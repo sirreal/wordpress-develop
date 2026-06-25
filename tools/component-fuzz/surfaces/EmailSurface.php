@@ -12,6 +12,7 @@ final class EmailSurface {
 	private const GENERATED_MALFORMED_VARIANT_CASES = 12;
 	private const GENERATED_UTF8_LOCALPART_ORACLE_CASES = 16;
 	private const GENERATED_USER_SEARCH_CASES = 8;
+	private const GENERATED_CONFUSABLE_LOCALPART_CASES = 6;
 	private const WHATWG_ASCII_EMAIL_REGEX = '/^[a-zA-Z0-9.!#$%&\'*+\/=?^_`{|}~-]+@'
 		. '[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?'
 		. '(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/';
@@ -75,6 +76,7 @@ final class EmailSurface {
 			$rows = array_merge( $rows, self::check_user_email_indexes_distinct_localparts( $ctx ) );
 			$rows = array_merge( $rows, self::check_user_email_indexes_generated_localpart_aliases( $ctx ) );
 			$rows = array_merge( $rows, self::check_user_email_search_unicode_terms( $ctx ) );
+			$rows = array_merge( $rows, self::check_confusable_localpart_boundaries( $ctx ) );
 			$rows = array_merge( $rows, self::check_user_email_indexes_distinct_domains( $ctx ) );
 			$rows = array_merge( $rows, self::check_user_email_indexes_canonical_domain_aliases( $ctx ) );
 			$rows = array_merge( $rows, self::check_password_reset_unicode_email_paths( $ctx ) );
@@ -2811,6 +2813,421 @@ final class EmailSurface {
 		);
 	}
 
+	private static function check_confusable_localpart_boundaries( \ComponentFuzz\FuzzContext $ctx ): array {
+		$result_name = 'email.confusable-localparts.lookup-boundaries';
+
+		if ( ! self::can_reset_stub_content() ) {
+			return array(
+				$ctx->skip(
+					$result_name,
+					'The in-memory wpdb content reset hook is unavailable.'
+				),
+			);
+		}
+
+		$missing = array();
+		foreach ( array( 'retrieve_password', 'wp_filter_comment', 'wp_mail' ) as $function ) {
+			if ( ! function_exists( $function ) ) {
+				$missing[] = 'function ' . $function;
+			}
+		}
+
+		if ( ! class_exists( 'WP_User_Query' ) ) {
+			$missing[] = 'class WP_User_Query';
+		}
+
+		if ( array() !== $missing ) {
+			return array(
+				$ctx->skip(
+					$result_name,
+					'Required lookup/search/password/comment APIs are unavailable.',
+					array( 'missing' => implode( ', ', $missing ) )
+				),
+			);
+		}
+
+		$cases           = self::generated_confusable_localpart_cases( $ctx->fork( 'confusable-localparts' ) );
+		$failures        = array();
+		$observed        = array();
+		$hook_snapshot   = self::snapshot_hook_globals();
+		$server_snapshot = array_key_exists( 'REMOTE_ADDR', $_SERVER )
+			? array( 'exists' => true, 'value' => $_SERVER['REMOTE_ADDR'] )
+			: array( 'exists' => false, 'value' => null );
+		$mail_calls      = array();
+		$mail_filter     = static function ( $return, $atts ) use ( &$mail_calls ) {
+			$mail_calls[] = $atts;
+			return true;
+		};
+		$not_called      = static function (): array {
+			return array(
+				'threw'    => false,
+				'value'    => null,
+				'warnings' => array(),
+			);
+		};
+
+		self::reset_stub_content();
+		try {
+			$_SERVER['REMOTE_ADDR'] = '127.0.0.1';
+
+			\remove_all_filters( 'pre_user_email' );
+			\add_filter( 'pre_user_email', 'trim' );
+			\add_filter( 'pre_user_email', 'sanitize_email' );
+			if ( function_exists( 'wp_filter_kses' ) ) {
+				\add_filter( 'pre_user_email', 'wp_filter_kses' );
+			}
+
+			\remove_all_filters( 'pre_comment_author_email' );
+			\add_filter( 'pre_comment_author_email', 'trim' );
+			\add_filter( 'pre_comment_author_email', 'sanitize_email' );
+
+			\remove_all_filters( 'pre_wp_mail' );
+			\add_filter( 'pre_wp_mail', $mail_filter, PHP_INT_MAX, 2 );
+
+			foreach ( $cases as $case_index => $case ) {
+				self::reset_stub_content();
+				self::install_email_filters( 'unicode' );
+				$mail_calls = array();
+				$variants   = array(
+					array(
+						'kind'           => 'ascii',
+						'local'          => $case['asciiLocal'],
+						'address'        => $case['asciiAddress'],
+						'asciiModeValid' => true,
+					),
+					array(
+						'kind'           => 'confusable',
+						'local'          => $case['confusableLocal'],
+						'address'        => $case['confusableAddress'],
+						'asciiModeValid' => false,
+					),
+				);
+				$inserted   = array();
+				$lookups    = array();
+
+				foreach ( $variants as $variant_index => $variant ) {
+					self::install_email_filters( 'unicode' );
+
+					$parse      = self::capture_warnings(
+						static fn() => \WP_Email_Address::from_string( $variant['address'], 'unicode' )
+					);
+					$is_email   = self::capture_warnings( static fn() => \is_email( $variant['address'] ) );
+					$sanitized  = self::capture_warnings( static fn() => \sanitize_email( $variant['address'] ) );
+					$email      = $parse['value'] ?? null;
+					$parse_ok   = ! $parse['threw']
+						&& array() === $parse['warnings']
+						&& ! $is_email['threw']
+						&& array() === $is_email['warnings']
+						&& ! $sanitized['threw']
+						&& array() === $sanitized['warnings']
+						&& $email instanceof \WP_Email_Address
+						&& $variant['local'] === $email->get_localpart()
+						&& $case['domain'] === $email->get_ascii_domain()
+						&& $case['domain'] === $email->get_unicode_domain()
+						&& $variant['address'] === $email->get_ascii_address()
+						&& $variant['address'] === $email->get_unicode_address()
+						&& $variant['address'] === $is_email['value']
+						&& $variant['address'] === $sanitized['value'];
+
+					self::install_email_filters( 'ascii' );
+					$ascii_parse     = self::capture_warnings(
+						static fn() => \WP_Email_Address::from_string( $variant['address'], 'ascii' )
+					);
+					$ascii_is_email  = self::capture_warnings( static fn() => \is_email( $variant['address'] ) );
+					$ascii_sanitized = self::capture_warnings( static fn() => \sanitize_email( $variant['address'] ) );
+					$ascii_email     = $ascii_parse['value'] ?? null;
+					$expected_ascii_is_email  = $variant['asciiModeValid'] ? $variant['address'] : false;
+					$expected_ascii_sanitized = $variant['asciiModeValid'] ? $variant['address'] : '';
+					$ascii_mode_ok            = ! $ascii_parse['threw']
+						&& array() === $ascii_parse['warnings']
+						&& ! $ascii_is_email['threw']
+						&& array() === $ascii_is_email['warnings']
+						&& ! $ascii_sanitized['threw']
+						&& array() === $ascii_sanitized['warnings']
+						&& (
+							$variant['asciiModeValid']
+								? $ascii_email instanceof \WP_Email_Address
+									&& $variant['address'] === $ascii_email->get_unicode_address()
+								: null === $ascii_email
+						)
+						&& $expected_ascii_is_email === $ascii_is_email['value']
+						&& $expected_ascii_sanitized === $ascii_sanitized['value'];
+
+					self::install_email_filters( 'unicode' );
+					$login  = 'cfz_confusable_' . $ctx->iteration() . '_' . $case_index . '_' . $variant_index . '_' . substr( sha1( $variant['address'] ), 0, 8 );
+					$insert = self::capture_warnings(
+						static fn() => \wp_insert_user(
+							array(
+								'user_login' => $login,
+								'user_pass'  => 'component-fuzz-pass',
+								'user_email' => $variant['address'],
+								'role'       => 'subscriber',
+							)
+						)
+					);
+					$user_id = $insert['value'] ?? null;
+					$stored  = is_int( $user_id ) ? self::capture_warnings( static fn() => \get_user_by( 'id', $user_id ) ) : $not_called();
+					$exists  = is_int( $user_id ) ? self::capture_warnings( static fn() => \email_exists( $variant['address'] ) ) : $not_called();
+					$by_email = is_int( $user_id ) ? self::capture_warnings( static fn() => \get_user_by( 'email', $variant['address'] ) ) : $not_called();
+					$stored_user = $stored['value'] ?? null;
+					$by_email_user = $by_email['value'] ?? null;
+					$insert_ok = ! $insert['threw']
+						&& array() === $insert['warnings']
+						&& ! $stored['threw']
+						&& array() === $stored['warnings']
+						&& ! $exists['threw']
+						&& array() === $exists['warnings']
+						&& ! $by_email['threw']
+						&& array() === $by_email['warnings']
+						&& is_int( $user_id )
+						&& $stored_user instanceof \WP_User
+						&& $stored_user->ID === $user_id
+						&& $variant['address'] === $stored_user->user_email
+						&& $exists['value'] === $user_id
+						&& $by_email_user instanceof \WP_User
+						&& $by_email_user->ID === $user_id
+						&& $variant['address'] === $by_email_user->user_email;
+
+					$comment = array(
+						'comment_author'       => 'Component Fuzzer',
+						'comment_author_email' => $variant['address'],
+						'comment_author_url'   => '',
+						'comment_content'      => 'Confusable email local-part case ' . $case_index . '.' . $variant_index,
+						'comment_author_IP'    => '127.0.0.1',
+						'comment_agent'        => 'component-fuzz',
+					);
+					$filtered       = self::capture_warnings( static fn() => \wp_filter_comment( $comment ) );
+					$filtered_email = ! $filtered['threw'] && is_array( $filtered['value'] )
+						? ( $filtered['value']['comment_author_email'] ?? null )
+						: null;
+					$filtered_valid = is_string( $filtered_email )
+						? self::capture_warnings( static fn() => \is_email( $filtered_email ) )
+						: $not_called();
+					$filtered_parse = is_string( $filtered_email )
+						? self::capture_warnings( static fn() => \WP_Email_Address::from_string( $filtered_email, 'unicode' ) )
+						: $not_called();
+					$comment_ok     = ! $filtered['threw']
+						&& array() === $filtered['warnings']
+						&& ! $filtered_valid['threw']
+						&& array() === $filtered_valid['warnings']
+						&& ! $filtered_parse['threw']
+						&& array() === $filtered_parse['warnings']
+						&& is_array( $filtered['value'] )
+						&& true === ( $filtered['value']['filtered'] ?? null )
+						&& $variant['address'] === $filtered_email
+						&& $variant['address'] === $filtered_valid['value']
+						&& ( $filtered_parse['value'] ?? null ) instanceof \WP_Email_Address;
+
+					if ( ! $parse_ok || ! $ascii_mode_ok || ! $insert_ok || ! $comment_ok ) {
+						$failures[] = array(
+							'label'         => $case['label'],
+							'variant'       => $variant['kind'],
+							'address'       => self::describe_string( $variant['address'] ),
+							'parse'         => self::describe_captured_call( $parse ),
+							'isEmail'       => self::describe_captured_call( $is_email ),
+							'sanitized'     => self::describe_captured_call( $sanitized ),
+							'asciiParse'    => self::describe_captured_call( $ascii_parse ),
+							'asciiIsEmail'  => self::describe_captured_call( $ascii_is_email ),
+							'asciiSanitized' => self::describe_captured_call( $ascii_sanitized ),
+							'insert'        => self::describe_captured_call( $insert ),
+							'stored'        => self::describe_captured_call( $stored ),
+							'exists'        => self::describe_captured_call( $exists ),
+							'byEmail'       => self::describe_captured_call( $by_email ),
+							'comment'       => self::describe_captured_call( $filtered ),
+							'commentValid'  => self::describe_captured_call( $filtered_valid ),
+							'commentParse'  => self::describe_captured_call( $filtered_parse ),
+							'parseOk'       => $parse_ok,
+							'asciiModeOk'   => $ascii_mode_ok,
+							'insertOk'      => $insert_ok,
+							'commentOk'     => $comment_ok,
+						);
+					}
+
+					$inserted[ $variant['kind'] ] = array(
+						'id'      => $user_id,
+						'login'   => $login,
+						'address' => $variant['address'],
+						'local'   => $variant['local'],
+					);
+					$lookups[]                    = array(
+						'variant'         => $variant['kind'],
+						'address'         => self::describe_string( $variant['address'] ),
+						'userId'          => $user_id,
+						'asciiModeValid'  => $variant['asciiModeValid'],
+						'asciiModeResult' => self::describe_value( $ascii_is_email['value'] ?? null ),
+						'commentEmail'    => self::describe_value( $filtered_email ),
+					);
+				}
+
+				$ids = array();
+				foreach ( $inserted as $entry ) {
+					if ( is_int( $entry['id'] ?? null ) ) {
+						$ids[] = $entry['id'];
+					}
+				}
+
+				$distinct_ok = 2 === count( $ids )
+					&& 2 === count( array_unique( $ids, SORT_REGULAR ) )
+					&& $case['asciiLocal'] !== $case['confusableLocal']
+					&& $case['asciiAddress'] !== $case['confusableAddress']
+					&& bin2hex( $case['asciiLocal'] ) !== bin2hex( $case['confusableLocal'] );
+
+				foreach ( $variants as $variant ) {
+					$duplicate = self::capture_warnings(
+						static fn() => \wp_insert_user(
+							array(
+								'user_login' => 'cfz_confusable_duplicate_' . $ctx->iteration() . '_' . $case_index . '_' . $variant['kind'],
+								'user_pass'  => 'component-fuzz-pass',
+								'user_email' => $variant['address'],
+								'role'       => 'subscriber',
+							)
+						)
+					);
+
+					if (
+						$duplicate['threw'] ||
+						array() !== $duplicate['warnings'] ||
+						! \is_wp_error( $duplicate['value'] ?? null ) ||
+						'existing_user_email' !== $duplicate['value']->get_error_code()
+					) {
+						$failures[] = array(
+							'label'     => $case['label'],
+							'variant'   => $variant['kind'],
+							'failure'   => 'exact-duplicate-not-rejected-cleanly',
+							'duplicate' => self::describe_captured_call( $duplicate ),
+						);
+					}
+				}
+
+				$hostile_ascii      = self::hostile_user_email_lookup_probe( $case['asciiAddress'], $case['confusableAddress'] );
+				$hostile_confusable = self::hostile_user_email_lookup_probe( $case['confusableAddress'], $case['asciiAddress'] );
+				$hostile_ok         = true === ( $hostile_ascii['ok'] ?? false )
+					&& true === ( $hostile_confusable['ok'] ?? false );
+
+				$ascii_query      = self::prepare_user_email_search_query( '*' . $case['asciiLocal'] . '*', array( 'user_email' ) );
+				$confusable_query = self::prepare_user_email_search_query( '*' . $case['confusableLocal'] . '*', array( 'user_email' ) );
+				$ascii_where      = is_array( $ascii_query['value'] ?? null ) ? (string) ( $ascii_query['value']['queryWhere'] ?? '' ) : '';
+				$confusable_where = is_array( $confusable_query['value'] ?? null ) ? (string) ( $confusable_query['value']['queryWhere'] ?? '' ) : '';
+				$ascii_likes      = self::sql_like_literals( $ascii_where, 'user_email' );
+				$confusable_likes = self::sql_like_literals( $confusable_where, 'user_email' );
+				$result_probe     = self::probe_user_email_localpart_search_results(
+					$ctx,
+					array(
+						'label'          => $case['label'],
+						'unicodeAddress' => $case['confusableAddress'],
+						'foldedAddress'  => $case['asciiAddress'],
+					)
+				);
+				$search_ok        = ! $ascii_query['threw']
+					&& array() === $ascii_query['warnings']
+					&& ! $confusable_query['threw']
+					&& array() === $confusable_query['warnings']
+					&& array( '%' . $case['asciiLocal'] . '%' ) === $ascii_likes
+					&& array( '%' . $case['confusableLocal'] . '%' ) === $confusable_likes
+					&& true === ( $result_probe['ok'] ?? false );
+
+				if ( ! $distinct_ok || ! $hostile_ok || ! $search_ok ) {
+					$failures[] = array(
+						'label'           => $case['label'],
+						'ascii'           => self::describe_string( $case['asciiAddress'] ),
+						'confusable'      => self::describe_string( $case['confusableAddress'] ),
+						'inserted'        => self::describe_value( $inserted ),
+						'hostileAscii'    => self::describe_value( $hostile_ascii ),
+						'hostileConfusable' => self::describe_value( $hostile_confusable ),
+						'asciiQuery'      => self::describe_captured_call( $ascii_query ),
+						'confusableQuery' => self::describe_captured_call( $confusable_query ),
+						'asciiLikes'      => self::describe_value( $ascii_likes ),
+						'confusableLikes' => self::describe_value( $confusable_likes ),
+						'resultProbe'     => self::describe_value( $result_probe ),
+						'distinctOk'      => $distinct_ok,
+						'hostileOk'       => $hostile_ok,
+						'searchOk'        => $search_ok,
+					);
+				}
+
+				$password_resets = array();
+				foreach ( $variants as $variant ) {
+					self::install_email_filters( 'unicode' );
+					$user_id           = $inserted[ $variant['kind'] ]['id'] ?? null;
+					$login             = $inserted[ $variant['kind'] ]['login'] ?? '';
+					$mail_count_before = count( $mail_calls );
+					$reset             = is_int( $user_id )
+						? self::capture_warnings( static fn() => \retrieve_password( $variant['address'] ) )
+						: $not_called();
+					$mail              = $mail_calls[ $mail_count_before ] ?? null;
+					$reset_ok          = is_int( $user_id )
+						&& ! $reset['threw']
+						&& array() === $reset['warnings']
+						&& true === $reset['value']
+						&& count( $mail_calls ) === $mail_count_before + 1
+						&& is_array( $mail )
+						&& $variant['address'] === ( $mail['to'] ?? null )
+						&& is_string( $mail['message'] ?? null )
+						&& str_contains( $mail['message'], rawurlencode( $login ) );
+
+					if ( ! $reset_ok ) {
+						$failures[] = array(
+							'label'     => $case['label'],
+							'variant'   => $variant['kind'],
+							'failure'   => 'password-reset-not-routed-to-exact-address',
+							'address'   => self::describe_string( $variant['address'] ),
+							'userId'    => self::describe_value( $user_id ),
+							'login'     => self::describe_value( $login ),
+							'reset'     => self::describe_captured_call( $reset ),
+							'mailCalls' => self::describe_value( array_slice( $mail_calls, $mail_count_before ) ),
+						);
+					}
+
+					$password_resets[] = array(
+						'variant' => $variant['kind'],
+						'userId'  => $user_id,
+						'ok'      => $reset_ok,
+						'mailTo'  => is_array( $mail ) && is_string( $mail['to'] ?? null ) ? self::describe_string( $mail['to'] ) : null,
+					);
+				}
+
+				$observed[] = array(
+					'label'          => $case['label'],
+					'profile'        => $case['profile'],
+					'domain'         => self::describe_string( $case['domain'] ),
+					'asciiLocal'     => self::describe_string( $case['asciiLocal'] ),
+					'confusableLocal' => self::describe_string( $case['confusableLocal'] ),
+					'insertedIds'    => self::describe_value( $ids ),
+					'lookups'        => $lookups,
+					'hostileLookups' => array(
+						'asciiLookup'      => true === ( $hostile_ascii['ok'] ?? false ),
+						'confusableLookup' => true === ( $hostile_confusable['ok'] ?? false ),
+					),
+					'searchLikes'    => array(
+						'ascii'      => self::describe_value( $ascii_likes ),
+						'confusable' => self::describe_value( $confusable_likes ),
+					),
+					'passwordResets' => $password_resets,
+				);
+			}
+		} finally {
+			if ( $server_snapshot['exists'] ) {
+				$_SERVER['REMOTE_ADDR'] = $server_snapshot['value'];
+			} else {
+				unset( $_SERVER['REMOTE_ADDR'] );
+			}
+			self::restore_hook_globals( $hook_snapshot );
+			self::reset_stub_content();
+		}
+
+		return array(
+			$ctx->result(
+				$result_name,
+				array() === $failures,
+				array(
+					'caseCount' => count( $cases ),
+					'observed'  => $observed,
+					'failures'  => self::describe_value( $failures ),
+				)
+			),
+		);
+	}
+
 	private static function check_user_email_indexes_distinct_domains( \ComponentFuzz\FuzzContext $ctx ): array {
 		if ( ! self::can_reset_stub_content() ) {
 			return array(
@@ -4825,6 +5242,96 @@ final class EmailSurface {
 		}
 
 		return $cases;
+	}
+
+	private static function generated_confusable_localpart_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$profiles = array(
+			array(
+				'label'      => 'cyrillic-a-paypal',
+				'ascii'      => 'paypal',
+				'confusable' => "p\u{0430}yp\u{0430}l",
+			),
+			array(
+				'label'      => 'cyrillic-a-admin',
+				'ascii'      => 'admin',
+				'confusable' => "\u{0430}dmin",
+			),
+			array(
+				'label'      => 'greek-omicron-google',
+				'ascii'      => 'google',
+				'confusable' => "g\u{03BF}\u{03BF}gle",
+			),
+			array(
+				'label'      => 'cyrillic-o-moderator',
+				'ascii'      => 'moderator',
+				'confusable' => "m\u{043E}derat\u{043E}r",
+			),
+			array(
+				'label'      => 'mixed-script-support',
+				'ascii'      => 'support',
+				'confusable' => "\u{0455}upp\u{03BF}rt",
+			),
+			array(
+				'label'      => 'mixed-script-wordpress',
+				'ascii'      => 'wordpress',
+				'confusable' => "w\u{03BF}rdpre\u{0455}\u{0455}",
+			),
+		);
+		$domains  = array(
+			'example.org',
+			'sub-domain.example',
+			'mail.example',
+		);
+		$cases    = array(
+			self::confusable_localpart_case(
+				'anchor-cyrillic-a-paypal',
+				$profiles[0],
+				'example.org',
+				''
+			),
+			self::confusable_localpart_case(
+				'anchor-greek-omicron-google',
+				$profiles[2],
+				'sub-domain.example',
+				''
+			),
+			self::confusable_localpart_case(
+				'anchor-mixed-script-support',
+				$profiles[4],
+				'mail.example',
+				''
+			),
+		);
+
+		for ( $i = 0; $i < self::GENERATED_CONFUSABLE_LOCALPART_CASES; $i++ ) {
+			$profile = $ctx->choice( $profiles );
+			$domain  = $ctx->choice( $domains );
+			$suffix  = (string) $ctx->int( 100, 999 );
+
+			$cases[] = self::confusable_localpart_case(
+				'generated-confusable-localpart-' . $i . '-' . $profile['label'],
+				$profile,
+				$domain,
+				$suffix
+			);
+		}
+
+		return $cases;
+	}
+
+	private static function confusable_localpart_case( string $label, array $profile, string $domain, string $suffix ): array {
+		$ascii_local      = $profile['ascii'] . $suffix;
+		$confusable_local = $profile['confusable'] . $suffix;
+
+		return array(
+			'label'             => $label,
+			'profile'           => $profile['label'],
+			'domain'            => $domain,
+			'asciiLocal'        => $ascii_local,
+			'confusableLocal'   => $confusable_local,
+			'asciiAddress'      => $ascii_local . '@' . $domain,
+			'confusableAddress' => $confusable_local . '@' . $domain,
+		);
 	}
 
 	private static function addresses_for_localparts( array $locals, string $domain ): array {
