@@ -249,6 +249,7 @@ final class WpBootstrap {
 			'wp-includes/class-wp-http-cookie.php',
 			'wp-includes/class-wp-http-proxy.php',
 			'wp-includes/class-wp-http.php',
+			'wp-includes/class-wp-http-requests-hooks.php',
 			'wp-includes/formatting.php',
 			'wp-includes/pomo/mo.php',
 			'wp-includes/l10n/class-wp-translation-controller.php',

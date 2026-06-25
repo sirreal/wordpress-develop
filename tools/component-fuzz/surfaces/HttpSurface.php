@@ -473,13 +473,15 @@ final class HttpSurface {
 		$http                 = new \WP_Http();
 		$preempt_url          = 'https://api.example.test/component-fuzz/http/normalized/' . self::token( $ctx, 8 );
 		$invalid_url          = 'component-fuzz-no-scheme-' . self::token( $ctx, 8 );
-		$stream_url           = 'https://api.example.test/component-fuzz/http/stream/' . self::token( $ctx, 8 );
+		$stream_url           = 'http://example.test:8080/component-fuzz/http/stream/' . self::token( $ctx, 8 );
 		$filtered_redirection = $ctx->int( 1, 4 );
 		$filtered_timeout     = $ctx->choice( array( 0.5, 1.25, 3.75 ) );
 		$input_limit          = 64 + $ctx->int( 0, 128 );
 		$filtered_limit       = 512 + $ctx->int( 0, 1024 );
 		$invalid_limit        = 128 + $ctx->int( 0, 256 );
 		$stream_filename      = self::missing_stream_filename( $ctx );
+		$stream_parent        = dirname( $stream_filename );
+		$stream_parent_file   = is_file( $stream_parent );
 		$preempt_case         = array(
 			'status'      => 287,
 			'message'     => 'Preempted',
@@ -568,6 +570,7 @@ final class HttpSurface {
 			remove_action( 'http_api_debug', $debug_action, 10 );
 			remove_filter( 'pre_http_request', $pre_http_request, 10 );
 			remove_filter( 'http_request_args', $request_args_filter, 10 );
+			self::cleanup_stream_parent_file( $stream_filename );
 		}
 
 		$preempt_args_event = self::first_event_for_url( $arg_events, $preempt_url );
@@ -576,6 +579,12 @@ final class HttpSurface {
 		$invalid_debug      = self::first_event_for_url( $debug_events, $invalid_url );
 		$stream_event       = self::first_event_for_url( $pre_events, $stream_url );
 		$stream_debug       = self::first_event_for_url( $debug_events, $stream_url );
+		$preempt_counts     = self::event_counts_for_url( $pre_events, $preempt_url );
+		$invalid_counts     = self::event_counts_for_url( $pre_events, $invalid_url );
+		$stream_counts      = self::event_counts_for_url( $pre_events, $stream_url );
+		$invalid_debug_counts = self::event_counts_for_url( $debug_events, $invalid_url );
+		$stream_debug_counts = self::event_counts_for_url( $debug_events, $stream_url );
+		$stream_parent_cleaned = ! is_file( $stream_parent );
 
 		self::collect_failure(
 			$failures,
@@ -587,6 +596,7 @@ final class HttpSurface {
 				&& true === ( $preempt_args_event['args']['decompress'] ?? null )
 				&& ! empty( $preempt_args_event['args']['sslcertificates'] )
 				&& is_array( $preempt_event )
+				&& 1 === $preempt_counts
 				&& false === $preempt_event['preempt']
 				&& $preempt_response === $preempted_response
 				&& $filtered_redirection === ( $preempt_event['args']['redirection'] ?? null )
@@ -607,8 +617,10 @@ final class HttpSurface {
 			$invalid_response instanceof \WP_Error
 				&& 'http_request_failed' === $invalid_response->get_error_code()
 				&& is_array( $invalid_event )
+				&& 1 === $invalid_counts
 				&& false === $invalid_event['preempt']
 				&& is_array( $invalid_debug )
+				&& 1 === $invalid_debug_counts
 				&& $invalid_debug['response'] instanceof \WP_Error
 				&& 'http_request_failed' === $invalid_debug['response']->get_error_code()
 				&& 'response' === ( $invalid_debug['context'] ?? null )
@@ -627,21 +639,28 @@ final class HttpSurface {
 			$stream_response instanceof \WP_Error
 				&& 'http_request_failed' === $stream_response->get_error_code()
 				&& is_array( $stream_event )
+				&& 1 === $stream_counts
 				&& false === $stream_event['preempt']
 				&& false === ( $stream_event['args']['blocking'] ?? null )
 				&& is_array( $stream_debug )
+				&& 1 === $stream_debug_counts
 				&& $stream_debug['response'] instanceof \WP_Error
 				&& 'http_request_failed' === $stream_debug['response']->get_error_code()
 				&& true === ( $stream_debug['args']['stream'] ?? null )
 				&& true === ( $stream_debug['args']['blocking'] ?? null )
 				&& $stream_filename === ( $stream_debug['args']['filename'] ?? null )
-				&& 'X-Fuzz-Stream: raw' === ( $stream_debug['args']['headers'] ?? null ),
+				&& 'raw' === ( $stream_debug['args']['headers']['x-fuzz-stream'] ?? null )
+				&& $stream_parent_file
+				&& $stream_parent_cleaned,
 			'WP_Http::request stream destination errors force blocking and expose debug payload without transport',
 			array(
 				'preHttpRequest' => self::event_summary( $stream_event ),
 				'debug'          => self::event_summary( $stream_debug ),
 				'response'       => self::describe_value( $stream_response ),
 				'filename'       => $stream_filename,
+				'streamParent'   => $stream_parent,
+				'streamParentFileBeforeRequest' => $stream_parent_file,
+				'streamParentCleaned' => $stream_parent_cleaned,
 			)
 		);
 
@@ -1301,18 +1320,19 @@ final class HttpSurface {
 	}
 
 	private static function missing_stream_filename( \ComponentFuzz\FuzzContext $ctx ): string {
-		return rtrim( sys_get_temp_dir(), DIRECTORY_SEPARATOR )
-			. DIRECTORY_SEPARATOR
-			. 'component-fuzz-http-missing-'
-			. getmypid()
-			. '-'
-			. $ctx->seed()
-			. '-'
-			. $ctx->iteration()
-			. '-'
-			. self::token( $ctx, 6 )
-			. DIRECTORY_SEPARATOR
-			. 'response.bin';
+		$path = tempnam( sys_get_temp_dir(), 'component-fuzz-http-parent-' );
+		if ( false === $path ) {
+			throw new \RuntimeException( 'Could not reserve a component fuzz HTTP temp file.' );
+		}
+
+		return $path . DIRECTORY_SEPARATOR . 'response-' . $ctx->seed() . '-' . $ctx->iteration() . '-' . self::token( $ctx, 6 ) . '.bin';
+	}
+
+	private static function cleanup_stream_parent_file( string $filename ): void {
+		$parent = dirname( $filename );
+		if ( is_file( $parent ) ) {
+			@unlink( $parent );
+		}
 	}
 
 	private static function first_event_for_url( array $events, string $url ): ?array {
@@ -1323,6 +1343,17 @@ final class HttpSurface {
 		}
 
 		return null;
+	}
+
+	private static function event_counts_for_url( array $events, string $url ): int {
+		$count = 0;
+		foreach ( $events as $event ) {
+			if ( is_array( $event ) && $url === ( $event['url'] ?? null ) ) {
+				++$count;
+			}
+		}
+
+		return $count;
 	}
 
 	private static function event_summary( $event ): array {
