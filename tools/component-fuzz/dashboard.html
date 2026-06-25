@@ -236,8 +236,8 @@
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
-			<div class="metric">2</div>
-			<div class="note">Noether the 3rd is working on <code>xmlrpc</code>; Dirac the 4th is reviewing <code>appearance-media</code>.</div>
+			<div class="metric">1</div>
+			<div class="note">Noether the 3rd is working on <code>xmlrpc</code>.</div>
 		</div>
 	</div>
 
@@ -574,10 +574,10 @@
 				</tr>
 				<tr>
 					<td><code>appearance-media</code></td>
-					<td><span class="status good">local validation passed</span></td>
-					<td>Main worktree; custom-logo helper follow-up through <code>90dd0e0afd</code></td>
-					<td>Main focused run: 700 passed, 100 skipped, 0 failed; smoke run: 35 passed, 5 skipped, 0 failed; latest broad run: 7971 passed, 66 skipped, 0 failed.</td>
-					<td>Theme mods, theme support globals, custom background/header helpers, custom header video URL/settings/markup active gates, synthetic custom-logo attachment markup and filter payload oracles, request-scheme-aware header oracles, site icon filters, and post type/status bootstrap.</td>
+					<td><span class="status good">review fixes passed</span></td>
+					<td>Main worktree; Dirac the 4th findings fixed through <code>39a5bb77d1</code></td>
+					<td>Main focused run: 700 passed, 100 skipped, 0 failed; smoke run: 35 passed, 5 skipped, 0 failed; reviewer seed <code>4</code>: 35 passed, 5 skipped, 0 failed; latest broad run: 7971 passed, 66 skipped, 0 failed.</td>
+					<td>Theme mods, theme support globals, custom background/header helpers, custom header video URL/settings/markup active gates, synthetic custom-logo attachment markup and filter payload oracles with DB-stub cleanup, request-scheme-aware header oracles, site icon filters, content-count state restoration, and post type/status bootstrap.</td>
 				</tr>
 				<tr>
 					<td><code>customizer-persistence</code></td>
@@ -976,6 +976,12 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>39a5bb77d1</code></td>
+					<td><code>appearance-media</code></td>
+					<td>700 passed, 100 skipped, 0 failed after review fixes for fetchpriority static-state leakage, synthetic attachment/postmeta cleanup, multisite-safe logo blog IDs, and content-count restoration; reviewer seed <code>4</code>: 35 passed, 5 skipped, 0 failed.</td>
+					<td>Pending next broad rerun; latest broad remains 8545 passed, 66 skipped, 0 failed before this focused addition.</td>
+				</tr>
 				<tr>
 					<td><code>7ca5e5d845</code></td>
 					<td><code>identity</code></td>
