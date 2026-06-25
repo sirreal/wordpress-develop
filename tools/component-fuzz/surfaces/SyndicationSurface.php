@@ -35,6 +35,7 @@ final class SyndicationSurface {
 			$rows[] = self::check_oembed_provider_registry( $ctx->fork( 'providers' ) );
 			$rows[] = self::check_oembed_output_filters( $ctx->fork( 'output-filters' ) );
 			$rows[] = self::check_oembed_no_network_shortcuts( $ctx->fork( 'no-network' ) );
+			$rows[] = self::check_oembed_rest_controller_cache( $ctx->fork( 'rest-controller' ) );
 			$rows[] = self::check_feed_helpers( $ctx->fork( 'feed-helpers' ) );
 			$rows[] = self::check_feed_head_link_output( $ctx->fork( 'feed-head-links' ) );
 			$rows[] = self::check_feed_link_generation( $ctx->fork( 'feed-links' ) );
@@ -780,6 +781,110 @@ final class SyndicationSurface {
 		);
 	}
 
+	private static function check_oembed_rest_controller_cache( \ComponentFuzz\FuzzContext $ctx ): array {
+		if ( ! self::load_oembed_controller() ) {
+			return self::skip(
+				$ctx,
+				'syndication.oembed.rest-controller-cache',
+				'WP_oEmbed_Controller is unavailable in this checkout.'
+			);
+		}
+
+		foreach ( array( 'WP_REST_Request', 'WP_Error' ) as $class ) {
+			if ( ! class_exists( $class ) ) {
+				return self::skip(
+					$ctx,
+					'syndication.oembed.rest-controller-cache',
+					"Class {$class} is unavailable."
+				);
+			}
+		}
+
+		foreach ( array( 'delete_transient', 'get_transient', 'rest_authorization_required_code', 'set_transient' ) as $function ) {
+			if ( ! function_exists( $function ) ) {
+				return self::skip(
+					$ctx,
+					'syndication.oembed.rest-controller-cache',
+					"Function {$function} is unavailable."
+				);
+			}
+		}
+
+		$failures   = array();
+		$controller = new \WP_oEmbed_Controller();
+		$token      = self::slug( $ctx, 5, 12 );
+		$url        = 'https://rest-oembed.example.test/watch/' . rawurlencode( $token );
+		$args       = array(
+			'url'       => $url,
+			'format'    => 'json',
+			'maxwidth'  => $ctx->int( 240, 960 ),
+			'maxheight' => $ctx->int( 120, 720 ),
+			'discover'  => (bool) $ctx->int( 0, 1 ),
+		);
+		$cache_key  = 'oembed_' . md5( serialize( $args ) );
+		$cached     = (object) array(
+			'provider_name' => 'Component Fuzz Provider',
+			'type'          => 'rich',
+			'html'          => '<blockquote data-token="' . \esc_attr( $token ) . '"></blockquote>',
+			'width'         => $args['maxwidth'],
+			'height'        => $args['maxheight'],
+		);
+		$request    = new \WP_REST_Request( 'GET', '/oembed/1.0/proxy' );
+		foreach ( $args as $key => $value ) {
+			$request->set_param( $key, $value );
+		}
+		$request->set_param( '_wpnonce', 'nonce-' . $token );
+
+		$permission = $controller->get_proxy_item_permissions_check();
+
+		\set_transient( $cache_key, $cached, 60 );
+		try {
+			$result = $controller->get_proxy_item( $request );
+		} finally {
+			\delete_transient( $cache_key );
+		}
+		$after_cleanup = \get_transient( $cache_key );
+
+		self::collect_failure(
+			$failures,
+			$permission instanceof \WP_Error
+				&& 'rest_forbidden' === $permission->get_error_code()
+				&& \rest_authorization_required_code() === ( $permission->get_error_data()['status'] ?? null ),
+			'oEmbed REST proxy permission check fails closed without edit_posts capability',
+			array(
+				'permission' => $permission instanceof \WP_Error ? array(
+					'code' => $permission->get_error_code(),
+					'data' => $permission->get_error_data(),
+				) : $permission,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			is_object( $result )
+				&& $cached->provider_name === ( $result->provider_name ?? null )
+				&& $cached->html === ( $result->html ?? null )
+				&& $cached->width === ( $result->width ?? null )
+				&& $cached->height === ( $result->height ?? null )
+				&& false === $after_cleanup,
+			'oEmbed REST proxy returns cached data using nonce-free cache keys and cleans up transients',
+			array(
+				'cacheKey'      => $cache_key,
+				'requestParams' => $request->get_params(),
+				'result'        => is_object( $result ) ? get_object_vars( $result ) : $result,
+				'cached'        => get_object_vars( $cached ),
+				'afterCleanup'  => $after_cleanup,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'syndication.oembed.rest-controller-cache',
+			array() === $failures,
+			array( 'failures' => $failures )
+		);
+	}
+
 	private static function check_feed_helpers( \ComponentFuzz\FuzzContext $ctx ): array {
 		$failures = array();
 
@@ -1374,6 +1479,25 @@ final class SyndicationSurface {
 		}
 		\WP_oEmbed::$early_providers = $snapshot['earlyProviders'];
 		self::$handler_calls         = array();
+	}
+
+	private static function load_oembed_controller(): bool {
+		if ( class_exists( 'WP_oEmbed_Controller' ) ) {
+			return true;
+		}
+
+		if ( ! defined( 'ABSPATH' ) || ! defined( 'WPINC' ) ) {
+			return false;
+		}
+
+		$file = rtrim( (string) ABSPATH, '/\\' ) . DIRECTORY_SEPARATOR . trim( (string) WPINC, '/\\' ) . DIRECTORY_SEPARATOR . 'class-wp-oembed-controller.php';
+		if ( ! is_readable( $file ) ) {
+			return false;
+		}
+
+		require_once $file;
+
+		return class_exists( 'WP_oEmbed_Controller' );
 	}
 
 	private static function snapshot_globals( array $names ): array {
