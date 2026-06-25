@@ -37,6 +37,7 @@ final class MetadataSurface {
 			$rows[] = self::check_sanitize_and_auth_callback_locality( $ctx->fork( 'callbacks' ) );
 			$rows[] = self::check_protected_meta_locality( $ctx->fork( 'protected' ) );
 			$rows[] = self::check_no_db_crud_filters_and_cache( $ctx->fork( 'crud' ) );
+			$rows[] = self::check_no_db_by_mid_filters_and_fail_closed( $ctx->fork( 'by-mid' ) );
 			$rows[] = self::check_in_memory_crud_cache_invalidation( $ctx->fork( 'crud-cache' ) );
 			$rows[] = self::check_lazyloader_queue_and_cache( $ctx->fork( 'lazyloader' ) );
 			$rows[] = self::check_registered_metadata_by_object_subtype( $ctx->fork( 'by-subtype' ) );
@@ -1112,6 +1113,267 @@ final class MetadataSurface {
 				'failures' => array_slice( $failures, 0, 8 ),
 				'note'     => 'Term CRUD filters are unreachable with the no-DB stub because termmeta is not exposed.',
 			)
+		);
+	}
+
+	private static function check_no_db_by_mid_filters_and_fail_closed( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime();
+
+		$failures = array();
+
+		foreach ( self::OBJECT_TYPES as $index => $object_type ) {
+			$case          = $ctx->fork( 'by-mid-' . $object_type );
+			$meta_id       = 7200 + $case->int( 1, 6000 ) + $index;
+			$meta_id_arg   = $case->bool() ? (string) $meta_id . '.0' : $meta_id;
+			$mismatch_id   = $meta_id + 11000 + $index;
+			$meta_value    = self::metadata_value( $case->fork( 'value' ) );
+			$meta_key_arg  = $case->choice(
+				array(
+					false,
+					self::meta_key( $case->fork( 'meta-key' ), 'by-mid' ),
+					array( 'invalid-key-shape' => $case->identifier( 3, 8 ) ),
+				)
+			);
+			$table_exists  = false !== \_get_meta_table( $object_type );
+			$get_records   = array();
+			$update_records = array();
+			$delete_records = array();
+
+			$sentinel = (object) array(
+				'meta_id'    => (string) $meta_id,
+				'meta_key'   => is_string( $meta_key_arg ) ? $meta_key_arg : 'filtered-key',
+				'meta_value' => self::metadata_value( $case->fork( 'read-value' ) ),
+			);
+
+			$update_short_circuit = $case->choice( array( true, false, 1, 0, '1', '', 'nonempty' ) );
+			$delete_short_circuit = $case->choice( array( true, false, 1, 0, '1', '', 'nonempty' ) );
+
+			$get_filter = static function ( $check, $id ) use ( &$get_records, $meta_id, $sentinel ) {
+				unset( $check );
+				$get_records[] = array(
+					'metaId'     => $id,
+					'metaIdType' => gettype( $id ),
+					'target'     => $meta_id === $id,
+				);
+
+				return $meta_id === $id ? $sentinel : false;
+			};
+			$update_filter = static function ( $check, $id, $value, $key ) use (
+				&$update_records,
+				$meta_id,
+				$update_short_circuit
+			) {
+				unset( $check );
+				$target           = $meta_id === $id;
+				$update_records[] = array(
+					'metaId'     => $id,
+					'metaIdType' => gettype( $id ),
+					'target'     => $target,
+					'value'      => $value,
+					'metaKey'    => $key,
+				);
+
+				return $target ? $update_short_circuit : false;
+			};
+			$delete_filter = static function ( $check, $id ) use (
+				&$delete_records,
+				$meta_id,
+				$delete_short_circuit
+			) {
+				unset( $check );
+				$target           = $meta_id === $id;
+				$delete_records[] = array(
+					'metaId'     => $id,
+					'metaIdType' => gettype( $id ),
+					'target'     => $target,
+				);
+
+				return $target ? $delete_short_circuit : false;
+			};
+
+			\add_filter( "get_{$object_type}_metadata_by_mid", $get_filter, 10, 2 );
+			\add_filter( "update_{$object_type}_metadata_by_mid", $update_filter, 10, 4 );
+			\add_filter( "delete_{$object_type}_metadata_by_mid", $delete_filter, 10, 2 );
+
+			try {
+				$get_exact       = \get_metadata_by_mid( $object_type, $meta_id_arg );
+				$get_mismatch    = \get_metadata_by_mid( $object_type, $mismatch_id );
+				$update_exact    = \update_metadata_by_mid( $object_type, $meta_id_arg, $meta_value, $meta_key_arg );
+				$update_mismatch = \update_metadata_by_mid( $object_type, $mismatch_id, $meta_value, $meta_key_arg );
+				$delete_exact    = \delete_metadata_by_mid( $object_type, $meta_id_arg );
+				$delete_mismatch = \delete_metadata_by_mid( $object_type, $mismatch_id );
+
+				$invalid_id_results = array();
+				foreach (
+					array(
+						0,
+						-$meta_id,
+						$meta_id + 0.25,
+						array( $meta_id ),
+						'not-a-mid-' . $case->identifier( 3, 8 ),
+					) as $invalid_id
+				) {
+					$invalid_id_results[] = array(
+						'id'     => $invalid_id,
+						'get'    => \get_metadata_by_mid( $object_type, $invalid_id ),
+						'update' => \update_metadata_by_mid( $object_type, $invalid_id, $meta_value, $meta_key_arg ),
+						'delete' => \delete_metadata_by_mid( $object_type, $invalid_id ),
+					);
+				}
+
+				$invalid_type = 'invalid-' . self::slug( $case->fork( 'invalid-type' ), 'meta-type' );
+				$invalid_type_calls = array(
+					'get'    => 0,
+					'update' => 0,
+					'delete' => 0,
+				);
+				$invalid_get_filter = static function ( $check, $id ) use ( &$invalid_type_calls ) {
+					unset( $check, $id );
+					++$invalid_type_calls['get'];
+					return (object) array( 'unexpected' => true );
+				};
+				$invalid_update_filter = static function ( $check, $id, $value, $key ) use ( &$invalid_type_calls ) {
+					unset( $check, $id, $value, $key );
+					++$invalid_type_calls['update'];
+					return true;
+				};
+				$invalid_delete_filter = static function ( $check, $id ) use ( &$invalid_type_calls ) {
+					unset( $check, $id );
+					++$invalid_type_calls['delete'];
+					return true;
+				};
+
+				\add_filter( "get_{$invalid_type}_metadata_by_mid", $invalid_get_filter, 10, 2 );
+				\add_filter( "update_{$invalid_type}_metadata_by_mid", $invalid_update_filter, 10, 4 );
+				\add_filter( "delete_{$invalid_type}_metadata_by_mid", $invalid_delete_filter, 10, 2 );
+
+				try {
+					$invalid_type_results = array(
+						'get'    => \get_metadata_by_mid( $invalid_type, $meta_id_arg ),
+						'update' => \update_metadata_by_mid( $invalid_type, $meta_id_arg, $meta_value, $meta_key_arg ),
+						'delete' => \delete_metadata_by_mid( $invalid_type, $meta_id_arg ),
+					);
+				} finally {
+					\remove_filter( "get_{$invalid_type}_metadata_by_mid", $invalid_get_filter, 10 );
+					\remove_filter( "update_{$invalid_type}_metadata_by_mid", $invalid_update_filter, 10 );
+					\remove_filter( "delete_{$invalid_type}_metadata_by_mid", $invalid_delete_filter, 10 );
+				}
+			} finally {
+				\remove_filter( "get_{$object_type}_metadata_by_mid", $get_filter, 10 );
+				\remove_filter( "update_{$object_type}_metadata_by_mid", $update_filter, 10 );
+				\remove_filter( "delete_{$object_type}_metadata_by_mid", $delete_filter, 10 );
+			}
+
+			$expected_get_records = $table_exists
+				? array(
+					array(
+						'metaId'     => $meta_id,
+						'metaIdType' => 'integer',
+						'target'     => true,
+					),
+					array(
+						'metaId'     => $mismatch_id,
+						'metaIdType' => 'integer',
+						'target'     => false,
+					),
+				)
+				: array();
+			$expected_update_records = $table_exists
+				? array(
+					array(
+						'metaId'     => $meta_id,
+						'metaIdType' => 'integer',
+						'target'     => true,
+						'value'      => $meta_value,
+						'metaKey'    => $meta_key_arg,
+					),
+					array(
+						'metaId'     => $mismatch_id,
+						'metaIdType' => 'integer',
+						'target'     => false,
+						'value'      => $meta_value,
+						'metaKey'    => $meta_key_arg,
+					),
+				)
+				: array();
+			$expected_delete_records = $table_exists
+				? array(
+					array(
+						'metaId'     => $meta_id,
+						'metaIdType' => 'integer',
+						'target'     => true,
+					),
+					array(
+						'metaId'     => $mismatch_id,
+						'metaIdType' => 'integer',
+						'target'     => false,
+					),
+				)
+				: array();
+
+			$invalid_ids_fail_closed = true;
+			foreach ( $invalid_id_results as $invalid_result ) {
+				if (
+					false !== $invalid_result['get']
+					|| false !== $invalid_result['update']
+					|| false !== $invalid_result['delete']
+				) {
+					$invalid_ids_fail_closed = false;
+					break;
+				}
+			}
+
+			self::collect_failure(
+				$failures,
+				( $table_exists ? self::same_value( $sentinel, $get_exact ) : false === $get_exact )
+					&& false === $get_mismatch
+					&& ( $table_exists ? (bool) $update_short_circuit === $update_exact : false === $update_exact )
+					&& false === $update_mismatch
+					&& ( $table_exists ? (bool) $delete_short_circuit === $delete_exact : false === $delete_exact )
+					&& false === $delete_mismatch
+					&& self::same_value( $expected_get_records, $get_records )
+					&& self::same_value( $expected_update_records, $update_records )
+					&& self::same_value( $expected_delete_records, $delete_records )
+					&& $invalid_ids_fail_closed
+					&& array( 'get' => false, 'update' => false, 'delete' => false ) === $invalid_type_results
+					&& array( 'get' => 0, 'update' => 0, 'delete' => 0 ) === $invalid_type_calls
+					&& false === \has_filter( "get_{$object_type}_metadata_by_mid", $get_filter )
+					&& false === \has_filter( "update_{$object_type}_metadata_by_mid", $update_filter )
+					&& false === \has_filter( "delete_{$object_type}_metadata_by_mid", $delete_filter ),
+				"no-DB {$object_type} by-mid filters preserve payloads and invalid inputs fail closed",
+				array(
+					'objectType'              => $object_type,
+					'tableExists'             => $table_exists,
+					'metaIdArg'               => $meta_id_arg,
+					'metaValue'               => $meta_value,
+					'metaKeyArg'              => $meta_key_arg,
+					'updateShortCircuit'      => $update_short_circuit,
+					'deleteShortCircuit'      => $delete_short_circuit,
+					'getExact'                => self::describe_value( $get_exact ),
+					'getMismatch'             => $get_mismatch,
+					'updateExact'             => $update_exact,
+					'updateMismatch'          => $update_mismatch,
+					'deleteExact'             => $delete_exact,
+					'deleteMismatch'          => $delete_mismatch,
+					'getRecords'              => $get_records,
+					'expectedGetRecords'      => $expected_get_records,
+					'updateRecords'           => $update_records,
+					'expectedUpdateRecords'   => $expected_update_records,
+					'deleteRecords'           => $delete_records,
+					'expectedDeleteRecords'   => $expected_delete_records,
+					'invalidIdResults'        => $invalid_id_results,
+					'invalidType'             => $invalid_type,
+					'invalidTypeResults'      => $invalid_type_results,
+					'invalidTypeCalls'        => $invalid_type_calls,
+				)
+			);
+		}
+
+		return self::result(
+			$ctx,
+			'metadata.no-db-by-mid.filters-payloads-fail-closed',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, 8 ) )
 		);
 	}
 
