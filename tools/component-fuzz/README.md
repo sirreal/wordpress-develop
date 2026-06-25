@@ -477,8 +477,9 @@ database, network requests, or a configured site.
   style guards.
 - `syndication`: oEmbed provider registration, embed handler lifecycle, oEmbed
   wildcard/regex matching, cache-key lookup, no-network fetch short-circuits,
-  HTML/XML filtering, feed metadata escaping, default feed normalization, self
-  links, comment feed-link generation/filtering, and Atom text construction.
+  HTML/XML filtering, feed metadata escaping, default feed normalization,
+  automatic feed-link head output gates, self links, comment feed-link
+  generation/filtering, and Atom text construction.
 - `taxonomy`: taxonomy registration lifecycle, object-type associations,
   registration filter/action locality, registry query consistency,
   argument/callback/default-term normalization, query-var and rewrite
