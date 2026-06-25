@@ -32,8 +32,9 @@ database, network requests, or a configured site.
 - `admin-dashboard`: no-live-DB admin dashboard API coverage, including
   dashboard widget registration/control callbacks, meta-box context and
   priority normalization, dashboard container rendering across column counts,
-  safe recent draft/comment output helpers, explicit skips for redirect/remote
-  paths, and filter/global/superglobal/output-buffer restoration.
+  safe recent draft/post/comment output helpers, activity post query
+  argument/link branches, explicit skips for redirect/remote paths, and
+  filter/global/superglobal/output-buffer restoration.
 - `admin-screen`: no-DB admin screen, settings, and meta-box APIs, including
   `WP_Screen` normalization/current-screen globals, help tabs and screen
   options, column header filter locality, settings registry/default/sanitize

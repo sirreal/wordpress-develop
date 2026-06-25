@@ -33,6 +33,7 @@ final class AdminDashboardSurface {
 			$rows[] = self::check_widget_control_callbacks( $ctx->fork( 'widget-controls' ) );
 			$rows[] = self::check_dashboard_rendering( $ctx->fork( 'dashboard-rendering' ) );
 			$rows[] = self::check_recent_drafts_rendering( $ctx->fork( 'recent-drafts' ) );
+			$rows[] = self::check_recent_posts_rendering( $ctx->fork( 'recent-posts' ) );
 			$rows[] = self::check_recent_comment_rows( $ctx->fork( 'recent-comment-row' ) );
 			$rows[] = self::check_recent_comments_rendering( $ctx->fork( 'recent-comments' ) );
 			$rows[] = $ctx->skip(
@@ -104,6 +105,7 @@ final class AdminDashboardSurface {
 				'wp_dashboard',
 				'wp_dashboard_recent_comments',
 				'wp_dashboard_recent_drafts',
+				'wp_dashboard_recent_posts',
 				'wp_dashboard_trigger_widget_control',
 				'wp_insert_user',
 				'wp_nonce_field',
@@ -539,6 +541,236 @@ final class AdminDashboardSurface {
 		);
 	}
 
+	private static function check_recent_posts_rendering( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+
+		self::reset_runtime();
+		$user_id = self::seed_user( $ctx->fork( 'user' ) );
+		\wp_set_current_user( $user_id );
+
+		$today     = \current_datetime();
+		$tomorrow  = $today->modify( '+1 day' );
+		$last_year = $today->modify( '-1 year' );
+		$marker    = 'cfz_dashboard_recent_posts_' . self::slug( $ctx->fork( 'marker' ), 'marker' );
+
+		$future_posts = array(
+			self::recent_post_fixture( $ctx->fork( 'future-0' ), $user_id, 'future', $tomorrow->setTime( 8, 15 ), 'Soon zero' ),
+			self::recent_post_fixture( $ctx->fork( 'future-1' ), $user_id, 'future', $tomorrow->setTime( 16, 45 ), 'Soon one' ),
+			self::recent_post_fixture( $ctx->fork( 'future-2' ), $user_id, 'future', $today->modify( '+3 days' )->setTime( 11, 30 ), 'Soon two' ),
+			self::recent_post_fixture( $ctx->fork( 'future-3' ), $user_id, 'future', $today->modify( '+4 days' )->setTime( 9, 0 ), 'Soon three' ),
+		);
+		$publish_posts = array(
+			self::recent_post_fixture( $ctx->fork( 'publish-0' ), $user_id, 'publish', $today->setTime( 13, 20 ), 'Published zero' ),
+			self::recent_post_fixture( $ctx->fork( 'publish-1' ), $user_id, 'publish', $today->modify( '-2 days' )->setTime( 7, 10 ), 'Published one' ),
+			self::recent_post_fixture( $ctx->fork( 'publish-2' ), $user_id, 'publish', $last_year->setTime( 18, 5 ), 'Published two' ),
+		);
+		$posts_by_status = array(
+			'future'  => $future_posts,
+			'publish' => $publish_posts,
+		);
+		$query_events    = array();
+
+		$query_arg_filter = static function ( array $query_args ) use ( &$query_events, $marker ): array {
+			$query_events[] = array(
+				'filter'       => 'dashboard_recent_posts_query_args',
+				'postStatus'   => $query_args['post_status'] ?? null,
+				'order'        => $query_args['order'] ?? null,
+				'postsPerPage' => $query_args['posts_per_page'] ?? null,
+				'perm'         => $query_args['perm'] ?? null,
+				'noFoundRows'  => $query_args['no_found_rows'] ?? null,
+				'cacheResults' => $query_args['cache_results'] ?? null,
+			);
+
+			$query_args['component_fuzz_dashboard_marker'] = $marker;
+
+			return $query_args;
+		};
+		$pre_query_filter = static function ( $posts, \WP_Query $query ) use ( &$query_events, $marker, $posts_by_status ) {
+			if ( $marker !== ( $query->query_vars['component_fuzz_dashboard_marker'] ?? null ) ) {
+				return $posts;
+			}
+
+			$status   = (string) ( $query->query_vars['post_status'] ?? '' );
+			$order    = strtoupper( (string) ( $query->query_vars['order'] ?? 'DESC' ) );
+			$limit    = max( 0, (int) ( $query->query_vars['posts_per_page'] ?? 0 ) );
+			$selected = $posts_by_status[ $status ] ?? array();
+
+			usort(
+				$selected,
+				static function ( \WP_Post $a, \WP_Post $b ) use ( $order ): int {
+					$compare = strcmp( (string) $a->post_date_gmt, (string) $b->post_date_gmt );
+					return 'ASC' === $order ? $compare : -$compare;
+				}
+			);
+
+			$total                = count( $selected );
+			$selected             = array_slice( $selected, 0, $limit );
+			$query->found_posts   = $total;
+			$query->max_num_pages = 1;
+
+			$query_events[] = array(
+				'filter'       => 'posts_pre_query',
+				'postStatus'   => $status,
+				'order'        => $order,
+				'limit'        => $limit,
+				'perm'         => $query->query_vars['perm'] ?? null,
+				'noFoundRows'  => $query->query_vars['no_found_rows'] ?? null,
+				'cacheResults' => $query->query_vars['cache_results'] ?? null,
+				'returnedIds'  => self::post_ids( $selected ),
+			);
+
+			return $selected;
+		};
+
+		$post_snapshot = self::snapshot_globals( array( 'post' ) );
+		\add_filter( 'dashboard_recent_posts_query_args', $query_arg_filter, 10, 1 );
+		\add_filter( 'posts_pre_query', $pre_query_filter, 10, 2 );
+		try {
+			$future_result = self::with_capabilities(
+				array( 'edit_post', 'edit_posts', 'edit_published_posts', 'edit_others_posts', 'read_post', 'read' ),
+				static function (): array {
+					ob_start();
+					$return = \wp_dashboard_recent_posts(
+						array(
+							'max'    => 3,
+							'status' => 'future',
+							'order'  => 'ASC',
+							'title'  => 'Publishing Soon',
+							'id'     => 'future-posts',
+						)
+					);
+					return array(
+						'return' => $return,
+						'html'   => (string) ob_get_clean(),
+					);
+				}
+			);
+			$publish_result = self::with_capabilities(
+				array( 'read_post', 'read' ),
+				static function (): array {
+					ob_start();
+					$return = \wp_dashboard_recent_posts(
+						array(
+							'max'    => 2,
+							'status' => 'publish',
+							'order'  => 'DESC',
+							'title'  => 'Recently Published',
+							'id'     => 'published-posts',
+						)
+					);
+					return array(
+						'return' => $return,
+						'html'   => (string) ob_get_clean(),
+					);
+				}
+			);
+		} finally {
+			\remove_filter( 'posts_pre_query', $pre_query_filter, 10 );
+			\remove_filter( 'dashboard_recent_posts_query_args', $query_arg_filter, 10 );
+			self::restore_globals( $post_snapshot );
+		}
+
+		$future_html      = $future_result['html'];
+		$publish_html     = $publish_result['html'];
+		$future_fragments = array_map(
+			static function ( \WP_Post $post ): string {
+				return 'post=' . $post->ID . '&amp;action=edit';
+			},
+			array_slice( $future_posts, 0, 3 )
+		);
+		$publish_fragments = array_map(
+			static function ( \WP_Post $post ): string {
+				return '?p=' . $post->ID;
+			},
+			array_slice( $publish_posts, 0, 2 )
+		);
+		$query_arg_events  = array_values(
+			array_filter(
+				$query_events,
+				static function ( array $event ): bool {
+					return 'dashboard_recent_posts_query_args' === ( $event['filter'] ?? null );
+				}
+			)
+		);
+		$pre_query_events  = array_values(
+			array_filter(
+				$query_events,
+				static function ( array $event ): bool {
+					return 'posts_pre_query' === ( $event['filter'] ?? null );
+				}
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			2 === count( $query_arg_events )
+				&& 2 === count( $pre_query_events )
+				&& 'future' === ( $query_arg_events[0]['postStatus'] ?? null )
+				&& 'ASC' === ( $query_arg_events[0]['order'] ?? null )
+				&& 3 === (int) ( $query_arg_events[0]['postsPerPage'] ?? 0 )
+				&& 'editable' === ( $query_arg_events[0]['perm'] ?? null )
+				&& true === ( $query_arg_events[0]['noFoundRows'] ?? null )
+				&& true === ( $query_arg_events[0]['cacheResults'] ?? null )
+				&& 'publish' === ( $query_arg_events[1]['postStatus'] ?? null )
+				&& 'DESC' === ( $query_arg_events[1]['order'] ?? null )
+				&& 2 === (int) ( $query_arg_events[1]['postsPerPage'] ?? 0 )
+				&& 'readable' === ( $query_arg_events[1]['perm'] ?? null )
+				&& self::post_ids( array_slice( $future_posts, 0, 3 ) ) === ( $pre_query_events[0]['returnedIds'] ?? null )
+				&& self::post_ids( array_slice( $publish_posts, 0, 2 ) ) === ( $pre_query_events[1]['returnedIds'] ?? null ),
+			'wp_dashboard_recent_posts() builds bounded query arguments for future/editable and publish/readable activity sections',
+			array( 'events' => $query_events )
+		);
+
+		self::collect_failure(
+			$failures,
+			true === $future_result['return']
+				&& str_contains( $future_html, 'id="future-posts"' )
+				&& str_contains( $future_html, '<h3>Publishing Soon</h3>' )
+				&& 3 === substr_count( $future_html, '<li><span>' )
+				&& str_contains( $future_html, 'Tomorrow' )
+				&& self::strings_in_order( $future_html, $future_fragments )
+				&& ! str_contains( strtolower( $future_html ), '<script' )
+				&& ! str_contains( strtolower( $future_html ), 'onerror=' ),
+			'future recent-post activity renders editable links, relative dates, bounded rows, and escaped hostile titles',
+			array( 'html' => self::preview_string( $future_html ) )
+		);
+
+		self::collect_failure(
+			$failures,
+			true === $publish_result['return']
+				&& str_contains( $publish_html, 'id="published-posts"' )
+				&& str_contains( $publish_html, '<h3>Recently Published</h3>' )
+				&& 2 === substr_count( $publish_html, '<li><span>' )
+				&& str_contains( $publish_html, 'Today' )
+				&& self::strings_in_order( $publish_html, $publish_fragments )
+				&& ! str_contains( $publish_html, 'post.php?post=' )
+				&& ! str_contains( strtolower( $publish_html ), '<script' )
+				&& ! str_contains( strtolower( $publish_html ), 'onerror=' ),
+			'published recent-post activity falls back to permalinks for non-editors while preserving safe output',
+			array( 'html' => self::preview_string( $publish_html ) )
+		);
+
+		self::collect_failure(
+			$failures,
+			false === \has_filter( 'dashboard_recent_posts_query_args', $query_arg_filter )
+				&& false === \has_filter( 'posts_pre_query', $pre_query_filter )
+				&& self::globals_match( $post_snapshot ),
+			'recent-post query filters and post globals are restored after the check',
+			array( 'changedGlobals' => self::changed_globals( $post_snapshot ) )
+		);
+
+		return self::result(
+			$ctx,
+			'admin-dashboard.helpers.recent-posts-query-output',
+			$failures,
+			array(
+				'events'      => $query_events,
+				'futureHash'  => sha1( $future_html ),
+				'publishHash' => sha1( $publish_html ),
+			)
+		);
+	}
+
 	private static function check_recent_comment_rows( \ComponentFuzz\FuzzContext $ctx ): array {
 		$failures = array();
 
@@ -873,6 +1105,39 @@ final class AdminDashboardSurface {
 		}
 
 		return (int) $wpdb->insert_id;
+	}
+
+	private static function recent_post_fixture( \ComponentFuzz\FuzzContext $ctx, int $user_id, string $status, \DateTimeInterface $date, string $label ): \WP_Post {
+		$title = $label . ' <script>alert(1)</script> ' . self::hostile_text( $ctx->fork( 'title' ) );
+		$id    = self::insert_post(
+			array(
+				'post_author'       => $user_id,
+				'post_date'         => $date->format( 'Y-m-d H:i:s' ),
+				'post_date_gmt'     => $date->format( 'Y-m-d H:i:s' ),
+				'post_modified'     => $date->format( 'Y-m-d H:i:s' ),
+				'post_modified_gmt' => $date->format( 'Y-m-d H:i:s' ),
+				'post_content'      => 'Activity body <img src=x onerror=alert(1)> ' . self::hostile_text( $ctx->fork( 'content' ) ),
+				'post_title'        => $title,
+				'post_status'       => $status,
+				'post_type'         => 'post',
+				'post_name'         => \sanitize_title( $label . '-' . self::slug( $ctx->fork( 'slug' ), 'activity' ) ),
+			)
+		);
+		$post  = \get_post( $id );
+		if ( ! $post instanceof \WP_Post ) {
+			throw new \RuntimeException( 'Could not load recent post fixture.' );
+		}
+
+		return $post;
+	}
+
+	private static function post_ids( array $posts ): array {
+		return array_map(
+			static function ( \WP_Post $post ): int {
+				return (int) $post->ID;
+			},
+			$posts
+		);
 	}
 
 	private static function with_capabilities( array $capabilities, callable $callback ) {
