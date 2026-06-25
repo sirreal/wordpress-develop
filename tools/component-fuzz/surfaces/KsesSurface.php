@@ -91,6 +91,7 @@ final class KsesSurface {
 		$results = array_merge( $results, self::check_wp_kses_post_invariants( $seed, $case_index, $case ) );
 		$results = array_merge( $results, self::check_wp_kses_data_invariants( $seed, $case_index, $case ) );
 		$results = array_merge( $results, self::check_bad_protocol_invariants( $seed, $case_index, $case ) );
+		$results = array_merge( $results, self::check_bad_protocol_helper_invariants( $seed, $case_index, $case ) );
 		$results = array_merge( $results, self::check_url_invariants( $seed, $case_index, $case ) );
 		$results = array_merge( $results, self::check_safecss_invariants( $seed, $case_index, $case ) );
 		$results = array_merge( $results, self::check_nohtml_invariants( $seed, $case_index, $case ) );
@@ -788,6 +789,116 @@ final class KsesSurface {
 			} catch ( \Throwable $e ) {
 				$results[] = self::throwable_result( $seed, $case_index, 'wp_kses_bad_protocol.no-throw', $url, $e, self::case_details( $case ) );
 			}
+		}
+
+		return $results;
+	}
+
+	private static function check_bad_protocol_helper_invariants( int $seed, int $case_index, array $case ): array {
+		foreach ( array( 'wp_kses_bad_protocol_once', 'wp_kses_bad_protocol_once2', 'wp_kses_no_null' ) as $function_name ) {
+			if ( ! function_exists( $function_name ) ) {
+				return array(
+					self::skip(
+						$seed,
+						$case_index,
+						'wp_kses_bad_protocol.helper-functions.available',
+						$function_name . '() is not loaded',
+						implode( "\n", $case['urls'] )
+					),
+				);
+			}
+		}
+
+		$results   = array();
+		$protocols = $case['protocols'];
+
+		foreach ( $case['urls'] as $url_index => $url ) {
+			try {
+				$public   = \wp_kses_bad_protocol( $url, $protocols );
+				$expected = self::bad_protocol_fixed_point( $url, $protocols );
+				$once     = \wp_kses_bad_protocol_once( $public, $protocols );
+				$details  = array(
+					'profile'   => $case['profile'],
+					'urlIndex'  => $url_index,
+					'protocols' => $protocols,
+					'public'    => self::preview( $public ),
+					'once'      => self::preview( $once ),
+				);
+
+				if ( $public === $expected ) {
+					$results[] = self::pass( $seed, $case_index, 'wp_kses_bad_protocol.wrapper-agrees-with-once-fixed-point', $url, $details );
+				} else {
+					$results[] = self::fail(
+						$seed,
+						$case_index,
+						'wp_kses_bad_protocol.wrapper-agrees-with-once-fixed-point',
+						$url,
+						$expected,
+						$public,
+						$details
+					);
+				}
+
+				if ( $public === $once ) {
+					$results[] = self::pass( $seed, $case_index, 'wp_kses_bad_protocol_once.public-output-stable', $url, $details );
+				} else {
+					$results[] = self::fail(
+						$seed,
+						$case_index,
+						'wp_kses_bad_protocol_once.public-output-stable',
+						$url,
+						'public wp_kses_bad_protocol() output remains unchanged after one helper pass',
+						array(
+							'public' => self::preview( $public ),
+							'once'   => self::preview( $once ),
+						),
+						$details
+					);
+				}
+			} catch ( \Throwable $e ) {
+				$results[] = self::throwable_result( $seed, $case_index, 'wp_kses_bad_protocol.helper-composition-no-throw', $url, $e, self::case_details( $case ) );
+			}
+		}
+
+		$scheme_probes   = self::protocol_scheme_probes( $case );
+		$scheme_failures = array();
+		foreach ( $scheme_probes as $scheme_index => $scheme ) {
+			try {
+				$actual   = \wp_kses_bad_protocol_once2( $scheme, $protocols );
+				$expected = self::bad_protocol_once2_expected( $scheme, $protocols );
+				if ( $actual !== $expected ) {
+					$scheme_failures[] = array(
+						'index'    => $scheme_index,
+						'scheme'   => self::preview( $scheme ),
+						'expected' => $expected,
+						'actual'   => $actual,
+					);
+				}
+			} catch ( \Throwable $e ) {
+				$scheme_failures[] = array(
+					'index'     => $scheme_index,
+					'scheme'    => self::preview( $scheme ),
+					'throwable' => get_class( $e ) . ': ' . $e->getMessage(),
+				);
+			}
+		}
+
+		$scheme_details = self::case_details( $case ) + array(
+			'protocols'   => $protocols,
+			'schemeCount' => count( $scheme_probes ),
+		);
+		if ( empty( $scheme_failures ) ) {
+			$results[] = self::pass( $seed, $case_index, 'wp_kses_bad_protocol_once2.scheme-normalization-contract', implode( "\n", $scheme_probes ), $scheme_details );
+		} else {
+			$results[] = self::fail(
+				$seed,
+				$case_index,
+				'wp_kses_bad_protocol_once2.scheme-normalization-contract',
+				implode( "\n", $scheme_probes ),
+				'allowed normalized schemes return "scheme:" and disallowed schemes return an empty string',
+				$scheme_failures,
+				$scheme_details
+			);
 		}
 
 		return $results;
@@ -1998,14 +2109,14 @@ final class KsesSurface {
 			$value = trim( $parts[1] );
 			$lower = strtolower( $prop );
 
-			if ( isset( $disallowed_props[ $lower ] ) ) {
+			if ( isset( $disallowed_props[ $lower ] ) && ! isset( $allowed_props[ $prop ] ) ) {
 				$violations[] = array(
 					'type'     => 'disallowed-property',
 					'property' => $prop,
 				);
 			}
 
-			$is_custom_property = 1 === preg_match( '/^--[A-Za-z0-9-_]+$/', $prop );
+			$is_custom_property = isset( $allowed_props['--*'] ) && 1 === preg_match( '/^--[A-Za-z0-9-_]+$/', $prop );
 			if ( ! $is_custom_property && ! isset( $allowed_props[ $prop ] ) ) {
 				$violations[] = array(
 					'type'     => 'unknown-property',
@@ -2044,6 +2155,28 @@ final class KsesSurface {
 	}
 
 	private static function css_allowed_properties(): array {
+		$props = self::base_css_allowed_properties();
+		if ( ! function_exists( 'apply_filters' ) ) {
+			return $props;
+		}
+
+		$filtered = \apply_filters( 'safe_style_css', array_keys( $props ) );
+		if ( ! is_array( $filtered ) || empty( $filtered ) ) {
+			return $props;
+		}
+
+		$props = array();
+		foreach ( $filtered as $property ) {
+			$property = (string) $property;
+			if ( '' !== $property ) {
+				$props[ $property ] = true;
+			}
+		}
+
+		return $props;
+	}
+
+	private static function base_css_allowed_properties(): array {
 		static $props = null;
 		if ( null !== $props ) {
 			return $props;
@@ -2235,6 +2368,7 @@ final class KsesSurface {
 			'transform-origin',
 			'pointer-events',
 			'visibility',
+			'--*',
 		);
 
 		$props = array_fill_keys( $names, true );
@@ -2247,6 +2381,8 @@ final class KsesSurface {
 			'background-image',
 			'cursor',
 			'filter',
+			'list-style',
+			'list-style-image',
 		);
 	}
 
@@ -2369,6 +2505,61 @@ final class KsesSurface {
 		}
 
 		return $decoded;
+	}
+
+	private static function bad_protocol_fixed_point( string $content, array $allowed_protocols ): string {
+		$content    = \wp_kses_no_null( $content );
+		$iterations = 0;
+
+		do {
+			$original_content = $content;
+			$content          = \wp_kses_bad_protocol_once( $content, $allowed_protocols );
+		} while ( $original_content !== $content && ++$iterations < 6 );
+
+		if ( $original_content !== $content ) {
+			return '';
+		}
+
+		return $content;
+	}
+
+	private static function protocol_scheme_probes( array $case ): array {
+		$schemes = array(
+			'http',
+			'HTTPS',
+			'feed',
+			'foo',
+			'data',
+			'jav&#x09;ascript',
+			'&#x6a;&#x61;vascript',
+			"java\t\nscript",
+			"java\x00script",
+			'\\0https',
+		);
+
+		foreach ( $case['urls'] as $url ) {
+			if ( 1 === preg_match( '/^([^:]+):/', $url, $matches ) ) {
+				$schemes[] = $matches[1];
+			}
+			if ( 1 === preg_match( '/^(.+?)(?:&#0*58;?|&#x0*3a;?|&colon;)/i', $url, $matches ) ) {
+				$schemes[] = $matches[1];
+			}
+		}
+
+		return array_values( array_unique( $schemes ) );
+	}
+
+	private static function bad_protocol_once2_expected( string $scheme, array $allowed_protocols ): string {
+		$scheme = \wp_kses_decode_entities( $scheme );
+		$scheme = preg_replace( '/\s/', '', $scheme );
+		$scheme = \wp_kses_no_null( $scheme );
+		$scheme = strtolower( $scheme );
+
+		if ( in_array( $scheme, self::lowercase_list( $allowed_protocols ), true ) ) {
+			return $scheme . ':';
+		}
+
+		return '';
 	}
 
 	private static function raw_control_violation( string $value ): ?array {
