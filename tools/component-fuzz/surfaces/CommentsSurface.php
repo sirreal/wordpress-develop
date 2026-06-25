@@ -77,6 +77,7 @@ final class CommentsSurface {
 				'is_wp_error',
 				'wp_cache_delete',
 				'wp_cache_set',
+				'wp_parse_url',
 				'wp_trim_words',
 			) as $function
 		) {
@@ -1196,14 +1197,42 @@ final class CommentsSurface {
 	}
 
 	private static function comment_link_has_cpage( string $link, int $page ): bool {
-		return str_contains( $link, 'cpage=' . $page )
-			|| str_contains( $link, 'cpage=' . rawurlencode( (string) $page ) )
-			|| str_contains( $link, self::comments_pagination_base() . '-' . $page );
+		$query_vars = self::comment_link_query_vars( $link );
+		if ( isset( $query_vars['cpage'] ) && ! is_array( $query_vars['cpage'] ) && (string) $page === (string) $query_vars['cpage'] ) {
+			return true;
+		}
+
+		$path = wp_parse_url( $link, PHP_URL_PATH );
+		if ( ! is_string( $path ) ) {
+			return false;
+		}
+
+		$base = preg_quote( self::comments_pagination_base(), '#' );
+		return 1 === preg_match( '#(?:^|/)' . $base . '-' . preg_quote( (string) $page, '#' ) . '/?$#', $path );
 	}
 
 	private static function comment_link_has_any_cpage( string $link ): bool {
-		return str_contains( $link, 'cpage=' )
-			|| str_contains( $link, self::comments_pagination_base() . '-' );
+		if ( array_key_exists( 'cpage', self::comment_link_query_vars( $link ) ) ) {
+			return true;
+		}
+
+		$path = wp_parse_url( $link, PHP_URL_PATH );
+		if ( ! is_string( $path ) ) {
+			return false;
+		}
+
+		return 1 === preg_match( '#(?:^|/)' . preg_quote( self::comments_pagination_base(), '#' ) . '-[^/]+/?$#', $path );
+	}
+
+	private static function comment_link_query_vars( string $link ): array {
+		$query = wp_parse_url( $link, PHP_URL_QUERY );
+		if ( ! is_string( $query ) || '' === $query ) {
+			return array();
+		}
+
+		$vars = array();
+		parse_str( $query, $vars );
+		return $vars;
 	}
 
 	private static function comments_pagination_base(): string {
