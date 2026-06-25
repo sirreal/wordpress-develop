@@ -42,6 +42,7 @@ final class StyleSurface {
 			$rows[] = self::check_theme_json_variable_resolution( $ctx, $case );
 			$rows[] = self::check_theme_json_stylesheet( $ctx, $case );
 			$rows[] = self::check_block_style_variation_serialization( $ctx, $case );
+			$rows[] = self::check_registered_block_style_variation_source_order( $ctx, $case );
 			$rows[] = self::check_theme_style_helper_filter_restoration( $ctx, $case );
 			$rows[] = self::check_style_store_cleanup( $ctx );
 			$rows[] = self::check_global_stylesheet_guard( $ctx );
@@ -74,6 +75,7 @@ final class StyleSurface {
 				'WP_Style_Engine_Processor',
 				'WP_Theme_JSON',
 				'WP_Theme_JSON_Data',
+				'WP_Theme_JSON_Resolver',
 				'WP_Theme_JSON_Schema',
 				'WP_Block_Type',
 				'WP_Block_Type_Registry',
@@ -801,6 +803,122 @@ final class StyleSurface {
 		);
 	}
 
+	private static function check_registered_block_style_variation_source_order( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$variation                = $case['registeredBlockStyleVariation'];
+		$registry                 = \WP_Block_Styles_Registry::get_instance();
+		$registered_styles_before = self::get_object_property( $registry, 'registered_block_styles' );
+		$theme_json_meta_before   = self::get_static_property( 'WP_Theme_JSON', 'blocks_metadata' );
+		$registered               = false;
+		$registry_restored        = false;
+		$metadata_restored        = false;
+		$call                     = null;
+
+		try {
+			$registered = \register_block_style(
+				'core/paragraph',
+				array(
+					'name'       => $variation['name'],
+					'label'      => 'Fuzz Registry ' . $variation['name'],
+					'style_data' => $variation['registryData'],
+				)
+			);
+
+			$call = self::call(
+				static function () use ( $variation ): array {
+					$data = array(
+						'version' => \WP_Theme_JSON::LATEST_SCHEMA,
+						'styles'  => array(
+							'variations' => array(
+								$variation['name'] => $variation['topLevelData'],
+							),
+							'blocks'     => array(
+								'core/paragraph' => array(
+									'variations' => array(
+										$variation['name'] => $variation['blockLevelData'],
+									),
+								),
+							),
+						),
+					);
+
+					$injected = self::inject_registered_block_style_variations( $data );
+					$clean    = \WP_Theme_JSON::remove_insecure_properties( $injected, 'theme' );
+					$tree     = new \WP_Theme_JSON( $clean, 'theme' );
+
+					return array(
+						'injected'   => $injected,
+						'clean'      => $clean,
+						'stylesheet' => $tree->get_stylesheet(
+							array( 'styles' ),
+							array( 'theme' ),
+							array(
+								'include_block_style_variations' => true,
+								'skip_root_layout_styles'        => true,
+							)
+						),
+					);
+				}
+			);
+		} finally {
+			self::set_object_property( $registry, 'registered_block_styles', $registered_styles_before );
+			self::set_static_property( 'WP_Theme_JSON', 'blocks_metadata', $theme_json_meta_before );
+
+			$registry_restored = $registered_styles_before === self::get_object_property( $registry, 'registered_block_styles' );
+			$metadata_restored = $theme_json_meta_before === self::get_static_property( 'WP_Theme_JSON', 'blocks_metadata' );
+		}
+
+		$value          = is_array( $call['value'] ?? null ) ? $call['value'] : array();
+		$injected       = is_array( $value['injected'] ?? null ) ? $value['injected'] : array();
+		$clean          = is_array( $value['clean'] ?? null ) ? $value['clean'] : array();
+		$stylesheet     = (string) ( $value['stylesheet'] ?? '' );
+		$variation_data = self::array_get( $injected, array( 'styles', 'blocks', 'core/paragraph', 'variations', $variation['name'] ), array() );
+		$clean_data     = self::array_get( $clean, array( 'styles', 'blocks', 'core/paragraph', 'variations', $variation['name'] ), array() );
+		$selector       = '.wp-block-paragraph.is-style-' . $variation['name'];
+
+		$ok = $registered
+			&& is_array( $call )
+			&& ! $call['threw']
+			&& is_array( $variation_data )
+			&& is_array( $clean_data )
+			&& $variation['blockTextColor'] === self::array_get( $variation_data, array( 'color', 'text' ) )
+			&& $variation['topBackgroundColor'] === self::array_get( $variation_data, array( 'color', 'background' ) )
+			&& $variation['topPaddingTop'] === self::array_get( $variation_data, array( 'spacing', 'padding', 'top' ) )
+			&& $variation['blockPaddingRight'] === self::array_get( $variation_data, array( 'spacing', 'padding', 'right' ) )
+			&& $variation['registryBorderColor'] === self::array_get( $variation_data, array( 'border', 'color' ) )
+			&& $variation['registryBorderColor'] === self::array_get( $clean_data, array( 'border', 'color' ) )
+			&& str_contains( $stylesheet, ':root :where(' . $selector . ')' )
+			&& self::css_contains_declaration( $stylesheet, 'color', $variation['blockTextColor'] )
+			&& self::css_contains_declaration( $stylesheet, 'background-color', $variation['topBackgroundColor'] )
+			&& self::css_contains_declaration( $stylesheet, 'padding-top', $variation['topPaddingTop'] )
+			&& self::css_contains_declaration( $stylesheet, 'padding-right', $variation['blockPaddingRight'] )
+			&& self::css_contains_declaration( $stylesheet, 'border-color', $variation['registryBorderColor'] )
+			&& ! str_contains( $stylesheet, $variation['registryTextColor'] )
+			&& ! str_contains( $stylesheet, $variation['topTextColor'] )
+			&& ! str_contains( strtolower( $stylesheet ), 'javascript:' )
+			&& ! str_contains( strtolower( $stylesheet ), '<script' )
+			&& self::css_structure_ok( $stylesheet )
+			&& ! self::contains_raw_unsafe_bytes( $stylesheet )
+			&& $registry_restored
+			&& $metadata_restored;
+
+		return $ctx->result(
+			'style.block-style-registry.style-data-injection-source-order-safe',
+			$ok,
+			array(
+				'name'             => $variation['name'],
+				'selector'         => $selector,
+				'registered'       => $registered,
+				'call'             => is_array( $call ) ? self::describe_call( $call ) : null,
+				'variationData'    => self::preview( $variation_data ),
+				'cleanData'        => self::preview( $clean_data ),
+				'structure'        => self::css_structure_report( $stylesheet ),
+				'unsafeBytes'      => self::unsafe_byte_report( $stylesheet ),
+				'registryRestored' => $registry_restored,
+				'metadataRestored' => $metadata_restored,
+			)
+		);
+	}
+
 	private static function check_theme_style_helper_filter_restoration( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
 		$global_snapshot = self::snapshot_globals( array( 'editor_styles', '_wp_theme_features' ) );
 		$style_handle    = 'component-fuzz-editor-' . $ctx->seed() . '-' . $ctx->iteration() . '.css';
@@ -978,27 +1096,29 @@ final class StyleSurface {
 		$theme_base     = self::theme_json_base( $ctx, $safe_slug, $unicode_slug, $base_text, $safe_spacing, $safe_font );
 		$theme_incoming = self::theme_json_incoming( $ctx, $safe_slug, $incoming_text, $safe_spacing );
 		$theme_unsafe   = self::theme_json_unsafe( $ctx, $safe_slug, $unicode_slug, $variation_color, $safe_spacing );
+		$registry_style = self::registered_block_style_variation_case( $ctx, $safe_spacing );
 
 		return array(
-			'safeSlug'                 => $safe_slug,
-			'unicodeSlug'              => $unicode_slug,
-			'safeColor'                => self::simple_safe_color( $ctx ),
-			'safeSpacing'              => $safe_spacing,
-			'safeFontSize'             => $safe_font,
-			'selector'                 => $selector,
-			'convertVarsToClassnames'  => $ctx->bool(),
-			'blockStyles'              => $block_styles,
-			'cssRules'                 => $css_rules,
-			'mergeSelector'            => $merge_selector,
-			'mergeExpectedColor'       => $second_color,
-			'mergeReplacedColor'       => $first_color,
-			'themeJsonBase'            => $theme_base,
-			'themeJsonIncoming'        => $theme_incoming,
-			'themeJsonUnsafe'          => $theme_unsafe,
-			'baseTextColor'            => $base_text,
-			'incomingTextColor'        => $incoming_text,
-			'incomingUnits'            => array( 'rem', 'px', '%' ),
-			'variationTextColor'       => $variation_color,
+			'safeSlug'                      => $safe_slug,
+			'unicodeSlug'                   => $unicode_slug,
+			'safeColor'                     => self::simple_safe_color( $ctx ),
+			'safeSpacing'                   => $safe_spacing,
+			'safeFontSize'                  => $safe_font,
+			'selector'                      => $selector,
+			'convertVarsToClassnames'       => $ctx->bool(),
+			'blockStyles'                   => $block_styles,
+			'cssRules'                      => $css_rules,
+			'mergeSelector'                 => $merge_selector,
+			'mergeExpectedColor'            => $second_color,
+			'mergeReplacedColor'            => $first_color,
+			'themeJsonBase'                 => $theme_base,
+			'themeJsonIncoming'             => $theme_incoming,
+			'themeJsonUnsafe'               => $theme_unsafe,
+			'registeredBlockStyleVariation' => $registry_style,
+			'baseTextColor'                 => $base_text,
+			'incomingTextColor'             => $incoming_text,
+			'incomingUnits'                 => array( 'rem', 'px', '%' ),
+			'variationTextColor'            => $variation_color,
 		);
 	}
 
@@ -1367,6 +1487,75 @@ final class StyleSurface {
 		);
 	}
 
+	private static function registered_block_style_variation_case( \ComponentFuzz\FuzzContext $ctx, string $spacing ): array {
+		$registry_text_color   = self::hex_color( $ctx );
+		$top_text_color        = self::hex_color( $ctx, array( $registry_text_color ) );
+		$block_text_color      = self::hex_color( $ctx, array( $registry_text_color, $top_text_color ) );
+		$top_background_color  = self::hex_color( $ctx, array( $registry_text_color, $top_text_color, $block_text_color ) );
+		$registry_border_color = self::hex_color( $ctx, array( $registry_text_color, $top_text_color, $block_text_color, $top_background_color ) );
+		$top_padding_top       = self::spacing_value( $ctx, false );
+		$block_padding_right   = self::spacing_value( $ctx, false );
+
+		return array(
+			'name'                => self::safe_slug( $ctx, 'registry-style' ),
+			'registryTextColor'   => $registry_text_color,
+			'topTextColor'        => $top_text_color,
+			'blockTextColor'      => $block_text_color,
+			'topBackgroundColor'  => $top_background_color,
+			'registryBorderColor' => $registry_border_color,
+			'topPaddingTop'       => $top_padding_top,
+			'blockPaddingRight'   => $block_padding_right,
+			'registryData'        => array(
+				'color'      => array(
+					'text'       => $registry_text_color,
+					'background' => self::hex_color( $ctx ),
+				),
+				'spacing'    => array(
+					'padding' => array(
+						'top'    => $spacing,
+						'right'  => $spacing,
+						'bottom' => $spacing,
+					),
+				),
+				'border'     => array(
+					'color' => $registry_border_color,
+					'style' => 'solid',
+					'width' => '1px',
+				),
+				'background' => array(
+					'backgroundImage' => "url('javascript:alert(1)')",
+				),
+			),
+			'topLevelData'       => array(
+				'color'      => array(
+					'text'       => $top_text_color,
+					'background' => $top_background_color,
+				),
+				'spacing'    => array(
+					'padding' => array(
+						'top' => $top_padding_top,
+					),
+				),
+				'typography' => array(
+					'lineHeight' => '1.35',
+				),
+			),
+			'blockLevelData'     => array(
+				'color'      => array(
+					'text' => $block_text_color,
+				),
+				'spacing'    => array(
+					'padding' => array(
+						'right' => $block_padding_right,
+					),
+				),
+				'typography' => array(
+					'fontWeight' => '700',
+				),
+			),
+		);
+	}
+
 	private static function prepare_block_registry(): void {
 		$registry = \WP_Block_Type_Registry::get_instance();
 		$blocks   = array(
@@ -1484,6 +1673,23 @@ final class StyleSurface {
 				'currentColor',
 			)
 		);
+	}
+
+	private static function hex_color( \ComponentFuzz\FuzzContext $ctx, array $except = array() ): string {
+		for ( $attempt = 0; $attempt < 8; $attempt++ ) {
+			$color = '#' . sprintf( '%06x', $ctx->int( 0, 0xffffff ) );
+			if ( ! in_array( $color, $except, true ) ) {
+				return $color;
+			}
+		}
+
+		foreach ( array( '#123456', '#654321', '#0f766e', '#7c2d12', '#4338ca', '#be123c' ) as $fallback ) {
+			if ( ! in_array( $fallback, $except, true ) ) {
+				return $fallback;
+			}
+		}
+
+		return '#000000';
 	}
 
 	private static function maybe_unsafe_color( \ComponentFuzz\FuzzContext $ctx ): string {
@@ -1637,6 +1843,13 @@ final class StyleSurface {
 		}
 
 		return true;
+	}
+
+	private static function css_contains_declaration( string $css, string $property, string $value ): bool {
+		return preg_match(
+			'/(?:^|[;{])\s*' . preg_quote( $property, '/' ) . '\s*:\s*' . preg_quote( $value, '/' ) . '\s*;/',
+			$css
+		) === 1;
 	}
 
 	private static function css_structure_report( string $css ): array {
@@ -1831,6 +2044,16 @@ final class StyleSurface {
 	private static function set_object_property( object $object, string $property, $value ): void {
 		$reflection = new \ReflectionProperty( $object, $property );
 		$reflection->setValue( $object, $value );
+	}
+
+	private static function inject_registered_block_style_variations( array $data ): array {
+		$reflection = new \ReflectionMethod( 'WP_Theme_JSON_Resolver', 'inject_variations_from_block_styles_registry' );
+		if ( PHP_VERSION_ID < 80100 ) {
+			$reflection->setAccessible( true );
+		}
+
+		$injected = $reflection->invoke( null, $data );
+		return is_array( $injected ) ? $injected : array();
 	}
 
 	private static function call( callable $callback ): array {
