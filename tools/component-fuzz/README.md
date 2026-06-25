@@ -63,8 +63,10 @@ database, network requests, or a configured site.
 - `ai-client`: no-DB WordPress AI Client API coverage for SDK DTO
   round-trips, enum strictness, provider registry isolation, model-selection
   preferences across provider/model collisions, prompt builder ability
-  integration, cache and event adapters, and deterministic in-memory generation
-  without network calls.
+  integration, cache and event adapters, deterministic in-memory generation,
+  HTTPlug discovery of the WordPress HTTP adapter, PSR-7 to WordPress HTTP
+  argument mapping, SDK request option merging, response body edge cases, and
+  transport error propagation without network calls.
 - `assets`: script/style registration lifecycle, dependency ordering, inline
   assets, style add-data output metadata, loading strategies, scoped loader-tag
   filters, script modules, and printed tag escaping.
@@ -195,7 +197,9 @@ database, network requests, or a configured site.
   filtering, REST user email schema validation across Unicode/ASCII filter modes,
   and user email lookup/duplicate behavior for accent-distinct local parts/domains,
   canonical Unicode-domain save/update collision behavior, password-reset
-  Unicode recipient paths, and clickable mailto rendering boundaries.
+  Unicode recipient paths, clickable mailto rendering boundaries, and generated
+  mailto/rendering-context round trips for UTF-8 local parts, WHATWG delimiter
+  local parts, IDN/punycode domains, escaped display hrefs, and readable text.
 - `environment-load`: no-network environment/load/compat helper coverage,
   including environment type cache boundaries, server/request normalization,
   Basic Auth and SSL detection, memory-limit parsing, ini mutability,

@@ -216,7 +216,7 @@ class WP_AI_Client_HTTP_Client implements ClientInterface, ClientWithOptionsInte
 			}
 		}
 
-		if ( ! empty( $body ) ) {
+		if ( '' !== $body ) {
 			$stream   = $this->stream_factory->createStream( $body );
 			$response = $response->withBody( $stream );
 		}

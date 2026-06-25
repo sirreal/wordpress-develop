@@ -83,6 +83,7 @@ final class AiClientSurface {
 				'WordPress\AiClient\Providers\Http\Exception\NetworkException',
 				'WordPress\AiClient\Providers\Models\DTO\ModelConfig',
 				'WordPress\AiClient\Results\DTO\GenerativeAiResult',
+				'WordPress\AiClientDependencies\Http\Discovery\Psr18ClientDiscovery',
 				'WordPress\AiClientDependencies\Nyholm\Psr7\Factory\Psr17Factory',
 				'WP_AI_Client_Ability_Function_Resolver',
 				'WP_AI_Client_Cache',
@@ -103,6 +104,7 @@ final class AiClientSurface {
 
 		foreach (
 			array(
+				'WordPress\AiClient\Providers\Http\Contracts\ClientWithOptionsInterface',
 				'WordPress\AiClientDependencies\Psr\Http\Client\ClientInterface',
 				'WordPress\AiClientDependencies\Psr\Http\Message\RequestFactoryInterface',
 				'WordPress\AiClientDependencies\Psr\Http\Message\ResponseFactoryInterface',
@@ -1117,6 +1119,73 @@ final class AiClientSurface {
 			)
 		);
 
+		$discovery_strategies = array();
+		foreach ( \WordPress\AiClientDependencies\Http\Discovery\Psr18ClientDiscovery::getStrategies() as $strategy ) {
+			$discovery_strategies[] = $strategy;
+		}
+
+		$discovery_url       = 'https://' . self::domain( $case->fork( 'discovery-domain' ) ) . '/discovered';
+		$discovery_body      = (string) wp_json_encode( array( 'ping' => self::safe_text( $case->fork( 'discovery-body' ), 3, 10 ) ) );
+		$discovery_reply     = (string) wp_json_encode( array( 'ok' => true, 'source' => 'discovery' ) );
+		$discovery_seen      = array();
+		$discovery_response  = null;
+		$discovery_throwable = null;
+		$discovery_request   = new \WordPress\AiClient\Providers\Http\DTO\Request(
+			\WordPress\AiClient\Providers\Http\Enums\HttpMethodEnum::from( 'POST' ),
+			$discovery_url,
+			array( 'Content-Type' => array( 'application/json' ) ),
+			$discovery_body
+		);
+		$discovery_filter    = static function ( $_pre, array $args, string $url ) use ( &$discovery_seen, $discovery_reply ) {
+			$discovery_seen[] = array(
+				'url'  => $url,
+				'args' => $args,
+			);
+
+			return self::wp_http_response(
+				202,
+				'Accepted',
+				array( 'Content-Type' => 'application/json' ),
+				$discovery_reply
+			);
+		};
+
+		\add_filter( 'pre_http_request', $discovery_filter, 10, 3 );
+		try {
+			\WordPress\AiClientDependencies\Http\Discovery\Psr18ClientDiscovery::setStrategies(
+				array( \WP_AI_Client_Discovery_Strategy::class )
+			);
+			$discovery_transporter = new \WordPress\AiClient\Providers\Http\HttpTransporter( null, $factory, $factory );
+			$discovery_response    = $discovery_transporter->send( $discovery_request );
+		} catch ( \Throwable $e ) {
+			$discovery_throwable = $e;
+		} finally {
+			\remove_filter( 'pre_http_request', $discovery_filter, 10 );
+			\WordPress\AiClientDependencies\Http\Discovery\Psr18ClientDiscovery::setStrategies( $discovery_strategies );
+			\WordPress\AiClientDependencies\Http\Discovery\Psr18ClientDiscovery::clearCache();
+		}
+
+		$discovery_args = $discovery_seen[0]['args'] ?? array();
+		self::collect_failure(
+			$failures,
+			null === $discovery_throwable
+				&& 1 === count( $discovery_seen )
+				&& $discovery_url === ( $discovery_seen[0]['url'] ?? null )
+				&& 'POST' === ( $discovery_args['method'] ?? null )
+				&& $discovery_body === ( $discovery_args['body'] ?? null )
+				&& $discovery_response instanceof \WordPress\AiClient\Providers\Http\DTO\Response
+				&& 202 === $discovery_response->getStatusCode()
+				&& $discovery_reply === $discovery_response->getBody(),
+			'HTTPlug discovery finds the WordPress HTTP client for HttpTransporter',
+			array(
+				'throwable' => $discovery_throwable ? self::describe_throwable( $discovery_throwable ) : null,
+				'request'   => $discovery_seen[0] ?? null,
+				'response'  => $discovery_response instanceof \WordPress\AiClient\Providers\Http\DTO\Response
+					? $discovery_response->toArray()
+					: self::describe_value( $discovery_response ),
+			)
+		);
+
 		$direct_url          = 'https://' . self::domain( $case->fork( 'direct-domain' ) ) . '/v1/responses';
 		$direct_body         = (string) wp_json_encode(
 			array(
@@ -1218,6 +1287,75 @@ final class AiClientSurface {
 			)
 		);
 
+		$body_edge_cases    = array(
+			array( 'label' => 'empty', 'body' => '' ),
+			array( 'label' => 'zero', 'body' => '0' ),
+			array( 'label' => 'scalar-json-false', 'body' => 'false' ),
+			array( 'label' => 'scalar-json-string', 'body' => '"scalar"' ),
+		);
+		$body_edge_failures = array();
+		$body_edge_seen     = array();
+
+		foreach ( $body_edge_cases as $edge_case ) {
+			$edge_seen      = array();
+			$edge_response  = null;
+			$edge_throwable = null;
+			$edge_url       = 'https://' . self::domain( $case->fork( 'body-edge-' . $edge_case['label'] ) ) . '/edge';
+			$edge_request   = $factory->createRequest( 'GET', $edge_url );
+			$edge_filter    = static function ( $_pre, array $args, string $url ) use ( &$edge_seen, $edge_case ) {
+				$edge_seen[] = array(
+					'url'  => $url,
+					'args' => $args,
+				);
+
+				return self::wp_http_response(
+					200,
+					'OK',
+					array( 'Content-Type' => 'application/json' ),
+					$edge_case['body']
+				);
+			};
+
+			\add_filter( 'pre_http_request', $edge_filter, 10, 3 );
+			try {
+				$edge_response = $client->sendRequestWithOptions( $edge_request, $direct_options );
+			} catch ( \Throwable $e ) {
+				$edge_throwable = $e;
+			} finally {
+				\remove_filter( 'pre_http_request', $edge_filter, 10 );
+			}
+
+			$edge_actual       = $edge_response instanceof \WordPress\AiClientDependencies\Psr\Http\Message\ResponseInterface
+				? (string) $edge_response->getBody()
+				: null;
+			$body_edge_seen[] = array(
+				'label'     => $edge_case['label'],
+				'body'      => self::describe_value( $edge_case['body'] ),
+				'actual'    => self::describe_value( $edge_actual ),
+				'request'   => $edge_seen[0] ?? null,
+				'throwable' => $edge_throwable ? self::describe_throwable( $edge_throwable ) : null,
+			);
+
+			if (
+				null !== $edge_throwable ||
+				1 !== count( $edge_seen ) ||
+				! $edge_response instanceof \WordPress\AiClientDependencies\Psr\Http\Message\ResponseInterface ||
+				$edge_case['body'] !== $edge_actual
+			) {
+				$body_edge_failures[] = end( $body_edge_seen );
+			}
+		}
+
+		self::collect_failure(
+			$failures,
+			array() === $body_edge_failures,
+			'WP HTTP client preserves exact empty and scalar response bodies',
+			array(
+				'cases'    => $body_edge_seen,
+				'failures' => $body_edge_failures,
+			)
+		);
+
 		$error_requests  = array();
 		$error_throwable = null;
 		$error_filter    = static function ( $_pre, array $args, string $url ) use ( &$error_requests ) {
@@ -1296,6 +1434,51 @@ final class AiClientSurface {
 			)
 		);
 		$transporter       = new \WordPress\AiClient\Providers\Http\HttpTransporter( $client, $factory, $factory );
+		$capture_client    = new AiClientSurface_CapturingHttpClient( $factory, $factory, 202, 'Accepted', $transport_reply );
+		$capture_transport = new \WordPress\AiClient\Providers\Http\HttpTransporter( $capture_client, $factory, $factory );
+		$capture_response  = null;
+		$capture_throwable = null;
+		try {
+			$capture_response = $capture_transport->send( $transport_request, $parameter_options );
+		} catch ( \Throwable $e ) {
+			$capture_throwable = $e;
+		}
+
+		$captured_options = $capture_client->last_options();
+		$captured_request = $capture_client->last_request();
+		self::collect_failure(
+			$failures,
+			null === $capture_throwable
+				&& $capture_response instanceof \WordPress\AiClient\Providers\Http\DTO\Response
+				&& 202 === $capture_response->getStatusCode()
+				&& 0 === $capture_client->send_request_count()
+				&& 1 === $capture_client->send_request_with_options_count()
+				&& $captured_request instanceof \WordPress\AiClientDependencies\Psr\Http\Message\RequestInterface
+				&& 'POST' === $captured_request->getMethod()
+				&& $transport_url === (string) $captured_request->getUri()
+				&& $captured_options instanceof \WordPress\AiClient\Providers\Http\DTO\RequestOptions
+				&& $parameter_timeout === $captured_options->getTimeout()
+				&& 0.7 === $captured_options->getConnectTimeout()
+				&& 0 === $captured_options->getMaxRedirects(),
+			'HttpTransporter preserves request-only SDK options while parameter options override matching fields',
+			array(
+				'throwable' => $capture_throwable ? self::describe_throwable( $capture_throwable ) : null,
+				'request'   => $captured_request instanceof \WordPress\AiClientDependencies\Psr\Http\Message\RequestInterface
+					? array(
+						'method' => $captured_request->getMethod(),
+						'uri'    => (string) $captured_request->getUri(),
+					)
+					: self::describe_value( $captured_request ),
+				'options'   => $captured_options instanceof \WordPress\AiClient\Providers\Http\DTO\RequestOptions
+					? $captured_options->toArray()
+					: self::describe_value( $captured_options ),
+				'counts'    => array(
+					'sendRequest'            => $capture_client->send_request_count(),
+					'sendRequestWithOptions' => $capture_client->send_request_with_options_count(),
+				),
+			)
+		);
+
 		$transport_seen    = array();
 		$transport_response = null;
 		$transport_throwable = null;
@@ -1364,6 +1547,40 @@ final class AiClientSurface {
 			)
 		);
 
+		$transport_error_seen      = array();
+		$transport_error_throwable = null;
+		$transport_error_filter    = static function ( $_pre, array $args, string $url ) use ( &$transport_error_seen ) {
+			$transport_error_seen[] = array(
+				'url'  => $url,
+				'args' => $args,
+			);
+
+			return new \WP_Error( '503', 'Synthetic SDK transport outage' );
+		};
+
+		\add_filter( 'pre_http_request', $transport_error_filter, 10, 3 );
+		try {
+			$transporter->send( $transport_request, $parameter_options );
+		} catch ( \Throwable $e ) {
+			$transport_error_throwable = $e;
+		} finally {
+			\remove_filter( 'pre_http_request', $transport_error_filter, 10 );
+		}
+
+		self::collect_failure(
+			$failures,
+			1 === count( $transport_error_seen )
+				&& $transport_error_throwable instanceof \WordPress\AiClient\Providers\Http\Exception\NetworkException
+				&& 503 === $transport_error_throwable->getCode()
+				&& str_contains( $transport_error_throwable->getMessage(), $transport_url )
+				&& str_contains( $transport_error_throwable->getMessage(), 'Synthetic SDK transport outage' ),
+			'HttpTransporter propagates WP HTTP adapter NetworkException failures',
+			array(
+				'throwable' => $transport_error_throwable ? self::describe_throwable( $transport_error_throwable ) : null,
+				'requests'  => $transport_error_seen,
+			)
+		);
+
 		return self::result(
 			$ctx,
 			'ai-client.wp-http-transport-mapping-and-errors',
@@ -1371,9 +1588,13 @@ final class AiClientSurface {
 			array(
 				'failures' => array_slice( $failures, 0, 8 ),
 				'requests' => array(
-					'direct'    => count( $direct_requests ),
-					'error'     => count( $error_requests ),
-					'transport' => count( $transport_seen ),
+					'discovery'      => count( $discovery_seen ),
+					'direct'         => count( $direct_requests ),
+					'bodyEdges'      => count( $body_edge_seen ),
+					'error'          => count( $error_requests ),
+					'optionsCapture' => $capture_client->send_request_with_options_count(),
+					'transport'      => count( $transport_seen ),
+					'transportError' => count( $transport_error_seen ),
 				),
 			)
 		);
@@ -2176,6 +2397,84 @@ final class AiClientSurface {
 
 	private static function small_float( \ComponentFuzz\FuzzContext $ctx, int $min_tenths, int $max_tenths ): float {
 		return $ctx->int( $min_tenths, $max_tenths ) / 10;
+	}
+}
+
+final class AiClientSurface_CapturingHttpClient implements
+	\WordPress\AiClientDependencies\Psr\Http\Client\ClientInterface,
+	\WordPress\AiClient\Providers\Http\Contracts\ClientWithOptionsInterface {
+
+	private \WordPress\AiClientDependencies\Psr\Http\Message\ResponseFactoryInterface $response_factory;
+	private \WordPress\AiClientDependencies\Psr\Http\Message\StreamFactoryInterface $stream_factory;
+	private ?\WordPress\AiClientDependencies\Psr\Http\Message\RequestInterface $last_request = null;
+	private ?\WordPress\AiClient\Providers\Http\DTO\RequestOptions $last_options = null;
+	private int $send_request_count = 0;
+	private int $send_request_with_options_count = 0;
+	private int $status_code;
+	private string $reason_phrase;
+	private string $body;
+
+	public function __construct(
+		\WordPress\AiClientDependencies\Psr\Http\Message\ResponseFactoryInterface $response_factory,
+		\WordPress\AiClientDependencies\Psr\Http\Message\StreamFactoryInterface $stream_factory,
+		int $status_code,
+		string $reason_phrase,
+		string $body
+	) {
+		$this->response_factory = $response_factory;
+		$this->stream_factory   = $stream_factory;
+		$this->status_code      = $status_code;
+		$this->reason_phrase    = $reason_phrase;
+		$this->body             = $body;
+	}
+
+	public function sendRequest(
+		\WordPress\AiClientDependencies\Psr\Http\Message\RequestInterface $request
+	): \WordPress\AiClientDependencies\Psr\Http\Message\ResponseInterface {
+		$this->last_request = $request;
+		$this->last_options = null;
+		++$this->send_request_count;
+
+		return $this->response();
+	}
+
+	public function sendRequestWithOptions(
+		\WordPress\AiClientDependencies\Psr\Http\Message\RequestInterface $request,
+		\WordPress\AiClient\Providers\Http\DTO\RequestOptions $options
+	): \WordPress\AiClientDependencies\Psr\Http\Message\ResponseInterface {
+		$this->last_request = $request;
+		$this->last_options = $options;
+		++$this->send_request_with_options_count;
+
+		return $this->response();
+	}
+
+	public function last_request(): ?\WordPress\AiClientDependencies\Psr\Http\Message\RequestInterface {
+		return $this->last_request;
+	}
+
+	public function last_options(): ?\WordPress\AiClient\Providers\Http\DTO\RequestOptions {
+		return $this->last_options;
+	}
+
+	public function send_request_count(): int {
+		return $this->send_request_count;
+	}
+
+	public function send_request_with_options_count(): int {
+		return $this->send_request_with_options_count;
+	}
+
+	private function response(): \WordPress\AiClientDependencies\Psr\Http\Message\ResponseInterface {
+		$response = $this->response_factory->createResponse( $this->status_code, $this->reason_phrase )
+			->withHeader( 'Content-Type', 'application/json' )
+			->withHeader( 'X-Capture', 'options' );
+
+		if ( '' !== $this->body ) {
+			$response = $response->withBody( $this->stream_factory->createStream( $this->body ) );
+		}
+
+		return $response;
 	}
 }
 

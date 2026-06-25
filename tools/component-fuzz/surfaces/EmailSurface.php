@@ -8,6 +8,7 @@ final class EmailSurface {
 	private const GENERATED_VIEW_CASES = 10;
 	private const GENERATED_DOMAIN_ALIAS_CASES = 8;
 	private const GENERATED_LOCALPART_ALIAS_CASES = 8;
+	private const GENERATED_MAILTO_CONTEXT_CASES = 10;
 	private const GENERATED_UNICODE_MATRIX_CASES = 12;
 	private const GENERATED_MALFORMED_VARIANT_CASES = 12;
 	private const GENERATED_UTF8_LOCALPART_ORACLE_CASES = 16;
@@ -83,6 +84,7 @@ final class EmailSurface {
 			$rows = array_merge( $rows, self::check_punycode_views( $ctx ) );
 			$rows = array_merge( $rows, self::check_idn_views( $ctx ) );
 			$rows = array_merge( $rows, self::check_extension_address_views( $ctx ) );
+			$rows = array_merge( $rows, self::check_mailto_rendering_context_round_trips( $ctx ) );
 			$rows = array_merge( $rows, self::check_make_clickable_email_rendering( $ctx ) );
 			$rows = array_merge( $rows, self::check_length_boundaries( $ctx ) );
 
@@ -4122,6 +4124,164 @@ final class EmailSurface {
 		);
 	}
 
+	private static function check_mailto_rendering_context_round_trips( \ComponentFuzz\FuzzContext $ctx ): array {
+		foreach ( array( 'esc_html', 'esc_url', 'esc_url_raw', 'sanitize_url' ) as $function ) {
+			if ( ! function_exists( $function ) ) {
+				return array(
+					$ctx->skip(
+						'email.mailto.rendering-context-round-trips',
+						'Required URL/HTML escaping APIs are unavailable.',
+						array( 'missing' => 'function ' . $function )
+					),
+				);
+			}
+		}
+
+		$cases    = self::mailto_context_cases( $ctx->fork( 'mailto-rendering-contexts' ) );
+		$failures = array();
+		$observed = array();
+
+		foreach ( $cases as $case ) {
+			$input = $case['local'] . '@' . $case['domain'];
+			$parse = self::capture_warnings( static fn() => \WP_Email_Address::from_string( $input, 'unicode' ) );
+			$email = $parse['value'] ?? null;
+
+			if ( $parse['threw'] || array() !== $parse['warnings'] || ! ( $email instanceof \WP_Email_Address ) ) {
+				$failures[] = array(
+					'label' => $case['label'],
+					'input' => self::describe_string( $input ),
+					'parse' => self::describe_captured_call( $parse ),
+				);
+				continue;
+			}
+
+			$uri_mailbox      = self::mailto_uri_mailbox( $email );
+			$raw_href         = 'mailto:' . $uri_mailbox . '?subject=' . rawurlencode( $case['subject'] ) . '&body=' . rawurlencode( $case['body'] );
+			$escaped_href     = self::capture_warnings( static fn() => \esc_url( $raw_href ) );
+			$raw_escaped_href = self::capture_warnings( static fn() => \esc_url_raw( $raw_href ) );
+			$sanitized_href   = self::capture_warnings( static fn() => \sanitize_url( $raw_href ) );
+			$escaped_text     = self::capture_warnings( static fn() => \esc_html( $email->get_unicode_address() ) );
+			$anchor_html      = ! $escaped_href['threw'] && ! $escaped_text['threw'] && is_string( $escaped_href['value'] ?? null ) && is_string( $escaped_text['value'] ?? null )
+				? '<a href="' . $escaped_href['value'] . '">' . $escaped_text['value'] . '</a>'
+				: '';
+			$anchors          = '' !== $anchor_html ? self::mailto_anchors( $anchor_html ) : array();
+			$anchor           = $anchors[0] ?? array();
+			$decoded_href     = isset( $anchor['href'] ) && is_string( $anchor['href'] )
+				? 'mailto:' . html_entity_decode( $anchor['href'], ENT_QUOTES, 'UTF-8' )
+				: '';
+			$decoded_text     = isset( $anchor['text'] ) && is_string( $anchor['text'] )
+				? html_entity_decode( $anchor['text'], ENT_QUOTES, 'UTF-8' )
+				: '';
+			$href_parts       = '' !== $decoded_href ? parse_url( $decoded_href ) : false;
+			$decoded_mailbox  = is_array( $href_parts ) && isset( $href_parts['path'] ) ? rawurldecode( $href_parts['path'] ) : '';
+			$query            = array();
+			if ( is_array( $href_parts ) && isset( $href_parts['query'] ) ) {
+				parse_str( $href_parts['query'], $query );
+			}
+			$href_parse = '' === $decoded_mailbox
+				? array( 'threw' => false, 'value' => null, 'warnings' => array() )
+				: self::capture_warnings( static fn() => \WP_Email_Address::from_string( $decoded_mailbox, 'unicode' ) );
+			$href_email = $href_parse['value'] ?? null;
+
+			$display_href_round_trips = ! $escaped_href['threw']
+				&& is_string( $escaped_href['value'] ?? null )
+				&& $raw_href === html_entity_decode( $escaped_href['value'], ENT_QUOTES, 'UTF-8' )
+				&& str_contains( $escaped_href['value'], '&#038;body=' )
+				&& ! str_contains( $escaped_href['value'], '&body=' );
+			$raw_href_round_trips     = ! $raw_escaped_href['threw']
+				&& ! $sanitized_href['threw']
+				&& array() === $raw_escaped_href['warnings']
+				&& array() === $sanitized_href['warnings']
+				&& $raw_href === $raw_escaped_href['value']
+				&& $raw_href === $sanitized_href['value'];
+			$anchor_ok               = 1 === count( $anchors )
+				&& $decoded_href === $raw_href
+				&& $decoded_text === $email->get_unicode_address();
+			$href_parts_ok           = is_array( $href_parts )
+				&& 'mailto' === ( $href_parts['scheme'] ?? null )
+				&& $decoded_mailbox === $email->get_ascii_address()
+				&& ( $query['subject'] ?? null ) === $case['subject']
+				&& ( $query['body'] ?? null ) === $case['body'];
+			$href_parse_ok           = ! $href_parse['threw']
+				&& array() === ( $href_parse['warnings'] ?? array() )
+				&& $href_email instanceof \WP_Email_Address
+				&& $href_email->get_ascii_address() === $email->get_ascii_address()
+				&& $href_email->get_unicode_address() === $email->get_unicode_address();
+			$uri_uses_context_views   = str_contains( $raw_href, '@' . $email->get_ascii_domain() )
+				&& (
+					$email->get_ascii_domain() === $email->get_unicode_domain()
+					|| ! str_contains( $uri_mailbox, $email->get_unicode_domain() )
+				)
+				&& (
+					self::is_ascii( $email->get_localpart() )
+					|| ! str_contains( $uri_mailbox, $email->get_localpart() )
+				);
+			$ok = array() === $parse['warnings']
+				&& ! $escaped_href['threw']
+				&& ! $raw_escaped_href['threw']
+				&& ! $sanitized_href['threw']
+				&& ! $escaped_text['threw']
+				&& array() === $escaped_href['warnings']
+				&& array() === $escaped_text['warnings']
+				&& $display_href_round_trips
+				&& $raw_href_round_trips
+				&& $anchor_ok
+				&& $href_parts_ok
+				&& $href_parse_ok
+				&& $uri_uses_context_views;
+
+			if ( ! $ok ) {
+				$failures[] = array(
+					'label'             => $case['label'],
+					'source'            => $case['source'],
+					'input'             => self::describe_string( $input ),
+					'address'           => self::describe_address( $email ),
+					'uriMailbox'        => self::describe_string( $uri_mailbox ),
+					'rawHref'           => self::describe_string( $raw_href ),
+					'escapedHref'       => self::describe_captured_call( $escaped_href ),
+					'rawEscapedHref'    => self::describe_captured_call( $raw_escaped_href ),
+					'sanitizedHref'     => self::describe_captured_call( $sanitized_href ),
+					'escapedText'       => self::describe_captured_call( $escaped_text ),
+					'anchorHtml'        => self::describe_string( $anchor_html ),
+					'anchors'           => self::describe_value( $anchors ),
+					'decodedHref'       => self::describe_string( $decoded_href ),
+					'decodedText'       => self::describe_string( $decoded_text ),
+					'decodedMailbox'    => self::describe_string( $decoded_mailbox ),
+					'query'             => self::describe_value( $query ),
+					'hrefParse'         => self::describe_captured_call( $href_parse ),
+					'displayRoundTrips' => $display_href_round_trips,
+					'rawRoundTrips'     => $raw_href_round_trips,
+					'anchorOk'          => $anchor_ok,
+					'hrefPartsOk'       => $href_parts_ok,
+					'hrefParseOk'       => $href_parse_ok,
+					'uriViewsOk'        => $uri_uses_context_views,
+				);
+			}
+
+			$observed[] = array(
+				'label'             => $case['label'],
+				'source'            => $case['source'],
+				'readableAddress'   => self::describe_string( $email->get_unicode_address() ),
+				'uriMailbox'        => self::describe_string( $uri_mailbox ),
+				'unicodeLocal'      => ! self::is_ascii( $email->get_localpart() ),
+				'unicodeDomain'     => $email->get_ascii_domain() !== $email->get_unicode_domain(),
+				'hrefPercentEncoded' => $uri_mailbox !== $email->get_ascii_address(),
+			);
+		}
+
+		return array(
+			$ctx->result(
+				'email.mailto.rendering-context-round-trips',
+				array() === $failures,
+				array(
+					'caseCount' => count( $cases ),
+					'observed'  => $observed,
+					'failures'  => $failures,
+				)
+			),
+		);
+	}
+
 	private static function check_make_clickable_email_rendering( \ComponentFuzz\FuzzContext $ctx ): array {
 		$samples = array(
 			array(
@@ -4480,6 +4640,10 @@ final class EmailSurface {
 			'asciiAddress'   => $email->get_ascii_address(),
 			'unicodeAddress' => $email->get_unicode_address(),
 		);
+	}
+
+	private static function mailto_uri_mailbox( \WP_Email_Address $email ): string {
+		return rawurlencode( $email->get_localpart() ) . '@' . $email->get_ascii_domain();
 	}
 
 	private static function mailto_anchors( string $html ): array {
@@ -5147,6 +5311,94 @@ final class EmailSurface {
 		}
 
 		return $samples;
+	}
+
+	private static function mailto_context_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$locals = array(
+			array( 'label' => 'ascii', 'value' => 'mail' ),
+			array( 'label' => 'plus-tag', 'value' => 'USER+tag' ),
+			array( 'label' => 'whatwg-atext-delimiters', 'value' => 'azAZ09.!#$%&\'*+/=?^_`{|}~-' ),
+			array( 'label' => 'latin-composed', 'value' => "gr\u{00E5}" ),
+			array( 'label' => 'latin-combining', 'value' => "jose\u{0301}" ),
+			array( 'label' => 'devanagari', 'value' => "\u{0928}\u{092E}\u{0938}\u{094D}\u{0924}\u{0947}" ),
+			array( 'label' => 'greek', 'value' => "\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}" ),
+			array( 'label' => 'cyrillic', 'value' => "\u{043F}\u{043E}\u{0447}\u{0442}\u{0430}" ),
+			array( 'label' => 'cjk', 'value' => "\u{7528}\u{6237}" ),
+		);
+		$domains = array(
+			array( 'label' => 'ascii-example', 'value' => 'example.com' ),
+			array( 'label' => 'ascii-subdomain', 'value' => 'sub-domain.example' ),
+			array( 'label' => 'single-label', 'value' => 'localhost' ),
+		);
+		if ( self::has_idn() ) {
+			$domains[] = array( 'label' => 'latin-ring-idn', 'value' => "gr\u{00E5}.org" );
+			$domains[] = array( 'label' => 'latin-diaeresis-idn', 'value' => "b\u{00FC}cher.de" );
+			$domains[] = array( 'label' => 'cjk-idn', 'value' => "\u{4F8B}\u{5B50}.\u{5E7F}\u{544A}" );
+			$domains[] = array( 'label' => 'punycode-idn', 'value' => 'xn--bcher-kva.de' );
+		}
+		$query_payloads = array(
+			array(
+				'label'   => 'latin-query',
+				'subject' => "H\u{00E9}llo & follow-up",
+				'body'    => "First line\nSecond line with jos\u{00E9}",
+			),
+			array(
+				'label'   => 'symbols-query',
+				'subject' => 'Question? 100% & <tag>',
+				'body'    => 'Symbols #fragment?query&value=1',
+			),
+			array(
+				'label'   => 'non-latin-query',
+				'subject' => "\u{041F}\u{0440}\u{0438}\u{0432}\u{0435}\u{0442} / \u{4F60}\u{597D}",
+				'body'    => "\u{0645}\u{0631}\u{062D}\u{0628}\u{0627}\n\u{0928}\u{092E}\u{0938}\u{094D}\u{0924}\u{0947}",
+			),
+		);
+		$cases = array(
+			array(
+				'label'   => 'anchor-unicode-local-ascii-domain',
+				'source'  => 'anchor',
+				'local'   => "jos\u{00E9}",
+				'domain'  => 'example.com',
+				'subject' => $query_payloads[0]['subject'],
+				'body'    => $query_payloads[0]['body'],
+			),
+			array(
+				'label'   => 'anchor-atext-delimiter-local',
+				'source'  => 'anchor',
+				'local'   => 'azAZ09.!#$%&\'*+/=?^_`{|}~-',
+				'domain'  => 'sub-domain.example',
+				'subject' => $query_payloads[1]['subject'],
+				'body'    => $query_payloads[1]['body'],
+			),
+		);
+		if ( self::has_idn() ) {
+			$cases[] = array(
+				'label'   => 'anchor-unicode-local-idn-domain',
+				'source'  => 'anchor',
+				'local'   => "jose\u{0301}",
+				'domain'  => "b\u{00FC}cher.de",
+				'subject' => $query_payloads[2]['subject'],
+				'body'    => $query_payloads[2]['body'],
+			);
+		}
+
+		for ( $i = 0; $i < self::GENERATED_MAILTO_CONTEXT_CASES; $i++ ) {
+			$local   = $ctx->choice( $locals );
+			$domain  = $ctx->choice( $domains );
+			$payload = $ctx->choice( $query_payloads );
+			$suffix  = (string) $ctx->int( 10, 99 );
+
+			$cases[] = array(
+				'label'   => 'generated-mailto-context-' . $i . '-' . $local['label'] . '-' . $domain['label'] . '-' . $payload['label'],
+				'source'  => 'generated',
+				'local'   => $local['value'] . $suffix,
+				'domain'  => $domain['value'],
+				'subject' => $payload['subject'] . ' #' . $suffix,
+				'body'    => $payload['body'] . "\nCase " . $suffix,
+			);
+		}
+
+		return $cases;
 	}
 
 	private static function generated_localpart_alias_cases( \ComponentFuzz\FuzzContext $ctx ): array {
