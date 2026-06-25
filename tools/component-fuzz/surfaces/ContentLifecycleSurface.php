@@ -59,16 +59,20 @@ final class ContentLifecycleSurface {
 		foreach (
 			array(
 				'add_action',
+				'add_post_meta',
 				'clean_post_cache',
 				'create_initial_post_types',
 				'create_initial_taxonomies',
+				'delete_post_meta',
 				'get_comment',
+				'get_post_meta',
 				'get_post',
 				'get_term',
 				'get_terms',
 				'get_user_by',
 				'get_userdata',
 				'is_wp_error',
+				'metadata_exists',
 				'post_type_exists',
 				'register_post_type',
 				'sanitize_comment_cookies',
@@ -92,6 +96,7 @@ final class ContentLifecycleSurface {
 				'wp_slash',
 				'wp_trash_post',
 				'wp_unslash',
+				'update_post_meta',
 				'wp_update_post',
 			) as $function
 		) {
@@ -111,7 +116,10 @@ final class ContentLifecycleSurface {
 		$failures  = array();
 		$post_type = $case['postType'];
 		$events    = array();
-		$hooks     = self::install_post_hooks( $post_type, $events );
+		$hooks     = array_merge(
+			self::install_post_hooks( $post_type, $events ),
+			self::install_post_meta_hooks( $case['metaKey'], $case['metaUniqueKey'], $events )
+		);
 
 		try {
 			\register_post_type(
@@ -205,6 +213,14 @@ final class ContentLifecycleSurface {
 				);
 			}
 
+			$meta = self::check_post_meta_lifecycle( $post_id, $case, $events );
+			self::collect_failure(
+				$failures,
+				$meta['ok'],
+				'post metadata add/read/update/delete contracts hold',
+				$meta
+			);
+
 			$updated_id = \wp_update_post(
 				\wp_slash(
 					array(
@@ -237,6 +253,7 @@ final class ContentLifecycleSurface {
 			$deleted      = \wp_delete_post( $post_id, true );
 			$deleted_2    = \wp_delete_post( $second_id, true );
 			$after_delete = \get_post( $post_id );
+			$unique_after_delete = \metadata_exists( 'post', $post_id, $case['metaUniqueKey'] );
 			self::collect_failure(
 				$failures,
 				$trashed instanceof \WP_Post
@@ -244,7 +261,8 @@ final class ContentLifecycleSurface {
 					&& 'trash' === $after_trash->post_status
 					&& $deleted instanceof \WP_Post
 					&& $deleted_2 instanceof \WP_Post
-					&& null === $after_delete,
+					&& null === $after_delete
+					&& false === $unique_after_delete,
 				'post trash and force-delete mutate/read as expected',
 				array(
 					'trashed'           => $trashed instanceof \WP_Post,
@@ -252,6 +270,7 @@ final class ContentLifecycleSurface {
 					'deleted'           => $deleted instanceof \WP_Post,
 					'deletedSecond'     => $deleted_2 instanceof \WP_Post,
 					'afterDeleteExists' => null !== $after_delete,
+					'uniqueMetaExists'  => $unique_after_delete,
 				)
 			);
 
@@ -265,11 +284,17 @@ final class ContentLifecycleSurface {
 						'save_post',
 						'wp_insert_post',
 						'wp_after_insert_post',
+						'add_post_meta',
+						'added_post_meta',
+						'update_post_meta',
+						'updated_post_meta',
+						'delete_post_meta',
+						'deleted_post_meta',
 						'pre_post_update',
 						'post_updated',
 					)
 				),
-				'post lifecycle hooks fire in expected relative order',
+				'post lifecycle and metadata hooks fire in expected relative order',
 				array( 'events' => $events )
 			);
 		} finally {
@@ -284,6 +309,90 @@ final class ContentLifecycleSurface {
 				'failures' => array_slice( $failures, 0, 6 ),
 				'events'   => array_slice( $events, 0, 16 ),
 			)
+		);
+	}
+
+	private static function check_post_meta_lifecycle( int $post_id, array $case, array &$events ): array {
+		$key        = $case['metaKey'];
+		$unique_key = $case['metaUniqueKey'];
+
+		$first_id = \add_post_meta( $post_id, $key, \wp_slash( $case['metaValue'] ) );
+		$second_id = \add_post_meta( $post_id, $key, \wp_slash( $case['metaSecondValue'] ) );
+		$unique_id = \add_post_meta( $post_id, $unique_key, \wp_slash( $case['metaArrayValue'] ), true );
+		$unique_duplicate = \add_post_meta( $post_id, $unique_key, \wp_slash( array( 'duplicate' => true ) ), true );
+
+		$all_before    = \get_post_meta( $post_id, $key, false );
+		$single_before = \get_post_meta( $post_id, $key, true );
+		$array_before  = \get_post_meta( $post_id, $unique_key, true );
+		$exists_before = \metadata_exists( 'post', $post_id, $key );
+
+		$updated = \update_post_meta( $post_id, $key, \wp_slash( $case['metaUpdatedValue'] ), $case['metaValue'] );
+		$all_after_update = \get_post_meta( $post_id, $key, false );
+		$stale_absent     = ! in_array( $case['metaValue'], $all_after_update, true );
+
+		$delete_second = \delete_post_meta( $post_id, $key, \wp_slash( $case['metaSecondValue'] ) );
+		$after_value_delete = \get_post_meta( $post_id, $key, false );
+		$delete_remaining   = \delete_post_meta( $post_id, $key );
+		$after_key_delete   = \get_post_meta( $post_id, $key, false );
+		$exists_after       = \metadata_exists( 'post', $post_id, $key );
+
+		$meta_events = array_values(
+			array_filter(
+				$events,
+				static function ( string $event ): bool {
+					return str_contains( $event, 'post_meta' );
+				}
+			)
+		);
+
+		$ok = is_int( $first_id )
+			&& is_int( $second_id )
+			&& $second_id > $first_id
+			&& is_int( $unique_id )
+			&& false === $unique_duplicate
+			&& true === $exists_before
+			&& $case['metaValue'] === $single_before
+			&& is_array( $all_before )
+			&& in_array( $case['metaValue'], $all_before, true )
+			&& in_array( $case['metaSecondValue'], $all_before, true )
+			&& $case['metaArrayValue'] === $array_before
+			&& true === $updated
+			&& in_array( $case['metaUpdatedValue'], $all_after_update, true )
+			&& in_array( $case['metaSecondValue'], $all_after_update, true )
+			&& $stale_absent
+			&& true === $delete_second
+			&& array( $case['metaUpdatedValue'] ) === array_values( $after_value_delete )
+			&& true === $delete_remaining
+			&& array() === $after_key_delete
+			&& false === $exists_after
+			&& self::events_are_ordered(
+				$meta_events,
+				array(
+					'add_post_meta',
+					'added_post_meta',
+					'update_post_meta',
+					'updated_post_meta',
+					'delete_post_meta',
+					'deleted_post_meta',
+				)
+			);
+
+		return array(
+			'ok'                 => $ok,
+			'firstId'            => $first_id,
+			'secondId'           => $second_id,
+			'uniqueId'           => $unique_id,
+			'uniqueDuplicate'    => $unique_duplicate,
+			'allBefore'          => $all_before,
+			'singleBefore'       => $single_before,
+			'arrayBefore'        => $array_before,
+			'allAfterUpdate'     => $all_after_update,
+			'afterValueDelete'   => $after_value_delete,
+			'afterKeyDelete'     => $after_key_delete,
+			'existsBefore'       => $exists_before,
+			'existsAfter'        => $exists_after,
+			'metaEvents'         => $meta_events,
+			'cacheInvalidated'   => $stale_absent,
 		);
 	}
 
@@ -880,6 +989,68 @@ final class ContentLifecycleSurface {
 		return $hooks;
 	}
 
+	private static function install_post_meta_hooks( string $meta_key, string $unique_key, array &$events ): array {
+		$hooks = array();
+		$watch = array(
+			$meta_key   => true,
+			$unique_key => true,
+		);
+		$add   = static function ( string $hook, callable $callback, int $accepted_args ) use ( &$hooks ): void {
+			\add_action( $hook, $callback, 10, $accepted_args );
+			$hooks[] = array( $hook, $callback, 10 );
+		};
+		$record = static function ( string $event, $key ) use ( &$events, $watch ): void {
+			if ( isset( $watch[ (string) $key ] ) ) {
+				$events[] = $event;
+			}
+		};
+
+		$add(
+			'add_post_meta',
+			static function ( $object_id, $key ) use ( $record ): void {
+				$record( 'add_post_meta', $key );
+			},
+			3
+		);
+		$add(
+			'added_post_meta',
+			static function ( $mid, $object_id, $key ) use ( $record ): void {
+				$record( 'added_post_meta', $key );
+			},
+			4
+		);
+		$add(
+			'update_post_meta',
+			static function ( $meta_id, $object_id, $key ) use ( $record ): void {
+				$record( 'update_post_meta', $key );
+			},
+			4
+		);
+		$add(
+			'updated_post_meta',
+			static function ( $meta_id, $object_id, $key ) use ( $record ): void {
+				$record( 'updated_post_meta', $key );
+			},
+			4
+		);
+		$add(
+			'delete_post_meta',
+			static function ( $meta_ids, $object_id, $key ) use ( $record ): void {
+				$record( 'delete_post_meta', $key );
+			},
+			4
+		);
+		$add(
+			'deleted_post_meta',
+			static function ( $meta_ids, $object_id, $key ) use ( $record ): void {
+				$record( 'deleted_post_meta', $key );
+			},
+			4
+		);
+
+		return $hooks;
+	}
+
 	private static function remove_hooks( array $hooks ): void {
 		foreach ( $hooks as $hook ) {
 			\remove_action( $hook[0], $hook[1], $hook[2] );
@@ -945,6 +1116,16 @@ final class ContentLifecycleSurface {
 			'commentEmail'       => 'comment-' . $token . '@example.test',
 			'commentUrl'         => 'http://example.test/comment-' . $token,
 			'commentContent'     => self::usable_content( self::edge_text( $ctx->fork( 'comment-content' ), 'comment content' ), 'Comment ' . $token ),
+			'metaKey'            => '_cf_life_meta_' . $token,
+			'metaUniqueKey'      => '_cf_life_unique_' . $token,
+			'metaValue'          => 'meta-alpha-' . $token,
+			'metaSecondValue'    => 'meta-beta-' . $token,
+			'metaUpdatedValue'   => 'meta-gamma-' . $token,
+			'metaArrayValue'     => array(
+				'token' => $token,
+				'text'  => self::edge_text( $ctx->fork( 'meta-array' ), 'meta array' ),
+				'flags' => array( true, 7, 'component-fuzz' ),
+			),
 		);
 	}
 
