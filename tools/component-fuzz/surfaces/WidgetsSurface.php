@@ -48,6 +48,7 @@ final class WidgetsSurface {
 			$rows[] = self::check_sidebar_assignment( $ctx );
 			$rows[] = self::check_sidebars_widgets_option_flow( $ctx );
 			$rows[] = self::check_widget_rendering( $ctx );
+			$rows[] = self::check_the_widget_helper( $ctx );
 			$rows[] = self::check_dynamic_sidebar_action_order( $ctx );
 		} catch ( \Throwable $e ) {
 			$rows[] = self::row(
@@ -136,8 +137,14 @@ final class WidgetsSurface {
 
 		foreach (
 			array(
+				'add_action',
+				'add_filter',
 				'dynamic_sidebar',
+				'has_action',
+				'has_filter',
 				'is_registered_sidebar',
+				'remove_action',
+				'remove_filter',
 				'register_sidebars',
 				'register_sidebar',
 				'register_widget',
@@ -153,6 +160,7 @@ final class WidgetsSurface {
 				'wp_render_widget_control',
 				'wp_set_sidebars_widgets',
 				'wp_sidebar_description',
+				'the_widget',
 				'wp_unregister_sidebar_widget',
 				'wp_unregister_widget_control',
 				'wp_widget_description',
@@ -812,6 +820,129 @@ final class WidgetsSurface {
 			'widgets.render.callbacks-and-wrappers',
 			array() === $failures,
 			array( 'failures' => array_slice( $failures, 0, 4 ) )
+		);
+	}
+
+	private static function check_the_widget_helper( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$case     = self::widget_case( $ctx->fork( 'the-widget' ), 'the_widget' );
+		$widget   = self::widget_instance( $case['idBase'], $case );
+		$key      = (string) spl_object_id( $widget );
+		$instance = array(
+			'title'   => 'Original ' . $case['title'],
+			'content' => 'Original ' . $case['content'],
+		);
+		$args     = array(
+			'before_widget' => '<article class="direct %s" data-widget="yes">',
+			'after_widget'  => '</article>',
+			'before_title'  => '<h4 class="direct-title">',
+			'after_title'   => '</h4>',
+		);
+		$events   = array();
+
+		$display_filter = static function ( $filtered_instance, \WP_Widget $widget_obj, array $filtered_args ) use ( &$events, $case, $widget ) {
+			$events[] = array(
+				'type'         => 'display-filter',
+				'sameWidget'   => $widget_obj === $widget,
+				'beforeWidget' => $filtered_args['before_widget'] ?? null,
+				'title'        => $filtered_instance['title'] ?? null,
+			);
+
+			$filtered_instance['title']   = 'Filtered ' . $case['title'];
+			$filtered_instance['content'] = 'Filtered ' . $case['content'];
+			return $filtered_instance;
+		};
+		$cancel_filter  = static function () {
+			return false;
+		};
+		$action         = static function ( string $widget_name, array $action_instance, array $action_args ) use ( &$events, $key ): void {
+			$events[] = array(
+				'type'         => 'action',
+				'widget'       => $widget_name,
+				'isKey'        => $key === $widget_name,
+				'title'        => $action_instance['title'] ?? null,
+				'beforeWidget' => $action_args['before_widget'] ?? null,
+			);
+		};
+
+		\register_widget( $widget );
+		self::$widget_calls = array();
+		\add_filter( 'widget_display_callback', $display_filter, 10, 3 );
+		\add_action( 'the_widget', $action, 10, 3 );
+		try {
+			ob_start();
+			\the_widget( $key, $instance, $args );
+			$output = (string) ob_get_clean();
+			$calls  = self::$widget_calls;
+
+			self::$widget_calls = array();
+			\remove_filter( 'widget_display_callback', $display_filter, 10 );
+			\add_filter( 'widget_display_callback', $cancel_filter, 10, 3 );
+			ob_start();
+			\the_widget( $key, $instance, $args );
+			$cancelled_output = (string) ob_get_clean();
+			$cancelled_calls  = self::$widget_calls;
+		} finally {
+			\remove_filter( 'widget_display_callback', $display_filter, 10 );
+			\remove_filter( 'widget_display_callback', $cancel_filter, 10 );
+			\remove_action( 'the_widget', $action, 10 );
+			\unregister_widget( $widget );
+		}
+
+		self::collect_failure(
+			$failures,
+			2 === count( $events )
+				&& 'display-filter' === ( $events[0]['type'] ?? null )
+				&& true === ( $events[0]['sameWidget'] ?? null )
+				&& str_contains( (string) ( $events[0]['beforeWidget'] ?? '' ), $case['className'] )
+				&& 'action' === ( $events[1]['type'] ?? null )
+				&& true === ( $events[1]['isKey'] ?? null )
+				&& 'Filtered ' . $case['title'] === ( $events[1]['title'] ?? null )
+				&& str_contains( (string) ( $events[1]['beforeWidget'] ?? '' ), $case['className'] ),
+			'the_widget() applies display filters before the action and passes substituted wrapper args',
+			array( 'events' => $events )
+		);
+
+		self::collect_failure(
+			$failures,
+			1 === count( $calls )
+				&& 'Filtered ' . $case['title'] === ( $calls[0]['instance']['title'] ?? null )
+				&& 'Filtered ' . $case['content'] === ( $calls[0]['instance']['content'] ?? null )
+				&& str_contains( $output, '<article class="direct ' . $case['className'] . '" data-widget="yes">' )
+				&& str_contains( $output, '<h4 class="direct-title"><span class="cfz-widget-title">' . \esc_html( 'Filtered ' . $case['title'] ) . '</span></h4>' )
+				&& str_contains( $output, '<div class="cfz-widget-content">' . \esc_html( 'Filtered ' . $case['content'] ) . '</div>' )
+				&& ! str_contains( $output, 'Original ' . $case['title'] )
+				&& ! str_contains( $output, 'Original ' . $case['content'] )
+				&& ! str_contains( strtolower( $output ), '<script' ),
+			'the_widget() renders filtered instance data through the widget callback with escaped wrappers and content',
+			array(
+				'output' => self::describe_string( $output ),
+				'calls'  => $calls,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			'' === $cancelled_output
+				&& array() === $cancelled_calls
+				&& false === \has_filter( 'widget_display_callback', $display_filter )
+				&& false === \has_filter( 'widget_display_callback', $cancel_filter )
+				&& false === \has_action( 'the_widget', $action ),
+			'the_widget() honors false display filter cancellation and removes filters/actions after the check',
+			array(
+				'cancelledOutput' => self::describe_string( $cancelled_output ),
+				'cancelledCalls'  => $cancelled_calls,
+				'displayFilter'   => \has_filter( 'widget_display_callback', $display_filter ),
+				'cancelFilter'    => \has_filter( 'widget_display_callback', $cancel_filter ),
+				'action'          => \has_action( 'the_widget', $action ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'widgets.render.the-widget-display-filter',
+			array() === $failures,
+			array( 'failures' => $failures )
 		);
 	}
 
