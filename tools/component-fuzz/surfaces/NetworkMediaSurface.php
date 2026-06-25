@@ -1867,7 +1867,238 @@ final class NetworkMediaSurface {
 			}
 		}
 
+		self::exercise_unique_filename_collision_oracle( $rng, $result, $unique_dir );
 		self::exercise_unique_filename_callback_filter( $rng, $result, $unique_dir );
+	}
+
+	private static function exercise_unique_filename_collision_oracle( array &$rng, array &$result, string $unique_dir ): void {
+		if ( ! function_exists( 'add_filter' ) || ! function_exists( 'remove_filter' ) || ! function_exists( 'has_filter' ) ) {
+			self::skip_once( $result, 'wp_unique_filename_collision_oracle', 'Filter API is unavailable.' );
+			return;
+		}
+
+		$collision_root = $unique_dir . DIRECTORY_SEPARATOR . 'collision-oracle';
+		self::ensure_dir( $collision_root );
+
+		$active_upload_root = null;
+		$active_formats     = array();
+		$upload_calls       = array();
+		$format_calls       = array();
+		$upload_dir_filter  = static function ( array $uploads ) use ( &$active_upload_root, &$upload_calls ): array {
+			$upload_calls[] = array(
+				'basedirBefore' => $uploads['basedir'] ?? null,
+				'activeRoot'    => $active_upload_root,
+			);
+
+			if ( null === $active_upload_root ) {
+				return $uploads;
+			}
+
+			$base = rtrim( $active_upload_root, '/\\' );
+
+			$uploads['basedir'] = $base;
+			$uploads['baseurl'] = 'http://example.test/component-fuzz-network-media';
+			$uploads['path']    = $base;
+			$uploads['url']     = $uploads['baseurl'];
+			$uploads['subdir']  = '';
+			$uploads['error']   = false;
+
+			return $uploads;
+		};
+		$output_format_filter = static function ( array $formats, string $filename, string $mime_type ) use ( &$active_formats, &$format_calls ): array {
+			unset( $formats );
+
+			$format_calls[] = array(
+				'filename' => basename( $filename ),
+				'mimeType' => $mime_type,
+				'formats'  => $active_formats,
+			);
+
+			return $active_formats;
+		};
+		$before_upload_filter = \has_filter( 'upload_dir', $upload_dir_filter );
+		$before_format_filter = \has_filter( 'image_editor_output_format', $output_format_filter );
+
+		\add_filter( 'upload_dir', $upload_dir_filter );
+		\add_filter( 'image_editor_output_format', $output_format_filter, 10, 3 );
+
+		try {
+			foreach ( self::unique_filename_collision_cases( $rng ) as $index => $case ) {
+				++$result['caseCount'];
+				self::feature( $result, 'wp_unique_filename:generated-collision-oracle' );
+
+				$case_dir = $collision_root . DIRECTORY_SEPARATOR . 'case-' . $index;
+				self::ensure_dir( $case_dir );
+
+				foreach ( $case['existing'] as $existing ) {
+					file_put_contents( $case_dir . DIRECTORY_SEPARATOR . $existing, 'x' );
+				}
+
+				$active_upload_root = $collision_root;
+				$active_formats     = $case['outputFormats'];
+				$upload_call_index  = count( $upload_calls );
+				$format_call_index  = count( $format_calls );
+
+				$unique = self::call_api(
+					$result,
+					'wp_unique_filename.generated-collision-oracle',
+					$case,
+					static function () use ( $case_dir, $case ) {
+						return wp_unique_filename( $case_dir, $case['filename'] );
+					}
+				);
+				$again  = self::call_api(
+					$result,
+					'wp_unique_filename.generated-collision-oracle-repeat',
+					$case,
+					static function () use ( $case_dir, $case ) {
+						return wp_unique_filename( $case_dir, $case['filename'] );
+					}
+				);
+
+				$files = self::directory_basenames( $case_dir );
+				$parts = self::unique_filename_parts( $case['filename'] );
+
+				self::check_invariant(
+					$result,
+					$unique['ok'] && is_string( $unique['value'] ),
+					'wp_unique_filename:generated-collision-return-string',
+					$case,
+					array( 'actual' => $unique['value'] ?? null )
+				);
+
+				if ( ! $unique['ok'] || ! is_string( $unique['value'] ) ) {
+					continue;
+				}
+
+				$output_number = self::unique_filename_output_number( $parts['stem'], $parts['normalizedExt'], $unique['value'] );
+				$start_number  = $parts['dimensionLike'] ? 1 : 0;
+
+				self::check_invariant(
+					$result,
+					'' !== $unique['value']
+						&& ! self::filename_has_forbidden_output_chars( $unique['value'] )
+						&& ( ! function_exists( 'sanitize_file_name' ) || sanitize_file_name( $unique['value'] ) === $unique['value'] ),
+					'wp_unique_filename:generated-collision-safe-sanitized-basename',
+					$case,
+					array(
+						'unique'    => $unique['value'],
+						'sanitized' => function_exists( 'sanitize_file_name' ) ? sanitize_file_name( $unique['value'] ) : null,
+					)
+				);
+
+				self::check_invariant(
+					$result,
+					$again['ok'] && $again['value'] === $unique['value'],
+					'wp_unique_filename:generated-collision-repeat-stable',
+					$case,
+					array(
+						'first'  => $unique['value'],
+						'second' => $again['value'] ?? null,
+					)
+				);
+
+				self::check_invariant(
+					$result,
+					null !== $output_number
+						&& $output_number >= $start_number
+						&& str_ends_with( $unique['value'], $parts['normalizedExt'] ),
+					'wp_unique_filename:generated-collision-extension-normalization',
+					$case,
+					array(
+						'unique'        => $unique['value'],
+						'rawExt'        => $parts['rawExt'],
+						'normalizedExt' => $parts['normalizedExt'],
+						'outputNumber'  => $output_number,
+						'startNumber'   => $start_number,
+					)
+				);
+
+				self::check_invariant(
+					$result,
+					null !== $output_number
+						&& ! self::unique_filename_candidate_collides(
+							$parts['stem'],
+							$parts['rawExt'],
+							$parts['normalizedExt'],
+							$case['altExts'],
+							$output_number,
+							$files
+						),
+					'wp_unique_filename:generated-collision-avoids-existing-and-alternate',
+					$case,
+					array(
+						'unique'       => $unique['value'],
+						'files'        => $files,
+						'altExts'      => $case['altExts'],
+						'outputNumber' => $output_number,
+					)
+				);
+
+				$previous_collisions = null !== $output_number;
+				if ( null !== $output_number ) {
+					for ( $number = $start_number; $number < $output_number; ++$number ) {
+						if ( ! self::unique_filename_candidate_collides(
+							$parts['stem'],
+							$parts['rawExt'],
+							$parts['normalizedExt'],
+							$case['altExts'],
+							$number,
+							$files
+						) ) {
+							$previous_collisions = false;
+							break;
+						}
+					}
+				}
+
+				self::check_invariant(
+					$result,
+					$previous_collisions,
+					'wp_unique_filename:generated-collision-lowest-available-suffix',
+					$case,
+					array(
+						'unique'       => $unique['value'],
+						'startNumber'  => $start_number,
+						'outputNumber' => $output_number,
+						'files'        => $files,
+						'altExts'      => $case['altExts'],
+					)
+				);
+
+				self::check_invariant(
+					$result,
+					count( $upload_calls ) > $upload_call_index
+						&& count( $format_calls ) > $format_call_index
+						&& $collision_root === $upload_calls[ $upload_call_index ]['activeRoot'],
+					'wp_unique_filename:generated-collision-filter-coverage',
+					$case,
+					array(
+						'uploadCalls' => array_slice( $upload_calls, $upload_call_index ),
+						'formatCalls' => array_slice( $format_calls, $format_call_index ),
+					)
+				);
+			}
+		} finally {
+			$active_upload_root = null;
+			$active_formats     = array();
+			\remove_filter( 'image_editor_output_format', $output_format_filter, 10 );
+			\remove_filter( 'upload_dir', $upload_dir_filter );
+		}
+
+		self::check_invariant(
+			$result,
+			$before_upload_filter === \has_filter( 'upload_dir', $upload_dir_filter )
+				&& $before_format_filter === \has_filter( 'image_editor_output_format', $output_format_filter ),
+			'wp_unique_filename:generated-collision-filters-restored',
+			'wp_unique_filename:generated-collision-oracle',
+			array(
+				'uploadBefore' => $before_upload_filter,
+				'uploadAfter'  => \has_filter( 'upload_dir', $upload_dir_filter ),
+				'formatBefore' => $before_format_filter,
+				'formatAfter'  => \has_filter( 'image_editor_output_format', $output_format_filter ),
+			)
+		);
 	}
 
 	private static function exercise_unique_filename_callback_filter( array &$rng, array &$result, string $unique_dir ): void {
@@ -3087,6 +3318,199 @@ final class NetworkMediaSurface {
 		}
 
 		return $cases;
+	}
+
+	private static function unique_filename_collision_cases( array &$rng ): array {
+		$cases = array(
+			array(
+				'label'         => 'uppercase-extension-direct-collisions',
+				'filename'      => 'Photo.JPG',
+				'existing'      => array( 'Photo.jpg', 'Photo-1.jpg' ),
+				'outputFormats' => array(),
+				'altExts'       => array(),
+			),
+			array(
+				'label'         => 'dimension-like-requested-basename',
+				'filename'      => 'Avatar-150x150.PNG',
+				'existing'      => array( 'Avatar-150x150-1.png' ),
+				'outputFormats' => array(),
+				'altExts'       => array(),
+			),
+			array(
+				'label'         => 'existing-subsize-files-reserve-original-basename',
+				'filename'      => 'Canvas.png',
+				'existing'      => array( 'Canvas-150x150.png', 'Canvas-1-scaled.png' ),
+				'outputFormats' => array(),
+				'altExts'       => array(),
+			),
+			array(
+				'label'         => 'alternate-jpeg-output-reserves-png-basename',
+				'filename'      => 'Poster Final.PNG',
+				'existing'      => array( 'Poster-Final.jpg', 'Poster-Final-1-150x150.jpg' ),
+				'outputFormats' => array( 'image/png' => 'image/jpeg' ),
+				'altExts'       => array( '.jpg' ),
+			),
+			array(
+				'label'         => 'alternate-jpeg-subsize-reserves-gif-basename',
+				'filename'      => 'Loop.gif',
+				'existing'      => array( 'Loop-rotated.jpg', 'Loop-1-150x150.jpg' ),
+				'outputFormats' => array( 'image/gif' => 'image/jpeg' ),
+				'altExts'       => array( '.jpg' ),
+			),
+			array(
+				'label'         => 'rotated-webp-requested-basename',
+				'filename'      => 'Scan-rotated.WEBP',
+				'existing'      => array( 'Scan-rotated-1.webp', 'Scan-rotated-2-scaled.webp' ),
+				'outputFormats' => array(),
+				'altExts'       => array(),
+			),
+		);
+
+		$prefixes = array( 'media', 'cover', 'gallery', 'network', 'upload', 'asset', 'sample', 'poster' );
+		$suffixes = array( '150x150', '300x200', 'scaled', 'rotated' );
+
+		for ( $i = 0; $i < 10; ++$i ) {
+			$stem = self::rng_choice( $rng, $prefixes ) . '-' . self::rng_int( $rng, 100, 999 );
+			$mode = self::rng_int( $rng, 0, 3 );
+
+			if ( 0 === $mode ) {
+				$cases[] = array(
+					'label'         => 'generated-uppercase-direct-' . $i,
+					'filename'      => $stem . '.PNG',
+					'existing'      => array( $stem . '.png', $stem . '-1.png', $stem . '-2-150x150.png' ),
+					'outputFormats' => array(),
+					'altExts'       => array(),
+				);
+				continue;
+			}
+
+			if ( 1 === $mode ) {
+				$cases[] = array(
+					'label'         => 'generated-existing-subsize-' . $i,
+					'filename'      => $stem . '.jpg',
+					'existing'      => array( $stem . '-150x150.jpg', $stem . '-1-rotated.jpg' ),
+					'outputFormats' => array(),
+					'altExts'       => array(),
+				);
+				continue;
+			}
+
+			if ( 2 === $mode ) {
+				$dimension_suffix = self::rng_choice( $rng, $suffixes );
+				$dimension_stem   = $stem . '-' . $dimension_suffix;
+				$cases[]          = array(
+					'label'         => 'generated-dimension-like-request-' . $i,
+					'filename'      => $dimension_stem . '.WEBP',
+					'existing'      => array( $dimension_stem . '-1.webp', $dimension_stem . '-2-scaled.webp' ),
+					'outputFormats' => array(),
+					'altExts'       => array(),
+				);
+				continue;
+			}
+
+			$cases[] = array(
+				'label'         => 'generated-alternate-jpeg-' . $i,
+				'filename'      => $stem . '.PNG',
+				'existing'      => array( $stem . '.jpg', $stem . '-1-scaled.jpg' ),
+				'outputFormats' => array( 'image/png' => 'image/jpeg' ),
+				'altExts'       => array( '.jpg' ),
+			);
+		}
+
+		return $cases;
+	}
+
+	private static function unique_filename_parts( string $filename ): array {
+		$sanitized = function_exists( 'sanitize_file_name' ) ? sanitize_file_name( $filename ) : $filename;
+		$raw_ext   = pathinfo( $sanitized, PATHINFO_EXTENSION );
+		$raw_ext   = $raw_ext ? '.' . $raw_ext : '';
+		$stem      = pathinfo( $sanitized, PATHINFO_FILENAME );
+
+		if ( $sanitized === $raw_ext ) {
+			$stem = '';
+		}
+
+		return array(
+			'sanitized'     => $sanitized,
+			'stem'          => $stem,
+			'rawExt'        => $raw_ext,
+			'normalizedExt' => strtolower( $raw_ext ),
+			'dimensionLike' => '' !== $stem && 1 === preg_match( '/-(?:\d+x\d+|scaled|rotated)$/', $stem ),
+		);
+	}
+
+	private static function unique_filename_output_number( string $stem, string $ext, string $filename ): ?int {
+		if ( $filename === $stem . $ext ) {
+			return 0;
+		}
+
+		if ( 1 === preg_match( '/^' . preg_quote( $stem, '/' ) . '-(\d+)' . preg_quote( $ext, '/' ) . '$/', $filename, $matches ) ) {
+			return (int) $matches[1];
+		}
+
+		return null;
+	}
+
+	private static function unique_filename_candidate_collides( string $stem, string $raw_ext, string $normalized_ext, array $alt_exts, int $number, array $files ): bool {
+		$direct_candidates = array( self::unique_filename_candidate_name( $stem, $normalized_ext, $number ) );
+		if ( $raw_ext && $raw_ext !== $normalized_ext ) {
+			$direct_candidates[] = self::unique_filename_candidate_name( $stem, $raw_ext, $number );
+		}
+
+		foreach ( array_unique( $direct_candidates ) as $candidate ) {
+			if ( in_array( $candidate, $files, true ) || self::unique_filename_has_subsize_collision( $candidate, $files ) ) {
+				return true;
+			}
+		}
+
+		foreach ( array_unique( $alt_exts ) as $alt_ext ) {
+			if ( $alt_ext === $normalized_ext ) {
+				continue;
+			}
+
+			$alt_candidate = self::unique_filename_candidate_name( $stem, $alt_ext, $number );
+			if ( in_array( $alt_candidate, $files, true ) || self::unique_filename_has_subsize_collision( $alt_candidate, $files ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private static function unique_filename_candidate_name( string $stem, string $ext, int $number ): string {
+		return $stem . ( 0 === $number ? '' : '-' . $number ) . $ext;
+	}
+
+	private static function unique_filename_has_subsize_collision( string $filename, array $files ): bool {
+		$stem = pathinfo( $filename, PATHINFO_FILENAME );
+		$ext  = pathinfo( $filename, PATHINFO_EXTENSION );
+
+		if ( '' === $stem ) {
+			return false;
+		}
+
+		$ext   = $ext ? '.' . $ext : '';
+		$regex = '/^' . preg_quote( $stem, '/' ) . '-(?:\d+x\d+|scaled|rotated)' . preg_quote( $ext, '/' ) . '$/i';
+
+		foreach ( $files as $file ) {
+			if ( 1 === preg_match( $regex, $file ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private static function directory_basenames( string $dir ): array {
+		$files = scandir( $dir );
+		if ( false === $files ) {
+			return array();
+		}
+
+		$files = array_values( array_diff( $files, array( '.', '..' ) ) );
+		sort( $files );
+
+		return $files;
 	}
 
 	private static function make_temp_root( int $seed, array &$result ): ?string {
