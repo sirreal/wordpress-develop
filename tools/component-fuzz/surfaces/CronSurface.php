@@ -735,11 +735,10 @@ final class CronSurface {
 
 		$pre_transient_filter = static function ( $pre, string $transient ) use ( &$transients ) {
 			unset( $pre, $transient );
-			return $transients['doing_cron'] ?? 0;
+			return $transients['doing_cron'] ?? false;
 		};
-		$pre_set_transient_filter = static function ( $value, int $expiration, string $transient ) use ( &$transients, &$transient_sets ) {
-			$transients[ $transient ] = $value;
-			$transient_sets[]         = array(
+		$pre_set_transient_filter = static function ( $value, int $expiration, string $transient ) use ( &$transient_sets ) {
+			$transient_sets[] = array(
 				'transient'  => $transient,
 				'value'      => $value,
 				'expiration' => $expiration,
@@ -749,7 +748,13 @@ final class CronSurface {
 		};
 		$pre_option_transient_filter = static function ( $pre, string $option, $default ) use ( &$transients ) {
 			unset( $pre, $option, $default );
-			return $transients['doing_cron'] ?? 0;
+			return $transients['doing_cron'] ?? false;
+		};
+		$transient_set_action = static function ( string $transient, $value, int $expiration ) use ( &$transients ): void {
+			unset( $expiration );
+			if ( 'doing_cron' === $transient ) {
+				$transients[ $transient ] = $value;
+			}
 		};
 		$pre_option_siteurl_filter = static function ( $pre, string $option, $default ): string {
 			unset( $pre, $option, $default );
@@ -797,6 +802,7 @@ final class CronSurface {
 		\add_filter( 'pre_transient_doing_cron', $pre_transient_filter, 10, 2 );
 		\add_filter( 'pre_set_transient_doing_cron', $pre_set_transient_filter, 10, 3 );
 		\add_filter( 'pre_option__transient_doing_cron', $pre_option_transient_filter, 10, 3 );
+		\add_filter( 'set_transient', $transient_set_action, 10, 3 );
 		\add_filter( 'pre_option_siteurl', $pre_option_siteurl_filter, 10, 3 );
 		\add_filter( 'https_local_ssl_verify', $ssl_filter, 10, 2 );
 		\add_filter( 'cron_request', $cron_request_filter, 10, 2 );
@@ -808,6 +814,7 @@ final class CronSurface {
 			$_SERVER['REQUEST_METHOD'] = 'GET';
 			$_SERVER['REQUEST_URI']    = '/component-fuzz/cron-spawn/';
 			unset( $_SERVER['HTTPS'], $_GET['doing_wp_cron'] );
+			self::clear_cron_lock_option_cache();
 
 			$no_ready_http_before      = count( $http_requests );
 			$no_ready_transient_before = count( $transient_sets );
@@ -818,6 +825,7 @@ final class CronSurface {
 
 			$store             = array( 'version' => 2 );
 			$transients        = array();
+			self::clear_cron_lock_option_cache();
 			$future_schedule   = self::call( static fn() => \wp_schedule_single_event( $future, 'component_fuzz_spawn_future', array( 'case' => 'future' ), true ) );
 			$future_http_before = count( $http_requests );
 			$future_transient_before = count( $transient_sets );
@@ -828,6 +836,7 @@ final class CronSurface {
 
 			$store       = array( 'version' => 2 );
 			$transients  = array( 'doing_cron' => sprintf( '%.22F', $gmt_time ) );
+			self::clear_cron_lock_option_cache();
 			$active_schedule = self::call( static fn() => \wp_schedule_single_event( $past, 'component_fuzz_spawn_active_lock', array( 'case' => 'active-lock' ), true ) );
 			$active_http_before = count( $http_requests );
 			$active_transient_before = count( $transient_sets );
@@ -837,6 +846,7 @@ final class CronSurface {
 
 			$store              = array( 'version' => 2 );
 			$transients         = array( 'doing_cron' => sprintf( '%.22F', $gmt_time - \WP_CRON_LOCK_TIMEOUT - 5 ) );
+			self::clear_cron_lock_option_cache();
 			$return_http_error  = false;
 			$stale_schedule     = self::call( static fn() => \wp_schedule_single_event( $past, 'component_fuzz_spawn_stale_lock', array( 'case' => 'stale-lock' ), true ) );
 			$stale_http_before  = count( $http_requests );
@@ -845,11 +855,13 @@ final class CronSurface {
 			$stale_spawn        = self::call( static fn() => \spawn_cron( $gmt_time ) );
 			$stale_http_requests = array_slice( $http_requests, $stale_http_before );
 			$stale_cron_requests = array_slice( $cron_requests, $stale_cron_before );
+			$stale_transient_sets = array_slice( $transient_sets, $stale_transient_before );
 			$stale_request_count = count( $stale_http_requests );
 			$stale_transient_count = count( $transient_sets ) - $stale_transient_before;
 
 			$store                     = array( 'version' => 2 );
 			$transients                = array( 'doing_cron' => sprintf( '%.22F', $gmt_time + 11 * \MINUTE_IN_SECONDS ) );
+			self::clear_cron_lock_option_cache();
 			$future_invalid_schedule   = self::call( static fn() => \wp_schedule_single_event( $past, 'component_fuzz_spawn_future_invalid_lock', array( 'case' => 'future-invalid-lock' ), true ) );
 			$future_invalid_http_before = count( $http_requests );
 			$future_invalid_cron_before = count( $cron_requests );
@@ -857,11 +869,29 @@ final class CronSurface {
 			$future_invalid_spawn      = self::call( static fn() => \spawn_cron( $gmt_time ) );
 			$future_invalid_http_requests = array_slice( $http_requests, $future_invalid_http_before );
 			$future_invalid_cron_requests = array_slice( $cron_requests, $future_invalid_cron_before );
+			$future_invalid_transient_sets = array_slice( $transient_sets, $future_invalid_transient_before );
 			$future_invalid_request_count = count( $future_invalid_http_requests );
 			$future_invalid_transient_count = count( $transient_sets ) - $future_invalid_transient_before;
 
+			$store                    = array( 'version' => 2 );
+			$transients               = array();
+			self::clear_cron_lock_option_cache();
+			$return_http_error        = false;
+			$wp_cron_ready_schedule   = self::call( static fn() => \wp_schedule_single_event( $past, 'component_fuzz_spawn_wp_cron_ready', array( 'case' => 'wp-cron-ready' ), true ) );
+			$wp_cron_ready_http_before = count( $http_requests );
+			$wp_cron_ready_cron_before = count( $cron_requests );
+			$wp_cron_ready_transient_before = count( $transient_sets );
+			$wp_cron_ready            = self::call( static fn() => \_wp_cron() );
+			$wp_cron_ready_http_requests = array_slice( $http_requests, $wp_cron_ready_http_before );
+			$wp_cron_ready_cron_requests = array_slice( $cron_requests, $wp_cron_ready_cron_before );
+			$wp_cron_ready_transient_sets = array_slice( $transient_sets, $wp_cron_ready_transient_before );
+			$wp_cron_ready_request_count = count( $wp_cron_ready_http_requests );
+			$wp_cron_ready_cron_request_count = count( $wp_cron_ready_cron_requests );
+			$wp_cron_ready_transient_count = count( $transient_sets ) - $wp_cron_ready_transient_before;
+
 			$store                 = array( 'version' => 2 );
 			$transients            = array();
+			self::clear_cron_lock_option_cache();
 			$return_http_error     = true;
 			$error_schedule        = self::call( static fn() => \wp_schedule_single_event( $past, 'component_fuzz_spawn_error', array( 'case' => 'request-error' ), true ) );
 			$error_http_before     = count( $http_requests );
@@ -873,6 +903,7 @@ final class CronSurface {
 
 			$store                 = array( 'version' => 2 );
 			$transients            = array();
+			self::clear_cron_lock_option_cache();
 			$_GET['doing_wp_cron'] = 'component-fuzz-guard';
 			$guard_schedule        = self::call( static fn() => \wp_schedule_single_event( $past, 'component_fuzz_spawn_get_guard', array( 'case' => 'get-guard' ), true ) );
 			$guard_http_before     = count( $http_requests );
@@ -884,6 +915,7 @@ final class CronSurface {
 			\remove_filter( 'pre_transient_doing_cron', $pre_transient_filter, 10 );
 			\remove_filter( 'pre_set_transient_doing_cron', $pre_set_transient_filter, 10 );
 			\remove_filter( 'pre_option__transient_doing_cron', $pre_option_transient_filter, 10 );
+			\remove_filter( 'set_transient', $transient_set_action, 10 );
 			\remove_filter( 'pre_option_siteurl', $pre_option_siteurl_filter, 10 );
 			\remove_filter( 'https_local_ssl_verify', $ssl_filter, 10 );
 			\remove_filter( 'cron_request', $cron_request_filter, 10 );
@@ -895,6 +927,7 @@ final class CronSurface {
 		$success_http = $future_invalid_http_requests[0] ?? null;
 		$success_cron = $future_invalid_cron_requests[0] ?? null;
 		$success_url = is_array( $success_http ) ? ( $success_http['url'] ?? '' ) : '';
+		$success_url_parts = is_string( $success_url ) ? parse_url( $success_url ) : false;
 		$success_query = array();
 		$query_string = is_string( $success_url ) ? parse_url( $success_url, PHP_URL_QUERY ) : null;
 		if ( is_string( $query_string ) ) {
@@ -905,9 +938,17 @@ final class CronSurface {
 		$cron_args    = is_array( $cron_request['args'] ?? null ) ? $cron_request['args'] : array();
 		$http_args    = is_array( $success_http['args'] ?? null ) ? $success_http['args'] : array();
 		$cron_key     = $cron_request['key'] ?? null;
+		$success_lock_ok = 1 === count( $future_invalid_transient_sets )
+			&& 'doing_cron' === ( $future_invalid_transient_sets[0]['transient'] ?? null )
+			&& 0 === ( $future_invalid_transient_sets[0]['expiration'] ?? null )
+			&& is_string( $cron_key )
+			&& $cron_key === ( $future_invalid_transient_sets[0]['value'] ?? null );
 		$payload_ok   = is_string( $success_url )
-			&& false !== strpos( $success_url, '/wp-cron.php' )
-			&& isset( $success_query['doing_wp_cron'] )
+			&& is_array( $success_url_parts )
+			&& 'http' === ( $success_url_parts['scheme'] ?? null )
+			&& 'example.test' === ( $success_url_parts['host'] ?? null )
+			&& '/wp-cron.php' === ( $success_url_parts['path'] ?? null )
+			&& array( 'doing_wp_cron' => $cron_key ) === $success_query
 			&& $cron_key === $success_query['doing_wp_cron']
 			&& $cron_key === ( $success_cron['doing_wp_cron'] ?? null )
 			&& $success_url === ( $cron_request['url'] ?? null )
@@ -921,9 +962,27 @@ final class CronSurface {
 			&& 'POST' === ( $http_args['method'] ?? null )
 			&& 'boolean' === ( $success_http['preType'] ?? null );
 
+		$wp_cron_ready_cron = $wp_cron_ready_cron_requests[0] ?? null;
+		$wp_cron_ready_request = is_array( $wp_cron_ready_cron ) ? ( $wp_cron_ready_cron['request'] ?? array() ) : array();
+		$wp_cron_ready_key = $wp_cron_ready_request['key'] ?? null;
+		$wp_cron_ready_lock_ok = 1 === count( $wp_cron_ready_transient_sets )
+			&& 'doing_cron' === ( $wp_cron_ready_transient_sets[0]['transient'] ?? null )
+			&& 0 === ( $wp_cron_ready_transient_sets[0]['expiration'] ?? null )
+			&& is_string( $wp_cron_ready_key )
+			&& $wp_cron_ready_key === ( $wp_cron_ready_transient_sets[0]['value'] ?? null );
+
+		$ssl_inputs_ok = count( $ssl_decisions ) === $stale_request_count + $future_invalid_request_count + $wp_cron_ready_request_count + $error_request_count;
+		foreach ( $ssl_decisions as $decision ) {
+			if ( false !== ( $decision['input'] ?? null ) || null !== ( $decision['url'] ?? null ) ) {
+				$ssl_inputs_ok = false;
+				break;
+			}
+		}
+
 		$filters_restored = false === \has_filter( 'pre_transient_doing_cron', $pre_transient_filter )
 			&& false === \has_filter( 'pre_set_transient_doing_cron', $pre_set_transient_filter )
 			&& false === \has_filter( 'pre_option__transient_doing_cron', $pre_option_transient_filter )
+			&& false === \has_filter( 'set_transient', $transient_set_action )
 			&& false === \has_filter( 'pre_option_siteurl', $pre_option_siteurl_filter )
 			&& false === \has_filter( 'https_local_ssl_verify', $ssl_filter )
 			&& false === \has_filter( 'cron_request', $cron_request_filter )
@@ -965,6 +1024,15 @@ final class CronSurface {
 			&& 1 === $future_invalid_request_count
 			&& 1 === $future_invalid_transient_count
 			&& $payload_ok
+			&& $success_lock_ok
+			&& ! $wp_cron_ready_schedule['threw']
+			&& true === $wp_cron_ready_schedule['value']
+			&& ! $wp_cron_ready['threw']
+			&& 1 === $wp_cron_ready['value']
+			&& 1 === $wp_cron_ready_request_count
+			&& 1 === $wp_cron_ready_cron_request_count
+			&& 1 === $wp_cron_ready_transient_count
+			&& $wp_cron_ready_lock_ok
 			&& ! $error_schedule['threw']
 			&& true === $error_schedule['value']
 			&& ! $error_spawn['threw']
@@ -977,7 +1045,7 @@ final class CronSurface {
 			&& false === $guard_spawn['value']
 			&& 0 === $guard_request_count
 			&& 0 === $guard_transient_count
-			&& array() !== $ssl_decisions
+			&& $ssl_inputs_ok
 			&& $filters_restored
 			&& $superglobals_restored;
 
@@ -998,6 +1066,8 @@ final class CronSurface {
 						'staleSpawn'         => self::describe_call( $stale_spawn ),
 						'futureInvalidSchedule' => self::describe_call( $future_invalid_schedule ),
 						'futureInvalidSpawn' => self::describe_call( $future_invalid_spawn ),
+						'wpCronReadySchedule' => self::describe_call( $wp_cron_ready_schedule ),
+						'wpCronReady'       => self::describe_call( $wp_cron_ready ),
 						'errorSchedule'      => self::describe_call( $error_schedule ),
 						'errorSpawn'         => self::describe_call( $error_spawn ),
 						'guardSchedule'      => self::describe_call( $guard_schedule ),
@@ -1009,6 +1079,7 @@ final class CronSurface {
 						'activeLock'    => $active_request_count,
 						'staleLock'     => $stale_request_count,
 						'futureInvalid' => $future_invalid_request_count,
+						'wpCronReady'   => $wp_cron_ready_request_count,
 						'requestError'  => $error_request_count,
 						'getGuard'      => $guard_request_count,
 					),
@@ -1018,12 +1089,17 @@ final class CronSurface {
 						'activeLock'    => $active_transient_count,
 						'staleLock'     => $stale_transient_count,
 						'futureInvalid' => $future_invalid_transient_count,
+						'wpCronReady'   => $wp_cron_ready_transient_count,
 						'requestError'  => $error_transient_count,
 						'getGuard'      => $guard_transient_count,
 					),
 					'payloadOk'             => $payload_ok,
+					'successLockOk'         => $success_lock_ok,
+					'wpCronReadyLockOk'     => $wp_cron_ready_lock_ok,
+					'sslInputsOk'           => $ssl_inputs_ok,
 					'capturedSuccessHttp'   => self::describe_value( $success_http ),
 					'capturedSuccessRequest' => self::describe_value( $success_cron ),
+					'wpCronReadyRequests'   => self::describe_value( $wp_cron_ready_cron_requests ),
 					'sslDecisions'          => self::describe_value( $ssl_decisions ),
 					'transientSets'         => self::describe_value( $transient_sets ),
 					'filtersRestored'       => $filters_restored,
@@ -1192,6 +1268,11 @@ final class CronSurface {
 
 			public function update( $table, $data, $where ) {
 				unset( $table, $data, $where );
+				return 1;
+			}
+
+			public function query( $query ) {
+				unset( $query );
 				return 1;
 			}
 
@@ -1412,6 +1493,30 @@ final class CronSurface {
 		return $out;
 	}
 
+	private static function clear_cron_lock_option_cache(): void {
+		if ( ! function_exists( 'wp_cache_delete' ) || ! function_exists( 'wp_cache_get' ) || ! function_exists( 'wp_cache_set' ) ) {
+			return;
+		}
+
+		$transient_option = '_transient_doing_cron';
+		$timeout_option   = '_transient_timeout_doing_cron';
+
+		\wp_cache_delete( $transient_option, 'options' );
+		\wp_cache_delete( $timeout_option, 'options' );
+
+		$alloptions = \wp_cache_get( 'alloptions', 'options' );
+		if ( is_array( $alloptions ) ) {
+			unset( $alloptions[ $transient_option ], $alloptions[ $timeout_option ] );
+			\wp_cache_set( 'alloptions', $alloptions, 'options' );
+		}
+
+		$notoptions = \wp_cache_get( 'notoptions', 'options' );
+		if ( is_array( $notoptions ) ) {
+			unset( $notoptions[ $transient_option ], $notoptions[ $timeout_option ] );
+			\wp_cache_set( 'notoptions', $notoptions, 'options' );
+		}
+	}
+
 	private static function snapshot_array_keys( array $source, array $keys ): array {
 		$snapshot = array();
 		foreach ( $keys as $key ) {
@@ -1450,7 +1555,7 @@ final class CronSurface {
 
 	private static function snapshot_globals(): array {
 		$snapshot = array();
-		foreach ( array( 'wp_filter', 'wp_actions', 'wp_filters', 'wp_current_filter', 'wpdb' ) as $name ) {
+		foreach ( array( 'wp_filter', 'wp_actions', 'wp_filters', 'wp_current_filter', 'wpdb', 'wp_object_cache' ) as $name ) {
 			$snapshot[ $name ] = array(
 				'exists' => array_key_exists( $name, $GLOBALS ),
 				'value'  => array_key_exists( $name, $GLOBALS ) ? self::clone_value( $GLOBALS[ $name ] ) : null,
