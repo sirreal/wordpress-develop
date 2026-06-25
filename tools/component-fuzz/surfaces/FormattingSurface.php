@@ -28,6 +28,7 @@ final class FormattingSurface {
 		$rows[] = self::check_autop_shortcode_stability( $ctx, $inputs['autopCases'] );
 		$rows[] = self::check_make_clickable( $ctx, $inputs['clickableCases'] );
 		$rows[] = self::check_url_sanitizers( $ctx, $inputs['urlCases'] );
+		$rows[] = self::check_identifier_sanitizers( $ctx, $inputs['identifierCases'] );
 		$rows[] = self::check_entity_normalization( $ctx, $inputs['entityCases'] );
 		$rows[] = self::check_zeroise( $ctx, $inputs['zeroiseCases'] );
 		$rows[] = self::check_size_format( $ctx, $inputs['sizeCases'] );
@@ -76,6 +77,7 @@ final class FormattingSurface {
 			'autopCases'       => self::generate_autop_cases( $ctx->fork( 'formatting-autop' ) ),
 			'clickableCases'   => self::generate_clickable_cases( $ctx->fork( 'formatting-clickable' ) ),
 			'urlCases'         => self::generate_url_cases( $ctx->fork( 'formatting-urls' ) ),
+			'identifierCases'  => self::generate_identifier_cases( $ctx->fork( 'formatting-identifiers' ) ),
 			'entityCases'      => self::generate_entity_cases( $ctx->fork( 'formatting-entities' ) ),
 			'zeroiseCases'     => self::generate_zeroise_cases( $ctx->fork( 'formatting-zeroise' ) ),
 			'sizeCases'        => self::generate_size_cases( $ctx->fork( 'formatting-size' ) ),
@@ -652,6 +654,168 @@ final class FormattingSurface {
 			'url_sanitizers.display_storage_contracts',
 			$failures,
 			array( 'cases' => $checked )
+		);
+	}
+
+	private static function check_identifier_sanitizers( \ComponentFuzz\FuzzContext $ctx, array $cases ): array {
+		foreach ( array( 'sanitize_html_class', 'sanitize_key', 'sanitize_title', 'sanitize_title_with_dashes' ) as $function ) {
+			if ( ! function_exists( $function ) ) {
+				return self::skip_row( $ctx, 'identifier_sanitizers.shape_filter_contracts', "{$function}() is unavailable." );
+			}
+		}
+
+		$failures         = array();
+		$title_calls      = array();
+		$key_calls        = array();
+		$html_class_calls = array();
+
+		$title_filter = static function ( string $title, string $raw_title, string $context ) use ( &$title_calls ): string {
+			$title_calls[] = array(
+				'title'   => $title,
+				'raw'     => $raw_title,
+				'context' => $context,
+			);
+
+			return $title;
+		};
+		$key_filter = static function ( string $sanitized, $raw_key ) use ( &$key_calls ): string {
+			$key_calls[] = array(
+				'sanitized' => $sanitized,
+				'raw'       => $raw_key,
+			);
+
+			return $sanitized;
+		};
+		$html_class_filter = static function ( string $sanitized, string $raw_class, string $fallback ) use ( &$html_class_calls ): string {
+			$html_class_calls[] = array(
+				'sanitized' => $sanitized,
+				'raw'       => $raw_class,
+				'fallback'  => $fallback,
+			);
+
+			return $sanitized;
+		};
+
+		\add_filter( 'sanitize_title', $title_filter, 99, 3 );
+		\add_filter( 'sanitize_key', $key_filter, 10, 2 );
+		\add_filter( 'sanitize_html_class', $html_class_filter, 10, 3 );
+
+		try {
+			foreach ( $cases as $case_index => $case ) {
+				$input    = (string) $case['input'];
+				$fallback = (string) $case['fallback'];
+
+				$key        = \sanitize_key( $input );
+				$key_again  = \sanitize_key( $key );
+				$class      = \sanitize_html_class( $input );
+				$fallbacked = \sanitize_html_class( $input, $fallback );
+				$slug       = \sanitize_title_with_dashes( $input, '', 'save' );
+				$slug_again = \sanitize_title_with_dashes( $slug, '', 'save' );
+				$title      = \sanitize_title( $input, $fallback, 'save' );
+
+				$violations = array();
+				if ( ! is_string( $key ) || ! preg_match( '/^[a-z0-9_-]*$/', $key ) ) {
+					$violations[] = 'sanitize-key-shape';
+				}
+				if ( $key_again !== $key ) {
+					$violations[] = 'sanitize-key-not-idempotent';
+				}
+				if ( ! is_string( $class ) || ! preg_match( '/^[A-Za-z0-9_-]*$/', $class ) ) {
+					$violations[] = 'sanitize-html-class-shape';
+				}
+				if ( str_contains( $class, '%' ) || $class !== \sanitize_html_class( $class ) ) {
+					$violations[] = 'sanitize-html-class-not-canonical';
+				}
+				if ( '' === $class && \sanitize_html_class( $fallback ) !== $fallbacked ) {
+					$violations[] = 'sanitize-html-class-fallback-mismatch';
+				}
+				if ( ! is_string( $slug ) || ! preg_match( '/^(?:[a-z0-9_-]|%[a-f0-9]{2})*$/', $slug ) ) {
+					$violations[] = 'sanitize-title-dashes-shape';
+				}
+				if ( '' !== $slug && ( trim( $slug, '-' ) !== $slug || str_contains( $slug, '--' ) ) ) {
+					$violations[] = 'sanitize-title-dashes-not-trimmed';
+				}
+				if ( $slug_again !== $slug ) {
+					$violations[] = 'sanitize-title-dashes-not-idempotent';
+				}
+				if ( ! is_string( $title ) || '' === $title ) {
+					$violations[] = 'sanitize-title-empty-with-fallback';
+				}
+
+				if ( array() !== $violations ) {
+					$failures[] = array(
+						'name'       => 'identifier-sanitizer-contract-violation',
+						'message'    => 'Identifier sanitizers returned a non-canonical shape, lost fallback behavior, or were not idempotent.',
+						'caseIndex'  => $case_index,
+						'input'      => self::describe_string( $input ),
+						'fallback'   => $fallback,
+						'key'        => self::describe_string( is_string( $key ) ? $key : '' ),
+						'class'      => self::describe_string( is_string( $class ) ? $class : '' ),
+						'fallbacked' => self::describe_string( is_string( $fallbacked ) ? $fallbacked : '' ),
+						'slug'       => self::describe_string( is_string( $slug ) ? $slug : '' ),
+						'title'      => self::describe_string( is_string( $title ) ? $title : '' ),
+						'violations' => $violations,
+					);
+				}
+			}
+		} finally {
+			\remove_filter( 'sanitize_title', $title_filter, 99 );
+			\remove_filter( 'sanitize_key', $key_filter, 10 );
+			\remove_filter( 'sanitize_html_class', $html_class_filter, 10 );
+		}
+
+		$title_by_raw = array();
+		foreach ( $title_calls as $call ) {
+			$title_by_raw[ $call['raw'] . "\0" . $call['context'] ] = true;
+		}
+
+		foreach ( $cases as $case_index => $case ) {
+			$key = (string) $case['input'] . "\0save";
+			if ( empty( $title_by_raw[ $key ] ) ) {
+				$failures[] = array(
+					'name'      => 'sanitize-title-filter-missing',
+					'message'   => 'sanitize_title filter did not observe the generated raw title/context pair.',
+					'caseIndex' => $case_index,
+					'input'     => self::describe_string( (string) $case['input'] ),
+				);
+			}
+		}
+
+		if (
+			count( $key_calls ) < count( $cases ) * 2
+			|| count( $html_class_calls ) < count( $cases ) * 2
+			|| false !== \has_filter( 'sanitize_title', $title_filter, 99 )
+			|| false !== \has_filter( 'sanitize_key', $key_filter, 10 )
+			|| false !== \has_filter( 'sanitize_html_class', $html_class_filter, 10 )
+		) {
+			$failures[] = array(
+				'name'    => 'identifier-sanitizer-filter-contract',
+				'message' => 'Identifier sanitizer filters did not receive expected calls or were not removed.',
+				'counts'  => array(
+					'title'     => count( $title_calls ),
+					'key'       => count( $key_calls ),
+					'htmlClass' => count( $html_class_calls ),
+				),
+				'active'  => array(
+					'title'     => \has_filter( 'sanitize_title', $title_filter, 99 ),
+					'key'       => \has_filter( 'sanitize_key', $key_filter, 10 ),
+					'htmlClass' => \has_filter( 'sanitize_html_class', $html_class_filter, 10 ),
+				),
+			);
+		}
+
+		return self::check_row(
+			$ctx,
+			'identifier_sanitizers.shape_filter_contracts',
+			$failures,
+			array(
+				'cases'       => count( $cases ),
+				'filterCalls' => array(
+					'title'     => count( $title_calls ),
+					'key'       => count( $key_calls ),
+					'htmlClass' => count( $html_class_calls ),
+				),
+			)
 		);
 	}
 
@@ -1343,6 +1507,28 @@ final class FormattingSurface {
 			$cases[] = array(
 				'input'              => $input,
 				'disallowedProtocol' => $is_disallowed,
+			);
+		}
+
+		return $cases;
+	}
+
+	private static function generate_identifier_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$cases = array(
+			array( 'input' => 'Post Title With Spaces', 'fallback' => 'fallback-title' ),
+			array( 'input' => 'Résumé déjà vu & more', 'fallback' => 'resume-fallback' ),
+			array( 'input' => '<script>alert(1)</script> %e2%80%8b zero', 'fallback' => 'script-fallback' ),
+			array( 'input' => '../../Path\\Traversal/Name.php', 'fallback' => 'path-fallback' ),
+			array( 'input' => '%20%ZZ only invalid !!!', 'fallback' => 'percent-fallback' ),
+			array( 'input' => "Tabs\tNewlines\nEmoji \u{1F642}", 'fallback' => 'emoji-fallback' ),
+			array( 'input' => '---Already--Slug---', 'fallback' => 'slug-fallback' ),
+			array( 'input' => '!!!', 'fallback' => 'only-fallback' ),
+		);
+
+		for ( $i = 0; $i < 12; ++$i ) {
+			$cases[] = array(
+				'input'    => self::generate_text( $ctx->fork( 'identifier-input-' . $i ), 256 ),
+				'fallback' => 'fallback-' . strtolower( $ctx->identifier( 3, 12 ) ),
 			);
 		}
 

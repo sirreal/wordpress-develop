@@ -207,7 +207,8 @@ database, network requests, or a configured site.
   trips, and missing-file failure values.
 - `formatting`: escaping helpers, text sanitizers, whitespace normalization,
   autop/shortcode cleanup, clickable text, URL sanitization, entity
-  normalization, colors, sizes, time strings, UTF-8 helpers, and accent removal.
+  normalization, title/key/class identifier sanitizers, colors, sizes, time
+  strings, UTF-8 helpers, and accent removal.
 - `feed-parsers`: local RSS/Atom parser and legacy feed utility API coverage,
   including bounded malformed fixtures, Magpie item/channel normalization,
   AtomParser local-file behavior, SimplePie raw-data parsing and KSES
