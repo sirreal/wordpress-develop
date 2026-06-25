@@ -491,9 +491,9 @@ database, network requests, or a configured site.
   serialization, JSON, and value helpers.
 - `style`: style engine serialization, preset/classname and CSS variable
   boundaries, CSS declaration filtering, theme.json schema/data merging and
-  variable resolution, block style variation declarations, selector/path
-  helpers, scoped editor style helpers, custom properties, and no-DB global
-  style guards.
+  variable resolution, block style variation declarations, registered block
+  style `style_data` source-order injection, selector/path helpers, scoped
+  editor style helpers, custom properties, and no-DB global style guards.
 - `syndication`: oEmbed provider registration, embed handler lifecycle, oEmbed
   wildcard/regex matching, cache-key lookup, no-network fetch short-circuits,
   HTML/XML filtering, feed metadata escaping, default feed normalization,
