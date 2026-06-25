@@ -33,8 +33,10 @@ final class RequestLifecycleSurface {
 			$rows[] = self::check_parse_request_rewrite_and_precedence( $ctx->fork( 'parse' ), $case );
 			$rows[] = self::check_parse_request_pathinfo_and_index( $ctx->fork( 'pathinfo-index' ), $case );
 			$rows[] = self::check_parse_request_public_private_gates( $ctx->fork( 'public-private-gates' ), $case );
+			$rows[] = self::check_parse_request_get_post_mismatch_guard( $ctx->fork( 'get-post-guard' ), $case );
 			$rows[] = self::check_parse_request_short_circuit( $ctx->fork( 'short-circuit' ) );
 			$rows[] = self::check_register_globals( $ctx->fork( 'globals' ), $case );
+			$rows[] = self::check_main_sequence_with_query_short_circuit( $ctx->fork( 'main-sequence' ), $case );
 			$rows[] = self::check_handle_404_transitions( $ctx->fork( '404' ) );
 			$rows[] = self::check_send_headers_filters_and_actions( $ctx->fork( 'headers' ) );
 		} catch ( \Throwable $e ) {
@@ -115,6 +117,7 @@ final class RequestLifecycleSurface {
 				'status_header',
 				'unregister_taxonomy',
 				'wp_get_nocache_headers',
+				'wp_die',
 			) as $function
 		) {
 			if ( ! function_exists( $function ) ) {
@@ -459,6 +462,186 @@ final class RequestLifecycleSurface {
 		);
 	}
 
+	private static function check_parse_request_get_post_mismatch_guard(
+		\ComponentFuzz\FuzzContext $ctx,
+		array $case
+	): array {
+		$failures  = array();
+		$guard_var = self::query_var_name( 'cfuzz_guard_', $ctx->identifier( 4, 10 ) );
+		$cases     = array(
+			'scalarMismatch' => array(
+				'public'        => true,
+				'get'           => 'get-' . $ctx->int( 10, 99 ),
+				'post'          => 'post-' . $ctx->int( 10, 99 ),
+				'extra'         => null,
+				'expectDie'     => true,
+				'expectedValue' => null,
+			),
+			'arrayMismatch'  => array(
+				'public'        => true,
+				'get'           => array( 'alpha' => 'same', 'beta' => 'get-' . $ctx->int( 10, 99 ) ),
+				'post'          => array( 'alpha' => 'same', 'beta' => 'post-' . $ctx->int( 10, 99 ) ),
+				'extra'         => null,
+				'expectDie'     => true,
+				'expectedValue' => null,
+			),
+			'scalarEqual'    => array(
+				'public'        => true,
+				'get'           => 'same-' . $ctx->int( 10, 99 ),
+				'post'          => 'same-' . $ctx->int( 10, 99 ),
+				'extra'         => null,
+				'expectDie'     => false,
+				'expectedValue' => null,
+			),
+			'arrayEqual'     => array(
+				'public'        => true,
+				'get'           => array( 'alpha' => 'same', 'count' => $ctx->int( 1, 9 ) ),
+				'post'          => null,
+				'extra'         => null,
+				'expectDie'     => false,
+				'expectedValue' => null,
+			),
+			'extraWins'      => array(
+				'public'        => true,
+				'get'           => 'get-' . $ctx->int( 100, 199 ),
+				'post'          => 'post-' . $ctx->int( 200, 299 ),
+				'extra'         => 'extra-' . $ctx->int( 300, 399 ),
+				'expectDie'     => false,
+				'expectedValue' => null,
+			),
+			'privateIgnored' => array(
+				'public'        => false,
+				'get'           => 'get-private-' . $ctx->int( 10, 99 ),
+				'post'          => 'post-private-' . $ctx->int( 10, 99 ),
+				'extra'         => null,
+				'expectDie'     => false,
+				'expectedValue' => null,
+			),
+		);
+
+		$cases['scalarEqual']['post']          = $cases['scalarEqual']['get'];
+		$cases['scalarEqual']['expectedValue'] = $cases['scalarEqual']['get'];
+		$cases['arrayEqual']['post']           = $cases['arrayEqual']['get'];
+		$cases['arrayEqual']['expectedValue']  = array_map( 'strval', $cases['arrayEqual']['get'] );
+		$cases['extraWins']['expectedValue']   = $cases['extraWins']['extra'];
+
+		foreach ( $cases as $label => $guard_case ) {
+			$wp = self::new_wp();
+			if ( $guard_case['public'] ) {
+				$wp->add_query_var( $guard_var );
+			}
+
+			self::set_rewrite_rules( array() );
+			self::prepare_rewrite_globals();
+			self::prepare_request_server( '/site-base/query-guard-' . rawurlencode( $label ) . '/', '' );
+			self::set_request_superglobals(
+				array( $guard_var => $guard_case['get'] ),
+				array( $guard_var => $guard_case['post'] )
+			);
+
+			$request_count = 0;
+			$parse_count   = 0;
+			$request_filter = static function ( array $query_vars ) use ( &$request_count ): array {
+				++$request_count;
+				return $query_vars;
+			};
+			$parse_action = static function () use ( &$parse_count ): void {
+				++$parse_count;
+			};
+
+			add_filter( 'request', $request_filter );
+			add_action( 'parse_request', $parse_action );
+			try {
+				$capture = self::capture_wp_die(
+					static function () use ( $wp, $guard_case ) {
+						$extra = array();
+						if ( null !== $guard_case['extra'] ) {
+							$extra = array( $GLOBALS['component_fuzz_request_guard_var'] => $guard_case['extra'] );
+						}
+
+						return $wp->parse_request( $extra );
+					},
+					$guard_var
+				);
+			} finally {
+				remove_filter( 'request', $request_filter );
+				remove_action( 'parse_request', $parse_action );
+				unset( $GLOBALS['component_fuzz_request_guard_var'] );
+			}
+
+			$expected_message = __( 'A variable mismatch has been detected.' );
+			$expected_title   = __( 'Sorry, you are not allowed to view this item.' );
+			if ( $guard_case['expectDie'] ) {
+				self::collect_failure(
+					$failures,
+					true === $capture['captured']
+						&& false === $capture['returned']
+						&& 400 === ( $capture['die']['args']['response'] ?? null )
+						&& $expected_message === ( $capture['die']['message'] ?? null )
+						&& $expected_title === ( $capture['die']['title'] ?? null )
+						&& 0 === $request_count
+						&& 0 === $parse_count
+						&& ! isset( $wp->query_vars[ $guard_var ] ),
+					"GET/POST mismatch terminates before request hooks for {$label}",
+					array(
+						'case'         => $guard_case,
+						'capture'      => $capture,
+						'requestCount' => $request_count,
+						'parseCount'   => $parse_count,
+						'queryVars'    => $wp->query_vars,
+					)
+				);
+			} else {
+				$expected_query_value = $guard_case['public'] ? $guard_case['expectedValue'] : null;
+				self::collect_failure(
+					$failures,
+					false === $capture['captured']
+						&& true === $capture['returned']
+						&& true === $capture['return']
+						&& 1 === $request_count
+						&& 1 === $parse_count
+						&& (
+							$guard_case['public']
+								? $expected_query_value === ( $wp->query_vars[ $guard_var ] ?? null )
+								: ! isset( $wp->query_vars[ $guard_var ] )
+						),
+					"GET/POST non-conflict parses with expected query var behavior for {$label}",
+					array(
+						'case'          => $guard_case,
+						'capture'       => $capture,
+						'requestCount'  => $request_count,
+						'parseCount'    => $parse_count,
+						'queryVars'     => $wp->query_vars,
+						'expectedValue' => $expected_query_value,
+					)
+				);
+			}
+
+			self::collect_failure(
+				$failures,
+				$capture['bufferBalanced']
+					&& false === has_filter( 'request', $request_filter )
+					&& false === has_filter( 'parse_request', $parse_action ),
+				"GET/POST mismatch guard cleanup restored hooks and output buffers for {$label}",
+				array(
+					'capture'          => $capture,
+					'hasRequestFilter' => has_filter( 'request', $request_filter ),
+					'hasParseAction'   => has_filter( 'parse_request', $parse_action ),
+				)
+			);
+		}
+
+		return $ctx->result(
+			'request-lifecycle.parse-request.get-post-mismatch-guard',
+			array() === $failures,
+			array(
+				'guardVar' => $guard_var,
+				'cases'    => array_keys( $cases ),
+				'failures' => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
 	private static function check_parse_request_short_circuit( \ComponentFuzz\FuzzContext $ctx ): array {
 		$wp = self::new_wp();
 		self::set_rewrite_rules(
@@ -578,6 +761,198 @@ final class RequestLifecycleSurface {
 				'globalPost'          => is_object( $GLOBALS['post'] ?? null ) ? get_object_vars( $GLOBALS['post'] ) : null,
 				'postsAreReferenced'  => $posts_are_referenced,
 				'exportedQueryVarKeys' => array_keys( $GLOBALS['wp_query']->query_vars ),
+			)
+		);
+	}
+
+	private static function check_main_sequence_with_query_short_circuit(
+		\ComponentFuzz\FuzzContext $ctx,
+		array $case
+	): array {
+		$wp          = self::new_wp();
+		$post_id     = $ctx->int( 2000, 9000 );
+		$post        = self::make_post(
+			$post_id,
+			array(
+				'post_name'    => $case['slug'],
+				'post_title'   => 'Main Sequence ' . $case['slug'],
+				'post_content' => 'main sequence body',
+			)
+		);
+		$events      = array();
+		$status_log  = array();
+		$header_log  = array();
+		$wp_actions  = array();
+		$extra_value = 'main-extra-' . $ctx->int( 10, 99 );
+		$offset      = $ctx->int( 1, 9 );
+
+		$wp->add_query_var( $case['rewriteVar'] );
+		$wp->add_query_var( $case['extraVar'] );
+		$wp->add_query_var( $case['tagVar'] );
+		$wp->add_query_var( $case['taxonomyVar'] );
+
+		self::set_rewrite_rules( $case['rules'] );
+		self::prepare_rewrite_globals();
+		self::prepare_request_server( '/site-base/library/' . rawurlencode( $case['slug'] ) . '/term-main/', '' );
+		self::set_request_superglobals( array( 'error' => '404' ), array() );
+
+		$GLOBALS['wp']           = $wp;
+		$GLOBALS['wp_the_query'] = new \WP_Query();
+		$GLOBALS['wp_query']     = $GLOBALS['wp_the_query'];
+		register_taxonomy(
+			$case['publicTaxonomy'],
+			'post',
+			array(
+				'public'             => true,
+				'publicly_queryable' => true,
+				'query_var'          => $case['taxonomyVar'],
+				'rewrite'            => false,
+			)
+		);
+
+		$parse_action = static function ( \WP $seen_wp ) use ( &$events, $wp ): void {
+			$events[] = array(
+				'name'  => 'parse_request',
+				'same'  => $seen_wp === $wp,
+				'vars'  => $seen_wp->query_vars,
+				'rule'  => $seen_wp->matched_rule,
+			);
+		};
+		$pre_get_posts = static function ( \WP_Query $query ) use ( &$events ): void {
+			$events[] = array(
+				'name' => 'pre_get_posts',
+				'vars' => $query->query_vars,
+			);
+
+			$query->set( 'no_found_rows', true );
+			$query->set( 'cache_results', false );
+			$query->set( 'update_post_meta_cache', false );
+			$query->set( 'update_post_term_cache', false );
+			$query->set( 'lazy_load_term_meta', false );
+		};
+		$posts_pre_query = static function ( $posts, \WP_Query $query ) use ( &$events, $post ) {
+			$events[] = array(
+				'name'    => 'posts_pre_query',
+				'request' => $query->request,
+				'vars'    => $query->query_vars,
+			);
+
+			$query->found_posts   = 1;
+			$query->max_num_pages = 1;
+
+			return array( $post );
+		};
+		$status_filter = static function (
+			string $status_header,
+			int $code,
+			string $description,
+			string $protocol
+		) use ( &$status_log ): string {
+			$status_log[] = array(
+				'code'        => $code,
+				'description' => $description,
+				'protocol'    => $protocol,
+			);
+
+			return $status_header;
+		};
+		$headers_filter = static function ( array $headers, \WP $seen_wp ) use ( &$events, &$header_log, $wp ): array {
+			$events[] = array(
+				'name'         => 'wp_headers',
+				'same'         => $seen_wp === $wp,
+				'globalPostId' => isset( $GLOBALS['post']->ID ) ? (int) $GLOBALS['post']->ID : null,
+				'queryString'  => $GLOBALS['query_string'] ?? null,
+			);
+			$header_log[] = $headers;
+			$headers['X-Component-Fuzz-Main'] = 'sequenced';
+
+			return $headers;
+		};
+		$send_action = static function ( \WP $seen_wp ) use ( &$events, $wp ): void {
+			$events[] = array(
+				'name'         => 'send_headers',
+				'same'         => $seen_wp === $wp,
+				'globalPostId' => isset( $GLOBALS['post']->ID ) ? (int) $GLOBALS['post']->ID : null,
+			);
+		};
+		$wp_action = static function ( \WP $seen_wp ) use ( &$events, &$wp_actions, $wp ): void {
+			$wp_actions[] = $seen_wp;
+			$events[]     = array(
+				'name'         => 'wp',
+				'same'         => $seen_wp === $wp,
+				'globalPostId' => isset( $GLOBALS['post']->ID ) ? (int) $GLOBALS['post']->ID : null,
+			);
+		};
+
+		add_action( 'parse_request', $parse_action );
+		add_action( 'pre_get_posts', $pre_get_posts );
+		add_filter( 'posts_pre_query', $posts_pre_query, 10, 2 );
+		add_filter( 'status_header', $status_filter, 10, 4 );
+		add_filter( 'wp_headers', $headers_filter, 10, 2 );
+		add_action( 'send_headers', $send_action, 10, 1 );
+		add_action( 'wp', $wp_action, 10, 1 );
+
+		try {
+			$wp->main(
+				array(
+					$case['extraVar'] => $extra_value,
+					'offset'          => $offset,
+				)
+			);
+		} finally {
+			remove_action( 'parse_request', $parse_action );
+			remove_action( 'pre_get_posts', $pre_get_posts );
+			remove_filter( 'posts_pre_query', $posts_pre_query, 10 );
+			remove_filter( 'status_header', $status_filter, 10 );
+			remove_filter( 'wp_headers', $headers_filter, 10 );
+			remove_action( 'send_headers', $send_action, 10 );
+			remove_action( 'wp', $wp_action, 10 );
+			unregister_taxonomy( $case['publicTaxonomy'] );
+		}
+
+		$event_names = array_column( $events, 'name' );
+		$parse_event = $events[ array_search( 'parse_request', $event_names, true ) ] ?? array();
+		$query_event = $events[ array_search( 'posts_pre_query', $event_names, true ) ] ?? array();
+		$header_event = $events[ array_search( 'wp_headers', $event_names, true ) ] ?? array();
+
+		$ok = array( 'parse_request', 'pre_get_posts', 'posts_pre_query', 'wp_headers', 'send_headers', 'wp' ) === $event_names
+			&& 1 === count( $wp_actions )
+			&& true === ( $parse_event['same'] ?? null )
+			&& $case['libraryRule'] === ( $parse_event['rule'] ?? null )
+			&& $case['slug'] === ( $wp->query_vars[ $case['rewriteVar'] ] ?? null )
+			&& $extra_value === ( $wp->query_vars[ $case['extraVar'] ] ?? null )
+			&& $offset === ( $wp->query_vars['offset'] ?? null )
+			&& 'permalink value' === ( $wp->query_vars[ $case['tagVar'] ] ?? null )
+			&& 'taxonomy+value' === ( $wp->query_vars[ $case['taxonomyVar'] ] ?? null )
+			&& $wp->query_string === ( $GLOBALS['query_string'] ?? null )
+			&& $post === ( $GLOBALS['post'] ?? null )
+			&& array( $post ) === ( $GLOBALS['posts'] ?? null )
+			&& $post === ( $GLOBALS['wp_query']->post ?? null )
+			&& array( $post ) === ( $GLOBALS['wp_query']->posts ?? null )
+			&& 1 === ( $GLOBALS['wp_query']->post_count ?? null )
+			&& 1 === ( $GLOBALS['wp_query']->found_posts ?? null )
+			&& 1 === ( $GLOBALS['wp_query']->max_num_pages ?? null )
+			&& 'SELECT component_fuzz' !== ( $GLOBALS['request'] ?? null )
+			&& is_string( $query_event['request'] ?? null )
+			&& str_contains( $query_event['request'], 'SELECT' )
+			&& array( 200 ) === array_column( $status_log, 'code' )
+			&& true === ( $header_event['same'] ?? null )
+			&& $post_id === ( $header_event['globalPostId'] ?? null )
+			&& 'text/html; charset=UTF-8' === ( $header_log[0]['Content-Type'] ?? null )
+			&& false === has_filter( 'posts_pre_query', $posts_pre_query )
+			&& false === has_filter( 'wp_headers', $headers_filter )
+			&& false === has_filter( 'wp', $wp_action );
+
+		return $ctx->result(
+			'request-lifecycle.main.sequence-query-short-circuit',
+			$ok,
+			array(
+				'events'       => $events,
+				'queryVars'    => $wp->query_vars,
+				'queryString'  => $wp->query_string,
+				'statusLog'    => $status_log,
+				'headerLog'    => $header_log,
+				'globalPostId' => isset( $GLOBALS['post']->ID ) ? (int) $GLOBALS['post']->ID : null,
 			)
 		);
 	}
@@ -858,6 +1233,68 @@ final class RequestLifecycleSurface {
 		return $wp;
 	}
 
+	private static function capture_wp_die( callable $callback, string $guard_var ): array {
+		$start_level = ob_get_level();
+		$die_call    = null;
+		$captured    = false;
+		$returned    = false;
+		$return      = null;
+		$throwable   = null;
+		$output      = '';
+		$filter      = static function ( $handler ) use ( &$die_call ) {
+			unset( $handler );
+			return static function ( $message = '', string $title = '', $args = array() ) use ( &$die_call ): void {
+				$die_call = array(
+					'message' => $message,
+					'title'   => $title,
+					'args'    => $args,
+				);
+				throw new RequestLifecycleSurface_DieCaptured( 'Captured request lifecycle wp_die.' );
+			};
+		};
+
+		$GLOBALS['component_fuzz_request_guard_var'] = $guard_var;
+		add_filter( 'wp_die_handler', $filter, 1 );
+
+		ob_start();
+		try {
+			$return   = $callback();
+			$returned = true;
+		} catch ( RequestLifecycleSurface_DieCaptured $e ) {
+			$captured = true;
+			$returned = false;
+		} catch ( \Throwable $e ) {
+			$throwable = self::describe_throwable( $e );
+		} finally {
+			while ( ob_get_level() > $start_level ) {
+				$chunk  = ob_get_clean();
+				$output = ( false === $chunk ? '' : $chunk ) . $output;
+			}
+			remove_filter( 'wp_die_handler', $filter, 1 );
+		}
+
+		return array(
+			'bufferBalanced' => $start_level === ob_get_level(),
+			'captured'       => $captured,
+			'returned'       => $returned,
+			'return'         => $return,
+			'die'            => $die_call,
+			'output'         => $output,
+			'throwable'      => $throwable,
+		);
+	}
+
+	private static function collect_failure( array &$failures, bool $condition, string $label, array $details ): void {
+		if ( $condition ) {
+			return;
+		}
+
+		$failures[] = array(
+			'label'   => $label,
+			'details' => $details,
+		);
+	}
+
 	private static function prepare_rewrite_globals(): void {
 		$GLOBALS['wp_rewrite'] = new \WP_Rewrite();
 		$GLOBALS['wp_rewrite']->permalink_structure = '/%postname%/';
@@ -948,6 +1385,7 @@ final class RequestLifecycleSurface {
 				'more',
 				'single',
 				'authordata',
+				'current_user',
 			) as $name
 		) {
 			$globals[ $name ] = array(
@@ -1040,3 +1478,5 @@ final class RequestLifecycleSurface {
 		);
 	}
 }
+
+final class RequestLifecycleSurface_DieCaptured extends \RuntimeException {}

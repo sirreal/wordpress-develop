@@ -379,9 +379,10 @@ database, network requests, or a configured site.
   CURIE compaction, embedding, envelopes, headers, and response conversion.
 - `request-lifecycle`: no-DB front-controller lifecycle coverage for
   `WP::parse_request()`, rewrite/pathinfo/index matching, public/private
-  query-var gates, query-var precedence, `register_globals()`, `handle_404()`
-  status transitions, and `send_headers()` filters/actions with deterministic
-  global restoration.
+  query-var gates, query-var precedence and GET/POST mismatch termination,
+  `WP::main()` sequencing with query short-circuits, `register_globals()`,
+  `handle_404()` status transitions, and `send_headers()` filters/actions with
+  deterministic global restoration.
 - `rest-controllers`: no-DB default REST endpoint controller coverage for
   registry-backed post types, post statuses, taxonomies, settings, block types,
   block patterns, and block pattern categories, including context/_fields
