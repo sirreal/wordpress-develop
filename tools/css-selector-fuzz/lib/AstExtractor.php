@@ -54,7 +54,7 @@ class AstExtractor {
 			if ( ! in_array( $pair[1], array( ' ', '>' ), true ) ) {
 				throw new \UnexpectedValueException( 'Context selector uses unsupported combinator: ' . var_export( $pair[1], true ) );
 			}
-			$context[] = array( $pair[0]->type, $pair[1] );
+			$context[] = self::from_type_selector_context_pair( $pair[0], $pair[1] );
 		}
 
 		return array(
@@ -79,10 +79,49 @@ class AstExtractor {
 			throw new \UnexpectedValueException( 'Compound selector has neither type nor subclass selectors.' );
 		}
 
-		return array(
+		$out = array(
 			'type' => null === $selector->type_selector ? null : $selector->type_selector->type,
 			'subs' => $subs,
 		);
+		if ( null !== $selector->type_selector ) {
+			self::add_type_selector_metadata( $out, $selector->type_selector );
+		}
+
+		return $out;
+	}
+
+	private static function from_type_selector_context_pair( \WP_CSS_Type_Selector $selector, string $combinator ): array {
+		$pair = array( $selector->type, $combinator );
+		if ( self::should_disambiguate_asterisk_type_selector( $selector ) ) {
+			$pair[] = false;
+		}
+		return $pair;
+	}
+
+	private static function add_type_selector_metadata( array &$compound, \WP_CSS_Type_Selector $selector ): void {
+		if ( self::should_disambiguate_asterisk_type_selector( $selector ) ) {
+			$compound['typeIsUniversal'] = false;
+		}
+	}
+
+	private static function should_disambiguate_asterisk_type_selector( \WP_CSS_Type_Selector $selector ): bool {
+		$is_universal = self::type_selector_is_universal( $selector );
+		if ( $is_universal && '*' !== $selector->type ) {
+			throw new \UnexpectedValueException( 'Universal type selector has unexpected type: ' . var_export( $selector->type, true ) );
+		}
+		return '*' === $selector->type && ! $is_universal;
+	}
+
+	private static function type_selector_is_universal( \WP_CSS_Type_Selector $selector ): bool {
+		$reflection = new \ReflectionProperty( \WP_CSS_Type_Selector::class, 'is_universal' );
+		if ( PHP_VERSION_ID < 80100 ) {
+			$reflection->setAccessible( true );
+		}
+		$value = $reflection->getValue( $selector );
+		if ( ! is_bool( $value ) ) {
+			throw new \UnexpectedValueException( 'Type selector universal flag is not a boolean.' );
+		}
+		return $value;
 	}
 
 	private static function from_subclass( $sub ): array {

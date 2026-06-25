@@ -100,13 +100,17 @@ class SelectorGenerator {
 			$out = '';
 			foreach ( array_reverse( $complex['context'] ) as $pair ) {
 				list( $type, $combinator ) = $pair;
-				$out                      .= '*' === $type ? '*' : self::canonical_ident( $type );
+				$out                      .= self::type_is_universal( $type, self::context_type_is_universal( $pair ) )
+					? '*'
+					: self::canonical_ident( $type );
 				$out                      .= '>' === $combinator ? ' > ' : ' ';
 			}
 
 			$compound = $complex['self'];
 			if ( null !== $compound['type'] ) {
-				$out .= '*' === $compound['type'] ? '*' : self::canonical_ident( $compound['type'] );
+				$out .= self::type_is_universal( $compound['type'], self::compound_type_is_universal( $compound ) )
+					? '*'
+					: self::canonical_ident( $compound['type'] );
 			}
 			foreach ( (array) $compound['subs'] as $sub ) {
 				switch ( $sub['kind'] ) {
@@ -312,8 +316,8 @@ class SelectorGenerator {
 	 * parsed WP_CSS_* objects):
 	 *
 	 *   list:     array of complex
-	 *   complex:  array( 'context' => array( array( type, combinator ) ... right-to-left ), 'self' => compound )
-	 *   compound: array( 'type' => string|null, 'subs' => array|null )
+	 *   complex:  array( 'context' => array( array( type, combinator[, is_universal] ) ... right-to-left ), 'self' => compound )
+	 *   compound: array( 'type' => string|null, 'subs' => array|null, 'typeIsUniversal' => bool optional )
 	 *   sub:      array( 'kind' => 'class'|'id', 'name' => string )
 	 *           | array( 'kind' => 'attr', 'name' => string, 'matcher' => string|null,
 	 *                    'value' => string|null, 'modifier' => string|null )
@@ -1138,7 +1142,7 @@ class SelectorGenerator {
 		$fid      = $element['fid'];
 
 		$flips = array( 'wrong-class', 'wrong-attr' );
-		if ( null !== $compound['type'] && '*' !== $compound['type'] ) {
+		if ( null !== $compound['type'] && ! self::type_is_universal( $compound['type'], self::compound_type_is_universal( $compound ) ) ) {
 			$flips[] = 'wrong-type';
 		}
 		foreach ( $complex['context'] as $pair ) {
@@ -1156,6 +1160,7 @@ class SelectorGenerator {
 					$other = $this->prng->choice( DocumentGenerator::SAFE_TAGS );
 				} while ( $other === $tag );
 				$complex['self']['type'] = $this->prng->chance( 25 ) ? $this->random_case( $other ) : $other;
+				unset( $complex['self']['typeIsUniversal'] );
 				return array( array( $complex ), null, $fid );
 
 			case 'wrong-attr':
@@ -1227,7 +1232,9 @@ class SelectorGenerator {
 		$reversed = array_reverse( $complex['context'] );
 		foreach ( $reversed as $pair ) {
 			list( $type, $combinator ) = $pair;
-			$rendered_type = '*' === $type ? '*' : $this->render_ident( $type );
+			$rendered_type = self::type_is_universal( $type, self::context_type_is_universal( $pair ) )
+				? '*'
+				: $this->render_ident( $type );
 			$out          .= $rendered_type;
 			if ( '>' === $combinator ) {
 				$before = $this->maybe_ws( 50 );
@@ -1247,7 +1254,9 @@ class SelectorGenerator {
 	private function render_compound( array $compound ): string {
 		$out = '';
 		if ( null !== $compound['type'] ) {
-			$out .= '*' === $compound['type'] ? '*' : $this->render_ident( $compound['type'] );
+			$out .= self::type_is_universal( $compound['type'], self::compound_type_is_universal( $compound ) )
+				? '*'
+				: $this->render_ident( $compound['type'] );
 		}
 		foreach ( (array) $compound['subs'] as $sub ) {
 			switch ( $sub['kind'] ) {
@@ -1263,6 +1272,18 @@ class SelectorGenerator {
 			}
 		}
 		return $out;
+	}
+
+	private static function context_type_is_universal( array $pair ): ?bool {
+		return array_key_exists( 2, $pair ) ? (bool) $pair[2] : null;
+	}
+
+	private static function compound_type_is_universal( array $compound ): ?bool {
+		return array_key_exists( 'typeIsUniversal', $compound ) ? (bool) $compound['typeIsUniversal'] : null;
+	}
+
+	private static function type_is_universal( string $type, ?bool $explicit ): bool {
+		return null === $explicit ? '*' === $type : $explicit;
 	}
 
 	private function render_attr_selector( array $sub ): string {

@@ -168,11 +168,13 @@ class ReferenceMatcher {
 			return false;
 		}
 
-		list( $type, $combinator ) = $context[0];
-		$rest                      = array_slice( $context, 1 );
+		$pair         = $context[0];
+		list( $type, $combinator ) = $pair;
+		$is_universal = array_key_exists( 2, $pair ) ? (bool) $pair[2] : null;
+		$rest         = array_slice( $context, 1 );
 
 		if ( '>' === $combinator ) {
-			return self::type_matches( $type, $ancestor_tags[0] )
+			return self::type_matches( $type, $ancestor_tags[0], $is_universal )
 				&& self::explore_context( $rest, array_slice( $ancestor_tags, 1 ) );
 		}
 
@@ -180,7 +182,7 @@ class ReferenceMatcher {
 		$count = count( $ancestor_tags );
 		for ( $i = 0; $i < $count; $i++ ) {
 			if (
-				self::type_matches( $type, $ancestor_tags[ $i ] ) &&
+				self::type_matches( $type, $ancestor_tags[ $i ], $is_universal ) &&
 				self::explore_context( $rest, array_slice( $ancestor_tags, $i + 1 ) )
 			) {
 				return true;
@@ -190,7 +192,8 @@ class ReferenceMatcher {
 	}
 
 	public static function compound_matches( array $compound, array $row, bool $quirks, bool $html_attr_ci = true ): bool {
-		if ( null !== $compound['type'] && ! self::type_matches( $compound['type'], $row['tag'] ) ) {
+		$is_universal = array_key_exists( 'typeIsUniversal', $compound ) ? (bool) $compound['typeIsUniversal'] : null;
+		if ( null !== $compound['type'] && ! self::type_matches( $compound['type'], $row['tag'], $is_universal ) ) {
 			return false;
 		}
 		foreach ( (array) $compound['subs'] as $sub ) {
@@ -201,8 +204,11 @@ class ReferenceMatcher {
 		return true;
 	}
 
-	private static function type_matches( string $type, string $tag ): bool {
-		return '*' === $type || ascii_strtolower( $type ) === ascii_strtolower( $tag );
+	private static function type_matches( string $type, string $tag, ?bool $is_universal = null ): bool {
+		if ( null === $is_universal ) {
+			$is_universal = '*' === $type;
+		}
+		return $is_universal || ascii_strtolower( $type ) === ascii_strtolower( $tag );
 	}
 
 	private static function sub_matches( array $sub, array $row, bool $quirks, bool $html_attr_ci ): bool {

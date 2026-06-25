@@ -436,13 +436,7 @@ check( array() === select_fids( $known_html, 'section > em' ), 'Known: section >
 check( array( 'e4' ) === select_fids( $known_html, '[data-v|="hello"]' ), 'Known: [data-v|=hello].' );
 check( array( 'e7' ) === select_fids( $known_html, '[lang^="en"]' ), 'Known: [lang^=en].' );
 
-// --- Class-value decode boundary (ReferenceMatcher vs WP class_list) --------
-// WP's class_list() folds NUL -> U+FFFD and treats FF as a separator; the
-// reference matcher reimplements tokenization independently. Pin both engines
-// against each other on these boundary inputs; randomized generator sampling
-// above verifies that the same NUL boundary is present in the hot path. Each
-// case also checks the reference matcher agrees with select() over a
-// TreeCapture of the same markup.
+// --- Known-answer matcher helpers ------------------------------------------
 
 function ref_fids( string $html, string $selector ): array {
 	$capture = \CssSelectorFuzz\TreeCapture::capture( $html );
@@ -453,6 +447,83 @@ function ref_fids( string $html, string $selector ): array {
 	$ast = \CssSelectorFuzz\AstExtractor::from_complex_list( $list );
 	return \CssSelectorFuzz\ReferenceMatcher::expected_html_matches_rows( $ast, $capture['htmlRows'], $capture['quirks'] );
 }
+
+function complex_ast( string $selector ): ?array {
+	$list = WP_CSS_Complex_Selector_List::from_selectors( $selector );
+	return null === $list ? null : \CssSelectorFuzz\AstExtractor::from_complex_list( $list );
+}
+
+// --- Escaped asterisk type selectors ---------------------------------------
+
+$literal_asterisk_ast = complex_ast( '*' );
+check( null !== $literal_asterisk_ast, 'Asterisk type distinction: literal universal parses.' );
+if ( null !== $literal_asterisk_ast ) {
+	check( '*' === $literal_asterisk_ast[0]['self']['type'], 'Asterisk type distinction: literal universal decodes to "*".' );
+	check( ! array_key_exists( 'typeIsUniversal', $literal_asterisk_ast[0]['self'] ), 'Asterisk type distinction: literal universal keeps legacy AST shape.' );
+}
+
+foreach ( array( '\\*', '\\2a', '\\2A', '\\00002A' ) as $selector ) {
+	$ast = complex_ast( $selector );
+	check( null !== $ast, "Asterisk type distinction: escaped selector parses ({$selector})." );
+	if ( null === $ast ) {
+		continue;
+	}
+	check( '*' === $ast[0]['self']['type'], "Asterisk type distinction: escaped selector decodes to type * ({$selector})." );
+	check( false === ( $ast[0]['self']['typeIsUniversal'] ?? null ), "Asterisk type distinction: escaped selector is not universal ({$selector})." );
+	check( $literal_asterisk_ast !== $ast, "Asterisk type distinction: escaped selector AST differs from literal universal ({$selector})." );
+}
+
+$escaped_asterisk_item_ast = array(
+	array(
+		'context' => array(),
+		'self'    => array(
+			'type'            => '*',
+			'subs'            => array( array( 'kind' => 'class', 'name' => 'item' ) ),
+			'typeIsUniversal' => false,
+		),
+	),
+);
+$canonical_escaped_asterisk_item = SelectorGenerator::render_canonical( $escaped_asterisk_item_ast );
+check(
+	$escaped_asterisk_item_ast === complex_ast( $canonical_escaped_asterisk_item ),
+	'Asterisk type distinction: canonical renderer escapes literal type *.'
+);
+for ( $seed = 1; $seed <= 30; $seed++ ) {
+	$rendered = SelectorGenerator::render( new Prng( (string) $seed, 'self-check-escaped-asterisk-type' ), $escaped_asterisk_item_ast );
+	check(
+		$escaped_asterisk_item_ast === complex_ast( $rendered ),
+		"AST renderer escaped type * seed {$seed}: AST round-trips for " . \CssSelectorFuzz\printable_bytes( $rendered )
+	);
+}
+
+$asterisk_html = '<!DOCTYPE html><html data-fid="a0"><head data-fid="a1"></head><body data-fid="a2">'
+	. '<div data-fid="a3" class="item"><span data-fid="a4" class="item"></span></div><p data-fid="a5"></p>'
+	. '</body></html>';
+
+foreach (
+	array(
+		'*.item'        => array( 'a3', 'a4' ),
+		'\\*.item'     => array(),
+		'\\2a.item'    => array(),
+		'\\00002A.item' => array(),
+		'* > .item'    => array( 'a3', 'a4' ),
+		'\\* > .item'  => array(),
+		'\\2a > .item' => array(),
+	) as $selector => $expected
+) {
+	$wp  = select_fids( $asterisk_html, $selector );
+	$ref = ref_fids( $asterisk_html, $selector );
+	check( $expected === $wp, "Asterisk type distinction ({$selector}): select() == expected." );
+	check( $ref === $wp, "Asterisk type distinction ({$selector}): ReferenceMatcher == select()." );
+}
+
+// --- Class-value decode boundary (ReferenceMatcher vs WP class_list) --------
+// WP's class_list() folds NUL -> U+FFFD and treats FF as a separator; the
+// reference matcher reimplements tokenization independently. Pin both engines
+// against each other on these boundary inputs; randomized generator sampling
+// above verifies that the same NUL boundary is present in the hot path. Each
+// case also checks the reference matcher agrees with select() over a
+// TreeCapture of the same markup.
 
 $nul_html = "<!DOCTYPE html><i data-fid=\"n0\" class=\"foo\x00bar\"></i><b data-fid=\"n1\" class=\"x\x00\"></b>";
 $ff_html  = "<!DOCTYPE html><i data-fid=\"f0\" class=\"alpha\x0Cbeta\"></i>";
