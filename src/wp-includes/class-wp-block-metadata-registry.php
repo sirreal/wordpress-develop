@@ -238,13 +238,13 @@ class WP_Block_Metadata_Registry {
 
 		// Check the last matched collection first, since block registration usually happens in batches per plugin or theme.
 		$path = rtrim( $file_or_folder, '/' );
-		if ( self::$last_matched_collection && self::is_in_collection( $path, self::$last_matched_collection ) ) {
+		if ( self::$last_matched_collection && self::is_same_or_child_path( $path, self::$last_matched_collection ) ) {
 			return self::$last_matched_collection;
 		}
 
 		$collection_paths = array_keys( self::$collections );
 		foreach ( $collection_paths as $collection_path ) {
-			if ( self::is_in_collection( $path, $collection_path ) ) {
+			if ( self::is_same_or_child_path( $path, $collection_path ) ) {
 				self::$last_matched_collection = $collection_path;
 				return $collection_path;
 			}
@@ -253,16 +253,16 @@ class WP_Block_Metadata_Registry {
 	}
 
 	/**
-	 * Checks whether a file or folder path belongs to a collection path.
+	 * Checks whether a path is equal to or inside another path.
 	 *
 	 * @since 7.1.0
 	 *
-	 * @param string $path            Normalized file or folder path.
-	 * @param string $collection_path Normalized collection path.
-	 * @return bool True if the path is the collection path or a child path, false otherwise.
+	 * @param string $path      Normalized path.
+	 * @param string $base_path Normalized base path.
+	 * @return bool True if the path is the base path or a child path, false otherwise.
 	 */
-	private static function is_in_collection( $path, $collection_path ) {
-		return $path === $collection_path || str_starts_with( $path, $collection_path . '/' );
+	private static function is_same_or_child_path( $path, $base_path ) {
+		return $path === $base_path || str_starts_with( $path, $base_path . '/' );
 	}
 
 	/**
@@ -330,7 +330,7 @@ class WP_Block_Metadata_Registry {
 			}
 
 			// If the path is a parent path of any of the roots, it is invalid.
-			if ( str_starts_with( $allowed_root, $path ) ) {
+			if ( self::is_same_or_child_path( $allowed_root, $path ) ) {
 				return false;
 			}
 		}

@@ -636,6 +636,7 @@ final class RegistriesSurface {
 		$collection_path = WP_PLUGIN_DIR . '/cf-' . $token . '/blocks';
 		$normalized_path = rtrim( \wp_normalize_path( $collection_path ), '/' );
 		$sibling_path    = $normalized_path . '-sibling';
+		$root_prefix_path = rtrim( \wp_normalize_path( WP_CONTENT_DIR . '/plugin' ), '/' );
 		$block_names     = array(
 			self::slug( $ctx->fork( 'alpha' ), 'alpha' ),
 			self::slug( $ctx->fork( 'beta' ), 'beta' ),
@@ -678,6 +679,8 @@ final class RegistriesSurface {
 			$missing_metadata        = \WP_Block_Metadata_Registry::get_metadata( $collection_path . '/missing-' . $token );
 			$sibling_metadata        = \WP_Block_Metadata_Registry::get_metadata( $sibling_path . '/' . $block_names[0] );
 			$sibling_has_metadata    = \WP_Block_Metadata_Registry::has_metadata( $sibling_path . '/' . $block_names[1] . '/block.json' );
+			$root_prefix_registered  = \WP_Block_Metadata_Registry::register_collection( $root_prefix_path, $manifest_path );
+			$root_prefix_metadata    = \WP_Block_Metadata_Registry::get_metadata( $root_prefix_path . '/' . $block_names[2] );
 			$last_matched            = self::get_static_property( 'WP_Block_Metadata_Registry', 'last_matched_collection' );
 
 			self::collect_failure(
@@ -690,11 +693,14 @@ final class RegistriesSurface {
 					&& null === $missing_metadata
 					&& null === $sibling_metadata
 					&& false === $sibling_has_metadata
-					&& $normalized_path === $last_matched,
-				'block metadata collection lookups normalize paths, cache metadata, and reject sibling path prefixes',
+					&& true === $root_prefix_registered
+					&& $manifest_data[ $block_names[2] ] === $root_prefix_metadata
+					&& $root_prefix_path === $last_matched,
+				'block metadata collection lookups normalize paths, cache metadata, reject sibling path prefixes, and allow root-name prefix siblings',
 				array(
 					'path'                  => $normalized_path,
 					'siblingPath'           => $sibling_path,
+					'rootPrefixPath'        => $root_prefix_path,
 					'blockNames'            => $block_names,
 					'metadataWasLazy'       => $metadata_was_lazy,
 					'expectedMetadataFiles' => $expected_metadata_files,
@@ -703,6 +709,8 @@ final class RegistriesSurface {
 					'secondMetadata'        => $second_metadata,
 					'siblingMetadata'       => $sibling_metadata,
 					'siblingHasMetadata'    => $sibling_has_metadata,
+					'rootPrefixRegistered'  => $root_prefix_registered,
+					'rootPrefixMetadata'    => $root_prefix_metadata,
 					'lastMatched'           => $last_matched,
 				)
 			);
