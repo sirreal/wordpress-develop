@@ -712,15 +712,22 @@ final class NetworkMediaSurface {
 		$explicit_post_id = $fallback_post_id + self::rng_int( $rng, 1, 100 );
 		$tab              = 'cfz-tab-' . $token;
 		$seen             = array();
+		$media_seen       = array();
 		$filter           = static function ( string $src ) use ( &$seen, $token ): string {
 			$seen[] = $src;
 			return add_query_arg( 'cfz_upload_filter', $token, $src );
 		};
+		$media_filter     = static function ( string $src ) use ( &$media_seen, $token ): string {
+			$media_seen[] = $src;
+			return add_query_arg( 'cfz_media_filter', $token, $src );
+		};
 		$had_post_id      = array_key_exists( 'post_ID', $GLOBALS );
 		$previous_post_id = $GLOBALS['post_ID'] ?? null;
 		$before_filter    = \has_filter( 'image_upload_iframe_src', $filter );
+		$before_media_filter = \has_filter( 'media_upload_iframe_src', $media_filter );
 
 		\add_filter( 'image_upload_iframe_src', $filter );
+		\add_filter( 'media_upload_iframe_src', $media_filter );
 		try {
 			$GLOBALS['post_ID'] = $fallback_post_id;
 			$image              = self::call_api(
@@ -747,6 +754,7 @@ final class NetworkMediaSurface {
 			);
 		} finally {
 			\remove_filter( 'image_upload_iframe_src', $filter );
+			\remove_filter( 'media_upload_iframe_src', $media_filter );
 			if ( $had_post_id ) {
 				$GLOBALS['post_ID'] = $previous_post_id;
 			} else {
@@ -757,6 +765,7 @@ final class NetworkMediaSurface {
 		$image_args = is_string( $image['value'] ?? null ) ? self::url_query_args( $image['value'] ) : array();
 		$media_args = is_string( $media['value'] ?? null ) ? self::url_query_args( $media['value'] ) : array();
 		$seen_args  = isset( $seen[0] ) ? self::url_query_args( $seen[0] ) : array();
+		$media_seen_args = isset( $media_seen[0] ) ? self::url_query_args( $media_seen[0] ) : array();
 
 		self::check_invariant(
 			$result,
@@ -770,6 +779,8 @@ final class NetworkMediaSurface {
 				&& $token === ( $image_args['cfz_upload_filter'] ?? null )
 				&& 1 === count( $seen )
 				&& ! isset( $seen_args['TB_iframe'] )
+				&& (string) $fallback_post_id === (string) ( $seen_args['post_id'] ?? '' )
+				&& 'image' === ( $seen_args['type'] ?? null )
 				&& $tab === ( $seen_args['tab'] ?? null ),
 			'get_upload_iframe_src:image-filter-fallback-post-and-tab-query',
 			array(
@@ -793,22 +804,33 @@ final class NetworkMediaSurface {
 				&& (string) $explicit_post_id === (string) ( $media_args['post_id'] ?? '' )
 				&& ! isset( $media_args['type'] )
 				&& ! isset( $media_args['tab'] )
-				&& '1' === (string) ( $media_args['TB_iframe'] ?? '' ),
-			'get_upload_iframe_src:media-type-omits-type-and-uses-explicit-post',
+				&& '1' === (string) ( $media_args['TB_iframe'] ?? '' )
+				&& $token === ( $media_args['cfz_media_filter'] ?? null )
+				&& 1 === count( $media_seen )
+				&& (string) $explicit_post_id === (string) ( $media_seen_args['post_id'] ?? '' )
+				&& ! isset( $media_seen_args['type'] )
+				&& ! isset( $media_seen_args['tab'] )
+				&& ! isset( $media_seen_args['TB_iframe'] ),
+			'get_upload_iframe_src:media-filter-omits-type-and-uses-explicit-post',
 			array(
 				'type'   => 'media',
 				'postId' => $explicit_post_id,
 			),
 			array(
-				'url'  => $media['value'] ?? null,
-				'args' => $media_args,
+				'url'       => $media['value'] ?? null,
+				'args'      => $media_args,
+				'seen'      => $media_seen,
+				'seenArgs'  => $media_seen_args,
+				'filterWas' => $before_media_filter,
 			)
 		);
 
 		self::check_invariant(
 			$result,
 			false === \has_filter( 'image_upload_iframe_src', $filter )
+				&& false === \has_filter( 'media_upload_iframe_src', $media_filter )
 				&& $before_filter === \has_filter( 'image_upload_iframe_src', $filter )
+				&& $before_media_filter === \has_filter( 'media_upload_iframe_src', $media_filter )
 				&& (
 					$had_post_id
 						? $GLOBALS['post_ID'] === $previous_post_id
@@ -820,6 +842,7 @@ final class NetworkMediaSurface {
 				'hadPostId' => $had_post_id,
 				'postId'    => $GLOBALS['post_ID'] ?? null,
 				'hasFilter' => \has_filter( 'image_upload_iframe_src', $filter ),
+				'hasMediaFilter' => \has_filter( 'media_upload_iframe_src', $media_filter ),
 			)
 		);
 	}
