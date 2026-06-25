@@ -34,6 +34,7 @@ final class IdentitySurface {
 			self::exercise_capability_keys( $result, $rng );
 			self::exercise_user_contact_methods( $result, $rng );
 			self::exercise_wp_user_identity_fields( $result, $rng );
+			self::exercise_user_existence_helpers( $result, $rng );
 			self::exercise_urls( $result, $rng );
 			self::exercise_avatar_helpers( $result, $rng );
 			self::exercise_text_and_comment_helpers( $result, $rng );
@@ -441,6 +442,105 @@ final class IdentitySurface {
 		self::check( $result, 'wp_user.field_filters.nicename_db_filter_is_prefix_scoped', $slug === $db_nicename && array( $row['user_nicename'] ) === $events['nicename'], $case, $slug, array( 'dbNicename' => $db_nicename, 'events' => $events['nicename'] ) );
 		self::check( $result, 'wp_user.field_filters.edit_display_name_escapes_filter_result', \esc_attr( $edit ) === $edit_name && 1 === count( $events['editName'] ) && $row['display_name'] === $events['editName'][0]['value'] && $row['ID'] === $events['editName'][0]['userId'], $case, \esc_attr( $edit ), array( 'editName' => $edit_name, 'events' => $events['editName'] ) );
 		self::check( $result, 'wp_user.field_filters.restored', $before_filters === $after_filters, array_keys( $before_filters ), $before_filters, $after_filters );
+	}
+
+	private static function exercise_user_existence_helpers( array &$result, array &$rng ): void {
+		if ( ! class_exists( 'WP_User' ) ) {
+			$result['skips'][] = 'user_existence_helpers:missing_class:WP_User';
+			return;
+		}
+
+		if ( ! self::have_functions( array( 'add_filter', 'clean_user_cache', 'email_exists', 'has_filter', 'remove_filter', 'sanitize_email', 'sanitize_title_with_dashes', 'sanitize_user', 'update_user_caches', 'username_exists', 'wp_cache_get' ), $result, 'user_existence_helpers' ) ) {
+			return;
+		}
+
+		$cases       = array_slice( self::wp_user_identity_cases( $rng ), 0, 3 );
+		$override_id = 900000 + self::rand_int( $rng, 1, 99999 );
+
+		self::run_case(
+			$result,
+			'user_existence_helpers',
+			static function () use ( &$result, $cases, $override_id ): void {
+				$users = array();
+				try {
+					foreach ( $cases as $case ) {
+						$user    = self::fake_identity_user( $case['row'] );
+						$users[] = $user;
+						\update_user_caches( $user );
+					}
+
+					$observed = array();
+					foreach ( $cases as $case ) {
+						$row       = $case['row'];
+						$observed[] = array(
+							'ID'       => $row['ID'],
+							'username' => \username_exists( "\t" . $row['user_login'] . " \n" ),
+							'email'    => \email_exists( ' ' . $row['user_email'] . "\t" ),
+						);
+					}
+
+					self::check( $result, 'username_exists.cache_backed_padded_login_returns_generated_user_id', self::user_existence_observations_match( $observed, 'username' ), $cases, self::user_existence_expected_ids( $cases ), $observed );
+					self::check( $result, 'email_exists.cache_backed_padded_email_returns_generated_user_id', self::user_existence_observations_match( $observed, 'email' ), $cases, self::user_existence_expected_ids( $cases ), $observed );
+
+					$row            = $cases[0]['row'];
+					$username_query = ' ' . $row['user_login'] . "\n";
+					$email_query    = "\t" . $row['user_email'] . ' ';
+					$empty_query    = " \t\n";
+					$username_events = array();
+					$email_events    = array();
+
+					$username_filter = static function ( $user_id, string $username ) use ( &$username_events, $override_id ): int {
+						$username_events[] = array(
+							'userId'   => $user_id,
+							'username' => $username,
+						);
+
+						return $override_id;
+					};
+					$email_filter    = static function ( $user_id, string $email ) use ( &$email_events, $override_id ): int {
+						$email_events[] = array(
+							'userId' => $user_id,
+							'email'  => $email,
+						);
+
+						return $override_id + 1;
+					};
+
+					$before_filters = array(
+						'username_exists' => \has_filter( 'username_exists', $username_filter ),
+						'email_exists'    => \has_filter( 'email_exists', $email_filter ),
+					);
+
+					\add_filter( 'username_exists', $username_filter, 999, 2 );
+					\add_filter( 'email_exists', $email_filter, 999, 2 );
+					try {
+						$filtered_username       = \username_exists( $username_query );
+						$filtered_empty_username = \username_exists( $empty_query );
+						$filtered_email          = \email_exists( $email_query );
+						$filtered_empty_email    = \email_exists( $empty_query );
+					} finally {
+						\remove_filter( 'username_exists', $username_filter, 999 );
+						\remove_filter( 'email_exists', $email_filter, 999 );
+					}
+
+					$after_filters = array(
+						'username_exists' => \has_filter( 'username_exists', $username_filter ),
+						'email_exists'    => \has_filter( 'email_exists', $email_filter ),
+					);
+
+					self::check( $result, 'username_exists.filter_receives_raw_query_and_cache_result', 2 === count( $username_events ) && (int) $row['ID'] === $username_events[0]['userId'] && $username_query === $username_events[0]['username'] && false === $username_events[1]['userId'] && $empty_query === $username_events[1]['username'], $row, 'cached ID event then empty false event', $username_events );
+					self::check( $result, 'email_exists.filter_receives_raw_query_and_cache_result', 2 === count( $email_events ) && (int) $row['ID'] === $email_events[0]['userId'] && $email_query === $email_events[0]['email'] && false === $email_events[1]['userId'] && $empty_query === $email_events[1]['email'], $row, 'cached ID event then empty false event', $email_events );
+					self::check( $result, 'user_existence_helpers.filters_can_override_hits_and_empty_misses', $override_id === $filtered_username && $override_id === $filtered_empty_username && ( $override_id + 1 ) === $filtered_email && ( $override_id + 1 ) === $filtered_empty_email, $row, array( $override_id, $override_id, $override_id + 1, $override_id + 1 ), array( $filtered_username, $filtered_empty_username, $filtered_email, $filtered_empty_email ) );
+					self::check( $result, 'user_existence_helpers.filters_restored', $before_filters === $after_filters, array_keys( $before_filters ), $before_filters, $after_filters );
+				} finally {
+					foreach ( $users as $user ) {
+						\clean_user_cache( $user );
+					}
+				}
+
+				self::check( $result, 'user_existence_helpers.generated_user_caches_cleaned', self::user_existence_caches_are_clean( $cases ), $cases, 'no generated user cache keys remain', self::user_existence_cache_observation( $cases ) );
+			}
+		);
 	}
 
 	private static function exercise_capability_keys( array &$result, array &$rng ): void {
@@ -1228,6 +1328,52 @@ final class IdentitySurface {
 		$out = array();
 		foreach ( $lookups as $key => $lookup ) {
 			$out[ $key ] = $lookup instanceof \WP_User ? self::wp_user_lookup_expectation( $lookup->to_array() ) : $lookup;
+		}
+
+		return $out;
+	}
+
+	private static function user_existence_observations_match( array $observed, string $field ): bool {
+		foreach ( $observed as $item ) {
+			if ( ! array_key_exists( $field, $item ) || (int) $item['ID'] !== $item[ $field ] ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function user_existence_expected_ids( array $cases ): array {
+		$out = array();
+		foreach ( $cases as $case ) {
+			$out[] = (int) $case['row']['ID'];
+		}
+
+		return $out;
+	}
+
+	private static function user_existence_caches_are_clean( array $cases ): bool {
+		foreach ( self::user_existence_cache_observation( $cases ) as $item ) {
+			foreach ( $item as $value ) {
+				if ( false !== $value ) {
+					return false;
+				}
+			}
+		}
+
+		return true;
+	}
+
+	private static function user_existence_cache_observation( array $cases ): array {
+		$out = array();
+		foreach ( $cases as $case ) {
+			$row   = $case['row'];
+			$out[] = array(
+				'users'      => \wp_cache_get( $row['ID'], 'users' ),
+				'userlogins' => \wp_cache_get( $row['user_login'], 'userlogins' ),
+				'userslugs'  => \wp_cache_get( $row['user_nicename'], 'userslugs' ),
+				'useremail'  => \wp_cache_get( $row['user_email'], 'useremail' ),
+			);
 		}
 
 		return $out;
