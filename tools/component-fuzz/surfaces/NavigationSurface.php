@@ -41,6 +41,7 @@ final class NavigationSurface {
 			$rows[] = self::check_location_registry( $ctx );
 			$rows[] = self::check_menu_lookup_and_item_setup( $ctx );
 			$rows[] = self::check_context_classes( $ctx );
+			$rows[] = self::check_wp_nav_menu_current_tree_classes( $ctx );
 			$rows[] = self::check_tree_walker_output( $ctx );
 			$rows[] = self::check_wp_nav_menu_rendering( $ctx );
 			$rows[] = self::check_wp_nav_menu_short_circuit_and_fallback( $ctx );
@@ -328,6 +329,164 @@ final class NavigationSurface {
 		return self::row(
 			$ctx,
 			'navigation.context.current-menu-classes',
+			array() === $failures,
+			array( 'failures' => $failures )
+		);
+	}
+
+	private static function check_wp_nav_menu_current_tree_classes( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures     = array();
+		$menu         = self::menu_object( $ctx->fork( 'current-tree-menu' ), 81 );
+		$item_base    = 800000 + ( $ctx->iteration() * 10 ) + $ctx->int( 1, 9 );
+		$current_path = '/current-tree-' . $ctx->int( 100, 999 );
+		$current_url  = 'https://example.test' . $current_path;
+		$items        = array(
+			self::menu_item(
+				$item_base,
+				1,
+				0,
+				'Tree Root',
+				'https://example.test/root-' . $ctx->int( 1, 99 ),
+				array( 'seed-root' )
+			),
+			self::menu_item(
+				$item_base + 1,
+				2,
+				$item_base,
+				'Tree Parent',
+				'https://example.test/parent-' . $ctx->int( 1, 99 ),
+				array( 'seed-parent' )
+			),
+			self::menu_item(
+				$item_base + 2,
+				3,
+				$item_base + 1,
+				'Tree Current',
+				$current_url,
+				array( 'seed-current' )
+			),
+			self::menu_item(
+				$item_base + 3,
+				4,
+				$item_base,
+				'Tree Sibling',
+				'https://example.test/sibling-' . $ctx->int( 1, 99 ),
+				array( 'seed-sibling' )
+			),
+		);
+		$parent_meta  = array(
+			$item_base + 2 => $item_base + 1,
+			$item_base + 1 => $item_base,
+			$item_base     => 0,
+		);
+		$captured     = array();
+
+		self::$menus[ $menu->term_id ]      = $menu;
+		self::$menu_items[ $menu->term_id ] = $items;
+
+		$_SERVER['HTTP_HOST']   = 'example.test';
+		$_SERVER['REQUEST_URI'] = $current_path;
+
+		if ( ! \taxonomy_exists( 'nav_menu' ) ) {
+			\register_taxonomy( 'nav_menu', 'nav_menu_item', array( 'public' => false ) );
+		}
+
+		$meta_filter = static function ( $value, $object_id, string $meta_key, bool $single, string $meta_type ) use ( $parent_meta ) {
+			if ( 'post' !== $meta_type || '_menu_item_menu_item_parent' !== $meta_key || ! $single ) {
+				return $value;
+			}
+
+			return (string) ( $parent_meta[ (int) $object_id ] ?? 0 );
+		};
+		$objects_filter = static function ( array $sorted_menu_items, object $args ) use ( &$captured ): array {
+			unset( $args );
+			foreach ( $sorted_menu_items as $item ) {
+				$captured[ (int) $item->ID ] = clone $item;
+			}
+
+			return $sorted_menu_items;
+		};
+
+		\add_filter( 'get_post_metadata', $meta_filter, 10, 5 );
+		\add_filter( 'wp_nav_menu_objects', $objects_filter, 10, 2 );
+		try {
+			$output = \wp_nav_menu(
+				array(
+					'menu'         => $menu->term_id,
+					'echo'         => false,
+					'fallback_cb'  => false,
+					'container'    => false,
+					'menu_class'   => 'cfz-current-tree',
+					'menu_id'      => 'cfz-current-tree-' . substr( hash( 'crc32b', $current_url . (string) $ctx->seed() ), 0, 8 ),
+					'item_spacing' => 'discard',
+					'depth'        => 0,
+				)
+			);
+		} finally {
+			\remove_filter( 'get_post_metadata', $meta_filter, 10 );
+			\remove_filter( 'wp_nav_menu_objects', $objects_filter, 10 );
+		}
+
+		$root    = $captured[ $item_base ] ?? null;
+		$parent  = $captured[ $item_base + 1 ] ?? null;
+		$current = $captured[ $item_base + 2 ] ?? null;
+		$sibling = $captured[ $item_base + 3 ] ?? null;
+
+		self::collect_failure(
+			$failures,
+			$current instanceof \stdClass
+				&& true === $current->current
+				&& in_array( 'current-menu-item', $current->classes, true )
+				&& in_array( 'menu-item-type-custom', $current->classes, true )
+				&& in_array( 'menu-item-object-custom', $current->classes, true )
+				&& $parent instanceof \stdClass
+				&& true === $parent->current_item_parent
+				&& true === $parent->current_item_ancestor
+				&& in_array( 'current-menu-parent', $parent->classes, true )
+				&& in_array( 'current-menu-ancestor', $parent->classes, true )
+				&& $root instanceof \stdClass
+				&& false === $root->current_item_parent
+				&& true === $root->current_item_ancestor
+				&& in_array( 'current-menu-ancestor', $root->classes, true )
+				&& $sibling instanceof \stdClass
+				&& false === $sibling->current
+				&& false === $sibling->current_item_parent
+				&& false === $sibling->current_item_ancestor
+				&& ! in_array( 'current-menu-item', $sibling->classes, true )
+				&& ! in_array( 'current-menu-parent', $sibling->classes, true )
+				&& ! in_array( 'current-menu-ancestor', $sibling->classes, true ),
+			'wp_nav_menu propagates current custom-link state through generated parent and ancestor chains',
+			array(
+				'root'    => $root,
+				'parent'  => $parent,
+				'current' => $current,
+				'sibling' => $sibling,
+				'meta'    => $parent_meta,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			is_string( $output )
+				&& 1 === substr_count( $output, 'current-menu-item' )
+				&& 1 === substr_count( $output, 'current-menu-parent' )
+				&& 2 === substr_count( $output, 'current-menu-ancestor' )
+				&& str_contains( $output, 'aria-current="page"' )
+				&& false === \has_filter( 'get_post_metadata', $meta_filter )
+				&& false === \has_filter( 'wp_nav_menu_objects', $objects_filter ),
+			'rendered wp_nav_menu output mirrors captured current tree classes and local filters are removed',
+			array(
+				'output'       => self::describe_string( is_string( $output ) ? $output : '' ),
+				'filterActive' => array(
+					'getPostMetadata'  => \has_filter( 'get_post_metadata', $meta_filter ),
+					'wpNavMenuObjects' => \has_filter( 'wp_nav_menu_objects', $objects_filter ),
+				),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'navigation.wp-nav-menu.current-tree-classes',
 			array() === $failures,
 			array( 'failures' => $failures )
 		);

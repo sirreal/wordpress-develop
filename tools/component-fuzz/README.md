@@ -334,10 +334,11 @@ database, network requests, or a configured site.
   reads, stub-backed network option CRUD, pre-query-short-circuited site/network
   queries, and current/switched URL helpers.
 - `navigation`: nav menu location registration, theme menu assignment lookup,
-  menu object and item setup filters, current-item class derivation, walker
-  output, depth pruning, short-circuit/fallback behavior, args/items-wrap
-  normalization, container allowlists, attribute filter escaping, and filtered
-  no-DB `wp_nav_menu()` rendering.
+  menu object and item setup filters, current-item class derivation, current-tree
+  parent/ancestor propagation, walker output, depth pruning,
+  short-circuit/fallback behavior, args/items-wrap normalization, container
+  allowlists, attribute filter escaping, and filtered no-DB `wp_nav_menu()`
+  rendering.
 - `network-media`: URL parsing/sanitization/validation, URL scheme
   normalization, path normalization, filename sanitization, filetype checks,
   unique filenames, sideload handling, multisite upload quota, remaining-space,
