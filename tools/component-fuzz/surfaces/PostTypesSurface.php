@@ -87,6 +87,8 @@ final class PostTypesSurface {
 				'WP_Rewrite',
 				'WP_REST_Autosaves_Controller',
 				'WP_REST_Controller',
+				'WP_REST_Meta_Fields',
+				'WP_REST_Post_Meta_Fields',
 				'WP_REST_Posts_Controller',
 				'WP_REST_Revisions_Controller',
 				'WP_REST_Server',
@@ -150,6 +152,8 @@ final class PostTypesSurface {
 		$files = array(
 			'wp-includes/rest-api/class-wp-rest-server.php',
 			'wp-includes/rest-api/endpoints/class-wp-rest-controller.php',
+			'wp-includes/rest-api/fields/class-wp-rest-meta-fields.php',
+			'wp-includes/rest-api/fields/class-wp-rest-post-meta-fields.php',
 			'wp-includes/rest-api/endpoints/class-wp-rest-posts-controller.php',
 			'wp-includes/rest-api/endpoints/class-wp-rest-revisions-controller.php',
 			'wp-includes/rest-api/endpoints/class-wp-rest-autosaves-controller.php',
