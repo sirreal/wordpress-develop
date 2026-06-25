@@ -253,8 +253,9 @@ database, network requests, or a configured site.
   EXIF helper normalization, image metadata filters, temp-file cleanup, and
   state restoration.
 - `identity`: usernames, emails, identity sanitizer filter contracts,
-  capabilities, text/comment filters, comment cookies/current-commenter
-  payloads, options, password hashing/checking, parse helpers.
+  capabilities, generated user contact-method filters and additional-key
+  propagation, text/comment filters, comment cookies/current-commenter payloads,
+  options, password hashing/checking, parse helpers.
 - `import-diff`: importer registry and upload-form helpers, `WP_Importer`
   imported post/comment lookup against the in-memory stub, `wp_text_diff()`
   rendering/escaping/normalization, and `WP_Error` export/merge/remove

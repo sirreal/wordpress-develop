@@ -32,6 +32,7 @@ final class IdentitySurface {
 			self::exercise_email_addresses( $result, $rng );
 			self::exercise_identity_filter_contracts( $result, $rng );
 			self::exercise_capability_keys( $result, $rng );
+			self::exercise_user_contact_methods( $result, $rng );
 			self::exercise_urls( $result, $rng );
 			self::exercise_text_and_comment_helpers( $result, $rng );
 			self::exercise_comment_cookies( $result, $rng );
@@ -234,6 +235,61 @@ final class IdentitySurface {
 					\remove_filter( 'sanitize_email', $sanitize_email_filter, 999 );
 					\remove_filter( 'is_email', $is_email_filter, 999 );
 				}
+			}
+		);
+	}
+
+	private static function exercise_user_contact_methods( array &$result, array &$rng ): void {
+		if ( ! self::have_functions( array( 'add_filter', 'has_filter', 'remove_filter', 'wp_get_user_contact_methods', '_wp_get_user_contactmethods', '_get_additional_user_keys' ), $result, 'user_contact_methods' ) ) {
+			return;
+		}
+
+		$token   = substr( hash( 'sha256', self::rand_bytes( $rng, 12 ) ), 0, 10 );
+		$user    = (object) array(
+			'ID'         => self::rand_int( $rng, 10, 999 ),
+			'user_login' => 'identity_contact_' . $token,
+		);
+		$methods = array(
+			'identity_profile_' . $token => 'Identity profile ' . $token,
+			'identity_chat_' . $token    => 'Identity chat ' . $token,
+		);
+
+		self::run_case(
+			$result,
+			'user_contact_methods',
+			static function () use ( &$result, $user, $methods ): void {
+				$default_public = \wp_get_user_contact_methods( $user );
+				$default_alias  = \_wp_get_user_contactmethods( $user );
+
+				self::check( $result, 'wp_get_user_contactmethods.alias_matches_public_default', $default_public === $default_alias, $user, $default_public, $default_alias );
+
+				$events = array();
+				$filter = static function ( array $current_methods, $current_user ) use ( &$events, $methods ): array {
+					$events[] = array(
+						'methods' => $current_methods,
+						'user'    => $current_user,
+					);
+
+					return array_merge( $current_methods, $methods );
+				};
+				$before_filter = \has_filter( 'user_contactmethods', $filter );
+
+				\add_filter( 'user_contactmethods', $filter, 999, 2 );
+				try {
+					$filtered_null = \wp_get_user_contact_methods();
+					$filtered_user = \wp_get_user_contact_methods( $user );
+					$filtered_alias = \_wp_get_user_contactmethods( $user );
+					$additional_keys = \_get_additional_user_keys( $user );
+				} finally {
+					\remove_filter( 'user_contactmethods', $filter, 999 );
+				}
+
+				self::check( $result, 'wp_get_user_contact_methods.filter_adds_generated_methods_for_null_user', $methods === array_intersect_assoc( $methods, $filtered_null ), $methods, $methods, $filtered_null );
+				self::check( $result, 'wp_get_user_contact_methods.filter_adds_generated_methods_for_user', $methods === array_intersect_assoc( $methods, $filtered_user ), $methods, $methods, $filtered_user );
+				self::check( $result, 'wp_get_user_contactmethods.alias_matches_filtered_public', $filtered_user === $filtered_alias, $methods, $filtered_user, $filtered_alias );
+				self::check( $result, 'wp_get_user_contact_methods.filter_receives_null_and_user_payloads', 4 === count( $events ) && null === $events[0]['user'] && $user === $events[1]['user'] && $user === $events[2]['user'] && $user === $events[3]['user'], $user, 'null payload then user payloads', $events );
+				self::check( $result, '_get_additional_user_keys.includes_filtered_contact_methods', array() === array_diff( array_keys( $methods ), $additional_keys ) && in_array( 'first_name', $additional_keys, true ) && in_array( 'locale', $additional_keys, true ), $methods, 'base keys plus generated contact keys', $additional_keys );
+				self::check( $result, 'wp_get_user_contact_methods.filter_restored', $before_filter === \has_filter( 'user_contactmethods', $filter ), $methods, $before_filter, \has_filter( 'user_contactmethods', $filter ) );
 			}
 		);
 	}
