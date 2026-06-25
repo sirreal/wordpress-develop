@@ -36,6 +36,7 @@ final class CommentsSurface {
 			$rows = array_merge( $rows, self::check_separate_comments( $ctx, $cases ) );
 			$rows = array_merge( $rows, self::check_comment_cookies( $ctx, $cases ) );
 			$rows = array_merge( $rows, self::check_comment_permalink_pagination( $ctx ) );
+			$rows = array_merge( $rows, self::check_comment_reply_links( $ctx ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
 				'comments.surface-no-throw',
@@ -70,11 +71,22 @@ final class CommentsSurface {
 				'get_comment_author_link',
 				'get_comment_author_url',
 				'get_comment_author_url_link',
+				'get_comment_author',
 				'get_comment_excerpt',
 				'get_comment_text',
 				'get_comment_link',
+				'get_comment_reply_link',
+				'comment_reply_link',
+				'get_post_reply_link',
+				'post_reply_link',
+				'get_cancel_comment_reply_link',
+				'cancel_comment_reply_link',
 				'get_page_of_comment',
+				'get_permalink',
+				'has_filter',
 				'is_wp_error',
+				'remove_query_arg',
+				'wp_login_url',
 				'wp_cache_delete',
 				'wp_cache_set',
 				'wp_parse_url',
@@ -608,8 +620,10 @@ final class CommentsSurface {
 			)
 		);
 
+		$author_name_call = self::call( static fn() => \get_comment_author( $comment ) );
 		$author_link_call = self::call( static fn() => \get_comment_author_link( $comment ) );
 		$author_link      = ! $author_link_call['threw'] && is_string( $author_link_call['value'] ) ? $author_link_call['value'] : '';
+		$author_name      = ! $author_name_call['threw'] && is_string( $author_name_call['value'] ) ? $author_name_call['value'] : null;
 		$rows[] = self::case_result(
 			$ctx,
 			$case_index,
@@ -617,9 +631,10 @@ final class CommentsSurface {
 			'comments.template.author-link.href-and-rel-follow-sanitized-url',
 			! $author_link_call['threw']
 				&& is_string( $author_link_call['value'] )
-				&& self::author_link_matches_url_contract( $author_link, $expected_url ),
+				&& self::author_link_matches_url_contract( $author_link, $expected_url, $author_name ),
 			array(
 				'expectedUrl' => self::describe_value( $expected_url ),
+				'authorName'  => self::describe_call( $author_name_call ),
 				'actual'      => self::describe_call( $author_link_call ),
 			)
 		);
@@ -989,6 +1004,276 @@ final class CommentsSurface {
 		}
 
 		return $rows;
+	}
+
+	private static function check_comment_reply_links( \ComponentFuzz\FuzzContext $ctx ): array {
+		$fixture        = self::comment_permalink_fixture( $ctx->fork( 'reply-links' ) );
+		$post           = $fixture['posts'][0];
+		$comment_id     = $fixture['aliases']['middle-comment'];
+		$comment        = $fixture['comments'][ $comment_id ];
+		$closed_post    = self::permalink_post( $post->ID + 77, 'Closed Reply Fixture ' . $ctx->iteration() );
+		$closed_comment = self::permalink_comment( $comment_id + 77, $closed_post->ID, 'comment', 0, '2026-06-01 00:01:00' );
+
+		$closed_post->comment_status = 'closed';
+
+		$reply_marker  = 'cfz-reply-' . strtolower( $ctx->identifier( 4, 10 ) );
+		$post_marker   = 'cfz-post-' . strtolower( $ctx->identifier( 4, 10 ) );
+		$cancel_marker = 'cfz-cancel-' . strtolower( $ctx->identifier( 4, 10 ) );
+		$options       = array(
+			'comment_registration' => 0,
+			'home'                 => 'http://example.test',
+			'page_comments'        => 0,
+			'permalink_structure'  => '',
+			'siteurl'              => 'http://example.test',
+		);
+		$args_events   = array();
+		$reply_events  = array();
+		$post_events   = array();
+		$cancel_events = array();
+		$snapshot      = self::snapshot_globals();
+
+		$args_filter = static function ( array $args, \WP_Comment $filtered_comment, \WP_Post $filtered_post ) use (
+			&$args_events,
+			$reply_marker
+		): array {
+			$args_events[] = array(
+				'commentId' => (int) $filtered_comment->comment_ID,
+				'postId'    => (int) $filtered_post->ID,
+				'depth'     => (int) $args['depth'],
+				'maxDepth'  => (int) $args['max_depth'],
+				'replyText' => self::describe_value( (string) $args['reply_text'] ),
+			);
+			$args['reply_text'] .= ' ' . $reply_marker;
+			$args['login_text'] .= ' ' . $reply_marker;
+			return $args;
+		};
+
+		$reply_filter = static function ( string $link, array $args, \WP_Comment $filtered_comment, \WP_Post $filtered_post ) use (
+			&$reply_events,
+			$reply_marker
+		): string {
+			$reply_events[] = array(
+				'commentId' => (int) $filtered_comment->comment_ID,
+				'postId'    => (int) $filtered_post->ID,
+				'link'      => self::describe_value( $link ),
+				'args'      => array(
+					'depth'     => $args['depth'] ?? null,
+					'respondId' => $args['respond_id'] ?? null,
+				),
+			);
+
+			return str_replace( 'comment-reply-link', 'comment-reply-link ' . \esc_attr( $reply_marker ), $link );
+		};
+
+		$post_filter = static function ( string $link, $filtered_post ) use ( &$post_events, $post_marker ): string {
+			$post_id       = $filtered_post instanceof \WP_Post ? $filtered_post->ID : (int) $filtered_post;
+			$post_events[] = array(
+				'postId' => $post_id,
+				'link'   => self::describe_value( $link ),
+			);
+
+			return str_replace( '<a ', '<a data-cfz-post="' . \esc_attr( $post_marker ) . '" ', $link );
+		};
+
+		$cancel_filter = static function ( string $link, string $url, string $text ) use ( &$cancel_events, $cancel_marker ): string {
+			$cancel_events[] = array(
+				'url'  => self::describe_value( $url ),
+				'text' => self::describe_value( $text ),
+				'link' => self::describe_value( $link ),
+			);
+
+			return str_replace( '<a ', '<a data-cfz-cancel="' . \esc_attr( $cancel_marker ) . '" ', $link );
+		};
+
+		try {
+			$fixture['posts'][]                                   = $closed_post;
+			$fixture['comments'][ $closed_comment->comment_ID ]   = $closed_comment;
+			self::cache_comment_permalink_fixture( $fixture );
+			self::force_query_style_comment_links();
+
+			$GLOBALS['post']       = $post;
+			$GLOBALS['comment']    = $comment;
+			$_SERVER['HTTP_HOST']  = 'example.test';
+			$_SERVER['REQUEST_URI'] = '/comments/reply/?replytocom=' . rawurlencode( (string) $comment_id ) . '&unapproved=1&moderation-hash=bad&keep=1';
+			$_GET                  = array(
+				'keep'            => '1',
+				'moderation-hash' => 'bad',
+				'replytocom'      => (string) $comment_id,
+				'unapproved'      => '1',
+			);
+
+			foreach ( array_keys( $options ) as $option ) {
+				\add_filter(
+					'pre_option_' . $option,
+					static function () use ( &$options, $option ) {
+						return $options[ $option ];
+					},
+					10,
+					3
+				);
+			}
+			\add_filter( 'comment_reply_link_args', $args_filter, 10, 3 );
+			\add_filter( 'comment_reply_link', $reply_filter, 10, 4 );
+			\add_filter( 'post_comments_link', $post_filter, 10, 2 );
+			\add_filter( 'cancel_comment_reply_link', $cancel_filter, 10, 3 );
+
+			if ( function_exists( 'wp_set_current_user' ) ) {
+				\wp_set_current_user( 0 );
+			}
+
+			$reply_args = array(
+				'add_below'          => 'comment-cfz',
+				'after'              => '</span>',
+				'before'             => '<span class="reply-before">',
+				'depth'              => 2,
+				'login_text'         => 'Sign in to reply',
+				'max_depth'          => 5,
+				'reply_text'         => 'Reply now',
+				'reply_to_text'      => 'Reply to %s <unsafe>',
+				'respond_id'         => 'respond-cfz',
+				'show_reply_to_text' => false,
+			);
+			$reply_call = self::call( static fn() => \get_comment_reply_link( $reply_args, $comment, $post ) );
+			ob_start();
+			\comment_reply_link( $reply_args, $comment, $post );
+			$reply_echo = (string) ob_get_clean();
+
+			$depth_gate_call = self::call(
+				static fn() => \get_comment_reply_link(
+					array_merge(
+						$reply_args,
+						array(
+							'depth'     => 5,
+							'max_depth' => 5,
+						)
+					),
+					$comment,
+					$post
+				)
+			);
+			$closed_call     = self::call( static fn() => \get_comment_reply_link( $reply_args, $closed_comment, $closed_post ) );
+
+			$options['comment_registration'] = 1;
+			$login_call = self::call( static fn() => \get_comment_reply_link( $reply_args, $comment, $post ) );
+			$options['comment_registration'] = 0;
+
+			$post_args = array(
+				'add_below'  => 'post-cfz',
+				'after'      => '</section>',
+				'before'     => '<section class="post-before">',
+				'login_text' => 'Sign in for post reply',
+				'reply_text' => 'Leave a deterministic comment',
+				'respond_id' => 'respond-post-cfz',
+			);
+			$post_reply_call = self::call( static fn() => \get_post_reply_link( $post_args, $post ) );
+			ob_start();
+			\post_reply_link( $post_args, $post );
+			$post_reply_echo = (string) ob_get_clean();
+
+			$cancel_call = self::call( static fn() => \get_cancel_comment_reply_link( 'Cancel reply now', $post ) );
+			ob_start();
+			\cancel_comment_reply_link( 'Cancel reply now' );
+			$cancel_echo = (string) ob_get_clean();
+
+			$_GET['replytocom'] = 'not-a-number';
+			$hidden_cancel_call = self::call( static fn() => \get_cancel_comment_reply_link( 'Cancel hidden reply', $post ) );
+		} finally {
+			foreach ( array_keys( $options ) as $option ) {
+				\remove_all_filters( 'pre_option_' . $option );
+			}
+			\remove_all_filters( 'comment_reply_link_args' );
+			\remove_all_filters( 'comment_reply_link' );
+			\remove_all_filters( 'post_comments_link' );
+			\remove_all_filters( 'cancel_comment_reply_link' );
+			self::clear_comment_permalink_fixture_cache( $fixture );
+			self::restore_globals( $snapshot );
+		}
+
+		$reply      = ! $reply_call['threw'] && is_string( $reply_call['value'] ) ? $reply_call['value'] : '';
+		$login      = ! $login_call['threw'] && is_string( $login_call['value'] ) ? $login_call['value'] : '';
+		$post_reply = ! $post_reply_call['threw'] && is_string( $post_reply_call['value'] ) ? $post_reply_call['value'] : '';
+		$cancel     = ! $cancel_call['threw'] && is_string( $cancel_call['value'] ) ? $cancel_call['value'] : '';
+		$hidden     = ! $hidden_cancel_call['threw'] && is_string( $hidden_cancel_call['value'] ) ? $hidden_cancel_call['value'] : '';
+
+		return array(
+			$ctx->result(
+				'comments.reply-links.comment-reply-normal-login-and-gates',
+				! $reply_call['threw']
+					&& str_contains( $reply, '<span class="reply-before">' )
+					&& str_contains( $reply, 'class="comment-reply-link ' . \esc_attr( $reply_marker ) . '"' )
+					&& str_contains( $reply, 'replytocom=' . $comment_id )
+					&& str_contains( $reply, '#respond-cfz' )
+					&& str_contains( $reply, 'data-commentid="' . $comment_id . '"' )
+					&& str_contains( $reply, 'data-postid="' . $post->ID . '"' )
+					&& str_contains( $reply, 'data-belowelement="comment-cfz-' . $comment_id . '"' )
+					&& str_contains( $reply, 'data-respondelement="respond-cfz"' )
+					&& str_contains( $reply, 'aria-label="Reply to Commenter ' . $comment_id . ' &lt;unsafe&gt;"' )
+					&& str_contains( $reply, 'Reply now ' . $reply_marker )
+					&& ! str_contains( $reply, '<unsafe>' )
+					&& $reply === $reply_echo
+					&& ! $depth_gate_call['threw']
+					&& null === $depth_gate_call['value']
+					&& ! $closed_call['threw']
+					&& false === $closed_call['value']
+					&& ! $login_call['threw']
+					&& str_contains( $login, 'class="comment-reply-login"' )
+					&& str_contains( $login, 'wp-login.php' )
+					&& str_contains( $login, 'Sign in to reply ' . $reply_marker ),
+				array(
+					'closed'    => self::describe_call( $closed_call ),
+					'depthGate' => self::describe_call( $depth_gate_call ),
+					'login'     => self::describe_call( $login_call ),
+					'reply'     => self::describe_call( $reply_call ),
+					'replyEcho' => self::describe_value( $reply_echo ),
+				)
+			),
+			$ctx->result(
+				'comments.reply-links.post-reply-and-cancel-contracts',
+				! $post_reply_call['threw']
+					&& str_contains( $post_reply, '<section class="post-before">' )
+					&& str_contains( $post_reply, 'data-cfz-post="' . \esc_attr( $post_marker ) . '"' )
+					&& str_contains( $post_reply, "class='comment-reply-link'" )
+					&& str_contains( $post_reply, '#respond-post-cfz' )
+					&& str_contains( $post_reply, 'post-cfz-' . $post->ID )
+					&& str_contains( $post_reply, 'Leave a deterministic comment' )
+					&& $post_reply === $post_reply_echo
+					&& ! $cancel_call['threw']
+					&& str_contains( $cancel, 'data-cfz-cancel="' . \esc_attr( $cancel_marker ) . '"' )
+					&& str_contains( $cancel, 'id="cancel-comment-reply-link"' )
+					&& str_contains( $cancel, 'keep=1#respond' )
+					&& ! str_contains( $cancel, 'replytocom=' )
+					&& ! str_contains( $cancel, 'unapproved=' )
+					&& ! str_contains( $cancel, 'moderation-hash=' )
+					&& ! str_contains( $cancel, 'style="display:none;"' )
+					&& $cancel === $cancel_echo
+					&& ! $hidden_cancel_call['threw']
+					&& str_contains( $hidden, 'style="display:none;"' ),
+				array(
+					'cancel'       => self::describe_call( $cancel_call ),
+					'cancelEcho'   => self::describe_value( $cancel_echo ),
+					'hiddenCancel' => self::describe_call( $hidden_cancel_call ),
+					'postEcho'     => self::describe_value( $post_reply_echo ),
+					'postReply'    => self::describe_call( $post_reply_call ),
+				)
+			),
+			$ctx->result(
+				'comments.reply-links.filters-payloads-and-restoration',
+				0 < count( $args_events )
+					&& 0 < count( $reply_events )
+					&& 0 < count( $post_events )
+					&& 0 < count( $cancel_events )
+					&& false === \has_filter( 'comment_reply_link_args', $args_filter )
+					&& false === \has_filter( 'comment_reply_link', $reply_filter )
+					&& false === \has_filter( 'post_comments_link', $post_filter )
+					&& false === \has_filter( 'cancel_comment_reply_link', $cancel_filter ),
+				array(
+					'argsEvents'   => $args_events,
+					'cancelEvents' => $cancel_events,
+					'postEvents'   => $post_events,
+					'replyEvents'  => $reply_events,
+				)
+			),
+		);
 	}
 
 	private static function all_permalink_scenarios_ok( array $scenario_results ): bool {
@@ -1643,7 +1928,9 @@ final class CommentsSurface {
 		foreach (
 			array(
 				'comment',
+				'current_user',
 				'post',
+				'user_ID',
 				'comment_alt',
 				'comment_depth',
 				'comment_thread_alt',
@@ -1663,12 +1950,16 @@ final class CommentsSurface {
 
 		return array(
 			'_COOKIE' => $_COOKIE,
+			'_GET'    => $_GET,
+			'_SERVER' => $_SERVER,
 			'globals' => $globals,
 		);
 	}
 
 	private static function restore_globals( array $snapshot ): void {
 		$_COOKIE = $snapshot['_COOKIE'];
+		$_GET    = $snapshot['_GET'];
+		$_SERVER = $snapshot['_SERVER'];
 
 		foreach ( $snapshot['globals'] as $key => $entry ) {
 			if ( $entry['exists'] ) {
@@ -1868,9 +2159,9 @@ final class CommentsSurface {
 		return true;
 	}
 
-	private static function author_link_matches_url_contract( string $link, string $expected_url ): bool {
+	private static function author_link_matches_url_contract( string $link, string $expected_url, ?string $author_name ): bool {
 		if ( '' === $expected_url ) {
-			return ! str_contains( $link, '<a ' ) && ! str_contains( $link, 'href=' );
+			return null !== $author_name && $link === $author_name;
 		}
 
 		return str_contains( $link, '<a href="' . $expected_url . '" class="url"' )
