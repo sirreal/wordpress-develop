@@ -29,6 +29,7 @@ final class StateSurface {
 			$rows[] = self::check_cache_object_cloning( $ctx );
 			$rows[] = self::check_cache_multiple_equivalence( $ctx );
 			$rows[] = self::check_cache_add_multiple_contract( $ctx );
+			$rows[] = self::check_cache_addition_suspension( $ctx );
 			$rows[] = self::check_cache_increments( $ctx );
 			$rows[] = self::check_cache_flushes_and_groups( $ctx );
 			$rows[] = self::check_cache_last_changed( $ctx );
@@ -81,6 +82,7 @@ final class StateSurface {
 				'wp_cache_add_non_persistent_groups',
 				'wp_cache_get_last_changed',
 				'wp_cache_set_last_changed',
+				'wp_suspend_cache_addition',
 				'get_option',
 				'add_option',
 				'update_option',
@@ -318,6 +320,81 @@ final class StateSurface {
 				'firstAdd'  => $first_add,
 				'secondAdd' => $second_add,
 				'values'    => self::describe_value( $values ),
+			)
+		);
+	}
+
+	private static function check_cache_addition_suspension( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime();
+
+		$case          = $ctx->fork( 'cache-addition-suspension' );
+		$group         = self::group( $ctx, 'addition-suspended' );
+		$key_add       = self::key( $ctx, 'suspended-add' );
+		$key_set       = self::key( $ctx, 'suspended-set' );
+		$key_after     = self::key( $ctx, 'suspended-after' );
+		$add_value     = self::wrapped_value( 'add', self::value( $case ) );
+		$set_value     = self::wrapped_value( 'set', self::value( $case ) );
+		$after_value   = self::wrapped_value( 'after', self::value( $case ) );
+		$multi_entries = self::cache_entries( $ctx, $case, 'suspended-add-multi', 3 );
+		$multi_keys    = array_keys( $multi_entries );
+
+		$initial_suspended = wp_suspend_cache_addition();
+		$suspended_now     = null;
+		$add_suspended     = null;
+		$found_add         = null;
+		$stored_add        = null;
+		$multi_suspended   = null;
+		$stored_multi      = null;
+		$set_suspended     = null;
+		$stored_set        = null;
+		$restored_now      = null;
+		$add_after         = null;
+		$stored_after      = null;
+
+		try {
+			$suspended_now   = wp_suspend_cache_addition( true );
+			$add_suspended   = wp_cache_add( $key_add, $add_value, $group );
+			$stored_add      = wp_cache_get( $key_add, $group, false, $found_add );
+			$multi_suspended = wp_cache_add_multiple( $multi_entries, $group );
+			$stored_multi    = wp_cache_get_multiple( $multi_keys, $group );
+			$set_suspended   = wp_cache_set( $key_set, $set_value, $group );
+			$stored_set      = wp_cache_get( $key_set, $group );
+		} finally {
+			$restored_now = wp_suspend_cache_addition( false );
+		}
+
+		$add_after    = wp_cache_add( $key_after, $after_value, $group );
+		$stored_after = wp_cache_get( $key_after, $group );
+
+		$ok = false === $initial_suspended
+			&& true === $suspended_now
+			&& false === $add_suspended
+			&& false === $stored_add
+			&& false === $found_add
+			&& self::all_same_scalar( $multi_suspended, false )
+			&& self::all_same_scalar( $stored_multi, false )
+			&& true === $set_suspended
+			&& self::same_value( $set_value, $stored_set )
+			&& false === $restored_now
+			&& false === wp_suspend_cache_addition()
+			&& true === $add_after
+			&& self::same_value( $after_value, $stored_after );
+
+		return $ctx->result(
+			'state.cache.suspended-addition-blocks-add-but-not-set',
+			$ok,
+			array(
+				'group'          => $group,
+				'initial'        => $initial_suspended,
+				'suspendedNow'   => $suspended_now,
+				'addSuspended'   => $add_suspended,
+				'foundAdd'       => $found_add,
+				'multiSuspended' => $multi_suspended,
+				'storedMulti'    => self::describe_value( $stored_multi ),
+				'setSuspended'   => $set_suspended,
+				'storedSet'      => self::describe_value( $stored_set ),
+				'restoredNow'    => $restored_now,
+				'addAfter'       => $add_after,
 			)
 		);
 	}
