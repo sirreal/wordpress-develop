@@ -34,6 +34,7 @@ final class AccountSecuritySurface {
 			$rows[] = self::check_application_password_lifecycle( $ctx->fork( 'application-password-lifecycle' ) );
 			$rows[] = self::check_application_password_chunking_and_hashes( $ctx->fork( 'application-password-hashes' ) );
 			$rows[] = self::check_application_password_authentication( $ctx->fork( 'application-password-authentication' ) );
+			$rows[] = self::check_password_reset_key_lifecycle( $ctx->fork( 'password-reset-key-lifecycle' ) );
 			$rows[] = self::check_recovery_key_service( $ctx->fork( 'recovery-key-service' ) );
 			$rows[] = self::check_recovery_cookie_service( $ctx->fork( 'recovery-cookie-service' ) );
 			$rows[] = self::check_paused_extension_storage( $ctx->fork( 'paused-extension-storage' ) );
@@ -79,6 +80,7 @@ final class AccountSecuritySurface {
 
 		foreach (
 			array(
+				'Component_Fuzz_WPDB_Stub',
 				'PasswordHash',
 				'WP_Application_Passwords',
 				'WP_Error',
@@ -97,7 +99,9 @@ final class AccountSecuritySurface {
 			array(
 				'add_action',
 				'add_filter',
+				'check_password_reset_key',
 				'delete_option',
+				'get_password_reset_key',
 				'get_user_by',
 				'get_network_option',
 				'get_option',
@@ -120,7 +124,9 @@ final class AccountSecuritySurface {
 				'wp_insert_user',
 				'wp_is_application_passwords_available',
 				'wp_is_application_passwords_available_for_user',
+				'wp_is_password_reset_allowed_for_user',
 				'wp_recovery_mode',
+				'wp_update_user',
 				'wp_validate_application_password',
 				'wp_verify_fast_hash',
 			) as $function
@@ -150,6 +156,10 @@ final class AccountSecuritySurface {
 
 		if ( ! function_exists( 'sodium_crypto_generichash' ) ) {
 			$missing[] = 'function sodium_crypto_generichash';
+		}
+
+		if ( ! isset( $GLOBALS['wpdb'] ) || ! $GLOBALS['wpdb'] instanceof \Component_Fuzz_WPDB_Stub ) {
+			$missing[] = 'global wpdb Component_Fuzz_WPDB_Stub';
 		}
 
 		return $missing;
@@ -765,6 +775,345 @@ final class AccountSecuritySurface {
 		);
 	}
 
+	private static function check_password_reset_key_lifecycle( \ComponentFuzz\FuzzContext $ctx ): array {
+		if ( ! self::can_reset_stub_content() ) {
+			return self::skip(
+				$ctx,
+				'account-security.password-reset-key.lifecycle-and-fail-closed-paths',
+				'The in-memory wpdb content reset hook is unavailable.'
+			);
+		}
+
+		$failures             = array();
+		$user_id              = 0;
+		$login                = self::login_case( $ctx->fork( 'login' ) );
+		$email                = $login . '@example.test';
+		$password             = 'component-fuzz-reset-' . self::token( $ctx->fork( 'password' ), 16 );
+		$expiration_duration  = 300 + $ctx->int( 0, DAY_IN_SECONDS );
+		$allow_decision       = true;
+		$expired_override     = false;
+		$retrieve_events      = array();
+		$key_events           = array();
+		$allow_events         = array();
+		$expiration_events    = array();
+		$expired_key_events   = array();
+		$filters_restored     = false;
+		$content_counts_after = null;
+
+		$retrieve_action = static function ( string $user_login ) use ( &$retrieve_events ): void {
+			$retrieve_events[] = $user_login;
+		};
+		$key_action      = static function ( string $user_login, string $key ) use ( &$key_events ): void {
+			$key_events[] = array(
+				'login' => $user_login,
+				'key'   => $key,
+			);
+		};
+		$allow_filter    = static function ( $allow, int $candidate_user_id ) use ( &$allow_events, &$allow_decision, &$user_id ) {
+			$allow_events[] = array(
+				'incoming' => $allow,
+				'userId'   => $candidate_user_id,
+			);
+
+			if ( $candidate_user_id !== $user_id ) {
+				return $allow;
+			}
+
+			return $allow_decision;
+		};
+		$expiration_filter = static function ( int $duration ) use ( &$expiration_events, &$expiration_duration ): int {
+			$expiration_events[] = $duration;
+			return $expiration_duration;
+		};
+		$expired_key_filter = static function ( $return, int $candidate_user_id ) use ( &$expired_key_events, &$expired_override, &$user_id ) {
+			$expired_key_events[] = array(
+				'code'   => $return instanceof \WP_Error ? $return->get_error_code() : get_debug_type( $return ),
+				'userId' => $candidate_user_id,
+			);
+
+			if ( $expired_override && $candidate_user_id === $user_id ) {
+				$user = \get_user_by( 'id', $user_id );
+				if ( $user instanceof \WP_User ) {
+					return $user;
+				}
+			}
+
+			return $return;
+		};
+
+		self::reset_stub_content();
+
+		try {
+			$invalid_user_result = \get_password_reset_key( new \stdClass() );
+			$missing_allowed     = \wp_is_password_reset_allowed_for_user( 0 );
+
+			self::collect_failure(
+				$failures,
+				self::is_error_code( $invalid_user_result, 'invalidcombo' ) && false === $missing_allowed,
+				'password reset helpers fail closed for non-user inputs before reset hooks run',
+				array(
+					'invalidUserResult' => self::describe_value( $invalid_user_result ),
+					'missingAllowed'    => self::describe_value( $missing_allowed ),
+				)
+			);
+
+			$inserted = \wp_insert_user(
+				array(
+					'user_login' => $login,
+					'user_pass'  => $password,
+					'user_email' => $email,
+					'role'       => 'subscriber',
+				)
+			);
+
+			if ( is_int( $inserted ) ) {
+				$user_id = $inserted;
+			}
+
+			$user = is_int( $inserted ) ? \get_user_by( 'id', $inserted ) : false;
+			self::collect_failure(
+				$failures,
+				is_int( $inserted )
+					&& $user instanceof \WP_User
+					&& $login === $user->user_login
+					&& $email === $user->user_email,
+				'synthetic reset user is created in the in-memory wpdb stub',
+				array(
+					'inserted' => self::describe_value( $inserted ),
+					'user'     => self::describe_value( $user ),
+					'login'    => self::describe_string( $login ),
+					'email'    => self::describe_string( $email ),
+				)
+			);
+
+			if ( $user instanceof \WP_User ) {
+				\add_action( 'retrieve_password', $retrieve_action );
+				\add_action( 'retrieve_password_key', $key_action, 10, 2 );
+				\add_filter( 'allow_password_reset', $allow_filter, 10, 2 );
+				\add_filter( 'password_reset_expiration', $expiration_filter );
+				\add_filter( 'password_reset_key_expired', $expired_key_filter, 10, 2 );
+
+				$allowed_by_object = \wp_is_password_reset_allowed_for_user( $user );
+				$allowed_by_id     = \wp_is_password_reset_allowed_for_user( $user_id );
+
+				self::collect_failure(
+					$failures,
+					true === $allowed_by_object
+						&& true === $allowed_by_id
+						&& 2 === count( $allow_events )
+						&& array( $user_id, $user_id ) === array_column( $allow_events, 'userId' ),
+					'password reset availability accepts both WP_User and user ID for the target account',
+					array(
+						'allowedByObject' => self::describe_value( $allowed_by_object ),
+						'allowedById'     => self::describe_value( $allowed_by_id ),
+						'allowEvents'     => self::describe_value( $allow_events ),
+					)
+				);
+
+				$allow_decision = false;
+				$denied         = \get_password_reset_key( $user );
+				$allow_decision = new \WP_Error( 'component_fuzz_reset_blocked', 'Synthetic reset policy rejected the account.' );
+				$custom_denied  = \get_password_reset_key( $user );
+				$allow_decision = true;
+
+				self::collect_failure(
+					$failures,
+					self::is_error_code( $denied, 'no_password_reset' )
+						&& self::is_error_code( $custom_denied, 'component_fuzz_reset_blocked' )
+						&& array() === $key_events
+						&& array( $login, $login ) === array_slice( $retrieve_events, -2 ),
+					'allow_password_reset can reject key generation with default and custom errors before keys are stored',
+					array(
+						'denied'         => self::describe_value( $denied ),
+						'customDenied'   => self::describe_value( $custom_denied ),
+						'keyEvents'      => self::describe_value( $key_events ),
+						'retrieveEvents' => self::describe_value( $retrieve_events ),
+					)
+				);
+
+				$key_started = time();
+				$key         = \get_password_reset_key( $user );
+				$key_finished = time();
+				$stored_user  = \get_user_by( 'id', $user_id );
+				$stored_key   = $stored_user instanceof \WP_User ? (string) $stored_user->user_activation_key : '';
+				$key_parts    = explode( ':', $stored_key, 2 );
+				$key_time     = isset( $key_parts[0] ) && ctype_digit( $key_parts[0] ) ? (int) $key_parts[0] : 0;
+				$key_hash     = (string) ( $key_parts[1] ?? '' );
+
+				self::collect_failure(
+					$failures,
+					is_string( $key )
+						&& 1 === preg_match( '/\A[A-Za-z0-9]{20}\z/', $key )
+						&& 2 === count( $key_parts )
+						&& $stored_key !== $key
+						&& $key_time >= $key_started
+						&& $key_time <= $key_finished
+						&& str_starts_with( $key_hash, '$generic$' )
+						&& \wp_verify_fast_hash( $key, $key_hash )
+						&& 1 === count( $key_events )
+						&& $login === ( $key_events[0]['login'] ?? null )
+						&& $key === ( $key_events[0]['key'] ?? null ),
+					'generated password reset keys are bounded, action-visible, and stored only as timestamped fast hashes',
+					array(
+						'key'         => self::describe_value( $key ),
+						'storedKey'   => self::describe_string( $stored_key ),
+						'keyParts'    => self::describe_value( $key_parts ),
+						'keyEvents'   => self::describe_value( $key_events ),
+						'keyStarted'  => $key_started,
+						'keyFinished' => $key_finished,
+					)
+				);
+
+				$decorated_key = is_string( $key ) ? trim( chunk_split( $key, 4, ' - ' ), " -\t\n\r\0\x0B" ) : '';
+				$exact_result  = is_string( $key ) ? \check_password_reset_key( $key, $login ) : null;
+				$spaced_result = '' !== $decorated_key ? \check_password_reset_key( $decorated_key, $login ) : null;
+				$wrong_key     = is_string( $key ) ? \check_password_reset_key( self::mutate_secret( $key ), $login ) : null;
+				$wrong_login   = is_string( $key ) ? \check_password_reset_key( $key, strtoupper( $login ) ) : null;
+				$empty_key     = \check_password_reset_key( " \t-|", $login );
+				$empty_login   = is_string( $key ) ? \check_password_reset_key( $key, '' ) : null;
+
+				self::collect_failure(
+					$failures,
+					$exact_result instanceof \WP_User
+						&& $exact_result->ID === $user_id
+						&& $spaced_result instanceof \WP_User
+						&& $spaced_result->ID === $user_id
+						&& self::is_error_code( $wrong_key, 'invalid_key' )
+						&& self::is_error_code( $wrong_login, 'invalid_key' )
+						&& self::is_error_code( $empty_key, 'invalid_key' )
+						&& self::is_error_code( $empty_login, 'invalid_key' ),
+					'reset key validation accepts normalized key punctuation and rejects wrong keys/logins/empties',
+					array(
+						'decoratedKey' => self::describe_string( $decorated_key ),
+						'exactResult'  => self::describe_value( $exact_result ),
+						'spacedResult' => self::describe_value( $spaced_result ),
+						'wrongKey'     => self::describe_value( $wrong_key ),
+						'wrongLogin'   => self::describe_value( $wrong_login ),
+						'emptyKey'     => self::describe_value( $empty_key ),
+						'emptyLogin'   => self::describe_value( $empty_login ),
+					)
+				);
+
+				$expired_key     = self::token( $ctx->fork( 'expired-key' ), 20 );
+				$expired_started = time() - $expiration_duration - $ctx->int( 1, 120 );
+				\wp_update_user(
+					array(
+						'ID'                  => $user_id,
+						'user_activation_key' => $expired_started . ':' . \wp_fast_hash( $expired_key ),
+					)
+				);
+				$expired_result = \check_password_reset_key( $expired_key, $login );
+
+				$legacy_key = self::token( $ctx->fork( 'legacy-key' ), 20 );
+				\wp_update_user(
+					array(
+						'ID'                  => $user_id,
+						'user_activation_key' => $legacy_key,
+					)
+				);
+				$legacy_expired  = \check_password_reset_key( $legacy_key, $login );
+				$expired_override = true;
+				$legacy_override = \check_password_reset_key( $legacy_key, $login );
+
+				$timeless_key = self::token( $ctx->fork( 'timeless-key' ), 20 );
+				\wp_update_user(
+					array(
+						'ID'                  => $user_id,
+						'user_activation_key' => \wp_fast_hash( $timeless_key ),
+					)
+				);
+				$timeless_override = \check_password_reset_key( $timeless_key, $login );
+				$expired_override  = false;
+
+				self::collect_failure(
+					$failures,
+					self::is_error_code( $expired_result, 'expired_key' )
+						&& self::is_error_code( $legacy_expired, 'expired_key' )
+						&& $legacy_override instanceof \WP_User
+						&& $legacy_override->ID === $user_id
+						&& $timeless_override instanceof \WP_User
+						&& $timeless_override->ID === $user_id
+						&& count( $expired_key_events ) >= 3
+						&& in_array( $user_id, array_column( $expired_key_events, 'userId' ), true ),
+					'expired current hashes fail closed while legacy plaintext/timeless hashes flow through the expired-key filter',
+					array(
+						'expirationDuration' => $expiration_duration,
+						'expiredStarted'     => $expired_started,
+						'expiredResult'      => self::describe_value( $expired_result ),
+						'legacyExpired'      => self::describe_value( $legacy_expired ),
+						'legacyOverride'     => self::describe_value( $legacy_override ),
+						'timelessOverride'   => self::describe_value( $timeless_override ),
+						'expiredKeyEvents'   => self::describe_value( $expired_key_events ),
+					)
+				);
+
+				$new_key      = \get_password_reset_key( $user );
+				$old_after_new = is_string( $key ) ? \check_password_reset_key( $key, $login ) : null;
+				$new_result   = is_string( $new_key ) ? \check_password_reset_key( $new_key, $login ) : null;
+
+				self::collect_failure(
+					$failures,
+					is_string( $new_key )
+						&& $new_key !== $key
+						&& self::is_error_code( $old_after_new, 'invalid_key' )
+						&& $new_result instanceof \WP_User
+						&& $new_result->ID === $user_id,
+					'new password reset keys replace older keys for the same account',
+					array(
+						'oldKey'      => self::describe_value( $key ),
+						'newKey'      => self::describe_value( $new_key ),
+						'oldAfterNew' => self::describe_value( $old_after_new ),
+						'newResult'   => self::describe_value( $new_result ),
+					)
+				);
+			}
+		} finally {
+			\remove_action( 'retrieve_password', $retrieve_action );
+			\remove_action( 'retrieve_password_key', $key_action, 10 );
+			\remove_filter( 'allow_password_reset', $allow_filter, 10 );
+			\remove_filter( 'password_reset_expiration', $expiration_filter );
+			\remove_filter( 'password_reset_key_expired', $expired_key_filter, 10 );
+
+			$filters_restored = false === \has_filter( 'retrieve_password', $retrieve_action )
+				&& false === \has_filter( 'retrieve_password_key', $key_action )
+				&& false === \has_filter( 'allow_password_reset', $allow_filter )
+				&& false === \has_filter( 'password_reset_expiration', $expiration_filter )
+				&& false === \has_filter( 'password_reset_key_expired', $expired_key_filter );
+
+			self::reset_stub_content();
+			$content_counts_after = self::stub_content_counts();
+		}
+
+		self::collect_failure(
+			$failures,
+			$filters_restored
+				&& is_array( $content_counts_after )
+				&& 0 === array_sum( array_map( 'intval', $content_counts_after ) ),
+			'password reset key lifecycle restores scoped hooks and in-memory content state',
+			array(
+				'filtersRestored'    => $filters_restored,
+				'contentCountsAfter' => self::describe_value( $content_counts_after ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'account-security.password-reset-key.lifecycle-and-fail-closed-paths',
+			array() === $failures,
+			array(
+				'userId'           => $user_id,
+				'login'            => $login,
+				'expiration'       => $expiration_duration,
+				'retrieveEvents'   => count( $retrieve_events ),
+				'keyEvents'        => count( $key_events ),
+				'allowEvents'      => count( $allow_events ),
+				'expirationEvents' => count( $expiration_events ),
+				'expiredEvents'    => count( $expired_key_events ),
+				'failures'         => array_slice( $failures, 0, 5 ),
+			)
+		);
+	}
+
 	private static function check_recovery_key_service( \ComponentFuzz\FuzzContext $ctx ): array {
 		$failures = array();
 		$service  = new \WP_Recovery_Mode_Key_Service();
@@ -1148,6 +1497,30 @@ final class AccountSecuritySurface {
 		self::$application_passwords = array();
 	}
 
+	private static function can_reset_stub_content(): bool {
+		return isset( $GLOBALS['wpdb'] )
+			&& $GLOBALS['wpdb'] instanceof \Component_Fuzz_WPDB_Stub
+			&& method_exists( $GLOBALS['wpdb'], 'component_fuzz_reset_content' );
+	}
+
+	private static function reset_stub_content(): void {
+		if ( self::can_reset_stub_content() ) {
+			$GLOBALS['wpdb']->component_fuzz_reset_content();
+		}
+	}
+
+	private static function stub_content_counts(): ?array {
+		if (
+			isset( $GLOBALS['wpdb'] )
+			&& $GLOBALS['wpdb'] instanceof \Component_Fuzz_WPDB_Stub
+			&& method_exists( $GLOBALS['wpdb'], 'component_fuzz_content_counts' )
+		) {
+			return $GLOBALS['wpdb']->component_fuzz_content_counts();
+		}
+
+		return null;
+	}
+
 	private static function recovery_key_records(): array {
 		$records = \get_option( 'recovery_keys', array() );
 		return is_array( $records ) ? $records : array();
@@ -1195,6 +1568,15 @@ final class AccountSecuritySurface {
 		}
 
 		return $cases;
+	}
+
+	private static function login_case( \ComponentFuzz\FuzzContext $ctx ): string {
+		return sprintf(
+			'cfz_reset_%d_%s_%s',
+			$ctx->iteration(),
+			self::token( $ctx->fork( 'login-a' ), 8 ),
+			self::token( $ctx->fork( 'login-b' ), 10 )
+		);
 	}
 
 	private static function recovery_token_case( \ComponentFuzz\FuzzContext $ctx ): string {
@@ -1470,6 +1852,7 @@ final class AccountSecuritySurface {
 		foreach (
 			array(
 				'pagenow',
+				'current_user',
 				'wp_roles',
 				'wp_user_roles',
 				'wp_actions',

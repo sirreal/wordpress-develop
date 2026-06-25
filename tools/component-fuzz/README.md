@@ -17,8 +17,9 @@ database, network requests, or a configured site.
   query pipeline ordering, validation filters, callback exception handling, and
   unregister/re-register behavior.
 - `account-security`: no-DB account recovery and security APIs, including
-  application password lifecycle/hash/authentication behavior, recovery
-  key/cookie validation, and paused extension storage transitions.
+  application password lifecycle/hash/authentication behavior, password-reset
+  key lifecycle validation, recovery key/cookie validation, and paused
+  extension storage transitions.
 - `admin-ajax`: bounded admin-AJAX response helper coverage, including
   captured `wp_die()` handlers, JSON response helpers, `WP_Ajax_Response`
   XML boundaries, nonce/capability failures, Heartbeat nonce hook branches,
