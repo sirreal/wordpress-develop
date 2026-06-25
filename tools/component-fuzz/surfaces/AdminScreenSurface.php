@@ -774,13 +774,13 @@ final class AdminScreenSurface {
 		$filtered_per_page  = $default_per_page + $ctx->int( 3, 25 );
 		$layout_columns_max = $ctx->int( 2, 5 );
 		$layout_default     = $ctx->int( 1, $layout_columns_max );
-		$layout_calls       = array();
-		$per_page_calls     = array();
-		$submit_filter_before = \has_filter( 'screen_options_show_submit', '__return_true' );
-		$globals_snapshot   = self::snapshot_globals( array( 'current_screen', 'screen_layout_columns', 'taxnow', 'typenow' ) );
-		$meta_html          = '';
-		$columns_during     = null;
-		$globals_after_render = array();
+		$layout_calls          = array();
+		$per_page_calls        = array();
+		$submit_filter_before  = \has_filter( 'screen_options_show_submit', '__return_true' );
+		$globals_snapshot      = self::snapshot_globals( array( 'current_screen', 'screen_layout_columns', 'taxnow', 'typenow' ) );
+		$meta_html             = '';
+		$columns_during        = null;
+		$globals_after_render  = array();
 
 		$layout_filter = static function ( array $columns, string $screen_id, \WP_Screen $seen_screen ) use ( &$layout_calls, $screen ): array {
 			$layout_calls[] = array(
@@ -835,8 +835,8 @@ final class AdminScreenSurface {
 			while ( ob_get_level() > $meta_ob_level ) {
 				ob_end_clean();
 			}
-			if ( false === $submit_filter_before ) {
-				\remove_filter( 'screen_options_show_submit', '__return_true' );
+			if ( 10 !== $submit_filter_before ) {
+				\remove_filter( 'screen_options_show_submit', '__return_true', 10 );
 			}
 			\remove_filter( $per_page_option, $per_page_filter, 10 );
 			\remove_filter( 'screen_layout_columns', $layout_filter, 10 );
