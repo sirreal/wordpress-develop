@@ -48,6 +48,7 @@ final class UpdateInstallUpgraderSurface {
 			$rows[] = self::check_update_transient_helpers( $ctx, $case );
 			$rows[] = self::check_download_package_paths( $ctx, $case );
 			$rows[] = self::check_install_package_lifecycle( $ctx, $case );
+			$rows[] = self::check_install_package_temp_backup_cleanup( $ctx, $case );
 			$rows[] = self::check_plugin_theme_package_validation( $ctx, $case );
 			$rows[] = self::check_upgrade_no_update_paths( $ctx, $case );
 			$rows[] = self::check_auto_update_decisions( $ctx, $case );
@@ -639,6 +640,282 @@ final class UpdateInstallUpgraderSurface {
 		);
 	}
 
+	private static function check_install_package_temp_backup_cleanup( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures       = array();
+		$events         = array();
+		$observed_paths = array();
+		$skin           = new \Automatic_Upgrader_Skin();
+		$upgrader       = self::initialized_upgrader( \WP_Upgrader::class, $skin );
+
+		$success_slug        = $case['plugin']['tempBackupSuccessSlug'];
+		$failure_slug        = $case['plugin']['tempBackupFailureSlug'];
+		$success_backup_args = self::temp_backup_args( $case, $success_slug );
+		$failure_backup_args = self::temp_backup_args( $case, $failure_slug );
+		$success_backup_path = self::temp_backup_path( $case, $success_slug );
+		$failure_backup_path = self::temp_backup_path( $case, $failure_slug );
+		$http_before         = self::$http_request_count;
+
+		$pre_install = static function ( $response, array $hook_extra ) use ( &$events ) {
+			if ( empty( $hook_extra['component_fuzz_temp_backup_case'] ) ) {
+				return $response;
+			}
+
+			$events[] = 'pre:' . $hook_extra['component_fuzz_temp_backup_case'] . ':' . ( $hook_extra['type'] ?? 'missing' ) . ':' . ( $hook_extra['action'] ?? 'missing' );
+			return $response;
+		};
+		$source_selection = static function ( $source, string $remote_source, $filter_upgrader, array $hook_extra ) use ( $upgrader, &$events, &$observed_paths ) {
+			if ( empty( $hook_extra['component_fuzz_temp_backup_case'] ) ) {
+				return $source;
+			}
+
+			$observed_paths[] = $source;
+			$observed_paths[] = $remote_source;
+			$events[]         = 'source:' . $hook_extra['component_fuzz_temp_backup_case'] . ':' . basename( rtrim( $remote_source, '/\\' ) ) . ':' . ( $filter_upgrader === $upgrader ? 'same' : 'different' );
+			return $source;
+		};
+		$clear_destination = static function ( $removed, string $local_destination, string $remote_destination, array $hook_extra ) use ( &$events, &$observed_paths ) {
+			if ( empty( $hook_extra['component_fuzz_temp_backup_case'] ) ) {
+				return $removed;
+			}
+
+			$observed_paths[] = $local_destination;
+			$observed_paths[] = $remote_destination;
+			$events[]         = 'clear:' . $hook_extra['component_fuzz_temp_backup_case'] . ':' . ( \is_wp_error( $removed ) ? $removed->get_error_code() : ( true === $removed ? 'true' : 'other' ) ) . ':' . basename( $local_destination );
+			return $removed;
+		};
+		$post_install = static function ( $response, array $hook_extra, array $result ) use ( &$events, &$observed_paths ) {
+			if ( empty( $hook_extra['component_fuzz_temp_backup_case'] ) ) {
+				return $response;
+			}
+
+			foreach ( array( 'source', 'destination', 'local_destination', 'remote_destination' ) as $key ) {
+				if ( isset( $result[ $key ] ) && is_string( $result[ $key ] ) ) {
+					$observed_paths[] = $result[ $key ];
+				}
+			}
+
+			$events[] = 'post:' . $hook_extra['component_fuzz_temp_backup_case'] . ':' . basename( $result['destination'] ?? '' ) . ':' . count( $result['source_files'] ?? array() );
+			if ( 'failure' === $hook_extra['component_fuzz_temp_backup_case'] ) {
+				return new \WP_Error( 'component_fuzz_post_install_failed', 'Component fuzz post-install failure.' );
+			}
+
+			return $response;
+		};
+
+		\add_filter( 'upgrader_pre_install', $pre_install, 10, 2 );
+		\add_filter( 'upgrader_source_selection', $source_selection, 10, 4 );
+		\add_filter( 'upgrader_clear_destination', $clear_destination, 10, 4 );
+		\add_filter( 'upgrader_post_install', $post_install, 10, 3 );
+		try {
+			$success_result = self::call(
+				static function () use ( $upgrader, $case, $success_backup_args ) {
+					return $upgrader->install_package(
+						array(
+							'source'                      => $case['paths']['tempBackupSuccessSource'],
+							'destination'                 => $case['paths']['tempBackupSuccessDestination'],
+							'clear_destination'           => true,
+							'clear_working'               => true,
+							'abort_if_destination_exists' => false,
+							'hook_extra'                  => array(
+								'type'                            => 'plugin',
+								'action'                          => 'update',
+								'temp_backup'                     => $success_backup_args,
+								'component_fuzz_temp_backup_case' => 'success',
+							),
+						)
+					);
+				}
+			);
+			$success_after_install = array(
+				'destinationNewExists' => file_exists( $case['paths']['tempBackupSuccessDestination'] . '/' . $success_slug . '.php' ),
+				'destinationOldExists' => file_exists( $case['paths']['tempBackupSuccessDestination'] . '/old-version.php' ),
+				'backupOldExists'      => file_exists( $success_backup_path . '/old-version.php' ),
+				'workingExists'        => file_exists( $case['paths']['tempBackupSuccessSource'] ),
+			);
+			$delete_result         = self::call(
+				static function () use ( $upgrader, $success_backup_args ) {
+					return $upgrader->delete_temp_backup( array( $success_backup_args ) );
+				}
+			);
+			$success_after_delete  = array(
+				'destinationNewExists' => file_exists( $case['paths']['tempBackupSuccessDestination'] . '/' . $success_slug . '.php' ),
+				'backupExists'         => file_exists( $success_backup_path ),
+			);
+
+			$failure_result = self::call(
+				static function () use ( $upgrader, $case, $failure_backup_args ) {
+					return $upgrader->install_package(
+						array(
+							'source'                      => $case['paths']['tempBackupFailureSource'],
+							'destination'                 => $case['paths']['tempBackupFailureDestination'],
+							'clear_destination'           => true,
+							'clear_working'               => true,
+							'abort_if_destination_exists' => false,
+							'hook_extra'                  => array(
+								'type'                            => 'plugin',
+								'action'                          => 'update',
+								'temp_backup'                     => $failure_backup_args,
+								'component_fuzz_temp_backup_case' => 'failure',
+							),
+						)
+					);
+				}
+			);
+			$failure_after_install = array(
+				'destinationNewExists' => file_exists( $case['paths']['tempBackupFailureDestination'] . '/' . $failure_slug . '.php' ),
+				'destinationOldExists' => file_exists( $case['paths']['tempBackupFailureDestination'] . '/old-version.php' ),
+				'backupOldExists'      => file_exists( $failure_backup_path . '/old-version.php' ),
+				'workingExists'        => file_exists( $case['paths']['tempBackupFailureSource'] ),
+			);
+			$restore_result        = self::call(
+				static function () use ( $upgrader, $failure_backup_args ) {
+					return $upgrader->restore_temp_backup( array( $failure_backup_args ) );
+				}
+			);
+			$failure_after_restore = array(
+				'destinationNewExists' => file_exists( $case['paths']['tempBackupFailureDestination'] . '/' . $failure_slug . '.php' ),
+				'destinationOldExists' => file_exists( $case['paths']['tempBackupFailureDestination'] . '/old-version.php' ),
+				'backupExists'         => file_exists( $failure_backup_path ),
+			);
+		} finally {
+			\remove_filter( 'upgrader_pre_install', $pre_install, 10 );
+			\remove_filter( 'upgrader_source_selection', $source_selection, 10 );
+			\remove_filter( 'upgrader_clear_destination', $clear_destination, 10 );
+			\remove_filter( 'upgrader_post_install', $post_install, 10 );
+		}
+
+		self::record_failure_if(
+			$failures,
+			$success_result['threw'] || ! is_array( $success_result['value'] ),
+			'WP_Upgrader.install_package.temp-backup-success-return-array',
+			array( 'call' => self::describe_call( $success_result ) )
+		);
+		if ( ! $success_result['threw'] && is_array( $success_result['value'] ) ) {
+			$source_files = $success_result['value']['source_files'] ?? array();
+			sort( $source_files );
+			self::record_failure_if(
+				$failures,
+				\trailingslashit( $success_result['value']['source'] ) !== \trailingslashit( $case['paths']['tempBackupSuccessSource'] . '/' . $success_slug )
+					|| \untrailingslashit( $success_result['value']['destination'] ) !== \untrailingslashit( $case['paths']['tempBackupSuccessDestination'] )
+					|| \untrailingslashit( $success_result['value']['local_destination'] ) !== \untrailingslashit( $case['paths']['tempBackupSuccessDestination'] )
+					|| \untrailingslashit( $success_result['value']['remote_destination'] ) !== \untrailingslashit( $case['paths']['tempBackupSuccessDestination'] )
+					|| true !== $success_result['value']['clear_destination']
+					|| array( 'assets', $success_slug . '.php' ) !== $source_files,
+				'WP_Upgrader.install_package.temp-backup-result-metadata',
+				array(
+					'result'      => $success_result['value'],
+					'sourceFiles' => $source_files,
+				)
+			);
+		}
+		self::record_failure_if(
+			$failures,
+			array(
+				'destinationNewExists' => true,
+				'destinationOldExists' => false,
+				'backupOldExists'      => true,
+				'workingExists'        => false,
+			) !== $success_after_install,
+			'WP_Upgrader.install_package.temp-backup-moves-old-and-clears-working',
+			$success_after_install
+		);
+		self::record_failure_if(
+			$failures,
+			$delete_result['threw'] || true !== $delete_result['value'] || array(
+				'destinationNewExists' => true,
+				'backupExists'         => false,
+			) !== $success_after_delete,
+			'WP_Upgrader.delete_temp_backup.removes-backup-after-success',
+			array(
+				'call'  => self::describe_call( $delete_result ),
+				'state' => $success_after_delete,
+			)
+		);
+		self::record_failure_if(
+			$failures,
+			$failure_result['threw'] || ! self::wp_error_has_code( $failure_result['value'], 'component_fuzz_post_install_failed' ) || array(
+				'destinationNewExists' => true,
+				'destinationOldExists' => false,
+				'backupOldExists'      => true,
+				'workingExists'        => false,
+			) !== $failure_after_install,
+			'WP_Upgrader.install_package.post-install-error-keeps-restorable-backup',
+			array(
+				'call'  => self::describe_call( $failure_result ),
+				'state' => $failure_after_install,
+			)
+		);
+		self::record_failure_if(
+			$failures,
+			$restore_result['threw'] || true !== $restore_result['value'] || array(
+				'destinationNewExists' => false,
+				'destinationOldExists' => true,
+				'backupExists'         => false,
+			) !== $failure_after_restore,
+			'WP_Upgrader.restore_temp_backup.replaces-failed-install-with-old-version',
+			array(
+				'call'  => self::describe_call( $restore_result ),
+				'state' => $failure_after_restore,
+			)
+		);
+		self::record_failure_if(
+			$failures,
+			array(
+				'pre:success:plugin:update',
+				'source:success:success-source:same',
+				'clear:success:true:' . $success_slug,
+				'post:success:' . $success_slug . ':2',
+				'pre:failure:plugin:update',
+				'source:failure:failure-source:same',
+				'clear:failure:true:' . $failure_slug,
+				'post:failure:' . $failure_slug . ':2',
+			) !== $events,
+			'WP_Upgrader.install_package.temp-backup-hook-order-cardinality',
+			array( 'events' => $events )
+		);
+
+		$observed_paths = array_merge(
+			$observed_paths,
+			array(
+				$success_backup_path,
+				$failure_backup_path,
+				$case['paths']['tempBackupSuccessDestination'],
+				$case['paths']['tempBackupFailureDestination'],
+			)
+		);
+		foreach ( $observed_paths as $path ) {
+			self::record_failure_if(
+				$failures,
+				! is_string( $path ) || ! self::path_is_within( $path, $case['paths']['tempRoot'] ),
+				'WP_Upgrader.install_package.temp-backup-path-remains-in-sandbox',
+				array(
+					'path' => $path,
+					'root' => $case['paths']['tempRoot'],
+				)
+			);
+		}
+		self::record_failure_if(
+			$failures,
+			self::$http_request_count !== $http_before,
+			'WP_Upgrader.install_package.temp-backup-does-not-attempt-network',
+			array(
+				'before' => $http_before,
+				'after'  => self::$http_request_count,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'update-install-upgrader.install-package.temp-backup-cleanup-contracts',
+			$failures,
+			array(
+				'successSlug' => $success_slug,
+				'failureSlug' => $failure_slug,
+				'events'      => $events,
+			)
+		);
+	}
+
 	private static function check_plugin_theme_package_validation( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
 		$failures = array();
 
@@ -1173,11 +1450,13 @@ final class UpdateInstallUpgraderSurface {
 	}
 
 	private static function case_for_context( \ComponentFuzz\FuzzContext $ctx, string $temp_root ): array {
-		$used        = array();
-		$plugin_slug = self::slug( $ctx->fork( 'plugin-slug' ), 'cfz-plugin', $used );
-		$theme_slug  = self::slug( $ctx->fork( 'theme-slug' ), 'cfz-theme', $used );
-		$parent_slug = self::slug( $ctx->fork( 'parent-theme-slug' ), 'cfz-parent', $used );
-		$suffix      = $ctx->identifier( 4, 10 ) . '-' . $ctx->int( 10, 99 );
+		$used                     = array();
+		$plugin_slug              = self::slug( $ctx->fork( 'plugin-slug' ), 'cfz-plugin', $used );
+		$theme_slug               = self::slug( $ctx->fork( 'theme-slug' ), 'cfz-theme', $used );
+		$parent_slug              = self::slug( $ctx->fork( 'parent-theme-slug' ), 'cfz-parent', $used );
+		$temp_backup_success_slug = self::slug( $ctx->fork( 'temp-backup-success-slug' ), 'cfz-backup-success', $used );
+		$temp_backup_failure_slug = self::slug( $ctx->fork( 'temp-backup-failure-slug' ), 'cfz-backup-failure', $used );
+		$suffix                   = $ctx->identifier( 4, 10 ) . '-' . $ctx->int( 10, 99 );
 
 		$plugin_file = $plugin_slug . '/' . $plugin_slug . '.php';
 		$wp_content  = $temp_root . '/wp-content';
@@ -1191,13 +1470,17 @@ final class UpdateInstallUpgraderSurface {
 			'installDestination'      => $temp_root . '/install/destination',
 			'emptySource'             => $temp_root . '/install/empty-source',
 			'emptyDestination'        => $temp_root . '/install/empty-destination',
-			'pluginValidSource'       => $temp_root . '/validation/plugin-valid',
-			'pluginInvalidSource'     => $temp_root . '/validation/plugin-invalid',
-			'pluginIncompatibleSource' => $temp_root . '/validation/plugin-incompatible',
-			'themeValidSource'        => $temp_root . '/validation/theme-valid',
-			'themeMissingStyleSource' => $temp_root . '/validation/theme-missing-style',
-			'themeMissingIndexSource' => $temp_root . '/validation/theme-missing-index',
-			'themeChildSource'        => $temp_root . '/validation/theme-child',
+			'tempBackupSuccessSource'      => $temp_root . '/install/temp-backup/success-source',
+			'tempBackupSuccessDestination' => $wp_content . '/plugins/' . $temp_backup_success_slug,
+			'tempBackupFailureSource'      => $temp_root . '/install/temp-backup/failure-source',
+			'tempBackupFailureDestination' => $wp_content . '/plugins/' . $temp_backup_failure_slug,
+			'pluginValidSource'            => $temp_root . '/validation/plugin-valid',
+			'pluginInvalidSource'          => $temp_root . '/validation/plugin-invalid',
+			'pluginIncompatibleSource'     => $temp_root . '/validation/plugin-incompatible',
+			'themeValidSource'             => $temp_root . '/validation/theme-valid',
+			'themeMissingStyleSource'      => $temp_root . '/validation/theme-missing-style',
+			'themeMissingIndexSource'      => $temp_root . '/validation/theme-missing-index',
+			'themeChildSource'             => $temp_root . '/validation/theme-child',
 		);
 
 		$plugin_name = 'Component Fuzz Plugin ' . $suffix;
@@ -1208,12 +1491,14 @@ final class UpdateInstallUpgraderSurface {
 				'suffix' => $suffix,
 			),
 			'plugin'    => array(
-				'slug'        => $plugin_slug,
-				'file'        => $plugin_file,
-				'missingFile' => $plugin_slug . '/missing.php',
-				'name'        => $plugin_name,
-				'version'     => self::version( $ctx->fork( 'plugin-version' ), 1 ),
-				'newVersion'  => self::version( $ctx->fork( 'plugin-new-version' ), 2 ),
+				'slug'                  => $plugin_slug,
+				'file'                  => $plugin_file,
+				'missingFile'           => $plugin_slug . '/missing.php',
+				'name'                  => $plugin_name,
+				'version'               => self::version( $ctx->fork( 'plugin-version' ), 1 ),
+				'newVersion'            => self::version( $ctx->fork( 'plugin-new-version' ), 2 ),
+				'tempBackupSuccessSlug' => $temp_backup_success_slug,
+				'tempBackupFailureSlug' => $temp_backup_failure_slug,
 			),
 			'theme'     => array(
 				'slug'        => $theme_slug,
@@ -1374,6 +1659,18 @@ final class UpdateInstallUpgraderSurface {
 		self::write_file( $paths['installSelectedSource'] . '/installed.php', "<?php\n// installed by component fuzz\n" );
 		self::write_file( $paths['installSelectedSource'] . '/assets/readme.txt', "selected source\n" );
 		self::write_file( $paths['installDestination'] . '/old.txt', "old destination content\n" );
+		self::write_file( $paths['tempBackupSuccessDestination'] . '/old-version.php', "<?php\n// old success plugin\n" );
+		self::write_file(
+			$paths['tempBackupSuccessSource'] . '/' . $case['plugin']['tempBackupSuccessSlug'] . '/' . $case['plugin']['tempBackupSuccessSlug'] . '.php',
+			self::plugin_header( $case['plugin']['name'] . ' Temp Backup Success', $case['plugin']['newVersion'], '5.6', '5.0' )
+		);
+		self::write_file( $paths['tempBackupSuccessSource'] . '/' . $case['plugin']['tempBackupSuccessSlug'] . '/assets/new.txt', "new success plugin asset\n" );
+		self::write_file( $paths['tempBackupFailureDestination'] . '/old-version.php', "<?php\n// old failure plugin\n" );
+		self::write_file(
+			$paths['tempBackupFailureSource'] . '/' . $case['plugin']['tempBackupFailureSlug'] . '/' . $case['plugin']['tempBackupFailureSlug'] . '.php',
+			self::plugin_header( $case['plugin']['name'] . ' Temp Backup Failure', $case['plugin']['newVersion'], '5.6', '5.0' )
+		);
+		self::write_file( $paths['tempBackupFailureSource'] . '/' . $case['plugin']['tempBackupFailureSlug'] . '/assets/new.txt', "new failure plugin asset\n" );
 
 		self::write_file(
 			$paths['pluginValidSource'] . '/' . $case['plugin']['slug'] . '.php',
@@ -1400,6 +1697,18 @@ final class UpdateInstallUpgraderSurface {
 			$paths['themeChildSource'] . '/style.css',
 			self::theme_header( $case['theme']['name'] . ' Child', $case['theme']['version'], $case['theme']['parentSlug'], '5.6', '5.0' )
 		);
+	}
+
+	private static function temp_backup_args( array $case, string $slug ): array {
+		return array(
+			'slug' => $slug,
+			'src'  => $case['paths']['wpContent'] . '/plugins',
+			'dir'  => 'plugins',
+		);
+	}
+
+	private static function temp_backup_path( array $case, string $slug ): string {
+		return $case['paths']['wpContent'] . '/upgrade-temp-backup/plugins/' . $slug;
 	}
 
 	private static function plugin_header( string $name, string $version, string $requires_php, string $requires_wp ): string {
@@ -1674,6 +1983,13 @@ final class UpdateInstallUpgraderSurface {
 
 	private static function wp_error_has_code( $value, string $code ): bool {
 		return \is_wp_error( $value ) && in_array( $code, $value->get_error_codes(), true );
+	}
+
+	private static function path_is_within( string $path, string $root ): bool {
+		$path = \trailingslashit( \wp_normalize_path( $path ) );
+		$root = \trailingslashit( \wp_normalize_path( $root ) );
+
+		return 0 === strpos( $path, $root );
 	}
 
 	private static function slug( \ComponentFuzz\FuzzContext $ctx, string $prefix, array &$used ): string {
