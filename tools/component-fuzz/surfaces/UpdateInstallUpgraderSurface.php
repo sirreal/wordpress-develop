@@ -733,8 +733,8 @@ final class UpdateInstallUpgraderSurface {
 				'workingExists'        => file_exists( $case['paths']['tempBackupSuccessSource'] ),
 			);
 			$delete_result         = self::call(
-				static function () use ( $upgrader, $success_backup_args ) {
-					return $upgrader->delete_temp_backup( array( $success_backup_args ) );
+				static function () use ( $upgrader ) {
+					return $upgrader->delete_temp_backup();
 				}
 			);
 			$success_after_delete  = array(
@@ -767,9 +767,10 @@ final class UpdateInstallUpgraderSurface {
 				'backupOldExists'      => file_exists( $failure_backup_path . '/old-version.php' ),
 				'workingExists'        => file_exists( $case['paths']['tempBackupFailureSource'] ),
 			);
+			self::set_object_property( $upgrader, 'temp_restores', array( $failure_backup_args ) );
 			$restore_result        = self::call(
-				static function () use ( $upgrader, $failure_backup_args ) {
-					return $upgrader->restore_temp_backup( array( $failure_backup_args ) );
+				static function () use ( $upgrader ) {
+					return $upgrader->restore_temp_backup();
 				}
 			);
 			$failure_after_restore = array(
@@ -829,6 +830,7 @@ final class UpdateInstallUpgraderSurface {
 			array(
 				'call'  => self::describe_call( $delete_result ),
 				'state' => $success_after_delete,
+				'mode'  => 'default-internal-temp-backups',
 			)
 		);
 		self::record_failure_if(
@@ -856,6 +858,7 @@ final class UpdateInstallUpgraderSurface {
 			array(
 				'call'  => self::describe_call( $restore_result ),
 				'state' => $failure_after_restore,
+				'mode'  => 'default-internal-temp-restores',
 			)
 		);
 		self::record_failure_if(
@@ -1986,10 +1989,44 @@ final class UpdateInstallUpgraderSurface {
 	}
 
 	private static function path_is_within( string $path, string $root ): bool {
-		$path = \trailingslashit( \wp_normalize_path( $path ) );
-		$root = \trailingslashit( \wp_normalize_path( $root ) );
+		$path = self::normalize_path_segments( $path );
+		$root = rtrim( self::normalize_path_segments( $root ), '/' );
 
-		return 0 === strpos( $path, $root );
+		return $path === $root || str_starts_with( $path, $root . '/' );
+	}
+
+	private static function normalize_path_segments( string $path ): string {
+		$path     = \wp_normalize_path( $path );
+		$absolute = str_starts_with( $path, '/' );
+		$segments = array();
+
+		foreach ( explode( '/', $path ) as $segment ) {
+			if ( '' === $segment || '.' === $segment ) {
+				continue;
+			}
+
+			if ( '..' === $segment ) {
+				if ( array() !== $segments && '..' !== end( $segments ) ) {
+					array_pop( $segments );
+				} elseif ( ! $absolute ) {
+					$segments[] = $segment;
+				}
+				continue;
+			}
+
+			$segments[] = $segment;
+		}
+
+		if ( array() === $segments ) {
+			return $absolute ? '/' : '.';
+		}
+
+		return ( $absolute ? '/' : '' ) . implode( '/', $segments );
+	}
+
+	private static function set_object_property( object $object, string $property, $value ): void {
+		$reflection = new \ReflectionProperty( $object, $property );
+		$reflection->setValue( $object, $value );
 	}
 
 	private static function slug( \ComponentFuzz\FuzzContext $ctx, string $prefix, array &$used ): string {
