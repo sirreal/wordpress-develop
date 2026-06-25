@@ -32,6 +32,7 @@ final class FeedRenderingSurface {
 			$rows[] = self::check_atom_posts_template( $ctx->fork( 'atom' ), $case );
 			$rows[] = self::check_comments_rss2_template( $ctx->fork( 'comments-rss2' ), $case );
 			$rows[] = self::check_comments_atom_template( $ctx->fork( 'comments-atom' ), $case );
+			$rows[] = self::check_feed_template_hook_payloads( $ctx->fork( 'hook-payloads' ), $case );
 			$rows[] = self::check_content_mode_switches( $ctx->fork( 'content-modes' ), $case );
 			$rows[] = self::check_feed_link_helpers( $ctx->fork( 'feed-links' ), $case );
 			$rows[] = self::check_feed_loop_helpers( $ctx->fork( 'helpers' ), $case );
@@ -67,6 +68,7 @@ final class FeedRenderingSurface {
 
 		foreach (
 			array(
+				'add_action',
 				'add_filter',
 				'add_metadata',
 				'add_theme_support',
@@ -95,10 +97,12 @@ final class FeedRenderingSurface {
 				'get_post_comments_feed_link',
 				'get_self_link',
 				'get_the_content_feed',
+				'has_filter',
 				'have_comments',
 				'have_posts',
 				'html_type_rss',
 				'is_wp_error',
+				'remove_action',
 				'remove_filter',
 				'rss_enclosure',
 				'sanitize_title_with_dashes',
@@ -338,6 +342,320 @@ final class FeedRenderingSurface {
 		);
 
 		return self::result( $ctx, 'feed-rendering.atom-comments-template.threading-and-escaping', $failures, $output );
+	}
+
+	private static function check_feed_template_hook_payloads( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures = array();
+		$outputs  = array();
+		$events   = array(
+			'rss_tag_pre'        => array(),
+			'rss2_ns'            => array(),
+			'rss2_comments_ns'   => array(),
+			'atom_ns'            => array(),
+			'atom_comments_ns'   => array(),
+			'rss2_head'          => array(),
+			'atom_head'          => array(),
+			'commentsrss2_head'  => array(),
+			'comments_atom_head' => array(),
+			'rss2_item'          => array(),
+			'atom_entry'         => array(),
+			'commentrss2_item'   => array(),
+			'comment_atom_entry' => array(),
+		);
+		$payload  = array(
+			'namespace'         => 'https://component-fuzz.example.test/feed/' . rawurlencode( $case['token'] ),
+			'commentsNamespace' => 'https://component-fuzz.example.test/comments/' . rawurlencode( $case['token'] ),
+			'attr'              => 'Hook attr "' . self::safe_text( $ctx, 4, 20 ) . '" & <node> CDATA ]]>',
+			'text'              => 'Hook payload <node attr="x"> & CDATA ]]> ' . self::safe_text( $ctx, 4, 24 ),
+		);
+		$hooked   = array();
+
+		$current_context = static function (): array {
+			$query = $GLOBALS['wp_query'] ?? null;
+
+			if ( $query instanceof \WP_Query ) {
+				return array(
+					'feed'          => (string) ( $query->query_vars['feed'] ?? '' ),
+					'isCommentFeed' => $query->is_comment_feed(),
+				);
+			}
+
+			return array(
+				'feed'          => '',
+				'isCommentFeed' => false,
+			);
+		};
+
+		$add_action = static function ( string $hook, callable $callback, int $accepted_args = 0 ) use ( &$hooked ): void {
+			\add_action( $hook, $callback, 10, $accepted_args );
+			$hooked[] = array(
+				'hook'     => $hook,
+				'callback' => $callback,
+				'priority' => 10,
+			);
+		};
+
+		$add_action(
+			'rss_tag_pre',
+			static function ( string $context ) use ( &$events ): void {
+				$events['rss_tag_pre'][] = $context;
+			},
+			1
+		);
+		$add_action(
+			'rss2_ns',
+			static function () use ( &$events, $payload, $current_context ): void {
+				$events['rss2_ns'][] = $current_context();
+				echo "\n\txmlns:cfz=\"" . self::xml_attr( $payload['namespace'] ) . '"';
+			}
+		);
+		$add_action(
+			'rss2_comments_ns',
+			static function () use ( &$events, $payload, $current_context ): void {
+				$events['rss2_comments_ns'][] = $current_context();
+				echo "\n\txmlns:cfzc=\"" . self::xml_attr( $payload['commentsNamespace'] ) . '"';
+			}
+		);
+		$add_action(
+			'atom_ns',
+			static function () use ( &$events, $payload, $current_context ): void {
+				$events['atom_ns'][] = $current_context();
+				echo "\n\txmlns:cfz=\"" . self::xml_attr( $payload['namespace'] ) . '"';
+			}
+		);
+		$add_action(
+			'atom_comments_ns',
+			static function () use ( &$events, $payload, $current_context ): void {
+				$events['atom_comments_ns'][] = $current_context();
+				echo "\n\txmlns:cfzc=\"" . self::xml_attr( $payload['commentsNamespace'] ) . '"';
+			}
+		);
+		$add_action(
+			'rss2_head',
+			static function () use ( &$events, $payload, $current_context ): void {
+				$events['rss2_head'][] = $current_context();
+				echo "\t<cfz:feed-marker data-cfz=\"" . self::xml_attr( $payload['attr'] ) . '">'
+					. self::xml_text( $payload['text'] )
+					. "</cfz:feed-marker>\n";
+			}
+		);
+		$add_action(
+			'atom_head',
+			static function () use ( &$events, $payload, $current_context ): void {
+				$events['atom_head'][] = $current_context();
+				echo "\t<cfz:feed-marker data-cfz=\"" . self::xml_attr( $payload['attr'] ) . '">'
+					. self::xml_text( $payload['text'] )
+					. "</cfz:feed-marker>\n";
+			}
+		);
+		$add_action(
+			'commentsrss2_head',
+			static function () use ( &$events, $payload, $current_context ): void {
+				$events['commentsrss2_head'][] = $current_context();
+				echo "\t<cfzc:comments-feed-marker data-cfz=\"" . self::xml_attr( $payload['attr'] ) . '">'
+					. self::xml_text( $payload['text'] )
+					. "</cfzc:comments-feed-marker>\n";
+			}
+		);
+		$add_action(
+			'comments_atom_head',
+			static function () use ( &$events, $payload, $current_context ): void {
+				$events['comments_atom_head'][] = $current_context();
+				echo "\t<cfzc:comments-feed-marker data-cfz=\"" . self::xml_attr( $payload['attr'] ) . '">'
+					. self::xml_text( $payload['text'] )
+					. "</cfzc:comments-feed-marker>\n";
+			}
+		);
+		$add_action(
+			'rss2_item',
+			static function () use ( &$events, $payload ): void {
+				$post    = $GLOBALS['post'] ?? null;
+				$post_id = $post instanceof \WP_Post ? (int) $post->ID : 0;
+
+				$events['rss2_item'][] = $post_id;
+				echo "\t\t<cfz:item-marker post-id=\"" . self::xml_attr( (string) $post_id ) . '" data-cfz="' . self::xml_attr( $payload['attr'] ) . '">'
+					. self::xml_text( $payload['text'] )
+					. "</cfz:item-marker>\n";
+			}
+		);
+		$add_action(
+			'atom_entry',
+			static function () use ( &$events, $payload ): void {
+				$post    = $GLOBALS['post'] ?? null;
+				$post_id = $post instanceof \WP_Post ? (int) $post->ID : 0;
+
+				$events['atom_entry'][] = $post_id;
+				echo "\t\t<cfz:item-marker post-id=\"" . self::xml_attr( (string) $post_id ) . '" data-cfz="' . self::xml_attr( $payload['attr'] ) . '">'
+					. self::xml_text( $payload['text'] )
+					. "</cfz:item-marker>\n";
+			}
+		);
+		$add_action(
+			'commentrss2_item',
+			static function ( $comment_id, $comment_post_id ) use ( &$events, $payload ): void {
+				$events['commentrss2_item'][] = array(
+					'commentId' => (int) $comment_id,
+					'postId'    => (int) $comment_post_id,
+				);
+				echo "\t\t<cfzc:comment-marker comment-id=\"" . self::xml_attr( (string) $comment_id ) . '" post-id="' . self::xml_attr( (string) $comment_post_id ) . '" data-cfz="' . self::xml_attr( $payload['attr'] ) . '">'
+					. self::xml_text( $payload['text'] )
+					. "</cfzc:comment-marker>\n";
+			},
+			2
+		);
+		$add_action(
+			'comment_atom_entry',
+			static function ( $comment_id, $comment_post_id ) use ( &$events, $payload ): void {
+				$events['comment_atom_entry'][] = array(
+					'commentId' => (int) $comment_id,
+					'postId'    => (int) $comment_post_id,
+				);
+				echo "\t\t<cfzc:comment-marker comment-id=\"" . self::xml_attr( (string) $comment_id ) . '" post-id="' . self::xml_attr( (string) $comment_post_id ) . '" data-cfz="' . self::xml_attr( $payload['attr'] ) . '">'
+					. self::xml_text( $payload['text'] )
+					. "</cfzc:comment-marker>\n";
+			},
+			2
+		);
+
+		try {
+			self::set_posts_query( $case, 'rss2', false );
+			$outputs['rss2'] = self::render_template( 'feed-rss2.php' );
+
+			self::set_posts_query( $case, 'atom', false );
+			$outputs['atom'] = self::render_template( 'feed-atom.php' );
+
+			self::set_posts_query( $case, 'rss2', true );
+			$outputs['rss2-comments'] = self::render_template( 'feed-rss2-comments.php' );
+
+			self::set_posts_query( $case, 'atom', true );
+			$outputs['atom-comments'] = self::render_template( 'feed-atom-comments.php' );
+		} finally {
+			foreach ( $hooked as $entry ) {
+				\remove_action( $entry['hook'], $entry['callback'], $entry['priority'] );
+			}
+		}
+
+		$leaked_hooks = array();
+		foreach ( $hooked as $entry ) {
+			if ( false !== \has_filter( $entry['hook'], $entry['callback'] ) ) {
+				$leaked_hooks[] = $entry['hook'];
+			}
+		}
+
+		$parsed = array_map(
+			static fn ( string $output ): array => self::parse_xml( $output ),
+			$outputs
+		);
+		$xml_failures = array_filter(
+			$parsed,
+			static fn ( array $xml ): bool => ! $xml['ok']
+		);
+
+		$rss2_context          = array(
+			'feed'          => 'rss2',
+			'isCommentFeed' => false,
+		);
+		$atom_context          = array(
+			'feed'          => 'atom',
+			'isCommentFeed' => false,
+		);
+		$rss2_comments_context = array(
+			'feed'          => 'comments-rss2',
+			'isCommentFeed' => true,
+		);
+		$atom_comments_context = array(
+			'feed'          => 'comments-atom',
+			'isCommentFeed' => true,
+		);
+		$expected_post_ids     = array_map(
+			static fn ( \WP_Post $post ): int => (int) $post->ID,
+			$case['posts']
+		);
+		$expected_comments     = array_map(
+			static fn ( \WP_Comment $comment ): array => array(
+				'commentId' => (int) $comment->comment_ID,
+				'postId'    => (int) $comment->comment_post_ID,
+			),
+			$case['comments']
+		);
+		$combined              = implode( "\n", $outputs );
+		$expected_marker_count = 4 + ( 2 * count( $case['posts'] ) ) + ( 2 * count( $case['comments'] ) );
+
+		self::collect_failure(
+			$failures,
+			array() === $xml_failures,
+			'Custom feed-template hook payloads keep all four feed templates parseable XML',
+			array( 'parsed' => $parsed )
+		);
+		self::collect_failure(
+			$failures,
+			array( 'rss2', 'atom', 'rss2-comments', 'atom-comments' ) === $events['rss_tag_pre']
+				&& array( $rss2_context, $rss2_comments_context ) === $events['rss2_ns']
+				&& array( $rss2_comments_context ) === $events['rss2_comments_ns']
+				&& array( $atom_context, $atom_comments_context ) === $events['atom_ns']
+				&& array( $atom_comments_context ) === $events['atom_comments_ns']
+				&& array( $rss2_context ) === $events['rss2_head']
+				&& array( $atom_context ) === $events['atom_head']
+				&& array( $rss2_comments_context ) === $events['commentsrss2_head']
+				&& array( $atom_comments_context ) === $events['comments_atom_head'],
+			'Feed template namespace and header hooks fire with the expected feed contexts',
+			array(
+				'rssTagPre'       => $events['rss_tag_pre'],
+				'namespaceEvents' => array(
+					'rss2'         => $events['rss2_ns'],
+					'rss2Comments' => $events['rss2_comments_ns'],
+					'atom'         => $events['atom_ns'],
+					'atomComments' => $events['atom_comments_ns'],
+				),
+				'headEvents'      => array(
+					'rss2'         => $events['rss2_head'],
+					'rss2Comments' => $events['commentsrss2_head'],
+					'atom'         => $events['atom_head'],
+					'atomComments' => $events['comments_atom_head'],
+				),
+			)
+		);
+		self::collect_failure(
+			$failures,
+			$expected_post_ids === $events['rss2_item']
+				&& $expected_post_ids === $events['atom_entry']
+				&& $expected_comments === $events['commentrss2_item']
+				&& $expected_comments === $events['comment_atom_entry'],
+			'Feed item hooks observe current synthetic post/comment IDs in loop order',
+			array(
+				'expectedPostIds'  => $expected_post_ids,
+				'rss2PostIds'      => $events['rss2_item'],
+				'atomPostIds'      => $events['atom_entry'],
+				'expectedComments' => $expected_comments,
+				'rss2Comments'     => $events['commentrss2_item'],
+				'atomComments'     => $events['comment_atom_entry'],
+			)
+		);
+		self::collect_failure(
+			$failures,
+			$expected_marker_count === substr_count( $combined, 'data-cfz="' . self::xml_attr( $payload['attr'] ) . '"' )
+				&& $expected_marker_count === substr_count( $combined, self::xml_text( $payload['text'] ) )
+				&& str_contains( $outputs['rss2'], 'xmlns:cfz="' . self::xml_attr( $payload['namespace'] ) . '"' )
+				&& str_contains( $outputs['atom'], 'xmlns:cfz="' . self::xml_attr( $payload['namespace'] ) . '"' )
+				&& str_contains( $outputs['rss2-comments'], 'xmlns:cfzc="' . self::xml_attr( $payload['commentsNamespace'] ) . '"' )
+				&& str_contains( $outputs['atom-comments'], 'xmlns:cfzc="' . self::xml_attr( $payload['commentsNamespace'] ) . '"' )
+				&& ! str_contains( $combined, '<node attr=' )
+				&& ! str_contains( $combined, 'CDATA ]]>' ),
+			'Generated hook payloads are escaped in namespace, header, and item output',
+			array(
+				'expectedMarkerCount' => $expected_marker_count,
+				'actualMarkerCount'   => substr_count( $combined, 'data-cfz="' . self::xml_attr( $payload['attr'] ) . '"' ),
+				'payload'             => $payload,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			array() === $leaked_hooks,
+			'Temporary feed hook payload callbacks are removed after rendering',
+			array( 'leakedHooks' => $leaked_hooks )
+		);
+
+		return self::result( $ctx, 'feed-rendering.template-hook-payloads.context-escaping-and-loop-ids', $failures, $combined );
 	}
 
 	private static function check_content_mode_switches( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
