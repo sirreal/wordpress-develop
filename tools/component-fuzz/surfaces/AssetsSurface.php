@@ -43,6 +43,7 @@ final class AssetsSurface {
 			$rows[] = self::check_style_dependency_print_order( $ctx, $case );
 			$rows[] = self::check_inline_scripts( $ctx, $case );
 			$rows[] = self::check_inline_styles( $ctx, $case );
+			$rows[] = self::check_style_data_output_metadata( $ctx, $case );
 			$rows[] = self::check_script_data_args( $ctx, $case );
 			$rows[] = self::check_printed_output_escaping( $ctx, $case );
 			$rows[] = self::check_loader_tag_filters( $ctx, $case );
@@ -501,6 +502,177 @@ final class AssetsSurface {
 				),
 				'outputPreview' => self::preview( $output ),
 				'call'          => self::describe_call( $printed ),
+			)
+		);
+	}
+
+	private static function check_style_data_output_metadata( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		self::reset_styles_global();
+
+		$ltr_handle = self::handle( $ctx, 'style-data-ltr-rtl' );
+		$ltr_media  = 'screen and (min-width: 12px)';
+		\wp_register_style( $ltr_handle, 'assets/style-data/ltr.min.css', array(), 'ltr-1', $ltr_media );
+		$ltr_added = array(
+			\wp_style_add_data( $ltr_handle, 'rtl', true ),
+			\wp_style_add_data( $ltr_handle, 'suffix', '.min' ),
+		);
+		\wp_enqueue_style( $ltr_handle );
+		$ltr_print = self::capture_output( static fn() => \wp_print_styles() );
+		$ltr_links = self::link_tags_by_id( $ltr_print['output'] );
+
+		self::reset_styles_global();
+		\wp_styles()->text_direction = 'rtl';
+
+		$alt_handle         = self::handle( $ctx, 'style-data-alt-rtl' );
+		$custom_handle      = self::handle( $ctx, 'style-data-custom-rtl' );
+		$conditional_handle = self::handle( $ctx, 'style-data-conditional' );
+		$conditional_dep    = self::handle( $ctx, 'style-data-conditional-dep' );
+		$alt_title          = 'Alt "<Choice>" & contrast';
+		$alt_media          = 'screen and (orientation: landscape)';
+		$custom_media       = 'print';
+		$filter_seen        = array();
+
+		\wp_register_style( $alt_handle, 'assets/style-data/theme.min.css', array(), 'meta-1', $alt_media );
+		$alt_added = array(
+			\wp_style_add_data( $alt_handle, 'alt', true ),
+			\wp_style_add_data( $alt_handle, 'title', $alt_title ),
+			\wp_style_add_data( $alt_handle, 'rtl', true ),
+			\wp_style_add_data( $alt_handle, 'suffix', '.min' ),
+		);
+
+		\wp_register_style( $custom_handle, 'assets/style-data/editor.css', array(), 'meta-2', $custom_media );
+		$custom_added = array(
+			\wp_style_add_data( $custom_handle, 'rtl', 'assets/style-data/editor-custom-rtl.css' ),
+		);
+
+		\wp_register_style( $conditional_dep, 'assets/style-data/conditional-dep.css', array(), 'meta-3' );
+		\wp_register_style( $conditional_handle, 'assets/style-data/conditional.css', array( $conditional_dep ), 'meta-4' );
+		$conditional_added = \wp_style_add_data( $conditional_handle, 'conditional', '_required-conditional-dependency_' );
+		$conditional_deps  = \wp_styles()->registered[ $conditional_handle ]->deps ?? null;
+
+		$style_filter = static function ( string $html, string $handle, string $href, string $media ) use ( &$filter_seen, $alt_handle, $custom_handle ): string {
+			if ( in_array( $handle, array( $alt_handle, $custom_handle ), true ) ) {
+				$filter_seen[] = array(
+					'handle' => $handle,
+					'id'     => self::first_attribute( $html, 'id' ),
+					'href'   => $href,
+					'media'  => $media,
+				);
+			}
+
+			return str_replace( '<link ', '<link data-cfz-style-meta="' . esc_attr( (string) count( $filter_seen ) ) . '" ', $html );
+		};
+
+		\wp_enqueue_style( $alt_handle );
+		\wp_enqueue_style( $custom_handle );
+		\wp_enqueue_style( $conditional_handle );
+		\add_filter( 'style_loader_tag', $style_filter, 10, 4 );
+		try {
+			$rtl_print = self::capture_output( static fn() => \wp_print_styles() );
+		} finally {
+			\remove_filter( 'style_loader_tag', $style_filter, 10 );
+		}
+
+		$rtl_links = self::link_tags_by_id( $rtl_print['output'] );
+
+		$ltr_link     = $ltr_links[ "{$ltr_handle}-css" ] ?? array();
+		$alt_link     = $rtl_links[ "{$alt_handle}-css" ] ?? array();
+		$alt_rtl_link = $rtl_links[ "{$alt_handle}-rtl-css" ] ?? array();
+		$custom_link  = $rtl_links[ "{$custom_handle}-css" ] ?? array();
+		$custom_rtl   = $rtl_links[ "{$custom_handle}-rtl-css" ] ?? array();
+
+		$filter_ids     = array_column( $filter_seen, 'id' );
+		$filter_handles = array_column( $filter_seen, 'handle' );
+		$filter_media   = array_column( $filter_seen, 'media' );
+		$filter_hrefs   = array_column( $filter_seen, 'href' );
+
+		$alt_pos         = self::attribute_position( $rtl_print['output'], 'id', "{$alt_handle}-css" );
+		$alt_rtl_pos     = self::attribute_position( $rtl_print['output'], 'id', "{$alt_handle}-rtl-css" );
+		$custom_pos      = self::attribute_position( $rtl_print['output'], 'id', "{$custom_handle}-css" );
+		$custom_rtl_pos  = self::attribute_position( $rtl_print['output'], 'id', "{$custom_handle}-rtl-css" );
+		$conditional_pos = self::attribute_position( $rtl_print['output'], 'id', "{$conditional_handle}-css" );
+		$dep_pos         = self::attribute_position( $rtl_print['output'], 'id', "{$conditional_dep}-css" );
+
+		$ok = ! $ltr_print['threw']
+			&& ! $rtl_print['threw']
+			&& array( true, true ) === $ltr_added
+			&& isset( $ltr_link['href'] )
+			&& 'stylesheet' === ( $ltr_link['rel'] ?? null )
+			&& $ltr_media === ( $ltr_link['media'] ?? null )
+			&& str_contains( $ltr_link['href'], 'assets/style-data/ltr.min.css' )
+			&& ! isset( $ltr_links[ "{$ltr_handle}-rtl-css" ] )
+			&& array( true, true, true, true ) === $alt_added
+			&& array( true ) === $custom_added
+			&& true === $conditional_added
+			&& array() === $conditional_deps
+			&& 'alternate stylesheet' === ( $alt_link['rel'] ?? null )
+			&& 'alternate stylesheet' === ( $alt_rtl_link['rel'] ?? null )
+			&& $alt_title === ( $alt_link['title'] ?? null )
+			&& $alt_title === ( $alt_rtl_link['title'] ?? null )
+			&& $alt_media === ( $alt_link['media'] ?? null )
+			&& $alt_media === ( $alt_rtl_link['media'] ?? null )
+			&& 'stylesheet' === ( $custom_link['rel'] ?? null )
+			&& 'stylesheet' === ( $custom_rtl['rel'] ?? null )
+			&& ! isset( $custom_link['title'] )
+			&& ! isset( $custom_rtl['title'] )
+			&& $custom_media === ( $custom_link['media'] ?? null )
+			&& $custom_media === ( $custom_rtl['media'] ?? null )
+			&& isset( $alt_link['href'], $alt_rtl_link['href'], $custom_link['href'], $custom_rtl['href'] )
+			&& str_contains( $alt_link['href'], 'assets/style-data/theme.min.css' )
+			&& str_contains( $alt_rtl_link['href'], 'assets/style-data/theme-rtl.min.css' )
+			&& str_contains( $custom_link['href'], 'assets/style-data/editor.css' )
+			&& str_contains( $custom_rtl['href'], 'assets/style-data/editor-custom-rtl.css' )
+			&& false !== $alt_pos
+			&& false !== $alt_rtl_pos
+			&& false !== $custom_pos
+			&& false !== $custom_rtl_pos
+			&& $alt_pos < $alt_rtl_pos
+			&& $alt_rtl_pos < $custom_pos
+			&& $custom_pos < $custom_rtl_pos
+			&& false === $conditional_pos
+			&& false === $dep_pos
+			&& array( $alt_handle, $alt_handle, $custom_handle, $custom_handle ) === $filter_handles
+			&& array( "{$alt_handle}-css", "{$alt_handle}-rtl-css", "{$custom_handle}-css", "{$custom_handle}-rtl-css" ) === $filter_ids
+			&& array( $alt_media, $alt_media, $custom_media, $custom_media ) === $filter_media
+			&& str_contains( $filter_hrefs[0] ?? '', 'assets/style-data/theme.min.css' )
+			&& str_contains( $filter_hrefs[1] ?? '', 'assets/style-data/theme-rtl.min.css' )
+			&& str_contains( $filter_hrefs[2] ?? '', 'assets/style-data/editor.css' )
+			&& str_contains( $filter_hrefs[3] ?? '', 'assets/style-data/editor-custom-rtl.css' )
+			&& '0' !== ( $alt_link['data-cfz-style-meta'] ?? '0' )
+			&& '0' !== ( $alt_rtl_link['data-cfz-style-meta'] ?? '0' )
+			&& '0' !== ( $custom_link['data-cfz-style-meta'] ?? '0' )
+			&& '0' !== ( $custom_rtl['data-cfz-style-meta'] ?? '0' )
+			&& false === \has_filter( 'style_loader_tag', $style_filter );
+
+		return $ctx->result(
+			'assets.styles.add-data-output-metadata',
+			$ok,
+			self::case_data( $case ) + array(
+				'ltrHandle'         => $ltr_handle,
+				'altHandle'         => $alt_handle,
+				'customHandle'      => $custom_handle,
+				'conditionalHandle' => $conditional_handle,
+				'conditionalDep'    => $conditional_dep,
+				'ltrAdded'          => $ltr_added,
+				'altAdded'          => $alt_added,
+				'customAdded'       => $custom_added,
+				'conditionalAdded'  => $conditional_added,
+				'conditionalDeps'   => $conditional_deps,
+				'ltrLinks'          => $ltr_links,
+				'rtlLinks'          => $rtl_links,
+				'filterSeen'        => $filter_seen,
+				'positions'         => array(
+					'alt'            => $alt_pos,
+					'altRtl'         => $alt_rtl_pos,
+					'custom'         => $custom_pos,
+					'customRtl'      => $custom_rtl_pos,
+					'conditional'    => $conditional_pos,
+					'conditionalDep' => $dep_pos,
+				),
+				'ltrOutputPreview'  => self::preview( $ltr_print['output'] ),
+				'rtlOutputPreview'  => self::preview( $rtl_print['output'] ),
+				'ltrCall'           => self::describe_call( $ltr_print ),
+				'rtlCall'           => self::describe_call( $rtl_print ),
 			)
 		);
 	}
@@ -1111,6 +1283,27 @@ final class AssetsSurface {
 		}
 
 		return false;
+	}
+
+	private static function link_tags_by_id( string $html ): array {
+		$processor = new \WP_HTML_Tag_Processor( $html );
+		$links     = array();
+
+		while ( $processor->next_tag( 'LINK' ) ) {
+			$attributes = array();
+			foreach ( array( 'id', 'rel', 'href', 'media', 'title', 'data-cfz-style-meta' ) as $attribute ) {
+				$value = $processor->get_attribute( $attribute );
+				if ( null !== $value ) {
+					$attributes[ $attribute ] = true === $value ? true : (string) $value;
+				}
+			}
+
+			if ( isset( $attributes['id'] ) && is_string( $attributes['id'] ) ) {
+				$links[ $attributes['id'] ] = $attributes;
+			}
+		}
+
+		return $links;
 	}
 
 	private static function decode_html_attribute( string $value ): string {
