@@ -11,6 +11,7 @@ final class MediaIngestSurface {
 	private const FILENAME_CASES        = 18;
 	private const DIRECT_HANDLE_CASES   = 3;
 	private const REJECTION_CASES       = 6;
+	private const OVERRIDE_ERROR_CASES  = 6;
 	private const PREVIEW_BYTES         = 180;
 	private const WPDB_PRIVATE_PROPS    = array(
 		'component_fuzz_options',
@@ -68,6 +69,7 @@ final class MediaIngestSurface {
 
 				$rows[] = self::check_filename_and_filetype_boundaries( $ctx->fork( 'filename-filetype' ), $temp_root );
 				$rows[] = self::check_prefilter_and_direct_handle_boundaries( $ctx->fork( 'direct-handles' ), $temp_root );
+				$rows[] = self::check_handle_override_error_semantics( $ctx->fork( 'handle-overrides' ), $temp_root );
 				foreach ( self::check_successful_ingest_flows( $ctx->fork( 'success' ), $temp_root ) as $row ) {
 					$rows[] = $row;
 				}
@@ -579,6 +581,496 @@ final class MediaIngestSurface {
 			array() === $failures,
 			array(
 				'cases'    => self::DIRECT_HANDLE_CASES,
+				'events'   => $events,
+				'failures' => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
+	private static function check_handle_override_error_semantics( \ComponentFuzz\FuzzContext $ctx, string $temp_root ): array {
+		$failures      = array();
+		$source_dir    = $temp_root . DIRECTORY_SEPARATOR . 'override-error-source';
+		$upload_root   = self::$upload_root;
+		$case_rows     = array();
+		$token         = trim( preg_replace( '/[^a-z0-9]+/', '-', strtolower( $ctx->identifier( 4, 9 ) ) ), '-' );
+		if ( '' === $token ) {
+			$token = 'token-' . $ctx->int( 1000, 9999 );
+		}
+		$form_action   = 'component_fuzz_override_form_' . preg_replace( '/[^a-z0-9_]+/', '_', strtolower( $ctx->fork( 'form-action' )->identifier( 4, 8 ) ) );
+		$post_snapshot = $_POST;
+		$before_counts = self::content_counts();
+		$events        = array(
+			'errors'          => array(),
+			'handled'         => array(),
+			'moves'           => array(),
+			'overrides'       => array(),
+			'sequence'        => array(),
+			'uniqueCallbacks' => array(),
+			'uniqueFilters'   => array(),
+			'uploadDirs'      => array(),
+		);
+
+		$upload_dir_filter = static function ( array $uploads ) use ( &$events ): array {
+			$filtered = MediaIngestSurface::filter_upload_dir( $uploads );
+			$events['uploadDirs'][] = array(
+				'path'   => $filtered['path'] ?? null,
+				'subdir' => $filtered['subdir'] ?? null,
+			);
+			return $filtered;
+		};
+		$handle_filter     = static function ( array $upload, string $context ) use ( &$events ): array {
+			$events['handled'][] = array(
+				'context'  => $context,
+				'basename' => isset( $upload['file'] ) ? basename( (string) $upload['file'] ) : null,
+				'type'     => $upload['type'] ?? null,
+			);
+			return $upload;
+		};
+		$error_handler     = static function ( array &$file, string $message ) use ( &$events ): array {
+			$event = array(
+				'name'        => $file['name'] ?? null,
+				'message'     => $message,
+				'error'       => $file['error'] ?? null,
+				'size'        => $file['size'] ?? null,
+				'tmpBasename' => isset( $file['tmp_name'] ) ? basename( (string) $file['tmp_name'] ) : null,
+				'tmpExists'   => isset( $file['tmp_name'] ) && file_exists( (string) $file['tmp_name'] ),
+			);
+			$events['errors'][]   = $event;
+			$events['sequence'][] = array(
+				'hook' => 'error',
+				'name' => $file['name'] ?? null,
+			);
+
+			return array(
+				'error'                => $message,
+				'component_fuzz_error' => $event,
+			);
+		};
+		$action_overrides  = static function ( $overrides, array $file ) use ( &$events, $form_action, $error_handler ): array {
+			$overrides = is_array( $overrides ) ? $overrides : array();
+			$events['overrides'][] = array(
+				'hook'     => "{$form_action}_overrides",
+				'name'     => $file['name'] ?? null,
+				'testForm' => $overrides['test_form'] ?? null,
+			);
+			$events['sequence'][]  = array(
+				'hook' => 'overrides',
+				'name' => $file['name'] ?? null,
+			);
+
+			$overrides['mimes']                = MediaIngestSurface::allowed_mimes();
+			$overrides['test_form']            = true;
+			$overrides['upload_error_handler'] = $error_handler;
+
+			return $overrides;
+		};
+		$move_filter       = static function ( $move_new_file, array $file, string $new_file, string $type ) use ( &$events ) {
+			$events['moves'][] = array(
+				'name'        => $file['name'] ?? null,
+				'newBasename' => basename( $new_file ),
+				'type'        => $type,
+			);
+			return $move_new_file;
+		};
+
+		$unique_callback_base = 'callback-' . $token;
+		$unique_callback      = static function ( string $dir, string $name, string $ext ) use ( &$events, $unique_callback_base ): string {
+			$events['uniqueCallbacks'][] = array(
+				'dir'  => $dir,
+				'name' => $name,
+				'ext'  => $ext,
+			);
+
+			return $unique_callback_base . strtolower( $ext );
+		};
+		$unique_filter        = static function (
+			string $filename,
+			string $ext,
+			string $dir,
+			$callback,
+			array $alt_filenames,
+			$number
+		) use ( &$events, $unique_callback, $unique_callback_base ): string {
+			if ( ! is_callable( $callback ) ) {
+				return $filename;
+			}
+
+			$events['uniqueFilters'][] = array(
+				'filename'     => $filename,
+				'ext'          => $ext,
+				'dir'          => $dir,
+				'sameCallback' => $callback === $unique_callback,
+				'altCount'     => count( $alt_filenames ),
+				'number'       => $number,
+			);
+
+			if ( 0 === strpos( $filename, $unique_callback_base ) ) {
+				return 'filtered-' . $filename;
+			}
+
+			return $filename;
+		};
+
+		\add_filter( 'upload_dir', $upload_dir_filter );
+		\add_filter( 'wp_handle_upload', $handle_filter, 10, 2 );
+		\add_filter( "{$form_action}_overrides", $action_overrides, 10, 2 );
+		\add_filter( 'pre_move_uploaded_file', $move_filter, 10, 4 );
+		\add_filter( 'wp_unique_filename', $unique_filter, 10, 6 );
+
+		try {
+			$too_large_message = 'component fuzz form too large ' . $token;
+			$error_strings     = array_fill( 0, 9, 'component fuzz unexpected upload error' );
+			$error_strings[ UPLOAD_ERR_FORM_SIZE ] = $too_large_message;
+			$too_large_case = array(
+				'label'       => 'upload-error-custom-handler-payload',
+				'filename'    => 'too-large-' . $token . '.txt',
+				'fixtureName' => 'too-large.txt',
+				'mime'        => 'text/plain',
+				'bytes'       => "too large\n" . $ctx->ascii( 4, 16 ),
+				'error'       => UPLOAD_ERR_FORM_SIZE,
+			);
+			$too_large_path = self::write_fixture( $source_dir, 'too-large.txt', $too_large_case['bytes'] );
+			$before_files   = self::list_files_recursive( (string) $upload_root );
+			$before_moves   = count( $events['moves'] );
+			$before_handles = count( $events['handled'] );
+			$too_large_file = null === $too_large_path ? array() : self::file_array( $too_large_case, $too_large_path );
+			$too_large      = null === $too_large_path ? null : \wp_handle_upload(
+				$too_large_file,
+				array(
+					'mimes'               => self::allowed_mimes(),
+					'test_form'           => false,
+					'upload_error_handler' => $error_handler,
+					'upload_error_strings' => $error_strings,
+				)
+			);
+			$too_large_event = $events['errors'][ count( $events['errors'] ) - 1 ] ?? null;
+			$case_rows[]     = array(
+				'case'   => self::case_summary( $too_large_case ),
+				'result' => self::describe_result( $too_large ),
+			);
+
+			self::collect_failure(
+				$failures,
+				is_array( $too_large )
+					&& $too_large_message === ( $too_large['error'] ?? null )
+					&& is_array( $too_large_event )
+					&& $too_large_message === ( $too_large_event['message'] ?? null )
+					&& UPLOAD_ERR_FORM_SIZE === ( $too_large_event['error'] ?? null )
+					&& true === ( $too_large_event['tmpExists'] ?? null )
+					&& is_string( $too_large_path )
+					&& file_exists( $too_large_path )
+					&& $before_files === self::list_files_recursive( (string) $upload_root )
+					&& $before_moves === count( $events['moves'] )
+					&& $before_handles === count( $events['handled'] ),
+				'wp_handle_upload uses custom upload_error_handler payloads for UPLOAD_ERR_* without moving files',
+				array(
+					'case'        => self::case_summary( $too_large_case ),
+					'result'      => self::describe_result( $too_large ),
+					'event'       => $too_large_event,
+					'beforeFiles' => $before_files,
+					'afterFiles'  => self::list_files_recursive( (string) $upload_root ),
+				)
+			);
+
+			$form_case = array(
+				'label'       => 'action-overrides-test-form-error',
+				'filename'    => 'form-' . $token . '.txt',
+				'fixtureName' => 'form.txt',
+				'mime'        => 'text/plain',
+				'bytes'       => "form mismatch\n" . $ctx->ascii( 4, 16 ),
+			);
+			$form_path = self::write_fixture( $source_dir, 'form.txt', $form_case['bytes'] );
+			$form_file = null === $form_path ? array() : self::file_array( $form_case, $form_path );
+			$_POST['action'] = 'component_fuzz_wrong_action';
+			$before_files    = self::list_files_recursive( (string) $upload_root );
+			$before_moves    = count( $events['moves'] );
+			$before_handles  = count( $events['handled'] );
+			$form_result     = null === $form_path ? null : \wp_handle_sideload(
+				$form_file,
+				array(
+					'action'    => $form_action,
+					'test_form' => true,
+				)
+			);
+			$form_event      = $events['errors'][ count( $events['errors'] ) - 1 ] ?? null;
+			$form_sequence   = array();
+			foreach ( $events['sequence'] as $event ) {
+				if ( is_array( $event ) && $form_case['filename'] === ( $event['name'] ?? null ) ) {
+					$form_sequence[] = $event['hook'] ?? null;
+				}
+			}
+			$case_rows[] = array(
+				'case'   => self::case_summary( $form_case ),
+				'result' => self::describe_result( $form_result ),
+			);
+
+			self::collect_failure(
+				$failures,
+				is_array( $form_result )
+					&& \__( 'Invalid form submission.' ) === ( $form_result['error'] ?? null )
+					&& array( 'overrides', 'error' ) === $form_sequence
+					&& is_array( $form_event )
+					&& \__( 'Invalid form submission.' ) === ( $form_event['message'] ?? null )
+					&& is_string( $form_path )
+					&& file_exists( $form_path )
+					&& $before_files === self::list_files_recursive( (string) $upload_root )
+					&& $before_moves === count( $events['moves'] )
+					&& $before_handles === count( $events['handled'] ),
+				'action-specific override filters can inject error handlers before test_form rejects a sideload',
+				array(
+					'case'        => self::case_summary( $form_case ),
+					'result'      => self::describe_result( $form_result ),
+					'sequence'    => $form_sequence,
+					'overrides'   => $events['overrides'],
+					'beforeFiles' => $before_files,
+					'afterFiles'  => self::list_files_recursive( (string) $upload_root ),
+				)
+			);
+			$_POST = $post_snapshot;
+
+			$empty_error = \is_multisite()
+				? \__( 'File is empty. Please upload something more substantial.' )
+				: sprintf(
+					\__( 'File is empty. Please upload something more substantial. This error could also be caused by uploads being disabled in your %1$s file or by %2$s being defined as smaller than %3$s in %1$s.' ),
+					'php.ini',
+					'post_max_size',
+					'upload_max_filesize'
+				);
+			$empty_case  = array(
+				'label'       => 'test-size-empty-sideload-error',
+				'filename'    => 'empty-' . $token . '.txt',
+				'fixtureName' => 'empty.txt',
+				'mime'        => 'text/plain',
+				'bytes'       => '',
+			);
+			$empty_path  = self::write_fixture( $source_dir, 'empty.txt', $empty_case['bytes'] );
+			$empty_file  = null === $empty_path ? array() : self::file_array( $empty_case, $empty_path );
+			$before_files   = self::list_files_recursive( (string) $upload_root );
+			$before_moves   = count( $events['moves'] );
+			$before_handles = count( $events['handled'] );
+			$empty_result   = null === $empty_path ? null : \wp_handle_sideload(
+				$empty_file,
+				array(
+					'mimes'               => self::allowed_mimes(),
+					'test_form'           => false,
+					'test_size'           => true,
+					'upload_error_handler' => $error_handler,
+				)
+			);
+			$empty_event    = $events['errors'][ count( $events['errors'] ) - 1 ] ?? null;
+			$case_rows[]    = array(
+				'case'   => self::case_summary( $empty_case ),
+				'result' => self::describe_result( $empty_result ),
+			);
+
+			self::collect_failure(
+				$failures,
+				is_array( $empty_result )
+					&& $empty_error === ( $empty_result['error'] ?? null )
+					&& is_array( $empty_event )
+					&& 0 === ( $empty_event['size'] ?? null )
+					&& $empty_error === ( $empty_event['message'] ?? null )
+					&& is_string( $empty_path )
+					&& file_exists( $empty_path )
+					&& $before_files === self::list_files_recursive( (string) $upload_root )
+					&& $before_moves === count( $events['moves'] )
+					&& $before_handles === count( $events['handled'] ),
+				'test_size rejects empty readable sideloads through the custom error handler without moving files',
+				array(
+					'case'   => self::case_summary( $empty_case ),
+					'result' => self::describe_result( $empty_result ),
+					'event'  => $empty_event,
+				)
+			);
+
+			$type_error = \__( 'Sorry, you are not allowed to upload this file type.' );
+			$type_case  = array(
+				'label'       => 'test-type-mimes-reject-php',
+				'filename'    => 'payload-' . $token . '.php',
+				'fixtureName' => 'payload.php',
+				'mime'        => 'application/x-php',
+				'bytes'       => "<?php echo 'component fuzz';\n",
+			);
+			$type_path  = self::write_fixture( $source_dir, 'payload.php', $type_case['bytes'] );
+			$type_file  = null === $type_path ? array() : self::file_array( $type_case, $type_path );
+			$before_files   = self::list_files_recursive( (string) $upload_root );
+			$before_moves   = count( $events['moves'] );
+			$before_handles = count( $events['handled'] );
+			$type_result    = null === $type_path ? null : \wp_handle_sideload(
+				$type_file,
+				array(
+					'mimes'               => array( 'txt' => 'text/plain' ),
+					'test_form'           => false,
+					'test_type'           => true,
+					'upload_error_handler' => $error_handler,
+				)
+			);
+			$type_event     = $events['errors'][ count( $events['errors'] ) - 1 ] ?? null;
+			$case_rows[]    = array(
+				'case'   => self::case_summary( $type_case ),
+				'result' => self::describe_result( $type_result ),
+			);
+
+			self::collect_failure(
+				$failures,
+				is_array( $type_result )
+					&& $type_error === ( $type_result['error'] ?? null )
+					&& is_array( $type_event )
+					&& $type_error === ( $type_event['message'] ?? null )
+					&& is_string( $type_path )
+					&& file_exists( $type_path )
+					&& $before_files === self::list_files_recursive( (string) $upload_root )
+					&& $before_moves === count( $events['moves'] )
+					&& $before_handles === count( $events['handled'] ),
+				'test_type and mimes reject disallowed sideload extensions before upload_dir or move filters run',
+				array(
+					'case'        => self::case_summary( $type_case ),
+					'result'      => self::describe_result( $type_result ),
+					'event'       => $type_event,
+					'beforeFiles' => $before_files,
+					'afterFiles'  => self::list_files_recursive( (string) $upload_root ),
+				)
+			);
+
+			$loose_case = array(
+				'label'       => 'test-type-disabled-allows-custom-extension',
+				'filename'    => 'loose ' . $token . '.component',
+				'fixtureName' => 'loose.component',
+				'mime'        => 'application/x-component-fuzz',
+				'bytes'       => "loose type\n" . $ctx->ascii( 4, 16 ),
+			);
+			$loose_path = self::write_fixture( $source_dir, 'loose.component', $loose_case['bytes'] );
+			$loose_file = null === $loose_path ? array() : self::file_array( $loose_case, $loose_path );
+			$loose      = null === $loose_path ? null : \wp_handle_sideload(
+				$loose_file,
+				array(
+					'mimes'     => array( 'txt' => 'text/plain' ),
+					'test_form' => false,
+					'test_type' => false,
+				)
+			);
+			$loose_file_path = is_array( $loose ) ? ( $loose['file'] ?? null ) : null;
+			$case_rows[]     = array(
+				'case'   => self::case_summary( $loose_case ),
+				'result' => self::describe_result( $loose ),
+			);
+
+			self::collect_failure(
+				$failures,
+				is_array( $loose )
+					&& ! isset( $loose['error'] )
+					&& '' === ( $loose['type'] ?? null )
+					&& is_string( $loose_file_path )
+					&& file_exists( $loose_file_path )
+					&& null !== $upload_root
+					&& self::path_starts_with( $loose_file_path, $upload_root )
+					&& basename( $loose_file_path ) === \sanitize_file_name( basename( $loose_file_path ) )
+					&& str_ends_with( basename( $loose_file_path ), '.component' )
+					&& is_string( $loose_path )
+					&& ! file_exists( $loose_path ),
+				'test_type false lets sideload bypass the mimes allowlist while still moving only inside the temp upload root',
+				array(
+					'case'       => self::case_summary( $loose_case ),
+					'result'     => self::describe_result( $loose ),
+					'uploadRoot' => $upload_root,
+					'sourceGone' => is_string( $loose_path ) ? ! file_exists( $loose_path ) : null,
+				)
+			);
+
+			$unique_case = array(
+				'label'       => 'unique-filename-callback-filter-sideload',
+				'filename'    => '../Unique ' . $token . '.TXT',
+				'fixtureName' => 'unique.txt',
+				'mime'        => 'text/plain',
+				'bytes'       => "unique callback\n" . $ctx->ascii( 4, 16 ),
+			);
+			$unique_path = self::write_fixture( $source_dir, 'unique.txt', $unique_case['bytes'] );
+			$unique_file = null === $unique_path ? array() : self::file_array( $unique_case, $unique_path );
+			$unique      = null === $unique_path ? null : \wp_handle_sideload(
+				$unique_file,
+				array(
+					'mimes'                   => self::allowed_mimes(),
+					'test_form'               => false,
+					'unique_filename_callback' => $unique_callback,
+				)
+			);
+			$unique_file_path = is_array( $unique ) ? ( $unique['file'] ?? null ) : null;
+			$unique_basename  = is_string( $unique_file_path ) ? basename( $unique_file_path ) : null;
+			$expected_unique  = 'filtered-' . $unique_callback_base . '.txt';
+			$case_rows[]      = array(
+				'case'   => self::case_summary( $unique_case ),
+				'result' => self::describe_result( $unique ),
+			);
+
+			self::collect_failure(
+				$failures,
+				is_array( $unique )
+					&& ! isset( $unique['error'] )
+					&& 'text/plain' === ( $unique['type'] ?? null )
+					&& $expected_unique === $unique_basename
+					&& is_string( $unique_file_path )
+					&& file_exists( $unique_file_path )
+					&& null !== $upload_root
+					&& self::path_starts_with( $unique_file_path, $upload_root )
+					&& basename( $unique_file_path ) === \sanitize_file_name( basename( $unique_file_path ) )
+					&& is_string( $unique_path )
+					&& ! file_exists( $unique_path )
+					&& 1 === count( $events['uniqueCallbacks'] )
+					&& 1 === count( $events['uniqueFilters'] )
+					&& true === ( $events['uniqueFilters'][0]['sameCallback'] ?? null )
+					&& is_string( $events['uniqueCallbacks'][0]['dir'] ?? null )
+					&& self::path_starts_with( (string) $events['uniqueCallbacks'][0]['dir'], (string) $upload_root ),
+				'unique_filename_callback and wp_unique_filename filter shape the real sideload destination safely',
+				array(
+					'case'            => self::case_summary( $unique_case ),
+					'result'          => self::describe_result( $unique ),
+					'expectedBasename' => $expected_unique,
+					'callbacks'       => $events['uniqueCallbacks'],
+					'filters'         => $events['uniqueFilters'],
+				)
+			);
+		} finally {
+			$_POST = $post_snapshot;
+			\remove_filter( 'wp_unique_filename', $unique_filter, 10 );
+			\remove_filter( 'pre_move_uploaded_file', $move_filter, 10 );
+			\remove_filter( "{$form_action}_overrides", $action_overrides, 10 );
+			\remove_filter( 'wp_handle_upload', $handle_filter, 10 );
+			\remove_filter( 'upload_dir', $upload_dir_filter );
+			self::cleanup_leftover_sources( $source_dir );
+		}
+
+		$after_counts = self::content_counts();
+		self::collect_failure(
+			$failures,
+			$before_counts === $after_counts
+				&& null !== $upload_root
+				&& self::upload_events_within_root( $events['uploadDirs'], $upload_root )
+				&& false === \has_filter( 'upload_dir', $upload_dir_filter )
+				&& false === \has_filter( 'wp_handle_upload', $handle_filter )
+				&& false === \has_filter( "{$form_action}_overrides", $action_overrides )
+				&& false === \has_filter( 'pre_move_uploaded_file', $move_filter )
+				&& false === \has_filter( 'wp_unique_filename', $unique_filter ),
+			'wp_handle_* override/error checks restore filters and avoid attachment DB side effects',
+			array(
+				'before'    => $before_counts,
+				'after'     => $after_counts,
+				'events'    => $events,
+				'hasFilter' => array(
+					'uploadDir'       => \has_filter( 'upload_dir', $upload_dir_filter ),
+					'handle'          => \has_filter( 'wp_handle_upload', $handle_filter ),
+					'actionOverrides' => \has_filter( "{$form_action}_overrides", $action_overrides ),
+					'preMove'         => \has_filter( 'pre_move_uploaded_file', $move_filter ),
+					'uniqueFilename'  => \has_filter( 'wp_unique_filename', $unique_filter ),
+				),
+			)
+		);
+
+		return $ctx->result(
+			'media-ingest.wp-handle-override-error-semantics',
+			array() === $failures,
+			array(
+				'cases'    => self::OVERRIDE_ERROR_CASES,
+				'rows'     => $case_rows,
 				'events'   => $events,
 				'failures' => array_slice( $failures, 0, 8 ),
 			)
