@@ -102,6 +102,7 @@ final class PluginThemeSurface {
 				'wp_cache_get',
 				'wp_cache_set',
 				'wp_cache_delete',
+				'is_multisite',
 				'is_wp_error',
 				'add_filter',
 				'remove_filter',
@@ -672,8 +673,13 @@ final class PluginThemeSurface {
 				'last_updated' => 'component-fuzz',
 			),
 		);
+		$api_guard_counts = array(
+			'pluginsApi' => 0,
+			'http'       => 0,
+		);
 		self::with_admin_plugin_dependencies_api_data(
 			$api_data,
+			$api_guard_counts,
 			static function () use ( &$failures, $api_data, $dependency_slug, $missing_slug, $main_file ) {
 				$dependency_data = \WP_Plugin_Dependencies::get_dependency_data( $dependency_slug );
 				if ( $api_data[ $dependency_slug ] !== $dependency_data ) {
@@ -704,6 +710,13 @@ final class PluginThemeSurface {
 				}
 			}
 		);
+		if ( array( 'pluginsApi' => 0, 'http' => 0 ) !== $api_guard_counts ) {
+			self::record_failure(
+				$failures,
+				'WP_Plugin_Dependencies.seeded-api-data-does-not-call-live-api',
+				array( 'guardCounts' => $api_guard_counts )
+			);
+		}
 
 		if ( ! \WP_Plugin_Dependencies::has_unmet_dependencies( $addon_file ) ) {
 			self::record_failure(
@@ -745,28 +758,60 @@ final class PluginThemeSurface {
 			);
 		}
 
-		$active_plugins = array( $dependency_file, $addon_file );
-		$network_active = array( $main_file => 1 );
+		$active_plugins = array( $addon_file );
 		if ( ! \WP_Plugin_Dependencies::has_active_dependents( $dependency_file ) ) {
 			self::record_failure(
 				$failures,
-				'WP_Plugin_Dependencies.has-active-dependents-uses-active-option-state',
+				'WP_Plugin_Dependencies.has-active-dependents-uses-local-active-option-state',
 				array(
 					'plugin'        => $dependency_file,
 					'activePlugins' => $active_plugins,
-					'networkActive' => $network_active,
 				)
 			);
 		}
+
+		if ( ! \is_multisite() ) {
+			$active_plugins = array();
+			$network_active = array( $main_file => 1 );
+			if ( \WP_Plugin_Dependencies::has_active_dependents( $dependency_file ) ) {
+				self::record_failure(
+					$failures,
+					'WP_Plugin_Dependencies.sitewide-only-dependents-are-inactive-on-single-site',
+					array(
+						'plugin'        => $dependency_file,
+						'activePlugins' => $active_plugins,
+						'networkActive' => $network_active,
+						'isMultisite'   => \is_multisite(),
+					)
+				);
+			}
+		}
 	}
 
-	private static function with_admin_plugin_dependencies_api_data( array $api_data, callable $callback ): void {
+	private static function with_admin_plugin_dependencies_api_data( array $api_data, array &$guard_counts, callable $callback ): void {
 		$previous_api_data = self::get_static_property( 'WP_Plugin_Dependencies', 'dependency_api_data' );
+		$plugins_api_guard = static function ( $result, string $action, $args ) use ( &$guard_counts ) {
+			unset( $result, $action, $args );
+
+			++$guard_counts['pluginsApi'];
+			return new \WP_Error( 'component_fuzz_plugins_api_blocked', 'Component fuzz blocked a plugin API lookup.' );
+		};
+		$http_guard        = static function ( $preempt, array $parsed_args, string $url ) use ( &$guard_counts ) {
+			unset( $preempt, $parsed_args, $url );
+
+			++$guard_counts['http'];
+			return new \WP_Error( 'component_fuzz_http_blocked', 'Component fuzz blocked a dependency API HTTP request.' );
+		};
+
 		self::set_static_property( 'WP_Plugin_Dependencies', 'dependency_api_data', $api_data );
+		\add_filter( 'plugins_api', $plugins_api_guard, PHP_INT_MAX, 3 );
+		\add_filter( 'pre_http_request', $http_guard, PHP_INT_MAX, 3 );
 
 		try {
 			self::with_plugin_dependencies_screen( true, 'plugins.php', $callback );
 		} finally {
+			\remove_filter( 'pre_http_request', $http_guard, PHP_INT_MAX );
+			\remove_filter( 'plugins_api', $plugins_api_guard, PHP_INT_MAX );
 			self::set_static_property( 'WP_Plugin_Dependencies', 'dependency_api_data', $previous_api_data );
 		}
 	}
