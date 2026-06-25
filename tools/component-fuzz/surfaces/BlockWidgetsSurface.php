@@ -611,7 +611,7 @@ final class BlockWidgetsSurface {
 			'legacy_widget'               => array(
 				'id_base' => 'legacy_widget',
 			),
-			'no-number-' . $ctx->identifier( 3, 8 ) => array(
+			'no-number-' . $ctx->identifier( 3, 8 ) . '-tail' => array(
 				'id_base' => null,
 			),
 		);
