@@ -75,6 +75,8 @@ class HttpTransporter implements HttpTransporterInterface
             } else {
                 $psr7Response = $this->client->sendRequest($psr7Request);
             }
+        } catch (NetworkException $e) {
+            throw NetworkException::fromPsr18NetworkException($psr7Request, $e);
         } catch (\WordPress\AiClientDependencies\Psr\Http\Client\NetworkExceptionInterface $e) {
             throw NetworkException::fromPsr18NetworkException($psr7Request, $e);
         } catch (\WordPress\AiClientDependencies\Psr\Http\Client\ClientExceptionInterface $e) {

@@ -83,6 +83,7 @@ final class AiClientSurface {
 				'WordPress\AiClient\Providers\Http\Exception\NetworkException',
 				'WordPress\AiClient\Providers\Models\DTO\ModelConfig',
 				'WordPress\AiClient\Results\DTO\GenerativeAiResult',
+				'WordPress\AiClientDependencies\Http\Discovery\ClassDiscovery',
 				'WordPress\AiClientDependencies\Http\Discovery\Psr18ClientDiscovery',
 				'WordPress\AiClientDependencies\Nyholm\Psr7\Factory\Psr17Factory',
 				'WP_AI_Client_Ability_Function_Resolver',
@@ -1119,10 +1120,7 @@ final class AiClientSurface {
 			)
 		);
 
-		$discovery_strategies = array();
-		foreach ( \WordPress\AiClientDependencies\Http\Discovery\Psr18ClientDiscovery::getStrategies() as $strategy ) {
-			$discovery_strategies[] = $strategy;
-		}
+		$discovery_state = self::snapshot_class_discovery_state();
 
 		$discovery_url       = 'https://' . self::domain( $case->fork( 'discovery-domain' ) ) . '/discovered';
 		$discovery_body      = (string) wp_json_encode( array( 'ping' => self::safe_text( $case->fork( 'discovery-body' ), 3, 10 ) ) );
@@ -1152,8 +1150,11 @@ final class AiClientSurface {
 
 		\add_filter( 'pre_http_request', $discovery_filter, 10, 3 );
 		try {
-			\WordPress\AiClientDependencies\Http\Discovery\Psr18ClientDiscovery::setStrategies(
-				array( \WP_AI_Client_Discovery_Strategy::class )
+			self::restore_class_discovery_state(
+				array(
+					'strategies' => array( \WP_AI_Client_Discovery_Strategy::class ),
+					'cache'      => array(),
+				)
 			);
 			$discovery_transporter = new \WordPress\AiClient\Providers\Http\HttpTransporter( null, $factory, $factory );
 			$discovery_response    = $discovery_transporter->send( $discovery_request );
@@ -1161,11 +1162,11 @@ final class AiClientSurface {
 			$discovery_throwable = $e;
 		} finally {
 			\remove_filter( 'pre_http_request', $discovery_filter, 10 );
-			\WordPress\AiClientDependencies\Http\Discovery\Psr18ClientDiscovery::setStrategies( $discovery_strategies );
-			\WordPress\AiClientDependencies\Http\Discovery\Psr18ClientDiscovery::clearCache();
+			self::restore_class_discovery_state( $discovery_state );
 		}
 
 		$discovery_args = $discovery_seen[0]['args'] ?? array();
+		$restored_state = self::snapshot_class_discovery_state();
 		self::collect_failure(
 			$failures,
 			null === $discovery_throwable
@@ -1175,7 +1176,8 @@ final class AiClientSurface {
 				&& $discovery_body === ( $discovery_args['body'] ?? null )
 				&& $discovery_response instanceof \WordPress\AiClient\Providers\Http\DTO\Response
 				&& 202 === $discovery_response->getStatusCode()
-				&& $discovery_reply === $discovery_response->getBody(),
+				&& $discovery_reply === $discovery_response->getBody()
+				&& $discovery_state === $restored_state,
 			'HTTPlug discovery finds the WordPress HTTP client for HttpTransporter',
 			array(
 				'throwable' => $discovery_throwable ? self::describe_throwable( $discovery_throwable ) : null,
@@ -1183,6 +1185,7 @@ final class AiClientSurface {
 				'response'  => $discovery_response instanceof \WordPress\AiClient\Providers\Http\DTO\Response
 					? $discovery_response->toArray()
 					: self::describe_value( $discovery_response ),
+				'stateRestored' => $discovery_state === $restored_state,
 			)
 		);
 
@@ -1567,17 +1570,40 @@ final class AiClientSurface {
 			\remove_filter( 'pre_http_request', $transport_error_filter, 10 );
 		}
 
+		$transport_error_request           = null;
+		$transport_error_request_throwable = null;
+		if ( $transport_error_throwable instanceof \WordPress\AiClient\Providers\Http\Exception\NetworkException ) {
+			try {
+				$transport_error_request = $transport_error_throwable->getRequest();
+			} catch ( \Throwable $e ) {
+				$transport_error_request_throwable = $e;
+			}
+		}
+		$transport_error_previous = $transport_error_throwable instanceof \Throwable
+			? $transport_error_throwable->getPrevious()
+			: null;
+
 		self::collect_failure(
 			$failures,
 			1 === count( $transport_error_seen )
 				&& $transport_error_throwable instanceof \WordPress\AiClient\Providers\Http\Exception\NetworkException
-				&& 503 === $transport_error_throwable->getCode()
 				&& str_contains( $transport_error_throwable->getMessage(), $transport_url )
-				&& str_contains( $transport_error_throwable->getMessage(), 'Synthetic SDK transport outage' ),
-			'HttpTransporter propagates WP HTTP adapter NetworkException failures',
+				&& str_contains( $transport_error_throwable->getMessage(), 'Synthetic SDK transport outage' )
+				&& $transport_error_previous instanceof \WordPress\AiClient\Providers\Http\Exception\NetworkException
+				&& 503 === $transport_error_previous->getCode()
+				&& null === $transport_error_request_throwable
+				&& $transport_error_request instanceof \WordPress\AiClient\Providers\Http\DTO\Request
+				&& $transport_url === $transport_error_request->getUri()
+				&& 'POST' === $transport_error_request->getMethod()->value,
+			'HttpTransporter wraps WP HTTP adapter NetworkException failures with request context',
 			array(
-				'throwable' => $transport_error_throwable ? self::describe_throwable( $transport_error_throwable ) : null,
-				'requests'  => $transport_error_seen,
+				'throwable'        => $transport_error_throwable ? self::describe_throwable( $transport_error_throwable ) : null,
+				'previous'         => $transport_error_previous ? self::describe_throwable( $transport_error_previous ) : null,
+				'requestThrowable' => $transport_error_request_throwable ? self::describe_throwable( $transport_error_request_throwable ) : null,
+				'request'          => $transport_error_request instanceof \WordPress\AiClient\Providers\Http\DTO\Request
+					? $transport_error_request->toArray()
+					: self::describe_value( $transport_error_request ),
+				'requests'         => $transport_error_seen,
 			)
 		);
 
@@ -2203,6 +2229,22 @@ final class AiClientSurface {
 		} else {
 			self::set_static_property( 'WP_Ability_Categories_Registry', 'instance', null );
 		}
+	}
+
+	private static function snapshot_class_discovery_state(): array {
+		$class = \WordPress\AiClientDependencies\Http\Discovery\ClassDiscovery::class;
+
+		return array(
+			'strategies' => self::get_static_property( $class, 'strategies' ),
+			'cache'      => self::get_static_property( $class, 'cache' ),
+		);
+	}
+
+	private static function restore_class_discovery_state( array $snapshot ): void {
+		$class = \WordPress\AiClientDependencies\Http\Discovery\ClassDiscovery::class;
+
+		self::set_static_property( $class, 'strategies', $snapshot['strategies'] ?? array() );
+		self::set_static_property( $class, 'cache', $snapshot['cache'] ?? array() );
 	}
 
 	private static function snapshot_globals( array $names ): array {
