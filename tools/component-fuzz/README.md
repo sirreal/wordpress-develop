@@ -119,6 +119,7 @@ database, network requests, or a configured site.
   balance, escaping contracts, and global/filter/superglobal/output-buffer
   restoration.
 - `content`: slashing, metadata serialization, post and term field sanitization,
+  whole-post `sanitize_post()` object/array consistency and filter locality,
   `get_extended()` more-tag splitting, query variables, `WP_Date_Query`, and
   title/class/key sanitizers.
 - `content-lifecycle`: in-memory wpdb-backed post, term, user, and comment CRUD
