@@ -45,6 +45,7 @@ final class TemplateLinksSurface {
 			$rows[] = self::check_page_and_paginate_links( $ctx );
 			$rows[] = self::check_search_feed_site_and_admin_links( $ctx );
 			$rows[] = self::check_post_link_helpers( $ctx );
+			$rows[] = self::check_adjacent_post_link_helpers( $ctx );
 			$rows[] = self::check_canonical_and_shortlink_outputs( $ctx );
 			$rows[] = self::check_bookmark_fields_and_lists( $ctx );
 			$rows[] = self::check_restoration_probe( $ctx, $snapshot );
@@ -184,9 +185,11 @@ final class TemplateLinksSurface {
 				'add_filter',
 				'body_class',
 				'create_initial_post_types',
+				'create_initial_taxonomies',
 				'esc_attr',
 				'esc_url',
 				'get_admin_url',
+				'get_adjacent_post_rel_link',
 				'get_body_class',
 				'get_bookmark',
 				'get_bookmark_field',
@@ -195,19 +198,26 @@ final class TemplateLinksSurface {
 				'get_feed_link',
 				'get_home_url',
 				'get_language_attributes',
+				'get_next_post_link',
 				'get_pagenum_link',
 				'get_permalink',
 				'get_preview_post_link',
+				'get_previous_post_link',
 				'get_search_feed_link',
 				'get_search_link',
 				'get_site_url',
 				'language_attributes',
+				'adjacent_posts_rel_link',
+				'adjacent_posts_rel_link_wp_head',
+				'next_post_rel_link',
 				'paginate_links',
+				'prev_post_rel_link',
 				'rel_canonical',
 				'remove_filter',
 				'remove_post_type_support',
 				'sanitize_html_class',
 				'sanitize_title_with_dashes',
+				'taxonomy_exists',
 				'wp_cache_delete',
 				'wp_cache_get',
 				'wp_cache_set',
@@ -798,6 +808,206 @@ final class TemplateLinksSurface {
 		);
 	}
 
+	private static function check_adjacent_post_link_helpers( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$current  = self::current_post();
+		$marker   = 'cfz-adjacent-' . strtolower( $ctx->identifier( 4, 10 ) );
+
+		$previous = self::adjacent_post_case( $ctx->fork( 'previous-adjacent' ), $current, 'previous' );
+		$next     = self::adjacent_post_case( $ctx->fork( 'next-adjacent' ), $current, 'next' );
+
+		self::seed_post_storage( $previous );
+		self::seed_post_storage( $next );
+
+		$where_events = array();
+		$term_events  = array();
+		$rel_events   = array();
+		$link_events  = array();
+
+		$previous_where_filter = self::adjacent_where_filter( 'previous', $previous->ID, $where_events );
+		$next_where_filter     = self::adjacent_where_filter( 'next', $next->ID, $where_events );
+
+		$previous_terms_filter = static function ( $excluded_terms ) use ( &$term_events ) {
+			$term_events[] = array(
+				'adjacent' => 'previous',
+				'terms'    => $excluded_terms,
+			);
+			return array_values( array_unique( array_merge( array_map( 'intval', (array) $excluded_terms ), array( 91 ) ) ) );
+		};
+		$next_terms_filter     = static function ( $excluded_terms ) use ( &$term_events ) {
+			$term_events[] = array(
+				'adjacent' => 'next',
+				'terms'    => $excluded_terms,
+			);
+			return array_values( array_unique( array_merge( array_map( 'intval', (array) $excluded_terms ), array( 92 ) ) ) );
+		};
+
+		$previous_rel_filter = self::adjacent_rel_filter( 'previous', $marker, $rel_events );
+		$next_rel_filter     = self::adjacent_rel_filter( 'next', $marker, $rel_events );
+		$previous_link_filter = self::adjacent_link_filter( 'previous', $marker, $link_events );
+		$next_link_filter     = self::adjacent_link_filter( 'next', $marker, $link_events );
+
+		$buffer_level = ob_get_level();
+		$previous_rel = null;
+		$next_rel     = null;
+		$combined_rel = '';
+		$head_rel     = '';
+		$head_bail    = '';
+		$previous_nav = '';
+		$next_nav     = '';
+
+		\add_filter( 'get_previous_post_where', $previous_where_filter, 10, 5 );
+		\add_filter( 'get_next_post_where', $next_where_filter, 10, 5 );
+		\add_filter( 'get_previous_post_excluded_terms', $previous_terms_filter, 10, 1 );
+		\add_filter( 'get_next_post_excluded_terms', $next_terms_filter, 10, 1 );
+		\add_filter( 'previous_post_rel_link', $previous_rel_filter, 10, 1 );
+		\add_filter( 'next_post_rel_link', $next_rel_filter, 10, 1 );
+		\add_filter( 'previous_post_link', $previous_link_filter, 10, 5 );
+		\add_filter( 'next_post_link', $next_link_filter, 10, 5 );
+
+		try {
+			self::with_permalink_structure(
+				'/%year%/%monthnum%/%postname%/',
+				static function () use (
+					$previous,
+					$next,
+					&$previous_rel,
+					&$next_rel,
+					&$combined_rel,
+					&$head_rel,
+					&$head_bail,
+					&$previous_nav,
+					&$next_nav
+				): void {
+					$previous_rel = \get_adjacent_post_rel_link( 'Older %title on %date', false, array( 11, 12 ), true );
+					$next_rel     = \get_adjacent_post_rel_link( 'Newer %title on %date', false, '21,22', false );
+
+					ob_start();
+					\adjacent_posts_rel_link( 'Around %title on %date', false, array( 31 ), 'category' );
+					$combined_rel = (string) ob_get_clean();
+
+					ob_start();
+					\prev_post_rel_link( 'Prev %title', false, array( 41 ) );
+					\next_post_rel_link( 'Next %title', false, '51,52' );
+					$head_rel = (string) ob_get_clean();
+
+					ob_start();
+					\adjacent_posts_rel_link_wp_head();
+					$head_rel .= (string) ob_get_clean();
+
+					$query           = $GLOBALS['wp_query'] ?? null;
+					$previous_single = $query instanceof \WP_Query ? $query->is_single : null;
+					if ( $query instanceof \WP_Query ) {
+						$query->is_single = false;
+					}
+					ob_start();
+					\adjacent_posts_rel_link_wp_head();
+					$head_bail = (string) ob_get_clean();
+					if ( $query instanceof \WP_Query ) {
+						$query->is_single = $previous_single;
+					}
+
+					$previous_nav = (string) \get_previous_post_link( '<nav class="previous">%link</nav>', 'Older %title', false, array( 61 ) );
+					$next_nav     = (string) \get_next_post_link( '<nav class="next">%link</nav>', 'Newer %title', false, '71,72' );
+
+					unset( $previous, $next );
+				}
+			);
+		} finally {
+			if ( ob_get_level() > $buffer_level ) {
+				ob_end_clean();
+			}
+			\remove_filter( 'get_previous_post_where', $previous_where_filter, 10 );
+			\remove_filter( 'get_next_post_where', $next_where_filter, 10 );
+			\remove_filter( 'get_previous_post_excluded_terms', $previous_terms_filter, 10 );
+			\remove_filter( 'get_next_post_excluded_terms', $next_terms_filter, 10 );
+			\remove_filter( 'previous_post_rel_link', $previous_rel_filter, 10 );
+			\remove_filter( 'next_post_rel_link', $next_rel_filter, 10 );
+			\remove_filter( 'previous_post_link', $previous_link_filter, 10 );
+			\remove_filter( 'next_post_link', $next_link_filter, 10 );
+			self::delete_post_storage( $previous->ID );
+			self::delete_post_storage( $next->ID );
+		}
+
+		$previous_href = \get_permalink( $previous );
+		$next_href     = \get_permalink( $next );
+
+		self::collect_failure(
+			$failures,
+			is_string( $previous_rel )
+				&& is_string( $next_rel )
+				&& str_contains( $previous_rel, "rel='prev'" )
+				&& str_contains( $next_rel, "rel='next'" )
+				&& str_contains( $previous_rel, 'Older Previous Adjacent' )
+				&& str_contains( $next_rel, 'Newer Next Adjacent' )
+				&& str_contains( $previous_rel, '&amp; &quot;Quote&quot; on 2026-06-20' )
+				&& str_contains( $next_rel, '&amp; &quot;Quote&quot; on 2026-06-24' )
+				&& str_contains( $previous_rel, \esc_url( $previous_href ) )
+				&& str_contains( $next_rel, \esc_url( $next_href ) )
+				&& str_contains( $previous_rel, "data-cfz-previous='" . \esc_attr( $marker ) . "'" )
+				&& str_contains( $next_rel, "data-cfz-next='" . \esc_attr( $marker ) . "'" )
+				&& ! str_contains( $previous_rel . $next_rel, '<Prev>' )
+				&& ! str_contains( $previous_rel . $next_rel, '<Next>' )
+				&& ! str_contains( strtolower( $previous_rel . $next_rel . $combined_rel . $head_rel ), '<script' )
+				&& '' === $head_bail,
+			'adjacent relational link helpers find previous/next posts, escape title attributes, honor wp_head gates, and keep filter output display-safe',
+			array(
+				'previousRel' => self::describe_string( is_string( $previous_rel ) ? $previous_rel : '' ),
+				'nextRel'     => self::describe_string( is_string( $next_rel ) ? $next_rel : '' ),
+				'combinedRel' => self::describe_string( $combined_rel ),
+				'headRel'     => self::describe_string( $head_rel ),
+				'headBail'    => self::describe_string( $head_bail ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			str_contains( $previous_nav, '<nav class="previous">' )
+				&& str_contains( $next_nav, '<nav class="next">' )
+				&& str_contains( $previous_nav, 'rel="prev"' )
+				&& str_contains( $next_nav, 'rel="next"' )
+				&& str_contains( $previous_nav, $previous->post_name )
+				&& str_contains( $next_nav, $next->post_name )
+				&& str_contains( $previous_nav, 'data-cfz-link="' . \esc_attr( $marker . '-previous' ) . '"' )
+				&& str_contains( $next_nav, 'data-cfz-link="' . \esc_attr( $marker . '-next' ) . '"' )
+				&& 0 < count( array_filter( $link_events, static fn( array $event ): bool => 'previous' === $event['adjacent'] ) )
+				&& 0 < count( array_filter( $link_events, static fn( array $event ): bool => 'next' === $event['adjacent'] ) ),
+			'previous/next post link helpers render expected adjacent anchors and expose filter payloads',
+			array(
+				'previousNav' => self::describe_string( $previous_nav ),
+				'nextNav'     => self::describe_string( $next_nav ),
+				'linkEvents'  => $link_events,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			0 < count( array_filter( $where_events, static fn( array $event ): bool => 'previous' === $event['adjacent'] && $current->ID === $event['currentPost'] ) )
+				&& 0 < count( array_filter( $where_events, static fn( array $event ): bool => 'next' === $event['adjacent'] && $current->ID === $event['currentPost'] ) )
+				&& 0 < count( array_filter( $term_events, static fn( array $event ): bool => 'previous' === $event['adjacent'] && in_array( 11, (array) $event['terms'], true ) ) )
+				&& 0 < count( array_filter( $term_events, static fn( array $event ): bool => 'next' === $event['adjacent'] && in_array( 21, (array) $event['terms'], true ) ) )
+				&& 0 < count( array_filter( $rel_events, static fn( array $event ): bool => 'previous' === $event['adjacent'] ) )
+				&& 0 < count( array_filter( $rel_events, static fn( array $event ): bool => 'next' === $event['adjacent'] ) )
+				&& false === \has_filter( 'get_previous_post_where', $previous_where_filter, 10 )
+				&& false === \has_filter( 'get_next_post_where', $next_where_filter, 10 )
+				&& false === \has_filter( 'previous_post_rel_link', $previous_rel_filter, 10 )
+				&& false === \has_filter( 'next_post_link', $next_link_filter, 10 ),
+			'adjacent post query and output filters receive expected payloads and are removed after use',
+			array(
+				'whereEvents' => $where_events,
+				'termEvents'  => $term_events,
+				'relEvents'   => $rel_events,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'template-links.links.adjacent-post-relations',
+			array() === $failures,
+			array( 'failures' => $failures )
+		);
+	}
+
 	private static function check_canonical_and_shortlink_outputs( \ComponentFuzz\FuzzContext $ctx ): array {
 		$failures = array();
 		$post     = self::current_post();
@@ -1046,6 +1256,9 @@ final class TemplateLinksSurface {
 		if ( ! get_post_type_object( 'post' ) || ! get_post_status_object( 'publish' ) ) {
 			\create_initial_post_types();
 		}
+		if ( ! \taxonomy_exists( 'category' ) ) {
+			\create_initial_taxonomies();
+		}
 		\remove_post_type_support( 'post', 'post-formats' );
 
 		$post = self::post_case( $ctx->fork( 'post' ) );
@@ -1128,6 +1341,111 @@ final class TemplateLinksSurface {
 				'filter'                => 'raw',
 			)
 		);
+	}
+
+	private static function adjacent_post_case( \ComponentFuzz\FuzzContext $ctx, \WP_Post $current, string $adjacent ): \WP_Post {
+		$is_previous = 'previous' === $adjacent;
+		$id_offset   = $is_previous ? 10000 : 20000;
+		$id          = $current->ID + $id_offset + $ctx->int( 10, 999 );
+		$title       = ( $is_previous ? 'Previous' : 'Next' ) . ' Adjacent ' . self::safe_title_text( $ctx->text( 0, 18 ) );
+		$title      .= $is_previous ? ' <Prev> & "Quote"' : ' <Next> & "Quote"';
+		$slug        = \sanitize_title_with_dashes( $adjacent . '-' . $ctx->text( 4, 30 ), '', 'save' );
+		if ( '' === $slug ) {
+			$slug = $adjacent . '-adjacent-' . substr( hash( 'crc32b', (string) $ctx->seed() ), 0, 8 );
+		}
+
+		return new \WP_Post(
+			(object) array_merge(
+				$current->to_array(),
+				array(
+					'ID'                => $id,
+					'post_date'         => $is_previous ? '2026-06-20 09:00:00' : '2026-06-24 09:00:00',
+					'post_date_gmt'     => $is_previous ? '2026-06-20 07:00:00' : '2026-06-24 07:00:00',
+					'post_modified'     => $is_previous ? '2026-06-20 09:00:00' : '2026-06-24 09:00:00',
+					'post_modified_gmt' => $is_previous ? '2026-06-20 07:00:00' : '2026-06-24 07:00:00',
+					'post_name'         => $slug,
+					'post_title'        => $title,
+					'guid'              => 'http://example.test/?p=' . $id,
+				)
+			)
+		);
+	}
+
+	private static function seed_post_storage( \WP_Post $post ): void {
+		global $wpdb;
+
+		self::$posts[ $post->ID ] = $post;
+		if ( isset( $wpdb ) && is_object( $wpdb ) && method_exists( $wpdb, 'insert' ) ) {
+			$wpdb->insert( $wpdb->posts, $post->to_array() );
+		}
+		\wp_cache_set( $post->ID, (object) $post->to_array(), 'posts' );
+	}
+
+	private static function delete_post_storage( int $post_id ): void {
+		global $wpdb;
+
+		unset( self::$posts[ $post_id ] );
+		if ( isset( $wpdb ) && is_object( $wpdb ) && method_exists( $wpdb, 'delete' ) ) {
+			$wpdb->delete( $wpdb->posts, array( 'ID' => $post_id ) );
+		}
+		\wp_cache_delete( $post_id, 'posts' );
+	}
+
+	private static function adjacent_where_filter( string $adjacent, int $target_id, array &$events ): callable {
+		return static function ( string $where, bool $in_same_term, $excluded_terms, string $taxonomy, \WP_Post $post ) use (
+			$adjacent,
+			$target_id,
+			&$events
+		): string {
+			global $wpdb;
+
+			$events[] = array(
+				'adjacent'      => $adjacent,
+				'currentPost'   => $post->ID,
+				'inSameTerm'    => $in_same_term,
+				'excludedTerms' => $excluded_terms,
+				'taxonomy'      => $taxonomy,
+				'originalWhere' => self::describe_string( $where ),
+				'targetId'      => $target_id,
+			);
+
+			return $wpdb->prepare( 'WHERE p.ID = %d AND p.post_type = %s', $target_id, $post->post_type );
+		};
+	}
+
+	private static function adjacent_rel_filter( string $adjacent, string $marker, array &$events ): callable {
+		return static function ( string $link ) use ( $adjacent, $marker, &$events ): string {
+			$events[] = array(
+				'adjacent' => $adjacent,
+				'link'     => self::describe_string( $link ),
+			);
+
+			$attribute = " data-cfz-{$adjacent}='" . \esc_attr( $marker ) . "'";
+			return preg_replace( '/\s*\/>\n?$/', $attribute . " />\n", $link ) ?? $link;
+		};
+	}
+
+	private static function adjacent_link_filter( string $adjacent, string $marker, array &$events ): callable {
+		return static function ( string $output, string $format, string $link, $post, string $filtered_adjacent ) use (
+			$adjacent,
+			$marker,
+			&$events
+		): string {
+			$events[] = array(
+				'adjacent'         => $adjacent,
+				'filteredAdjacent' => $filtered_adjacent,
+				'format'           => self::describe_string( $format ),
+				'link'             => self::describe_string( $link ),
+				'postId'           => $post instanceof \WP_Post ? $post->ID : null,
+				'output'           => self::describe_string( $output ),
+			);
+
+			return str_replace(
+				'<a ',
+				'<a data-cfz-link="' . \esc_attr( $marker . '-' . $adjacent ) . '" ',
+				$output
+			);
+		};
 	}
 
 	private static function query_for_post( \WP_Post $post, int $paged ): \WP_Query {
