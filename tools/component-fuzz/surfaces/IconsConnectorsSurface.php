@@ -30,6 +30,7 @@ final class IconsConnectorsSurface {
 			return array(
 				self::check_connector_registry_lifecycle( $ctx->fork( 'connector-registry' ) ),
 				self::check_connector_init_settings_and_serialization( $ctx->fork( 'connector-init-settings' ) ),
+				self::check_connector_rest_ai_key_validation( $ctx->fork( 'connector-rest-ai-validation' ) ),
 				self::check_connector_masking_and_file_mod_flags( $ctx->fork( 'connector-mask-filemods' ) ),
 				self::check_icon_registry_lifecycle( $ctx->fork( 'icon-registry' ) ),
 				self::check_rest_icons_controller( $ctx->fork( 'rest-icons' ) ),
@@ -69,6 +70,7 @@ final class IconsConnectorsSurface {
 				'_wp_connectors_get_api_key_source',
 				'_wp_connectors_get_connector_script_module_data',
 				'_wp_connectors_init',
+				'_wp_connectors_is_ai_api_key_valid',
 				'_wp_connectors_mask_api_key',
 				'_wp_connectors_resolve_ai_provider_logo_url',
 				'_wp_connectors_rest_settings_dispatch',
@@ -76,12 +78,15 @@ final class IconsConnectorsSurface {
 				'add_action',
 				'add_filter',
 				'current_user_can',
+				'get_option',
 				'get_registered_settings',
+				'has_filter',
 				'is_wp_error',
 				'register_setting',
 				'remove_action',
 				'remove_filter',
 				'rest_ensure_response',
+				'update_option',
 				'wp_get_connector',
 				'wp_get_connectors',
 				'wp_is_connector_registered',
@@ -657,6 +662,147 @@ final class IconsConnectorsSurface {
 		return self::result(
 			$ctx,
 			'icons-connectors.connectors.init-settings-rest-module-data',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, 8 ) )
+		);
+	}
+
+	private static function check_connector_rest_ai_key_validation( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+
+		$registry = new \WP_Connector_Registry();
+		self::set_connector_registry( $registry );
+
+		$token           = substr( hash( 'sha256', (string) $ctx->seed() . ':' . (string) $ctx->iteration() ), 0, 10 );
+		$ai_id           = 'cfuzz-ai-' . $token;
+		$service_id      = 'cfuzz-service-' . $token;
+		$ai_setting      = 'cfuzz_ai_' . str_replace( '-', '_', $token ) . '_api_key';
+		$service_setting = 'cfuzz_service_' . str_replace( '-', '_', $token ) . '_api_key';
+		$secret          = 'sk-' . strtolower( $ctx->identifier( 5, 12 ) ) . '-' . substr( hash( 'sha256', (string) $ctx->seed() ), 0, 20 );
+		$masked_secret   = \_wp_connectors_mask_api_key( $secret );
+		$server          = new \WP_REST_Server();
+		$enable_ai       = static fn(): bool => true;
+
+		\add_filter( 'wp_supports_ai', $enable_ai );
+		try {
+			$registered_ai = $registry->register(
+				$ai_id,
+				array(
+					'name'           => 'Fuzz AI Provider',
+					'type'           => 'ai_provider',
+					'authentication' => array(
+						'method'       => 'api_key',
+						'setting_name' => $ai_setting,
+					),
+				)
+			);
+		} finally {
+			\remove_filter( 'wp_supports_ai', $enable_ai );
+		}
+
+		$registered_service = $registry->register(
+			$service_id,
+			array(
+				'name'           => 'Fuzz Service Connector',
+				'type'           => 'service',
+				'authentication' => array(
+					'method'       => 'api_key',
+					'setting_name' => $service_setting,
+				),
+			)
+		);
+
+		\update_option( $ai_setting, $secret );
+		\update_option( $service_setting, $secret );
+
+		$get_response = \_wp_connectors_rest_settings_dispatch(
+			new \WP_REST_Response(
+				array(
+					$ai_setting      => $secret,
+					$service_setting => $secret,
+				)
+			),
+			$server,
+			self::request( 'GET', '/wp/v2/settings' )
+		);
+		$get_data     = $get_response instanceof \WP_REST_Response ? $get_response->get_data() : array();
+		$after_get    = \get_option( $ai_setting, '__missing__' );
+
+		$post_capture  = self::capture_doing_it_wrong(
+			static fn() => \_wp_connectors_rest_settings_dispatch(
+				new \WP_REST_Response(
+					array(
+						$ai_setting      => $secret,
+						$service_setting => $secret,
+					)
+				),
+				$server,
+				self::request( 'POST', '/wp/v2/settings' )
+			)
+		);
+		$post_response = $post_capture['value'];
+		$post_data     = $post_response instanceof \WP_REST_Response ? $post_response->get_data() : array();
+		$after_post    = \get_option( $ai_setting, '__missing__' );
+
+		\update_option( $ai_setting, $secret );
+		$put_capture  = self::capture_doing_it_wrong(
+			static fn() => \_wp_connectors_rest_settings_dispatch(
+				new \WP_REST_Response( array( $ai_setting => $masked_secret ) ),
+				$server,
+				self::request( 'PUT', '/wp/v2/settings' )
+			)
+		);
+		$put_response = $put_capture['value'];
+		$put_data     = $put_response instanceof \WP_REST_Response ? $put_response->get_data() : array();
+		$after_put    = \get_option( $ai_setting, '__missing__' );
+
+		$serialized_updates = \wp_json_encode(
+			array(
+				'get'  => $get_data,
+				'post' => $post_data,
+				'put'  => $put_data,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			is_array( $registered_ai )
+				&& is_array( $registered_service )
+				&& $masked_secret === ( $get_data[ $ai_setting ] ?? null )
+				&& $masked_secret === ( $get_data[ $service_setting ] ?? null )
+				&& $secret === $after_get
+				&& $post_response instanceof \WP_REST_Response
+				&& '' === ( $post_data[ $ai_setting ] ?? null )
+				&& $masked_secret === ( $post_data[ $service_setting ] ?? null )
+				&& '' === $after_post
+				&& self::has_warning( $post_capture )
+				&& $put_response instanceof \WP_REST_Response
+				&& '' === ( $put_data[ $ai_setting ] ?? null )
+				&& '' === $after_put
+				&& self::has_warning( $put_capture )
+				&& is_string( $serialized_updates )
+				&& ! str_contains( $serialized_updates, $secret ),
+			'REST settings update validation masks GET responses but clears unconfigured AI provider keys on update',
+			array(
+				'aiId'                => $ai_id,
+				'serviceId'           => $service_id,
+				'secretLength'        => strlen( $secret ),
+				'maskedSecret'        => $masked_secret,
+				'getDataKeys'         => array_keys( $get_data ),
+				'postData'            => $post_data,
+				'putData'             => $put_data,
+				'afterGetPreserved'   => $secret === $after_get,
+				'afterPostCleared'    => '' === $after_post,
+				'afterPutCleared'     => '' === $after_put,
+				'postWarnings'        => $post_capture['warnings'] ?? array(),
+				'putWarnings'         => $put_capture['warnings'] ?? array(),
+				'serializedHasSecret' => is_string( $serialized_updates ) && str_contains( $serialized_updates, $secret ),
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'icons-connectors.connectors.rest-ai-key-validation-fail-closed',
 			array() === $failures,
 			array( 'failures' => array_slice( $failures, 0, 8 ) )
 		);
