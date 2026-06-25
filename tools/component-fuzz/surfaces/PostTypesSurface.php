@@ -35,6 +35,7 @@ final class PostTypesSurface {
 			$rows[] = self::check_registration_filters_actions_and_meta_box_lifecycle( $ctx );
 			$rows[] = self::check_rest_route_registration_boundaries( $ctx );
 			$rows[] = self::check_invalid_post_type_names_do_not_leak( $ctx );
+			$rows[] = self::check_post_type_query_operators( $ctx );
 			$rows[] = self::check_support_feature_mutation( $ctx );
 			$rows[] = self::check_post_type_unregister_cleanup( $ctx );
 			$rows[] = self::check_post_type_archive_link_helpers( $ctx );
@@ -985,6 +986,129 @@ final class PostTypesSurface {
 			array(
 				'cases'    => count( $cases ),
 				'failures' => $failures,
+			)
+		);
+	}
+
+	private static function check_post_type_query_operators( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_registries();
+
+		$case     = $ctx->fork( 'query-operators' );
+		$failures = array();
+		$matrix   = array(
+			'alpha' => array(
+				'name' => self::post_type_name( $case->fork( 'alpha' ), 'qalpha' ),
+				'args' => array(
+					'public'       => true,
+					'hierarchical' => false,
+					'show_ui'      => true,
+					'supports'     => array( 'title', 'editor' ),
+				),
+			),
+			'beta'  => array(
+				'name' => self::post_type_name( $case->fork( 'beta' ), 'qbeta' ),
+				'args' => array(
+					'public'       => false,
+					'hierarchical' => true,
+					'show_ui'      => true,
+					'supports'     => array( 'thumbnail' ),
+				),
+			),
+			'gamma' => array(
+				'name' => self::post_type_name( $case->fork( 'gamma' ), 'qgamma' ),
+				'args' => array(
+					'public'       => true,
+					'hierarchical' => true,
+					'show_ui'      => false,
+					'supports'     => array( 'revisions' ),
+				),
+			),
+			'delta' => array(
+				'name' => self::post_type_name( $case->fork( 'delta' ), 'qdelta' ),
+				'args' => array(
+					'public'       => false,
+					'hierarchical' => false,
+					'show_ui'      => false,
+					'supports'     => array( 'editor', 'comments' ),
+				),
+			),
+		);
+
+		foreach ( $matrix as $key => $definition ) {
+			$object = \register_post_type( $definition['name'], $definition['args'] );
+			self::collect_failure(
+				$failures,
+				$object instanceof \WP_Post_Type,
+				"query operator fixture post type registers {$key}",
+				array(
+					'key'    => $key,
+					'name'   => $definition['name'],
+					'result' => self::describe_value( $object ),
+				)
+			);
+		}
+
+		$names = array(
+			'alpha' => $matrix['alpha']['name'],
+			'beta'  => $matrix['beta']['name'],
+			'gamma' => $matrix['gamma']['name'],
+			'delta' => $matrix['delta']['name'],
+		);
+
+		$public_names              = \get_post_types( array( 'public' => true ), 'names', 'and' );
+		$public_or_hierarchical    = \get_post_types( array( 'public' => true, 'hierarchical' => true ), 'names', 'or' );
+		$public_and_hierarchical   = \get_post_types( array( 'public' => true, 'hierarchical' => true ), 'names', 'and' );
+		$not_public_names          = \get_post_types( array( 'public' => true ), 'names', 'not' );
+		$not_public_objects        = \get_post_types( array( 'public' => true ), 'objects', 'not' );
+		$show_ui_names             = \get_post_types( array( 'show_ui' => true ), 'names', 'and' );
+		$not_hierarchical_names    = \get_post_types( array( 'hierarchical' => true ), 'names', 'not' );
+		$editor_or_thumbnail       = \get_post_types_by_support( array( 'editor', 'thumbnail' ), 'or' );
+		$editor_and_comments       = \get_post_types_by_support( array( 'editor', 'comments' ), 'and' );
+		$not_editor_support        = \get_post_types_by_support( 'editor', 'not' );
+		$not_public_object_names   = self::post_type_object_names( $not_public_objects );
+		$not_public_object_classes = array_map(
+			static function ( $object ): bool {
+				return $object instanceof \WP_Post_Type;
+			},
+			$not_public_objects
+		);
+
+		self::collect_failure(
+			$failures,
+			self::sets_match( array( $names['alpha'], $names['gamma'] ), $public_names )
+				&& self::sets_match( array( $names['alpha'], $names['beta'], $names['gamma'] ), $public_or_hierarchical )
+				&& self::sets_match( array( $names['gamma'] ), $public_and_hierarchical )
+				&& self::sets_match( array( $names['beta'], $names['delta'] ), $not_public_names )
+				&& self::sets_match( array( $names['beta'], $names['delta'] ), $not_public_object_names )
+				&& ! in_array( false, $not_public_object_classes, true )
+				&& self::sets_match( array( $names['alpha'], $names['beta'] ), $show_ui_names )
+				&& self::sets_match( array( $names['alpha'], $names['delta'] ), $not_hierarchical_names )
+				&& self::sets_match( array( $names['alpha'], $names['beta'], $names['delta'] ), $editor_or_thumbnail )
+				&& self::sets_match( array( $names['delta'] ), $editor_and_comments )
+				&& self::sets_match( array( $names['beta'], $names['gamma'] ), $not_editor_support ),
+			'get_post_types and get_post_types_by_support honor and/or/not operators and object output',
+			array(
+				'names'                 => $names,
+				'publicNames'           => $public_names,
+				'publicOrHierarchical'  => $public_or_hierarchical,
+				'publicAndHierarchical' => $public_and_hierarchical,
+				'notPublicNames'        => $not_public_names,
+				'notPublicObjects'      => $not_public_object_names,
+				'showUiNames'           => $show_ui_names,
+				'notHierarchicalNames'  => $not_hierarchical_names,
+				'editorOrThumbnail'     => $editor_or_thumbnail,
+				'editorAndComments'     => $editor_and_comments,
+				'notEditorSupport'      => $not_editor_support,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'post-types.registry-query-operators',
+			array() === $failures,
+			array(
+				'registered' => $names,
+				'failures'   => array_slice( $failures, 0, 6 ),
 			)
 		);
 	}
@@ -2135,6 +2259,17 @@ final class PostTypesSurface {
 		sort( $actual );
 
 		return $expected === $actual;
+	}
+
+	private static function post_type_object_names( array $objects ): array {
+		$names = array();
+		foreach ( $objects as $object ) {
+			if ( $object instanceof \WP_Post_Type ) {
+				$names[] = $object->name;
+			}
+		}
+
+		return $names;
 	}
 
 	private static function label_subset_matches( array $expected, object $actual ): bool {
