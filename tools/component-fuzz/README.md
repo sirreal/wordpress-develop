@@ -721,7 +721,8 @@ execution, external asset fetching, admin page dispatch, DB-backed link queries,
 and AJAX media-shortcode preview paths.
 The `user-preferences` surface avoids `set_screen_options()` and AJAX
 preference handlers because they redirect or call `wp_die()` in-process; it
-covers the underlying user-setting and screen preference helpers directly.
+covers the underlying user-setting, user-option precedence/deletion, and screen
+preference helpers directly.
 The `update-install-upgrader` surface intentionally avoids live package
 downloads, real ZIP unpacking into `wp-content/upgrade`, real plugin/theme
 activation or switching, full plugin/theme/core update execution, core

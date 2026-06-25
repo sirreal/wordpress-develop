@@ -29,6 +29,7 @@ final class UserPreferencesSurface {
 
 			$rows[] = self::check_user_setting_serialization( $ctx->fork( 'settings' ) );
 			$rows[] = self::check_admin_color_serialization( $ctx->fork( 'admin-color' ) );
+			$rows[] = self::check_user_option_preference_storage( $ctx->fork( 'user-options' ) );
 			$rows[] = self::check_hidden_column_preferences( $ctx->fork( 'hidden-columns' ) );
 			$rows[] = self::check_hidden_meta_box_preferences( $ctx->fork( 'hidden-metaboxes' ) );
 			$rows[] = self::check_meta_box_order_preferences( $ctx->fork( 'metabox-order' ) );
@@ -74,11 +75,13 @@ final class UserPreferencesSurface {
 				'add_screen_option',
 				'convert_to_screen',
 				'delete_all_user_settings',
+				'delete_user_option',
 				'delete_user_setting',
 				'get_all_user_settings',
 				'get_current_screen',
 				'get_hidden_columns',
 				'get_hidden_meta_boxes',
+				'get_user_meta',
 				'get_user_option',
 				'get_user_setting',
 				'has_filter',
@@ -305,6 +308,189 @@ final class UserPreferencesSurface {
 			'user-preferences.admin-color.sanitize-and-default',
 			$failures,
 			array( 'userId' => $user_id )
+		);
+	}
+
+	private static function check_user_option_preference_storage( \ComponentFuzz\FuzzContext $ctx ): array {
+		global $wpdb;
+
+		$failures          = array();
+		$user_id           = self::seed_user( $ctx );
+		$option_name       = 'cfz_pref_' . self::slug( $ctx, 'option' );
+		$prefixed_name     = $wpdb->get_blog_prefix() . $option_name;
+		$blog_value        = array(
+			'mode'    => 'list-' . self::slug( $ctx, 'blog-mode' ),
+			'perPage' => $ctx->int( 1, 200 ),
+			'flags'   => array(
+				'compact' => 1 === $ctx->int( 0, 1 ),
+				'pinned'  => 'box_' . self::slug( $ctx, 'blog-box' ),
+			),
+		);
+		$global_value      = array(
+			'mode'    => 'grid-' . self::slug( $ctx, 'global-mode' ),
+			'perPage' => $ctx->int( 201, 400 ),
+			'flags'   => array(
+				'compact' => 1 === $ctx->int( 0, 1 ),
+				'pinned'  => 'box_' . self::slug( $ctx, 'global-box' ),
+			),
+		);
+		$filter_events     = array();
+		$filter_hook       = 'get_user_option_' . $option_name;
+		$user_option_probe = static function ( $result, string $option, \WP_User $user ) use ( &$filter_events ) {
+			$filter_events[] = array(
+				'result' => $result,
+				'option' => $option,
+				'userId' => (int) $user->ID,
+			);
+
+			return $result;
+		};
+
+		\add_filter( $filter_hook, $user_option_probe, 10, 3 );
+		try {
+			\wp_set_current_user( $user_id );
+
+			$missing_before_count = count( $filter_events );
+			$missing_current      = \get_user_option( $option_name );
+			$missing_before_event = array_slice( $filter_events, $missing_before_count );
+
+			$invalid_before_count = count( $filter_events );
+			$invalid_user_option  = \get_user_option( $option_name, $user_id + 100000 );
+			$invalid_event_count  = count( $filter_events ) - $invalid_before_count;
+
+			$empty_name_update = \update_user_option( $user_id, '', 'ignored', true );
+			$blog_add_result   = \update_user_option( $user_id, $option_name, $blog_value, false );
+			$blog_same_result  = \update_user_option( $user_id, $option_name, $blog_value, false );
+			$global_add_result = \update_user_option( $user_id, $option_name, $global_value, true );
+			\wp_set_current_user( $user_id );
+
+			$raw_blog_value   = \get_user_meta( $user_id, $prefixed_name, true );
+			$raw_global_value = \get_user_meta( $user_id, $option_name, true );
+
+			$current_user_value         = \get_user_option( $option_name );
+			$explicit_value             = \get_user_option( $option_name, $user_id );
+			$blog_delete_result         = \delete_user_option( $user_id, $option_name, false );
+			$missing_blog_delete_result = \delete_user_option( $user_id, $option_name, false );
+			\wp_set_current_user( $user_id );
+			$fallback_value       = \get_user_option( $option_name, $user_id );
+			$global_delete_result = \delete_user_option( $user_id, $option_name, true );
+			\wp_set_current_user( $user_id );
+			$after_delete_value = \get_user_option( $option_name, $user_id );
+
+			\wp_set_current_user( 0 );
+			$logged_out_before_count = count( $filter_events );
+			$logged_out_value        = \get_user_option( $option_name );
+			$logged_out_event_count  = count( $filter_events ) - $logged_out_before_count;
+		} finally {
+			\remove_filter( $filter_hook, $user_option_probe, 10 );
+		}
+
+		self::collect_failure(
+			$failures,
+			false === $missing_current
+				&& 1 === count( $missing_before_event )
+				&& false === ( $missing_before_event[0]['result'] ?? null )
+				&& 0 === $invalid_event_count
+				&& false === $invalid_user_option
+				&& false === $logged_out_value
+				&& 0 === $logged_out_event_count,
+			'get_user_option() returns false for missing, invalid-user, and logged-out lookups with the expected filter boundary',
+			array(
+				'missing'             => $missing_current,
+				'missingEvents'       => $missing_before_event,
+				'invalidUserOption'   => $invalid_user_option,
+				'invalidEventCount'   => $invalid_event_count,
+				'loggedOutValue'      => $logged_out_value,
+				'loggedOutEventCount' => $logged_out_event_count,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			false === $empty_name_update
+				&& is_int( $blog_add_result )
+				&& false === $blog_same_result
+				&& is_int( $global_add_result )
+				&& $blog_value === $raw_blog_value
+				&& $global_value === $raw_global_value,
+			'update_user_option() prefixes blog-local preference keys, stores global keys unprefixed, rejects empty global names, and reports unchanged values',
+			array(
+				'option'          => $option_name,
+				'prefixed'        => $prefixed_name,
+				'emptyNameUpdate' => $empty_name_update,
+				'blogAddResult'   => $blog_add_result,
+				'blogSameResult'  => $blog_same_result,
+				'globalAddResult' => $global_add_result,
+				'rawBlogValue'    => $raw_blog_value,
+				'rawGlobalValue'  => $raw_global_value,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			$blog_value === $current_user_value
+				&& $blog_value === $explicit_value
+				&& true === $blog_delete_result
+				&& false === $missing_blog_delete_result
+				&& $global_value === $fallback_value
+				&& true === $global_delete_result
+				&& false === $after_delete_value,
+			'get_user_option() prefers blog-local preferences, falls back to global preferences after deletion, and delete_user_option() distinguishes missing keys',
+			array(
+				'currentUserValue'         => $current_user_value,
+				'explicitValue'            => $explicit_value,
+				'blogDeleteResult'         => $blog_delete_result,
+				'missingBlogDeleteResult'  => $missing_blog_delete_result,
+				'fallbackValue'            => $fallback_value,
+				'globalDeleteResult'       => $global_delete_result,
+				'afterDeleteValue'         => $after_delete_value,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			array(
+				array(
+					'result' => false,
+					'option' => $option_name,
+					'userId' => $user_id,
+				),
+				array(
+					'result' => $blog_value,
+					'option' => $option_name,
+					'userId' => $user_id,
+				),
+				array(
+					'result' => $blog_value,
+					'option' => $option_name,
+					'userId' => $user_id,
+				),
+				array(
+					'result' => $global_value,
+					'option' => $option_name,
+					'userId' => $user_id,
+				),
+				array(
+					'result' => false,
+					'option' => $option_name,
+					'userId' => $user_id,
+				),
+			) === $filter_events
+				&& false === \has_filter( $filter_hook, $user_option_probe ),
+			'get_user_option() dynamic filters observe resolved missing/blog/global values and are removed after the check',
+			array(
+				'filterHook'   => $filter_hook,
+				'filterEvents' => $filter_events,
+				'hasFilter'    => \has_filter( $filter_hook, $user_option_probe ),
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'user-preferences.user-options.prefix-precedence-delete-and-filters',
+			$failures,
+			array(
+				'userId'      => $user_id,
+				'option'      => $option_name,
+				'prefixedKey' => $prefixed_name,
+			)
 		);
 	}
 
@@ -879,7 +1065,7 @@ final class UserPreferencesSurface {
 	}
 
 	private static function seed_user( \ComponentFuzz\FuzzContext $ctx, array $overrides = array() ): int {
-		$login = 'cfz_pref_' . self::slug( $ctx, 'user' );
+		$login = 'cfz_pref_' . substr( hash( 'sha1', (string) $ctx->seed() ), 0, 10 ) . '_' . self::slug( $ctx, 'user' );
 		$id    = \wp_insert_user(
 			array_merge(
 				array(
