@@ -32,6 +32,7 @@ final class InstallSchemaSurface {
 			$rows[] = self::check_make_db_current_scope_wrappers( $ctx );
 			$rows[] = self::check_create_table_parser_variants( $ctx );
 			$rows[] = self::check_dbdelta_equivalent_noops( $ctx );
+			$rows[] = self::check_dbdelta_missing_table_creation_replay( $ctx );
 			$rows[] = self::check_dbdelta_column_change_isolation( $ctx );
 			$rows[] = self::check_dbdelta_index_normalization( $ctx );
 			$rows[] = self::check_sql_allowlist_on_executed_diffs( $ctx );
@@ -459,6 +460,109 @@ final class InstallSchemaSurface {
 				'cases'    => array_keys( $variants ),
 				'results'  => $results,
 				'failures' => array_slice( $failures, 0, self::MAX_FAILURES ),
+			)
+		);
+	}
+
+	private static function check_dbdelta_missing_table_creation_replay( \ComponentFuzz\FuzzContext $ctx ): array {
+		$primary_spec             = self::schema_spec( $ctx->fork( 'missing-table-create-primary' ) );
+		$secondary_spec           = self::schema_spec( $ctx->fork( 'missing-table-create-secondary' ) );
+		$secondary_spec['table'] .= '_replay';
+		$specs                    = array( $primary_spec, $secondary_spec );
+		$styles                   = array( 'canonical', 'wide-spacing' );
+		$expected_tables          = array_column( $specs, 'table' );
+		$expected_messages        = array();
+		$ddl_parts                = array();
+
+		foreach ( $specs as $index => $spec ) {
+			$expected_messages[ $spec['table'] ] = 'Created table ' . $spec['table'];
+			$ddl_parts[]                         = self::ddl_from_spec( $spec, $styles[ $index ] );
+		}
+
+		$ddl    = "\n" . implode( "\n", $ddl_parts );
+		$parsed = self::parse_create_tables( $ddl );
+
+		$create_wpdb   = new InstallSchemaWpdbDouble( 'wp_', array(), $expected_tables );
+		$create_result = self::with_wpdb(
+			$create_wpdb,
+			static function () use ( $ddl ): array {
+				return dbDelta( $ddl, true );
+			}
+		);
+
+		$created_tables = self::created_tables_from_queries( $create_wpdb->executed_queries );
+		$escaped        = self::queries_escape_table_allowlist( $create_wpdb->executed_queries, $expected_tables );
+
+		$replay_wpdb    = new InstallSchemaWpdbDouble( 'wp_', $parsed['tables'], $expected_tables );
+		$replay_results = self::with_wpdb(
+			$replay_wpdb,
+			static function () use ( $ddl ): array {
+				return array(
+					dbDelta( $ddl, true ),
+					dbDelta( $ddl, true ),
+				);
+			}
+		);
+
+		$failures = array();
+
+		if ( ! $parsed['ok'] || $expected_tables !== array_keys( $parsed['tables'] ) ) {
+			$failures[] = array(
+				'reason'         => 'generated-ddl-parse-mismatch',
+				'expectedTables' => $expected_tables,
+				'parsedTables'   => array_keys( $parsed['tables'] ),
+				'parseErrors'    => $parsed['errors'],
+			);
+		}
+
+		if ( $expected_messages !== $create_result ) {
+			$failures[] = array(
+				'reason'   => 'created-table-messages-mismatch',
+				'expected' => $expected_messages,
+				'actual'   => $create_result,
+			);
+		}
+
+		if ( $expected_tables !== $created_tables || count( $created_tables ) !== count( array_unique( $created_tables ) ) ) {
+			$failures[] = array(
+				'reason'  => 'executed-create-tables-not-unique-or-deterministic',
+				'expected' => $expected_tables,
+				'actual'  => $created_tables,
+				'queries' => $create_wpdb->executed_queries,
+			);
+		}
+
+		if ( count( $create_wpdb->executed_queries ) !== count( $expected_tables ) || array() !== $escaped || array() !== $create_wpdb->violations ) {
+			$failures[] = array(
+				'reason'     => 'create-queries-escaped-allowlist-or-non-create',
+				'executed'   => $create_wpdb->executed_queries,
+				'created'    => $created_tables,
+				'escaped'    => $escaped,
+				'violations' => $create_wpdb->violations,
+			);
+		}
+
+		if ( array( array(), array() ) !== $replay_results || array() !== $replay_wpdb->executed_queries || array() !== $replay_wpdb->violations ) {
+			$failures[] = array(
+				'reason'        => 'seeded-replay-not-stable-noop',
+				'replayResults' => $replay_results,
+				'executed'      => $replay_wpdb->executed_queries,
+				'violations'    => $replay_wpdb->violations,
+			);
+		}
+
+		return $ctx->result(
+			'install-schema.dbdelta-missing-tables-create-and-replay-idempotently',
+			array() === $failures,
+			array(
+				'tables'          => $expected_tables,
+				'styles'          => $styles,
+				'createdMessages' => $create_result,
+				'createdTables'   => $created_tables,
+				'createSql'       => $create_wpdb->executed_queries,
+				'replayResults'   => $replay_results,
+				'replaySql'       => $replay_wpdb->executed_queries,
+				'failures'        => array_slice( $failures, 0, self::MAX_FAILURES ),
 			)
 		);
 	}
@@ -1185,6 +1289,17 @@ final class InstallSchemaSurface {
 		}
 
 		return $escaped;
+	}
+
+	private static function created_tables_from_queries( array $queries ): array {
+		$tables = array();
+		foreach ( $queries as $query ) {
+			if ( ! preg_match( '/^\s*CREATE\s+TABLE\s+`?([A-Za-z0-9_]+)`?\s+\(/i', $query, $matches ) ) {
+				continue;
+			}
+			$tables[] = $matches[1];
+		}
+		return $tables;
 	}
 
 	private static function capture_make_db_current_call( callable $callback ): array {
