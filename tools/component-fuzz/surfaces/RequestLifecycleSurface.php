@@ -799,16 +799,10 @@ final class RequestLifecycleSurface {
 		$GLOBALS['wp']           = $wp;
 		$GLOBALS['wp_the_query'] = new \WP_Query();
 		$GLOBALS['wp_query']     = $GLOBALS['wp_the_query'];
-		register_taxonomy(
-			$case['publicTaxonomy'],
-			'post',
-			array(
-				'public'             => true,
-				'publicly_queryable' => true,
-				'query_var'          => $case['taxonomyVar'],
-				'rewrite'            => false,
-			)
-		);
+		$wpdb_previous_last_query = self::wpdb_last_query();
+		$wpdb_last_query_before   = 'component-fuzz-request-lifecycle-main-sentinel-' . $ctx->seed();
+		$wpdb_last_query_set      = self::set_wpdb_last_query( $wpdb_last_query_before );
+		$wpdb_last_query_after    = null;
 
 		$parse_action = static function ( \WP $seen_wp ) use ( &$events, $wp ): void {
 			$events[] = array(
@@ -883,10 +877,47 @@ final class RequestLifecycleSurface {
 				'globalPostId' => isset( $GLOBALS['post']->ID ) ? (int) $GLOBALS['post']->ID : null,
 			);
 		};
+		$option_filters = array(
+			'pre_option_comments_per_page' => static function ( $pre_option ): string {
+				unset( $pre_option );
+				return '50';
+			},
+			'pre_option_default_comments_page' => static function ( $pre_option ): string {
+				unset( $pre_option );
+				return 'newest';
+			},
+			'pre_option_page_comments' => static function ( $pre_option ): string {
+				unset( $pre_option );
+				return '0';
+			},
+			'pre_option_posts_per_page' => static function ( $pre_option ): string {
+				unset( $pre_option );
+				return '10';
+			},
+			'pre_option_page_for_posts' => static function ( $pre_option ): string {
+				unset( $pre_option );
+				return '0';
+			},
+			'pre_option_page_on_front' => static function ( $pre_option ): string {
+				unset( $pre_option );
+				return '0';
+			},
+			'pre_option_show_on_front' => static function ( $pre_option ): string {
+				unset( $pre_option );
+				return 'posts';
+			},
+			'pre_option_sticky_posts' => static function ( $pre_option ): array {
+				unset( $pre_option );
+				return array();
+			},
+		);
 
 		add_action( 'parse_request', $parse_action );
 		add_action( 'pre_get_posts', $pre_get_posts );
 		add_filter( 'posts_pre_query', $posts_pre_query, 10, 2 );
+		foreach ( $option_filters as $option_filter_name => $option_filter ) {
+			add_filter( $option_filter_name, $option_filter );
+		}
 		add_filter( 'status_header', $status_filter, 10, 4 );
 		add_filter( 'wp_headers', $headers_filter, 10, 2 );
 		add_action( 'send_headers', $send_action, 10, 1 );
@@ -899,21 +930,35 @@ final class RequestLifecycleSurface {
 					'offset'          => $offset,
 				)
 			);
+			$wpdb_last_query_after = self::wpdb_last_query();
 		} finally {
 			remove_action( 'parse_request', $parse_action );
 			remove_action( 'pre_get_posts', $pre_get_posts );
 			remove_filter( 'posts_pre_query', $posts_pre_query, 10 );
+			foreach ( $option_filters as $option_filter_name => $option_filter ) {
+				remove_filter( $option_filter_name, $option_filter );
+			}
 			remove_filter( 'status_header', $status_filter, 10 );
 			remove_filter( 'wp_headers', $headers_filter, 10 );
 			remove_action( 'send_headers', $send_action, 10 );
 			remove_action( 'wp', $wp_action, 10 );
-			unregister_taxonomy( $case['publicTaxonomy'] );
+			if ( $wpdb_last_query_set ) {
+				self::set_wpdb_last_query( $wpdb_previous_last_query );
+			}
 		}
 
 		$event_names = array_column( $events, 'name' );
 		$parse_event = $events[ array_search( 'parse_request', $event_names, true ) ] ?? array();
 		$query_event = $events[ array_search( 'posts_pre_query', $event_names, true ) ] ?? array();
 		$header_event = $events[ array_search( 'wp_headers', $event_names, true ) ] ?? array();
+		$query_request = $query_event['request'] ?? null;
+		$option_filters_removed = true;
+		foreach ( $option_filters as $option_filter_name => $option_filter ) {
+			if ( false !== has_filter( $option_filter_name, $option_filter ) ) {
+				$option_filters_removed = false;
+				break;
+			}
+		}
 
 		$ok = array( 'parse_request', 'pre_get_posts', 'posts_pre_query', 'wp_headers', 'send_headers', 'wp' ) === $event_names
 			&& 1 === count( $wp_actions )
@@ -923,7 +968,7 @@ final class RequestLifecycleSurface {
 			&& $extra_value === ( $wp->query_vars[ $case['extraVar'] ] ?? null )
 			&& $offset === ( $wp->query_vars['offset'] ?? null )
 			&& 'permalink value' === ( $wp->query_vars[ $case['tagVar'] ] ?? null )
-			&& 'taxonomy+value' === ( $wp->query_vars[ $case['taxonomyVar'] ] ?? null )
+			&& 'taxonomy value' === ( $wp->query_vars[ $case['taxonomyVar'] ] ?? null )
 			&& $wp->query_string === ( $GLOBALS['query_string'] ?? null )
 			&& $post === ( $GLOBALS['post'] ?? null )
 			&& array( $post ) === ( $GLOBALS['posts'] ?? null )
@@ -932,14 +977,18 @@ final class RequestLifecycleSurface {
 			&& 1 === ( $GLOBALS['wp_query']->post_count ?? null )
 			&& 1 === ( $GLOBALS['wp_query']->found_posts ?? null )
 			&& 1 === ( $GLOBALS['wp_query']->max_num_pages ?? null )
-			&& 'SELECT component_fuzz' !== ( $GLOBALS['request'] ?? null )
-			&& is_string( $query_event['request'] ?? null )
-			&& str_contains( $query_event['request'], 'SELECT' )
+			&& is_string( $query_request )
+			&& str_contains( $query_request, 'SELECT' )
+			&& $query_request === ( $GLOBALS['request'] ?? null )
+			&& $query_request === ( $GLOBALS['wp_query']->request ?? null )
+			&& $wpdb_last_query_set
+			&& $wpdb_last_query_before === $wpdb_last_query_after
 			&& array( 200 ) === array_column( $status_log, 'code' )
 			&& true === ( $header_event['same'] ?? null )
 			&& $post_id === ( $header_event['globalPostId'] ?? null )
 			&& 'text/html; charset=UTF-8' === ( $header_log[0]['Content-Type'] ?? null )
 			&& false === has_filter( 'posts_pre_query', $posts_pre_query )
+			&& $option_filters_removed
 			&& false === has_filter( 'wp_headers', $headers_filter )
 			&& false === has_filter( 'wp', $wp_action );
 
@@ -953,6 +1002,11 @@ final class RequestLifecycleSurface {
 				'statusLog'    => $status_log,
 				'headerLog'    => $header_log,
 				'globalPostId' => isset( $GLOBALS['post']->ID ) ? (int) $GLOBALS['post']->ID : null,
+				'queryRequest' => $query_request,
+				'wpdbLastQueryBefore' => $wpdb_last_query_before,
+				'wpdbLastQueryAfter' => $wpdb_last_query_after,
+				'wpdbLastQueryPrevious' => $wpdb_previous_last_query,
+				'optionFiltersRemoved' => $option_filters_removed,
 			)
 		);
 	}
@@ -1252,9 +1306,19 @@ final class RequestLifecycleSurface {
 				throw new RequestLifecycleSurface_DieCaptured( 'Captured request lifecycle wp_die.' );
 			};
 		};
+		$handler_filters = array(
+			'wp_die_ajax_handler',
+			'wp_die_json_handler',
+			'wp_die_jsonp_handler',
+			'wp_die_xml_handler',
+			'wp_die_xmlrpc_handler',
+			'wp_die_handler',
+		);
 
 		$GLOBALS['component_fuzz_request_guard_var'] = $guard_var;
-		add_filter( 'wp_die_handler', $filter, 1 );
+		foreach ( $handler_filters as $handler_filter ) {
+			add_filter( $handler_filter, $filter, 1 );
+		}
 
 		ob_start();
 		try {
@@ -1270,7 +1334,9 @@ final class RequestLifecycleSurface {
 				$chunk  = ob_get_clean();
 				$output = ( false === $chunk ? '' : $chunk ) . $output;
 			}
-			remove_filter( 'wp_die_handler', $filter, 1 );
+			foreach ( $handler_filters as $handler_filter ) {
+				remove_filter( $handler_filter, $filter, 1 );
+			}
 		}
 
 		return array(
@@ -1282,6 +1348,23 @@ final class RequestLifecycleSurface {
 			'output'         => $output,
 			'throwable'      => $throwable,
 		);
+	}
+
+	private static function wpdb_last_query() {
+		if ( isset( $GLOBALS['wpdb'] ) && is_object( $GLOBALS['wpdb'] ) && property_exists( $GLOBALS['wpdb'], 'last_query' ) ) {
+			return $GLOBALS['wpdb']->last_query;
+		}
+
+		return null;
+	}
+
+	private static function set_wpdb_last_query( $last_query ): bool {
+		if ( isset( $GLOBALS['wpdb'] ) && is_object( $GLOBALS['wpdb'] ) && property_exists( $GLOBALS['wpdb'], 'last_query' ) ) {
+			$GLOBALS['wpdb']->last_query = $last_query;
+			return true;
+		}
+
+		return false;
 	}
 
 	private static function collect_failure( array &$failures, bool $condition, string $label, array $details ): void {
@@ -1315,6 +1398,7 @@ final class RequestLifecycleSurface {
 		$_SERVER['PATH_INFO']       = $path_info;
 		$_SERVER['SERVER_PROTOCOL'] = 'HTTP/1.1';
 		unset( $_SERVER['HTTP_IF_NONE_MATCH'], $_SERVER['HTTP_IF_MODIFIED_SINCE'] );
+		unset( $_SERVER['CONTENT_TYPE'], $_SERVER['HTTP_ACCEPT'], $_SERVER['HTTP_X_REQUESTED_WITH'] );
 	}
 
 	private static function set_request_superglobals( array $get, array $post ): void {
@@ -1405,6 +1489,9 @@ final class RequestLifecycleSurface {
 				'SERVER_PROTOCOL',
 				'HTTP_IF_NONE_MATCH',
 				'HTTP_IF_MODIFIED_SINCE',
+				'CONTENT_TYPE',
+				'HTTP_ACCEPT',
+				'HTTP_X_REQUESTED_WITH',
 			) as $name
 		) {
 			$server[ $name ] = array(
