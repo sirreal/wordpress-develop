@@ -29,6 +29,7 @@ final class MailSurface {
 			$rows[] = self::check_pre_wp_mail_short_circuit( $ctx->fork( 'pre' ) );
 			$rows[] = self::check_phpmailer_composition( $ctx->fork( 'compose' ), $temp_root );
 			$rows[] = self::check_string_header_and_path_parsing( $ctx->fork( 'strings' ), $temp_root );
+			$rows[] = self::check_multipart_boundary_preservation( $ctx->fork( 'multipart' ) );
 			$rows[] = self::check_unicode_recipient_handoff( $ctx->fork( 'unicode' ) );
 			$rows[] = self::check_unicode_domain_recipient_handoff( $ctx->fork( 'unicode-domain' ) );
 			$rows[] = self::check_phpmailer_reuse_resets_message_state( $ctx->fork( 'reuse' ), $temp_root );
@@ -350,6 +351,124 @@ final class MailSurface {
 		);
 
 		return self::row( $ctx, 'mail.phpmailer.string-header-and-path-parsing', $failures );
+	}
+
+	private static function check_multipart_boundary_preservation( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$cases    = array(
+			array(
+				'label'          => 'array-lf-alternative',
+				'inputSubtype'   => 'Alternative',
+				'expectedSubtype' => 'alternative',
+				'headerForm'     => 'array',
+				'eol'            => "\n",
+				'boundaryParam'  => 'boundary',
+				'quotedBoundary' => true,
+				'partCount'      => 2,
+			),
+			array(
+				'label'          => 'string-crlf-mixed-uppercase-boundary',
+				'inputSubtype'   => 'Mixed',
+				'expectedSubtype' => 'mixed',
+				'headerForm'     => 'string',
+				'eol'            => "\r\n",
+				'boundaryParam'  => 'BOUNDARY',
+				'quotedBoundary' => true,
+				'partCount'      => 3,
+			),
+			array(
+				'label'          => 'array-crlf-related-unquoted-boundary',
+				'inputSubtype'   => 'related',
+				'expectedSubtype' => 'related',
+				'headerForm'     => 'array',
+				'eol'            => "\r\n",
+				'boundaryParam'  => 'boundary',
+				'quotedBoundary' => false,
+				'partCount'      => 3,
+			),
+		);
+
+		foreach ( $cases as $index => $case ) {
+			$case_ctx = $ctx->fork( $case['label'] );
+			$token    = preg_replace( '/[^A-Za-z0-9]+/', '', $case_ctx->identifier( 6, 12 ) );
+			$token    = '' === $token ? 'boundary' . abs( $case_ctx->seed() % 100000 ) : $token;
+			$boundary = '----=_ComponentFuzz_' . $index . '_' . $token;
+			$parts    = self::multipart_parts( $case_ctx, (int) $case['partCount'] );
+			$message  = self::multipart_body( $boundary, $parts, $case['eol'] );
+			$subject  = 'Multipart ' . $case['label'] . ' ' . $token;
+			$content_type = 'Content-Type: multipart/' . $case['inputSubtype'] . '; ' . $case['boundaryParam'] . '=';
+			$content_type .= $case['quotedBoundary'] ? '"' . $boundary . '"' : $boundary;
+			$headers = array(
+				'From: Multipart Sender <multipart@example.test>',
+				$content_type,
+				'MIME-Version: ignored-custom',
+				'X-Multipart-Token: ' . $token,
+			);
+
+			if ( 'string' === $case['headerForm'] ) {
+				$headers = implode( $case['eol'], $headers );
+			}
+
+			$init_seen = array();
+
+			MailSurfaceMailer::$mode = 'success';
+			MailSurfaceMailer::$sent = array();
+			$GLOBALS['phpmailer']    = self::new_mailer();
+
+			$init_action = static function ( $mailer ) use ( &$init_seen ): void {
+				$init_seen[] = array(
+					'contentType' => $mailer->ContentType ?? null,
+					'charset'     => $mailer->CharSet ?? null,
+					'body'        => $mailer->Body ?? null,
+				);
+			};
+
+			\add_action( 'phpmailer_init', $init_action );
+			try {
+				$result = \wp_mail( 'multipart-recipient@example.test', $subject, $message, $headers );
+			} finally {
+				\remove_action( 'phpmailer_init', $init_action );
+			}
+
+			$sent         = MailSurfaceMailer::$sent[0] ?? array();
+			$mime_message = self::normalize_eol( (string) ( $sent['mimeMessage'] ?? '' ) );
+			$mime_headers = self::mime_headers( $mime_message );
+			$expected_content_type = 'multipart/' . $case['expectedSubtype'] . '; boundary="' . $boundary . '"';
+
+			self::collect_failure(
+				$failures,
+				true === $result
+					&& 1 === count( MailSurfaceMailer::$sent )
+					&& 1 === count( $init_seen )
+					&& $expected_content_type === ( $sent['contentType'] ?? null )
+					&& '' === ( $sent['charset'] ?? null )
+					&& self::normalize_eol( $message ) === self::normalize_eol( (string) ( $sent['body'] ?? '' ) )
+					&& $expected_content_type === ( $init_seen[0]['contentType'] ?? null )
+					&& '' === ( $init_seen[0]['charset'] ?? null )
+					&& self::normalize_eol( $message ) === self::normalize_eol( (string) ( $init_seen[0]['body'] ?? '' ) )
+					&& self::addresses_include( $sent['to'] ?? array(), 'multipart-recipient@example.test', '' )
+					&& self::custom_headers_include( $sent['customHeaders'] ?? array(), 'X-Multipart-Token' )
+					&& ! self::custom_headers_include( $sent['customHeaders'] ?? array(), 'Content-Type' )
+					&& ! self::custom_headers_include( $sent['customHeaders'] ?? array(), 'MIME-Version' )
+					&& str_contains( $mime_headers, 'Content-Type: multipart/' . $case['expectedSubtype'] . ';' )
+					&& str_contains( $mime_headers, 'boundary="' . $boundary . '"' )
+					&& 1 === substr_count( $mime_headers, 'Content-Type: multipart/' . $case['expectedSubtype'] . ';' )
+					&& count( $parts ) + 1 === substr_count( $mime_message, '--' . $boundary )
+					&& self::mime_message_contains_parts( $mime_message, $boundary, $parts )
+					&& str_contains( $mime_message, '--' . $boundary . '--' ),
+				'wp_mail preserves multipart boundary headers and body parts through PHPMailer for ' . $case['label'],
+				array(
+					'case'        => $case,
+					'result'      => $result,
+					'contentType' => self::describe_value( $sent['contentType'] ?? null ),
+					'charset'     => self::describe_value( $sent['charset'] ?? null ),
+					'mimeHeaders' => self::describe_string( $mime_headers ),
+					'initSeen'    => self::describe_value( $init_seen ),
+				)
+			);
+		}
+
+		return self::row( $ctx, 'mail.phpmailer.multipart-boundary-matrix', $failures );
 	}
 
 	private static function check_unicode_recipient_handoff( \ComponentFuzz\FuzzContext $ctx ): array {
@@ -799,6 +918,64 @@ final class MailSurface {
 		return false;
 	}
 
+	private static function multipart_parts( \ComponentFuzz\FuzzContext $ctx, int $count ): array {
+		$parts = array(
+			array(
+				'headers' => array( 'Content-Type: text/plain; charset=us-ascii' ),
+				'body'    => 'Plain part ' . $ctx->identifier( 4, 8 ),
+			),
+			array(
+				'headers' => array(
+					'Content-Type: text/html; charset=UTF-8',
+					'Content-Transfer-Encoding: 8bit',
+				),
+				'body'    => '<html><body><p>HTML part ' . $ctx->identifier( 4, 8 ) . " \u{2603}</p></body></html>",
+			),
+			array(
+				'headers' => array( 'Content-Type: application/json; charset=UTF-8' ),
+				'body'    => '{"token":"' . $ctx->identifier( 4, 8 ) . '"}',
+			),
+		);
+
+		return array_slice( $parts, 0, max( 2, min( 3, $count ) ) );
+	}
+
+	private static function multipart_body( string $boundary, array $parts, string $eol ): string {
+		$lines = array();
+		foreach ( $parts as $part ) {
+			$lines[] = '--' . $boundary;
+			foreach ( $part['headers'] as $header ) {
+				$lines[] = $header;
+			}
+			$lines[] = '';
+			$lines[] = $part['body'];
+		}
+		$lines[] = '--' . $boundary . '--';
+
+		return implode( $eol, $lines );
+	}
+
+	private static function mime_message_contains_parts( string $mime_message, string $boundary, array $parts ): bool {
+		foreach ( $parts as $part ) {
+			$expected = '--' . $boundary . "\n" . implode( "\n", $part['headers'] ) . "\n\n" . $part['body'];
+			if ( ! str_contains( $mime_message, $expected ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function normalize_eol( string $value ): string {
+		return str_replace( array( "\r\n", "\r" ), "\n", $value );
+	}
+
+	private static function mime_headers( string $mime_message ): string {
+		$normalized = self::normalize_eol( $mime_message );
+		$parts      = explode( "\n\n", $normalized, 2 );
+		return $parts[0] ?? '';
+	}
+
 	private static function make_temp_root( \ComponentFuzz\FuzzContext $ctx ): ?string {
 		$dir = rtrim( sys_get_temp_dir(), DIRECTORY_SEPARATOR ) . DIRECTORY_SEPARATOR . 'component-fuzz-mail-' . getmypid() . '-' . $ctx->seed();
 		if ( is_dir( $dir ) ) {
@@ -969,6 +1146,7 @@ final class MailSurface {
 					'contentType'   => $this->ContentType,
 					'charset'       => $this->CharSet,
 					'encoding'      => $this->Encoding,
+					'mimeMessage'   => $this->getSentMIMEMessage(),
 				);
 
 				return true;
