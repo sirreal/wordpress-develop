@@ -39,6 +39,7 @@ final class RequestLifecycleSurface {
 			$rows[] = self::check_main_sequence_with_query_short_circuit( $ctx->fork( 'main-sequence' ), $case );
 			$rows[] = self::check_handle_404_transitions( $ctx->fork( '404' ) );
 			$rows[] = self::check_send_headers_filters_and_actions( $ctx->fork( 'headers' ) );
+			$rows[] = self::check_status_and_nocache_header_contracts( $ctx->fork( 'status-nocache' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
 				'request-lifecycle.surface-no-throw',
@@ -106,6 +107,7 @@ final class RequestLifecycleSurface {
 				'get_option',
 				'get_post_types',
 				'get_taxonomies',
+				'get_status_header_desc',
 				'has_filter',
 				'home_url',
 				'is_404',
@@ -116,6 +118,7 @@ final class RequestLifecycleSurface {
 				'sanitize_title_with_dashes',
 				'status_header',
 				'unregister_taxonomy',
+				'wp_get_server_protocol',
 				'wp_get_nocache_headers',
 				'wp_die',
 			) as $function
@@ -1276,6 +1279,104 @@ final class RequestLifecycleSurface {
 					'Last-Modified' => $expected_feed_last_modified,
 					'ETag'          => $expected_feed_etag,
 				),
+			)
+		);
+	}
+
+	private static function check_status_and_nocache_header_contracts( \ComponentFuzz\FuzzContext $ctx ): array {
+		$protocol_input    = $ctx->choice( array( 'HTTP/1.0', 'HTTP/1.1', 'HTTP/2', 'HTTP/2.0', 'HTTP/3', 'HTTP/9.9', '' ) );
+		$expected_protocol = in_array( $protocol_input, array( 'HTTP/1.1', 'HTTP/2', 'HTTP/2.0', 'HTTP/3' ), true )
+			? $protocol_input
+			: 'HTTP/1.0';
+		$known_code        = $ctx->choice( array( 103, 200, 204, 301, 302, 307, 308, 400, 403, 404, 410, 418, 451, 500, 503 ) );
+		$custom_code       = $ctx->choice( array( 207, 226, 425, 429, 506, 510 ) );
+		$custom_desc       = 'Component Fuzz ' . str_replace( array( '-', ':' ), ' ', $ctx->identifier( 4, 10 ) );
+		$unknown_code      = $ctx->choice( array( 299, 399, 499, 512, 599 ) );
+		$status_events     = array();
+		$nocache_events    = array();
+		$old_protocol      = $_SERVER['SERVER_PROTOCOL'] ?? null;
+		$had_protocol      = array_key_exists( 'SERVER_PROTOCOL', $_SERVER );
+
+		$status_filter = static function (
+			string $status_header,
+			int $code,
+			string $description,
+			string $protocol
+		) use ( &$status_events ): string {
+			$status_events[] = array(
+				'header'      => $status_header,
+				'code'        => $code,
+				'description' => $description,
+				'protocol'    => $protocol,
+			);
+			return $status_header;
+		};
+		$nocache_filter = static function ( array $headers ) use ( &$nocache_events, $ctx ): array {
+			$headers['Last-Modified']     = 'Mon, 01 Jan 1990 00:00:00 GMT';
+			$headers['X-Component-Fuzz']  = 'nocache-' . $ctx->identifier( 4, 8 );
+			$headers['X-Filtered-Expires'] = $headers['Expires'] ?? null;
+			$nocache_events[]             = $headers;
+			return $headers;
+		};
+
+		add_filter( 'status_header', $status_filter, 10, 4 );
+		add_filter( 'nocache_headers', $nocache_filter );
+		try {
+			$_SERVER['SERVER_PROTOCOL'] = $protocol_input;
+
+			\status_header( $known_code );
+			\status_header( $custom_code, $custom_desc );
+			\status_header( $unknown_code );
+			$nocache_headers = \wp_get_nocache_headers();
+		} finally {
+			remove_filter( 'status_header', $status_filter, 10 );
+			remove_filter( 'nocache_headers', $nocache_filter );
+			if ( $had_protocol ) {
+				$_SERVER['SERVER_PROTOCOL'] = $old_protocol;
+			} else {
+				unset( $_SERVER['SERVER_PROTOCOL'] );
+			}
+		}
+
+		$known_desc       = \get_status_header_desc( $known_code );
+		$expected_events  = array(
+			array(
+				'header'      => $expected_protocol . ' ' . $known_code . ' ' . $known_desc,
+				'code'        => $known_code,
+				'description' => $known_desc,
+				'protocol'    => $expected_protocol,
+			),
+			array(
+				'header'      => $expected_protocol . ' ' . $custom_code . ' ' . $custom_desc,
+				'code'        => $custom_code,
+				'description' => $custom_desc,
+				'protocol'    => $expected_protocol,
+			),
+		);
+
+		$ok = $expected_events === $status_events
+			&& '' === \get_status_header_desc( $unknown_code )
+			&& false === ( $nocache_headers['Last-Modified'] ?? null )
+			&& isset( $nocache_headers['Expires'], $nocache_headers['Cache-Control'] )
+			&& str_contains( $nocache_headers['Cache-Control'], 'no-store' )
+			&& str_contains( $nocache_headers['Cache-Control'], 'private' )
+			&& isset( $nocache_headers['X-Component-Fuzz'] )
+			&& isset( $nocache_headers['X-Filtered-Expires'] )
+			&& 'Mon, 01 Jan 1990 00:00:00 GMT' === ( $nocache_events[0]['Last-Modified'] ?? null )
+			&& false === has_filter( 'status_header', $status_filter )
+			&& false === has_filter( 'nocache_headers', $nocache_filter );
+
+		return $ctx->result(
+			'request-lifecycle.status-nocache.generated-protocol-filter-contracts',
+			$ok,
+			array(
+				'protocolInput'   => $protocol_input,
+				'expectedProtocol' => $expected_protocol,
+				'statusEvents'    => $status_events,
+				'expectedEvents'  => $expected_events,
+				'unknownCode'     => $unknown_code,
+				'nocacheHeaders'  => $nocache_headers,
+				'nocacheEvents'   => $nocache_events,
 			)
 		);
 	}
