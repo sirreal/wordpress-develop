@@ -40,6 +40,7 @@ final class CommunityEventsSurface {
 			$rows[] = self::check_cache_keys_and_event_trimming( $ctx->fork( 'cache-trim' ) );
 			$rows[] = self::check_coordinates_and_cache_expiration( $ctx->fork( 'coordinates-cache-expiration' ) );
 			$rows[] = self::check_successful_api_fetch_and_cache_hit( $ctx->fork( 'success-cache' ) );
+			$rows[] = self::check_search_bypasses_cache_and_refreshes( $ctx->fork( 'search-cache-refresh' ) );
 			$rows[] = self::check_api_failure_paths( $ctx->fork( 'failure-paths' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
@@ -538,6 +539,110 @@ final class CommunityEventsSurface {
 			array() === $failures,
 			array(
 				'cases'    => count( $cases ),
+				'failures' => $failures,
+			)
+		);
+	}
+
+	private static function check_search_bypasses_cache_and_refreshes( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures    = array();
+		$remote_addr = self::ipv4( $ctx->fork( 'remote' ), 198, 51, 100 );
+		$ip          = self::expected_anonymized_ip( $remote_addr );
+		$search      = 'Search ' . $ctx->identifier( 4, 12 );
+		$timezone    = $ctx->choice( array( 'UTC', 'Europe/Madrid', 'America/New_York' ) );
+		$location    = array(
+			'ip'          => $ip,
+			'description' => 'Cached Location',
+		);
+		$cached_raw  = self::event_corpus( $ctx->fork( 'cached' ) );
+		$fresh_raw   = self::event_corpus( $ctx->fork( 'fresh' ) );
+		$cached_raw[0]['title'] = 'Cached &amp; Meetup';
+		$fresh_raw[0]['title']  = 'Fresh &amp; Meetup';
+		$response_body = array(
+			'location' => array(
+				'ip'          => self::ipv4( $ctx->fork( 'api-ip' ), 203, 0, 113 ),
+				'description' => 'Fresh Search Location',
+			),
+			'events'   => $fresh_raw,
+			'ttl'      => $ctx->int( 60, 7200 ),
+		);
+
+		self::reset_runtime_state();
+		self::set_address_headers( array( 'REMOTE_ADDR' => $remote_addr ) );
+
+		$probe = self::probe( 8300 + $ctx->iteration(), $location );
+		$probe->fuzz_cache_events(
+			array(
+				'location' => $location,
+				'events'   => $cached_raw,
+			),
+			HOUR_IN_SECONDS
+		);
+
+		$calls  = array();
+		$filter = static function ( $preempt, array $parsed_args, string $url ) use ( &$calls, $response_body ) {
+			unset( $preempt );
+
+			$calls[] = array(
+				'url'  => $url,
+				'body' => $parsed_args['body'] ?? array(),
+			);
+
+			return self::http_response( 200, $response_body );
+		};
+
+		\add_filter( 'pre_http_request', $filter, 10, 3 );
+		try {
+			$cached = $probe->get_events( '', $timezone );
+			$fresh  = $probe->get_events( $search, $timezone );
+			$after  = $probe->get_events( '', $timezone );
+		} finally {
+			\remove_filter( 'pre_http_request', $filter, 10 );
+		}
+
+		$cached_titles = is_array( $cached ) && isset( $cached['events'] ) ? \wp_list_pluck( $cached['events'], 'title' ) : array();
+		$fresh_titles  = is_array( $fresh ) && isset( $fresh['events'] ) ? \wp_list_pluck( $fresh['events'], 'title' ) : array();
+		$after_titles  = is_array( $after ) && isset( $after['events'] ) ? \wp_list_pluck( $after['events'], 'title' ) : array();
+		$request_body  = $calls[0]['body'] ?? array();
+
+		self::collect_failure(
+			$failures,
+			is_array( $cached )
+				&& array( 'Cached & Meetup', 'Meetup Two', 'WordCamp & Pinned' ) === $cached_titles
+				&& is_array( $fresh )
+				&& array( 'Fresh & Meetup', 'Meetup Two', 'WordCamp & Pinned' ) === $fresh_titles
+				&& is_array( $after )
+				&& $fresh_titles === $after_titles
+				&& $ip === ( $fresh['location']['ip'] ?? null )
+				&& 'Fresh Search Location' === ( $fresh['location']['description'] ?? null ),
+			'manual location searches bypass cached events, normalize the response IP, and refresh cache contents',
+			array(
+				'cached' => $cached,
+				'fresh'  => $fresh,
+				'after'  => $after,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			1 === count( $calls )
+				&& str_ends_with( $calls[0]['url'] ?? '', '://api.wordpress.org/events/1.0/' )
+				&& $search === ( $request_body['location'] ?? null )
+				&& $timezone === ( $request_body['timezone'] ?? null )
+				&& $ip === ( $request_body['ip'] ?? null )
+				&& isset( $request_body['locale'] )
+				&& ! isset( $request_body['latitude'], $request_body['longitude'] ),
+			'search refresh sends minimal search request body exactly once despite an existing cache hit',
+			array(
+				'calls'       => $calls,
+				'requestBody' => $request_body,
+			)
+		);
+
+		return $ctx->result(
+			'community-events.get-events.search-bypasses-cache-and-refreshes',
+			array() === $failures,
+			array(
 				'failures' => $failures,
 			)
 		);

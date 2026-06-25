@@ -136,8 +136,8 @@ database, network requests, or a configured site.
 - `community-events`: no-network Community Events API client coverage,
   including IP header selection and anonymization, minimal request bodies,
   transient key/cache behavior, strict coordinate matching, cache expiration
-  normalization, event trimming and WordCamp pinning, response normalization,
-  and API error contracts.
+  normalization, search-triggered cache refresh behavior, event trimming and
+  WordCamp pinning, response normalization, and API error contracts.
 - `comment-workflow`: in-memory comment submission, duplicate/flood approval
   decisions, direct `wp_new_comment()` preprocessing and insert hooks,
   moderation short-circuits, update/status transition hooks, trash/untrash and
