@@ -244,8 +244,9 @@ database, network requests, or a configured site.
 - `frontend-features`: no-DB frontend feature helper coverage for speculative
   loading and view transitions, including direct speculation rule validation,
   configuration eligibility, mode/eagerness filters, generated URL-pattern
-  exclusions, script tag escaping, theme support behavior, view-transition CSS
-  registration timing, enqueueing, and global restoration.
+  exclusions, disabled lifecycle/load-action isolation, script tag escaping,
+  theme support behavior, view-transition CSS registration timing, enqueueing,
+  and global restoration.
 - `html-api`: HTML tag and tree processor mutation escaping, deterministic
   rich HTML generation, normalization/recovery idempotence with tree
   preservation, token walking, breadcrumb stack replay, bookmark/seek replay,

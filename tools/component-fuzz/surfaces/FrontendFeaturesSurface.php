@@ -31,6 +31,7 @@ final class FrontendFeaturesSurface {
 			$rows[] = self::check_speculation_rules_class_validation( $ctx->fork( 'rules-class' ) );
 			$rows[] = self::check_speculation_rule_shapes( $ctx->fork( 'rules' ) );
 			$rows[] = self::check_speculation_printed_tag( $ctx->fork( 'printed-tag' ) );
+			$rows[] = self::check_speculation_disabled_lifecycle( $ctx->fork( 'disabled-lifecycle' ) );
 			$rows[] = self::check_url_pattern_prefixer( $ctx->fork( 'url-prefixer' ) );
 			$rows[] = self::check_view_transition_helpers( $ctx->fork( 'view-transitions' ) );
 		} catch ( \Throwable $e ) {
@@ -585,6 +586,254 @@ final class FrontendFeaturesSurface {
 				'themeResults'  => $theme_results,
 				'disabledEmpty' => '' === $disabled_output,
 				'failures'      => array_slice( $failures, 0, 6 ),
+			)
+		);
+	}
+
+	private static function check_speculation_disabled_lifecycle( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures  = array();
+		$slug      = self::slug( $ctx, 'lifecycle' );
+		$mode      = $ctx->choice( array( 'prefetch', 'prerender' ) );
+		$eagerness = $ctx->choice( array( 'conservative', 'moderate', 'eager' ) );
+
+		$disabled_filter = static function (): ?array {
+			return null;
+		};
+		$disabled_permalink_filter = static function (): string {
+			return '/%postname%/';
+		};
+		$disabled_loads            = array();
+		$disabled_action           = static function ( \WP_Speculation_Rules $rules ) use ( &$disabled_loads ): void {
+			$disabled_loads[] = spl_object_id( $rules );
+		};
+
+		$disabled_rules          = null;
+		$disabled_output         = null;
+		$disabled_action_before  = \did_action( 'wp_load_speculation_rules' );
+		$disabled_action_after   = null;
+		$disabled_hooks_removed  = false;
+
+		\add_filter( 'wp_speculation_rules_configuration', $disabled_filter );
+		\add_filter( 'pre_option_permalink_structure', $disabled_permalink_filter );
+		\add_action( 'wp_load_speculation_rules', $disabled_action );
+		try {
+			self::set_logged_in( false, $ctx->seed() );
+
+			$disabled_rules        = \wp_get_speculation_rules();
+			$disabled_output       = self::capture_output( static fn() => \wp_print_speculation_rules() );
+			$disabled_action_after = \did_action( 'wp_load_speculation_rules' );
+		} finally {
+			\remove_action( 'wp_load_speculation_rules', $disabled_action );
+			\remove_filter( 'pre_option_permalink_structure', $disabled_permalink_filter );
+			\remove_filter( 'wp_speculation_rules_configuration', $disabled_filter );
+			\wp_set_current_user( 0 );
+
+			$disabled_hooks_removed = false === \has_action( 'wp_load_speculation_rules', $disabled_action )
+				&& false === \has_filter( 'pre_option_permalink_structure', $disabled_permalink_filter )
+				&& false === \has_filter( 'wp_speculation_rules_configuration', $disabled_filter );
+		}
+
+		self::collect_failure(
+			$failures,
+			null === $disabled_rules
+				&& '' === $disabled_output
+				&& array() === $disabled_loads
+				&& $disabled_action_before === $disabled_action_after
+				&& $disabled_hooks_removed,
+			'disabled speculation configuration returns null, prints nothing, skips load action, and removes lifecycle hooks',
+			array(
+				'disabledRules'        => $disabled_rules,
+				'disabledOutput'       => $disabled_output,
+				'disabledLoads'        => $disabled_loads,
+				'actionCountBefore'    => $disabled_action_before,
+				'actionCountAfter'     => $disabled_action_after,
+				'disabledHooksRemoved' => $disabled_hooks_removed,
+			)
+		);
+
+		$per_call_urls = array(
+			'/lifecycle-' . $slug . '-get-1?close=</script>&tag=<tag>',
+			'/lifecycle-' . $slug . '-get-2?close=</script>&tag=<tag>',
+			'/lifecycle-' . $slug . '-print-1?close=</script>&tag=<tag>',
+			'/lifecycle-' . $slug . '-print-2?close=</script>&tag=<tag>',
+		);
+		$config_filter = static function () use ( $mode, $eagerness ): array {
+			return array(
+				'mode'      => $mode,
+				'eagerness' => $eagerness,
+			);
+		};
+		$permalink_filter = static function (): string {
+			return '/%postname%/';
+		};
+		$home_filter      = static function () use ( $slug ): string {
+			return 'https://example.test/front-' . $slug;
+		};
+		$siteurl_filter   = static function () use ( $slug ): string {
+			return 'https://example.test/core-' . $slug;
+		};
+		$template_filter  = static function () use ( $slug ): string {
+			return 'https://example.test/wp-content/themes/template-' . $slug;
+		};
+		$stylesheet_filter = static function () use ( $slug ): string {
+			return 'https://example.test/wp-content/themes/stylesheet-' . $slug;
+		};
+
+		$enabled_loads  = array();
+		$retained_rules = array();
+		$load_action    = static function ( \WP_Speculation_Rules $rules ) use ( &$enabled_loads, &$retained_rules, $per_call_urls, $slug ): void {
+			$index                = count( $enabled_loads );
+			$url                  = $per_call_urls[ $index ] ?? '/lifecycle-' . $slug . '-extra-' . $index . '?close=</script>&tag=<tag>';
+			$rule_id              = 'lifecycle-' . $slug . '-' . $index;
+			$retained_rules[]     = $rules;
+			$enabled_loads[]      = array(
+				'objectId' => spl_object_id( $rules ),
+				'class'    => get_class( $rules ),
+				'url'      => $url,
+				'added'    => $rules->add_rule(
+					'prefetch',
+					$rule_id,
+					array(
+						'source'    => 'list',
+						'urls'      => array( $url ),
+						'eagerness' => 'immediate',
+					)
+				),
+			);
+		};
+
+		$contains_only_call_url = static function ( $serialized, int $expected_index ) use ( $per_call_urls ): bool {
+			foreach ( $per_call_urls as $index => $url ) {
+				$contains = self::serialized_rules_contain_url( $serialized, 'prefetch', $url );
+				if ( $expected_index === $index && ! $contains ) {
+					return false;
+				}
+				if ( $expected_index !== $index && $contains ) {
+					return false;
+				}
+			}
+
+			return true;
+		};
+
+		$first_get_obj         = null;
+		$second_get_obj        = null;
+		$first_get_serialized  = null;
+		$second_get_serialized = null;
+		$first_print           = '';
+		$second_print          = '';
+		$first_print_decoded   = array( 'ok' => false );
+		$second_print_decoded  = array( 'ok' => false );
+		$enabled_before        = \did_action( 'wp_load_speculation_rules' );
+		$enabled_after         = null;
+		$enabled_hooks_removed = false;
+
+		\add_filter( 'wp_speculation_rules_configuration', $config_filter );
+		\add_filter( 'pre_option_permalink_structure', $permalink_filter );
+		\add_filter( 'pre_option_home', $home_filter );
+		\add_filter( 'pre_option_siteurl', $siteurl_filter );
+		\add_filter( 'template_directory_uri', $template_filter );
+		\add_filter( 'stylesheet_directory_uri', $stylesheet_filter );
+		\add_action( 'wp_load_speculation_rules', $load_action );
+
+		try {
+			self::set_logged_in( false, $ctx->seed() + 1 );
+
+			$first_get_obj         = \wp_get_speculation_rules();
+			$first_get_serialized  = $first_get_obj instanceof \WP_Speculation_Rules ? $first_get_obj->jsonSerialize() : null;
+			$second_get_obj        = \wp_get_speculation_rules();
+			$second_get_serialized = $second_get_obj instanceof \WP_Speculation_Rules ? $second_get_obj->jsonSerialize() : null;
+			$first_print           = self::capture_output( static fn() => \wp_print_speculation_rules() );
+			$first_print_decoded   = self::decode_speculation_output( $first_print );
+			$second_print          = self::capture_output( static fn() => \wp_print_speculation_rules() );
+			$second_print_decoded  = self::decode_speculation_output( $second_print );
+			$enabled_after         = \did_action( 'wp_load_speculation_rules' );
+		} finally {
+			\remove_action( 'wp_load_speculation_rules', $load_action );
+			\remove_filter( 'stylesheet_directory_uri', $stylesheet_filter );
+			\remove_filter( 'template_directory_uri', $template_filter );
+			\remove_filter( 'pre_option_siteurl', $siteurl_filter );
+			\remove_filter( 'pre_option_home', $home_filter );
+			\remove_filter( 'pre_option_permalink_structure', $permalink_filter );
+			\remove_filter( 'wp_speculation_rules_configuration', $config_filter );
+			\wp_set_current_user( 0 );
+
+			$enabled_hooks_removed = false === \has_action( 'wp_load_speculation_rules', $load_action )
+				&& false === \has_filter( 'stylesheet_directory_uri', $stylesheet_filter )
+				&& false === \has_filter( 'template_directory_uri', $template_filter )
+				&& false === \has_filter( 'pre_option_siteurl', $siteurl_filter )
+				&& false === \has_filter( 'pre_option_home', $home_filter )
+				&& false === \has_filter( 'pre_option_permalink_structure', $permalink_filter )
+				&& false === \has_filter( 'wp_speculation_rules_configuration', $config_filter );
+		}
+
+		$object_ids     = array_column( $enabled_loads, 'objectId' );
+		$load_urls      = array_column( $enabled_loads, 'url' );
+		$expected_order = array(
+			$first_get_obj instanceof \WP_Speculation_Rules ? spl_object_id( $first_get_obj ) : null,
+			$second_get_obj instanceof \WP_Speculation_Rules ? spl_object_id( $second_get_obj ) : null,
+			$object_ids[2] ?? null,
+			$object_ids[3] ?? null,
+		);
+		$all_added      = array_column( $enabled_loads, 'added' );
+		$printed_escape = str_contains( $first_print, '\u003C/script\u003E' )
+			&& str_contains( $first_print, '\u003Ctag\u003E' )
+			&& str_contains( $second_print, '\u003C/script\u003E' )
+			&& str_contains( $second_print, '\u003Ctag\u003E' )
+			&& ! str_contains( $first_print, '</script><tag>' )
+			&& ! str_contains( $second_print, '</script><tag>' );
+
+		self::collect_failure(
+			$failures,
+			$first_get_obj instanceof \WP_Speculation_Rules
+				&& $second_get_obj instanceof \WP_Speculation_Rules
+				&& 4 === count( $enabled_loads )
+				&& $enabled_after === $enabled_before + 4
+				&& array_fill( 0, 4, true ) === $all_added
+				&& $expected_order === $object_ids
+				&& $per_call_urls === $load_urls
+				&& 4 === count( array_unique( $object_ids ) )
+				&& $contains_only_call_url( $first_get_serialized, 0 )
+				&& $contains_only_call_url( $second_get_serialized, 1 )
+				&& $first_print_decoded['ok']
+				&& $contains_only_call_url( $first_print_decoded['rules'] ?? null, 2 )
+				&& $second_print_decoded['ok']
+				&& $contains_only_call_url( $second_print_decoded['rules'] ?? null, 3 )
+				&& $printed_escape
+				&& $enabled_hooks_removed,
+			'enabled speculation lifecycle fires one load action per get/print call with fresh objects, isolated generated rules, escaped print output, and removed hooks',
+			array(
+				'mode'                  => $mode,
+				'eagerness'             => $eagerness,
+				'actionCountBefore'     => $enabled_before,
+				'actionCountAfter'      => $enabled_after,
+				'loads'                 => $enabled_loads,
+				'expectedObjectOrder'   => $expected_order,
+				'objectIds'             => $object_ids,
+				'perCallUrls'           => $per_call_urls,
+				'loadUrls'              => $load_urls,
+				'firstGet'              => $first_get_serialized,
+				'secondGet'             => $second_get_serialized,
+				'firstPrint'            => self::preview( $first_print ),
+				'secondPrint'           => self::preview( $second_print ),
+				'firstPrintDecoded'     => $first_print_decoded['ok'] ? array_keys( $first_print_decoded['rules'] ) : $first_print_decoded,
+				'secondPrintDecoded'    => $second_print_decoded['ok'] ? array_keys( $second_print_decoded['rules'] ) : $second_print_decoded,
+				'printedEscape'         => $printed_escape,
+				'enabledHooksRemoved'   => $enabled_hooks_removed,
+				'retainedRulesForIds'   => count( $retained_rules ),
+			)
+		);
+
+		return $ctx->result(
+			'frontend-features.speculation.disabled-lifecycle-and-load-action-isolation',
+			array() === $failures,
+			array(
+				'mode'             => $mode,
+				'eagerness'        => $eagerness,
+				'disabledLoads'    => count( $disabled_loads ),
+				'enabledLoads'     => count( $enabled_loads ),
+				'enabledObjectIds' => $object_ids,
+				'failures'         => array_slice( $failures, 0, 4 ),
 			)
 		);
 	}
