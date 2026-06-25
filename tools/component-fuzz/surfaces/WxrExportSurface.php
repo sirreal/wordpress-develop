@@ -44,6 +44,7 @@ final class WxrExportSurface {
 				$rows[] = self::check_selection_filters( $ctx->fork( 'selection' ), $case, $details );
 				$rows[] = self::check_export_content_filters( $ctx->fork( 'content-filters' ), $case, $run, $details );
 				$rows[] = self::check_meta_filters( $ctx->fork( 'meta' ), $case, $run, $details, $xml );
+				$rows[] = self::check_attachment_urls_and_filemeta( $ctx->fork( 'attachments' ), $case, $details );
 				$rows[] = self::check_authors_and_terms( $ctx->fork( 'authors-terms' ), $case, $details );
 				$rows[] = self::check_header_capture( $ctx->fork( 'headers' ), $case, $run );
 				$rows[] = self::check_child_state_restored( $ctx->fork( 'child-state' ), $case, $run );
@@ -374,6 +375,52 @@ final class WxrExportSurface {
 		return self::result( $ctx, 'wxr-export.meta-skip-filters', $failures );
 	}
 
+	private static function check_attachment_urls_and_filemeta( \ComponentFuzz\FuzzContext $ctx, array $case, array $details ): array {
+		$failures              = array();
+		$expected_attachments  = self::expected_attachment_details( $case, $details['postIds'] );
+		$actual_attachment_ids = array_keys( $details['attachmentUrls'] );
+		sort( $actual_attachment_ids, SORT_NUMERIC );
+
+		self::collect_failure(
+			$failures,
+			array_keys( $expected_attachments ) === $actual_attachment_ids,
+			'only exported attachment items carry WXR attachment URLs',
+			array(
+				'expectedAttachmentIds' => array_keys( $expected_attachments ),
+				'actualAttachmentIds'   => $actual_attachment_ids,
+				'postTypes'             => $details['postTypes'],
+			)
+		);
+
+		$mismatches = array();
+		foreach ( $expected_attachments as $post_id => $expected ) {
+			$file_values = $details['postMetaValues'][ $post_id ]['_wp_attached_file'] ?? array();
+			$actual_url  = $details['attachmentUrls'][ $post_id ] ?? null;
+
+			if ( $expected['url'] !== $actual_url || ! in_array( $expected['file'], $file_values, true ) ) {
+				$mismatches[] = array(
+					'postId'             => $post_id,
+					'expectedUrl'        => $expected['url'],
+					'actualUrl'          => $actual_url,
+					'expectedFileMeta'   => $expected['file'],
+					'actualFileMetaList' => $file_values,
+				);
+			}
+		}
+
+		self::collect_failure(
+			$failures,
+			array() === $mismatches,
+			'attachment URLs are derived from _wp_attached_file and the file meta is serialized with each attachment item',
+			array(
+				'uploadsBaseUrl' => $case['uploadsBaseUrl'],
+				'mismatches'     => array_slice( $mismatches, 0, 8 ),
+			)
+		);
+
+		return self::result( $ctx, 'wxr-export.attachment-url-and-filemeta', $failures );
+	}
+
 	private static function expected_meta_filter_events( array $case, array $post_ids ): array {
 		$expected = array(
 			'postmeta'    => array(),
@@ -584,6 +631,7 @@ final class WxrExportSurface {
 			'customTaxonomy'    => $custom_tax,
 			'customPostType'    => $custom_pt,
 			'expectedFilename'  => 'component-fuzz-' . $token . '.xml',
+			'uploadsBaseUrl'    => 'http://example.test/component-fuzz-uploads/' . $token,
 			'autoDraftPostId'   => 104,
 			'args'              => self::args_for_scenario( $scenario, $terms['categoryParent']['slug'] ),
 			'users'             => $users,
@@ -764,6 +812,43 @@ final class WxrExportSurface {
 		return array_values( array_unique( $authors ) );
 	}
 
+	private static function expected_attachment_details( array $case, array $post_ids ): array {
+		$expected = array();
+		foreach ( $post_ids as $post_id ) {
+			$post = $case['posts'][ $post_id ] ?? null;
+			if ( ! is_array( $post ) || 'attachment' !== $post['post_type'] ) {
+				continue;
+			}
+
+			$file = self::attached_file_for_post( $case, (int) $post_id );
+			if ( null === $file ) {
+				continue;
+			}
+
+			$expected[ (int) $post_id ] = array(
+				'file' => $file,
+				'url'  => self::expected_attachment_url( $case, $file ),
+			);
+		}
+
+		ksort( $expected, SORT_NUMERIC );
+		return $expected;
+	}
+
+	private static function attached_file_for_post( array $case, int $post_id ): ?string {
+		foreach ( $case['postmeta'] as $meta ) {
+			if ( (int) $meta['post_id'] === $post_id && '_wp_attached_file' === $meta['meta_key'] ) {
+				return (string) $meta['meta_value'];
+			}
+		}
+
+		return null;
+	}
+
+	private static function expected_attachment_url( array $case, string $file ): string {
+		return rtrim( (string) $case['uploadsBaseUrl'], '/' ) . '/' . ltrim( $file, '/' );
+	}
+
 	private static function term_by_slug( array $case, string $slug, string $taxonomy ): ?array {
 		foreach ( $case['terms'] as $term ) {
 			if ( $slug === $term['slug'] && $taxonomy === $term['taxonomy'] ) {
@@ -810,6 +895,9 @@ final class WxrExportSurface {
 			'postMetaKeys'    => array(),
 			'termMetaKeys'    => array(),
 			'commentMetaKeys' => array(),
+			'postTypes'       => array(),
+			'attachmentUrls'  => array(),
+			'postMetaValues'  => array(),
 			'titles'          => array(),
 			'contents'        => array(),
 			'excerpts'        => array(),
@@ -840,14 +928,23 @@ final class WxrExportSurface {
 
 		foreach ( $channel->item as $item ) {
 			$item_wp = $item->children( self::WXR_NS );
-			$post_id               = (int) $item_wp->post_id;
-			$details['postIds'][]  = $post_id;
-			$details['statuses'][] = (string) $item_wp->status;
+			$post_id                       = (int) $item_wp->post_id;
+			$details['postIds'][]          = $post_id;
+			$details['statuses'][]         = (string) $item_wp->status;
+			$details['postTypes'][ $post_id ] = (string) $item_wp->post_type;
+			if ( isset( $item_wp->attachment_url ) ) {
+				$details['attachmentUrls'][ $post_id ] = (string) $item_wp->attachment_url;
+			}
 			$details['titles'][ $post_id ]   = (string) $item->title;
 			$details['contents'][ $post_id ] = (string) $item->children( self::CONTENT_NS )->encoded;
 			$details['excerpts'][ $post_id ] = (string) $item->children( self::EXCERPT_NS )->encoded;
 			foreach ( $item_wp->postmeta as $meta ) {
-				$details['postMetaKeys'][] = (string) $meta->children( self::WXR_NS )->meta_key;
+				$meta_wp    = $meta->children( self::WXR_NS );
+				$meta_key   = (string) $meta_wp->meta_key;
+				$meta_value = (string) $meta_wp->meta_value;
+
+				$details['postMetaKeys'][] = $meta_key;
+				$details['postMetaValues'][ $post_id ][ $meta_key ][] = $meta_value;
 			}
 			foreach ( $item_wp->comment as $comment ) {
 				foreach ( $comment->children( self::WXR_NS )->commentmeta as $meta ) {
@@ -1091,7 +1188,7 @@ if ( ! class_exists( 'Component_Fuzz_WXR_WPDB_Double', false ) ) {
 					'language'      => 'en-US',
 					'sticky_posts'  => array( 101 ),
 					'upload_path'   => '',
-					'upload_url_path' => '',
+					'upload_url_path' => $fixture['uploadsBaseUrl'] ?? '',
 					'uploads_use_yearmonth_folders' => 1,
 				)
 			);
