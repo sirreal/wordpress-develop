@@ -1250,6 +1250,46 @@ final class NetworkMediaSurface {
 					);
 				}
 			}
+
+			foreach ( self::custom_mime_filetype_cases( $rng ) as $index => $case ) {
+				++$result['caseCount'];
+				self::feature( $result, 'filetype-and-ext:custom-mimes' );
+
+				$missing_path = $filetype_dir . DIRECTORY_SEPARATOR . 'custom-missing-' . $index . '.bin';
+				$checked      = self::call_api(
+					$result,
+					'wp_check_filetype_and_ext.custom-mimes',
+					$case['filename'],
+					static function () use ( $missing_path, $case ) {
+						return wp_check_filetype_and_ext( $missing_path, $case['filename'], $case['mimes'] );
+					}
+				);
+
+				if ( ! $checked['ok'] ) {
+					continue;
+				}
+
+				self::check_filetype_and_ext_shape( $case['filename'], $checked['value'], 'wp_check_filetype_and_ext:custom-mimes-shape', $result );
+				self::check_invariant(
+					$result,
+					array(
+						'ext'             => $case['expectedExt'],
+						'type'            => $case['expectedType'],
+						'proper_filename' => false,
+					) === $checked['value'],
+					'wp_check_filetype_and_ext:custom-mimes-allowlist-oracle',
+					$case['filename'],
+					array(
+						'mimes'    => $case['mimes'],
+						'expected' => array(
+							'ext'             => $case['expectedExt'],
+							'type'            => $case['expectedType'],
+							'proper_filename' => false,
+						),
+						'actual'   => $checked['value'],
+					)
+				);
+			}
 		}
 
 		if ( ! function_exists( 'wp_unique_filename' ) ) {
@@ -2396,6 +2436,51 @@ final class NetworkMediaSurface {
 		}
 
 		return $site_mimes;
+	}
+
+	private static function custom_mime_filetype_cases( array &$rng ): array {
+		$cases = array(
+			array(
+				'filename'     => 'photo.jpg',
+				'mimes'        => array( 'jpg|jpeg' => 'image/jpeg' ),
+				'expectedExt'  => 'jpg',
+				'expectedType' => 'image/jpeg',
+			),
+			array(
+				'filename'     => 'photo.JPG',
+				'mimes'        => array( 'jpg|jpeg' => 'image/jpeg' ),
+				'expectedExt'  => 'JPG',
+				'expectedType' => 'image/jpeg',
+			),
+			array(
+				'filename'     => 'archive.tar.gz',
+				'mimes'        => array( 'tar\.gz|tgz' => 'application/gzip' ),
+				'expectedExt'  => 'tar.gz',
+				'expectedType' => 'application/gzip',
+			),
+			array(
+				'filename'     => 'vector.svg',
+				'mimes'        => array( 'jpg|jpeg' => 'image/jpeg' ),
+				'expectedExt'  => false,
+				'expectedType' => false,
+			),
+		);
+
+		$exts = array( 'cfz', 'data', 'asset', 'bundle' );
+		for ( $i = 0; $i < 6; ++$i ) {
+			$ext       = self::rng_choice( $rng, $exts );
+			$uppercase = 0 === self::rng_int( $rng, 0, 2 );
+			$filename  = 'component-' . self::rng_int( $rng, 100, 999 ) . '.' . ( $uppercase ? strtoupper( $ext ) : $ext );
+
+			$cases[] = array(
+				'filename'     => $filename,
+				'mimes'        => array( preg_quote( $ext, '!' ) => 'application/x-component-fuzz-' . $ext ),
+				'expectedExt'  => $uppercase ? strtoupper( $ext ) : $ext,
+				'expectedType' => 'application/x-component-fuzz-' . $ext,
+			);
+		}
+
+		return $cases;
 	}
 
 	private static function generated_unique_filename_cases( array &$rng ): array {
