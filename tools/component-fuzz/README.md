@@ -315,9 +315,11 @@ database, network requests, or a configured site.
 - `media-remote`: no-live-network remote media helper coverage for
   `download_url()`, `media_sideload_image()`, and selected
   `media_handle_sideload()` branches, including HTTP short-circuit fixtures,
-  Content-Disposition filename sanitization, URL extension/MIME boundaries,
-  temp-file cleanup, size/type rejection, sideload prefilter and override
-  filter contracts, filter locality, and global restoration.
+  case-insensitive download headers, Content-Disposition filename sanitization,
+  signature soft-fail/hard-fail temp-file behavior, URL extension/MIME
+  boundaries, extension-filtered sideload return types and metadata,
+  temp-file cleanup, size/type rejection, sideload prefilter cleanup and
+  override filter contracts, filter locality, and global restoration.
 - `metadata`: no-DB Metadata API registration, subtype visibility, defaults,
   registration argument edges, legacy callbacks, sanitize/auth/protected-meta
   filters, cache-backed lookup shape, filtered and in-memory CRUD cache
@@ -671,10 +673,11 @@ outside the component-fuzz temp root.
 The `media-remote` surface complements that local ingest coverage by exercising
 remote download and sideload helpers with `pre_http_request` fixtures only. It
 records every streamed temp filename observed by the HTTP short-circuit,
-removes returned temp files, routes successful sideloads through a temp upload
-root, and asserts that its HTTP, upload, extension, and error-body filters are
-removed after each check. It never lets unregistered remote URLs fall through to
-the live HTTP transport.
+including package signature soft-fail/hard-fail paths, removes returned temp
+files, routes successful sideloads through a temp upload root, and asserts that
+its HTTP, signature, upload, extension, and error-body filters are removed after
+each check. It never lets unregistered remote URLs fall through to the live HTTP
+transport.
 The `comment-workflow` surface uses the bounded content/comment rows in the
 in-memory `wpdb` stub and avoids notification mail, browser cookie writes, and
 `wp_die()` paths by requesting `WP_Error` returns or using non-exiting helpers.

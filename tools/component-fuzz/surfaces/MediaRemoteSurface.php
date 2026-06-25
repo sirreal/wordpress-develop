@@ -43,6 +43,7 @@ final class MediaRemoteSurface {
 				self::prepare_runtime( $temp_root );
 
 				$rows[] = self::check_download_url_contracts( $ctx->fork( 'download-url' ), $download_paths );
+				$rows[] = self::check_download_url_signature_contracts( $ctx->fork( 'download-url-signatures' ), $download_paths );
 				$rows[] = self::check_media_sideload_image_flows( $ctx->fork( 'media-sideload-image' ), $temp_root, $download_paths );
 				$rows[] = self::check_media_handle_sideload_branches( $ctx->fork( 'media-handle-sideload' ), $temp_root );
 				$rows[] = self::check_media_handle_sideload_filter_contracts( $ctx->fork( 'media-handle-filters' ), $temp_root );
@@ -136,7 +137,7 @@ final class MediaRemoteSurface {
 			}
 		}
 
-		foreach ( array( 'WP_Error', 'WP_Post' ) as $class ) {
+		foreach ( array( 'WP_Error', 'WP_Post', 'WpOrg\Requests\Utility\CaseInsensitiveDictionary' ) as $class ) {
 			if ( ! class_exists( $class ) ) {
 				$missing[] = "class {$class}";
 			}
@@ -165,15 +166,15 @@ final class MediaRemoteSurface {
 				'body'    => $ok_body,
 				'code'    => 200,
 				'headers' => array(
-					'Content-Disposition' => $disposition_header,
-					'content-type'         => 'application/octet-stream',
+					'cOnTeNt-DiSpOsItIoN' => $disposition_header,
+					'CONTENT-TYPE'         => 'application/octet-stream',
 				),
 			),
 			'https://example.test/component-fuzz/no-extension-' . $ctx->identifier( 4, 8 ) => array(
 				'body'    => $image_body,
 				'code'    => 200,
 				'headers' => array(
-					'content-type' => 'image/png',
+					'Content-Type' => 'image/png',
 				),
 			),
 			'https://example.test/component-fuzz/status-' . $ctx->identifier( 4, 8 ) . '.jpg' => array(
@@ -188,7 +189,7 @@ final class MediaRemoteSurface {
 				'body'    => $md5_body,
 				'code'    => 200,
 				'headers' => array(
-					'Content-MD5' => str_repeat( '0', 32 ),
+					'content-md5' => str_repeat( '0', 32 ),
 					'content-type' => 'text/plain',
 				),
 			),
@@ -334,6 +335,208 @@ final class MediaRemoteSurface {
 		);
 	}
 
+	private static function check_download_url_signature_contracts( \ComponentFuzz\FuzzContext $ctx, array &$download_paths ): array {
+		$failures         = array();
+		$http_events      = array();
+		$signature_events = array();
+		$allowed_errors   = array(
+			'signature_verification_failed',
+			'signature_verification_no_signature',
+			'signature_verification_unsupported',
+		);
+
+		$bypass_body = "signature host bypass\n" . $ctx->ascii( 8, 24 );
+		$soft_body   = "softfail package\n" . $ctx->ascii( 8, 24 );
+		$hard_body   = "hardfail package\n" . $ctx->ascii( 8, 24 );
+		$bypass_url  = 'https://example.test/component-fuzz/signature-bypass-' . rawurlencode( $ctx->identifier( 4, 8 ) ) . '.zip';
+		$soft_url    = 'https://downloads.wordpress.org/plugin/component-fuzz-soft-' . rawurlencode( $ctx->identifier( 4, 8 ) ) . '.zip';
+		$hard_url    = 'https://downloads.wordpress.org/theme/component-fuzz-hard-' . rawurlencode( $ctx->identifier( 4, 8 ) ) . '.tar.gz';
+
+		$routes = array(
+			$bypass_url        => array(
+				'body'    => $bypass_body,
+				'code'    => 200,
+				'headers' => array(
+					'content-md5' => md5( $bypass_body ),
+					'CONTENT-TYPE' => 'application/zip',
+				),
+			),
+			$soft_url          => array(
+				'body'    => $soft_body,
+				'code'    => 200,
+				'headers' => array(
+					'Content-Type' => 'application/zip',
+				),
+			),
+			$soft_url . '.sig' => array(
+				'body'    => 'component-fuzz-invalid-signature-' . $ctx->identifier( 4, 8 ),
+				'code'    => 200,
+				'headers' => array(
+					'content-type' => 'text/plain',
+				),
+			),
+			$hard_url          => array(
+				'body'    => $hard_body,
+				'code'    => 200,
+				'headers' => array(
+					'content-type' => 'application/x-tar',
+				),
+			),
+			$hard_url . '.sig' => array(
+				'body'    => 'component-fuzz-invalid-signature-' . $ctx->identifier( 4, 8 ),
+				'code'    => 200,
+				'headers' => array(
+					'content-type' => 'text/plain',
+				),
+			),
+		);
+
+		$http_filter = self::http_interceptor( $routes, $http_events, $download_paths );
+		$hosts_filter = static function ( array $hosts ) use ( &$signature_events ): array {
+			$signature_events[] = array(
+				'hook'  => 'wp_signature_hosts',
+				'hosts' => $hosts,
+			);
+
+			return array( 'downloads.wordpress.org' );
+		};
+		$signature_url_filter = static function ( $signature_url, string $url ) use ( &$signature_events ) {
+			$signature_events[] = array(
+				'hook'         => 'wp_signature_url',
+				'url'          => $url,
+				'signatureUrl' => $signature_url,
+			);
+
+			return $signature_url;
+		};
+		$hardfail_filter = static function ( bool $softfail, string $url ) use ( &$signature_events ): bool {
+			$signature_events[] = array(
+				'hook'     => 'wp_signature_softfail',
+				'url'      => $url,
+				'softfail' => $softfail,
+			);
+
+			return false;
+		};
+
+		\add_filter( 'pre_http_request', $http_filter, 10, 3 );
+		\add_filter( 'wp_signature_hosts', $hosts_filter );
+		\add_filter( 'wp_signature_url', $signature_url_filter, 10, 2 );
+
+		try {
+			$bypass_result = \download_url( $bypass_url, 11, true );
+			self::collect_failure(
+				$failures,
+				is_string( $bypass_result )
+					&& is_file( $bypass_result )
+					&& $bypass_body === file_get_contents( $bypass_result )
+					&& 'zip' === pathinfo( $bypass_result, PATHINFO_EXTENSION ),
+				'download_url skips signature verification for hosts outside the filtered signature allowlist while honoring case-insensitive headers',
+				array( 'result' => self::describe_result( $bypass_result ) )
+			);
+			if ( is_string( $bypass_result ) ) {
+				$download_paths[] = $bypass_result;
+				@unlink( $bypass_result );
+			}
+
+			$soft_error = \download_url( $soft_url, 11, true );
+			$soft_path  = \is_wp_error( $soft_error ) ? $soft_error->get_error_data( 'softfail-filename' ) : null;
+			self::collect_failure(
+				$failures,
+				\is_wp_error( $soft_error )
+					&& in_array( $soft_error->get_error_code(), $allowed_errors, true )
+					&& is_string( $soft_path )
+					&& is_file( $soft_path )
+					&& $soft_body === file_get_contents( $soft_path ),
+				'download_url signature soft-fail errors retain the downloaded package path for callers',
+				array(
+					'result'       => self::describe_error( $soft_error ),
+					'softfailPath' => self::describe_result( $soft_path ),
+				)
+			);
+			if ( is_string( $soft_path ) ) {
+				$download_paths[] = $soft_path;
+				@unlink( $soft_path );
+			}
+
+			\add_filter( 'wp_signature_softfail', $hardfail_filter, 10, 2 );
+			try {
+				$hard_error = \download_url( $hard_url, 11, true );
+			} finally {
+				\remove_filter( 'wp_signature_softfail', $hardfail_filter, 10 );
+			}
+
+			self::collect_failure(
+				$failures,
+				\is_wp_error( $hard_error )
+					&& in_array( $hard_error->get_error_code(), $allowed_errors, true )
+					&& ! is_string( $hard_error->get_error_data( 'softfail-filename' ) )
+					&& self::tracked_paths_absent( $download_paths ),
+				'download_url signature hard-fail errors delete streamed temp packages and do not expose a softfail filename',
+				array(
+					'result'              => self::describe_error( $hard_error ),
+					'trackedPathsCleaned' => self::tracked_paths_absent( $download_paths ),
+				)
+			);
+		} finally {
+			\remove_filter( 'wp_signature_url', $signature_url_filter, 10 );
+			\remove_filter( 'wp_signature_hosts', $hosts_filter );
+			\remove_filter( 'pre_http_request', $http_filter, 10 );
+		}
+
+		$registered_events = array_filter(
+			$http_events,
+			static function ( array $event ): bool {
+				return ! empty( $event['registered'] );
+			}
+		);
+		$signature_url_events = array_filter(
+			$signature_events,
+			static function ( array $event ): bool {
+				return 'wp_signature_url' === ( $event['hook'] ?? null );
+			}
+		);
+		$softfail_events = array_filter(
+			$signature_events,
+			static function ( array $event ): bool {
+				return 'wp_signature_softfail' === ( $event['hook'] ?? null );
+			}
+		);
+
+		self::collect_failure(
+			$failures,
+			count( $routes ) === count( $registered_events )
+				&& 2 === count( $signature_url_events )
+				&& 1 === count( $softfail_events )
+				&& false === \has_filter( 'pre_http_request', $http_filter )
+				&& false === \has_filter( 'wp_signature_hosts', $hosts_filter )
+				&& false === \has_filter( 'wp_signature_url', $signature_url_filter )
+				&& false === \has_filter( 'wp_signature_softfail', $hardfail_filter ),
+			'download_url signature verification uses only registered HTTP fixtures and leaves signature filters scoped',
+			array(
+				'httpEvents'      => $http_events,
+				'signatureEvents' => $signature_events,
+				'hasFilters'      => array(
+					'preHttp'       => \has_filter( 'pre_http_request', $http_filter ),
+					'signatureHost' => \has_filter( 'wp_signature_hosts', $hosts_filter ),
+					'signatureUrl'  => \has_filter( 'wp_signature_url', $signature_url_filter ),
+					'softfail'      => \has_filter( 'wp_signature_softfail', $hardfail_filter ),
+				),
+			)
+		);
+
+		return $ctx->result(
+			'media-remote.download-url-signature-header-boundaries',
+			array() === $failures,
+			array(
+				'cases'           => 3,
+				'httpEvents'      => $http_events,
+				'signatureEvents' => $signature_events,
+				'failures'        => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
 	private static function check_media_sideload_image_flows( \ComponentFuzz\FuzzContext $ctx, string $temp_root, array &$download_paths ): array {
 		$failures      = array();
 		$http_events   = array();
@@ -343,10 +546,14 @@ final class MediaRemoteSurface {
 
 		$valid_url      = 'https://example.test/component-fuzz/media-photo-' . rawurlencode( $ctx->identifier( 4, 9 ) ) . '.png?token=' . rawurlencode( $ctx->identifier( 3, 8 ) );
 		$html_url       = 'https://example.test/component-fuzz/media-html-' . rawurlencode( $ctx->identifier( 4, 9 ) ) . '.png';
+		$src_url        = 'https://example.test/component-fuzz/media-src-' . rawurlencode( $ctx->identifier( 4, 9 ) ) . '.PNG?download=' . rawurlencode( $ctx->identifier( 3, 8 ) );
+		$text_url       = 'https://example.test/component-fuzz/media-text-' . rawurlencode( $ctx->identifier( 4, 9 ) ) . '.txt';
 		$empty_url      = 'https://example.test/component-fuzz/media-empty-' . rawurlencode( $ctx->identifier( 4, 9 ) ) . '.png';
 		$spoofed_url    = 'https://example.test/component-fuzz/media-spoofed-' . rawurlencode( $ctx->identifier( 4, 9 ) ) . '.png';
 		$invalid_url    = 'https://example.test/component-fuzz/media-invalid-' . rawurlencode( $ctx->identifier( 4, 9 ) ) . '.php';
 		$valid_body     = self::png_bytes();
+		$src_body       = self::png_bytes();
+		$text_body      = "plain text sideload\n" . $ctx->ascii( 10, 32 );
 		$desc           = 'Remote desc ' . $ctx->identifier( 3, 8 ) . ' <quoted>';
 		$parent_id      = self::insert_parent_post( $ctx );
 		$extension_hits = array();
@@ -364,6 +571,20 @@ final class MediaRemoteSurface {
 				'code'    => 200,
 				'headers' => array(
 					'content-type' => 'image/png',
+				),
+			),
+			$src_url     => array(
+				'body'    => $src_body,
+				'code'    => 200,
+				'headers' => array(
+					'content-type' => 'image/png',
+				),
+			),
+			$text_url    => array(
+				'body'    => $text_body,
+				'code'    => 200,
+				'headers' => array(
+					'content-type' => 'text/plain',
 				),
 			),
 			$empty_url   => array(
@@ -391,10 +612,17 @@ final class MediaRemoteSurface {
 			);
 			return $filtered;
 		};
-		$extension_filter  = static function ( array $extensions, string $file ) use ( &$extension_hits ): array {
+		$extension_filter  = static function ( array $extensions, string $file ) use ( &$extension_hits, $text_url ): array {
+			$input_extensions = $extensions;
+			if ( $text_url === $file ) {
+				$extensions[] = 'txt';
+				$extensions   = array_values( array_unique( $extensions ) );
+			}
+
 			$extension_hits[] = array(
-				'file'       => $file,
-				'extensions' => $extensions,
+				'file'            => $file,
+				'inputExtensions' => $input_extensions,
+				'extensions'      => $extensions,
 			);
 
 			return $extensions;
@@ -442,6 +670,83 @@ final class MediaRemoteSurface {
 				'media_sideload_image html return type includes escaped alt text and filtered upload URL',
 				array( 'html' => self::describe_result( $html ) )
 			);
+
+			$src = \media_sideload_image( $src_url, 0, $desc, 'src' );
+			self::collect_failure(
+				$failures,
+				is_string( $src )
+					&& str_starts_with( $src, 'http://example.test/component-fuzz-media-remote/' )
+					&& false === str_starts_with( $src, '<img' ),
+				'media_sideload_image src return type returns the attachment URL without HTML wrapping',
+				array( 'src' => self::describe_result( $src ) )
+			);
+
+			$text_id = \media_sideload_image( $text_url, $parent_id, null, 'id' );
+			if ( is_int( $text_id ) ) {
+				$text_post          = \get_post( $text_id );
+				$text_attached_file = \get_attached_file( $text_id );
+				$text_metadata      = \wp_get_attachment_metadata( $text_id );
+				$text_source_url    = \get_post_meta( $text_id, '_source_url', true );
+				$text_title         = preg_replace( '/\.[^.]+$/', '', \sanitize_file_name( basename( (string) parse_url( $text_url, PHP_URL_PATH ) ) ) );
+
+				self::collect_failure(
+					$failures,
+					$text_post instanceof \WP_Post
+						&& 'attachment' === $text_post->post_type
+						&& (int) $text_post->post_parent === $parent_id
+						&& 'text/plain' === (string) $text_post->post_mime_type
+						&& (string) $text_post->post_title === (string) $text_title,
+					'media_sideload_image extension filters can admit generated non-image attachment post rows',
+					array(
+						'id'            => $text_id,
+						'expectedTitle' => $text_title,
+						'post'          => $text_post instanceof \WP_Post
+							? array(
+								'ID'             => $text_post->ID,
+								'post_parent'    => $text_post->post_parent,
+								'post_title'     => $text_post->post_title,
+								'post_mime_type' => $text_post->post_mime_type,
+							)
+							: self::describe_result( $text_post ),
+					)
+				);
+
+				self::collect_failure(
+					$failures,
+					$text_url === $text_source_url
+						&& is_string( $text_attached_file )
+						&& null !== $upload_root
+						&& self::path_starts_with( $text_attached_file, $upload_root )
+						&& 'txt' === pathinfo( $text_attached_file, PATHINFO_EXTENSION )
+						&& is_file( $text_attached_file ),
+					'media_sideload_image extension-filtered non-image files preserve source URL and move inside the upload root',
+					array(
+						'id'           => $text_id,
+						'attachedFile' => $text_attached_file,
+						'uploadRoot'   => $upload_root,
+						'sourceUrl'    => $text_source_url,
+					)
+				);
+
+				self::collect_failure(
+					$failures,
+					is_array( $text_metadata )
+						&& (int) ( $text_metadata['filesize'] ?? -1 ) === strlen( $text_body ),
+					'media_sideload_image extension-filtered non-image files store generated filesize metadata',
+					array(
+						'id'           => $text_id,
+						'metadata'     => $text_metadata,
+						'expectedSize' => strlen( $text_body ),
+					)
+				);
+			} else {
+				self::collect_failure(
+					$failures,
+					false,
+					'media_sideload_image extension filters can admit generated non-image attachment post rows',
+					array( 'result' => self::describe_result( $text_id ) )
+				);
+			}
 
 			$empty_error = \media_sideload_image( $empty_url, 0, null, 'id' );
 			self::collect_failure(
@@ -502,8 +807,20 @@ final class MediaRemoteSurface {
 
 		self::collect_failure(
 			$failures,
-			( $after['posts'] ?? 0 ) >= ( $before['posts'] ?? 0 ) + 2
-				&& ( $after['post_meta'] ?? 0 ) >= ( $before['post_meta'] ?? 0 ) + 4
+			self::extension_event_allows( $extension_hits, $text_url, 'txt' )
+				&& ! self::extension_event_allows( $extension_hits, $invalid_url, 'php' ),
+			'media_sideload_image applies generated extension filters before the URL regex and before any HTTP request',
+			array(
+				'textUrl'       => $text_url,
+				'invalidUrl'    => $invalid_url,
+				'extensionHits' => $extension_hits,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			( $after['posts'] ?? 0 ) >= ( $before['posts'] ?? 0 ) + 4
+				&& ( $after['post_meta'] ?? 0 ) >= ( $before['post_meta'] ?? 0 ) + 8
 				&& null !== $upload_root
 				&& array() !== $upload_events
 				&& self::upload_events_within_root( $upload_events, $upload_root ),
@@ -537,7 +854,7 @@ final class MediaRemoteSurface {
 			'media-remote.media-sideload-image-remote-boundaries',
 			array() === $failures,
 			array(
-				'cases'    => 5,
+				'cases'    => 7,
 				'failures' => array_slice( $failures, 0, 10 ),
 				'http'     => $http_events,
 				'uploads'  => $upload_events,
@@ -685,6 +1002,7 @@ final class MediaRemoteSurface {
 		$forced_base      = trim( $forced_base, '-' );
 		$forced_name      = null;
 		$reject_name      = null;
+		$reject_path      = null;
 
 		$upload_dir_filter = static function ( array $uploads ) use ( &$upload_events ): array {
 			$filtered        = MediaRemoteSurface::filter_upload_dir( $uploads );
@@ -795,6 +1113,16 @@ final class MediaRemoteSurface {
 
 		self::collect_failure(
 			$failures,
+			is_string( $reject_path ) && ! file_exists( $reject_path ),
+			'media_handle_sideload prefilter rejection fixtures are cleaned after the source-preservation contract is observed',
+			array(
+				'rejectPath'   => $reject_path,
+				'sourceExists' => is_string( $reject_path ) ? file_exists( $reject_path ) : null,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
 			null !== $upload_root
 				&& array() !== $upload_events
 				&& self::upload_events_within_root( $upload_events, $upload_root )
@@ -882,7 +1210,7 @@ final class MediaRemoteSurface {
 			}
 
 			return array(
-				'headers'  => $route['headers'] ?? array(),
+				'headers'  => self::response_headers( $route['headers'] ?? array() ),
 				'body'     => empty( $parsed_args['stream'] ) ? $body : '',
 				'response' => array(
 					'code'    => (int) ( $route['code'] ?? 200 ),
@@ -902,8 +1230,9 @@ final class MediaRemoteSurface {
 		$paths   = array();
 		$headers = $route['headers'] ?? array();
 
-		if ( isset( $headers['Content-Disposition'] ) ) {
-			$content_disposition = strtolower( (string) $headers['Content-Disposition'] );
+		$content_disposition_header = self::route_header( $headers, 'Content-Disposition' );
+		if ( null !== $content_disposition_header ) {
+			$content_disposition = strtolower( (string) $content_disposition_header );
 			if ( str_starts_with( $content_disposition, 'attachment; filename=' ) ) {
 				$disposition_name = \sanitize_file_name( substr( $content_disposition, 21 ) );
 				if ( $disposition_name && 0 === \validate_file( $disposition_name ) ) {
@@ -912,14 +1241,29 @@ final class MediaRemoteSurface {
 			}
 		}
 
-		if ( 'tmp' === pathinfo( $filename, PATHINFO_EXTENSION ) && isset( $headers['content-type'] ) ) {
-			$extension = self::extension_for_mime_type( (string) $headers['content-type'] );
+		$content_type = self::route_header( $headers, 'content-type' );
+		if ( 'tmp' === pathinfo( $filename, PATHINFO_EXTENSION ) && null !== $content_type ) {
+			$extension = self::extension_for_mime_type( (string) $content_type );
 			if ( null !== $extension ) {
 				$paths[] = substr( $filename, 0, -4 ) . '.' . $extension;
 			}
 		}
 
 		return array_values( array_unique( $paths ) );
+	}
+
+	private static function response_headers( array $headers ): \WpOrg\Requests\Utility\CaseInsensitiveDictionary {
+		return new \WpOrg\Requests\Utility\CaseInsensitiveDictionary( $headers );
+	}
+
+	private static function route_header( array $headers, string $name ) {
+		foreach ( $headers as $header_name => $value ) {
+			if ( 0 === strcasecmp( (string) $header_name, $name ) ) {
+				return $value;
+			}
+		}
+
+		return null;
 	}
 
 	private static function extension_for_mime_type( string $mime_type ): ?string {
@@ -1379,6 +1723,20 @@ final class MediaRemoteSurface {
 	private static function event_contains_name( array $events, string $name ): bool {
 		foreach ( $events as $event ) {
 			if ( $name === (string) ( $event['name'] ?? '' ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private static function extension_event_allows( array $events, string $file, string $extension ): bool {
+		foreach ( $events as $event ) {
+			if ( $file !== (string) ( $event['file'] ?? '' ) || ! is_array( $event['extensions'] ?? null ) ) {
+				continue;
+			}
+
+			if ( in_array( $extension, $event['extensions'], true ) ) {
 				return true;
 			}
 		}
