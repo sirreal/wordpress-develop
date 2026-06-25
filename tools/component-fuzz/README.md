@@ -223,7 +223,9 @@ database, network requests, or a configured site.
   boundary checks.
 - `http`: synthetic HTTP response arrays, request wrapper dispatch,
   response objects, header/cookie parsing, proxy decisions, redirect safety,
-  URL validation, and relative URL resolution without live network requests.
+  chunk-transfer decoding, direct no-network request normalization and early
+  error contracts, URL validation, and relative URL resolution without live
+  network requests.
 - `icons-connectors`: no-DB Icons and Connectors API coverage, including
   connector registry lifecycle and init discovery, settings/REST key masking,
   API-key mask/file-modification policy, script module serialization, icon

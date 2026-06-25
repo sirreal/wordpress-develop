@@ -226,17 +226,17 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 8029 passed, 0 failed, 0 errored, 67 skipped at 99 surfaces over 2 iterations.</div>
+			<div class="note">Non-skipped pass rate: 8033 passed, 0 failed, 0 errored, 67 skipped at 99 surfaces over 2 iterations.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Latest focused validations: <code>site-health-debug</code> at 700 passed and 200 skipped, <code>images</code> at 900 passed, <code>appearance-media</code> at 600 passed and 100 skipped, <code>block-widgets</code> at 700 passed, <code>import-diff</code> at 800 passed, <code>admin-list-tables</code> at 500 passed and 200 skipped, <code>rest</code> at 900 passed, <code>blocks</code> at 600 passed, <code>assets</code> at 1400 passed, <code>media-editor</code> at 800 passed and 100 skipped, <code>rest-site-editor</code> at 1000 passed and 200 skipped, <code>customizer-persistence</code> at 700 passed, <code>email</code> at 123168 passed and 100 skipped, <code>account-security</code> at 600 passed, <code>identity</code> at 100 passed, <code>network-media</code> at 100 passed, <code>query-loop</code> at 7600 passed, <code>customizer</code> at 600 passed, <code>block-templates</code> at 800 passed and 100 skipped, <code>comment-workflow</code> at 700 passed, <code>admin-workflows</code> at 400 passed and 200 skipped, <code>default-widgets</code> at 900 passed, <code>editor-helpers</code> at 900 passed, <code>frontend-features</code> at 700 passed, <code>admin-screen</code> at 700 passed, <code>wpdb-sql</code> at 800 passed, <code>markup</code> at 2173 passed and 27 skipped, <code>media-metadata</code> at 500 passed, <code>fonts</code> at 800 passed, <code>wxr-export</code> at 900 passed and 100 skipped, <code>auth-flow</code> at 1000 passed, <code>content</code> at 1300 passed, <code>registries</code> at 600 passed, <code>abilities</code> at 700 passed, <code>security</code> at 900 passed, <code>mail</code> at 2000 passed, <code>request-lifecycle</code> at 1000 passed plus JSON-header smoke at 50 passed, <code>interactivity</code> at 1000 passed, <code>ai-client</code> at 8000 passed, <code>metadata</code> at 1000 passed and 100 skipped, and <code>post-types</code> at 9000 passed.</div>
+			<div class="note">Latest focused validations: <code>site-health-debug</code> at 700 passed and 200 skipped, <code>images</code> at 900 passed, <code>appearance-media</code> at 600 passed and 100 skipped, <code>block-widgets</code> at 700 passed, <code>import-diff</code> at 800 passed, <code>admin-list-tables</code> at 500 passed and 200 skipped, <code>rest</code> at 900 passed, <code>blocks</code> at 600 passed, <code>assets</code> at 1400 passed, <code>media-editor</code> at 800 passed and 100 skipped, <code>rest-site-editor</code> at 1000 passed and 200 skipped, <code>customizer-persistence</code> at 700 passed, <code>email</code> at 123168 passed and 100 skipped, <code>http</code> at 1000 passed, <code>account-security</code> at 600 passed, <code>identity</code> at 100 passed, <code>network-media</code> at 100 passed, <code>query-loop</code> at 7600 passed, <code>customizer</code> at 600 passed, <code>block-templates</code> at 800 passed and 100 skipped, <code>comment-workflow</code> at 700 passed, <code>admin-workflows</code> at 400 passed and 200 skipped, <code>default-widgets</code> at 900 passed, <code>editor-helpers</code> at 900 passed, <code>frontend-features</code> at 700 passed, <code>admin-screen</code> at 700 passed, <code>wpdb-sql</code> at 800 passed, <code>markup</code> at 2173 passed and 27 skipped, <code>media-metadata</code> at 500 passed, <code>fonts</code> at 800 passed, <code>wxr-export</code> at 900 passed and 100 skipped, <code>auth-flow</code> at 1000 passed, <code>content</code> at 1300 passed, <code>registries</code> at 600 passed, <code>abilities</code> at 700 passed, <code>security</code> at 900 passed, <code>mail</code> at 2000 passed, <code>request-lifecycle</code> at 1000 passed plus JSON-header smoke at 50 passed, <code>interactivity</code> at 1000 passed, <code>ai-client</code> at 8000 passed, <code>metadata</code> at 1000 passed and 100 skipped, and <code>post-types</code> at 9000 passed.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
 			<div class="metric">0</div>
-			<div class="note">No active subagents; Darwin the 3rd and Plato the 3rd were closed after the email domain-alias commits and review fixes landed.</div>
+			<div class="note">No active subagents; Darwin the 3rd and Plato the 3rd closed after email domain-alias review fixes, and Fermat the 3rd and Avicenna the 3rd closed after HTTP request-contract review fixes.</div>
 		</div>
 	</div>
 
@@ -461,10 +461,10 @@
 				</tr>
 				<tr>
 					<td><code>http</code></td>
-					<td><span class="status good">local validation passed</span></td>
-					<td>Main worktree</td>
-					<td>Main focused run: 800 passed, 0 skipped, 0 failed; latest broad run: 7643 passed, 62 skipped, 0 failed.</td>
-					<td>Remote request wrappers, <code>pre_http_request</code> short-circuiting, safe URL flags, response helpers, header/cookie/proxy/redirect contracts.</td>
+					<td><span class="status good">review fixes passed</span></td>
+					<td>Main worktree; Fermat the 3rd implementation and Avicenna the 3rd review findings fixed through <code>5bbf3f6c27</code></td>
+					<td>Main focused run: 1000 passed, 0 skipped, 0 failed; latest broad run: 8033 passed, 67 skipped, 0 failed.</td>
+					<td>Remote request wrappers, <code>pre_http_request</code> short-circuiting, direct <code>WP_Http::request()</code> normalization and early-error contracts, debug hook cardinality, stream destination guards, chunk-transfer decoding, safe URL flags, response helpers, header/cookie/proxy/redirect contracts.</td>
 				</tr>
 				<tr>
 					<td><code>security</code></td>
@@ -940,6 +940,12 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>46b69bb45d</code> / <code>5bbf3f6c27</code></td>
+					<td><code>http</code></td>
+					<td>1000 passed, 0 skipped, 0 failed after chunk-transfer decoding, direct no-network request normalization and early-error coverage, plus review fixes for stream hermeticity, temp-parent reservation, hook/debug cardinality, and normalized stream headers.</td>
+					<td>8033 passed, 67 skipped, 0 failed at 2 iterations after HTTP request-contract coverage and oracle hardening.</td>
+				</tr>
 				<tr>
 					<td><code>0892834d10</code> / <code>96c73556df</code></td>
 					<td><code>email</code></td>
