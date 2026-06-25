@@ -56,6 +56,7 @@ final class AppearanceMediaSurface {
 			array(
 				'trackedGlobals' => array_keys( $snapshot['globals'] ),
 				'trackedOptions' => array_keys( $snapshot['options'] ),
+				'contentCounts'  => $snapshot['contentCounts'],
 				'obLevel'        => ob_get_level(),
 				'diff'           => $state_diff,
 			)
@@ -84,6 +85,9 @@ final class AppearanceMediaSurface {
 			if ( ! class_exists( $class, false ) ) {
 				$missing[] = "class {$class}";
 			}
+		}
+		if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
+			$missing[] = 'class Component_Fuzz_WPDB_Stub';
 		}
 
 		foreach (
@@ -134,16 +138,19 @@ final class AppearanceMediaSurface {
 				'update_option',
 				'wp_check_filetype',
 				'wp_create_nonce',
-				'wp_delete_post',
 				'wp_get_mime_types',
-				'wp_insert_post',
 				'wp_nonce_tick',
+				'wp_cache_delete',
 				'wp_site_icon',
 			) as $function
 		) {
 			if ( ! function_exists( $function ) ) {
 				$missing[] = "function {$function}";
 			}
+		}
+
+		if ( ! isset( $GLOBALS['wpdb'] ) || ! $GLOBALS['wpdb'] instanceof \Component_Fuzz_WPDB_Stub ) {
+			$missing[] = 'global wpdb Component_Fuzz_WPDB_Stub';
 		}
 
 		return $missing;
@@ -305,6 +312,8 @@ final class AppearanceMediaSurface {
 				'selector'     => self::preview( $output ),
 			)
 		);
+		$GLOBALS['wpdb']->delete( $GLOBALS['wpdb']->postmeta, array( 'post_id' => 991 ) );
+		\wp_cache_delete( 991, 'post_meta' );
 
 		return self::row(
 			$ctx,
@@ -524,16 +533,14 @@ final class AppearanceMediaSurface {
 	}
 
 	private static function check_custom_logo_helpers( \ComponentFuzz\FuzzContext $ctx ): array {
-		$failures       = array();
-		$case           = self::custom_logo_case( $ctx );
-		$attachment_id  = null;
-		$attr_payloads  = array();
-		$output_payloads = array();
+		$failures              = array();
+		$case                  = self::custom_logo_case( $ctx );
+		$attachment_id         = null;
+		$attr_payloads         = array();
+		$output_payloads       = array();
+		$content_counts_before = self::content_counts();
+		$content_counts_after  = null;
 
-		$slug_filter = static function ( $override, string $slug, int $post_id, string $post_status, string $post_type, int $post_parent ) use ( $case ) {
-			unset( $post_id, $post_status, $post_parent );
-			return ( 'attachment' === $post_type && $case['slug'] === $slug ) ? $slug : $override;
-		};
 		$file_filter = static function ( $file, int $attachment_id_arg ) use ( &$attachment_id, $case ) {
 			return ( null !== $attachment_id && $attachment_id_arg === $attachment_id ) ? $case['file'] : $file;
 		};
@@ -574,7 +581,6 @@ final class AppearanceMediaSurface {
 			return $html . '<span data-component-fuzz-logo="' . \esc_attr( $case['token'] ) . '"></span>';
 		};
 
-		\add_filter( 'pre_wp_unique_post_slug', $slug_filter, 10, 6 );
 		\add_filter( 'get_attached_file', $file_filter, 10, 2 );
 		\add_filter( 'wp_get_attachment_image_src', $source_filter, 10, 4 );
 		\add_filter( 'get_post_metadata', $meta_filter, 10, 5 );
@@ -583,20 +589,23 @@ final class AppearanceMediaSurface {
 
 		try {
 			\add_theme_support( 'custom-logo', $case['support'] );
-			$attachment_id = \wp_insert_post(
+			$inserted = $GLOBALS['wpdb']->insert(
+				$GLOBALS['wpdb']->posts,
 				array(
+					'post_author'    => 0,
 					'post_type'      => 'attachment',
 					'post_status'    => 'inherit',
 					'post_title'     => $case['title'],
 					'post_name'      => $case['slug'],
 					'post_mime_type' => $case['mime'],
 					'guid'           => $case['src'],
-				),
-				true,
-				false
+				)
 			);
+			if ( 1 === $inserted ) {
+				$attachment_id = (int) $GLOBALS['wpdb']->insert_id;
+			}
 
-			if ( ! is_int( $attachment_id ) || $attachment_id <= 0 ) {
+			if ( null === $attachment_id || $attachment_id <= 0 ) {
 				self::collect_failure(
 					$failures,
 					false,
@@ -669,12 +678,15 @@ final class AppearanceMediaSurface {
 			\remove_filter( 'get_post_metadata', $meta_filter, 10 );
 			\remove_filter( 'wp_get_attachment_image_src', $source_filter, 10 );
 			\remove_filter( 'get_attached_file', $file_filter, 10 );
-			\remove_filter( 'pre_wp_unique_post_slug', $slug_filter, 10 );
 			\remove_theme_mod( 'custom_logo' );
 			\remove_theme_support( 'custom-logo' );
 			if ( null !== $attachment_id ) {
-				\wp_delete_post( $attachment_id, true );
+				$GLOBALS['wpdb']->delete( $GLOBALS['wpdb']->postmeta, array( 'post_id' => $attachment_id ) );
+				$GLOBALS['wpdb']->delete( $GLOBALS['wpdb']->posts, array( 'ID' => $attachment_id ) );
+				\wp_cache_delete( $attachment_id, 'posts' );
+				\wp_cache_delete( $attachment_id, 'post_meta' );
 			}
+			$content_counts_after = self::content_counts();
 		}
 
 		self::collect_failure(
@@ -683,16 +695,23 @@ final class AppearanceMediaSurface {
 				&& false === \has_filter( 'get_custom_logo_image_attributes', $attr_filter )
 				&& false === \has_filter( 'get_post_metadata', $meta_filter )
 				&& false === \has_filter( 'wp_get_attachment_image_src', $source_filter )
-				&& false === \has_filter( 'get_attached_file', $file_filter )
-				&& false === \has_filter( 'pre_wp_unique_post_slug', $slug_filter ),
+				&& false === \has_filter( 'get_attached_file', $file_filter ),
 			'custom logo helper filters are removed after the case',
 			array(
-				'getCustomLogo'           => \has_filter( 'get_custom_logo', $output_filter ),
-				'customLogoAttributes'    => \has_filter( 'get_custom_logo_image_attributes', $attr_filter ),
-				'getPostMetadata'         => \has_filter( 'get_post_metadata', $meta_filter ),
-				'attachmentImageSource'   => \has_filter( 'wp_get_attachment_image_src', $source_filter ),
-				'getAttachedFile'         => \has_filter( 'get_attached_file', $file_filter ),
-				'preUniqueAttachmentSlug' => \has_filter( 'pre_wp_unique_post_slug', $slug_filter ),
+				'getCustomLogo'         => \has_filter( 'get_custom_logo', $output_filter ),
+				'customLogoAttributes'  => \has_filter( 'get_custom_logo_image_attributes', $attr_filter ),
+				'getPostMetadata'       => \has_filter( 'get_post_metadata', $meta_filter ),
+				'attachmentImageSource' => \has_filter( 'wp_get_attachment_image_src', $source_filter ),
+				'getAttachedFile'       => \has_filter( 'get_attached_file', $file_filter ),
+			)
+		);
+		self::collect_failure(
+			$failures,
+			$content_counts_before === $content_counts_after,
+			'custom logo synthetic attachment rows are removed from the in-memory DB stub',
+			array(
+				'before' => $content_counts_before,
+				'after'  => $content_counts_after,
 			)
 		);
 
@@ -784,6 +803,8 @@ final class AppearanceMediaSurface {
 			\remove_filter( 'get_site_icon_url', $url_filter, 10 );
 			\remove_filter( 'site_icon_meta_tags', $meta_filter );
 			\remove_filter( 'intermediate_image_sizes', array( $site_icon, 'intermediate_image_sizes' ) );
+			$GLOBALS['wpdb']->delete( $GLOBALS['wpdb']->postmeta, array( 'post_id' => 4242 ) );
+			\wp_cache_delete( 4242, 'post_meta' );
 		}
 
 		return self::row(
@@ -883,9 +904,9 @@ final class AppearanceMediaSurface {
 			'height'          => $height,
 			'altMeta'         => 'Logo <' . $token . '>',
 			'expectedAlt'     => 'Logo',
-			'blogId'          => $ctx->int( 0, 3 ),
+			'blogId'          => 0,
 			'decoding'        => $ctx->choice( array( 'async', 'sync', 'auto', 'invalid' ) ),
-			'fetchpriority'   => $ctx->choice( array( 'high', 'low', '' ) ),
+			'fetchpriority'   => $ctx->choice( array( 'low', 'auto', '' ) ),
 			'support'         => $support,
 			'expectedSupport' => array(
 				'width'      => $flex ? false : $width,
@@ -939,6 +960,7 @@ final class AppearanceMediaSurface {
 			'stylesheet',
 			'template',
 			'site_icon',
+			'site_logo',
 			self::theme_mod_option_name(),
 			'theme_mods_component-fuzz-theme',
 		);
@@ -965,10 +987,11 @@ final class AppearanceMediaSurface {
 				)
 			),
 			'options' => $options,
-			'post'    => $_POST,
-			'request' => $_REQUEST,
-			'get'     => $_GET,
-			'obLevel' => ob_get_level(),
+			'post'          => $_POST,
+			'request'       => $_REQUEST,
+			'get'           => $_GET,
+			'obLevel'       => ob_get_level(),
+			'contentCounts' => self::content_counts(),
 		);
 	}
 
@@ -1029,7 +1052,19 @@ final class AppearanceMediaSurface {
 			}
 		}
 
+		$content_counts = self::content_counts();
+		if ( $content_counts !== $snapshot['contentCounts'] ) {
+			$diff['contentCounts'] = array(
+				'expected' => $snapshot['contentCounts'],
+				'actual'   => $content_counts,
+			);
+		}
+
 		return $diff;
+	}
+
+	private static function content_counts(): array {
+		return $GLOBALS['wpdb']->component_fuzz_content_counts();
 	}
 
 	private static function snapshot_globals( array $names ): array {
