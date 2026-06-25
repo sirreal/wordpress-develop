@@ -30,6 +30,7 @@ final class AbilitiesSurface {
 				self::check_action_guards( $ctx ),
 				self::check_category_registry( $ctx ),
 				self::check_ability_registration_and_queries( $ctx ),
+				self::check_custom_subclass_query_and_reregister( $ctx ),
 				self::check_execution_pipeline( $ctx ),
 				self::check_validation_filter_and_exception_paths( $ctx ),
 				self::check_invalid_registration_paths( $ctx ),
@@ -434,6 +435,281 @@ final class AbilitiesSurface {
 			array() === $failures,
 			array(
 				'cases'    => count( $cases ),
+				'failures' => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
+	private static function check_custom_subclass_query_and_reregister( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures       = array();
+		$custom_class   = self::custom_ability_class();
+		$category       = self::category_cases( $ctx->fork( 'custom-subclass-category' ) )[0];
+		$other_category = self::category_cases( $ctx->fork( 'custom-subclass-other-category' ) )[0];
+		$namespace      = 'cfuzz-sub-' . self::slug_piece( $ctx->fork( 'custom-subclass-namespace' ), 10 );
+		$other_namespace = 'cfuzz-sub-' . self::slug_piece( $ctx->fork( 'custom-subclass-other-namespace' ), 10 );
+		$group          = 'group-' . self::slug_piece( $ctx->fork( 'custom-subclass-group' ), 10 );
+		$other_group    = 'group-' . self::slug_piece( $ctx->fork( 'custom-subclass-other-group' ), 10 );
+		$keys           = array( 'keep', 'rescue', 'drop', 'wrong-meta', 'wrong-category', 'wrong-namespace' );
+		$names          = array();
+		$args           = array();
+		$defaults       = array();
+		$sources        = array();
+		$captured       = array(
+			'registered'   => array(),
+			'removed'      => null,
+			'secondRemove' => null,
+			'reregistered' => null,
+		);
+		$query_log      = array(
+			'itemCallback'   => array(),
+			'itemFilter'     => array(),
+			'resultCallback' => array(),
+			'resultFilter'   => array(),
+		);
+
+		if ( $other_category['slug'] === $category['slug'] ) {
+			$other_category['slug'] .= '-alt';
+		}
+		if ( $other_namespace === $namespace ) {
+			$other_namespace .= '-alt';
+		}
+		if ( $other_group === $group ) {
+			$other_group .= '-alt';
+		}
+
+		foreach ( $keys as $key ) {
+			$case_ctx          = $ctx->fork( 'custom-subclass-' . $key );
+			$case_namespace    = 'wrong-namespace' === $key ? $other_namespace : $namespace;
+			$names[ $key ]    = $case_namespace . '/' . self::slug_piece( $case_ctx, 10 ) . '-' . $key;
+			$defaults[ $key ] = array(
+				'value' => 'default-' . self::slug_piece( $case_ctx->fork( 'default' ), 12 ),
+				'count' => $case_ctx->int( 1, 30 ),
+			);
+			$sources[ $key ]  = 'source-' . self::slug_piece( $case_ctx->fork( 'source' ), 12 );
+			$args[ $key ]     = array(
+				'label'         => 'Custom subclass ' . $key,
+				'description'   => 'Component fuzz custom subclass ability ' . $key . '.',
+				'category'      => 'wrong-category' === $key ? $other_category['slug'] : $category['slug'],
+				'input_schema'  => array(
+					'type'                 => 'object',
+					'properties'           => array(
+						'value' => array( 'type' => 'string' ),
+						'count' => array(
+							'type'    => 'integer',
+							'minimum' => 0,
+							'maximum' => 100,
+						),
+					),
+					'additionalProperties' => false,
+					'default'              => $defaults[ $key ],
+				),
+				'output_schema' => array(
+					'type'                 => 'object',
+					'required'             => array( 'name', 'value', 'count', 'source' ),
+					'properties'           => array(
+						'name'   => array( 'type' => 'string' ),
+						'value'  => array( 'type' => 'string' ),
+						'count'  => array( 'type' => 'integer' ),
+						'source' => array( 'type' => 'string' ),
+					),
+					'additionalProperties' => false,
+				),
+				'meta'          => array(
+					'annotations'  => array( 'readonly' => true ),
+					'show_in_rest' => 'wrong-meta' !== $key,
+					'subclass'     => array(
+						'group' => 'wrong-meta' === $key ? $other_group : $group,
+						'key'   => $key,
+					),
+					'source'       => $sources[ $key ],
+				),
+				'ability_class' => $custom_class,
+			);
+		}
+
+		self::reset_registries();
+		$category_action = self::install_category_action( array( $category, $other_category ) );
+
+		$register_action = static function () use ( $keys, $names, $args, &$captured ): void {
+			foreach ( $keys as $key ) {
+				$captured['registered'][ $key ] = \wp_register_ability( $names[ $key ], $args[ $key ] );
+			}
+
+			$captured['removed']      = \wp_unregister_ability( $names['rescue'] );
+			$captured['secondRemove'] = \wp_unregister_ability( $names['rescue'] );
+			$captured['reregistered'] = \wp_register_ability( $names['rescue'], $args['rescue'] );
+		};
+
+		\add_action( 'wp_abilities_api_init', $register_action );
+		\WP_Abilities_Registry::get_instance();
+		\remove_action( 'wp_abilities_api_init', $register_action );
+		\remove_action( 'wp_abilities_api_categories_init', $category_action );
+
+		foreach ( $keys as $key ) {
+			$ability = \wp_get_ability( $names[ $key ] );
+			$meta    = $ability instanceof \WP_Ability ? $ability->get_meta() : array();
+			self::collect_failure(
+				$failures,
+				$ability instanceof $custom_class
+					&& $captured['registered'][ $key ] instanceof $custom_class
+					&& $names[ $key ] === $ability->get_name()
+					&& $args[ $key ]['input_schema'] === $ability->get_input_schema()
+					&& $args[ $key ]['output_schema'] === $ability->get_output_schema()
+					&& $args[ $key ]['meta']['source'] === $ability->get_meta_item( 'source' )
+					&& true === ( $meta['annotations']['readonly'] ?? null )
+					&& array_key_exists( 'destructive', $meta['annotations'] ?? array() )
+					&& array_key_exists( 'idempotent', $meta['annotations'] ?? array() )
+					&& null === $meta['annotations']['destructive']
+					&& null === $meta['annotations']['idempotent']
+					&& is_bool( $meta['show_in_rest'] ?? null ),
+				"custom ability subclass registration prepares metadata and schemas for {$key}",
+				array(
+					'key'     => $key,
+					'ability' => self::describe_ability( $ability ),
+				)
+			);
+		}
+
+		self::collect_failure(
+			$failures,
+			$captured['removed'] === $captured['registered']['rescue']
+				&& null === $captured['secondRemove']
+				&& $captured['reregistered'] instanceof $custom_class
+				&& $captured['reregistered'] !== $captured['removed']
+				&& \wp_get_ability( $names['rescue'] ) === $captured['reregistered']
+				&& \wp_has_ability( $names['rescue'] ),
+			'unregistering and re-registering a custom subclass swaps identity cleanly',
+			array(
+				'removed'      => self::describe_ability( $captured['removed'] ),
+				'secondRemove' => self::describe_value( $captured['secondRemove'] ),
+				'reregistered' => self::describe_ability( $captured['reregistered'] ),
+			)
+		);
+
+		$item_callback = static function ( \WP_Ability $ability ) use ( $names, &$query_log ): bool {
+			$query_log['itemCallback'][] = $ability->get_name();
+			return ! in_array( $ability->get_name(), array( $names['rescue'], $names['drop'] ), true );
+		};
+		$item_filter   = static function ( bool $include, \WP_Ability $ability, array $query_args ) use ( $names, &$query_log ): bool {
+			$query_log['itemFilter'][] = array(
+				'name'    => $ability->get_name(),
+				'include' => $include,
+				'args'    => array_keys( $query_args ),
+			);
+			if ( $names['rescue'] === $ability->get_name() ) {
+				return true;
+			}
+			if ( $names['drop'] === $ability->get_name() ) {
+				return false;
+			}
+			return $include;
+		};
+		$result_callback = static function ( array $abilities ) use ( &$query_log ): array {
+			$query_log['resultCallback'][] = array_keys( $abilities );
+			return array_reverse( $abilities, true );
+		};
+		$result_filter   = static function ( array $abilities, array $query_args ) use ( &$query_log ): array {
+			$query_log['resultFilter'][] = array(
+				'names' => array_keys( $abilities ),
+				'args'  => array_keys( $query_args ),
+			);
+			return $abilities;
+		};
+		$query_args      = array(
+			'category'              => $category['slug'],
+			'namespace'             => $namespace . '/',
+			'meta'                  => array(
+				'show_in_rest' => true,
+				'subclass'     => array(
+					'group' => $group,
+				),
+			),
+			'item_include_callback' => $item_callback,
+			'result_callback'       => $result_callback,
+		);
+
+		\add_filter( 'wp_get_abilities_item_include', $item_filter, 10, 3 );
+		\add_filter( 'wp_get_abilities_result', $result_filter, 10, 2 );
+		try {
+			$queried = \wp_get_abilities( $query_args );
+		} finally {
+			\remove_filter( 'wp_get_abilities_item_include', $item_filter, 10 );
+			\remove_filter( 'wp_get_abilities_result', $result_filter, 10 );
+		}
+
+		self::collect_failure(
+			$failures,
+			array( $names['rescue'], $names['keep'] ) === array_keys( $queried )
+				&& self::all_abilities_instance_of( $queried, $custom_class )
+				&& array( $names['keep'], $names['drop'], $names['rescue'] ) === $query_log['itemCallback']
+				&& array(
+					array(
+						'name'    => $names['keep'],
+						'include' => true,
+						'args'    => array_keys( $query_args ),
+					),
+					array(
+						'name'    => $names['drop'],
+						'include' => false,
+						'args'    => array_keys( $query_args ),
+					),
+					array(
+						'name'    => $names['rescue'],
+						'include' => false,
+						'args'    => array_keys( $query_args ),
+					),
+				) === $query_log['itemFilter']
+				&& array( array( $names['keep'], $names['rescue'] ) ) === $query_log['resultCallback']
+				&& array(
+					array(
+						'names' => array( $names['rescue'], $names['keep'] ),
+						'args'  => array_keys( $query_args ),
+					),
+				) === $query_log['resultFilter'],
+			'custom subclass abilities honor declarative query filters before callback and global filter ordering',
+			array(
+				'resultKeys' => array_keys( $queried ),
+				'queryLog'  => $query_log,
+				'names'     => $names,
+			)
+		);
+
+		$custom_class::reset_logs();
+		$rescue           = \wp_get_ability( $names['rescue'] );
+		$execution_result = $rescue instanceof \WP_Ability ? $rescue->execute() : null;
+		$execution_logs   = $custom_class::get_logs();
+		$expected_output  = array(
+			'name'   => $names['rescue'],
+			'value'  => $defaults['rescue']['value'],
+			'count'  => $defaults['rescue']['count'],
+			'source' => $sources['rescue'],
+		);
+		$expected_log     = array(
+			array(
+				'name'  => $names['rescue'],
+				'input' => $defaults['rescue'],
+			),
+		);
+
+		self::collect_failure(
+			$failures,
+			$expected_output === $execution_result
+				&& $expected_log === $execution_logs['permission']
+				&& $expected_log === $execution_logs['execute'],
+			'custom subclass execution uses schema defaults and overridden permission/execute methods without callbacks',
+			array(
+				'expected' => $expected_output,
+				'actual'   => self::describe_value( $execution_result ),
+				'logs'     => $execution_logs,
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'abilities.custom-subclass-query-and-reregister',
+			array() === $failures,
+			array(
+				'cases'    => count( $keys ),
 				'failures' => array_slice( $failures, 0, 8 ),
 			)
 		);
@@ -1214,6 +1490,18 @@ final class AbilitiesSurface {
 		return true;
 	}
 
+	private static function all_abilities_instance_of( array $abilities, string $class ): bool {
+		if ( array() === $abilities ) {
+			return false;
+		}
+		foreach ( $abilities as $ability ) {
+			if ( ! $ability instanceof $class ) {
+				return false;
+			}
+		}
+		return true;
+	}
+
 	private static function array_contains( array $haystack, array $needle ): bool {
 		foreach ( $needle as $key => $value ) {
 			if ( ! array_key_exists( $key, $haystack ) ) {
@@ -1228,6 +1516,64 @@ final class AbilitiesSurface {
 			}
 		}
 		return true;
+	}
+
+	private static function custom_ability_class(): string {
+		static $custom_ability_class = null;
+
+		if ( null === $custom_ability_class ) {
+			$probe                = new class(
+				'component-fuzz/probe',
+				array(
+					'label'       => 'Component Fuzz Probe',
+					'description' => 'Probe for the component fuzz custom ability class.',
+					'category'    => 'component-fuzz',
+				)
+			) extends \WP_Ability {
+				private static $permission_log = array();
+				private static $execute_log    = array();
+
+				public static function reset_logs(): void {
+					self::$permission_log = array();
+					self::$execute_log    = array();
+				}
+
+				public static function get_logs(): array {
+					return array(
+						'permission' => self::$permission_log,
+						'execute'    => self::$execute_log,
+					);
+				}
+
+				public function check_permissions( $input = null ) {
+					self::$permission_log[] = array(
+						'name'  => $this->name,
+						'input' => $input,
+					);
+					return true;
+				}
+
+				protected function do_execute( $input = null ) {
+					self::$execute_log[] = array(
+						'name'  => $this->name,
+						'input' => $input,
+					);
+
+					$input  = is_array( $input ) ? $input : array();
+					$source = $this->get_meta_item( 'source', '' );
+
+					return array(
+						'name'   => $this->name,
+						'value'  => (string) ( $input['value'] ?? '' ),
+						'count'  => (int) ( $input['count'] ?? 0 ),
+						'source' => is_string( $source ) ? $source : '',
+					);
+				}
+			};
+			$custom_ability_class = get_class( $probe );
+		}
+
+		return $custom_ability_class;
 	}
 
 	private static function is_error_code( $value, string $code ): bool {
