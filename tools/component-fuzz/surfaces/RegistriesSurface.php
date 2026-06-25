@@ -66,6 +66,7 @@ final class RegistriesSurface {
 				'_wp_connectors_mask_api_key',
 				'add_action',
 				'add_filter',
+				'has_action',
 				'remove_action',
 				'remove_filter',
 				'wp_get_connector',
@@ -525,6 +526,66 @@ final class RegistriesSurface {
 					'hadContent' => $had_content,
 					'firstFile'  => self::describe_value( $first_file ),
 					'secondFile' => self::describe_value( $second_file ),
+				)
+			);
+
+			$invalid_file_path = self::write_temp_svg( $ctx->fork( 'invalid-file' ), '' );
+			$temp_files[]      = $invalid_file_path;
+			$invalid_file_id   = self::icon_name( $ctx->fork( 'invalid-file' ), 'invalid-file' );
+			$invalid_file_reg  = $register->invoke(
+				$registry,
+				$invalid_file_id,
+				array(
+					'label'    => 'Fuzz invalid file icon',
+					'filePath' => $invalid_file_path,
+				)
+			);
+			$trigger_events    = array();
+			$trigger_listener  = static function ( string $function_name, string $message, int $error_level ) use ( &$trigger_events ): void {
+				$trigger_events[] = array(
+					'function' => $function_name,
+					'message'  => $message,
+					'level'    => $error_level,
+				);
+			};
+
+			\add_action( 'wp_trigger_error_always_run', $trigger_listener, 10, 3 );
+			try {
+				$invalid_first  = $registry->get_registered_icon( $invalid_file_id );
+				$stored_invalid = self::get_object_property( $registry, 'registered_icons' );
+				file_put_contents(
+					$invalid_file_path,
+					'<svg xmlns="http://www.w3.org/2000/svg" viewbox="0 0 24 24"><path d="M3 3h18v18H3z"/></svg>'
+				);
+				$invalid_second = $registry->get_registered_icon( $invalid_file_id );
+				$invalid_third  = $registry->get_registered_icon( $invalid_file_id );
+			} finally {
+				\remove_action( 'wp_trigger_error_always_run', $trigger_listener, 10 );
+			}
+
+			self::collect_failure(
+				$failures,
+				true === $invalid_file_reg
+					&& is_array( $invalid_first )
+					&& null === ( $invalid_first['content'] ?? null )
+					&& ! isset( $stored_invalid[ $invalid_file_id ]['content'] )
+					&& is_array( $invalid_second )
+					&& is_array( $invalid_third )
+					&& isset( $invalid_second['content'], $invalid_third['content'] )
+					&& $invalid_second['content'] === $invalid_third['content']
+					&& str_contains( $invalid_second['content'], '<svg' )
+					&& str_contains( $invalid_second['content'], 'M3 3h18v18H3z' )
+					&& false === has_action( 'wp_trigger_error_always_run', $trigger_listener )
+					&& 1 === count( $trigger_events )
+					&& 'WP_Icons_Registry::get_content' === ( $trigger_events[0]['function'] ?? null ),
+				'filePath icon retrieval failures do not cache null content and can recover after file replacement',
+				array(
+					'invalidFileId' => $invalid_file_id,
+					'first'         => self::describe_value( $invalid_first ),
+					'second'        => self::describe_value( $invalid_second ),
+					'third'         => self::describe_value( $invalid_third ),
+					'triggerEvents' => $trigger_events,
+					'storedBeforeRecovery' => self::describe_value( $stored_invalid[ $invalid_file_id ] ?? null ),
 				)
 			);
 
