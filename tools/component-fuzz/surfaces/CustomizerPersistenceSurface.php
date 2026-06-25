@@ -398,11 +398,17 @@ final class CustomizerPersistenceSurface {
 			$other_attempt_lock              = \get_post_meta( $post_id, '_edit_lock', true );
 			$current_user_after_other_attempt = \get_current_user_id();
 
+			$owner_refresh_stale_time = max( 1, time() - 30 );
+			$owner_refresh_stale_lock = self::changeset_lock_string( $owner_refresh_stale_time, $owner_id );
+			\update_post_meta( $post_id, '_edit_lock', $owner_refresh_stale_lock );
 			\wp_set_current_user( $owner_id );
 			$manager->refresh_changeset_lock( $post_id );
 			$owner_refresh_lock = \get_post_meta( $post_id, '_edit_lock', true );
 			$owner_refresh      = self::parse_changeset_lock( $owner_refresh_lock );
 
+			$other_heartbeat_stale_time = max( 1, time() - 30 );
+			$other_heartbeat_stale_lock = self::changeset_lock_string( $other_heartbeat_stale_time, $owner_id );
+			\update_post_meta( $post_id, '_edit_lock', $other_heartbeat_stale_lock );
 			\wp_set_current_user( $other_id );
 			$other_response              = $manager->check_changeset_lock_with_heartbeat(
 				$base_response,
@@ -412,6 +418,9 @@ final class CustomizerPersistenceSurface {
 			$after_other_heartbeat_lock  = \get_post_meta( $post_id, '_edit_lock', true );
 			$after_other_heartbeat_check = \wp_check_post_lock( $post_id );
 
+			$owner_heartbeat_stale_time = max( 1, time() - 30 );
+			$owner_heartbeat_stale_lock = self::changeset_lock_string( $owner_heartbeat_stale_time, $owner_id );
+			\update_post_meta( $post_id, '_edit_lock', $owner_heartbeat_stale_lock );
 			\wp_set_current_user( $owner_id );
 			$owner_response              = $manager->check_changeset_lock_with_heartbeat(
 				$base_response,
@@ -458,11 +467,13 @@ final class CustomizerPersistenceSurface {
 					&& (int) $current_user_after_other_attempt === (int) $other_id
 					&& $other_attempt_lock === $initial_lock
 					&& self::lock_belongs_to_user( $owner_refresh, $owner_id )
-					&& (int) $owner_refresh['time'] >= (int) $initial['time'],
+					&& $owner_refresh_lock !== $owner_refresh_stale_lock
+					&& (int) ( $owner_refresh['time'] ?? 0 ) > $owner_refresh_stale_time,
 				'set_changeset_lock writes unlocked changesets, preserves another user lock, and refreshes same-user locks',
 				array(
 					'initialLock'      => self::describe_lock( $initial_lock ),
 					'otherAttemptLock' => self::describe_lock( $other_attempt_lock ),
+					'ownerStaleLock'   => self::describe_lock( $owner_refresh_stale_lock ),
 					'ownerRefreshLock' => self::describe_lock( $owner_refresh_lock ),
 					'currentUserId'    => $current_user_after_other_attempt,
 				)
@@ -479,11 +490,12 @@ final class CustomizerPersistenceSurface {
 					&& (int) $owner_id === (int) ( $reported_user['id'] ?? 0 )
 					&& $owner_user instanceof \WP_User
 					&& $owner_user->display_name === ( $reported_user['name'] ?? null )
-					&& $owner_refresh_lock === $after_other_heartbeat_lock
+					&& $other_heartbeat_stale_lock === $after_other_heartbeat_lock
 					&& (int) $owner_id === (int) $after_other_heartbeat_check,
 				'heartbeat on the customize screen reports another valid user lock without refreshing it',
 				array(
 					'response'                 => self::describe_value( $other_response ),
+					'staleLock'                => self::describe_lock( $other_heartbeat_stale_lock ),
 					'afterOtherHeartbeatLock'  => self::describe_lock( $after_other_heartbeat_lock ),
 					'afterOtherHeartbeatCheck' => $after_other_heartbeat_check,
 				)
@@ -495,11 +507,13 @@ final class CustomizerPersistenceSurface {
 					&& 'preserve' === ( $owner_response['component_fuzz'] ?? null )
 					&& ! array_key_exists( 'customize_changeset_lock_user', $owner_response )
 					&& self::lock_belongs_to_user( $after_owner_heartbeat, $owner_id )
-					&& (int) $after_owner_heartbeat['time'] >= (int) $owner_refresh['time']
+					&& $after_owner_heartbeat_lock !== $owner_heartbeat_stale_lock
+					&& (int) ( $after_owner_heartbeat['time'] ?? 0 ) > $owner_heartbeat_stale_time
 					&& false === $after_owner_heartbeat_check,
 				'heartbeat from the lock owner refreshes the changeset lock and does not report a lock user',
 				array(
 					'response'                => self::describe_value( $owner_response ),
+					'staleLock'               => self::describe_lock( $owner_heartbeat_stale_lock ),
 					'afterOwnerHeartbeatLock' => self::describe_lock( $after_owner_heartbeat_lock ),
 					'wpCheckPostLock'         => $after_owner_heartbeat_check,
 				)
@@ -508,7 +522,7 @@ final class CustomizerPersistenceSurface {
 			self::collect_failure(
 				$failures,
 				self::lock_belongs_to_user( $takeover, $other_id )
-					&& (int) $takeover['time'] >= (int) $after_owner_heartbeat['time'],
+					&& (int) ( $takeover['time'] ?? 0 ) >= (int) ( $after_owner_heartbeat['time'] ?? 0 ),
 				'set_changeset_lock with take_over=true lets a different current user replace the lock',
 				array(
 					'takeoverLock' => self::describe_lock( $takeover_lock ),
@@ -1324,6 +1338,10 @@ final class CustomizerPersistenceSurface {
 			'time'   => (int) $matches[1],
 			'userId' => (int) $matches[2],
 		);
+	}
+
+	private static function changeset_lock_string( int $timestamp, int $user_id ): string {
+		return max( 1, $timestamp ) . ':' . max( 1, $user_id );
 	}
 
 	private static function lock_belongs_to_user( ?array $lock, int $user_id ): bool {
