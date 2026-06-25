@@ -38,6 +38,7 @@ final class EmailSurface {
 			$rows = array_merge( $rows, self::check_sanitizer_recovery( $ctx ) );
 			$rows = array_merge( $rows, self::check_malformed_utf8_byte_matrix( $ctx ) );
 			$rows = array_merge( $rows, self::check_unicode_localpart_byte_boundaries( $ctx ) );
+			$rows = array_merge( $rows, self::check_construction_mode_consistency( $ctx ) );
 
 			foreach ( $cases as $case_index => $case ) {
 				$rows = array_merge( $rows, self::check_unicode_case( $ctx, $case_index, $case ) );
@@ -747,6 +748,137 @@ final class EmailSurface {
 		return array(
 			$ctx->result(
 				'email.wp-email-address.unicode-localpart-byte-boundaries',
+				array() === $failures,
+				array(
+					'observed' => $observed,
+					'failures' => $failures,
+				)
+			),
+		);
+	}
+
+	private static function check_construction_mode_consistency( \ComponentFuzz\FuzzContext $ctx ): array {
+		$cases = array(
+			array(
+				'label'           => 'ascii-plus-subdomain',
+				'input'           => 'USER+tag@example.co.uk',
+				'localpart'       => 'USER+tag',
+				'asciiDomain'     => 'example.co.uk',
+				'unicodeDomain'   => 'example.co.uk',
+				'asciiModeValid'  => true,
+			),
+			array(
+				'label'           => 'whatwg-single-label-domain',
+				'input'           => 'a@b',
+				'localpart'       => 'a',
+				'asciiDomain'     => 'b',
+				'unicodeDomain'   => 'b',
+				'asciiModeValid'  => true,
+			),
+			array(
+				'label'           => 'whatwg-local-dots',
+				'input'           => 'first..last@example.com',
+				'localpart'       => 'first..last',
+				'asciiDomain'     => 'example.com',
+				'unicodeDomain'   => 'example.com',
+				'asciiModeValid'  => true,
+			),
+			array(
+				'label'           => 'unicode-local-ascii-domain',
+				'input'           => "gr\u{00E5}@example.com",
+				'localpart'       => "gr\u{00E5}",
+				'asciiDomain'     => 'example.com',
+				'unicodeDomain'   => 'example.com',
+				'asciiModeValid'  => false,
+			),
+		);
+
+		if ( self::has_idn() ) {
+			$cases[] = array(
+				'label'           => 'punycode-domain',
+				'input'           => 'books@xn--bcher-kva.de',
+				'localpart'       => 'books',
+				'asciiDomain'     => 'xn--bcher-kva.de',
+				'unicodeDomain'   => "b\u{00FC}cher.de",
+				'asciiModeValid'  => false,
+			);
+			$cases[] = array(
+				'label'           => 'unicode-domain',
+				'input'           => "books@b\u{00FC}cher.de",
+				'localpart'       => 'books',
+				'asciiDomain'     => 'xn--bcher-kva.de',
+				'unicodeDomain'   => "b\u{00FC}cher.de",
+				'asciiModeValid'  => false,
+			);
+			$cases[] = array(
+				'label'           => 'unicode-local-punycode-domain',
+				'input'           => "jose\u{0301}@xn--bcher-kva.de",
+				'localpart'       => "jose\u{0301}",
+				'asciiDomain'     => 'xn--bcher-kva.de',
+				'unicodeDomain'   => "b\u{00FC}cher.de",
+				'asciiModeValid'  => false,
+			);
+		}
+
+		$failures = array();
+		$observed = array();
+
+		foreach ( $cases as $case ) {
+			$unicode_parse = self::call( static fn() => \WP_Email_Address::from_string( $case['input'], 'unicode' ) );
+			$ascii_parse   = self::call( static fn() => \WP_Email_Address::from_string( $case['input'], 'ascii' ) );
+			$unicode_email = $unicode_parse['value'] ?? null;
+			$ascii_email   = $ascii_parse['value'] ?? null;
+			$expected      = array(
+				'localpart'      => $case['localpart'],
+				'asciiDomain'    => $case['asciiDomain'],
+				'unicodeDomain'  => $case['unicodeDomain'],
+				'asciiAddress'   => $case['localpart'] . '@' . $case['asciiDomain'],
+				'unicodeAddress' => $case['localpart'] . '@' . $case['unicodeDomain'],
+			);
+			$unicode_views = $unicode_email instanceof \WP_Email_Address
+				? self::address_raw_views( $unicode_email )
+				: null;
+			$ascii_views   = $ascii_email instanceof \WP_Email_Address
+				? self::address_raw_views( $ascii_email )
+				: null;
+
+			$unicode_ok = ! $unicode_parse['threw']
+				&& $unicode_email instanceof \WP_Email_Address
+				&& $expected === $unicode_views;
+			$ascii_ok   = $case['asciiModeValid']
+				? (
+					! $ascii_parse['threw']
+					&& $ascii_email instanceof \WP_Email_Address
+					&& $expected === $ascii_views
+					&& $unicode_views === $ascii_views
+				)
+				: ! $ascii_parse['threw'] && null === $ascii_email;
+			$ok         = $unicode_ok && $ascii_ok;
+
+			if ( ! $ok ) {
+				$failures[] = array(
+					'label'        => $case['label'],
+					'input'        => self::describe_string( $case['input'] ),
+					'expected'     => self::describe_value( $expected ),
+					'unicodeParse' => self::describe_call( $unicode_parse ),
+					'asciiParse'   => self::describe_call( $ascii_parse ),
+					'unicodeViews' => self::describe_value( $unicode_views ),
+					'asciiViews'   => self::describe_value( $ascii_views ),
+				);
+			}
+
+			$observed[] = array(
+				'label'          => $case['label'],
+				'input'          => self::describe_string( $case['input'] ),
+				'asciiModeValid' => $case['asciiModeValid'],
+				'unicodeViews'   => self::describe_value( $unicode_views ),
+				'asciiAccepted'  => $ascii_email instanceof \WP_Email_Address,
+			);
+		}
+
+		return array(
+			$ctx->result(
+				'email.wp-email-address.construction-mode-consistency',
 				array() === $failures,
 				array(
 					'observed' => $observed,
@@ -2248,6 +2380,16 @@ final class EmailSurface {
 
 		return str_contains( $email->get_ascii_address(), '@' )
 			&& str_contains( $email->get_unicode_address(), '@' );
+	}
+
+	private static function address_raw_views( \WP_Email_Address $email ): array {
+		return array(
+			'localpart'      => $email->get_localpart(),
+			'asciiDomain'    => $email->get_ascii_domain(),
+			'unicodeDomain'  => $email->get_unicode_domain(),
+			'asciiAddress'   => $email->get_ascii_address(),
+			'unicodeAddress' => $email->get_unicode_address(),
+		);
 	}
 
 	private static function mailto_anchors( string $html ): array {
