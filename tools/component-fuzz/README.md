@@ -274,7 +274,8 @@ database, network requests, or a configured site.
   filters, pre-send short-circuiting, PHPMailer recipient/header/content
   handoff, UTF-8 local-part recipient/display-name preservation, IDN domain
   punycode handoff, array and string header parsing, newline-delimited
-  attachments and embeds, reusable mailer cleanup/reset behavior,
+  attachments and embeds, multipart boundary/header/body preservation through
+  serialized MIME output, reusable mailer cleanup/reset behavior,
   success/failure actions, and emoji email body staticization.
 - `markup`: block parse/serialize/render guards, shortcodes, text trimming,
   excerpts, balanced tags, URL extraction, link attribute helpers, and embed

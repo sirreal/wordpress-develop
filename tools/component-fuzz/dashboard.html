@@ -231,7 +231,7 @@
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Latest focused validations: <code>site-health-debug</code> at 700 passed and 200 skipped, <code>images</code> at 900 passed, <code>appearance-media</code> at 600 passed and 100 skipped, <code>block-widgets</code> at 700 passed, <code>import-diff</code> at 800 passed, <code>admin-list-tables</code> at 500 passed and 200 skipped, <code>rest</code> at 900 passed, <code>blocks</code> at 600 passed, <code>email</code> at 61493 passed and 50 skipped, <code>account-security</code> at 600 passed, <code>identity</code> at 100 passed, <code>network-media</code> at 100 passed, <code>query-loop</code> at 7600 passed, <code>customizer</code> at 600 passed, <code>block-templates</code> at 800 passed and 100 skipped, <code>comment-workflow</code> at 700 passed, <code>admin-workflows</code> at 400 passed and 200 skipped, <code>default-widgets</code> at 900 passed, <code>editor-helpers</code> at 900 passed, <code>frontend-features</code> at 700 passed, <code>admin-screen</code> at 700 passed, <code>wpdb-sql</code> at 800 passed, <code>markup</code> at 2173 passed and 27 skipped, <code>media-metadata</code> at 500 passed, <code>fonts</code> at 700 passed, <code>wxr-export</code> at 800 passed and 100 skipped, <code>auth-flow</code> at 900 passed, <code>content</code> at 1200 passed, <code>registries</code> at 500 passed, <code>abilities</code> at 600 passed, <code>security</code> at 900 passed, <code>mail</code> at 900 passed, <code>request-lifecycle</code> at 1000 passed plus JSON-header smoke at 50 passed, <code>interactivity</code> at 1000 passed, <code>ai-client</code> at 8000 passed, and <code>post-types</code> at 9000 passed.</div>
+			<div class="note">Latest focused validations: <code>site-health-debug</code> at 700 passed and 200 skipped, <code>images</code> at 900 passed, <code>appearance-media</code> at 600 passed and 100 skipped, <code>block-widgets</code> at 700 passed, <code>import-diff</code> at 800 passed, <code>admin-list-tables</code> at 500 passed and 200 skipped, <code>rest</code> at 900 passed, <code>blocks</code> at 600 passed, <code>email</code> at 61493 passed and 50 skipped, <code>account-security</code> at 600 passed, <code>identity</code> at 100 passed, <code>network-media</code> at 100 passed, <code>query-loop</code> at 7600 passed, <code>customizer</code> at 600 passed, <code>block-templates</code> at 800 passed and 100 skipped, <code>comment-workflow</code> at 700 passed, <code>admin-workflows</code> at 400 passed and 200 skipped, <code>default-widgets</code> at 900 passed, <code>editor-helpers</code> at 900 passed, <code>frontend-features</code> at 700 passed, <code>admin-screen</code> at 700 passed, <code>wpdb-sql</code> at 800 passed, <code>markup</code> at 2173 passed and 27 skipped, <code>media-metadata</code> at 500 passed, <code>fonts</code> at 700 passed, <code>wxr-export</code> at 800 passed and 100 skipped, <code>auth-flow</code> at 900 passed, <code>content</code> at 1200 passed, <code>registries</code> at 500 passed, <code>abilities</code> at 600 passed, <code>security</code> at 900 passed, <code>mail</code> at 2000 passed, <code>request-lifecycle</code> at 1000 passed plus JSON-header smoke at 50 passed, <code>interactivity</code> at 1000 passed, <code>ai-client</code> at 8000 passed, and <code>post-types</code> at 9000 passed.</div>
 		</div>
 		<div class="card">
 			<div class="label">Active Workers</div>
@@ -517,10 +517,10 @@
 				</tr>
 				<tr>
 					<td><code>mail</code></td>
-					<td><span class="status good">local validation passed</span></td>
-					<td>Main worktree</td>
-					<td>Main focused run: 900 passed, 0 skipped, 0 failed; latest broad run: 7936 passed, 63 skipped, 0 failed.</td>
-					<td><code>wp_mail()</code>, PHPMailer state reuse, UTF-8 local-part and IDN-domain recipient/display-name handoff, recipient/header parsing, attachments, embeds, success/failure hooks.</td>
+					<td><span class="status good">reviewed validation passed</span></td>
+					<td>Main worktree / Herschel the 3rd review</td>
+					<td>Main focused run: 2000 passed, 0 skipped, 0 failed; latest broad run: 8001 passed, 67 skipped, 0 failed; related PHPUnit: 32 tests, 87 assertions.</td>
+					<td><code>wp_mail()</code>, PHPMailer state reuse, UTF-8 local-part and IDN-domain recipient/display-name handoff, recipient/header parsing, attachments, embeds, multipart boundary matrix, serialized MIME body/header preservation, success/failure hooks.</td>
 				</tr>
 				<tr>
 					<td><code>block-widgets</code></td>
@@ -783,10 +783,10 @@
 				</tr>
 				<tr>
 					<td><code>mail</code></td>
-					<td><span class="status good">local validation passed</span></td>
-					<td>Main worktree</td>
-					<td>Main focused run: 600 passed, 0 skipped, 0 failed; broad run: 6690 passed, 62 skipped, 0 failed.</td>
-					<td><code>wp_mail()</code> filters, PHPMailer handoff, string headers, attachments, embeds.</td>
+					<td><span class="status good">reviewed validation passed</span></td>
+					<td>Main worktree / Herschel the 3rd review</td>
+					<td>Main focused run: 2000 passed, 0 skipped, 0 failed; latest broad run: 8001 passed, 67 skipped, 0 failed; related PHPUnit: 32 tests, 87 assertions.</td>
+					<td><code>wp_mail()</code> filters, PHPMailer handoff, string/array headers, attachments, embeds, reusable state reset, Unicode handoff, and multipart boundary matrix.</td>
 				</tr>
 				<tr>
 					<td><code>hooks</code></td>
@@ -1163,10 +1163,10 @@
 					<td>7927 passed, 63 skipped, 0 failed at 2 iterations after redirect validation matrix coverage.</td>
 				</tr>
 				<tr>
-					<td><code>cfae0b0230</code></td>
+					<td><code>e51aa0ed46</code></td>
 					<td><code>mail</code></td>
-					<td>900 passed, 0 skipped, 0 failed.</td>
-					<td>7936 passed, 63 skipped, 0 failed at 2 iterations after IDN-domain PHPMailer handoff coverage.</td>
+					<td>2000 passed, 0 skipped, 0 failed; related PHPUnit: 32 tests, 87 assertions.</td>
+					<td>8001 passed, 67 skipped, 0 failed at 2 iterations after multipart boundary matrix coverage across string/array headers, LF/CRLF bodies, uppercase boundary parameters, quoted/unquoted boundaries, and serialized MIME body/header preservation.</td>
 				</tr>
 				<tr>
 					<td><code>6719f743e3</code></td>
