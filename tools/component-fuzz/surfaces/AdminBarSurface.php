@@ -29,6 +29,7 @@ final class AdminBarSurface {
 				self::check_node_lifecycle( $ctx->fork( 'node-lifecycle' ) ),
 				self::check_parent_child_rendering( $ctx->fork( 'parent-child-rendering' ) ),
 				self::check_render_escaping_contracts( $ctx->fork( 'render-escaping' ) ),
+				self::check_back_compat_parents_and_tabindex( $ctx->fork( 'back-compat-tabindex' ) ),
 				self::check_initialize_side_effects( $ctx->fork( 'initialize-side-effects' ) ),
 				self::check_show_admin_bar_filters( $ctx->fork( 'show-admin-bar-filters' ) ),
 				self::check_default_menu_hook_registration( $ctx->fork( 'default-menu-hooks' ) ),
@@ -620,6 +621,126 @@ final class AdminBarSurface {
 			array() === $failures,
 			array(
 				'ids'      => compact( 'unsafe_id', 'child_id', 'safe_id' ),
+				'failures' => $failures,
+			)
+		);
+	}
+
+	private static function check_back_compat_parents_and_tabindex( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$snapshot = self::snapshot_state();
+
+		try {
+			$bar      = new \WP_Admin_Bar();
+			$avatar_id = self::node_id( $ctx->fork( 'avatar-child' ), 'cfz-avatar-child' );
+			$blogs_id  = self::node_id( $ctx->fork( 'blogs-child' ), 'cfz-blogs-child' );
+			$tab_id    = self::node_id( $ctx->fork( 'numeric-tab' ), 'cfz-tab' );
+			$bad_id    = self::node_id( $ctx->fork( 'bad-tab' ), 'cfz-bad-tab' );
+			$bad_tab   = '1" autofocus="bad ' . $ctx->identifier( 3, 8 );
+
+			$before_deprecated = \did_action( 'deprecated_argument_run' );
+
+			$bar->add_node(
+				array(
+					'id'    => 'my-account',
+					'title' => 'Account root',
+				)
+			);
+			$bar->add_node(
+				array(
+					'id'    => 'my-sites',
+					'title' => 'Sites root',
+				)
+			);
+			$bar->add_node(
+				array(
+					'id'     => $avatar_id,
+					'parent' => 'my-account-with-avatar',
+					'title'  => 'Avatar alias child',
+					'href'   => 'https://example.test/account',
+				)
+			);
+			$bar->add_node(
+				array(
+					'id'     => $blogs_id,
+					'parent' => 'my-blogs',
+					'title'  => 'Blogs alias child',
+				)
+			);
+			$bar->add_node(
+				array(
+					'id'    => $tab_id,
+					'title' => 'Numeric tabindex',
+					'href'  => 'https://example.test/tab',
+					'meta'  => array(
+						'tabindex' => '0',
+					),
+				)
+			);
+			$bar->add_node(
+				array(
+					'id'    => $bad_id,
+					'title' => 'Hostile tabindex',
+					'href'  => 'https://example.test/bad-tab',
+					'meta'  => array(
+						'tabindex' => $bad_tab,
+					),
+				)
+			);
+
+			$avatar_node      = $bar->get_node( $avatar_id );
+			$blogs_node       = $bar->get_node( $blogs_id );
+			$after_deprecated = \did_action( 'deprecated_argument_run' );
+			$output           = self::render_bar( $bar );
+		} finally {
+			self::restore_state( $snapshot );
+		}
+
+		$avatar_node      = $avatar_node ?? null;
+		$blogs_node       = $blogs_node ?? null;
+		$after_deprecated = $after_deprecated ?? null;
+		$before_deprecated = $before_deprecated ?? null;
+		$output           = $output ?? '';
+		$bad_tab          = $bad_tab ?? '';
+
+		self::collect_failure(
+			$failures,
+			$avatar_node instanceof \stdClass
+				&& 'my-account' === $avatar_node->parent
+				&& $blogs_node instanceof \stdClass
+				&& 'my-sites' === $blogs_node->parent
+				&& $after_deprecated === $before_deprecated + 2,
+			'back-compat parent aliases normalize to current admin-bar parent IDs and fire deprecation hooks',
+			array(
+				'avatarNode'       => $avatar_node,
+				'blogsNode'        => $blogs_node,
+				'beforeDeprecated' => $before_deprecated,
+				'afterDeprecated'  => $after_deprecated,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			str_contains( $output, self::rendered_id( $avatar_id ) )
+				&& str_contains( $output, self::rendered_id( $blogs_id ) )
+				&& str_contains( $output, 'tabindex="0"' )
+				&& ! str_contains( $output, 'autofocus="bad' )
+				&& ! str_contains( $output, 'tabindex="' . $bad_tab ),
+			'numeric tabindex values render while hostile non-numeric tabindex values are omitted',
+			array(
+				'avatarId' => $avatar_id,
+				'blogsId'  => $blogs_id,
+				'tabId'    => $tab_id,
+				'badTab'   => $bad_tab,
+				'output'   => self::preview_string( $output ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'admin-bar.render.back-compat-parents-and-tabindex',
+			array() === $failures,
+			array(
 				'failures' => $failures,
 			)
 		);
