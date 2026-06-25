@@ -359,6 +359,9 @@ final class TaxonomyRelationshipsSurface {
 		$id_to_slug         = \wp_get_object_terms( $post_id, $case['primaryTaxonomy'], self::term_query_args( 'id=>slug' ) );
 		$with_object_id     = \wp_get_object_terms( array( $post_id ), $case['primaryTaxonomy'], self::term_query_args( 'all_with_object_id' ) );
 		$with_object_ids    = self::pluck_terms( $with_object_id, 'object_id' );
+		$multi_object_terms = \wp_get_object_terms( array( $post_id, $second_post_id ), $case['primaryTaxonomy'], self::term_query_args( 'all_with_object_id' ) );
+		$multi_object_ids   = self::pluck_terms( $multi_object_terms, 'object_id' );
+		$multi_object_map   = self::term_ids_by_object_id( $multi_object_terms );
 		$multi_taxonomy_ids = \wp_get_object_terms(
 			$post_id,
 			array( $case['primaryTaxonomy'], $case['secondaryTaxonomy'] ),
@@ -381,6 +384,14 @@ final class TaxonomyRelationshipsSurface {
 				&& self::same_string_map( $id_to_slug, self::term_field_map( $assigned, 'term_id', 'slug' ) )
 				&& self::same_int_set( self::pluck_terms( $with_object_id, 'term_id' ), self::term_ids( $assigned ) )
 				&& ( array() === $with_object_ids || self::same_int_set( $with_object_ids, array( $post_id ) ) )
+				&& (
+					array() === $multi_object_ids
+					|| (
+						self::same_int_set( array_keys( $multi_object_map ), array( $post_id, $second_post_id ) )
+						&& self::same_int_set( $multi_object_map[ $post_id ] ?? array(), self::term_ids( $assigned ) )
+						&& self::same_int_set( $multi_object_map[ $second_post_id ] ?? array(), self::term_ids( array( $primary['alpha'] ) ) )
+					)
+				)
 				&& self::same_int_set(
 					$multi_taxonomy_ids,
 					array_merge( self::term_ids( $assigned ), self::term_ids( array( $secondary['one'] ) ) )
@@ -396,6 +407,8 @@ final class TaxonomyRelationshipsSurface {
 				'idToSlug'         => $id_to_slug,
 				'withObjectId'     => self::term_summaries( $with_object_id ),
 				'objectIdSupport'  => array() !== $with_object_ids,
+				'multiObjectTerms' => self::term_summaries( $multi_object_terms ),
+				'multiObjectMap'   => $multi_object_map,
 				'multiTaxonomyIds' => $multi_taxonomy_ids,
 				'assign'           => self::term_summaries( $assigned ),
 			)
@@ -2099,6 +2112,44 @@ final class TaxonomyRelationshipsSurface {
 				$out[] = $term[ $field ];
 			}
 		}
+
+		return $out;
+	}
+
+	private static function term_ids_by_object_id( $terms ): array {
+		if ( ! is_array( $terms ) ) {
+			return array();
+		}
+
+		$out = array();
+		foreach ( $terms as $term ) {
+			$object_id = null;
+			$term_id   = null;
+
+			if ( is_object( $term ) && isset( $term->object_id, $term->term_id ) ) {
+				$object_id = (int) $term->object_id;
+				$term_id   = (int) $term->term_id;
+			} elseif ( is_array( $term ) && isset( $term['object_id'], $term['term_id'] ) ) {
+				$object_id = (int) $term['object_id'];
+				$term_id   = (int) $term['term_id'];
+			}
+
+			if ( null === $object_id || null === $term_id ) {
+				continue;
+			}
+
+			if ( ! isset( $out[ $object_id ] ) ) {
+				$out[ $object_id ] = array();
+			}
+			$out[ $object_id ][] = $term_id;
+		}
+
+		ksort( $out );
+		foreach ( $out as &$term_ids ) {
+			$term_ids = self::to_ints( $term_ids );
+			sort( $term_ids, SORT_NUMERIC );
+		}
+		unset( $term_ids );
 
 		return $out;
 	}
