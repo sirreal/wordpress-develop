@@ -100,10 +100,10 @@ final class PostTypesSurface {
 
 		foreach (
 			array(
+				'add_action',
 				'add_filter',
 				'add_post_type_support',
 				'add_query_arg',
-				'create_initial_rest_routes',
 				'do_action',
 				'get_post_type_archive_feed_link',
 				'get_post_type_archive_link',
@@ -124,7 +124,9 @@ final class PostTypesSurface {
 				'post_type_supports',
 				'register_post_status',
 				'register_post_type',
+				'register_rest_route',
 				'register_taxonomy',
+				'remove_action',
 				'remove_filter',
 				'remove_post_type_support',
 				'rest_get_server',
@@ -146,29 +148,11 @@ final class PostTypesSurface {
 	private static function load_rest_route_dependencies(): void {
 		$root  = dirname( __DIR__, 3 );
 		$files = array(
+			'wp-includes/rest-api/class-wp-rest-server.php',
+			'wp-includes/rest-api/endpoints/class-wp-rest-controller.php',
+			'wp-includes/rest-api/endpoints/class-wp-rest-posts-controller.php',
+			'wp-includes/rest-api/endpoints/class-wp-rest-revisions-controller.php',
 			'wp-includes/rest-api/endpoints/class-wp-rest-autosaves-controller.php',
-			'wp-includes/rest-api/endpoints/class-wp-rest-application-passwords-controller.php',
-			'wp-includes/rest-api/search/class-wp-rest-search-handler.php',
-			'wp-includes/rest-api/search/class-wp-rest-post-search-handler.php',
-			'wp-includes/rest-api/search/class-wp-rest-term-search-handler.php',
-			'wp-includes/rest-api/search/class-wp-rest-post-format-search-handler.php',
-			'wp-includes/rest-api/endpoints/class-wp-rest-search-controller.php',
-			'wp-includes/rest-api/endpoints/class-wp-rest-block-renderer-controller.php',
-			'wp-includes/rest-api/endpoints/class-wp-rest-sidebars-controller.php',
-			'wp-includes/rest-api/endpoints/class-wp-rest-widget-types-controller.php',
-			'wp-includes/rest-api/endpoints/class-wp-rest-widgets-controller.php',
-			'wp-includes/rest-api/endpoints/class-wp-rest-block-directory-controller.php',
-			'wp-includes/rest-api/endpoints/class-wp-rest-pattern-directory-controller.php',
-			'wp-includes/rest-api/endpoints/class-wp-rest-site-health-controller.php',
-			'wp-includes/rest-api/endpoints/class-wp-rest-url-details-controller.php',
-			'wp-includes/rest-api/endpoints/class-wp-rest-menu-locations-controller.php',
-			'wp-includes/rest-api/endpoints/class-wp-rest-edit-site-export-controller.php',
-			'wp-includes/rest-api/endpoints/class-wp-rest-navigation-fallback-controller.php',
-			'wp-includes/rest-api/endpoints/class-wp-rest-font-collections-controller.php',
-			'wp-includes/rest-api/endpoints/class-wp-rest-abilities-v1-categories-controller.php',
-			'wp-includes/rest-api/endpoints/class-wp-rest-abilities-v1-list-controller.php',
-			'wp-includes/rest-api/endpoints/class-wp-rest-abilities-v1-run-controller.php',
-			'wp-includes/rest-api/endpoints/class-wp-rest-icons-controller.php',
 		);
 
 		foreach ( $files as $file ) {
@@ -814,7 +798,21 @@ final class PostTypesSurface {
 
 		try {
 			$wp_rest_server = new \WP_REST_Server();
-			\create_initial_rest_routes();
+			$route_diagnostics = self::register_post_type_rest_routes(
+				array_map(
+					static function ( array $route_case ): string {
+						return $route_case['postType'];
+					},
+					$route_cases
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				array() === $route_diagnostics,
+				'REST route registration runs inside rest_api_init without diagnostics',
+				array( 'diagnostics' => $route_diagnostics )
+			);
 
 			foreach ( $route_cases as $index => $route_case ) {
 				$namespace = $route_case['namespace'];
@@ -2510,6 +2508,74 @@ final class PostTypesSurface {
 			'autosavesClass'      => $object->autosave_rest_controller_class,
 			'autosavesController' => is_object( $autosaves ) ? get_class( $autosaves ) : null,
 		);
+	}
+
+	private static function register_post_type_rest_routes( array $post_type_names ): array {
+		$diagnostics         = array();
+		$had_wp_actions      = array_key_exists( 'wp_actions', $GLOBALS );
+		$previous_wp_actions = $had_wp_actions ? $GLOBALS['wp_actions'] : null;
+
+		$doing_it_wrong = static function ( string $function_name, string $message, string $version ) use ( &$diagnostics ): void {
+			if ( 'register_rest_route' !== $function_name ) {
+				return;
+			}
+
+			$diagnostics[] = array(
+				'function' => $function_name,
+				'version'  => $version,
+				'message'  => $message,
+			);
+		};
+
+		\add_action( 'doing_it_wrong_run', $doing_it_wrong, 10, 3 );
+
+		try {
+			if ( ! isset( $GLOBALS['wp_actions'] ) || ! is_array( $GLOBALS['wp_actions'] ) ) {
+				$GLOBALS['wp_actions'] = array();
+			}
+
+			$GLOBALS['wp_actions']['rest_api_init'] = max( 1, (int) ( $GLOBALS['wp_actions']['rest_api_init'] ?? 0 ) );
+
+			foreach ( $post_type_names as $post_type_name ) {
+				$post_type = \get_post_type_object( $post_type_name );
+				if ( ! ( $post_type instanceof \WP_Post_Type ) ) {
+					continue;
+				}
+
+				$controller = $post_type->get_rest_controller();
+				if ( ! $controller ) {
+					continue;
+				}
+
+				if ( ! $post_type->late_route_registration ) {
+					$controller->register_routes();
+				}
+
+				$revisions_controller = $post_type->get_revisions_rest_controller();
+				if ( $revisions_controller ) {
+					$revisions_controller->register_routes();
+				}
+
+				$autosaves_controller = $post_type->get_autosave_rest_controller();
+				if ( $autosaves_controller ) {
+					$autosaves_controller->register_routes();
+				}
+
+				if ( $post_type->late_route_registration ) {
+					$controller->register_routes();
+				}
+			}
+		} finally {
+			if ( $had_wp_actions ) {
+				$GLOBALS['wp_actions'] = $previous_wp_actions;
+			} else {
+				unset( $GLOBALS['wp_actions'] );
+			}
+
+			\remove_action( 'doing_it_wrong_run', $doing_it_wrong, 10 );
+		}
+
+		return $diagnostics;
 	}
 
 	private static function rest_route_case_summary( array $case ): array {
