@@ -43,6 +43,7 @@ final class MediaMetadataSurface {
 				$rows[] = self::check_id3_tag_and_timestamp_helpers( $ctx->fork( 'id3-helper' ) );
 				$rows[] = self::check_extension_key_and_attachment_helpers( $ctx->fork( 'helpers' ), $temp_root );
 				$rows[] = self::check_attachment_metadata_get_update_helpers( $ctx->fork( 'metadata' ), $temp_root );
+				$rows[] = self::check_original_image_metadata_helpers( $ctx->fork( 'original-image' ), $temp_root );
 				$rows[] = self::check_generate_attachment_metadata_branches( $ctx->fork( 'generate' ), $temp_root );
 			}
 		} catch ( \Throwable $e ) {
@@ -81,6 +82,7 @@ final class MediaMetadataSurface {
 				'create_initial_taxonomies',
 				'current_theme_supports',
 				'get_attached_file',
+				'get_post_meta',
 				'get_post',
 				'get_post_mime_type',
 				'metadata_exists',
@@ -101,9 +103,13 @@ final class MediaMetadataSurface {
 				'wp_get_attachment_id3_keys',
 				'wp_get_audio_extensions',
 				'wp_get_attachment_metadata',
+				'wp_get_attachment_url',
+				'wp_get_original_image_path',
+				'wp_get_original_image_url',
 				'wp_get_media_creation_timestamp',
 				'wp_get_upload_dir',
 				'wp_get_video_extensions',
+				'wp_image_file_matches_image_meta',
 				'wp_update_attachment_metadata',
 				'wp_read_audio_metadata',
 				'wp_read_video_metadata',
@@ -611,6 +617,251 @@ final class MediaMetadataSurface {
 			'media-metadata.attachment-metadata-get-update-delete',
 			array() === $failures,
 			array( 'failures' => array_slice( $failures, 0, 8 ) )
+		);
+	}
+
+	private static function check_original_image_metadata_helpers( \ComponentFuzz\FuzzContext $ctx, string $temp_root ): array {
+		$failures        = array();
+		$events          = array(
+			'attachmentUrl' => array(),
+			'originalPath'  => array(),
+			'originalUrl'   => array(),
+			'matches'       => array(),
+		);
+		$upload_root     = $temp_root . DIRECTORY_SEPARATOR . 'metadata-uploads';
+		$upload_url      = 'http://example.test/component-fuzz-media-' . $ctx->int( 1000, 9999 );
+		$attachment_ids  = array();
+		$generated_cases = array();
+
+		$upload_filter = static function ( array $uploads ) use ( $upload_root, $upload_url ): array {
+			$uploads['basedir'] = $upload_root;
+			$uploads['baseurl'] = $upload_url;
+			$uploads['path']    = $upload_root;
+			$uploads['url']     = $upload_url;
+			$uploads['subdir']  = '';
+			$uploads['error']   = false;
+			return $uploads;
+		};
+		$url_filter    = static function ( string $url, int $attachment_id ) use ( &$events, &$attachment_ids ): string {
+			if ( in_array( $attachment_id, $attachment_ids, true ) ) {
+				$events['attachmentUrl'][] = array(
+					'id'  => $attachment_id,
+					'url' => $url,
+				);
+			}
+
+			return $url;
+		};
+		$path_filter   = static function ( string $original_image, int $attachment_id ) use ( &$events, &$attachment_ids ): string {
+			if ( in_array( $attachment_id, $attachment_ids, true ) ) {
+				$events['originalPath'][] = array(
+					'id'       => $attachment_id,
+					'basename' => basename( $original_image ),
+				);
+			}
+
+			return $original_image;
+		};
+		$original_url_filter = static function ( string $original_image_url, int $attachment_id ) use ( &$events, &$attachment_ids ): string {
+			if ( in_array( $attachment_id, $attachment_ids, true ) ) {
+				$events['originalUrl'][] = array(
+					'id'       => $attachment_id,
+					'basename' => basename( $original_image_url ),
+				);
+			}
+
+			return $original_image_url;
+		};
+		$match_filter        = static function ( bool $match, string $image_location, array $image_meta, int $attachment_id ) use ( &$events, &$attachment_ids ): bool {
+			if ( in_array( $attachment_id, $attachment_ids, true ) ) {
+				$events['matches'][] = array(
+					'id'       => $attachment_id,
+					'match'    => $match,
+					'basename' => basename( explode( '?', $image_location, 2 )[0] ),
+					'hasFile'  => isset( $image_meta['file'] ),
+				);
+			}
+
+			return $match;
+		};
+
+		\ComponentFuzz\ensure_dir( $upload_root );
+
+		\add_filter( 'upload_dir', $upload_filter );
+		\add_filter( 'wp_get_attachment_url', $url_filter, 10, 2 );
+		\add_filter( 'wp_get_original_image_path', $path_filter, 10, 2 );
+		\add_filter( 'wp_get_original_image_url', $original_url_filter, 10, 2 );
+		\add_filter( 'wp_image_file_matches_image_meta', $match_filter, 10, 4 );
+		try {
+			foreach ( array( 'absolute', 'relative', 'legacy' ) as $index => $storage ) {
+				$case_ctx         = $ctx->fork( $storage );
+				$attachment_id    = 874000 + ( $ctx->iteration() * 10 ) + $index;
+				$attachment_ids[] = $attachment_id;
+				$year             = (string) $case_ctx->int( 2021, 2026 );
+				$month            = str_pad( (string) $case_ctx->int( 1, 12 ), 2, '0', STR_PAD_LEFT );
+				$subdir           = $year . '/' . $month;
+				$slug             = strtolower( str_replace( array( ':', '_' ), '-', $case_ctx->identifier( 5, 10 ) ) );
+				$width            = $case_ctx->int( 900, 2200 );
+				$height           = $case_ctx->int( 600, 1600 );
+				$medium_width     = max( 1, (int) floor( $width / 2 ) );
+				$medium_height    = max( 1, (int) floor( $height / 2 ) );
+				$current_file     = $slug . ( 'relative' === $storage ? '' : '-scaled' ) . '.jpg';
+				$original_file    = 'relative' === $storage ? '' : $slug . '.jpg';
+				$medium_file      = $slug . '-' . $medium_width . 'x' . $medium_height . '.jpg';
+				$relative_file    = $subdir . '/' . $current_file;
+
+				if ( 'absolute' === $storage ) {
+					$attached_file = $upload_root . '/' . $relative_file;
+				} elseif ( 'legacy' === $storage ) {
+					$attached_file = $temp_root . '/legacy/wp-content/uploads/' . $relative_file;
+				} else {
+					$attached_file = $relative_file;
+				}
+
+				$expected_attached_file = 'relative' === $storage ? $upload_root . '/' . $relative_file : $attached_file;
+				$expected_url           = $upload_url . '/' . $relative_file;
+				$expected_original_path = '' === $original_file ? $expected_attached_file : dirname( $expected_attached_file ) . '/' . $original_file;
+				$expected_original_url  = '' === $original_file ? $expected_url : dirname( $expected_url ) . '/' . $original_file;
+				$metadata               = array(
+					'width'      => $width,
+					'height'     => $height,
+					'file'       => $relative_file,
+					'filesize'   => $case_ctx->int( 1000, 9000 ),
+					'sizes'      => array(
+						'medium' => array(
+							'file'      => $medium_file,
+							'width'     => $medium_width,
+							'height'    => $medium_height,
+							'mime-type' => 'image/jpeg',
+						),
+					),
+					'image_meta' => array(
+						'created_timestamp' => $case_ctx->int( 1000000000, 1999999999 ),
+						'credit'            => 'Component Fuzz ' . $storage,
+						'caption'           => 'Original image normalization',
+					),
+				);
+				if ( '' !== $original_file ) {
+					$metadata['original_image'] = $original_file;
+				}
+
+				self::seed_attachment_post( $attachment_id, 'image/jpeg', $attached_file );
+				\wp_cache_set(
+					$attachment_id,
+					array(
+						'_wp_attached_file'       => array( $attached_file ),
+						'_wp_attachment_metadata' => array( $metadata ),
+					),
+					'post_meta'
+				);
+
+				$attached_unfiltered = \get_attached_file( $attachment_id, true );
+				$attachment_url      = \wp_get_attachment_url( $attachment_id );
+				$retrieved_meta      = \wp_get_attachment_metadata( $attachment_id, true );
+				$original_path       = \wp_get_original_image_path( $attachment_id, true );
+				$original_url        = \wp_get_original_image_url( $attachment_id );
+				$current_match       = is_array( $retrieved_meta ) && is_string( $attachment_url )
+					? \wp_image_file_matches_image_meta( $attachment_url . '?ver=' . $case_ctx->int( 1, 99 ), $retrieved_meta, $attachment_id )
+					: false;
+				$original_match      = is_array( $retrieved_meta )
+					? \wp_image_file_matches_image_meta( $expected_original_url . '?ver=' . $case_ctx->int( 1, 99 ), $retrieved_meta, $attachment_id )
+					: false;
+				$medium_match        = is_array( $retrieved_meta )
+					? \wp_image_file_matches_image_meta( dirname( $expected_url ) . '/' . $medium_file, $retrieved_meta, $attachment_id )
+					: false;
+				$foreign_match       = is_array( $retrieved_meta )
+					? \wp_image_file_matches_image_meta( dirname( $expected_url ) . '/foreign-' . $medium_file, $retrieved_meta, $attachment_id )
+					: true;
+
+				$generated_cases[] = array(
+					'id'                   => $attachment_id,
+					'storage'              => $storage,
+					'attached'             => $attached_unfiltered,
+					'url'                  => $attachment_url,
+					'originalPath'         => $original_path,
+					'originalUrl'          => $original_url,
+					'currentMatch'         => $current_match,
+					'originalMatch'        => $original_match,
+					'mediumMatch'          => $medium_match,
+					'foreignMatch'         => $foreign_match,
+					'metadata'             => $retrieved_meta,
+					'expectedAttached'     => $expected_attached_file,
+					'expectedUrl'          => $expected_url,
+					'expectedOriginalPath' => $expected_original_path,
+					'expectedOriginalUrl'  => $expected_original_url,
+				);
+
+				self::collect_failure(
+					$failures,
+					$metadata === $retrieved_meta
+						&& self::serializable_array_ok( $retrieved_meta )
+						&& $expected_attached_file === $attached_unfiltered
+						&& $expected_url === $attachment_url
+						&& $expected_original_path === $original_path
+						&& $expected_original_url === $original_url
+						&& true === $current_match
+						&& true === $original_match
+						&& true === $medium_match
+						&& false === $foreign_match,
+					'original image helpers normalize seeded metadata, storage style, generated sizes, and query strings',
+					end( $generated_cases )
+				);
+			}
+
+			$non_image_id = 874099 + ( $ctx->iteration() * 10 );
+			self::seed_attachment_post( $non_image_id, 'application/pdf', 'documents/component-fuzz.pdf' );
+			$non_image_path = \wp_get_original_image_path( $non_image_id, true );
+			$non_image_url  = \wp_get_original_image_url( $non_image_id );
+
+			self::collect_failure(
+				$failures,
+				false === $non_image_path && false === $non_image_url,
+				'original image helpers fail closed for non-image attachments',
+				array(
+					'id'   => $non_image_id,
+					'path' => $non_image_path,
+					'url'  => $non_image_url,
+				)
+			);
+		} finally {
+			\remove_filter( 'wp_image_file_matches_image_meta', $match_filter, 10 );
+			\remove_filter( 'wp_get_original_image_url', $original_url_filter, 10 );
+			\remove_filter( 'wp_get_original_image_path', $path_filter, 10 );
+			\remove_filter( 'wp_get_attachment_url', $url_filter, 10 );
+			\remove_filter( 'upload_dir', $upload_filter );
+		}
+
+		self::collect_failure(
+			$failures,
+			3 === count( $events['originalPath'] )
+				&& 3 === count( $events['originalUrl'] )
+				&& 6 === count( $events['attachmentUrl'] )
+				&& 12 === count( $events['matches'] )
+				&& false === \has_filter( 'upload_dir', $upload_filter )
+				&& false === \has_filter( 'wp_get_attachment_url', $url_filter )
+				&& false === \has_filter( 'wp_get_original_image_path', $path_filter )
+				&& false === \has_filter( 'wp_get_original_image_url', $original_url_filter )
+				&& false === \has_filter( 'wp_image_file_matches_image_meta', $match_filter ),
+			'original image metadata filters fire only for image cases and are restored',
+			array(
+				'events'                   => $events,
+				'uploadHasFilter'          => \has_filter( 'upload_dir', $upload_filter ),
+				'attachmentUrlHasFilter'   => \has_filter( 'wp_get_attachment_url', $url_filter ),
+				'originalPathHasFilter'    => \has_filter( 'wp_get_original_image_path', $path_filter ),
+				'originalUrlHasFilter'     => \has_filter( 'wp_get_original_image_url', $original_url_filter ),
+				'imageFileMatchHasFilter'  => \has_filter( 'wp_image_file_matches_image_meta', $match_filter ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'media-metadata.original-image-metadata-normalization',
+			array() === $failures,
+			array(
+				'cases'    => $generated_cases,
+				'events'   => $events,
+				'failures' => array_slice( $failures, 0, 8 ),
+			)
 		);
 	}
 

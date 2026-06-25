@@ -324,7 +324,8 @@ database, network requests, or a configured site.
   sanitization, creation timestamp extraction, audio/video extension and ID3 key
   filters, `wp_attachment_is()` MIME/extension branches, image/document
   classification, MIME/extension disagreement, wrapper behavior, attachment
-  metadata get/update/delete filter contracts, and
+  metadata get/update/delete filter contracts, original-image path/URL and
+  image-meta matching normalization across seeded upload storage styles, and
   `wp_generate_attachment_metadata()` audio/video cover-art avoidance.
 - `media-remote`: no-live-network remote media helper coverage for
   `download_url()`, `media_sideload_image()`, and selected
