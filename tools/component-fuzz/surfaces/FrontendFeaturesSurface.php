@@ -702,20 +702,6 @@ final class FrontendFeaturesSurface {
 			);
 		};
 
-		$contains_only_call_url = static function ( $serialized, int $expected_index ) use ( $per_call_urls ): bool {
-			foreach ( $per_call_urls as $index => $url ) {
-				$contains = self::serialized_rules_contain_url( $serialized, 'prefetch', $url );
-				if ( $expected_index === $index && ! $contains ) {
-					return false;
-				}
-				if ( $expected_index !== $index && $contains ) {
-					return false;
-				}
-			}
-
-			return true;
-		};
-
 		$first_get_obj         = null;
 		$second_get_obj        = null;
 		$first_get_serialized  = null;
@@ -769,6 +755,18 @@ final class FrontendFeaturesSurface {
 
 		$object_ids     = array_column( $enabled_loads, 'objectId' );
 		$load_urls      = array_column( $enabled_loads, 'url' );
+		$list_urls      = array(
+			'firstGet'    => self::serialized_list_rule_urls( $first_get_serialized ),
+			'secondGet'   => self::serialized_list_rule_urls( $second_get_serialized ),
+			'firstPrint'  => self::serialized_list_rule_urls( $first_print_decoded['rules'] ?? null ),
+			'secondPrint' => self::serialized_list_rule_urls( $second_print_decoded['rules'] ?? null ),
+		);
+		$expected_list_urls = array(
+			'firstGet'    => array( $per_call_urls[0] ),
+			'secondGet'   => array( $per_call_urls[1] ),
+			'firstPrint'  => array( $per_call_urls[2] ),
+			'secondPrint' => array( $per_call_urls[3] ),
+		);
 		$expected_order = array(
 			$first_get_obj instanceof \WP_Speculation_Rules ? spl_object_id( $first_get_obj ) : null,
 			$second_get_obj instanceof \WP_Speculation_Rules ? spl_object_id( $second_get_obj ) : null,
@@ -793,12 +791,12 @@ final class FrontendFeaturesSurface {
 				&& $expected_order === $object_ids
 				&& $per_call_urls === $load_urls
 				&& 4 === count( array_unique( $object_ids ) )
-				&& $contains_only_call_url( $first_get_serialized, 0 )
-				&& $contains_only_call_url( $second_get_serialized, 1 )
+				&& $expected_list_urls['firstGet'] === $list_urls['firstGet']
+				&& $expected_list_urls['secondGet'] === $list_urls['secondGet']
 				&& $first_print_decoded['ok']
-				&& $contains_only_call_url( $first_print_decoded['rules'] ?? null, 2 )
+				&& $expected_list_urls['firstPrint'] === $list_urls['firstPrint']
 				&& $second_print_decoded['ok']
-				&& $contains_only_call_url( $second_print_decoded['rules'] ?? null, 3 )
+				&& $expected_list_urls['secondPrint'] === $list_urls['secondPrint']
 				&& $printed_escape
 				&& $enabled_hooks_removed,
 			'enabled speculation lifecycle fires one load action per get/print call with fresh objects, isolated generated rules, escaped print output, and removed hooks',
@@ -812,6 +810,8 @@ final class FrontendFeaturesSurface {
 				'objectIds'             => $object_ids,
 				'perCallUrls'           => $per_call_urls,
 				'loadUrls'              => $load_urls,
+				'listUrls'              => $list_urls,
+				'expectedListUrls'      => $expected_list_urls,
 				'firstGet'              => $first_get_serialized,
 				'secondGet'             => $second_get_serialized,
 				'firstPrint'            => self::preview( $first_print ),
@@ -1156,6 +1156,31 @@ final class FrontendFeaturesSurface {
 		}
 
 		return false;
+	}
+
+	private static function serialized_list_rule_urls( $serialized ): array {
+		if ( ! is_array( $serialized ) ) {
+			return array();
+		}
+
+		$urls = array();
+		foreach ( $serialized as $rules ) {
+			if ( ! is_array( $rules ) ) {
+				continue;
+			}
+
+			foreach ( $rules as $rule ) {
+				if ( ! is_array( $rule ) || ! isset( $rule['urls'] ) || ! is_array( $rule['urls'] ) ) {
+					continue;
+				}
+
+				foreach ( $rule['urls'] as $url ) {
+					$urls[] = $url;
+				}
+			}
+		}
+
+		return $urls;
 	}
 
 	private static function prefix_path( string $base_path, string $path_pattern ): string {
