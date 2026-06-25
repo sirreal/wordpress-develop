@@ -435,8 +435,8 @@ database, network requests, or a configured site.
   registry-backed post types, post statuses, taxonomies, settings, block types,
   block patterns, and block pattern categories, including context/_fields
   filtering, registered additional-field get/update/schema callbacks,
-  collection params, permission gates, REST links, invalid values, and state
-  restoration.
+  collection params, permission gates, namespace-specific REST links, invalid
+  values, and state restoration.
 - `rest-object-controllers`: in-memory wpdb-backed REST object controller
   coverage for posts, terms, comments, users, revisions, and attachments,
   including schema/context/_fields filtering, collection-param sanitization,

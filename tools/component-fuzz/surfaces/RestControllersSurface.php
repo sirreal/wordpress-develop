@@ -32,6 +32,7 @@ final class RestControllersSurface {
 			$rows[] = self::check_post_statuses_controller( $ctx );
 			$rows[] = self::check_taxonomies_controller( $ctx );
 			$rows[] = self::check_additional_fields_controller_callbacks( $ctx );
+			$rows[] = self::check_namespace_route_contracts( $ctx );
 			$rows[] = self::check_settings_controller( $ctx );
 			$rows[] = self::check_block_types_controller( $ctx );
 			$rows[] = self::check_block_patterns_controller( $ctx );
@@ -1044,6 +1045,167 @@ final class RestControllersSurface {
 		);
 	}
 
+	private static function check_namespace_route_contracts( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime_state();
+
+		$case       = self::namespace_route_case( $ctx->fork( 'namespace-routes' ) );
+		$post_types = new \WP_REST_Post_Types_Controller();
+		$taxonomies = new \WP_REST_Taxonomies_Controller();
+		$failures   = array();
+
+		$post_type = \register_post_type(
+			$case['postType'],
+			array(
+				'label'          => $case['postTypeLabel'],
+				'public'         => true,
+				'show_in_rest'   => true,
+				'rest_base'      => $case['postRestBase'],
+				'rest_namespace' => $case['postNamespace'],
+				'rewrite'        => false,
+				'query_var'      => false,
+				'show_ui'        => true,
+			)
+		);
+		\register_post_type(
+			$case['hiddenPostType'],
+			array(
+				'label'          => 'Hidden ' . $case['postTypeLabel'],
+				'public'         => true,
+				'show_in_rest'   => false,
+				'rest_base'      => $case['hiddenPostRestBase'],
+				'rest_namespace' => $case['postNamespace'],
+				'rewrite'        => false,
+				'query_var'      => false,
+			)
+		);
+		$taxonomy = \register_taxonomy(
+			$case['taxonomy'],
+			$case['postType'],
+			array(
+				'label'          => $case['taxonomyLabel'],
+				'public'         => true,
+				'show_in_rest'   => true,
+				'rest_base'      => $case['taxonomyRestBase'],
+				'rest_namespace' => $case['taxonomyNamespace'],
+				'rewrite'        => false,
+				'query_var'      => false,
+			)
+		);
+		\register_taxonomy(
+			$case['hiddenTaxonomy'],
+			$case['postType'],
+			array(
+				'label'          => 'Hidden ' . $case['taxonomyLabel'],
+				'public'         => true,
+				'show_in_rest'   => false,
+				'rest_base'      => $case['hiddenTaxonomyRestBase'],
+				'rest_namespace' => $case['taxonomyNamespace'],
+				'rewrite'        => false,
+				'query_var'      => false,
+			)
+		);
+
+		$post_item = $post_types->get_item(
+			self::request(
+				'GET',
+				'/wp/v2/types/' . $case['postType'],
+				array(
+					'context' => 'view',
+					'_fields' => 'slug,taxonomies,rest_base,rest_namespace,_links',
+				),
+				array( 'type' => $case['postType'] )
+			)
+		);
+		$post_data = $post_item instanceof \WP_REST_Response ? $post_item->get_data() : array();
+		$post_keys = array_keys( $post_data );
+		sort( $post_keys );
+		$post_links = $post_item instanceof \WP_REST_Response ? $post_item->get_links() : array();
+		$post_schema = $post_types->get_item_schema();
+
+		self::collect_failure(
+			$failures,
+			$post_type instanceof \WP_Post_Type
+				&& $post_item instanceof \WP_REST_Response
+				&& array( 'rest_base', 'rest_namespace', 'slug', 'taxonomies' ) === $post_keys
+				&& $case['postType'] === ( $post_data['slug'] ?? null )
+				&& $case['postRestBase'] === ( $post_data['rest_base'] ?? null )
+				&& $case['postNamespace'] === ( $post_data['rest_namespace'] ?? null )
+				&& array( $case['taxonomy'] ) === ( $post_data['taxonomies'] ?? null )
+				&& true === \rest_validate_value_from_schema(
+					$post_data['rest_namespace'] ?? null,
+					$post_schema['properties']['rest_namespace'] ?? array(),
+					'rest_namespace'
+				)
+				&& \rest_url( '/wp/v2/types' ) === self::link_href( $post_links, 'collection' )
+				&& \rest_url( '/' . $case['postNamespace'] . '/' . $case['postRestBase'] ) === self::link_href( $post_links, 'https://api.w.org/items' )
+				&& '/' . $case['postNamespace'] . '/' . $case['postRestBase'] === \rest_get_route_for_post_type_items( $case['postType'] )
+				&& '' === \rest_get_route_for_post_type_items( $case['hiddenPostType'] ),
+			'post type rest_namespace data and item links follow generated object routes',
+			array(
+				'postData'          => $post_data,
+				'postLinks'         => $post_links,
+				'visibleRoute'      => \rest_get_route_for_post_type_items( $case['postType'] ),
+				'hiddenRoute'       => \rest_get_route_for_post_type_items( $case['hiddenPostType'] ),
+				'restNamespaceSpec' => $post_schema['properties']['rest_namespace'] ?? null,
+			)
+		);
+
+		$taxonomy_item = $taxonomies->get_item(
+			self::request(
+				'GET',
+				'/wp/v2/taxonomies/' . $case['taxonomy'],
+				array(
+					'context' => 'view',
+					'_fields' => 'slug,types,rest_base,rest_namespace,_links',
+				),
+				array( 'taxonomy' => $case['taxonomy'] )
+			)
+		);
+		$taxonomy_data = $taxonomy_item instanceof \WP_REST_Response ? $taxonomy_item->get_data() : array();
+		$taxonomy_keys = array_keys( $taxonomy_data );
+		sort( $taxonomy_keys );
+		$taxonomy_links = $taxonomy_item instanceof \WP_REST_Response ? $taxonomy_item->get_links() : array();
+		$taxonomy_schema = $taxonomies->get_item_schema();
+
+		self::collect_failure(
+			$failures,
+			$taxonomy instanceof \WP_Taxonomy
+				&& $taxonomy_item instanceof \WP_REST_Response
+				&& array( 'rest_base', 'rest_namespace', 'slug', 'types' ) === $taxonomy_keys
+				&& $case['taxonomy'] === ( $taxonomy_data['slug'] ?? null )
+				&& $case['taxonomyRestBase'] === ( $taxonomy_data['rest_base'] ?? null )
+				&& $case['taxonomyNamespace'] === ( $taxonomy_data['rest_namespace'] ?? null )
+				&& array( $case['postType'] ) === ( $taxonomy_data['types'] ?? null )
+				&& true === \rest_validate_value_from_schema(
+					$taxonomy_data['rest_namespace'] ?? null,
+					$taxonomy_schema['properties']['rest_namespace'] ?? array(),
+					'rest_namespace'
+				)
+				&& \rest_url( '/wp/v2/taxonomies' ) === self::link_href( $taxonomy_links, 'collection' )
+				&& \rest_url( '/' . $case['taxonomyNamespace'] . '/' . $case['taxonomyRestBase'] ) === self::link_href( $taxonomy_links, 'https://api.w.org/items' )
+				&& '/' . $case['taxonomyNamespace'] . '/' . $case['taxonomyRestBase'] === \rest_get_route_for_taxonomy_items( $case['taxonomy'] )
+				&& '' === \rest_get_route_for_taxonomy_items( $case['hiddenTaxonomy'] ),
+			'taxonomy rest_namespace data and item links follow generated object routes',
+			array(
+				'taxonomyData'      => $taxonomy_data,
+				'taxonomyLinks'     => $taxonomy_links,
+				'visibleRoute'      => \rest_get_route_for_taxonomy_items( $case['taxonomy'] ),
+				'hiddenRoute'       => \rest_get_route_for_taxonomy_items( $case['hiddenTaxonomy'] ),
+				'restNamespaceSpec' => $taxonomy_schema['properties']['rest_namespace'] ?? null,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'rest-controllers.namespace-route-links',
+			array() === $failures,
+			array(
+				'case'     => $case,
+				'failures' => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
 	private static function check_settings_controller( \ComponentFuzz\FuzzContext $ctx ): array {
 		self::reset_runtime_state();
 
@@ -1963,6 +2125,23 @@ final class RestControllersSurface {
 			'updateLabel'        => 'update-' . substr( hash( 'crc32b', $token . '-update' ), 0, 8 ),
 			'nestedUpdate'       => 'updated-' . substr( hash( 'crc32b', $token . '-nested-update' ), 0, 8 ),
 			'invalidUpdateLabel' => 'reject-' . substr( hash( 'crc32b', $token . '-reject' ), 0, 8 ),
+		);
+	}
+
+	private static function namespace_route_case( \ComponentFuzz\FuzzContext $ctx ): array {
+		return array(
+			'postType'                => self::name_token( $ctx->fork( 'post-type' ), 'cfzpt', 20 ),
+			'hiddenPostType'          => self::name_token( $ctx->fork( 'hidden-post-type' ), 'cfzhpt', 20 ),
+			'taxonomy'                => self::name_token( $ctx->fork( 'taxonomy' ), 'cfztax', 28 ),
+			'hiddenTaxonomy'          => self::name_token( $ctx->fork( 'hidden-taxonomy' ), 'cfzhtax', 28 ),
+			'postRestBase'            => self::route_token( $ctx->fork( 'post-rest-base' ), 'cfz-posts' ),
+			'hiddenPostRestBase'      => self::route_token( $ctx->fork( 'hidden-post-rest-base' ), 'cfz-hidden-posts' ),
+			'taxonomyRestBase'        => self::route_token( $ctx->fork( 'taxonomy-rest-base' ), 'cfz-terms' ),
+			'hiddenTaxonomyRestBase'  => self::route_token( $ctx->fork( 'hidden-taxonomy-rest-base' ), 'cfz-hidden-terms' ),
+			'postNamespace'           => self::route_token( $ctx->fork( 'post-namespace' ), 'cfz-post-ns' ) . '/v' . $ctx->fork( 'post-version' )->int( 1, 9 ),
+			'taxonomyNamespace'       => self::route_token( $ctx->fork( 'taxonomy-namespace' ), 'cfz-tax-ns' ) . '/v' . $ctx->fork( 'taxonomy-version' )->int( 1, 9 ),
+			'postTypeLabel'           => 'Namespace Type ' . $ctx->int( 1, 999 ),
+			'taxonomyLabel'           => 'Namespace Taxonomy ' . $ctx->int( 1, 999 ),
 		);
 	}
 
