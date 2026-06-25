@@ -490,12 +490,18 @@ final class InstallSchemaSurface {
 			}
 		);
 
-		$created_tables = self::created_tables_from_queries( $create_wpdb->executed_queries );
-		$escaped        = self::queries_escape_table_allowlist( $create_wpdb->executed_queries, $expected_tables );
+		$create_executed_queries       = $create_wpdb->executed_queries;
+		$create_introspection_queries  = $create_wpdb->introspection_log;
+		$create_violations             = $create_wpdb->violations;
+		$created_tables                = self::created_tables_from_queries( $create_executed_queries );
+		$executed_escaped              = self::queries_escape_table_allowlist( $create_executed_queries, $expected_tables );
+		$create_introspection_escaped  = self::queries_escape_table_allowlist( $create_introspection_queries, $expected_tables );
+		$applied_tables                = $create_wpdb->component_fuzz_apply_created_tables( $parsed['tables'], $create_executed_queries );
+		$replay_executed_offset        = count( $create_executed_queries );
+		$replay_introspection_offset   = count( $create_introspection_queries );
 
-		$replay_wpdb    = new InstallSchemaWpdbDouble( 'wp_', $parsed['tables'], $expected_tables );
 		$replay_results = self::with_wpdb(
-			$replay_wpdb,
+			$create_wpdb,
 			static function () use ( $ddl ): array {
 				return array(
 					dbDelta( $ddl, true ),
@@ -503,6 +509,9 @@ final class InstallSchemaSurface {
 				);
 			}
 		);
+		$replay_executed               = array_slice( $create_wpdb->executed_queries, $replay_executed_offset );
+		$replay_introspection          = array_slice( $create_wpdb->introspection_log, $replay_introspection_offset );
+		$replay_introspection_escaped  = self::queries_escape_table_allowlist( $replay_introspection, $expected_tables );
 
 		$failures = array();
 
@@ -532,22 +541,35 @@ final class InstallSchemaSurface {
 			);
 		}
 
-		if ( count( $create_wpdb->executed_queries ) !== count( $expected_tables ) || array() !== $escaped || array() !== $create_wpdb->violations ) {
+		if ( count( $create_executed_queries ) !== count( $expected_tables ) || array() !== $executed_escaped || array() !== $create_introspection_escaped || array() !== $create_violations ) {
 			$failures[] = array(
-				'reason'     => 'create-queries-escaped-allowlist-or-non-create',
-				'executed'   => $create_wpdb->executed_queries,
-				'created'    => $created_tables,
-				'escaped'    => $escaped,
-				'violations' => $create_wpdb->violations,
+				'reason'               => 'create-queries-escaped-allowlist-or-non-create',
+				'executed'             => $create_executed_queries,
+				'introspection'        => $create_introspection_queries,
+				'created'              => $created_tables,
+				'executedEscaped'      => $executed_escaped,
+				'introspectionEscaped' => $create_introspection_escaped,
+				'violations'           => $create_violations,
 			);
 		}
 
-		if ( array( array(), array() ) !== $replay_results || array() !== $replay_wpdb->executed_queries || array() !== $replay_wpdb->violations ) {
+		if ( $expected_tables !== $applied_tables ) {
 			$failures[] = array(
-				'reason'        => 'seeded-replay-not-stable-noop',
-				'replayResults' => $replay_results,
-				'executed'      => $replay_wpdb->executed_queries,
-				'violations'    => $replay_wpdb->violations,
+				'reason'  => 'executed-create-tables-not-applied-to-replay-double',
+				'expected' => $expected_tables,
+				'applied' => $applied_tables,
+			);
+		}
+
+		if ( array( array(), array() ) !== $replay_results || array() !== $replay_executed || array() !== $replay_introspection_escaped || $create_violations !== $create_wpdb->violations ) {
+			$failures[] = array(
+				'reason'               => 'same-double-replay-not-stable-noop',
+				'replayResults'        => $replay_results,
+				'replayExecuted'       => $replay_executed,
+				'replayIntrospection'  => $replay_introspection,
+				'introspectionEscaped' => $replay_introspection_escaped,
+				'createViolations'     => $create_violations,
+				'allViolations'        => $create_wpdb->violations,
 			);
 		}
 
@@ -559,9 +581,12 @@ final class InstallSchemaSurface {
 				'styles'          => $styles,
 				'createdMessages' => $create_result,
 				'createdTables'   => $created_tables,
-				'createSql'       => $create_wpdb->executed_queries,
+				'appliedTables'   => $applied_tables,
+				'createSql'       => $create_executed_queries,
+				'createIntrospectionSql' => $create_introspection_queries,
 				'replayResults'   => $replay_results,
-				'replaySql'       => $replay_wpdb->executed_queries,
+				'replaySql'       => $replay_executed,
+				'replayIntrospectionSql' => $replay_introspection,
 				'failures'        => array_slice( $failures, 0, self::MAX_FAILURES ),
 			)
 		);
@@ -1274,7 +1299,7 @@ final class InstallSchemaSurface {
 			'/\bALTER\s+TABLE\s+`?([A-Za-z0-9_]+)`?/i',
 			'/\bCREATE\s+TABLE\s+`?([A-Za-z0-9_]+)`?/i',
 			'/\bDESCRIBE\s+`?([A-Za-z0-9_]+)`?/i',
-			'/\bSHOW\s+INDEX\s+FROM\s+`?([A-Za-z0-9_]+)`?/i',
+			'/\bSHOW\s+INDEX(?:ES)?\s+FROM\s+`?([A-Za-z0-9_]+)`?/i',
 		);
 
 		foreach ( $queries as $query ) {
@@ -1702,6 +1727,25 @@ final class InstallSchemaWpdbDouble {
 		$this->executed_queries[] = $this->last_query;
 		$this->record_allowlist_violations( $this->last_query );
 		return 0;
+	}
+
+	public function component_fuzz_apply_created_tables( array $schemas, array $queries ): array {
+		$applied = array();
+		foreach ( $queries as $query ) {
+			if ( ! preg_match( '/^\s*CREATE\s+TABLE\s+`?([A-Za-z0-9_]+)`?\s+\(/i', (string) $query, $matches ) ) {
+				continue;
+			}
+
+			$table = $matches[1];
+			if ( ! isset( $schemas[ $table ] ) ) {
+				continue;
+			}
+
+			$this->schemas[ $table ] = $schemas[ $table ];
+			$applied[]              = $table;
+		}
+
+		return $applied;
 	}
 
 	public function _escape( $data ) {
