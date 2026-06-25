@@ -3358,6 +3358,13 @@ final class NetworkMediaSurface {
 				'altExts'       => array( '.jpg' ),
 			),
 			array(
+				'label'         => 'reverse-output-format-reserves-source-basename',
+				'filename'      => 'Magazine.jpg',
+				'existing'      => array( 'Magazine.png', 'Magazine-1-150x150.png' ),
+				'outputFormats' => array( 'image/png' => 'image/jpeg' ),
+				'altExts'       => array( '.png' ),
+			),
+			array(
 				'label'         => 'rotated-webp-requested-basename',
 				'filename'      => 'Scan-rotated.WEBP',
 				'existing'      => array( 'Scan-rotated-1.webp', 'Scan-rotated-2-scaled.webp' ),
@@ -3371,7 +3378,7 @@ final class NetworkMediaSurface {
 
 		for ( $i = 0; $i < 10; ++$i ) {
 			$stem = self::rng_choice( $rng, $prefixes ) . '-' . self::rng_int( $rng, 100, 999 );
-			$mode = self::rng_int( $rng, 0, 3 );
+			$mode = self::rng_int( $rng, 0, 4 );
 
 			if ( 0 === $mode ) {
 				$cases[] = array(
@@ -3408,12 +3415,23 @@ final class NetworkMediaSurface {
 				continue;
 			}
 
+			if ( 3 === $mode ) {
+				$cases[] = array(
+					'label'         => 'generated-alternate-jpeg-' . $i,
+					'filename'      => $stem . '.PNG',
+					'existing'      => array( $stem . '.jpg', $stem . '-1-scaled.jpg' ),
+					'outputFormats' => array( 'image/png' => 'image/jpeg' ),
+					'altExts'       => array( '.jpg' ),
+				);
+				continue;
+			}
+
 			$cases[] = array(
-				'label'         => 'generated-alternate-jpeg-' . $i,
-				'filename'      => $stem . '.PNG',
-				'existing'      => array( $stem . '.jpg', $stem . '-1-scaled.jpg' ),
+				'label'         => 'generated-reverse-output-format-' . $i,
+				'filename'      => $stem . '.jpg',
+				'existing'      => array( $stem . '.png', $stem . '-1-150x150.png' ),
 				'outputFormats' => array( 'image/png' => 'image/jpeg' ),
-				'altExts'       => array( '.jpg' ),
+				'altExts'       => array( '.png' ),
 			);
 		}
 
@@ -3485,7 +3503,7 @@ final class NetworkMediaSurface {
 		$stem = pathinfo( $filename, PATHINFO_FILENAME );
 		$ext  = pathinfo( $filename, PATHINFO_EXTENSION );
 
-		if ( '' === $stem ) {
+		if ( empty( $stem ) ) {
 			return false;
 		}
 
