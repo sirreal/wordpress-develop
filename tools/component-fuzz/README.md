@@ -380,10 +380,12 @@ database, network requests, or a configured site.
   empty-result events, offset/no-found-rows field-shape windows for `ids` and
   `id=>parent`, `the_posts` result-filter finalization, and deterministic state
   restoration.
-- `registries`: no-DB modern registry coverage for connectors, icons, and
-  speculation rules, including lifecycle validation, helper oracles, manifest
-  sanitization/caching, connector override re-registration, allowlist behavior,
-  rule serialization, and state restoration.
+- `registries`: no-DB modern registry coverage for connectors, icons, block
+  metadata collections, and speculation rules, including lifecycle validation,
+  helper oracles, manifest sanitization/caching, connector override
+  re-registration, block metadata path-boundary/cache behavior, virtual path
+  prefix preservation, allowlist behavior, rule serialization, and state
+  restoration.
 - `rest`: request normalization, parameter precedence, JSON bodies, route regexes,
   schema sanitize/validate, permissions, HEAD/GET behavior, response links,
   CURIE compaction, embedding, envelopes, headers, and response conversion.
