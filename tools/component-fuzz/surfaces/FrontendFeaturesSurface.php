@@ -642,7 +642,20 @@ final class FrontendFeaturesSurface {
 	private static function check_view_transition_helpers( \ComponentFuzz\FuzzContext $ctx ): array {
 		$failures = array();
 
-		$GLOBALS['wp_actions']['init'] = max( 1, (int) ( $GLOBALS['wp_actions']['init'] ?? 0 ) );
+		$previous_init_count = $GLOBALS['wp_actions']['init'] ?? null;
+		unset( $GLOBALS['wp_actions']['init'] );
+		$GLOBALS['wp_styles'] = new \WP_Styles();
+		\wp_default_styles( \wp_styles() );
+
+		$pre_init_after_data = \wp_styles()->get_data( 'wp-view-transitions-admin', 'after' );
+		$pre_init_registered = \wp_styles()->registered['wp-view-transitions-admin'] ?? null;
+		$pre_init_before     = \wp_style_is( 'wp-view-transitions-admin' );
+		\wp_enqueue_view_transitions_admin_css();
+		$pre_init_enqueued   = \wp_style_is( 'wp-view-transitions-admin' );
+		$pre_init_queue      = \wp_styles()->queue;
+		$pre_init_queue_count = count( array_keys( $pre_init_queue, 'wp-view-transitions-admin', true ) );
+
+		$GLOBALS['wp_actions']['init'] = max( 1, (int) ( $previous_init_count ?? 0 ) );
 		$GLOBALS['wp_styles']         = new \WP_Styles();
 		\wp_default_styles( \wp_styles() );
 
@@ -657,6 +670,27 @@ final class FrontendFeaturesSurface {
 		\wp_enqueue_view_transitions_admin_css();
 		$queue_count = count( array_keys( \wp_styles()->queue, 'wp-view-transitions-admin', true ) );
 
+		self::collect_failure(
+			$failures,
+			$pre_init_registered instanceof \_WP_Dependency
+				&& false === $pre_init_registered->src
+				&& false === $pre_init_after_data
+				&& false === $pre_init_before
+				&& true === $pre_init_enqueued
+				&& 1 === $pre_init_queue_count,
+			'view transition admin style registers and enqueues before init without attaching inline CSS',
+			array(
+				'afterData'          => $pre_init_after_data,
+				'registered'         => $pre_init_registered instanceof \_WP_Dependency ? array(
+					'handle' => $pre_init_registered->handle,
+					'src'    => $pre_init_registered->src,
+				) : self::preview( $pre_init_registered ),
+				'before'             => $pre_init_before,
+				'enqueued'           => $pre_init_enqueued,
+				'queue'              => $pre_init_queue,
+				'queueCountForStyle' => $pre_init_queue_count,
+			)
+		);
 		self::collect_failure(
 			$failures,
 			is_string( $css_first )
@@ -687,7 +721,7 @@ final class FrontendFeaturesSurface {
 		);
 
 		return $ctx->result(
-			'frontend-features.view-transitions.css-and-enqueue-idempotence',
+			'frontend-features.view-transitions.css-registration-timing-and-enqueue-idempotence',
 			array() === $failures,
 			array( 'failures' => array_slice( $failures, 0, 4 ) )
 		);
