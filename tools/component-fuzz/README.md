@@ -92,9 +92,10 @@ database, network requests, or a configured site.
   editor support toggles, and sidebars widget mapping for block widget instances.
 - `bookmark-links`: no-live-DB legacy bookmark/link-manager API coverage,
   including in-memory link rows and link categories for `get_bookmark()`,
-  `get_bookmarks()`, `wp_list_bookmarks()` escaping, edit bookmark links,
-  bookmark sanitizers, selected deprecated wrappers, safe link CRUD, argument
-  filtering, ordering, limits, visibility, ratings, and bookmark caches.
+  `get_bookmarks()`, `wp_list_bookmarks()` and `_walk_bookmarks()` escaping,
+  image/update/filter-payload rendering, edit bookmark links, bookmark
+  sanitizers, selected deprecated wrappers, safe link CRUD, argument filtering,
+  ordering, limits, visibility, ratings, and bookmark caches.
 - `block-templates`: no-DB block template and block theme resolution coverage,
   including template registry lifecycle, file-backed templates and parts,
   parent/child theme precedence, theme.json metadata, hierarchy resolution, and

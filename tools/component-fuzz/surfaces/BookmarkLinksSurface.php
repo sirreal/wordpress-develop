@@ -33,6 +33,7 @@ final class BookmarkLinksSurface {
 			$rows[] = self::check_get_bookmark_cache_and_outputs( $ctx, $fixture );
 			$rows[] = self::check_get_bookmarks_argument_matrix( $ctx, $fixture );
 			$rows[] = self::check_wp_list_bookmarks_rendering( $ctx, $fixture );
+			$rows[] = self::check_walk_bookmarks_rendering_contract( $ctx, $fixture );
 			$rows[] = self::check_bookmark_edit_links_and_crud( $ctx, $fixture );
 			$rows[] = self::check_sanitize_bookmark_fields( $ctx, $fixture );
 			$rows[] = self::check_legacy_wrappers( $ctx, $fixture );
@@ -103,6 +104,7 @@ final class BookmarkLinksSurface {
 				'wp_parse_args',
 				'wp_set_current_user',
 				'wp_update_link',
+				'_walk_bookmarks',
 			) as $function
 		) {
 			if ( ! function_exists( $function ) ) {
@@ -296,6 +298,116 @@ final class BookmarkLinksSurface {
 			array(
 				'listPreview'     => self::preview( $returned ),
 				'categoryPreview' => self::preview( $category_html ),
+			)
+		);
+	}
+
+	private static function check_walk_bookmarks_rendering_contract( \ComponentFuzz\FuzzContext $ctx, array $fixture ): array {
+		$first          = (object) $fixture['links'][0];
+		$second         = (object) $fixture['links'][3];
+		$first->link_id = 8600 + $ctx->iteration();
+		$second->link_id = 8700 + $ctx->iteration();
+
+		$first->link_url         = 'https://walk.example.test/' . rawurlencode( $ctx->identifier( 4, 8 ) );
+		$first->link_name        = 'Walk Alpha ' . $ctx->identifier( 3, 6 );
+		$first->link_description = 'Walk description <script>bad</script>';
+		$first->link_image       = 'https://static.example.test/icon-' . $ctx->identifier( 3, 6 ) . '.png';
+		$first->link_rel         = 'friend met';
+		$first->link_target      = '_blank';
+		$first->link_rating      = $ctx->int( 1, 10 );
+		$first->link_updated_f   = (string) strtotime( '2026-06-23 10:00:00 UTC' );
+		$first->recently_updated = true;
+
+		$second->link_url         = '';
+		$second->link_name        = 'Walk Relative ' . $ctx->identifier( 3, 6 );
+		$second->link_description = 'Relative description & notes';
+		$second->link_image       = '/assets/bookmark-' . $ctx->identifier( 3, 6 ) . '.png';
+		$second->link_rel         = '';
+		$second->link_target      = '';
+		$second->link_rating      = $ctx->int( 0, 10 );
+		$second->link_updated_f   = (string) strtotime( '2026-06-20 09:30:00 UTC' );
+		$second->recently_updated = false;
+
+		$events        = array();
+		$name_filter   = static function ( $value, $bookmark_id, $context ) use ( &$events ): string {
+			$events[] = 'link_name:' . (int) $bookmark_id . ':' . (string) $context;
+			return (string) $value . ' filtered-name-' . (int) $bookmark_id;
+		};
+		$desc_filter   = static function ( $value, $bookmark_id, $context ) use ( &$events ): string {
+			$events[] = 'link_description:' . (int) $bookmark_id . ':' . (string) $context;
+			return (string) $value . ' filtered-description-' . (int) $bookmark_id;
+		};
+		$rating_filter = static function ( $value, $bookmark_id, $context ) use ( &$events ) {
+			$events[] = 'link_rating:' . (int) $bookmark_id . ':' . (string) $context . ':' . (int) $value;
+			return $value;
+		};
+
+		\add_filter( 'link_name', $name_filter, 20, 3 );
+		\add_filter( 'link_description', $desc_filter, 20, 3 );
+		\add_filter( 'link_rating', $rating_filter, 20, 3 );
+
+		try {
+			$html = \_walk_bookmarks(
+				array( $first, $second ),
+				array(
+					'before'           => '<p class="cfz-bookmark">',
+					'after'            => '</p>',
+					'between'          => '<span class="cfz-between">|</span>',
+					'link_before'      => '<strong>',
+					'link_after'       => '</strong>',
+					'show_description' => 1,
+					'show_images'      => 1,
+					'show_name'        => 1,
+					'show_rating'      => 1,
+					'show_updated'     => 1,
+				)
+			);
+		} finally {
+			\remove_filter( 'link_name', $name_filter, 20 );
+			\remove_filter( 'link_description', $desc_filter, 20 );
+			\remove_filter( 'link_rating', $rating_filter, 20 );
+		}
+
+		$expected_events = array(
+			'link_description:' . $first->link_id . ':display',
+			'link_name:' . $first->link_id . ':display',
+			'link_rating:' . $first->link_id . ':display:' . $first->link_rating,
+			'link_description:' . $second->link_id . ':display',
+			'link_name:' . $second->link_id . ':display',
+			'link_rating:' . $second->link_id . ':display:' . $second->link_rating,
+		);
+		$first_position   = strpos( $html, 'filtered-name-' . $first->link_id );
+		$second_position  = strpos( $html, 'filtered-name-' . $second->link_id );
+
+		$ok = is_string( $html )
+			&& $expected_events === $events
+			&& 2 === substr_count( $html, '<p class="cfz-bookmark">' )
+			&& 1 === substr_count( $html, '<em><a href="' . $first->link_url . '"' )
+			&& 1 === substr_count( $html, '</a></em>' )
+			&& str_contains( $html, 'rel="friend met"' )
+			&& str_contains( $html, 'target="_blank"' )
+			&& str_contains( $html, '<strong><img src="' . $first->link_image . '"' )
+			&& str_contains( $html, '<img src="http://example.test' . $second->link_image . '"' )
+			&& str_contains( $html, '<a href="#"' )
+			&& str_contains( $html, 'Last updated:' )
+			&& str_contains( $html, 'filtered-description-' . $first->link_id )
+			&& str_contains( $html, 'filtered-description-' . $second->link_id )
+			&& str_contains( $html, '<span class="cfz-between">|</span>' . $first->link_rating )
+			&& str_contains( $html, '<span class="cfz-between">|</span>' . $second->link_rating )
+			&& false !== $first_position
+			&& false !== $second_position
+			&& $first_position < $second_position
+			&& ! self::contains_raw_dangerous_html( $html );
+
+		return self::row(
+			$ctx,
+			'bookmark-links.walk-bookmarks.images-updated-and-filter-payloads',
+			$ok,
+			array(
+				'ids'      => array( $first->link_id, $second->link_id ),
+				'events'   => $events,
+				'expected' => $expected_events,
+				'preview'  => self::preview( $html ),
 			)
 		);
 	}
