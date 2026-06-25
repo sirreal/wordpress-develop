@@ -1402,6 +1402,124 @@ final class NetworkMediaSurface {
 				);
 			}
 		}
+
+		self::exercise_unique_filename_callback_filter( $rng, $result, $unique_dir );
+	}
+
+	private static function exercise_unique_filename_callback_filter( array &$rng, array &$result, string $unique_dir ): void {
+		if ( ! function_exists( 'wp_unique_filename' ) ) {
+			self::skip_once( $result, 'wp_unique_filename_callback', 'Function wp_unique_filename is unavailable.' );
+			return;
+		}
+		if ( ! function_exists( 'add_filter' ) || ! function_exists( 'remove_filter' ) || ! function_exists( 'has_filter' ) ) {
+			self::skip_once( $result, 'wp_unique_filename_callback', 'Filter API is unavailable.' );
+			return;
+		}
+
+		++$result['caseCount'];
+		self::feature( $result, 'wp_unique_filename:callback-filter' );
+
+		$token              = 'cfz-' . self::rng_int( $rng, 1000, 9999 );
+		$input              = "Callback {$token} Image.JPG";
+		$sanitized          = function_exists( 'sanitize_file_name' ) ? sanitize_file_name( $input ) : $input;
+		$expected_name      = pathinfo( $sanitized, PATHINFO_BASENAME );
+		$expected_ext       = '.' . pathinfo( $sanitized, PATHINFO_EXTENSION );
+		$callback_filename  = "callback-{$token}{$expected_ext}";
+		$expected_filename  = "filtered-{$callback_filename}";
+		$callback_calls     = array();
+		$filter_calls       = array();
+		$unique_callback    = static function ( string $dir, string $name, string $ext ) use ( &$callback_calls, $callback_filename ): string {
+			$callback_calls[] = array(
+				'dir'  => $dir,
+				'name' => $name,
+				'ext'  => $ext,
+			);
+
+			return $callback_filename;
+		};
+		$unique_name_filter = static function (
+			string $filename,
+			string $ext,
+			string $dir,
+			$callback,
+			array $alt_filenames,
+			$number
+		) use ( &$filter_calls, $unique_callback ): string {
+			$filter_calls[] = array(
+				'filename'   => $filename,
+				'ext'        => $ext,
+				'dir'        => $dir,
+				'callback'   => $callback,
+				'altNames'   => $alt_filenames,
+				'number'     => $number,
+				'sameObject' => $callback === $unique_callback,
+			);
+
+			return 'filtered-' . $filename;
+		};
+		$before_filter      = \has_filter( 'wp_unique_filename', $unique_name_filter );
+
+		\add_filter( 'wp_unique_filename', $unique_name_filter, 10, 6 );
+		try {
+			$unique = self::call_api(
+				$result,
+				'wp_unique_filename.callback-filter',
+				$input,
+				static function () use ( $unique_dir, $input, $unique_callback ) {
+					return wp_unique_filename( $unique_dir, $input, $unique_callback );
+				}
+			);
+		} finally {
+			\remove_filter( 'wp_unique_filename', $unique_name_filter, 10 );
+		}
+
+		self::check_invariant(
+			$result,
+			$unique['ok'] && $expected_filename === $unique['value'],
+			'wp_unique_filename:callback-filter-return',
+			$input,
+			array(
+				'expected' => $expected_filename,
+				'actual'   => $unique['value'] ?? null,
+			)
+		);
+
+		self::check_invariant(
+			$result,
+			array(
+				array(
+					'dir'  => $unique_dir,
+					'name' => $expected_name,
+					'ext'  => $expected_ext,
+				),
+			) === $callback_calls,
+			'wp_unique_filename:callback-receives-sanitized-parts',
+			$input,
+			array(
+				'expectedName' => $expected_name,
+				'expectedExt'  => $expected_ext,
+				'calls'        => $callback_calls,
+			)
+		);
+
+		self::check_invariant(
+			$result,
+			1 === count( $filter_calls )
+				&& $callback_filename === $filter_calls[0]['filename']
+				&& $expected_ext === $filter_calls[0]['ext']
+				&& $unique_dir === $filter_calls[0]['dir']
+				&& true === $filter_calls[0]['sameObject']
+				&& array() === $filter_calls[0]['altNames']
+				&& '' === $filter_calls[0]['number']
+				&& $before_filter === \has_filter( 'wp_unique_filename', $unique_name_filter ),
+			'wp_unique_filename:filter-payload-and-restoration',
+			$input,
+			array(
+				'filterCalls'  => self::describe_value( $filter_calls ),
+				'filterBefore' => $before_filter,
+				'filterAfter'  => \has_filter( 'wp_unique_filename', $unique_name_filter ),
+			)
+		);
 	}
 
 	private static function exercise_sideload_helpers( array &$rng, array &$result, string $temp_root ): void {
