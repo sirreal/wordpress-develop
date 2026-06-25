@@ -332,6 +332,9 @@ final class MediaEditorSurface {
 		$expected_defaults    = array( $default_quality[ $output_mime ], $default_quality[ $source_mime ] );
 		$expected_conversion  = ( 'image/jpeg' === $output_mime ) ? 74 : $quality_values[ $output_mime ];
 		$expected_reset       = ( 'image/jpeg' === $source_mime ) ? 74 : $quality_values[ $source_mime ];
+		$output_calls_match   = 1 === count( $output_calls )
+			&& $source_mime === ( $output_calls[0]['mime'] ?? null )
+			&& self::same_path( $target_file, $output_calls[0]['filename'] ?? '' );
 		$quality_sizes_match  = true;
 		foreach ( $quality_calls as $call ) {
 			$quality_sizes_match = $quality_sizes_match
@@ -349,7 +352,7 @@ final class MediaEditorSurface {
 				&& self::same_path( $target_file, $reset_format[0] ?? '' )
 				&& $source_ext === ( $reset_format[1] ?? null )
 				&& $source_mime === ( $reset_format[2] ?? null )
-				&& array( $source_mime ) === array_column( $output_calls, 'mime' )
+				&& $output_calls_match
 				&& $expected_mimes === $quality_mimes
 				&& $expected_defaults === $quality_defaults
 				&& $expected_conversion === $quality_after_conversion
@@ -412,7 +415,6 @@ final class MediaEditorSurface {
 			self::same_path( $expected_default, $default_filename )
 				&& self::same_path( $expected_empty, $empty_filename )
 				&& self::same_path( $expected_custom, $custom_filename )
-				&& ! str_contains( \wp_basename( $empty_filename ), "-{$width}x{$height}" )
 				&& self::same_path( self::replace_file_extension( $fallback_file, 'png' ), $fallback_format[0] ?? '' )
 				&& 'png' === ( $fallback_format[1] ?? null )
 				&& 'image/png' === ( $fallback_format[2] ?? null )
