@@ -219,9 +219,10 @@ database, network requests, or a configured site.
   exclusions, script tag escaping, theme support behavior, view-transition CSS
   enqueueing, and global restoration.
 - `html-api`: HTML tag and tree processor mutation escaping, deterministic
-  rich HTML generation, normalization/recovery idempotence, token walking,
-  bookmark/seek replay, modifiable text escaping, and namespace/comment/rawtext
-  boundary checks.
+  rich HTML generation, normalization/recovery idempotence with tree
+  preservation, token walking, breadcrumb stack replay, bookmark/seek replay,
+  semantic parser mode probes, modifiable text escaping, token serialization,
+  and namespace/comment/rawtext boundary checks.
 - `http`: synthetic HTTP response arrays, request wrapper dispatch,
   response objects, header/cookie parsing, proxy decisions, redirect safety,
   chunk-transfer decoding, direct no-network request normalization and early

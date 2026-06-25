@@ -44,6 +44,7 @@ final class HtmlApiSurface {
 				self::check_tag_processor_structural_invariants( $ctx ),
 				self::check_tag_processor_bookmark_seek( $ctx ),
 				self::check_processor_normalization( $ctx ),
+				self::check_processor_semantic_oracles( $ctx ),
 				self::check_processor_tokens_and_text( $ctx ),
 				self::check_processor_boundaries( $ctx ),
 			);
@@ -254,6 +255,42 @@ final class HtmlApiSurface {
 		);
 	}
 
+	private static function check_processor_semantic_oracles( \ComponentFuzz\FuzzContext $ctx ): array {
+		$oracles = array(
+			'foreign-seek-namespace-state'       => self::check_foreign_seek_namespace_state(),
+			'table-form-comment-mode'           => self::check_table_form_comment_mode(),
+			'select-breakout-mode'              => self::check_select_breakout_mode(),
+			'template-table-mode'               => self::check_template_table_mode(),
+			'foreign-attribute-token-serialize' => self::check_foreign_attribute_token_serialization(),
+			'textarea-rcdata-text-mutation'     => self::check_textarea_rcdata_text_mutation(),
+			'foreign-atomic-text-rejection'     => self::check_foreign_atomic_text_rejection(),
+			'active-formatting-reconstruction'  => self::check_active_formatting_reconstruction_path(),
+		);
+
+		$failures = array();
+		foreach ( $oracles as $name => $oracle ) {
+			self::collect_failure(
+				$failures,
+				$oracle['ok'],
+				"WP_HTML_Processor semantic oracle {$name}",
+				array(
+					'name'   => $name,
+					'oracle' => $oracle,
+				)
+			);
+		}
+
+		return self::result(
+			$ctx,
+			'html-api.processor.semantic-parser-oracles',
+			array() === $failures,
+			array(
+				'cases'    => count( $oracles ),
+				'failures' => array_slice( $failures, 0, 6 ),
+			)
+		);
+	}
+
 	private static function check_processor_tokens_and_text( \ComponentFuzz\FuzzContext $ctx ): array {
 		$failures = array();
 		$cases    = self::rich_html_cases( $ctx->fork( 'processor-tokens' ) );
@@ -363,6 +400,316 @@ final class HtmlApiSurface {
 				'cases'    => count( $cases ),
 				'failures' => array_slice( $failures, 0, 6 ),
 			)
+		);
+	}
+
+	private static function check_foreign_seek_namespace_state(): array {
+		$processor = \WP_HTML_Processor::create_fragment( '<custom-element /><svg><rect />' );
+		if ( ! $processor instanceof \WP_HTML_Processor ) {
+			return array( 'ok' => false, 'status' => 'create-fragment-failed' );
+		}
+
+		$found_custom = $processor->next_tag( 'CUSTOM-ELEMENT' );
+		$marked       = $found_custom && $processor->set_bookmark( 'cfz-foreign-seek' );
+		$custom       = $found_custom ? self::processor_tag_state( $processor ) : null;
+
+		$found_rect = $processor->next_tag( 'RECT' );
+		$rect       = $found_rect ? self::processor_tag_state( $processor ) : null;
+
+		$sought       = $marked && $processor->seek( 'cfz-foreign-seek' );
+		$custom_again = $sought ? self::processor_tag_state( $processor ) : null;
+
+		$found_rect_again = $sought && $processor->next_tag( 'RECT' );
+		$rect_again       = $found_rect_again ? self::processor_tag_state( $processor ) : null;
+
+		return array(
+			'ok' => $found_custom
+				&& $marked
+				&& $found_rect
+				&& $sought
+				&& $found_rect_again
+				&& $custom === $custom_again
+				&& $rect === $rect_again
+				&& array(
+					'tag'         => 'CUSTOM-ELEMENT',
+					'namespace'   => 'html',
+					'selfClosing' => true,
+					'expectsClose' => true,
+					'breadcrumbs' => array( 'HTML', 'BODY', 'CUSTOM-ELEMENT' ),
+				) === $custom
+				&& array(
+					'tag'         => 'RECT',
+					'namespace'   => 'svg',
+					'selfClosing' => true,
+					'expectsClose' => false,
+					'breadcrumbs' => array( 'HTML', 'BODY', 'CUSTOM-ELEMENT', 'SVG', 'RECT' ),
+				) === $rect,
+			'custom'      => $custom,
+			'rect'        => $rect,
+			'customAgain' => $custom_again,
+			'rectAgain'   => $rect_again,
+		);
+	}
+
+	private static function check_table_form_comment_mode(): array {
+		$processor = \WP_HTML_Processor::create_fragment( '<table><form><!--comment-->' );
+		if ( ! $processor instanceof \WP_HTML_Processor ) {
+			return array( 'ok' => false, 'status' => 'create-fragment-failed' );
+		}
+
+		$found_form = $processor->next_tag( 'FORM' );
+		$form       = $found_form ? self::processor_tag_state( $processor ) : null;
+
+		$found_closer = $found_form && $processor->next_token();
+		$closer       = $found_closer
+			? array(
+				'tokenName'   => $processor->get_token_name(),
+				'tokenType'   => $processor->get_token_type(),
+				'isCloser'    => $processor->is_tag_closer(),
+				'breadcrumbs' => $processor->get_breadcrumbs(),
+			)
+			: null;
+
+		$found_comment = $found_closer && $processor->next_token();
+		$comment       = $found_comment
+			? array(
+				'tokenName'   => $processor->get_token_name(),
+				'tokenType'   => $processor->get_token_type(),
+				'breadcrumbs' => $processor->get_breadcrumbs(),
+				'text'        => $processor->get_modifiable_text(),
+			)
+			: null;
+
+		return array(
+			'ok' => $found_form
+				&& array(
+					'tag'         => 'FORM',
+					'namespace'   => 'html',
+					'selfClosing' => false,
+					'expectsClose' => true,
+					'breadcrumbs' => array( 'HTML', 'BODY', 'TABLE', 'FORM' ),
+				) === $form
+				&& $found_closer
+				&& 'FORM' === $closer['tokenName']
+				&& '#tag' === $closer['tokenType']
+				&& true === $closer['isCloser']
+				&& array( 'HTML', 'BODY', 'TABLE' ) === $closer['breadcrumbs']
+				&& $found_comment
+				&& '#comment' === $comment['tokenName']
+				&& '#comment' === $comment['tokenType']
+				&& array( 'HTML', 'BODY', 'TABLE', '#comment' ) === $comment['breadcrumbs']
+				&& 'comment' === $comment['text'],
+			'form'    => $form,
+			'closer'  => $closer,
+			'comment' => $comment,
+		);
+	}
+
+	private static function check_select_breakout_mode(): array {
+		$html      = '<select><option>one<option>two<input><textarea>x</textarea><button>b</button><hr><datalist><option>d</datalist></select><p>after';
+		$processor = \WP_HTML_Processor::create_fragment( $html );
+		if ( ! $processor instanceof \WP_HTML_Processor ) {
+			return array( 'ok' => false, 'status' => 'create-fragment-failed' );
+		}
+
+		$found_input = $processor->next_tag( 'INPUT' );
+		$input       = $found_input ? self::processor_tag_state( $processor ) : null;
+
+		$found_textarea = $found_input && $processor->next_tag( 'TEXTAREA' );
+		$textarea       = $found_textarea
+			? array_merge(
+				self::processor_tag_state( $processor ),
+				array( 'text' => $processor->get_modifiable_text() )
+			)
+			: null;
+
+		$found_after = $found_textarea && $processor->next_tag( 'P' );
+		$after       = $found_after ? self::processor_tag_state( $processor ) : null;
+
+		return array(
+			'ok' => array(
+				'tag'         => 'INPUT',
+				'namespace'   => 'html',
+				'selfClosing' => false,
+				'expectsClose' => false,
+				'breadcrumbs' => array( 'HTML', 'BODY', 'INPUT' ),
+			) === $input
+				&& array(
+					'tag'         => 'TEXTAREA',
+					'namespace'   => 'html',
+					'selfClosing' => false,
+					'expectsClose' => false,
+					'breadcrumbs' => array( 'HTML', 'BODY', 'TEXTAREA' ),
+					'text'        => 'x',
+				) === $textarea
+				&& array(
+					'tag'         => 'P',
+					'namespace'   => 'html',
+					'selfClosing' => false,
+					'expectsClose' => true,
+					'breadcrumbs' => array( 'HTML', 'BODY', 'P' ),
+				) === $after,
+			'input'    => $input,
+			'textarea' => $textarea,
+			'after'    => $after,
+		);
+	}
+
+	private static function check_template_table_mode(): array {
+		$html      = '<template><p>inside</p><table><tr><td>cell</table></template><p>after</p>';
+		$processor = \WP_HTML_Processor::create_fragment( $html );
+		if ( ! $processor instanceof \WP_HTML_Processor ) {
+			return array( 'ok' => false, 'status' => 'create-fragment-failed' );
+		}
+
+		$found_inside = $processor->next_tag( 'P' );
+		$inside       = $found_inside ? self::processor_tag_state( $processor ) : null;
+
+		$found_tbody = $found_inside && $processor->next_tag( 'TBODY' );
+		$tbody       = $found_tbody ? self::processor_tag_state( $processor ) : null;
+
+		$found_after = $found_tbody && $processor->next_tag( 'P' );
+		$after       = $found_after ? self::processor_tag_state( $processor ) : null;
+
+		return array(
+			'ok' => array(
+				'tag'         => 'P',
+				'namespace'   => 'html',
+				'selfClosing' => false,
+				'expectsClose' => true,
+				'breadcrumbs' => array( 'HTML', 'BODY', 'TEMPLATE', 'P' ),
+			) === $inside
+				&& array(
+					'tag'         => 'TBODY',
+					'namespace'   => 'html',
+					'selfClosing' => false,
+					'expectsClose' => true,
+					'breadcrumbs' => array( 'HTML', 'BODY', 'TEMPLATE', 'TABLE', 'TBODY' ),
+				) === $tbody
+				&& array(
+					'tag'         => 'P',
+					'namespace'   => 'html',
+					'selfClosing' => false,
+					'expectsClose' => true,
+					'breadcrumbs' => array( 'HTML', 'BODY', 'P' ),
+				) === $after,
+			'inside' => $inside,
+			'tbody'  => $tbody,
+			'after'  => $after,
+		);
+	}
+
+	private static function check_foreign_attribute_token_serialization(): array {
+		$svg = '<svg><a xlink:actuate="onLoad" xlink:arcrole="arc" xlink:href="#target" xlink:role="role" xlink:show="new" xlink:title="title" xlink:type="simple" xml:lang="en" xml:space="preserve" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"></a></svg>';
+
+		$processor = \WP_HTML_Processor::create_fragment( $svg );
+		if ( ! $processor instanceof \WP_HTML_Processor ) {
+			return array( 'ok' => false, 'status' => 'create-fragment-failed' );
+		}
+
+		$found_svg = $processor->next_token();
+		$svg_token = $found_svg ? $processor->serialize_token() : null;
+		$found_a   = $found_svg && $processor->next_token();
+		$a_token   = $found_a ? $processor->serialize_token() : null;
+
+		return array(
+			'ok' => '<svg>' === $svg_token
+				&& '<a xlink:actuate="onLoad" xlink:arcrole="arc" xlink:href="#target" xlink:role="role" xlink:show="new" xlink:title="title" xlink:type="simple" xml:lang="en" xml:space="preserve" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">' === $a_token,
+			'svgToken' => $svg_token,
+			'aToken'   => $a_token,
+		);
+	}
+
+	private static function check_textarea_rcdata_text_mutation(): array {
+		$processor = \WP_HTML_Processor::create_fragment( '<textarea></textarea>' );
+		if ( ! $processor instanceof \WP_HTML_Processor ) {
+			return array( 'ok' => false, 'status' => 'create-fragment-failed' );
+		}
+
+		$found   = $processor->next_token();
+		$updated = $found && $processor->set_modifiable_text( "\nAFTER NEWLINE" );
+		$text    = $found ? $processor->get_modifiable_text() : null;
+		$html    = $processor->get_updated_html();
+
+		return array(
+			'ok' => $found
+				&& 'TEXTAREA' === $processor->get_token_name()
+				&& $updated
+				&& "\nAFTER NEWLINE" === $text
+				&& "<textarea>\n\nAFTER NEWLINE</textarea>" === $html,
+			'text'    => $text,
+			'htmlHex' => bin2hex( $html ),
+		);
+	}
+
+	private static function check_foreign_atomic_text_rejection(): array {
+		$html      = '<svg><textarea></textarea></svg>';
+		$processor = \WP_HTML_Processor::create_fragment( $html );
+		if ( ! $processor instanceof \WP_HTML_Processor ) {
+			return array( 'ok' => false, 'status' => 'create-fragment-failed' );
+		}
+
+		$found   = $processor->next_tag( 'TEXTAREA' );
+		$state   = $found ? self::processor_tag_state( $processor ) : null;
+		$updated = $found ? $processor->set_modifiable_text( 'test' ) : null;
+		$output  = $processor->get_updated_html();
+
+		return array(
+			'ok' => $found
+				&& 'svg' === $state['namespace']
+				&& false === $updated
+				&& $html === $output,
+			'state'   => $state,
+			'updated' => $updated,
+			'output'  => $output,
+		);
+	}
+
+	private static function check_active_formatting_reconstruction_path(): array {
+		$processor = \WP_HTML_Processor::create_fragment( '<p><b>One<p><source>Two<source>' );
+		if ( ! $processor instanceof \WP_HTML_Processor ) {
+			return array( 'ok' => false, 'status' => 'create-fragment-failed' );
+		}
+
+		$found_first = $processor->next_tag( 'SOURCE' );
+		$first       = $found_first ? self::processor_tag_state( $processor ) : null;
+
+		$found_second = $found_first && $processor->next_tag( 'SOURCE' );
+		$second       = $found_second ? self::processor_tag_state( $processor ) : null;
+		$last_error   = $processor->get_last_error();
+
+		return array(
+			'ok' => array(
+				'tag'         => 'SOURCE',
+				'namespace'   => 'html',
+				'selfClosing' => false,
+				'expectsClose' => false,
+				'breadcrumbs' => array( 'HTML', 'BODY', 'P', 'SOURCE' ),
+			) === $first
+				&& (
+					array(
+						'tag'         => 'SOURCE',
+						'namespace'   => 'html',
+						'selfClosing' => false,
+						'expectsClose' => false,
+						'breadcrumbs' => array( 'HTML', 'BODY', 'P', 'B', 'SOURCE' ),
+					) === $second
+					|| ( false === $found_second && \WP_HTML_Processor::ERROR_UNSUPPORTED === $last_error )
+				),
+			'first'      => $first,
+			'second'     => $second,
+			'lastError'  => $last_error,
+			'supported'  => $found_second,
+		);
+	}
+
+	private static function processor_tag_state( \WP_HTML_Processor $processor ): array {
+		return array(
+			'tag'         => $processor->get_tag(),
+			'namespace'   => $processor->get_namespace(),
+			'selfClosing' => $processor->has_self_closing_flag(),
+			'expectsClose' => $processor->expects_closer(),
+			'breadcrumbs' => $processor->get_breadcrumbs(),
 		);
 	}
 
@@ -1107,8 +1454,10 @@ final class HtmlApiSurface {
 	}
 
 	private static function walk_html_processor( string $html, string $mode ): array {
-		$processor = self::create_html_processor( $html, $mode );
-		$summary   = self::empty_walk_summary();
+		$processor         = self::create_html_processor( $html, $mode );
+		$summary           = self::empty_walk_summary();
+		$breadcrumb_prefix = self::MODE_FULL_DOCUMENT === $mode ? array() : array( 'HTML', 'BODY' );
+		$element_stack     = array();
 
 		if ( ! $processor instanceof \WP_HTML_Processor ) {
 			$summary['failures'][] = array( 'name' => 'processor-create-returned-null' );
@@ -1137,12 +1486,21 @@ final class HtmlApiSurface {
 			self::record_walk_token( $summary, $type, $name, $processor->get_namespace(), $processor->get_current_depth() );
 			$processor->get_modifiable_text();
 
-			if ( '#tag' === $type && ! $processor->is_tag_closer() ) {
-				self::exercise_tag_attributes( $processor, $summary );
-				if ( array() === $processor->get_breadcrumbs() ) {
-					$summary['failures'][] = array( 'name' => 'empty-breadcrumbs-for-processor-token' );
+			if ( '#tag' === $type ) {
+				$breadcrumb_failure = self::apply_breadcrumb_stack_invariant( $processor, $breadcrumb_prefix, $element_stack );
+				if ( null !== $breadcrumb_failure ) {
+					$summary['failures'][] = $breadcrumb_failure;
 					break;
 				}
+
+				if ( ! $processor->is_tag_closer() ) {
+					self::exercise_tag_attributes( $processor, $summary );
+				}
+			}
+
+			if ( '#tag' === $type && ! $processor->is_tag_closer() && array() === $processor->get_breadcrumbs() ) {
+				$summary['failures'][] = array( 'name' => 'empty-breadcrumbs-for-processor-token' );
+				break;
 			}
 		}
 
@@ -1182,6 +1540,59 @@ final class HtmlApiSurface {
 			$summary['tokenNames'][] = $name;
 		}
 		$summary['namespaces'][ $namespace ] = ( $summary['namespaces'][ $namespace ] ?? 0 ) + 1;
+	}
+
+	private static function apply_breadcrumb_stack_invariant( \WP_HTML_Processor $processor, array $breadcrumb_prefix, array &$element_stack ): ?array {
+		if ( '#tag' !== $processor->get_token_type() ) {
+			return null;
+		}
+
+		if ( $processor->is_tag_closer() ) {
+			array_pop( $element_stack );
+			return self::breadcrumb_stack_mismatch( $processor, $breadcrumb_prefix, $element_stack, null );
+		}
+
+		$token_name = (string) $processor->get_token_name();
+		$mismatch   = self::breadcrumb_stack_mismatch( $processor, $breadcrumb_prefix, $element_stack, $token_name );
+		if ( null !== $mismatch ) {
+			return $mismatch;
+		}
+
+		if ( true === $processor->expects_closer() ) {
+			$element_stack[] = $token_name;
+		}
+
+		return null;
+	}
+
+	private static function breadcrumb_stack_mismatch( \WP_HTML_Processor $processor, array $prefix, array $element_stack, ?string $current ): ?array {
+		$actual   = $processor->get_breadcrumbs();
+		$expected = array_merge( $prefix, $element_stack );
+		if ( null !== $current ) {
+			$expected[] = $current;
+		}
+
+		if ( $expected === $actual ) {
+			return null;
+		}
+
+		$divergence = 0;
+		$limit      = min( count( $expected ), count( $actual ) );
+		while ( $divergence < $limit && $expected[ $divergence ] === $actual[ $divergence ] ) {
+			++$divergence;
+		}
+
+		return array(
+			'name'            => 'breadcrumb-stack-mismatch',
+			'divergenceDepth' => $divergence,
+			'expectedDepth'   => count( $expected ),
+			'actualDepth'     => count( $actual ),
+			'expected'        => array_slice( $expected, 0, 40 ),
+			'actual'          => array_slice( $actual, 0, 40 ),
+			'tokenName'       => $processor->get_token_name(),
+			'tokenType'       => $processor->get_token_type(),
+			'isCloser'        => $processor->is_tag_closer(),
+		);
 	}
 
 	private static function exercise_tag_attributes( \WP_HTML_Tag_Processor $processor, array &$summary ): void {
@@ -1429,6 +1840,8 @@ final class HtmlApiSurface {
 		$normalized       = null;
 		$normalized_twice = null;
 		$serialized       = null;
+		$input_tree       = null;
+		$normalized_tree  = null;
 		$throwable        = null;
 
 		set_error_handler(
@@ -1442,6 +1855,8 @@ final class HtmlApiSurface {
 			$normalized       = self::normalize_html( $html, $mode );
 			$normalized_twice = is_string( $normalized ) ? self::normalize_html( $normalized, $mode ) : null;
 			$serialized       = is_string( $normalized ) ? self::serialize_html( $normalized, $mode ) : null;
+			$input_tree       = self::processor_tree_fingerprint( $html, $mode );
+			$normalized_tree  = is_string( $normalized ) ? self::processor_tree_fingerprint( $normalized, $mode ) : null;
 		} catch ( \Throwable $e ) {
 			$throwable = $e;
 		} finally {
@@ -1502,12 +1917,28 @@ final class HtmlApiSurface {
 			);
 		}
 
+		if (
+			is_array( $input_tree )
+			&& is_array( $normalized_tree )
+			&& true === ( $input_tree['ok'] ?? false )
+			&& true === ( $normalized_tree['ok'] ?? false )
+			&& $input_tree['fingerprint'] !== $normalized_tree['fingerprint']
+		) {
+			return array(
+				'ok'             => false,
+				'status'         => 'normalize-tree-changed',
+				'inputTree'      => $input_tree,
+				'normalizedTree' => $normalized_tree,
+			);
+		}
+
 		return array(
 			'ok'               => true,
 			'status'           => 'idempotent',
 			'inputLength'      => strlen( $html ),
 			'normalizedLength' => strlen( $normalized ),
 			'normalizedSha1'   => sha1( $normalized ),
+			'treeSha1'         => true === ( $normalized_tree['ok'] ?? false ) ? $normalized_tree['fingerprint'] : null,
 		);
 	}
 
@@ -1523,6 +1954,103 @@ final class HtmlApiSurface {
 	private static function serialize_html( string $html, string $mode ): ?string {
 		$processor = self::create_html_processor( $html, $mode );
 		return $processor instanceof \WP_HTML_Processor ? $processor->serialize() : null;
+	}
+
+	private static function processor_tree_fingerprint( string $html, string $mode ): array {
+		$processor = self::create_html_processor( $html, $mode );
+		if ( ! $processor instanceof \WP_HTML_Processor ) {
+			return array(
+				'ok'     => false,
+				'status' => 'unsupported',
+			);
+		}
+
+		$tokens        = 0;
+		$parts         = array();
+		$last_text_key = null;
+		while ( $processor->next_token() ) {
+			++$tokens;
+			if ( $tokens > self::MAX_TOKENS ) {
+				return array(
+					'ok'         => false,
+					'status'     => 'token-limit-exceeded',
+					'tokenCount' => $tokens,
+				);
+			}
+
+			$token_type = (string) $processor->get_token_type();
+			if ( in_array( $token_type, array( '#text', '#cdata-section' ), true ) ) {
+				$text_key = implode(
+					"\x1f",
+					array(
+						$token_type,
+						(string) $processor->get_token_name(),
+						(string) $processor->get_namespace(),
+						(string) $processor->get_current_depth(),
+						implode( '/', $processor->get_breadcrumbs() ),
+					)
+				);
+
+				if ( $last_text_key === $text_key && array() !== $parts ) {
+					$parts[ count( $parts ) - 1 ] .= (string) $processor->get_modifiable_text();
+				} else {
+					$parts[]       = $text_key . "\x1f" . (string) $processor->get_modifiable_text();
+					$last_text_key = $text_key;
+				}
+				continue;
+			}
+
+			$last_text_key = null;
+			$token_parts = array(
+				$token_type,
+				(string) $processor->get_token_name(),
+				(string) $processor->get_namespace(),
+				$processor->is_tag_closer() ? '/' : '',
+				(string) $processor->get_current_depth(),
+				implode( '/', $processor->get_breadcrumbs() ),
+				(string) $processor->get_modifiable_text(),
+			);
+
+			if ( '#tag' === $processor->get_token_type() && ! $processor->is_tag_closer() ) {
+				$attributes = array();
+				$names      = $processor->get_attribute_names_with_prefix( '' );
+				if ( is_array( $names ) ) {
+					foreach ( $names as $name ) {
+						$value        = $processor->get_attribute( $name );
+						$qualified    = $processor->get_qualified_attribute_name( $name );
+						$attributes[] = (string) $qualified . '=' . ( true === $value ? '(true)' : (string) $value );
+					}
+					sort( $attributes, SORT_STRING );
+				}
+				$token_parts[] = implode( "\x1e", $attributes );
+			}
+
+			$parts[] = implode( "\x1f", $token_parts );
+		}
+
+		if ( null !== $processor->get_last_error() ) {
+			return array(
+				'ok'         => false,
+				'status'     => 'last-error',
+				'lastError'  => $processor->get_last_error(),
+				'tokenCount' => $tokens,
+			);
+		}
+
+		if ( null !== $processor->get_unsupported_exception() || $processor->paused_at_incomplete_token() ) {
+			return array(
+				'ok'         => false,
+				'status'     => 'unsupported',
+				'tokenCount' => $tokens,
+			);
+		}
+
+		return array(
+			'ok'          => true,
+			'status'      => 'ok',
+			'tokenCount'  => $tokens,
+			'fingerprint' => sha1( implode( "\x1d", $parts ) ),
+		);
 	}
 
 	private static function create_html_processor( string $html, string $mode ) {
