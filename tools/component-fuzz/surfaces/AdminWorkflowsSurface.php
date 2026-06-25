@@ -30,6 +30,7 @@ final class AdminWorkflowsSurface {
 			$rows[] = self::check_synthetic_list_table( $ctx->fork( 'list-table' ) );
 			$rows[] = self::check_list_table_action_and_month_helpers( $ctx->fork( 'list-table-helpers' ) );
 			$rows[] = self::check_referer_helpers( $ctx->fork( 'referer-helpers' ) );
+			$rows[] = self::check_referer_field_helpers( $ctx->fork( 'referer-field-helpers' ) );
 			$rows[] = self::check_admin_form_controls( $ctx->fork( 'form-controls' ) );
 			$rows[] = self::skipped_core_list_table_subclasses( $ctx->fork( 'core-list-table-skips' ) );
 			$rows[] = self::skipped_exiting_ajax_wrappers( $ctx->fork( 'ajax-wrapper-skips' ) );
@@ -75,6 +76,7 @@ final class AdminWorkflowsSurface {
 				'get_admin_page_title',
 				'get_column_headers',
 				'get_hidden_columns',
+				'home_url',
 				'get_plugin_page_hook',
 				'get_plugin_page_hookname',
 				'has_action',
@@ -92,9 +94,16 @@ final class AdminWorkflowsSurface {
 				'set_url_scheme',
 				'submit_button',
 				'wp_create_nonce',
+				'wp_get_original_referer',
+				'wp_get_raw_referer',
+				'wp_get_referer',
 				'wp_nonce_field',
 				'wp_nonce_url',
+				'wp_original_referer_field',
+				'wp_referer_field',
 				'wp_strip_all_tags',
+				'wp_unslash',
+				'wp_validate_redirect',
 				'wp_verify_nonce',
 			) as $function
 		) {
@@ -1018,6 +1027,149 @@ final class AdminWorkflowsSurface {
 		return self::row(
 			$ctx,
 			'admin-workflows.referers.nonce-admin-post-ajax',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, 6 ) )
+		);
+	}
+
+	private static function check_referer_field_helpers( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures        = array();
+		$local_snapshot  = self::snapshot_globals( array( '_GET', '_POST', '_REQUEST' ) );
+		$server_snapshot = self::snapshot_server( array( 'HTTP_HOST', 'HTTP_REFERER', 'REQUEST_URI' ) );
+		$page            = \sanitize_key( 'cfz_referer_' . $ctx->identifier( 3, 8 ) );
+		$token           = \sanitize_key( $ctx->fork( 'token' )->identifier( 3, 8 ) );
+		$current_path    = '/wp-admin/admin.php?page=' . rawurlencode( $page )
+			. '&_wp_http_referer=' . rawurlencode( '/wp-admin/old.php?drop=<script>' )
+			. '&unsafe=' . rawurlencode( self::hostile_label( $ctx->fork( 'unsafe' ) ) )
+			. '&quote=' . rawurlencode( '"bad"' );
+		$request_ref     = \admin_url( 'edit.php?page=' . rawurlencode( $page ) . '&mode=request-' . $token );
+		$header_ref      = \admin_url( 'tools.php?page=' . rawurlencode( $page ) . '&mode=header-' . $token );
+		$original_ref    = \admin_url( 'users.php?page=' . rawurlencode( $page ) . '&mode=original-' . $token );
+		$result          = array();
+		$restored        = false;
+
+		$buffer_level = ob_get_level();
+		try {
+			$_SERVER['HTTP_HOST']   = parse_url( \home_url(), PHP_URL_HOST ) ?: 'example.test';
+			$_SERVER['REQUEST_URI'] = $current_path;
+			unset( $_SERVER['HTTP_REFERER'] );
+
+			$_GET     = array();
+			$_POST    = array();
+			$_REQUEST = array();
+
+			$result['referer_field'] = \wp_referer_field( false );
+
+			ob_start();
+			\wp_referer_field( true );
+			$result['referer_field_echo'] = (string) ob_get_clean();
+
+			$_REQUEST['_wp_http_referer'] = $request_ref;
+			$result['raw_request_referer'] = \wp_get_raw_referer();
+			$result['request_referer']     = \wp_get_referer();
+
+			$_REQUEST['_wp_http_referer'] = $current_path;
+			$result['same_request_referer'] = \wp_get_referer();
+
+			$_REQUEST['_wp_http_referer'] = \home_url() . $current_path;
+			$result['same_home_request_referer'] = \wp_get_referer();
+
+			$_REQUEST = array();
+			$_SERVER['HTTP_REFERER'] = $header_ref;
+			$result['raw_header_referer'] = \wp_get_raw_referer();
+			$result['header_referer']     = \wp_get_referer();
+
+			$_REQUEST['_wp_original_http_referer'] = $original_ref;
+			$result['original_referer']       = \wp_get_original_referer();
+			$result['original_referer_field'] = \wp_original_referer_field( false, 'previous' );
+
+			ob_start();
+			\wp_original_referer_field( true, 'previous' );
+			$result['original_referer_echo'] = (string) ob_get_clean();
+
+			$_REQUEST = array( '_wp_http_referer' => $request_ref );
+			unset( $_SERVER['HTTP_REFERER'] );
+			$result['previous_fallback_field'] = \wp_original_referer_field( false, 'previous' );
+
+			$_REQUEST = array();
+			$result['current_fallback_field'] = \wp_original_referer_field( false, 'current' );
+		} finally {
+			while ( ob_get_level() > $buffer_level ) {
+				ob_end_clean();
+			}
+			self::restore_globals( $local_snapshot );
+			self::restore_server( $server_snapshot );
+			$restored = self::globals_match( $local_snapshot, array( '_GET', '_POST', '_REQUEST' ) )
+				&& self::server_matches( $server_snapshot, array( 'HTTP_HOST', 'HTTP_REFERER', 'REQUEST_URI' ) );
+		}
+
+		self::collect_failure(
+			$failures,
+			is_string( $result['referer_field'] ?? null )
+				&& str_starts_with( $result['referer_field'], '<input type="hidden" name="_wp_http_referer"' )
+				&& ! str_contains( $result['referer_field'], '_wp_http_referer=' )
+				&& str_contains( $result['referer_field'], 'unsafe=' )
+				&& ( $result['referer_field_echo'] ?? null ) === ( $result['referer_field'] ?? null )
+				&& self::html_has_no_unsafe_raw_markup( $result['referer_field'] ),
+			'wp_referer_field removes nested referer query args, escapes hostile current URLs, and echoes returned markup',
+			array(
+				'refererField' => $result['referer_field'] ?? null,
+				'echo'         => $result['referer_field_echo'] ?? null,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			( $result['raw_request_referer'] ?? null ) === $request_ref
+				&& ( $result['request_referer'] ?? null ) === $request_ref
+				&& false === ( $result['same_request_referer'] ?? null )
+				&& false === ( $result['same_home_request_referer'] ?? null )
+				&& ( $result['raw_header_referer'] ?? null ) === $header_ref
+				&& ( $result['header_referer'] ?? null ) === $header_ref,
+			'raw and validated referer helpers prefer request values, fall back to HTTP_REFERER, and reject current URLs',
+			array(
+				'requestRaw'      => $result['raw_request_referer'] ?? null,
+				'requestValid'    => $result['request_referer'] ?? null,
+				'samePath'        => $result['same_request_referer'] ?? null,
+				'sameAbsolute'    => $result['same_home_request_referer'] ?? null,
+				'headerRaw'       => $result['raw_header_referer'] ?? null,
+				'headerValidated' => $result['header_referer'] ?? null,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			( $result['original_referer'] ?? null ) === $original_ref
+				&& str_contains( (string) ( $result['original_referer_field'] ?? '' ), 'name="_wp_original_http_referer"' )
+				&& str_contains( (string) ( $result['original_referer_field'] ?? '' ), \esc_attr( $original_ref ) )
+				&& ( $result['original_referer_echo'] ?? null ) === ( $result['original_referer_field'] ?? null )
+				&& str_contains( (string) ( $result['previous_fallback_field'] ?? '' ), \esc_attr( $request_ref ) )
+				&& str_contains( (string) ( $result['current_fallback_field'] ?? '' ), 'page=' . rawurlencode( $page ) )
+				&& self::html_has_no_unsafe_raw_markup( (string) ( $result['original_referer_field'] ?? '' ) )
+				&& self::html_has_no_unsafe_raw_markup( (string) ( $result['previous_fallback_field'] ?? '' ) )
+				&& self::html_has_no_unsafe_raw_markup( (string) ( $result['current_fallback_field'] ?? '' ) ),
+			'original referer fields prefer posted originals, echo returned markup, and fall back to previous or current request URLs',
+			array(
+				'original'         => $result['original_referer_field'] ?? null,
+				'originalEcho'     => $result['original_referer_echo'] ?? null,
+				'previousFallback' => $result['previous_fallback_field'] ?? null,
+				'currentFallback'  => $result['current_fallback_field'] ?? null,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$restored,
+			'direct referer field helpers restore request and server globals',
+			array(
+				'globals' => self::globals_match( $local_snapshot, array( '_GET', '_POST', '_REQUEST' ) ),
+				'server'  => self::server_matches( $server_snapshot, array( 'HTTP_HOST', 'HTTP_REFERER', 'REQUEST_URI' ) ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'admin-workflows.referers.direct-field-and-original-helpers',
 			array() === $failures,
 			array( 'failures' => array_slice( $failures, 0, 6 ) )
 		);
