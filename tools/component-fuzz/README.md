@@ -60,8 +60,8 @@ database, network requests, or a configured site.
   integration, cache and event adapters, and deterministic in-memory generation
   without network calls.
 - `assets`: script/style registration lifecycle, dependency ordering, inline
-  assets, loading strategies, scoped loader-tag filters, script modules, and
-  printed tag escaping.
+  assets, style add-data output metadata, loading strategies, scoped loader-tag
+  filters, script modules, and printed tag escaping.
 - `script-loader-runtime`: server-side script-loader runtime helpers, including
   default script/style/module registrations, handle normalization, duplicate
   update behavior, inline/localized data placement, tag/settings escaping,
