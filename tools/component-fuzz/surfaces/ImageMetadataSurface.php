@@ -39,6 +39,7 @@ final class ImageMetadataSurface {
 
 				$rows[] = self::check_invalid_file_failure_paths( $ctx->fork( 'invalid' ), $temp_root );
 				$rows[] = self::check_minimal_image_metadata_filters( $ctx->fork( 'minimal' ), $temp_root );
+				$rows[] = self::check_xmp_alt_text_selection( $ctx->fork( 'xmp-alt' ), $temp_root );
 				$rows[] = self::check_iptc_metadata( $ctx->fork( 'iptc' ), $temp_root );
 				$rows[] = self::check_exif_metadata( $ctx->fork( 'exif' ), $temp_root );
 				$rows[] = self::check_exif_helpers( $ctx->fork( 'helpers' ) );
@@ -303,6 +304,165 @@ final class ImageMetadataSurface {
 				'metadata'   => self::preview_metadata_map( $metadata ),
 				'failures'   => array_slice( $failures, 0, 8 ),
 			)
+		);
+	}
+
+	private static function check_xmp_alt_text_selection( \ComponentFuzz\FuzzContext $ctx, string $temp_root ): array {
+		if ( ! class_exists( 'DOMDocument' ) || ! class_exists( 'DOMXPath' ) ) {
+			return $ctx->skip(
+				'image-metadata.xmp-alt.locale-fallbacks',
+				'DOMDocument/DOMXPath are unavailable in this PHP build.'
+			);
+		}
+
+		$failures = array();
+		$dir      = $temp_root . DIRECTORY_SEPARATOR . 'xmp-alt-fixtures';
+		$token    = $ctx->identifier( 3, 8 );
+		$alts     = array(
+			'default' => 'Default alt ' . $token,
+			'en'      => 'English alt ' . $token,
+			'fr'      => 'Texte alternatif ' . $token . ' <script>drop()</script>',
+		);
+
+		$localized_path = self::write_fixture(
+			$dir,
+			'localized-alt.jpg',
+			self::jpeg_bytes(
+				array(
+					self::jpeg_xmp_alt_segment(
+						array(
+							'x-default' => $alts['default'],
+							'en'        => $alts['en'],
+							'fr_FR'     => $alts['fr'],
+						)
+					),
+				),
+				$ctx->int( 4, 32 ),
+				$ctx->int( 4, 32 )
+			)
+		);
+		$partial_path   = self::write_fixture(
+			$dir,
+			'partial-alt.jpg',
+			self::jpeg_bytes(
+				array(
+					self::jpeg_xmp_alt_segment(
+						array(
+							'x-default' => $alts['default'],
+							'en'        => $alts['en'],
+						)
+					),
+				),
+				$ctx->int( 4, 32 ),
+				$ctx->int( 4, 32 )
+			)
+		);
+		$default_path   = self::write_fixture(
+			$dir,
+			'default-alt.jpg',
+			self::jpeg_bytes(
+				array(
+					self::jpeg_xmp_alt_segment(
+						array(
+							'x-default' => $alts['default'],
+						)
+					),
+				),
+				$ctx->int( 4, 32 ),
+				$ctx->int( 4, 32 )
+			)
+		);
+		$plain_path     = self::write_fixture(
+			$dir,
+			'plain.jpg',
+			self::jpeg_bytes( array(), $ctx->int( 4, 32 ), $ctx->int( 4, 32 ) )
+		);
+
+		foreach (
+			array(
+				'localized' => $localized_path,
+				'partial'   => $partial_path,
+				'default'   => $default_path,
+				'plain'     => $plain_path,
+			) as $label => $path
+		) {
+			self::collect_failure(
+				$failures,
+				is_string( $path ),
+				"XMP alt fixture {$label} is writable",
+				array( 'path' => $path )
+			);
+		}
+
+		if ( array() !== $failures ) {
+			return self::row(
+				$ctx,
+				'image-metadata.xmp-alt.locale-fallbacks',
+				false,
+				array( 'failures' => array_slice( $failures, 0, 8 ) )
+			);
+		}
+
+		$fr_locale = static fn(): string => 'fr_FR';
+		$en_locale = static fn(): string => 'en_US';
+		$es_locale = static fn(): string => 'es_ES';
+
+		\add_filter( 'locale', $fr_locale );
+		try {
+			$direct_fr = \wp_get_image_alttext( $localized_path );
+			$meta_fr   = \wp_read_image_metadata( $localized_path );
+		} finally {
+			\remove_filter( 'locale', $fr_locale );
+		}
+
+		\add_filter( 'locale', $en_locale );
+		try {
+			$direct_en = \wp_get_image_alttext( $partial_path );
+		} finally {
+			\remove_filter( 'locale', $en_locale );
+		}
+
+		\add_filter( 'locale', $es_locale );
+		try {
+			$direct_default = \wp_get_image_alttext( $default_path );
+		} finally {
+			\remove_filter( 'locale', $es_locale );
+		}
+
+		$plain_alt = \wp_get_image_alttext( $plain_path );
+
+		self::collect_failure(
+			$failures,
+			$alts['fr'] === $direct_fr
+				&& is_array( $meta_fr )
+				&& isset( $meta_fr['alt'] )
+				&& str_contains( (string) $meta_fr['alt'], 'Texte alternatif ' . $token )
+				&& ! str_contains( strtolower( (string) $meta_fr['alt'] ), '<script' )
+				&& self::metadata_text_is_clean( $meta_fr )
+				&& $alts['en'] === $direct_en
+				&& $alts['default'] === $direct_default
+				&& '' === $plain_alt
+				&& false === \has_filter( 'locale', $fr_locale )
+				&& false === \has_filter( 'locale', $en_locale )
+				&& false === \has_filter( 'locale', $es_locale ),
+			'XMP alt text honors exact locale, partial locale, x-default fallback, and metadata sanitization',
+			array(
+				'directFr'          => $direct_fr,
+				'metadataFr'        => is_array( $meta_fr ) ? self::preview_metadata( $meta_fr ) : $meta_fr,
+				'directEn'          => $direct_en,
+				'directDefault'     => $direct_default,
+				'plainAlt'          => $plain_alt,
+				'frLocaleHasFilter' => \has_filter( 'locale', $fr_locale ),
+				'enLocaleHasFilter' => \has_filter( 'locale', $en_locale ),
+				'esLocaleHasFilter' => \has_filter( 'locale', $es_locale ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'image-metadata.xmp-alt.locale-fallbacks',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, 8 ) )
 		);
 	}
 
@@ -836,12 +996,22 @@ final class ImageMetadataSurface {
 			return '';
 		}
 
-		$escaped = htmlspecialchars( $alt_text, ENT_XML1 | ENT_COMPAT, 'UTF-8' );
+		return self::jpeg_xmp_alt_segment( array( 'x-default' => $alt_text ) );
+	}
+
+	private static function jpeg_xmp_alt_segment( array $alternatives ): string {
+		$items = '';
+		foreach ( $alternatives as $locale => $alt_text ) {
+			$items .= '<rdf:li xml:lang="' . htmlspecialchars( (string) $locale, ENT_XML1 | ENT_QUOTES, 'UTF-8' ) . '">'
+				. htmlspecialchars( (string) $alt_text, ENT_XML1 | ENT_COMPAT, 'UTF-8' )
+				. '</rdf:li>';
+		}
+
 		$xmp     = '<x:xmpmeta xmlns:x="adobe:ns:meta/">'
 			. '<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
 			. '<rdf:Description xmlns:Iptc4xmpCore="http://iptc.org/std/Iptc4xmpCore/1.0/xmlns/">'
 			. '<Iptc4xmpCore:AltTextAccessibility><rdf:Alt>'
-			. '<rdf:li xml:lang="x-default">' . $escaped . '</rdf:li>'
+			. $items
 			. '</rdf:Alt></Iptc4xmpCore:AltTextAccessibility>'
 			. '</rdf:Description></rdf:RDF></x:xmpmeta>';
 

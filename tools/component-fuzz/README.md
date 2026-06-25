@@ -248,8 +248,9 @@ database, network requests, or a configured site.
 - `image-metadata`: local admin image metadata parser coverage over generated
   bounded JPEG/TIFF/PNG byte fixtures, including `wp_read_image_metadata()`
   malformed-file behavior, EXIF/IPTC field extraction and sanitization when PHP
-  extensions are available, XMP alt text extraction, EXIF helper normalization,
-  image metadata filters, temp-file cleanup, and state restoration.
+  extensions are available, locale-aware XMP alt text extraction/fallbacks,
+  EXIF helper normalization, image metadata filters, temp-file cleanup, and
+  state restoration.
 - `identity`: usernames, emails, identity sanitizer filter contracts,
   capabilities, text/comment filters, comment cookies/current-commenter
   payloads, options, password hashing/checking, parse helpers.
