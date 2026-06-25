@@ -9,6 +9,7 @@ final class FontsSurface {
 
 	private const FONT_FACE_CASES = 10;
 	private const COLLECTION_CASES = 5;
+	private const REST_FONT_FACE_CASES = 6;
 
 	public static function run( \ComponentFuzz\FuzzContext $ctx ): array {
 		$missing = self::missing_requirements();
@@ -34,6 +35,7 @@ final class FontsSurface {
 			$rows[] = self::check_font_collection_json_sources( $ctx->fork( 'font-collection-json' ) );
 			$rows[] = self::check_font_utils_normalization( $ctx->fork( 'font-utils' ) );
 			$rows[] = self::check_font_utils_schema_sanitization( $ctx->fork( 'font-utils-schema' ) );
+			$rows[] = self::check_rest_font_face_prepare_boundaries( $ctx->fork( 'rest-font-face' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = self::row(
 				$ctx,
@@ -49,6 +51,8 @@ final class FontsSurface {
 	}
 
 	private static function missing_requirements(): array {
+		self::ensure_rest_font_faces_controller_loaded();
+
 		$missing = array();
 
 		foreach (
@@ -59,6 +63,10 @@ final class FontsSurface {
 				'WP_Font_Library',
 				'WP_Font_Utils',
 				'WP_HTML_Tag_Processor',
+				'WP_Post',
+				'WP_REST_Font_Faces_Controller',
+				'WP_REST_Request',
+				'WP_REST_Response',
 			) as $class
 		) {
 			if ( ! class_exists( $class ) ) {
@@ -75,10 +83,16 @@ final class FontsSurface {
 				'doing_filter',
 				'has_filter',
 				'remove_filter',
+				'rest_ensure_response',
+				'rest_is_field_included',
+				'rest_validate_value_from_schema',
 				'sanitize_text_field',
 				'sanitize_title',
+				'sanitize_url',
 				'wp_font_dir',
 				'wp_get_font_dir',
+				'wp_http_validate_url',
+				'wp_json_encode',
 				'wp_print_font_faces',
 				'wp_register_font_collection',
 				'wp_unregister_font_collection',
@@ -91,6 +105,18 @@ final class FontsSurface {
 		}
 
 		return $missing;
+	}
+
+	private static function ensure_rest_font_faces_controller_loaded(): void {
+		if ( class_exists( 'WP_REST_Font_Faces_Controller' ) ) {
+			return;
+		}
+
+		$base = defined( 'ABSPATH' ) ? ABSPATH : \ComponentFuzz\repo_root() . DIRECTORY_SEPARATOR . 'src' . DIRECTORY_SEPARATOR;
+		$path = $base . 'wp-includes/rest-api/endpoints/class-wp-rest-font-faces-controller.php';
+		if ( is_readable( $path ) ) {
+			require_once $path;
+		}
 	}
 
 	private static function check_font_face_serialization_and_escaping( \ComponentFuzz\FuzzContext $ctx ): array {
@@ -829,6 +855,139 @@ final class FontsSurface {
 		);
 	}
 
+	private static function check_rest_font_face_prepare_boundaries( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures  = array();
+		$controller = self::rest_font_face_controller();
+
+		foreach ( self::rest_font_face_cases( $ctx ) as $index => $case ) {
+			$json       = \wp_json_encode( $case['settings'] );
+			$validation = $controller->validate_create_font_face_settings(
+				$json,
+				self::rest_font_face_request( $case['settings'], $case['files'], $case['parentId'] )
+			);
+			$sanitized  = $controller->sanitize_font_face_settings( $json );
+			$prepared   = $controller->component_fuzz_prepare_item_for_database(
+				self::rest_font_face_request( $sanitized, $case['files'], $case['parentId'] )
+			);
+
+			self::collect_failure(
+				$failures,
+				true === $validation
+					&& is_array( $sanitized )
+					&& self::rest_sanitized_font_face_matches_case( $sanitized, $case )
+					&& self::rest_prepared_font_face_matches_case( $prepared, $sanitized, $case ),
+				"REST font-face create settings validate, sanitize, and prepare post data case {$index}",
+				array(
+					'case'       => $case['label'],
+					'validation' => self::describe_value( $validation ),
+					'sanitized'  => $sanitized,
+					'prepared'   => self::describe_value( $prepared ),
+					'expected'   => $case['expected'],
+				)
+			);
+
+			$post     = self::rest_font_face_post(
+				$case['postId'],
+				$case['parentId'],
+				\wp_json_encode( $sanitized + array( 'componentFuzzUnknown' => 'drop-me' ) )
+			);
+			$response = $controller->prepare_item_for_response( $post, self::rest_font_face_response_request( $case['parentId'] ) );
+			$data     = $response instanceof \WP_REST_Response ? $response->get_data() : null;
+
+			self::collect_failure(
+				$failures,
+				is_array( $data )
+					&& $case['postId'] === ( $data['id'] ?? null )
+					&& $case['parentId'] === ( $data['parent'] ?? null )
+					&& \WP_REST_Font_Faces_Controller::LATEST_THEME_JSON_VERSION_SUPPORTED === ( $data['theme_json_version'] ?? null )
+					&& $sanitized === ( $data['font_face_settings'] ?? null )
+					&& ! isset( $data['font_face_settings']['componentFuzzUnknown'] ),
+				"REST font-face response preparation exposes schema fields and strips unknown settings case {$index}",
+				array(
+					'case'     => $case['label'],
+					'response' => self::describe_value( $data ),
+					'expected' => array(
+						'id'                 => $case['postId'],
+						'parent'             => $case['parentId'],
+						'themeJsonVersion'   => \WP_REST_Font_Faces_Controller::LATEST_THEME_JSON_VERSION_SUPPORTED,
+						'fontFaceSettings'   => $sanitized,
+						'unknownKeyExcluded' => true,
+					),
+				)
+			);
+		}
+
+		$duplicate_case = self::rest_font_face_duplicate_slug_case( $ctx->fork( 'duplicate-slug' ) );
+		$prepared_a     = $controller->component_fuzz_prepare_item_for_database(
+			self::rest_font_face_request( $duplicate_case['a'], array(), $duplicate_case['parentId'] )
+		);
+		$prepared_b     = $controller->component_fuzz_prepare_item_for_database(
+			self::rest_font_face_request( $duplicate_case['b'], array(), $duplicate_case['parentId'] )
+		);
+
+		self::collect_failure(
+			$failures,
+			is_object( $prepared_a )
+				&& is_object( $prepared_b )
+				&& $prepared_a->post_title === $prepared_b->post_title
+				&& $prepared_a->post_name === $prepared_b->post_name
+				&& $prepared_a->post_content !== $prepared_b->post_content,
+			'REST font-face prepared post slug is stable across equivalent matching settings',
+			array(
+				'case'      => $duplicate_case,
+				'preparedA' => self::describe_value( $prepared_a ),
+				'preparedB' => self::describe_value( $prepared_b ),
+			)
+		);
+
+		$invalid_post      = self::rest_font_face_post( 970000 + $ctx->iteration(), 970100 + $ctx->iteration(), "{not-json\n" );
+		$invalid_response  = $controller->prepare_item_for_response( $invalid_post, self::rest_font_face_response_request( 970100 + $ctx->iteration() ) );
+		$invalid_data      = $invalid_response instanceof \WP_REST_Response ? $invalid_response->get_data() : null;
+		$invalid_settings  = is_array( $invalid_data ) ? ( $invalid_data['font_face_settings'] ?? null ) : null;
+		$invalid_creations = self::rest_font_face_invalid_create_cases( $ctx->fork( 'invalid-create' ) );
+
+		self::collect_failure(
+			$failures,
+			array( 'fontFamily' => '', 'src' => array() ) === $invalid_settings,
+			'REST font-face response preparation falls back for invalid stored JSON',
+			array(
+				'response' => self::describe_value( $invalid_data ),
+				'expected' => array( 'fontFamily' => '', 'src' => array() ),
+			)
+		);
+
+		foreach ( $invalid_creations as $index => $case ) {
+			$validation = $controller->validate_create_font_face_settings(
+				$case['json'],
+				self::rest_font_face_request( array(), $case['files'], $case['parentId'] )
+			);
+
+			self::collect_failure(
+				$failures,
+				$validation instanceof \WP_Error
+					&& $case['expectedCode'] === $validation->get_error_code()
+					&& 400 === ( $validation->get_error_data()['status'] ?? null ),
+				"REST font-face create validation rejects boundary case {$index}",
+				array(
+					'case'           => $case,
+					'validationCode' => $validation instanceof \WP_Error ? $validation->get_error_code() : null,
+					'validation'     => self::describe_value( $validation ),
+				)
+			);
+		}
+
+		return self::row(
+			$ctx,
+			'fonts.rest-font-face.prepare-boundaries',
+			array() === $failures,
+			array(
+				'cases'    => self::REST_FONT_FACE_CASES,
+				'invalids' => count( $invalid_creations ),
+				'failures' => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
 	private static function font_face_cases( \ComponentFuzz\FuzzContext $ctx ): array {
 		$cases = array();
 
@@ -1155,6 +1314,229 @@ final class FontsSurface {
 			&& $case['expected']['familySlug'] === ( $setting['slug'] ?? null )
 			&& '"JSON Fuzz Family", sans-serif' === ( $setting['fontFamily'] ?? null )
 			&& 'JSON File Category' !== ( $data['categories'][0]['name'] ?? null );
+	}
+
+	private static function rest_font_face_controller(): \WP_REST_Font_Faces_Controller {
+		return new class() extends \WP_REST_Font_Faces_Controller {
+			public function __construct() {
+				$this->post_type = 'wp_font_face';
+				$this->rest_base = 'font-families/(?P<font_family_id>[\d]+)/font-faces';
+				$this->namespace = 'wp/v2';
+			}
+
+			public function component_fuzz_prepare_item_for_database( \WP_REST_Request $request ) {
+				return $this->prepare_item_for_database( $request );
+			}
+		};
+	}
+
+	private static function rest_font_face_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$cases = array();
+
+		for ( $i = 0; $i < self::REST_FONT_FACE_CASES; $i++ ) {
+			$case_ctx = $ctx->fork( 'rest-case-' . $i );
+			$token    = self::slug( $case_ctx, 'rest-face' );
+			$file_key = 'file-' . str_replace( '-', '_', self::slug( $case_ctx->fork( 'file' ), 'font' ) );
+			$remote   = '  https://example.test/fonts/' . $token . '.woff2';
+			$src      = 0 === $i % 3 ? $remote : array( $remote, $file_key );
+
+			if ( 2 === $i % 3 ) {
+				$src = array( $file_key, $remote );
+			}
+
+			$settings = array(
+				'fontFamily'          => '<b>Component Fuzz REST ' . $token . '</b>, serif',
+				'fontStyle'           => $case_ctx->choice( array( 'normal', 'italic', 'oblique 10deg' ) ),
+				'fontWeight'          => $case_ctx->choice( array( '400', '700', 700, '100 900' ) ),
+				'fontDisplay'         => $case_ctx->choice( array( 'auto', 'block', 'fallback', 'swap', 'optional' ) ),
+				'src'                 => $src,
+				'fontStretch'         => $case_ctx->choice( array( 'normal', 'condensed', '125%' ) ),
+				'fontFeatureSettings' => '"kern" 1 <i>ignored</i>',
+				'unicodeRange'        => 'U+00-' . strtoupper( dechex( 255 + $i + $case_ctx->int( 0, 31 ) ) ),
+				'preview'             => 'https://example.test/previews/' . $token . '.png',
+			);
+			$files    = is_array( $src ) && in_array( $file_key, $src, true )
+				? array(
+					$file_key => array(
+						'name'     => $token . '.woff2',
+						'type'     => 'font/woff2',
+						'tmp_name' => '/tmp/component-fuzz-' . $token . '.woff2',
+						'error'    => 0,
+						'size'     => $case_ctx->int( 128, 4096 ),
+					),
+				)
+				: array();
+
+			$cases[] = array(
+				'label'    => $token,
+				'parentId' => 960000 + $ctx->iteration() * 100 + $i,
+				'postId'   => 961000 + $ctx->iteration() * 100 + $i,
+				'settings' => $settings,
+				'files'    => $files,
+				'expected' => array(
+					'fontFamily' => \WP_Font_Utils::sanitize_font_family( $settings['fontFamily'] ),
+					'src'        => self::expected_rest_src( $settings['src'] ),
+				),
+			);
+		}
+
+		return $cases;
+	}
+
+	private static function rest_sanitized_font_face_matches_case( array $sanitized, array $case ): bool {
+		$settings = $case['settings'];
+
+		return $case['expected']['fontFamily'] === ( $sanitized['fontFamily'] ?? null )
+			&& $case['expected']['src'] === ( $sanitized['src'] ?? null )
+			&& $settings['fontStyle'] === ( $sanitized['fontStyle'] ?? null )
+			&& (string) $settings['fontWeight'] === (string) ( $sanitized['fontWeight'] ?? null )
+			&& $settings['fontDisplay'] === ( $sanitized['fontDisplay'] ?? null )
+			&& $settings['fontStretch'] === ( $sanitized['fontStretch'] ?? null )
+			&& '"kern" 1 ignored' === ( $sanitized['fontFeatureSettings'] ?? null )
+			&& $settings['unicodeRange'] === ( $sanitized['unicodeRange'] ?? null )
+			&& $settings['preview'] === ( $sanitized['preview'] ?? null )
+			&& ! str_contains( $sanitized['fontFamily'] ?? '', '<' )
+			&& ! str_contains( $sanitized['fontFeatureSettings'] ?? '', '<' );
+	}
+
+	private static function rest_prepared_font_face_matches_case( $prepared, array $sanitized, array $case ): bool {
+		if ( ! is_object( $prepared ) ) {
+			return false;
+		}
+
+		$title = \WP_Font_Utils::get_font_face_slug( $sanitized );
+
+		return 'wp_font_face' === ( $prepared->post_type ?? null )
+			&& $case['parentId'] === ( $prepared->post_parent ?? null )
+			&& 'publish' === ( $prepared->post_status ?? null )
+			&& $title === ( $prepared->post_title ?? null )
+			&& \sanitize_title( $title ) === ( $prepared->post_name ?? null )
+			&& \wp_json_encode( $sanitized ) === ( $prepared->post_content ?? null );
+	}
+
+	private static function rest_font_face_duplicate_slug_case( \ComponentFuzz\FuzzContext $ctx ): array {
+		$token = self::slug( $ctx, 'dup-face' );
+
+		return array(
+			'parentId' => 968000 + $ctx->iteration(),
+			'a'        => array(
+				'fontFamily'   => '"Component Fuzz ' . $token . '", serif',
+				'fontStyle'    => 'NORMAL',
+				'fontWeight'   => 'bold',
+				'fontStretch'  => 'normal',
+				'unicodeRange' => 'u+00-ff',
+				'src'          => 'https://example.test/fonts/' . $token . '-a.woff2',
+			),
+			'b'        => array(
+				'fontFamily'   => "'component fuzz " . $token . "',serif",
+				'fontStyle'    => 'normal',
+				'fontWeight'   => '700',
+				'fontStretch'  => '100%',
+				'unicodeRange' => 'U+00-FF',
+				'src'          => 'https://example.test/fonts/' . $token . '-b.woff2',
+			),
+		);
+	}
+
+	private static function rest_font_face_invalid_create_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$token = self::slug( $ctx, 'invalid-rest-face' );
+
+		return array(
+			array(
+				'label'        => 'invalid-json',
+				'parentId'     => 969000 + $ctx->iteration(),
+				'json'         => "{not-json\n",
+				'files'        => array(),
+				'expectedCode' => 'rest_invalid_param',
+			),
+			array(
+				'label'        => 'empty-required-src',
+				'parentId'     => 969100 + $ctx->iteration(),
+				'json'         => \wp_json_encode(
+					array(
+						'fontFamily' => 'Component Fuzz Empty Src ' . $token,
+						'src'        => '',
+					)
+				),
+				'files'        => array(),
+				'expectedCode' => 'rest_invalid_param',
+			),
+			array(
+				'label'        => 'bad-src-reference',
+				'parentId'     => 969200 + $ctx->iteration(),
+				'json'         => \wp_json_encode(
+					array(
+						'fontFamily' => 'Component Fuzz Bad Src ' . $token,
+						'src'        => 'not-a-url-or-file',
+					)
+				),
+				'files'        => array(),
+				'expectedCode' => 'rest_invalid_param',
+			),
+			array(
+				'label'        => 'unused-upload-file',
+				'parentId'     => 969300 + $ctx->iteration(),
+				'json'         => \wp_json_encode(
+					array(
+						'fontFamily' => 'Component Fuzz Unused File ' . $token,
+						'src'        => 'https://example.test/fonts/' . $token . '.woff2',
+					)
+				),
+				'files'        => array(
+					'file-' . $token => array(
+						'name'     => $token . '.woff2',
+						'type'     => 'font/woff2',
+						'tmp_name' => '/tmp/component-fuzz-' . $token . '.woff2',
+						'error'    => 0,
+						'size'     => 512,
+					),
+				),
+				'expectedCode' => 'rest_invalid_param',
+			),
+		);
+	}
+
+	private static function expected_rest_src( $src ) {
+		if ( is_array( $src ) ) {
+			return array_map( array( self::class, 'expected_rest_src_item' ), $src );
+		}
+
+		return self::expected_rest_src_item( $src );
+	}
+
+	private static function expected_rest_src_item( $src ): string {
+		$src = ltrim( (string) $src );
+		return false === \wp_http_validate_url( $src ) ? $src : \sanitize_url( $src );
+	}
+
+	private static function rest_font_face_request( array $settings, array $files, int $parent_id ): \WP_REST_Request {
+		$request = new \WP_REST_Request( 'POST', '/wp/v2/font-families/' . $parent_id . '/font-faces' );
+		$request->set_param( 'font_family_id', $parent_id );
+		$request->set_param( 'font_face_settings', $settings );
+		$request->set_file_params( $files );
+		return $request;
+	}
+
+	private static function rest_font_face_response_request( int $parent_id ): \WP_REST_Request {
+		$request = new \WP_REST_Request( 'GET', '/wp/v2/font-families/' . $parent_id . '/font-faces/1' );
+		$request->set_param( 'font_family_id', $parent_id );
+		$request->set_param( 'context', 'view' );
+		$request->set_param( '_fields', 'id,parent,theme_json_version,font_face_settings' );
+		return $request;
+	}
+
+	private static function rest_font_face_post( int $id, int $parent_id, string $content ): \WP_Post {
+		return new \WP_Post(
+			(object) array(
+				'ID'           => $id,
+				'post_parent'  => $parent_id,
+				'post_content' => $content,
+				'post_title'   => 'component-fuzz-font-face-' . $id,
+				'post_name'    => 'component-fuzz-font-face-' . $id,
+				'post_status'  => 'publish',
+				'post_type'    => 'wp_font_face',
+			)
+		);
 	}
 
 	private static function has_declaration( string $block, string $property, string $value ): bool {
