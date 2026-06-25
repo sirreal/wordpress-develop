@@ -434,10 +434,8 @@ final class PostTypesSurface {
 		$second            = \register_post_type( $duplicate, $second_args );
 		$expected          = self::expected_post_type_props( $post_type, $second_args );
 		$expected_cap      = self::expected_capabilities( $second_args );
-		$expected_supports = array_merge(
-			self::expected_supports( $first_args['supports'] ),
-			self::expected_supports( $second_args['supports'] )
-		);
+		$first_supports    = self::expected_supports( $first_args['supports'] );
+		$second_supports   = self::expected_supports( $second_args['supports'] );
 		$rewrite_regexes   = self::rewrite_rule_regexes_for_post_type( $post_type );
 		$first_query_var   = self::expected_query_var( $post_type, $query_first );
 		$second_query_var  = self::expected_query_var( $post_type, $query_second );
@@ -484,22 +482,28 @@ final class PostTypesSurface {
 			$failures,
 			$first instanceof \WP_Post_Type
 				&& $second instanceof \WP_Post_Type
-				&& self::support_maps_match( $expected_supports, \get_all_post_type_supports( $post_type ) )
-				&& self::sets_match( array( $tax_first, $tax_second ), \get_object_taxonomies( $post_type, 'names' ) )
-				&& self::taxonomy_contains_object_type( $tax_first, $post_type )
+				&& self::support_maps_match( $first_supports, $after_first['supports'] )
+				&& in_array( $first_query_var, $after_first['queryVars'], true )
+				&& self::rewrite_regexes_include_slug( $after_first['rewriteRegexes'], $first_rewrite['slug'] )
+				&& self::sets_match( array( $tax_first ), $after_first['taxonomies'] )
+				&& array() !== $after_first['metaCaps']
+				&& self::support_maps_match( $second_supports, \get_all_post_type_supports( $post_type ) )
+				&& self::sets_match( array( $tax_second ), \get_object_taxonomies( $post_type, 'names' ) )
+				&& ! self::taxonomy_contains_object_type( $tax_first, $post_type )
 				&& self::taxonomy_contains_object_type( $tax_second, $post_type )
-				&& self::query_var_is_public( $first_query_var )
+				&& ! self::query_var_is_public( $first_query_var )
 				&& self::query_var_is_public( $second_query_var )
 				&& self::permastruct_uses_slug( $post_type, $second_rewrite['slug'] )
-				&& self::rewrite_regexes_include_slug( $rewrite_regexes, $first_rewrite['slug'] )
+				&& ! self::rewrite_regexes_include_slug( $rewrite_regexes, $first_rewrite['slug'] )
 				&& self::rewrite_regexes_include_slug( $rewrite_regexes, $second_rewrite['slug'] )
-				&& self::meta_cap_registry_matches( $first->cap, true )
+				&& ! self::post_type_meta_caps_contain( $first->cap )
 				&& self::meta_cap_registry_matches( $second->cap, true )
 				&& 5 === \has_action( 'future_' . $post_type, '_future_post_hook' ),
-			'duplicate post type registration keeps additive supports, taxonomy links, query vars, rewrite rules, and meta caps bounded',
+			'duplicate post type registration replaces supports, taxonomy links, query vars, rewrite rules, and meta caps',
 			array(
 				'postType'         => $post_type,
-				'expectedSupports' => $expected_supports,
+				'firstSupports'    => $first_supports,
+				'secondSupports'   => $second_supports,
 				'afterFirst'       => $after_first,
 				'afterSecond'      => $after_second,
 				'firstRewrite'     => $first_rewrite,
@@ -536,6 +540,7 @@ final class PostTypesSurface {
 				&& ! isset( $_wp_post_type_features[ $post_type ] )
 				&& ! self::taxonomy_contains_object_type( $tax_first, $post_type )
 				&& ! self::taxonomy_contains_object_type( $tax_second, $post_type )
+				&& ! self::query_var_is_public( $first_query_var )
 				&& ! self::query_var_is_public( $second_query_var )
 				&& (
 					! is_object( $wp_rewrite )
@@ -543,6 +548,7 @@ final class PostTypesSurface {
 					|| ! array_key_exists( $post_type, $wp_rewrite->extra_permastructs )
 				)
 				&& ! self::rewrite_rules_contain_post_type( $post_type )
+				&& ! self::post_type_meta_caps_contain( $first->cap )
 				&& ! self::post_type_meta_caps_contain( $second->cap )
 				&& ! \has_action( 'future_' . $post_type, '_future_post_hook' ),
 			'unregister_post_type after duplicate registration removes the latest object and shared registries',
@@ -555,7 +561,7 @@ final class PostTypesSurface {
 
 		return self::row(
 			$ctx,
-			'post-types.duplicate-registration.replaces-object-and-bounds-side-registries',
+			'post-types.duplicate-registration.replaces-object-and-cleans-side-registries',
 			array() === $failures,
 			array(
 				'postType' => $post_type,

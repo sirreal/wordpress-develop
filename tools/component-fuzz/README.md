@@ -419,10 +419,10 @@ database, network requests, or a configured site.
   handlers.
 - `post-types`: post type and post status registry defaults, registration
   filter/action/meta-box lifecycle, REST route registration boundaries and
-  late-route ordering, duplicate post-type replacement and additive side
-  registries, support feature registration, capability generation, registry
-  query operators, query/archive normalization, unregister cleanup, archive/feed
-  link filters, and status filtering.
+  late-route ordering, duplicate post-type replacement cleanup, support feature
+  registration, capability generation, registry query operators, query/archive
+  normalization, unregister cleanup, archive/feed link filters, and status
+  filtering.
 - `privacy`: no-DB user request and privacy helper coverage, including
   synthetic `WP_User_Request` objects, request lifecycle helpers, action and
   confirmation descriptions, request-key hash/expiration validation including
