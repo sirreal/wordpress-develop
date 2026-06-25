@@ -996,11 +996,17 @@ class Tests_Auth extends WP_UnitTestCase {
 
 		// A missing request should fail closed, even when get_post() could fall
 		// back to the global post.
+		$had_global_post = array_key_exists( 'post', $GLOBALS );
+		$global_post     = $GLOBALS['post'] ?? null;
 		$GLOBALS['post'] = get_post( $request_id );
 		try {
 			$check = wp_validate_user_request_key( 0, $key );
 		} finally {
-			unset( $GLOBALS['post'] );
+			if ( $had_global_post ) {
+				$GLOBALS['post'] = $global_post;
+			} else {
+				unset( $GLOBALS['post'] );
+			}
 		}
 
 		$this->assertWPError( $check );
