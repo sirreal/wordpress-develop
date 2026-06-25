@@ -753,6 +753,7 @@ final class MediaIngestSurface {
 				$failures,
 				is_array( $too_large )
 					&& $too_large_message === ( $too_large['error'] ?? null )
+					&& self::result_contains_error_payload( $too_large, $too_large_message, UPLOAD_ERR_FORM_SIZE )
 					&& is_array( $too_large_event )
 					&& $too_large_message === ( $too_large_event['message'] ?? null )
 					&& UPLOAD_ERR_FORM_SIZE === ( $too_large_event['error'] ?? null )
@@ -808,6 +809,7 @@ final class MediaIngestSurface {
 				$failures,
 				is_array( $form_result )
 					&& \__( 'Invalid form submission.' ) === ( $form_result['error'] ?? null )
+					&& self::result_contains_error_payload( $form_result, \__( 'Invalid form submission.' ), UPLOAD_ERR_OK )
 					&& array( 'overrides', 'error' ) === $form_sequence
 					&& is_array( $form_event )
 					&& \__( 'Invalid form submission.' ) === ( $form_event['message'] ?? null )
@@ -867,6 +869,7 @@ final class MediaIngestSurface {
 				$failures,
 				is_array( $empty_result )
 					&& $empty_error === ( $empty_result['error'] ?? null )
+					&& self::result_contains_error_payload( $empty_result, $empty_error, UPLOAD_ERR_OK )
 					&& is_array( $empty_event )
 					&& 0 === ( $empty_event['size'] ?? null )
 					&& $empty_error === ( $empty_event['message'] ?? null )
@@ -896,6 +899,7 @@ final class MediaIngestSurface {
 			$before_files   = self::list_files_recursive( (string) $upload_root );
 			$before_moves   = count( $events['moves'] );
 			$before_handles = count( $events['handled'] );
+			$before_dirs    = count( $events['uploadDirs'] );
 			$type_result    = null === $type_path ? null : \wp_handle_sideload(
 				$type_file,
 				array(
@@ -915,18 +919,22 @@ final class MediaIngestSurface {
 				$failures,
 				is_array( $type_result )
 					&& $type_error === ( $type_result['error'] ?? null )
+					&& self::result_contains_error_payload( $type_result, $type_error, UPLOAD_ERR_OK )
 					&& is_array( $type_event )
 					&& $type_error === ( $type_event['message'] ?? null )
 					&& is_string( $type_path )
 					&& file_exists( $type_path )
 					&& $before_files === self::list_files_recursive( (string) $upload_root )
 					&& $before_moves === count( $events['moves'] )
-					&& $before_handles === count( $events['handled'] ),
+					&& $before_handles === count( $events['handled'] )
+					&& $before_dirs === count( $events['uploadDirs'] ),
 				'test_type and mimes reject disallowed sideload extensions before upload_dir or move filters run',
 				array(
 					'case'        => self::case_summary( $type_case ),
 					'result'      => self::describe_result( $type_result ),
 					'event'       => $type_event,
+					'beforeDirs'  => $before_dirs,
+					'afterDirs'   => count( $events['uploadDirs'] ),
 					'beforeFiles' => $before_files,
 					'afterFiles'  => self::list_files_recursive( (string) $upload_root ),
 				)
@@ -997,6 +1005,7 @@ final class MediaIngestSurface {
 			$unique_file_path = is_array( $unique ) ? ( $unique['file'] ?? null ) : null;
 			$unique_basename  = is_string( $unique_file_path ) ? basename( $unique_file_path ) : null;
 			$expected_unique  = 'filtered-' . $unique_callback_base . '.txt';
+			$callback_name    = $events['uniqueCallbacks'][0]['name'] ?? null;
 			$case_rows[]      = array(
 				'case'   => self::case_summary( $unique_case ),
 				'result' => self::describe_result( $unique ),
@@ -1019,12 +1028,18 @@ final class MediaIngestSurface {
 					&& 1 === count( $events['uniqueFilters'] )
 					&& true === ( $events['uniqueFilters'][0]['sameCallback'] ?? null )
 					&& is_string( $events['uniqueCallbacks'][0]['dir'] ?? null )
-					&& self::path_starts_with( (string) $events['uniqueCallbacks'][0]['dir'], (string) $upload_root ),
+					&& self::path_starts_with( (string) $events['uniqueCallbacks'][0]['dir'], (string) $upload_root )
+					&& is_string( $callback_name )
+					&& 'unique-' . $token . '.txt' === strtolower( $callback_name )
+					&& $callback_name === \sanitize_file_name( $callback_name )
+					&& false === strpbrk( $callback_name, "/\\" )
+					&& '.txt' === strtolower( (string) ( $events['uniqueCallbacks'][0]['ext'] ?? '' ) ),
 				'unique_filename_callback and wp_unique_filename filter shape the real sideload destination safely',
 				array(
 					'case'            => self::case_summary( $unique_case ),
 					'result'          => self::describe_result( $unique ),
 					'expectedBasename' => $expected_unique,
+					'callbackName'    => $callback_name,
 					'callbacks'       => $events['uniqueCallbacks'],
 					'filters'         => $events['uniqueFilters'],
 				)
@@ -2094,6 +2109,15 @@ final class MediaIngestSurface {
 				'uploadRoot' => $upload_root,
 			)
 		);
+	}
+
+	private static function result_contains_error_payload( $result, string $message, int $error_code ): bool {
+		return is_array( $result )
+			&& isset( $result['component_fuzz_error'] )
+			&& is_array( $result['component_fuzz_error'] )
+			&& $message === ( $result['component_fuzz_error']['message'] ?? null )
+			&& $error_code === ( $result['component_fuzz_error']['error'] ?? null )
+			&& true === ( $result['component_fuzz_error']['tmpExists'] ?? null );
 	}
 
 	private static function rejection_cases( \ComponentFuzz\FuzzContext $ctx ): array {
