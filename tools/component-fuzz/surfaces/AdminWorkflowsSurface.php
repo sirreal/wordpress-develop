@@ -1039,12 +1039,13 @@ final class AdminWorkflowsSurface {
 		$page            = \sanitize_key( 'cfz_referer_' . $ctx->identifier( 3, 8 ) );
 		$token           = \sanitize_key( $ctx->fork( 'token' )->identifier( 3, 8 ) );
 		$current_path    = '/wp-admin/admin.php?page=' . rawurlencode( $page )
-			. '&_wp_http_referer=' . rawurlencode( '/wp-admin/old.php?drop=<script>' )
-			. '&unsafe=' . rawurlencode( self::hostile_label( $ctx->fork( 'unsafe' ) ) )
-			. '&quote=' . rawurlencode( '"bad"' );
+			. '&_wp_http_referer=/wp-admin/old.php?drop=<script>'
+			. '&unsafe=' . self::hostile_label( $ctx->fork( 'unsafe' ) )
+			. '&quote="bad"';
 		$request_ref     = \admin_url( 'edit.php?page=' . rawurlencode( $page ) . '&mode=request-' . $token );
 		$header_ref      = \admin_url( 'tools.php?page=' . rawurlencode( $page ) . '&mode=header-' . $token );
 		$original_ref    = \admin_url( 'users.php?page=' . rawurlencode( $page ) . '&mode=original-' . $token );
+		$off_host_ref    = 'https://invalid.example.test/wp-admin/edit.php?page=' . rawurlencode( $page );
 		$result          = array();
 		$restored        = false;
 
@@ -1065,6 +1066,7 @@ final class AdminWorkflowsSurface {
 			$result['referer_field_echo'] = (string) ob_get_clean();
 
 			$_REQUEST['_wp_http_referer'] = $request_ref;
+			$_SERVER['HTTP_REFERER'] = $header_ref;
 			$result['raw_request_referer'] = \wp_get_raw_referer();
 			$result['request_referer']     = \wp_get_referer();
 
@@ -1079,6 +1081,9 @@ final class AdminWorkflowsSurface {
 			$result['raw_header_referer'] = \wp_get_raw_referer();
 			$result['header_referer']     = \wp_get_referer();
 
+			$_REQUEST = array( '_wp_http_referer' => $off_host_ref );
+			$result['off_host_referer'] = \wp_get_referer();
+
 			$_REQUEST['_wp_original_http_referer'] = $original_ref;
 			$result['original_referer']       = \wp_get_original_referer();
 			$result['original_referer_field'] = \wp_original_referer_field( false, 'previous' );
@@ -1086,6 +1091,9 @@ final class AdminWorkflowsSurface {
 			ob_start();
 			\wp_original_referer_field( true, 'previous' );
 			$result['original_referer_echo'] = (string) ob_get_clean();
+
+			$_REQUEST = array( '_wp_original_http_referer' => $off_host_ref );
+			$result['off_host_original_referer'] = \wp_get_original_referer();
 
 			$_REQUEST = array( '_wp_http_referer' => $request_ref );
 			unset( $_SERVER['HTTP_REFERER'] );
@@ -1125,8 +1133,9 @@ final class AdminWorkflowsSurface {
 				&& false === ( $result['same_request_referer'] ?? null )
 				&& false === ( $result['same_home_request_referer'] ?? null )
 				&& ( $result['raw_header_referer'] ?? null ) === $header_ref
-				&& ( $result['header_referer'] ?? null ) === $header_ref,
-			'raw and validated referer helpers prefer request values, fall back to HTTP_REFERER, and reject current URLs',
+				&& ( $result['header_referer'] ?? null ) === $header_ref
+				&& false === ( $result['off_host_referer'] ?? null ),
+			'raw and validated referer helpers prefer request values over HTTP_REFERER, fall back to HTTP_REFERER, and reject current or off-host URLs',
 			array(
 				'requestRaw'      => $result['raw_request_referer'] ?? null,
 				'requestValid'    => $result['request_referer'] ?? null,
@@ -1134,6 +1143,7 @@ final class AdminWorkflowsSurface {
 				'sameAbsolute'    => $result['same_home_request_referer'] ?? null,
 				'headerRaw'       => $result['raw_header_referer'] ?? null,
 				'headerValidated' => $result['header_referer'] ?? null,
+				'offHost'         => $result['off_host_referer'] ?? null,
 			)
 		);
 
@@ -1145,13 +1155,15 @@ final class AdminWorkflowsSurface {
 				&& ( $result['original_referer_echo'] ?? null ) === ( $result['original_referer_field'] ?? null )
 				&& str_contains( (string) ( $result['previous_fallback_field'] ?? '' ), \esc_attr( $request_ref ) )
 				&& str_contains( (string) ( $result['current_fallback_field'] ?? '' ), 'page=' . rawurlencode( $page ) )
+				&& false === ( $result['off_host_original_referer'] ?? null )
 				&& self::html_has_no_unsafe_raw_markup( (string) ( $result['original_referer_field'] ?? '' ) )
 				&& self::html_has_no_unsafe_raw_markup( (string) ( $result['previous_fallback_field'] ?? '' ) )
 				&& self::html_has_no_unsafe_raw_markup( (string) ( $result['current_fallback_field'] ?? '' ) ),
-			'original referer fields prefer posted originals, echo returned markup, and fall back to previous or current request URLs',
+			'original referer fields prefer posted originals, reject off-host originals, echo returned markup, and fall back to previous or current request URLs',
 			array(
 				'original'         => $result['original_referer_field'] ?? null,
 				'originalEcho'     => $result['original_referer_echo'] ?? null,
+				'offHostOriginal'  => $result['off_host_original_referer'] ?? null,
 				'previousFallback' => $result['previous_fallback_field'] ?? null,
 				'currentFallback'  => $result['current_fallback_field'] ?? null,
 			)
