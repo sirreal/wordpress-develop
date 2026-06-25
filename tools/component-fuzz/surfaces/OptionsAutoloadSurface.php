@@ -572,33 +572,33 @@ final class OptionsAutoloadSurface {
 
 		try {
 			wp_load_alloptions( true );
-			$query_before_pre = self::last_query();
-			$pre_first        = get_option( $pre_key, $pre_fallback );
-			$query_after_pre  = self::last_query();
-			$pre_not_after_get = wp_cache_get( 'notoptions', 'options' );
+			$query_count_before_pre = self::query_count();
+			$pre_first              = get_option( $pre_key, $pre_fallback );
+			$query_count_after_pre  = self::query_count();
+			$pre_not_after_get      = wp_cache_get( 'notoptions', 'options' );
 			$pre_cache_found_after_get = null;
-			$pre_cache_after_get = wp_cache_get( $pre_key, 'options', false, $pre_cache_found_after_get );
+			$pre_cache_after_get       = wp_cache_get( $pre_key, 'options', false, $pre_cache_found_after_get );
 			$all_after_pre_get = wp_cache_get( 'alloptions', 'options' );
 
 			wp_prime_option_caches( array( $pre_key ) );
-			$pre_not_after_prime = wp_cache_get( 'notoptions', 'options' );
+			$pre_not_after_prime         = wp_cache_get( 'notoptions', 'options' );
 			$pre_cache_found_after_prime = null;
-			$pre_cache_after_prime = wp_cache_get( $pre_key, 'options', false, $pre_cache_found_after_prime );
-			$all_after_pre_prime = wp_cache_get( 'alloptions', 'options' );
-			$pre_second          = get_option( $pre_key, $pre_second_fallback );
+			$pre_cache_after_prime       = wp_cache_get( $pre_key, 'options', false, $pre_cache_found_after_prime );
+			$all_after_pre_prime         = wp_cache_get( 'alloptions', 'options' );
+			$pre_second                  = get_option( $pre_key, $pre_second_fallback );
 
-			$missing_first       = get_option( $default_key, $first_fallback );
-			$query_after_missing = self::last_query();
-			$not_after_first     = wp_cache_get( 'notoptions', 'options' );
+			$missing_first             = get_option( $default_key, $first_fallback );
+			$query_count_after_missing = self::query_count();
+			$not_after_first           = wp_cache_get( 'notoptions', 'options' );
 			$default_cache_found_after_first = null;
 			$default_cache_after_first       = wp_cache_get( $default_key, 'options', false, $default_cache_found_after_first );
-			$all_after_first = wp_cache_get( 'alloptions', 'options' );
-			$missing_second  = get_option( $default_key, $second_fallback );
-			$query_after_second_missing = self::last_query();
+			$all_after_first                  = wp_cache_get( 'alloptions', 'options' );
+			$missing_second                   = get_option( $default_key, $second_fallback );
+			$query_count_after_second_missing = self::query_count();
 
 			wp_prime_option_caches( array( $default_key ) );
-			$query_after_prime_missing = self::last_query();
-			$not_after_prime_missing   = wp_cache_get( 'notoptions', 'options' );
+			$query_count_after_prime_missing = self::query_count();
+			$not_after_prime_missing         = wp_cache_get( 'notoptions', 'options' );
 			$default_cache_found_after_prime_missing = null;
 			$default_cache_after_prime_missing       = wp_cache_get( $default_key, 'options', false, $default_cache_found_after_prime_missing );
 			$all_after_prime_missing = wp_cache_get( 'alloptions', 'options' );
@@ -608,20 +608,22 @@ final class OptionsAutoloadSurface {
 			$option_calls_after_add  = count( $option_seen );
 			$store_after_add         = self::option_store();
 			$not_after_add           = wp_cache_get( 'notoptions', 'options' );
-			$all_after_add           = wp_load_alloptions( true );
+			$all_after_add_found     = null;
+			$all_after_add           = wp_cache_get( 'alloptions', 'options', false, $all_after_add_found );
 			$default_cache_found_after_add = null;
 			$default_cache_after_add       = wp_cache_get( $default_key, 'options', false, $default_cache_found_after_add );
-			$after_add_read               = get_option( $default_key, self::missing_default( $default_key ) );
+			$after_add_read                = get_option( $default_key, self::missing_default( $default_key ) );
 
 			$update             = update_option( $default_key, $updated, false );
 			$store_after_update = self::option_store();
 			$not_after_update   = wp_cache_get( 'notoptions', 'options' );
-			$all_after_update   = wp_load_alloptions( true );
+			$all_after_update_found = null;
+			$all_after_update       = wp_cache_get( 'alloptions', 'options', false, $all_after_update_found );
 			$default_cache_found_after_update = null;
 			$default_cache_after_update       = wp_cache_get( $default_key, 'options', false, $default_cache_found_after_update );
-			$query_before_prime_update        = self::last_query();
+			$query_count_before_prime_update  = self::query_count();
 			wp_prime_option_caches( array( $default_key ) );
-			$query_after_prime_update = self::last_query();
+			$query_count_after_prime_update = self::query_count();
 			$default_cache_found_after_prime_update = null;
 			$default_cache_after_prime_update       = wp_cache_get( $default_key, 'options', false, $default_cache_found_after_prime_update );
 			$after_update_read = get_option( $default_key, self::missing_default( $default_key ) );
@@ -629,7 +631,8 @@ final class OptionsAutoloadSurface {
 			$delete             = delete_option( $default_key );
 			$store_after_delete = self::option_store();
 			$not_after_delete   = wp_cache_get( 'notoptions', 'options' );
-			$all_after_delete   = wp_load_alloptions( true );
+			$all_after_delete_found = null;
+			$all_after_delete       = wp_cache_get( 'alloptions', 'options', false, $all_after_delete_found );
 			$default_cache_found_after_delete = null;
 			$default_cache_after_delete       = wp_cache_get( $default_key, 'options', false, $default_cache_found_after_delete );
 			$after_delete_read = get_option( $default_key, $after_delete_fallback );
@@ -670,7 +673,7 @@ final class OptionsAutoloadSurface {
 			$failures,
 			self::same_value( $pre_value, $pre_first )
 				&& self::same_value( $pre_value, $pre_second )
-				&& $query_before_pre === $query_after_pre
+				&& $query_count_before_pre === $query_count_after_pre
 				&& ( ! is_array( $pre_not_after_get ) || ! isset( $pre_not_after_get[ $pre_key ] ) )
 				&& false === $pre_cache_after_get
 				&& false === $pre_cache_found_after_get
@@ -685,7 +688,7 @@ final class OptionsAutoloadSurface {
 			'pre_option short-circuits reads without positive or negative cache pollution until explicit priming',
 			array(
 				'preKey'             => $pre_key,
-				'queryStableOnGet'   => $query_before_pre === $query_after_pre,
+				'queryCountStableOnGet' => $query_count_before_pre === $query_count_after_pre,
 				'notoptionAfterGet'  => is_array( $pre_not_after_get ) && isset( $pre_not_after_get[ $pre_key ] ),
 				'notoptionAfterPrime' => is_array( $pre_not_after_prime ) && isset( $pre_not_after_prime[ $pre_key ] ),
 				'cacheFoundAfterGet' => $pre_cache_found_after_get,
@@ -703,8 +706,8 @@ final class OptionsAutoloadSurface {
 				&& false === $default_cache_found_after_first
 				&& is_array( $all_after_first )
 				&& ! isset( $all_after_first[ $default_key ] )
-				&& $query_after_missing === $query_after_second_missing
-				&& $query_after_second_missing === $query_after_prime_missing
+				&& $query_count_after_missing === $query_count_after_second_missing
+				&& $query_count_after_second_missing === $query_count_after_prime_missing
 				&& is_array( $not_after_prime_missing )
 				&& isset( $not_after_prime_missing[ $default_key ] )
 				&& false === $default_cache_after_prime_missing
@@ -714,8 +717,8 @@ final class OptionsAutoloadSurface {
 			'default_option filtered misses repeat from notoptions and are not converted into positive caches by priming',
 			array(
 				'defaultKey'             => $default_key,
-				'queryStableSecondGet'   => $query_after_missing === $query_after_second_missing,
-				'queryStablePrime'       => $query_after_second_missing === $query_after_prime_missing,
+				'queryCountStableSecondGet' => $query_count_after_missing === $query_count_after_second_missing,
+				'queryCountStablePrime' => $query_count_after_second_missing === $query_count_after_prime_missing,
 				'notoptionAfterFirst'    => is_array( $not_after_first ) && isset( $not_after_first[ $default_key ] ),
 				'notoptionAfterPrime'    => is_array( $not_after_prime_missing ) && isset( $not_after_prime_missing[ $default_key ] ),
 				'cacheFoundAfterFirst'   => $default_cache_found_after_first,
@@ -733,6 +736,8 @@ final class OptionsAutoloadSurface {
 				&& 'on' === ( $store_after_add[ $default_key ]['autoload'] ?? null )
 				&& is_array( $not_after_add )
 				&& ! isset( $not_after_add[ $default_key ] )
+				&& true === $all_after_add_found
+				&& is_array( $all_after_add )
 				&& isset( $all_after_add[ $default_key ] )
 				&& self::stored_value( $stored ) === $all_after_add[ $default_key ]
 				&& false === $default_cache_after_add
@@ -747,6 +752,7 @@ final class OptionsAutoloadSurface {
 				'optionCallsAfterAdd' => $option_calls_after_add,
 				'autoloadAfterAdd'    => $store_after_add[ $default_key ]['autoload'] ?? null,
 				'notoptionAfterAdd'   => is_array( $not_after_add ) && isset( $not_after_add[ $default_key ] ),
+				'alloptionsFoundAfterAdd' => $all_after_add_found,
 				'inAlloptionsAfterAdd' => isset( $all_after_add[ $default_key ] ),
 				'cacheFoundAfterAdd'  => $default_cache_found_after_add,
 				'afterAddRead'        => self::describe_value( $after_add_read ),
@@ -765,7 +771,7 @@ final class OptionsAutoloadSurface {
 				&& ! isset( $all_after_update[ $default_key ] )
 				&& true === $default_cache_found_after_update
 				&& self::stored_value( $updated ) === $default_cache_after_update
-				&& $query_before_prime_update === $query_after_prime_update
+				&& $query_count_before_prime_update === $query_count_after_prime_update
 				&& true === $default_cache_found_after_prime_update
 				&& self::stored_value( $updated ) === $default_cache_after_prime_update
 				&& self::same_value( $expected_update_read, $after_update_read ),
@@ -775,9 +781,10 @@ final class OptionsAutoloadSurface {
 				'update'               => $update,
 				'autoloadAfterUpdate'  => $store_after_update[ $default_key ]['autoload'] ?? null,
 				'notoptionAfterUpdate' => is_array( $not_after_update ) && isset( $not_after_update[ $default_key ] ),
+				'alloptionsFoundAfterUpdate' => $all_after_update_found,
 				'inAlloptionsAfterUpdate' => is_array( $all_after_update ) && isset( $all_after_update[ $default_key ] ),
 				'cacheFoundAfterUpdate' => $default_cache_found_after_update,
-				'primeQueryStable'     => $query_before_prime_update === $query_after_prime_update,
+				'primeQueryCountStable' => $query_count_before_prime_update === $query_count_after_prime_update,
 				'afterUpdateRead'      => self::describe_value( $after_update_read ),
 			)
 		);
@@ -798,6 +805,7 @@ final class OptionsAutoloadSurface {
 				'defaultKey'            => $default_key,
 				'delete'                => $delete,
 				'notoptionAfterDelete'  => is_array( $not_after_delete ) && isset( $not_after_delete[ $default_key ] ),
+				'alloptionsFoundAfterDelete' => $all_after_delete_found,
 				'inAlloptionsAfterDelete' => is_array( $all_after_delete ) && isset( $all_after_delete[ $default_key ] ),
 				'cacheFoundAfterDelete' => $default_cache_found_after_delete,
 				'afterDeleteRead'       => self::describe_value( $after_delete_read ),
@@ -1367,6 +1375,22 @@ final class OptionsAutoloadSurface {
 		}
 
 		return null;
+	}
+
+	private static function query_count(): int {
+		if ( isset( $GLOBALS['wpdb'] ) && is_object( $GLOBALS['wpdb'] ) && property_exists( $GLOBALS['wpdb'], 'num_queries' ) ) {
+			return (int) $GLOBALS['wpdb']->num_queries;
+		}
+
+		return count( self::query_log() );
+	}
+
+	private static function query_log(): array {
+		if ( isset( $GLOBALS['wpdb'] ) && is_object( $GLOBALS['wpdb'] ) && method_exists( $GLOBALS['wpdb'], 'component_fuzz_get_queries' ) ) {
+			return $GLOBALS['wpdb']->component_fuzz_get_queries();
+		}
+
+		return array();
 	}
 
 	private static function first_entry_with_membership( array $entries, bool $should_autoload ): array {

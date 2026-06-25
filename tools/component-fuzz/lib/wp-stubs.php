@@ -75,6 +75,7 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 		public $rows_affected = 0;
 		public $insert_id = 0;
 		public $num_rows = 0;
+		public $num_queries = 0;
 		public $is_mysql = false;
 		public $posts = 'wp_posts';
 		public $comments = 'wp_comments';
@@ -102,6 +103,7 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 		private $component_fuzz_links = array();
 		private $component_fuzz_meta = array();
 		private $component_fuzz_next_ids = array();
+		private $component_fuzz_queries = array();
 
 		public function __construct( array $options = array() ) {
 			$this->component_fuzz_reset_options( $options );
@@ -129,6 +131,10 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 
 		public function component_fuzz_get_options() {
 			return $this->component_fuzz_options;
+		}
+
+		public function component_fuzz_get_queries() {
+			return $this->component_fuzz_queries;
 		}
 
 		public function component_fuzz_reset_content() {
@@ -241,7 +247,7 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 		public function get_var( $query = null, $x = 0, $y = 0 ) {
 			unset( $x, $y );
 
-			$this->last_query = (string) $query;
+			$this->component_fuzz_record_query( $query );
 
 			if ( preg_match( '/\bSELECT\s+COUNT\(\*\)/i', $this->last_query ) ) {
 				return $this->component_fuzz_count_for_query( $this->last_query );
@@ -252,20 +258,22 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 				return $groups ? max( array_map( 'intval', $groups ) ) : 0;
 			}
 
-			$row = $this->get_row( $query, ARRAY_A );
-			if ( ! is_array( $row ) || array() === $row ) {
+			$rows           = $this->component_fuzz_select_rows( $this->last_query );
+			$this->num_rows = count( $rows );
+			if ( array() === $rows ) {
 				return null;
 			}
 
+			$row = reset( $rows );
 			return reset( $row );
 		}
 
 		public function get_row( $query = null, $output = OBJECT, $y = 0 ) {
 			unset( $y );
 
-			$this->last_query = (string) $query;
-			$rows             = $this->component_fuzz_select_rows( $this->last_query );
-			$this->num_rows   = count( $rows );
+			$this->component_fuzz_record_query( $query );
+			$rows           = $this->component_fuzz_select_rows( $this->last_query );
+			$this->num_rows = count( $rows );
 
 			if ( array() === $rows ) {
 				return null;
@@ -275,17 +283,17 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 		}
 
 		public function get_results( $query = null, $output = OBJECT ) {
-			$this->last_query = (string) $query;
-			$rows             = $this->component_fuzz_select_rows( $this->last_query );
-			$this->num_rows   = count( $rows );
+			$this->component_fuzz_record_query( $query );
+			$rows           = $this->component_fuzz_select_rows( $this->last_query );
+			$this->num_rows = count( $rows );
 
 			return $this->component_fuzz_format_results( $rows, $output );
 		}
 
 		public function get_col( $query = null, $x = 0 ) {
-			$this->last_query = (string) $query;
-			$rows             = $this->component_fuzz_select_rows( $this->last_query );
-			$this->num_rows   = count( $rows );
+			$this->component_fuzz_record_query( $query );
+			$rows           = $this->component_fuzz_select_rows( $this->last_query );
+			$this->num_rows = count( $rows );
 			$values           = array();
 
 			foreach ( $rows as $row ) {
@@ -299,7 +307,7 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 		}
 
 		public function query( $query ) {
-			$this->last_query    = (string) $query;
+			$this->component_fuzz_record_query( $query );
 			$this->rows_affected = 0;
 
 			if ( preg_match( '/\bINSERT\s+INTO\s+`?wp_options`?\b/i', $this->last_query ) ) {
@@ -627,6 +635,14 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 			}
 
 			return $this->rows_affected;
+		}
+
+		private function component_fuzz_record_query( $query ) {
+			$this->last_query = (string) $query;
+			$this->component_fuzz_queries[] = $this->last_query;
+			++$this->num_queries;
+
+			return $this->last_query;
 		}
 
 		private function component_fuzz_finish_insert( $id ) {

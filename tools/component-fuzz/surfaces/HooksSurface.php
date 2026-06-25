@@ -699,13 +699,15 @@ final class HooksSurface {
 		$depth                = 0;
 		$expected_inner_value = null;
 
-		$record = static function ( string $phase ) use ( &$events, $tag ) {
+		$record = static function ( string $phase, $extra_arg = null ) use ( &$events, $tag ) {
 			$hook = $GLOBALS['wp_filter'][ $tag ] ?? null;
 
 			$events[] = array(
 				'phase'           => $phase,
 				'nestingLevel'    => $hook instanceof \WP_Hook ? self::wp_hook_nesting_level( $hook ) : null,
 				'currentPriority' => $hook instanceof \WP_Hook ? $hook->current_priority() : null,
+				'priorityStack'   => $hook instanceof \WP_Hook ? self::wp_hook_current_priority_stack( $hook ) : null,
+				'extraArg'        => $extra_arg,
 				'currentFilter'   => current_filter(),
 				'stack'           => self::current_filter_stack(),
 				'doingTag'        => doing_filter( $tag ),
@@ -767,7 +769,7 @@ final class HooksSurface {
 			$inner_extra
 		) {
 			if ( 0 === $depth ) {
-				$record( 'outer-reentrant-before' );
+				$record( 'outer-reentrant-before', $extra );
 				add_filter( $tag, $same_added, $reentrant_priority, 1 );
 				add_filter( $tag, $future_added, $future_priority, 1 );
 				$removed_future[] = remove_filter( $tag, $late_removed, $removed_priority );
@@ -784,7 +786,7 @@ final class HooksSurface {
 				return $expected_inner_value . '|outer-reentrant-after';
 			}
 
-			$record( 'inner-reentrant' );
+			$record( 'inner-reentrant', $extra );
 
 			return $value . '|inner-reentrant';
 		};
@@ -801,6 +803,7 @@ final class HooksSurface {
 		$post_dispatch_state = array(
 			'nestingLevel'    => $hook instanceof \WP_Hook ? self::wp_hook_nesting_level( $hook ) : null,
 			'currentPriority' => $hook instanceof \WP_Hook ? $hook->current_priority() : null,
+			'priorityStack'   => $hook instanceof \WP_Hook ? self::wp_hook_current_priority_stack( $hook ) : null,
 			'currentFilter'   => current_filter(),
 			'stack'           => self::current_filter_stack(),
 			'doingTag'        => doing_filter( $tag ),
@@ -835,13 +838,17 @@ final class HooksSurface {
 			string $phase,
 			int $nesting_level,
 			$current_priority,
+			array $priority_stack,
 			array $stack,
-			int $did_filter
+			int $did_filter,
+			$extra_arg = null
 		) use ( $tag ): array {
 			return array(
 				'phase'           => $phase,
 				'nestingLevel'    => $nesting_level,
 				'currentPriority' => $current_priority,
+				'priorityStack'   => $priority_stack,
+				'extraArg'        => $extra_arg,
 				'currentFilter'   => $tag,
 				'stack'           => $stack,
 				'doingTag'        => true,
@@ -849,18 +856,18 @@ final class HooksSurface {
 			);
 		};
 		$expected_events      = array(
-			$expected_event( 'outer-reentrant-before', 1, $reentrant_priority, array( $tag ), 1 ),
-			$expected_event( 'inner-reentrant', 2, $reentrant_priority, array( $tag, $tag ), 2 ),
-			$expected_event( 'inner-same-neighbor', 2, $reentrant_priority, array( $tag, $tag ), 2 ),
-			$expected_event( 'inner-same-added', 2, $reentrant_priority, array( $tag, $tag ), 2 ),
-			$expected_event( 'inner-middle', 2, $reentrant_priority, array( $tag, $tag ), 2 ),
-			$expected_event( 'inner-future-added', 2, $reentrant_priority, array( $tag, $tag ), 2 ),
-			$expected_event( 'inner-late-survivor', 2, $reentrant_priority, array( $tag, $tag ), 2 ),
-			$expected_event( 'outer-reentrant-after', 1, $reentrant_priority, array( $tag ), 2 ),
-			$expected_event( 'outer-same-neighbor', 1, $reentrant_priority, array( $tag ), 2 ),
-			$expected_event( 'outer-middle', 1, $middle_priority, array( $tag ), 2 ),
-			$expected_event( 'outer-future-added', 1, $future_priority, array( $tag ), 2 ),
-			$expected_event( 'outer-late-survivor', 1, $late_priority, array( $tag ), 2 ),
+			$expected_event( 'outer-reentrant-before', 1, $reentrant_priority, array( $reentrant_priority ), array( $tag ), 1, $outer_extra ),
+			$expected_event( 'inner-reentrant', 2, $reentrant_priority, array( $reentrant_priority, $reentrant_priority ), array( $tag, $tag ), 2, $inner_extra ),
+			$expected_event( 'inner-same-neighbor', 2, $reentrant_priority, array( $reentrant_priority, $reentrant_priority ), array( $tag, $tag ), 2 ),
+			$expected_event( 'inner-same-added', 2, $reentrant_priority, array( $reentrant_priority, $reentrant_priority ), array( $tag, $tag ), 2 ),
+			$expected_event( 'inner-middle', 2, $reentrant_priority, array( $reentrant_priority, $middle_priority ), array( $tag, $tag ), 2 ),
+			$expected_event( 'inner-future-added', 2, $reentrant_priority, array( $reentrant_priority, $future_priority ), array( $tag, $tag ), 2 ),
+			$expected_event( 'inner-late-survivor', 2, $reentrant_priority, array( $reentrant_priority, $late_priority ), array( $tag, $tag ), 2 ),
+			$expected_event( 'outer-reentrant-after', 1, $reentrant_priority, array( $reentrant_priority ), array( $tag ), 2 ),
+			$expected_event( 'outer-same-neighbor', 1, $reentrant_priority, array( $reentrant_priority ), array( $tag ), 2 ),
+			$expected_event( 'outer-middle', 1, $middle_priority, array( $middle_priority ), array( $tag ), 2 ),
+			$expected_event( 'outer-future-added', 1, $future_priority, array( $future_priority ), array( $tag ), 2 ),
+			$expected_event( 'outer-late-survivor', 1, $late_priority, array( $late_priority ), array( $tag ), 2 ),
 		);
 
 		self::collect_failure(
@@ -904,6 +911,7 @@ final class HooksSurface {
 			array(
 				'nestingLevel'    => 0,
 				'currentPriority' => false,
+				'priorityStack'   => array(),
 				'currentFilter'   => false,
 				'stack'           => array(),
 				'doingTag'        => false,
@@ -1720,6 +1728,10 @@ final class HooksSurface {
 
 	private static function wp_hook_nesting_level( \WP_Hook $hook ): int {
 		return (int) self::wp_hook_private_property( $hook, 'nesting_level' );
+	}
+
+	private static function wp_hook_current_priority_stack( \WP_Hook $hook ): array {
+		return array_values( (array) self::wp_hook_private_property( $hook, 'current_priority' ) );
 	}
 
 	private static function wp_hook_private_property( \WP_Hook $hook, string $property ) {
