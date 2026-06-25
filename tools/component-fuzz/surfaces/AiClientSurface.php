@@ -552,6 +552,10 @@ final class AiClientSurface {
 		$registry->registerProvider( AiClientSurface_CollisionProviderA::class );
 		$registry->registerProvider( AiClientSurface_CollisionProviderB::class );
 
+		$reversed_registry = new \WordPress\AiClient\Providers\ProviderRegistry();
+		$reversed_registry->registerProvider( AiClientSurface_CollisionProviderB::class );
+		$reversed_registry->registerProvider( AiClientSurface_CollisionProviderA::class );
+
 		$prompt  = 'Choose model ' . self::safe_text( $case->fork( 'prompt' ), 5, 24 );
 		$history = new \WordPress\AiClient\Messages\DTO\UserMessage(
 			array(
@@ -571,6 +575,15 @@ final class AiClientSurface {
 			->using_model_preference(
 				array( self::COLLISION_PROVIDER_B_ID, self::COLLISION_SHARED_MODEL )
 			)
+			->generate_text_result();
+
+		$model_instance = AiClientSurface_CollisionProviderB::model(
+			self::COLLISION_SHARED_MODEL,
+			new \WordPress\AiClient\Providers\Models\DTO\ModelConfig()
+		);
+		$model_instance_preference = ( new \WP_AI_Client_Prompt_Builder( $registry, $prompt ) )
+			->with_history( $history )
+			->using_model_preference( $model_instance )
 			->generate_text_result();
 
 		$provider_locked_by_id = ( new \WP_AI_Client_Prompt_Builder( $registry, $prompt ) )
@@ -595,6 +608,11 @@ final class AiClientSurface {
 
 		$discovery_order = ( new \WP_AI_Client_Prompt_Builder( $registry, $prompt ) )
 			->with_history( $history )
+			->generate_text_result();
+
+		$reversed_model_only = ( new \WP_AI_Client_Prompt_Builder( $reversed_registry, $prompt ) )
+			->with_history( $history )
+			->using_model_preference( self::COLLISION_SHARED_MODEL )
 			->generate_text_result();
 
 		self::collect_failure(
@@ -622,20 +640,34 @@ final class AiClientSurface {
 		self::collect_failure(
 			$failures,
 			self::result_selects_provider_model(
+				$model_instance_preference,
+				self::COLLISION_PROVIDER_B_ID,
+				self::COLLISION_SHARED_MODEL
+			),
+			'model-instance preference carries its provider/model pair through collisions',
+			array( 'selection' => self::describe_ai_result_selection( $model_instance_preference ) )
+		);
+
+		self::collect_failure(
+			$failures,
+			self::result_selects_provider_model(
 				$provider_locked_by_id,
 				self::COLLISION_PROVIDER_B_ID,
 				self::COLLISION_SHARED_MODEL
-			)
-				&& self::result_selects_provider_model(
-					$provider_locked_by_class,
-					self::COLLISION_PROVIDER_B_ID,
-					self::COLLISION_SHARED_MODEL
-				),
-			'provider lock by ID or class narrows shared model lookup to that provider',
-			array(
-				'idLock'    => self::describe_ai_result_selection( $provider_locked_by_id ),
-				'classLock' => self::describe_ai_result_selection( $provider_locked_by_class ),
-			)
+			),
+			'provider lock by ID narrows shared model lookup to that provider',
+			array( 'selection' => self::describe_ai_result_selection( $provider_locked_by_id ) )
+		);
+
+		self::collect_failure(
+			$failures,
+			self::result_selects_provider_model(
+				$provider_locked_by_class,
+				self::COLLISION_PROVIDER_B_ID,
+				self::COLLISION_SHARED_MODEL
+			),
+			'provider lock by class narrows shared model lookup to that provider',
+			array( 'selection' => self::describe_ai_result_selection( $provider_locked_by_class ) )
 		);
 
 		self::collect_failure(
@@ -658,6 +690,17 @@ final class AiClientSurface {
 			),
 			'no model preference falls back to first matching provider/model discovery order',
 			array( 'selection' => self::describe_ai_result_selection( $discovery_order ) )
+		);
+
+		self::collect_failure(
+			$failures,
+			self::result_selects_provider_model(
+				$reversed_model_only,
+				self::COLLISION_PROVIDER_B_ID,
+				self::COLLISION_SHARED_MODEL
+			),
+			'reversed registration order changes the model-only collision winner',
+			array( 'selection' => self::describe_ai_result_selection( $reversed_model_only ) )
 		);
 
 		return self::result(
