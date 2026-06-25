@@ -155,9 +155,9 @@ database, network requests, or a configured site.
   refresh partial registration/rendering without changeset persistence.
 - `customizer-persistence`: no-live-DB Customizer persistence coverage for
   changeset UUID/data normalization, stub-backed `customize_changeset` post
-  content parsing, transactional changeset saves, Custom CSS setting
-  validate/sanitize/preview/update behavior, custom CSS post filters, and
-  global/superglobal restoration.
+  content parsing, changeset lock/heartbeat persistence, transactional
+  changeset saves, Custom CSS setting validate/sanitize/preview/update
+  behavior, custom CSS post filters, and global/superglobal restoration.
 - `date-time`: deterministic no-DB date/time helper coverage, including
   `wp_date()`/`DateTimeImmutable` agreement, `date_i18n()` and `mysql2date()`
   timestamp oracles, timezone option filters, GMT/local round trips, ISO8601
