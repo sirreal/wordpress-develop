@@ -174,9 +174,10 @@ database, network requests, or a configured site.
   `current_time()`, `current_datetime()`, timezone override offsets,
   `wp_checkdate()` validity/filter contracts, date/human diff filter contracts,
   and safe human time diffs.
-- `discovery`: robots meta directives, sitemap enablement and robots.txt
-  injection, provider registration/replacement filters, query/permalink sitemap
-  URL/index expansion, escaped sitemap XML rendering, unsupported sitemap field
+- `discovery`: robots meta directives, scoped public/private robots helper
+  output, sitemap enablement and robots.txt injection, provider
+  registration/replacement filters, query/permalink sitemap URL/index
+  expansion, escaped sitemap XML rendering, unsupported sitemap field
   boundaries, stylesheet URL filters, and sitemap max-URL filters without
   DB-backed providers.
 - `email`: Unicode email validation/sanitization, ASCII fallback filters,

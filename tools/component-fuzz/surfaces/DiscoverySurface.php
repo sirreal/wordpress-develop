@@ -34,6 +34,7 @@ final class DiscoverySurface {
 			self::install_url_filters();
 
 			$rows[] = self::check_robots_directives( $ctx );
+			$rows[] = self::check_robots_public_private_option_matrix( $ctx );
 			$rows[] = self::check_sitemap_registry_and_urls( $ctx );
 			$rows[] = self::check_sitemap_enablement_robots_and_provider_filters( $ctx );
 			$rows[] = self::check_sitemap_provider_url_modes( $ctx );
@@ -169,6 +170,100 @@ final class DiscoverySurface {
 		return self::row(
 			$ctx,
 			'discovery.robots.directive-rendering-and-helpers',
+			array() === $failures,
+			array(
+				'cases'    => count( $cases ),
+				'failures' => array_slice( $failures, 0, 6 ),
+			)
+		);
+	}
+
+	private static function check_robots_public_private_option_matrix( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$cases    = array(
+			array(
+				'label'          => 'public',
+				'blogPublic'     => 1,
+				'expectedNoindex' => array(),
+				'expectedNoRobots' => array(
+					'seed'    => true,
+					'noindex' => true,
+					'follow'  => true,
+				),
+				'expectedMaxImage' => array(
+					'seed'              => true,
+					'max-image-preview' => 'large',
+				),
+				'expectedOutput' => "<meta name='robots' content='max-image-preview:large' />\n",
+			),
+			array(
+				'label'          => 'private',
+				'blogPublic'     => 0,
+				'expectedNoindex' => array(
+					'noindex'  => true,
+					'nofollow' => true,
+				),
+				'expectedNoRobots' => array(
+					'seed'     => true,
+					'noindex'  => true,
+					'nofollow' => true,
+				),
+				'expectedMaxImage' => array( 'seed' => true ),
+				'expectedOutput' => "<meta name='robots' content='noindex, nofollow' />\n",
+			),
+		);
+
+		foreach ( $cases as $case ) {
+			$blog_public_filter = static function () use ( $case ): int {
+				return $case['blogPublic'];
+			};
+			$output             = '';
+
+			\add_filter( 'pre_option_blog_public', $blog_public_filter, 11, 0 );
+			\add_filter( 'wp_robots', 'wp_robots_noindex' );
+			\add_filter( 'wp_robots', 'wp_robots_max_image_preview_large' );
+			try {
+				$noindex  = \wp_robots_noindex( array() );
+				$no_robots = \wp_robots_no_robots( array( 'seed' => true ) );
+				$max_image = \wp_robots_max_image_preview_large( array( 'seed' => true ) );
+
+				ob_start();
+				\wp_robots();
+				$output = ob_get_clean();
+			} finally {
+				\remove_filter( 'wp_robots', 'wp_robots_max_image_preview_large' );
+				\remove_filter( 'wp_robots', 'wp_robots_noindex' );
+				\remove_filter( 'pre_option_blog_public', $blog_public_filter, 11 );
+			}
+
+			self::collect_failure(
+				$failures,
+				$case['expectedNoindex'] === $noindex
+					&& $case['expectedNoRobots'] === $no_robots
+					&& $case['expectedMaxImage'] === $max_image
+					&& $case['expectedOutput'] === $output
+					&& false === \has_filter( 'pre_option_blog_public', $blog_public_filter )
+					&& false === \has_filter( 'wp_robots', 'wp_robots_noindex' )
+					&& false === \has_filter( 'wp_robots', 'wp_robots_max_image_preview_large' ),
+				'robots helpers and wp_robots output respect scoped blog_public option state',
+				array(
+					'label'            => $case['label'],
+					'blogPublic'       => $case['blogPublic'],
+					'noindex'          => $noindex,
+					'noRobots'         => $no_robots,
+					'maxImage'         => $max_image,
+					'expectedOutput'   => self::describe_string( $case['expectedOutput'] ),
+					'actualOutput'     => self::describe_string( $output ),
+					'hasBlogFilter'    => \has_filter( 'pre_option_blog_public', $blog_public_filter ),
+					'hasNoindexFilter' => \has_filter( 'wp_robots', 'wp_robots_noindex' ),
+					'hasMaxImageFilter' => \has_filter( 'wp_robots', 'wp_robots_max_image_preview_large' ),
+				)
+			);
+		}
+
+		return self::row(
+			$ctx,
+			'discovery.robots.blog-public-helper-matrix',
 			array() === $failures,
 			array(
 				'cases'    => count( $cases ),
