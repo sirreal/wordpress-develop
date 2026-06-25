@@ -758,7 +758,7 @@ final class EmailSurface {
 	}
 
 	private static function check_construction_mode_consistency( \ComponentFuzz\FuzzContext $ctx ): array {
-		$cases = array(
+		$base_cases = array(
 			array(
 				'label'           => 'ascii-plus-subdomain',
 				'input'           => 'USER+tag@example.co.uk',
@@ -793,33 +793,62 @@ final class EmailSurface {
 			),
 		);
 
-		if ( self::has_idn() ) {
-			$cases[] = array(
+		$base_result = self::evaluate_construction_mode_cases( $base_cases );
+		$rows        = array(
+			$ctx->result(
+				'email.wp-email-address.construction-mode-consistency',
+				array() === $base_result['failures'],
+				$base_result
+			),
+		);
+
+		if ( ! self::has_idn() ) {
+			$rows[] = $ctx->skip(
+				'email.wp-email-address.idn-construction-mode-consistency',
+				'idn_to_ascii() or idn_to_utf8() is unavailable.'
+			);
+
+			return $rows;
+		}
+
+		$idn_cases  = array(
+			array(
 				'label'           => 'punycode-domain',
 				'input'           => 'books@xn--bcher-kva.de',
 				'localpart'       => 'books',
 				'asciiDomain'     => 'xn--bcher-kva.de',
 				'unicodeDomain'   => "b\u{00FC}cher.de",
 				'asciiModeValid'  => false,
-			);
-			$cases[] = array(
+			),
+			array(
 				'label'           => 'unicode-domain',
 				'input'           => "books@b\u{00FC}cher.de",
 				'localpart'       => 'books',
 				'asciiDomain'     => 'xn--bcher-kva.de',
 				'unicodeDomain'   => "b\u{00FC}cher.de",
 				'asciiModeValid'  => false,
-			);
-			$cases[] = array(
+			),
+			array(
 				'label'           => 'unicode-local-punycode-domain',
 				'input'           => "jose\u{0301}@xn--bcher-kva.de",
 				'localpart'       => "jose\u{0301}",
 				'asciiDomain'     => 'xn--bcher-kva.de',
 				'unicodeDomain'   => "b\u{00FC}cher.de",
 				'asciiModeValid'  => false,
-			);
-		}
+			),
+		);
+		$idn_result = self::evaluate_construction_mode_cases( $idn_cases );
 
+		$rows[] = $ctx->result(
+			'email.wp-email-address.idn-construction-mode-consistency',
+			array() === $idn_result['failures'],
+			$idn_result
+		);
+
+		return $rows;
+	}
+
+	private static function evaluate_construction_mode_cases( array $cases ): array {
 		$failures = array();
 		$observed = array();
 
@@ -877,14 +906,8 @@ final class EmailSurface {
 		}
 
 		return array(
-			$ctx->result(
-				'email.wp-email-address.construction-mode-consistency',
-				array() === $failures,
-				array(
-					'observed' => $observed,
-					'failures' => $failures,
-				)
-			),
+			'observed' => $observed,
+			'failures' => $failures,
 		);
 	}
 
