@@ -27,6 +27,7 @@ final class AdminScreenSurface {
 		try {
 			$rows[] = self::check_screen_normalization( $ctx->fork( 'screen-normalization' ) );
 			$rows[] = self::check_help_tabs_and_screen_options( $ctx->fork( 'help-screen-options' ) );
+			$rows[] = self::check_screen_options_rendering( $ctx->fork( 'screen-options-rendering' ) );
 			$rows[] = self::check_column_headers( $ctx->fork( 'column-headers' ) );
 			$rows[] = self::check_settings_registry( $ctx->fork( 'settings-registry' ) );
 			$rows[] = self::check_settings_rendering( $ctx->fork( 'settings-rendering' ) );
@@ -58,6 +59,7 @@ final class AdminScreenSurface {
 				'add_action',
 				'add_filter',
 				'add_meta_box',
+				'add_screen_option',
 				'add_settings_field',
 				'add_settings_section',
 				'convert_to_screen',
@@ -479,6 +481,170 @@ final class AdminScreenSurface {
 		return self::row(
 			$ctx,
 			'admin-screen.help-tabs-and-screen-options',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, 6 ) )
+		);
+	}
+
+	private static function check_screen_options_rendering( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+
+		$current_snapshot = self::snapshot_globals( array( 'current_screen' ) );
+		unset( $GLOBALS['current_screen'] );
+		\add_screen_option(
+			'per_page',
+			array(
+				'label'   => 'No screen',
+				'default' => 17,
+				'option'  => 'cfz_no_screen_per_page',
+			)
+		);
+		$no_screen_result = \get_current_screen();
+		self::restore_globals( $current_snapshot );
+
+		$screen            = \convert_to_screen( self::id( $ctx->fork( 'screen' ), 'cfz_render_screen', 40 ) );
+		$option            = self::id( $ctx->fork( 'option' ), 'cfz_render_per_page', 32 );
+		$default_per_page  = $ctx->int( 7, 55 );
+		$filtered_per_page = $default_per_page + $ctx->int( 3, 25 );
+		$columns           = $ctx->int( 2, 5 );
+		$label             = 'Items per page: ' . \esc_html( self::fuzz_label( $ctx->fork( 'label' ) ) );
+		$per_page_calls    = array();
+		$submit_calls      = array();
+
+		\set_current_screen( $screen );
+		\add_screen_option(
+			'per_page',
+			array(
+				'label'   => $label,
+				'default' => $default_per_page,
+				'option'  => $option,
+			)
+		);
+		\add_screen_option(
+			'layout_columns',
+			array(
+				'max'     => $columns,
+				'default' => 1,
+			)
+		);
+
+		$per_page_filter = static function ( int $per_page ) use ( &$per_page_calls, $filtered_per_page, $option ): int {
+			$per_page_calls[] = array(
+				'option'   => $option,
+				'incoming' => $per_page,
+			);
+
+			return $filtered_per_page;
+		};
+		$submit_filter   = static function ( bool $show, \WP_Screen $seen_screen ) use ( &$submit_calls, $screen ): bool {
+			$submit_calls[] = array(
+				'incoming'   => $show,
+				'sameScreen' => $seen_screen === $screen,
+			);
+
+			return $show;
+		};
+
+		\add_filter( $option, $per_page_filter, 10, 1 );
+		\add_filter( 'screen_options_show_submit', $submit_filter, 20, 2 );
+		$ob_level = ob_get_level();
+		try {
+			ob_start();
+			$screen->render_screen_options( array( 'wrap' => true ) );
+			$wrapped_html = (string) ob_get_clean();
+		} finally {
+			while ( ob_get_level() > $ob_level ) {
+				ob_end_clean();
+			}
+			\remove_filter( 'screen_options_show_submit', '__return_true' );
+			\remove_filter( 'screen_options_show_submit', $submit_filter, 20 );
+			\remove_filter( $option, $per_page_filter, 10 );
+		}
+
+		\add_filter( $option, $per_page_filter, 10, 1 );
+		\add_filter( 'screen_options_show_submit', $submit_filter, 20, 2 );
+		$ob_level = ob_get_level();
+		try {
+			ob_start();
+			$screen->render_screen_options( array( 'wrap' => false ) );
+			$unwrapped_html = (string) ob_get_clean();
+		} finally {
+			while ( ob_get_level() > $ob_level ) {
+				ob_end_clean();
+			}
+			\remove_filter( 'screen_options_show_submit', '__return_true' );
+			\remove_filter( 'screen_options_show_submit', $submit_filter, 20 );
+			\remove_filter( $option, $per_page_filter, 10 );
+		}
+
+		self::collect_failure(
+			$failures,
+			null === $no_screen_result
+				&& $screen === \get_current_screen()
+				&& $screen->get_option( 'per_page', 'option' ) === $option
+				&& $screen->get_option( 'per_page', 'default' ) === $default_per_page
+				&& $screen->get_option( 'layout_columns', 'max' ) === $columns,
+			'add_screen_option() no-ops without a current screen and attaches options to the current WP_Screen',
+			array(
+				'noScreenResult' => $no_screen_result,
+				'screen'         => self::describe_screen( $screen ),
+				'options'        => $screen->get_options(),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			str_contains( $wrapped_html, 'id="screen-options-wrap"' )
+				&& str_contains( $wrapped_html, "form id='adv-settings' method='post'" )
+				&& str_contains( $wrapped_html, 'name="screenoptionnonce"' )
+				&& str_contains( $wrapped_html, 'class="screen-options"' )
+				&& str_contains( $wrapped_html, 'name="wp_screen_options[value]"' )
+				&& str_contains( $wrapped_html, 'id="' . \esc_attr( $option ) . '"' )
+				&& str_contains( $wrapped_html, 'value="' . \esc_attr( (string) $filtered_per_page ) . '"' )
+				&& str_contains( $wrapped_html, 'name="wp_screen_options[option]" value="' . \esc_attr( $option ) . '"' )
+				&& substr_count( $wrapped_html, "name='screen_columns'" ) === $columns
+				&& str_contains( $wrapped_html, 'id="screen-options-apply"' )
+				&& self::html_has_no_unsafe_raw_markup( $wrapped_html ),
+			'WP_Screen::render_screen_options() emits wrapped form, nonce, generated per-page option, column radios, and submit button safely',
+			array( 'html' => self::describe_string( $wrapped_html ) )
+		);
+
+		self::collect_failure(
+			$failures,
+			! str_contains( $unwrapped_html, 'id="screen-options-wrap"' )
+				&& str_contains( $unwrapped_html, "form id='adv-settings' method='post'" )
+				&& str_contains( $unwrapped_html, 'name="screenoptionnonce"' )
+				&& str_contains( $unwrapped_html, 'name="wp_screen_options[option]" value="' . \esc_attr( $option ) . '"' )
+				&& self::html_has_no_unsafe_raw_markup( $unwrapped_html ),
+			'WP_Screen::render_screen_options() honors wrap=false while preserving form controls',
+			array( 'html' => self::describe_string( $unwrapped_html ) )
+		);
+
+		self::collect_failure(
+			$failures,
+			array(
+				array( 'option' => $option, 'incoming' => $default_per_page ),
+				array( 'option' => $option, 'incoming' => $default_per_page ),
+			) === $per_page_calls
+				&& 2 === count( $submit_calls )
+				&& self::all_call_values( $submit_calls, 'incoming', true )
+				&& self::all_call_values( $submit_calls, 'sameScreen', true )
+				&& false === \has_filter( $option, $per_page_filter )
+				&& false === \has_filter( 'screen_options_show_submit', $submit_filter ),
+			'per-page and submit filters receive generated screen context and are removed after rendering',
+			array(
+				'perPageCalls' => $per_page_calls,
+				'submitCalls'  => $submit_calls,
+				'perPageHook'  => \has_filter( $option, $per_page_filter ),
+				'submitHook'   => \has_filter( 'screen_options_show_submit', $submit_filter ),
+			)
+		);
+
+		self::restore_globals( $current_snapshot );
+
+		return self::row(
+			$ctx,
+			'admin-screen.screen-options.rendering-controls',
 			array() === $failures,
 			array( 'failures' => array_slice( $failures, 0, 6 ) )
 		);
