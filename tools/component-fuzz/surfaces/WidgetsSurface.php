@@ -13,6 +13,9 @@ final class WidgetsSurface {
 	private static array $widget_calls = array();
 
 	/** @var array<int,array<string,mixed>> */
+	private static array $the_widget_events = array();
+
+	/** @var array<int,array<string,mixed>> */
 	private static array $direct_widget_calls = array();
 
 	/** @var array<int,array<string,mixed>> */
@@ -69,6 +72,12 @@ final class WidgetsSurface {
 	}
 
 	public static function record_widget_call( string $id, array $args, array $instance ): void {
+		self::$the_widget_events[] = array(
+			'type'     => 'callback',
+			'widgetId' => $id,
+			'title'    => $instance['title'] ?? null,
+		);
+
 		self::$widget_calls[] = array(
 			'id'       => $id,
 			'args'     => array(
@@ -838,10 +847,10 @@ final class WidgetsSurface {
 			'before_title'  => '<h4 class="direct-title">',
 			'after_title'   => '</h4>',
 		);
-		$events   = array();
+		self::$the_widget_events = array();
 
-		$display_filter = static function ( $filtered_instance, \WP_Widget $widget_obj, array $filtered_args ) use ( &$events, $case, $widget ) {
-			$events[] = array(
+		$display_filter = static function ( $filtered_instance, \WP_Widget $widget_obj, array $filtered_args ) use ( $case, $widget ) {
+			self::$the_widget_events[] = array(
 				'type'         => 'display-filter',
 				'sameWidget'   => $widget_obj === $widget,
 				'beforeWidget' => $filtered_args['before_widget'] ?? null,
@@ -855,8 +864,8 @@ final class WidgetsSurface {
 		$cancel_filter  = static function () {
 			return false;
 		};
-		$action         = static function ( string $widget_name, array $action_instance, array $action_args ) use ( &$events, $key ): void {
-			$events[] = array(
+		$action         = static function ( string $widget_name, array $action_instance, array $action_args ) use ( $key ): void {
+			self::$the_widget_events[] = array(
 				'type'         => 'action',
 				'widget'       => $widget_name,
 				'isKey'        => $key === $widget_name,
@@ -870,18 +879,25 @@ final class WidgetsSurface {
 		\add_filter( 'widget_display_callback', $display_filter, 10, 3 );
 		\add_action( 'the_widget', $action, 10, 3 );
 		try {
-			ob_start();
-			\the_widget( $key, $instance, $args );
-			$output = (string) ob_get_clean();
+			$output = self::capture_output(
+				static function () use ( $key, $instance, $args ): void {
+					\the_widget( $key, $instance, $args );
+				}
+			);
 			$calls  = self::$widget_calls;
+			$events = self::$the_widget_events;
 
 			self::$widget_calls = array();
+			self::$the_widget_events = array();
 			\remove_filter( 'widget_display_callback', $display_filter, 10 );
 			\add_filter( 'widget_display_callback', $cancel_filter, 10, 3 );
-			ob_start();
-			\the_widget( $key, $instance, $args );
-			$cancelled_output = (string) ob_get_clean();
+			$cancelled_output = self::capture_output(
+				static function () use ( $key, $instance, $args ): void {
+					\the_widget( $key, $instance, $args );
+				}
+			);
 			$cancelled_calls  = self::$widget_calls;
+			$cancelled_events = self::$the_widget_events;
 		} finally {
 			\remove_filter( 'widget_display_callback', $display_filter, 10 );
 			\remove_filter( 'widget_display_callback', $cancel_filter, 10 );
@@ -891,15 +907,17 @@ final class WidgetsSurface {
 
 		self::collect_failure(
 			$failures,
-			2 === count( $events )
+			3 === count( $events )
 				&& 'display-filter' === ( $events[0]['type'] ?? null )
 				&& true === ( $events[0]['sameWidget'] ?? null )
 				&& str_contains( (string) ( $events[0]['beforeWidget'] ?? '' ), $case['className'] )
 				&& 'action' === ( $events[1]['type'] ?? null )
 				&& true === ( $events[1]['isKey'] ?? null )
 				&& 'Filtered ' . $case['title'] === ( $events[1]['title'] ?? null )
-				&& str_contains( (string) ( $events[1]['beforeWidget'] ?? '' ), $case['className'] ),
-			'the_widget() applies display filters before the action and passes substituted wrapper args',
+				&& str_contains( (string) ( $events[1]['beforeWidget'] ?? '' ), $case['className'] )
+				&& 'callback' === ( $events[2]['type'] ?? null )
+				&& 'Filtered ' . $case['title'] === ( $events[2]['title'] ?? null ),
+			'the_widget() applies display filters, runs the action, then invokes the widget callback with substituted args',
 			array( 'events' => $events )
 		);
 
@@ -925,6 +943,7 @@ final class WidgetsSurface {
 			$failures,
 			'' === $cancelled_output
 				&& array() === $cancelled_calls
+				&& array() === $cancelled_events
 				&& false === \has_filter( 'widget_display_callback', $display_filter )
 				&& false === \has_filter( 'widget_display_callback', $cancel_filter )
 				&& false === \has_action( 'the_widget', $action ),
@@ -932,6 +951,7 @@ final class WidgetsSurface {
 			array(
 				'cancelledOutput' => self::describe_string( $cancelled_output ),
 				'cancelledCalls'  => $cancelled_calls,
+				'cancelledEvents' => $cancelled_events,
 				'displayFilter'   => \has_filter( 'widget_display_callback', $display_filter ),
 				'cancelFilter'    => \has_filter( 'widget_display_callback', $cancel_filter ),
 				'action'          => \has_action( 'the_widget', $action ),
@@ -1327,6 +1347,7 @@ final class WidgetsSurface {
 		$GLOBALS['_wp_theme_features']            = array();
 		unset( $GLOBALS['current_screen'] );
 		self::$widget_calls                       = array();
+		self::$the_widget_events                  = array();
 		self::$direct_widget_calls                = array();
 		self::$direct_control_calls               = array();
 		self::$dynamic_sidebar_events             = array();
@@ -1453,6 +1474,22 @@ final class WidgetsSurface {
 		);
 	}
 
+	private static function capture_output( callable $callback ): string {
+		$level = ob_get_level();
+		ob_start();
+
+		try {
+			$callback();
+			return (string) ob_get_clean();
+		} catch ( \Throwable $e ) {
+			while ( ob_get_level() > $level ) {
+				ob_end_clean();
+			}
+
+			throw $e;
+		}
+	}
+
 	private static function collect_failure( array &$failures, bool $condition, string $label, array $details ): void {
 		if ( $condition ) {
 			return;
@@ -1571,6 +1608,7 @@ final class WidgetsSurface {
 	private static function snapshot_state(): array {
 		$snapshot = array(
 			'widgetCalls'        => self::$widget_calls,
+			'theWidgetEvents'    => self::$the_widget_events,
 			'directWidgetCalls'  => self::$direct_widget_calls,
 			'directControlCalls' => self::$direct_control_calls,
 			'dynamicSidebarEvents' => self::$dynamic_sidebar_events,
@@ -1618,6 +1656,7 @@ final class WidgetsSurface {
 
 	private static function restore_state( array $snapshot ): void {
 		self::$widget_calls         = $snapshot['widgetCalls'];
+		self::$the_widget_events    = $snapshot['theWidgetEvents'];
 		self::$direct_widget_calls  = $snapshot['directWidgetCalls'];
 		self::$direct_control_calls = $snapshot['directControlCalls'];
 		self::$dynamic_sidebar_events = $snapshot['dynamicSidebarEvents'];
