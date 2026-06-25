@@ -451,7 +451,7 @@ final class IdentitySurface {
 			return;
 		}
 
-		if ( ! self::have_functions( array( 'add_action', 'add_filter', 'clean_user_cache', 'get_current_user_id', 'get_userdata', 'has_filter', 'is_user_logged_in', 'remove_action', 'remove_filter', 'sanitize_email', 'sanitize_title_with_dashes', 'sanitize_user', 'update_user_caches', 'wp_get_current_user', 'wp_set_current_user' ), $result, 'current_user_lifecycle' ) ) {
+		if ( ! self::have_functions( array( 'add_action', 'add_filter', 'clean_user_cache', 'get_current_user_id', 'get_userdata', 'has_filter', 'is_user_logged_in', 'remove_action', 'remove_filter', 'sanitize_email', 'sanitize_title_with_dashes', 'sanitize_user', 'update_user_caches', 'wp_cache_get', 'wp_get_current_user', 'wp_set_current_user' ), $result, 'current_user_lifecycle' ) ) {
 			return;
 		}
 
@@ -468,7 +468,17 @@ final class IdentitySurface {
 				$set_current_user_hook = static function () use ( &$set_current_user_hits ): void {
 					$set_current_user_hits[] = \get_current_user_id();
 				};
-				$thrown                = null;
+				$before_action_filter = \has_filter( 'set_current_user', $set_current_user_hook );
+				$determine_row        = $cases[2]['row'];
+				$determine_events     = array();
+				$determine_filter     = static function ( $user_id ) use ( &$determine_events, $determine_row ): int {
+					$determine_events[] = $user_id;
+
+					return (int) $determine_row['ID'];
+				};
+				$before_determine     = \has_filter( 'determine_current_user', $determine_filter );
+				$thrown               = null;
+				$cleanup_thrown       = null;
 
 				try {
 					foreach ( $cases as $case ) {
@@ -477,7 +487,6 @@ final class IdentitySurface {
 						\update_user_caches( $user );
 					}
 
-					$before_action_filter = \has_filter( 'set_current_user', $set_current_user_hook );
 					\add_action( 'set_current_user', $set_current_user_hook, 999, 0 );
 
 					foreach ( $cases as $case ) {
@@ -507,14 +516,6 @@ final class IdentitySurface {
 					$upgraded                   = \wp_get_current_user();
 					self::check( $result, 'wp_get_current_user.upgrades_legacy_object_global_from_cache', $upgraded instanceof \WP_User && (int) $upgrade_row['ID'] === $upgraded->ID && $upgrade_row['user_login'] === $upgraded->user_login && count( $set_current_user_hits ) === $before_upgrade_hit_count + 1, $cases[1], self::current_user_expectation( $upgrade_row ), self::current_user_observation( $upgraded ) );
 
-					$determine_row      = $cases[2]['row'];
-					$determine_events   = array();
-					$determine_filter   = static function ( $user_id ) use ( &$determine_events, $determine_row ): int {
-						$determine_events[] = $user_id;
-
-						return (int) $determine_row['ID'];
-					};
-					$before_determine   = \has_filter( 'determine_current_user', $determine_filter );
 					$GLOBALS['current_user'] = null;
 					$_COOKIE            = array();
 					\add_filter( 'determine_current_user', $determine_filter, 999, 1 );
@@ -534,11 +535,24 @@ final class IdentitySurface {
 				} catch ( \Throwable $e ) {
 					$thrown = $e;
 				} finally {
-					foreach ( $users as $user ) {
-						\clean_user_cache( $user );
+					try {
+						foreach ( $users as $user ) {
+							\clean_user_cache( $user );
+						}
+					} catch ( \Throwable $e ) {
+						$cleanup_thrown = $e;
+					} finally {
+						self::restore_current_user_globals( $user_global_snapshot );
+						self::restore_hook_globals( $hook_global_snapshot );
 					}
-					self::restore_current_user_globals( $user_global_snapshot );
-					self::restore_hook_globals( $hook_global_snapshot );
+				}
+
+				self::check( $result, 'current_user_lifecycle.generated_user_caches_cleaned', self::user_existence_caches_are_clean( $cases ), $cases, 'no generated user cache keys remain', self::user_existence_cache_observation( $cases ) );
+				self::check( $result, 'current_user_lifecycle.current_user_globals_restored', self::current_user_globals_match_snapshot( $user_global_snapshot ), self::current_user_global_names(), self::current_user_globals_expectation( $user_global_snapshot ), self::current_user_globals_observation() );
+				self::check( $result, 'current_user_lifecycle.hook_globals_restored', self::hook_counter_globals_match_snapshot( $hook_global_snapshot ) && $before_action_filter === \has_filter( 'set_current_user', $set_current_user_hook ) && $before_determine === \has_filter( 'determine_current_user', $determine_filter ), array( 'set_current_user', 'determine_current_user' ), self::hook_globals_expectation( $hook_global_snapshot, $before_action_filter, $before_determine ), self::hook_globals_observation( $set_current_user_hook, $determine_filter ) );
+
+				if ( null !== $cleanup_thrown && null === $thrown ) {
+					$thrown = $cleanup_thrown;
 				}
 
 				if ( null !== $thrown ) {
@@ -1383,6 +1397,7 @@ final class IdentitySurface {
 
 	private static function current_user_legacy_globals_match_row( array $row ): bool {
 		return (int) $row['ID'] === ( $GLOBALS['user_ID'] ?? null )
+			&& 0 === ( $GLOBALS['user_level'] ?? null )
 			&& $row['user_login'] === ( $GLOBALS['user_login'] ?? null )
 			&& $row['user_email'] === ( $GLOBALS['user_email'] ?? null )
 			&& $row['user_url'] === ( $GLOBALS['user_url'] ?? null )
@@ -1436,6 +1451,79 @@ final class IdentitySurface {
 			'user_identity' => $GLOBALS['user_identity'] ?? null,
 			'userdata'      => isset( $GLOBALS['userdata'] ) && $GLOBALS['userdata'] instanceof \WP_User ? self::current_user_observation( $GLOBALS['userdata'] ) : ( $GLOBALS['userdata'] ?? null ),
 		);
+	}
+
+	private static function current_user_globals_match_snapshot( array $snapshot ): bool {
+		foreach ( $snapshot as $name => $entry ) {
+			$exists = array_key_exists( $name, $GLOBALS );
+			if ( (bool) $entry['exists'] !== $exists ) {
+				return false;
+			}
+
+			if ( ! $exists ) {
+				continue;
+			}
+
+			$expected = $entry['value'];
+			$actual   = $GLOBALS[ $name ];
+			if ( is_object( $expected ) || is_object( $actual ) ) {
+				if ( $expected !== $actual ) {
+					return false;
+				}
+				continue;
+			}
+
+			if ( ! self::same_value( $expected, $actual ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function current_user_globals_expectation( array $snapshot ): array {
+		$out = array();
+		foreach ( self::current_user_global_names() as $name ) {
+			$entry        = $snapshot[ $name ] ?? array( 'exists' => false, 'value' => null );
+			$out[ $name ] = array(
+				'exists' => (bool) $entry['exists'],
+				'value'  => self::summarize_current_user_global_value( $entry['value'] ),
+			);
+		}
+
+		return $out;
+	}
+
+	private static function current_user_globals_observation(): array {
+		$out = array();
+		foreach ( self::current_user_global_names() as $name ) {
+			$out[ $name ] = array(
+				'exists' => array_key_exists( $name, $GLOBALS ),
+				'value'  => self::summarize_current_user_global_value( $GLOBALS[ $name ] ?? null ),
+			);
+		}
+
+		return $out;
+	}
+
+	private static function summarize_current_user_global_value( $value ) {
+		if ( $value instanceof \WP_User ) {
+			return array(
+				'class'      => \WP_User::class,
+				'objectId'   => spl_object_id( $value ),
+				'ID'         => $value->ID,
+				'user_login' => $value->user_login,
+			);
+		}
+
+		if ( is_object( $value ) ) {
+			return array(
+				'class'    => get_class( $value ),
+				'objectId' => spl_object_id( $value ),
+			);
+		}
+
+		return $value;
 	}
 
 	private static function wp_user_raw_fields_match( \WP_User $user, array $row, array $fields ): bool {
@@ -2177,6 +2265,55 @@ final class IdentitySurface {
 				unset( $GLOBALS[ $name ] );
 			}
 		}
+	}
+
+	private static function hook_counter_globals_match_snapshot( array $snapshot ): bool {
+		foreach ( array( 'wp_actions', 'wp_filters', 'wp_current_filter' ) as $name ) {
+			$exists = array_key_exists( $name, $GLOBALS );
+			if ( (bool) $snapshot[ $name ]['exists'] !== $exists ) {
+				return false;
+			}
+
+			if ( $exists && ! self::same_value( $snapshot[ $name ]['value'], $GLOBALS[ $name ] ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function hook_globals_expectation( array $snapshot, $set_current_user_hook, $determine_current_user_hook ): array {
+		return array(
+			'wp_actions'             => self::hook_counter_snapshot_item( $snapshot, 'wp_actions' ),
+			'wp_filters'             => self::hook_counter_snapshot_item( $snapshot, 'wp_filters' ),
+			'wp_current_filter'      => self::hook_counter_snapshot_item( $snapshot, 'wp_current_filter' ),
+			'setCurrentUserHook'     => $set_current_user_hook,
+			'determineCurrentUserHook' => $determine_current_user_hook,
+		);
+	}
+
+	private static function hook_globals_observation( callable $set_current_user_hook, callable $determine_current_user_hook ): array {
+		return array(
+			'wp_actions'             => self::hook_counter_global_observation( 'wp_actions' ),
+			'wp_filters'             => self::hook_counter_global_observation( 'wp_filters' ),
+			'wp_current_filter'      => self::hook_counter_global_observation( 'wp_current_filter' ),
+			'setCurrentUserHook'     => \has_filter( 'set_current_user', $set_current_user_hook ),
+			'determineCurrentUserHook' => \has_filter( 'determine_current_user', $determine_current_user_hook ),
+		);
+	}
+
+	private static function hook_counter_snapshot_item( array $snapshot, string $name ): array {
+		return array(
+			'exists' => (bool) ( $snapshot[ $name ]['exists'] ?? false ),
+			'value'  => $snapshot[ $name ]['value'] ?? null,
+		);
+	}
+
+	private static function hook_counter_global_observation( string $name ): array {
+		return array(
+			'exists' => array_key_exists( $name, $GLOBALS ),
+			'value'  => $GLOBALS[ $name ] ?? null,
+		);
 	}
 
 	private static function clone_wp_filter_registry( $registry ) {
