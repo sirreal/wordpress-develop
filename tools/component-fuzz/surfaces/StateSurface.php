@@ -41,6 +41,7 @@ final class StateSurface {
 			$rows[] = self::check_transient_crud_and_expiration( $ctx );
 			$rows[] = self::check_transient_filters( $ctx );
 			$rows[] = self::check_site_transient_cache_branch( $ctx );
+			$rows[] = self::check_site_transient_option_branch( $ctx );
 
 			$rows[] = self::check_serialization_helpers( $ctx );
 			$rows[] = self::check_json_encoding( $ctx );
@@ -94,6 +95,11 @@ final class StateSurface {
 				'get_site_transient',
 				'set_site_transient',
 				'delete_site_transient',
+				'get_site_option',
+				'add_site_option',
+				'update_site_option',
+				'delete_site_option',
+				'wp_prime_site_option_caches',
 				'maybe_serialize',
 				'maybe_unserialize',
 				'is_serialized',
@@ -101,6 +107,7 @@ final class StateSurface {
 				'wp_json_encode',
 				'map_deep',
 				'remove_filter',
+				'has_filter',
 				'wp_using_ext_object_cache',
 				'wp_parse_args',
 			) as $function
@@ -889,6 +896,304 @@ final class StateSurface {
 				'expirationCalls' => self::describe_value( $expiration_calls ),
 				'readFiltered'    => self::describe_value( $read_filtered ),
 				'optionKeys'      => implode( ',', array_keys( $store ) ),
+			)
+		);
+	}
+
+	private static function check_site_transient_option_branch( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime();
+
+		$name          = self::key( $ctx, 'site-transient-option' );
+		$zero_name     = self::key( $ctx, 'site-transient-option-zero' );
+		$expired_name  = self::key( $ctx, 'site-transient-option-expired' );
+		$pre_name      = self::key( $ctx, 'pre-site-transient-option' );
+		$filtered_name = self::key( $ctx, 'filtered-site-transient-option' );
+
+		$value         = self::wrapped_value( 'site-transient-option', self::value( $ctx->fork( 'site-transient-option-value' ) ) );
+		$updated_value = self::wrapped_value( 'site-transient-option-updated', self::value( $ctx->fork( 'site-transient-option-updated-value' ) ) );
+		$zero_value    = self::wrapped_value( 'site-transient-option-zero', self::value( $ctx->fork( 'site-transient-option-zero-value' ) ) );
+		$expired_value = self::wrapped_value( 'site-transient-option-expired', self::value( $ctx->fork( 'site-transient-option-expired-value' ) ) );
+		$pre_value     = self::wrapped_value( 'pre-site-transient-option', self::value( $ctx->fork( 'pre-site-transient-option-value' ) ) );
+		$set_value     = self::wrapped_value( 'set-site-transient-option', self::value( $ctx->fork( 'set-site-transient-option-value' ) ) );
+		$read_value    = self::wrapped_value( 'read-site-transient-option', self::value( $ctx->fork( 'read-site-transient-option-value' ) ) );
+
+		$value_key            = '_site_transient_' . $name;
+		$timeout_key          = '_site_transient_timeout_' . $name;
+		$zero_value_key       = '_site_transient_' . $zero_name;
+		$zero_timeout_key     = '_site_transient_timeout_' . $zero_name;
+		$expired_value_key    = '_site_transient_' . $expired_name;
+		$expired_timeout_key  = '_site_transient_timeout_' . $expired_name;
+		$pre_value_key        = '_site_transient_' . $pre_name;
+		$filtered_value_key   = '_site_transient_' . $filtered_name;
+		$filtered_timeout_key = '_site_transient_timeout_' . $filtered_name;
+
+		$pre_calls        = array();
+		$pre_set_calls    = array();
+		$expiration_calls = array();
+		$read_calls       = array();
+
+		$pre_filter        = static function ( $pre, string $transient ) use ( $pre_value, &$pre_calls ) {
+			$pre_calls[] = array(
+				'pre'       => $pre,
+				'transient' => $transient,
+			);
+			return $pre_value;
+		};
+		$pre_set_filter    = static function ( $raw, string $transient ) use ( $set_value, &$pre_set_calls ) {
+			$pre_set_calls[] = array(
+				'raw'       => $raw,
+				'transient' => $transient,
+			);
+			return $set_value;
+		};
+		$expiration_filter = static function ( int $expiration, $filtered_value, string $transient ) use ( &$expiration_calls ): int {
+			$expiration_calls[] = array(
+				'expiration' => $expiration,
+				'value'      => $filtered_value,
+				'transient'  => $transient,
+			);
+			return 0;
+		};
+		$read_filter       = static function ( $current, string $transient ) use ( $read_value, &$read_calls ) {
+			$read_calls[] = array(
+				'value'     => $current,
+				'transient' => $transient,
+			);
+			return $read_value;
+		};
+
+		$original_ext = wp_using_ext_object_cache();
+		wp_using_ext_object_cache( true );
+		$previous_ext = wp_using_ext_object_cache( false );
+
+		$missing_before          = null;
+		$set                     = null;
+		$got                     = null;
+		$stored_value            = null;
+		$stored_timeout          = null;
+		$update_set              = null;
+		$updated_got             = null;
+		$updated_stored_value    = null;
+		$updated_stored_timeout  = null;
+		$found_site_cache        = null;
+		$site_cache              = null;
+		$delete                  = null;
+		$delete_again            = null;
+		$after_delete            = null;
+		$zero_set                = null;
+		$zero_got                = null;
+		$zero_stored_value       = null;
+		$zero_delete             = null;
+		$expired_set             = null;
+		$expired_stored_value    = null;
+		$expired_timeout         = null;
+		$timeout_update          = null;
+		$after_expire            = null;
+		$pre_got                 = null;
+		$filtered_set            = null;
+		$filtered_got            = null;
+		$filtered_stored_value   = null;
+		$read_filtered           = null;
+		$ext_forced              = null;
+		$set_started             = 0;
+		$set_finished            = 0;
+		$update_started          = 0;
+		$update_finished         = 0;
+		$expired_set_started     = 0;
+		$expired_set_finished    = 0;
+		$hooks_removed            = false;
+		$ext_restored_to_previous = false;
+		$ext_restored_to_original = false;
+		$store_after_set         = array();
+		$store_after_update      = array();
+		$store_after_delete      = array();
+		$store_after_zero        = array();
+		$store_after_zero_delete = array();
+		$store_after_expired_set = array();
+		$store_after_expire      = array();
+		$store_after_pre         = array();
+		$store_after_filtered    = array();
+
+		try {
+			$ext_forced     = wp_using_ext_object_cache();
+			$missing_before = get_site_transient( $name );
+			$set_started    = time();
+			$set            = set_site_transient( $name, $value, 60 );
+			$set_finished   = time();
+			$got             = get_site_transient( $name );
+			$store_after_set = self::option_store();
+			$stored_value    = isset( $store_after_set[ $value_key ] )
+				? maybe_unserialize( $store_after_set[ $value_key ]['option_value'] )
+				: null;
+			$stored_timeout  = $store_after_set[ $timeout_key ]['option_value'] ?? null;
+			$site_cache      = wp_cache_get( $name, 'site-transient', false, $found_site_cache );
+
+			$update_started         = time();
+			$update_set             = set_site_transient( $name, $updated_value, 120 );
+			$update_finished        = time();
+			$updated_got            = get_site_transient( $name );
+			$store_after_update     = self::option_store();
+			$updated_stored_value   = isset( $store_after_update[ $value_key ] )
+				? maybe_unserialize( $store_after_update[ $value_key ]['option_value'] )
+				: null;
+			$updated_stored_timeout = $store_after_update[ $timeout_key ]['option_value'] ?? null;
+
+			$delete             = delete_site_transient( $name );
+			$after_delete       = get_site_transient( $name );
+			$delete_again       = delete_site_transient( $name );
+			$store_after_delete = self::option_store();
+
+			$zero_set          = set_site_transient( $zero_name, $zero_value, 0 );
+			$zero_got          = get_site_transient( $zero_name );
+			$store_after_zero  = self::option_store();
+			$zero_stored_value = isset( $store_after_zero[ $zero_value_key ] )
+				? maybe_unserialize( $store_after_zero[ $zero_value_key ]['option_value'] )
+				: null;
+			$zero_delete       = delete_site_transient( $zero_name );
+			$store_after_zero_delete = self::option_store();
+
+			$expired_set_started  = time();
+			$expired_set          = set_site_transient( $expired_name, $expired_value, 60 );
+			$expired_set_finished = time();
+			$store_after_expired_set = self::option_store();
+			$expired_stored_value = isset( $store_after_expired_set[ $expired_value_key ] )
+				? maybe_unserialize( $store_after_expired_set[ $expired_value_key ]['option_value'] )
+				: null;
+			$expired_timeout      = $store_after_expired_set[ $expired_timeout_key ]['option_value'] ?? null;
+			$timeout_update       = update_site_option( $expired_timeout_key, time() - 1 );
+			$after_expire         = get_site_transient( $expired_name );
+			$store_after_expire   = self::option_store();
+
+			add_filter( "pre_site_transient_{$pre_name}", $pre_filter, 10, 2 );
+			$pre_got         = get_site_transient( $pre_name );
+			$store_after_pre = self::option_store();
+
+			add_filter( "pre_set_site_transient_{$filtered_name}", $pre_set_filter, 10, 2 );
+			add_filter( "expiration_of_site_transient_{$filtered_name}", $expiration_filter, 10, 3 );
+			$filtered_set          = set_site_transient( $filtered_name, array( 'raw' => 'ignored' ), 99 );
+			$filtered_got          = get_site_transient( $filtered_name );
+			$store_after_filtered  = self::option_store();
+			$filtered_stored_value = isset( $store_after_filtered[ $filtered_value_key ] )
+				? maybe_unserialize( $store_after_filtered[ $filtered_value_key ]['option_value'] )
+				: null;
+
+			add_filter( "site_transient_{$filtered_name}", $read_filter, 10, 2 );
+			$read_filtered = get_site_transient( $filtered_name );
+		} finally {
+			remove_filter( "pre_site_transient_{$pre_name}", $pre_filter, 10 );
+			remove_filter( "pre_set_site_transient_{$filtered_name}", $pre_set_filter, 10 );
+			remove_filter( "expiration_of_site_transient_{$filtered_name}", $expiration_filter, 10 );
+			remove_filter( "site_transient_{$filtered_name}", $read_filter, 10 );
+			$hooks_removed = false === has_filter( "pre_site_transient_{$pre_name}", $pre_filter )
+				&& false === has_filter( "pre_set_site_transient_{$filtered_name}", $pre_set_filter )
+				&& false === has_filter( "expiration_of_site_transient_{$filtered_name}", $expiration_filter )
+				&& false === has_filter( "site_transient_{$filtered_name}", $read_filter );
+			wp_using_ext_object_cache( $previous_ext );
+			$ext_restored_to_previous = wp_using_ext_object_cache() === $previous_ext;
+			wp_using_ext_object_cache( $original_ext );
+			$ext_restored_to_original = wp_using_ext_object_cache() === $original_ext;
+		}
+
+		$timeout_created = isset( $store_after_set[ $timeout_key ] )
+			&& is_numeric( $stored_timeout )
+			&& (int) $stored_timeout >= $set_started + 60
+			&& (int) $stored_timeout <= $set_finished + 60;
+		$updated_timeout_created = isset( $store_after_update[ $timeout_key ] )
+			&& is_numeric( $updated_stored_timeout )
+			&& (int) $updated_stored_timeout >= $update_started + 120
+			&& (int) $updated_stored_timeout <= $update_finished + 120
+			&& (int) $updated_stored_timeout > (int) $stored_timeout;
+		$expired_timeout_created = isset( $store_after_expired_set[ $expired_timeout_key ] )
+			&& is_numeric( $expired_timeout )
+			&& (int) $expired_timeout >= $expired_set_started + 60
+			&& (int) $expired_timeout <= $expired_set_finished + 60;
+
+		$ok = false === $original_ext
+			&& true === $previous_ext
+			&& false === $ext_forced
+			&& false === $missing_before
+			&& true === $set
+			&& self::same_value( $value, $got )
+			&& isset( $store_after_set[ $value_key ] )
+			&& self::same_value( $value, $stored_value )
+			&& $timeout_created
+			&& true === $update_set
+			&& self::same_value( $updated_value, $updated_got )
+			&& isset( $store_after_update[ $value_key ] )
+			&& self::same_value( $updated_value, $updated_stored_value )
+			&& $updated_timeout_created
+			&& false === $found_site_cache
+			&& false === $site_cache
+			&& true === $delete
+			&& false === $after_delete
+			&& false === $delete_again
+			&& ! isset( $store_after_delete[ $value_key ] )
+			&& ! isset( $store_after_delete[ $timeout_key ] )
+			&& true === $zero_set
+			&& self::same_value( $zero_value, $zero_got )
+			&& isset( $store_after_zero[ $zero_value_key ] )
+			&& self::same_value( $zero_value, $zero_stored_value )
+			&& ! isset( $store_after_zero[ $zero_timeout_key ] )
+			&& true === $zero_delete
+			&& ! isset( $store_after_zero_delete[ $zero_value_key ] )
+			&& ! isset( $store_after_zero_delete[ $zero_timeout_key ] )
+			&& true === $expired_set
+			&& self::same_value( $expired_value, $expired_stored_value )
+			&& $expired_timeout_created
+			&& true === $timeout_update
+			&& false === $after_expire
+			&& ! isset( $store_after_expire[ $expired_value_key ] )
+			&& ! isset( $store_after_expire[ $expired_timeout_key ] )
+			&& self::same_value( $pre_value, $pre_got )
+			&& 1 === count( $pre_calls )
+			&& array( 'pre' => false, 'transient' => $pre_name ) === $pre_calls[0]
+			&& ! isset( $store_after_pre[ $pre_value_key ] )
+			&& true === $filtered_set
+			&& self::same_value( $set_value, $filtered_got )
+			&& self::same_value( $set_value, $filtered_stored_value )
+			&& ! isset( $store_after_filtered[ $filtered_timeout_key ] )
+			&& 1 === count( $pre_set_calls )
+			&& array( 'raw' => array( 'raw' => 'ignored' ), 'transient' => $filtered_name ) === $pre_set_calls[0]
+			&& 1 === count( $expiration_calls )
+			&& 99 === $expiration_calls[0]['expiration']
+			&& self::same_value( $set_value, $expiration_calls[0]['value'] )
+			&& $filtered_name === $expiration_calls[0]['transient']
+			&& self::same_value( $read_value, $read_filtered )
+			&& 1 === count( $read_calls )
+			&& self::same_value( $set_value, $read_calls[0]['value'] )
+			&& $filtered_name === $read_calls[0]['transient']
+			&& $hooks_removed
+			&& $ext_restored_to_previous
+			&& $ext_restored_to_original;
+
+		return $ctx->result(
+			'state.site-transients.option-branch-uses-options-and-filters',
+			$ok,
+			array(
+				'name'                  => $name,
+				'zeroName'              => $zero_name,
+				'expiredName'           => $expired_name,
+				'filteredName'          => $filtered_name,
+				'set'                   => $set,
+				'delete'                => $delete,
+				'deleteAgain'           => $delete_again,
+				'timeoutCreated'        => $timeout_created,
+				'storedTimeout'         => self::describe_value( $stored_timeout ),
+				'updateSet'             => $update_set,
+				'updatedTimeoutCreated' => $updated_timeout_created,
+				'updatedStoredTimeout'  => self::describe_value( $updated_stored_timeout ),
+				'zeroTimeoutStored'     => isset( $store_after_zero[ $zero_timeout_key ] ),
+				'expiredTimeoutCreated' => $expired_timeout_created,
+				'timeoutUpdate'         => $timeout_update,
+				'afterExpire'           => self::describe_value( $after_expire ),
+				'preCalls'              => self::describe_value( $pre_calls ),
+				'preSetCalls'           => self::describe_value( $pre_set_calls ),
+				'expirationCalls'       => self::describe_value( $expiration_calls ),
+				'readCalls'             => self::describe_value( $read_calls ),
+				'hooksRemoved'          => $hooks_removed,
+				'extRestoredPrevious'   => $ext_restored_to_previous,
+				'extRestoredOriginal'   => $ext_restored_to_original,
+				'optionKeysAfterFilter' => implode( ',', array_keys( $store_after_filtered ) ),
 			)
 		);
 	}
