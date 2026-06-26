@@ -210,7 +210,9 @@ database, network requests, or a configured site.
   case/width/normalization identity preservation, hook restoration,
   normalization-sensitive local parts, generated accent-distinct local-part
   alias/index paths, byte-preserving user email search SQL, comment-author email
-  filtering, REST user email schema validation across Unicode/ASCII filter modes,
+  filtering, UTF-8 comment submission through `wp_handle_comment_submission()`
+  and direct `wp_new_comment()` sanitization paths, REST user email schema
+  validation across Unicode/ASCII filter modes,
   and no-DB stub-backed user email lookup/duplicate behavior for accent-distinct
   local parts/domains, canonical Unicode-domain save/update collision behavior
   without MySQL collation/index coverage, password-reset Unicode recipient paths,
