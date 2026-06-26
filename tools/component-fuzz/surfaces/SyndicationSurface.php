@@ -38,6 +38,7 @@ final class SyndicationSurface {
 			$rows[] = self::check_oembed_rest_controller_cache( $ctx->fork( 'rest-controller' ) );
 			$rows[] = self::check_feed_helpers( $ctx->fork( 'feed-helpers' ) );
 			$rows[] = self::check_feed_head_link_output( $ctx->fork( 'feed-head-links' ) );
+			$rows[] = self::check_feed_extra_head_link_output( $ctx->fork( 'feed-extra-head-links' ) );
 			$rows[] = self::check_feed_link_generation( $ctx->fork( 'feed-links' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = self::row(
@@ -91,7 +92,7 @@ final class SyndicationSurface {
 	private static function missing_requirements(): array {
 		$missing = array();
 
-		foreach ( array( 'SimpleXMLElement', 'WP_Embed', 'WP_oEmbed', 'WP_Post' ) as $class ) {
+		foreach ( array( 'SimpleXMLElement', 'WP_Embed', 'WP_oEmbed', 'WP_Post', 'WP_Query', 'WP_Term' ) as $class ) {
 			if ( ! class_exists( $class ) ) {
 				$missing[] = "class {$class}";
 			}
@@ -106,6 +107,7 @@ final class SyndicationSurface {
 				'esc_html',
 				'feed_content_type',
 				'feed_links',
+				'feed_links_extra',
 				'get_bloginfo_rss',
 				'get_default_feed',
 				'get_feed_link',
@@ -115,8 +117,13 @@ final class SyndicationSurface {
 				'home_url',
 				'prep_atom_text_construct',
 				'post_comments_feed_link',
+				'register_post_type',
+				'register_taxonomy',
 				'remove_filter',
 				'self_link',
+				'taxonomy_exists',
+				'unregister_post_type',
+				'unregister_taxonomy',
 				'wp_cache_delete',
 				'wp_cache_get',
 				'wp_cache_set',
@@ -1182,6 +1189,569 @@ final class SyndicationSurface {
 		);
 	}
 
+	private static function check_feed_extra_head_link_output( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$marker   = self::slug( $ctx, 4, 10 );
+
+		$post_id     = $ctx->int( 510000, 519999 );
+		$category_id = $ctx->int( 520000, 529999 );
+		$tag_id      = $ctx->int( 530000, 539999 );
+		$term_id     = $ctx->int( 540000, 549999 );
+		$author_id   = $ctx->int( 550000, 559999 );
+		$safe_marker = substr( preg_replace( '/[^a-z0-9]/', '', $marker ), 0, 8 );
+		$post_type   = 'cfzpt' . $safe_marker;
+		$taxonomy    = 'cfztax' . $safe_marker;
+
+		$post             = new \WP_Post( self::cached_feed_post( $post_id, 'post' ) );
+		$post->post_title = 'Single <b>"' . $marker . '"</b> & Comments';
+		$post->comment_status = 'open';
+		$post->comment_count  = 3;
+		$category             = new \WP_Term(
+			self::cached_feed_term(
+				$category_id,
+				'category',
+				'category-' . $safe_marker,
+				'Category <Name> & "' . $marker . '"'
+			)
+		);
+		$tag                  = new \WP_Term(
+			self::cached_feed_term(
+				$tag_id,
+				'post_tag',
+				'tag-' . $safe_marker,
+				'Tag <Name> & "' . $marker . '"'
+			)
+		);
+		$term                 = new \WP_Term(
+			self::cached_feed_term(
+				$term_id,
+				$taxonomy,
+				'topic-' . $safe_marker,
+				'Topic <Name> & "' . $marker . '"'
+			)
+		);
+		$author               = self::cached_feed_user( $author_id, $safe_marker, 'Author <Name> & "' . $marker . '"' );
+		$search               = 'Search <Needle> & "' . $marker . '"';
+		$cache_snapshot       = self::snapshot_cache_slots(
+			array(
+				array( 'key' => $post_id, 'group' => 'posts' ),
+				array( 'key' => $category_id, 'group' => 'terms' ),
+				array( 'key' => $tag_id, 'group' => 'terms' ),
+				array( 'key' => $term_id, 'group' => 'terms' ),
+				array( 'key' => $author_id, 'group' => 'users' ),
+			)
+		);
+
+		$show_calls = array(
+			'comments'      => array(),
+			'postComments'  => array(),
+			'postType'      => array(),
+			'category'      => array(),
+			'tag'           => array(),
+			'tax'           => array(),
+			'author'        => array(),
+			'search'        => array(),
+		);
+		$args_calls = array();
+		$feed_link_calls = array();
+		$post_comments_link_calls = array();
+		$branch_link_calls = array();
+		$outputs = array();
+		$suppress_category_feed = false;
+
+		$default_feed_filter = static fn (): string => 'atom';
+		$plain_permalink_filter = static fn (): string => '';
+		$args_filter = static function ( array $args ) use ( &$args_calls, $marker ): array {
+			$args_calls[] = $args;
+
+			return array_merge(
+				$args,
+				array(
+					'separator'     => '::' . $marker . '<sep>&::',
+					'singletitle'   => '%1$s %2$s Single %3$s',
+					'cattitle'      => '%1$s %2$s Category %3$s',
+					'tagtitle'      => '%1$s %2$s Tag %3$s',
+					'taxtitle'      => '%1$s %2$s Tax %3$s %4$s',
+					'authortitle'   => '%1$s %2$s Author %3$s',
+					'searchtitle'   => '%1$s %2$s Search %3$s',
+					'posttypetitle' => '%1$s %2$s Archive %3$s',
+				)
+			);
+		};
+		$feed_link_filter = static function ( string $url, string $feed ) use ( &$feed_link_calls ): string {
+			$feed_link_calls[] = array(
+				'url'  => $url,
+				'feed' => $feed,
+			);
+
+			return $url;
+		};
+		$post_comments_link_filter = static function ( string $url ) use ( &$post_comments_link_calls, $marker ): string {
+			$post_comments_link_calls[] = $url;
+
+			return self::append_query_arg(
+				self::append_query_arg( $url, 'pcfz', $marker ),
+				'unsafe',
+				'<href>&"'
+			);
+		};
+		$branch_link_filter = static function ( string $branch ) use ( &$branch_link_calls, $marker ): \Closure {
+			return static function ( string $url, string $feed = '', string $taxonomy = '' ) use ( &$branch_link_calls, $branch, $marker ): string {
+				$branch_link_calls[] = array(
+					'branch'   => $branch,
+					'url'      => $url,
+					'feed'     => $feed,
+					'taxonomy' => $taxonomy,
+				);
+
+				return self::append_query_arg( $url, 'xfz', $branch . '-' . $marker );
+			};
+		};
+		$post_type_link_filter = $branch_link_filter( 'post-type' );
+		$category_link_filter = $branch_link_filter( 'category' );
+		$tag_link_filter = $branch_link_filter( 'tag' );
+		$taxonomy_link_filter = $branch_link_filter( 'tax' );
+		$author_link_filter = $branch_link_filter( 'author' );
+		$search_link_filter = $branch_link_filter( 'search' );
+
+		$show_comments_filter = static function ( bool $show ) use ( &$show_calls ): bool {
+			$show_calls['comments'][] = $show;
+			return $show;
+		};
+		$show_post_comments_filter = static function ( bool $show ) use ( &$show_calls ): bool {
+			$show_calls['postComments'][] = $show;
+			return $show;
+		};
+		$show_post_type_filter = static function ( bool $show ) use ( &$show_calls ): bool {
+			$show_calls['postType'][] = $show;
+			return $show;
+		};
+		$show_category_filter = static function ( bool $show ) use ( &$show_calls, &$suppress_category_feed ): bool {
+			$show_calls['category'][] = $show;
+			return $show && ! $suppress_category_feed;
+		};
+		$show_tag_filter = static function ( bool $show ) use ( &$show_calls ): bool {
+			$show_calls['tag'][] = $show;
+			return $show;
+		};
+		$show_tax_filter = static function ( bool $show ) use ( &$show_calls ): bool {
+			$show_calls['tax'][] = $show;
+			return $show;
+		};
+		$show_author_filter = static function ( bool $show ) use ( &$show_calls ): bool {
+			$show_calls['author'][] = $show;
+			return $show;
+		};
+		$show_search_filter = static function ( bool $show ) use ( &$show_calls ): bool {
+			$show_calls['search'][] = $show;
+			return $show;
+		};
+
+		$global_snapshot = self::snapshot_globals( array( 'authordata', 'post', 'wp', 'wp_query', 'wp_rewrite' ) );
+		$buffer_level = ob_get_level();
+		$registered_category = false;
+		$registered_tag = false;
+		$registered_post_type = false;
+		$registered_taxonomy = false;
+
+		$capture = static function ( \WP_Query $query ) use ( &$buffer_level ): string {
+			$GLOBALS['wp_query'] = $query;
+			ob_start();
+			\feed_links_extra();
+			$output = (string) ob_get_clean();
+			$buffer_level = ob_get_level();
+
+			return $output;
+		};
+
+		try {
+			$GLOBALS['wp'] = self::plain_wp_stub();
+			$GLOBALS['wp_rewrite'] = self::plain_rewrite_stub();
+			$GLOBALS['post'] = $post;
+			\add_filter( 'pre_option_home', array( self::class, 'filter_home' ), 10, 3 );
+			\add_filter( 'pre_option_blogname', array( self::class, 'filter_blogname' ), 10, 3 );
+			\add_filter( 'pre_option_permalink_structure', $plain_permalink_filter );
+			\add_filter( 'default_feed', $default_feed_filter );
+			\add_filter( 'feed_links_extra_args', $args_filter );
+			\add_filter( 'feed_link', $feed_link_filter, 10, 2 );
+			\add_filter( 'post_comments_feed_link', $post_comments_link_filter );
+			\add_filter( 'post_type_archive_feed_link', $post_type_link_filter, 10, 2 );
+			\add_filter( 'category_feed_link', $category_link_filter, 10, 2 );
+			\add_filter( 'tag_feed_link', $tag_link_filter, 10, 2 );
+			\add_filter( 'taxonomy_feed_link', $taxonomy_link_filter, 10, 3 );
+			\add_filter( 'author_feed_link', $author_link_filter, 10, 2 );
+			\add_filter( 'search_feed_link', $search_link_filter, 10, 3 );
+			\add_filter( 'feed_links_show_comments_feed', $show_comments_filter );
+			\add_filter( 'feed_links_extra_show_post_comments_feed', $show_post_comments_filter );
+			\add_filter( 'feed_links_extra_show_post_type_archive_feed', $show_post_type_filter );
+			\add_filter( 'feed_links_extra_show_category_feed', $show_category_filter );
+			\add_filter( 'feed_links_extra_show_tag_feed', $show_tag_filter );
+			\add_filter( 'feed_links_extra_show_tax_feed', $show_tax_filter );
+			\add_filter( 'feed_links_extra_show_author_feed', $show_author_filter );
+			\add_filter( 'feed_links_extra_show_search_feed', $show_search_filter );
+
+			if ( ! taxonomy_exists( 'category' ) ) {
+				\register_taxonomy(
+					'category',
+					'post',
+					array(
+						'hierarchical' => true,
+						'public'       => true,
+						'query_var'    => 'category_name',
+						'rewrite'      => false,
+						'labels'       => array(
+							'singular_name' => 'Category',
+						),
+					)
+				);
+				$registered_category = true;
+			}
+			if ( ! taxonomy_exists( 'post_tag' ) ) {
+				\register_taxonomy(
+					'post_tag',
+					'post',
+					array(
+						'public'    => true,
+						'query_var' => 'tag',
+						'rewrite'   => false,
+						'labels'    => array(
+							'singular_name' => 'Tag',
+						),
+					)
+				);
+				$registered_tag = true;
+			}
+			\register_post_type(
+				$post_type,
+				array(
+					'public'      => true,
+					'has_archive' => true,
+					'rewrite'     => false,
+					'label'       => 'Archive <Type> & "' . $marker . '"',
+				)
+			);
+			$registered_post_type = true;
+			\register_taxonomy(
+				$taxonomy,
+				'post',
+				array(
+					'public'    => true,
+					'query_var' => $taxonomy,
+					'rewrite'   => false,
+					'labels'    => array(
+						'singular_name' => 'Topic <Tax> & "' . $marker . '"',
+					),
+				)
+			);
+			$registered_taxonomy = true;
+
+			\wp_cache_set( $post_id, $post, 'posts' );
+			\wp_cache_set( $category_id, $category, 'terms' );
+			\wp_cache_set( $tag_id, $tag, 'terms' );
+			\wp_cache_set( $term_id, $term, 'terms' );
+			\wp_cache_set( $author_id, $author, 'users' );
+
+			$outputs['singular'] = $capture(
+				self::feed_extra_query(
+					array(
+						'is_single'   => true,
+						'is_singular' => true,
+					),
+					array( 'p' => $post_id ),
+					$post
+				)
+			);
+			$outputs['postType'] = $capture(
+				self::feed_extra_query(
+					array(
+						'is_archive'           => true,
+						'is_post_type_archive' => true,
+					),
+					array( 'post_type' => array( $post_type, 'ignored' ) )
+				)
+			);
+			$outputs['category'] = $capture(
+				self::feed_extra_query(
+					array(
+						'is_archive'  => true,
+						'is_category' => true,
+					),
+					array( 'cat' => $category_id ),
+					$category
+				)
+			);
+			$suppress_category_feed = true;
+			$outputs['categorySuppressed'] = $capture(
+				self::feed_extra_query(
+					array(
+						'is_archive'  => true,
+						'is_category' => true,
+					),
+					array( 'cat' => $category_id ),
+					$category
+				)
+			);
+			$suppress_category_feed = false;
+			$outputs['tag'] = $capture(
+				self::feed_extra_query(
+					array(
+						'is_archive' => true,
+						'is_tag'     => true,
+					),
+					array( 'tag_id' => $tag_id ),
+					$tag
+				)
+			);
+			$outputs['tax'] = $capture(
+				self::feed_extra_query(
+					array(
+						'is_archive' => true,
+						'is_tax'     => true,
+					),
+					array( $taxonomy => $term->slug ),
+					$term
+				)
+			);
+			$outputs['author'] = $capture(
+				self::feed_extra_query(
+					array(
+						'is_archive' => true,
+						'is_author'  => true,
+					),
+					array( 'author' => $author_id )
+				)
+			);
+			$outputs['search'] = $capture(
+				self::feed_extra_query(
+					array(
+						'is_search' => true,
+					),
+					array( 's' => $search )
+				)
+			);
+		} finally {
+			if ( ob_get_level() > $buffer_level ) {
+				ob_end_clean();
+			}
+			\remove_filter( 'feed_links_extra_show_search_feed', $show_search_filter );
+			\remove_filter( 'feed_links_extra_show_author_feed', $show_author_filter );
+			\remove_filter( 'feed_links_extra_show_tax_feed', $show_tax_filter );
+			\remove_filter( 'feed_links_extra_show_tag_feed', $show_tag_filter );
+			\remove_filter( 'feed_links_extra_show_category_feed', $show_category_filter );
+			\remove_filter( 'feed_links_extra_show_post_type_archive_feed', $show_post_type_filter );
+			\remove_filter( 'feed_links_extra_show_post_comments_feed', $show_post_comments_filter );
+			\remove_filter( 'feed_links_show_comments_feed', $show_comments_filter );
+			\remove_filter( 'search_feed_link', $search_link_filter, 10 );
+			\remove_filter( 'author_feed_link', $author_link_filter, 10 );
+			\remove_filter( 'taxonomy_feed_link', $taxonomy_link_filter, 10 );
+			\remove_filter( 'tag_feed_link', $tag_link_filter, 10 );
+			\remove_filter( 'category_feed_link', $category_link_filter, 10 );
+			\remove_filter( 'post_type_archive_feed_link', $post_type_link_filter, 10 );
+			\remove_filter( 'post_comments_feed_link', $post_comments_link_filter );
+			\remove_filter( 'feed_link', $feed_link_filter, 10 );
+			\remove_filter( 'feed_links_extra_args', $args_filter );
+			\remove_filter( 'default_feed', $default_feed_filter );
+			\remove_filter( 'pre_option_permalink_structure', $plain_permalink_filter );
+			\remove_filter( 'pre_option_blogname', array( self::class, 'filter_blogname' ), 10 );
+			\remove_filter( 'pre_option_home', array( self::class, 'filter_home' ), 10 );
+			if ( $registered_taxonomy ) {
+				\unregister_taxonomy( $taxonomy );
+			}
+			if ( $registered_post_type ) {
+				\unregister_post_type( $post_type );
+			}
+			if ( $registered_tag ) {
+				\unregister_taxonomy( 'post_tag' );
+			}
+			if ( $registered_category ) {
+				\unregister_taxonomy( 'category' );
+			}
+			self::restore_cache_slots( $cache_snapshot );
+			self::restore_globals( $global_snapshot );
+		}
+
+		$enabled_names = array( 'singular', 'postType', 'category', 'tag', 'tax', 'author', 'search' );
+		$attrs = array();
+		$actual_queries = array();
+		$enabled_output_ok = true;
+		foreach ( $enabled_names as $name ) {
+			$attrs[ $name ] = self::head_link_attrs( $outputs[ $name ] ?? '' );
+			$actual_queries[ $name ] = self::query_args( $attrs[ $name ]['href'] ?? '' );
+			$enabled_output_ok = $enabled_output_ok
+				&& 1 === substr_count( $outputs[ $name ] ?? '', '<link ' )
+				&& 'alternate' === ( $attrs[ $name ]['rel'] ?? null )
+				&& 'application/atom+xml' === ( $attrs[ $name ]['type'] ?? null );
+		}
+
+		$expected_queries = array(
+			'singular' => array(
+				'feed'   => 'atom',
+				'p'      => (string) $post_id,
+				'pcfz'   => $marker,
+				'unsafe' => '<href>&"',
+			),
+			'postType' => array(
+				'feed'      => 'atom',
+				'post_type' => $post_type,
+				'xfz'       => 'post-type-' . $marker,
+			),
+			'category' => array(
+				'cat'  => (string) $category_id,
+				'feed' => 'atom',
+				'xfz'  => 'category-' . $marker,
+			),
+			'tag'      => array(
+				'feed' => 'atom',
+				'tag'  => $tag->slug,
+				'xfz'  => 'tag-' . $marker,
+			),
+			'tax'      => array(
+				'feed'     => 'atom',
+				$taxonomy  => $term->slug,
+				'xfz'      => 'tax-' . $marker,
+			),
+			'author'   => array(
+				'author' => (string) $author_id,
+				'feed'   => 'atom',
+				'xfz'    => 'author-' . $marker,
+			),
+			'search'   => array(
+				'feed' => 'atom',
+				's'    => $search,
+				'xfz'  => 'search-' . $marker,
+			),
+		);
+		foreach ( $expected_queries as $name => $expected_query ) {
+			ksort( $expected_query );
+			$expected_queries[ $name ] = $expected_query;
+		}
+		$query_diffs = array();
+		foreach ( $expected_queries as $name => $expected_query ) {
+			if ( $expected_query !== ( $actual_queries[ $name ] ?? array() ) ) {
+				$query_diffs[ $name ] = 'expected='
+					. http_build_query( $expected_query, '', '&', PHP_QUERY_RFC3986 )
+					. ' actual='
+					. http_build_query( $actual_queries[ $name ] ?? array(), '', '&', PHP_QUERY_RFC3986 );
+			}
+		}
+
+		self::collect_failure(
+			$failures,
+			$enabled_output_ok
+				&& '' === ( $outputs['categorySuppressed'] ?? null ),
+			'feed_links_extra emits one atom head link for each deterministic query branch and honors a disabled show filter',
+			array(
+				'outputs' => array_map(
+					static fn ( string $output ): array => self::describe_string( $output ),
+					$outputs
+				),
+				'attrs'   => $attrs,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$expected_queries === $actual_queries,
+			'feed_links_extra branch hrefs include expected post, term, author, search, archive, and comment feed arguments',
+			$query_diffs
+		);
+
+		$combined_output = implode( "\n", $outputs );
+		self::collect_failure(
+			$failures,
+			str_contains( $combined_output, \esc_attr( '::' . $marker . '<sep>&::' ) )
+				&& str_contains( $outputs['singular'] ?? '', \esc_attr( 'Single "' . $marker . '" & Comments' ) )
+				&& str_contains( $outputs['postType'] ?? '', \esc_attr( 'Archive <Type> & "' . $marker . '"' ) )
+				&& str_contains( $outputs['category'] ?? '', \esc_attr( $category->name ) )
+				&& str_contains( $outputs['tag'] ?? '', \esc_attr( $tag->name ) )
+				&& str_contains( $outputs['tax'] ?? '', \esc_attr( $term->name ) )
+				&& str_contains( $outputs['tax'] ?? '', \esc_attr( 'Topic <Tax> & "' . $marker . '"' ) )
+				&& str_contains( $outputs['author'] ?? '', \esc_attr( $author->display_name ) )
+				&& str_contains( $outputs['search'] ?? '', \esc_attr( $search ) )
+				&& ! str_contains( $combined_output, '<b>' )
+				&& ! str_contains( $combined_output, '<sep>' )
+				&& ! str_contains( $combined_output, '<href>' )
+				&& ! str_contains( $combined_output, '<Name>' )
+				&& ! str_contains( strtolower( $combined_output ), '<script' ),
+			'feed_links_extra escapes title fragments and filtered hrefs in rendered head links',
+			array(
+				'outputs' => array_map(
+					static fn ( string $output ): array => self::describe_string( $output ),
+					$outputs
+				),
+			)
+		);
+
+		$expected_show_calls = array(
+			'comments'      => array( true ),
+			'postComments'  => array( true ),
+			'postType'      => array( true ),
+			'category'      => array( true, true ),
+			'tag'           => array( true ),
+			'tax'           => array( true ),
+			'author'        => array( true ),
+			'search'        => array( true ),
+		);
+		self::collect_failure(
+			$failures,
+			8 === count( $args_calls )
+				&& $expected_show_calls === $show_calls
+				&& array() === $feed_link_calls
+				&& 1 === count( $post_comments_link_calls )
+				&& array( 'post-type', 'category', 'tag', 'tax', 'author', 'search' ) === array_column( $branch_link_calls, 'branch' ),
+			'feed_links_extra applies args, show, comment-link, and branch-specific link filters on the expected branches only',
+			array(
+				'argsCalls'             => $args_calls,
+				'showCalls'             => $show_calls,
+				'feedLinkCalls'         => $feed_link_calls,
+				'postCommentLinkCalls'  => $post_comments_link_calls,
+				'branchLinkCalls'       => $branch_link_calls,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			false === \has_filter( 'pre_option_home', array( self::class, 'filter_home' ), 10 )
+				&& false === \has_filter( 'pre_option_blogname', array( self::class, 'filter_blogname' ), 10 )
+				&& false === \has_filter( 'pre_option_permalink_structure', $plain_permalink_filter, 10 )
+				&& false === \has_filter( 'default_feed', $default_feed_filter, 10 )
+				&& false === \has_filter( 'feed_links_extra_args', $args_filter, 10 )
+				&& false === \has_filter( 'feed_link', $feed_link_filter, 10 )
+				&& false === \has_filter( 'post_comments_feed_link', $post_comments_link_filter, 10 )
+				&& false === \has_filter( 'post_type_archive_feed_link', $post_type_link_filter, 10 )
+				&& false === \has_filter( 'category_feed_link', $category_link_filter, 10 )
+				&& false === \has_filter( 'tag_feed_link', $tag_link_filter, 10 )
+				&& false === \has_filter( 'taxonomy_feed_link', $taxonomy_link_filter, 10 )
+				&& false === \has_filter( 'author_feed_link', $author_link_filter, 10 )
+				&& false === \has_filter( 'search_feed_link', $search_link_filter, 10 )
+				&& false === \has_filter( 'feed_links_show_comments_feed', $show_comments_filter, 10 )
+				&& false === \has_filter( 'feed_links_extra_show_post_comments_feed', $show_post_comments_filter, 10 )
+				&& false === \has_filter( 'feed_links_extra_show_post_type_archive_feed', $show_post_type_filter, 10 )
+				&& false === \has_filter( 'feed_links_extra_show_category_feed', $show_category_filter, 10 )
+				&& false === \has_filter( 'feed_links_extra_show_tag_feed', $show_tag_filter, 10 )
+				&& false === \has_filter( 'feed_links_extra_show_tax_feed', $show_tax_filter, 10 )
+				&& false === \has_filter( 'feed_links_extra_show_author_feed', $show_author_filter, 10 )
+				&& false === \has_filter( 'feed_links_extra_show_search_feed', $show_search_filter, 10 )
+				&& self::globals_match_snapshot( $global_snapshot )
+				&& self::cache_slots_match_snapshot( $cache_snapshot )
+				&& ! isset( $GLOBALS['wp_post_types'][ $post_type ] )
+				&& ! isset( $GLOBALS['wp_taxonomies'][ $taxonomy ] ),
+			'feed_links_extra check cleans filters, caches, registrations, and query globals',
+			array(
+				'globalsRestored' => self::globals_match_snapshot( $global_snapshot ),
+				'postTypeExists'  => isset( $GLOBALS['wp_post_types'][ $post_type ] ),
+				'taxonomyExists'  => isset( $GLOBALS['wp_taxonomies'][ $taxonomy ] ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'syndication.feed-extra.head-link-output-and-query-branches',
+			array() === $failures,
+			array( 'failures' => $failures )
+		);
+	}
+
 	private static function check_feed_link_generation( \ComponentFuzz\FuzzContext $ctx ): array {
 		$failures = array();
 
@@ -1408,6 +1978,62 @@ final class SyndicationSurface {
 		);
 	}
 
+	private static function cached_feed_term( int $term_id, string $taxonomy, string $slug, string $name ): object {
+		return (object) array(
+			'term_id'          => $term_id,
+			'name'             => $name,
+			'slug'             => $slug,
+			'term_group'       => 0,
+			'term_taxonomy_id' => $term_id + 100000,
+			'taxonomy'         => $taxonomy,
+			'description'      => '',
+			'parent'           => 0,
+			'count'            => 1,
+			'filter'           => 'raw',
+		);
+	}
+
+	private static function cached_feed_user( int $user_id, string $slug, string $display_name ): object {
+		return (object) array(
+			'ID'                  => $user_id,
+			'user_login'          => 'cfz_author_' . $slug,
+			'user_pass'           => '',
+			'user_nicename'       => 'cfz-author-' . $slug,
+			'user_email'          => 'cfz-author-' . $slug . '@example.test',
+			'user_url'            => '',
+			'user_registered'     => '2024-01-01 00:00:00',
+			'user_activation_key' => '',
+			'user_status'         => 0,
+			'display_name'        => $display_name,
+		);
+	}
+
+	private static function feed_extra_query( array $flags, array $query_vars = array(), $queried_object = null ): \WP_Query {
+		$query             = new \WP_Query();
+		$query->query_vars = $query_vars;
+
+		foreach ( $flags as $flag => $value ) {
+			$query->$flag = (bool) $value;
+		}
+
+		if ( null !== $queried_object ) {
+			$query->queried_object = $queried_object;
+
+			if ( $queried_object instanceof \WP_Post ) {
+				$query->post              = $queried_object;
+				$query->posts             = array( $queried_object );
+				$query->post_count        = 1;
+				$query->queried_object_id = (int) $queried_object->ID;
+			} elseif ( isset( $queried_object->term_id ) ) {
+				$query->queried_object_id = (int) $queried_object->term_id;
+			} elseif ( isset( $queried_object->ID ) ) {
+				$query->queried_object_id = (int) $queried_object->ID;
+			}
+		}
+
+		return $query;
+	}
+
 	private static function query_args( string $url ): array {
 		$query = parse_url( html_entity_decode( $url, ENT_QUOTES, 'UTF-8' ), PHP_URL_QUERY );
 		if ( ! is_string( $query ) ) {
@@ -1420,14 +2046,66 @@ final class SyndicationSurface {
 		return array_map( 'strval', $args );
 	}
 
+	private static function head_link_attrs( string $html ): array {
+		if ( ! preg_match( '/<link\s+([^>]+)>/i', $html, $link_match ) ) {
+			return array();
+		}
+
+		$attrs = array();
+		if ( ! preg_match_all( '/([a-zA-Z_:][-a-zA-Z0-9_:.]*)="([^"]*)"/', $link_match[1], $attr_matches, PREG_SET_ORDER ) ) {
+			return $attrs;
+		}
+
+		foreach ( $attr_matches as $attr_match ) {
+			$attrs[ $attr_match[1] ] = html_entity_decode( $attr_match[2], ENT_QUOTES, 'UTF-8' );
+		}
+
+		return $attrs;
+	}
+
+	private static function append_query_arg( string $url, string $key, string $value ): string {
+		return $url
+			. ( str_contains( $url, '?' ) ? '&' : '?' )
+			. rawurlencode( $key )
+			. '='
+			. rawurlencode( $value );
+	}
+
 	private static function plain_rewrite_stub(): object {
 		return new class() {
+			public string $front = '';
+
+			public string $root = '';
+
 			public function get_feed_permastruct(): string {
 				return '';
 			}
 
 			public function get_comment_feed_permastruct(): string {
 				return '';
+			}
+
+			public function get_search_permastruct(): string {
+				return '';
+			}
+
+			public function get_author_permastruct(): string {
+				return '';
+			}
+		};
+	}
+
+	private static function plain_wp_stub(): object {
+		return new class() {
+			/** @var string[] */
+			public array $public_query_vars = array();
+
+			public function add_query_var( string $qv ): void {
+				$this->public_query_vars[] = $qv;
+			}
+
+			public function remove_query_var( string $name ): void {
+				$this->public_query_vars = array_values( array_diff( $this->public_query_vars, array( $name ) ) );
 			}
 		};
 	}
@@ -1449,13 +2127,19 @@ final class SyndicationSurface {
 			'globals'        => self::snapshot_globals(
 				array(
 					'content_width',
+					'authordata',
+					'post',
 					'shortcode_tags',
 					'wp_actions',
 					'wp_current_filter',
 					'wp_embed',
 					'wp_filter',
 					'wp_filters',
+					'wp',
+					'wp_post_types',
+					'wp_query',
 					'wp_rewrite',
+					'wp_taxonomies',
 					'_wp_theme_features',
 				)
 			),
@@ -1519,6 +2203,69 @@ final class SyndicationSurface {
 				unset( $GLOBALS[ $name ] );
 			}
 		}
+	}
+
+	private static function snapshot_cache_slots( array $slots ): array {
+		$snapshots = array();
+
+		foreach ( $slots as $slot ) {
+			$found       = false;
+			$key         = $slot['key'];
+			$group       = $slot['group'];
+			$value       = \wp_cache_get( $key, $group, false, $found );
+			$snapshots[] = array(
+				'key'   => $key,
+				'group' => $group,
+				'found' => $found,
+				'value' => self::clone_value( $value ),
+			);
+		}
+
+		return $snapshots;
+	}
+
+	private static function restore_cache_slots( array $snapshots ): void {
+		foreach ( $snapshots as $snapshot ) {
+			if ( ! empty( $snapshot['found'] ) ) {
+				\wp_cache_set( $snapshot['key'], self::clone_value( $snapshot['value'] ), $snapshot['group'] );
+			} else {
+				\wp_cache_delete( $snapshot['key'], $snapshot['group'] );
+			}
+		}
+	}
+
+	private static function cache_slots_match_snapshot( array $snapshots ): bool {
+		foreach ( $snapshots as $snapshot ) {
+			$found = false;
+			$value = \wp_cache_get( $snapshot['key'], $snapshot['group'], false, $found );
+
+			if ( (bool) $snapshot['found'] !== $found ) {
+				return false;
+			}
+			if ( $found && self::clone_value( $value ) != $snapshot['value'] ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function globals_match_snapshot( array $snapshot ): bool {
+		foreach ( $snapshot as $name => $entry ) {
+			if ( array_key_exists( $name, $GLOBALS ) !== $entry['exists'] ) {
+				return false;
+			}
+
+			if ( ! $entry['exists'] ) {
+				continue;
+			}
+
+			if ( self::clone_value( $GLOBALS[ $name ] ) != $entry['value'] ) {
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 	private static function clone_value( $value ) {
