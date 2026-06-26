@@ -361,7 +361,8 @@ database, network requests, or a configured site.
   punycode handoff, array and string header parsing, newline-delimited
   attachments and embeds, multipart boundary/header/body preservation through
   serialized MIME output, reusable mailer cleanup/reset behavior,
-  success/failure actions, and emoji email body staticization.
+  invalid From failure payloads, early failure cleanup, success/failure
+  actions, and emoji email body staticization.
 - `markup`: block parse/serialize/render guards, shortcodes, text trimming,
   excerpts, balanced tags, URL extraction, link attribute helpers, and embed
   helpers.
