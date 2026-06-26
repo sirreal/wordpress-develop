@@ -66,13 +66,23 @@ final class KsesSurface {
 			);
 		}
 
-		$global_snapshot = self::snapshot_globals( self::kses_global_names() );
+		$global_snapshot            = self::snapshot_globals( self::kses_global_names() );
+		$pre_kses_hook_snapshot     = self::snapshot_hook( 'pre_kses' );
+		$pre_kses_hook_signature    = self::hook_signature( 'pre_kses' );
+		$pre_kses_hook_priority     = \has_filter( 'pre_kses', 'wp_pre_kses_block_attributes' );
 		try {
 			$results = array_merge( $results, self::check_allowed_html_contracts( $seed ) );
 			$results = array_merge( $results, self::check_custom_policy_and_filter_invariants( $seed ) );
 			$results = array_merge( $results, self::check_attribute_constraint_invariants( $seed ) );
 			$results = array_merge( $results, self::check_pdf_object_and_uri_attribute_invariants( $seed ) );
 			$results[] = self::check_helper_contract_matrix( $seed );
+			$results[] = self::check_pre_kses_hook_state(
+				$seed,
+				'kses.pre_kses-hook-state-before-block-attribute-check',
+				$pre_kses_hook_signature,
+				$pre_kses_hook_priority
+			);
+			self::restore_hook( 'pre_kses', $pre_kses_hook_snapshot );
 			$results[] = self::check_block_attribute_kses_invariants( $seed );
 
 			$rng = self::rng( $seed );
@@ -80,7 +90,14 @@ final class KsesSurface {
 				$case    = self::generate_case( $rng, $case_index );
 				$results = array_merge( $results, self::check_case( $seed, $case_index, $case ) );
 			}
+			$results[] = self::check_pre_kses_hook_state(
+				$seed,
+				'kses.pre_kses-hook-state-after-surface-run',
+				$pre_kses_hook_signature,
+				$pre_kses_hook_priority
+			);
 		} finally {
+			self::restore_hook( 'pre_kses', $pre_kses_hook_snapshot );
 			self::restore_globals( $global_snapshot );
 		}
 
@@ -3635,6 +3652,35 @@ final class KsesSurface {
 
 		$value = $snapshot['value'] ?? null;
 		$GLOBALS['wp_filter'][ $hook_name ] = is_object( $value ) ? clone $value : $value;
+	}
+
+	private static function check_pre_kses_hook_state( int $seed, string $invariant, array $expected_signature, $expected_priority ): array {
+		$actual_signature = self::hook_signature( 'pre_kses' );
+		$actual_priority  = \has_filter( 'pre_kses', 'wp_pre_kses_block_attributes' );
+		$priority_ok      = false === $actual_priority || 10 === $actual_priority;
+		$ok               = $priority_ok
+			&& $expected_priority === $actual_priority
+			&& $expected_signature === $actual_signature;
+
+		$details = array(
+			'expectedPriority'  => $expected_priority,
+			'actualPriority'    => $actual_priority,
+			'expectedSignature' => $expected_signature,
+			'actualSignature'   => $actual_signature,
+		);
+
+		if ( $ok ) {
+			return self::pass( $seed, null, $invariant, '', $details );
+		}
+
+		return self::fail(
+			$seed,
+			null,
+			$invariant,
+			'',
+			'pre_kses hook signature and wp_pre_kses_block_attributes priority remain stable',
+			$details
+		);
 	}
 
 	private static function hook_signature( string $hook_name ): array {
