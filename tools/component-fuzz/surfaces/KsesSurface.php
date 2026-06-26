@@ -642,43 +642,47 @@ final class KsesSurface {
 		$failures = array();
 
 		try {
-			$serialized          = \serialize_blocks( array( $block ) );
-			$parsed              = \parse_blocks( $serialized );
-			$direct_block        = \filter_block_kses( $parsed[0], $allowed, $protocols );
-			$direct_serialized   = \serialize_block( $direct_block );
-			$content_filtered    = \filter_block_content( $serialized, $allowed, $protocols );
-			$content_refiltered  = \filter_block_content( $content_filtered, $allowed, $protocols );
-			$content_reparsed    = \parse_blocks( $content_filtered );
-			$value_actual        = \filter_block_kses_value( $value_probe, $allowed, $protocols );
-			$value_expected      = self::block_kses_value_reference( $value_probe, $allowed, $protocols );
-			$template_actual     = \filter_block_kses_value(
+			$serialized            = \serialize_blocks( array( $block ) );
+			$parsed                = \parse_blocks( $serialized );
+			$direct_block          = \filter_block_kses( $parsed[0], $allowed, $protocols );
+			$direct_serialized     = \serialize_block( $direct_block );
+			$content_filtered      = \filter_block_content( $serialized, $allowed, $protocols );
+			$content_refiltered    = \filter_block_content( $content_filtered, $allowed, $protocols );
+			$content_reparsed      = \parse_blocks( $content_filtered );
+			$value_actual          = \filter_block_kses_value( $value_probe, $allowed, $protocols );
+			$value_expected        = self::block_kses_value_reference( $value_probe, $allowed, $protocols );
+			$template_actual       = \filter_block_kses_value(
 				$template_probe,
 				$allowed,
 				$protocols,
 				array( 'blockName' => 'core/template-part' )
 			);
-			$template_expected   = self::block_kses_value_reference(
+			$template_expected     = self::block_kses_value_reference(
 				$template_probe,
 				$allowed,
 				$protocols,
 				array( 'blockName' => 'core/template-part' )
 			);
 			$hook_priority_before = \has_filter( 'pre_kses', 'wp_pre_kses_block_attributes' );
-			$hook_added           = false;
-			if ( false === $hook_priority_before ) {
-				\add_filter( 'pre_kses', 'wp_pre_kses_block_attributes', 10, 3 );
-				$hook_added = true;
-			}
+			$hook_snapshot_before = self::snapshot_hook( 'pre_kses' );
+			$hook_signature_before = self::hook_signature( 'pre_kses' );
+			$hook_added            = false;
 			try {
+				if ( false === $hook_priority_before ) {
+					\add_filter( 'pre_kses', 'wp_pre_kses_block_attributes', 10, 3 );
+					$hook_added = true;
+				}
 				$hooked = \wp_kses( $serialized, $allowed, $protocols );
 			} finally {
-				if ( $hook_added ) {
-					\remove_filter( 'pre_kses', 'wp_pre_kses_block_attributes', 10 );
-				}
+				self::restore_hook( 'pre_kses', $hook_snapshot_before );
 			}
-			$hook_priority_after = \has_filter( 'pre_kses', 'wp_pre_kses_block_attributes' );
-			$hook_expected       = \wp_kses( $content_filtered, $allowed, $protocols );
+			$hook_priority_after  = \has_filter( 'pre_kses', 'wp_pre_kses_block_attributes' );
+			$hook_signature_after = self::hook_signature( 'pre_kses' );
+			$hook_expected        = \wp_kses( $content_filtered, $allowed, $protocols );
 		} catch ( \Throwable $e ) {
+			if ( isset( $hook_snapshot_before ) ) {
+				self::restore_hook( 'pre_kses', $hook_snapshot_before );
+			}
 			return self::throwable_result( $seed, null, 'kses.block-attribute-filtering.no-throw', '', $e );
 		}
 
@@ -710,6 +714,42 @@ final class KsesSurface {
 				'actual'   => $value_actual,
 			);
 		}
+		$link_html   = (string) ( $direct_block['attrs']['linkHtml'] ?? '' );
+		$nested_html = (string) ( $direct_block['attrs']['nested']['badKey'] ?? '' );
+		$value_html  = (string) ( $value_actual['html'] ?? '' );
+		if (
+			false !== stripos( $link_html, 'javascript:' )
+			|| false !== stripos( $link_html, 'onclick' )
+			|| false === strpos( $link_html, 'https://example.test/' . $token )
+			|| false !== stripos( $nested_html, 'javascript:' )
+			|| false !== stripos( $nested_html, 'onclick' )
+			|| false !== stripos( $nested_html, 'background-image' )
+			|| false === strpos( $nested_html, 'style="color:red"' )
+			|| false === strpos( $nested_html, 'data-safe="yes"' )
+			|| false !== stripos( $value_html, 'javascript:' )
+			|| false !== stripos( $value_html, 'onclick' )
+			|| false === strpos( $value_html, 'https://example.test/' . $token )
+		) {
+			$failures[] = array(
+				'label'      => 'block attribute HTML string leaves remove dangerous URI/style/event tokens and preserve safe markers',
+				'linkHtml'   => self::preview( $link_html ),
+				'nestedHtml' => self::preview( $nested_html ),
+				'valueHtml'  => self::preview( $value_html ),
+			);
+		}
+		if (
+			! array_key_exists( 'badKey', $value_actual )
+			|| array_key_exists( '<script>bad</script>Key', $value_actual )
+			|| 42 !== ( $value_actual['nested']['number'] ?? null )
+			|| true !== ( $value_actual['nested']['flag'] ?? null )
+			|| null !== ( $value_actual['nested']['nothing'] ?? null )
+			|| '<a href="mailto:test@example.test">Mail</a>' !== ( $value_actual['nested']['mailto'] ?? null )
+		) {
+			$failures[] = array(
+				'label' => 'recursive block attribute filtering sanitizes keys and preserves non-string scalar leaves',
+				'actual' => $value_actual,
+			);
+		}
 		if (
 			$template_expected !== $template_actual
 			|| '' !== ( $template_actual['tagName'] ?? null )
@@ -729,14 +769,17 @@ final class KsesSurface {
 			);
 		}
 		if (
-			( $hook_added && false !== $hook_priority_after )
-			|| ( ! $hook_added && $hook_priority_before !== $hook_priority_after )
+			$hook_signature_before !== $hook_signature_after
+			|| $hook_priority_before !== $hook_priority_after
+			|| ( false !== $hook_priority_before && 10 !== $hook_priority_before )
 		) {
 			$failures[] = array(
 				'label'  => 'pre_kses block attribute hook state is restored after hook-path check',
 				'before' => $hook_priority_before,
 				'after'  => $hook_priority_after,
 				'added'  => $hook_added,
+				'beforeSignature' => $hook_signature_before,
+				'afterSignature'  => $hook_signature_after,
 			);
 		}
 
@@ -745,6 +788,8 @@ final class KsesSurface {
 			'serializedPreview' => self::preview( $serialized ),
 			'filteredPreview'   => self::preview( $content_filtered ),
 			'hookPriority'      => $hook_priority_before,
+			'hookAdded'         => $hook_added,
+			'hookRestored'      => $hook_signature_before === $hook_signature_after,
 			'failureCount'      => count( $failures ),
 			'failures'          => array_slice( $failures, 0, 6 ),
 		);
@@ -3293,8 +3338,6 @@ final class KsesSurface {
 					'empty'                   => null,
 				),
 				'entityText'              => 'Keep &amp; normalize &#x3c;strong&#x3e;text&#x3c;/strong&#x3e;',
-				'style'                   => 'color:red;background-image:url(javascript:alert(1));width:calc(100% - 1em)',
-				'url'                     => 'javascript:alert(1)',
 				'xml:lang<script>x</script>' => 'en',
 			),
 			'innerBlocks'  => array(
@@ -3554,6 +3597,104 @@ final class KsesSurface {
 		}
 
 		return array_values( array_unique( $out ) );
+	}
+
+	private static function snapshot_hook( string $hook_name ): array {
+		$exists = isset( $GLOBALS['wp_filter'] )
+			&& is_array( $GLOBALS['wp_filter'] )
+			&& array_key_exists( $hook_name, $GLOBALS['wp_filter'] );
+
+		if ( ! $exists ) {
+			return array(
+				'exists' => false,
+				'value'  => null,
+			);
+		}
+
+		$value = $GLOBALS['wp_filter'][ $hook_name ];
+		return array(
+			'exists' => true,
+			'value'  => is_object( $value ) ? clone $value : $value,
+		);
+	}
+
+	private static function restore_hook( string $hook_name, array $snapshot ): void {
+		if ( empty( $snapshot['exists'] ) ) {
+			if ( isset( $GLOBALS['wp_filter'] ) && is_array( $GLOBALS['wp_filter'] ) ) {
+				unset( $GLOBALS['wp_filter'][ $hook_name ] );
+			}
+			return;
+		}
+
+		if ( ! isset( $GLOBALS['wp_filter'] ) || ! is_array( $GLOBALS['wp_filter'] ) ) {
+			$GLOBALS['wp_filter'] = array();
+		}
+
+		$value = $snapshot['value'] ?? null;
+		$GLOBALS['wp_filter'][ $hook_name ] = is_object( $value ) ? clone $value : $value;
+	}
+
+	private static function hook_signature( string $hook_name ): array {
+		if (
+			! isset( $GLOBALS['wp_filter'] )
+			|| ! is_array( $GLOBALS['wp_filter'] )
+			|| ! array_key_exists( $hook_name, $GLOBALS['wp_filter'] )
+		) {
+			return array( 'exists' => false );
+		}
+
+		$hook = $GLOBALS['wp_filter'][ $hook_name ];
+		if ( ! $hook instanceof \WP_Hook ) {
+			return array(
+				'exists' => true,
+				'type'   => is_object( $hook ) ? get_class( $hook ) : gettype( $hook ),
+			);
+		}
+
+		$callbacks = array();
+		foreach ( $hook->callbacks as $priority => $priority_callbacks ) {
+			foreach ( $priority_callbacks as $id => $callback ) {
+				$callbacks[] = array(
+					'priority'     => (int) $priority,
+					'id'           => (string) $id,
+					'function'     => self::hook_callback_summary( $callback['function'] ?? null ),
+					'acceptedArgs' => (int) ( $callback['accepted_args'] ?? 0 ),
+				);
+			}
+		}
+
+		usort(
+			$callbacks,
+			static function ( array $a, array $b ): int {
+				return array( $a['priority'], $a['id'] ) <=> array( $b['priority'], $b['id'] );
+			}
+		);
+
+		return array(
+			'exists'    => true,
+			'callbacks' => $callbacks,
+		);
+	}
+
+	private static function hook_callback_summary( $callback ): string {
+		if ( is_string( $callback ) ) {
+			return $callback;
+		}
+
+		if ( is_array( $callback ) && isset( $callback[0], $callback[1] ) ) {
+			$target = is_object( $callback[0] ) ? get_class( $callback[0] ) : (string) $callback[0];
+			return $target . '::' . (string) $callback[1];
+		}
+
+		if ( $callback instanceof \Closure ) {
+			return 'Closure:' . spl_object_hash( $callback );
+		}
+
+		if ( is_object( $callback ) && method_exists( $callback, '__invoke' ) ) {
+			return get_class( $callback ) . '::__invoke';
+		}
+
+		return gettype( $callback );
 	}
 
 	private static function kses_global_names(): array {
