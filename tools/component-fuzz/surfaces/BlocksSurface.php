@@ -28,6 +28,7 @@ final class BlocksSurface {
 				self::check_parser_detection_and_rendering( $ctx ),
 				self::check_nested_attribute_round_trips( $ctx ),
 				self::check_style_pattern_binding_registries( $ctx ),
+				self::check_block_bindings_render_pipeline( $ctx ),
 				self::check_metadata_and_pattern_categories( $ctx ),
 				self::check_block_hooks_insertion_and_metadata( $ctx ),
 				self::check_block_supports( $ctx ),
@@ -72,6 +73,7 @@ final class BlocksSurface {
 				'apply_block_hooks_to_content',
 				'block_has_support',
 				'get_all_registered_block_bindings_sources',
+				'get_block_bindings_supported_attributes',
 				'get_block_bindings_source',
 				'get_block_wrapper_attributes',
 				'get_hooked_blocks',
@@ -544,6 +546,210 @@ final class BlocksSurface {
 		return self::result(
 			$ctx,
 			'blocks.registry.style-pattern-binding-lifecycle',
+			array() === $failures,
+			array(
+				'cases'    => self::CASES,
+				'failures' => array_slice( $failures, 0, 6 ),
+			)
+		);
+	}
+
+	private static function check_block_bindings_render_pipeline( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+
+		foreach ( self::block_bindings_render_cases( $ctx->fork( 'binding-render' ) ) as $index => $case ) {
+			$supported_log    = array();
+			$source_log       = array();
+			$source_value_log = array();
+			$context_log      = array();
+			$render_log       = array();
+
+			$supported_filter = static function ( array $supported_attributes, string $block_type ) use ( $case, &$supported_log ): array {
+				$supported_log[] = array(
+					'hook'      => 'global',
+					'blockType' => $block_type,
+					'before'    => $supported_attributes,
+				);
+
+				if ( $case['blockName'] !== $block_type ) {
+					return $supported_attributes;
+				}
+
+				return array_values( array_unique( array_merge( $supported_attributes, array( 'content', 'unsupportedFromGlobal' ) ) ) );
+			};
+			$dynamic_filter   = static function ( array $supported_attributes ) use ( $case, &$supported_log ): array {
+				$supported_log[] = array(
+					'hook'      => 'dynamic',
+					'blockType' => $case['blockName'],
+					'before'    => $supported_attributes,
+				);
+
+				return array( 'content', 'url' );
+			};
+			$context_filter   = static function ( array $context, array $parsed_block, $parent_block ) use ( $case, &$context_log ): array {
+				$context_log[] = array(
+					'name'   => $parsed_block['blockName'] ?? null,
+					'parent' => $parent_block instanceof \WP_Block ? $parent_block->name : null,
+				);
+
+				if ( $case['blockName'] === ( $parsed_block['blockName'] ?? null ) ) {
+					$context['componentFuzz/bindingToken'] = $case['contextToken'];
+				}
+
+				return $context;
+			};
+			$source_filter    = static function ( $value, string $source_name, array $source_args, $block_instance, string $attribute_name ) use ( $case, &$source_value_log ) {
+				$source_value_log[] = array(
+					'value'     => $value,
+					'source'    => $source_name,
+					'args'      => $source_args,
+					'attribute' => $attribute_name,
+					'blockName' => $block_instance instanceof \WP_Block ? $block_instance->name : null,
+					'context'   => $block_instance instanceof \WP_Block ? ( $block_instance->context['componentFuzz/bindingToken'] ?? null ) : null,
+				);
+
+				if ( $case['sourceName'] !== $source_name ) {
+					return $value;
+				}
+
+				if ( 'content' === $attribute_name ) {
+					return $case['filteredContent'];
+				}
+				if ( 'url' === $attribute_name ) {
+					return $case['filteredUrl'];
+				}
+
+				return $value;
+			};
+			$get_value        = static function ( array $source_args, $block_instance, string $attribute_name ) use ( $case, &$source_log ) {
+				$source_log[] = array(
+					'args'      => $source_args,
+					'attribute' => $attribute_name,
+					'blockName' => $block_instance instanceof \WP_Block ? $block_instance->name : null,
+					'context'   => $block_instance instanceof \WP_Block ? ( $block_instance->context['componentFuzz/bindingToken'] ?? null ) : null,
+				);
+
+				if ( 'content' === $attribute_name ) {
+					return $case['sourceContent'];
+				}
+				if ( 'url' === $attribute_name ) {
+					return $case['sourceUrl'];
+				}
+
+				return 'unexpected-' . $case['token'] . '-' . $attribute_name;
+			};
+			$render_callback  = static function ( array $attributes, string $content, \WP_Block $block ) use ( $case, &$render_log ): string {
+				$render_log[] = array(
+					'blockName'       => $block->name,
+					'content'         => $content,
+					'contentAttr'     => $attributes['content'] ?? null,
+					'urlAttr'         => $attributes['url'] ?? null,
+					'unsupportedAttr' => $attributes['unsupported'] ?? null,
+					'metadata'        => $attributes['metadata'] ?? null,
+					'context'         => $block->context['componentFuzz/bindingToken'] ?? null,
+				);
+
+				return '<section data-cfz-bindings="' . esc_attr( $case['token'] ) . '">' . $content . '</section>';
+			};
+
+			$registered_source = \register_block_bindings_source(
+				$case['sourceName'],
+				array(
+					'label'              => 'Component Fuzz Binding Render ' . $index,
+					'uses_context'       => array( 'componentFuzz/bindingToken' ),
+					'get_value_callback' => $get_value,
+				)
+			);
+			$registered_block  = \register_block_type(
+				$case['blockName'],
+				array(
+					'title'           => 'Component Fuzz Binding Render',
+					'api_version'     => 3,
+					'attributes'      => self::block_bindings_render_attributes(),
+					'render_callback' => $render_callback,
+				)
+			);
+
+			\add_filter( 'block_bindings_supported_attributes', $supported_filter, 10, 2 );
+			\add_filter( 'block_bindings_supported_attributes_' . $case['blockName'], $dynamic_filter, 10, 1 );
+			\add_filter( 'render_block_context', $context_filter, 99, 3 );
+			\add_filter( 'block_bindings_source_value', $source_filter, 99, 5 );
+
+			try {
+				$supported = \get_block_bindings_supported_attributes( $case['blockName'] );
+				$rendered  = \render_block( $case['block'] );
+
+				$source_attributes       = array_column( $source_log, 'attribute' );
+				$source_value_attributes = array_column( $source_value_log, 'attribute' );
+				$render_entry            = $render_log[0] ?? array();
+
+				self::collect_failure(
+					$failures,
+					$registered_source instanceof \WP_Block_Bindings_Source
+						&& $registered_block instanceof \WP_Block_Type
+						&& array( 'content', 'url' ) === $supported
+						&& self::binding_supported_log_contains( $supported_log, 'global', $case['blockName'], array() )
+						&& self::binding_supported_log_contains( $supported_log, 'dynamic', $case['blockName'], array( 'content', 'unsupportedFromGlobal' ) ),
+					"block binding supported-attribute filters gate custom block attributes case {$index}",
+					array(
+						'case'         => $case,
+						'supported'    => $supported,
+						'supportedLog' => $supported_log,
+					)
+				);
+
+				self::collect_failure(
+					$failures,
+					array( 'content', 'url' ) === $source_attributes
+						&& array( 'content', 'url' ) === $source_value_attributes
+						&& self::binding_source_log_contains( $source_log, $case, 'content', $case['contentArgs'] )
+						&& self::binding_source_log_contains( $source_log, $case, 'url', $case['urlArgs'] )
+						&& self::binding_source_value_log_contains( $source_value_log, $case, 'content', $case['contentArgs'], $case['sourceContent'] )
+						&& self::binding_source_value_log_contains( $source_value_log, $case, 'url', $case['urlArgs'], $case['sourceUrl'] ),
+					"block binding sources receive exact args, block context, and value-filter payloads case {$index}",
+					array(
+						'case'           => $case,
+						'sourceLog'      => $source_log,
+						'sourceValueLog' => $source_value_log,
+					)
+				);
+
+				self::collect_failure(
+					$failures,
+					is_string( $rendered )
+						&& str_contains( $rendered, 'data-cfz-bindings="' . esc_attr( $case['token'] ) . '"' )
+						&& str_contains( $rendered, '<p>' . $case['filteredContent'] . '</p>' )
+						&& str_contains( $rendered, 'href="' . esc_attr( $case['filteredUrl'] ) . '"' )
+						&& str_contains( $rendered, 'Fallback link ' . esc_html( $case['token'] ) )
+						&& ! str_contains( $rendered, $case['fallbackContent'] )
+						&& ! str_contains( $rendered, $case['fallbackUrl'] )
+						&& $case['filteredContent'] === ( $render_entry['contentAttr'] ?? null )
+						&& $case['filteredUrl'] === ( $render_entry['urlAttr'] ?? null )
+						&& $case['fallbackUnsupported'] === ( $render_entry['unsupportedAttr'] ?? null )
+						&& isset( $render_entry['metadata']['bindings']['missing'], $render_entry['metadata']['bindings']['malformed'] )
+						&& $case['contextToken'] === ( $render_entry['context'] ?? null ),
+					"render_block merges computed binding attributes before dynamic rendering and replaces only supported HTML targets case {$index}",
+					array(
+						'case'        => $case,
+						'rendered'    => $rendered,
+						'renderLog'   => $render_log,
+						'contextLog'  => $context_log,
+						'sourceAttrs' => $source_attributes,
+					)
+				);
+			} finally {
+				\remove_filter( 'block_bindings_source_value', $source_filter, 99 );
+				\remove_filter( 'render_block_context', $context_filter, 99 );
+				\remove_filter( 'block_bindings_supported_attributes_' . $case['blockName'], $dynamic_filter, 10 );
+				\remove_filter( 'block_bindings_supported_attributes', $supported_filter, 10 );
+				\unregister_block_bindings_source( $case['sourceName'] );
+				\unregister_block_type( $case['blockName'] );
+			}
+		}
+
+		return self::result(
+			$ctx,
+			'blocks.block-bindings.render-pipeline',
 			array() === $failures,
 			array(
 				'cases'    => self::CASES,
@@ -1280,6 +1486,110 @@ final class BlocksSurface {
 		return $cases;
 	}
 
+	private static function block_bindings_render_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$cases = array();
+		for ( $i = 0; $i < self::CASES; ++$i ) {
+			$case                 = $ctx->fork( 'binding-render-' . $i );
+			$token                = self::slug( $case, 'binding-token' );
+			$block_name           = 'component-fuzz/' . self::slug( $case->fork( 'block' ), 'binding-block' );
+			$source_name          = 'component-fuzz/' . self::slug( $case->fork( 'source' ), 'binding-source' );
+			$missing_source       = 'component-fuzz/' . self::slug( $case->fork( 'missing-source' ), 'binding-missing' );
+			$fallback_content     = 'Fallback binding content ' . $token;
+			$fallback_url         = 'https://fallback.example.test/' . rawurlencode( $token );
+			$fallback_unsupported = 'fallback-unsupported-' . $token;
+			$source_content       = 'Source content ' . $token;
+			$source_url           = 'https://source.example.test/' . rawurlencode( $token );
+			$filtered_content     = 'Bound content ' . $token;
+			$filtered_url         = 'https://bound.example.test/' . rawurlencode( $token );
+			$content_args         = array(
+				'kind'  => 'content',
+				'token' => $token,
+				'index' => $i,
+			);
+			$url_args             = array(
+				'kind'  => 'url',
+				'token' => $token,
+				'index' => $i,
+			);
+
+			$cases[] = array(
+				'token'               => $token,
+				'contextToken'        => 'context-' . $token,
+				'blockName'           => $block_name,
+				'sourceName'          => $source_name,
+				'missingSource'       => $missing_source,
+				'fallbackContent'     => $fallback_content,
+				'fallbackUrl'         => $fallback_url,
+				'fallbackUnsupported' => $fallback_unsupported,
+				'sourceContent'       => $source_content,
+				'sourceUrl'           => $source_url,
+				'filteredContent'     => $filtered_content,
+				'filteredUrl'         => $filtered_url,
+				'contentArgs'         => $content_args,
+				'urlArgs'             => $url_args,
+				'block'               => self::parsed_block(
+					$block_name,
+					array(
+						'metadata'    => array(
+							'bindings' => array(
+								'content'     => array(
+									'source' => $source_name,
+									'args'   => $content_args,
+								),
+								'url'         => array(
+									'source' => $source_name,
+									'args'   => $url_args,
+								),
+								'unsupported' => array(
+									'source' => $source_name,
+									'args'   => array( 'kind' => 'unsupported', 'token' => $token ),
+								),
+								'missing'     => array(
+									'source' => $missing_source,
+									'args'   => array( 'kind' => 'missing', 'token' => $token ),
+								),
+								'malformed'   => array(
+									'args' => array( 'kind' => 'malformed', 'token' => $token ),
+								),
+							),
+						),
+						'content'     => $fallback_content,
+						'url'         => $fallback_url,
+						'unsupported' => $fallback_unsupported,
+					),
+					array(),
+					array(
+						'<p>' . esc_html( $fallback_content ) . '</p><a href="' . esc_attr( $fallback_url ) . '" title="' . esc_attr( $fallback_unsupported ) . '">Fallback link ' . esc_html( $token ) . '</a>',
+					)
+				),
+			);
+		}
+
+		return $cases;
+	}
+
+	private static function block_bindings_render_attributes(): array {
+		return array(
+			'content'     => array(
+				'type'     => 'string',
+				'source'   => 'rich-text',
+				'selector' => 'p',
+			),
+			'url'         => array(
+				'type'      => 'string',
+				'source'    => 'attribute',
+				'selector'  => 'a',
+				'attribute' => 'href',
+			),
+			'unsupported' => array(
+				'type'      => 'string',
+				'source'    => 'attribute',
+				'selector'  => 'a',
+				'attribute' => 'title',
+			),
+		);
+	}
+
 	private static function metadata_cases( \ComponentFuzz\FuzzContext $ctx ): array {
 		$cases = array();
 		for ( $i = 0; $i < self::CASES; ++$i ) {
@@ -1698,6 +2008,52 @@ final class BlocksSurface {
 				&& $filtered_token === ( $entry['filteredToken'] ?? null )
 				&& $context_token === ( $entry['contextToken'] ?? null )
 				&& $context_parent === ( $entry['contextParent'] ?? null )
+			) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private static function binding_supported_log_contains( array $log, string $hook, string $block_name, array $before ): bool {
+		foreach ( $log as $entry ) {
+			if (
+				$hook === ( $entry['hook'] ?? null )
+				&& $block_name === ( $entry['blockType'] ?? null )
+				&& $before === ( $entry['before'] ?? null )
+			) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private static function binding_source_log_contains( array $log, array $case, string $attribute, array $args ): bool {
+		foreach ( $log as $entry ) {
+			if (
+				$attribute === ( $entry['attribute'] ?? null )
+				&& $args === ( $entry['args'] ?? null )
+				&& $case['blockName'] === ( $entry['blockName'] ?? null )
+				&& $case['contextToken'] === ( $entry['context'] ?? null )
+			) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private static function binding_source_value_log_contains( array $log, array $case, string $attribute, array $args, string $value ): bool {
+		foreach ( $log as $entry ) {
+			if (
+				$attribute === ( $entry['attribute'] ?? null )
+				&& $args === ( $entry['args'] ?? null )
+				&& $value === ( $entry['value'] ?? null )
+				&& $case['sourceName'] === ( $entry['source'] ?? null )
+				&& $case['blockName'] === ( $entry['blockName'] ?? null )
+				&& $case['contextToken'] === ( $entry['context'] ?? null )
 			) {
 				return true;
 			}
