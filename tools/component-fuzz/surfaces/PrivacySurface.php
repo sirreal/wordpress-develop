@@ -1997,7 +1997,9 @@ final class PrivacySurface {
 	}
 
 	private static function check_erasure_processor( \ComponentFuzz\FuzzContext $ctx ): array {
-		$failures = array();
+		$failures                   = array();
+		$completed_path_exercised   = false;
+		$completed_path_skip_reason = null;
 
 		$malformed = array(
 			array( 'label' => 'non-array', 'response' => 'not an array' ),
@@ -2074,14 +2076,84 @@ final class PrivacySurface {
 			);
 		}
 
+		if ( self::wpdb_stub_available() ) {
+			$final_request_id = 93002;
+			$final_response   = array(
+				'done'           => true,
+				'items_removed'  => true,
+				'items_retained' => false,
+				'messages'       => array( 'final eraser finished' ),
+			);
+
+			self::reset_db_content();
+			self::$erased_actions = array();
+
+			try {
+				self::seed_db_request_post(
+					self::post_record(
+						array(
+							'ID'                => $final_request_id,
+							'post_title'        => 'privacy-final-erasure@example.test',
+							'post_name'         => 'remove_personal_data',
+							'post_status'       => 'request-confirmed',
+							'post_content'      => '{"processor":"privacy-erasure-final"}',
+							'post_password'     => \wp_fast_hash( 'final-erasure-key' ),
+							'post_modified'     => gmdate( 'Y-m-d H:i:s', time() - MINUTE_IN_SECONDS ),
+							'post_modified_gmt' => gmdate( 'Y-m-d H:i:s', time() - MINUTE_IN_SECONDS ),
+						)
+					)
+				);
+				self::set_post_meta( $final_request_id, array() );
+
+				$final_result    = self::call(
+					static function () use ( $final_response, $final_request_id ) {
+						return \wp_privacy_process_personal_data_erasure_page( $final_response, 2, 'privacy-final-erasure@example.test', 1, $final_request_id );
+					}
+				);
+				$completed_after = \wp_get_user_request( $final_request_id );
+				$completed_at    = \get_post_meta( $final_request_id, '_wp_user_request_completed_timestamp', true );
+				$completed_ok    = ! $final_result['threw']
+					&& $final_response === $final_result['value']
+					&& $completed_after instanceof \WP_User_Request
+					&& 'request-completed' === $completed_after->status
+					&& 'remove_personal_data' === $completed_after->action_name
+					&& 'privacy-final-erasure@example.test' === $completed_after->email
+					&& is_int( $completed_at )
+					&& $completed_at === $completed_after->completed_timestamp
+					&& $completed_at <= time()
+					&& $completed_at >= time() - 5
+					&& array( $final_request_id ) === self::$erased_actions;
+				$completed_path_exercised = true;
+
+				if ( ! $completed_ok ) {
+					self::record_failure(
+						$failures,
+						'erasure-processor.final-done-completes-request-and-fires-action',
+						array( 'label' => 'final-done' ),
+						array(
+							'finalResult'    => self::describe_call( $final_result ),
+							'completedAfter' => self::describe_value( $completed_after ),
+							'completedAt'    => self::describe_value( $completed_at ),
+							'erasedActions'  => self::describe_value( self::$erased_actions ),
+						)
+					);
+				}
+			} finally {
+				self::reset_db_content();
+				\clean_post_cache( $final_request_id );
+			}
+		} else {
+			$completed_path_skip_reason = 'The in-memory wpdb content stub is unavailable for the final erasure completion path.';
+		}
+
 		return self::row(
 			$ctx,
-			'privacy.erasure-processor.shape-and-nonfinal-done-flags',
+			'privacy.erasure-processor.shape-nonfinal-and-final-completion',
 			array() === $failures,
 			array(
 				'erasers'                  => array_keys( self::$erasers ),
-				'completedPathExercised'   => false,
-				'completedPathSkipReason'  => 'The final erasure path calls _wp_privacy_completed_request(), which updates posts through DB-backed wp_update_post().',
+				'completedPathExercised'   => $completed_path_exercised,
+				'completedPathSkipReason'  => $completed_path_skip_reason,
 				'erasedActions'            => self::describe_value( self::$erased_actions ),
 				'failures'                 => $failures,
 			)
