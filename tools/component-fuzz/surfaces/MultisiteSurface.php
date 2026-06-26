@@ -52,6 +52,8 @@ final class MultisiteSurface {
 			$rows[] = self::check_site_objects_and_normalization( $ctx );
 			$rows[] = self::check_network_objects_and_main_site( $ctx );
 			$rows[] = self::check_generated_site_network_fixture( $ctx, $case );
+			$rows[] = self::check_legacy_blog_identity_helpers( $ctx, $case );
+			$rows[] = self::check_bootstrap_resolution_helpers( $ctx, $case );
 			$rows[] = self::check_switch_stack_and_cache_context( $ctx );
 			$rows[] = self::check_blog_option_helpers( $ctx, $case );
 			$rows[] = self::check_network_option_helpers( $ctx );
@@ -201,17 +203,31 @@ final class MultisiteSurface {
 			'paths'    => $paths,
 		);
 
+		$matches = array();
 		foreach ( self::$sites as $site ) {
 			if ( ! self::domain_matches_request( $site->domain, $domain ) ) {
 				continue;
 			}
 
 			if ( in_array( $site->path, $paths, true ) ) {
-				return $site;
+				$matches[] = $site;
 			}
 		}
 
-		return false;
+		if ( array() === $matches ) {
+			return false;
+		}
+
+		usort(
+			$matches,
+			static function ( \WP_Site $left, \WP_Site $right ): int {
+				return ( strlen( $right->domain ) <=> strlen( $left->domain ) )
+					?: ( strlen( $right->path ) <=> strlen( $left->path ) )
+					?: ( $left->id <=> $right->id );
+			}
+		);
+
+		return $matches[0];
 	}
 
 	public static function filter_network_by_path( $pre, string $domain, string $path, ?int $segments, array $paths ) {
@@ -305,9 +321,14 @@ final class MultisiteSurface {
 				'delete_network_option',
 				'get_admin_url',
 				'get_blog_option',
+				'get_blog_details',
+				'get_blogaddress_by_id',
+				'get_blogaddress_by_name',
+				'get_blog_id_from_url',
 				'get_blogs_of_user',
 				'get_blog_count',
 				'get_current_blog_id',
+				'get_id_from_blogname',
 				'get_network_by_path',
 				'get_network',
 				'get_network_option',
@@ -320,6 +341,8 @@ final class MultisiteSurface {
 				'get_user_count',
 				'has_filter',
 				'is_multisite',
+				'domain_exists',
+				'ms_load_current_site_and_network',
 				'network_home_url',
 				'network_site_url',
 				'remove_filter',
@@ -526,6 +549,318 @@ final class MultisiteSurface {
 				'site'       => self::describe_site( $site ),
 				'network'    => self::describe_network( $network ),
 				'normalized' => self::describe_value( $normalized ),
+			)
+		);
+	}
+
+	private static function check_legacy_blog_identity_helpers( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures    = array();
+		$events      = array();
+		$start_blog  = get_current_blog_id();
+		$start_stack = $GLOBALS['_wp_switched_stack'];
+		$had_ms_loaded_action = isset( $GLOBALS['wp_actions'] ) && array_key_exists( 'ms_loaded', $GLOBALS['wp_actions'] );
+		$ms_loaded_action     = $GLOBALS['wp_actions']['ms_loaded'] ?? null;
+		$domain_filter = static function ( $result, string $domain, string $path, int $network_id ) use ( &$events ) {
+			$events[] = array(
+				'result'    => $result,
+				'domain'    => $domain,
+				'path'      => $path,
+				'networkId' => $network_id,
+			);
+
+			return $result;
+		};
+
+		add_filter( 'domain_exists', $domain_filter, 10, 4 );
+
+		try {
+			$GLOBALS['wp_actions']['ms_loaded'] = max( 1, (int) ( $GLOBALS['wp_actions']['ms_loaded'] ?? 0 ) );
+
+			$short_details = get_blog_details( $case['siteId'], false );
+			$full_details  = get_blog_details( $case['siteId'], true );
+			$current       = get_blog_details();
+
+			wp_cache_set( md5( 'www.' . $case['siteDomain'] . $case['sitePath'] ), $full_details, 'blog-lookup' );
+			$cached_lookup = get_blog_details(
+				array(
+					'domain' => 'www.' . $case['siteDomain'],
+					'path'   => $case['sitePath'],
+				)
+			);
+
+			$address_by_id      = get_blogaddress_by_id( $case['siteId'] );
+			$address_by_name    = get_blogaddress_by_name( $case['directorySlug'] );
+			$id_from_blogname   = get_id_from_blogname( $case['directorySlug'] );
+			$id_from_url        = get_blog_id_from_url( strtoupper( 'example.test' ), strtoupper( $case['directoryPath'] ) );
+			$id_from_url_again  = get_blog_id_from_url( 'example.test', $case['directoryPath'] );
+			$missing_url_id     = get_blog_id_from_url( 'missing.' . $case['siteDomain'], '/missing/' );
+			$missing_url_cached = get_blog_id_from_url( 'missing.' . $case['siteDomain'], '/missing/' );
+			$domain_hit         = domain_exists( 'example.test', untrailingslashit( $case['directoryPath'] ), 1 );
+			$domain_miss        = domain_exists( 'missing.' . $case['siteDomain'], '/missing', $case['networkId'] );
+		} finally {
+			remove_filter( 'domain_exists', $domain_filter, 10 );
+			self::clear_legacy_blog_identity_caches( $case );
+			if ( $had_ms_loaded_action ) {
+				$GLOBALS['wp_actions']['ms_loaded'] = $ms_loaded_action;
+			} else {
+				unset( $GLOBALS['wp_actions']['ms_loaded'] );
+			}
+			while ( ! empty( $GLOBALS['_wp_switched_stack'] ) ) {
+				restore_current_blog();
+			}
+		}
+
+		if (
+			! $short_details instanceof \WP_Site
+			|| $short_details->id !== $case['siteId']
+			|| array_key_exists( 'blogname', get_object_vars( $short_details ) )
+		) {
+			$failures[] = 'short blog details did not return only site-table fields';
+		}
+
+		if (
+			! $full_details instanceof \WP_Site
+			|| $full_details->id !== $case['siteId']
+			|| $full_details->blogname !== 'Generated Component Fuzz Site ' . $case['caseSeed']
+			|| $full_details->siteurl !== 'http://' . $case['siteDomain'] . untrailingslashit( $case['sitePath'] ) . '/wp'
+			|| $full_details->home !== 'http://' . $case['siteDomain'] . untrailingslashit( $case['sitePath'] )
+			|| (int) $full_details->post_count !== $case['postCount']
+		) {
+			$failures[] = 'full blog details did not hydrate filtered site options';
+		}
+
+		if ( ! $current instanceof \WP_Site || 1 !== $current->id || 'Main Component Fuzz Site' !== $current->blogname ) {
+			$failures[] = 'current blog details did not use current blog option context';
+		}
+
+		if ( ! $cached_lookup instanceof \WP_Site || $cached_lookup->id !== $case['siteId'] ) {
+			$failures[] = 'domain/path blog-details cache lookup did not return generated site';
+		}
+
+		if ( 'http://' . $case['siteDomain'] . $case['sitePath'] !== $address_by_id ) {
+			$failures[] = 'get_blogaddress_by_id did not compose generated site URL';
+		}
+
+		if ( 'http://example.test/' . $case['directorySlug'] . '/' !== $address_by_name ) {
+			$failures[] = 'get_blogaddress_by_name did not compose subdirectory network URL';
+		}
+
+		if (
+			$case['directorySiteId'] !== $id_from_blogname
+			|| $case['directorySiteId'] !== $id_from_url
+			|| $case['directorySiteId'] !== $id_from_url_again
+			|| 0 !== $missing_url_id
+			|| 0 !== $missing_url_cached
+		) {
+			$failures[] = 'blog slug and URL ID helpers did not hit/cache expected IDs';
+		}
+
+		if ( $case['directorySiteId'] !== $domain_hit || null !== $domain_miss ) {
+			$failures[] = 'domain_exists hit/miss semantics diverged from generated site fixture';
+		}
+
+		if (
+			2 !== count( $events )
+			|| ( $events[0]['result'] ?? null ) !== $case['directorySiteId']
+			|| ( $events[0]['path'] ?? null ) !== $case['directoryPath']
+			|| null !== ( $events[1]['result'] ?? null )
+			|| ( $events[1]['path'] ?? null ) !== '/missing/'
+		) {
+			$failures[] = 'domain_exists filter did not observe expected normalized payloads';
+		}
+
+		if ( $start_blog !== get_current_blog_id() || $start_stack !== $GLOBALS['_wp_switched_stack'] || false !== $GLOBALS['switched'] ) {
+			$failures[] = 'legacy blog identity helpers did not restore blog switch globals';
+		}
+
+		return $ctx->result(
+			'multisite.legacy-blog-identity.address-details-domain-and-url-helpers',
+			array() === $failures,
+			array(
+				'case'            => self::describe_case( $case ),
+				'failures'        => $failures,
+				'shortDetails'    => self::describe_site( $short_details ?? null ),
+				'fullDetails'     => self::describe_site( $full_details ?? null ),
+				'addressById'     => $address_by_id ?? null,
+				'addressByName'   => $address_by_name ?? null,
+				'idFromBlogname'  => $id_from_blogname ?? null,
+				'idFromUrl'       => $id_from_url ?? null,
+				'missingUrlId'    => $missing_url_id ?? null,
+				'domainHit'       => $domain_hit ?? null,
+				'domainMiss'      => self::describe_value( $domain_miss ?? null ),
+				'domainEvents'    => self::describe_value( $events ),
+			)
+		);
+	}
+
+	private static function check_bootstrap_resolution_helpers( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		if ( defined( 'DOMAIN_CURRENT_SITE' ) || defined( 'PATH_CURRENT_SITE' ) ) {
+			return $ctx->skip(
+				'multisite.bootstrap-resolution.current-site-network',
+				'DOMAIN_CURRENT_SITE/PATH_CURRENT_SITE constants force the constants branch.'
+			);
+		}
+
+		$failures     = array();
+		$site_events  = array();
+		$snapshot     = array(
+			'currentSite'  => $GLOBALS['current_site'] ?? null,
+			'currentBlog'  => $GLOBALS['current_blog'] ?? null,
+			'pathLog'      => self::$path_lookup_log,
+			'installing'   => function_exists( 'wp_installing' ) ? wp_installing() : null,
+			'httpsExists'  => array_key_exists( 'HTTPS', $_SERVER ),
+			'https'        => $_SERVER['HTTPS'] ?? null,
+		);
+		$site_not_found = static function ( \WP_Network $current_site, string $domain, string $path ) use ( &$site_events ): void {
+			$site_events[] = array(
+				'networkId' => $current_site->id,
+				'domain'    => $domain,
+				'path'      => $path,
+			);
+		};
+
+		add_action( 'ms_site_not_found', $site_not_found, 10, 3 );
+
+		try {
+			if ( function_exists( 'wp_installing' ) ) {
+				wp_installing( false );
+			}
+			unset( $_SERVER['HTTPS'] );
+
+			self::$path_lookup_log = array();
+			wp_cache_delete( 'current_network', 'site-options' );
+			$GLOBALS['current_site'] = null;
+			$GLOBALS['current_blog'] = null;
+			$subdirectory_loaded = ms_load_current_site_and_network( 'example.test', $case['directoryPath'] . 'child/', false );
+			$subdirectory_site   = $GLOBALS['current_site'] ?? null;
+			$subdirectory_blog   = $GLOBALS['current_blog'] ?? null;
+			$subdirectory_log    = self::$path_lookup_log;
+
+			self::$path_lookup_log = array();
+			wp_cache_delete( 'current_network', 'site-options' );
+			$GLOBALS['current_site'] = null;
+			$GLOBALS['current_blog'] = null;
+			$subdomain_loaded = ms_load_current_site_and_network( 'blog17.example.test', '/child/', true );
+			$subdomain_site   = $GLOBALS['current_site'] ?? null;
+			$subdomain_blog   = $GLOBALS['current_blog'] ?? null;
+			$subdomain_log    = self::$path_lookup_log;
+
+			self::$path_lookup_log = array();
+			wp_cache_delete( 'current_network', 'site-options' );
+			$GLOBALS['current_site'] = null;
+			$GLOBALS['current_blog'] = null;
+			$missing_result = ms_load_current_site_and_network( 'missing.example.test', '/missing/', true );
+			$missing_site   = $GLOBALS['current_site'] ?? null;
+			$missing_blog   = $GLOBALS['current_blog'] ?? null;
+			$missing_log    = self::$path_lookup_log;
+		} finally {
+			remove_action( 'ms_site_not_found', $site_not_found, 10 );
+			wp_cache_delete( 'current_network', 'site-options' );
+			self::$path_lookup_log = $snapshot['pathLog'];
+			$GLOBALS['current_site'] = $snapshot['currentSite'];
+			$GLOBALS['current_blog'] = $snapshot['currentBlog'];
+			if ( function_exists( 'wp_installing' ) && is_bool( $snapshot['installing'] ) ) {
+				wp_installing( $snapshot['installing'] );
+			}
+			if ( $snapshot['httpsExists'] ) {
+				$_SERVER['HTTPS'] = $snapshot['https'];
+			} else {
+				unset( $_SERVER['HTTPS'] );
+			}
+		}
+
+		if (
+			true !== $subdirectory_loaded
+			|| ! $subdirectory_site instanceof \WP_Network
+			|| 1 !== $subdirectory_site->id
+			|| ! $subdirectory_blog instanceof \WP_Site
+			|| $case['directorySiteId'] !== $subdirectory_blog->id
+		) {
+			$failures[] = 'subdirectory bootstrap did not resolve current network and generated directory site';
+		}
+
+		if (
+			! self::lookup_log_contains( $subdirectory_log, 'network', 'example.test', '/' )
+			|| ! self::lookup_log_contains( $subdirectory_log, 'site', 'example.test', $case['directoryPath'] )
+		) {
+			$failures[] = 'subdirectory bootstrap did not perform expected network and site path lookups';
+		}
+
+		if (
+			true !== $subdomain_loaded
+			|| ! $subdomain_site instanceof \WP_Network
+			|| 1 !== $subdomain_site->id
+			|| ! $subdomain_blog instanceof \WP_Site
+			|| 17 !== $subdomain_blog->id
+		) {
+			$failures[] = 'subdomain bootstrap did not resolve site first and then network';
+		}
+
+		if (
+			! self::lookup_log_contains( $subdomain_log, 'site', 'blog17.example.test', '/' )
+			|| self::lookup_log_contains_type( $subdomain_log, 'network' )
+		) {
+			$failures[] = 'subdomain bootstrap lookup path did not stay on the site-first branch';
+		}
+
+		if (
+			defined( 'NOBLOGREDIRECT' )
+				? ( false === $missing_result || is_string( $missing_result ) )
+				: 'http://example.test/wp-signup.php?new=missing' === $missing_result
+		) {
+			// Expected branch.
+		} else {
+			$failures[] = 'missing subdomain bootstrap did not return expected signup redirect or fail-closed value';
+		}
+
+		if (
+			! $missing_site instanceof \WP_Network
+			|| 1 !== $missing_site->id
+			|| ! empty( $missing_blog )
+			|| 1 !== count( $site_events )
+			|| ( $site_events[0]['networkId'] ?? null ) !== 1
+			|| ( $site_events[0]['domain'] ?? null ) !== 'missing.example.test'
+			|| ( $site_events[0]['path'] ?? null ) !== '/missing/'
+		) {
+			$failures[] = 'missing subdomain bootstrap did not fire expected site-not-found payload';
+		}
+
+		if (
+			! self::lookup_log_contains( $missing_log, 'site', 'missing.example.test', '/' )
+			|| ! self::lookup_log_contains( $missing_log, 'network', 'missing.example.test', '/' )
+		) {
+			$failures[] = 'missing subdomain bootstrap did not perform expected site and network lookups';
+		}
+
+		if ( ( $GLOBALS['current_site'] ?? null ) !== $snapshot['currentSite'] || ( $GLOBALS['current_blog'] ?? null ) !== $snapshot['currentBlog'] ) {
+			$failures[] = 'bootstrap resolution check did not restore current site/blog globals';
+		}
+
+		return $ctx->result(
+			'multisite.bootstrap-resolution.current-site-network',
+			array() === $failures,
+			array(
+				'case'            => self::describe_case( $case ),
+				'failures'        => $failures,
+				'subdirectory'    => array(
+					'result'  => $subdirectory_loaded ?? null,
+					'network' => self::describe_network( $subdirectory_site ?? null ),
+					'site'    => self::describe_site( $subdirectory_blog ?? null ),
+					'log'     => self::describe_value( $subdirectory_log ?? array() ),
+				),
+				'subdomain'       => array(
+					'result'  => $subdomain_loaded ?? null,
+					'network' => self::describe_network( $subdomain_site ?? null ),
+					'site'    => self::describe_site( $subdomain_blog ?? null ),
+					'log'     => self::describe_value( $subdomain_log ?? array() ),
+				),
+				'missing'         => array(
+					'result'  => $missing_result ?? null,
+					'network' => self::describe_network( $missing_site ?? null ),
+					'site'    => self::describe_site( $missing_blog ?? null ),
+					'log'     => self::describe_value( $missing_log ?? array() ),
+				),
+				'siteNotFound'    => $site_events,
 			)
 		);
 	}
@@ -872,6 +1207,31 @@ final class MultisiteSurface {
 		return false;
 	}
 
+	private static function lookup_log_contains( array $events, string $type, string $domain, string $path ): bool {
+		foreach ( $events as $event ) {
+			if (
+				is_array( $event )
+				&& $type === ( $event['type'] ?? null )
+				&& $domain === ( $event['domain'] ?? null )
+				&& in_array( $path, (array) ( $event['paths'] ?? array() ), true )
+			) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private static function lookup_log_contains_type( array $events, string $type ): bool {
+		foreach ( $events as $event ) {
+			if ( is_array( $event ) && $type === ( $event['type'] ?? null ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
 	private static function check_site_and_network_queries( \ComponentFuzz\FuzzContext $ctx ): array {
 		$wpdb = $GLOBALS['wpdb'];
 		$before_query = is_object( $wpdb ) && property_exists( $wpdb, 'last_query' ) ? $wpdb->last_query : null;
@@ -945,7 +1305,7 @@ final class MultisiteSurface {
 			&& 1 === count( $site_objects )
 			&& $site_objects[0] instanceof \WP_Site
 			&& 17 === $site_objects[0]->id
-			&& 2 === $site_count
+			&& 3 === $site_count
 			&& array( 1, 2 ) === $network_ids
 			&& 1 === count( $network_objects )
 			&& $network_objects[0] instanceof \WP_Network
@@ -1271,16 +1631,20 @@ final class MultisiteSurface {
 		$case_ctx     = $ctx->fork( 'multisite-rich-case' );
 		$network_slug = self::slug( $case_ctx, 'net' );
 		$site_slug    = self::slug( $case_ctx, 'site' );
+		$directory_slug = self::slug( $case_ctx->fork( 'directory-site' ), 'dir' );
 		$case_seed    = $case_ctx->seed();
 		$network_id   = 300 + $case_ctx->int( 1, 400 );
 		$site_id      = 5000 + $case_ctx->int( 1, 4000 );
+		$directory_site_id = 9200 + $case_ctx->int( 1, 500 );
 		$month        = $case_ctx->int( 1, 12 );
 		$network_path = '/' . $network_slug . '/';
 		$site_path    = $network_path . $site_slug . '/';
+		$directory_path = '/' . $directory_slug . '/';
 		$domain_label = self::slug( $case_ctx, 'domain' );
 		$site_domain  = $site_slug . '.' . $domain_label . '.example.test';
 		$network_domain = $network_slug . '.' . $domain_label . '.example.test';
 		$mature         = $case_ctx->bool( 30 ) ? '1' : '0';
+		$post_count     = $case_ctx->int( 1, 999 );
 		$raw_site_data = array(
 			'domain'       => " HTTPS://{$site_domain}/Bad Path?x=1 \n",
 			'path'         => '//' . trim( $site_path, '/' ) . '//',
@@ -1298,12 +1662,16 @@ final class MultisiteSurface {
 			'caseSeed'            => $case_seed,
 			'networkId'           => $network_id,
 			'siteId'              => $site_id,
+			'directorySiteId'     => $directory_site_id,
 			'userId'              => 7000 + $case_ctx->int( 1, 3000 ),
 			'networkDomain'       => $network_domain,
 			'siteDomain'          => $site_domain,
 			'networkPath'         => $network_path,
 			'sitePath'            => $site_path,
+			'directorySlug'       => $directory_slug,
+			'directoryPath'       => $directory_path,
 			'mature'              => (int) $mature,
+			'postCount'           => $post_count,
 			'rawSiteData'         => $raw_site_data,
 			'normalizedRawDomain' => preg_replace( '/[^a-z0-9\-.:]+/i', '', $raw_site_data['domain'] ),
 			'normalizedRawPath'   => trailingslashit( '/' . trim( $raw_site_data['path'], '/' ) ),
@@ -1355,6 +1723,7 @@ final class MultisiteSurface {
 				'upload_path'                  => 'wp-content/uploads',
 				'upload_url_path'              => '',
 				'uploads_use_yearmonth_folders' => '1',
+				'post_count'                   => '17',
 			),
 			17 => array(
 				'home'                         => 'http://blog17.example.test',
@@ -1364,6 +1733,7 @@ final class MultisiteSurface {
 				'upload_path'                  => 'wp-content/uploads/blog17',
 				'upload_url_path'              => '',
 				'uploads_use_yearmonth_folders' => '1',
+				'post_count'                   => '23',
 			),
 			23 => array(
 				'home'                         => 'http://network-two.example.test/archive',
@@ -1373,6 +1743,7 @@ final class MultisiteSurface {
 				'upload_path'                  => 'wp-content/uploads/archive',
 				'upload_url_path'              => '',
 				'uploads_use_yearmonth_folders' => '0',
+				'post_count'                   => '0',
 			),
 			$case['siteId'] => array(
 				'home'                         => 'http://' . $case['siteDomain'] . untrailingslashit( $case['sitePath'] ),
@@ -1382,6 +1753,17 @@ final class MultisiteSurface {
 				'upload_path'                  => $case['uploadPath'],
 				'upload_url_path'              => $case['uploadUrl'],
 				'uploads_use_yearmonth_folders' => '1',
+				'post_count'                   => (string) $case['postCount'],
+			),
+			$case['directorySiteId'] => array(
+				'home'                         => 'http://example.test' . untrailingslashit( $case['directoryPath'] ),
+				'siteurl'                      => 'http://example.test' . untrailingslashit( $case['directoryPath'] ) . '/wp',
+				'blogname'                     => 'Directory Component Fuzz Site ' . $case['caseSeed'],
+				'admin_email'                  => 'directory-' . $case['caseSeed'] . '@example.test',
+				'upload_path'                  => 'wp-content/uploads/' . $case['directorySlug'],
+				'upload_url_path'              => '',
+				'uploads_use_yearmonth_folders' => '1',
+				'post_count'                   => '5',
 			),
 		);
 
@@ -1413,6 +1795,7 @@ final class MultisiteSurface {
 			self::site_from_parts( 17, 'blog17.example.test', '/', 1, 1, 0, 0, 0, 0 ),
 			self::site_from_parts( 23, 'network-two.example.test', '/archive/', 2, 0, 1, 0, 0, 0 ),
 			self::site_from_parts( $case['siteId'], $case['siteDomain'], $case['sitePath'], $case['networkId'], 1, 0, $case['mature'], 0, 0 ),
+			self::site_from_parts( $case['directorySiteId'], 'example.test', $case['directoryPath'], 1, 1, 0, 0, 0, 0 ),
 		);
 		self::$networks = array(
 			self::network_from_parts( 1, 'example.test', '/', 1, 'Primary Component Fuzz Network' ),
@@ -1557,6 +1940,27 @@ final class MultisiteSurface {
 		self::$path_lookup_log       = array();
 		self::$sites           = array();
 		self::$networks        = array();
+	}
+
+	private static function clear_legacy_blog_identity_caches( array $case ): void {
+		foreach ( array( 1, $case['siteId'], $case['directorySiteId'] ) as $site_id ) {
+			wp_cache_delete( $site_id, 'site-details' );
+			wp_cache_delete( $site_id, 'blog-details' );
+			wp_cache_delete( $site_id . 'short', 'blog-details' );
+		}
+
+		foreach (
+			array(
+				$case['siteDomain'] . $case['sitePath'],
+				'www.' . $case['siteDomain'] . $case['sitePath'],
+				'example.test' . $case['directoryPath'],
+				'missing.' . $case['siteDomain'] . '/missing/',
+			) as $domain_path
+		) {
+			$key = md5( strtolower( $domain_path ) );
+			wp_cache_delete( $key, 'blog-lookup' );
+			wp_cache_delete( $key, 'blog-id-cache' );
+		}
 	}
 
 	private static function make_wpdb_stub( array $options ): \Component_Fuzz_WPDB_Stub {
@@ -1842,11 +2246,14 @@ final class MultisiteSurface {
 			'caseSeed'      => $case['caseSeed'],
 			'networkId'     => $case['networkId'],
 			'siteId'        => $case['siteId'],
+			'directorySiteId' => $case['directorySiteId'],
 			'userId'        => $case['userId'],
 			'networkDomain' => $case['networkDomain'],
 			'siteDomain'    => $case['siteDomain'],
 			'networkPath'   => $case['networkPath'],
 			'sitePath'      => $case['sitePath'],
+			'directorySlug' => $case['directorySlug'],
+			'directoryPath' => $case['directoryPath'],
 			'uploadTime'    => $case['uploadTime'],
 		);
 	}

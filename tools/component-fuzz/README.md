@@ -396,10 +396,11 @@ database, network requests, or a configured site.
   behavior.
 - `multisite`: no-DB multisite/network API coverage, including synthetic
   `WP_Site` and `WP_Network` objects, site data normalization, cache-backed
-  lookups, blog-switch stack/cache restoration, filter-backed network option
+  lookups, legacy blog identity helpers, bootstrap current-site/current-network
+  resolution, blog-switch stack/cache restoration, filter-backed network option
   reads, stub-backed network option CRUD, large-network threshold/filter
-  contracts, pre-query-short-circuited site/network queries, and
-  current/switched URL helpers.
+  contracts, pre-query-short-circuited site/network queries, domain/path lookup
+  helpers, and current/switched URL helpers.
 - `navigation`: nav menu location registration, theme menu assignment lookup,
   menu object and item setup filters, current-item class derivation, current-tree
   parent/ancestor propagation, walker output, depth pruning,
