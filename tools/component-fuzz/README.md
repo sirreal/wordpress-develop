@@ -583,8 +583,9 @@ database, network requests, or a configured site.
   priming, empty-entry, warm-cache, and re-prime invariants.
 - `template-hierarchy`: no-DB classic PHP template hierarchy coverage,
   including child/parent lookup priority, query-template filters, direct
-  archive/page/search/404/embed helper filters and path confinement,
-  stylesheet/template root precedence, single template ordering, generated
+  archive/page/search/404/embed/author/date/home/front-page/privacy/singular/
+  attachment helper filters and path confinement, stylesheet/template root
+  precedence, single template ordering, generated
   category/tag/taxonomy decoded-slug and term-ID ordering, `load_template()`
   include semantics, template-part hooks and args, and guarded
   comments-template state handling.
