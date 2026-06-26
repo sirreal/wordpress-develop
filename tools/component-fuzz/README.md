@@ -143,7 +143,8 @@ database, network requests, or a configured site.
 - `content-lifecycle`: in-memory wpdb-backed post, post-meta, term, user, and
   comment CRUD lifecycles, including insert/update/read/delete round trips,
   duplicate and invalid-input errors, sanitizer agreement, monotonic IDs,
-  metadata cache invalidation, cheap hook ordering, cache/count refresh
+  metadata cache invalidation, post-to-term relationship field modes, helper
+  caches, relationship hook arguments, post-delete cleanup, cache/count refresh
   behavior, and per-iteration state restoration.
 - `comments`: comment filtering, sanitizer agreement, max-length boundaries,
   type partitioning, comment classes, author URL/email links, excerpt/text
@@ -720,9 +721,12 @@ The `content-lifecycle` surface uses a bounded in-memory `wpdb` stub that
 recognizes the narrow SQL shapes emitted by core post, term, user, comment, and
 metadata lifecycle APIs; it is not a general SQL engine. Post metadata coverage
 asserts add/read/update/delete, unique keys, serialized array values, cache
-invalidation, metadata hooks, and post-delete cleanup. Rich post-to-term
-relationship behavior is covered by `taxonomy-relationships`, still limited to
-the recognized term relationship SQL shapes emitted by the targeted core APIs.
+invalidation, metadata hooks, and post-delete cleanup. Post-to-term relationship
+coverage asserts category/tag set/append/replace/remove/delete helpers, object
+term field modes, relationship caches, hook payloads, and post-delete cleanup.
+Broader taxonomy relationship behavior is covered by `taxonomy-relationships`,
+still limited to the recognized term relationship SQL shapes emitted by the
+targeted core APIs.
 The `taxonomy` surface remains no-DB; term-query coverage short-circuits through
 `terms_pre_query` and asserts query parsing/filter contracts rather than SQL
 hydration.

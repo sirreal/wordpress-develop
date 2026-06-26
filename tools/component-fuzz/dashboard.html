@@ -424,10 +424,10 @@
 				</tr>
 				<tr>
 					<td><code>content-lifecycle</code></td>
-					<td><span class="status good">review follow-up passed</span></td>
-					<td>Main worktree; post-meta lifecycle follow-up through <code>9d3f744ee5</code></td>
-					<td>Main focused run: 600 passed, 0 skipped, 0 failed; latest broad run: 8465 passed, 66 skipped, 0 failed.</td>
-					<td>In-memory post, post-meta, term, user, and comment CRUD lifecycles, duplicate/invalid inputs, sanitizer agreement, metadata cache invalidation, metadata hooks, post-delete cleanup, count refresh, and state restoration.</td>
+					<td><span class="status good">review fixes passed</span></td>
+					<td>Main worktree; reviewer Singer findings fixed through <code>3b335ffb7b</code></td>
+					<td>Main focused runs: seeds 1 and 224 each 700 passed, 0 skipped, 0 failed; latest smoke: 4520 passed, 33 skipped, 0 failed.</td>
+					<td>In-memory post, post-meta, post-to-term relationship, term, user, and comment CRUD lifecycles, duplicate/invalid inputs, sanitizer agreement, metadata cache invalidation, relationship helper/cache/hook oracles, post-delete cleanup, count refresh, and state restoration.</td>
 				</tr>
 				<tr>
 					<td><code>auth-flow</code></td>
@@ -1749,6 +1749,12 @@
 					<td><code>html-api</code></td>
 					<td>700 passed, 0 skipped, 0 failed after semantic parser mode probes, breadcrumb stack replay, tree-preservation normalization, token serialization, and textarea/foreign-content boundary coverage.</td>
 					<td>8467 passed, 66 skipped, 0 failed at 2 iterations after discovery sitemap field fuzzing.</td>
+				</tr>
+				<tr>
+					<td><code>3b335ffb7b</code></td>
+					<td><code>content-lifecycle</code></td>
+					<td>700 passed, 0 skipped, 0 failed at seeds 1 and 224 after post-to-term relationship set/append/replace/remove/delete helpers, object-term field modes, relationship cache invalidation, hook payloads/counts, and post-delete cleanup coverage.</td>
+					<td>4520 passed, 33 skipped, 0 failed at 1 iteration after content-lifecycle term relationship review fixes.</td>
 				</tr>
 				<tr>
 					<td><code>9d3f744ee5</code></td>
