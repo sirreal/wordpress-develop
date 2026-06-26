@@ -36,6 +36,7 @@ final class QuerySurface {
 			$rows = array_merge( $rows, self::check_wp_query_cache_keys( $ctx ) );
 			$rows = array_merge( $rows, self::check_wp_query_result_cache( $ctx ) );
 			$rows = array_merge( $rows, self::check_user_query_parsing( $ctx ) );
+			$rows = array_merge( $rows, self::check_user_query_sql_semantics( $ctx ) );
 			$rows = array_merge( $rows, self::check_user_query_pre_query( $ctx ) );
 			$rows = array_merge( $rows, self::check_comment_query_parsing( $ctx ) );
 			$rows = array_merge( $rows, self::check_comment_query_pre_query( $ctx ) );
@@ -833,6 +834,94 @@ final class QuerySurface {
 				array( 'call' => self::describe_call( $call ) )
 			),
 		);
+	}
+
+	private static function check_user_query_sql_semantics( \ComponentFuzz\FuzzContext $ctx ): array {
+		$rows  = array();
+		$cases = self::user_query_semantic_cases( $ctx );
+
+		foreach ( $cases as $case_index => $case ) {
+			$call = self::call_guarded(
+				static function () use ( $case ) {
+					return self::user_query_semantic_observation( $case );
+				}
+			);
+
+			$rows[] = self::case_result(
+				$ctx,
+				$case_index,
+				$case,
+				'query.user-query.semantic-sql-no-throw',
+				$call['ok'] && is_array( $call['value'] ),
+				array( 'call' => self::describe_call( $call ) )
+			);
+
+			if ( ! $call['ok'] || ! is_array( $call['value'] ) ) {
+				continue;
+			}
+
+			$rows[] = self::case_result(
+				$ctx,
+				$case_index,
+				$case,
+				'query.user-query.semantic-sql-features',
+				self::user_query_sql_expectations_match( $call['value'], $case['expect'] ?? array() ),
+				array(
+					'expect'      => $case['expect'] ?? array(),
+					'observation' => self::describe_value( $call['value'] ),
+				)
+			);
+		}
+
+		$hook_case = array(
+			'label'     => 'pre-get-search-pre-user-query-hooks',
+			'queryVars' => array(
+				'blog_id'        => 0,
+				'fields'         => 'ID',
+				'search'         => 'ignored',
+				'search_columns' => array( 'ID' ),
+				'orderby'        => 'login',
+				'order'          => 'DESC',
+				'count_total'    => false,
+			),
+		);
+		$hook_call = self::call_guarded(
+			static function () use ( $hook_case ) {
+				return self::user_query_hook_mutation_observation( $hook_case['queryVars'] );
+			}
+		);
+
+		$rows[] = self::case_result(
+			$ctx,
+			count( $cases ),
+			$hook_case,
+			'query.user-query.hook-mutation-no-throw',
+			$hook_call['ok'] && is_array( $hook_call['value'] ),
+			array( 'call' => self::describe_call( $hook_call ) )
+		);
+
+		if ( $hook_call['ok'] && is_array( $hook_call['value'] ) ) {
+			$hook_observation = $hook_call['value'];
+			$rows[]           = self::case_result(
+				$ctx,
+				count( $cases ),
+				$hook_case,
+				'query.user-query.hook-mutations-scoped',
+				1 === $hook_observation['preGetUsersHits']
+					&& 1 === $hook_observation['userSearchColumnsHits']
+					&& 1 === $hook_observation['preUserQueryHits']
+					&& array( 'user_login', 'user_email' ) === $hook_observation['searchColumnsBefore']
+					&& 'hooked' === $hook_observation['searchSeen']
+					&& 'ORDER BY user_email DESC' === $hook_observation['queryOrderby']
+					&& str_contains( $hook_observation['queryWhere'], "display_name LIKE '%hooked%'" )
+					&& str_contains( $hook_observation['queryWhere'], '/*cfz_pre_user_query*/' )
+					&& ! str_contains( $hook_observation['queryWhere'], 'user_login LIKE' )
+					&& $hook_observation['hookRuntimeRestored'],
+				array( 'observation' => self::describe_value( $hook_observation ) )
+			);
+		}
+
+		return $rows;
 	}
 
 	private static function check_comment_query_parsing( \ComponentFuzz\FuzzContext $ctx ): array {
@@ -1813,6 +1902,160 @@ final class QuerySurface {
 		return $cases;
 	}
 
+	private static function user_query_semantic_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		unset( $ctx );
+
+		return array(
+			array(
+				'label'     => 'fields-include-wins-invalid-orderby',
+				'queryVars' => array(
+					'blog_id'     => 0,
+					'fields'      => array( 'ID', 'invalid', 'user_email' ),
+					'include'     => array( 5, 'bad', 2 ),
+					'exclude'     => array( 7, 8 ),
+					'orderby'     => 'include bad_order',
+					'order'       => 'ASC',
+					'number'      => 10,
+					'count_total' => false,
+				),
+				'expect'    => array(
+					'fieldsExact'      => 'wp_users.ID,wp_users.user_email',
+					'whereContains'    => array( 'wp_users.ID IN (5,0,2)' ),
+					'whereNotContains' => array( 'ID NOT IN', '7,8' ),
+					'orderbyContains'  => array( 'FIELD( wp_users.ID, 5,0,2 ) ASC' ),
+					'orderbyNotContains' => array( 'bad_order' ),
+					'limitContains'    => array( 'LIMIT' ),
+				),
+			),
+			array(
+				'label'     => 'invalid-orderby-falls-back-to-login',
+				'queryVars' => array(
+					'blog_id'     => 0,
+					'fields'      => 'ID',
+					'orderby'     => 'bad_order another_bad_order',
+					'order'       => 'sideways',
+					'count_total' => false,
+				),
+				'expect'    => array(
+					'orderbyExact'       => 'ORDER BY user_login DESC',
+					'orderbyNotContains' => array( 'bad_order', 'another_bad_order' ),
+				),
+			),
+			array(
+				'label'     => 'login-and-nicename-in-field-order',
+				'queryVars' => array(
+					'blog_id'      => 0,
+					'fields'       => 'ID',
+					'login__in'    => array( 'beta', "quote'user" ),
+					'nicename__in' => array( 'nice', "quote'name" ),
+					'orderby'      => 'login__in nicename__in',
+					'order'        => 'DESC',
+					'count_total'  => false,
+				),
+				'expect'    => array(
+					'whereContains'      => array( "user_login IN ( 'beta','quote\\'user' )", "user_nicename IN ( 'nice','quote\\'name' )" ),
+					'orderbyContains'    => array( "FIELD( user_login, 'beta','quote\\'user' )", "FIELD( user_nicename, 'nice','quote\\'name' )" ),
+					'orderbyNotContains' => array( ' ASC', ' DESC' ),
+				),
+			),
+			array(
+				'label'     => 'explicit-search-columns-allowlist',
+				'queryVars' => array(
+					'blog_id'        => 0,
+					'fields'         => 'ID',
+					'search'         => '*admin@example.com*',
+					'search_columns' => array( 'user_email', 'bad_column' ),
+					'count_total'    => false,
+				),
+				'expect'    => array(
+					'whereContains'    => array( "user_email LIKE '%admin@example.com%'" ),
+					'whereNotContains' => array( 'bad_column', 'user_login LIKE', 'display_name LIKE' ),
+				),
+			),
+			array(
+				'label'     => 'numeric-search-infers-login-and-id',
+				'queryVars' => array(
+					'blog_id'     => 0,
+					'fields'      => 'ID',
+					'search'      => '42',
+					'count_total' => false,
+				),
+				'expect'    => array(
+					'whereContains'    => array( "user_login LIKE '42'", "ID = '42'" ),
+					'whereNotContains' => array( 'user_email LIKE', 'user_url LIKE', 'display_name LIKE' ),
+				),
+			),
+			array(
+				'label'     => 'url-search-infers-user-url',
+				'queryVars' => array(
+					'blog_id'     => 0,
+					'fields'      => 'ID',
+					'search'      => 'https://example.test/path',
+					'count_total' => false,
+				),
+				'expect'    => array(
+					'whereContains'    => array( "user_url LIKE 'https://example.test/path'" ),
+					'whereNotContains' => array( 'user_login LIKE', 'user_email LIKE', 'display_name LIKE' ),
+				),
+			),
+			array(
+				'label'     => 'general-search-infers-public-user-columns',
+				'queryVars' => array(
+					'blog_id'     => 0,
+					'fields'      => 'ID',
+					'search'      => '*alpha*',
+					'count_total' => false,
+				),
+				'expect'    => array(
+					'whereContains' => array( 'user_login LIKE', 'user_url LIKE', 'user_email LIKE', 'user_nicename LIKE', 'display_name LIKE' ),
+				),
+			),
+			array(
+				'label'     => 'role-capability-blog-prefix-clauses',
+				'queryVars' => array(
+					'blog_id'            => 3,
+					'fields'             => 'ID',
+					'role'               => 'administrator, editor',
+					'role__in'           => array( 'subscriber' ),
+					'role__not_in'       => array( 'blocked' ),
+					'capability'         => 'edit_posts',
+					'capability__not_in' => array( 'read' ),
+					'count_total'        => false,
+				),
+				'roles'     => true,
+				'expect'    => array(
+					'fromContains'  => array( 'wp_usermeta' ),
+					'whereContains' => array( 'wp_capabilities', 'edit\\\\_posts', 'administrator', 'editor', 'subscriber', 'blocked', 'read', 'NOT LIKE' ),
+					'whereNotContains' => array( 'wp_3_capabilities' ),
+				),
+			),
+			array(
+				'label'     => 'has-published-posts-nonzero-blog',
+				'queryVars' => array(
+					'blog_id'             => 4,
+					'fields'              => 'ID',
+					'has_published_posts' => array( 'post', 'page' ),
+					'count_total'         => false,
+				),
+				'expect'    => array(
+					'whereContains' => array( 'SELECT DISTINCT wp_posts.post_author', "wp_posts.post_status = 'publish'", "wp_posts.post_type IN ( 'post', 'page' )" ),
+				),
+			),
+			array(
+				'label'     => 'has-published-posts-zero-blog-noop',
+				'queryVars' => array(
+					'blog_id'             => 0,
+					'fields'              => 'ID',
+					'has_published_posts' => array( 'post' ),
+					'count_total'         => false,
+				),
+				'expect'    => array(
+					'whereNotContains' => array( 'SELECT DISTINCT', 'post_author', 'post_type IN' ),
+				),
+			),
+		);
+	}
+
 	private static function comment_query_cases( \ComponentFuzz\FuzzContext $ctx ): array {
 		$cases = array(
 			array(
@@ -2197,6 +2440,106 @@ final class QuerySurface {
 		);
 	}
 
+	private static function user_query_semantic_observation( array $case ): array {
+		$roles_snapshot = array_key_exists( 'wp_roles', $GLOBALS )
+			? array( 'exists' => true, 'value' => $GLOBALS['wp_roles'] )
+			: array( 'exists' => false );
+
+		try {
+			if ( ! empty( $case['roles'] ) ) {
+				$GLOBALS['wp_roles'] = self::user_query_roles_stub();
+			}
+
+			return self::user_query_parse_observation( $case['queryVars'] );
+		} finally {
+			if ( $roles_snapshot['exists'] ) {
+				$GLOBALS['wp_roles'] = $roles_snapshot['value'];
+			} else {
+				unset( $GLOBALS['wp_roles'] );
+			}
+		}
+	}
+
+	private static function user_query_hook_mutation_observation( array $query_vars ): array {
+		$hook_snapshot           = self::snapshot_hook_runtime();
+		$pre_get_users_hits      = 0;
+		$user_search_hits        = 0;
+		$pre_user_query_hits     = 0;
+		$search_columns_before   = array();
+		$search_seen             = null;
+		$pre_get_users_callback  = static function ( \WP_User_Query $query ) use ( &$pre_get_users_hits ): void {
+			++$pre_get_users_hits;
+			$query->set( 'search', '*hooked*' );
+			$query->set( 'search_columns', array( 'user_login', 'user_email', 'bad_column' ) );
+			$query->set( 'orderby', 'ID' );
+			$query->set( 'order', 'ASC' );
+		};
+		$search_columns_callback = static function ( array $columns, string $search, \WP_User_Query $query ) use ( &$user_search_hits, &$search_columns_before, &$search_seen ): array {
+			unset( $query );
+
+			++$user_search_hits;
+			$search_columns_before = $columns;
+			$search_seen           = $search;
+
+			return array( 'display_name' );
+		};
+		$pre_user_query_callback = static function ( \WP_User_Query $query ) use ( &$pre_user_query_hits ): void {
+			++$pre_user_query_hits;
+			$query->query_orderby = 'ORDER BY user_email DESC';
+			$query->query_where  .= ' AND 1=1 /*cfz_pre_user_query*/';
+		};
+
+		try {
+			\add_filter( 'pre_get_users', $pre_get_users_callback, 10, 1 );
+			\add_filter( 'user_search_columns', $search_columns_callback, 10, 3 );
+			\add_filter( 'pre_user_query', $pre_user_query_callback, 10, 1 );
+
+			$observation = self::user_query_parse_observation( $query_vars );
+		} finally {
+			\remove_filter( 'pre_get_users', $pre_get_users_callback, 10 );
+			\remove_filter( 'user_search_columns', $search_columns_callback, 10 );
+			\remove_filter( 'pre_user_query', $pre_user_query_callback, 10 );
+			self::restore_hook_runtime( $hook_snapshot );
+		}
+
+		return $observation + array(
+			'preGetUsersHits'      => $pre_get_users_hits,
+			'userSearchColumnsHits' => $user_search_hits,
+			'preUserQueryHits'     => $pre_user_query_hits,
+			'searchColumnsBefore'  => $search_columns_before,
+			'searchSeen'           => $search_seen,
+			'hookRuntimeRestored'  => self::hook_runtime_matches( $hook_snapshot ),
+		);
+	}
+
+	private static function user_query_roles_stub(): object {
+		return new class() {
+			public array $roles = array(
+				'administrator' => array(
+					'capabilities' => array(
+						'edit_posts'     => true,
+						'manage_options' => true,
+					),
+				),
+				'editor'        => array(
+					'capabilities' => array(
+						'edit_posts'    => true,
+						'publish_posts' => true,
+					),
+				),
+				'subscriber'    => array(
+					'capabilities' => array(
+						'read' => true,
+					),
+				),
+			);
+
+			public function for_site( $blog_id = null ): void {
+				unset( $blog_id );
+			}
+		};
+	}
+
 	private static function user_query_pre_query_observation( array $query_vars ): array {
 		$queries_before = self::wpdb_recorded_queries();
 		$filter_hits    = 0;
@@ -2421,6 +2764,55 @@ final class QuerySurface {
 		foreach ( $expect['whereContains'] ?? array() as $needle ) {
 			if ( ! is_array( $sql ) || ! str_contains( $sql['where'], $needle ) ) {
 				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function user_query_sql_expectations_match( array $observation, array $expect ): bool {
+		foreach (
+			array(
+				'fieldsExact'  => 'queryFields',
+				'orderbyExact' => 'queryOrderby',
+			) as $expect_key => $observation_key
+		) {
+			if ( array_key_exists( $expect_key, $expect ) && (string) $expect[ $expect_key ] !== (string) ( $observation[ $observation_key ] ?? '' ) ) {
+				return false;
+			}
+		}
+
+		foreach (
+			array(
+				'fieldsContains'  => 'queryFields',
+				'fromContains'    => 'queryFrom',
+				'whereContains'   => 'queryWhere',
+				'orderbyContains' => 'queryOrderby',
+				'limitContains'   => 'queryLimit',
+				'sqlContains'     => 'sql',
+			) as $expect_key => $observation_key
+		) {
+			foreach ( $expect[ $expect_key ] ?? array() as $needle ) {
+				if ( ! str_contains( (string) ( $observation[ $observation_key ] ?? '' ), (string) $needle ) ) {
+					return false;
+				}
+			}
+		}
+
+		foreach (
+			array(
+				'fieldsNotContains'  => 'queryFields',
+				'fromNotContains'    => 'queryFrom',
+				'whereNotContains'   => 'queryWhere',
+				'orderbyNotContains' => 'queryOrderby',
+				'limitNotContains'   => 'queryLimit',
+				'sqlNotContains'     => 'sql',
+			) as $expect_key => $observation_key
+		) {
+			foreach ( $expect[ $expect_key ] ?? array() as $needle ) {
+				if ( str_contains( (string) ( $observation[ $observation_key ] ?? '' ), (string) $needle ) ) {
+					return false;
+				}
 			}
 		}
 
@@ -2914,6 +3306,7 @@ final class QuerySurface {
 		return array(
 			'current_user:exists',
 			'wp_actions:value',
+			'wp_filters:value',
 			'wp_post_types:exists',
 			'wp_the_query:exists',
 		);
@@ -3436,11 +3829,72 @@ final class QuerySurface {
 		};
 	}
 
+	private static function snapshot_hook_runtime(): array {
+		$snapshot = array();
+		foreach ( array( 'wp_filter', 'wp_actions', 'wp_filters', 'wp_current_filter' ) as $name ) {
+			$snapshot[ $name ] = array_key_exists( $name, $GLOBALS )
+				? array(
+					'exists' => true,
+					'value'  => self::clone_snapshot_value( $GLOBALS[ $name ] ),
+				)
+				: array( 'exists' => false );
+		}
+
+		return $snapshot;
+	}
+
+	private static function restore_hook_runtime( array $snapshot ): void {
+		foreach ( $snapshot as $name => $entry ) {
+			if ( $entry['exists'] ) {
+				$GLOBALS[ $name ] = $entry['value'];
+			} else {
+				unset( $GLOBALS[ $name ] );
+			}
+		}
+	}
+
+	private static function hook_runtime_matches( array $snapshot ): bool {
+		foreach ( $snapshot as $name => $entry ) {
+			$exists = array_key_exists( $name, $GLOBALS );
+			if ( (bool) $entry['exists'] !== $exists ) {
+				return false;
+			}
+
+			if ( $entry['exists'] && $GLOBALS[ $name ] !== $entry['value'] ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function clone_snapshot_value( $value ) {
+		if ( is_object( $value ) ) {
+			if ( $value instanceof \Closure ) {
+				return $value;
+			}
+
+			return clone $value;
+		}
+
+		if ( is_array( $value ) ) {
+			$copy = array();
+			foreach ( $value as $key => $entry ) {
+				$copy[ $key ] = self::clone_snapshot_value( $entry );
+			}
+
+			return $copy;
+		}
+
+		return $value;
+	}
+
 	private static function snapshot_globals(): array {
 		$names    = array(
 			'wpdb',
 			'wp_filter',
 			'wp_actions',
+			'wp_filters',
 			'wp_current_filter',
 			'wp_taxonomies',
 			'wp_post_types',
