@@ -685,10 +685,13 @@ final class ShortcodesSurface {
 		$unmatched_tag    = self::tag( $ctx, 'image-context-unmatched' );
 		$pre_outer        = self::tag( $ctx, 'image-context-outer' );
 		$pre_inner        = self::tag( $ctx, 'image-context-inner' );
+		$zero_outer       = self::tag( $ctx, 'image-context-zero-outer' );
+		$zero_inner       = self::tag( $ctx, 'image-context-zero-inner' );
 		$hook_snapshot    = self::snapshot_hook( $hook );
 		$registry_snapshot = self::snapshot_registry();
 		$scoped_events    = array();
 		$preexisting_events = array();
+		$zero_priority_events = array();
 		$failures         = array();
 
 		try {
@@ -844,6 +847,87 @@ final class ShortcodesSurface {
 					'afterCount'    => $preexisting_after_count,
 				)
 			);
+
+			self::clear_hook( $hook );
+			\add_filter( $hook, $context_callback, 0 );
+			self::replace_registry( array() );
+			\add_shortcode(
+				$zero_outer,
+				static function () use ( &$zero_priority_events, $hook, $context_callback, $zero_inner ) {
+					$zero_priority_events[] = array(
+						'phase'           => 'outer-before',
+						'priority'        => \has_filter( $hook, $context_callback ),
+						'context'         => \apply_filters( $hook, 'wp_get_attachment_image' ),
+						'totalCount'      => self::hook_callback_total_count( $hook, $context_callback ),
+						'priority0Count'  => self::hook_callback_count( $hook, $context_callback, 0 ),
+						'priority10Count' => self::hook_callback_count( $hook, $context_callback, 10 ),
+					);
+
+					$nested = \do_shortcode( 'nested [' . $zero_inner . ' /]' );
+
+					$zero_priority_events[] = array(
+						'phase'           => 'outer-after',
+						'priority'        => \has_filter( $hook, $context_callback ),
+						'context'         => \apply_filters( $hook, 'wp_get_attachment_image' ),
+						'totalCount'      => self::hook_callback_total_count( $hook, $context_callback ),
+						'priority0Count'  => self::hook_callback_count( $hook, $context_callback, 0 ),
+						'priority10Count' => self::hook_callback_count( $hook, $context_callback, 10 ),
+						'nested'          => $nested,
+					);
+
+					return 'zero-outer<' . $nested . '>';
+				}
+			);
+			\add_shortcode(
+				$zero_inner,
+				static function () use ( &$zero_priority_events, $hook, $context_callback ) {
+					$zero_priority_events[] = array(
+						'phase'           => 'inner',
+						'priority'        => \has_filter( $hook, $context_callback ),
+						'context'         => \apply_filters( $hook, 'wp_get_attachment_image' ),
+						'totalCount'      => self::hook_callback_total_count( $hook, $context_callback ),
+						'priority0Count'  => self::hook_callback_count( $hook, $context_callback, 0 ),
+						'priority10Count' => self::hook_callback_count( $hook, $context_callback, 10 ),
+					);
+
+					return 'zero-inner-image-context';
+				}
+			);
+
+			$zero_priority_source = 'before [' . $zero_outer . ']body[/' . $zero_outer . '] after';
+			$zero_priority_output = \do_shortcode( $zero_priority_source );
+			$zero_after_priority = \has_filter( $hook, $context_callback );
+			$zero_after_total = self::hook_callback_total_count( $hook, $context_callback );
+			$zero_after_priority_10 = self::hook_callback_count( $hook, $context_callback, 10 );
+			$zero_phases = array_column( $zero_priority_events, 'phase' );
+			$zero_priorities = array_column( $zero_priority_events, 'priority' );
+			$zero_contexts = array_column( $zero_priority_events, 'context' );
+			$zero_totals = array_column( $zero_priority_events, 'totalCount' );
+			$zero_priority_0_counts = array_column( $zero_priority_events, 'priority0Count' );
+			$zero_priority_10_counts = array_column( $zero_priority_events, 'priority10Count' );
+
+			self::collect_failure(
+				$failures,
+				'before zero-outer<nested zero-inner-image-context> after' === $zero_priority_output
+					&& array( 'outer-before', 'inner', 'outer-after' ) === $zero_phases
+					&& array( 0, 0, 0 ) === $zero_priorities
+					&& array( 'do_shortcode', 'do_shortcode', 'do_shortcode' ) === $zero_contexts
+					&& array( 1, 1, 1 ) === $zero_totals
+					&& array( 1, 1, 1 ) === $zero_priority_0_counts
+					&& array( 0, 0, 0 ) === $zero_priority_10_counts
+					&& 0 === $zero_after_priority
+					&& 1 === $zero_after_total
+					&& 0 === $zero_after_priority_10,
+				'priority-0 preexisting media image context filters are treated as already installed',
+				array(
+					'source'          => self::describe_string( $zero_priority_source ),
+					'output'          => self::describe_string( $zero_priority_output ),
+					'events'          => $zero_priority_events,
+					'afterPriority'   => $zero_after_priority,
+					'afterTotal'      => $zero_after_total,
+					'afterPriority10' => $zero_after_priority_10,
+				)
+			);
 		} finally {
 			self::restore_registry( $registry_snapshot );
 			self::restore_hook( $hook, $hook_snapshot );
@@ -854,7 +938,7 @@ final class ShortcodesSurface {
 			'shortcodes.do-shortcode-image-context-scoped',
 			$failures,
 			array(
-				'tags' => array( $scoped_tag, $pre_outer, $pre_inner ),
+				'tags' => array( $scoped_tag, $pre_outer, $pre_inner, $zero_outer, $zero_inner ),
 			)
 		);
 	}
@@ -2058,13 +2142,19 @@ final class ShortcodesSurface {
 	}
 
 	private static function snapshot_hook( string $hook ): array {
-		$exists = isset( $GLOBALS['wp_filter'] )
+		$wp_filter_exists = array_key_exists( 'wp_filter', $GLOBALS );
+		$exists = $wp_filter_exists
 			&& is_array( $GLOBALS['wp_filter'] )
 			&& array_key_exists( $hook, $GLOBALS['wp_filter'] );
 
 		return array(
-			'exists' => $exists,
-			'value'  => $exists ? self::clone_hook_value( $GLOBALS['wp_filter'][ $hook ] ) : null,
+			'wpFilterExists'        => $wp_filter_exists,
+			'exists'                => $exists,
+			'value'                 => $exists ? self::clone_hook_value( $GLOBALS['wp_filter'][ $hook ] ) : null,
+			'wpFiltersExists'       => array_key_exists( 'wp_filters', $GLOBALS ),
+			'wpFiltersValue'        => $GLOBALS['wp_filters'] ?? null,
+			'wpCurrentFilterExists' => array_key_exists( 'wp_current_filter', $GLOBALS ),
+			'wpCurrentFilterValue'  => $GLOBALS['wp_current_filter'] ?? null,
 		);
 	}
 
@@ -2077,14 +2167,30 @@ final class ShortcodesSurface {
 	}
 
 	private static function restore_hook( string $hook, array $snapshot ): void {
-		if ( ! isset( $GLOBALS['wp_filter'] ) || ! is_array( $GLOBALS['wp_filter'] ) ) {
-			$GLOBALS['wp_filter'] = array();
+		if ( $snapshot['wpFilterExists'] ) {
+			if ( ! isset( $GLOBALS['wp_filter'] ) || ! is_array( $GLOBALS['wp_filter'] ) ) {
+				$GLOBALS['wp_filter'] = array();
+			}
+
+			if ( $snapshot['exists'] ) {
+				$GLOBALS['wp_filter'][ $hook ] = self::clone_hook_value( $snapshot['value'] );
+			} else {
+				unset( $GLOBALS['wp_filter'][ $hook ] );
+			}
+		} else {
+			unset( $GLOBALS['wp_filter'] );
 		}
 
-		if ( $snapshot['exists'] ) {
-			$GLOBALS['wp_filter'][ $hook ] = self::clone_hook_value( $snapshot['value'] );
+		if ( $snapshot['wpFiltersExists'] ) {
+			$GLOBALS['wp_filters'] = $snapshot['wpFiltersValue'];
 		} else {
-			unset( $GLOBALS['wp_filter'][ $hook ] );
+			unset( $GLOBALS['wp_filters'] );
+		}
+
+		if ( $snapshot['wpCurrentFilterExists'] ) {
+			$GLOBALS['wp_current_filter'] = $snapshot['wpCurrentFilterValue'];
+		} else {
+			unset( $GLOBALS['wp_current_filter'] );
 		}
 	}
 
@@ -2127,6 +2233,39 @@ final class ShortcodesSurface {
 		foreach ( $callbacks as $entry ) {
 			if ( is_array( $entry ) && ( $entry['function'] ?? null ) === $callback ) {
 				++$count;
+			}
+		}
+
+		return $count;
+	}
+
+	private static function hook_callback_total_count( string $hook, $callback ): int {
+		if ( ! isset( $GLOBALS['wp_filter'] ) || ! is_array( $GLOBALS['wp_filter'] ) ) {
+			return 0;
+		}
+
+		$hook_value = $GLOBALS['wp_filter'][ $hook ] ?? null;
+		$callbacks  = null;
+		if ( is_object( $hook_value ) && isset( $hook_value->callbacks ) ) {
+			$callbacks = $hook_value->callbacks;
+		} elseif ( is_array( $hook_value ) ) {
+			$callbacks = $hook_value;
+		}
+
+		if ( ! is_array( $callbacks ) ) {
+			return 0;
+		}
+
+		$count = 0;
+		foreach ( $callbacks as $priority_callbacks ) {
+			if ( ! is_array( $priority_callbacks ) ) {
+				continue;
+			}
+
+			foreach ( $priority_callbacks as $entry ) {
+				if ( is_array( $entry ) && ( $entry['function'] ?? null ) === $callback ) {
+					++$count;
+				}
 			}
 		}
 
