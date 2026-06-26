@@ -464,8 +464,10 @@ database, network requests, or a configured site.
   prefix preservation, allowlist behavior, rule serialization, and state
   restoration.
 - `rest`: request normalization, parameter precedence, JSON bodies, route regexes,
-  schema sanitize/validate, permissions, HEAD/GET behavior, response links,
-  CURIE compaction, embedding, envelopes, headers, and response conversion.
+  `register_rest_route()` wrapper merge/override semantics, schema
+  sanitize/validate, permissions, HEAD/GET behavior, response links, CURIE
+  compaction, embedding, envelopes, headers, response conversion, and global
+  REST registration state restoration.
 - `request-lifecycle`: no-DB front-controller lifecycle coverage for
   `WP::parse_request()`, rewrite/pathinfo/index matching, public/private
   query-var gates, query-var precedence and GET/POST mismatch termination,
