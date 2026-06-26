@@ -460,7 +460,7 @@ database, network requests, or a configured site.
   classic post-search parser/order/result SQL oracles for terms, exclusions,
   columns, stopwords, attachment filename left-join branches, password gates,
   literal clause-keyword searches, empty relevance-order boundaries, and
-  relevance ranking,
+  relevance ranking, wpdb stub status-OR branch handling,
   cache-key/cache-hit determinism, `WP_User_Query` field/order/search/role/
   capability/has-published-post SQL-shape oracles and hook mutation locality,
   user/comment pre-query short-circuits, and deterministic global restoration.
