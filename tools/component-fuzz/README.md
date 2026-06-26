@@ -452,8 +452,9 @@ database, network requests, or a configured site.
 - `query`: no-DB query builder and execution APIs, including meta/tax/date
   query tree sanitization, SQL fragment generation, relation normalization,
   query-var parsing, seeded `WP_Query` execution/found-row result oracles,
-  cache-key/cache-hit determinism, user/comment pre-query short-circuits, and
-  deterministic global restoration.
+  cache-key/cache-hit determinism, `WP_User_Query` field/order/search/role/
+  capability/has-published-post SQL-shape oracles and hook mutation locality,
+  user/comment pre-query short-circuits, and deterministic global restoration.
 - `query-loop`: no-DB `WP_Query` execution and loop-state coverage through
   `posts_pre_query` fixtures, including loop wrapper delegation,
   setup/reset postdata globals, nested secondary-query reset and conditional

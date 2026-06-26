@@ -914,9 +914,9 @@
 				<tr>
 					<td><code>query</code></td>
 					<td><span class="status good">review fixes passed</span></td>
-					<td>Main worktree; Kant the 3rd implementation and Peirce the 3rd review findings fixed through <code>31e3df4d4b</code></td>
-					<td>Main focused run: 46400 passed, 0 skipped, 0 failed; latest broad run: 8208 passed, 66 skipped, 0 failed.</td>
-					<td>Query arg normalization, meta/tax/date/search interactions, pagination, sticky posts, SQL-shape safety, WP_Query execution order/found rows/cache-key/cache-hit behavior, user/comment pre-query short-circuits, and state restoration.</td>
+					<td>Main worktree; Kant the 3rd implementation and Peirce the 3rd review findings fixed through <code>31e3df4d4b</code>; WP_User_Query semantic follow-up through <code>d0bbc3c4fb</code> and review fixes through <code>e2f4e658d1</code></td>
+					<td>Main focused runs: 48600 passed, 0 skipped, 0 failed at seeds 1 and 224 after WP_User_Query semantic coverage; latest broad run: 4353 passed, 33 skipped, 0 failed; related PHPUnit: 52 tests, 156 assertions.</td>
+					<td>Query arg normalization, meta/tax/date/search interactions, pagination, sticky posts, SQL-shape safety, WP_Query execution order/found rows/cache-key/cache-hit behavior, WP_User_Query field/order/search/role/capability/has-published-post SQL-shape behavior, hook mutation locality, typed wpdb prepare placeholders, user/comment pre-query short-circuits, and state restoration.</td>
 				</tr>
 				<tr>
 					<td><code>query-loop</code></td>
@@ -1022,6 +1022,12 @@
 					<td><code>rest</code></td>
 					<td>1000 passed, 0 skipped, 0 failed at seeds 1 and 224 after <code>register_rest_route()</code> wrapper coverage for common-arg merge precedence, route option schema callbacks, dispatch defaults/sanitization, override replacement, and global REST registration state restoration; syntax/PHPCS/diff checks and REST API/server PHPUnit filters passed.</td>
 					<td>4325 passed, 33 skipped, 0 failed at 1 iteration after REST route-registration review fixes; Lovelace follow-up review found no actionable findings.</td>
+				</tr>
+				<tr>
+					<td><code>d0bbc3c4fb</code> / <code>e2f4e658d1</code></td>
+					<td><code>query</code>, wpdb stub, <code>import-diff</code></td>
+					<td>48600 passed, 0 skipped, 0 failed at seeds 1 and 224 after WP_User_Query field/order/search/role/capability/has-published-post SQL-shape coverage plus review fixes for hook cleanup and typed placeholders; reviewer follow-up found no actionable findings; related PHPUnit: 52 tests, 156 assertions.</td>
+					<td>4353 passed, 33 skipped, 0 failed at 1 iteration after user-query semantic coverage and typed wpdb prepare fix.</td>
 				</tr>
 				<tr>
 					<td><code>72f3ae35e3</code> / <code>970437d39f</code></td>
