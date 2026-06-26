@@ -9,6 +9,7 @@ final class EmailSurface {
 	private const GENERATED_DOMAIN_ALIAS_CASES = 8;
 	private const GENERATED_LOCALPART_ALIAS_CASES = 8;
 	private const GENERATED_LOCALPART_UPDATE_CASES = 5;
+	private const GENERATED_PROFILE_CONFIRMATION_CASES = 5;
 	private const GENERATED_MAILTO_CONTEXT_CASES = 10;
 	private const GENERATED_UNICODE_MATRIX_CASES = 12;
 	private const GENERATED_MALFORMED_VARIANT_CASES = 12;
@@ -58,9 +59,12 @@ final class EmailSurface {
 		'retrieve_password_title',
 		'retrieve_password_message',
 		'retrieve_password_notification_email',
+		'new_user_email_content',
 		'pre_user_query',
 		'users_pre_query',
 		'query',
+		'pre_option_home',
+		'pre_option_siteurl',
 	);
 	private const WHATWG_ASCII_EMAIL_REGEX = '/^[a-zA-Z0-9.!#$%&\'*+\/=?^_`{|}~-]+@'
 		. '[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?'
@@ -130,6 +134,7 @@ final class EmailSurface {
 			$rows = array_merge( $rows, self::check_user_email_indexes_distinct_localparts( $ctx ) );
 			$rows = array_merge( $rows, self::check_user_email_indexes_generated_localpart_aliases( $ctx ) );
 			$rows = array_merge( $rows, self::check_user_email_updates_generated_localpart_aliases( $ctx ) );
+			$rows = array_merge( $rows, self::check_profile_email_confirmation_unicode_paths( $ctx ) );
 			$rows = array_merge( $rows, self::check_user_email_search_unicode_terms( $ctx ) );
 			$rows = array_merge( $rows, self::check_confusable_localpart_boundaries( $ctx ) );
 			$rows = array_merge( $rows, self::check_user_email_indexes_distinct_domains( $ctx ) );
@@ -3742,6 +3747,633 @@ final class EmailSurface {
 					'observed'  => $observed,
 					'failures'  => self::describe_value( $failures ),
 				)
+			),
+		);
+	}
+
+	private static function check_profile_email_confirmation_unicode_paths( \ComponentFuzz\FuzzContext $ctx ): array {
+		$result_name = 'email.profile-confirmation.unicode-email-change-paths';
+
+		if ( ! self::can_reset_stub_content() ) {
+			return array(
+				$ctx->skip(
+					$result_name,
+					'The in-memory wpdb content reset hook is unavailable.'
+				),
+			);
+		}
+
+		$missing = array();
+		foreach (
+			array(
+				'delete_user_meta',
+				'email_exists',
+				'get_user_by',
+				'get_user_meta',
+				'is_email',
+				'sanitize_email',
+				'send_confirmation_on_profile_email',
+				'update_user_meta',
+				'wp_insert_user',
+				'wp_mail',
+				'wp_set_current_user',
+			) as $function
+		) {
+			if ( ! function_exists( $function ) ) {
+				$missing[] = 'function ' . $function;
+			}
+		}
+
+		foreach ( array( 'WP_Email_Address', 'WP_Error', 'WP_User' ) as $class ) {
+			if ( ! class_exists( $class ) ) {
+				$missing[] = 'class ' . $class;
+			}
+		}
+
+		if ( array() !== $missing ) {
+			return array(
+				$ctx->skip(
+					$result_name,
+					'Required WordPress profile email confirmation APIs are unavailable.',
+					array( 'missing' => implode( ', ', $missing ) )
+				),
+			);
+		}
+
+		$cases            = self::generated_profile_confirmation_cases( $ctx->fork( 'profile-email-confirmation' ) );
+		$failures         = array();
+		$observed         = array();
+		$mail_calls       = array();
+		$content_events   = array();
+		$hook_snapshot    = self::snapshot_hook_globals();
+		$global_snapshot  = self::snapshot_named_globals(
+			array(
+				'current_user',
+				'errors',
+				'user_ID',
+				'userdata',
+				'user_email',
+				'user_identity',
+				'user_level',
+				'user_login',
+				'user_url',
+			)
+		);
+		$post_snapshot    = $_POST;
+		$mail_filter      = static function ( $return, array $atts ) use ( &$mail_calls ) {
+			$mail_calls[] = $atts;
+			return true;
+		};
+		$content_filter   = static function ( string $content, array $new_user_email ) use ( &$content_events ): string {
+			$content_events[] = $new_user_email;
+			return $content . "\nFiltered confirmation for ###EMAIL### via ###ADMIN_URL###";
+		};
+		$option_values    = array(
+			'pre_option_blogname' => 'Component Fuzz Profile Site',
+			'pre_option_home'     => 'http://profile.example.test',
+			'pre_option_siteurl'  => 'http://profile.example.test/wp',
+		);
+
+		self::reset_stub_content();
+		try {
+			self::install_email_filters( 'unicode' );
+			\remove_all_filters( 'pre_user_email' );
+			\add_filter( 'pre_user_email', 'trim' );
+			\add_filter( 'pre_user_email', 'sanitize_email' );
+			if ( function_exists( 'wp_filter_kses' ) ) {
+				\add_filter( 'pre_user_email', 'wp_filter_kses' );
+			}
+			\remove_all_filters( 'pre_wp_mail' );
+			\add_filter( 'pre_wp_mail', $mail_filter, PHP_INT_MAX, 2 );
+			\remove_all_filters( 'new_user_email_content' );
+			\add_filter( 'new_user_email_content', $content_filter, 10, 2 );
+			foreach ( $option_values as $hook => $value ) {
+				\remove_all_filters( $hook );
+				\add_filter(
+					$hook,
+					static function () use ( $value ) {
+						return $value;
+					}
+				);
+			}
+
+			foreach ( $cases as $case_index => $case ) {
+				$mail_calls     = array();
+				$content_events = array();
+
+				$parse     = self::capture_warnings( static fn() => \WP_Email_Address::from_string( $case['email'], 'unicode' ) );
+				$email     = $parse['value'] ?? null;
+				$canonical = $email instanceof \WP_Email_Address ? $email->get_unicode_address() : null;
+				$is_email  = self::capture_warnings( static fn() => \is_email( $case['email'] ) );
+				$sanitized = self::capture_warnings( static fn() => \sanitize_email( $case['email'] ) );
+
+				if (
+					$parse['threw']
+					|| array() !== $parse['warnings']
+					|| ! $email instanceof \WP_Email_Address
+					|| $is_email['value'] !== $canonical
+					|| $sanitized['value'] !== $canonical
+				) {
+					$failures[] = array(
+						'label'         => $case['label'],
+						'failure'       => 'profile-confirmation-address-oracle-mismatch',
+						'email'         => self::describe_string( $case['email'] ),
+						'parse'         => self::describe_captured_call( $parse ),
+						'isEmail'       => self::describe_captured_call( $is_email ),
+						'sanitizeEmail' => self::describe_captured_call( $sanitized ),
+					);
+					continue;
+				}
+
+				$success = self::exercise_profile_email_confirmation_success( $ctx, $case_index, $case, $canonical, $mail_calls, $content_events );
+				if ( ! ( $success['ok'] ?? false ) ) {
+					$failures[] = $success;
+				}
+
+				$duplicate = self::exercise_profile_email_confirmation_duplicate( $ctx, $case_index, $case, $canonical, $mail_calls );
+				if ( ! ( $duplicate['ok'] ?? false ) ) {
+					$failures[] = $duplicate;
+				}
+
+				$invalid = self::exercise_profile_email_confirmation_invalid( $ctx, $case_index, $case, $mail_calls );
+				if ( ! ( $invalid['ok'] ?? false ) ) {
+					$failures[] = $invalid;
+				}
+
+				$wrong_user = self::exercise_profile_email_confirmation_wrong_user( $ctx, $case_index, $case, $canonical, $mail_calls );
+				if ( ! ( $wrong_user['ok'] ?? false ) ) {
+					$failures[] = $wrong_user;
+				}
+
+				$same_email = self::exercise_profile_email_confirmation_same_email( $ctx, $case_index, $case, $canonical, $mail_calls );
+				if ( ! ( $same_email['ok'] ?? false ) ) {
+					$failures[] = $same_email;
+				}
+
+				$observed[] = array(
+					'label'     => $case['label'],
+					'profile'   => $case['profile'],
+					'email'     => self::describe_string( $canonical ),
+					'success'   => $success['summary'] ?? null,
+					'duplicate' => $duplicate['summary'] ?? null,
+					'invalid'   => $invalid['summary'] ?? null,
+					'wrongUser' => $wrong_user['summary'] ?? null,
+					'sameEmail' => $same_email['summary'] ?? null,
+				);
+			}
+		} finally {
+			$_POST = $post_snapshot;
+			self::restore_named_globals( $global_snapshot );
+			self::restore_hook_globals( $hook_snapshot );
+			self::reset_stub_content();
+		}
+
+		return array(
+			$ctx->result(
+				$result_name,
+				array() === $failures,
+				array(
+					'caseCount' => count( $cases ),
+					'observed'  => $observed,
+					'failures'  => self::describe_value( $failures ),
+				)
+			),
+		);
+	}
+
+	private static function exercise_profile_email_confirmation_success( \ComponentFuzz\FuzzContext $ctx, int $case_index, array $case, string $email, array &$mail_calls, array &$content_events ): array {
+		self::reset_stub_content();
+		\wp_set_current_user( 0 );
+		$mail_calls     = array();
+		$content_events = array();
+
+		$current_email = 'profile-current-' . $ctx->iteration() . '-' . $case_index . '-' . substr( sha1( $email ), 0, 10 ) . '@example.org';
+		$login         = 'cfz_profile_' . $ctx->iteration() . '_' . $case_index . '_' . substr( sha1( $email ), 0, 8 );
+		$insert        = self::capture_warnings(
+			static fn() => \wp_insert_user(
+				array(
+					'user_login' => $login,
+					'user_pass'  => 'component-fuzz-pass',
+					'user_email' => $current_email,
+					'role'       => 'subscriber',
+				)
+			)
+		);
+		$user_id       = $insert['value'] ?? null;
+
+		if ( $insert['threw'] || array() !== $insert['warnings'] || ! is_int( $user_id ) ) {
+			return array(
+				'ok'      => false,
+				'label'   => $case['label'],
+				'branch'  => 'success',
+				'failure' => 'profile-confirmation-user-insert-failed',
+				'insert'  => self::describe_captured_call( $insert ),
+			);
+		}
+
+		\wp_set_current_user( $user_id );
+		$GLOBALS['errors'] = new \WP_Error();
+		$_POST            = array(
+			'user_id' => (string) $user_id,
+			'email'   => $email,
+		);
+
+		$call        = self::capture_warnings( static fn() => \send_confirmation_on_profile_email() );
+		$meta        = self::capture_warnings( static fn() => \get_user_meta( $user_id, '_new_email', true ) );
+		$stored      = self::capture_warnings( static fn() => \get_user_by( 'id', $user_id ) );
+		$mail        = $mail_calls[0] ?? null;
+		$event       = $content_events[0] ?? null;
+		$meta_value  = $meta['value'] ?? null;
+		$stored_user = $stored['value'] ?? null;
+		$hash        = is_array( $meta_value ) && is_string( $meta_value['hash'] ?? null ) ? $meta_value['hash'] : '';
+		$message     = is_array( $mail ) && is_string( $mail['message'] ?? null ) ? $mail['message'] : '';
+		$subject     = is_array( $mail ) && is_string( $mail['subject'] ?? null ) ? $mail['subject'] : '';
+		$error_codes = $GLOBALS['errors'] instanceof \WP_Error ? $GLOBALS['errors']->get_error_codes() : array( 'missing-error-object' );
+		$ok          = ! $call['threw']
+			&& array() === $call['warnings']
+			&& null === $call['value']
+			&& ! $meta['threw']
+			&& array() === $meta['warnings']
+			&& is_array( $meta_value )
+			&& $email === ( $meta_value['newemail'] ?? null )
+			&& 1 === preg_match( '/^[a-f0-9]{32}$/', $hash )
+			&& ! $stored['threw']
+			&& array() === $stored['warnings']
+			&& $stored_user instanceof \WP_User
+			&& $stored_user->ID === $user_id
+			&& $current_email === $stored_user->user_email
+			&& 1 === count( $content_events )
+			&& is_array( $event )
+			&& $hash === ( $event['hash'] ?? null )
+			&& $email === ( $event['newemail'] ?? null )
+			&& 1 === count( $mail_calls )
+			&& is_array( $mail )
+			&& $email === ( $mail['to'] ?? null )
+			&& '[Component Fuzz Profile Site] Email Change Request' === $subject
+			&& str_contains( $message, $login )
+			&& str_contains( $message, $email )
+			&& str_contains( $message, 'profile.php?newuseremail=' . $hash )
+			&& str_contains( $message, 'http://profile.example.test' )
+			&& str_contains( $message, 'Filtered confirmation for ' . $email . ' via ' )
+			&& ! str_contains( $message, '###' )
+			&& $current_email === ( $_POST['email'] ?? null )
+			&& array() === $error_codes;
+
+		return array(
+			'ok'      => $ok,
+			'label'   => $case['label'],
+			'branch'  => 'success',
+			'failure' => $ok ? null : 'profile-confirmation-success-oracle-mismatch',
+			'summary' => array(
+				'userId'      => $user_id,
+				'email'       => self::describe_string( $email ),
+				'currentEmail' => self::describe_string( $current_email ),
+				'hash'        => $hash,
+				'mailTo'      => is_array( $mail ) && is_string( $mail['to'] ?? null ) ? self::describe_string( $mail['to'] ) : null,
+			),
+			'details' => $ok ? null : array(
+				'call'          => self::describe_captured_call( $call ),
+				'meta'          => self::describe_captured_call( $meta ),
+				'stored'        => self::describe_captured_call( $stored ),
+				'mailCalls'     => self::describe_value( $mail_calls ),
+				'contentEvents' => self::describe_value( $content_events ),
+				'postEmail'     => self::describe_value( $_POST['email'] ?? null ),
+				'errors'        => self::describe_value( $error_codes ),
+			),
+		);
+	}
+
+	private static function exercise_profile_email_confirmation_duplicate( \ComponentFuzz\FuzzContext $ctx, int $case_index, array $case, string $email, array &$mail_calls ): array {
+		self::reset_stub_content();
+		\wp_set_current_user( 0 );
+		$mail_calls = array();
+
+		$current_email = 'profile-duplicate-current-' . $ctx->iteration() . '-' . $case_index . '-' . substr( sha1( $email ), 0, 10 ) . '@example.org';
+		$current_login = 'cfz_profile_dup_current_' . $ctx->iteration() . '_' . $case_index . '_' . substr( sha1( $current_email ), 0, 8 );
+		$other_login   = 'cfz_profile_dup_other_' . $ctx->iteration() . '_' . $case_index . '_' . substr( sha1( $email ), 0, 8 );
+		$current       = self::capture_warnings(
+			static fn() => \wp_insert_user(
+				array(
+					'user_login' => $current_login,
+					'user_pass'  => 'component-fuzz-pass',
+					'user_email' => $current_email,
+					'role'       => 'subscriber',
+				)
+			)
+		);
+		$duplicate     = self::capture_warnings(
+			static fn() => \wp_insert_user(
+				array(
+					'user_login' => $other_login,
+					'user_pass'  => 'component-fuzz-pass',
+					'user_email' => $email,
+					'role'       => 'subscriber',
+				)
+			)
+		);
+		$user_id       = $current['value'] ?? null;
+
+		if ( $current['threw'] || $duplicate['threw'] || array() !== $current['warnings'] || array() !== $duplicate['warnings'] || ! is_int( $user_id ) || ! is_int( $duplicate['value'] ?? null ) ) {
+			return array(
+				'ok'        => false,
+				'label'     => $case['label'],
+				'branch'    => 'duplicate',
+				'failure'   => 'profile-confirmation-duplicate-users-not-inserted',
+				'current'   => self::describe_captured_call( $current ),
+				'duplicate' => self::describe_captured_call( $duplicate ),
+			);
+		}
+
+		$stale_meta = array( 'hash' => 'stale', 'newemail' => 'stale@example.org' );
+		\update_user_meta( $user_id, '_new_email', $stale_meta );
+		$meta_before = self::capture_warnings( static fn() => \get_user_meta( $user_id, '_new_email', true ) );
+		\wp_set_current_user( $user_id );
+		$GLOBALS['errors'] = new \WP_Error();
+		$_POST            = array(
+			'user_id' => (string) $user_id,
+			'email'   => $email,
+		);
+
+		$call        = self::capture_warnings( static fn() => \send_confirmation_on_profile_email() );
+		$meta        = self::capture_warnings( static fn() => \get_user_meta( $user_id, '_new_email', true ) );
+		$error_codes = $GLOBALS['errors'] instanceof \WP_Error ? $GLOBALS['errors']->get_error_codes() : array( 'missing-error-object' );
+		$error_data  = $GLOBALS['errors'] instanceof \WP_Error ? $GLOBALS['errors']->get_error_data( 'user_email' ) : null;
+		$ok          = ! $call['threw']
+			&& array() === $call['warnings']
+			&& null === $call['value']
+			&& ! $meta_before['threw']
+			&& array() === $meta_before['warnings']
+			&& $stale_meta === $meta_before['value']
+			&& ! $meta['threw']
+			&& array() === $meta['warnings']
+			&& '' === $meta['value']
+			&& in_array( 'user_email', $error_codes, true )
+			&& array( 'form-field' => 'email' ) === $error_data
+			&& 0 === count( $mail_calls )
+			&& $email === ( $_POST['email'] ?? null );
+
+		return array(
+			'ok'      => $ok,
+			'label'   => $case['label'],
+			'branch'  => 'duplicate',
+			'failure' => $ok ? null : 'profile-confirmation-duplicate-oracle-mismatch',
+			'summary' => array(
+				'userId'      => $user_id,
+				'email'       => self::describe_string( $email ),
+				'errors'      => $error_codes,
+				'mailCalls'   => count( $mail_calls ),
+				'metaCleared' => '' === ( $meta['value'] ?? null ),
+			),
+			'details' => $ok ? null : array(
+				'call'      => self::describe_captured_call( $call ),
+				'metaBefore' => self::describe_captured_call( $meta_before ),
+				'meta'      => self::describe_captured_call( $meta ),
+				'mailCalls' => self::describe_value( $mail_calls ),
+				'postEmail' => self::describe_value( $_POST['email'] ?? null ),
+				'errors'    => self::describe_value( $error_codes ),
+				'errorData' => self::describe_value( $error_data ),
+			),
+		);
+	}
+
+	private static function exercise_profile_email_confirmation_invalid( \ComponentFuzz\FuzzContext $ctx, int $case_index, array $case, array &$mail_calls ): array {
+		self::reset_stub_content();
+		\wp_set_current_user( 0 );
+		$mail_calls = array();
+
+		$current_email = 'profile-invalid-current-' . $ctx->iteration() . '-' . $case_index . '-' . substr( sha1( $case['invalid'] ), 0, 10 ) . '@example.org';
+		$login         = 'cfz_profile_invalid_' . $ctx->iteration() . '_' . $case_index . '_' . substr( sha1( $current_email ), 0, 8 );
+		$insert        = self::capture_warnings(
+			static fn() => \wp_insert_user(
+				array(
+					'user_login' => $login,
+					'user_pass'  => 'component-fuzz-pass',
+					'user_email' => $current_email,
+					'role'       => 'subscriber',
+				)
+			)
+		);
+		$user_id       = $insert['value'] ?? null;
+
+		if ( $insert['threw'] || array() !== $insert['warnings'] || ! is_int( $user_id ) ) {
+			return array(
+				'ok'      => false,
+				'label'   => $case['label'],
+				'branch'  => 'invalid',
+				'failure' => 'profile-confirmation-invalid-user-insert-failed',
+				'insert'  => self::describe_captured_call( $insert ),
+			);
+		}
+
+		$stale_meta = array( 'hash' => 'stale', 'newemail' => 'stale@example.org' );
+		\update_user_meta( $user_id, '_new_email', $stale_meta );
+		\wp_set_current_user( $user_id );
+		$GLOBALS['errors'] = 'not-an-error-object';
+		$_POST            = array(
+			'user_id' => (string) $user_id,
+			'email'   => $case['invalid'],
+		);
+
+		$call        = self::capture_warnings( static fn() => \send_confirmation_on_profile_email() );
+		$meta        = self::capture_warnings( static fn() => \get_user_meta( $user_id, '_new_email', true ) );
+		$error_codes = $GLOBALS['errors'] instanceof \WP_Error ? $GLOBALS['errors']->get_error_codes() : array( 'missing-error-object' );
+		$error_data  = $GLOBALS['errors'] instanceof \WP_Error ? $GLOBALS['errors']->get_error_data( 'user_email' ) : null;
+		$ok          = ! $call['threw']
+			&& array() === $call['warnings']
+			&& null === $call['value']
+			&& $GLOBALS['errors'] instanceof \WP_Error
+			&& ! $meta['threw']
+			&& array() === $meta['warnings']
+			&& $stale_meta === $meta['value']
+			&& in_array( 'user_email', $error_codes, true )
+			&& array( 'form-field' => 'email' ) === $error_data
+			&& 0 === count( $mail_calls )
+			&& $case['invalid'] === ( $_POST['email'] ?? null );
+
+		return array(
+			'ok'      => $ok,
+			'label'   => $case['label'],
+			'branch'  => 'invalid',
+			'failure' => $ok ? null : 'profile-confirmation-invalid-oracle-mismatch',
+			'summary' => array(
+				'userId'      => $user_id,
+				'invalid'     => self::describe_string( $case['invalid'] ),
+				'errors'      => $error_codes,
+				'mailCalls'   => count( $mail_calls ),
+				'metaRetained' => $stale_meta === ( $meta['value'] ?? null ),
+			),
+			'details' => $ok ? null : array(
+				'call'      => self::describe_captured_call( $call ),
+				'meta'      => self::describe_captured_call( $meta ),
+				'mailCalls' => self::describe_value( $mail_calls ),
+				'postEmail' => self::describe_value( $_POST['email'] ?? null ),
+				'errors'    => self::describe_value( $error_codes ),
+				'errorData' => self::describe_value( $error_data ),
+			),
+		);
+	}
+
+	private static function exercise_profile_email_confirmation_wrong_user( \ComponentFuzz\FuzzContext $ctx, int $case_index, array $case, string $email, array &$mail_calls ): array {
+		self::reset_stub_content();
+		\wp_set_current_user( 0 );
+		$mail_calls = array();
+
+		$current_email = 'profile-wrong-current-' . $ctx->iteration() . '-' . $case_index . '-' . substr( sha1( $email ), 0, 10 ) . '@example.org';
+		$other_email   = 'profile-wrong-other-' . $ctx->iteration() . '-' . $case_index . '-' . substr( sha1( $current_email ), 0, 10 ) . '@example.org';
+		$current       = self::capture_warnings(
+			static fn() => \wp_insert_user(
+				array(
+					'user_login' => 'cfz_profile_wrong_current_' . $ctx->iteration() . '_' . $case_index,
+					'user_pass'  => 'component-fuzz-pass',
+					'user_email' => $current_email,
+					'role'       => 'subscriber',
+				)
+			)
+		);
+		$other         = self::capture_warnings(
+			static fn() => \wp_insert_user(
+				array(
+					'user_login' => 'cfz_profile_wrong_other_' . $ctx->iteration() . '_' . $case_index,
+					'user_pass'  => 'component-fuzz-pass',
+					'user_email' => $other_email,
+					'role'       => 'subscriber',
+				)
+			)
+		);
+		$current_id    = $current['value'] ?? null;
+		$other_id      = $other['value'] ?? null;
+
+		if ( $current['threw'] || $other['threw'] || array() !== $current['warnings'] || array() !== $other['warnings'] || ! is_int( $current_id ) || ! is_int( $other_id ) ) {
+			return array(
+				'ok'      => false,
+				'label'   => $case['label'],
+				'branch'  => 'wrong-user',
+				'failure' => 'profile-confirmation-wrong-user-seed-failed',
+				'current' => self::describe_captured_call( $current ),
+				'other'   => self::describe_captured_call( $other ),
+			);
+		}
+
+		\wp_set_current_user( $current_id );
+		$GLOBALS['errors'] = new \WP_Error();
+		$_POST            = array(
+			'user_id' => (string) $other_id,
+			'email'   => $email,
+		);
+
+		$call         = self::capture_warnings( static fn() => \send_confirmation_on_profile_email() );
+		$current_meta = self::capture_warnings( static fn() => \get_user_meta( $current_id, '_new_email', true ) );
+		$other_meta   = self::capture_warnings( static fn() => \get_user_meta( $other_id, '_new_email', true ) );
+		$error_codes  = $GLOBALS['errors'] instanceof \WP_Error ? $GLOBALS['errors']->get_error_codes() : array( 'missing-error-object' );
+		$ok           = ! $call['threw']
+			&& array() === $call['warnings']
+			&& false === $call['value']
+			&& ! $current_meta['threw']
+			&& ! $other_meta['threw']
+			&& array() === $current_meta['warnings']
+			&& array() === $other_meta['warnings']
+			&& '' === $current_meta['value']
+			&& '' === $other_meta['value']
+			&& array() === $error_codes
+			&& 0 === count( $mail_calls )
+			&& $email === ( $_POST['email'] ?? null );
+
+		return array(
+			'ok'      => $ok,
+			'label'   => $case['label'],
+			'branch'  => 'wrong-user',
+			'failure' => $ok ? null : 'profile-confirmation-wrong-user-oracle-mismatch',
+			'summary' => array(
+				'currentId' => $current_id,
+				'postedId'  => $other_id,
+				'email'     => self::describe_string( $email ),
+				'mailCalls' => count( $mail_calls ),
+			),
+			'details' => $ok ? null : array(
+				'call'        => self::describe_captured_call( $call ),
+				'currentMeta' => self::describe_captured_call( $current_meta ),
+				'otherMeta'   => self::describe_captured_call( $other_meta ),
+				'mailCalls'   => self::describe_value( $mail_calls ),
+				'postEmail'   => self::describe_value( $_POST['email'] ?? null ),
+				'errors'      => self::describe_value( $error_codes ),
+			),
+		);
+	}
+
+	private static function exercise_profile_email_confirmation_same_email( \ComponentFuzz\FuzzContext $ctx, int $case_index, array $case, string $email, array &$mail_calls ): array {
+		self::reset_stub_content();
+		\wp_set_current_user( 0 );
+		$mail_calls = array();
+
+		$login  = 'cfz_profile_same_' . $ctx->iteration() . '_' . $case_index . '_' . substr( sha1( $email ), 0, 8 );
+		$insert = self::capture_warnings(
+			static fn() => \wp_insert_user(
+				array(
+					'user_login' => $login,
+					'user_pass'  => 'component-fuzz-pass',
+					'user_email' => $email,
+					'role'       => 'subscriber',
+				)
+			)
+		);
+		$user_id = $insert['value'] ?? null;
+
+		if ( $insert['threw'] || array() !== $insert['warnings'] || ! is_int( $user_id ) ) {
+			return array(
+				'ok'      => false,
+				'label'   => $case['label'],
+				'branch'  => 'same-email',
+				'failure' => 'profile-confirmation-same-email-user-insert-failed',
+				'insert'  => self::describe_captured_call( $insert ),
+			);
+		}
+
+		\wp_set_current_user( $user_id );
+		$GLOBALS['errors'] = 'same-email-scalar';
+		$_POST            = array(
+			'user_id' => (string) $user_id,
+			'email'   => $email,
+		);
+
+		$call        = self::capture_warnings( static fn() => \send_confirmation_on_profile_email() );
+		$meta        = self::capture_warnings( static fn() => \get_user_meta( $user_id, '_new_email', true ) );
+		$stored      = self::capture_warnings( static fn() => \get_user_by( 'id', $user_id ) );
+		$error_codes = $GLOBALS['errors'] instanceof \WP_Error ? $GLOBALS['errors']->get_error_codes() : array( 'missing-error-object' );
+		$stored_user = $stored['value'] ?? null;
+		$ok          = ! $call['threw']
+			&& array() === $call['warnings']
+			&& null === $call['value']
+			&& $GLOBALS['errors'] instanceof \WP_Error
+			&& array() === $error_codes
+			&& ! $meta['threw']
+			&& array() === $meta['warnings']
+			&& '' === $meta['value']
+			&& ! $stored['threw']
+			&& array() === $stored['warnings']
+			&& $stored_user instanceof \WP_User
+			&& $stored_user->ID === $user_id
+			&& $email === $stored_user->user_email
+			&& 0 === count( $mail_calls )
+			&& $email === ( $_POST['email'] ?? null );
+
+		return array(
+			'ok'      => $ok,
+			'label'   => $case['label'],
+			'branch'  => 'same-email',
+			'failure' => $ok ? null : 'profile-confirmation-same-email-oracle-mismatch',
+			'summary' => array(
+				'userId'    => $user_id,
+				'email'     => self::describe_string( $email ),
+				'mailCalls' => count( $mail_calls ),
+				'errors'    => $error_codes,
+			),
+			'details' => $ok ? null : array(
+				'call'      => self::describe_captured_call( $call ),
+				'meta'      => self::describe_captured_call( $meta ),
+				'stored'    => self::describe_captured_call( $stored ),
+				'mailCalls' => self::describe_value( $mail_calls ),
+				'postEmail' => self::describe_value( $_POST['email'] ?? null ),
+				'errors'    => self::describe_value( $error_codes ),
 			),
 		);
 	}
@@ -7427,6 +8059,86 @@ final class EmailSurface {
 				'profile'   => $profile['label'],
 				'domain'    => $domain,
 				'addresses' => self::addresses_for_localparts( $locals, $domain ),
+			);
+		}
+
+		return $cases;
+	}
+
+	private static function generated_profile_confirmation_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$profiles = array(
+			array(
+				'label' => 'latin-ring',
+				'local' => "gr\u{00E5}profile",
+			),
+			array(
+				'label' => 'latin-acute',
+				'local' => "jos\u{00E9}profile",
+			),
+			array(
+				'label' => 'latin-combining',
+				'local' => "jose\u{0301}profile",
+			),
+			array(
+				'label' => 'greek',
+				'local' => "\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}profile",
+			),
+			array(
+				'label' => 'cyrillic',
+				'local' => "\u{043F}\u{043E}\u{0447}\u{0442}\u{0430}profile",
+			),
+			array(
+				'label' => 'fullwidth-latin',
+				'local' => "\u{FF50}rofileuser",
+			),
+		);
+		$domains  = array(
+			'example.org',
+			'sub-domain.example',
+		);
+
+		if ( self::has_idn() ) {
+			$domains[] = "gr\u{00E5}.org";
+			$domains[] = "b\u{00FC}cher.de";
+		}
+
+		$cases = array(
+			array(
+				'label'   => 'profile-confirmation-unicode-local-latin',
+				'profile' => 'latin-ring',
+				'email'   => "gr\u{00E5}profile@example.org",
+				'invalid' => "invalid\u{1F642}profile@example.org",
+			),
+			array(
+				'label'   => 'profile-confirmation-combining-local',
+				'profile' => 'latin-combining',
+				'email'   => "jose\u{0301}profile@example.org",
+				'invalid' => "\u{0301}profile@example.org",
+			),
+		);
+
+		if ( self::has_idn() ) {
+			$cases[] = array(
+				'label'   => 'profile-confirmation-unicode-domain',
+				'profile' => 'unicode-domain',
+				'email'   => "profile@gr\u{00E5}.org",
+				'invalid' => "profile\u{FF20}gr\u{00E5}.org",
+			);
+		}
+
+		for ( $i = 0; $i < self::GENERATED_PROFILE_CONFIRMATION_CASES; $i++ ) {
+			$profile = $ctx->choice( $profiles );
+			$domain  = $ctx->choice( $domains );
+			$suffix  = (string) $ctx->int( 100, 999 );
+			$invalid = $ctx->bool()
+				? 'profile' . $suffix . "\u{1F642}@example.org"
+				: 'profile' . $suffix . "\u{FF20}example.org";
+
+			$cases[] = array(
+				'label'   => 'generated-profile-confirmation-' . $i . '-' . $profile['label'],
+				'profile' => $profile['label'],
+				'email'   => $profile['local'] . $suffix . '@' . $domain,
+				'invalid' => $invalid,
 			);
 		}
 

@@ -218,7 +218,7 @@ database, network requests, or a configured site.
   local parts/domains, generated Unicode local-part update/collision behavior,
   email-change notification recipient/body preservation, canonical Unicode-domain
   save/update collision behavior without MySQL collation/index coverage,
-  password-reset Unicode recipient paths,
+  profile email-change confirmation request paths, password-reset Unicode recipient paths,
   password-reset notification recipient machine/readable view overrides through
   the PHPMailer handoff, current machine-view reset lookup rejection, clickable
   mailto rendering boundaries, and generated
