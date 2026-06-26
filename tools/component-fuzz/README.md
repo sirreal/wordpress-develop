@@ -232,8 +232,9 @@ database, network requests, or a configured site.
   slugs, schemas, and MIME maps.
 - `filesystem`: path normalization and joining, file validation classes,
   filename sanitization/uniqueness, unique-filename callback and case-collision
-  filters, temp names, direct filesystem sandboxing, metadata/time/chmod round
-  trips, and missing-file failure values.
+  filters, temp names, recursive directory creation/listing and stream wrapper
+  detection, direct filesystem sandboxing, metadata/time/chmod round trips, and
+  missing-file failure values.
 - `formatting`: escaping helpers, text sanitizers, whitespace normalization,
   autop/shortcode cleanup, clickable text, URL sanitization, entity
   normalization, title/key/class identifier sanitizers, colors, sizes, time
