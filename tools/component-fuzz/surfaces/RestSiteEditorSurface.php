@@ -39,6 +39,8 @@ final class RestSiteEditorSurface {
 			$rows[] = self::check_global_styles_controller( $ctx, $case, $fixtures );
 			$rows[] = self::check_global_styles_revisions( $ctx, $case, $fixtures );
 			$rows[] = self::check_templates_controller( $ctx, $case, $fixtures );
+			$rows[] = self::check_template_item_route_dispatch( $ctx, $case, $fixtures );
+			$rows[] = self::check_template_lookup_fallback_dispatch( $ctx, $case );
 			$rows[] = self::check_template_revisions_autosaves( $ctx, $case, $fixtures );
 			$rows[] = self::check_navigation_fallback_controller( $ctx, $case, $fixtures );
 			$rows[] = self::check_edit_site_export_controller( $ctx );
@@ -53,8 +55,8 @@ final class RestSiteEditorSurface {
 			$rows[] = self::skip(
 				$ctx,
 				'rest-site-editor.broad-template-dispatch.skipped',
-				'Full REST dispatch and broad template collection queries are skipped because they can traverse'
-					. ' theme/template CPT query paths outside the bounded fixtures.',
+				'Broad template collection queries are skipped because they can traverse theme/template CPT query paths'
+					. ' outside the bounded fixtures; bounded item-route dispatch is covered directly.',
 				array(
 					'controllers' => array(
 						'WP_REST_Templates_Controller',
@@ -167,9 +169,11 @@ final class RestSiteEditorSurface {
 				'create_initial_taxonomies',
 				'current_user_can',
 				'get_block_template',
+				'get_block_templates',
 				'get_post',
 				'get_post_type_object',
 				'get_stylesheet',
+				'get_template_hierarchy',
 				'get_the_terms',
 				'is_wp_error',
 				'post_type_supports',
@@ -181,6 +185,7 @@ final class RestSiteEditorSurface {
 				'rest_sanitize_value_from_schema',
 				'rest_url',
 				'rest_validate_value_from_schema',
+				'resolve_block_template',
 				'sanitize_title',
 				'wp_cache_flush',
 				'wp_clean_theme_json_cache',
@@ -832,6 +837,404 @@ final class RestSiteEditorSurface {
 			array(
 				'templateId'     => $case['templateId'],
 				'templatePartId' => $case['templatePartId'],
+			)
+		);
+	}
+
+	private static function check_template_item_route_dispatch(
+		\ComponentFuzz\FuzzContext $ctx,
+		array $case,
+		array $fixtures
+	): array {
+		$failures        = array();
+		$previous_server = $GLOBALS['wp_rest_server'] ?? null;
+		$server_existed  = array_key_exists( 'wp_rest_server', $GLOBALS );
+		$server          = new \WP_REST_Server();
+		$template        = self::template_object(
+			$case,
+			array(
+				'wp_id'   => $fixtures['template'],
+				'author'  => $fixtures['author'],
+				'content' => $case['templateContent'],
+			)
+		);
+		$template_part   = self::template_object(
+			$case,
+			array(
+				'id'      => $case['templatePartId'],
+				'slug'    => $case['templatePartSlug'],
+				'type'    => 'wp_template_part',
+				'title'   => $case['templatePartTitle'],
+				'area'    => 'header',
+				'wp_id'   => $fixtures['templatePart'],
+				'content' => $case['templatePartContent'],
+			)
+		);
+		$filter_log      = array();
+		$filter          = static function ( $block_template, $requested_id, $requested_type ) use (
+			$template,
+			$template_part,
+			&$filter_log
+		) {
+			$filter_log[] = array(
+				'id'   => $requested_id,
+				'type' => $requested_type,
+			);
+
+			if ( $requested_id === $template->id && 'wp_template' === $requested_type ) {
+				return clone $template;
+			}
+			if ( $requested_id === $template_part->id && 'wp_template_part' === $requested_type ) {
+				return clone $template_part;
+			}
+
+			return $block_template;
+		};
+
+		$template_route = '/wp/v2/templates/' . rawurlencode( $case['themeSlug'] ) . '/' . rawurlencode( $case['templateSlug'] );
+		$part_route     = '/wp/v2/template-parts/' . rawurlencode( $case['themeSlug'] ) . '/' . rawurlencode( $case['templatePartSlug'] );
+
+		try {
+			$GLOBALS['wp_rest_server'] = $server;
+			( new \WP_REST_Templates_Controller( 'wp_template' ) )->register_routes();
+			( new \WP_REST_Templates_Controller( 'wp_template_part' ) )->register_routes();
+
+			$denied_response = $server->dispatch(
+				self::request(
+					'GET',
+					$template_route,
+					array(
+						'context' => 'edit',
+						'_fields' => 'id',
+					)
+				)
+			);
+			$denied_filter_log = $filter_log;
+
+			\add_filter( 'pre_get_block_template', $filter, 10, 3 );
+			$cap_filter = self::install_cap_filter( array( 'edit_posts' ) );
+			try {
+				$template_response = $server->dispatch(
+					self::request(
+						'GET',
+						$template_route,
+						array(
+							'context' => 'edit',
+							'_fields' => 'id,slug,theme,content,wp_id,original_source,_links',
+						)
+					)
+				);
+				$part_response     = $server->dispatch(
+					self::request(
+						'GET',
+						$part_route,
+						array(
+							'context' => 'edit',
+							'_fields' => 'id,slug,type,area,content,wp_id,_links',
+						)
+					)
+				);
+			} finally {
+				\remove_filter( 'user_has_cap', $cap_filter, 10 );
+				\remove_filter( 'pre_get_block_template', $filter, 10 );
+			}
+		} finally {
+			if ( $server_existed ) {
+				$GLOBALS['wp_rest_server'] = $previous_server;
+			} else {
+				unset( $GLOBALS['wp_rest_server'] );
+			}
+		}
+
+		$expected_filter_log = array(
+			array(
+				'id'   => $case['templateId'],
+				'type' => 'wp_template',
+			),
+			array(
+				'id'   => $case['templateId'],
+				'type' => 'wp_template',
+			),
+			array(
+				'id'   => $case['templatePartId'],
+				'type' => 'wp_template_part',
+			),
+			array(
+				'id'   => $case['templatePartId'],
+				'type' => 'wp_template_part',
+			),
+		);
+		$denied_data         = $denied_response instanceof \WP_REST_Response ? $denied_response->get_data() : array();
+		$template_data       = $template_response instanceof \WP_REST_Response ? $template_response->get_data() : array();
+		$template_links = $template_response instanceof \WP_REST_Response ? $template_response->get_links() : array();
+		$part_data           = $part_response instanceof \WP_REST_Response ? $part_response->get_data() : array();
+		$part_links          = $part_response instanceof \WP_REST_Response ? $part_response->get_links() : array();
+
+		self::collect_failure(
+			$failures,
+			$denied_response instanceof \WP_REST_Response
+				&& 403 === $denied_response->get_status()
+				&& 'rest_cannot_manage_templates' === ( $denied_data['code'] ?? null )
+				&& array() === $denied_filter_log,
+			'template item dispatch denies access before template lookup when capabilities are absent',
+			array(
+				'status'    => $denied_response instanceof \WP_REST_Response ? $denied_response->get_status() : null,
+				'data'      => $denied_data,
+				'filterLog' => $denied_filter_log,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$template_response instanceof \WP_REST_Response
+				&& 200 === $template_response->get_status()
+				&& $case['templateId'] === ( $template_data['id'] ?? null )
+				&& $case['templateSlug'] === ( $template_data['slug'] ?? null )
+				&& $case['themeSlug'] === ( $template_data['theme'] ?? null )
+				&& $case['templateContent'] === ( $template_data['content']['raw'] ?? null )
+				&& $fixtures['template'] === (int) ( $template_data['wp_id'] ?? 0 )
+				&& 'user' === ( $template_data['original_source'] ?? null )
+				&& self::link_href( $template_links, 'self' ) === \rest_url( 'wp/v2/templates/' . $case['templateId'] ),
+			'template item dispatch sanitizes single-slash route IDs and applies REST field filtering',
+			array(
+				'route'  => $template_route,
+				'data'   => $template_data,
+				'links'  => $template_links,
+				'status' => $template_response instanceof \WP_REST_Response ? $template_response->get_status() : null,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$part_response instanceof \WP_REST_Response
+				&& 200 === $part_response->get_status()
+				&& $case['templatePartId'] === ( $part_data['id'] ?? null )
+				&& $case['templatePartSlug'] === ( $part_data['slug'] ?? null )
+				&& 'wp_template_part' === ( $part_data['type'] ?? null )
+				&& 'header' === ( $part_data['area'] ?? null )
+				&& $case['templatePartContent'] === ( $part_data['content']['raw'] ?? null )
+				&& $fixtures['templatePart'] === (int) ( $part_data['wp_id'] ?? 0 )
+				&& self::link_href( $part_links, 'self' ) === \rest_url( 'wp/v2/template-parts/' . $case['templatePartId'] ),
+			'template-part item dispatch returns area-specific data through the registered route',
+			array(
+				'route'  => $part_route,
+				'data'   => $part_data,
+				'links'  => $part_links,
+				'status' => $part_response instanceof \WP_REST_Response ? $part_response->get_status() : null,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$expected_filter_log === $filter_log
+				&& false === \has_filter( 'pre_get_block_template', $filter )
+				&& false === \has_filter( 'user_has_cap', $cap_filter ),
+			'template item dispatch uses only the expected bounded template lookups and removes filters',
+			array(
+				'filterLog'             => $filter_log,
+				'templateFilterRemoved' => false === \has_filter( 'pre_get_block_template', $filter ),
+				'capFilterRemoved'      => false === \has_filter( 'user_has_cap', $cap_filter ),
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'rest-site-editor.template-item-route-dispatch',
+			$failures,
+			array(
+				'templateRoute'     => $template_route,
+				'templatePartRoute' => $part_route,
+				'filterLog'         => $filter_log,
+			)
+		);
+	}
+
+	private static function check_template_lookup_fallback_dispatch(
+		\ComponentFuzz\FuzzContext $ctx,
+		array $case
+	): array {
+		$failures        = array();
+		$previous_server = $GLOBALS['wp_rest_server'] ?? null;
+		$server_existed  = array_key_exists( 'wp_rest_server', $GLOBALS );
+		$server          = new \WP_REST_Server();
+		$custom_slug     = 'custom-' . substr( $case['token'], 0, 6 );
+		$missing_slug    = 'missing-' . substr( $case['token'], 0, 6 );
+		$fallback_markup = self::paragraph_block( 'Fallback lookup ' . $case['token'] );
+		$page_template   = self::template_object(
+			$case,
+			array(
+				'id'        => $case['themeSlug'] . '//page',
+				'content'   => '',
+				'slug'      => 'page',
+				'title'     => 'Empty Page Fallback',
+				'is_custom' => false,
+			)
+		);
+		$singular        = self::template_object(
+			$case,
+			array(
+				'id'        => $case['themeSlug'] . '//singular',
+				'content'   => $fallback_markup,
+				'slug'      => 'singular',
+				'title'     => 'Singular Fallback',
+				'is_custom' => false,
+			)
+		);
+		$templates       = array(
+			'page'     => $page_template,
+			'singular' => $singular,
+		);
+		$filter_log      = array();
+		$filter          = static function ( $block_templates, array $query, string $template_type ) use (
+			$templates,
+			&$filter_log
+		) {
+			$slugs        = array_values( $query['slug__in'] ?? array() );
+			$filter_log[] = array(
+				'type'     => $template_type,
+				'slug__in' => $slugs,
+			);
+
+			if ( 'wp_template' !== $template_type ) {
+				return array();
+			}
+
+			$matches = array();
+			foreach ( $slugs as $slug ) {
+				if ( isset( $templates[ $slug ] ) ) {
+					$matches[] = clone $templates[ $slug ];
+				}
+			}
+			return $matches;
+		};
+
+		try {
+			$GLOBALS['wp_rest_server'] = $server;
+			$controller                = new \WP_REST_Templates_Controller( 'wp_template' );
+			$controller->register_routes();
+			$routes = $server->get_routes();
+			$route  = $routes['/wp/v2/templates/lookup'][0] ?? array();
+
+			\add_filter( 'pre_get_block_templates', $filter, 10, 3 );
+			$cap_filter = self::install_cap_filter( array( 'edit_posts' ) );
+			try {
+				$found_response = $server->dispatch(
+					self::request(
+						'GET',
+						'/wp/v2/templates/lookup',
+						array(
+							'slug'      => $custom_slug,
+							'is_custom' => true,
+							'context'   => 'edit',
+							'_fields'   => 'id,slug,theme,content,source,is_custom',
+						)
+					)
+				);
+				$empty_response = $server->dispatch(
+					self::request(
+						'GET',
+						'/wp/v2/templates/lookup',
+						array(
+							'slug'      => $missing_slug,
+							'is_custom' => false,
+							'context'   => 'edit',
+							'_fields'   => 'id,slug,content',
+						)
+					)
+				);
+			} finally {
+				\remove_filter( 'user_has_cap', $cap_filter, 10 );
+				\remove_filter( 'pre_get_block_templates', $filter, 10 );
+			}
+		} finally {
+			if ( $server_existed ) {
+				$GLOBALS['wp_rest_server'] = $previous_server;
+			} else {
+				unset( $GLOBALS['wp_rest_server'] );
+			}
+		}
+
+		$found_data       = $found_response instanceof \WP_REST_Response ? $found_response->get_data() : array();
+		$empty_data       = $empty_response instanceof \WP_REST_Response ? $empty_response->get_data() : null;
+		$expected_queries = array(
+			array(
+				'type'     => 'wp_template',
+				'slug__in' => array( 'page', 'singular', 'index' ),
+			),
+			array(
+				'type'     => 'wp_template',
+				'slug__in' => array( 'singular', 'index' ),
+			),
+			array(
+				'type'     => 'wp_template',
+				'slug__in' => array( $missing_slug, 'index' ),
+			),
+			array(
+				'type'     => 'wp_template',
+				'slug__in' => array( 'index' ),
+			),
+		);
+
+		self::collect_failure(
+			$failures,
+			isset( $route['callback'], $route['permission_callback'], $route['methods']['GET'] )
+				&& 'WP_REST_Templates_Controller::get_template_fallback' === self::callback_summary( $route['callback'] )
+				&& 'WP_REST_Templates_Controller::get_item_permissions_check' === self::callback_summary( $route['permission_callback'] ),
+			'template lookup route registers the fallback controller callback and read permission guard',
+			array( 'route' => self::route_summary( $route ) )
+		);
+
+		self::collect_failure(
+			$failures,
+			$found_response instanceof \WP_REST_Response
+				&& 200 === $found_response->get_status()
+				&& $case['themeSlug'] . '//singular' === ( $found_data['id'] ?? null )
+				&& 'singular' === ( $found_data['slug'] ?? null )
+				&& $case['themeSlug'] === ( $found_data['theme'] ?? null )
+				&& $fallback_markup === ( $found_data['content']['raw'] ?? null )
+				&& 'custom' === ( $found_data['source'] ?? null )
+				&& false === ( $found_data['is_custom'] ?? null ),
+			'template lookup dispatch skips empty higher-priority fallbacks and returns populated fallback content',
+			array(
+				'status' => $found_response instanceof \WP_REST_Response ? $found_response->get_status() : null,
+				'data'   => $found_data,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$empty_response instanceof \WP_REST_Response
+				&& 200 === $empty_response->get_status()
+				&& $empty_data instanceof \stdClass
+				&& array() === get_object_vars( $empty_data ),
+			'template lookup dispatch preserves the empty-object no-fallback response contract',
+			array(
+				'status' => $empty_response instanceof \WP_REST_Response ? $empty_response->get_status() : null,
+				'data'   => $empty_data,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$expected_queries === $filter_log
+				&& false === \has_filter( 'pre_get_block_templates', $filter )
+				&& false === \has_filter( 'user_has_cap', $cap_filter ),
+			'template lookup dispatch uses bounded hierarchy queries and removes filters',
+			array(
+				'filterLog'             => $filter_log,
+				'templateFilterRemoved' => false === \has_filter( 'pre_get_block_templates', $filter ),
+				'capFilterRemoved'      => false === \has_filter( 'user_has_cap', $cap_filter ),
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'rest-site-editor.template-lookup-fallback-dispatch',
+			$failures,
+			array(
+				'customSlug'  => $custom_slug,
+				'missingSlug' => $missing_slug,
+				'filterLog'   => $filter_log,
 			)
 		);
 	}
