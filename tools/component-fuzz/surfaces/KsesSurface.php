@@ -71,6 +71,7 @@ final class KsesSurface {
 			$results = array_merge( $results, self::check_allowed_html_contracts( $seed ) );
 			$results = array_merge( $results, self::check_custom_policy_and_filter_invariants( $seed ) );
 			$results = array_merge( $results, self::check_attribute_constraint_invariants( $seed ) );
+			$results = array_merge( $results, self::check_pdf_object_and_uri_attribute_invariants( $seed ) );
 
 			$rng = self::rng( $seed );
 			for ( $case_index = 0; $case_index < $case_count; ++$case_index ) {
@@ -402,6 +403,232 @@ final class KsesSurface {
 		}
 
 		return $results;
+	}
+
+	private static function check_pdf_object_and_uri_attribute_invariants( int $seed ): array {
+		foreach ( array( 'add_filter', 'remove_filter', 'has_filter', 'wp_kses_post', 'wp_kses_hair', '_wp_kses_allow_pdf_objects' ) as $function_name ) {
+			if ( ! function_exists( $function_name ) ) {
+				return array(
+					self::skip(
+						$seed,
+						null,
+						'kses.pdf-object-uri-helpers.available',
+						$function_name . '() is not loaded',
+						''
+					),
+				);
+			}
+		}
+
+		$results = array();
+		try {
+			$results[] = self::check_pdf_object_policy_matrix( $seed );
+			$results[] = self::check_uri_attribute_filter_scope( $seed );
+		} catch ( \Throwable $e ) {
+			$results[] = self::throwable_result( $seed, null, 'kses.pdf-object-uri-invariants-no-throw', '', $e );
+		}
+
+		return $results;
+	}
+
+	private static function check_pdf_object_policy_matrix( int $seed ): array {
+		$upload_url        = 'https://component-fuzz.example:9443/uploads';
+		$valid_https_url   = 'https://component-fuzz.example:9443/cat/foo.pdf';
+		$valid_http_url    = 'http://component-fuzz.example:9443/cat/foo.pdf';
+		$upload_dir_filter = static function ( array $uploads ) use ( $upload_url ): array {
+			$uploads['path']    = '/tmp/component-fuzz-kses-uploads';
+			$uploads['url']     = $upload_url;
+			$uploads['subdir']  = '';
+			$uploads['basedir'] = '/tmp/component-fuzz-kses-uploads';
+			$uploads['baseurl'] = $upload_url;
+			$uploads['error']   = false;
+			return $uploads;
+		};
+
+		$cases = array(
+			'validHttpsPort'           => array(
+				'<object type="application/pdf" data="' . $valid_https_url . '" />',
+				'<object type="application/pdf" data="' . $valid_https_url . '" />',
+			),
+			'validHttpPort'            => array(
+				'<object type="application/pdf" data="' . $valid_http_url . '" />',
+				'<object type="application/pdf" data="' . $valid_http_url . '" />',
+			),
+			'typeValueCaseInsensitive' => array(
+				'<object type="APPLICATION/PDF" data="' . $valid_https_url . '" />',
+				'<object type="APPLICATION/PDF" data="' . $valid_https_url . '" />',
+			),
+			'dataBadProtocolFilteredBeforeCallback' => array(
+				'<object type="application/pdf" data="javascript:' . $valid_https_url . '" />',
+				'<object type="application/pdf" data="' . $valid_https_url . '" />',
+			),
+			'duplicateTypeLastInvalid' => array(
+				'<object type="application/pdf" type="application/exe" data="' . $valid_https_url . '" />',
+				'<object type="application/pdf" data="' . $valid_https_url . '" />',
+			),
+			'duplicateTypeFirstInvalid' => array(
+				'<object type="application/exe" type="application/pdf" data="' . $valid_https_url . '" />',
+				'',
+			),
+			'queryStringRejected'      => array(
+				'<object type="application/pdf" data="' . $valid_https_url . '?download=.pdf" />',
+				'',
+			),
+			'fragmentRejected'         => array(
+				'<object type="application/pdf" data="' . $valid_https_url . '#page.pdf" />',
+				'',
+			),
+			'wrongExtensionRejected'   => array(
+				'<object type="application/pdf" data="https://component-fuzz.example:9443/cat/foo.php" />',
+				'',
+			),
+			'uppercaseExtensionRejected' => array(
+				'<object type="application/pdf" data="https://component-fuzz.example:9443/cat/foo.PDF" />',
+				'',
+			),
+			'nonSelfInvalidDegradesToBareTag' => array(
+				'<object type="application/pdf" data="https://component-fuzz.example:9443/cat/foo.php"></object>',
+				'<object></object>',
+			),
+			'wrongPortRejected'        => array(
+				'<object type="application/pdf" data="https://component-fuzz.example:9444/cat/foo.pdf" />',
+				'',
+			),
+			'missingPortRejected'      => array(
+				'<object type="application/pdf" data="https://component-fuzz.example/cat/foo.pdf" />',
+				'',
+			),
+			'protocolRelativeRejected' => array(
+				'<object type="application/pdf" data="//component-fuzz.example:9443/cat/foo.pdf" />',
+				'',
+			),
+		);
+
+		$actual        = array();
+		$helper_actual = array();
+		\add_filter( 'upload_dir', $upload_dir_filter, 10, 1 );
+		try {
+			foreach ( $cases as $label => $case ) {
+				$actual[ $label ] = \wp_kses_post( $case[0] );
+			}
+
+			$helper_actual = array(
+				'validHttps'     => \_wp_kses_allow_pdf_objects( $valid_https_url ),
+				'validHttp'      => \_wp_kses_allow_pdf_objects( $valid_http_url ),
+				'queryString'    => \_wp_kses_allow_pdf_objects( $valid_https_url . '?download=.pdf' ),
+				'fragment'       => \_wp_kses_allow_pdf_objects( $valid_https_url . '#page.pdf' ),
+				'wrongExtension' => \_wp_kses_allow_pdf_objects( 'https://component-fuzz.example:9443/cat/foo.php' ),
+				'uppercaseExtension' => \_wp_kses_allow_pdf_objects( 'https://component-fuzz.example:9443/cat/foo.PDF' ),
+				'wrongPort'      => \_wp_kses_allow_pdf_objects( 'https://component-fuzz.example:9444/cat/foo.pdf' ),
+				'missingPort'    => \_wp_kses_allow_pdf_objects( 'https://component-fuzz.example/cat/foo.pdf' ),
+			);
+		} finally {
+			\remove_filter( 'upload_dir', $upload_dir_filter, 10 );
+		}
+
+		$expected        = array();
+		$helper_expected = array(
+			'validHttps'     => true,
+			'validHttp'      => true,
+			'queryString'    => false,
+			'fragment'       => false,
+			'wrongExtension' => false,
+			'uppercaseExtension' => false,
+			'wrongPort'      => false,
+			'missingPort'    => false,
+		);
+		foreach ( $cases as $label => $case ) {
+			$expected[ $label ] = $case[1];
+		}
+
+		$filter_removed = false === \has_filter( 'upload_dir', $upload_dir_filter );
+		$details        = array(
+			'uploadUrl'      => $upload_url,
+			'actual'         => self::compact_value( $actual ),
+			'helperActual'   => $helper_actual,
+			'filterRemoved'  => $filter_removed,
+			'caseCount'      => count( $cases ),
+		);
+
+		if ( $expected === $actual && $helper_expected === $helper_actual && $filter_removed ) {
+			return self::pass( $seed, null, 'wp_kses_post.pdf-object-policy-matrix', '<object type="application/pdf" data>', $details );
+		}
+
+		return self::fail(
+			$seed,
+			null,
+			'wp_kses_post.pdf-object-policy-matrix',
+			'<object type="application/pdf" data>',
+			array(
+				'outputs' => $expected,
+				'helper'  => $helper_expected,
+			),
+			array(
+				'outputs' => $actual,
+				'helper'  => $helper_actual,
+			),
+			$details
+		);
+	}
+
+	private static function check_uri_attribute_filter_scope( int $seed ): array {
+		$attrs       = 'href="javascript:alert(1)" data-url="javascript:alert(1)" data-plain="javascript:alert(1)" src="https://example.test/image.png"';
+		$protocols   = array( 'http', 'https' );
+		$uri_filter  = static function ( array $uri_attributes ): array {
+			$uri_attributes[] = 'data-url';
+			return array_values( array_unique( $uri_attributes ) );
+		};
+		$without     = \wp_kses_hair( $attrs, $protocols );
+		$with_filter = array();
+		\add_filter( 'wp_kses_uri_attributes', $uri_filter, 10, 1 );
+		try {
+			$with_filter = \wp_kses_hair( $attrs, $protocols );
+		} finally {
+			\remove_filter( 'wp_kses_uri_attributes', $uri_filter, 10 );
+		}
+		$after_filter   = \wp_kses_hair( $attrs, $protocols );
+		$filter_removed = false === \has_filter( 'wp_kses_uri_attributes', $uri_filter );
+		$actual         = array(
+			'withoutHref'      => $without['href']['value'] ?? null,
+			'withoutDataUrl'   => $without['data-url']['value'] ?? null,
+			'withoutDataPlain' => $without['data-plain']['value'] ?? null,
+			'withHref'         => $with_filter['href']['value'] ?? null,
+			'withDataUrl'      => $with_filter['data-url']['value'] ?? null,
+			'withDataPlain'    => $with_filter['data-plain']['value'] ?? null,
+			'afterDataUrl'     => $after_filter['data-url']['value'] ?? null,
+			'filterRemoved'    => $filter_removed,
+		);
+		$expected       = array(
+			'withoutHref'      => 'alert(1)',
+			'withoutDataUrl'   => 'javascript:alert(1)',
+			'withoutDataPlain' => 'javascript:alert(1)',
+			'withHref'         => 'alert(1)',
+			'withDataUrl'      => 'alert(1)',
+			'withDataPlain'    => 'javascript:alert(1)',
+			'afterDataUrl'     => 'javascript:alert(1)',
+			'filterRemoved'    => true,
+		);
+		$details        = array(
+			'attrs'        => $attrs,
+			'without'      => self::compact_value( $without ),
+			'withFilter'   => self::compact_value( $with_filter ),
+			'afterFilter'  => self::compact_value( $after_filter ),
+			'actualValues' => $actual,
+		);
+
+		if ( $expected === $actual ) {
+			return self::pass( $seed, null, 'wp_kses_uri_attributes.filter-controls-custom-data-url', $attrs, $details );
+		}
+
+		return self::fail(
+			$seed,
+			null,
+			'wp_kses_uri_attributes.filter-controls-custom-data-url',
+			$attrs,
+			$expected,
+			$actual,
+			$details
+		);
 	}
 
 	private static function check_attribute_constraint_invariants( int $seed ): array {
