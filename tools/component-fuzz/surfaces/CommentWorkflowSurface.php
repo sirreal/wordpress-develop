@@ -31,6 +31,7 @@ final class CommentWorkflowSurface {
 			$rows[] = self::check_allow_comment_decisions( $ctx->fork( 'allow' ), $case );
 			$rows[] = self::check_update_and_status_transitions( $ctx->fork( 'status' ), $case );
 			$rows[] = self::check_trash_spam_restore_helpers( $ctx->fork( 'trash-spam' ), $case );
+			$rows[] = self::check_force_delete_comment_semantics( $ctx->fork( 'delete' ), $case );
 			$rows[] = self::check_failure_paths( $ctx->fork( 'failures' ), $case );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
@@ -66,8 +67,10 @@ final class CommentWorkflowSurface {
 			array(
 				'add_action',
 				'add_filter',
+				'add_comment_meta',
 				'create_initial_post_types',
 				'get_comment',
+				'get_comment_meta',
 				'get_post',
 				'has_action',
 				'is_wp_error',
@@ -524,6 +527,225 @@ final class CommentWorkflowSurface {
 			'comment-workflow.trash-spam.restore-previous-status',
 			$failures,
 			array( 'commentId' => $comment_id )
+		);
+	}
+
+	private static function check_force_delete_comment_semantics( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures = array();
+		$post_id  = self::insert_post( $case, 'open' );
+		$parent_id = \wp_insert_comment(
+			array(
+				'comment_post_ID'      => $post_id,
+				'comment_author'       => 'Delete Parent ' . $case['token'],
+				'comment_author_email' => 'delete-parent-' . $case['token'] . '@example.test',
+				'comment_content'      => 'delete parent ' . $case['token'],
+				'comment_approved'     => '1',
+				'comment_type'         => 'comment',
+			)
+		);
+		$target_id = \wp_insert_comment(
+			array(
+				'comment_post_ID'      => $post_id,
+				'comment_parent'       => $parent_id,
+				'comment_author'       => 'Delete Target ' . $case['token'],
+				'comment_author_email' => 'delete-target-' . $case['token'] . '@example.test',
+				'comment_content'      => 'delete target ' . $case['token'],
+				'comment_approved'     => '1',
+				'comment_type'         => 'comment',
+			)
+		);
+		$child_id = \wp_insert_comment(
+			array(
+				'comment_post_ID'      => $post_id,
+				'comment_parent'       => $target_id,
+				'comment_author'       => 'Delete Child ' . $case['token'],
+				'comment_author_email' => 'delete-child-' . $case['token'] . '@example.test',
+				'comment_content'      => 'delete child ' . $case['token'],
+				'comment_approved'     => '1',
+				'comment_type'         => 'comment',
+			)
+		);
+		$meta_key   = '_component_fuzz_delete_' . $case['token'];
+		$meta_value = 'meta-' . $ctx->int( 1000, 9999 );
+		$meta_id    = \add_comment_meta( $target_id, $meta_key, $meta_value, true );
+		$before     = array(
+			'post'   => \get_post( $post_id ),
+			'target' => \get_comment( $target_id ),
+			'child'  => \get_comment( $child_id ),
+			'meta'   => \get_comment_meta( $target_id, $meta_key, true ),
+		);
+
+		$events = array();
+		$hooks  = array();
+		$add    = static function ( string $hook, callable $callback, int $accepted_args = 1 ) use ( &$hooks ): void {
+			\add_action( $hook, $callback, 10, $accepted_args );
+			$hooks[] = array( $hook, $callback, 10 );
+		};
+
+		$add(
+			'delete_comment',
+			static function ( $comment_id, \WP_Comment $comment ) use ( &$events ): void {
+				$events[] = array(
+					'name'     => 'delete_comment',
+					'id'       => (int) $comment_id,
+					'objectId' => (int) $comment->comment_ID,
+					'status'   => (string) $comment->comment_approved,
+					'parent'   => (int) $comment->comment_parent,
+				);
+			},
+			2
+		);
+		$add(
+			'deleted_comment',
+			static function ( $comment_id, \WP_Comment $comment ) use ( &$events ): void {
+				$events[] = array(
+					'name'     => 'deleted_comment',
+					'id'       => (int) $comment_id,
+					'objectId' => (int) $comment->comment_ID,
+					'status'   => (string) $comment->comment_approved,
+					'parent'   => (int) $comment->comment_parent,
+				);
+			},
+			2
+		);
+		$add(
+			'wp_set_comment_status',
+			static function ( $comment_id, string $status ) use ( &$events ): void {
+				$events[] = array(
+					'name'   => 'wp_set_comment_status',
+					'id'     => (int) $comment_id,
+					'status' => $status,
+				);
+			},
+			2
+		);
+		$add(
+			'transition_comment_status',
+			static function ( string $new_status, string $old_status, \WP_Comment $comment ) use ( &$events ): void {
+				$events[] = array(
+					'name' => 'transition_comment_status',
+					'id'   => (int) $comment->comment_ID,
+					'new'  => $new_status,
+					'old'  => $old_status,
+				);
+			},
+			3
+		);
+		$add(
+			'comment_approved_to_delete',
+			static function ( \WP_Comment $comment ) use ( &$events ): void {
+				$events[] = array(
+					'name' => 'comment_approved_to_delete',
+					'id'   => (int) $comment->comment_ID,
+				);
+			}
+		);
+
+		try {
+			$deleted        = \wp_delete_comment( $target_id, true );
+			$missing_delete = \wp_delete_comment( $target_id, true );
+		} finally {
+			self::remove_hooks( $hooks );
+		}
+
+		$after_target = \get_comment( $target_id );
+		$after_child  = \get_comment( $child_id );
+		$after_parent = \get_comment( $parent_id );
+		$after_post   = \get_post( $post_id );
+		$after_meta   = \get_comment_meta( $target_id, $meta_key, true );
+		$event_names  = array_column( $events, 'name' );
+
+		self::collect_failure(
+			$failures,
+			is_int( $parent_id )
+				&& is_int( $target_id )
+				&& is_int( $child_id )
+				&& is_int( $meta_id )
+				&& $before['post'] instanceof \WP_Post
+				&& 3 === (int) $before['post']->comment_count
+				&& $before['target'] instanceof \WP_Comment
+				&& $before['child'] instanceof \WP_Comment
+				&& (int) $target_id === (int) $before['child']->comment_parent
+				&& $meta_value === $before['meta'],
+			'delete fixture starts with approved parent, target, child, and target meta',
+			array(
+				'parentId' => $parent_id,
+				'targetId' => $target_id,
+				'childId'  => $child_id,
+				'metaId'   => $meta_id,
+				'before'   => array(
+					'postCount' => $before['post'] instanceof \WP_Post ? $before['post']->comment_count : null,
+					'target'    => self::comment_summary( $before['target'] ),
+					'child'     => self::comment_summary( $before['child'] ),
+					'meta'      => $before['meta'],
+				),
+			)
+		);
+		self::collect_failure(
+			$failures,
+			true === $deleted
+				&& false === $missing_delete
+				&& ! ( $after_target instanceof \WP_Comment )
+				&& $after_parent instanceof \WP_Comment
+				&& $after_child instanceof \WP_Comment
+				&& (int) $parent_id === (int) $after_child->comment_parent
+				&& $after_post instanceof \WP_Post
+				&& 2 === (int) $after_post->comment_count
+				&& '' === $after_meta,
+			'force deleting an approved comment removes it, reparents children, deletes meta, and refreshes counts',
+			array(
+				'deleted'       => $deleted,
+				'missingDelete' => $missing_delete,
+				'afterTarget'   => self::comment_summary( $after_target ),
+				'afterParent'   => self::comment_summary( $after_parent ),
+				'afterChild'    => self::comment_summary( $after_child ),
+				'afterCount'    => $after_post instanceof \WP_Post ? $after_post->comment_count : null,
+				'afterMeta'     => $after_meta,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			self::events_are_ordered(
+				$event_names,
+				array(
+					'delete_comment',
+					'deleted_comment',
+					'wp_set_comment_status',
+					'transition_comment_status',
+					'comment_approved_to_delete',
+				)
+			)
+				&& array(
+					'delete_comment',
+					'deleted_comment',
+					'wp_set_comment_status',
+					'transition_comment_status',
+					'comment_approved_to_delete',
+				) === $event_names
+				&& (int) $target_id === (int) ( $events[0]['id'] ?? 0 )
+				&& (int) $target_id === (int) ( $events[1]['id'] ?? 0 )
+				&& 'delete' === ( $events[2]['status'] ?? null )
+				&& 'delete' === ( $events[3]['new'] ?? null )
+				&& 'approved' === ( $events[3]['old'] ?? null )
+				&& false === \has_action( 'delete_comment', $hooks[0][1] )
+				&& false === \has_action( 'deleted_comment', $hooks[1][1] )
+				&& false === \has_action( 'wp_set_comment_status', $hooks[2][1] )
+				&& false === \has_action( 'transition_comment_status', $hooks[3][1] )
+				&& false === \has_action( 'comment_approved_to_delete', $hooks[4][1] ),
+			'force delete fires delete/status transition hooks with the deleted comment payload and removes hooks',
+			array( 'events' => $events )
+		);
+
+		return self::result(
+			$ctx,
+			'comment-workflow.delete-comment.force-delete-reparents-meta-counts-hooks',
+			$failures,
+			array(
+				'postId'   => $post_id,
+				'targetId' => $target_id,
+				'childId'  => $child_id,
+				'events'   => $events,
+			)
 		);
 	}
 
