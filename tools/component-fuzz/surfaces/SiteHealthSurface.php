@@ -883,12 +883,15 @@ final class SiteHealthSurface {
 					OBJECT_K === $wpdb->last_output
 						&& false !== strpos( $wpdb->last_query, 'information_schema.TABLES' )
 						&& isset( $wpdb->prepared_queries[0]['args'][0] )
-						&& DB_NAME === $wpdb->prepared_queries[0]['args'][0],
+						&& DB_NAME === $wpdb->prepared_queries[0]['args'][0]
+						&& $wpdb->expected_table_names() === $wpdb->last_requested_tables,
 					"persistent object cache table-row threshold uses prepared information_schema OBJECT_K query for {$scenario['name']}",
 					array(
-						'lastOutput' => $wpdb->last_output,
-						'lastQuery'  => self::preview( $wpdb->last_query ),
-						'prepared'   => $wpdb->prepared_queries,
+						'expectedTables'  => $wpdb->expected_table_names(),
+						'requestedTables' => $wpdb->last_requested_tables,
+						'lastOutput'      => $wpdb->last_output,
+						'lastQuery'       => self::preview( $wpdb->last_query ),
+						'prepared'        => $wpdb->prepared_queries,
 					)
 				);
 			}
@@ -1406,6 +1409,9 @@ final class SiteHealthSurface {
 		$table_thresholds  = self::persistent_object_cache_thresholds( $case['tableLimit'] );
 		$table_rows_low    = self::persistent_object_cache_table_rows( $table_thresholds, null );
 		$table_rows_trigger = self::persistent_object_cache_table_rows( $table_thresholds, $case['tableThreshold'] );
+		$exact_thresholds  = $table_thresholds;
+		$exact_thresholds['alloptions_count'] = count( $low_alloptions );
+		$exact_thresholds['alloptions_bytes'] = strlen( serialize( $low_alloptions ) );
 		$unsafe_note       = $case['safeNoteToken']
 			. ' <strong>allowed-note</strong> <script>alert(1)</script><img src="x" onerror="alert(1)">';
 		$alloptions_thresholds = $base_thresholds;
@@ -1472,6 +1478,24 @@ final class SiteHealthSurface {
 				'expectedAlloptionsCalls'   => 0,
 				'expectedDbQueries'         => 0,
 				'expectFilteredNotes'       => true,
+			),
+			array(
+				'name'                      => 'natural-below-thresholds',
+				'extObjectCache'            => false,
+				'shortCircuit'              => null,
+				'thresholds'                => $exact_thresholds,
+				'alloptions'                => $low_alloptions,
+				'tableRows'                 => $table_rows_low,
+				'services'                  => array(),
+				'actionUrl'                 => $case['actionUrl'],
+				'unsafeNote'                => '',
+				'safeNoteToken'             => '',
+				'expectedStatus'            => 'good',
+				'labelContains'             => 'not required',
+				'expectedShortCircuitCalls' => 1,
+				'expectedAlloptionsCalls'   => 1,
+				'expectedDbQueries'         => 1,
+				'expectFilteredNotes'       => false,
 			),
 			array(
 				'name'                      => 'alloptions-threshold',
@@ -2381,6 +2405,7 @@ final class SiteHealthPersistentObjectCacheWpdbDouble {
 	public int $get_results_calls = 0;
 	public array $prepared_queries = array();
 	public array $result_queries = array();
+	public array $last_requested_tables = array();
 	public string $comments = 'wp_comments';
 	public string $options = 'wp_options';
 	public string $posts = 'wp_posts';
@@ -2410,6 +2435,16 @@ final class SiteHealthPersistentObjectCacheWpdbDouble {
 		foreach ( $map as $threshold => $table ) {
 			$this->rows_by_table[ $table ] = (int) ( $rows_by_threshold[ $threshold ] ?? 0 );
 		}
+	}
+
+	public function expected_table_names(): array {
+		return array(
+			$this->comments,
+			$this->options,
+			$this->posts,
+			$this->terms,
+			$this->users,
+		);
 	}
 
 	public function prepare( $query, ...$args ): string {
@@ -2445,8 +2480,14 @@ final class SiteHealthPersistentObjectCacheWpdbDouble {
 			return array();
 		}
 
+		$this->last_requested_tables = $this->requested_table_names( $query );
 		$rows = array();
-		foreach ( $this->rows_by_table as $table => $table_rows ) {
+		foreach ( $this->last_requested_tables as $table ) {
+			if ( ! array_key_exists( $table, $this->rows_by_table ) ) {
+				continue;
+			}
+
+			$table_rows = $this->rows_by_table[ $table ];
 			$row = (object) array(
 				'table' => $table,
 				'rows'  => $table_rows,
@@ -2462,5 +2503,17 @@ final class SiteHealthPersistentObjectCacheWpdbDouble {
 
 		$this->num_rows = count( $rows );
 		return $rows;
+	}
+
+	private function requested_table_names( string $query ): array {
+		if ( ! preg_match( "/TABLE_NAME\s+IN\s*\(([^)]*)\)/i", $query, $match ) ) {
+			return array();
+		}
+
+		if ( ! preg_match_all( "/'((?:[^'\\\\]|\\\\.)*)'/", $match[1], $matches ) ) {
+			return array();
+		}
+
+		return array_map( 'stripslashes', $matches[1] );
 	}
 }
