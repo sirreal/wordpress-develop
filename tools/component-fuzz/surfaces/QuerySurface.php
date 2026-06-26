@@ -33,6 +33,7 @@ final class QuerySurface {
 			$rows = array_merge( $rows, self::check_date_queries( $ctx ) );
 			$rows = array_merge( $rows, self::check_wp_query_parsing( $ctx ) );
 			$rows = array_merge( $rows, self::check_wp_query_execution( $ctx ) );
+			$rows = array_merge( $rows, self::check_wp_query_post_search_matrix( $ctx ) );
 			$rows = array_merge( $rows, self::check_wp_query_cache_keys( $ctx ) );
 			$rows = array_merge( $rows, self::check_wp_query_result_cache( $ctx ) );
 			$rows = array_merge( $rows, self::check_user_query_parsing( $ctx ) );
@@ -553,6 +554,105 @@ final class QuerySurface {
 					'globalMismatches'            => $observation['globalMismatches'],
 					'unexpectedGlobalMismatches'  => $observation['unexpectedGlobalMismatches'],
 				)
+			);
+		}
+
+		return $rows;
+	}
+
+	private static function check_wp_query_post_search_matrix( \ComponentFuzz\FuzzContext $ctx ): array {
+		$rows  = array();
+		$cases = self::wp_query_post_search_cases( $ctx );
+
+		foreach ( $cases as $case_index => $case ) {
+			$call = self::call_guarded(
+				static function () use ( $case ) {
+					return self::wp_query_post_search_observation( $case );
+				}
+			);
+
+			$rows[] = self::case_result(
+				$ctx,
+				$case_index,
+				$case,
+				'query.wp-query.post-search-no-throw',
+				$call['ok'] && self::is_wp_query_post_search_observation( $call['value'] ),
+				array( 'call' => self::describe_call( $call ) )
+			);
+
+			if ( ! $call['ok'] || ! self::is_wp_query_post_search_observation( $call['value'] ) ) {
+				continue;
+			}
+
+			$observation = $call['value'];
+
+			$rows[] = self::case_result(
+				$ctx,
+				$case_index,
+				$case,
+				'query.wp-query.post-search-protected-api-rules',
+				self::wp_query_post_search_parse_expectations_match( $observation, $case['expect'] ?? array() ),
+				array(
+					'parse'  => self::describe_value( $observation['parse'] ),
+					'expect' => $case['expect'] ?? array(),
+				)
+			);
+
+			$rows[] = self::case_result(
+				$ctx,
+				$case_index,
+				$case,
+				'query.wp-query.post-search-sql-safe',
+				self::wp_query_post_search_sql_is_safe( $observation ),
+				array(
+					'where'   => self::describe_value( $observation['parse']['where'] ),
+					'order'   => self::describe_value( $observation['parse']['order'] ),
+					'request' => self::describe_value( $observation['execution']['request'] ),
+				)
+			);
+
+			$rows[] = self::case_result(
+				$ctx,
+				$case_index,
+				$case,
+				'query.wp-query.post-search-sql-features',
+				self::wp_query_post_search_sql_expectations_match( $observation, $case['expect'] ?? array() ),
+				array(
+					'expect'  => $case['expect'] ?? array(),
+					'where'   => self::describe_value( $observation['parse']['where'] ),
+					'order'   => self::describe_value( $observation['parse']['order'] ),
+					'request' => self::describe_value( $observation['execution']['request'] ),
+				)
+			);
+
+			$rows[] = self::case_result(
+				$ctx,
+				$case_index,
+				$case,
+				'query.wp-query.post-search-filters-scoped',
+				self::wp_query_post_search_filter_expectations_match( $observation, $case ),
+				array(
+					'filterHits'             => $observation['filterHits'],
+					'hookCallbacksRemoved'   => $observation['hookCallbacksRemoved'],
+					'hookRuntimeRestored'    => $observation['hookRuntimeRestored'],
+					'currentUserRestored'    => $observation['currentUserRestored'],
+					'postSearchColumnsSeen'  => $observation['postSearchColumnsSeen'],
+				)
+			);
+
+			$second = self::call_guarded(
+				static function () use ( $case ) {
+					return self::wp_query_post_search_observation( $case );
+				}
+			);
+
+			$rows[] = self::case_result(
+				$ctx,
+				$case_index,
+				$case,
+				'query.wp-query.post-search-deterministic',
+				$second['ok'] && self::wp_query_post_search_observations_match( $observation, $second['value'] ),
+				array( 'second' => self::describe_call( $second ) )
 			);
 		}
 
@@ -1839,6 +1939,252 @@ final class QuerySurface {
 		return $cases;
 	}
 
+	private static function wp_query_post_search_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$long_search = 'one two three four five six seven eight nine ten eleven';
+		$cases       = array(
+			array(
+				'label'      => 'quoted-stopword-exclusion-columns',
+				'queryVars'  => array(
+					'orderby'        => 'relevance',
+					's'              => 'alpha "quoted phrase" the b -excluded',
+					'search_columns' => array( 'post_title', 'post_excerpt', 'bad_column' ),
+				),
+				'termsInput' => array( 'alpha', '"quoted phrase"', 'the', 'b', '-excluded' ),
+				'expect'     => array(
+					'searchTermsExact' => array( 'alpha', 'quoted phrase', '-excluded' ),
+					'searchTermsCount' => 5,
+					'parsedTermsExact' => array( 'alpha', 'quoted phrase', '-excluded' ),
+					'whereContains'    => array(
+						"wp_posts.post_title LIKE '%alpha%'",
+						"wp_posts.post_excerpt LIKE '%quoted phrase%'",
+						"wp_posts.post_title NOT LIKE '%excluded%'",
+						"wp_posts.post_excerpt NOT LIKE '%excluded%'",
+					),
+					'whereNotContains' => array(
+						'bad_column',
+						'wp_posts.post_content LIKE',
+						'wp_posts.post_content NOT LIKE',
+					),
+					'orderContains'    => array( '(CASE ', 'THEN 2 ', 'ELSE 6 END)' ),
+					'orderNotContains' => array( 'THEN 1 ', 'THEN 4 ', 'THEN 5 ' ),
+					'requestContains'  => array( "wp_posts.post_password = ''" ),
+				),
+			),
+			array(
+				'label'      => 'positive-multi-term-rank-case',
+				'queryVars'  => array(
+					'orderby' => 'relevance',
+					's'       => 'alpha beta gamma',
+				),
+				'termsInput' => array( 'alpha', 'beta', 'gamma' ),
+				'expect'     => array(
+					'searchTermsExact' => array( 'alpha', 'beta', 'gamma' ),
+					'searchTermsCount' => 3,
+					'orderContains'    => array( '(CASE ', 'THEN 1 ', 'THEN 2 ', 'THEN 3 ', 'THEN 4 ', 'THEN 5 ', 'ELSE 6 END)' ),
+					'requestContains'  => array(
+						"wp_posts.post_title LIKE '%alpha beta gamma%'",
+						"wp_posts.post_excerpt LIKE '%alpha beta gamma%'",
+						"wp_posts.post_content LIKE '%alpha beta gamma%'",
+					),
+				),
+			),
+			array(
+				'label'      => 'ten-plus-term-sentence-fallback',
+				'queryVars'  => array(
+					'orderby' => 'relevance',
+					's'       => $long_search,
+				),
+				'termsInput' => explode( ' ', $long_search ),
+				'expect'     => array(
+					'searchTermsExact' => array( $long_search ),
+					'searchTermsCount' => 11,
+					'singleSearchTermEqualsSearch' => true,
+					'whereContains'    => array( "wp_posts.post_title LIKE '%{$long_search}%'" ),
+					'orderContains'    => array( 'THEN 1 ', 'THEN 2 ', 'THEN 4 ', 'THEN 5 ', 'ELSE 6 END)' ),
+					'orderNotContains' => array( 'THEN 3 ' ),
+				),
+			),
+			array(
+				'label'      => 'crlf-normalized-wildcard-sensitive',
+				'queryVars'  => array(
+					's'              => "100%_match\r\nalpha",
+					'search_columns' => array( 'post_title' ),
+				),
+				'termsInput' => array( "100%_match\r\nalpha" ),
+				'expect'     => array(
+					'normalizedSearch' => '100%_matchalpha',
+					'searchTermsExact' => array( '100%_matchalpha' ),
+					'whereContains'    => array( "wp_posts.post_title LIKE '%100\\\\%\\\\_matchalpha%'" ),
+					'whereNotContains' => array( "\r", "\n", 'wp_posts.post_excerpt', 'wp_posts.post_content' ),
+					'requestContains'  => array( "wp_posts.post_title LIKE '%100\\\\%\\\\_matchalpha%'" ),
+					'requestNotContains' => array( "\r" ),
+				),
+			),
+			array(
+				'label'      => 'exact-single-term-no-surrounding-wildcards',
+				'queryVars'  => array(
+					'exact'          => true,
+					's'              => '100%_match',
+					'search_columns' => array( 'post_title' ),
+				),
+				'termsInput' => array( '100%_match' ),
+				'expect'     => array(
+					'searchTermsExact' => array( '100%_match' ),
+					'whereContains'    => array( "wp_posts.post_title LIKE '100\\\\%\\\\_match'" ),
+					'whereNotContains' => array( "LIKE '%100", "match%'" ),
+					'requestContains'  => array( "wp_posts.post_title LIKE '100\\\\%\\\\_match'" ),
+					'requestNotContains' => array( '(CASE ', "LIKE '%100" ),
+				),
+			),
+			array(
+				'label'      => 'sentence-exact-keeps-dash-literal',
+				'queryVars'  => array(
+					'exact'          => true,
+					's'              => 'alpha beta -literal',
+					'search_columns' => array( 'post_content' ),
+					'sentence'       => true,
+				),
+				'termsInput' => array( 'alpha', 'beta', '-literal' ),
+				'expect'     => array(
+					'searchTermsExact' => array( 'alpha beta -literal' ),
+					'searchTermsCount' => 1,
+					'whereContains'    => array( "wp_posts.post_content LIKE 'alpha beta -literal'" ),
+					'whereNotContains' => array( 'NOT LIKE', 'wp_posts.post_title', 'wp_posts.post_excerpt' ),
+					'requestContains'  => array( "wp_posts.post_content LIKE 'alpha beta -literal'" ),
+				),
+			),
+			array(
+				'label'           => 'prefix-disabled-dash-is-positive',
+				'queryVars'       => array(
+					'orderby'        => 'relevance',
+					's'              => 'alpha -excluded',
+					'search_columns' => array( 'post_title' ),
+				),
+				'termsInput'      => array( 'alpha', '-excluded' ),
+				'exclusionPrefix' => '',
+				'expect'          => array(
+					'searchTermsExact' => array( 'alpha', '-excluded' ),
+					'whereContains'    => array( "wp_posts.post_title LIKE '%-excluded%'" ),
+					'whereNotContains' => array( 'NOT LIKE' ),
+					'orderContains'    => array( 'THEN 2 ', 'THEN 3 ', 'ELSE 6 END)' ),
+					'orderNotContains' => array( 'THEN 1 ', 'THEN 4 ', 'THEN 5 ' ),
+					'requestContains'  => array( "wp_posts.post_title LIKE '%-excluded%'" ),
+					'requestNotContains' => array( 'NOT LIKE' ),
+				),
+			),
+			array(
+				'label'               => 'invalid-search-columns-fallback-defaults',
+				'queryVars'           => array(
+					's'              => 'alpha',
+					'search_columns' => array( 'bad_column' ),
+				),
+				'termsInput'          => array( 'alpha' ),
+				'filterSearchColumns' => array( 'bad_column', 'also_bad' ),
+				'expect'              => array(
+					'postSearchColumnsBefore' => array( array( 'bad_column' ), array( 'bad_column' ) ),
+					'whereContains'           => array( 'wp_posts.post_title LIKE', 'wp_posts.post_excerpt LIKE', 'wp_posts.post_content LIKE' ),
+					'whereNotContains'        => array( 'bad_column', 'also_bad' ),
+					'requestNotContains'      => array( 'bad_column', 'also_bad' ),
+				),
+			),
+			array(
+				'label'               => 'post-search-columns-filter-allowlist',
+				'queryVars'           => array(
+					's'              => 'alpha beta',
+					'search_columns' => array( 'post_title', 'post_content' ),
+				),
+				'termsInput'          => array( 'alpha', 'beta' ),
+				'filterSearchColumns' => array( 'post_title', 'bad_column' ),
+				'expect'              => array(
+					'postSearchColumnsBefore' => array( array( 'post_title', 'post_content' ), array( 'post_title', 'post_content' ) ),
+					'whereContains'           => array( 'wp_posts.post_title LIKE' ),
+					'whereNotContains'        => array( 'wp_posts.post_content', 'wp_posts.post_excerpt', 'bad_column' ),
+					'requestNotContains'      => array( 'bad_column' ),
+				),
+			),
+			array(
+				'label'      => 'stopwords-filter-reduces-terms',
+				'queryVars'  => array(
+					'orderby' => 'relevance',
+					's'       => 'alpha beta gamma',
+				),
+				'termsInput' => array( 'alpha', 'beta', 'gamma' ),
+				'stopwords'  => array( 'alpha', 'beta' ),
+				'expect'     => array(
+					'searchTermsExact' => array( 'gamma' ),
+					'parsedTermsExact' => array( 'gamma' ),
+					'whereContains'    => array( "wp_posts.post_title LIKE '%gamma%'" ),
+					'whereNotContains' => array( "LIKE '%alpha%'", "LIKE '%beta%'" ),
+				),
+			),
+			array(
+				'label'      => 'stopword-short-only-fallback',
+				'queryVars'  => array(
+					's' => 'a the x -',
+				),
+				'termsInput' => array( 'a', 'the', 'x', '-' ),
+				'expect'     => array(
+					'searchTermsExact' => array( 'a the x -' ),
+					'searchTermsCount' => 4,
+					'singleSearchTermEqualsSearch' => true,
+					'parsedTermsExact' => array(),
+					'whereContains'    => array( "wp_posts.post_title LIKE '%a the x -%'" ),
+				),
+			),
+			array(
+				'label'      => 'logged-in-skips-search-password-gate',
+				'queryVars'  => array(
+					's' => 'alpha beta',
+				),
+				'termsInput' => array( 'alpha', 'beta' ),
+				'loggedIn'   => true,
+				'expect'     => array(
+					'requestNotContains' => array( "wp_posts.post_password = ''" ),
+				),
+			),
+			array(
+				'label'      => 'explicit-post-password-clause',
+				'queryVars'  => array(
+					'post_password' => 'secret',
+					's'             => 'alpha',
+				),
+				'termsInput' => array( 'alpha' ),
+				'loggedIn'   => true,
+				'expect'     => array(
+					'requestContains'    => array( "wp_posts.post_password = 'secret'" ),
+					'requestNotContains' => array( "wp_posts.post_password = ''" ),
+				),
+			),
+			array(
+				'label'                     => 'attachment-filename-search-branch',
+				'queryVars'                 => array(
+					'post_status'    => 'inherit',
+					'post_type'      => 'attachment',
+					's'              => '2020/06/photo.jpg',
+					'search_columns' => array( 'post_title' ),
+				),
+				'termsInput'                => array( '2020/06/photo.jpg' ),
+				'allowAttachmentByFilename' => true,
+				'expect'                    => array(
+					'requestContains' => array(
+						'LEFT JOIN wp_postmeta AS sq1',
+						"_wp_attached_file",
+						'sq1.meta_value LIKE',
+						'GROUP BY wp_posts.ID',
+					),
+					'whereContains'   => array( 'sq1.meta_value LIKE' ),
+				),
+			),
+		);
+
+		$generated_count = min( 3, self::GENERATED_CASES );
+		for ( $i = 0; $i < $generated_count; $i++ ) {
+			$cases[] = self::generated_wp_query_post_search_case( $ctx->fork( 'wp-query-post-search-' . $i ), $i );
+		}
+
+		return $cases;
+	}
+
 	private static function user_query_cases( \ComponentFuzz\FuzzContext $ctx ): array {
 		$cases = array(
 			array(
@@ -2289,6 +2635,77 @@ final class QuerySurface {
 		return $vars;
 	}
 
+	private static function generated_wp_query_post_search_case( \ComponentFuzz\FuzzContext $ctx, int $index ): array {
+		$search = $ctx->choice(
+			array(
+				'alpha "quoted generated" -omit',
+				'one two three four five six seven eight nine ten',
+				"line\r\nbreak wildcard_% value",
+				'100%_generated',
+				'a the generated',
+			)
+		);
+
+		$query_vars = array(
+			'exact'          => $ctx->bool( 35 ),
+			'orderby'        => $ctx->choice( array( '', 'date', 'relevance' ) ),
+			's'              => $search,
+			'search_columns' => $ctx->choice(
+				array(
+					array(),
+					array( 'post_title' ),
+					array( 'post_title', 'post_content', 'bad_column' ),
+					array( 'bad_column' ),
+				)
+			),
+			'sentence'       => $ctx->bool( 25 ),
+		);
+
+		if ( '' === $query_vars['orderby'] ) {
+			unset( $query_vars['orderby'] );
+		}
+
+		$filter_columns = $ctx->choice(
+			array(
+				null,
+				array( 'post_title', 'post_excerpt' ),
+				array( 'post_content', 'bad_column' ),
+				array( 'bad_column' ),
+			)
+		);
+		$stopwords      = $ctx->choice(
+			array(
+				null,
+				array( 'alpha', 'generated' ),
+				array( 'one', 'two', 'three' ),
+			)
+		);
+
+		$case = array(
+			'label'                     => 'generated-post-search-' . $index,
+			'queryVars'                 => $query_vars,
+			'termsInput'                => array( $search, 'a', 'the', '-omit' ),
+			'exclusionPrefix'           => $ctx->choice( array( '-', '', '!' ) ),
+			'allowAttachmentByFilename' => $ctx->bool( 30 ),
+			'loggedIn'                  => $ctx->bool( 30 ),
+			'expect'                    => array(
+				'requestContains'    => array( 'FROM wp_posts' ),
+				'requestNotContains' => array( 'bad_column' ),
+				'whereNotContains'   => array( 'bad_column' ),
+			),
+		);
+
+		if ( null !== $filter_columns ) {
+			$case['filterSearchColumns'] = $filter_columns;
+		}
+
+		if ( null !== $stopwords ) {
+			$case['stopwords'] = $stopwords;
+		}
+
+		return $case;
+	}
+
 	private static function generated_user_query_vars( \ComponentFuzz\FuzzContext $ctx ): array {
 		return array(
 			'blog_id'        => 0,
@@ -2410,6 +2827,150 @@ final class QuerySurface {
 			'unexpectedGlobalMismatches' => $unexpected_global_mismatches,
 			'globalSnapshot'             => $global_snapshot,
 		);
+	}
+
+	private static function wp_query_post_search_observation( array $case ): array {
+		$hook_snapshot         = self::snapshot_hook_runtime();
+		$current_user_snapshot = self::snapshot_named_globals( array( 'current_user' ) );
+		$filter_hits           = array(
+			'postSearchColumns'        => 0,
+			'searchExclusionPrefix'    => 0,
+			'searchStopwords'          => 0,
+			'allowAttachmentFilename'  => 0,
+		);
+		$post_search_columns_seen = array();
+		$post_search_searches     = array();
+		$observation              = array();
+
+		$post_search_columns_filter = static function ( array $columns, string $search, \WP_Query $query ) use ( &$filter_hits, &$post_search_columns_seen, &$post_search_searches, $case ): array {
+			unset( $query );
+
+			++$filter_hits['postSearchColumns'];
+			$post_search_columns_seen[] = array_values( $columns );
+			$post_search_searches[]     = $search;
+
+			return array_key_exists( 'filterSearchColumns', $case ) ? (array) $case['filterSearchColumns'] : $columns;
+		};
+		$exclusion_prefix_filter    = static function ( string $prefix ) use ( &$filter_hits, $case ): string {
+			++$filter_hits['searchExclusionPrefix'];
+			return array_key_exists( 'exclusionPrefix', $case ) ? (string) $case['exclusionPrefix'] : $prefix;
+		};
+		$stopwords_filter           = static function ( array $stopwords ) use ( &$filter_hits, $case ): array {
+			++$filter_hits['searchStopwords'];
+			return array_key_exists( 'stopwords', $case ) ? array_values( (array) $case['stopwords'] ) : $stopwords;
+		};
+		$allow_attachment_filter    = static function ( bool $allow ) use ( &$filter_hits, $case ): bool {
+			unset( $allow );
+
+			++$filter_hits['allowAttachmentFilename'];
+			return ! empty( $case['allowAttachmentByFilename'] );
+		};
+
+		try {
+			\add_filter( 'post_search_columns', $post_search_columns_filter, 10, 3 );
+			\add_filter( 'wp_query_search_exclusion_prefix', $exclusion_prefix_filter, 10, 1 );
+			\add_filter( 'wp_search_stopwords', $stopwords_filter, 10, 1 );
+			\add_filter( 'wp_allow_query_attachment_by_filename', $allow_attachment_filter, 10, 1 );
+
+			self::set_current_user_for_search( ! empty( $case['loggedIn'] ) );
+
+			$parse_probe = self::wp_query_search_probe();
+			$parse       = $parse_probe->component_fuzz_observe_search(
+				$case['queryVars'],
+				$case['termsInput'] ?? array( (string) ( $case['queryVars']['s'] ?? '' ) ),
+				! empty( $case['allowAttachmentByFilename'] )
+			);
+			$execution   = self::wp_query_execution_observation(
+				array(
+					'queryVars' => self::wp_query_post_search_execution_vars( $case['queryVars'] ),
+				)
+			);
+
+			$observation = array(
+				'parse'                 => $parse,
+				'execution'             => $execution,
+				'filterHits'            => $filter_hits,
+				'postSearchColumnsSeen' => $post_search_columns_seen,
+				'postSearchSearches'    => $post_search_searches,
+			);
+		} finally {
+			\remove_filter( 'wp_allow_query_attachment_by_filename', $allow_attachment_filter, 10 );
+			\remove_filter( 'wp_search_stopwords', $stopwords_filter, 10 );
+			\remove_filter( 'wp_query_search_exclusion_prefix', $exclusion_prefix_filter, 10 );
+			\remove_filter( 'post_search_columns', $post_search_columns_filter, 10 );
+
+			$callbacks_removed = ! self::hook_has_callback( 'post_search_columns', $post_search_columns_filter, 10 )
+				&& ! self::hook_has_callback( 'wp_query_search_exclusion_prefix', $exclusion_prefix_filter, 10 )
+				&& ! self::hook_has_callback( 'wp_search_stopwords', $stopwords_filter, 10 )
+				&& ! self::hook_has_callback( 'wp_allow_query_attachment_by_filename', $allow_attachment_filter, 10 );
+
+			self::restore_hook_runtime( $hook_snapshot );
+			self::restore_named_globals( $current_user_snapshot );
+
+			$observation['hookCallbacksRemoved'] = $callbacks_removed;
+			$observation['hookRuntimeRestored']  = self::hook_runtime_matches( $hook_snapshot );
+			$observation['currentUserRestored']  = self::named_globals_match_snapshot( $current_user_snapshot );
+		}
+
+		return $observation;
+	}
+
+	private static function wp_query_search_probe(): object {
+		return new class() extends \WP_Query {
+			public function component_fuzz_observe_search( array $query_vars, array $terms_input, bool $allow_attachment_by_filename ): array {
+				$parsed_terms = $this->parse_search_terms( $terms_input );
+				$stopwords    = $this->get_search_stopwords();
+				$query_vars   = $this->fill_query_vars( $query_vars );
+				$this->allow_query_attachment_by_filename = $allow_attachment_by_filename;
+				$where                                   = $this->parse_search( $query_vars );
+				$order                                   = '';
+
+				if ( ! empty( $query_vars['s'] ) && ( ! empty( $query_vars['search_orderby_title'] ) || ( isset( $query_vars['orderby'] ) && 'relevance' === $query_vars['orderby'] ) ) ) {
+					$order = (string) $this->parse_search_order( $query_vars );
+				}
+
+				return array(
+					'where'              => $where,
+					'order'              => $order,
+					'queryVars'          => $query_vars,
+					'searchTerms'        => array_values( (array) ( $query_vars['search_terms'] ?? array() ) ),
+					'searchTermsCount'   => (int) ( $query_vars['search_terms_count'] ?? 0 ),
+					'searchOrderbyTitle' => array_values( (array) ( $query_vars['search_orderby_title'] ?? array() ) ),
+					'parsedTerms'        => array_values( $parsed_terms ),
+					'stopwords'          => array_values( $stopwords ),
+				);
+			}
+		};
+	}
+
+	private static function wp_query_post_search_execution_vars( array $query_vars ): array {
+		return array_merge(
+			array(
+				'cache_results'          => false,
+				'ignore_sticky_posts'    => true,
+				'lazy_load_term_meta'    => false,
+				'no_found_rows'          => true,
+				'post_status'            => 'publish',
+				'post_type'              => 'post',
+				'posts_per_page'         => 3,
+				'suppress_filters'       => false,
+				'update_post_meta_cache' => false,
+				'update_post_term_cache' => false,
+			),
+			$query_vars
+		);
+	}
+
+	private static function set_current_user_for_search( bool $logged_in ): void {
+		if ( ! class_exists( '\WP_User' ) ) {
+			unset( $GLOBALS['current_user'] );
+			return;
+		}
+
+		$user     = new \WP_User();
+		$user->ID = $logged_in ? 41 : 0;
+
+		$GLOBALS['current_user'] = $user;
 	}
 
 	private static function user_query_parse_observation( array $query_vars ): array {
@@ -2738,6 +3299,26 @@ final class QuerySurface {
 			&& is_string( $value['sql'] ?? null );
 	}
 
+	private static function is_wp_query_post_search_observation( $value ): bool {
+		return is_array( $value )
+			&& is_array( $value['parse'] ?? null )
+			&& is_string( $value['parse']['where'] ?? null )
+			&& is_string( $value['parse']['order'] ?? null )
+			&& is_array( $value['parse']['queryVars'] ?? null )
+			&& is_array( $value['parse']['searchTerms'] ?? null )
+			&& is_int( $value['parse']['searchTermsCount'] ?? null )
+			&& is_array( $value['parse']['searchOrderbyTitle'] ?? null )
+			&& is_array( $value['parse']['parsedTerms'] ?? null )
+			&& is_array( $value['parse']['stopwords'] ?? null )
+			&& self::is_wp_query_execution_observation( $value['execution'] ?? null )
+			&& is_array( $value['filterHits'] ?? null )
+			&& is_array( $value['postSearchColumnsSeen'] ?? null )
+			&& is_array( $value['postSearchSearches'] ?? null )
+			&& is_bool( $value['hookCallbacksRemoved'] ?? null )
+			&& is_bool( $value['hookRuntimeRestored'] ?? null )
+			&& is_bool( $value['currentUserRestored'] ?? null );
+	}
+
 	private static function is_sql_fragment( $value ): bool {
 		return is_array( $value )
 			&& is_string( $value['join'] ?? null )
@@ -2769,6 +3350,118 @@ final class QuerySurface {
 
 		foreach ( $expect['whereContains'] ?? array() as $needle ) {
 			if ( ! is_array( $sql ) || ! str_contains( $sql['where'], $needle ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function wp_query_post_search_parse_expectations_match( array $observation, array $expect ): bool {
+		$parse      = $observation['parse'];
+		$query_vars = $parse['queryVars'];
+
+		foreach (
+			array(
+				'searchTermsExact' => 'searchTerms',
+				'parsedTermsExact' => 'parsedTerms',
+			) as $expect_key => $parse_key
+		) {
+			if ( array_key_exists( $expect_key, $expect ) && array_values( $expect[ $expect_key ] ) !== array_values( $parse[ $parse_key ] ) ) {
+				return false;
+			}
+		}
+
+		if ( array_key_exists( 'searchTermsCount', $expect ) && (int) $expect['searchTermsCount'] !== (int) $parse['searchTermsCount'] ) {
+			return false;
+		}
+
+		if ( array_key_exists( 'normalizedSearch', $expect ) && (string) $expect['normalizedSearch'] !== (string) ( $query_vars['s'] ?? '' ) ) {
+			return false;
+		}
+
+		if ( ! empty( $expect['singleSearchTermEqualsSearch'] ) ) {
+			if ( 1 !== count( $parse['searchTerms'] ) || (string) ( $query_vars['s'] ?? '' ) !== (string) $parse['searchTerms'][0] ) {
+				return false;
+			}
+		}
+
+		return self::query_vars_are_scalar_array_safe( $query_vars )
+			&& self::sql_string_is_balanced( $parse['where'] )
+			&& self::sql_has_no_unexpanded_placeholders( $parse['where'] )
+			&& self::sql_string_is_balanced( $parse['order'] )
+			&& self::sql_has_no_unexpanded_placeholders( $parse['order'] );
+	}
+
+	private static function wp_query_post_search_sql_is_safe( array $observation ): bool {
+		$parse   = $observation['parse'];
+		$request = $observation['execution']['request'];
+
+		return self::sql_string_is_balanced( $parse['where'] )
+			&& self::sql_has_no_unexpanded_placeholders( $parse['where'] )
+			&& self::sql_has_no_empty_condition_groups( $parse['where'] )
+			&& self::sql_string_is_balanced( $parse['order'] )
+			&& self::sql_has_no_unexpanded_placeholders( $parse['order'] )
+			&& self::wp_query_request_sql_is_safe( $request )
+			&& self::wp_query_recorded_sql_is_safe( $observation['execution']['wpdbNewQueries'] );
+	}
+
+	private static function wp_query_post_search_sql_expectations_match( array $observation, array $expect ): bool {
+		$targets = array(
+			'where'   => $observation['parse']['where'],
+			'order'   => $observation['parse']['order'],
+			'request' => $observation['execution']['request'],
+		);
+
+		foreach (
+			array(
+				'whereContains'   => array( 'where', true ),
+				'whereNotContains' => array( 'where', false ),
+				'orderContains'   => array( 'order', true ),
+				'orderNotContains' => array( 'order', false ),
+				'requestContains' => array( 'request', true ),
+				'requestNotContains' => array( 'request', false ),
+			) as $expect_key => $rule
+		) {
+			$target = $targets[ $rule[0] ];
+			foreach ( $expect[ $expect_key ] ?? array() as $needle ) {
+				$contains = str_contains( $target, (string) $needle );
+				if ( (bool) $rule[1] !== $contains ) {
+					return false;
+				}
+			}
+		}
+
+		return true;
+	}
+
+	private static function wp_query_post_search_filter_expectations_match( array $observation, array $case ): bool {
+		if ( ! $observation['hookCallbacksRemoved'] || ! $observation['hookRuntimeRestored'] || ! $observation['currentUserRestored'] ) {
+			return false;
+		}
+
+		$filter_hits = $observation['filterHits'];
+		$stopwords_expected = ! empty( $case['queryVars']['sentence'] ) ? 1 : 2;
+		foreach (
+			array(
+				'postSearchColumns'       => 2,
+				'searchExclusionPrefix'   => 2,
+				'searchStopwords'         => $stopwords_expected,
+				'allowAttachmentFilename' => 1,
+			) as $filter => $expected_count
+		) {
+			if ( (int) ( $filter_hits[ $filter ] ?? -1 ) !== $expected_count ) {
+				return false;
+			}
+		}
+
+		$expect = $case['expect'] ?? array();
+		if ( array_key_exists( 'postSearchColumnsBefore', $expect ) && array_values( $expect['postSearchColumnsBefore'] ) !== $observation['postSearchColumnsSeen'] ) {
+			return false;
+		}
+
+		foreach ( $observation['postSearchSearches'] as $search ) {
+			if ( (string) ( $observation['parse']['queryVars']['s'] ?? '' ) !== (string) $search ) {
 				return false;
 			}
 		}
@@ -3206,6 +3899,18 @@ final class QuerySurface {
 			&& $first['postCount'] === $second['postCount']
 			&& $first['resultCount'] === $second['resultCount']
 			&& $first['postIds'] === $second['postIds'];
+	}
+
+	private static function wp_query_post_search_observations_match( array $first, $second ): bool {
+		return self::is_wp_query_post_search_observation( $second )
+			&& $first['parse'] === $second['parse']
+			&& self::wp_query_execution_observations_match( $first['execution'], $second['execution'] )
+			&& $first['filterHits'] === $second['filterHits']
+			&& $first['postSearchColumnsSeen'] === $second['postSearchColumnsSeen']
+			&& $first['postSearchSearches'] === $second['postSearchSearches']
+			&& $first['hookCallbacksRemoved'] === $second['hookCallbacksRemoved']
+			&& $first['hookRuntimeRestored'] === $second['hookRuntimeRestored']
+			&& $first['currentUserRestored'] === $second['currentUserRestored'];
 	}
 
 	private static function wp_query_cache_key_for( array $args, string $sql ): string {
@@ -3921,6 +4626,43 @@ final class QuerySurface {
 		}
 
 		return $value;
+	}
+
+	private static function snapshot_named_globals( array $names ): array {
+		$snapshot = array();
+
+		foreach ( $names as $name ) {
+			$snapshot[ $name ] = array_key_exists( $name, $GLOBALS )
+				? array( 'exists' => true, 'value' => $GLOBALS[ $name ] )
+				: array( 'exists' => false );
+		}
+
+		return $snapshot;
+	}
+
+	private static function restore_named_globals( array $snapshot ): void {
+		foreach ( $snapshot as $name => $entry ) {
+			if ( $entry['exists'] ) {
+				$GLOBALS[ $name ] = $entry['value'];
+			} else {
+				unset( $GLOBALS[ $name ] );
+			}
+		}
+	}
+
+	private static function named_globals_match_snapshot( array $snapshot ): bool {
+		foreach ( $snapshot as $name => $entry ) {
+			$exists = array_key_exists( $name, $GLOBALS );
+			if ( (bool) $entry['exists'] !== $exists ) {
+				return false;
+			}
+
+			if ( $entry['exists'] && $entry['value'] !== $GLOBALS[ $name ] ) {
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 	private static function snapshot_globals(): array {
