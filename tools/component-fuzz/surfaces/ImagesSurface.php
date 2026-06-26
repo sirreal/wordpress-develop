@@ -33,6 +33,7 @@ final class ImagesSurface {
 			$rows[] = self::check_srcset_and_sizes( $ctx );
 			$rows[] = self::check_responsive_filter_boundaries( $ctx );
 			$rows[] = self::check_image_tag_attributes( $ctx );
+			$rows[] = self::check_content_tag_filter_pipeline( $ctx );
 			$rows[] = self::check_loading_optimization_attributes( $ctx );
 			$rows[] = self::check_attachment_helpers( $ctx );
 			$rows[] = self::check_filetype_helpers( $ctx );
@@ -79,6 +80,31 @@ final class ImagesSurface {
 			if ( ! function_exists( $function ) ) {
 				$missing[] = "function {$function}";
 			}
+		}
+
+		return $missing;
+	}
+
+	private static function missing_content_tag_requirements(): array {
+		$missing = array();
+		foreach (
+			array(
+				'wp_filter_content_tags',
+				'wp_iframe_tag_add_loading_attr',
+				'wp_img_tag_add_auto_sizes',
+				'wp_img_tag_add_loading_optimization_attrs',
+				'wp_img_tag_add_srcset_and_sizes_attr',
+				'wp_img_tag_add_width_and_height_attr',
+				'wp_sizes_attribute_includes_valid_auto',
+			) as $function
+		) {
+			if ( ! function_exists( $function ) ) {
+				$missing[] = "function {$function}";
+			}
+		}
+
+		if ( ! class_exists( '\WP_HTML_Tag_Processor' ) ) {
+			$missing[] = 'class WP_HTML_Tag_Processor';
 		}
 
 		return $missing;
@@ -490,6 +516,461 @@ final class ImagesSurface {
 			'images.markup.srcset-sizes-insertion',
 			array() === $failures,
 			array( 'failures' => $failures )
+		);
+	}
+
+	private static function check_content_tag_filter_pipeline( \ComponentFuzz\FuzzContext $ctx ): array {
+		$missing = self::missing_content_tag_requirements();
+		if ( array() !== $missing ) {
+			return self::skip(
+				$ctx,
+				'images.content-tags.direct-helper-pipeline',
+				'Required WordPress content tag image APIs are unavailable.',
+				array( 'missing' => $missing )
+			);
+		}
+
+		$failures      = array();
+		$attachment_id = 400000 + $ctx->iteration();
+		$meta          = self::generated_image_meta( $ctx->fork( 'content-tag-meta' ) );
+		$medium        = $meta['sizes']['medium'];
+		$medium_src    = self::image_url( $meta, 'medium' );
+		$context       = 'component-fuzz-content-tags';
+
+		if ( class_exists( '\WP_Query' ) && ! isset( $GLOBALS['wp_query'] ) ) {
+			$GLOBALS['wp_query'] = new \WP_Query();
+		}
+
+		$valid_auto_cases = array(
+			'auto, (max-width: 600px) 100vw, 600px',
+			" \tAuTo\r\n, 100vw",
+		);
+		$invalid_auto_cases = array(
+			'(max-width: 600px) 100vw, auto',
+			'automatic, 100vw',
+			'auto 100vw, 50vw',
+		);
+
+		$auto_results = array();
+		foreach ( $valid_auto_cases as $case ) {
+			$auto_results[ $case ] = \wp_sizes_attribute_includes_valid_auto( $case );
+		}
+		foreach ( $invalid_auto_cases as $case ) {
+			$auto_results[ $case ] = \wp_sizes_attribute_includes_valid_auto( $case );
+		}
+
+		self::collect_failure(
+			$failures,
+			array_fill_keys( $valid_auto_cases, true ) + array_fill_keys( $invalid_auto_cases, false ) === $auto_results,
+			'wp_sizes_attribute_includes_valid_auto only accepts leading auto token',
+			array( 'results' => $auto_results )
+		);
+
+		$auto_base = '<img src="http://example.test/image.jpg" loading="lazy" width="640" sizes="(max-width: 640px) 100vw, 640px" alt="Auto">';
+		$auto_added = \wp_img_tag_add_auto_sizes( $auto_base );
+		$auto_attrs = self::tag_attributes( $auto_added, 'img' );
+
+		$auto_eager    = str_replace( 'loading="lazy"', 'loading="eager"', $auto_base );
+		$auto_no_width = str_replace( ' width="640"', '', $auto_base );
+		$auto_no_sizes = str_replace( ' sizes="(max-width: 640px) 100vw, 640px"', '', $auto_base );
+		$auto_existing = '<img src="http://example.test/image.jpg" loading="lazy" width="640" sizes=" AUTO, 100vw" alt="Auto">';
+
+		$auto_disabled_filter = static fn() => false;
+		\add_filter( 'wp_img_tag_add_auto_sizes', $auto_disabled_filter );
+		try {
+			$auto_disabled = \wp_img_tag_add_auto_sizes( $auto_base );
+		} finally {
+			\remove_filter( 'wp_img_tag_add_auto_sizes', $auto_disabled_filter );
+		}
+
+		self::collect_failure(
+			$failures,
+			'auto, (max-width: 640px) 100vw, 640px' === ( $auto_attrs['sizes'] ?? null )
+				&& 1 === substr_count( strtolower( (string) ( $auto_attrs['sizes'] ?? '' ) ), 'auto' )
+				&& 1 === self::tag_attribute_count( $auto_added, 'sizes' )
+				&& $auto_eager === \wp_img_tag_add_auto_sizes( $auto_eager )
+				&& $auto_no_width === \wp_img_tag_add_auto_sizes( $auto_no_width )
+				&& $auto_no_sizes === \wp_img_tag_add_auto_sizes( $auto_no_sizes )
+				&& $auto_existing === \wp_img_tag_add_auto_sizes( $auto_existing )
+				&& $auto_base === $auto_disabled
+				&& false === \has_filter( 'wp_img_tag_add_auto_sizes', $auto_disabled_filter ),
+			'wp_img_tag_add_auto_sizes is gated by lazy loading, width, sizes, existing auto, and filter',
+			array(
+				'autoAdded'       => self::describe_string( $auto_added ),
+				'autoAttrs'       => $auto_attrs,
+				'autoDisabled'    => self::describe_string( $auto_disabled ),
+				'disabledHasHook' => \has_filter( 'wp_img_tag_add_auto_sizes', $auto_disabled_filter ),
+			)
+		);
+
+		$content_img_calls    = array();
+		$iframe_loading_calls = array();
+		$img_loading_contexts = array(
+			'component-fuzz-img-loading',
+			'component-fuzz-img-loading-missing-dimensions',
+			'component-fuzz-img-loading-omit-decoding',
+			'component-fuzz-img-loading-auto-decoding',
+			'component-fuzz-img-loading-omit-loading',
+			'component-fuzz-img-loading-eager-loading',
+			$context,
+		);
+		$iframe_contexts      = array(
+			'component-fuzz-iframe-loading',
+			'component-fuzz-iframe-loading-invalid',
+			$context,
+		);
+
+		$meta_filter = static function ( $value, int $object_id, string $meta_key, bool $single ) use ( $attachment_id, $meta ) {
+			if ( $attachment_id !== $object_id || '_wp_attachment_metadata' !== $meta_key || ! $single ) {
+				return $value;
+			}
+
+			return array( $meta );
+		};
+
+		$lazy_enabled_filter = static function ( bool $default, string $tag_name, string $filter_context ) use ( $img_loading_contexts, $iframe_contexts ): bool {
+			if ( 'img' === $tag_name && in_array( $filter_context, $img_loading_contexts, true ) ) {
+				return true;
+			}
+
+			if ( 'iframe' === $tag_name && in_array( $filter_context, $iframe_contexts, true ) ) {
+				return true;
+			}
+
+			return $default;
+		};
+
+		$decoding_attr_filter = static function ( $value, string $image, string $filter_context ) {
+			unset( $image );
+
+			if ( 'component-fuzz-img-loading-omit-decoding' === $filter_context ) {
+				return false;
+			}
+
+			if ( 'component-fuzz-img-loading-auto-decoding' === $filter_context ) {
+				return 'auto';
+			}
+
+			return $value;
+		};
+
+		$img_loading_attr_filter = static function ( $value, string $image, string $filter_context ) {
+			unset( $image );
+
+			if ( 'component-fuzz-img-loading-omit-loading' === $filter_context ) {
+				return false;
+			}
+
+			if ( 'component-fuzz-img-loading-eager-loading' === $filter_context ) {
+				return 'eager';
+			}
+
+			return $value;
+		};
+
+		$iframe_loading_attr_filter = static function ( $value, string $iframe, string $filter_context ) use ( &$iframe_loading_calls, $context ) {
+			if ( $context === $filter_context ) {
+				$iframe_loading_calls[] = $iframe;
+			}
+
+			if ( 'component-fuzz-iframe-loading-invalid' === $filter_context ) {
+				return 'invalid';
+			}
+
+			return $value;
+		};
+
+		$content_img_filter = static function ( string $filtered_image, string $filter_context, int $image_attachment_id ) use ( &$content_img_calls, $context ): string {
+			if ( $context !== $filter_context ) {
+				return $filtered_image;
+			}
+
+			$content_img_calls[] = array(
+				'attachmentId' => $image_attachment_id,
+				'image'        => $filtered_image,
+			);
+
+			return str_replace( '<img', '<img data-content-filtered="' . $image_attachment_id . '"', $filtered_image );
+		};
+
+		\add_filter( 'get_post_metadata', $meta_filter, 10, 4 );
+		\add_filter( 'wp_lazy_loading_enabled', $lazy_enabled_filter, 10, 3 );
+		\add_filter( 'wp_img_tag_add_decoding_attr', $decoding_attr_filter, 10, 3 );
+		\add_filter( 'wp_img_tag_add_loading_attr', $img_loading_attr_filter, 10, 3 );
+		\add_filter( 'wp_iframe_tag_add_loading_attr', $iframe_loading_attr_filter, 10, 3 );
+		\add_filter( 'wp_content_img_tag', $content_img_filter, 10, 3 );
+		try {
+			$width_tag       = '<img class="wp-image-' . $attachment_id . '" src="' . $medium_src . '?cache=1" alt="Attachment">';
+			$width_added     = \wp_img_tag_add_width_and_height_attr( $width_tag, 'component-fuzz-width-height', $attachment_id );
+			$width_attrs     = self::tag_attributes( $width_added, 'img' );
+			$style_width     = max( 1, (int) round( $medium['width'] / 3 ) );
+			$style_height    = (int) round( $medium['height'] * $style_width / $medium['width'] );
+			$style_tag       = '<img class="wp-image-' . $attachment_id . '" src="' . $medium_src . '" style="width: ' . $style_width . 'px;" alt="Styled">';
+			$style_added     = \wp_img_tag_add_width_and_height_attr( $style_tag, 'component-fuzz-width-height-style', $attachment_id );
+			$style_attrs     = self::tag_attributes( $style_added, 'img' );
+			$single_src_tag  = "<img class='wp-image-{$attachment_id}' src='{$medium_src}' alt='Single'>";
+			$unknown_src_tag = '<img class="wp-image-' . $attachment_id . '" src="http://example.test/wp-content/uploads/2026/06/not-found.jpg" alt="Unknown">';
+
+			$disable_width_filter = static fn() => false;
+			\add_filter( 'wp_img_tag_add_width_and_height_attr', $disable_width_filter );
+			try {
+				$width_disabled = \wp_img_tag_add_width_and_height_attr( $width_tag, 'component-fuzz-width-height-disabled', $attachment_id );
+			} finally {
+				\remove_filter( 'wp_img_tag_add_width_and_height_attr', $disable_width_filter );
+			}
+
+			self::collect_failure(
+				$failures,
+				(string) $medium['width'] === ( $width_attrs['width'] ?? null )
+					&& (string) $medium['height'] === ( $width_attrs['height'] ?? null )
+					&& (string) $style_width === ( $style_attrs['width'] ?? null )
+					&& (string) $style_height === ( $style_attrs['height'] ?? null )
+					&& $single_src_tag === \wp_img_tag_add_width_and_height_attr( $single_src_tag, 'component-fuzz-width-height-single-src', $attachment_id )
+					&& $unknown_src_tag === \wp_img_tag_add_width_and_height_attr( $unknown_src_tag, 'component-fuzz-width-height-unknown-src', $attachment_id )
+					&& $width_tag === $width_disabled
+					&& false === \has_filter( 'wp_img_tag_add_width_and_height_attr', $disable_width_filter ),
+				'wp_img_tag_add_width_and_height_attr uses metadata, style scaling, double-quoted src, and filter',
+				array(
+					'widthAdded'      => self::describe_string( $width_added ),
+					'widthAttrs'      => $width_attrs,
+					'styleAdded'      => self::describe_string( $style_added ),
+					'styleAttrs'      => $style_attrs,
+					'widthDisabled'   => self::describe_string( $width_disabled ),
+					'disabledHasHook' => \has_filter( 'wp_img_tag_add_width_and_height_attr', $disable_width_filter ),
+				)
+			);
+
+			$srcset_tag   = '<img class="wp-image-' . $attachment_id . '" src="' . $medium_src . '" width="' . $medium['width'] . '" height="' . $medium['height'] . '" alt="Responsive">';
+			$srcset_added = \wp_img_tag_add_srcset_and_sizes_attr( $srcset_tag, 'component-fuzz-srcset-helper', $attachment_id );
+			$srcset_attrs = self::tag_attributes( $srcset_added, 'img' );
+			$srcset_widths = isset( $srcset_attrs['srcset'] ) && is_string( $srcset_attrs['srcset'] )
+				? self::parse_srcset_widths( $srcset_attrs['srcset'] )
+				: array();
+			$srcset_urls = isset( $srcset_attrs['srcset'] ) && is_string( $srcset_attrs['srcset'] )
+				? self::parse_srcset_width_urls( $srcset_attrs['srcset'] )
+				: array();
+
+			$disable_srcset_filter = static fn() => false;
+			\add_filter( 'wp_img_tag_add_srcset_and_sizes_attr', $disable_srcset_filter );
+			try {
+				$srcset_disabled = \wp_img_tag_add_srcset_and_sizes_attr( $srcset_tag, 'component-fuzz-srcset-helper-disabled', $attachment_id );
+			} finally {
+				\remove_filter( 'wp_img_tag_add_srcset_and_sizes_attr', $disable_srcset_filter );
+			}
+
+			self::collect_failure(
+				$failures,
+					isset( $srcset_attrs['srcset'], $srcset_attrs['sizes'] )
+						&& is_string( $srcset_attrs['srcset'] )
+						&& self::expected_srcset_widths_present( $meta, $srcset_widths, (int) $medium['width'], (int) $medium['height'] )
+						&& self::expected_srcset_urls_present( $meta, $srcset_urls, (int) $medium['width'], (int) $medium['height'] )
+						&& sprintf( '(max-width: %1$dpx) 100vw, %1$dpx', $medium['width'] ) === $srcset_attrs['sizes']
+						&& self::tag_has_unique_attributes( $srcset_added, array( 'srcset', 'sizes' ) )
+						&& $srcset_tag === $srcset_disabled
+					&& false === \has_filter( 'wp_img_tag_add_srcset_and_sizes_attr', $disable_srcset_filter ),
+				'wp_img_tag_add_srcset_and_sizes_attr adds responsive attrs from metadata and obeys filter',
+				array(
+					'srcsetAdded'     => self::describe_string( $srcset_added ),
+					'srcsetAttrs'     => $srcset_attrs,
+					'srcsetWidths'    => $srcset_widths,
+					'srcsetUrls'      => $srcset_urls,
+					'srcsetDisabled'  => self::describe_string( $srcset_disabled ),
+					'disabledHasHook' => \has_filter( 'wp_img_tag_add_srcset_and_sizes_attr', $disable_srcset_filter ),
+				)
+			);
+
+			$loading_tag        = '<img src="http://example.test/loading.jpg" width="640" height="480" alt="Loading">';
+			$loading_added      = \wp_img_tag_add_loading_optimization_attrs( $loading_tag, 'component-fuzz-img-loading' );
+			$loading_attrs      = self::tag_attributes( $loading_added, 'img' );
+			$missing_dim_added  = \wp_img_tag_add_loading_optimization_attrs( '<img src="http://example.test/loading.jpg" alt="Loading">', 'component-fuzz-img-loading-missing-dimensions' );
+			$missing_dim_attrs  = self::tag_attributes( $missing_dim_added, 'img' );
+			$existing_loading   = '<img src="http://example.test/loading.jpg" width="640" height="480" loading="eager" decoding="sync" fetchpriority="low" alt="Loading">';
+			$existing_added     = \wp_img_tag_add_loading_optimization_attrs( $existing_loading, 'component-fuzz-img-loading' );
+			$existing_attrs     = self::tag_attributes( $existing_added, 'img' );
+			$omit_decoding      = \wp_img_tag_add_loading_optimization_attrs( $loading_tag, 'component-fuzz-img-loading-omit-decoding' );
+			$omit_decoding_attrs = self::tag_attributes( $omit_decoding, 'img' );
+			$auto_decoding      = \wp_img_tag_add_loading_optimization_attrs( $loading_tag, 'component-fuzz-img-loading-auto-decoding' );
+			$auto_decoding_attrs = self::tag_attributes( $auto_decoding, 'img' );
+			$omit_loading       = \wp_img_tag_add_loading_optimization_attrs( $loading_tag, 'component-fuzz-img-loading-omit-loading' );
+			$omit_loading_attrs = self::tag_attributes( $omit_loading, 'img' );
+			$eager_loading      = \wp_img_tag_add_loading_optimization_attrs( $loading_tag, 'component-fuzz-img-loading-eager-loading' );
+			$eager_loading_attrs = self::tag_attributes( $eager_loading, 'img' );
+			$single_quote_loading = '<img src=\'http://example.test/loading.jpg\' width="640" height="480" alt="Loading">';
+
+			self::collect_failure(
+				$failures,
+				'async' === ( $loading_attrs['decoding'] ?? null )
+					&& 'lazy' === ( $loading_attrs['loading'] ?? null )
+					&& 'async' === ( $missing_dim_attrs['decoding'] ?? null )
+					&& ! isset( $missing_dim_attrs['loading'] )
+					&& 'eager' === ( $existing_attrs['loading'] ?? null )
+					&& 'sync' === ( $existing_attrs['decoding'] ?? null )
+					&& 'low' === ( $existing_attrs['fetchpriority'] ?? null )
+					&& ! isset( $omit_decoding_attrs['decoding'] )
+					&& 'lazy' === ( $omit_decoding_attrs['loading'] ?? null )
+					&& 'auto' === ( $auto_decoding_attrs['decoding'] ?? null )
+					&& 'lazy' === ( $auto_decoding_attrs['loading'] ?? null )
+					&& 'async' === ( $omit_loading_attrs['decoding'] ?? null )
+					&& ! isset( $omit_loading_attrs['loading'] )
+					&& 'async' === ( $eager_loading_attrs['decoding'] ?? null )
+					&& 'eager' === ( $eager_loading_attrs['loading'] ?? null )
+					&& $single_quote_loading === \wp_img_tag_add_loading_optimization_attrs( $single_quote_loading, 'component-fuzz-img-loading' )
+					&& self::tag_has_unique_attributes( $loading_added, array( 'loading', 'decoding', 'fetchpriority' ) )
+					&& self::tag_has_unique_attributes( $existing_added, array( 'loading', 'decoding', 'fetchpriority' ) ),
+				'wp_img_tag_add_loading_optimization_attrs gates loading, preserves attrs, and applies decoding/loading filters',
+				array(
+					'loadingAdded'        => self::describe_string( $loading_added ),
+					'loadingAttrs'        => $loading_attrs,
+					'missingDimAdded'     => self::describe_string( $missing_dim_added ),
+					'missingDimAttrs'     => $missing_dim_attrs,
+					'existingAdded'       => self::describe_string( $existing_added ),
+					'existingAttrs'       => $existing_attrs,
+					'omitDecodingAttrs'   => $omit_decoding_attrs,
+					'autoDecodingAttrs'   => $auto_decoding_attrs,
+					'omitLoadingAttrs'    => $omit_loading_attrs,
+					'eagerLoadingAttrs'   => $eager_loading_attrs,
+				)
+			);
+
+			$iframe_tag        = '<iframe src="https://example.test/embed" width="640" height="360">';
+			$iframe_added      = \wp_iframe_tag_add_loading_attr( $iframe_tag, 'component-fuzz-iframe-loading' );
+			$iframe_attrs      = self::tag_attributes( $iframe_added, 'iframe' );
+			$iframe_no_width   = '<iframe src="https://example.test/embed" height="360">';
+			$iframe_no_src     = '<iframe width="640" height="360">';
+			$iframe_invalid    = \wp_iframe_tag_add_loading_attr( $iframe_tag, 'component-fuzz-iframe-loading-invalid' );
+			$iframe_invalid_attrs = self::tag_attributes( $iframe_invalid, 'iframe' );
+
+			self::collect_failure(
+				$failures,
+				'lazy' === ( $iframe_attrs['loading'] ?? null )
+					&& $iframe_no_width === \wp_iframe_tag_add_loading_attr( $iframe_no_width, 'component-fuzz-iframe-loading' )
+					&& $iframe_no_src === \wp_iframe_tag_add_loading_attr( $iframe_no_src, 'component-fuzz-iframe-loading' )
+					&& 'lazy' === ( $iframe_invalid_attrs['loading'] ?? null )
+					&& self::tag_has_unique_attributes( $iframe_added, array( 'loading' ) )
+					&& self::tag_has_unique_attributes( $iframe_invalid, array( 'loading' ) ),
+				'wp_iframe_tag_add_loading_attr requires double-quoted src and dimensions and falls back for invalid filter values',
+				array(
+					'iframeAdded'        => self::describe_string( $iframe_added ),
+					'iframeAttrs'        => $iframe_attrs,
+					'iframeInvalid'      => self::describe_string( $iframe_invalid ),
+					'iframeInvalidAttrs' => $iframe_invalid_attrs,
+				)
+			);
+
+			$attachment_tag     = '<img class="alignnone wp-image-' . $attachment_id . '" src="' . $medium_src . '" alt="Attachment">';
+			$non_attachment_src = 'http://example.test/wp-content/uploads/2026/06/not-an-attachment.jpg';
+			$non_attachment_tag = '<img class="not-an-attachment" src="' . $non_attachment_src . '" width="320" height="180" alt="External">';
+			$iframe_open        = '<iframe src="https://example.test/embed" width="640" height="360">';
+			$content            = '<p>' . $attachment_tag . '</p><p>' . $attachment_tag . '</p><p>' . $non_attachment_tag . '</p><figure>' . $iframe_open . '</iframe>' . $iframe_open . '</iframe></figure>';
+			$filtered_content   = \wp_filter_content_tags( $content, $context );
+			$filtered_imgs      = self::extract_tag_opens( $filtered_content, 'img' );
+			$filtered_iframes   = self::extract_tag_opens( $filtered_content, 'iframe' );
+			$attachment_imgs    = array_values(
+				array_filter(
+					$filtered_imgs,
+					static function ( string $tag ) use ( $medium_src ): bool {
+						$attrs = self::tag_attributes( $tag, 'img' );
+						return $medium_src === ( $attrs['src'] ?? null );
+					}
+				)
+			);
+			$non_attachment_imgs = array_values(
+				array_filter(
+					$filtered_imgs,
+					static function ( string $tag ) use ( $non_attachment_src ): bool {
+						$attrs = self::tag_attributes( $tag, 'img' );
+						return $non_attachment_src === ( $attrs['src'] ?? null );
+					}
+				)
+			);
+			$attachment_attrs = isset( $attachment_imgs[0] ) ? self::tag_attributes( $attachment_imgs[0], 'img' ) : array();
+			$non_attrs        = isset( $non_attachment_imgs[0] ) ? self::tag_attributes( $non_attachment_imgs[0], 'img' ) : array();
+			$iframe_attrs     = isset( $filtered_iframes[0] ) ? self::tag_attributes( $filtered_iframes[0], 'iframe' ) : array();
+			$attachment_srcset_widths = isset( $attachment_attrs['srcset'] ) && is_string( $attachment_attrs['srcset'] )
+				? self::parse_srcset_widths( $attachment_attrs['srcset'] )
+				: array();
+			$attachment_srcset_urls = isset( $attachment_attrs['srcset'] ) && is_string( $attachment_attrs['srcset'] )
+				? self::parse_srcset_width_urls( $attachment_attrs['srcset'] )
+				: array();
+			$attachment_sizes = 'auto, ' . sprintf( '(max-width: %1$dpx) 100vw, %1$dpx', $medium['width'] );
+			$attachment_call_count = count(
+				array_filter(
+					$content_img_calls,
+					static fn( array $call ): bool => $attachment_id === ( $call['attachmentId'] ?? null )
+				)
+			);
+			$non_attachment_call_count = count(
+				array_filter(
+					$content_img_calls,
+					static fn( array $call ): bool => 0 === ( $call['attachmentId'] ?? null )
+				)
+			);
+			$all_filtered_tags_unique = true;
+			foreach ( array_merge( $filtered_imgs, $filtered_iframes ) as $tag ) {
+				$all_filtered_tags_unique = $all_filtered_tags_unique
+					&& self::tag_has_unique_attributes( $tag, array( 'srcset', 'sizes', 'loading', 'decoding' ) );
+			}
+
+			self::collect_failure(
+				$failures,
+				3 === count( $filtered_imgs )
+					&& 2 === count( $filtered_iframes )
+					&& 2 === count( $attachment_imgs )
+					&& isset( $attachment_imgs[0] )
+					&& 2 === substr_count( $filtered_content, $attachment_imgs[0] )
+					&& 1 === $attachment_call_count
+					&& 1 === $non_attachment_call_count
+					&& (string) $medium['width'] === ( $attachment_attrs['width'] ?? null )
+					&& (string) $medium['height'] === ( $attachment_attrs['height'] ?? null )
+					&& isset( $attachment_attrs['srcset'], $attachment_attrs['sizes'] )
+					&& self::expected_srcset_widths_present( $meta, $attachment_srcset_widths, (int) $medium['width'], (int) $medium['height'] )
+					&& self::expected_srcset_urls_present( $meta, $attachment_srcset_urls, (int) $medium['width'], (int) $medium['height'] )
+					&& $attachment_sizes === $attachment_attrs['sizes']
+					&& 'lazy' === ( $attachment_attrs['loading'] ?? null )
+					&& 'async' === ( $attachment_attrs['decoding'] ?? null )
+					&& (string) $attachment_id === ( $attachment_attrs['data-content-filtered'] ?? null )
+					&& 1 === count( $non_attachment_imgs )
+					&& '0' === ( $non_attrs['data-content-filtered'] ?? null )
+					&& 'lazy' === ( $non_attrs['loading'] ?? null )
+					&& 'async' === ( $non_attrs['decoding'] ?? null )
+					&& ! isset( $non_attrs['srcset'], $non_attrs['sizes'] )
+					&& '320' === ( $non_attrs['width'] ?? null )
+					&& '180' === ( $non_attrs['height'] ?? null )
+					&& 2 === substr_count( $filtered_content, $filtered_iframes[0] ?? '' )
+					&& 1 === count( $iframe_loading_calls )
+					&& $iframe_open === ( $iframe_loading_calls[0] ?? null )
+					&& 'lazy' === ( $iframe_attrs['loading'] ?? null )
+					&& $all_filtered_tags_unique,
+				'wp_filter_content_tags transforms unique duplicate images/iframes once and replaces all copies',
+				array(
+					'contentImgCalls'    => $content_img_calls,
+					'iframeCalls'        => $iframe_loading_calls,
+					'attachmentAttrs'    => $attachment_attrs,
+					'attachmentWidths'   => $attachment_srcset_widths,
+					'attachmentUrls'     => $attachment_srcset_urls,
+					'attachmentSizes'    => $attachment_sizes,
+					'nonAttachmentAttrs' => $non_attrs,
+					'iframeAttrs'        => $iframe_attrs,
+					'filteredContent'    => self::describe_string( $filtered_content ),
+				)
+			);
+		} finally {
+			\remove_filter( 'wp_content_img_tag', $content_img_filter, 10 );
+			\remove_filter( 'wp_iframe_tag_add_loading_attr', $iframe_loading_attr_filter, 10 );
+			\remove_filter( 'wp_img_tag_add_loading_attr', $img_loading_attr_filter, 10 );
+			\remove_filter( 'wp_img_tag_add_decoding_attr', $decoding_attr_filter, 10 );
+			\remove_filter( 'wp_lazy_loading_enabled', $lazy_enabled_filter, 10 );
+			\remove_filter( 'get_post_metadata', $meta_filter, 10 );
+		}
+
+		return self::row(
+			$ctx,
+			'images.content-tags.direct-helper-pipeline',
+			array() === $failures,
+			array(
+				'attachmentId' => $attachment_id,
+				'failures'     => array_slice( $failures, 0, 8 ),
+			)
 		);
 	}
 
@@ -1051,6 +1532,68 @@ final class ImagesSurface {
 		return $widths;
 	}
 
+	private static function parse_srcset_width_urls( string $srcset ): array {
+		$urls = array();
+		foreach ( explode( ',', $srcset ) as $candidate ) {
+			$candidate = trim( $candidate );
+			if ( preg_match( '/^(.+)\s+(\d+)w$/', $candidate, $matches ) ) {
+				$urls[ (int) $matches[2] ] = $matches[1];
+			}
+		}
+
+		return $urls;
+	}
+
+	private static function extract_tag_opens( string $html, string $tag_name ): array {
+		if ( ! preg_match_all( '/<' . preg_quote( $tag_name, '/' ) . '\s[^>]*>/i', $html, $matches ) ) {
+			return array();
+		}
+
+		return $matches[0];
+	}
+
+	private static function tag_attributes( string $tag, string $tag_name ): array {
+		$candidates = array( $tag );
+		if ( 'img' !== strtolower( $tag_name ) && ! str_contains( strtolower( $tag ), '</' . strtolower( $tag_name ) . '>' ) ) {
+			$candidates[] = $tag . '</' . strtolower( $tag_name ) . '>';
+		}
+
+		foreach ( $candidates as $html ) {
+			$processor = new \WP_HTML_Tag_Processor( $html );
+			if ( ! $processor->next_tag( array( 'tag_name' => strtoupper( $tag_name ) ) ) ) {
+				continue;
+			}
+
+			$names = $processor->get_attribute_names_with_prefix( '' );
+			if ( ! is_array( $names ) ) {
+				return array();
+			}
+
+			$attrs = array();
+			foreach ( $names as $name ) {
+				$attrs[ $name ] = $processor->get_attribute( $name );
+			}
+
+			return $attrs;
+		}
+
+		return array();
+	}
+
+	private static function tag_attribute_count( string $tag, string $name ): int {
+		return preg_match_all( '/(?<=\s)' . preg_quote( $name, '/' ) . '\s*=/i', $tag );
+	}
+
+	private static function tag_has_unique_attributes( string $tag, array $names ): bool {
+		foreach ( $names as $name ) {
+			if ( self::tag_attribute_count( $tag, (string) $name ) > 1 ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
 	private static function expected_srcset_widths_present( array $meta, array $candidates, int $src_width, int $src_height ): bool {
 		$images = array_merge(
 			array(
@@ -1068,6 +1611,36 @@ final class ImagesSurface {
 			$allowed_by_width = $width <= 2048 || $width === $src_width;
 
 			if ( $ratio_matches && $allowed_by_width && ! isset( $candidates[ $width ] ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function expected_srcset_urls_present( array $meta, array $candidate_urls, int $src_width, int $src_height ): bool {
+		$images = array(
+			array(
+				'width'  => (int) $meta['width'],
+				'height' => (int) $meta['height'],
+				'url'    => self::image_url( $meta, null ),
+			),
+		);
+
+		foreach ( $meta['sizes'] as $size => $image ) {
+			$images[] = array(
+				'width'  => (int) $image['width'],
+				'height' => (int) $image['height'],
+				'url'    => self::image_url( $meta, (string) $size ),
+			);
+		}
+
+		foreach ( $images as $image ) {
+			$width            = (int) $image['width'];
+			$ratio_matches    = \wp_image_matches_ratio( $src_width, $src_height, $width, (int) $image['height'] );
+			$allowed_by_width = $width <= 2048 || $width === $src_width;
+
+			if ( $ratio_matches && $allowed_by_width && ( ! isset( $candidate_urls[ $width ] ) || $image['url'] !== $candidate_urls[ $width ] ) ) {
 				return false;
 			}
 		}
