@@ -747,22 +747,38 @@ final class QuerySurface {
 			);
 		}
 
-		$status_sql = "SELECT wp_posts.ID FROM wp_posts WHERE (wp_posts.post_status = 'private' OR wp_posts.post_status = 'publish') AND wp_posts.post_type = 'post' ORDER BY wp_posts.post_date DESC";
-		$status_ids = self::post_ids_from_results( $GLOBALS['wpdb']->get_results( $status_sql ) );
-		$rows[]     = self::case_result(
-			$ctx,
-			count( $sql_cases ) + 1,
+		$status_cases = array(
 			array(
-				'label' => 'direct-stub-post-status-or-equality-results',
-				'query' => $status_sql,
+				'label'   => 'direct-stub-post-status-or-equality-results',
+				'query'   => "SELECT wp_posts.ID FROM wp_posts WHERE (wp_posts.post_status = 'private' OR wp_posts.post_status = 'publish') AND wp_posts.post_type = 'post' ORDER BY wp_posts.post_date DESC",
+				'postIds' => array( 29, 23, 19, 7, 3 ),
 			),
-			'query.wpdb-stub.post-status-or-equality-results',
-			array( 29, 23, 19, 7, 3 ) === $status_ids,
 			array(
-				'postIds' => $status_ids,
-				'expect'  => array( 29, 23, 19, 7, 3 ),
-			)
+				'label'   => 'direct-stub-author-scoped-private-status-results',
+				'query'   => "SELECT wp_posts.ID FROM wp_posts WHERE (wp_posts.post_status = 'publish' OR (wp_posts.post_author = 41 AND wp_posts.post_status = 'private')) AND wp_posts.post_type = 'post' ORDER BY wp_posts.post_date DESC",
+				'postIds' => array( 29, 23, 7, 3 ),
+			),
+			array(
+				'label'   => 'direct-stub-post-status-or-in-results',
+				'query'   => "SELECT wp_posts.ID FROM wp_posts WHERE (wp_posts.post_status = 'private' OR wp_posts.post_status IN ('publish')) AND wp_posts.post_type = 'post' ORDER BY wp_posts.post_date DESC",
+				'postIds' => array( 29, 23, 19, 7, 3 ),
+			),
 		);
+
+		foreach ( $status_cases as $index => $status_case ) {
+			$status_ids = self::post_ids_from_results( $GLOBALS['wpdb']->get_results( $status_case['query'] ) );
+			$rows[]     = self::case_result(
+				$ctx,
+				count( $sql_cases ) + 1 + $index,
+				$status_case,
+				'query.wpdb-stub.post-status-or-equality-results',
+				array_values( $status_case['postIds'] ) === $status_ids,
+				array(
+					'postIds' => $status_ids,
+					'expect'  => $status_case['postIds'],
+				)
+			);
+		}
 
 		return $rows;
 	}

@@ -897,7 +897,17 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 				);
 			}
 
+			$status_or_rows    = $this->component_fuzz_filter_posts_by_status_or_branches( $query, array_values( $rows ) );
+			$status_or_handled = null !== $status_or_rows;
+			if ( $status_or_handled ) {
+				$rows = $status_or_rows;
+			}
+
 			foreach ( array( 'post_name', 'post_type', 'post_parent', 'post_status', 'post_password' ) as $column ) {
+				if ( $status_or_handled && 'post_status' === $column ) {
+					continue;
+				}
+
 				if ( 'post_password' === $column ) {
 					$values       = $this->component_fuzz_compare_values( $query, $column );
 					$conjunctive  = true;
@@ -937,6 +947,10 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 			}
 
 			foreach ( array( 'post_name', 'post_parent', 'post_status' ) as $column ) {
+				if ( $status_or_handled && 'post_status' === $column ) {
+					continue;
+				}
+
 				$values = $this->component_fuzz_in_values( $query, $column );
 				if ( array() === $values ) {
 					continue;
@@ -984,6 +998,61 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 			}
 
 			return $rows;
+		}
+
+		private function component_fuzz_filter_posts_by_status_or_branches( $query, array $rows ) {
+			$where = $this->component_fuzz_where_clause( $query );
+			if ( '' === $where || ! preg_match( '/\bOR\b/i', $where ) || ! preg_match( '/post_status/i', $where ) ) {
+				return null;
+			}
+
+			$status_branches = array();
+			foreach ( $this->component_fuzz_split_sql_or_terms( $where ) as $branch ) {
+				if ( ! preg_match( '/post_status/i', $branch ) ) {
+					continue;
+				}
+
+				$statuses = array_values(
+					array_unique(
+						array_merge(
+							$this->component_fuzz_compare_values( $branch, 'post_status' ),
+							$this->component_fuzz_in_values( $branch, 'post_status' )
+						)
+					)
+				);
+
+				if ( array() === $statuses ) {
+					continue;
+				}
+
+				$status_branches[] = array(
+					'authors'  => $this->component_fuzz_compare_values( $branch, 'post_author' ),
+					'statuses' => $statuses,
+				);
+			}
+
+			if ( array() === $status_branches ) {
+				return null;
+			}
+
+			return array_filter(
+				$rows,
+				static function ( $row ) use ( $status_branches ) {
+					foreach ( $status_branches as $branch ) {
+						if ( ! in_array( (string) $row['post_status'], array_map( 'strval', $branch['statuses'] ), true ) ) {
+							continue;
+						}
+
+						if ( array() !== $branch['authors'] && ! in_array( (string) $row['post_author'], array_map( 'strval', $branch['authors'] ), true ) ) {
+							continue;
+						}
+
+						return true;
+					}
+
+					return false;
+				}
+			);
 		}
 
 		private function component_fuzz_filter_posts_by_search_like( $query, array $rows ) {
@@ -2033,6 +2102,55 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 			}
 
 			return $length;
+		}
+
+		private function component_fuzz_split_sql_or_terms( $sql ) {
+			$terms     = array();
+			$current   = '';
+			$length    = strlen( (string) $sql );
+			$in_string = false;
+			$quote     = '';
+			$escaped   = false;
+
+			for ( $i = 0; $i < $length; $i++ ) {
+				$char = $sql[ $i ];
+
+				if ( $in_string ) {
+					$current .= $char;
+					if ( '\\' === $char && ! $escaped ) {
+						$escaped = true;
+						continue;
+					}
+
+					if ( $quote === $char && ! $escaped ) {
+						$in_string = false;
+					}
+
+					$escaped = false;
+					continue;
+				}
+
+				if ( "'" === $char || '"' === $char ) {
+					$in_string = true;
+					$quote     = $char;
+					$escaped   = false;
+					$current  .= $char;
+					continue;
+				}
+
+				$end = $this->component_fuzz_sql_keyword_match_end_at( $sql, $i, 'OR' );
+				if ( null !== $end ) {
+					$terms[] = $current;
+					$current = '';
+					$i       = $end - 1;
+					continue;
+				}
+
+				$current .= $char;
+			}
+
+			$terms[] = $current;
+			return $terms;
 		}
 
 		private function component_fuzz_sql_keyword_match_end_at( $sql, $offset, $keyword ) {
