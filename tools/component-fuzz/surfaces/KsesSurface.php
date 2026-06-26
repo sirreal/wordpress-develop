@@ -642,27 +642,6 @@ final class KsesSurface {
 		$failures = array();
 
 		try {
-			$serialized            = \serialize_blocks( array( $block ) );
-			$parsed                = \parse_blocks( $serialized );
-			$direct_block          = \filter_block_kses( $parsed[0], $allowed, $protocols );
-			$direct_serialized     = \serialize_block( $direct_block );
-			$content_filtered      = \filter_block_content( $serialized, $allowed, $protocols );
-			$content_refiltered    = \filter_block_content( $content_filtered, $allowed, $protocols );
-			$content_reparsed      = \parse_blocks( $content_filtered );
-			$value_actual          = \filter_block_kses_value( $value_probe, $allowed, $protocols );
-			$value_expected        = self::block_kses_value_reference( $value_probe, $allowed, $protocols );
-			$template_actual       = \filter_block_kses_value(
-				$template_probe,
-				$allowed,
-				$protocols,
-				array( 'blockName' => 'core/template-part' )
-			);
-			$template_expected     = self::block_kses_value_reference(
-				$template_probe,
-				$allowed,
-				$protocols,
-				array( 'blockName' => 'core/template-part' )
-			);
 			$hook_priority_before = \has_filter( 'pre_kses', 'wp_pre_kses_block_attributes' );
 			$hook_snapshot_before = self::snapshot_hook( 'pre_kses' );
 			$hook_signature_before = self::hook_signature( 'pre_kses' );
@@ -672,13 +651,35 @@ final class KsesSurface {
 					\add_filter( 'pre_kses', 'wp_pre_kses_block_attributes', 10, 3 );
 					$hook_added = true;
 				}
+				$serialized          = \serialize_blocks( array( $block ) );
+				$parsed              = \parse_blocks( $serialized );
+				$direct_block        = \filter_block_kses( $parsed[0], $allowed, $protocols );
+				$direct_serialized   = \serialize_block( $direct_block );
+				$content_filtered    = \filter_block_content( $serialized, $allowed, $protocols );
+				$content_refiltered  = \filter_block_content( $content_filtered, $allowed, $protocols );
+				$content_reparsed    = \parse_blocks( $content_filtered );
+				$value_actual        = \filter_block_kses_value( $value_probe, $allowed, $protocols );
+				$value_expected      = self::block_kses_value_reference( $value_probe, $allowed, $protocols );
+				$template_actual     = \filter_block_kses_value(
+					$template_probe,
+					$allowed,
+					$protocols,
+					array( 'blockName' => 'core/template-part' )
+				);
+				$template_expected   = self::block_kses_value_reference(
+					$template_probe,
+					$allowed,
+					$protocols,
+					array( 'blockName' => 'core/template-part' )
+				);
 				$hooked = \wp_kses( $serialized, $allowed, $protocols );
+				$hook_expected = \wp_kses( $content_filtered, $allowed, $protocols );
 			} finally {
+				$hook_priority_after  = \has_filter( 'pre_kses', 'wp_pre_kses_block_attributes' );
+				$hook_signature_after = self::hook_signature( 'pre_kses' );
 				self::restore_hook( 'pre_kses', $hook_snapshot_before );
+				$hook_signature_restored = self::hook_signature( 'pre_kses' );
 			}
-			$hook_priority_after  = \has_filter( 'pre_kses', 'wp_pre_kses_block_attributes' );
-			$hook_signature_after = self::hook_signature( 'pre_kses' );
-			$hook_expected        = \wp_kses( $content_filtered, $allowed, $protocols );
 		} catch ( \Throwable $e ) {
 			if ( isset( $hook_snapshot_before ) ) {
 				self::restore_hook( 'pre_kses', $hook_snapshot_before );
@@ -769,8 +770,9 @@ final class KsesSurface {
 			);
 		}
 		if (
-			$hook_signature_before !== $hook_signature_after
-			|| $hook_priority_before !== $hook_priority_after
+			( ! $hook_added && $hook_signature_before !== $hook_signature_after )
+			|| $hook_signature_before !== $hook_signature_restored
+			|| ( ! $hook_added && $hook_priority_before !== $hook_priority_after )
 			|| ( false !== $hook_priority_before && 10 !== $hook_priority_before )
 		) {
 			$failures[] = array(
@@ -780,6 +782,7 @@ final class KsesSurface {
 				'added'  => $hook_added,
 				'beforeSignature' => $hook_signature_before,
 				'afterSignature'  => $hook_signature_after,
+				'restoredSignature' => $hook_signature_restored,
 			);
 		}
 
@@ -789,7 +792,7 @@ final class KsesSurface {
 			'filteredPreview'   => self::preview( $content_filtered ),
 			'hookPriority'      => $hook_priority_before,
 			'hookAdded'         => $hook_added,
-			'hookRestored'      => $hook_signature_before === $hook_signature_after,
+			'hookRestored'      => $hook_signature_before === $hook_signature_restored,
 			'failureCount'      => count( $failures ),
 			'failures'          => array_slice( $failures, 0, 6 ),
 		);
@@ -3662,13 +3665,6 @@ final class KsesSurface {
 				);
 			}
 		}
-
-		usort(
-			$callbacks,
-			static function ( array $a, array $b ): int {
-				return array( $a['priority'], $a['id'] ) <=> array( $b['priority'], $b['id'] );
-			}
-		);
 
 		return array(
 			'exists'    => true,
