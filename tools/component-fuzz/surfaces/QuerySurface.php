@@ -34,6 +34,7 @@ final class QuerySurface {
 			$rows = array_merge( $rows, self::check_wp_query_parsing( $ctx ) );
 			$rows = array_merge( $rows, self::check_wp_query_execution( $ctx ) );
 			$rows = array_merge( $rows, self::check_wp_query_post_search_matrix( $ctx ) );
+			$rows = array_merge( $rows, self::check_wp_query_post_search_known_boundaries( $ctx ) );
 			$rows = array_merge( $rows, self::check_wp_query_cache_keys( $ctx ) );
 			$rows = array_merge( $rows, self::check_wp_query_result_cache( $ctx ) );
 			$rows = array_merge( $rows, self::check_user_query_parsing( $ctx ) );
@@ -653,6 +654,90 @@ final class QuerySurface {
 				'query.wp-query.post-search-deterministic',
 				$second['ok'] && self::wp_query_post_search_observations_match( $observation, $second['value'] ),
 				array( 'second' => self::describe_call( $second ) )
+			);
+		}
+
+		return $rows;
+	}
+
+	private static function check_wp_query_post_search_known_boundaries( \ComponentFuzz\FuzzContext $ctx ): array {
+		$rows = array();
+		$case = array(
+			'label'     => 'exact-relevance-empty-order-known-boundary',
+			'queryVars' => array(
+				'exact'          => true,
+				'orderby'        => 'relevance',
+				's'              => 'alpha',
+				'search_columns' => array( 'post_title' ),
+			),
+		);
+		$call = self::call_guarded(
+			static function () use ( $case ) {
+				return self::wp_query_post_search_observation(
+					array_merge(
+						$case,
+						array(
+							'termsInput' => array( 'alpha' ),
+							'expect'     => array(),
+						)
+					)
+				);
+			}
+		);
+
+		$core_emits_empty_order = $call['ok']
+			&& self::is_wp_query_post_search_observation( $call['value'] )
+			&& ! self::sql_has_no_empty_orderby_expressions( $call['value']['execution']['request'] );
+
+		$rows[] = self::case_result(
+			$ctx,
+			0,
+			$case,
+			'query.wp-query.post-search-exact-relevance-boundary-detected',
+			$call['ok']
+				&& self::is_wp_query_post_search_observation( $call['value'] )
+				&& ( $core_emits_empty_order ? ! self::wp_query_post_search_sql_is_safe( $call['value'] ) : self::wp_query_post_search_sql_is_safe( $call['value'] ) ),
+			array(
+				'coreEmitsEmptyOrder' => $core_emits_empty_order,
+				'request'             => $call['ok'] ? self::describe_value( $call['value']['execution']['request'] ?? '' ) : '',
+			)
+		);
+
+		$sql_cases = array(
+			array(
+				'label' => 'empty-expression-after-order-by',
+				'sql'   => 'SELECT wp_posts.ID FROM wp_posts ORDER BY DESC, wp_posts.post_date DESC LIMIT 0, 1',
+				'safe'  => false,
+			),
+			array(
+				'label' => 'trailing-empty-expression-before-limit',
+				'sql'   => 'SELECT wp_posts.ID FROM wp_posts ORDER BY wp_posts.post_date DESC, LIMIT 0, 1',
+				'safe'  => false,
+			),
+			array(
+				'label' => 'valid-string-literal-containing-comma-desc',
+				'sql'   => "SELECT wp_posts.ID FROM wp_posts WHERE wp_posts.post_title = ', DESC' ORDER BY wp_posts.post_date DESC LIMIT 0, 1",
+				'safe'  => true,
+			),
+			array(
+				'label' => 'valid-order-fragment-string-literal-containing-comma-desc',
+				'sql'   => "FIELD(wp_posts.post_title, ', DESC') DESC, wp_posts.ID ASC",
+				'safe'  => true,
+			),
+		);
+
+		foreach ( $sql_cases as $index => $sql_case ) {
+			$rows[] = self::case_result(
+				$ctx,
+				$index + 1,
+				$sql_case,
+				'query.wp-query.post-search-empty-order-detector-boundaries',
+				(bool) $sql_case['safe'] === self::sql_has_no_empty_orderby_expressions( $sql_case['sql'] ),
+				array(
+					'sql'      => self::describe_value( $sql_case['sql'] ),
+					'expected' => (bool) $sql_case['safe'],
+					'actual'   => self::sql_has_no_empty_orderby_expressions( $sql_case['sql'] ),
+				)
 			);
 		}
 
@@ -2080,6 +2165,48 @@ final class QuerySurface {
 				),
 			),
 			array(
+				'label'      => 'clause-keyword-order-by-literal-empty-result',
+				'queryVars'  => array(
+					's'              => 'ORDER BY',
+					'search_columns' => array( 'post_title' ),
+					'sentence'       => true,
+				),
+				'termsInput' => array( 'ORDER BY' ),
+				'expect'     => array(
+					'whereContains'   => array( "wp_posts.post_title LIKE '%ORDER BY%'" ),
+					'whereNotContains' => array( 'wp_posts.post_excerpt', 'wp_posts.post_content' ),
+					'postIds'         => array(),
+				),
+			),
+			array(
+				'label'      => 'clause-keyword-group-by-literal-empty-result',
+				'queryVars'  => array(
+					's'              => 'GROUP BY',
+					'search_columns' => array( 'post_title' ),
+					'sentence'       => true,
+				),
+				'termsInput' => array( 'GROUP BY' ),
+				'expect'     => array(
+					'whereContains'   => array( "wp_posts.post_title LIKE '%GROUP BY%'" ),
+					'whereNotContains' => array( 'wp_posts.post_excerpt', 'wp_posts.post_content' ),
+					'postIds'         => array(),
+				),
+			),
+			array(
+				'label'      => 'clause-keyword-limit-literal-empty-result',
+				'queryVars'  => array(
+					's'              => 'LIMIT',
+					'search_columns' => array( 'post_title' ),
+					'sentence'       => true,
+				),
+				'termsInput' => array( 'LIMIT' ),
+				'expect'     => array(
+					'whereContains'   => array( "wp_posts.post_title LIKE '%LIMIT%'" ),
+					'whereNotContains' => array( 'wp_posts.post_excerpt', 'wp_posts.post_content' ),
+					'postIds'         => array(),
+				),
+			),
+			array(
 				'label'           => 'prefix-disabled-dash-is-positive',
 				'queryVars'       => array(
 					'orderby'        => 'relevance',
@@ -2183,6 +2310,18 @@ final class QuerySurface {
 				),
 			),
 			array(
+				'label'      => 'logged-out-explicit-post-password-unsatisfiable',
+				'queryVars'  => array(
+					'post_password' => 'secret',
+					's'             => 'alpha',
+				),
+				'termsInput' => array( 'alpha' ),
+				'expect'     => array(
+					'requestContains' => array( "wp_posts.post_password = 'secret'", "wp_posts.post_password = ''" ),
+					'postIds'         => array(),
+				),
+			),
+			array(
 				'label'      => 'attachment-filename-default-off',
 				'queryVars'  => array(
 					'post_status'    => 'inherit',
@@ -2198,6 +2337,25 @@ final class QuerySurface {
 					),
 					'whereNotContains'   => array( 'sq1.meta_value LIKE' ),
 					'postIds'            => array(),
+				),
+			),
+			array(
+				'label'                     => 'attachment-filename-negative-term-requires-meta-row',
+				'queryVars'                 => array(
+					'post_status'    => 'inherit',
+					'post_type'      => 'attachment',
+					's'              => 'photo -missing',
+					'search_columns' => array( 'post_title' ),
+				),
+				'termsInput'                => array( 'photo', '-missing' ),
+				'allowAttachmentByFilename' => true,
+				'expect'                    => array(
+					'requestContains' => array(
+						'LEFT JOIN wp_postmeta AS sq1',
+						'sq1.meta_value NOT LIKE',
+					),
+					'whereContains'   => array( 'sq1.meta_value NOT LIKE' ),
+					'postIds'         => array( 31 ),
 				),
 			),
 			array(
@@ -3712,10 +3870,187 @@ final class QuerySurface {
 
 	private static function sql_has_no_empty_orderby_expressions( $sql ): bool {
 		$sql_string = is_array( $sql ) ? implode( ' ', $sql ) : (string) $sql;
+		if ( '' === trim( $sql_string ) ) {
+			return true;
+		}
 
-		return ! preg_match( '/\A\s*(?:ASC|DESC)\b/i', $sql_string )
-			&& ! preg_match( '/\bORDER\s+BY\s*(?:,|\z|(?:ASC|DESC)\b)/i', $sql_string )
-			&& ! preg_match( '/,\s*(?:ASC|DESC)\b/i', $sql_string );
+		$fragments = self::sql_orderby_fragments( $sql_string );
+		if ( array() === $fragments ) {
+			if ( preg_match( '/\b(?:SELECT|FROM|WHERE|GROUP\s+BY|LIMIT)\b/i', $sql_string ) ) {
+				return true;
+			}
+
+			$fragments = array( $sql_string );
+		}
+
+		foreach ( $fragments as $fragment ) {
+			if ( ! self::sql_orderby_fragment_has_no_empty_expressions( $fragment ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function sql_orderby_fragments( string $sql ): array {
+		$fragments = array();
+		$length    = strlen( $sql );
+		$in_string = false;
+		$quote     = '';
+		$escaped   = false;
+
+		for ( $i = 0; $i < $length; $i++ ) {
+			$char = $sql[ $i ];
+
+			if ( $in_string ) {
+				if ( '\\' === $char && ! $escaped ) {
+					$escaped = true;
+					continue;
+				}
+
+				if ( $quote === $char && ! $escaped ) {
+					$in_string = false;
+				}
+
+				$escaped = false;
+				continue;
+			}
+
+			if ( "'" === $char || '"' === $char ) {
+				$in_string = true;
+				$quote     = $char;
+				$escaped   = false;
+				continue;
+			}
+
+			$start = self::sql_keyword_match_end_at( $sql, $i, 'ORDER BY' );
+			if ( null === $start ) {
+				continue;
+			}
+
+			$end         = self::sql_clause_boundary( $sql, $start, array( 'LIMIT' ) );
+			$fragments[] = substr( $sql, $start, $end - $start );
+			$i           = max( $start, $end - 1 );
+		}
+
+		return $fragments;
+	}
+
+	private static function sql_clause_boundary( string $sql, int $start, array $keywords ): int {
+		$length    = strlen( $sql );
+		$in_string = false;
+		$quote     = '';
+		$escaped   = false;
+
+		for ( $i = $start; $i < $length; $i++ ) {
+			$char = $sql[ $i ];
+
+			if ( $in_string ) {
+				if ( '\\' === $char && ! $escaped ) {
+					$escaped = true;
+					continue;
+				}
+
+				if ( $quote === $char && ! $escaped ) {
+					$in_string = false;
+				}
+
+				$escaped = false;
+				continue;
+			}
+
+			if ( "'" === $char || '"' === $char ) {
+				$in_string = true;
+				$quote     = $char;
+				$escaped   = false;
+				continue;
+			}
+
+			foreach ( $keywords as $keyword ) {
+				if ( null !== self::sql_keyword_match_end_at( $sql, $i, $keyword ) ) {
+					return $i;
+				}
+			}
+		}
+
+		return $length;
+	}
+
+	private static function sql_keyword_match_end_at( string $sql, int $offset, string $keyword ): ?int {
+		if ( $offset > 0 && preg_match( '/[A-Za-z0-9_]/', $sql[ $offset - 1 ] ) ) {
+			return null;
+		}
+
+		$parts   = preg_split( '/\s+/', trim( $keyword ) );
+		$pattern = '/\A' . implode( '\s+', array_map( 'preg_quote', $parts ) ) . '\b/i';
+		if ( ! preg_match( $pattern, substr( $sql, $offset ), $matches ) ) {
+			return null;
+		}
+
+		return $offset + strlen( $matches[0] );
+	}
+
+	private static function sql_orderby_fragment_has_no_empty_expressions( string $fragment ): bool {
+		foreach ( self::sql_split_orderby_expressions( $fragment ) as $expression ) {
+			$expression = trim( $expression );
+			if ( '' === $expression || preg_match( '/\A(?:ASC|DESC)\b/i', $expression ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function sql_split_orderby_expressions( string $fragment ): array {
+		$expressions = array();
+		$current     = '';
+		$depth       = 0;
+		$in_string   = false;
+		$quote       = '';
+		$escaped     = false;
+		$length      = strlen( $fragment );
+
+		for ( $i = 0; $i < $length; $i++ ) {
+			$char = $fragment[ $i ];
+
+			if ( $in_string ) {
+				$current .= $char;
+				if ( '\\' === $char && ! $escaped ) {
+					$escaped = true;
+					continue;
+				}
+
+				if ( $quote === $char && ! $escaped ) {
+					$in_string = false;
+				}
+
+				$escaped = false;
+				continue;
+			}
+
+			if ( "'" === $char || '"' === $char ) {
+				$in_string = true;
+				$quote     = $char;
+				$escaped   = false;
+				$current  .= $char;
+				continue;
+			}
+
+			if ( '(' === $char ) {
+				++$depth;
+			} elseif ( ')' === $char && $depth > 0 ) {
+				--$depth;
+			} elseif ( ',' === $char && 0 === $depth ) {
+				$expressions[] = $current;
+				$current       = '';
+				continue;
+			}
+
+			$current .= $char;
+		}
+
+		$expressions[] = $current;
+		return $expressions;
 	}
 
 	private static function safe_sql_identifier( string $identifier ): bool {
@@ -4363,6 +4698,18 @@ final class QuerySurface {
 				'post_name'         => 'photo-attachment',
 				'post_status'       => 'inherit',
 				'post_title'        => 'Photo attachment',
+				'post_type'         => 'attachment',
+				'comment_count'     => '0',
+			),
+			array(
+				'ID'                => 33,
+				'post_author'       => 41,
+				'post_date'         => '2020-08-01 16:00:00',
+				'post_modified'     => '2020-08-02 16:00:00',
+				'post_mime_type'    => 'image/jpeg',
+				'post_name'         => 'photo-orphan-attachment',
+				'post_status'       => 'inherit',
+				'post_title'        => 'Photo orphan attachment',
 				'post_type'         => 'attachment',
 				'comment_count'     => '0',
 			),

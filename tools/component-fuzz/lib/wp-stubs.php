@@ -898,16 +898,25 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 			}
 
 			foreach ( array( 'post_name', 'post_type', 'post_parent', 'post_status', 'post_password' ) as $column ) {
-				$value = $this->component_fuzz_compare_value( $query, $column );
-				if ( null === $value ) {
+				$values = 'post_password' === $column
+					? $this->component_fuzz_compare_values( $query, $column )
+					: array_filter(
+						array( $this->component_fuzz_compare_value( $query, $column ) ),
+						static function ( $value ) {
+							return null !== $value;
+						}
+					);
+				if ( array() === $values ) {
 					continue;
 				}
-				$rows = array_filter(
-					$rows,
-					static function ( $row ) use ( $column, $value ) {
-						return (string) $row[ $column ] === (string) $value;
-					}
-				);
+				foreach ( $values as $value ) {
+					$rows = array_filter(
+						$rows,
+						static function ( $row ) use ( $column, $value ) {
+							return (string) $row[ $column ] === (string) $value;
+						}
+					);
+				}
 			}
 
 			foreach ( array( 'post_name', 'post_parent', 'post_status' ) as $column ) {
@@ -1003,11 +1012,16 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 				$rows,
 				function ( $row ) use ( $patterns ) {
 					foreach ( $patterns as $pattern ) {
-						$matched = false;
+						$matched      = false;
+						$missing_meta = false;
 						foreach ( array_keys( $pattern['columns'] ) as $column ) {
 							$values = 'sq1.meta_value' === $column
 								? $this->component_fuzz_post_meta_values( (int) $row['ID'], '_wp_attached_file' )
 								: array( (string) ( $row[ $column ] ?? '' ) );
+
+							if ( 'sq1.meta_value' === $column && array() === $values ) {
+								$missing_meta = true;
+							}
 
 							foreach ( $values as $value ) {
 								if ( $this->component_fuzz_sql_like_match( (string) $value, (string) $pattern['pattern'] ) ) {
@@ -1021,7 +1035,7 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 							return false;
 						}
 
-						if ( 'NOT LIKE' === $pattern['operator'] && $matched ) {
+						if ( 'NOT LIKE' === $pattern['operator'] && ( $matched || $missing_meta ) ) {
 							return false;
 						}
 					}
@@ -1953,11 +1967,69 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 		}
 
 		private function component_fuzz_where_clause( $query ) {
-			if ( preg_match( '/\bWHERE\b(.+?)(?:\bGROUP\s+BY\b|\bORDER\s+BY\b|\bLIMIT\b|\z)/is', (string) $query, $matches ) ) {
-				return $matches[1];
+			$sql = (string) $query;
+			if ( ! preg_match( '/\bWHERE\b/i', $sql, $matches, PREG_OFFSET_CAPTURE ) ) {
+				return '';
 			}
 
-			return '';
+			$start = $matches[0][1] + strlen( $matches[0][0] );
+			$end   = $this->component_fuzz_sql_clause_boundary( $sql, $start, array( 'GROUP BY', 'ORDER BY', 'LIMIT' ) );
+
+			return substr( $sql, $start, $end - $start );
+		}
+
+		private function component_fuzz_sql_clause_boundary( $sql, $start, array $keywords ) {
+			$length    = strlen( (string) $sql );
+			$in_string = false;
+			$quote     = '';
+			$escaped   = false;
+
+			for ( $i = (int) $start; $i < $length; $i++ ) {
+				$char = $sql[ $i ];
+
+				if ( $in_string ) {
+					if ( '\\' === $char && ! $escaped ) {
+						$escaped = true;
+						continue;
+					}
+
+					if ( $quote === $char && ! $escaped ) {
+						$in_string = false;
+					}
+
+					$escaped = false;
+					continue;
+				}
+
+				if ( "'" === $char || '"' === $char ) {
+					$in_string = true;
+					$quote     = $char;
+					$escaped   = false;
+					continue;
+				}
+
+				foreach ( $keywords as $keyword ) {
+					if ( null !== $this->component_fuzz_sql_keyword_match_end_at( $sql, $i, $keyword ) ) {
+						return $i;
+					}
+				}
+			}
+
+			return $length;
+		}
+
+		private function component_fuzz_sql_keyword_match_end_at( $sql, $offset, $keyword ) {
+			if ( $offset > 0 && preg_match( '/[A-Za-z0-9_]/', $sql[ $offset - 1 ] ) ) {
+				return null;
+			}
+
+			$parts   = preg_split( '/\s+/', trim( (string) $keyword ) );
+			$pattern = '/\A' . implode( '\s+', array_map( 'preg_quote', $parts ) ) . '\b/i';
+			if ( ! preg_match( $pattern, substr( (string) $sql, (int) $offset ), $matches ) ) {
+				return null;
+			}
+
+			return (int) $offset + strlen( $matches[0] );
 		}
 
 		private function component_fuzz_meta_type_for_table_key( $table_key ) {
@@ -1991,12 +2063,17 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 		}
 
 		private function component_fuzz_compare_value( $query, $column ) {
+			$values = $this->component_fuzz_compare_values( $query, $column );
+			return $values[0] ?? null;
+		}
+
+		private function component_fuzz_compare_values( $query, $column ) {
 			$column = preg_quote( $column, '/' );
-			if ( preg_match( '/(?<![A-Za-z0-9_])(?:`?[a-z_][a-z0-9_]*`?\.)?`?' . $column . '`?(?![A-Za-z0-9_])\s*=\s*(\'(?:\\\\.|[^\'\\\\])*\'|"[^"]*"|-?\d+)/i', (string) $query, $matches ) ) {
-				return $this->component_fuzz_unquote_sql_value( $matches[1] );
+			if ( ! preg_match_all( '/(?<![A-Za-z0-9_])(?:`?[a-z_][a-z0-9_]*`?\.)?`?' . $column . '`?(?![A-Za-z0-9_])\s*=\s*(\'(?:\\\\.|[^\'\\\\])*\'|"[^"]*"|-?\d+)/i', (string) $query, $matches ) ) {
+				return array();
 			}
 
-			return null;
+			return array_map( array( $this, 'component_fuzz_unquote_sql_value' ), $matches[1] );
 		}
 
 		private function component_fuzz_not_compare_value( $query, $column ) {
