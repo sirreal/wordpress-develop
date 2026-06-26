@@ -1885,18 +1885,23 @@ final class AdminListTablesSurface {
 		$bottom_output   = (string) ( $result['bottom_output'] ?? '' );
 		$infinite_output = (string) ( $result['infinite_output'] ?? '' );
 		$empty_output    = (string) ( $result['empty_output'] ?? '' );
-		$first_href      = '';
-		$prev_href       = '';
-		$next_href       = '';
-		$last_href       = '';
-		preg_match( "/class='first-page button' href='([^']+)'/", $top_output, $first_match );
-		preg_match( "/class='prev-page button' href='([^']+)'/", $top_output, $prev_match );
-		preg_match( "/class='next-page button' href='([^']+)'/", $top_output, $next_match );
-		preg_match( "/class='last-page button' href='([^']+)'/", $top_output, $last_match );
-		$first_href = (string) ( $first_match[1] ?? '' );
-		$prev_href  = (string) ( $prev_match[1] ?? '' );
-		$next_href  = (string) ( $next_match[1] ?? '' );
-		$last_href  = (string) ( $last_match[1] ?? '' );
+		$displaying_count = sprintf(
+			\_n( '%s item', '%s items', 23 ),
+			\number_format_i18n( 23 )
+		);
+		$hrefs            = self::anchor_hrefs_by_class(
+			$top_output,
+			array(
+				'first-page',
+				'prev-page',
+				'next-page',
+				'last-page',
+			)
+		);
+		$first_href       = (string) ( $hrefs['first-page'] ?? '' );
+		$prev_href        = (string) ( $hrefs['prev-page'] ?? '' );
+		$next_href        = (string) ( $hrefs['next-page'] ?? '' );
+		$last_href        = (string) ( $hrefs['last-page'] ?? '' );
 
 		self::collect_failure(
 			$failures,
@@ -1935,23 +1940,19 @@ final class AdminListTablesSurface {
 		self::collect_failure(
 			$failures,
 			str_contains( $top_output, 'displaying-num' )
-				&& str_contains( $top_output, '23 items' )
+				&& str_contains( $top_output, $displaying_count )
 				&& str_contains( $top_output, "id='current-page-selector'" )
 				&& str_contains( $top_output, "name='paged'" )
 				&& str_contains( $top_output, "value='3'" )
 				&& str_contains( $top_output, "class='total-pages'>5</span>" )
-				&& str_contains( $top_output, "class='first-page button'" )
-				&& str_contains( $top_output, "class='prev-page button'" )
-				&& str_contains( $top_output, "class='next-page button'" )
-				&& str_contains( $top_output, "class='last-page button'" )
 				&& '' !== $first_href
 				&& '' !== $prev_href
 				&& '' !== $next_href
 				&& '' !== $last_href
-				&& ! str_contains( $first_href, 'paged=' )
-				&& str_contains( $prev_href, 'paged=2' )
-				&& str_contains( $next_href, 'paged=4' )
-				&& str_contains( $last_href, 'paged=5' )
+				&& self::pagination_href_matches( $first_href, $screen->id, null )
+				&& self::pagination_href_matches( $prev_href, $screen->id, 2 )
+				&& self::pagination_href_matches( $next_href, $screen->id, 4 )
+				&& self::pagination_href_matches( $last_href, $screen->id, 5 )
 				&& str_contains( $top_output, 'mode=list' )
 				&& str_contains( $top_output, 'order=asc' )
 				&& str_contains( $top_output, 's=stable-value' )
@@ -2751,6 +2752,106 @@ final class AdminListTablesSurface {
 
 		return ! str_contains( $lower, '<script' )
 			&& ! str_contains( $lower, 'javascript:' );
+	}
+
+	private static function anchor_hrefs_by_class( string $html, array $classes ): array {
+		$wanted = array_fill_keys( $classes, true );
+		$hrefs  = array();
+
+		if ( ! preg_match_all( '/<a\b([^>]*)>/i', $html, $anchors ) ) {
+			return $hrefs;
+		}
+
+		foreach ( $anchors[1] as $attribute_text ) {
+			$attrs = self::html_attributes( $attribute_text );
+			if ( ! isset( $attrs['class'], $attrs['href'] ) ) {
+				continue;
+			}
+
+			$class_tokens = preg_split( '/\s+/', html_entity_decode( $attrs['class'], ENT_QUOTES, 'UTF-8' ) );
+			foreach ( is_array( $class_tokens ) ? $class_tokens : array() as $class ) {
+				if ( isset( $wanted[ $class ] ) && ! isset( $hrefs[ $class ] ) ) {
+					$hrefs[ $class ] = $attrs['href'];
+				}
+			}
+		}
+
+		return $hrefs;
+	}
+
+	private static function html_attributes( string $attribute_text ): array {
+		$attrs = array();
+		preg_match_all(
+			"/([A-Za-z_:][-A-Za-z0-9_:.]*)\s*=\s*(?:\"([^\"]*)\"|'([^']*)'|([^\s\"'=<>`]+))/",
+			$attribute_text,
+			$matches,
+			PREG_SET_ORDER
+		);
+
+		foreach ( $matches as $match ) {
+			$value = $match[2] ?? '';
+			if ( '' === $value && isset( $match[3] ) && '' !== $match[3] ) {
+				$value = $match[3];
+			} elseif ( '' === $value && isset( $match[4] ) ) {
+				$value = $match[4];
+			}
+
+			$attrs[ strtolower( $match[1] ) ] = $value;
+		}
+
+		return $attrs;
+	}
+
+	private static function pagination_href_matches( string $href, string $screen_id, ?int $expected_paged ): bool {
+		if ( '' === $href ) {
+			return false;
+		}
+
+		if ( preg_match( '/[<>"\']/', $href ) || preg_match( '/&(?!#\d+;|#x[0-9a-f]+;|[a-z][a-z0-9]+;)/i', $href ) ) {
+			return false;
+		}
+
+		if ( ! preg_match( '/(?:&#0*38;|&amp;)/i', $href ) ) {
+			return false;
+		}
+
+		$lower_href = strtolower( $href );
+		if ( str_contains( $lower_href, '<script' ) || str_contains( $lower_href, 'javascript:' ) ) {
+			return false;
+		}
+
+		$decoded = html_entity_decode( $href, ENT_QUOTES, 'UTF-8' );
+		$parts   = \wp_parse_url( $decoded );
+		if ( ! is_array( $parts ) ) {
+			return false;
+		}
+
+		$query = array();
+		parse_str( (string) ( $parts['query'] ?? '' ), $query );
+
+		$expected = array(
+			'page'  => $screen_id,
+			'mode'  => 'list',
+			'order' => 'asc',
+			's'     => 'stable-value',
+			'raw'   => '<script>alert(1)</script>',
+			'proto' => 'javascript:alert(1)',
+		);
+		foreach ( $expected as $key => $value ) {
+			if ( (string) ( $query[ $key ] ?? '' ) !== $value ) {
+				return false;
+			}
+		}
+
+		if ( isset( $query['updated'] ) || isset( $query['deleted'] ) ) {
+			return false;
+		}
+
+		if ( null === $expected_paged ) {
+			return ! isset( $query['paged'] );
+		}
+
+		return (string) ( $query['paged'] ?? '' ) === (string) $expected_paged;
 	}
 
 	private static function raw_script_context( string $html ): string {
