@@ -72,6 +72,7 @@ final class FontsSurface {
 				'WP_REST_Font_Faces_Controller',
 				'WP_REST_Request',
 				'WP_REST_Response',
+				'WP_Theme_JSON',
 				'WP_Theme_JSON_Data',
 				'WP_Theme_JSON_Resolver',
 			) as $class
@@ -102,6 +103,8 @@ final class FontsSurface {
 				'sanitize_url',
 				'urlencode_deep',
 				'wp_cache_delete',
+				'wp_cache_get',
+				'wp_cache_set',
 				'wp_font_dir',
 				'wp_get_global_settings',
 				'wp_get_font_dir',
@@ -374,13 +377,13 @@ final class FontsSurface {
 				}
 			);
 			$fonts         = is_array( $resolver_call['value'] ?? null ) ? $resolver_call['value'] : array();
-			$explicit_call = self::capture_output(
+			$explicit_call = self::capture_output_doing_it_wrong(
 				static function () use ( $fonts ): void {
 					\wp_print_font_faces( $fonts );
 				}
 			);
 			self::clean_theme_json_caches();
-			$default_call = self::capture_output(
+			$default_call = self::capture_output_doing_it_wrong(
 				static function (): void {
 					\wp_print_font_faces();
 				}
@@ -431,6 +434,8 @@ final class FontsSurface {
 			$failures,
 			! $explicit_call['threw']
 				&& ! $default_call['threw']
+				&& array() === ( $explicit_call['warnings'] ?? array() )
+				&& array() === ( $default_call['warnings'] ?? array() )
 				&& $explicit_output === $default_output
 				&& count( $blocks ) === $case['expectedFaceCount']
 				&& str_contains( $default_output, $case['themeFileBaseUrl'] . $case['expectedThemeFiles'][0] )
@@ -970,6 +975,7 @@ final class FontsSurface {
 		self::collect_failure(
 			$failures,
 			$page_one instanceof \WP_REST_Response
+				&& array() === ( $page_one_call['warnings'] ?? array() )
 				&& 200 === $page_one->get_status()
 				&& self::rest_collection_headers_match( $page_one, 4, 2, 'next' )
 				&& self::rest_collection_page_one_body_matches_case( $page_one->get_data(), $case ),
@@ -987,7 +993,10 @@ final class FontsSurface {
 				&& 200 === $page_two->get_status()
 				&& self::rest_collection_headers_match( $page_two, 4, 2, 'prev' )
 				&& self::rest_collection_page_two_body_matches_case( $page_two->get_data(), $case )
-				&& count( $page_two_call['warnings'] ?? array() ) >= 1,
+				&& self::warnings_match_functions(
+					$page_two_call['warnings'] ?? array(),
+					array( 'WP_Font_Collection::load_from_json' )
+				),
 			'REST font collections GET skips invalid collection data without failing the bounded page',
 			array(
 				'call'    => self::describe_call( $page_two_call ),
@@ -999,6 +1008,7 @@ final class FontsSurface {
 		self::collect_failure(
 			$failures,
 			$head instanceof \WP_REST_Response
+				&& array() === ( $head_call['warnings'] ?? array() )
 				&& 200 === $head->get_status()
 				&& array() === $head->get_data()
 				&& self::rest_collection_headers_match( $head, 4, 2, 'next' ),
@@ -1013,6 +1023,7 @@ final class FontsSurface {
 		self::collect_failure(
 			$failures,
 			$item instanceof \WP_REST_Response
+				&& array() === ( $item_call['warnings'] ?? array() )
 				&& 200 === $item->get_status()
 				&& array( 'slug' => $case['collections'][0]['slug'] ) === $item->get_data()
 				&& isset( $item->get_links()['self'][0]['href'], $item->get_links()['collection'][0]['href'] )
@@ -1029,6 +1040,7 @@ final class FontsSurface {
 		self::collect_failure(
 			$failures,
 			$missing instanceof \WP_Error
+				&& array() === ( $missing_call['warnings'] ?? array() )
 				&& 'rest_font_collection_not_found' === $missing->get_error_code()
 				&& 404 === ( $missing->get_error_data()['status'] ?? null ),
 			'REST font collection get_item returns a 404 WP_Error for missing slugs',
@@ -2244,6 +2256,20 @@ final class FontsSurface {
 		return $value;
 	}
 
+	private static function warnings_match_functions( array $warnings, array $expected_functions ): bool {
+		if ( count( $warnings ) !== count( $expected_functions ) ) {
+			return false;
+		}
+
+		foreach ( $expected_functions as $index => $function_name ) {
+			if ( $function_name !== ( $warnings[ $index ]['function'] ?? null ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
 	private static function clean_theme_json_caches(): void {
 		if ( class_exists( 'WP_Theme_JSON_Resolver' ) ) {
 			\WP_Theme_JSON_Resolver::clean_cached_data();
@@ -2253,6 +2279,70 @@ final class FontsSurface {
 			\wp_cache_delete( 'wp_get_global_settings_custom', 'theme_json' );
 			\wp_cache_delete( 'wp_get_global_settings_theme', 'theme_json' );
 		}
+	}
+
+	private static function snapshot_theme_json_state(): array {
+		$state = array(
+			'statics' => array(),
+			'cache'   => array(),
+		);
+
+		if ( class_exists( 'WP_Theme_JSON_Resolver' ) ) {
+			foreach ( self::theme_json_resolver_static_properties() as $property ) {
+				$state['statics'][ $property ] = self::get_static_property( 'WP_Theme_JSON_Resolver', $property );
+			}
+		}
+
+		if ( function_exists( 'wp_cache_get' ) ) {
+			foreach ( self::theme_json_cache_keys() as $cache_key ) {
+				$found = null;
+				$value = \wp_cache_get( $cache_key, 'theme_json', false, $found );
+
+				$state['cache'][ $cache_key ] = array(
+					'exists' => (bool) $found,
+					'value'  => $value,
+				);
+			}
+		}
+
+		return $state;
+	}
+
+	private static function restore_theme_json_state( array $state ): void {
+		if ( class_exists( 'WP_Theme_JSON_Resolver' ) ) {
+			foreach ( $state['statics'] ?? array() as $property => $value ) {
+				self::set_static_property( 'WP_Theme_JSON_Resolver', $property, $value );
+			}
+		}
+
+		if ( function_exists( 'wp_cache_set' ) && function_exists( 'wp_cache_delete' ) ) {
+			foreach ( $state['cache'] ?? array() as $cache_key => $entry ) {
+				if ( $entry['exists'] ?? false ) {
+					\wp_cache_set( $cache_key, $entry['value'], 'theme_json' );
+				} else {
+					\wp_cache_delete( $cache_key, 'theme_json' );
+				}
+			}
+		}
+	}
+
+	private static function theme_json_resolver_static_properties(): array {
+		return array(
+			'core',
+			'blocks',
+			'blocks_cache',
+			'theme',
+			'user',
+			'user_custom_post_type_id',
+			'i18n_schema',
+		);
+	}
+
+	private static function theme_json_cache_keys(): array {
+		return array(
+			'wp_get_global_settings_custom',
+			'wp_get_global_settings_theme',
+		);
 	}
 
 	private static function font_face_declaration_properties( string $block ): array {
@@ -2336,6 +2426,40 @@ final class FontsSurface {
 		}
 	}
 
+	private static function capture_output_doing_it_wrong( callable $callback ): array {
+		$warnings = array();
+		$listener = static function ( $function_name, $message, $version ) use ( &$warnings ): void {
+			$warnings[] = array(
+				'function' => $function_name,
+				'message'  => $message,
+				'version'  => $version,
+			);
+		};
+
+		\add_action( 'doing_it_wrong_run', $listener, 10, 3 );
+		\ob_start();
+		try {
+			$value  = $callback();
+			$output = \ob_get_clean();
+			return array(
+				'threw'    => false,
+				'value'    => $value,
+				'output'   => $output,
+				'warnings' => $warnings,
+			);
+		} catch ( \Throwable $e ) {
+			$output = \ob_get_clean();
+			return array(
+				'threw'     => true,
+				'throwable' => self::describe_throwable( $e ),
+				'output'    => $output,
+				'warnings'  => $warnings,
+			);
+		} finally {
+			\remove_action( 'doing_it_wrong_run', $listener, 10 );
+		}
+	}
+
 	private static function capture_doing_it_wrong( callable $callback ): array {
 		$warnings = array();
 		$listener = static function ( $function_name, $message, $version ) use ( &$warnings ): void {
@@ -2400,6 +2524,7 @@ final class FontsSurface {
 			'globals'            => self::snapshot_globals( array( 'wp_filter', 'wp_filters', 'wp_actions', 'wp_current_filter' ) ),
 			'fontLibrary'        => $library,
 			'fontLibraryEntries' => $library instanceof \WP_Font_Library ? self::get_object_property( $library, 'collections' ) : null,
+			'themeJson'          => self::snapshot_theme_json_state(),
 		);
 	}
 
@@ -2412,6 +2537,8 @@ final class FontsSurface {
 		} else {
 			self::set_static_property( 'WP_Font_Library', 'instance', null );
 		}
+
+		self::restore_theme_json_state( $snapshot['themeJson'] ?? array() );
 	}
 
 	private static function reset_font_library(): void {
