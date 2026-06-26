@@ -860,9 +860,13 @@ final class RestSurface {
 		$route     = '/wrapper/(?P<id>[0-9]+)';
 		$full_route = '/' . $namespace . '/wrapper/(?P<id>[0-9]+)';
 		$path      = '/' . $namespace . '/wrapper/' . $id;
-		$server    = new \WP_REST_Server();
-		$get_hits  = 0;
-		$post_hits = 0;
+		$server             = new \WP_REST_Server();
+		$get_hits           = 0;
+		$post_hits          = 0;
+		$override_get_hits  = 0;
+		$override_post_hits = 0;
+		$get_token          = 'get-' . substr( $token, -6 );
+		$post_token         = 'post-' . substr( $token, -6 );
 
 		$state = array(
 			'serverExists' => array_key_exists( 'wp_rest_server', $GLOBALS ),
@@ -919,6 +923,11 @@ final class RestSurface {
 								'default' => 'view',
 								'enum'    => array( 'view', 'edit' ),
 							),
+							'token' => array(
+								'type'    => 'string',
+								'default' => $get_token,
+								'pattern' => '^get-[a-z0-9]{6}$',
+							),
 						),
 					),
 				)
@@ -950,6 +959,11 @@ final class RestSurface {
 								'type'     => 'string',
 								'required' => true,
 							),
+							'token'   => array(
+								'type'    => 'string',
+								'default' => $post_token,
+								'pattern' => '^post-[a-z0-9]{6}$',
+							),
 						),
 					),
 				)
@@ -959,6 +973,7 @@ final class RestSurface {
 			$route_options      = $server->get_route_options( $full_route );
 			$merged_handlers    = $routes_after_merge[ $full_route ] ?? array();
 			$merged_summary     = self::route_handler_summary( $merged_handlers );
+			$schema_data        = is_callable( $route_options['schema'] ?? null ) ? call_user_func( $route_options['schema'] ) : null;
 
 			$get_request = new \WP_REST_Request( 'GET', $path );
 			$get_request->set_query_params( array( 'mode' => 'edit' ) );
@@ -971,6 +986,7 @@ final class RestSurface {
 			$post_data     = $post_response->get_data();
 
 			$override_route = '/override-' . substr( $token, -3 );
+			$override_path  = '/' . $namespace . '/' . trim( $override_route, '/' );
 			$override_full  = '/' . $namespace . '/' . trim( $override_route, '/' );
 			$override_get   = \register_rest_route(
 				$namespace,
@@ -981,7 +997,9 @@ final class RestSurface {
 						'permission_callback' => static function (): bool {
 							return true;
 						},
-						'callback'            => static function (): array {
+						'callback'            => static function () use ( &$override_get_hits ): array {
+							++$override_get_hits;
+
 							return array( 'handler' => 'override-get' );
 						},
 					),
@@ -996,7 +1014,9 @@ final class RestSurface {
 						'permission_callback' => static function (): bool {
 							return true;
 						},
-						'callback'            => static function (): array {
+						'callback'            => static function () use ( &$override_post_hits ): array {
+							++$override_post_hits;
+
 							return array( 'handler' => 'override-post' );
 						},
 					),
@@ -1006,6 +1026,10 @@ final class RestSurface {
 			$routes_after_override = $server->get_routes( $namespace );
 			$override_handlers     = $routes_after_override[ $override_full ] ?? array();
 			$override_summary      = self::route_handler_summary( $override_handlers );
+			$override_get_response  = $server->dispatch( new \WP_REST_Request( 'GET', $override_path ) );
+			$override_post_response = $server->dispatch( new \WP_REST_Request( 'POST', $override_path ) );
+			$override_get_data      = $override_get_response->get_data();
+			$override_post_data     = $override_post_response->get_data();
 		} finally {
 			if ( $state['serverExists'] ) {
 				$GLOBALS['wp_rest_server'] = $state['server'];
@@ -1031,8 +1055,11 @@ final class RestSurface {
 			&& array( 'GET', 'POST' ) === array_keys( $merged_summary )
 			&& isset( $merged_handlers[0]['args']['id'], $merged_handlers[0]['args']['token'], $merged_handlers[0]['args']['mode'] )
 			&& isset( $merged_handlers[1]['args']['id'], $merged_handlers[1]['args']['token'], $merged_handlers[1]['args']['payload'] )
+			&& ( $merged_handlers[0]['args']['token']['default'] ?? null ) === $get_token
+			&& ( $merged_handlers[1]['args']['token']['default'] ?? null ) === $post_token
 			&& is_array( $route_options )
-			&& isset( $route_options['schema'] );
+			&& is_callable( $route_options['schema'] ?? null )
+			&& array( 'namespace' => $namespace ) === $schema_data;
 		$dispatch_ok = 200 === $get_response->get_status()
 			&& 200 === $post_response->get_status()
 			&& is_array( $get_data )
@@ -1040,14 +1067,14 @@ final class RestSurface {
 			&& array(
 				'handler' => 'get',
 				'id'      => (int) $id,
-				'token'   => $token,
+				'token'   => $get_token,
 				'mode'    => 'edit',
 				'method'  => 'GET',
 			) === $get_data
 			&& array(
 				'handler' => 'post',
 				'id'      => (int) $id,
-				'token'   => $token,
+				'token'   => $post_token,
 				'payload' => 'body-' . $token,
 				'method'  => 'POST',
 			) === $post_data
@@ -1056,7 +1083,14 @@ final class RestSurface {
 		$override_ok = true === $override_get
 			&& true === $override_post
 			&& array( 'POST' ) === array_keys( $override_summary )
-			&& 1 === count( $override_handlers );
+			&& 1 === count( $override_handlers )
+			&& 0 === $override_get_hits
+			&& 1 === $override_post_hits
+			&& 200 !== $override_get_response->get_status()
+			&& 200 === $override_post_response->get_status()
+			&& is_array( $override_get_data )
+			&& is_array( $override_post_data )
+			&& array( 'handler' => 'override-post' ) === $override_post_data;
 		$ok = $merge_ok && $dispatch_ok && $override_ok && $state_restored;
 
 		return array(
@@ -1064,20 +1098,24 @@ final class RestSurface {
 			'message'  => $ok ? 'register_rest_route wrapper merge, override, dispatch, and global restoration semantics held.' : 'register_rest_route wrapper invariant failed.',
 			'features' => array( 'register-rest-route', 'route-merge', 'route-override', 'common-route-args', 'route-options', 'global-rest-server-restore' ),
 			'details'  => array(
-				'namespace'       => $namespace,
-				'route'           => $full_route,
-				'mergeOk'         => $merge_ok,
-				'dispatchOk'      => $dispatch_ok,
-				'overrideOk'      => $override_ok,
-				'stateRestored'   => $state_restored,
-				'mergedHandlers'  => $merged_summary,
-				'overrideHandlers' => $override_summary,
-				'routeOptions'    => array_keys( (array) $route_options ),
-				'getResponse'     => self::response_summary( $get_response ),
-				'postResponse'    => self::response_summary( $post_response ),
-				'hits'            => array(
-					'get'  => $get_hits,
-					'post' => $post_hits,
+				'namespace'            => $namespace,
+				'route'                => $full_route,
+				'mergeOk'              => $merge_ok,
+				'dispatchOk'           => $dispatch_ok,
+				'overrideOk'           => $override_ok,
+				'stateRestored'        => $state_restored,
+				'mergedHandlers'       => $merged_summary,
+				'overrideHandlers'     => $override_summary,
+				'routeOptions'         => array_keys( (array) $route_options ),
+				'getResponse'          => self::response_summary( $get_response ),
+				'postResponse'         => self::response_summary( $post_response ),
+				'overrideGetResponse'  => self::response_summary( $override_get_response ),
+				'overridePostResponse' => self::response_summary( $override_post_response ),
+				'hits'                 => array(
+					'get'           => $get_hits,
+					'post'          => $post_hits,
+					'overrideGet'   => $override_get_hits,
+					'overridePost'  => $override_post_hits,
 				),
 			),
 		);
