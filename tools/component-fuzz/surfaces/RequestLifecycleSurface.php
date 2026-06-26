@@ -39,6 +39,7 @@ final class RequestLifecycleSurface {
 			$rows[] = self::check_main_sequence_with_query_short_circuit( $ctx->fork( 'main-sequence' ), $case );
 			$rows[] = self::check_handle_404_transitions( $ctx->fork( '404' ) );
 			$rows[] = self::check_send_headers_filters_and_actions( $ctx->fork( 'headers' ) );
+			$rows[] = self::check_feed_header_variants( $ctx->fork( 'feed-headers' ) );
 			$rows[] = self::check_status_and_nocache_header_contracts( $ctx->fork( 'status-nocache' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
@@ -118,6 +119,8 @@ final class RequestLifecycleSurface {
 				'sanitize_title_with_dashes',
 				'status_header',
 				'unregister_taxonomy',
+				'wp_cache_delete',
+				'wp_cache_set',
 				'wp_get_server_protocol',
 				'wp_get_nocache_headers',
 				'wp_die',
@@ -1279,6 +1282,171 @@ final class RequestLifecycleSurface {
 					'Last-Modified' => $expected_feed_last_modified,
 					'ETag'          => $expected_feed_etag,
 				),
+			)
+		);
+	}
+
+	private static function check_feed_header_variants( \ComponentFuzz\FuzzContext $ctx ): array {
+		$post_modified    = '2024-03-04 05:06:07';
+		$comment_modified = '2024-03-05 06:07:08';
+		$older_modified   = '2024-03-03 04:05:06 GMT';
+		$failures         = array();
+		$observed         = array();
+		$status_log       = array();
+		$headers_log      = array();
+		$post_modified_calls = array();
+		$default_feed_calls  = 0;
+
+		$lastpost_filter = static function ( $pre, string $timezone, string $post_type ) use ( &$post_modified_calls, $post_modified ): string {
+			$post_modified_calls[] = array(
+				'pre'      => $pre,
+				'timezone' => $timezone,
+				'postType' => $post_type,
+			);
+			return $post_modified;
+		};
+		$default_feed_filter = static function ( string $feed ) use ( &$default_feed_calls ): string {
+			++$default_feed_calls;
+			return 'atom';
+		};
+		$status_filter = static function (
+			string $status_header,
+			int $code,
+			string $description,
+			string $protocol
+		) use ( &$status_log ): string {
+			$status_log[] = array(
+				'header'      => $status_header,
+				'code'        => $code,
+				'description' => $description,
+				'protocol'    => $protocol,
+			);
+			return $status_header;
+		};
+		$headers_filter = static function ( array $headers, \WP $wp ) use ( &$headers_log ): array {
+			$headers_log[] = array(
+				'headers'   => $headers,
+				'queryVars' => $wp->query_vars,
+			);
+			return $headers;
+		};
+
+		$cases = array(
+			'defaultFeedAlias' => array(
+				'queryVars'           => array( 'feed' => 'feed' ),
+				'expectedContentType' => 'application/atom+xml; charset=UTF-8',
+				'expectedModified'    => $post_modified,
+				'conditional'         => false,
+				'expectDefaultFeed'   => true,
+			),
+			'postFeedStaleConditional' => array(
+				'queryVars'           => array( 'feed' => 'rss2' ),
+				'expectedContentType' => 'application/rss+xml; charset=UTF-8',
+				'expectedModified'    => $post_modified,
+				'conditional'         => true,
+				'expectDefaultFeed'   => false,
+			),
+			'commentsFeedUsesCommentModified' => array(
+				'queryVars'           => array( 'feed' => 'rss2', 'withcomments' => '1', 'p' => '42' ),
+				'expectedContentType' => 'application/rss+xml; charset=UTF-8',
+				'expectedModified'    => $comment_modified,
+				'conditional'         => false,
+				'expectDefaultFeed'   => false,
+			),
+			'withoutCommentsPostFeed' => array(
+				'queryVars'           => array( 'feed' => 'rss2', 'withoutcomments' => '1', 'p' => '42' ),
+				'expectedContentType' => 'application/rss+xml; charset=UTF-8',
+				'expectedModified'    => $post_modified,
+				'conditional'         => false,
+				'expectDefaultFeed'   => false,
+			),
+		);
+
+		\add_filter( 'pre_get_lastpostmodified', $lastpost_filter, 10, 3 );
+		\add_filter( 'default_feed', $default_feed_filter, 10, 1 );
+		\add_filter( 'status_header', $status_filter, 10, 4 );
+		\add_filter( 'wp_headers', $headers_filter, 10, 2 );
+		try {
+			foreach ( $cases as $label => $case ) {
+				\wp_cache_set( 'lastcommentmodified:gmt', $comment_modified, 'timeinfo' );
+
+				$GLOBALS['wp_query'] = new \WP_Query();
+				$wp                  = self::new_wp();
+				$wp->query_vars       = $case['queryVars'];
+				self::prepare_request_server( '/site-base/feed-variant-' . rawurlencode( $label ) . '/', '' );
+				self::set_request_superglobals( array(), array() );
+				if ( $case['conditional'] ) {
+					$_SERVER['HTTP_IF_MODIFIED_SINCE'] = $older_modified;
+					$_SERVER['HTTP_IF_NONE_MATCH']     = '"component-fuzz-stale-etag"';
+				}
+
+				$status_before  = count( $status_log );
+				$headers_before = count( $headers_log );
+				$default_before = $default_feed_calls;
+				$wp->send_headers();
+				$header_event = $headers_log[ $headers_before ] ?? array();
+				$headers      = $header_event['headers'] ?? array();
+				$last_modified = \mysql2date( 'D, d M Y H:i:s', $case['expectedModified'], false ) . ' GMT';
+				$expected_etag = '"' . md5( $last_modified ) . '"';
+
+				self::collect_failure(
+					$failures,
+					$headers_before + 1 === count( $headers_log )
+						&& $case['expectedContentType'] === ( $headers['Content-Type'] ?? null )
+						&& $last_modified === ( $headers['Last-Modified'] ?? null )
+						&& $expected_etag === ( $headers['ETag'] ?? null )
+						&& $status_before === count( $status_log )
+						&& (
+							$case['expectDefaultFeed']
+								? $default_before + 1 === $default_feed_calls
+								: $default_before === $default_feed_calls
+						),
+					"feed header variant {$label} produced expected headers without 304 exit",
+					array(
+						'case'         => $case,
+						'headers'      => $headers,
+						'statusLog'    => array_slice( $status_log, $status_before ),
+						'expectedLastModified' => $last_modified,
+						'expectedEtag' => $expected_etag,
+						'defaultFeedBefore' => $default_before,
+						'defaultFeedAfter' => $default_feed_calls,
+					)
+				);
+
+				$observed[] = array(
+					'label'        => $label,
+					'contentType'  => $headers['Content-Type'] ?? null,
+					'lastModified' => $headers['Last-Modified'] ?? null,
+					'etag'         => $headers['ETag'] ?? null,
+				);
+
+				\wp_cache_delete( 'lastcommentmodified:gmt', 'timeinfo' );
+			}
+		} finally {
+			\remove_filter( 'pre_get_lastpostmodified', $lastpost_filter, 10 );
+			\remove_filter( 'default_feed', $default_feed_filter, 10 );
+			\remove_filter( 'status_header', $status_filter, 10 );
+			\remove_filter( 'wp_headers', $headers_filter, 10 );
+			\wp_cache_delete( 'lastcommentmodified:gmt', 'timeinfo' );
+		}
+
+		$ok = array() === $failures
+			&& 4 === count( $post_modified_calls )
+			&& 1 === $default_feed_calls
+			&& false === has_filter( 'pre_get_lastpostmodified', $lastpost_filter )
+			&& false === has_filter( 'default_feed', $default_feed_filter )
+			&& false === has_filter( 'status_header', $status_filter )
+			&& false === has_filter( 'wp_headers', $headers_filter );
+
+		return $ctx->result(
+			'request-lifecycle.send-headers.feed-variant-conditional-matrix',
+			$ok,
+			array(
+				'observed'          => $observed,
+				'statusLog'         => $status_log,
+				'postModifiedCalls' => $post_modified_calls,
+				'defaultFeedCalls'  => $default_feed_calls,
+				'failures'          => array_slice( $failures, 0, 8 ),
 			)
 		);
 	}
