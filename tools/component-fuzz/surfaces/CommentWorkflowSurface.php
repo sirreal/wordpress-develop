@@ -32,6 +32,7 @@ final class CommentWorkflowSurface {
 			$rows[] = self::check_update_and_status_transitions( $ctx->fork( 'status' ), $case );
 			$rows[] = self::check_trash_spam_restore_helpers( $ctx->fork( 'trash-spam' ), $case );
 			$rows[] = self::check_force_delete_comment_semantics( $ctx->fork( 'delete' ), $case );
+			$rows[] = self::check_force_delete_non_counted_count_semantics( $ctx->fork( 'delete-counts' ), $case );
 			$rows[] = self::check_failure_paths( $ctx->fork( 'failures' ), $case );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
@@ -609,6 +610,50 @@ final class CommentWorkflowSurface {
 			2
 		);
 		$add(
+			'delete_comment_meta',
+			static function ( array $meta_ids, int $object_id, string $seen_key, $seen_value ) use ( &$events ): void {
+				$events[] = array(
+					'name'     => 'delete_comment_meta',
+					'metaIds'  => array_map( 'intval', $meta_ids ),
+					'objectId' => $object_id,
+					'key'      => $seen_key,
+					'value'    => $seen_value,
+				);
+			},
+			4
+		);
+		$add(
+			'delete_commentmeta',
+			static function ( int $seen_meta_id ) use ( &$events ): void {
+				$events[] = array(
+					'name'   => 'delete_commentmeta',
+					'metaId' => $seen_meta_id,
+				);
+			}
+		);
+		$add(
+			'deleted_comment_meta',
+			static function ( array $meta_ids, int $object_id, string $seen_key, $seen_value ) use ( &$events ): void {
+				$events[] = array(
+					'name'     => 'deleted_comment_meta',
+					'metaIds'  => array_map( 'intval', $meta_ids ),
+					'objectId' => $object_id,
+					'key'      => $seen_key,
+					'value'    => $seen_value,
+				);
+			},
+			4
+		);
+		$add(
+			'deleted_commentmeta',
+			static function ( int $seen_meta_id ) use ( &$events ): void {
+				$events[] = array(
+					'name'   => 'deleted_commentmeta',
+					'metaId' => $seen_meta_id,
+				);
+			}
+		);
+		$add(
 			'wp_set_comment_status',
 			static function ( $comment_id, string $status ) use ( &$events ): void {
 				$events[] = array(
@@ -639,6 +684,17 @@ final class CommentWorkflowSurface {
 					'id'   => (int) $comment->comment_ID,
 				);
 			}
+		);
+		$add(
+			'comment_delete_comment',
+			static function ( $comment_id, \WP_Comment $comment ) use ( &$events ): void {
+				$events[] = array(
+					'name'     => 'comment_delete_comment',
+					'id'       => (int) $comment_id,
+					'objectId' => (int) $comment->comment_ID,
+				);
+			},
+			2
 		);
 
 		try {
@@ -709,29 +765,54 @@ final class CommentWorkflowSurface {
 				$event_names,
 				array(
 					'delete_comment',
+					'delete_comment_meta',
+					'delete_commentmeta',
+					'deleted_comment_meta',
+					'deleted_commentmeta',
 					'deleted_comment',
 					'wp_set_comment_status',
 					'transition_comment_status',
 					'comment_approved_to_delete',
+					'comment_delete_comment',
 				)
 			)
 				&& array(
 					'delete_comment',
+					'delete_comment_meta',
+					'delete_commentmeta',
+					'deleted_comment_meta',
+					'deleted_commentmeta',
 					'deleted_comment',
 					'wp_set_comment_status',
 					'transition_comment_status',
 					'comment_approved_to_delete',
+					'comment_delete_comment',
 				) === $event_names
 				&& (int) $target_id === (int) ( $events[0]['id'] ?? 0 )
-				&& (int) $target_id === (int) ( $events[1]['id'] ?? 0 )
-				&& 'delete' === ( $events[2]['status'] ?? null )
-				&& 'delete' === ( $events[3]['new'] ?? null )
-				&& 'approved' === ( $events[3]['old'] ?? null )
-				&& false === \has_action( 'delete_comment', $hooks[0][1] )
-				&& false === \has_action( 'deleted_comment', $hooks[1][1] )
-				&& false === \has_action( 'wp_set_comment_status', $hooks[2][1] )
-				&& false === \has_action( 'transition_comment_status', $hooks[3][1] )
-				&& false === \has_action( 'comment_approved_to_delete', $hooks[4][1] ),
+				&& (int) $target_id === (int) ( $events[0]['objectId'] ?? 0 )
+				&& '1' === ( $events[0]['status'] ?? null )
+				&& (int) $parent_id === (int) ( $events[0]['parent'] ?? 0 )
+				&& array( (int) $meta_id ) === ( $events[1]['metaIds'] ?? null )
+				&& (int) $target_id === (int) ( $events[1]['objectId'] ?? 0 )
+				&& $meta_key === ( $events[1]['key'] ?? null )
+				&& $meta_value === ( $events[1]['value'] ?? null )
+				&& (int) $meta_id === (int) ( $events[2]['metaId'] ?? 0 )
+				&& array( (int) $meta_id ) === ( $events[3]['metaIds'] ?? null )
+				&& (int) $target_id === (int) ( $events[3]['objectId'] ?? 0 )
+				&& $meta_key === ( $events[3]['key'] ?? null )
+				&& $meta_value === ( $events[3]['value'] ?? null )
+				&& (int) $meta_id === (int) ( $events[4]['metaId'] ?? 0 )
+				&& (int) $target_id === (int) ( $events[5]['id'] ?? 0 )
+				&& (int) $target_id === (int) ( $events[5]['objectId'] ?? 0 )
+				&& '1' === ( $events[5]['status'] ?? null )
+				&& (int) $parent_id === (int) ( $events[5]['parent'] ?? 0 )
+				&& 'delete' === ( $events[6]['status'] ?? null )
+				&& 'delete' === ( $events[7]['new'] ?? null )
+				&& 'approved' === ( $events[7]['old'] ?? null )
+				&& (int) $target_id === (int) ( $events[8]['id'] ?? 0 )
+				&& (int) $target_id === (int) ( $events[9]['id'] ?? 0 )
+				&& (int) $target_id === (int) ( $events[9]['objectId'] ?? 0 )
+				&& self::hooks_are_removed( $hooks ),
 			'force delete fires delete/status transition hooks with the deleted comment payload and removes hooks',
 			array( 'events' => $events )
 		);
@@ -745,6 +826,128 @@ final class CommentWorkflowSurface {
 				'targetId' => $target_id,
 				'childId'  => $child_id,
 				'events'   => $events,
+			)
+		);
+	}
+
+	private static function check_force_delete_non_counted_count_semantics( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures = array();
+		$post_id  = self::insert_post( $case, 'open' );
+		$baseline_id = \wp_insert_comment(
+			array(
+				'comment_post_ID'      => $post_id,
+				'comment_author'       => 'Count Baseline ' . $case['token'],
+				'comment_author_email' => 'count-baseline-' . $case['token'] . '@example.test',
+				'comment_content'      => 'count baseline ' . $case['token'],
+				'comment_approved'     => '1',
+				'comment_type'         => 'comment',
+			)
+		);
+		$delete_cases = array(
+			'pending-comment' => array(
+				'approved' => '0',
+				'type'     => 'comment',
+			),
+			'spam-comment'    => array(
+				'approved' => 'spam',
+				'type'     => 'comment',
+			),
+			'trash-comment'   => array(
+				'approved' => 'trash',
+				'type'     => 'comment',
+			),
+			'approved-note'   => array(
+				'approved' => '1',
+				'type'     => 'note',
+			),
+		);
+		$comment_ids  = array();
+
+		foreach ( $delete_cases as $label => $spec ) {
+			$comment_ids[ $label ] = \wp_insert_comment(
+				array(
+					'comment_post_ID'      => $post_id,
+					'comment_author'       => 'Delete Count ' . $label . ' ' . $case['token'],
+					'comment_author_email' => 'delete-count-' . $label . '-' . $case['token'] . '@example.test',
+					'comment_content'      => 'delete count ' . $label . ' ' . $case['token'],
+					'comment_approved'     => $spec['approved'],
+					'comment_type'         => $spec['type'],
+				)
+			);
+		}
+
+		$before_post  = \get_post( $post_id );
+		$count_events = array();
+		$count_hook   = static function ( int $seen_post_id, int $new, int $old ) use ( &$count_events ): void {
+			$count_events[] = array(
+				'postId' => $seen_post_id,
+				'new'    => $new,
+				'old'    => $old,
+			);
+		};
+
+		\add_action( 'wp_update_comment_count', $count_hook, 10, 3 );
+		try {
+			$delete_results = array();
+			foreach ( $comment_ids as $label => $comment_id ) {
+				$delete_results[ $label ] = \wp_delete_comment( $comment_id, true );
+			}
+		} finally {
+			\remove_action( 'wp_update_comment_count', $count_hook, 10 );
+		}
+
+		$after_post = \get_post( $post_id );
+		$remaining  = array();
+		foreach ( $comment_ids as $label => $comment_id ) {
+			$remaining[ $label ] = \get_comment( $comment_id );
+		}
+
+		self::collect_failure(
+			$failures,
+			is_int( $baseline_id )
+				&& $before_post instanceof \WP_Post
+				&& 1 === (int) $before_post->comment_count
+				&& $after_post instanceof \WP_Post
+				&& 1 === (int) $after_post->comment_count
+				&& array_fill_keys( array_keys( $delete_cases ), true ) === $delete_results
+				&& array() === array_filter(
+					$remaining,
+					static function ( $comment ): bool {
+						return $comment instanceof \WP_Comment;
+					}
+				),
+			'force deleting pending/spam/trash and approved note comments leaves approved comment count stable',
+			array(
+				'postId'        => $post_id,
+				'baselineId'    => $baseline_id,
+				'beforeCount'   => $before_post instanceof \WP_Post ? $before_post->comment_count : null,
+				'afterCount'    => $after_post instanceof \WP_Post ? $after_post->comment_count : null,
+				'deleteResults' => $delete_results ?? array(),
+				'remaining'     => array_map( array( self::class, 'comment_summary' ), $remaining ),
+			)
+		);
+		self::collect_failure(
+			$failures,
+			array(
+				array(
+					'postId' => $post_id,
+					'new'    => 1,
+					'old'    => 1,
+				),
+			) === $count_events
+				&& false === \has_action( 'wp_update_comment_count', $count_hook ),
+			'only the approved non-counted note delete refreshes the post count, and the count stays unchanged',
+			array( 'countEvents' => $count_events )
+		);
+
+		return self::result(
+			$ctx,
+			'comment-workflow.delete-comment.non-counted-statuses-preserve-counts',
+			$failures,
+			array(
+				'postId'      => $post_id,
+				'commentIds'  => $comment_ids,
+				'countEvents' => $count_events,
 			)
 		);
 	}
@@ -956,6 +1159,16 @@ final class CommentWorkflowSurface {
 		foreach ( $hooks as $hook ) {
 			\remove_action( $hook[0], $hook[1], $hook[2] );
 		}
+	}
+
+	private static function hooks_are_removed( array $hooks ): bool {
+		foreach ( $hooks as $hook ) {
+			if ( false !== \has_action( $hook[0], $hook[1] ) ) {
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 	private static function events_are_ordered( array $events, array $expected ): bool {
