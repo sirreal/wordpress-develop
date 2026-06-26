@@ -55,6 +55,7 @@ final class FilesystemSurface {
 				$rows[] = self::check_wp_unique_filename( $ctx, $filename_cases, $unique_dir );
 				$rows[] = self::check_wp_unique_filename_callbacks_and_case( $ctx, $unique_dir );
 				$rows[] = self::check_wp_tempnam( $ctx, $filename_cases, $temp_dir );
+				$rows[] = self::check_recursive_directory_helpers( $ctx, $filename_cases, $direct_dir );
 				$rows[] = self::check_wp_filesystem_direct( $ctx, $filename_cases, $direct_dir );
 				$rows[] = self::check_wp_filesystem_direct_metadata( $ctx, $filename_cases, $direct_dir );
 			}
@@ -97,6 +98,10 @@ final class FilesystemSurface {
 				'wp_normalize_path',
 				'sanitize_file_name',
 				'wp_unique_filename',
+				'wp_mkdir_p',
+				'wp_is_stream',
+				'wp_is_writable',
+				'list_files',
 			) as $function
 		) {
 			if ( ! function_exists( $function ) ) {
@@ -931,6 +936,170 @@ final class FilesystemSurface {
 				'allowedDir' => self::describe_string( $allowed_dir ),
 				'created'    => $created_count,
 				'cleaned'    => $cleaned_count,
+			)
+		);
+	}
+
+	private static function check_recursive_directory_helpers( \ComponentFuzz\FuzzContext $ctx, array $cases, string $dir ): array {
+		$failures = array();
+		$root     = $dir . DIRECTORY_SEPARATOR . 'recursive-' . $ctx->iteration();
+		$branch   = self::safe_leaf_name( $cases[ $ctx->int( 0, count( $cases ) - 1 ) ]['value'], 'branch' );
+		$leaf     = self::safe_leaf_name( $cases[ $ctx->int( 0, count( $cases ) - 1 ) ]['value'], 'leaf.txt' );
+		$nested   = $root . DIRECTORY_SEPARATOR . $branch . DIRECTORY_SEPARATOR . 'deep';
+		$file     = $nested . DIRECTORY_SEPARATOR . $leaf;
+		$hidden   = $nested . DIRECTORY_SEPARATOR . '.hidden-' . $ctx->iteration() . '.txt';
+		$excluded = $root . DIRECTORY_SEPARATOR . 'excluded-' . $ctx->iteration() . '.txt';
+		$contents = 'filesystem-recursive-' . $ctx->seed() . '-' . $ctx->iteration();
+
+		$mkdir_nested = self::call(
+			static function () use ( $nested ) {
+				return \wp_mkdir_p( $nested );
+			}
+		);
+		$mkdir_again = self::call(
+			static function () use ( $nested ) {
+				return \wp_mkdir_p( \trailingslashit( $nested ) );
+			}
+		);
+
+		if (
+			$mkdir_nested['threw']
+			|| true !== $mkdir_nested['value']
+			|| $mkdir_again['threw']
+			|| true !== $mkdir_again['value']
+			|| ! is_dir( $nested )
+			|| ! self::path_is_inside_directory( $nested, $dir )
+			|| ! \wp_is_writable( $nested )
+		) {
+			self::record_failure(
+				$failures,
+				'wp_mkdir_p.recursive-idempotent-sandbox-directory',
+				array(
+					'value'    => $nested,
+					'source'   => 'generated',
+					'features' => array( 'recursive-directory' ),
+				),
+				array(
+					'mkdir'      => self::describe_call( $mkdir_nested ),
+					'mkdirAgain' => self::describe_call( $mkdir_again ),
+					'isDir'      => is_dir( $nested ),
+					'writable'   => \wp_is_writable( $nested ),
+				)
+			);
+		}
+
+		file_put_contents( $file, $contents );
+		file_put_contents( $hidden, 'hidden' );
+		file_put_contents( $excluded, 'excluded' );
+
+		$list_visible = self::call(
+			static function () use ( $root, $excluded ) {
+				return \list_files( $root, 100, array( basename( $excluded ) ), false );
+			}
+		);
+		$list_hidden = self::call(
+			static function () use ( $root ) {
+				return \list_files( $root, 100, array(), true );
+			}
+		);
+		$list_depth_one = self::call(
+			static function () use ( $root, $excluded ) {
+				return \list_files( $root, 1, array( basename( $excluded ) ), true );
+			}
+		);
+		$list_zero = self::call(
+			static function () use ( $root ) {
+				return \list_files( $root, 0, array(), true );
+			}
+		);
+
+		$visible_files   = self::normalized_list_files_result( $list_visible['value'] ?? false );
+		$hidden_files    = self::normalized_list_files_result( $list_hidden['value'] ?? false );
+		$depth_one_files = self::normalized_list_files_result( $list_depth_one['value'] ?? false );
+		$expected_file   = \wp_normalize_path( $file );
+		$expected_hidden = \wp_normalize_path( $hidden );
+		$expected_excl   = \wp_normalize_path( $excluded );
+		$expected_branch = \trailingslashit( \wp_normalize_path( $root . DIRECTORY_SEPARATOR . $branch ) );
+
+		if (
+			$list_visible['threw']
+			|| $list_hidden['threw']
+			|| $list_depth_one['threw']
+			|| $list_zero['threw']
+			|| ! is_array( $list_visible['value'] )
+			|| ! is_array( $list_hidden['value'] )
+			|| ! is_array( $list_depth_one['value'] )
+			|| false !== $list_zero['value']
+			|| ! in_array( $expected_file, $visible_files, true )
+			|| in_array( $expected_hidden, $visible_files, true )
+			|| in_array( $expected_excl, $visible_files, true )
+			|| ! in_array( $expected_hidden, $hidden_files, true )
+			|| ! in_array( $expected_excl, $hidden_files, true )
+			|| array( $expected_branch ) !== $depth_one_files
+		) {
+			self::record_failure(
+				$failures,
+				'list_files.recursive-hidden-exclusion-depth-contract',
+				array(
+					'value'    => $root,
+					'source'   => 'generated',
+					'features' => array( 'recursive-directory', 'hidden-file', 'excluded-file' ),
+				),
+				array(
+					'visible'       => self::describe_call( $list_visible ),
+					'hidden'        => self::describe_call( $list_hidden ),
+					'depthOne'      => self::describe_call( $list_depth_one ),
+					'zero'          => self::describe_call( $list_zero ),
+					'expectedFile'  => $expected_file,
+					'expectedHidden' => $expected_hidden,
+					'expectedExcl'  => $expected_excl,
+					'expectedBranch' => $expected_branch,
+				)
+			);
+		}
+
+		$stream_cases = array(
+			'file://' . $file  => \in_array( 'file', stream_get_wrappers(), true ),
+			'php://memory'    => \in_array( 'php', stream_get_wrappers(), true ),
+			'not-a-stream://' . $leaf => \in_array( 'not-a-stream', stream_get_wrappers(), true ),
+			$file             => false,
+		);
+		foreach ( $stream_cases as $path => $expected ) {
+			$actual = \wp_is_stream( $path );
+			if ( $actual !== $expected ) {
+				self::record_failure(
+					$failures,
+					'wp_is_stream.registered-wrapper-contract',
+					array(
+						'value'    => $path,
+						'source'   => 'generated',
+						'features' => array( 'stream-detection' ),
+					),
+					array(
+						'expected' => $expected,
+						'actual'   => $actual,
+						'wrappers' => stream_get_wrappers(),
+					)
+				);
+			}
+		}
+
+		return self::row(
+			$ctx,
+			'filesystem.recursive-directory-listing-and-stream-contracts',
+			array(
+				array(
+					'value'    => $root,
+					'source'   => 'generated',
+					'features' => array( 'recursive-directory', 'hidden-file', 'excluded-file', 'stream-detection' ),
+				),
+			),
+			$failures,
+			array(
+				'sandbox' => self::describe_string( $dir ),
+				'root'    => self::describe_string( $root ),
+				'branch'  => self::describe_string( $branch ),
+				'leaf'    => self::describe_string( $leaf ),
 			)
 		);
 	}
@@ -1772,6 +1941,20 @@ final class FilesystemSurface {
 		$path_norm      = \wp_normalize_path( $path_real );
 
 		return $path_norm === rtrim( $directory_norm, '/' ) || str_starts_with( $path_norm, $directory_norm );
+	}
+
+	private static function normalized_list_files_result( $files ): array {
+		if ( ! is_array( $files ) ) {
+			return array();
+		}
+
+		$normalized = array();
+		foreach ( $files as $file ) {
+			$normalized[] = \wp_normalize_path( $file );
+		}
+		sort( $normalized );
+
+		return $normalized;
 	}
 
 	private static function row( \ComponentFuzz\FuzzContext $ctx, string $invariant, array $cases, array $failures, array $extra = array() ): array {
