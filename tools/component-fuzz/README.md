@@ -574,8 +574,9 @@ database, network requests, or a configured site.
   directory/database/total-size aggregation, MySQL variable lookup fallbacks,
   and explicit skips for unsafe full debug-data scans.
 - `state`: object cache groups, multi-operations, and cache-addition
-  suspension, option, transient, and cache-backed site-transient APIs, filters,
-  serialization, JSON, and value helpers.
+  suspension, option, transient, cache-backed and option-backed site-transient
+  APIs, update/expiration cleanup, dynamic transient filters, serialization,
+  JSON, and value helpers.
 - `style`: style engine serialization, preset/classname and CSS variable
   boundaries, CSS declaration filtering, theme.json schema/data merging and
   variable resolution, block style variation declarations, registered block
