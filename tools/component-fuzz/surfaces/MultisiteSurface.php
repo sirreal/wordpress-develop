@@ -560,6 +560,14 @@ final class MultisiteSurface {
 		$start_stack = $GLOBALS['_wp_switched_stack'];
 		$had_ms_loaded_action = isset( $GLOBALS['wp_actions'] ) && array_key_exists( 'ms_loaded', $GLOBALS['wp_actions'] );
 		$ms_loaded_action     = $GLOBALS['wp_actions']['ms_loaded'] ?? null;
+		$cache_probe_calls    = array();
+		$cache_probe_filter   = static function ( $site_data, \WP_Site_Query $query ) use ( &$cache_probe_calls ): array {
+			unset( $site_data );
+
+			$cache_probe_calls[] = $query->query_vars;
+
+			return array( 999999 );
+		};
 		$domain_filter = static function ( $result, string $domain, string $path, int $network_id ) use ( &$events ) {
 			$events[] = array(
 				'result'    => $result,
@@ -592,12 +600,22 @@ final class MultisiteSurface {
 			$address_by_name    = get_blogaddress_by_name( $case['directorySlug'] );
 			$id_from_blogname   = get_id_from_blogname( $case['directorySlug'] );
 			$id_from_url        = get_blog_id_from_url( strtoupper( 'example.test' ), strtoupper( $case['directoryPath'] ) );
-			$id_from_url_again  = get_blog_id_from_url( 'example.test', $case['directoryPath'] );
 			$missing_url_id     = get_blog_id_from_url( 'missing.' . $case['siteDomain'], '/missing/' );
+
+			remove_filter( 'sites_pre_query', array( self::class, 'filter_sites_pre_query' ), 10 );
+			add_filter( 'sites_pre_query', $cache_probe_filter, 10, 2 );
+			$id_from_url_again  = get_blog_id_from_url( 'example.test', $case['directoryPath'] );
 			$missing_url_cached = get_blog_id_from_url( 'missing.' . $case['siteDomain'], '/missing/' );
+			remove_filter( 'sites_pre_query', $cache_probe_filter, 10 );
+			add_filter( 'sites_pre_query', array( self::class, 'filter_sites_pre_query' ), 10, 2 );
+
 			$domain_hit         = domain_exists( 'example.test', untrailingslashit( $case['directoryPath'] ), 1 );
 			$domain_miss        = domain_exists( 'missing.' . $case['siteDomain'], '/missing', $case['networkId'] );
 		} finally {
+			remove_filter( 'sites_pre_query', $cache_probe_filter, 10 );
+			if ( false === has_filter( 'sites_pre_query', array( self::class, 'filter_sites_pre_query' ) ) ) {
+				add_filter( 'sites_pre_query', array( self::class, 'filter_sites_pre_query' ), 10, 2 );
+			}
 			remove_filter( 'domain_exists', $domain_filter, 10 );
 			self::clear_legacy_blog_identity_caches( $case );
 			if ( $had_ms_loaded_action ) {
@@ -655,6 +673,10 @@ final class MultisiteSurface {
 			$failures[] = 'blog slug and URL ID helpers did not hit/cache expected IDs';
 		}
 
+		if ( array() !== $cache_probe_calls ) {
+			$failures[] = 'cached blog URL ID helpers unexpectedly queried sites after cache priming';
+		}
+
 		if ( $case['directorySiteId'] !== $domain_hit || null !== $domain_miss ) {
 			$failures[] = 'domain_exists hit/miss semantics diverged from generated site fixture';
 		}
@@ -686,6 +708,7 @@ final class MultisiteSurface {
 				'idFromBlogname'  => $id_from_blogname ?? null,
 				'idFromUrl'       => $id_from_url ?? null,
 				'missingUrlId'    => $missing_url_id ?? null,
+				'cacheProbeCalls' => self::describe_value( $cache_probe_calls ),
 				'domainHit'       => $domain_hit ?? null,
 				'domainMiss'      => self::describe_value( $domain_miss ?? null ),
 				'domainEvents'    => self::describe_value( $events ),
@@ -694,7 +717,7 @@ final class MultisiteSurface {
 	}
 
 	private static function check_bootstrap_resolution_helpers( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
-		if ( defined( 'DOMAIN_CURRENT_SITE' ) || defined( 'PATH_CURRENT_SITE' ) ) {
+		if ( defined( 'DOMAIN_CURRENT_SITE' ) && defined( 'PATH_CURRENT_SITE' ) ) {
 			return $ctx->skip(
 				'multisite.bootstrap-resolution.current-site-network',
 				'DOMAIN_CURRENT_SITE/PATH_CURRENT_SITE constants force the constants branch.'
@@ -803,13 +826,13 @@ final class MultisiteSurface {
 			$failures[] = 'subdomain bootstrap lookup path did not stay on the site-first branch';
 		}
 
-		if (
-			defined( 'NOBLOGREDIRECT' )
-				? ( false === $missing_result || is_string( $missing_result ) )
-				: 'http://example.test/wp-signup.php?new=missing' === $missing_result
-		) {
-			// Expected branch.
+		if ( defined( 'NOBLOGREDIRECT' ) ) {
+			$expected_missing_result = '%siteurl%' === NOBLOGREDIRECT ? 'http://example.test/' : NOBLOGREDIRECT;
 		} else {
+			$expected_missing_result = 'http://example.test/wp-signup.php?new=missing';
+		}
+
+		if ( $expected_missing_result !== $missing_result ) {
 			$failures[] = 'missing subdomain bootstrap did not return expected signup redirect or fail-closed value';
 		}
 
@@ -856,6 +879,7 @@ final class MultisiteSurface {
 				),
 				'missing'         => array(
 					'result'  => $missing_result ?? null,
+					'expectedResult' => $expected_missing_result ?? null,
 					'network' => self::describe_network( $missing_site ?? null ),
 					'site'    => self::describe_site( $missing_blog ?? null ),
 					'log'     => self::describe_value( $missing_log ?? array() ),
@@ -1951,6 +1975,7 @@ final class MultisiteSurface {
 
 		foreach (
 			array(
+				'example.test/',
 				$case['siteDomain'] . $case['sitePath'],
 				'www.' . $case['siteDomain'] . $case['sitePath'],
 				'example.test' . $case['directoryPath'],
