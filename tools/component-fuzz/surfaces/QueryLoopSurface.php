@@ -377,7 +377,16 @@ final class QueryLoopSurface {
 			$primary       = self::run_pre_query( $primary_args, $unused_events, $primary_hooks );
 			self::remove_scoped_hooks( $primary_hooks );
 			$primary_hooks = array();
-			$primary_expect = self::expected_query_observation( $primary, array( 'args' => $primary_args ) );
+			$primary_flags = self::expected_flags_from_args( $primary_args );
+			$primary_flags['isMainQuery'] = true;
+			$primary_case  = self::query_case(
+				'nested-primary',
+				$primary_args,
+				$primary_flags,
+				array(),
+				array( 'nested', 'primary' )
+			);
+			$primary_expect = self::expected_query_observation( $primary, $primary_case );
 
 			foreach ( self::nested_secondary_query_cases( $ctx->fork( 'secondary-cases' ) ) as $case_index => $case ) {
 				$case_hooks = array();
@@ -429,11 +438,13 @@ final class QueryLoopSurface {
 			self::collect_failure(
 				$failures,
 				self::global_query_scope_matches( $primary )
+					&& self::query_flags_match( $primary, $primary_case )
 					&& ( $GLOBALS['wp_the_query'] ?? null ) === $primary,
 				'primary query is the active global query before nested loops',
 				array(
 					'global' => self::global_query_scope_summary(),
 					'query'  => self::query_scope_summary( $primary ),
+					'expect' => self::expected_complete_flags( $primary_case ),
 				)
 			);
 
@@ -449,17 +460,19 @@ final class QueryLoopSurface {
 					$failures,
 					self::active_loop_post_aligned( $primary )
 						&& self::global_query_scope_matches( $primary )
+						&& self::query_flags_match( $primary, $primary_case )
 						&& true === self::global_in_the_loop(),
 					'primary loop globals align before and after nested query work',
 					array(
 						'global' => self::global_query_scope_summary(),
 						'query'  => self::query_scope_summary( $primary ),
+						'expect' => self::expected_complete_flags( $primary_case ),
 					)
 				);
 
 				if ( ! $ran_nested ) {
 					foreach ( $secondary_runs as $run ) {
-						$nested_summaries[] = self::exercise_nested_secondary_query( $failures, $run, $primary );
+						$nested_summaries[] = self::exercise_nested_secondary_query( $failures, $run, $primary, $primary_case );
 					}
 					$ran_nested = true;
 				}
@@ -468,11 +481,13 @@ final class QueryLoopSurface {
 					$failures,
 					self::active_loop_post_aligned( $primary )
 						&& self::global_query_scope_matches( $primary )
+						&& self::query_flags_match( $primary, $primary_case )
 						&& true === self::global_in_the_loop(),
 					'primary active query, conditional flags, and post globals are restored after nested resets',
 					array(
 						'global' => self::global_query_scope_summary(),
 						'query'  => self::query_scope_summary( $primary ),
+						'expect' => self::expected_complete_flags( $primary_case ),
 					)
 				);
 
@@ -1442,7 +1457,7 @@ final class QueryLoopSurface {
 		return $args;
 	}
 
-	private static function exercise_nested_secondary_query( array &$failures, array $run, \WP_Query $primary ): array {
+	private static function exercise_nested_secondary_query( array &$failures, array $run, \WP_Query $primary, array $primary_case ): array {
 		$secondary          = $run['query'];
 		$case               = $run['case'];
 		$expect             = $run['expect'];
@@ -1608,6 +1623,7 @@ final class QueryLoopSurface {
 				&& $primary_current_id === self::post_id_from_value( $GLOBALS['post'] ?? null )
 				&& self::postdata_summary_matches( $after_reset_postdata, $expected_primary_postdata )
 				&& self::global_query_scope_matches( $primary )
+				&& self::query_flags_match( $primary, $primary_case )
 				&& $primary_state['currentPost'] === (int) $primary->current_post
 				&& true === $primary->in_the_loop,
 			'wp_reset_query restores the primary global query, queried object, conditionals, and current loop post',
@@ -1619,6 +1635,7 @@ final class QueryLoopSurface {
 				'afterResetQuery'   => $after_reset_query,
 				'postdata'          => $after_reset_postdata,
 				'expectedPostdata'  => $expected_primary_postdata,
+				'expectedFlags'     => self::expected_complete_flags( $primary_case ),
 			)
 		);
 
