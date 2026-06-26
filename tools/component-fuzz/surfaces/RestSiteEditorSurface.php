@@ -899,6 +899,7 @@ final class RestSiteEditorSurface {
 			( new \WP_REST_Templates_Controller( 'wp_template' ) )->register_routes();
 			( new \WP_REST_Templates_Controller( 'wp_template_part' ) )->register_routes();
 
+			\add_filter( 'pre_get_block_template', $filter, 10, 3 );
 			$denied_response = $server->dispatch(
 				self::request(
 					'GET',
@@ -911,7 +912,6 @@ final class RestSiteEditorSurface {
 			);
 			$denied_filter_log = $filter_log;
 
-			\add_filter( 'pre_get_block_template', $filter, 10, 3 );
 			$cap_filter = self::install_cap_filter( array( 'edit_posts' ) );
 			try {
 				$template_response = $server->dispatch(
@@ -966,9 +966,21 @@ final class RestSiteEditorSurface {
 		);
 		$denied_data         = $denied_response instanceof \WP_REST_Response ? $denied_response->get_data() : array();
 		$template_data       = $template_response instanceof \WP_REST_Response ? $template_response->get_data() : array();
-		$template_links = $template_response instanceof \WP_REST_Response ? $template_response->get_links() : array();
+		$template_links      = $template_response instanceof \WP_REST_Response ? $template_response->get_links() : array();
 		$part_data           = $part_response instanceof \WP_REST_Response ? $part_response->get_data() : array();
 		$part_links          = $part_response instanceof \WP_REST_Response ? $part_response->get_links() : array();
+		$template_keys       = array_keys( $template_data );
+		$part_keys           = array_keys( $part_data );
+		sort( $template_keys );
+		sort( $part_keys );
+		$template_content_keys = isset( $template_data['content'] ) && is_array( $template_data['content'] )
+			? array_keys( $template_data['content'] )
+			: array();
+		$part_content_keys     = isset( $part_data['content'] ) && is_array( $part_data['content'] )
+			? array_keys( $part_data['content'] )
+			: array();
+		sort( $template_content_keys );
+		sort( $part_content_keys );
 
 		self::collect_failure(
 			$failures,
@@ -994,13 +1006,17 @@ final class RestSiteEditorSurface {
 				&& $case['templateContent'] === ( $template_data['content']['raw'] ?? null )
 				&& $fixtures['template'] === (int) ( $template_data['wp_id'] ?? 0 )
 				&& 'user' === ( $template_data['original_source'] ?? null )
-				&& self::link_href( $template_links, 'self' ) === \rest_url( 'wp/v2/templates/' . $case['templateId'] ),
+				&& self::link_href( $template_links, 'self' ) === \rest_url( 'wp/v2/templates/' . $case['templateId'] )
+				&& array( 'content', 'id', 'original_source', 'slug', 'theme', 'wp_id' ) === $template_keys
+				&& array( 'block_version', 'raw' ) === $template_content_keys,
 			'template item dispatch sanitizes single-slash route IDs and applies REST field filtering',
 			array(
-				'route'  => $template_route,
-				'data'   => $template_data,
-				'links'  => $template_links,
-				'status' => $template_response instanceof \WP_REST_Response ? $template_response->get_status() : null,
+				'route'       => $template_route,
+				'data'        => $template_data,
+				'links'       => $template_links,
+				'status'      => $template_response instanceof \WP_REST_Response ? $template_response->get_status() : null,
+				'dataKeys'    => $template_keys,
+				'contentKeys' => $template_content_keys,
 			)
 		);
 
@@ -1014,13 +1030,17 @@ final class RestSiteEditorSurface {
 				&& 'header' === ( $part_data['area'] ?? null )
 				&& $case['templatePartContent'] === ( $part_data['content']['raw'] ?? null )
 				&& $fixtures['templatePart'] === (int) ( $part_data['wp_id'] ?? 0 )
-				&& self::link_href( $part_links, 'self' ) === \rest_url( 'wp/v2/template-parts/' . $case['templatePartId'] ),
+				&& self::link_href( $part_links, 'self' ) === \rest_url( 'wp/v2/template-parts/' . $case['templatePartId'] )
+				&& array( 'area', 'content', 'id', 'slug', 'type', 'wp_id' ) === $part_keys
+				&& array( 'block_version', 'raw' ) === $part_content_keys,
 			'template-part item dispatch returns area-specific data through the registered route',
 			array(
-				'route'  => $part_route,
-				'data'   => $part_data,
-				'links'  => $part_links,
-				'status' => $part_response instanceof \WP_REST_Response ? $part_response->get_status() : null,
+				'route'       => $part_route,
+				'data'        => $part_data,
+				'links'       => $part_links,
+				'status'      => $part_response instanceof \WP_REST_Response ? $part_response->get_status() : null,
+				'dataKeys'    => $part_keys,
+				'contentKeys' => $part_content_keys,
 			)
 		);
 
