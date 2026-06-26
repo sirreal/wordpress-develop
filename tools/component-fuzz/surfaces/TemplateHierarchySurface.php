@@ -32,6 +32,7 @@ final class TemplateHierarchySurface {
 			$rows[] = self::check_locate_template_priority( $ctx->fork( 'locate' ), $case );
 			$rows[] = self::check_get_query_template_filters( $ctx->fork( 'query-template' ), $case );
 			$rows[] = self::check_direct_template_helpers_and_theme_paths( $ctx->fork( 'direct-templates' ), $case );
+			$rows[] = self::check_rich_direct_template_helpers( $ctx->fork( 'rich-direct-templates' ), $case );
 			$rows[] = self::check_get_single_template_hierarchy( $ctx->fork( 'single-template' ), $case );
 			$rows[] = self::check_term_template_hierarchy_decoding( $ctx->fork( 'term-templates' ), $case );
 			$rows[] = self::check_load_template_include_semantics( $ctx->fork( 'load-template' ), $case );
@@ -59,6 +60,7 @@ final class TemplateHierarchySurface {
 			array(
 				'WP_Query',
 				'WP_Post',
+				'WP_User',
 			) as $class
 		) {
 			if ( ! class_exists( $class ) ) {
@@ -72,13 +74,20 @@ final class TemplateHierarchySurface {
 				'comments_template',
 				'get_404_template',
 				'get_archive_template',
+				'get_attachment_template',
+				'get_author_template',
 				'get_category_template',
+				'get_date_template',
 				'get_embed_template',
+				'get_front_page_template',
+				'get_home_template',
 				'get_page_template',
+				'get_privacy_policy_template',
 				'get_query_template',
 				'get_queried_object',
 				'get_search_template',
 				'get_single_template',
+				'get_singular_template',
 				'get_stylesheet',
 				'get_stylesheet_directory',
 				'get_tag_template',
@@ -473,6 +482,185 @@ final class TemplateHierarchySurface {
 			'template-hierarchy.direct-template-helper-paths-and-filters',
 			$failures,
 			array(
+				'selected'  => self::relative_paths_to_root( $selected, $case['paths']['root'] ),
+				'contracts' => $template_contracts,
+			)
+		);
+	}
+
+	private static function check_rich_direct_template_helpers( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		self::reset_template_globals();
+
+		$failures = array();
+		$observed = array();
+		$filters  = array();
+		$types    = array( 'author', 'date', 'home', 'frontpage', 'privacypolicy', 'singular', 'attachment' );
+
+		foreach ( $types as $type ) {
+			$hierarchy_filter = static function ( array $templates ) use ( &$observed, $type ): array {
+				$observed[ $type ]['hierarchy'][] = $templates;
+				return $templates;
+			};
+			$template_filter  = static function ( string $template, string $seen_type, array $templates ) use ( &$observed, $type ): string {
+				$observed[ $type ]['template'][] = array(
+					'template'  => $template,
+					'type'      => $seen_type,
+					'templates' => $templates,
+				);
+				return $template;
+			};
+
+			\add_filter( "{$type}_template_hierarchy", $hierarchy_filter );
+			\add_filter( "{$type}_template", $template_filter, 10, 3 );
+			$filters[] = array( "{$type}_template_hierarchy", $hierarchy_filter );
+			$filters[] = array( "{$type}_template", $template_filter );
+		}
+
+		try {
+			$author_id       = $ctx->fork( 'author-id' )->int( 100, 9999 );
+			$author_nicename = 'author-' . self::safe_fragment( $ctx->fork( 'author-name' ), 8 );
+			$author          = self::make_user( $author_id, $author_nicename );
+			$author_template = "author-{$author_nicename}.php";
+			self::write_template_file( $case['paths']['child'] . '/' . $author_template, 'author-nicename' );
+			self::write_template_file( $case['paths']['parent'] . "/author-{$author_id}.php", 'author-id' );
+			self::write_template_file( $case['paths']['parent'] . '/author.php', 'author-fallback' );
+			self::set_queried_object( $author, array( 'is_author' => true, 'is_archive' => true ) );
+			$author_selected = \get_author_template();
+
+			self::write_template_file( $case['paths']['child'] . '/date.php', 'date-child' );
+			self::set_query_context( array( 'year' => '2026' ), null, array( 'is_date' => true, 'is_archive' => true ) );
+			$date_selected = \get_date_template();
+
+			self::write_template_file( $case['paths']['child'] . '/home.php', 'home-child' );
+			self::write_template_file( $case['paths']['parent'] . '/home.php', 'home-parent' );
+			self::set_query_context( array(), null, array( 'is_home' => true ) );
+			$home_selected = \get_home_template();
+
+			self::write_template_file( $case['paths']['child'] . '/front-page.php', 'frontpage-child' );
+			self::write_template_file( $case['paths']['parent'] . '/front-page.php', 'frontpage-parent' );
+			self::set_query_context( array(), null, array( 'is_front_page' => true ) );
+			$frontpage_selected = \get_front_page_template();
+
+			self::write_template_file( $case['paths']['child'] . '/privacy-policy.php', 'privacy-child' );
+			self::write_template_file( $case['paths']['parent'] . '/privacy-policy.php', 'privacy-parent' );
+			self::set_query_context( array(), null, array( 'is_privacy_policy' => true ) );
+			$privacypolicy_selected = \get_privacy_policy_template();
+
+			$singular_post = self::make_post(
+				$ctx->fork( 'singular-id' )->int( 20000, 29999 ),
+				'story',
+				'singular-' . self::safe_fragment( $ctx->fork( 'singular-name' ), 6 )
+			);
+			self::write_template_file( $case['paths']['child'] . '/singular.php', 'singular-child' );
+			self::write_template_file( $case['paths']['parent'] . '/singular.php', 'singular-parent' );
+			self::set_query_context( array(), $singular_post, array( 'is_singular' => true ) );
+			$singular_selected = \get_singular_template();
+
+			$attachment_mime = 'image/jpeg';
+			list( $attachment_type, $attachment_subtype ) = explode( '/', $attachment_mime, 2 );
+			$attachment_post     = self::make_post(
+				$ctx->fork( 'attachment-id' )->int( 30000, 39999 ),
+				'attachment',
+				'attachment-' . self::safe_fragment( $ctx->fork( 'attachment-name' ), 6 ),
+				$attachment_mime
+			);
+			$attachment_template = "{$attachment_type}-{$attachment_subtype}.php";
+			self::write_template_file( $case['paths']['child'] . '/' . $attachment_template, 'attachment-mime-subtype' );
+			self::write_template_file( $case['paths']['parent'] . "/{$attachment_subtype}.php", 'attachment-subtype' );
+			self::write_template_file( $case['paths']['parent'] . "/{$attachment_type}.php", 'attachment-type' );
+			self::write_template_file( $case['paths']['parent'] . '/attachment.php', 'attachment-fallback' );
+			self::set_query_context(
+				array(),
+				$attachment_post,
+				array(
+					'is_attachment' => true,
+					'is_singular'   => true,
+				)
+			);
+			$attachment_selected = \get_attachment_template();
+		} finally {
+			foreach ( $filters as $filter ) {
+				\remove_filter( $filter[0], $filter[1], 10 );
+			}
+		}
+
+		$selected = array(
+			'author'        => $author_selected,
+			'date'          => $date_selected,
+			'home'          => $home_selected,
+			'frontpage'     => $frontpage_selected,
+			'privacypolicy' => $privacypolicy_selected,
+			'singular'      => $singular_selected,
+			'attachment'    => $attachment_selected,
+		);
+
+		$expected_selected = array(
+			'author'        => $case['paths']['child'] . '/' . $author_template,
+			'date'          => $case['paths']['child'] . '/date.php',
+			'home'          => $case['paths']['child'] . '/home.php',
+			'frontpage'     => $case['paths']['child'] . '/front-page.php',
+			'privacypolicy' => $case['paths']['child'] . '/privacy-policy.php',
+			'singular'      => $case['paths']['child'] . '/singular.php',
+			'attachment'    => $case['paths']['child'] . '/' . $attachment_template,
+		);
+		self::collect_failure(
+			$failures,
+			$expected_selected === $selected
+				&& self::all_paths_in_theme_roots( $selected, $case ),
+			'rich direct template helpers select exact generated child paths and stay confined to generated theme roots',
+			array(
+				'selected' => self::relative_paths_to_root( $selected, $case['paths']['root'] ),
+				'expected' => self::relative_paths_to_root( $expected_selected, $case['paths']['root'] ),
+			)
+		);
+
+		$expected_hierarchies = array(
+			'author'        => array( $author_template, "author-{$author_id}.php", 'author.php' ),
+			'date'          => array( 'date.php' ),
+			'home'          => array( 'home.php', 'index.php' ),
+			'frontpage'     => array( 'front-page.php' ),
+			'privacypolicy' => array( 'privacy-policy.php' ),
+			'singular'      => array( 'singular.php' ),
+			'attachment'    => array( $attachment_template, "{$attachment_subtype}.php", "{$attachment_type}.php", 'attachment.php' ),
+		);
+		$template_contracts   = array();
+
+		foreach ( $expected_hierarchies as $type => $templates ) {
+			$hierarchy_events = $observed[ $type ]['hierarchy'] ?? array();
+			$template_events  = $observed[ $type ]['template'] ?? array();
+			$hierarchy_seen   = $hierarchy_events[0] ?? null;
+			$template_seen    = $template_events[0] ?? null;
+
+			$template_contracts[ $type ] = array(
+				'hierarchy' => $hierarchy_seen,
+				'template'  => $template_seen,
+			);
+
+			self::collect_failure(
+				$failures,
+				1 === count( $hierarchy_events )
+					&& 1 === count( $template_events )
+					&& $templates === $hierarchy_seen
+					&& is_array( $template_seen )
+					&& $type === $template_seen['type']
+					&& $templates === $template_seen['templates']
+					&& ( $selected[ $type ] ?? null ) === $template_seen['template'],
+				"{$type} rich direct template filters receive exact hierarchy, type, and selected path",
+				array(
+					'expected' => $templates,
+					'seen'     => array(
+						'hierarchy' => $hierarchy_events,
+						'template'  => $template_events,
+					),
+				)
+			);
+		}
+
+		return self::result(
+			'template-hierarchy.rich-direct-template-helper-paths-and-filters',
+			$failures,
+			array(
+				'mimeType'  => $attachment_mime,
 				'selected'  => self::relative_paths_to_root( $selected, $case['paths']['root'] ),
 				'contracts' => $template_contracts,
 			)
@@ -1133,6 +1321,8 @@ PHP
 		$query->queried_object = $object;
 		if ( isset( $object->term_id ) ) {
 			$query->queried_object_id = (int) $object->term_id;
+		} elseif ( isset( $object->ID ) ) {
+			$query->queried_object_id = (int) $object->ID;
 		}
 
 		foreach ( $flags as $flag => $value ) {
@@ -1144,7 +1334,22 @@ PHP
 		$GLOBALS['wp_the_query'] = $query;
 	}
 
-	private static function make_post( int $id, string $post_type, string $post_name ): \WP_Post {
+	private static function make_user( int $id, string $user_nicename ): \WP_User {
+		$reflection = new \ReflectionClass( \WP_User::class );
+		$user       = $reflection->newInstanceWithoutConstructor();
+		$user->ID   = $id;
+		$user->data = (object) array(
+			'ID'            => $id,
+			'user_login'    => $user_nicename,
+			'user_nicename' => $user_nicename,
+			'display_name'  => $user_nicename,
+			'user_email'    => "{$user_nicename}@example.test",
+		);
+
+		return $user;
+	}
+
+	private static function make_post( int $id, string $post_type, string $post_name, string $post_mime_type = '' ): \WP_Post {
 		return new \WP_Post(
 			(object) array(
 				'ID'                    => $id,
@@ -1168,7 +1373,7 @@ PHP
 				'guid'                  => 'https://example.test/template-hierarchy-direct',
 				'menu_order'            => 0,
 				'post_type'             => $post_type,
-				'post_mime_type'        => '',
+				'post_mime_type'        => $post_mime_type,
 				'comment_count'         => 0,
 				'filter'                => 'raw',
 			)
