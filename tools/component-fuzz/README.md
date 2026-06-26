@@ -202,7 +202,8 @@ database, network requests, or a configured site.
   filtering, REST user email schema validation across Unicode/ASCII filter modes,
   and user email lookup/duplicate behavior for accent-distinct local parts/domains,
   canonical Unicode-domain save/update collision behavior, password-reset
-  Unicode recipient paths, clickable mailto rendering boundaries, and generated
+  Unicode recipient paths, password-reset notification recipient machine/readable
+  view overrides, clickable mailto rendering boundaries, and generated
   mailto/rendering-context round trips for UTF-8 local parts, WHATWG delimiter
   local parts, IDN/punycode domains, escaped display hrefs, and readable text.
 - `environment-load`: no-network environment/load/compat helper coverage,

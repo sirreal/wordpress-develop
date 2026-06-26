@@ -14,6 +14,7 @@ final class EmailSurface {
 	private const GENERATED_UTF8_LOCALPART_ORACLE_CASES = 16;
 	private const GENERATED_USER_SEARCH_CASES = 8;
 	private const GENERATED_CONFUSABLE_LOCALPART_CASES = 6;
+	private const GENERATED_PASSWORD_RESET_RECIPIENT_CASES = 6;
 	private const WHATWG_ASCII_EMAIL_REGEX = '/^[a-zA-Z0-9.!#$%&\'*+\/=?^_`{|}~-]+@'
 		. '[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?'
 		. '(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/';
@@ -81,6 +82,7 @@ final class EmailSurface {
 			$rows = array_merge( $rows, self::check_user_email_indexes_distinct_domains( $ctx ) );
 			$rows = array_merge( $rows, self::check_user_email_indexes_canonical_domain_aliases( $ctx ) );
 			$rows = array_merge( $rows, self::check_password_reset_unicode_email_paths( $ctx ) );
+			$rows = array_merge( $rows, self::check_password_reset_notification_recipient_views( $ctx ) );
 			$rows = array_merge( $rows, self::check_punycode_views( $ctx ) );
 			$rows = array_merge( $rows, self::check_idn_views( $ctx ) );
 			$rows = array_merge( $rows, self::check_extension_address_views( $ctx ) );
@@ -3868,6 +3870,326 @@ final class EmailSurface {
 		);
 	}
 
+	private static function check_password_reset_notification_recipient_views( \ComponentFuzz\FuzzContext $ctx ): array {
+		$result_name = 'email.password-reset.notification-recipient-views';
+
+		if ( ! self::can_reset_stub_content() ) {
+			return array(
+				$ctx->skip(
+					$result_name,
+					'The in-memory wpdb content reset hook is unavailable.'
+				),
+			);
+		}
+
+		if ( ! self::has_idn() ) {
+			return array(
+				$ctx->skip(
+					$result_name,
+					'idn_to_ascii() or idn_to_utf8() is unavailable.'
+				),
+			);
+		}
+
+		$missing = array();
+		foreach (
+			array(
+				'add_filter',
+				'email_exists',
+				'get_user_by',
+				'is_email',
+				'remove_filter',
+				'retrieve_password',
+				'sanitize_email',
+				'wp_insert_user',
+				'wp_mail',
+			) as $function
+		) {
+			if ( ! function_exists( $function ) ) {
+				$missing[] = 'function ' . $function;
+			}
+		}
+
+		if ( array() !== $missing ) {
+			return array(
+				$ctx->skip(
+					$result_name,
+					'Required password reset recipient APIs are unavailable.',
+					array( 'missing' => implode( ', ', $missing ) )
+				),
+			);
+		}
+
+		$cases           = self::password_reset_recipient_alias_cases( $ctx->fork( 'password-reset-recipient-views' ) );
+		$failures        = array();
+		$observed        = array();
+		$hook_snapshot   = self::snapshot_hook_globals();
+		$server_snapshot = array_key_exists( 'REMOTE_ADDR', $_SERVER )
+			? array( 'exists' => true, 'value' => $_SERVER['REMOTE_ADDR'] )
+			: array( 'exists' => false, 'value' => null );
+		$not_called      = static function (): array {
+			return array(
+				'threw'    => false,
+				'value'    => null,
+				'warnings' => array(),
+			);
+		};
+
+		self::reset_stub_content();
+		try {
+			$_SERVER['REMOTE_ADDR'] = '127.0.0.1';
+
+			\remove_all_filters( 'pre_user_email' );
+			\add_filter( 'pre_user_email', 'trim' );
+			\add_filter( 'pre_user_email', 'sanitize_email' );
+			if ( function_exists( 'wp_filter_kses' ) ) {
+				\add_filter( 'pre_user_email', 'wp_filter_kses' );
+			}
+
+			foreach (
+				array(
+					'lostpassword_user_data',
+					'lostpassword_post',
+					'lostpassword_errors',
+					'send_retrieve_password_email',
+					'retrieve_password_title',
+					'retrieve_password_message',
+					'retrieve_password_notification_email',
+					'wp_mail',
+					'pre_wp_mail',
+				) as $password_reset_hook
+			) {
+				\remove_all_filters( $password_reset_hook );
+			}
+
+			foreach ( $cases as $case_index => $case ) {
+				self::reset_stub_content();
+				self::install_email_filters( 'unicode' );
+
+				if ( null !== $case['conversionError'] ) {
+					$failures[] = array(
+						'label' => $case['label'],
+						'error' => $case['conversionError'],
+					);
+					continue;
+				}
+
+				$unicode_parse = self::capture_warnings(
+					static fn() => \WP_Email_Address::from_string( $case['unicodeInput'], 'unicode' )
+				);
+				$machine_parse = self::capture_warnings(
+					static fn() => \WP_Email_Address::from_string( $case['machineInput'], 'unicode' )
+				);
+				$unicode_email = $unicode_parse['value'] ?? null;
+				$machine_email = $machine_parse['value'] ?? null;
+				$parse_ok      = ! $unicode_parse['threw']
+					&& ! $machine_parse['threw']
+					&& array() === $unicode_parse['warnings']
+					&& array() === $machine_parse['warnings']
+					&& $unicode_email instanceof \WP_Email_Address
+					&& $machine_email instanceof \WP_Email_Address
+					&& $case['local'] === $unicode_email->get_localpart()
+					&& $case['unicodeInput'] === $unicode_email->get_unicode_address()
+					&& $case['machineInput'] === $unicode_email->get_ascii_address()
+					&& $unicode_email->get_unicode_address() === $machine_email->get_unicode_address()
+					&& $unicode_email->get_ascii_address() === $machine_email->get_ascii_address()
+					&& $unicode_email->get_unicode_domain() !== $unicode_email->get_ascii_domain()
+					&& self::is_ascii( $unicode_email->get_ascii_domain() );
+
+				if ( ! $parse_ok ) {
+					$failures[] = array(
+						'label'        => $case['label'],
+						'unicodeInput' => self::describe_string( $case['unicodeInput'] ),
+						'machineInput' => self::describe_string( $case['machineInput'] ),
+						'unicodeParse' => self::describe_captured_call( $unicode_parse ),
+						'machineParse' => self::describe_captured_call( $machine_parse ),
+					);
+					continue;
+				}
+
+				$canonical          = $unicode_email->get_unicode_address();
+				$machine            = $unicode_email->get_ascii_address();
+				$mail_calls         = array();
+				$notification_calls = array();
+				$mail_filter        = static function ( $return, $atts ) use ( &$mail_calls ) {
+					$mail_calls[] = $atts;
+					return true;
+				};
+				$notification_filter = static function ( $defaults, $key, $user_login, $user_data ) use ( &$notification_calls, $machine ) {
+					$notification_calls[] = array(
+						'defaults'  => $defaults,
+						'key'       => $key,
+						'userLogin' => $user_login,
+						'userEmail' => $user_data instanceof \WP_User ? $user_data->user_email : null,
+					);
+
+					$defaults['to'] = $machine;
+					return $defaults;
+				};
+
+				\add_filter( 'retrieve_password_notification_email', $notification_filter, 10, 4 );
+				\add_filter( 'pre_wp_mail', $mail_filter, PHP_INT_MAX, 2 );
+				try {
+					$login  = 'cfz_reset_views_' . $ctx->iteration() . '_' . $case_index . '_' . substr( sha1( $canonical ), 0, 8 );
+					$insert = self::capture_warnings(
+						static fn() => \wp_insert_user(
+							array(
+								'user_login' => $login,
+								'user_pass'  => 'component-fuzz-pass',
+								'user_email' => $machine,
+								'role'       => 'subscriber',
+							)
+						)
+					);
+					$user_id = $insert['value'] ?? null;
+					$stored  = is_int( $user_id ) ? self::capture_warnings( static fn() => \get_user_by( 'id', $user_id ) ) : $not_called();
+					$exists_canonical = is_int( $user_id ) ? self::capture_warnings( static fn() => \email_exists( $canonical ) ) : $not_called();
+					$by_canonical     = is_int( $user_id ) ? self::capture_warnings( static fn() => \get_user_by( 'email', $canonical ) ) : $not_called();
+					$exists_machine   = is_int( $user_id ) ? self::capture_warnings( static fn() => \email_exists( $machine ) ) : $not_called();
+					$reset            = is_int( $user_id ) ? self::capture_warnings( static fn() => \retrieve_password( $canonical ) ) : $not_called();
+					$mail             = $mail_calls[0] ?? null;
+					$notification     = $notification_calls[0] ?? null;
+					$mail_to          = is_array( $mail ) && is_string( $mail['to'] ?? null ) ? $mail['to'] : null;
+					$mail_to_parse    = is_string( $mail_to )
+						? self::capture_warnings( static fn() => \WP_Email_Address::from_string( $mail_to, 'unicode' ) )
+						: $not_called();
+					$mail_to_is       = is_string( $mail_to )
+						? self::capture_warnings( static fn() => \is_email( $mail_to ) )
+						: $not_called();
+					$mail_to_sanitize = is_string( $mail_to )
+						? self::capture_warnings( static fn() => \sanitize_email( $mail_to ) )
+						: $not_called();
+				} finally {
+					\remove_filter( 'retrieve_password_notification_email', $notification_filter, 10 );
+					\remove_filter( 'pre_wp_mail', $mail_filter, PHP_INT_MAX );
+				}
+
+				$stored_user        = $stored['value'] ?? null;
+				$canonical_user     = $by_canonical['value'] ?? null;
+				$mail_to_email      = $mail_to_parse['value'] ?? null;
+				$notification_to    = is_array( $notification ) && is_array( $notification['defaults'] ?? null )
+					? ( $notification['defaults']['to'] ?? null )
+					: null;
+				$notification_login = is_array( $notification ) ? ( $notification['userLogin'] ?? null ) : null;
+				$notification_email = is_array( $notification ) ? ( $notification['userEmail'] ?? null ) : null;
+				$message            = is_array( $mail ) && is_string( $mail['message'] ?? null ) ? $mail['message'] : '';
+
+				$insert_lookup_ok = ! $insert['threw']
+					&& ! $stored['threw']
+					&& ! $exists_canonical['threw']
+					&& ! $by_canonical['threw']
+					&& ! $exists_machine['threw']
+					&& array() === $insert['warnings']
+					&& array() === $stored['warnings']
+					&& array() === $exists_canonical['warnings']
+					&& array() === $by_canonical['warnings']
+					&& array() === $exists_machine['warnings']
+					&& is_int( $user_id )
+					&& $stored_user instanceof \WP_User
+					&& $stored_user->ID === $user_id
+					&& $canonical === $stored_user->user_email
+					&& $exists_canonical['value'] === $user_id
+					&& $canonical_user instanceof \WP_User
+					&& $canonical_user->ID === $user_id
+					&& $canonical === $canonical_user->user_email
+					&& false === $exists_machine['value'];
+
+				$notification_ok = is_array( $notification )
+					&& $canonical === $notification_to
+					&& $login === $notification_login
+					&& $canonical === $notification_email
+					&& is_string( $notification['key'] ?? null )
+					&& '' !== ( $notification['key'] ?? '' );
+
+				$mail_to_ok = ! $mail_to_parse['threw']
+					&& ! $mail_to_is['threw']
+					&& ! $mail_to_sanitize['threw']
+					&& array() === $mail_to_parse['warnings']
+					&& array() === $mail_to_is['warnings']
+					&& array() === $mail_to_sanitize['warnings']
+					&& $mail_to_email instanceof \WP_Email_Address
+					&& $machine === $mail_to
+					&& $machine === $mail_to_email->get_ascii_address()
+					&& $canonical === $mail_to_email->get_unicode_address()
+					&& $canonical === $mail_to_is['value']
+					&& $canonical === $mail_to_sanitize['value'];
+
+				$reset_ok = ! $reset['threw']
+					&& array() === $reset['warnings']
+					&& true === $reset['value']
+					&& 1 === count( $notification_calls )
+					&& 1 === count( $mail_calls )
+					&& is_array( $mail )
+					&& $machine === ( $mail['to'] ?? null )
+					&& is_string( $mail['subject'] ?? null )
+					&& '' !== ( $mail['subject'] ?? '' )
+					&& str_contains( $message, rawurlencode( $login ) );
+
+				$ok = $insert_lookup_ok
+					&& $notification_ok
+					&& $mail_to_ok
+					&& $reset_ok;
+
+				if ( ! $ok ) {
+					$failures[] = array(
+						'label'           => $case['label'],
+						'canonical'       => self::describe_string( $canonical ),
+						'machine'         => self::describe_string( $machine ),
+						'login'           => $login,
+						'insert'          => self::describe_captured_call( $insert ),
+						'stored'          => self::describe_captured_call( $stored ),
+						'existsCanonical' => self::describe_captured_call( $exists_canonical ),
+						'byCanonical'     => self::describe_captured_call( $by_canonical ),
+						'existsMachine'   => self::describe_captured_call( $exists_machine ),
+						'reset'           => self::describe_captured_call( $reset ),
+						'notificationCalls' => self::describe_value( $notification_calls ),
+						'mailCalls'       => self::describe_value( $mail_calls ),
+						'mailToParse'     => self::describe_captured_call( $mail_to_parse ),
+						'mailToIsEmail'   => self::describe_captured_call( $mail_to_is ),
+						'mailToSanitize'  => self::describe_captured_call( $mail_to_sanitize ),
+						'insertLookupOk'  => $insert_lookup_ok,
+						'notificationOk'  => $notification_ok,
+						'mailToOk'        => $mail_to_ok,
+						'resetOk'         => $reset_ok,
+					);
+				}
+
+				$observed[] = array(
+					'label'             => $case['label'],
+					'profile'           => $case['profile'],
+					'canonical'         => self::describe_string( $canonical ),
+					'machine'           => self::describe_string( $machine ),
+					'unicodeLocal'      => ! self::is_ascii( $unicode_email->get_localpart() ),
+					'unicodeDomain'     => self::describe_string( $unicode_email->get_unicode_domain() ),
+					'asciiDomain'       => self::describe_string( $unicode_email->get_ascii_domain() ),
+					'storedCanonical'   => $stored_user instanceof \WP_User && $canonical === $stored_user->user_email,
+					'machineLookupMiss' => false === ( $exists_machine['value'] ?? null ),
+					'mailToMachine'     => is_array( $mail ) && $machine === ( $mail['to'] ?? null ),
+				);
+			}
+		} finally {
+			if ( $server_snapshot['exists'] ) {
+				$_SERVER['REMOTE_ADDR'] = $server_snapshot['value'];
+			} else {
+				unset( $_SERVER['REMOTE_ADDR'] );
+			}
+			self::restore_hook_globals( $hook_snapshot );
+			self::reset_stub_content();
+		}
+
+		return array(
+			$ctx->result(
+				$result_name,
+				array() === $failures,
+				array(
+					'caseCount' => count( $cases ),
+					'observed'  => $observed,
+					'failures'  => self::describe_value( $failures ),
+				)
+			),
+		);
+	}
+
 	private static function check_punycode_views( \ComponentFuzz\FuzzContext $ctx ): array {
 		if ( ! self::has_idn() ) {
 			return array(
@@ -5311,6 +5633,73 @@ final class EmailSurface {
 		}
 
 		return $samples;
+	}
+
+	private static function password_reset_recipient_alias_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$locals = array(
+			array( 'label' => 'ascii-plus', 'value' => 'reset+tag' ),
+			array( 'label' => 'latin-composed', 'value' => "gr\u{00E5}.reset" ),
+			array( 'label' => 'latin-combining', 'value' => "jose\u{0301}.reset" ),
+			array( 'label' => 'greek', 'value' => "\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}.reset" ),
+			array( 'label' => 'cyrillic', 'value' => "\u{043F}\u{043E}\u{0447}\u{0442}\u{0430}.reset" ),
+			array( 'label' => 'cjk', 'value' => "\u{7528}\u{6237}.reset" ),
+		);
+		$domains = array(
+			array( 'label' => 'latin-ring', 'value' => "gr\u{00E5}.org" ),
+			array( 'label' => 'latin-diaeresis', 'value' => "b\u{00FC}cher.de" ),
+			array( 'label' => 'eszett', 'value' => "fa\u{00DF}.de" ),
+			array( 'label' => 'cjk', 'value' => "\u{4F8B}\u{5B50}.\u{5E7F}\u{544A}" ),
+			array( 'label' => 'greek', 'value' => "\u{03C0}\u{03B1}\u{03C1}\u{03AC}\u{03B4}\u{03B5}\u{03B9}\u{03B3}\u{03BC}\u{03B1}.\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}" ),
+			array( 'label' => 'cyrillic', 'value' => "\u{043F}\u{0440}\u{0438}\u{043C}\u{0435}\u{0440}.\u{0438}\u{0441}\u{043F}\u{044B}\u{0442}\u{0430}\u{043D}\u{0438}\u{0435}" ),
+			array( 'label' => 'hiragana', 'value' => "\u{308C}\u{3044}.\u{307F}\u{3093}\u{306A}" ),
+		);
+		$cases   = array(
+			self::password_reset_recipient_alias_case( 'punycode-save-latin-combining-local', $locals[2], $domains[1], 'fixture' ),
+			self::password_reset_recipient_alias_case( 'punycode-save-cjk-domain', $locals[0], $domains[3], 'fixture' ),
+			self::password_reset_recipient_alias_case( 'punycode-save-confusable-domain', $locals[4], $domains[5], 'fixture' ),
+		);
+
+		for ( $i = 0; $i < self::GENERATED_PASSWORD_RESET_RECIPIENT_CASES; $i++ ) {
+			$local          = $ctx->choice( $locals );
+			$local['value'] = $local['value'] . $ctx->int( 10, 99 );
+			$cases[]        = self::password_reset_recipient_alias_case(
+				'generated-recipient-view-' . $i,
+				$local,
+				$ctx->choice( $domains ),
+				'generated'
+			);
+		}
+
+		return $cases;
+	}
+
+	private static function password_reset_recipient_alias_case( string $label, array $local, array $domain, string $source ): array {
+		$ascii_domain   = idn_to_ascii( $domain['value'], IDNA_DEFAULT, INTL_IDNA_VARIANT_UTS46 );
+		$unicode_domain = false === $ascii_domain
+			? false
+			: idn_to_utf8( $ascii_domain, IDNA_DEFAULT, INTL_IDNA_VARIANT_UTS46 );
+
+		if ( false === $ascii_domain || false === $unicode_domain ) {
+			return array(
+				'label'           => $label,
+				'source'          => $source,
+				'profile'         => $local['label'] . '/' . $domain['label'],
+				'local'           => $local['value'],
+				'unicodeInput'    => $local['value'] . '@' . $domain['value'],
+				'machineInput'    => $local['value'] . '@' . $domain['value'],
+				'conversionError' => 'IDN conversion failed.',
+			);
+		}
+
+		return array(
+			'label'           => $label,
+			'source'          => $source,
+			'profile'         => $local['label'] . '/' . $domain['label'],
+			'local'           => $local['value'],
+			'unicodeInput'    => $local['value'] . '@' . $unicode_domain,
+			'machineInput'    => $local['value'] . '@' . $ascii_domain,
+			'conversionError' => null,
+		);
 	}
 
 	private static function mailto_context_cases( \ComponentFuzz\FuzzContext $ctx ): array {
