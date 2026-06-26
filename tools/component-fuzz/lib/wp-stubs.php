@@ -915,6 +915,9 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 				$rows = $status_or_rows;
 			}
 
+			$author_filter_sql = $status_or_handled ? $this->component_fuzz_top_level_author_filter_sql( $query ) : $query;
+			$rows              = $this->component_fuzz_filter_posts_by_author_constraints( $author_filter_sql, $rows );
+
 			foreach ( array( 'post_name', 'post_type', 'post_parent', 'post_status', 'post_password' ) as $column ) {
 				if ( $status_or_handled && 'post_status' === $column ) {
 					continue;
@@ -1038,8 +1041,9 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 				}
 
 				$status_branches[] = array(
-					'authors'  => $this->component_fuzz_compare_values( $branch, 'post_author' ),
-					'statuses' => $statuses,
+					'author_equals' => $this->component_fuzz_compare_values( $branch, 'post_author' ),
+					'author_in'     => $this->component_fuzz_in_values( $branch, 'post_author' ),
+					'statuses'      => $statuses,
 				);
 			}
 
@@ -1055,8 +1059,17 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 							continue;
 						}
 
-						if ( array() !== $branch['authors'] && ! in_array( (string) $row['post_author'], array_map( 'strval', $branch['authors'] ), true ) ) {
-							continue;
+						foreach ( $branch['author_equals'] as $author ) {
+							if ( (int) $row['post_author'] !== (int) $author ) {
+								continue 2;
+							}
+						}
+
+						if ( array() !== $branch['author_in'] ) {
+							$author_map = array_fill_keys( array_map( 'intval', $branch['author_in'] ), true );
+							if ( ! isset( $author_map[ (int) $row['post_author'] ] ) ) {
+								continue;
+							}
 						}
 
 						return true;
@@ -1065,6 +1078,52 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 					return false;
 				}
 			);
+		}
+
+		private function component_fuzz_filter_posts_by_author_constraints( $query, array $rows ) {
+			foreach ( $this->component_fuzz_compare_values( $query, 'post_author' ) as $author ) {
+				$rows = array_filter(
+					$rows,
+					static function ( $row ) use ( $author ) {
+						return (int) $row['post_author'] === (int) $author;
+					}
+				);
+			}
+
+			$authors = $this->component_fuzz_in_values( $query, 'post_author' );
+			if ( array() === $authors ) {
+				return $rows;
+			}
+
+			$author_map = array_fill_keys( array_map( 'intval', $authors ), true );
+			return array_filter(
+				$rows,
+				static function ( $row ) use ( $author_map ) {
+					return isset( $author_map[ (int) $row['post_author'] ] );
+				}
+			);
+		}
+
+		private function component_fuzz_top_level_author_filter_sql( $query ) {
+			$where = $this->component_fuzz_where_clause( $query );
+			if ( '' === $where ) {
+				$where = (string) $query;
+			}
+
+			$terms = array();
+			foreach ( $this->component_fuzz_split_sql_top_level_terms( $where, 'AND' ) as $term ) {
+				if ( ! preg_match( '/post_author/i', $term ) ) {
+					continue;
+				}
+
+				if ( preg_match( '/\bOR\b/i', $term ) ) {
+					continue;
+				}
+
+				$terms[] = $term;
+			}
+
+			return implode( ' AND ', $terms );
 		}
 
 		private function component_fuzz_filter_posts_by_search_like( $query, array $rows ) {
@@ -2224,6 +2283,68 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 				}
 
 				$end = $this->component_fuzz_sql_keyword_match_end_at( $sql, $i, 'OR' );
+				if ( null !== $end ) {
+					$terms[] = $current;
+					$current = '';
+					$i       = $end - 1;
+					continue;
+				}
+
+				$current .= $char;
+			}
+
+			$terms[] = $current;
+			return $terms;
+		}
+
+		private function component_fuzz_split_sql_top_level_terms( $sql, $keyword ) {
+			$terms     = array();
+			$current   = '';
+			$length    = strlen( (string) $sql );
+			$depth     = 0;
+			$in_string = false;
+			$quote     = '';
+			$escaped   = false;
+
+			for ( $i = 0; $i < $length; $i++ ) {
+				$char = $sql[ $i ];
+
+				if ( $in_string ) {
+					$current .= $char;
+					if ( '\\' === $char && ! $escaped ) {
+						$escaped = true;
+						continue;
+					}
+
+					if ( $quote === $char && ! $escaped ) {
+						$in_string = false;
+					}
+
+					$escaped = false;
+					continue;
+				}
+
+				if ( "'" === $char || '"' === $char ) {
+					$in_string = true;
+					$quote     = $char;
+					$escaped   = false;
+					$current  .= $char;
+					continue;
+				}
+
+				if ( '(' === $char ) {
+					++$depth;
+					$current .= $char;
+					continue;
+				}
+
+				if ( ')' === $char ) {
+					$depth = max( 0, $depth - 1 );
+					$current .= $char;
+					continue;
+				}
+
+				$end = 0 === $depth ? $this->component_fuzz_sql_keyword_match_end_at( $sql, $i, $keyword ) : null;
 				if ( null !== $end ) {
 					$terms[] = $current;
 					$current = '';

@@ -33,16 +33,8 @@ final class RevisionsAutosavesSurface {
 			$rows[] = self::check_revision_support_restore_edges_and_titles( $ctx->fork( 'support-restore-ui' ), $case );
 			$rows[] = self::check_revision_ui_payloads( $ctx->fork( 'ui' ), $case );
 			$rows[] = self::check_preview_helper( $ctx->fork( 'preview' ), $case );
-			$rows[] = $ctx->skip(
-				'revisions-autosaves.latest-count-url.stub-limited',
-				'The in-memory wpdb stub does not emulate the WP_Query found_posts COUNT(*) shape for wp_posts, so latest revision count and revision URL helpers are recorded as unsupported here.',
-				array( 'apis' => array( 'wp_get_latest_revision_id_and_total_count', 'wp_get_post_revisions_url' ) )
-			);
-			$rows[] = $ctx->skip(
-				'revisions-autosaves.user-filtered-autosave.stub-limited',
-				'The in-memory wpdb stub does not emulate WP_Query author filtering for wp_posts, so user-specific autosave lookup is recorded as unsupported here.',
-				array( 'api' => 'wp_get_post_autosave($post_id, $user_id)' )
-			);
+			$rows[] = self::check_latest_revision_count_and_url_helpers( $ctx->fork( 'latest-count-url' ), $case );
+			$rows[] = self::check_user_filtered_autosave_lookup( $ctx->fork( 'user-filtered-autosave' ), $case );
 			$rows[] = $ctx->skip(
 				'revisions-autosaves.browser-template-preview.skipped',
 				'Browser/admin-template and request-dispatch helpers are intentionally avoided in CLI fuzzing.',
@@ -90,6 +82,7 @@ final class RevisionsAutosavesSurface {
 				'delete_post_meta',
 				'get_post',
 				'get_post_meta',
+				'get_edit_post_link',
 				'get_userdata',
 				'has_filter',
 				'is_wp_error',
@@ -110,8 +103,10 @@ final class RevisionsAutosavesSurface {
 				'wp_create_post_autosave',
 				'wp_delete_post_revision',
 				'wp_get_post_autosave',
+				'wp_get_latest_revision_id_and_total_count',
 				'wp_get_post_revision',
 				'wp_get_post_revisions',
+				'wp_get_post_revisions_url',
 				'wp_get_revision_ui_diff',
 				'wp_insert_post',
 				'wp_insert_user',
@@ -1603,6 +1598,255 @@ final class RevisionsAutosavesSurface {
 				'case'       => self::case_summary( $case ),
 				'postId'     => $post_id,
 				'autosaveId' => $autosave,
+			)
+		);
+	}
+
+	private static function check_latest_revision_count_and_url_helpers( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		self::prepare_runtime();
+		self::register_case_post_type( $case, true );
+
+		$failures       = array();
+		$author_id      = self::insert_author( $case, 'latest-count-url' );
+		$post_id        = self::insert_parent_post( $case, $author_id, 'latest-count-url' );
+		$revision_ids   = array();
+		$revision_ids[] = self::insert_revision_row(
+			$post_id,
+			$author_id,
+			array(
+				'post_title'        => $case['titleFrom'] . ' first revision',
+				'post_content'      => $case['contentFrom'] . "\nFirst revision",
+				'post_excerpt'      => $case['excerptFrom'],
+				'post_date'         => $case['dateFrom'],
+				'post_date_gmt'     => $case['dateFromGmt'],
+				'post_modified'     => $case['dateFrom'],
+				'post_modified_gmt' => $case['dateFromGmt'],
+			),
+			false
+		);
+		$revision_ids[] = self::insert_revision_row(
+			$post_id,
+			$author_id,
+			array(
+				'post_title'        => $case['titleTo'] . ' second revision',
+				'post_content'      => $case['contentTo'] . "\nSecond revision",
+				'post_excerpt'      => $case['excerptTo'],
+				'post_date'         => $case['dateTo'],
+				'post_date_gmt'     => $case['dateToGmt'],
+				'post_modified'     => $case['dateTo'],
+				'post_modified_gmt' => $case['dateToGmt'],
+			),
+			false
+		);
+		$revision_ids[] = self::insert_revision_row(
+			$post_id,
+			$author_id,
+			array(
+				'post_title'        => $case['titleTo'] . ' latest revision',
+				'post_content'      => $case['contentTo'] . "\nLatest revision",
+				'post_excerpt'      => $case['excerptTo'],
+				'post_date'         => $case['dateLater'],
+				'post_date_gmt'     => $case['dateLaterGmt'],
+				'post_modified'     => $case['dateLater'],
+				'post_modified_gmt' => $case['dateLaterGmt'],
+			),
+			false
+		);
+
+		$latest_revision_id = (int) end( $revision_ids );
+		$latest_count       = \wp_get_latest_revision_id_and_total_count( $post_id );
+		$expected_url       = \admin_url( 'revision.php?revision=' . $latest_revision_id );
+		$grant_caps         = self::grant_all_caps_filter( $author_id );
+
+		\wp_set_current_user( $author_id );
+		\add_filter( 'user_has_cap', $grant_caps, 10, 4 );
+		try {
+			$parent_url   = \wp_get_post_revisions_url( $post_id );
+			$revision_url = \wp_get_post_revisions_url( $latest_revision_id );
+		} finally {
+			\remove_filter( 'user_has_cap', $grant_caps, 10 );
+		}
+
+		$empty_post_id = self::insert_parent_post( $case, $author_id, 'no-revisions' );
+		$empty_count   = \wp_get_latest_revision_id_and_total_count( $empty_post_id );
+		$empty_url     = \wp_get_post_revisions_url( $empty_post_id );
+
+		$disabled_type = substr( \sanitize_key( 'cfnorev_' . $case['token'] ), 0, 20 );
+		\register_post_type(
+			$disabled_type,
+			array(
+				'public'    => true,
+				'query_var' => false,
+				'rewrite'   => false,
+				'show_ui'   => true,
+				'supports'  => array( 'title', 'editor', 'author' ),
+			)
+		);
+		$disabled_case     = array_merge( $case, array( 'postType' => $disabled_type ) );
+		$disabled_post_id  = self::insert_parent_post( $disabled_case, $author_id, 'revisions-disabled' );
+		$disabled_revision = self::insert_revision_row(
+			$disabled_post_id,
+			$author_id,
+			array(
+				'post_title'        => 'Disabled revision ' . $case['token'],
+				'post_content'      => 'Disabled revision content ' . $case['token'],
+				'post_excerpt'      => '',
+				'post_date'         => $case['dateLater'],
+				'post_date_gmt'     => $case['dateLaterGmt'],
+				'post_modified'     => $case['dateLater'],
+				'post_modified_gmt' => $case['dateLaterGmt'],
+			),
+			false
+		);
+		$disabled_count    = \wp_get_latest_revision_id_and_total_count( $disabled_post_id );
+		$disabled_url      = \wp_get_post_revisions_url( $disabled_post_id );
+
+		self::collect_failure(
+			$failures,
+			is_array( $latest_count )
+				&& $latest_revision_id === (int) ( $latest_count['latest_id'] ?? 0 )
+				&& count( $revision_ids ) === (int) ( $latest_count['count'] ?? -1 ),
+			'wp_get_latest_revision_id_and_total_count returns the newest revision ID and total revision count',
+			array(
+				'postId'           => $post_id,
+				'revisionIds'      => array_map( 'intval', $revision_ids ),
+				'latestRevisionId' => $latest_revision_id,
+				'latestCount'      => $latest_count,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			$expected_url === $parent_url
+				&& $expected_url === $revision_url,
+			'wp_get_post_revisions_url returns the latest revision edit link and returns a revision edit link early for revision input',
+			array(
+				'expectedUrl' => $expected_url,
+				'parentUrl'   => $parent_url,
+				'revisionUrl' => $revision_url,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			is_array( $empty_count )
+				&& 0 === (int) ( $empty_count['latest_id'] ?? -1 )
+				&& 0 === (int) ( $empty_count['count'] ?? -1 )
+				&& null === $empty_url,
+			'posts without revisions report a zero latest revision ID/count and no revisions URL',
+			array(
+				'emptyPostId' => $empty_post_id,
+				'emptyCount'  => $empty_count,
+				'emptyUrl'    => $empty_url,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			\is_wp_error( $disabled_count )
+				&& 'revisions_not_enabled' === $disabled_count->get_error_code()
+				&& null === $disabled_url,
+			'revisions-disabled post types return a revisions_not_enabled error and no revisions URL even when revision children exist',
+			array(
+				'disabledPostId'  => $disabled_post_id,
+				'disabledType'    => $disabled_type,
+				'manualRevision'  => $disabled_revision,
+				'disabledCount'   => self::error_summary( $disabled_count ),
+				'disabledUrl'     => $disabled_url,
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'revisions-autosaves.latest-count-url',
+			$failures,
+			array(
+				'case'             => self::case_summary( $case ),
+				'postId'           => $post_id,
+				'revisionIds'      => array_map( 'intval', $revision_ids ),
+				'latestRevisionId' => $latest_revision_id,
+				'emptyPostId'      => $empty_post_id,
+				'disabledPostId'   => $disabled_post_id,
+			)
+		);
+	}
+
+	private static function check_user_filtered_autosave_lookup( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		self::prepare_runtime();
+		self::register_case_post_type( $case, true );
+
+		$failures       = array();
+		$author_id      = self::insert_author( $case, 'autosave-match' );
+		$other_user_id  = self::insert_author( $case, 'autosave-other-match' );
+		$wrong_user_id  = self::insert_author( $case, 'autosave-wrong-user' );
+		$post_id        = self::insert_parent_post( $case, $author_id, 'user-filtered-autosave' );
+		$matching_id    = self::insert_revision_row(
+			$post_id,
+			$author_id,
+			array(
+				'post_title'        => $case['titleTo'] . ' matching autosave',
+				'post_content'      => $case['contentTo'] . "\nMatching autosave",
+				'post_excerpt'      => $case['excerptTo'],
+				'post_date'         => $case['dateTo'],
+				'post_date_gmt'     => $case['dateToGmt'],
+				'post_modified'     => $case['dateTo'],
+				'post_modified_gmt' => $case['dateToGmt'],
+			),
+			true
+		);
+		$other_id       = self::insert_revision_row(
+			$post_id,
+			$other_user_id,
+			array(
+				'post_title'        => $case['titleTo'] . ' other autosave',
+				'post_content'      => $case['contentTo'] . "\nOther autosave",
+				'post_excerpt'      => $case['excerptTo'],
+				'post_date'         => $case['dateLater'],
+				'post_date_gmt'     => $case['dateLaterGmt'],
+				'post_modified'     => $case['dateLater'],
+				'post_modified_gmt' => $case['dateLaterGmt'],
+			),
+			true
+		);
+		$user_autosave  = \wp_get_post_autosave( $post_id, $author_id );
+		$other_autosave = \wp_get_post_autosave( $post_id, $other_user_id );
+		$wrong_autosave = \wp_get_post_autosave( $post_id, $wrong_user_id );
+
+		self::collect_failure(
+			$failures,
+			$user_autosave instanceof \WP_Post
+				&& $matching_id === (int) $user_autosave->ID
+				&& $author_id === (int) $user_autosave->post_author
+				&& "{$post_id}-autosave-v1" === $user_autosave->post_name,
+			'wp_get_post_autosave($post_id, $user_id) selects the autosave authored by the requested user',
+			array(
+				'postId'       => $post_id,
+				'matchingId'   => $matching_id,
+				'otherId'      => $other_id,
+				'userAutosave' => self::post_summary( $user_autosave ),
+			)
+		);
+		self::collect_failure(
+			$failures,
+			$other_autosave instanceof \WP_Post
+				&& $other_id === (int) $other_autosave->ID
+				&& $other_user_id === (int) $other_autosave->post_author
+				&& false === $wrong_autosave,
+			'user-filtered autosave lookup does not fall back to another author when the requested user has no autosave',
+			array(
+				'otherAutosave' => self::post_summary( $other_autosave ),
+				'wrongUserId'   => $wrong_user_id,
+				'wrongAutosave' => $wrong_autosave,
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'revisions-autosaves.user-filtered-autosave',
+			$failures,
+			array(
+				'case'          => self::case_summary( $case ),
+				'postId'        => $post_id,
+				'matchingId'    => $matching_id,
+				'otherId'       => $other_id,
+				'wrongUserId'   => $wrong_user_id,
 			)
 		);
 	}
