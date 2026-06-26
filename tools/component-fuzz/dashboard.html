@@ -850,10 +850,10 @@
 				</tr>
 				<tr>
 					<td><code>shortcodes</code></td>
-					<td><span class="status good">review fixes passed</span></td>
-					<td>Main worktree; Boole the 3rd implementation and Lovelace the 3rd review findings fixed through <code>b37285c933</code></td>
-					<td>Main focused run: 2000 passed, 0 skipped, 0 failed; latest broad run: 8208 passed, 66 skipped, 0 failed.</td>
-					<td>Registry, invalid registration and non-callable callback guards, exact attribute-filter locality, nested parser behavior, callback mutation, escaped shortcode boundaries, strip preservation, tag discovery, aliasing, malformed cases, and prefix/punctuated tag collisions.</td>
+					<td><span class="status good">follow-up review passed</span></td>
+					<td>Main worktree; image-context follow-up reviewed by Mendel through <code>e4f39081f1</code></td>
+					<td>Main focused run: 2100 passed, 0 skipped, 0 failed at seeds 1 and 224; reviewer seed 12345: 525 passed, 0 skipped, 0 failed; latest broad run: 4331 passed, 33 skipped, 0 failed.</td>
+					<td>Registry, invalid registration and non-callable callback guards, exact attribute-filter locality, nested parser behavior, callback mutation, scoped <code>wp_get_attachment_image_context</code> hooks including priority-zero preexisting filters, escaped shortcode boundaries, strip preservation, tag discovery, aliasing, malformed cases, and prefix/punctuated tag collisions.</td>
 				</tr>
 				<tr>
 					<td><code>cron</code></td>
@@ -1694,6 +1694,12 @@
 					<td><code>community-events</code></td>
 					<td>800 passed, 0 skipped, 0 failed after manual search cache-bypass and cache-refresh coverage.</td>
 					<td>8475 passed, 66 skipped, 0 failed at 2 iterations after taxonomy and Community Events follow-ups.</td>
+				</tr>
+				<tr>
+					<td><code>eb38b87a55</code> / <code>e4f39081f1</code></td>
+					<td><code>shortcodes</code>, <code>src/wp-includes/shortcodes.php</code></td>
+					<td>2100 passed, 0 skipped, 0 failed at seeds 1 and 224 after scoped image-context hook coverage plus review fixes for hook-runtime restoration and priority-zero preexisting filters; reviewer seed 12345: 525 passed, 0 skipped, 0 failed.</td>
+					<td>4331 passed, 33 skipped, 0 failed at 1 iteration after shortcode image-context coverage.</td>
 				</tr>
 				<tr>
 					<td><code>7f3c1c433a</code></td>
