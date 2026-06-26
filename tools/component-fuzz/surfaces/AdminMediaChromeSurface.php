@@ -901,6 +901,9 @@ final class AdminMediaChromeSurface {
 			)
 		);
 
+		$filter_snapshot = self::snapshot_globals( array( 'wp_filter', 'wp_actions', 'wp_filters', 'wp_current_filter' ) );
+		self::load_default_filters();
+
 		$caption        = 'Send caption <script>alert(1)</script> javascript:alert(1) ' . $ctx->text( 0, 12 );
 		$title          = 'Send title <script>alert(1)</script> "' . $ctx->identifier( 3, 8 );
 		$align          = 'left<script>alert(1)</script>" onmouseover="bad';
@@ -913,7 +916,6 @@ final class AdminMediaChromeSurface {
 		$send_events    = array();
 		$integrated_caption = "Integrated caption\nSecond line";
 		$integrated_alt     = 'Integrated alt <script>alert(1)</script> "' . $ctx->identifier( 3, 8 );
-		$added_default_caption_filter = false;
 		$no_rel_url         = 'http://example.test/component-fuzz/no-rel?raw=' . rawurlencode( '<script>alert(1)</script>' ) . '&safe=1';
 		$no_rel_alt         = 'No rel alt <script>alert(1)</script> "' . $ctx->identifier( 3, 8 );
 
@@ -984,10 +986,6 @@ final class AdminMediaChromeSurface {
 				$no_rel_alt
 			);
 
-			if ( false === \has_filter( 'image_send_to_editor', 'image_add_caption' ) ) {
-				\add_filter( 'image_send_to_editor', 'image_add_caption', 20, 8 );
-				$added_default_caption_filter = true;
-			}
 			$integrated_caption_html = \get_image_send_to_editor(
 				$attachment->ID,
 				$integrated_caption,
@@ -999,9 +997,6 @@ final class AdminMediaChromeSurface {
 				$integrated_alt
 			);
 		} finally {
-			if ( $added_default_caption_filter ) {
-				\remove_filter( 'image_send_to_editor', 'image_add_caption', 20 );
-			}
 			\remove_filter( 'image_downsize', $downsize_filter, 10 );
 			\remove_filter( 'image_send_to_editor', $send_filter, 10 );
 			\remove_filter( 'disable_captions', $disable_captions_filter );
@@ -1054,7 +1049,8 @@ final class AdminMediaChromeSurface {
 
 		self::collect_failure(
 			$failures,
-			is_string( $integrated_caption_html )
+			20 === \has_filter( 'image_send_to_editor', 'image_add_caption' )
+				&& is_string( $integrated_caption_html )
 				&& str_starts_with( $integrated_caption_html, '[caption id="attachment_' . $attachment->ID . '" align="alignleft" width="321"]' )
 				&& str_contains( $integrated_caption_html, 'href="' . \esc_url( \wp_get_attachment_url( $attachment->ID ) ) . '"' )
 				&& str_contains( $integrated_caption_html, 'rel="attachment wp-att-' . $attachment->ID . '"' )
@@ -1265,6 +1261,18 @@ final class AdminMediaChromeSurface {
 			)
 		);
 		$unchanged_document_html = '<span class="component-fuzz-document">Document HTML</span>';
+		$media_caption_payload  = array_merge(
+			$media_payload,
+			array(
+				'align'        => 'right',
+				'image-size'   => 'medium',
+				'image_alt'    => 'Media caption alt <script>alert(1)</script> "' . $ctx->identifier( 3, 8 ),
+				'post_excerpt' => "Media integrated caption\nSecond line",
+				'post_title'   => 'Media integrated title',
+				'url'          => $media_permalink_url,
+			)
+		);
+		$media_caption_html     = \image_media_send_to_editor( '<span>input</span>', $attachment->ID, $media_caption_payload );
 
 		\add_filter( 'image_send_to_editor', $media_send_filter, 10, 9 );
 		\add_filter( 'disable_captions', $disable_captions_filter );
@@ -1305,6 +1313,20 @@ final class AdminMediaChromeSurface {
 
 		self::collect_failure(
 			$failures,
+			20 === \has_filter( 'image_send_to_editor', 'image_add_caption' )
+				&& is_string( $media_caption_html )
+				&& str_starts_with( $media_caption_html, '[caption id="attachment_' . $attachment->ID . '" align="alignright" width="300"]' )
+				&& str_contains( $media_caption_html, 'href="' . \esc_url( $media_permalink_url ) . '"' )
+				&& str_contains( $media_caption_html, 'rel="attachment wp-att-' . $attachment->ID . '"' )
+				&& str_contains( $media_caption_html, 'alt="' . \esc_attr( $media_caption_payload['image_alt'] ) . '"' )
+				&& str_contains( $media_caption_html, 'Media integrated caption<br />Second line[/caption]' )
+				&& self::html_has_no_raw_script( $media_caption_html ),
+			'image_media_send_to_editor() observes the default image_send_to_editor caption wrapping path',
+			array( 'html' => self::describe_string( $media_caption_html ) )
+		);
+
+		self::collect_failure(
+			$failures,
 			3 === count( $media_events )
 				&& (int) $attachment->ID === (int) ( $media_events[0]['id'] ?? 0 )
 				&& (int) $attachment->ID === (int) ( $media_events[1]['id'] ?? 0 )
@@ -1329,6 +1351,8 @@ final class AdminMediaChromeSurface {
 			'image_media_send_to_editor() forwards attachment fields into get_image_send_to_editor() payloads with scoped filters',
 			array( 'events' => $media_events )
 		);
+
+		self::restore_state( $filter_snapshot );
 
 		return self::row(
 			$ctx,
@@ -1608,6 +1632,17 @@ final class AdminMediaChromeSurface {
 		\create_initial_post_types();
 		\create_initial_taxonomies();
 		\wp_set_current_user( 0 );
+	}
+
+	private static function load_default_filters(): void {
+		$wpdb = $GLOBALS['wpdb'] ?? null;
+		if ( ! is_object( $wpdb ) ) {
+			$wpdb            = new \stdClass();
+			$wpdb->charset   = 'utf8mb4';
+			$GLOBALS['wpdb'] = $wpdb;
+		}
+
+		require \ComponentFuzz\repo_root() . DIRECTORY_SEPARATOR . 'src' . DIRECTORY_SEPARATOR . 'wp-includes' . DIRECTORY_SEPARATOR . 'default-filters.php';
 	}
 
 	private static function cleanup_runtime(): void {
