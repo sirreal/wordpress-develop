@@ -3890,22 +3890,22 @@ final class EmailSurface {
 					$failures[] = $success;
 				}
 
-				$duplicate = self::exercise_profile_email_confirmation_duplicate( $ctx, $case_index, $case, $canonical, $mail_calls );
+				$duplicate = self::exercise_profile_email_confirmation_duplicate( $ctx, $case_index, $case, $canonical, $mail_calls, $content_events );
 				if ( ! ( $duplicate['ok'] ?? false ) ) {
 					$failures[] = $duplicate;
 				}
 
-				$invalid = self::exercise_profile_email_confirmation_invalid( $ctx, $case_index, $case, $mail_calls );
+				$invalid = self::exercise_profile_email_confirmation_invalid( $ctx, $case_index, $case, $mail_calls, $content_events );
 				if ( ! ( $invalid['ok'] ?? false ) ) {
 					$failures[] = $invalid;
 				}
 
-				$wrong_user = self::exercise_profile_email_confirmation_wrong_user( $ctx, $case_index, $case, $canonical, $mail_calls );
+				$wrong_user = self::exercise_profile_email_confirmation_wrong_user( $ctx, $case_index, $case, $canonical, $mail_calls, $content_events );
 				if ( ! ( $wrong_user['ok'] ?? false ) ) {
 					$failures[] = $wrong_user;
 				}
 
-				$same_email = self::exercise_profile_email_confirmation_same_email( $ctx, $case_index, $case, $canonical, $mail_calls );
+				$same_email = self::exercise_profile_email_confirmation_same_email( $ctx, $case_index, $case, $canonical, $mail_calls, $content_events );
 				if ( ! ( $same_email['ok'] ?? false ) ) {
 					$failures[] = $same_email;
 				}
@@ -3989,6 +3989,7 @@ final class EmailSurface {
 		$message     = is_array( $mail ) && is_string( $mail['message'] ?? null ) ? $mail['message'] : '';
 		$subject     = is_array( $mail ) && is_string( $mail['subject'] ?? null ) ? $mail['subject'] : '';
 		$error_codes = $GLOBALS['errors'] instanceof \WP_Error ? $GLOBALS['errors']->get_error_codes() : array( 'missing-error-object' );
+		$expected_url = '' !== $hash ? \esc_url( \self_admin_url( 'profile.php?newuseremail=' . $hash ) ) : '';
 		$ok          = ! $call['threw']
 			&& array() === $call['warnings']
 			&& null === $call['value']
@@ -4012,9 +4013,9 @@ final class EmailSurface {
 			&& '[Component Fuzz Profile Site] Email Change Request' === $subject
 			&& str_contains( $message, $login )
 			&& str_contains( $message, $email )
-			&& str_contains( $message, 'profile.php?newuseremail=' . $hash )
-			&& str_contains( $message, 'http://profile.example.test' )
-			&& str_contains( $message, 'Filtered confirmation for ' . $email . ' via ' )
+			&& '' !== $expected_url
+			&& str_contains( $message, $expected_url )
+			&& str_contains( $message, 'Filtered confirmation for ' . $email . ' via ' . $expected_url )
 			&& ! str_contains( $message, '###' )
 			&& $current_email === ( $_POST['email'] ?? null )
 			&& array() === $error_codes;
@@ -4037,16 +4038,18 @@ final class EmailSurface {
 				'stored'        => self::describe_captured_call( $stored ),
 				'mailCalls'     => self::describe_value( $mail_calls ),
 				'contentEvents' => self::describe_value( $content_events ),
+				'expectedUrl'   => $expected_url,
 				'postEmail'     => self::describe_value( $_POST['email'] ?? null ),
 				'errors'        => self::describe_value( $error_codes ),
 			),
 		);
 	}
 
-	private static function exercise_profile_email_confirmation_duplicate( \ComponentFuzz\FuzzContext $ctx, int $case_index, array $case, string $email, array &$mail_calls ): array {
+	private static function exercise_profile_email_confirmation_duplicate( \ComponentFuzz\FuzzContext $ctx, int $case_index, array $case, string $email, array &$mail_calls, array &$content_events ): array {
 		self::reset_stub_content();
 		\wp_set_current_user( 0 );
-		$mail_calls = array();
+		$mail_calls     = array();
+		$content_events = array();
 
 		$current_email = 'profile-duplicate-current-' . $ctx->iteration() . '-' . $case_index . '-' . substr( sha1( $email ), 0, 10 ) . '@example.org';
 		$current_login = 'cfz_profile_dup_current_' . $ctx->iteration() . '_' . $case_index . '_' . substr( sha1( $current_email ), 0, 8 );
@@ -4110,6 +4113,7 @@ final class EmailSurface {
 			&& in_array( 'user_email', $error_codes, true )
 			&& array( 'form-field' => 'email' ) === $error_data
 			&& 0 === count( $mail_calls )
+			&& 0 === count( $content_events )
 			&& $email === ( $_POST['email'] ?? null );
 
 		return array(
@@ -4122,24 +4126,27 @@ final class EmailSurface {
 				'email'       => self::describe_string( $email ),
 				'errors'      => $error_codes,
 				'mailCalls'   => count( $mail_calls ),
+				'contentEvents' => count( $content_events ),
 				'metaCleared' => '' === ( $meta['value'] ?? null ),
 			),
 			'details' => $ok ? null : array(
 				'call'      => self::describe_captured_call( $call ),
 				'metaBefore' => self::describe_captured_call( $meta_before ),
 				'meta'      => self::describe_captured_call( $meta ),
-				'mailCalls' => self::describe_value( $mail_calls ),
-				'postEmail' => self::describe_value( $_POST['email'] ?? null ),
-				'errors'    => self::describe_value( $error_codes ),
-				'errorData' => self::describe_value( $error_data ),
+				'mailCalls'     => self::describe_value( $mail_calls ),
+				'contentEvents' => self::describe_value( $content_events ),
+				'postEmail'     => self::describe_value( $_POST['email'] ?? null ),
+				'errors'        => self::describe_value( $error_codes ),
+				'errorData'     => self::describe_value( $error_data ),
 			),
 		);
 	}
 
-	private static function exercise_profile_email_confirmation_invalid( \ComponentFuzz\FuzzContext $ctx, int $case_index, array $case, array &$mail_calls ): array {
+	private static function exercise_profile_email_confirmation_invalid( \ComponentFuzz\FuzzContext $ctx, int $case_index, array $case, array &$mail_calls, array &$content_events ): array {
 		self::reset_stub_content();
 		\wp_set_current_user( 0 );
-		$mail_calls = array();
+		$mail_calls     = array();
+		$content_events = array();
 
 		$current_email = 'profile-invalid-current-' . $ctx->iteration() . '-' . $case_index . '-' . substr( sha1( $case['invalid'] ), 0, 10 ) . '@example.org';
 		$login         = 'cfz_profile_invalid_' . $ctx->iteration() . '_' . $case_index . '_' . substr( sha1( $current_email ), 0, 8 );
@@ -4188,6 +4195,7 @@ final class EmailSurface {
 			&& in_array( 'user_email', $error_codes, true )
 			&& array( 'form-field' => 'email' ) === $error_data
 			&& 0 === count( $mail_calls )
+			&& 0 === count( $content_events )
 			&& $case['invalid'] === ( $_POST['email'] ?? null );
 
 		return array(
@@ -4200,23 +4208,26 @@ final class EmailSurface {
 				'invalid'     => self::describe_string( $case['invalid'] ),
 				'errors'      => $error_codes,
 				'mailCalls'   => count( $mail_calls ),
+				'contentEvents' => count( $content_events ),
 				'metaRetained' => $stale_meta === ( $meta['value'] ?? null ),
 			),
 			'details' => $ok ? null : array(
-				'call'      => self::describe_captured_call( $call ),
-				'meta'      => self::describe_captured_call( $meta ),
-				'mailCalls' => self::describe_value( $mail_calls ),
-				'postEmail' => self::describe_value( $_POST['email'] ?? null ),
-				'errors'    => self::describe_value( $error_codes ),
-				'errorData' => self::describe_value( $error_data ),
+				'call'          => self::describe_captured_call( $call ),
+				'meta'          => self::describe_captured_call( $meta ),
+				'mailCalls'     => self::describe_value( $mail_calls ),
+				'contentEvents' => self::describe_value( $content_events ),
+				'postEmail'     => self::describe_value( $_POST['email'] ?? null ),
+				'errors'        => self::describe_value( $error_codes ),
+				'errorData'     => self::describe_value( $error_data ),
 			),
 		);
 	}
 
-	private static function exercise_profile_email_confirmation_wrong_user( \ComponentFuzz\FuzzContext $ctx, int $case_index, array $case, string $email, array &$mail_calls ): array {
+	private static function exercise_profile_email_confirmation_wrong_user( \ComponentFuzz\FuzzContext $ctx, int $case_index, array $case, string $email, array &$mail_calls, array &$content_events ): array {
 		self::reset_stub_content();
 		\wp_set_current_user( 0 );
-		$mail_calls = array();
+		$mail_calls     = array();
+		$content_events = array();
 
 		$current_email = 'profile-wrong-current-' . $ctx->iteration() . '-' . $case_index . '-' . substr( sha1( $email ), 0, 10 ) . '@example.org';
 		$other_email   = 'profile-wrong-other-' . $ctx->iteration() . '-' . $case_index . '-' . substr( sha1( $current_email ), 0, 10 ) . '@example.org';
@@ -4254,6 +4265,10 @@ final class EmailSurface {
 			);
 		}
 
+		$current_stale_meta = array( 'hash' => 'current-stale', 'newemail' => 'current-stale@example.org' );
+		$other_stale_meta   = array( 'hash' => 'other-stale', 'newemail' => 'other-stale@example.org' );
+		\update_user_meta( $current_id, '_new_email', $current_stale_meta );
+		\update_user_meta( $other_id, '_new_email', $other_stale_meta );
 		\wp_set_current_user( $current_id );
 		$GLOBALS['errors'] = new \WP_Error();
 		$_POST            = array(
@@ -4272,10 +4287,11 @@ final class EmailSurface {
 			&& ! $other_meta['threw']
 			&& array() === $current_meta['warnings']
 			&& array() === $other_meta['warnings']
-			&& '' === $current_meta['value']
-			&& '' === $other_meta['value']
+			&& $current_stale_meta === $current_meta['value']
+			&& $other_stale_meta === $other_meta['value']
 			&& array() === $error_codes
 			&& 0 === count( $mail_calls )
+			&& 0 === count( $content_events )
 			&& $email === ( $_POST['email'] ?? null );
 
 		return array(
@@ -4284,26 +4300,31 @@ final class EmailSurface {
 			'branch'  => 'wrong-user',
 			'failure' => $ok ? null : 'profile-confirmation-wrong-user-oracle-mismatch',
 			'summary' => array(
-				'currentId' => $current_id,
-				'postedId'  => $other_id,
-				'email'     => self::describe_string( $email ),
-				'mailCalls' => count( $mail_calls ),
+				'currentId'            => $current_id,
+				'postedId'             => $other_id,
+				'email'                => self::describe_string( $email ),
+				'mailCalls'            => count( $mail_calls ),
+				'contentEvents'        => count( $content_events ),
+				'currentMetaPreserved' => $current_stale_meta === ( $current_meta['value'] ?? null ),
+				'otherMetaPreserved'   => $other_stale_meta === ( $other_meta['value'] ?? null ),
 			),
 			'details' => $ok ? null : array(
-				'call'        => self::describe_captured_call( $call ),
-				'currentMeta' => self::describe_captured_call( $current_meta ),
-				'otherMeta'   => self::describe_captured_call( $other_meta ),
-				'mailCalls'   => self::describe_value( $mail_calls ),
-				'postEmail'   => self::describe_value( $_POST['email'] ?? null ),
-				'errors'      => self::describe_value( $error_codes ),
+				'call'          => self::describe_captured_call( $call ),
+				'currentMeta'   => self::describe_captured_call( $current_meta ),
+				'otherMeta'     => self::describe_captured_call( $other_meta ),
+				'mailCalls'     => self::describe_value( $mail_calls ),
+				'contentEvents' => self::describe_value( $content_events ),
+				'postEmail'     => self::describe_value( $_POST['email'] ?? null ),
+				'errors'        => self::describe_value( $error_codes ),
 			),
 		);
 	}
 
-	private static function exercise_profile_email_confirmation_same_email( \ComponentFuzz\FuzzContext $ctx, int $case_index, array $case, string $email, array &$mail_calls ): array {
+	private static function exercise_profile_email_confirmation_same_email( \ComponentFuzz\FuzzContext $ctx, int $case_index, array $case, string $email, array &$mail_calls, array &$content_events ): array {
 		self::reset_stub_content();
 		\wp_set_current_user( 0 );
-		$mail_calls = array();
+		$mail_calls     = array();
+		$content_events = array();
 
 		$login  = 'cfz_profile_same_' . $ctx->iteration() . '_' . $case_index . '_' . substr( sha1( $email ), 0, 8 );
 		$insert = self::capture_warnings(
@@ -4328,6 +4349,8 @@ final class EmailSurface {
 			);
 		}
 
+		$stale_meta = array( 'hash' => 'same-stale', 'newemail' => 'same-stale@example.org' );
+		\update_user_meta( $user_id, '_new_email', $stale_meta );
 		\wp_set_current_user( $user_id );
 		$GLOBALS['errors'] = 'same-email-scalar';
 		$_POST            = array(
@@ -4347,13 +4370,14 @@ final class EmailSurface {
 			&& array() === $error_codes
 			&& ! $meta['threw']
 			&& array() === $meta['warnings']
-			&& '' === $meta['value']
+			&& $stale_meta === $meta['value']
 			&& ! $stored['threw']
 			&& array() === $stored['warnings']
 			&& $stored_user instanceof \WP_User
 			&& $stored_user->ID === $user_id
 			&& $email === $stored_user->user_email
 			&& 0 === count( $mail_calls )
+			&& 0 === count( $content_events )
 			&& $email === ( $_POST['email'] ?? null );
 
 		return array(
@@ -4362,18 +4386,21 @@ final class EmailSurface {
 			'branch'  => 'same-email',
 			'failure' => $ok ? null : 'profile-confirmation-same-email-oracle-mismatch',
 			'summary' => array(
-				'userId'    => $user_id,
-				'email'     => self::describe_string( $email ),
-				'mailCalls' => count( $mail_calls ),
-				'errors'    => $error_codes,
+				'userId'        => $user_id,
+				'email'         => self::describe_string( $email ),
+				'mailCalls'     => count( $mail_calls ),
+				'contentEvents' => count( $content_events ),
+				'errors'        => $error_codes,
+				'metaPreserved' => $stale_meta === ( $meta['value'] ?? null ),
 			),
 			'details' => $ok ? null : array(
-				'call'      => self::describe_captured_call( $call ),
-				'meta'      => self::describe_captured_call( $meta ),
-				'stored'    => self::describe_captured_call( $stored ),
-				'mailCalls' => self::describe_value( $mail_calls ),
-				'postEmail' => self::describe_value( $_POST['email'] ?? null ),
-				'errors'    => self::describe_value( $error_codes ),
+				'call'          => self::describe_captured_call( $call ),
+				'meta'          => self::describe_captured_call( $meta ),
+				'stored'        => self::describe_captured_call( $stored ),
+				'mailCalls'     => self::describe_value( $mail_calls ),
+				'contentEvents' => self::describe_value( $content_events ),
+				'postEmail'     => self::describe_value( $_POST['email'] ?? null ),
+				'errors'        => self::describe_value( $error_codes ),
 			),
 		);
 	}
