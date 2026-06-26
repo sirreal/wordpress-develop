@@ -34,6 +34,7 @@ final class AdminMediaChromeSurface {
 			$rows[] = self::check_image_editor_chrome( $ctx->fork( 'image-editor-chrome' ) );
 			$rows[] = self::check_edit_form_image_details_and_compat( $ctx->fork( 'edit-form-details' ) );
 			$rows[] = self::check_thumbnail_icon_and_image_helpers( $ctx->fork( 'thumb-icons' ) );
+			$rows[] = self::check_image_caption_editor_output( $ctx->fork( 'image-caption-editor' ) );
 			$rows[] = self::check_media_button_and_bypass_output( $ctx->fork( 'media-buttons' ) );
 			$rows[] = self::skipped_exiting_upload_helpers( $ctx );
 			$rows[] = self::skipped_modal_runtime_helpers( $ctx );
@@ -71,12 +72,17 @@ final class AdminMediaChromeSurface {
 				'create_initial_post_types',
 				'create_initial_taxonomies',
 				'edit_form_image_editor',
+				'get_attachment_link',
 				'get_attachment_fields_to_edit',
 				'get_compat_media_markup',
+				'get_image_send_to_editor',
+				'get_image_tag',
 				'get_media_item',
 				'image_align_input_fields',
+				'image_add_caption',
 				'image_edit_apply_changes',
 				'image_link_input_fields',
+				'image_media_send_to_editor',
 				'image_size_input_fields',
 				'media_buttons',
 				'media_upload_flash_bypass',
@@ -867,6 +873,385 @@ final class AdminMediaChromeSurface {
 		return self::row(
 			$ctx,
 			'admin-media-chrome.thumbnail-icon-image-helpers',
+			array() === $failures,
+			array( 'failures' => $failures )
+		);
+	}
+
+	private static function check_image_caption_editor_output( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures   = array();
+		$attachment = self::seed_attachment(
+			$ctx,
+			'image/jpeg',
+			array(
+				'alt'          => 'Stored alt <script>alert(1)</script> "' . $ctx->identifier( 3, 8 ),
+				'post_title'   => 'Editor title <script>alert(1)</script> "' . $ctx->identifier( 3, 8 ),
+				'post_excerpt' => 'Editor caption <script>alert(1)</script> &' . $ctx->text( 0, 16 ),
+				'width'        => 1024,
+				'height'       => 768,
+			)
+		);
+		$document   = self::seed_attachment(
+			$ctx,
+			'application/pdf',
+			array(
+				'extension' => 'pdf',
+				'width'     => 0,
+				'height'    => 0,
+			)
+		);
+
+		$caption        = 'Send caption <script>alert(1)</script> javascript:alert(1) ' . $ctx->text( 0, 12 );
+		$title          = 'Send title <script>alert(1)</script> "' . $ctx->identifier( 3, 8 );
+		$align          = 'left<script>alert(1)</script>" onmouseover="bad';
+		$size           = 'cfzsize<script>alert(1)</script>"';
+		$alt            = 'Send alt " <script>alert(1)</script> &' . $ctx->identifier( 3, 8 );
+		$url            = 'javascript:alert(1)" onclick="bad';
+		$rel            = 'noopener" onclick="bad <script>alert(1)</script>';
+		$downsize_url   = 'http://example.test/component-fuzz/direct <script>alert(1)</script> "' . $ctx->identifier( 3, 8 ) . '.jpg';
+		$downsize_calls = array();
+		$send_events    = array();
+
+		$downsize_filter = static function ( $downsize, int $id, $requested_size ) use ( &$downsize_calls, $attachment, $size, $downsize_url ) {
+			$downsize_calls[] = array(
+				'id'   => $id,
+				'size' => $requested_size,
+			);
+
+			if ( (int) $attachment->ID === $id && $requested_size === $size ) {
+				return array( $downsize_url, 321, 123, true );
+			}
+
+			return $downsize;
+		};
+
+		$send_filter = static function ( string $html, int $id, string $captured_caption, string $captured_title, string $captured_align, string $captured_url, $captured_size, string $captured_alt, string $captured_rel ) use ( &$send_events ): string {
+			$send_events[] = array(
+				'html'    => $html,
+				'id'      => $id,
+				'caption' => $captured_caption,
+				'title'   => $captured_title,
+				'align'   => $captured_align,
+				'url'     => $captured_url,
+				'size'    => $captured_size,
+				'alt'     => $captured_alt,
+				'rel'     => $captured_rel,
+			);
+
+			return $html;
+		};
+
+		$disable_captions_filter = static function (): bool {
+			return true;
+		};
+
+		$direct_filter_removed = false;
+		\add_filter( 'image_downsize', $downsize_filter, 10, 3 );
+		\add_filter( 'image_send_to_editor', $send_filter, 10, 9 );
+		\add_filter( 'disable_captions', $disable_captions_filter );
+		try {
+			$direct_html = \get_image_send_to_editor( $attachment->ID, $caption, $title, $align, $url, $rel, $size, $alt );
+
+			\remove_filter( 'image_send_to_editor', $send_filter, 10 );
+			\remove_filter( 'disable_captions', $disable_captions_filter );
+			$direct_filter_removed = false === \has_filter( 'image_send_to_editor', $send_filter )
+				&& false === \has_filter( 'disable_captions', $disable_captions_filter );
+
+			$default_rel_html = \get_image_send_to_editor(
+				$attachment->ID,
+				'',
+				$title,
+				'center',
+				\wp_get_attachment_url( $attachment->ID ),
+				true,
+				$size,
+				'Default rel alt <script>alert(1)</script>'
+			);
+		} finally {
+			\remove_filter( 'image_downsize', $downsize_filter, 10 );
+			\remove_filter( 'image_send_to_editor', $send_filter, 10 );
+			\remove_filter( 'disable_captions', $disable_captions_filter );
+		}
+
+		self::collect_failure(
+			$failures,
+			is_string( $direct_html )
+				&& str_contains( $direct_html, '<a href="' . \esc_url( $url ) . '"' )
+				&& str_contains( $direct_html, ' rel="' . \esc_attr( $rel ) . '"' )
+				&& str_contains( $direct_html, '<img ' )
+				&& str_contains( $direct_html, 'src="' . \esc_url( $downsize_url ) . '"' )
+				&& str_contains( $direct_html, 'alt="' . \esc_attr( $alt ) . '"' )
+				&& str_contains( $direct_html, 'width="321" height="123"' )
+				&& str_contains( $direct_html, 'align' . \esc_attr( $align ) )
+				&& str_contains( $direct_html, 'size-' . \esc_attr( $size ) )
+				&& self::html_has_no_raw_script( $direct_html )
+				&& ! str_contains( strtolower( $direct_html ), 'javascript:' )
+				&& ! str_contains( $direct_html, $alt )
+				&& ! str_contains( $direct_html, $rel ),
+			'get_image_send_to_editor() builds escaped linked image HTML from hostile generated attributes',
+			array(
+				'html'          => self::describe_string( $direct_html ),
+				'downsizeCalls' => $downsize_calls,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			is_string( $default_rel_html )
+				&& str_contains( $default_rel_html, 'rel="attachment wp-att-' . $attachment->ID . '"' )
+				&& str_contains( $default_rel_html, 'alt="' . \esc_attr( 'Default rel alt <script>alert(1)</script>' ) . '"' )
+				&& self::html_has_no_raw_script( $default_rel_html ),
+			'get_image_send_to_editor() emits the default attachment rel when rel is true',
+			array( 'html' => self::describe_string( $default_rel_html ) )
+		);
+
+		self::collect_failure(
+			$failures,
+			1 === count( $send_events )
+				&& $direct_filter_removed
+				&& false === \has_filter( 'image_downsize', $downsize_filter )
+				&& (int) $attachment->ID === (int) ( $send_events[0]['id'] ?? 0 )
+				&& $caption === ( $send_events[0]['caption'] ?? null )
+				&& $title === ( $send_events[0]['title'] ?? null )
+				&& $align === ( $send_events[0]['align'] ?? null )
+				&& $url === ( $send_events[0]['url'] ?? null )
+				&& $size === ( $send_events[0]['size'] ?? null )
+				&& $alt === ( $send_events[0]['alt'] ?? null )
+				&& ' rel="' . \esc_attr( $rel ) . '"' === ( $send_events[0]['rel'] ?? null ),
+			'image_send_to_editor filter captures the direct helper payload shape and is removed afterward',
+			array(
+				'events'              => $send_events,
+				'directFilterRemoved' => $direct_filter_removed,
+			)
+		);
+
+		$caption_html   = '<img src="' . \esc_url( $downsize_url ) . '" alt="' . \esc_attr( $alt ) . '" width="456" height="321" class="alignright size-medium wp-image-' . $attachment->ID . ' component-fuzz" />';
+		$caption_text   = "First <em class=\"cfz\"\n data-x=\"1\">tag</em>\r\nSecond line\nThird <abbr title=\"component\"\n data-y=\"2\">abbr</abbr>";
+		$caption_events = array();
+
+		$caption_text_filter = static function ( string $filtered_caption, int $id ) use ( &$caption_events ): string {
+			$caption_events[] = array(
+				'filter'  => 'image_add_caption_text',
+				'id'      => $id,
+				'caption' => $filtered_caption,
+			);
+
+			return $filtered_caption . "\nFiltered <span class=\"cfz-caption\"\n data-filter=\"1\">tag</span>";
+		};
+
+		$caption_shortcode_filter = static function ( string $shortcode, string $html ) use ( &$caption_events ): string {
+			$caption_events[] = array(
+				'filter'    => 'image_add_caption_shortcode',
+				'shortcode' => $shortcode,
+				'html'      => $html,
+			);
+
+			return $shortcode . '<!--cfz-caption-shortcode-->';
+		};
+
+		\add_filter( 'image_add_caption_text', $caption_text_filter, 10, 2 );
+		\add_filter( 'image_add_caption_shortcode', $caption_shortcode_filter, 10, 2 );
+		try {
+			$captioned_html = \image_add_caption( $caption_html, $attachment->ID, $caption_text, $title, 'right', $url, 'medium', $alt );
+		} finally {
+			\remove_filter( 'image_add_caption_text', $caption_text_filter, 10 );
+			\remove_filter( 'image_add_caption_shortcode', $caption_shortcode_filter, 10 );
+		}
+
+		self::collect_failure(
+			$failures,
+			is_string( $captioned_html )
+				&& str_starts_with( $captioned_html, '[caption id="attachment_' . $attachment->ID . '" align="alignright" width="456"]' )
+				&& str_contains( $captioned_html, 'class="size-medium wp-image-' . $attachment->ID . ' component-fuzz"' )
+				&& ! str_contains( $captioned_html, 'class="alignright' )
+				&& str_contains( $captioned_html, '<em class="cfz"  data-x="1">tag</em><br />Second line<br />Third <abbr title="component"  data-y="2">abbr</abbr><br />Filtered <span class="cfz-caption"  data-filter="1">tag</span>' )
+				&& str_ends_with( $captioned_html, '<!--cfz-caption-shortcode-->' )
+				&& self::html_has_no_raw_script( $captioned_html ),
+			'image_add_caption() extracts width, strips image align class, and normalizes caption tag and line breaks',
+			array(
+				'html'   => self::describe_string( $captioned_html ),
+				'events' => $caption_events,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			array( 'image_add_caption_text', 'image_add_caption_shortcode' ) === array_column( $caption_events, 'filter' )
+				&& (int) $attachment->ID === (int) ( $caption_events[0]['id'] ?? 0 )
+				&& isset( $caption_events[1]['html'] )
+				&& ! str_contains( (string) $caption_events[1]['html'], 'class="alignright' )
+				&& false === \has_filter( 'image_add_caption_text', $caption_text_filter )
+				&& false === \has_filter( 'image_add_caption_shortcode', $caption_shortcode_filter ),
+			'image_add_caption_text and image_add_caption_shortcode filters fire in order and remain local',
+			array( 'events' => $caption_events )
+		);
+
+		$early_shortcode_events = array();
+		$early_shortcode_filter = static function ( string $shortcode, string $html ) use ( &$early_shortcode_events ): string {
+			$early_shortcode_events[] = array(
+				'shortcode' => $shortcode,
+				'html'      => $html,
+			);
+
+			return $shortcode;
+		};
+
+		$disabled_events         = array();
+		$disable_captions_filter = static function ( $disabled ) use ( &$disabled_events ): bool {
+			$disabled_events[] = $disabled;
+			return true;
+		};
+
+		\add_filter( 'disable_captions', $disable_captions_filter );
+		\add_filter( 'image_add_caption_shortcode', $early_shortcode_filter, 10, 2 );
+		try {
+			$disabled_caption_html = \image_add_caption( $caption_html, $attachment->ID, 'Disabled caption', $title, 'right', $url, 'medium', $alt );
+		} finally {
+			\remove_filter( 'disable_captions', $disable_captions_filter );
+			\remove_filter( 'image_add_caption_shortcode', $early_shortcode_filter, 10 );
+		}
+
+		$empty_text_events      = array();
+		$empty_disable_events   = array();
+		$empty_text_filter     = static function ( string $filtered_caption, int $id ) use ( &$empty_text_events ): string {
+			$empty_text_events[] = array(
+				'id'      => $id,
+				'caption' => $filtered_caption,
+			);
+
+			return '';
+		};
+		$empty_disable_filter  = static function ( $disabled ) use ( &$empty_disable_events ): bool {
+			$empty_disable_events[] = $disabled;
+			return false;
+		};
+
+		\add_filter( 'image_add_caption_text', $empty_text_filter, 10, 2 );
+		\add_filter( 'disable_captions', $empty_disable_filter );
+		\add_filter( 'image_add_caption_shortcode', $early_shortcode_filter, 10, 2 );
+		try {
+			$empty_caption_html = \image_add_caption( $caption_html, $attachment->ID, 'Will be emptied', $title, 'right', $url, 'medium', $alt );
+		} finally {
+			\remove_filter( 'image_add_caption_text', $empty_text_filter, 10 );
+			\remove_filter( 'disable_captions', $empty_disable_filter );
+			\remove_filter( 'image_add_caption_shortcode', $early_shortcode_filter, 10 );
+		}
+
+		self::collect_failure(
+			$failures,
+			$caption_html === $disabled_caption_html
+				&& $caption_html === $empty_caption_html
+				&& array( '' ) === $disabled_events
+				&& 1 === count( $empty_text_events )
+				&& array() === $empty_disable_events
+				&& array() === $early_shortcode_events
+				&& false === \has_filter( 'disable_captions', $disable_captions_filter )
+				&& false === \has_filter( 'image_add_caption_text', $empty_text_filter )
+				&& false === \has_filter( 'disable_captions', $empty_disable_filter )
+				&& false === \has_filter( 'image_add_caption_shortcode', $early_shortcode_filter ),
+			'image_add_caption() returns original HTML for disabled or empty captions before shortcode filters',
+			array(
+				'disabledEvents'       => $disabled_events,
+				'emptyTextEvents'      => $empty_text_events,
+				'emptyDisableEvents'   => $empty_disable_events,
+				'earlyShortcodeEvents' => $early_shortcode_events,
+			)
+		);
+
+		$media_events       = array();
+		$media_send_filter = static function ( string $html, int $id, string $captured_caption, string $captured_title, string $captured_align, string $captured_url, $captured_size, string $captured_alt, string $captured_rel ) use ( &$media_events ): string {
+			$media_events[] = array(
+				'html'    => $html,
+				'id'      => $id,
+				'caption' => $captured_caption,
+				'title'   => $captured_title,
+				'align'   => $captured_align,
+				'url'     => $captured_url,
+				'size'    => $captured_size,
+				'alt'     => $captured_alt,
+				'rel'     => $captured_rel,
+			);
+
+			return $html;
+		};
+
+		$media_permalink_url = \get_attachment_link( $attachment->ID );
+		$media_query_url     = \add_query_arg( 'attachment_id', (string) $attachment->ID, 'http://example.test/component-fuzz/media-send' );
+		$media_alt           = 'Media alt <script>alert(1)</script> "' . $ctx->identifier( 3, 8 );
+		$media_payload       = array(
+			'url'          => $media_permalink_url,
+			'align'        => 'left',
+			'image-size'   => 'medium',
+			'image_alt'    => $media_alt,
+			'post_excerpt' => $attachment->post_excerpt,
+			'post_title'   => $attachment->post_title,
+		);
+		$media_query_payload = array_merge(
+			$media_payload,
+			array(
+				'url'        => $media_query_url,
+				'align'      => 'center',
+				'image-size' => 'thumbnail',
+			)
+		);
+		$unchanged_document_html = '<span class="component-fuzz-document">Document HTML</span>';
+
+		\add_filter( 'image_send_to_editor', $media_send_filter, 10, 9 );
+		\add_filter( 'disable_captions', $disable_captions_filter );
+		try {
+			$media_permalink_html = \image_media_send_to_editor( '<span>input</span>', $attachment->ID, $media_payload );
+			$media_query_html     = \image_media_send_to_editor( '<span>input</span>', $attachment->ID, $media_query_payload );
+			$document_html        = \image_media_send_to_editor( $unchanged_document_html, $document->ID, array( 'url' => \wp_get_attachment_url( $document->ID ) ) );
+		} finally {
+			\remove_filter( 'image_send_to_editor', $media_send_filter, 10 );
+			\remove_filter( 'disable_captions', $disable_captions_filter );
+		}
+
+		self::collect_failure(
+			$failures,
+			is_string( $media_permalink_html )
+				&& is_string( $media_query_html )
+				&& str_contains( $media_permalink_html, 'href="' . \esc_url( $media_permalink_url ) . '"' )
+				&& str_contains( $media_query_html, 'href="' . \esc_url( $media_query_url ) . '"' )
+				&& str_contains( $media_permalink_html, 'rel="attachment wp-att-' . $attachment->ID . '"' )
+				&& str_contains( $media_query_html, 'rel="attachment wp-att-' . $attachment->ID . '"' )
+				&& str_contains( $media_permalink_html, 'alt="' . \esc_attr( $media_alt ) . '"' )
+				&& str_contains( $media_query_html, 'alt="' . \esc_attr( $media_alt ) . '"' )
+				&& self::html_has_no_raw_script( $media_permalink_html . $media_query_html )
+				&& $unchanged_document_html === $document_html,
+			'image_media_send_to_editor() delegates image attachments and leaves non-image HTML unchanged',
+			array(
+				'permalinkHtml' => self::describe_string( $media_permalink_html ),
+				'queryHtml'     => self::describe_string( $media_query_html ),
+				'documentHtml'  => self::describe_string( $document_html ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			2 === count( $media_events )
+				&& (int) $attachment->ID === (int) ( $media_events[0]['id'] ?? 0 )
+				&& (int) $attachment->ID === (int) ( $media_events[1]['id'] ?? 0 )
+				&& $attachment->post_excerpt === ( $media_events[0]['caption'] ?? null )
+				&& $attachment->post_title === ( $media_events[0]['title'] ?? null )
+				&& 'left' === ( $media_events[0]['align'] ?? null )
+				&& 'medium' === ( $media_events[0]['size'] ?? null )
+				&& $media_permalink_url === ( $media_events[0]['url'] ?? null )
+				&& $media_alt === ( $media_events[0]['alt'] ?? null )
+				&& 'center' === ( $media_events[1]['align'] ?? null )
+				&& 'thumbnail' === ( $media_events[1]['size'] ?? null )
+				&& $media_query_url === ( $media_events[1]['url'] ?? null )
+				&& ' rel="attachment wp-att-' . $attachment->ID . '"' === ( $media_events[0]['rel'] ?? null )
+				&& ' rel="attachment wp-att-' . $attachment->ID . '"' === ( $media_events[1]['rel'] ?? null )
+				&& false === \has_filter( 'image_send_to_editor', $media_send_filter )
+				&& false === \has_filter( 'disable_captions', $disable_captions_filter ),
+			'image_media_send_to_editor() forwards attachment fields into get_image_send_to_editor() payloads with scoped filters',
+			array( 'events' => $media_events )
+		);
+
+		return self::row(
+			$ctx,
+			'admin-media-chrome.image-caption-editor-output',
 			array() === $failures,
 			array( 'failures' => $failures )
 		);
