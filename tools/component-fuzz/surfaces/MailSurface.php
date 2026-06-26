@@ -34,6 +34,7 @@ final class MailSurface {
 			$rows[] = self::check_unicode_domain_recipient_handoff( $ctx->fork( 'unicode-domain' ) );
 			$rows[] = self::check_phpmailer_reuse_resets_message_state( $ctx->fork( 'reuse' ), $temp_root );
 			$rows[] = self::check_phpmailer_failure_action( $ctx->fork( 'failure' ) );
+			$rows[] = self::check_invalid_from_address_failure( $ctx->fork( 'from-failure' ), $temp_root );
 			$rows[] = self::check_staticize_emoji_for_email( $ctx->fork( 'emoji' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
@@ -849,6 +850,178 @@ final class MailSurface {
 
 		MailSurfaceMailer::$mode = 'success';
 		return self::row( $ctx, 'mail.phpmailer.failure-action', $failures );
+	}
+
+	private static function check_invalid_from_address_failure( \ComponentFuzz\FuzzContext $ctx, ?string $temp_root ): array {
+		if ( null === $temp_root ) {
+			return $ctx->skip( 'mail.phpmailer.invalid-from-address-failure', 'Could not create temporary attachment root.' );
+		}
+
+		$failures    = array();
+		$failed      = array();
+		$succeeded   = array();
+		$init_calls  = 0;
+		$token       = 'from-' . $ctx->identifier( 4, 8 );
+		$invalid_from = 'invalid-from-' . $token;
+		$to          = array( 'recipient@example.test' );
+		$subject     = 'Invalid From ' . $token;
+		$message     = 'body ' . $token;
+		$headers     = array( 'X-Invalid-From-Token: ' . $token );
+		$attachments = array( '/component-fuzz-missing-' . $token . '.txt' );
+		$embeds      = array( 'invalid-from-inline' => '/component-fuzz-missing-embed-' . $token . '.png' );
+		$stale_attachment = $temp_root . DIRECTORY_SEPARATOR . 'stale-from-' . $token . '.txt';
+		$stale_subject    = 'Stale Subject ' . $token;
+
+		file_put_contents( $stale_attachment, 'stale attachment ' . $token );
+
+		$from_filter = static function () use ( $invalid_from ): string {
+			return $invalid_from;
+		};
+		$name_filter = static function () use ( $token ): string {
+			return 'Invalid Sender ' . $token;
+		};
+		$failed_action = static function ( \WP_Error $error ) use ( &$failed ): void {
+			$failed[] = array(
+				'code'    => $error->get_error_code(),
+				'message' => $error->get_error_message(),
+				'data'    => $error->get_error_data(),
+			);
+		};
+		$success_action = static function ( array $mail_data ) use ( &$succeeded ): void {
+			$succeeded[] = $mail_data;
+		};
+		$init_action    = static function () use ( &$init_calls ): void {
+			++$init_calls;
+		};
+
+		MailSurfaceMailer::$mode = 'success';
+		MailSurfaceMailer::$sent = array();
+		$mailer                  = self::new_mailer();
+
+		try {
+			$mailer->addAddress( 'stale-to@example.test', 'Stale To' );
+			$mailer->addCC( 'stale-cc@example.test', 'Stale Cc' );
+			$mailer->addBCC( 'stale-bcc@example.test', 'Stale Bcc' );
+			$mailer->addReplyTo( 'stale-reply@example.test', 'Stale Reply' );
+			$mailer->addCustomHeader( 'X-Stale-Header: yes' );
+			$mailer->addAttachment( $stale_attachment, 'stale-from.txt' );
+		} catch ( \Throwable $e ) {
+			self::collect_failure(
+				$failures,
+				false,
+				'prepopulating reusable PHPMailer state for invalid-from coverage does not throw',
+				array( 'throwable' => self::describe_throwable( $e ) )
+			);
+
+			return self::row( $ctx, 'mail.phpmailer.invalid-from-address-failure', $failures );
+		}
+
+		$mailer->Subject = $stale_subject;
+		$mailer->Body    = 'stale body ' . $token;
+		$mailer->AltBody = 'stale alt body ' . $token;
+		$mailer->Encoding = \PHPMailer\PHPMailer\PHPMailer::ENCODING_BASE64;
+		$GLOBALS['phpmailer'] = $mailer;
+
+		\add_filter( 'wp_mail_from', $from_filter );
+		\add_filter( 'wp_mail_from_name', $name_filter );
+		\add_action( 'wp_mail_failed', $failed_action );
+		\add_action( 'wp_mail_succeeded', $success_action );
+		\add_action( 'phpmailer_init', $init_action );
+		try {
+			$result = \wp_mail( $to, $subject, $message, $headers, $attachments, $embeds );
+		} finally {
+			\remove_filter( 'wp_mail_from', $from_filter );
+			\remove_filter( 'wp_mail_from_name', $name_filter );
+			\remove_action( 'wp_mail_failed', $failed_action );
+			\remove_action( 'wp_mail_succeeded', $success_action );
+			\remove_action( 'phpmailer_init', $init_action );
+			MailSurfaceMailer::$mode = 'success';
+		}
+
+		$failed_data    = $failed[0]['data'] ?? array();
+		$failed_headers = $failed_data['headers'] ?? array();
+		$mailer         = $GLOBALS['phpmailer'] ?? null;
+
+		self::collect_failure(
+			$failures,
+			false === $result
+				&& 1 === count( $failed )
+				&& 'wp_mail_failed' === ( $failed[0]['code'] ?? null )
+				&& str_contains( (string) ( $failed[0]['message'] ?? '' ), '(From): ' . $invalid_from )
+				&& array_key_exists( 'phpmailer_exception_code', $failed_data )
+				&& 0 === $failed_data['phpmailer_exception_code']
+				&& $to === ( $failed_data['to'] ?? null )
+				&& $subject === ( $failed_data['subject'] ?? null )
+				&& $message === ( $failed_data['message'] ?? null )
+				&& array( 'X-Invalid-From-Token' => $token ) === $failed_headers
+				&& $attachments === ( $failed_data['attachments'] ?? null )
+				&& $embeds === ( $failed_data['embeds'] ?? null ),
+			'invalid wp_mail_from value fails at setFrom with original mail data, embeds, and PHPMailer exception code',
+			array(
+				'result'  => $result,
+				'failed'  => self::describe_value( $failed ),
+				'headers' => self::describe_value( $failed_headers ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			0 === count( MailSurfaceMailer::$sent )
+				&& 0 === $init_calls
+				&& array() === $succeeded
+				&& $mailer instanceof \PHPMailer\PHPMailer\PHPMailer
+				&& array() === $mailer->getToAddresses()
+				&& array() === $mailer->getCcAddresses()
+				&& array() === $mailer->getBccAddresses()
+				&& array() === $mailer->getReplyToAddresses()
+				&& array() === $mailer->getCustomHeaders()
+				&& array() === $mailer->getAttachments()
+				&& $stale_subject === $mailer->Subject
+				&& '' === $mailer->Body
+				&& '' === $mailer->AltBody
+				&& \PHPMailer\PHPMailer\PHPMailer::ENCODING_8BIT === $mailer->Encoding,
+			'setFrom failure clears reusable mailer state before recipient/header/attachment handoff, phpmailer_init, success action, or send',
+			array(
+				'sent'      => self::describe_value( MailSurfaceMailer::$sent ),
+				'initCalls' => $init_calls,
+				'succeeded' => self::describe_value( $succeeded ),
+				'mailer'    => self::describe_value(
+					$mailer instanceof \PHPMailer\PHPMailer\PHPMailer
+						? array(
+							'to'            => $mailer->getToAddresses(),
+							'cc'            => $mailer->getCcAddresses(),
+							'bcc'           => $mailer->getBccAddresses(),
+							'replyTo'       => $mailer->getReplyToAddresses(),
+							'customHeaders' => $mailer->getCustomHeaders(),
+							'attachments'   => $mailer->getAttachments(),
+							'subject'       => $mailer->Subject,
+							'body'          => $mailer->Body,
+							'altBody'       => $mailer->AltBody,
+							'encoding'      => $mailer->Encoding,
+						)
+						: $mailer
+				),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			false === \has_filter( 'wp_mail_from', $from_filter )
+				&& false === \has_filter( 'wp_mail_from_name', $name_filter )
+				&& false === \has_filter( 'wp_mail_failed', $failed_action )
+				&& false === \has_filter( 'wp_mail_succeeded', $success_action )
+				&& false === \has_filter( 'phpmailer_init', $init_action ),
+			'invalid-from failure filters and actions are removed after wp_mail returns',
+			array(
+				'wp_mail_from'      => \has_filter( 'wp_mail_from', $from_filter ),
+				'wp_mail_from_name' => \has_filter( 'wp_mail_from_name', $name_filter ),
+				'wp_mail_failed'    => \has_filter( 'wp_mail_failed', $failed_action ),
+				'wp_mail_succeeded' => \has_filter( 'wp_mail_succeeded', $success_action ),
+				'phpmailer_init'    => \has_filter( 'phpmailer_init', $init_action ),
+			)
+		);
+
+		return self::row( $ctx, 'mail.phpmailer.invalid-from-address-failure', $failures );
 	}
 
 	private static function check_staticize_emoji_for_email( \ComponentFuzz\FuzzContext $ctx ): array {
