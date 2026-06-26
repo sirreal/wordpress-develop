@@ -30,9 +30,11 @@ final class FontsSurface {
 		try {
 			$rows[] = self::check_font_face_serialization_and_escaping( $ctx->fork( 'font-face' ) );
 			$rows[] = self::check_invalid_font_face_rejection( $ctx->fork( 'invalid-font-face' ) );
+			$rows[] = self::check_theme_json_font_face_resolver_and_default_print( $ctx->fork( 'theme-json-font-face' ) );
 			$rows[] = self::check_font_dir_filters( $ctx->fork( 'font-dir' ) );
 			$rows[] = self::check_font_library_lifecycle( $ctx->fork( 'font-library' ) );
 			$rows[] = self::check_font_collection_json_sources( $ctx->fork( 'font-collection-json' ) );
+			$rows[] = self::check_rest_font_collection_controller_boundaries( $ctx->fork( 'rest-font-collections' ) );
 			$rows[] = self::check_font_utils_normalization( $ctx->fork( 'font-utils' ) );
 			$rows[] = self::check_font_utils_schema_sanitization( $ctx->fork( 'font-utils-schema' ) );
 			$rows[] = self::check_rest_font_face_prepare_boundaries( $ctx->fork( 'rest-font-face' ) );
@@ -52,6 +54,7 @@ final class FontsSurface {
 
 	private static function missing_requirements(): array {
 		self::ensure_rest_font_faces_controller_loaded();
+		self::ensure_rest_font_collections_controller_loaded();
 
 		$missing = array();
 
@@ -60,13 +63,17 @@ final class FontsSurface {
 				'WP_Error',
 				'WP_Font_Collection',
 				'WP_Font_Face',
+				'WP_Font_Face_Resolver',
 				'WP_Font_Library',
 				'WP_Font_Utils',
 				'WP_HTML_Tag_Processor',
 				'WP_Post',
+				'WP_REST_Font_Collections_Controller',
 				'WP_REST_Font_Faces_Controller',
 				'WP_REST_Request',
 				'WP_REST_Response',
+				'WP_Theme_JSON_Data',
+				'WP_Theme_JSON_Resolver',
 			) as $class
 		) {
 			if ( ! class_exists( $class ) ) {
@@ -79,17 +86,24 @@ final class FontsSurface {
 				'_wp_filter_font_directory',
 				'_wp_to_kebab_case',
 				'add_filter',
+				'add_query_arg',
 				'apply_filters',
 				'doing_filter',
+				'get_theme_file_uri',
 				'has_filter',
+				'is_wp_error',
 				'remove_filter',
 				'rest_ensure_response',
 				'rest_is_field_included',
+				'rest_url',
 				'rest_validate_value_from_schema',
 				'sanitize_text_field',
 				'sanitize_title',
 				'sanitize_url',
+				'urlencode_deep',
+				'wp_cache_delete',
 				'wp_font_dir',
+				'wp_get_global_settings',
 				'wp_get_font_dir',
 				'wp_http_validate_url',
 				'wp_json_encode',
@@ -114,6 +128,18 @@ final class FontsSurface {
 
 		$base = defined( 'ABSPATH' ) ? ABSPATH : \ComponentFuzz\repo_root() . DIRECTORY_SEPARATOR . 'src' . DIRECTORY_SEPARATOR;
 		$path = $base . 'wp-includes/rest-api/endpoints/class-wp-rest-font-faces-controller.php';
+		if ( is_readable( $path ) ) {
+			require_once $path;
+		}
+	}
+
+	private static function ensure_rest_font_collections_controller_loaded(): void {
+		if ( class_exists( 'WP_REST_Font_Collections_Controller' ) ) {
+			return;
+		}
+
+		$base = defined( 'ABSPATH' ) ? ABSPATH : \ComponentFuzz\repo_root() . DIRECTORY_SEPARATOR . 'src' . DIRECTORY_SEPARATOR;
+		$path = $base . 'wp-includes/rest-api/endpoints/class-wp-rest-font-collections-controller.php';
 		if ( is_readable( $path ) ) {
 			require_once $path;
 		}
@@ -312,6 +338,137 @@ final class FontsSurface {
 			array(
 				'cases'    => count( $invalids ) + 1,
 				'failures' => array_slice( $failures, 0, 4 ),
+			)
+		);
+	}
+
+	private static function check_theme_json_font_face_resolver_and_default_print( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures       = array();
+		$case           = self::theme_json_font_face_resolver_case( $ctx );
+		$resolved_files = array();
+
+		$theme_json_filter = static function () use ( $case ): \WP_Theme_JSON_Data {
+			return new \WP_Theme_JSON_Data( $case['themeJson'], 'theme' );
+		};
+		$theme_file_uri_filter = static function ( string $url, string $file ) use ( $case, &$resolved_files ): string {
+			$resolved_files[] = $file;
+			return $case['themeFileBaseUrl'] . ltrim( $file, '/' );
+		};
+		$user_theme_json_filter = static function (): \WP_Theme_JSON_Data {
+			return new \WP_Theme_JSON_Data( array( 'version' => \WP_Theme_JSON::LATEST_SCHEMA ), 'custom' );
+		};
+		$posts_pre_query_filter = static function ( $posts, $query ) {
+			return 'wp_global_styles' === $query->get( 'post_type' ) ? array() : $posts;
+		};
+
+		\add_filter( 'wp_theme_json_data_theme', $theme_json_filter, 10 );
+		\add_filter( 'theme_file_uri', $theme_file_uri_filter, 10, 2 );
+		\add_filter( 'wp_theme_json_data_user', $user_theme_json_filter, 10 );
+		\add_filter( 'posts_pre_query', $posts_pre_query_filter, 10, 2 );
+		self::clean_theme_json_caches();
+
+		try {
+			$resolver_call = self::capture_doing_it_wrong(
+				static function (): array {
+					return \WP_Font_Face_Resolver::get_fonts_from_theme_json();
+				}
+			);
+			$fonts         = is_array( $resolver_call['value'] ?? null ) ? $resolver_call['value'] : array();
+			$explicit_call = self::capture_output(
+				static function () use ( $fonts ): void {
+					\wp_print_font_faces( $fonts );
+				}
+			);
+			self::clean_theme_json_caches();
+			$default_call = self::capture_output(
+				static function (): void {
+					\wp_print_font_faces();
+				}
+			);
+		} finally {
+			\remove_filter( 'posts_pre_query', $posts_pre_query_filter, 10 );
+			\remove_filter( 'wp_theme_json_data_user', $user_theme_json_filter, 10 );
+			\remove_filter( 'theme_file_uri', $theme_file_uri_filter, 10 );
+			\remove_filter( 'wp_theme_json_data_theme', $theme_json_filter, 10 );
+			self::clean_theme_json_caches();
+		}
+
+		$flat_fonts      = is_array( $fonts ) && array() !== $fonts ? array_merge( array(), ...array_map( 'array_values', $fonts ) ) : array();
+		$explicit_output = (string) ( $explicit_call['output'] ?? '' );
+		$default_output  = (string) ( $default_call['output'] ?? '' );
+		$blocks          = self::font_face_blocks( $default_output );
+
+		self::collect_failure(
+			$failures,
+			! $resolver_call['threw']
+				&& self::normalize_key_order( $case['expectedFonts'] ) === self::normalize_key_order( $fonts )
+				&& array() === $resolver_call['warnings'],
+			'WP_Font_Face_Resolver::get_fonts_from_theme_json converts valid theme.json fontFace entries and skips invalid families',
+			array(
+				'expected' => $case['expectedFonts'],
+				'actual'   => $fonts,
+				'call'     => self::describe_call( $resolver_call ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			count( $flat_fonts ) === $case['expectedFaceCount']
+				&& ! self::contains_any_key( $flat_fonts, $case['camelCaseKeys'] )
+				&& $case['expectedThemeFiles'] === array_values( array_unique( $resolved_files ) )
+				&& ! str_contains( (string) \wp_json_encode( $fonts ), 'file:./' ),
+			'theme.json fontFace properties are kebab-cased and file placeholders resolve to theme URLs',
+			array(
+				'flatFonts'          => $flat_fonts,
+				'camelCaseKeys'      => $case['camelCaseKeys'],
+				'resolvedFiles'      => $resolved_files,
+				'uniqueResolvedFiles' => array_values( array_unique( $resolved_files ) ),
+				'expectedThemeFiles' => $case['expectedThemeFiles'],
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			! $explicit_call['threw']
+				&& ! $default_call['threw']
+				&& $explicit_output === $default_output
+				&& count( $blocks ) === $case['expectedFaceCount']
+				&& str_contains( $default_output, $case['themeFileBaseUrl'] . $case['expectedThemeFiles'][0] )
+				&& ! str_contains( $default_output, 'file:./' )
+				&& ! str_contains( $default_output, $case['invalidFamilyNeedle'] ),
+			'default wp_print_font_faces() output matches explicit resolver output and excludes skipped theme.json entries',
+			array(
+				'explicit' => self::describe_call( $explicit_call ),
+				'default'  => self::describe_call( $default_call ),
+				'blocks'   => $blocks,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::has_declaration( $blocks[0] ?? '', 'font-family', self::expected_font_family( $case['firstFamilyName'] ) )
+				&& ! str_contains( $blocks[0] ?? '', $case['commaFallbackNeedle'] )
+				&& self::has_declaration( $blocks[0] ?? '', 'font-feature-settings', '"kern" 1' )
+				&& self::has_declaration( $blocks[0] ?? '', 'font-variation-settings', '"wght" 420' ),
+			'comma-separated fontFamily uses the first family name and preserves converted fontFace declarations',
+			array(
+				'firstBlock' => $blocks[0] ?? '',
+				'expected'   => array(
+					'fontFamily'            => self::expected_font_family( $case['firstFamilyName'] ),
+					'fontFeatureSettings'   => '"kern" 1',
+					'fontVariationSettings' => '"wght" 420',
+				),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'fonts.theme-json.resolver-and-default-print-no-db',
+			array() === $failures,
+			array(
+				'families' => count( $fonts ),
+				'faces'    => count( $flat_fonts ),
+				'failures' => array_slice( $failures, 0, 8 ),
 			)
 		);
 	}
@@ -648,6 +805,264 @@ final class FontsSurface {
 			array() === $failures,
 			array(
 				'failures' => array_slice( $failures, 0, 6 ),
+			)
+		);
+	}
+
+	private static function check_rest_font_collection_controller_boundaries( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$case     = self::rest_font_collection_controller_case( $ctx );
+
+		self::reset_font_library();
+
+		foreach ( $case['collections'] as $collection ) {
+			\wp_register_font_collection( $collection['slug'], $collection['args'] );
+		}
+		\wp_register_font_collection(
+			$case['invalidSlug'],
+			array(
+				'name'          => 'Component Fuzz Invalid REST Collection',
+				'font_families' => $case['missingJsonPath'],
+			)
+		);
+
+		$controller             = new \WP_REST_Font_Collections_Controller();
+		$prepared_filter_calls  = array();
+		$collection_param_calls = 0;
+		$home_filter            = static function (): string {
+			return 'http://example.test';
+		};
+		$empty_filter           = static function (): string {
+			return '';
+		};
+		$prepare_filter         = static function ( $response, $item, $request ) use ( &$prepared_filter_calls ) {
+			$prepared_filter_calls[] = array(
+				'slug'   => $item instanceof \WP_Font_Collection ? $item->slug : null,
+				'method' => $request instanceof \WP_REST_Request ? $request->get_method() : null,
+				'fields' => $request instanceof \WP_REST_Request ? $request->get_param( '_fields' ) : null,
+			);
+
+			if ( $response instanceof \WP_REST_Response && $item instanceof \WP_Font_Collection ) {
+				$response->header( 'X-Component-Fuzz-Collection', $item->slug );
+			}
+
+			return $response;
+		};
+		$params_filter          = static function ( array $params ) use ( &$collection_param_calls ): array {
+			++$collection_param_calls;
+			$params['component_fuzz_marker'] = array( 'type' => 'string' );
+			return $params;
+		};
+
+		\add_filter( 'pre_option_home', $home_filter, 0 );
+		\add_filter( 'pre_option_siteurl', $home_filter, 0 );
+		\add_filter( 'pre_option_permalink_structure', $empty_filter, 0 );
+		\add_filter( 'rest_prepare_font_collection', $prepare_filter, 10, 3 );
+		\add_filter( 'rest_font_collections_collection_params', $params_filter, 10 );
+
+		try {
+			$params = $controller->get_collection_params();
+
+			$page_one_call = self::capture_doing_it_wrong(
+				static function () use ( $controller ): \WP_REST_Response {
+					return $controller->get_items(
+						self::rest_font_collection_request(
+							'GET',
+							'/wp/v2/font-collections',
+							array(
+								'context'  => 'view',
+								'page'     => 1,
+								'per_page' => 2,
+								'_fields'  => 'slug,name,_links',
+							)
+						)
+					);
+				}
+			);
+			$page_two_call = self::capture_doing_it_wrong(
+				static function () use ( $controller ): \WP_REST_Response {
+					return $controller->get_items(
+						self::rest_font_collection_request(
+							'GET',
+							'/wp/v2/font-collections',
+							array(
+								'context'  => 'view',
+								'page'     => 2,
+								'per_page' => 2,
+								'_fields'  => 'slug,name',
+							)
+						)
+					);
+				}
+			);
+			$head_call     = self::capture_doing_it_wrong(
+				static function () use ( $controller ): \WP_REST_Response {
+					return $controller->get_items(
+						self::rest_font_collection_request(
+							'HEAD',
+							'/wp/v2/font-collections',
+							array(
+								'context'  => 'view',
+								'page'     => 1,
+								'per_page' => 2,
+								'_fields'  => 'slug,name',
+							)
+						)
+					);
+				}
+			);
+			$item_call     = self::capture_doing_it_wrong(
+				static function () use ( $controller, $case ): \WP_REST_Response {
+					return $controller->get_item(
+						self::rest_font_collection_request(
+							'GET',
+							'/wp/v2/font-collections/' . $case['collections'][0]['slug'],
+							array(
+								'context' => 'view',
+								'_fields' => 'slug,_links',
+								'slug'    => $case['collections'][0]['slug'],
+							)
+						)
+					);
+				}
+			);
+			$missing_call  = self::capture_doing_it_wrong(
+				static function () use ( $controller ): \WP_Error {
+					return $controller->get_item(
+						self::rest_font_collection_request(
+							'GET',
+							'/wp/v2/font-collections/component-fuzz-missing',
+							array(
+								'context' => 'view',
+								'slug'    => 'component-fuzz-missing',
+							)
+						)
+					);
+				}
+			);
+		} finally {
+			\remove_filter( 'rest_font_collections_collection_params', $params_filter, 10 );
+			\remove_filter( 'rest_prepare_font_collection', $prepare_filter, 10 );
+			\remove_filter( 'pre_option_permalink_structure', $empty_filter, 0 );
+			\remove_filter( 'pre_option_siteurl', $home_filter, 0 );
+			\remove_filter( 'pre_option_home', $home_filter, 0 );
+		}
+
+		$page_one = $page_one_call['value'] ?? null;
+		$page_two = $page_two_call['value'] ?? null;
+		$head     = $head_call['value'] ?? null;
+		$item     = $item_call['value'] ?? null;
+		$missing  = $missing_call['value'] ?? null;
+
+		self::collect_failure(
+			$failures,
+			is_array( $params )
+				&& ! isset( $params['search'] )
+				&& isset( $params['component_fuzz_marker'] )
+				&& 1 === $collection_param_calls,
+			'REST font collections params remove search and run the collection params filter once',
+			array(
+				'params' => $params,
+				'calls'  => $collection_param_calls,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$page_one instanceof \WP_REST_Response
+				&& 200 === $page_one->get_status()
+				&& self::rest_collection_headers_match( $page_one, 4, 2, 'next' )
+				&& self::rest_collection_page_one_body_matches_case( $page_one->get_data(), $case ),
+			'REST font collections GET page body, totals, next link, _fields, and compact _links are stable',
+			array(
+				'call'    => self::describe_call( $page_one_call ),
+				'headers' => $page_one instanceof \WP_REST_Response ? $page_one->get_headers() : null,
+				'data'    => $page_one instanceof \WP_REST_Response ? $page_one->get_data() : null,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$page_two instanceof \WP_REST_Response
+				&& 200 === $page_two->get_status()
+				&& self::rest_collection_headers_match( $page_two, 4, 2, 'prev' )
+				&& self::rest_collection_page_two_body_matches_case( $page_two->get_data(), $case )
+				&& count( $page_two_call['warnings'] ?? array() ) >= 1,
+			'REST font collections GET skips invalid collection data without failing the bounded page',
+			array(
+				'call'    => self::describe_call( $page_two_call ),
+				'headers' => $page_two instanceof \WP_REST_Response ? $page_two->get_headers() : null,
+				'data'    => $page_two instanceof \WP_REST_Response ? $page_two->get_data() : null,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$head instanceof \WP_REST_Response
+				&& 200 === $head->get_status()
+				&& array() === $head->get_data()
+				&& self::rest_collection_headers_match( $head, 4, 2, 'next' ),
+			'REST font collections HEAD returns headers and no response body',
+			array(
+				'call'    => self::describe_call( $head_call ),
+				'headers' => $head instanceof \WP_REST_Response ? $head->get_headers() : null,
+				'data'    => $head instanceof \WP_REST_Response ? $head->get_data() : null,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$item instanceof \WP_REST_Response
+				&& 200 === $item->get_status()
+				&& array( 'slug' => $case['collections'][0]['slug'] ) === $item->get_data()
+				&& isset( $item->get_links()['self'][0]['href'], $item->get_links()['collection'][0]['href'] )
+				&& $case['collections'][0]['slug'] === ( $item->get_headers()['X-Component-Fuzz-Collection'] ?? null ),
+			'REST font collection get_item/prepare honors _fields, _links, and rest_prepare_font_collection',
+			array(
+				'call'    => self::describe_call( $item_call ),
+				'headers' => $item instanceof \WP_REST_Response ? $item->get_headers() : null,
+				'links'   => $item instanceof \WP_REST_Response ? $item->get_links() : null,
+				'data'    => $item instanceof \WP_REST_Response ? $item->get_data() : null,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$missing instanceof \WP_Error
+				&& 'rest_font_collection_not_found' === $missing->get_error_code()
+				&& 404 === ( $missing->get_error_data()['status'] ?? null ),
+			'REST font collection get_item returns a 404 WP_Error for missing slugs',
+			array( 'call' => self::describe_call( $missing_call ) )
+		);
+
+		self::collect_failure(
+			$failures,
+			false === \has_filter( 'rest_prepare_font_collection', $prepare_filter )
+				&& false === \has_filter( 'rest_font_collections_collection_params', $params_filter )
+				&& false === \has_filter( 'pre_option_home', $home_filter )
+				&& false === \has_filter( 'pre_option_siteurl', $home_filter )
+				&& false === \has_filter( 'pre_option_permalink_structure', $empty_filter )
+				&& count( $prepared_filter_calls ) >= 5,
+			'REST font collection temporary filters are cleaned up after bounded calls',
+			array(
+				'preparedFilterCalls' => $prepared_filter_calls,
+				'hasFilters'          => array(
+					'restPrepare'          => \has_filter( 'rest_prepare_font_collection', $prepare_filter ),
+					'collectionParams'     => \has_filter( 'rest_font_collections_collection_params', $params_filter ),
+					'preOptionHome'        => \has_filter( 'pre_option_home', $home_filter ),
+					'preOptionSiteurl'     => \has_filter( 'pre_option_siteurl', $home_filter ),
+					'preOptionPermalink'   => \has_filter( 'pre_option_permalink_structure', $empty_filter ),
+				),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'fonts.rest-font-collections.controller-boundaries-no-db',
+			array() === $failures,
+			array(
+				'collections' => count( $case['collections'] ) + 1,
+				'failures'    => array_slice( $failures, 0, 8 ),
 			)
 		);
 	}
@@ -1168,6 +1583,159 @@ final class FontsSurface {
 		);
 	}
 
+	private static function theme_json_font_face_resolver_case( \ComponentFuzz\FuzzContext $ctx ): array {
+		$token           = self::slug( $ctx, 'theme-face' );
+		$family_a        = 'Component Fuzz Theme ' . $token;
+		$family_b        = 'ComponentFuzzTheme' . str_replace( '-', '', $token );
+		$regular_file    = 'assets/fonts/' . $token . '-regular.woff2';
+		$italic_file     = 'assets/fonts/' . $token . '-italic.woff2';
+		$theme_file_base = 'https://theme.example.test/';
+		$remote_woff     = 'https://cdn.example.test/fonts/' . $token . '-regular.woff';
+		$remote_ttf      = 'https://cdn.example.test/fonts/' . $token . '-mono.ttf';
+		$invalid_family  = 'Component Fuzz Invalid Theme ' . $token;
+
+		$expected_fonts = array(
+			array(
+				array(
+					'font-style'               => 'normal',
+					'font-weight'              => '400',
+					'font-stretch'             => 'normal',
+					'font-display'             => 'swap',
+					'font-feature-settings'    => '"kern" 1',
+					'font-variation-settings'  => '"wght" 420',
+					'unicode-range'            => 'U+00-5FF',
+					'src'                      => array( $theme_file_base . $regular_file, $remote_woff ),
+					'font-family'              => $family_a,
+				),
+				array(
+					'font-style'          => 'italic',
+					'font-weight'         => '700',
+					'font-display'        => 'optional',
+					'ascent-override'     => '90%',
+					'descent-override'    => '-20%',
+					'line-gap-override'   => '0%',
+					'size-adjust'         => '105%',
+					'src'                 => array( $theme_file_base . $italic_file ),
+					'font-family'         => $family_a,
+				),
+			),
+			array(
+				array(
+					'font-style'   => 'normal',
+					'font-weight'  => '300',
+					'font-display' => 'fallback',
+					'src'          => array( $remote_ttf ),
+					'font-family'  => $family_b,
+				),
+			),
+		);
+
+		return array(
+			'themeFileBaseUrl'    => $theme_file_base,
+			'expectedThemeFiles'  => array( $regular_file, $italic_file ),
+			'firstFamilyName'     => $family_a,
+			'commaFallbackNeedle' => 'ui-sans-serif',
+			'invalidFamilyNeedle' => $invalid_family,
+			'expectedFaceCount'   => 3,
+			'camelCaseKeys'       => array(
+				'ascentOverride',
+				'descentOverride',
+				'fontDisplay',
+				'fontFamily',
+				'fontFeatureSettings',
+				'fontStretch',
+				'fontStyle',
+				'fontVariationSettings',
+				'fontWeight',
+				'lineGapOverride',
+				'sizeAdjust',
+				'unicodeRange',
+			),
+			'expectedFonts'       => $expected_fonts,
+			'themeJson'           => array(
+				'version'  => \WP_Theme_JSON::LATEST_SCHEMA,
+				'settings' => array(
+					'typography' => array(
+						'fontFamilies' => array(
+							'theme'  => array(
+								array(
+									'name'       => $family_a,
+									'slug'       => $token,
+									'fontFamily' => '"' . $family_a . '", ui-sans-serif, sans-serif',
+									'fontFace'   => array(
+										array(
+											'fontFamily'            => 'Ignored Face Family ' . $token,
+											'fontStyle'             => 'normal',
+											'fontWeight'            => '400',
+											'fontStretch'           => 'normal',
+											'fontDisplay'           => 'swap',
+											'fontFeatureSettings'   => '"kern" 1',
+											'fontVariationSettings' => '"wght" 420',
+											'unicodeRange'          => 'U+00-5FF',
+											'src'                   => array( 'file:./' . $regular_file, $remote_woff ),
+										),
+										array(
+											'fontStyle'        => 'italic',
+											'fontWeight'       => '700',
+											'fontDisplay'      => 'optional',
+											'ascentOverride'   => '90%',
+											'descentOverride'  => '-20%',
+											'lineGapOverride'  => '0%',
+											'sizeAdjust'       => '105%',
+											'src'              => 'file:./' . $italic_file,
+										),
+									),
+								),
+								array(
+									'name'       => $invalid_family,
+									'slug'       => 'missing-face-' . $token,
+									'fontFamily' => $invalid_family,
+								),
+								array(
+									'name'       => 'Empty First Family ' . $token,
+									'slug'       => 'empty-first-' . $token,
+									'fontFamily' => ', serif',
+									'fontFace'   => array(
+										array(
+											'fontWeight' => '400',
+											'src'        => 'https://cdn.example.test/fonts/skipped-' . $token . '.woff2',
+										),
+									),
+								),
+							),
+							'custom' => array(
+								array(
+									'name'       => $family_b,
+									'slug'       => strtolower( $family_b ),
+									'fontFamily' => $family_b,
+									'fontFace'   => array(
+										array(
+											'fontStyle'   => 'normal',
+											'fontWeight'  => '300',
+											'fontDisplay' => 'fallback',
+											'src'         => $remote_ttf,
+										),
+									),
+								),
+								array(
+									'name'       => 'Empty Font Family ' . $token,
+									'slug'       => 'empty-family-' . $token,
+									'fontFamily' => '',
+									'fontFace'   => array(
+										array(
+											'fontWeight' => '400',
+											'src'        => 'https://cdn.example.test/fonts/empty-' . $token . '.woff2',
+										),
+									),
+								),
+							),
+						),
+					),
+				),
+			),
+		);
+	}
+
 	private static function collection_cases( \ComponentFuzz\FuzzContext $ctx ): array {
 		$cases = array();
 
@@ -1314,6 +1882,56 @@ final class FontsSurface {
 			&& $case['expected']['familySlug'] === ( $setting['slug'] ?? null )
 			&& '"JSON Fuzz Family", sans-serif' === ( $setting['fontFamily'] ?? null )
 			&& 'JSON File Category' !== ( $data['categories'][0]['name'] ?? null );
+	}
+
+	private static function rest_font_collection_controller_case( \ComponentFuzz\FuzzContext $ctx ): array {
+		$collections = array();
+
+		for ( $i = 0; $i < 3; $i++ ) {
+			$case_ctx = $ctx->fork( 'rest-collection-' . $i );
+			$token    = self::slug( $case_ctx, 'rest-collection' );
+			$family   = 'REST Collection Family ' . $case_ctx->int( 100, 999 );
+			$slug     = 'component-fuzz-rest-' . $token;
+
+			$collections[] = array(
+				'slug' => $slug,
+				'args' => array(
+					'name'          => 'REST Collection ' . $case_ctx->int( 1000, 9999 ),
+					'description'   => 'REST collection description ' . $token,
+					'font_families' => array(
+						array(
+							'font_family_settings' => array(
+								'name'       => $family,
+								'slug'       => $family,
+								'fontFamily' => '"' . $family . '", serif',
+								'fontFace'   => array(
+									array(
+										'fontFamily'  => $family,
+										'fontStyle'   => 'normal',
+										'fontWeight'  => '400',
+										'src'         => array( 'https://example.test/fonts/' . $token . '.woff2' ),
+										'fontDisplay' => 'swap',
+									),
+								),
+							),
+							'categories'           => array( 'rest fuzz' ),
+						),
+					),
+					'categories'    => array(
+						array(
+							'name' => 'REST Fuzz',
+							'slug' => 'rest-fuzz',
+						),
+					),
+				),
+			);
+		}
+
+		return array(
+			'collections'     => $collections,
+			'invalidSlug'     => 'component-fuzz-rest-invalid-' . self::slug( $ctx->fork( 'invalid' ), 'collection' ),
+			'missingJsonPath' => rtrim( sys_get_temp_dir(), DIRECTORY_SEPARATOR ) . DIRECTORY_SEPARATOR . 'component-fuzz-missing-font-collection-' . self::slug( $ctx->fork( 'missing' ), 'json' ) . '.json',
+		);
 	}
 
 	private static function rest_font_face_controller(): \WP_REST_Font_Faces_Controller {
@@ -1539,8 +2157,102 @@ final class FontsSurface {
 		);
 	}
 
+	private static function rest_font_collection_request( string $method, string $path, array $params ): \WP_REST_Request {
+		$request = new \WP_REST_Request( $method, $path );
+
+		$query_params = $params;
+		unset( $query_params['slug'] );
+		$request->set_query_params( $query_params );
+
+		if ( isset( $params['slug'] ) ) {
+			$request->set_url_params( array( 'slug' => $params['slug'] ) );
+		}
+
+		return $request;
+	}
+
+	private static function rest_collection_headers_match( \WP_REST_Response $response, int $total, int $pages, string $expected_link_rel ): bool {
+		$headers = $response->get_headers();
+
+		return $total === ( $headers['X-WP-Total'] ?? null )
+			&& $pages === ( $headers['X-WP-TotalPages'] ?? null )
+			&& isset( $headers['Link'] )
+			&& str_contains( $headers['Link'], 'rel="' . $expected_link_rel . '"' )
+			&& str_contains( $headers['Link'], 'http://example.test' );
+	}
+
+	private static function rest_collection_page_one_body_matches_case( $data, array $case ): bool {
+		if ( ! is_array( $data ) || 2 !== count( $data ) ) {
+			return false;
+		}
+
+		foreach ( array( 0, 1 ) as $index ) {
+			$item = $data[ $index ] ?? null;
+			if (
+				! is_array( $item )
+				|| array( 'slug', 'name', '_links' ) !== array_keys( $item )
+				|| $case['collections'][ $index ]['slug'] !== ( $item['slug'] ?? null )
+				|| \sanitize_text_field( $case['collections'][ $index ]['args']['name'] ) !== ( $item['name'] ?? null )
+				|| ! isset( $item['_links']['self'][0]['href'], $item['_links']['collection'][0]['href'] )
+			) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function rest_collection_page_two_body_matches_case( $data, array $case ): bool {
+		return is_array( $data )
+			&& 1 === count( $data )
+			&& array( 'slug', 'name' ) === array_keys( $data[0] ?? array() )
+			&& $case['collections'][2]['slug'] === ( $data[0]['slug'] ?? null )
+			&& \sanitize_text_field( $case['collections'][2]['args']['name'] ) === ( $data[0]['name'] ?? null );
+	}
+
 	private static function has_declaration( string $block, string $property, string $value ): bool {
 		return str_contains( $block, $property . ':' . $value . ';' );
+	}
+
+	private static function contains_any_key( array $data, array $keys ): bool {
+		foreach ( $data as $key => $value ) {
+			if ( is_string( $key ) && in_array( $key, $keys, true ) ) {
+				return true;
+			}
+
+			if ( is_array( $value ) && self::contains_any_key( $value, $keys ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private static function normalize_key_order( $value ) {
+		if ( ! is_array( $value ) ) {
+			return $value;
+		}
+
+		foreach ( $value as $key => $item ) {
+			$value[ $key ] = self::normalize_key_order( $item );
+		}
+
+		if ( ! array_is_list( $value ) ) {
+			ksort( $value );
+		}
+
+		return $value;
+	}
+
+	private static function clean_theme_json_caches(): void {
+		if ( class_exists( 'WP_Theme_JSON_Resolver' ) ) {
+			\WP_Theme_JSON_Resolver::clean_cached_data();
+		}
+
+		if ( function_exists( 'wp_cache_delete' ) ) {
+			\wp_cache_delete( 'wp_get_global_settings_custom', 'theme_json' );
+			\wp_cache_delete( 'wp_get_global_settings_theme', 'theme_json' );
+		}
 	}
 
 	private static function font_face_declaration_properties( string $block ): array {
