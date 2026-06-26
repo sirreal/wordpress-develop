@@ -736,7 +736,7 @@ final class QueryLoopSurface {
 						&& self::request_shape_matches( $query, $case ),
 					array(
 						'flags'   => self::query_flags( $query ),
-						'expect'  => $case['expect']['flags'] ?? array(),
+						'expect'  => self::expected_complete_flags( $case ),
 						'request' => self::describe_string( $query->request ),
 					)
 				);
@@ -1261,6 +1261,17 @@ final class QueryLoopSurface {
 				'no_found_rows'  => $ctx->bool(),
 			)
 		);
+		$empty_status_args = self::query_args(
+			array(
+				'post_type'      => $ctx->choice( array( 'post', 'any', array( 'post', 'page' ) ) ),
+				'post_status'    => 'draft',
+				'fields'         => $empty_fields,
+				'posts_per_page' => $ctx->choice( array( 1, 2, 3 ) ),
+				'paged'          => $ctx->choice( array( 1, 2 ) ),
+				's'              => 'missing-' . $ctx->identifier( 4, 8 ),
+				'no_found_rows'  => false,
+			)
+		);
 
 		$cases = array(
 			self::query_case(
@@ -1311,18 +1322,8 @@ final class QueryLoopSurface {
 			),
 			self::query_case(
 				'generated-secondary-empty-status',
-				self::query_args(
-					array(
-						'post_type'      => $ctx->choice( array( 'post', 'any', array( 'post', 'page' ) ) ),
-						'post_status'    => 'draft',
-						'fields'         => $empty_fields,
-						'posts_per_page' => $ctx->choice( array( 1, 2, 3 ) ),
-						'paged'          => $ctx->choice( array( 1, 2 ) ),
-						's'              => 'missing-' . $ctx->identifier( 4, 8 ),
-						'no_found_rows'  => false,
-					)
-				),
-				array( 'isSearch' => true ),
+				$empty_status_args,
+				self::expected_flags_from_args( $empty_status_args ),
 				array(),
 				array( 'nested', 'generated', 'empty', 'post_status', 'search' )
 			),
@@ -1446,12 +1447,13 @@ final class QueryLoopSurface {
 		$case               = $run['case'];
 		$expect             = $run['expect'];
 		$label              = $run['label'];
-		$primary_current_id = self::post_id_from_value( $GLOBALS['post'] ?? null );
-		$primary_state      = self::query_loop_state( $primary );
-		$seen               = array();
-		$aligned            = true;
-		$overflow           = false;
-		$manual_setup       = array(
+		$primary_current_post = $GLOBALS['post'] ?? null;
+		$primary_current_id   = self::post_id_from_value( $GLOBALS['post'] ?? null );
+		$primary_state        = self::query_loop_state( $primary );
+		$seen                 = array();
+		$aligned              = true;
+		$overflow             = false;
+		$manual_setup         = array(
 			'ran' => false,
 		);
 
@@ -1468,7 +1470,7 @@ final class QueryLoopSurface {
 				'case'   => $case['label'] ?? $label,
 				'global' => self::global_query_scope_summary(),
 				'query'  => self::query_scope_summary( $secondary ),
-				'expect' => $case['expect']['flags'] ?? array(),
+				'expect' => self::expected_complete_flags( $case ),
 			)
 		);
 
@@ -1489,7 +1491,11 @@ final class QueryLoopSurface {
 				if ( $target instanceof \WP_Post ) {
 					$setup_ok        = \setup_postdata( $target );
 					$setup_global_id = (int) ( $GLOBALS['id'] ?? 0 );
+					$setup_postdata  = self::postdata_global_summary();
 					\wp_reset_postdata();
+					$reset_postdata  = self::postdata_global_summary();
+					$expected_setup  = self::expected_postdata_summary( $secondary, $target, $current_id );
+					$expected_reset  = self::expected_postdata_summary( $secondary, $secondary->post );
 
 					$manual_setup = array(
 						'ran'             => true,
@@ -1499,20 +1505,26 @@ final class QueryLoopSurface {
 						'resetPostId'     => self::post_id_from_value( $GLOBALS['post'] ?? null ),
 						'resetGlobalId'   => (int) ( $GLOBALS['id'] ?? 0 ),
 						'queryCurrentId'  => self::post_id_from_value( $secondary->post ),
+						'setupPostdata'   => $setup_postdata,
+						'resetPostdata'   => $reset_postdata,
 					);
 
 					self::collect_failure(
 						$failures,
 						$setup_ok
 							&& $setup_global_id === $target_id
+							&& self::postdata_summary_matches( $setup_postdata, $expected_setup )
 							&& $manual_setup['resetPostId'] === $current_id
 							&& $manual_setup['resetGlobalId'] === $current_id
+							&& self::postdata_summary_matches( $reset_postdata, $expected_reset )
 							&& ( $GLOBALS['wp_query'] ?? null ) === $secondary,
 						'nested setup_postdata and wp_reset_postdata are scoped to the active secondary query',
 						array(
-							'label'       => $label,
-							'manualSetup' => $manual_setup,
-							'global'      => self::global_query_scope_summary(),
+							'label'         => $label,
+							'manualSetup'   => $manual_setup,
+							'global'        => self::global_query_scope_summary(),
+							'expectedSetup' => $expected_setup,
+							'expectedReset' => $expected_reset,
 						)
 					);
 				}
@@ -1555,19 +1567,26 @@ final class QueryLoopSurface {
 		\wp_reset_postdata();
 		$expected_postdata_reset_id = array() === $expected_ids ? $primary_current_id : $expected_ids[0];
 		$after_postdata_reset      = self::global_query_scope_summary();
+		$after_postdata_globals    = self::postdata_global_summary();
+		$expected_postdata_source  = array() === $expected_ids ? $primary_current_post : $secondary->post;
+		$expected_postdata_query   = array() === $expected_ids ? $primary : $secondary;
+		$expected_postdata_globals = self::expected_postdata_summary( $expected_postdata_query, $expected_postdata_source );
 
 		self::collect_failure(
 			$failures,
 			( $GLOBALS['wp_query'] ?? null ) === $secondary
 				&& ( $GLOBALS['wp_the_query'] ?? null ) === $primary
 				&& $expected_postdata_reset_id === self::post_id_from_value( $GLOBALS['post'] ?? null )
+				&& self::postdata_summary_matches( $after_postdata_globals, $expected_postdata_globals )
 				&& self::global_query_scope_matches( $secondary ),
 			'wp_reset_postdata restores post globals from the active secondary query without changing wp_the_query',
 			array(
-				'label'           => $label,
-				'expectedPostId'  => $expected_postdata_reset_id,
-				'beforeResetPost' => $before_reset_id,
-				'afterReset'      => $after_postdata_reset,
+				'label'            => $label,
+				'expectedPostId'   => $expected_postdata_reset_id,
+				'beforeResetPost'  => $before_reset_id,
+				'afterReset'       => $after_postdata_reset,
+				'postdata'         => $after_postdata_globals,
+				'expectedPostdata' => $expected_postdata_globals,
 			)
 		);
 
@@ -1579,12 +1598,15 @@ final class QueryLoopSurface {
 			\wp_reset_postdata();
 		}
 
-		$after_reset_query = self::global_query_scope_summary();
+		$after_reset_query        = self::global_query_scope_summary();
+		$after_reset_postdata     = self::postdata_global_summary();
+		$expected_primary_postdata = self::expected_postdata_summary( $primary, $primary_current_post );
 		self::collect_failure(
 			$failures,
 			( $GLOBALS['wp_query'] ?? null ) === $primary
 				&& ( $GLOBALS['wp_the_query'] ?? null ) === $primary
 				&& $primary_current_id === self::post_id_from_value( $GLOBALS['post'] ?? null )
+				&& self::postdata_summary_matches( $after_reset_postdata, $expected_primary_postdata )
 				&& self::global_query_scope_matches( $primary )
 				&& $primary_state['currentPost'] === (int) $primary->current_post
 				&& true === $primary->in_the_loop,
@@ -1595,6 +1617,8 @@ final class QueryLoopSurface {
 				'primaryPostId'     => $primary_current_id,
 				'primaryBefore'     => $primary_state,
 				'afterResetQuery'   => $after_reset_query,
+				'postdata'          => $after_reset_postdata,
+				'expectedPostdata'  => $expected_primary_postdata,
 			)
 		);
 
@@ -1610,6 +1634,7 @@ final class QueryLoopSurface {
 			'manualSetup'        => $manual_setup,
 			'afterPostdataReset' => $after_postdata_reset,
 			'afterResetQuery'    => $after_reset_query,
+			'afterResetPostdata' => $after_reset_postdata,
 		);
 	}
 
@@ -1955,30 +1980,26 @@ final class QueryLoopSurface {
 	}
 
 	private static function expected_flags_from_args( array $args ): array {
-		if ( ! empty( $args['page_id'] ) || ! empty( $args['pagename'] ) ) {
-			return array( 'isPage' => true );
-		}
-
-		if ( ! empty( $args['p'] ) || ! empty( $args['name'] ) ) {
-			return array( 'isSingle' => true );
-		}
-
 		$flags = array();
-		if ( array_key_exists( 's', $args ) ) {
+
+		if ( ! empty( $args['page_id'] ) || ! empty( $args['pagename'] ) ) {
+			$flags['isPage'] = true;
+		} elseif ( ! empty( $args['p'] ) || ! empty( $args['name'] ) ) {
+			$flags['isSingle'] = true;
+		} elseif ( array_key_exists( 's', $args ) ) {
 			$flags['isSearch'] = true;
-		}
-		if ( ! empty( $args['tax_query'] ) && self::tax_query_sets_tax_flag( $args['tax_query'] ) ) {
+		} elseif ( ! empty( $args['tax_query'] ) && self::tax_query_sets_tax_flag( $args['tax_query'] ) ) {
 			$flags['isTax']     = true;
 			$flags['isArchive'] = true;
-		}
-		if ( ! empty( $args['year'] ) || ! empty( $args['monthnum'] ) || ! empty( $args['day'] ) || ! empty( $args['m'] ) ) {
+		} elseif ( ! empty( $args['year'] ) || ! empty( $args['monthnum'] ) || ! empty( $args['day'] ) || ! empty( $args['m'] ) ) {
 			$flags['isDate']    = true;
 			$flags['isArchive'] = true;
 		}
+
 		if ( ! empty( $args['paged'] ) && (int) $args['paged'] > 1 ) {
 			$flags['isPaged'] = true;
 		}
-		if ( array() === $flags ) {
+		if ( empty( $flags['isPage'] ) && empty( $flags['isSingle'] ) && empty( $flags['isSearch'] ) && empty( $flags['isArchive'] ) ) {
 			$flags['isHome'] = true;
 		}
 
@@ -2536,8 +2557,9 @@ final class QueryLoopSurface {
 
 	private static function query_flags_match( \WP_Query $query, array $case ): bool {
 		$actual = self::query_flags( $query );
+		$expect = self::expected_complete_flags( $case );
 
-		foreach ( $case['expect']['flags'] ?? array() as $flag => $expected ) {
+		foreach ( $expect as $flag => $expected ) {
 			if ( ! array_key_exists( $flag, $actual ) || (bool) $expected !== (bool) $actual[ $flag ] ) {
 				return false;
 			}
@@ -2991,29 +3013,50 @@ final class QueryLoopSurface {
 
 	private static function query_flags( \WP_Query $query ): array {
 		return array(
-			'isHome'    => $query->is_home(),
-			'isPage'    => $query->is_page(),
-			'isSingle'  => $query->is_single(),
-			'isSearch'  => $query->is_search(),
-			'isArchive' => $query->is_archive(),
-			'isDate'    => $query->is_date(),
-			'isTax'     => $query->is_tax(),
-			'isPaged'   => $query->is_paged(),
-			'is404'     => $query->is_404(),
+			'isHome'      => $query->is_home(),
+			'isPage'      => $query->is_page(),
+			'isSingle'    => $query->is_single(),
+			'isSingular'  => $query->is_singular(),
+			'isSearch'    => $query->is_search(),
+			'isArchive'   => $query->is_archive(),
+			'isDate'      => $query->is_date(),
+			'isTax'       => $query->is_tax(),
+			'isPaged'     => $query->is_paged(),
+			'is404'       => $query->is_404(),
+			'isMainQuery' => $query->is_main_query(),
 		);
+	}
+
+	private static function expected_complete_flags( array $case ): array {
+		$expected = array_fill_keys(
+			array_keys( self::query_flags( new \WP_Query() ) ),
+			false
+		);
+
+		foreach ( $case['expect']['flags'] ?? array() as $flag => $value ) {
+			$expected[ $flag ] = (bool) $value;
+		}
+
+		if ( ! empty( $expected['isPage'] ) || ! empty( $expected['isSingle'] ) ) {
+			$expected['isSingular'] = true;
+		}
+
+		return $expected;
 	}
 
 	private static function global_conditional_flags(): array {
 		$map   = array(
-			'isHome'    => 'is_home',
-			'isPage'    => 'is_page',
-			'isSingle'  => 'is_single',
-			'isSearch'  => 'is_search',
-			'isArchive' => 'is_archive',
-			'isDate'    => 'is_date',
-			'isTax'     => 'is_tax',
-			'isPaged'   => 'is_paged',
-			'is404'     => 'is_404',
+			'isHome'      => 'is_home',
+			'isPage'      => 'is_page',
+			'isSingle'    => 'is_single',
+			'isSingular'  => 'is_singular',
+			'isSearch'    => 'is_search',
+			'isArchive'   => 'is_archive',
+			'isDate'      => 'is_date',
+			'isTax'       => 'is_tax',
+			'isPaged'     => 'is_paged',
+			'is404'       => 'is_404',
+			'isMainQuery' => 'is_main_query',
 		);
 		$flags = array();
 
@@ -3022,6 +3065,85 @@ final class QueryLoopSurface {
 		}
 
 		return $flags;
+	}
+
+	private static function postdata_global_summary(): array {
+		return array(
+			'postId'       => self::post_id_from_value( $GLOBALS['post'] ?? null ),
+			'id'           => (int) ( $GLOBALS['id'] ?? 0 ),
+			'authordataId' => is_object( $GLOBALS['authordata'] ?? null ) && isset( $GLOBALS['authordata']->ID )
+				? (int) $GLOBALS['authordata']->ID
+				: 0,
+			'currentday'   => $GLOBALS['currentday'] ?? null,
+			'currentmonth' => $GLOBALS['currentmonth'] ?? null,
+			'page'         => (int) ( $GLOBALS['page'] ?? 0 ),
+			'pages'        => array_values( array_map( 'strval', (array) ( $GLOBALS['pages'] ?? array() ) ) ),
+			'multipage'    => (int) ( $GLOBALS['multipage'] ?? 0 ),
+			'more'         => (int) ( $GLOBALS['more'] ?? 0 ),
+			'numpages'     => (int) ( $GLOBALS['numpages'] ?? 0 ),
+		);
+	}
+
+	private static function expected_postdata_summary( \WP_Query $query, $post, ?int $global_post_id = null ): array {
+		$post_id        = self::post_id_from_value( $post );
+		$global_post_id = null === $global_post_id ? $post_id : $global_post_id;
+		$source         = is_object( $post ) ? $post : self::fixture_post_by_id( $post_id );
+
+		if ( ! is_object( $source ) ) {
+			return array(
+				'postId'       => $global_post_id,
+				'id'           => 0,
+				'authordataId' => 0,
+				'currentday'   => null,
+				'currentmonth' => null,
+				'page'         => 0,
+				'pages'        => array(),
+				'multipage'    => 0,
+				'more'         => 0,
+				'numpages'     => 0,
+			);
+		}
+
+		$generated = $query->generate_postdata( $source );
+		if ( ! is_array( $generated ) ) {
+			return array(
+				'postId'       => $global_post_id,
+				'id'           => $post_id,
+				'authordataId' => 0,
+				'currentday'   => null,
+				'currentmonth' => null,
+				'page'         => 0,
+				'pages'        => array(),
+				'multipage'    => 0,
+				'more'         => 0,
+				'numpages'     => 0,
+			);
+		}
+
+		return array(
+			'postId'       => $global_post_id,
+			'id'           => (int) ( $generated['id'] ?? 0 ),
+			'authordataId' => is_object( $generated['authordata'] ?? null ) && isset( $generated['authordata']->ID )
+				? (int) $generated['authordata']->ID
+				: 0,
+			'currentday'   => $generated['currentday'] ?? null,
+			'currentmonth' => $generated['currentmonth'] ?? null,
+			'page'         => (int) ( $generated['page'] ?? 0 ),
+			'pages'        => array_values( array_map( 'strval', (array) ( $generated['pages'] ?? array() ) ) ),
+			'multipage'    => (int) ( $generated['multipage'] ?? 0 ),
+			'more'         => (int) ( $generated['more'] ?? 0 ),
+			'numpages'     => (int) ( $generated['numpages'] ?? 0 ),
+		);
+	}
+
+	private static function postdata_summary_matches( array $actual, array $expected ): bool {
+		foreach ( $expected as $key => $value ) {
+			if ( ! array_key_exists( $key, $actual ) || $actual[ $key ] !== $value ) {
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 	private static function conditional_flags_match( array $actual, array $expected ): bool {
