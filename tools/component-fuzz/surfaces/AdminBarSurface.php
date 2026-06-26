@@ -33,6 +33,7 @@ final class AdminBarSurface {
 				self::check_initialize_side_effects( $ctx->fork( 'initialize-side-effects' ) ),
 				self::check_show_admin_bar_filters( $ctx->fork( 'show-admin-bar-filters' ) ),
 				self::check_default_menu_hook_registration( $ctx->fork( 'default-menu-hooks' ) ),
+				self::check_default_callback_node_graph( $ctx->fork( 'default-callback-node-graph' ) ),
 			);
 		} catch ( \Throwable $e ) {
 			return array(
@@ -50,7 +51,7 @@ final class AdminBarSurface {
 	private static function missing_requirements(): array {
 		$missing = array();
 
-		foreach ( array( 'WP_Admin_Bar' ) as $class ) {
+		foreach ( array( 'WP_Admin_Bar', 'WP_User' ) as $class ) {
 			if ( ! class_exists( $class ) ) {
 				$missing[] = "class {$class}";
 			}
@@ -67,8 +68,14 @@ final class AdminBarSurface {
 				'esc_attr_e',
 				'esc_js',
 				'esc_url',
+				'admin_url',
+				'get_avatar',
+				'get_current_user_id',
+				'get_edit_profile_url',
 				'get_theme_support',
+				'home_url',
 				'has_filter',
+				'number_format_i18n',
 				'is_admin',
 				'is_admin_bar_showing',
 				'is_embed',
@@ -78,13 +85,25 @@ final class AdminBarSurface {
 				'remove_action',
 				'remove_filter',
 				'sanitize_title',
+				'self_admin_url',
 				'show_admin_bar',
+				'wp_admin_bar_add_secondary_groups',
+				'wp_admin_bar_appearance_menu',
+				'wp_admin_bar_comments_menu',
+				'wp_admin_bar_my_account_item',
+				'wp_admin_bar_my_account_menu',
 				'wp_admin_bar_render',
+				'wp_admin_bar_search_menu',
+				'wp_admin_bar_wp_menu',
+				'wp_count_comments',
 				'wp_enqueue_script',
 				'wp_enqueue_style',
+				'wp_get_current_user',
 				'wp_is_json_request',
 				'wp_is_mobile',
+				'wp_logout_url',
 				'wp_parse_args',
+				'wp_strip_all_tags',
 			) as $function
 		) {
 			if ( ! function_exists( $function ) ) {
@@ -1058,6 +1077,407 @@ final class AdminBarSurface {
 		);
 	}
 
+	private static function check_default_callback_node_graph( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$snapshot = self::snapshot_state();
+		$wpdb_snapshot = self::wpdb_runtime_state();
+
+		$user          = self::synthetic_current_user( $ctx->fork( 'user' ) );
+		$user_id       = (int) $user->ID;
+		$avatar_class  = 'cfz-avatar-' . strtolower( $ctx->identifier( 4, 10 ) );
+		$awaiting_mod  = $ctx->int( 2, 23 );
+		$avatar_calls  = array();
+		$comment_calls = array();
+
+		$cap_filter = self::default_callback_cap_filter(
+			array(
+				'read',
+				'edit_posts',
+				'switch_themes',
+				'edit_theme_options',
+			),
+			$user_id
+		);
+
+		$avatar_filter = static function ( $avatar, $id_or_email, array $args ) use ( &$avatar_calls, $avatar_class, $user_id ): string {
+			unset( $avatar );
+
+			$size           = (int) ( $args['size'] ?? 0 );
+			$avatar_calls[] = array(
+				'id'   => is_numeric( $id_or_email ) ? (int) $id_or_email : null,
+				'size' => $size,
+			);
+
+			return '<span class="' . \esc_attr( $avatar_class ) . '" data-user="' . $user_id . '" data-size="' . $size . '"></span>';
+		};
+
+		$comments_filter = static function ( $count, int $post_id ) use ( &$comment_calls, $awaiting_mod ): \stdClass {
+			unset( $count );
+
+			$comment_calls[] = $post_id;
+			return (object) array(
+				'approved'       => 0,
+				'moderated'      => $awaiting_mod,
+				'spam'           => 0,
+				'trash'          => 0,
+				'post-trashed'   => 0,
+				'total_comments' => $awaiting_mod,
+				'all'            => $awaiting_mod,
+			);
+		};
+
+		$blogs_of_user_filter = static function ( $sites, int $filtered_user_id, bool $all ) use ( $user_id ): array {
+			unset( $sites, $all );
+
+			if ( $filtered_user_id !== $user_id ) {
+				return array();
+			}
+
+			return array(
+				1 => (object) array(
+					'userblog_id' => 1,
+					'blogname'    => 'Component Fuzz',
+					'domain'      => 'example.test',
+					'path'        => '/',
+					'site_id'     => 1,
+					'siteurl'     => 'http://example.test',
+					'archived'    => 0,
+					'mature'      => 0,
+					'spam'        => 0,
+					'deleted'     => 0,
+				),
+			);
+		};
+
+		$user_meta_filter = static function ( $value, int $filtered_user_id, string $meta_key, bool $single, string $meta_type ) use ( $user_id ) {
+			unset( $meta_key, $meta_type );
+
+			if ( $filtered_user_id !== $user_id ) {
+				return $value;
+			}
+
+			return $single ? '' : array();
+		};
+
+		$option_filters = array(
+			'pre_option_avatar_default' => static function (): string {
+				return 'mystery';
+			},
+			'pre_option_avatar_rating'  => static function (): string {
+				return 'G';
+			},
+			'pre_option_blog_charset'   => static function (): string {
+				return 'UTF-8';
+			},
+			'pre_option_home'           => static function (): string {
+				return 'http://example.test';
+			},
+			'pre_option_siteurl'        => static function (): string {
+				return 'http://example.test';
+			},
+			'pre_option_wp_user_roles'  => static function (): array {
+				return array();
+			},
+		);
+
+		try {
+			$GLOBALS['current_user'] = $user;
+			$GLOBALS['wp_query']     = (object) array(
+				'before_loop' => false,
+				'in_the_loop' => false,
+			);
+
+			foreach ( array( 'widgets', 'menus', 'custom-background', 'custom-header' ) as $feature ) {
+				$GLOBALS['_wp_theme_features'][ $feature ] = true;
+			}
+
+			\add_filter( 'user_has_cap', $cap_filter, 10, 4 );
+			\add_filter( 'pre_get_avatar', $avatar_filter, 10, 3 );
+			\add_filter( 'wp_count_comments', $comments_filter, 10, 2 );
+			\add_filter( 'pre_get_blogs_of_user', $blogs_of_user_filter, 10, 3 );
+			\add_filter( 'get_user_metadata', $user_meta_filter, 10, 5 );
+			foreach ( $option_filters as $hook => $filter ) {
+				\add_filter( $hook, $filter, 10, 3 );
+			}
+
+			$bar = new \WP_Admin_Bar();
+			\wp_admin_bar_add_secondary_groups( $bar );
+			\wp_admin_bar_wp_menu( $bar );
+			\wp_admin_bar_my_account_item( $bar );
+			\wp_admin_bar_my_account_menu( $bar );
+			\wp_admin_bar_appearance_menu( $bar );
+			\wp_admin_bar_comments_menu( $bar );
+			\wp_admin_bar_search_menu( $bar );
+
+			$expected_urls = array(
+				'about'      => \self_admin_url( 'about.php' ),
+				'background' => \admin_url( 'themes.php?page=custom-background' ),
+				'comments'   => \admin_url( 'edit-comments.php' ),
+				'contribute' => \self_admin_url( 'contribute.php' ),
+				'header'     => \admin_url( 'themes.php?page=custom-header' ),
+				'home'       => \home_url( '/' ),
+				'menus'      => \admin_url( 'nav-menus.php' ),
+				'profile'    => \get_edit_profile_url( $user_id ),
+				'themes'     => \admin_url( 'themes.php' ),
+				'widgets'    => \admin_url( 'widgets.php' ),
+			);
+			$top_secondary   = $bar->get_node( 'top-secondary' );
+			$wp_external     = $bar->get_node( 'wp-logo-external' );
+			$wp_logo         = $bar->get_node( 'wp-logo' );
+			$about           = $bar->get_node( 'about' );
+			$contribute      = $bar->get_node( 'contribute' );
+			$wporg           = $bar->get_node( 'wporg' );
+			$documentation   = $bar->get_node( 'documentation' );
+			$learn           = $bar->get_node( 'learn' );
+			$support_forums  = $bar->get_node( 'support-forums' );
+			$feedback        = $bar->get_node( 'feedback' );
+			$my_account      = $bar->get_node( 'my-account' );
+			$user_actions    = $bar->get_node( 'user-actions' );
+			$user_info       = $bar->get_node( 'user-info' );
+			$logout          = $bar->get_node( 'logout' );
+			$appearance      = $bar->get_node( 'appearance' );
+			$themes          = $bar->get_node( 'themes' );
+			$widgets         = $bar->get_node( 'widgets' );
+			$menus           = $bar->get_node( 'menus' );
+			$background      = $bar->get_node( 'background' );
+			$header          = $bar->get_node( 'header' );
+			$comments        = $bar->get_node( 'comments' );
+			$search          = $bar->get_node( 'search' );
+			$all_nodes_shape = self::node_registry_shape( $bar->get_nodes() );
+
+			\remove_filter( 'wp_count_comments', $comments_filter, 10 );
+			\remove_filter( 'pre_get_avatar', $avatar_filter, 10 );
+			\remove_filter( 'user_has_cap', $cap_filter, 10 );
+			\remove_filter( 'pre_get_blogs_of_user', $blogs_of_user_filter, 10 );
+			\remove_filter( 'get_user_metadata', $user_meta_filter, 10 );
+			foreach ( $option_filters as $hook => $filter ) {
+				\remove_filter( $hook, $filter, 10 );
+			}
+			$option_filters_removed = true;
+			foreach ( $option_filters as $hook => $filter ) {
+				if ( false !== \has_filter( $hook, $filter ) ) {
+					$option_filters_removed = false;
+					break;
+				}
+			}
+			$filters_removed = false === \has_filter( 'wp_count_comments', $comments_filter )
+				&& false === \has_filter( 'pre_get_avatar', $avatar_filter )
+				&& false === \has_filter( 'user_has_cap', $cap_filter )
+				&& false === \has_filter( 'pre_get_blogs_of_user', $blogs_of_user_filter )
+				&& false === \has_filter( 'get_user_metadata', $user_meta_filter )
+				&& $option_filters_removed;
+		} finally {
+			\remove_filter( 'wp_count_comments', $comments_filter, 10 );
+			\remove_filter( 'pre_get_avatar', $avatar_filter, 10 );
+			\remove_filter( 'user_has_cap', $cap_filter, 10 );
+			\remove_filter( 'pre_get_blogs_of_user', $blogs_of_user_filter, 10 );
+			\remove_filter( 'get_user_metadata', $user_meta_filter, 10 );
+			foreach ( $option_filters as $hook => $filter ) {
+				\remove_filter( $hook, $filter, 10 );
+			}
+			self::restore_state( $snapshot );
+		}
+
+		$filters_removed = $filters_removed ?? false;
+		$expected_urls   = $expected_urls ?? array();
+		$wpdb_restored   = self::wpdb_runtime_matches( $wpdb_snapshot );
+
+		self::collect_failure(
+			$failures,
+			$top_secondary instanceof \stdClass
+				&& true === $top_secondary->group
+				&& 'ab-top-secondary' === ( $top_secondary->meta['class'] ?? null )
+				&& $wp_external instanceof \stdClass
+				&& 'wp-logo' === $wp_external->parent
+				&& true === $wp_external->group
+				&& 'ab-sub-secondary' === ( $wp_external->meta['class'] ?? null ),
+			'default secondary group callback creates exact top-secondary and wp-logo-external groups',
+			array(
+				'topSecondary' => $top_secondary ?? null,
+				'wpExternal'   => $wp_external ?? null,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$wp_logo instanceof \stdClass
+				&& 'wp-logo' === $wp_logo->id
+				&& ( $expected_urls['about'] ?? null ) === $wp_logo->href
+				&& 'About WordPress' === ( $wp_logo->meta['menu_title'] ?? null )
+				&& $about instanceof \stdClass
+				&& 'wp-logo' === $about->parent
+				&& ( $expected_urls['about'] ?? null ) === $about->href
+				&& $contribute instanceof \stdClass
+				&& 'wp-logo' === $contribute->parent
+				&& ( $expected_urls['contribute'] ?? null ) === $contribute->href,
+			'wp-logo callback creates readable-user core links with exact parents and admin hrefs',
+			array(
+				'wpLogo'     => $wp_logo ?? null,
+				'about'      => $about ?? null,
+				'contribute' => $contribute ?? null,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$wporg instanceof \stdClass
+				&& 'wp-logo-external' === $wporg->parent
+				&& 'https://wordpress.org/' === $wporg->href
+				&& $documentation instanceof \stdClass
+				&& 'https://wordpress.org/documentation/' === $documentation->href
+				&& $learn instanceof \stdClass
+				&& 'https://learn.wordpress.org/' === $learn->href
+				&& $support_forums instanceof \stdClass
+				&& 'https://wordpress.org/support/forums/' === $support_forums->href
+				&& $feedback instanceof \stdClass
+				&& 'https://wordpress.org/support/forum/requests-and-feedback' === $feedback->href,
+			'wp-logo callback creates exact external WordPress resource links under the secondary group',
+			array(
+				'wporg'         => $wporg ?? null,
+				'documentation' => $documentation ?? null,
+				'learn'         => $learn ?? null,
+				'supportForums' => $support_forums ?? null,
+				'feedback'      => $feedback ?? null,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$my_account instanceof \stdClass
+				&& 'top-secondary' === $my_account->parent
+				&& ( $expected_urls['profile'] ?? null ) === $my_account->href
+				&& 'with-avatar' === ( $my_account->meta['class'] ?? null )
+				&& 'Howdy, ' . $user->display_name === ( $my_account->meta['menu_title'] ?? null )
+				&& str_contains( $my_account->title, '<span class="display-name">' . $user->display_name . '</span>' )
+				&& str_contains( $my_account->title, 'data-size="26"' ),
+			'my-account item callback binds the synthetic user display name, profile URL, avatar, and menu title',
+			array(
+				'node'         => $my_account ?? null,
+				'profileUrl'   => $expected_urls['profile'] ?? null,
+				'avatarCalls'  => $avatar_calls,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$user_actions instanceof \stdClass
+				&& 'my-account' === $user_actions->parent
+				&& true === $user_actions->group
+				&& $user_info instanceof \stdClass
+				&& 'user-actions' === $user_info->parent
+				&& ( $expected_urls['profile'] ?? null ) === $user_info->href
+				&& str_contains( $user_info->title, 'data-size="64"' )
+				&& str_contains( $user_info->title, "<span class='display-name'>{$user->display_name}</span>" )
+				&& str_contains( $user_info->title, "<span class='username'>{$user->user_login}</span>" )
+				&& str_contains( $user_info->title, "<span class='display-name edit-profile'>Edit Profile</span>" )
+				&& $logout instanceof \stdClass
+				&& 'user-actions' === $logout->parent
+				&& str_contains( $logout->href, 'wp-login.php?action=logout' ),
+			'my-account submenu callback creates exact user-actions group, profile info, and logout nodes',
+			array(
+				'userActions' => $user_actions ?? null,
+				'userInfo'    => $user_info ?? null,
+				'logout'      => $logout ?? null,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			array(
+				array( 'id' => $user_id, 'size' => 26 ),
+				array( 'id' => $user_id, 'size' => 64 ),
+			) === $avatar_calls,
+			'account callbacks request the expected avatar sizes for the same synthetic user',
+			array( 'avatarCalls' => $avatar_calls )
+		);
+
+		self::collect_failure(
+			$failures,
+			$appearance instanceof \stdClass
+				&& 'site-name' === $appearance->parent
+				&& true === $appearance->group
+				&& $themes instanceof \stdClass
+				&& 'appearance' === $themes->parent
+				&& ( $expected_urls['themes'] ?? null ) === $themes->href
+				&& $widgets instanceof \stdClass
+				&& ( $expected_urls['widgets'] ?? null ) === $widgets->href
+				&& $menus instanceof \stdClass
+				&& ( $expected_urls['menus'] ?? null ) === $menus->href
+				&& $background instanceof \stdClass
+				&& ( $expected_urls['background'] ?? null ) === $background->href
+				&& 'hide-if-customize' === ( $background->meta['class'] ?? null )
+				&& $header instanceof \stdClass
+				&& ( $expected_urls['header'] ?? null ) === $header->href
+				&& 'hide-if-customize' === ( $header->meta['class'] ?? null ),
+			'appearance callback honors generated capabilities and theme-support branches with exact child hrefs',
+			array(
+				'appearance' => $appearance ?? null,
+				'themes'     => $themes ?? null,
+				'widgets'    => $widgets ?? null,
+				'menus'      => $menus ?? null,
+				'background' => $background ?? null,
+				'header'     => $header ?? null,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$comments instanceof \stdClass
+				&& ( $expected_urls['comments'] ?? null ) === $comments->href
+				&& str_contains( $comments->title, 'pending-count count-' . $awaiting_mod )
+				&& str_contains( $comments->title, '>' . \number_format_i18n( $awaiting_mod ) . '</span>' )
+				&& str_contains( $comments->title, 'Comments in moderation' )
+				&& array( 0 ) === $comment_calls,
+			'comments callback uses the filtered moderation count in its badge and screen-reader text',
+			array(
+				'comments'     => $comments ?? null,
+				'commentCalls' => $comment_calls,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$search instanceof \stdClass
+				&& 'top-secondary' === $search->parent
+				&& 'admin-bar-search' === ( $search->meta['class'] ?? null )
+				&& -1 === ( $search->meta['tabindex'] ?? null )
+				&& str_contains( $search->title, '<form action="' . \esc_url( $expected_urls['home'] ?? '' ) . '" method="get" id="adminbarsearch">' )
+				&& str_contains( $search->title, 'name="s" id="adminbar-search"' )
+				&& str_contains( $search->title, 'class="adminbar-button" value="Search"' ),
+			'search callback creates the top-secondary search form only on the front end',
+			array( 'search' => $search ?? null )
+		);
+
+		self::collect_failure(
+			$failures,
+			$filters_removed
+				&& self::global_matches( $snapshot['globals']['current_user'], 'current_user' )
+				&& self::global_matches( $snapshot['globals']['_wp_theme_features'], '_wp_theme_features' )
+				&& self::global_matches( $snapshot['globals']['wp_query'], 'wp_query' )
+				&& self::global_matches( $snapshot['globals']['wp_filter'], 'wp_filter' )
+				&& $wpdb_restored,
+			'default callback probe removes filters and restores user, theme, query, hook, and wpdb runtime state',
+			array(
+				'filtersRemoved' => $filters_removed,
+				'currentUser'    => self::global_summary( 'current_user' ),
+				'themeFeatures'  => self::global_summary( '_wp_theme_features' ),
+				'wpQuery'        => self::global_summary( 'wp_query' ),
+				'wpdbRestored'   => $wpdb_restored,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'admin-bar.default-callbacks.node-graph-basic',
+			array() === $failures,
+			array(
+				'userId'    => $user_id,
+				'nodeIds'   => array_keys( $all_nodes_shape ?? array() ),
+				'failures'  => $failures,
+			)
+		);
+	}
+
 	private static function render_bar( \WP_Admin_Bar $bar ): string {
 		ob_start();
 		try {
@@ -1090,6 +1510,50 @@ final class AdminBarSurface {
 
 	private static function fuzz_class( \ComponentFuzz\FuzzContext $ctx ): string {
 		return 'cfz-' . $ctx->identifier( 3, 10 ) . ' "' . $ctx->text( 0, 24 ) . "'";
+	}
+
+	private static function synthetic_current_user( \ComponentFuzz\FuzzContext $ctx ): \WP_User {
+		$user_id = 880000 + $ctx->int( 1, 9999 );
+		$login   = 'cfz_admin_bar_' . strtolower( $ctx->identifier( 5, 12 ) );
+		$data    = (object) array(
+			'ID'                  => $user_id,
+			'user_login'          => $login,
+			'user_pass'           => 'component-fuzz-admin-bar-pass',
+			'user_nicename'       => $login,
+			'user_email'          => $login . '@example.test',
+			'user_url'            => 'https://example.test/admin-bar-user/' . rawurlencode( $login ),
+			'user_registered'     => '2026-06-26 00:00:00',
+			'user_activation_key' => '',
+			'user_status'         => 0,
+			'display_name'        => 'Admin Bar User ' . $ctx->identifier( 4, 10 ),
+		);
+		$user    = ( new \ReflectionClass( \WP_User::class ) )->newInstanceWithoutConstructor();
+
+		$user->data    = $data;
+		$user->ID      = $user_id;
+		$user->site_id = 1;
+		$user->cap_key = 'wp_capabilities';
+		$user->roles   = array();
+		$user->caps    = array();
+		$user->allcaps = array();
+
+		return $user;
+	}
+
+	private static function default_callback_cap_filter( array $capabilities, int $user_id ): callable {
+		return static function ( array $allcaps, array $caps, array $args, \WP_User $filtered_user ) use ( $capabilities, $user_id ): array {
+			unset( $caps, $args );
+
+			if ( (int) $filtered_user->ID !== $user_id ) {
+				return $allcaps;
+			}
+
+			foreach ( $capabilities as $capability ) {
+				$allcaps[ $capability ] = true;
+			}
+
+			return $allcaps;
+		};
 	}
 
 	private static function rendered_id( string $id ): string {
@@ -1322,6 +1786,7 @@ final class AdminBarSurface {
 					'wp_current_filter',
 					'wp_filter',
 					'wp_filters',
+					'wp_query',
 					'wp_scripts',
 					'wp_styles',
 				)
@@ -1397,6 +1862,22 @@ final class AdminBarSurface {
 			'exists' => array_key_exists( $name, $GLOBALS ),
 			'value'  => array_key_exists( $name, $GLOBALS ) ? self::describe_value( $GLOBALS[ $name ] ) : null,
 		);
+	}
+
+	private static function wpdb_runtime_state(): ?array {
+		if (
+			! isset( $GLOBALS['wpdb'] )
+			|| ! is_object( $GLOBALS['wpdb'] )
+			|| ! method_exists( $GLOBALS['wpdb'], 'component_fuzz_get_runtime_state' )
+		) {
+			return null;
+		}
+
+		return $GLOBALS['wpdb']->component_fuzz_get_runtime_state();
+	}
+
+	private static function wpdb_runtime_matches( ?array $snapshot ): bool {
+		return $snapshot === self::wpdb_runtime_state();
 	}
 
 	private static function clone_value( $value ) {
