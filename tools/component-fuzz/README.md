@@ -442,8 +442,10 @@ database, network requests, or a configured site.
   missing-request and global-post fallback fail-closed behavior, export group
   HTML escaping, exporter/eraser registry and processor shape contracts,
   built-in comments exporter/eraser payload and anonymization behavior, export
-  directory/expiration cleanup filters, anonymization helpers, and privacy
-  policy suggestion/default text without mail or network delivery.
+  notification recipient/subject/content/header filters through an intercepted
+  PHPMailer handoff, directory/expiration cleanup filters, anonymization
+  helpers, and privacy policy suggestion/default text without real mail or
+  network delivery.
 - `query`: no-DB query builder and execution APIs, including meta/tax/date
   query tree sanitization, SQL fragment generation, relation normalization,
   query-var parsing, seeded `WP_Query` execution/found-row result oracles,
