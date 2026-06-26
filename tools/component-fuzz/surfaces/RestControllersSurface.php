@@ -2091,8 +2091,8 @@ final class RestControllersSurface {
 		self::reset_runtime_state();
 
 		$case              = self::search_case( $ctx->fork( 'search' ) );
-		$handler           = self::make_search_handler( $case['type'], $case['subtypes'], $case['items'] );
-		$secondary_handler = self::make_search_handler( $case['secondaryType'], $case['secondarySubtypes'], array() );
+		$handler           = self::make_search_handler( $case['type'], $case['subtypes'], $case['items'], $case['handlerIds'], $case['handlerTotal'] );
+		$secondary_handler = self::make_search_handler( $case['secondaryType'], $case['secondarySubtypes'], array(), array(), 0 );
 		$failures          = array();
 		$doing_it_wrong    = array();
 
@@ -2224,25 +2224,18 @@ final class RestControllersSurface {
 		);
 		$get_request = self::request( 'GET', '/wp/v2/search', $query );
 		$get_items   = $controller->get_items( $get_request );
-		$expected_ids = self::expected_search_ids(
-			$case['items'],
-			$case['subtypes'],
-			$case['search'],
-			$case['include'],
-			$case['exclude']
-		);
-		$expected_page_ids = array_slice( $expected_ids, 2, 2 );
-		$get_headers       = $get_items instanceof \WP_REST_Response ? $get_items->get_headers() : array();
-		$link_header       = (string) ( $get_headers['Link'] ?? '' );
-		$base_link         = \add_query_arg( \urlencode_deep( $get_request->get_query_params() ), \rest_url( 'wp/v2/search' ) );
-		$expected_prev     = \add_query_arg( 'page', 1, $base_link );
-		$expected_next     = \add_query_arg( 'page', 3, $base_link );
+		$expected_ids = $case['handlerIds'];
+		$get_headers  = $get_items instanceof \WP_REST_Response ? $get_items->get_headers() : array();
+		$link_header  = (string) ( $get_headers['Link'] ?? '' );
+		$base_link    = \add_query_arg( \urlencode_deep( $get_request->get_query_params() ), \rest_url( 'wp/v2/search' ) );
+		$expected_prev = \add_query_arg( 'page', 1, $base_link );
+		$expected_next = \add_query_arg( 'page', 3, $base_link );
 
 		self::collect_failure(
 			$failures,
 			$get_items instanceof \WP_REST_Response
-				&& $expected_page_ids === self::search_response_ids( $get_items )
-				&& count( $expected_ids ) === $get_headers['X-WP-Total']
+				&& $expected_ids === self::search_response_ids( $get_items )
+				&& $case['handlerTotal'] === (int) ( $get_headers['X-WP-Total'] ?? 0 )
 				&& 3 === $get_headers['X-WP-TotalPages']
 				&& str_contains( $link_header, '<' . $expected_prev . '>; rel="prev"' )
 				&& str_contains( $link_header, '<' . $expected_next . '>; rel="next"' )
@@ -2290,7 +2283,7 @@ final class RestControllersSurface {
 			$failures,
 			$head_items instanceof \WP_REST_Response
 				&& array() === $head_items->get_data()
-				&& count( $expected_ids ) === $head_headers['X-WP-Total']
+				&& $case['handlerTotal'] === (int) ( $head_headers['X-WP-Total'] ?? 0 )
 				&& 2 === $head_headers['X-WP-TotalPages']
 				&& $prepare_count_before_head === count( $handler->prepare_calls ),
 			'search HEAD returns only headers and does not prepare item bodies',
@@ -2318,7 +2311,7 @@ final class RestControllersSurface {
 				)
 			)
 		);
-		$malformed_handler = self::make_search_handler( $case['malformedType'], $case['subtypes'], $case['items'], true );
+		$malformed_handler = self::make_search_handler( $case['malformedType'], $case['subtypes'], $case['items'], $case['handlerIds'], $case['handlerTotal'], true );
 		$malformed_items   = ( new \WP_REST_Search_Controller( array( $malformed_handler ) ) )->get_items(
 			self::request(
 				'GET',
@@ -2341,6 +2334,14 @@ final class RestControllersSurface {
 				'invalidPage' => $invalid_page,
 				'malformed'   => $malformed_items,
 			)
+		);
+
+		$route_dispatch = self::check_search_route_dispatch( $case );
+		self::collect_failure(
+			$failures,
+			true === $route_dispatch['ok'],
+			'search registered route applies defaults, schema validation, HEAD, and links',
+			$route_dispatch
 		);
 
 		$field_request = self::request(
@@ -2395,6 +2396,126 @@ final class RestControllersSurface {
 				'case'     => $case,
 				'failures' => array_slice( $failures, 0, 8 ),
 			)
+		);
+	}
+
+	private static function check_search_route_dispatch( array $case ): array {
+		$handler    = self::make_search_handler( $case['type'], $case['subtypes'], $case['items'], $case['handlerIds'], $case['handlerTotal'] );
+		$controller = new \WP_REST_Search_Controller( array( $handler ) );
+
+		$previous_server  = $GLOBALS['wp_rest_server'] ?? null;
+		$had_wp_actions   = array_key_exists( 'wp_actions', $GLOBALS );
+		$previous_actions = $GLOBALS['wp_actions'] ?? null;
+
+		$server                    = new \WP_REST_Server();
+		$GLOBALS['wp_rest_server'] = $server;
+
+		if ( ! isset( $GLOBALS['wp_actions'] ) || ! is_array( $GLOBALS['wp_actions'] ) ) {
+			$GLOBALS['wp_actions'] = array();
+		}
+		$GLOBALS['wp_actions']['rest_api_init'] = max( 1, (int) ( $GLOBALS['wp_actions']['rest_api_init'] ?? 0 ) );
+
+		$default_request          = self::request( 'GET', '/wp/v2/search', array( 'page' => 2, 'per_page' => 2 ) );
+		$head_request             = self::request( 'HEAD', '/wp/v2/search', array( 'page' => 1, 'per_page' => 4 ) );
+		$invalid_include_request  = self::request( 'GET', '/wp/v2/search', array( 'include' => array( 'not-an-int' ) ) );
+		$invalid_type_request     = self::request(
+			'GET',
+			'/wp/v2/search',
+			array( \WP_REST_Search_Controller::PROP_TYPE => $case['invalidType'] )
+		);
+		$routes                   = array();
+		$route_options            = array();
+		$default_response         = null;
+		$head_response            = null;
+		$invalid_include_response = null;
+		$invalid_type_response    = null;
+
+		try {
+			$controller->register_routes();
+			$routes                   = $server->get_routes( 'wp/v2' );
+			$route_options            = $server->get_route_options( '/wp/v2/search' );
+			$default_response         = $server->dispatch( $default_request );
+			$prepare_count_before_head = count( $handler->prepare_calls );
+			$head_response            = $server->dispatch( $head_request );
+			$invalid_include_response = $server->dispatch( $invalid_include_request );
+			$invalid_type_response    = $server->dispatch( $invalid_type_request );
+		} finally {
+			if ( $had_wp_actions ) {
+				$GLOBALS['wp_actions'] = $previous_actions;
+			} else {
+				unset( $GLOBALS['wp_actions'] );
+			}
+
+			if ( null !== $previous_server ) {
+				$GLOBALS['wp_rest_server'] = $previous_server;
+			} else {
+				unset( $GLOBALS['wp_rest_server'] );
+			}
+		}
+
+		$default_headers = $default_response instanceof \WP_REST_Response ? $default_response->get_headers() : array();
+		$head_headers    = $head_response instanceof \WP_REST_Response ? $head_response->get_headers() : array();
+		$link_header     = (string) ( $default_headers['Link'] ?? '' );
+		$base_link       = \add_query_arg( \urlencode_deep( $default_request->get_query_params() ), \rest_url( 'wp/v2/search' ) );
+		$expected_prev   = \add_query_arg( 'page', 1, $base_link );
+		$expected_next   = \add_query_arg( 'page', 3, $base_link );
+		$route_methods   = self::route_methods( $routes['/wp/v2/search'] ?? array() );
+		$first_call      = $handler->search_calls[0] ?? array();
+		$head_call       = $handler->search_calls[1] ?? array();
+		$server_restored = null !== $previous_server ? ( $GLOBALS['wp_rest_server'] ?? null ) === $previous_server : ! array_key_exists( 'wp_rest_server', $GLOBALS );
+		$actions_restored = $had_wp_actions ? ( $GLOBALS['wp_actions'] ?? null ) === $previous_actions : ! array_key_exists( 'wp_actions', $GLOBALS );
+		$prepare_count_after_head = count( $handler->prepare_calls );
+
+		return array(
+			'ok'                     => isset( $routes['/wp/v2/search'] )
+				&& in_array( 'GET', $route_methods, true )
+				&& is_callable( $route_options['schema'] ?? null )
+				&& $default_response instanceof \WP_REST_Response
+				&& 200 === $default_response->get_status()
+				&& $case['handlerIds'] === self::search_response_ids( $default_response )
+				&& $case['handlerTotal'] === (int) ( $default_headers['X-WP-Total'] ?? 0 )
+				&& 3 === (int) ( $default_headers['X-WP-TotalPages'] ?? 0 )
+				&& str_contains( $link_header, '<' . $expected_prev . '>; rel="prev"' )
+				&& str_contains( $link_header, '<' . $expected_next . '>; rel="next"' )
+				&& array(
+					'method'   => 'GET',
+					'type'     => $case['type'],
+					'subtype'  => array( \WP_REST_Search_Controller::TYPE_ANY ),
+					'include'  => array(),
+					'exclude'  => array(),
+					'page'     => 2,
+					'per_page' => 2,
+					'search'   => '',
+				) === $first_call
+				&& $head_response instanceof \WP_REST_Response
+				&& 200 === $head_response->get_status()
+				&& array() === $head_response->get_data()
+				&& $case['handlerTotal'] === (int) ( $head_headers['X-WP-Total'] ?? 0 )
+				&& 2 === (int) ( $head_headers['X-WP-TotalPages'] ?? 0 )
+				&& is_array( $head_call )
+				&& 'HEAD' === ( $head_call['method'] ?? null )
+				&& $case['type'] === ( $head_call['type'] ?? null )
+				&& 1 === ( $head_call['page'] ?? null )
+				&& 4 === ( $head_call['per_page'] ?? null )
+				&& $prepare_count_before_head === $prepare_count_after_head
+				&& self::response_error_ok( $invalid_include_response, 'rest_invalid_param', 400 )
+				&& self::response_error_ok( $invalid_type_response, 'rest_invalid_param', 400 )
+				&& $server_restored
+				&& $actions_restored,
+			'routes'                 => array_keys( $routes ),
+			'routeMethods'           => $route_methods,
+			'defaultIds'             => self::search_response_ids( $default_response ),
+			'defaultHeaders'         => $default_headers,
+			'defaultLinkHeader'      => $link_header,
+			'searchCalls'            => $handler->search_calls,
+			'headData'               => $head_response instanceof \WP_REST_Response ? $head_response->get_data() : $head_response,
+			'headHeaders'            => $head_headers,
+			'prepareBeforeHead'      => $prepare_count_before_head,
+			'prepareAfterHead'       => $prepare_count_after_head,
+			'invalidIncludeResponse' => $invalid_include_response,
+			'invalidTypeResponse'    => $invalid_type_response,
+			'serverRestored'         => $server_restored,
+			'actionsRestored'        => $actions_restored,
 		);
 	}
 
@@ -2453,7 +2574,11 @@ final class RestControllersSurface {
 			);
 
 			foreach ( $slugs as $slug ) {
-				$format = str_replace( 'post-format-', '', $slug );
+				if ( ! str_starts_with( $slug, 'post-format-' ) ) {
+					continue;
+				}
+
+				$format = substr( $slug, strlen( 'post-format-' ) );
 				if ( in_array( $format, $linked_formats, true ) ) {
 					return array( self::post_format_term( $format ) );
 				}
@@ -2531,7 +2656,8 @@ final class RestControllersSurface {
 					),
 				) === $query_calls
 				&& array() === array_values( array_diff( $actual_ids ?? array(), $linked_formats ) )
-				&& count( $term_link_calls ) >= count( $expected_ids )
+				&& self::post_format_term_queries_cover( $term_query_calls, $expected_ids )
+				&& self::post_format_link_calls_cover( $term_link_calls, array_unique( array_merge( $expected_ids, array( $linked_formats[0] ) ) ) )
 				&& $filter_cleanup,
 			'expectedIds'     => $expected_ids,
 			'actualIds'       => $actual_ids,
@@ -2747,6 +2873,8 @@ final class RestControllersSurface {
 			'subtypes'          => $subtypes,
 			'secondarySubtypes' => array( self::route_token( $ctx->fork( 'secondary-subtype' ), 'cfz-delta' ) ),
 			'items'             => $items,
+			'handlerIds'        => array( 103, 104 ),
+			'handlerTotal'      => 6,
 			'search'            => 'relay',
 			'include'           => array( 101, 102, 103, 104, 105, 106, 107 ),
 			'exclude'           => array( 107 ),
@@ -2755,8 +2883,8 @@ final class RestControllersSurface {
 		);
 	}
 
-	private static function make_search_handler( string $type, array $subtypes, array $items, bool $malformed_result = false ): \WP_REST_Search_Handler {
-		return new class( $type, $subtypes, $items, $malformed_result ) extends \WP_REST_Search_Handler {
+	private static function make_search_handler( string $type, array $subtypes, array $items, array $result_ids = array(), int $result_total = 0, bool $malformed_result = false ): \WP_REST_Search_Handler {
+		return new class( $type, $subtypes, $items, $result_ids, $result_total, $malformed_result ) extends \WP_REST_Search_Handler {
 			/** @var array<int,array<string,mixed>> */
 			public array $search_calls = array();
 
@@ -2766,11 +2894,18 @@ final class RestControllersSurface {
 			/** @var array<int,array<string,mixed>> */
 			private array $fixture_items = array();
 
+			/** @var array<int,int> */
+			private array $result_ids;
+
+			private int $result_total;
+
 			private bool $malformed_result;
 
-			public function __construct( string $type, array $subtypes, array $items, bool $malformed_result ) {
+			public function __construct( string $type, array $subtypes, array $items, array $result_ids, int $result_total, bool $malformed_result ) {
 				$this->type             = $type;
 				$this->subtypes         = array_values( $subtypes );
+				$this->result_ids       = array_values( array_map( 'intval', $result_ids ) );
+				$this->result_total     = $result_total;
 				$this->malformed_result = $malformed_result;
 
 				foreach ( $items as $item ) {
@@ -2802,40 +2937,9 @@ final class RestControllersSurface {
 					);
 				}
 
-				if ( array() === $subtypes || in_array( \WP_REST_Search_Controller::TYPE_ANY, $subtypes, true ) ) {
-					$subtypes = $this->subtypes;
-				}
-
-				$search        = strtolower( (string) $request['search'] );
-				$include_lookup = array_fill_keys( $include, true );
-				$exclude_lookup = array_fill_keys( $exclude, true );
-				$ids           = array();
-
-				foreach ( $this->fixture_items as $item ) {
-					$id = (int) $item['id'];
-
-					if ( ! in_array( $item['subtype'], $subtypes, true ) ) {
-						continue;
-					}
-					if ( array() !== $include_lookup && ! isset( $include_lookup[ $id ] ) ) {
-						continue;
-					}
-					if ( isset( $exclude_lookup[ $id ] ) ) {
-						continue;
-					}
-					if ( '' !== $search && false === stripos( (string) $item['title'], $search ) ) {
-						continue;
-					}
-
-					$ids[] = $id;
-				}
-
-				$page     = max( 1, (int) $request['page'] );
-				$per_page = max( 1, (int) $request['per_page'] );
-
 				return array(
-					self::RESULT_IDS   => array_slice( $ids, ( $page - 1 ) * $per_page, $per_page ),
-					self::RESULT_TOTAL => count( $ids ),
+					self::RESULT_IDS   => $this->result_ids,
+					self::RESULT_TOTAL => $this->result_total,
 				);
 			}
 
@@ -2884,33 +2988,6 @@ final class RestControllersSurface {
 		};
 	}
 
-	private static function expected_search_ids( array $items, array $subtypes, string $search, array $include, array $exclude ): array {
-		$search         = strtolower( $search );
-		$include_lookup = array_fill_keys( array_values( array_map( 'intval', $include ) ), true );
-		$exclude_lookup = array_fill_keys( array_values( array_map( 'intval', $exclude ) ), true );
-		$ids            = array();
-
-		foreach ( $items as $item ) {
-			$id = (int) $item['id'];
-			if ( ! in_array( $item['subtype'], $subtypes, true ) ) {
-				continue;
-			}
-			if ( array() !== $include_lookup && ! isset( $include_lookup[ $id ] ) ) {
-				continue;
-			}
-			if ( isset( $exclude_lookup[ $id ] ) ) {
-				continue;
-			}
-			if ( '' !== $search && false === stripos( (string) $item['title'], $search ) ) {
-				continue;
-			}
-
-			$ids[] = $id;
-		}
-
-		return $ids;
-	}
-
 	private static function search_response_ids( $response ): array {
 		if ( ! $response instanceof \WP_REST_Response || ! is_array( $response->get_data() ) ) {
 			return array();
@@ -2942,6 +3019,45 @@ final class RestControllersSurface {
 		}
 
 		return $expected;
+	}
+
+	private static function post_format_term_queries_cover( array $term_query_calls, array $formats ): bool {
+		$expected_slugs = array();
+		foreach ( $formats as $format ) {
+			$expected_slugs[] = 'post-format-' . $format;
+		}
+
+		$seen_slugs = array();
+		foreach ( $term_query_calls as $call ) {
+			if ( ! is_array( $call ) ) {
+				continue;
+			}
+
+			foreach ( (array) ( $call['slugs'] ?? array() ) as $slug ) {
+				if ( ! is_string( $slug ) ) {
+					continue;
+				}
+
+				if ( '' !== $slug && ! str_starts_with( $slug, 'post-format-' ) ) {
+					return false;
+				}
+
+				$seen_slugs[] = $slug;
+			}
+		}
+
+		return array() === array_values( array_diff( $expected_slugs, array_unique( $seen_slugs ) ) );
+	}
+
+	private static function post_format_link_calls_cover( array $term_link_calls, array $formats ): bool {
+		$seen_formats = array();
+		foreach ( $term_link_calls as $call ) {
+			if ( is_array( $call ) && isset( $call['format'] ) && is_string( $call['format'] ) ) {
+				$seen_formats[] = $call['format'];
+			}
+		}
+
+		return array() === array_values( array_diff( array_values( $formats ), array_unique( $seen_formats ) ) );
 	}
 
 	private static function post_format_term( string $format ): \WP_Term {
