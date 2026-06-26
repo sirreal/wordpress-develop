@@ -29,6 +29,7 @@ final class ContentLifecycleSurface {
 			$rows[] = self::check_user_lifecycle( $ctx->fork( 'users' ), $case );
 			$rows[] = self::check_term_lifecycle( $ctx->fork( 'terms' ), $case );
 			$rows[] = self::check_post_lifecycle( $ctx->fork( 'posts' ), $case );
+			$rows[] = self::check_post_term_relationship_lifecycle( $ctx->fork( 'post-terms' ), $case );
 			$rows[] = self::check_comment_lifecycle( $ctx->fork( 'comments' ), $case );
 			$rows[] = self::check_invalid_inputs( $ctx->fork( 'invalid' ), $case );
 		} catch ( \Throwable $e ) {
@@ -64,6 +65,7 @@ final class ContentLifecycleSurface {
 				'create_initial_post_types',
 				'create_initial_taxonomies',
 				'delete_post_meta',
+				'get_the_terms',
 				'get_comment',
 				'get_post_meta',
 				'get_post',
@@ -71,6 +73,8 @@ final class ContentLifecycleSurface {
 				'get_terms',
 				'get_user_by',
 				'get_userdata',
+				'has_term',
+				'is_object_in_term',
 				'is_wp_error',
 				'metadata_exists',
 				'post_type_exists',
@@ -86,12 +90,16 @@ final class ContentLifecycleSurface {
 				'wp_cache_get',
 				'wp_cache_set',
 				'wp_delete_comment',
+				'wp_delete_object_term_relationships',
 				'wp_delete_post',
+				'wp_get_object_terms',
 				'wp_insert_comment',
 				'wp_insert_post',
 				'wp_insert_term',
 				'wp_insert_user',
 				'wp_new_comment',
+				'wp_remove_object_terms',
+				'wp_set_object_terms',
 				'wp_set_current_user',
 				'wp_slash',
 				'wp_trash_post',
@@ -393,6 +401,360 @@ final class ContentLifecycleSurface {
 			'existsAfter'        => $exists_after,
 			'metaEvents'         => $meta_events,
 			'cacheInvalidated'   => $stale_absent,
+		);
+	}
+
+	private static function check_post_term_relationship_lifecycle( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures = array();
+		$events   = array();
+		$hooks    = self::install_term_relationship_hooks( $events );
+		$post_id  = 0;
+		$deleted  = false;
+
+		try {
+			$author_id = self::insert_support_user( 'term-author-' . $case['token'], 'term-author-' . $case['token'] . '@example.test' );
+			$post_id   = \wp_insert_post(
+				\wp_slash(
+					array(
+						'post_type'    => 'post',
+						'post_title'   => 'Term relationship ' . $case['token'],
+						'post_content' => 'Relationship content ' . $case['token'],
+						'post_status'  => 'publish',
+						'post_author'  => $author_id,
+						'post_name'    => 'term-relationship-' . $case['token'],
+					)
+				),
+				true,
+				false
+			);
+			$primary   = \wp_insert_term( 'Primary ' . $case['token'], 'category', array( 'slug' => 'primary-' . $case['token'] ) );
+			$secondary = \wp_insert_term( 'Secondary ' . $case['token'], 'category', array( 'slug' => 'secondary-' . $case['token'] ) );
+			$tag       = \wp_insert_term( 'Taggy ' . $case['token'], 'post_tag', array( 'slug' => 'taggy-' . $case['token'] ) );
+
+			self::collect_failure(
+				$failures,
+				is_int( $post_id )
+					&& is_array( $primary )
+					&& is_array( $secondary )
+					&& is_array( $tag ),
+				'post and term fixtures insert before relationship checks',
+				array(
+					'postId'    => $post_id,
+					'primary'   => $primary,
+					'secondary' => $secondary,
+					'tag'       => $tag,
+				)
+			);
+
+			if ( ! is_int( $post_id ) || ! is_array( $primary ) || ! is_array( $secondary ) || ! is_array( $tag ) ) {
+				return $ctx->result(
+					'content-lifecycle.posts.term-relationships',
+					false,
+					array( 'failures' => $failures )
+				);
+			}
+
+			$primary_term   = \get_term( (int) $primary['term_id'], 'category' );
+			$secondary_term = \get_term( (int) $secondary['term_id'], 'category' );
+			$tag_term       = \get_term( (int) $tag['term_id'], 'post_tag' );
+
+			$first_tt_ids = \wp_set_object_terms(
+				$post_id,
+				array( (int) $primary['term_id'], (int) $secondary['term_id'] ),
+				'category',
+				false
+			);
+			$ids          = \wp_get_object_terms( $post_id, 'category', array( 'fields' => 'ids', 'orderby' => 'term_id' ) );
+			$slugs        = \wp_get_object_terms( $post_id, 'category', array( 'fields' => 'slugs', 'orderby' => 'term_id' ) );
+			$names        = \wp_get_object_terms( $post_id, 'category', array( 'fields' => 'names', 'orderby' => 'term_id' ) );
+			$tt_ids       = \wp_get_object_terms( $post_id, 'category', array( 'fields' => 'tt_ids', 'orderby' => 'term_id' ) );
+			$all_with_ids = \wp_get_object_terms( $post_id, 'category', array( 'fields' => 'all_with_object_id', 'orderby' => 'term_id' ) );
+			$the_terms    = \get_the_terms( $post_id, 'category' );
+			$has_primary  = $primary_term instanceof \WP_Term ? \has_term( $primary_term->slug, 'category', $post_id ) : false;
+			$in_secondary = \is_object_in_term( $post_id, 'category', (int) $secondary['term_id'] );
+			$all_terms_ok = is_array( $all_with_ids )
+				&& self::term_objects_match_relationships(
+					$all_with_ids,
+					$post_id,
+					array( (int) $primary['term_id'], (int) $secondary['term_id'] ),
+					array( (int) $primary['term_taxonomy_id'], (int) $secondary['term_taxonomy_id'] )
+				);
+
+			self::collect_failure(
+				$failures,
+				array_values( array_map( 'intval', $first_tt_ids ) ) === array( (int) $primary['term_taxonomy_id'], (int) $secondary['term_taxonomy_id'] )
+					&& array_values( array_map( 'intval', $ids ) ) === array( (int) $primary['term_id'], (int) $secondary['term_id'] )
+					&& $primary_term instanceof \WP_Term
+					&& $secondary_term instanceof \WP_Term
+					&& array_values( $slugs ) === array( $primary_term->slug, $secondary_term->slug )
+					&& array_values( $names ) === array( $primary_term->name, $secondary_term->name )
+					&& array_values( array_map( 'intval', $tt_ids ) ) === array( (int) $primary['term_taxonomy_id'], (int) $secondary['term_taxonomy_id'] )
+					&& true === $all_terms_ok
+					&& is_array( $the_terms )
+					&& 2 === count( $the_terms )
+					&& true === $has_primary
+					&& true === $in_secondary,
+				'initial category relationships round-trip across field modes and helpers',
+				array(
+					'firstTtIds' => $first_tt_ids,
+					'ids'        => $ids,
+					'slugs'      => $slugs,
+						'names'      => $names,
+						'ttIds'      => $tt_ids,
+						'allCount'   => is_array( $all_with_ids ) ? count( $all_with_ids ) : null,
+						'allTermsOk' => $all_terms_ok,
+						'theTerms'   => is_array( $the_terms ) ? count( $the_terms ) : $the_terms,
+						'hasPrimary' => $has_primary,
+						'inSecond'   => $in_secondary,
+				)
+			);
+
+			$append_tt_ids = \wp_set_object_terms( $post_id, array( (int) $tag['term_id'] ), 'post_tag', true );
+			$tag_ids       = \wp_get_object_terms( $post_id, 'post_tag', array( 'fields' => 'ids' ) );
+			self::collect_failure(
+				$failures,
+				array_values( array_map( 'intval', $append_tt_ids ) ) === array( (int) $tag['term_taxonomy_id'] )
+					&& array_values( array_map( 'intval', $tag_ids ) ) === array( (int) $tag['term_id'] )
+					&& $tag_term instanceof \WP_Term
+					&& true === \has_term( $tag_term->slug, 'post_tag', $post_id ),
+				'append mode adds post tags without disturbing category relationships',
+				array(
+					'appendTtIds' => $append_tt_ids,
+					'tagIds'      => $tag_ids,
+					'categories'  => \wp_get_object_terms( $post_id, 'category', array( 'fields' => 'ids' ) ),
+				)
+			);
+
+			$replace_tt_ids = \wp_set_object_terms( $post_id, array( (int) $secondary['term_id'] ), 'category', false );
+			$ids_after_replace = \wp_get_object_terms( $post_id, 'category', array( 'fields' => 'ids' ) );
+			$primary_after_replace = $primary_term instanceof \WP_Term ? \has_term( $primary_term->slug, 'category', $post_id ) : true;
+			$secondary_after_replace = $secondary_term instanceof \WP_Term ? \has_term( $secondary_term->slug, 'category', $post_id ) : false;
+			self::collect_failure(
+				$failures,
+				array_values( array_map( 'intval', $replace_tt_ids ) ) === array( (int) $secondary['term_taxonomy_id'] )
+					&& array_values( array_map( 'intval', $ids_after_replace ) ) === array( (int) $secondary['term_id'] )
+					&& false === $primary_after_replace
+					&& true === $secondary_after_replace,
+				'replace mode removes stale category relationships and keeps requested term',
+				array(
+					'replaceTtIds' => $replace_tt_ids,
+					'idsAfter'     => $ids_after_replace,
+					'hasPrimary'   => $primary_after_replace,
+					'hasSecondary' => $secondary_after_replace,
+				)
+				);
+
+				$removed = \wp_remove_object_terms( $post_id, array( (int) $secondary['term_id'] ), 'category' );
+				$ids_after_remove = \wp_get_object_terms( $post_id, 'category', array( 'fields' => 'ids' ) );
+				$delete_all = \wp_delete_object_term_relationships( $post_id, array( 'post_tag' ) );
+				$tag_ids_after_delete = \wp_get_object_terms( $post_id, 'post_tag', array( 'fields' => 'ids' ) );
+				$tag_after_delete = $tag_term instanceof \WP_Term ? \has_term( $tag_term->slug, 'post_tag', $post_id ) : true;
+				self::collect_failure(
+					$failures,
+					true === $removed
+						&& array() === array_values( $ids_after_remove )
+						&& null === $delete_all
+						&& array() === array_values( $tag_ids_after_delete )
+						&& false === $tag_after_delete
+						&& false === \is_object_in_term( $post_id, 'category', (int) $secondary['term_id'] ),
+					'remove and delete relationship helpers clear taxonomy relationships',
+					array(
+						'removed'           => $removed,
+						'idsAfterRemove'    => $ids_after_remove,
+						'deleteAll'         => $delete_all,
+						'tagsAfterDelete'   => $tag_ids_after_delete,
+						'hasTagAfterDelete' => $tag_after_delete,
+					)
+				);
+
+				$post_delete_category_tt_ids = \wp_set_object_terms( $post_id, array( (int) $primary['term_id'] ), 'category', false );
+				$post_delete_tag_tt_ids      = \wp_set_object_terms( $post_id, array( (int) $tag['term_id'] ), 'post_tag', false );
+				$category_terms_before_delete = \get_the_terms( $post_id, 'category' );
+				$tag_terms_before_delete      = \get_the_terms( $post_id, 'post_tag' );
+				$category_cache_before_delete = \wp_cache_get( $post_id, 'category_relationships' );
+				$tag_cache_before_delete      = \wp_cache_get( $post_id, 'post_tag_relationships' );
+				$deleted_post                 = \wp_delete_post( $post_id, true );
+				$deleted                      = $deleted_post instanceof \WP_Post;
+				$category_cache_after_delete  = \wp_cache_get( $post_id, 'category_relationships' );
+				$tag_cache_after_delete       = \wp_cache_get( $post_id, 'post_tag_relationships' );
+				$category_ids_after_post_delete = \wp_get_object_terms( $post_id, 'category', array( 'fields' => 'ids' ) );
+				$tag_ids_after_post_delete      = \wp_get_object_terms( $post_id, 'post_tag', array( 'fields' => 'ids' ) );
+				self::collect_failure(
+					$failures,
+					array_values( array_map( 'intval', $post_delete_category_tt_ids ) ) === array( (int) $primary['term_taxonomy_id'] )
+						&& array_values( array_map( 'intval', $post_delete_tag_tt_ids ) ) === array( (int) $tag['term_taxonomy_id'] )
+						&& is_array( $category_terms_before_delete )
+						&& 1 === count( $category_terms_before_delete )
+						&& is_array( $tag_terms_before_delete )
+						&& 1 === count( $tag_terms_before_delete )
+						&& array( (int) $primary['term_id'] ) === array_values( array_map( 'intval', (array) $category_cache_before_delete ) )
+						&& array( (int) $tag['term_id'] ) === array_values( array_map( 'intval', (array) $tag_cache_before_delete ) )
+						&& true === $deleted
+						&& false === $category_cache_after_delete
+						&& false === $tag_cache_after_delete
+						&& array() === array_values( $category_ids_after_post_delete )
+						&& array() === array_values( $tag_ids_after_post_delete ),
+					'post deletion clears remaining term relationships and relationship caches',
+					array(
+						'categoryTtIds'      => $post_delete_category_tt_ids,
+						'tagTtIds'           => $post_delete_tag_tt_ids,
+						'categoryBefore'     => is_array( $category_terms_before_delete ) ? count( $category_terms_before_delete ) : $category_terms_before_delete,
+						'tagBefore'          => is_array( $tag_terms_before_delete ) ? count( $tag_terms_before_delete ) : $tag_terms_before_delete,
+						'categoryCacheBefore' => $category_cache_before_delete,
+						'tagCacheBefore'     => $tag_cache_before_delete,
+						'deletedPost'        => $deleted,
+						'categoryCacheAfter' => $category_cache_after_delete,
+						'tagCacheAfter'      => $tag_cache_after_delete,
+						'categoryAfter'      => $category_ids_after_post_delete,
+						'tagAfter'           => $tag_ids_after_post_delete,
+					)
+				);
+
+				self::collect_failure(
+					$failures,
+					self::term_relationship_events_match(
+						$events,
+						array(
+							array(
+								'hook'     => 'set_object_terms',
+								'objectId' => $post_id,
+								'taxonomy' => 'category',
+								'append'   => false,
+								'ttIds'    => array(),
+								'oldTtIds' => array(),
+							),
+							array(
+								'hook'     => 'add_term_relationship',
+								'objectId' => $post_id,
+								'taxonomy' => 'category',
+								'ttIds'    => array( (int) $primary['term_taxonomy_id'] ),
+							),
+							array(
+								'hook'     => 'added_term_relationship',
+								'objectId' => $post_id,
+								'taxonomy' => 'category',
+								'ttIds'    => array( (int) $primary['term_taxonomy_id'] ),
+							),
+							array(
+								'hook'     => 'add_term_relationship',
+								'objectId' => $post_id,
+								'taxonomy' => 'category',
+								'ttIds'    => array( (int) $secondary['term_taxonomy_id'] ),
+							),
+							array(
+								'hook'     => 'added_term_relationship',
+								'objectId' => $post_id,
+								'taxonomy' => 'category',
+								'ttIds'    => array( (int) $secondary['term_taxonomy_id'] ),
+							),
+							array(
+								'hook'     => 'set_object_terms',
+								'objectId' => $post_id,
+								'taxonomy' => 'category',
+								'append'   => false,
+								'ttIds'    => array( (int) $primary['term_taxonomy_id'], (int) $secondary['term_taxonomy_id'] ),
+								'oldTtIds' => array(),
+							),
+							array(
+								'hook'     => 'set_object_terms',
+								'objectId' => $post_id,
+								'taxonomy' => 'post_tag',
+								'append'   => true,
+								'ttIds'    => array( (int) $tag['term_taxonomy_id'] ),
+								'oldTtIds' => array(),
+							),
+							array(
+								'hook'     => 'delete_term_relationships',
+								'objectId' => $post_id,
+								'taxonomy' => 'category',
+								'ttIds'    => array( (int) $primary['term_taxonomy_id'] ),
+							),
+							array(
+								'hook'     => 'set_object_terms',
+								'objectId' => $post_id,
+								'taxonomy' => 'category',
+								'append'   => false,
+								'ttIds'    => array( (int) $secondary['term_taxonomy_id'] ),
+								'oldTtIds' => array( (int) $primary['term_taxonomy_id'], (int) $secondary['term_taxonomy_id'] ),
+							),
+							array(
+								'hook'     => 'delete_term_relationships',
+								'objectId' => $post_id,
+								'taxonomy' => 'category',
+								'ttIds'    => array( (int) $secondary['term_taxonomy_id'] ),
+							),
+							array(
+								'hook'     => 'deleted_term_relationships',
+								'objectId' => $post_id,
+								'taxonomy' => 'post_tag',
+								'ttIds'    => array( (int) $tag['term_taxonomy_id'] ),
+							),
+							array(
+								'hook'     => 'add_term_relationship',
+								'objectId' => $post_id,
+								'taxonomy' => 'category',
+								'ttIds'    => array( (int) $primary['term_taxonomy_id'] ),
+							),
+							array(
+								'hook'     => 'set_object_terms',
+								'objectId' => $post_id,
+								'taxonomy' => 'post_tag',
+								'append'   => false,
+								'ttIds'    => array( (int) $tag['term_taxonomy_id'] ),
+								'oldTtIds' => array(),
+							),
+							array(
+								'hook'     => 'delete_term_relationships',
+								'objectId' => $post_id,
+								'taxonomy' => 'category',
+								'ttIds'    => array( (int) $primary['term_taxonomy_id'] ),
+							),
+							array(
+								'hook'     => 'deleted_term_relationships',
+								'objectId' => $post_id,
+								'taxonomy' => 'post_tag',
+								'ttIds'    => array( (int) $tag['term_taxonomy_id'] ),
+							),
+						)
+						)
+						&& self::term_relationship_event_counts_match(
+						$events,
+						array(
+							'add_term_relationship'     => 5,
+							'added_term_relationship'   => 5,
+							'delete_term_relationships' => 5,
+							'deleted_term_relationships' => 5,
+							'set_object_terms'          => 6,
+						)
+					),
+					'term relationship hooks fire with expected relative order and arguments',
+					array(
+						'eventCounts' => self::term_relationship_event_counts( $events ),
+						'events'      => $events,
+					)
+				);
+			} finally {
+				if ( ! $deleted && is_int( $post_id ) && $post_id > 0 ) {
+					\wp_delete_post( $post_id, true );
+				}
+				self::remove_hooks( $hooks );
+			}
+
+			self::collect_failure(
+				$failures,
+				self::hooks_are_removed( $hooks ),
+				'term relationship hooks are removed after lifecycle check',
+				array( 'hooks' => array_map( static fn( array $hook ): string => $hook[0], $hooks ) )
+			);
+
+			return $ctx->result(
+				'content-lifecycle.posts.term-relationships',
+			array() === $failures,
+			array(
+				'case'     => self::case_summary( $case ),
+				'failures' => array_slice( $failures, 0, 6 ),
+				'events'   => array_slice( $events, 0, 20 ),
+			)
 		);
 	}
 
@@ -1051,6 +1413,80 @@ final class ContentLifecycleSurface {
 		return $hooks;
 	}
 
+	private static function install_term_relationship_hooks( array &$events ): array {
+		$hooks = array();
+		$add   = static function ( string $hook, callable $callback, int $accepted_args ) use ( &$hooks ): void {
+			\add_action( $hook, $callback, 10, $accepted_args );
+			$hooks[] = array( $hook, $callback, 10 );
+		};
+
+		$add(
+			'add_term_relationship',
+			static function ( $object_id, $tt_id, $taxonomy ) use ( &$events ): void {
+				$events[] = array(
+					'hook'     => 'add_term_relationship',
+					'objectId' => (int) $object_id,
+					'taxonomy' => (string) $taxonomy,
+					'ttIds'    => array( (int) $tt_id ),
+				);
+			},
+			3
+		);
+		$add(
+			'added_term_relationship',
+			static function ( $object_id, $tt_id, $taxonomy ) use ( &$events ): void {
+				$events[] = array(
+					'hook'     => 'added_term_relationship',
+					'objectId' => (int) $object_id,
+					'taxonomy' => (string) $taxonomy,
+					'ttIds'    => array( (int) $tt_id ),
+				);
+			},
+			3
+		);
+		$add(
+			'delete_term_relationships',
+			static function ( $object_id, $tt_ids, $taxonomy ) use ( &$events ): void {
+				$events[] = array(
+					'hook'     => 'delete_term_relationships',
+					'objectId' => (int) $object_id,
+					'taxonomy' => (string) $taxonomy,
+					'ttIds'    => self::normalize_int_list( (array) $tt_ids ),
+				);
+			},
+			3
+		);
+		$add(
+			'deleted_term_relationships',
+			static function ( $object_id, $tt_ids, $taxonomy ) use ( &$events ): void {
+				$events[] = array(
+					'hook'     => 'deleted_term_relationships',
+					'objectId' => (int) $object_id,
+					'taxonomy' => (string) $taxonomy,
+					'ttIds'    => self::normalize_int_list( (array) $tt_ids ),
+				);
+			},
+			3
+		);
+		$add(
+			'set_object_terms',
+			static function ( $object_id, $terms, $tt_ids, $taxonomy, $append, $old_tt_ids ) use ( &$events ): void {
+				$events[] = array(
+					'hook'     => 'set_object_terms',
+					'objectId' => (int) $object_id,
+					'taxonomy' => (string) $taxonomy,
+					'append'   => (bool) $append,
+					'terms'    => array_values( (array) $terms ),
+					'ttIds'    => self::normalize_int_list( (array) $tt_ids ),
+					'oldTtIds' => self::normalize_int_list( (array) $old_tt_ids ),
+				);
+			},
+			6
+		);
+
+		return $hooks;
+	}
+
 	private static function remove_hooks( array $hooks ): void {
 		foreach ( $hooks as $hook ) {
 			\remove_action( $hook[0], $hook[1], $hook[2] );
@@ -1068,6 +1504,126 @@ final class ContentLifecycleSurface {
 		}
 
 		return true;
+	}
+
+	private static function term_objects_match_relationships( array $terms, int $object_id, array $term_ids, array $tt_ids ): bool {
+		if ( count( $terms ) !== count( $term_ids ) || count( $terms ) !== count( $tt_ids ) ) {
+			return false;
+		}
+
+		$actual = array();
+		foreach ( $terms as $term ) {
+			if ( ! $term instanceof \WP_Term || ! isset( $term->object_id ) ) {
+				return false;
+			}
+
+			$actual[] = array(
+				'objectId' => (int) $term->object_id,
+				'termId'   => (int) $term->term_id,
+				'ttId'     => (int) $term->term_taxonomy_id,
+			);
+		}
+
+		$expected = array();
+		foreach ( array_values( $term_ids ) as $index => $term_id ) {
+			$expected[] = array(
+				'objectId' => $object_id,
+				'termId'   => (int) $term_id,
+				'ttId'     => (int) $tt_ids[ $index ],
+			);
+		}
+
+		self::sort_relationship_rows( $actual );
+		self::sort_relationship_rows( $expected );
+
+		return $actual === $expected;
+	}
+
+	private static function term_relationship_events_match( array $events, array $expected ): bool {
+		$offset = -1;
+		foreach ( $expected as $event ) {
+			$matched = false;
+			for ( $i = $offset + 1, $count = count( $events ); $i < $count; ++$i ) {
+				if ( is_array( $events[ $i ] ) && self::term_relationship_event_matches( $events[ $i ], $event ) ) {
+					$offset  = $i;
+					$matched = true;
+					break;
+				}
+			}
+
+			if ( ! $matched ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function term_relationship_event_matches( array $actual, array $expected ): bool {
+		foreach ( array( 'hook', 'objectId', 'taxonomy', 'append' ) as $key ) {
+			if ( array_key_exists( $key, $expected ) && ( ! array_key_exists( $key, $actual ) || $actual[ $key ] !== $expected[ $key ] ) ) {
+				return false;
+			}
+		}
+
+		foreach ( array( 'ttIds', 'oldTtIds' ) as $key ) {
+			if (
+				array_key_exists( $key, $expected )
+				&& ( ! array_key_exists( $key, $actual ) || self::normalize_int_list( (array) $actual[ $key ] ) !== self::normalize_int_list( (array) $expected[ $key ] ) )
+			) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function term_relationship_event_counts_match( array $events, array $expected ): bool {
+		return self::term_relationship_event_counts( $events ) === $expected;
+	}
+
+	private static function term_relationship_event_counts( array $events ): array {
+		$counts = array(
+			'add_term_relationship'      => 0,
+			'added_term_relationship'    => 0,
+			'delete_term_relationships'  => 0,
+			'deleted_term_relationships' => 0,
+			'set_object_terms'           => 0,
+		);
+
+		foreach ( $events as $event ) {
+			if ( is_array( $event ) && isset( $counts[ $event['hook'] ] ) ) {
+				++$counts[ $event['hook'] ];
+			}
+		}
+
+		return $counts;
+	}
+
+	private static function hooks_are_removed( array $hooks ): bool {
+		foreach ( $hooks as $hook ) {
+			if ( false !== \has_filter( $hook[0], $hook[1] ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function normalize_int_list( array $values ): array {
+		$values = array_values( array_map( 'intval', $values ) );
+		sort( $values, SORT_NUMERIC );
+
+		return $values;
+	}
+
+	private static function sort_relationship_rows( array &$rows ): void {
+		usort(
+			$rows,
+			static function ( array $a, array $b ): int {
+				return array( $a['objectId'], $a['termId'], $a['ttId'] ) <=> array( $b['objectId'], $b['termId'], $b['ttId'] );
+			}
+		);
 	}
 
 	private static function insert_support_user( string $label, string $email ) {
