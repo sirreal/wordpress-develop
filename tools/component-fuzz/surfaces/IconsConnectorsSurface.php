@@ -30,6 +30,7 @@ final class IconsConnectorsSurface {
 			return array(
 				self::check_connector_registry_lifecycle( $ctx->fork( 'connector-registry' ) ),
 				self::check_connector_init_settings_and_serialization( $ctx->fork( 'connector-init-settings' ) ),
+				self::check_connector_module_data_plugin_status( $ctx->fork( 'connector-module-plugin-status' ) ),
 				self::check_connector_rest_ai_key_validation( $ctx->fork( 'connector-rest-ai-validation' ) ),
 				self::check_connector_masking_and_file_mod_flags( $ctx->fork( 'connector-mask-filemods' ) ),
 				self::check_icon_registry_lifecycle( $ctx->fork( 'icon-registry' ) ),
@@ -87,6 +88,10 @@ final class IconsConnectorsSurface {
 				'remove_filter',
 				'rest_ensure_response',
 				'update_option',
+				'validate_plugin',
+				'wp_cache_delete',
+				'wp_cache_get',
+				'wp_cache_set',
 				'wp_get_connector',
 				'wp_get_connectors',
 				'wp_is_connector_registered',
@@ -662,6 +667,157 @@ final class IconsConnectorsSurface {
 		return self::result(
 			$ctx,
 			'icons-connectors.connectors.init-settings-rest-module-data',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, 8 ) )
+		);
+	}
+
+	private static function check_connector_module_data_plugin_status( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures           = array();
+		$plugin_cache_found = false;
+		$plugin_cache       = \wp_cache_get( 'plugins', 'plugins', false, $plugin_cache_found );
+		$cleanup_ok         = true;
+		$token              = substr( hash( 'sha256', (string) $ctx->seed() . ':' . (string) $ctx->iteration() . ':' . getmypid() ), 0, 10 );
+		$plugin_slug        = 'cf-icons-connectors-status-' . $token;
+		$plugin_file        = $plugin_slug . '/' . $plugin_slug . '.php';
+		$plugin_dir         = WP_PLUGIN_DIR . '/' . $plugin_slug;
+		$plugin_path        = WP_PLUGIN_DIR . '/' . $plugin_file;
+
+		try {
+			self::write_temp_file(
+				$plugin_path,
+				"<?php\n"
+				. "/**\n"
+				. " * Plugin Name: Component Fuzz Connector Status {$token}\n"
+				. " * Description: Connector module data plugin status fixture.\n"
+				. " * Version: 1.0.0\n"
+				. " */\n"
+				. "// Fixture only; no runtime behavior.\n"
+			);
+			self::clear_plugin_cache();
+
+			$registry = new \WP_Connector_Registry();
+			self::set_connector_registry( $registry );
+
+			$active_missing_id    = 'cfuzz-plugin-status-a-' . $token;
+			$installed_inactive_id = 'cfuzz-plugin-status-b-' . $token;
+			$missing_inactive_id  = 'cfuzz-plugin-status-c-' . $token;
+			$without_file_id      = 'cfuzz-plugin-status-d-' . $token;
+			$active_missing_file  = $plugin_slug . '-active-missing/' . $plugin_slug . '-active-missing.php';
+			$inactive_missing_file = $plugin_slug . '-inactive-missing/' . $plugin_slug . '-inactive-missing.php';
+
+			$cases = array(
+				$without_file_id       => array(
+					'name'           => 'No Plugin File Connector',
+					'type'           => 'service',
+					'authentication' => array( 'method' => 'none' ),
+					'plugin'         => array(
+						'is_active' => static fn(): bool => true,
+					),
+				),
+				$active_missing_id     => array(
+					'name'           => 'Active Missing Plugin Connector',
+					'type'           => 'service',
+					'authentication' => array( 'method' => 'none' ),
+					'plugin'         => array(
+						'file'      => $active_missing_file,
+						'is_active' => static fn(): bool => true,
+					),
+				),
+				$installed_inactive_id => array(
+					'name'           => 'Installed Inactive Plugin Connector',
+					'type'           => 'service',
+					'authentication' => array( 'method' => 'none' ),
+					'plugin'         => array(
+						'file'      => $plugin_file,
+						'is_active' => static fn(): bool => false,
+					),
+				),
+				$missing_inactive_id   => array(
+					'name'           => 'Inactive Missing Plugin Connector',
+					'type'           => 'service',
+					'authentication' => array( 'method' => 'none' ),
+					'plugin'         => array(
+						'file'      => $inactive_missing_file,
+						'is_active' => static fn(): bool => false,
+					),
+				),
+			);
+
+			$registered = array();
+			foreach ( $cases as $id => $args ) {
+				$registered[ $id ] = $registry->register( $id, $args );
+			}
+
+			$all_registered = true;
+			foreach ( $registered as $registered_connector ) {
+				$all_registered = $all_registered && is_array( $registered_connector );
+			}
+
+			$fixture_validation = \validate_plugin( $plugin_file );
+			$input_data         = array(
+				'existing' => array(
+					'token'     => $token,
+					'iteration' => $ctx->iteration(),
+				),
+				'sentinel' => 'preserved',
+			);
+			$module_data        = \_wp_connectors_get_connector_script_module_data( $input_data );
+			$connectors         = $module_data['connectors'] ?? array();
+			$actual_ids         = array_keys( $connectors );
+			$expected_ids       = array_keys( $cases );
+			sort( $expected_ids, SORT_STRING );
+
+			self::collect_failure(
+				$failures,
+				$all_registered
+					&& 0 === $fixture_validation
+					&& $input_data['existing'] === ( $module_data['existing'] ?? null )
+					&& 'preserved' === ( $module_data['sentinel'] ?? null )
+					&& $expected_ids === $actual_ids
+					&& $active_missing_file === ( $connectors[ $active_missing_id ]['plugin']['file'] ?? null )
+					&& true === ( $connectors[ $active_missing_id ]['plugin']['isActivated'] ?? null )
+					&& true === ( $connectors[ $active_missing_id ]['plugin']['isInstalled'] ?? null )
+					&& $plugin_file === ( $connectors[ $installed_inactive_id ]['plugin']['file'] ?? null )
+					&& false === ( $connectors[ $installed_inactive_id ]['plugin']['isActivated'] ?? null )
+					&& true === ( $connectors[ $installed_inactive_id ]['plugin']['isInstalled'] ?? null )
+					&& $inactive_missing_file === ( $connectors[ $missing_inactive_id ]['plugin']['file'] ?? null )
+					&& false === ( $connectors[ $missing_inactive_id ]['plugin']['isActivated'] ?? null )
+					&& false === ( $connectors[ $missing_inactive_id ]['plugin']['isInstalled'] ?? null )
+					&& ! array_key_exists( 'plugin', $connectors[ $without_file_id ] ?? array() ),
+				'connector module data emits plugin install and activation status only when plugin files are declared',
+				array(
+					'registered'        => $registered,
+					'fixtureValidation' => self::describe_value( $fixture_validation ),
+					'expectedIds'       => $expected_ids,
+					'actualIds'         => $actual_ids,
+					'activeMissing'     => $connectors[ $active_missing_id ] ?? null,
+					'installedInactive' => $connectors[ $installed_inactive_id ] ?? null,
+					'missingInactive'   => $connectors[ $missing_inactive_id ] ?? null,
+					'withoutFile'       => $connectors[ $without_file_id ] ?? null,
+				)
+			);
+		} finally {
+			$cleanup_ok = self::remove_dir_recursive( $plugin_dir );
+			self::clear_plugin_cache();
+			if ( $plugin_cache_found ) {
+				\wp_cache_set( 'plugins', $plugin_cache, 'plugins' );
+			}
+		}
+
+		self::collect_failure(
+			$failures,
+			$cleanup_ok && ! file_exists( $plugin_dir ),
+			'temporary connector plugin fixture directory is removed after module data status checks',
+			array(
+				'pluginDir' => $plugin_dir,
+				'exists'    => file_exists( $plugin_dir ),
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'icons-connectors.connectors.module-data-plugin-install-activation-status',
 			array() === $failures,
 			array( 'failures' => array_slice( $failures, 0, 8 ) )
 		);
@@ -1422,6 +1578,42 @@ final class IconsConnectorsSurface {
 		}
 		file_put_contents( $path, $contents );
 		return $path;
+	}
+
+	private static function clear_plugin_cache(): void {
+		if ( function_exists( 'wp_clean_plugins_cache' ) ) {
+			\wp_clean_plugins_cache( false );
+			return;
+		}
+
+		\wp_cache_delete( 'plugins', 'plugins' );
+	}
+
+	private static function remove_dir_recursive( string $dir ): bool {
+		if ( ! file_exists( $dir ) ) {
+			return true;
+		}
+		if ( ! is_dir( $dir ) ) {
+			return @unlink( $dir );
+		}
+
+		$iterator = new \RecursiveIteratorIterator(
+			new \RecursiveDirectoryIterator( $dir, \FilesystemIterator::SKIP_DOTS ),
+			\RecursiveIteratorIterator::CHILD_FIRST
+		);
+
+		foreach ( $iterator as $item ) {
+			$path = $item->getPathname();
+			if ( $item->isDir() && ! $item->isLink() ) {
+				if ( ! @rmdir( $path ) ) {
+					return false;
+				}
+			} elseif ( ! @unlink( $path ) ) {
+				return false;
+			}
+		}
+
+		return @rmdir( $dir );
 	}
 
 	private static function load_rest_icons_controller(): void {

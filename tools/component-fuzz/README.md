@@ -263,9 +263,10 @@ database, network requests, or a configured site.
 - `icons-connectors`: no-DB Icons and Connectors API coverage, including
   connector registry lifecycle and init discovery, settings/REST key masking,
   AI-provider update validation fail-closed behavior, API-key mask/
-  file-modification policy, script module serialization, icon manifest/search
-  behavior, SVG sanitization and file caching, REST icons schema/permission/
-  error contracts, and state restoration.
+  file-modification policy, script module serialization, plugin install/
+  activation status metadata, icon manifest/search behavior, SVG sanitization
+  and file caching, REST icons schema/permission/error contracts, and state
+  restoration.
 - `images`: image constraint and resize math, synthetic intermediate metadata,
   metadata dimension lookup, responsive `srcset`/`sizes` generation and filter
   boundaries, attachment image helpers and attribute filters, image tag
