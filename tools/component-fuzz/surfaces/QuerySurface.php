@@ -685,9 +685,14 @@ final class QuerySurface {
 			}
 		);
 
-		$core_emits_empty_order = $call['ok']
+		$request = $call['ok'] && self::is_wp_query_post_search_observation( $call['value'] )
+			? $call['value']['execution']['request']
+			: '';
+		$core_emits_empty_order = '' !== $request
+			&& 1 === preg_match( '/\bORDER\s+BY\s+DESC\s*,/i', $request );
+		$safety_oracle_passes = $call['ok']
 			&& self::is_wp_query_post_search_observation( $call['value'] )
-			&& ! self::sql_has_no_empty_orderby_expressions( $call['value']['execution']['request'] );
+			&& self::wp_query_post_search_sql_is_safe( $call['value'] );
 
 		$rows[] = self::case_result(
 			$ctx,
@@ -696,10 +701,11 @@ final class QuerySurface {
 			'query.wp-query.post-search-exact-relevance-boundary-detected',
 			$call['ok']
 				&& self::is_wp_query_post_search_observation( $call['value'] )
-				&& ( $core_emits_empty_order ? ! self::wp_query_post_search_sql_is_safe( $call['value'] ) : self::wp_query_post_search_sql_is_safe( $call['value'] ) ),
+				&& ( $core_emits_empty_order ? ! $safety_oracle_passes : $safety_oracle_passes ),
 			array(
 				'coreEmitsEmptyOrder' => $core_emits_empty_order,
-				'request'             => $call['ok'] ? self::describe_value( $call['value']['execution']['request'] ?? '' ) : '',
+				'safetyOraclePasses'  => $safety_oracle_passes,
+				'request'             => self::describe_value( $request ),
 			)
 		);
 
@@ -740,6 +746,23 @@ final class QuerySurface {
 				)
 			);
 		}
+
+		$status_sql = "SELECT wp_posts.ID FROM wp_posts WHERE (wp_posts.post_status = 'private' OR wp_posts.post_status = 'publish') AND wp_posts.post_type = 'post' ORDER BY wp_posts.post_date DESC";
+		$status_ids = self::post_ids_from_results( $GLOBALS['wpdb']->get_results( $status_sql ) );
+		$rows[]     = self::case_result(
+			$ctx,
+			count( $sql_cases ) + 1,
+			array(
+				'label' => 'direct-stub-post-status-or-equality-results',
+				'query' => $status_sql,
+			),
+			'query.wpdb-stub.post-status-or-equality-results',
+			array( 29, 23, 19, 7, 3 ) === $status_ids,
+			array(
+				'postIds' => $status_ids,
+				'expect'  => array( 29, 23, 19, 7, 3 ),
+			)
+		);
 
 		return $rows;
 	}

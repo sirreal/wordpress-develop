@@ -898,15 +898,32 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 			}
 
 			foreach ( array( 'post_name', 'post_type', 'post_parent', 'post_status', 'post_password' ) as $column ) {
-				$values = 'post_password' === $column
-					? $this->component_fuzz_compare_values( $query, $column )
-					: array_filter(
+				if ( 'post_password' === $column ) {
+					$values       = $this->component_fuzz_compare_values( $query, $column );
+					$conjunctive  = true;
+				} elseif ( 'post_status' === $column ) {
+					$values       = $this->component_fuzz_compare_values( $query, $column );
+					$conjunctive  = false;
+				} else {
+					$values       = array_filter(
 						array( $this->component_fuzz_compare_value( $query, $column ) ),
 						static function ( $value ) {
 							return null !== $value;
 						}
 					);
+					$conjunctive = true;
+				}
 				if ( array() === $values ) {
+					continue;
+				}
+				if ( ! $conjunctive ) {
+					$value_map = array_fill_keys( array_map( 'strval', $values ), true );
+					$rows = array_filter(
+						$rows,
+						static function ( $row ) use ( $column, $value_map ) {
+							return isset( $value_map[ (string) $row[ $column ] ] );
+						}
+					);
 					continue;
 				}
 				foreach ( $values as $value ) {
