@@ -83,6 +83,7 @@ final class ContentLifecycleSurface {
 				'is_wp_error',
 				'metadata_exists',
 				'post_type_exists',
+				'get_permalink',
 				'register_post_type',
 				'remove_action',
 				'sanitize_comment_cookies',
@@ -108,11 +109,13 @@ final class ContentLifecycleSurface {
 				'wp_remove_object_terms',
 				'wp_set_object_terms',
 				'wp_set_current_user',
+				'wp_schedule_single_event',
 				'wp_slash',
 				'wp_trash_post',
 				'wp_transition_post_status',
 				'wp_unslash',
 				'wp_clear_scheduled_hook',
+				'wp_next_scheduled',
 				'update_post_meta',
 				'wp_update_post',
 				'_count_posts_cache_key',
@@ -335,10 +338,11 @@ final class ContentLifecycleSurface {
 		$hook_failures    = array();
 		$storage_failures = array();
 		$cache_failures   = array();
+		$side_failures    = array();
 		$events           = array();
 		$hooks            = array();
 		$post_id          = 0;
-		$post_type        = 'cf_status_' . substr( $case['token'], 0, 8 );
+		$post_type        = self::status_transition_post_type( $case );
 
 		try {
 			\register_post_type(
@@ -377,6 +381,7 @@ final class ContentLifecycleSurface {
 				self::collect_failure( $hook_failures, false, 'status transition host post inserted', $details );
 				self::collect_failure( $storage_failures, false, 'status transition host post inserted', $details );
 				self::collect_failure( $cache_failures, false, 'status transition host post inserted', $details );
+				self::collect_failure( $side_failures, false, 'status transition host post inserted', $details );
 			} else {
 				$transitions = array(
 					array( 'draft', 'publish' ),
@@ -392,18 +397,27 @@ final class ContentLifecycleSurface {
 
 				$hooks = array_merge( $hooks, self::install_post_status_transition_hooks( $post_type, $transitions, $events ) );
 
-				foreach ( $transitions as $transition ) {
+				$GLOBALS['wpdb']->update( $GLOBALS['wpdb']->posts, array( 'guid' => '' ), array( 'ID' => $post_id ) );
+				\clean_post_cache( $post_id );
+				$post = \get_post( $post_id );
+
+				foreach ( $transitions as $transition_index => $transition ) {
 					list( $old_status, $new_status ) = $transition;
 					$label           = $old_status . '_to_' . $new_status;
 					$event_offset    = count( $events );
 					$transition_post = clone $post;
 					$transition_post->post_status = $old_status;
+					$cron_timestamp  = 2000000000 + $transition_index;
+					$scheduled       = \wp_schedule_single_event( $cron_timestamp, 'publish_future_post', array( $post_id ) );
+					$next_before     = \wp_next_scheduled( 'publish_future_post', array( $post_id ) );
+					$guid_before     = $transition_post instanceof \WP_Post ? $transition_post->guid : null;
 
 					self::seed_transition_caches( $post_type, $label );
 					\wp_transition_post_status( $new_status, $old_status, $transition_post );
 
 					$transition_events = array_slice( $events, $event_offset );
 					$stored_after      = \get_post( $post_id );
+					$next_after        = \wp_next_scheduled( 'publish_future_post', array( $post_id ) );
 
 					self::collect_failure(
 						$hook_failures,
@@ -432,13 +446,47 @@ final class ContentLifecycleSurface {
 							'caches' => self::transition_cache_summary( $post_type ),
 						)
 					);
+					self::collect_failure(
+						$side_failures,
+						true === $scheduled
+							&& $cron_timestamp === $next_before
+							&& false === $next_after,
+						'status transition clears scheduled publish_future_post hooks for the post',
+						array(
+							'label'       => $label,
+							'scheduled'   => $scheduled,
+							'nextBefore'  => $next_before,
+							'nextAfter'   => $next_after,
+							'timestamp'   => $cron_timestamp,
+						)
+					);
+
+					if ( 'draft' === $old_status && 'publish' === $new_status ) {
+						\clean_post_cache( $post_id );
+						$guid_after = \get_post( $post_id );
+						self::collect_failure(
+							$side_failures,
+							'' === $guid_before
+								&& $guid_after instanceof \WP_Post
+								&& \get_permalink( $post_id ) === $guid_after->guid,
+							'empty post GUID is reset when transitioning into publish',
+							array(
+								'label'        => $label,
+								'guidBefore'   => $guid_before,
+								'guidAfter'    => self::post_summary( $guid_after ),
+								'expectedGuid' => \get_permalink( $post_id ),
+							)
+						);
+					}
 				}
 			}
 		} finally {
 			self::remove_hooks( $hooks );
 			if ( is_int( $post_id ) && $post_id > 0 ) {
 				\wp_delete_post( $post_id, true );
+				\wp_clear_scheduled_hook( 'publish_future_post', array( $post_id ) );
 			}
+			self::clear_transition_caches( $post_type );
 		}
 
 		$data = array(
@@ -462,6 +510,11 @@ final class ContentLifecycleSurface {
 				'content-lifecycle.posts.status-transition-cache-branches',
 				array() === $cache_failures,
 				array_merge( $data, array( 'failures' => array_slice( $cache_failures, 0, 6 ) ) )
+			),
+			$ctx->result(
+				'content-lifecycle.posts.status-transition-default-side-effects',
+				array() === $side_failures,
+				array_merge( $data, array( 'failures' => array_slice( $side_failures, 0, 6 ) ) )
 			),
 		);
 	}
@@ -1324,21 +1377,32 @@ final class ContentLifecycleSurface {
 	}
 
 	private static function check_state_restored( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
-		$wpdb       = $GLOBALS['wpdb'] ?? null;
-		$counts     = $wpdb instanceof \Component_Fuzz_WPDB_Stub ? $wpdb->component_fuzz_content_counts() : array();
-		$count_ok   = array() === array_filter( $counts );
-		$cache_ok   = false === \wp_cache_get( $case['token'], 'component-fuzz-lifecycle' );
-		$type_ok    = ! \post_type_exists( $case['postType'] );
-		$dynamic_ok = false === has_filter( 'save_post_' . $case['postType'] );
+		$wpdb             = $GLOBALS['wpdb'] ?? null;
+		$status_post_type = self::status_transition_post_type( $case );
+		$status_hooks     = array(
+			'publish_' . $status_post_type,
+			'trash_' . $status_post_type,
+			'draft_' . $status_post_type,
+			'future_' . $status_post_type,
+		);
+		$counts           = $wpdb instanceof \Component_Fuzz_WPDB_Stub ? $wpdb->component_fuzz_content_counts() : array();
+		$count_ok         = array() === array_filter( $counts );
+		$cache_ok         = false === \wp_cache_get( $case['token'], 'component-fuzz-lifecycle' );
+		$type_ok          = ! \post_type_exists( $case['postType'] );
+		$status_type_ok   = ! \post_type_exists( $status_post_type );
+		$dynamic_ok       = false === has_filter( 'save_post_' . $case['postType'] );
+		$status_hooks_ok  = self::hooks_absent( $status_hooks );
 
 		return $ctx->result(
 			'content-lifecycle.state-restored-between-iterations',
-			$count_ok && $cache_ok && $type_ok && $dynamic_ok,
+			$count_ok && $cache_ok && $type_ok && $status_type_ok && $dynamic_ok && $status_hooks_ok,
 			array(
 				'counts'             => $counts,
 				'cacheSentinelEmpty' => $cache_ok,
 				'postTypeGone'       => $type_ok,
+				'statusPostTypeGone' => $status_type_ok,
 				'dynamicHookGone'    => $dynamic_ok,
+				'statusHooksGone'    => $status_hooks_ok,
 			)
 		);
 	}
@@ -1588,8 +1652,22 @@ final class ContentLifecycleSurface {
 
 		foreach ( array( 'server', 'gmt', 'blog' ) as $timezone ) {
 			\wp_cache_set( "lastpostmodified:{$timezone}", 'modified-' . $label, 'timeinfo' );
+			\wp_cache_set( "lastpostmodified:{$timezone}:{$post_type}", 'modified-type-' . $label, 'timeinfo' );
 			\wp_cache_set( "lastpostdate:{$timezone}", 'date-' . $label, 'timeinfo' );
 			\wp_cache_set( "lastpostdate:{$timezone}:{$post_type}", 'date-type-' . $label, 'timeinfo' );
+		}
+	}
+
+	private static function clear_transition_caches( string $post_type ): void {
+		foreach ( array_unique( array( \_count_posts_cache_key( $post_type ), \_count_posts_cache_key( $post_type, 'readable' ) ) ) as $key ) {
+			\wp_cache_delete( $key, 'counts' );
+		}
+
+		foreach ( array( 'server', 'gmt', 'blog' ) as $timezone ) {
+			\wp_cache_delete( "lastpostmodified:{$timezone}", 'timeinfo' );
+			\wp_cache_delete( "lastpostmodified:{$timezone}:{$post_type}", 'timeinfo' );
+			\wp_cache_delete( "lastpostdate:{$timezone}", 'timeinfo' );
+			\wp_cache_delete( "lastpostdate:{$timezone}:{$post_type}", 'timeinfo' );
 		}
 	}
 
@@ -1614,7 +1692,12 @@ final class ContentLifecycleSurface {
 
 		foreach ( $summary['timeinfo'] as $timezone => $values ) {
 			if ( $publish_touched ) {
-				if ( false !== $values['modified'] || false !== $values['date'] || false !== $values['datePostType'] ) {
+				if (
+					false !== $values['modified']
+					|| false !== $values['date']
+					|| false !== $values['datePostType']
+					|| $values['modifiedPostType'] !== 'modified-type-' . $label
+				) {
 					return false;
 				}
 				continue;
@@ -1622,6 +1705,7 @@ final class ContentLifecycleSurface {
 
 			if (
 				$values['modified'] !== 'modified-' . $label
+				|| $values['modifiedPostType'] !== 'modified-type-' . $label
 				|| $values['date'] !== 'date-' . $label
 				|| $values['datePostType'] !== 'date-type-' . $label
 			) {
@@ -1651,9 +1735,10 @@ final class ContentLifecycleSurface {
 
 		foreach ( array( 'server', 'gmt', 'blog' ) as $timezone ) {
 			$summary['timeinfo'][ $timezone ] = array(
-				'modified'     => \wp_cache_get( "lastpostmodified:{$timezone}", 'timeinfo' ),
-				'date'         => \wp_cache_get( "lastpostdate:{$timezone}", 'timeinfo' ),
-				'datePostType' => \wp_cache_get( "lastpostdate:{$timezone}:{$post_type}", 'timeinfo' ),
+				'modified'         => \wp_cache_get( "lastpostmodified:{$timezone}", 'timeinfo' ),
+				'modifiedPostType' => \wp_cache_get( "lastpostmodified:{$timezone}:{$post_type}", 'timeinfo' ),
+				'date'             => \wp_cache_get( "lastpostdate:{$timezone}", 'timeinfo' ),
+				'datePostType'     => \wp_cache_get( "lastpostdate:{$timezone}:{$post_type}", 'timeinfo' ),
 			);
 		}
 
@@ -1934,6 +2019,16 @@ final class ContentLifecycleSurface {
 		return true;
 	}
 
+	private static function hooks_absent( array $hooks ): bool {
+		foreach ( $hooks as $hook ) {
+			if ( false !== \has_filter( $hook ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
 	private static function normalize_int_list( array $values ): array {
 		$values = array_values( array_map( 'intval', $values ) );
 		sort( $values, SORT_NUMERIC );
@@ -2007,6 +2102,10 @@ final class ContentLifecycleSurface {
 				'flags' => array( true, 7, 'component-fuzz' ),
 			),
 		);
+	}
+
+	private static function status_transition_post_type( array $case ): string {
+		return 'cf_status_' . substr( $case['token'], 0, 8 );
 	}
 
 	private static function edge_text( \ComponentFuzz\FuzzContext $ctx, string $label ): string {
