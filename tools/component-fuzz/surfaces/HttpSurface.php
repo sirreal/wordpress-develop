@@ -709,15 +709,17 @@ final class HttpSurface {
 		$response_events  = array();
 		$responses        = array();
 		$http             = new \WP_Http();
-		$base_url         = 'https://api.example.test/component-fuzz/http/requests/' . self::token( $ctx, 8 );
+		$base_url         = 'https://example.test/component-fuzz/http/requests/' . self::token( $ctx, 8 );
 		$cert_path        = ABSPATH . WPINC . '/certificates/component-fuzz-ca-bundle.pem';
+		$stream_root      = self::make_temp_directory( $ctx, 'requests-success' );
+		$stream_file      = $stream_root . DIRECTORY_SEPARATOR . 'stream-' . self::token( $ctx, 8 ) . '.txt';
 		$object_cookie    = new \WP_Http_Cookie(
 			array(
 				'name'      => 'object_cookie',
 				'value'     => 'object-' . self::token( $ctx, 5 ),
 				'expires'   => PHP_INT_MAX,
 				'path'      => '/',
-				'domain'    => 'api.example.test',
+				'domain'    => 'example.test',
 				'host_only' => true,
 			)
 		);
@@ -731,6 +733,10 @@ final class HttpSurface {
 			'patch' => self::token( $ctx, 8 ),
 			'flag'  => '1',
 		);
+		$limit_size       = 333;
+		$limited_body     = 'requests-get-limited-' . str_repeat( self::token( $ctx, 6 ), 80 );
+		$stream_limit     = 160;
+		$stream_body      = 'requests-stream-success-' . str_repeat( self::token( $ctx, 7 ), 40 );
 		$redirect_url     = $base_url . '/redirect-follow';
 		$redirect_final   = $base_url . '/redirect-follow/final';
 		$redirect_body    = 'redirect=' . rawurlencode( self::token( $ctx, 8 ) );
@@ -751,14 +757,14 @@ final class HttpSurface {
 						$object_cookie->name  => $object_cookie,
 					),
 					'sslverify'           => false,
-					'limit_response_size' => 333,
+					'limit_response_size' => $limit_size,
 				),
 				'expectedMethod'        => 'GET',
 				'expectedData'          => $get_body,
 				'expectedDataFormat'    => 'query',
 				'expectedVerify'        => false,
 				'expectedVerifyName'    => false,
-				'expectedMaxBytes'      => 333,
+				'expectedMaxBytes'      => $limit_size,
 				'expectedRedirects'     => 5,
 				'expectedHeaders'       => array(
 					'x-fuzz-raw'     => 'one',
@@ -772,9 +778,10 @@ final class HttpSurface {
 				),
 				'status'                => 200,
 				'reason'                => 'OK',
-				'responseBody'          => 'requests-get-' . self::token( $ctx, 8 ),
+				'responseBody'          => $limited_body,
+				'respectMaxBytes'       => true,
 				'expectedResponseCode'  => 200,
-				'expectedResponseBody'  => null,
+				'expectedResponseBody'  => substr( $limited_body, 0, $limit_size ),
 				'expectedResponseText'  => 'OK',
 				'cookieName'            => 'server_get',
 				'cookieValue'           => 'server value ' . self::token( $ctx, 4 ),
@@ -948,6 +955,34 @@ final class HttpSurface {
 				'cookieTwoName'         => 'server_nonblocking_extra',
 				'cookieTwoValue'        => 'extra ' . self::token( $ctx, 4 ),
 			),
+			array(
+				'label'                 => 'remote-get-stream-success',
+				'caller'                => 'wp_remote_get',
+				'url'                   => $base_url . '/stream-success',
+				'args'                  => array(
+					'stream'              => true,
+					'filename'            => $stream_file,
+					'limit_response_size' => $stream_limit,
+				),
+				'expectedMethod'        => 'GET',
+				'expectedData'          => null,
+				'expectedDataFormat'    => 'query',
+				'expectedRedirects'     => 5,
+				'expectedMaxBytes'      => $stream_limit,
+				'expectedFilename'      => $stream_file,
+				'status'                => 200,
+				'reason'                => 'OK',
+				'responseBody'          => $stream_body,
+				'respectMaxBytes'       => true,
+				'expectedResponseCode'  => 200,
+				'expectedResponseBody'  => '',
+				'expectedResponseText'  => 'OK',
+				'expectedFileBody'      => substr( $stream_body, 0, $stream_limit ),
+				'cookieName'            => 'server_stream',
+				'cookieValue'           => 'stream ' . self::token( $ctx, 4 ),
+				'cookieTwoName'         => 'server_stream_extra',
+				'cookieTwoValue'        => 'extra ' . self::token( $ctx, 4 ),
+			),
 		);
 
 		$generated_methods = array( 'PUT', 'PATCH', 'DELETE', 'OPTIONS' );
@@ -1050,6 +1085,7 @@ final class HttpSurface {
 				if ( ! empty( $case['redirectOnly'] ) || ( ! empty( $case['redirectLocation'] ) && 0 === $redirected ) ) {
 					return $this->raw_response(
 						$case,
+						$options,
 						302,
 						'Found',
 						'',
@@ -1057,7 +1093,7 @@ final class HttpSurface {
 					);
 				}
 
-				return $this->raw_response( $case );
+				return $this->raw_response( $case, $options );
 			}
 
 			public function request_multiple( $requests, $options ) {
@@ -1078,7 +1114,7 @@ final class HttpSurface {
 				return true;
 			}
 
-			private function raw_response( array $case, $status = null, $reason = null, $body = null, array $extra_headers = array() ): string {
+			private function raw_response( array $case, array $options, $status = null, $reason = null, $body = null, array $extra_headers = array() ): string {
 				$label            = (string) ( $case['label'] ?? 'unmapped' );
 				$status           = null === $status ? (int) ( $case['status'] ?? 200 ) : (int) $status;
 				$reason           = null === $reason ? (string) ( $case['reason'] ?? 'OK' ) : (string) $reason;
@@ -1101,7 +1137,17 @@ final class HttpSurface {
 					$lines[] = $header;
 				}
 
-				return implode( "\r\n", $lines ) . "\r\n\r\n" . $body;
+				if ( ! empty( $case['respectMaxBytes'] ) && false !== ( $options['max_bytes'] ?? false ) ) {
+					$body = substr( $body, 0, (int) $options['max_bytes'] );
+				}
+
+				$headers = implode( "\r\n", $lines );
+				if ( ! empty( $options['filename'] ) ) {
+					file_put_contents( (string) $options['filename'], $body );
+					return $headers;
+				}
+
+				return $headers . "\r\n\r\n" . $body;
 			}
 		};
 
@@ -1218,6 +1264,11 @@ final class HttpSurface {
 					&& $case['expectedMaxBytes'] === ( $first_before['options']['max_bytes'] ?? null )
 					&& $case['expectedMaxBytes'] === ( $first_transport['options']['max_bytes'] ?? null );
 			}
+			if ( array_key_exists( 'expectedFilename', $case ) ) {
+				$mapping_ok = $mapping_ok
+					&& $case['expectedFilename'] === ( $first_before['options']['filename'] ?? null )
+					&& $case['expectedFilename'] === ( $first_transport['options']['filename'] ?? null );
+			}
 			if ( array_key_exists( 'expectedRedirects', $case ) ) {
 				$mapping_ok = $mapping_ok
 					&& true === ( $first_before['options']['follow_redirects'] ?? null )
@@ -1230,12 +1281,17 @@ final class HttpSurface {
 					&& $case['expectedFollowRedirects'] === ( $first_transport['options']['follow_redirects'] ?? null );
 			}
 			foreach ( $case['expectedHeaders'] ?? array() as $header => $expected_value ) {
-				$mapping_ok = $mapping_ok && $expected_value === self::request_header_value( $first_before['headers'] ?? array(), $header );
+				$mapping_ok = $mapping_ok
+					&& $expected_value === self::request_header_value( $first_before['headers'] ?? array(), $header )
+					&& $expected_value === self::request_header_value( $first_transport['headers'] ?? array(), $header );
 			}
 			foreach ( $case['expectedHeaderParts'] ?? array() as $header => $parts ) {
-				$actual_header = (string) self::request_header_value( $first_before['headers'] ?? array(), $header );
+				$actual_before_header    = (string) self::request_header_value( $first_before['headers'] ?? array(), $header );
+				$actual_transport_header = (string) self::request_header_value( $first_transport['headers'] ?? array(), $header );
 				foreach ( $parts as $part ) {
-					$mapping_ok = $mapping_ok && false !== strpos( $actual_header, $part );
+					$mapping_ok = $mapping_ok
+						&& false !== strpos( $actual_before_header, $part )
+						&& false !== strpos( $actual_transport_header, $part );
 				}
 			}
 			if ( isset( $case['expectedFinalMethod'] ) ) {
@@ -1343,6 +1399,12 @@ final class HttpSurface {
 					&& isset( $response_object->history[0] )
 					&& 302 === $response_object->history[0]->status_code;
 			}
+			if ( array_key_exists( 'expectedFileBody', $case ) ) {
+				$response_ok = $response_ok
+					&& ( $response['filename'] ?? null ) === ( $case['expectedFilename'] ?? null )
+					&& is_file( (string) ( $case['expectedFilename'] ?? '' ) )
+					&& $case['expectedFileBody'] === file_get_contents( (string) $case['expectedFilename'] );
+			}
 
 			self::collect_failure(
 				$failures,
@@ -1358,6 +1420,23 @@ final class HttpSurface {
 				)
 			);
 		}
+
+		if ( is_file( $stream_file ) ) {
+			@unlink( $stream_file );
+		}
+		if ( is_dir( $stream_root ) ) {
+			@rmdir( $stream_root );
+		}
+
+		self::collect_failure(
+			$failures,
+			! is_file( $stream_file ) && ! is_dir( $stream_root ),
+			'Requests stream success temp files are cleaned after assertion',
+			array(
+				'streamRoot' => $stream_root,
+				'streamFile' => $stream_file,
+			)
+		);
 
 		self::collect_failure(
 			$failures,
@@ -2053,6 +2132,20 @@ final class HttpSurface {
 		}
 
 		return $path . DIRECTORY_SEPARATOR . 'response-' . $ctx->seed() . '-' . $ctx->iteration() . '-' . self::token( $ctx, 6 ) . '.bin';
+	}
+
+	private static function make_temp_directory( \ComponentFuzz\FuzzContext $ctx, string $label ): string {
+		$path = tempnam( sys_get_temp_dir(), 'component-fuzz-http-' . $label . '-' );
+		if ( false === $path ) {
+			throw new \RuntimeException( 'Could not reserve a component fuzz HTTP temp directory.' );
+		}
+
+		$directory = $path . '-' . $ctx->seed() . '-' . $ctx->iteration();
+		if ( ! @unlink( $path ) || ! @mkdir( $directory, 0700 ) ) {
+			throw new \RuntimeException( 'Could not create a component fuzz HTTP temp directory.' );
+		}
+
+		return $directory;
 	}
 
 	private static function cleanup_stream_parent_file( string $filename ): void {
