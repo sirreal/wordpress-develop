@@ -907,9 +907,9 @@
 				<tr>
 					<td><code>rest-controllers</code></td>
 					<td><span class="status good">review fixes passed</span></td>
-					<td>Zeno the 3rd, Pasteur, and main worktree through <code>503b1da799</code></td>
-					<td>Main focused runs: seeds 1 and 224 each 1100 passed, 200 skipped, 0 failed after REST search review fixes; adjacent REST smoke: 21 passed, 2 skipped, 0 failed; all-surface smoke: 4357 passed, 33 skipped, 0 failed.</td>
-					<td>REST controller registries, schemas, context filtering, additional fields, permissions, namespace-specific post type/taxonomy item links, route helper visibility, REST search controller constructor/params/sanitizers, route-dispatched defaults and schema validation, custom handler result/header/link propagation, post-format search term/link behavior, and state restoration.</td>
+					<td>Zeno the 3rd, Pasteur, and main worktree through <code>e52ab28cbe</code></td>
+					<td>Main focused runs: seeds 1 and 224 each 1100 passed, 200 skipped, 0 failed after REST search review hardening; adjacent REST smoke: 21 passed, 2 skipped, 0 failed; all-surface smoke: 4357 passed, 33 skipped, 0 failed.</td>
+					<td>REST controller registries, schemas, context filtering, additional fields, permissions, namespace-specific post type/taxonomy item links, route helper visibility, REST search controller constructor/params/sanitizers, route-dispatched defaults, invalid subtype/schema validation, public search-result schema contents, custom handler result/header/link propagation, post-format search term/link pagination behavior, and state restoration.</td>
 				</tr>
 				<tr>
 					<td><code>query</code></td>
@@ -1492,10 +1492,10 @@
 					<td>8541 passed, 66 skipped, 0 failed at 2 iterations after dashboard recent-post fuzzing and REST namespace route coverage.</td>
 				</tr>
 				<tr>
-					<td><code>503b1da799</code></td>
+					<td><code>e52ab28cbe</code></td>
 					<td><code>rest-controllers</code></td>
-					<td>Seeds 1 and 224 each 1100 passed, 200 skipped, 0 failed after REST search controller route-dispatch defaults/schema validation, fixed custom-handler oracle, and post-format linked-term review fixes.</td>
-					<td>4357 passed, 33 skipped, 0 failed at 1 iteration after REST search review fixes.</td>
+					<td>Seeds 1 and 224 each 1100 passed, 200 skipped, 0 failed after REST search route-dispatch invalid subtype rejection, public schema callback assertions, fixed custom-handler oracle, and post-format pagination review fixes.</td>
+					<td>4357 passed, 33 skipped, 0 failed at 1 iteration after REST search review hardening.</td>
 				</tr>
 				<tr>
 					<td><code>1a26db9f1d</code></td>

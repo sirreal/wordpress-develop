@@ -487,8 +487,9 @@ database, network requests, or a configured site.
   context/_fields filtering, registered additional-field get/update/schema
   callbacks, collection params, permission gates, namespace-specific REST links,
   route-dispatched defaults/schema validation, custom search handler
-  result/header/link propagation, post-format search term/link behavior, invalid
-  values, and state restoration.
+  result/header/link propagation, invalid subtype rejection, public search-result
+  schema callback contents, post-format search term/link and pagination behavior,
+  invalid values, and state restoration.
 - `rest-object-controllers`: in-memory wpdb-backed REST object controller
   coverage for posts, terms, comments, users, revisions, and attachments,
   including schema/context/_fields filtering, deterministic collection
