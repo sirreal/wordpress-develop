@@ -35,6 +35,7 @@ final class XmlRpcSurface {
 			$rows[] = self::check_ixr_server_multicall_matrix( $ctx->fork( 'ixr-multicall' ) );
 			$rows[] = self::check_wp_xmlrpc_server_helpers( $ctx->fork( 'wp-server' ) );
 			$rows[] = self::check_pingback_fail_closed_and_readonly_lookups( $ctx->fork( 'pingbacks' ) );
+			$rows[] = self::check_authenticated_readonly_content_media_methods( $ctx->fork( 'readonly-content-media' ) );
 			$rows[] = self::check_xmlrpc_post_data_helpers( $ctx->fork( 'post-data' ) );
 			$rows[] = self::check_http_ixr_client_transport( $ctx->fork( 'http-client' ) );
 		} catch ( \Throwable $e ) {
@@ -77,16 +78,33 @@ final class XmlRpcSurface {
 			array(
 				'add_action',
 				'add_filter',
+				'current_theme_supports',
+				'current_user_can',
 				'get_post',
+				'get_permalink',
+				'get_post_format',
+				'get_post_meta',
+				'get_post_thumbnail_id',
+				'get_post_type_object',
+				'get_posts',
 				'has_filter',
+				'image_downsize',
+				'is_sticky',
 				'is_wp_error',
 				'pings_open',
 				'remove_action',
 				'remove_filter',
+				'register_post_type',
 				'url_to_postid',
+				'wp_authenticate',
 				'wp_cache_delete',
+				'wp_cache_set_posts_last_changed',
+				'wp_get_attachment_metadata',
+				'wp_get_attachment_url',
+				'wp_get_recent_posts',
 				'wp_remote_retrieve_body',
 				'wp_remote_retrieve_response_code',
+				'wp_set_current_user',
 				'wp_slash',
 				'wp_safe_remote_post',
 				'xml_parser_create',
@@ -850,6 +868,674 @@ final class XmlRpcSurface {
 		);
 	}
 
+	private static function check_authenticated_readonly_content_media_methods( \ComponentFuzz\FuzzContext $ctx ): array {
+		$wpdb = $GLOBALS['wpdb'] ?? null;
+		if (
+			! is_object( $wpdb )
+			|| ! method_exists( $wpdb, 'insert' )
+			|| ! method_exists( $wpdb, 'delete' )
+			|| ! method_exists( $wpdb, 'component_fuzz_content_counts' )
+			|| ! method_exists( $wpdb, 'component_fuzz_get_runtime_state' )
+			|| ! method_exists( $wpdb, 'component_fuzz_restore_runtime_state' )
+		) {
+			return $ctx->skip(
+				'xmlrpc.authenticated-readonly-content-media',
+				'Authenticated XML-RPC read-only content/media coverage requires the component fuzzer in-memory DB stub.',
+				array()
+			);
+		}
+
+		$failures         = array();
+		$global_snapshot  = self::snapshot_globals();
+		$content_snapshot = $wpdb->component_fuzz_content_counts();
+		$runtime_snapshot = $wpdb->component_fuzz_get_runtime_state();
+		$cleanup_state    = array(
+			'authenticate'       => null,
+			'userHasCap'         => null,
+			'defaultFields'      => null,
+			'postPrepare'        => null,
+			'mediaPrepare'       => null,
+			'xmlrpcCall'         => null,
+			'uploadDir'          => null,
+			'imageDownsize'      => null,
+			'home'               => null,
+			'siteurl'            => null,
+			'permalinkStructure' => null,
+			'stickyPosts'        => null,
+			'contentCounts'      => null,
+		);
+		$home             = 'https://example.test';
+		$uploads_url      = $home . '/wp-content/uploads';
+		$uploads_dir      = rtrim( sys_get_temp_dir(), DIRECTORY_SEPARATOR ) . DIRECTORY_SEPARATOR . 'component-fuzz-xmlrpc-uploads';
+		$marker           = 'xmlrpc-readonly-' . $ctx->identifier( 5, 12 );
+		$user_id          = 820000 + $ctx->int( 1, 5000 );
+		$username         = 'xmlrpc_user_' . $ctx->identifier( 4, 9 );
+		$password         = 'xmlrpc-pass-' . $ctx->identifier( 6, 12 );
+		$base_id          = 830000 + ( $ctx->int( 1, 8000 ) * 10 );
+		$newer_id         = $base_id + 1;
+		$older_id         = $base_id + 2;
+		$future_id        = $base_id + 3;
+		$jpg_id           = $base_id + 4;
+		$pdf_id           = $base_id + 5;
+		$png_id           = $base_id + 6;
+		$missing_id       = $base_id + 9000;
+		$jpg_file         = '2026/06/' . $marker . '.jpg';
+		$pdf_file         = '2026/06/' . $marker . '.pdf';
+		$png_file         = '2026/06/' . $marker . '.png';
+		$jpg_meta         = array(
+			'width'  => 640,
+			'height' => 480,
+			'file'   => $jpg_file,
+			'sizes'  => array(
+				'thumbnail' => array(
+					'file'      => 'thumb-' . basename( $jpg_file ),
+					'width'     => 150,
+					'height'    => 150,
+					'mime-type' => 'image/jpeg',
+				),
+			),
+		);
+		$jpg_alt          = 'JPEG alt ' . self::safe_text( $ctx->fork( 'jpg-alt' ), 12 );
+		$post_rows        = array(
+			$newer_id  => array(
+				'ID'                => $newer_id,
+				'post_author'       => $user_id,
+				'post_date'         => '2026-06-05 12:13:14',
+				'post_date_gmt'     => '2026-06-05 10:13:14',
+				'post_content'      => 'XML-RPC newer content ' . self::safe_text( $ctx->fork( 'newer-content' ), 18 ),
+				'post_title'        => 'XML-RPC newer ' . self::safe_text( $ctx->fork( 'newer-title' ), 14 ),
+				'post_excerpt'      => 'Newer excerpt',
+				'post_status'       => 'publish',
+				'comment_status'    => 'open',
+				'ping_status'       => 'closed',
+				'post_password'     => '',
+				'post_name'         => 'xmlrpc-newer-' . $ctx->identifier( 4, 8 ),
+				'post_modified'     => '2026-06-06 07:08:09',
+				'post_modified_gmt' => '2026-06-06 05:08:09',
+				'post_parent'       => 0,
+				'guid'              => $home . '/?p=' . $newer_id,
+				'menu_order'        => 2,
+				'post_type'         => 'post',
+				'post_mime_type'    => '',
+				'comment_count'     => 0,
+			),
+			$older_id  => array(
+				'ID'                => $older_id,
+				'post_author'       => $user_id,
+				'post_date'         => '2026-06-02 03:04:05',
+				'post_date_gmt'     => '2026-06-02 01:04:05',
+				'post_content'      => 'XML-RPC older content ' . self::safe_text( $ctx->fork( 'older-content' ), 18 ),
+				'post_title'        => 'XML-RPC older ' . self::safe_text( $ctx->fork( 'older-title' ), 14 ),
+				'post_excerpt'      => 'Older excerpt',
+				'post_status'       => 'publish',
+				'comment_status'    => 'closed',
+				'ping_status'       => 'open',
+				'post_password'     => '',
+				'post_name'         => 'xmlrpc-older-' . $ctx->identifier( 4, 8 ),
+				'post_modified'     => '2026-06-03 07:08:09',
+				'post_modified_gmt' => '2026-06-03 05:08:09',
+				'post_parent'       => 0,
+				'guid'              => $home . '/?p=' . $older_id,
+				'menu_order'        => 3,
+				'post_type'         => 'post',
+				'post_mime_type'    => '',
+				'comment_count'     => 0,
+			),
+			$future_id => array(
+				'ID'                => $future_id,
+				'post_author'       => $user_id,
+				'post_date'         => '2026-05-01 02:03:04',
+				'post_date_gmt'     => '2026-05-01 00:03:04',
+				'post_content'      => 'XML-RPC future content',
+				'post_title'        => 'XML-RPC future ' . self::safe_text( $ctx->fork( 'future-title' ), 14 ),
+				'post_excerpt'      => 'Future excerpt',
+				'post_status'       => 'future',
+				'comment_status'    => 'open',
+				'ping_status'       => 'open',
+				'post_password'     => '',
+				'post_name'         => 'xmlrpc-future-' . $ctx->identifier( 4, 8 ),
+				'post_modified'     => '2026-05-01 03:03:04',
+				'post_modified_gmt' => '2026-05-01 01:03:04',
+				'post_parent'       => 0,
+				'guid'              => $home . '/?p=' . $future_id,
+				'menu_order'        => 4,
+				'post_type'         => 'post',
+				'post_mime_type'    => '',
+				'comment_count'     => 0,
+			),
+		);
+		$attachment_rows  = array(
+			$jpg_id => array(
+				'ID'                => $jpg_id,
+				'post_author'       => $user_id,
+				'post_date'         => '2026-06-08 01:02:03',
+				'post_date_gmt'     => '2026-06-07 23:02:03',
+				'post_content'      => 'JPEG description ' . self::safe_text( $ctx->fork( 'jpg-description' ), 14 ),
+				'post_title'        => 'JPEG ' . self::safe_text( $ctx->fork( 'jpg-title' ), 12 ),
+				'post_excerpt'      => 'JPEG caption',
+				'post_status'       => 'inherit',
+				'comment_status'    => 'closed',
+				'ping_status'       => 'closed',
+				'post_password'     => '',
+				'post_name'         => 'xmlrpc-jpeg-' . $ctx->identifier( 4, 8 ),
+				'post_modified'     => '2026-06-08 01:12:03',
+				'post_modified_gmt' => '2026-06-07 23:12:03',
+				'post_parent'       => $newer_id,
+				'guid'              => $uploads_url . '/' . $jpg_file,
+				'menu_order'        => 0,
+				'post_type'         => 'attachment',
+				'post_mime_type'    => 'image/jpeg',
+				'comment_count'     => 0,
+			),
+			$pdf_id => array(
+				'ID'                => $pdf_id,
+				'post_author'       => $user_id,
+				'post_date'         => '2026-06-09 01:02:03',
+				'post_date_gmt'     => '2026-06-08 23:02:03',
+				'post_content'      => 'PDF description',
+				'post_title'        => 'PDF ' . self::safe_text( $ctx->fork( 'pdf-title' ), 12 ),
+				'post_excerpt'      => 'PDF caption',
+				'post_status'       => 'inherit',
+				'comment_status'    => 'closed',
+				'ping_status'       => 'closed',
+				'post_password'     => '',
+				'post_name'         => 'xmlrpc-pdf-' . $ctx->identifier( 4, 8 ),
+				'post_modified'     => '2026-06-09 01:12:03',
+				'post_modified_gmt' => '2026-06-08 23:12:03',
+				'post_parent'       => 0,
+				'guid'              => $uploads_url . '/' . $pdf_file,
+				'menu_order'        => 0,
+				'post_type'         => 'attachment',
+				'post_mime_type'    => 'application/pdf',
+				'comment_count'     => 0,
+			),
+			$png_id => array(
+				'ID'                => $png_id,
+				'post_author'       => $user_id,
+				'post_date'         => '2026-06-10 01:02:03',
+				'post_date_gmt'     => '2026-06-09 23:02:03',
+				'post_content'      => 'PNG description',
+				'post_title'        => 'PNG ' . self::safe_text( $ctx->fork( 'png-title' ), 12 ),
+				'post_excerpt'      => 'PNG caption',
+				'post_status'       => 'inherit',
+				'comment_status'    => 'closed',
+				'ping_status'       => 'closed',
+				'post_password'     => '',
+				'post_name'         => 'xmlrpc-png-' . $ctx->identifier( 4, 8 ),
+				'post_modified'     => '2026-06-10 01:12:03',
+				'post_modified_gmt' => '2026-06-09 23:12:03',
+				'post_parent'       => $newer_id,
+				'guid'              => $uploads_url . '/' . $png_file,
+				'menu_order'        => 0,
+				'post_type'         => 'attachment',
+				'post_mime_type'    => 'image/png',
+				'comment_count'     => 0,
+			),
+		);
+		$default_calls    = array();
+		$post_prepare    = array();
+		$media_prepare   = array();
+		$xmlrpc_calls    = array();
+		$grant_caps      = true;
+		$thrown          = null;
+		$default_post    = null;
+		$default_posts   = null;
+		$future_post     = null;
+		$invalid_post    = null;
+		$denied_post     = null;
+		$posts_list      = null;
+		$invalid_type    = null;
+		$denied_posts    = null;
+		$media_item      = null;
+		$invalid_media   = null;
+		$denied_media    = null;
+		$media_library      = null;
+		$wrong_mime_library = null;
+		$unattached         = null;
+		$denied_library     = null;
+		$auth_failure       = null;
+
+		$authenticate_filter = static function ( $user, string $login, string $pass ) use ( $username, $password, $user_id ) {
+			if ( $username === $login && $password === $pass ) {
+				return new \WP_User( $user_id );
+			}
+
+			return new \WP_Error( 'component_fuzz_xmlrpc_auth', 'Synthetic XML-RPC authentication failure.' );
+		};
+		$cap_filter          = static function ( array $allcaps, array $caps, array $args, \WP_User $user ) use ( &$grant_caps, $user_id ): array {
+			if ( (int) $user->ID !== $user_id ) {
+				return $allcaps;
+			}
+
+			foreach ( array( 'read', 'edit_posts', 'edit_others_posts', 'edit_published_posts', 'edit_private_posts', 'upload_files', 'edit_post_meta' ) as $primitive ) {
+				$allcaps[ $primitive ] = $grant_caps;
+			}
+			foreach ( $caps as $cap ) {
+				$allcaps[ $cap ] = $grant_caps && 'do_not_allow' !== $cap;
+			}
+
+			return $allcaps;
+		};
+		$default_fields_filter = static function ( array $fields, string $method ) use ( &$default_calls ): array {
+			$default_calls[] = array(
+				'method' => $method,
+				'fields' => array_values( $fields ),
+			);
+			return array( 'post_title', 'post_status', 'post_date' );
+		};
+		$post_prepare_filter = static function ( array $prepared, array $post, array $fields ) use ( &$post_prepare, $marker ): array {
+			$post_prepare[] = array(
+				'postId' => (int) $post['ID'],
+				'fields' => array_values( $fields ),
+				'keys'   => array_keys( $prepared ),
+			);
+			$prepared['component_fuzz_marker'] = $marker . ':post:' . (int) $post['ID'];
+			return $prepared;
+		};
+		$media_prepare_filter = static function ( array $prepared, \WP_Post $media_item, string $thumbnail_size ) use ( &$media_prepare, $marker ): array {
+			$media_prepare[] = array(
+				'attachmentId'  => (int) $media_item->ID,
+				'thumbnailSize' => $thumbnail_size,
+				'keys'          => array_keys( $prepared ),
+			);
+			$prepared['component_fuzz_marker'] = $marker . ':media:' . (int) $media_item->ID;
+			return $prepared;
+		};
+		$xmlrpc_call_action = static function ( string $method ) use ( &$xmlrpc_calls ): void {
+			$xmlrpc_calls[] = $method;
+		};
+		$upload_dir_filter  = static function () use ( $uploads_dir, $uploads_url ): array {
+			return array(
+				'path'    => $uploads_dir,
+				'url'     => $uploads_url,
+				'subdir'  => '',
+				'basedir' => $uploads_dir,
+				'baseurl' => $uploads_url,
+				'error'   => false,
+			);
+		};
+		$image_downsize_filter = static function ( $downsize, int $id ) use ( $jpg_id, $jpg_file, $uploads_url ) {
+			if ( $jpg_id === $id ) {
+				return array( $uploads_url . '/' . dirname( $jpg_file ) . '/thumb-' . basename( $jpg_file ), 150, 150, true );
+			}
+
+			return $downsize;
+		};
+		$home_filter        = static function () use ( $home ): string {
+			return $home;
+		};
+		$plain_permalink_filter = static function (): string {
+			return '';
+		};
+		$sticky_filter      = static function () use ( $newer_id ): array {
+			return array( $newer_id );
+		};
+
+		try {
+			\add_filter( 'authenticate', $authenticate_filter, 1, 3 );
+			\add_filter( 'user_has_cap', $cap_filter, 10, 4 );
+			\add_filter( 'xmlrpc_default_post_fields', $default_fields_filter, 10, 2 );
+			\add_filter( 'xmlrpc_prepare_post', $post_prepare_filter, 10, 3 );
+			\add_filter( 'xmlrpc_prepare_media_item', $media_prepare_filter, 10, 3 );
+			\add_action( 'xmlrpc_call', $xmlrpc_call_action, 10, 1 );
+			\add_filter( 'upload_dir', $upload_dir_filter, 10, 1 );
+			\add_filter( 'image_downsize', $image_downsize_filter, 10, 2 );
+			\add_filter( 'pre_option_home', $home_filter, 0, 3 );
+			\add_filter( 'pre_option_siteurl', $home_filter, 0, 3 );
+			\add_filter( 'pre_option_permalink_structure', $plain_permalink_filter, 0, 3 );
+			\add_filter( 'pre_option_sticky_posts', $sticky_filter, 0, 3 );
+
+			if ( ! \get_post_type_object( 'post' ) ) {
+				\register_post_type(
+					'post',
+					array(
+						'_builtin'        => true,
+						'public'          => true,
+						'show_ui'         => true,
+						'capability_type' => 'post',
+						'map_meta_cap'    => true,
+						'supports'        => array( 'title', 'editor', 'excerpt', 'thumbnail' ),
+					)
+				);
+			}
+			self::seed_xmlrpc_user( $user_id, $username, $password );
+			foreach ( $post_rows + $attachment_rows as $row ) {
+				self::seed_xmlrpc_post_row( $row );
+			}
+			self::seed_xmlrpc_post_meta( $jpg_id, '_wp_attached_file', $jpg_file );
+			self::seed_xmlrpc_post_meta( $jpg_id, '_wp_attachment_image_alt', $jpg_alt );
+			self::seed_xmlrpc_post_meta( $jpg_id, '_wp_attachment_metadata', $jpg_meta );
+			self::seed_xmlrpc_post_meta( $pdf_id, '_wp_attached_file', $pdf_file );
+			self::seed_xmlrpc_post_meta( $png_id, '_wp_attached_file', $png_file );
+			\wp_cache_set_posts_last_changed();
+
+			$server          = new \wp_xmlrpc_server();
+			$default_post    = $server->wp_getPost( array( 1, $username, $password, $newer_id ) );
+			$default_posts   = $server->wp_getPosts( array( 1, $username, $password, array( 'post_type' => 'post', 'number' => 1 ) ) );
+			$future_post     = $server->wp_getPost( array( 1, $username, $password, $future_id, array( 'post_title', 'post_status', 'post_date_gmt', 'link', 'sticky' ) ) );
+			$invalid_post    = $server->wp_getPost( array( 1, $username, $password, $missing_id, array( 'post_title' ) ) );
+			$posts_list      = $server->wp_getPosts(
+				array(
+					1,
+					$username,
+					$password,
+					array(
+						'post_type'   => 'post',
+						'post_status' => 'publish',
+						'number'      => 1,
+						'offset'      => 1,
+						'orderby'     => 'post_date',
+						'order'       => 'DESC',
+					),
+					array( 'post_title', 'post_status', 'post_date' ),
+				)
+			);
+			$invalid_type    = $server->wp_getPosts( array( 1, $username, $password, array( 'post_type' => 'component_fuzz_missing' ), array( 'post_title' ) ) );
+			$media_item      = $server->wp_getMediaItem( array( 1, $username, $password, $jpg_id ) );
+			$invalid_media   = $server->wp_getMediaItem( array( 1, $username, $password, $newer_id ) );
+			$media_library   = $server->wp_getMediaLibrary(
+				array(
+					1,
+					$username,
+					$password,
+					array(
+						'parent_id' => $newer_id,
+						'mime_type' => 'image/jpeg',
+						'number'    => 1,
+						'offset'    => 0,
+					),
+				)
+			);
+			$wrong_mime_library = $server->wp_getMediaLibrary(
+				array(
+					1,
+					$username,
+					$password,
+					array(
+						'parent_id' => $newer_id,
+						'mime_type' => 'application/pdf',
+						'number'    => 5,
+						'offset'    => 0,
+					),
+				)
+			);
+			$unattached      = $server->wp_getMediaLibrary( array( 1, $username, $password, array( 'parent_id' => 0, 'number' => 5, 'offset' => 0 ) ) );
+			$grant_caps      = false;
+			$denied_post     = $server->wp_getPost( array( 1, $username, $password, $newer_id, array( 'post_title' ) ) );
+			$denied_posts    = $server->wp_getPosts( array( 1, $username, $password, array( 'post_type' => 'post' ), array( 'post_title' ) ) );
+			$denied_media    = $server->wp_getMediaItem( array( 1, $username, $password, $jpg_id ) );
+			$denied_library  = $server->wp_getMediaLibrary( array( 1, $username, $password, array( 'number' => 1 ) ) );
+
+			$auth_server  = new \wp_xmlrpc_server();
+			$auth_failure = $auth_server->wp_getPost( array( 1, $username, $password . '-wrong', $newer_id, array( 'post_title' ) ) );
+		} catch ( \Throwable $e ) {
+			$thrown = self::describe_throwable( $e );
+		} finally {
+			\remove_filter( 'pre_option_sticky_posts', $sticky_filter, 0 );
+			\remove_filter( 'pre_option_permalink_structure', $plain_permalink_filter, 0 );
+			\remove_filter( 'pre_option_siteurl', $home_filter, 0 );
+			\remove_filter( 'pre_option_home', $home_filter, 0 );
+			\remove_filter( 'image_downsize', $image_downsize_filter, 10 );
+			\remove_filter( 'upload_dir', $upload_dir_filter, 10 );
+			\remove_action( 'xmlrpc_call', $xmlrpc_call_action, 10 );
+			\remove_filter( 'xmlrpc_prepare_media_item', $media_prepare_filter, 10 );
+			\remove_filter( 'xmlrpc_prepare_post', $post_prepare_filter, 10 );
+			\remove_filter( 'xmlrpc_default_post_fields', $default_fields_filter, 10 );
+			\remove_filter( 'user_has_cap', $cap_filter, 10 );
+			\remove_filter( 'authenticate', $authenticate_filter, 1 );
+
+			foreach ( array( $jpg_id, $pdf_id, $png_id ) as $post_id ) {
+				$wpdb->delete( $wpdb->postmeta, array( 'post_id' => $post_id ) );
+				\wp_cache_delete( $post_id, 'post_meta' );
+			}
+			foreach ( array( $newer_id, $older_id, $future_id, $jpg_id, $pdf_id, $png_id ) as $post_id ) {
+				$wpdb->delete( $wpdb->posts, array( 'ID' => $post_id ) );
+				\wp_cache_delete( $post_id, 'posts' );
+				\wp_cache_delete( $post_id, 'post_meta' );
+			}
+			$wpdb->delete( $wpdb->users, array( 'ID' => $user_id ) );
+			\wp_cache_delete( $user_id, 'users' );
+			\wp_cache_delete( $username, 'userlogins' );
+			\wp_cache_set_posts_last_changed();
+			$cleanup_state = array(
+				'authenticate'       => \has_filter( 'authenticate', $authenticate_filter ),
+				'userHasCap'         => \has_filter( 'user_has_cap', $cap_filter ),
+				'defaultFields'      => \has_filter( 'xmlrpc_default_post_fields', $default_fields_filter ),
+				'postPrepare'        => \has_filter( 'xmlrpc_prepare_post', $post_prepare_filter ),
+				'mediaPrepare'       => \has_filter( 'xmlrpc_prepare_media_item', $media_prepare_filter ),
+				'xmlrpcCall'         => \has_filter( 'xmlrpc_call', $xmlrpc_call_action ),
+				'uploadDir'          => \has_filter( 'upload_dir', $upload_dir_filter ),
+				'imageDownsize'      => \has_filter( 'image_downsize', $image_downsize_filter ),
+				'home'               => \has_filter( 'pre_option_home', $home_filter ),
+				'siteurl'            => \has_filter( 'pre_option_siteurl', $home_filter ),
+				'permalinkStructure' => \has_filter( 'pre_option_permalink_structure', $plain_permalink_filter ),
+				'stickyPosts'        => \has_filter( 'pre_option_sticky_posts', $sticky_filter ),
+				'contentCounts'      => $wpdb->component_fuzz_content_counts(),
+			);
+			$wpdb->component_fuzz_restore_runtime_state( $runtime_snapshot );
+			self::restore_globals( $global_snapshot );
+		}
+
+		if ( null !== $thrown ) {
+			$failures[] = array(
+				'message' => 'authenticated XML-RPC read-only methods do not throw',
+				'details' => self::describe_value( $thrown ),
+			);
+		}
+
+		$expected_default_keys = array( 'component_fuzz_marker', 'post_date', 'post_id', 'post_status', 'post_title' );
+		$actual_default_keys   = is_array( $default_post ) ? array_keys( $default_post ) : array();
+		sort( $actual_default_keys );
+		self::collect_failure(
+			$failures,
+			is_array( $default_post )
+				&& $expected_default_keys === $actual_default_keys
+				&& (string) $newer_id === ( $default_post['post_id'] ?? null )
+				&& is_array( $default_posts )
+				&& array( (string) $newer_id ) === self::xmlrpc_post_ids( $default_posts )
+				&& $post_rows[ $newer_id ]['post_title'] === ( $default_post['post_title'] ?? null )
+				&& 'publish' === ( $default_post['post_status'] ?? null )
+				&& '20260605T12:13:14' === self::ixr_date_iso( $default_post['post_date'] ?? null )
+				&& $marker . ':post:' . $newer_id === ( $default_post['component_fuzz_marker'] ?? null ),
+			'wp.getPost uses default post-field filtering and preserves IXR dates',
+			array( 'defaultPost' => self::describe_value( $default_post ) )
+		);
+
+		self::collect_failure(
+			$failures,
+			is_array( $future_post )
+				&& 'publish' === ( $future_post['post_status'] ?? null )
+				&& '20260501T00:03:04' === self::ixr_date_iso( $future_post['post_date_gmt'] ?? null )
+				&& $home . '/?p=' . $future_id === ( $future_post['link'] ?? null )
+				&& false === ( $future_post['sticky'] ?? null )
+				&& ! array_key_exists( 'post_content', $future_post ),
+			'wp.getPost explicit field filtering preserves permalink/sticky and future-as-publish behavior',
+			array( 'futurePost' => self::describe_value( $future_post ) )
+		);
+
+		self::collect_failure(
+			$failures,
+			404 === self::ixr_error_code( $invalid_post )
+				&& 401 === self::ixr_error_code( $denied_post )
+				&& 403 === self::ixr_error_code( $auth_failure ),
+			'wp.getPost returns distinct missing, capability, and authentication errors',
+			array(
+				'invalidPost' => self::describe_value( $invalid_post ),
+				'deniedPost'  => self::describe_value( $denied_post ),
+				'authFailure' => self::describe_value( $auth_failure ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			is_array( $posts_list )
+				&& array( (string) $older_id ) === self::xmlrpc_post_ids( $posts_list )
+				&& $post_rows[ $older_id ]['post_title'] === ( $posts_list[0]['post_title'] ?? null )
+				&& '20260602T03:04:05' === self::ixr_date_iso( $posts_list[0]['post_date'] ?? null )
+				&& 403 === self::ixr_error_code( $invalid_type )
+				&& 401 === self::ixr_error_code( $denied_posts ),
+			'wp.getPosts applies type/status/number/offset/order filters and fail-closed collection branches',
+			array(
+				'postsList'   => self::describe_value( $posts_list ),
+				'invalidType' => self::describe_value( $invalid_type ),
+				'deniedPosts' => self::describe_value( $denied_posts ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			is_array( $media_item )
+				&& (string) $jpg_id === ( $media_item['attachment_id'] ?? null )
+				&& '20260607T23:02:03' === self::ixr_date_iso( $media_item['date_created_gmt'] ?? null )
+				&& $newer_id === ( $media_item['parent'] ?? null )
+				&& $uploads_url . '/' . $jpg_file === ( $media_item['link'] ?? null )
+				&& $uploads_url . '/' . dirname( $jpg_file ) . '/thumb-' . basename( $jpg_file ) === ( $media_item['thumbnail'] ?? null )
+				&& $jpg_meta === ( $media_item['metadata'] ?? null )
+				&& $jpg_alt === ( $media_item['alt'] ?? null )
+				&& 'image/jpeg' === ( $media_item['type'] ?? null )
+				&& $marker . ':media:' . $jpg_id === ( $media_item['component_fuzz_marker'] ?? null )
+				&& 404 === self::ixr_error_code( $invalid_media )
+				&& 403 === self::ixr_error_code( $denied_media ),
+			'wp.getMediaItem returns exact media projection and distinguishes invalid attachment from upload-cap denial',
+			array(
+				'mediaItem'    => self::describe_value( $media_item ),
+				'invalidMedia' => self::describe_value( $invalid_media ),
+				'deniedMedia'  => self::describe_value( $denied_media ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			is_array( $media_library )
+				&& array( (string) $jpg_id ) === self::xmlrpc_media_ids( $media_library )
+				&& is_array( $wrong_mime_library )
+				&& array() === self::xmlrpc_media_ids( $wrong_mime_library )
+				&& is_array( $unattached )
+				&& array( (string) $pdf_id ) === self::xmlrpc_media_ids( $unattached )
+				&& 401 === self::ixr_error_code( $denied_library ),
+			'wp.getMediaLibrary applies parent, MIME, number, and offset filters with its documented cap error',
+			array(
+				'mediaLibrary'     => self::describe_value( $media_library ),
+				'wrongMimeLibrary' => self::describe_value( $wrong_mime_library ),
+				'unattached'       => self::describe_value( $unattached ),
+				'denied'           => self::describe_value( $denied_library ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			in_array( 'wp.getPost', array_column( $default_calls, 'method' ), true )
+				&& in_array( 'wp.getPosts', array_column( $default_calls, 'method' ), true )
+				&& in_array( $newer_id, array_column( $post_prepare, 'postId' ), true )
+				&& in_array( $older_id, array_column( $post_prepare, 'postId' ), true )
+				&& in_array( $jpg_id, array_column( $media_prepare, 'attachmentId' ), true )
+				&& in_array( 'wp.getMediaLibrary', $xmlrpc_calls, true )
+				&& false === $cleanup_state['authenticate']
+				&& false === $cleanup_state['userHasCap']
+				&& false === $cleanup_state['defaultFields']
+				&& false === $cleanup_state['postPrepare']
+				&& false === $cleanup_state['mediaPrepare']
+				&& false === $cleanup_state['xmlrpcCall']
+				&& false === $cleanup_state['uploadDir']
+				&& false === $cleanup_state['imageDownsize']
+				&& false === $cleanup_state['home']
+				&& false === $cleanup_state['siteurl']
+				&& false === $cleanup_state['permalinkStructure']
+				&& false === $cleanup_state['stickyPosts']
+				&& $content_snapshot === $cleanup_state['contentCounts'],
+			'authenticated XML-RPC read-only checks fire scoped hooks and restore seeded content',
+			array(
+				'defaultCalls' => self::describe_value( $default_calls ),
+				'postPrepare'  => self::describe_value( $post_prepare ),
+				'mediaPrepare' => self::describe_value( $media_prepare ),
+				'xmlrpcCalls'  => self::describe_value( $xmlrpc_calls ),
+				'cleanup'      => $cleanup_state,
+				'beforeCounts' => $content_snapshot,
+				'afterCounts'  => $cleanup_state['contentCounts'],
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'xmlrpc.authenticated-readonly-content-media',
+			array() === $failures,
+			array(
+				'failures'    => $failures,
+				'xmlrpcCalls' => $xmlrpc_calls,
+			)
+		);
+	}
+
+	private static function seed_xmlrpc_user( int $user_id, string $username, string $password ): void {
+		$GLOBALS['wpdb']->insert(
+			$GLOBALS['wpdb']->users,
+			array(
+				'ID'              => $user_id,
+				'user_login'      => $username,
+				'user_pass'       => $password,
+				'user_nicename'   => $username,
+				'user_email'      => $username . '@example.test',
+				'user_registered' => '2026-06-01 00:00:00',
+				'display_name'    => 'XML-RPC User ' . $user_id,
+			)
+		);
+		\wp_cache_delete( $user_id, 'users' );
+		\wp_cache_delete( $username, 'userlogins' );
+	}
+
+	private static function seed_xmlrpc_post_row( array $row ): void {
+		\wp_cache_delete( (int) $row['ID'], 'posts' );
+		$GLOBALS['wpdb']->insert( $GLOBALS['wpdb']->posts, $row );
+	}
+
+	private static function seed_xmlrpc_post_meta( int $post_id, string $key, $value ): void {
+		$GLOBALS['wpdb']->insert(
+			$GLOBALS['wpdb']->postmeta,
+			array(
+				'post_id'    => $post_id,
+				'meta_key'   => $key,
+				'meta_value' => $value,
+			)
+		);
+		\wp_cache_delete( $post_id, 'post_meta' );
+	}
+
+	private static function ixr_date_iso( $value ): ?string {
+		if ( ! $value instanceof \IXR_Date ) {
+			return null;
+		}
+
+		return $value->getIso();
+	}
+
+	private static function xmlrpc_post_ids( $posts ): array {
+		if ( ! is_array( $posts ) ) {
+			return array();
+		}
+
+		$ids = array();
+		foreach ( $posts as $post ) {
+			if ( is_array( $post ) && isset( $post['post_id'] ) ) {
+				$ids[] = (string) $post['post_id'];
+			}
+		}
+		return $ids;
+	}
+
+	private static function xmlrpc_media_ids( $media_items ): array {
+		if ( ! is_array( $media_items ) ) {
+			return array();
+		}
+
+		$ids = array();
+		foreach ( $media_items as $media_item ) {
+			if ( is_array( $media_item ) && isset( $media_item['attachment_id'] ) ) {
+				$ids[] = (string) $media_item['attachment_id'];
+			}
+		}
+		return $ids;
+	}
+
 	private static function seed_pingback_post( int $post_id, string $title, string $slug, string $ping_status ): void {
 		if ( ! isset( $GLOBALS['wpdb'] ) || ! is_object( $GLOBALS['wpdb'] ) || ! method_exists( $GLOBALS['wpdb'], 'insert' ) ) {
 			return;
@@ -1561,12 +2247,23 @@ final class XmlRpcSurface {
 
 		foreach (
 			array(
+				'_wp_post_type_features',
 				'current_user',
+				'post_type_meta_caps',
+				'user_email',
 				'user_ID',
+				'user_identity',
+				'user_level',
+				'user_login',
+				'user_url',
+				'userdata',
+				'wp',
 				'wp_actions',
 				'wp_current_filter',
 				'wp_filter',
 				'wp_filters',
+				'wp_post_types',
+				'wp_rewrite',
 			) as $name
 		) {
 			$snapshot['globals'][ $name ] = array(

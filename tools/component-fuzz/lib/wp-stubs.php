@@ -990,6 +990,8 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 				);
 			}
 
+			$rows = $this->component_fuzz_filter_posts_by_mime_constraints( $query, array_values( $rows ) );
+
 			$rows = $this->component_fuzz_filter_posts_by_search_like( $query, array_values( $rows ) );
 
 			$rows = $this->component_fuzz_sort_post_rows( $query, array_values( $rows ) );
@@ -1126,6 +1128,42 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 			return implode( ' AND ', $terms );
 		}
 
+		private function component_fuzz_filter_posts_by_mime_constraints( $query, array $rows ) {
+			$where = $this->component_fuzz_where_clause( $query );
+			if ( '' === $where || ! preg_match( '/post_mime_type/i', $where ) ) {
+				return $rows;
+			}
+
+			$exact_values = $this->component_fuzz_compare_values( $where, 'post_mime_type' );
+			$like_values  = array();
+			if ( preg_match_all( '/(?<![A-Za-z0-9_])(?:`?wp_posts`?\.)?`?post_mime_type`?(?![A-Za-z0-9_])\s+LIKE\s+(\'(?:\\\\.|[^\'\\\\])*\'|"[^"]*")/i', $where, $matches ) ) {
+				$like_values = array_map( array( $this, 'component_fuzz_unquote_sql_value' ), $matches[1] );
+			}
+
+			if ( array() === $exact_values && array() === $like_values ) {
+				return $rows;
+			}
+
+			$exact_map = array_fill_keys( array_map( 'strval', $exact_values ), true );
+			return array_filter(
+				$rows,
+				function ( $row ) use ( $exact_map, $like_values ) {
+					$mime_type = (string) ( $row['post_mime_type'] ?? '' );
+					if ( isset( $exact_map[ $mime_type ] ) ) {
+						return true;
+					}
+
+					foreach ( $like_values as $pattern ) {
+						if ( $this->component_fuzz_sql_like_match( $mime_type, (string) $pattern ) ) {
+							return true;
+						}
+					}
+
+					return false;
+				}
+			);
+		}
+
 		private function component_fuzz_filter_posts_by_search_like( $query, array $rows ) {
 			$where = $this->component_fuzz_where_clause( $query );
 			if ( '' === $where ) {
@@ -1133,7 +1171,7 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 			}
 
 			$patterns = array();
-			if ( preg_match_all( '/(?<![A-Za-z0-9_])(?:`?wp_posts`?\.)?`?(post_title|post_excerpt|post_content|post_mime_type)`?(?![A-Za-z0-9_])\s+(NOT\s+LIKE|LIKE)\s+(\'(?:\\\\.|[^\'\\\\])*\'|"[^"]*")/i', $where, $matches, PREG_SET_ORDER ) ) {
+			if ( preg_match_all( '/(?<![A-Za-z0-9_])(?:`?wp_posts`?\.)?`?(post_title|post_excerpt|post_content)`?(?![A-Za-z0-9_])\s+(NOT\s+LIKE|LIKE)\s+(\'(?:\\\\.|[^\'\\\\])*\'|"[^"]*")/i', $where, $matches, PREG_SET_ORDER ) ) {
 				foreach ( $matches as $match ) {
 					$key = strtoupper( preg_replace( '/\s+/', ' ', $match[2] ) ) . "\0" . $this->component_fuzz_unquote_sql_value( $match[3] );
 					if ( ! isset( $patterns[ $key ] ) ) {
