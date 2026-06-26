@@ -2939,9 +2939,7 @@ final class StyleSurface {
 				? self::get_object_property( $block_supports, 'block_supports' )
 				: null,
 			'blockSupportRenderItem' => self::get_static_property( 'WP_Block_Supports', 'block_to_render' ),
-			'dimensionsRenderFilter' => function_exists( 'has_filter' ) && function_exists( 'wp_render_dimensions_support' )
-				? \has_filter( 'render_block', 'wp_render_dimensions_support' )
-				: false,
+			'renderBlockHook'      => self::snapshot_filter_hook( 'render_block' ),
 		);
 	}
 
@@ -2971,22 +2969,40 @@ final class StyleSurface {
 			self::set_static_property( 'WP_Block_Supports', 'instance', null );
 		}
 		self::set_static_property( 'WP_Block_Supports', 'block_to_render', $snapshot['blockSupportRenderItem'] );
-		self::restore_filter_callback_presence( 'render_block', 'wp_render_dimensions_support', $snapshot['dimensionsRenderFilter'], 2 );
+		self::restore_filter_hook( 'render_block', $snapshot['renderBlockHook'] );
 	}
 
-	private static function restore_filter_callback_presence( string $hook_name, string $callback, $priority_before, int $accepted_args ): void {
-		if ( ! function_exists( 'has_filter' ) || ! function_exists( 'remove_filter' ) || ! function_exists( 'add_filter' ) ) {
+	private static function snapshot_filter_hook( string $hook_name ): array {
+		if ( ! isset( $GLOBALS['wp_filter'][ $hook_name ] ) || ! ( $GLOBALS['wp_filter'][ $hook_name ] instanceof \WP_Hook ) ) {
+			return array(
+				'exists'    => false,
+				'callbacks' => array(),
+			);
+		}
+
+		return array(
+			'exists'    => true,
+			'callbacks' => $GLOBALS['wp_filter'][ $hook_name ]->callbacks,
+		);
+	}
+
+	private static function restore_filter_hook( string $hook_name, array $snapshot ): void {
+		if ( empty( $snapshot['exists'] ) ) {
+			unset( $GLOBALS['wp_filter'][ $hook_name ] );
 			return;
 		}
 
-		$priority_after = \has_filter( $hook_name, $callback );
-		if ( false !== $priority_after ) {
-			\remove_filter( $hook_name, $callback, (int) $priority_after );
+		if ( ! class_exists( 'WP_Hook' ) ) {
+			return;
 		}
 
-		if ( false !== $priority_before && function_exists( $callback ) ) {
-			\add_filter( $hook_name, $callback, (int) $priority_before, $accepted_args );
+		if ( ! isset( $GLOBALS['wp_filter'][ $hook_name ] ) || ! ( $GLOBALS['wp_filter'][ $hook_name ] instanceof \WP_Hook ) ) {
+			$GLOBALS['wp_filter'][ $hook_name ] = new \WP_Hook();
 		}
+
+		$callbacks = is_array( $snapshot['callbacks'] ?? null ) ? $snapshot['callbacks'] : array();
+		self::set_object_property( $GLOBALS['wp_filter'][ $hook_name ], 'callbacks', $callbacks );
+		self::set_object_property( $GLOBALS['wp_filter'][ $hook_name ], 'priorities', array_keys( $callbacks ) );
 	}
 
 	private static function snapshot_globals( array $names ): array {
