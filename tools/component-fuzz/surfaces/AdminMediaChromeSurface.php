@@ -914,6 +914,8 @@ final class AdminMediaChromeSurface {
 		$integrated_caption = "Integrated caption\nSecond line";
 		$integrated_alt     = 'Integrated alt <script>alert(1)</script> "' . $ctx->identifier( 3, 8 );
 		$added_default_caption_filter = false;
+		$no_rel_url         = 'http://example.test/component-fuzz/no-rel?raw=' . rawurlencode( '<script>alert(1)</script>' ) . '&safe=1';
+		$no_rel_alt         = 'No rel alt <script>alert(1)</script> "' . $ctx->identifier( 3, 8 );
 
 		$downsize_filter = static function ( $downsize, int $id, $requested_size ) use ( &$downsize_calls, $attachment, $size, $downsize_url ) {
 			$downsize_calls[] = array(
@@ -971,6 +973,17 @@ final class AdminMediaChromeSurface {
 				'Default rel alt <script>alert(1)</script>'
 			);
 
+			$no_rel_html = \get_image_send_to_editor(
+				$attachment->ID,
+				'',
+				$title,
+				'none',
+				$no_rel_url,
+				false,
+				$size,
+				$no_rel_alt
+			);
+
 			if ( false === \has_filter( 'image_send_to_editor', 'image_add_caption' ) ) {
 				\add_filter( 'image_send_to_editor', 'image_add_caption', 20, 8 );
 				$added_default_caption_filter = true;
@@ -1024,6 +1037,19 @@ final class AdminMediaChromeSurface {
 				&& self::html_has_no_raw_script( $default_rel_html ),
 			'get_image_send_to_editor() emits the default attachment rel when rel is true',
 			array( 'html' => self::describe_string( $default_rel_html ) )
+		);
+
+		self::collect_failure(
+			$failures,
+			is_string( $no_rel_html )
+				&& str_contains( $no_rel_html, 'href="' . \esc_url( $no_rel_url ) . '"' )
+				&& str_contains( $no_rel_html, 'alt="' . \esc_attr( $no_rel_alt ) . '"' )
+				&& ! str_contains( $no_rel_html, ' rel=' )
+				&& ! str_contains( $no_rel_html, 'attachment wp-att-' )
+				&& self::html_has_no_raw_script( $no_rel_html )
+				&& ! str_contains( strtolower( $no_rel_html ), 'javascript:' ),
+			'get_image_send_to_editor() omits rel for non-attachment URLs when rel is false',
+			array( 'html' => self::describe_string( $no_rel_html ) )
 		);
 
 		self::collect_failure(
@@ -1212,6 +1238,7 @@ final class AdminMediaChromeSurface {
 
 		$media_permalink_url = \get_attachment_link( $attachment->ID );
 		$media_query_url     = \add_query_arg( 'attachment_id', (string) $attachment->ID, 'http://example.test/component-fuzz/media-send' );
+		$media_plain_url     = 'http://example.test/component-fuzz/media-send-plain?raw=' . rawurlencode( '<script>alert(1)</script>' );
 		$media_alt           = 'Media alt <script>alert(1)</script> "' . $ctx->identifier( 3, 8 );
 		$media_payload       = array(
 			'url'          => $media_permalink_url,
@@ -1229,6 +1256,14 @@ final class AdminMediaChromeSurface {
 				'image-size' => 'thumbnail',
 			)
 		);
+		$media_plain_payload = array_merge(
+			$media_payload,
+			array(
+				'url'        => $media_plain_url,
+				'align'      => 'none',
+				'image-size' => 'medium',
+			)
+		);
 		$unchanged_document_html = '<span class="component-fuzz-document">Document HTML</span>';
 
 		\add_filter( 'image_send_to_editor', $media_send_filter, 10, 9 );
@@ -1236,6 +1271,7 @@ final class AdminMediaChromeSurface {
 		try {
 			$media_permalink_html = \image_media_send_to_editor( '<span>input</span>', $attachment->ID, $media_payload );
 			$media_query_html     = \image_media_send_to_editor( '<span>input</span>', $attachment->ID, $media_query_payload );
+			$media_plain_html     = \image_media_send_to_editor( '<span>input</span>', $attachment->ID, $media_plain_payload );
 			$document_html        = \image_media_send_to_editor( $unchanged_document_html, $document->ID, array( 'url' => \wp_get_attachment_url( $document->ID ) ) );
 		} finally {
 			\remove_filter( 'image_send_to_editor', $media_send_filter, 10 );
@@ -1246,27 +1282,33 @@ final class AdminMediaChromeSurface {
 			$failures,
 			is_string( $media_permalink_html )
 				&& is_string( $media_query_html )
+				&& is_string( $media_plain_html )
 				&& str_contains( $media_permalink_html, 'href="' . \esc_url( $media_permalink_url ) . '"' )
 				&& str_contains( $media_query_html, 'href="' . \esc_url( $media_query_url ) . '"' )
+				&& str_contains( $media_plain_html, 'href="' . \esc_url( $media_plain_url ) . '"' )
 				&& str_contains( $media_permalink_html, 'rel="attachment wp-att-' . $attachment->ID . '"' )
 				&& str_contains( $media_query_html, 'rel="attachment wp-att-' . $attachment->ID . '"' )
+				&& ! str_contains( $media_plain_html, ' rel=' )
 				&& str_contains( $media_permalink_html, 'alt="' . \esc_attr( $media_alt ) . '"' )
 				&& str_contains( $media_query_html, 'alt="' . \esc_attr( $media_alt ) . '"' )
-				&& self::html_has_no_raw_script( $media_permalink_html . $media_query_html )
+				&& str_contains( $media_plain_html, 'alt="' . \esc_attr( $media_alt ) . '"' )
+				&& self::html_has_no_raw_script( $media_permalink_html . $media_query_html . $media_plain_html )
 				&& $unchanged_document_html === $document_html,
 			'image_media_send_to_editor() delegates image attachments and leaves non-image HTML unchanged',
 			array(
 				'permalinkHtml' => self::describe_string( $media_permalink_html ),
 				'queryHtml'     => self::describe_string( $media_query_html ),
+				'plainHtml'     => self::describe_string( $media_plain_html ),
 				'documentHtml'  => self::describe_string( $document_html ),
 			)
 		);
 
 		self::collect_failure(
 			$failures,
-			2 === count( $media_events )
+			3 === count( $media_events )
 				&& (int) $attachment->ID === (int) ( $media_events[0]['id'] ?? 0 )
 				&& (int) $attachment->ID === (int) ( $media_events[1]['id'] ?? 0 )
+				&& (int) $attachment->ID === (int) ( $media_events[2]['id'] ?? 0 )
 				&& $attachment->post_excerpt === ( $media_events[0]['caption'] ?? null )
 				&& $attachment->post_title === ( $media_events[0]['title'] ?? null )
 				&& 'left' === ( $media_events[0]['align'] ?? null )
@@ -1276,8 +1318,12 @@ final class AdminMediaChromeSurface {
 				&& 'center' === ( $media_events[1]['align'] ?? null )
 				&& 'thumbnail' === ( $media_events[1]['size'] ?? null )
 				&& $media_query_url === ( $media_events[1]['url'] ?? null )
+				&& 'none' === ( $media_events[2]['align'] ?? null )
+				&& 'medium' === ( $media_events[2]['size'] ?? null )
+				&& $media_plain_url === ( $media_events[2]['url'] ?? null )
 				&& ' rel="attachment wp-att-' . $attachment->ID . '"' === ( $media_events[0]['rel'] ?? null )
 				&& ' rel="attachment wp-att-' . $attachment->ID . '"' === ( $media_events[1]['rel'] ?? null )
+				&& '' === ( $media_events[2]['rel'] ?? null )
 				&& false === \has_filter( 'image_send_to_editor', $media_send_filter )
 				&& false === \has_filter( 'disable_captions', $disable_captions_filter ),
 			'image_media_send_to_editor() forwards attachment fields into get_image_send_to_editor() payloads with scoped filters',
