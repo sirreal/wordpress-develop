@@ -137,7 +137,8 @@ database, network requests, or a configured site.
   restoration.
 - `content`: slashing, metadata serialization, post and term field sanitization,
   whole-post `sanitize_post()` object/array consistency and filter locality,
-  `get_extended()` more-tag splitting, query variables, `WP_Date_Query`, and
+  `get_extended()` more-tag splitting, post-template title/excerpt/password
+  helper filters and cookie branches, query variables, `WP_Date_Query`, and
   title/class/key sanitizers.
 - `content-lifecycle`: in-memory wpdb-backed post, post-meta, term, user, and
   comment CRUD lifecycles, including insert/update/read/delete round trips,
