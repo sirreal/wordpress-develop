@@ -42,6 +42,9 @@ final class DiscoverySurface {
 			$rows[] = self::check_sitemap_renderer_field_boundaries( $ctx );
 			$rows[] = self::check_sitemap_renderer_stylesheet_filters( $ctx );
 			$rows[] = self::check_sitemap_max_url_filter( $ctx );
+			$rows[] = self::check_sitemap_posts_provider( $ctx->fork( 'sitemap-posts-provider' ) );
+			$rows[] = self::check_sitemap_taxonomies_provider( $ctx->fork( 'sitemap-taxonomies-provider' ) );
+			$rows[] = self::check_sitemap_users_provider( $ctx->fork( 'sitemap-users-provider' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = self::row(
 				$ctx,
@@ -805,6 +808,1301 @@ final class DiscoverySurface {
 		);
 	}
 
+	private static function check_sitemap_posts_provider( \ComponentFuzz\FuzzContext $ctx ): array {
+		$missing = self::sitemap_provider_fixture_missing_requirements();
+		if ( array() !== $missing ) {
+			return self::skip(
+				$ctx,
+				'discovery.sitemaps.posts-provider-fixtures',
+				'Built-in sitemap provider fixture APIs are unavailable.',
+				array( 'missing' => $missing )
+			);
+		}
+
+		$failures     = array();
+		$case         = self::prepare_sitemap_provider_runtime( $ctx->fork( 'posts-runtime' ) );
+		$provider     = new \WP_Sitemaps_Posts();
+		$limit        = 2 + $ctx->int( 0, 1 );
+		$private_type = $case['postTypePrivate'];
+		$public_type  = $case['postTypePublic'];
+		$published    = array();
+
+		\register_post_type(
+			$public_type,
+			array(
+				'public'      => true,
+				'label'       => 'Discovery Public',
+				'has_archive' => true,
+				'rewrite'     => false,
+				'supports'    => array( 'title', 'editor', 'author' ),
+			)
+		);
+
+		\register_post_type(
+			$private_type,
+			array(
+				'public'      => false,
+				'label'       => 'Discovery Private',
+				'has_archive' => false,
+				'rewrite'     => false,
+				'supports'    => array( 'title', 'editor', 'author' ),
+			)
+		);
+
+		for ( $i = 0; $i < ( $limit * 2 ) + 1; ++$i ) {
+			$day          = 1 + $i;
+			$modified_gmt = sprintf( '2026-06-%02d %02d:00:00', $day, 8 + ( $i % 10 ) );
+			$modified     = sprintf( '2026-06-%02d %02d:30:00', $day, 11 + ( $i % 10 ) );
+			$published[] = array(
+				'id'           => self::insert_sitemap_post(
+					array(
+						'post_type'         => 'post',
+						'post_status'       => 'publish',
+						'post_title'        => 'Discovery sitemap post ' . $i,
+						'post_name'         => 'discovery-sitemap-post-' . $case['token'] . '-' . $i,
+						'post_date'         => $modified,
+						'post_date_gmt'     => $modified_gmt,
+						'post_modified'     => $modified,
+						'post_modified_gmt' => $modified_gmt,
+					)
+				),
+				'modified_gmt' => $modified_gmt,
+			);
+		}
+
+		$custom_published = array();
+		for ( $i = 0; $i < $limit + 1; ++$i ) {
+			$day                = 10 + $i;
+			$custom_gmt         = sprintf( '2026-06-%02d %02d:15:00', $day, 7 + ( $i % 10 ) );
+			$custom_modified    = sprintf( '2026-06-%02d %02d:45:00', $day, 10 + ( $i % 10 ) );
+			$custom_published[] = array(
+				'id'           => self::insert_sitemap_post(
+					array(
+						'post_type'         => $public_type,
+						'post_status'       => 'publish',
+						'post_title'        => 'Discovery custom sitemap post ' . $i,
+						'post_name'         => 'discovery-custom-sitemap-post-' . $case['token'] . '-' . $i,
+						'post_date'         => $custom_modified,
+						'post_date_gmt'     => $custom_gmt,
+						'post_modified'     => $custom_modified,
+						'post_modified_gmt' => $custom_gmt,
+					)
+				),
+				'modified_gmt' => $custom_gmt,
+			);
+		}
+
+		$page_gmt      = '2026-06-18 06:00:00';
+		$page_modified = '2026-06-18 09:45:00';
+		$page_fixture  = array(
+			'id'           => self::insert_sitemap_post(
+				array(
+					'post_type'         => 'page',
+					'post_status'       => 'publish',
+					'post_title'        => 'Discovery sitemap page',
+					'post_name'         => 'discovery-sitemap-page-' . $case['token'],
+					'post_date'         => $page_modified,
+					'post_date_gmt'     => $page_gmt,
+					'post_modified'     => $page_modified,
+					'post_modified_gmt' => $page_gmt,
+				)
+			),
+			'modified_gmt' => $page_gmt,
+		);
+
+		$draft_id = self::insert_sitemap_post(
+			array(
+				'post_type'         => 'post',
+				'post_status'       => 'draft',
+				'post_title'        => 'Discovery draft sitemap post',
+				'post_name'         => 'discovery-draft-' . $case['token'],
+				'post_modified_gmt' => '2026-06-20 10:00:00',
+			)
+		);
+		$private_id = self::insert_sitemap_post(
+			array(
+				'post_type'         => 'post',
+				'post_status'       => 'private',
+				'post_title'        => 'Discovery private sitemap post',
+				'post_name'         => 'discovery-private-' . $case['token'],
+				'post_modified_gmt' => '2026-06-21 10:00:00',
+			)
+		);
+		$unsupported_private_type_id = self::insert_sitemap_post(
+			array(
+				'post_type'         => $private_type,
+				'post_status'       => 'publish',
+				'post_title'        => 'Discovery unsupported post type sitemap post',
+				'post_name'         => 'discovery-unsupported-' . $case['token'],
+				'post_modified_gmt' => '2026-06-22 10:00:00',
+			)
+		);
+		$custom_draft_id = self::insert_sitemap_post(
+			array(
+				'post_type'         => $public_type,
+				'post_status'       => 'draft',
+				'post_title'        => 'Discovery custom draft sitemap post',
+				'post_name'         => 'discovery-custom-draft-' . $case['token'],
+				'post_modified_gmt' => '2026-07-20 10:00:00',
+			)
+		);
+
+		$subtypes = $provider->get_object_subtypes();
+		self::collect_failure(
+			$failures,
+			isset( $subtypes['post'] )
+				&& isset( $subtypes['page'] )
+				&& isset( $subtypes[ $public_type ] )
+				&& ! isset( $subtypes['attachment'] )
+				&& ! isset( $subtypes[ $private_type ] ),
+			'WP_Sitemaps_Posts exposes viewable public post subtypes and excludes attachments/private types',
+			array(
+				'subtypes'    => array_keys( $subtypes ),
+				'publicType'  => $public_type,
+				'privateType' => $private_type,
+			)
+		);
+
+		$query_seen = array();
+		$entry_seen = array();
+		$max_filter = static function ( int $max_urls, string $object_type ) use ( $limit ): int {
+			return 'post' === $object_type ? $limit : $max_urls;
+		};
+		$query_filter = static function ( array $args, string $post_type ) use ( &$query_seen ): array {
+			$query_seen[] = array(
+				'postType'      => $post_type,
+				'status'        => $args['post_status'] ?? null,
+				'postsPerPage'  => $args['posts_per_page'] ?? null,
+				'noFoundRows'   => $args['no_found_rows'] ?? null,
+				'ignoreSticky'  => $args['ignore_sticky_posts'] ?? null,
+			);
+
+			return $args;
+		};
+		$entry_filter = static function ( array $entry, \WP_Post $post, string $post_type ) use ( &$entry_seen ): array {
+			$entry_seen[] = array(
+				'id'      => (int) $post->ID,
+				'type'    => $post_type,
+				'loc'     => $entry['loc'] ?? null,
+				'lastmod' => $entry['lastmod'] ?? null,
+			);
+
+			$entry['component-fuzz-id'] = (string) $post->ID;
+			return $entry;
+		};
+
+		\add_filter( 'wp_sitemaps_max_urls', $max_filter, 10, 2 );
+		\add_filter( 'wp_sitemaps_posts_query_args', $query_filter, 10, 2 );
+		\add_filter( 'wp_sitemaps_posts_entry', $entry_filter, 10, 3 );
+		try {
+			$max_pages        = $provider->get_max_num_pages( 'post' );
+			$page_entries     = array();
+			for ( $page = 1; $page <= $max_pages; ++$page ) {
+				$page_entries[ $page ] = $provider->get_url_list( $page, 'post' );
+			}
+			$unsupported_list = $provider->get_url_list( 1, $private_type );
+			$attachment_list  = $provider->get_url_list( 1, 'attachment' );
+		} finally {
+			\remove_filter( 'wp_sitemaps_posts_entry', $entry_filter, 10 );
+			\remove_filter( 'wp_sitemaps_posts_query_args', $query_filter, 10 );
+			\remove_filter( 'wp_sitemaps_max_urls', $max_filter, 10 );
+		}
+
+		$all_entries = array_merge( ...array_values( $page_entries ) );
+		self::collect_failure(
+			$failures,
+			3 === $max_pages
+				&& $limit === count( $page_entries[1] ?? array() )
+				&& $limit === count( $page_entries[2] ?? array() )
+				&& 1 === count( $page_entries[3] ?? array() )
+				&& count( $published ) === count( $all_entries )
+				&& self::sitemap_post_entries_match_fixtures( $all_entries, $published )
+				&& ! self::sitemap_entries_contain_locs_for_ids( $all_entries, array( $draft_id, $private_id, $unsupported_private_type_id ) )
+				&& array() === $unsupported_list
+				&& array() === $attachment_list
+				&& self::sitemap_post_query_args_local_to_type( $query_seen, 'post', $limit )
+				&& array_column( $entry_seen, 'id' ) === array_column( $published, 'id' )
+				&& false === \has_filter( 'wp_sitemaps_posts_entry', $entry_filter )
+				&& false === \has_filter( 'wp_sitemaps_posts_query_args', $query_filter )
+				&& false === \has_filter( 'wp_sitemaps_max_urls', $max_filter ),
+			'WP_Sitemaps_Posts lists only published supported subtype entries with lastmod and max-page math',
+			array(
+				'limit'           => $limit,
+				'maxPages'        => $max_pages,
+				'pageCounts'      => array_map( 'count', $page_entries ),
+				'entrySeen'       => $entry_seen,
+				'querySeen'       => $query_seen,
+				'unsupportedList' => $unsupported_list,
+				'attachmentList'  => $attachment_list,
+			)
+		);
+
+		$custom_query_seen = array();
+		$custom_entry_seen = array();
+		$custom_max_filter = static function ( int $max_urls, string $object_type ) use ( $limit ): int {
+			return 'post' === $object_type ? $limit : $max_urls;
+		};
+		$custom_query_filter = static function ( array $args, string $post_type ) use ( &$custom_query_seen ): array {
+			$custom_query_seen[] = array(
+				'postType'      => $post_type,
+				'status'        => $args['post_status'] ?? null,
+				'postsPerPage'  => $args['posts_per_page'] ?? null,
+				'noFoundRows'   => $args['no_found_rows'] ?? null,
+				'ignoreSticky'  => $args['ignore_sticky_posts'] ?? null,
+			);
+
+			return $args;
+		};
+		$custom_entry_filter = static function ( array $entry, \WP_Post $post, string $post_type ) use ( &$custom_entry_seen ): array {
+			$custom_entry_seen[] = array(
+				'id'      => (int) $post->ID,
+				'type'    => $post_type,
+				'loc'     => $entry['loc'] ?? null,
+				'lastmod' => $entry['lastmod'] ?? null,
+			);
+
+			$entry['component-fuzz-id'] = (string) $post->ID;
+			return $entry;
+		};
+
+		\add_filter( 'wp_sitemaps_max_urls', $custom_max_filter, 10, 2 );
+		\add_filter( 'wp_sitemaps_posts_query_args', $custom_query_filter, 10, 2 );
+		\add_filter( 'wp_sitemaps_posts_entry', $custom_entry_filter, 10, 3 );
+		try {
+			$custom_max_pages    = $provider->get_max_num_pages( $public_type );
+			$custom_page_entries = array();
+			for ( $page = 1; $page <= $custom_max_pages; ++$page ) {
+				$custom_page_entries[ $page ] = $provider->get_url_list( $page, $public_type );
+			}
+		} finally {
+			\remove_filter( 'wp_sitemaps_posts_entry', $custom_entry_filter, 10 );
+			\remove_filter( 'wp_sitemaps_posts_query_args', $custom_query_filter, 10 );
+			\remove_filter( 'wp_sitemaps_max_urls', $custom_max_filter, 10 );
+		}
+
+		$custom_entries = array_merge( ...array_values( $custom_page_entries ) );
+		self::collect_failure(
+			$failures,
+			2 === $custom_max_pages
+				&& $limit === count( $custom_page_entries[1] ?? array() )
+				&& 1 === count( $custom_page_entries[2] ?? array() )
+				&& count( $custom_published ) === count( $custom_entries )
+				&& self::sitemap_post_entries_match_fixtures( $custom_entries, $custom_published )
+				&& ! self::sitemap_entries_contain_locs_for_ids( $custom_entries, array( $custom_draft_id ) )
+				&& self::sitemap_post_query_args_local_to_type( $custom_query_seen, $public_type, $limit )
+				&& array_column( $custom_entry_seen, 'id' ) === array_column( $custom_published, 'id' )
+				&& false === \has_filter( 'wp_sitemaps_posts_entry', $custom_entry_filter )
+				&& false === \has_filter( 'wp_sitemaps_posts_query_args', $custom_query_filter )
+				&& false === \has_filter( 'wp_sitemaps_max_urls', $custom_max_filter ),
+			'WP_Sitemaps_Posts includes viewable public custom post type entries with local filters and max-page math',
+			array(
+				'publicType'  => $public_type,
+				'limit'       => $limit,
+				'maxPages'    => $custom_max_pages,
+				'pageCounts'  => array_map( 'count', $custom_page_entries ),
+				'entrySeen'   => $custom_entry_seen,
+				'querySeen'   => $custom_query_seen,
+				'customDraft' => $custom_draft_id,
+			)
+		);
+
+		$page_query_seen = array();
+		$page_entry_seen = array();
+		$home_seen       = array();
+		$page_max_filter = static function ( int $max_urls, string $object_type ) use ( $limit ): int {
+			return 'post' === $object_type ? $limit : $max_urls;
+		};
+		$page_query_filter = static function ( array $args, string $post_type ) use ( &$page_query_seen ): array {
+			$page_query_seen[] = array(
+				'postType'      => $post_type,
+				'status'        => $args['post_status'] ?? null,
+				'postsPerPage'  => $args['posts_per_page'] ?? null,
+				'noFoundRows'   => $args['no_found_rows'] ?? null,
+				'ignoreSticky'  => $args['ignore_sticky_posts'] ?? null,
+			);
+
+			return $args;
+		};
+		$page_entry_filter = static function ( array $entry, \WP_Post $post, string $post_type ) use ( &$page_entry_seen ): array {
+			$page_entry_seen[] = array(
+				'id'      => (int) $post->ID,
+				'type'    => $post_type,
+				'loc'     => $entry['loc'] ?? null,
+				'lastmod' => $entry['lastmod'] ?? null,
+			);
+
+			$entry['component-fuzz-id'] = (string) $post->ID;
+			return $entry;
+		};
+		$home_filter = static function ( array $entry ) use ( &$home_seen ): array {
+			$home_seen[]                  = $entry;
+			$entry['component-fuzz-home'] = '1';
+			return $entry;
+		};
+
+		\add_filter( 'wp_sitemaps_max_urls', $page_max_filter, 10, 2 );
+		\add_filter( 'wp_sitemaps_posts_query_args', $page_query_filter, 10, 2 );
+		\add_filter( 'wp_sitemaps_posts_entry', $page_entry_filter, 10, 3 );
+		\add_filter( 'wp_sitemaps_posts_show_on_front_entry', $home_filter, 10, 1 );
+		try {
+			$page_max_pages = $provider->get_max_num_pages( 'page' );
+			$page_list      = $provider->get_url_list( 1, 'page' );
+			$page_two_list  = $provider->get_url_list( 2, 'page' );
+		} finally {
+			\remove_filter( 'wp_sitemaps_posts_show_on_front_entry', $home_filter, 10 );
+			\remove_filter( 'wp_sitemaps_posts_entry', $page_entry_filter, 10 );
+			\remove_filter( 'wp_sitemaps_posts_query_args', $page_query_filter, 10 );
+			\remove_filter( 'wp_sitemaps_max_urls', $page_max_filter, 10 );
+		}
+
+		$latest_post             = $published[ count( $published ) - 1 ];
+		$expected_home_lastmod   = self::expected_sitemap_lastmod_from_gmt( (string) $latest_post['modified_gmt'] );
+		$page_post_entries       = array_slice( $page_list, 1 );
+		$page_home_entry         = $page_list[0] ?? array();
+		$captured_home_entry     = $home_seen[0] ?? array();
+		self::collect_failure(
+			$failures,
+			1 === $page_max_pages
+				&& 2 === count( $page_list )
+				&& array() === $page_two_list
+				&& \home_url( '/' ) === ( $page_home_entry['loc'] ?? null )
+				&& '1' === ( $page_home_entry['component-fuzz-home'] ?? null )
+				&& $expected_home_lastmod === ( $page_home_entry['lastmod'] ?? null )
+				&& \home_url( '/' ) === ( $captured_home_entry['loc'] ?? null )
+				&& $expected_home_lastmod === ( $captured_home_entry['lastmod'] ?? null )
+				&& self::sitemap_post_entries_match_fixtures( $page_post_entries, array( $page_fixture ) )
+				&& self::sitemap_post_query_args_local_to_type( $page_query_seen, 'page', $limit )
+				&& array_column( $page_entry_seen, 'id' ) === array( $page_fixture['id'] )
+				&& false === \has_filter( 'wp_sitemaps_posts_show_on_front_entry', $home_filter )
+				&& false === \has_filter( 'wp_sitemaps_posts_entry', $page_entry_filter )
+				&& false === \has_filter( 'wp_sitemaps_posts_query_args', $page_query_filter )
+				&& false === \has_filter( 'wp_sitemaps_max_urls', $page_max_filter ),
+			'WP_Sitemaps_Posts page subtype includes the show-on-front home entry, page entries, and min-page math',
+			array(
+				'limit'                => $limit,
+				'pageMaxPages'         => $page_max_pages,
+				'pageList'             => $page_list,
+				'pageTwoList'          => $page_two_list,
+				'homeSeen'             => $home_seen,
+				'expectedHomeLastmod'  => $expected_home_lastmod,
+				'pageEntrySeen'        => $page_entry_seen,
+				'pageQuerySeen'        => $page_query_seen,
+			)
+		);
+
+		$pre_seen      = array();
+		$pre_page_seen = array();
+		$pre_sentinel  = array(
+			array(
+				'loc'     => 'https://example.test/pre-posts-' . $case['token'],
+				'lastmod' => '2026-06-25T00:00:00+00:00',
+			),
+		);
+		$pre_list_filter = static function ( $url_list, string $post_type, int $page_num ) use ( &$pre_seen, $pre_sentinel ) {
+			$pre_seen[] = array(
+				'type' => $post_type,
+				'page' => $page_num,
+				'null' => null === $url_list,
+			);
+
+			return 'post' === $post_type && 2 === $page_num ? $pre_sentinel : $url_list;
+		};
+		$pre_page_filter = static function ( $max_num_pages, string $post_type ) use ( &$pre_page_seen ): int {
+			$pre_page_seen[] = array(
+				'type' => $post_type,
+				'null' => null === $max_num_pages,
+			);
+
+			return 'post' === $post_type ? 17 : (int) $max_num_pages;
+		};
+
+		\add_filter( 'wp_sitemaps_posts_pre_url_list', $pre_list_filter, 10, 3 );
+		\add_filter( 'wp_sitemaps_posts_pre_max_num_pages', $pre_page_filter, 10, 2 );
+		try {
+			$pre_list        = $provider->get_url_list( 2, 'post' );
+			$pre_unsupported = $provider->get_url_list( 2, $private_type );
+			$pre_pages       = $provider->get_max_num_pages( 'post' );
+		} finally {
+			\remove_filter( 'wp_sitemaps_posts_pre_max_num_pages', $pre_page_filter, 10 );
+			\remove_filter( 'wp_sitemaps_posts_pre_url_list', $pre_list_filter, 10 );
+		}
+
+		self::collect_failure(
+			$failures,
+			$pre_sentinel === $pre_list
+				&& array() === $pre_unsupported
+				&& 17 === $pre_pages
+				&& array( array( 'type' => 'post', 'page' => 2, 'null' => true ) ) === $pre_seen
+				&& array( array( 'type' => 'post', 'null' => true ) ) === $pre_page_seen
+				&& false === \has_filter( 'wp_sitemaps_posts_pre_url_list', $pre_list_filter )
+				&& false === \has_filter( 'wp_sitemaps_posts_pre_max_num_pages', $pre_page_filter ),
+			'WP_Sitemaps_Posts pre-list and pre-page filters short-circuit only matching subtype calls',
+			array(
+				'preList'        => $pre_list,
+				'preUnsupported' => $pre_unsupported,
+				'prePages'       => $pre_pages,
+				'preSeen'        => $pre_seen,
+				'prePageSeen'    => $pre_page_seen,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'discovery.sitemaps.posts-provider-fixtures',
+			array() === $failures,
+			array(
+				'limit'    => $limit,
+				'failures' => array_slice( $failures, 0, 6 ),
+			)
+		);
+	}
+
+	private static function check_sitemap_taxonomies_provider( \ComponentFuzz\FuzzContext $ctx ): array {
+		$missing = self::sitemap_provider_fixture_missing_requirements();
+		if ( array() !== $missing ) {
+			return self::skip(
+				$ctx,
+				'discovery.sitemaps.taxonomies-provider-fixtures',
+				'Built-in sitemap provider fixture APIs are unavailable.',
+				array( 'missing' => $missing )
+			);
+		}
+
+		$failures    = array();
+		$case        = self::prepare_sitemap_provider_runtime( $ctx->fork( 'taxonomies-runtime' ) );
+		$provider    = new \WP_Sitemaps_Taxonomies();
+		$limit       = 2 + $ctx->int( 0, 1 );
+		$private_tax = $case['taxonomyPrivate'];
+		$public_tax  = $case['taxonomyPublic'];
+		$included    = array();
+		$empty       = array();
+
+		\register_taxonomy(
+			$public_tax,
+			array( 'post' ),
+			array(
+				'public'       => true,
+				'hierarchical' => false,
+				'label'        => 'Discovery Public Taxonomy',
+				'rewrite'      => false,
+			)
+		);
+
+		\register_taxonomy(
+			$private_tax,
+			array( 'post' ),
+			array(
+				'public'       => false,
+				'hierarchical' => true,
+				'label'        => 'Discovery Private Taxonomy',
+				'rewrite'      => false,
+			)
+		);
+
+		for ( $i = 0; $i < $limit + 1; ++$i ) {
+			$included[] = self::insert_sitemap_term(
+				'category',
+				'Discovery Sitemap Category ' . $i,
+				'discovery-sitemap-category-' . $case['token'] . '-' . $i,
+				1 + $i
+			);
+		}
+
+		for ( $i = 0; $i < 2; ++$i ) {
+			$empty[] = self::insert_sitemap_term(
+				'category',
+				'Discovery Empty Category ' . $i,
+				'discovery-empty-category-' . $case['token'] . '-' . $i,
+				0
+			);
+		}
+
+		$public_included = array();
+		for ( $i = 0; $i < $limit + 1; ++$i ) {
+			$public_included[] = self::insert_sitemap_term(
+				$public_tax,
+				'Discovery Public Taxonomy Term ' . $i,
+				'discovery-public-taxonomy-term-' . $case['token'] . '-' . $i,
+				2 + $i
+			);
+		}
+
+		$public_empty = self::insert_sitemap_term(
+			$public_tax,
+			'Discovery Empty Public Taxonomy Term',
+			'discovery-empty-public-taxonomy-term-' . $case['token'],
+			0
+		);
+
+		$private_term = self::insert_sitemap_term(
+			$private_tax,
+			'Discovery Private Term',
+			'discovery-private-term-' . $case['token'],
+			3
+		);
+
+		$subtypes = $provider->get_object_subtypes();
+		self::collect_failure(
+			$failures,
+			isset( $subtypes['category'] )
+				&& isset( $subtypes['post_tag'] )
+				&& isset( $subtypes[ $public_tax ] )
+				&& ! isset( $subtypes[ $private_tax ] ),
+			'WP_Sitemaps_Taxonomies exposes public taxonomies and excludes private taxonomy subtypes',
+			array(
+				'subtypes'   => array_keys( $subtypes ),
+				'publicTax'  => $public_tax,
+				'privateTax' => $private_tax,
+			)
+		);
+
+		$query_seen = array();
+		$entry_seen = array();
+		$max_filter = static function ( int $max_urls, string $object_type ) use ( $limit ): int {
+			return 'term' === $object_type ? $limit : $max_urls;
+		};
+		$query_filter = static function ( array $args, string $taxonomy ) use ( &$query_seen ): array {
+			$query_seen[] = array(
+				'taxonomy'   => $taxonomy,
+				'number'     => $args['number'] ?? null,
+				'hideEmpty'  => $args['hide_empty'] ?? null,
+				'fields'     => $args['fields'] ?? null,
+				'offset'     => $args['offset'] ?? null,
+			);
+
+			return $args;
+		};
+		$entry_filter = static function ( array $entry, int $term_id, string $taxonomy, \WP_Term $term ) use ( &$entry_seen ): array {
+			$entry_seen[] = array(
+				'id'       => $term_id,
+				'taxonomy' => $taxonomy,
+				'count'    => (int) $term->count,
+				'loc'      => $entry['loc'] ?? null,
+			);
+
+			$entry['component-fuzz-term'] = (string) $term_id;
+			return $entry;
+		};
+
+		\add_filter( 'wp_sitemaps_max_urls', $max_filter, 10, 2 );
+		\add_filter( 'wp_sitemaps_taxonomies_query_args', $query_filter, 10, 2 );
+		\add_filter( 'wp_sitemaps_taxonomies_entry', $entry_filter, 10, 4 );
+		try {
+			$max_pages        = $provider->get_max_num_pages( 'category' );
+			$page_entries     = array();
+			for ( $page = 1; $page <= $max_pages; ++$page ) {
+				$page_entries[ $page ] = $provider->get_url_list( $page, 'category' );
+			}
+			$unsupported_list = $provider->get_url_list( 1, $private_tax );
+		} finally {
+			\remove_filter( 'wp_sitemaps_taxonomies_entry', $entry_filter, 10 );
+			\remove_filter( 'wp_sitemaps_taxonomies_query_args', $query_filter, 10 );
+			\remove_filter( 'wp_sitemaps_max_urls', $max_filter, 10 );
+		}
+
+		$all_entries = array_merge( ...array_values( $page_entries ) );
+		self::collect_failure(
+			$failures,
+			2 === $max_pages
+				&& $limit === count( $page_entries[1] ?? array() )
+				&& 1 === count( $page_entries[2] ?? array() )
+				&& count( $included ) === count( $all_entries )
+				&& self::sitemap_term_entries_match_fixtures( $all_entries, $included, 'category' )
+				&& array_column( $entry_seen, 'id' ) === array_column( $included, 'term_id' )
+				&& ! array_intersect( array_column( $entry_seen, 'id' ), array_column( $empty, 'term_id' ) )
+				&& ! in_array( $private_term['term_id'], array_column( $entry_seen, 'id' ), true )
+				&& array() === $unsupported_list
+				&& self::sitemap_taxonomy_query_args_local_to_taxonomy( $query_seen, 'category', $limit )
+				&& false === \has_filter( 'wp_sitemaps_taxonomies_entry', $entry_filter )
+				&& false === \has_filter( 'wp_sitemaps_taxonomies_query_args', $query_filter )
+				&& false === \has_filter( 'wp_sitemaps_max_urls', $max_filter ),
+			'WP_Sitemaps_Taxonomies honors public subtype gating, hide-empty terms, locs, and max-page math',
+			array(
+				'limit'           => $limit,
+				'maxPages'        => $max_pages,
+				'pageCounts'      => array_map( 'count', $page_entries ),
+				'entrySeen'       => $entry_seen,
+				'querySeen'       => $query_seen,
+				'unsupportedList' => $unsupported_list,
+				)
+			);
+
+		$public_tax_query_seen = array();
+		$public_tax_entry_seen = array();
+		$public_tax_max_filter = static function ( int $max_urls, string $object_type ) use ( $limit ): int {
+			return 'term' === $object_type ? $limit : $max_urls;
+		};
+		$public_tax_query_filter = static function ( array $args, string $taxonomy ) use ( &$public_tax_query_seen ): array {
+			$public_tax_query_seen[] = array(
+				'taxonomy'   => $taxonomy,
+				'number'     => $args['number'] ?? null,
+				'hideEmpty'  => $args['hide_empty'] ?? null,
+				'fields'     => $args['fields'] ?? null,
+				'offset'     => $args['offset'] ?? null,
+			);
+
+			return $args;
+		};
+		$public_tax_entry_filter = static function ( array $entry, int $term_id, string $taxonomy, \WP_Term $term ) use ( &$public_tax_entry_seen ): array {
+			$public_tax_entry_seen[] = array(
+				'id'       => $term_id,
+				'taxonomy' => $taxonomy,
+				'count'    => (int) $term->count,
+				'loc'      => $entry['loc'] ?? null,
+			);
+
+			$entry['component-fuzz-term'] = (string) $term_id;
+			return $entry;
+		};
+
+		\add_filter( 'wp_sitemaps_max_urls', $public_tax_max_filter, 10, 2 );
+		\add_filter( 'wp_sitemaps_taxonomies_query_args', $public_tax_query_filter, 10, 2 );
+		\add_filter( 'wp_sitemaps_taxonomies_entry', $public_tax_entry_filter, 10, 4 );
+		try {
+			$public_tax_max_pages    = $provider->get_max_num_pages( $public_tax );
+			$public_tax_page_entries = array();
+			for ( $page = 1; $page <= $public_tax_max_pages; ++$page ) {
+				$public_tax_page_entries[ $page ] = $provider->get_url_list( $page, $public_tax );
+			}
+		} finally {
+			\remove_filter( 'wp_sitemaps_taxonomies_entry', $public_tax_entry_filter, 10 );
+			\remove_filter( 'wp_sitemaps_taxonomies_query_args', $public_tax_query_filter, 10 );
+			\remove_filter( 'wp_sitemaps_max_urls', $public_tax_max_filter, 10 );
+		}
+
+		$public_tax_entries = array_merge( ...array_values( $public_tax_page_entries ) );
+		self::collect_failure(
+			$failures,
+			2 === $public_tax_max_pages
+				&& $limit === count( $public_tax_page_entries[1] ?? array() )
+				&& 1 === count( $public_tax_page_entries[2] ?? array() )
+				&& count( $public_included ) === count( $public_tax_entries )
+				&& self::sitemap_term_entries_match_fixtures( $public_tax_entries, $public_included, $public_tax )
+				&& array_column( $public_tax_entry_seen, 'id' ) === array_column( $public_included, 'term_id' )
+				&& ! in_array( $public_empty['term_id'], array_column( $public_tax_entry_seen, 'id' ), true )
+				&& self::sitemap_taxonomy_query_args_local_to_taxonomy( $public_tax_query_seen, $public_tax, $limit )
+				&& false === \has_filter( 'wp_sitemaps_taxonomies_entry', $public_tax_entry_filter )
+				&& false === \has_filter( 'wp_sitemaps_taxonomies_query_args', $public_tax_query_filter )
+				&& false === \has_filter( 'wp_sitemaps_max_urls', $public_tax_max_filter ),
+			'WP_Sitemaps_Taxonomies includes public custom taxonomy terms with hide-empty and max-page math',
+			array(
+				'publicTax'   => $public_tax,
+				'limit'       => $limit,
+				'maxPages'    => $public_tax_max_pages,
+				'pageCounts'  => array_map( 'count', $public_tax_page_entries ),
+				'entrySeen'   => $public_tax_entry_seen,
+				'querySeen'   => $public_tax_query_seen,
+				'publicEmpty' => $public_empty,
+			)
+		);
+
+		$pre_seen      = array();
+		$pre_page_seen = array();
+		$pre_sentinel  = array( array( 'loc' => 'https://example.test/pre-taxonomies-' . $case['token'] ) );
+		$pre_list_filter = static function ( $url_list, string $taxonomy, int $page_num ) use ( &$pre_seen, $pre_sentinel ) {
+			$pre_seen[] = array(
+				'taxonomy' => $taxonomy,
+				'page'     => $page_num,
+				'null'     => null === $url_list,
+			);
+
+			return 'category' === $taxonomy && 2 === $page_num ? $pre_sentinel : $url_list;
+		};
+		$pre_page_filter = static function ( $max_num_pages, string $taxonomy ) use ( &$pre_page_seen ): int {
+			$pre_page_seen[] = array(
+				'taxonomy' => $taxonomy,
+				'null'     => null === $max_num_pages,
+			);
+
+			return 'category' === $taxonomy ? 19 : (int) $max_num_pages;
+		};
+
+		\add_filter( 'wp_sitemaps_taxonomies_pre_url_list', $pre_list_filter, 10, 3 );
+		\add_filter( 'wp_sitemaps_taxonomies_pre_max_num_pages', $pre_page_filter, 10, 2 );
+		try {
+			$pre_list        = $provider->get_url_list( 2, 'category' );
+			$pre_unsupported = $provider->get_url_list( 2, $private_tax );
+			$pre_pages       = $provider->get_max_num_pages( 'category' );
+		} finally {
+			\remove_filter( 'wp_sitemaps_taxonomies_pre_max_num_pages', $pre_page_filter, 10 );
+			\remove_filter( 'wp_sitemaps_taxonomies_pre_url_list', $pre_list_filter, 10 );
+		}
+
+		self::collect_failure(
+			$failures,
+			$pre_sentinel === $pre_list
+				&& array() === $pre_unsupported
+				&& 19 === $pre_pages
+				&& array( array( 'taxonomy' => 'category', 'page' => 2, 'null' => true ) ) === $pre_seen
+				&& array( array( 'taxonomy' => 'category', 'null' => true ) ) === $pre_page_seen
+				&& false === \has_filter( 'wp_sitemaps_taxonomies_pre_url_list', $pre_list_filter )
+				&& false === \has_filter( 'wp_sitemaps_taxonomies_pre_max_num_pages', $pre_page_filter ),
+			'WP_Sitemaps_Taxonomies pre-list and pre-page filters short-circuit only matching taxonomy calls',
+			array(
+				'preList'        => $pre_list,
+				'preUnsupported' => $pre_unsupported,
+				'prePages'       => $pre_pages,
+				'preSeen'        => $pre_seen,
+				'prePageSeen'    => $pre_page_seen,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'discovery.sitemaps.taxonomies-provider-fixtures',
+			array() === $failures,
+			array(
+				'limit'    => $limit,
+				'failures' => array_slice( $failures, 0, 6 ),
+			)
+		);
+	}
+
+	private static function check_sitemap_users_provider( \ComponentFuzz\FuzzContext $ctx ): array {
+		$missing = self::sitemap_provider_fixture_missing_requirements();
+		if ( array() !== $missing ) {
+			return self::skip(
+				$ctx,
+				'discovery.sitemaps.users-provider-fixtures',
+				'Built-in sitemap provider fixture APIs are unavailable.',
+				array( 'missing' => $missing )
+			);
+		}
+
+		$failures        = array();
+		$case            = self::prepare_sitemap_provider_runtime( $ctx->fork( 'users-runtime' ) );
+		$provider        = new \WP_Sitemaps_Users();
+		$limit           = 2 + $ctx->int( 0, 1 );
+		$private_type    = $case['postTypePrivate'];
+		$public_type     = $case['postTypePublic'];
+		$included_users  = array();
+
+		\register_post_type(
+			$private_type,
+			array(
+				'public'      => false,
+				'label'       => 'Discovery Private Author Type',
+				'has_archive' => false,
+				'rewrite'     => false,
+				'supports'    => array( 'title', 'editor', 'author' ),
+			)
+		);
+
+		\register_post_type(
+			$public_type,
+			array(
+				'public'      => true,
+				'label'       => 'Discovery Public Author Type',
+				'has_archive' => true,
+				'rewrite'     => false,
+				'supports'    => array( 'title', 'editor', 'author' ),
+			)
+		);
+
+		for ( $i = 0; $i < $limit + 1; ++$i ) {
+			$user_id          = self::insert_sitemap_user( $case, 'public-' . $i );
+			$included_users[] = $user_id;
+			self::insert_sitemap_post(
+				array(
+					'post_type'         => 0 === $i % 2 ? 'post' : $public_type,
+					'post_status'       => 'publish',
+					'post_author'       => $user_id,
+					'post_title'        => 'Discovery public author post ' . $i,
+					'post_name'         => 'discovery-public-author-' . $case['token'] . '-' . $i,
+					'post_modified_gmt' => sprintf( '2026-06-%02d 12:00:00', 1 + $i ),
+				)
+			);
+		}
+
+		$page_only_user = self::insert_sitemap_user( $case, 'page-only' );
+		self::insert_sitemap_post(
+			array(
+				'post_type'         => 'page',
+				'post_status'       => 'publish',
+				'post_author'       => $page_only_user,
+				'post_title'        => 'Discovery author page only',
+				'post_name'         => 'discovery-author-page-only-' . $case['token'],
+				'post_modified_gmt' => '2026-06-15 12:00:00',
+			)
+		);
+
+		$draft_only_user = self::insert_sitemap_user( $case, 'draft-only' );
+		self::insert_sitemap_post(
+			array(
+				'post_type'         => 'post',
+				'post_status'       => 'draft',
+				'post_author'       => $draft_only_user,
+				'post_title'        => 'Discovery author draft only',
+				'post_name'         => 'discovery-author-draft-only-' . $case['token'],
+				'post_modified_gmt' => '2026-06-16 12:00:00',
+			)
+		);
+
+		$private_only_user = self::insert_sitemap_user( $case, 'private-only' );
+		self::insert_sitemap_post(
+			array(
+				'post_type'         => $private_type,
+				'post_status'       => 'publish',
+				'post_author'       => $private_only_user,
+				'post_title'        => 'Discovery author private type only',
+				'post_name'         => 'discovery-author-private-only-' . $case['token'],
+				'post_modified_gmt' => '2026-06-17 12:00:00',
+			)
+		);
+
+		$empty_user = self::insert_sitemap_user( $case, 'empty' );
+
+		$query_seen = array();
+		$entry_seen = array();
+		$max_filter = static function ( int $max_urls, string $object_type ) use ( $limit ): int {
+			return 'user' === $object_type ? $limit : $max_urls;
+		};
+		$query_filter = static function ( array $args ) use ( &$query_seen ): array {
+			$query_seen[] = array(
+				'number'            => $args['number'] ?? null,
+				'hasPublishedPosts' => array_values( (array) ( $args['has_published_posts'] ?? array() ) ),
+			);
+
+			return $args;
+		};
+		$entry_filter = static function ( array $entry, \WP_User $user ) use ( &$entry_seen ): array {
+			$entry_seen[] = array(
+				'id'  => (int) $user->ID,
+				'loc' => $entry['loc'] ?? null,
+			);
+
+			$entry['component-fuzz-user'] = (string) $user->ID;
+			return $entry;
+		};
+
+		\add_filter( 'wp_sitemaps_max_urls', $max_filter, 10, 2 );
+		\add_filter( 'wp_sitemaps_users_query_args', $query_filter, 10, 1 );
+		\add_filter( 'wp_sitemaps_users_entry', $entry_filter, 10, 2 );
+		try {
+			$max_pages    = $provider->get_max_num_pages();
+			$page_entries = array();
+			for ( $page = 1; $page <= $max_pages; ++$page ) {
+				$page_entries[ $page ] = $provider->get_url_list( $page );
+			}
+		} finally {
+			\remove_filter( 'wp_sitemaps_users_entry', $entry_filter, 10 );
+			\remove_filter( 'wp_sitemaps_users_query_args', $query_filter, 10 );
+			\remove_filter( 'wp_sitemaps_max_urls', $max_filter, 10 );
+		}
+
+		$all_entries  = array_merge( ...array_values( $page_entries ) );
+		$excluded_ids = array( $page_only_user, $draft_only_user, $private_only_user, $empty_user );
+		self::collect_failure(
+			$failures,
+			2 === $max_pages
+				&& $limit === count( $page_entries[1] ?? array() )
+				&& 1 === count( $page_entries[2] ?? array() )
+				&& count( $included_users ) === count( $all_entries )
+				&& self::sitemap_user_entries_match_ids( $all_entries, $included_users )
+				&& array_column( $entry_seen, 'id' ) === $included_users
+				&& ! array_intersect( array_column( $entry_seen, 'id' ), $excluded_ids )
+				&& self::sitemap_user_query_args_include_public_post_types( $query_seen, $limit, $public_type, $private_type )
+				&& false === \has_filter( 'wp_sitemaps_users_entry', $entry_filter )
+				&& false === \has_filter( 'wp_sitemaps_users_query_args', $query_filter )
+				&& false === \has_filter( 'wp_sitemaps_max_urls', $max_filter ),
+			'WP_Sitemaps_Users lists only authors with published public posts and computes max pages',
+			array(
+				'limit'      => $limit,
+				'maxPages'   => $max_pages,
+				'pageCounts' => array_map( 'count', $page_entries ),
+				'entrySeen'  => $entry_seen,
+				'querySeen'  => $query_seen,
+				'excluded'   => $excluded_ids,
+				'privateType' => $private_type,
+			)
+		);
+
+		$pre_seen      = array();
+		$pre_page_seen = array();
+		$pre_sentinel  = array( array( 'loc' => 'https://example.test/pre-users-' . $case['token'] ) );
+		$pre_list_filter = static function ( $url_list, int $page_num ) use ( &$pre_seen, $pre_sentinel ) {
+			$pre_seen[] = array(
+				'page' => $page_num,
+				'null' => null === $url_list,
+			);
+
+			return 2 === $page_num ? $pre_sentinel : $url_list;
+		};
+		$pre_page_filter = static function ( $max_num_pages ) use ( &$pre_page_seen ): int {
+			$pre_page_seen[] = array( 'null' => null === $max_num_pages );
+			return 23;
+		};
+
+		\add_filter( 'wp_sitemaps_users_pre_url_list', $pre_list_filter, 10, 2 );
+		\add_filter( 'wp_sitemaps_users_pre_max_num_pages', $pre_page_filter, 10, 1 );
+		try {
+			$pre_list  = $provider->get_url_list( 2 );
+			$pre_pages = $provider->get_max_num_pages();
+		} finally {
+			\remove_filter( 'wp_sitemaps_users_pre_max_num_pages', $pre_page_filter, 10 );
+			\remove_filter( 'wp_sitemaps_users_pre_url_list', $pre_list_filter, 10 );
+		}
+
+		self::collect_failure(
+			$failures,
+			$pre_sentinel === $pre_list
+				&& 23 === $pre_pages
+				&& array( array( 'page' => 2, 'null' => true ) ) === $pre_seen
+				&& array( array( 'null' => true ) ) === $pre_page_seen
+				&& false === \has_filter( 'wp_sitemaps_users_pre_url_list', $pre_list_filter )
+				&& false === \has_filter( 'wp_sitemaps_users_pre_max_num_pages', $pre_page_filter ),
+			'WP_Sitemaps_Users pre-list and pre-page filters short-circuit provider calls',
+			array(
+				'preList'     => $pre_list,
+				'prePages'    => $pre_pages,
+				'preSeen'     => $pre_seen,
+				'prePageSeen' => $pre_page_seen,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'discovery.sitemaps.users-provider-fixtures',
+			array() === $failures,
+			array(
+				'limit'    => $limit,
+				'failures' => array_slice( $failures, 0, 6 ),
+			)
+		);
+	}
+
+	private static function sitemap_provider_fixture_missing_requirements(): array {
+		$missing = array();
+
+		self::load_builtin_sitemap_provider_classes();
+
+		foreach ( array( 'WP_Post', 'WP_Sitemaps_Posts', 'WP_Sitemaps_Taxonomies', 'WP_Sitemaps_Users', 'WP_Term', 'WP_User' ) as $class ) {
+			if ( ! class_exists( $class ) ) {
+				$missing[] = "class {$class}";
+			}
+		}
+
+		foreach (
+			array(
+				'create_initial_post_types',
+				'create_initial_taxonomies',
+				'get_author_posts_url',
+				'get_permalink',
+				'get_term_link',
+				'home_url',
+				'is_wp_error',
+				'register_post_type',
+				'register_taxonomy',
+				'wp_cache_flush',
+				'wp_insert_post',
+				'wp_insert_term',
+				'wp_insert_user',
+				'wp_date',
+				'wp_timezone',
+			) as $function
+		) {
+			if ( ! function_exists( $function ) ) {
+				$missing[] = "function {$function}";
+			}
+		}
+
+		if ( ! isset( $GLOBALS['wpdb'] ) || ! method_exists( $GLOBALS['wpdb'], 'component_fuzz_reset_content' ) || ! method_exists( $GLOBALS['wpdb'], 'component_fuzz_reset_options' ) ) {
+			$missing[] = 'component fuzz wpdb stub';
+		}
+
+		return $missing;
+	}
+
+	private static function load_builtin_sitemap_provider_classes(): void {
+		if ( class_exists( 'WP_Sitemaps_Posts' ) && class_exists( 'WP_Sitemaps_Taxonomies' ) && class_exists( 'WP_Sitemaps_Users' ) ) {
+			return;
+		}
+
+		if ( ! defined( 'ABSPATH' ) || ! defined( 'WPINC' ) ) {
+			return;
+		}
+
+		foreach (
+			array(
+				'WP_Sitemaps_Posts'      => ABSPATH . WPINC . '/sitemaps/providers/class-wp-sitemaps-posts.php',
+				'WP_Sitemaps_Taxonomies' => ABSPATH . WPINC . '/sitemaps/providers/class-wp-sitemaps-taxonomies.php',
+				'WP_Sitemaps_Users'      => ABSPATH . WPINC . '/sitemaps/providers/class-wp-sitemaps-users.php',
+			) as $class => $path
+		) {
+			if ( ! class_exists( $class ) && is_file( $path ) ) {
+				require_once $path;
+			}
+		}
+	}
+
+	private static function prepare_sitemap_provider_runtime( \ComponentFuzz\FuzzContext $ctx ): array {
+		global $wpdb, $wp_rewrite;
+
+		$token = substr( hash( 'crc32b', 'discovery-sitemaps:' . $ctx->seed() ), 0, 7 );
+		$wpdb->component_fuzz_reset_content();
+		$wpdb->component_fuzz_reset_options(
+			array(
+				'admin_email'            => 'admin@example.test',
+				'blog_charset'           => 'UTF-8',
+				'blog_public'            => 1,
+				'blogname'               => 'Component Fuzz',
+				'default_category'       => 0,
+				'default_comment_status' => 'closed',
+				'default_ping_status'    => 'closed',
+				'gmt_offset'             => 2,
+				'home'                   => 'https://example.test',
+				'permalink_structure'    => '',
+				'show_on_front'          => 'posts',
+				'siteurl'                => 'https://example.test',
+				'timezone_string'        => 'Europe/Madrid',
+			)
+		);
+
+		\wp_cache_flush();
+
+		$GLOBALS['wp_post_types'] = array();
+		$GLOBALS['wp_taxonomies'] = array();
+		\create_initial_post_types();
+		\create_initial_taxonomies();
+
+		if ( class_exists( 'WP_Rewrite' ) ) {
+			$wp_rewrite = new \WP_Rewrite();
+		}
+
+		return array(
+			'token'           => $token,
+			'postTypePrivate' => 'cfzdp' . substr( $token, 0, 7 ),
+			'postTypePublic'  => 'cfzdu' . substr( $token, 0, 7 ),
+			'taxonomyPrivate' => 'cfzdtax' . substr( $token, 0, 7 ),
+			'taxonomyPublic'  => 'cfzdtp' . substr( $token, 0, 7 ),
+		);
+	}
+
+	private static function insert_sitemap_post( array $fields ): int {
+		$defaults = array(
+			'post_author'       => 0,
+			'post_content'      => 'Discovery sitemap fixture content',
+			'post_date'         => '2026-06-01 00:00:00',
+			'post_date_gmt'     => '2026-06-01 00:00:00',
+			'post_excerpt'      => '',
+			'post_modified'     => $fields['post_modified_gmt'] ?? '2026-06-01 00:00:00',
+			'post_modified_gmt' => '2026-06-01 00:00:00',
+			'post_name'         => '',
+			'post_status'       => 'publish',
+			'post_title'        => 'Discovery sitemap fixture',
+			'post_type'         => 'post',
+		);
+
+		$post_id = \wp_insert_post( array_merge( $defaults, $fields ), true, false );
+		if ( \is_wp_error( $post_id ) ) {
+			throw new \RuntimeException( 'Could not insert sitemap post fixture: ' . $post_id->get_error_code() );
+		}
+
+		return (int) $post_id;
+	}
+
+	private static function insert_sitemap_user( array $case, string $suffix ): int {
+		$safe_suffix = preg_replace( '/[^a-z0-9_]+/', '-', strtolower( $suffix ) );
+		$login       = 'cfz_' . $case['token'] . '_' . $safe_suffix;
+		$user_id     = \wp_insert_user(
+			array(
+				'user_login'   => $login,
+				'user_pass'    => 'component-fuzz',
+				'user_email'   => $login . '@example.test',
+				'user_nicename' => str_replace( '_', '-', $login ),
+				'display_name' => 'Discovery User ' . $suffix,
+			)
+		);
+
+		if ( \is_wp_error( $user_id ) ) {
+			throw new \RuntimeException( 'Could not insert sitemap user fixture: ' . $user_id->get_error_code() );
+		}
+
+		return (int) $user_id;
+	}
+
+	private static function insert_sitemap_term( string $taxonomy, string $name, string $slug, int $count ): array {
+		global $wpdb;
+
+		$result = \wp_insert_term(
+			$name,
+			$taxonomy,
+			array(
+				'slug' => $slug,
+			)
+		);
+
+		if ( \is_wp_error( $result ) ) {
+			throw new \RuntimeException( 'Could not insert sitemap term fixture: ' . $result->get_error_code() );
+		}
+
+		$wpdb->update(
+			$wpdb->term_taxonomy,
+			array( 'count' => $count ),
+			array( 'term_taxonomy_id' => (int) $result['term_taxonomy_id'] )
+		);
+
+		return array(
+			'term_id'          => (int) $result['term_id'],
+			'term_taxonomy_id' => (int) $result['term_taxonomy_id'],
+			'taxonomy'         => $taxonomy,
+			'slug'             => $slug,
+			'count'            => $count,
+		);
+	}
+
+	private static function sitemap_post_entries_match_fixtures( array $entries, array $posts ): bool {
+		if ( count( $entries ) !== count( $posts ) ) {
+			return false;
+		}
+
+		foreach ( $posts as $index => $post ) {
+			$entry    = $entries[ $index ] ?? array();
+			$expected = self::expected_sitemap_lastmod_from_gmt( (string) $post['modified_gmt'] );
+			if ( ( $entry['loc'] ?? null ) !== \get_permalink( $post['id'] ) ) {
+				return false;
+			}
+			if ( ( $entry['lastmod'] ?? null ) !== $expected || ! self::is_w3c_datetime( (string) ( $entry['lastmod'] ?? '' ) ) ) {
+				return false;
+			}
+			if ( (string) $post['id'] !== ( $entry['component-fuzz-id'] ?? null ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function expected_sitemap_lastmod_from_gmt( string $modified_gmt ): string {
+		$datetime = \DateTimeImmutable::createFromFormat( '!Y-m-d H:i:s', $modified_gmt, new \DateTimeZone( 'UTC' ) );
+		if ( ! $datetime ) {
+			return '';
+		}
+
+		$timezone = function_exists( 'wp_timezone' ) ? \wp_timezone() : new \DateTimeZone( 'UTC' );
+		return $datetime->setTimezone( $timezone )->format( DATE_W3C );
+	}
+
+	private static function sitemap_entries_contain_locs_for_ids( array $entries, array $post_ids ): bool {
+		$locs = array_column( $entries, 'loc' );
+		foreach ( $post_ids as $post_id ) {
+			if ( in_array( \get_permalink( $post_id ), $locs, true ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private static function sitemap_post_query_args_local_to_type( array $query_seen, string $post_type, int $limit ): bool {
+		if ( array() === $query_seen ) {
+			return false;
+		}
+
+		foreach ( $query_seen as $seen ) {
+			if ( $post_type !== ( $seen['postType'] ?? null ) ) {
+				return false;
+			}
+			if ( $limit !== (int) ( $seen['postsPerPage'] ?? 0 ) ) {
+				return false;
+			}
+			if ( array( 'publish' ) !== array_values( (array) ( $seen['status'] ?? array() ) ) ) {
+				return false;
+			}
+			if ( true !== ( $seen['ignoreSticky'] ?? null ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function sitemap_term_entries_match_fixtures( array $entries, array $terms, string $taxonomy ): bool {
+		if ( count( $entries ) !== count( $terms ) ) {
+			return false;
+		}
+
+		foreach ( $terms as $index => $term ) {
+			$entry = $entries[ $index ] ?? array();
+			$link  = \get_term_link( $term['term_id'], $taxonomy );
+			if ( \is_wp_error( $link ) || ( $entry['loc'] ?? null ) !== $link ) {
+				return false;
+			}
+			if ( (string) $term['term_id'] !== ( $entry['component-fuzz-term'] ?? null ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function sitemap_taxonomy_query_args_local_to_taxonomy( array $query_seen, string $taxonomy, int $limit ): bool {
+		if ( array() === $query_seen ) {
+			return false;
+		}
+
+		foreach ( $query_seen as $seen ) {
+			if ( $taxonomy !== ( $seen['taxonomy'] ?? null ) ) {
+				return false;
+			}
+			if ( $limit !== (int) ( $seen['number'] ?? 0 ) ) {
+				return false;
+			}
+			if ( true !== ( $seen['hideEmpty'] ?? null ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function sitemap_user_entries_match_ids( array $entries, array $user_ids ): bool {
+		if ( count( $entries ) !== count( $user_ids ) ) {
+			return false;
+		}
+
+		foreach ( $user_ids as $index => $user_id ) {
+			$entry = $entries[ $index ] ?? array();
+			if ( ( $entry['loc'] ?? null ) !== \get_author_posts_url( $user_id ) ) {
+				return false;
+			}
+			if ( (string) $user_id !== ( $entry['component-fuzz-user'] ?? null ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function sitemap_user_query_args_include_public_post_types( array $query_seen, int $limit, string $public_type, string $private_type ): bool {
+		if ( array() === $query_seen ) {
+			return false;
+		}
+
+		$expected_post_types = array( 'post', $public_type );
+		sort( $expected_post_types );
+
+		foreach ( $query_seen as $seen ) {
+			$post_types = array_values( (array) ( $seen['hasPublishedPosts'] ?? array() ) );
+			sort( $post_types );
+			if ( $limit !== (int) ( $seen['number'] ?? 0 ) ) {
+				return false;
+			}
+			if ( $expected_post_types !== $post_types ) {
+				return false;
+			}
+			if ( in_array( 'page', $post_types, true ) || in_array( 'attachment', $post_types, true ) || in_array( $private_type, $post_types, true ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function is_w3c_datetime( string $value ): bool {
+		return 1 === preg_match( '/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:\d{2})$/', $value );
+	}
+
 	private static function robots_cases( \ComponentFuzz\FuzzContext $ctx ): array {
 		$cases = array(
 			array( 'directives' => array() ),
@@ -1051,7 +2349,7 @@ final class DiscoverySurface {
 			'globals'      => array(),
 		);
 
-		foreach ( array( 'wp_rewrite', 'wp_sitemaps', 'wp_filter', 'wp_filters', 'wp_actions', 'wp_current_filter' ) as $name ) {
+		foreach ( array( 'wpdb', 'wp_rewrite', 'wp_sitemaps', 'wp_filter', 'wp_filters', 'wp_actions', 'wp_current_filter', 'wp_object_cache', 'wp_post_types', 'wp_taxonomies' ) as $name ) {
 			$snapshot['globals'][ $name ] = array(
 				'exists' => array_key_exists( $name, $GLOBALS ),
 				'value'  => array_key_exists( $name, $GLOBALS ) ? self::clone_value( $GLOBALS[ $name ] ) : null,
