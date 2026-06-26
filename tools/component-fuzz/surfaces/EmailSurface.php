@@ -15,10 +15,37 @@ final class EmailSurface {
 	private const GENERATED_USER_SEARCH_CASES = 8;
 	private const GENERATED_CONFUSABLE_LOCALPART_CASES = 6;
 	private const GENERATED_PASSWORD_RESET_RECIPIENT_CASES = 6;
+	private const GENERATED_COMMENT_SUBMISSION_CASES = 8;
 	private const TRACKED_HOOKS = array(
 		'is_email',
 		'sanitize_email',
+		'preprocess_comment',
 		'pre_comment_author_email',
+		'pre_comment_author_name',
+		'pre_comment_author_url',
+		'pre_comment_content',
+		'pre_comment_user_agent',
+		'pre_comment_user_ip',
+		'pre_comment_approved',
+		'duplicate_comment_id',
+		'check_comment_flood',
+		'wp_is_comment_flood',
+		'comment_post',
+		'wp_insert_comment',
+		'comment_text',
+		'comment_max_links_url',
+		'wp_check_comment_disallowed_list',
+		'pre_option_comment_registration',
+		'pre_option_require_name_email',
+		'pre_option_comment_moderation',
+		'pre_option_comment_max_links',
+		'pre_option_moderation_keys',
+		'pre_option_disallowed_keys',
+		'pre_option_comment_previously_approved',
+		'pre_option_comments_notify',
+		'pre_option_moderation_notify',
+		'pre_option_admin_email',
+		'pre_option_blogname',
 		'pre_user_email',
 		'pre_wp_mail',
 		'wp_mail',
@@ -97,6 +124,7 @@ final class EmailSurface {
 			$rows = array_merge( $rows, self::check_distinct_localparts( $ctx ) );
 			$rows = array_merge( $rows, self::check_normalization_sensitive_localparts( $ctx ) );
 			$rows = array_merge( $rows, self::check_comment_author_email_filters( $ctx ) );
+			$rows = array_merge( $rows, self::check_comment_submission_unicode_email_paths( $ctx ) );
 			$rows = array_merge( $rows, self::check_rest_email_schema_filter_modes( $ctx ) );
 			$rows = array_merge( $rows, self::check_user_email_indexes_distinct_localparts( $ctx ) );
 			$rows = array_merge( $rows, self::check_user_email_indexes_generated_localpart_aliases( $ctx ) );
@@ -2488,6 +2516,378 @@ final class EmailSurface {
 				array(
 					'observed' => $observed,
 					'failures' => $failures,
+				)
+			),
+		);
+	}
+
+	private static function check_comment_submission_unicode_email_paths( \ComponentFuzz\FuzzContext $ctx ): array {
+		$result_name = 'email.comment-submission.unicode-address-paths';
+
+		if ( ! self::can_reset_stub_content() ) {
+			return array(
+				$ctx->skip(
+					$result_name,
+					'The in-memory wpdb content reset hook is unavailable.'
+				),
+			);
+		}
+
+		$missing = array();
+		foreach (
+			array(
+				'add_action',
+				'add_filter',
+				'create_initial_post_types',
+				'get_comment',
+				'is_email',
+				'is_wp_error',
+				'remove_all_filters',
+				'sanitize_email',
+				'wp_handle_comment_submission',
+				'wp_new_comment',
+				'wp_set_current_user',
+			) as $function
+		) {
+			if ( ! function_exists( $function ) ) {
+				$missing[] = "function {$function}";
+			}
+		}
+
+		foreach ( array( 'WP_Comment', 'WP_Email_Address', 'WP_Error' ) as $class ) {
+			if ( ! class_exists( $class ) ) {
+				$missing[] = "class {$class}";
+			}
+		}
+
+		if ( array() !== $missing ) {
+			return array(
+				$ctx->skip(
+					$result_name,
+					'Required WordPress comment submission APIs are unavailable.',
+					array( 'missing' => implode( ', ', $missing ) )
+				),
+			);
+		}
+
+		$cases            = self::generated_comment_submission_cases( $ctx->fork( 'comment-submission' ) );
+		$failures         = array();
+		$observed         = array();
+		$insert_events    = array();
+		$post_events      = array();
+		$submission_hooks = array(
+			'preprocess_comment',
+			'pre_comment_author_email',
+			'pre_comment_author_name',
+			'pre_comment_author_url',
+			'pre_comment_content',
+			'pre_comment_user_agent',
+			'pre_comment_user_ip',
+			'pre_comment_approved',
+			'duplicate_comment_id',
+			'check_comment_flood',
+			'wp_is_comment_flood',
+			'comment_post',
+			'wp_insert_comment',
+			'comment_text',
+			'comment_max_links_url',
+			'wp_check_comment_disallowed_list',
+			'pre_option_comment_registration',
+			'pre_option_require_name_email',
+			'pre_option_comment_moderation',
+			'pre_option_comment_max_links',
+			'pre_option_moderation_keys',
+			'pre_option_disallowed_keys',
+			'pre_option_comment_previously_approved',
+			'pre_option_comments_notify',
+			'pre_option_moderation_notify',
+			'pre_option_admin_email',
+			'pre_option_blogname',
+		);
+		$hook_snapshot    = self::snapshot_hook_globals();
+		$hook_state_before = self::snapshot_selected_hook_state( $submission_hooks );
+		$server_keys      = array( 'REMOTE_ADDR', 'HTTP_USER_AGENT', 'REQUEST_URI', 'HTTP_HOST' );
+		$global_keys      = array(
+			'current_user',
+			'user_ID',
+			'userdata',
+			'user_login',
+			'user_level',
+			'user_email',
+			'user_url',
+			'user_identity',
+			'post',
+			'comment',
+			'wp_post_types',
+			'wp_post_statuses',
+			'_wp_post_type_features',
+			'post_type_meta_caps',
+		);
+		$server_snapshot  = self::snapshot_array_keys( $_SERVER, $server_keys );
+		$global_snapshot  = self::snapshot_named_globals( $global_keys );
+
+		self::reset_stub_content();
+		$content_before = self::stub_content_counts();
+
+		try {
+			$_SERVER['REMOTE_ADDR']     = '127.0.0.1';
+			$_SERVER['HTTP_USER_AGENT'] = 'ComponentFuzz EmailSurface';
+			$_SERVER['REQUEST_URI']     = '/component-fuzz/email-comment-unicode/';
+			$_SERVER['HTTP_HOST']       = 'example.test';
+
+			\wp_set_current_user( 0 );
+			\create_initial_post_types();
+			self::install_email_filters( 'unicode' );
+			self::install_comment_submission_filters( $insert_events, $post_events );
+
+			foreach ( $cases as $case_index => $case ) {
+				$post_id = self::seed_comment_submission_post( $ctx, $case_index, $case );
+				if ( $post_id <= 0 ) {
+					$failures[] = array(
+						'label'   => $case['label'],
+						'failure' => 'post-seed-failed',
+					);
+					continue;
+				}
+
+				$comments_before = self::stub_comment_count();
+				$insert_before   = count( $insert_events );
+				$post_before     = count( $post_events );
+				$content         = 'Unicode comment submission ' . $ctx->iteration() . '.' . $case_index . ' ' . $case['label'];
+				$submit          = self::capture_warnings(
+					static function () use ( $case, $post_id, $content ) {
+						if ( 'handle-submission' === $case['path'] ) {
+							return \wp_handle_comment_submission(
+								array(
+									'comment_post_ID' => $post_id,
+									'author'          => 'Component Fuzzer',
+									'email'           => $case['input'],
+									'url'             => '',
+									'comment'         => $content,
+									'comment_parent'  => 0,
+								)
+							);
+						}
+
+						return \wp_new_comment(
+							array(
+								'comment_post_ID'      => $post_id,
+								'comment_parent'       => 0,
+								'comment_author'       => 'Component Fuzzer',
+								'comment_author_email' => $case['input'],
+								'comment_author_url'   => '',
+								'comment_content'      => $content,
+								'comment_author_IP'    => '127.0.0.1',
+								'comment_agent'        => 'ComponentFuzz EmailSurface',
+								'comment_date'         => '2026-06-26 12:00:00',
+								'comment_date_gmt'     => '2026-06-26 10:00:00',
+								'comment_type'         => 'comment',
+								'user_id'              => 0,
+							),
+							true
+						);
+					}
+				);
+				$comments_after = self::stub_comment_count();
+				$case_inserts   = array_slice( $insert_events, $insert_before );
+				$case_posts     = array_slice( $post_events, $post_before );
+
+				if ( $case['accepted'] || 'wp-new-comment-sanitizes-invalid' === $case['expectedError'] ) {
+					$comment_id = 0;
+					$returned   = $submit['value'] ?? null;
+					$return_shape_ok = 'handle-submission' === $case['path']
+						? $returned instanceof \WP_Comment
+						: is_int( $returned );
+					if ( 'handle-submission' === $case['path'] && $returned instanceof \WP_Comment ) {
+						$comment_id = (int) $returned->comment_ID;
+					} elseif ( 'wp-new-comment' === $case['path'] && is_int( $returned ) ) {
+						$comment_id = $returned;
+					}
+
+					$stored             = $comment_id > 0
+						? self::capture_warnings( static fn() => \get_comment( $comment_id ) )
+						: self::not_called();
+					$stored_comment     = $stored['value'] ?? null;
+					$expected_email     = (string) $case['expectedEmail'];
+					$raw_sanitized      = self::capture_warnings( static fn() => \sanitize_email( $case['input'] ) );
+					$expected_sanitized = self::capture_warnings( static fn() => \sanitize_email( $expected_email ) );
+					$is_email           = '' === $expected_email
+						? self::not_called()
+						: self::capture_warnings( static fn() => \is_email( $expected_email ) );
+					$parsed             = '' === $expected_email
+						? self::not_called()
+						: self::capture_warnings( static fn() => \WP_Email_Address::from_string( $expected_email, 'unicode' ) );
+					$email              = $parsed['value'] ?? null;
+					$insert_event       = $case_inserts[0] ?? null;
+					$post_event         = $case_posts[0] ?? null;
+
+					$stored_ok = $stored_comment instanceof \WP_Comment
+						&& $expected_email === $stored_comment->comment_author_email
+						&& (string) $post_id === (string) $stored_comment->comment_post_ID
+						&& '1' === (string) $stored_comment->comment_approved;
+					$oracle_ok = ! $raw_sanitized['threw']
+						&& array() === $raw_sanitized['warnings']
+						&& ! $expected_sanitized['threw']
+						&& array() === $expected_sanitized['warnings']
+						&& ! $is_email['threw']
+						&& array() === $is_email['warnings']
+						&& ! $parsed['threw']
+						&& array() === $parsed['warnings']
+						&& $expected_email === $raw_sanitized['value']
+						&& $expected_email === $expected_sanitized['value']
+						&& (
+							'' === $expected_email
+								? null === $is_email['value'] && null === $parsed['value']
+								: $expected_email === $is_email['value']
+									&& $email instanceof \WP_Email_Address
+									&& $expected_email === $email->get_unicode_address()
+						);
+					$events_ok = 1 === count( $case_inserts )
+						&& 1 === count( $case_posts )
+						&& is_array( $insert_event )
+						&& is_array( $post_event )
+						&& $comment_id === (int) ( $insert_event['id'] ?? 0 )
+						&& $comment_id === (int) ( $post_event['id'] ?? 0 )
+						&& $post_id === (int) ( $insert_event['postId'] ?? 0 )
+						&& $post_id === (int) ( $post_event['postId'] ?? 0 )
+						&& $expected_email === ( $insert_event['email'] ?? null )
+						&& $expected_email === ( $post_event['email'] ?? null )
+						&& '1' === (string) ( $insert_event['approved'] ?? '' )
+						&& '1' === (string) ( $post_event['approved'] ?? '' )
+						&& true === ( $post_event['filtered'] ?? null );
+					$ok = ! $submit['threw']
+						&& array() === $submit['warnings']
+						&& $return_shape_ok
+						&& ! $stored['threw']
+						&& array() === $stored['warnings']
+						&& $comment_id > 0
+						&& $comments_after === $comments_before + 1
+						&& $stored_ok
+						&& $oracle_ok
+						&& $events_ok;
+
+					if ( ! $ok ) {
+						$failures[] = array(
+							'label'             => $case['label'],
+							'path'              => $case['path'],
+							'input'             => self::describe_string( $case['input'] ),
+							'expectedEmail'     => self::describe_string( $expected_email ),
+							'submit'            => self::describe_captured_call( $submit ),
+							'stored'            => self::describe_captured_call( $stored ),
+							'rawSanitized'      => self::describe_captured_call( $raw_sanitized ),
+							'expectedSanitized' => self::describe_captured_call( $expected_sanitized ),
+							'isEmail'           => self::describe_captured_call( $is_email ),
+							'parsed'            => self::describe_captured_call( $parsed ),
+							'insertEvents'      => self::describe_value( $case_inserts ),
+							'postEvents'        => self::describe_value( $case_posts ),
+							'returnShapeOk'     => $return_shape_ok,
+							'commentsBefore'    => $comments_before,
+							'commentsAfter'     => $comments_after,
+							'storedOk'          => $stored_ok,
+							'oracleOk'          => $oracle_ok,
+							'eventsOk'          => $events_ok,
+						);
+					}
+
+					$observed[] = array(
+						'label'         => $case['label'],
+						'path'          => $case['path'],
+						'accepted'      => (bool) $case['accepted'],
+						'inserted'      => true,
+						'expectedEmail' => self::describe_string( $expected_email ),
+						'commentId'     => $comment_id,
+						'traits'        => implode( ',', $case['traits'] ),
+					);
+					continue;
+				}
+
+				$is_email  = self::capture_warnings( static fn() => \is_email( $case['input'] ) );
+				$sanitized = self::capture_warnings( static fn() => \sanitize_email( $case['input'] ) );
+				$parsed    = self::capture_warnings( static fn() => \WP_Email_Address::from_string( $case['input'], 'unicode' ) );
+				$error     = $submit['value'] ?? null;
+				$ok        = ! $submit['threw']
+					&& array() === $submit['warnings']
+					&& \is_wp_error( $error )
+					&& $case['expectedError'] === $error->get_error_code()
+					&& $comments_after === $comments_before
+					&& array() === $case_inserts
+					&& array() === $case_posts
+					&& ! $is_email['threw']
+					&& array() === $is_email['warnings']
+					&& false === $is_email['value']
+					&& ! $sanitized['threw']
+					&& array() === $sanitized['warnings']
+					&& '' === $sanitized['value']
+					&& ! $parsed['threw']
+					&& array() === $parsed['warnings']
+					&& null === $parsed['value'];
+
+				if ( ! $ok ) {
+					$failures[] = array(
+						'label'          => $case['label'],
+						'path'           => $case['path'],
+						'input'          => self::describe_string( $case['input'] ),
+						'expectedError'  => $case['expectedError'],
+						'submit'         => self::describe_captured_call( $submit ),
+						'isEmail'        => self::describe_captured_call( $is_email ),
+						'sanitizeEmail'  => self::describe_captured_call( $sanitized ),
+						'parsed'         => self::describe_captured_call( $parsed ),
+						'insertEvents'   => self::describe_value( $case_inserts ),
+						'postEvents'     => self::describe_value( $case_posts ),
+						'commentsBefore' => $comments_before,
+						'commentsAfter'  => $comments_after,
+					);
+				}
+
+				$observed[] = array(
+					'label'        => $case['label'],
+					'path'         => $case['path'],
+					'accepted'     => false,
+					'error'        => \is_wp_error( $error ) ? $error->get_error_code() : self::describe_value( $error ),
+					'traits'       => implode( ',', $case['traits'] ),
+					'commentsHeld' => $comments_after === $comments_before,
+				);
+			}
+		} finally {
+			self::restore_hook_globals( $hook_snapshot );
+			self::restore_named_globals( $global_snapshot );
+			self::restore_array_keys( $_SERVER, $server_snapshot );
+			self::reset_stub_content();
+		}
+
+		$hook_state_after = self::snapshot_selected_hook_state( $submission_hooks );
+		$server_after     = self::snapshot_array_keys( $_SERVER, $server_keys );
+		$global_after     = self::snapshot_named_globals( $global_keys );
+		$content_after    = self::stub_content_counts();
+		$state_ok         = $hook_state_before === $hook_state_after
+			&& $server_snapshot === $server_after
+			&& $global_snapshot === $global_after
+			&& $content_before === $content_after;
+
+		if ( ! $state_ok ) {
+			$failures[] = array(
+				'failure'       => 'state-not-restored',
+				'hooksBefore'   => self::describe_value( $hook_state_before ),
+				'hooksAfter'    => self::describe_value( $hook_state_after ),
+				'serverBefore'  => self::describe_value( $server_snapshot ),
+				'serverAfter'   => self::describe_value( $server_after ),
+				'globalsBefore' => self::describe_value( $global_snapshot ),
+				'globalsAfter'  => self::describe_value( $global_after ),
+				'contentBefore' => self::describe_value( $content_before ),
+				'contentAfter'  => self::describe_value( $content_after ),
+			);
+		}
+
+		return array(
+			$ctx->result(
+				$result_name,
+				array() === $failures,
+				array(
+					'caseCount'    => count( $cases ),
+					'idnSupported' => self::has_idn(),
+					'observed'     => $observed,
+					'stateRestored' => $state_ok,
+					'failures'     => self::describe_value( $failures ),
 				)
 			),
 		);
@@ -5748,6 +6148,354 @@ final class EmailSurface {
 		return substr( $address, 0, $at );
 	}
 
+	private static function generated_comment_submission_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$cases = array(
+			array(
+				'label'         => 'handle-unicode-local-latin',
+				'path'          => 'handle-submission',
+				'input'         => "gr\u{00E5}@example.com",
+				'expectedEmail' => "gr\u{00E5}@example.com",
+				'accepted'      => true,
+				'expectedError' => null,
+				'source'        => 'fixed',
+				'traits'        => array( 'valid', 'unicodeLocal', 'handleSubmission' ),
+			),
+			array(
+				'label'         => 'handle-unicode-local-combining',
+				'path'          => 'handle-submission',
+				'input'         => "jose\u{0301}@example.com",
+				'expectedEmail' => "jose\u{0301}@example.com",
+				'accepted'      => true,
+				'expectedError' => null,
+				'source'        => 'fixed',
+				'traits'        => array( 'valid', 'unicodeLocal', 'combiningMark', 'handleSubmission' ),
+			),
+			array(
+				'label'         => 'new-comment-display-name-recovery',
+				'path'          => 'wp-new-comment',
+				'input'         => "\"\u{00C5}sa Example\" <gr\u{00E5} @ example . com.>",
+				'expectedEmail' => "gr\u{00E5}@example.com",
+				'accepted'      => true,
+				'expectedError' => null,
+				'source'        => 'fixed',
+				'traits'        => array( 'valid', 'unicodeLocal', 'displayName', 'recoverableWhitespace', 'wpNewComment' ),
+			),
+			array(
+				'label'         => 'new-comment-nbsp-recovery',
+				'path'          => 'wp-new-comment',
+				'input'         => "jos\u{00E9}\u{00A0}@\u{00A0}example.com",
+				'expectedEmail' => "jos\u{00E9}@example.com",
+				'accepted'      => true,
+				'expectedError' => null,
+				'source'        => 'fixed',
+				'traits'        => array( 'valid', 'unicodeLocal', 'recoverableWhitespace', 'wpNewComment' ),
+			),
+			array(
+				'label'         => 'handle-emoji-local-rejected',
+				'path'          => 'handle-submission',
+				'input'         => "emoji\u{1F600}@example.com",
+				'expectedEmail' => null,
+				'accepted'      => false,
+				'expectedError' => 'require_valid_email',
+				'source'        => 'fixed',
+				'traits'        => array( 'invalid', 'emojiLocal', 'handleSubmission' ),
+			),
+			array(
+				'label'         => 'handle-fullwidth-at-rejected',
+				'path'          => 'handle-submission',
+				'input'         => "bad\u{FF20}example.com",
+				'expectedEmail' => null,
+				'accepted'      => false,
+				'expectedError' => 'require_valid_email',
+				'source'        => 'fixed',
+				'traits'        => array( 'invalid', 'fullwidthAt', 'handleSubmission' ),
+			),
+			array(
+				'label'         => 'handle-invalid-utf8-rejected',
+				'path'          => 'handle-submission',
+				'input'         => "bad\xE2\x82@example.com",
+				'expectedEmail' => null,
+				'accepted'      => false,
+				'expectedError' => 'require_valid_email',
+				'source'        => 'fixed',
+				'traits'        => array( 'invalid', 'invalidUtf8', 'handleSubmission' ),
+			),
+			array(
+				'label'         => 'handle-leading-combining-local-rejected',
+				'path'          => 'handle-submission',
+				'input'         => "\u{0301}bad@example.com",
+				'expectedEmail' => null,
+				'accepted'      => false,
+				'expectedError' => 'require_valid_email',
+				'source'        => 'fixed',
+				'traits'        => array( 'invalid', 'leadingCombiningMark', 'handleSubmission' ),
+			),
+			array(
+				'label'         => 'new-comment-emoji-local-sanitized-empty',
+				'path'          => 'wp-new-comment',
+				'input'         => "direct\u{1F600}@example.com",
+				'expectedEmail' => '',
+				'accepted'      => false,
+				'expectedError' => 'wp-new-comment-sanitizes-invalid',
+				'source'        => 'fixed',
+				'traits'        => array( 'invalid', 'emojiLocal', 'wpNewComment', 'sanitizedEmpty' ),
+			),
+			array(
+				'label'         => 'new-comment-fullwidth-at-sanitized-empty',
+				'path'          => 'wp-new-comment',
+				'input'         => "direct\u{FF20}example.com",
+				'expectedEmail' => '',
+				'accepted'      => false,
+				'expectedError' => 'wp-new-comment-sanitizes-invalid',
+				'source'        => 'fixed',
+				'traits'        => array( 'invalid', 'fullwidthAt', 'wpNewComment', 'sanitizedEmpty' ),
+			),
+		);
+
+		$valid_locals = array(
+			array( 'value' => "gr\u{00E5}", 'traits' => array( 'unicodeLocal', 'latin' ) ),
+			array( 'value' => "jos\u{00E9}", 'traits' => array( 'unicodeLocal', 'latin' ) ),
+			array( 'value' => "jose\u{0301}", 'traits' => array( 'unicodeLocal', 'combiningMark' ) ),
+			array( 'value' => "\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}", 'traits' => array( 'unicodeLocal', 'greek' ) ),
+			array( 'value' => "\u{043F}\u{043E}\u{0447}\u{0442}\u{0430}", 'traits' => array( 'unicodeLocal', 'cyrillic' ) ),
+			array( 'value' => "\u{3086}\u{3046}\u{3056}\u{3042}", 'traits' => array( 'unicodeLocal', 'hiragana' ) ),
+		);
+		$domains      = array(
+			array( 'value' => 'example.com', 'traits' => array( 'asciiDomain' ) ),
+			array( 'value' => 'sub-domain.example', 'traits' => array( 'asciiDomain' ) ),
+		);
+
+		if ( self::has_idn() ) {
+			$cases[]  = array(
+				'label'         => 'handle-unicode-domain-latin',
+				'path'          => 'handle-submission',
+				'input'         => "mail@gr\u{00E5}.org",
+				'expectedEmail' => "mail@gr\u{00E5}.org",
+				'accepted'      => true,
+				'expectedError' => null,
+				'source'        => 'fixed',
+				'traits'        => array( 'valid', 'unicodeDomain', 'handleSubmission' ),
+			);
+			$cases[]  = array(
+				'label'         => 'new-comment-unicode-domain-recovery',
+				'path'          => 'wp-new-comment',
+				'input'         => "Display Name <mail @ gr\u{00E5} . org.>",
+				'expectedEmail' => "mail@gr\u{00E5}.org",
+				'accepted'      => true,
+				'expectedError' => null,
+				'source'        => 'fixed',
+				'traits'        => array( 'valid', 'unicodeDomain', 'displayName', 'recoverableWhitespace', 'wpNewComment' ),
+			);
+			$domains[] = array( 'value' => "gr\u{00E5}.org", 'traits' => array( 'unicodeDomain', 'latin' ) );
+			$domains[] = array( 'value' => "b\u{00FC}cher.tld", 'traits' => array( 'unicodeDomain', 'latin' ) );
+			$domains[] = array(
+				'value'  => "\u{03C0}\u{03B1}\u{03C1}\u{03AC}\u{03B4}\u{03B5}\u{03B9}\u{03B3}\u{03BC}\u{03B1}.\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}",
+				'traits' => array( 'unicodeDomain', 'greek' ),
+			);
+		}
+
+		$invalid_profiles = array(
+			array( 'label' => 'emoji-local', 'input' => "emoji\u{1F642}@example.com", 'traits' => array( 'emojiLocal' ) ),
+			array( 'label' => 'fullwidth-at', 'input' => "generated\u{FF20}example.com", 'traits' => array( 'fullwidthAt' ) ),
+			array( 'label' => 'invalid-utf8', 'input' => "generated\xC0\xAF@example.com", 'traits' => array( 'invalidUtf8' ) ),
+			array( 'label' => 'leading-combining-local', 'input' => "\u{0301}generated@example.com", 'traits' => array( 'leadingCombiningMark' ) ),
+		);
+
+		for ( $i = 0; $i < self::GENERATED_COMMENT_SUBMISSION_CASES; $i++ ) {
+			if ( $ctx->bool( 58 ) ) {
+				$local          = $ctx->choice( $valid_locals );
+				$domain         = $ctx->choice( $domains );
+				$expected_email = $local['value'] . '@' . $domain['value'];
+				$path           = $ctx->bool( 35 ) ? 'wp-new-comment' : 'handle-submission';
+				$input          = $expected_email;
+				$traits         = array_merge( array( 'valid' ), $local['traits'], $domain['traits'] );
+
+				if ( 'wp-new-comment' === $path ) {
+					$input    = 'Generated ' . $i . ' <' . $local['value'] . ' @ ' . str_replace( '.', ' . ', $domain['value'] ) . '.>';
+					$traits[] = 'displayName';
+					$traits[] = 'recoverableWhitespace';
+					$traits[] = 'wpNewComment';
+				} else {
+					$traits[] = 'handleSubmission';
+				}
+
+				$cases[] = array(
+					'label'         => 'generated-valid-' . $i,
+					'path'          => $path,
+					'input'         => $input,
+					'expectedEmail' => $expected_email,
+					'accepted'      => true,
+					'expectedError' => null,
+					'source'        => 'generated',
+					'traits'        => array_values( array_unique( $traits ) ),
+				);
+				continue;
+			}
+
+			$invalid = $ctx->choice( $invalid_profiles );
+			$path    = $ctx->bool( 30 ) ? 'wp-new-comment' : 'handle-submission';
+			$cases[] = array(
+				'label'         => 'generated-invalid-' . $i . '-' . $invalid['label'],
+				'path'          => $path,
+				'input'         => $invalid['input'],
+				'expectedEmail' => 'wp-new-comment' === $path ? '' : null,
+				'accepted'      => false,
+				'expectedError' => 'wp-new-comment' === $path ? 'wp-new-comment-sanitizes-invalid' : 'require_valid_email',
+				'source'        => 'generated',
+				'traits'        => array_values(
+					array_unique(
+						array_merge(
+							array( 'invalid', 'wp-new-comment' === $path ? 'wpNewComment' : 'handleSubmission' ),
+							'wp-new-comment' === $path ? array( 'sanitizedEmpty' ) : array(),
+							$invalid['traits']
+						)
+					)
+				),
+			);
+		}
+
+		return $cases;
+	}
+
+	private static function install_comment_submission_filters( array &$insert_events, array &$post_events ): void {
+		foreach (
+			array(
+				'preprocess_comment',
+				'pre_comment_author_name',
+				'pre_comment_author_url',
+				'pre_comment_content',
+				'pre_comment_user_agent',
+				'pre_comment_user_ip',
+				'pre_comment_author_email',
+				'pre_comment_approved',
+				'duplicate_comment_id',
+				'check_comment_flood',
+				'wp_is_comment_flood',
+				'comment_post',
+				'wp_insert_comment',
+				'comment_text',
+				'comment_max_links_url',
+				'wp_check_comment_disallowed_list',
+			) as $hook
+		) {
+			\remove_all_filters( $hook );
+		}
+
+		foreach (
+			array(
+				'pre_option_comment_registration',
+				'pre_option_require_name_email',
+				'pre_option_comment_moderation',
+				'pre_option_comment_max_links',
+				'pre_option_moderation_keys',
+				'pre_option_disallowed_keys',
+				'pre_option_comment_previously_approved',
+				'pre_option_comments_notify',
+				'pre_option_moderation_notify',
+				'pre_option_admin_email',
+				'pre_option_blogname',
+			) as $hook
+		) {
+			\remove_all_filters( $hook );
+		}
+
+		\add_filter( 'pre_comment_author_email', 'trim' );
+		\add_filter( 'pre_comment_author_email', 'sanitize_email' );
+		\add_filter(
+			'pre_comment_approved',
+			static function () {
+				return 1;
+			},
+			10,
+			2
+		);
+		\add_filter(
+			'wp_is_comment_flood',
+			static function () {
+				return false;
+			},
+			PHP_INT_MAX,
+			5
+		);
+
+		$option_values = array(
+			'pre_option_comment_registration'         => 0,
+			'pre_option_require_name_email'          => 1,
+			'pre_option_comment_moderation'          => 0,
+			'pre_option_comment_max_links'           => 0,
+			'pre_option_moderation_keys'             => '',
+			'pre_option_disallowed_keys'             => '',
+			'pre_option_comment_previously_approved' => 0,
+			'pre_option_comments_notify'             => 0,
+			'pre_option_moderation_notify'           => 0,
+			'pre_option_admin_email'                 => 'admin@example.test',
+			'pre_option_blogname'                    => 'Component Fuzz',
+		);
+		foreach ( $option_values as $hook => $value ) {
+			\add_filter(
+				$hook,
+				static function () use ( $value ) {
+					return $value;
+				}
+			);
+		}
+
+		\add_action(
+			'wp_insert_comment',
+			static function ( $comment_id, $comment ) use ( &$insert_events ): void {
+				$insert_events[] = array(
+					'id'       => (int) $comment_id,
+					'postId'   => $comment instanceof \WP_Comment ? (int) $comment->comment_post_ID : null,
+					'email'    => $comment instanceof \WP_Comment ? $comment->comment_author_email : null,
+					'approved' => $comment instanceof \WP_Comment ? (string) $comment->comment_approved : null,
+				);
+			},
+			10,
+			2
+		);
+		\add_action(
+			'comment_post',
+			static function ( $comment_id, $approved, array $commentdata ) use ( &$post_events ): void {
+				$post_events[] = array(
+					'id'       => (int) $comment_id,
+					'postId'   => isset( $commentdata['comment_post_ID'] ) ? (int) $commentdata['comment_post_ID'] : null,
+					'email'    => $commentdata['comment_author_email'] ?? null,
+					'approved' => (string) $approved,
+					'filtered' => true === ( $commentdata['filtered'] ?? null ),
+				);
+			},
+			10,
+			3
+		);
+	}
+
+	private static function seed_comment_submission_post( \ComponentFuzz\FuzzContext $ctx, int $case_index, array $case ): int {
+		if ( ! isset( $GLOBALS['wpdb'] ) || ! is_object( $GLOBALS['wpdb'] ) ) {
+			return 0;
+		}
+
+		$slug   = 'email-comment-unicode-' . $ctx->iteration() . '-' . $case_index . '-' . substr( sha1( $case['label'] ), 0, 10 );
+		$result = $GLOBALS['wpdb']->insert(
+			$GLOBALS['wpdb']->posts,
+			array(
+				'post_author'       => 0,
+				'post_date'         => '2026-06-26 12:00:00',
+				'post_date_gmt'     => '2026-06-26 10:00:00',
+				'post_content'      => 'Email comment Unicode host post.',
+				'post_title'        => 'Email Comment Unicode ' . $case_index,
+				'post_status'       => 'publish',
+				'comment_status'    => 'open',
+				'ping_status'       => 'closed',
+				'post_name'         => $slug,
+				'post_modified'     => '2026-06-26 12:00:00',
+				'post_modified_gmt' => '2026-06-26 10:00:00',
+				'post_type'         => 'post',
+			)
+		);
+
+		return false === $result ? 0 : (int) $GLOBALS['wpdb']->insert_id;
+	}
+
 	private static function delete_user_email_cache( string $email ): void {
 		if ( function_exists( 'wp_cache_delete' ) ) {
 			\wp_cache_delete( $email, 'useremail' );
@@ -5822,6 +6570,23 @@ final class EmailSurface {
 		}
 
 		\wp_cache_flush();
+	}
+
+	private static function stub_content_counts(): array {
+		if (
+			isset( $GLOBALS['wpdb'] )
+			&& is_object( $GLOBALS['wpdb'] )
+			&& method_exists( $GLOBALS['wpdb'], 'component_fuzz_content_counts' )
+		) {
+			return $GLOBALS['wpdb']->component_fuzz_content_counts();
+		}
+
+		return array();
+	}
+
+	private static function stub_comment_count(): int {
+		$counts = self::stub_content_counts();
+		return (int) ( $counts['comments'] ?? 0 );
 	}
 
 	private static function install_email_filters( string $mode ): void {
@@ -7009,6 +7774,14 @@ final class EmailSurface {
 		}
 	}
 
+	private static function not_called(): array {
+		return array(
+			'threw'    => false,
+			'value'    => null,
+			'warnings' => array(),
+		);
+	}
+
 	private static function case_result( \ComponentFuzz\FuzzContext $ctx, int $case_index, array $case, string $invariant, bool $ok, array $data = array() ): array {
 		return $ctx->result(
 			$invariant,
@@ -7192,9 +7965,13 @@ final class EmailSurface {
 	}
 
 	private static function snapshot_tracked_hook_state(): array {
+		return self::snapshot_selected_hook_state( self::TRACKED_HOOKS );
+	}
+
+	private static function snapshot_selected_hook_state( array $hooks ): array {
 		$state = array();
 
-		foreach ( self::TRACKED_HOOKS as $hook ) {
+		foreach ( $hooks as $hook ) {
 			$state[ $hook ] = array(
 				'hasFilter'    => isset( $GLOBALS['wp_filter'][ $hook ] ),
 				'callbacks'    => self::hook_callbacks_fingerprint( $GLOBALS['wp_filter'][ $hook ] ?? null ),
@@ -7284,6 +8061,50 @@ final class EmailSurface {
 				$GLOBALS[ $name ] = self::clone_value( $entry['value'] );
 			} else {
 				unset( $GLOBALS[ $name ] );
+			}
+		}
+	}
+
+	private static function snapshot_named_globals( array $names ): array {
+		$snapshot = array();
+		foreach ( $names as $name ) {
+			$snapshot[ $name ] = array(
+				'exists' => array_key_exists( $name, $GLOBALS ),
+				'value'  => array_key_exists( $name, $GLOBALS ) ? $GLOBALS[ $name ] : null,
+			);
+		}
+
+		return $snapshot;
+	}
+
+	private static function restore_named_globals( array $snapshot ): void {
+		foreach ( $snapshot as $name => $entry ) {
+			if ( $entry['exists'] ) {
+				$GLOBALS[ $name ] = $entry['value'];
+			} else {
+				unset( $GLOBALS[ $name ] );
+			}
+		}
+	}
+
+	private static function snapshot_array_keys( array $source, array $keys ): array {
+		$snapshot = array();
+		foreach ( $keys as $key ) {
+			$snapshot[ $key ] = array(
+				'exists' => array_key_exists( $key, $source ),
+				'value'  => array_key_exists( $key, $source ) ? $source[ $key ] : null,
+			);
+		}
+
+		return $snapshot;
+	}
+
+	private static function restore_array_keys( array &$target, array $snapshot ): void {
+		foreach ( $snapshot as $key => $entry ) {
+			if ( $entry['exists'] ) {
+				$target[ $key ] = $entry['value'];
+			} else {
+				unset( $target[ $key ] );
 			}
 		}
 	}
