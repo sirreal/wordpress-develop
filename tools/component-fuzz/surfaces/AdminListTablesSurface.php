@@ -35,6 +35,7 @@ final class AdminListTablesSurface {
 			$rows[] = self::check_network_themes_table( $ctx->fork( 'network-themes' ) );
 			$rows[] = self::check_application_passwords_table( $ctx->fork( 'application-passwords' ) );
 			$rows[] = self::check_application_passwords_last_ip_boundary( $ctx->fork( 'application-passwords-last-ip' ) );
+			$rows[] = self::check_base_pagination_per_page_output( $ctx->fork( 'base-pagination' ) );
 			$rows[] = self::check_network_tables( $ctx->fork( 'network-tables' ) );
 			$rows[] = self::skipped_db_heavy_branches( $ctx->fork( 'skips' ) );
 		} catch ( \Throwable $e ) {
@@ -1725,6 +1726,293 @@ final class AdminListTablesSurface {
 		);
 	}
 
+	private static function check_base_pagination_per_page_output( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures           = array();
+		$filters            = array();
+		$screen             = self::screen( 'cfz-base-pagination-' . $ctx->iteration() . '-' . substr( hash( 'crc32b', (string) $ctx->seed() ), 0, 8 ) );
+		$current_user       = self::synthetic_user( $ctx->fork( 'current-user' ), 55500, 'base-pagination' );
+		$absent_option      = 'cfz_base_absent_per_page_' . $ctx->iteration();
+		$invalid_option     = 'cfz_base_invalid_per_page_' . $ctx->iteration();
+		$per_page_events    = array();
+		$user_option_events = array();
+		$result             = array();
+		$filters_removed    = false;
+		$restored           = false;
+		$probe              = null;
+		$local_snapshot     = self::snapshot_globals(
+			array(
+				'_GET',
+				'_POST',
+				'_REQUEST',
+				'current_screen',
+				'current_user',
+				'pagenow',
+			)
+		);
+		$server_snapshot = self::snapshot_server( array( 'HTTP_HOST', 'REQUEST_URI', 'PHP_SELF' ) );
+
+		$absent_per_page_filter = static function ( int $per_page ) use ( &$per_page_events ): int {
+			$per_page_events['absent'][] = $per_page;
+			return $per_page + 4;
+		};
+		$invalid_user_option_filter = static function ( $value, string $option, \WP_User $user ) use ( &$user_option_events ) {
+			$user_option_events[] = array(
+				'option' => $option,
+				'user'   => (int) $user->ID,
+				'value'  => $value,
+			);
+
+			return '0';
+		};
+		$invalid_per_page_filter = static function ( int $per_page ) use ( &$per_page_events ): int {
+			$per_page_events['invalid'][] = $per_page;
+			return $per_page + 7;
+		};
+
+		self::add_filter_record( $filters, $absent_option, $absent_per_page_filter, 10, 1 );
+		self::add_filter_record( $filters, 'get_user_option_' . $invalid_option, $invalid_user_option_filter, 10, 3 );
+		self::add_filter_record( $filters, $invalid_option, $invalid_per_page_filter, 10, 1 );
+
+		try {
+			$GLOBALS['current_user'] = $current_user;
+			$GLOBALS['pagenow']      = 'admin.php';
+			$_GET                    = array(
+				'page'  => $screen->id,
+				'paged' => 3,
+			);
+			$_POST                   = array();
+			$_REQUEST                = $_GET;
+			$_SERVER['HTTP_HOST']    = 'example.test';
+			$_SERVER['PHP_SELF']     = '/wp-admin/admin.php';
+			$_SERVER['REQUEST_URI']  = '/wp-admin/admin.php?page=' . rawurlencode( $screen->id )
+				. '&mode=list&order=asc&s=stable-value'
+				. '&updated=1&deleted=2'
+				. '&raw=<script>alert(1)</script>'
+				. '&proto=javascript:alert(1)'
+				. '&paged=3';
+
+			$probe = self::new_pagination_probe( $screen );
+
+			$absent_per_page  = $probe->expose_get_items_per_page( $absent_option, 19 );
+			$invalid_per_page = $probe->expose_get_items_per_page( $invalid_option, 23 );
+
+			$probe->expose_set_pagination_args(
+				array(
+					'total_items' => 23,
+					'per_page'    => 5,
+				)
+			);
+
+			$derived_total_pages  = $probe->get_pagination_arg( 'total_pages' );
+			$page_before_clamp    = $probe->get_pagenum();
+			$page_arg_before_clamp = $probe->get_pagination_arg( 'page' );
+			$top_output           = self::capture(
+				static function () use ( $probe ): void {
+					$probe->expose_pagination( 'top' );
+				}
+			);
+			$bottom_output        = self::capture(
+				static function () use ( $probe ): void {
+					$probe->expose_pagination( 'bottom' );
+				}
+			);
+
+			$_REQUEST['paged']    = 999;
+			$page_after_clamp     = $probe->get_pagenum();
+			$page_arg_after_clamp = $probe->get_pagination_arg( 'page' );
+
+			$_REQUEST['paged'] = 2;
+			$probe->expose_set_pagination_args(
+				array(
+					'infinite_scroll' => true,
+					'per_page'        => 5,
+					'total_items'     => 23,
+				)
+			);
+			$infinite_output = self::capture(
+				static function () use ( $probe ): void {
+					$probe->expose_pagination( 'top' );
+				}
+			);
+
+			$_REQUEST['paged'] = 1;
+			$probe->expose_set_pagination_args(
+				array(
+					'per_page'    => 5,
+					'total_items' => 0,
+				)
+			);
+			$empty_output = self::capture(
+				static function () use ( $probe ): void {
+					$probe->expose_pagination( 'top' );
+				}
+			);
+
+			$result = compact(
+				'absent_per_page',
+				'bottom_output',
+				'derived_total_pages',
+				'empty_output',
+				'infinite_output',
+				'invalid_per_page',
+				'page_after_clamp',
+				'page_arg_after_clamp',
+				'page_arg_before_clamp',
+				'page_before_clamp',
+				'per_page_events',
+				'top_output',
+				'user_option_events'
+			);
+		} finally {
+			self::remove_filter_records( $filters );
+			if ( $probe instanceof \WP_List_Table ) {
+				\remove_filter( "manage_{$screen->id}_columns", array( $probe, 'get_columns' ), 0 );
+			}
+
+			$filters_removed = self::filters_removed( $filters )
+				&& ( ! ( $probe instanceof \WP_List_Table ) || false === \has_filter( "manage_{$screen->id}_columns", array( $probe, 'get_columns' ) ) );
+
+			self::restore_server( $server_snapshot );
+			self::restore_globals( $local_snapshot );
+			$restored = self::globals_match(
+				$local_snapshot,
+				array( '_GET', '_POST', '_REQUEST', 'current_screen', 'current_user', 'pagenow' )
+			)
+				&& self::server_match( $server_snapshot, array( 'HTTP_HOST', 'REQUEST_URI', 'PHP_SELF' ) );
+		}
+
+		$top_output      = (string) ( $result['top_output'] ?? '' );
+		$bottom_output   = (string) ( $result['bottom_output'] ?? '' );
+		$infinite_output = (string) ( $result['infinite_output'] ?? '' );
+		$empty_output    = (string) ( $result['empty_output'] ?? '' );
+		$first_href      = '';
+		$prev_href       = '';
+		$next_href       = '';
+		$last_href       = '';
+		preg_match( "/class='first-page button' href='([^']+)'/", $top_output, $first_match );
+		preg_match( "/class='prev-page button' href='([^']+)'/", $top_output, $prev_match );
+		preg_match( "/class='next-page button' href='([^']+)'/", $top_output, $next_match );
+		preg_match( "/class='last-page button' href='([^']+)'/", $top_output, $last_match );
+		$first_href = (string) ( $first_match[1] ?? '' );
+		$prev_href  = (string) ( $prev_match[1] ?? '' );
+		$next_href  = (string) ( $next_match[1] ?? '' );
+		$last_href  = (string) ( $last_match[1] ?? '' );
+
+		self::collect_failure(
+			$failures,
+			23 === ( $result['absent_per_page'] ?? null )
+				&& 30 === ( $result['invalid_per_page'] ?? null )
+				&& array( 19 ) === ( $result['per_page_events']['absent'] ?? array() )
+				&& array( 23 ) === ( $result['per_page_events']['invalid'] ?? array() )
+				&& 1 === count( $result['user_option_events'] ?? array() )
+				&& false === ( $result['user_option_events'][0]['value'] ?? null ),
+			'get_items_per_page falls back for absent/invalid user options before applying dynamic per-page filters',
+			array(
+				'absentPerPage'    => $result['absent_per_page'] ?? null,
+				'invalidPerPage'   => $result['invalid_per_page'] ?? null,
+				'perPageEvents'    => $result['per_page_events'] ?? array(),
+				'userOptionEvents' => $result['user_option_events'] ?? array(),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			5 === ( $result['derived_total_pages'] ?? null )
+				&& 3 === ( $result['page_before_clamp'] ?? null )
+				&& 3 === ( $result['page_arg_before_clamp'] ?? null )
+				&& 5 === ( $result['page_after_clamp'] ?? null )
+				&& 5 === ( $result['page_arg_after_clamp'] ?? null ),
+			'set_pagination_args derives total_pages and get_pagenum/get_pagination_arg clamp after totals are known',
+			array(
+				'derivedTotalPages' => $result['derived_total_pages'] ?? null,
+				'pageBeforeClamp'    => $result['page_before_clamp'] ?? null,
+				'pageArgBeforeClamp' => $result['page_arg_before_clamp'] ?? null,
+				'pageAfterClamp'     => $result['page_after_clamp'] ?? null,
+				'pageArgAfterClamp'  => $result['page_arg_after_clamp'] ?? null,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			str_contains( $top_output, 'displaying-num' )
+				&& str_contains( $top_output, '23 items' )
+				&& str_contains( $top_output, "id='current-page-selector'" )
+				&& str_contains( $top_output, "name='paged'" )
+				&& str_contains( $top_output, "value='3'" )
+				&& str_contains( $top_output, "class='total-pages'>5</span>" )
+				&& str_contains( $top_output, "class='first-page button'" )
+				&& str_contains( $top_output, "class='prev-page button'" )
+				&& str_contains( $top_output, "class='next-page button'" )
+				&& str_contains( $top_output, "class='last-page button'" )
+				&& '' !== $first_href
+				&& '' !== $prev_href
+				&& '' !== $next_href
+				&& '' !== $last_href
+				&& ! str_contains( $first_href, 'paged=' )
+				&& str_contains( $prev_href, 'paged=2' )
+				&& str_contains( $next_href, 'paged=4' )
+				&& str_contains( $last_href, 'paged=5' )
+				&& str_contains( $top_output, 'mode=list' )
+				&& str_contains( $top_output, 'order=asc' )
+				&& str_contains( $top_output, 's=stable-value' )
+				&& ! str_contains( $top_output, 'updated=1' )
+				&& ! str_contains( $top_output, 'deleted=2' )
+				&& ! str_contains( strtolower( $top_output ), '<script' )
+				&& ! str_contains( strtolower( $top_output ), 'javascript:' ),
+			"pagination('top') renders editable middle-page controls, enabled links, preserved safe query args, and escaped hostile query values",
+			array(
+				'firstHref' => $first_href,
+				'lastHref'  => $last_href,
+				'nextHref'  => $next_href,
+				'prevHref'  => $prev_href,
+				'top'       => self::describe_string( $top_output ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			str_contains( $bottom_output, 'displaying-num' )
+				&& str_contains( $bottom_output, 'tablenav-paging-text' )
+				&& str_contains( $bottom_output, "class='total-pages'>5</span>" )
+				&& ! str_contains( $bottom_output, 'current-page-selector' )
+				&& ! str_contains( $bottom_output, "name='paged'" )
+				&& self::html_has_no_raw_script( $bottom_output ),
+			"pagination('bottom') renders static current-page text rather than an editable paged input",
+			array( 'bottom' => self::describe_string( $bottom_output ) )
+		);
+
+		self::collect_failure(
+			$failures,
+			str_contains( $infinite_output, "class='pagination-links hide-if-js'" )
+				&& '' === $empty_output,
+			'infinite_scroll adds hide-if-js and zero total_items suppresses pagination output',
+			array(
+				'empty'    => self::describe_string( $empty_output ),
+				'infinite' => self::describe_string( $infinite_output ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$filters_removed && $restored,
+			'base pagination filters, constructor column filter, request globals, and server metadata are restored',
+			array(
+				'filtersRemoved' => $filters_removed,
+				'restored'       => $restored,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'admin-list-tables.base-pagination-per-page-output',
+			array() === $failures,
+			array(
+				'failures' => array_slice( $failures, 0, 8 ),
+				'screen'   => $screen->id,
+			)
+		);
+	}
+
 	private static function check_network_tables( \ComponentFuzz\FuzzContext $ctx ): array {
 		$failures        = array();
 		$filters         = array();
@@ -2051,6 +2339,43 @@ final class AdminListTablesSurface {
 				),
 			)
 		);
+	}
+
+	private static function new_pagination_probe( \WP_Screen $screen ): \WP_List_Table {
+		return new class( $screen ) extends \WP_List_Table {
+			public function __construct( \WP_Screen $screen ) {
+				parent::__construct(
+					array(
+						'ajax'     => false,
+						'plural'   => 'cfz_base_items',
+						'screen'   => $screen,
+						'singular' => 'cfz_base_item',
+					)
+				);
+			}
+
+			public function get_columns(): array {
+				return array(
+					'title' => 'Title',
+				);
+			}
+
+			public function prepare_items(): void {
+				$this->items = array();
+			}
+
+			public function expose_set_pagination_args( array $args ): void {
+				$this->set_pagination_args( $args );
+			}
+
+			public function expose_get_items_per_page( string $option, int $default_value ): int {
+				return $this->get_items_per_page( $option, $default_value );
+			}
+
+			public function expose_pagination( string $which ): void {
+				$this->pagination( $which );
+			}
+		};
 	}
 
 	private static function list_table( string $class_name, \WP_Screen $screen ): \WP_List_Table {
@@ -2685,6 +3010,44 @@ final class AdminListTablesSurface {
 				unset( $_SERVER[ $name ] );
 			}
 		}
+	}
+
+	private static function globals_match( array $snapshot, array $names ): bool {
+		foreach ( $names as $name ) {
+			$expected_exists = (bool) ( $snapshot[ $name ]['exists'] ?? false );
+			$actual_exists   = array_key_exists( $name, $GLOBALS );
+
+			if ( $expected_exists !== $actual_exists ) {
+				return false;
+			}
+
+			if ( $expected_exists && self::snapshot_token( $snapshot[ $name ]['value'] ) !== self::snapshot_token( $GLOBALS[ $name ] ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function server_match( array $snapshot, array $names ): bool {
+		foreach ( $names as $name ) {
+			$expected_exists = (bool) ( $snapshot[ $name ]['exists'] ?? false );
+			$actual_exists   = array_key_exists( $name, $_SERVER );
+
+			if ( $expected_exists !== $actual_exists ) {
+				return false;
+			}
+
+			if ( $expected_exists && (string) $snapshot[ $name ]['value'] !== (string) $_SERVER[ $name ] ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function snapshot_token( $value ): string {
+		return serialize( $value );
 	}
 
 	private static function clone_value( $value ) {

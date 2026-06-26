@@ -52,8 +52,9 @@ database, network requests, or a configured site.
   for posts, media, comments, terms, users, plugins, themes, network themes,
   application passwords, and guarded network sites/users, including columns/
   hidden/sortable/default-primary logic, views, actions, bulk actions, exact row
-  URL/nonce and HTML escaping, pagination/counts, synthetic object/pre-query/
-  user-meta/theme fixtures, capability gates, JS row templates, and state/filter
+  URL/nonce and HTML escaping, base `WP_List_Table` pagination/per-page output,
+  pagination/counts, synthetic object/pre-query/user-meta/theme fixtures,
+  capability gates, JS row templates, and state/filter
   restoration.
 - `admin-media-chrome`: no-DB admin media chrome helper coverage, including
   attachment edit field preparation, media item and compat markup escaping,
