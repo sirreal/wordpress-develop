@@ -417,7 +417,7 @@ final class ImportDiffSurface {
 				$expected === $lookup
 					&& 106 === $count
 					&& array( $other_permalink => $other_id ) === $other
-					&& str_contains( $lookup_query, "LIMIT '100','100'" ),
+					&& str_contains( $lookup_query, 'LIMIT 100,100' ),
 				'WP_Importer maps imported post permalinks to local post IDs by importer/blog meta key across chunks',
 				array(
 					'blogId'       => $blog_id,

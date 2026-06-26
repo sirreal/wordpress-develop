@@ -232,7 +232,22 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 						return $match[0];
 					}
 
-					return "'" . $this->_escape( $args[ $index++ ] ) . "'";
+					$placeholder = $match[0];
+					$arg         = $args[ $index++ ];
+
+					if ( '%d' === $placeholder ) {
+						return (string) (int) $arg;
+					}
+
+					if ( '%f' === $placeholder || '%F' === $placeholder ) {
+						return (string) (float) $arg;
+					}
+
+					if ( '%i' === $placeholder ) {
+						return preg_replace( '/[^A-Za-z0-9_$\.]/', '', (string) $arg );
+					}
+
+					return "'" . $this->_escape( $arg ) . "'";
 				},
 				$query
 			);

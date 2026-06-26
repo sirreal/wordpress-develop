@@ -916,6 +916,7 @@ final class QuerySurface {
 					&& str_contains( $hook_observation['queryWhere'], "display_name LIKE '%hooked%'" )
 					&& str_contains( $hook_observation['queryWhere'], '/*cfz_pre_user_query*/' )
 					&& ! str_contains( $hook_observation['queryWhere'], 'user_login LIKE' )
+					&& $hook_observation['hookCallbacksRemoved']
 					&& $hook_observation['hookRuntimeRestored'],
 				array( 'observation' => self::describe_value( $hook_observation ) )
 			);
@@ -1924,7 +1925,7 @@ final class QuerySurface {
 					'whereNotContains' => array( 'ID NOT IN', '7,8' ),
 					'orderbyContains'  => array( 'FIELD( wp_users.ID, 5,0,2 ) ASC' ),
 					'orderbyNotContains' => array( 'bad_order' ),
-					'limitContains'    => array( 'LIMIT' ),
+					'limitExact'       => 'LIMIT 0, 10',
 				),
 			),
 			array(
@@ -2467,6 +2468,7 @@ final class QuerySurface {
 		$pre_user_query_hits     = 0;
 		$search_columns_before   = array();
 		$search_seen             = null;
+		$hook_callbacks_removed  = false;
 		$pre_get_users_callback  = static function ( \WP_User_Query $query ) use ( &$pre_get_users_hits ): void {
 			++$pre_get_users_hits;
 			$query->set( 'search', '*hooked*' );
@@ -2499,6 +2501,9 @@ final class QuerySurface {
 			\remove_filter( 'pre_get_users', $pre_get_users_callback, 10 );
 			\remove_filter( 'user_search_columns', $search_columns_callback, 10 );
 			\remove_filter( 'pre_user_query', $pre_user_query_callback, 10 );
+			$hook_callbacks_removed = ! self::hook_has_callback( 'pre_get_users', $pre_get_users_callback, 10 )
+				&& ! self::hook_has_callback( 'user_search_columns', $search_columns_callback, 10 )
+				&& ! self::hook_has_callback( 'pre_user_query', $pre_user_query_callback, 10 );
 			self::restore_hook_runtime( $hook_snapshot );
 		}
 
@@ -2508,6 +2513,7 @@ final class QuerySurface {
 			'preUserQueryHits'     => $pre_user_query_hits,
 			'searchColumnsBefore'  => $search_columns_before,
 			'searchSeen'           => $search_seen,
+			'hookCallbacksRemoved' => $hook_callbacks_removed,
 			'hookRuntimeRestored'  => self::hook_runtime_matches( $hook_snapshot ),
 		);
 	}
@@ -2775,6 +2781,7 @@ final class QuerySurface {
 			array(
 				'fieldsExact'  => 'queryFields',
 				'orderbyExact' => 'queryOrderby',
+				'limitExact'   => 'queryLimit',
 			) as $expect_key => $observation_key
 		) {
 			if ( array_key_exists( $expect_key, $expect ) && (string) $expect[ $expect_key ] !== (string) ( $observation[ $observation_key ] ?? '' ) ) {
@@ -3866,6 +3873,33 @@ final class QuerySurface {
 		}
 
 		return true;
+	}
+
+	private static function hook_has_callback( string $hook, $callback, int $priority ): bool {
+		if ( function_exists( 'has_filter' ) ) {
+			return true === \has_filter( $hook, $callback, $priority );
+		}
+
+		if ( ! isset( $GLOBALS['wp_filter'] ) || ! is_array( $GLOBALS['wp_filter'] ) || ! isset( $GLOBALS['wp_filter'][ $hook ] ) ) {
+			return false;
+		}
+
+		$hook_value = $GLOBALS['wp_filter'][ $hook ];
+		if ( is_object( $hook_value ) && isset( $hook_value->callbacks ) ) {
+			$callbacks = $hook_value->callbacks[ $priority ] ?? array();
+		} elseif ( is_array( $hook_value ) ) {
+			$callbacks = $hook_value[ $priority ] ?? array();
+		} else {
+			return false;
+		}
+
+		foreach ( $callbacks as $entry ) {
+			if ( is_array( $entry ) && ( $entry['function'] ?? null ) === $callback ) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	private static function clone_snapshot_value( $value ) {
