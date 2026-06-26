@@ -645,6 +645,8 @@ final class BlocksSurface {
 					'contentAttr'     => $attributes['content'] ?? null,
 					'urlAttr'         => $attributes['url'] ?? null,
 					'unsupportedAttr' => $attributes['unsupported'] ?? null,
+					'missingAttr'     => $attributes['missing'] ?? null,
+					'malformedAttr'   => $attributes['malformed'] ?? null,
 					'metadata'        => $attributes['metadata'] ?? null,
 					'context'         => $block->context['componentFuzz/bindingToken'] ?? null,
 				);
@@ -720,12 +722,15 @@ final class BlocksSurface {
 						&& str_contains( $rendered, 'data-cfz-bindings="' . esc_attr( $case['token'] ) . '"' )
 						&& str_contains( $rendered, '<p>' . $case['filteredContent'] . '</p>' )
 						&& str_contains( $rendered, 'href="' . esc_attr( $case['filteredUrl'] ) . '"' )
+						&& str_contains( $rendered, 'title="' . esc_attr( $case['fallbackUnsupported'] ) . '"' )
 						&& str_contains( $rendered, 'Fallback link ' . esc_html( $case['token'] ) )
 						&& ! str_contains( $rendered, $case['fallbackContent'] )
 						&& ! str_contains( $rendered, $case['fallbackUrl'] )
 						&& $case['filteredContent'] === ( $render_entry['contentAttr'] ?? null )
 						&& $case['filteredUrl'] === ( $render_entry['urlAttr'] ?? null )
 						&& $case['fallbackUnsupported'] === ( $render_entry['unsupportedAttr'] ?? null )
+						&& null === ( $render_entry['missingAttr'] ?? null )
+						&& null === ( $render_entry['malformedAttr'] ?? null )
 						&& isset( $render_entry['metadata']['bindings']['missing'], $render_entry['metadata']['bindings']['malformed'] )
 						&& $case['contextToken'] === ( $render_entry['context'] ?? null ),
 					"render_block merges computed binding attributes before dynamic rendering and replaces only supported HTML targets case {$index}",
