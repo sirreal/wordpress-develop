@@ -33,6 +33,7 @@ final class ContentSurface {
 		self::check_query_var_normalization( $result, $inputs );
 		self::check_get_post_class_splitting( $result, $inputs );
 		self::check_post_template_password_excerpt_title( $result, $inputs );
+		self::check_post_template_content_pagination( $result, $inputs );
 
 		$result['ok']     = empty( $result['failures'] );
 		$result['status'] = $result['ok'] ? 'passed' : 'failed';
@@ -1541,6 +1542,801 @@ final class ContentSurface {
 			),
 			$failures
 		);
+	}
+
+	private static function check_post_template_content_pagination( array &$result, array $inputs ): void {
+		foreach ( array( 'get_the_content', 'the_content', 'wp_link_pages', 'add_filter', 'remove_filter', 'has_filter' ) as $function ) {
+			if ( ! \function_exists( $function ) ) {
+				self::skip( $result, 'post_template.content_pagination', $function . '() is unavailable.' );
+				return;
+			}
+		}
+		if ( ! \class_exists( '\WP_Post' ) || ! \class_exists( '\WP_Query' ) ) {
+			self::skip( $result, 'post_template.content_pagination', 'WP_Post or WP_Query is unavailable.' );
+			return;
+		}
+
+		$case             = self::post_template_content_case( $inputs );
+		$post             = self::make_wp_post( $case['post'] );
+		$protected_post   = self::make_wp_post( $case['protectedPost'] );
+		$failures         = array();
+		$events           = array();
+		$hooks            = array(
+			'content_pagination',
+			'the_content_more_link',
+			'the_content',
+			'the_password_form',
+			'the_password_form_incorrect_password',
+			'wp_link_pages_args',
+			'wp_link_pages_link',
+			'wp_link_pages',
+			'post_password_required',
+			'pre_option_permalink_structure',
+			'pre_option_home',
+			'pre_option_siteurl',
+			'pre_option_show_on_front',
+			'pre_option_page_on_front',
+		);
+		$hook_snapshot       = self::snapshot_filter_hooks( $hooks );
+		$global_snapshot     = self::snapshot_globals( array( 'post', 'page', 'pages', 'multipage', 'more', 'numpages', 'preview', 'wp_query', 'wp_the_query' ) );
+		$get_snapshot        = self::snapshot_array_keys( $_GET, array( 'preview_id', 'preview_nonce' ) );
+		$server_snapshot     = self::snapshot_array_keys( $_SERVER, array( 'HTTP_REFERER' ) );
+		$post_cache_snapshot = self::snapshot_post_cache( array( (int) $post->ID, (int) $protected_post->ID ) );
+		$cookie_name         = 'wp-postpass_' . ( \defined( 'COOKIEHASH' ) ? COOKIEHASH : '' );
+		$had_cookie          = array_key_exists( $cookie_name, $_COOKIE );
+		$cookie_value        = $had_cookie ? $_COOKIE[ $cookie_name ] : null;
+		$content_suffix      = '<span data-component-fuzz-content="' . $case['token'] . '">]]></span>';
+		$pagination_filter   = static function ( array $pages, \WP_Post $post ) use ( &$events ): array {
+			$events[] = array(
+				'hook'      => 'content_pagination',
+				'postId'    => (int) $post->ID,
+				'pageCount' => count( $pages ),
+			);
+			return $pages;
+		};
+		$more_link_filter    = static function ( string $link, string $text ) use ( &$events ): string {
+			$events[] = array(
+				'hook' => 'the_content_more_link',
+				'link' => $link,
+				'text' => $text,
+			);
+			return $link;
+		};
+		$content_filter   = static function ( string $content ) use ( &$events, $content_suffix ): string {
+			$events[] = array(
+				'hook'    => 'the_content',
+				'content' => $content,
+			);
+			return $content . $content_suffix;
+		};
+		$link_args_filter = static function ( array $args ) use ( &$events ): array {
+			$events[] = array(
+				'hook'         => 'wp_link_pages_args',
+				'nextOrNumber' => $args['next_or_number'] ?? null,
+				'echo'         => $args['echo'] ?? null,
+				'before'       => $args['before'] ?? null,
+			);
+			return $args;
+		};
+		$link_filter      = static function ( string $link, int $page_number ) use ( &$events ): string {
+			$events[] = array(
+				'hook' => 'wp_link_pages_link',
+				'page' => $page_number,
+				'link' => $link,
+			);
+			return $link;
+		};
+		$pages_filter     = static function ( string $html, $args ) use ( &$events ): string {
+			$events[] = array(
+				'hook'         => 'wp_link_pages',
+				'html'         => $html,
+				'nextOrNumber' => is_array( $args ) ? ( $args['next_or_number'] ?? null ) : null,
+			);
+			return $html;
+		};
+		$password_filter  = static function ( bool $required, $post ) use ( &$events ): bool {
+			$events[] = array(
+				'hook'     => 'post_password_required',
+				'postId'   => isset( $post->ID ) ? (int) $post->ID : 0,
+				'required' => $required,
+			);
+			return $required;
+		};
+		$plain_permalink_filter = static function (): string {
+			return '';
+		};
+		$home_filter            = static function (): string {
+			return 'http://content-pagination.example.test';
+		};
+		$siteurl_filter         = static function (): string {
+			return 'http://content-pagination.example.test';
+		};
+		$zero_option_filter     = static function (): int {
+			return 0;
+		};
+
+		try {
+			self::clear_filter_hooks( $hooks );
+			\add_filter( 'content_pagination', $pagination_filter, PHP_INT_MAX, 2 );
+			\add_filter( 'the_content_more_link', $more_link_filter, PHP_INT_MAX, 2 );
+			\add_filter( 'the_content', $content_filter, PHP_INT_MAX, 1 );
+			\add_filter( 'wp_link_pages_args', $link_args_filter, PHP_INT_MAX, 1 );
+			\add_filter( 'wp_link_pages_link', $link_filter, PHP_INT_MAX, 2 );
+			\add_filter( 'wp_link_pages', $pages_filter, PHP_INT_MAX, 2 );
+			\add_filter( 'post_password_required', $password_filter, PHP_INT_MAX, 2 );
+			\add_filter( 'pre_option_permalink_structure', $plain_permalink_filter, PHP_INT_MAX, 0 );
+			\add_filter( 'pre_option_home', $home_filter, PHP_INT_MAX, 0 );
+			\add_filter( 'pre_option_siteurl', $siteurl_filter, PHP_INT_MAX, 0 );
+			\add_filter( 'pre_option_show_on_front', $zero_option_filter, PHP_INT_MAX, 0 );
+			\add_filter( 'pre_option_page_on_front', $zero_option_filter, PHP_INT_MAX, 0 );
+			self::prime_post_cache( array( $post, $protected_post ) );
+			unset( $_COOKIE[ $cookie_name ] );
+			unset( $_GET['preview_id'], $_GET['preview_nonce'], $_SERVER['HTTP_REFERER'] );
+
+			self::set_post_template_runtime( $post, $case['pages'], 1, 0, false );
+			$before_pagination_events = self::event_count( $events, 'content_pagination' );
+			$before_more_events       = self::event_count( $events, 'the_content_more_link' );
+			$list_call                = self::call_guarded(
+				static function () use ( $post, $case ) {
+					return \get_the_content( $case['fallbackMoreText'], false, $post );
+				}
+			);
+			self::assert_guarded_string_contains(
+				$failures,
+				'get-the-content-list-teaser',
+				'get_the_content() did not return the expected teaser and read-more link in list context.',
+				$list_call,
+				array( $case['teaser'], 'class="more-link"', '#more-' . (int) $post->ID, $case['moreTextSanitized'] ),
+				array( $case['afterMore'], $case['pageTwo'], $case['pageThree'], '<em>' ),
+				array( 'case' => $case['label'] )
+			);
+			self::assert_hook_delta(
+				$failures,
+				$events,
+				'content_pagination',
+				$before_pagination_events,
+				1,
+				'get-the-content-pagination-filter',
+				'get_the_content() did not run content_pagination exactly once while generating pages.',
+				array(
+					'postId'    => (int) $post->ID,
+					'pageCount' => count( $case['pages'] ),
+				)
+			);
+			self::assert_hook_delta(
+				$failures,
+				$events,
+				'the_content_more_link',
+				$before_more_events,
+				1,
+				'get-the-content-more-link-filter',
+				'get_the_content() did not run the more-link filter exactly once in list context.',
+				array( 'text' => $case['moreTextSanitized'] )
+			);
+
+			self::set_post_template_runtime( $post, $case['pages'], 1, 1, true );
+			$singular_call = self::call_guarded(
+				static function () use ( $post, $case ) {
+					return \get_the_content( $case['fallbackMoreText'], false, $post );
+				}
+			);
+			self::assert_guarded_string_contains(
+				$failures,
+				'get-the-content-singular-noteaser',
+				'get_the_content() did not honor more/noteaser behavior in singular context.',
+				$singular_call,
+				array( '<span id="more-' . (int) $post->ID . '"></span>', $case['afterMore'] ),
+				array( $case['teaser'], 'class="more-link"', $case['pageTwo'], $case['pageThree'] ),
+				array( 'case' => $case['label'] )
+			);
+
+			self::set_post_template_runtime( $post, $case['pages'], 2, 1, false );
+			$page_two_call = self::call_guarded(
+				static function () use ( $post, $case ) {
+					return \get_the_content( $case['fallbackMoreText'], false, $post );
+				}
+			);
+			self::assert_guarded_string_contains(
+				$failures,
+				'get-the-content-page-two',
+				'get_the_content() did not select exactly the second generated content page.',
+				$page_two_call,
+				array( $case['pageTwo'], ']]>' ),
+				array( $case['teaser'], $case['afterMore'], $case['pageThree'] ),
+				array( 'case' => $case['label'] )
+			);
+
+			self::set_post_template_runtime( $post, $case['pages'], 99, 1, false );
+			$clamped_call = self::call_guarded(
+				static function () use ( $post, $case ) {
+					return \get_the_content( $case['fallbackMoreText'], false, $post );
+				}
+			);
+			self::assert_guarded_string_contains(
+				$failures,
+				'get-the-content-page-clamp',
+				'get_the_content() did not clamp an out-of-range content page to the final page.',
+				$clamped_call,
+				array( $case['pageThree'] ),
+				array( $case['teaser'], $case['afterMore'], $case['pageTwo'] ),
+				array( 'case' => $case['label'] )
+			);
+
+			self::set_post_template_runtime( $protected_post, array( $protected_post->post_content ), 1, 0, false );
+			$before_password_events = self::event_count( $events, 'post_password_required' );
+			$protected_call         = self::call_guarded(
+				static function () use ( $protected_post ) {
+					return \get_the_content( null, false, $protected_post );
+				}
+			);
+			self::assert_guarded_string_contains(
+				$failures,
+				'get-the-content-password-form',
+				'get_the_content() did not return the password form for a protected post.',
+				$protected_call,
+				array( 'name="post_password"', 'type="password"' ),
+				array( (string) $protected_post->post_content ),
+				array( 'case' => 'protected' )
+			);
+			self::assert_hook_delta(
+				$failures,
+				$events,
+				'post_password_required',
+				$before_password_events,
+				1,
+				'get-the-content-password-filter',
+				'get_the_content() did not run the password-required filter exactly once for the protected branch.',
+				array(
+					'postId'   => (int) $protected_post->ID,
+					'required' => true,
+				)
+			);
+
+			self::set_post_template_runtime( $post, $case['pages'], 2, 1, false );
+			$before_content_events = self::event_count( $events, 'the_content' );
+			$the_content_call      = self::capture_output_call(
+				static function (): void {
+					\the_content( 'ignored', false );
+				}
+			);
+			if ( ! $the_content_call['ok'] ) {
+				$failures[] = self::call_failure( 'the-content-throwable', 'the_content() threw while echoing a generated content page.', $the_content_call, array( 'case' => $case['label'] ) );
+			} else {
+				$output = (string) $the_content_call['output'];
+				if (
+					! str_contains( $output, 'data-page="two"' )
+					|| ! str_contains( $output, 'Second ' . $case['token'] )
+					|| str_contains( $output, ']]>' )
+					|| ! str_contains( $output, ']]&gt;' )
+					|| ! str_contains( $output, 'data-component-fuzz-content="' . $case['token'] . '"' )
+				) {
+					$failures[] = array(
+						'name'    => 'the-content-filter-and-cdata-output-mismatch',
+						'message' => 'the_content() did not filter and CDATA-escape the generated page output as expected.',
+						'output'  => self::describe_string( $output ),
+					);
+				}
+			}
+			self::assert_hook_delta(
+				$failures,
+				$events,
+				'the_content',
+				$before_content_events,
+				1,
+				'the-content-filter-payload',
+				'the_content() did not run its content filter exactly once with the raw selected page.',
+				array( 'content' => $case['pageTwo'] )
+			);
+
+			self::set_post_template_runtime( $post, $case['pages'], 2, 1, false );
+			$number_before_links = self::event_count( $events, 'wp_link_pages_link' );
+			$number_before_args  = self::event_count( $events, 'wp_link_pages_args' );
+			$number_before_final = self::event_count( $events, 'wp_link_pages' );
+			$number_call         = self::call_guarded(
+				static function () use ( $case ) {
+					return \wp_link_pages(
+						array(
+							'before'         => '<nav data-fuzz="' . $case['token'] . '">',
+							'after'          => '</nav>',
+							'link_before'    => '<b>',
+							'link_after'     => '</b>',
+							'aria_current'   => 'step',
+							'next_or_number' => 'number',
+							'separator'      => '|',
+							'pagelink'       => 'Page %',
+							'echo'           => 0,
+						)
+					);
+				}
+			);
+			self::assert_numbered_link_pages_output( $failures, $number_call, $post, $case );
+			self::assert_hook_delta(
+				$failures,
+				$events,
+				'wp_link_pages_args',
+				$number_before_args,
+				1,
+				'wp-link-pages-number-args-filter',
+				'wp_link_pages() did not run its args filter exactly once for numbered links.',
+				array(
+					'nextOrNumber' => 'number',
+					'echo'         => 0,
+				)
+			);
+			self::assert_event_pages(
+				$failures,
+				$events,
+				'wp_link_pages_link',
+				$number_before_links,
+				array( 1, 2, 3 ),
+				'wp-link-pages-number-link-events',
+				'wp_link_pages() did not filter numbered links for each generated page.'
+			);
+			self::assert_hook_delta(
+				$failures,
+				$events,
+				'wp_link_pages',
+				$number_before_final,
+				1,
+				'wp-link-pages-number-final-filter',
+				'wp_link_pages() did not run its final output filter exactly once for numbered links.',
+				array( 'nextOrNumber' => 'number' )
+			);
+
+			self::set_post_template_runtime( $post, $case['pages'], 2, 1, false );
+			$next_before_links = self::event_count( $events, 'wp_link_pages_link' );
+			$next_before_final = self::event_count( $events, 'wp_link_pages' );
+			$next_call         = self::call_guarded(
+				static function (): string {
+					return \wp_link_pages(
+						array(
+							'before'           => '<div class="next-pages">',
+							'after'            => '</div>',
+							'next_or_number'   => 'next',
+							'separator'        => ' / ',
+							'previouspagelink' => 'Previous fuzz',
+							'nextpagelink'     => 'Next fuzz',
+							'echo'             => 0,
+						)
+					);
+				}
+			);
+			self::assert_guarded_string_contains(
+				$failures,
+				'wp-link-pages-next-prev-output',
+				'wp_link_pages() did not render the expected previous/next links for page two.',
+				$next_call,
+				array( 'Previous fuzz', 'Next fuzz', 'page=3', 'class="post-page-numbers"' ),
+				array( 'aria-current=', 'Page 2' ),
+				array( 'case' => $case['label'] )
+			);
+			self::assert_event_pages(
+				$failures,
+				$events,
+				'wp_link_pages_link',
+				$next_before_links,
+				array( 1, 3 ),
+				'wp-link-pages-next-link-events',
+				'wp_link_pages() did not filter exactly previous and next links in next-link mode.'
+			);
+			self::assert_hook_delta(
+				$failures,
+				$events,
+				'wp_link_pages',
+				$next_before_final,
+				1,
+				'wp-link-pages-next-final-filter',
+				'wp_link_pages() did not run its final output filter exactly once for next/previous links.',
+				array( 'nextOrNumber' => 'next' )
+			);
+
+			self::set_post_template_runtime( $post, array( $case['teaser'] ), 1, 0, false );
+			$single_before_links = self::event_count( $events, 'wp_link_pages_link' );
+			$single_before_final = self::event_count( $events, 'wp_link_pages' );
+			$single_call         = self::call_guarded(
+				static function (): string {
+					return \wp_link_pages( array( 'echo' => 0 ) );
+				}
+			);
+			self::assert_guarded_value(
+				$failures,
+				'wp-link-pages-single-page-empty',
+				'wp_link_pages() did not return an empty string for non-multipage content.',
+				$single_call,
+				'',
+				array( 'case' => $case['label'] )
+			);
+			self::assert_event_pages(
+				$failures,
+				$events,
+				'wp_link_pages_link',
+				$single_before_links,
+				array(),
+				'wp-link-pages-single-link-events',
+				'wp_link_pages() unexpectedly filtered page links for non-multipage content.'
+			);
+			self::assert_hook_delta(
+				$failures,
+				$events,
+				'wp_link_pages',
+				$single_before_final,
+				1,
+				'wp-link-pages-single-final-filter',
+				'wp_link_pages() did not run its final output filter exactly once for non-multipage content.',
+				array(
+					'html'         => '',
+					'nextOrNumber' => null,
+				)
+			);
+		} finally {
+			\remove_filter( 'content_pagination', $pagination_filter, PHP_INT_MAX );
+			\remove_filter( 'the_content_more_link', $more_link_filter, PHP_INT_MAX );
+			\remove_filter( 'the_content', $content_filter, PHP_INT_MAX );
+			\remove_filter( 'wp_link_pages_args', $link_args_filter, PHP_INT_MAX );
+			\remove_filter( 'wp_link_pages_link', $link_filter, PHP_INT_MAX );
+			\remove_filter( 'wp_link_pages', $pages_filter, PHP_INT_MAX );
+			\remove_filter( 'post_password_required', $password_filter, PHP_INT_MAX );
+			\remove_filter( 'pre_option_permalink_structure', $plain_permalink_filter, PHP_INT_MAX );
+			\remove_filter( 'pre_option_home', $home_filter, PHP_INT_MAX );
+			\remove_filter( 'pre_option_siteurl', $siteurl_filter, PHP_INT_MAX );
+			\remove_filter( 'pre_option_show_on_front', $zero_option_filter, PHP_INT_MAX );
+			\remove_filter( 'pre_option_page_on_front', $zero_option_filter, PHP_INT_MAX );
+			self::restore_filter_hooks( $hook_snapshot );
+			self::restore_globals( $global_snapshot );
+			self::restore_array_keys( $_GET, $get_snapshot );
+			self::restore_array_keys( $_SERVER, $server_snapshot );
+			self::restore_post_cache( $post_cache_snapshot );
+			if ( $had_cookie ) {
+				$_COOKIE[ $cookie_name ] = $cookie_value;
+			} else {
+				unset( $_COOKIE[ $cookie_name ] );
+			}
+		}
+
+		$leaked_hooks = array();
+		foreach (
+			array(
+				array( 'content_pagination', $pagination_filter ),
+				array( 'the_content_more_link', $more_link_filter ),
+				array( 'the_content', $content_filter ),
+				array( 'wp_link_pages_args', $link_args_filter ),
+				array( 'wp_link_pages_link', $link_filter ),
+				array( 'wp_link_pages', $pages_filter ),
+				array( 'post_password_required', $password_filter ),
+				array( 'pre_option_permalink_structure', $plain_permalink_filter ),
+				array( 'pre_option_home', $home_filter ),
+				array( 'pre_option_siteurl', $siteurl_filter ),
+				array( 'pre_option_show_on_front', $zero_option_filter ),
+				array( 'pre_option_page_on_front', $zero_option_filter ),
+			) as $hook_probe
+		) {
+			if ( false !== \has_filter( $hook_probe[0], $hook_probe[1] ) ) {
+				$leaked_hooks[] = $hook_probe[0];
+			}
+		}
+		if ( array() !== $leaked_hooks ) {
+			$failures[] = array(
+				'name'    => 'post-template-content-filter-leak',
+				'message' => 'The content pagination probe left one or more filters registered.',
+				'hooks'   => $leaked_hooks,
+			);
+		}
+		if ( ! self::globals_match_snapshot( $global_snapshot ) ) {
+			$failures[] = array(
+				'name'    => 'post-template-content-global-leak',
+				'message' => 'The content pagination probe did not restore template globals.',
+			);
+		}
+
+		self::record(
+			$result,
+			'post_template.content_pagination_links',
+			empty( $failures ),
+			array(
+				'pages'       => count( $case['pages'] ),
+				'eventCounts' => array(
+					'content_pagination'    => self::event_count( $events, 'content_pagination' ),
+					'the_content_more_link' => self::event_count( $events, 'the_content_more_link' ),
+					'the_content'           => self::event_count( $events, 'the_content' ),
+					'wp_link_pages_args'    => self::event_count( $events, 'wp_link_pages_args' ),
+					'wp_link_pages_link'    => self::event_count( $events, 'wp_link_pages_link' ),
+					'wp_link_pages'         => self::event_count( $events, 'wp_link_pages' ),
+					'post_password_required' => self::event_count( $events, 'post_password_required' ),
+				),
+				'globalsRestored' => self::globals_match_snapshot( $global_snapshot ),
+			),
+			$failures
+		);
+	}
+
+	private static function post_template_content_case( array $inputs ): array {
+		$source     = $inputs['posts'][0] ?? array();
+		$token      = substr( sha1( wp_json_encode( $source ) . ':content-pagination' ), 0, 12 );
+		$teaser     = 'Lead ' . $token . ' <strong>teaser</strong>';
+		$after_more = '<span data-after-more="' . $token . '">After more</span><!--noteaser-->';
+		$page_two   = '<p data-page="two">Second ' . $token . ' ]]></p>';
+		$page_three = '<p data-page="three">Third ' . $token . '</p>';
+		$more_text  = 'Continue <em>' . $token . '</em>';
+		$page_one   = $teaser . '<!--more ' . $more_text . '-->' . $after_more;
+		$pages      = array( $page_one, $page_two, $page_three );
+
+		$post                    = $source;
+		$post['ID']              = 52000;
+		$post['post_author']     = '0';
+		$post['post_title']      = 'Content pagination ' . $token;
+		$post['post_excerpt']    = 'Content pagination excerpt ' . $token;
+		$post['post_content']    = implode( '<!--nextpage-->', $pages );
+		$post['post_status']     = 'publish';
+		$post['post_password']   = '';
+		$post['post_type']       = 'post';
+		$post['comment_status']  = 'open';
+		$post['ping_status']     = 'closed';
+		$post['post_name']       = 'content-pagination-' . $token;
+		$post['post_parent']     = 0;
+		$post['menu_order']      = 0;
+		$post['filter']          = 'raw';
+
+		$protected                    = $post;
+		$protected['ID']              = 52099;
+		$protected['post_title']      = 'Protected content pagination ' . $token;
+		$protected['post_content']    = 'Protected secret content ' . $token;
+		$protected['post_password']   = 'content-pass-' . $token;
+		$protected['post_name']       = 'protected-content-pagination-' . $token;
+
+		return array(
+			'label'             => 'generated-content-pagination',
+			'token'             => $token,
+			'post'              => $post,
+			'protectedPost'     => $protected,
+			'pages'             => $pages,
+			'teaser'            => $teaser,
+			'afterMore'         => $after_more,
+			'pageTwo'           => $page_two,
+			'pageThree'         => $page_three,
+			'fallbackMoreText'  => 'Fallback more ' . $token,
+			'moreTextSanitized' => 'Continue ' . $token,
+		);
+	}
+
+	private static function set_post_template_runtime( \WP_Post $post, array $pages, int $page, int $more, bool $singular ): void {
+		$query                    = new \WP_Query();
+		$query->posts             = array( $post );
+		$query->post              = $post;
+		$query->post_count        = 1;
+		$query->current_post      = 0;
+		$query->in_the_loop       = true;
+		$query->queried_object    = $post;
+		$query->queried_object_id = (int) $post->ID;
+		$query->is_single         = $singular && 'post' === (string) $post->post_type;
+		$query->is_page           = $singular && 'page' === (string) $post->post_type;
+		$query->query_vars        = array_merge(
+			is_array( $query->query_vars ) ? $query->query_vars : array(),
+			array(
+				'p'    => (int) $post->ID,
+				'page' => $page,
+			)
+		);
+
+		$GLOBALS['post']         = $post;
+		$GLOBALS['page']         = $page;
+		$GLOBALS['pages']        = $pages;
+		$GLOBALS['numpages']     = count( $pages );
+		$GLOBALS['multipage']    = count( $pages ) > 1 ? 1 : 0;
+		$GLOBALS['more']         = $more;
+		$GLOBALS['preview']      = false;
+		$GLOBALS['wp_query']     = $query;
+		$GLOBALS['wp_the_query'] = $query;
+	}
+
+	private static function snapshot_globals( array $names ): array {
+		$snapshot = array();
+		foreach ( $names as $name ) {
+			$name              = (string) $name;
+			$exists            = array_key_exists( $name, $GLOBALS );
+			$snapshot[ $name ] = array(
+				'exists' => $exists,
+				'value'  => $exists ? $GLOBALS[ $name ] : null,
+			);
+		}
+
+		return $snapshot;
+	}
+
+	private static function restore_globals( array $snapshot ): void {
+		foreach ( $snapshot as $name => $entry ) {
+			if ( ! empty( $entry['exists'] ) ) {
+				$GLOBALS[ $name ] = $entry['value'];
+			} else {
+				unset( $GLOBALS[ $name ] );
+			}
+		}
+	}
+
+	private static function globals_match_snapshot( array $snapshot ): bool {
+		foreach ( $snapshot as $name => $entry ) {
+			$exists = array_key_exists( $name, $GLOBALS );
+			if ( (bool) $entry['exists'] !== $exists ) {
+				return false;
+			}
+			if ( $exists && $GLOBALS[ $name ] !== $entry['value'] ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function snapshot_array_keys( array $source, array $keys ): array {
+		$snapshot = array();
+		foreach ( $keys as $key ) {
+			$key              = (string) $key;
+			$exists           = array_key_exists( $key, $source );
+			$snapshot[ $key ] = array(
+				'exists' => $exists,
+				'value'  => $exists ? $source[ $key ] : null,
+			);
+		}
+
+		return $snapshot;
+	}
+
+	private static function restore_array_keys( array &$target, array $snapshot ): void {
+		foreach ( $snapshot as $key => $entry ) {
+			if ( ! empty( $entry['exists'] ) ) {
+				$target[ $key ] = $entry['value'];
+			} else {
+				unset( $target[ $key ] );
+			}
+		}
+	}
+
+	private static function snapshot_post_cache( array $ids ): array {
+		$snapshot = array();
+		foreach ( $ids as $id ) {
+			$id    = (int) $id;
+			$found = false;
+			$value = \wp_cache_get( $id, 'posts', false, $found );
+			$snapshot[ $id ] = array(
+				'exists' => $found,
+				'value'  => $value,
+			);
+		}
+
+		return $snapshot;
+	}
+
+	private static function prime_post_cache( array $posts ): void {
+		foreach ( $posts as $post ) {
+			if ( $post instanceof \WP_Post ) {
+				\wp_cache_set( (int) $post->ID, $post, 'posts' );
+			}
+		}
+	}
+
+	private static function restore_post_cache( array $snapshot ): void {
+		foreach ( $snapshot as $id => $entry ) {
+			if ( ! empty( $entry['exists'] ) ) {
+				\wp_cache_set( (int) $id, $entry['value'], 'posts' );
+			} else {
+				\wp_cache_delete( (int) $id, 'posts' );
+			}
+		}
+	}
+
+	private static function capture_output_call( callable $callback ): array {
+		ob_start();
+		$call   = self::call_guarded(
+			static function () use ( $callback ) {
+				$callback();
+				return null;
+			}
+		);
+		$output = ob_get_clean();
+		if ( false === $output ) {
+			$output = '';
+		}
+		$call['output'] = $output;
+
+		return $call;
+	}
+
+	private static function assert_guarded_string_contains( array &$failures, string $name, string $message, array $call, array $must_contain, array $must_not_contain, array $context ): void {
+		if ( ! $call['ok'] ) {
+			$failures[] = self::call_failure( $name . '-throwable', $message, $call, $context );
+			return;
+		}
+
+		if ( ! is_string( $call['value'] ) ) {
+			$failures[] = array_merge(
+				array(
+					'name'    => $name . '-non-string',
+					'message' => $message,
+					'type'    => gettype( $call['value'] ),
+				),
+				$context
+			);
+			return;
+		}
+
+		$value   = $call['value'];
+		$missing = array();
+		foreach ( $must_contain as $needle ) {
+			if ( ! str_contains( $value, (string) $needle ) ) {
+				$missing[] = (string) $needle;
+			}
+		}
+
+		$present = array();
+		foreach ( $must_not_contain as $needle ) {
+			if ( '' !== (string) $needle && str_contains( $value, (string) $needle ) ) {
+				$present[] = (string) $needle;
+			}
+		}
+
+		if ( array() !== $missing || array() !== $present ) {
+			$failures[] = array_merge(
+				array(
+					'name'       => $name . '-mismatch',
+					'message'    => $message,
+					'missing'    => $missing,
+					'unexpected' => $present,
+					'value'      => self::describe_string( $value ),
+				),
+				$context
+			);
+		}
+	}
+
+	private static function assert_numbered_link_pages_output( array &$failures, array $call, \WP_Post $post, array $case ): void {
+		if ( ! $call['ok'] ) {
+			$failures[] = self::call_failure( 'wp-link-pages-number-output-throwable', 'wp_link_pages() threw while rendering numbered links.', $call, array( 'case' => $case['label'] ) );
+			return;
+		}
+
+		if ( ! is_string( $call['value'] ) ) {
+			$failures[] = array(
+				'name'    => 'wp-link-pages-number-output-non-string',
+				'message' => 'wp_link_pages() returned a non-string numbered-link value.',
+				'type'    => gettype( $call['value'] ),
+			);
+			return;
+		}
+
+		$output = $call['value'];
+		if (
+			! str_starts_with( $output, '<nav data-fuzz="' . $case['token'] . '">' )
+			|| ! str_ends_with( $output, '</nav>' )
+			|| ! str_contains( $output, '<b>Page 1</b>' )
+			|| ! str_contains( $output, '<b>Page 2</b>' )
+			|| ! str_contains( $output, '<b>Page 3</b>' )
+			|| ! str_contains( $output, 'aria-current="step"' )
+			|| ! str_contains( $output, 'p=' . (int) $post->ID )
+			|| ! str_contains( $output, 'page=3' )
+			|| 2 !== substr_count( $output, 'class="post-page-numbers"' )
+		) {
+			$failures[] = array(
+				'name'        => 'wp-link-pages-number-output-mismatch',
+				'message'     => 'wp_link_pages() did not render the expected numbered pagination HTML.',
+				'output'      => self::describe_string( $output ),
+				'anchorCount' => substr_count( $output, 'class="post-page-numbers"' ),
+			);
+		}
+	}
+
+	private static function assert_event_pages( array &$failures, array $events, string $hook, int $before_count, array $expected_pages, string $name, string $message ): void {
+		$actual_pages = array();
+		foreach ( self::events_since_count( $events, $hook, $before_count ) as $event ) {
+			$actual_pages[] = (int) ( $event['page'] ?? 0 );
+		}
+
+		if ( $expected_pages !== $actual_pages ) {
+			$failures[] = array(
+				'name'     => $name . '-mismatch',
+				'message'  => $message,
+				'expected' => $expected_pages,
+				'actual'   => $actual_pages,
+			);
+		}
 	}
 
 	private static function post_template_cases( array $inputs ): array {
