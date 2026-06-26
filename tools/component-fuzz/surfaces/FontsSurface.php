@@ -2335,6 +2335,7 @@ final class FontsSurface {
 			'user',
 			'user_custom_post_type_id',
 			'i18n_schema',
+			'theme_json_file_cache',
 		);
 	}
 
