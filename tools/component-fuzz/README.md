@@ -620,10 +620,11 @@ database, network requests, or a configured site.
 - `xmlrpc`: no-DB IXR/XML-RPC protocol coverage, including value escaping,
   request/message round trips, invalid XML fail-closed behavior, fault XML,
   system method dispatch, mixed success/fault multicall ordering, method
-  registry filters, demo helpers, disabled login behavior, legacy post
-  title/category XML helpers, and short-circuited `WP_HTTP_IXR_Client`
-  transport/error handling without publishing, media, pingback, option, or live
-  network side effects.
+  registry filters, demo helpers, disabled login behavior, bounded pre-network
+  pingback fail-closed/read-only lookup branches, legacy post title/category XML
+  helpers, and short-circuited `WP_HTTP_IXR_Client` transport/error handling
+  without publishing, media, option, post-sleep pingback fetch, or live network
+  side effects.
 
 Some checks deliberately skip cases that would invoke DB-backed or dynamic block
 rendering side effects. The Admin Screen surface intentionally avoids admin page
