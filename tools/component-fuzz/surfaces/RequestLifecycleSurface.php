@@ -1296,6 +1296,8 @@ final class RequestLifecycleSurface {
 		$headers_log      = array();
 		$post_modified_calls = array();
 		$default_feed_calls  = 0;
+		$had_comment_modified_cache = false;
+		$comment_modified_cache     = \wp_cache_get( 'lastcommentmodified:gmt', 'timeinfo', false, $had_comment_modified_cache );
 
 		$lastpost_filter = static function ( $pre, string $timezone, string $post_type ) use ( &$post_modified_calls, $post_modified ): string {
 			$post_modified_calls[] = array(
@@ -1420,19 +1422,43 @@ final class RequestLifecycleSurface {
 					'etag'         => $headers['ETag'] ?? null,
 				);
 
-				\wp_cache_delete( 'lastcommentmodified:gmt', 'timeinfo' );
+				if ( $had_comment_modified_cache ) {
+					\wp_cache_set( 'lastcommentmodified:gmt', $comment_modified_cache, 'timeinfo' );
+				} else {
+					\wp_cache_delete( 'lastcommentmodified:gmt', 'timeinfo' );
+				}
 			}
 		} finally {
 			\remove_filter( 'pre_get_lastpostmodified', $lastpost_filter, 10 );
 			\remove_filter( 'default_feed', $default_feed_filter, 10 );
 			\remove_filter( 'status_header', $status_filter, 10 );
 			\remove_filter( 'wp_headers', $headers_filter, 10 );
-			\wp_cache_delete( 'lastcommentmodified:gmt', 'timeinfo' );
+			if ( $had_comment_modified_cache ) {
+				\wp_cache_set( 'lastcommentmodified:gmt', $comment_modified_cache, 'timeinfo' );
+			} else {
+				\wp_cache_delete( 'lastcommentmodified:gmt', 'timeinfo' );
+			}
 		}
 
+		$expected_post_modified_calls = array_fill(
+			0,
+			count( $cases ),
+			array(
+				'pre'      => false,
+				'timezone' => 'GMT',
+				'postType' => 'any',
+			)
+		);
+		$comment_modified_cache_after = \wp_cache_get( 'lastcommentmodified:gmt', 'timeinfo', false, $comment_cache_found_after );
 		$ok = array() === $failures
-			&& 4 === count( $post_modified_calls )
+			&& $expected_post_modified_calls === $post_modified_calls
 			&& 1 === $default_feed_calls
+			&& $had_comment_modified_cache === $comment_cache_found_after
+			&& (
+				$had_comment_modified_cache
+					? $comment_modified_cache === $comment_modified_cache_after
+					: false === $comment_modified_cache_after
+			)
 			&& false === has_filter( 'pre_get_lastpostmodified', $lastpost_filter )
 			&& false === has_filter( 'default_feed', $default_feed_filter )
 			&& false === has_filter( 'status_header', $status_filter )
@@ -1445,7 +1471,14 @@ final class RequestLifecycleSurface {
 				'observed'          => $observed,
 				'statusLog'         => $status_log,
 				'postModifiedCalls' => $post_modified_calls,
+				'expectedPostModifiedCalls' => $expected_post_modified_calls,
 				'defaultFeedCalls'  => $default_feed_calls,
+				'commentModifiedCacheRestored' => $had_comment_modified_cache === $comment_cache_found_after
+					&& (
+						$had_comment_modified_cache
+							? $comment_modified_cache === $comment_modified_cache_after
+							: false === $comment_modified_cache_after
+					),
 				'failures'          => array_slice( $failures, 0, 8 ),
 			)
 		);
