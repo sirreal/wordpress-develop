@@ -264,10 +264,11 @@ database, network requests, or a configured site.
   semantic parser mode probes, modifiable text escaping, token serialization,
   and namespace/comment/rawtext boundary checks.
 - `http`: synthetic HTTP response arrays, request wrapper dispatch,
-  response objects, header/cookie parsing, proxy decisions, redirect safety,
-  chunk-transfer decoding, direct no-network request normalization and early
-  error contracts, URL validation, and relative URL resolution without live
-  network requests.
+  real `WP_Http::request()` to Requests success-path option mapping and
+  response conversion through a fake no-network transport, response objects,
+  header/cookie parsing, proxy decisions, redirect safety, chunk-transfer
+  decoding, direct no-network request normalization and early error contracts,
+  URL validation, and relative URL resolution without live network requests.
 - `icons-connectors`: no-DB Icons and Connectors API coverage, including
   connector registry lifecycle and init discovery, settings/REST key masking,
   AI-provider update validation fail-closed behavior, API-key mask/
