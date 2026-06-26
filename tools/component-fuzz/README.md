@@ -198,7 +198,9 @@ database, network requests, or a configured site.
   views, ASCII-vs-Unicode construction-mode consistency with explicit IDN skips,
   optional Unicode API availability skips, disabled-filter fail-closed behavior,
   invalid UTF-8, generated malformed address variants across filter/charset
-  modes, selected boundary lengths,
+  modes, selected boundary lengths, quoted/escaped local-part rejection,
+  control-character and Unicode separator sanitization boundaries, local-part
+  case/width/normalization identity preservation, hook restoration,
   normalization-sensitive local parts, generated accent-distinct local-part
   alias/index paths, byte-preserving user email search SQL, comment-author email
   filtering, REST user email schema validation across Unicode/ASCII filter modes,
@@ -455,8 +457,10 @@ database, network requests, or a configured site.
 - `query`: no-DB query builder and execution APIs, including meta/tax/date
   query tree sanitization, SQL fragment generation, relation normalization,
   query-var parsing, seeded `WP_Query` execution/found-row result oracles,
-  classic post-search parser/order SQL oracles for terms, exclusions, columns,
-  stopwords, attachment filename, password gates, and relevance ranking,
+  classic post-search parser/order/result SQL oracles for terms, exclusions,
+  columns, stopwords, attachment filename left-join branches, password gates,
+  literal clause-keyword searches, empty relevance-order boundaries, and
+  relevance ranking,
   cache-key/cache-hit determinism, `WP_User_Query` field/order/search/role/
   capability/has-published-post SQL-shape oracles and hook mutation locality,
   user/comment pre-query short-circuits, and deterministic global restoration.
