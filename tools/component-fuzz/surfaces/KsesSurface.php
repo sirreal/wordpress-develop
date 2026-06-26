@@ -70,6 +70,7 @@ final class KsesSurface {
 		try {
 			$results = array_merge( $results, self::check_allowed_html_contracts( $seed ) );
 			$results = array_merge( $results, self::check_custom_policy_and_filter_invariants( $seed ) );
+			$results = array_merge( $results, self::check_attribute_constraint_invariants( $seed ) );
 
 			$rng = self::rng( $seed );
 			for ( $case_index = 0; $case_index < $case_count; ++$case_index ) {
@@ -401,6 +402,301 @@ final class KsesSurface {
 		}
 
 		return $results;
+	}
+
+	private static function check_attribute_constraint_invariants( int $seed ): array {
+		foreach ( array( 'add_filter', 'remove_filter', 'has_filter', 'wp_kses', 'wp_kses_attr', 'wp_kses_attr_check', 'wp_kses_attr_parse', 'wp_kses_check_attr_val', 'safecss_filter_attr' ) as $function_name ) {
+			if ( ! function_exists( $function_name ) ) {
+				return array(
+					self::skip(
+						$seed,
+						null,
+						'kses.attribute-constraint-helpers.available',
+						$function_name . '() is not loaded',
+						''
+					),
+				);
+			}
+		}
+
+		$results = array();
+		try {
+			$results[] = self::check_attr_val_constraint_truth_table( $seed );
+			$results[] = self::check_attr_check_constraint_mutations( $seed );
+			$results[] = self::check_required_attr_tag_stripping( $seed );
+			$results[] = self::check_style_attr_entity_decoding( $seed );
+			$results[] = self::check_attr_parse_round_trips( $seed );
+			$results[] = self::check_safecss_allow_css_filter( $seed );
+		} catch ( \Throwable $e ) {
+			$results[] = self::throwable_result( $seed, null, 'kses.attribute-constraint-invariants-no-throw', '', $e );
+		}
+
+		return $results;
+	}
+
+	private static function check_attr_val_constraint_truth_table( int $seed ): array {
+		$cases = array(
+			array( 'maxlen-pass', 'abc', 'n', 'maxlen', 3, true ),
+			array( 'maxlen-fail', 'abcd', 'n', 'maxlen', 3, false ),
+			array( 'minlen-pass', 'abc', 'n', 'minlen', 3, true ),
+			array( 'minlen-fail', 'ab', 'n', 'minlen', 3, false ),
+			array( 'maxval-pass', ' 123 ', 'n', 'maxval', 200, true ),
+			array( 'maxval-over-limit', '201', 'n', 'maxval', 200, false ),
+			array( 'maxval-too-many-digits', '1234567', 'n', 'maxval', 2000000, false ),
+			array( 'minval-pass', '7', 'n', 'minval', 5, true ),
+			array( 'minval-under-limit', '4', 'n', 'minval', 5, false ),
+			array( 'valueless-required-pass', '', 'y', 'valueless', 'y', true ),
+			array( 'valueless-required-fail', 'disabled', 'n', 'valueless', 'y', false ),
+			array( 'valued-required-pass', 'submit', 'n', 'valueless', 'n', true ),
+			array( 'values-case-insensitive-pass', 'BETA', 'n', 'values', array( 'alpha', 'beta' ), true ),
+			array( 'values-fail', 'gamma', 'n', 'values', array( 'alpha', 'beta' ), false ),
+			array(
+				'value-callback-pass',
+				'prefix-ok',
+				'n',
+				'value_callback',
+				static function ( string $value ): bool {
+					return str_starts_with( $value, 'prefix-' );
+				},
+				true,
+			),
+			array(
+				'value-callback-fail',
+				'other',
+				'n',
+				'value_callback',
+				static function ( string $value ): bool {
+					return str_starts_with( $value, 'prefix-' );
+				},
+				false,
+			),
+		);
+
+		$failures = array();
+		foreach ( $cases as $case ) {
+			list( $label, $value, $vless, $check_name, $check_value, $expected ) = $case;
+			$actual = \wp_kses_check_attr_val( $value, $vless, $check_name, $check_value );
+			if ( $expected !== $actual ) {
+				$failures[] = array(
+					'label'    => $label,
+					'value'    => $value,
+					'vless'    => $vless,
+					'check'    => $check_name,
+					'expected' => $expected,
+					'actual'   => $actual,
+				);
+			}
+		}
+
+		if ( array() === $failures ) {
+			return self::pass( $seed, null, 'wp_kses_check_attr_val.constraint-truth-table', 'max/min/value constraints', array( 'cases' => count( $cases ) ) );
+		}
+
+		return self::fail(
+			$seed,
+			null,
+			'wp_kses_check_attr_val.constraint-truth-table',
+			'max/min/value constraints',
+			'all generated attribute value constraints match their expected branch behavior',
+			$failures,
+			array( 'cases' => count( $cases ) )
+		);
+	}
+
+	private static function check_attr_check_constraint_mutations( int $seed ): array {
+		$allowed_html = array(
+			'button' => array(
+				'data-*'   => array( 'maxlen' => 6 ),
+				'disabled' => array( 'valueless' => 'y' ),
+				'role'     => array( 'values' => array( 'button', 'navigation' ) ),
+			),
+		);
+		$cases        = array(
+			array( 'valid-data-wildcard', 'data-safe', 'abc123', 'data-safe="abc123"', 'n', true, 'data-safe', 'abc123', 'data-safe="abc123"' ),
+			array( 'invalid-data-wildcard-name', 'data-bad.dot', 'abc', 'data-bad.dot="abc"', 'n', false, '', '', '' ),
+			array( 'invalid-data-wildcard-length', 'data-safe', 'abcdefg', 'data-safe="abcdefg"', 'n', false, '', '', '' ),
+			array( 'valid-role-values', 'role', 'Button', 'role="Button"', 'n', true, 'role', 'Button', 'role="Button"' ),
+			array( 'invalid-role-values', 'role', 'dialog', 'role="dialog"', 'n', false, '', '', '' ),
+			array( 'valid-valueless', 'disabled', '', 'disabled', 'y', true, 'disabled', '', 'disabled' ),
+			array( 'invalid-valueless-with-value', 'disabled', 'disabled', 'disabled="disabled"', 'n', false, '', '', '' ),
+		);
+
+		$failures = array();
+		foreach ( $cases as $case ) {
+			list( $label, $name, $value, $whole, $vless, $expected_allowed, $expected_name, $expected_value, $expected_whole ) = $case;
+			$actual_name  = $name;
+			$actual_value = $value;
+			$actual_whole = $whole;
+			$allowed      = \wp_kses_attr_check( $actual_name, $actual_value, $actual_whole, $vless, 'button', $allowed_html );
+
+			if (
+				$expected_allowed !== $allowed
+				|| $expected_name !== $actual_name
+				|| $expected_value !== $actual_value
+				|| $expected_whole !== $actual_whole
+			) {
+				$failures[] = array(
+					'label'    => $label,
+					'expected' => array( $expected_allowed, $expected_name, $expected_value, $expected_whole ),
+					'actual'   => array( $allowed, $actual_name, $actual_value, $actual_whole ),
+				);
+			}
+		}
+
+		if ( array() === $failures ) {
+			return self::pass( $seed, null, 'wp_kses_attr_check.constraint-mutations', 'button data/role/disabled attributes', array( 'cases' => count( $cases ) ) );
+		}
+
+		return self::fail(
+			$seed,
+			null,
+			'wp_kses_attr_check.constraint-mutations',
+			'button data/role/disabled attributes',
+			'accepted attributes stay intact and rejected attributes are cleared by reference',
+			$failures,
+			array( 'cases' => count( $cases ) )
+		);
+	}
+
+	private static function check_required_attr_tag_stripping( int $seed ): array {
+		$allowed_html = array(
+			'mark' => array(
+				'data-required' => array(
+					'required' => true,
+					'values'   => array( 'keep' ),
+				),
+				'data-optional' => true,
+			),
+		);
+		$protocols    = self::default_protocols();
+		$actual       = array(
+			'valid'        => \wp_kses_attr( 'mark', ' data-required="keep" data-optional="ok"', $allowed_html, $protocols ),
+			'missing'      => \wp_kses_attr( 'mark', ' data-optional="ok"', $allowed_html, $protocols ),
+			'invalidSelf'  => \wp_kses_attr( 'mark', ' data-required="drop" /', $allowed_html, $protocols ),
+			'missingSelf'  => \wp_kses_attr( 'mark', ' data-optional="ok" /', $allowed_html, $protocols ),
+		);
+		$expected     = array(
+			'valid'       => '<mark data-required="keep" data-optional="ok">',
+			'missing'     => '<mark>',
+			'invalidSelf' => '',
+			'missingSelf' => '',
+		);
+
+		if ( $expected === $actual ) {
+			return self::pass( $seed, null, 'wp_kses_attr.required-attribute-tag-stripping', 'mark data-required', array( 'outputs' => $actual ) );
+		}
+
+		return self::fail(
+			$seed,
+			null,
+			'wp_kses_attr.required-attribute-tag-stripping',
+			'mark data-required',
+			$expected,
+			$actual
+		);
+	}
+
+	private static function check_style_attr_entity_decoding( int $seed ): array {
+		$input        = '<div style="background-image: url(&quot;https://localhost/image.jpg&quot;);"></div>';
+		$allowed_html = array(
+			'div' => array(
+				'style' => true,
+			),
+		);
+		$actual       = \wp_kses( $input, $allowed_html );
+		$expected     = '<div style="background-image: url(&quot;https://localhost/image.jpg&quot;)"></div>';
+
+		if ( $expected === $actual ) {
+			return self::pass( $seed, null, 'wp_kses_attr.style-decodes-entities-before-css-filtering', $input, array( 'output' => self::preview( $actual ) ) );
+		}
+
+		return self::fail(
+			$seed,
+			null,
+			'wp_kses_attr.style-decodes-entities-before-css-filtering',
+			$input,
+			$expected,
+			$actual
+		);
+	}
+
+	private static function check_attr_parse_round_trips( int $seed ): array {
+		$valid        = '<a href="https://example.test/path" title=\'A B\' data-x=ok />';
+		$valid_parsed = \wp_kses_attr_parse( $valid );
+		$actual       = array(
+			'validRoundTrip' => is_array( $valid_parsed ) ? implode( '', $valid_parsed ) : $valid_parsed,
+			'closingTag'     => \wp_kses_attr_parse( '</a>' ),
+			'malformedTag'   => \wp_kses_attr_parse( '<a href="unterminated>' ),
+		);
+		$expected     = array(
+			'validRoundTrip' => $valid,
+			'closingTag'     => false,
+			'malformedTag'   => false,
+		);
+
+		if ( $expected === $actual ) {
+			return self::pass( $seed, null, 'wp_kses_attr_parse.full-tag-round-trip-and-rejects-invalid', $valid, array( 'parsed' => self::compact_value( $valid_parsed ) ) );
+		}
+
+		return self::fail(
+			$seed,
+			null,
+			'wp_kses_attr_parse.full-tag-round-trip-and-rejects-invalid',
+			$valid,
+			$expected,
+			$actual
+		);
+	}
+
+	private static function check_safecss_allow_css_filter( int $seed ): array {
+		$css            = 'height: expression( body.scrollTop + 50 + "px" );margin-bottom: 2px};color:red';
+		$without_filter = \safecss_filter_attr( $css );
+		$seen           = array();
+		$allow_filter   = static function ( bool $allow_css, string $css_test_string ) use ( &$seen ): bool {
+			$seen[] = array(
+				'default' => $allow_css,
+				'test'    => $css_test_string,
+			);
+			return true;
+		};
+
+		\add_filter( 'safecss_filter_attr_allow_css', $allow_filter, 10, 2 );
+		try {
+			$with_filter = \safecss_filter_attr( $css );
+		} finally {
+			\remove_filter( 'safecss_filter_attr_allow_css', $allow_filter, 10 );
+		}
+
+		$filter_removed = false === \has_filter( 'safecss_filter_attr_allow_css', $allow_filter );
+		$ok             = 'color:red' === $without_filter
+			&& false !== strpos( $with_filter, 'height: expression( body.scrollTop + 50 + "px" )' )
+			&& false !== strpos( $with_filter, 'margin-bottom: 2px}' )
+			&& false !== strpos( $with_filter, 'color:red' )
+			&& 3 === count( $seen )
+			&& false === $seen[0]['default']
+			&& false === $seen[1]['default']
+			&& true === $seen[2]['default']
+			&& $filter_removed;
+		$details        = array(
+			'withoutFilter' => self::preview( $without_filter ),
+			'withFilter'    => self::preview( $with_filter ),
+			'seen'          => $seen,
+			'filterRemoved' => $filter_removed,
+		);
+
+		if ( $ok ) {
+			return self::pass( $seed, null, 'safecss_filter_attr_allow_css.unsafe-token-gate-and-restoration', $css, $details );
+		}
+
+		return self::fail(
+			$seed,
+			null,
+			'safecss_filter_attr_allow_css.unsafe-token-gate-and-restoration',
+			$css,
+			'unsafe CSS tokens removed by default, restored by scoped allow filter, and filter removed',
+			$details,
+			$details
+		);
 	}
 
 	private static function check_wp_kses_invariants( int $seed, int $case_index, array $case ): array {
