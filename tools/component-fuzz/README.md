@@ -157,7 +157,8 @@ database, network requests, or a configured site.
 - `comment-workflow`: in-memory comment submission, duplicate/flood approval
   decisions, direct `wp_new_comment()` preprocessing and insert hooks,
   moderation short-circuits, update/status transition hooks, trash/untrash and
-  spam/unspam restoration, and WP_Error failure paths without process exits.
+  spam/unspam restoration, force-delete reparenting/meta/count/hook contracts,
+  and WP_Error failure paths without process exits.
 - `cron`: in-memory cron scheduling, recurrence lookup, schedule/unschedule
   and next-scheduled filter contracts, duplicate single-event windows,
   scheduled-event lookup ordering/exactness, ready-job partitioning,
