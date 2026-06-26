@@ -515,7 +515,8 @@ database, network requests, or a configured site.
   generated update transients and dismissed core update options, aggregate
   update counts/titles, HTTPS option booleans, migration replacement, HTTPS
   detection short-circuits, generated `site_status_tests` registry/filter
-  behavior, and selected direct `WP_Site_Health` tests without remote requests.
+  behavior, selected direct `WP_Site_Health` tests without remote requests, and
+  persistent object cache threshold/filter direct-test behavior.
 - `site-health-debug`: bounded `WP_Debug_Data` coverage for Site Health Info
   formatting and diagnostic size helpers, including private field/section
   suppression, debug vs info labels, `debug_information` filter locality,

@@ -47,6 +47,7 @@ final class SiteHealthSurface {
 			$rows[] = self::check_https_migration( $ctx, $case );
 			$rows[] = self::check_https_detection_short_circuit( $ctx, $case );
 			$rows[] = self::check_site_health_direct_tests( $ctx, $case );
+			$rows[] = self::check_persistent_object_cache_direct_test( $ctx, $case );
 			$rows[] = self::check_site_status_test_registry( $ctx, $case );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
@@ -224,6 +225,7 @@ final class SiteHealthSurface {
 				'rest_url',
 				'site_url',
 				'wp_cache_delete',
+				'wp_cache_get',
 				'wp_cache_set',
 				'wp_convert_hr_to_bytes',
 				'wp_get_https_detection_errors',
@@ -234,9 +236,11 @@ final class SiteHealthSurface {
 				'wp_is_site_url_using_https',
 				'wp_is_site_protected_by_basic_auth',
 				'wp_is_using_https',
+				'wp_load_alloptions',
 				'wp_parse_url',
 				'wp_replace_insecure_home_url',
 				'wp_should_replace_insecure_home_url',
+				'wp_using_ext_object_cache',
 			) as $function
 		) {
 			if ( ! function_exists( $function ) ) {
@@ -733,6 +737,230 @@ final class SiteHealthSurface {
 		);
 	}
 
+	private static function check_persistent_object_cache_direct_test( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures    = array();
+		$site_health = self::site_health_without_constructor();
+		$statuses    = array();
+
+		self::$http_request_count = 0;
+
+		foreach ( self::persistent_object_cache_scenarios( $case['persistentObjectCache'] ) as $scenario ) {
+			$result             = null;
+			$alloptions_calls   = 0;
+			$short_circuit_calls = 0;
+			$notes_filter_seen  = array();
+			$services_seen      = array();
+			$ext_snapshot       = self::snapshot_runtime_global( '_wp_using_ext_object_cache' );
+			$wpdb_snapshot      = self::snapshot_runtime_global( 'wpdb' );
+			$alloptions_cache   = self::snapshot_cache_slot( 'alloptions', 'options' );
+			$wpdb               = new SiteHealthPersistentObjectCacheWpdbDouble(
+				$GLOBALS['wpdb'] ?? null,
+				$scenario['tableRows']
+			);
+
+			$action_url_filter = static function () use ( $scenario ): string {
+				return $scenario['actionUrl'];
+			};
+			$short_circuit_filter = static function ( $suggest ) use ( $scenario, &$short_circuit_calls ) {
+				unset( $suggest );
+
+				++$short_circuit_calls;
+				return $scenario['shortCircuit'];
+			};
+			$threshold_filter = static function () use ( $scenario ): array {
+				return $scenario['thresholds'];
+			};
+			$alloptions_filter = static function ( $alloptions, bool $force_cache ) use ( $scenario, &$alloptions_calls ): array {
+				unset( $alloptions, $force_cache );
+
+				++$alloptions_calls;
+				return $scenario['alloptions'];
+			};
+			$services_filter = static function ( array $services ) use ( $scenario, &$services_seen ): array {
+				$services_seen[] = $services;
+				return $scenario['services'];
+			};
+			$notes_filter = static function ( string $notes, array $available_services ) use ( $scenario, &$notes_filter_seen ): string {
+				$notes_filter_seen[] = array(
+					'notes'    => $notes,
+					'services' => $available_services,
+				);
+
+				if ( '' === $scenario['unsafeNote'] ) {
+					return $notes;
+				}
+
+				return $notes . ' ' . $scenario['unsafeNote'];
+			};
+
+			try {
+				\add_filter( 'site_status_persistent_object_cache_url', $action_url_filter );
+				\add_filter( 'site_status_should_suggest_persistent_object_cache', $short_circuit_filter );
+				\add_filter( 'site_status_persistent_object_cache_thresholds', $threshold_filter );
+				\add_filter( 'pre_wp_load_alloptions', $alloptions_filter, 10, 2 );
+				\add_filter( 'site_status_available_object_cache_services', $services_filter );
+				\add_filter( 'site_status_persistent_object_cache_notes', $notes_filter, 10, 2 );
+
+				$GLOBALS['wpdb'] = $wpdb;
+				\wp_using_ext_object_cache( $scenario['extObjectCache'] );
+
+				$result = $site_health->get_test_persistent_object_cache();
+			} finally {
+				\remove_filter( 'site_status_persistent_object_cache_url', $action_url_filter );
+				\remove_filter( 'site_status_should_suggest_persistent_object_cache', $short_circuit_filter );
+				\remove_filter( 'site_status_persistent_object_cache_thresholds', $threshold_filter );
+				\remove_filter( 'pre_wp_load_alloptions', $alloptions_filter, 10 );
+				\remove_filter( 'site_status_available_object_cache_services', $services_filter );
+				\remove_filter( 'site_status_persistent_object_cache_notes', $notes_filter, 10 );
+				self::restore_runtime_global( 'wpdb', $wpdb_snapshot );
+				self::restore_runtime_global( '_wp_using_ext_object_cache', $ext_snapshot );
+				self::restore_cache_slot( 'alloptions', 'options', $alloptions_cache );
+			}
+
+			$statuses[ $scenario['name'] ] = is_array( $result ) ? ( $result['status'] ?? null ) : null;
+
+			self::assert_site_health_result( $failures, $result, 'persistent_object_cache', $scenario['expectedStatus'] );
+
+			self::collect_failure(
+				$failures,
+				is_array( $result )
+					&& self::html_contains_url( (string) ( $result['actions'] ?? '' ), $scenario['actionUrl'] ),
+				"persistent object cache action URL propagates for {$scenario['name']}",
+				array(
+					'actionUrl' => $scenario['actionUrl'],
+					'actions'   => is_array( $result ) ? self::preview( (string) ( $result['actions'] ?? '' ) ) : null,
+				)
+			);
+
+			if ( '' !== $scenario['labelContains'] ) {
+				self::collect_failure(
+					$failures,
+					is_array( $result )
+						&& false !== stripos( (string) ( $result['label'] ?? '' ), $scenario['labelContains'] ),
+					"persistent object cache label invariant for {$scenario['name']}",
+					array(
+						'expectedContains' => $scenario['labelContains'],
+						'label'            => is_array( $result ) ? ( $result['label'] ?? null ) : null,
+					)
+				);
+			}
+
+			self::collect_failure(
+				$failures,
+				$scenario['expectedShortCircuitCalls'] === $short_circuit_calls,
+				"persistent object cache short-circuit call count for {$scenario['name']}",
+				array(
+					'expected' => $scenario['expectedShortCircuitCalls'],
+					'actual'   => $short_circuit_calls,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$scenario['expectedAlloptionsCalls'] === $alloptions_calls,
+				"persistent object cache alloptions call count for {$scenario['name']}",
+				array(
+					'expected' => $scenario['expectedAlloptionsCalls'],
+					'actual'   => $alloptions_calls,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$scenario['expectedDbQueries'] === $wpdb->get_results_calls
+					&& $scenario['expectedDbQueries'] === $wpdb->prepare_calls,
+				"persistent object cache information_schema query count for {$scenario['name']}",
+				array(
+					'expected' => $scenario['expectedDbQueries'],
+					'prepared' => $wpdb->prepared_queries,
+					'queries'  => $wpdb->result_queries,
+				)
+			);
+
+			if ( $scenario['expectedDbQueries'] > 0 ) {
+				self::collect_failure(
+					$failures,
+					OBJECT_K === $wpdb->last_output
+						&& false !== strpos( $wpdb->last_query, 'information_schema.TABLES' )
+						&& isset( $wpdb->prepared_queries[0]['args'][0] )
+						&& DB_NAME === $wpdb->prepared_queries[0]['args'][0],
+					"persistent object cache table-row threshold uses prepared information_schema OBJECT_K query for {$scenario['name']}",
+					array(
+						'lastOutput' => $wpdb->last_output,
+						'lastQuery'  => self::preview( $wpdb->last_query ),
+						'prepared'   => $wpdb->prepared_queries,
+					)
+				);
+			}
+
+			if ( $scenario['expectFilteredNotes'] ) {
+				$description = is_array( $result ) ? (string) ( $result['description'] ?? '' ) : '';
+				$notes_seen  = $notes_filter_seen[0] ?? null;
+
+				self::collect_failure(
+					$failures,
+					is_array( $notes_seen )
+						&& $scenario['services'] === $notes_seen['services']
+						&& self::all_strings_contained( $description, $scenario['services'] )
+						&& self::all_strings_contained( (string) $notes_seen['notes'], $scenario['services'] ),
+					'persistent object cache filtered services are passed to notes and rendered',
+					array(
+						'services'    => $scenario['services'],
+						'notesSeen'   => $notes_seen,
+						'description' => self::preview( $description ),
+						'servicesFilterSeen' => $services_seen,
+					)
+				);
+
+				self::collect_failure(
+					$failures,
+					false !== strpos( $description, $scenario['safeNoteToken'] )
+						&& false !== strpos( $description, '<strong>allowed-note</strong>' )
+						&& false === strpos( $description, '<script' )
+						&& false === strpos( $description, '</script>' )
+						&& false === strpos( $description, '<img' )
+						&& false === strpos( $description, 'onerror' ),
+					'persistent object cache notes allow safe markup and remove unsafe markup',
+					array(
+						'safeNoteToken' => $scenario['safeNoteToken'],
+						'description'   => self::preview( $description ),
+					)
+				);
+			}
+
+			self::collect_failure(
+				$failures,
+				self::runtime_global_matches( '_wp_using_ext_object_cache', $ext_snapshot )
+					&& self::runtime_global_matches( 'wpdb', $wpdb_snapshot )
+					&& self::cache_slot_matches( 'alloptions', 'options', $alloptions_cache ),
+				"persistent object cache scenario restores ext-cache/wpdb/alloptions state for {$scenario['name']}",
+				array(
+					'extObjectCacheRestored' => self::runtime_global_matches( '_wp_using_ext_object_cache', $ext_snapshot ),
+					'wpdbRestored'           => self::runtime_global_matches( 'wpdb', $wpdb_snapshot ),
+					'alloptionsRestored'     => self::cache_slot_matches( 'alloptions', 'options', $alloptions_cache ),
+				)
+			);
+		}
+
+		self::collect_failure(
+			$failures,
+			0 === self::$http_request_count,
+			'persistent object cache direct test does not make HTTP requests',
+			array( 'httpRequests' => self::$http_request_count )
+		);
+
+		return $ctx->result(
+			'site-health.direct-tests.persistent-object-cache-thresholds',
+			array() === $failures,
+			array(
+				'statuses'      => $statuses,
+				'alloptionsMode' => $case['persistentObjectCache']['alloptionsMode'],
+				'tableThreshold' => $case['persistentObjectCache']['tableThreshold'],
+				'failures'      => array_slice( $failures, 0, self::MAX_FAILURES ),
+			)
+		);
+	}
+
 	private static function check_site_status_test_registry( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
 		$failures    = array();
 		$registry    = $case['siteStatusTests'];
@@ -854,6 +1082,7 @@ final class SiteHealthSurface {
 			'siteHealthUpdateHttpsCap' => $ctx->bool(),
 			'authorization'          => self::authorization_case( $ctx->fork( 'authorization' ) ),
 			'blogPublic'             => $ctx->bool() ? 1 : 0,
+			'persistentObjectCache'  => self::persistent_object_cache_case( $ctx->fork( 'persistent-object-cache' ) ),
 			'siteStatusTests'        => self::site_status_tests_case( $ctx->fork( 'site-status-tests' ) ),
 		);
 	}
@@ -1125,6 +1354,198 @@ final class SiteHealthSurface {
 			'async'              => $async,
 			'results'            => $results,
 		);
+	}
+
+	private static function persistent_object_cache_case( \ComponentFuzz\FuzzContext $ctx ): array {
+		$services = array();
+		$used     = array();
+		$pool     = array( 'Redis', 'Memcached', 'APCu', 'Relay', 'SQLite Object Cache' );
+		$count    = $ctx->int( 1, 3 );
+
+		for ( $i = 0; $i < $count; ++$i ) {
+			$service = $pool[ $ctx->int( 0, count( $pool ) - 1 ) ];
+			if ( isset( $used[ $service ] ) ) {
+				$service = 'Generated Cache ' . $ctx->int( 10, 99 );
+			}
+
+			$used[ $service ] = true;
+			$services[]       = $service;
+		}
+
+		return array(
+			'actionUrl'          => 'https://example.test/persistent-object-cache/' . strtolower( $ctx->identifier( 5, 10 ) ),
+			'alloptionsMode'     => $ctx->choice( array( 'alloptions_count', 'alloptions_bytes' ) ),
+			'alloptionsCount'    => $ctx->int( 4, 9 ),
+			'alloptionsPayload'  => $ctx->int( 96, 256 ),
+			'tableThreshold'     => $ctx->choice(
+				array(
+					'comments_count',
+					'options_count',
+					'posts_count',
+					'terms_count',
+					'users_count',
+				)
+			),
+			'tableLimit'         => $ctx->int( 8, 40 ),
+			'services'           => $services,
+			'safeNoteToken'      => 'component-fuzz-note-' . strtolower( $ctx->identifier( 4, 8 ) ),
+		);
+	}
+
+	private static function persistent_object_cache_scenarios( array $case ): array {
+		$low_alloptions    = array(
+			'component_fuzz_small' => '1',
+			'component_fuzz_flag'  => 'yes',
+		);
+		$high_alloptions   = self::persistent_object_cache_alloptions_fixture(
+			$case['alloptionsCount'],
+			$case['alloptionsPayload']
+		);
+		$high_serialized   = strlen( serialize( $high_alloptions ) );
+		$base_thresholds   = self::persistent_object_cache_thresholds( 1000 );
+		$table_thresholds  = self::persistent_object_cache_thresholds( $case['tableLimit'] );
+		$table_rows_low    = self::persistent_object_cache_table_rows( $table_thresholds, null );
+		$table_rows_trigger = self::persistent_object_cache_table_rows( $table_thresholds, $case['tableThreshold'] );
+		$unsafe_note       = $case['safeNoteToken']
+			. ' <strong>allowed-note</strong> <script>alert(1)</script><img src="x" onerror="alert(1)">';
+		$alloptions_thresholds = $base_thresholds;
+
+		if ( 'alloptions_count' === $case['alloptionsMode'] ) {
+			$alloptions_thresholds['alloptions_count'] = count( $high_alloptions ) - 1;
+			$alloptions_thresholds['alloptions_bytes'] = $high_serialized + 1000;
+		} else {
+			$alloptions_thresholds['alloptions_count'] = count( $high_alloptions ) + 1000;
+			$alloptions_thresholds['alloptions_bytes'] = max( 0, $high_serialized - 1 );
+		}
+
+		return array(
+			array(
+				'name'                      => 'external-object-cache',
+				'extObjectCache'            => true,
+				'shortCircuit'              => null,
+				'thresholds'                => $base_thresholds,
+				'alloptions'                => $high_alloptions,
+				'tableRows'                 => $table_rows_trigger,
+				'services'                  => array(),
+				'actionUrl'                 => $case['actionUrl'],
+				'unsafeNote'                => '',
+				'safeNoteToken'             => '',
+				'expectedStatus'            => 'good',
+				'labelContains'             => 'being used',
+				'expectedShortCircuitCalls' => 0,
+				'expectedAlloptionsCalls'   => 0,
+				'expectedDbQueries'         => 0,
+				'expectFilteredNotes'       => false,
+			),
+			array(
+				'name'                      => 'short-circuit-false',
+				'extObjectCache'            => false,
+				'shortCircuit'              => false,
+				'thresholds'                => $base_thresholds,
+				'alloptions'                => $high_alloptions,
+				'tableRows'                 => $table_rows_trigger,
+				'services'                  => array(),
+				'actionUrl'                 => $case['actionUrl'],
+				'unsafeNote'                => '',
+				'safeNoteToken'             => '',
+				'expectedStatus'            => 'good',
+				'labelContains'             => 'not required',
+				'expectedShortCircuitCalls' => 1,
+				'expectedAlloptionsCalls'   => 0,
+				'expectedDbQueries'         => 0,
+				'expectFilteredNotes'       => false,
+			),
+			array(
+				'name'                      => 'short-circuit-true-filters',
+				'extObjectCache'            => false,
+				'shortCircuit'              => true,
+				'thresholds'                => $base_thresholds,
+				'alloptions'                => $low_alloptions,
+				'tableRows'                 => $table_rows_low,
+				'services'                  => $case['services'],
+				'actionUrl'                 => $case['actionUrl'],
+				'unsafeNote'                => $unsafe_note,
+				'safeNoteToken'             => $case['safeNoteToken'],
+				'expectedStatus'            => 'recommended',
+				'labelContains'             => '',
+				'expectedShortCircuitCalls' => 1,
+				'expectedAlloptionsCalls'   => 0,
+				'expectedDbQueries'         => 0,
+				'expectFilteredNotes'       => true,
+			),
+			array(
+				'name'                      => 'alloptions-threshold',
+				'extObjectCache'            => false,
+				'shortCircuit'              => null,
+				'thresholds'                => $alloptions_thresholds,
+				'alloptions'                => $high_alloptions,
+				'tableRows'                 => $table_rows_low,
+				'services'                  => array(),
+				'actionUrl'                 => $case['actionUrl'],
+				'unsafeNote'                => '',
+				'safeNoteToken'             => '',
+				'expectedStatus'            => 'recommended',
+				'labelContains'             => '',
+				'expectedShortCircuitCalls' => 1,
+				'expectedAlloptionsCalls'   => 1,
+				'expectedDbQueries'         => 0,
+				'expectFilteredNotes'       => false,
+			),
+			array(
+				'name'                      => 'table-row-threshold',
+				'extObjectCache'            => false,
+				'shortCircuit'              => null,
+				'thresholds'                => $table_thresholds,
+				'alloptions'                => $low_alloptions,
+				'tableRows'                 => $table_rows_trigger,
+				'services'                  => array(),
+				'actionUrl'                 => $case['actionUrl'],
+				'unsafeNote'                => '',
+				'safeNoteToken'             => '',
+				'expectedStatus'            => 'recommended',
+				'labelContains'             => '',
+				'expectedShortCircuitCalls' => 1,
+				'expectedAlloptionsCalls'   => 1,
+				'expectedDbQueries'         => 1,
+				'expectFilteredNotes'       => false,
+			),
+		);
+	}
+
+	private static function persistent_object_cache_thresholds( int $table_limit ): array {
+		return array(
+			'alloptions_count' => 500,
+			'alloptions_bytes' => 100000,
+			'comments_count'   => $table_limit,
+			'options_count'    => $table_limit,
+			'posts_count'      => $table_limit,
+			'terms_count'      => $table_limit,
+			'users_count'      => $table_limit,
+		);
+	}
+
+	private static function persistent_object_cache_table_rows( array $thresholds, ?string $trigger ): array {
+		$rows = array();
+
+		foreach ( array( 'comments_count', 'options_count', 'posts_count', 'terms_count', 'users_count' ) as $threshold ) {
+			$rows[ $threshold ] = max( 0, (int) $thresholds[ $threshold ] - 1 );
+		}
+
+		if ( null !== $trigger ) {
+			$rows[ $trigger ] = (int) $thresholds[ $trigger ];
+		}
+
+		return $rows;
+	}
+
+	private static function persistent_object_cache_alloptions_fixture( int $count, int $payload_size ): array {
+		$alloptions = array();
+
+		for ( $i = 0; $i < $count; ++$i ) {
+			$alloptions[ 'component_fuzz_poc_' . $i ] = str_repeat( chr( 97 + ( $i % 26 ) ), $payload_size + $i );
+		}
+
+		return $alloptions;
 	}
 
 	private static function site_status_headers_case( \ComponentFuzz\FuzzContext $ctx ): array {
@@ -1767,6 +2188,8 @@ final class SiteHealthSurface {
 			'wp_actions',
 			'wp_current_filter',
 			'wp_object_cache',
+			'wpdb',
+			'_wp_using_ext_object_cache',
 			'current_user',
 			'_SERVER',
 			'_ENV',
@@ -1819,6 +2242,68 @@ final class SiteHealthSurface {
 				return false;
 			}
 			if ( $exists && $GLOBALS[ $name ] !== $entry['value'] ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function snapshot_runtime_global( string $name ): array {
+		return array(
+			'exists' => array_key_exists( $name, $GLOBALS ),
+			'value'  => $GLOBALS[ $name ] ?? null,
+		);
+	}
+
+	private static function restore_runtime_global( string $name, array $snapshot ): void {
+		if ( $snapshot['exists'] ) {
+			$GLOBALS[ $name ] = $snapshot['value'];
+		} else {
+			unset( $GLOBALS[ $name ] );
+		}
+	}
+
+	private static function runtime_global_matches( string $name, array $snapshot ): bool {
+		$exists = array_key_exists( $name, $GLOBALS );
+
+		return $exists === $snapshot['exists']
+			&& ( ! $exists || $GLOBALS[ $name ] === $snapshot['value'] );
+	}
+
+	private static function snapshot_cache_slot( string $key, string $group ): array {
+		$found = false;
+		$value = \wp_cache_get( $key, $group, false, $found );
+
+		return array(
+			'found' => $found,
+			'value' => $value,
+		);
+	}
+
+	private static function restore_cache_slot( string $key, string $group, array $snapshot ): void {
+		if ( $snapshot['found'] ) {
+			\wp_cache_set( $key, $snapshot['value'], $group );
+		} else {
+			\wp_cache_delete( $key, $group );
+		}
+	}
+
+	private static function cache_slot_matches( string $key, string $group, array $snapshot ): bool {
+		$found = false;
+		$value = \wp_cache_get( $key, $group, false, $found );
+
+		return $found === $snapshot['found']
+			&& ( ! $found || $value === $snapshot['value'] );
+	}
+
+	private static function html_contains_url( string $html, string $url ): bool {
+		return false !== strpos( html_entity_decode( $html, ENT_QUOTES, 'UTF-8' ), $url );
+	}
+
+	private static function all_strings_contained( string $haystack, array $needles ): bool {
+		foreach ( $needles as $needle ) {
+			if ( false === strpos( $haystack, (string) $needle ) ) {
 				return false;
 			}
 		}
@@ -1885,5 +2370,97 @@ final class SiteHealthSurface {
 		}
 
 		return substr( $value, 0, $limit ) . '...';
+	}
+}
+
+final class SiteHealthPersistentObjectCacheWpdbDouble {
+	public int $num_rows = 0;
+	public string $last_query = '';
+	public $last_output = null;
+	public int $prepare_calls = 0;
+	public int $get_results_calls = 0;
+	public array $prepared_queries = array();
+	public array $result_queries = array();
+	public string $comments = 'wp_comments';
+	public string $options = 'wp_options';
+	public string $posts = 'wp_posts';
+	public string $terms = 'wp_terms';
+	public string $users = 'wp_users';
+
+	private $delegate;
+	private array $rows_by_table = array();
+
+	public function __construct( $delegate, array $rows_by_threshold ) {
+		$this->delegate = is_object( $delegate ) ? $delegate : null;
+
+		foreach ( array( 'comments', 'options', 'posts', 'terms', 'users' ) as $property ) {
+			if ( is_object( $delegate ) && isset( $delegate->{$property} ) ) {
+				$this->{$property} = (string) $delegate->{$property};
+			}
+		}
+
+		$map = array(
+			'comments_count' => $this->comments,
+			'options_count'  => $this->options,
+			'posts_count'    => $this->posts,
+			'terms_count'    => $this->terms,
+			'users_count'    => $this->users,
+		);
+
+		foreach ( $map as $threshold => $table ) {
+			$this->rows_by_table[ $table ] = (int) ( $rows_by_threshold[ $threshold ] ?? 0 );
+		}
+	}
+
+	public function prepare( $query, ...$args ): string {
+		++$this->prepare_calls;
+		$query                    = (string) $query;
+		$this->prepared_queries[] = array(
+			'query' => $query,
+			'args'  => $args,
+		);
+
+		if ( isset( $args[0] ) ) {
+			return str_replace( '%s', "'" . addslashes( (string) $args[0] ) . "'", $query );
+		}
+
+		return $query;
+	}
+
+	public function get_results( $query = null, $output = OBJECT ): array {
+		++$this->get_results_calls;
+		$query                = (string) $query;
+		$this->last_query     = $query;
+		$this->last_output    = $output;
+		$this->result_queries[] = array(
+			'query'  => $query,
+			'output' => $output,
+		);
+
+		if ( false === strpos( $query, 'information_schema.TABLES' ) ) {
+			if ( is_object( $this->delegate ) && method_exists( $this->delegate, 'get_results' ) ) {
+				return $this->delegate->get_results( $query, $output );
+			}
+
+			return array();
+		}
+
+		$rows = array();
+		foreach ( $this->rows_by_table as $table => $table_rows ) {
+			$row = (object) array(
+				'table' => $table,
+				'rows'  => $table_rows,
+				'bytes' => $table_rows * 128,
+			);
+
+			if ( OBJECT_K === $output ) {
+				$rows[ $table ] = $row;
+			} else {
+				$rows[] = $row;
+			}
+		}
+
+		$this->num_rows = count( $rows );
+		return $rows;
 	}
 }
