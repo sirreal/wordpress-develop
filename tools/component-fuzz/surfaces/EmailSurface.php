@@ -15,6 +15,25 @@ final class EmailSurface {
 	private const GENERATED_USER_SEARCH_CASES = 8;
 	private const GENERATED_CONFUSABLE_LOCALPART_CASES = 6;
 	private const GENERATED_PASSWORD_RESET_RECIPIENT_CASES = 6;
+	private const TRACKED_HOOKS = array(
+		'is_email',
+		'sanitize_email',
+		'pre_comment_author_email',
+		'pre_user_email',
+		'pre_wp_mail',
+		'wp_mail',
+		'wp_mail_succeeded',
+		'lostpassword_user_data',
+		'lostpassword_post',
+		'lostpassword_errors',
+		'send_retrieve_password_email',
+		'retrieve_password_title',
+		'retrieve_password_message',
+		'retrieve_password_notification_email',
+		'pre_user_query',
+		'users_pre_query',
+		'query',
+	);
 	private const WHATWG_ASCII_EMAIL_REGEX = '/^[a-zA-Z0-9.!#$%&\'*+\/=?^_`{|}~-]+@'
 		. '[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?'
 		. '(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/';
@@ -47,6 +66,7 @@ final class EmailSurface {
 
 		$rows     = array();
 		$snapshot = self::snapshot_hook_globals();
+		$tracked_hook_snapshot = self::snapshot_tracked_hook_state();
 
 		try {
 			$cases = self::cases( $ctx );
@@ -66,6 +86,9 @@ final class EmailSurface {
 			$rows = array_merge( $rows, self::check_construction_mode_consistency( $ctx ) );
 			$rows = array_merge( $rows, self::check_generated_unicode_filter_view_matrix( $ctx ) );
 			$rows = array_merge( $rows, self::check_generated_malformed_variant_matrix( $ctx ) );
+			$rows = array_merge( $rows, self::check_quoted_escaped_localpart_boundaries( $ctx ) );
+			$rows = array_merge( $rows, self::check_control_character_boundaries( $ctx ) );
+			$rows = array_merge( $rows, self::check_localpart_identity_preservation( $ctx ) );
 
 			foreach ( $cases as $case_index => $case ) {
 				$rows = array_merge( $rows, self::check_unicode_case( $ctx, $case_index, $case ) );
@@ -106,6 +129,20 @@ final class EmailSurface {
 		} finally {
 			self::restore_hook_globals( $snapshot );
 		}
+
+		$tracked_hook_actual = self::snapshot_tracked_hook_state();
+		$tracked_hook_ok     = $tracked_hook_snapshot === $tracked_hook_actual;
+		$tracked_hook_data   = array( 'trackedHooks' => self::TRACKED_HOOKS );
+		if ( ! $tracked_hook_ok ) {
+			$tracked_hook_data['expected'] = $tracked_hook_snapshot;
+			$tracked_hook_data['actual']   = $tracked_hook_actual;
+		}
+
+		$rows[] = $ctx->result(
+			'email.global-hook-state-restored',
+			$tracked_hook_ok,
+			$tracked_hook_data
+		);
 
 		return $rows;
 	}
@@ -1654,6 +1691,310 @@ final class EmailSurface {
 					'variantCount'  => count( $observed ),
 					'observed'      => $observed,
 					'failures'      => $failures,
+				)
+			),
+		);
+	}
+
+	private static function check_quoted_escaped_localpart_boundaries( \ComponentFuzz\FuzzContext $ctx ): array {
+		$cases = array(
+			array( 'label' => 'quoted-simple', 'input' => '"quoted"@example.com' ),
+			array( 'label' => 'quoted-space', 'input' => '"first last"@example.com' ),
+			array( 'label' => 'quoted-escaped-backslash', 'input' => '"quo\\ted"@example.com' ),
+			array( 'label' => 'quoted-escaped-quote', 'input' => '"a\"b"@example.com' ),
+			array( 'label' => 'quoted-at-sign', 'input' => '"a@b"@example.com' ),
+			array( 'label' => 'quoted-control', 'input' => "\"\x01\"@example.com" ),
+			array( 'label' => 'escaped-at-outside-quotes', 'input' => 'user\\@example.com@example.org' ),
+		);
+		$failures = array();
+		$observed = array();
+		$snapshot = self::snapshot_hook_globals();
+
+		try {
+			foreach ( array( 'unicode', 'ascii' ) as $mode ) {
+				self::install_email_filters( $mode );
+
+				foreach ( $cases as $case ) {
+					$parse           = self::call( static fn() => \WP_Email_Address::from_string( $case['input'], $mode ) );
+					$is_email        = self::call( static fn() => \is_email( $case['input'] ) );
+					$sanitized       = self::call( static fn() => \sanitize_email( $case['input'] ) );
+					$direct_is       = 'unicode' === $mode
+						? self::call( static fn() => \wp_is_unicode_email( false, $case['input'], null ) )
+						: self::call( static fn() => \wp_is_ascii_email( false, $case['input'], null ) );
+					$direct_sanitize = 'unicode' === $mode
+						? self::call( static fn() => \wp_sanitize_unicode_email( '', $case['input'], null ) )
+						: self::call( static fn() => \wp_sanitize_ascii_email( '', $case['input'], null ) );
+					$ok              = ! $parse['threw']
+						&& ! $is_email['threw']
+						&& ! $sanitized['threw']
+						&& ! $direct_is['threw']
+						&& ! $direct_sanitize['threw']
+						&& null === $parse['value']
+						&& false === $is_email['value']
+						&& '' === $sanitized['value']
+						&& false === $direct_is['value']
+						&& '' === $direct_sanitize['value'];
+
+					if ( ! $ok ) {
+						$failures[] = array(
+							'mode'           => $mode,
+							'label'          => $case['label'],
+							'input'          => self::describe_string( $case['input'] ),
+							'parse'          => self::describe_call( $parse ),
+							'isEmail'        => self::describe_call( $is_email ),
+							'sanitizeEmail'  => self::describe_call( $sanitized ),
+							'directIs'       => self::describe_call( $direct_is ),
+							'directSanitize' => self::describe_call( $direct_sanitize ),
+						);
+					}
+
+					$observed[] = array(
+						'mode'     => $mode,
+						'label'    => $case['label'],
+						'input'    => self::describe_string( $case['input'] ),
+						'rejected' => $ok,
+					);
+				}
+			}
+		} finally {
+			self::restore_hook_globals( $snapshot );
+		}
+
+		return array(
+			$ctx->result(
+				'email.rfc-quoted-escaped-localparts.rejected',
+				array() === $failures,
+				array(
+					'caseCount' => count( $cases ),
+					'observed'  => $observed,
+					'failures'  => $failures,
+				)
+			),
+		);
+	}
+
+	private static function check_control_character_boundaries( \ComponentFuzz\FuzzContext $ctx ): array {
+		$cases = array(
+			array( 'label' => 'nul-local', 'input' => "bad\0local@example.com", 'expectedSanitized' => '' ),
+			array( 'label' => 'tab-local', 'input' => "bad\tlocal@example.com", 'expectedSanitized' => '' ),
+			array( 'label' => 'lf-local', 'input' => "bad\nlocal@example.com", 'expectedSanitized' => '' ),
+			array( 'label' => 'cr-local', 'input' => "bad\rlocal@example.com", 'expectedSanitized' => '' ),
+			array( 'label' => 'del-local', 'input' => "bad\x7Flocal@example.com", 'expectedSanitized' => '' ),
+			array( 'label' => 'nul-domain', 'input' => "user@example\0.com", 'expectedSanitized' => '' ),
+			array( 'label' => 'tab-domain', 'input' => "user@example\t.com", 'expectedSanitized' => 'user@example.com' ),
+			array( 'label' => 'lf-domain', 'input' => "user@example\n.com", 'expectedSanitized' => 'user@example.com' ),
+			array( 'label' => 'cr-domain', 'input' => "user@example\r.com", 'expectedSanitized' => 'user@example.com' ),
+			array( 'label' => 'del-domain', 'input' => "user@example\x7F.com", 'expectedSanitized' => '' ),
+			array( 'label' => 'control-before-at', 'input' => "user\x01@example.com", 'expectedSanitized' => '' ),
+			array( 'label' => 'control-after-at', 'input' => "user@\x01example.com", 'expectedSanitized' => '' ),
+			array( 'label' => 'line-separator-local', 'input' => "line\u{2028}sep@example.com", 'expectedSanitized' => '' ),
+			array( 'label' => 'paragraph-separator-domain', 'input' => "user@example\u{2029}.com", 'expectedSanitized' => 'user@example.com' ),
+		);
+		$failures = array();
+		$observed = array();
+		$snapshot = self::snapshot_hook_globals();
+
+		try {
+			foreach ( array( 'unicode', 'ascii' ) as $mode ) {
+				self::install_email_filters( $mode );
+
+				foreach ( $cases as $case ) {
+					$valid_utf8      = self::call( static fn() => \wp_is_valid_utf8( $case['input'] ) );
+					$parse           = self::call( static fn() => \WP_Email_Address::from_string( $case['input'], $mode ) );
+					$is_email        = self::call( static fn() => \is_email( $case['input'] ) );
+					$sanitized       = self::call( static fn() => \sanitize_email( $case['input'] ) );
+					$direct_is       = 'unicode' === $mode
+						? self::call( static fn() => \wp_is_unicode_email( false, $case['input'], null ) )
+						: self::call( static fn() => \wp_is_ascii_email( false, $case['input'], null ) );
+					$direct_sanitize = 'unicode' === $mode
+						? self::call( static fn() => \wp_sanitize_unicode_email( '', $case['input'], null ) )
+						: self::call( static fn() => \wp_sanitize_ascii_email( '', $case['input'], null ) );
+					$sanitized_value = is_string( $sanitized['value'] ?? null ) ? $sanitized['value'] : '';
+					$expected_sanitized = $case['expectedSanitized'];
+					$sanitized_parse = '' === $sanitized_value
+						? array( 'threw' => false, 'value' => null )
+						: self::call( static fn() => \WP_Email_Address::from_string( $sanitized_value, $mode ) );
+					$sanitized_is = '' === $sanitized_value
+						? array( 'threw' => false, 'value' => false )
+						: self::call( static fn() => \is_email( $sanitized_value ) );
+					$ok              = ! $valid_utf8['threw']
+						&& ! $parse['threw']
+						&& ! $is_email['threw']
+						&& ! $sanitized['threw']
+						&& ! $direct_is['threw']
+						&& ! $direct_sanitize['threw']
+						&& ! $sanitized_parse['threw']
+						&& ! $sanitized_is['threw']
+						&& null === $parse['value']
+						&& false === $is_email['value']
+						&& false === $direct_is['value']
+						&& $expected_sanitized === $sanitized_value
+						&& '' === $direct_sanitize['value']
+						&& 1 !== preg_match( '/[\x00-\x1F\x7F]/', $sanitized_value )
+						&& \wp_is_valid_utf8( $sanitized_value )
+						&& (
+							'' === $expected_sanitized
+								? null === $sanitized_parse['value'] && false === $sanitized_is['value']
+								: $sanitized_parse['value'] instanceof \WP_Email_Address && $expected_sanitized === $sanitized_is['value']
+						);
+
+					if ( ! $ok ) {
+						$failures[] = array(
+							'mode'           => $mode,
+							'label'          => $case['label'],
+							'input'          => self::describe_string( $case['input'] ),
+							'expectedSanitized' => self::describe_string( $expected_sanitized ),
+							'validUtf8'      => self::describe_call( $valid_utf8 ),
+							'parse'          => self::describe_call( $parse ),
+							'isEmail'        => self::describe_call( $is_email ),
+							'sanitizeEmail'  => self::describe_call( $sanitized ),
+							'directIs'       => self::describe_call( $direct_is ),
+							'directSanitize' => self::describe_call( $direct_sanitize ),
+							'sanitizedParse' => self::describe_call( $sanitized_parse ),
+							'sanitizedIs'    => self::describe_call( $sanitized_is ),
+						);
+					}
+
+					$observed[] = array(
+						'mode'      => $mode,
+						'label'     => $case['label'],
+						'input'     => self::describe_string( $case['input'] ),
+						'validUtf8' => ! $valid_utf8['threw'] ? $valid_utf8['value'] : null,
+						'sanitized' => self::describe_string( $sanitized_value ),
+						'rejected'  => $ok,
+					);
+				}
+			}
+		} finally {
+			self::restore_hook_globals( $snapshot );
+		}
+
+		return array(
+			$ctx->result(
+				'email.control-characters.rejected-in-all-segments',
+				array() === $failures,
+				array(
+					'caseCount' => count( $cases ),
+					'observed'  => $observed,
+					'failures'  => $failures,
+				)
+			),
+		);
+	}
+
+	private static function check_localpart_identity_preservation( \ComponentFuzz\FuzzContext $ctx ): array {
+		$groups = array(
+			array(
+				'label'  => 'case-sensitive-ascii-local',
+				'locals' => array( 'user', 'User', 'USER' ),
+			),
+			array(
+				'label'  => 'width-sensitive-latin-local',
+				'locals' => array( 'user', "\u{FF55}ser" ),
+			),
+			array(
+				'label'  => 'width-sensitive-katakana-local',
+				'locals' => array( "\u{30A2}\u{30A4}", "\u{FF71}\u{FF72}" ),
+			),
+			array(
+				'label'  => 'compatibility-ligature-local',
+				'locals' => array( 'ffi', "\u{FB03}" ),
+			),
+			array(
+				'label'  => 'normalization-sensitive-latin-local',
+				'locals' => array( "jos\u{00E9}", "jose\u{0301}" ),
+			),
+		);
+		$failures = array();
+		$observed = array();
+		$snapshot = self::snapshot_hook_globals();
+
+		try {
+			self::install_email_filters( 'unicode' );
+
+			foreach ( $groups as $group ) {
+				$addresses = self::addresses_for_localparts( $group['locals'], 'example.com' );
+				$views     = array();
+
+				foreach ( $addresses as $index => $address ) {
+					$parse        = self::capture_warnings( static fn() => \WP_Email_Address::from_string( $address, 'unicode' ) );
+					$is_email     = self::capture_warnings( static fn() => \is_email( $address ) );
+					$sanitized    = self::capture_warnings( static fn() => \sanitize_email( $address ) );
+					$ascii_parse  = self::capture_warnings( static fn() => \WP_Email_Address::from_string( $address, 'ascii' ) );
+					$email        = $parse['value'] ?? null;
+					$local        = $group['locals'][ $index ];
+					$ascii_email  = $ascii_parse['value'] ?? null;
+					$ascii_valid  = self::is_ascii( $local );
+					$expected_raw = $local . '@example.com';
+					$ok           = ! $parse['threw']
+						&& ! $is_email['threw']
+						&& ! $sanitized['threw']
+						&& ! $ascii_parse['threw']
+						&& array() === $parse['warnings']
+						&& array() === $is_email['warnings']
+						&& array() === $sanitized['warnings']
+						&& array() === $ascii_parse['warnings']
+						&& $email instanceof \WP_Email_Address
+						&& $local === $email->get_localpart()
+						&& $expected_raw === $email->get_unicode_address()
+						&& $expected_raw === $email->get_ascii_address()
+						&& $expected_raw === $is_email['value']
+						&& $expected_raw === $sanitized['value']
+						&& (
+							$ascii_valid
+								? $ascii_email instanceof \WP_Email_Address && $expected_raw === $ascii_email->get_unicode_address()
+								: null === $ascii_email
+						);
+
+					if ( ! $ok ) {
+						$failures[] = array(
+							'group'         => $group['label'],
+							'local'         => self::describe_string( $local ),
+							'address'       => self::describe_string( $address ),
+							'parse'         => self::describe_captured_call( $parse ),
+							'isEmail'       => self::describe_captured_call( $is_email ),
+							'sanitizeEmail' => self::describe_captured_call( $sanitized ),
+							'asciiParse'    => self::describe_captured_call( $ascii_parse ),
+						);
+					}
+
+					$views[] = array(
+						'local'        => self::describe_string( $local ),
+						'address'      => self::describe_string( $address ),
+						'asciiValid'   => $ascii_valid,
+						'unicodeValid' => $email instanceof \WP_Email_Address,
+					);
+				}
+
+				if (
+					count( array_unique( $group['locals'], SORT_REGULAR ) ) !== count( $group['locals'] ) ||
+					count( array_unique( $addresses, SORT_REGULAR ) ) !== count( $addresses )
+				) {
+					$failures[] = array(
+						'group'     => $group['label'],
+						'failure'   => 'locals-or-addresses-collapsed-before-validation',
+						'locals'    => array_map( array( self::class, 'describe_string' ), $group['locals'] ),
+						'addresses' => array_map( array( self::class, 'describe_string' ), $addresses ),
+					);
+				}
+
+				$observed[] = array(
+					'label' => $group['label'],
+					'views' => $views,
+				);
+			}
+		} finally {
+			self::restore_hook_globals( $snapshot );
+		}
+
+		return array(
+			$ctx->result(
+				'email.localpart-identity.case-width-normalization-preserved',
+				array() === $failures,
+				array(
+					'groupCount' => count( $groups ),
+					'observed'   => $observed,
+					'failures'   => $failures,
 				)
 			),
 		);
@@ -6848,6 +7189,93 @@ final class EmailSurface {
 		}
 
 		return $snapshot;
+	}
+
+	private static function snapshot_tracked_hook_state(): array {
+		$state = array();
+
+		foreach ( self::TRACKED_HOOKS as $hook ) {
+			$state[ $hook ] = array(
+				'hasFilter'    => isset( $GLOBALS['wp_filter'][ $hook ] ),
+				'callbacks'    => self::hook_callbacks_fingerprint( $GLOBALS['wp_filter'][ $hook ] ?? null ),
+				'actionCount'  => $GLOBALS['wp_actions'][ $hook ] ?? null,
+				'filterCount'  => $GLOBALS['wp_filters'][ $hook ] ?? null,
+				'currentDepth' => isset( $GLOBALS['wp_current_filter'] ) && is_array( $GLOBALS['wp_current_filter'] )
+					? count( array_keys( $GLOBALS['wp_current_filter'], $hook, true ) )
+					: 0,
+			);
+		}
+
+		return $state;
+	}
+
+	private static function hook_callbacks_fingerprint( $hook ): array {
+		if ( null === $hook ) {
+			return array();
+		}
+
+		if ( is_object( $hook ) && property_exists( $hook, 'callbacks' ) && is_array( $hook->callbacks ) ) {
+			$callbacks = $hook->callbacks;
+		} elseif ( is_array( $hook ) ) {
+			$callbacks = $hook;
+		} else {
+			return array(
+				array(
+					'type' => is_object( $hook ) ? get_class( $hook ) : gettype( $hook ),
+				),
+			);
+		}
+
+		ksort( $callbacks );
+		$fingerprint = array();
+		foreach ( $callbacks as $priority => $entries ) {
+			if ( ! is_array( $entries ) ) {
+				$fingerprint[] = array(
+					'priority' => (string) $priority,
+					'entries'  => self::describe_value( $entries ),
+				);
+				continue;
+			}
+
+			ksort( $entries );
+			foreach ( $entries as $id => $entry ) {
+				$fingerprint[] = array(
+					'priority'     => (string) $priority,
+					'id'           => (string) $id,
+					'callback'     => self::callback_fingerprint( is_array( $entry ) && array_key_exists( 'function', $entry ) ? $entry['function'] : $entry ),
+					'acceptedArgs' => is_array( $entry ) && array_key_exists( 'accepted_args', $entry ) ? (int) $entry['accepted_args'] : null,
+				);
+			}
+		}
+
+		return $fingerprint;
+	}
+
+	private static function callback_fingerprint( $callback ): array {
+		if ( is_string( $callback ) ) {
+			return array( 'type' => 'function', 'name' => $callback );
+		}
+
+		if ( $callback instanceof \Closure ) {
+			return array( 'type' => 'closure', 'id' => spl_object_id( $callback ) );
+		}
+
+		if ( is_array( $callback ) && 2 === count( $callback ) ) {
+			$target = $callback[0];
+			return array(
+				'type'   => 'method',
+				'target' => is_object( $target )
+					? array( 'class' => get_class( $target ), 'id' => spl_object_id( $target ) )
+					: (string) $target,
+				'method' => (string) $callback[1],
+			);
+		}
+
+		if ( is_object( $callback ) ) {
+			return array( 'type' => 'invokable', 'class' => get_class( $callback ), 'id' => spl_object_id( $callback ) );
+		}
+
+		return array( 'type' => gettype( $callback ), 'value' => self::describe_value( $callback ) );
 	}
 
 	private static function restore_hook_globals( array $snapshot ): void {
