@@ -329,8 +329,10 @@ database, network requests, or a configured site.
 - `kses`: KSES policies, wrapper agreement, protocol filtering/helper contracts,
   filter-aware safe CSS, attribute/entity/comment handling, deterministic
   attribute constraint matrices for required, values, max/min, valueless, and
-  callback checks, full-tag attribute parsing, no-HTML filtering, custom context
-  locality, strict/custom policy monotonicity, and filter/global restoration.
+  callback checks, PDF object policy and upload-host/port URL gates, dynamic URI
+  attribute filtering, full-tag attribute parsing, no-HTML filtering, custom
+  context locality, strict/custom policy monotonicity, and filter/global
+  restoration.
 - `l10n`: translation fallbacks, escaped translation helpers, plural/nooped
   selection, textdomain load/unload state, translation path guards, locale and
   user-locale switching including generated stack/action payload matrices,
