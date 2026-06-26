@@ -487,10 +487,10 @@
 				</tr>
 				<tr>
 					<td><code>admin-ajax</code></td>
-					<td><span class="status good">review follow-up passed</span></td>
-					<td>Main worktree; heartbeat nonce-branch follow-up through <code>7d314bc82f</code></td>
-					<td>Main focused run: 900 passed, 0 skipped, 0 failed; latest broad run: 8489 passed, 66 skipped, 0 failed.</td>
-					<td>Captured <code>wp_die()</code> handlers, JSON/XML response helpers, nonce/capability failures, safe AJAX handlers, heartbeat nonce/hook/server-time branches, compression-test capability/body branches, superglobal and output-buffer restoration.</td>
+					<td><span class="status good">review fixes passed</span></td>
+					<td>Main worktree; worker Ohm and reviewer Plato findings fixed through <code>259d6bd90e</code></td>
+					<td>Main focused runs: seeds 1 and 224 each 1000 passed, 0 skipped, 0 failed; latest smoke: 4521 passed, 33 skipped, 0 failed.</td>
+					<td>Captured <code>wp_die()</code> handlers, JSON/XML response helpers, nonce/capability failures, safe AJAX handlers, attachment query/save workflows, heartbeat nonce/hook/server-time branches, compression-test capability/body branches, superglobal and output-buffer restoration.</td>
 				</tr>
 				<tr>
 					<td><code>feed-rendering</code></td>
@@ -1677,6 +1677,12 @@
 					<td><code>state</code></td>
 					<td>1800 passed, 0 skipped, 0 failed after cache-addition suspension coverage for <code>wp_cache_add()</code>, <code>wp_cache_add_multiple()</code>, and <code>wp_cache_set()</code>.</td>
 					<td>8491 passed, 66 skipped, 0 failed at 2 iterations after state cache suspension fuzzing.</td>
+				</tr>
+				<tr>
+					<td><code>259d6bd90e</code></td>
+					<td><code>admin-ajax</code>, wpdb query stub</td>
+					<td>1000 passed, 0 skipped, 0 failed at seeds 1 and 224 after direct <code>wp_ajax_query_attachments()</code> MIME/search/order/paging oracles, filename-search hook restoration, query capability denial, <code>wp_ajax_save_attachment()</code> title/caption/description/alt mutation oracles, invalid nonce and capability denial, synthetic fixture cleanup, and narrow post MIME LIKE stub support.</td>
+					<td>4521 passed, 33 skipped, 0 failed at 1 iteration after admin-ajax attachment workflow review fixes.</td>
 				</tr>
 				<tr>
 					<td><code>7d314bc82f</code></td>

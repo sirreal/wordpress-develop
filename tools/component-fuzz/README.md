@@ -23,8 +23,9 @@ database, network requests, or a configured site.
 - `admin-ajax`: bounded admin-AJAX response helper coverage, including
   captured `wp_die()` handlers, JSON response helpers, `WP_Ajax_Response`
   XML boundaries, nonce/capability failures, Heartbeat nonce hook branches,
-  selected safe AJAX handlers, compression-test capability/body branches, and
-  superglobal/output-buffer restoration.
+  selected safe AJAX handlers, attachment query/save workflows,
+  compression-test capability/body branches, and superglobal/output-buffer
+  restoration.
 - `admin-bar`: no-DB toolbar node lifecycle, default root/submenu binding,
   group/container behavior, render escaping/raw HTML contracts, and
   back-compat parent alias and tabindex rendering contracts, initialization
@@ -634,11 +635,14 @@ Admin Workflows surface intentionally avoids `admin.php`/`admin-ajax.php` reques
 dispatch, DB-backed core `WP_*_List_Table` subclasses, and `wp_ajax_*` wrappers
 or JSON helpers that call `wp_die()`/`die()` in-process; it covers the base list
 table API with synthetic items and referer helpers only where valid nonces or
-`stop=false` avoid exits. The `admin-list-tables` surface complements that base
-coverage by loading concrete `WP_*_List_Table` subclasses with synthetic rows,
-object-cache fixtures, temporary plugin/theme/network-theme metadata, exact
-row-action nonce checks, and `posts_pre_query`, `comments_pre_query`,
-`terms_pre_query`, `users_pre_query`, and
+`stop=false` avoid exits. The `admin-ajax` surface calls selected `wp_ajax_*`
+handlers directly with captured `wp_die()` termination; attachment workflows use
+synthetic attachment rows, bounded capability grants, and narrow post MIME LIKE
+support in the in-memory `wpdb` stub. The `admin-list-tables` surface complements
+that base coverage by loading concrete `WP_*_List_Table` subclasses with
+synthetic rows, object-cache fixtures, temporary plugin/theme/network-theme
+metadata, exact row-action nonce checks, and `posts_pre_query`,
+`comments_pre_query`, `terms_pre_query`, `users_pre_query`, and
 `sites_pre_query` short-circuits. It intentionally skips full admin dispatch,
 privacy request tables, install/update tables, destructive plugin/theme
 operations, real uploads, and true multisite write paths; network site/user
