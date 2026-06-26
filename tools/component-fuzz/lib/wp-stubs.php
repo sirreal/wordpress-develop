@@ -1062,7 +1062,7 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 			}
 
 			$patterns = array();
-			if ( preg_match_all( '/(?<![A-Za-z0-9_])(?:`?wp_posts`?\.)?`?(post_title|post_excerpt|post_content)`?(?![A-Za-z0-9_])\s+(NOT\s+LIKE|LIKE)\s+(\'(?:\\\\.|[^\'\\\\])*\'|"[^"]*")/i', $where, $matches, PREG_SET_ORDER ) ) {
+			if ( preg_match_all( '/(?<![A-Za-z0-9_])(?:`?wp_posts`?\.)?`?(post_title|post_excerpt|post_content|post_mime_type)`?(?![A-Za-z0-9_])\s+(NOT\s+LIKE|LIKE)\s+(\'(?:\\\\.|[^\'\\\\])*\'|"[^"]*")/i', $where, $matches, PREG_SET_ORDER ) ) {
 				foreach ( $matches as $match ) {
 					$key = strtoupper( preg_replace( '/\s+/', ' ', $match[2] ) ) . "\0" . $this->component_fuzz_unquote_sql_value( $match[3] );
 					if ( ! isset( $patterns[ $key ] ) ) {

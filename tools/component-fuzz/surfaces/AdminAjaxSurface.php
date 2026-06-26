@@ -35,6 +35,7 @@ final class AdminAjaxSurface {
 			$rows[] = self::check_nonce_and_capability_failures( $ctx->fork( 'nonce-cap' ) );
 			$rows[] = self::check_heartbeat_nonce_branches( $ctx->fork( 'heartbeat-nonce-branches' ) );
 			$rows[] = self::check_selected_safe_ajax_handlers( $ctx->fork( 'safe-handlers' ) );
+			$rows[] = self::check_attachment_ajax_workflows( $ctx->fork( 'attachment-workflows' ) );
 			$rows[] = self::check_compression_test_handler( $ctx->fork( 'compression-test' ) );
 			$rows[] = self::check_malformed_request_globals_restore( $ctx->fork( 'request-restore' ) );
 		} catch ( \Throwable $e ) {
@@ -1043,6 +1044,485 @@ final class AdminAjaxSurface {
 		);
 	}
 
+	private static function check_attachment_ajax_workflows( \ComponentFuzz\FuzzContext $ctx ): array {
+		$required = array(
+			'WP_Query',
+			'WP_Rewrite',
+			'check_ajax_referer',
+			'create_initial_post_types',
+			'current_user_can',
+			'get_post',
+			'get_post_meta',
+			'get_post_type_object',
+			'wp_ajax_query_attachments',
+			'wp_ajax_save_attachment',
+			'wp_create_nonce',
+			'wp_insert_post',
+			'wp_prepare_attachment_for_js',
+			'wp_send_json_error',
+			'wp_send_json_success',
+			'wp_set_current_user',
+			'wp_slash',
+			'wp_strip_all_tags',
+			'wp_unslash',
+			'update_post_meta',
+		);
+		$missing  = array();
+
+		foreach ( $required as $symbol ) {
+			if ( str_starts_with( $symbol, 'WP_' ) ) {
+				if ( ! class_exists( $symbol ) ) {
+					$missing[] = "class {$symbol}";
+				}
+				continue;
+			}
+
+			if ( ! function_exists( $symbol ) ) {
+				$missing[] = "function {$symbol}";
+			}
+		}
+
+		if ( array() !== $missing ) {
+			return self::row(
+				$ctx,
+				'admin-ajax.attachments.query-save-workflows',
+				true,
+				array( 'missing' => $missing ),
+				'skipped'
+			);
+		}
+
+		$failures        = array();
+		$local           = self::snapshot_superglobals();
+		$user_snapshot   = self::snapshot_globals( array( 'current_user', 'userdata', 'user_ID' ) );
+		$registry_snapshot = self::snapshot_globals( array( '_wp_post_type_features', 'post_type_meta_caps', 'wp_post_statuses', 'wp_post_types', 'wp_rewrite' ) );
+		$start_level     = ob_get_level();
+		$fixtures        = array();
+		$case            = self::attachment_ajax_case( $ctx );
+		$query_cases     = array();
+		$db_before_seed  = self::db_content_counts();
+		$db_after_seed   = null;
+		$db_after_delete = null;
+		$slug_filter     = static function ( $override_slug, string $slug ): string {
+			unset( $override_slug );
+			return $slug;
+		};
+
+		\add_filter( 'pre_wp_unique_post_slug', $slug_filter, 10, 6 );
+		try {
+			if ( ! \get_post_type_object( 'attachment' ) ) {
+				\create_initial_post_types();
+			}
+			if ( ! isset( $GLOBALS['wp_rewrite'] ) || ! $GLOBALS['wp_rewrite'] instanceof \WP_Rewrite ) {
+				$GLOBALS['wp_rewrite'] = new \WP_Rewrite();
+			}
+
+			\wp_set_current_user( 0 );
+			$fixtures      = self::seed_attachment_ajax_fixtures( $case );
+			$db_after_seed = self::db_content_counts();
+
+			$query_grant = self::cap_grant_filter( array( 'upload_files' ) );
+			\add_filter( 'user_has_cap', $query_grant, 10, 4 );
+			try {
+				$mimetype_query = array(
+					'order'          => 'DESC',
+					'orderby'        => 'date',
+					'paged'          => 2,
+					'post_mime_type' => 'image',
+					'posts_per_page' => 2,
+				);
+				self::set_request_globals(
+					array(),
+					array(
+						'action' => 'query-attachments',
+						'query'  => $mimetype_query,
+					)
+				);
+				$mimetype_capture = self::capture_terminating_call(
+					static function (): void {
+						\wp_ajax_query_attachments();
+					},
+					true
+				);
+				$mimetype_decoded = json_decode( self::terminal_body( $mimetype_capture ), true );
+				$mimetype_ids     = self::decoded_attachment_ids( $mimetype_decoded );
+				$mimetype_shape   = self::decoded_attachment_shape_ok( $mimetype_decoded );
+				$expected_mimetype_ids = array(
+					$fixtures['titleSearch'],
+					$fixtures['imageNew'],
+				);
+				$mimetype_ok      = is_array( $mimetype_decoded )
+					&& true === ( $mimetype_decoded['success'] ?? null )
+					&& $expected_mimetype_ids === $mimetype_ids
+					&& $mimetype_shape
+					&& self::decoded_attachment_field( $mimetype_decoded, 0, 'mime' ) === 'image/jpeg'
+					&& self::decoded_attachment_field( $mimetype_decoded, 1, 'mime' ) === 'image/png'
+					&& self::decoded_attachment_field( $mimetype_decoded, 0, 'filename' ) === basename( $case['files']['titleSearch'] )
+					&& ! in_array( $fixtures['pdf'], $mimetype_ids, true )
+					&& ! in_array( $fixtures['filenameSearch'], $mimetype_ids, true )
+					&& ! in_array( $fixtures['nonAttachment'], $mimetype_ids, true )
+					&& ! in_array( $fixtures['privateImage'], $mimetype_ids, true )
+					&& $mimetype_capture['captured']
+					&& $mimetype_capture['bufferBalanced']
+					&& $mimetype_capture['filtersRestored'];
+
+				self::collect_failure(
+					$failures,
+					$mimetype_ok,
+					'wp_ajax_query_attachments() applies MIME filtering plus date-desc paging and excludes mismatched/private/non-attachment rows',
+					array(
+						'capture'     => $mimetype_capture,
+						'decoded'     => $mimetype_decoded,
+						'expectedIds' => $expected_mimetype_ids,
+						'actualIds'   => $mimetype_ids,
+					)
+				);
+				$query_cases[] = array(
+					'name' => 'mime-date-paged',
+					'ids'  => $mimetype_ids,
+				);
+
+				$filename_hook_snapshot = self::snapshot_hook( 'wp_allow_query_attachment_by_filename' );
+				$sentinel_filter        = static function (): bool {
+					return false;
+				};
+				\add_filter( 'wp_allow_query_attachment_by_filename', $sentinel_filter, 9, 1 );
+				$search_query           = array(
+					'order'          => 'DESC',
+					'orderby'        => 'ID',
+					'posts_per_page' => 5,
+					's'              => $case['searchToken'],
+				);
+				try {
+					self::set_request_globals(
+						array(),
+						array(
+							'action' => 'query-attachments',
+							'query'  => $search_query,
+						)
+					);
+					$search_capture = self::capture_terminating_call(
+						static function (): void {
+							\wp_ajax_query_attachments();
+						},
+						true
+					);
+				} finally {
+					self::restore_hook( 'wp_allow_query_attachment_by_filename', $filename_hook_snapshot );
+				}
+				$search_decoded = json_decode( self::terminal_body( $search_capture ), true );
+				$search_ids     = self::decoded_attachment_ids( $search_decoded );
+				$expected_search_ids = array(
+					$fixtures['filenameSearch'],
+					$fixtures['titleSearch'],
+				);
+				$search_ok      = is_array( $search_decoded )
+					&& true === ( $search_decoded['success'] ?? null )
+					&& $expected_search_ids === $search_ids
+					&& self::decoded_attachment_shape_ok( $search_decoded )
+					&& self::decoded_attachment_field( $search_decoded, 0, 'filename' ) === basename( $case['files']['filenameSearch'] )
+					&& false === \has_filter( 'wp_allow_query_attachment_by_filename', '__return_true' )
+					&& self::hook_matches( 'wp_allow_query_attachment_by_filename', $filename_hook_snapshot )
+					&& $search_capture['captured']
+					&& $search_capture['bufferBalanced']
+					&& $search_capture['filtersRestored'];
+
+				self::collect_failure(
+					$failures,
+					$search_ok,
+					'wp_ajax_query_attachments() searches title/content and attached filenames while removing the filename-search filter',
+					array(
+						'capture'     => $search_capture,
+						'decoded'     => $search_decoded,
+						'expectedIds' => $expected_search_ids,
+						'actualIds'   => $search_ids,
+						'hasFilenameFilter' => \has_filter( 'wp_allow_query_attachment_by_filename', '__return_true' ),
+						'hookRestored' => self::hook_matches( 'wp_allow_query_attachment_by_filename', $filename_hook_snapshot ),
+					)
+				);
+				$query_cases[] = array(
+					'name' => 'search-title-filename',
+					'ids'  => $search_ids,
+				);
+			} finally {
+				\remove_filter( 'user_has_cap', $query_grant, 10 );
+			}
+
+			self::set_request_globals(
+				array(),
+				array(
+					'action' => 'query-attachments',
+					'query'  => array(
+						'post_mime_type' => 'image',
+						'posts_per_page' => 3,
+						's'              => $case['searchToken'],
+					),
+				)
+			);
+			$query_denied_capture = self::capture_terminating_call(
+				static function (): void {
+					\wp_ajax_query_attachments();
+				},
+				true
+			);
+			$query_denied_decoded = json_decode( self::terminal_body( $query_denied_capture ), true );
+			self::collect_failure(
+				$failures,
+				is_array( $query_denied_decoded )
+					&& false === ( $query_denied_decoded['success'] ?? null )
+					&& ! array_key_exists( 'data', $query_denied_decoded )
+					&& $query_denied_capture['captured']
+					&& $query_denied_capture['bufferBalanced']
+					&& $query_denied_capture['filtersRestored']
+					&& $db_after_seed === self::db_content_counts(),
+				'wp_ajax_query_attachments() capability denial returns stable JSON error before mutating attachment fixtures',
+				array(
+					'capture'  => $query_denied_capture,
+					'decoded'  => $query_denied_decoded,
+					'dbBefore' => $db_after_seed,
+					'dbAfter'  => self::db_content_counts(),
+				)
+			);
+
+			$target_before = \get_post( $fixtures['saveTarget'], ARRAY_A );
+			$other_before  = \get_post( $fixtures['otherAttachment'], ARRAY_A );
+			$other_alt_before = \get_post_meta( $fixtures['otherAttachment'], '_wp_attachment_image_alt', true );
+			$target_unrelated_before = \get_post_meta( $fixtures['saveTarget'], '_cfz_unrelated_attachment_meta', true );
+			$save_nonce    = \wp_create_nonce( 'update-post_' . $fixtures['saveTarget'] );
+			$save_changes  = array(
+				'alt'         => $case['saveAlt'],
+				'caption'     => $case['saveCaption'],
+				'description' => $case['saveDescription'],
+				'title'       => $case['saveTitle'],
+			);
+			$save_grant    = self::cap_grant_filter( array( 'edit_post' ) );
+			\add_filter( 'user_has_cap', $save_grant, 10, 4 );
+			try {
+				self::set_request_globals(
+					array(),
+					array(
+						'action'  => 'save-attachment',
+						'changes' => \wp_slash( $save_changes ),
+						'id'      => (string) $fixtures['saveTarget'],
+						'nonce'   => $save_nonce,
+					)
+				);
+				$save_capture = self::capture_terminating_call(
+					static function (): void {
+						\wp_ajax_save_attachment();
+					},
+					true
+				);
+			} finally {
+				\remove_filter( 'user_has_cap', $save_grant, 10 );
+			}
+
+			$save_decoded       = json_decode( self::terminal_body( $save_capture ), true );
+			$target_after       = \get_post( $fixtures['saveTarget'], ARRAY_A );
+			$other_after        = \get_post( $fixtures['otherAttachment'], ARRAY_A );
+			$target_alt_after   = \get_post_meta( $fixtures['saveTarget'], '_wp_attachment_image_alt', true );
+			$other_alt_after    = \get_post_meta( $fixtures['otherAttachment'], '_wp_attachment_image_alt', true );
+			$target_unrelated_after = \get_post_meta( $fixtures['saveTarget'], '_cfz_unrelated_attachment_meta', true );
+			$expected_alt       = \wp_strip_all_tags( \wp_unslash( $save_changes['alt'] ), true );
+			$save_ok            = is_array( $save_decoded )
+				&& true === ( $save_decoded['success'] ?? null )
+				&& ! array_key_exists( 'data', $save_decoded )
+				&& is_array( $target_before )
+				&& is_array( $target_after )
+				&& \wp_unslash( $save_changes['title'] ) === (string) ( $target_after['post_title'] ?? '' )
+				&& \wp_unslash( $save_changes['caption'] ) === (string) ( $target_after['post_excerpt'] ?? '' )
+				&& \wp_unslash( $save_changes['description'] ) === (string) ( $target_after['post_content'] ?? '' )
+				&& $expected_alt === $target_alt_after
+				&& (string) ( $target_before['post_mime_type'] ?? '' ) === (string) ( $target_after['post_mime_type'] ?? '' )
+				&& (int) ( $target_before['post_parent'] ?? -1 ) === (int) ( $target_after['post_parent'] ?? -2 )
+				&& $target_unrelated_before === $target_unrelated_after
+				&& $other_before === $other_after
+				&& $other_alt_before === $other_alt_after
+				&& $save_capture['captured']
+				&& $save_capture['bufferBalanced']
+				&& $save_capture['filtersRestored']
+				&& false === \has_filter( 'user_has_cap', $save_grant );
+
+			self::collect_failure(
+				$failures,
+				$save_ok,
+				'wp_ajax_save_attachment() updates only targeted title/caption/description/alt fields with expected slashing and alt stripping',
+				array(
+					'capture'       => $save_capture,
+					'decoded'       => $save_decoded,
+					'targetBefore'  => self::summarize_post_row( $target_before ),
+					'targetAfter'   => self::summarize_post_row( $target_after ),
+					'expectedAlt'   => $expected_alt,
+					'actualAlt'     => $target_alt_after,
+					'otherChanged'  => $other_before != $other_after,
+				)
+			);
+
+			$after_success_post = \get_post( $fixtures['saveTarget'], ARRAY_A );
+			$after_success_alt  = \get_post_meta( $fixtures['saveTarget'], '_wp_attachment_image_alt', true );
+			$nonce_events       = array();
+			$nonce_action       = static function ( $action, $result ) use ( &$nonce_events ): void {
+				$nonce_events[] = array(
+					'action' => $action,
+					'result' => $result,
+				);
+			};
+			$nonce_grant        = self::cap_grant_filter( array( 'edit_post' ) );
+			\add_action( 'check_ajax_referer', $nonce_action, 10, 2 );
+			\add_filter( 'user_has_cap', $nonce_grant, 10, 4 );
+			try {
+				self::set_request_globals(
+					array(),
+					array(
+						'action'  => 'save-attachment',
+						'changes' => \wp_slash(
+							array(
+								'alt'   => 'blocked alt ' . $case['token'],
+								'title' => 'Blocked title ' . $case['token'],
+							)
+						),
+						'id'      => (string) $fixtures['saveTarget'],
+						'nonce'   => 'bad-' . $case['token'],
+					)
+				);
+				$save_bad_nonce_capture = self::capture_terminating_call(
+					static function (): void {
+						\wp_ajax_save_attachment();
+					},
+					true
+				);
+			} finally {
+				\remove_filter( 'user_has_cap', $nonce_grant, 10 );
+				\remove_action( 'check_ajax_referer', $nonce_action, 10 );
+			}
+
+			$bad_nonce_die = $save_bad_nonce_capture['dieCalls'][0] ?? array();
+			self::collect_failure(
+				$failures,
+				$save_bad_nonce_capture['captured']
+					&& '-1' === self::terminal_body( $save_bad_nonce_capture )
+					&& 403 === ( $bad_nonce_die['processed']['args']['response'] ?? null )
+					&& array( 'update-post_' . $fixtures['saveTarget'] ) === array_column( $nonce_events, 'action' )
+					&& array( false ) === array_column( $nonce_events, 'result' )
+					&& $after_success_post === \get_post( $fixtures['saveTarget'], ARRAY_A )
+					&& $after_success_alt === \get_post_meta( $fixtures['saveTarget'], '_wp_attachment_image_alt', true )
+					&& false === \has_action( 'check_ajax_referer', $nonce_action )
+					&& false === \has_filter( 'user_has_cap', $nonce_grant )
+					&& $save_bad_nonce_capture['bufferBalanced']
+					&& $save_bad_nonce_capture['filtersRestored'],
+				'wp_ajax_save_attachment() invalid nonce dies with -1/403 before post or meta mutation',
+				array(
+					'capture'     => $save_bad_nonce_capture,
+					'nonceEvents' => $nonce_events,
+				)
+			);
+
+			$valid_nonce_for_cap_denial = \wp_create_nonce( 'update-post_' . $fixtures['saveTarget'] );
+			self::set_request_globals(
+				array(),
+				array(
+					'action'  => 'save-attachment',
+					'changes' => \wp_slash(
+						array(
+							'alt'         => 'denied alt ' . $case['token'],
+							'description' => 'Denied description ' . $case['token'],
+							'title'       => 'Denied title ' . $case['token'],
+						)
+					),
+					'id'      => (string) $fixtures['saveTarget'],
+					'nonce'   => $valid_nonce_for_cap_denial,
+				)
+			);
+			$save_cap_denied_capture = self::capture_terminating_call(
+				static function (): void {
+					\wp_ajax_save_attachment();
+				},
+				true
+			);
+			$save_cap_denied_decoded = json_decode( self::terminal_body( $save_cap_denied_capture ), true );
+			self::collect_failure(
+				$failures,
+				is_array( $save_cap_denied_decoded )
+					&& false === ( $save_cap_denied_decoded['success'] ?? null )
+					&& ! array_key_exists( 'data', $save_cap_denied_decoded )
+					&& $after_success_post === \get_post( $fixtures['saveTarget'], ARRAY_A )
+					&& $after_success_alt === \get_post_meta( $fixtures['saveTarget'], '_wp_attachment_image_alt', true )
+					&& $save_cap_denied_capture['captured']
+					&& $save_cap_denied_capture['bufferBalanced']
+					&& $save_cap_denied_capture['filtersRestored'],
+				'wp_ajax_save_attachment() capability denial returns JSON error before post or meta mutation',
+				array(
+					'capture' => $save_cap_denied_capture,
+					'decoded' => $save_cap_denied_decoded,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$db_after_seed === self::db_content_counts(),
+				'attachment Ajax workflow cases keep fixture row counts bounded',
+				array(
+					'dbAfterSeed' => $db_after_seed,
+					'dbAfterCases' => self::db_content_counts(),
+				)
+			);
+		} finally {
+			self::restore_superglobals( $local );
+			self::restore_globals( $user_snapshot );
+			\remove_filter( 'pre_wp_unique_post_slug', $slug_filter, 10 );
+			self::delete_attachment_ajax_fixtures( $fixtures );
+			self::restore_globals( $registry_snapshot );
+			$db_after_delete = self::db_content_counts();
+		}
+
+		self::collect_failure(
+			$failures,
+			self::superglobals_match( $local )
+				&& self::globals_match( $user_snapshot )
+				&& self::globals_match( $registry_snapshot )
+				&& $start_level === ob_get_level()
+				&& false === \has_filter( 'pre_wp_unique_post_slug', $slug_filter )
+				&& $db_before_seed === $db_after_delete
+				&& self::attachment_ajax_fixtures_deleted( $fixtures ),
+			'attachment Ajax workflows restore request/user globals, output buffers, and seeded fixture rows',
+			array(
+				'dbBeforeSeed'  => $db_before_seed,
+				'dbAfterDelete' => $db_after_delete,
+				'registryRestored' => self::globals_match( $registry_snapshot ),
+				'slugFilter'    => \has_filter( 'pre_wp_unique_post_slug', $slug_filter ),
+				'fixturesDeleted' => self::attachment_ajax_fixtures_deleted( $fixtures ),
+				'startLevel'    => $start_level,
+				'endLevel'      => ob_get_level(),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'admin-ajax.attachments.query-save-workflows',
+			array() === $failures,
+			array(
+				'queryCases' => $query_cases,
+				'fixtures'   => array_intersect_key(
+					$fixtures,
+					array_fill_keys(
+						array(
+							'imageOld',
+							'imageNew',
+							'pdf',
+							'titleSearch',
+							'filenameSearch',
+							'saveTarget',
+							'otherAttachment',
+							'nonAttachment',
+						),
+						true
+					)
+				),
+				'failures'  => array_slice( $failures, 0, 10 ),
+			)
+		);
+	}
+
 	private static function check_compression_test_handler( \ComponentFuzz\FuzzContext $ctx ): array {
 		if ( ! function_exists( 'wp_ajax_wp_compression_test' ) ) {
 			return self::row(
@@ -1514,6 +1994,405 @@ final class AdminAjaxSurface {
 		}
 
 		return $name;
+	}
+
+	private static function attachment_ajax_case( \ComponentFuzz\FuzzContext $ctx ): array {
+		$token        = self::slug( $ctx->fork( 'token' ), 'attachment' );
+		$search_token = 'cfzsearch' . self::safe_label( $ctx->fork( 'search-token' ) );
+		$text_suffix  = self::safe_label( $ctx->fork( 'text-suffix' ) );
+
+		return array(
+			'files'           => array(
+				'filenameSearch' => "2026/06/{$search_token}-filename-match-{$token}.txt",
+				'imageNew'       => "2026/06/{$token}-new-image.jpg",
+				'imageOld'       => "2026/06/{$token}-old-image.jpg",
+				'otherAttachment' => "2026/06/{$token}-other-image.jpg",
+				'pdf'            => "2026/06/{$token}-document.pdf",
+				'privateImage'   => "2026/06/{$token}-private-image.jpg",
+				'saveTarget'     => "2026/06/{$token}-save-target.jpg",
+				'titleSearch'    => "2026/06/{$token}-title-match.jpg",
+			),
+			'saveAlt'         => "Alt {$text_suffix} <em>strip me</em> & \"quoted\"\nsecond line",
+			'saveCaption'     => "Caption {$text_suffix} <strong>kept</strong> & \"quoted\"\nsecond line",
+			'saveDescription' => "Description {$text_suffix} <p>body</p> & \"quoted\"\nsecond line",
+			'saveTitle'       => "Title {$text_suffix} <b>bold</b> & \"quoted\"",
+			'searchToken'     => $search_token,
+			'token'           => $token,
+		);
+	}
+
+	private static function seed_attachment_ajax_fixtures( array $case ): array {
+		$post_ids = array();
+		$base_url = 'http://example.test/wp-content/uploads/';
+		$token    = $case['token'];
+
+		$parent = self::insert_attachment_ajax_post(
+			array(
+				'post_content' => 'Attachment parent content ' . $token,
+				'post_name'    => 'cfz-attachment-parent-' . $token,
+				'post_status'  => 'publish',
+				'post_title'   => 'Attachment Parent ' . $token,
+				'post_type'    => 'post',
+			)
+		);
+		$post_ids[] = $parent;
+
+		$non_attachment = self::insert_attachment_ajax_post(
+			array(
+				'post_content' => 'Not an attachment but contains ' . $case['searchToken'],
+				'post_name'    => 'cfz-not-attachment-' . $token,
+				'post_status'  => 'publish',
+				'post_title'   => 'Not Attachment ' . $case['searchToken'],
+				'post_type'    => 'post',
+			)
+		);
+		$post_ids[] = $non_attachment;
+
+		$image_old = self::insert_attachment_ajax_post(
+			array(
+				'guid'           => $base_url . $case['files']['imageOld'],
+				'post_date'      => '2026-06-01 10:00:00',
+				'post_date_gmt'  => '2026-06-01 08:00:00',
+				'post_mime_type' => 'image/jpeg',
+				'post_name'      => 'cfz-old-image-' . $token,
+				'post_parent'    => $parent,
+				'post_status'    => 'inherit',
+				'post_title'     => 'Old Image ' . $token,
+				'post_type'      => 'attachment',
+			)
+		);
+		$post_ids[] = $image_old;
+		\update_post_meta( $image_old, '_wp_attached_file', $case['files']['imageOld'] );
+		\update_post_meta( $image_old, '_wp_attachment_image_alt', 'Old image alt ' . $token );
+
+		$image_new = self::insert_attachment_ajax_post(
+			array(
+				'guid'           => $base_url . $case['files']['imageNew'],
+				'post_date'      => '2026-06-02 10:00:00',
+				'post_date_gmt'  => '2026-06-02 08:00:00',
+				'post_mime_type' => 'image/png',
+				'post_name'      => 'cfz-new-image-' . $token,
+				'post_parent'    => $parent,
+				'post_status'    => 'inherit',
+				'post_title'     => 'New Image ' . $token,
+				'post_type'      => 'attachment',
+			)
+		);
+		$post_ids[] = $image_new;
+		\update_post_meta( $image_new, '_wp_attached_file', $case['files']['imageNew'] );
+		\update_post_meta( $image_new, '_wp_attachment_image_alt', 'New image alt ' . $token );
+
+		$private_image = self::insert_attachment_ajax_post(
+			array(
+				'guid'           => $base_url . $case['files']['privateImage'],
+				'post_date'      => '2026-06-03 10:00:00',
+				'post_date_gmt'  => '2026-06-03 08:00:00',
+				'post_mime_type' => 'image/jpeg',
+				'post_name'      => 'cfz-private-image-' . $token,
+				'post_parent'    => $parent,
+				'post_status'    => 'private',
+				'post_title'     => 'Private Image ' . $token,
+				'post_type'      => 'attachment',
+			)
+		);
+		$post_ids[] = $private_image;
+		\update_post_meta( $private_image, '_wp_attached_file', $case['files']['privateImage'] );
+
+		$pdf = self::insert_attachment_ajax_post(
+			array(
+				'guid'           => $base_url . $case['files']['pdf'],
+				'post_date'      => '2026-06-04 10:00:00',
+				'post_date_gmt'  => '2026-06-04 08:00:00',
+				'post_mime_type' => 'application/pdf',
+				'post_name'      => 'cfz-pdf-' . $token,
+				'post_parent'    => $parent,
+				'post_status'    => 'inherit',
+				'post_title'     => 'PDF Document ' . $token,
+				'post_type'      => 'attachment',
+			)
+		);
+		$post_ids[] = $pdf;
+		\update_post_meta( $pdf, '_wp_attached_file', $case['files']['pdf'] );
+
+		$title_search = self::insert_attachment_ajax_post(
+			array(
+				'guid'           => $base_url . $case['files']['titleSearch'],
+				'post_content'   => 'Title-search attachment body ' . $token,
+				'post_date'      => '2026-06-05 10:00:00',
+				'post_date_gmt'  => '2026-06-05 08:00:00',
+				'post_mime_type' => 'image/jpeg',
+				'post_name'      => 'cfz-title-search-' . $token,
+				'post_parent'    => $parent,
+				'post_status'    => 'inherit',
+				'post_title'     => 'Title Match ' . $case['searchToken'],
+				'post_type'      => 'attachment',
+			)
+		);
+		$post_ids[] = $title_search;
+		\update_post_meta( $title_search, '_wp_attached_file', $case['files']['titleSearch'] );
+
+		$filename_search = self::insert_attachment_ajax_post(
+			array(
+				'guid'           => $base_url . $case['files']['filenameSearch'],
+				'post_content'   => 'Filename-search body without the generated token',
+				'post_date'      => '2026-06-06 10:00:00',
+				'post_date_gmt'  => '2026-06-06 08:00:00',
+				'post_mime_type' => 'text/plain',
+				'post_name'      => 'cfz-filename-search-' . $token,
+				'post_parent'    => $parent,
+				'post_status'    => 'inherit',
+				'post_title'     => 'Filename Match ' . $token,
+				'post_type'      => 'attachment',
+			)
+		);
+		$post_ids[] = $filename_search;
+		\update_post_meta( $filename_search, '_wp_attached_file', $case['files']['filenameSearch'] );
+
+		$save_target = self::insert_attachment_ajax_post(
+			array(
+				'guid'           => $base_url . $case['files']['saveTarget'],
+				'post_content'   => 'Original save target description ' . $token,
+				'post_date'      => '2026-06-07 10:00:00',
+				'post_date_gmt'  => '2026-06-07 08:00:00',
+				'post_excerpt'   => 'Original save target caption ' . $token,
+				'post_mime_type' => 'image/jpeg',
+				'post_name'      => 'cfz-save-target-' . $token,
+				'post_parent'    => $parent,
+				'post_status'    => 'inherit',
+				'post_title'     => 'Original Save Target ' . $token,
+				'post_type'      => 'attachment',
+			)
+		);
+		$post_ids[] = $save_target;
+		\update_post_meta( $save_target, '_wp_attached_file', $case['files']['saveTarget'] );
+		\update_post_meta( $save_target, '_wp_attachment_image_alt', 'Original target alt ' . $token );
+		\update_post_meta( $save_target, '_cfz_unrelated_attachment_meta', 'target-unrelated-' . $token );
+
+		$other_attachment = self::insert_attachment_ajax_post(
+			array(
+				'guid'           => $base_url . $case['files']['otherAttachment'],
+				'post_content'   => 'Other attachment description ' . $token,
+				'post_date'      => '2026-06-08 10:00:00',
+				'post_date_gmt'  => '2026-06-08 08:00:00',
+				'post_excerpt'   => 'Other attachment caption ' . $token,
+				'post_mime_type' => 'image/jpeg',
+				'post_name'      => 'cfz-other-attachment-' . $token,
+				'post_parent'    => $parent,
+				'post_status'    => 'inherit',
+				'post_title'     => 'Other Attachment ' . $token,
+				'post_type'      => 'attachment',
+			)
+		);
+		$post_ids[] = $other_attachment;
+		\update_post_meta( $other_attachment, '_wp_attached_file', $case['files']['otherAttachment'] );
+		\update_post_meta( $other_attachment, '_wp_attachment_image_alt', 'Other attachment alt ' . $token );
+
+		self::flush_runtime_cache();
+
+		return array(
+			'filenameSearch' => $filename_search,
+			'imageNew'       => $image_new,
+			'imageOld'       => $image_old,
+			'nonAttachment'  => $non_attachment,
+			'otherAttachment' => $other_attachment,
+			'parent'         => $parent,
+			'pdf'            => $pdf,
+			'postIds'        => $post_ids,
+			'privateImage'   => $private_image,
+			'saveTarget'     => $save_target,
+			'titleSearch'    => $title_search,
+		);
+	}
+
+	private static function insert_attachment_ajax_post( array $postarr ): int {
+		$post_id = \wp_insert_post( \wp_slash( $postarr ), true, false );
+		if ( \is_wp_error( $post_id ) ) {
+			throw new \RuntimeException( 'Could not seed admin-ajax attachment fixture: ' . $post_id->get_error_code() );
+		}
+
+		if ( ! is_int( $post_id ) || $post_id <= 0 ) {
+			throw new \RuntimeException( 'Could not seed admin-ajax attachment fixture.' );
+		}
+
+		return $post_id;
+	}
+
+	private static function cap_grant_filter( array $allowed_requested_caps ): callable {
+		$allowed_requested_caps = array_values( array_map( 'strval', $allowed_requested_caps ) );
+
+		return static function ( array $allcaps, array $caps, array $args = array(), $user = null ) use ( $allowed_requested_caps ): array {
+			unset( $user );
+
+			$requested = (string) ( $args[0] ?? '' );
+			$allowed   = in_array( $requested, $allowed_requested_caps, true );
+			foreach ( $caps as $cap ) {
+				if ( in_array( (string) $cap, $allowed_requested_caps, true ) ) {
+					$allowed = true;
+					break;
+				}
+			}
+
+			if ( $allowed ) {
+				foreach ( $caps as $cap ) {
+					if ( 'do_not_allow' !== (string) $cap ) {
+						$allcaps[ (string) $cap ] = true;
+					}
+				}
+			}
+
+			foreach ( $allowed_requested_caps as $cap ) {
+				if ( ! in_array( $cap, array( 'delete_post', 'edit_post', 'read_post' ), true ) ) {
+					$allcaps[ $cap ] = true;
+				}
+			}
+
+			return $allcaps;
+		};
+	}
+
+	private static function decoded_attachment_ids( $decoded ): array {
+		if ( ! is_array( $decoded ) || ! is_array( $decoded['data'] ?? null ) ) {
+			return array();
+		}
+
+		$ids = array();
+		foreach ( $decoded['data'] as $row ) {
+			if ( is_array( $row ) && array_key_exists( 'id', $row ) ) {
+				$ids[] = (int) $row['id'];
+			}
+		}
+
+		return $ids;
+	}
+
+	private static function decoded_attachment_shape_ok( $decoded ): bool {
+		if ( ! is_array( $decoded ) || ! is_array( $decoded['data'] ?? null ) || array() === $decoded['data'] ) {
+			return false;
+		}
+
+		foreach ( $decoded['data'] as $row ) {
+			if ( ! is_array( $row ) ) {
+				return false;
+			}
+
+			foreach ( array( 'id', 'title', 'filename', 'url', 'alt', 'mime', 'type', 'subtype', 'status', 'uploadedTo', 'nonces' ) as $key ) {
+				if ( ! array_key_exists( $key, $row ) ) {
+					return false;
+				}
+			}
+
+			if (
+				! is_int( $row['id'] )
+				|| ! is_string( $row['title'] )
+				|| ! is_string( $row['filename'] )
+				|| ! is_string( $row['mime'] )
+				|| ! is_string( $row['type'] )
+				|| ! is_string( $row['subtype'] )
+				|| ! is_array( $row['nonces'] )
+			) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function decoded_attachment_field( $decoded, int $index, string $field ) {
+		return is_array( $decoded )
+			&& is_array( $decoded['data'] ?? null )
+			&& is_array( $decoded['data'][ $index ] ?? null )
+			&& array_key_exists( $field, $decoded['data'][ $index ] )
+				? $decoded['data'][ $index ][ $field ]
+				: null;
+	}
+
+	private static function summarize_post_row( $post ): ?array {
+		if ( ! is_array( $post ) ) {
+			return null;
+		}
+
+		return array_intersect_key(
+			$post,
+			array_fill_keys(
+				array(
+					'ID',
+					'post_content',
+					'post_excerpt',
+					'post_mime_type',
+					'post_parent',
+					'post_status',
+					'post_title',
+					'post_type',
+				),
+				true
+			)
+		);
+	}
+
+	private static function delete_attachment_ajax_fixtures( array $fixtures ): void {
+		if ( empty( $fixtures['postIds'] ) || ! isset( $GLOBALS['wpdb'] ) || ! is_object( $GLOBALS['wpdb'] ) ) {
+			self::flush_runtime_cache();
+			return;
+		}
+
+		$wpdb = $GLOBALS['wpdb'];
+		foreach ( array_reverse( array_map( 'intval', $fixtures['postIds'] ) ) as $post_id ) {
+			if ( method_exists( $wpdb, 'delete' ) ) {
+				$wpdb->delete( $wpdb->postmeta, array( 'post_id' => $post_id ) );
+				$wpdb->delete( $wpdb->posts, array( 'ID' => $post_id ) );
+			}
+
+			if ( function_exists( 'clean_post_cache' ) ) {
+				\clean_post_cache( $post_id );
+			}
+		}
+
+		self::flush_runtime_cache();
+	}
+
+	private static function attachment_ajax_fixtures_deleted( array $fixtures ): bool {
+		if ( empty( $fixtures['postIds'] ) ) {
+			return true;
+		}
+
+		foreach ( array_map( 'intval', $fixtures['postIds'] ) as $post_id ) {
+			if ( null !== \get_post( $post_id ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function flush_runtime_cache(): void {
+		if ( function_exists( 'wp_cache_flush' ) ) {
+			\wp_cache_flush();
+		}
+	}
+
+	private static function snapshot_hook( string $hook_name ) {
+		global $wp_filter;
+
+		return isset( $wp_filter[ $hook_name ] ) ? self::clone_value( $wp_filter[ $hook_name ] ) : null;
+	}
+
+	private static function restore_hook( string $hook_name, $snapshot ): void {
+		global $wp_filter;
+
+		if ( null === $snapshot ) {
+			unset( $wp_filter[ $hook_name ] );
+			return;
+		}
+
+		$wp_filter[ $hook_name ] = self::clone_value( $snapshot );
+	}
+
+	private static function hook_matches( string $hook_name, $snapshot ): bool {
+		global $wp_filter;
+
+		$current = $wp_filter[ $hook_name ] ?? null;
+
+		return $current == $snapshot;
 	}
 
 	private static function cdata_safe( string $value ): string {
