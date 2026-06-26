@@ -1180,13 +1180,23 @@ final class ContentSurface {
 			return $required;
 		};
 
-		\add_filter( 'protected_title_format', $protected_filter, PHP_INT_MAX, 2 );
-		\add_filter( 'private_title_format', $private_filter, PHP_INT_MAX, 2 );
-		\add_filter( 'the_title', $title_filter, PHP_INT_MAX, 2 );
-		\add_filter( 'get_the_excerpt', $excerpt_filter, PHP_INT_MAX, 2 );
-		\add_filter( 'post_password_required', $password_filter, PHP_INT_MAX, 2 );
+		$probe_hooks   = array(
+			'protected_title_format',
+			'private_title_format',
+			'the_title',
+			'get_the_excerpt',
+			'post_password_required',
+		);
+		$hook_snapshot = self::snapshot_filter_hooks( $probe_hooks );
 
 		try {
+			self::clear_filter_hooks( $probe_hooks );
+			\add_filter( 'protected_title_format', $protected_filter, PHP_INT_MAX, 2 );
+			\add_filter( 'private_title_format', $private_filter, PHP_INT_MAX, 2 );
+			\add_filter( 'the_title', $title_filter, PHP_INT_MAX, 2 );
+			\add_filter( 'get_the_excerpt', $excerpt_filter, PHP_INT_MAX, 2 );
+			\add_filter( 'post_password_required', $password_filter, PHP_INT_MAX, 2 );
+
 			unset( $GLOBALS['current_screen'] );
 
 			foreach ( $cases as $case ) {
@@ -1194,7 +1204,8 @@ final class ContentSurface {
 				$has_password = '' !== (string) $post->post_password;
 
 				unset( $_COOKIE[ $cookie_name ] );
-				$no_cookie_required = self::call_guarded(
+				$before_password_events = self::event_count( $events, 'post_password_required' );
+				$no_cookie_required     = self::call_guarded(
 					static function () use ( $post ) {
 						return \post_password_required( $post );
 					}
@@ -1211,9 +1222,23 @@ final class ContentSurface {
 						'post' => self::describe_template_post( $post ),
 					)
 				);
+				self::assert_hook_delta(
+					$failures,
+					$events,
+					'post_password_required',
+					$before_password_events,
+					1,
+					'post-password-required-no-cookie-filter',
+					'post_password_required() did not run its filter exactly once for the no-cookie branch.',
+					array(
+						'required' => $has_password,
+						'postId'   => (int) $post->ID,
+					)
+				);
 
 				$_COOKIE[ $cookie_name ] = 'not-a-wordpress-postpass-' . $case['token'];
-				$bad_cookie_required     = self::call_guarded(
+				$before_password_events  = self::event_count( $events, 'post_password_required' );
+				$bad_cookie_required      = self::call_guarded(
 					static function () use ( $post ) {
 						return \post_password_required( $post );
 					}
@@ -1230,14 +1255,63 @@ final class ContentSurface {
 						'post' => self::describe_template_post( $post ),
 					)
 				);
+				self::assert_hook_delta(
+					$failures,
+					$events,
+					'post_password_required',
+					$before_password_events,
+					1,
+					'post-password-required-bad-cookie-filter',
+					'post_password_required() did not run its filter exactly once for the malformed-cookie branch.',
+					array(
+						'required' => $has_password,
+						'postId'   => (int) $post->ID,
+					)
+				);
 
 				if ( $has_password ) {
 					$hash = self::postpass_hash( (string) $post->post_password );
 					if ( null === $hash ) {
 						$hash_skipped = true;
 					} else {
+						$wrong_hash              = self::postpass_hash( (string) $post->post_password . '-wrong-' . $case['token'] );
+						$_COOKIE[ $cookie_name ] = $wrong_hash;
+						$before_password_events  = self::event_count( $events, 'post_password_required' );
+						$wrong_cookie_required   = self::call_guarded(
+							static function () use ( $post ) {
+								return \post_password_required( $post );
+							}
+						);
+						++$password_probes;
+						self::assert_guarded_value(
+							$failures,
+							'post-password-required-wrong-cookie',
+							'post_password_required() did not reject the generated phpass cookie for the wrong password.',
+							$wrong_cookie_required,
+							true,
+							array(
+								'case'       => $case['label'],
+								'post'       => self::describe_template_post( $post ),
+								'hashPrefix' => substr( $wrong_hash, 0, 4 ),
+							)
+						);
+						self::assert_hook_delta(
+							$failures,
+							$events,
+								'post_password_required',
+								$before_password_events,
+								1,
+								'post-password-required-wrong-cookie-filter',
+								'post_password_required() did not run its filter exactly once for the wrong phpass-cookie branch.',
+								array(
+									'required' => true,
+									'postId'   => (int) $post->ID,
+								)
+							);
+
 						$_COOKIE[ $cookie_name ] = $hash;
-						$good_cookie_required    = self::call_guarded(
+						$before_password_events  = self::event_count( $events, 'post_password_required' );
+						$good_cookie_required     = self::call_guarded(
 							static function () use ( $post ) {
 								return \post_password_required( $post );
 							}
@@ -1255,11 +1329,25 @@ final class ContentSurface {
 								'hashPrefix' => substr( $hash, 0, 4 ),
 							)
 						);
+						self::assert_hook_delta(
+							$failures,
+							$events,
+								'post_password_required',
+								$before_password_events,
+								1,
+								'post-password-required-good-cookie-filter',
+								'post_password_required() did not run its filter exactly once for the correct phpass-cookie branch.',
+								array(
+									'required' => false,
+									'postId'   => (int) $post->ID,
+								)
+							);
 					}
 				}
 
 				unset( $_COOKIE[ $cookie_name ] );
 				$before_excerpt_events = self::event_count( $events, 'get_the_excerpt' );
+				$before_password_events = self::event_count( $events, 'post_password_required' );
 				$excerpt_call          = self::call_guarded(
 					static function () use ( $post ) {
 						return \get_the_excerpt( $post );
@@ -1289,6 +1377,19 @@ final class ContentSurface {
 						'actual'   => $actual_excerpt_events,
 					);
 				}
+				self::assert_hook_delta(
+					$failures,
+					$events,
+						'post_password_required',
+						$before_password_events,
+						1,
+						'get-the-excerpt-password-filter',
+						'get_the_excerpt() did not run post_password_required() and its filter exactly once.',
+						array(
+							'required' => $has_password,
+							'postId'   => (int) $post->ID,
+						)
+					);
 
 				$has_excerpt_call = self::call_guarded(
 					static function () use ( $post ) {
@@ -1365,6 +1466,7 @@ final class ContentSurface {
 			\remove_filter( 'the_title', $title_filter, PHP_INT_MAX );
 			\remove_filter( 'get_the_excerpt', $excerpt_filter, PHP_INT_MAX );
 			\remove_filter( 'post_password_required', $password_filter, PHP_INT_MAX );
+			self::restore_filter_hooks( $hook_snapshot );
 
 			if ( $had_cookie ) {
 				$_COOKIE[ $cookie_name ] = $cookie_value;
@@ -1546,6 +1648,44 @@ final class ContentSurface {
 		return $hasher->HashPassword( $password );
 	}
 
+	private static function snapshot_filter_hooks( array $hooks ): array {
+		$snapshot = array();
+		foreach ( $hooks as $hook ) {
+			$exists             = isset( $GLOBALS['wp_filter'] )
+				&& is_array( $GLOBALS['wp_filter'] )
+				&& array_key_exists( $hook, $GLOBALS['wp_filter'] );
+			$snapshot[ $hook ] = array(
+				'exists' => $exists,
+				'value'  => $exists ? $GLOBALS['wp_filter'][ $hook ] : null,
+			);
+		}
+
+		return $snapshot;
+	}
+
+	private static function clear_filter_hooks( array $hooks ): void {
+		if ( ! isset( $GLOBALS['wp_filter'] ) || ! is_array( $GLOBALS['wp_filter'] ) ) {
+			return;
+		}
+
+		foreach ( $hooks as $hook ) {
+			unset( $GLOBALS['wp_filter'][ $hook ] );
+		}
+	}
+
+	private static function restore_filter_hooks( array $snapshot ): void {
+		foreach ( $snapshot as $hook => $entry ) {
+			if ( ! empty( $entry['exists'] ) ) {
+				if ( ! isset( $GLOBALS['wp_filter'] ) || ! is_array( $GLOBALS['wp_filter'] ) ) {
+					$GLOBALS['wp_filter'] = array();
+				}
+				$GLOBALS['wp_filter'][ $hook ] = $entry['value'];
+			} elseif ( isset( $GLOBALS['wp_filter'] ) && is_array( $GLOBALS['wp_filter'] ) ) {
+				unset( $GLOBALS['wp_filter'][ $hook ] );
+			}
+		}
+	}
+
 	private static function assert_guarded_value( array &$failures, string $name, string $message, array $call, $expected, array $context ): void {
 		if ( ! $call['ok'] ) {
 			$failures[] = self::call_failure( $name . '-throwable', $message, $call, $context );
@@ -1565,6 +1705,38 @@ final class ContentSurface {
 		}
 	}
 
+	private static function assert_hook_delta( array &$failures, array $events, string $hook, int $before_count, int $expected_count, string $name, string $message, array $expected_fields ): void {
+		$actual_events = self::events_since_count( $events, $hook, $before_count );
+		if ( $expected_count !== count( $actual_events ) ) {
+			$failures[] = array(
+				'name'     => $name . '-count-mismatch',
+				'message'  => $message,
+				'expected' => $expected_count,
+				'actual'   => count( $actual_events ),
+				'events'   => $actual_events,
+			);
+			return;
+		}
+
+		if ( 1 !== $expected_count ) {
+			return;
+		}
+
+		$event = $actual_events[0] ?? array();
+		foreach ( $expected_fields as $field => $expected ) {
+			if ( ! array_key_exists( $field, $event ) || $expected !== $event[ $field ] ) {
+				$failures[] = array(
+					'name'     => $name . '-payload-mismatch',
+					'message'  => $message,
+					'field'    => $field,
+					'expected' => self::describe_value( $expected ),
+					'actual'   => self::describe_value( $event[ $field ] ?? null ),
+					'event'    => $event,
+				);
+			}
+		}
+	}
+
 	private static function event_count( array $events, string $hook ): int {
 		$count = 0;
 		foreach ( $events as $event ) {
@@ -1574,6 +1746,22 @@ final class ContentSurface {
 		}
 
 		return $count;
+	}
+
+	private static function events_since_count( array $events, string $hook, int $before_count ): array {
+		$count = 0;
+		$since = array();
+		foreach ( $events as $event ) {
+			if ( $hook !== ( $event['hook'] ?? null ) ) {
+				continue;
+			}
+			++$count;
+			if ( $count > $before_count ) {
+				$since[] = $event;
+			}
+		}
+
+		return $since;
 	}
 
 	private static function non_empty_template_string( string $value, string $fallback ): string {
