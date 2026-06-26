@@ -80,6 +80,13 @@ final class RestSurface {
 				}
 			);
 			$checks[] = self::run_check(
+				'register-rest-route-wrapper',
+				'register_rest_route() trims, merges common args into handlers, merges non-overridden handlers, honors override replacement, and restores global REST registration state.',
+				function () use ( &$rng ) {
+					return self::check_register_rest_route_wrapper( $rng );
+				}
+			);
+			$checks[] = self::run_check(
 				'head-get-routing',
 				'HEAD falls back to a GET handler only when no HEAD handler is registered; explicit HEAD handlers take precedence when ordered first.',
 				function () use ( &$rng ) {
@@ -154,6 +161,7 @@ final class RestSurface {
 			'is_user_logged_in',
 			'is_wp_error',
 			'number_format_i18n',
+			'register_rest_route',
 			'rest_convert_error_to_response',
 			'rest_ensure_response',
 			'rest_get_server',
@@ -840,6 +848,236 @@ final class RestSurface {
 					'ok'       => $nonmatching_regex_ok,
 					'route'    => $nonmatching_regex_route,
 					'response' => self::response_summary( $nonmatching_regex_response ),
+				),
+			),
+		);
+	}
+
+	private static function check_register_rest_route_wrapper( array &$rng ): array {
+		$namespace = self::namespace_token( $rng );
+		$token     = self::slug_token( $rng, 'route' );
+		$id        = (string) self::rng_int( $rng, 100, 999 );
+		$route     = '/wrapper/(?P<id>[0-9]+)';
+		$full_route = '/' . $namespace . '/wrapper/(?P<id>[0-9]+)';
+		$path      = '/' . $namespace . '/wrapper/' . $id;
+		$server    = new \WP_REST_Server();
+		$get_hits  = 0;
+		$post_hits = 0;
+
+		$state = array(
+			'serverExists' => array_key_exists( 'wp_rest_server', $GLOBALS ),
+			'server'       => $GLOBALS['wp_rest_server'] ?? null,
+			'actionsExists' => array_key_exists( 'wp_actions', $GLOBALS ),
+			'actions'      => $GLOBALS['wp_actions'] ?? null,
+		);
+
+		try {
+			$GLOBALS['wp_rest_server'] = $server;
+			if ( ! isset( $GLOBALS['wp_actions'] ) || ! is_array( $GLOBALS['wp_actions'] ) ) {
+				$GLOBALS['wp_actions'] = array();
+			}
+			$GLOBALS['wp_actions']['rest_api_init'] = max( 1, (int) ( $GLOBALS['wp_actions']['rest_api_init'] ?? 0 ) );
+
+			$common_args = array(
+				'id'    => array(
+					'type' => 'integer',
+				),
+				'token' => array(
+					'type'    => 'string',
+					'default' => $token,
+					'pattern' => '^route-[a-z0-9]{6}$',
+				),
+			);
+
+			$registered_get = \register_rest_route(
+				$namespace,
+				$route,
+				array(
+					'args'   => $common_args,
+					'schema' => static function () use ( $namespace ): array {
+						return array( 'namespace' => $namespace );
+					},
+					array(
+						'methods'             => 'GET',
+						'permission_callback' => static function (): bool {
+							return true;
+						},
+						'callback'            => static function ( \WP_REST_Request $request ) use ( &$get_hits ): array {
+							++$get_hits;
+
+							return array(
+								'handler' => 'get',
+								'id'      => $request['id'],
+								'token'   => $request['token'],
+								'mode'    => $request['mode'],
+								'method'  => $request->get_method(),
+							);
+						},
+						'args'                => array(
+							'mode' => array(
+								'type'    => 'string',
+								'default' => 'view',
+								'enum'    => array( 'view', 'edit' ),
+							),
+						),
+					),
+				)
+			);
+
+			$registered_post = \register_rest_route(
+				$namespace,
+				$route,
+				array(
+					'args' => $common_args,
+					array(
+						'methods'             => array( 'POST' ),
+						'permission_callback' => static function (): bool {
+							return true;
+						},
+						'callback'            => static function ( \WP_REST_Request $request ) use ( &$post_hits ): array {
+							++$post_hits;
+
+							return array(
+								'handler' => 'post',
+								'id'      => $request['id'],
+								'token'   => $request['token'],
+								'payload' => $request['payload'],
+								'method'  => $request->get_method(),
+							);
+						},
+						'args'                => array(
+							'payload' => array(
+								'type'     => 'string',
+								'required' => true,
+							),
+						),
+					),
+				)
+			);
+
+			$routes_after_merge = $server->get_routes( $namespace );
+			$route_options      = $server->get_route_options( $full_route );
+			$merged_handlers    = $routes_after_merge[ $full_route ] ?? array();
+			$merged_summary     = self::route_handler_summary( $merged_handlers );
+
+			$get_request = new \WP_REST_Request( 'GET', $path );
+			$get_request->set_query_params( array( 'mode' => 'edit' ) );
+			$get_response = $server->dispatch( $get_request );
+			$get_data     = $get_response->get_data();
+
+			$post_request = new \WP_REST_Request( 'POST', $path );
+			$post_request->set_body_params( array( 'payload' => 'body-' . $token ) );
+			$post_response = $server->dispatch( $post_request );
+			$post_data     = $post_response->get_data();
+
+			$override_route = '/override-' . substr( $token, -3 );
+			$override_full  = '/' . $namespace . '/' . trim( $override_route, '/' );
+			$override_get   = \register_rest_route(
+				$namespace,
+				$override_route,
+				array(
+					array(
+						'methods'             => 'GET',
+						'permission_callback' => static function (): bool {
+							return true;
+						},
+						'callback'            => static function (): array {
+							return array( 'handler' => 'override-get' );
+						},
+					),
+				)
+			);
+			$override_post  = \register_rest_route(
+				$namespace,
+				$override_route,
+				array(
+					array(
+						'methods'             => 'POST',
+						'permission_callback' => static function (): bool {
+							return true;
+						},
+						'callback'            => static function (): array {
+							return array( 'handler' => 'override-post' );
+						},
+					),
+				),
+				true
+			);
+			$routes_after_override = $server->get_routes( $namespace );
+			$override_handlers     = $routes_after_override[ $override_full ] ?? array();
+			$override_summary      = self::route_handler_summary( $override_handlers );
+		} finally {
+			if ( $state['serverExists'] ) {
+				$GLOBALS['wp_rest_server'] = $state['server'];
+			} else {
+				unset( $GLOBALS['wp_rest_server'] );
+			}
+			if ( $state['actionsExists'] ) {
+				$GLOBALS['wp_actions'] = $state['actions'];
+			} else {
+				unset( $GLOBALS['wp_actions'] );
+			}
+		}
+
+		$state_restored = ( $state['serverExists']
+			? array_key_exists( 'wp_rest_server', $GLOBALS ) && $state['server'] === $GLOBALS['wp_rest_server']
+			: ! array_key_exists( 'wp_rest_server', $GLOBALS ) )
+			&& ( $state['actionsExists']
+				? array_key_exists( 'wp_actions', $GLOBALS ) && $state['actions'] === $GLOBALS['wp_actions']
+				: ! array_key_exists( 'wp_actions', $GLOBALS ) );
+
+		$merge_ok = true === $registered_get
+			&& true === $registered_post
+			&& array( 'GET', 'POST' ) === array_keys( $merged_summary )
+			&& isset( $merged_handlers[0]['args']['id'], $merged_handlers[0]['args']['token'], $merged_handlers[0]['args']['mode'] )
+			&& isset( $merged_handlers[1]['args']['id'], $merged_handlers[1]['args']['token'], $merged_handlers[1]['args']['payload'] )
+			&& is_array( $route_options )
+			&& isset( $route_options['schema'] );
+		$dispatch_ok = 200 === $get_response->get_status()
+			&& 200 === $post_response->get_status()
+			&& is_array( $get_data )
+			&& is_array( $post_data )
+			&& array(
+				'handler' => 'get',
+				'id'      => (int) $id,
+				'token'   => $token,
+				'mode'    => 'edit',
+				'method'  => 'GET',
+			) === $get_data
+			&& array(
+				'handler' => 'post',
+				'id'      => (int) $id,
+				'token'   => $token,
+				'payload' => 'body-' . $token,
+				'method'  => 'POST',
+			) === $post_data
+			&& 1 === $get_hits
+			&& 1 === $post_hits;
+		$override_ok = true === $override_get
+			&& true === $override_post
+			&& array( 'POST' ) === array_keys( $override_summary )
+			&& 1 === count( $override_handlers );
+		$ok = $merge_ok && $dispatch_ok && $override_ok && $state_restored;
+
+		return array(
+			'ok'       => $ok,
+			'message'  => $ok ? 'register_rest_route wrapper merge, override, dispatch, and global restoration semantics held.' : 'register_rest_route wrapper invariant failed.',
+			'features' => array( 'register-rest-route', 'route-merge', 'route-override', 'common-route-args', 'route-options', 'global-rest-server-restore' ),
+			'details'  => array(
+				'namespace'       => $namespace,
+				'route'           => $full_route,
+				'mergeOk'         => $merge_ok,
+				'dispatchOk'      => $dispatch_ok,
+				'overrideOk'      => $override_ok,
+				'stateRestored'   => $state_restored,
+				'mergedHandlers'  => $merged_summary,
+				'overrideHandlers' => $override_summary,
+				'routeOptions'    => array_keys( (array) $route_options ),
+				'getResponse'     => self::response_summary( $get_response ),
+				'postResponse'    => self::response_summary( $post_response ),
+				'hits'            => array(
+					'get'  => $get_hits,
+					'post' => $post_hits,
 				),
 			),
 		);
@@ -1587,6 +1825,25 @@ final class RestSurface {
 			$summary['matchedRoute'] = $response->get_matched_route();
 		}
 
+		return $summary;
+	}
+
+	private static function route_handler_summary( array $handlers ): array {
+		$summary = array();
+		foreach ( $handlers as $handler ) {
+			if ( ! is_array( $handler ) || ! isset( $handler['methods'] ) || ! is_array( $handler['methods'] ) ) {
+				continue;
+			}
+
+			foreach ( array_keys( $handler['methods'] ) as $method ) {
+				$summary[ $method ] = array(
+					'args'        => isset( $handler['args'] ) && is_array( $handler['args'] ) ? array_keys( $handler['args'] ) : array(),
+					'showInIndex' => $handler['show_in_index'] ?? null,
+				);
+			}
+		}
+
+		ksort( $summary );
 		return $summary;
 	}
 
