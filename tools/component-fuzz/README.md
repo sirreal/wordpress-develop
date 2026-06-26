@@ -483,9 +483,11 @@ database, network requests, or a configured site.
   deterministic global restoration.
 - `rest-controllers`: no-DB default REST endpoint controller coverage for
   registry-backed post types, post statuses, taxonomies, settings, block types,
-  block patterns, and block pattern categories, including context/_fields
-  filtering, registered additional-field get/update/schema callbacks,
-  collection params, permission gates, namespace-specific REST links, invalid
+  block patterns, block pattern categories, and REST search handlers, including
+  context/_fields filtering, registered additional-field get/update/schema
+  callbacks, collection params, permission gates, namespace-specific REST links,
+  route-dispatched defaults/schema validation, custom search handler
+  result/header/link propagation, post-format search term/link behavior, invalid
   values, and state restoration.
 - `rest-object-controllers`: in-memory wpdb-backed REST object controller
   coverage for posts, terms, comments, users, revisions, and attachments,
