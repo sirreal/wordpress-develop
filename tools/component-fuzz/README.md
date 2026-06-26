@@ -286,8 +286,8 @@ database, network requests, or a configured site.
 - `images`: image constraint and resize math, synthetic intermediate metadata,
   metadata dimension lookup, responsive `srcset`/`sizes` generation and filter
   boundaries, attachment image helpers and attribute filters, image tag
-  attribute insertion, loading optimization attributes, and image
-  filetype/extension helpers.
+  attribute insertion, content tag image/iframe filtering, auto-sizes helper
+  gates, loading optimization attributes, and image filetype/extension helpers.
 - `image-metadata`: local admin image metadata parser coverage over generated
   bounded JPEG/TIFF/PNG byte fixtures, including `wp_read_image_metadata()`
   malformed-file behavior, EXIF/IPTC field extraction and sanitization when PHP
