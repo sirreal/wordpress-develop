@@ -526,10 +526,11 @@ database, network requests, or a configured site.
   live database.
 - `rest-site-editor`: no-live-DB Site Editor REST controller coverage for
   global styles, template/template-part response shaping, template revisions
-  and autosaves, navigation fallback, direct block-template ZIP export
-  generation, and edit-site export guards, including route normalization,
-  schema/context behavior, permission and error contracts, custom CSS
-  validation, temp theme fixtures, archive cleanup, and state restoration.
+  and autosaves, bounded template item and lookup fallback route dispatch,
+  navigation fallback, direct block-template ZIP export generation, and
+  edit-site export guards, including route normalization, schema/context
+  behavior, permission and error contracts, custom CSS validation, temp theme
+  fixtures, archive cleanup, and state restoration.
 - `revisions-autosaves`: in-memory wpdb-backed revision and autosave API
   coverage, including protected revision field/filter contracts, autosave
   create/update/delete and post-lock behavior, autosave and revision predicates,
@@ -728,11 +729,14 @@ remote pattern and current-theme pattern loaders are short-circuited.
 The `rest-site-editor` surface creates a bounded temp theme under the harness
 `WP_CONTENT_DIR` and uses the in-memory `wpdb` stub for `wp_global_styles`,
 `wp_template`, `wp_template_part`, `revision`, and `wp_navigation` fixtures. It
-does not dispatch live REST requests, run broad template collection queries, or
-call `WP_REST_Edit_Site_Export_Controller::export()` because that path
-generates, streams, unlinks, and exits with a zip file. Export coverage uses
-the direct ZIP generator with bounded `pre_get_block_templates` fixtures while
-the live REST export method remains an explicit skip.
+dispatches only bounded template/template-part item routes and the lookup
+fallback route through `WP_REST_Server`; broad template collection queries and
+live export dispatch remain skipped because they can traverse unbounded
+theme/template CPT query paths or call
+`WP_REST_Edit_Site_Export_Controller::export()`, which generates, streams,
+unlinks, and exits with a zip file. Export coverage uses the direct ZIP
+generator with bounded `pre_get_block_templates` fixtures while the live REST
+export method remains an explicit skip.
 The `block-editor-adjuncts` surface keeps REST preloading on synthetic
 `rest_pre_dispatch` responses and keeps theme styles local to temp fixtures;
 it does not load editor screens, dispatch DB-backed REST controllers, fetch
