@@ -8,6 +8,7 @@ final class EmailSurface {
 	private const GENERATED_VIEW_CASES = 10;
 	private const GENERATED_DOMAIN_ALIAS_CASES = 8;
 	private const GENERATED_LOCALPART_ALIAS_CASES = 8;
+	private const GENERATED_LOCALPART_UPDATE_CASES = 5;
 	private const GENERATED_MAILTO_CONTEXT_CASES = 10;
 	private const GENERATED_UNICODE_MATRIX_CASES = 12;
 	private const GENERATED_MALFORMED_VARIANT_CASES = 12;
@@ -128,6 +129,7 @@ final class EmailSurface {
 			$rows = array_merge( $rows, self::check_rest_email_schema_filter_modes( $ctx ) );
 			$rows = array_merge( $rows, self::check_user_email_indexes_distinct_localparts( $ctx ) );
 			$rows = array_merge( $rows, self::check_user_email_indexes_generated_localpart_aliases( $ctx ) );
+			$rows = array_merge( $rows, self::check_user_email_updates_generated_localpart_aliases( $ctx ) );
 			$rows = array_merge( $rows, self::check_user_email_search_unicode_terms( $ctx ) );
 			$rows = array_merge( $rows, self::check_confusable_localpart_boundaries( $ctx ) );
 			$rows = array_merge( $rows, self::check_user_email_indexes_distinct_domains( $ctx ) );
@@ -3409,6 +3411,331 @@ final class EmailSurface {
 		return array(
 			$ctx->result(
 				'email.user-email-indexes.generated-localpart-aliases-clean',
+				array() === $failures,
+				array(
+					'caseCount' => count( $cases ),
+					'observed'  => $observed,
+					'failures'  => self::describe_value( $failures ),
+				)
+			),
+		);
+	}
+
+	private static function check_user_email_updates_generated_localpart_aliases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$result_name = 'email.user-email-updates.generated-localpart-aliases-clean';
+
+		if ( ! self::can_reset_stub_content() ) {
+			return array(
+				$ctx->skip(
+					$result_name,
+					'The in-memory wpdb content reset hook is unavailable.'
+				),
+			);
+		}
+
+		$missing = array();
+		foreach (
+			array(
+				'email_exists',
+				'get_user_by',
+				'is_email',
+				'sanitize_email',
+				'wp_insert_user',
+				'wp_mail',
+				'wp_update_user',
+			) as $function
+		) {
+			if ( ! function_exists( $function ) ) {
+				$missing[] = 'function ' . $function;
+			}
+		}
+
+		if ( array() !== $missing ) {
+			return array(
+				$ctx->skip(
+					$result_name,
+					'Required WordPress user update APIs are unavailable.',
+					array( 'missing' => implode( ', ', $missing ) )
+				),
+			);
+		}
+
+		$cases         = self::generated_localpart_update_alias_cases( $ctx->fork( 'user-email-localpart-update-aliases' ) );
+		$failures      = array();
+		$observed      = array();
+		$hook_snapshot = self::snapshot_hook_globals();
+		$mail_calls    = array();
+		$mail_filter   = static function ( $return, array $atts ) use ( &$mail_calls ) {
+			$mail_calls[] = $atts;
+			return true;
+		};
+
+		self::reset_stub_content();
+		try {
+			self::install_email_filters( 'unicode' );
+			\remove_all_filters( 'pre_user_email' );
+			\add_filter( 'pre_user_email', 'trim' );
+			\add_filter( 'pre_user_email', 'sanitize_email' );
+			if ( function_exists( 'wp_filter_kses' ) ) {
+				\add_filter( 'pre_user_email', 'wp_filter_kses' );
+			}
+			\remove_all_filters( 'pre_wp_mail' );
+			\add_filter( 'pre_wp_mail', $mail_filter, PHP_INT_MAX, 2 );
+
+			foreach ( $cases as $case_index => $case ) {
+				self::reset_stub_content();
+				$mail_calls          = array();
+				$canonical_addresses = array();
+				$address_oracles     = array();
+
+				foreach ( $case['addresses'] as $address ) {
+					$parse     = self::capture_warnings( static fn() => \WP_Email_Address::from_string( $address, 'unicode' ) );
+					$email     = $parse['value'] ?? null;
+					$canonical = $email instanceof \WP_Email_Address ? $email->get_unicode_address() : null;
+					$is_email  = self::capture_warnings( static fn() => \is_email( $address ) );
+					$sanitized = self::capture_warnings( static fn() => \sanitize_email( $address ) );
+					$oracle_ok = ! $parse['threw']
+						&& array() === $parse['warnings']
+						&& ! $is_email['threw']
+						&& array() === $is_email['warnings']
+						&& ! $sanitized['threw']
+						&& array() === $sanitized['warnings']
+						&& $email instanceof \WP_Email_Address
+						&& $canonical === $is_email['value']
+						&& $canonical === $sanitized['value'];
+
+					if ( ! $oracle_ok ) {
+						$failures[] = array(
+							'label'         => $case['label'],
+							'failure'       => 'address-oracle-mismatch',
+							'address'       => self::describe_string( $address ),
+							'parse'         => self::describe_captured_call( $parse ),
+							'isEmail'       => self::describe_captured_call( $is_email ),
+							'sanitizeEmail' => self::describe_captured_call( $sanitized ),
+						);
+					}
+
+					if ( is_string( $canonical ) ) {
+						$canonical_addresses[] = $canonical;
+					}
+
+					$address_oracles[] = array(
+						'input'     => self::describe_string( $address ),
+						'canonical' => is_string( $canonical ) ? self::describe_string( $canonical ) : null,
+						'ok'        => $oracle_ok,
+					);
+				}
+
+				if (
+					count( $canonical_addresses ) !== count( $case['addresses'] ) ||
+					count( array_unique( $canonical_addresses, SORT_REGULAR ) ) !== count( $case['addresses'] )
+				) {
+					$failures[] = array(
+						'label'      => $case['label'],
+						'failure'    => 'canonical-addresses-not-distinct',
+						'addresses'  => self::describe_value( $case['addresses'] ),
+						'canonical'  => self::describe_value( $canonical_addresses ),
+						'oracles'    => $address_oracles,
+					);
+					continue;
+				}
+
+				$primary_email = $canonical_addresses[0];
+				$holder_email  = 'cfz-update-holder-' . $ctx->iteration() . '-' . $case_index . '-' . substr( sha1( $primary_email ), 0, 10 ) . '@example.org';
+				$primary_login = 'cfz_update_primary_' . $ctx->iteration() . '_' . $case_index . '_' . substr( sha1( $primary_email ), 0, 8 );
+				$other_login   = 'cfz_update_other_' . $ctx->iteration() . '_' . $case_index . '_' . substr( sha1( $holder_email ), 0, 8 );
+
+				$primary_insert = self::capture_warnings(
+					static fn() => \wp_insert_user(
+						array(
+							'user_login' => $primary_login,
+							'user_pass'  => 'component-fuzz-pass',
+							'user_email' => $primary_email,
+							'role'       => 'subscriber',
+						)
+					)
+				);
+				$other_insert   = self::capture_warnings(
+					static fn() => \wp_insert_user(
+						array(
+							'user_login' => $other_login,
+							'user_pass'  => 'component-fuzz-pass',
+							'user_email' => $holder_email,
+							'role'       => 'subscriber',
+						)
+					)
+				);
+				$primary_id     = $primary_insert['value'] ?? null;
+				$other_id       = $other_insert['value'] ?? null;
+
+				if (
+					$primary_insert['threw'] ||
+					$other_insert['threw'] ||
+					array() !== $primary_insert['warnings'] ||
+					array() !== $other_insert['warnings'] ||
+					! is_int( $primary_id ) ||
+					! is_int( $other_id )
+				) {
+					$failures[] = array(
+						'label'         => $case['label'],
+						'failure'       => 'seed-users-not-inserted-cleanly',
+						'primaryEmail'  => self::describe_string( $primary_email ),
+						'holderEmail'   => self::describe_string( $holder_email ),
+						'primaryInsert' => self::describe_captured_call( $primary_insert ),
+						'otherInsert'   => self::describe_captured_call( $other_insert ),
+					);
+					continue;
+				}
+
+				$current_email = $holder_email;
+				$updates       = array();
+				foreach ( array_slice( $case['addresses'], 1, null, true ) as $address_index => $input_address ) {
+					$expected_email = $canonical_addresses[ $address_index ];
+					$mail_before    = count( $mail_calls );
+					$update         = self::capture_warnings(
+						static fn() => \wp_update_user(
+							array(
+								'ID'         => $other_id,
+								'user_email' => $input_address,
+							)
+						)
+					);
+					$stored         = self::capture_warnings( static fn() => \get_user_by( 'id', $other_id ) );
+					$by_new         = self::capture_warnings( static fn() => \get_user_by( 'email', $expected_email ) );
+					$exists_new     = self::capture_warnings( static fn() => \email_exists( $expected_email ) );
+					$by_old         = self::capture_warnings( static fn() => \get_user_by( 'email', $current_email ) );
+					$exists_old     = self::capture_warnings( static fn() => \email_exists( $current_email ) );
+					$primary_exists = self::capture_warnings( static fn() => \email_exists( $primary_email ) );
+					$mail_slice     = array_slice( $mail_calls, $mail_before );
+					$mail           = $mail_slice[0] ?? null;
+					$message        = is_array( $mail ) && is_string( $mail['message'] ?? null ) ? $mail['message'] : '';
+					$stored_user    = $stored['value'] ?? null;
+					$new_user       = $by_new['value'] ?? null;
+					$update_ok      = ! $update['threw']
+						&& array() === $update['warnings']
+						&& $update['value'] === $other_id
+						&& ! $stored['threw']
+						&& array() === $stored['warnings']
+						&& $stored_user instanceof \WP_User
+						&& $stored_user->ID === $other_id
+						&& $expected_email === $stored_user->user_email
+						&& ! $by_new['threw']
+						&& array() === $by_new['warnings']
+						&& $new_user instanceof \WP_User
+						&& $new_user->ID === $other_id
+						&& ! $exists_new['threw']
+						&& array() === $exists_new['warnings']
+						&& $exists_new['value'] === $other_id
+						&& ! $by_old['threw']
+						&& array() === $by_old['warnings']
+						&& false === $by_old['value']
+						&& ! $exists_old['threw']
+						&& array() === $exists_old['warnings']
+						&& false === $exists_old['value']
+						&& ! $primary_exists['threw']
+						&& array() === $primary_exists['warnings']
+						&& $primary_exists['value'] === $primary_id;
+					$mail_ok        = 1 === count( $mail_slice )
+						&& is_array( $mail )
+						&& $current_email === ( $mail['to'] ?? null )
+						&& is_string( $mail['subject'] ?? null )
+						&& '' !== ( $mail['subject'] ?? '' )
+						&& str_contains( $message, $current_email )
+						&& str_contains( $message, $expected_email );
+
+					if ( ! $update_ok || ! $mail_ok ) {
+						$failures[] = array(
+							'label'         => $case['label'],
+							'failure'       => 'update-alias-not-preserved-cleanly',
+							'input'         => self::describe_string( $input_address ),
+							'previousEmail' => self::describe_string( $current_email ),
+							'expectedEmail' => self::describe_string( $expected_email ),
+							'update'        => self::describe_captured_call( $update ),
+							'stored'        => self::describe_captured_call( $stored ),
+							'byNew'         => self::describe_captured_call( $by_new ),
+							'existsNew'     => self::describe_captured_call( $exists_new ),
+							'byOld'         => self::describe_captured_call( $by_old ),
+							'existsOld'     => self::describe_captured_call( $exists_old ),
+							'primaryExists' => self::describe_captured_call( $primary_exists ),
+							'mailCalls'     => self::describe_value( $mail_slice ),
+							'updateOk'      => $update_ok,
+							'mailOk'        => $mail_ok,
+						);
+					}
+
+					$updates[]     = array(
+						'input'         => self::describe_string( $input_address ),
+						'previousEmail' => self::describe_string( $current_email ),
+						'expectedEmail' => self::describe_string( $expected_email ),
+						'ok'            => $update_ok && $mail_ok,
+						'mailTo'        => is_array( $mail ) && is_string( $mail['to'] ?? null ) ? self::describe_string( $mail['to'] ) : null,
+					);
+					$current_email = $expected_email;
+				}
+
+				$mail_before      = count( $mail_calls );
+				$collision_update = self::capture_warnings(
+					static fn() => \wp_update_user(
+						array(
+							'ID'         => $other_id,
+							'user_email' => $case['addresses'][0],
+						)
+					)
+				);
+				$stored_after_collision = self::capture_warnings( static fn() => \get_user_by( 'id', $other_id ) );
+				$primary_lookup         = self::capture_warnings( static fn() => \email_exists( $primary_email ) );
+				$current_lookup         = self::capture_warnings( static fn() => \email_exists( $current_email ) );
+				$stored_after_user      = $stored_after_collision['value'] ?? null;
+				$collision_ok           = ! $collision_update['threw']
+					&& array() === $collision_update['warnings']
+					&& \is_wp_error( $collision_update['value'] ?? null )
+					&& 'existing_user_email' === $collision_update['value']->get_error_code()
+					&& ! $stored_after_collision['threw']
+					&& array() === $stored_after_collision['warnings']
+					&& $stored_after_user instanceof \WP_User
+					&& $stored_after_user->ID === $other_id
+					&& $current_email === $stored_after_user->user_email
+					&& ! $primary_lookup['threw']
+					&& array() === $primary_lookup['warnings']
+					&& $primary_lookup['value'] === $primary_id
+					&& ! $current_lookup['threw']
+					&& array() === $current_lookup['warnings']
+					&& $current_lookup['value'] === $other_id
+					&& $mail_before === count( $mail_calls );
+
+				if ( ! $collision_ok ) {
+					$failures[] = array(
+						'label'                 => $case['label'],
+						'failure'               => 'exact-collision-update-not-rejected-cleanly',
+						'primaryEmail'          => self::describe_string( $primary_email ),
+						'currentEmail'          => self::describe_string( $current_email ),
+						'collisionUpdate'       => self::describe_captured_call( $collision_update ),
+						'storedAfterCollision'  => self::describe_captured_call( $stored_after_collision ),
+						'primaryLookup'         => self::describe_captured_call( $primary_lookup ),
+						'currentLookup'         => self::describe_captured_call( $current_lookup ),
+						'mailCalls'             => self::describe_value( array_slice( $mail_calls, $mail_before ) ),
+					);
+				}
+
+				$observed[] = array(
+					'label'             => $case['label'],
+					'profile'           => $case['profile'],
+					'domain'            => self::describe_string( $case['domain'] ),
+					'addressCount'      => count( $case['addresses'] ),
+					'canonical'         => self::describe_value( $canonical_addresses ),
+					'updates'           => $updates,
+					'collisionRejected' => $collision_ok,
+					'mailCalls'         => count( $mail_calls ),
+				);
+			}
+		} finally {
+			self::restore_hook_globals( $hook_snapshot );
+			self::reset_stub_content();
+		}
+
+		return array(
+			$ctx->result(
+				$result_name,
 				array() === $failures,
 				array(
 					'caseCount' => count( $cases ),
@@ -7014,6 +7341,89 @@ final class EmailSurface {
 
 			$cases[] = array(
 				'label'     => 'generated-localpart-alias-' . $i . '-' . $profile['label'],
+				'profile'   => $profile['label'],
+				'domain'    => $domain,
+				'addresses' => self::addresses_for_localparts( $locals, $domain ),
+			);
+		}
+
+		return $cases;
+	}
+
+	private static function generated_localpart_update_alias_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$profiles = array(
+			array(
+				'label'  => 'latin-acute',
+				'locals' => array( 'joseupdate', "jos\u{00E9}update", "jose\u{0301}update" ),
+			),
+			array(
+				'label'  => 'latin-ring',
+				'locals' => array( 'angstromupdate', "\u{00E5}ngstromupdate", "a\u{030A}ngstromupdate" ),
+			),
+			array(
+				'label'  => 'greek-tonos',
+				'locals' => array( "\u{03B1}\u{03BB}\u{03C6}\u{03B1}update", "\u{03AC}\u{03BB}\u{03C6}\u{03B1}update", "\u{03B1}\u{0301}\u{03BB}\u{03C6}\u{03B1}update" ),
+			),
+			array(
+				'label'  => 'cyrillic-io',
+				'locals' => array( "\u{0435}mailupdate", "\u{0451}mailupdate", "\u{0435}\u{0308}mailupdate" ),
+			),
+			array(
+				'label'  => 'compatibility-ligature',
+				'locals' => array( 'officeupdate', "o\u{FB03}ceupdate", "of\u{FB01}ceupdate" ),
+			),
+			array(
+				'label'  => 'width-sensitive-latin',
+				'locals' => array( 'updateuser', "\u{FF55}pdateuser", "up\u{FF44}ateuser" ),
+			),
+			array(
+				'label'  => 'width-sensitive-katakana',
+				'locals' => array( "\u{30A2}\u{30A4}update", "\u{FF71}\u{FF72}update" ),
+			),
+		);
+		$domains  = array(
+			'example.org',
+			'sub-domain.example',
+		);
+
+		if ( self::has_idn() ) {
+			$domains[] = "gr\u{00E5}.org";
+			$domains[] = "b\u{00FC}cher.de";
+		}
+
+		$cases = array(
+			array(
+				'label'     => 'anchor-update-normalization-sensitive-local',
+				'profile'   => 'latin-acute',
+				'domain'    => 'example.org',
+				'addresses' => self::addresses_for_localparts(
+					array( 'joseupdate', "jos\u{00E9}update", "jose\u{0301}update" ),
+					'example.org'
+				),
+			),
+			array(
+				'label'     => 'anchor-update-compatibility-ligature-local',
+				'profile'   => 'compatibility-ligature',
+				'domain'    => 'example.org',
+				'addresses' => self::addresses_for_localparts(
+					array( 'officeupdate', "o\u{FB03}ceupdate", "of\u{FB01}ceupdate" ),
+					'example.org'
+				),
+			),
+		);
+
+		for ( $i = 0; $i < self::GENERATED_LOCALPART_UPDATE_CASES; $i++ ) {
+			$profile = $ctx->choice( $profiles );
+			$domain  = $ctx->choice( $domains );
+			$suffix  = (string) $ctx->int( 100, 999 );
+			$locals  = array();
+
+			foreach ( $profile['locals'] as $local ) {
+				$locals[] = $local . $suffix;
+			}
+
+			$cases[] = array(
+				'label'     => 'generated-localpart-update-alias-' . $i . '-' . $profile['label'],
 				'profile'   => $profile['label'],
 				'domain'    => $domain,
 				'addresses' => self::addresses_for_localparts( $locals, $domain ),

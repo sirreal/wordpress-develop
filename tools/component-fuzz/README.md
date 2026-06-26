@@ -215,8 +215,10 @@ database, network requests, or a configured site.
   and direct `wp_new_comment()` sanitization paths, REST user email schema
   validation across Unicode/ASCII filter modes,
   and no-DB stub-backed user email lookup/duplicate behavior for accent-distinct
-  local parts/domains, canonical Unicode-domain save/update collision behavior
-  without MySQL collation/index coverage, password-reset Unicode recipient paths,
+  local parts/domains, generated Unicode local-part update/collision behavior,
+  email-change notification recipient/body preservation, canonical Unicode-domain
+  save/update collision behavior without MySQL collation/index coverage,
+  password-reset Unicode recipient paths,
   password-reset notification recipient machine/readable view overrides through
   the PHPMailer handoff, current machine-view reset lookup rejection, clickable
   mailto rendering boundaries, and generated
