@@ -148,6 +148,7 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 				'num_queries'     => $this->num_queries,
 				'queries'         => $this->component_fuzz_queries,
 				'last_found_rows' => $this->component_fuzz_last_found_rows,
+				'next_ids'        => $this->component_fuzz_next_ids,
 			);
 		}
 
@@ -160,6 +161,7 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 			$this->num_queries                    = (int) ( $state['num_queries'] ?? 0 );
 			$this->component_fuzz_queries         = is_array( $state['queries'] ?? null ) ? array_values( $state['queries'] ) : array();
 			$this->component_fuzz_last_found_rows = (int) ( $state['last_found_rows'] ?? 0 );
+			$this->component_fuzz_next_ids        = is_array( $state['next_ids'] ?? null ) ? array_map( 'intval', $state['next_ids'] ) : $this->component_fuzz_next_ids;
 		}
 
 		public function component_fuzz_reset_content() {
@@ -1312,7 +1314,7 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 		private function component_fuzz_select_comments( $query ) {
 			$rows = array_values( $this->component_fuzz_comments );
 
-			foreach ( array( 'comment_ID', 'comment_post_ID', 'comment_parent', 'comment_author', 'comment_author_email', 'comment_content', 'comment_approved', 'user_id' ) as $column ) {
+			foreach ( array( 'comment_ID', 'comment_post_ID', 'comment_parent', 'comment_author', 'comment_author_email', 'comment_author_url', 'comment_content', 'comment_approved', 'user_id' ) as $column ) {
 				$value = $this->component_fuzz_compare_value( $query, $column );
 				if ( null === $value ) {
 					continue;
@@ -1374,6 +1376,10 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 
 			if ( preg_match( '/SELECT\s+comment_ID\s*,\s*comment_agent\b/i', $query ) ) {
 				return $this->component_fuzz_project_rows( $rows, array( 'comment_ID', 'comment_agent' ) );
+			}
+
+			if ( preg_match( '/SELECT\s+comment_author_url\s*,\s*comment_content\s*,\s*comment_author_IP\s*,\s*comment_type\b/i', $query ) ) {
+				return $this->component_fuzz_project_rows( $rows, array( 'comment_author_url', 'comment_content', 'comment_author_IP', 'comment_type' ) );
 			}
 
 			if ( preg_match( '/SELECT\s+comment_ID\b/i', $query ) ) {

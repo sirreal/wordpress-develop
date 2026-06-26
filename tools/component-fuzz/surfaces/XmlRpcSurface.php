@@ -34,6 +34,7 @@ final class XmlRpcSurface {
 			$rows[] = self::check_ixr_server_dispatch( $ctx->fork( 'ixr-server' ) );
 			$rows[] = self::check_ixr_server_multicall_matrix( $ctx->fork( 'ixr-multicall' ) );
 			$rows[] = self::check_wp_xmlrpc_server_helpers( $ctx->fork( 'wp-server' ) );
+			$rows[] = self::check_pingback_fail_closed_and_readonly_lookups( $ctx->fork( 'pingbacks' ) );
 			$rows[] = self::check_xmlrpc_post_data_helpers( $ctx->fork( 'post-data' ) );
 			$rows[] = self::check_http_ixr_client_transport( $ctx->fork( 'http-client' ) );
 		} catch ( \Throwable $e ) {
@@ -62,6 +63,7 @@ final class XmlRpcSurface {
 				'IXR_Request',
 				'IXR_Server',
 				'IXR_Value',
+				'WP_Error',
 				'WP_HTTP_IXR_Client',
 				'wp_xmlrpc_server',
 			) as $class
@@ -73,10 +75,16 @@ final class XmlRpcSurface {
 
 		foreach (
 			array(
+				'add_action',
 				'add_filter',
+				'get_post',
 				'has_filter',
 				'is_wp_error',
+				'pings_open',
+				'remove_action',
 				'remove_filter',
+				'url_to_postid',
+				'wp_cache_delete',
 				'wp_remote_retrieve_body',
 				'wp_remote_retrieve_response_code',
 				'wp_slash',
@@ -585,10 +593,333 @@ final class XmlRpcSurface {
 				'failures'             => $failures,
 				'dbBackedPathsSkipped' => array(
 					'wp.getOptions requires successful XML-RPC authentication before option reads.',
-					'Publishing, media upload, taxonomy, comment, and pingback methods require DB/network side effects.',
+					'Publishing, media upload, taxonomy, and comment methods require DB/network side effects.',
+					'Pingback coverage is limited to pre-network fail-closed and read-only lookup branches.',
 				),
 			)
 		);
+	}
+
+	private static function check_pingback_fail_closed_and_readonly_lookups( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures         = array();
+		$home             = 'http://example.test';
+		$post_id          = 70000 + $ctx->int( 1, 5000 );
+		$closed_post_id   = $post_id + 1;
+		$missing_post_id  = $post_id + 10000;
+		$comment_base_id  = $post_id + 20000;
+		$title            = 'Pingback Target ' . self::safe_text( $ctx->fork( 'title' ), 18 );
+		$slug             = 'pingback-' . $ctx->identifier( 5, 10 );
+		$source           = $home . '/source/' . $ctx->identifier( 5, 12 ) . '?from=' . rawurlencode( self::safe_text( $ctx->fork( 'source' ), 10 ) );
+		$other_source     = $home . '/source/other/' . $ctx->identifier( 5, 12 );
+		$pingback_source  = $home . '/pingback/' . $ctx->identifier( 4, 8 );
+		$same_source      = $home . '/?p=' . $post_id;
+		$server           = new \wp_xmlrpc_server();
+		$events           = array(
+			'xmlrpcCall' => array(),
+			'sourceUri'  => array(),
+			'http'       => 0,
+			'pingback'   => 0,
+		);
+		$targets          = array(
+			'query'      => $home . '/?p=' . $post_id,
+			'p-path'     => $home . '/archives/p/' . $post_id,
+			'fragment'   => $home . '/linked#' . $post_id,
+			'post-frag'  => $home . '/linked#post-' . $post_id,
+			'missing'    => $home . '/?p=' . $missing_post_id,
+			'unknown'    => $home . '/not-a-post',
+			'offsite'    => 'http://offsite.invalid/?p=' . $post_id,
+		);
+		$wpdb             = $GLOBALS['wpdb'] ?? null;
+		$options_snapshot = is_object( $wpdb ) && method_exists( $wpdb, 'component_fuzz_get_options' )
+			? $wpdb->component_fuzz_get_options()
+			: null;
+		$content_snapshot = is_object( $wpdb ) && method_exists( $wpdb, 'component_fuzz_content_counts' )
+			? $wpdb->component_fuzz_content_counts()
+			: null;
+		$runtime_snapshot = is_object( $wpdb ) && method_exists( $wpdb, 'component_fuzz_get_runtime_state' )
+			? $wpdb->component_fuzz_get_runtime_state()
+			: null;
+		$had_wp_rewrite   = array_key_exists( 'wp_rewrite', $GLOBALS );
+		$old_wp_rewrite   = $GLOBALS['wp_rewrite'] ?? null;
+		$home_filter      = static function () use ( $home ): string {
+			return $home;
+		};
+		$siteurl_filter   = static function () use ( $home ): string {
+			return $home;
+		};
+		$url_filter       = static function ( string $url ): string {
+			return $url;
+		};
+		$source_filter    = static function ( string $from, string $to ) use ( &$events, $source ): string {
+			$events['sourceUri'][] = array(
+				'from' => $from,
+				'to'   => $to,
+			);
+			if ( str_contains( $from, '/blocked-empty-source/' ) ) {
+				return '';
+			}
+			if ( str_contains( $from, '&amp;' ) ) {
+				return str_replace( '&amp;', '&', $from );
+			}
+			return $source === $from ? $source : $from;
+		};
+		$xmlrpc_action    = static function ( string $method ) use ( &$events ): void {
+			$events['xmlrpcCall'][] = $method;
+		};
+		$http_filter      = static function () use ( &$events ) {
+			++$events['http'];
+			return new \WP_Error( 'component_fuzz_unexpected_pingback_http', 'Pingback fuzz cases must not reach HTTP transport.' );
+		};
+		$pingback_action  = static function () use ( &$events ): void {
+			++$events['pingback'];
+		};
+		$xmlrpc_error_filter_priority = false;
+
+		try {
+			$GLOBALS['wp_rewrite'] = new class() {
+				public $index = 'index.php';
+				public $use_verbose_page_rules = false;
+
+				public function wp_rewrite_rules(): array {
+					return array();
+				}
+
+				public function using_index_permalinks(): bool {
+					return false;
+				}
+			};
+
+			\add_filter( 'pre_option_home', $home_filter, 0, 3 );
+			\add_filter( 'pre_option_siteurl', $siteurl_filter, 0, 3 );
+			$xmlrpc_error_filter_priority = \has_filter( 'xmlrpc_pingback_error', 'xmlrpc_pingback_error' );
+			if ( false !== $xmlrpc_error_filter_priority ) {
+				\remove_filter( 'xmlrpc_pingback_error', 'xmlrpc_pingback_error', $xmlrpc_error_filter_priority );
+			}
+
+			self::seed_pingback_post( $post_id, $title, $slug, 'open' );
+			self::seed_pingback_post( $closed_post_id, $title . ' Closed', $slug . '-closed', 'closed' );
+			self::seed_pingback_comment( $comment_base_id, $post_id, $source, 'pingback' );
+			self::seed_pingback_comment( $comment_base_id + 1, $post_id, $other_source, 'comment' );
+			self::seed_pingback_comment( $comment_base_id + 2, $post_id, $pingback_source, 'pingback' );
+
+			\add_filter( 'url_to_postid', $url_filter, 10, 1 );
+			\add_filter( 'pingback_ping_source_uri', $source_filter, 10, 2 );
+			\add_filter( 'pre_http_request', $http_filter, 10, 0 );
+			\add_action( 'xmlrpc_call', $xmlrpc_action, 10, 1 );
+			\add_action( 'pingback_post', $pingback_action, 10, 1 );
+
+			$empty_source  = $server->pingback_ping( array( $home . '/blocked-empty-source/' . $ctx->identifier( 4, 8 ), $targets['query'] ) );
+			$offsite       = $server->pingback_ping( array( $source, $targets['offsite'] ) );
+			$unknown       = $server->pingback_ping( array( $source, $targets['unknown'] ) );
+			$missing_post  = $server->pingback_ping( array( $source, $targets['missing'] ) );
+			$same_resource = $server->pingback_ping( array( $same_source, $targets['query'] ) );
+			$closed        = $server->pingback_ping( array( $source, $home . '/?p=' . $closed_post_id ) );
+			$duplicate     = array();
+			foreach ( array( 'query', 'p-path', 'fragment', 'post-frag' ) as $label ) {
+				$duplicate[ $label ] = $server->pingback_ping( array( $source, $targets[ $label ] ) );
+			}
+			$pingbacks     = $server->pingback_extensions_getPingbacks( $targets['query'] );
+			$missing_list  = $server->pingback_extensions_getPingbacks( $targets['missing'] );
+			$unknown_list  = $server->pingback_extensions_getPingbacks( $targets['unknown'] );
+		} finally {
+			\remove_action( 'pingback_post', $pingback_action, 10 );
+			\remove_action( 'xmlrpc_call', $xmlrpc_action, 10 );
+			\remove_filter( 'pre_http_request', $http_filter, 10 );
+			\remove_filter( 'pingback_ping_source_uri', $source_filter, 10 );
+			\remove_filter( 'url_to_postid', $url_filter, 10 );
+			\remove_filter( 'pre_option_home', $home_filter, 0 );
+			\remove_filter( 'pre_option_siteurl', $siteurl_filter, 0 );
+			if ( false !== $xmlrpc_error_filter_priority ) {
+				\add_filter( 'xmlrpc_pingback_error', 'xmlrpc_pingback_error', $xmlrpc_error_filter_priority );
+			}
+			if ( is_object( $wpdb ) && method_exists( $wpdb, 'delete' ) ) {
+				foreach ( array( $comment_base_id, $comment_base_id + 1, $comment_base_id + 2 ) as $comment_id ) {
+					$wpdb->delete( $wpdb->comments, array( 'comment_ID' => $comment_id ) );
+				}
+				foreach ( array( $post_id, $closed_post_id ) as $delete_post_id ) {
+					$wpdb->delete( $wpdb->posts, array( 'ID' => $delete_post_id ) );
+				}
+			}
+			foreach ( array( $post_id, $closed_post_id, $missing_post_id ) as $cache_id ) {
+				\wp_cache_delete( $cache_id, 'posts' );
+			}
+			if ( null !== $options_snapshot && is_object( $wpdb ) && method_exists( $wpdb, 'component_fuzz_reset_options' ) ) {
+				$wpdb->component_fuzz_reset_options( $options_snapshot );
+			}
+			if ( null !== $runtime_snapshot && is_object( $wpdb ) && method_exists( $wpdb, 'component_fuzz_restore_runtime_state' ) ) {
+				$wpdb->component_fuzz_restore_runtime_state( $runtime_snapshot );
+			}
+			if ( $had_wp_rewrite ) {
+				$GLOBALS['wp_rewrite'] = $old_wp_rewrite;
+			} else {
+				unset( $GLOBALS['wp_rewrite'] );
+			}
+		}
+
+		self::collect_failure(
+			$failures,
+			self::ixr_error_code( $empty_source ) === 0
+				&& self::ixr_error_code( $offsite ) === 0
+				&& self::ixr_error_code( $unknown ) === 33
+				&& self::ixr_error_code( $missing_post ) === 33
+				&& self::ixr_error_code( $same_resource ) === 0
+				&& self::ixr_error_code( $closed ) === 33,
+			'pingback.ping rejects empty source, offsite target, unresolved target, missing posts, same resource, and closed pings before network',
+			array(
+				'emptySource'  => self::describe_value( $empty_source ),
+				'offsite'      => self::describe_value( $offsite ),
+				'unknown'      => self::describe_value( $unknown ),
+				'missingPost'  => self::describe_value( $missing_post ),
+				'sameResource' => self::describe_value( $same_resource ),
+				'closed'       => self::describe_value( $closed ),
+			)
+		);
+
+		foreach ( $duplicate as $label => $result ) {
+			self::collect_failure(
+				$failures,
+				self::ixr_error_code( $result ) === 48,
+				'pingback.ping legacy target extraction reaches duplicate detection before network',
+				array(
+					'label'  => $label,
+					'target' => $targets[ $label ],
+					'result' => self::describe_value( $result ),
+				)
+			);
+		}
+
+		$expected_pingbacks = array( $source, $pingback_source );
+		$actual_pingbacks   = is_array( $pingbacks ) ? array_values( $pingbacks ) : array();
+		sort( $expected_pingbacks, SORT_STRING );
+		sort( $actual_pingbacks, SORT_STRING );
+
+		self::collect_failure(
+			$failures,
+			$expected_pingbacks === $actual_pingbacks
+				&& self::ixr_error_code( $missing_list ) === 32
+				&& self::ixr_error_code( $unknown_list ) === 33,
+			'pingback.extensions.getPingbacks returns only pingback author URLs and fail-closed errors for missing resources',
+			array(
+				'pingbacks'   => self::describe_value( $pingbacks ),
+				'missingList' => self::describe_value( $missing_list ),
+				'unknownList' => self::describe_value( $unknown_list ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			0 === $events['http']
+				&& 0 === $events['pingback']
+				&& 13 === count( $events['xmlrpcCall'] )
+				&& 10 === count( $events['sourceUri'] )
+				&& false === \has_filter( 'url_to_postid', $url_filter )
+				&& false === \has_filter( 'pre_option_home', $home_filter )
+				&& false === \has_filter( 'pre_option_siteurl', $siteurl_filter )
+				&& false === \has_filter( 'pingback_ping_source_uri', $source_filter )
+				&& false === \has_filter( 'pre_http_request', $http_filter )
+				&& false === \has_filter( 'xmlrpc_call', $xmlrpc_action )
+				&& false === \has_filter( 'pingback_post', $pingback_action )
+				&& (
+					null === $content_snapshot
+					|| $content_snapshot === ( is_object( $wpdb ) && method_exists( $wpdb, 'component_fuzz_content_counts' ) ? $wpdb->component_fuzz_content_counts() : null )
+				),
+			'pingback fuzzing stays pre-network/pre-insert and removes hooks after execution',
+			array(
+				'events'             => $events,
+				'urlToPostIdFilter'  => \has_filter( 'url_to_postid', $url_filter ),
+				'homeFilter'         => \has_filter( 'pre_option_home', $home_filter ),
+				'siteurlFilter'      => \has_filter( 'pre_option_siteurl', $siteurl_filter ),
+				'sourceUriFilter'    => \has_filter( 'pingback_ping_source_uri', $source_filter ),
+				'preHttpFilter'      => \has_filter( 'pre_http_request', $http_filter ),
+				'xmlrpcAction'       => \has_filter( 'xmlrpc_call', $xmlrpc_action ),
+				'pingbackAction'     => \has_filter( 'pingback_post', $pingback_action ),
+				'contentBefore'      => $content_snapshot,
+				'contentAfterCleanup' => is_object( $wpdb ) && method_exists( $wpdb, 'component_fuzz_content_counts' ) ? $wpdb->component_fuzz_content_counts() : null,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'xmlrpc.pingback.fail-closed-and-readonly-lookups',
+			array() === $failures,
+			array(
+				'postId'   => $post_id,
+				'failures' => $failures,
+				'events'   => $events,
+			)
+		);
+	}
+
+	private static function seed_pingback_post( int $post_id, string $title, string $slug, string $ping_status ): void {
+		if ( ! isset( $GLOBALS['wpdb'] ) || ! is_object( $GLOBALS['wpdb'] ) || ! method_exists( $GLOBALS['wpdb'], 'insert' ) ) {
+			return;
+		}
+
+		\wp_cache_delete( $post_id, 'posts' );
+		$GLOBALS['wpdb']->insert(
+			$GLOBALS['wpdb']->posts,
+			array(
+				'ID'                  => $post_id,
+				'post_author'         => 1,
+				'post_date'           => '2026-06-01 00:00:00',
+				'post_date_gmt'       => '2026-06-01 00:00:00',
+				'post_content'        => 'Synthetic XML-RPC pingback target.',
+				'post_title'          => $title,
+				'post_excerpt'        => '',
+				'post_status'         => 'publish',
+				'comment_status'      => 'open',
+				'ping_status'         => $ping_status,
+				'post_password'       => '',
+				'post_name'           => $slug,
+				'to_ping'             => '',
+				'pinged'              => '',
+				'post_modified'       => '2026-06-01 00:00:00',
+				'post_modified_gmt'   => '2026-06-01 00:00:00',
+				'post_content_filtered' => '',
+				'post_parent'         => 0,
+				'guid'                => 'https://example.test/?p=' . $post_id,
+				'menu_order'          => 0,
+				'post_type'           => 'post',
+				'post_mime_type'      => '',
+				'comment_count'       => 0,
+			)
+		);
+	}
+
+	private static function seed_pingback_comment( int $comment_id, int $post_id, string $author_url, string $type ): void {
+		if ( ! isset( $GLOBALS['wpdb'] ) || ! is_object( $GLOBALS['wpdb'] ) || ! method_exists( $GLOBALS['wpdb'], 'insert' ) ) {
+			return;
+		}
+
+		$second = $comment_id % 60;
+		$ip_octet = 1 + ( $comment_id % 250 );
+		$GLOBALS['wpdb']->insert(
+			$GLOBALS['wpdb']->comments,
+			array(
+				'comment_ID'           => $comment_id,
+				'comment_post_ID'      => $post_id,
+				'comment_author'       => 'Pingback Source ' . $comment_id,
+				'comment_author_email' => '',
+				'comment_author_url'   => $author_url,
+				'comment_author_IP'    => '192.0.2.' . $ip_octet,
+				'comment_date'         => sprintf( '2026-06-01 00:00:%02d', $second ),
+				'comment_date_gmt'     => sprintf( '2026-06-01 00:00:%02d', $second ),
+				'comment_content'      => 'Synthetic pingback/comment ' . $comment_id,
+				'comment_approved'     => '1',
+				'comment_agent'        => 'component-fuzz/xmlrpc',
+				'comment_type'         => $type,
+				'comment_parent'       => 0,
+				'user_id'              => 0,
+			)
+		);
+	}
+
+	private static function ixr_error_code( $value ): ?int {
+		if ( $value instanceof \IXR_Error ) {
+			return (int) $value->code;
+		}
+
+		return null;
 	}
 
 	private static function check_xmlrpc_post_data_helpers( \ComponentFuzz\FuzzContext $ctx ): array {
