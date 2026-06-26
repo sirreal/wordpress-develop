@@ -41,6 +41,7 @@ final class ShortcodesSurface {
 			$rows[] = self::check_shortcode_atts_filter_contract( $ctx->fork( 'attribute-filter' ), $attribute_cases );
 			$rows[] = self::check_shortcode_atts_filter_locality_matrix( $ctx->fork( 'attribute-filter-locality' ), $attribute_cases );
 			$rows[] = self::check_rendering_contracts( $ctx->fork( 'rendering' ), $attribute_cases );
+			$rows[] = self::check_do_shortcode_image_context_scoping( $ctx->fork( 'image-context' ) );
 			$rows[] = self::check_nested_parse_boundaries( $ctx->fork( 'nested-boundaries' ), $attribute_cases );
 			$rows[] = self::check_callback_mutation_during_render( $ctx->fork( 'callback-mutation' ), $attribute_cases );
 			$rows[] = self::check_shortcode_tag_filter_contracts( $ctx->fork( 'tag-filters' ), $attribute_cases );
@@ -79,6 +80,8 @@ final class ShortcodesSurface {
 				'remove_shortcode',
 				'remove_all_shortcodes',
 				'add_filter',
+				'has_filter',
+				'apply_filters',
 				'remove_action',
 				'remove_filter',
 				'shortcode_exists',
@@ -88,6 +91,7 @@ final class ShortcodesSurface {
 				'shortcode_parse_atts',
 				'shortcode_atts',
 				'do_shortcode',
+				'_filter_do_shortcode_context',
 				'apply_shortcodes',
 				'do_shortcodes_in_html_tags',
 				'strip_shortcodes',
@@ -670,6 +674,187 @@ final class ShortcodesSurface {
 				'source'     => self::describe_string( $source ),
 				'outputSha1' => sha1( $output ),
 				'callCount'  => count( $calls ),
+			)
+		);
+	}
+
+	private static function check_do_shortcode_image_context_scoping( \ComponentFuzz\FuzzContext $ctx ): array {
+		$hook             = 'wp_get_attachment_image_context';
+		$context_callback = '_filter_do_shortcode_context';
+		$scoped_tag       = self::tag( $ctx, 'image-context-scoped' );
+		$unmatched_tag    = self::tag( $ctx, 'image-context-unmatched' );
+		$pre_outer        = self::tag( $ctx, 'image-context-outer' );
+		$pre_inner        = self::tag( $ctx, 'image-context-inner' );
+		$hook_snapshot    = self::snapshot_hook( $hook );
+		$registry_snapshot = self::snapshot_registry();
+		$scoped_events    = array();
+		$preexisting_events = array();
+		$failures         = array();
+
+		try {
+			self::clear_hook( $hook );
+			self::replace_registry( array() );
+			\add_shortcode(
+				$scoped_tag,
+				static function () use ( &$scoped_events, $hook, $context_callback ) {
+					$scoped_events[] = array(
+						'priority'      => \has_filter( $hook, $context_callback ),
+						'context'       => \apply_filters( $hook, 'wp_get_attachment_image' ),
+						'callbackCount' => self::hook_callback_count( $hook, $context_callback, 10 ),
+					);
+
+					return 'scoped-image-context';
+				}
+			);
+
+			$scoped_source         = 'before [' . $scoped_tag . ' /] after';
+			$scoped_output         = \do_shortcode( $scoped_source );
+			$scoped_after_priority = \has_filter( $hook, $context_callback );
+			$scoped_after_count    = self::hook_callback_count( $hook, $context_callback, 10 );
+
+			self::collect_failure(
+				$failures,
+				'before scoped-image-context after' === $scoped_output
+					&& array(
+						array(
+							'priority'      => 10,
+							'context'       => 'do_shortcode',
+							'callbackCount' => 1,
+						),
+					) === $scoped_events
+					&& false === $scoped_after_priority
+					&& 0 === $scoped_after_count,
+				'do_shortcode installs the media image context filter only for a matching shortcode render scope',
+				array(
+					'source'        => self::describe_string( $scoped_source ),
+					'output'        => self::describe_string( $scoped_output ),
+					'events'        => $scoped_events,
+					'afterPriority' => $scoped_after_priority,
+					'afterCount'    => $scoped_after_count,
+				)
+			);
+
+			self::clear_hook( $hook );
+			self::replace_registry(
+				array(
+					$scoped_tag => static function () {
+						return 'unexpected';
+					},
+				)
+			);
+
+			$plain_source     = 'plain text without shortcode brackets';
+			$plain_output     = \do_shortcode( $plain_source );
+			$plain_priority   = \has_filter( $hook, $context_callback );
+			$unmatched_source = 'before [' . $unmatched_tag . ' /] after';
+			$unmatched_output = \do_shortcode( $unmatched_source );
+			$unmatched_priority = \has_filter( $hook, $context_callback );
+
+			self::replace_registry( array() );
+			$empty_registry_source = 'before [' . $scoped_tag . ' /] after';
+			$empty_registry_output = \do_shortcode( $empty_registry_source );
+			$empty_registry_priority = \has_filter( $hook, $context_callback );
+
+			$GLOBALS['shortcode_tags'] = 'not-an-array';
+			$non_array_output   = \do_shortcode( $empty_registry_source );
+			$non_array_priority = \has_filter( $hook, $context_callback );
+
+			self::collect_failure(
+				$failures,
+				$plain_source === $plain_output
+					&& false === $plain_priority
+					&& $unmatched_source === $unmatched_output
+					&& false === $unmatched_priority
+					&& $empty_registry_source === $empty_registry_output
+					&& false === $empty_registry_priority
+					&& $empty_registry_source === $non_array_output
+					&& false === $non_array_priority
+					&& 0 === self::hook_callback_count( $hook, $context_callback, 10 ),
+				'do_shortcode no-op paths return before installing the media image context filter',
+				array(
+					'plainPriority'         => $plain_priority,
+					'unmatchedPriority'     => $unmatched_priority,
+					'emptyRegistryPriority' => $empty_registry_priority,
+					'nonArrayPriority'      => $non_array_priority,
+				)
+			);
+
+			self::clear_hook( $hook );
+			\add_filter( $hook, $context_callback );
+			self::replace_registry( array() );
+			\add_shortcode(
+				$pre_outer,
+				static function () use ( &$preexisting_events, $hook, $context_callback, $pre_inner ) {
+					$preexisting_events[] = array(
+						'phase'         => 'outer-before',
+						'priority'      => \has_filter( $hook, $context_callback ),
+						'context'       => \apply_filters( $hook, 'wp_get_attachment_image' ),
+						'callbackCount' => self::hook_callback_count( $hook, $context_callback, 10 ),
+					);
+
+					$nested = \do_shortcode( 'nested [' . $pre_inner . ' /]' );
+
+					$preexisting_events[] = array(
+						'phase'         => 'outer-after',
+						'priority'      => \has_filter( $hook, $context_callback ),
+						'context'       => \apply_filters( $hook, 'wp_get_attachment_image' ),
+						'callbackCount' => self::hook_callback_count( $hook, $context_callback, 10 ),
+						'nested'        => $nested,
+					);
+
+					return 'outer<' . $nested . '>';
+				}
+			);
+			\add_shortcode(
+				$pre_inner,
+				static function () use ( &$preexisting_events, $hook, $context_callback ) {
+					$preexisting_events[] = array(
+						'phase'         => 'inner',
+						'priority'      => \has_filter( $hook, $context_callback ),
+						'context'       => \apply_filters( $hook, 'wp_get_attachment_image' ),
+						'callbackCount' => self::hook_callback_count( $hook, $context_callback, 10 ),
+					);
+
+					return 'inner-image-context';
+				}
+			);
+
+			$preexisting_source = 'before [' . $pre_outer . ']body[/' . $pre_outer . '] after';
+			$preexisting_output = \do_shortcode( $preexisting_source );
+			$preexisting_after_priority = \has_filter( $hook, $context_callback );
+			$preexisting_after_count = self::hook_callback_count( $hook, $context_callback, 10 );
+			$preexisting_phases = array_column( $preexisting_events, 'phase' );
+			$preexisting_contexts = array_column( $preexisting_events, 'context' );
+			$preexisting_counts = array_column( $preexisting_events, 'callbackCount' );
+
+			self::collect_failure(
+				$failures,
+				'before outer<nested inner-image-context> after' === $preexisting_output
+					&& array( 'outer-before', 'inner', 'outer-after' ) === $preexisting_phases
+					&& array( 'do_shortcode', 'do_shortcode', 'do_shortcode' ) === $preexisting_contexts
+					&& array( 1, 1, 1 ) === $preexisting_counts
+					&& 10 === $preexisting_after_priority
+					&& 1 === $preexisting_after_count,
+				'preexisting media image context filters survive nested do_shortcode renders exactly once',
+				array(
+					'source'        => self::describe_string( $preexisting_source ),
+					'output'        => self::describe_string( $preexisting_output ),
+					'events'        => $preexisting_events,
+					'afterPriority' => $preexisting_after_priority,
+					'afterCount'    => $preexisting_after_count,
+				)
+			);
+		} finally {
+			self::restore_registry( $registry_snapshot );
+			self::restore_hook( $hook, $hook_snapshot );
+		}
+
+		return self::result(
+			$ctx,
+			'shortcodes.do-shortcode-image-context-scoped',
+			$failures,
+			array(
+				'tags' => array( $scoped_tag, $pre_outer, $pre_inner ),
 			)
 		);
 	}
@@ -1872,12 +2057,80 @@ final class ShortcodesSurface {
 		);
 	}
 
+	private static function snapshot_hook( string $hook ): array {
+		$exists = isset( $GLOBALS['wp_filter'] )
+			&& is_array( $GLOBALS['wp_filter'] )
+			&& array_key_exists( $hook, $GLOBALS['wp_filter'] );
+
+		return array(
+			'exists' => $exists,
+			'value'  => $exists ? self::clone_hook_value( $GLOBALS['wp_filter'][ $hook ] ) : null,
+		);
+	}
+
 	private static function restore_registry( array $snapshot ): void {
 		if ( $snapshot['exists'] ) {
 			$GLOBALS['shortcode_tags'] = $snapshot['value'];
 		} else {
 			unset( $GLOBALS['shortcode_tags'] );
 		}
+	}
+
+	private static function restore_hook( string $hook, array $snapshot ): void {
+		if ( ! isset( $GLOBALS['wp_filter'] ) || ! is_array( $GLOBALS['wp_filter'] ) ) {
+			$GLOBALS['wp_filter'] = array();
+		}
+
+		if ( $snapshot['exists'] ) {
+			$GLOBALS['wp_filter'][ $hook ] = self::clone_hook_value( $snapshot['value'] );
+		} else {
+			unset( $GLOBALS['wp_filter'][ $hook ] );
+		}
+	}
+
+	private static function clear_hook( string $hook ): void {
+		if ( isset( $GLOBALS['wp_filter'] ) && is_array( $GLOBALS['wp_filter'] ) ) {
+			unset( $GLOBALS['wp_filter'][ $hook ] );
+		}
+	}
+
+	private static function clone_hook_value( $value ) {
+		if ( is_object( $value ) ) {
+			if ( $value instanceof \Closure ) {
+				return $value;
+			}
+
+			return clone $value;
+		}
+
+		return $value;
+	}
+
+	private static function hook_callback_count( string $hook, $callback, int $priority ): int {
+		if ( ! isset( $GLOBALS['wp_filter'] ) || ! is_array( $GLOBALS['wp_filter'] ) ) {
+			return 0;
+		}
+
+		$hook_value = $GLOBALS['wp_filter'][ $hook ] ?? null;
+		$callbacks  = null;
+		if ( is_object( $hook_value ) && isset( $hook_value->callbacks ) ) {
+			$callbacks = $hook_value->callbacks[ $priority ] ?? null;
+		} elseif ( is_array( $hook_value ) ) {
+			$callbacks = $hook_value[ $priority ] ?? null;
+		}
+
+		if ( ! is_array( $callbacks ) ) {
+			return 0;
+		}
+
+		$count = 0;
+		foreach ( $callbacks as $entry ) {
+			if ( is_array( $entry ) && ( $entry['function'] ?? null ) === $callback ) {
+				++$count;
+			}
+		}
+
+		return $count;
 	}
 
 	private static function replace_registry( array $registry ): void {
