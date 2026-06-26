@@ -897,7 +897,7 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 				);
 			}
 
-			foreach ( array( 'post_name', 'post_type', 'post_parent', 'post_status' ) as $column ) {
+			foreach ( array( 'post_name', 'post_type', 'post_parent', 'post_status', 'post_password' ) as $column ) {
 				$value = $this->component_fuzz_compare_value( $query, $column );
 				if ( null === $value ) {
 					continue;
@@ -935,6 +935,8 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 				);
 			}
 
+			$rows = $this->component_fuzz_filter_posts_by_search_like( $query, array_values( $rows ) );
+
 			$rows = $this->component_fuzz_sort_post_rows( $query, array_values( $rows ) );
 
 			if ( preg_match( '/\bSQL_CALC_FOUND_ROWS\b/i', $query ) ) {
@@ -956,6 +958,77 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 			}
 
 			return $rows;
+		}
+
+		private function component_fuzz_filter_posts_by_search_like( $query, array $rows ) {
+			$where = $this->component_fuzz_where_clause( $query );
+			if ( '' === $where ) {
+				return $rows;
+			}
+
+			$patterns = array();
+			if ( preg_match_all( '/(?<![A-Za-z0-9_])(?:`?wp_posts`?\.)?`?(post_title|post_excerpt|post_content)`?(?![A-Za-z0-9_])\s+(NOT\s+LIKE|LIKE)\s+(\'(?:\\\\.|[^\'\\\\])*\'|"[^"]*")/i', $where, $matches, PREG_SET_ORDER ) ) {
+				foreach ( $matches as $match ) {
+					$key = strtoupper( preg_replace( '/\s+/', ' ', $match[2] ) ) . "\0" . $this->component_fuzz_unquote_sql_value( $match[3] );
+					if ( ! isset( $patterns[ $key ] ) ) {
+						$patterns[ $key ] = array(
+							'operator' => strtoupper( preg_replace( '/\s+/', ' ', $match[2] ) ),
+							'pattern'  => $this->component_fuzz_unquote_sql_value( $match[3] ),
+							'columns'  => array(),
+						);
+					}
+					$patterns[ $key ]['columns'][ $match[1] ] = true;
+				}
+			}
+
+			if ( preg_match_all( '/(?<![A-Za-z0-9_])(?:`?sq1`?\.)?`?meta_value`?(?![A-Za-z0-9_])\s+(NOT\s+LIKE|LIKE)\s+(\'(?:\\\\.|[^\'\\\\])*\'|"[^"]*")/i', $where, $matches, PREG_SET_ORDER ) ) {
+				foreach ( $matches as $match ) {
+					$key = strtoupper( preg_replace( '/\s+/', ' ', $match[1] ) ) . "\0" . $this->component_fuzz_unquote_sql_value( $match[2] );
+					if ( ! isset( $patterns[ $key ] ) ) {
+						$patterns[ $key ] = array(
+							'operator' => strtoupper( preg_replace( '/\s+/', ' ', $match[1] ) ),
+							'pattern'  => $this->component_fuzz_unquote_sql_value( $match[2] ),
+							'columns'  => array(),
+						);
+					}
+					$patterns[ $key ]['columns']['sq1.meta_value'] = true;
+				}
+			}
+
+			if ( array() === $patterns ) {
+				return $rows;
+			}
+
+			return array_filter(
+				$rows,
+				function ( $row ) use ( $patterns ) {
+					foreach ( $patterns as $pattern ) {
+						$matched = false;
+						foreach ( array_keys( $pattern['columns'] ) as $column ) {
+							$values = 'sq1.meta_value' === $column
+								? $this->component_fuzz_post_meta_values( (int) $row['ID'], '_wp_attached_file' )
+								: array( (string) ( $row[ $column ] ?? '' ) );
+
+							foreach ( $values as $value ) {
+								if ( $this->component_fuzz_sql_like_match( (string) $value, (string) $pattern['pattern'] ) ) {
+									$matched = true;
+									break 2;
+								}
+							}
+						}
+
+						if ( 'LIKE' === $pattern['operator'] && ! $matched ) {
+							return false;
+						}
+
+						if ( 'NOT LIKE' === $pattern['operator'] && $matched ) {
+							return false;
+						}
+					}
+
+					return true;
+				}
+			);
 		}
 
 		private function component_fuzz_sort_post_rows( $query, array $rows ) {
@@ -1288,7 +1361,7 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 				$regex .= preg_quote( $char, '/' );
 			}
 
-			return 1 === preg_match( '/\A' . $regex . '\z/s', (string) $value );
+			return 1 === preg_match( '/\A' . $regex . '\z/is', (string) $value );
 		}
 
 		private function component_fuzz_sort_link_rows( $query, array $rows ) {
@@ -1879,6 +1952,14 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 			return '';
 		}
 
+		private function component_fuzz_where_clause( $query ) {
+			if ( preg_match( '/\bWHERE\b(.+?)(?:\bGROUP\s+BY\b|\bORDER\s+BY\b|\bLIMIT\b|\z)/is', (string) $query, $matches ) ) {
+				return $matches[1];
+			}
+
+			return '';
+		}
+
 		private function component_fuzz_meta_type_for_table_key( $table_key ) {
 			$map = array(
 				'post_meta'    => 'post',
@@ -1896,6 +1977,17 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 
 		private function component_fuzz_meta_object_column( $meta_type ) {
 			return $meta_type . '_id';
+		}
+
+		private function component_fuzz_post_meta_values( $post_id, $meta_key ) {
+			$values = array();
+			foreach ( $this->component_fuzz_meta['post'] as $row ) {
+				if ( (int) $row['post_id'] === (int) $post_id && (string) $row['meta_key'] === (string) $meta_key ) {
+					$values[] = (string) $row['meta_value'];
+				}
+			}
+
+			return $values;
 		}
 
 		private function component_fuzz_compare_value( $query, $column ) {

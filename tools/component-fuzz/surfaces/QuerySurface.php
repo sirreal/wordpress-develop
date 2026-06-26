@@ -1986,6 +1986,7 @@ final class QuerySurface {
 						"wp_posts.post_excerpt LIKE '%alpha beta gamma%'",
 						"wp_posts.post_content LIKE '%alpha beta gamma%'",
 					),
+					'postIds'          => array( 3 ),
 				),
 			),
 			array(
@@ -2051,6 +2052,31 @@ final class QuerySurface {
 					'whereContains'    => array( "wp_posts.post_content LIKE 'alpha beta -literal'" ),
 					'whereNotContains' => array( 'NOT LIKE', 'wp_posts.post_title', 'wp_posts.post_excerpt' ),
 					'requestContains'  => array( "wp_posts.post_content LIKE 'alpha beta -literal'" ),
+				),
+			),
+			array(
+				'label'      => 'title-search-result-oracle',
+				'queryVars'  => array(
+					's'              => 'alpha',
+					'search_columns' => array( 'post_title' ),
+				),
+				'termsInput' => array( 'alpha' ),
+				'expect'     => array(
+					'whereContains'   => array( "wp_posts.post_title LIKE '%alpha%'" ),
+					'whereNotContains' => array( 'wp_posts.post_excerpt', 'wp_posts.post_content' ),
+					'requestContains' => array( "wp_posts.post_password = ''" ),
+					'postIds'         => array( 3 ),
+				),
+			),
+			array(
+				'label'      => 'missing-search-term-empty-result',
+				'queryVars'  => array(
+					's' => 'no-such-term',
+				),
+				'termsInput' => array( 'no-such-term' ),
+				'expect'     => array(
+					'requestContains' => array( "wp_posts.post_title LIKE '%no-such-term%'" ),
+					'postIds'         => array(),
 				),
 			),
 			array(
@@ -2153,6 +2179,25 @@ final class QuerySurface {
 				'expect'     => array(
 					'requestContains'    => array( "wp_posts.post_password = 'secret'" ),
 					'requestNotContains' => array( "wp_posts.post_password = ''" ),
+					'postIds'            => array( 29 ),
+				),
+			),
+			array(
+				'label'      => 'attachment-filename-default-off',
+				'queryVars'  => array(
+					'post_status'    => 'inherit',
+					'post_type'      => 'attachment',
+					's'              => '2020/06/photo.jpg',
+					'search_columns' => array( 'post_title' ),
+				),
+				'termsInput' => array( '2020/06/photo.jpg' ),
+				'expect'     => array(
+					'requestNotContains' => array(
+						'LEFT JOIN wp_postmeta AS sq1',
+						'sq1.meta_value LIKE',
+					),
+					'whereNotContains'   => array( 'sq1.meta_value LIKE' ),
+					'postIds'            => array(),
 				),
 			),
 			array(
@@ -2173,6 +2218,7 @@ final class QuerySurface {
 						'GROUP BY wp_posts.ID',
 					),
 					'whereContains'   => array( 'sq1.meta_value LIKE' ),
+					'postIds'         => array( 31 ),
 				),
 			),
 		);
@@ -2665,6 +2711,10 @@ final class QuerySurface {
 			unset( $query_vars['orderby'] );
 		}
 
+		if ( ! empty( $query_vars['exact'] ) && 'relevance' === ( $query_vars['orderby'] ?? '' ) ) {
+			$query_vars['orderby'] = 'date';
+		}
+
 		$filter_columns = $ctx->choice(
 			array(
 				null,
@@ -2860,10 +2910,8 @@ final class QuerySurface {
 			return array_key_exists( 'stopwords', $case ) ? array_values( (array) $case['stopwords'] ) : $stopwords;
 		};
 		$allow_attachment_filter    = static function ( bool $allow ) use ( &$filter_hits, $case ): bool {
-			unset( $allow );
-
 			++$filter_hits['allowAttachmentFilename'];
-			return ! empty( $case['allowAttachmentByFilename'] );
+			return array_key_exists( 'allowAttachmentByFilename', $case ) ? (bool) $case['allowAttachmentByFilename'] : $allow;
 		};
 
 		try {
@@ -2924,8 +2972,10 @@ final class QuerySurface {
 				$this->allow_query_attachment_by_filename = $allow_attachment_by_filename;
 				$where                                   = $this->parse_search( $query_vars );
 				$order                                   = '';
+				$should_order_by_relevance               = ! empty( $query_vars['search_orderby_title'] )
+					&& ( empty( $query_vars['orderby'] ) || ( isset( $query_vars['orderby'] ) && 'relevance' === $query_vars['orderby'] ) );
 
-				if ( ! empty( $query_vars['s'] ) && ( ! empty( $query_vars['search_orderby_title'] ) || ( isset( $query_vars['orderby'] ) && 'relevance' === $query_vars['orderby'] ) ) ) {
+				if ( ! empty( $query_vars['s'] ) && $should_order_by_relevance ) {
 					$order = (string) $this->parse_search_order( $query_vars );
 				}
 
@@ -3390,7 +3440,8 @@ final class QuerySurface {
 			&& self::sql_string_is_balanced( $parse['where'] )
 			&& self::sql_has_no_unexpanded_placeholders( $parse['where'] )
 			&& self::sql_string_is_balanced( $parse['order'] )
-			&& self::sql_has_no_unexpanded_placeholders( $parse['order'] );
+			&& self::sql_has_no_unexpanded_placeholders( $parse['order'] )
+			&& self::sql_has_no_empty_orderby_expressions( $parse['order'] );
 	}
 
 	private static function wp_query_post_search_sql_is_safe( array $observation ): bool {
@@ -3402,6 +3453,7 @@ final class QuerySurface {
 			&& self::sql_has_no_empty_condition_groups( $parse['where'] )
 			&& self::sql_string_is_balanced( $parse['order'] )
 			&& self::sql_has_no_unexpanded_placeholders( $parse['order'] )
+			&& self::sql_has_no_empty_orderby_expressions( $parse['order'] )
 			&& self::wp_query_request_sql_is_safe( $request )
 			&& self::wp_query_recorded_sql_is_safe( $observation['execution']['wpdbNewQueries'] );
 	}
@@ -3430,6 +3482,10 @@ final class QuerySurface {
 					return false;
 				}
 			}
+		}
+
+		if ( array_key_exists( 'postIds', $expect ) && array_values( array_map( 'intval', $expect['postIds'] ) ) !== $observation['execution']['postIds'] ) {
+			return false;
 		}
 
 		return true;
@@ -3654,6 +3710,14 @@ final class QuerySurface {
 		return ! $in_string;
 	}
 
+	private static function sql_has_no_empty_orderby_expressions( $sql ): bool {
+		$sql_string = is_array( $sql ) ? implode( ' ', $sql ) : (string) $sql;
+
+		return ! preg_match( '/\A\s*(?:ASC|DESC)\b/i', $sql_string )
+			&& ! preg_match( '/\bORDER\s+BY\s*(?:,|\z|(?:ASC|DESC)\b)/i', $sql_string )
+			&& ! preg_match( '/,\s*(?:ASC|DESC)\b/i', $sql_string );
+	}
+
 	private static function safe_sql_identifier( string $identifier ): bool {
 		return 1 === preg_match( '/^[A-Za-z0-9_$\.]+$/', $identifier );
 	}
@@ -3735,12 +3799,13 @@ final class QuerySurface {
 			&& str_contains( $sql, 'wp_posts' )
 			&& self::sql_string_is_balanced( $sql )
 			&& self::sql_has_no_unexpanded_placeholders( $sql )
+			&& self::sql_has_no_empty_orderby_expressions( $sql )
 			&& self::sql_has_no_empty_condition_groups( $sql );
 	}
 
 	private static function wp_query_recorded_sql_is_safe( array $queries ): bool {
 		foreach ( $queries as $query ) {
-			if ( ! is_string( $query ) || ! self::sql_string_is_balanced( $query ) || ! self::sql_has_no_unexpanded_placeholders( $query ) ) {
+			if ( ! is_string( $query ) || ! self::sql_string_is_balanced( $query ) || ! self::sql_has_no_unexpanded_placeholders( $query ) || ! self::sql_has_no_empty_orderby_expressions( $query ) ) {
 				return false;
 			}
 		}
@@ -4216,6 +4281,8 @@ final class QuerySurface {
 				'post_modified'     => '2020-01-16 10:00:00',
 				'post_name'         => 'alpha-seed',
 				'post_status'       => 'publish',
+				'post_content'      => 'Alpha beta gamma content body',
+				'post_excerpt'      => 'Alpha quoted phrase excerpt',
 				'post_title'        => 'Alpha quoted phrase',
 				'post_type'         => 'post',
 				'comment_count'     => '2',
@@ -4275,6 +4342,30 @@ final class QuerySurface {
 				'post_type'         => 'post',
 				'comment_count'     => '3',
 			),
+			array(
+				'ID'                => 29,
+				'post_author'       => 41,
+				'post_date'         => '2020-06-01 14:00:00',
+				'post_modified'     => '2020-06-02 14:00:00',
+				'post_name'         => 'alpha-protected-seed',
+				'post_password'     => 'secret',
+				'post_status'       => 'publish',
+				'post_title'        => 'Alpha beta protected',
+				'post_type'         => 'post',
+				'comment_count'     => '0',
+			),
+			array(
+				'ID'                => 31,
+				'post_author'       => 41,
+				'post_date'         => '2020-07-01 15:00:00',
+				'post_modified'     => '2020-07-02 15:00:00',
+				'post_mime_type'    => 'image/jpeg',
+				'post_name'         => 'photo-attachment',
+				'post_status'       => 'inherit',
+				'post_title'        => 'Photo attachment',
+				'post_type'         => 'attachment',
+				'comment_count'     => '0',
+			),
 		);
 
 		foreach ( $posts as $post ) {
@@ -4331,6 +4422,7 @@ final class QuerySurface {
 				array( 'post_id' => 3, 'meta_key' => 'rating', 'meta_value' => '5' ),
 				array( 'post_id' => 7, 'meta_key' => 'color', 'meta_value' => 'red' ),
 				array( 'post_id' => 23, 'meta_key' => 'color', 'meta_value' => 'blue' ),
+				array( 'post_id' => 31, 'meta_key' => '_wp_attached_file', 'meta_value' => '2020/06/photo.jpg' ),
 			) as $meta
 		) {
 			$wpdb->insert( $wpdb->postmeta, $meta );
