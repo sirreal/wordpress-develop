@@ -455,6 +455,8 @@ database, network requests, or a configured site.
 - `query`: no-DB query builder and execution APIs, including meta/tax/date
   query tree sanitization, SQL fragment generation, relation normalization,
   query-var parsing, seeded `WP_Query` execution/found-row result oracles,
+  classic post-search parser/order SQL oracles for terms, exclusions, columns,
+  stopwords, attachment filename, password gates, and relevance ranking,
   cache-key/cache-hit determinism, `WP_User_Query` field/order/search/role/
   capability/has-published-post SQL-shape oracles and hook mutation locality,
   user/comment pre-query short-circuits, and deterministic global restoration.

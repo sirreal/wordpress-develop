@@ -914,9 +914,9 @@
 				<tr>
 					<td><code>query</code></td>
 					<td><span class="status good">review fixes passed</span></td>
-					<td>Main worktree; Kant the 3rd implementation and Peirce the 3rd review findings fixed through <code>31e3df4d4b</code>; WP_User_Query semantic follow-up through <code>d0bbc3c4fb</code> and review fixes through <code>e2f4e658d1</code></td>
-					<td>Main focused runs: 48600 passed, 0 skipped, 0 failed at seeds 1 and 224 after WP_User_Query semantic coverage; latest broad run: 4353 passed, 33 skipped, 0 failed; related PHPUnit: 52 tests, 156 assertions.</td>
-					<td>Query arg normalization, meta/tax/date/search interactions, pagination, sticky posts, SQL-shape safety, WP_Query execution order/found rows/cache-key/cache-hit behavior, WP_User_Query field/order/search/role/capability/has-published-post SQL-shape behavior, hook mutation locality, typed wpdb prepare placeholders, user/comment pre-query short-circuits, and state restoration.</td>
+					<td>Main worktree; Kant the 3rd implementation and Peirce the 3rd review findings fixed through <code>31e3df4d4b</code>; WP_User_Query semantic follow-up through <code>d0bbc3c4fb</code> and review fixes through <code>e2f4e658d1</code>; WP_Query post-search matrix through <code>244b2278a8</code></td>
+					<td>Main focused runs: 58800 passed, 0 skipped, 0 failed at seeds 1 and 224 after WP_Query post-search parser/order coverage; latest broad smoke: 4459 passed, 33 skipped, 0 failed; related PHPUnit: 52 tests, 156 assertions.</td>
+					<td>Query arg normalization, meta/tax/date/search interactions, pagination, sticky posts, SQL-shape safety, WP_Query execution order/found rows/cache-key/cache-hit behavior, classic WP_Query post-search terms/exclusions/columns/stopwords/relevance/password/attachment filename SQL behavior, WP_User_Query field/order/search/role/capability/has-published-post SQL-shape behavior, hook mutation locality, typed wpdb prepare placeholders, user/comment pre-query short-circuits, and state restoration.</td>
 				</tr>
 				<tr>
 					<td><code>query-loop</code></td>
@@ -993,6 +993,12 @@
 				</tr>
 			</thead>
 			<tbody>
+				<tr>
+					<td><code>244b2278a8</code></td>
+					<td><code>query</code></td>
+					<td>58800 passed, 0 skipped, 0 failed at seeds 1 and 224 after classic <code>WP_Query</code> post-search parser/order coverage for quoted phrases, stopwords, short-term fallback, 10+ term sentence fallback, CR/LF normalization, exact matches, exclusion-prefix disabling, supported search-column allowlisting, <code>post_search_columns</code>, <code>wp_search_stopwords</code>, logged-in password gates, attachment filename SQL branches, and relevance <code>CASE</code> ranking. Syntax/PHPCS/diff checks passed.</td>
+					<td>4459 passed, 33 skipped, 0 failed at 1 iteration after WP_Query post-search fuzzing.</td>
+				</tr>
 				<tr>
 					<td><code>f53cfd1bfc</code> / <code>d83d02f5e0</code> / <code>9e4c4ee83c</code></td>
 					<td><code>blocks</code></td>
