@@ -7,6 +7,7 @@ final class HttpSurface {
 	private const GENERATED_RESPONSE_CASES     = 8;
 	private const GENERATED_ABSOLUTE_URL_CASES = 10;
 	private const GENERATED_CHUNK_CASES        = 6;
+	private const GENERATED_REQUEST_CASES      = 4;
 
 	/** @var bool|null */
 	private static $proxy_override = null;
@@ -36,6 +37,7 @@ final class HttpSurface {
 			$rows[] = self::check_remote_request_wrappers( $ctx );
 			$rows[] = self::check_chunk_transfer_decode( $ctx );
 			$rows[] = self::check_request_normalization_no_network( $ctx );
+			$rows[] = self::check_requests_success_path_no_network( $ctx );
 			$rows[] = self::check_response_objects( $ctx );
 			$rows[] = self::check_header_processing( $ctx );
 			$rows[] = self::check_cookie_parsing_and_headers( $ctx );
@@ -77,6 +79,8 @@ final class HttpSurface {
 	}
 
 	private static function missing_requirements(): array {
+		self::load_http_requests_response_bridge();
+
 		$missing = array();
 
 		foreach (
@@ -86,6 +90,8 @@ final class HttpSurface {
 				'WP_REST_Response',
 				'WP_Http',
 				'WP_Http_Cookie',
+				'WP_HTTP_Requests_Hooks',
+				'WP_HTTP_Requests_Response',
 				'WP_HTTP_Proxy',
 				'WpOrg\Requests\Response\Headers',
 				'WpOrg\Requests\Cookie\Jar',
@@ -96,12 +102,20 @@ final class HttpSurface {
 			}
 		}
 
+		foreach ( array( 'WpOrg\Requests\Transport' ) as $interface ) {
+			if ( ! interface_exists( $interface ) ) {
+				$missing[] = "interface {$interface}";
+			}
+		}
+
 		foreach (
 			array(
 				'absint',
 				'add_action',
 				'add_filter',
 				'apply_filters',
+				'has_action',
+				'has_filter',
 				'home_url',
 				'is_wp_error',
 				'remove_action',
@@ -134,6 +148,17 @@ final class HttpSurface {
 		}
 
 		return $missing;
+	}
+
+	private static function load_http_requests_response_bridge(): void {
+		if ( class_exists( 'WP_HTTP_Requests_Response' ) || ! defined( 'ABSPATH' ) || ! defined( 'WPINC' ) ) {
+			return;
+		}
+
+		$file = ABSPATH . WPINC . '/class-wp-http-requests-response.php';
+		if ( is_readable( $file ) ) {
+			require_once $file;
+		}
 	}
 
 	private static function check_remote_retrieve_helpers( \ComponentFuzz\FuzzContext $ctx ): array {
@@ -672,6 +697,708 @@ final class HttpSurface {
 				'preEvents'   => count( $pre_events ),
 				'debugEvents' => count( $debug_events ),
 				'failures'    => array_slice( $failures, 0, 5 ),
+			)
+		);
+	}
+
+	private static function check_requests_success_path_no_network( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures         = array();
+		$before_events    = array();
+		$transport_events = array();
+		$debug_events     = array();
+		$response_events  = array();
+		$responses        = array();
+		$http             = new \WP_Http();
+		$base_url         = 'https://api.example.test/component-fuzz/http/requests/' . self::token( $ctx, 8 );
+		$cert_path        = ABSPATH . WPINC . '/certificates/component-fuzz-ca-bundle.pem';
+		$object_cookie    = new \WP_Http_Cookie(
+			array(
+				'name'      => 'object_cookie',
+				'value'     => 'object-' . self::token( $ctx, 5 ),
+				'expires'   => PHP_INT_MAX,
+				'path'      => '/',
+				'domain'    => 'api.example.test',
+				'host_only' => true,
+			)
+		);
+
+		$get_body         = array(
+			'q'     => self::token( $ctx, 8 ),
+			'limit' => (string) $ctx->int( 1, 9 ),
+		);
+		$post_body        = 'posted=' . rawurlencode( self::token( $ctx, 8 ) );
+		$patch_body       = array(
+			'patch' => self::token( $ctx, 8 ),
+			'flag'  => '1',
+		);
+		$redirect_url     = $base_url . '/redirect-follow';
+		$redirect_final   = $base_url . '/redirect-follow/final';
+		$redirect_body    = 'redirect=' . rawurlencode( self::token( $ctx, 8 ) );
+		$head_url         = $base_url . '/head-default-redirect';
+		$redirection_zero = $base_url . '/redirection-zero';
+		$nonblocking_body = 'nonblocking=' . rawurlencode( self::token( $ctx, 8 ) );
+
+		$cases = array(
+			array(
+				'label'                 => 'remote-get-string-headers-cookies-ssl-off',
+				'caller'                => 'wp_remote_get',
+				'url'                   => $base_url . '/get-string-headers',
+				'args'                  => array(
+					'headers'             => "X-Fuzz-Raw: one\r\nX-Fuzz-Raw-Two: two",
+					'body'                => $get_body,
+					'cookies'             => array(
+						'plain_cookie'        => 'plain-' . self::token( $ctx, 5 ),
+						$object_cookie->name  => $object_cookie,
+					),
+					'sslverify'           => false,
+					'limit_response_size' => 333,
+				),
+				'expectedMethod'        => 'GET',
+				'expectedData'          => $get_body,
+				'expectedDataFormat'    => 'query',
+				'expectedVerify'        => false,
+				'expectedVerifyName'    => false,
+				'expectedMaxBytes'      => 333,
+				'expectedRedirects'     => 5,
+				'expectedHeaders'       => array(
+					'x-fuzz-raw'     => 'one',
+					'x-fuzz-raw-two' => 'two',
+				),
+				'expectedHeaderParts'   => array(
+					'Cookie' => array(
+						'plain_cookie=plain-',
+						'object_cookie=' . $object_cookie->value,
+					),
+				),
+				'status'                => 200,
+				'reason'                => 'OK',
+				'responseBody'          => 'requests-get-' . self::token( $ctx, 8 ),
+				'expectedResponseCode'  => 200,
+				'expectedResponseBody'  => null,
+				'expectedResponseText'  => 'OK',
+				'cookieName'            => 'server_get',
+				'cookieValue'           => 'server value ' . self::token( $ctx, 4 ),
+				'cookieTwoName'         => 'server_get_extra',
+				'cookieTwoValue'        => 'extra ' . self::token( $ctx, 4 ),
+			),
+			array(
+				'label'                 => 'remote-post-string-body-array-headers',
+				'caller'                => 'wp_remote_post',
+				'url'                   => $base_url . '/post-string-body',
+				'args'                  => array(
+					'headers' => array(
+						'Content-Type' => 'application/x-www-form-urlencoded',
+						'X-Fuzz-Array' => 'post',
+					),
+					'body'    => $post_body,
+				),
+				'expectedMethod'        => 'POST',
+				'expectedData'          => $post_body,
+				'expectedDataFormat'    => 'body',
+				'expectedRedirects'     => 5,
+				'expectedHeaders'       => array(
+					'Content-Type' => 'application/x-www-form-urlencoded',
+					'X-Fuzz-Array' => 'post',
+				),
+				'status'                => 200,
+				'reason'                => 'OK',
+				'responseBody'          => 'requests-post-' . self::token( $ctx, 8 ),
+				'expectedResponseCode'  => 200,
+				'expectedResponseBody'  => null,
+				'expectedResponseText'  => 'OK',
+				'cookieName'            => 'server_post',
+				'cookieValue'           => 'posted ' . self::token( $ctx, 4 ),
+				'cookieTwoName'         => 'server_post_extra',
+				'cookieTwoValue'        => 'extra ' . self::token( $ctx, 4 ),
+			),
+			array(
+				'label'                 => 'wp-http-patch-cert-http-response-mutation',
+				'caller'                => 'wp_http_request',
+				'url'                   => $base_url . '/patch-mutated',
+				'args'                  => array(
+					'method'          => 'PATCH',
+					'headers'         => array( 'X-Fuzz-Object' => 'mutate' ),
+					'body'            => $patch_body,
+					'sslcertificates' => $cert_path,
+				),
+				'expectedMethod'        => 'PATCH',
+				'expectedData'          => $patch_body,
+				'expectedDataFormat'    => 'body',
+				'expectedVerify'        => $cert_path,
+				'expectedVerifyName'    => true,
+				'expectedRedirects'     => 5,
+				'expectedHeaders'       => array( 'X-Fuzz-Object' => 'mutate' ),
+				'status'                => 201,
+				'reason'                => 'Created',
+				'responseBody'          => 'requests-patch-before-mutation',
+				'mutateResponse'        => true,
+				'mutatedStatus'         => 202,
+				'mutatedBody'           => 'requests-patch-mutated-' . self::token( $ctx, 8 ),
+				'mutatedHeader'         => 'mutated-' . self::token( $ctx, 6 ),
+				'expectedResponseCode'  => 202,
+				'expectedResponseBody'  => null,
+				'expectedResponseText'  => 'Accepted',
+				'expectedDebugCode'     => 201,
+				'cookieName'            => 'server_patch',
+				'cookieValue'           => 'patch ' . self::token( $ctx, 4 ),
+				'cookieTwoName'         => 'server_patch_extra',
+				'cookieTwoValue'        => 'extra ' . self::token( $ctx, 4 ),
+			),
+			array(
+				'label'                 => 'remote-request-post-redirect-follow',
+				'caller'                => 'wp_remote_request',
+				'url'                   => $redirect_url,
+				'finalUrl'              => $redirect_final,
+				'args'                  => array(
+					'method'      => 'POST',
+					'body'        => $redirect_body,
+					'redirection' => 2,
+				),
+				'expectedMethod'        => 'POST',
+				'expectedData'          => $redirect_body,
+				'expectedDataFormat'    => 'body',
+				'expectedRedirects'     => 2,
+				'expectedBeforeCount'   => 2,
+				'expectedTransportCount' => 2,
+				'expectedFinalMethod'   => 'GET',
+				'redirectLocation'      => $redirect_final,
+				'status'                => 200,
+				'reason'                => 'OK',
+				'responseBody'          => 'requests-redirect-final-' . self::token( $ctx, 8 ),
+				'expectedResponseCode'  => 200,
+				'expectedResponseBody'  => null,
+				'expectedResponseText'  => 'OK',
+				'cookieName'            => 'server_redirect',
+				'cookieValue'           => 'redirect ' . self::token( $ctx, 4 ),
+				'cookieTwoName'         => 'server_redirect_extra',
+				'cookieTwoValue'        => 'extra ' . self::token( $ctx, 4 ),
+			),
+			array(
+				'label'                 => 'remote-head-default-redirection-zero',
+				'caller'                => 'wp_remote_head',
+				'url'                   => $head_url,
+				'args'                  => array(),
+				'expectedMethod'        => 'HEAD',
+				'expectedData'          => null,
+				'expectedDataFormat'    => 'query',
+				'expectedFollowRedirects' => false,
+				'expectedParsedRedirection' => 0,
+				'redirectOnly'          => true,
+				'redirectLocation'      => $head_url . '/should-not-follow',
+				'status'                => 302,
+				'reason'                => 'Found',
+				'responseBody'          => '',
+				'expectedResponseCode'  => 302,
+				'expectedResponseBody'  => '',
+				'expectedResponseText'  => 'Found',
+				'cookieName'            => 'server_head',
+				'cookieValue'           => 'head ' . self::token( $ctx, 4 ),
+				'cookieTwoName'         => 'server_head_extra',
+				'cookieTwoValue'        => 'extra ' . self::token( $ctx, 4 ),
+			),
+			array(
+				'label'                 => 'remote-get-explicit-redirection-zero',
+				'caller'                => 'wp_remote_get',
+				'url'                   => $redirection_zero,
+				'args'                  => array( 'redirection' => 0 ),
+				'expectedMethod'        => 'GET',
+				'expectedData'          => null,
+				'expectedDataFormat'    => 'query',
+				'expectedFollowRedirects' => false,
+				'expectedParsedRedirection' => 0,
+				'redirectOnly'          => true,
+				'redirectLocation'      => $redirection_zero . '/should-not-follow',
+				'status'                => 302,
+				'reason'                => 'Found',
+				'responseBody'          => '',
+				'expectedResponseCode'  => 302,
+				'expectedResponseBody'  => '',
+				'expectedResponseText'  => 'Found',
+				'cookieName'            => 'server_redirection_zero',
+				'cookieValue'           => 'zero ' . self::token( $ctx, 4 ),
+				'cookieTwoName'         => 'server_redirection_zero_extra',
+				'cookieTwoValue'        => 'extra ' . self::token( $ctx, 4 ),
+			),
+			array(
+				'label'                 => 'remote-request-nonblocking-delete',
+				'caller'                => 'wp_remote_request',
+				'url'                   => $base_url . '/nonblocking-delete',
+				'args'                  => array(
+					'method'      => 'DELETE',
+					'body'        => $nonblocking_body,
+					'blocking'    => false,
+					'sslverify'   => false,
+				),
+				'expectedMethod'        => 'DELETE',
+				'expectedData'          => $nonblocking_body,
+				'expectedDataFormat'    => 'body',
+				'expectedVerify'        => false,
+				'expectedVerifyName'    => false,
+				'expectedRedirects'     => 5,
+				'nonblocking'           => true,
+				'status'                => 200,
+				'reason'                => 'OK',
+				'responseBody'          => 'requests-nonblocking-ignored',
+				'expectedResponseCode'  => false,
+				'expectedResponseBody'  => '',
+				'expectedResponseText'  => false,
+				'expectedDebugCode'     => false,
+				'cookieName'            => 'server_nonblocking',
+				'cookieValue'           => 'nonblocking ' . self::token( $ctx, 4 ),
+				'cookieTwoName'         => 'server_nonblocking_extra',
+				'cookieTwoValue'        => 'extra ' . self::token( $ctx, 4 ),
+			),
+		);
+
+		$generated_methods = array( 'PUT', 'PATCH', 'DELETE', 'OPTIONS' );
+		for ( $i = 0; $i < self::GENERATED_REQUEST_CASES; ++$i ) {
+			$method         = $ctx->choice( $generated_methods );
+			$generated_body = $ctx->bool( 50 )
+				? array(
+					'g' => self::token( $ctx, 6 ),
+					'i' => (string) $i,
+				)
+				: 'generated=' . rawurlencode( self::token( $ctx, 8 ) );
+			$cases[]        = array(
+				'label'                 => 'remote-request-generated-' . strtolower( $method ) . '-' . $i,
+				'caller'                => 0 === $i % 2 ? 'wp_remote_request' : 'wp_http_request',
+				'url'                   => $base_url . '/generated/' . $i . '/' . strtolower( $method ),
+				'args'                  => array(
+					'method'          => $method,
+					'headers'         => array( 'X-Fuzz-Generated' => (string) $i ),
+					'body'            => $generated_body,
+					'sslcertificates' => $cert_path,
+				),
+				'expectedMethod'        => $method,
+				'expectedData'          => $generated_body,
+				'expectedDataFormat'    => 'body',
+				'expectedVerify'        => $cert_path,
+				'expectedVerifyName'    => true,
+				'expectedRedirects'     => 5,
+				'expectedHeaders'       => array( 'X-Fuzz-Generated' => (string) $i ),
+				'status'                => 200,
+				'reason'                => 'OK',
+				'responseBody'          => 'requests-generated-' . $i . '-' . self::token( $ctx, 8 ),
+				'expectedResponseCode'  => 200,
+				'expectedResponseBody'  => null,
+				'expectedResponseText'  => 'OK',
+				'cookieName'            => 'server_generated_' . $i,
+				'cookieValue'           => 'generated ' . self::token( $ctx, 4 ),
+				'cookieTwoName'         => 'server_generated_extra_' . $i,
+				'cookieTwoValue'        => 'extra ' . self::token( $ctx, 4 ),
+			);
+		}
+
+		foreach ( $cases as &$case ) {
+			if ( ! empty( $case['mutateResponse'] ) ) {
+				$case['expectedResponseBody'] = $case['mutatedBody'];
+			} elseif ( null === ( $case['expectedResponseBody'] ?? null ) ) {
+				$case['expectedResponseBody'] = $case['responseBody'];
+			}
+			if ( ! array_key_exists( 'expectedDebugCode', $case ) ) {
+				$case['expectedDebugCode'] = $case['status'];
+			}
+			if ( ! array_key_exists( 'expectedBeforeCount', $case ) ) {
+				$case['expectedBeforeCount'] = 1;
+			}
+			if ( ! array_key_exists( 'expectedTransportCount', $case ) ) {
+				$case['expectedTransportCount'] = $case['expectedBeforeCount'];
+			}
+		}
+		unset( $case );
+
+		$case_by_url = array();
+		foreach ( $cases as $case ) {
+			$case_by_url[ $case['url'] ] = $case;
+			if ( isset( $case['finalUrl'] ) ) {
+				$case_by_url[ $case['finalUrl'] ] = $case;
+			}
+		}
+
+		$transport = new class( $transport_events ) implements \WpOrg\Requests\Transport {
+			/** @var array<int,array<string,mixed>> */
+			private $events;
+
+			public function __construct( array &$events ) {
+				$this->events =& $events;
+			}
+
+			public function request( $url, $headers = array(), $data = array(), $options = array() ) {
+				$case       = isset( $options['component_fuzz_case'] ) && is_array( $options['component_fuzz_case'] ) ? $options['component_fuzz_case'] : array();
+				$label      = (string) ( $case['label'] ?? 'unmapped' );
+				$redirected = (int) ( $options['redirected'] ?? 0 );
+
+				$this->events[] = array(
+					'label'   => $label,
+					'url'     => (string) $url,
+					'headers' => $headers,
+					'data'    => $data,
+					'options' => array(
+						'type'             => $options['type'] ?? null,
+						'blocking'         => $options['blocking'] ?? null,
+						'follow_redirects' => $options['follow_redirects'] ?? null,
+						'redirects'        => $options['redirects'] ?? null,
+						'redirected'       => $options['redirected'] ?? null,
+						'verify'           => $options['verify'] ?? null,
+						'verifyname'       => $options['verifyname'] ?? null,
+						'data_format'      => $options['data_format'] ?? null,
+						'max_bytes'        => $options['max_bytes'] ?? null,
+						'filename'         => $options['filename'] ?? null,
+					),
+				);
+
+				if ( ! empty( $case['redirectOnly'] ) || ( ! empty( $case['redirectLocation'] ) && 0 === $redirected ) ) {
+					return $this->raw_response(
+						$case,
+						302,
+						'Found',
+						'',
+						array( 'Location: ' . (string) ( $case['redirectLocation'] ?? $url ) )
+					);
+				}
+
+				return $this->raw_response( $case );
+			}
+
+			public function request_multiple( $requests, $options ) {
+				$responses = array();
+				foreach ( $requests as $id => $request ) {
+					$responses[ $id ] = $this->request(
+						$request['url'] ?? '',
+						$request['headers'] ?? array(),
+						$request['data'] ?? array(),
+						$request['options'] ?? $options
+					);
+				}
+				return $responses;
+			}
+
+			public static function test( $capabilities = array() ) {
+				unset( $capabilities );
+				return true;
+			}
+
+			private function raw_response( array $case, $status = null, $reason = null, $body = null, array $extra_headers = array() ): string {
+				$label            = (string) ( $case['label'] ?? 'unmapped' );
+				$status           = null === $status ? (int) ( $case['status'] ?? 200 ) : (int) $status;
+				$reason           = null === $reason ? (string) ( $case['reason'] ?? 'OK' ) : (string) $reason;
+				$body             = null === $body ? (string) ( $case['responseBody'] ?? '' ) : (string) $body;
+				$cookie_name      = (string) ( $case['cookieName'] ?? 'server_cookie' );
+				$cookie_value     = (string) ( $case['cookieValue'] ?? 'server value' );
+				$cookie_two_name  = (string) ( $case['cookieTwoName'] ?? 'server_cookie_extra' );
+				$cookie_two_value = (string) ( $case['cookieTwoValue'] ?? 'extra value' );
+				$lines            = array(
+					'HTTP/1.1 ' . $status . ' ' . $reason,
+					'Content-Type: text/plain; charset=UTF-8',
+					'X-Fuzz-Case: ' . $label,
+					'X-Fuzz-Dupe: one-' . $label,
+					'x-fuzz-dupe: two-' . $label,
+					'Set-Cookie: ' . $cookie_name . '=' . rawurlencode( $cookie_value ) . '; Path=/; HttpOnly',
+					'Set-Cookie: ' . $cookie_two_name . '=' . rawurlencode( $cookie_two_value ) . '; Path=/; SameSite=Lax',
+				);
+
+				foreach ( $extra_headers as $header ) {
+					$lines[] = $header;
+				}
+
+				return implode( "\r\n", $lines ) . "\r\n\r\n" . $body;
+			}
+		};
+
+		$before_request_action = static function ( &$url, array &$headers, &$data, &$type, array &$options ) use ( &$before_events, &$case_by_url, $transport ): void {
+			$url_string = (string) $url;
+			$case       = $case_by_url[ $url_string ] ?? array(
+				'label'        => 'unmapped-before-request',
+				'status'       => 599,
+				'reason'       => 'Unmapped',
+				'responseBody' => '',
+			);
+
+			$options['component_fuzz_case'] = $case;
+			$options['transport']           = $transport;
+
+			$before_events[] = array(
+				'label'   => (string) ( $case['label'] ?? 'unmapped' ),
+				'url'     => $url_string,
+				'headers' => $headers,
+				'data'    => $data,
+				'type'    => $type,
+				'options' => self::requests_option_summary( $options ),
+			);
+		};
+
+		$debug_action = static function ( $response, string $context, string $class, array $parsed_args, string $url ) use ( &$debug_events ): void {
+			$debug_events[] = array(
+				'url'      => $url,
+				'context'  => $context,
+				'class'    => $class,
+				'response' => $response,
+				'args'     => $parsed_args,
+			);
+		};
+
+		$http_response_filter = static function ( $response, array $parsed_args, string $url ) use ( &$response_events, &$case_by_url ) {
+			$case    = $case_by_url[ $url ] ?? array();
+			$mutated = false;
+
+			if ( ! empty( $case['mutateResponse'] ) && is_array( $response ) && isset( $response['http_response'] ) && $response['http_response'] instanceof \WP_HTTP_Requests_Response ) {
+				$http_response = $response['http_response'];
+				$http_response->set_status( (int) $case['mutatedStatus'] );
+				$http_response->set_data( (string) $case['mutatedBody'] );
+				$http_response->header( 'X-Fuzz-Mutated', (string) $case['mutatedHeader'] );
+				$response                  = $http_response->to_array();
+				$response['http_response'] = $http_response;
+				$mutated                   = true;
+			}
+
+			$response_events[] = array(
+				'url'      => $url,
+				'mutated'  => $mutated,
+				'response' => $response,
+				'args'     => $parsed_args,
+			);
+
+			return $response;
+		};
+
+		add_action( 'requests-requests.before_request', $before_request_action, 10, 5 );
+		add_action( 'http_api_debug', $debug_action, 10, 5 );
+		add_filter( 'http_response', $http_response_filter, 10, 3 );
+		try {
+			foreach ( $cases as $case ) {
+				if ( 'wp_http_request' === $case['caller'] ) {
+					$responses[ $case['label'] ] = $http->request( $case['url'], $case['args'] );
+					continue;
+				}
+
+				$function                    = $case['caller'];
+				$responses[ $case['label'] ] = $function( $case['url'], $case['args'] );
+			}
+		} finally {
+			remove_filter( 'http_response', $http_response_filter, 10 );
+			remove_action( 'http_api_debug', $debug_action, 10 );
+			remove_action( 'requests-requests.before_request', $before_request_action, 10 );
+		}
+
+		foreach ( $cases as $case ) {
+			$label            = $case['label'];
+			$response         = $responses[ $label ] ?? null;
+			$before_for_case  = self::events_for_label( $before_events, $label );
+			$transport_for_case = self::events_for_label( $transport_events, $label );
+			$first_before     = $before_for_case[0] ?? null;
+			$last_before      = array() === $before_for_case ? null : $before_for_case[ count( $before_for_case ) - 1 ];
+			$first_transport  = $transport_for_case[0] ?? null;
+			$last_transport   = array() === $transport_for_case ? null : $transport_for_case[ count( $transport_for_case ) - 1 ];
+			$debug_event      = self::first_event_for_url( $debug_events, $case['url'] );
+			$response_event   = self::first_event_for_url( $response_events, $case['url'] );
+			$mapping_ok       = is_array( $first_before )
+				&& is_array( $first_transport )
+				&& (int) $case['expectedBeforeCount'] === count( $before_for_case )
+				&& (int) $case['expectedTransportCount'] === count( $transport_for_case )
+				&& $case['expectedMethod'] === $first_before['type']
+				&& $case['expectedMethod'] === ( $first_before['options']['type'] ?? null )
+				&& $case['expectedMethod'] === ( $first_transport['options']['type'] ?? null )
+				&& $case['expectedData'] === $first_before['data']
+				&& $case['expectedData'] === $first_transport['data']
+				&& $case['expectedDataFormat'] === ( $first_before['options']['data_format'] ?? null )
+				&& $case['expectedDataFormat'] === ( $first_transport['options']['data_format'] ?? null );
+
+			if ( array_key_exists( 'expectedVerify', $case ) ) {
+				$mapping_ok = $mapping_ok
+					&& $case['expectedVerify'] === ( $first_before['options']['verify'] ?? null )
+					&& $case['expectedVerify'] === ( $first_transport['options']['verify'] ?? null );
+			}
+			if ( array_key_exists( 'expectedVerifyName', $case ) ) {
+				$mapping_ok = $mapping_ok
+					&& $case['expectedVerifyName'] === ( $first_before['options']['verifyname'] ?? null )
+					&& $case['expectedVerifyName'] === ( $first_transport['options']['verifyname'] ?? null );
+			}
+			if ( array_key_exists( 'expectedMaxBytes', $case ) ) {
+				$mapping_ok = $mapping_ok
+					&& $case['expectedMaxBytes'] === ( $first_before['options']['max_bytes'] ?? null )
+					&& $case['expectedMaxBytes'] === ( $first_transport['options']['max_bytes'] ?? null );
+			}
+			if ( array_key_exists( 'expectedRedirects', $case ) ) {
+				$mapping_ok = $mapping_ok
+					&& true === ( $first_before['options']['follow_redirects'] ?? null )
+					&& $case['expectedRedirects'] === ( $first_before['options']['redirects'] ?? null )
+					&& $case['expectedRedirects'] === ( $first_transport['options']['redirects'] ?? null );
+			}
+			if ( array_key_exists( 'expectedFollowRedirects', $case ) ) {
+				$mapping_ok = $mapping_ok
+					&& $case['expectedFollowRedirects'] === ( $first_before['options']['follow_redirects'] ?? null )
+					&& $case['expectedFollowRedirects'] === ( $first_transport['options']['follow_redirects'] ?? null );
+			}
+			foreach ( $case['expectedHeaders'] ?? array() as $header => $expected_value ) {
+				$mapping_ok = $mapping_ok && $expected_value === self::request_header_value( $first_before['headers'] ?? array(), $header );
+			}
+			foreach ( $case['expectedHeaderParts'] ?? array() as $header => $parts ) {
+				$actual_header = (string) self::request_header_value( $first_before['headers'] ?? array(), $header );
+				foreach ( $parts as $part ) {
+					$mapping_ok = $mapping_ok && false !== strpos( $actual_header, $part );
+				}
+			}
+			if ( isset( $case['expectedFinalMethod'] ) ) {
+				$mapping_ok = $mapping_ok
+					&& is_array( $last_before )
+					&& is_array( $last_transport )
+					&& $case['finalUrl'] === ( $last_before['url'] ?? null )
+					&& $case['finalUrl'] === ( $last_transport['url'] ?? null )
+					&& $case['expectedFinalMethod'] === ( $last_before['type'] ?? null )
+					&& $case['expectedFinalMethod'] === ( $last_transport['options']['type'] ?? null )
+					&& 1 === ( $last_transport['options']['redirected'] ?? null );
+			}
+
+			self::collect_failure(
+				$failures,
+				$mapping_ok,
+				'Requests bridge maps request options for ' . $label,
+				array(
+					'case'      => $case,
+					'before'    => $before_for_case,
+					'transport' => $transport_for_case,
+				)
+			);
+
+			$debug_response = is_array( $debug_event ) ? ( $debug_event['response'] ?? null ) : null;
+			$debug_ok       = is_array( $debug_event )
+				&& 'response' === ( $debug_event['context'] ?? null )
+				&& 'WpOrg\Requests\Requests' === ( $debug_event['class'] ?? null )
+				&& is_array( $debug_response )
+				&& isset( $debug_response['http_response'] )
+				&& $debug_response['http_response'] instanceof \WP_HTTP_Requests_Response
+				&& $case['expectedDebugCode'] === ( $debug_response['response']['code'] ?? null )
+				&& $case['expectedMethod'] === ( $debug_event['args']['method'] ?? null );
+
+			if ( array_key_exists( 'expectedParsedRedirection', $case ) ) {
+				$debug_ok = $debug_ok
+					&& $case['expectedParsedRedirection'] === ( $debug_event['args']['redirection'] ?? null )
+					&& $case['expectedParsedRedirection'] === ( $debug_event['args']['_redirection'] ?? null );
+			}
+			if ( ! empty( $case['nonblocking'] ) ) {
+				$debug_ok = $debug_ok && false === ( $debug_event['args']['blocking'] ?? null );
+			}
+
+			self::collect_failure(
+				$failures,
+				$debug_ok,
+				'http_api_debug observes Requests response for ' . $label,
+				array(
+					'case'  => $case,
+					'debug' => self::event_summary( $debug_event ),
+				)
+			);
+
+			if ( ! empty( $case['nonblocking'] ) ) {
+				self::collect_failure(
+					$failures,
+					is_array( $response )
+						&& array() === ( $response['headers'] ?? null )
+						&& '' === ( $response['body'] ?? null )
+						&& array( 'code' => false, 'message' => false ) === ( $response['response'] ?? null )
+						&& array() === ( $response['cookies'] ?? null )
+						&& array_key_exists( 'http_response', $response )
+						&& null === $response['http_response']
+						&& ! array_key_exists( 'filename', $response )
+						&& null === $response_event,
+					'nonblocking Requests response returns the documented empty shape for ' . $label,
+					array(
+						'response'      => self::describe_value( $response ),
+						'filterEvent'   => self::event_summary( $response_event ),
+						'debugResponse' => self::describe_value( $debug_response ),
+					)
+				);
+				continue;
+			}
+
+			$headers          = is_array( $response ) ? ( $response['headers'] ?? null ) : null;
+			$dupe_header     = is_array( $response ) ? wp_remote_retrieve_header( $response, 'x-fuzz-dupe' ) : null;
+			$set_cookie      = is_array( $response ) ? wp_remote_retrieve_header( $response, 'set-cookie' ) : null;
+			$http_response   = is_array( $response ) ? ( $response['http_response'] ?? null ) : null;
+			$response_object = $http_response instanceof \WP_HTTP_Requests_Response ? $http_response->get_response_object() : null;
+			$response_ok     = is_array( $response )
+				&& $headers instanceof \WpOrg\Requests\Utility\CaseInsensitiveDictionary
+				&& $http_response instanceof \WP_HTTP_Requests_Response
+				&& $case['expectedResponseCode'] === wp_remote_retrieve_response_code( $response )
+				&& $case['expectedResponseText'] === wp_remote_retrieve_response_message( $response )
+				&& $case['expectedResponseBody'] === wp_remote_retrieve_body( $response )
+				&& array( 'one-' . $label, 'two-' . $label ) === $dupe_header
+				&& is_array( $set_cookie )
+				&& 2 === count( $set_cookie )
+				&& $case['cookieValue'] === wp_remote_retrieve_cookie_value( $response, $case['cookieName'] )
+				&& $case['cookieTwoValue'] === wp_remote_retrieve_cookie_value( $response, $case['cookieTwoName'] );
+
+			if ( ! empty( $case['mutateResponse'] ) ) {
+				$response_ok = $response_ok
+					&& is_array( $response_event )
+					&& true === ( $response_event['mutated'] ?? null )
+					&& $case['mutatedHeader'] === wp_remote_retrieve_header( $response, 'x-fuzz-mutated' );
+			} else {
+				$response_ok = $response_ok && is_array( $response_event ) && false === ( $response_event['mutated'] ?? null );
+			}
+			if ( isset( $case['expectedFinalMethod'] ) ) {
+				$response_ok = $response_ok
+					&& $response_object instanceof \WpOrg\Requests\Response
+					&& 1 === $response_object->redirects
+					&& isset( $response_object->history[0] )
+					&& 302 === $response_object->history[0]->status_code;
+			}
+
+			self::collect_failure(
+				$failures,
+				$response_ok,
+				'Requests response converts through WP_HTTP_Requests_Response for ' . $label,
+				array(
+					'case'          => $case,
+					'response'      => self::describe_value( $response ),
+					'filterEvent'   => self::event_summary( $response_event ),
+					'dupeHeader'    => self::describe_value( $dupe_header ),
+					'setCookie'     => self::describe_value( $set_cookie ),
+					'responseClass' => $response_object instanceof \WpOrg\Requests\Response ? get_class( $response_object ) : self::describe_value( $response_object ),
+				)
+			);
+		}
+
+		self::collect_failure(
+			$failures,
+			count( $cases ) === count( $debug_events )
+				&& count( $cases ) - 1 === count( $response_events )
+				&& array_sum( array_map( static function ( array $case ): int {
+					return (int) $case['expectedTransportCount'];
+				}, $cases ) ) === count( $transport_events ),
+			'Requests success-path matrix emits the expected bounded hook counts',
+			array(
+				'cases'           => count( $cases ),
+				'beforeEvents'    => count( $before_events ),
+				'transportEvents' => count( $transport_events ),
+				'debugEvents'     => count( $debug_events ),
+				'responseEvents'  => count( $response_events ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			false === has_action( 'requests-requests.before_request', $before_request_action )
+				&& false === has_action( 'http_api_debug', $debug_action )
+				&& false === has_filter( 'http_response', $http_response_filter ),
+			'Requests success-path hooks and filters are removed after the matrix',
+			array(
+				'beforeRequestHook' => has_action( 'requests-requests.before_request', $before_request_action ),
+				'debugHook'         => has_action( 'http_api_debug', $debug_action ),
+				'responseFilter'    => has_filter( 'http_response', $http_response_filter ),
+			)
+		);
+
+		return $ctx->result(
+			'http.requests-success-path.no-network-matrix',
+			array() === $failures,
+			array(
+				'cases'           => count( $cases ),
+				'beforeEvents'    => count( $before_events ),
+				'transportEvents' => count( $transport_events ),
+				'debugEvents'     => count( $debug_events ),
+				'responseEvents'  => count( $response_events ),
+				'failures'        => array_slice( $failures, 0, 5 ),
 			)
 		);
 	}
@@ -1356,6 +2083,32 @@ final class HttpSurface {
 		return $count;
 	}
 
+	private static function events_for_label( array $events, string $label ): array {
+		$matches = array();
+		foreach ( $events as $event ) {
+			if ( is_array( $event ) && $label === ( $event['label'] ?? null ) ) {
+				$matches[] = $event;
+			}
+		}
+
+		return $matches;
+	}
+
+	private static function request_header_value( array $headers, string $header ) {
+		if ( array_key_exists( $header, $headers ) ) {
+			return $headers[ $header ];
+		}
+
+		$needle = strtolower( $header );
+		foreach ( $headers as $key => $value ) {
+			if ( strtolower( (string) $key ) === $needle ) {
+				return $value;
+			}
+		}
+
+		return null;
+	}
+
 	private static function event_summary( $event ): array {
 		if ( ! is_array( $event ) ) {
 			return array( 'event' => self::describe_value( $event ) );
@@ -1386,6 +2139,23 @@ final class HttpSurface {
 		}
 
 		return $summary;
+	}
+
+	private static function requests_option_summary( array $options ): array {
+		return array(
+			'type'             => $options['type'] ?? null,
+			'blocking'         => $options['blocking'] ?? null,
+			'follow_redirects' => $options['follow_redirects'] ?? null,
+			'redirects'        => $options['redirects'] ?? null,
+			'redirected'       => $options['redirected'] ?? null,
+			'verify'           => $options['verify'] ?? null,
+			'verifyname'       => $options['verifyname'] ?? null,
+			'data_format'      => $options['data_format'] ?? null,
+			'max_bytes'        => $options['max_bytes'] ?? null,
+			'filename'         => $options['filename'] ?? null,
+			'transport'        => isset( $options['transport'] ) && is_object( $options['transport'] ) ? get_class( $options['transport'] ) : ( $options['transport'] ?? null ),
+			'cookies'          => isset( $options['cookies'] ) && is_object( $options['cookies'] ) ? get_class( $options['cookies'] ) : self::describe_value( $options['cookies'] ?? null ),
+		);
 	}
 
 	private static function install_scoped_filters(): void {
