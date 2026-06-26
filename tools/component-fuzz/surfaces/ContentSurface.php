@@ -32,6 +32,7 @@ final class ContentSurface {
 		self::check_date_queries( $result, $inputs );
 		self::check_query_var_normalization( $result, $inputs );
 		self::check_get_post_class_splitting( $result, $inputs );
+		self::check_post_template_password_excerpt_title( $result, $inputs );
 
 		$result['ok']     = empty( $result['failures'] );
 		$result['status'] = $result['ok'] ? 'passed' : 'failed';
@@ -1106,6 +1107,487 @@ final class ContentSurface {
 		}
 
 		self::record( $result, 'get_post_class.no_post_class_splitting', empty( $failures ), array( 'cases' => $cases ), $failures );
+	}
+
+	private static function check_post_template_password_excerpt_title( array &$result, array $inputs ): void {
+		foreach ( array( 'get_the_title', 'get_the_excerpt', 'has_excerpt', 'post_password_required', 'add_filter', 'remove_filter', 'has_filter' ) as $function ) {
+			if ( ! \function_exists( $function ) ) {
+				self::skip( $result, 'post_template.password_excerpt_title', $function . '() is unavailable.' );
+				return;
+			}
+		}
+		if ( ! \class_exists( '\WP_Post' ) ) {
+			self::skip( $result, 'post_template.password_excerpt_title', 'WP_Post is unavailable.' );
+			return;
+		}
+
+		$cases            = self::post_template_cases( $inputs );
+		$failures         = array();
+		$events           = array();
+		$password_probes  = 0;
+		$excerpt_probes   = 0;
+		$title_probes     = 0;
+		$has_excerpt_runs = 0;
+		$hash_skipped     = false;
+		$cookie_name      = 'wp-postpass_' . ( \defined( 'COOKIEHASH' ) ? COOKIEHASH : '' );
+		$had_cookie       = array_key_exists( $cookie_name, $_COOKIE );
+		$cookie_value     = $had_cookie ? $_COOKIE[ $cookie_name ] : null;
+		$had_screen       = array_key_exists( 'current_screen', $GLOBALS );
+		$current_screen   = $had_screen ? $GLOBALS['current_screen'] : null;
+		$excerpt_suffix   = ' [component-fuzz-excerpt]';
+		$title_suffix     = ' [component-fuzz-title]';
+		$protected_format = 'Protected fuzz: %s';
+		$private_format   = 'Private fuzz: %s';
+
+		$protected_filter = static function ( string $format, $post ) use ( &$events, $protected_format ): string {
+			$events[] = array(
+				'hook'   => 'protected_title_format',
+				'postId' => isset( $post->ID ) ? (int) $post->ID : 0,
+				'format' => $format,
+			);
+			return $protected_format;
+		};
+		$private_filter   = static function ( string $format, $post ) use ( &$events, $private_format ): string {
+			$events[] = array(
+				'hook'   => 'private_title_format',
+				'postId' => isset( $post->ID ) ? (int) $post->ID : 0,
+				'format' => $format,
+			);
+			return $private_format;
+		};
+		$title_filter     = static function ( string $title, int $post_id ) use ( &$events, $title_suffix ): string {
+			$events[] = array(
+				'hook'   => 'the_title',
+				'postId' => $post_id,
+				'title'  => $title,
+			);
+			return $title . $title_suffix . ':' . $post_id;
+		};
+		$excerpt_filter   = static function ( string $excerpt, $post ) use ( &$events, $excerpt_suffix ): string {
+			$events[] = array(
+				'hook'    => 'get_the_excerpt',
+				'postId'  => isset( $post->ID ) ? (int) $post->ID : 0,
+				'excerpt' => $excerpt,
+			);
+			return $excerpt . $excerpt_suffix;
+		};
+		$password_filter  = static function ( bool $required, $post ) use ( &$events ): bool {
+			$events[] = array(
+				'hook'     => 'post_password_required',
+				'postId'   => isset( $post->ID ) ? (int) $post->ID : 0,
+				'required' => $required,
+			);
+			return $required;
+		};
+
+		\add_filter( 'protected_title_format', $protected_filter, PHP_INT_MAX, 2 );
+		\add_filter( 'private_title_format', $private_filter, PHP_INT_MAX, 2 );
+		\add_filter( 'the_title', $title_filter, PHP_INT_MAX, 2 );
+		\add_filter( 'get_the_excerpt', $excerpt_filter, PHP_INT_MAX, 2 );
+		\add_filter( 'post_password_required', $password_filter, PHP_INT_MAX, 2 );
+
+		try {
+			unset( $GLOBALS['current_screen'] );
+
+			foreach ( $cases as $case ) {
+				$post         = self::make_wp_post( $case['post'] );
+				$has_password = '' !== (string) $post->post_password;
+
+				unset( $_COOKIE[ $cookie_name ] );
+				$no_cookie_required = self::call_guarded(
+					static function () use ( $post ) {
+						return \post_password_required( $post );
+					}
+				);
+				++$password_probes;
+				self::assert_guarded_value(
+					$failures,
+					'post-password-required-no-cookie',
+					'post_password_required() did not match the generated no-cookie oracle.',
+					$no_cookie_required,
+					$has_password,
+					array(
+						'case' => $case['label'],
+						'post' => self::describe_template_post( $post ),
+					)
+				);
+
+				$_COOKIE[ $cookie_name ] = 'not-a-wordpress-postpass-' . $case['token'];
+				$bad_cookie_required     = self::call_guarded(
+					static function () use ( $post ) {
+						return \post_password_required( $post );
+					}
+				);
+				++$password_probes;
+				self::assert_guarded_value(
+					$failures,
+					'post-password-required-bad-cookie',
+					'post_password_required() did not reject the generated malformed cookie.',
+					$bad_cookie_required,
+					$has_password,
+					array(
+						'case' => $case['label'],
+						'post' => self::describe_template_post( $post ),
+					)
+				);
+
+				if ( $has_password ) {
+					$hash = self::postpass_hash( (string) $post->post_password );
+					if ( null === $hash ) {
+						$hash_skipped = true;
+					} else {
+						$_COOKIE[ $cookie_name ] = $hash;
+						$good_cookie_required    = self::call_guarded(
+							static function () use ( $post ) {
+								return \post_password_required( $post );
+							}
+						);
+						++$password_probes;
+						self::assert_guarded_value(
+							$failures,
+							'post-password-required-good-cookie',
+							'post_password_required() did not accept the generated phpass post cookie.',
+							$good_cookie_required,
+							false,
+							array(
+								'case'       => $case['label'],
+								'post'       => self::describe_template_post( $post ),
+								'hashPrefix' => substr( $hash, 0, 4 ),
+							)
+						);
+					}
+				}
+
+				unset( $_COOKIE[ $cookie_name ] );
+				$before_excerpt_events = self::event_count( $events, 'get_the_excerpt' );
+				$excerpt_call          = self::call_guarded(
+					static function () use ( $post ) {
+						return \get_the_excerpt( $post );
+					}
+				);
+				++$excerpt_probes;
+				$expected_excerpt = $has_password ? \__( 'There is no excerpt because this is a protected post.' ) : (string) $post->post_excerpt . $excerpt_suffix;
+				self::assert_guarded_value(
+					$failures,
+					'get-the-excerpt-password-branch',
+					'get_the_excerpt() did not match the generated protected/public excerpt oracle.',
+					$excerpt_call,
+					$expected_excerpt,
+					array(
+						'case' => $case['label'],
+						'post' => self::describe_template_post( $post ),
+					)
+				);
+				$expected_excerpt_events = $has_password ? 0 : 1;
+				$actual_excerpt_events   = self::event_count( $events, 'get_the_excerpt' ) - $before_excerpt_events;
+				if ( $expected_excerpt_events !== $actual_excerpt_events ) {
+					$failures[] = array(
+						'name'     => 'get-the-excerpt-filter-count-mismatch',
+						'message'  => 'get_the_excerpt() did not run the excerpt filter exactly in the expected password branch.',
+						'case'     => $case['label'],
+						'expected' => $expected_excerpt_events,
+						'actual'   => $actual_excerpt_events,
+					);
+				}
+
+				$has_excerpt_call = self::call_guarded(
+					static function () use ( $post ) {
+						return \has_excerpt( $post );
+					}
+				);
+				++$has_excerpt_runs;
+				self::assert_guarded_value(
+					$failures,
+					'has-excerpt-custom-excerpt',
+					'has_excerpt() did not match the generated custom-excerpt oracle.',
+					$has_excerpt_call,
+					! empty( $post->post_excerpt ),
+					array(
+						'case' => $case['label'],
+						'post' => self::describe_template_post( $post ),
+					)
+				);
+
+				$before_protected_events = self::event_count( $events, 'protected_title_format' );
+				$before_private_events   = self::event_count( $events, 'private_title_format' );
+				$before_title_events     = self::event_count( $events, 'the_title' );
+				$title_call              = self::call_guarded(
+					static function () use ( $post ) {
+						return \get_the_title( $post );
+					}
+				);
+				++$title_probes;
+				if ( $has_password ) {
+					$expected_base_title = sprintf( $protected_format, (string) $post->post_title );
+				} elseif ( 'private' === (string) $post->post_status ) {
+					$expected_base_title = sprintf( $private_format, (string) $post->post_title );
+				} else {
+					$expected_base_title = (string) $post->post_title;
+				}
+				self::assert_guarded_value(
+					$failures,
+					'get-the-title-template-filters',
+					'get_the_title() did not match the generated protected/private/title filter oracle.',
+					$title_call,
+					$expected_base_title . $title_suffix . ':' . (int) $post->ID,
+					array(
+						'case' => $case['label'],
+						'post' => self::describe_template_post( $post ),
+					)
+				);
+
+				$expected_protected_events = $has_password ? 1 : 0;
+				$expected_private_events   = ( ! $has_password && 'private' === (string) $post->post_status ) ? 1 : 0;
+				$actual_protected_events   = self::event_count( $events, 'protected_title_format' ) - $before_protected_events;
+				$actual_private_events     = self::event_count( $events, 'private_title_format' ) - $before_private_events;
+				$actual_title_events       = self::event_count( $events, 'the_title' ) - $before_title_events;
+				if ( $expected_protected_events !== $actual_protected_events || $expected_private_events !== $actual_private_events || 1 !== $actual_title_events ) {
+					$failures[] = array(
+						'name'     => 'get-the-title-filter-count-mismatch',
+						'message'  => 'get_the_title() did not run the expected protected/private/title filters exactly once.',
+						'case'     => $case['label'],
+						'expected' => array(
+							'protected' => $expected_protected_events,
+							'private'   => $expected_private_events,
+							'title'     => 1,
+						),
+						'actual'   => array(
+							'protected' => $actual_protected_events,
+							'private'   => $actual_private_events,
+							'title'     => $actual_title_events,
+						),
+					);
+				}
+			}
+		} finally {
+			\remove_filter( 'protected_title_format', $protected_filter, PHP_INT_MAX );
+			\remove_filter( 'private_title_format', $private_filter, PHP_INT_MAX );
+			\remove_filter( 'the_title', $title_filter, PHP_INT_MAX );
+			\remove_filter( 'get_the_excerpt', $excerpt_filter, PHP_INT_MAX );
+			\remove_filter( 'post_password_required', $password_filter, PHP_INT_MAX );
+
+			if ( $had_cookie ) {
+				$_COOKIE[ $cookie_name ] = $cookie_value;
+			} else {
+				unset( $_COOKIE[ $cookie_name ] );
+			}
+			if ( $had_screen ) {
+				$GLOBALS['current_screen'] = $current_screen;
+			} else {
+				unset( $GLOBALS['current_screen'] );
+			}
+		}
+
+		$leaked_hooks = array();
+		foreach (
+			array(
+				array( 'protected_title_format', $protected_filter ),
+				array( 'private_title_format', $private_filter ),
+				array( 'the_title', $title_filter ),
+				array( 'get_the_excerpt', $excerpt_filter ),
+				array( 'post_password_required', $password_filter ),
+			) as $hook_probe
+		) {
+			if ( false !== \has_filter( $hook_probe[0], $hook_probe[1] ) ) {
+				$leaked_hooks[] = $hook_probe[0];
+			}
+		}
+		if ( array() !== $leaked_hooks ) {
+			$failures[] = array(
+				'name'    => 'post-template-filter-leak',
+				'message' => 'The post-template helper probe left one or more filters registered.',
+				'hooks'   => $leaked_hooks,
+			);
+		}
+		if ( $had_cookie ) {
+			if ( ! array_key_exists( $cookie_name, $_COOKIE ) || $_COOKIE[ $cookie_name ] !== $cookie_value ) {
+				$failures[] = array(
+					'name'    => 'post-template-cookie-not-restored',
+					'message' => 'The post-template helper probe did not restore the original post password cookie.',
+				);
+			}
+		} elseif ( array_key_exists( $cookie_name, $_COOKIE ) ) {
+			$failures[] = array(
+				'name'    => 'post-template-cookie-leak',
+				'message' => 'The post-template helper probe left a generated post password cookie behind.',
+			);
+		}
+
+		if ( $hash_skipped ) {
+			self::skip( $result, 'post_password_required.correct_cookie_hash', 'PasswordHash was unavailable for a correct post-password cookie branch.' );
+		}
+
+		self::record(
+			$result,
+			'post_template.password_excerpt_title_filters',
+			empty( $failures ),
+			array(
+				'cases'           => count( $cases ),
+				'passwordProbes'  => $password_probes,
+				'excerptProbes'   => $excerpt_probes,
+				'titleProbes'     => $title_probes,
+				'hasExcerptRuns'  => $has_excerpt_runs,
+				'eventCounts'     => array(
+					'post_password_required' => self::event_count( $events, 'post_password_required' ),
+					'get_the_excerpt'        => self::event_count( $events, 'get_the_excerpt' ),
+					'protected_title_format' => self::event_count( $events, 'protected_title_format' ),
+					'private_title_format'   => self::event_count( $events, 'private_title_format' ),
+					'the_title'              => self::event_count( $events, 'the_title' ),
+				),
+				'cookieRestored'  => ! array_key_exists( $cookie_name, $_COOKIE ) || ( $had_cookie && $_COOKIE[ $cookie_name ] === $cookie_value ),
+				'hashBranchCount' => $password_probes - ( 2 * count( $cases ) ),
+			),
+			$failures
+		);
+	}
+
+	private static function post_template_cases( array $inputs ): array {
+		$posts  = array_values( $inputs['posts'] );
+		$cases  = array();
+		$matrix = array(
+			array(
+				'label'    => 'public',
+				'status'   => 'publish',
+				'password' => '',
+			),
+			array(
+				'label'    => 'private',
+				'status'   => 'private',
+				'password' => '',
+			),
+			array(
+				'label'    => 'protected',
+				'status'   => 'publish',
+				'password' => 'component-fuzz-pass',
+			),
+			array(
+				'label'    => 'private-protected',
+				'status'   => 'private',
+				'password' => 'component-fuzz-private-pass',
+			),
+		);
+
+		foreach ( $matrix as $index => $row ) {
+			$source = $posts[ $index % max( 1, count( $posts ) ) ] ?? array();
+			$title  = self::non_empty_template_string( (string) ( $source['post_title'] ?? '' ), 'Template title ' . $index );
+			$excerpt = self::non_empty_template_string(
+				(string) ( $source['post_excerpt'] ?? '' ),
+				'Template excerpt ' . $index
+			);
+			$content = self::non_empty_template_string(
+				(string) ( $source['post_content'] ?? '' ),
+				'Template content ' . $index
+			);
+
+			$post                    = $source;
+			$post['ID']              = 51000 + $index;
+			$post['post_title']      = $title;
+			$post['post_excerpt']    = $excerpt;
+			$post['post_content']    = $content;
+			$post['post_status']     = $row['status'];
+			$post['post_password']   = '' === $row['password'] ? '' : $row['password'] . '-' . substr( sha1( $title . ':' . $excerpt ), 0, 8 );
+			$post['post_type']       = (string) ( $post['post_type'] ?? 'post' );
+			$post['comment_status']  = (string) ( $post['comment_status'] ?? 'open' );
+			$post['ping_status']     = (string) ( $post['ping_status'] ?? 'closed' );
+			$post['post_name']       = (string) ( $post['post_name'] ?? 'template-title-' . $index );
+			$post['post_parent']     = (int) ( $post['post_parent'] ?? 0 );
+			$post['menu_order']      = (int) ( $post['menu_order'] ?? 0 );
+			$post['filter']          = 'raw';
+			$cases[]                 = array(
+				'label' => $row['label'],
+				'token' => substr( sha1( $row['label'] . ':' . $post['ID'] . ':' . $post['post_password'] ), 0, 12 ),
+				'post'  => $post,
+			);
+		}
+
+		return $cases;
+	}
+
+	private static function make_wp_post( array $post ): \WP_Post {
+		$defaults = array(
+			'ID'                    => 0,
+			'post_author'           => '0',
+			'post_date'             => '2024-01-01 00:00:00',
+			'post_date_gmt'         => '2024-01-01 00:00:00',
+			'post_content'          => '',
+			'post_title'            => '',
+			'post_excerpt'          => '',
+			'post_status'           => 'publish',
+			'comment_status'        => 'open',
+			'ping_status'           => 'closed',
+			'post_password'         => '',
+			'post_name'             => '',
+			'to_ping'               => '',
+			'pinged'                => '',
+			'post_modified'         => '2024-01-01 00:00:00',
+			'post_modified_gmt'     => '2024-01-01 00:00:00',
+			'post_content_filtered' => '',
+			'post_parent'           => 0,
+			'guid'                  => '',
+			'menu_order'            => 0,
+			'post_type'             => 'post',
+			'post_mime_type'        => '',
+			'comment_count'         => '0',
+			'filter'                => 'raw',
+		);
+
+		return new \WP_Post( (object) array_merge( $defaults, $post, array( 'filter' => 'raw' ) ) );
+	}
+
+	private static function postpass_hash( string $password ): ?string {
+		if ( ! \class_exists( '\PasswordHash' ) && \defined( 'ABSPATH' ) && \defined( 'WPINC' ) ) {
+			require_once ABSPATH . WPINC . '/class-phpass.php';
+		}
+		if ( ! \class_exists( '\PasswordHash' ) ) {
+			return null;
+		}
+
+		$hasher = new \PasswordHash( 8, true );
+		return $hasher->HashPassword( $password );
+	}
+
+	private static function assert_guarded_value( array &$failures, string $name, string $message, array $call, $expected, array $context ): void {
+		if ( ! $call['ok'] ) {
+			$failures[] = self::call_failure( $name . '-throwable', $message, $call, $context );
+			return;
+		}
+
+		if ( $expected !== $call['value'] ) {
+			$failures[] = array_merge(
+				array(
+					'name'     => $name . '-mismatch',
+					'message'  => $message,
+					'expected' => self::describe_value( $expected ),
+					'actual'   => self::describe_value( $call['value'] ),
+				),
+				$context
+			);
+		}
+	}
+
+	private static function event_count( array $events, string $hook ): int {
+		$count = 0;
+		foreach ( $events as $event ) {
+			if ( $hook === ( $event['hook'] ?? null ) ) {
+				++$count;
+			}
+		}
+
+		return $count;
+	}
+
+	private static function non_empty_template_string( string $value, string $fallback ): string {
+		return '' === $value ? $fallback : $value;
+	}
+
+	private static function describe_template_post( \WP_Post $post ): array {
+		return array(
+			'ID'          => (int) $post->ID,
+			'postStatus'  => (string) $post->post_status,
+			'hasPassword' => '' !== (string) $post->post_password,
+			'title'       => self::describe_string( (string) $post->post_title ),
+			'excerpt'     => self::describe_string( (string) $post->post_excerpt ),
+		);
 	}
 
 	private static function sanitize_post_cases( array $posts ): array {
