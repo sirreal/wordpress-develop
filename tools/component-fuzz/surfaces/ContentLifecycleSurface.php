@@ -29,6 +29,10 @@ final class ContentLifecycleSurface {
 			$rows[] = self::check_user_lifecycle( $ctx->fork( 'users' ), $case );
 			$rows[] = self::check_term_lifecycle( $ctx->fork( 'terms' ), $case );
 			$rows[] = self::check_post_lifecycle( $ctx->fork( 'posts' ), $case );
+			$rows   = array_merge(
+				$rows,
+				self::check_post_status_transition_hooks( $ctx->fork( 'post-status' ), $case )
+			);
 			$rows[] = self::check_post_term_relationship_lifecycle( $ctx->fork( 'post-terms' ), $case );
 			$rows[] = self::check_comment_lifecycle( $ctx->fork( 'comments' ), $case );
 			$rows[] = self::check_invalid_inputs( $ctx->fork( 'invalid' ), $case );
@@ -73,12 +77,14 @@ final class ContentLifecycleSurface {
 				'get_terms',
 				'get_user_by',
 				'get_userdata',
+				'has_action',
 				'has_term',
 				'is_object_in_term',
 				'is_wp_error',
 				'metadata_exists',
 				'post_type_exists',
 				'register_post_type',
+				'remove_action',
 				'sanitize_comment_cookies',
 				'sanitize_email',
 				'sanitize_post_field',
@@ -87,6 +93,7 @@ final class ContentLifecycleSurface {
 				'sanitize_user',
 				'term_exists',
 				'wp_cache_flush',
+				'wp_cache_delete',
 				'wp_cache_get',
 				'wp_cache_set',
 				'wp_delete_comment',
@@ -103,9 +110,13 @@ final class ContentLifecycleSurface {
 				'wp_set_current_user',
 				'wp_slash',
 				'wp_trash_post',
+				'wp_transition_post_status',
 				'wp_unslash',
+				'wp_clear_scheduled_hook',
 				'update_post_meta',
 				'wp_update_post',
+				'_count_posts_cache_key',
+				'_transition_post_status',
 			) as $function
 		) {
 			if ( ! function_exists( $function ) ) {
@@ -317,6 +328,141 @@ final class ContentLifecycleSurface {
 				'failures' => array_slice( $failures, 0, 6 ),
 				'events'   => array_slice( $events, 0, 16 ),
 			)
+		);
+	}
+
+	private static function check_post_status_transition_hooks( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$hook_failures    = array();
+		$storage_failures = array();
+		$cache_failures   = array();
+		$events           = array();
+		$hooks            = array();
+		$post_id          = 0;
+		$post_type        = 'cf_status_' . substr( $case['token'], 0, 8 );
+
+		try {
+			\register_post_type(
+				$post_type,
+				array(
+					'public'    => true,
+					'rewrite'   => false,
+					'query_var' => false,
+					'supports'  => array( 'title' ),
+				)
+			);
+
+			$post_id = \wp_insert_post(
+				\wp_slash(
+					array(
+						'post_type'     => $post_type,
+						'post_title'    => 'Status transition ' . $case['token'],
+						'post_content'  => 'Status transition content ' . $case['token'],
+						'post_status'   => 'draft',
+						'post_name'     => 'status-transition-' . $case['token'],
+						'post_date'     => '2021-02-03 04:05:06',
+						'post_date_gmt' => '2021-02-03 04:05:06',
+						'guid'          => 'http://example.test/status-transition-' . $case['token'],
+					)
+				),
+				true,
+				false
+			);
+			$post    = \get_post( $post_id );
+
+			if ( ! is_int( $post_id ) || ! $post instanceof \WP_Post ) {
+				$details = array(
+					'postId' => self::error_summary( $post_id ),
+					'post'   => self::post_summary( $post ),
+				);
+				self::collect_failure( $hook_failures, false, 'status transition host post inserted', $details );
+				self::collect_failure( $storage_failures, false, 'status transition host post inserted', $details );
+				self::collect_failure( $cache_failures, false, 'status transition host post inserted', $details );
+			} else {
+				$transitions = array(
+					array( 'draft', 'publish' ),
+					array( 'publish', 'publish' ),
+					array( 'publish', 'trash' ),
+					array( 'future', 'draft' ),
+				);
+
+				if ( false === \has_action( 'transition_post_status', '_transition_post_status' ) ) {
+					\add_action( 'transition_post_status', '_transition_post_status', 5, 3 );
+					$hooks[] = array( 'transition_post_status', '_transition_post_status', 5 );
+				}
+
+				$hooks = array_merge( $hooks, self::install_post_status_transition_hooks( $post_type, $transitions, $events ) );
+
+				foreach ( $transitions as $transition ) {
+					list( $old_status, $new_status ) = $transition;
+					$label           = $old_status . '_to_' . $new_status;
+					$event_offset    = count( $events );
+					$transition_post = clone $post;
+					$transition_post->post_status = $old_status;
+
+					self::seed_transition_caches( $post_type, $label );
+					\wp_transition_post_status( $new_status, $old_status, $transition_post );
+
+					$transition_events = array_slice( $events, $event_offset );
+					$stored_after      = \get_post( $post_id );
+
+					self::collect_failure(
+						$hook_failures,
+						self::transition_events_match( $transition_events, $old_status, $new_status, $post_id, $post_type ),
+						'status transition hooks fire in generic, old-to-new, and new-status-type order',
+						array(
+							'label'  => $label,
+							'events' => $transition_events,
+						)
+					);
+					self::collect_failure(
+						$storage_failures,
+						$stored_after instanceof \WP_Post && 'draft' === $stored_after->post_status,
+						'direct wp_transition_post_status does not mutate stored post status',
+						array(
+							'label'        => $label,
+							'storedStatus' => $stored_after instanceof \WP_Post ? $stored_after->post_status : null,
+						)
+					);
+					self::collect_failure(
+						$cache_failures,
+						self::transition_caches_match_expectations( $post_type, $old_status, $new_status, $label ),
+						'status transition cache invalidation follows publish and status-change branches',
+						array(
+							'label'  => $label,
+							'caches' => self::transition_cache_summary( $post_type ),
+						)
+					);
+				}
+			}
+		} finally {
+			self::remove_hooks( $hooks );
+			if ( is_int( $post_id ) && $post_id > 0 ) {
+				\wp_delete_post( $post_id, true );
+			}
+		}
+
+		$data = array(
+			'case'     => self::case_summary( $case ),
+			'postType' => $post_type,
+			'events'   => array_slice( $events, 0, 18 ),
+		);
+
+		return array(
+			$ctx->result(
+				'content-lifecycle.posts.status-transition-hook-order',
+				array() === $hook_failures,
+				array_merge( $data, array( 'failures' => array_slice( $hook_failures, 0, 6 ) ) )
+			),
+			$ctx->result(
+				'content-lifecycle.posts.status-transition-does-not-mutate-storage',
+				array() === $storage_failures,
+				array_merge( $data, array( 'failures' => array_slice( $storage_failures, 0, 6 ) ) )
+			),
+			$ctx->result(
+				'content-lifecycle.posts.status-transition-cache-branches',
+				array() === $cache_failures,
+				array_merge( $data, array( 'failures' => array_slice( $cache_failures, 0, 6 ) ) )
+			),
 		);
 	}
 
@@ -1351,6 +1497,184 @@ final class ContentLifecycleSurface {
 		return $hooks;
 	}
 
+	private static function install_post_status_transition_hooks( string $post_type, array $transitions, array &$events ): array {
+		$hooks = array();
+		$add   = static function ( string $hook, callable $callback, int $accepted_args ) use ( &$hooks ): void {
+			\add_action( $hook, $callback, 20, $accepted_args );
+			$hooks[] = array( $hook, $callback, 20 );
+		};
+
+		$add(
+			'transition_post_status',
+			static function ( string $new_status, string $old_status, \WP_Post $post ) use ( &$events ): void {
+				$events[] = array(
+					'hook'   => 'transition_post_status',
+					'new'    => $new_status,
+					'old'    => $old_status,
+					'postId' => (int) $post->ID,
+					'type'   => (string) $post->post_type,
+				);
+			},
+			3
+		);
+
+		foreach ( $transitions as $transition ) {
+			list( $old_status, $new_status ) = $transition;
+			$add(
+				$old_status . '_to_' . $new_status,
+				static function ( \WP_Post $post ) use ( &$events, $old_status, $new_status ): void {
+					$events[] = array(
+						'hook'   => $old_status . '_to_' . $new_status,
+						'new'    => $new_status,
+						'old'    => $old_status,
+						'postId' => (int) $post->ID,
+						'type'   => (string) $post->post_type,
+					);
+				},
+				1
+			);
+		}
+
+		foreach ( array_unique( array_column( $transitions, 1 ) ) as $new_status ) {
+			$add(
+				$new_status . '_' . $post_type,
+				static function ( int $post_id, \WP_Post $post, string $old_status ) use ( &$events, $new_status, $post_type ): void {
+					$events[] = array(
+						'hook'   => $new_status . '_' . $post_type,
+						'new'    => $new_status,
+						'old'    => $old_status,
+						'postId' => $post_id,
+						'type'   => (string) $post->post_type,
+					);
+				},
+				3
+			);
+		}
+
+		return $hooks;
+	}
+
+	private static function transition_events_match( array $events, string $old_status, string $new_status, int $post_id, string $post_type ): bool {
+		$expected = array(
+			array(
+				'hook'   => 'transition_post_status',
+				'new'    => $new_status,
+				'old'    => $old_status,
+				'postId' => $post_id,
+				'type'   => $post_type,
+			),
+			array(
+				'hook'   => $old_status . '_to_' . $new_status,
+				'new'    => $new_status,
+				'old'    => $old_status,
+				'postId' => $post_id,
+				'type'   => $post_type,
+			),
+			array(
+				'hook'   => $new_status . '_' . $post_type,
+				'new'    => $new_status,
+				'old'    => $old_status,
+				'postId' => $post_id,
+				'type'   => $post_type,
+			),
+		);
+
+		return array_values( $events ) === $expected;
+	}
+
+	private static function seed_transition_caches( string $post_type, string $label ): void {
+		\wp_cache_set( \_count_posts_cache_key( $post_type ), 'counts-' . $label, 'counts' );
+		\wp_cache_set( \_count_posts_cache_key( $post_type, 'readable' ), 'readable-' . $label, 'counts' );
+
+		foreach ( array( 'server', 'gmt', 'blog' ) as $timezone ) {
+			\wp_cache_set( "lastpostmodified:{$timezone}", 'modified-' . $label, 'timeinfo' );
+			\wp_cache_set( "lastpostdate:{$timezone}", 'date-' . $label, 'timeinfo' );
+			\wp_cache_set( "lastpostdate:{$timezone}:{$post_type}", 'date-type-' . $label, 'timeinfo' );
+		}
+	}
+
+	private static function transition_caches_match_expectations( string $post_type, string $old_status, string $new_status, string $label ): bool {
+		$summary         = self::transition_cache_summary( $post_type );
+		$status_changed  = $new_status !== $old_status;
+		$publish_touched = 'publish' === $new_status || 'publish' === $old_status;
+
+		if ( $status_changed ) {
+			if ( false !== $summary['counts']['base']['value'] || false !== $summary['counts']['readable']['value'] ) {
+				return false;
+			}
+		} else {
+			$count_expected = self::transition_count_cache_expected_values( $post_type, $label );
+			if (
+				$summary['counts']['base']['value'] !== $count_expected['base']
+				|| $summary['counts']['readable']['value'] !== $count_expected['readable']
+			) {
+				return false;
+			}
+		}
+
+		foreach ( $summary['timeinfo'] as $timezone => $values ) {
+			if ( $publish_touched ) {
+				if ( false !== $values['modified'] || false !== $values['date'] || false !== $values['datePostType'] ) {
+					return false;
+				}
+				continue;
+			}
+
+			if (
+				$values['modified'] !== 'modified-' . $label
+				|| $values['date'] !== 'date-' . $label
+				|| $values['datePostType'] !== 'date-type-' . $label
+			) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function transition_cache_summary( string $post_type ): array {
+		$base_count_key     = \_count_posts_cache_key( $post_type );
+		$readable_count_key = \_count_posts_cache_key( $post_type, 'readable' );
+		$summary            = array(
+			'counts'   => array(
+				'base'     => array(
+					'key'   => $base_count_key,
+					'value' => \wp_cache_get( $base_count_key, 'counts' ),
+				),
+				'readable' => array(
+					'key'   => $readable_count_key,
+					'value' => \wp_cache_get( $readable_count_key, 'counts' ),
+				),
+			),
+			'timeinfo' => array(),
+		);
+
+		foreach ( array( 'server', 'gmt', 'blog' ) as $timezone ) {
+			$summary['timeinfo'][ $timezone ] = array(
+				'modified'     => \wp_cache_get( "lastpostmodified:{$timezone}", 'timeinfo' ),
+				'date'         => \wp_cache_get( "lastpostdate:{$timezone}", 'timeinfo' ),
+				'datePostType' => \wp_cache_get( "lastpostdate:{$timezone}:{$post_type}", 'timeinfo' ),
+			);
+		}
+
+		return $summary;
+	}
+
+	private static function transition_count_cache_expected_values( string $post_type, string $label ): array {
+		$base_key     = \_count_posts_cache_key( $post_type );
+		$readable_key = \_count_posts_cache_key( $post_type, 'readable' );
+		$expected     = array(
+			'base'     => 'counts-' . $label,
+			'readable' => 'readable-' . $label,
+		);
+
+		if ( $base_key === $readable_key ) {
+			$expected['base'] = $expected['readable'];
+		}
+
+		return $expected;
+	}
+
 	private static function install_post_meta_hooks( string $meta_key, string $unique_key, array &$events ): array {
 		$hooks = array();
 		$watch = array(
@@ -1753,6 +2077,20 @@ final class ContentLifecycleSurface {
 			'tagName'        => $case['tagName'],
 			'commentAuthor'  => $case['commentAuthor'],
 			'commentEmail'   => $case['commentEmail'],
+		);
+	}
+
+	private static function post_summary( $post ) {
+		if ( ! $post instanceof \WP_Post ) {
+			return $post;
+		}
+
+		return array(
+			'ID'          => $post->ID,
+			'post_type'   => $post->post_type,
+			'post_status' => $post->post_status,
+			'post_name'   => $post->post_name,
+			'post_author' => $post->post_author,
 		);
 	}
 
