@@ -645,8 +645,8 @@ final class BlocksSurface {
 					'contentAttr'     => $attributes['content'] ?? null,
 					'urlAttr'         => $attributes['url'] ?? null,
 					'unsupportedAttr' => $attributes['unsupported'] ?? null,
-					'missingAttr'     => $attributes['missing'] ?? null,
-					'malformedAttr'   => $attributes['malformed'] ?? null,
+					'hasMissingAttr'  => array_key_exists( 'missing', $attributes ),
+					'hasMalformedAttr' => array_key_exists( 'malformed', $attributes ),
 					'metadata'        => $attributes['metadata'] ?? null,
 					'context'         => $block->context['componentFuzz/bindingToken'] ?? null,
 				);
@@ -729,8 +729,8 @@ final class BlocksSurface {
 						&& $case['filteredContent'] === ( $render_entry['contentAttr'] ?? null )
 						&& $case['filteredUrl'] === ( $render_entry['urlAttr'] ?? null )
 						&& $case['fallbackUnsupported'] === ( $render_entry['unsupportedAttr'] ?? null )
-						&& null === ( $render_entry['missingAttr'] ?? null )
-						&& null === ( $render_entry['malformedAttr'] ?? null )
+						&& false === ( $render_entry['hasMissingAttr'] ?? null )
+						&& false === ( $render_entry['hasMalformedAttr'] ?? null )
 						&& isset( $render_entry['metadata']['bindings']['missing'], $render_entry['metadata']['bindings']['malformed'] )
 						&& $case['contextToken'] === ( $render_entry['context'] ?? null ),
 					"render_block merges computed binding attributes before dynamic rendering and replaces only supported HTML targets case {$index}",
