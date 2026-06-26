@@ -911,6 +911,9 @@ final class AdminMediaChromeSurface {
 		$downsize_url   = 'http://example.test/component-fuzz/direct <script>alert(1)</script> "' . $ctx->identifier( 3, 8 ) . '.jpg';
 		$downsize_calls = array();
 		$send_events    = array();
+		$integrated_caption = "Integrated caption\nSecond line";
+		$integrated_alt     = 'Integrated alt <script>alert(1)</script> "' . $ctx->identifier( 3, 8 );
+		$added_default_caption_filter = false;
 
 		$downsize_filter = static function ( $downsize, int $id, $requested_size ) use ( &$downsize_calls, $attachment, $size, $downsize_url ) {
 			$downsize_calls[] = array(
@@ -967,7 +970,25 @@ final class AdminMediaChromeSurface {
 				$size,
 				'Default rel alt <script>alert(1)</script>'
 			);
+
+			if ( false === \has_filter( 'image_send_to_editor', 'image_add_caption' ) ) {
+				\add_filter( 'image_send_to_editor', 'image_add_caption', 20, 8 );
+				$added_default_caption_filter = true;
+			}
+			$integrated_caption_html = \get_image_send_to_editor(
+				$attachment->ID,
+				$integrated_caption,
+				$title,
+				'left',
+				\wp_get_attachment_url( $attachment->ID ),
+				true,
+				$size,
+				$integrated_alt
+			);
 		} finally {
+			if ( $added_default_caption_filter ) {
+				\remove_filter( 'image_send_to_editor', 'image_add_caption', 20 );
+			}
 			\remove_filter( 'image_downsize', $downsize_filter, 10 );
 			\remove_filter( 'image_send_to_editor', $send_filter, 10 );
 			\remove_filter( 'disable_captions', $disable_captions_filter );
@@ -1003,6 +1024,20 @@ final class AdminMediaChromeSurface {
 				&& self::html_has_no_raw_script( $default_rel_html ),
 			'get_image_send_to_editor() emits the default attachment rel when rel is true',
 			array( 'html' => self::describe_string( $default_rel_html ) )
+		);
+
+		self::collect_failure(
+			$failures,
+			is_string( $integrated_caption_html )
+				&& str_starts_with( $integrated_caption_html, '[caption id="attachment_' . $attachment->ID . '" align="alignleft" width="321"]' )
+				&& str_contains( $integrated_caption_html, 'href="' . \esc_url( \wp_get_attachment_url( $attachment->ID ) ) . '"' )
+				&& str_contains( $integrated_caption_html, 'rel="attachment wp-att-' . $attachment->ID . '"' )
+				&& str_contains( $integrated_caption_html, 'alt="' . \esc_attr( $integrated_alt ) . '"' )
+				&& ! str_contains( $integrated_caption_html, 'class="alignleft' )
+				&& str_contains( $integrated_caption_html, 'Integrated caption<br />Second line[/caption]' )
+				&& self::html_has_no_raw_script( $integrated_caption_html ),
+			'get_image_send_to_editor() runs through the default caption shortcode filter when captions are enabled',
+			array( 'html' => self::describe_string( $integrated_caption_html ) )
 		);
 
 		self::collect_failure(
