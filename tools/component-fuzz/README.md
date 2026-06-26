@@ -466,6 +466,7 @@ database, network requests, or a configured site.
   confirmation descriptions, request-key hash/expiration validation including
   missing-request and global-post fallback fail-closed behavior, export group
   HTML escaping, exporter/eraser registry and processor shape contracts,
+  final erasure completion status/meta/action behavior,
   built-in comments exporter/eraser payload and anonymization behavior, export
   notification recipient/subject/content/header filters through an intercepted
   PHPMailer handoff, directory/expiration cleanup filters, anonymization
