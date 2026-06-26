@@ -38,6 +38,7 @@ final class CanonicalRoutingSurface {
 			$rows[] = self::check_safe_redirect_replacement_is_returned( $ctx->fork( 'safe-filter' ), $case );
 			$rows[] = self::check_unsafe_redirect_replacement_is_cancelled( $ctx->fork( 'unsafe-filter' ), $case );
 			$rows[] = self::check_trailing_slash_modes( $ctx->fork( 'slashes' ), $case );
+			$rows[] = self::check_canonical_url_output_helpers( $ctx->fork( 'canonical-output' ), $case );
 			$rows[] = self::check_canonical_helpers( $ctx->fork( 'helpers' ), $case );
 			$rows[] = self::check_canonical_helper_matrix( $ctx->fork( 'helper-matrix' ), $case );
 		} catch ( \Throwable $e ) {
@@ -85,6 +86,10 @@ final class CanonicalRoutingSurface {
 		return 'rss2';
 	}
 
+	public static function filter_default_comments_page(): string {
+		return 'oldest';
+	}
+
 	public static function filter_false() {
 		return false;
 	}
@@ -96,7 +101,7 @@ final class CanonicalRoutingSurface {
 	private static function missing_requirements(): array {
 		$missing = array();
 
-		foreach ( array( 'WP', 'WP_Query', 'WP_Rewrite' ) as $class ) {
+		foreach ( array( 'WP', 'WP_Post', 'WP_Query', 'WP_Rewrite' ) as $class ) {
 			if ( ! class_exists( $class ) ) {
 				$missing[] = "class {$class}";
 			}
@@ -108,7 +113,9 @@ final class CanonicalRoutingSurface {
 				'add_filter',
 				'add_query_arg',
 				'get_day_link',
+				'get_comments_pagenum_link',
 				'get_month_link',
+				'get_permalink',
 				'get_query_var',
 				'get_year_link',
 				'home_url',
@@ -117,9 +124,16 @@ final class CanonicalRoutingSurface {
 				'redirect_canonical',
 				'remove_query_arg',
 				'remove_filter',
+				'sanitize_title',
 				'strip_fragment_from_url',
+				'trailingslashit',
 				'user_trailingslashit',
+				'wp_cache_delete',
+				'wp_cache_get',
+				'wp_cache_set',
+				'wp_get_canonical_url',
 				'wp_parse_url',
+				'rel_canonical',
 			) as $function
 		) {
 			if ( ! function_exists( $function ) ) {
@@ -558,6 +572,126 @@ final class CanonicalRoutingSurface {
 		);
 	}
 
+	private static function check_canonical_url_output_helpers( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures   = array();
+		$post       = self::make_post( 510000 + $ctx->iteration(), $case['token'], 'publish' );
+		$other_post = self::make_post( 520000 + $ctx->iteration(), $case['token'] . '-other', 'publish' );
+		$draft_post = self::make_post( 530000 + $ctx->iteration(), $case['token'] . '-draft', 'draft' );
+		$cached_ids      = array( $post->ID, $other_post->ID, $draft_post->ID );
+		$cached_snapshot = self::snapshot_cache_slots( $cached_ids, 'posts' );
+		$page            = $ctx->int( 2, 9 );
+		$cpage           = $ctx->int( 2, 9 );
+
+		foreach ( array( $post, $other_post, $draft_post ) as $cached_post ) {
+			\wp_cache_set( $cached_post->ID, $cached_post, 'posts' );
+		}
+
+		$plain_permalink_filter = static fn() => '';
+		$canonical_filter_seen  = array();
+		$canonical_marker       = 'canonical-' . $ctx->identifier( 4, 8 );
+		$canonical_filter      = static function ( string $canonical_url, \WP_Post $filtered_post ) use ( &$canonical_filter_seen, $canonical_marker ): string {
+			$canonical_filter_seen[] = array(
+				'url'    => $canonical_url,
+				'postId' => $filtered_post->ID,
+				'status' => $filtered_post->post_status,
+			);
+
+			return \add_query_arg( 'cfz-canonical', $canonical_marker, $canonical_url );
+		};
+
+		try {
+			self::prepare_singular_request( $post, array( 'page' => $page ) );
+			$paged_url     = \wp_get_canonical_url( $post );
+			$paged_parts   = is_string( $paged_url ) ? \wp_parse_url( $paged_url ) : array();
+			$other_url     = \wp_get_canonical_url( $other_post );
+			$expected_base = \get_permalink( $post );
+			$expected_paged = is_string( $expected_base )
+				? \trailingslashit( $expected_base ) . \user_trailingslashit( (string) $page, 'single_paged' )
+				: false;
+			$expected_paged_parts = is_string( $expected_paged ) ? \wp_parse_url( $expected_paged ) : array();
+			$expected_other       = \get_permalink( $other_post );
+
+			\add_filter( 'pre_option_permalink_structure', $plain_permalink_filter, 100 );
+			try {
+				$plain_url   = \wp_get_canonical_url( $post );
+				$plain_parts = is_string( $plain_url ) ? \wp_parse_url( $plain_url ) : array();
+				$plain_query = self::parse_query_from_parts( $plain_parts );
+			} finally {
+				\remove_filter( 'pre_option_permalink_structure', $plain_permalink_filter, 100 );
+			}
+
+			self::prepare_singular_request( $post, array( 'cpage' => $cpage ) );
+			$comment_expected = \get_comments_pagenum_link( $cpage );
+			$comment_url      = \wp_get_canonical_url( $post );
+
+			self::prepare_singular_request( $post );
+			\add_filter( 'get_canonical_url', $canonical_filter, 10, 2 );
+			try {
+				$filtered_url = \wp_get_canonical_url( $post );
+				ob_start();
+				\rel_canonical();
+				$rel_output = ob_get_clean();
+			} finally {
+				\remove_filter( 'get_canonical_url', $canonical_filter, 10 );
+			}
+			$filtered_parts = is_string( $filtered_url ) ? \wp_parse_url( $filtered_url ) : array();
+			$filtered_query = self::parse_query_from_parts( $filtered_parts );
+
+			self::prepare_request( array(), array( 'is_home' => true ) );
+			ob_start();
+			\rel_canonical();
+			$rel_non_singular = ob_get_clean();
+
+			self::collect_failure(
+				$failures,
+				is_string( $expected_base )
+					&& $expected_paged === $paged_url
+					&& str_ends_with( $paged_url, '/' . $page . '/' )
+					&& ( $expected_paged_parts['path'] ?? null ) === ( $paged_parts['path'] ?? null )
+					&& $expected_other === $other_url
+					&& false === \wp_get_canonical_url( $draft_post )
+					&& self::HOME_URL . '/?p=' . $post->ID . '&page=' . $page === $plain_url
+					&& array( 'p' => (string) $post->ID, 'page' => (string) $page ) === $plain_query
+					&& $comment_expected === $comment_url
+					&& 2 === count( $canonical_filter_seen )
+					&& array( $post->ID, $post->ID ) === array_column( $canonical_filter_seen, 'postId' )
+					&& $canonical_marker === ( $filtered_query['cfz-canonical'] ?? null )
+					&& is_string( $rel_output )
+					&& '<link rel="canonical" href="' . esc_url( $filtered_url ) . "\" />\n" === $rel_output
+					&& '' === $rel_non_singular
+					&& false === \has_filter( 'get_canonical_url', $canonical_filter )
+					&& false === \has_filter( 'pre_option_permalink_structure', $plain_permalink_filter ),
+				'wp_get_canonical_url and rel_canonical honor status, current pagination, comments pages, filters, and singular gates',
+				array(
+					'pagedUrl'       => $paged_url,
+					'otherUrl'       => $other_url,
+					'plainUrl'       => $plain_url,
+					'plainQuery'     => $plain_query,
+					'commentUrl'     => $comment_url,
+					'filteredUrl'    => $filtered_url,
+					'filterSeen'     => $canonical_filter_seen,
+					'relOutput'      => $rel_output,
+					'relNonSingular' => $rel_non_singular,
+					'expectedPaged'  => $expected_paged,
+				)
+			);
+		} finally {
+			\remove_filter( 'get_canonical_url', $canonical_filter, 10 );
+			\remove_filter( 'pre_option_permalink_structure', $plain_permalink_filter, 100 );
+
+			self::restore_cache_slots( $cached_snapshot, 'posts' );
+		}
+
+		return $ctx->result(
+			'canonical-routing.canonical-url-output-helpers',
+			array() === $failures,
+			array(
+				'postId'   => $post->ID,
+				'failures' => array_slice( $failures, 0, 4 ),
+			)
+		);
+	}
+
 	private static function check_canonical_helpers( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
 		$url            = self::HOME_URL . '/route/' . rawurlencode( $case['keep'] ) . '/?p=123&keep=' . rawurlencode( $case['keep'] ) . '#frag-' . rawurlencode( $case['token'] );
 		$stripped       = \strip_fragment_from_url( $url );
@@ -699,13 +833,14 @@ final class CanonicalRoutingSurface {
 
 	private static function install_option_filters(): void {
 		$options = array(
-			'pre_option_home'                     => array( self::class, 'filter_home' ),
-			'pre_option_siteurl'                  => array( self::class, 'filter_siteurl' ),
-			'pre_option_permalink_structure'      => array( self::class, 'filter_permalink_structure' ),
-			'pre_option_blog_charset'             => array( self::class, 'filter_blog_charset' ),
-			'pre_option_html_type'                => array( self::class, 'filter_html_type' ),
-			'pre_option_default_feed'             => array( self::class, 'filter_default_feed' ),
-			'pre_option_page_comments'            => array( self::class, 'filter_false' ),
+			'pre_option_home'                        => array( self::class, 'filter_home' ),
+			'pre_option_siteurl'                     => array( self::class, 'filter_siteurl' ),
+			'pre_option_permalink_structure'         => array( self::class, 'filter_permalink_structure' ),
+			'pre_option_blog_charset'                => array( self::class, 'filter_blog_charset' ),
+			'pre_option_html_type'                   => array( self::class, 'filter_html_type' ),
+			'pre_option_default_feed'                => array( self::class, 'filter_default_feed' ),
+			'pre_option_default_comments_page'       => array( self::class, 'filter_default_comments_page' ),
+			'pre_option_page_comments'               => array( self::class, 'filter_false' ),
 			'pre_option_wp_attachment_pages_enabled' => array( self::class, 'filter_zero' ),
 		);
 
@@ -716,13 +851,14 @@ final class CanonicalRoutingSurface {
 
 	private static function remove_option_filters(): void {
 		$options = array(
-			'pre_option_home'                     => array( self::class, 'filter_home' ),
-			'pre_option_siteurl'                  => array( self::class, 'filter_siteurl' ),
-			'pre_option_permalink_structure'      => array( self::class, 'filter_permalink_structure' ),
-			'pre_option_blog_charset'             => array( self::class, 'filter_blog_charset' ),
-			'pre_option_html_type'                => array( self::class, 'filter_html_type' ),
-			'pre_option_default_feed'             => array( self::class, 'filter_default_feed' ),
-			'pre_option_page_comments'            => array( self::class, 'filter_false' ),
+			'pre_option_home'                        => array( self::class, 'filter_home' ),
+			'pre_option_siteurl'                     => array( self::class, 'filter_siteurl' ),
+			'pre_option_permalink_structure'         => array( self::class, 'filter_permalink_structure' ),
+			'pre_option_blog_charset'                => array( self::class, 'filter_blog_charset' ),
+			'pre_option_html_type'                   => array( self::class, 'filter_html_type' ),
+			'pre_option_default_feed'                => array( self::class, 'filter_default_feed' ),
+			'pre_option_default_comments_page'       => array( self::class, 'filter_default_comments_page' ),
+			'pre_option_page_comments'               => array( self::class, 'filter_false' ),
 			'pre_option_wp_attachment_pages_enabled' => array( self::class, 'filter_zero' ),
 		);
 
@@ -759,11 +895,98 @@ final class CanonicalRoutingSurface {
 		$_POST = array();
 	}
 
+	private static function prepare_singular_request( \WP_Post $post, array $query_vars = array() ): void {
+		self::prepare_request(
+			$query_vars,
+			array(
+				'is_single'   => true,
+				'is_singular' => true,
+				'post_count'  => 1,
+			)
+		);
+
+		$GLOBALS['post']                  = $post;
+		$GLOBALS['wp_query']->post        = $post;
+		$GLOBALS['wp_query']->posts       = array( $post );
+		$GLOBALS['wp_query']->queried_object = $post;
+		$GLOBALS['wp_query']->queried_object_id = $post->ID;
+	}
+
+	private static function make_post( int $post_id, string $token, string $status ): \WP_Post {
+		$slug = sanitize_title( 'canonical-' . $token . '-' . $status );
+		$post = (object) array(
+			'ID'                    => $post_id,
+			'post_author'           => 1,
+			'post_date'             => '2026-06-15 10:20:30',
+			'post_date_gmt'         => '2026-06-15 10:20:30',
+			'post_content'          => 'canonical routing fixture',
+			'post_title'            => 'Canonical ' . $token,
+			'post_excerpt'          => '',
+			'post_status'           => $status,
+			'post_name'             => $slug,
+			'post_modified'         => '2026-06-16 10:20:30',
+			'post_modified_gmt'     => '2026-06-16 10:20:30',
+			'post_parent'           => 0,
+			'post_type'             => 'post',
+			'post_mime_type'        => '',
+			'comment_count'         => 0,
+			'comment_status'        => 'open',
+			'ping_status'           => 'closed',
+			'to_ping'               => '',
+			'pinged'                => '',
+			'post_password'         => '',
+			'post_content_filtered' => '',
+			'post_excerpt_filtered' => '',
+			'guid'                  => self::HOME_URL . '/?p=' . $post_id,
+			'menu_order'            => 0,
+			'filter'                => 'raw',
+		);
+
+		return new \WP_Post( $post );
+	}
+
+	private static function collect_failure( array &$failures, bool $condition, string $label, array $details ): void {
+		if ( $condition ) {
+			return;
+		}
+
+		$failures[] = array(
+			'label'   => $label,
+			'details' => $details,
+		);
+	}
+
+	private static function snapshot_cache_slots( array $keys, string $group ): array {
+		$snapshots = array();
+
+		foreach ( $keys as $key ) {
+			$found             = false;
+			$value             = \wp_cache_get( $key, $group, false, $found );
+			$snapshots[ $key ] = array(
+				'found' => $found,
+				'value' => self::clone_value( $value ),
+			);
+		}
+
+		return $snapshots;
+	}
+
+	private static function restore_cache_slots( array $snapshots, string $group ): void {
+		foreach ( $snapshots as $key => $snapshot ) {
+			if ( ! empty( $snapshot['found'] ) ) {
+				\wp_cache_set( $key, self::clone_value( $snapshot['value'] ), $group );
+			} else {
+				\wp_cache_delete( $key, $group );
+			}
+		}
+	}
+
 	private static function snapshot_state(): array {
 		$globals = array();
 		foreach (
 			array(
 				'wp',
+				'post',
 				'wp_query',
 				'wp_the_query',
 				'wp_rewrite',
