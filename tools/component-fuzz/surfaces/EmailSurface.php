@@ -3894,11 +3894,13 @@ final class EmailSurface {
 		$missing = array();
 		foreach (
 			array(
+				'add_action',
 				'add_filter',
 				'email_exists',
 				'get_user_by',
 				'is_email',
 				'remove_filter',
+				'remove_action',
 				'retrieve_password',
 				'sanitize_email',
 				'wp_insert_user',
@@ -3907,6 +3909,12 @@ final class EmailSurface {
 		) {
 			if ( ! function_exists( $function ) ) {
 				$missing[] = 'function ' . $function;
+			}
+		}
+
+		foreach ( array( 'PHPMailer\PHPMailer\PHPMailer', 'WP_PHPMailer' ) as $class ) {
+			if ( ! class_exists( $class ) ) {
+				$missing[] = 'class ' . $class;
 			}
 		}
 
@@ -3927,6 +3935,10 @@ final class EmailSurface {
 		$server_snapshot = array_key_exists( 'REMOTE_ADDR', $_SERVER )
 			? array( 'exists' => true, 'value' => $_SERVER['REMOTE_ADDR'] )
 			: array( 'exists' => false, 'value' => null );
+		$mailer_snapshot = array_key_exists( 'phpmailer', $GLOBALS )
+			? array( 'exists' => true, 'value' => $GLOBALS['phpmailer'] )
+			: array( 'exists' => false, 'value' => null );
+		$validator_snapshot = \PHPMailer\PHPMailer\PHPMailer::$validator;
 		$not_called      = static function (): array {
 			return array(
 				'threw'    => false,
@@ -3934,10 +3946,17 @@ final class EmailSurface {
 				'warnings' => array(),
 			);
 		};
+		$mail_succeeded  = array();
+		$success_action  = static function ( array $mail_data ) use ( &$mail_succeeded ): void {
+			$mail_succeeded[] = $mail_data;
+		};
 
 		self::reset_stub_content();
 		try {
 			$_SERVER['REMOTE_ADDR'] = '127.0.0.1';
+			\PHPMailer\PHPMailer\PHPMailer::$validator = static function ( $email ): bool {
+				return (bool) \is_email( $email );
+			};
 
 			\remove_all_filters( 'pre_user_email' );
 			\add_filter( 'pre_user_email', 'trim' );
@@ -3957,14 +3976,19 @@ final class EmailSurface {
 					'retrieve_password_notification_email',
 					'wp_mail',
 					'pre_wp_mail',
+					'wp_mail_succeeded',
 				) as $password_reset_hook
 			) {
 				\remove_all_filters( $password_reset_hook );
 			}
+			\add_action( 'wp_mail_succeeded', $success_action );
 
 			foreach ( $cases as $case_index => $case ) {
 				self::reset_stub_content();
 				self::install_email_filters( 'unicode' );
+				EmailSurfaceMailer::$sent = array();
+				$GLOBALS['phpmailer']     = self::new_mailer();
+				$mail_succeeded           = array();
 
 				if ( null !== $case['conversionError'] ) {
 					$failures[] = array(
@@ -4009,12 +4033,7 @@ final class EmailSurface {
 
 				$canonical          = $unicode_email->get_unicode_address();
 				$machine            = $unicode_email->get_ascii_address();
-				$mail_calls         = array();
 				$notification_calls = array();
-				$mail_filter        = static function ( $return, $atts ) use ( &$mail_calls ) {
-					$mail_calls[] = $atts;
-					return true;
-				};
 				$notification_filter = static function ( $defaults, $key, $user_login, $user_data ) use ( &$notification_calls, $machine ) {
 					$notification_calls[] = array(
 						'defaults'  => $defaults,
@@ -4028,7 +4047,6 @@ final class EmailSurface {
 				};
 
 				\add_filter( 'retrieve_password_notification_email', $notification_filter, 10, 4 );
-				\add_filter( 'pre_wp_mail', $mail_filter, PHP_INT_MAX, 2 );
 				try {
 					$login  = 'cfz_reset_views_' . $ctx->iteration() . '_' . $case_index . '_' . substr( sha1( $canonical ), 0, 8 );
 					$insert = self::capture_warnings(
@@ -4047,9 +4065,12 @@ final class EmailSurface {
 					$by_canonical     = is_int( $user_id ) ? self::capture_warnings( static fn() => \get_user_by( 'email', $canonical ) ) : $not_called();
 					$exists_machine   = is_int( $user_id ) ? self::capture_warnings( static fn() => \email_exists( $machine ) ) : $not_called();
 					$reset            = is_int( $user_id ) ? self::capture_warnings( static fn() => \retrieve_password( $canonical ) ) : $not_called();
-					$mail             = $mail_calls[0] ?? null;
+					$mail             = EmailSurfaceMailer::$sent[0] ?? null;
+					$mail_success     = $mail_succeeded[0] ?? null;
 					$notification     = $notification_calls[0] ?? null;
-					$mail_to          = is_array( $mail ) && is_string( $mail['to'] ?? null ) ? $mail['to'] : null;
+					$mail_to          = is_array( $mail ) && is_array( $mail['to'] ?? null ) && is_string( $mail['to'][0][0] ?? null )
+						? $mail['to'][0][0]
+						: null;
 					$mail_to_parse    = is_string( $mail_to )
 						? self::capture_warnings( static fn() => \WP_Email_Address::from_string( $mail_to, 'unicode' ) )
 						: $not_called();
@@ -4059,9 +4080,12 @@ final class EmailSurface {
 					$mail_to_sanitize = is_string( $mail_to )
 						? self::capture_warnings( static fn() => \sanitize_email( $mail_to ) )
 						: $not_called();
+					$mail_count_before = count( EmailSurfaceMailer::$sent );
+					$success_count_before = count( $mail_succeeded );
+					$notification_count_before = count( $notification_calls );
+					$machine_reset     = is_int( $user_id ) ? self::capture_warnings( static fn() => \retrieve_password( $machine ) ) : $not_called();
 				} finally {
 					\remove_filter( 'retrieve_password_notification_email', $notification_filter, 10 );
-					\remove_filter( 'pre_wp_mail', $mail_filter, PHP_INT_MAX );
 				}
 
 				$stored_user        = $stored['value'] ?? null;
@@ -4073,6 +4097,7 @@ final class EmailSurface {
 				$notification_login = is_array( $notification ) ? ( $notification['userLogin'] ?? null ) : null;
 				$notification_email = is_array( $notification ) ? ( $notification['userEmail'] ?? null ) : null;
 				$message            = is_array( $mail ) && is_string( $mail['message'] ?? null ) ? $mail['message'] : '';
+				$success_to         = is_array( $mail_success ) ? (array) ( $mail_success['to'] ?? array() ) : array();
 
 				$insert_lookup_ok = ! $insert['threw']
 					&& ! $stored['threw']
@@ -4112,23 +4137,37 @@ final class EmailSurface {
 					&& $machine === $mail_to_email->get_ascii_address()
 					&& $canonical === $mail_to_email->get_unicode_address()
 					&& $canonical === $mail_to_is['value']
-					&& $canonical === $mail_to_sanitize['value'];
+					&& $canonical === $mail_to_sanitize['value']
+					&& is_array( $mail )
+					&& 1 === count( $mail['to'] ?? array() )
+					&& self::addresses_include( $mail['to'] ?? array(), $machine, '' );
 
 				$reset_ok = ! $reset['threw']
 					&& array() === $reset['warnings']
 					&& true === $reset['value']
 					&& 1 === count( $notification_calls )
-					&& 1 === count( $mail_calls )
+					&& 1 === count( EmailSurfaceMailer::$sent )
+					&& 1 === count( $mail_succeeded )
 					&& is_array( $mail )
-					&& $machine === ( $mail['to'] ?? null )
+					&& is_array( $mail_success )
+					&& array( $machine ) === $success_to
 					&& is_string( $mail['subject'] ?? null )
 					&& '' !== ( $mail['subject'] ?? '' )
 					&& str_contains( $message, rawurlencode( $login ) );
 
+				$machine_reset_ok = ! $machine_reset['threw']
+					&& array() === $machine_reset['warnings']
+					&& \is_wp_error( $machine_reset['value'] ?? null )
+					&& 'invalid_email' === $machine_reset['value']->get_error_code()
+					&& $mail_count_before === count( EmailSurfaceMailer::$sent )
+					&& $success_count_before === count( $mail_succeeded )
+					&& $notification_count_before === count( $notification_calls );
+
 				$ok = $insert_lookup_ok
 					&& $notification_ok
 					&& $mail_to_ok
-					&& $reset_ok;
+					&& $reset_ok
+					&& $machine_reset_ok;
 
 				if ( ! $ok ) {
 					$failures[] = array(
@@ -4142,8 +4181,10 @@ final class EmailSurface {
 						'byCanonical'     => self::describe_captured_call( $by_canonical ),
 						'existsMachine'   => self::describe_captured_call( $exists_machine ),
 						'reset'           => self::describe_captured_call( $reset ),
+						'machineReset'    => self::describe_captured_call( $machine_reset ),
 						'notificationCalls' => self::describe_value( $notification_calls ),
-						'mailCalls'       => self::describe_value( $mail_calls ),
+						'sentMail'        => self::describe_value( EmailSurfaceMailer::$sent ),
+						'mailSucceeded'   => self::describe_value( $mail_succeeded ),
 						'mailToParse'     => self::describe_captured_call( $mail_to_parse ),
 						'mailToIsEmail'   => self::describe_captured_call( $mail_to_is ),
 						'mailToSanitize'  => self::describe_captured_call( $mail_to_sanitize ),
@@ -4151,6 +4192,7 @@ final class EmailSurface {
 						'notificationOk'  => $notification_ok,
 						'mailToOk'        => $mail_to_ok,
 						'resetOk'         => $reset_ok,
+						'machineResetOk'  => $machine_reset_ok,
 					);
 				}
 
@@ -4164,10 +4206,19 @@ final class EmailSurface {
 					'asciiDomain'       => self::describe_string( $unicode_email->get_ascii_domain() ),
 					'storedCanonical'   => $stored_user instanceof \WP_User && $canonical === $stored_user->user_email,
 					'machineLookupMiss' => false === ( $exists_machine['value'] ?? null ),
-					'mailToMachine'     => is_array( $mail ) && $machine === ( $mail['to'] ?? null ),
+					'machineResetRejected' => \is_wp_error( $machine_reset['value'] ?? null ),
+					'mailToMachine'     => is_array( $mail ) && self::addresses_include( $mail['to'] ?? array(), $machine, '' ),
 				);
 			}
 		} finally {
+			\remove_action( 'wp_mail_succeeded', $success_action );
+			\PHPMailer\PHPMailer\PHPMailer::$validator = $validator_snapshot;
+			EmailSurfaceMailer::$sent = array();
+			if ( $mailer_snapshot['exists'] ) {
+				$GLOBALS['phpmailer'] = $mailer_snapshot['value'];
+			} else {
+				unset( $GLOBALS['phpmailer'] );
+			}
 			if ( $server_snapshot['exists'] ) {
 				$_SERVER['REMOTE_ADDR'] = $server_snapshot['value'];
 			} else {
@@ -4183,6 +4234,7 @@ final class EmailSurface {
 				array() === $failures,
 				array(
 					'caseCount' => count( $cases ),
+					'dbCoverage' => 'stub-backed no-DB lookup only; MySQL user_email collation and index behavior is not exercised here.',
 					'observed'  => $observed,
 					'failures'  => self::describe_value( $failures ),
 				)
@@ -6749,6 +6801,43 @@ final class EmailSurface {
 		return function_exists( 'idn_to_ascii' ) && function_exists( 'idn_to_utf8' );
 	}
 
+	private static function addresses_include( array $addresses, string $email, string $name ): bool {
+		foreach ( $addresses as $address ) {
+			if ( isset( $address[0], $address[1] ) && $email === $address[0] && $name === trim( (string) $address[1] ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private static function new_mailer(): object {
+		return new class( true ) extends \WP_PHPMailer {
+			public function send(): bool {
+				$this->preSend();
+				EmailSurfaceMailer::$sent[] = array(
+					'to'            => $this->getToAddresses(),
+					'cc'            => $this->getCcAddresses(),
+					'bcc'           => $this->getBccAddresses(),
+					'replyTo'       => $this->getReplyToAddresses(),
+					'attachments'   => $this->getAttachments(),
+					'customHeaders' => $this->getCustomHeaders(),
+					'from'          => $this->From,
+					'fromName'      => $this->FromName,
+					'subject'       => $this->Subject,
+					'body'          => $this->Body,
+					'message'       => $this->Body,
+					'contentType'   => $this->ContentType,
+					'charset'       => $this->CharSet,
+					'encoding'      => $this->Encoding,
+					'mimeMessage'   => $this->getSentMIMEMessage(),
+				);
+
+				return true;
+			}
+		};
+	}
+
 	private static function snapshot_hook_globals(): array {
 		$snapshot = array();
 		foreach ( array( 'wp_filter', 'wp_actions', 'wp_filters', 'wp_current_filter' ) as $name ) {
@@ -6807,4 +6896,9 @@ final class EmailSurface {
 		}
 		return $value;
 	}
+}
+
+final class EmailSurfaceMailer {
+	/** @var array<int,array<string,mixed>> */
+	public static array $sent = array();
 }
