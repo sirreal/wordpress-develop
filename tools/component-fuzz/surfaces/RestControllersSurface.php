@@ -2198,17 +2198,40 @@ final class RestControllersSurface {
 			$invalid_type_request,
 			\WP_REST_Search_Controller::PROP_SUBTYPE
 		);
+		$empty_subtype_controller = new \WP_REST_Search_Controller(
+			array(
+				self::make_search_handler( $case['emptySubtypeType'], array(), array(), array(), 0 ),
+			)
+		);
+		$empty_subtype_params     = $empty_subtype_controller->get_collection_params();
+		$empty_subtype_request    = self::request(
+			'GET',
+			'/wp/v2/search',
+			array(
+				\WP_REST_Search_Controller::PROP_TYPE => $case['emptySubtypeType'],
+			)
+		);
+		$empty_subtype_request->set_attributes( array( 'args' => $empty_subtype_params ) );
+		$invalid_subtype_subtypes = $empty_subtype_controller->sanitize_subtypes(
+			array( $case['invalidSubtype'] ),
+			$empty_subtype_request,
+			\WP_REST_Search_Controller::PROP_SUBTYPE
+		);
 
 		self::collect_failure(
 			$failures,
 			array( \WP_REST_Search_Controller::TYPE_ANY ) === $any_subtypes
 				&& array( $case['subtypes'][1] ) === array_values( $intersected_subtypes )
-				&& self::wp_error_ok( $invalid_type_subtypes, 'rest_search_invalid_type', 400 ),
-			'search sanitize_subtypes applies any dominance, selected-handler intersection, and invalid-type errors',
+				&& self::wp_error_ok( $invalid_type_subtypes, 'rest_search_invalid_type', 400 )
+				&& $invalid_subtype_subtypes instanceof \WP_Error
+				&& 'rest_not_in_enum' === $invalid_subtype_subtypes->get_error_code(),
+			'search sanitize_subtypes applies any dominance, selected-handler intersection, invalid-type errors, and invalid-subtype schema errors',
 			array(
-				'any'         => $any_subtypes,
-				'intersected' => $intersected_subtypes,
-				'invalidType' => $invalid_type_subtypes,
+				'any'            => $any_subtypes,
+				'intersected'    => $intersected_subtypes,
+				'invalidType'    => $invalid_type_subtypes,
+				'invalidSubtype' => $invalid_subtype_subtypes,
+				'invalidSubtypeEnum' => $empty_subtype_params[ \WP_REST_Search_Controller::PROP_SUBTYPE ]['items']['enum'] ?? null,
 			)
 		);
 
@@ -2425,15 +2448,20 @@ final class RestControllersSurface {
 		);
 		$routes                   = array();
 		$route_options            = array();
+		$route_schema             = array();
 		$default_response         = null;
 		$head_response            = null;
 		$invalid_include_response = null;
 		$invalid_type_response    = null;
+		$prepare_count_before_head = 0;
 
 		try {
 			$controller->register_routes();
 			$routes                   = $server->get_routes( 'wp/v2' );
 			$route_options            = $server->get_route_options( '/wp/v2/search' );
+			$route_schema             = is_callable( $route_options['schema'] ?? null )
+				? (array) call_user_func( $route_options['schema'] )
+				: array();
 			$default_response         = $server->dispatch( $default_request );
 			$prepare_count_before_head = count( $handler->prepare_calls );
 			$head_response            = $server->dispatch( $head_request );
@@ -2465,11 +2493,12 @@ final class RestControllersSurface {
 		$server_restored = null !== $previous_server ? ( $GLOBALS['wp_rest_server'] ?? null ) === $previous_server : ! array_key_exists( 'wp_rest_server', $GLOBALS );
 		$actions_restored = $had_wp_actions ? ( $GLOBALS['wp_actions'] ?? null ) === $previous_actions : ! array_key_exists( 'wp_actions', $GLOBALS );
 		$prepare_count_after_head = count( $handler->prepare_calls );
+		$invalid_subtype_route = self::check_search_invalid_subtype_route_dispatch( $case );
 
 		return array(
 			'ok'                     => isset( $routes['/wp/v2/search'] )
 				&& in_array( 'GET', $route_methods, true )
-				&& is_callable( $route_options['schema'] ?? null )
+				&& self::search_route_schema_matches( $route_schema, $case )
 				&& $default_response instanceof \WP_REST_Response
 				&& 200 === $default_response->get_status()
 				&& $case['handlerIds'] === self::search_response_ids( $default_response )
@@ -2500,10 +2529,12 @@ final class RestControllersSurface {
 				&& $prepare_count_before_head === $prepare_count_after_head
 				&& self::response_error_ok( $invalid_include_response, 'rest_invalid_param', 400 )
 				&& self::response_error_ok( $invalid_type_response, 'rest_invalid_param', 400 )
+				&& true === $invalid_subtype_route['ok']
 				&& $server_restored
 				&& $actions_restored,
 			'routes'                 => array_keys( $routes ),
 			'routeMethods'           => $route_methods,
+			'routeSchema'            => self::search_schema_summary( $route_schema ),
 			'defaultIds'             => self::search_response_ids( $default_response ),
 			'defaultHeaders'         => $default_headers,
 			'defaultLinkHeader'      => $link_header,
@@ -2514,9 +2545,120 @@ final class RestControllersSurface {
 			'prepareAfterHead'       => $prepare_count_after_head,
 			'invalidIncludeResponse' => $invalid_include_response,
 			'invalidTypeResponse'    => $invalid_type_response,
+			'invalidSubtypeRoute'    => $invalid_subtype_route,
 			'serverRestored'         => $server_restored,
 			'actionsRestored'        => $actions_restored,
 		);
+	}
+
+	private static function check_search_invalid_subtype_route_dispatch( array $case ): array {
+		$handler    = self::make_search_handler( $case['emptySubtypeType'], array(), array(), array(), 0 );
+		$controller = new \WP_REST_Search_Controller( array( $handler ) );
+
+		$previous_server  = $GLOBALS['wp_rest_server'] ?? null;
+		$had_wp_actions   = array_key_exists( 'wp_actions', $GLOBALS );
+		$previous_actions = $GLOBALS['wp_actions'] ?? null;
+
+		$server                    = new \WP_REST_Server();
+		$GLOBALS['wp_rest_server'] = $server;
+
+		if ( ! isset( $GLOBALS['wp_actions'] ) || ! is_array( $GLOBALS['wp_actions'] ) ) {
+			$GLOBALS['wp_actions'] = array();
+		}
+		$GLOBALS['wp_actions']['rest_api_init'] = max( 1, (int) ( $GLOBALS['wp_actions']['rest_api_init'] ?? 0 ) );
+
+		$response = null;
+		$routes   = array();
+
+		try {
+			$controller->register_routes();
+			$routes   = $server->get_routes( 'wp/v2' );
+			$response = $server->dispatch(
+				self::request(
+					'GET',
+					'/wp/v2/search',
+					array( \WP_REST_Search_Controller::PROP_SUBTYPE => array( $case['invalidSubtype'] ) )
+				)
+			);
+		} finally {
+			if ( $had_wp_actions ) {
+				$GLOBALS['wp_actions'] = $previous_actions;
+			} else {
+				unset( $GLOBALS['wp_actions'] );
+			}
+
+			if ( null !== $previous_server ) {
+				$GLOBALS['wp_rest_server'] = $previous_server;
+			} else {
+				unset( $GLOBALS['wp_rest_server'] );
+			}
+		}
+
+		$server_restored = null !== $previous_server ? ( $GLOBALS['wp_rest_server'] ?? null ) === $previous_server : ! array_key_exists( 'wp_rest_server', $GLOBALS );
+		$actions_restored = $had_wp_actions ? ( $GLOBALS['wp_actions'] ?? null ) === $previous_actions : ! array_key_exists( 'wp_actions', $GLOBALS );
+
+		return array(
+			'ok'              => isset( $routes['/wp/v2/search'] )
+				&& self::response_error_ok( $response, 'rest_invalid_param', 400 )
+				&& $server_restored
+				&& $actions_restored,
+			'routes'          => array_keys( $routes ),
+			'response'        => $response,
+			'serverRestored'  => $server_restored,
+			'actionsRestored' => $actions_restored,
+		);
+	}
+
+	private static function search_route_schema_matches( array $schema, array $case ): bool {
+		$properties = $schema['properties'] ?? null;
+		if ( ! is_array( $properties ) ) {
+			return false;
+		}
+
+		return 'search-result' === ( $schema['title'] ?? null )
+			&& 'object' === ( $schema['type'] ?? null )
+			&& array( 'integer', 'string' ) === ( $properties[ \WP_REST_Search_Controller::PROP_ID ]['type'] ?? null )
+			&& array( 'view', 'embed' ) === ( $properties[ \WP_REST_Search_Controller::PROP_ID ]['context'] ?? null )
+			&& true === ( $properties[ \WP_REST_Search_Controller::PROP_ID ]['readonly'] ?? null )
+			&& 'string' === ( $properties[ \WP_REST_Search_Controller::PROP_TITLE ]['type'] ?? null )
+			&& array( 'view', 'embed' ) === ( $properties[ \WP_REST_Search_Controller::PROP_TITLE ]['context'] ?? null )
+			&& true === ( $properties[ \WP_REST_Search_Controller::PROP_TITLE ]['readonly'] ?? null )
+			&& 'string' === ( $properties[ \WP_REST_Search_Controller::PROP_URL ]['type'] ?? null )
+			&& 'uri' === ( $properties[ \WP_REST_Search_Controller::PROP_URL ]['format'] ?? null )
+			&& array( 'view', 'embed' ) === ( $properties[ \WP_REST_Search_Controller::PROP_URL ]['context'] ?? null )
+			&& true === ( $properties[ \WP_REST_Search_Controller::PROP_URL ]['readonly'] ?? null )
+			&& 'string' === ( $properties[ \WP_REST_Search_Controller::PROP_TYPE ]['type'] ?? null )
+			&& array( $case['type'] ) === ( $properties[ \WP_REST_Search_Controller::PROP_TYPE ]['enum'] ?? null )
+			&& array( 'view', 'embed' ) === ( $properties[ \WP_REST_Search_Controller::PROP_TYPE ]['context'] ?? null )
+			&& true === ( $properties[ \WP_REST_Search_Controller::PROP_TYPE ]['readonly'] ?? null )
+			&& 'string' === ( $properties[ \WP_REST_Search_Controller::PROP_SUBTYPE ]['type'] ?? null )
+			&& $case['subtypes'] === ( $properties[ \WP_REST_Search_Controller::PROP_SUBTYPE ]['enum'] ?? null )
+			&& array( 'view', 'embed' ) === ( $properties[ \WP_REST_Search_Controller::PROP_SUBTYPE ]['context'] ?? null )
+			&& true === ( $properties[ \WP_REST_Search_Controller::PROP_SUBTYPE ]['readonly'] ?? null );
+	}
+
+	private static function search_schema_summary( array $schema ): array {
+		$properties = $schema['properties'] ?? array();
+		$summary    = array(
+			'title'      => $schema['title'] ?? null,
+			'type'       => $schema['type'] ?? null,
+			'properties' => array(),
+		);
+
+		foreach ( array( 'id', 'title', 'url', 'type', 'subtype' ) as $property ) {
+			$summary['properties'][ $property ] = array_intersect_key(
+				is_array( $properties[ $property ] ?? null ) ? $properties[ $property ] : array(),
+				array(
+					'type'     => true,
+					'format'   => true,
+					'enum'     => true,
+					'context'  => true,
+					'readonly' => true,
+				)
+			);
+		}
+
+		return $summary;
 	}
 
 	private static function check_post_format_search_handler( array $case ): array {
@@ -2527,6 +2669,7 @@ final class RestControllersSurface {
 		$term_link_calls   = array();
 		$filter_cleanup    = false;
 		$result            = null;
+		$paged_result      = null;
 		$prepared          = null;
 
 		\register_post_type(
@@ -2617,6 +2760,19 @@ final class RestControllersSurface {
 				)
 			);
 			$result  = $handler->search_items( $request );
+			$paged_request = self::request(
+				'GET',
+				'/wp/v2/search',
+				array(
+					'context'                                      => 'view',
+					'page'                                         => 2,
+					'per_page'                                     => 1,
+					'search'                                       => 'before-filter',
+					\WP_REST_Search_Controller::PROP_TYPE          => 'post-format',
+					\WP_REST_Search_Controller::PROP_SUBTYPE       => array( \WP_REST_Search_Controller::TYPE_ANY ),
+				)
+			);
+			$paged_result = $handler->search_items( $paged_request );
 			$prepared = $handler->prepare_item(
 				$linked_formats[0],
 				array(
@@ -2638,10 +2794,14 @@ final class RestControllersSurface {
 		$expected_ids = self::expected_post_format_ids( $linked_formats, $format_search );
 		$actual_ids   = is_array( $result ) ? ( $result[ \WP_REST_Search_Handler::RESULT_IDS ] ?? null ) : null;
 		$total        = is_array( $result ) ? ( $result[ \WP_REST_Search_Handler::RESULT_TOTAL ] ?? null ) : null;
+		$paged_ids    = is_array( $paged_result ) ? ( $paged_result[ \WP_REST_Search_Handler::RESULT_IDS ] ?? null ) : null;
+		$paged_total  = is_array( $paged_result ) ? ( $paged_result[ \WP_REST_Search_Handler::RESULT_TOTAL ] ?? null ) : null;
 
 		return array(
 			'ok'              => $expected_ids === $actual_ids
 				&& count( $expected_ids ) === $total
+				&& array_slice( $expected_ids, 1, 1 ) === $paged_ids
+				&& count( $expected_ids ) === $paged_total
 				&& array( $linked_formats[0], \get_post_format_string( $linked_formats[0] ), 'http://example.test/component-fuzz/formats/' . $linked_formats[0], 'post-format' ) === array(
 					$prepared[ \WP_REST_Search_Controller::PROP_ID ] ?? null,
 					$prepared[ \WP_REST_Search_Controller::PROP_TITLE ] ?? null,
@@ -2649,6 +2809,11 @@ final class RestControllersSurface {
 					$prepared[ \WP_REST_Search_Controller::PROP_TYPE ] ?? null,
 				)
 				&& array(
+					array(
+						'before' => array( 'search' => 'before-filter' ),
+						'route'  => '/wp/v2/search',
+						'type'   => 'post-format',
+					),
 					array(
 						'before' => array( 'search' => 'before-filter' ),
 						'route'  => '/wp/v2/search',
@@ -2662,6 +2827,8 @@ final class RestControllersSurface {
 			'expectedIds'     => $expected_ids,
 			'actualIds'       => $actual_ids,
 			'total'           => $total,
+			'pagedIds'        => $paged_ids,
+			'pagedTotal'      => $paged_total,
 			'prepared'        => $prepared,
 			'queryCalls'      => $query_calls,
 			'termQueryCalls'  => $term_query_calls,
@@ -2869,7 +3036,9 @@ final class RestControllersSurface {
 			'type'              => $type,
 			'secondaryType'     => self::route_token( $ctx->fork( 'secondary-type' ), 'cfz-search-other' ),
 			'malformedType'     => self::route_token( $ctx->fork( 'malformed-type' ), 'cfz-search-bad' ),
+			'emptySubtypeType'  => self::route_token( $ctx->fork( 'empty-subtype-type' ), 'cfz-search-empty' ),
 			'invalidType'       => self::route_token( $ctx->fork( 'invalid-type' ), 'cfz-search-missing' ),
+			'invalidSubtype'    => self::route_token( $ctx->fork( 'invalid-subtype' ), 'cfz-missing-subtype' ),
 			'subtypes'          => $subtypes,
 			'secondarySubtypes' => array( self::route_token( $ctx->fork( 'secondary-subtype' ), 'cfz-delta' ) ),
 			'items'             => $items,
