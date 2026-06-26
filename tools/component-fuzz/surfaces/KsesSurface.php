@@ -72,6 +72,8 @@ final class KsesSurface {
 			$results = array_merge( $results, self::check_custom_policy_and_filter_invariants( $seed ) );
 			$results = array_merge( $results, self::check_attribute_constraint_invariants( $seed ) );
 			$results = array_merge( $results, self::check_pdf_object_and_uri_attribute_invariants( $seed ) );
+			$results[] = self::check_helper_contract_matrix( $seed );
+			$results[] = self::check_block_attribute_kses_invariants( $seed );
 
 			$rng = self::rng( $seed );
 			for ( $case_index = 0; $case_index < $case_count; ++$case_index ) {
@@ -429,6 +431,337 @@ final class KsesSurface {
 		}
 
 		return $results;
+	}
+
+	private static function check_helper_contract_matrix( int $seed ): array {
+		$required = array(
+			'wp_kses_array_lc',
+			'wp_kses_decode_entities',
+			'wp_kses_html_error',
+			'wp_kses_named_entities',
+			'wp_kses_normalize_entities',
+			'wp_kses_normalize_entities2',
+			'wp_kses_normalize_entities3',
+			'wp_kses_stripslashes',
+			'wp_kses_xml_named_entities',
+		);
+		foreach ( $required as $function_name ) {
+			if ( ! function_exists( $function_name ) ) {
+				return self::skip(
+					$seed,
+					null,
+					'kses.helper-contract-matrix.available',
+					$function_name . '() is not loaded',
+					''
+				);
+			}
+		}
+
+		$failures = array();
+		try {
+			$array_input    = array(
+				'DIV'  => array(
+					'DATA-CF' => true,
+					'Title'   => false,
+				),
+				'SPAN' => array(
+					'ARIA-LABEL' => 'ok',
+					'CLASS'      => true,
+				),
+			);
+			$array_expected = array(
+				'div'  => array(
+					'data-cf' => true,
+					'title'   => false,
+				),
+				'span' => array(
+					'aria-label' => 'ok',
+					'class'      => true,
+				),
+			);
+			$array_actual   = \wp_kses_array_lc( $array_input );
+			if ( $array_expected !== $array_actual ) {
+				$failures[] = array(
+					'label'    => 'wp_kses_array_lc lowercases tag and attribute keys without changing values',
+					'expected' => $array_expected,
+					'actual'   => $array_actual,
+				);
+			}
+
+			$slash_input    = 'alpha \"quoted\" beta \\\'single\\\' gamma \\path\\tail';
+			$slash_expected = 'alpha "quoted" beta \\\'single\\\' gamma \\path\\tail';
+			$slash_actual   = \wp_kses_stripslashes( $slash_input );
+			if ( $slash_expected !== $slash_actual ) {
+				$failures[] = array(
+					'label'    => 'wp_kses_stripslashes only strips slashes before double quotes',
+					'expected' => $slash_expected,
+					'actual'   => $slash_actual,
+				);
+			}
+
+			$error_input    = '"bad value" next=safe tail';
+			$error_expected = 'next=safe tail';
+			$error_actual   = \wp_kses_html_error( $error_input );
+			if ( $error_expected !== $error_actual ) {
+				$failures[] = array(
+					'label'    => 'wp_kses_html_error consumes malformed quoted attribute prefix through following whitespace',
+					'expected' => $error_expected,
+					'actual'   => $error_actual,
+				);
+			}
+
+			$decode_input    = '&#065; &#x42; &amp;copy;';
+			$decode_expected = 'A B &amp;copy;';
+			$decode_actual   = \wp_kses_decode_entities( $decode_input );
+			if ( $decode_expected !== $decode_actual ) {
+				$failures[] = array(
+					'label'    => 'wp_kses_decode_entities decodes decimal and hex numeric references only',
+					'expected' => $decode_expected,
+					'actual'   => $decode_actual,
+				);
+			}
+
+			$entity_input   = '&copy; &amp; &lt; &bogus; &#065; &#x42; &#x110000;';
+			$html_expected  = '&copy; &amp; &lt; &amp;bogus; &#065; &#x42; &amp;#x110000;';
+			$xml_expected   = html_entity_decode( '&copy;', ENT_HTML5, 'UTF-8' ) . ' &amp; &lt; &amp;bogus; &#065; &#x42; &amp;#x110000;';
+			$html_actual    = \wp_kses_normalize_entities( $entity_input );
+			$xml_actual     = \wp_kses_normalize_entities( $entity_input, 'xml' );
+			$html_named     = \wp_kses_named_entities( array( '&amp;copy;', 'copy' ) );
+			$xml_named      = \wp_kses_xml_named_entities( array( '&amp;copy;', 'copy' ) );
+			$decimal_valid  = \wp_kses_normalize_entities2( array( '&amp;#065;', '065' ) );
+			$decimal_bad    = \wp_kses_normalize_entities2( array( '&amp;#0000000;', '0000000' ) );
+			$hex_valid      = \wp_kses_normalize_entities3( array( '&amp;#x042;', '042' ) );
+			$hex_bad        = \wp_kses_normalize_entities3( array( '&amp;#x110000;', '110000' ) );
+			if (
+				$html_expected !== $html_actual
+				|| $xml_expected !== $xml_actual
+				|| '&copy;' !== $html_named
+				|| html_entity_decode( '&copy;', ENT_HTML5, 'UTF-8' ) !== $xml_named
+				|| '&#065;' !== $decimal_valid
+				|| '&amp;#0000000;' !== $decimal_bad
+				|| '&#x42;' !== $hex_valid
+				|| '&amp;#x110000;' !== $hex_bad
+			) {
+				$failures[] = array(
+					'label' => 'entity helper callbacks preserve HTML/XML named-entity and valid-Unicode contracts',
+					'expected' => array(
+						'html'         => $html_expected,
+						'xml'          => $xml_expected,
+						'htmlNamed'    => '&copy;',
+						'xmlNamed'     => html_entity_decode( '&copy;', ENT_HTML5, 'UTF-8' ),
+						'decimalValid' => '&#065;',
+						'decimalBad'   => '&amp;#0000000;',
+						'hexValid'     => '&#x42;',
+						'hexBad'       => '&amp;#x110000;',
+					),
+					'actual' => array(
+						'html'         => $html_actual,
+						'xml'          => $xml_actual,
+						'htmlNamed'    => $html_named,
+						'xmlNamed'     => $xml_named,
+						'decimalValid' => $decimal_valid,
+						'decimalBad'   => $decimal_bad,
+						'hexValid'     => $hex_valid,
+						'hexBad'       => $hex_bad,
+					),
+				);
+			}
+		} catch ( \Throwable $e ) {
+			return self::throwable_result( $seed, null, 'kses.helper-contract-matrix.no-throw', '', $e );
+		}
+
+		$details = array(
+			'helpers'      => $required,
+			'failureCount' => count( $failures ),
+			'failures'     => array_slice( $failures, 0, 6 ),
+		);
+
+		if ( empty( $failures ) ) {
+			return self::pass( $seed, null, 'kses.helper-contract-matrix', implode( ',', $required ), $details );
+		}
+
+		return self::fail(
+			$seed,
+			null,
+			'kses.helper-contract-matrix',
+			implode( ',', $required ),
+			'low-level KSES helper contracts match exact bounded expectations',
+			$failures,
+			$details
+		);
+	}
+
+	private static function check_block_attribute_kses_invariants( int $seed ): array {
+		$required = array(
+			'add_filter',
+			'filter_block_content',
+			'filter_block_kses',
+			'filter_block_kses_value',
+			'has_filter',
+			'parse_blocks',
+			'remove_filter',
+			'serialize_block',
+			'serialize_blocks',
+			'wp_kses',
+			'wp_pre_kses_block_attributes',
+		);
+		foreach ( $required as $function_name ) {
+			if ( ! function_exists( $function_name ) ) {
+				return self::skip(
+					$seed,
+					null,
+					'kses.block-attribute-filtering.available',
+					$function_name . '() is not loaded',
+					''
+				);
+			}
+		}
+
+		$token        = substr( sha1( 'block-attributes:' . $seed ), 0, 10 );
+		$allowed     = self::block_attribute_allowed_html();
+		$protocols   = array( 'https', 'mailto' );
+		$block       = self::block_attribute_case( $token );
+		$value_probe = array(
+			'plain'                   => 'Text ' . $token,
+			'html'                    => '<a href="javascript:alert(1)" onclick="evil()">Bad</a><a href="https://example.test/' . $token . '">Good</a>',
+			'<script>bad</script>Key' => '<span style="color:red;background-image:url(javascript:alert(1))" data-safe="yes" onclick="evil()">Span</span>',
+			'nested'                  => array(
+				'number'  => 42,
+				'flag'    => true,
+				'nothing' => null,
+				'mailto'  => '<a href="mailto:test@example.test">Mail</a>',
+			),
+		);
+		$template_probe = array(
+			'tagName' => 'script',
+			'nested'  => array(
+				'tagName' => 'main',
+			),
+			'label'   => 'Header ' . $token,
+		);
+		$failures = array();
+
+		try {
+			$serialized          = \serialize_blocks( array( $block ) );
+			$parsed              = \parse_blocks( $serialized );
+			$direct_block        = \filter_block_kses( $parsed[0], $allowed, $protocols );
+			$direct_serialized   = \serialize_block( $direct_block );
+			$content_filtered    = \filter_block_content( $serialized, $allowed, $protocols );
+			$content_refiltered  = \filter_block_content( $content_filtered, $allowed, $protocols );
+			$content_reparsed    = \parse_blocks( $content_filtered );
+			$value_actual        = \filter_block_kses_value( $value_probe, $allowed, $protocols );
+			$value_expected      = self::block_kses_value_reference( $value_probe, $allowed, $protocols );
+			$template_actual     = \filter_block_kses_value(
+				$template_probe,
+				$allowed,
+				$protocols,
+				array( 'blockName' => 'core/template-part' )
+			);
+			$template_expected   = self::block_kses_value_reference(
+				$template_probe,
+				$allowed,
+				$protocols,
+				array( 'blockName' => 'core/template-part' )
+			);
+			$hook_priority_before = \has_filter( 'pre_kses', 'wp_pre_kses_block_attributes' );
+			$hook_added           = false;
+			if ( false === $hook_priority_before ) {
+				\add_filter( 'pre_kses', 'wp_pre_kses_block_attributes', 10, 3 );
+				$hook_added = true;
+			}
+			try {
+				$hooked = \wp_kses( $serialized, $allowed, $protocols );
+			} finally {
+				if ( $hook_added ) {
+					\remove_filter( 'pre_kses', 'wp_pre_kses_block_attributes', 10 );
+				}
+			}
+			$hook_priority_after = \has_filter( 'pre_kses', 'wp_pre_kses_block_attributes' );
+			$hook_expected       = \wp_kses( $content_filtered, $allowed, $protocols );
+		} catch ( \Throwable $e ) {
+			return self::throwable_result( $seed, null, 'kses.block-attribute-filtering.no-throw', '', $e );
+		}
+
+		if ( $direct_serialized !== $content_filtered ) {
+			$failures[] = array(
+				'label'  => 'filter_block_content agrees with filter_block_kses plus serialize_block',
+				'direct' => self::preview( $direct_serialized ),
+				'filter' => self::preview( $content_filtered ),
+			);
+		}
+		if ( $content_filtered !== $content_refiltered ) {
+			$failures[] = array(
+				'label'     => 'filter_block_content is idempotent',
+				'filtered'  => self::preview( $content_filtered ),
+				'refiltered' => self::preview( $content_refiltered ),
+			);
+		}
+		if ( ! isset( $content_reparsed[0]['attrs'] ) || $direct_block['attrs'] !== $content_reparsed[0]['attrs'] ) {
+			$failures[] = array(
+				'label'  => 'serialized filtered block reparses to direct filtered attrs',
+				'direct' => $direct_block['attrs'] ?? null,
+				'parsed' => $content_reparsed[0]['attrs'] ?? null,
+			);
+		}
+		if ( $value_expected !== $value_actual ) {
+			$failures[] = array(
+				'label'    => 'filter_block_kses_value recursively filters string keys and leaves while preserving scalar types',
+				'expected' => $value_expected,
+				'actual'   => $value_actual,
+			);
+		}
+		if (
+			$template_expected !== $template_actual
+			|| '' !== ( $template_actual['tagName'] ?? null )
+			|| 'main' !== ( $template_actual['nested']['tagName'] ?? null )
+		) {
+			$failures[] = array(
+				'label'    => 'core/template-part tagName values are restricted to allowed tag names',
+				'expected' => $template_expected,
+				'actual'   => $template_actual,
+			);
+		}
+		if ( $hooked !== $hook_expected ) {
+			$failures[] = array(
+				'label'    => 'wp_pre_kses_block_attributes hook path agrees with explicit block-content filtering',
+				'expected' => self::preview( $hook_expected ),
+				'actual'   => self::preview( $hooked ),
+			);
+		}
+		if (
+			( $hook_added && false !== $hook_priority_after )
+			|| ( ! $hook_added && $hook_priority_before !== $hook_priority_after )
+		) {
+			$failures[] = array(
+				'label'  => 'pre_kses block attribute hook state is restored after hook-path check',
+				'before' => $hook_priority_before,
+				'after'  => $hook_priority_after,
+				'added'  => $hook_added,
+			);
+		}
+
+		$details = array(
+			'token'             => $token,
+			'serializedPreview' => self::preview( $serialized ),
+			'filteredPreview'   => self::preview( $content_filtered ),
+			'hookPriority'      => $hook_priority_before,
+			'failureCount'      => count( $failures ),
+			'failures'          => array_slice( $failures, 0, 6 ),
+		);
+
+		if ( empty( $failures ) ) {
+			return self::pass( $seed, null, 'kses.block-attribute-filtering', $serialized, $details );
+		}
+
+		return self::fail(
+			$seed,
+			null,
+			'kses.block-attribute-filtering',
+			$serialized,
+			'serialized block attributes and recursive values are KSES-filtered with stable hook cleanup',
+			$failures,
+			$details
+		);
 	}
 
 	private static function check_pdf_object_policy_matrix( int $seed ): array {
@@ -2924,6 +3257,98 @@ final class KsesSurface {
 		}
 
 		return array_values( array_unique( $pieces ) );
+	}
+
+	private static function block_attribute_allowed_html(): array {
+		return array(
+			'a'       => array(
+				'href'  => true,
+				'title' => true,
+			),
+			'div'     => array(
+				'data-safe' => true,
+			),
+			'em'      => array(),
+			'main'    => array(),
+			'section' => array(),
+			'span'    => array(
+				'data-safe' => true,
+				'style'     => true,
+			),
+			'strong'  => array(),
+		);
+	}
+
+	private static function block_attribute_case( string $token ): array {
+		return array(
+			'blockName'    => 'core/group',
+			'attrs'        => array(
+				'anchor'                  => 'safe-anchor-' . $token,
+				'linkHtml'                => '<a href="javascript:alert(1)" onclick="evil()">Bad</a>'
+					. '<a href="https://example.test/' . $token . '" title="Safe">Good</a>',
+				'nested'                  => array(
+					'<script>bad</script>Key' => '<span style="color:red;background-image:url(javascript:alert(1))" data-safe="yes" onclick="evil()">Span</span>',
+					'count'                   => 3,
+					'enabled'                 => true,
+					'empty'                   => null,
+				),
+				'entityText'              => 'Keep &amp; normalize &#x3c;strong&#x3e;text&#x3c;/strong&#x3e;',
+				'style'                   => 'color:red;background-image:url(javascript:alert(1));width:calc(100% - 1em)',
+				'url'                     => 'javascript:alert(1)',
+				'xml:lang<script>x</script>' => 'en',
+			),
+			'innerBlocks'  => array(
+				array(
+					'blockName'    => 'core/template-part',
+					'attrs'        => array(
+						'tagName' => 'script',
+						'nested'  => array(
+							'tagName' => 'main',
+						),
+						'label'   => '<strong>Header ' . $token . '</strong>',
+					),
+					'innerBlocks'  => array(),
+					'innerHTML'    => '',
+					'innerContent' => array(),
+				),
+			),
+			'innerHTML'    => '',
+			'innerContent' => array( null ),
+		);
+	}
+
+	private static function block_kses_value_reference( $value, array $allowed_html, array $allowed_protocols, ?array $block_context = null ) {
+		if ( is_array( $value ) ) {
+			foreach ( $value as $key => $inner_value ) {
+				$filtered_key   = self::block_kses_value_reference( $key, $allowed_html, $allowed_protocols, $block_context );
+				$filtered_value = self::block_kses_value_reference( $inner_value, $allowed_html, $allowed_protocols, $block_context );
+
+				if ( isset( $block_context['blockName'] ) && 'core/template-part' === $block_context['blockName'] ) {
+					$filtered_value = self::block_template_part_attribute_reference( $filtered_value, $filtered_key, $allowed_html );
+				}
+				if ( $filtered_key !== $key ) {
+					unset( $value[ $key ] );
+				}
+
+				$value[ $filtered_key ] = $filtered_value;
+			}
+
+			return $value;
+		}
+
+		if ( is_string( $value ) ) {
+			return \wp_kses( $value, $allowed_html, $allowed_protocols );
+		}
+
+		return $value;
+	}
+
+	private static function block_template_part_attribute_reference( $attribute_value, string $attribute_name, array $allowed_html ) {
+		if ( empty( $attribute_value ) || 'tagName' !== $attribute_name ) {
+			return $attribute_value;
+		}
+
+		return isset( $allowed_html[ $attribute_value ] ) ? $attribute_value : '';
 	}
 
 	private static function missing_text_markers( string $html, array $case ): array {
