@@ -31,6 +31,7 @@ final class InteractivitySurface {
 			$rows[] = self::check_state_config_helpers( $ctx, $case );
 			$rows[] = self::check_directive_processing( $ctx, $case );
 			$rows[] = self::check_namespaced_directive_evaluation( $ctx->fork( 'namespaced-directives' ), $case );
+			$rows[] = self::check_directive_syntax_ordering_matrix( $ctx->fork( 'directive-syntax-ordering' ), $case );
 			$rows[] = self::check_context_and_element_helpers( $ctx, $case );
 			$rows[] = self::check_context_namespace_stack_merge_sort_and_restore( $ctx->fork( 'context-stack' ), $case );
 			$rows[] = self::check_derived_state_stack_recovery( $ctx->fork( 'derived-stack' ), $case );
@@ -338,6 +339,301 @@ final class InteractivitySurface {
 				'otherBody'      => $other_body,
 				'localBody'      => $local_body,
 				'lengthBody'     => $length_body,
+			)
+		);
+	}
+
+	private static function check_directive_syntax_ordering_matrix( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		self::install_fresh_api();
+
+		$start_class       = 'start-' . self::safe_token( $ctx, 'start' );
+		$removed_class     = 'remove-' . self::safe_token( $ctx, 'remove' );
+		$alpha_class       = 'alpha-' . self::safe_token( $ctx, 'alpha' );
+		$zeta_class        = 'zeta-' . self::safe_token( $ctx, 'zeta' );
+		$class_id_a        = 'id-a-' . self::safe_token( $ctx, 'class-a' );
+		$class_id_z        = 'id-z-' . self::safe_token( $ctx, 'class-z' );
+		$foo_id            = 'id-t-' . self::safe_token( $ctx, 'foo-id' );
+		$removed_foo_id    = 'id-f-' . self::safe_token( $ctx, 'removed-foo-id' );
+		$ignored_bind_id   = 'id-' . self::safe_token( $ctx, 'ignored-bind' );
+		$ignored_style_id  = 'id-' . self::safe_token( $ctx, 'ignored-style' );
+		$ignored_text_id   = 'id-' . self::safe_token( $ctx, 'ignored-text' );
+		$existing_name     = 'existing-' . self::safe_token( $ctx, 'name' );
+		$bound_id          = 'bound-' . self::safe_token( $ctx, 'bound-id' );
+		$bound_name        = 'ignored-name-' . self::safe_token( $ctx, 'bound-name' );
+		$marker            = 'marker-' . self::safe_token( $ctx, 'marker' );
+		$first_text        = 'First text <' . self::safe_token( $ctx, 'first-text' ) . '> & value';
+		$suffix_text       = 'Suffix text <' . self::safe_token( $ctx, 'suffix-text' ) . '> & value';
+		$unique_text       = 'Unique text <' . self::safe_token( $ctx, 'unique-text' ) . '> & value';
+		$style_color       = self::css_color( $ctx );
+		$style_background  = self::css_color( $ctx );
+		$style_z_index     = (string) $ctx->int( 2, 20 );
+		$original_padding  = $ctx->int( 2, 9 ) . 'px';
+		$generated_padding = $ctx->int( 10, 18 ) . 'px';
+		$original_outline  = 'solid 1px red';
+
+		\wp_interactivity_state(
+			$case['namespace'],
+			array(
+				'trueFlag'         => true,
+				'falseFlag'        => false,
+				'emptyValue'       => '',
+				'boundId'          => $bound_id,
+				'boundName'        => $bound_name,
+				'handler'          => 'return false',
+				'marker'           => $marker,
+				'firstText'        => $first_text,
+				'suffixText'       => $suffix_text,
+				'uniqueText'       => $unique_text,
+				'nonScalarText'    => array( 'not' => 'rendered' ),
+				'styleColor'       => $style_color,
+				'styleBackground'  => $style_background,
+				'styleZIndex'      => $style_z_index,
+				'generatedPadding' => $generated_padding,
+			)
+		);
+
+		$html = '<section data-wp-interactive="' . \esc_attr( $case['namespace'] ) . '">'
+			. '<button data-case="bind" hidden title="old-title" name="' . \esc_attr( $existing_name ) . '"'
+			. ' data-wp-bind="state.boundName"'
+			. ' data-wp-bind--="state.boundName"'
+			. ' data-wp-bind--id="state.boundId"'
+			. ' data-wp-bind--name---' . \esc_attr( $ignored_bind_id ) . '="state.boundName"'
+			. ' data-wp-bind--data-enabled="state.trueFlag"'
+			. ' data-wp-bind--data-disabled="state.falseFlag"'
+			. ' data-wp-bind--aria-expanded="state.trueFlag"'
+			. ' data-wp-bind--aria-hidden="state.falseFlag"'
+			. ' data-wp-bind--hidden="state.falseFlag"'
+			. ' data-wp-bind--title="state.falseFlag"'
+			. ' data-wp-bind--onclick="state.handler"'
+			. ' data-wp-bind--onmouseover="state.handler"'
+			. '>bind</button>'
+			. '<div data-case="class" class="' . \esc_attr( "{$start_class} {$removed_class} foo---{$removed_foo_id}" ) . '"'
+			. ' data-wp-class="state.trueFlag"'
+			. ' data-wp-class--="state.trueFlag"'
+			. ' data-wp-class--' . \esc_attr( $zeta_class ) . '---' . \esc_attr( $class_id_z ) . '="state.trueFlag"'
+			. ' data-wp-class--foo---' . \esc_attr( $foo_id ) . '="state.trueFlag"'
+			. ' data-wp-class--foo---' . \esc_attr( $removed_foo_id ) . '="state.falseFlag"'
+			. ' data-wp-class--' . \esc_attr( $zeta_class ) . '---' . \esc_attr( $class_id_a ) . '="state.trueFlag"'
+			. ' data-wp-class--' . \esc_attr( $alpha_class ) . '="state.trueFlag"'
+			. ' data-wp-class--' . \esc_attr( $removed_class ) . '="state.falseFlag"'
+			. '></div>'
+			. '<div data-case="style"'
+			. ' style="' . \esc_attr( "color:#010203;margin:7px;border-color:#111111;padding:{$original_padding};outline:{$original_outline};" ) . '"'
+			. ' data-wp-style="state.generatedPadding"'
+			. ' data-wp-style--="state.generatedPadding"'
+			. ' data-wp-style--z-index="state.styleZIndex"'
+			. ' data-wp-style--padding---' . \esc_attr( $ignored_style_id ) . '="state.generatedPadding"'
+			. ' data-wp-style--margin="state.emptyValue"'
+			. ' data-wp-style--color="state.styleColor"'
+			. ' data-wp-style--border-color="state.falseFlag"'
+			. ' data-wp-style--background-color="state.styleBackground"'
+			. '></div>'
+			. '<span data-case="text-first"'
+			. ' data-wp-text---' . \esc_attr( $ignored_text_id ) . '="state.uniqueText"'
+			. ' data-wp-text--caption="state.suffixText"'
+			. ' data-wp-text="state.firstText">old first</span>'
+			. '<span data-case="text-empty" data-wp-text="state.nonScalarText">old non scalar <em>markup</em></span>'
+			. '<span data-case="text-empty-value" data-wp-text="" data-wp-text--caption="state.firstText">keep old</span>'
+			. '<span data-case="invalid" data-probe="old" data-wp-:bad="state.boundName"'
+			. ' data-wp-bind--data-marker="state.marker">invalid old</span>'
+			. '</section>';
+
+		$capture   = self::capture_doing_it_wrong(
+			static function () use ( $html ): string {
+				return \wp_interactivity_process_directives( $html );
+			}
+		);
+		$processed = is_string( $capture['value'] ?? null ) ? $capture['value'] : '';
+
+		$bind        = self::find_first_tag_by_attribute( $processed, 'data-case', 'bind' );
+		$class       = self::find_first_tag_by_attribute( $processed, 'data-case', 'class' );
+		$style       = self::find_first_tag_by_attribute( $processed, 'data-case', 'style' );
+		$invalid     = self::find_first_tag_by_attribute( $processed, 'data-case', 'invalid' );
+		$bind_attrs  = is_array( $bind ) ? $bind['attributes'] : array();
+		$class_attrs = is_array( $class ) ? $class['attributes'] : array();
+		$style_attrs = is_array( $style ) ? $style['attributes'] : array();
+		$invalid_attrs = is_array( $invalid ) ? $invalid['attributes'] : array();
+
+		$class_tokens = preg_split( '/\s+/', trim( (string) ( $class_attrs['class'] ?? '' ) ), -1, PREG_SPLIT_NO_EMPTY );
+		$class_tokens = is_array( $class_tokens ) ? $class_tokens : array();
+		$foo_class    = 'foo---' . $foo_id;
+		$foo_removed  = 'foo---' . $removed_foo_id;
+		$zeta_a_class = $zeta_class . '---' . $class_id_a;
+		$zeta_z_class = $zeta_class . '---' . $class_id_z;
+		$expected_class_tokens = array( $start_class, $alpha_class, $foo_class, $zeta_a_class, $zeta_z_class );
+		$class_order  = array(
+			array_search( $alpha_class, $class_tokens, true ),
+			array_search( $foo_class, $class_tokens, true ),
+			array_search( $zeta_a_class, $class_tokens, true ),
+			array_search( $zeta_z_class, $class_tokens, true ),
+		);
+
+		$style_attribute = (string) ( $style_attrs['style'] ?? '' );
+		$style_map       = self::parse_style( $style_attribute );
+		$style_order     = self::style_property_order( $style_attribute );
+		$warning_targets = array();
+		foreach ( $capture['warnings'] as $warning ) {
+			if ( str_contains( (string) ( $warning['message'] ?? '' ), 'data-wp-on--click' ) ) {
+				$warning_targets[] = 'click';
+			}
+			if ( str_contains( (string) ( $warning['message'] ?? '' ), 'data-wp-on--mouseover' ) ) {
+				$warning_targets[] = 'mouseover';
+			}
+		}
+
+		$text_first       = self::find_element_body( $processed, 'span', 'data-case', 'text-first' );
+		$text_empty       = self::find_element_body( $processed, 'span', 'data-case', 'text-empty' );
+		$text_empty_value = self::find_element_body( $processed, 'span', 'data-case', 'text-empty-value' );
+		$invalid_body     = self::find_element_body( $processed, 'span', 'data-case', 'invalid' );
+		$failures         = array();
+
+		self::collect_failure(
+			$failures,
+			false === ( $capture['threw'] ?? true ) && 2 === count( $capture['warnings'] ),
+			'event handler bind suffixes emit exactly two warnings',
+			array(
+				'captureThrew' => $capture['threw'] ?? null,
+				'warnings'     => $capture['warnings'],
+			)
+		);
+		self::collect_failure(
+			$failures,
+			array( 'click', 'mouseover' ) === array_values( array_unique( $warning_targets ) )
+				&& array() === array_diff(
+					array_column( $capture['warnings'], 'function' ),
+					array( 'WP_Interactivity_API::data_wp_bind_processor' )
+				)
+				&& array() === array_diff( array_column( $capture['warnings'], 'version' ), array( '6.9.2' ) ),
+			'event handler warnings identify data-wp-on replacements',
+			array(
+				'warningTargets' => $warning_targets,
+				'warnings'       => $capture['warnings'],
+			)
+		);
+		self::collect_failure(
+			$failures,
+			$bound_id === ( $bind_attrs['id'] ?? null )
+				&& $existing_name === ( $bind_attrs['name'] ?? null )
+				&& ! array_key_exists( 'name---' . $ignored_bind_id, $bind_attrs )
+				&& 'true' === ( $bind_attrs['data-enabled'] ?? null )
+				&& 'false' === ( $bind_attrs['data-disabled'] ?? null )
+				&& 'true' === ( $bind_attrs['aria-expanded'] ?? null )
+				&& 'false' === ( $bind_attrs['aria-hidden'] ?? null )
+				&& ! array_key_exists( 'hidden', $bind_attrs )
+				&& ! array_key_exists( 'title', $bind_attrs )
+				&& ! array_key_exists( 'onclick', $bind_attrs )
+				&& ! array_key_exists( 'onmouseover', $bind_attrs ),
+			'bind suffixes convert data/aria booleans, remove false attrs, and skip event handlers',
+			array(
+				'bindAttrs'    => $bind_attrs,
+				'expectedId'   => $bound_id,
+				'expectedName' => $existing_name,
+				'ignoredName'  => $bound_name,
+				'ignoredKey'   => 'name---' . $ignored_bind_id,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			'state.boundName' === ( $bind_attrs['data-wp-bind'] ?? null )
+				&& 'state.boundName' === ( $bind_attrs['data-wp-bind--'] ?? null )
+				&& 'state.trueFlag' === ( $class_attrs['data-wp-class'] ?? null )
+				&& 'state.trueFlag' === ( $class_attrs['data-wp-class--'] ?? null )
+				&& 'state.generatedPadding' === ( $style_attrs['data-wp-style'] ?? null )
+				&& 'state.generatedPadding' === ( $style_attrs['data-wp-style--'] ?? null )
+				&& ! str_contains( $style_attribute, $generated_padding ),
+			'empty bind/class/style suffix directives remain inert',
+			array(
+				'bindAttrs'        => $bind_attrs,
+				'classAttrs'       => $class_attrs,
+				'styleAttrs'       => $style_attrs,
+				'generatedPadding' => $generated_padding,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			$expected_class_tokens === $class_tokens,
+			'class directives produce only expected suffix/unique-id classes and removals',
+			array(
+				'classAttrs' => $class_attrs,
+				'expected'   => $expected_class_tokens,
+				'removed'    => array( $removed_class, $foo_removed ),
+			)
+		);
+		self::collect_failure(
+			$failures,
+			! in_array( false, $class_order, true )
+				&& $class_order[0] < $class_order[1]
+				&& $class_order[1] < $class_order[2]
+				&& $class_order[2] < $class_order[3],
+			'class directive entries are applied in suffix and unique-id order',
+			array(
+				'classTokens' => $class_tokens,
+				'classOrder'  => $class_order,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			array(
+				'padding'          => $original_padding,
+				'outline'          => $original_outline,
+				'background-color' => $style_background,
+				'color'            => $style_color,
+				'z-index'          => $style_z_index,
+			) === $style_map
+				&& array( 'padding', 'outline', 'background-color', 'color', 'z-index' ) === $style_order,
+			'style directives preserve unrelated declarations and merge/remove in suffix order',
+			array(
+				'styleAttribute'   => $style_attribute,
+				'styleMap'         => $style_map,
+				'styleOrder'       => $style_order,
+				'generatedPadding' => $generated_padding,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			\esc_html( $first_text ) === $text_first
+				&& '' === $text_empty
+				&& 'keep old' === $text_empty_value,
+			'text directives use only valid no-suffix entries and empty non-scalar results',
+			array(
+				'textFirst'      => $text_first,
+				'textEmpty'      => $text_empty,
+				'textEmptyValue' => $text_empty_value,
+				'ignoredTexts'   => array( $suffix_text, $unique_text ),
+			)
+		);
+		self::collect_failure(
+			$failures,
+			$marker === ( $invalid_attrs['data-marker'] ?? null )
+				&& 'old' === ( $invalid_attrs['data-probe'] ?? null )
+				&& 'invalid old' === $invalid_body
+				&& str_contains( $processed, 'data-wp-:bad="state.boundName"' ),
+			'invalid directive names do not affect neighboring valid directives or output',
+			array(
+				'invalidAttrs' => $invalid_attrs,
+				'invalidBody'  => $invalid_body,
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'interactivity.directives.syntax-ordering-bind-class-style-text-matrix',
+			array() === $failures,
+			array(
+				'namespace'      => $case['namespace'],
+				'input'          => self::preview( $html ),
+				'processed'      => self::preview( $processed ),
+				'bindAttrs'      => $bind_attrs,
+				'classTokens'    => $class_tokens,
+				'styleAttribute' => $style_attribute,
+				'styleOrder'     => $style_order,
+				'textBodies'     => array(
+					'first'      => $text_first,
+					'empty'      => $text_empty,
+					'emptyValue' => $text_empty_value,
+				),
+				'warnings'       => $capture['warnings'],
+				'failures'       => $failures,
 			)
 		);
 	}
@@ -1010,6 +1306,21 @@ final class InteractivitySurface {
 			}
 			list( $name, $value ) = explode( ':', $assignment, 2 );
 			$properties[ trim( strtolower( $name ) ) ] = trim( $value );
+		}
+
+		return $properties;
+	}
+
+	private static function style_property_order( string $style ): array {
+		$properties = array();
+
+		foreach ( explode( ';', $style ) as $assignment ) {
+			$assignment = trim( $assignment );
+			if ( '' === $assignment || ! str_contains( $assignment, ':' ) ) {
+				continue;
+			}
+			list( $name ) = explode( ':', $assignment, 2 );
+			$properties[] = trim( strtolower( $name ) );
 		}
 
 		return $properties;
