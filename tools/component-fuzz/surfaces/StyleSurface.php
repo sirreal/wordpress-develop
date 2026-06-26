@@ -41,6 +41,7 @@ final class StyleSurface {
 			$rows[] = self::check_theme_json_data_merge( $ctx, $case );
 			$rows[] = self::check_theme_json_variable_resolution( $ctx, $case );
 			$rows[] = self::check_theme_json_stylesheet( $ctx, $case );
+			$rows[] = self::check_block_supports_wrapper_attributes_serialization( $ctx, $case );
 			$rows[] = self::check_block_style_variation_serialization( $ctx, $case );
 			$rows[] = self::check_registered_block_style_variation_source_order( $ctx, $case );
 			$rows[] = self::check_theme_style_helper_filter_restoration( $ctx, $case );
@@ -64,6 +65,8 @@ final class StyleSurface {
 	}
 
 	private static function missing_requirements(): array {
+		self::load_block_support_wrapper_apis();
+
 		$missing = array();
 
 		foreach (
@@ -80,6 +83,7 @@ final class StyleSurface {
 				'WP_Block_Type',
 				'WP_Block_Type_Registry',
 				'WP_Block_Styles_Registry',
+				'WP_Block_Supports',
 			) as $class
 		) {
 			if ( ! class_exists( $class ) ) {
@@ -99,6 +103,22 @@ final class StyleSurface {
 				'get_block_editor_theme_styles',
 				'wp_get_block_name_from_theme_json_path',
 				'wp_get_block_css_selector',
+				'wp_register_colors_support',
+				'wp_apply_colors_support',
+				'wp_register_spacing_support',
+				'wp_apply_spacing_support',
+				'wp_register_border_support',
+				'wp_apply_border_support',
+				'wp_register_typography_support',
+				'wp_apply_typography_support',
+				'wp_register_dimensions_support',
+				'wp_apply_dimensions_support',
+				'wp_register_shadow_support',
+				'wp_apply_shadow_support',
+				'wp_register_alignment_support',
+				'wp_apply_alignment_support',
+				'wp_should_skip_block_supports_serialization',
+				'block_has_support',
 				'wp_get_layout_definitions',
 				'wp_get_typography_font_size_value',
 				'wp_strip_all_tags',
@@ -110,6 +130,54 @@ final class StyleSurface {
 		}
 
 		return $missing;
+	}
+
+	private static function load_block_support_wrapper_apis(): void {
+		if ( ! class_exists( 'WP_Block_Supports' ) || ! defined( 'ABSPATH' ) || ! defined( 'WPINC' ) ) {
+			return;
+		}
+
+		foreach (
+			array(
+				'block-supports/utils.php',
+				'block-supports/colors.php',
+				'block-supports/spacing.php',
+				'block-supports/border.php',
+				'block-supports/typography.php',
+				'block-supports/dimensions.php',
+				'block-supports/shadow.php',
+				'block-supports/align.php',
+			) as $relative_path
+		) {
+			$path = ABSPATH . WPINC . '/' . $relative_path;
+			if ( is_readable( $path ) ) {
+				require_once $path;
+			}
+		}
+
+		self::ensure_block_support_callback( 'typography', 'wp_register_typography_support', 'wp_apply_typography_support' );
+		self::ensure_block_support_callback( 'colors', 'wp_register_colors_support', 'wp_apply_colors_support' );
+		self::ensure_block_support_callback( 'spacing', 'wp_register_spacing_support', 'wp_apply_spacing_support' );
+		self::ensure_block_support_callback( 'border', 'wp_register_border_support', 'wp_apply_border_support' );
+		self::ensure_block_support_callback( 'dimensions', 'wp_register_dimensions_support', 'wp_apply_dimensions_support' );
+		self::ensure_block_support_callback( 'shadow', 'wp_register_shadow_support', 'wp_apply_shadow_support' );
+		self::ensure_block_support_callback( 'align', 'wp_register_alignment_support', 'wp_apply_alignment_support' );
+	}
+
+	private static function ensure_block_support_callback( string $name, ?string $register_attribute, string $apply ): void {
+		if ( ! class_exists( 'WP_Block_Supports' ) || ! function_exists( $apply ) ) {
+			return;
+		}
+
+		$config = array(
+			'apply' => $apply,
+		);
+
+		if ( null !== $register_attribute && function_exists( $register_attribute ) ) {
+			$config['register_attribute'] = $register_attribute;
+		}
+
+		\WP_Block_Supports::get_instance()->register( $name, $config );
 	}
 
 	private static function check_style_engine_block_styles( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
@@ -762,6 +830,155 @@ final class StyleSurface {
 				'second'      => self::describe_call( $second ),
 				'structure'   => self::css_structure_report( $stylesheet ),
 				'unsafeBytes' => self::unsafe_byte_report( $stylesheet ),
+			)
+		);
+	}
+
+	private static function check_block_supports_wrapper_attributes_serialization( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$slug             = \_wp_to_kebab_case( $case['safeSlug'] );
+		$supports         = self::block_support_wrapper_supports();
+		$skip_supports    = self::block_support_wrapper_skip_supports();
+		$attributes       = self::block_support_wrapper_attrs( $slug );
+		$attribute_schema = self::block_support_wrapper_attribute_schema();
+
+		$direct_type = new \WP_Block_Type(
+			'component-fuzz/style-wrapper-direct',
+			array(
+				'supports'   => $supports,
+				'attributes' => $attribute_schema,
+			)
+		);
+		$skip_type   = new \WP_Block_Type(
+			'component-fuzz/style-wrapper-skip',
+			array(
+				'supports'   => $skip_supports,
+				'attributes' => $attribute_schema,
+			)
+		);
+
+		$registry                = \WP_Block_Type_Registry::get_instance();
+		$supports_api            = \WP_Block_Supports::get_instance();
+		$registered_types_before = self::get_object_property( $registry, 'registered_block_types' );
+		$block_supports_before   = self::get_object_property( $supports_api, 'block_supports' );
+		$block_to_render_before  = self::get_static_property( 'WP_Block_Supports', 'block_to_render' );
+		$registry_restored       = false;
+		$supports_restored       = false;
+		$registered              = false;
+		$register_call           = null;
+		$direct_first            = null;
+		$direct_second           = null;
+		$skip_call               = null;
+		$skip_query              = null;
+		$aggregate_first         = null;
+		$aggregate_second        = null;
+		$empty_aggregate         = null;
+
+		try {
+			$register_call = self::call( static fn() => self::block_support_wrapper_register_outputs( $supports ) );
+			$direct_first  = self::call( static fn() => self::block_support_wrapper_apply_outputs( $direct_type, $attributes ) );
+			$direct_second = self::call( static fn() => self::block_support_wrapper_apply_outputs( $direct_type, $attributes ) );
+			$skip_call     = self::call( static fn() => self::block_support_wrapper_apply_outputs( $skip_type, $attributes ) );
+			$skip_query    = self::call( static fn() => self::block_support_wrapper_skip_queries( $skip_type ) );
+
+			$block_name      = 'component-fuzz/style-wrapper-' . $ctx->seed() . '-' . $ctx->iteration();
+			$registered_type = \register_block_type(
+				$block_name,
+				array(
+					'title'           => 'Component Fuzz Style Wrapper',
+					'supports'        => $supports,
+					'attributes'      => $attribute_schema,
+					'render_callback' => static fn() => '',
+				)
+			);
+			$registered      = $registered_type instanceof \WP_Block_Type;
+
+			$aggregate_first = self::call(
+				static function () use ( $block_name, $attributes ): array {
+					\WP_Block_Supports::$block_to_render = array(
+						'blockName' => $block_name,
+						'attrs'     => $attributes,
+					);
+					return \WP_Block_Supports::get_instance()->apply_block_supports();
+				}
+			);
+			$aggregate_second = self::call(
+				static function () use ( $block_name, $attributes ): array {
+					\WP_Block_Supports::$block_to_render = array(
+						'blockName' => $block_name,
+						'attrs'     => $attributes,
+					);
+					return \WP_Block_Supports::get_instance()->apply_block_supports();
+				}
+			);
+			$empty_aggregate  = self::call(
+				static function (): array {
+					\WP_Block_Supports::$block_to_render = null;
+					return \WP_Block_Supports::get_instance()->apply_block_supports();
+				}
+			);
+		} finally {
+			self::set_object_property( $registry, 'registered_block_types', $registered_types_before );
+			self::set_object_property( $supports_api, 'block_supports', $block_supports_before );
+			self::set_static_property( 'WP_Block_Supports', 'instance', $supports_api );
+			self::set_static_property( 'WP_Block_Supports', 'block_to_render', $block_to_render_before );
+
+			$registry_restored = $registered_types_before === self::get_object_property( $registry, 'registered_block_types' );
+			$supports_restored = $block_supports_before === self::get_object_property( $supports_api, 'block_supports' )
+				&& $block_to_render_before === self::get_static_property( 'WP_Block_Supports', 'block_to_render' );
+		}
+
+		$register_value  = is_array( $register_call['value'] ?? null ) ? $register_call['value'] : array();
+		$direct_value    = is_array( $direct_first['value'] ?? null ) ? $direct_first['value'] : array();
+		$skip_value      = is_array( $skip_call['value'] ?? null ) ? $skip_call['value'] : array();
+		$skip_query_value = is_array( $skip_query['value'] ?? null ) ? $skip_query['value'] : array();
+		$aggregate_value = is_array( $aggregate_first['value'] ?? null ) ? $aggregate_first['value'] : array();
+
+		$ok = is_array( $register_call )
+			&& is_array( $direct_first )
+			&& is_array( $direct_second )
+			&& is_array( $skip_call )
+			&& is_array( $skip_query )
+			&& is_array( $aggregate_first )
+			&& is_array( $aggregate_second )
+			&& is_array( $empty_aggregate )
+			&& ! $register_call['threw']
+			&& ! $direct_first['threw']
+			&& ! $direct_second['threw']
+			&& ! $skip_call['threw']
+			&& ! $skip_query['threw']
+			&& ! $aggregate_first['threw']
+			&& ! $aggregate_second['threw']
+			&& ! $empty_aggregate['threw']
+			&& $direct_first['value'] === $direct_second['value']
+			&& $aggregate_first['value'] === $aggregate_second['value']
+			&& array() === $empty_aggregate['value']
+			&& self::block_support_wrapper_registers_ok( $register_value )
+			&& self::block_support_wrapper_direct_outputs_ok( $direct_value, $slug )
+			&& self::block_support_wrapper_skip_outputs_ok( $skip_value, $slug )
+			&& self::block_support_wrapper_skip_queries_ok( $skip_query_value )
+			&& $registered
+			&& self::block_support_wrapper_aggregate_output_ok( $aggregate_value, $slug )
+			&& $registry_restored
+			&& $supports_restored;
+
+		return $ctx->result(
+			'style.block-supports.wrapper-attributes-serialization',
+			$ok,
+			array(
+				'slug'             => $slug,
+				'attributes'       => self::preview( $attributes ),
+				'register'         => is_array( $register_call ) ? self::describe_call( $register_call ) : null,
+				'direct'           => is_array( $direct_first ) ? self::describe_call( $direct_first ) : null,
+				'directRepeat'     => is_array( $direct_second ) ? self::describe_call( $direct_second ) : null,
+				'skip'             => is_array( $skip_call ) ? self::describe_call( $skip_call ) : null,
+				'skipQueries'      => is_array( $skip_query ) ? self::describe_call( $skip_query ) : null,
+				'aggregate'        => is_array( $aggregate_first ) ? self::describe_call( $aggregate_first ) : null,
+				'aggregateRepeat'  => is_array( $aggregate_second ) ? self::describe_call( $aggregate_second ) : null,
+				'emptyAggregate'   => is_array( $empty_aggregate ) ? self::describe_call( $empty_aggregate ) : null,
+				'registered'       => $registered,
+				'registryRestored' => $registry_restored,
+				'supportsRestored' => $supports_restored,
+				'unsafeBytes'      => self::block_support_wrapper_unsafe_report( $direct_value, $skip_value, $aggregate_value ),
 			)
 		);
 	}
@@ -1655,6 +1872,498 @@ final class StyleSurface {
 		return $supports;
 	}
 
+	private static function block_support_wrapper_supports(): array {
+		return array(
+			'color'                => array(
+				'text'       => true,
+				'background' => true,
+				'gradients'  => true,
+			),
+			'spacing'              => array(
+				'padding' => true,
+				'margin'  => true,
+			),
+			'__experimentalBorder' => array(
+				'color'  => true,
+				'radius' => true,
+				'style'  => true,
+				'width'  => true,
+			),
+			'typography'           => array(
+				'fontSize'                     => true,
+				'lineHeight'                   => true,
+				'textAlign'                    => true,
+				'textColumns'                  => true,
+				'textIndent'                   => true,
+				'__experimentalFontFamily'     => true,
+				'__experimentalFontStyle'      => true,
+				'__experimentalFontWeight'     => true,
+				'__experimentalLetterSpacing'  => true,
+				'__experimentalTextDecoration' => true,
+				'__experimentalTextTransform'  => true,
+				'__experimentalWritingMode'    => true,
+			),
+			'dimensions'           => array(
+				'height'    => true,
+				'minHeight' => true,
+				'width'     => true,
+			),
+			'shadow'               => true,
+			'align'                => array( 'left', 'center', 'right', 'wide', 'full' ),
+		);
+	}
+
+	private static function block_support_wrapper_skip_supports(): array {
+		$supports = self::block_support_wrapper_supports();
+
+		$supports['color']['__experimentalSkipSerialization']                = array( 'text' );
+		$supports['spacing']['__experimentalSkipSerialization']              = array( 'padding' );
+		$supports['__experimentalBorder']['__experimentalSkipSerialization'] = array( 'color' );
+		$supports['typography']['__experimentalSkipSerialization']           = array( 'fontSize' );
+		$supports['dimensions']['__experimentalSkipSerialization']           = array( 'width' );
+		$supports['shadow']                                                  = array(
+			'__experimentalSkipSerialization' => true,
+		);
+
+		return $supports;
+	}
+
+	private static function block_support_wrapper_attribute_schema(): array {
+		return array(
+			'style'           => array(
+				'type' => 'object',
+			),
+			'textColor'       => array(
+				'type' => 'string',
+			),
+			'backgroundColor' => array(
+				'type' => 'string',
+			),
+			'gradient'        => array(
+				'type' => 'string',
+			),
+			'borderColor'     => array(
+				'type' => 'string',
+			),
+			'fontSize'        => array(
+				'type' => 'string',
+			),
+			'fontFamily'      => array(
+				'type' => 'string',
+			),
+			'align'           => array(
+				'type' => 'string',
+				'enum' => array( 'left', 'center', 'right', 'wide', 'full', '' ),
+			),
+		);
+	}
+
+	private static function block_support_wrapper_attrs( string $slug ): array {
+		$hostile_declaration = "1px;background:url('javascript:alert(1)')";
+		$hostile_script      = "<script>alert(1)</script>\x02";
+
+		return array(
+			'textColor'       => $slug,
+			'backgroundColor' => $slug,
+			'gradient'        => $slug,
+			'borderColor'     => $slug,
+			'fontSize'        => $slug,
+			'fontFamily'      => $slug,
+			'align'           => 'wide',
+			'style'           => array(
+				'color'      => array(
+					'text'       => $hostile_script,
+					'background' => "url('javascript:alert(1)')",
+					'gradient'   => 'linear-gradient(90deg, #111111, #eeeeee)',
+				),
+				'spacing'    => array(
+					'padding'  => array(
+						'top'        => '1px',
+						'right'      => 'var:preset|spacing|' . $slug,
+						'unsupported' => $hostile_declaration,
+					),
+					'margin'   => array(
+						'bottom'     => '2rem',
+						'unsupported' => $hostile_script,
+					),
+					'blockGap' => $hostile_declaration,
+				),
+				'border'     => array(
+					'color'  => "url('javascript:alert(1)')",
+					'radius' => '3',
+					'style'  => 'solid',
+					'width'  => '2',
+					'top'    => array(
+						'color' => 'var:preset|color|' . $slug,
+						'style' => 'dashed',
+						'width' => '4px',
+					),
+					'unsafe' => $hostile_script,
+				),
+				'typography' => array(
+					'fontSize'       => $hostile_script,
+					'fontFamily'     => 'var:preset|font-family|' . $slug,
+					'fontStyle'      => 'italic',
+					'fontWeight'     => '700',
+					'letterSpacing'  => '0.1em',
+					'lineHeight'     => '1.5',
+					'textAlign'      => 'center',
+					'textColumns'    => '2',
+					'textDecoration' => 'underline',
+					'textIndent'     => '1em',
+					'textTransform'  => 'uppercase',
+					'writingMode'    => 'vertical-rl',
+					'unsafe'         => $hostile_declaration,
+				),
+				'dimensions' => array(
+					'aspectRatio' => $hostile_declaration,
+					'height'      => '20px',
+					'minHeight'   => '10px',
+					'width'       => '30px',
+				),
+				'shadow'     => '1px 1px 1px #000',
+				'unknown'    => array(
+					'unsafe' => $hostile_script,
+				),
+			),
+		);
+	}
+
+	private static function block_support_wrapper_register_outputs( array $supports ): array {
+		$callbacks = array(
+			'wp_register_colors_support',
+			'wp_register_spacing_support',
+			'wp_register_border_support',
+			'wp_register_typography_support',
+			'wp_register_dimensions_support',
+			'wp_register_shadow_support',
+			'wp_register_alignment_support',
+		);
+		$preserve_callbacks = array(
+			'wp_register_colors_support',
+			'wp_register_spacing_support',
+			'wp_register_border_support',
+			'wp_register_typography_support',
+			'wp_register_dimensions_support',
+			'wp_register_alignment_support',
+		);
+		$preexisting_style  = array(
+			'type'    => 'object',
+			'default' => array(
+				'componentFuzz' => 'preserve',
+			),
+		);
+
+		$supported   = new \WP_Block_Type(
+			'component-fuzz/style-wrapper-register-supported',
+			array(
+				'supports'   => $supports,
+				'attributes' => array(),
+			)
+		);
+		$unsupported = new \WP_Block_Type(
+			'component-fuzz/style-wrapper-register-unsupported',
+			array(
+				'supports'   => array(),
+				'attributes' => array(),
+			)
+		);
+		$preexisting = new \WP_Block_Type(
+			'component-fuzz/style-wrapper-register-preserve',
+			array(
+				'supports'   => $supports,
+				'attributes' => array(
+					'style' => $preexisting_style,
+				),
+			)
+		);
+
+		foreach ( $callbacks as $callback ) {
+			$callback( $supported );
+			$callback( $unsupported );
+		}
+
+		foreach ( $preserve_callbacks as $callback ) {
+			$callback( $preexisting );
+		}
+
+		return array(
+			'supportedAttributes'   => $supported->attributes,
+			'unsupportedAttributes' => $unsupported->attributes,
+			'preexistingAttributes' => $preexisting->attributes,
+			'preexistingStyle'      => $preexisting_style,
+		);
+	}
+
+	private static function block_support_wrapper_apply_outputs( \WP_Block_Type $block_type, array $attributes ): array {
+		return array(
+			'colors'     => \wp_apply_colors_support( $block_type, $attributes ),
+			'spacing'    => \wp_apply_spacing_support( $block_type, $attributes ),
+			'border'     => \wp_apply_border_support( $block_type, $attributes ),
+			'typography' => \wp_apply_typography_support( $block_type, $attributes ),
+			'dimensions' => \wp_apply_dimensions_support( $block_type, $attributes ),
+			'shadow'     => \wp_apply_shadow_support( $block_type, $attributes ),
+			'alignment'  => \wp_apply_alignment_support( $block_type, $attributes ),
+		);
+	}
+
+	private static function block_support_wrapper_skip_queries( \WP_Block_Type $block_type ): array {
+		return array(
+			'colorText'        => \wp_should_skip_block_supports_serialization( $block_type, 'color', 'text' ),
+			'colorBackground'  => \wp_should_skip_block_supports_serialization( $block_type, 'color', 'background' ),
+			'spacingPadding'   => \wp_should_skip_block_supports_serialization( $block_type, 'spacing', 'padding' ),
+			'spacingMargin'    => \wp_should_skip_block_supports_serialization( $block_type, 'spacing', 'margin' ),
+			'borderColor'      => \wp_should_skip_block_supports_serialization( $block_type, '__experimentalBorder', 'color' ),
+			'borderWidth'      => \wp_should_skip_block_supports_serialization( $block_type, '__experimentalBorder', 'width' ),
+			'typographySize'   => \wp_should_skip_block_supports_serialization( $block_type, 'typography', 'fontSize' ),
+			'typographyFamily' => \wp_should_skip_block_supports_serialization( $block_type, 'typography', 'fontFamily' ),
+			'dimensionsWidth'  => \wp_should_skip_block_supports_serialization( $block_type, 'dimensions', 'width' ),
+			'dimensionsHeight' => \wp_should_skip_block_supports_serialization( $block_type, 'dimensions', 'height' ),
+			'shadowAll'        => \wp_should_skip_block_supports_serialization( $block_type, 'shadow' ),
+			'alignAll'         => \wp_should_skip_block_supports_serialization( $block_type, 'align' ),
+		);
+	}
+
+	private static function block_support_wrapper_registers_ok( array $result ): bool {
+		$supported   = is_array( $result['supportedAttributes'] ?? null ) ? $result['supportedAttributes'] : array();
+		$unsupported = is_array( $result['unsupportedAttributes'] ?? null ) ? $result['unsupportedAttributes'] : array();
+		$preexisting = is_array( $result['preexistingAttributes'] ?? null ) ? $result['preexistingAttributes'] : array();
+
+		$added_attributes = array( 'style', 'textColor', 'backgroundColor', 'gradient', 'borderColor', 'fontSize', 'fontFamily', 'align' );
+		$preset_attributes = array( 'textColor', 'backgroundColor', 'gradient', 'borderColor', 'fontSize', 'fontFamily', 'align' );
+
+		return array() === array_diff( $added_attributes, array_keys( $supported ) )
+			&& array() === array_intersect( $added_attributes, array_keys( $unsupported ) )
+			&& array() === array_diff( $preset_attributes, array_keys( $preexisting ) )
+			&& ( $result['preexistingStyle'] ?? null ) === ( $preexisting['style'] ?? null );
+	}
+
+	private static function block_support_wrapper_direct_outputs_ok( array $outputs, string $slug ): bool {
+		$colors     = is_array( $outputs['colors'] ?? null ) ? $outputs['colors'] : array();
+		$spacing    = is_array( $outputs['spacing'] ?? null ) ? $outputs['spacing'] : array();
+		$border     = is_array( $outputs['border'] ?? null ) ? $outputs['border'] : array();
+		$typography = is_array( $outputs['typography'] ?? null ) ? $outputs['typography'] : array();
+		$dimensions = is_array( $outputs['dimensions'] ?? null ) ? $outputs['dimensions'] : array();
+		$shadow     = is_array( $outputs['shadow'] ?? null ) ? $outputs['shadow'] : array();
+		$alignment  = is_array( $outputs['alignment'] ?? null ) ? $outputs['alignment'] : array();
+
+		$spacing_style    = (string) ( $spacing['style'] ?? '' );
+		$border_style     = (string) ( $border['style'] ?? '' );
+		$typography_style = (string) ( $typography['style'] ?? '' );
+		$dimensions_style = (string) ( $dimensions['style'] ?? '' );
+		$shadow_style     = (string) ( $shadow['style'] ?? '' );
+
+		return self::block_support_wrapper_outputs_safe( $outputs )
+			&& self::class_tokens_include(
+				(string) ( $colors['class'] ?? '' ),
+				array(
+					'has-text-color',
+					'has-' . $slug . '-color',
+					'has-background',
+					'has-' . $slug . '-background-color',
+					'has-' . $slug . '-gradient-background',
+				)
+			)
+			&& ! array_key_exists( 'style', $colors )
+			&& self::css_contains_declaration( $spacing_style, 'padding-top', '1px' )
+			&& self::css_contains_declaration( $spacing_style, 'padding-right', 'var(--wp--preset--spacing--' . $slug . ')' )
+			&& self::css_contains_declaration( $spacing_style, 'margin-bottom', '2rem' )
+			&& self::class_tokens_include(
+				(string) ( $border['class'] ?? '' ),
+				array(
+					'has-border-color',
+					'has-' . $slug . '-border-color',
+				)
+			)
+			&& self::css_contains_declaration( $border_style, 'border-radius', '3px' )
+			&& self::css_contains_declaration( $border_style, 'border-style', 'solid' )
+			&& self::css_contains_declaration( $border_style, 'border-width', '2px' )
+			&& self::css_contains_declaration( $border_style, 'border-top-width', '4px' )
+			&& self::css_contains_declaration( $border_style, 'border-top-color', 'var(--wp--preset--color--' . $slug . ')' )
+			&& self::css_contains_declaration( $border_style, 'border-top-style', 'dashed' )
+			&& self::class_tokens_include(
+				(string) ( $typography['class'] ?? '' ),
+				array(
+					'has-' . $slug . '-font-size',
+					'has-' . $slug . '-font-family',
+					'has-text-align-center',
+				)
+			)
+			&& self::css_contains_declaration( $typography_style, 'font-style', 'italic' )
+			&& self::css_contains_declaration( $typography_style, 'font-weight', '700' )
+			&& self::css_contains_declaration( $typography_style, 'line-height', '1.5' )
+			&& self::css_contains_declaration( $typography_style, 'column-count', '2' )
+			&& self::css_contains_declaration( $typography_style, 'text-decoration', 'underline' )
+			&& self::css_contains_declaration( $typography_style, 'text-indent', '1em' )
+			&& self::css_contains_declaration( $typography_style, 'text-transform', 'uppercase' )
+			&& self::css_contains_declaration( $typography_style, 'letter-spacing', '0.1em' )
+			&& self::css_contains_declaration( $typography_style, 'writing-mode', 'vertical-rl' )
+			&& self::css_contains_declaration( $dimensions_style, 'height', '20px' )
+			&& self::css_contains_declaration( $dimensions_style, 'min-height', '10px' )
+			&& self::css_contains_declaration( $dimensions_style, 'width', '30px' )
+			&& self::css_contains_declaration( $shadow_style, 'box-shadow', '1px 1px 1px #000' )
+			&& self::class_tokens_include( (string) ( $alignment['class'] ?? '' ), array( 'alignwide' ) );
+	}
+
+	private static function block_support_wrapper_skip_outputs_ok( array $outputs, string $slug ): bool {
+		$colors     = is_array( $outputs['colors'] ?? null ) ? $outputs['colors'] : array();
+		$spacing    = is_array( $outputs['spacing'] ?? null ) ? $outputs['spacing'] : array();
+		$border     = is_array( $outputs['border'] ?? null ) ? $outputs['border'] : array();
+		$typography = is_array( $outputs['typography'] ?? null ) ? $outputs['typography'] : array();
+		$dimensions = is_array( $outputs['dimensions'] ?? null ) ? $outputs['dimensions'] : array();
+		$shadow     = is_array( $outputs['shadow'] ?? null ) ? $outputs['shadow'] : array();
+		$alignment  = is_array( $outputs['alignment'] ?? null ) ? $outputs['alignment'] : array();
+
+		$color_tokens      = self::class_tokens( (string) ( $colors['class'] ?? '' ) );
+		$typography_tokens = self::class_tokens( (string) ( $typography['class'] ?? '' ) );
+		$spacing_style     = (string) ( $spacing['style'] ?? '' );
+		$border_style      = (string) ( $border['style'] ?? '' );
+		$dimensions_style  = (string) ( $dimensions['style'] ?? '' );
+
+		return self::block_support_wrapper_outputs_safe( $outputs )
+			&& ! in_array( 'has-text-color', $color_tokens, true )
+			&& ! in_array( 'has-' . $slug . '-color', $color_tokens, true )
+			&& self::class_tokens_include(
+				(string) ( $colors['class'] ?? '' ),
+				array(
+					'has-background',
+					'has-' . $slug . '-background-color',
+					'has-' . $slug . '-gradient-background',
+				)
+			)
+			&& ! self::css_contains_declaration( $spacing_style, 'padding-top', '1px' )
+			&& ! self::css_contains_declaration( $spacing_style, 'padding-right', 'var(--wp--preset--spacing--' . $slug . ')' )
+			&& self::css_contains_declaration( $spacing_style, 'margin-bottom', '2rem' )
+			&& ! array_key_exists( 'class', $border )
+			&& ! self::css_contains_declaration( $border_style, 'border-top-color', 'var(--wp--preset--color--' . $slug . ')' )
+			&& self::css_contains_declaration( $border_style, 'border-radius', '3px' )
+			&& self::css_contains_declaration( $border_style, 'border-style', 'solid' )
+			&& self::css_contains_declaration( $border_style, 'border-width', '2px' )
+			&& self::css_contains_declaration( $border_style, 'border-top-width', '4px' )
+			&& self::css_contains_declaration( $border_style, 'border-top-style', 'dashed' )
+			&& ! in_array( 'has-' . $slug . '-font-size', $typography_tokens, true )
+			&& self::class_tokens_include(
+				(string) ( $typography['class'] ?? '' ),
+				array(
+					'has-' . $slug . '-font-family',
+					'has-text-align-center',
+				)
+			)
+			&& ! self::css_contains_declaration( $dimensions_style, 'width', '30px' )
+			&& self::css_contains_declaration( $dimensions_style, 'height', '20px' )
+			&& self::css_contains_declaration( $dimensions_style, 'min-height', '10px' )
+			&& array() === $shadow
+			&& self::class_tokens_include( (string) ( $alignment['class'] ?? '' ), array( 'alignwide' ) );
+	}
+
+	private static function block_support_wrapper_skip_queries_ok( array $queries ): bool {
+		$expected = array(
+			'colorText'        => true,
+			'colorBackground'  => false,
+			'spacingPadding'   => true,
+			'spacingMargin'    => false,
+			'borderColor'      => true,
+			'borderWidth'      => false,
+			'typographySize'   => true,
+			'typographyFamily' => false,
+			'dimensionsWidth'  => true,
+			'dimensionsHeight' => false,
+			'shadowAll'        => true,
+			'alignAll'         => false,
+		);
+
+		foreach ( $expected as $key => $value ) {
+			if ( ! array_key_exists( $key, $queries ) || $queries[ $key ] !== $value ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function block_support_wrapper_aggregate_output_ok( array $attributes, string $slug ): bool {
+		$class = (string) ( $attributes['class'] ?? '' );
+		$style = (string) ( $attributes['style'] ?? '' );
+
+		return self::block_support_wrapper_attributes_safe( $attributes )
+			&& self::class_tokens_include(
+				$class,
+				array(
+					'has-' . $slug . '-font-size',
+					'has-' . $slug . '-font-family',
+					'has-text-align-center',
+					'has-text-color',
+					'has-' . $slug . '-color',
+					'has-background',
+					'has-' . $slug . '-background-color',
+					'has-' . $slug . '-gradient-background',
+					'has-border-color',
+					'has-' . $slug . '-border-color',
+					'alignwide',
+				)
+			)
+			&& self::css_contains_declaration( $style, 'font-style', 'italic' )
+			&& self::css_contains_declaration( $style, 'line-height', '1.5' )
+			&& self::css_contains_declaration( $style, 'padding-top', '1px' )
+			&& self::css_contains_declaration( $style, 'padding-right', 'var(--wp--preset--spacing--' . $slug . ')' )
+			&& self::css_contains_declaration( $style, 'margin-bottom', '2rem' )
+			&& self::css_contains_declaration( $style, 'border-radius', '3px' )
+			&& self::css_contains_declaration( $style, 'border-top-color', 'var(--wp--preset--color--' . $slug . ')' )
+			&& self::css_contains_declaration( $style, 'height', '20px' )
+			&& self::css_contains_declaration( $style, 'min-height', '10px' )
+			&& self::css_contains_declaration( $style, 'width', '30px' )
+			&& self::css_contains_declaration( $style, 'box-shadow', '1px 1px 1px #000' );
+	}
+
+	private static function block_support_wrapper_outputs_safe( array $outputs ): bool {
+		foreach ( $outputs as $attributes ) {
+			if ( ! is_array( $attributes ) || ! self::block_support_wrapper_attributes_safe( $attributes ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function block_support_wrapper_attributes_safe( array $attributes ): bool {
+		foreach ( array( 'class', 'style' ) as $attribute_name ) {
+			if ( ! array_key_exists( $attribute_name, $attributes ) ) {
+				continue;
+			}
+
+			$value = $attributes[ $attribute_name ];
+			if ( ! is_scalar( $value ) || is_bool( $value ) ) {
+				return false;
+			}
+
+			$value = (string) $value;
+			if ( str_contains( strtolower( $value ), 'javascript:' ) || self::contains_raw_unsafe_bytes( $value ) ) {
+				return false;
+			}
+
+			if ( 'style' === $attribute_name && ! self::declaration_block_ok( $value ) ) {
+				return false;
+			}
+
+			if ( 'class' === $attribute_name ) {
+				$tokens = self::class_tokens( $value );
+				if ( count( $tokens ) !== count( array_unique( $tokens ) ) ) {
+					return false;
+				}
+			}
+		}
+
+		return true;
+	}
+
+	private static function block_support_wrapper_unsafe_report( array $direct, array $skip, array $aggregate ): array {
+		return array(
+			'directSafe'    => self::block_support_wrapper_outputs_safe( $direct ),
+			'skipSafe'      => self::block_support_wrapper_outputs_safe( $skip ),
+			'aggregateSafe' => self::block_support_wrapper_attributes_safe( $aggregate ),
+		);
+	}
+
 	private static function safe_color( \ComponentFuzz\FuzzContext $ctx ): string {
 		return $ctx->choice(
 			array(
@@ -1931,6 +2640,7 @@ final class StyleSurface {
 	private static function snapshot_state(): array {
 		$block_registry       = self::get_static_property( 'WP_Block_Type_Registry', 'instance' );
 		$block_style_registry = self::get_static_property( 'WP_Block_Styles_Registry', 'instance' );
+		$block_supports       = self::get_static_property( 'WP_Block_Supports', 'instance' );
 
 		return array(
 			'globals'              => self::snapshot_globals(
@@ -1952,6 +2662,11 @@ final class StyleSurface {
 				? self::get_object_property( $block_style_registry, 'registered_block_styles' )
 				: null,
 			'themeJsonBlockMeta'   => self::get_static_property( 'WP_Theme_JSON', 'blocks_metadata' ),
+			'blockSupportsApi'     => $block_supports,
+			'blockSupports'        => $block_supports instanceof \WP_Block_Supports
+				? self::get_object_property( $block_supports, 'block_supports' )
+				: null,
+			'blockSupportRenderItem' => self::get_static_property( 'WP_Block_Supports', 'block_to_render' ),
 		);
 	}
 
@@ -1973,6 +2688,14 @@ final class StyleSurface {
 		} else {
 			self::set_static_property( 'WP_Block_Styles_Registry', 'instance', null );
 		}
+
+		if ( $snapshot['blockSupportsApi'] instanceof \WP_Block_Supports ) {
+			self::set_object_property( $snapshot['blockSupportsApi'], 'block_supports', $snapshot['blockSupports'] );
+			self::set_static_property( 'WP_Block_Supports', 'instance', $snapshot['blockSupportsApi'] );
+		} else {
+			self::set_static_property( 'WP_Block_Supports', 'instance', null );
+		}
+		self::set_static_property( 'WP_Block_Supports', 'block_to_render', $snapshot['blockSupportRenderItem'] );
 	}
 
 	private static function snapshot_globals( array $names ): array {
