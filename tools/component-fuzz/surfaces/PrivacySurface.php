@@ -57,6 +57,7 @@ final class PrivacySurface {
 			$rows[] = self::check_registry_filters( $ctx->fork( 'registry-filters' ) );
 			$rows[] = self::check_comment_privacy_callbacks( $ctx->fork( 'comment-privacy-callbacks' ) );
 			$rows[] = self::check_export_processor( $ctx->fork( 'export-processor' ) );
+			$rows[] = self::check_export_email_notification( $ctx->fork( 'export-email' ) );
 			$rows[] = self::check_erasure_processor( $ctx->fork( 'erasure-processor' ) );
 			$rows[] = self::check_anonymization_helpers( $ctx->fork( 'anonymization' ) );
 			$rows[] = self::check_export_paths_and_cleanup( $ctx->fork( 'export-paths-cleanup' ) );
@@ -164,6 +165,8 @@ final class PrivacySurface {
 				'WP_User_Request',
 				'WP_Post',
 				'WP_Rewrite',
+				'PHPMailer\PHPMailer\PHPMailer',
+				'WP_PHPMailer',
 			) as $class
 		) {
 			if ( ! class_exists( $class ) ) {
@@ -186,6 +189,7 @@ final class PrivacySurface {
 				'get_comments',
 				'get_post_meta',
 				'is_wp_error',
+				'remove_action',
 				'remove_filter',
 				'sanitize_email',
 				'sanitize_title_with_dashes',
@@ -195,9 +199,13 @@ final class PrivacySurface {
 				'wp_fast_hash',
 				'wp_get_user_request',
 				'wp_json_encode',
+				'wp_mail',
+				'wp_is_unicode_email',
+				'wp_sanitize_unicode_email',
 				'wp_privacy_generate_personal_data_export_group_html',
 				'wp_privacy_process_personal_data_erasure_page',
 				'wp_privacy_process_personal_data_export_page',
+				'wp_privacy_send_personal_data_export_email',
 				'wp_privacy_anonymize_data',
 				'wp_privacy_anonymize_ip',
 				'wp_privacy_delete_old_export_files',
@@ -1564,6 +1572,248 @@ final class PrivacySurface {
 		);
 	}
 
+	private static function check_export_email_notification( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$token    = strtolower( preg_replace( '/[^a-z0-9]+/', '', $ctx->identifier( 5, 10 ) ) );
+		$token    = '' === $token ? 'privacy' . abs( $ctx->seed() % 10000 ) : $token;
+
+		$request_id = 92500 + $ctx->int( 1, 99 );
+		$request_email = 'privacy-export+' . $token . '@example.com';
+		$recipient     = 'privacy-recipient-' . $token . '@example.com';
+		$file_name     = 'component-privacy-export-' . $token . '.zip';
+		$site_name     = 'Privacy <b>Fuzz</b> & Site';
+		$site_url      = 'https://privacy.example.com/base';
+		$expected_url  = 'http://example.test/uploads/wp-personal-data-exports/' . $file_name;
+
+		self::prime_request_post(
+			self::post_record(
+				array(
+					'ID'            => $request_id,
+					'post_author'   => '0',
+					'post_title'    => $request_email,
+					'post_name'     => 'export_personal_data',
+					'post_status'   => 'request-confirmed',
+					'post_content'  => '{"export":"email"}',
+					'post_password' => \wp_fast_hash( 'export-email-key-' . $token ),
+				)
+			)
+		);
+		self::set_post_meta(
+			$request_id,
+			array(
+				'_export_file_name' => $file_name,
+			)
+		);
+
+		$mailer_snapshot = array_key_exists( 'phpmailer', $GLOBALS )
+			? array( 'exists' => true, 'value' => $GLOBALS['phpmailer'] )
+			: array( 'exists' => false, 'value' => null );
+		$validator_snapshot = \PHPMailer\PHPMailer\PHPMailer::$validator;
+		$to_calls           = array();
+		$subject_calls      = array();
+		$content_calls      = array();
+		$header_calls       = array();
+		$succeeded          = array();
+
+		$blogname_filter = static fn() => $site_name;
+		$home_filter     = static fn() => $site_url;
+		$date_filter     = static fn() => 'Y-m-d';
+		$to_filter       = static function ( string $request_email_arg, \WP_User_Request $request ) use ( &$to_calls, $recipient ): string {
+			$to_calls[] = array(
+				'requestEmail' => $request_email_arg,
+				'request'      => $request,
+			);
+
+			return $recipient;
+		};
+		$subject_filter  = static function ( string $subject, string $sitename, array $email_data ) use ( &$subject_calls, $token ): string {
+			$subject_calls[] = array(
+				'subject'   => $subject,
+				'sitename'  => $sitename,
+				'emailData' => $email_data,
+			);
+
+			return $subject . ' [' . $token . ']';
+		};
+		$content_filter  = static function ( string $content, int $request_id_arg, array $email_data ) use ( &$content_calls, $token ): string {
+			$content_calls[] = array(
+				'content'   => $content,
+				'requestId' => $request_id_arg,
+				'emailData' => $email_data,
+			);
+
+			return 'Export ###LINK### for ###EMAIL### from ###SITENAME### at ###SITEURL### until ###EXPIRATION### token ' . $token;
+		};
+		$headers_filter  = static function ( $headers, string $subject, string $content, int $request_id_arg, array $email_data ) use ( &$header_calls, $token ): array {
+			$header_calls[] = array(
+				'headers'   => $headers,
+				'subject'   => $subject,
+				'content'   => $content,
+				'requestId' => $request_id_arg,
+				'emailData' => $email_data,
+			);
+
+			return array(
+				'Content-Type: text/plain; charset=UTF-8',
+				'X-Privacy-Token: ' . $token,
+			);
+		};
+		$success_action  = static function ( array $mail_data ) use ( &$succeeded ): void {
+			$succeeded[] = $mail_data;
+		};
+
+		PrivacySurfaceMailer::$sent = array();
+		$GLOBALS['phpmailer']       = self::new_mailer();
+		\PHPMailer\PHPMailer\PHPMailer::$validator = static function ( $email ): bool {
+			return (bool) \is_email( $email );
+		};
+
+		\add_filter( 'pre_option_blogname', $blogname_filter );
+		\add_filter( 'pre_option_home', $home_filter );
+		\add_filter( 'pre_option_date_format', $date_filter );
+		\add_filter( 'wp_privacy_personal_data_email_to', $to_filter, 10, 2 );
+		\add_filter( 'wp_privacy_personal_data_email_subject', $subject_filter, 10, 3 );
+		\add_filter( 'wp_privacy_personal_data_email_content', $content_filter, 10, 3 );
+		\add_filter( 'wp_privacy_personal_data_email_headers', $headers_filter, 10, 5 );
+		\add_action( 'wp_mail_succeeded', $success_action );
+		try {
+			$result = self::call(
+				static function () use ( $request_id ) {
+					return \wp_privacy_send_personal_data_export_email( $request_id );
+				}
+			);
+		} finally {
+			\remove_action( 'wp_mail_succeeded', $success_action );
+			\remove_filter( 'wp_privacy_personal_data_email_headers', $headers_filter, 10 );
+			\remove_filter( 'wp_privacy_personal_data_email_content', $content_filter, 10 );
+			\remove_filter( 'wp_privacy_personal_data_email_subject', $subject_filter, 10 );
+			\remove_filter( 'wp_privacy_personal_data_email_to', $to_filter, 10 );
+			\remove_filter( 'pre_option_date_format', $date_filter );
+			\remove_filter( 'pre_option_home', $home_filter );
+			\remove_filter( 'pre_option_blogname', $blogname_filter );
+			\PHPMailer\PHPMailer\PHPMailer::$validator = $validator_snapshot;
+			if ( $mailer_snapshot['exists'] ) {
+				$GLOBALS['phpmailer'] = $mailer_snapshot['value'];
+			} else {
+				unset( $GLOBALS['phpmailer'] );
+			}
+		}
+
+		$sent         = PrivacySurfaceMailer::$sent[0] ?? array();
+		$succeeded_to = isset( $succeeded[0]['to'] ) ? (array) $succeeded[0]['to'] : array();
+		$sent_body    = is_array( $sent ) ? (string) ( $sent['body'] ?? '' ) : '';
+		$sent_subject = is_array( $sent ) ? (string) ( $sent['subject'] ?? '' ) : '';
+		$to_request   = $to_calls[0]['request'] ?? null;
+		$subject_data = $subject_calls[0]['emailData'] ?? array();
+		$content_data = $content_calls[0]['emailData'] ?? array();
+		$headers_data = $header_calls[0]['emailData'] ?? array();
+
+		self::collect_failure(
+			$failures,
+			! $result['threw']
+				&& true === $result['value']
+				&& 1 === count( PrivacySurfaceMailer::$sent )
+				&& 1 === count( $succeeded )
+				&& self::addresses_include( $sent['to'] ?? array(), $recipient, '' )
+				&& array( $recipient ) === $succeeded_to,
+			'export-email.wp-mail-success-and-recipient',
+			array(
+				'result'    => self::describe_call( $result ),
+				'sent'      => self::describe_value( $sent ),
+				'succeeded' => self::describe_value( $succeeded ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			1 === count( $to_calls )
+				&& 1 === count( $subject_calls )
+				&& 1 === count( $content_calls )
+				&& 1 === count( $header_calls )
+				&& $to_request instanceof \WP_User_Request
+				&& $request_id === $to_request->ID
+				&& $request_email === ( $to_calls[0]['requestEmail'] ?? null )
+				&& $recipient === ( $subject_data['message_recipient'] ?? null )
+				&& $recipient === ( $content_data['message_recipient'] ?? null )
+				&& $recipient === ( $headers_data['message_recipient'] ?? null )
+				&& $expected_url === ( $subject_data['export_file_url'] ?? null )
+				&& $expected_url === ( $content_data['export_file_url'] ?? null )
+				&& $expected_url === ( $headers_data['export_file_url'] ?? null ),
+			'export-email.filter-data-uses-request-and-recipient',
+			array(
+				'toCalls'      => self::describe_value( $to_calls ),
+				'subjectCalls' => self::describe_value( $subject_calls ),
+				'contentCalls' => self::describe_value( $content_calls ),
+				'headerCalls'  => self::describe_value( $header_calls ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			str_contains( $sent_subject, '[Privacy <b>Fuzz</b> & Site] Personal Data Export' )
+				&& str_contains( $sent_subject, '[' . $token . ']' )
+				&& str_contains( $sent_body, $expected_url )
+				&& str_contains( $sent_body, $recipient )
+				&& str_contains( $sent_body, $site_name )
+				&& str_contains( $sent_body, $site_url )
+				&& str_contains( $sent_body, 'token ' . $token )
+				&& ! str_contains( $sent_body, '###LINK###' )
+				&& ! str_contains( $sent_body, '###EMAIL###' )
+				&& ! str_contains( $sent_body, '###SITENAME###' )
+				&& ! str_contains( $sent_body, '###SITEURL###' )
+				&& ! str_contains( $sent_body, '###EXPIRATION###' ),
+			'export-email.placeholders-and-subject-rendered',
+			array(
+				'subject' => self::describe_string( $sent_subject ),
+				'body'    => self::describe_string( $sent_body ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			'text/plain' === ( $sent['contentType'] ?? null )
+				&& 'UTF-8' === ( $sent['charset'] ?? null )
+				&& self::custom_headers_include( $sent['customHeaders'] ?? array(), 'X-Privacy-Token' )
+				&& false === \has_filter( 'wp_privacy_personal_data_email_to', $to_filter )
+				&& false === \has_filter( 'wp_privacy_personal_data_email_subject', $subject_filter )
+				&& false === \has_filter( 'wp_privacy_personal_data_email_content', $content_filter )
+				&& false === \has_filter( 'wp_privacy_personal_data_email_headers', $headers_filter )
+				&& false === \has_filter( 'wp_mail_succeeded', $success_action ),
+			'export-email.headers-and-filter-cleanup',
+			array(
+				'sent' => self::describe_value( $sent ),
+				'filters' => array(
+					'to'      => \has_filter( 'wp_privacy_personal_data_email_to', $to_filter ),
+					'subject' => \has_filter( 'wp_privacy_personal_data_email_subject', $subject_filter ),
+					'content' => \has_filter( 'wp_privacy_personal_data_email_content', $content_filter ),
+					'headers' => \has_filter( 'wp_privacy_personal_data_email_headers', $headers_filter ),
+					'success' => \has_filter( 'wp_mail_succeeded', $success_action ),
+				),
+			)
+		);
+
+		PrivacySurfaceMailer::$sent = array();
+
+		return self::row(
+			$ctx,
+			'privacy.export-email.notification-filters-and-mailer',
+			array() === $failures,
+			array(
+				'requestId'   => $request_id,
+				'recipient'   => $recipient,
+				'exportUrl'   => $expected_url,
+				'mailCount'   => count( $succeeded ),
+				'filterCalls' => array(
+					'to'      => count( $to_calls ),
+					'subject' => count( $subject_calls ),
+					'content' => count( $content_calls ),
+					'headers' => count( $header_calls ),
+				),
+				'failures'    => $failures,
+			)
+		);
+	}
+
 	private static function check_erasure_processor( \ComponentFuzz\FuzzContext $ctx ): array {
 		$failures = array();
 
@@ -2263,6 +2513,55 @@ final class PrivacySurface {
 			&& 'IP' === $groups['activity']['items']['login-1'][0]['name'];
 	}
 
+	private static function addresses_include( array $addresses, string $email, string $name ): bool {
+		foreach ( $addresses as $address ) {
+			if ( isset( $address[0], $address[1] ) && $email === $address[0] && $name === trim( (string) $address[1] ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private static function custom_headers_include( array $headers, string $name ): bool {
+		foreach ( $headers as $header ) {
+			if ( is_array( $header ) && isset( $header[0] ) && $name === $header[0] ) {
+				return true;
+			}
+			if ( is_string( $header ) && str_starts_with( $header, $name . ':' ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private static function new_mailer(): object {
+		return new class( true ) extends \WP_PHPMailer {
+			public function send(): bool {
+				$this->preSend();
+				PrivacySurfaceMailer::$sent[] = array(
+					'to'            => $this->getToAddresses(),
+					'cc'            => $this->getCcAddresses(),
+					'bcc'           => $this->getBccAddresses(),
+					'replyTo'       => $this->getReplyToAddresses(),
+					'attachments'   => $this->getAttachments(),
+					'customHeaders' => $this->getCustomHeaders(),
+					'from'          => $this->From,
+					'fromName'      => $this->FromName,
+					'subject'       => $this->Subject,
+					'body'          => $this->Body,
+					'contentType'   => $this->ContentType,
+					'charset'       => $this->CharSet,
+					'encoding'      => $this->Encoding,
+					'mimeMessage'   => $this->getSentMIMEMessage(),
+				);
+
+				return true;
+			}
+		};
+	}
+
 	private static function wpdb_stub_available(): bool {
 		return isset( $GLOBALS['wpdb'] )
 			&& $GLOBALS['wpdb'] instanceof \Component_Fuzz_WPDB_Stub
@@ -2337,6 +2636,8 @@ final class PrivacySurface {
 		\add_filter( 'wp_privacy_personal_data_exporters', array( __CLASS__, 'filter_exporters' ), 10, 1 );
 		\add_filter( 'wp_privacy_personal_data_erasers', array( __CLASS__, 'filter_erasers' ), 10, 1 );
 		\add_filter( 'upload_dir', array( __CLASS__, 'filter_upload_dir' ), 10, 1 );
+		\add_filter( 'is_email', 'wp_is_unicode_email', 10, 3 );
+		\add_filter( 'sanitize_email', 'wp_sanitize_unicode_email', 10, 3 );
 		\remove_all_filters( 'wp_privacy_personal_data_export_file' );
 		\remove_all_filters( 'wp_privacy_personal_data_erased' );
 		\add_action( 'wp_privacy_personal_data_export_file', array( __CLASS__, 'record_export_file_action' ), 10, 1 );
@@ -2364,6 +2665,7 @@ final class PrivacySurface {
 		self::$erasers             = array();
 		self::$export_file_actions = array();
 		self::$erased_actions      = array();
+		PrivacySurfaceMailer::$sent = array();
 	}
 
 	private static function with_admin_init_context( callable $callback ): void {
@@ -2761,4 +3063,9 @@ final class PrivacySurface {
 
 		return $value;
 	}
+}
+
+final class PrivacySurfaceMailer {
+	/** @var array<int,array<string,mixed>> */
+	public static array $sent = array();
 }
