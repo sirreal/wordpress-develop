@@ -448,10 +448,10 @@ database, network requests, or a configured site.
   deterministic global restoration.
 - `query-loop`: no-DB `WP_Query` execution and loop-state coverage through
   `posts_pre_query` fixtures, including loop wrapper delegation,
-  setup/reset postdata globals, single/page flag behavior, found/max-page coherence,
-  empty-result events, offset/no-found-rows field-shape windows for `ids` and
-  `id=>parent`, `the_posts` result-filter finalization, and deterministic state
-  restoration.
+  setup/reset postdata globals, nested secondary-query reset and conditional
+  scoping, single/page flag behavior, found/max-page coherence, empty-result
+  events, offset/no-found-rows field-shape windows for `ids` and `id=>parent`,
+  `the_posts` result-filter finalization, and deterministic state restoration.
 - `registries`: no-DB modern registry coverage for connectors, icons, block
   metadata collections, and speculation rules, including lifecycle validation,
   helper oracles, manifest sanitization/caching, connector override

@@ -37,6 +37,7 @@ final class QueryLoopSurface {
 
 			$rows[] = self::check_pre_query_loop_state( $ctx->fork( 'pre-query' ) );
 			$rows[] = self::check_global_wrappers_and_reset( $ctx->fork( 'global-wrappers' ) );
+			$rows[] = self::check_nested_query_reset_and_conditionals( $ctx->fork( 'nested-reset-conditionals' ) );
 			$rows[] = self::check_query_flags_and_selected_posts( $ctx->fork( 'flags' ) );
 			$rows[] = self::check_empty_query_events( $ctx->fork( 'empty' ) );
 			$rows   = array_merge( $rows, self::check_generated_query_cases( $ctx->fork( 'generated-cases' ) ) );
@@ -343,6 +344,220 @@ final class QueryLoopSurface {
 			'query-loop.global-wrappers-reset-postdata',
 			array() === $failures,
 			array( 'failures' => array_slice( $failures, 0, self::MAX_FAILURES ) )
+		);
+	}
+
+	private static function check_nested_query_reset_and_conditionals( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures       = array();
+		$events         = array();
+		$tracker_hooks  = array();
+		$primary_hooks  = array();
+		$secondary_runs = array();
+		$nested_summaries = array();
+		$local_snapshot = self::snapshot_state();
+		$state_restored = false;
+		$sentinel_key   = 'query-loop-nested-sentinel-' . $ctx->iteration() . '-' . substr( sha1( (string) $ctx->seed() ), 0, 12 );
+		$sentinel_value = 'nested-query-loop:' . $ctx->seed();
+
+		try {
+			\wp_cache_set( $sentinel_key, $sentinel_value, 'component-fuzz-query-loop' );
+
+			$primary_args = self::query_args(
+				array(
+					'post_type'      => 'post',
+					'post_status'    => 'publish',
+					'posts_per_page' => 3,
+					'paged'          => 1,
+					'orderby'        => 'ID',
+					'order'          => 'ASC',
+					'no_found_rows'  => false,
+				)
+			);
+			$unused_events = array();
+			$primary       = self::run_pre_query( $primary_args, $unused_events, $primary_hooks );
+			self::remove_scoped_hooks( $primary_hooks );
+			$primary_hooks = array();
+			$primary_expect = self::expected_query_observation( $primary, array( 'args' => $primary_args ) );
+
+			foreach ( self::nested_secondary_query_cases( $ctx->fork( 'secondary-cases' ) ) as $case_index => $case ) {
+				$case_hooks = array();
+				$unused_events = array();
+
+				try {
+					$query = self::run_pre_query( $case['args'], $unused_events, $case_hooks, $case['options'] ?? array() );
+					self::remove_scoped_hooks( $case_hooks );
+					$case_hooks = array();
+
+					$secondary_runs[] = array(
+						'label'  => 'nested-' . $case_index,
+						'case'   => $case,
+						'query'  => $query,
+						'expect' => self::expected_query_observation( $query, $case ),
+					);
+				} catch ( \Throwable $e ) {
+					self::collect_failure(
+						$failures,
+						false,
+						'nested secondary query construction does not throw',
+						array(
+							'case'      => $case['label'] ?? 'case-' . $case_index,
+							'args'      => $case['args'] ?? array(),
+							'throwable' => self::describe_throwable( $e ),
+						)
+					);
+				} finally {
+					self::remove_scoped_hooks( $case_hooks );
+				}
+			}
+
+			self::collect_failure(
+				$failures,
+				array() !== $secondary_runs,
+				'nested query invariant builds at least one secondary query',
+				array( 'caseCount' => count( $secondary_runs ) )
+			);
+
+			$tracked_queries = array( 'primary' => $primary );
+			foreach ( $secondary_runs as $run ) {
+				$tracked_queries[ $run['label'] ] = $run['query'];
+			}
+			self::install_query_event_tracker( $events, $tracker_hooks, $tracked_queries );
+
+			$GLOBALS['wp_query']     = $primary;
+			$GLOBALS['wp_the_query'] = $primary;
+
+			self::collect_failure(
+				$failures,
+				self::global_query_scope_matches( $primary )
+					&& ( $GLOBALS['wp_the_query'] ?? null ) === $primary,
+				'primary query is the active global query before nested loops',
+				array(
+					'global' => self::global_query_scope_summary(),
+					'query'  => self::query_scope_summary( $primary ),
+				)
+			);
+
+			$primary_seen      = array();
+			$ran_nested       = false;
+			$primary_overflow = false;
+
+			while ( \have_posts() ) {
+				\the_post();
+				$primary_seen[] = self::post_id_from_value( $GLOBALS['post'] ?? null );
+
+				self::collect_failure(
+					$failures,
+					self::active_loop_post_aligned( $primary )
+						&& self::global_query_scope_matches( $primary )
+						&& true === self::global_in_the_loop(),
+					'primary loop globals align before and after nested query work',
+					array(
+						'global' => self::global_query_scope_summary(),
+						'query'  => self::query_scope_summary( $primary ),
+					)
+				);
+
+				if ( ! $ran_nested ) {
+					foreach ( $secondary_runs as $run ) {
+						$nested_summaries[] = self::exercise_nested_secondary_query( $failures, $run, $primary );
+					}
+					$ran_nested = true;
+				}
+
+				self::collect_failure(
+					$failures,
+					self::active_loop_post_aligned( $primary )
+						&& self::global_query_scope_matches( $primary )
+						&& true === self::global_in_the_loop(),
+					'primary active query, conditional flags, and post globals are restored after nested resets',
+					array(
+						'global' => self::global_query_scope_summary(),
+						'query'  => self::query_scope_summary( $primary ),
+					)
+				);
+
+				if ( count( $primary_seen ) > 50 ) {
+					$primary_overflow = true;
+					break;
+				}
+			}
+
+			$primary_have_after_loop = \have_posts();
+			\rewind_posts();
+			$primary_after_rewind = self::query_loop_state( $primary );
+			$expected_events      = self::expected_nested_loop_events( $secondary_runs );
+
+			self::collect_failure(
+				$failures,
+				false === $primary_overflow
+					&& $primary_expect['pageIds'] === $primary_seen
+					&& count( $primary_expect['pageIds'] ) === (int) $primary->post_count
+					&& $primary_have_after_loop
+					&& -1 === $primary->current_post
+					&& false === $primary->in_the_loop
+					&& false === $primary->before_loop,
+				'primary loop order, post_count, have_posts rewind, and final loop state are coherent after nested loops',
+				array(
+					'expectedIds'        => $primary_expect['pageIds'],
+					'seenIds'            => $primary_seen,
+					'postCount'          => (int) $primary->post_count,
+					'haveAfterLoop'      => $primary_have_after_loop,
+					'stateAfterRewind'   => $primary_after_rewind,
+					'primaryLoopOverflow' => $primary_overflow,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$expected_events === $events,
+				'primary and nested loop_start/loop_end/no-results events occur in query-local order',
+				array(
+					'expected' => $expected_events,
+					'actual'   => $events,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$sentinel_value === \wp_cache_get( $sentinel_key, 'component-fuzz-query-loop' ),
+				'nested query work leaves unrelated cache entries intact before cleanup',
+				array(
+					'expected' => $sentinel_value,
+					'actual'   => \wp_cache_get( $sentinel_key, 'component-fuzz-query-loop' ),
+				)
+			);
+		} catch ( \Throwable $e ) {
+			self::collect_failure(
+				$failures,
+				false,
+				'nested query reset and conditional probe does not throw',
+				array( 'throwable' => self::describe_throwable( $e ) )
+			);
+		} finally {
+			self::remove_scoped_hooks( $tracker_hooks );
+			self::remove_scoped_hooks( $primary_hooks );
+			\wp_cache_delete( $sentinel_key, 'component-fuzz-query-loop' );
+			self::restore_state( $local_snapshot );
+			$state_restored = self::state_matches( $local_snapshot );
+		}
+
+		self::collect_failure(
+			$failures,
+			$state_restored,
+			'nested query probe restores scoped globals, filters, cache, and output state',
+			array( 'trackedGlobals' => array_keys( $local_snapshot['globals'] ) )
+		);
+
+		return self::row(
+			$ctx,
+			'query-loop.nested-query-reset-and-conditionals',
+			array() === $failures,
+			array(
+				'failures'  => array_slice( $failures, 0, self::MAX_FAILURES ),
+				'events'    => $events,
+				'nested'    => $nested_summaries,
+				'restored'  => $state_restored,
+			)
 		);
 	}
 
@@ -997,6 +1212,423 @@ final class QueryLoopSurface {
 		}
 	}
 
+	private static function install_query_event_tracker( array &$events, array &$hooks, array $queries ): void {
+		$query_labels = array();
+		foreach ( $queries as $label => $query ) {
+			if ( $query instanceof \WP_Query ) {
+				$query_labels[ spl_object_id( $query ) ] = (string) $label;
+			}
+		}
+
+		$label_for_query = static function ( \WP_Query $query ) use ( $query_labels ): string {
+			return $query_labels[ spl_object_id( $query ) ] ?? 'unknown';
+		};
+		$loop_start = static function ( \WP_Query $query ) use ( &$events, $label_for_query ): void {
+			$events[] = $label_for_query( $query ) . ':loop_start';
+		};
+		$loop_end = static function ( \WP_Query $query ) use ( &$events, $label_for_query ): void {
+			$events[] = $label_for_query( $query ) . ':loop_end';
+		};
+		$loop_no_results = static function ( \WP_Query $query ) use ( &$events, $label_for_query ): void {
+			$events[] = $label_for_query( $query ) . ':loop_no_results';
+		};
+
+		\add_action( 'loop_start', $loop_start, 10, 1 );
+		\add_action( 'loop_end', $loop_end, 10, 1 );
+		\add_action( 'loop_no_results', $loop_no_results, 10, 1 );
+		$hooks[] = array( 'action', 'loop_start', $loop_start, 10 );
+		$hooks[] = array( 'action', 'loop_end', $loop_end, 10 );
+		$hooks[] = array( 'action', 'loop_no_results', $loop_no_results, 10 );
+	}
+
+	private static function nested_secondary_query_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$post_ids = self::ids_for_type( 'post' );
+		$page_ids = self::ids_for_type( 'page' );
+
+		$generated_args = self::nested_generated_secondary_args( $ctx->fork( 'generated' ), $post_ids, $page_ids );
+		$field_mode     = $ctx->choice( array( 'ids', 'id=>parent' ) );
+		$empty_fields   = $ctx->choice( array( 'all', 'ids', 'id=>parent' ) );
+		$search_or_date = $ctx->choice( array( 'search-hit', 'search-miss', 'date-archive' ) );
+		$paged_fields_args = self::query_args(
+			array(
+				'post_type'      => array( 'post', 'page' ),
+				'post_status'    => $ctx->choice( array( 'publish', array( 'publish' ) ) ),
+				'fields'         => $field_mode,
+				'posts_per_page' => 2,
+				'paged'          => $ctx->choice( array( 1, 2 ) ),
+				'orderby'        => $ctx->choice( array( 'ID', 'menu_order' ) ),
+				'order'          => $ctx->choice( array( 'ASC', 'DESC' ) ),
+				'no_found_rows'  => $ctx->bool(),
+			)
+		);
+
+		$cases = array(
+			self::query_case(
+				'generated-secondary-mixed',
+				$generated_args,
+				self::expected_flags_from_args( $generated_args ),
+				array(),
+				array( 'nested', 'generated', 'mixed' )
+			),
+			self::query_case(
+				'generated-secondary-single-post',
+				self::query_args(
+					array(
+						'p'              => $post_ids[ $ctx->int( 0, count( $post_ids ) - 1 ) ],
+						'post_type'      => 'post',
+						'post_status'    => 'publish',
+						'fields'         => 'all',
+						'posts_per_page' => 1,
+						'no_found_rows'  => false,
+					)
+				),
+				array( 'isSingle' => true ),
+				array(),
+				array( 'nested', 'generated', 'single', 'post_status' )
+			),
+			self::query_case(
+				'generated-secondary-page-id',
+				self::query_args(
+					array(
+						'page_id'        => $page_ids[ $ctx->int( 0, count( $page_ids ) - 1 ) ],
+						'post_type'      => 'page',
+						'post_status'    => 'publish',
+						'fields'         => 'all',
+						'posts_per_page' => 1,
+						'no_found_rows'  => false,
+					)
+				),
+				array( 'isPage' => true ),
+				array(),
+				array( 'nested', 'generated', 'page', 'post_status' )
+			),
+			self::query_case(
+				'generated-secondary-paged-fields',
+				$paged_fields_args,
+				self::expected_flags_from_args( $paged_fields_args ),
+				array(),
+				array( 'nested', 'generated', 'fields', 'pagination', 'post_status' )
+			),
+			self::query_case(
+				'generated-secondary-empty-status',
+				self::query_args(
+					array(
+						'post_type'      => $ctx->choice( array( 'post', 'any', array( 'post', 'page' ) ) ),
+						'post_status'    => 'draft',
+						'fields'         => $empty_fields,
+						'posts_per_page' => $ctx->choice( array( 1, 2, 3 ) ),
+						'paged'          => $ctx->choice( array( 1, 2 ) ),
+						's'              => 'missing-' . $ctx->identifier( 4, 8 ),
+						'no_found_rows'  => false,
+					)
+				),
+				array( 'isSearch' => true ),
+				array(),
+				array( 'nested', 'generated', 'empty', 'post_status', 'search' )
+			),
+		);
+
+		if ( 'date-archive' === $search_or_date ) {
+			$args = self::query_args(
+				array(
+					'post_type'      => 'post',
+					'post_status'    => 'publish',
+					'fields'         => $ctx->choice( array( 'all', 'ids' ) ),
+					'year'           => 2026,
+					'monthnum'       => $ctx->choice( array( 1, 5, 6 ) ),
+					'posts_per_page' => 3,
+					'orderby'        => 'date',
+					'order'          => 'DESC',
+				)
+			);
+			$cases[] = self::query_case(
+				'generated-secondary-date-archive',
+				$args,
+				self::expected_flags_from_args( $args ),
+				array(),
+				array( 'nested', 'generated', 'date', 'archive', 'post_status' )
+			);
+		} else {
+			$args = self::query_args(
+				array(
+					'post_type'      => 'any',
+					'post_status'    => 'publish',
+					'fields'         => $ctx->choice( array( 'all', 'ids', 'id=>parent' ) ),
+					's'              => 'search-hit' === $search_or_date ? $ctx->choice( array( 'Alpha', 'Page', 'Gamma' ) ) : 'missing-' . $ctx->identifier( 4, 8 ),
+					'posts_per_page' => 4,
+					'no_found_rows'  => false,
+				)
+			);
+			$cases[] = self::query_case(
+				'generated-secondary-search',
+				$args,
+				self::expected_flags_from_args( $args ),
+				array(),
+				array( 'nested', 'generated', 'search', 'post_status' )
+			);
+		}
+
+		return $cases;
+	}
+
+	private static function nested_generated_secondary_args( \ComponentFuzz\FuzzContext $ctx, array $post_ids, array $page_ids ): array {
+		$fields = $ctx->weightedChoice(
+			array(
+				array( 50, 'all' ),
+				array( 25, 'ids' ),
+				array( 25, 'id=>parent' ),
+			)
+		);
+		$args   = self::query_args(
+			array(
+				'post_type'      => $ctx->choice( array( 'post', 'any', array( 'post', 'page' ) ) ),
+				'post_status'    => $ctx->choice( array( 'publish', array( 'publish' ) ) ),
+				'fields'         => $fields,
+				'posts_per_page' => 'all' === $fields ? $ctx->int( 1, 4 ) : $ctx->choice( array( -1, 1, 2, 3 ) ),
+				'paged'          => $ctx->int( 1, 2 ),
+				'orderby'        => $ctx->choice( array( 'ID', 'date', 'title', 'menu_order' ) ),
+				'order'          => $ctx->choice( array( 'ASC', 'DESC' ) ),
+				'no_found_rows'  => $ctx->bool(),
+			)
+		);
+
+		switch ( $ctx->choice( array( 'post__in', 'single', 'page', 'search', 'date', 'empty' ) ) ) {
+			case 'post__in':
+				$args['post_type'] = array( 'post', 'page' );
+				$args['post__in']  = array_values(
+					array_unique(
+						array(
+							$post_ids[ $ctx->int( 0, count( $post_ids ) - 1 ) ],
+							$page_ids[ $ctx->int( 0, count( $page_ids ) - 1 ) ],
+							$post_ids[ $ctx->int( 0, count( $post_ids ) - 1 ) ],
+						)
+					)
+				);
+				$args['orderby']   = 'post__in';
+				break;
+
+			case 'single':
+				$args['p']              = $post_ids[ $ctx->int( 0, count( $post_ids ) - 1 ) ];
+				$args['post_type']      = 'post';
+				$args['fields']         = 'all';
+				$args['posts_per_page'] = 1;
+				break;
+
+			case 'page':
+				$args['page_id']        = $page_ids[ $ctx->int( 0, count( $page_ids ) - 1 ) ];
+				$args['post_type']      = 'page';
+				$args['fields']         = 'all';
+				$args['posts_per_page'] = 1;
+				break;
+
+			case 'search':
+				$args['post_type'] = 'any';
+				$args['s']         = $ctx->choice( array( 'Alpha', 'Page', 'Gamma', 'missing-' . $ctx->identifier( 4, 8 ) ) );
+				break;
+
+			case 'date':
+				$args['post_type'] = 'post';
+				$args['year']      = 2026;
+				$args['monthnum']  = $ctx->choice( array( 1, 5, 6 ) );
+				break;
+
+			case 'empty':
+				$args['post_status'] = 'draft';
+				$args['s']           = 'missing-' . $ctx->identifier( 4, 8 );
+				break;
+		}
+
+		return $args;
+	}
+
+	private static function exercise_nested_secondary_query( array &$failures, array $run, \WP_Query $primary ): array {
+		$secondary          = $run['query'];
+		$case               = $run['case'];
+		$expect             = $run['expect'];
+		$label              = $run['label'];
+		$primary_current_id = self::post_id_from_value( $GLOBALS['post'] ?? null );
+		$primary_state      = self::query_loop_state( $primary );
+		$seen               = array();
+		$aligned            = true;
+		$overflow           = false;
+		$manual_setup       = array(
+			'ran' => false,
+		);
+
+		$GLOBALS['wp_query'] = $secondary;
+
+		self::collect_failure(
+			$failures,
+			self::global_query_scope_matches( $secondary )
+				&& ( $GLOBALS['wp_the_query'] ?? null ) === $primary
+				&& self::query_flags_match( $secondary, $case ),
+			'nested secondary query becomes active without replacing wp_the_query and has generated conditional flags',
+			array(
+				'label'  => $label,
+				'case'   => $case['label'] ?? $label,
+				'global' => self::global_query_scope_summary(),
+				'query'  => self::query_scope_summary( $secondary ),
+				'expect' => $case['expect']['flags'] ?? array(),
+			)
+		);
+
+		while ( \have_posts() ) {
+			\the_post();
+			$current_id = self::post_id_from_value( $GLOBALS['post'] ?? null );
+			$seen[]     = $current_id;
+			$aligned    = $aligned
+				&& self::active_loop_post_aligned( $secondary )
+				&& self::global_query_scope_matches( $secondary )
+				&& true === self::global_in_the_loop()
+				&& ( $GLOBALS['wp_the_query'] ?? null ) === $primary;
+
+			if ( ! $manual_setup['ran'] ) {
+				$target_id = $expect['pageIds'][ count( $expect['pageIds'] ) - 1 ] ?? $current_id;
+				$target    = self::fixture_post_by_id( $target_id );
+
+				if ( $target instanceof \WP_Post ) {
+					$setup_ok        = \setup_postdata( $target );
+					$setup_global_id = (int) ( $GLOBALS['id'] ?? 0 );
+					\wp_reset_postdata();
+
+					$manual_setup = array(
+						'ran'             => true,
+						'targetId'        => $target_id,
+						'setupOk'         => $setup_ok,
+						'setupGlobalId'   => $setup_global_id,
+						'resetPostId'     => self::post_id_from_value( $GLOBALS['post'] ?? null ),
+						'resetGlobalId'   => (int) ( $GLOBALS['id'] ?? 0 ),
+						'queryCurrentId'  => self::post_id_from_value( $secondary->post ),
+					);
+
+					self::collect_failure(
+						$failures,
+						$setup_ok
+							&& $setup_global_id === $target_id
+							&& $manual_setup['resetPostId'] === $current_id
+							&& $manual_setup['resetGlobalId'] === $current_id
+							&& ( $GLOBALS['wp_query'] ?? null ) === $secondary,
+						'nested setup_postdata and wp_reset_postdata are scoped to the active secondary query',
+						array(
+							'label'       => $label,
+							'manualSetup' => $manual_setup,
+							'global'      => self::global_query_scope_summary(),
+						)
+					);
+				}
+			}
+
+			if ( count( $seen ) > 50 ) {
+				$overflow = true;
+				break;
+			}
+		}
+
+		$state_after_loop = self::query_loop_state( $secondary );
+		$before_reset_id  = self::post_id_from_value( $GLOBALS['post'] ?? null );
+		$expected_ids     = $expect['pageIds'];
+
+		$secondary->rewind_posts();
+		$after_explicit_rewind = self::query_loop_state( $secondary );
+
+		self::collect_failure(
+			$failures,
+			false === $overflow
+				&& $expected_ids === $seen
+				&& count( $expected_ids ) === (int) $secondary->post_count
+				&& true === $aligned
+				&& -1 === $secondary->current_post
+				&& false === $secondary->in_the_loop
+				&& false === $secondary->before_loop,
+			'nested secondary loop order, post_count, alignment, and final rewind state are coherent',
+			array(
+				'label'                => $label,
+				'expectedIds'          => $expected_ids,
+				'seenIds'              => $seen,
+				'postCount'            => (int) $secondary->post_count,
+				'stateAfterLoop'       => $state_after_loop,
+				'afterExplicitRewind'  => $after_explicit_rewind,
+				'overflow'             => $overflow,
+			)
+		);
+
+		\wp_reset_postdata();
+		$expected_postdata_reset_id = array() === $expected_ids ? $primary_current_id : $expected_ids[0];
+		$after_postdata_reset      = self::global_query_scope_summary();
+
+		self::collect_failure(
+			$failures,
+			( $GLOBALS['wp_query'] ?? null ) === $secondary
+				&& ( $GLOBALS['wp_the_query'] ?? null ) === $primary
+				&& $expected_postdata_reset_id === self::post_id_from_value( $GLOBALS['post'] ?? null )
+				&& self::global_query_scope_matches( $secondary ),
+			'wp_reset_postdata restores post globals from the active secondary query without changing wp_the_query',
+			array(
+				'label'           => $label,
+				'expectedPostId'  => $expected_postdata_reset_id,
+				'beforeResetPost' => $before_reset_id,
+				'afterReset'      => $after_postdata_reset,
+			)
+		);
+
+		$used_wp_reset_query = function_exists( 'wp_reset_query' );
+		if ( $used_wp_reset_query ) {
+			\wp_reset_query();
+		} else {
+			$GLOBALS['wp_query'] = $GLOBALS['wp_the_query'];
+			\wp_reset_postdata();
+		}
+
+		$after_reset_query = self::global_query_scope_summary();
+		self::collect_failure(
+			$failures,
+			( $GLOBALS['wp_query'] ?? null ) === $primary
+				&& ( $GLOBALS['wp_the_query'] ?? null ) === $primary
+				&& $primary_current_id === self::post_id_from_value( $GLOBALS['post'] ?? null )
+				&& self::global_query_scope_matches( $primary )
+				&& $primary_state['currentPost'] === (int) $primary->current_post
+				&& true === $primary->in_the_loop,
+			'wp_reset_query restores the primary global query, queried object, conditionals, and current loop post',
+			array(
+				'label'             => $label,
+				'usedWpResetQuery'  => $used_wp_reset_query,
+				'primaryPostId'     => $primary_current_id,
+				'primaryBefore'     => $primary_state,
+				'afterResetQuery'   => $after_reset_query,
+			)
+		);
+
+		return array(
+			'label'              => $label,
+			'case'               => $case['label'] ?? $label,
+			'tags'               => $case['tags'] ?? array(),
+			'queryVars'          => self::selected_query_vars( $secondary ),
+			'expectedIds'        => $expected_ids,
+			'seenIds'            => $seen,
+			'fieldShape'         => $secondary->query_vars['fields'] ?? 'all',
+			'flags'              => self::query_flags( $secondary ),
+			'manualSetup'        => $manual_setup,
+			'afterPostdataReset' => $after_postdata_reset,
+			'afterResetQuery'    => $after_reset_query,
+		);
+	}
+
+	private static function expected_nested_loop_events( array $secondary_runs ): array {
+		$events = array( 'primary:loop_start' );
+		foreach ( $secondary_runs as $run ) {
+			if ( array() === $run['expect']['pageIds'] ) {
+				$events[] = $run['label'] . ':loop_no_results';
+				continue;
+			}
+
+			$events[] = $run['label'] . ':loop_start';
+			$events[] = $run['label'] . ':loop_end';
+		}
+		$events[] = 'primary:loop_end';
+
+		return $events;
+	}
+
 	private static function query_cases( \ComponentFuzz\FuzzContext $ctx ): array {
 		$post_ids = self::ids_for_type( 'post' );
 		$page_ids = self::ids_for_type( 'page' );
@@ -1390,6 +2022,10 @@ final class QueryLoopSurface {
 		$page_id = (int) ( $vars['page_id'] ?? 0 );
 		$post_id = (int) ( $vars['p'] ?? 0 );
 
+		if ( ! self::post_status_allows_post( $post, $vars ) ) {
+			return false;
+		}
+
 		if ( $page_id > 0 ) {
 			return 'page' === $post->post_type && (int) $post->ID === $page_id;
 		}
@@ -1453,6 +2089,20 @@ final class QueryLoopSurface {
 		}
 
 		return $post->post_type === (string) $post_type;
+	}
+
+	private static function post_status_allows_post( \WP_Post $post, array $vars ): bool {
+		$status = $vars['post_status'] ?? '';
+		if ( '' === $status || null === $status ) {
+			return true;
+		}
+
+		$statuses = array_map( 'strval', (array) $status );
+		if ( in_array( 'any', $statuses, true ) ) {
+			return true;
+		}
+
+		return in_array( $post->post_status, $statuses, true );
 	}
 
 	private static function id_list_allows_post( \WP_Post $post, array $vars ): bool {
@@ -1986,6 +2636,7 @@ final class QueryLoopSurface {
 		$keys = array(
 			'fields',
 			'post_type',
+			'post_status',
 			'posts_per_page',
 			'paged',
 			'offset',
@@ -2288,6 +2939,16 @@ final class QueryLoopSurface {
 		throw new \RuntimeException( 'Missing post fixture for type ' . $type );
 	}
 
+	private static function fixture_post_by_id( int $id ): ?\WP_Post {
+		foreach ( self::$posts as $post ) {
+			if ( (int) $post->ID === $id ) {
+				return $post;
+			}
+		}
+
+		return null;
+	}
+
 	private static function ids_for_type( string $type ): array {
 		return self::post_ids(
 			array_values(
@@ -2312,6 +2973,18 @@ final class QueryLoopSurface {
 		);
 	}
 
+	private static function post_id_from_value( $post ): int {
+		if ( $post instanceof \WP_Post || ( is_object( $post ) && isset( $post->ID ) ) ) {
+			return (int) $post->ID;
+		}
+
+		if ( is_int( $post ) || is_numeric( $post ) ) {
+			return (int) $post;
+		}
+
+		return 0;
+	}
+
 	private static function max_pages( int $count, int $per_page ): int {
 		return $per_page > 0 ? (int) ceil( $count / $per_page ) : 0;
 	}
@@ -2328,6 +3001,110 @@ final class QueryLoopSurface {
 			'isPaged'   => $query->is_paged(),
 			'is404'     => $query->is_404(),
 		);
+	}
+
+	private static function global_conditional_flags(): array {
+		$map   = array(
+			'isHome'    => 'is_home',
+			'isPage'    => 'is_page',
+			'isSingle'  => 'is_single',
+			'isSearch'  => 'is_search',
+			'isArchive' => 'is_archive',
+			'isDate'    => 'is_date',
+			'isTax'     => 'is_tax',
+			'isPaged'   => 'is_paged',
+			'is404'     => 'is_404',
+		);
+		$flags = array();
+
+		foreach ( $map as $flag => $function ) {
+			$flags[ $flag ] = function_exists( $function ) ? (bool) $function() : null;
+		}
+
+		return $flags;
+	}
+
+	private static function conditional_flags_match( array $actual, array $expected ): bool {
+		foreach ( $expected as $flag => $value ) {
+			if ( array_key_exists( $flag, $actual ) && null !== $actual[ $flag ] && (bool) $actual[ $flag ] !== (bool) $value ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function global_in_the_loop(): bool {
+		if ( function_exists( 'in_the_loop' ) ) {
+			return \in_the_loop();
+		}
+
+		return ( $GLOBALS['wp_query'] ?? null ) instanceof \WP_Query
+			&& (bool) $GLOBALS['wp_query']->in_the_loop;
+	}
+
+	private static function active_loop_post_aligned( \WP_Query $query ): bool {
+		$query_id  = self::post_id_from_value( $query->post );
+		$global_id = self::post_id_from_value( $GLOBALS['post'] ?? null );
+
+		return $query_id > 0 && $query_id === $global_id;
+	}
+
+	private static function global_query_scope_matches( \WP_Query $query ): bool {
+		return ( $GLOBALS['wp_query'] ?? null ) === $query
+			&& self::conditional_flags_match( self::global_conditional_flags(), self::query_flags( $query ) )
+			&& self::global_queried_object_id() === self::query_queried_object_id( $query );
+	}
+
+	private static function global_query_scope_summary(): array {
+		$wp_query     = $GLOBALS['wp_query'] ?? null;
+		$wp_the_query = $GLOBALS['wp_the_query'] ?? null;
+
+		return array(
+			'wpQueryObjectId'    => $wp_query instanceof \WP_Query ? spl_object_id( $wp_query ) : null,
+			'wpTheQueryObjectId' => $wp_the_query instanceof \WP_Query ? spl_object_id( $wp_the_query ) : null,
+			'postId'             => self::post_id_from_value( $GLOBALS['post'] ?? null ),
+			'inTheLoop'          => self::global_in_the_loop(),
+			'flags'              => self::global_conditional_flags(),
+			'queriedObjectId'    => self::global_queried_object_id(),
+		);
+	}
+
+	private static function query_scope_summary( \WP_Query $query ): array {
+		return array(
+			'objectId'        => spl_object_id( $query ),
+			'loop'            => self::query_loop_state( $query ),
+			'flags'           => self::query_flags( $query ),
+			'queriedObjectId' => self::query_queried_object_id( $query ),
+			'queryVars'       => self::selected_query_vars( $query ),
+		);
+	}
+
+	private static function query_loop_state( \WP_Query $query ): array {
+		return array(
+			'currentPost' => (int) $query->current_post,
+			'postCount'   => (int) $query->post_count,
+			'inTheLoop'   => (bool) $query->in_the_loop,
+			'beforeLoop'  => (bool) $query->before_loop,
+			'postId'      => self::post_id_from_value( $query->post ),
+			'post'        => self::describe_value( $query->post ),
+		);
+	}
+
+	private static function global_queried_object_id(): int {
+		if ( ! ( ( $GLOBALS['wp_query'] ?? null ) instanceof \WP_Query ) ) {
+			return 0;
+		}
+
+		if ( function_exists( 'get_queried_object_id' ) ) {
+			return (int) \get_queried_object_id();
+		}
+
+		return self::query_queried_object_id( $GLOBALS['wp_query'] );
+	}
+
+	private static function query_queried_object_id( \WP_Query $query ): int {
+		return (int) $query->get_queried_object_id();
 	}
 
 	private static function collect_failure( array &$failures, bool $condition, string $label, array $details ): void {
