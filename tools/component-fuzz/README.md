@@ -522,10 +522,11 @@ database, network requests, or a configured site.
 - `revisions-autosaves`: in-memory wpdb-backed revision and autosave API
   coverage, including protected revision field/filter contracts, autosave
   create/update/delete and post-lock behavior, autosave and revision predicates,
-  revision insert/save/restore/delete helpers, revisioned meta copy and restore
-  behavior, post type support gates, revision title/list helpers, revision UI
-  diffs, JS payload preparation, preview overlay behavior, and global/filter
-  restoration.
+  latest revision count and URL helpers, user-filtered autosave lookup,
+  revision insert/save/restore/delete helpers, revisioned meta copy and
+  restore behavior, post type support gates, revision title/list helpers,
+  revision UI diffs, JS payload preparation, preview overlay behavior, and
+  global/filter restoration.
 - `rewrite`: rewrite tags, permastruct/rule generation, collision ordering,
   endpoint expansion and mask propagation, match substitution, query arg and
   build/parse helpers, rewrite-tag removal/query-var retention boundaries, URL
@@ -792,14 +793,13 @@ in-memory `wpdb` stub and avoids notification mail, browser cookie writes, and
 The `revisions-autosaves` surface uses the bounded post and postmeta rows in
 the in-memory `wpdb` stub. It exercises autosave creation/update/delete,
 post-lock windows, protected revision field filters, revision title/list
-helpers, post type support gates, and restore action/edit-user side effects
-without browser dispatch. It records explicit skips for
-`wp_get_latest_revision_id_and_total_count()` and `wp_get_post_revisions_url()`
-because the stub does not emulate the `WP_Query` `found_posts` count SQL shape
-for posts. User-specific `wp_get_post_autosave()` lookup is also skipped
-because the stub does not emulate post author filtering in `WP_Query`. The
-surface avoids browser/admin-template or request-dispatch helpers such as
-`_show_post_preview()` and `wp_print_revision_templates()`.
+helpers, latest revision count and URL helpers, user-filtered autosave lookup,
+post type support gates, and restore action/edit-user side effects without
+browser dispatch. The in-memory `wpdb` post query stub supports the bounded
+`found_posts` and `post_author` equality/`IN` shapes needed by these helpers,
+including author intersections across status-`OR` branches. The surface avoids
+browser/admin-template or request-dispatch helpers such as `_show_post_preview()`
+and `wp_print_revision_templates()`.
 The `feed-rendering` surface renders core feed templates through synthetic
 `WP_Query` loops backed by the in-memory `wpdb` stub. It avoids live HTTP
 headers, remote enclosures, DB-backed query execution, and arbitrary invalid
