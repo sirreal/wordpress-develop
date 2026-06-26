@@ -451,10 +451,10 @@
 				</tr>
 				<tr>
 					<td><code>fonts</code></td>
-					<td><span class="status good">reviewed validation passed</span></td>
-					<td>Main worktree; reviewer Pascal found no actionable issues in <code>48ae854da3</code></td>
-					<td>Main focused run: 800 passed, 0 skipped, 0 failed; latest broad run: 8017 passed, 67 skipped, 0 failed.</td>
-					<td>Font-face CSS serialization, invalid face rejection, font directory filters, Font Library collection lifecycle/JSON loading, REST font-face preparation boundaries, utility normalization, schema sanitization, and MIME maps.</td>
+					<td><span class="status good">review fixes passed</span></td>
+					<td>Main worktree; Einstein implementation in <code>ab3113389c</code>; Euler review fixes through <code>5251e4ff47</code>; Volta follow-up cache restoration in <code>cdf3ecf90a</code></td>
+					<td>Main focused runs: 1000 passed, 0 skipped, 0 failed at seeds 1 and 224; latest broad smoke: 4356 passed, 33 skipped, 0 failed.</td>
+					<td>Font-face CSS serialization, invalid face rejection, theme.json font-face resolver conversion and default <code>wp_print_font_faces()</code> output, font directory filters, Font Library collection lifecycle/JSON loading, REST font collection pagination, HEAD, _fields, _links, invalid collection skipping, filter cleanup, REST font-face preparation boundaries, utility normalization, schema sanitization, and MIME maps.</td>
 				</tr>
 				<tr>
 					<td><code>assets</code></td>
@@ -1978,10 +1978,10 @@
 					<td>7942 passed, 63 skipped, 0 failed at 2 iterations after attachment classification and MIME/extension disagreement coverage.</td>
 				</tr>
 				<tr>
-					<td><code>48ae854da3</code></td>
+					<td><code>ab3113389c</code> / <code>5251e4ff47</code> / <code>cdf3ecf90a</code></td>
 					<td><code>fonts</code></td>
-					<td>800 passed, 0 skipped, 0 failed.</td>
-					<td>8017 passed, 67 skipped, 0 failed at 2 iterations after REST font-face validation, sanitization, preparation, and response coverage.</td>
+					<td>1000 passed, 0 skipped, 0 failed at seeds 1 and 224.</td>
+					<td>4356 passed, 33 skipped, 0 failed at 1 iteration after theme.json resolver/default printing and REST font collection controller coverage.</td>
 				</tr>
 				<tr>
 					<td><code>f8a6444fd2</code></td>

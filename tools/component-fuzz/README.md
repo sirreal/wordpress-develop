@@ -228,10 +228,12 @@ database, network requests, or a configured site.
   teeny and full TinyMCE/Quicktags filter branches, captured editor markup,
   editor script enqueue decisions, TinyMCE translation snippets, media-view
   stylesheet helpers, and global restoration.
-- `fonts`: font-face CSS serialization and validation, font directory filters,
-  Font Library collection registration/JSON loading, REST font-face
-  preparation boundaries, and font utility sanitization for family lists, face
-  slugs, schemas, and MIME maps.
+- `fonts`: font-face CSS serialization and validation, theme.json font-face
+  resolution and default printing, font directory filters, Font Library
+  collection registration/JSON loading, REST font collection pagination,
+  filtering, and response boundaries, REST font-face preparation boundaries,
+  and font utility sanitization for family lists, face slugs, schemas, and MIME
+  maps.
 - `filesystem`: path normalization and joining, file validation classes,
   filename sanitization/uniqueness, unique-filename callback and case-collision
   filters, temp names, recursive directory creation/listing and stream wrapper
