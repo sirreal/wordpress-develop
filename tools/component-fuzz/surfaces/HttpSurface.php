@@ -713,6 +713,8 @@ final class HttpSurface {
 		$cert_path        = ABSPATH . WPINC . '/certificates/component-fuzz-ca-bundle.pem';
 		$stream_root      = self::make_temp_directory( $ctx, 'requests-success' );
 		$stream_file      = $stream_root . DIRECTORY_SEPARATOR . 'stream-' . self::token( $ctx, 8 ) . '.txt';
+
+		try {
 		$object_cookie    = new \WP_Http_Cookie(
 			array(
 				'name'      => 'object_cookie',
@@ -1421,12 +1423,7 @@ final class HttpSurface {
 			);
 		}
 
-		if ( is_file( $stream_file ) ) {
-			@unlink( $stream_file );
-		}
-		if ( is_dir( $stream_root ) ) {
-			@rmdir( $stream_root );
-		}
+		self::cleanup_requests_success_temp( $stream_file, $stream_root );
 
 		self::collect_failure(
 			$failures,
@@ -1480,6 +1477,9 @@ final class HttpSurface {
 				'failures'        => array_slice( $failures, 0, 5 ),
 			)
 		);
+		} finally {
+			self::cleanup_requests_success_temp( $stream_file, $stream_root );
+		}
 	}
 
 	private static function check_response_objects( \ComponentFuzz\FuzzContext $ctx ): array {
@@ -2146,6 +2146,15 @@ final class HttpSurface {
 		}
 
 		return $directory;
+	}
+
+	private static function cleanup_requests_success_temp( string $stream_file, string $stream_root ): void {
+		if ( is_file( $stream_file ) ) {
+			@unlink( $stream_file );
+		}
+		if ( is_dir( $stream_root ) ) {
+			@rmdir( $stream_root );
+		}
 	}
 
 	private static function cleanup_stream_parent_file( string $filename ): void {
