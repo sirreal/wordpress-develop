@@ -149,8 +149,9 @@ database, network requests, or a configured site.
   comment CRUD lifecycles, including insert/update/read/delete round trips,
   duplicate and invalid-input errors, sanitizer agreement, monotonic IDs,
   metadata cache invalidation, post-to-term relationship field modes, helper
-  caches, relationship hook arguments, post-delete cleanup, cache/count refresh
-  behavior, and per-iteration state restoration.
+  caches, relationship hook arguments, status-transition hook/cache/default
+  side-effect branches, post-delete cleanup, cache/count refresh behavior, and
+  per-iteration state restoration.
 - `comments`: comment filtering, sanitizer agreement, max-length boundaries,
   type partitioning, comment classes, author URL/email links, excerpt/text
   helpers, comment cookies, reply/cancel link rendering branches, and permalink
@@ -746,6 +747,10 @@ asserts add/read/update/delete, unique keys, serialized array values, cache
 invalidation, metadata hooks, and post-delete cleanup. Post-to-term relationship
 coverage asserts category/tag set/append/replace/remove/delete helpers, object
 term field modes, relationship caches, hook payloads, and post-delete cleanup.
+Post status transition coverage asserts hook order, direct-transition status
+storage behavior, count/timeinfo cache invalidation and preservation branches,
+empty-GUID publish repair, scheduled future-post hook clearing, and cleanup of
+the generated status post type and hooks.
 Broader taxonomy relationship behavior is covered by `taxonomy-relationships`,
 still limited to the recognized term relationship SQL shapes emitted by the
 targeted core APIs.

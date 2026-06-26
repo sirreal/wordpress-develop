@@ -444,9 +444,9 @@
 				<tr>
 					<td><code>content-lifecycle</code></td>
 					<td><span class="status good">review fixes passed</span></td>
-					<td>Main worktree; reviewer Singer findings fixed through <code>3b335ffb7b</code></td>
-					<td>Main focused runs: seeds 1 and 224 each 700 passed, 0 skipped, 0 failed; latest smoke: 4520 passed, 33 skipped, 0 failed.</td>
-					<td>In-memory post, post-meta, post-to-term relationship, term, user, and comment CRUD lifecycles, duplicate/invalid inputs, sanitizer agreement, metadata cache invalidation, relationship helper/cache/hook oracles, post-delete cleanup, count refresh, and state restoration.</td>
+					<td>Main worktree; reviewer Singer findings fixed through <code>3b335ffb7b</code>; status-transition follow-up through <code>ab4f507dd5</code> and reviewer Herschel findings fixed through <code>2a965fb770</code></td>
+					<td>Main focused runs: seeds 1 and 224 each 11 passed, 0 skipped, 0 failed; seed 20260626 at 5 iterations: 55 passed, 0 skipped, 0 failed; seed 65270 at 20 iterations: 220 passed, 0 skipped, 0 failed; latest smoke: 9115 passed, 62 skipped, 0 failed.</td>
+					<td>In-memory post, post-meta, post-to-term relationship, term, user, and comment CRUD lifecycles, duplicate/invalid inputs, sanitizer agreement, metadata cache invalidation, status-transition hook order, direct-transition status storage, count/timeinfo cache branches, empty-GUID publish repair, future-post cron cleanup, relationship helper/cache/hook oracles, post-delete cleanup, count refresh, and state restoration.</td>
 				</tr>
 				<tr>
 					<td><code>auth-flow</code></td>
@@ -1852,6 +1852,12 @@
 					<td><code>html-api</code></td>
 					<td>700 passed, 0 skipped, 0 failed after semantic parser mode probes, breadcrumb stack replay, tree-preservation normalization, token serialization, and textarea/foreign-content boundary coverage.</td>
 					<td>8467 passed, 66 skipped, 0 failed at 2 iterations after discovery sitemap field fuzzing.</td>
+				</tr>
+				<tr>
+					<td><code>2a965fb770</code></td>
+					<td><code>content-lifecycle</code></td>
+					<td>Seeds 1 and 224 each 11 passed, 0 skipped, 0 failed; seed 20260626 at 5 iterations: 55 passed, 0 skipped, 0 failed; seed 65270 at 20 iterations: 220 passed, 0 skipped, 0 failed after status-transition hook order, direct status-storage, cache branch, GUID repair, cron cleanup, and review isolation fixes.</td>
+					<td>9115 passed, 62 skipped, 0 failed at 2 iterations after content-lifecycle status-transition review fixes.</td>
 				</tr>
 				<tr>
 					<td><code>3b335ffb7b</code></td>
