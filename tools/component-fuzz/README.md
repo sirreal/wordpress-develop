@@ -193,8 +193,9 @@ database, network requests, or a configured site.
   output, sitemap enablement and robots.txt injection, provider
   registration/replacement filters, query/permalink sitemap URL/index
   expansion, escaped sitemap XML rendering, unsupported sitemap field
-  boundaries, stylesheet URL filters, and sitemap max-URL filters without
-  DB-backed providers.
+  boundaries, stylesheet URL filters, sitemap max-URL filters, and built-in
+  posts/taxonomies/users sitemap providers with fixture-backed subtype,
+  lastmod, max-page, query-arg, pre-filter, and public/private gating oracles.
 - `email`: Unicode email validation/sanitization, ASCII fallback filters,
   WHATWG-style validity, `WP_Email_Address` machine/readable and IDN/punycode
   views, ASCII-vs-Unicode construction-mode consistency with explicit IDN skips,
