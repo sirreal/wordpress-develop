@@ -1258,6 +1258,7 @@ final class AdminListTablesSurface {
 		$tabs_events       = array();
 		$action_events     = array();
 		$description_events = array();
+		$localized_update_counts = false;
 		$mode_results      = array();
 		$result            = array();
 		$active_mode       = '';
@@ -1299,8 +1300,8 @@ final class AdminListTablesSurface {
 			),
 		);
 
-		$tabs_filter = static function ( array $tabs ) use ( $hostile_label, &$tabs_events ): array {
-			$tabs['cfz-custom'] = \esc_html( 'Generated Tab ' . $hostile_label );
+		$tabs_filter = static function ( array $tabs ) use ( $token, &$tabs_events ): array {
+			$tabs['cfz-custom'] = 'Generated Tab ' . $token;
 			$tabs_events[]      = array_keys( $tabs );
 			return $tabs;
 		};
@@ -1317,7 +1318,7 @@ final class AdminListTablesSurface {
 				'phase'    => 'args',
 				'mode'     => $active_mode,
 				'action'   => $action,
-				'args'     => clone $args,
+				'args'     => self::clone_value( $args ),
 			);
 
 			return $args;
@@ -1327,11 +1328,15 @@ final class AdminListTablesSurface {
 				'phase'  => 'response',
 				'mode'   => $active_mode,
 				'action' => $action,
-				'args'   => clone $args,
+				'args'   => self::clone_value( $args ),
 			);
 
 			if ( 'query_plugins' !== $action ) {
-				return $result;
+				return new \WP_Error(
+					'component_fuzz_unexpected_plugins_api_action',
+					'Unexpected plugins_api action short-circuited by component fuzz.',
+					array( 'action' => $action )
+				);
 			}
 
 			return (object) array(
@@ -1395,6 +1400,7 @@ final class AdminListTablesSurface {
 			$GLOBALS['wp_version']   = \wp_get_wp_version();
 			$_SERVER['HTTP_HOST']    = 'example.test';
 			$_SERVER['PHP_SELF']     = '/wp-admin/plugin-install.php';
+			\wp_register_script( 'updates', false, array(), false, true );
 
 			foreach ( $search_modes as $mode ) {
 				$active_mode            = $mode['type'];
@@ -1421,6 +1427,10 @@ final class AdminListTablesSurface {
 					'total_pages'  => $table->get_pagination_arg( 'total_pages' ),
 					'view_keys'    => array_keys( $views ),
 					'views_html'   => implode( '', $views ),
+				);
+				$localized_update_counts = self::script_data_contains_all(
+					'updates',
+					array( '_wpUpdatesItemCounts', $installed_file, $update_file )
 				);
 
 				$result['table'] = $table;
@@ -1462,6 +1472,7 @@ final class AdminListTablesSurface {
 					'installed_slug',
 					'incompatible_slug',
 					'install_slug',
+					'localized_update_counts',
 					'mode_results',
 					'row',
 					'table_arg_events',
@@ -1506,7 +1517,7 @@ final class AdminListTablesSurface {
 			$failures,
 			self::plugin_install_mode_results_match( $result['mode_results'] ?? array(), array_column( $api_plugins, 'slug' ), $api_total )
 				&& self::plugin_install_views_match( $result['mode_results'] ?? array() ),
-			'plugin install prepare_items preserves API result ordering, pagination totals, and escaped install tabs',
+			'plugin install prepare_items preserves API result ordering, pagination totals, and generated install tabs',
 			array(
 				'modeResults' => $result['mode_results'] ?? array(),
 			)
@@ -1556,12 +1567,13 @@ final class AdminListTablesSurface {
 
 		self::collect_failure(
 			$failures,
-			$filters_removed && $globals_restored && $fixture_removed,
-			'plugin install API, transient, action, description, capability filters, globals, server values, plugin cache, and temp fixtures are restored',
+			$filters_removed && $globals_restored && $fixture_removed && true === ( $result['localized_update_counts'] ?? null ),
+			'plugin install API, transient, action, description, capability filters, localized update-count scripts, globals, server values, plugin cache, and temp fixtures are restored',
 			array(
-				'filtersRemoved'  => $filters_removed,
-				'fixtureRemoved'  => $fixture_removed,
-				'globalsRestored' => $globals_restored,
+				'filtersRemoved'        => $filters_removed,
+				'fixtureRemoved'        => $fixture_removed,
+				'globalsRestored'       => $globals_restored,
+				'localizedUpdateCounts' => $result['localized_update_counts'] ?? null,
 			)
 		);
 
@@ -3431,6 +3443,29 @@ final class AdminListTablesSurface {
 		return $has_example_icon;
 	}
 
+	private static function script_data_contains_all( string $handle, array $needles ): bool {
+		$scripts = $GLOBALS['wp_scripts'] ?? null;
+		if ( ! $scripts instanceof \WP_Scripts || ! isset( $scripts->registered[ $handle ] ) ) {
+			return false;
+		}
+
+		$data = $scripts->registered[ $handle ]->extra['data'] ?? '';
+		if ( is_array( $data ) ) {
+			$data = implode( "\n", array_map( 'strval', $data ) );
+		}
+		if ( ! is_string( $data ) ) {
+			return false;
+		}
+
+		foreach ( $needles as $needle ) {
+			if ( ! str_contains( $data, (string) $needle ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
 	private static function html_attributes( string $attribute_text ): array {
 		$attrs = array();
 		preg_match_all(
@@ -3813,6 +3848,17 @@ final class AdminListTablesSurface {
 		}
 
 		if ( is_object( $value ) ) {
+			if (
+				( class_exists( 'WP_Dependencies' ) && $value instanceof \WP_Dependencies )
+				|| ( class_exists( '_WP_Dependency' ) && $value instanceof \_WP_Dependency )
+			) {
+				$copy = clone $value;
+				foreach ( array_keys( get_object_vars( $copy ) ) as $property ) {
+					$copy->$property = self::clone_value( $copy->$property );
+				}
+				return $copy;
+			}
+
 			return clone $value;
 		}
 
