@@ -33,6 +33,7 @@ final class AdminListTablesSurface {
 			$rows[] = self::check_comments_terms_users_tables( $ctx->fork( 'comments-terms-users' ) );
 			$rows[] = self::check_plugin_theme_tables( $ctx->fork( 'plugins-themes' ) );
 			$rows[] = self::check_plugin_install_table( $ctx->fork( 'plugin-install' ) );
+			$rows[] = self::check_theme_install_table( $ctx->fork( 'theme-install' ) );
 			$rows[] = self::check_network_themes_table( $ctx->fork( 'network-themes' ) );
 			$rows[] = self::check_application_passwords_table( $ctx->fork( 'application-passwords' ) );
 			$rows[] = self::check_application_passwords_last_ip_boundary( $ctx->fork( 'application-passwords-last-ip' ) );
@@ -1588,6 +1589,471 @@ final class AdminListTablesSurface {
 		);
 	}
 
+	private static function check_theme_install_table( \ComponentFuzz\FuzzContext $ctx ): array {
+		static $theme_install_prepare_items_used = false;
+
+		if ( $theme_install_prepare_items_used || function_exists( 'install_themes_feature_list' ) ) {
+			$theme_install_prepare_items_used = true;
+			return $ctx->skip(
+				'admin-list-tables.theme-install.search-api-actions-escaping',
+				'WP_Theme_Install_List_Table::prepare_items() requires theme-install.php with require, so this invariant runs once per PHP process to avoid redeclaring theme-install functions.',
+				array( 'prepareItemsAlreadyUsed' => true )
+			);
+		}
+
+		$theme_install_prepare_items_used = true;
+
+		$failures        = array();
+		$filters         = array();
+		$current_user    = self::synthetic_user( $ctx->fork( 'current-user' ), 54400, 'theme-install' );
+		$screen          = self::screen( 'theme-install' );
+		$hostile_label   = self::hostile_label( $ctx->fork( 'theme-install-label' ) );
+		$token           = substr( hash( 'sha1', (string) $ctx->seed() . ':' . (string) $ctx->iteration() . ':theme' ), 0, 10 );
+		$install_slug    = 'cfz-theme-install-new-' . $token;
+		$update_slug     = 'cfz-theme-install-update-' . $token;
+		$installed_slug  = 'cfz-theme-install-installed-' . $token;
+		$current_slug    = 'cfz-theme-install-current-' . $token;
+		$theme_root      = \trailingslashit( WP_CONTENT_DIR ) . 'themes';
+		$theme_root_preexisting = is_dir( $theme_root );
+		$update_dir      = \trailingslashit( $theme_root ) . $update_slug;
+		$installed_dir   = \trailingslashit( $theme_root ) . $installed_slug;
+		$current_dir     = \trailingslashit( $theme_root ) . $current_slug;
+		$marker          = 'cfz-theme-install-marker-' . $token;
+		$api_total       = 83;
+		$api_themes      = array(
+			self::theme_install_api_item(
+				$install_slug,
+				'Installable Theme ' . $hostile_label,
+				'1.0.0',
+				'Theme install description ' . $hostile_label,
+				array(
+					'preview_url'    => 'https://preview.example.test/themes/' . rawurlencode( $install_slug ) . '/?label=' . rawurlencode( $hostile_label ),
+					'screenshot_url' => 'https://example.test/screens/' . rawurlencode( $install_slug ) . '.png?label=' . rawurlencode( $hostile_label ) . '&raw=<script>alert(1)</script>',
+				)
+			),
+			self::theme_install_api_item(
+				$update_slug,
+				'Update Theme ' . $hostile_label,
+				'2.0.0',
+				'Theme update description ' . $hostile_label,
+				array(
+					'preview_url'    => 'javascript:alert(1)',
+					'screenshot_url' => 'https://example.test/screens/' . rawurlencode( $update_slug ) . '.png?raw=' . rawurlencode( $hostile_label ),
+				)
+			),
+			self::theme_install_api_item(
+				$installed_slug,
+				'Installed Theme ' . $hostile_label,
+				'1.0.0',
+				'Theme installed description ' . $hostile_label,
+				array(
+					'preview_url'    => 'https://preview.example.test/themes/' . rawurlencode( $installed_slug ) . '/',
+					'screenshot_url' => 'https://example.test/screens/' . rawurlencode( $installed_slug ) . '.png?raw=' . rawurlencode( $hostile_label ),
+				)
+			),
+			self::theme_install_api_item(
+				$current_slug,
+				'Current Theme ' . $hostile_label,
+				'1.0.0',
+				'Theme current description ' . $hostile_label,
+				array(
+					'preview_url'    => 'https://preview.example.test/themes/' . rawurlencode( $current_slug ) . '/',
+					'screenshot_url' => 'https://example.test/screens/' . rawurlencode( $current_slug ) . '.png?raw=' . rawurlencode( $hostile_label ),
+				)
+			),
+		);
+		$request_modes   = array(
+			array(
+				'id'    => 'search-term',
+				'tab'   => 'search',
+				'type'  => 'term',
+				'term'  => 'Generated Theme Search ' . $hostile_label,
+				'paged' => 2,
+			),
+			array(
+				'id'    => 'search-tag',
+				'tab'   => 'search',
+				'type'  => 'tag',
+				'term'  => 'grid layout ' . $token . ',accessibility ready',
+				'paged' => 2,
+			),
+			array(
+				'id'    => 'search-author',
+				'tab'   => 'search',
+				'type'  => 'author',
+				'term'  => 'Theme Author ' . $hostile_label,
+				'paged' => 2,
+			),
+			array(
+				'features' => array( 'blog', 'custom-background', 'full-site-editing' ),
+				'id'       => 'feature-filter',
+				'tab'      => 'search',
+				'type'     => 'term',
+				'term'     => 'Feature Theme ' . $hostile_label,
+				'paged'    => 2,
+			),
+			array(
+				'browse' => 'featured',
+				'id'     => 'browse-featured',
+				'tab'    => 'featured',
+				'paged'  => 2,
+			),
+			array(
+				'browse' => 'new',
+				'id'     => 'browse-new',
+				'tab'    => 'new',
+				'paged'  => 2,
+			),
+			array(
+				'browse' => 'updated',
+				'id'     => 'browse-updated',
+				'tab'    => 'updated',
+				'paged'  => 2,
+			),
+		);
+		$request_modes   = array( $ctx->choice( $request_modes ) );
+		$global_names    = array( '_GET', '_POST', '_REQUEST', 'current_user', 'paged', 'pagenow', 'tab', 'tabs', 'term', 'theme_field_defaults', 'themes_allowedtags', 'type', 'wp_scripts', 'wp_styles', 'wp_theme_directories', 'wp_version' );
+		$server_names    = array( 'HTTP_HOST', 'PHP_SELF', 'REQUEST_URI' );
+		$global_snapshot = self::snapshot_globals( $global_names );
+		$server_snapshot = self::snapshot_server( $server_names );
+		$api_events      = array();
+		$table_arg_events = array();
+		$tabs_events     = array();
+		$action_events   = array();
+		$http_events     = array();
+		$mode_results    = array();
+		$result          = array();
+		$active_mode     = '';
+		$filters_removed = false;
+		$globals_restored = false;
+		$fixtures_removed = false;
+		$header_action_restored = false;
+		$had_search_form_action = false !== \has_filter( 'install_themes_table_header', 'install_theme_search_form' );
+
+		$tabs_filter = static function ( array $tabs ) use ( $token, &$tabs_events ): array {
+			$tabs['cfz-custom'] = 'Generated Theme Tab ' . $token;
+			$tabs_events[]      = array_keys( $tabs );
+			return $tabs;
+		};
+		$table_api_args_filter = static function ( $args ) use ( $marker, &$active_mode, &$table_arg_events ) {
+			if ( is_array( $args ) ) {
+				$args['cfz_marker'] = $marker;
+				$table_arg_events[] = array(
+					'args' => $args,
+					'mode' => $active_mode,
+				);
+			}
+
+			return $args;
+		};
+		$themes_api_args_filter = static function ( $args, string $action ) use ( &$active_mode, &$api_events ) {
+			$api_events[] = array(
+				'action' => $action,
+				'args'   => self::clone_value( $args ),
+				'mode'   => $active_mode,
+				'phase'  => 'args',
+			);
+
+			return $args;
+		};
+		$themes_api_filter = static function ( $result, string $action, $args ) use ( $api_themes, $api_total, &$active_mode, &$api_events ) {
+			$api_events[] = array(
+				'action' => $action,
+				'args'   => self::clone_value( $args ),
+				'mode'   => $active_mode,
+				'phase'  => 'response',
+			);
+
+			if ( 'query_themes' !== $action ) {
+				return new \WP_Error(
+					'component_fuzz_unexpected_themes_api_action',
+					'Unexpected themes_api action short-circuited by component fuzz.',
+					array( 'action' => $action )
+				);
+			}
+
+			return (object) array(
+				'info'   => array(
+					'page'    => 2,
+					'pages'   => (int) ceil( $api_total / 36 ),
+					'results' => $api_total,
+				),
+				'themes' => $api_themes,
+			);
+		};
+		$themes_api_result_filter = static function ( $result, string $action, $args ) use ( &$active_mode, &$api_events ) {
+			$api_events[] = array(
+				'action' => $action,
+				'args'   => self::clone_value( $args ),
+				'mode'   => $active_mode,
+				'phase'  => 'result',
+			);
+
+			return $result;
+		};
+		$theme_install_actions_filter = static function ( array $actions, \stdClass $theme ) use ( $token, &$action_events ): array {
+			$slug            = (string) ( $theme->slug ?? '' );
+			$action_events[] = $slug;
+			$actions[]       = sprintf(
+				'<a class="cfz-theme-install-action" href="%s" data-slug="%s">%s</a>',
+				\esc_url( 'https://example.test/theme-install-action/?theme=' . rawurlencode( $slug ) . '&marker=' . rawurlencode( $token ) ),
+				\esc_attr( $slug ),
+				\esc_html( 'Generated Theme Action ' . $token )
+			);
+
+			return $actions;
+		};
+		$pre_http_request_filter = static function ( $preempt, array $parsed_args, string $url ) use ( &$http_events ) {
+			unset( $preempt, $parsed_args );
+			$http_events[] = $url;
+
+			return new \WP_Error(
+				'component_fuzz_unexpected_theme_install_http',
+				'Unexpected HTTP request from WP_Theme_Install_List_Table.',
+				array( 'url' => $url )
+			);
+		};
+		$current_theme_filter = static function () use ( $current_slug ): string {
+			return $current_slug;
+		};
+		$cap_filter = self::cap_filter(
+			array(
+				'install_themes',
+				'read',
+				'update_themes',
+			)
+		);
+
+		self::add_filter_record( $filters, 'install_themes_tabs', $tabs_filter, 10, 1 );
+		foreach ( array( 'search', 'featured', 'new', 'updated' ) as $api_tab ) {
+			self::add_filter_record( $filters, 'install_themes_table_api_args_' . $api_tab, $table_api_args_filter, 10, 1 );
+		}
+		self::add_filter_record( $filters, 'themes_api_args', $themes_api_args_filter, 10, 2 );
+		self::add_filter_record( $filters, 'themes_api', $themes_api_filter, 10, 3 );
+		self::add_filter_record( $filters, 'themes_api_result', $themes_api_result_filter, 10, 3 );
+		self::add_filter_record( $filters, 'theme_install_actions', $theme_install_actions_filter, 10, 2 );
+		self::add_filter_record( $filters, 'pre_http_request', $pre_http_request_filter, 10, 3 );
+		self::add_filter_record( $filters, 'pre_option_stylesheet', $current_theme_filter, 10, 3 );
+		self::add_filter_record( $filters, 'pre_option_template', $current_theme_filter, 10, 3 );
+		self::add_filter_record( $filters, 'user_has_cap', $cap_filter, 10, 4 );
+
+		try {
+			self::write_theme_fixture( $update_dir, 'Theme Update ' . $hostile_label );
+			self::write_theme_fixture( $installed_dir, 'Theme Installed ' . $hostile_label );
+			self::write_theme_fixture( $current_dir, 'Theme Current ' . $hostile_label );
+			\register_theme_directory( $theme_root );
+			\search_theme_directories( true );
+			\wp_cache_delete( 'theme_roots', 'site-transient' );
+
+			$GLOBALS['current_user'] = $current_user;
+			$GLOBALS['pagenow']      = 'theme-install.php';
+			$GLOBALS['wp_version']   = \wp_get_wp_version();
+			$_SERVER['HTTP_HOST']    = 'example.test';
+			$_SERVER['PHP_SELF']     = '/wp-admin/theme-install.php';
+
+			foreach ( $request_modes as $mode ) {
+				$active_mode = $mode['id'];
+				$request     = array(
+					'paged' => $mode['paged'],
+					'tab'   => $mode['tab'],
+				);
+
+				if ( isset( $mode['type'] ) ) {
+					$request['type'] = $mode['type'];
+					$request['s']    = $mode['term'];
+				}
+				if ( isset( $mode['features'] ) ) {
+					$request['features'] = $mode['features'];
+				}
+
+				$_GET                   = $request;
+				$_POST                  = array();
+				$_REQUEST               = $request;
+				$_SERVER['REQUEST_URI'] = '/wp-admin/theme-install.php?' . http_build_query( $request, '', '&', PHP_QUERY_RFC3986 );
+
+				$table = self::list_table( 'WP_Theme_Install_List_Table', $screen );
+				$table->prepare_items();
+				$views = self::invoke( $table, 'get_views' );
+
+				$mode_results[ $mode['id'] ] = array(
+					'features'    => $table->features,
+					'item_count'  => count( $table->items ?? array() ),
+					'items'       => array_map(
+						static function ( $item ): string {
+							return (string) ( $item->slug ?? '' );
+						},
+						$table->items ?? array()
+					),
+					'per_page'    => $table->get_pagination_arg( 'per_page' ),
+					'total_items' => $table->get_pagination_arg( 'total_items' ),
+					'total_pages' => $table->get_pagination_arg( 'total_pages' ),
+					'view_keys'   => array_keys( $views ),
+					'views_html'  => implode( '', $views ),
+				);
+
+				$result['table'] = $table;
+				$result['views'] = $views;
+			}
+
+			$row = self::capture(
+				static function () use ( $table ): void {
+					$table->display_rows();
+				}
+			);
+			$display = self::capture(
+				static function () use ( $table ): void {
+					$table->display();
+				}
+			);
+			$ajax_allowed = $table->ajax_user_can();
+			$ajax_denied  = self::without_filter(
+				'user_has_cap',
+				$cap_filter,
+				static function () use ( $screen ) {
+					$table = self::list_table( 'WP_Theme_Install_List_Table', $screen );
+					return $table->ajax_user_can();
+				}
+			);
+			$image_sources = self::image_srcs( $row );
+
+			$result = array_merge(
+				$result,
+				compact(
+					'action_events',
+					'ajax_denied',
+					'ajax_allowed',
+					'api_events',
+					'current_slug',
+					'display',
+					'http_events',
+					'image_sources',
+					'install_slug',
+					'installed_slug',
+					'mode_results',
+					'row',
+					'table_arg_events',
+					'tabs_events',
+					'update_slug'
+				)
+			);
+		} finally {
+			self::remove_filter_records( $filters );
+			if ( ! $had_search_form_action ) {
+				\remove_filter( 'install_themes_table_header', 'install_theme_search_form', 10 );
+			}
+			$filters_removed = self::filters_removed( $filters );
+			$header_action_restored = $had_search_form_action === ( false !== \has_filter( 'install_themes_table_header', 'install_theme_search_form' ) );
+			self::remove_theme_fixture( $update_dir );
+			self::remove_theme_fixture( $installed_dir );
+			self::remove_theme_fixture( $current_dir );
+			self::restore_server( $server_snapshot );
+			self::restore_globals( $global_snapshot );
+			self::reset_theme_directory_cache_after_restore( $global_snapshot, $theme_root );
+			if ( ! $theme_root_preexisting && is_dir( $theme_root ) ) {
+				@rmdir( $theme_root );
+			}
+			\wp_cache_delete( 'theme_roots', 'site-transient' );
+			$globals_restored = self::globals_match( $global_snapshot, $global_names ) && self::server_match( $server_snapshot, $server_names );
+			$fixtures_removed = ! is_dir( $update_dir ) && ! is_dir( $installed_dir ) && ! is_dir( $current_dir )
+				&& ( $theme_root_preexisting || ! is_dir( $theme_root ) );
+		}
+
+		$row             = (string) ( $result['row'] ?? '' );
+		$display         = (string) ( $result['display'] ?? '' );
+		$views_html      = implode( '', array_column( $result['mode_results'] ?? array(), 'views_html' ) );
+		$image_sources   = $result['image_sources'] ?? array();
+		$action_slugs    = array_values( array_unique( $result['action_events'] ?? array() ) );
+		$expected_slugs  = array_column( $api_themes, 'slug' );
+		$expected_action_slugs = $expected_slugs;
+		sort( $action_slugs );
+		sort( $expected_action_slugs );
+
+		self::collect_failure(
+			$failures,
+			self::theme_install_request_events_match( $result['api_events'] ?? array(), $result['table_arg_events'] ?? array(), $request_modes, $marker ),
+			'theme install search, browse, feature filters, and API arguments are generated and short-circuited before network',
+			array(
+				'apiEvents'      => $result['api_events'] ?? array(),
+				'httpEvents'     => $result['http_events'] ?? array(),
+				'tableArgEvents' => $result['table_arg_events'] ?? array(),
+				'tabsEvents'     => $result['tabs_events'] ?? array(),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			array() === ( $result['http_events'] ?? array() )
+				&& self::theme_install_mode_results_match( $result['mode_results'] ?? array(), $expected_slugs, $api_total, $request_modes )
+				&& self::theme_install_views_match( $result['mode_results'] ?? array() ),
+			'theme install prepare_items preserves API result ordering, pagination totals, generated tabs, and filtered features',
+			array(
+				'httpEvents'  => $result['http_events'] ?? array(),
+				'modeResults' => $result['mode_results'] ?? array(),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			false === ( $result['ajax_denied'] ?? null )
+				&& true === ( $result['ajax_allowed'] ?? null )
+				&& str_contains( $row, 'action=install-theme' )
+				&& str_contains( $row, 'theme=' . rawurlencode( $install_slug ) )
+				&& str_contains( $row, 'action=upgrade-theme' )
+				&& str_contains( $row, 'theme=' . rawurlencode( $update_slug ) )
+				&& substr_count( $row, '<span class="install-now">' ) >= 2
+				&& substr_count( $row, '<span class="theme-install">' ) >= 2
+				&& str_contains( $row, 'cfz-theme-install-action' )
+				&& $expected_action_slugs === $action_slugs,
+			'theme install rows cover install, update, installed/current installed states, custom action filters, and capability gates',
+			array(
+				'actionSlugs' => $action_slugs,
+				'ajaxAllowed' => $result['ajax_allowed'] ?? null,
+				'ajaxDenied'  => $result['ajax_denied'] ?? null,
+				'row'         => self::describe_string( $row ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			count( $image_sources ) >= count( $expected_slugs )
+				&& self::escaped_url_attributes_with_prefix( $image_sources, 'https://example.test/screens/' )
+				&& str_contains( $row, 'tab=theme-information' )
+				&& str_contains( $row, 'class="theme-preview-url"' )
+				&& self::html_has_no_raw_script( $row . $display . $views_html ),
+			'theme install screenshots, preview metadata, descriptions, views, and display output are escaped',
+			array(
+				'display'          => self::describe_string( $display ),
+				'imageSources'     => $image_sources,
+				'rowNoScript'      => self::html_has_no_raw_script( $row ),
+				'rowScriptContext' => self::raw_script_context( $row ),
+				'viewsNoScript'    => self::html_has_no_raw_script( $views_html ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$filters_removed && $header_action_restored && $globals_restored && $fixtures_removed,
+			'theme install API, tab, action, capability, HTTP guard filters, header action, globals, server values, theme cache, and temp fixtures are restored',
+			array(
+				'filtersRemoved'      => $filters_removed,
+				'fixturesRemoved'     => $fixtures_removed,
+				'globalsRestored'     => $globals_restored,
+				'headerActionRestored' => $header_action_restored,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'admin-list-tables.theme-install.search-api-actions-escaping',
+			array() === $failures,
+			array(
+				'failures' => array_slice( $failures, 0, 8 ),
+				'screen'   => $screen->id,
+				'selectedMode' => $request_modes[0]['id'] ?? '',
+			)
+		);
+	}
+
 	private static function check_network_themes_table( \ComponentFuzz\FuzzContext $ctx ): array {
 		$failures        = array();
 		$filters         = array();
@@ -2733,7 +3199,7 @@ final class AdminListTablesSurface {
 		return $ctx->skip(
 			'admin-list-tables.db-heavy-branches-skipped',
 			'Full admin page dispatch, destructive plugin/theme lifecycle operations, real uploads, privacy request tables, '
-				. 'theme install/update tables, and true multisite write paths remain out of scope. This surface covers concrete '
+				. 'and true multisite write paths remain out of scope. This surface covers concrete '
 				. 'core list-table constructors, columns, views, actions, row rendering, and pagination through synthetic rows, '
 				. 'object-cache fixtures, generated temp plugin/theme metadata, and pre-query filters.',
 			array(
@@ -2746,6 +3212,7 @@ final class AdminListTablesSurface {
 					'WP_Plugins_List_Table',
 					'WP_Themes_List_Table',
 					'WP_Plugin_Install_List_Table',
+					'WP_Theme_Install_List_Table',
 					'WP_Application_Passwords_List_Table',
 					'WP_MS_Themes_List_Table',
 					'WP_MS_Sites_List_Table',
@@ -2754,7 +3221,6 @@ final class AdminListTablesSurface {
 				'skipped_classes' => array(
 					'WP_Privacy_Data_Export_Requests_List_Table',
 					'WP_Privacy_Data_Removal_Requests_List_Table',
-					'WP_Theme_Install_List_Table',
 				),
 			)
 		);
@@ -3068,6 +3534,31 @@ final class AdminListTablesSurface {
 		);
 	}
 
+	private static function theme_install_api_item(
+		string $slug,
+		string $name,
+		string $version,
+		string $description,
+		array $overrides = array()
+	): \stdClass {
+		return (object) array_merge(
+			array(
+				'author'         => 'Theme Author ' . $slug,
+				'description'    => $description,
+				'download_link'  => 'https://downloads.example.test/themes/' . rawurlencode( $slug ) . '.zip',
+				'homepage'       => 'https://example.test/themes/' . rawurlencode( $slug ),
+				'name'           => $name,
+				'num_ratings'    => 9,
+				'preview_url'    => 'https://preview.example.test/themes/' . rawurlencode( $slug ) . '/',
+				'rating'         => 88,
+				'screenshot_url' => 'https://example.test/screens/' . rawurlencode( $slug ) . '.png',
+				'slug'           => $slug,
+				'version'        => $version,
+			),
+			$overrides
+		);
+	}
+
 	private static function cache_post( \WP_Post $post ): void {
 		\wp_cache_set( (int) $post->ID, (object) $post->to_array(), 'posts' );
 	}
@@ -3160,6 +3651,24 @@ final class AdminListTablesSurface {
 		}
 		if ( is_dir( $theme_dir ) ) {
 			rmdir( $theme_dir );
+		}
+	}
+
+	private static function reset_theme_directory_cache_after_restore( array $global_snapshot, string $fallback_theme_root ): void {
+		if ( empty( $GLOBALS['wp_theme_directories'] ) && is_dir( $fallback_theme_root ) ) {
+			$GLOBALS['wp_theme_directories'] = array( \untrailingslashit( $fallback_theme_root ) );
+		}
+
+		\search_theme_directories( true );
+
+		if ( isset( $global_snapshot['wp_theme_directories'] ) ) {
+			self::restore_globals(
+				array(
+					'wp_theme_directories' => $global_snapshot['wp_theme_directories'],
+				)
+			);
+		} else {
+			unset( $GLOBALS['wp_theme_directories'] );
 		}
 	}
 
@@ -3365,6 +3874,169 @@ final class AdminListTablesSurface {
 		return true;
 	}
 
+	private static function theme_install_request_events_match( array $api_events, array $table_arg_events, array $request_modes, string $marker ): bool {
+		$args_events     = array_values(
+			array_filter(
+				$api_events,
+				static function ( array $event ): bool {
+					return 'args' === ( $event['phase'] ?? null );
+				}
+			)
+		);
+		$response_events = array_values(
+			array_filter(
+				$api_events,
+				static function ( array $event ): bool {
+					return 'response' === ( $event['phase'] ?? null );
+				}
+			)
+		);
+		$result_events   = array_values(
+			array_filter(
+				$api_events,
+				static function ( array $event ): bool {
+					return 'result' === ( $event['phase'] ?? null );
+				}
+			)
+		);
+
+		if (
+			count( $request_modes ) !== count( $table_arg_events )
+			|| count( $request_modes ) !== count( $args_events )
+			|| count( $request_modes ) !== count( $response_events )
+			|| count( $request_modes ) !== count( $result_events )
+		) {
+			return false;
+		}
+
+		foreach ( array_values( $request_modes ) as $index => $mode ) {
+			if (
+				( $table_arg_events[ $index ]['mode'] ?? null ) !== $mode['id']
+				|| ! self::theme_install_args_match( $table_arg_events[ $index ]['args'] ?? array(), $mode, $marker, false )
+			) {
+				return false;
+			}
+
+			foreach ( array( $args_events[ $index ], $response_events[ $index ], $result_events[ $index ] ) as $event ) {
+				if (
+					( $event['mode'] ?? null ) !== $mode['id']
+					|| 'query_themes' !== ( $event['action'] ?? null )
+					|| ! self::theme_install_args_match( $event['args'] ?? array(), $mode, $marker, true )
+				) {
+					return false;
+				}
+			}
+		}
+
+		return true;
+	}
+
+	private static function theme_install_args_match( $args, array $mode, string $marker, bool $expect_api_defaults ): bool {
+		$args = (array) $args;
+		if (
+			(int) ( $mode['paged'] ?? 0 ) !== (int) ( $args['page'] ?? 0 )
+			|| 36 !== (int) ( $args['per_page'] ?? 0 )
+			|| $marker !== (string) ( $args['cfz_marker'] ?? '' )
+			|| ! array_key_exists( 'fields', $args )
+		) {
+			return false;
+		}
+
+		if (
+			$expect_api_defaults
+			&& ( '' === (string) ( $args['locale'] ?? '' ) || '' === (string) ( $args['wp_version'] ?? '' ) )
+		) {
+			return false;
+		}
+
+		if ( isset( $mode['browse'] ) ) {
+			return (string) ( $args['browse'] ?? '' ) === $mode['browse']
+				&& ! isset( $args['search'], $args['tag'], $args['author'] );
+		}
+
+		$search_string = strtolower( (string) ( $mode['term'] ?? '' ) );
+
+		if ( isset( $mode['features'] ) ) {
+			return ( $mode['features'] ?? array() ) === ( $args['tag'] ?? null )
+				&& (string) ( $args['search'] ?? '' ) === $search_string
+				&& ! isset( $args['author'], $args['browse'] );
+		}
+
+		if ( 'term' === ( $mode['type'] ?? '' ) ) {
+			return (string) ( $args['search'] ?? '' ) === $search_string
+				&& ! isset( $args['tag'], $args['author'], $args['browse'] );
+		}
+
+		if ( 'tag' === ( $mode['type'] ?? '' ) ) {
+			$expected_terms = array_map( 'sanitize_key', array_unique( array_filter( array_map( 'trim', explode( ',', $search_string ) ) ) ) );
+
+			return array_values( $expected_terms ) === array_values( (array) ( $args['tag'] ?? array() ) )
+				&& ! isset( $args['search'], $args['author'], $args['browse'] );
+		}
+
+		if ( 'author' === ( $mode['type'] ?? '' ) ) {
+			return (string) ( $args['author'] ?? '' ) === $search_string
+				&& ! isset( $args['search'], $args['tag'], $args['browse'] );
+		}
+
+		return false;
+	}
+
+	private static function theme_install_mode_results_match( array $mode_results, array $expected_slugs, int $api_total, array $request_modes ): bool {
+		foreach ( $request_modes as $mode ) {
+			$result = $mode_results[ $mode['id'] ] ?? null;
+			if ( ! is_array( $result ) ) {
+				return false;
+			}
+
+			if (
+				count( $expected_slugs ) !== (int) ( $result['item_count'] ?? -1 )
+				|| $expected_slugs !== ( $result['items'] ?? array() )
+				|| 36 !== (int) ( $result['per_page'] ?? 0 )
+				|| $api_total !== (int) ( $result['total_items'] ?? 0 )
+				|| (int) ceil( $api_total / 36 ) !== (int) ( $result['total_pages'] ?? 0 )
+			) {
+				return false;
+			}
+
+			if ( isset( $mode['features'] ) && ( $mode['features'] ?? array() ) !== ( $result['features'] ?? array() ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function theme_install_views_match( array $mode_results ): bool {
+		$base_required = array(
+			'theme-install-cfz-custom',
+			'theme-install-dashboard',
+			'theme-install-featured',
+			'theme-install-new',
+			'theme-install-updated',
+			'theme-install-upload',
+		);
+
+		foreach ( $mode_results as $mode_id => $result ) {
+			$view_keys = $result['view_keys'] ?? array();
+			if ( array() !== array_diff( $base_required, $view_keys ) ) {
+				return false;
+			}
+			if ( str_starts_with( (string) $mode_id, 'search-' ) || 'feature-filter' === $mode_id ) {
+				if ( ! in_array( 'theme-install-search', $view_keys, true ) ) {
+					return false;
+				}
+			} elseif ( in_array( 'theme-install-search', $view_keys, true ) ) {
+				return false;
+			}
+			if ( ! self::html_has_no_raw_script( (string) ( $result['views_html'] ?? '' ) ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
 	private static function hostile_label( \ComponentFuzz\FuzzContext $ctx ): string {
 		return 'label "' . $ctx->identifier( 3, 8 ) . '" <script>alert(1)</script> onclick="bad" & value';
 	}
@@ -3422,8 +4094,28 @@ final class AdminListTablesSurface {
 		return $srcs;
 	}
 
+	private static function image_srcs( string $html ): array {
+		$srcs = array();
+		if ( ! preg_match_all( '/<img\b([^>]*)>/i', $html, $images ) ) {
+			return $srcs;
+		}
+
+		foreach ( $images[1] as $attribute_text ) {
+			$attrs = self::html_attributes( $attribute_text );
+			if ( isset( $attrs['src'] ) ) {
+				$srcs[] = $attrs['src'];
+			}
+		}
+
+		return $srcs;
+	}
+
 	private static function escaped_url_attributes( array $urls ): bool {
-		$has_example_icon = false;
+		return self::escaped_url_attributes_with_prefix( $urls, 'https://example.test/icons/' );
+	}
+
+	private static function escaped_url_attributes_with_prefix( array $urls, string $required_prefix ): bool {
+		$has_required_prefix = false;
 		foreach ( $urls as $url ) {
 			if ( ! is_string( $url ) || preg_match( '/[<>"\']/', $url ) ) {
 				return false;
@@ -3435,12 +4127,12 @@ final class AdminListTablesSurface {
 				return false;
 			}
 
-			if ( str_contains( $decoded, 'https://example.test/icons/' ) ) {
-				$has_example_icon = true;
+			if ( str_contains( $decoded, $required_prefix ) ) {
+				$has_required_prefix = true;
 			}
 		}
 
-		return $has_example_icon;
+		return $has_required_prefix;
 	}
 
 	private static function script_data_contains_all( string $handle, array $needles ): bool {
