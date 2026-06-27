@@ -32,6 +32,7 @@ final class HooksSurface {
 			$rows[] = self::check_remove_all_filters( $ctx->fork( 'remove-all-filters' ) );
 			$rows[] = self::check_action_and_filter_counters( $ctx->fork( 'counters' ) );
 			$rows[] = self::check_reference_and_object_payloads( $ctx->fork( 'reference-object-payloads' ) );
+			$rows[] = self::check_deprecated_hook_wrappers( $ctx->fork( 'deprecated-hook-wrappers' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
 				'hooks.surface-no-throw',
@@ -80,6 +81,28 @@ final class HooksSurface {
 
 		if ( ! class_exists( 'WP_Hook', false ) ) {
 			$missing[] = 'class WP_Hook';
+		}
+
+		return $missing;
+	}
+
+	private static function missing_deprecated_hook_requirements(): array {
+		$missing = array();
+
+		foreach (
+			array(
+				'apply_filters_deprecated',
+				'do_action_deprecated',
+				'_deprecated_hook',
+			) as $function
+		) {
+			if ( ! function_exists( $function ) ) {
+				$missing[] = "function {$function}";
+			}
+		}
+
+		if ( ! defined( 'WP_DEBUG' ) ) {
+			$missing[] = 'constant WP_DEBUG';
 		}
 
 		return $missing;
@@ -1588,6 +1611,457 @@ final class HooksSurface {
 		);
 	}
 
+	private static function check_deprecated_hook_wrappers( \ComponentFuzz\FuzzContext $ctx ): array {
+		$missing = self::missing_deprecated_hook_requirements();
+		if ( array() !== $missing ) {
+			return $ctx->skip(
+				'hooks.deprecated-hook-wrappers',
+				'Deprecated hook wrapper APIs are unavailable.',
+				array( 'missing' => $missing )
+			);
+		}
+
+		$snapshot            = self::snapshot_hook_globals();
+		$filter              = self::tag( $ctx, 'deprecated-filter' );
+		$action              = self::tag( $ctx, 'deprecated-action' );
+		$missing_filter      = self::tag( $ctx, 'deprecated-missing-filter' );
+		$missing_action      = self::tag( $ctx, 'deprecated-missing-action' );
+		$filter_replacement  = self::tag( $ctx, 'deprecated-filter-replacement' );
+		$action_replacement  = self::tag( $ctx, 'deprecated-action-replacement' );
+		$filter_version      = '6.' . $ctx->int( 1, 9 ) . '.0';
+		$action_version      = '7.' . $ctx->int( 0, 3 ) . '.1';
+		$filter_message      = 'filter-message-' . $ctx->identifier( 3, 8 );
+		$action_message      = 'action-message-' . $ctx->identifier( 3, 8 );
+		$filter_extra        = 'extra-' . $ctx->identifier( 3, 8 );
+		$action_note         = 'note-' . $ctx->identifier( 3, 8 );
+		$wp_debug            = (bool) WP_DEBUG;
+		$failures            = array();
+		$deprecated_log      = array();
+		$trigger_log         = array();
+		$trigger_error_log   = array();
+		$all_seen            = array();
+		$filter_log          = array();
+		$action_log          = array();
+		$filter_box          = array(
+			'count' => 2,
+			'trail' => array( 'filter-start' ),
+		);
+		$action_box          = array(
+			'count' => 4,
+			'trail' => array( 'action-start' ),
+		);
+		$counter_before      = array(
+			'missingFilter'     => did_filter( $missing_filter ),
+			'missingAction'     => did_action( $missing_action ),
+			'filter'            => did_filter( $filter ),
+			'action'            => did_action( $action ),
+			'deprecatedHookRun' => did_action( 'deprecated_hook_run' ),
+			'triggerError'      => did_filter( 'deprecated_hook_trigger_error' ),
+		);
+		$no_callback_state   = array();
+		$counter_after       = array();
+		$post_dispatch_state = array();
+		$cleanup_state       = array();
+		$filtered            = null;
+		$action_result       = null;
+
+		$deprecated_run = static function ( $hook, $replacement, $version, $message ) use (
+			&$deprecated_log,
+			$counter_before
+		) {
+			$deprecated_log[] = array(
+				'hook'           => $hook,
+				'replacement'    => $replacement,
+				'version'        => $version,
+				'message'        => $message,
+				'currentAction'  => current_action(),
+				'currentFilter'  => current_filter(),
+				'stack'          => self::current_filter_stack(),
+				'doingAction'    => doing_action( 'deprecated_hook_run' ),
+				'didActionDelta' => did_action( 'deprecated_hook_run' ) - $counter_before['deprecatedHookRun'],
+			);
+		};
+		$suppress_error = static function ( $trigger ) use ( &$trigger_log, $counter_before ) {
+			$trigger_log[] = array(
+				'trigger'        => $trigger,
+				'currentFilter'  => current_filter(),
+				'stack'          => self::current_filter_stack(),
+				'doingFilter'    => doing_filter( 'deprecated_hook_trigger_error' ),
+				'didFilterDelta' => did_filter( 'deprecated_hook_trigger_error' ) - $counter_before['triggerError'],
+			);
+
+			return false;
+		};
+		$trigger_error = static function ( $function_name, $message, $error_level ) use ( &$trigger_error_log ) {
+			$trigger_error_log[] = array(
+				'function' => $function_name,
+				'message'  => $message,
+				'level'    => $error_level,
+			);
+		};
+		$all           = static function ( $hook_name, ...$args ) use (
+			&$all_seen,
+			$filter,
+			$action
+		) {
+			if ( ! in_array( $hook_name, array( 'deprecated_hook_run', 'deprecated_hook_trigger_error', $filter, $action ), true ) ) {
+				return;
+			}
+
+			$all_seen[] = array(
+				'hook'    => $hook_name,
+				'current' => current_filter(),
+				'stack'   => self::current_filter_stack(),
+				'count'   => 1 + count( $args ),
+			);
+		};
+		$filter_cb     = static function ( $value, &$box_arg, $extra ) use (
+			&$filter_log,
+			$filter,
+			$counter_before
+		) {
+			$filter_log[] = array(
+				'value'          => $value,
+				'boxCount'       => $box_arg['count'],
+				'extra'          => $extra,
+				'currentFilter'  => current_filter(),
+				'stack'          => self::current_filter_stack(),
+				'doingFilter'    => doing_filter( $filter ),
+				'didFilterDelta' => did_filter( $filter ) - $counter_before['filter'],
+			);
+
+			$box_arg['count']  += 3;
+			$box_arg['trail'][] = 'filter:' . $extra;
+
+			return $value . '|deprecated-filter:' . $extra . ':' . $box_arg['count'];
+		};
+		$action_cb     = static function ( &$box_arg, $note ) use (
+			&$action_log,
+			$action,
+			$filter,
+			$counter_before
+		) {
+			$action_log[] = array(
+				'boxCount'       => $box_arg['count'],
+				'note'           => $note,
+				'currentAction'  => current_action(),
+				'currentFilter'  => current_filter(),
+				'stack'          => self::current_filter_stack(),
+				'doingAction'    => doing_action( $action ),
+				'doingFilter'    => doing_filter( $filter ),
+				'didActionDelta' => did_action( $action ) - $counter_before['action'],
+			);
+
+			$box_arg['count']  += 5;
+			$box_arg['trail'][] = 'action:' . $note;
+		};
+
+		try {
+			self::isolate_hook_callbacks(
+				array(
+					'deprecated_hook_run',
+					'deprecated_hook_trigger_error',
+					'wp_trigger_error_always_run',
+					'all',
+				)
+			);
+
+			add_action( 'deprecated_hook_run', $deprecated_run, 10, 4 );
+			add_filter( 'deprecated_hook_trigger_error', $suppress_error, 10, 1 );
+			add_action( 'wp_trigger_error_always_run', $trigger_error, 10, 3 );
+			add_action( 'all', $all, 10, 99 );
+
+			$missing_filter_result = apply_filters_deprecated(
+				$missing_filter,
+				array( 'missing-base', 'unused' ),
+				$filter_version,
+				$filter_replacement,
+				$filter_message
+			);
+			$missing_action_result = do_action_deprecated(
+				$missing_action,
+				array( 'unused' ),
+				$action_version,
+				$action_replacement,
+				$action_message
+			);
+			$no_callback_state     = array(
+				'filterResult'       => $missing_filter_result,
+				'actionResult'       => $missing_action_result,
+				'missingFilterDelta' => did_filter( $missing_filter ) - $counter_before['missingFilter'],
+				'missingActionDelta' => did_action( $missing_action ) - $counter_before['missingAction'],
+				'deprecatedRunDelta' => did_action( 'deprecated_hook_run' ) - $counter_before['deprecatedHookRun'],
+				'triggerErrorDelta'  => did_filter( 'deprecated_hook_trigger_error' ) - $counter_before['triggerError'],
+				'allSeen'            => $all_seen,
+			);
+
+			add_filter( $filter, $filter_cb, 10, 3 );
+			add_action( $action, $action_cb, 10, 2 );
+
+			$filter_args   = array( 'filter-base', &$filter_box, $filter_extra );
+			$filtered      = apply_filters_deprecated(
+				$filter,
+				$filter_args,
+				$filter_version,
+				$filter_replacement,
+				$filter_message
+			);
+			$action_args   = array( &$action_box, $action_note );
+			$action_result = do_action_deprecated(
+				$action,
+				$action_args,
+				$action_version,
+				$action_replacement,
+				$action_message
+			);
+
+			$counter_after       = array(
+				'missingFilter'     => did_filter( $missing_filter ) - $counter_before['missingFilter'],
+				'missingAction'     => did_action( $missing_action ) - $counter_before['missingAction'],
+				'filter'            => did_filter( $filter ) - $counter_before['filter'],
+				'action'            => did_action( $action ) - $counter_before['action'],
+				'deprecatedHookRun' => did_action( 'deprecated_hook_run' ) - $counter_before['deprecatedHookRun'],
+				'triggerError'      => did_filter( 'deprecated_hook_trigger_error' ) - $counter_before['triggerError'],
+			);
+			$post_dispatch_state = array(
+				'currentFilter'  => current_filter(),
+				'stack'          => self::current_filter_stack(),
+				'doingAnyFilter' => doing_filter(),
+				'doingAnyAction' => doing_action(),
+			);
+		} finally {
+			self::restore_hook_globals( $snapshot );
+		}
+
+		$cleanup_state = array(
+			'restored'      => self::snapshots_identical( $snapshot, self::snapshot_hook_globals() ),
+			'currentFilter' => current_filter(),
+			'stack'         => self::current_filter_stack(),
+		);
+
+		$expected_trigger_log = array();
+		$expected_all_seen    = array(
+			array(
+				'hook'    => 'deprecated_hook_run',
+				'current' => 'deprecated_hook_run',
+				'stack'   => array( 'deprecated_hook_run' ),
+				'count'   => 5,
+			),
+		);
+		if ( $wp_debug ) {
+			$expected_trigger_log[] = array(
+				'trigger'        => true,
+				'currentFilter'  => 'deprecated_hook_trigger_error',
+				'stack'          => array( 'deprecated_hook_trigger_error' ),
+				'doingFilter'    => true,
+				'didFilterDelta' => 1,
+			);
+			$expected_all_seen[]    = array(
+				'hook'    => 'deprecated_hook_trigger_error',
+				'current' => 'deprecated_hook_trigger_error',
+				'stack'   => array( 'deprecated_hook_trigger_error' ),
+				'count'   => 2,
+			);
+		}
+		$expected_all_seen[] = array(
+			'hook'    => $filter,
+			'current' => $filter,
+			'stack'   => array( $filter ),
+			'count'   => 2,
+		);
+		$expected_all_seen[] = array(
+			'hook'    => 'deprecated_hook_run',
+			'current' => 'deprecated_hook_run',
+			'stack'   => array( 'deprecated_hook_run' ),
+			'count'   => 5,
+		);
+		if ( $wp_debug ) {
+			$expected_trigger_log[] = array(
+				'trigger'        => true,
+				'currentFilter'  => 'deprecated_hook_trigger_error',
+				'stack'          => array( 'deprecated_hook_trigger_error' ),
+				'doingFilter'    => true,
+				'didFilterDelta' => 2,
+			);
+			$expected_all_seen[]    = array(
+				'hook'    => 'deprecated_hook_trigger_error',
+				'current' => 'deprecated_hook_trigger_error',
+				'stack'   => array( 'deprecated_hook_trigger_error' ),
+				'count'   => 2,
+			);
+		}
+		$expected_all_seen[] = array(
+			'hook'    => $action,
+			'current' => $action,
+			'stack'   => array( $action ),
+			'count'   => 2,
+		);
+
+		self::collect_failure(
+			$failures,
+			array(
+				'filterResult'       => 'missing-base',
+				'actionResult'       => null,
+				'missingFilterDelta' => 0,
+				'missingActionDelta' => 0,
+				'deprecatedRunDelta' => 0,
+				'triggerErrorDelta'  => 0,
+				'allSeen'            => array(),
+			) === $no_callback_state,
+			'Deprecated hook wrappers take the no-callback fast path without side effects or all-hook visibility.',
+			array(
+				'noCallbackState' => $no_callback_state,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			array(
+				array(
+					'hook'           => $filter,
+					'replacement'    => $filter_replacement,
+					'version'        => $filter_version,
+					'message'        => $filter_message,
+					'currentAction'  => 'deprecated_hook_run',
+					'currentFilter'  => 'deprecated_hook_run',
+					'stack'          => array( 'deprecated_hook_run' ),
+					'doingAction'    => true,
+					'didActionDelta' => 1,
+				),
+				array(
+					'hook'           => $action,
+					'replacement'    => $action_replacement,
+					'version'        => $action_version,
+					'message'        => $action_message,
+					'currentAction'  => 'deprecated_hook_run',
+					'currentFilter'  => 'deprecated_hook_run',
+					'stack'          => array( 'deprecated_hook_run' ),
+					'doingAction'    => true,
+					'didActionDelta' => 2,
+				),
+			) === $deprecated_log,
+			'_deprecated_hook fires deprecated_hook_run with exact replacement, version, and message payloads.',
+			array(
+				'deprecatedLog' => $deprecated_log,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			$expected_trigger_log === $trigger_log && array() === $trigger_error_log,
+			'deprecated_hook_trigger_error is suppressed when the debug-gated branch is reachable.',
+			array(
+				'wpDebug'         => $wp_debug,
+				'expectedTrigger' => $expected_trigger_log,
+				'triggerLog'      => $trigger_log,
+				'triggerErrorLog' => $trigger_error_log,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			'filter-base|deprecated-filter:' . $filter_extra . ':5' === $filtered
+				&& array(
+					'count' => 5,
+					'trail' => array( 'filter-start', 'filter:' . $filter_extra ),
+				) === $filter_box
+				&& array(
+					array(
+						'value'          => 'filter-base',
+						'boxCount'       => 2,
+						'extra'          => $filter_extra,
+						'currentFilter'  => $filter,
+						'stack'          => array( $filter ),
+						'doingFilter'    => true,
+						'didFilterDelta' => 1,
+					),
+				) === $filter_log,
+			'apply_filters_deprecated dispatches through the ref-array filter path and returns the transformed value.',
+			array(
+				'filtered'  => $filtered,
+				'filterBox' => $filter_box,
+				'filterLog' => $filter_log,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			null === $action_result
+				&& array(
+					'count' => 9,
+					'trail' => array( 'action-start', 'action:' . $action_note ),
+				) === $action_box
+				&& array(
+					array(
+						'boxCount'       => 4,
+						'note'           => $action_note,
+						'currentAction'  => $action,
+						'currentFilter'  => $action,
+						'stack'          => array( $action ),
+						'doingAction'    => true,
+						'doingFilter'    => false,
+						'didActionDelta' => 1,
+					),
+				) === $action_log,
+			'do_action_deprecated dispatches through the ref-array action path and preserves by-reference mutation.',
+			array(
+				'actionResult' => $action_result,
+				'actionBox'    => $action_box,
+				'actionLog'    => $action_log,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			array(
+				'missingFilter'     => 0,
+				'missingAction'     => 0,
+				'filter'            => 1,
+				'action'            => 1,
+				'deprecatedHookRun' => 2,
+				'triggerError'      => $wp_debug ? 2 : 0,
+			) === $counter_after,
+			'Deprecated hook wrappers update did_filter and did_action counters only for dispatches that actually run.',
+			array(
+				'counterAfter' => $counter_after,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			$expected_all_seen === $all_seen,
+			'The all hook observes deprecated side-effect hooks and ref-array dispatches in order.',
+			array(
+				'expectedAllSeen' => $expected_all_seen,
+				'allSeen'         => $all_seen,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			array(
+				'currentFilter'  => false,
+				'stack'          => array(),
+				'doingAnyFilter' => false,
+				'doingAnyAction' => false,
+			) === $post_dispatch_state
+				&& array(
+					'restored'      => true,
+					'currentFilter' => false,
+					'stack'         => array(),
+				) === $cleanup_state,
+			'Deprecated hook wrapper invariant restores the hook stack and cleans up local hook globals.',
+			array(
+				'postDispatchState' => $post_dispatch_state,
+				'cleanupState'      => $cleanup_state,
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'hooks.deprecated-hook-wrappers',
+			$failures,
+			array(
+				'filter'  => $filter,
+				'action'  => $action,
+				'wpDebug' => $wp_debug,
+			)
+		);
+	}
+
 	private static function check_hook_globals_restored( \ComponentFuzz\FuzzContext $ctx, array $snapshot ): array {
 		$after    = self::snapshot_hook_globals();
 		$failures = array();
@@ -1778,7 +2252,7 @@ final class HooksSurface {
 
 	private static function snapshot_hook_globals(): array {
 		return array(
-			'wp_filter'         => $GLOBALS['wp_filter'] ?? null,
+			'wp_filter'         => self::clone_wp_filter_registry( $GLOBALS['wp_filter'] ?? null ),
 			'wp_actions'        => $GLOBALS['wp_actions'] ?? null,
 			'wp_filters'        => $GLOBALS['wp_filters'] ?? null,
 			'wp_current_filter' => $GLOBALS['wp_current_filter'] ?? null,
@@ -1789,6 +2263,8 @@ final class HooksSurface {
 		foreach ( $snapshot as $name => $value ) {
 			if ( null === $value ) {
 				unset( $GLOBALS[ $name ] );
+			} elseif ( 'wp_filter' === $name ) {
+				$GLOBALS[ $name ] = self::clone_wp_filter_registry( $value );
 			} else {
 				$GLOBALS[ $name ] = $value;
 			}
@@ -1797,12 +2273,46 @@ final class HooksSurface {
 
 	private static function snapshots_identical( array $before, array $after ): bool {
 		foreach ( $before as $name => $value ) {
-			if ( ! array_key_exists( $name, $after ) || $after[ $name ] !== $value ) {
+			if ( ! array_key_exists( $name, $after ) ) {
+				return false;
+			}
+
+			if ( 'wp_filter' === $name ) {
+				if ( $after[ $name ] != $value ) {
+					return false;
+				}
+				continue;
+			}
+
+			if ( $after[ $name ] !== $value ) {
 				return false;
 			}
 		}
 
 		return array_keys( $before ) === array_keys( $after );
+	}
+
+	private static function isolate_hook_callbacks( array $hook_names ): void {
+		if ( ! isset( $GLOBALS['wp_filter'] ) || ! is_array( $GLOBALS['wp_filter'] ) ) {
+			return;
+		}
+
+		foreach ( $hook_names as $hook_name ) {
+			unset( $GLOBALS['wp_filter'][ $hook_name ] );
+		}
+	}
+
+	private static function clone_wp_filter_registry( $registry ) {
+		if ( ! is_array( $registry ) ) {
+			return $registry instanceof \WP_Hook ? clone $registry : $registry;
+		}
+
+		$clone = array();
+		foreach ( $registry as $hook_name => $hook ) {
+			$clone[ $hook_name ] = $hook instanceof \WP_Hook ? clone $hook : $hook;
+		}
+
+		return $clone;
 	}
 
 	private static function describe_snapshot( array $snapshot ): array {
