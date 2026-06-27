@@ -152,7 +152,10 @@ final class EnvironmentLoadSurface {
 				self::set_env_var( 'WP_ENVIRONMENT_TYPE', $value );
 
 				$actual   = \wp_get_environment_type();
-				$expected = $case['expected'];
+				$expected = self::environment_type_expected_value(
+					$value,
+					defined( 'WP_ENVIRONMENT_TYPE' ) ? WP_ENVIRONMENT_TYPE : null
+				);
 				$honored  = $actual === $expected;
 
 				self::collect_failure(
@@ -160,11 +163,12 @@ final class EnvironmentLoadSurface {
 					in_array( $actual, $allowed, true ) && ( ! defined( 'WP_RUN_CORE_TESTS' ) || $honored ),
 					"wp_get_environment_type allowed/fail-closed case {$index}",
 					array(
-						'label'    => $case['label'],
-						'value'    => $value,
-						'actual'   => $actual,
-						'expected' => $expected,
-						'honored'  => $honored,
+						'label'        => $case['label'],
+						'value'        => $value,
+						'actual'       => $actual,
+						'expected'     => $expected,
+						'caseExpected' => $case['expected'],
+						'honored'      => $honored,
 					)
 				);
 			}
@@ -192,6 +196,17 @@ final class EnvironmentLoadSurface {
 
 	private static function environment_type_allowed_values(): array {
 		return array( 'local', 'development', 'staging', 'production' );
+	}
+
+	private static function environment_type_expected_value( $env_value, $constant_value = null ): string {
+		$current = false === $env_value ? '' : $env_value;
+		if ( null !== $constant_value && $constant_value ) {
+			$current = $constant_value;
+		}
+
+		return is_string( $current ) && in_array( $current, self::environment_type_allowed_values(), true )
+			? $current
+			: 'production';
 	}
 
 	private static function environment_type_matrix_cases( \ComponentFuzz\FuzzContext $ctx ): array {
@@ -262,61 +277,37 @@ final class EnvironmentLoadSurface {
 			);
 		}
 
-		$parent_snapshot_before    = self::snapshot_state();
-		$parent_constant_before    = defined( 'WP_RUN_CORE_TESTS' );
+		$constant_allowed_value = $ctx->fork( 'constant-allowed' )->choice( self::environment_type_allowed_values() );
+		$constant_invalid_value = self::generated_environment_type_value( $ctx->fork( 'constant-invalid' ) );
+		$matrix_runs            = array(
+			'env-var'          => array(
+				'label'         => 'environment variable matrix',
+				'constantValue' => null,
+			),
+			'constant-allowed' => array(
+				'label'         => 'allowed constant override matrix',
+				'constantValue' => $constant_allowed_value,
+			),
+			'constant-invalid' => array(
+				'label'         => 'invalid constant override matrix',
+				'constantValue' => $constant_invalid_value,
+			),
+		);
+
+		$parent_snapshot_before = self::snapshot_state();
+		$parent_constant_before = defined( 'WP_RUN_CORE_TESTS' );
 		try {
-			$run = self::run_child_environment_type_matrix( $cases );
+			foreach ( $matrix_runs as $key => $matrix ) {
+				$matrix_runs[ $key ]['run'] = self::run_child_environment_type_matrix( $cases, $matrix['constantValue'] );
+			}
 		} finally {
 			self::restore_state( $parent_snapshot_before );
 		}
-		$parent_state_restored     = self::state_matches( $parent_snapshot_before );
-		$parent_constant_after     = defined( 'WP_RUN_CORE_TESTS' );
-		$result                    = is_array( $run['result'] ) ? $run['result'] : array();
-		$child_cases               = is_array( $result['cases'] ?? null ) ? $result['cases'] : array();
-		$expected_shape            = self::environment_type_child_result_has_expected_shape( $result );
-		$allowed_values            = self::environment_type_allowed_values();
-		$failures                  = array();
-		$allowed_cases_honored     = 0;
-		$fail_closed_cases_honored = 0;
-
-		self::collect_failure(
-			$failures,
-			$run['ok'],
-			'isolated environment-type subprocess exits cleanly and returns structured JSON',
-			array(
-				'exitCode' => $run['exitCode'],
-				'stdout'   => \ComponentFuzz\preview_value( $run['stdout'] ),
-				'stderr'   => \ComponentFuzz\preview_value( $run['stderr'] ),
-			)
-		);
-
-		self::collect_failure(
-			$failures,
-			$expected_shape,
-			'isolated environment-type subprocess result has expected shape',
-			array(
-				'resultKeys' => array_keys( $result ),
-				'casesType'  => gettype( $result['cases'] ?? null ),
-			)
-		);
-
-		self::collect_failure(
-			$failures,
-			true === ( $result['wpRunCoreTests'] ?? null ),
-			'child defines WP_RUN_CORE_TESTS before evaluating environment types',
-			array( 'wpRunCoreTests' => $result['wpRunCoreTests'] ?? null )
-		);
-
-		self::collect_failure(
-			$failures,
-			true === ( $result['childStateRestored'] ?? null ),
-			'child restores WP_ENVIRONMENT_TYPE before exit',
-			array(
-				'childStateRestored' => $result['childStateRestored'] ?? null,
-				'childOriginalEnv'   => $result['originalEnv'] ?? null,
-				'childRestoredEnv'   => $result['restoredEnv'] ?? null,
-			)
-		);
+		$parent_state_restored = self::state_matches( $parent_snapshot_before );
+		$parent_constant_after = defined( 'WP_RUN_CORE_TESTS' );
+		$allowed_values        = self::environment_type_allowed_values();
+		$failures              = array();
+		$matrix_summaries      = array();
 
 		self::collect_failure(
 			$failures,
@@ -331,58 +322,169 @@ final class EnvironmentLoadSurface {
 			)
 		);
 
-		self::collect_failure(
-			$failures,
-			count( $cases ) === count( $child_cases ),
-			'child evaluates every generated environment-type matrix case',
-			array(
-				'expectedCount' => count( $cases ),
-				'actualCount'   => count( $child_cases ),
-			)
-		);
-
-		foreach ( $cases as $index => $case ) {
-			$child_case = $child_cases[ $index ] ?? null;
-			if ( ! is_array( $child_case ) ) {
-				self::collect_failure(
-					$failures,
-					false,
-					"environment-type matrix case {$index} is present",
-					array(
-						'case'        => $case,
-						'actualEntry' => $child_case,
-					)
-				);
-				continue;
-			}
-
-			$actual   = $child_case['actual'] ?? null;
-			$repeat   = $child_case['repeat'] ?? null;
-			$expected = $case['expected'];
-			$matched  = ( $child_case['label'] ?? null ) === $case['label']
-				&& ( $child_case['value'] ?? null ) === $case['value']
-				&& ( $child_case['expected'] ?? null ) === $expected
-				&& $actual === $expected
-				&& $repeat === $expected
-				&& in_array( $actual, $allowed_values, true );
-
-			if ( ! empty( $case['allowed'] ) && $matched ) {
-				++$allowed_cases_honored;
-			}
-			if ( empty( $case['allowed'] ) && $matched && 'production' === $actual ) {
-				++$fail_closed_cases_honored;
-			}
+		foreach ( $matrix_runs as $mode => $matrix ) {
+			$run = $matrix['run'] ?? array(
+				'ok'       => false,
+				'exitCode' => -1,
+				'stdout'   => '',
+				'stderr'   => 'child matrix was not executed',
+				'result'   => null,
+			);
+			$result                    = is_array( $run['result'] ) ? $run['result'] : array();
+			$child_cases               = is_array( $result['cases'] ?? null ) ? $result['cases'] : array();
+			$expected_shape            = self::environment_type_child_result_has_expected_shape( $result );
+			$child_unexpected_output   = (string) ( $result['unexpectedOutput'] ?? '' );
+			$allowed_cases_honored     = 0;
+			$fail_closed_cases_honored = 0;
+			$constant_cases_honored    = 0;
+			$constant_defined          = null !== $matrix['constantValue'];
 
 			self::collect_failure(
 				$failures,
-				$matched,
-				! empty( $case['allowed'] )
-					? "wp_get_environment_type honors allowed value {$case['value']}"
-					: "wp_get_environment_type fails closed for {$case['label']}",
+				$run['ok'],
+				"isolated environment-type {$matrix['label']} subprocess exits cleanly and returns structured JSON",
 				array(
-					'case'      => $case,
-					'childCase' => $child_case,
+					'mode'     => $mode,
+					'exitCode' => $run['exitCode'],
+					'stdout'   => \ComponentFuzz\preview_value( $run['stdout'] ),
+					'stderr'   => \ComponentFuzz\preview_value( $run['stderr'] ),
 				)
+			);
+
+			self::collect_failure(
+				$failures,
+				'' === $run['stderr'] && '' === $child_unexpected_output,
+				"isolated environment-type {$matrix['label']} subprocess emits no stderr or stray output",
+				array(
+					'mode'             => $mode,
+					'stderr'           => \ComponentFuzz\preview_value( $run['stderr'] ),
+					'unexpectedOutput' => \ComponentFuzz\preview_value( $child_unexpected_output ),
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$expected_shape,
+				"isolated environment-type {$matrix['label']} subprocess result has expected shape",
+				array(
+					'mode'       => $mode,
+					'resultKeys' => array_keys( $result ),
+					'casesType'  => gettype( $result['cases'] ?? null ),
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				true === ( $result['wpRunCoreTests'] ?? null ),
+				"{$matrix['label']} child defines WP_RUN_CORE_TESTS before evaluating environment types",
+				array(
+					'mode'           => $mode,
+					'wpRunCoreTests' => $result['wpRunCoreTests'] ?? null,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$constant_defined === ( $result['constantDefined'] ?? null )
+					&& ( ! $constant_defined || $matrix['constantValue'] === ( $result['constantValue'] ?? null ) ),
+				"{$matrix['label']} child has the expected WP_ENVIRONMENT_TYPE constant state",
+				array(
+					'mode'                    => $mode,
+					'expectedConstantDefined' => $constant_defined,
+					'actualConstantDefined'   => $result['constantDefined'] ?? null,
+					'expectedConstantValue'   => $matrix['constantValue'],
+					'actualConstantValue'     => $result['constantValue'] ?? null,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				true === ( $result['childStateRestored'] ?? null ),
+				"{$matrix['label']} child restores WP_ENVIRONMENT_TYPE before exit",
+				array(
+					'mode'               => $mode,
+					'childStateRestored' => $result['childStateRestored'] ?? null,
+					'childOriginalEnv'   => $result['originalEnv'] ?? null,
+					'childRestoredEnv'   => $result['restoredEnv'] ?? null,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				count( $cases ) === count( $child_cases ),
+				"{$matrix['label']} child evaluates every generated environment-type matrix case",
+				array(
+					'mode'          => $mode,
+					'expectedCount' => count( $cases ),
+					'actualCount'   => count( $child_cases ),
+				)
+			);
+
+			foreach ( $cases as $index => $case ) {
+				$child_case = $child_cases[ $index ] ?? null;
+				if ( ! is_array( $child_case ) ) {
+					self::collect_failure(
+						$failures,
+						false,
+						"{$matrix['label']} environment-type matrix case {$index} is present",
+						array(
+							'mode'        => $mode,
+							'case'        => $case,
+							'actualEntry' => $child_case,
+						)
+					);
+					continue;
+				}
+
+				$actual   = $child_case['actual'] ?? null;
+				$repeat   = $child_case['repeat'] ?? null;
+				$expected = self::environment_type_expected_value( $case['value'], $matrix['constantValue'] );
+				$matched  = ( $child_case['label'] ?? null ) === $case['label']
+					&& ( $child_case['value'] ?? null ) === $case['value']
+					&& ( $child_case['expected'] ?? null ) === $expected
+					&& $actual === $expected
+					&& $repeat === $expected
+					&& in_array( $actual, $allowed_values, true );
+
+				if ( ! $constant_defined && ! empty( $case['allowed'] ) && $matched ) {
+					++$allowed_cases_honored;
+				}
+				if ( ! $constant_defined && empty( $case['allowed'] ) && $matched && 'production' === $actual ) {
+					++$fail_closed_cases_honored;
+				}
+				if ( $constant_defined && $matched ) {
+					++$constant_cases_honored;
+				}
+
+				self::collect_failure(
+					$failures,
+					$matched,
+					$constant_defined
+						? "wp_get_environment_type lets WP_ENVIRONMENT_TYPE constant override {$case['label']}"
+						: ( ! empty( $case['allowed'] )
+							? "wp_get_environment_type honors allowed value {$case['value']}"
+							: "wp_get_environment_type fails closed for {$case['label']}" ),
+					array(
+						'mode'      => $mode,
+						'case'      => $case,
+						'expected'  => $expected,
+						'childCase' => $child_case,
+					)
+				);
+			}
+
+			$matrix_summaries[ $mode ] = array(
+				'constantValue'         => $matrix['constantValue'],
+				'caseCount'             => count( $cases ),
+				'childCaseCount'        => count( $child_cases ),
+				'allowedCasesHonored'   => $allowed_cases_honored,
+				'failClosedCasesHonored' => $fail_closed_cases_honored,
+				'constantCasesHonored'  => $constant_cases_honored,
+				'childWpRunCoreTests'   => $result['wpRunCoreTests'] ?? null,
+				'constantDefined'       => $result['constantDefined'] ?? null,
+				'childStateRestored'    => $result['childStateRestored'] ?? null,
+				'childUnexpectedOutput' => \ComponentFuzz\preview_value( $child_unexpected_output ),
+				'childStderr'           => \ComponentFuzz\preview_value( $run['stderr'] ),
 			);
 		}
 
@@ -393,16 +495,10 @@ final class EnvironmentLoadSurface {
 			array(
 				'cases'                 => count( $cases ),
 				'generatedCases'        => self::ENVIRONMENT_TYPE_GENERATED_CASES,
-				'allowedCasesHonored'   => $allowed_cases_honored,
-				'failClosedCasesHonored' => $fail_closed_cases_honored,
-				'childCaseCount'        => count( $child_cases ),
-				'childWpRunCoreTests'   => $result['wpRunCoreTests'] ?? null,
-				'childStateRestored'    => $result['childStateRestored'] ?? null,
+				'matrixRuns'            => $matrix_summaries,
 				'parentStateRestored'   => $parent_state_restored,
 				'parentConstantBefore'  => $parent_constant_before,
 				'parentConstantAfter'   => $parent_constant_after,
-				'childUnexpectedOutput' => \ComponentFuzz\preview_value( (string) ( $result['unexpectedOutput'] ?? '' ) ),
-				'childStderr'           => \ComponentFuzz\preview_value( $run['stderr'] ),
 				'failures'              => array_slice( $failures, 0, 10 ),
 			)
 		);
@@ -424,11 +520,18 @@ final class EnvironmentLoadSurface {
 		return $missing;
 	}
 
-	private static function run_child_environment_type_matrix( array $cases ): array {
+	private static function run_child_environment_type_matrix( array $cases, $constant_value ): array {
+		$child_cases = array();
+		foreach ( $cases as $case ) {
+			$case['expected'] = self::environment_type_expected_value( $case['value'], $constant_value );
+			$child_cases[]    = $case;
+		}
+
 		$payload = json_encode(
 			array(
-				'repoRoot' => \ComponentFuzz\repo_root(),
-				'cases'    => $cases,
+				'repoRoot'      => \ComponentFuzz\repo_root(),
+				'cases'         => $child_cases,
+				'constantValue' => $constant_value,
 			),
 			JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE
 		);
@@ -486,6 +589,9 @@ final class EnvironmentLoadSurface {
 			&& is_bool( $result['ok'] )
 			&& array_key_exists( 'wpRunCoreTests', $result )
 			&& is_bool( $result['wpRunCoreTests'] )
+			&& array_key_exists( 'constantDefined', $result )
+			&& is_bool( $result['constantDefined'] )
+			&& array_key_exists( 'constantValue', $result )
 			&& array_key_exists( 'cases', $result )
 			&& is_array( $result['cases'] )
 			&& array_key_exists( 'childStateRestored', $result )
@@ -546,6 +652,8 @@ $component_fuzz_env_load_unexpected_output = '';
 $component_fuzz_env_load_result            = array(
 	'ok'                 => false,
 	'wpRunCoreTests'     => false,
+	'constantDefined'    => false,
+	'constantValue'      => null,
 	'cases'              => array(),
 	'childStateRestored' => false,
 	'originalEnv'        => null,
@@ -565,9 +673,16 @@ try {
 		throw new RuntimeException( 'Invalid environment-type fixture.' );
 	}
 
+	if ( array_key_exists( 'constantValue', $component_fuzz_env_load_fixture ) && null !== $component_fuzz_env_load_fixture['constantValue'] ) {
+		define( 'WP_ENVIRONMENT_TYPE', (string) $component_fuzz_env_load_fixture['constantValue'] );
+	}
+
 	if ( ! defined( 'WP_RUN_CORE_TESTS' ) ) {
 		define( 'WP_RUN_CORE_TESTS', true );
 	}
+
+	$component_fuzz_env_load_result['constantDefined'] = defined( 'WP_ENVIRONMENT_TYPE' );
+	$component_fuzz_env_load_result['constantValue']   = defined( 'WP_ENVIRONMENT_TYPE' ) ? WP_ENVIRONMENT_TYPE : null;
 
 	require_once $component_fuzz_env_load_fixture['repoRoot'] . '/tools/component-fuzz/lib/autoload.php';
 
