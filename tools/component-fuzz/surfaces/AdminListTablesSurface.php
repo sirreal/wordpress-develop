@@ -1612,12 +1612,12 @@ final class AdminListTablesSurface {
 		$install_slug    = 'cfz-theme-install-new-' . $token;
 		$update_slug     = 'cfz-theme-install-update-' . $token;
 		$installed_slug  = 'cfz-theme-install-installed-' . $token;
-		$current_slug    = 'cfz-theme-install-current-' . $token;
+		$newer_slug      = 'cfz-theme-install-newer-' . $token;
 		$theme_root      = \trailingslashit( WP_CONTENT_DIR ) . 'themes';
 		$theme_root_preexisting = is_dir( $theme_root );
 		$update_dir      = \trailingslashit( $theme_root ) . $update_slug;
 		$installed_dir   = \trailingslashit( $theme_root ) . $installed_slug;
-		$current_dir     = \trailingslashit( $theme_root ) . $current_slug;
+		$newer_dir       = \trailingslashit( $theme_root ) . $newer_slug;
 		$marker          = 'cfz-theme-install-marker-' . $token;
 		$api_total       = 83;
 		$api_themes      = array(
@@ -1652,13 +1652,13 @@ final class AdminListTablesSurface {
 				)
 			),
 			self::theme_install_api_item(
-				$current_slug,
-				'Current Theme ' . $hostile_label,
-				'1.0.0',
-				'Theme current description ' . $hostile_label,
+				$newer_slug,
+				'Newer Installed Theme ' . $hostile_label,
+				'0.5.0',
+				'Theme newer installed description ' . $hostile_label,
 				array(
-					'preview_url'    => 'https://preview.example.test/themes/' . rawurlencode( $current_slug ) . '/',
-					'screenshot_url' => 'https://example.test/screens/' . rawurlencode( $current_slug ) . '.png?raw=' . rawurlencode( $hostile_label ),
+					'preview_url'    => 'https://preview.example.test/themes/' . rawurlencode( $newer_slug ) . '/',
+					'screenshot_url' => 'https://example.test/screens/' . rawurlencode( $newer_slug ) . '.png?raw=' . rawurlencode( $hostile_label ),
 				)
 			),
 		);
@@ -1716,6 +1716,7 @@ final class AdminListTablesSurface {
 		$server_names    = array( 'HTTP_HOST', 'PHP_SELF', 'REQUEST_URI' );
 		$global_snapshot = self::snapshot_globals( $global_names );
 		$server_snapshot = self::snapshot_server( $server_names );
+		$options_snapshot = self::snapshot_options();
 		$api_events      = array();
 		$table_arg_events = array();
 		$tabs_events     = array();
@@ -1726,6 +1727,7 @@ final class AdminListTablesSurface {
 		$active_mode     = '';
 		$filters_removed = false;
 		$globals_restored = false;
+		$options_restored = false;
 		$fixtures_removed = false;
 		$header_action_restored = false;
 		$had_search_form_action = false !== \has_filter( 'install_themes_table_header', 'install_theme_search_form' );
@@ -1813,9 +1815,6 @@ final class AdminListTablesSurface {
 				array( 'url' => $url )
 			);
 		};
-		$current_theme_filter = static function () use ( $current_slug ): string {
-			return $current_slug;
-		};
 		$cap_filter = self::cap_filter(
 			array(
 				'install_themes',
@@ -1833,14 +1832,12 @@ final class AdminListTablesSurface {
 		self::add_filter_record( $filters, 'themes_api_result', $themes_api_result_filter, 10, 3 );
 		self::add_filter_record( $filters, 'theme_install_actions', $theme_install_actions_filter, 10, 2 );
 		self::add_filter_record( $filters, 'pre_http_request', $pre_http_request_filter, 10, 3 );
-		self::add_filter_record( $filters, 'pre_option_stylesheet', $current_theme_filter, 10, 3 );
-		self::add_filter_record( $filters, 'pre_option_template', $current_theme_filter, 10, 3 );
 		self::add_filter_record( $filters, 'user_has_cap', $cap_filter, 10, 4 );
 
 		try {
 			self::write_theme_fixture( $update_dir, 'Theme Update ' . $hostile_label );
 			self::write_theme_fixture( $installed_dir, 'Theme Installed ' . $hostile_label );
-			self::write_theme_fixture( $current_dir, 'Theme Current ' . $hostile_label );
+			self::write_theme_fixture( $newer_dir, 'Theme Newer Installed ' . $hostile_label );
 			\register_theme_directory( $theme_root );
 			\search_theme_directories( true );
 			\wp_cache_delete( 'theme_roots', 'site-transient' );
@@ -1923,7 +1920,6 @@ final class AdminListTablesSurface {
 					'ajax_denied',
 					'ajax_allowed',
 					'api_events',
-					'current_slug',
 					'display',
 					'http_events',
 					'image_sources',
@@ -1945,7 +1941,7 @@ final class AdminListTablesSurface {
 			$header_action_restored = $had_search_form_action === ( false !== \has_filter( 'install_themes_table_header', 'install_theme_search_form' ) );
 			self::remove_theme_fixture( $update_dir );
 			self::remove_theme_fixture( $installed_dir );
-			self::remove_theme_fixture( $current_dir );
+			self::remove_theme_fixture( $newer_dir );
 			self::restore_server( $server_snapshot );
 			self::restore_globals( $global_snapshot );
 			self::reset_theme_directory_cache_after_restore( $global_snapshot, $theme_root );
@@ -1953,8 +1949,11 @@ final class AdminListTablesSurface {
 				@rmdir( $theme_root );
 			}
 			\wp_cache_delete( 'theme_roots', 'site-transient' );
+			self::restore_options( $options_snapshot );
+			\wp_cache_delete( 'theme_roots', 'site-transient' );
 			$globals_restored = self::globals_match( $global_snapshot, $global_names ) && self::server_match( $server_snapshot, $server_names );
-			$fixtures_removed = ! is_dir( $update_dir ) && ! is_dir( $installed_dir ) && ! is_dir( $current_dir )
+			$options_restored = self::options_match( $options_snapshot );
+			$fixtures_removed = ! is_dir( $update_dir ) && ! is_dir( $installed_dir ) && ! is_dir( $newer_dir )
 				&& ( $theme_root_preexisting || ! is_dir( $theme_root ) );
 		}
 
@@ -1971,10 +1970,11 @@ final class AdminListTablesSurface {
 		self::collect_failure(
 			$failures,
 			self::theme_install_request_events_match( $result['api_events'] ?? array(), $result['table_arg_events'] ?? array(), $request_modes, $marker ),
-			'theme install search, browse, feature filters, and API arguments are generated and short-circuited before network',
+			'theme install selected request mode API arguments are generated and short-circuited before network',
 			array(
 				'apiEvents'      => $result['api_events'] ?? array(),
 				'httpEvents'     => $result['http_events'] ?? array(),
+				'selectedMode'   => $request_modes[0]['id'] ?? '',
 				'tableArgEvents' => $result['table_arg_events'] ?? array(),
 				'tabsEvents'     => $result['tabs_events'] ?? array(),
 			)
@@ -1985,7 +1985,7 @@ final class AdminListTablesSurface {
 			array() === ( $result['http_events'] ?? array() )
 				&& self::theme_install_mode_results_match( $result['mode_results'] ?? array(), $expected_slugs, $api_total, $request_modes )
 				&& self::theme_install_views_match( $result['mode_results'] ?? array() ),
-			'theme install prepare_items preserves API result ordering, pagination totals, generated tabs, and filtered features',
+			'theme install prepare_items preserves selected-mode API result ordering, pagination totals, generated tabs, and features when selected',
 			array(
 				'httpEvents'  => $result['http_events'] ?? array(),
 				'modeResults' => $result['mode_results'] ?? array(),
@@ -2004,7 +2004,7 @@ final class AdminListTablesSurface {
 				&& substr_count( $row, '<span class="theme-install">' ) >= 2
 				&& str_contains( $row, 'cfz-theme-install-action' )
 				&& $expected_action_slugs === $action_slugs,
-			'theme install rows cover install, update, installed/current installed states, custom action filters, and capability gates',
+			'theme install rows cover install, update, latest-installed and newer-installed states, custom action filters, and capability gates',
 			array(
 				'actionSlugs' => $action_slugs,
 				'ajaxAllowed' => $result['ajax_allowed'] ?? null,
@@ -2032,13 +2032,14 @@ final class AdminListTablesSurface {
 
 		self::collect_failure(
 			$failures,
-			$filters_removed && $header_action_restored && $globals_restored && $fixtures_removed,
-			'theme install API, tab, action, capability, HTTP guard filters, header action, globals, server values, theme cache, and temp fixtures are restored',
+			$filters_removed && $header_action_restored && $globals_restored && $options_restored && $fixtures_removed,
+			'theme install API, tab, action, capability, HTTP guard filters, header action, globals, server values, theme-root options/cache, and temp fixtures are restored',
 			array(
 				'filtersRemoved'      => $filters_removed,
 				'fixturesRemoved'     => $fixtures_removed,
 				'globalsRestored'     => $globals_restored,
 				'headerActionRestored' => $header_action_restored,
+				'optionsRestored'      => $options_restored,
 			)
 		);
 
@@ -3670,6 +3671,31 @@ final class AdminListTablesSurface {
 		} else {
 			unset( $GLOBALS['wp_theme_directories'] );
 		}
+	}
+
+	private static function snapshot_options(): ?array {
+		if ( isset( $GLOBALS['wpdb'] ) && method_exists( $GLOBALS['wpdb'], 'component_fuzz_get_options' ) ) {
+			return self::clone_value( $GLOBALS['wpdb']->component_fuzz_get_options() );
+		}
+
+		return null;
+	}
+
+	private static function restore_options( ?array $snapshot ): void {
+		if ( null !== $snapshot && isset( $GLOBALS['wpdb'] ) && method_exists( $GLOBALS['wpdb'], 'component_fuzz_reset_options' ) ) {
+			$GLOBALS['wpdb']->component_fuzz_reset_options( $snapshot );
+		}
+	}
+
+	private static function options_match( ?array $snapshot ): bool {
+		if ( null === $snapshot ) {
+			return ! ( isset( $GLOBALS['wpdb'] ) && method_exists( $GLOBALS['wpdb'], 'component_fuzz_get_options' ) );
+		}
+		if ( ! isset( $GLOBALS['wpdb'] ) || ! method_exists( $GLOBALS['wpdb'], 'component_fuzz_get_options' ) ) {
+			return false;
+		}
+
+		return $snapshot === $GLOBALS['wpdb']->component_fuzz_get_options();
 	}
 
 	private static function cap_filter( array $capabilities ): callable {
