@@ -209,10 +209,12 @@ database, network requests, or a configured site.
   lastmod, max-page, query-arg, pre-filter, and public/private gating oracles.
 - `email`: Unicode email validation/sanitization, ASCII fallback filters,
   WHATWG-style validity, `WP_Email_Address` machine/readable and IDN/punycode
-  views, ASCII-vs-Unicode construction-mode consistency with explicit IDN skips,
+  views, generated mixed-script UTF-8 address-model round trips, raw getter
+  invariants, ASCII-vs-Unicode construction-mode consistency with explicit IDN skips,
   optional Unicode API availability skips, disabled-filter fail-closed behavior,
-  invalid UTF-8, generated malformed address variants across filter/charset
-  modes, selected boundary lengths, quoted/escaped local-part rejection,
+  invalid UTF-8, generated malformed address variants and reserved/invalid ACE
+  domain labels across filter/charset modes, selected boundary lengths,
+  quoted/escaped local-part rejection,
   control-character and Unicode separator sanitization boundaries, local-part
   case/width/normalization identity preservation, hook restoration,
   normalization-sensitive local parts, generated accent-distinct local-part
