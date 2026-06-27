@@ -8,6 +8,7 @@ final class EnvironmentLoadSurface {
 	public const NAME = 'environment-load';
 
 	private const UTF8_CASES = 12;
+	private const ENVIRONMENT_TYPE_GENERATED_CASES = 8;
 	private const REQUEST_MEDIA_GENERATED_CASES = 16;
 
 	public static function run( \ComponentFuzz\FuzzContext $ctx ): array {
@@ -140,26 +141,18 @@ final class EnvironmentLoadSurface {
 			);
 		}
 
-		$allowed  = array( 'local', 'development', 'staging', 'production' );
-		$cases    = array_merge(
-			$allowed,
-			array(
-				'',
-				'LOCAL',
-				'prod',
-				"staging\n",
-				$ctx->ascii( 0, 12 ),
-			)
-		);
+		$allowed  = self::environment_type_allowed_values();
+		$cases    = self::environment_type_matrix_cases( $ctx );
 		$failures = array();
 		$original = getenv( 'WP_ENVIRONMENT_TYPE' );
 
 		try {
-			foreach ( $cases as $index => $value ) {
+			foreach ( $cases as $index => $case ) {
+				$value = $case['value'];
 				self::set_env_var( 'WP_ENVIRONMENT_TYPE', $value );
 
 				$actual   = \wp_get_environment_type();
-				$expected = in_array( $value, $allowed, true ) ? $value : 'production';
+				$expected = $case['expected'];
 				$honored  = $actual === $expected;
 
 				self::collect_failure(
@@ -167,6 +160,7 @@ final class EnvironmentLoadSurface {
 					in_array( $actual, $allowed, true ) && ( ! defined( 'WP_RUN_CORE_TESTS' ) || $honored ),
 					"wp_get_environment_type allowed/fail-closed case {$index}",
 					array(
+						'label'    => $case['label'],
 						'value'    => $value,
 						'actual'   => $actual,
 						'expected' => $expected,
@@ -191,14 +185,453 @@ final class EnvironmentLoadSurface {
 			),
 		);
 
-		if ( ! defined( 'WP_RUN_CORE_TESTS' ) ) {
-			$rows[] = $ctx->skip(
-				'environment-load.environment-type.full-matrix',
-				'wp_get_environment_type() caches in-process results unless WP_RUN_CORE_TESTS is defined; this surface asserts allowed fail-closed output without permanently changing constants.'
+		$rows[] = self::check_environment_type_full_matrix( $ctx->fork( 'full-matrix' ), $cases );
+
+		return $rows;
+	}
+
+	private static function environment_type_allowed_values(): array {
+		return array( 'local', 'development', 'staging', 'production' );
+	}
+
+	private static function environment_type_matrix_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$cases = array();
+
+		foreach ( self::environment_type_allowed_values() as $value ) {
+			$cases[] = array(
+				'label'    => 'allowed-' . $value,
+				'value'    => $value,
+				'expected' => $value,
+				'allowed'  => true,
 			);
 		}
 
-		return $rows;
+		foreach (
+			array(
+				'empty'          => '',
+				'uppercase'      => 'LOCAL',
+				'abbreviation'   => 'prod',
+				'trailing-lf'    => "staging\n",
+				'leading-space'  => ' production',
+				'trailing-space' => 'development ',
+			) as $label => $value
+		) {
+			$cases[] = array(
+				'label'    => 'invalid-' . $label,
+				'value'    => $value,
+				'expected' => 'production',
+				'allowed'  => false,
+			);
+		}
+
+		for ( $i = 0; $i < self::ENVIRONMENT_TYPE_GENERATED_CASES; ++$i ) {
+			$case_ctx = $ctx->fork( 'generated-' . $i );
+			$value    = self::generated_environment_type_value( $case_ctx );
+			$cases[]  = array(
+				'label'    => 'generated-invalid-' . $i,
+				'value'    => $value,
+				'expected' => 'production',
+				'allowed'  => false,
+			);
+		}
+
+		return $cases;
+	}
+
+	private static function generated_environment_type_value( \ComponentFuzz\FuzzContext $ctx ): string {
+		$allowed = self::environment_type_allowed_values();
+		$value   = $ctx->choice(
+			array(
+				'component-' . strtolower( $ctx->identifier( 3, 10 ) ),
+				strtoupper( $ctx->choice( $allowed ) ),
+				$ctx->choice( $allowed ) . '-' . strtolower( $ctx->identifier( 2, 6 ) ),
+				$ctx->ascii( 1, 12 ) . '-cfz',
+			)
+		);
+
+		return in_array( $value, $allowed, true ) || '' === $value ? 'component-fuzz-invalid' : $value;
+	}
+
+	private static function check_environment_type_full_matrix( \ComponentFuzz\FuzzContext $ctx, array $cases ): array {
+		$missing = self::missing_environment_type_matrix_requirements();
+		if ( array() !== $missing ) {
+			return $ctx->skip(
+				'environment-load.environment-type.full-matrix',
+				'Child-process support for isolated WP_RUN_CORE_TESTS environment-type coverage is unavailable.',
+				array( 'missing' => implode( ', ', $missing ) )
+			);
+		}
+
+		$parent_snapshot_before    = self::snapshot_state();
+		$parent_constant_before    = defined( 'WP_RUN_CORE_TESTS' );
+		try {
+			$run = self::run_child_environment_type_matrix( $cases );
+		} finally {
+			self::restore_state( $parent_snapshot_before );
+		}
+		$parent_state_restored     = self::state_matches( $parent_snapshot_before );
+		$parent_constant_after     = defined( 'WP_RUN_CORE_TESTS' );
+		$result                    = is_array( $run['result'] ) ? $run['result'] : array();
+		$child_cases               = is_array( $result['cases'] ?? null ) ? $result['cases'] : array();
+		$expected_shape            = self::environment_type_child_result_has_expected_shape( $result );
+		$allowed_values            = self::environment_type_allowed_values();
+		$failures                  = array();
+		$allowed_cases_honored     = 0;
+		$fail_closed_cases_honored = 0;
+
+		self::collect_failure(
+			$failures,
+			$run['ok'],
+			'isolated environment-type subprocess exits cleanly and returns structured JSON',
+			array(
+				'exitCode' => $run['exitCode'],
+				'stdout'   => \ComponentFuzz\preview_value( $run['stdout'] ),
+				'stderr'   => \ComponentFuzz\preview_value( $run['stderr'] ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$expected_shape,
+			'isolated environment-type subprocess result has expected shape',
+			array(
+				'resultKeys' => array_keys( $result ),
+				'casesType'  => gettype( $result['cases'] ?? null ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			true === ( $result['wpRunCoreTests'] ?? null ),
+			'child defines WP_RUN_CORE_TESTS before evaluating environment types',
+			array( 'wpRunCoreTests' => $result['wpRunCoreTests'] ?? null )
+		);
+
+		self::collect_failure(
+			$failures,
+			true === ( $result['childStateRestored'] ?? null ),
+			'child restores WP_ENVIRONMENT_TYPE before exit',
+			array(
+				'childStateRestored' => $result['childStateRestored'] ?? null,
+				'childOriginalEnv'   => $result['originalEnv'] ?? null,
+				'childRestoredEnv'   => $result['restoredEnv'] ?? null,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$parent_state_restored && $parent_constant_before === $parent_constant_after,
+			'parent environment, globals, and WP_RUN_CORE_TESTS definition are unchanged',
+			array(
+				'parentStateRestored'    => $parent_state_restored,
+				'parentConstantBefore'   => $parent_constant_before,
+				'parentConstantAfter'    => $parent_constant_after,
+				'parentEnvBefore'        => $parent_snapshot_before['env'],
+				'parentEnvAfter'         => function_exists( 'getenv' ) ? getenv( 'WP_ENVIRONMENT_TYPE' ) : false,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			count( $cases ) === count( $child_cases ),
+			'child evaluates every generated environment-type matrix case',
+			array(
+				'expectedCount' => count( $cases ),
+				'actualCount'   => count( $child_cases ),
+			)
+		);
+
+		foreach ( $cases as $index => $case ) {
+			$child_case = $child_cases[ $index ] ?? null;
+			if ( ! is_array( $child_case ) ) {
+				self::collect_failure(
+					$failures,
+					false,
+					"environment-type matrix case {$index} is present",
+					array(
+						'case'        => $case,
+						'actualEntry' => $child_case,
+					)
+				);
+				continue;
+			}
+
+			$actual   = $child_case['actual'] ?? null;
+			$repeat   = $child_case['repeat'] ?? null;
+			$expected = $case['expected'];
+			$matched  = ( $child_case['label'] ?? null ) === $case['label']
+				&& ( $child_case['value'] ?? null ) === $case['value']
+				&& ( $child_case['expected'] ?? null ) === $expected
+				&& $actual === $expected
+				&& $repeat === $expected
+				&& in_array( $actual, $allowed_values, true );
+
+			if ( ! empty( $case['allowed'] ) && $matched ) {
+				++$allowed_cases_honored;
+			}
+			if ( empty( $case['allowed'] ) && $matched && 'production' === $actual ) {
+				++$fail_closed_cases_honored;
+			}
+
+			self::collect_failure(
+				$failures,
+				$matched,
+				! empty( $case['allowed'] )
+					? "wp_get_environment_type honors allowed value {$case['value']}"
+					: "wp_get_environment_type fails closed for {$case['label']}",
+				array(
+					'case'      => $case,
+					'childCase' => $child_case,
+				)
+			);
+		}
+
+		return self::result(
+			$ctx,
+			'environment-load.environment-type.full-matrix',
+			array() === $failures,
+			array(
+				'cases'                 => count( $cases ),
+				'generatedCases'        => self::ENVIRONMENT_TYPE_GENERATED_CASES,
+				'allowedCasesHonored'   => $allowed_cases_honored,
+				'failClosedCasesHonored' => $fail_closed_cases_honored,
+				'childCaseCount'        => count( $child_cases ),
+				'childWpRunCoreTests'   => $result['wpRunCoreTests'] ?? null,
+				'childStateRestored'    => $result['childStateRestored'] ?? null,
+				'parentStateRestored'   => $parent_state_restored,
+				'parentConstantBefore'  => $parent_constant_before,
+				'parentConstantAfter'   => $parent_constant_after,
+				'childUnexpectedOutput' => \ComponentFuzz\preview_value( (string) ( $result['unexpectedOutput'] ?? '' ) ),
+				'childStderr'           => \ComponentFuzz\preview_value( $run['stderr'] ),
+				'failures'              => array_slice( $failures, 0, 10 ),
+			)
+		);
+	}
+
+	private static function missing_environment_type_matrix_requirements(): array {
+		$missing = array();
+
+		foreach ( array( 'json_decode', 'json_encode', 'proc_close', 'proc_open', 'stream_get_contents' ) as $function ) {
+			if ( ! function_exists( $function ) ) {
+				$missing[] = "function {$function}";
+			}
+		}
+
+		if ( ! defined( 'PHP_BINARY' ) || '' === PHP_BINARY ) {
+			$missing[] = 'PHP_BINARY';
+		}
+
+		return $missing;
+	}
+
+	private static function run_child_environment_type_matrix( array $cases ): array {
+		$payload = json_encode(
+			array(
+				'repoRoot' => \ComponentFuzz\repo_root(),
+				'cases'    => $cases,
+			),
+			JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE
+		);
+
+		if ( false === $payload ) {
+			return array(
+				'ok'       => false,
+				'exitCode' => -1,
+				'stdout'   => '',
+				'stderr'   => 'json_encode failed',
+				'result'   => null,
+			);
+		}
+
+		$descriptors = array(
+			0 => array( 'pipe', 'r' ),
+			1 => array( 'pipe', 'w' ),
+			2 => array( 'pipe', 'w' ),
+		);
+
+		// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.system_calls_proc_open -- Isolates WP_RUN_CORE_TESTS in a local PHP subprocess.
+		$process = proc_open( array( PHP_BINARY, '-r', self::environment_type_matrix_child_program() ), $descriptors, $pipes, \ComponentFuzz\repo_root() );
+		if ( ! is_resource( $process ) ) {
+			return array(
+				'ok'       => false,
+				'exitCode' => -1,
+				'stdout'   => '',
+				'stderr'   => 'proc_open failed',
+				'result'   => null,
+			);
+		}
+
+		fwrite( $pipes[0], $payload );
+		fclose( $pipes[0] );
+
+		$stdout = stream_get_contents( $pipes[1] );
+		$stderr = stream_get_contents( $pipes[2] );
+		fclose( $pipes[1] );
+		fclose( $pipes[2] );
+
+		$exit_code = proc_close( $process );
+		$result    = json_decode( (string) $stdout, true );
+
+		return array(
+			'ok'       => 0 === $exit_code && is_array( $result ) && true === ( $result['ok'] ?? null ),
+			'exitCode' => $exit_code,
+			'stdout'   => (string) $stdout,
+			'stderr'   => (string) $stderr,
+			'result'   => is_array( $result ) ? $result : null,
+		);
+	}
+
+	private static function environment_type_child_result_has_expected_shape( array $result ): bool {
+		return array_key_exists( 'ok', $result )
+			&& is_bool( $result['ok'] )
+			&& array_key_exists( 'wpRunCoreTests', $result )
+			&& is_bool( $result['wpRunCoreTests'] )
+			&& array_key_exists( 'cases', $result )
+			&& is_array( $result['cases'] )
+			&& array_key_exists( 'childStateRestored', $result )
+			&& is_bool( $result['childStateRestored'] )
+			&& array_key_exists( 'unexpectedOutput', $result )
+			&& is_string( $result['unexpectedOutput'] );
+	}
+
+	private static function environment_type_matrix_child_program(): string {
+		return <<<'PHP'
+ini_set( 'display_errors', 'stderr' );
+error_reporting( E_ALL & ~E_DEPRECATED & ~E_USER_DEPRECATED );
+
+function component_fuzz_env_load_set_env_var( string $name, $value ): void {
+	if ( false === $value ) {
+		putenv( $name );
+		return;
+	}
+
+	putenv( $name . '=' . (string) $value );
+}
+
+function component_fuzz_env_load_snapshot(): array {
+	return array(
+		'env' => getenv( 'WP_ENVIRONMENT_TYPE' ),
+	);
+}
+
+function component_fuzz_env_load_restore( array $snapshot ): void {
+	component_fuzz_env_load_set_env_var( 'WP_ENVIRONMENT_TYPE', $snapshot['env'] );
+}
+
+function component_fuzz_env_load_state_matches( array $snapshot ): bool {
+	return getenv( 'WP_ENVIRONMENT_TYPE' ) === $snapshot['env'];
+}
+
+function component_fuzz_env_load_preview( string $value, int $limit = 240 ): string {
+	$printable = preg_replace_callback(
+		'/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/',
+		static function ( array $m ): string {
+			return sprintf( '\\x%02X', ord( $m[0] ) );
+		},
+		$value
+	);
+
+	if ( strlen( $printable ) > $limit ) {
+		return substr( $printable, 0, $limit ) . '...';
+	}
+
+	return $printable;
+}
+
+$component_fuzz_env_load_outer_ob_level = ob_get_level();
+ob_start();
+
+$component_fuzz_env_load_snapshot          = null;
+$component_fuzz_env_load_unexpected_output = '';
+$component_fuzz_env_load_result            = array(
+	'ok'                 => false,
+	'wpRunCoreTests'     => false,
+	'cases'              => array(),
+	'childStateRestored' => false,
+	'originalEnv'        => null,
+	'restoredEnv'        => null,
+	'unexpectedOutput'   => '',
+);
+
+try {
+	$component_fuzz_env_load_raw     = stream_get_contents( STDIN );
+	$component_fuzz_env_load_fixture = json_decode( $component_fuzz_env_load_raw, true );
+
+	if (
+		! is_array( $component_fuzz_env_load_fixture )
+		|| empty( $component_fuzz_env_load_fixture['repoRoot'] )
+		|| ! is_array( $component_fuzz_env_load_fixture['cases'] ?? null )
+	) {
+		throw new RuntimeException( 'Invalid environment-type fixture.' );
+	}
+
+	if ( ! defined( 'WP_RUN_CORE_TESTS' ) ) {
+		define( 'WP_RUN_CORE_TESTS', true );
+	}
+
+	require_once $component_fuzz_env_load_fixture['repoRoot'] . '/tools/component-fuzz/lib/autoload.php';
+
+	\ComponentFuzz\WpBootstrap::load();
+
+	$component_fuzz_env_load_snapshot = component_fuzz_env_load_snapshot();
+	$component_fuzz_env_load_result['originalEnv'] = $component_fuzz_env_load_snapshot['env'];
+
+	foreach ( $component_fuzz_env_load_fixture['cases'] as $component_fuzz_env_load_index => $component_fuzz_env_load_case ) {
+		if (
+			! is_array( $component_fuzz_env_load_case )
+			|| ! array_key_exists( 'label', $component_fuzz_env_load_case )
+			|| ! array_key_exists( 'value', $component_fuzz_env_load_case )
+			|| ! array_key_exists( 'expected', $component_fuzz_env_load_case )
+			|| ! array_key_exists( 'allowed', $component_fuzz_env_load_case )
+		) {
+			throw new RuntimeException( 'Invalid environment-type case at index ' . $component_fuzz_env_load_index . '.' );
+		}
+
+		component_fuzz_env_load_set_env_var( 'WP_ENVIRONMENT_TYPE', $component_fuzz_env_load_case['value'] );
+
+		$component_fuzz_env_load_actual = wp_get_environment_type();
+		$component_fuzz_env_load_repeat = wp_get_environment_type();
+
+		$component_fuzz_env_load_result['cases'][] = array(
+			'index'    => $component_fuzz_env_load_index,
+			'label'    => $component_fuzz_env_load_case['label'],
+			'value'    => $component_fuzz_env_load_case['value'],
+			'expected' => $component_fuzz_env_load_case['expected'],
+			'allowed'  => $component_fuzz_env_load_case['allowed'],
+			'actual'   => $component_fuzz_env_load_actual,
+			'repeat'   => $component_fuzz_env_load_repeat,
+			'honored'  => $component_fuzz_env_load_actual === $component_fuzz_env_load_case['expected']
+				&& $component_fuzz_env_load_repeat === $component_fuzz_env_load_case['expected'],
+		);
+	}
+
+	$component_fuzz_env_load_result['wpRunCoreTests'] = defined( 'WP_RUN_CORE_TESTS' ) && WP_RUN_CORE_TESTS;
+	$component_fuzz_env_load_result['ok']             = true;
+} catch ( Throwable $e ) {
+	$component_fuzz_env_load_result['throwable'] = array(
+		'class'   => get_class( $e ),
+		'message' => $e->getMessage(),
+		'file'    => $e->getFile(),
+		'line'    => $e->getLine(),
+	);
+} finally {
+	if ( is_array( $component_fuzz_env_load_snapshot ) ) {
+		component_fuzz_env_load_restore( $component_fuzz_env_load_snapshot );
+		$component_fuzz_env_load_result['childStateRestored'] = component_fuzz_env_load_state_matches( $component_fuzz_env_load_snapshot );
+		$component_fuzz_env_load_result['restoredEnv']        = getenv( 'WP_ENVIRONMENT_TYPE' );
+	}
+
+	while ( ob_get_level() > $component_fuzz_env_load_outer_ob_level ) {
+		$component_fuzz_env_load_unexpected_output = ob_get_clean() . $component_fuzz_env_load_unexpected_output;
+	}
+
+	$component_fuzz_env_load_result['unexpectedOutput'] = component_fuzz_env_load_preview( $component_fuzz_env_load_unexpected_output );
+}
+
+$component_fuzz_env_load_json = json_encode( $component_fuzz_env_load_result, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE );
+echo false === $component_fuzz_env_load_json ? '{"ok":false,"error":"json_encode failed"}' : $component_fuzz_env_load_json;
+exit( ! empty( $component_fuzz_env_load_result['ok'] ) ? 0 : 1 );
+PHP;
 	}
 
 	private static function check_development_mode( \ComponentFuzz\FuzzContext $ctx ): array {
