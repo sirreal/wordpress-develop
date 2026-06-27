@@ -83,6 +83,7 @@ database, network requests, or a configured site.
   update behavior, inline/localized data placement, concatenated
   load-scripts.php/load-styles.php URL construction and exclusion boundaries,
   tag/settings escaping, script translations, emoji settings/styles, style
+  JIT localization with isolated `AUTOSAVE_INTERVAL` coverage, style
   inlining, block-loader guards, strategy/fetchpriority/module interactions,
   generated classic-script module import-map/modulepreload graphs, and print
   side-effect boundaries.
