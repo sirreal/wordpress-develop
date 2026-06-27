@@ -621,8 +621,9 @@ database, network requests, or a configured site.
   attachment helper filters and path confinement, stylesheet/template root
   precedence, single template ordering, generated
   category/tag/taxonomy decoded-slug and term-ID ordering, `load_template()`
-  include semantics, template-part hooks and args, and guarded
-  comments-template state handling.
+  include semantics, template-part hooks and args, and isolated
+  `comments_template()` child/parent/custom file loading and comment-query
+  contracts without leaking `COMMENTS_TEMPLATE` into the parent process.
 - `template-links`: no-DB public template and link helpers, including body and
   language attributes and filter ordering/locality, document title stability,
   resource hints/preloads, pagination/search/feed/site/admin URLs, canonical and
