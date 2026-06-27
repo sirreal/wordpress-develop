@@ -37,8 +37,9 @@ database, network requests, or a configured site.
   dashboard widget registration/control callbacks, meta-box context and
   priority normalization, dashboard container rendering across column counts,
   safe recent draft/post/comment output helpers, activity post query
-  argument/link branches, explicit skips for redirect/remote paths, and
-  filter/global/superglobal/output-buffer restoration.
+  argument/link branches, cached RSS loading/AJAX/cache replay branches,
+  Browser Happy remote/cache failure and rendering branches, explicit skips for
+  redirect-only paths, and filter/global/superglobal/output-buffer restoration.
 - `admin-screen`: no-DB admin screen, settings, and meta-box APIs, including
   `WP_Screen` normalization/current-screen globals, help tabs and screen
   options, rendered per-page/layout controls, screen meta/help sidebar and
