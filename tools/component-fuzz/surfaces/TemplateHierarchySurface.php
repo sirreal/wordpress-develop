@@ -1053,20 +1053,793 @@ final class TemplateHierarchySurface {
 	}
 
 	private static function check_comments_template_guard( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
-		unset( $case );
+		$missing                = self::missing_comments_template_guard_requirements();
+		$parent_constant_before = self::comments_template_constant_state();
 
-		if ( ! defined( 'COMMENTS_TEMPLATE' ) ) {
+		if ( array() !== $missing ) {
+			$parent_constant_after = self::comments_template_constant_state();
 			return $ctx->skip(
 				'template-hierarchy.comments-template-guarded',
-				'comments_template() defines COMMENTS_TEMPLATE permanently in-process; skipped to preserve shared fuzz runtime state.'
+				'Child-process support for isolated comments_template() coverage is unavailable.',
+				array(
+					'missing'                 => implode( ', ', $missing ),
+					'parentConstantBefore'    => $parent_constant_before,
+					'parentConstantAfter'     => $parent_constant_after,
+					'parentConstantUnchanged' => $parent_constant_before === $parent_constant_after,
+				)
 			);
+		}
+
+		$custom_basename = 'comments-' . self::safe_fragment( $ctx->fork( 'custom-file' ), 8 ) . '.php';
+		$post_id         = $ctx->fork( 'post-id' )->int( 40000, 49999 );
+		$comment_ids     = array(
+			$ctx->fork( 'comment-one' )->int( 50000, 59999 ),
+			$ctx->fork( 'comment-two' )->int( 60000, 69999 ),
+		);
+
+		self::write_comments_template_file( $case['paths']['child'] . '/comments.php', 'child-comments', $case['token'] );
+		self::write_comments_template_file( $case['paths']['parent'] . '/comments.php', 'parent-comments', $case['token'] );
+		self::write_comments_template_file( $case['paths']['child'] . '/' . $custom_basename, 'child-custom-comments', $case['token'] );
+
+		$fixture = array(
+			'repoRoot' => \ComponentFuzz\repo_root(),
+			'token'    => $case['token'],
+			'paths'    => $case['paths'],
+			'theme'    => $case['theme'],
+			'files'    => array(
+				'defaultFile'   => '/comments.php',
+				'customFile'    => '/' . $custom_basename,
+				'childDefault'  => $case['paths']['child'] . '/comments.php',
+				'parentDefault' => $case['paths']['parent'] . '/comments.php',
+				'childCustom'   => $case['paths']['child'] . '/' . $custom_basename,
+			),
+			'post'     => array(
+				'ID'             => $post_id,
+				'post_type'      => 'page',
+				'post_name'      => 'comments-template-' . self::safe_fragment( $ctx->fork( 'post-name' ), 7 ),
+				'post_status'    => 'publish',
+				'comment_status' => 'open',
+			),
+			'comments' => array(
+				self::comments_template_comment_fixture( $comment_ids[0], $post_id, 'first', $case['token'] ),
+				self::comments_template_comment_fixture( $comment_ids[1], $post_id, 'second', $case['token'] ),
+			),
+			'expected' => array(
+				'postId'      => $post_id,
+				'commentIds'  => $comment_ids,
+				'queryStatus' => 'approve',
+				'queryOrder'  => 'ASC',
+			),
+		);
+
+		$worker                = self::run_child_comments_template_guard( $fixture );
+		$parent_constant_after = self::comments_template_constant_state();
+		$failures              = array();
+		$child_result          = is_array( $worker['result'] ?? null ) ? $worker['result'] : array();
+
+		self::collect_failure(
+			$failures,
+			$parent_constant_before === $parent_constant_after,
+			'comments_template() child coverage leaves the parent COMMENTS_TEMPLATE constant unchanged',
+			array(
+				'before' => $parent_constant_before,
+				'after'  => $parent_constant_after,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			! empty( $worker['ok'] ),
+			'comments_template() child process exits successfully and reports a passing JSON result',
+			array(
+				'exitCode' => $worker['exitCode'] ?? null,
+				'stdout'   => self::describe_string( (string) ( $worker['stdout'] ?? '' ) ),
+				'stderr'   => self::describe_string( (string) ( $worker['stderr'] ?? '' ) ),
+				'result'   => $child_result,
+			)
+		);
+
+		if ( is_array( $worker['result'] ?? null ) ) {
+			self::collect_failure(
+				$failures,
+				self::comments_template_guard_child_result_has_expected_shape( $child_result ),
+				'comments_template() child result has the expected shape',
+				array( 'resultKeys' => array_keys( $child_result ) )
+			);
+
+			self::collect_failure(
+				$failures,
+				false === ( $child_result['commentsTemplateDefinedBefore'] ?? null )
+					&& true === ( $child_result['commentsTemplateDefinedAfter'] ?? null ),
+				'comments_template() defines COMMENTS_TEMPLATE in the isolated child process',
+				array(
+					'before' => $child_result['commentsTemplateDefinedBefore'] ?? null,
+					'after'  => $child_result['commentsTemplateDefinedAfter'] ?? null,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				'' === ( $worker['stderr'] ?? '' )
+					&& '' === ( $child_result['unexpectedOutput'] ?? null ),
+				'comments_template() child emits no stderr or stray stdout beyond captured template output',
+				array(
+					'stderr'          => self::describe_string( (string) ( $worker['stderr'] ?? '' ) ),
+					'unexpectedOutput' => $child_result['unexpectedOutput'] ?? null,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				true === ( $child_result['childStateRestored'] ?? null ),
+				'comments_template() child restores tracked globals, hooks, and output buffers before exit',
+				array( 'childStateRestored' => $child_result['childStateRestored'] ?? null )
+			);
+
+			self::collect_comments_template_child_failures( $failures, $child_result, $fixture );
 		}
 
 		return self::result(
 			'template-hierarchy.comments-template-guarded',
-			array(),
-			array( 'defined' => true )
+			$failures,
+			array(
+				'parentConstantBefore' => $parent_constant_before,
+				'parentConstantAfter'  => $parent_constant_after,
+				'childExitCode'        => $worker['exitCode'] ?? null,
+				'childStdout'          => self::describe_string( (string) ( $worker['stdout'] ?? '' ) ),
+				'childStderr'          => self::describe_string( (string) ( $worker['stderr'] ?? '' ) ),
+				'templates'            => self::relative_paths_to_root(
+					array(
+						'childDefault'  => $fixture['files']['childDefault'],
+						'parentDefault' => $fixture['files']['parentDefault'],
+						'childCustom'   => $fixture['files']['childCustom'],
+					),
+					$case['paths']['root']
+				),
+				'filterEvents'         => array_slice( $child_result['filterEvents'] ?? array(), 0, 4 ),
+				'queryEvents'          => self::summarize_comments_template_query_events( $child_result['queryEvents'] ?? array() ),
+				'templateLoads'        => array_slice( $child_result['templateLoads'] ?? array(), 0, 4 ),
+			)
 		);
+	}
+
+	private static function missing_comments_template_guard_requirements(): array {
+		$missing = array();
+
+		foreach ( array( 'json_decode', 'json_encode', 'proc_close', 'proc_open', 'stream_get_contents' ) as $function ) {
+			if ( ! function_exists( $function ) ) {
+				$missing[] = "function {$function}";
+			}
+		}
+
+		if ( ! defined( 'PHP_BINARY' ) || '' === PHP_BINARY ) {
+			$missing[] = 'PHP_BINARY';
+		}
+
+		return $missing;
+	}
+
+	private static function comments_template_constant_state(): array {
+		return array(
+			'defined' => defined( 'COMMENTS_TEMPLATE' ),
+			'value'   => defined( 'COMMENTS_TEMPLATE' ) ? constant( 'COMMENTS_TEMPLATE' ) : null,
+		);
+	}
+
+	private static function comments_template_comment_fixture( int $comment_id, int $post_id, string $label, string $token ): array {
+		return array(
+			'comment_ID'           => $comment_id,
+			'comment_post_ID'      => $post_id,
+			'comment_author'       => 'Template ' . $label,
+			'comment_author_email' => $label . '-' . $token . '@example.test',
+			'comment_author_url'   => 'https://example.test/' . $label,
+			'comment_author_IP'    => '127.0.0.1',
+			'comment_date'         => '2026-06-23 12:00:00',
+			'comment_date_gmt'     => '2026-06-23 10:00:00',
+			'comment_content'      => 'Synthetic comments_template comment ' . $label . ' ' . $token,
+			'comment_karma'        => 0,
+			'comment_approved'     => '1',
+			'comment_agent'        => 'ComponentFuzz',
+			'comment_type'         => 'comment',
+			'comment_parent'       => 0,
+			'user_id'              => 0,
+		);
+	}
+
+	private static function run_child_comments_template_guard( array $fixture ): array {
+		$payload = json_encode( $fixture, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE );
+
+		if ( false === $payload ) {
+			return array(
+				'ok'       => false,
+				'exitCode' => -1,
+				'stdout'   => '',
+				'stderr'   => 'json_encode failed',
+				'result'   => null,
+			);
+		}
+
+		$descriptors = array(
+			0 => array( 'pipe', 'r' ),
+			1 => array( 'pipe', 'w' ),
+			2 => array( 'pipe', 'w' ),
+		);
+
+		// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.system_calls_proc_open -- Isolates COMMENTS_TEMPLATE in a local PHP subprocess.
+		$process = proc_open( array( PHP_BINARY, '-r', self::comments_template_guard_child_program() ), $descriptors, $pipes, \ComponentFuzz\repo_root() );
+		if ( ! is_resource( $process ) ) {
+			return array(
+				'ok'       => false,
+				'exitCode' => -1,
+				'stdout'   => '',
+				'stderr'   => 'proc_open failed',
+				'result'   => null,
+			);
+		}
+
+		fwrite( $pipes[0], $payload );
+		fclose( $pipes[0] );
+
+		$stdout = stream_get_contents( $pipes[1] );
+		$stderr = stream_get_contents( $pipes[2] );
+		fclose( $pipes[1] );
+		fclose( $pipes[2] );
+
+		$exit_code = proc_close( $process );
+		$result    = json_decode( (string) $stdout, true );
+
+		return array(
+			'ok'       => 0 === $exit_code && is_array( $result ) && true === ( $result['ok'] ?? null ),
+			'exitCode' => $exit_code,
+			'stdout'   => (string) $stdout,
+			'stderr'   => (string) $stderr,
+			'result'   => is_array( $result ) ? $result : null,
+		);
+	}
+
+	private static function comments_template_guard_child_result_has_expected_shape( array $result ): bool {
+		return array_key_exists( 'ok', $result )
+			&& is_bool( $result['ok'] )
+			&& array_key_exists( 'commentsTemplateDefinedBefore', $result )
+			&& is_bool( $result['commentsTemplateDefinedBefore'] )
+			&& array_key_exists( 'commentsTemplateDefinedAfter', $result )
+			&& is_bool( $result['commentsTemplateDefinedAfter'] )
+			&& array_key_exists( 'filterEvents', $result )
+			&& is_array( $result['filterEvents'] )
+			&& array_key_exists( 'queryEvents', $result )
+			&& is_array( $result['queryEvents'] )
+			&& array_key_exists( 'commentsArrayEvents', $result )
+			&& is_array( $result['commentsArrayEvents'] )
+			&& array_key_exists( 'templateLoads', $result )
+			&& is_array( $result['templateLoads'] )
+			&& array_key_exists( 'calls', $result )
+			&& is_array( $result['calls'] )
+			&& array_key_exists( 'childStateRestored', $result )
+			&& is_bool( $result['childStateRestored'] )
+			&& array_key_exists( 'unexpectedOutput', $result )
+			&& is_string( $result['unexpectedOutput'] );
+	}
+
+	private static function collect_comments_template_child_failures( array &$failures, array $result, array $fixture ): void {
+		$expected_default_filter = $fixture['paths']['child'] . '//comments.php';
+		$expected_custom_filter  = $fixture['paths']['child'] . '/' . $fixture['files']['customFile'];
+		$expected_child_default  = realpath( $fixture['files']['childDefault'] ) ?: $fixture['files']['childDefault'];
+		$expected_child_custom   = realpath( $fixture['files']['childCustom'] ) ?: $fixture['files']['childCustom'];
+		$expected_comment_ids    = array_map( 'intval', $fixture['expected']['commentIds'] );
+		$filter_events           = $result['filterEvents'] ?? array();
+		$template_loads          = $result['templateLoads'] ?? array();
+		$query_events            = $result['queryEvents'] ?? array();
+		$comments_array_events   = $result['commentsArrayEvents'] ?? array();
+		$calls                   = $result['calls'] ?? array();
+
+		self::collect_failure(
+			$failures,
+			2 === count( $filter_events )
+				&& $expected_default_filter === ( $filter_events[0]['received'] ?? null )
+				&& $expected_default_filter === ( $filter_events[0]['returned'] ?? null )
+				&& $expected_custom_filter === ( $filter_events[1]['received'] ?? null )
+				&& $expected_custom_filter === ( $filter_events[1]['returned'] ?? null ),
+			'comments_template filter receives and returns the expected generated child paths',
+			array(
+				'expected' => array( $expected_default_filter, $expected_custom_filter ),
+				'seen'     => $filter_events,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			2 === count( $template_loads )
+				&& 'child-comments' === ( $template_loads[0]['label'] ?? null )
+				&& $expected_child_default === ( $template_loads[0]['fileRealpath'] ?? null )
+				&& 'child-custom-comments' === ( $template_loads[1]['label'] ?? null )
+				&& $expected_child_custom === ( $template_loads[1]['fileRealpath'] ?? null ),
+			'comments_template loads the child default before the parent fallback and loads the generated custom child file',
+			array(
+				'expected' => array( $expected_child_default, $expected_child_custom ),
+				'seen'     => $template_loads,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::comments_template_query_events_match( $query_events, $fixture ),
+			'comments_template comment queries are short-circuited with the generated post ID, status, and order',
+			array(
+				'expected' => $fixture['expected'],
+				'seen'     => self::summarize_comments_template_query_events( $query_events ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::comments_template_comment_events_match( $comments_array_events, $expected_comment_ids, (int) $fixture['expected']['postId'] )
+				&& self::comments_template_loads_received_comments( $template_loads, $expected_comment_ids ),
+			'synthetic comments are passed through comments_array and into the included comments templates',
+			array(
+				'commentsArrayEvents' => $comments_array_events,
+				'templateLoads'       => $template_loads,
+				'expectedCommentIds'  => $expected_comment_ids,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			"comments-template:child-comments:{$fixture['token']}:2\n" === ( $calls['default']['output'] ?? null )
+				&& "comments-template:child-custom-comments:{$fixture['token']}:2\n" === ( $calls['custom']['output'] ?? null ),
+			'comments_template template output is captured for both default and custom calls',
+			array( 'calls' => $calls )
+		);
+	}
+
+	private static function comments_template_query_events_match( array $query_events, array $fixture ): bool {
+		if ( 2 !== count( $query_events ) ) {
+			return false;
+		}
+
+		foreach ( $query_events as $event ) {
+			$query_vars = is_array( $event['queryVars'] ?? null ) ? $event['queryVars'] : array();
+			if (
+				(int) ( $query_vars['post_id'] ?? 0 ) !== (int) $fixture['expected']['postId']
+				|| ( $query_vars['status'] ?? null ) !== $fixture['expected']['queryStatus']
+				|| ( $query_vars['order'] ?? null ) !== $fixture['expected']['queryOrder']
+				|| false !== ( $query_vars['hierarchical'] ?? null )
+			) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function comments_template_comment_events_match( array $events, array $expected_comment_ids, int $post_id ): bool {
+		if ( 2 !== count( $events ) ) {
+			return false;
+		}
+
+		foreach ( $events as $event ) {
+			if (
+				$post_id !== (int) ( $event['postId'] ?? 0 )
+				|| $expected_comment_ids !== array_map( 'intval', is_array( $event['commentIds'] ?? null ) ? $event['commentIds'] : array() )
+			) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function comments_template_loads_received_comments( array $template_loads, array $expected_comment_ids ): bool {
+		if ( 2 !== count( $template_loads ) ) {
+			return false;
+		}
+
+		foreach ( $template_loads as $load ) {
+			if (
+				2 !== (int) ( $load['commentsCount'] ?? -1 )
+				|| 2 !== (int) ( $load['queryCommentCount'] ?? -1 )
+				|| $expected_comment_ids !== array_map( 'intval', is_array( $load['commentIds'] ?? null ) ? $load['commentIds'] : array() )
+			) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function summarize_comments_template_query_events( array $query_events ): array {
+		$summary = array();
+
+		foreach ( $query_events as $event ) {
+			$query_vars = is_array( $event['queryVars'] ?? null ) ? $event['queryVars'] : array();
+			$summary[]  = array(
+				'postId'        => $query_vars['post_id'] ?? null,
+				'status'        => $query_vars['status'] ?? null,
+				'order'         => $query_vars['order'] ?? null,
+				'hierarchical'  => $query_vars['hierarchical'] ?? null,
+				'returnedIds'   => $event['returnedIds'] ?? array(),
+				'maxNumPages'   => $event['maxNumPages'] ?? null,
+				'foundComments' => $event['foundComments'] ?? null,
+			);
+		}
+
+		return $summary;
+	}
+
+	private static function comments_template_guard_child_program(): string {
+		return <<<'PHP'
+ini_set( 'display_errors', 'stderr' );
+error_reporting( E_ALL & ~E_DEPRECATED & ~E_USER_DEPRECATED );
+
+function component_fuzz_template_hierarchy_preview( string $value, int $limit = 240 ): string {
+	$printable = preg_replace_callback(
+		'/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/',
+		static function ( array $m ): string {
+			return sprintf( '\\x%02X', ord( $m[0] ) );
+		},
+		$value
+	);
+
+	if ( strlen( $printable ) > $limit ) {
+		return substr( $printable, 0, $limit ) . '...';
+	}
+
+	return $printable;
+}
+
+function component_fuzz_template_hierarchy_snapshot(): array {
+	$snapshot = array(
+		'globals' => array(),
+		'obLevel' => ob_get_level(),
+	);
+
+	foreach (
+		array(
+			'wp_filter',
+			'wp_actions',
+			'wp_filters',
+			'wp_current_filter',
+			'wp_theme_directories',
+			'wp_stylesheet_path',
+			'wp_template_path',
+			'wp_query',
+			'wp_the_query',
+			'post',
+			'id',
+			'comment',
+			'user_login',
+			'user_identity',
+			'withcomments',
+			'overridden_cpage',
+			'cfz_template_hierarchy_comments_template_loaded',
+		) as $name
+	) {
+		$snapshot['globals'][ $name ] = array(
+			'exists' => array_key_exists( $name, $GLOBALS ),
+			'value'  => $GLOBALS[ $name ] ?? null,
+		);
+	}
+
+	return $snapshot;
+}
+
+function component_fuzz_template_hierarchy_restore( array $snapshot ): void {
+	foreach ( $snapshot['globals'] as $name => $entry ) {
+		if ( $entry['exists'] ) {
+			$GLOBALS[ $name ] = $entry['value'];
+		} else {
+			unset( $GLOBALS[ $name ] );
+		}
+	}
+
+	if ( function_exists( 'wp_cache_delete' ) ) {
+		wp_cache_delete( 'theme_roots', 'site-transient' );
+	}
+	if ( function_exists( 'wp_clean_theme_json_cache' ) ) {
+		wp_clean_theme_json_cache();
+	}
+}
+
+function component_fuzz_template_hierarchy_state_matches( array $snapshot ): bool {
+	if ( ob_get_level() !== (int) $snapshot['obLevel'] ) {
+		return false;
+	}
+
+	foreach ( $snapshot['globals'] as $name => $entry ) {
+		$exists = array_key_exists( $name, $GLOBALS );
+		if ( $exists !== $entry['exists'] ) {
+			return false;
+		}
+		if ( $exists && $GLOBALS[ $name ] !== $entry['value'] ) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
+function component_fuzz_template_hierarchy_reset_template_globals(): void {
+	unset( $GLOBALS['wp_stylesheet_path'], $GLOBALS['wp_template_path'] );
+	if ( function_exists( 'wp_cache_delete' ) ) {
+		wp_cache_delete( 'theme_roots', 'site-transient' );
+	}
+	if ( function_exists( 'wp_clean_theme_json_cache' ) ) {
+		wp_clean_theme_json_cache();
+	}
+}
+
+function component_fuzz_template_hierarchy_install_theme_filters( array $fixture ): void {
+	$stylesheet = static function () use ( $fixture ): string {
+		return (string) $fixture['theme']['child'];
+	};
+	$template = static function () use ( $fixture ): string {
+		return (string) $fixture['theme']['parent'];
+	};
+	$theme_root = static function () use ( $fixture ): string {
+		return (string) $fixture['paths']['themes'];
+	};
+	$theme_root_uri = static function () use ( $fixture ): string {
+		return (string) $fixture['theme']['uri'];
+	};
+
+	$GLOBALS['wp_theme_directories'] = array_values(
+		array_unique(
+			array_merge(
+				is_array( $GLOBALS['wp_theme_directories'] ?? null ) ? $GLOBALS['wp_theme_directories'] : array(),
+				array( (string) $fixture['paths']['themes'] )
+			)
+		)
+	);
+
+	add_filter( 'stylesheet', $stylesheet );
+	add_filter( 'template', $template );
+	add_filter( 'theme_root', $theme_root );
+	add_filter( 'theme_root_uri', $theme_root_uri );
+	add_filter( 'pre_option_stylesheet', $stylesheet );
+	add_filter( 'pre_option_template', $template );
+	add_filter( 'pre_option_stylesheet_root', $theme_root );
+	add_filter( 'pre_option_template_root', $theme_root );
+	component_fuzz_template_hierarchy_reset_template_globals();
+	wp_set_template_globals();
+}
+
+function component_fuzz_template_hierarchy_make_post( array $data ) {
+	if ( ! class_exists( 'WP_Post' ) ) {
+		throw new RuntimeException( 'WP_Post is unavailable in comments_template child.' );
+	}
+
+	return new WP_Post(
+		(object) array(
+			'ID'                    => (int) $data['ID'],
+			'post_author'           => 1,
+			'post_date'             => '2026-06-23 12:00:00',
+			'post_date_gmt'         => '2026-06-23 10:00:00',
+			'post_content'          => 'Template hierarchy comments_template host',
+			'post_title'            => 'Template hierarchy comments_template host',
+			'post_excerpt'          => '',
+			'post_status'           => (string) $data['post_status'],
+			'comment_status'        => (string) $data['comment_status'],
+			'ping_status'           => 'closed',
+			'post_password'         => '',
+			'post_name'             => (string) $data['post_name'],
+			'to_ping'               => '',
+			'pinged'                => '',
+			'post_modified'         => '2026-06-23 12:00:00',
+			'post_modified_gmt'     => '2026-06-23 10:00:00',
+			'post_content_filtered' => '',
+			'post_parent'           => 0,
+			'guid'                  => 'https://example.test/template-hierarchy-comments-template',
+			'menu_order'            => 0,
+			'post_type'             => (string) $data['post_type'],
+			'post_mime_type'        => '',
+			'comment_count'         => 2,
+			'filter'                => 'raw',
+		)
+	);
+}
+
+function component_fuzz_template_hierarchy_make_comment( array $data ) {
+	$comment = (object) $data;
+
+	if ( class_exists( 'WP_Comment' ) ) {
+		return new WP_Comment( $comment );
+	}
+
+	return $comment;
+}
+
+function component_fuzz_template_hierarchy_comment_ids( $comments ): array {
+	$ids = array();
+	foreach ( is_array( $comments ) ? $comments : array() as $comment ) {
+		if ( is_object( $comment ) && isset( $comment->comment_ID ) ) {
+			$ids[] = (int) $comment->comment_ID;
+		}
+	}
+
+	return $ids;
+}
+
+function component_fuzz_template_hierarchy_set_query_context( WP_Post $post ): void {
+	$query                    = new WP_Query();
+	$query->query_vars        = array(
+		'page_id' => (int) $post->ID,
+		'p'       => (int) $post->ID,
+		'cpage'   => '',
+	);
+	$query->is_page           = true;
+	$query->is_singular       = true;
+	$query->queried_object    = $post;
+	$query->queried_object_id = (int) $post->ID;
+	$query->post              = $post;
+	$query->posts             = array( $post );
+	$query->post_count        = 1;
+
+	$GLOBALS['wp_query']     = $query;
+	$GLOBALS['wp_the_query'] = $query;
+	$GLOBALS['post']         = $post;
+	$GLOBALS['id']           = (int) $post->ID;
+	$GLOBALS['withcomments'] = true;
+}
+
+function component_fuzz_template_hierarchy_capture_output( callable $callback ): string {
+	$level = ob_get_level();
+	ob_start();
+	try {
+		$callback();
+		return (string) ob_get_clean();
+	} catch ( Throwable $e ) {
+		while ( ob_get_level() > $level ) {
+			ob_end_clean();
+		}
+		throw $e;
+	}
+}
+
+$component_fuzz_template_hierarchy_outer_ob_level = ob_get_level();
+ob_start();
+
+$component_fuzz_template_hierarchy_snapshot          = null;
+$component_fuzz_template_hierarchy_unexpected_output = '';
+$component_fuzz_template_hierarchy_result            = array(
+	'ok'                            => false,
+	'commentsTemplateDefinedBefore' => false,
+	'commentsTemplateDefinedAfter'  => false,
+	'filterEvents'                  => array(),
+	'queryEvents'                   => array(),
+	'commentsArrayEvents'           => array(),
+	'templateLoads'                 => array(),
+	'calls'                         => array(),
+	'wpStylesheetPath'              => null,
+	'wpTemplatePath'                => null,
+	'childStateRestored'            => false,
+	'unexpectedOutput'              => '',
+);
+
+try {
+	$component_fuzz_template_hierarchy_raw     = stream_get_contents( STDIN );
+	$component_fuzz_template_hierarchy_fixture = json_decode( $component_fuzz_template_hierarchy_raw, true );
+
+	if (
+		! is_array( $component_fuzz_template_hierarchy_fixture )
+		|| empty( $component_fuzz_template_hierarchy_fixture['repoRoot'] )
+		|| ! is_array( $component_fuzz_template_hierarchy_fixture['paths'] ?? null )
+		|| ! is_array( $component_fuzz_template_hierarchy_fixture['theme'] ?? null )
+		|| ! is_array( $component_fuzz_template_hierarchy_fixture['files'] ?? null )
+		|| ! is_array( $component_fuzz_template_hierarchy_fixture['post'] ?? null )
+		|| ! is_array( $component_fuzz_template_hierarchy_fixture['comments'] ?? null )
+	) {
+		throw new RuntimeException( 'Invalid comments_template fixture.' );
+	}
+
+	require_once $component_fuzz_template_hierarchy_fixture['repoRoot'] . '/tools/component-fuzz/lib/autoload.php';
+
+	\ComponentFuzz\WpBootstrap::load();
+
+	$component_fuzz_template_hierarchy_snapshot = component_fuzz_template_hierarchy_snapshot();
+	$component_fuzz_template_hierarchy_result['commentsTemplateDefinedBefore'] = defined( 'COMMENTS_TEMPLATE' );
+
+	component_fuzz_template_hierarchy_install_theme_filters( $component_fuzz_template_hierarchy_fixture );
+
+	$component_fuzz_template_hierarchy_false_option = static function () {
+		return 0;
+	};
+	add_filter( 'pre_option_require_name_email', $component_fuzz_template_hierarchy_false_option );
+	add_filter( 'pre_option_thread_comments', $component_fuzz_template_hierarchy_false_option );
+	add_filter( 'pre_option_page_comments', $component_fuzz_template_hierarchy_false_option );
+
+	$component_fuzz_template_hierarchy_template_filter = static function ( string $theme_template ) use ( &$component_fuzz_template_hierarchy_result ): string {
+		$component_fuzz_template_hierarchy_result['filterEvents'][] = array(
+			'received' => $theme_template,
+			'returned' => $theme_template,
+		);
+		return $theme_template;
+	};
+	add_filter( 'comments_template', $component_fuzz_template_hierarchy_template_filter );
+
+	$component_fuzz_template_hierarchy_comments = array();
+	foreach ( $component_fuzz_template_hierarchy_fixture['comments'] as $component_fuzz_template_hierarchy_comment ) {
+		if ( ! is_array( $component_fuzz_template_hierarchy_comment ) ) {
+			throw new RuntimeException( 'Invalid synthetic comment fixture.' );
+		}
+		$component_fuzz_template_hierarchy_comments[] = component_fuzz_template_hierarchy_make_comment( $component_fuzz_template_hierarchy_comment );
+	}
+
+	$component_fuzz_template_hierarchy_comments_pre_query = static function ( $comment_data, WP_Comment_Query $query ) use ( &$component_fuzz_template_hierarchy_result, $component_fuzz_template_hierarchy_comments ): array {
+		unset( $comment_data );
+		$query->found_comments = count( $component_fuzz_template_hierarchy_comments );
+		$query->max_num_pages  = 1;
+
+		$component_fuzz_template_hierarchy_result['queryEvents'][] = array(
+			'queryVars'     => $query->query_vars,
+			'returnedIds'   => component_fuzz_template_hierarchy_comment_ids( $component_fuzz_template_hierarchy_comments ),
+			'foundComments' => $query->found_comments,
+			'maxNumPages'   => $query->max_num_pages,
+		);
+
+		return $component_fuzz_template_hierarchy_comments;
+	};
+	add_filter( 'comments_pre_query', $component_fuzz_template_hierarchy_comments_pre_query, 10, 2 );
+
+	$component_fuzz_template_hierarchy_comments_array = static function ( array $comments, int $post_id ) use ( &$component_fuzz_template_hierarchy_result ): array {
+		$component_fuzz_template_hierarchy_result['commentsArrayEvents'][] = array(
+			'postId'     => $post_id,
+			'commentIds' => component_fuzz_template_hierarchy_comment_ids( $comments ),
+		);
+		return $comments;
+	};
+	add_filter( 'comments_array', $component_fuzz_template_hierarchy_comments_array, 10, 2 );
+
+	$component_fuzz_template_hierarchy_post = component_fuzz_template_hierarchy_make_post( $component_fuzz_template_hierarchy_fixture['post'] );
+
+	$component_fuzz_template_hierarchy_result['wpStylesheetPath'] = $GLOBALS['wp_stylesheet_path'] ?? null;
+	$component_fuzz_template_hierarchy_result['wpTemplatePath']   = $GLOBALS['wp_template_path'] ?? null;
+
+	component_fuzz_template_hierarchy_set_query_context( $component_fuzz_template_hierarchy_post );
+	$component_fuzz_template_hierarchy_result['calls']['default'] = array(
+		'file'   => $component_fuzz_template_hierarchy_fixture['files']['defaultFile'],
+		'output' => component_fuzz_template_hierarchy_capture_output(
+			static function (): void {
+				comments_template();
+			}
+		),
+	);
+
+	component_fuzz_template_hierarchy_set_query_context( $component_fuzz_template_hierarchy_post );
+	$component_fuzz_template_hierarchy_result['calls']['custom'] = array(
+		'file'   => $component_fuzz_template_hierarchy_fixture['files']['customFile'],
+		'output' => component_fuzz_template_hierarchy_capture_output(
+			static function () use ( $component_fuzz_template_hierarchy_fixture ): void {
+				comments_template( $component_fuzz_template_hierarchy_fixture['files']['customFile'] );
+			}
+		),
+	);
+
+	$component_fuzz_template_hierarchy_result['commentsTemplateDefinedAfter'] = defined( 'COMMENTS_TEMPLATE' );
+	$component_fuzz_template_hierarchy_result['templateLoads']                = $GLOBALS['cfz_template_hierarchy_comments_template_loaded'] ?? array();
+	$component_fuzz_template_hierarchy_result['ok']                           = true;
+} catch ( Throwable $e ) {
+	$component_fuzz_template_hierarchy_result['throwable'] = array(
+		'class'   => get_class( $e ),
+		'message' => $e->getMessage(),
+		'file'    => $e->getFile(),
+		'line'    => $e->getLine(),
+	);
+} finally {
+	if ( is_array( $component_fuzz_template_hierarchy_snapshot ) ) {
+		component_fuzz_template_hierarchy_restore( $component_fuzz_template_hierarchy_snapshot );
+		$component_fuzz_template_hierarchy_result['childStateRestored'] = component_fuzz_template_hierarchy_state_matches( $component_fuzz_template_hierarchy_snapshot );
+	}
+
+	while ( ob_get_level() > $component_fuzz_template_hierarchy_outer_ob_level ) {
+		$component_fuzz_template_hierarchy_unexpected_output = ob_get_clean() . $component_fuzz_template_hierarchy_unexpected_output;
+	}
+
+	$component_fuzz_template_hierarchy_result['unexpectedOutput'] = component_fuzz_template_hierarchy_preview( $component_fuzz_template_hierarchy_unexpected_output );
+}
+
+$component_fuzz_template_hierarchy_json = json_encode( $component_fuzz_template_hierarchy_result, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE );
+echo false === $component_fuzz_template_hierarchy_json ? '{"ok":false,"error":"json_encode failed"}' : $component_fuzz_template_hierarchy_json;
+exit( ! empty( $component_fuzz_template_hierarchy_result['ok'] ) ? 0 : 1 );
+PHP;
 	}
 
 	private static function prepare_case( \ComponentFuzz\FuzzContext $ctx, string $temp_root ): array {
@@ -1156,6 +1929,44 @@ $GLOBALS['cfz_template_hierarchy_loaded'][] = array(
 echo 'template:' . $__cfz_label . ':' . ( isset( $args['token'] ) ? $args['token'] : 'no-token' ) . "\n";
 PHP;
 		self::write_file( $path, str_replace( 'LABEL_PLACEHOLDER', $label_export, $body ) );
+	}
+
+	private static function write_comments_template_file( string $path, string $label, string $token ): void {
+		self::ensure_dir( dirname( $path ) );
+		$label_export = var_export( $label, true );
+		$token_export = var_export( $token, true );
+		$body         = <<<'PHP'
+<?php
+$__cfz_label    = LABEL_PLACEHOLDER;
+$__cfz_token    = TOKEN_PLACEHOLDER;
+$__cfz_comments = isset( $comments ) && is_array( $comments ) ? $comments : array();
+$__cfz_ids      = array();
+foreach ( $__cfz_comments as $__cfz_comment ) {
+	if ( is_object( $__cfz_comment ) && isset( $__cfz_comment->comment_ID ) ) {
+		$__cfz_ids[] = (int) $__cfz_comment->comment_ID;
+	}
+}
+
+$GLOBALS['cfz_template_hierarchy_comments_template_loaded'][] = array(
+	'label'             => $__cfz_label,
+	'file'              => __FILE__,
+	'fileRealpath'      => realpath( __FILE__ ) ?: __FILE__,
+	'token'             => $__cfz_token,
+	'commentsCount'     => count( $__cfz_comments ),
+	'commentIds'        => $__cfz_ids,
+	'queryCommentCount' => isset( $wp_query ) && is_object( $wp_query ) && isset( $wp_query->comment_count ) ? (int) $wp_query->comment_count : null,
+	'commentArgs'       => isset( $comment_args ) && is_array( $comment_args ) ? $comment_args : array(),
+);
+echo 'comments-template:' . $__cfz_label . ':' . $__cfz_token . ':' . count( $__cfz_comments ) . "\n";
+PHP;
+		self::write_file(
+			$path,
+			str_replace(
+				array( 'LABEL_PLACEHOLDER', 'TOKEN_PLACEHOLDER' ),
+				array( $label_export, $token_export ),
+				$body
+			)
+		);
 	}
 
 	private static function write_load_probe_file( string $path ): void {
