@@ -235,10 +235,11 @@ database, network requests, or a configured site.
   mailto/rendering-context round trips for UTF-8 local parts, WHATWG delimiter
   local parts, IDN/punycode domains, escaped display hrefs, and readable text.
 - `environment-load`: no-network environment/load/compat helper coverage,
-  including environment type cache boundaries, server/request normalization,
-  Basic Auth and SSL detection, memory-limit parsing, ini mutability,
-  installing/maintenance flags, generated JSON/XML request media matrices,
-  request guard filters, HTTPS migration short-circuits, and UTF-8
+  including environment type cache boundaries, isolated `WP_RUN_CORE_TESTS`
+  environment-type matrices with constant precedence, server/request
+  normalization, Basic Auth and SSL detection, memory-limit parsing, ini
+  mutability, installing/maintenance flags, generated JSON/XML request media
+  matrices, request guard filters, HTTPS migration short-circuits, and UTF-8
   compatibility oracles with state restoration.
 - `error-protection`: no-shutdown error protection and recovery-mode
   infrastructure coverage, including paused-extension source normalization and
@@ -664,11 +665,12 @@ runtime helpers in `script-loader.php`, `functions.wp-scripts.php`, and
 `functions.wp-styles.php` without browser execution. It directly calls the emoji
 detection printer instead of the public static-once wrapper so iterations remain
 isolated, directly asserts concatenated loader query chunks and separate
-strategy/external asset tags under forced concat globals, and it records an
-explicit skip for just-in-time autosave localization when the stripped no-DB
-bootstrap does not define `AUTOSAVE_INTERVAL`. It avoids admin/page dispatch,
-process exits, live HTTP, live DB-backed block queries, and browser module
-execution while still asserting restored globals, filters, and output buffers.
+strategy/external asset tags under forced concat globals, and covers
+just-in-time script localization for autosave, mce-view, and word-count in an
+isolated child process so `AUTOSAVE_INTERVAL` does not leak into the parent. It
+avoids admin/page dispatch, process exits, live HTTP, live DB-backed block
+queries, and browser module execution while still asserting restored globals,
+filters, and output buffers.
 The
 Admin Workflows surface intentionally avoids `admin.php`/`admin-ajax.php` request
 dispatch, DB-backed core `WP_*_List_Table` subclasses, and `wp_ajax_*` wrappers
