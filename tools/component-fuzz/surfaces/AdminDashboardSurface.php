@@ -1163,12 +1163,13 @@ final class AdminDashboardSurface {
 		$requests        = array();
 		$case_summaries  = array();
 		$active_response = null;
+		$active_failure  = null;
 		$expected_url    = self::browser_happy_endpoint();
 		$expected_agent  = 'WordPress/' . \wp_get_wp_version() . '; ' . \home_url( '/' );
 		$transients      = array();
 		$global_snapshot = self::snapshot_globals( array( '_SERVER', 'is_IE' ) );
 		$options_before  = self::options_snapshot();
-		$http_filter     = static function ( $preempt, array $parsed_args, string $url ) use ( &$active_response, &$requests ) {
+		$http_filter     = static function ( $preempt, array $parsed_args, string $url ) use ( &$active_failure, &$active_response, &$requests ) {
 			$requests[] = array(
 				'url'       => $url,
 				'method'    => $parsed_args['method'] ?? null,
@@ -1179,6 +1180,23 @@ final class AdminDashboardSurface {
 
 			if ( null === $active_response ) {
 				return new \WP_Error( 'component_fuzz_unexpected_browser_http', 'Component fuzz blocked an unexpected Browser Happy HTTP request.' );
+			}
+
+			if ( is_array( $active_failure ) ) {
+				if ( 'wp-error' === ( $active_failure['type'] ?? '' ) ) {
+					return new \WP_Error( 'component_fuzz_browser_http_failure', 'Generated Browser Happy HTTP failure.' );
+				}
+
+				return array(
+					'headers'  => array(),
+					'body'     => $active_failure['body'] ?? '',
+					'response' => array(
+						'code'    => $active_failure['code'] ?? 500,
+						'message' => $active_failure['message'] ?? 'Generated failure',
+					),
+					'cookies'  => array(),
+					'filename' => null,
+				);
 			}
 
 			return array(
@@ -1198,6 +1216,7 @@ final class AdminDashboardSurface {
 				'response'        => self::browser_response_fixture( $ctx->fork( 'response-insecure' ), true, true ),
 				'ssl'             => true,
 				'expectsClass'    => true,
+				'ie'              => false,
 				'messageFragment' => 'insecure version',
 			),
 			'recommended' => array(
@@ -1205,7 +1224,16 @@ final class AdminDashboardSurface {
 				'response'        => self::browser_response_fixture( $ctx->fork( 'response-recommended' ), true, false ),
 				'ssl'             => false,
 				'expectsClass'    => false,
+				'ie'              => false,
 				'messageFragment' => 'old version',
+			),
+			'ie'          => array(
+				'userAgent'       => self::browser_user_agent( $ctx->fork( 'ua-ie' ), 'MSIE' ),
+				'response'        => self::browser_response_fixture( $ctx->fork( 'response-ie' ), true, true ),
+				'ssl'             => true,
+				'expectsClass'    => true,
+				'ie'              => true,
+				'messageFragment' => 'Internet Explorer does not give you the best WordPress experience',
 			),
 		);
 
@@ -1223,15 +1251,19 @@ final class AdminDashboardSurface {
 				\delete_site_transient( $transient );
 
 				$active_response              = $response;
+				$active_failure               = null;
 				$_SERVER['HTTP_USER_AGENT']   = $user_agent;
 				$_SERVER['HTTPS']             = $case['ssl'] ? 'on' : 'off';
 				$_SERVER['SERVER_PORT']       = $case['ssl'] ? '443' : '80';
-				$GLOBALS['is_IE']             = false;
+				$GLOBALS['is_IE']             = (bool) $case['ie'];
 				$request_count_before         = count( $requests );
 				$first_response               = \wp_check_browser_version();
 				$cached_response              = \get_site_transient( $transient );
+				$timeout_option               = \get_site_option( '_site_transient_timeout_' . $transient );
+				$timeout_remaining            = is_numeric( $timeout_option ) ? ( (int) $timeout_option - time() ) : null;
 				$second_response              = \wp_check_browser_version();
-				$classes                      = \dashboard_browser_nag_class( array( 'postbox', 'cfz-browser-nag' ) );
+				$base_classes                 = array( 'postbox', 'cfz-browser-nag' );
+				$classes                      = \dashboard_browser_nag_class( $base_classes );
 				$nag_html                     = self::capture_output(
 					static function (): void {
 						\wp_dashboard_browser_nag();
@@ -1245,13 +1277,16 @@ final class AdminDashboardSurface {
 					\esc_url( $response['update_url'] ),
 					\esc_html( $response['name'] )
 				);
-				$expected_update_action_link  = sprintf(
-					'<a href="%1$s" class="update-browser-link">Update %2$s</a>',
-					\esc_attr( $response['update_url'] ),
-					\esc_html( $response['name'] )
-				);
+				$expected_update_action_link  = $case['ie']
+					? '<a href="https://browsehappy.com/" class="update-browser-link">browse happy</a>'
+					: sprintf(
+						'<a href="%1$s" class="update-browser-link">Update %2$s</a>',
+						\esc_attr( $response['update_url'] ),
+						\esc_html( $response['name'] )
+					);
 				$expected_image_fragment      = '<img src="' . \esc_url( $expected_image ) . '" alt="" />';
 				$has_insecure_class           = in_array( 'browser-insecure', $classes, true );
+				$base_classes_preserved       = array_values( array_intersect( $base_classes, $classes ) ) === $base_classes;
 				$cleaned_response             = false;
 
 				\delete_site_transient( $transient );
@@ -1263,6 +1298,7 @@ final class AdminDashboardSurface {
 					'request'      => $request,
 					'classes'      => $classes,
 					'htmlHash'     => sha1( $nag_html ),
+					'timeout'      => $timeout_remaining,
 				);
 
 				self::collect_failure(
@@ -1274,8 +1310,11 @@ final class AdminDashboardSurface {
 						&& $expected_url === ( $request['url'] ?? null )
 						&& 'POST' === ( $request['method'] ?? null )
 						&& array( 'useragent' => $user_agent ) === ( $request['body'] ?? null )
-						&& $expected_agent === ( $request['userAgent'] ?? null ),
-					'wp_check_browser_version() posts the generated user agent once, stores the site transient, and reuses cached results',
+						&& $expected_agent === ( $request['userAgent'] ?? null )
+						&& is_int( $timeout_remaining )
+						&& WEEK_IN_SECONDS - 5 <= $timeout_remaining
+						&& WEEK_IN_SECONDS >= $timeout_remaining,
+					'wp_check_browser_version() posts the generated user agent once, stores the site transient for one week, and reuses cached results',
 					array(
 						'label'          => $label,
 						'expectedUrl'    => $expected_url,
@@ -1283,33 +1322,39 @@ final class AdminDashboardSurface {
 						'request'        => $request,
 						'firstResponse'  => $first_response,
 						'cachedResponse' => $cached_response,
+						'timeout'        => $timeout_option,
 					)
 				);
 
 				self::collect_failure(
 					$failures,
-					$case['expectsClass'] === $has_insecure_class,
-					'dashboard_browser_nag_class() adds browser-insecure only for insecure Browse Happy responses',
+					$base_classes_preserved
+						&& $case['expectsClass'] === $has_insecure_class
+						&& ( ! $case['expectsClass'] || count( $base_classes ) + 1 === count( $classes ) )
+						&& ( $case['expectsClass'] || count( $base_classes ) === count( $classes ) ),
+					'dashboard_browser_nag_class() preserves caller classes and adds browser-insecure only for insecure Browse Happy responses',
 					array(
-						'label'   => $label,
-						'classes' => $classes,
+						'label'                => $label,
+						'baseClassesPreserved' => $base_classes_preserved,
+						'classes'              => $classes,
 					)
 				);
 
 				self::collect_failure(
 					$failures,
 					str_contains( $nag_html, $case['messageFragment'] )
-						&& str_contains( $nag_html, $expected_browser_name_link )
+						&& ( $case['ie'] || str_contains( $nag_html, $expected_browser_name_link ) )
 						&& str_contains( $nag_html, $expected_update_action_link )
 						&& str_contains( $nag_html, $expected_image_fragment )
 						&& str_contains( $nag_html, 'browser-update-nag has-browser-icon' )
 						&& str_contains( $nag_html, 'browsehappy.com' )
 						&& str_contains( $nag_html, 'class="dismiss"' )
-						&& ! str_contains( $nag_html, $response['name'] )
+						&& ( $case['ie'] || ! str_contains( $nag_html, $response['name'] ) )
 						&& ! str_contains( strtolower( $nag_html ), '<script' ),
-					'wp_dashboard_browser_nag() renders the expected branch and escapes browser names, update URLs, and icon URLs',
+					'wp_dashboard_browser_nag() renders the expected regular or IE branch and escapes browser names, update URLs, and icon URLs',
 					array(
 						'label'              => $label,
+						'ie'                 => $case['ie'],
 						'expectedNameLink'   => $expected_browser_name_link,
 						'expectedUpdateLink' => $expected_update_action_link,
 						'expectedImage'      => $expected_image_fragment,
@@ -1328,7 +1373,53 @@ final class AdminDashboardSurface {
 				);
 			}
 
+			foreach ( self::browser_failure_cases( $ctx->fork( 'failure-cases' ) ) as $label => $failure_case ) {
+				$user_agent = $failure_case['userAgent'];
+				$transient  = 'browser_' . md5( $user_agent );
+
+				$transients[] = $transient;
+				\delete_site_transient( $transient );
+
+				$active_response              = array();
+				$active_failure               = $failure_case['failure'];
+				$_SERVER['HTTP_USER_AGENT']   = $user_agent;
+				$_SERVER['HTTPS']             = 'off';
+				$_SERVER['SERVER_PORT']       = '80';
+				$GLOBALS['is_IE']             = false;
+				$request_count_before_failure = count( $requests );
+				$failure_response             = \wp_check_browser_version();
+				$cached_failure_response      = \get_site_transient( $transient );
+				$missing_marker               = 'component_fuzz_missing_browser_transient_' . $label;
+				$raw_failure_response         = \get_site_option( '_site_transient_' . $transient, $missing_marker );
+				$raw_failure_timeout          = \get_site_option( '_site_transient_timeout_' . $transient, $missing_marker );
+				$second_failure_response      = \wp_check_browser_version();
+				$failure_request_count        = count( $requests ) - $request_count_before_failure;
+
+				\delete_site_transient( $transient );
+
+				self::collect_failure(
+					$failures,
+					2 === $failure_request_count
+						&& false === $failure_response
+						&& false === $second_failure_response
+						&& false === $cached_failure_response
+						&& $missing_marker === $raw_failure_response
+						&& $missing_marker === $raw_failure_timeout,
+					'wp_check_browser_version() fails closed and does not cache generated HTTP errors, non-200 responses, or invalid JSON',
+					array(
+						'label'          => $label,
+						'failure'        => $failure_case['failure'],
+						'firstResponse'  => $failure_response,
+						'secondResponse' => $second_failure_response,
+						'cachedValue'    => self::preview( $cached_failure_response ),
+						'rawValue'       => self::preview( $raw_failure_response ),
+						'rawTimeout'     => self::preview( $raw_failure_timeout ),
+					)
+				);
+			}
+
 			$active_response            = null;
+			$active_failure             = null;
 			$request_count_before_empty = count( $requests );
 			unset( $_SERVER['HTTP_USER_AGENT'] );
 			$empty_user_agent_response  = \wp_check_browser_version();
@@ -1402,6 +1493,7 @@ final class AdminDashboardSurface {
 				'esc_attr__',
 				'esc_html',
 				'esc_url',
+				'get_site_option',
 				'get_site_transient',
 				'get_user_locale',
 				'has_filter',
@@ -1461,6 +1553,33 @@ final class AdminDashboardSurface {
 			'update_url'      => 'https://updates.example.test/' . rawurlencode( $token ) . '/download?channel=stable&name="<tag>"',
 			'img_src'         => 'http://images.example.test/' . rawurlencode( $token ) . '.png?label="<img>"',
 			'img_src_ssl'     => 'https://images.example.test/' . rawurlencode( $token ) . '.png?label="<img>"',
+		);
+	}
+
+	private static function browser_failure_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		return array(
+			'wp-error'     => array(
+				'userAgent' => self::browser_user_agent( $ctx->fork( 'ua-error' ), 'ErrorBrowser' ),
+				'failure'   => array(
+					'type' => 'wp-error',
+				),
+			),
+			'non-200'      => array(
+				'userAgent' => self::browser_user_agent( $ctx->fork( 'ua-non-200' ), 'StatusBrowser' ),
+				'failure'   => array(
+					'body'    => \wp_json_encode( self::browser_response_fixture( $ctx->fork( 'response-non-200' ), true, true ) ),
+					'code'    => 503,
+					'message' => 'Service Unavailable',
+				),
+			),
+			'invalid-json' => array(
+				'userAgent' => self::browser_user_agent( $ctx->fork( 'ua-invalid-json' ), 'JsonBrowser' ),
+				'failure'   => array(
+					'body'    => '{"not-valid-json":',
+					'code'    => 200,
+					'message' => 'OK',
+				),
+			),
 		);
 	}
 
