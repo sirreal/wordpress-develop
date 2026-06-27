@@ -37,10 +37,11 @@ final class AdminDashboardSurface {
 			$rows[] = self::check_recent_comment_rows( $ctx->fork( 'recent-comment-row' ) );
 			$rows[] = self::check_recent_comments_rendering( $ctx->fork( 'recent-comments' ) );
 			$rows[] = self::check_cached_rss_widget( $ctx->fork( 'cached-rss' ) );
+			$rows[] = self::check_browser_nag_remote_cache( $ctx->fork( 'browser-nag' ) );
 			$rows[] = $ctx->skip(
 				'admin-dashboard.unsafe-dispatch-and-remote-paths',
-				'wp_dashboard_setup() POST handling redirects/exits, dashboard events can reach remote HTTP, and full RSS feed parsing '
-					. 'is covered by feed surfaces; the cached dashboard RSS helper is covered directly.'
+				'wp_dashboard_setup() POST handling redirects/exits and full RSS feed parsing are skipped; the Browser Happy nag '
+					. 'and cached dashboard RSS helper are covered directly with no-live-network fixtures.'
 			);
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
@@ -1146,6 +1147,339 @@ final class AdminDashboardSurface {
 				'cacheKey' => $cache_key,
 			)
 		);
+	}
+
+	private static function check_browser_nag_remote_cache( \ComponentFuzz\FuzzContext $ctx ): array {
+		$missing = self::missing_browser_nag_requirements();
+		if ( array() !== $missing ) {
+			return $ctx->skip(
+				'admin-dashboard.helpers.browser-nag-remote-cache',
+				'Browser Happy dashboard helper dependencies are unavailable in this checkout.',
+				array( 'missing' => $missing )
+			);
+		}
+
+		$failures        = array();
+		$requests        = array();
+		$case_summaries  = array();
+		$active_response = null;
+		$expected_url    = self::browser_happy_endpoint();
+		$expected_agent  = 'WordPress/' . \wp_get_wp_version() . '; ' . \home_url( '/' );
+		$transients      = array();
+		$global_snapshot = self::snapshot_globals( array( '_SERVER', 'is_IE' ) );
+		$options_before  = self::options_snapshot();
+		$http_filter     = static function ( $preempt, array $parsed_args, string $url ) use ( &$active_response, &$requests ) {
+			$requests[] = array(
+				'url'       => $url,
+				'method'    => $parsed_args['method'] ?? null,
+				'body'      => $parsed_args['body'] ?? null,
+				'userAgent' => $parsed_args['user-agent'] ?? null,
+				'headers'   => $parsed_args['headers'] ?? null,
+			);
+
+			if ( null === $active_response ) {
+				return new \WP_Error( 'component_fuzz_unexpected_browser_http', 'Component fuzz blocked an unexpected Browser Happy HTTP request.' );
+			}
+
+			return array(
+				'headers'  => array(),
+				'body'     => \wp_json_encode( $active_response ),
+				'response' => array(
+					'code'    => 200,
+					'message' => 'OK',
+				),
+				'cookies'  => array(),
+				'filename' => null,
+			);
+		};
+		$cases           = array(
+			'insecure'    => array(
+				'userAgent'       => self::browser_user_agent( $ctx->fork( 'ua-insecure' ), 'Chrome' ),
+				'response'        => self::browser_response_fixture( $ctx->fork( 'response-insecure' ), true, true ),
+				'ssl'             => true,
+				'expectsClass'    => true,
+				'messageFragment' => 'insecure version',
+			),
+			'recommended' => array(
+				'userAgent'       => self::browser_user_agent( $ctx->fork( 'ua-recommended' ), 'Firefox' ),
+				'response'        => self::browser_response_fixture( $ctx->fork( 'response-recommended' ), true, false ),
+				'ssl'             => false,
+				'expectsClass'    => false,
+				'messageFragment' => 'old version',
+			),
+		);
+
+		foreach ( $cases as $case ) {
+			$transients[] = 'browser_' . md5( $case['userAgent'] );
+		}
+
+		\add_filter( 'pre_http_request', $http_filter, 10, 3 );
+		try {
+			foreach ( $cases as $label => $case ) {
+				$user_agent = $case['userAgent'];
+				$response   = $case['response'];
+				$transient  = 'browser_' . md5( $user_agent );
+
+				\delete_site_transient( $transient );
+
+				$active_response              = $response;
+				$_SERVER['HTTP_USER_AGENT']   = $user_agent;
+				$_SERVER['HTTPS']             = $case['ssl'] ? 'on' : 'off';
+				$_SERVER['SERVER_PORT']       = $case['ssl'] ? '443' : '80';
+				$GLOBALS['is_IE']             = false;
+				$request_count_before         = count( $requests );
+				$first_response               = \wp_check_browser_version();
+				$cached_response              = \get_site_transient( $transient );
+				$second_response              = \wp_check_browser_version();
+				$classes                      = \dashboard_browser_nag_class( array( 'postbox', 'cfz-browser-nag' ) );
+				$nag_html                     = self::capture_output(
+					static function (): void {
+						\wp_dashboard_browser_nag();
+					}
+				);
+				$request_count_after_helpers  = count( $requests );
+				$request                      = $requests[ $request_count_before ] ?? array();
+				$expected_image               = ( $case['ssl'] && ! empty( $response['img_src_ssl'] ) ) ? $response['img_src_ssl'] : $response['img_src'];
+				$expected_browser_name_link   = sprintf(
+					'<a href="%s">%s</a>',
+					\esc_url( $response['update_url'] ),
+					\esc_html( $response['name'] )
+				);
+				$expected_update_action_link  = sprintf(
+					'<a href="%1$s" class="update-browser-link">Update %2$s</a>',
+					\esc_attr( $response['update_url'] ),
+					\esc_html( $response['name'] )
+				);
+				$expected_image_fragment      = '<img src="' . \esc_url( $expected_image ) . '" alt="" />';
+				$has_insecure_class           = in_array( 'browser-insecure', $classes, true );
+				$cleaned_response             = false;
+
+				\delete_site_transient( $transient );
+				$cleaned_response = \get_site_transient( $transient );
+
+				$case_summaries[ $label ] = array(
+					'transient'    => $transient,
+					'requestCount' => $request_count_after_helpers - $request_count_before,
+					'request'      => $request,
+					'classes'      => $classes,
+					'htmlHash'     => sha1( $nag_html ),
+				);
+
+				self::collect_failure(
+					$failures,
+					1 === ( $request_count_after_helpers - $request_count_before )
+						&& $response === $first_response
+						&& $response === $second_response
+						&& $response === $cached_response
+						&& $expected_url === ( $request['url'] ?? null )
+						&& 'POST' === ( $request['method'] ?? null )
+						&& array( 'useragent' => $user_agent ) === ( $request['body'] ?? null )
+						&& $expected_agent === ( $request['userAgent'] ?? null ),
+					'wp_check_browser_version() posts the generated user agent once, stores the site transient, and reuses cached results',
+					array(
+						'label'          => $label,
+						'expectedUrl'    => $expected_url,
+						'expectedAgent'  => $expected_agent,
+						'request'        => $request,
+						'firstResponse'  => $first_response,
+						'cachedResponse' => $cached_response,
+					)
+				);
+
+				self::collect_failure(
+					$failures,
+					$case['expectsClass'] === $has_insecure_class,
+					'dashboard_browser_nag_class() adds browser-insecure only for insecure Browse Happy responses',
+					array(
+						'label'   => $label,
+						'classes' => $classes,
+					)
+				);
+
+				self::collect_failure(
+					$failures,
+					str_contains( $nag_html, $case['messageFragment'] )
+						&& str_contains( $nag_html, $expected_browser_name_link )
+						&& str_contains( $nag_html, $expected_update_action_link )
+						&& str_contains( $nag_html, $expected_image_fragment )
+						&& str_contains( $nag_html, 'browser-update-nag has-browser-icon' )
+						&& str_contains( $nag_html, 'browsehappy.com' )
+						&& str_contains( $nag_html, 'class="dismiss"' )
+						&& ! str_contains( $nag_html, $response['name'] )
+						&& ! str_contains( strtolower( $nag_html ), '<script' ),
+					'wp_dashboard_browser_nag() renders the expected branch and escapes browser names, update URLs, and icon URLs',
+					array(
+						'label'              => $label,
+						'expectedNameLink'   => $expected_browser_name_link,
+						'expectedUpdateLink' => $expected_update_action_link,
+						'expectedImage'      => $expected_image_fragment,
+						'html'               => self::preview_string( $nag_html ),
+					)
+				);
+
+				self::collect_failure(
+					$failures,
+					false === $cleaned_response,
+					'browser version site transient is cleaned after each Browser Happy fixture replay',
+					array(
+						'label'   => $label,
+						'cleaned' => self::preview( $cleaned_response ),
+					)
+				);
+			}
+
+			$active_response            = null;
+			$request_count_before_empty = count( $requests );
+			unset( $_SERVER['HTTP_USER_AGENT'] );
+			$empty_user_agent_response  = \wp_check_browser_version();
+
+			self::collect_failure(
+				$failures,
+				false === $empty_user_agent_response
+					&& $request_count_before_empty === count( $requests ),
+				'wp_check_browser_version() returns false without issuing HTTP when HTTP_USER_AGENT is empty',
+				array(
+					'response'      => $empty_user_agent_response,
+					'requestBefore' => $request_count_before_empty,
+					'requestAfter'  => count( $requests ),
+				)
+			);
+		} finally {
+			\remove_filter( 'pre_http_request', $http_filter, 10 );
+			foreach ( $transients as $transient ) {
+				\delete_site_transient( $transient );
+			}
+			self::restore_globals( $global_snapshot );
+		}
+
+		$transients_after = array();
+		foreach ( $transients as $transient ) {
+			$transients_after[ $transient ] = \get_site_transient( $transient );
+		}
+
+		self::collect_failure(
+			$failures,
+			false === \has_filter( 'pre_http_request', $http_filter )
+				&& self::globals_match( $global_snapshot )
+				&& self::all_call_values( array_map(
+					static function ( $value ): array {
+						return array( 'value' => $value );
+					},
+					$transients_after
+				), 'value', false )
+				&& $options_before === self::options_snapshot(),
+			'Browser Happy HTTP filter, server globals, browser global, site transient options, and cache state are restored',
+			array(
+				'filter'          => \has_filter( 'pre_http_request', $http_filter ),
+				'changedGlobals'  => self::changed_globals( $global_snapshot ),
+				'transientsAfter' => self::preview( $transients_after ),
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'admin-dashboard.helpers.browser-nag-remote-cache',
+			$failures,
+			array(
+				'cases'        => $case_summaries,
+				'requestCount' => count( $requests ),
+			)
+		);
+	}
+
+	private static function missing_browser_nag_requirements(): array {
+		$missing = array();
+
+		foreach (
+			array(
+				'__',
+				'add_filter',
+				'add_query_arg',
+				'apply_filters',
+				'dashboard_browser_nag_class',
+				'delete_site_transient',
+				'esc_attr',
+				'esc_attr__',
+				'esc_html',
+				'esc_url',
+				'get_site_transient',
+				'get_user_locale',
+				'has_filter',
+				'home_url',
+				'is_ssl',
+				'is_wp_error',
+				'remove_filter',
+				'set_site_transient',
+				'set_url_scheme',
+				'wp_check_browser_version',
+				'wp_dashboard_browser_nag',
+				'wp_get_wp_version',
+				'wp_http_supports',
+				'wp_json_encode',
+				'wp_remote_post',
+				'wp_remote_retrieve_body',
+				'wp_remote_retrieve_response_code',
+			) as $function
+		) {
+			if ( ! function_exists( $function ) ) {
+				$missing[] = "function {$function}";
+			}
+		}
+
+		if ( ! class_exists( 'WP_Error' ) ) {
+			$missing[] = 'class WP_Error';
+		}
+		if ( ! defined( 'WEEK_IN_SECONDS' ) ) {
+			$missing[] = 'constant WEEK_IN_SECONDS';
+		}
+
+		return $missing;
+	}
+
+	private static function browser_user_agent( \ComponentFuzz\FuzzContext $ctx, string $browser ): string {
+		$token = self::slug( $ctx->fork( 'token' ), 'ua' );
+
+		return sprintf(
+			'Mozilla/5.0 (ComponentFuzz %1$s; %2$s) AppleWebKit/537.36 %2$s/%3$d.0.%4$d.0 Safari/537.36',
+			$token,
+			$browser,
+			$ctx->int( 1, 99 ),
+			$ctx->int( 1000, 9999 )
+		);
+	}
+
+	private static function browser_response_fixture( \ComponentFuzz\FuzzContext $ctx, bool $upgrade, bool $insecure ): array {
+		$token = self::slug( $ctx->fork( 'token' ), 'browser' );
+
+		return array(
+			'platform'        => 'FuzzOS ' . $token,
+			'name'            => 'Browser ' . $token . ' <script>alert(1)</script> & "quoted"',
+			'version'         => '1.' . $ctx->int( 0, 9 ) . '.' . $ctx->int( 0, 99 ),
+			'current_version' => '120.' . $ctx->int( 0, 9 ) . '.' . $ctx->int( 0, 99 ),
+			'upgrade'         => $upgrade,
+			'insecure'        => $insecure,
+			'update_url'      => 'https://updates.example.test/' . rawurlencode( $token ) . '/download?channel=stable&name="<tag>"',
+			'img_src'         => 'http://images.example.test/' . rawurlencode( $token ) . '.png?label="<img>"',
+			'img_src_ssl'     => 'https://images.example.test/' . rawurlencode( $token ) . '.png?label="<img>"',
+		);
+	}
+
+	private static function browser_happy_endpoint(): string {
+		$url = 'http://api.wordpress.org/core/browse-happy/1.1/';
+
+		if ( \wp_http_supports( array( 'ssl' ) ) ) {
+			$url = \set_url_scheme( $url, 'https' );
+		}
+
+		return $url;
+	}
+
+	private static function options_snapshot(): ?array {
+		if ( isset( $GLOBALS['wpdb'] ) && method_exists( $GLOBALS['wpdb'], 'component_fuzz_get_options' ) ) {
+			return $GLOBALS['wpdb']->component_fuzz_get_options();
+		}
+
+		return null;
 	}
 
 	private static function reset_runtime(): void {
