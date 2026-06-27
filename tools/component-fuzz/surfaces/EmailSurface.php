@@ -10,6 +10,7 @@ final class EmailSurface {
 	private const GENERATED_LOCALPART_ALIAS_CASES = 8;
 	private const GENERATED_LOCALPART_UPDATE_CASES = 5;
 	private const GENERATED_PROFILE_CONFIRMATION_CASES = 5;
+	private const GENERATED_AUTHENTICATION_CASES = 6;
 	private const GENERATED_MAILTO_CONTEXT_CASES = 10;
 	private const GENERATED_UNICODE_MATRIX_CASES = 12;
 	private const GENERATED_MALFORMED_VARIANT_CASES = 12;
@@ -60,6 +61,7 @@ final class EmailSurface {
 		'retrieve_password_message',
 		'retrieve_password_notification_email',
 		'new_user_email_content',
+		'wp_authenticate_user',
 		'pre_user_query',
 		'users_pre_query',
 		'query',
@@ -134,6 +136,7 @@ final class EmailSurface {
 			$rows = array_merge( $rows, self::check_user_email_indexes_distinct_localparts( $ctx ) );
 			$rows = array_merge( $rows, self::check_user_email_indexes_generated_localpart_aliases( $ctx ) );
 			$rows = array_merge( $rows, self::check_user_email_updates_generated_localpart_aliases( $ctx ) );
+			$rows = array_merge( $rows, self::check_user_email_authentication_unicode_paths( $ctx ) );
 			$rows = array_merge( $rows, self::check_profile_email_confirmation_unicode_paths( $ctx ) );
 			$rows = array_merge( $rows, self::check_user_email_search_unicode_terms( $ctx ) );
 			$rows = array_merge( $rows, self::check_confusable_localpart_boundaries( $ctx ) );
@@ -3731,6 +3734,278 @@ final class EmailSurface {
 					'updates'           => $updates,
 					'collisionRejected' => $collision_ok,
 					'mailCalls'         => count( $mail_calls ),
+				);
+			}
+		} finally {
+			self::restore_hook_globals( $hook_snapshot );
+			self::reset_stub_content();
+		}
+
+		return array(
+			$ctx->result(
+				$result_name,
+				array() === $failures,
+				array(
+					'caseCount' => count( $cases ),
+					'observed'  => $observed,
+					'failures'  => self::describe_value( $failures ),
+				)
+			),
+		);
+	}
+
+	private static function check_user_email_authentication_unicode_paths( \ComponentFuzz\FuzzContext $ctx ): array {
+		$result_name = 'email.user-email-authentication.unicode-exact-addresses';
+
+		if ( ! self::can_reset_stub_content() ) {
+			return array(
+				$ctx->skip(
+					$result_name,
+					'The in-memory wpdb content reset hook is unavailable.'
+				),
+			);
+		}
+
+		$missing = array();
+		foreach (
+			array(
+				'email_exists',
+				'get_user_by',
+				'is_email',
+				'is_wp_error',
+				'sanitize_email',
+				'wp_authenticate_email_password',
+				'wp_insert_user',
+			) as $function
+		) {
+			if ( ! function_exists( $function ) ) {
+				$missing[] = 'function ' . $function;
+			}
+		}
+
+		foreach ( array( 'WP_Email_Address', 'WP_Error', 'WP_User' ) as $class ) {
+			if ( ! class_exists( $class ) ) {
+				$missing[] = 'class ' . $class;
+			}
+		}
+
+		if ( array() !== $missing ) {
+			return array(
+				$ctx->skip(
+					$result_name,
+					'Required WordPress user authentication APIs are unavailable.',
+					array( 'missing' => implode( ', ', $missing ) )
+				),
+			);
+		}
+
+		$cases         = self::generated_authentication_cases( $ctx->fork( 'user-email-authentication' ) );
+		$failures      = array();
+		$observed      = array();
+		$hook_snapshot = self::snapshot_hook_globals();
+
+		self::reset_stub_content();
+		try {
+			self::install_email_filters( 'unicode' );
+			\remove_all_filters( 'pre_user_email' );
+			\add_filter( 'pre_user_email', 'trim' );
+			\add_filter( 'pre_user_email', 'sanitize_email' );
+			if ( function_exists( 'wp_filter_kses' ) ) {
+				\add_filter( 'pre_user_email', 'wp_filter_kses' );
+			}
+			\remove_all_filters( 'wp_authenticate_user' );
+
+			foreach ( $cases as $case_index => $case ) {
+				self::reset_stub_content();
+				self::install_email_filters( 'unicode' );
+
+				$parse       = self::capture_warnings( static fn() => \WP_Email_Address::from_string( $case['input'], 'unicode' ) );
+				$alias_parse = self::capture_warnings( static fn() => \WP_Email_Address::from_string( $case['aliasInput'], 'unicode' ) );
+				$email       = $parse['value'] ?? null;
+				$alias_email = $alias_parse['value'] ?? null;
+
+				if (
+					null !== $case['conversionError']
+					|| $parse['threw']
+					|| $alias_parse['threw']
+					|| array() !== $parse['warnings']
+					|| array() !== $alias_parse['warnings']
+					|| ! $email instanceof \WP_Email_Address
+					|| ! $alias_email instanceof \WP_Email_Address
+				) {
+					$failures[] = array(
+						'label'           => $case['label'],
+						'failure'         => 'authentication-address-oracle-unavailable',
+						'input'           => self::describe_string( $case['input'] ),
+						'aliasInput'      => self::describe_string( $case['aliasInput'] ),
+						'conversionError' => $case['conversionError'],
+						'parse'           => self::describe_captured_call( $parse ),
+						'aliasParse'      => self::describe_captured_call( $alias_parse ),
+					);
+					continue;
+				}
+
+				$canonical       = $email->get_unicode_address();
+				$machine         = $email->get_ascii_address();
+				$alias_canonical = $alias_email->get_unicode_address();
+				$password        = 'cfz-auth-pass-' . $ctx->iteration() . '-' . $case_index . '-' . substr( sha1( $canonical ), 0, 12 );
+				$alias_password  = 'cfz-auth-alias-pass-' . $ctx->iteration() . '-' . $case_index . '-' . substr( sha1( $alias_canonical ), 0, 12 );
+				$login           = 'cfz_auth_' . $ctx->iteration() . '_' . $case_index . '_' . substr( sha1( $canonical ), 0, 8 );
+				$alias_login     = 'cfz_auth_alias_' . $ctx->iteration() . '_' . $case_index . '_' . substr( sha1( $alias_canonical ), 0, 8 );
+
+				if ( $canonical === $alias_canonical ) {
+					$failures[] = array(
+						'label'     => $case['label'],
+						'failure'   => 'authentication-alias-not-distinct',
+						'canonical' => self::describe_string( $canonical ),
+						'alias'     => self::describe_string( $alias_canonical ),
+					);
+					continue;
+				}
+
+				$insert = self::capture_warnings(
+					static fn() => \wp_insert_user(
+						array(
+							'user_login' => $login,
+							'user_pass'  => $password,
+							'user_email' => $case['input'],
+							'role'       => 'subscriber',
+						)
+					)
+				);
+				$user_id = $insert['value'] ?? null;
+
+				$alias_insert = self::capture_warnings(
+					static fn() => \wp_insert_user(
+						array(
+							'user_login' => $alias_login,
+							'user_pass'  => $alias_password,
+							'user_email' => $case['aliasInput'],
+							'role'       => 'subscriber',
+						)
+					)
+				);
+				$alias_id = $alias_insert['value'] ?? null;
+
+				$stored           = is_int( $user_id ) ? self::capture_warnings( static fn() => \get_user_by( 'id', $user_id ) ) : self::not_called();
+				$by_canonical     = is_int( $user_id ) ? self::capture_warnings( static fn() => \get_user_by( 'email', $canonical ) ) : self::not_called();
+				$exists_canonical = is_int( $user_id ) ? self::capture_warnings( static fn() => \email_exists( $canonical ) ) : self::not_called();
+				$alias_stored     = is_int( $alias_id ) ? self::capture_warnings( static fn() => \get_user_by( 'id', $alias_id ) ) : self::not_called();
+				$alias_by_email   = is_int( $alias_id ) ? self::capture_warnings( static fn() => \get_user_by( 'email', $alias_canonical ) ) : self::not_called();
+				$auth             = is_int( $user_id ) ? self::capture_warnings( static fn() => \wp_authenticate_email_password( null, $canonical, $password ) ) : self::not_called();
+				$wrong_password   = is_int( $user_id ) ? self::capture_warnings( static fn() => \wp_authenticate_email_password( null, $canonical, $alias_password ) ) : self::not_called();
+				$alias_auth       = is_int( $alias_id ) ? self::capture_warnings( static fn() => \wp_authenticate_email_password( null, $alias_canonical, $alias_password ) ) : self::not_called();
+				$alias_with_target_password = is_int( $alias_id ) ? self::capture_warnings( static fn() => \wp_authenticate_email_password( null, $alias_canonical, $password ) ) : self::not_called();
+				$machine_auth     = $machine !== $canonical && is_int( $user_id )
+					? self::capture_warnings( static fn() => \wp_authenticate_email_password( null, $machine, $password ) )
+					: self::not_called();
+
+				$stored_user        = $stored['value'] ?? null;
+				$canonical_user     = $by_canonical['value'] ?? null;
+				$alias_stored_user  = $alias_stored['value'] ?? null;
+				$alias_lookup_user  = $alias_by_email['value'] ?? null;
+				$auth_user          = $auth['value'] ?? null;
+				$alias_auth_user    = $alias_auth['value'] ?? null;
+				$wrong_error        = $wrong_password['value'] ?? null;
+				$alias_wrong_error  = $alias_with_target_password['value'] ?? null;
+				$machine_auth_value = $machine_auth['value'] ?? null;
+
+				$insert_lookup_ok = ! $insert['threw']
+					&& ! $alias_insert['threw']
+					&& ! $stored['threw']
+					&& ! $by_canonical['threw']
+					&& ! $exists_canonical['threw']
+					&& ! $alias_stored['threw']
+					&& ! $alias_by_email['threw']
+					&& array() === $insert['warnings']
+					&& array() === $alias_insert['warnings']
+					&& array() === $stored['warnings']
+					&& array() === $by_canonical['warnings']
+					&& array() === $exists_canonical['warnings']
+					&& array() === $alias_stored['warnings']
+					&& array() === $alias_by_email['warnings']
+					&& is_int( $user_id )
+					&& is_int( $alias_id )
+					&& $user_id !== $alias_id
+					&& $stored_user instanceof \WP_User
+					&& $stored_user->ID === $user_id
+					&& $canonical === $stored_user->user_email
+					&& $canonical_user instanceof \WP_User
+					&& $canonical_user->ID === $user_id
+					&& $exists_canonical['value'] === $user_id
+					&& $alias_stored_user instanceof \WP_User
+					&& $alias_stored_user->ID === $alias_id
+					&& $alias_canonical === $alias_stored_user->user_email
+					&& $alias_lookup_user instanceof \WP_User
+					&& $alias_lookup_user->ID === $alias_id;
+
+				$auth_ok = ! $auth['threw']
+					&& ! $wrong_password['threw']
+					&& ! $alias_auth['threw']
+					&& ! $alias_with_target_password['threw']
+					&& array() === $auth['warnings']
+					&& array() === $wrong_password['warnings']
+					&& array() === $alias_auth['warnings']
+					&& array() === $alias_with_target_password['warnings']
+					&& $auth_user instanceof \WP_User
+					&& $auth_user->ID === $user_id
+					&& $canonical === $auth_user->user_email
+					&& \is_wp_error( $wrong_error )
+					&& 'incorrect_password' === $wrong_error->get_error_code()
+					&& $alias_auth_user instanceof \WP_User
+					&& $alias_auth_user->ID === $alias_id
+					&& $alias_canonical === $alias_auth_user->user_email
+					&& \is_wp_error( $alias_wrong_error )
+					&& 'incorrect_password' === $alias_wrong_error->get_error_code();
+
+				$machine_probe_ok = $machine === $canonical
+					? null === $machine_auth['value']
+					: (
+						! $machine_auth['threw']
+						&& array() === $machine_auth['warnings']
+						&& \is_wp_error( $machine_auth_value )
+						&& 'invalid_email' === $machine_auth_value->get_error_code()
+					);
+
+				if ( ! $insert_lookup_ok || ! $auth_ok || ! $machine_probe_ok ) {
+					$failures[] = array(
+						'label'           => $case['label'],
+						'profile'         => $case['profile'],
+						'input'           => self::describe_string( $case['input'] ),
+						'canonical'       => self::describe_string( $canonical ),
+						'machine'         => self::describe_string( $machine ),
+						'alias'           => self::describe_string( $alias_canonical ),
+						'insert'          => self::describe_captured_call( $insert ),
+						'aliasInsert'     => self::describe_captured_call( $alias_insert ),
+						'stored'          => self::describe_captured_call( $stored ),
+						'byCanonical'     => self::describe_captured_call( $by_canonical ),
+						'existsCanonical' => self::describe_captured_call( $exists_canonical ),
+						'aliasStored'     => self::describe_captured_call( $alias_stored ),
+						'aliasByEmail'    => self::describe_captured_call( $alias_by_email ),
+						'auth'            => self::describe_captured_call( $auth ),
+						'wrongPassword'   => self::describe_captured_call( $wrong_password ),
+						'aliasAuth'       => self::describe_captured_call( $alias_auth ),
+						'aliasWithTargetPassword' => self::describe_captured_call( $alias_with_target_password ),
+						'machineAuth'     => self::describe_captured_call( $machine_auth ),
+						'insertLookupOk'  => $insert_lookup_ok,
+						'authOk'          => $auth_ok,
+						'machineProbeOk'  => $machine_probe_ok,
+					);
+				}
+
+				$observed[] = array(
+					'label'            => $case['label'],
+					'profile'          => $case['profile'],
+					'source'           => $case['source'],
+					'inputDomainView'  => $case['inputDomainView'],
+					'canonical'        => self::describe_string( $canonical ),
+					'machineDiffers'   => $machine !== $canonical,
+					'alias'            => self::describe_string( $alias_canonical ),
+					'userId'           => $user_id,
+					'aliasId'          => $alias_id,
+					'exactAuthUserId'  => $auth_user instanceof \WP_User ? $auth_user->ID : null,
+					'aliasAuthUserId'  => $alias_auth_user instanceof \WP_User ? $alias_auth_user->ID : null,
+					'machineRejected'  => $machine !== $canonical ? \is_wp_error( $machine_auth_value ) : null,
 				);
 			}
 		} finally {
@@ -8090,6 +8365,89 @@ final class EmailSurface {
 		}
 
 		return $cases;
+	}
+
+	private static function generated_authentication_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$profiles = array(
+			array(
+				'label' => 'latin-ring',
+				'local' => "gr\u{00E5}.auth",
+				'alias' => 'gra.auth',
+			),
+			array(
+				'label' => 'latin-composed',
+				'local' => "jos\u{00E9}.auth",
+				'alias' => 'jose.auth',
+			),
+			array(
+				'label' => 'latin-combining',
+				'local' => "jose\u{0301}.auth",
+				'alias' => "jos\u{00E9}.auth",
+			),
+			array(
+				'label' => 'greek',
+				'local' => "\u{03B4}\u{03BF}\u{03BA}\u{03B9}\u{03BC}\u{03AE}.auth",
+				'alias' => 'dokimi.auth',
+			),
+			array(
+				'label' => 'cyrillic',
+				'local' => "\u{043F}\u{043E}\u{0447}\u{0442}\u{0430}.auth",
+				'alias' => 'pochta.auth',
+			),
+			array(
+				'label' => 'hiragana',
+				'local' => "\u{3086}\u{3046}\u{3056}\u{3042}.auth",
+				'alias' => 'yuzaa.auth',
+			),
+		);
+		$domains  = array(
+			self::unicode_matrix_domain( 'ascii-example', 'example.org' ),
+			self::unicode_matrix_domain( 'ascii-subdomain', 'sub-domain.example' ),
+		);
+		$cases    = array(
+			self::authentication_case( 'auth-unicode-local-ascii-domain', $profiles[1], $domains[0], 'unicode', 'fixture' ),
+			self::authentication_case( 'auth-combining-local-ascii-domain', $profiles[2], $domains[1], 'unicode', 'fixture' ),
+		);
+
+		if ( self::has_idn() ) {
+			$domains[] = self::unicode_matrix_domain( 'latin-ring-idn', "gr\u{00E5}.org" );
+			$domains[] = self::unicode_matrix_domain( 'latin-diaeresis-idn', "b\u{00FC}cher.de" );
+			$domains[] = self::unicode_matrix_domain( 'cjk-idn', "\u{4F8B}\u{5B50}.\u{5E7F}\u{544A}" );
+			$cases[]   = self::authentication_case( 'auth-punycode-input-canonical-user', $profiles[0], $domains[3], 'ascii', 'fixture' );
+			$cases[]   = self::authentication_case( 'auth-unicode-local-idn-domain', $profiles[4], $domains[2], 'unicode', 'fixture' );
+		}
+
+		for ( $i = 0; $i < self::GENERATED_AUTHENTICATION_CASES; $i++ ) {
+			$profile          = $ctx->choice( $profiles );
+			$suffix           = (string) $ctx->int( 10, 99 );
+			$profile['local'] = $profile['local'] . $suffix;
+			$profile['alias'] = $profile['alias'] . $suffix;
+			$domain           = $ctx->choice( $domains );
+			$input_view       = $domain['isIdn'] && $ctx->bool() ? 'ascii' : 'unicode';
+			$cases[]          = self::authentication_case(
+				'generated-auth-' . $i . '-' . $profile['label'] . '-' . $domain['label'],
+				$profile,
+				$domain,
+				$input_view,
+				'generated'
+			);
+		}
+
+		return $cases;
+	}
+
+	private static function authentication_case( string $label, array $profile, array $domain, string $input_domain_view, string $source ): array {
+		$input_domain = 'ascii' === $input_domain_view ? $domain['ascii'] : $domain['unicode'];
+
+		return array(
+			'label'           => $label,
+			'source'          => $source,
+			'profile'         => $profile['label'] . '/' . $domain['label'],
+			'inputDomainView' => $input_domain_view,
+			'input'           => $profile['local'] . '@' . $input_domain,
+			'aliasInput'      => $profile['alias'] . '@' . $domain['unicode'],
+			'conversionError' => $domain['conversionError'],
+		);
 	}
 
 	private static function generated_profile_confirmation_cases( \ComponentFuzz\FuzzContext $ctx ): array {
