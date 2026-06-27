@@ -91,12 +91,6 @@ final class ScriptLoaderRuntimeSurface {
 
 		foreach (
 			array(
-				'json_decode',
-				'json_encode',
-				'proc_close',
-				'proc_open',
-				'random_bytes',
-				'stream_get_contents',
 				'_print_emoji_detection_script',
 				'_wp_normalize_relative_css_links',
 				'load_script_textdomain',
@@ -149,10 +143,6 @@ final class ScriptLoaderRuntimeSurface {
 			if ( ! function_exists( $function ) ) {
 				$missing[] = "function {$function}";
 			}
-		}
-
-		if ( ! defined( 'PHP_BINARY' ) || '' === PHP_BINARY ) {
-			$missing[] = 'PHP_BINARY';
 		}
 
 		return $missing;
@@ -1490,6 +1480,15 @@ final class ScriptLoaderRuntimeSurface {
 	}
 
 	private static function check_jit_script_localization( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$missing = self::missing_jit_script_localization_requirements();
+		if ( array() !== $missing ) {
+			return $ctx->skip(
+				'script-loader-runtime.jit-script-localization',
+				'Child-process support for isolated AUTOSAVE_INTERVAL coverage is unavailable.',
+				self::case_data( $case ) + array( 'missing' => implode( ', ', $missing ) )
+			);
+		}
+
 		$parent_state_before      = self::jit_parent_state_snapshot();
 		$constant_defined_before = defined( 'AUTOSAVE_INTERVAL' );
 		$autosave_interval       = $ctx->fork( 'jit-script-localization' )->int( 15, 300 );
@@ -1628,6 +1627,22 @@ final class ScriptLoaderRuntimeSurface {
 				'failures'              => array_slice( $failures, 0, self::FAILURE_LIMIT ),
 			)
 		);
+	}
+
+	private static function missing_jit_script_localization_requirements(): array {
+		$missing = array();
+
+		foreach ( array( 'json_decode', 'json_encode', 'proc_close', 'proc_open', 'random_bytes', 'stream_get_contents' ) as $function ) {
+			if ( ! function_exists( $function ) ) {
+				$missing[] = "function {$function}";
+			}
+		}
+
+		if ( ! defined( 'PHP_BINARY' ) || '' === PHP_BINARY ) {
+			$missing[] = 'PHP_BINARY';
+		}
+
+		return $missing;
 	}
 
 	private static function run_child_jit_script_localization( array $case, int $autosave_interval ): array {
