@@ -91,6 +91,12 @@ final class ScriptLoaderRuntimeSurface {
 
 		foreach (
 			array(
+				'json_decode',
+				'json_encode',
+				'proc_close',
+				'proc_open',
+				'random_bytes',
+				'stream_get_contents',
 				'_print_emoji_detection_script',
 				'_wp_normalize_relative_css_links',
 				'load_script_textdomain',
@@ -143,6 +149,10 @@ final class ScriptLoaderRuntimeSurface {
 			if ( ! function_exists( $function ) ) {
 				$missing[] = "function {$function}";
 			}
+		}
+
+		if ( ! defined( 'PHP_BINARY' ) || '' === PHP_BINARY ) {
+			$missing[] = 'PHP_BINARY';
 		}
 
 		return $missing;
@@ -1480,56 +1490,437 @@ final class ScriptLoaderRuntimeSurface {
 	}
 
 	private static function check_jit_script_localization( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
-		if ( ! defined( 'AUTOSAVE_INTERVAL' ) ) {
-			return $ctx->skip(
-				'script-loader-runtime.jit-script-localization',
-				'AUTOSAVE_INTERVAL is not defined in the stripped no-DB bootstrap; calling the helper would fatal before exercising script-loader state.',
-				self::case_data( $case )
+		$parent_state_before      = self::jit_parent_state_snapshot();
+		$constant_defined_before = defined( 'AUTOSAVE_INTERVAL' );
+		$autosave_interval       = $ctx->fork( 'jit-script-localization' )->int( 15, 300 );
+
+		$run = self::run_child_jit_script_localization( $case, $autosave_interval );
+
+		$parent_state_after      = self::jit_parent_state_snapshot();
+		$constant_defined_after = defined( 'AUTOSAVE_INTERVAL' );
+
+		$result        = is_array( $run['result'] ) ? $run['result'] : array();
+		$localizations = is_array( $result['localizations'] ?? null ) ? $result['localizations'] : array();
+		$autosave      = $localizations['autosave']['decoded'] ?? null;
+		$mce_view      = $localizations['mce-view']['decoded'] ?? null;
+		$word_count    = $localizations['word-count']['decoded'] ?? null;
+		$autosave_raw  = (string) ( $localizations['autosave']['raw'] ?? '' );
+		$mce_raw       = (string) ( $localizations['mce-view']['raw'] ?? '' );
+		$word_raw      = (string) ( $localizations['word-count']['raw'] ?? '' );
+
+		$expected_handles    = array( 'autosave', 'mce-view', 'word-count' );
+		$expected_shortcodes = array_merge( array( 'gallery' ), $case['shortcodes'], array( $case['escapeShortcode'] ) );
+
+		$failures = array();
+		if ( ! $run['ok'] ) {
+			$failures[] = array(
+				'invariant' => 'isolated subprocess exits cleanly and returns structured JSON',
+				'exitCode'  => $run['exitCode'],
+				'stdout'    => self::preview( $run['stdout'] ),
+				'stderr'    => self::preview( $run['stderr'] ),
+			);
+		}
+		if ( true !== ( $result['childStateRestored'] ?? null ) ) {
+			$failures[] = array(
+				'invariant'          => 'child restores shortcode_tags, wp_scripts, and hook globals before exit',
+				'childStateRestored' => $result['childStateRestored'] ?? null,
+			);
+		}
+		if ( $parent_state_before !== $parent_state_after || $constant_defined_before !== $constant_defined_after ) {
+			$failures[] = array(
+				'invariant'             => 'parent shortcode_tags, wp_scripts, hook state, and AUTOSAVE_INTERVAL definition do not change',
+				'parentStateHashBefore' => self::state_hash( $parent_state_before ),
+				'parentStateHashAfter'  => self::state_hash( $parent_state_after ),
+				'constantBefore'        => $constant_defined_before,
+				'constantAfter'         => $constant_defined_after,
+			);
+		}
+		if ( $expected_handles !== ( $result['registeredHandles'] ?? null ) ) {
+			$failures[] = array(
+				'invariant' => 'child registers only the expected script handles',
+				'expected'  => $expected_handles,
+				'actual'    => $result['registeredHandles'] ?? null,
+			);
+		}
+		if (
+			! is_array( $autosave )
+			|| (string) $autosave_interval !== ( $autosave['autosaveInterval'] ?? null )
+			|| '1' !== ( $autosave['blog_id'] ?? null )
+		) {
+			$failures[] = array(
+				'invariant' => 'autosave localizes autosaveL10n.autosaveInterval and blog_id on the autosave handle',
+				'expected'  => array(
+					'autosaveInterval' => (string) $autosave_interval,
+					'blog_id'          => '1',
+				),
+				'actual'    => $autosave,
+			);
+		}
+		if ( ! is_array( $mce_view ) || $expected_shortcodes !== ( $mce_view['shortcodes'] ?? null ) ) {
+			$failures[] = array(
+				'invariant' => 'mce-view localizes mceViewL10n.shortcodes with generated shortcode tags',
+				'expected'  => $expected_shortcodes,
+				'actual'    => $mce_view['shortcodes'] ?? null,
+			);
+		}
+		if (
+			! is_array( $word_count )
+			|| 'words' !== ( $word_count['type'] ?? null )
+			|| $expected_shortcodes !== ( $word_count['shortcodes'] ?? null )
+		) {
+			$failures[] = array(
+				'invariant' => 'word-count localizes wordCountL10n.type and generated shortcode tags',
+				'expected'  => array(
+					'type'       => 'words',
+					'shortcodes' => $expected_shortcodes,
+				),
+				'actual'    => $word_count,
+			);
+		}
+		foreach ( $expected_handles as $handle ) {
+			$json_error = $localizations[ $handle ]['jsonError'] ?? null;
+			if ( 'No error' !== $json_error ) {
+				$failures[] = array(
+					'invariant' => 'localized data is parseable JSON with the expected object shape',
+					'handle'    => $handle,
+					'jsonError' => $json_error,
+					'raw'       => self::preview( (string) ( $localizations[ $handle ]['raw'] ?? '' ) ),
+				);
+			}
+		}
+		if (
+			str_contains( $mce_raw, '<script' )
+			|| str_contains( $mce_raw, '</script' )
+			|| str_contains( $word_raw, '<script' )
+			|| str_contains( $word_raw, '</script' )
+			|| ! str_contains( $mce_raw, '\u003Cscript' )
+			|| ! str_contains( $word_raw, '\u003Cscript' )
+		) {
+			$failures[] = array(
+				'invariant'       => 'localized shortcode data JSON-escapes tag-shaped shortcode keys',
+				'escapeShortcode' => $case['escapeShortcode'],
+				'mceViewRaw'      => self::preview( $mce_raw ),
+				'wordCountRaw'    => self::preview( $word_raw ),
 			);
 		}
 
-		self::reset_scripts_global();
-
-		$GLOBALS['shortcode_tags'] = array(
-			'gallery'          => static fn() => '',
-			$case['shortcode'] => static fn() => '',
-		);
-
-		foreach ( array( 'autosave', 'mce-view', 'word-count' ) as $handle ) {
-			\wp_register_script( $handle, "runtime/{$handle}.js", array(), '1.0.0' );
-		}
-
-		$call = self::call( static fn() => \wp_just_in_time_script_localization() );
-
-		$autosave = \wp_scripts()->get_data( 'autosave', 'data' );
-		$mce_view = \wp_scripts()->get_data( 'mce-view', 'data' );
-		$word_count = \wp_scripts()->get_data( 'word-count', 'data' );
-
-		$ok = ! $call['threw']
-			&& is_string( $autosave )
-			&& is_string( $mce_view )
-			&& is_string( $word_count )
-			&& str_contains( $autosave, 'autosaveInterval' )
-			&& str_contains( $mce_view, $case['shortcode'] )
-			&& str_contains( $word_count, $case['shortcode'] );
+		$ok = array() === $failures;
 
 		return $ctx->result(
 			'script-loader-runtime.jit-script-localization',
 			$ok,
 			self::case_data( $case ) + array(
-				'shortcode' => $case['shortcode'],
-				'autosave'  => self::preview( is_string( $autosave ) ? $autosave : '' ),
-				'mceView'   => self::preview( is_string( $mce_view ) ? $mce_view : '' ),
-				'wordCount' => self::preview( is_string( $word_count ) ? $word_count : '' ),
-				'call'      => self::describe_call( $call ),
+				'autosaveInterval'      => $autosave_interval,
+				'shortcodes'            => $expected_shortcodes,
+				'parentStateHashBefore' => self::state_hash( $parent_state_before ),
+				'parentStateHashAfter'  => self::state_hash( $parent_state_after ),
+				'parentConstantBefore'  => $constant_defined_before,
+				'parentConstantAfter'   => $constant_defined_after,
+				'childStateRestored'    => $result['childStateRestored'] ?? null,
+				'registeredHandles'     => $result['registeredHandles'] ?? null,
+				'localizedHandles'      => $result['localizedHandles'] ?? null,
+				'autosave'              => self::preview( $autosave_raw ),
+				'mceView'               => self::preview( $mce_raw ),
+				'wordCount'             => self::preview( $word_raw ),
+				'call'                  => $result['call'] ?? null,
+				'childUnexpectedOutput' => self::preview( (string) ( $result['unexpectedOutput'] ?? '' ) ),
+				'childStderr'           => self::preview( $run['stderr'] ),
+				'failures'              => array_slice( $failures, 0, self::FAILURE_LIMIT ),
 			)
 		);
+	}
+
+	private static function run_child_jit_script_localization( array $case, int $autosave_interval ): array {
+		$dir = rtrim( sys_get_temp_dir(), DIRECTORY_SEPARATOR ) . DIRECTORY_SEPARATOR . 'component-fuzz-script-loader-runtime';
+		\ComponentFuzz\ensure_dir( $dir );
+
+		$script = $dir . DIRECTORY_SEPARATOR . 'jit-child-' . getmypid() . '-' . bin2hex( random_bytes( 6 ) ) . '.php';
+		file_put_contents( $script, self::jit_script_localization_child_program() );
+
+		$descriptors = array(
+			0 => array( 'pipe', 'r' ),
+			1 => array( 'pipe', 'w' ),
+			2 => array( 'pipe', 'w' ),
+		);
+
+		// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.system_calls_proc_open -- Isolates AUTOSAVE_INTERVAL in a local PHP subprocess.
+		$process = proc_open( array( PHP_BINARY, $script ), $descriptors, $pipes, \ComponentFuzz\repo_root() );
+		if ( ! is_resource( $process ) ) {
+			@unlink( $script );
+			return array(
+				'ok'       => false,
+				'exitCode' => -1,
+				'stdout'   => '',
+				'stderr'   => 'proc_open failed',
+				'result'   => null,
+			);
+		}
+
+		$payload = json_encode(
+			array(
+				'repoRoot'          => \ComponentFuzz\repo_root(),
+				'case'              => $case,
+				'autosaveInterval'  => $autosave_interval,
+				'baseUrl'           => self::BASE_URL,
+				'contentUrl'        => self::CONTENT_URL,
+				'defaultVersion'    => self::DEFAULT_VERSION,
+			),
+			JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE
+		);
+		fwrite( $pipes[0], false === $payload ? '{}' : $payload );
+		fclose( $pipes[0] );
+
+		$stdout = stream_get_contents( $pipes[1] );
+		$stderr = stream_get_contents( $pipes[2] );
+		fclose( $pipes[1] );
+		fclose( $pipes[2] );
+
+		$exit_code = proc_close( $process );
+		@unlink( $script );
+
+		$result = json_decode( (string) $stdout, true );
+		return array(
+			'ok'       => 0 === $exit_code && is_array( $result ) && ! empty( $result['ok'] ),
+			'exitCode' => $exit_code,
+			'stdout'   => (string) $stdout,
+			'stderr'   => (string) $stderr,
+			'result'   => is_array( $result ) ? $result : null,
+		);
+	}
+
+	private static function jit_script_localization_child_program(): string {
+		return <<<'PHP'
+<?php
+ini_set( 'display_errors', 'stderr' );
+error_reporting( E_ALL & ~E_DEPRECATED & ~E_USER_DEPRECATED );
+
+function component_fuzz_slr_snapshot_globals(): array {
+	$snapshot = array(
+		'obLevel' => ob_get_level(),
+		'globals' => array(),
+	);
+
+	foreach ( array( 'shortcode_tags', 'wp_actions', 'wp_current_filter', 'wp_filter', 'wp_filters', 'wp_scripts' ) as $name ) {
+		$snapshot['globals'][ $name ] = array(
+			'exists' => array_key_exists( $name, $GLOBALS ),
+			'value'  => $GLOBALS[ $name ] ?? null,
+		);
+	}
+
+	return $snapshot;
+}
+
+function component_fuzz_slr_restore_globals( array $snapshot ): void {
+	foreach ( $snapshot['globals'] as $name => $entry ) {
+		if ( $entry['exists'] ) {
+			$GLOBALS[ $name ] = $entry['value'];
+		} else {
+			unset( $GLOBALS[ $name ] );
+		}
+	}
+
+	while ( ob_get_level() > $snapshot['obLevel'] ) {
+		ob_end_clean();
+	}
+}
+
+function component_fuzz_slr_state_matches( array $snapshot ): bool {
+	if ( ob_get_level() !== $snapshot['obLevel'] ) {
+		return false;
+	}
+
+	foreach ( $snapshot['globals'] as $name => $entry ) {
+		if ( $entry['exists'] !== array_key_exists( $name, $GLOBALS ) ) {
+			return false;
+		}
+		if ( $entry['exists'] && $GLOBALS[ $name ] !== $entry['value'] ) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
+function component_fuzz_slr_call( callable $callback ): array {
+	try {
+		$callback();
+		return array(
+			'threw' => false,
+			'value' => null,
+		);
+	} catch ( Throwable $e ) {
+		return array(
+			'threw'     => true,
+			'throwable' => array(
+				'class'   => get_class( $e ),
+				'message' => $e->getMessage(),
+				'file'    => $e->getFile(),
+				'line'    => $e->getLine(),
+			),
+			'value'     => null,
+		);
+	}
+}
+
+function component_fuzz_slr_decode_localization( $raw, string $object_name ): array {
+	if ( ! is_string( $raw ) ) {
+		return array(
+			'json'      => null,
+			'decoded'   => null,
+			'jsonError' => 'localized data is not a string',
+		);
+	}
+
+	$pattern = '/^var\s+' . preg_quote( $object_name, '/' ) . '\s*=\s*(.*);$/s';
+	if ( ! preg_match( $pattern, trim( $raw ), $matches ) ) {
+		return array(
+			'json'      => null,
+			'decoded'   => null,
+			'jsonError' => 'localized data does not match expected var assignment',
+		);
+	}
+
+	$decoded = json_decode( $matches[1], true );
+	return array(
+		'json'      => $matches[1],
+		'decoded'   => $decoded,
+		'jsonError' => json_last_error_msg(),
+	);
+}
+
+function component_fuzz_slr_localization( WP_Scripts $scripts, string $handle, string $object_name ): array {
+	$raw     = $scripts->get_data( $handle, 'data' );
+	$decoded = component_fuzz_slr_decode_localization( $raw, $object_name );
+
+	return array(
+		'object'    => $object_name,
+		'raw'       => is_string( $raw ) ? $raw : null,
+		'rawType'   => gettype( $raw ),
+		'json'      => $decoded['json'],
+		'decoded'   => $decoded['decoded'],
+		'jsonError' => $decoded['jsonError'],
+	);
+}
+
+function component_fuzz_slr_preview( string $value, int $limit = 240 ): string {
+	$printable = preg_replace_callback(
+		'/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/',
+		static function ( array $m ): string {
+			return sprintf( '\\x%02X', ord( $m[0] ) );
+		},
+		$value
+	);
+
+	if ( strlen( $printable ) > $limit ) {
+		return substr( $printable, 0, $limit ) . '...';
+	}
+
+	return $printable;
+}
+
+$component_fuzz_slr_outer_ob_level = ob_get_level();
+ob_start();
+
+$component_fuzz_slr_unexpected_output = '';
+$component_fuzz_slr_snapshot          = null;
+$component_fuzz_slr_result            = array(
+	'ok'                 => false,
+	'childStateRestored' => false,
+	'registeredHandles'  => array(),
+	'localizedHandles'   => array(),
+	'localizations'      => array(),
+	'call'               => null,
+	'unexpectedOutput'   => '',
+);
+
+try {
+	$component_fuzz_slr_raw     = stream_get_contents( STDIN );
+	$component_fuzz_slr_fixture = json_decode( $component_fuzz_slr_raw, true );
+
+	if ( ! is_array( $component_fuzz_slr_fixture ) || empty( $component_fuzz_slr_fixture['repoRoot'] ) || ! is_array( $component_fuzz_slr_fixture['case'] ?? null ) ) {
+		throw new RuntimeException( 'Invalid script-loader JIT fixture.' );
+	}
+
+	define( 'AUTOSAVE_INTERVAL', (int) $component_fuzz_slr_fixture['autosaveInterval'] );
+
+	require_once $component_fuzz_slr_fixture['repoRoot'] . '/tools/component-fuzz/lib/autoload.php';
+
+	\ComponentFuzz\WpBootstrap::load();
+
+	$component_fuzz_slr_snapshot = component_fuzz_slr_snapshot_globals();
+	$component_fuzz_slr_case     = $component_fuzz_slr_fixture['case'];
+
+	if ( ! isset( $GLOBALS['wp_actions'] ) || ! is_array( $GLOBALS['wp_actions'] ) ) {
+		$GLOBALS['wp_actions'] = array();
+	}
+	$GLOBALS['wp_actions']['init'] = max( 1, (int) ( $GLOBALS['wp_actions']['init'] ?? 0 ) );
+	$GLOBALS['concatenate_scripts'] = false;
+	$GLOBALS['compress_scripts']    = false;
+	$GLOBALS['wp_scripts']          = new WP_Scripts();
+	wp_scripts()->base_url          = (string) $component_fuzz_slr_fixture['baseUrl'];
+	wp_scripts()->content_url       = (string) $component_fuzz_slr_fixture['contentUrl'];
+	wp_scripts()->default_version   = (string) $component_fuzz_slr_fixture['defaultVersion'];
+	wp_scripts()->default_dirs      = array();
+
+	$GLOBALS['shortcode_tags'] = array( 'gallery' => '__return_empty_string' );
+	foreach ( $component_fuzz_slr_case['shortcodes'] as $component_fuzz_slr_shortcode ) {
+		$GLOBALS['shortcode_tags'][ $component_fuzz_slr_shortcode ] = '__return_empty_string';
+	}
+	$GLOBALS['shortcode_tags'][ $component_fuzz_slr_case['escapeShortcode'] ] = '__return_empty_string';
+
+	foreach ( array( 'autosave', 'mce-view', 'word-count' ) as $component_fuzz_slr_handle ) {
+		wp_register_script( $component_fuzz_slr_handle, "runtime/{$component_fuzz_slr_handle}.js", array(), '1.0.0' );
+	}
+
+	$component_fuzz_slr_call = component_fuzz_slr_call( static fn() => wp_just_in_time_script_localization() );
+	$component_fuzz_slr_scripts = wp_scripts();
+
+	$component_fuzz_slr_result['call']              = $component_fuzz_slr_call;
+	$component_fuzz_slr_result['registeredHandles'] = array_keys( $component_fuzz_slr_scripts->registered );
+	$component_fuzz_slr_result['localizations']     = array(
+		'autosave'   => component_fuzz_slr_localization( $component_fuzz_slr_scripts, 'autosave', 'autosaveL10n' ),
+		'mce-view'   => component_fuzz_slr_localization( $component_fuzz_slr_scripts, 'mce-view', 'mceViewL10n' ),
+		'word-count' => component_fuzz_slr_localization( $component_fuzz_slr_scripts, 'word-count', 'wordCountL10n' ),
+	);
+	$component_fuzz_slr_result['localizedHandles']  = array_values(
+		array_filter(
+			array_keys( $component_fuzz_slr_result['localizations'] ),
+			static fn( string $handle ): bool => is_string( $component_fuzz_slr_result['localizations'][ $handle ]['raw'] )
+		)
+	);
+	$component_fuzz_slr_result['wordCountType']     = wp_get_word_count_type();
+	$component_fuzz_slr_result['ok']                = ! $component_fuzz_slr_call['threw'];
+} catch ( Throwable $e ) {
+	$component_fuzz_slr_result['throwable'] = array(
+		'class'   => get_class( $e ),
+		'message' => $e->getMessage(),
+		'file'    => $e->getFile(),
+		'line'    => $e->getLine(),
+	);
+} finally {
+	if ( is_array( $component_fuzz_slr_snapshot ) ) {
+		component_fuzz_slr_restore_globals( $component_fuzz_slr_snapshot );
+		$component_fuzz_slr_result['childStateRestored'] = component_fuzz_slr_state_matches( $component_fuzz_slr_snapshot );
+	}
+
+	while ( ob_get_level() > $component_fuzz_slr_outer_ob_level ) {
+		$component_fuzz_slr_unexpected_output = ob_get_clean() . $component_fuzz_slr_unexpected_output;
+	}
+
+	$component_fuzz_slr_result['unexpectedOutput'] = component_fuzz_slr_preview( $component_fuzz_slr_unexpected_output );
+}
+
+$component_fuzz_slr_json = json_encode( $component_fuzz_slr_result, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE );
+echo false === $component_fuzz_slr_json ? '{"ok":false,"error":"json_encode failed"}' : $component_fuzz_slr_json;
+exit( ! empty( $component_fuzz_slr_result['ok'] ) ? 0 : 1 );
+PHP;
 	}
 
 	private static function case_for_context( \ComponentFuzz\FuzzContext $ctx ): array {
 		$token  = $ctx->iteration() . '-' . substr( sha1( (string) $ctx->seed() ), 0, 8 );
 		$prefix = 'cf-slr-' . $token;
 		$tag_value = '<tag attr="value&' . $ctx->int( 0, 999 ) . '">"quoted"&</tag>';
+		$shortcode = 'cf_shortcode_' . str_replace( '-', '_', $token );
 
 		return array(
 			'token'      => $token,
@@ -1540,7 +1931,13 @@ final class ScriptLoaderRuntimeSurface {
 			'styleSrcA'  => 'runtime/' . rawurlencode( $prefix ) . '-one.css?x=1#frag',
 			'styleSrcB'  => 'runtime/' . rawurlencode( $prefix ) . '-two.css?x=2#frag',
 			'objectName' => 'cfRuntime' . str_replace( '-', '_', $token ),
-			'shortcode'  => 'cf_shortcode_' . str_replace( '-', '_', $token ),
+			'shortcode'  => $shortcode,
+			'shortcodes' => array(
+				$shortcode,
+				$shortcode . '_alpha',
+				$shortcode . '_beta',
+			),
+			'escapeShortcode' => $shortcode . '_lt<script>alert(1)</script>',
 			'moduleIds'  => array(
 				'@component-fuzz/runtime/' . $token . '/alpha',
 				'@component-fuzz/runtime/' . $token . '/beta',
@@ -2085,6 +2482,207 @@ final class ScriptLoaderRuntimeSurface {
 			return array();
 		}
 		return array( $value );
+	}
+
+	private static function jit_parent_state_snapshot(): array {
+		return array(
+			'shortcodeTags' => array_key_exists( 'shortcode_tags', $GLOBALS )
+				? self::shortcode_tags_state( $GLOBALS['shortcode_tags'] )
+				: null,
+			'wpScripts'     => self::wp_scripts_state( $GLOBALS['wp_scripts'] ?? null ),
+			'hooks'         => array(
+				'wp_actions'        => self::normalize_state_value( $GLOBALS['wp_actions'] ?? null ),
+				'wp_current_filter' => self::normalize_state_value( $GLOBALS['wp_current_filter'] ?? null ),
+				'wp_filter'         => self::filter_hooks_state( $GLOBALS['wp_filter'] ?? null ),
+				'wp_filters'        => self::normalize_state_value( $GLOBALS['wp_filters'] ?? null ),
+			),
+		);
+	}
+
+	private static function shortcode_tags_state( $shortcode_tags ): array {
+		if ( ! is_array( $shortcode_tags ) ) {
+			return array(
+				'type'  => gettype( $shortcode_tags ),
+				'value' => self::normalize_state_value( $shortcode_tags ),
+			);
+		}
+
+		$state = array();
+		foreach ( $shortcode_tags as $tag => $callback ) {
+			$state[ $tag ] = self::callback_state( $callback );
+		}
+		return $state;
+	}
+
+	private static function wp_scripts_state( $scripts ): array {
+		if ( ! $scripts instanceof \WP_Scripts ) {
+			return array(
+				'type'  => is_object( $scripts ) ? get_class( $scripts ) : gettype( $scripts ),
+				'value' => self::normalize_state_value( $scripts ),
+			);
+		}
+
+		$registered = array();
+		foreach ( $scripts->registered as $handle => $dependency ) {
+			$registered[ $handle ] = self::dependency_state( $dependency );
+		}
+
+		return array(
+			'class'           => get_class( $scripts ),
+			'baseUrl'         => $scripts->base_url,
+			'contentUrl'      => $scripts->content_url,
+			'defaultVersion'  => $scripts->default_version,
+			'defaultDirs'     => self::normalize_state_value( $scripts->default_dirs ),
+			'registered'      => $registered,
+			'queue'           => $scripts->queue,
+			'toDo'            => $scripts->to_do,
+			'done'            => $scripts->done,
+			'args'            => self::normalize_state_value( $scripts->args ),
+			'groups'          => self::normalize_state_value( $scripts->groups ),
+			'inFooter'        => self::normalize_state_value( $scripts->in_footer ),
+			'concat'          => $scripts->concat,
+			'concatVersion'   => $scripts->concat_version,
+			'doConcat'        => $scripts->do_concat,
+			'printHtml'       => $scripts->print_html,
+			'printCode'       => $scripts->print_code,
+			'extHandles'      => $scripts->ext_handles,
+			'extVersion'      => $scripts->ext_version,
+		);
+	}
+
+	private static function dependency_state( $dependency ): array {
+		if ( ! $dependency instanceof \_WP_Dependency ) {
+			return array(
+				'type'  => is_object( $dependency ) ? get_class( $dependency ) : gettype( $dependency ),
+				'value' => self::normalize_state_value( $dependency ),
+			);
+		}
+
+		return array(
+			'handle'           => $dependency->handle,
+			'src'              => $dependency->src,
+			'deps'             => $dependency->deps,
+			'ver'              => $dependency->ver,
+			'args'             => self::normalize_state_value( $dependency->args ),
+			'extra'            => self::normalize_state_value( $dependency->extra ),
+			'textdomain'       => $dependency->textdomain ?? null,
+			'translationsPath' => $dependency->translations_path ?? null,
+		);
+	}
+
+	private static function filter_hooks_state( $hooks ): array {
+		if ( ! is_array( $hooks ) ) {
+			return array(
+				'type'  => is_object( $hooks ) ? get_class( $hooks ) : gettype( $hooks ),
+				'value' => self::normalize_state_value( $hooks ),
+			);
+		}
+
+		$state = array();
+		foreach ( $hooks as $hook_name => $hook ) {
+			$state[ $hook_name ] = self::hook_state( $hook );
+		}
+		return $state;
+	}
+
+	private static function hook_state( $hook ): array {
+		if ( $hook instanceof \WP_Hook ) {
+			$callbacks = array();
+			foreach ( $hook->callbacks as $priority => $priority_callbacks ) {
+				$callbacks[ (string) $priority ] = array();
+				foreach ( $priority_callbacks as $id => $callback ) {
+					$callbacks[ (string) $priority ][ $id ] = array(
+						'function'     => self::callback_state( $callback['function'] ?? null ),
+						'acceptedArgs' => (int) ( $callback['accepted_args'] ?? 0 ),
+					);
+				}
+			}
+
+			return array(
+				'class'     => get_class( $hook ),
+				'callbacks' => $callbacks,
+			);
+		}
+
+		return array(
+			'type'  => is_object( $hook ) ? get_class( $hook ) : gettype( $hook ),
+			'value' => self::normalize_state_value( $hook ),
+		);
+	}
+
+	private static function callback_state( $callback ): array {
+		if ( is_string( $callback ) ) {
+			return array(
+				'type' => 'function',
+				'name' => $callback,
+			);
+		}
+		if ( is_array( $callback ) && 2 === count( $callback ) ) {
+			return array(
+				'type'   => 'method',
+				'class'  => is_object( $callback[0] ) ? get_class( $callback[0] ) : (string) $callback[0],
+				'object' => is_object( $callback[0] ) ? spl_object_id( $callback[0] ) : null,
+				'method' => (string) $callback[1],
+			);
+		}
+		if ( $callback instanceof \Closure ) {
+			return array(
+				'type'   => 'closure',
+				'object' => spl_object_id( $callback ),
+			);
+		}
+		if ( is_object( $callback ) ) {
+			return array(
+				'type'   => 'invokable',
+				'class'  => get_class( $callback ),
+				'object' => spl_object_id( $callback ),
+			);
+		}
+
+		return array(
+			'type'  => gettype( $callback ),
+			'value' => self::normalize_state_value( $callback ),
+		);
+	}
+
+	private static function normalize_state_value( $value, int $depth = 0 ) {
+		if ( null === $value || is_scalar( $value ) ) {
+			return $value;
+		}
+		if ( $depth > 5 ) {
+			return is_object( $value ) ? '[object ' . get_class( $value ) . ']' : '[' . gettype( $value ) . ']';
+		}
+		if ( is_array( $value ) ) {
+			$normalized = array();
+			foreach ( $value as $key => $item ) {
+				$normalized[ $key ] = self::normalize_state_value( $item, $depth + 1 );
+			}
+			return $normalized;
+		}
+		if ( $value instanceof \Closure ) {
+			return array(
+				'type'   => 'closure',
+				'object' => spl_object_id( $value ),
+			);
+		}
+		if ( is_object( $value ) ) {
+			return array(
+				'type'   => 'object',
+				'class'  => get_class( $value ),
+				'object' => spl_object_id( $value ),
+			);
+		}
+
+		return '[' . gettype( $value ) . ']';
+	}
+
+	private static function state_hash( array $state ): string {
+		$json = json_encode( $state, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE );
+		if ( false === $json ) {
+			return 'json-error:' . json_last_error_msg();
+		}
+
+		return hash( 'sha256', $json );
 	}
 
 	private static function temp_path( string $filename ): string {
