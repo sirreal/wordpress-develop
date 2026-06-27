@@ -331,7 +331,8 @@ database, network requests, or a configured site.
   state/config merge serialization.
 - `hooks`: filter/action priority ordering, accepted arguments, removal,
   nested and reentrant hook stack state, preinitialized hook normalization,
-  `current_filter()`, `doing_filter()`, `did_action()`.
+  deprecated hook wrapper fast paths and side-effect hooks, ref-array
+  deprecated dispatch, `current_filter()`, `doing_filter()`, `did_action()`.
 - `kses`: KSES policies, wrapper agreement, protocol filtering/helper contracts,
   low-level helper contracts, filter-aware safe CSS, attribute/entity/comment
   handling, deterministic attribute constraint matrices for required, values,
