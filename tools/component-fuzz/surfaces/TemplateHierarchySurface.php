@@ -1105,10 +1105,12 @@ final class TemplateHierarchySurface {
 				self::comments_template_comment_fixture( $comment_ids[1], $post_id, 'second', $case['token'] ),
 			),
 			'expected' => array(
-				'postId'      => $post_id,
-				'commentIds'  => $comment_ids,
-				'queryStatus' => 'approve',
-				'queryOrder'  => 'ASC',
+				'postId'           => $post_id,
+				'commentIds'       => $comment_ids,
+				'queryOrderby'     => 'comment_date_gmt',
+				'queryOrder'       => 'ASC',
+				'queryStatus'      => 'approve',
+				'queryNoFoundRows' => false,
 			),
 		);
 
@@ -1373,7 +1375,7 @@ final class TemplateHierarchySurface {
 		self::collect_failure(
 			$failures,
 			self::comments_template_comment_events_match( $comments_array_events, $expected_comment_ids, (int) $fixture['expected']['postId'] )
-				&& self::comments_template_loads_received_comments( $template_loads, $expected_comment_ids ),
+				&& self::comments_template_loads_received_comments( $template_loads, $expected_comment_ids, $fixture ),
 			'synthetic comments are passed through comments_array and into the included comments templates',
 			array(
 				'commentsArrayEvents' => $comments_array_events,
@@ -1400,8 +1402,10 @@ final class TemplateHierarchySurface {
 			$query_vars = is_array( $event['queryVars'] ?? null ) ? $event['queryVars'] : array();
 			if (
 				(int) ( $query_vars['post_id'] ?? 0 ) !== (int) $fixture['expected']['postId']
-				|| ( $query_vars['status'] ?? null ) !== $fixture['expected']['queryStatus']
+				|| ( $query_vars['orderby'] ?? null ) !== $fixture['expected']['queryOrderby']
 				|| ( $query_vars['order'] ?? null ) !== $fixture['expected']['queryOrder']
+				|| ( $query_vars['status'] ?? null ) !== $fixture['expected']['queryStatus']
+				|| ( $query_vars['no_found_rows'] ?? null ) !== $fixture['expected']['queryNoFoundRows']
 				|| false !== ( $query_vars['hierarchical'] ?? null )
 			) {
 				return false;
@@ -1428,16 +1432,23 @@ final class TemplateHierarchySurface {
 		return true;
 	}
 
-	private static function comments_template_loads_received_comments( array $template_loads, array $expected_comment_ids ): bool {
+	private static function comments_template_loads_received_comments( array $template_loads, array $expected_comment_ids, array $fixture ): bool {
 		if ( 2 !== count( $template_loads ) ) {
 			return false;
 		}
 
 		foreach ( $template_loads as $load ) {
+			$comment_args = is_array( $load['commentArgs'] ?? null ) ? $load['commentArgs'] : array();
 			if (
 				2 !== (int) ( $load['commentsCount'] ?? -1 )
 				|| 2 !== (int) ( $load['queryCommentCount'] ?? -1 )
 				|| $expected_comment_ids !== array_map( 'intval', is_array( $load['commentIds'] ?? null ) ? $load['commentIds'] : array() )
+				|| (int) ( $comment_args['post_id'] ?? 0 ) !== (int) $fixture['expected']['postId']
+				|| ( $comment_args['orderby'] ?? null ) !== $fixture['expected']['queryOrderby']
+				|| ( $comment_args['order'] ?? null ) !== $fixture['expected']['queryOrder']
+				|| ( $comment_args['status'] ?? null ) !== $fixture['expected']['queryStatus']
+				|| ( $comment_args['no_found_rows'] ?? null ) !== $fixture['expected']['queryNoFoundRows']
+				|| false !== ( $comment_args['hierarchical'] ?? null )
 			) {
 				return false;
 			}
@@ -1453,8 +1464,10 @@ final class TemplateHierarchySurface {
 			$query_vars = is_array( $event['queryVars'] ?? null ) ? $event['queryVars'] : array();
 			$summary[]  = array(
 				'postId'        => $query_vars['post_id'] ?? null,
-				'status'        => $query_vars['status'] ?? null,
+				'orderby'       => $query_vars['orderby'] ?? null,
 				'order'         => $query_vars['order'] ?? null,
+				'status'        => $query_vars['status'] ?? null,
+				'noFoundRows'   => $query_vars['no_found_rows'] ?? null,
 				'hierarchical'  => $query_vars['hierarchical'] ?? null,
 				'returnedIds'   => $event['returnedIds'] ?? array(),
 				'maxNumPages'   => $event['maxNumPages'] ?? null,
@@ -1515,11 +1528,36 @@ function component_fuzz_template_hierarchy_snapshot(): array {
 	) {
 		$snapshot['globals'][ $name ] = array(
 			'exists' => array_key_exists( $name, $GLOBALS ),
-			'value'  => $GLOBALS[ $name ] ?? null,
+			'value'  => array_key_exists( $name, $GLOBALS ) ? component_fuzz_template_hierarchy_clone_value( $GLOBALS[ $name ] ) : null,
 		);
 	}
 
 	return $snapshot;
+}
+
+function component_fuzz_template_hierarchy_clone_value( $value ) {
+	if ( is_array( $value ) ) {
+		$copy = array();
+		foreach ( $value as $key => $item ) {
+			$copy[ $key ] = component_fuzz_template_hierarchy_clone_value( $item );
+		}
+
+		return $copy;
+	}
+
+	if ( is_object( $value ) ) {
+		if ( $value instanceof Closure ) {
+			return $value;
+		}
+
+		try {
+			return clone $value;
+		} catch ( Throwable $e ) {
+			return $value;
+		}
+	}
+
+	return $value;
 }
 
 function component_fuzz_template_hierarchy_restore( array $snapshot ): void {
