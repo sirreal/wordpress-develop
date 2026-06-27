@@ -52,13 +52,14 @@ database, network requests, or a configured site.
   bulk-action/month-dropdown helper contracts, and safe admin/AJAX nonce checks
   without process exits.
 - `admin-list-tables`: no-live-DB concrete admin list-table subclass coverage
-  for posts, media, comments, terms, users, plugins, themes, network themes,
-  application passwords, and guarded network sites/users, including columns/
-  hidden/sortable/default-primary logic, views, actions, bulk actions, exact row
-  URL/nonce and HTML escaping, base `WP_List_Table` pagination/per-page output,
-  pagination/counts, synthetic object/pre-query/user-meta/theme fixtures,
-  capability gates, JS row templates, and state/filter
-  restoration.
+  for posts, media, comments, terms, users, plugins, plugin install search
+  results, themes, network themes, application passwords, and guarded network
+  sites/users, including columns/hidden/sortable/default-primary logic, views,
+  actions, bulk actions, exact row URL/nonce and HTML escaping, base
+  `WP_List_Table` pagination/per-page output, pagination/counts, synthetic
+  object/pre-query/user-meta/plugin/theme fixtures, capability gates,
+  install/update/activate action rendering, localized update-count cleanup,
+  JS row templates, and state/filter restoration.
 - `admin-media-chrome`: no-DB admin media chrome helper coverage, including
   attachment edit field preparation, media item and compat markup escaping,
   image form controls, image editor chrome from cache-seeded metadata,
