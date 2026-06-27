@@ -219,6 +219,7 @@ database, network requests, or a configured site.
   validation across Unicode/ASCII filter modes,
   and no-DB stub-backed user email lookup/duplicate behavior for accent-distinct
   local parts/domains, generated Unicode local-part update/collision behavior,
+  exact Unicode email authentication and machine-view miss behavior,
   email-change notification recipient/body preservation, canonical Unicode-domain
   save/update collision behavior without MySQL collation/index coverage,
   profile email-change confirmation request paths, password-reset Unicode recipient paths,
