@@ -32,6 +32,7 @@ final class AdminListTablesSurface {
 			$rows[] = self::check_posts_media_tables( $ctx->fork( 'posts-media' ) );
 			$rows[] = self::check_comments_terms_users_tables( $ctx->fork( 'comments-terms-users' ) );
 			$rows[] = self::check_plugin_theme_tables( $ctx->fork( 'plugins-themes' ) );
+			$rows[] = self::check_plugin_install_table( $ctx->fork( 'plugin-install' ) );
 			$rows[] = self::check_network_themes_table( $ctx->fork( 'network-themes' ) );
 			$rows[] = self::check_application_passwords_table( $ctx->fork( 'application-passwords' ) );
 			$rows[] = self::check_application_passwords_last_ip_boundary( $ctx->fork( 'application-passwords-last-ip' ) );
@@ -1166,6 +1167,411 @@ final class AdminListTablesSurface {
 			array(
 				'failures' => array_slice( $failures, 0, 8 ),
 				'screens'  => array( $screen_plugins->id, $screen_themes->id ),
+			)
+		);
+	}
+
+	private static function check_plugin_install_table( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures          = array();
+		$filters           = array();
+		$current_user      = self::synthetic_user( $ctx->fork( 'current-user' ), 54200, 'plugin-install' );
+		$screen            = self::screen( 'plugin-install' );
+		$hostile_label     = self::hostile_label( $ctx->fork( 'install-label' ) );
+		$token             = substr( hash( 'sha1', (string) $ctx->seed() . ':' . (string) $ctx->iteration() ), 0, 10 );
+		$install_slug      = 'cfz-install-new-' . $token;
+		$update_slug       = 'cfz-install-update-' . $token;
+		$installed_slug    = 'cfz-install-installed-' . $token;
+		$incompatible_slug = 'cfz-install-incompatible-' . $token;
+		$installed_file    = $installed_slug . '/' . $installed_slug . '.php';
+		$update_file       = $update_slug . '/' . $update_slug . '.php';
+		$installed_dir     = \trailingslashit( WP_PLUGIN_DIR ) . $installed_slug;
+		$installed_path    = \trailingslashit( $installed_dir ) . $installed_slug . '.php';
+		$marker            = 'cfz-install-marker-' . $token;
+		$api_total         = 91;
+		$api_plugins       = array(
+			self::plugin_install_api_item(
+				$install_slug,
+				'Installable Plugin ' . $hostile_label,
+				'1.0.0',
+				'Generated install description ' . $hostile_label,
+				array(
+					'svg'     => 'https://example.test/icons/' . rawurlencode( $install_slug ) . '.svg?label=' . rawurlencode( $hostile_label ) . '&raw=<script>alert(1)</script>',
+					'default' => 'https://example.test/icons/default.png',
+				)
+			),
+			self::plugin_install_api_item(
+				$update_slug,
+				'Update Plugin ' . $hostile_label,
+				'2.0.0',
+				'Generated update description ' . $hostile_label,
+				array(
+					'svg'     => 'javascript:alert(1)',
+					'2x'      => 'https://example.test/icons/' . rawurlencode( $update_slug ) . '-2x.png?raw=' . rawurlencode( $hostile_label ),
+					'default' => 'https://example.test/icons/default.png',
+				)
+			),
+			self::plugin_install_api_item(
+				$installed_slug,
+				'Installed Plugin ' . $hostile_label,
+				'1.0.0',
+				'Generated installed description ' . $hostile_label,
+				array(
+					'1x'      => 'https://example.test/icons/' . rawurlencode( $installed_slug ) . '.png?raw=' . rawurlencode( $hostile_label ),
+					'default' => 'https://example.test/icons/default.png',
+				)
+			),
+			self::plugin_install_api_item(
+				$incompatible_slug,
+				'Incompatible Plugin ' . $hostile_label,
+				'1.0.0',
+				'Generated incompatible description ' . $hostile_label,
+				array(
+					'default' => 'https://example.test/icons/' . rawurlencode( $incompatible_slug ) . '.png?raw=' . rawurlencode( $hostile_label ),
+				),
+				array(
+					'requires'     => '99.0',
+					'requires_php' => '999.0',
+					'tested'       => '99.0',
+				)
+			),
+		);
+		$search_modes      = array(
+			array(
+				'type' => 'term',
+				'term' => 'Generated Search ' . $hostile_label,
+			),
+			array(
+				'type' => 'tag',
+				'term' => 'Tag Search ' . $hostile_label,
+			),
+			array(
+				'type' => 'author',
+				'term' => 'Author Search ' . $hostile_label,
+			),
+		);
+		$global_names      = array( '_GET', '_POST', '_REQUEST', 'current_user', 'paged', 'pagenow', 'tab', 'tabs', 'term', 'type', 'wp_scripts', 'wp_styles', 'wp_version' );
+		$server_names      = array( 'HTTP_HOST', 'PHP_SELF', 'REQUEST_URI' );
+		$global_snapshot   = self::snapshot_globals( $global_names );
+		$server_snapshot   = self::snapshot_server( $server_names );
+		$api_events        = array();
+		$table_arg_events  = array();
+		$tabs_events       = array();
+		$action_events     = array();
+		$description_events = array();
+		$mode_results      = array();
+		$result            = array();
+		$active_mode       = '';
+		$filters_removed   = false;
+		$globals_restored  = false;
+		$fixture_removed   = false;
+
+		$update_plugins = (object) array(
+			'last_checked' => 1763980800,
+			'checked'      => array(
+				$installed_file => '1.0.0',
+				$update_file    => '1.0.0',
+			),
+			'response'     => array(
+				$update_file => (object) array(
+					'id'            => 'w.org/plugins/' . $update_slug,
+					'slug'          => $update_slug,
+					'plugin'        => $update_file,
+					'new_version'   => '2.0.0',
+					'url'           => 'https://example.test/plugins/' . rawurlencode( $update_slug ),
+					'package'       => 'https://downloads.example.test/' . rawurlencode( $update_slug ) . '.zip',
+					'requires'      => '5.0',
+					'requires_php'  => '5.6',
+					'requires_plugins' => array(),
+				),
+			),
+			'no_update'    => array(
+				$installed_file => (object) array(
+					'id'            => 'w.org/plugins/' . $installed_slug,
+					'slug'          => $installed_slug,
+					'plugin'        => $installed_file,
+					'new_version'   => '1.0.0',
+					'url'           => 'https://example.test/plugins/' . rawurlencode( $installed_slug ),
+					'package'       => '',
+					'requires'      => '5.0',
+					'requires_php'  => '5.6',
+					'requires_plugins' => array(),
+				),
+			),
+		);
+
+		$tabs_filter = static function ( array $tabs ) use ( $hostile_label, &$tabs_events ): array {
+			$tabs['cfz-custom'] = \esc_html( 'Generated Tab ' . $hostile_label );
+			$tabs_events[]      = array_keys( $tabs );
+			return $tabs;
+		};
+		$table_api_args_filter = static function ( $args ) use ( $marker, &$table_arg_events ) {
+			if ( is_array( $args ) ) {
+				$args['cfz_marker'] = $marker;
+				$table_arg_events[] = $args;
+			}
+
+			return $args;
+		};
+		$plugins_api_args_filter = static function ( $args, string $action ) use ( &$api_events, &$active_mode ) {
+			$api_events[] = array(
+				'phase'    => 'args',
+				'mode'     => $active_mode,
+				'action'   => $action,
+				'args'     => clone $args,
+			);
+
+			return $args;
+		};
+		$plugins_api_filter = static function ( $result, string $action, $args ) use ( $api_plugins, $api_total, &$api_events, &$active_mode ) {
+			$api_events[] = array(
+				'phase'  => 'response',
+				'mode'   => $active_mode,
+				'action' => $action,
+				'args'   => clone $args,
+			);
+
+			if ( 'query_plugins' !== $action ) {
+				return $result;
+			}
+
+			return (object) array(
+				'plugins' => $api_plugins,
+				'info'    => array(
+					'groups'  => array( 'cfz-group' => 'Performance' ),
+					'results' => $api_total,
+				),
+			);
+		};
+		$update_plugins_filter = static function () use ( $update_plugins ) {
+			return $update_plugins;
+		};
+		$active_plugins_filter = static function (): array {
+			return array();
+		};
+		$description_filter = static function ( string $description, array $plugin ) use ( $hostile_label, &$description_events ): string {
+			$description_events[] = $plugin['slug'] ?? '';
+			return \esc_html( $description . ' ' . $hostile_label );
+		};
+		$action_links_filter = static function ( array $action_links, array $plugin ) use ( $hostile_label, &$action_events ): array {
+			$slug            = (string) ( $plugin['slug'] ?? '' );
+			$action_events[] = $slug;
+			$action_links[]  = sprintf(
+				'<a class="cfz-plugin-install-action" href="%s" data-slug="%s">%s</a>',
+				\esc_url( 'https://example.test/install-action/?plugin=' . rawurlencode( $slug ) . '&label=' . rawurlencode( $hostile_label ) ),
+				\esc_attr( $slug ),
+				\esc_html( 'Generated Action ' . $hostile_label )
+			);
+
+			return $action_links;
+		};
+		$cap_filter = self::cap_filter(
+			array(
+				'activate_plugin',
+				'activate_plugins',
+				'install_plugins',
+				'read',
+				'update_core',
+				'update_php',
+				'update_plugins',
+			)
+		);
+
+		self::add_filter_record( $filters, 'install_plugins_tabs', $tabs_filter, 10, 1 );
+		self::add_filter_record( $filters, 'install_plugins_table_api_args_search', $table_api_args_filter, 10, 1 );
+		self::add_filter_record( $filters, 'plugins_api_args', $plugins_api_args_filter, 10, 2 );
+		self::add_filter_record( $filters, 'plugins_api', $plugins_api_filter, 10, 3 );
+		self::add_filter_record( $filters, 'pre_site_transient_update_plugins', $update_plugins_filter, 10, 2 );
+		self::add_filter_record( $filters, 'pre_option_active_plugins', $active_plugins_filter, 10, 3 );
+		self::add_filter_record( $filters, 'plugin_install_description', $description_filter, 10, 2 );
+		self::add_filter_record( $filters, 'plugin_install_action_links', $action_links_filter, 10, 2 );
+		self::add_filter_record( $filters, 'user_has_cap', $cap_filter, 10, 4 );
+
+		try {
+			self::write_plugin_fixture( $installed_dir, $installed_path, 'Installed Plugin ' . $hostile_label, '1.0.0' );
+			\wp_cache_delete( 'plugins', 'plugins' );
+
+			$GLOBALS['current_user'] = $current_user;
+			$GLOBALS['pagenow']      = 'plugin-install.php';
+			$GLOBALS['wp_version']   = \wp_get_wp_version();
+			$_SERVER['HTTP_HOST']    = 'example.test';
+			$_SERVER['PHP_SELF']     = '/wp-admin/plugin-install.php';
+
+			foreach ( $search_modes as $mode ) {
+				$active_mode            = $mode['type'];
+				$_GET                   = array(
+					'tab'   => 'search',
+					'type'  => $mode['type'],
+					's'     => $mode['term'],
+					'paged' => 2,
+					'from'  => 'component-fuzz-' . $hostile_label,
+				);
+				$_POST                  = array();
+				$_REQUEST               = $_GET;
+				$_SERVER['REQUEST_URI'] = '/wp-admin/plugin-install.php?tab=search&type=' . rawurlencode( $mode['type'] ) . '&s=' . rawurlencode( $mode['term'] ) . '&paged=2';
+
+				$table = self::list_table( 'WP_Plugin_Install_List_Table', $screen );
+				$table->prepare_items();
+				$views = self::invoke( $table, 'get_views' );
+
+				$mode_results[ $mode['type'] ] = array(
+					'item_count'   => count( $table->items ?? array() ),
+					'items'        => array_column( array_map( 'get_object_vars', array_map( static fn( $item ) => (object) $item, $table->items ?? array() ) ), 'slug' ),
+					'per_page'     => $table->get_pagination_arg( 'per_page' ),
+					'total_items'  => $table->get_pagination_arg( 'total_items' ),
+					'total_pages'  => $table->get_pagination_arg( 'total_pages' ),
+					'view_keys'    => array_keys( $views ),
+					'views_html'   => implode( '', $views ),
+				);
+
+				$result['table'] = $table;
+				$result['views'] = $views;
+			}
+
+			$row = self::capture(
+				static function () use ( $table ): void {
+					$table->display_rows();
+				}
+			);
+			$display = self::capture(
+				static function () use ( $table ): void {
+					$table->display();
+				}
+			);
+			$ajax_allowed = $table->ajax_user_can();
+			$ajax_denied  = self::without_filter(
+				'user_has_cap',
+				$cap_filter,
+				static function () use ( $screen ) {
+					$table = self::list_table( 'WP_Plugin_Install_List_Table', $screen );
+					return $table->ajax_user_can();
+				}
+			);
+			$icon_sources = self::image_srcs_by_class( $row, 'plugin-icon' );
+
+			$result = array_merge(
+				$result,
+				compact(
+					'action_events',
+					'ajax_denied',
+					'ajax_allowed',
+					'api_events',
+					'description_events',
+					'display',
+					'icon_sources',
+					'installed_file',
+					'installed_slug',
+					'incompatible_slug',
+					'install_slug',
+					'mode_results',
+					'row',
+					'table_arg_events',
+					'tabs_events',
+					'update_file',
+					'update_slug'
+				)
+			);
+		} finally {
+			self::remove_filter_records( $filters );
+			$filters_removed = self::filters_removed( $filters );
+			self::remove_plugin_fixture( $installed_dir, $installed_path );
+			\wp_cache_delete( 'plugins', 'plugins' );
+			self::restore_server( $server_snapshot );
+			self::restore_globals( $global_snapshot );
+			$globals_restored = self::globals_match( $global_snapshot, $global_names ) && self::server_match( $server_snapshot, $server_names );
+			$fixture_removed  = ! is_file( $installed_path ) && ! is_dir( $installed_dir );
+		}
+
+		$row          = (string) ( $result['row'] ?? '' );
+		$display      = (string) ( $result['display'] ?? '' );
+		$views_html   = implode( '', array_column( $result['mode_results'] ?? array(), 'views_html' ) );
+		$icon_sources = $result['icon_sources'] ?? array();
+		$action_slugs = array_values( array_unique( $result['action_events'] ?? array() ) );
+		sort( $action_slugs );
+		$expected_action_slugs = array( $incompatible_slug, $install_slug, $installed_slug, $update_slug );
+		sort( $expected_action_slugs );
+
+		self::collect_failure(
+			$failures,
+			self::plugin_install_request_events_match( $result['api_events'] ?? array(), $result['table_arg_events'] ?? array(), $search_modes, $marker ),
+			'plugin install search tabs and API arguments are generated, mode-specific, and short-circuited before network',
+			array(
+				'apiEvents'       => $result['api_events'] ?? array(),
+				'tableArgEvents'  => $result['table_arg_events'] ?? array(),
+				'tabsEvents'      => $result['tabs_events'] ?? array(),
+				'expectedModes'   => array_column( $search_modes, 'type' ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::plugin_install_mode_results_match( $result['mode_results'] ?? array(), array_column( $api_plugins, 'slug' ), $api_total )
+				&& self::plugin_install_views_match( $result['mode_results'] ?? array() ),
+			'plugin install prepare_items preserves API result ordering, pagination totals, and escaped install tabs',
+			array(
+				'modeResults' => $result['mode_results'] ?? array(),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			false === ( $result['ajax_denied'] ?? null )
+				&& true === ( $result['ajax_allowed'] ?? null )
+				&& str_contains( $row, 'class="install-now button button-compact"' )
+				&& str_contains( $row, 'data-slug="' . \esc_attr( $install_slug ) . '"' )
+				&& str_contains( $row, 'action=install-plugin' )
+				&& str_contains( $row, 'class="update-now button button-compact aria-button-if-js"' )
+				&& str_contains( $row, 'data-plugin="' . \esc_attr( $update_file ) . '"' )
+				&& str_contains( $row, 'action=upgrade-plugin' )
+				&& str_contains( $row, 'class="button button-compact button-primary activate-now"' )
+				&& str_contains( $row, 'data-plugin="' . \esc_attr( $installed_file ) . '"' )
+				&& str_contains( $row, 'action=activate' )
+				&& str_contains( $row, 'cfz-plugin-install-action' )
+				&& $expected_action_slugs === $action_slugs,
+			'plugin install row actions cover install, update, installed activation, custom action filters, and capability gates',
+			array(
+				'actionSlugs' => $action_slugs,
+				'ajaxAllowed' => $result['ajax_allowed'] ?? null,
+				'ajaxDenied'  => $result['ajax_denied'] ?? null,
+				'row'         => self::describe_string( $row ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			str_contains( $row, 'button-disabled' )
+				&& str_contains( $row, 'compatibility-incompatible' )
+				&& str_contains( $row, 'notice-error' )
+				&& count( $icon_sources ) >= 4
+				&& self::escaped_url_attributes( $icon_sources )
+				&& self::html_has_no_raw_script( $row . $display . $views_html ),
+			'plugin install compatibility notices, disabled buttons, icon URLs, descriptions, views, and display output are escaped',
+			array(
+				'iconSources'  => $icon_sources,
+				'rowNoScript'  => self::html_has_no_raw_script( $row ),
+				'display'      => self::describe_string( $display ),
+				'viewsNoScript' => self::html_has_no_raw_script( $views_html ),
+				'rowScriptContext' => self::raw_script_context( $row ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$filters_removed && $globals_restored && $fixture_removed,
+			'plugin install API, transient, action, description, capability filters, globals, server values, plugin cache, and temp fixtures are restored',
+			array(
+				'filtersRemoved'  => $filters_removed,
+				'fixtureRemoved'  => $fixture_removed,
+				'globalsRestored' => $globals_restored,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'admin-list-tables.plugin-install.search-api-actions-escaping',
+			array() === $failures,
+			array(
+				'failures' => array_slice( $failures, 0, 8 ),
+				'screen'   => $screen->id,
 			)
 		);
 	}
@@ -2315,7 +2721,7 @@ final class AdminListTablesSurface {
 		return $ctx->skip(
 			'admin-list-tables.db-heavy-branches-skipped',
 			'Full admin page dispatch, destructive plugin/theme lifecycle operations, real uploads, privacy request tables, '
-				. 'install/update tables, and true multisite write paths remain out of scope. This surface covers concrete '
+				. 'theme install/update tables, and true multisite write paths remain out of scope. This surface covers concrete '
 				. 'core list-table constructors, columns, views, actions, row rendering, and pagination through synthetic rows, '
 				. 'object-cache fixtures, generated temp plugin/theme metadata, and pre-query filters.',
 			array(
@@ -2327,6 +2733,7 @@ final class AdminListTablesSurface {
 					'WP_Users_List_Table',
 					'WP_Plugins_List_Table',
 					'WP_Themes_List_Table',
+					'WP_Plugin_Install_List_Table',
 					'WP_Application_Passwords_List_Table',
 					'WP_MS_Themes_List_Table',
 					'WP_MS_Sites_List_Table',
@@ -2335,7 +2742,6 @@ final class AdminListTablesSurface {
 				'skipped_classes' => array(
 					'WP_Privacy_Data_Export_Requests_List_Table',
 					'WP_Privacy_Data_Removal_Requests_List_Table',
-					'WP_Plugin_Install_List_Table',
 					'WP_Theme_Install_List_Table',
 				),
 			)
@@ -2608,6 +3014,48 @@ final class AdminListTablesSurface {
 		);
 	}
 
+	private static function plugin_install_api_item(
+		string $slug,
+		string $name,
+		string $version,
+		string $description,
+		array $icons,
+		array $overrides = array()
+	): array {
+		$icons = array_merge(
+			array(
+				'svg'     => '',
+				'2x'      => '',
+				'1x'      => '',
+				'default' => 'https://example.test/icons/default.png',
+			),
+			$icons
+		);
+
+		return array_merge(
+			array(
+				'active_installs'   => 1200,
+				'author'            => '<a href="https://example.test/authors/' . rawurlencode( $slug ) . '">Plugin Author</a>',
+				'download_link'     => 'https://downloads.example.test/' . rawurlencode( $slug ) . '.zip',
+				'group'             => 'cfz-group',
+				'homepage'          => 'https://example.test/plugins/' . rawurlencode( $slug ),
+				'icons'             => $icons,
+				'last_updated'      => '2026-06-01',
+				'name'              => $name,
+				'num_ratings'       => 12,
+				'rating'            => 83,
+				'requires'          => '5.0',
+				'requires_php'      => '5.6',
+				'requires_plugins'  => array(),
+				'short_description' => $description,
+				'slug'              => $slug,
+				'tested'            => '99.0',
+				'version'           => $version,
+			),
+			$overrides
+		);
+	}
+
 	private static function cache_post( \WP_Post $post ): void {
 		\wp_cache_set( (int) $post->ID, (object) $post->to_array(), 'posts' );
 	}
@@ -2646,6 +3094,46 @@ final class AdminListTablesSurface {
 		}
 		if ( false === file_put_contents( $theme_dir . '/index.php', "<?php\n// Synthetic component-fuzz theme fixture.\n" ) ) {
 			throw new \RuntimeException( 'Could not write synthetic theme index.' );
+		}
+	}
+
+	private static function write_plugin_fixture( string $plugin_dir, string $plugin_path, string $name, string $version ): void {
+		if ( ! is_dir( WP_PLUGIN_DIR ) && ! mkdir( WP_PLUGIN_DIR, 0777, true ) && ! is_dir( WP_PLUGIN_DIR ) ) {
+			throw new \RuntimeException( 'Could not create synthetic plugin root.' );
+		}
+		if ( ! is_dir( $plugin_dir ) && ! mkdir( $plugin_dir, 0777, true ) && ! is_dir( $plugin_dir ) ) {
+			throw new \RuntimeException( 'Could not create synthetic plugin directory.' );
+		}
+
+		$plugin = implode(
+			"\n",
+			array(
+				'<?php',
+				'/**',
+				' * Plugin Name: ' . $name,
+				' * Plugin URI: https://example.test/plugins/installed',
+				' * Description: Synthetic component-fuzz plugin install fixture.',
+				' * Version: ' . $version,
+				' * Author: Component Fuzz',
+				' * Requires at least: 5.0',
+				' * Requires PHP: 5.6',
+				' */',
+				'// Synthetic component-fuzz plugin fixture.',
+				'',
+			)
+		);
+
+		if ( false === file_put_contents( $plugin_path, $plugin ) ) {
+			throw new \RuntimeException( 'Could not write synthetic plugin fixture.' );
+		}
+	}
+
+	private static function remove_plugin_fixture( string $plugin_dir, string $plugin_path ): void {
+		if ( is_file( $plugin_path ) ) {
+			unlink( $plugin_path );
+		}
+		if ( is_dir( $plugin_dir ) ) {
+			rmdir( $plugin_dir );
 		}
 	}
 
@@ -2743,6 +3231,128 @@ final class AdminListTablesSurface {
 		return true;
 	}
 
+	private static function plugin_install_request_events_match( array $api_events, array $table_arg_events, array $search_modes, string $marker ): bool {
+		$args_events     = array_values(
+			array_filter(
+				$api_events,
+				static function ( array $event ): bool {
+					return 'args' === ( $event['phase'] ?? null );
+				}
+			)
+		);
+		$response_events = array_values(
+			array_filter(
+				$api_events,
+				static function ( array $event ): bool {
+					return 'response' === ( $event['phase'] ?? null );
+				}
+			)
+		);
+
+		if (
+			count( $search_modes ) !== count( $table_arg_events )
+			|| count( $search_modes ) !== count( $args_events )
+			|| count( $search_modes ) !== count( $response_events )
+		) {
+			return false;
+		}
+
+		foreach ( array_values( $search_modes ) as $index => $mode ) {
+			foreach ( array( $args_events[ $index ], $response_events[ $index ] ) as $event ) {
+				if (
+					( $event['mode'] ?? null ) !== $mode['type']
+					|| 'query_plugins' !== ( $event['action'] ?? null )
+					|| ! self::plugin_install_args_match( $event['args'] ?? array(), $mode, $marker )
+				) {
+					return false;
+				}
+			}
+
+			if ( ! self::plugin_install_args_match( $table_arg_events[ $index ], $mode, $marker ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function plugin_install_args_match( $args, array $mode, string $marker ): bool {
+		$args = (array) $args;
+		if (
+			2 !== (int) ( $args['page'] ?? 0 )
+			|| 36 !== (int) ( $args['per_page'] ?? 0 )
+			|| $marker !== (string) ( $args['cfz_marker'] ?? '' )
+			|| '' === (string) ( $args['locale'] ?? '' )
+		) {
+			return false;
+		}
+
+		if ( 'term' === $mode['type'] ) {
+			return (string) ( $args['search'] ?? '' ) === $mode['term']
+				&& ! isset( $args['tag'], $args['author'] );
+		}
+
+		if ( 'tag' === $mode['type'] ) {
+			return (string) ( $args['tag'] ?? '' ) === \sanitize_title_with_dashes( $mode['term'] )
+				&& ! isset( $args['search'], $args['author'] );
+		}
+
+		if ( 'author' === $mode['type'] ) {
+			return (string) ( $args['author'] ?? '' ) === $mode['term']
+				&& ! isset( $args['search'], $args['tag'] );
+		}
+
+		return false;
+	}
+
+	private static function plugin_install_mode_results_match( array $mode_results, array $expected_slugs, int $api_total ): bool {
+		foreach ( array( 'term', 'tag', 'author' ) as $mode ) {
+			$result = $mode_results[ $mode ] ?? null;
+			if ( ! is_array( $result ) ) {
+				return false;
+			}
+
+			if (
+				count( $expected_slugs ) !== (int) ( $result['item_count'] ?? -1 )
+				|| $expected_slugs !== ( $result['items'] ?? array() )
+				|| 36 !== (int) ( $result['per_page'] ?? 0 )
+				|| $api_total !== (int) ( $result['total_items'] ?? 0 )
+				|| (int) ceil( $api_total / 36 ) !== (int) ( $result['total_pages'] ?? 0 )
+			) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function plugin_install_views_match( array $mode_results ): bool {
+		$required = array(
+			'plugin-install-cfz-custom',
+			'plugin-install-favorites',
+			'plugin-install-featured',
+			'plugin-install-popular',
+			'plugin-install-recommended',
+			'plugin-install-search',
+		);
+
+		foreach ( array( 'term', 'tag', 'author' ) as $mode ) {
+			$result    = $mode_results[ $mode ] ?? array();
+			$view_keys = $result['view_keys'] ?? array();
+			if ( array() !== array_diff( $required, $view_keys ) ) {
+				return false;
+			}
+			if ( in_array( 'plugin-install-upload', $view_keys, true ) ) {
+				return false;
+			}
+			if ( ! self::html_has_no_raw_script( (string) ( $result['views_html'] ?? '' ) ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
 	private static function hostile_label( \ComponentFuzz\FuzzContext $ctx ): string {
 		return 'label "' . $ctx->identifier( 3, 8 ) . '" <script>alert(1)</script> onclick="bad" & value';
 	}
@@ -2777,6 +3387,48 @@ final class AdminListTablesSurface {
 		}
 
 		return $hrefs;
+	}
+
+	private static function image_srcs_by_class( string $html, string $class ): array {
+		$srcs = array();
+		if ( ! preg_match_all( '/<img\b([^>]*)>/i', $html, $images ) ) {
+			return $srcs;
+		}
+
+		foreach ( $images[1] as $attribute_text ) {
+			$attrs = self::html_attributes( $attribute_text );
+			if ( ! isset( $attrs['class'], $attrs['src'] ) ) {
+				continue;
+			}
+
+			$class_tokens = preg_split( '/\s+/', html_entity_decode( $attrs['class'], ENT_QUOTES, 'UTF-8' ) );
+			if ( is_array( $class_tokens ) && in_array( $class, $class_tokens, true ) ) {
+				$srcs[] = $attrs['src'];
+			}
+		}
+
+		return $srcs;
+	}
+
+	private static function escaped_url_attributes( array $urls ): bool {
+		$has_example_icon = false;
+		foreach ( $urls as $url ) {
+			if ( ! is_string( $url ) || preg_match( '/[<>"\']/', $url ) ) {
+				return false;
+			}
+
+			$decoded = html_entity_decode( $url, ENT_QUOTES, 'UTF-8' );
+			$lower   = strtolower( $decoded );
+			if ( str_contains( $lower, '<script' ) || str_contains( $lower, 'javascript:' ) ) {
+				return false;
+			}
+
+			if ( str_contains( $decoded, 'https://example.test/icons/' ) ) {
+				$has_example_icon = true;
+			}
+		}
+
+		return $has_example_icon;
 	}
 
 	private static function html_attributes( string $attribute_text ): array {
