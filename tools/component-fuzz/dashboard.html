@@ -866,7 +866,7 @@
 				<tr>
 					<td><code>block-supports</code></td>
 					<td><span class="status good">local validation passed</span></td>
-					<td>Scoped worktree <code>component-fuzz-block-supports</code>; implementation validated locally before merge.</td>
+					<td>Scoped worktree <code>component-fuzz-block-supports</code>; implementation landed through <code>e2f832432a</code>.</td>
 					<td>Main focused runs: seed 1 passed 6 checks, seed 224 over 25 iterations passed 150 checks, adjacent <code>block-supports,blocks,style,core-block-render,block-editor-adjuncts,block-widgets,interactivity</code> smoke passed 310 checks with 5 skips; latest broad run: 4644 passed, 27 skipped, 0 failed.</td>
 					<td><code>WP_Block_Supports</code>, block support registration callbacks, wrapper attribute merging, skip-serialization gates, auto-generated control markers, background/dimensions/visibility/position/layout render filters, elements and custom CSS render-data filters, state-style selector/layout helpers, safe stored CSS, <code>WP_Block_Type_Registry</code>, theme-json caches, scripts/styles globals, and style-engine store restoration.</td>
 				</tr>
@@ -1113,6 +1113,12 @@
 				</tr>
 				</thead>
 				<tbody>
+					<tr>
+						<td><code>e2f832432a</code></td>
+						<td><code>block-supports</code></td>
+						<td><code>block-supports</code> passed 6 checks at seed 1 and 150 checks at seed 224 over 25 iterations; adjacent block/editor/style smoke passed 310 checks with 5 skips after adding block-support lifecycle, render-filter, helper, and state-style coverage.</td>
+						<td>4644 passed, 27 skipped, 0 failed at 1 iteration after block support coverage and bootstrap support-module includes.</td>
+					</tr>
 					<tr>
 						<td><code>cbc425b410</code></td>
 						<td><code>admin-edit-metaboxes</code></td>
