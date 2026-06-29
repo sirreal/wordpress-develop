@@ -519,7 +519,7 @@
 				<tr>
 					<td><code>media-image-edit-requests</code></td>
 					<td><span class="status good">validation passed</span></td>
-					<td>Scoped worktree <code>component-fuzz-media-image-edit-requests</code>; implementation validated locally before landing.</td>
+					<td>Scoped worktree <code>component-fuzz-media-image-edit-requests</code>; implementation landed through <code>cfb49670d1</code>.</td>
 					<td>Main focused runs: seed 1 passed 11 checks, seed 224 over 25 iterations passed 275 checks, adjacent <code>media-image-edit-requests,rest-media-attachments,admin-ajax,admin-media-chrome,media-editor,media-ingest,media-remote,media-metadata,image-metadata,network-media,appearance-media,filesystem</code> smoke passed 97 checks with 4 skips; latest broad run: 4615 passed, 28 skipped, 0 failed.</td>
 					<td>Server-side image-edit request coverage for normalized edit histories, preview streaming and AJAX, save/restore metadata, save/stream filters, crop wrappers, parent-property copying, crop AJAX metadata/id filters, media sub-size AJAX boundaries, nonce/capability gates, captured <code>wp_die()</code>/JSON envelopes, temp upload roots, fake editor operations, and global/filter/superglobal restoration.</td>
 				</tr>
@@ -1082,7 +1082,7 @@
 				</thead>
 				<tbody>
 					<tr>
-						<td><code>local</code></td>
+						<td><code>cfb49670d1</code></td>
 						<td><code>media-image-edit-requests</code></td>
 						<td><code>media-image-edit-requests</code> passed 11 checks at seed 1 and 275 checks at seed 224 over 25 iterations; adjacent media/admin smoke passed 97 checks with 4 skips after adding image-edit request save/preview/crop/sub-size coverage and REST media capability grant hardening.</td>
 						<td>4615 passed, 28 skipped, 0 failed at 1 iteration after media image-edit request coverage.</td>
