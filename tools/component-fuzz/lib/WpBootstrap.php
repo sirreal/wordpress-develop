@@ -477,6 +477,7 @@ final class WpBootstrap {
 			'wp-includes/rest-api/endpoints/class-wp-rest-menu-locations-controller.php',
 			'wp-includes/rest-api/endpoints/class-wp-rest-comments-controller.php',
 			'wp-includes/rest-api/endpoints/class-wp-rest-users-controller.php',
+			'wp-includes/rest-api/endpoints/class-wp-rest-application-passwords-controller.php',
 			'wp-includes/rest-api/endpoints/class-wp-rest-post-types-controller.php',
 			'wp-includes/rest-api/endpoints/class-wp-rest-post-statuses-controller.php',
 			'wp-includes/rest-api/endpoints/class-wp-rest-taxonomies-controller.php',

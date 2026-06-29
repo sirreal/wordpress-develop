@@ -579,6 +579,13 @@ database, network requests, or a configured site.
   result/header/link propagation, invalid subtype rejection, public search-result
   schema callback contents, post-format search term/link and pagination behavior,
   invalid values, and state restoration.
+- `rest-application-passwords`: in-memory user/app-password backed REST
+  application password controller coverage, including collection/item/
+  introspection route and schema contracts, create/update/delete dispatch,
+  one-time password response and stored hash agreement, `_fields` projection and
+  links, REST pre/after/prepare hooks, capability-denied and availability error
+  matrices, current-user introspection, stale UUID failures, and global/filter
+  restoration.
 - `rest-media-attachments`: in-memory wpdb-backed REST media attachment write
   coverage, including `Content-Disposition` filename parsing, raw upload
   validation failures, raw body `create_item()` success through the upload
@@ -812,7 +819,10 @@ as explicit skips when the PHP build lacks `exif_read_data()` or `iptcparse()`,
 while malformed/no-metadata image paths and filter cleanup still run. The
 `rest-controllers` surface remains registry-backed only. DB-backed posts,
 terms, comments, users, revisions, and attachments are covered by
-`rest-object-controllers` against the in-memory `wpdb` stub.
+`rest-object-controllers` against the in-memory `wpdb` stub. The
+`rest-application-passwords` surface complements lower-level account-security
+coverage by dispatching the REST controller with synthetic users and scoped
+application-password metadata.
 `rest-media-attachments` covers the bounded REST attachment upload write path
 using raw request bodies, temp upload roots, attachment postmeta, response
 projection, metadata finalization, and permission gates. It intentionally avoids
