@@ -555,6 +555,13 @@ database, network requests, or a configured site.
   result/header/link propagation, invalid subtype rejection, public search-result
   schema callback contents, post-format search term/link and pagination behavior,
   invalid values, and state restoration.
+- `rest-media-attachments`: in-memory wpdb-backed REST media attachment write
+  coverage, including `Content-Disposition` filename parsing, raw upload
+  validation failures, raw body `create_item()` success through the upload
+  directory and attachment postmeta pipeline, permission gates, client-side
+  media-processing route/argument contracts, metadata finalization filters,
+  `_fields` response projection, edit-media fail-closed paths, temp upload
+  cleanup, and global/filter restoration.
 - `rest-object-controllers`: in-memory wpdb-backed REST object controller
   coverage for posts, terms, comments, users, revisions, and attachments,
   including schema/context/_fields filtering, deterministic collection
@@ -767,16 +774,21 @@ as explicit skips when the PHP build lacks `exif_read_data()` or `iptcparse()`,
 while malformed/no-metadata image paths and filter cleanup still run. The
 `rest-controllers` surface remains registry-backed only. DB-backed posts,
 terms, comments, users, revisions, and attachments are covered by
-`rest-object-controllers` against the in-memory `wpdb` stub. That object
-surface records explicit skip rows for template controllers that depend on
-block-theme filesystem state and template CPT queries, and for broad collection
-queries that exceed the small SQL parser in the stub. It documents limits for
-real upload/sideload paths and invalid enum-error formatting branches that are
-not warning-safe under the stripped bootstrap. The registry-backed surface also
-records explicit skips for the themes and plugins controllers because their
-lifecycle-heavy read and status paths are covered by `plugin-theme-lifecycle`,
-while install/update/delete controller methods are still avoided. Block pattern
-coverage is registry-backed only:
+`rest-object-controllers` against the in-memory `wpdb` stub.
+`rest-media-attachments` covers the bounded REST attachment upload write path
+using raw request bodies, temp upload roots, attachment postmeta, response
+projection, metadata finalization, and permission gates. It intentionally avoids
+multipart success paths that depend on PHP's `is_uploaded_file()` state, remote
+sideload downloads, and heavyweight image-edit success paths unless they can be
+kept process-local and codec-independent. The object surface records explicit
+skip rows for template controllers that depend on block-theme filesystem state
+and template CPT queries, and for broad collection queries that exceed the small
+SQL parser in the stub. It documents limits for invalid enum-error formatting
+branches that are not warning-safe under the stripped bootstrap. The
+registry-backed surface also records explicit skips for the themes and plugins
+controllers because their lifecycle-heavy read and status paths are covered by
+`plugin-theme-lifecycle`, while install/update/delete controller methods are
+still avoided. Block pattern coverage is registry-backed only:
 remote pattern and current-theme pattern loaders are short-circuited.
 The `rest-site-editor` surface creates a bounded temp theme under the harness
 `WP_CONTENT_DIR` and uses the in-memory `wpdb` stub for `wp_global_styles`,
