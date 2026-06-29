@@ -6,6 +6,7 @@ namespace ComponentFuzz\Surfaces;
  */
 final class RestSiteEditorSurface {
 	public const NAME = 'rest-site-editor';
+	private const LIVE_EXPORT_STDOUT_SENTINEL = "__COMPONENT_FUZZ_REST_SITE_EDITOR_EXPORT__\n";
 
 	public static function run( \ComponentFuzz\FuzzContext $ctx ): array {
 		self::load_endpoint_classes();
@@ -45,13 +46,7 @@ final class RestSiteEditorSurface {
 			$rows[] = self::check_navigation_fallback_controller( $ctx, $case, $fixtures );
 			$rows[] = self::check_edit_site_export_controller( $ctx );
 			$rows[] = self::check_block_templates_export_generator( $ctx, $case );
-			$rows[] = self::skip(
-				$ctx,
-				'rest-site-editor.live-export.skipped',
-				'WP_REST_Edit_Site_Export_Controller::export() generates a zip, streams it, unlinks it, and exits;'
-					. ' this surface covers permission and route guards only.',
-				array( 'controller' => 'WP_REST_Edit_Site_Export_Controller' )
-			);
+			$rows[] = self::check_live_edit_site_export_controller( $ctx, $case );
 			$rows[] = self::skip(
 				$ctx,
 				'rest-site-editor.broad-template-dispatch.skipped',
@@ -1649,16 +1644,7 @@ final class RestSiteEditorSurface {
 
 			self::collect_failure(
 				$failures,
-				array(
-					array(
-						'type'  => 'wp_template',
-						'query' => array(),
-					),
-					array(
-						'type'  => 'wp_template_part',
-						'query' => array(),
-					),
-				) === $filter_log,
+				self::expected_export_template_filter_log() === $filter_log,
 				'export generator retrieves only the scoped template and template-part collections',
 				array( 'filterLog' => $filter_log )
 			);
@@ -1702,6 +1688,606 @@ final class RestSiteEditorSurface {
 				'zipFile'   => is_string( $filename ) ? self::preview( basename( $filename ) ) : $filename,
 			)
 		);
+	}
+
+	private static function check_live_edit_site_export_controller(
+		\ComponentFuzz\FuzzContext $ctx,
+		array $case
+	): array {
+		$missing = self::missing_live_edit_site_export_requirements();
+		if ( array() !== $missing ) {
+			return self::skip(
+				$ctx,
+				'rest-site-editor.live-export.skipped',
+				'Required isolated live export subprocess APIs are unavailable.',
+				array( 'missing' => $missing )
+			);
+		}
+
+		$run                  = self::run_child_live_edit_site_export( $case );
+		$failures             = array();
+		$metadata             = is_array( $run['metadata'] ) ? $run['metadata'] : array();
+		$zip_base64           = is_string( $metadata['zipBase64'] ?? null ) ? $metadata['zipBase64'] : '';
+		$decoded_zip          = '' !== $zip_base64 ? base64_decode( $zip_base64, true ) : false;
+		$streamed_zip         = is_string( $decoded_zip ) ? $decoded_zip : '';
+		$streamed_bytes       = strlen( $streamed_zip );
+		$zip_path             = null;
+		$zip                  = null;
+		$zip_open_result      = null;
+		$zip_opened           = false;
+		$zip_close_error      = null;
+		$zip_cleanup_ok       = true;
+		$headers_observable   = true === ( $metadata['headersObservable'] ?? false );
+		$expected_filter_log  = self::expected_export_template_filter_log();
+		$filter_log           = is_array( $metadata['filterLog'] ?? null ) ? $metadata['filterLog'] : null;
+		$new_zip_files_after  = is_array( $metadata['newZipFilesAfterExport'] ?? null )
+			? $metadata['newZipFilesAfterExport']
+			: null;
+		$parent_pid           = getmypid();
+		$child_pid            = isset( $metadata['pid'] ) ? (int) $metadata['pid'] : null;
+		$metadata_parent_pid  = isset( $metadata['parentPid'] ) ? (int) $metadata['parentPid'] : null;
+
+		try {
+			self::collect_failure(
+				$failures,
+				0 === $run['exitCode']
+					&& is_array( $run['metadata'] )
+					&& 'stdout' === $run['metadataSource']
+					&& '' === $run['unexpectedOutput']
+					&& true === ( $metadata['ok'] ?? null )
+					&& false === ( $metadata['exportReturned'] ?? true )
+					&& true === ( $metadata['exportStarted'] ?? null ),
+				'isolated edit-site export child exits cleanly through export() and writes structured stdout metadata',
+				array(
+					'exitCode'         => $run['exitCode'],
+					'metadata'         => self::live_export_metadata_summary( $metadata ),
+					'metadataSource'   => $run['metadataSource'],
+					'metadataRaw'      => self::preview( $run['metadataRaw'] ),
+					'unexpectedOutput' => self::preview( $run['unexpectedOutput'] ),
+					'stdoutPreview'    => self::preview( $run['stdout'] ),
+					'stderrPreview'    => self::preview( $run['stderr'] ),
+					'metadataPath'     => self::preview( $run['metadataPath'] ),
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				'' === $run['stderr'],
+				'live export child emits no stderr diagnostics during the successful export path',
+				array( 'stderr' => self::preview( $run['stderr'] ) )
+			);
+
+			self::collect_failure(
+				$failures,
+				is_string( $decoded_zip ) && $streamed_bytes > 0 && 'PK' === substr( $streamed_zip, 0, 2 ),
+				'live export streams non-empty ZIP bytes through the structured stdout protocol',
+				array(
+					'streamedBytes' => $streamed_bytes,
+					'zipBase64Set'  => '' !== $zip_base64,
+					'zipPrefix'     => self::preview( substr( $streamed_zip, 0, 32 ) ),
+				)
+			);
+
+			if ( $streamed_bytes > 0 ) {
+				$zip_path = self::write_live_export_stream_zip( $streamed_zip );
+				$zip      = new \ZipArchive();
+
+				$zip_open_result = $zip->open( $zip_path );
+				$zip_opened      = true === $zip_open_result;
+
+				self::collect_failure(
+					$failures,
+					file_exists( $zip_path )
+						&& filesize( $zip_path ) === $streamed_bytes
+						&& $zip_opened,
+					'live export streamed bytes can be reopened as the exported ZIP archive',
+					array(
+						'zipPath'        => self::preview( $zip_path ),
+						'streamedBytes'  => $streamed_bytes,
+						'writtenBytes'   => file_exists( $zip_path ) ? filesize( $zip_path ) : null,
+						'zipOpenResult'  => $zip_open_result,
+					)
+				);
+
+				if ( $zip_opened ) {
+					self::inspect_block_template_export_zip( $zip, $case, $failures );
+				}
+			}
+
+			self::collect_failure(
+				$failures,
+				$expected_filter_log === $filter_log,
+				'live export generator retrieves only scoped template and template-part collections',
+				array(
+					'expectedFilterLog' => $expected_filter_log,
+					'filterLog'         => $filter_log,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				true === ( $metadata['zipFilesRestored'] ?? null )
+					&& array() === $new_zip_files_after,
+				'live export unlinks the generated temporary ZIP before process shutdown',
+				array(
+					'beforeZipFiles'         => $metadata['beforeZipFiles'] ?? null,
+					'afterZipFiles'          => $metadata['afterZipFiles'] ?? null,
+					'newZipFilesAfterExport' => $new_zip_files_after,
+					'zipFilesRestored'       => $metadata['zipFilesRestored'] ?? null,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				true === ( $metadata['filterRemovedAtShutdown'] ?? null )
+					&& is_int( $child_pid )
+					&& is_int( $metadata_parent_pid )
+					&& $parent_pid === $metadata_parent_pid
+					&& $child_pid !== $parent_pid,
+				'live export child removes scoped filters at shutdown and runs isolated from parent process state',
+				array(
+					'parentPid'               => $parent_pid,
+					'metadataParentPid'       => $metadata_parent_pid,
+					'childPid'                => $child_pid,
+					'filterRemovedAtShutdown' => $metadata['filterRemovedAtShutdown'] ?? null,
+					'contentDirRemaining'     => $metadata['contentDirRemainingAtShutdown'] ?? null,
+					'themeFixtureRemaining'   => $metadata['themeFixtureRemainingAtShutdown'] ?? null,
+				)
+			);
+
+			if ( $headers_observable ) {
+				self::collect_failure(
+					$failures,
+					self::header_value( $metadata['headers'] ?? array(), 'Content-Type' ) === 'application/zip'
+						&& self::header_value( $metadata['headers'] ?? array(), 'Content-Disposition' )
+							=== 'attachment; filename=' . basename( $case['themeSlug'] ) . '.zip'
+						&& self::header_value( $metadata['headers'] ?? array(), 'Content-Length' ) === (string) $streamed_bytes,
+					'observable live export headers describe the streamed ZIP payload',
+					array(
+						'headers'        => $metadata['headers'] ?? array(),
+						'expectedLength' => $streamed_bytes,
+						'expectedName'   => basename( $case['themeSlug'] ) . '.zip',
+					)
+				);
+			}
+		} finally {
+			if ( $zip instanceof \ZipArchive && $zip_opened ) {
+				try {
+					$zip->close();
+				} catch ( \Throwable $e ) {
+					$zip_close_error = self::describe_throwable( $e );
+				}
+			}
+
+			if ( is_string( $zip_path ) && '' !== $zip_path && file_exists( $zip_path ) ) {
+				@unlink( $zip_path );
+			}
+			$zip_cleanup_ok = ! is_string( $zip_path ) || '' === $zip_path || ! file_exists( $zip_path );
+		}
+
+		self::collect_failure(
+			$failures,
+			null === $zip_close_error && $zip_cleanup_ok,
+			'live export parent closes and deletes the temporary streamed ZIP inspection copy',
+			array(
+				'zipOpened'    => $zip_opened,
+				'closeError'   => $zip_close_error,
+				'zipPath'      => self::preview( $zip_path ),
+				'cleanupOk'    => $zip_cleanup_ok,
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'rest-site-editor.live-export',
+			$failures,
+			array(
+				'case'              => self::case_summary( $case ),
+				'exitCode'          => $run['exitCode'],
+				'streamedBytes'     => $streamed_bytes,
+				'headersObservable' => $headers_observable,
+				'filterLog'         => $filter_log,
+				'childPid'          => $child_pid,
+			)
+		);
+	}
+
+	private static function missing_live_edit_site_export_requirements(): array {
+		$missing = array();
+
+		if ( ! class_exists( 'ZipArchive' ) ) {
+			$missing[] = 'class ZipArchive';
+		}
+
+		foreach (
+			array(
+				'base64_decode',
+				'base64_encode',
+				'json_decode',
+				'json_encode',
+				'proc_close',
+				'proc_open',
+				'random_bytes',
+				'stream_get_contents',
+			) as $function
+		) {
+			if ( ! function_exists( $function ) ) {
+				$missing[] = "function {$function}";
+			}
+		}
+
+		if ( ! defined( 'PHP_BINARY' ) || '' === PHP_BINARY ) {
+			$missing[] = 'PHP_BINARY';
+		}
+
+		return $missing;
+	}
+
+	private static function run_child_live_edit_site_export( array $case ): array {
+		$dir = rtrim( sys_get_temp_dir(), DIRECTORY_SEPARATOR )
+			. DIRECTORY_SEPARATOR
+			. 'component-fuzz-rest-site-editor-live-export';
+		\ComponentFuzz\ensure_dir( $dir );
+
+		$token    = getmypid() . '-' . bin2hex( random_bytes( 6 ) );
+		$script   = $dir . DIRECTORY_SEPARATOR . 'live-export-child-' . $token . '.php';
+		$metadata = $dir . DIRECTORY_SEPARATOR . 'live-export-child-' . $token . '.json';
+		file_put_contents( $script, self::live_edit_site_export_child_program() );
+
+		$descriptors = array(
+			0 => array( 'pipe', 'r' ),
+			1 => array( 'pipe', 'w' ),
+			2 => array( 'pipe', 'w' ),
+		);
+
+		// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.system_calls_proc_open -- Isolates export(), which exits.
+		$process = proc_open( array( PHP_BINARY, $script ), $descriptors, $pipes, \ComponentFuzz\repo_root() );
+		if ( ! is_resource( $process ) ) {
+			@unlink( $script );
+			@unlink( $metadata );
+			return array(
+				'ok'               => false,
+				'exitCode'         => -1,
+				'stdout'           => '',
+				'stderr'           => 'proc_open failed',
+				'metadata'         => null,
+				'metadataRaw'      => '',
+				'metadataSource'   => 'none',
+				'unexpectedOutput' => '',
+				'metadataPath'     => $metadata,
+			);
+		}
+
+		$payload = json_encode(
+			array(
+				'repoRoot'     => \ComponentFuzz\repo_root(),
+				'case'         => $case,
+				'metadataPath' => $metadata,
+				'parentPid'    => getmypid(),
+			),
+			JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE
+		);
+		fwrite( $pipes[0], false === $payload ? '{}' : $payload );
+		fclose( $pipes[0] );
+
+		$stdout = stream_get_contents( $pipes[1] );
+		$stderr = stream_get_contents( $pipes[2] );
+		fclose( $pipes[1] );
+		fclose( $pipes[2] );
+
+		$exit_code    = proc_close( $process );
+		$stdout_parse = self::parse_live_export_child_stdout( (string) $stdout );
+		$metadata_raw = $stdout_parse['metadataRaw'];
+		$result       = json_decode( $metadata_raw, true );
+		$source       = 'stdout';
+
+		if ( ! is_array( $result ) && file_exists( $metadata ) ) {
+			$metadata_raw = (string) file_get_contents( $metadata );
+			$result       = json_decode( $metadata_raw, true );
+			$source       = 'sidecar';
+		}
+
+		@unlink( $script );
+		@unlink( $metadata );
+
+		return array(
+			'ok'           => 0 === $exit_code && is_array( $result ) && ! empty( $result['ok'] ),
+			'exitCode'     => $exit_code,
+			'stdout'       => (string) $stdout,
+			'stderr'       => (string) $stderr,
+			'metadata'     => is_array( $result ) ? $result : null,
+			'metadataRaw'  => $metadata_raw,
+			'metadataSource' => $source,
+			'unexpectedOutput' => $stdout_parse['unexpectedOutput'],
+			'metadataPath' => $metadata,
+		);
+	}
+
+	private static function parse_live_export_child_stdout( string $stdout ): array {
+		if ( ! str_starts_with( $stdout, self::LIVE_EXPORT_STDOUT_SENTINEL ) ) {
+			return array(
+				'metadataRaw'       => '',
+				'unexpectedOutput'  => $stdout,
+			);
+		}
+
+		return array(
+			'metadataRaw'      => substr( $stdout, strlen( self::LIVE_EXPORT_STDOUT_SENTINEL ) ),
+			'unexpectedOutput' => '',
+		);
+	}
+
+	private static function live_export_metadata_summary( array $metadata ): array {
+		if ( isset( $metadata['zipBase64'] ) ) {
+			$metadata['zipBase64'] = '[base64 bytes ' . strlen( (string) $metadata['zipBase64'] ) . ']';
+		}
+
+		return $metadata;
+	}
+
+	private static function write_live_export_stream_zip( string $bytes ): string {
+		$dir = rtrim( sys_get_temp_dir(), DIRECTORY_SEPARATOR )
+			. DIRECTORY_SEPARATOR
+			. 'component-fuzz-rest-site-editor-live-export';
+		\ComponentFuzz\ensure_dir( $dir );
+
+		$path = $dir . DIRECTORY_SEPARATOR . 'streamed-' . getmypid() . '-' . bin2hex( random_bytes( 6 ) ) . '.zip';
+		file_put_contents( $path, $bytes );
+		return $path;
+	}
+
+	private static function expected_export_template_filter_log(): array {
+		return array(
+			array(
+				'type'  => 'wp_template',
+				'query' => array(),
+			),
+			array(
+				'type'  => 'wp_template_part',
+				'query' => array(),
+			),
+		);
+	}
+
+	private static function header_value( array $headers, string $name ): ?string {
+		foreach ( $headers as $header ) {
+			if ( ! is_string( $header ) || ! str_contains( $header, ':' ) ) {
+				continue;
+			}
+
+			list( $header_name, $value ) = explode( ':', $header, 2 );
+			if ( 0 === strcasecmp( trim( $header_name ), $name ) ) {
+				return trim( $value );
+			}
+		}
+
+		return null;
+	}
+
+	private static function live_edit_site_export_child_program(): string {
+		return <<<'PHP'
+<?php
+ini_set( 'display_errors', 'stderr' );
+error_reporting( E_ALL & ~E_DEPRECATED & ~E_USER_DEPRECATED );
+
+function component_fuzz_rest_site_editor_private_call( string $method, array $args = array() ) {
+	$callback = \Closure::bind(
+		static function ( string $method, array $args ) {
+			return \ComponentFuzz\Surfaces\RestSiteEditorSurface::$method( ...$args );
+		},
+		null,
+		\ComponentFuzz\Surfaces\RestSiteEditorSurface::class
+	);
+
+	return $callback( $method, $args );
+}
+
+function component_fuzz_rest_site_editor_zip_files( string $temp_dir, string $theme_name ): array {
+	$files = glob( rtrim( $temp_dir, DIRECTORY_SEPARATOR ) . DIRECTORY_SEPARATOR . $theme_name . '*.zip' );
+	if ( false === $files ) {
+		return array();
+	}
+
+	sort( $files );
+	return array_map( 'basename', $files );
+}
+
+function component_fuzz_rest_site_editor_describe_value( $value ) {
+	if ( $value instanceof \WP_Error ) {
+		return array(
+			'class'   => 'WP_Error',
+			'code'    => $value->get_error_code(),
+			'message' => $value->get_error_message(),
+			'data'    => $value->get_error_data(),
+		);
+	}
+
+	if ( is_object( $value ) ) {
+		return array( 'class' => get_class( $value ) );
+	}
+
+	return $value;
+}
+
+function component_fuzz_rest_site_editor_write_metadata( string $metadata_path, array $metadata ): void {
+	$json = json_encode( $metadata, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE );
+	file_put_contents( $metadata_path, false === $json ? '{"ok":false,"error":"metadata json encode failed"}' : $json );
+}
+
+$component_fuzz_rest_site_editor_raw     = stream_get_contents( STDIN );
+$component_fuzz_rest_site_editor_payload = json_decode( $component_fuzz_rest_site_editor_raw, true );
+
+if (
+	! is_array( $component_fuzz_rest_site_editor_payload )
+	|| empty( $component_fuzz_rest_site_editor_payload['repoRoot'] )
+	|| empty( $component_fuzz_rest_site_editor_payload['metadataPath'] )
+	|| ! is_array( $component_fuzz_rest_site_editor_payload['case'] ?? null )
+) {
+	fwrite( STDERR, "Invalid Rest Site Editor live export payload.\n" );
+	exit( 1 );
+}
+
+require_once $component_fuzz_rest_site_editor_payload['repoRoot'] . '/tools/component-fuzz/lib/autoload.php';
+
+\ComponentFuzz\WpBootstrap::load();
+
+$component_fuzz_rest_site_editor_case            = $component_fuzz_rest_site_editor_payload['case'];
+$component_fuzz_rest_site_editor_metadata_path   = (string) $component_fuzz_rest_site_editor_payload['metadataPath'];
+$component_fuzz_rest_site_editor_filter_log      = array();
+$component_fuzz_rest_site_editor_filter          = null;
+$component_fuzz_rest_site_editor_temp_paths      = array();
+$component_fuzz_rest_site_editor_before_zip      = array();
+$component_fuzz_rest_site_editor_theme_name      = '';
+$component_fuzz_rest_site_editor_temp_dir        = '';
+$component_fuzz_rest_site_editor_export_started  = false;
+$component_fuzz_rest_site_editor_export_returned = false;
+$component_fuzz_rest_site_editor_export_ob_level = null;
+$component_fuzz_rest_site_editor_return_value    = null;
+$component_fuzz_rest_site_editor_uncaught        = null;
+$component_fuzz_rest_site_editor_metadata        = array(
+	'ok'            => false,
+	'pid'           => getmypid(),
+	'parentPid'     => (int) ( $component_fuzz_rest_site_editor_payload['parentPid'] ?? 0 ),
+	'exportStarted' => false,
+	'exportReturned' => false,
+);
+
+register_shutdown_function(
+	static function () use (
+		&$component_fuzz_rest_site_editor_metadata,
+		$component_fuzz_rest_site_editor_metadata_path,
+		&$component_fuzz_rest_site_editor_filter_log,
+		&$component_fuzz_rest_site_editor_filter,
+		&$component_fuzz_rest_site_editor_temp_paths,
+		&$component_fuzz_rest_site_editor_before_zip,
+		&$component_fuzz_rest_site_editor_theme_name,
+		&$component_fuzz_rest_site_editor_temp_dir,
+		&$component_fuzz_rest_site_editor_export_started,
+		&$component_fuzz_rest_site_editor_export_returned,
+		&$component_fuzz_rest_site_editor_export_ob_level,
+		&$component_fuzz_rest_site_editor_return_value,
+		&$component_fuzz_rest_site_editor_uncaught
+	): void {
+		$streamed_zip = '';
+		if (
+			is_int( $component_fuzz_rest_site_editor_export_ob_level )
+			&& ob_get_level() > $component_fuzz_rest_site_editor_export_ob_level
+		) {
+			$streamed_zip = (string) ob_get_clean();
+		}
+
+		if ( is_callable( $component_fuzz_rest_site_editor_filter ) && function_exists( 'remove_filter' ) ) {
+			\remove_filter( 'pre_get_block_templates', $component_fuzz_rest_site_editor_filter, 10 );
+		}
+
+		$after_zip_files = '' === $component_fuzz_rest_site_editor_theme_name
+			? array()
+			: component_fuzz_rest_site_editor_zip_files(
+				$component_fuzz_rest_site_editor_temp_dir,
+				$component_fuzz_rest_site_editor_theme_name
+			);
+
+		$headers      = headers_list();
+		$fatal_error  = error_get_last();
+		$theme_path   = $component_fuzz_rest_site_editor_temp_paths[0] ?? null;
+		$new_zip_file = array_values( array_diff( $after_zip_files, $component_fuzz_rest_site_editor_before_zip ) );
+
+		$component_fuzz_rest_site_editor_metadata = array_merge(
+			$component_fuzz_rest_site_editor_metadata,
+			array(
+				'ok'                              => $component_fuzz_rest_site_editor_export_started
+					&& ! $component_fuzz_rest_site_editor_export_returned
+					&& null === $component_fuzz_rest_site_editor_uncaught
+					&& null === $fatal_error,
+				'exportStarted'                   => $component_fuzz_rest_site_editor_export_started,
+				'exportReturned'                  => $component_fuzz_rest_site_editor_export_returned,
+				'returnValue'                     => component_fuzz_rest_site_editor_describe_value(
+					$component_fuzz_rest_site_editor_return_value
+				),
+				'uncaught'                        => $component_fuzz_rest_site_editor_uncaught,
+				'fatalError'                      => $fatal_error,
+				'filterLog'                       => $component_fuzz_rest_site_editor_filter_log,
+				'filterRemovedAtShutdown'         => is_callable( $component_fuzz_rest_site_editor_filter )
+					? false === \has_filter( 'pre_get_block_templates', $component_fuzz_rest_site_editor_filter )
+					: null,
+				'beforeZipFiles'                  => $component_fuzz_rest_site_editor_before_zip,
+				'afterZipFiles'                   => $after_zip_files,
+				'newZipFilesAfterExport'          => $new_zip_file,
+				'zipFilesRestored'                => $component_fuzz_rest_site_editor_before_zip === $after_zip_files,
+				'headersObservable'               => array() !== $headers,
+				'headers'                         => $headers,
+				'zipBase64'                       => base64_encode( $streamed_zip ),
+				'streamedBytes'                   => strlen( $streamed_zip ),
+				'contentDirRemainingAtShutdown'   => defined( 'WP_CONTENT_DIR' ) ? file_exists( WP_CONTENT_DIR ) : null,
+				'themeFixtureRemainingAtShutdown' => is_string( $theme_path ) ? file_exists( $theme_path ) : null,
+				'obLevelAtShutdown'               => ob_get_level(),
+			)
+		);
+
+		component_fuzz_rest_site_editor_write_metadata(
+			$component_fuzz_rest_site_editor_metadata_path,
+			$component_fuzz_rest_site_editor_metadata
+		);
+		echo "__COMPONENT_FUZZ_REST_SITE_EDITOR_EXPORT__\n";
+		echo json_encode(
+			$component_fuzz_rest_site_editor_metadata,
+			JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE
+		);
+	}
+);
+
+try {
+	component_fuzz_rest_site_editor_private_call( 'load_endpoint_classes' );
+	component_fuzz_rest_site_editor_private_call( 'prepare_runtime' );
+	$component_fuzz_rest_site_editor_temp_paths = component_fuzz_rest_site_editor_private_call(
+		'prepare_theme_fixture',
+		array( $component_fuzz_rest_site_editor_case )
+	);
+	component_fuzz_rest_site_editor_private_call(
+		'seed_fixtures',
+		array( $component_fuzz_rest_site_editor_case )
+	);
+
+	if ( function_exists( 'update_option' ) ) {
+		\update_option( 'current_theme', $component_fuzz_rest_site_editor_case['themeName'] ?? '' );
+		\update_option( 'stylesheet', $component_fuzz_rest_site_editor_case['themeSlug'] ?? '' );
+		\update_option( 'template', $component_fuzz_rest_site_editor_case['themeSlug'] ?? '' );
+	}
+
+	$component_fuzz_rest_site_editor_filter = component_fuzz_rest_site_editor_private_call(
+		'install_export_template_filter',
+		array( $component_fuzz_rest_site_editor_case, &$component_fuzz_rest_site_editor_filter_log )
+	);
+
+	$component_fuzz_rest_site_editor_theme_name = basename( \get_stylesheet() );
+	$component_fuzz_rest_site_editor_temp_dir   = \get_temp_dir();
+	$component_fuzz_rest_site_editor_before_zip = component_fuzz_rest_site_editor_zip_files(
+		$component_fuzz_rest_site_editor_temp_dir,
+		$component_fuzz_rest_site_editor_theme_name
+	);
+
+	component_fuzz_rest_site_editor_private_call( 'reset_runtime_caches' );
+
+	$component_fuzz_rest_site_editor_controller     = new \WP_REST_Edit_Site_Export_Controller();
+	$component_fuzz_rest_site_editor_export_started = true;
+	$component_fuzz_rest_site_editor_export_ob_level = ob_get_level();
+	ob_start();
+	$component_fuzz_rest_site_editor_return_value   = $component_fuzz_rest_site_editor_controller->export();
+	$component_fuzz_rest_site_editor_export_returned = true;
+
+	exit( 2 );
+} catch ( \Throwable $e ) {
+	$component_fuzz_rest_site_editor_uncaught = array(
+		'class'   => get_class( $e ),
+		'message' => $e->getMessage(),
+		'file'    => $e->getFile(),
+		'line'    => $e->getLine(),
+	);
+
+	fwrite( STDERR, $e->getMessage() . "\n" );
+	exit( 1 );
+}
+PHP;
 	}
 
 	private static function prepare_runtime(): void {
