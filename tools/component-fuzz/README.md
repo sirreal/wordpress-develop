@@ -116,6 +116,12 @@ database, network requests, or a configured site.
   variations, block hook insertion and ignored metadata, style,
   pattern/category, bindings, and supports registries, including dynamic block
   attribute preparation and wrapper attribute merging.
+- `block-supports`: no-DB core block-support lifecycle coverage, including
+  `WP_Block_Supports` registration and wrapper merging, auto-generated control
+  markers, direct support callbacks, skip-serialization gates, background,
+  dimensions, visibility, position, layout, elements, custom CSS, state-style,
+  and helper-matrix render behavior, safe stored CSS, and registry/global/style
+  store restoration.
 - `core-block-render`: no-DB direct render-callback coverage for representative
   dynamic core blocks, including site title/tagline option handling, search
   label/query/placeholder escaping, loginout current-request redirect links,
