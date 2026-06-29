@@ -320,16 +320,22 @@ final class RestMediaAttachmentsSurface {
 				&& $filter_removed,
 			'create_item raw upload creates one attachment, stores bounded metadata, sets response headers, and removes client-side filters',
 			array(
-				'denied'       => self::describe_error( $denied ),
-				'allowed'      => $allowed,
-				'data'         => $data,
-				'headers'      => $headers,
-				'post'         => $attachment,
-				'attachedFile' => $attached_file,
-				'relativeFile' => $relative_file,
-				'metadata'     => $metadata,
-				'before'       => $before,
-				'after'        => $after,
+				'denied'         => self::describe_error( $denied ),
+				'allowed'        => self::describe_error( $allowed ),
+				'responseStatus' => $response instanceof \WP_REST_Response ? $response->get_status() : null,
+				'responseClass'  => is_object( $response ) ? get_class( $response ) : gettype( $response ),
+				'dataKeys'       => array_keys( $data ),
+				'headers'        => $headers,
+				'postType'       => $attachment instanceof \WP_Post ? $attachment->post_type : null,
+				'postStatus'     => $attachment instanceof \WP_Post ? $attachment->post_status : null,
+				'postParent'     => $attachment instanceof \WP_Post ? (int) $attachment->post_parent : null,
+				'postMimeType'   => $attachment instanceof \WP_Post ? $attachment->post_mime_type : null,
+				'attachedFile'   => $attached_file,
+				'relativeFile'   => $relative_file,
+				'metadataKeys'   => is_array( $metadata ) ? array_keys( $metadata ) : null,
+				'before'         => $before,
+				'after'          => $after,
+				'filterRemoved'  => $filter_removed,
 			)
 		);
 
@@ -766,13 +772,13 @@ final class RestMediaAttachmentsSurface {
 			return $allcaps;
 		};
 
-		\add_filter( 'user_has_cap', $filter, 10, 2 );
+		\add_filter( 'user_has_cap', $filter, PHP_INT_MAX, 2 );
 
 		return $filter;
 	}
 
 	private static function remove_cap_filter( callable $filter ): bool {
-		return \remove_filter( 'user_has_cap', $filter, 10 );
+		return \remove_filter( 'user_has_cap', $filter, PHP_INT_MAX );
 	}
 
 	private static function result( \ComponentFuzz\FuzzContext $ctx, string $invariant, array $failures, array $data = array() ): array {

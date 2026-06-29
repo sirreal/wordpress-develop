@@ -392,6 +392,11 @@ database, network requests, or a configured site.
   filename/quality/EXIF-orientation contracts, resize/save metadata,
   intermediate and generated sub-sizes, missing sub-size detection, and
   cache/filter-backed attachment metadata helpers with temp-file cleanup.
+- `media-image-edit-requests`: admin media image-edit request coverage for
+  history normalization, preview streaming, save/restore metadata, crop
+  wrappers, AJAX preview/crop/sub-size boundaries, nonce/capability gates,
+  file/metadata/id filters, and temp-root attachment fixtures using a
+  deterministic fake image editor.
 - `media-ingest`: no-network media upload and sideload ingest coverage over
   generated temp fixtures, including upload directory filters, MIME/filetype
   boundaries, sanitized unique filenames, direct handle prefilter/move hooks,
@@ -741,9 +746,10 @@ browser widgets editor, performing REST persistence, or depending on theme
 files. The
 Admin Media Chrome surface intentionally avoids upload dispatch, real
 attachments created by browser flows, `wp_media_attach_action()` redirects,
-AJAX image-editor actions, and media modal runtime behavior; it covers direct
-server-side helpers with synthetic attachment rows and cache/filter-backed
-metadata only. The
+media modal runtime behavior, and browser-side image editor UI; server-side
+image-edit AJAX save, preview, crop, restore, and sub-size request branches are
+covered by `media-image-edit-requests`. The surface covers direct server-side
+helpers with synthetic attachment rows and cache/filter-backed metadata only. The
 Customizer surface intentionally avoids changeset save/publish, nav-menu
 persistence, widget persistence, and real post/option storage beyond the
 existing no-DB option stub. The `admin-options-submission` surface covers the
@@ -751,11 +757,14 @@ bounded `wp-admin/options.php` submission/update branch without loading the full
 admin bootstrap, redirects, or process exits. The `options-autoload` surface
 uses that same bounded in-memory option table and object cache, and deliberately
 focuses on core option/autoload/cache/hook semantics rather than admin form
-submission, network options, transients, or arbitrary SQL support. The `media-editor`
-surface short-circuits attachment
-metadata updates and intentionally avoids media paths that insert attachments,
-create cover-image attachments, process audio/video thumbnails, or otherwise
-require real postmeta writes. The `multisite` surface leaves `MULTISITE`
+submission, network options, transients, or arbitrary SQL support. The
+`media-editor` surface short-circuits attachment metadata updates and
+intentionally avoids media paths that insert attachments, create cover-image
+attachments, process audio/video thumbnails, or otherwise require real postmeta
+writes. The `media-image-edit-requests` surface complements it with bounded
+in-memory attachment rows, temp upload roots, captured AJAX termination, and a
+fake `WP_Image_Editor`; it avoids codec-dependent image decoding and
+subprocess-only `IMAGE_EDIT_OVERWRITE` branches. The `multisite` surface leaves `MULTISITE`
 disabled for the shared PHP process; true multisite `sitemeta` write paths,
 site creation/update/deletion, and DB-backed query execution are skipped unless
 short-circuited through filters, while non-multisite network-option CRUD remains
@@ -779,8 +788,9 @@ terms, comments, users, revisions, and attachments are covered by
 using raw request bodies, temp upload roots, attachment postmeta, response
 projection, metadata finalization, and permission gates. It intentionally avoids
 multipart success paths that depend on PHP's `is_uploaded_file()` state, remote
-sideload downloads, and heavyweight image-edit success paths unless they can be
-kept process-local and codec-independent. The object surface records explicit
+sideload downloads, and admin image-edit request paths, which are covered by
+`media-image-edit-requests` when they can be kept process-local and
+codec-independent. The object surface records explicit
 skip rows for template controllers that depend on block-theme filesystem state
 and template CPT queries, and for broad collection queries that exceed the small
 SQL parser in the stub. It documents limits for invalid enum-error formatting
