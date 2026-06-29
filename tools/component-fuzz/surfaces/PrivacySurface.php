@@ -56,6 +56,7 @@ final class PrivacySurface {
 			$rows[] = self::check_export_group_html( $ctx->fork( 'export-group-html' ) );
 			$rows[] = self::check_registry_filters( $ctx->fork( 'registry-filters' ) );
 			$rows[] = self::check_comment_privacy_callbacks( $ctx->fork( 'comment-privacy-callbacks' ) );
+			$rows[] = self::check_builtin_user_media_exporters( $ctx->fork( 'builtin-user-media-exporters' ) );
 			$rows[] = self::check_export_processor( $ctx->fork( 'export-processor' ) );
 			$rows[] = self::check_export_email_notification( $ctx->fork( 'export-email' ) );
 			$rows[] = self::check_export_email_negative_paths( $ctx->fork( 'export-email-negative' ) );
@@ -165,7 +166,9 @@ final class PrivacySurface {
 				'WP_Error',
 				'WP_User_Request',
 				'WP_Post',
+				'WP_Query',
 				'WP_Rewrite',
+				'WP_User',
 				'PHPMailer\PHPMailer\PHPMailer',
 				'WP_PHPMailer',
 			) as $class
@@ -180,6 +183,8 @@ final class PrivacySurface {
 				'add_action',
 				'add_filter',
 				'clean_post_cache',
+				'clean_user_cache',
+				'date_i18n',
 				'delete_post_meta',
 				'esc_attr',
 				'esc_html',
@@ -189,15 +194,21 @@ final class PrivacySurface {
 				'get_comment_text',
 				'get_comments',
 				'get_post_meta',
+				'get_user_by',
+				'get_user_meta',
 				'is_wp_error',
+				'maybe_serialize',
+				'maybe_unserialize',
 				'remove_action',
 				'remove_filter',
 				'sanitize_email',
 				'sanitize_title_with_dashes',
 				'update_post_meta',
+				'wp_cache_delete',
 				'wp_generate_user_request_key',
 				'wp_cache_set',
 				'wp_fast_hash',
+				'wp_get_attachment_url',
 				'wp_get_user_request',
 				'wp_json_encode',
 				'wp_mail',
@@ -219,8 +230,12 @@ final class PrivacySurface {
 				'wp_comments_personal_data_eraser',
 				'wp_comments_personal_data_exporter',
 				'wp_insert_comment',
+				'wp_media_personal_data_exporter',
 				'wp_register_comment_personal_data_eraser',
 				'wp_register_comment_personal_data_exporter',
+				'wp_register_media_personal_data_exporter',
+				'wp_register_user_personal_data_exporter',
+				'wp_user_personal_data_exporter',
 				'_wp_privacy_account_request_confirmed',
 				'_wp_privacy_account_request_confirmed_message',
 				'_wp_privacy_completed_request',
@@ -1447,6 +1462,351 @@ final class PrivacySurface {
 			array(
 				'email'    => self::describe_string( $email ),
 				'failures' => $failures,
+			)
+		);
+	}
+
+	private static function check_builtin_user_media_exporters( \ComponentFuzz\FuzzContext $ctx ): array {
+		if ( ! self::wpdb_stub_available() ) {
+			return self::skip(
+				$ctx,
+				'privacy.builtin-exporters.user-media-payloads',
+				'The wpdb content stub is unavailable for built-in user and media exporter coverage.'
+			);
+		}
+
+		$failures = array();
+		$token    = strtolower( preg_replace( '/[^a-z0-9]+/', '', $ctx->identifier( 5, 10 ) ) );
+		$token    = '' === $token ? 'privacy' . abs( $ctx->seed() % 10000 ) : $token;
+
+		$user_id       = 93600 + $ctx->int( 0, 199 );
+		$other_user_id = $user_id + 1000;
+		$email         = 'privacy-user-' . $token . '@example.test';
+		$login         = 'privacy_' . $token;
+		$profile_note  = 'profile-note-' . $token . ' <script>alert(1)</script>';
+		$session_key   = 'component_' . $token;
+		$attachment_base = 94000 + ( $ctx->int( 0, 100 ) * 100 );
+		$attachment_ids  = array();
+
+		$profile_filter_calls = array();
+		$reserved_names_seen  = array();
+		$profile_filter       = static function ( array $items, \WP_User $user, array $reserved_names ) use ( &$profile_filter_calls, &$reserved_names_seen, $profile_note, $user_id ): array {
+			$profile_filter_calls[] = (int) $user->ID;
+			$reserved_names_seen[]  = $reserved_names;
+
+			$items[] = array(
+				'name'  => 'Component Fuzz Profile Note',
+				'value' => $profile_note,
+			);
+			$items[] = array(
+				'name'  => 'User Email',
+				'value' => 'reserved-profile-value-' . $user_id,
+			);
+
+			return $items;
+		};
+		$suppress_doing_it_wrong = static fn() => false;
+
+		$attachment_url_calls = array();
+		$attachment_url_filter = static function ( $url, int $post_id ) use ( &$attachment_url_calls, &$attachment_ids, $token ) {
+			$attachment_url_calls[] = $post_id;
+
+			if ( in_array( $post_id, $attachment_ids, true ) ) {
+				return 'https://media.example.test/' . $token . '/attachment-' . $post_id . '.jpg?unsafe=<script>';
+			}
+
+			return $url;
+		};
+
+		self::reset_db_content();
+		try {
+			$wpdb = $GLOBALS['wpdb'];
+
+			$wpdb->insert(
+				$wpdb->users,
+				array(
+					'ID'              => $user_id,
+					'user_login'      => $login,
+					'user_pass'       => '$P$ComponentFuzzPrivacyUser',
+					'user_nicename'   => 'privacy-nice-' . $token,
+					'user_email'      => $email,
+					'user_url'        => 'https://example.test/users/' . rawurlencode( $token ) . '?q=<script>',
+					'user_registered' => '2026-06-29 12:34:56',
+					'display_name'    => 'Privacy User ' . $token,
+					'user_status'     => 0,
+				)
+			);
+			$wpdb->insert(
+				$wpdb->users,
+				array(
+					'ID'              => $other_user_id,
+					'user_login'      => 'other_' . $token,
+					'user_pass'       => '$P$ComponentFuzzOtherUser',
+					'user_nicename'   => 'other-privacy-' . $token,
+					'user_email'      => 'other-privacy-' . $token . '@example.test',
+					'user_registered' => '2026-06-29 13:00:00',
+					'display_name'    => 'Other Privacy User',
+					'user_status'     => 0,
+				)
+			);
+
+			foreach (
+				array(
+					'nickname'                  => 'Nick ' . $token,
+					'first_name'                => 'MetaFirst ' . $token,
+					'last_name'                 => 'MetaLast ' . $token,
+					'description'               => 'Meta description ' . $token,
+					'community-events-location' => array(
+						'description' => 'Barcelona ' . $token,
+						'country'     => 'ES',
+						'latitude'    => '41.3874',
+						'longitude'   => '2.1686',
+						'ip'          => '198.51.100.' . $ctx->int( 1, 254 ),
+					),
+					'session_tokens'            => array(
+						$session_key => array(
+							'expiration' => 1780000000 + $ctx->int( 0, 1000 ),
+							'ip'         => '203.0.113.' . $ctx->int( 1, 254 ),
+							'ua'         => 'ComponentFuzz/' . $ctx->int( 10, 99 ),
+							'login'      => 1770000000 + $ctx->int( 0, 1000 ),
+						),
+					),
+				) as $meta_key => $meta_value
+			) {
+				$wpdb->insert(
+					$wpdb->usermeta,
+					array(
+						'user_id'    => $user_id,
+						'meta_key'   => $meta_key,
+						'meta_value' => \maybe_serialize( $meta_value ),
+					)
+				);
+			}
+			\clean_user_cache( $user_id );
+			\wp_cache_delete( $user_id, 'user_meta' );
+
+			$exporters = \wp_register_user_personal_data_exporter(
+				array(
+					'existing-exporter' => array(
+						'exporter_friendly_name' => 'Existing Exporter',
+						'callback'               => '__return_empty_array',
+					),
+				)
+			);
+			$exporters = \wp_register_media_personal_data_exporter( $exporters );
+			$registry_ok = isset( $exporters['existing-exporter'], $exporters['wordpress-user'], $exporters['wordpress-media'] )
+				&& 'WordPress User' === ( $exporters['wordpress-user']['exporter_friendly_name'] ?? null )
+				&& 'wp_user_personal_data_exporter' === ( $exporters['wordpress-user']['callback'] ?? null )
+				&& 'WordPress Media' === ( $exporters['wordpress-media']['exporter_friendly_name'] ?? null )
+				&& 'wp_media_personal_data_exporter' === ( $exporters['wordpress-media']['callback'] ?? null );
+
+			\add_filter( 'wp_privacy_additional_user_profile_data', $profile_filter, 10, 3 );
+			\add_filter( 'doing_it_wrong_trigger_error', $suppress_doing_it_wrong, 10, 4 );
+			try {
+				$user_export  = \wp_user_personal_data_exporter( " \t" . strtoupper( $email ) . "\n" );
+				$missing_user = \wp_user_personal_data_exporter( 'missing-' . $email );
+			} finally {
+				\remove_filter( 'doing_it_wrong_trigger_error', $suppress_doing_it_wrong, 10 );
+				\remove_filter( 'wp_privacy_additional_user_profile_data', $profile_filter, 10 );
+			}
+
+			$user_item     = self::find_export_item( (array) ( $user_export['data'] ?? array() ), 'user', 'user-' . $user_id );
+			$location_item = self::find_export_item( (array) ( $user_export['data'] ?? array() ), 'community-events-location', 'community-events-location-' . $user_id );
+			$session_item  = self::find_export_item( (array) ( $user_export['data'] ?? array() ), 'session-tokens', 'session-tokens-' . $user_id . '-' . $session_key );
+
+			$user_fields     = self::export_item_fields( $user_item );
+			$location_fields = self::export_item_fields( $location_item );
+			$session_fields  = self::export_item_fields( $session_item );
+			$field_counts    = array_count_values(
+				array_values(
+					array_filter(
+						array_map(
+							static fn( $datum ) => is_array( $datum ) ? ( $datum['name'] ?? null ) : null,
+							(array) ( $user_item['data'] ?? array() )
+						),
+						'is_string'
+					)
+				)
+			);
+			$user_html = is_array( $user_item )
+				? \wp_privacy_generate_personal_data_export_group_html(
+					array(
+						'group_label'       => $user_item['group_label'] ?? 'User',
+						'group_description' => $user_item['group_description'] ?? '',
+						'items'             => array(
+							$user_item['item_id'] ?? 'user' => $user_item['data'] ?? array(),
+						),
+					),
+					'user',
+					1
+				)
+				: '';
+
+			$user_ok = is_array( $user_export )
+				&& true === ( $user_export['done'] ?? null )
+				&& array() === ( $missing_user['data'] ?? null )
+				&& true === ( $missing_user['done'] ?? null )
+				&& $email === ( $user_fields['User Email'] ?? null )
+				&& $login === ( $user_fields['User Login Name'] ?? null )
+				&& 'MetaFirst ' . $token === ( $user_fields['User First Name'] ?? null )
+				&& 'MetaLast ' . $token === ( $user_fields['User Last Name'] ?? null )
+				&& 'Meta description ' . $token === ( $user_fields['User Description'] ?? null )
+				&& $profile_note === ( $user_fields['Component Fuzz Profile Note'] ?? null )
+				&& 1 === ( $field_counts['User Email'] ?? 0 )
+				&& 'Barcelona ' . $token === ( $location_fields['City'] ?? null )
+				&& 'ES' === ( $location_fields['Country'] ?? null )
+				&& isset( $location_fields['Latitude'], $location_fields['Longitude'], $location_fields['IP'] )
+				&& isset( $session_fields['Expiration'], $session_fields['IP'], $session_fields['User Agent'], $session_fields['Last Login'] )
+				&& 1 === count( $profile_filter_calls )
+				&& $user_id === ( $profile_filter_calls[0] ?? null )
+				&& isset( $reserved_names_seen[0] )
+				&& in_array( 'User Email', $reserved_names_seen[0], true )
+				&& false === \has_filter( 'wp_privacy_additional_user_profile_data', $profile_filter )
+				&& false === \has_filter( 'doing_it_wrong_trigger_error', $suppress_doing_it_wrong )
+				&& is_string( $user_html )
+				&& false === stripos( $user_html, '<script' )
+				&& str_contains( $user_html, 'Component Fuzz Profile Note' )
+				&& str_contains( $user_html, 'alert(1)' );
+
+			if ( ! $registry_ok || ! $user_ok ) {
+				self::record_failure(
+					$failures,
+					'builtin-exporters.user-registry-payload-filter-and-html-contracts',
+					array( 'label' => 'user-exporter' ),
+					array(
+						'exporters'           => self::describe_value( $exporters ),
+						'userExport'          => self::describe_value( $user_export ),
+						'missingUser'         => self::describe_value( $missing_user ),
+						'userFields'          => self::describe_value( $user_fields ),
+						'locationFields'      => self::describe_value( $location_fields ),
+						'sessionFields'       => self::describe_value( $session_fields ),
+						'profileFilterCalls'  => self::describe_value( $profile_filter_calls ),
+						'reservedNamesSeen'   => self::describe_value( $reserved_names_seen ),
+						'userHtml'            => self::describe_string( $user_html ),
+						'registryOk'          => $registry_ok,
+						'userOk'              => $user_ok,
+					)
+				);
+			}
+
+			for ( $i = 0; $i < 51; $i++ ) {
+				$attachment_id     = $attachment_base + $i;
+				$attachment_ids[]  = $attachment_id;
+				self::seed_db_request_post(
+					self::post_record(
+						array(
+							'ID'             => $attachment_id,
+							'post_author'    => $user_id,
+							'post_name'      => 'privacy-media-' . $token . '-' . $i,
+							'post_title'     => 'Privacy Media ' . $i,
+							'post_status'    => 0 === $i % 2 ? 'inherit' : 'private',
+							'post_type'      => 'attachment',
+							'post_mime_type' => 'image/jpeg',
+							'guid'           => 'https://media.example.test/guid/' . $attachment_id . '.jpg',
+						)
+					)
+				);
+			}
+			self::seed_db_request_post(
+				self::post_record(
+					array(
+						'ID'             => $attachment_base + 1000,
+						'post_author'    => $other_user_id,
+						'post_name'      => 'privacy-other-author-media-' . $token,
+						'post_status'    => 'inherit',
+						'post_type'      => 'attachment',
+						'post_mime_type' => 'image/jpeg',
+					)
+				)
+			);
+			self::seed_db_request_post(
+				self::post_record(
+					array(
+						'ID'          => $attachment_base + 1001,
+						'post_author' => $user_id,
+						'post_name'   => 'privacy-non-attachment-' . $token,
+						'post_status' => 'publish',
+						'post_type'   => 'post',
+					)
+				)
+			);
+
+			\add_filter( 'wp_get_attachment_url', $attachment_url_filter, 10, 2 );
+			try {
+				$media_page_1  = \wp_media_personal_data_exporter( $email, 1 );
+				$media_page_2  = \wp_media_personal_data_exporter( $email, 2 );
+				$media_page_3  = \wp_media_personal_data_exporter( $email, 3 );
+				$missing_media = \wp_media_personal_data_exporter( 'missing-' . $email, 1 );
+			} finally {
+				\remove_filter( 'wp_get_attachment_url', $attachment_url_filter, 10 );
+			}
+
+			$page_1_items = (array) ( $media_page_1['data'] ?? array() );
+			$page_2_items = (array) ( $media_page_2['data'] ?? array() );
+			$page_3_items = (array) ( $media_page_3['data'] ?? array() );
+			$page_1_first = $page_1_items[0] ?? null;
+			$page_1_last  = $page_1_items[49] ?? null;
+			$page_2_only  = $page_2_items[0] ?? null;
+			$page_1_ids   = self::export_item_ids( $page_1_items );
+			$page_2_ids   = self::export_item_ids( $page_2_items );
+
+			$media_ok = is_array( $media_page_1 )
+				&& false === ( $media_page_1['done'] ?? null )
+				&& 50 === count( $page_1_items )
+				&& true === ( $media_page_2['done'] ?? null )
+				&& 1 === count( $page_2_items )
+				&& true === ( $media_page_3['done'] ?? null )
+				&& array() === $page_3_items
+				&& true === ( $missing_media['done'] ?? null )
+				&& array() === ( $missing_media['data'] ?? null )
+				&& 'post-' . $attachment_ids[0] === ( $page_1_first['item_id'] ?? null )
+				&& 'post-' . $attachment_ids[49] === ( $page_1_last['item_id'] ?? null )
+				&& 'post-' . $attachment_ids[50] === ( $page_2_only['item_id'] ?? null )
+				&& 'media' === ( $page_1_first['group_id'] ?? null )
+				&& 'https://media.example.test/' . $token . '/attachment-' . $attachment_ids[0] . '.jpg?unsafe=<script>' === ( self::export_item_fields( $page_1_first )['URL'] ?? null )
+				&& 'https://media.example.test/' . $token . '/attachment-' . $attachment_ids[50] . '.jpg?unsafe=<script>' === ( self::export_item_fields( $page_2_only )['URL'] ?? null )
+				&& range( $attachment_ids[0], $attachment_ids[49] ) === $page_1_ids
+				&& array( $attachment_ids[50] ) === $page_2_ids
+				&& false === \has_filter( 'wp_get_attachment_url', $attachment_url_filter );
+
+			if ( ! $media_ok ) {
+				self::record_failure(
+					$failures,
+					'builtin-exporters.media-pagination-filtering-and-url-contracts',
+					array( 'label' => 'media-exporter' ),
+					array(
+						'page1'              => self::describe_value( $media_page_1 ),
+						'page2'              => self::describe_value( $media_page_2 ),
+						'page3'              => self::describe_value( $media_page_3 ),
+						'missingMedia'       => self::describe_value( $missing_media ),
+						'page1Ids'           => self::describe_value( $page_1_ids ),
+						'page2Ids'           => self::describe_value( $page_2_ids ),
+						'attachmentUrlCalls' => self::describe_value( $attachment_url_calls ),
+					)
+				);
+			}
+		} finally {
+			\remove_filter( 'doing_it_wrong_trigger_error', $suppress_doing_it_wrong, 10 );
+			\remove_filter( 'wp_privacy_additional_user_profile_data', $profile_filter, 10 );
+			\remove_filter( 'wp_get_attachment_url', $attachment_url_filter, 10 );
+			\clean_user_cache( $user_id );
+			\clean_user_cache( $other_user_id );
+			\wp_cache_delete( $user_id, 'user_meta' );
+			\wp_cache_delete( $other_user_id, 'user_meta' );
+			foreach ( $attachment_ids as $attachment_id ) {
+				\clean_post_cache( $attachment_id );
+			}
+			self::reset_db_content();
+		}
+
+		return self::row(
+			$ctx,
+			'privacy.builtin-exporters.user-media-payloads',
+			array() === $failures,
+			array(
+				'userId'          => $user_id,
+				'attachmentCount' => count( $attachment_ids ),
+				'failures'        => $failures,
 			)
 		);
 	}
@@ -2911,6 +3271,46 @@ final class PrivacySurface {
 			&& str_contains( $link, '<a href="' )
 			&& str_contains( $link, 'target="_blank"' )
 			&& false === stripos( $link, '<script' );
+	}
+
+	private static function export_item_fields( $item ): array {
+		$fields = array();
+		if ( ! is_array( $item ) ) {
+			return $fields;
+		}
+
+		foreach ( (array) ( $item['data'] ?? array() ) as $datum ) {
+			if ( is_array( $datum ) && isset( $datum['name'] ) ) {
+				$fields[ $datum['name'] ] = $datum['value'] ?? null;
+			}
+		}
+
+		return $fields;
+	}
+
+	private static function find_export_item( array $items, string $group_id, string $item_id ): ?array {
+		foreach ( $items as $item ) {
+			if ( is_array( $item ) && $group_id === ( $item['group_id'] ?? null ) && $item_id === ( $item['item_id'] ?? null ) ) {
+				return $item;
+			}
+		}
+
+		return null;
+	}
+
+	private static function export_item_ids( array $items ): array {
+		$ids = array();
+		foreach ( $items as $item ) {
+			if ( ! is_array( $item ) || ! isset( $item['item_id'] ) || ! is_string( $item['item_id'] ) ) {
+				continue;
+			}
+
+			if ( preg_match( '/^post-(\d+)$/', $item['item_id'], $matches ) ) {
+				$ids[] = (int) $matches[1];
+			}
+		}
+
+		return $ids;
 	}
 
 	private static function install_scoped_filters(): void {
