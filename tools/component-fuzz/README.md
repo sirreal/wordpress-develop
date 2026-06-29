@@ -68,6 +68,12 @@ database, network requests, or a configured site.
   edit attachment details form output, thumbnail/icon helper filters, direct
   caption/send-to-editor helper output, and safe media button/uploader bypass
   output.
+- `admin-options-submission`: no-DB `wp-admin/options.php` update-flow
+  coverage, including registered Settings API allowlists and sanitize
+  callbacks, settings error transients, General Settings date/time/timezone
+  branches, legacy `page_options` submissions, nonce/capability/unknown-page
+  failure paths, redirect capture, and global/filter/option restoration without
+  process exits.
 - `ai-client`: no-DB WordPress AI Client API coverage for SDK DTO
   round-trips, enum strictness, provider registry isolation, model-selection
   preferences across provider/model collisions, prompt builder ability
@@ -713,10 +719,12 @@ server-side helpers with synthetic attachment rows and cache/filter-backed
 metadata only. The
 Customizer surface intentionally avoids changeset save/publish, nav-menu
 persistence, widget persistence, and real post/option storage beyond the
-existing no-DB option stub. The `options-autoload` surface uses that same
-bounded in-memory option table and object cache, and deliberately focuses on
-core option/autoload/cache/hook semantics rather than settings-page submission,
-network options, transients, or arbitrary SQL support. The `media-editor`
+existing no-DB option stub. The `admin-options-submission` surface covers the
+bounded `wp-admin/options.php` submission/update branch without loading the full
+admin bootstrap, redirects, or process exits. The `options-autoload` surface
+uses that same bounded in-memory option table and object cache, and deliberately
+focuses on core option/autoload/cache/hook semantics rather than admin form
+submission, network options, transients, or arbitrary SQL support. The `media-editor`
 surface short-circuits attachment
 metadata updates and intentionally avoids media paths that insert attachments,
 create cover-image attachments, process audio/video thumbnails, or otherwise

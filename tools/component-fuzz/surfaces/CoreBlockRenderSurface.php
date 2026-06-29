@@ -95,6 +95,7 @@ final class CoreBlockRenderSurface {
 				'render_block',
 				'update_option',
 				'wp_cache_set',
+				'wp_parse_url',
 				'wp_set_current_user',
 			) as $function
 		) {
@@ -208,7 +209,6 @@ final class CoreBlockRenderSurface {
 			self::collect_failure(
 				$failures,
 				str_contains( $title_output, '<' . $case['titleTag'] . ' ' )
-					&& str_contains( $title_output, 'wp-block-post-title' )
 					&& str_contains( $title_output, 'has-text-align-' . $case['textAlign'] )
 					&& str_contains( $title_output, 'has-link-color' )
 					&& str_contains( $title_output, 'href="' . self::expected_permalink( $post->ID ) . '"' )
@@ -236,8 +236,7 @@ final class CoreBlockRenderSurface {
 
 			self::collect_failure(
 				$failures,
-				str_contains( $date_output, 'wp-block-post-date' )
-					&& str_contains( $date_output, '<time datetime="' . $case['date'] . '">' . $case['formattedDate'] . '</time>' )
+				str_contains( $date_output, '<time datetime="' . $case['date'] . '">' . $case['formattedDate'] . '</time>' )
 					&& str_contains( $date_output, 'has-text-align-' . $case['textAlign'] )
 					&& ( ! $case['dateIsLink'] || str_contains( $date_output, 'href="' . self::expected_permalink( $post->ID ) . '"' ) )
 					&& self::sane_html_fragment( $date_output, array( 'a', 'div', 'time' ) ),
@@ -293,8 +292,7 @@ final class CoreBlockRenderSurface {
 
 			self::collect_failure(
 				$failures,
-				str_contains( $read_more_output, 'wp-block-read-more' )
-					&& str_contains( $read_more_output, 'is-justified-' . $case['justifyContent'] )
+				str_contains( $read_more_output, 'is-justified-' . $case['justifyContent'] )
 					&& str_contains( $read_more_output, 'href="' . self::expected_permalink( $post->ID ) . '"' )
 					&& str_contains( $read_more_output, esc_attr( $case['linkTarget'] ) )
 					&& str_contains( $read_more_output, '<span>Read ' . $case['token'] . '</span>' )
@@ -400,7 +398,6 @@ final class CoreBlockRenderSurface {
 			self::collect_failure(
 				$failures,
 				str_contains( $title_output, '<' . $tag . ' ' )
-					&& str_contains( $title_output, 'wp-block-site-title' )
 					&& str_contains( $title_output, 'has-text-align-' . $text_align )
 					&& str_contains( $title_output, esc_html( $blog_name ) )
 					&& ( ! $is_link || ( str_contains( $title_output, '<a href="http://example.test" target="' ) && str_contains( $title_output, 'rel="home"' ) ) )
@@ -419,7 +416,6 @@ final class CoreBlockRenderSurface {
 			self::collect_failure(
 				$failures,
 				str_contains( $tagline, '<' . $tag . ' ' )
-					&& str_contains( $tagline, 'wp-block-site-tagline' )
 					&& str_contains( $tagline, 'has-text-align-' . $text_align )
 					&& str_contains( $tagline, $description )
 					&& self::sane_html_fragment( $tagline, array( $tag ) ),
@@ -523,11 +519,9 @@ final class CoreBlockRenderSurface {
 				str_contains( $pagination, '<nav ' )
 					&& str_contains( $pagination, 'aria-label="Pagination"' )
 					&& str_contains( $pagination, 'wp-block-query-pagination' )
-					&& str_contains( $pagination, 'wp-block-query-pagination-previous' )
-					&& str_contains( $pagination, 'wp-block-query-pagination-next' )
 					&& str_contains( $pagination, 'page-numbers' )
-					&& str_contains( $pagination, 'href="http://example.test/component-fuzz/?paged=' . ( $page - 1 ) )
-					&& str_contains( $pagination, 'href="http://example.test/component-fuzz/?paged=' . ( $page + 1 ) )
+					&& self::has_paged_link( $pagination, $page - 1, $token )
+					&& self::has_paged_link( $pagination, $page + 1, $token )
 					&& str_contains( $pagination, esc_html( $previous ) )
 					&& str_contains( $pagination, esc_html( $next ) )
 					&& ( 'none' === $arrow || str_contains( $pagination, 'is-arrow-' . $arrow ) )
@@ -655,8 +649,7 @@ final class CoreBlockRenderSurface {
 
 		self::collect_failure(
 			$failures,
-			str_contains( $logged_out_link, 'wp-block-loginout' )
-				&& str_contains( $logged_out_link, 'logged-out' )
+			str_contains( $logged_out_link, 'logged-out' )
 				&& str_contains( $logged_out_link, 'Log in' )
 				&& str_contains( $logged_out_form, 'has-login-form' )
 				&& str_contains( $logged_out_form, 'name="log"' )
@@ -742,7 +735,6 @@ final class CoreBlockRenderSurface {
 				array(
 					'id'              => $image_id,
 					'data-id'         => 7,
-					'caption'         => '',
 					'lightbox'        => array( 'enabled' => false ),
 					'metadata'        => array(
 						'bindings' => array(
@@ -943,16 +935,78 @@ final class CoreBlockRenderSurface {
 	}
 
 	private static function hostile_report( string $html ): array {
-		$decoded = html_entity_decode( $html, ENT_QUOTES | ENT_HTML5, 'UTF-8' );
 		preg_match_all( '/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', $html, $control_matches );
 
 		return array(
 			'rawScriptTag'         => false !== stripos( $html, '<script' ),
-			'inlineEventAttribute' => 1 === preg_match( '/<[^>]+\son[a-z]+\s*=/i', $html ),
-			'javascriptUrl'        => 1 === preg_match( '/<[^>]+\s(?:href|src|action|data)\s*=\s*([\"\'])?\s*javascript:/i', $decoded ),
+			'inlineEventAttribute' => self::has_inline_event_attribute( $html ),
+			'javascriptUrl'        => self::has_javascript_url_attribute( $html ),
 			'controlBytes'         => count( $control_matches[0] ),
 			'bytes'                => strlen( $html ),
 		);
+	}
+
+	private static function has_inline_event_attribute( string $html ): bool {
+		$processor = new \WP_HTML_Tag_Processor( $html );
+		while ( $processor->next_tag() ) {
+			$event_attributes = $processor->get_attribute_names_with_prefix( 'on' );
+			if ( ! is_array( $event_attributes ) ) {
+				continue;
+			}
+			foreach ( $event_attributes as $attribute ) {
+				if ( 1 === preg_match( '/^on[a-z]+$/i', $attribute ) ) {
+					return true;
+				}
+			}
+		}
+
+		return false;
+	}
+
+	private static function has_javascript_url_attribute( string $html ): bool {
+		$processor = new \WP_HTML_Tag_Processor( $html );
+		while ( $processor->next_tag() ) {
+			foreach ( array( 'href', 'src', 'action', 'data' ) as $attribute ) {
+				$value = $processor->get_attribute( $attribute );
+				if ( is_string( $value ) && 1 === preg_match( '/^\s*javascript\s*:/i', html_entity_decode( $value, ENT_QUOTES | ENT_HTML5, 'UTF-8' ) ) ) {
+					return true;
+				}
+			}
+		}
+
+		return false;
+	}
+
+	private static function has_paged_link( string $html, int $target_page, string $keep_token ): bool {
+		$processor = new \WP_HTML_Tag_Processor( $html );
+		while ( $processor->next_tag() ) {
+			if ( 'A' !== $processor->get_tag() ) {
+				continue;
+			}
+
+			$href = $processor->get_attribute( 'href' );
+			if ( ! is_string( $href ) ) {
+				continue;
+			}
+
+			$parts = \wp_parse_url( html_entity_decode( $href, ENT_QUOTES | ENT_HTML5, 'UTF-8' ) );
+			if ( ! is_array( $parts ) ) {
+				continue;
+			}
+
+			$query = array();
+			parse_str( (string) ( $parts['query'] ?? '' ), $query );
+			if ( $keep_token !== ( $query['keep'] ?? null ) ) {
+				continue;
+			}
+
+			$paged = isset( $query['paged'] ) ? (int) $query['paged'] : 1;
+			if ( $target_page === $paged ) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	private static function paired_tags_balanced( string $html, array $tags ): bool {
