@@ -44,6 +44,39 @@
  *         $processor->add_class( 'responsive-image' );
  *     }
  *
+ * #### Reading ordinary text from a subtree
+ *
+ * Ordinary text extraction is usually a tree-aware operation, so use the HTML
+ * Processor and walk the subtree. Append only `#text` tokens unless the caller
+ * intentionally asks for another token type. Do not use
+ * {@see WP_HTML_Tag_Processor::get_modifiable_text} itself as a test for
+ * ordinary text, because comments and special elements can also carry
+ * modifiable text.
+ *
+ * Example:
+ *
+ *     $processor = WP_HTML_Processor::create_fragment( $html );
+ *     if ( $processor->next_tag( 'ARTICLE' ) ) {
+ *         $article_depth = $processor->get_current_depth();
+ *         $text          = '';
+ *
+ *         while ( $processor->next_token() && $processor->get_current_depth() >= $article_depth ) {
+ *             if ( '#text' === $processor->get_token_type() ) {
+ *                 $text .= $processor->get_modifiable_text();
+ *             }
+ *         }
+ *     }
+ *
+ * HTML elements whose contents cannot contain markup, such as SCRIPT, STYLE,
+ * TITLE, and TEXTAREA, do not expose their contents as child `#text` tokens.
+ * Their contents are available on the element token itself and should be read
+ * only when the caller specifically asks for that element's own contents.
+ *
+ * For read-only extraction, parser state such as
+ * {@see WP_HTML_Tag_Processor::paused_at_incomplete_token} or
+ * {@see WP_HTML_Processor::get_last_error} reports how the scan ended. Whether
+ * already-collected text is acceptable is the caller's policy.
+ *
  * #### Breadcrumbs
  *
  * Breadcrumbs represent the stack of open elements from the root
@@ -5576,6 +5609,13 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * avoid needless crashing or type errors. An empty string does not mean
 	 * that a token has modifiable text, and a token with modifiable text may
 	 * have an empty string (e.g. a comment with no contents).
+	 *
+	 * This method is not a predicate for ordinary text. For ordinary subtree
+	 * text extraction, first require `get_token_type() === '#text'`, then read
+	 * this method. HTML SCRIPT, STYLE, TITLE, and TEXTAREA contents are carried
+	 * on the element token itself, with no child `#text` token; read that
+	 * opener-carried text only when the caller specifically asks for the
+	 * element's own contents.
 	 *
 	 * @since 6.6.0 Subclassed for the HTML Processor.
 	 *
