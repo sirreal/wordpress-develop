@@ -40,6 +40,13 @@ database, network requests, or a configured site.
   argument/link branches, cached RSS loading/AJAX/cache replay branches,
   Browser Happy remote/cache failure and rendering branches, explicit skips for
   redirect-only paths, and filter/global/superglobal/output-buffer restoration.
+- `admin-edit-metaboxes`: no-live-DB classic edit-screen meta box callback
+  coverage, including publish-box status/visibility/action branches, flat and
+  hierarchical taxonomy boxes with capability gates, excerpt/trackback/custom
+  field/comment/slug helpers, page attributes, post formats, attachment submit
+  and ID3 metadata boxes, link target/XFN/advanced/submit boxes, default
+  `register_and_do_post_meta_boxes()` box registration, hook payloads, context
+  ordering, and state restoration.
 - `admin-screen`: no-DB admin screen, settings, and meta-box APIs, including
   `WP_Screen` normalization/current-screen globals, help tabs and screen
   options, rendered per-page/layout controls, screen meta/help sidebar and
