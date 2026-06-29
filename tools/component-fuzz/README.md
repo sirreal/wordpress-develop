@@ -531,7 +531,10 @@ database, network requests, or a configured site.
   missing-request and global-post fallback fail-closed behavior, export group
   HTML escaping, exporter/eraser registry and processor shape contracts,
   final erasure completion status/meta/action behavior,
-  built-in comments exporter/eraser payload and anonymization behavior, export
+  built-in comments exporter/eraser payload and anonymization behavior, built-in
+  user exporter profile/community-location/session-token payloads and additional
+  profile filter contracts, built-in media exporter author/type filtering,
+  50-item pagination, URL payloads, and registration callbacks, export
   notification recipient/subject/content/header filters through an intercepted
   PHPMailer handoff, directory/expiration cleanup filters, anonymization
   helpers, and privacy policy suggestion/default text without real mail or
