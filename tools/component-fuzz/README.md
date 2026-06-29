@@ -103,6 +103,12 @@ database, network requests, or a configured site.
   variations, block hook insertion and ignored metadata, style,
   pattern/category, bindings, and supports registries, including dynamic block
   attribute preparation and wrapper attribute merging.
+- `core-block-render`: no-DB direct render-callback coverage for representative
+  dynamic core blocks, including site title/tagline option handling, search
+  label/query/placeholder escaping, loginout current-request redirect links,
+  post title/date/excerpt/read-more context rendering, temporary excerpt filter
+  cleanup, button/file/image markup transforms, lightbox filter locality, and
+  global/superglobal/option restoration.
 - `block-widgets`: block-backed widget behavior, including `WP_Widget_Block`
   rendering, dynamic legacy class mapping matrix, malformed/unknown block
   fallbacks, content sanitization on update, form escaping, `the_widget()`
