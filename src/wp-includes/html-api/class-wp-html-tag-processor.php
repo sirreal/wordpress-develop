@@ -24,6 +24,17 @@
 /**
  * Core class used to modify attributes in an HTML document for tags matching a query.
  *
+ * The Tag Processor scans an HTML document linearly and is designed for
+ * position-based work on individual tags: finding tags by name or class,
+ * reading and changing attributes, and preserving the rest of the input
+ * byte-for-byte.
+ *
+ * It does not track the parsed document tree. It provides no nesting depth,
+ * ancestor breadcrumbs, or guarantee that every opener is paired with a closer.
+ * Use {@see WP_HTML_Processor} when structure matters, such as checking whether
+ * one element is inside another, walking a subtree, collecting an element's text
+ * content, or working with implied closing tags the way a browser parser would.
+ *
  * ## Usage
  *
  * Use of this class requires three steps:
