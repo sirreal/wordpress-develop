@@ -489,6 +489,12 @@ database, network requests, or a configured site.
   view modes, and custom settings, layout column rendering and legacy filters,
   filter locality, and state restoration without redirecting or dying request
   handlers.
+- `post-embeds`: in-memory wpdb-backed WordPress-as-oEmbed-provider coverage,
+  including post type embeddability predicates, public visibility fail-closed
+  behavior, oEmbed response width clamps, rich iframe and thumbnail conversion,
+  plain/pretty/path-conflict embed URL selection, iframe/blockquote/script
+  markup contracts, discovery link output, direct `WP_oEmbed_Controller`
+  item responses, and same-site `pre_oembed_result` short-circuit behavior.
 - `post-types`: post type and post status registry defaults, registration
   filter/action/meta-box lifecycle, REST route registration boundaries and
   late-route ordering, duplicate post-type replacement cleanup, support feature
@@ -710,6 +716,12 @@ metadata, exact row-action nonce checks, and `posts_pre_query`,
 privacy request tables, install/update tables, destructive plugin/theme
 operations, real uploads, and true multisite write paths; network site/user
 rows remain synthetic when the shared PHP process is not in multisite mode. The
+`post-embeds` surface covers direct provider helpers and the oEmbed item
+controller without loading the full embed template, dispatching theme rendering,
+performing remote discovery, or requiring generated build artifacts; when the
+source checkout lacks the built `wp-embed.js` file it suppresses only that
+expected file-read warning while still asserting the generated embed markup
+shape. The
 `appearance-media` surface covers custom background/header/site icon helpers
 without invoking media uploads, image crops, AJAX actions, or admin page
 dispatch. The
