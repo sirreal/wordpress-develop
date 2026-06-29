@@ -586,6 +586,12 @@ database, network requests, or a configured site.
   links, REST pre/after/prepare hooks, capability-denied and availability error
   matrices, current-user introspection, stale UUID failures, and global/filter
   restoration.
+- `rest-directory-services`: no-network REST coverage for WordPress.org-backed
+  directory service controllers, including block-directory, pattern-directory,
+  and URL-details route/schema contracts, plugin API and HTTP short-circuits,
+  permission matrices, request validation errors, transformed response schemas,
+  pattern and URL cache/transient behavior, HEAD/cache-hit boundaries, metadata
+  parsing and relative media URL normalization, and global/filter restoration.
 - `rest-media-attachments`: in-memory wpdb-backed REST media attachment write
   coverage, including `Content-Disposition` filename parsing, raw upload
   validation failures, raw body `create_item()` success through the upload
