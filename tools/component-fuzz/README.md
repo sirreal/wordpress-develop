@@ -573,6 +573,13 @@ database, network requests, or a configured site.
   media-processing route/argument contracts, metadata finalization filters,
   `_fields` response projection, edit-media fail-closed paths, temp upload
   cleanup, and global/filter restoration.
+- `rest-widgets-sidebars`: no-live-DB REST widget, widget-type, and sidebar
+  controller coverage, including route/schema contracts, public
+  `show_in_rest` read gates, widget type sorting/projection and
+  `encode_form_data()` instance/hash round trips, text widget create/update
+  persistence, sidebar reassignment/reorder semantics, legacy widget
+  `form_data` updates, soft/force delete hooks, HEAD short-circuits, and
+  widget/global/filter restoration.
 - `rest-object-controllers`: in-memory wpdb-backed REST object controller
   coverage for posts, terms, comments, users, revisions, and attachments,
   including schema/context/_fields filtering, deterministic collection
@@ -799,7 +806,11 @@ projection, metadata finalization, and permission gates. It intentionally avoids
 multipart success paths that depend on PHP's `is_uploaded_file()` state, remote
 sideload downloads, and admin image-edit request paths, which are covered by
 `media-image-edit-requests` when they can be kept process-local and
-codec-independent. The object surface records explicit
+codec-independent. `rest-widgets-sidebars` complements the lower-level widget
+surfaces by exercising REST controller permissions, schemas, instance encoding,
+sidebar mutation, and legacy form-data paths directly; it avoids the
+`/widget-types/{id}/render` iframe endpoint in the shared process because that
+path defines the global `IFRAME_REQUEST` constant. The object surface records explicit
 skip rows for template controllers that depend on block-theme filesystem state
 and template CPT queries, and for broad collection queries that exceed the small
 SQL parser in the stub. It documents limits for invalid enum-error formatting
