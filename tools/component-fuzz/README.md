@@ -201,6 +201,12 @@ database, network requests, or a configured site.
   and programmatic post-value merge precedence, multidimensional option
   previewing, container/control JSON exports, active callbacks, and selective
   refresh partial registration/rendering without changeset persistence.
+- `customizer-nav-widgets-requests`: in-memory wpdb-backed Customizer nav menu
+  and widget request coverage, including loaded component/capability hook
+  gates, menu available/search AJAX, auto-draft insertion and publish cleanup,
+  dynamic nav menu/menu-item settings, placeholder menu remaps into locations
+  and `widget_nav_menu`, preview HMAC/export metadata, signed widget instance
+  round trips, widget update AJAX, and widget selective-refresh partials.
 - `customizer-persistence`: no-live-DB Customizer persistence coverage for
   changeset UUID/data normalization, stub-backed `customize_changeset` post
   content parsing, changeset lock/heartbeat persistence, transactional
@@ -750,9 +756,12 @@ media modal runtime behavior, and browser-side image editor UI; server-side
 image-edit AJAX save, preview, crop, restore, and sub-size request branches are
 covered by `media-image-edit-requests`. The surface covers direct server-side
 helpers with synthetic attachment rows and cache/filter-backed metadata only. The
-Customizer surface intentionally avoids changeset save/publish, nav-menu
-persistence, widget persistence, and real post/option storage beyond the
-existing no-DB option stub. The `admin-options-submission` surface covers the
+base `customizer` surface intentionally avoids changeset save/publish,
+nav-menu persistence, widget persistence, and real post/option storage beyond
+the existing no-DB option stub. `customizer-persistence` covers changesets and
+custom CSS persistence, while `customizer-nav-widgets-requests` covers bounded
+nav-menu/widget request, remap, and selective-refresh persistence paths against
+the in-memory `wpdb` stub. The `admin-options-submission` surface covers the
 bounded `wp-admin/options.php` submission/update branch without loading the full
 admin bootstrap, redirects, or process exits. The `options-autoload` surface
 uses that same bounded in-memory option table and object cache, and deliberately
