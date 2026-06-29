@@ -816,14 +816,14 @@
 				<tr>
 					<td><code>admin-options-submission</code></td>
 					<td><span class="status good">validation passed</span></td>
-					<td>Main worktree on <code>component-fuzzers</code> through <code>fd60bfac26</code>.</td>
+					<td>Main worktree on <code>component-fuzzers</code> through <code>7f9abcb47d</code>.</td>
 					<td>Main focused runs: seed 1 passed 5 checks, seed 224 over 25 iterations passed 125 checks, adjacent <code>admin-options-submission,admin-screen,admin-workflows,options-autoload,security</code> smoke passed 230 checks with 10 skips, and combined <code>admin-options-submission,core-block-render</code> replay passed 300 checks; latest broad run: 4585 passed, 28 skipped, 0 failed.</td>
 					<td>Settings API options submission allowlists and sanitize callbacks, settings error transient persistence, General Settings date/time/timezone normalization, legacy <code>options.php</code> <code>page_options</code> submissions, nonce/capability/unknown-page failure paths, redirect capture, slashed request semantics, and global/filter/option restoration without including the exiting admin controller.</td>
 				</tr>
 				<tr>
 					<td><code>core-block-render</code></td>
 					<td><span class="status good">validation passed</span></td>
-					<td>Main worktree on <code>component-fuzzers</code>; expectation hardening through <code>fd60bfac26</code>.</td>
+					<td>Main worktree on <code>component-fuzzers</code>; expectation hardening through <code>7f9abcb47d</code>.</td>
 					<td>Main focused runs: seed 1 passed 5 checks, seed 224 over 5 iterations passed 25 checks, seed 224 direct replay passed 7 checks after expectation hardening, combined <code>admin-options-submission,core-block-render</code> replay passed 300 checks, and adjacent <code>blocks,core-block-render,query-loop</code> smoke passed 180 checks; latest broad run: 4585 passed, 28 skipped, 0 failed.</td>
 					<td>Representative dynamic core block render callbacks for site title/tagline, search, loginout, post title/date/excerpt/read-more, button, file, and image; option/cache setup, current-request links, KSES and attribute escaping, parsed pagination-link oracles, actual HTML attribute safety scans, temporary excerpt and lightbox filter cleanup, and global/superglobal/option restoration.</td>
 				</tr>
@@ -1050,7 +1050,7 @@
 				</thead>
 				<tbody>
 					<tr>
-						<td><code>fd60bfac26</code></td>
+						<td><code>7f9abcb47d</code></td>
 						<td><code>admin-options-submission</code>, <code>core-block-render</code></td>
 						<td><code>admin-options-submission</code> passed 5 checks at seed 1 and 125 checks at seed 224 over 25 iterations; adjacent admin/options/security smoke passed 230 checks with 10 skips; combined admin/core replay passed 300 checks after core block render expectation hardening.</td>
 						<td>4585 passed, 28 skipped, 0 failed at 1 iteration after admin options submission coverage and core block render seed-224 hardening.</td>
