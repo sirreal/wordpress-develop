@@ -435,6 +435,14 @@ database, network requests, or a configured site.
   short-circuit/fallback behavior, args/items-wrap normalization, container
   allowlists, attribute filter escaping, and filtered no-DB `wp_nav_menu()`
   rendering.
+- `navigation-lifecycle`: in-memory wpdb-backed nav menu persistence and REST
+  menu controller coverage, including `wp_create_nav_menu()`,
+  `wp_update_nav_menu_object()`, `wp_delete_nav_menu()`,
+  `wp_update_nav_menu_item()`, associated object cleanup callbacks,
+  auto-add page behavior, menu-location remapping, orphan/self-parent item
+  normalization, sanitized menu item meta, REST menu/menu-item/location
+  permission gates, invalid location/object errors, forced-delete semantics,
+  links, and state restoration.
 - `network-media`: URL parsing/sanitization/validation, URL scheme
   normalization, path normalization, filename sanitization, filetype checks,
   unique filenames, generated collision/alternate-extension filename oracles,
