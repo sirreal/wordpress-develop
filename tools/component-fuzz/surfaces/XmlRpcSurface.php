@@ -36,6 +36,7 @@ final class XmlRpcSurface {
 			$rows[] = self::check_wp_xmlrpc_server_helpers( $ctx->fork( 'wp-server' ) );
 			$rows[] = self::check_pingback_fail_closed_and_readonly_lookups( $ctx->fork( 'pingbacks' ) );
 			$rows[] = self::check_authenticated_readonly_content_media_methods( $ctx->fork( 'readonly-content-media' ) );
+			$rows[] = self::check_authenticated_write_post_methods( $ctx->fork( 'write-post-methods' ) );
 			$rows[] = self::check_xmlrpc_post_data_helpers( $ctx->fork( 'post-data' ) );
 			$rows[] = self::check_http_ixr_client_transport( $ctx->fork( 'http-client' ) );
 		} catch ( \Throwable $e ) {
@@ -80,6 +81,7 @@ final class XmlRpcSurface {
 				'add_filter',
 				'current_theme_supports',
 				'current_user_can',
+				'get_default_post_to_edit',
 				'get_post',
 				'get_permalink',
 				'get_post_format',
@@ -97,15 +99,21 @@ final class XmlRpcSurface {
 				'register_post_type',
 				'url_to_postid',
 				'wp_authenticate',
+				'wp_after_insert_post',
 				'wp_cache_delete',
 				'wp_cache_set_posts_last_changed',
+				'wp_delete_post',
 				'wp_get_attachment_metadata',
 				'wp_get_attachment_url',
 				'wp_get_recent_posts',
+				'wp_insert_post',
+				'wp_next_scheduled',
 				'wp_remote_retrieve_body',
 				'wp_remote_retrieve_response_code',
+				'wp_schedule_event',
 				'wp_set_current_user',
 				'wp_slash',
+				'wp_update_post',
 				'wp_safe_remote_post',
 				'xml_parser_create',
 				'xmlrpc_getpostcategory',
@@ -1466,6 +1474,569 @@ final class XmlRpcSurface {
 		);
 	}
 
+	private static function check_authenticated_write_post_methods( \ComponentFuzz\FuzzContext $ctx ): array {
+		$wpdb = $GLOBALS['wpdb'] ?? null;
+		if (
+			! is_object( $wpdb )
+			|| ! method_exists( $wpdb, 'insert' )
+			|| ! method_exists( $wpdb, 'delete' )
+			|| ! method_exists( $wpdb, 'component_fuzz_content_counts' )
+			|| ! method_exists( $wpdb, 'component_fuzz_get_runtime_state' )
+			|| ! method_exists( $wpdb, 'component_fuzz_restore_runtime_state' )
+			|| ! method_exists( $wpdb, 'component_fuzz_get_options' )
+			|| ! method_exists( $wpdb, 'component_fuzz_reset_options' )
+		) {
+			return $ctx->skip(
+				'xmlrpc.authenticated-write-post-methods',
+				'Authenticated XML-RPC write-method coverage requires the component fuzzer in-memory DB stub.',
+				array()
+			);
+		}
+
+		$failures         = array();
+		$global_snapshot  = self::snapshot_globals();
+		$content_snapshot = $wpdb->component_fuzz_content_counts();
+		$runtime_snapshot = $wpdb->component_fuzz_get_runtime_state();
+		$options_snapshot = $wpdb->component_fuzz_get_options();
+		$cleanup_state    = array(
+			'authenticate'       => null,
+			'userHasCap'         => null,
+			'insertData'         => null,
+			'xmlrpcCall'         => null,
+			'preHttp'            => null,
+			'contentCounts'      => null,
+			'optionsRestored'    => null,
+			'runtimeRestored'    => null,
+			'globalsRestored'    => null,
+		);
+		$marker           = 'xmlrpc-write-' . $ctx->identifier( 5, 12 );
+		$user_id          = 890000 + $ctx->int( 1, 5000 );
+		$username         = 'xmlrpc_writer_' . $ctx->identifier( 4, 9 );
+		$password         = 'xmlrpc-write-pass-' . $ctx->identifier( 6, 12 );
+		$base_id          = 900000 + ( $ctx->int( 1, 8000 ) * 10 );
+		$edit_id          = $base_id + 1;
+		$delete_id        = $base_id + 2;
+		$caller_id        = $base_id + 5000;
+		$missing_id       = $base_id + 9000;
+		$new_title        = 'XML-RPC new ' . self::safe_text( $ctx->fork( 'new-title' ), 18 );
+		$new_content      = 'XML-RPC new content ' . self::safe_text( $ctx->fork( 'new-content' ), 34 );
+		$new_excerpt      = 'New excerpt ' . self::safe_text( $ctx->fork( 'new-excerpt' ), 14 );
+		$edit_title       = 'XML-RPC edited ' . self::safe_text( $ctx->fork( 'edit-title' ), 18 );
+		$edit_content     = 'XML-RPC edited content ' . self::safe_text( $ctx->fork( 'edit-content' ), 34 );
+		$stale_title      = 'XML-RPC stale ' . self::safe_text( $ctx->fork( 'stale-title' ), 18 );
+		$new_date         = new \IXR_Date( '20260612T10:11:12Z' );
+		$stale_date       = new \IXR_Date( strtotime( '2026-06-01 00:00:00 UTC' ) );
+		$fresh_date       = new \IXR_Date( strtotime( '2027-01-01 00:00:00 UTC' ) );
+		$expected_date    = \iso8601_to_datetime( $new_date->getIso() );
+		$expected_gmt     = \iso8601_to_datetime( $new_date->getIso(), 'gmt' );
+		$xmlrpc_calls     = array();
+		$insert_events    = array();
+		$http_count       = 0;
+		$grant_caps       = true;
+		$created_id       = null;
+		$thrown           = null;
+		$auth_before      = null;
+		$auth_after       = null;
+		$denial_before    = null;
+		$denial_after     = null;
+		$auth_failure     = null;
+		$denied_new       = null;
+		$denied_edit      = null;
+		$denied_delete    = null;
+		$denied_edit_post = null;
+		$denied_delete_post = null;
+		$new_result       = null;
+		$new_post         = null;
+		$missing_edit     = null;
+		$stale_edit       = null;
+		$after_stale      = null;
+		$valid_edit       = null;
+		$edited_post      = null;
+		$type_change      = null;
+		$after_type_change = null;
+		$missing_delete   = null;
+		$valid_delete     = null;
+		$after_delete     = null;
+
+		$authenticate_filter = static function ( $user, string $login, string $pass ) use ( $username, $password, $user_id ) {
+			if ( $username === $login && $password === $pass ) {
+				return new \WP_User( $user_id );
+			}
+
+			return new \WP_Error( 'component_fuzz_xmlrpc_write_auth', 'Synthetic XML-RPC write authentication failure.' );
+		};
+		$cap_filter          = static function ( array $allcaps, array $caps, array $args, \WP_User $user ) use ( &$grant_caps, $user_id ): array {
+			if ( (int) $user->ID !== $user_id ) {
+				return $allcaps;
+			}
+
+			foreach (
+				array(
+					'delete_others_posts',
+					'delete_post',
+					'delete_posts',
+					'delete_published_posts',
+					'edit_others_posts',
+					'edit_post',
+					'edit_posts',
+					'edit_published_posts',
+					'publish_posts',
+					'read',
+					'read_post',
+				) as $primitive
+			) {
+				$allcaps[ $primitive ] = $grant_caps;
+			}
+			foreach ( $caps as $cap ) {
+				$allcaps[ $cap ] = $grant_caps && 'do_not_allow' !== $cap;
+			}
+
+			return $allcaps;
+		};
+		$insert_data_filter  = static function ( array $post_data, array $content_struct ) use ( &$insert_events ): array {
+			$insert_events[] = array(
+				'ID'            => (int) ( $post_data['ID'] ?? 0 ),
+				'postContent'   => (string) ( $post_data['post_content'] ?? '' ),
+				'postStatus'    => (string) ( $post_data['post_status'] ?? '' ),
+				'postTitle'     => (string) ( $post_data['post_title'] ?? '' ),
+				'contentKeys'   => array_keys( $content_struct ),
+				'hasEditDate'   => array_key_exists( 'edit_date', $post_data ),
+			);
+			return $post_data;
+		};
+		$xmlrpc_call_action  = static function ( string $method ) use ( &$xmlrpc_calls ): void {
+			$xmlrpc_calls[] = $method;
+		};
+		$http_filter         = static function () use ( &$http_count ) {
+			++$http_count;
+			return new \WP_Error( 'component_fuzz_xmlrpc_write_http', 'XML-RPC write fuzz cases must not reach HTTP transport.' );
+		};
+
+		try {
+			\add_filter( 'authenticate', $authenticate_filter, 1, 3 );
+			\add_filter( 'user_has_cap', $cap_filter, 10, 4 );
+			\add_filter( 'xmlrpc_wp_insert_post_data', $insert_data_filter, 10, 2 );
+			\add_action( 'xmlrpc_call', $xmlrpc_call_action, 10, 1 );
+			\add_filter( 'pre_http_request', $http_filter, 10, 3 );
+
+			$GLOBALS['wp_rewrite'] = new class() {
+				public $feeds = array( 'feed', 'rdf', 'rss', 'rss2', 'atom' );
+				public $index = 'index.php';
+				public $permalink_structure = '';
+				public $use_verbose_page_rules = false;
+
+				public function using_permalinks(): bool {
+					return false;
+				}
+
+				public function using_index_permalinks(): bool {
+					return false;
+				}
+			};
+
+			if ( ! \get_post_type_object( 'post' ) ) {
+				\register_post_type(
+					'post',
+					array(
+						'_builtin'        => true,
+						'public'          => true,
+						'show_ui'         => true,
+						'capability_type' => 'post',
+						'map_meta_cap'    => true,
+						'supports'        => array( 'title', 'editor', 'excerpt', 'thumbnail' ),
+					)
+				);
+			}
+			if ( ! \get_post_type_object( 'page' ) ) {
+				\register_post_type(
+					'page',
+					array(
+						'_builtin'        => true,
+						'public'          => true,
+						'show_ui'         => true,
+						'capability_type' => 'page',
+						'hierarchical'    => true,
+						'map_meta_cap'    => true,
+						'supports'        => array( 'title', 'editor', 'excerpt', 'thumbnail' ),
+					)
+				);
+			}
+
+			self::seed_xmlrpc_user( $user_id, $username, $password );
+			self::seed_xmlrpc_post_row(
+				array(
+					'ID'                => $edit_id,
+					'post_author'       => $user_id,
+					'post_date'         => '2026-06-08 09:10:11',
+					'post_date_gmt'     => '2026-06-08 07:10:11',
+					'post_content'      => 'Original editable XML-RPC content ' . $marker,
+					'post_title'        => 'Original editable XML-RPC title ' . $marker,
+					'post_excerpt'      => 'Original editable excerpt',
+					'post_status'       => 'publish',
+					'comment_status'    => 'open',
+					'ping_status'       => 'open',
+					'post_password'     => '',
+					'post_name'         => 'xmlrpc-edit-' . $ctx->identifier( 4, 8 ),
+					'post_modified'     => '2026-06-10 12:00:00',
+					'post_modified_gmt' => '2026-06-10 12:00:00',
+					'post_parent'       => 0,
+					'guid'              => 'https://example.test/?p=' . $edit_id,
+					'menu_order'        => 0,
+					'post_type'         => 'post',
+					'post_mime_type'    => '',
+					'comment_count'     => 0,
+				)
+			);
+			self::seed_xmlrpc_post_row(
+				array(
+					'ID'                => $delete_id,
+					'post_author'       => $user_id,
+					'post_date'         => '2026-06-09 09:10:11',
+					'post_date_gmt'     => '2026-06-09 07:10:11',
+					'post_content'      => 'Delete target XML-RPC content ' . $marker,
+					'post_title'        => 'Delete target XML-RPC title ' . $marker,
+					'post_excerpt'      => 'Delete target excerpt',
+					'post_status'       => 'publish',
+					'comment_status'    => 'open',
+					'ping_status'       => 'closed',
+					'post_password'     => '',
+					'post_name'         => 'xmlrpc-delete-' . $ctx->identifier( 4, 8 ),
+					'post_modified'     => '2026-06-09 12:00:00',
+					'post_modified_gmt' => '2026-06-09 12:00:00',
+					'post_parent'       => 0,
+					'guid'              => 'https://example.test/?p=' . $delete_id,
+					'menu_order'        => 0,
+					'post_type'         => 'post',
+					'post_mime_type'    => '',
+					'comment_count'     => 0,
+				)
+			);
+			\wp_cache_set_posts_last_changed();
+
+			$auth_server  = new \wp_xmlrpc_server();
+			$auth_before  = $wpdb->component_fuzz_content_counts();
+			$auth_failure = $auth_server->wp_newPost(
+				array(
+					1,
+					$username,
+					$password . '-wrong',
+					array(
+						'post_title'   => 'Should not insert ' . $marker,
+						'post_content' => 'auth failure',
+					),
+				)
+			);
+			$auth_after   = $wpdb->component_fuzz_content_counts();
+
+			$grant_caps       = false;
+			$denial_server    = new \wp_xmlrpc_server();
+			$denial_before    = $wpdb->component_fuzz_content_counts();
+			$denied_new       = $denial_server->wp_newPost(
+				array(
+					1,
+					$username,
+					$password,
+					array(
+						'post_title'   => 'Denied new ' . $marker,
+						'post_content' => 'denied new',
+					),
+				)
+			);
+			$denied_edit      = $denial_server->wp_editPost(
+				array(
+					1,
+					$username,
+					$password,
+					$edit_id,
+					array( 'post_title' => 'Denied edit ' . $marker ),
+				)
+			);
+			$denied_delete    = $denial_server->wp_deletePost( array( 1, $username, $password, $delete_id ) );
+			$denial_after     = $wpdb->component_fuzz_content_counts();
+			$denied_edit_post = \get_post( $edit_id );
+			$denied_delete_post = \get_post( $delete_id );
+			$grant_caps       = true;
+
+			$server     = new \wp_xmlrpc_server();
+			$new_result = $server->wp_newPost(
+				array(
+					1,
+					$username,
+					$password,
+					array(
+						'ID'             => $caller_id,
+						'post_title'     => $new_title,
+						'post_content'   => $new_content,
+						'post_excerpt'   => $new_excerpt,
+						'post_status'    => 'component-fuzz-unknown-status',
+						'post_date_gmt'  => $new_date,
+						'comment_status' => 'open',
+						'ping_status'    => 'closed',
+					),
+				)
+			);
+			$created_id = is_string( $new_result ) && ctype_digit( $new_result ) ? (int) $new_result : null;
+			$new_post   = null !== $created_id ? \get_post( $created_id ) : null;
+
+			$missing_edit = $server->wp_editPost(
+				array(
+					1,
+					$username,
+					$password,
+					$missing_id,
+					array( 'post_title' => 'Missing edit ' . $marker ),
+				)
+			);
+			$stale_edit   = $server->wp_editPost(
+				array(
+					1,
+					$username,
+					$password,
+					$edit_id,
+					array(
+						'post_title'            => $stale_title,
+						'if_not_modified_since' => $stale_date,
+					),
+				)
+			);
+			$after_stale  = \get_post( $edit_id );
+
+			$valid_edit = $server->wp_editPost(
+				array(
+					1,
+					$username,
+					$password,
+					$edit_id,
+					array(
+						'post_title'            => $edit_title,
+						'post_content'          => $edit_content,
+						'post_status'           => 'publish',
+						'if_not_modified_since' => $fresh_date,
+					),
+				)
+			);
+			$edited_post = \get_post( $edit_id );
+
+			$type_change = $server->wp_editPost(
+				array(
+					1,
+					$username,
+					$password,
+					$edit_id,
+					array( 'post_type' => 'page' ),
+				)
+			);
+			$after_type_change = \get_post( $edit_id );
+
+			$missing_delete = $server->wp_deletePost( array( 1, $username, $password, $missing_id ) );
+			$valid_delete   = $server->wp_deletePost( array( 1, $username, $password, $delete_id ) );
+			$after_delete   = \get_post( $delete_id );
+		} catch ( \Throwable $e ) {
+			$thrown = self::describe_throwable( $e );
+		} finally {
+			\remove_filter( 'pre_http_request', $http_filter, 10 );
+			\remove_action( 'xmlrpc_call', $xmlrpc_call_action, 10 );
+			\remove_filter( 'xmlrpc_wp_insert_post_data', $insert_data_filter, 10 );
+			\remove_filter( 'user_has_cap', $cap_filter, 10 );
+			\remove_filter( 'authenticate', $authenticate_filter, 1 );
+
+			foreach ( range( $base_id + 1, $base_id + 10 ) as $post_id ) {
+				$wpdb->delete( $wpdb->postmeta, array( 'post_id' => $post_id ) );
+				$wpdb->delete( $wpdb->posts, array( 'ID' => $post_id ) );
+				\wp_cache_delete( $post_id, 'posts' );
+				\wp_cache_delete( $post_id, 'post_meta' );
+			}
+			foreach ( array( $caller_id, $missing_id ) as $post_id ) {
+				$wpdb->delete( $wpdb->postmeta, array( 'post_id' => $post_id ) );
+				$wpdb->delete( $wpdb->posts, array( 'ID' => $post_id ) );
+				\wp_cache_delete( $post_id, 'posts' );
+				\wp_cache_delete( $post_id, 'post_meta' );
+			}
+			$wpdb->delete( $wpdb->users, array( 'ID' => $user_id ) );
+			\wp_cache_delete( $user_id, 'users' );
+			\wp_cache_delete( $username, 'userlogins' );
+			\wp_cache_set_posts_last_changed();
+			$wpdb->component_fuzz_reset_options( $options_snapshot );
+			$cleanup_state = array(
+				'authenticate'    => \has_filter( 'authenticate', $authenticate_filter ),
+				'userHasCap'      => \has_filter( 'user_has_cap', $cap_filter ),
+				'insertData'      => \has_filter( 'xmlrpc_wp_insert_post_data', $insert_data_filter ),
+				'xmlrpcCall'      => \has_filter( 'xmlrpc_call', $xmlrpc_call_action ),
+				'preHttp'         => \has_filter( 'pre_http_request', $http_filter ),
+				'contentCounts'   => $wpdb->component_fuzz_content_counts(),
+				'optionsRestored' => $options_snapshot === $wpdb->component_fuzz_get_options(),
+				'runtimeRestored' => null,
+				'globalsRestored' => null,
+			);
+			$wpdb->component_fuzz_restore_runtime_state( $runtime_snapshot );
+			$cleanup_state['runtimeRestored'] = $runtime_snapshot === $wpdb->component_fuzz_get_runtime_state();
+			self::restore_globals( $global_snapshot );
+			$cleanup_state['globalsRestored'] = self::globals_match( $global_snapshot );
+		}
+
+		if ( null !== $thrown ) {
+			$failures[] = array(
+				'message'          => 'authenticated XML-RPC write methods do not throw',
+				'throwableClass'   => $thrown['class'] ?? null,
+				'throwableMessage' => $thrown['message'] ?? null,
+				'throwableFile'    => $thrown['file'] ?? null,
+				'throwableLine'    => $thrown['line'] ?? null,
+			);
+		}
+
+		self::collect_failure(
+			$failures,
+			403 === self::ixr_error_code( $auth_failure )
+				&& $auth_before === $auth_after,
+			'wp.newPost authentication failures return 403 and do not mutate in-memory content',
+			array(
+				'authFailure' => self::describe_value( $auth_failure ),
+				'before'      => $auth_before,
+				'after'       => $auth_after,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			401 === self::ixr_error_code( $denied_new )
+				&& 401 === self::ixr_error_code( $denied_edit )
+				&& 401 === self::ixr_error_code( $denied_delete )
+				&& $denial_before === $denial_after
+				&& $denied_edit_post instanceof \WP_Post
+				&& ! str_contains( $denied_edit_post->post_title, 'Denied edit' )
+				&& $denied_delete_post instanceof \WP_Post
+				&& 'publish' === $denied_delete_post->post_status,
+			'XML-RPC post write methods fail closed on capability denial without creating, editing, or deleting rows',
+			array(
+				'deniedNew'    => self::describe_value( $denied_new ),
+				'deniedEdit'   => self::describe_value( $denied_edit ),
+				'deniedDelete' => self::describe_value( $denied_delete ),
+				'before'       => $denial_before,
+				'after'        => $denial_after,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			is_string( $new_result )
+				&& null !== $created_id
+				&& $created_id !== $caller_id
+				&& $new_post instanceof \WP_Post
+				&& $user_id === (int) $new_post->post_author
+				&& $new_title === $new_post->post_title
+				&& $new_content === $new_post->post_content
+				&& $new_excerpt === $new_post->post_excerpt
+				&& 'draft' === $new_post->post_status
+				&& 'open' === $new_post->comment_status
+				&& 'closed' === $new_post->ping_status
+				&& $expected_date === $new_post->post_date
+				&& $expected_gmt === $new_post->post_date_gmt,
+			'wp.newPost ignores caller IDs, normalizes unknown statuses to draft, converts IXR dates, and persists generated content',
+			array(
+				'result'       => self::describe_value( $new_result ),
+				'createdId'    => $created_id,
+				'callerId'     => $caller_id,
+				'post'         => self::describe_value( $new_post ),
+				'expectedDate' => $expected_date,
+				'expectedGmt'  => $expected_gmt,
+			)
+		);
+
+		$edit_ok = 404 === self::ixr_error_code( $missing_edit )
+			&& 409 === self::ixr_error_code( $stale_edit )
+			&& $after_stale instanceof \WP_Post
+			&& ! str_contains( $after_stale->post_title, $stale_title )
+			&& true === $valid_edit
+			&& $edited_post instanceof \WP_Post
+			&& $edit_title === $edited_post->post_title
+			&& $edit_content === $edited_post->post_content
+			&& 'Original editable excerpt' === $edited_post->post_excerpt
+			&& 'publish' === $edited_post->post_status
+			&& 401 === self::ixr_error_code( $type_change )
+			&& $after_type_change instanceof \WP_Post
+			&& 'post' === $after_type_change->post_type;
+		if ( ! $edit_ok ) {
+			$failures[] = array(
+				'message'             => 'wp.editPost distinguishes missing, stale, valid, and post-type-change branches while preserving omitted fields',
+				'missingCode'         => self::ixr_error_code( $missing_edit ),
+				'staleCode'           => self::ixr_error_code( $stale_edit ),
+				'afterStaleTitle'     => $after_stale instanceof \WP_Post ? $after_stale->post_title : null,
+				'validEdit'           => $valid_edit,
+				'editedTitle'         => $edited_post instanceof \WP_Post ? $edited_post->post_title : null,
+				'editedContent'       => $edited_post instanceof \WP_Post ? $edited_post->post_content : null,
+				'editedExcerpt'       => $edited_post instanceof \WP_Post ? $edited_post->post_excerpt : null,
+				'editedStatus'        => $edited_post instanceof \WP_Post ? $edited_post->post_status : null,
+				'typeChangeCode'      => self::ixr_error_code( $type_change ),
+				'afterTypeChangeType' => $after_type_change instanceof \WP_Post ? $after_type_change->post_type : null,
+			);
+		}
+
+		self::collect_failure(
+			$failures,
+			404 === self::ixr_error_code( $missing_delete )
+				&& true === $valid_delete
+				&& (
+					null === $after_delete
+					|| (
+						$after_delete instanceof \WP_Post
+						&& 'trash' === $after_delete->post_status
+					)
+				),
+			'wp.deletePost reports missing rows, returns true for valid deletes, and either trashes or removes the row according to Core trash settings',
+			array(
+				'missing'     => self::describe_value( $missing_delete ),
+				'validDelete' => self::describe_value( $valid_delete ),
+				'afterDelete' => self::describe_value( $after_delete ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			in_array( 'wp.newPost', $xmlrpc_calls, true )
+				&& in_array( 'wp.editPost', $xmlrpc_calls, true )
+				&& in_array( 'wp.deletePost', $xmlrpc_calls, true )
+				&& count( $insert_events ) >= 2
+				&& in_array( 'draft', array_column( $insert_events, 'postStatus' ), true )
+				&& in_array( 'publish', array_column( $insert_events, 'postStatus' ), true )
+				&& 0 === $http_count,
+			'XML-RPC write methods fire call/insert filters for success paths and do not attempt HTTP',
+			array(
+				'xmlrpcCalls'  => self::describe_value( $xmlrpc_calls ),
+				'insertEvents' => self::describe_value( $insert_events ),
+				'httpCount'    => $http_count,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			false === $cleanup_state['authenticate']
+				&& false === $cleanup_state['userHasCap']
+				&& false === $cleanup_state['insertData']
+				&& false === $cleanup_state['xmlrpcCall']
+				&& false === $cleanup_state['preHttp']
+				&& $content_snapshot === $cleanup_state['contentCounts']
+				&& true === $cleanup_state['optionsRestored']
+				&& true === $cleanup_state['runtimeRestored']
+				&& true === $cleanup_state['globalsRestored'],
+			'authenticated XML-RPC write-method checks remove hooks, rows, options, runtime, and globals',
+			array(
+				'cleanup'      => $cleanup_state,
+				'beforeCounts' => $content_snapshot,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'xmlrpc.authenticated-write-post-methods',
+			array() === $failures,
+			array(
+				'failures'    => $failures,
+				'xmlrpcCalls' => $xmlrpc_calls,
+				'createdId'   => $created_id,
+			)
+		);
+	}
+
 	private static function seed_xmlrpc_user( int $user_id, string $username, string $password ): void {
 		$GLOBALS['wpdb']->insert(
 			$GLOBALS['wpdb']->users,
@@ -2289,6 +2860,29 @@ final class XmlRpcSurface {
 				unset( $GLOBALS[ $name ] );
 			}
 		}
+	}
+
+	private static function globals_match( array $snapshot ): bool {
+		if (
+			$_GET !== $snapshot['_GET']
+			|| $_POST !== $snapshot['_POST']
+			|| $_REQUEST !== $snapshot['_REQUEST']
+			|| $_COOKIE !== $snapshot['_COOKIE']
+			|| $_SERVER !== $snapshot['_SERVER']
+		) {
+			return false;
+		}
+
+		foreach ( $snapshot['globals'] as $name => $entry ) {
+			if ( array_key_exists( $name, $GLOBALS ) !== $entry['exists'] ) {
+				return false;
+			}
+			if ( $entry['exists'] && $GLOBALS[ $name ] != $entry['value'] ) {
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 	private static function clone_value( $value ) {

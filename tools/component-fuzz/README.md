@@ -789,9 +789,11 @@ database, network requests, or a configured site.
   pingback fail-closed/read-only lookup branches, legacy post title/category XML
   helpers, authenticated read-only `wp.getPost`, `wp.getPosts`,
   `wp.getMediaItem`, and `wp.getMediaLibrary` post/media field filtering,
-  auth/capability/error paths, media MIME/parent filters, hook cleanup, and
-  short-circuited `WP_HTTP_IXR_Client` transport/error handling without
-  publishing, option, post-sleep pingback fetch, or live network side effects.
+  authenticated `wp.newPost`, `wp.editPost`, and `wp.deletePost` post write
+  lifecycle branches, auth/capability/error paths, media MIME/parent filters,
+  hook cleanup, and short-circuited `WP_HTTP_IXR_Client` transport/error
+  handling without option, post-sleep pingback fetch, or live network side
+  effects.
 
 Some checks deliberately skip cases that would invoke DB-backed or dynamic block
 rendering side effects. The Admin Screen surface intentionally avoids admin page
