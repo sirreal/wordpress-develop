@@ -778,11 +778,13 @@ queries, and browser module execution while still asserting restored globals,
 filters, and output buffers.
 The
 Admin Workflows surface intentionally avoids `admin.php`/`admin-ajax.php` request
-dispatch, DB-backed core `WP_*_List_Table` subclasses, and direct `die()` or
-destructive `wp_ajax_*` wrappers. It covers the base list table API with
-synthetic items, referer helpers where valid nonces or `stop=false` avoid exits,
-and deterministic date/time AJAX wrappers through captured `wp_die()`
-termination. The `admin-ajax` surface calls selected `wp_ajax_*` handlers
+dispatch, direct DB-backed concrete `WP_*_List_Table` subclasses, and direct
+`die()` or destructive `wp_ajax_*` wrappers. It covers the base list table API
+with synthetic items, records scoped accounting for concrete list-table coverage
+owned by `admin-list-tables` and `privacy-admin-requests`, referer helpers where
+valid nonces or `stop=false` avoid exits, and deterministic date/time AJAX
+wrappers through captured `wp_die()` termination. This is not full admin page
+dispatch coverage. The `admin-ajax` surface calls selected `wp_ajax_*` handlers
 directly with captured `wp_die()` termination; attachment workflows use
 synthetic attachment rows, bounded capability grants, and narrow post MIME LIKE
 support in the in-memory `wpdb` stub. The `admin-list-tables` surface complements
