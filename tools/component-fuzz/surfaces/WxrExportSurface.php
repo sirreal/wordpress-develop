@@ -492,34 +492,77 @@ final class WxrExportSurface {
 	}
 
 	private static function check_header_capture( \ComponentFuzz\FuzzContext $ctx, array $case, array $run ): array {
-		$result  = is_array( $run['result'] ) ? $run['result'] : array();
-		$headers = $result['headers'] ?? array();
+		$result               = is_array( $run['result'] ) ? $run['result'] : array();
+		$headers              = $result['headers'] ?? array();
+		$headers_observable   = ! empty( $result['headersObservable'] );
+		$filename_filter      = $result['filenameFilter'] ?? null;
+		$filename_filter_count = is_array( $result['filterEvents']['filename'] ?? null ) ? count( $result['filterEvents']['filename'] ) : 0;
+		$source_facts         = self::export_header_source_facts();
+		$expected_disposition = (string) ( $result['expectedContentDisposition'] ?? ( 'Content-Disposition: attachment; filename=' . $case['expectedFilename'] ) );
+		$expected_type        = (string) ( $result['expectedContentType'] ?? 'Content-Type: text/xml; charset=UTF-8' );
+		$failures             = array();
 
-		if ( empty( $result['headersObservable'] ) ) {
-			return $ctx->skip(
-				'wxr-export.headers.filename-and-content-type',
-				'PHP CLI did not expose header() calls through headers_list() or xdebug_get_headers().',
+		if ( $headers_observable ) {
+			$joined = implode( "\n", array_map( 'strval', $headers ) );
+			self::collect_failure(
+				$failures,
+				str_contains( $joined, $expected_disposition )
+					&& str_contains( $joined, $expected_type ),
+				'observable CLI headers include the filtered filename and XML content type',
 				array(
-					'filenameFilter' => $result['filenameFilter'] ?? null,
-					'sapi'           => $result['sapi'] ?? PHP_SAPI,
+					'headers'             => $headers,
+					'expectedDisposition' => $expected_disposition,
+					'expectedType'        => $expected_type,
 				)
+			);
+		} else {
+			self::collect_failure(
+				$failures,
+				is_array( $filename_filter )
+					&& 1 === $filename_filter_count
+					&& '' !== (string) ( $filename_filter['filename'] ?? '' )
+					&& '' !== (string) ( $filename_filter['sitename'] ?? '' )
+					&& preg_match( '/^\d{4}-\d{2}-\d{2}$/', (string) ( $filename_filter['date'] ?? '' ) )
+					&& (string) ( $filename_filter['filename'] ?? '' ) === (string) ( $filename_filter['sitename'] ?? '' ) . 'WordPress.' . (string) ( $filename_filter['date'] ?? '' ) . '.xml'
+					&& $case['expectedFilename'] === ( $filename_filter['filteredFilename'] ?? null )
+					&& 'UTF-8' === ( $result['blogCharset'] ?? null )
+					&& 'Content-Disposition: attachment; filename=' . $case['expectedFilename'] === $expected_disposition
+					&& 'Content-Type: text/xml; charset=UTF-8' === $expected_type,
+				'unobservable CLI headers still account for export filename filtering and XML content-type intent',
+				array(
+					'filenameFilter'      => $filename_filter,
+					'filenameFilterCount' => $filename_filter_count,
+					'expectedDisposition' => $expected_disposition,
+					'expectedType'        => $expected_type,
+					'headersObservable'   => $headers_observable,
+					'sapi'                => $result['sapi'] ?? PHP_SAPI,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				true === ( $source_facts['ordered'] ?? null ),
+				'export_wp() source applies filename filter before content-disposition and content-type headers',
+				$source_facts
 			);
 		}
 
-		$joined   = implode( "\n", array_map( 'strval', $headers ) );
-		$failures = array();
-		self::collect_failure(
+		return self::result(
+			$ctx,
+			'wxr-export.headers.filename-and-content-type',
 			$failures,
-			str_contains( $joined, 'Content-Disposition: attachment; filename=' . $case['expectedFilename'] )
-				&& str_contains( $joined, 'Content-Type: text/xml; charset=UTF-8' ),
-			'observable CLI headers include the filtered filename and XML content type',
 			array(
-				'headers'          => $headers,
-				'expectedFilename' => $case['expectedFilename'],
+				'headersObservable'   => $headers_observable,
+				'headers'             => $headers,
+				'filenameFilter'      => $filename_filter,
+				'filenameFilterCount' => $filename_filter_count,
+				'expectedDisposition' => $expected_disposition,
+				'expectedType'        => $expected_type,
+				'mode'                => $headers_observable ? 'observable-headers' : 'unobservable-source-fallback',
+				'exportHeaderSource'  => $source_facts,
+				'sapi'                => $result['sapi'] ?? PHP_SAPI,
 			)
 		);
-
-		return self::result( $ctx, 'wxr-export.headers.filename-and-content-type', $failures );
 	}
 
 	private static function check_child_state_restored( \ComponentFuzz\FuzzContext $ctx, array $case, array $run ): array {
@@ -1055,11 +1098,45 @@ final class WxrExportSurface {
 		);
 	}
 
-	private static function result( \ComponentFuzz\FuzzContext $ctx, string $invariant, array $failures ): array {
+	private static function result( \ComponentFuzz\FuzzContext $ctx, string $invariant, array $failures, array $data = array() ): array {
+		$data['failures'] = array_slice( $failures, 0, 8 );
+
 		return $ctx->result(
 			$invariant,
 			array() === $failures,
-			array( 'failures' => array_slice( $failures, 0, 8 ) )
+			$data
+		);
+	}
+
+	private static function export_header_source_facts(): array {
+		$path   = \ComponentFuzz\repo_root() . '/src/wp-admin/includes/export.php';
+		$source = is_readable( $path ) ? file_get_contents( $path ) : false;
+		if ( ! is_string( $source ) ) {
+			return array(
+				'path'     => $path,
+				'readable' => false,
+				'ordered'  => false,
+			);
+		}
+
+		$filter_pos      = strpos( $source, "apply_filters( 'export_wp_filename'" );
+		$disposition_pos = strpos( $source, "header( 'Content-Disposition: attachment; filename=' . \$filename )" );
+		$type_pos        = strpos( $source, "header( 'Content-Type: text/xml; charset=' . get_option( 'blog_charset' ), true )" );
+
+		return array(
+			'path'                  => $path,
+			'readable'              => true,
+			'applyFilterPresent'    => false !== $filter_pos,
+			'dispositionPresent'    => false !== $disposition_pos,
+			'contentTypePresent'    => false !== $type_pos,
+			'applyFilterOffset'     => false === $filter_pos ? null : $filter_pos,
+			'dispositionOffset'     => false === $disposition_pos ? null : $disposition_pos,
+			'contentTypeOffset'     => false === $type_pos ? null : $type_pos,
+			'ordered'               => false !== $filter_pos
+				&& false !== $disposition_pos
+				&& false !== $type_pos
+				&& $filter_pos < $disposition_pos
+				&& $disposition_pos < $type_pos,
 		);
 	}
 
@@ -1719,8 +1796,9 @@ function component_fuzz_wxr_prepare_runtime( array $fixture ): void {
 	add_filter(
 		'export_wp_filename',
 		static function ( string $filename, string $sitename, string $date ) use ( $fixture, &$component_fuzz_wxr_events ): string {
-			$component_fuzz_wxr_events['filename'][] = compact( 'filename', 'sitename', 'date' );
-			return $fixture['expectedFilename'];
+			$filteredFilename = $fixture['expectedFilename'];
+			$component_fuzz_wxr_events['filename'][] = compact( 'filename', 'sitename', 'date', 'filteredFilename' );
+			return $filteredFilename;
 		},
 		10,
 		3
@@ -1918,6 +1996,9 @@ try {
 		'xmlBase64'                    => base64_encode( $component_fuzz_wxr_xml ),
 		'headers'                      => array_values( array_map( 'strval', $component_fuzz_wxr_headers ) ),
 		'headersObservable'            => array() !== $component_fuzz_wxr_headers,
+		'blogCharset'                  => get_option( 'blog_charset' ),
+		'expectedContentDisposition'    => 'Content-Disposition: attachment; filename=' . $component_fuzz_wxr_fixture['expectedFilename'],
+		'expectedContentType'           => 'Content-Type: text/xml; charset=' . get_option( 'blog_charset' ),
 		'filenameFilter'               => $component_fuzz_wxr_events['filename'][0] ?? null,
 		'filterEvents'                 => $component_fuzz_wxr_events,
 		'containsInvalidInput'         => str_contains( serialize( $GLOBALS['wpdb']->fixture() ), "\xC3\x28" ),
