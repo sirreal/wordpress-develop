@@ -287,9 +287,10 @@ database, network requests, or a configured site.
 - `fonts`: font-face CSS serialization and validation, theme.json font-face
   resolution and default printing, font directory filters, Font Library
   collection registration/JSON loading, REST font collection pagination,
-  filtering, and response boundaries, REST font-face preparation boundaries,
-  and font utility sanitization for family lists, face slugs, schemas, and MIME
-  maps.
+  filtering, and response boundaries, REST font-family/font-face write
+  lifecycle coverage for duplicate guards, upload rewriting, force-delete
+  cleanup, and cascade deletion, REST font-face preparation boundaries, and font
+  utility sanitization for family lists, face slugs, schemas, and MIME maps.
 - `filesystem`: path normalization and joining, file validation classes,
   filename sanitization/uniqueness, unique-filename callback and case-collision
   filters, temp names, recursive directory creation/listing and stream wrapper
