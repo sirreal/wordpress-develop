@@ -954,13 +954,15 @@ final class ScriptLoaderRuntimeSurface {
 			$style_data
 		);
 
-		$loader_path = ABSPATH . WPINC . '/js/wp-emoji-loader' . \wp_scripts_get_suffix() . '.js';
-		$loader_data = array(
+		$loader_path    = ABSPATH . WPINC . '/js/wp-emoji-loader' . \wp_scripts_get_suffix() . '.js';
+		$loader_cleanup = self::materialize_emoji_loader_asset( $loader_path );
+		$loader_data    = array(
 			'loaderPath'            => $loader_path,
 			'scriptDebug'           => defined( 'SCRIPT_DEBUG' ) ? SCRIPT_DEBUG : null,
 			'scriptSuffix'          => \wp_scripts_get_suffix(),
 			'loaderReadable'        => is_readable( $loader_path ),
 			'wpIncludesJsDirExists' => is_dir( ABSPATH . WPINC . '/js' ),
+			'loaderMaterialized'    => $loader_cleanup,
 		);
 		if ( ! is_readable( $loader_path ) ) {
 			if ( ! $style_ok ) {
@@ -998,11 +1000,14 @@ final class ScriptLoaderRuntimeSurface {
 		\add_filter( 'emoji_ext', $emoji_ext );
 		\add_filter( 'script_loader_src', $script_src, 10, 2 );
 
-		$printed = self::capture_output( static fn() => \_print_emoji_detection_script() );
-
-		\remove_filter( 'emoji_url', $emoji_url );
-		\remove_filter( 'emoji_ext', $emoji_ext );
-		\remove_filter( 'script_loader_src', $script_src, 10 );
+		try {
+			$printed = self::capture_output( static fn() => \_print_emoji_detection_script() );
+		} finally {
+			\remove_filter( 'emoji_url', $emoji_url );
+			\remove_filter( 'emoji_ext', $emoji_ext );
+			\remove_filter( 'script_loader_src', $script_src, 10 );
+			self::cleanup_materialized_emoji_loader_asset( $loader_cleanup );
+		}
 
 		$settings_json = self::first_script_text_by_id( $printed['output'], 'wp-emoji-settings' );
 		$settings      = is_string( $settings_json ) ? json_decode( $settings_json, true ) : null;
@@ -1036,6 +1041,58 @@ final class ScriptLoaderRuntimeSurface {
 			)
 		);
 		return $rows;
+	}
+
+	private static function materialize_emoji_loader_asset( string $loader_path ): array {
+		$source_path = ABSPATH . 'js/_enqueues/lib/emoji-loader.js';
+		$target_dir  = dirname( $loader_path );
+		$result      = array(
+			'createdFile' => false,
+			'createdDir'  => false,
+			'sourcePath'  => $source_path,
+			'error'       => null,
+		);
+
+		if ( is_readable( $loader_path ) ) {
+			return $result;
+		}
+
+		if ( ! is_readable( $source_path ) ) {
+			$result['error'] = 'source-unreadable';
+			return $result;
+		}
+
+		if ( ! is_dir( $target_dir ) ) {
+			if ( ! @mkdir( $target_dir, 0777, true ) && ! is_dir( $target_dir ) ) {
+				$result['error'] = 'target-dir-unwritable';
+				return $result;
+			}
+			$result['createdDir'] = true;
+		}
+
+		if ( ! @copy( $source_path, $loader_path ) ) {
+			$result['error'] = 'copy-failed';
+			if ( $result['createdDir'] ) {
+				@rmdir( $target_dir );
+			}
+			return $result;
+		}
+
+		$result['createdFile'] = true;
+		return $result;
+	}
+
+	private static function cleanup_materialized_emoji_loader_asset( array $loader_cleanup ): void {
+		if ( ! empty( $loader_cleanup['createdFile'] ) && ! empty( $loader_cleanup['sourcePath'] ) ) {
+			$loader_path = ABSPATH . WPINC . '/js/wp-emoji-loader' . \wp_scripts_get_suffix() . '.js';
+			if ( is_file( $loader_path ) ) {
+				@unlink( $loader_path );
+			}
+		}
+
+		if ( ! empty( $loader_cleanup['createdDir'] ) ) {
+			@rmdir( ABSPATH . WPINC . '/js' );
+		}
 	}
 
 	private static function check_style_inlining_boundaries( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
