@@ -56,10 +56,12 @@ final class SecuritySurface {
 
 			$rows[] = self::check_salts_and_hashes( $ctx );
 			$rows[] = self::check_password_hashing_contracts( $ctx );
+			$rows[] = self::check_native_password_hash_compatibility( $ctx );
 			$rows[] = self::check_password_and_fast_hash_filter_boundaries( $ctx );
 			$rows[] = self::check_nonce_metamorphic_behavior( $ctx );
 			$rows[] = self::check_nonce_tick_lifetime_boundaries( $ctx );
 			$rows[] = self::check_nonce_url_and_fields( $ctx );
+			$rows[] = self::check_referer_retrieval_contracts( $ctx );
 			$rows[] = self::check_ajax_referer_lookup_order( $ctx );
 			$rows[] = self::check_admin_referer_valid_paths( $ctx );
 			$rows[] = self::check_auth_cookie_structure_and_validation( $ctx );
@@ -212,6 +214,7 @@ final class SecuritySurface {
 				'hash_equals',
 				'hash_hmac_algos',
 				'has_filter',
+				'home_url',
 				'remove_filter',
 				'remove_query_arg',
 				'update_user_caches',
@@ -221,6 +224,9 @@ final class SecuritySurface {
 				'wp_fast_hash',
 				'wp_generate_auth_cookie',
 				'wp_get_current_user',
+				'wp_get_original_referer',
+				'wp_get_raw_referer',
+				'wp_get_referer',
 				'wp_get_session_token',
 				'wp_hash',
 				'wp_hash_password',
@@ -469,6 +475,71 @@ final class SecuritySurface {
 			'security.password-and-fast-hash.verification-and-rehash',
 			array() === $failures,
 			array( 'failures' => array_slice( $failures, 0, 5 ) )
+		);
+	}
+
+	private static function check_native_password_hash_compatibility( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures           = array();
+		$user_id            = 72000 + $ctx->int( 0, 9999 );
+		$password           = 'native-pass-' . self::token( $ctx->fork( 'password-native' ), 12 );
+		$wp_hasher_exists   = array_key_exists( 'wp_hasher', $GLOBALS );
+		$wp_hasher_snapshot = $GLOBALS['wp_hasher'] ?? null;
+
+		$GLOBALS['wp_hasher'] = null;
+
+		try {
+			$hash         = password_hash( $password, PASSWORD_BCRYPT, array( 'cost' => 4 ) );
+			$mutated_hash = is_string( $hash ) && '' !== $hash
+				? substr( $hash, 0, -1 ) . ( 'A' === substr( $hash, -1 ) ? 'B' : 'A' )
+				: '';
+			$prefix       = is_string( $hash ) ? substr( $hash, 0, 4 ) : null;
+
+			self::collect_failure(
+				$failures,
+				is_string( $hash )
+					&& 1 === preg_match( '/^\\$2[aby]\\$/', $hash )
+					&& ! str_starts_with( $hash, '$wp' ),
+				'native bcrypt hash is unprefixed',
+				array(
+					'hash'   => self::describe_value( $hash ),
+					'prefix' => $prefix,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				is_string( $hash )
+					&& true === \wp_check_password( $password, $hash, $user_id )
+					&& false === \wp_check_password( $password . '|wrong', $hash, $user_id )
+					&& false === \wp_check_password( $password, $mutated_hash, $user_id )
+					&& true === \wp_password_needs_rehash( $hash, $user_id ),
+				'wp_check_password accepts native hash but marks it for migration',
+				array(
+					'userId'             => $user_id,
+					'hash'               => self::describe_string( (string) $hash ),
+					'mutatedHash'        => self::describe_string( $mutated_hash ),
+					'valid'              => is_string( $hash ) ? \wp_check_password( $password, $hash, $user_id ) : null,
+					'invalidPassword'    => is_string( $hash ) ? \wp_check_password( $password . '|wrong', $hash, $user_id ) : null,
+					'invalidMutatedHash' => is_string( $hash ) ? \wp_check_password( $password, $mutated_hash, $user_id ) : null,
+					'needsRehash'        => is_string( $hash ) ? \wp_password_needs_rehash( $hash, $user_id ) : null,
+				)
+			);
+		} finally {
+			if ( $wp_hasher_exists ) {
+				$GLOBALS['wp_hasher'] = $wp_hasher_snapshot;
+			} else {
+				unset( $GLOBALS['wp_hasher'] );
+			}
+		}
+
+		return self::row(
+			$ctx,
+			'security.password.native-hash-compatibility-and-migration',
+			array() === $failures,
+			array(
+				'userId'   => $user_id,
+				'failures' => array_slice( $failures, 0, 5 ),
+			)
 		);
 	}
 
@@ -958,6 +1029,159 @@ final class SecuritySurface {
 			'security.nonce-url-and-hidden-fields.escape-and-shape',
 			array() === $failures,
 			array( 'failures' => array_slice( $failures, 0, 5 ) )
+		);
+	}
+
+	private static function check_referer_retrieval_contracts( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$previous = array(
+			'_GET'     => $_GET,
+			'_POST'    => $_POST,
+			'_REQUEST' => $_REQUEST,
+			'_SERVER'  => $_SERVER,
+		);
+
+		$token       = self::token( $ctx->fork( 'referer-token' ), 8 );
+		$current_uri = '/wp-admin/admin.php?page=security-fuzz&token=' . rawurlencode( $token );
+		$home_current = \home_url() . $current_uri;
+		$request_ref  = '/wp-admin/edit.php?page=previous&token=' . rawurlencode( $token );
+		$server_ref   = 'http://example.test/wp-admin/server.php?token=' . rawurlencode( $token );
+		$external_ref = 'https://evil.test/wp-admin/steal.php?token=' . rawurlencode( $token );
+		$original_ref = '/wp-admin/original.php?token=' . rawurlencode( $token );
+		$cases        = array(
+			array(
+				'label'            => 'request referer takes precedence over HTTP_REFERER',
+				'request'          => array( '_wp_http_referer' => $request_ref ),
+				'serverReferer'    => $server_ref,
+				'expectedRaw'      => $request_ref,
+				'expectedReferer'  => \wp_validate_redirect( $request_ref, false ),
+				'expectedOriginal' => false,
+			),
+			array(
+				'label'            => 'relative current request referer is rejected',
+				'request'          => array( '_wp_http_referer' => $current_uri ),
+				'serverReferer'    => $server_ref,
+				'expectedRaw'      => $current_uri,
+				'expectedReferer'  => false,
+				'expectedOriginal' => false,
+			),
+			array(
+				'label'            => 'absolute home current request referer is rejected',
+				'request'          => array( '_wp_http_referer' => $home_current ),
+				'serverReferer'    => $server_ref,
+				'expectedRaw'      => $home_current,
+				'expectedReferer'  => false,
+				'expectedOriginal' => false,
+			),
+			array(
+				'label'            => 'non-string request referer falls back to HTTP_REFERER',
+				'request'          => array( '_wp_http_referer' => array( $request_ref ) ),
+				'serverReferer'    => $server_ref,
+				'expectedRaw'      => $server_ref,
+				'expectedReferer'  => \wp_validate_redirect( $server_ref, false ),
+				'expectedOriginal' => false,
+			),
+			array(
+				'label'            => 'external HTTP_REFERER is visible raw but rejected for redirects',
+				'request'          => array(),
+				'serverReferer'    => $external_ref,
+				'expectedRaw'      => $external_ref,
+				'expectedReferer'  => false,
+				'expectedOriginal' => false,
+			),
+			array(
+				'label'            => 'original referer validates posted relative URL',
+				'request'          => array( '_wp_original_http_referer' => $original_ref ),
+				'serverReferer'    => false,
+				'expectedRaw'      => false,
+				'expectedReferer'  => false,
+				'expectedOriginal' => \wp_validate_redirect( $original_ref, false ),
+			),
+			array(
+				'label'            => 'external original referer is rejected',
+				'request'          => array( '_wp_original_http_referer' => $external_ref ),
+				'serverReferer'    => false,
+				'expectedRaw'      => false,
+				'expectedReferer'  => false,
+				'expectedOriginal' => false,
+			),
+			array(
+				'label'            => 'original referer does not apply current-request self rejection',
+				'request'          => array( '_wp_original_http_referer' => $home_current ),
+				'serverReferer'    => false,
+				'expectedRaw'      => false,
+				'expectedReferer'  => false,
+				'expectedOriginal' => \wp_validate_redirect( $home_current, false ),
+			),
+		);
+
+		try {
+			foreach ( $cases as $index => $case ) {
+				$_GET                    = array();
+				$_POST                   = array();
+				$_REQUEST                = $case['request'];
+				$_SERVER['HTTP_HOST']    = 'example.test';
+				$_SERVER['REQUEST_URI']  = $current_uri;
+				$_SERVER['REQUEST_METHOD'] = 'GET';
+
+				if ( false === $case['serverReferer'] ) {
+					unset( $_SERVER['HTTP_REFERER'] );
+				} else {
+					$_SERVER['HTTP_REFERER'] = $case['serverReferer'];
+				}
+
+				$raw      = \wp_get_raw_referer();
+				$referer  = \wp_get_referer();
+				$original = \wp_get_original_referer();
+
+				self::collect_failure(
+					$failures,
+					$case['expectedRaw'] === $raw
+						&& $case['expectedReferer'] === $referer
+						&& $case['expectedOriginal'] === $original,
+					"wp_get_referer/original_referer case {$index}: {$case['label']}",
+					array(
+						'request'          => self::describe_value( $case['request'] ),
+						'serverReferer'    => self::describe_value( $case['serverReferer'] ),
+						'expectedRaw'      => self::describe_value( $case['expectedRaw'] ),
+						'actualRaw'        => self::describe_value( $raw ),
+						'expectedReferer'  => self::describe_value( $case['expectedReferer'] ),
+						'actualReferer'    => self::describe_value( $referer ),
+						'expectedOriginal' => self::describe_value( $case['expectedOriginal'] ),
+						'actualOriginal'   => self::describe_value( $original ),
+					)
+				);
+			}
+		} finally {
+			$_GET     = $previous['_GET'];
+			$_POST    = $previous['_POST'];
+			$_REQUEST = $previous['_REQUEST'];
+			$_SERVER  = $previous['_SERVER'];
+		}
+
+		self::collect_failure(
+			$failures,
+			$_GET === $previous['_GET']
+				&& $_POST === $previous['_POST']
+				&& $_REQUEST === $previous['_REQUEST']
+				&& $_SERVER === $previous['_SERVER'],
+			'referer retrieval matrix restores request superglobals',
+			array(
+				'getRestored'     => $_GET === $previous['_GET'],
+				'postRestored'    => $_POST === $previous['_POST'],
+				'requestRestored' => $_REQUEST === $previous['_REQUEST'],
+				'serverRestored'  => $_SERVER === $previous['_SERVER'],
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'security.referer-retrieval.precedence-validation-and-restoration',
+			array() === $failures,
+			array(
+				'cases'    => count( $cases ),
+				'failures' => array_slice( $failures, 0, 5 ),
+			)
 		);
 	}
 
