@@ -676,10 +676,12 @@ database, network requests, or a configured site.
   merging and dynamic filters, invalid registration and non-callable callback
   guards, callback argument and rendering filter contracts, nested parse
   boundaries, callback mutation during rendering, scoped media image context
-  hooks including priority-zero preexisting filters, escaped and HTML-attribute
-  rendering, tag-name edge/collision behavior, tag discovery, apply aliasing,
-  stripping preservation and strip filters, presence checks, malformed inputs,
-  and exact global/hook restoration.
+  hooks including priority-zero preexisting filters, escaped shortcode
+  boundaries, accepted/rejected HTML-attribute shortcode rendering,
+  placeholder encoding/unescaping for ignore_html, comments, CDATA, and escaped
+  shortcode forms, tag-name edge/collision behavior, tag discovery, apply
+  aliasing, stripping preservation and strip filters, presence checks,
+  malformed inputs, and exact global/hook restoration.
 - `site-health`: no-DB Site Health/update/HTTPS helper coverage, including
   generated update transients and dismissed core update options, aggregate
   update counts/titles, HTTPS option booleans, migration replacement, HTTPS
