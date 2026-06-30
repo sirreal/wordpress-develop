@@ -779,9 +779,12 @@ database, network requests, or a configured site.
 - `wxr-export`: subprocess-isolated WXR export coverage over deterministic
   synthetic posts, terms, authors, comments, and meta, including export
   argument filtering, title/content/excerpt export filters, XML/CDATA/UTF-8
-  safety, meta skip filters, attachment URL/file metadata serialization, author
-  and term ordering, filtered filename and XML content-type header intent with
-  observable-header assertions when available, and state restoration.
+  safety, meta skip filters, null post/term/comment meta serialization,
+  non-exportable and invalid content fallback behavior, filtered-comment
+  omission, nav-menu term boundaries, attachment URL/file metadata
+  serialization, author and term ordering, filtered filename and XML
+  content-type header intent with observable-header assertions when available,
+  and state restoration.
 - `xmlrpc`: no-DB IXR/XML-RPC protocol coverage, including value escaping,
   request/message round trips, invalid XML fail-closed behavior, fault XML,
   system method dispatch, mixed success/fault multicall ordering, method

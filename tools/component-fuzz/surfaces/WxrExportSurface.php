@@ -46,6 +46,7 @@ final class WxrExportSurface {
 				$rows[] = self::check_meta_filters( $ctx->fork( 'meta' ), $case, $run, $details, $xml );
 				$rows[] = self::check_attachment_urls_and_filemeta( $ctx->fork( 'attachments' ), $case, $details );
 				$rows[] = self::check_authors_and_terms( $ctx->fork( 'authors-terms' ), $case, $details );
+				$rows[] = self::check_edge_case_resilience( $ctx->fork( 'edges' ), $case, $details );
 				$rows[] = self::check_header_capture( $ctx->fork( 'headers' ), $case, $run );
 				$rows[] = self::check_child_state_restored( $ctx->fork( 'child-state' ), $case, $run );
 			}
@@ -491,6 +492,152 @@ final class WxrExportSurface {
 		return self::result( $ctx, 'wxr-export.authors-and-term-ordering', $failures );
 	}
 
+	private static function check_edge_case_resilience( \ComponentFuzz\FuzzContext $ctx, array $case, array $details ): array {
+		$failures     = array();
+		$content      = self::effective_export_content_arg( $case );
+		$comment_case = $case;
+
+		$comment_case['scenario']             = 'comment-filtered-replay';
+		$comment_case['args']                 = self::post_default_args();
+		$comment_case['filterCommentsToNull'] = true;
+
+		$comment_run     = self::run_child_export( $comment_case );
+		$comment_xml     = base64_decode( (string) ( $comment_run['result']['xmlBase64'] ?? '' ), true );
+		$comment_xml     = false === $comment_xml ? '' : $comment_xml;
+		$comment_parsed  = self::parse_xml( $comment_xml );
+		$comment_details = self::extract_wxr_details( $comment_parsed['xml'] );
+
+		self::collect_failure(
+			$failures,
+			! in_array( $case['nonExportablePostId'], $details['postIds'], true )
+				&& ! in_array( $case['nonExportablePostType'], $details['postTypes'], true ),
+			'non-exportable post types are excluded from every generated export mode',
+			array(
+				'scenario'              => $case['scenario'],
+				'args'                  => $case['args'],
+				'nonExportablePostId'   => $case['nonExportablePostId'],
+				'nonExportablePostType' => $case['nonExportablePostType'],
+				'postIds'               => $details['postIds'],
+				'postTypes'             => $details['postTypes'],
+			)
+		);
+
+		if ( $case['nonExportablePostType'] === $case['args']['content'] ) {
+			self::collect_failure(
+				$failures,
+				in_array( 101, $details['postIds'], true )
+					&& in_array( 301, $details['postIds'], true )
+					&& ! in_array( 105, $details['postIds'], true )
+					&& ! in_array( $case['nonExportablePostId'], $details['postIds'], true ),
+				'explicit non-exportable content falls back to post exports plus reachable attachments',
+				array(
+					'postIds'   => $details['postIds'],
+					'postTypes' => $details['postTypes'],
+				)
+			);
+		}
+
+		if ( $case['invalidContent'] === $case['args']['content'] ) {
+			$expected_types = self::expected_exported_post_types( $case, $details['postIds'] );
+			$actual_types   = array_values( array_unique( array_values( $details['postTypes'] ) ) );
+			sort( $actual_types );
+			sort( $expected_types );
+
+			self::collect_failure(
+				$failures,
+				$expected_types === $actual_types
+					&& in_array( $case['customPostType'], $actual_types, true )
+					&& ! in_array( $case['nonExportablePostType'], $actual_types, true ),
+				'unknown content values select the exportable post type set without term-only full-export side effects',
+				array(
+					'expectedTypes' => $expected_types,
+					'actualTypes'   => $actual_types,
+					'postIds'       => $details['postIds'],
+				)
+			);
+		}
+
+		self::collect_failure(
+			$failures,
+			'all' === $content
+				? in_array( $case['terms']['navMenu']['slug'], $details['navMenuSlugs'], true )
+				: ! in_array( $case['terms']['navMenu']['slug'], $details['navMenuSlugs'], true ),
+			'nav menu terms are emitted only by full-content exports',
+			array(
+				'effectiveContent' => $content,
+				'navMenuSlug'      => $case['terms']['navMenu']['slug'],
+				'navMenuSlugs'     => $details['navMenuSlugs'],
+			)
+		);
+
+		if ( in_array( 101, $details['postIds'], true ) ) {
+			self::collect_failure(
+				$failures,
+				self::has_meta_value( $details['postMetaValues'], 101, $case['nullKeys']['post'], '' ),
+				'null post meta values survive export as empty WXR meta values',
+				array(
+					'postId' => 101,
+					'key'    => $case['nullKeys']['post'],
+					'values' => $details['postMetaValues'][101][ $case['nullKeys']['post'] ] ?? null,
+				)
+			);
+		}
+
+		if ( self::exports_category_parent_term_meta( $case ) ) {
+			self::collect_failure(
+				$failures,
+				self::has_meta_value( $details['termMetaValues'], 10, $case['nullKeys']['term'], '' ),
+				'null term meta values survive export as empty WXR meta values',
+				array(
+					'termId' => 10,
+					'key'    => $case['nullKeys']['term'],
+					'values' => $details['termMetaValues'][10][ $case['nullKeys']['term'] ] ?? null,
+				)
+			);
+		}
+
+		self::collect_failure(
+			$failures,
+			$comment_run['ok'] && $comment_parsed['ok'] && array() === $comment_details['commentIds'],
+			'comments filtered to null are omitted instead of emitting empty wp:comment nodes',
+			array(
+				'exitCode'   => $comment_run['exitCode'],
+				'xmlErrors'  => $comment_parsed['errors'],
+				'commentIds' => $comment_details['commentIds'],
+				'stderr'     => self::preview( $comment_run['stderr'] ?? '' ),
+			)
+		);
+
+		if ( in_array( 1001, $details['commentIds'], true ) ) {
+			self::collect_failure(
+				$failures,
+				array( 1001 ) === $details['commentIds']
+					&& ! in_array( 1002, $details['commentIds'], true )
+					&& self::has_meta_value( $details['commentMetaValues'], 1001, $case['nullKeys']['comment'], '' ),
+				'unfiltered approved comments emit once, spam comments stay excluded, and null comment meta serializes empty',
+				array(
+					'commentIds' => $details['commentIds'],
+					'key'        => $case['nullKeys']['comment'],
+					'values'     => $details['commentMetaValues'][1001][ $case['nullKeys']['comment'] ] ?? null,
+				)
+			);
+		}
+
+		return self::result(
+			$ctx,
+			'wxr-export.edge-fallback-null-meta-comments-nav-menus',
+			$failures,
+			array(
+				'scenario'              => $case['scenario'],
+				'args'                  => $case['args'],
+				'filteredCommentReplay' => array(
+					'ok'         => $comment_run['ok'],
+					'commentIds' => $comment_details['commentIds'],
+				),
+			)
+		);
+	}
+
 	private static function check_header_capture( \ComponentFuzz\FuzzContext $ctx, array $case, array $run ): array {
 		$result               = is_array( $run['result'] ) ? $run['result'] : array();
 		$headers              = $result['headers'] ?? array();
@@ -589,7 +736,9 @@ final class WxrExportSurface {
 		$token      = '' === $token ? 'wxr' : $token;
 		$scenario   = self::scenario_for_iteration( $ctx->iteration() );
 		$custom_tax = 'component_fuzz_tax_' . substr( $token, 0, 8 );
-		$custom_pt  = 'component_fuzz_export';
+		$custom_pt       = 'cfz_export';
+		$excluded_pt     = 'cfz_no_export';
+		$invalid_content = 'cfz_missing_' . substr( $token, 0, 8 );
 
 		$terms = array(
 			'categoryChild'  => self::term_row( 11, 101, 'category', 'fuzz-child-' . $token, 'Child ' . $token, 10 ),
@@ -621,6 +770,7 @@ final class WxrExportSurface {
 			103 => self::post_row( 103, 'post', 'publish', 1, '2021-03-25 10:00:00', 'Late body ' . $token, 'Late Post ' . $token, 0 ),
 			104 => self::post_row( 104, 'post', 'auto-draft', 3, '2021-01-12 10:00:00', 'Auto draft body ' . $token, 'Auto Draft ' . $token, 0 ),
 			105 => self::post_row( 105, $custom_pt, 'publish', 3, '2021-01-20 10:00:00', 'Custom type body ' . $token, 'Custom Type ' . $token, 0 ),
+			106 => self::post_row( 106, $excluded_pt, 'publish', 1, '2021-01-21 10:00:00', 'Excluded type body ' . $token, 'Excluded Type ' . $token, 0 ),
 			201 => self::post_row( 201, 'page', 'publish', 2, '2021-02-11 10:00:00', 'Page body ]]> ' . self::INVALID_MARK . ' ' . $token, 'Page ' . $token, 0 ),
 			202 => self::post_row( 202, 'page', 'draft', 1, '2021-04-11 10:00:00', 'Draft page body ' . $token, 'Draft Page ' . $token, 0 ),
 			301 => self::post_row( 301, 'attachment', 'inherit', 2, '2021-01-16 10:00:00', 'Attachment body ]]> ' . self::INVALID_MARK . ' ' . $token, 'Attachment One ' . $token, 101 ),
@@ -636,12 +786,14 @@ final class WxrExportSurface {
 			self::meta_row( 5, 'post_id', 301, '_wp_attached_file', '2021/01/attachment-' . $token . '.txt' ),
 			self::meta_row( 6, 'post_id', 302, '_wp_attached_file', '2021/02/page-attachment-' . $token . '.txt' ),
 			self::meta_row( 7, 'post_id', 303, '_wp_attached_file', '2021/05/custom-attachment-' . $token . '.txt' ),
+			self::meta_row( 8, 'post_id', 101, 'null_post_' . $token, null ),
 		);
 
 		$termmeta = array(
 			self::meta_row( 11, 'term_id', 10, 'keep_term_' . $token, 'kept term meta ]]> ' . self::INVALID_MARK ),
 			self::meta_row( 12, 'term_id', 10, 'skip_term_' . $token, 'skipped term meta' ),
 			self::meta_row( 13, 'term_id', 31, 'keep_custom_term_' . $token, 'kept custom term meta' ),
+			self::meta_row( 14, 'term_id', 10, 'null_term_' . $token, null ),
 		);
 
 		$comments = array(
@@ -652,6 +804,7 @@ final class WxrExportSurface {
 		$commentmeta = array(
 			self::meta_row( 21, 'comment_id', 1001, 'keep_comment_' . $token, 'kept comment meta ]]> ' . self::INVALID_MARK ),
 			self::meta_row( 22, 'comment_id', 1001, 'skip_comment_' . $token, 'skipped comment meta' ),
+			self::meta_row( 23, 'comment_id', 1001, 'null_comment_' . $token, null ),
 		);
 
 		$relationships = array(
@@ -673,10 +826,13 @@ final class WxrExportSurface {
 			'token'             => $token,
 			'customTaxonomy'    => $custom_tax,
 			'customPostType'    => $custom_pt,
+			'nonExportablePostType' => $excluded_pt,
+			'invalidContent'    => $invalid_content,
 			'expectedFilename'  => 'component-fuzz-' . $token . '.xml',
 			'uploadsBaseUrl'    => 'http://example.test/component-fuzz-uploads/' . $token,
 			'autoDraftPostId'   => 104,
-			'args'              => self::args_for_scenario( $scenario, $terms['categoryParent']['slug'] ),
+			'nonExportablePostId' => 106,
+			'args'              => self::args_for_scenario( $scenario, $terms['categoryParent']['slug'], $excluded_pt, $invalid_content ),
 			'users'             => $users,
 			'posts'             => $posts,
 			'terms'             => $terms,
@@ -700,22 +856,28 @@ final class WxrExportSurface {
 				'term'    => 'skip_term_' . $token,
 				'comment' => 'skip_comment_' . $token,
 			),
+			'nullKeys'          => array(
+				'post'    => 'null_post_' . $token,
+				'term'    => 'null_term_' . $token,
+				'comment' => 'null_comment_' . $token,
+			),
 			'exportableTypes'   => array( 'post', 'page', 'attachment', $custom_pt ),
 			'contentCanExport'  => array(
 				'post'       => true,
 				'page'       => true,
 				'attachment' => true,
 				$custom_pt   => true,
+				$excluded_pt => false,
 			),
 		);
 	}
 
 	private static function scenario_for_iteration( int $iteration ): string {
-		$scenarios = array( 'all', 'post-filtered', 'page-filtered', 'attachment-filtered', 'post-default' );
+		$scenarios = array( 'all', 'post-filtered', 'page-filtered', 'attachment-filtered', 'post-default', 'non-exportable-explicit', 'invalid-content' );
 		return $scenarios[ $iteration % count( $scenarios ) ];
 	}
 
-	private static function args_for_scenario( string $scenario, string $category_slug ): array {
+	private static function args_for_scenario( string $scenario, string $category_slug, string $non_exportable_type, string $invalid_content ): array {
 		if ( 'post-filtered' === $scenario ) {
 			return array(
 				'content'    => 'post',
@@ -750,18 +912,34 @@ final class WxrExportSurface {
 		}
 
 		if ( 'post-default' === $scenario ) {
-			return array(
-				'content'    => 'post',
-				'author'     => false,
-				'category'   => false,
-				'start_date' => false,
-				'end_date'   => false,
-				'status'     => false,
-			);
+			return self::post_default_args();
+		}
+
+		if ( 'non-exportable-explicit' === $scenario ) {
+			$args            = self::post_default_args();
+			$args['content'] = $non_exportable_type;
+			return $args;
+		}
+
+		if ( 'invalid-content' === $scenario ) {
+			$args            = self::post_default_args();
+			$args['content'] = $invalid_content;
+			return $args;
 		}
 
 		return array(
 			'content'    => 'all',
+			'author'     => false,
+			'category'   => false,
+			'start_date' => false,
+			'end_date'   => false,
+			'status'     => false,
+		);
+	}
+
+	private static function post_default_args(): array {
+		return array(
+			'content'    => 'post',
 			'author'     => false,
 			'category'   => false,
 			'start_date' => false,
@@ -781,7 +959,7 @@ final class WxrExportSurface {
 			$ids[] = (int) $id;
 		}
 
-		if ( ! in_array( $args['content'], array( 'all', 'attachment' ), true ) ) {
+		if ( ! in_array( self::effective_export_content_arg( $case ), array( 'all', 'attachment' ), true ) ) {
 			$additional = array();
 			foreach ( $case['posts'] as $id => $post ) {
 				if ( 'attachment' === $post['post_type'] && in_array( (int) $post['post_parent'], $ids, true ) ) {
@@ -802,13 +980,14 @@ final class WxrExportSurface {
 
 	private static function post_matches_export_args( array $post, array $case ): bool {
 		$args    = $case['args'];
-		$content = $args['content'];
+		$content = self::effective_export_content_arg( $case );
+		$scope   = self::post_type_scope_for_export( $case );
 
-		if ( 'all' === $content ) {
+		if ( 'exportable' === $scope ) {
 			if ( ! in_array( $post['post_type'], $case['exportableTypes'], true ) ) {
 				return false;
 			}
-		} elseif ( $post['post_type'] !== $content ) {
+		} elseif ( $post['post_type'] !== $scope ) {
 			return false;
 		}
 
@@ -840,6 +1019,36 @@ final class WxrExportSurface {
 		}
 
 		return true;
+	}
+
+	private static function effective_export_content_arg( array $case ): string {
+		$content = (string) ( $case['args']['content'] ?? 'all' );
+		if ( 'all' !== $content && array_key_exists( $content, $case['contentCanExport'] ) && ! $case['contentCanExport'][ $content ] ) {
+			return 'post';
+		}
+
+		return $content;
+	}
+
+	private static function post_type_scope_for_export( array $case ): string {
+		$content = self::effective_export_content_arg( $case );
+		if ( 'all' === $content || ! array_key_exists( $content, $case['contentCanExport'] ) ) {
+			return 'exportable';
+		}
+
+		return $content;
+	}
+
+	private static function expected_exported_post_types( array $case, array $post_ids ): array {
+		$types = array();
+		foreach ( $post_ids as $post_id ) {
+			$type = $case['posts'][ $post_id ]['post_type'] ?? null;
+			if ( is_string( $type ) ) {
+				$types[] = $type;
+			}
+		}
+
+		return array_values( array_unique( $types ) );
 	}
 
 	private static function expected_author_ids( array $case, array $post_ids ): array {
@@ -935,12 +1144,16 @@ final class WxrExportSurface {
 			'authorIds'       => array(),
 			'categorySlugs'   => array(),
 			'termSlugs'       => array(),
+			'navMenuSlugs'    => array(),
 			'postMetaKeys'    => array(),
 			'termMetaKeys'    => array(),
 			'commentMetaKeys' => array(),
+			'commentIds'      => array(),
 			'postTypes'       => array(),
 			'attachmentUrls'  => array(),
 			'postMetaValues'  => array(),
+			'termMetaValues'  => array(),
+			'commentMetaValues' => array(),
 			'titles'          => array(),
 			'contents'        => array(),
 			'excerpts'        => array(),
@@ -957,15 +1170,34 @@ final class WxrExportSurface {
 			$details['authorIds'][] = (int) $author->children( self::WXR_NS )->author_id;
 		}
 		foreach ( $wp->category as $category ) {
-			$details['categorySlugs'][] = (string) $category->children( self::WXR_NS )->category_nicename;
+			$category_wp                = $category->children( self::WXR_NS );
+			$term_id                    = (int) $category_wp->term_id;
+			$details['categorySlugs'][] = (string) $category_wp->category_nicename;
 			foreach ( $category->children( self::WXR_NS )->termmeta as $meta ) {
-				$details['termMetaKeys'][] = (string) $meta->children( self::WXR_NS )->meta_key;
+				$meta_wp    = $meta->children( self::WXR_NS );
+				$meta_key   = (string) $meta_wp->meta_key;
+				$meta_value = (string) $meta_wp->meta_value;
+
+				$details['termMetaKeys'][] = $meta_key;
+				$details['termMetaValues'][ $term_id ][ $meta_key ][] = $meta_value;
 			}
 		}
 		foreach ( $wp->term as $term ) {
-			$details['termSlugs'][] = (string) $term->children( self::WXR_NS )->term_slug;
+			$term_wp                  = $term->children( self::WXR_NS );
+			$term_id                  = (int) $term_wp->term_id;
+			$term_slug                = (string) $term_wp->term_slug;
+			$term_taxonomy            = (string) $term_wp->term_taxonomy;
+			$details['termSlugs'][]   = $term_slug;
+			if ( 'nav_menu' === $term_taxonomy ) {
+				$details['navMenuSlugs'][] = $term_slug;
+			}
 			foreach ( $term->children( self::WXR_NS )->termmeta as $meta ) {
-				$details['termMetaKeys'][] = (string) $meta->children( self::WXR_NS )->meta_key;
+				$meta_wp    = $meta->children( self::WXR_NS );
+				$meta_key   = (string) $meta_wp->meta_key;
+				$meta_value = (string) $meta_wp->meta_value;
+
+				$details['termMetaKeys'][] = $meta_key;
+				$details['termMetaValues'][ $term_id ][ $meta_key ][] = $meta_value;
 			}
 		}
 
@@ -990,13 +1222,21 @@ final class WxrExportSurface {
 				$details['postMetaValues'][ $post_id ][ $meta_key ][] = $meta_value;
 			}
 			foreach ( $item_wp->comment as $comment ) {
-				foreach ( $comment->children( self::WXR_NS )->commentmeta as $meta ) {
-					$details['commentMetaKeys'][] = (string) $meta->children( self::WXR_NS )->meta_key;
+				$comment_wp = $comment->children( self::WXR_NS );
+				$comment_id = (int) $comment_wp->comment_id;
+				$details['commentIds'][] = $comment_id;
+				foreach ( $comment_wp->commentmeta as $meta ) {
+					$meta_wp    = $meta->children( self::WXR_NS );
+					$meta_key   = (string) $meta_wp->meta_key;
+					$meta_value = (string) $meta_wp->meta_value;
+
+					$details['commentMetaKeys'][] = $meta_key;
+					$details['commentMetaValues'][ $comment_id ][ $meta_key ][] = $meta_value;
 				}
 			}
 		}
 
-		foreach ( array( 'postIds', 'authorIds' ) as $key ) {
+		foreach ( array( 'postIds', 'authorIds', 'commentIds' ) as $key ) {
 			$details[ $key ] = array_values( array_map( 'intval', $details[ $key ] ) );
 		}
 
@@ -1088,7 +1328,7 @@ final class WxrExportSurface {
 		);
 	}
 
-	private static function meta_row( int $id, string $object_column, int $object_id, string $key, string $value ): array {
+	private static function meta_row( int $id, string $object_column, int $object_id, string $key, $value ): array {
 		return array(
 			'meta_id'        => $id,
 			$object_column   => $object_id,
@@ -1096,6 +1336,15 @@ final class WxrExportSurface {
 			'meta_value'     => $value,
 			'meta_object_id' => $object_id,
 		);
+	}
+
+	private static function exports_category_parent_term_meta( array $case ): bool {
+		$content = self::effective_export_content_arg( $case );
+		return 'all' === $content || ( 'post' === $content && ! empty( $case['args']['category'] ) );
+	}
+
+	private static function has_meta_value( array $values, int $object_id, string $key, string $value ): bool {
+		return in_array( $value, $values[ $object_id ][ $key ] ?? array(), true );
 	}
 
 	private static function result( \ComponentFuzz\FuzzContext $ctx, string $invariant, array $failures, array $data = array() ): array {
@@ -1269,6 +1518,14 @@ if ( ! class_exists( 'Component_Fuzz_WXR_WPDB_Double', false ) ) {
 					'uploads_use_yearmonth_folders' => 1,
 				)
 			);
+		}
+
+		public function prepare( $query, ...$args ) {
+			if ( 1 === count( $args ) && is_array( $args[0] ) ) {
+				$args = array_values( $args[0] );
+			}
+
+			return parent::prepare( $query, ...$args );
 		}
 
 		public function get_results( $query = null, $output = OBJECT ) {
@@ -1751,6 +2008,17 @@ function component_fuzz_wxr_prepare_runtime( array $fixture ): void {
 			'supports'   => array( 'title', 'editor', 'excerpt', 'author', 'comments' ),
 		)
 	);
+	register_post_type(
+		$fixture['nonExportablePostType'],
+		array(
+			'public'     => true,
+			'show_ui'    => false,
+			'rewrite'    => false,
+			'query_var'  => false,
+			'can_export' => false,
+			'supports'   => array( 'title', 'editor', 'excerpt', 'author', 'comments' ),
+		)
+	);
 	register_taxonomy(
 		$fixture['customTaxonomy'],
 		array( 'post', $fixture['customPostType'] ),
@@ -1867,6 +2135,14 @@ function component_fuzz_wxr_prepare_runtime( array $fixture ): void {
 		10,
 		2
 	);
+	if ( ! empty( $fixture['filterCommentsToNull'] ) ) {
+		add_action(
+			'export_wp',
+			static function (): void {
+				add_filter( 'get_comment', '__return_null' );
+			}
+		);
+	}
 }
 
 function component_fuzz_wxr_terms_for_query( array $fixture, array $query_vars ): array {
