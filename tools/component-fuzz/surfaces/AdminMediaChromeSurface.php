@@ -35,9 +35,9 @@ final class AdminMediaChromeSurface {
 			$rows[] = self::check_edit_form_image_details_and_compat( $ctx->fork( 'edit-form-details' ) );
 			$rows[] = self::check_thumbnail_icon_and_image_helpers( $ctx->fork( 'thumb-icons' ) );
 			$rows[] = self::check_image_caption_editor_output( $ctx->fork( 'image-caption-editor' ) );
+			$rows[] = self::check_legacy_upload_shell_helpers( $ctx->fork( 'legacy-upload-shell' ) );
+			$rows[] = self::check_media_enqueue_and_iframe_shell( $ctx->fork( 'modal-enqueue-shell' ) );
 			$rows[] = self::check_media_button_and_bypass_output( $ctx->fork( 'media-buttons' ) );
-			$rows[] = self::skipped_exiting_upload_helpers( $ctx );
-			$rows[] = self::skipped_modal_runtime_helpers( $ctx );
 		} catch ( \Throwable $e ) {
 			$rows[] = self::row(
 				$ctx,
@@ -85,17 +85,27 @@ final class AdminMediaChromeSurface {
 				'image_media_send_to_editor',
 				'image_size_input_fields',
 				'media_buttons',
+				'media_upload_form',
 				'media_upload_flash_bypass',
+				'media_upload_header',
 				'media_upload_html_bypass',
+				'media_upload_tabs',
+				'media_upload_type_form',
+				'the_media_upload_tabs',
 				'wp_get_attachment_image',
 				'wp_get_attachment_image_src',
 				'wp_get_attachment_metadata',
 				'wp_get_attachment_thumb_url',
+				'wp_enqueue_media',
 				'wp_image_editor',
+				'wp_iframe',
 				'wp_insert_post',
 				'wp_mime_type_icon',
 				'wp_editor',
+				'wp_script_is',
+				'wp_scripts',
 				'wp_set_current_user',
+				'wp_style_is',
 			) as $function
 		) {
 			if ( ! function_exists( $function ) ) {
@@ -1362,6 +1372,427 @@ final class AdminMediaChromeSurface {
 		);
 	}
 
+	private static function check_legacy_upload_shell_helpers( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures        = array();
+		$snapshot        = self::snapshot_state();
+		$token           = $ctx->identifier( 3, 8 );
+		$post_id         = self::seed_parent_post( $ctx->fork( 'post' ) );
+		$unsafe_type     = 'image-' . $token . '</script><script>alert(1)</script>';
+		$unsafe_tab      = 'type-' . $token . '</script><script>alert(2)</script>';
+		$unsafe_post_id  = (string) $post_id . '<script>alert(3)</script>';
+		$action_counts   = array();
+		$tab_events      = array();
+		$form_url_events = array();
+		$post_events     = array();
+		$plupload_events = array();
+		$direct_tabs     = array();
+		$header_html     = '';
+		$chromeless_html = '';
+		$type_form_html  = '';
+
+		$tabs_filter = static function ( array $tabs ) use ( &$tab_events, $token ): array {
+			$tab_events[] = array_keys( $tabs );
+			$tabs['component_fuzz'] = 'Component Fuzz ' . $token;
+			return $tabs;
+		};
+		$form_url_filter = static function ( string $url, string $type ) use ( &$form_url_events, $token ): string {
+			$form_url_events[] = array(
+				'url'  => $url,
+				'type' => $type,
+			);
+			return \add_query_arg( 'cfz_upload_marker', $token, $url );
+		};
+		$post_params_filter = static function ( array $params ) use ( &$post_events, $token ): array {
+			$post_events[] = $params;
+			$params['component_fuzz_param'] = $token;
+			return $params;
+		};
+		$plupload_filter = static function ( array $init ) use ( &$plupload_events, $token ): array {
+			$plupload_events[] = $init;
+			$init['component_fuzz_init'] = $token;
+			return $init;
+		};
+		$tracked_actions = array(
+			'pre-upload-ui',
+			'pre-plupload-upload-ui',
+			'post-plupload-upload-ui',
+			'pre-html-upload-ui',
+			'post-html-upload-ui',
+			'post-upload-ui',
+		);
+		$action_callbacks = array();
+		foreach ( $tracked_actions as $hook ) {
+			$action_counts[ $hook ]   = 0;
+			$action_callbacks[ $hook ] = static function () use ( &$action_counts, $hook ): void {
+				++$action_counts[ $hook ];
+			};
+		}
+
+		\add_filter( 'media_upload_tabs', $tabs_filter );
+		\add_filter( 'media_upload_form_url', $form_url_filter, 10, 2 );
+		\add_filter( 'upload_post_params', $post_params_filter );
+		\add_filter( 'plupload_init', $plupload_filter );
+		foreach ( $action_callbacks as $hook => $callback ) {
+			\add_action( $hook, $callback );
+		}
+
+		try {
+			$GLOBALS['type'] = $unsafe_type;
+			$GLOBALS['tab']  = $unsafe_tab;
+			$_SERVER['HTTP_USER_AGENT'] = 'ComponentFuzz Desktop';
+			$_GET     = array(
+				'tab' => 'component_fuzz',
+			);
+			$_POST    = array();
+			$_REQUEST = array(
+				'post_id' => $unsafe_post_id,
+			);
+
+			$direct_tabs = \media_upload_tabs();
+			$header_html = self::capture_output(
+				static function (): void {
+					\media_upload_header();
+				}
+			);
+
+			$_GET['chromeless'] = '1';
+			$chromeless_html    = self::capture_output(
+				static function (): void {
+					\media_upload_header();
+				}
+			);
+
+			unset( $_GET['chromeless'] );
+			$type_form_html = self::capture_output(
+				static function (): void {
+					\media_upload_type_form( 'image', null, null );
+				}
+			);
+		} finally {
+			\remove_filter( 'media_upload_tabs', $tabs_filter );
+			\remove_filter( 'media_upload_form_url', $form_url_filter, 10 );
+			\remove_filter( 'upload_post_params', $post_params_filter );
+			\remove_filter( 'plupload_init', $plupload_filter );
+			foreach ( $action_callbacks as $hook => $callback ) {
+				\remove_action( $hook, $callback );
+			}
+			self::restore_state( $snapshot );
+		}
+
+		self::collect_failure(
+			$failures,
+			isset( $direct_tabs['type'], $direct_tabs['type_url'], $direct_tabs['gallery'], $direct_tabs['library'], $direct_tabs['component_fuzz'] )
+				&& 'Component Fuzz ' . $token === $direct_tabs['component_fuzz'],
+			'media_upload_tabs() exposes default legacy tabs and scoped filter additions',
+			array( 'directTabs' => $direct_tabs )
+		);
+
+		self::collect_failure(
+			$failures,
+			str_contains( $header_html, '<script>post_id = ' . $post_id . ';</script>' )
+				&& str_contains( $header_html, '<div id="media-upload-header">' )
+				&& str_contains( $header_html, "id='tab-component_fuzz'" )
+				&& str_contains( $header_html, "class='current'" )
+				&& str_contains( $chromeless_html, '<script>post_id = ' . $post_id . ';</script>' )
+				&& ! str_contains( $chromeless_html, '<div id="media-upload-header">' )
+				&& ! str_contains( $header_html . $chromeless_html, $unsafe_post_id ),
+			'media_upload_header() casts request post IDs and honors chromeless legacy tab rendering',
+			array(
+				'header'     => self::describe_string( $header_html ),
+				'chromeless' => self::describe_string( $chromeless_html ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			str_contains( $type_form_html, 'enctype="multipart/form-data"' )
+				&& str_contains( $type_form_html, 'id="image-form"' )
+				&& str_contains( $type_form_html, 'name="_wpnonce"' )
+				&& str_contains( $type_form_html, 'id="post_id" value="' . $post_id . '"' )
+				&& str_contains( $type_form_html, 'cfz_upload_marker=' . $token )
+				&& str_contains( $type_form_html, 'wpUploaderInit = ' )
+				&& str_contains( $type_form_html, 'component_fuzz_param' )
+				&& str_contains( $type_form_html, 'component_fuzz_init' )
+				&& str_contains( $type_form_html, '\\u003C/script\\u003E' )
+				&& ! str_contains( $type_form_html, $unsafe_type )
+				&& ! str_contains( $type_form_html, $unsafe_tab )
+				&& ! str_contains( $type_form_html, $unsafe_post_id ),
+			'media_upload_type_form() renders the non-dispatch upload shell with nonce, filtered action URL, and JSON-escaped uploader settings',
+			array( 'html' => self::describe_string( $type_form_html ) )
+		);
+
+		self::collect_failure(
+			$failures,
+			1 === count( $form_url_events )
+				&& 'image' === ( $form_url_events[0]['type'] ?? null )
+				&& 1 === count( $post_events )
+				&& $post_id === (int) ( $post_events[0]['post_id'] ?? 0 )
+				&& $unsafe_type === ( $post_events[0]['type'] ?? null )
+				&& $unsafe_tab === ( $post_events[0]['tab'] ?? null )
+				&& 1 === count( $plupload_events )
+				&& $token === ( $plupload_events[0]['multipart_params']['component_fuzz_param'] ?? null )
+				&& array() === array_filter(
+					$action_counts,
+					static function ( int $count ): bool {
+						return 1 !== $count;
+					}
+				),
+			'legacy upload shell fires documented form filters and upload UI hooks exactly once without dispatching uploads',
+			array(
+				'formUrlEvents'  => $form_url_events,
+				'postEvents'     => $post_events,
+				'pluploadEvents' => $plupload_events,
+				'actionCounts'   => $action_counts,
+				'tabEvents'      => $tab_events,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			false === \has_filter( 'media_upload_tabs', $tabs_filter )
+				&& false === \has_filter( 'media_upload_form_url', $form_url_filter )
+				&& false === \has_filter( 'upload_post_params', $post_params_filter )
+				&& false === \has_filter( 'plupload_init', $plupload_filter ),
+			'legacy upload shell filters are scoped to the invariant',
+			array()
+		);
+
+		return self::row(
+			$ctx,
+			'admin-media-chrome.legacy-upload-shell-server-output',
+			array() === $failures,
+			array(
+				'failures'   => $failures,
+				'notClaimed' => array(
+					'media_upload_form_handler() send/insert-gallery dispatch branches',
+					'media_upload_type_form() WP_Error branch that exits',
+					'wp_media_attach_action() redirect/exit branch',
+					'media_handle_upload() and media_handle_sideload() real ingest paths',
+				),
+			)
+		);
+	}
+
+	private static function check_media_enqueue_and_iframe_shell( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures        = array();
+		$snapshot        = self::snapshot_state();
+		$token           = $ctx->identifier( 3, 8 );
+		$post_id         = self::seed_parent_post( $ctx->fork( 'post' ) );
+		$iframe_payload  = 'iframe <script>alert(1)</script> ' . $token;
+		$settings_events = array();
+		$strings_events  = array();
+		$filter_events   = array();
+		$enqueue_actions = 0;
+		$localized       = '';
+		$script_status   = array();
+		$style_status    = array();
+		$template_hooks  = array();
+		$did_enqueue     = 0;
+		$iframe_html     = '';
+
+		$tabs_filter = static function ( array $tabs ) use ( &$filter_events, $token ): array {
+			$filter_events['tabs'][] = array_keys( $tabs );
+			$tabs['component_fuzz_modal'] = 'Component Fuzz Modal ' . $token;
+			return $tabs;
+		};
+		$audio_filter = static function ( $show ) use ( &$filter_events ): bool {
+			$filter_events['audio'][] = $show;
+			return false;
+		};
+		$video_filter = static function ( $show ) use ( &$filter_events ): bool {
+			$filter_events['video'][] = $show;
+			return true;
+		};
+		$months_filter = static function ( $months ) use ( &$filter_events ): array {
+			$filter_events['months'][] = $months;
+			return array(
+				(object) array(
+					'month' => 6,
+					'year'  => 2026,
+				),
+			);
+		};
+		$infinite_filter = static function ( bool $infinite ) use ( &$filter_events ): bool {
+			$filter_events['infinite'][] = $infinite;
+			return true;
+		};
+		$captions_filter = static function ( $disabled ) use ( &$filter_events ): bool {
+			$filter_events['captions'][] = $disabled;
+			return true;
+		};
+		$settings_filter = static function ( array $settings, $post ) use ( &$settings_events, $token ): array {
+			$settings['componentFuzzSetting'] = $token;
+			$settings_events[] = array(
+				'postId'   => $post instanceof \WP_Post ? $post->ID : null,
+				'settings' => $settings,
+			);
+			return $settings;
+		};
+		$strings_filter = static function ( array $strings, $post ) use ( &$strings_events, $token ): array {
+			$strings['componentFuzzString'] = $token;
+			$strings_events[] = array(
+				'postId'  => $post instanceof \WP_Post ? $post->ID : null,
+				'strings' => $strings,
+			);
+			return $strings;
+		};
+		$enqueue_action = static function () use ( &$enqueue_actions ): void {
+			++$enqueue_actions;
+		};
+
+		\add_filter( 'media_upload_tabs', $tabs_filter );
+		\add_filter( 'media_library_show_audio_playlist', $audio_filter );
+		\add_filter( 'media_library_show_video_playlist', $video_filter );
+		\add_filter( 'media_library_months_with_files', $months_filter );
+		\add_filter( 'media_library_infinite_scrolling', $infinite_filter );
+		\add_filter( 'disable_captions', $captions_filter );
+		\add_filter( 'media_view_settings', $settings_filter, 10, 2 );
+		\add_filter( 'media_view_strings', $strings_filter, 10, 2 );
+		\add_action( 'wp_enqueue_media', $enqueue_action );
+
+		try {
+			$GLOBALS['content_width'] = 733;
+			$GLOBALS['body_id']       = 'component-fuzz-iframe';
+
+			\wp_enqueue_media( array( 'post' => $post_id ) );
+			$localized = (string) \wp_scripts()->get_data( 'media-views', 'data' );
+			$script_status = array(
+				'media-editor'     => \wp_script_is( 'media-editor', 'enqueued' ),
+				'media-audiovideo' => \wp_script_is( 'media-audiovideo', 'enqueued' ),
+			);
+			$style_status = array(
+				'media-views'    => \wp_style_is( 'media-views', 'enqueued' ),
+				'imgareaselect'  => \wp_style_is( 'imgareaselect', 'enqueued' ),
+			);
+			$template_hooks = array(
+				'admin_footer'                               => \has_action( 'admin_footer', 'wp_print_media_templates' ),
+				'wp_footer'                                  => \has_action( 'wp_footer', 'wp_print_media_templates' ),
+				'customize_controls_print_footer_scripts'    => \has_action( 'customize_controls_print_footer_scripts', 'wp_print_media_templates' ),
+			);
+			$did_enqueue = \did_action( 'wp_enqueue_media' );
+
+			$iframe_html = self::capture_output(
+				static function () use ( $iframe_payload ): void {
+					\wp_iframe( 'esc_html_e', $iframe_payload );
+				}
+			);
+		} finally {
+			\remove_filter( 'media_upload_tabs', $tabs_filter );
+			\remove_filter( 'media_library_show_audio_playlist', $audio_filter );
+			\remove_filter( 'media_library_show_video_playlist', $video_filter );
+			\remove_filter( 'media_library_months_with_files', $months_filter );
+			\remove_filter( 'media_library_infinite_scrolling', $infinite_filter );
+			\remove_filter( 'disable_captions', $captions_filter );
+			\remove_filter( 'media_view_settings', $settings_filter, 10 );
+			\remove_filter( 'media_view_strings', $strings_filter, 10 );
+			\remove_action( 'wp_enqueue_media', $enqueue_action );
+			self::restore_state( $snapshot );
+		}
+
+		$settings = $settings_events[0]['settings'] ?? array();
+		$strings  = $strings_events[0]['strings'] ?? array();
+		$month    = $settings['months'][0] ?? null;
+
+		self::collect_failure(
+			$failures,
+			1 === count( $settings_events )
+				&& $post_id === (int) ( $settings_events[0]['postId'] ?? 0 )
+				&& isset( $settings['tabs']['component_fuzz_modal'] )
+				&& 'Component Fuzz Modal ' . $token === $settings['tabs']['component_fuzz_modal']
+				&& false === ( $settings['captions'] ?? null )
+				&& 0 === (int) ( $settings['attachmentCounts']['audio'] ?? -1 )
+				&& 1 === (int) ( $settings['attachmentCounts']['video'] ?? -1 )
+				&& 1 === (int) ( $settings['infiniteScrolling'] ?? 0 )
+				&& 733 === (int) ( $settings['contentWidth'] ?? 0 )
+				&& $month instanceof \stdClass
+				&& 6 === (int) $month->month
+				&& 2026 === (int) $month->year
+				&& isset( $month->text ),
+			'wp_enqueue_media() builds filterable media-view settings without querying media months or playlist counts',
+			array(
+				'settingsEvents' => $settings_events,
+				'filterEvents'   => $filter_events,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			1 === count( $strings_events )
+				&& $post_id === (int) ( $strings_events[0]['postId'] ?? 0 )
+				&& isset( $strings['componentFuzzString'] )
+				&& $token === $strings['componentFuzzString'],
+			'wp_enqueue_media() filters media strings before attaching the filtered settings payload for localization',
+			array( 'stringsEvents' => $strings_events )
+		);
+
+		self::collect_failure(
+			$failures,
+			'' === $localized
+				|| (
+					str_contains( $localized, '_wpMediaViewsL10n' )
+					&& str_contains( $localized, 'componentFuzzSetting' )
+					&& str_contains( $localized, 'componentFuzzString' )
+					&& str_contains( $localized, $token )
+				),
+			'wp_enqueue_media() localizes filtered media strings when the media-views handle is registered',
+			array(
+				'localized' => self::describe_string( $localized ),
+				'scripts'   => $script_status,
+				'styles'    => $style_status,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			1 === $did_enqueue
+				&& 1 === $enqueue_actions
+				&& ! in_array( false, $template_hooks, true ),
+			'wp_enqueue_media() completes its action and registers media templates once',
+			array(
+				'templateHooks' => $template_hooks,
+				'didAction'     => $did_enqueue,
+				'actionCount'   => $enqueue_actions,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			str_contains( $iframe_html, 'pagenow = \'media-upload-popup\'' )
+				&& str_contains( $iframe_html, '<body id="component-fuzz-iframe" class="wp-core-ui no-js ' )
+				&& str_contains( $iframe_html, \esc_html( $iframe_payload ) )
+				&& ! str_contains( $iframe_html, $iframe_payload )
+				&& str_contains( $iframe_html, '</html>' ),
+			'wp_iframe() renders the legacy media iframe shell and escapes callback output in-process',
+			array( 'iframe' => self::describe_string( $iframe_html ) )
+		);
+
+		self::collect_failure(
+			$failures,
+			false === \has_filter( 'media_upload_tabs', $tabs_filter )
+				&& false === \has_filter( 'media_view_settings', $settings_filter )
+				&& false === \has_filter( 'media_view_strings', $strings_filter )
+				&& false === \has_action( 'wp_enqueue_media', $enqueue_action ),
+			'media enqueue and iframe filters/actions are scoped to the invariant',
+			array()
+		);
+
+		return self::row(
+			$ctx,
+			'admin-media-chrome.modal-enqueue-data-and-iframe-shell',
+			array() === $failures,
+			array(
+				'failures'   => $failures,
+				'notClaimed' => array(
+					'Backbone media modal JavaScript runtime behavior after enqueue',
+					'default admin script/style registration and localization when media handles are unavailable in the no-admin bootstrap',
+					'admin-ajax.php image editor dispatch actions',
+					'Thickbox browser interactions after the wp_iframe() shell is rendered',
+					'full legacy gallery screen submission flows',
+				),
+			)
+		);
+	}
+
 	private static function check_media_button_and_bypass_output( \ComponentFuzz\FuzzContext $ctx ): array {
 		$failures  = array();
 		$editor_id = 'content-" <script>alert(1)</script> ' . $ctx->identifier( 3, 8 );
@@ -1432,36 +1863,6 @@ final class AdminMediaChromeSurface {
 			'admin-media-chrome.media-buttons-bypass-output',
 			array() === $failures,
 			array( 'failures' => $failures )
-		);
-	}
-
-	private static function skipped_exiting_upload_helpers( \ComponentFuzz\FuzzContext $ctx ): array {
-		return $ctx->skip(
-			'admin-media-chrome.upload-dispatch-exit-helpers-skipped',
-			'Upload dispatch helpers and attach/detach actions are skipped in-process because selected branches call exit, wp_die(), redirects, or real upload handlers.',
-			array(
-				'skipped' => array(
-					'media_upload_form_handler() send/insert-gallery branches',
-					'media_upload_type_form() WP_Error branch',
-					'wp_media_attach_action() redirect/exit branch',
-					'media_handle_upload() and media_handle_sideload() real ingest paths',
-				),
-			)
-		);
-	}
-
-	private static function skipped_modal_runtime_helpers( \ComponentFuzz\FuzzContext $ctx ): array {
-		return $ctx->skip(
-			'admin-media-chrome.browser-modal-runtime-skipped',
-			'Media modal browser flows, AJAX dispatch wrappers, and script runtime behavior are skipped; this surface covers server-side helper output only.',
-			array(
-				'skipped' => array(
-					'wp_enqueue_media() JavaScript runtime behavior beyond media_buttons() output',
-					'admin-ajax.php image editor dispatch actions',
-					'Thickbox iframe shell rendering through wp_iframe()',
-					'full legacy gallery screen submission flows',
-				),
-			)
 		);
 	}
 
@@ -1794,6 +2195,9 @@ final class AdminMediaChromeSurface {
 				'_GET',
 				'_POST',
 				'_REQUEST',
+				'_SERVER',
+				'body_id',
+				'content_width',
 				'pagenow',
 				'post',
 				'post_ID',
