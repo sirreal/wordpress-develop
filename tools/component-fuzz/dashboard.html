@@ -226,13 +226,14 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 4693 passed, 0 failed, 0 errored, 5 skipped at 112 surfaces over 1 iteration after adding shortcode HTML-attribute KSES/placeholder boundary coverage while preserving the five documented current-core/environment skips.</div>
+			<div class="note">Non-skipped pass rate: 4695 passed, 0 failed, 0 errored, 5 skipped at 112 surfaces over 1 iteration after adding security referer retrieval and native password-hash migration coverage while preserving the five documented current-core/environment skips.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Latest focused addition: <code>shortcodes</code> HTML-attribute boundary coverage landed through <code>ec3e228603</code>, exercising accepted quoted/unquoted attribute rendering, KSES-rejected <code>onclick</code> and unknown attributes that still execute callbacks before restoring literals, <code>ignore_html</code> delimiter placeholders, escaped shortcode attributes/tag names, comments, CDATA, callback-count accounting, and media image-context hook restoration; focused seed 224 passed 22 checks, seeds 1 and 224 over 25 iterations each passed 550 checks, adjacent markup/blocks/KSES smoke passed 1163 checks, and broad seed 224 smoke passed 4693 checks with 5 skips.</div>
-			<div class="note">Previous focused addition: <code>network-media</code> upload-bits coverage landed through <code>ece71f4765</code>, exercising <code>wp_upload_bits()</code> exact-byte writes into isolated filtered upload roots, year/month upload paths, virtual <code>pre_wp_unique_filename_file_list</code> subsize collisions, <code>wp_upload_bits</code>/<code>wp_unique_filename</code>/<code>wp_handle_upload</code> filter payloads, filter-error short-circuits, empty-name pre-filter failures, and filter restoration; focused seed 224 passed 1 aggregate row with 299 cases, 1667 API calls, and 2087 assertions, seeds 1 and 224 over 25 iterations each passed 25 aggregate rows, adjacent media/filesystem smoke passed 55 checks, and broad seed 224 smoke passed 4692 checks with 5 skips.</div>
+			<div class="note">Latest focused addition: <code>security</code> referer retrieval and native password-hash migration coverage landed through <code>764df53851</code>, exercising raw/safe/original referer precedence and restoration, current-request self rejection, external redirect rejection, native unprefixed bcrypt verification, wrong-password and mutated-hash rejection, and forced WordPress rehash migration signals; focused seed 224 passed 15 checks, seeds 1 and 224 over 25 iterations each passed 375 checks, adjacent security/request/formatting/routing/HTTP smoke passed 66 checks, and broad seed 224 smoke passed 4695 checks with 5 skips.</div>
+			<div class="note">Previous focused addition: <code>shortcodes</code> HTML-attribute boundary coverage landed through <code>ec3e228603</code>, exercising accepted quoted/unquoted attribute rendering, KSES-rejected <code>onclick</code> and unknown attributes that still execute callbacks before restoring literals, <code>ignore_html</code> delimiter placeholders, escaped shortcode attributes/tag names, comments, CDATA, callback-count accounting, and media image-context hook restoration; focused seed 224 passed 22 checks, seeds 1 and 224 over 25 iterations each passed 550 checks, adjacent markup/blocks/KSES smoke passed 1163 checks, and broad seed 224 smoke passed 4693 checks with 5 skips.</div>
+			<div class="note">Earlier focused addition: <code>network-media</code> upload-bits coverage landed through <code>ece71f4765</code>, exercising <code>wp_upload_bits()</code> exact-byte writes into isolated filtered upload roots, year/month upload paths, virtual <code>pre_wp_unique_filename_file_list</code> subsize collisions, <code>wp_upload_bits</code>/<code>wp_unique_filename</code>/<code>wp_handle_upload</code> filter payloads, filter-error short-circuits, empty-name pre-filter failures, and filter restoration; focused seed 224 passed 1 aggregate row with 299 cases, 1667 API calls, and 2087 assertions, seeds 1 and 224 over 25 iterations each passed 25 aggregate rows, adjacent media/filesystem smoke passed 55 checks, and broad seed 224 smoke passed 4692 checks with 5 skips.</div>
 			<div class="note">Earlier focused addition: <code>rest-directory-services</code> directory-service oracle coverage landed through <code>e581555577</code>, exercising pattern-directory WordPress.org query allowlisting, derived-argument overwrites for client-supplied proxy parameters, and URL-details malformed/unclosed head metadata fallback precedence; focused seed 224 passed 5 checks, seeds 1 and 224 over 25 iterations each passed 125 checks, adjacent REST/HTTP/media smoke passed 56 checks, and broad seed 224 smoke passed 4692 checks with 5 skips.</div>
 			<div class="note">Earlier focused addition: <code>error-protection</code> pure process-boundary-adjacent coverage landed through <code>61e22a3455</code>, exercising synthetic fatal-handler <code>handle()</code> orchestration and recovery-link begin-link early-return branches without registering shutdown handlers, redirecting, dying, or performing loopbacks; focused seed 224 passed 11 checks with 1 skip, seeds 1 and 224 over 25 iterations each passed 275 checks with 25 skips, adjacent error/Site Health/HTTP/filesystem smoke passed 55 checks with 1 skip, and broad seed 224 smoke passed 4692 checks with 5 skips.</div>
 			<div class="note">Earlier focused addition: <code>script-loader-runtime</code> emoji loader-asset skip retirement landed through <code>e52e60ef77</code>, materializing the generated <code>wp-emoji-loader.js</code> asset from the canonical source during the fuzz case and removing it afterward; focused seed 224 passed 15 checks, seeds 1 and 224 over 25 iterations each passed 375 checks, adjacent script/assets smoke passed 69 checks, and broad seed 224 smoke passed 4690 checks with 5 skips.</div>
@@ -599,10 +600,10 @@
 				</tr>
 				<tr>
 					<td><code>security</code></td>
-					<td><span class="status good">review fixes passed</span></td>
-					<td>Main worktree; Lagrange the 3rd implementation and Hume the 3rd review findings fixed through <code>47b9b32fb5</code></td>
-					<td>Main focused run: 1300 passed, 0 skipped, 0 failed; latest broad run: 8208 passed, 66 skipped, 0 failed.</td>
-					<td>Salts/HMACs, password and fast-hash verification filter locality, nonce tick/lifetime boundaries, admin/AJAX referers, auth cookie grace/session edges, and redirect sanitization/validation expected outcomes.</td>
+					<td><span class="status good">focused passed</span></td>
+					<td>Main worktree; Lagrange the 3rd implementation and Hume the 3rd review findings fixed through <code>47b9b32fb5</code>; referer/native-password follow-up through <code>764df53851</code>.</td>
+					<td>Latest focused runs: seed 224 passed 15 checks, seeds 1 and 224 over 25 iterations each passed 375 checks, adjacent <code>security,request-lifecycle,formatting,canonical-routing,http</code> smoke passed 66 checks; latest broad run: 4695 passed, 5 skipped, 0 failed.</td>
+					<td>Salts/HMACs, password and fast-hash verification filter locality, native bcrypt compatibility and migration rehash signals, nonce tick/lifetime boundaries, nonce URLs and hidden fields, raw/safe/original referer retrieval, admin/AJAX referers, auth cookie grace/session edges, and redirect sanitization/validation expected outcomes.</td>
 				</tr>
 				<tr>
 					<td><code>state</code></td>
@@ -1998,6 +1999,12 @@
 					<td><code>error-protection</code></td>
 					<td>900 passed, 100 skipped, 0 failed after recovery-mode <code>handle_error()</code> gates and fatal-error email rate-limit coverage.</td>
 					<td>Latest broad rerun: 8615 passed, 66 skipped, 0 failed at 2 iterations after the latest email follow-up.</td>
+				</tr>
+				<tr>
+					<td><code>764df53851</code></td>
+					<td><code>security</code></td>
+					<td>Seed 224 passed 15 checks; seeds 1 and 224 over 25 iterations each passed 375 checks after referer retrieval precedence/restoration and native bcrypt compatibility/migration coverage; adjacent security/request/formatting/routing/HTTP smoke passed 66 checks with 0 skips.</td>
+					<td>Latest broad rerun: 4695 passed, 5 skipped, 0 failed at 1 iteration.</td>
 				</tr>
 				<tr>
 					<td><code>ec3e228603</code></td>

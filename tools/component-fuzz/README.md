@@ -666,12 +666,13 @@ database, network requests, or a configured site.
   build/parse helpers, rewrite-tag removal/query-var retention boundaries, URL
   parsing, home/site URL helpers, weird path fragments, and cheap no-DB
   `url_to_postid()` paths.
-- `security`: salts and HMACs, password and fast-hash verification, nonce
-  generation/verification, nonce tick/lifetime boundaries, nonce URLs and
-  hidden fields, admin/ajax referer paths, synthetic auth cookies and session
-  token grace/failure edges, password filter locality, redirect sanitization,
-  redirect validation matrices, sanitize/validate metamorphic behavior, and
-  safe redirect filters.
+- `security`: salts and HMACs, password and fast-hash verification, native
+  bcrypt compatibility and migration signals, nonce generation/verification,
+  nonce tick/lifetime boundaries, nonce URLs and hidden fields, referer
+  retrieval precedence/restoration, admin/ajax referer paths, synthetic auth
+  cookies and session token grace/failure edges, password filter locality,
+  redirect sanitization, redirect validation matrices, sanitize/validate
+  metamorphic behavior, and safe redirect filters.
 - `shortcodes`: no-DB shortcode registry lifecycle, attribute parsing/default
   merging and dynamic filters, invalid registration and non-callable callback
   guards, callback argument and rendering filter contracts, nested parse
