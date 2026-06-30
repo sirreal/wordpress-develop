@@ -7,9 +7,13 @@ final class PrivacySurface {
 	private const GENERATED_REQUEST_CASES = 10;
 	private const SAMPLE_BYTES            = 160;
 	private const MAX_FAILURES            = 12;
+	private const POLICY_CONTENT_META_KEY = '_wp_suggested_privacy_policy_content';
 
 	/** @var array<int,array<string,mixed>> */
 	private static array $post_meta = array();
+
+	/** @var array<string,mixed> */
+	private static array $options = array();
 
 	/** @var array<string,array<string,mixed>> */
 	private static array $exporters = array();
@@ -64,6 +68,7 @@ final class PrivacySurface {
 			$rows[] = self::check_anonymization_helpers( $ctx->fork( 'anonymization' ) );
 			$rows[] = self::check_export_paths_and_cleanup( $ctx->fork( 'export-paths-cleanup' ) );
 			$rows[] = self::check_policy_content_helpers( $ctx->fork( 'policy-content' ) );
+			$rows[] = self::check_policy_content_lifecycle( $ctx->fork( 'policy-content-lifecycle' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = self::row(
 				$ctx,
@@ -93,7 +98,40 @@ final class PrivacySurface {
 			return $single ? array( '' ) : array();
 		}
 
+		if ( self::POLICY_CONTENT_META_KEY === $meta_key ) {
+			$values = is_array( $meta[ $meta_key ] ) ? array_values( $meta[ $meta_key ] ) : array( $meta[ $meta_key ] );
+			return $single ? array( $values[0] ?? '' ) : $values;
+		}
+
 		return $single ? array( $meta[ $meta_key ] ) : array( $meta[ $meta_key ] );
+	}
+
+	public static function filter_add_post_metadata( $check, int $object_id, string $meta_key, $meta_value, bool $unique ) {
+		unset( $check );
+
+		if ( ! isset( self::$post_meta[ $object_id ] ) ) {
+			self::$post_meta[ $object_id ] = array();
+		}
+
+		if ( self::POLICY_CONTENT_META_KEY === $meta_key ) {
+			$values = self::$post_meta[ $object_id ][ $meta_key ] ?? array();
+			$values = is_array( $values ) ? array_values( $values ) : array( $values );
+			if ( $unique && array() !== $values ) {
+				return false;
+			}
+
+			$values[] = $meta_value;
+			self::$post_meta[ $object_id ][ $meta_key ] = $values;
+			return count( $values );
+		}
+
+		if ( $unique && array_key_exists( $meta_key, self::$post_meta[ $object_id ] ) ) {
+			return false;
+		}
+
+		self::$post_meta[ $object_id ][ $meta_key ] = $meta_value;
+
+		return count( self::$post_meta[ $object_id ] );
 	}
 
 	public static function filter_update_post_metadata( $check, int $object_id, string $meta_key, $meta_value, $prev_value ) {
@@ -103,24 +141,36 @@ final class PrivacySurface {
 			self::$post_meta[ $object_id ] = array();
 		}
 
-		self::$post_meta[ $object_id ][ $meta_key ] = $meta_value;
+		self::$post_meta[ $object_id ][ $meta_key ] = self::POLICY_CONTENT_META_KEY === $meta_key ? array( $meta_value ) : $meta_value;
 
 		return true;
 	}
 
 	public static function filter_delete_post_metadata( $check, int $object_id, string $meta_key, $meta_value, bool $delete_all ) {
-		unset( $check, $meta_value );
+		unset( $check );
 
 		if ( $delete_all ) {
 			foreach ( self::$post_meta as $id => $meta ) {
-				unset( self::$post_meta[ $id ][ $meta_key ] );
+				self::delete_post_meta_value( $id, $meta_key, $meta_value );
 			}
 			return true;
 		}
 
-		unset( self::$post_meta[ $object_id ][ $meta_key ] );
+		self::delete_post_meta_value( $object_id, $meta_key, $meta_value );
 
 		return true;
+	}
+
+	public static function filter_pre_option( $pre_option, string $option, $default_value ) {
+		unset( $default_value );
+
+		return array_key_exists( $option, self::$options ) ? self::$options[ $option ] : $pre_option;
+	}
+
+	public static function filter_pre_update_option( $value, $old_value, string $option ) {
+		self::$options[ $option ] = $value;
+
+		return $old_value;
 	}
 
 	public static function filter_exporters( array $exporters ): array {
@@ -168,6 +218,7 @@ final class PrivacySurface {
 				'WP_Post',
 				'WP_Query',
 				'WP_Rewrite',
+				'WP_Screen',
 				'WP_User',
 				'PHPMailer\PHPMailer\PHPMailer',
 				'WP_PHPMailer',
@@ -182,17 +233,23 @@ final class PrivacySurface {
 			array(
 				'add_action',
 				'add_filter',
+				'add_post_meta',
 				'clean_post_cache',
 				'clean_user_cache',
+				'current_user_can',
 				'date_i18n',
 				'delete_post_meta',
+				'did_action',
 				'esc_attr',
 				'esc_html',
+				'get_current_screen',
 				'has_filter',
+				'has_action',
 				'get_comment',
 				'get_comment_link',
 				'get_comment_text',
 				'get_comments',
+				'get_option',
 				'get_post_meta',
 				'get_user_by',
 				'get_user_meta',
@@ -204,6 +261,7 @@ final class PrivacySurface {
 				'sanitize_email',
 				'sanitize_title_with_dashes',
 				'update_post_meta',
+				'update_option',
 				'wp_cache_delete',
 				'wp_generate_user_request_key',
 				'wp_cache_set',
@@ -224,6 +282,7 @@ final class PrivacySurface {
 				'wp_privacy_exports_dir',
 				'wp_privacy_exports_url',
 				'wp_add_privacy_policy_content',
+				'wp_admin_notice',
 				'wp_user_request_action_description',
 				'wp_validate_user_request_key',
 				'wp_verify_fast_hash',
@@ -2851,6 +2910,465 @@ final class PrivacySurface {
 		);
 	}
 
+	private static function check_policy_content_lifecycle( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures       = array();
+		$suffix         = strtolower( $ctx->identifier( 4, 8 ) );
+		$policy_page_id = 94800 + $ctx->int( 0, 99 );
+		$old_time       = time() - ( 2 * DAY_IN_SECONDS );
+
+		$stable_name        = 'Stable Privacy ' . $suffix;
+		$renamed_old_name   = 'Old Privacy Name ' . $suffix;
+		$renamed_name       = 'Renamed Privacy <Plugin> & "' . $suffix;
+		$updated_name       = 'Updated Privacy ' . $suffix;
+		$reactivated_name   = 'Reactivated Privacy ' . $suffix;
+		$removed_name       = 'Removed Privacy ' . $suffix;
+		$added_name         = 'Added Privacy ' . $suffix;
+		$stable_text        = '<p>Stable policy text ' . $suffix . '.</p>';
+		$renamed_text       = '<p>Policy text moved with the plugin name.</p>';
+		$updated_old_text   = '<p>Old policy text.</p>';
+		$updated_new_text   = '<p>New policy text with <strong>changed</strong> processing.</p>';
+		$reactivated_text   = '<p>Reactivated policy text.</p>';
+		$removed_text       = '<p>Removed policy text.</p>';
+		$added_text         = '<p>New plugin policy text.</p>';
+		$policy_changed_key = '_wp_suggested_policy_text_has_changed';
+
+		$policy_post = self::prime_policy_page( $policy_page_id );
+		self::prime_policy_page( $policy_page_id + 1 );
+		self::$options['wp_page_for_privacy_policy'] = $policy_page_id;
+		self::$options[ $policy_changed_key ]        = false;
+
+		$old = array(
+			array(
+				'plugin_name' => $stable_name,
+				'policy_text' => $stable_text,
+				'added'       => $old_time,
+			),
+			array(
+				'plugin_name' => $renamed_old_name,
+				'policy_text' => $renamed_text,
+				'added'       => $old_time,
+			),
+			array(
+				'plugin_name' => $updated_name,
+				'policy_text' => $updated_old_text,
+				'added'       => $old_time,
+			),
+			array(
+				'plugin_name' => $reactivated_name,
+				'policy_text' => $reactivated_text,
+				'removed'     => $old_time,
+			),
+			array(
+				'plugin_name' => $removed_name,
+				'policy_text' => $removed_text,
+				'added'       => $old_time,
+			),
+		);
+		$new = array(
+			array(
+				'plugin_name' => $stable_name,
+				'policy_text' => $stable_text,
+			),
+			array(
+				'plugin_name' => $renamed_name,
+				'policy_text' => $renamed_text,
+			),
+			array(
+				'plugin_name' => $updated_name,
+				'policy_text' => $updated_new_text,
+			),
+			array(
+				'plugin_name' => $reactivated_name,
+				'policy_text' => $reactivated_text,
+			),
+			array(
+				'plugin_name' => $added_name,
+				'policy_text' => $added_text,
+			),
+		);
+
+		self::set_post_meta( $policy_page_id, array( self::POLICY_CONTENT_META_KEY => $old ) );
+		self::set_policy_content_state( $new );
+		$start          = time();
+		$suggested_call = self::call(
+			static function () {
+				return \WP_Privacy_Policy_Content::get_suggested_policy_text();
+			}
+		);
+		$suggested      = ( ! $suggested_call['threw'] && is_array( $suggested_call['value'] ) ) ? $suggested_call['value'] : array();
+		$by_plugin      = self::index_policy_sections( $suggested );
+
+		$transition_ok = 6 === count( $suggested )
+			&& isset( $by_plugin[ $stable_name ], $by_plugin[ $renamed_name ], $by_plugin[ $updated_name ], $by_plugin[ $reactivated_name ], $by_plugin[ $removed_name ], $by_plugin[ $added_name ] )
+			&& ! isset( $by_plugin[ $renamed_old_name ] )
+			&& $old_time === ( $by_plugin[ $stable_name ]['added'] ?? null )
+			&& $old_time === ( $by_plugin[ $renamed_name ]['added'] ?? null )
+			&& $updated_new_text === ( $by_plugin[ $updated_name ]['policy_text'] ?? null )
+			&& isset( $by_plugin[ $updated_name ]['updated'] )
+			&& (int) $by_plugin[ $updated_name ]['updated'] >= $start
+			&& isset( $by_plugin[ $reactivated_name ]['added'] )
+			&& (int) $by_plugin[ $reactivated_name ]['added'] >= $start
+			&& ! isset( $by_plugin[ $reactivated_name ]['removed'] )
+			&& isset( $by_plugin[ $removed_name ]['removed'] )
+			&& (int) $by_plugin[ $removed_name ]['removed'] >= $start
+			&& isset( $by_plugin[ $added_name ]['added'] )
+			&& (int) $by_plugin[ $added_name ]['added'] >= $start;
+		self::collect_failure(
+			$failures,
+			! $suggested_call['threw'] && $transition_ok,
+			'policy-content.get-suggested-policy-text-classifies-added-updated-removed-reactivated-and-renamed',
+			array(
+				'suggestedCall' => self::describe_call( $suggested_call ),
+				'suggested'     => self::describe_value( $suggested ),
+			)
+		);
+
+		$meta_after = \get_post_meta( $policy_page_id, self::POLICY_CONTENT_META_KEY );
+		self::collect_failure(
+			$failures,
+			$suggested === $meta_after,
+			'policy-content.get-suggested-policy-text-rewrites-policy-page-cache-as-multi-row-meta',
+			array(
+				'suggested' => self::describe_value( $suggested ),
+				'metaAfter' => self::describe_value( $meta_after ),
+			)
+		);
+
+		$ignored_update = self::call(
+			static function () use ( $policy_page_id ): void {
+				\WP_Privacy_Policy_Content::_policy_page_updated( $policy_page_id + 1 );
+			}
+		);
+		$after_ignored  = \get_post_meta( $policy_page_id, self::POLICY_CONTENT_META_KEY );
+		self::collect_failure(
+			$failures,
+			! $ignored_update['threw'] && $after_ignored === $meta_after,
+			'policy-content.policy-page-updated-ignores-non-policy-posts',
+			array(
+				'ignoredUpdate' => self::describe_call( $ignored_update ),
+				'before'        => self::describe_value( $meta_after ),
+				'after'         => self::describe_value( $after_ignored ),
+			)
+		);
+
+		$matching_update = self::call(
+			static function () use ( $policy_page_id ): void {
+				\WP_Privacy_Policy_Content::_policy_page_updated( $policy_page_id );
+			}
+		);
+		$final_meta      = \get_post_meta( $policy_page_id, self::POLICY_CONTENT_META_KEY );
+		$final_by_plugin = self::index_policy_sections( $final_meta );
+		$updated_time    = $by_plugin[ $updated_name ]['updated'] ?? null;
+		self::collect_failure(
+			$failures,
+			! $matching_update['threw']
+				&& 5 === count( $final_meta )
+				&& ! isset( $final_by_plugin[ $removed_name ] )
+				&& self::policy_sections_are_active( $final_meta )
+				&& $updated_time === ( $final_by_plugin[ $updated_name ]['added'] ?? null ),
+			'policy-content.policy-page-updated-drops-removed-and-converts-updated-to-added',
+			array(
+				'matchingUpdate' => self::describe_call( $matching_update ),
+				'finalMeta'      => self::describe_value( $final_meta ),
+			)
+		);
+
+		$grant_caps = static function ( array $allcaps, array $caps ): array {
+			foreach ( array_merge( $caps, array( 'edit_pages', 'edit_others_pages', 'edit_published_pages', 'manage_options', 'manage_privacy_options' ) ) as $cap ) {
+				$allcaps[ $cap ] = true;
+			}
+
+			return $allcaps;
+		};
+		$deny_edit_post = static function ( array $caps, string $cap ): array {
+			return 'edit_post' === $cap ? array( 'do_not_allow' ) : $caps;
+		};
+		$text_old       = array(
+			array(
+				'plugin_name' => 'Text Change Stable',
+				'policy_text' => '<p>Reviewed privacy text.</p>',
+				'added'       => $old_time,
+			),
+			array(
+				'plugin_name' => 'Text Change Removed',
+				'policy_text' => '<p>Ignored removed text.</p>',
+				'removed'     => $old_time,
+			),
+		);
+		$text_same      = array(
+			array(
+				'plugin_name' => 'Text Change Stable',
+				'policy_text' => '<p>Reviewed privacy text.</p>',
+			),
+		);
+		$text_changed   = array(
+			array(
+				'plugin_name' => 'Text Change Stable',
+				'policy_text' => '<p>Changed privacy text.</p>',
+			),
+		);
+
+		self::$options['wp_page_for_privacy_policy'] = 0;
+		$no_page = self::call(
+			static function () {
+				return self::with_admin_action_count(
+					1,
+					static function () {
+						return \WP_Privacy_Policy_Content::text_change_check();
+					}
+				);
+			}
+		);
+		self::collect_failure(
+			$failures,
+			! $no_page['threw'] && false === $no_page['value'],
+			'policy-content.text-change-check-returns-false-without-policy-page',
+			array( 'noPage' => self::describe_call( $no_page ) )
+		);
+
+		self::$options['wp_page_for_privacy_policy'] = $policy_page_id;
+		self::set_post_meta( $policy_page_id, array( self::POLICY_CONTENT_META_KEY => $text_old ) );
+		self::set_policy_content_state( $text_changed );
+		\add_filter( 'map_meta_cap', $deny_edit_post, 10, 2 );
+		try {
+			$no_cap = self::call(
+				static function () {
+					return self::with_admin_action_count(
+						1,
+						static function () {
+							return \WP_Privacy_Policy_Content::text_change_check();
+						}
+					);
+				}
+			);
+		} finally {
+			\remove_filter( 'map_meta_cap', $deny_edit_post, 10 );
+		}
+		self::collect_failure(
+			$failures,
+			! $no_cap['threw'] && false === $no_cap['value'],
+			'policy-content.text-change-check-requires-edit-policy-page-capability',
+			array( 'noCap' => self::describe_call( $no_cap ) )
+		);
+
+		\add_filter( 'user_has_cap', $grant_caps, 10, 2 );
+		try {
+			self::set_post_meta( $policy_page_id, array( self::POLICY_CONTENT_META_KEY => array() ) );
+			$no_prior_review = self::call(
+				static function () {
+					return self::with_admin_action_count(
+						1,
+						static function () {
+							return \WP_Privacy_Policy_Content::text_change_check();
+						}
+					);
+				}
+			);
+			self::collect_failure(
+				$failures,
+				! $no_prior_review['threw'] && false === $no_prior_review['value'],
+				'policy-content.text-change-check-returns-false-before-any-review',
+				array( 'noPriorReview' => self::describe_call( $no_prior_review ) )
+			);
+
+			self::set_post_meta( $policy_page_id, array( self::POLICY_CONTENT_META_KEY => $text_old ) );
+			self::$options[ $policy_changed_key ] = 'changed';
+			$cached_changed = self::call(
+				static function () {
+					return self::with_admin_action_count(
+						0,
+						static function () {
+							return \WP_Privacy_Policy_Content::text_change_check();
+						}
+					);
+				}
+			);
+			self::$options[ $policy_changed_key ] = 'not-changed';
+			$cached_unchanged = self::call(
+				static function () {
+					return self::with_admin_action_count(
+						0,
+						static function () {
+							return \WP_Privacy_Policy_Content::text_change_check();
+						}
+					);
+				}
+			);
+			self::collect_failure(
+				$failures,
+				! $cached_changed['threw']
+					&& true === $cached_changed['value']
+					&& ! $cached_unchanged['threw']
+					&& false === $cached_unchanged['value'],
+				'policy-content.text-change-check-before-admin-init-uses-cached-option',
+				array(
+					'cachedChanged'   => self::describe_call( $cached_changed ),
+					'cachedUnchanged' => self::describe_call( $cached_unchanged ),
+				)
+			);
+
+			\remove_action( 'admin_notices', array( 'WP_Privacy_Policy_Content', 'policy_text_changed_notice' ) );
+			self::$options[ $policy_changed_key ] = 'changed';
+			self::set_policy_content_state( $text_same );
+			$unchanged = self::call(
+				static function () {
+					return self::with_admin_action_count(
+						1,
+						static function () {
+							return \WP_Privacy_Policy_Content::text_change_check();
+						}
+					);
+				}
+			);
+			self::collect_failure(
+				$failures,
+				! $unchanged['threw']
+					&& false === $unchanged['value']
+					&& 'not-changed' === ( self::$options[ $policy_changed_key ] ?? null )
+					&& false === \has_action( 'admin_notices', array( 'WP_Privacy_Policy_Content', 'policy_text_changed_notice' ) ),
+				'policy-content.text-change-check-normalizes-reviewed-and-removed-policy-text',
+				array(
+					'unchanged' => self::describe_call( $unchanged ),
+					'option'    => self::describe_value( self::$options[ $policy_changed_key ] ?? null ),
+					'hasNotice' => \has_action( 'admin_notices', array( 'WP_Privacy_Policy_Content', 'policy_text_changed_notice' ) ),
+				)
+			);
+
+			self::$options[ $policy_changed_key ] = 'not-changed';
+			self::set_policy_content_state( $text_changed );
+			$changed = self::call(
+				static function () {
+					return self::with_admin_action_count(
+						1,
+						static function () {
+							return \WP_Privacy_Policy_Content::text_change_check();
+						}
+					);
+				}
+			);
+			$notice_hooked = \has_action( 'admin_notices', array( 'WP_Privacy_Policy_Content', 'policy_text_changed_notice' ) );
+			self::collect_failure(
+				$failures,
+				! $changed['threw']
+					&& true === $changed['value']
+					&& 'changed' === ( self::$options[ $policy_changed_key ] ?? null )
+					&& false !== $notice_hooked,
+				'policy-content.text-change-check-detects-real-change-caches-state-and-schedules-notice',
+				array(
+					'changed'      => self::describe_call( $changed ),
+					'option'       => self::describe_value( self::$options[ $policy_changed_key ] ?? null ),
+					'noticeHooked' => $notice_hooked,
+				)
+			);
+
+			$privacy_notice = self::call(
+				static function () {
+					return self::with_current_screen(
+						'privacy',
+						'privacy',
+						false,
+						static function () {
+							return self::capture_output(
+								static function (): void {
+									\WP_Privacy_Policy_Content::policy_text_changed_notice();
+								}
+							);
+						}
+					);
+				}
+			);
+			$other_notice   = self::call(
+				static function () {
+					return self::with_current_screen(
+						'dashboard',
+						'dashboard',
+						false,
+						static function () {
+							return self::capture_output(
+								static function (): void {
+									\WP_Privacy_Policy_Content::policy_text_changed_notice();
+								}
+							);
+						}
+					);
+				}
+			);
+			self::collect_failure(
+				$failures,
+				! $privacy_notice['threw']
+					&& is_string( $privacy_notice['value'] )
+					&& str_contains( $privacy_notice['value'], 'policy-text-updated' )
+					&& str_contains( $privacy_notice['value'], 'privacy-policy-guide.php?tab=policyguide' )
+					&& ! $other_notice['threw']
+					&& '' === $other_notice['value'],
+				'policy-content.policy-text-changed-notice-only-renders-on-privacy-screen',
+				array(
+					'privacyNotice' => self::describe_call( $privacy_notice ),
+					'otherNotice'   => self::describe_call( $other_notice ),
+				)
+			);
+
+			self::$options['wp_page_for_privacy_policy'] = $policy_page_id;
+			$classic_notice = self::call(
+				static function () use ( $policy_post ) {
+					return self::with_current_screen(
+						'page',
+						'post',
+						false,
+						static function () use ( $policy_post ) {
+							return self::capture_output(
+								static function () use ( $policy_post ): void {
+									\WP_Privacy_Policy_Content::notice( $policy_post );
+								}
+							);
+						}
+					);
+				}
+			);
+			$non_policy_notice = self::call(
+				static function () use ( $policy_page_id ) {
+					$other_post = self::prime_policy_page( $policy_page_id + 50 );
+					return self::with_current_screen(
+						'page',
+						'post',
+						false,
+						static function () use ( $other_post ) {
+							return self::capture_output(
+								static function () use ( $other_post ): void {
+									\WP_Privacy_Policy_Content::notice( $other_post );
+								}
+							);
+						}
+					);
+				}
+			);
+			self::collect_failure(
+				$failures,
+				! $classic_notice['threw']
+					&& is_string( $classic_notice['value'] )
+					&& str_contains( $classic_notice['value'], 'wp-pp-notice' )
+					&& str_contains( $classic_notice['value'], 'options-privacy.php?tab=policyguide' )
+					&& ! $non_policy_notice['threw']
+					&& '' === $non_policy_notice['value'],
+				'policy-content.notice-renders-only-for-classic-policy-page-editor',
+				array(
+					'classicNotice'   => self::describe_call( $classic_notice ),
+					'nonPolicyNotice' => self::describe_call( $non_policy_notice ),
+				)
+			);
+		} finally {
+			\remove_filter( 'user_has_cap', $grant_caps, 10 );
+			\remove_action( 'admin_notices', array( 'WP_Privacy_Policy_Content', 'policy_text_changed_notice' ) );
+		}
+
+		return self::row(
+			$ctx,
+			'privacy.policy-content.lifecycle-cache-notice-contracts',
+			array() === $failures,
+			array( 'failures' => $failures )
+		);
+	}
+
 	private static function request_cases( \ComponentFuzz\FuzzContext $ctx ): array {
 		$base_time = 1700000000 + $ctx->int( 0, 100000 );
 		$cases     = array(
@@ -3066,8 +3584,71 @@ final class PrivacySurface {
 		\wp_cache_set( (int) $post->ID, $post, 'posts' );
 	}
 
+	private static function prime_policy_page( int $post_id ): \WP_Post {
+		$post = self::post_record(
+			array(
+				'ID'          => $post_id,
+				'post_author' => '1',
+				'post_title'  => 'Privacy Policy ' . $post_id,
+				'post_name'   => 'privacy-policy-' . $post_id,
+				'post_status' => 'publish',
+				'post_type'   => 'page',
+			)
+		);
+		self::prime_request_post( $post );
+
+		return new \WP_Post( $post );
+	}
+
 	private static function set_post_meta( int $post_id, array $meta ): void {
 		self::$post_meta[ $post_id ] = $meta;
+	}
+
+	private static function delete_post_meta_value( int $post_id, string $meta_key, $meta_value ): void {
+		if ( ! isset( self::$post_meta[ $post_id ][ $meta_key ] ) ) {
+			return;
+		}
+
+		if ( self::POLICY_CONTENT_META_KEY !== $meta_key || '' === $meta_value ) {
+			unset( self::$post_meta[ $post_id ][ $meta_key ] );
+			return;
+		}
+
+		$values   = self::$post_meta[ $post_id ][ $meta_key ];
+		$values   = is_array( $values ) ? array_values( $values ) : array( $values );
+		$filtered = array();
+		foreach ( $values as $value ) {
+			if ( $value !== $meta_value ) {
+				$filtered[] = $value;
+			}
+		}
+
+		if ( array() === $filtered ) {
+			unset( self::$post_meta[ $post_id ][ $meta_key ] );
+		} else {
+			self::$post_meta[ $post_id ][ $meta_key ] = $filtered;
+		}
+	}
+
+	private static function index_policy_sections( array $sections ): array {
+		$indexed = array();
+		foreach ( $sections as $section ) {
+			if ( is_array( $section ) && isset( $section['plugin_name'] ) && is_string( $section['plugin_name'] ) ) {
+				$indexed[ $section['plugin_name'] ] = $section;
+			}
+		}
+
+		return $indexed;
+	}
+
+	private static function policy_sections_are_active( array $sections ): bool {
+		foreach ( $sections as $section ) {
+			if ( ! is_array( $section ) || isset( $section['removed'] ) || isset( $section['updated'] ) ) {
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 	private static function processor_exporters(): array {
@@ -3315,8 +3896,12 @@ final class PrivacySurface {
 
 	private static function install_scoped_filters(): void {
 		\add_filter( 'get_post_metadata', array( __CLASS__, 'filter_get_post_metadata' ), 10, 5 );
+		\add_filter( 'add_post_metadata', array( __CLASS__, 'filter_add_post_metadata' ), 10, 5 );
 		\add_filter( 'update_post_metadata', array( __CLASS__, 'filter_update_post_metadata' ), 10, 5 );
 		\add_filter( 'delete_post_metadata', array( __CLASS__, 'filter_delete_post_metadata' ), 10, 5 );
+		\add_filter( 'pre_option_wp_page_for_privacy_policy', array( __CLASS__, 'filter_pre_option' ), 10, 3 );
+		\add_filter( 'pre_option__wp_suggested_policy_text_has_changed', array( __CLASS__, 'filter_pre_option' ), 10, 3 );
+		\add_filter( 'pre_update_option__wp_suggested_policy_text_has_changed', array( __CLASS__, 'filter_pre_update_option' ), 10, 3 );
 		\add_filter( 'wp_privacy_personal_data_exporters', array( __CLASS__, 'filter_exporters' ), 10, 1 );
 		\add_filter( 'wp_privacy_personal_data_erasers', array( __CLASS__, 'filter_erasers' ), 10, 1 );
 		\add_filter( 'upload_dir', array( __CLASS__, 'filter_upload_dir' ), 10, 1 );
@@ -3345,6 +3930,7 @@ final class PrivacySurface {
 
 	private static function reset_static_state(): void {
 		self::$post_meta           = array();
+		self::$options             = array();
 		self::$exporters           = array();
 		self::$erasers             = array();
 		self::$export_file_actions = array();
@@ -3382,6 +3968,72 @@ final class PrivacySurface {
 			} else {
 				unset( $GLOBALS['wp_actions'] );
 			}
+		}
+	}
+
+	private static function with_admin_action_count( int $count, callable $callback ) {
+		$had_wp_actions = array_key_exists( 'wp_actions', $GLOBALS );
+		$wp_actions     = $GLOBALS['wp_actions'] ?? null;
+
+		if ( ! isset( $GLOBALS['wp_actions'] ) || ! is_array( $GLOBALS['wp_actions'] ) ) {
+			$GLOBALS['wp_actions'] = array();
+		}
+		$GLOBALS['wp_actions']['admin_init'] = $count;
+
+		try {
+			return $callback();
+		} finally {
+			if ( $had_wp_actions ) {
+				$GLOBALS['wp_actions'] = $wp_actions;
+			} else {
+				unset( $GLOBALS['wp_actions'] );
+			}
+		}
+	}
+
+	private static function with_current_screen( string $id, string $base, bool $is_block_editor, callable $callback ) {
+		$had_current_screen = array_key_exists( 'current_screen', $GLOBALS );
+		$current_screen     = $GLOBALS['current_screen'] ?? null;
+		$had_typenow        = array_key_exists( 'typenow', $GLOBALS );
+		$typenow            = $GLOBALS['typenow'] ?? null;
+		$had_taxnow         = array_key_exists( 'taxnow', $GLOBALS );
+		$taxnow             = $GLOBALS['taxnow'] ?? null;
+
+		$screen = \WP_Screen::get( $base );
+		$screen->is_block_editor( $is_block_editor );
+		$GLOBALS['current_screen'] = $screen;
+
+		try {
+			return $callback();
+		} finally {
+			if ( $had_current_screen ) {
+				$GLOBALS['current_screen'] = $current_screen;
+			} else {
+				unset( $GLOBALS['current_screen'] );
+			}
+
+			if ( $had_typenow ) {
+				$GLOBALS['typenow'] = $typenow;
+			} else {
+				unset( $GLOBALS['typenow'] );
+			}
+
+			if ( $had_taxnow ) {
+				$GLOBALS['taxnow'] = $taxnow;
+			} else {
+				unset( $GLOBALS['taxnow'] );
+			}
+		}
+	}
+
+	private static function capture_output( callable $callback ): string {
+		ob_start();
+		try {
+			$callback();
+			return (string) ob_get_clean();
+		} catch ( \Throwable $e ) {
+			ob_end_clean();
+			throw $e;
 		}
 	}
 
