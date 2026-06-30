@@ -7,6 +7,12 @@ namespace ComponentFuzz\Surfaces;
 final class PostEmbedsSurface {
 	public const NAME = 'post-embeds';
 
+	/** @var array<int,array<string,mixed>> */
+	private static array $http_intercepts = array();
+
+	/** @var array<int,array<string,mixed>> */
+	private static array $http_request_log = array();
+
 	public static function run( \ComponentFuzz\FuzzContext $ctx ): array {
 		$missing = self::missing_requirements();
 		if ( array() !== $missing ) {
@@ -32,6 +38,7 @@ final class PostEmbedsSurface {
 			$rows[] = self::check_embed_url_and_html( $ctx->fork( 'url-html' ), $case, $fixtures );
 			$rows[] = self::check_discovery_links( $ctx->fork( 'discovery' ), $case, $fixtures );
 			$rows[] = self::check_controller_and_pre_oembed( $ctx->fork( 'controller-pre' ), $case, $fixtures );
+			$rows[] = self::check_proxy_provider_transient_cache( $ctx->fork( 'proxy-cache' ), $case );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
 				'post-embeds.surface-no-throw',
@@ -45,6 +52,41 @@ final class PostEmbedsSurface {
 		}
 
 		return $rows;
+	}
+
+	public static function filter_pre_http_request( $preempt, array $args, string $url ) {
+		self::$http_request_log[] = array(
+			'url'                 => $url,
+			'method'              => strtoupper( (string) ( $args['method'] ?? 'GET' ) ),
+			'limitResponseSize'   => $args['limit_response_size'] ?? null,
+			'rejectUnsafeUrls'    => $args['reject_unsafe_urls'] ?? null,
+			'timeout'             => $args['timeout'] ?? null,
+			'userAgent'           => $args['user-agent'] ?? null,
+		);
+
+		foreach ( self::$http_intercepts as $intercept ) {
+			$method = strtoupper( (string) ( $intercept['method'] ?? 'GET' ) );
+			if ( $method !== strtoupper( (string) ( $args['method'] ?? 'GET' ) ) ) {
+				continue;
+			}
+
+			$contains = (string) ( $intercept['contains'] ?? '' );
+			if ( '' !== $contains && ! str_contains( $url, $contains ) ) {
+				continue;
+			}
+
+			if ( isset( $intercept['callback'] ) && is_callable( $intercept['callback'] ) ) {
+				return $intercept['callback']( $url, $args );
+			}
+
+			return $intercept['response'] ?? false;
+		}
+
+		return new \WP_Error(
+			'component_fuzz_unexpected_oembed_http',
+			'Unexpected oEmbed HTTP request escaped the component fuzz intercepts.',
+			array( 'url' => $url )
+		);
 	}
 
 	private static function missing_requirements(): array {
@@ -63,6 +105,7 @@ final class PostEmbedsSurface {
 				'add_post_meta',
 				'create_initial_post_types',
 				'create_initial_taxonomies',
+				'delete_transient',
 				'do_action',
 				'get_author_posts_url',
 				'get_bloginfo',
@@ -74,6 +117,7 @@ final class PostEmbedsSurface {
 				'get_page_by_path',
 				'get_permalink',
 				'get_post',
+				'get_transient',
 				'get_post_embed_html',
 				'get_post_embed_url',
 				'get_post_thumbnail_id',
@@ -89,6 +133,7 @@ final class PostEmbedsSurface {
 				'remove_filter',
 				'sanitize_key',
 				'sanitize_title',
+				'set_transient',
 				'update_option',
 				'update_post_meta',
 				'wp_cache_flush',
@@ -570,6 +615,283 @@ final class PostEmbedsSurface {
 		);
 	}
 
+	private static function check_proxy_provider_transient_cache( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		if ( ! self::load_oembed_controller() ) {
+			return $ctx->skip(
+				'post-embeds.proxy-controller-class-available',
+				'WP_oEmbed_Controller could not be loaded.'
+			);
+		}
+
+		$failures       = array();
+		$url            = 'https://consumer.example.test/item/' . rawurlencode( $case['token'] );
+		$width          = $ctx->int( 260, 620 );
+		$height         = $ctx->int( 180, 420 );
+		$changed_width  = $width + $ctx->int( 7, 73 );
+		$ttl            = $ctx->int( 300, 7200 );
+		$marker         = '<!--cfz-oembed-proxy-' . $case['token'] . '-->';
+		$pattern        = 'https://consumer.example.test/item/*';
+		$endpoint       = 'https://provider.example.test/oembed.{format}';
+		$provider_name  = 'Component Fuzz Provider ' . $case['token'];
+		$fetch_urls     = array();
+		$remote_args    = array();
+		$result_calls   = array();
+		$ttl_calls      = array();
+		$content_before = self::content_counts();
+
+		$oembed             = \_wp_oembed_get_object();
+		$providers_snapshot = $oembed->providers;
+
+		$first_request  = self::proxy_request( $url, $width, $height, 'first-' . $case['token'] );
+		$second_request = self::proxy_request( $url, $width, $height, 'second-' . $case['token'] );
+		$third_request  = self::proxy_request( $url, $changed_width, $height, 'third-' . $case['token'] );
+		$first_key      = self::proxy_cache_key( $first_request );
+		$second_key     = self::proxy_cache_key( $second_request );
+		$third_key      = self::proxy_cache_key( $third_request );
+
+		\delete_transient( $first_key );
+		\delete_transient( $third_key );
+
+		$fetch_filter = static function ( string $provider, string $request_url, array $args ) use ( &$fetch_urls ): string {
+			$fetch_urls[] = array(
+				'provider' => $provider,
+				'url'      => $request_url,
+				'args'     => $args,
+				'query'    => self::url_query_args( $provider ),
+			);
+
+			return $provider;
+		};
+		$remote_args_filter = static function ( array $args, string $request_url ) use ( &$remote_args ): array {
+			$remote_args[] = array(
+				'args'  => $args,
+				'url'   => $request_url,
+				'query' => self::url_query_args( $request_url ),
+			);
+
+			return $args;
+		};
+		$result_filter = static function ( $html, string $request_url, array $args ) use ( &$result_calls, $marker ) {
+			$result_calls[] = array(
+				'html' => is_string( $html ) ? self::preview( $html ) : $html,
+				'url'  => $request_url,
+				'args' => $args,
+			);
+
+			return is_string( $html ) ? $html . $marker : $html;
+		};
+		$ttl_filter = static function ( int $time, string $request_url, array $args ) use ( &$ttl_calls, $ttl ): int {
+			$ttl_calls[] = array(
+				'incoming' => $time,
+				'url'      => $request_url,
+				'args'     => $args,
+			);
+
+			return $ttl;
+		};
+
+		self::$http_request_log = array();
+		self::$http_intercepts  = array(
+			array(
+				'method'   => 'GET',
+				'contains' => 'provider.example.test/oembed.json',
+				'callback' => static function ( string $request_url, array $args ) use ( $case, $provider_name ) {
+					unset( $args );
+
+					$query = self::url_query_args( $request_url );
+					$width = max( 1, (int) ( $query['maxwidth'] ?? 0 ) );
+					$height = max( 1, (int) ( $query['maxheight'] ?? 0 ) );
+
+					return self::http_response(
+						json_encode(
+							array(
+								'version'       => '1.0',
+								'type'          => 'rich',
+								'provider_name' => $provider_name,
+								'provider_url'  => 'https://provider.example.test/',
+								'title'         => 'Remote embed ' . $case['token'],
+								'html'          => '<iframe class="cfz-remote-embed" src="https://provider.example.test/embed/' . esc_attr( $case['token'] ) . '" width="' . $width . '" height="' . $height . '"></iframe>',
+								'width'         => $width,
+								'height'        => $height,
+							)
+						)
+					);
+				},
+			),
+		);
+
+		\add_filter( 'pre_http_request', array( self::class, 'filter_pre_http_request' ), 10, 3 );
+		\add_filter( 'oembed_fetch_url', $fetch_filter, 10, 3 );
+		\add_filter( 'oembed_remote_get_args', $remote_args_filter, 10, 2 );
+		\add_filter( 'oembed_result', $result_filter, 10, 3 );
+		\add_filter( 'rest_oembed_ttl', $ttl_filter, 10, 3 );
+
+		try {
+			$oembed->providers[ $pattern ] = array( $endpoint, false );
+			$controller                    = new \WP_oEmbed_Controller();
+
+			$first                  = $controller->get_proxy_item( $first_request );
+			$http_count_after_first = count( self::$http_request_log );
+			$first_cache            = \get_transient( $first_key );
+
+			$second                  = $controller->get_proxy_item( $second_request );
+			$http_count_after_second = count( self::$http_request_log );
+
+			$third                  = $controller->get_proxy_item( $third_request );
+			$http_count_after_third = count( self::$http_request_log );
+			$third_cache            = \get_transient( $third_key );
+		} finally {
+			\delete_transient( $first_key );
+			\delete_transient( $third_key );
+			$oembed->providers = $providers_snapshot;
+			\remove_filter( 'rest_oembed_ttl', $ttl_filter, 10 );
+			\remove_filter( 'oembed_result', $result_filter, 10 );
+			\remove_filter( 'oembed_remote_get_args', $remote_args_filter, 10 );
+			\remove_filter( 'oembed_fetch_url', $fetch_filter, 10 );
+			\remove_filter( 'pre_http_request', array( self::class, 'filter_pre_http_request' ), 10 );
+		}
+
+		$http_log          = self::$http_request_log;
+		$content_after     = self::content_counts();
+		$first_query       = isset( $fetch_urls[0]['provider'] ) ? self::url_query_args( (string) $fetch_urls[0]['provider'] ) : array();
+		$third_query       = isset( $fetch_urls[1]['provider'] ) ? self::url_query_args( (string) $fetch_urls[1]['provider'] ) : array();
+		$first_http_query  = isset( $http_log[0]['url'] ) ? self::url_query_args( (string) $http_log[0]['url'] ) : array();
+		$third_http_query  = isset( $http_log[1]['url'] ) ? self::url_query_args( (string) $http_log[1]['url'] ) : array();
+		$first_cached_data = is_object( $first_cache ) ? get_object_vars( $first_cache ) : $first_cache;
+		$third_cached_data = is_object( $third_cache ) ? get_object_vars( $third_cache ) : $third_cache;
+		self::$http_intercepts = array();
+		self::$http_request_log = array();
+
+		self::collect_failure(
+			$failures,
+			$first_key === $second_key
+				&& $first_key !== $third_key
+				&& is_object( $first_cache )
+				&& is_object( $third_cache )
+				&& false === \get_transient( $first_key )
+				&& false === \get_transient( $third_key ),
+			'proxy cache key ignores nonce, includes dimensions, stores transient data, and cleans transient options',
+			array(
+				'firstKey'   => $first_key,
+				'secondKey'  => $second_key,
+				'thirdKey'   => $third_key,
+				'firstCache' => $first_cached_data,
+				'thirdCache' => $third_cached_data,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			is_object( $first )
+				&& is_object( $second )
+				&& is_object( $third )
+				&& 'rich' === ( $first->type ?? null )
+				&& $provider_name === ( $first->provider_name ?? null )
+				&& $provider_name === ( $second->provider_name ?? null )
+				&& $provider_name === ( $third->provider_name ?? null )
+				&& $width === (int) ( $first->width ?? 0 )
+				&& $width === (int) ( $second->width ?? 0 )
+				&& $changed_width === (int) ( $third->width ?? 0 )
+				&& is_string( $first->html ?? null )
+				&& str_contains( $first->html, '<iframe' )
+				&& 1 === substr_count( $first->html, $marker )
+				&& ( $first->html ?? null ) === ( $second->html ?? null )
+				&& is_string( $third->html ?? null )
+				&& str_contains( $third->html, $marker ),
+			'proxy returns filtered rich oEmbed objects and serves same-dimension nonce changes from cache',
+			array(
+				'first'        => is_object( $first ) ? get_object_vars( $first ) : self::describe_wp_error( $first ),
+				'second'       => is_object( $second ) ? get_object_vars( $second ) : self::describe_wp_error( $second ),
+				'third'        => is_object( $third ) ? get_object_vars( $third ) : self::describe_wp_error( $third ),
+				'expected'     => array( 'width' => $width, 'changedWidth' => $changed_width, 'height' => $height ),
+				'marker'       => $marker,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			1 === $http_count_after_first
+				&& 1 === $http_count_after_second
+				&& 2 === $http_count_after_third
+				&& 2 === count( $http_log )
+				&& 2 === count( $fetch_urls )
+				&& 2 === count( $remote_args )
+				&& 2 === count( $result_calls )
+				&& 2 === count( $ttl_calls ),
+			'cold proxy requests fetch once, cached nonce variants fetch zero times, and changed dimensions fetch again',
+			array(
+				'httpCounts'  => array( $http_count_after_first, $http_count_after_second, $http_count_after_third ),
+				'httpLog'     => $http_log,
+				'fetchUrls'   => $fetch_urls,
+				'remoteArgs'  => $remote_args,
+				'resultCalls' => $result_calls,
+				'ttlCalls'    => $ttl_calls,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			'1' === (string) ( $first_query['dnt'] ?? '' )
+				&& $width === (int) ( $first_query['maxwidth'] ?? 0 )
+				&& $height === (int) ( $first_query['maxheight'] ?? 0 )
+				&& $url === self::decode_url_arg( $first_query['url'] ?? '' )
+				&& 'json' === ( $first_http_query['format'] ?? null )
+				&& '1' === (string) ( $third_query['dnt'] ?? '' )
+				&& $changed_width === (int) ( $third_query['maxwidth'] ?? 0 )
+				&& $height === (int) ( $third_query['maxheight'] ?? 0 )
+				&& $url === self::decode_url_arg( $third_query['url'] ?? '' )
+				&& 'json' === ( $third_http_query['format'] ?? null ),
+			'provider fetch URL carries max dimensions, original URL, dnt, and JSON format',
+			array(
+				'firstFetchQuery'  => $first_query,
+				'firstHttpQuery'   => $first_http_query,
+				'thirdFetchQuery'  => $third_query,
+				'thirdHttpQuery'   => $third_http_query,
+				'decodedFirstUrl'  => self::decode_url_arg( $first_http_query['url'] ?? '' ),
+				'decodedThirdUrl'  => self::decode_url_arg( $third_http_query['url'] ?? '' ),
+				'expectedOriginal' => $url,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::ttl_call_matches( $ttl_calls[0] ?? array(), $url, $width, $height, $ttl )
+				&& self::ttl_call_matches( $ttl_calls[1] ?? array(), $url, $changed_width, $height, $ttl )
+				&& ! array_key_exists( '_wpnonce', $ttl_calls[0]['args'] ?? array() )
+				&& ! array_key_exists( '_wpnonce', $ttl_calls[1]['args'] ?? array() ),
+			'rest_oembed_ttl receives nonce-free args with copied width and height',
+			array(
+				'ttlCalls' => $ttl_calls,
+				'ttl'      => $ttl,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$content_before === $content_after
+				&& $providers_snapshot === $oembed->providers
+				&& false === \has_filter( 'pre_http_request', array( self::class, 'filter_pre_http_request' ) )
+				&& false === \has_filter( 'oembed_fetch_url', $fetch_filter )
+				&& false === \has_filter( 'oembed_remote_get_args', $remote_args_filter )
+				&& false === \has_filter( 'oembed_result', $result_filter )
+				&& false === \has_filter( 'rest_oembed_ttl', $ttl_filter ),
+			'proxy check restores provider registry, filters, and content-row counts',
+			array(
+				'contentBefore' => $content_before,
+				'contentAfter'  => $content_after,
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'post-embeds.proxy-provider-transient-cache',
+			$failures,
+			array(
+				'case' => self::case_summary( $case ),
+			)
+		);
+	}
+
 	private static function seed_fixtures( array $case ): array {
 		\register_post_type(
 			$case['blockedType'],
@@ -709,6 +1031,9 @@ final class PostEmbedsSurface {
 	}
 
 	private static function prepare_runtime( array $case ): void {
+		self::$http_intercepts  = array();
+		self::$http_request_log = array();
+
 		$wpdb = $GLOBALS['wpdb'];
 		$wpdb->component_fuzz_reset_content();
 		$wpdb->component_fuzz_reset_options(
@@ -889,6 +1214,87 @@ final class PostEmbedsSurface {
 		}
 
 		\WP_oEmbed::$early_providers = $snapshot['earlyProviders'];
+	}
+
+	private static function proxy_request( string $url, int $width, int $height, string $nonce ): \WP_REST_Request {
+		$request = new \WP_REST_Request( 'GET', '/oembed/1.0/proxy' );
+		$request->set_param( 'url', $url );
+		$request->set_param( 'format', 'json' );
+		$request->set_param( 'maxwidth', $width );
+		$request->set_param( 'maxheight', $height );
+		$request->set_param( 'discover', false );
+		$request->set_param( '_wpnonce', $nonce );
+
+		return $request;
+	}
+
+	private static function proxy_cache_key( \WP_REST_Request $request ): string {
+		$args = $request->get_params();
+		unset( $args['_wpnonce'] );
+
+		return 'oembed_' . md5( serialize( $args ) );
+	}
+
+	private static function http_response( string $body, int $status = 200 ): array {
+		return array(
+			'headers'  => array(),
+			'body'     => $body,
+			'response' => array(
+				'code'    => $status,
+				'message' => 200 === $status ? 'OK' : 'Error',
+			),
+			'cookies'  => array(),
+			'filename' => null,
+		);
+	}
+
+	private static function url_query_args( string $url ): array {
+		$query = parse_url( $url, PHP_URL_QUERY );
+		if ( ! is_string( $query ) || '' === $query ) {
+			return array();
+		}
+
+		$args = array();
+		parse_str( $query, $args );
+
+		return $args;
+	}
+
+	private static function decode_url_arg( $value ): string {
+		$decoded = (string) $value;
+		for ( $i = 0; $i < 3; ++$i ) {
+			$next = rawurldecode( $decoded );
+			if ( $next === $decoded ) {
+				break;
+			}
+			$decoded = $next;
+		}
+
+		return $decoded;
+	}
+
+	private static function ttl_call_matches( array $call, string $url, int $width, int $height, int $ttl ): bool {
+		$args = $call['args'] ?? null;
+
+		return is_array( $args )
+			&& DAY_IN_SECONDS === (int) ( $call['incoming'] ?? 0 )
+			&& $url === ( $call['url'] ?? null )
+			&& $ttl > 0
+			&& $width === (int) ( $args['maxwidth'] ?? 0 )
+			&& $width === (int) ( $args['width'] ?? 0 )
+			&& $height === (int) ( $args['maxheight'] ?? 0 )
+			&& $height === (int) ( $args['height'] ?? 0 )
+			&& false === ( $args['discover'] ?? null )
+			&& 'json' === ( $args['format'] ?? null )
+			&& ! array_key_exists( 'url', $args );
+	}
+
+	private static function content_counts(): array {
+		if ( isset( $GLOBALS['wpdb'] ) && method_exists( $GLOBALS['wpdb'], 'component_fuzz_content_counts' ) ) {
+			return $GLOBALS['wpdb']->component_fuzz_content_counts();
+		}
+
+		return array();
 	}
 
 	private static function load_oembed_controller(): bool {
