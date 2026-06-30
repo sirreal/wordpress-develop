@@ -129,8 +129,11 @@ database, network requests, or a configured site.
   dynamic core blocks, including site title/tagline option handling, search
   label/query/placeholder escaping, loginout current-request redirect links,
   post title/date/excerpt/read-more context rendering, temporary excerpt filter
-  cleanup, button/file/image markup transforms, lightbox filter locality, and
-  global/superglobal/option restoration.
+  cleanup, button/file/image markup transforms, lightbox filter locality,
+  server-side `core/navigation`/navigation-link/submenu/home-link/page-list
+  rendering, responsive overlay/interactivity markup, duplicate navigation
+  label uniqueness, submenu visibility migration, synthetic page-list
+  active/ancestor classes, and global/superglobal/option restoration.
 - `block-widgets`: block-backed widget behavior, including `WP_Widget_Block`
   rendering, dynamic legacy class mapping matrix, malformed/unknown block
   fallbacks, content sanitization on update, form escaping, `the_widget()`
