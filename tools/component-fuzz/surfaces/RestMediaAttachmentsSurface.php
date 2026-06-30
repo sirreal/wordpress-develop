@@ -40,6 +40,7 @@ final class RestMediaAttachmentsSurface {
 				$case   = self::case_for_context( $ctx );
 				$rows[] = self::check_disposition_parser_and_raw_errors( $ctx->fork( 'raw-errors' ), $case );
 				$rows[] = self::check_create_item_raw_upload_success( $ctx->fork( 'create-raw' ), $case, $temp_root );
+				$rows[] = self::check_sideload_raw_upload_metadata( $ctx->fork( 'sideload-raw' ), $case, $temp_root );
 				$rows[] = self::check_finalize_and_response_projection( $ctx->fork( 'finalize' ), $case, $temp_root );
 				$rows[] = self::check_permission_and_edit_fail_closed_paths( $ctx->fork( 'permission-edit' ), $case, $temp_root );
 				$rows[] = self::check_client_side_route_contracts( $ctx->fork( 'client-side-routes' ) );
@@ -121,6 +122,7 @@ final class RestMediaAttachmentsSurface {
 				'current_user_can',
 				'get_attached_file',
 				'get_post',
+				'get_post_parent',
 				'get_post_meta',
 				'has_filter',
 				'is_wp_error',
@@ -131,12 +133,17 @@ final class RestMediaAttachmentsSurface {
 				'sanitize_file_name',
 				'sanitize_text_field',
 				'update_post_meta',
+				'update_attached_file',
 				'wp_basename',
+				'wp_attachment_is',
+				'wp_attachment_is_image',
 				'wp_cache_flush',
 				'wp_create_nonce',
 				'wp_get_attachment_metadata',
 				'wp_get_attachment_url',
 				'wp_get_original_image_path',
+				'wp_getimagesize',
+				'wp_filesize',
 				'wp_insert_attachment',
 				'wp_insert_post',
 				'wp_insert_user',
@@ -363,6 +370,195 @@ final class RestMediaAttachmentsSurface {
 		return self::result(
 			$ctx,
 			'rest-media-attachments.create-item-raw-upload-success',
+			$failures,
+			array( 'case' => self::case_summary( $case ) )
+		);
+	}
+
+	private static function check_sideload_raw_upload_metadata( \ComponentFuzz\FuzzContext $ctx, array $case, string $temp_root ): array {
+		self::reset_content_runtime();
+
+		$failures       = array();
+		$controller     = new \WP_REST_Attachments_Controller( 'attachment' );
+		$author         = self::insert_user( $case, 'sideload-author' );
+		$png_body       = self::tiny_png_bytes();
+		$base_filename  = 'sideload-' . $case['token'] . '.png';
+		$thumb_filename = 'sideload-' . $case['token'] . '-150x150.png';
+
+		$text_attachment = self::insert_attachment_fixture( $case, $author, $temp_root, 'sideload-invalid-' . $case['uploadFile'], $case['body'], true );
+		$image_attachment = self::insert_attachment_fixture(
+			$case,
+			$author,
+			$temp_root,
+			$base_filename,
+			$png_body,
+			true,
+			'image/png',
+			array(
+				'file'     => $base_filename,
+				'width'    => 1,
+				'height'   => 1,
+				'filesize' => strlen( $png_body ),
+				'sizes'    => array(),
+			)
+		);
+		$original_attachment = self::insert_attachment_fixture(
+			$case,
+			$author,
+			$temp_root,
+			'original-' . $base_filename,
+			$png_body,
+			true,
+			'image/png',
+			array(
+				'file'     => 'original-' . $base_filename,
+				'width'    => 1,
+				'height'   => 1,
+				'filesize' => strlen( $png_body ),
+				'sizes'    => array(),
+			)
+		);
+
+		$invalid_type = $controller->sideload_item(
+			self::sideload_request(
+				$text_attachment,
+				$thumb_filename,
+				$png_body,
+				'thumbnail',
+				false
+			)
+		);
+
+		\wp_set_current_user( $author );
+		$grant = self::install_cap_filter(
+			array(
+				'edit_post',
+				'edit_posts',
+				'edit_published_posts',
+				'read',
+				'upload_files',
+			)
+		);
+
+		$before_counts = self::content_counts();
+		try {
+			$thumb_request = self::sideload_request(
+				$image_attachment,
+				$thumb_filename,
+				$png_body,
+				'thumbnail',
+				false,
+				array( 'id', 'media_details', 'filename', 'filesize' )
+			);
+			$thumb_allowed = $controller->sideload_item_permissions_check( $thumb_request );
+			$thumb_response = $controller->sideload_item( $thumb_request );
+
+			$original_filename = 'original-' . $case['token'] . '-replacement.png';
+			$original_request  = self::sideload_request(
+				$original_attachment,
+				$original_filename,
+				$png_body,
+				'original',
+				true,
+				array( 'id', 'media_details' )
+			);
+			$original_allowed  = $controller->sideload_item_permissions_check( $original_request );
+			$original_response = $controller->sideload_item( $original_request );
+		} finally {
+			$grant_removed = self::remove_cap_filter( $grant );
+		}
+		$after_counts = self::content_counts();
+
+		$thumb_metadata  = \wp_get_attachment_metadata( $image_attachment, true );
+		$thumb_size      = is_array( $thumb_metadata ) ? ( $thumb_metadata['sizes']['thumbnail'] ?? array() ) : array();
+		$thumb_path      = rtrim( $temp_root, '/\\' ) . DIRECTORY_SEPARATOR . $thumb_filename;
+		$thumb_data      = $thumb_response instanceof \WP_REST_Response ? $thumb_response->get_data() : array();
+		$thumb_headers   = $thumb_response instanceof \WP_REST_Response ? $thumb_response->get_headers() : array();
+		$original_meta   = \wp_get_attachment_metadata( $original_attachment, true );
+		$original_path   = \get_attached_file( $original_attachment, true );
+		$original_data   = $original_response instanceof \WP_REST_Response ? $original_response->get_data() : array();
+		$original_header = $original_response instanceof \WP_REST_Response ? $original_response->get_headers() : array();
+
+		self::collect_failure(
+			$failures,
+			self::error_matches( $invalid_type, 'rest_post_invalid_id', 400 ),
+			'sideload rejects non-image and non-PDF attachments before writing upload metadata',
+			array(
+				'textAttachment' => $text_attachment,
+				'result'         => self::describe_error( $invalid_type ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			true === $thumb_allowed
+				&& $thumb_response instanceof \WP_REST_Response
+				&& 200 === $thumb_response->get_status()
+				&& isset( $thumb_headers['Location'] )
+				&& str_contains( (string) $thumb_headers['Location'], 'wp/v2/media/' . $image_attachment )
+				&& is_file( $thumb_path )
+				&& $png_body === file_get_contents( $thumb_path )
+				&& is_array( $thumb_size )
+				&& 1 === (int) ( $thumb_size['width'] ?? 0 )
+				&& 1 === (int) ( $thumb_size['height'] ?? 0 )
+				&& $thumb_filename === ( $thumb_size['file'] ?? null )
+				&& 'image/png' === ( $thumb_size['mime-type'] ?? null )
+				&& strlen( $png_body ) === (int) ( $thumb_size['filesize'] ?? 0 )
+				&& $image_attachment === (int) ( $thumb_data['id'] ?? 0 )
+				&& $thumb_filename === ( $thumb_data['media_details']['sizes']['thumbnail']['file'] ?? null )
+				&& $base_filename === ( $thumb_data['filename'] ?? null )
+				&& self::projected_keys_match( $thumb_data, array( 'filename', 'filesize', 'id', 'media_details' ) ),
+			'sideload raw body stores an exact generated subsize, preserves the base attachment file, and projects the REST response',
+			array(
+				'allowed'   => self::describe_error( $thumb_allowed ),
+				'status'    => $thumb_response instanceof \WP_REST_Response ? $thumb_response->get_status() : null,
+				'headers'   => $thumb_headers,
+				'metadata'  => $thumb_metadata,
+				'data'      => $thumb_data,
+				'thumbPath' => $thumb_path,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			true === $original_allowed
+				&& $original_response instanceof \WP_REST_Response
+				&& 200 === $original_response->get_status()
+				&& isset( $original_header['Location'] )
+				&& str_contains( (string) $original_header['Location'], 'wp/v2/media/' . $original_attachment )
+				&& is_array( $original_meta )
+				&& $original_filename === ( $original_meta['original_image'] ?? null )
+				&& 'original-' . $base_filename === \wp_basename( (string) $original_path )
+				&& $original_attachment === (int) ( $original_data['id'] ?? 0 )
+				&& $original_filename === ( $original_data['media_details']['original_image'] ?? null )
+				&& self::projected_keys_match( $original_data, array( 'id', 'media_details' ) ),
+			'original-image sideload records original_image metadata without replacing the attached file path',
+			array(
+				'allowed'      => self::describe_error( $original_allowed ),
+				'headers'      => $original_header,
+				'metadata'     => $original_meta,
+				'attachedFile' => $original_path,
+				'data'         => $original_data,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$grant_removed
+				&& false === \has_filter( 'image_editor_output_format', '__return_empty_array' )
+				&& self::content_count_delta_matches( $before_counts, $after_counts, array() ),
+			'sideload restores capability and client-side conversion filters without creating attachment posts or new meta rows',
+			array(
+				'grantRemoved'             => $grant_removed,
+				'imageEditorOutputFilter'  => \has_filter( 'image_editor_output_format', '__return_empty_array' ),
+				'beforeCounts'             => $before_counts,
+				'afterCounts'              => $after_counts,
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'rest-media-attachments.sideload-raw-upload-metadata',
 			$failures,
 			array( 'case' => self::case_summary( $case ) )
 		);
@@ -719,7 +915,16 @@ final class RestMediaAttachmentsSurface {
 		return is_int( $post_id ) ? $post_id : 0;
 	}
 
-	private static function insert_attachment_fixture( array $case, int $author, string $temp_root, string $filename, string $body, bool $with_metadata = true ): int {
+	private static function insert_attachment_fixture(
+		array $case,
+		int $author,
+		string $temp_root,
+		string $filename,
+		string $body,
+		bool $with_metadata = true,
+		string $mime_type = 'text/plain',
+		?array $metadata = null
+	): int {
 		$uploads = \wp_upload_dir();
 		\ComponentFuzz\ensure_dir( $uploads['path'] );
 		$path = rtrim( $uploads['path'], '/\\' ) . DIRECTORY_SEPARATOR . \sanitize_file_name( $filename );
@@ -730,7 +935,7 @@ final class RestMediaAttachmentsSurface {
 				array(
 					'guid'           => $uploads['url'] . '/' . rawurlencode( \wp_basename( $path ) ),
 					'post_author'    => $author,
-					'post_mime_type' => 'text/plain',
+					'post_mime_type' => $mime_type,
 					'post_status'    => 'inherit',
 					'post_title'     => 'Fixture ' . $case['token'],
 					'post_type'      => 'attachment',
@@ -747,7 +952,7 @@ final class RestMediaAttachmentsSurface {
 			if ( $with_metadata ) {
 				\wp_update_attachment_metadata(
 					$id,
-					array(
+					$metadata ?? array(
 						'file'     => \wp_basename( $path ),
 						'filesize' => strlen( $body ),
 						'sizes'    => array(),
@@ -757,6 +962,36 @@ final class RestMediaAttachmentsSurface {
 		}
 
 		return is_int( $id ) ? $id : 0;
+	}
+
+	private static function sideload_request( int $attachment_id, string $filename, string $body, string $image_size, bool $convert_format, array $fields = array() ): \WP_REST_Request {
+		$query = array();
+		if ( array() !== $fields ) {
+			$query['_fields'] = implode( ',', $fields );
+		}
+
+		$request = self::request(
+			'POST',
+			'/wp/v2/media/' . $attachment_id . '/sideload',
+			$query,
+			array( 'id' => $attachment_id ),
+			array(
+				'convert_format' => $convert_format,
+				'image_size'     => $image_size,
+			)
+		);
+		$request->set_body( $body );
+		$request->set_header( 'Content-Type', 'image/png' );
+		$request->set_header( 'Content-Disposition', 'attachment; filename="' . $filename . '"' );
+		$request->set_header( 'Content-MD5', md5( $body ) );
+
+		return $request;
+	}
+
+	private static function tiny_png_bytes(): string {
+		return base64_decode(
+			'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII='
+		);
 	}
 
 	private static function install_cap_filter( array $granted_caps ): callable {
