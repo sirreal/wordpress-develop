@@ -816,21 +816,32 @@ final class MediaEditorSurface {
 		foreach ( self::REAL_EDITORS as $class ) {
 			$case_ctx = $ctx->fork( strtolower( $class ) );
 			if ( ! class_exists( $class ) ) {
-				$rows[] = $case_ctx->skip(
+				$rows[] = self::row(
+					$case_ctx,
 					'media-editor.editor-class.' . $class,
-					'Editor class is unavailable.'
+					true,
+					self::editor_availability_data(
+						$class,
+						$mime,
+						'class-unavailable',
+						array( 'Editor class is unavailable.' )
+					)
 				);
 				continue;
 			}
 
 			if ( ! self::editor_class_available_for_mime( $class, $mime ) ) {
-				$rows[] = $case_ctx->skip(
+				$rows[] = self::row(
+					$case_ctx,
 					'media-editor.editor-class.' . $class,
-					'Editor is unavailable or does not support this generated source mime type.',
-					array(
-						'mime'    => $mime,
-						'gd'      => extension_loaded( 'gd' ),
-						'imagick' => extension_loaded( 'imagick' ),
+					true,
+					self::editor_availability_data(
+						$class,
+						$mime,
+						'editor-unavailable-for-generated-mime',
+						array(
+							'Forced real-editor execution is not claimed when the extension, editor self-test, or generated source mime support is unavailable.',
+						)
 					)
 				);
 				continue;
@@ -858,6 +869,37 @@ final class MediaEditorSurface {
 		$rows[] = self::check_subsizes_metadata_generation( $ctx->fork( 'subsizes' ), $temp_root, $editor_class, $mime );
 
 		return $rows;
+	}
+
+	private static function editor_availability_data( string $class, string $mime, string $mode, array $not_claimed ): array {
+		return array(
+			'class'      => $class,
+			'mime'       => $mime,
+			'mode'       => $mode,
+			'available'  => false,
+			'extensions' => array(
+				'gd'      => extension_loaded( 'gd' ),
+				'imagick' => extension_loaded( 'imagick' ),
+			),
+			'support'    => array(
+				'classExists'      => class_exists( $class ),
+				'test'             => self::safe_editor_static_bool_call( $class, 'test', array( 'mime_type' => $mime ) ),
+				'supportsMimeType' => self::safe_editor_static_bool_call( $class, 'supports_mime_type', $mime ),
+			),
+			'notClaimed' => $not_claimed,
+		);
+	}
+
+	private static function safe_editor_static_bool_call( string $class, string $method, $argument ): bool {
+		if ( ! class_exists( $class ) || ! is_callable( array( $class, $method ) ) ) {
+			return false;
+		}
+
+		try {
+			return (bool) call_user_func( array( $class, $method ), $argument );
+		} catch ( \Throwable $e ) {
+			return false;
+		}
 	}
 
 	private static function check_single_editor_class(
