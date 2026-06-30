@@ -1673,10 +1673,7 @@ final class MetadataSurface {
 
 	private static function check_registered_metadata_by_object_subtype( \ComponentFuzz\FuzzContext $ctx ): array {
 		if ( ! function_exists( 'get_registered_metadata_by_object_subtype' ) ) {
-			return $ctx->skip(
-				'metadata.registered-metadata-by-object-subtype.available',
-				'get_registered_metadata_by_object_subtype() is not available in this WordPress checkout.'
-			);
+			return self::check_registered_metadata_by_object_subtype_current_api( $ctx );
 		}
 
 		self::reset_runtime();
@@ -1717,6 +1714,192 @@ final class MetadataSurface {
 				'subtype'    => $subtype,
 				'metaKey'    => $meta_key,
 				'value'      => $value,
+			)
+		);
+	}
+
+	private static function check_registered_metadata_by_object_subtype_current_api( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime();
+
+		$failures = array();
+		$cases    = array();
+
+		foreach ( self::OBJECT_TYPES as $index => $object_type ) {
+			$case            = $ctx->fork( 'current-api-' . $object_type );
+			$object_id       = 6400 + ( $index * 1000 ) + $case->int( 1, 900 );
+			$other_object_id = $object_id + 50000;
+			$subtype         = self::object_subtype( $case, $object_type );
+			$other_subtype   = $subtype . '-other';
+			$meta_key        = self::meta_key( $case, 'by-subtype-current-api' );
+			$meta_value      = 'stored-' . $case->identifier( 4, 10 );
+			$default         = 'default-' . $case->identifier( 4, 10 );
+			$raw_value       = ' raw ' . $case->identifier( 3, 8 );
+			$sanitized       = 'sanitized-' . $case->identifier( 4, 10 );
+			$auth_log        = array();
+			$sanitize_log    = array();
+
+			$subtype_filter = static function ( $current, $id ) use ( $object_id, $other_object_id, $subtype, $other_subtype ) {
+				if ( (int) $id === $object_id ) {
+					return $subtype;
+				}
+				if ( (int) $id === $other_object_id ) {
+					return $other_subtype;
+				}
+				return $current;
+			};
+			$sanitize_callback = static function ( $value, $key, $type, $filtered_subtype ) use ( &$sanitize_log, $meta_key, $object_type, $subtype, $sanitized ) {
+				$sanitize_log[] = array(
+					'value'   => $value,
+					'key'     => $key,
+					'type'    => $type,
+					'subtype' => $filtered_subtype,
+				);
+
+				return $meta_key === $key && $object_type === $type && $subtype === $filtered_subtype ? $sanitized : $value;
+			};
+			$auth_callback = static function ( $allowed, $key, $filtered_object_id, $user_id, $cap, $caps ) use ( &$auth_log, $meta_key, $object_id ) {
+				$auth_log[] = array(
+					'allowed'  => $allowed,
+					'key'      => $key,
+					'objectId' => $filtered_object_id,
+					'userId'   => $user_id,
+					'cap'      => $cap,
+					'caps'     => $caps,
+				);
+
+				return $meta_key === $key && $object_id === (int) $filtered_object_id;
+			};
+
+			\add_filter( "get_object_subtype_{$object_type}", $subtype_filter, 10, 2 );
+			$registered = self::register_subtype_meta(
+				$object_type,
+				$subtype,
+				$meta_key,
+				array(
+					'type'              => 'string',
+					'single'            => true,
+					'default'           => $default,
+					'sanitize_callback' => $sanitize_callback,
+					'auth_callback'     => $auth_callback,
+				)
+			);
+
+			\wp_cache_set(
+				$object_id,
+				array(
+					$meta_key => array( \maybe_serialize( $meta_value ) ),
+				),
+				$object_type . '_meta'
+			);
+
+			$registered_keys       = \get_registered_meta_keys( $object_type, $subtype );
+			$other_registered_keys = \get_registered_meta_keys( $object_type, $other_subtype );
+			$exists_subtype        = \registered_meta_key_exists( $object_type, $meta_key, $subtype );
+			$exists_other_subtype  = \registered_meta_key_exists( $object_type, $meta_key, $other_subtype );
+			$exists_global         = \registered_meta_key_exists( $object_type, $meta_key );
+			$registered_meta       = \get_registered_metadata( $object_type, $object_id, $meta_key );
+			$other_registered_meta = \get_registered_metadata( $object_type, $other_object_id, $meta_key );
+			$default_value         = \get_metadata_default( $object_type, $object_id, $meta_key, true );
+			$other_default_value   = \get_metadata_default( $object_type, $other_object_id, $meta_key, true );
+			$sanitized_value       = \sanitize_meta( $meta_key, $raw_value, $object_type, $subtype );
+			$other_sanitized_value = \sanitize_meta( $meta_key, $raw_value, $object_type, $other_subtype );
+			$auth_allowed          = \apply_filters(
+				"auth_{$object_type}_meta_{$meta_key}_for_{$subtype}",
+				null,
+				$meta_key,
+				$object_id,
+				0,
+				'edit',
+				array()
+			);
+			$other_auth_allowed    = \apply_filters(
+				"auth_{$object_type}_meta_{$meta_key}_for_{$other_subtype}",
+				null,
+				$meta_key,
+				$other_object_id,
+				0,
+				'edit',
+				array()
+			);
+
+			$unregistered     = \unregister_meta_key( $object_type, $meta_key, $subtype );
+			$after_unregister = \get_registered_metadata( $object_type, $object_id, $meta_key );
+			\remove_filter( "get_object_subtype_{$object_type}", $subtype_filter, 10 );
+			$filter_restored = false === \has_filter( "get_object_subtype_{$object_type}", $subtype_filter )
+				&& false === \has_filter( "sanitize_{$object_type}_meta_{$meta_key}_for_{$subtype}", $sanitize_callback )
+				&& false === \has_filter( "auth_{$object_type}_meta_{$meta_key}_for_{$subtype}", $auth_callback );
+
+			$case_details = array(
+				'objectType'           => $object_type,
+				'subtype'              => $subtype,
+				'otherSubtype'         => $other_subtype,
+				'metaKey'              => $meta_key,
+				'registeredKeys'       => $registered_keys,
+				'otherRegisteredKeys'  => $other_registered_keys,
+				'registeredMeta'       => $registered_meta,
+				'otherRegisteredMeta'  => $other_registered_meta,
+				'afterUnregister'      => $after_unregister,
+				'defaultValue'         => $default_value,
+				'otherDefaultValue'    => $other_default_value,
+				'sanitizedValue'       => $sanitized_value,
+				'otherSanitizedValue'  => $other_sanitized_value,
+				'authAllowed'          => $auth_allowed,
+				'otherAuthAllowed'     => $other_auth_allowed,
+				'sanitizeLog'          => $sanitize_log,
+				'authLog'              => $auth_log,
+				'filterRestored'       => $filter_restored,
+			);
+			$cases[]      = $case_details;
+
+			self::collect_failure(
+				$failures,
+				true === $registered
+					&& isset( $registered_keys[ $meta_key ] )
+					&& ! isset( $other_registered_keys[ $meta_key ] )
+					&& true === ( $registered_keys[ $meta_key ]['single'] ?? null )
+					&& $default === ( $registered_keys[ $meta_key ]['default'] ?? null )
+					&& $exists_subtype
+					&& ! $exists_other_subtype
+					&& ! $exists_global
+					&& $meta_value === $registered_meta
+					&& false === $other_registered_meta
+					&& $default === $default_value
+					&& '' === $other_default_value
+					&& $sanitized === $sanitized_value
+					&& $raw_value === $other_sanitized_value
+					&& true === $auth_allowed
+					&& null === $other_auth_allowed
+					&& 1 === count( $sanitize_log )
+					&& $subtype === ( $sanitize_log[0]['subtype'] ?? null )
+					&& 1 === count( $auth_log )
+					&& $object_id === (int) ( $auth_log[0]['objectId'] ?? 0 )
+					&& true === $unregistered
+					&& false === $after_unregister
+					&& $filter_restored,
+				"current subtype-aware metadata APIs cover absent helper behavior for {$object_type}",
+				$case_details
+			);
+		}
+
+		return self::result(
+			$ctx,
+			'metadata.registered-metadata-by-object-subtype.current-api-accounting',
+			array() === $failures,
+			array(
+				'helperAvailable' => false,
+				'objectTypes'     => self::OBJECT_TYPES,
+				'cases'           => $cases,
+				'coveredApis'     => array(
+					'register_meta',
+					'register_post_meta',
+					'get_registered_meta_keys',
+					'registered_meta_key_exists',
+					'get_registered_metadata',
+					'get_metadata_default',
+					'sanitize_meta',
+					'auth_*_meta_*_for_subtype',
+				),
+				'failures'        => array_slice( $failures, 0, 8 ),
 			)
 		);
 	}
