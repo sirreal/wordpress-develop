@@ -358,9 +358,9 @@ database, network requests, or a configured site.
   cookies/current-commenter payloads, options, password hashing/checking, parse
   helpers.
 - `import-diff`: importer registry and upload-form helpers, `WP_Importer`
-  imported post/comment lookup against the in-memory stub, `wp_text_diff()`
-  rendering/escaping/normalization, and `WP_Error` export/merge/remove
-  transfer semantics.
+  imported post/comment lookup against the in-memory stub, import upload handler
+  fail-closed and cleanup paths, `wp_text_diff()` rendering/escaping/
+  normalization, and `WP_Error` export/merge/remove transfer semantics.
 - `install-schema`: no-DB install and upgrade schema coverage, including
   `wp_get_db_schema()` table sets, `make_db_current()`/silent wrapper scope
   expansion, global-table upgrade gate filters, `dbDelta()` CREATE TABLE
@@ -960,9 +960,10 @@ local filters only. It loads the single comment/admin walker class files when
 available, but avoids nav menu AJAX quick-search, meta-box pagination, browser
 admin page dispatch, and any DB-backed menu/page/category/comment queries.
 The `import-diff` surface covers importer registry, importer form, imported
-post/comment lookup, text diff, and WP_Error transfer/lifecycle helpers without
-remote importer discovery, upload handling, or importer dispatch screens. WXR
-download generation is covered separately by `wxr-export`.
+post/comment lookup, fail-closed importer upload handling, cleanup, text diff,
+and WP_Error transfer/lifecycle helpers without remote importer discovery, real
+PHP SAPI upload success, or importer dispatch screens. WXR download generation
+is covered separately by `wxr-export`.
 The `wxr-export` surface invokes actual `export_wp()` once per isolated PHP
 subprocess because core defines `wxr_*` helper functions inside that function.
 It uses a surface-local in-memory `wpdb` double and deterministic fixtures only;

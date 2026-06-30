@@ -636,10 +636,10 @@
 				</tr>
 				<tr>
 					<td><code>import-diff</code></td>
-					<td><span class="status good">review fixes passed</span></td>
-					<td>Main worktree; Curie the 4th review findings fixed through <code>7d322ba2e7</code></td>
-					<td>Main focused run: 900 passed, 0 skipped, 0 failed after importer helper review fixes; smoke: 45 passed, 0 skipped, 0 failed; reviewer run: 900 passed, 0 skipped, 0 failed; latest broad run: 7959 passed, 67 skipped, 0 failed.</td>
-					<td>Importer registry/form helpers, text diff rendering, post/comment imported lookup through in-memory postmeta/comment fixtures, importer chunking, duplicate permalink behavior, base importer byte-length sorting, whitespace compaction, timeout/quota true and false branches, stop-the-insanity cleanup and WPDB restoration, WP_Error transfer and lifecycle ordering, and stub meta-query limit projection.</td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Scoped component worktree <code>component-fuzz-import-upload-lifecycle</code>; import upload handler fail-closed and cleanup coverage validated before merge.</td>
+					<td>Latest focused runs: seed 224 passed 10 checks, seeds 1 and 224 over 25 iterations each passed 250 checks, adjacent <code>import-diff,media-ingest,media-remote,filesystem,cron,mail,email</code> smoke passed 1387 checks with 1 skip, and broad seed 224 smoke passed 4698 checks with 5 skips.</td>
+					<td>Importer registry/form helpers, import upload missing-file and prefiltered-error paths, upload override and filter cleanup, import attachment cleanup, text diff rendering, post/comment imported lookup through in-memory postmeta/comment fixtures, importer chunking, duplicate permalink behavior, base importer byte-length sorting, whitespace compaction, timeout/quota true and false branches, stop-the-insanity cleanup and WPDB restoration, WP_Error transfer and lifecycle ordering, and stub meta-query limit projection.</td>
 				</tr>
 				<tr>
 					<td><code>navigation</code></td>
