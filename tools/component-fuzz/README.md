@@ -875,9 +875,11 @@ sidebar mutation, legacy form-data paths, and the `/widget-types/{id}/render`
 iframe endpoint directly. The render path runs in an isolated child process so
 the global `IFRAME_REQUEST` constant cannot leak into the shared runner. The
 object surface records explicit skip rows for template controllers that depend
-on block-theme filesystem state and template CPT queries, and for broad
-collection queries that exceed the small SQL parser in the stub. It documents
-limits for invalid enum-error formatting
+on block-theme filesystem state and template CPT queries. Broad collection
+query translation for posts, attachments, revisions, users, comments, and terms
+is covered through REST query filters, query-class pre-query short-circuits,
+HEAD pagination headers, no broad SQL execution, and filter restoration. It
+documents limits for invalid enum-error formatting
 branches that are not warning-safe under the stripped bootstrap. The
 registry-backed surface covers plugin/theme controller route, schema,
 collection parameter, sanitizer, and permission-gate contracts without
