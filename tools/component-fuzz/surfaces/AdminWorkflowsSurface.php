@@ -34,7 +34,7 @@ final class AdminWorkflowsSurface {
 			$rows[] = self::check_referer_helpers( $ctx->fork( 'referer-helpers' ) );
 			$rows[] = self::check_referer_field_helpers( $ctx->fork( 'referer-field-helpers' ) );
 			$rows[] = self::check_admin_form_controls( $ctx->fork( 'form-controls' ) );
-			$rows[] = self::skipped_core_list_table_subclasses( $ctx->fork( 'core-list-table-skips' ) );
+			$rows[] = self::check_core_list_table_coverage_accounting( $ctx->fork( 'core-list-table-accounting' ) );
 			$rows[] = self::check_exiting_ajax_wrappers( $ctx->fork( 'ajax-wrappers' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
@@ -1311,24 +1311,53 @@ final class AdminWorkflowsSurface {
 		);
 	}
 
-	private static function skipped_core_list_table_subclasses( \ComponentFuzz\FuzzContext $ctx ): array {
-		return $ctx->skip(
-			'admin-workflows.list-table.core-subclasses-skipped',
-			'Core WP_*_List_Table subclasses are not instantiated here because their prepare_items(), '
-				. 'column, and row-action paths query posts, users, comments, terms, plugins, themes, '
-				. 'privacy requests, update transients, or multisite tables unless each class is heavily short-circuited.',
+	private static function check_core_list_table_coverage_accounting( \ComponentFuzz\FuzzContext $ctx ): array {
+		$admin_list_surface = AdminListTablesSurface::NAME;
+		$privacy_surface    = PrivacyAdminRequestsSurface::NAME;
+
+		return self::row(
+			$ctx,
+			'admin-workflows.list-table.scoped-coverage-accounted',
+			class_exists( AdminListTablesSurface::class ) && class_exists( PrivacyAdminRequestsSurface::class ),
 			array(
-				'covered_instead' => 'A tiny WP_List_Table subclass exercises base rendering with synthetic items.',
-				'skipped_classes' => array(
-					'WP_Posts_List_Table',
-					'WP_Media_List_Table',
-					'WP_Terms_List_Table',
-					'WP_Users_List_Table',
-					'WP_Comments_List_Table',
-					'WP_Plugins_List_Table',
-					'WP_Themes_List_Table',
-					'WP_MS_Sites_List_Table',
-					'WP_Privacy_Requests_Table',
+				'retired_skip'                    => 'admin-workflows.list-table.core-subclasses-skipped',
+				'admin_workflows_direct_coverage' => array(
+					'synthetic WP_List_Table rendering',
+					'columns, hidden columns, sortable columns, and primary column filters',
+					'views and tablenav output',
+					'bulk controls and row actions',
+					'current action and month dropdown helpers',
+					'referer and form-control helpers',
+					'request/filter/global restoration',
+				),
+				'dedicated_surface_coverage'       => array(
+					$admin_list_surface => array(
+						'WP_Posts_List_Table',
+						'WP_Media_List_Table',
+						'WP_Terms_List_Table',
+						'WP_Users_List_Table',
+						'WP_Comments_List_Table',
+						'WP_Plugins_List_Table',
+						'WP_Themes_List_Table',
+						'WP_Plugin_Install_List_Table',
+						'WP_Theme_Install_List_Table',
+						'WP_Application_Passwords_List_Table',
+						'WP_MS_Themes_List_Table',
+						'WP_MS_Sites_List_Table',
+						'WP_MS_Users_List_Table',
+					),
+					$privacy_surface    => array(
+						'WP_Privacy_Data_Export_Requests_List_Table',
+						'WP_Privacy_Data_Removal_Requests_List_Table',
+					),
+				),
+				'not_claimed'                      => array(
+					'full admin.php/admin-ajax.php request dispatch',
+					'destructive plugin/theme lifecycle operations',
+					'real uploads',
+					'true multisite write paths',
+					'direct WP_Links_List_Table subclass-specific coverage',
+					'direct WP_Post_Comments_List_Table subclass-specific coverage',
 				),
 			)
 		);
