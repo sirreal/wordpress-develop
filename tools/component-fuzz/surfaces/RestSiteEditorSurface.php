@@ -48,6 +48,7 @@ final class RestSiteEditorSurface {
 			$rows[] = self::check_block_templates_export_generator( $ctx, $case );
 			$rows[] = self::check_live_edit_site_export_controller( $ctx, $case );
 			$rows[] = self::check_template_collection_dispatch_guards( $ctx, $case );
+			$rows[] = self::check_template_mutation_lifecycle( $ctx, $case, $fixtures );
 		} catch ( \Throwable $e ) {
 			$rows[] = self::row(
 				$ctx,
@@ -147,6 +148,7 @@ final class RestSiteEditorSurface {
 		foreach (
 			array(
 				'_build_block_template_result_from_post',
+				'add_action',
 				'add_filter',
 				'create_initial_post_types',
 				'create_initial_taxonomies',
@@ -154,6 +156,7 @@ final class RestSiteEditorSurface {
 				'get_block_template',
 				'get_block_templates',
 				'get_post',
+				'get_post_meta',
 				'get_post_type_object',
 				'get_stylesheet',
 				'get_template_hierarchy',
@@ -161,6 +164,7 @@ final class RestSiteEditorSurface {
 				'is_wp_error',
 				'post_type_supports',
 				'register_rest_route',
+				'remove_action',
 				'remove_filter',
 				'rest_authorization_required_code',
 				'rest_ensure_response',
@@ -172,6 +176,7 @@ final class RestSiteEditorSurface {
 				'sanitize_title',
 				'wp_cache_flush',
 				'wp_clean_theme_json_cache',
+				'wp_delete_post',
 				'wp_generate_block_templates_export_file',
 				'wp_insert_post',
 				'wp_insert_term',
@@ -179,6 +184,8 @@ final class RestSiteEditorSurface {
 				'wp_json_encode',
 				'wp_set_current_user',
 				'wp_set_object_terms',
+				'wp_trash_post',
+				'wp_update_post',
 			) as $function
 		) {
 			if ( ! function_exists( $function ) ) {
@@ -820,6 +827,480 @@ final class RestSiteEditorSurface {
 			array(
 				'templateId'     => $case['templateId'],
 				'templatePartId' => $case['templatePartId'],
+			)
+		);
+	}
+
+	private static function check_template_mutation_lifecycle(
+		\ComponentFuzz\FuzzContext $ctx,
+		array $case,
+		array $fixtures
+	): array {
+		$controller      = new \WP_REST_Templates_Controller( 'wp_template' );
+		$part_controller = new \WP_REST_Templates_Controller( 'wp_template_part' );
+		$failures        = array();
+
+		$created_slug        = 'mutated-' . substr( $case['token'], 0, 6 );
+		$created_id          = $case['themeSlug'] . '//' . $created_slug;
+		$created_content     = self::paragraph_block( 'Mutated created template ' . $case['token'] );
+		$created_title       = 'Mutated Created Template ' . substr( $case['token'], 0, 5 );
+		$created_description = 'Mutated created template description ' . $case['token'];
+
+		$part_slug    = 'mutated-part-' . substr( $case['token'], 0, 6 );
+		$part_id      = $case['themeSlug'] . '//' . $part_slug;
+		$part_content = '<!-- wp:group --><div class="wp-block-group">Mutated footer '
+			. esc_html( $case['token'] )
+			. '</div><!-- /wp:group -->';
+		$part_title   = 'Mutated Footer Part ' . substr( $case['token'], 0, 5 );
+
+		$updated_content     = self::paragraph_block( 'Updated custom template ' . $case['token'] );
+		$updated_title       = 'Updated Custom Template ' . substr( $case['token'], 0, 5 );
+		$updated_description = 'Updated custom template description ' . $case['token'];
+
+		$theme_file_slug        = 'theme-file-' . substr( $case['token'], 0, 6 );
+		$theme_file_id          = $case['themeSlug'] . '//' . $theme_file_slug;
+		$theme_file_content     = self::paragraph_block( 'Theme file template ' . $case['token'] );
+		$theme_file_title       = 'Theme File Template ' . substr( $case['token'], 0, 5 );
+		$theme_file_description = 'Theme file template description ' . $case['token'];
+		$promoted_content       = self::paragraph_block( 'Promoted theme file template ' . $case['token'] );
+		$promoted_title         = 'Promoted Theme File Template ' . substr( $case['token'], 0, 5 );
+		$promoted_description   = 'Promoted theme file template description ' . $case['token'];
+		$theme_file_template    = self::template_object(
+			$case,
+			array(
+				'id'             => $theme_file_id,
+				'slug'           => $theme_file_slug,
+				'content'        => $theme_file_content,
+				'title'          => $theme_file_title,
+				'description'    => $theme_file_description,
+				'source'         => 'theme',
+				'origin'         => 'theme',
+				'wp_id'          => 0,
+				'has_theme_file' => true,
+				'is_custom'      => false,
+				'author'         => 0,
+			)
+		);
+
+		$template_insert_log = array();
+		$part_insert_log     = array();
+		$wp_after_log        = array();
+		$theme_file_log      = array();
+
+		$template_insert_hook = static function ( \WP_Post $post, \WP_REST_Request $request, bool $creating ) use ( &$template_insert_log ): void {
+			$template_insert_log[] = array(
+				'postId'    => (int) $post->ID,
+				'postType'  => $post->post_type,
+				'creating'  => $creating,
+				'requestId' => $request['id'] ?? null,
+				'source'    => $request['source'] ?? null,
+				'context'   => $request['context'] ?? null,
+			);
+		};
+		$part_insert_hook     = static function ( \WP_Post $post, \WP_REST_Request $request, bool $creating ) use ( &$part_insert_log ): void {
+			$part_insert_log[] = array(
+				'postId'    => (int) $post->ID,
+				'postType'  => $post->post_type,
+				'creating'  => $creating,
+				'requestId' => $request['id'] ?? null,
+				'area'      => $request['area'] ?? null,
+				'context'   => $request['context'] ?? null,
+			);
+		};
+		$wp_after_hook        = static function ( int $post_id, \WP_Post $post, bool $update, $post_before ) use ( &$wp_after_log ): void {
+			$wp_after_log[] = array(
+				'postId'       => $post_id,
+				'postType'     => $post->post_type,
+				'update'       => $update,
+				'postBeforeId' => $post_before instanceof \WP_Post ? (int) $post_before->ID : null,
+			);
+		};
+		$theme_file_filter    = static function ( $block_template, string $requested_id, string $requested_type ) use (
+			$case,
+			$theme_file_id,
+			$theme_file_slug,
+			$theme_file_template,
+			&$theme_file_log
+		) {
+			if ( $theme_file_id !== $requested_id || 'wp_template' !== $requested_type ) {
+				return $block_template;
+			}
+
+			$custom_post_id   = self::template_post_id_for_slug( $case['themeSlug'], $theme_file_slug, 'wp_template' );
+			$theme_file_log[] = array(
+				'id'           => $requested_id,
+				'type'         => $requested_type,
+				'customPostId' => $custom_post_id,
+			);
+
+			return 0 === $custom_post_id ? clone $theme_file_template : $block_template;
+		};
+
+		\wp_set_current_user( $fixtures['author'] );
+		\add_action( 'rest_after_insert_wp_template', $template_insert_hook, 10, 3 );
+		\add_action( 'rest_after_insert_wp_template_part', $part_insert_hook, 10, 3 );
+		\add_action( 'wp_after_insert_post', $wp_after_hook, 10, 4 );
+		\add_filter( 'pre_get_block_template', $theme_file_filter, 10, 3 );
+		$cap_filter = self::install_cap_filter( array( 'edit_posts', 'edit_theme_options' ) );
+
+		try {
+			$create_template_response = $controller->create_item(
+				self::request(
+					'POST',
+					'/wp/v2/templates',
+					array(
+						'context' => 'edit',
+						'_fields' => 'id,slug,theme,type,source,origin,content,title,status,wp_id,description,author,_links',
+					),
+					array(),
+					array(
+						'slug'        => $created_slug,
+						'theme'       => $case['themeSlug'],
+						'content'     => array( 'raw' => $created_content ),
+						'title'       => $created_title,
+						'description' => $created_description,
+						'author'      => $fixtures['author'],
+					)
+				)
+			);
+			$create_template_data     = $create_template_response instanceof \WP_REST_Response
+				? $create_template_response->get_data()
+				: array();
+			$created_post_id          = (int) ( $create_template_data['wp_id'] ?? 0 );
+			$created_post             = $created_post_id > 0 ? \get_post( $created_post_id ) : null;
+			$created_theme_terms      = $created_post_id > 0 ? self::term_names( $created_post_id, 'wp_theme' ) : array();
+
+			$create_part_response = $part_controller->create_item(
+				self::request(
+					'POST',
+					'/wp/v2/template-parts',
+					array(
+						'context' => 'edit',
+						'_fields' => 'id,slug,theme,type,source,content,title,status,wp_id,area,author,_links',
+					),
+					array(),
+					array(
+						'slug'    => $part_slug,
+						'theme'   => $case['themeSlug'],
+						'content' => $part_content,
+						'title'   => array( 'raw' => $part_title ),
+						'area'    => 'footer',
+						'author'  => $fixtures['author'],
+					)
+				)
+			);
+			$create_part_data     = $create_part_response instanceof \WP_REST_Response
+				? $create_part_response->get_data()
+				: array();
+			$created_part_post_id = (int) ( $create_part_data['wp_id'] ?? 0 );
+			$created_part_post    = $created_part_post_id > 0 ? \get_post( $created_part_post_id ) : null;
+			$part_theme_terms     = $created_part_post_id > 0 ? self::term_names( $created_part_post_id, 'wp_theme' ) : array();
+			$part_area_terms      = $created_part_post_id > 0 ? self::term_names( $created_part_post_id, 'wp_template_part_area' ) : array();
+
+			$update_response = $controller->update_item(
+				self::request(
+					'PUT',
+					'/wp/v2/templates/' . $case['templateId'],
+					array(
+						'context' => 'edit',
+						'_fields' => 'id,slug,theme,source,content,title,status,wp_id,description,author',
+					),
+					array( 'id' => $case['templateId'] ),
+					array(
+						'content'     => array( 'raw' => $updated_content ),
+						'title'       => array( 'raw' => $updated_title ),
+						'description' => $updated_description,
+						'author'      => $fixtures['author'],
+					)
+				)
+			);
+			$update_data     = $update_response instanceof \WP_REST_Response ? $update_response->get_data() : array();
+			$updated_post    = \get_post( $fixtures['template'] );
+
+			$theme_delete_response = $controller->delete_item(
+				self::request(
+					'DELETE',
+					'/wp/v2/templates/' . $theme_file_id,
+					array(),
+					array( 'id' => $theme_file_id ),
+					array( 'force' => true )
+				)
+			);
+
+			$promote_response = $controller->update_item(
+				self::request(
+					'PUT',
+					'/wp/v2/templates/' . $theme_file_id,
+					array(
+						'context' => 'edit',
+						'_fields' => 'id,slug,theme,source,origin,original_source,content,title,status,wp_id,description,has_theme_file,is_custom,author',
+					),
+					array( 'id' => $theme_file_id ),
+					array(
+						'content'     => $promoted_content,
+						'title'       => $promoted_title,
+						'description' => $promoted_description,
+						'author'      => $fixtures['author'],
+					)
+				)
+			);
+			$promote_data     = $promote_response instanceof \WP_REST_Response ? $promote_response->get_data() : array();
+			$promoted_post_id = (int) ( $promote_data['wp_id'] ?? 0 );
+			$promoted_post    = $promoted_post_id > 0 ? \get_post( $promoted_post_id ) : null;
+			$promoted_origin  = $promoted_post_id > 0 ? \get_post_meta( $promoted_post_id, 'origin', true ) : null;
+			$promoted_terms   = $promoted_post_id > 0 ? self::term_names( $promoted_post_id, 'wp_theme' ) : array();
+
+			$reset_response = $controller->update_item(
+				self::request(
+					'PUT',
+					'/wp/v2/templates/' . $theme_file_id,
+					array(
+						'context' => 'edit',
+						'_fields' => 'id,slug,theme,source,content,title,status,wp_id,has_theme_file,is_custom',
+					),
+					array( 'id' => $theme_file_id ),
+					array( 'source' => 'theme' )
+				)
+			);
+			$reset_data     = $reset_response instanceof \WP_REST_Response ? $reset_response->get_data() : array();
+			$post_after_reset = $promoted_post_id > 0 ? \get_post( $promoted_post_id ) : null;
+
+			$trash_response = $controller->delete_item(
+				self::request(
+					'DELETE',
+					'/wp/v2/templates/' . $created_id,
+					array(),
+					array( 'id' => $created_id ),
+					array( 'force' => false )
+				)
+			);
+			$trash_data     = $trash_response instanceof \WP_REST_Response ? $trash_response->get_data() : array();
+			$trashed_post   = $created_post_id > 0 ? \get_post( $created_post_id ) : null;
+			$trashed_id     = $case['themeSlug'] . '//' . $created_slug . '__trashed';
+
+			$already_trashed = $controller->delete_item(
+				self::request(
+					'DELETE',
+					'/wp/v2/templates/' . $trashed_id,
+					array(),
+					array( 'id' => $trashed_id ),
+					array( 'force' => false )
+				)
+			);
+
+			$force_part_response = $part_controller->delete_item(
+				self::request(
+					'DELETE',
+					'/wp/v2/template-parts/' . $part_id,
+					array(),
+					array( 'id' => $part_id ),
+					array( 'force' => true )
+				)
+			);
+			$force_part_data     = $force_part_response instanceof \WP_REST_Response
+				? $force_part_response->get_data()
+				: array();
+			$part_after_delete   = $created_part_post_id > 0 ? \get_post( $created_part_post_id ) : null;
+		} finally {
+			\remove_filter( 'user_has_cap', $cap_filter, 10 );
+			\remove_filter( 'pre_get_block_template', $theme_file_filter, 10 );
+			\remove_action( 'wp_after_insert_post', $wp_after_hook, 10 );
+			\remove_action( 'rest_after_insert_wp_template_part', $part_insert_hook, 10 );
+			\remove_action( 'rest_after_insert_wp_template', $template_insert_hook, 10 );
+		}
+
+		self::collect_failure(
+			$failures,
+			$create_template_response instanceof \WP_REST_Response
+				&& 201 === $create_template_response->get_status()
+				&& self::response_header( $create_template_response, 'Location' ) === \rest_url( 'wp/v2/templates/' . $created_id )
+				&& $created_post instanceof \WP_Post
+				&& 'wp_template' === $created_post->post_type
+				&& 'publish' === $created_post->post_status
+				&& $created_slug === $created_post->post_name
+				&& $created_content === $created_post->post_content
+				&& $created_title === $created_post->post_title
+				&& $created_description === $created_post->post_excerpt
+				&& $fixtures['author'] === (int) $created_post->post_author
+				&& in_array( $case['themeSlug'], $created_theme_terms, true )
+				&& $created_id === ( $create_template_data['id'] ?? null )
+				&& 'custom' === ( $create_template_data['source'] ?? null )
+				&& $created_content === ( $create_template_data['content']['raw'] ?? null )
+				&& $created_title === ( $create_template_data['title']['raw'] ?? null )
+				&& $fixtures['author'] === (int) ( $create_template_data['author'] ?? 0 )
+				&& self::hook_log_contains( $template_insert_log, $created_post_id, 'creating', true )
+				&& self::hook_log_contains( $wp_after_log, $created_post_id, 'update', false ),
+			'template create_item persists a custom template, assigns theme taxonomy, emits 201 Location, and fires insert hooks',
+			array(
+				'response'   => $create_template_response,
+				'data'       => $create_template_data,
+				'post'       => self::describe_post( $created_post ),
+				'themeTerms' => $created_theme_terms,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$create_part_response instanceof \WP_REST_Response
+				&& 201 === $create_part_response->get_status()
+				&& self::response_header( $create_part_response, 'Location' ) === \rest_url( 'wp/v2/template-parts/' . $part_id )
+				&& $created_part_post instanceof \WP_Post
+				&& 'wp_template_part' === $created_part_post->post_type
+				&& 'publish' === $created_part_post->post_status
+				&& $part_slug === $created_part_post->post_name
+				&& $part_content === $created_part_post->post_content
+				&& $part_title === $created_part_post->post_title
+				&& in_array( $case['themeSlug'], $part_theme_terms, true )
+				&& in_array( 'footer', $part_area_terms, true )
+				&& $part_id === ( $create_part_data['id'] ?? null )
+				&& 'wp_template_part' === ( $create_part_data['type'] ?? null )
+				&& 'footer' === ( $create_part_data['area'] ?? null )
+				&& $part_content === ( $create_part_data['content']['raw'] ?? null )
+				&& self::hook_log_contains( $part_insert_log, $created_part_post_id, 'creating', true )
+				&& self::hook_log_contains( $wp_after_log, $created_part_post_id, 'update', false ),
+			'template-part create_item persists area taxonomy, response shape, and insert hooks',
+			array(
+				'response'  => $create_part_response,
+				'data'      => $create_part_data,
+				'post'      => self::describe_post( $created_part_post ),
+				'themeTerms' => $part_theme_terms,
+				'areaTerms' => $part_area_terms,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$update_response instanceof \WP_REST_Response
+				&& 200 === $update_response->get_status()
+				&& $updated_post instanceof \WP_Post
+				&& $fixtures['template'] === (int) ( $update_data['wp_id'] ?? 0 )
+				&& $case['templateId'] === ( $update_data['id'] ?? null )
+				&& $updated_content === $updated_post->post_content
+				&& $updated_title === $updated_post->post_title
+				&& $updated_description === $updated_post->post_excerpt
+				&& $updated_content === ( $update_data['content']['raw'] ?? null )
+				&& $updated_title === ( $update_data['title']['raw'] ?? null )
+				&& self::hook_log_contains( $template_insert_log, $fixtures['template'], 'creating', false )
+				&& self::hook_log_contains( $wp_after_log, $fixtures['template'], 'update', true ),
+			'template update_item mutates the existing custom post in place and exposes edit-context response data',
+			array(
+				'response' => $update_response,
+				'data'     => $update_data,
+				'post'     => self::describe_post( $updated_post ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$theme_delete_response instanceof \WP_Error
+				&& 'rest_invalid_template' === $theme_delete_response->get_error_code()
+				&& $promote_response instanceof \WP_REST_Response
+				&& 200 === $promote_response->get_status()
+				&& $promoted_post instanceof \WP_Post
+				&& 'wp_template' === $promoted_post->post_type
+				&& $theme_file_slug === $promoted_post->post_name
+				&& $promoted_content === $promoted_post->post_content
+				&& $promoted_title === $promoted_post->post_title
+				&& $promoted_description === $promoted_post->post_excerpt
+				&& 'theme' === $promoted_origin
+				&& in_array( $case['themeSlug'], $promoted_terms, true )
+				&& $theme_file_id === ( $promote_data['id'] ?? null )
+				&& 'custom' === ( $promote_data['source'] ?? null )
+				&& 'theme' === ( $promote_data['origin'] ?? null )
+				&& 'user' === ( $promote_data['original_source'] ?? null )
+				&& false === ( $promote_data['has_theme_file'] ?? null )
+				&& true === ( $promote_data['is_custom'] ?? null )
+				&& self::hook_log_contains( $template_insert_log, $promoted_post_id, 'creating', false )
+				&& self::hook_log_contains( $wp_after_log, $promoted_post_id, 'update', false ),
+			'theme-file templates reject delete, then update_item promotes them to custom posts with origin metadata',
+			array(
+				'deleteError' => $theme_delete_response,
+				'response'    => $promote_response,
+				'data'        => $promote_data,
+				'post'        => self::describe_post( $promoted_post ),
+				'origin'      => $promoted_origin,
+				'themeTerms'  => $promoted_terms,
+				'filterLog'   => $theme_file_log,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$reset_response instanceof \WP_REST_Response
+				&& 200 === $reset_response->get_status()
+				&& ! ( $post_after_reset instanceof \WP_Post )
+				&& $theme_file_id === ( $reset_data['id'] ?? null )
+				&& 'theme' === ( $reset_data['source'] ?? null )
+				&& $theme_file_content === ( $reset_data['content']['raw'] ?? null )
+				&& $theme_file_title === ( $reset_data['title']['raw'] ?? null )
+				&& 0 === (int) ( $reset_data['wp_id'] ?? -1 )
+				&& true === ( $reset_data['has_theme_file'] ?? null )
+				&& false === ( $reset_data['is_custom'] ?? null ),
+			'update_item with source=theme deletes the custom override and returns the theme-file template',
+			array(
+				'response'       => $reset_response,
+				'data'           => $reset_data,
+				'postAfterReset' => self::describe_post( $post_after_reset ),
+				'filterLog'      => $theme_file_log,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$trash_response instanceof \WP_REST_Response
+				&& $trashed_post instanceof \WP_Post
+				&& 'trash' === $trashed_post->post_status
+				&& $created_slug . '__trashed' === $trashed_post->post_name
+				&& $created_slug === \get_post_meta( $created_post_id, '_wp_desired_post_slug', true )
+				&& 'trash' === ( $trash_data['status'] ?? null )
+				&& $already_trashed instanceof \WP_Error
+				&& 'rest_template_already_trashed' === $already_trashed->get_error_code()
+				&& 410 === (int) ( $already_trashed->get_error_data()['status'] ?? 0 )
+				&& $force_part_response instanceof \WP_REST_Response
+				&& true === ( $force_part_data['deleted'] ?? null )
+				&& $created_part_post_id === (int) ( $force_part_data['previous']['wp_id'] ?? 0 )
+				&& ! ( $part_after_delete instanceof \WP_Post ),
+			'delete_item trashes custom templates, reports already-trashed state, and force-deletes template parts with previous data',
+			array(
+				'trashResponse'     => $trash_response,
+				'trashData'         => $trash_data,
+				'alreadyTrashed'    => $already_trashed,
+				'alreadyTrashedId'  => $trashed_id,
+				'forcePartResponse' => $force_part_response,
+				'forcePartData'     => $force_part_data,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			count( $template_insert_log ) >= 3
+				&& 1 === count( $part_insert_log )
+				&& false === \has_filter( 'rest_after_insert_wp_template', $template_insert_hook )
+				&& false === \has_filter( 'rest_after_insert_wp_template_part', $part_insert_hook )
+				&& false === \has_filter( 'wp_after_insert_post', $wp_after_hook )
+				&& false === \has_filter( 'pre_get_block_template', $theme_file_filter )
+				&& false === \has_filter( 'user_has_cap', $cap_filter ),
+			'template mutation lifecycle uses bounded hooks and removes every temporary filter',
+			array(
+				'templateInsertLog' => $template_insert_log,
+				'partInsertLog'     => $part_insert_log,
+				'wpAfterLog'        => $wp_after_log,
+				'themeFileLog'      => $theme_file_log,
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'rest-site-editor.template-mutation-lifecycle',
+			$failures,
+			array(
+				'createdId'        => $created_id,
+				'partId'           => $part_id,
+				'themeFileId'      => $theme_file_id,
+				'templateHooks'    => count( $template_insert_log ),
+				'partHooks'        => count( $part_insert_log ),
+				'wpAfterHooks'     => count( $wp_after_log ),
+				'themeFileLookups' => count( $theme_file_log ),
 			)
 		);
 	}
@@ -3170,6 +3651,70 @@ PHP;
 		return $links[ $rel ][0]['href'] ?? null;
 	}
 
+	private static function response_header( \WP_REST_Response $response, string $name ): ?string {
+		foreach ( $response->get_headers() as $header => $value ) {
+			if ( 0 === strcasecmp( (string) $header, $name ) ) {
+				return is_array( $value ) ? implode( ', ', array_map( 'strval', $value ) ) : (string) $value;
+			}
+		}
+
+		return null;
+	}
+
+	private static function term_names( int $post_id, string $taxonomy ): array {
+		$terms = \get_the_terms( $post_id, $taxonomy );
+		if ( \is_wp_error( $terms ) || ! is_array( $terms ) ) {
+			return array();
+		}
+
+		$names = array();
+		foreach ( $terms as $term ) {
+			if ( is_object( $term ) && isset( $term->name ) ) {
+				$names[] = (string) $term->name;
+			}
+		}
+
+		sort( $names );
+		return $names;
+	}
+
+	private static function template_post_id_for_slug( string $theme_slug, string $slug, string $post_type ): int {
+		$templates = \get_block_templates(
+			array(
+				'slug__in' => array( $slug ),
+			),
+			$post_type
+		);
+
+		foreach ( $templates as $template ) {
+			if (
+				$template instanceof \WP_Block_Template
+				&& $theme_slug === $template->theme
+				&& $slug === $template->slug
+				&& (int) $template->wp_id > 0
+			) {
+				return (int) $template->wp_id;
+			}
+		}
+
+		return 0;
+	}
+
+	private static function hook_log_contains( array $log, int $post_id, string $key, $expected ): bool {
+		foreach ( $log as $entry ) {
+			if (
+				is_array( $entry )
+				&& $post_id === (int) ( $entry['postId'] ?? 0 )
+				&& array_key_exists( $key, $entry )
+				&& $expected === $entry[ $key ]
+			) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
 	private static function inspect_block_template_export_zip(
 		\ZipArchive $zip,
 		array $case,
@@ -3843,6 +4388,24 @@ PHP;
 		}
 
 		return $value;
+	}
+
+	private static function describe_post( $post ) {
+		if ( ! $post instanceof \WP_Post ) {
+			return self::describe_value( $post );
+		}
+
+		return array(
+			'ID'           => (int) $post->ID,
+			'post_author'  => (int) $post->post_author,
+			'post_content' => self::preview( $post->post_content ),
+			'post_excerpt' => self::preview( $post->post_excerpt ),
+			'post_name'    => (string) $post->post_name,
+			'post_parent'  => (int) $post->post_parent,
+			'post_status'  => (string) $post->post_status,
+			'post_title'   => (string) $post->post_title,
+			'post_type'    => (string) $post->post_type,
+		);
 	}
 
 	private static function describe_throwable( \Throwable $e ): array {
