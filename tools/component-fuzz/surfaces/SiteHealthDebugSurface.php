@@ -36,16 +36,10 @@ final class SiteHealthDebugSurface {
 			$rows[] = self::check_database_size( $ctx->fork( 'database-size' ) );
 			$rows[] = self::check_sizes( $ctx->fork( 'sizes' ) );
 			$rows[] = self::check_mysql_var( $ctx->fork( 'mysql-var' ) );
+			$rows[] = self::check_debug_data_full_scan_child( $ctx->fork( 'debug-data-full-scan' ) );
 			$rows[] = $ctx->skip(
 				'site-health-debug.database-size.malformed-row-omissions',
 				'Skipped malformed SHOW TABLE STATUS rows because get_database_size() currently assumes MySQL returns numeric Data_length and Index_length columns.'
-			);
-			$rows[] = $ctx->skip(
-				'site-health-debug.debug-data.full-scan-bounded',
-				'Skipped full WP_Debug_Data::debug_data() because it eagerly performs network, plugin/theme, media, and filesystem discovery before filters can short-circuit it.',
-				array(
-					'coveredPublicPaths' => array( 'WP_Debug_Data::format', 'WP_Debug_Data::get_database_size', 'WP_Debug_Data::get_sizes' ),
-				)
 			);
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
@@ -717,6 +711,596 @@ final class SiteHealthDebugSurface {
 				'preparedCount' => count( $wpdb->prepared_queries ),
 			)
 		);
+	}
+
+	private static function check_debug_data_full_scan_child( \ComponentFuzz\FuzzContext $ctx ): array {
+		$missing = array();
+		if ( ! defined( 'PHP_BINARY' ) || '' === PHP_BINARY ) {
+			$missing[] = 'PHP_BINARY';
+		}
+		foreach ( array( 'file_put_contents', 'json_decode', 'json_encode', 'proc_close', 'proc_open', 'random_bytes', 'stream_get_contents' ) as $function ) {
+			if ( ! function_exists( $function ) ) {
+				$missing[] = "function {$function}";
+			}
+		}
+
+		if ( array() !== $missing ) {
+			return $ctx->skip(
+				'site-health-debug.debug-data.full-scan-bounded',
+				'Skipped isolated WP_Debug_Data::debug_data() coverage because PHP subprocess APIs are unavailable.',
+				array(
+					'missing' => $missing,
+				)
+			);
+		}
+
+		$case = self::debug_data_child_case( $ctx );
+		$run  = self::run_debug_data_child( $case );
+
+		$failures = array();
+		self::collect_failure(
+			$failures,
+			$run['ok'] && is_array( $run['result'] ) && ! empty( $run['result']['ok'] ),
+			'isolated debug_data subprocess exits cleanly and returns structured JSON',
+			array(
+				'exitCode' => $run['exitCode'],
+				'stdout'   => self::describe_string( $run['stdout'] ),
+				'stderr'   => self::describe_string( $run['stderr'] ),
+				'result'   => $run['result'],
+			)
+		);
+
+		$result = is_array( $run['result'] ) ? $run['result'] : array();
+		$sections = is_array( $result['sections'] ?? null ) ? $result['sections'] : array();
+		$field_counts = is_array( $result['fieldCounts'] ?? null ) ? $result['fieldCounts'] : array();
+		$expected_sections = array(
+			'wp-core',
+			'wp-paths-sizes',
+			'wp-dropins',
+			'wp-active-theme',
+			'wp-parent-theme',
+			'wp-themes-inactive',
+			'wp-mu-plugins',
+			'wp-plugins-active',
+			'wp-plugins-inactive',
+			'wp-media',
+			'wp-server',
+			'wp-database',
+			'wp-constants',
+			'wp-filesystem',
+			$case['customSectionId'],
+		);
+		$expected_empty_sections = array(
+			'wp-dropins',
+			'wp-parent-theme',
+			'wp-themes-inactive',
+			'wp-mu-plugins',
+			'wp-plugins-active',
+			'wp-plugins-inactive',
+		);
+		$empty_section_counts_ok = true;
+		foreach ( $expected_empty_sections as $section ) {
+			$empty_section_counts_ok = $empty_section_counts_ok && 0 === ( $field_counts[ $section ] ?? null );
+		}
+
+		self::collect_failure(
+			$failures,
+			$expected_sections === $sections
+				&& ( $field_counts['wp-core'] ?? 0 ) >= 12
+				&& ( $field_counts['wp-media'] ?? 0 ) >= 8
+				&& 11 === ( $field_counts['wp-database'] ?? null )
+				&& ( $field_counts['wp-constants'] ?? 0 ) >= 18
+				&& ( $field_counts[ $case['customSectionId'] ] ?? null ) === 2
+				&& $empty_section_counts_ok,
+			'debug_data returns expected single-site core sections, empty plugin/theme buckets, and generated debug_information section',
+			array(
+				'expectedSections'      => $expected_sections,
+				'sections'              => $sections,
+				'fieldCounts'           => $field_counts,
+				'expectedEmptySections' => $expected_empty_sections,
+			)
+		);
+
+		$network_requests = is_array( $result['networkRequests'] ?? null ) ? $result['networkRequests'] : array();
+		self::collect_failure(
+			$failures,
+			'true' === ( $result['core']['dotorgDebug'] ?? null )
+				&& count( $network_requests ) >= 1
+				&& in_array( 'https://wordpress.org', array_column( $network_requests, 'url' ), true ),
+			'full debug data records a bounded successful WordPress.org communication field through pre_http_request',
+			array(
+				'core'            => $result['core'] ?? null,
+				'networkRequests' => $network_requests,
+			)
+		);
+
+		$paths = is_array( $result['paths'] ?? null ) ? $result['paths'] : array();
+		$loading_size_fields = array( 'wordpress_size', 'uploads_size', 'themes_size', 'plugins_size', 'fonts_size', 'database_size', 'total_size' );
+		$loading_fields_ok = true;
+		foreach ( $loading_size_fields as $field ) {
+			$loading_fields_ok = $loading_fields_ok
+				&& 'loading...' === ( $paths[ $field ]['debug'] ?? null )
+				&& is_string( $paths[ $field ]['value'] ?? null );
+		}
+		self::collect_failure(
+			$failures,
+			$loading_fields_ok
+				&& is_string( $paths['wordpress_path']['value'] ?? null )
+				&& is_string( $paths['uploads_path']['value'] ?? null )
+				&& is_string( $paths['themes_path']['value'] ?? null )
+				&& is_string( $paths['plugins_path']['value'] ?? null )
+				&& is_string( $paths['fonts_path']['value'] ?? null ),
+			'paths and sizes section exposes bounded paths and loading placeholders rather than scanning directories',
+			array(
+				'paths'             => $paths,
+				'loadingSizeFields' => $loading_size_fields,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$case['ghostscriptVersion'] === ( $result['media']['ghostscriptDebug'] ?? null )
+				&& $case['serverVersion'] === ( $result['database']['serverVersion'] ?? null )
+				&& $case['clientVersion'] === ( $result['database']['clientVersion'] ?? null )
+				&& $case['maxAllowedPacket'] === ( $result['database']['maxAllowedPacket'] ?? null )
+				&& $case['maxConnections'] === ( $result['database']['maxConnections'] ?? null ),
+			'generated Ghostscript and database fixture values are reflected in media/database sections',
+			array(
+				'expected' => array(
+					'ghostscript'       => $case['ghostscriptVersion'],
+					'serverVersion'     => $case['serverVersion'],
+					'clientVersion'     => $case['clientVersion'],
+					'maxAllowedPacket'  => $case['maxAllowedPacket'],
+					'maxConnections'    => $case['maxConnections'],
+				),
+				'media'    => $result['media'] ?? null,
+				'database' => $result['database'] ?? null,
+			)
+		);
+
+		$format = is_array( $result['format'] ?? null ) ? $result['format'] : array();
+		self::collect_failure(
+			$failures,
+			! empty( $format['customDebugPresent'] )
+				&& ! empty( $format['customInfoPresent'] )
+				&& empty( $format['privateLeak'] )
+				&& empty( $format['privateDatabaseLeak'] )
+				&& is_string( $format['debugSha1'] ?? null )
+				&& is_string( $format['infoSha1'] ?? null ),
+			'formatted full debug_data output includes generated public fields and omits private fields',
+			array( 'format' => $format )
+		);
+
+		self::collect_failure(
+			$failures,
+			'' === ( $result['unexpectedOutput'] ?? null )
+				&& '' === $run['stderr']
+				&& ! empty( $result['filtersRemoved'] )
+				&& ! empty( $result['fakeBinRemoved'] )
+				&& ! empty( $result['pathRestored'] ),
+			'child process cleans temporary hooks, fake Ghostscript path, and produces no stray output',
+			array(
+				'unexpectedOutput' => $result['unexpectedOutput'] ?? null,
+				'stderr'           => self::describe_string( $run['stderr'] ),
+				'filtersRemoved'   => $result['filtersRemoved'] ?? null,
+				'fakeBinRemoved'   => $result['fakeBinRemoved'] ?? null,
+				'pathRestored'     => $result['pathRestored'] ?? null,
+			)
+		);
+
+		return $ctx->result(
+			'site-health-debug.debug-data.full-scan-bounded',
+			array() === $failures,
+			array(
+				'failures'       => array_slice( $failures, 0, 8 ),
+				'sectionCount'   => count( $sections ),
+				'fieldCounts'    => $field_counts,
+				'networkCount'   => count( $network_requests ),
+				'customSection'  => $case['customSectionId'],
+				'debugSha1'      => $format['debugSha1'] ?? null,
+				'infoSha1'       => $format['infoSha1'] ?? null,
+			)
+		);
+	}
+
+	private static function debug_data_child_case( \ComponentFuzz\FuzzContext $ctx ): array {
+		$token = self::slug( $ctx->fork( 'token' ), 'fullscan' );
+
+		return array(
+			'repoRoot'            => \ComponentFuzz\repo_root(),
+			'token'               => $token,
+			'networkBody'         => 'component-fuzz-wordpress-org-ok-' . $token,
+			'ghostscriptVersion'  => '9.' . $ctx->int( 10, 99 ) . '.' . $ctx->int( 0, 9 ),
+			'serverVersion'       => '8.0.' . $ctx->int( 20, 99 ) . '-component-fuzz',
+			'clientVersion'       => 'mysqlnd-component-fuzz-' . $ctx->int( 1, 99 ),
+			'dbUser'              => 'cfz_user_' . $token,
+			'dbHost'              => 'db-' . $token . '.example.test',
+			'dbName'              => 'cfz_db_' . $token,
+			'dbCollate'           => 'utf8mb4_unicode_ci',
+			'maxAllowedPacket'    => (string) $ctx->int( 1048576, 16777216 ),
+			'maxConnections'      => (string) $ctx->int( 50, 500 ),
+			'customSectionId'     => 'cfz-site-health-debug-' . $token,
+			'customSectionLabel'  => 'Component Fuzz Debug ' . self::safe_label( $ctx->fork( 'section-label' ) ),
+			'customFieldId'       => 'cfz_full_scan_' . str_replace( '-', '_', $token ),
+			'customFieldLabel'    => 'Full Scan Field ' . self::safe_label( $ctx->fork( 'field-label' ) ),
+			'customValue'         => 'visible-info-' . self::safe_label( $ctx->fork( 'value' ) ),
+			'customDebug'         => 'visible-debug-' . self::safe_label( $ctx->fork( 'debug' ) ),
+			'privateSentinel'     => 'cfz-private-full-scan-' . sha1( (string) $ctx->seed() ),
+		);
+	}
+
+	private static function run_debug_data_child( array $case ): array {
+		$dir = rtrim( sys_get_temp_dir(), DIRECTORY_SEPARATOR ) . DIRECTORY_SEPARATOR . 'component-fuzz-site-health-debug';
+		\ComponentFuzz\ensure_dir( $dir );
+
+		$script = $dir . DIRECTORY_SEPARATOR . 'debug-data-child-' . getmypid() . '-' . bin2hex( random_bytes( 6 ) ) . '.php';
+		file_put_contents( $script, self::debug_data_child_program() );
+
+		$descriptors = array(
+			0 => array( 'pipe', 'r' ),
+			1 => array( 'pipe', 'w' ),
+			2 => array( 'pipe', 'w' ),
+		);
+
+		// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.system_calls_proc_open -- Isolates full WP_Debug_Data::debug_data() discovery in a local PHP subprocess.
+		$process = proc_open( array( PHP_BINARY, $script ), $descriptors, $pipes, \ComponentFuzz\repo_root() );
+		if ( ! is_resource( $process ) ) {
+			@unlink( $script );
+			return array(
+				'ok'       => false,
+				'exitCode' => -1,
+				'stdout'   => '',
+				'stderr'   => 'proc_open failed',
+				'result'   => null,
+			);
+		}
+
+		$payload = json_encode( $case, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE );
+		fwrite( $pipes[0], false === $payload ? '{}' : $payload );
+		fclose( $pipes[0] );
+
+		$stdout = stream_get_contents( $pipes[1] );
+		$stderr = stream_get_contents( $pipes[2] );
+		fclose( $pipes[1] );
+		fclose( $pipes[2] );
+
+		$exit_code = proc_close( $process );
+		@unlink( $script );
+
+		$result = json_decode( (string) $stdout, true );
+		return array(
+			'ok'       => 0 === $exit_code && is_array( $result ) && ! empty( $result['ok'] ),
+			'exitCode' => $exit_code,
+			'stdout'   => (string) $stdout,
+			'stderr'   => (string) $stderr,
+			'result'   => is_array( $result ) ? $result : null,
+		);
+	}
+
+	private static function debug_data_child_program(): string {
+		return <<<'PHP'
+<?php
+ini_set( 'display_errors', 'stderr' );
+error_reporting( E_ALL & ~E_DEPRECATED & ~E_USER_DEPRECATED );
+
+function component_fuzz_site_health_debug_preview( string $value, int $limit = 240 ): string {
+	$printable = preg_replace_callback(
+		'/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/',
+		static function ( array $m ): string {
+			return sprintf( '\\x%02X', ord( $m[0] ) );
+		},
+		$value
+	);
+
+	if ( strlen( $printable ) > $limit ) {
+		return substr( $printable, 0, $limit ) . '...';
+	}
+
+	return $printable;
+}
+
+function component_fuzz_site_health_debug_remove_dir( string $dir ): bool {
+	if ( ! is_dir( $dir ) ) {
+		return ! file_exists( $dir );
+	}
+
+	$items = scandir( $dir );
+	if ( false === $items ) {
+		return false;
+	}
+
+	foreach ( $items as $item ) {
+		if ( '.' === $item || '..' === $item ) {
+			continue;
+		}
+
+		$path = $dir . DIRECTORY_SEPARATOR . $item;
+		if ( is_dir( $path ) ) {
+			if ( ! component_fuzz_site_health_debug_remove_dir( $path ) ) {
+				return false;
+			}
+		} elseif ( ! @unlink( $path ) ) {
+			return false;
+		}
+	}
+
+	return @rmdir( $dir );
+}
+
+$component_fuzz_debug_outer_ob_level = ob_get_level();
+ob_start();
+
+$component_fuzz_debug_raw     = stream_get_contents( STDIN );
+$component_fuzz_debug_fixture = json_decode( $component_fuzz_debug_raw, true );
+$component_fuzz_debug_result  = array(
+	'ok'               => false,
+	'sections'         => array(),
+	'fieldCounts'      => array(),
+	'networkRequests'  => array(),
+	'core'             => array(),
+	'media'            => array(),
+	'database'         => array(),
+	'paths'            => array(),
+	'format'           => array(),
+	'unexpectedOutput' => '',
+	'filtersRemoved'   => false,
+	'fakeBinRemoved'   => false,
+	'pathRestored'     => false,
+);
+$component_fuzz_debug_original_path = getenv( 'PATH' );
+$component_fuzz_debug_fake_bin      = null;
+$component_fuzz_debug_network_filter = null;
+$component_fuzz_debug_info_filter    = null;
+
+try {
+	if ( ! is_array( $component_fuzz_debug_fixture ) || empty( $component_fuzz_debug_fixture['repoRoot'] ) ) {
+		throw new RuntimeException( 'Invalid Site Health debug_data fixture.' );
+	}
+
+	if ( ! defined( 'WP_CACHE' ) ) {
+		define( 'WP_CACHE', false );
+	}
+
+	require_once $component_fuzz_debug_fixture['repoRoot'] . '/tools/component-fuzz/lib/autoload.php';
+
+	\ComponentFuzz\WpBootstrap::load();
+
+	require_once ABSPATH . 'wp-admin/includes/misc.php';
+	require_once ABSPATH . 'wp-admin/includes/class-wp-debug-data.php';
+
+	if ( ! class_exists( 'Component_Fuzz_Site_Health_Debug_WPDB_Double', false ) ) {
+		class Component_Fuzz_Site_Health_Debug_WPDB_Double extends Component_Fuzz_WPDB_Stub {
+			public $dbh;
+			public $dbuser;
+			public $dbhost;
+			public $dbname;
+			public $collate;
+			public array $query_log = array();
+
+			private array $fixture;
+
+			public function __construct( array $fixture ) {
+				$this->fixture = $fixture;
+				parent::__construct();
+
+				$this->dbh     = (object) array( 'client_info' => (string) $fixture['clientVersion'] );
+				$this->dbuser  = (string) $fixture['dbUser'];
+				$this->dbhost  = (string) $fixture['dbHost'];
+				$this->dbname  = (string) $fixture['dbName'];
+				$this->collate = (string) $fixture['dbCollate'];
+			}
+
+			public function get_var( $query = null, $x = 0, $y = 0 ) {
+				$query = (string) $query;
+				$this->query_log[] = array(
+					'method' => 'get_var',
+					'query'  => $query,
+				);
+
+				if ( 'SELECT VERSION()' === $query ) {
+					return (string) $this->fixture['serverVersion'];
+				}
+
+				return parent::get_var( $query, $x, $y );
+			}
+
+			public function get_row( $query = null, $output = OBJECT, $y = 0 ) {
+				$query = (string) $query;
+				$this->query_log[] = array(
+					'method' => 'get_row',
+					'query'  => $query,
+					'output' => $output,
+				);
+
+				$prefix = 'SHOW VARIABLES LIKE ';
+				if ( str_starts_with( $query, $prefix ) ) {
+					$name = trim( substr( $query, strlen( $prefix ) ), "'\"" );
+					if ( 'max_allowed_packet' === $name ) {
+						return array(
+							'Variable_name' => $name,
+							'Value'         => (string) $this->fixture['maxAllowedPacket'],
+						);
+					}
+					if ( 'max_connections' === $name ) {
+						return array(
+							'Variable_name' => $name,
+							'Value'         => (string) $this->fixture['maxConnections'],
+						);
+					}
+
+					return null;
+				}
+
+				return parent::get_row( $query, $output, $y );
+			}
+		}
+	}
+
+	$GLOBALS['wpdb'] = new Component_Fuzz_Site_Health_Debug_WPDB_Double( $component_fuzz_debug_fixture );
+
+	$component_fuzz_debug_fake_bin = rtrim( sys_get_temp_dir(), DIRECTORY_SEPARATOR ) . DIRECTORY_SEPARATOR . 'component-fuzz-site-health-debug-bin-' . getmypid();
+	if ( ! is_dir( $component_fuzz_debug_fake_bin ) && ! mkdir( $component_fuzz_debug_fake_bin, 0700, true ) ) {
+		throw new RuntimeException( 'Could not create fake Ghostscript bin directory.' );
+	}
+
+	$component_fuzz_debug_gs = $component_fuzz_debug_fake_bin . DIRECTORY_SEPARATOR . 'gs';
+	$component_fuzz_debug_gs_script = "#!/bin/sh\nprintf '%s\n' " . escapeshellarg( (string) $component_fuzz_debug_fixture['ghostscriptVersion'] ) . "\n";
+	if ( false === file_put_contents( $component_fuzz_debug_gs, $component_fuzz_debug_gs_script ) || ! chmod( $component_fuzz_debug_gs, 0700 ) ) {
+		throw new RuntimeException( 'Could not create fake Ghostscript executable.' );
+	}
+
+	$component_fuzz_debug_path_suffix = false === $component_fuzz_debug_original_path || '' === $component_fuzz_debug_original_path
+		? ''
+		: PATH_SEPARATOR . $component_fuzz_debug_original_path;
+	putenv( 'PATH=' . $component_fuzz_debug_fake_bin . $component_fuzz_debug_path_suffix );
+
+	$component_fuzz_debug_network_filter = static function ( $preempt, array $parsed_args, string $url ) use ( &$component_fuzz_debug_result, $component_fuzz_debug_fixture ) {
+		unset( $preempt );
+
+		$component_fuzz_debug_result['networkRequests'][] = array(
+			'url'     => $url,
+			'timeout' => $parsed_args['timeout'] ?? null,
+		);
+
+		return array(
+			'headers'  => array( 'content-type' => 'text/html; charset=utf-8' ),
+			'body'     => (string) $component_fuzz_debug_fixture['networkBody'],
+			'response' => array(
+				'code'    => 200,
+				'message' => 'OK',
+			),
+			'cookies'  => array(),
+			'filename' => null,
+		);
+	};
+	$component_fuzz_debug_info_filter = static function ( array $info ) use ( $component_fuzz_debug_fixture ): array {
+		$info[ $component_fuzz_debug_fixture['customSectionId'] ] = array(
+			'label'      => (string) $component_fuzz_debug_fixture['customSectionLabel'],
+			'show_count' => true,
+			'fields'     => array(
+				$component_fuzz_debug_fixture['customFieldId'] => array(
+					'label' => (string) $component_fuzz_debug_fixture['customFieldLabel'],
+					'value' => (string) $component_fuzz_debug_fixture['customValue'],
+					'debug' => (string) $component_fuzz_debug_fixture['customDebug'],
+				),
+				'cfz_private_full_scan' => array(
+					'label'   => 'Private Full Scan',
+					'value'   => (string) $component_fuzz_debug_fixture['privateSentinel'],
+					'debug'   => (string) $component_fuzz_debug_fixture['privateSentinel'],
+					'private' => true,
+				),
+			),
+		);
+
+		return $info;
+	};
+
+	add_filter( 'pre_http_request', $component_fuzz_debug_network_filter, 10, 3 );
+	add_filter( 'debug_information', $component_fuzz_debug_info_filter, 10, 1 );
+
+	$component_fuzz_debug_info  = WP_Debug_Data::debug_data();
+	$component_fuzz_debug_debug = WP_Debug_Data::format( $component_fuzz_debug_info, 'debug' );
+	$component_fuzz_debug_info_text = WP_Debug_Data::format( $component_fuzz_debug_info, 'info' );
+
+	$component_fuzz_debug_result['sections'] = array_keys( $component_fuzz_debug_info );
+	foreach ( $component_fuzz_debug_info as $component_fuzz_debug_section => $component_fuzz_debug_details ) {
+		$component_fuzz_debug_result['fieldCounts'][ $component_fuzz_debug_section ] = isset( $component_fuzz_debug_details['fields'] ) && is_array( $component_fuzz_debug_details['fields'] )
+			? count( $component_fuzz_debug_details['fields'] )
+			: null;
+	}
+
+	$component_fuzz_debug_result['core'] = array(
+		'dotorgDebug' => $component_fuzz_debug_info['wp-core']['fields']['dotorg_communication']['debug'] ?? null,
+		'dotorgValue' => $component_fuzz_debug_info['wp-core']['fields']['dotorg_communication']['value'] ?? null,
+	);
+	$component_fuzz_debug_result['media'] = array(
+		'ghostscriptDebug' => $component_fuzz_debug_info['wp-media']['fields']['ghostscript_version']['debug'] ?? null,
+		'ghostscriptValue' => $component_fuzz_debug_info['wp-media']['fields']['ghostscript_version']['value'] ?? null,
+	);
+	$component_fuzz_debug_path_fields = array(
+		'wordpress_path',
+		'wordpress_size',
+		'uploads_path',
+		'uploads_size',
+		'themes_path',
+		'themes_size',
+		'plugins_path',
+		'plugins_size',
+		'fonts_path',
+		'fonts_size',
+		'database_size',
+		'total_size',
+	);
+	foreach ( $component_fuzz_debug_path_fields as $component_fuzz_debug_path_field ) {
+		$component_fuzz_debug_result['paths'][ $component_fuzz_debug_path_field ] = array(
+			'value' => $component_fuzz_debug_info['wp-paths-sizes']['fields'][ $component_fuzz_debug_path_field ]['value'] ?? null,
+			'debug' => $component_fuzz_debug_info['wp-paths-sizes']['fields'][ $component_fuzz_debug_path_field ]['debug'] ?? null,
+		);
+	}
+	$component_fuzz_debug_result['database'] = array(
+		'serverVersion'    => $component_fuzz_debug_info['wp-database']['fields']['server_version']['value'] ?? null,
+		'clientVersion'    => $component_fuzz_debug_info['wp-database']['fields']['client_version']['value'] ?? null,
+		'maxAllowedPacket' => $component_fuzz_debug_info['wp-database']['fields']['max_allowed_packet']['value'] ?? null,
+		'maxConnections'   => $component_fuzz_debug_info['wp-database']['fields']['max_connections']['value'] ?? null,
+		'queryLog'         => $GLOBALS['wpdb']->query_log,
+	);
+	$component_fuzz_debug_result['format'] = array(
+		'debugSha1'             => sha1( $component_fuzz_debug_debug ),
+		'infoSha1'              => sha1( $component_fuzz_debug_info_text ),
+		'customDebugPresent'    => str_contains( $component_fuzz_debug_debug, (string) $component_fuzz_debug_fixture['customDebug'] ),
+		'customInfoPresent'     => str_contains( $component_fuzz_debug_info_text, (string) $component_fuzz_debug_fixture['customValue'] ),
+		'privateLeak'           => str_contains( $component_fuzz_debug_debug, (string) $component_fuzz_debug_fixture['privateSentinel'] )
+			|| str_contains( $component_fuzz_debug_info_text, (string) $component_fuzz_debug_fixture['privateSentinel'] ),
+		'privateDatabaseLeak'   => str_contains( $component_fuzz_debug_debug, (string) $component_fuzz_debug_fixture['dbUser'] )
+			|| str_contains( $component_fuzz_debug_debug, (string) $component_fuzz_debug_fixture['dbHost'] )
+			|| str_contains( $component_fuzz_debug_debug, (string) $component_fuzz_debug_fixture['dbName'] ),
+	);
+
+	$component_fuzz_debug_result['ok'] = true;
+} catch ( Throwable $e ) {
+	$component_fuzz_debug_result['throwable'] = array(
+		'class'   => get_class( $e ),
+		'message' => $e->getMessage(),
+		'file'    => $e->getFile(),
+		'line'    => $e->getLine(),
+	);
+} finally {
+	if ( null !== $component_fuzz_debug_info_filter ) {
+		$removed_info = remove_filter( 'debug_information', $component_fuzz_debug_info_filter, 10 );
+	} else {
+		$removed_info = true;
+	}
+	if ( null !== $component_fuzz_debug_network_filter ) {
+		$removed_network = remove_filter( 'pre_http_request', $component_fuzz_debug_network_filter, 10 );
+	} else {
+		$removed_network = true;
+	}
+
+	$component_fuzz_debug_result['filtersRemoved'] = $removed_info && $removed_network;
+
+	if ( false === $component_fuzz_debug_original_path ) {
+		putenv( 'PATH' );
+		$component_fuzz_debug_result['pathRestored'] = false === getenv( 'PATH' );
+	} else {
+		putenv( 'PATH=' . $component_fuzz_debug_original_path );
+		$component_fuzz_debug_result['pathRestored'] = getenv( 'PATH' ) === $component_fuzz_debug_original_path;
+	}
+
+	if ( null !== $component_fuzz_debug_fake_bin ) {
+		$component_fuzz_debug_result['fakeBinRemoved'] = component_fuzz_site_health_debug_remove_dir( $component_fuzz_debug_fake_bin );
+	}
+
+	while ( ob_get_level() > $component_fuzz_debug_outer_ob_level ) {
+		$component_fuzz_debug_result['unexpectedOutput'] = ob_get_clean() . $component_fuzz_debug_result['unexpectedOutput'];
+	}
+
+	$component_fuzz_debug_result['unexpectedOutput'] = component_fuzz_site_health_debug_preview( (string) $component_fuzz_debug_result['unexpectedOutput'] );
+}
+
+$component_fuzz_debug_json = json_encode( $component_fuzz_debug_result, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE );
+echo false === $component_fuzz_debug_json ? '{"ok":false,"error":"json_encode failed"}' : $component_fuzz_debug_json;
+exit( ! empty( $component_fuzz_debug_result['ok'] ) ? 0 : 1 );
+PHP;
 	}
 
 	private static function format_case( \ComponentFuzz\FuzzContext $ctx ): array {
