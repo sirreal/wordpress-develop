@@ -47,19 +47,7 @@ final class RestSiteEditorSurface {
 			$rows[] = self::check_edit_site_export_controller( $ctx );
 			$rows[] = self::check_block_templates_export_generator( $ctx, $case );
 			$rows[] = self::check_live_edit_site_export_controller( $ctx, $case );
-			$rows[] = self::skip(
-				$ctx,
-				'rest-site-editor.broad-template-dispatch.skipped',
-				'Broad template collection queries are skipped because they can traverse theme/template CPT query paths'
-					. ' outside the bounded fixtures; bounded item-route dispatch is covered directly.',
-				array(
-					'controllers' => array(
-						'WP_REST_Templates_Controller',
-						'WP_REST_Template_Revisions_Controller',
-						'WP_REST_Template_Autosaves_Controller',
-					),
-				)
-			);
+			$rows[] = self::check_template_collection_dispatch_guards( $ctx, $case );
 		} catch ( \Throwable $e ) {
 			$rows[] = self::row(
 				$ctx,
@@ -1060,6 +1048,250 @@ final class RestSiteEditorSurface {
 				'templateRoute'     => $template_route,
 				'templatePartRoute' => $part_route,
 				'filterLog'         => $filter_log,
+			)
+		);
+	}
+
+	private static function check_template_collection_dispatch_guards(
+		\ComponentFuzz\FuzzContext $ctx,
+		array $case
+	): array {
+		$failures        = array();
+		$previous_server = $GLOBALS['wp_rest_server'] ?? null;
+		$server_existed  = array_key_exists( 'wp_rest_server', $GLOBALS );
+		$server          = new \WP_REST_Server();
+		$filter_log      = array();
+		$template_filter = static function ( $block_templates, array $query, string $template_type ) use ( &$filter_log ) {
+			$filter_log[] = array(
+				'hook'  => 'pre_get_block_templates',
+				'type'  => $template_type,
+				'query' => $query,
+			);
+			return $block_templates;
+		};
+		$item_filter     = static function ( $block_template, string $requested_id, string $template_type ) use ( &$filter_log ) {
+			$filter_log[] = array(
+				'hook' => 'pre_get_block_template',
+				'id'   => $requested_id,
+				'type' => $template_type,
+			);
+			return $block_template;
+		};
+
+		try {
+			$GLOBALS['wp_rest_server'] = $server;
+			( new \WP_REST_Templates_Controller( 'wp_template' ) )->register_routes();
+			( new \WP_REST_Templates_Controller( 'wp_template_part' ) )->register_routes();
+			( new \WP_REST_Template_Revisions_Controller( 'wp_template' ) )->register_routes();
+			( new \WP_REST_Template_Autosaves_Controller( 'wp_template' ) )->register_routes();
+
+			$routes          = $server->get_routes();
+			$template_route  = '/wp/v2/templates';
+			$part_route      = '/wp/v2/template-parts';
+			$revision_route  = self::route_key_for_parts(
+				$routes,
+				array( '/wp/v2/templates/(?P<parent>', '/revisions' ),
+				array( '/revisions/(?P<id>' )
+			);
+			$autosaves_route = self::route_key_for_parts(
+				$routes,
+				array( '/wp/v2/templates/(?P<id>', '/autosaves' ),
+				array( '/autosaves/(?P<id>' )
+			);
+
+			$template_data  = $server->get_data_for_route( $template_route, $routes[ $template_route ] ?? array(), 'help' );
+			$part_data      = $server->get_data_for_route( $part_route, $routes[ $part_route ] ?? array(), 'help' );
+			$revision_data  = null === $revision_route
+				? null
+				: $server->get_data_for_route( $revision_route, $routes[ $revision_route ] ?? array(), 'help' );
+			$autosaves_data = null === $autosaves_route
+				? null
+				: $server->get_data_for_route( $autosaves_route, $routes[ $autosaves_route ] ?? array(), 'help' );
+
+			self::collect_failure(
+				$failures,
+				array( 'GET', 'POST' ) === self::route_methods( $routes[ $template_route ] ?? array() )
+					&& array( 'GET', 'POST' ) === self::route_methods( $routes[ $part_route ] ?? array() )
+					&& null !== $revision_route
+					&& array( 'GET' ) === self::route_methods( $routes[ $revision_route ] ?? array() )
+					&& null !== $autosaves_route
+					&& array( 'GET', 'POST' ) === self::route_methods( $routes[ $autosaves_route ] ?? array() ),
+				'template, template-part, revision, and autosave collection routes expose bounded methods',
+				array(
+					'templateMethods'  => self::route_methods( $routes[ $template_route ] ?? array() ),
+					'partMethods'      => self::route_methods( $routes[ $part_route ] ?? array() ),
+					'revisionRoute'    => $revision_route,
+					'revisionMethods'  => null === $revision_route ? array() : self::route_methods( $routes[ $revision_route ] ?? array() ),
+					'autosavesRoute'   => $autosaves_route,
+					'autosavesMethods' => null === $autosaves_route ? array() : self::route_methods( $routes[ $autosaves_route ] ?? array() ),
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				self::route_data_has_methods( $template_data, array( 'GET', 'POST' ) )
+					&& self::route_data_has_methods( $part_data, array( 'GET', 'POST' ) )
+					&& self::route_data_has_methods( $revision_data, array( 'GET' ) )
+					&& self::route_data_has_methods( $autosaves_data, array( 'GET', 'POST' ) )
+					&& self::route_data_has_endpoint_args( $template_data, array( 'GET' ), array( 'area', 'context', 'post_type', 'wp_id' ) )
+					&& self::route_data_has_endpoint_args( $template_data, array( 'POST' ), array( 'content', 'slug', 'theme', 'title' ) )
+					&& self::route_data_has_endpoint_args( $part_data, array( 'GET' ), array( 'area', 'context', 'post_type', 'wp_id' ) )
+					&& self::route_data_has_endpoint_args( $part_data, array( 'POST' ), array( 'area', 'content', 'slug', 'theme', 'title' ) )
+					&& self::route_data_has_endpoint_args( $revision_data, array( 'GET' ), array( 'context', 'offset', 'page', 'per_page' ) )
+					&& self::route_data_has_endpoint_args( $autosaves_data, array( 'GET' ), array( 'context' ) )
+					&& self::route_data_has_endpoint_args( $autosaves_data, array( 'POST' ), array( 'content', 'slug', 'theme', 'title' ) )
+					&& self::route_data_schema_has_properties( $template_data, array( 'id', 'slug', 'theme', 'content', 'is_custom' ) )
+					&& self::route_data_schema_has_properties( $part_data, array( 'id', 'slug', 'theme', 'content', 'area' ) )
+					&& self::route_data_schema_has_properties( $revision_data, array( 'id', 'parent', 'content', 'wp_id' ) )
+					&& self::route_data_schema_has_properties( $autosaves_data, array( 'id', 'parent', 'content', 'wp_id' ) ),
+				'template collection route index data exposes methods, args, and schemas without dispatching broad queries',
+				array(
+					'templateData'  => $template_data,
+					'partData'      => $part_data,
+					'revisionRoute' => $revision_route,
+					'revisionData'  => $revision_data,
+					'autosavesRoute' => $autosaves_route,
+					'autosavesData' => $autosaves_data,
+				)
+			);
+
+			\add_filter( 'pre_get_block_templates', $template_filter, 10, 3 );
+			\add_filter( 'pre_get_block_template', $item_filter, 10, 3 );
+
+			$denied_template = $server->dispatch(
+				self::request(
+					'GET',
+					$template_route,
+					array(
+						'context' => 'edit',
+						'_fields' => 'id',
+					)
+				)
+			);
+			$denied_part     = $server->dispatch(
+				self::request(
+					'GET',
+					$part_route,
+					array(
+						'context' => 'edit',
+						'_fields' => 'id',
+					)
+				)
+			);
+			$denied_lookup   = $server->dispatch(
+				self::request(
+					'GET',
+					'/wp/v2/templates/lookup',
+					array(
+						'context'   => 'edit',
+						'is_custom' => true,
+						'slug'      => 'denied-' . substr( $case['token'], 0, 6 ),
+						'_fields'   => 'id',
+					)
+				)
+			);
+			$denied_log      = $filter_log;
+
+			$cap_filter = self::install_cap_filter( array( 'edit_posts' ) );
+			try {
+				$head_template = $server->dispatch(
+					self::request(
+						'HEAD',
+						$template_route,
+						array(
+							'context' => 'edit',
+							'_fields' => 'id,slug',
+						)
+					)
+				);
+				$head_part     = $server->dispatch(
+					self::request(
+						'HEAD',
+						$part_route,
+						array(
+							'context' => 'edit',
+							'_fields' => 'id,slug,area',
+						)
+					)
+				);
+			} finally {
+				\remove_filter( 'user_has_cap', $cap_filter, 10 );
+				\remove_filter( 'pre_get_block_templates', $template_filter, 10 );
+				\remove_filter( 'pre_get_block_template', $item_filter, 10 );
+			}
+		} finally {
+			if ( $server_existed ) {
+				$GLOBALS['wp_rest_server'] = $previous_server;
+			} else {
+				unset( $GLOBALS['wp_rest_server'] );
+			}
+		}
+
+		$denied_status        = \rest_authorization_required_code();
+		$denied_template_data = $denied_template instanceof \WP_REST_Response ? $denied_template->get_data() : array();
+		$denied_part_data     = $denied_part instanceof \WP_REST_Response ? $denied_part->get_data() : array();
+		$denied_lookup_data   = $denied_lookup instanceof \WP_REST_Response ? $denied_lookup->get_data() : array();
+		$head_template_data   = $head_template instanceof \WP_REST_Response ? $head_template->get_data() : null;
+		$head_part_data       = $head_part instanceof \WP_REST_Response ? $head_part->get_data() : null;
+
+		self::collect_failure(
+			$failures,
+			$denied_template instanceof \WP_REST_Response
+				&& $denied_status === $denied_template->get_status()
+				&& 'rest_cannot_manage_templates' === ( $denied_template_data['code'] ?? null )
+				&& $denied_part instanceof \WP_REST_Response
+				&& $denied_status === $denied_part->get_status()
+				&& 'rest_cannot_manage_templates' === ( $denied_part_data['code'] ?? null )
+				&& $denied_lookup instanceof \WP_REST_Response
+				&& $denied_status === $denied_lookup->get_status()
+				&& 'rest_cannot_manage_templates' === ( $denied_lookup_data['code'] ?? null )
+				&& array() === $denied_log,
+			'template collection and lookup dispatch deny access before template lookup when capabilities are absent',
+			array(
+				'deniedStatus' => $denied_status,
+				'templateStatus' => $denied_template instanceof \WP_REST_Response ? $denied_template->get_status() : null,
+				'templateData' => $denied_template_data,
+				'partStatus'   => $denied_part instanceof \WP_REST_Response ? $denied_part->get_status() : null,
+				'partData'     => $denied_part_data,
+				'lookupStatus' => $denied_lookup instanceof \WP_REST_Response ? $denied_lookup->get_status() : null,
+				'lookupData'   => $denied_lookup_data,
+				'filterLog'    => $denied_log,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$head_template instanceof \WP_REST_Response
+				&& 200 === $head_template->get_status()
+				&& array() === $head_template_data
+				&& $head_part instanceof \WP_REST_Response
+				&& 200 === $head_part->get_status()
+				&& array() === $head_part_data
+				&& array() === $filter_log
+				&& false === \has_filter( 'pre_get_block_templates', $template_filter )
+				&& false === \has_filter( 'pre_get_block_template', $item_filter )
+				&& false === \has_filter( 'user_has_cap', $cap_filter ),
+			'template collection HEAD dispatch returns empty data and does not call template lookup filters',
+			array(
+				'templateStatus' => $head_template instanceof \WP_REST_Response ? $head_template->get_status() : null,
+				'templateData'   => $head_template_data,
+				'partStatus'     => $head_part instanceof \WP_REST_Response ? $head_part->get_status() : null,
+				'partData'       => $head_part_data,
+				'filterLog'      => $filter_log,
+				'templateFilterRemoved' => false === \has_filter( 'pre_get_block_templates', $template_filter ),
+				'itemFilterRemoved' => false === \has_filter( 'pre_get_block_template', $item_filter ),
+				'capFilterRemoved' => false === \has_filter( 'user_has_cap', $cap_filter ),
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'rest-site-editor.template-collection-dispatch-guards',
+			$failures,
+			array(
+				'case'       => self::case_summary( $case ),
+				'filterLog'  => $filter_log,
+				'notCovered' => 'Non-HEAD template collection dispatch, revision/autosave collection callbacks after permission success, template writes, template CPT queries, and filesystem-backed template traversal remain intentionally outside this bounded dispatch guard.',
 			)
 		);
 	}
@@ -2816,6 +3048,104 @@ PHP;
 		}
 
 		return false;
+	}
+
+	private static function route_key_for_parts( array $routes, array $required_parts, array $excluded_parts = array() ): ?string {
+		foreach ( array_keys( $routes ) as $route ) {
+			foreach ( $required_parts as $part ) {
+				if ( ! str_contains( $route, $part ) ) {
+					continue 2;
+				}
+			}
+			foreach ( $excluded_parts as $part ) {
+				if ( str_contains( $route, $part ) ) {
+					continue 2;
+				}
+			}
+			return $route;
+		}
+
+		return null;
+	}
+
+	private static function route_methods( array $handlers ): array {
+		$methods = array();
+		foreach ( $handlers as $handler ) {
+			if ( ! is_array( $handler ) || ! is_array( $handler['methods'] ?? null ) ) {
+				continue;
+			}
+			foreach ( $handler['methods'] as $method => $enabled ) {
+				if ( $enabled ) {
+					$methods[] = (string) $method;
+				}
+			}
+		}
+
+		$methods = array_values( array_unique( $methods ) );
+		sort( $methods );
+
+		return $methods;
+	}
+
+	private static function route_data_has_methods( ?array $data, array $expected_methods ): bool {
+		if ( ! is_array( $data['methods'] ?? null ) ) {
+			return false;
+		}
+
+		$methods = array_values( array_map( 'strval', $data['methods'] ) );
+		sort( $methods );
+		sort( $expected_methods );
+
+		return $expected_methods === $methods;
+	}
+
+	private static function route_data_has_endpoint_args( ?array $data, array $methods, array $args ): bool {
+		$endpoint = self::route_data_endpoint_for_methods( $data, $methods );
+		if ( null === $endpoint || ! is_array( $endpoint['args'] ?? null ) ) {
+			return false;
+		}
+
+		foreach ( $args as $arg ) {
+			if ( ! array_key_exists( $arg, $endpoint['args'] ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function route_data_schema_has_properties( ?array $data, array $properties ): bool {
+		if ( ! is_array( $data['schema']['properties'] ?? null ) ) {
+			return false;
+		}
+
+		foreach ( $properties as $property ) {
+			if ( ! array_key_exists( $property, $data['schema']['properties'] ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function route_data_endpoint_for_methods( ?array $data, array $methods ): ?array {
+		if ( ! is_array( $data['endpoints'] ?? null ) ) {
+			return null;
+		}
+
+		sort( $methods );
+		foreach ( $data['endpoints'] as $endpoint ) {
+			if ( ! is_array( $endpoint['methods'] ?? null ) ) {
+				continue;
+			}
+			$endpoint_methods = array_values( array_map( 'strval', $endpoint['methods'] ) );
+			sort( $endpoint_methods );
+			if ( $methods === $endpoint_methods ) {
+				return $endpoint;
+			}
+		}
+
+		return null;
 	}
 
 	private static function matching_routes( array $routes ): array {
