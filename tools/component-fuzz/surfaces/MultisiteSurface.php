@@ -65,14 +65,7 @@ final class MultisiteSurface {
 			$rows[] = self::check_user_blog_membership_helpers( $ctx, $case );
 			$rows[] = self::check_cache_group_isolation( $ctx, $case );
 			$rows[] = self::check_restoration_probe( $ctx, $snapshot );
-
-			if ( ! is_multisite() ) {
-				$rows[] = $ctx->skip(
-					'multisite.network-options.true-multisite-sitemeta-writes',
-					'The harness does not enable MULTISITE globally, so direct sitemeta write paths are skipped; '
-						. 'reads and non-multisite network-option CRUD remain covered without DB writes.'
-				);
-			}
+			$rows[] = self::check_true_multisite_lifecycle_subprocess( $ctx->fork( 'true-multisite-lifecycle' ), $case );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
 				'multisite.surface-no-throw',
@@ -1651,6 +1644,769 @@ final class MultisiteSurface {
 		);
 	}
 
+	private static function check_true_multisite_lifecycle_subprocess( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$missing = self::true_multisite_lifecycle_child_missing_requirements();
+		if ( array() !== $missing ) {
+			return $ctx->skip(
+				'multisite.true-multisite.site-and-sitemeta-lifecycle',
+				'Required child-process APIs are unavailable.',
+				array(
+					'missing' => implode( ', ', $missing ),
+					'case'    => self::describe_case( $case ),
+				)
+			);
+		}
+
+		$run     = self::run_true_multisite_lifecycle_child( $case );
+		$result  = $run['result'];
+		$details = array(
+			'case'     => self::describe_case( $case ),
+			'exitCode' => $run['exitCode'],
+			'stdout'   => self::child_preview( $run['stdout'] ),
+			'stderr'   => self::child_preview( $run['stderr'] ),
+		);
+
+		if ( is_array( $result ) && ! empty( $result['skip'] ) ) {
+			return $ctx->skip(
+				'multisite.true-multisite.site-and-sitemeta-lifecycle',
+				(string) ( $result['reason'] ?? 'True multisite child check skipped.' ),
+				$details + array(
+					'childDetails' => $result['details'] ?? array(),
+				)
+			);
+		}
+
+		$failures = array();
+		if ( ! $run['ok'] ) {
+			$failures[] = array(
+				'message' => 'true multisite child process did not exit cleanly with successful JSON',
+				'details' => $details,
+			);
+		}
+
+		if ( is_array( $result ) ) {
+			foreach ( $result['failures'] ?? array() as $failure ) {
+				$failures[] = $failure;
+			}
+
+			if ( ! empty( $result['unexpectedOutput'] ) ) {
+				$failures[] = array(
+					'message' => 'true multisite child emitted unexpected stdout before its JSON result',
+					'details' => array( 'unexpectedOutput' => $result['unexpectedOutput'] ),
+				);
+			}
+
+			if ( ! self::true_multisite_child_events_seen( $result['events'] ?? array() ) ) {
+				$failures[] = array(
+					'message' => 'true multisite site lifecycle hooks were not observed in the expected order',
+					'details' => array( 'events' => $result['events'] ?? array() ),
+				);
+			}
+
+			$residue = $result['residue'] ?? array();
+			if ( 0 !== (int) ( $residue['siteRows'] ?? 0 ) || 0 !== (int) ( $residue['networkOptionRows'] ?? 0 ) || 0 !== (int) ( $residue['aliasOptionRows'] ?? 0 ) ) {
+				$failures[] = array(
+					'message' => 'true multisite child left generated DB rows behind',
+					'details' => array( 'residue' => $residue ),
+				);
+			}
+		} else {
+			$failures[] = array(
+				'message' => 'true multisite child did not return parseable JSON',
+				'details' => $details,
+			);
+		}
+
+		return $ctx->result(
+			'multisite.true-multisite.site-and-sitemeta-lifecycle',
+			array() === $failures,
+			$details + array(
+				'failures' => $failures,
+				'child'    => is_array( $result ) ? $result : null,
+			)
+		);
+	}
+
+	private static function true_multisite_lifecycle_child_missing_requirements(): array {
+		$missing = array();
+
+		foreach ( array( 'file_put_contents', 'json_decode', 'json_encode', 'proc_close', 'proc_open', 'random_bytes', 'stream_get_contents' ) as $function ) {
+			if ( ! function_exists( $function ) ) {
+				$missing[] = "function {$function}";
+			}
+		}
+
+		if ( ! defined( 'PHP_BINARY' ) || '' === PHP_BINARY ) {
+			$missing[] = 'PHP_BINARY';
+		}
+
+		return $missing;
+	}
+
+	private static function run_true_multisite_lifecycle_child( array $case ): array {
+		$dir = rtrim( sys_get_temp_dir(), DIRECTORY_SEPARATOR ) . DIRECTORY_SEPARATOR . 'component-fuzz-multisite-true-lifecycle';
+		\ComponentFuzz\ensure_dir( $dir );
+
+		$script = $dir . DIRECTORY_SEPARATOR . 'child-' . getmypid() . '-' . bin2hex( random_bytes( 6 ) ) . '.php';
+		file_put_contents( $script, self::true_multisite_lifecycle_child_program() );
+
+		$descriptors = array(
+			0 => array( 'pipe', 'r' ),
+			1 => array( 'pipe', 'w' ),
+			2 => array( 'pipe', 'w' ),
+		);
+
+		// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.system_calls_proc_open -- Isolates MULTISITE and a real wpdb bootstrap in a local PHP subprocess.
+		$process = proc_open( array( PHP_BINARY, $script ), $descriptors, $pipes, \ComponentFuzz\repo_root() );
+		if ( ! is_resource( $process ) ) {
+			@unlink( $script );
+			return array(
+				'ok'       => false,
+				'exitCode' => -1,
+				'stdout'   => '',
+				'stderr'   => 'proc_open failed',
+				'result'   => null,
+			);
+		}
+
+		$payload = json_encode(
+			array(
+				'repoRoot' => \ComponentFuzz\repo_root(),
+				'case'     => $case,
+			),
+			JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE
+		);
+		fwrite( $pipes[0], false === $payload ? '{}' : $payload );
+		fclose( $pipes[0] );
+
+		$stdout = stream_get_contents( $pipes[1] );
+		$stderr = stream_get_contents( $pipes[2] );
+		fclose( $pipes[1] );
+		fclose( $pipes[2] );
+
+		$exit_code = proc_close( $process );
+		@unlink( $script );
+
+		$result = json_decode( (string) $stdout, true );
+		return array(
+			'ok'       => 0 === $exit_code && is_array( $result ) && ( ! empty( $result['ok'] ) || ! empty( $result['skip'] ) ),
+			'exitCode' => $exit_code,
+			'stdout'   => (string) $stdout,
+			'stderr'   => (string) $stderr,
+			'result'   => is_array( $result ) ? $result : null,
+		);
+	}
+
+	private static function true_multisite_child_events_seen( array $events ): bool {
+		$expected = array( 'wp_insert_site', 'wp_initialize_site', 'wp_update_site', 'wp_uninitialize_site', 'wp_delete_site' );
+		$actual   = array();
+		foreach ( $events as $event ) {
+			if ( is_array( $event ) && isset( $event['hook'] ) ) {
+				$actual[] = $event['hook'];
+			}
+		}
+
+		return $expected === $actual;
+	}
+
+	private static function child_preview( string $value ): array {
+		return array(
+			'bytes'   => strlen( $value ),
+			'preview' => strlen( $value ) > 300 ? substr( $value, 0, 300 ) . '...' : $value,
+		);
+	}
+
+	private static function true_multisite_lifecycle_child_program(): string {
+		return <<<'PHP'
+<?php
+ini_set( 'display_errors', 'stderr' );
+error_reporting( E_ALL & ~E_DEPRECATED & ~E_USER_DEPRECATED );
+
+$GLOBALS['component_fuzz_ms_base_ob_level'] = ob_get_level();
+ob_start();
+
+function component_fuzz_ms_emit( array $payload, int $exit_code = 0 ): void {
+	$unexpected_output = '';
+	while ( ob_get_level() > ( $GLOBALS['component_fuzz_ms_base_ob_level'] ?? 0 ) ) {
+		$chunk             = ob_get_clean();
+		$unexpected_output = ( false === $chunk ? '' : $chunk ) . $unexpected_output;
+	}
+	if ( '' !== $unexpected_output ) {
+		$payload['unexpectedOutput'] = strlen( $unexpected_output ) > 500 ? substr( $unexpected_output, 0, 500 ) . '...' : $unexpected_output;
+	}
+
+	$json = json_encode( $payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE );
+	echo false === $json ? '{"ok":false,"failures":[{"message":"json_encode failed"}]}' : $json;
+	exit( $exit_code );
+}
+
+function component_fuzz_ms_skip( string $reason, array $details = array() ): void {
+	component_fuzz_ms_emit(
+		array(
+			'ok'      => true,
+			'skip'    => true,
+			'reason'  => $reason,
+			'details' => $details,
+		)
+	);
+}
+
+function component_fuzz_ms_config_candidates( string $repo_root ): array {
+	$candidates = array();
+	$env        = getenv( 'WP_TESTS_CONFIG_FILE_PATH' );
+
+	if ( is_string( $env ) && '' !== $env ) {
+		$candidates[] = is_dir( $env ) ? rtrim( $env, DIRECTORY_SEPARATOR ) . DIRECTORY_SEPARATOR . 'wp-tests-config.php' : $env;
+	}
+
+	$candidates[] = rtrim( $repo_root, DIRECTORY_SEPARATOR ) . DIRECTORY_SEPARATOR . 'wp-tests-config.php';
+	$candidates[] = rtrim( $repo_root, DIRECTORY_SEPARATOR ) . DIRECTORY_SEPARATOR . 'tests' . DIRECTORY_SEPARATOR . 'phpunit' . DIRECTORY_SEPARATOR . 'wp-tests-config.php';
+
+	return array_values( array_unique( $candidates ) );
+}
+
+function component_fuzz_ms_find_config( string $repo_root ): ?string {
+	foreach ( component_fuzz_ms_config_candidates( $repo_root ) as $candidate ) {
+		if ( is_readable( $candidate ) ) {
+			return $candidate;
+		}
+	}
+
+	return null;
+}
+
+function component_fuzz_ms_table_exists( string $table ): bool {
+	global $wpdb;
+
+	$suppress = $wpdb->suppress_errors();
+	$found    = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $table ) );
+	$wpdb->suppress_errors( $suppress );
+
+	return is_string( $found ) && strtolower( $found ) === strtolower( $table );
+}
+
+function component_fuzz_ms_sitemeta_count( int $network_id, string $key ): int {
+	global $wpdb;
+
+	return (int) $wpdb->get_var(
+		$wpdb->prepare(
+			"SELECT COUNT(*) FROM {$wpdb->sitemeta} WHERE site_id = %d AND meta_key = %s",
+			$network_id,
+			$key
+		)
+	);
+}
+
+function component_fuzz_ms_site_row_count( string $domain, int $network_id ): int {
+	global $wpdb;
+
+	return (int) $wpdb->get_var(
+		$wpdb->prepare(
+			"SELECT COUNT(*) FROM {$wpdb->blogs} WHERE domain = %s AND site_id = %d",
+			$domain,
+			$network_id
+		)
+	);
+}
+
+function component_fuzz_ms_cleanup_option( int $network_id, string $key ): void {
+	global $wpdb;
+
+	if ( function_exists( 'delete_network_option' ) ) {
+		delete_network_option( $network_id, $key );
+	}
+
+	$wpdb->delete(
+		$wpdb->sitemeta,
+		array(
+			'site_id'  => $network_id,
+			'meta_key' => $key,
+		)
+	);
+	wp_cache_delete( "{$network_id}:{$key}", 'site-options' );
+	wp_cache_delete( "{$network_id}:notoptions", 'site-options' );
+}
+
+function component_fuzz_ms_delete_sites( string $domain, int $network_id ): void {
+	global $wpdb;
+
+	$site_ids = $wpdb->get_col(
+		$wpdb->prepare(
+			"SELECT blog_id FROM {$wpdb->blogs} WHERE domain = %s AND site_id = %d",
+			$domain,
+			$network_id
+		)
+	);
+
+	foreach ( array_map( 'intval', $site_ids ) as $site_id ) {
+		if ( function_exists( 'clean_blog_cache' ) ) {
+			clean_blog_cache( $site_id );
+		}
+		$wpdb->delete( $wpdb->blogs, array( 'blog_id' => $site_id ) );
+		if ( function_exists( 'clean_blog_cache' ) ) {
+			clean_blog_cache( $site_id );
+		}
+	}
+}
+
+function component_fuzz_ms_remove_core_site_hooks(): void {
+	$actions = array(
+		array( 'wp_insert_site', 'wp_maybe_update_network_site_counts_on_update', 10 ),
+		array( 'wp_update_site', 'wp_maybe_update_network_site_counts_on_update', 10 ),
+		array( 'wp_delete_site', 'wp_maybe_update_network_site_counts_on_update', 10 ),
+		array( 'wp_insert_site', 'wp_maybe_transition_site_statuses_on_update', 10 ),
+		array( 'wp_update_site', 'wp_maybe_transition_site_statuses_on_update', 10 ),
+		array( 'wp_update_site', 'wp_maybe_clean_new_site_cache_on_update', 10 ),
+		array( 'wp_initialize_site', 'wp_initialize_site', 10 ),
+		array( 'wp_initialize_site', 'wpmu_log_new_registrations', 100 ),
+		array( 'wp_initialize_site', 'newblog_notify_siteadmin', 100 ),
+		array( 'wp_uninitialize_site', 'wp_uninitialize_site', 10 ),
+		array( 'update_network_counts', 'wp_update_network_counts', 10 ),
+	);
+
+	foreach ( $actions as $action ) {
+		remove_action( $action[0], $action[1], $action[2] );
+	}
+}
+
+function component_fuzz_ms_add_event_observers( array &$events ): void {
+	add_action(
+		'wp_insert_site',
+		static function ( WP_Site $site ) use ( &$events ): void {
+			$events[] = array(
+				'hook'   => 'wp_insert_site',
+				'siteId' => $site->id,
+			);
+		},
+		20,
+		1
+	);
+	add_action(
+		'wp_initialize_site',
+		static function ( WP_Site $site, array $args ) use ( &$events ): void {
+			$events[] = array(
+				'hook'    => 'wp_initialize_site',
+				'siteId'  => $site->id,
+				'hasArgs' => array() !== $args,
+			);
+		},
+		20,
+		2
+	);
+	add_action(
+		'wp_update_site',
+		static function ( WP_Site $new_site, WP_Site $old_site ) use ( &$events ): void {
+			$events[] = array(
+				'hook'    => 'wp_update_site',
+				'siteId'  => $new_site->id,
+				'oldPath' => $old_site->path,
+				'newPath' => $new_site->path,
+			);
+		},
+		20,
+		2
+	);
+	add_action(
+		'wp_uninitialize_site',
+		static function ( WP_Site $site ) use ( &$events ): void {
+			$events[] = array(
+				'hook'   => 'wp_uninitialize_site',
+				'siteId' => $site->id,
+			);
+		},
+		20,
+		1
+	);
+	add_action(
+		'wp_delete_site',
+		static function ( WP_Site $site ) use ( &$events ): void {
+			$events[] = array(
+				'hook'   => 'wp_delete_site',
+				'siteId' => $site->id,
+			);
+		},
+		20,
+		1
+	);
+}
+
+function component_fuzz_ms_expect( array &$failures, bool $condition, string $message, array $details = array() ): void {
+	if ( $condition ) {
+		return;
+	}
+
+	$failures[] = array(
+		'message' => $message,
+		'details' => $details,
+	);
+}
+
+function component_fuzz_ms_check_network_option( array &$failures, int $network_id, string $key, $first_value, $second_value, bool $alias ): array {
+	component_fuzz_ms_cleanup_option( $network_id, $key );
+
+	$add       = $alias ? 'add_site_option' : 'add_network_option';
+	$get       = $alias ? 'get_site_option' : 'get_network_option';
+	$update    = $alias ? 'update_site_option' : 'update_network_option';
+	$delete    = $alias ? 'delete_site_option' : 'delete_network_option';
+	$add_args  = $alias ? array( $key, $first_value ) : array( $network_id, $key, $first_value );
+	$get_args  = $alias ? array( $key, 'fallback' ) : array( $network_id, $key, 'fallback' );
+	$upd_args1 = $alias ? array( $key, $first_value ) : array( $network_id, $key, $first_value );
+	$upd_args2 = $alias ? array( $key, $second_value ) : array( $network_id, $key, $second_value );
+	$del_args  = $alias ? array( $key ) : array( $network_id, $key );
+
+	$added          = $add( ...$add_args );
+	$duplicate     = $add( ...$add_args );
+	$read_first    = $get( ...$get_args );
+	$count_added   = component_fuzz_ms_sitemeta_count( $network_id, $key );
+	$cache_added   = wp_cache_get( "{$network_id}:{$key}", 'site-options' );
+	$same_update   = $update( ...$upd_args1 );
+	$changed       = $update( ...$upd_args2 );
+	$read_second   = $get( ...$get_args );
+	$cache_updated = wp_cache_get( "{$network_id}:{$key}", 'site-options' );
+	$deleted       = $delete( ...$del_args );
+	$delete_again  = $delete( ...$del_args );
+	$read_gone     = $get( ...$get_args );
+	$count_deleted = component_fuzz_ms_sitemeta_count( $network_id, $key );
+
+	component_fuzz_ms_expect(
+		$failures,
+		true === $added && false === $duplicate && 1 === $count_added,
+		( $alias ? 'site option alias' : 'network option' ) . ' add/duplicate row-count semantics diverged',
+		compact( 'added', 'duplicate', 'count_added', 'key' )
+	);
+	component_fuzz_ms_expect(
+		$failures,
+		$first_value === $read_first && $first_value === $cache_added,
+		( $alias ? 'site option alias' : 'network option' ) . ' add did not populate read/cache value',
+		array(
+			'readFirst'  => $read_first,
+			'cacheAdded' => $cache_added,
+			'key'        => $key,
+		)
+	);
+	component_fuzz_ms_expect(
+		$failures,
+		false === $same_update && true === $changed && $second_value === $read_second && $second_value === $cache_updated,
+		( $alias ? 'site option alias' : 'network option' ) . ' update/cache semantics diverged',
+		array(
+			'sameUpdate'   => $same_update,
+			'changed'      => $changed,
+			'readSecond'   => $read_second,
+			'cacheUpdated' => $cache_updated,
+			'key'          => $key,
+		)
+	);
+	component_fuzz_ms_expect(
+		$failures,
+		true === $deleted && false === $delete_again && 'fallback' === $read_gone && 0 === $count_deleted,
+		( $alias ? 'site option alias' : 'network option' ) . ' delete/fallback row-count semantics diverged',
+		array(
+			'deleted'      => $deleted,
+			'deleteAgain'  => $delete_again,
+			'readGone'     => $read_gone,
+			'countDeleted' => $count_deleted,
+			'key'          => $key,
+		)
+	);
+
+	return array(
+		'key'          => $key,
+		'countAdded'   => $count_added,
+		'countDeleted' => $count_deleted,
+	);
+}
+
+try {
+	$input = json_decode( stream_get_contents( STDIN ), true );
+	if ( ! is_array( $input ) ) {
+		$input = array();
+	}
+
+	$repo_root = isset( $input['repoRoot'] ) && is_string( $input['repoRoot'] ) ? $input['repoRoot'] : (string) getcwd();
+	$case      = isset( $input['case'] ) && is_array( $input['case'] ) ? $input['case'] : array();
+	$token     = preg_replace( '/[^a-z0-9]/', '', strtolower( (string) ( $case['trueMsToken'] ?? 'cfms' ) ) );
+	if ( '' === $token ) {
+		$token = 'cfms';
+	}
+
+	$config = component_fuzz_ms_find_config( $repo_root );
+	if ( null === $config ) {
+		component_fuzz_ms_skip(
+			'No readable wp-tests-config.php is available for a true multisite DB child process.',
+			array( 'candidates' => component_fuzz_ms_config_candidates( $repo_root ) )
+		);
+	}
+
+	defined( 'MULTISITE' ) || define( 'MULTISITE', true );
+	defined( 'SUBDOMAIN_INSTALL' ) || define( 'SUBDOMAIN_INSTALL', false );
+	defined( 'DISABLE_WP_CRON' ) || define( 'DISABLE_WP_CRON', true );
+	defined( 'WP_USE_THEMES' ) || define( 'WP_USE_THEMES', false );
+
+	require_once $config;
+
+	if ( ! defined( 'ABSPATH' ) || ! is_dir( ABSPATH ) ) {
+		component_fuzz_ms_skip(
+			'wp-tests-config.php does not define a readable ABSPATH.',
+			array( 'config' => $config )
+		);
+	}
+
+	$host = defined( 'WP_TESTS_DOMAIN' ) ? WP_TESTS_DOMAIN : 'example.org';
+	$_SERVER['HTTP_HOST']   = $host;
+	$_SERVER['SERVER_NAME'] = $host;
+	$_SERVER['REQUEST_URI'] = '/';
+	$_SERVER['PHP_SELF']    = '/index.php';
+	$_SERVER['REMOTE_ADDR'] = '127.0.0.1';
+
+	require_once ABSPATH . 'wp-settings.php';
+
+	global $wpdb;
+	if ( ! function_exists( 'is_multisite' ) || ! is_multisite() ) {
+		component_fuzz_ms_skip( 'WordPress did not boot in multisite mode.', array( 'config' => $config ) );
+	}
+	if (
+		is_object( $wpdb )
+		&& (
+			'Component_Fuzz_WPDB_Stub' === get_class( $wpdb )
+			|| is_subclass_of( $wpdb, 'Component_Fuzz_WPDB_Stub' )
+		)
+	) {
+		component_fuzz_ms_skip( 'WordPress booted with the component fuzz wpdb stub instead of a real database connection.' );
+	}
+
+	$missing_tables = array();
+	foreach ( array( $wpdb->blogs, $wpdb->sitemeta ) as $table ) {
+		if ( ! component_fuzz_ms_table_exists( $table ) ) {
+			$missing_tables[] = $table;
+		}
+	}
+	if ( array() !== $missing_tables ) {
+		component_fuzz_ms_skip(
+			'The configured test database is missing required multisite tables.',
+			array( 'missingTables' => $missing_tables )
+		);
+	}
+
+	$network_id = (int) get_current_network_id();
+	if ( $network_id <= 0 || ! get_network( $network_id ) ) {
+		component_fuzz_ms_skip( 'No current network is available for true multisite lifecycle fuzzing.', array( 'networkId' => $network_id ) );
+	}
+
+	component_fuzz_ms_remove_core_site_hooks();
+
+	$domain             = $token . '.component-fuzz-ms.test';
+	$path               = '/' . $token . '/';
+	$updated_path       = '/' . $token . '-updated/';
+	$network_option_key = 'component_fuzz_ms_network_' . $token;
+	$alias_option_key   = 'component_fuzz_ms_alias_' . $token;
+	$events             = array();
+	$failures           = array();
+	$created_site_id    = 0;
+
+	component_fuzz_ms_delete_sites( $domain, $network_id );
+	component_fuzz_ms_cleanup_option( $network_id, $network_option_key );
+	component_fuzz_ms_cleanup_option( $network_id, $alias_option_key );
+	component_fuzz_ms_add_event_observers( $events );
+
+	try {
+		$network_option_details = component_fuzz_ms_check_network_option(
+			$failures,
+			$network_id,
+			$network_option_key,
+			array(
+				'token' => $token,
+				'kind'  => 'network',
+			),
+			array(
+				'token' => $token,
+				'kind'  => 'network-updated',
+				'count' => 2,
+			),
+			false
+		);
+		$alias_option_details   = component_fuzz_ms_check_network_option(
+			$failures,
+			$network_id,
+			$alias_option_key,
+			'alias-first-' . $token,
+			'alias-second-' . $token,
+			true
+		);
+
+		$site_data = array(
+			'domain'     => $domain,
+			'path'       => $path,
+			'network_id' => $network_id,
+			'public'     => 1,
+			'archived'   => 0,
+			'mature'     => 0,
+			'spam'       => 0,
+			'deleted'    => 0,
+			'title'      => 'Component Fuzz Multisite ' . $token,
+			'options'    => array(),
+			'meta'       => array(),
+		);
+
+		$inserted = wp_insert_site( $site_data );
+		component_fuzz_ms_expect(
+			$failures,
+			is_int( $inserted ) && $inserted > 0,
+			'wp_insert_site did not return a positive integer site ID',
+			array( 'inserted' => is_wp_error( $inserted ) ? $inserted->get_error_code() : $inserted )
+		);
+
+		if ( is_int( $inserted ) && $inserted > 0 ) {
+			$created_site_id = $inserted;
+			$site            = get_site( $inserted );
+			$site_ids        = get_sites(
+				array(
+					'site__in'               => array( $inserted ),
+					'fields'                 => 'ids',
+					'update_site_meta_cache' => false,
+				)
+			);
+			$duplicate      = wp_insert_site( $site_data );
+			$duplicate_code = is_wp_error( $duplicate ) ? $duplicate->get_error_code() : null;
+
+			component_fuzz_ms_expect(
+				$failures,
+				$site instanceof WP_Site
+					&& $site->id === $inserted
+					&& $site->domain === $domain
+					&& $site->path === $path
+					&& $site->network_id === $network_id
+					&& 1 === (int) $site->public
+					&& 0 === (int) $site->archived
+					&& 0 === (int) $site->spam
+					&& 0 === (int) $site->deleted,
+				'get_site did not return the inserted site with expected normalized fields',
+				array( 'site' => $site instanceof WP_Site ? $site->to_array() : $site )
+			);
+			component_fuzz_ms_expect(
+				$failures,
+				array( $inserted ) === array_map( 'intval', $site_ids ),
+				'get_sites(fields=ids) did not find exactly the inserted site',
+				array( 'siteIds' => $site_ids )
+			);
+			component_fuzz_ms_expect(
+				$failures,
+				'site_taken' === $duplicate_code,
+				'duplicate wp_insert_site call did not return site_taken',
+				array( 'duplicate' => is_wp_error( $duplicate ) ? $duplicate->get_error_messages() : $duplicate )
+			);
+
+			$updated_id   = wp_update_site(
+				$inserted,
+				array(
+					'path'   => $updated_path,
+					'public' => 0,
+				)
+			);
+			$updated_site = get_site( $inserted );
+			component_fuzz_ms_expect(
+				$failures,
+				$updated_id === $inserted
+					&& $updated_site instanceof WP_Site
+					&& $updated_site->path === $updated_path
+					&& 0 === (int) $updated_site->public,
+				'wp_update_site did not return the same ID or refresh cached site fields',
+				array(
+					'updatedId'   => is_wp_error( $updated_id ) ? $updated_id->get_error_code() : $updated_id,
+					'updatedSite' => $updated_site instanceof WP_Site ? $updated_site->to_array() : $updated_site,
+				)
+			);
+
+			if ( function_exists( 'get_main_network_id' ) ) {
+				wp_cache_set( get_main_network_id() . ':site_meta_supported', 0, 'site-options' );
+			}
+			$deleted = wp_delete_site( $inserted );
+			if ( $deleted instanceof WP_Site ) {
+				$created_site_id = 0;
+			}
+
+			$site_after_delete   = get_site( $inserted );
+			$domain_after_delete = domain_exists( $domain, $updated_path, $network_id );
+			$row_count_after     = component_fuzz_ms_site_row_count( $domain, $network_id );
+			component_fuzz_ms_expect(
+				$failures,
+				$deleted instanceof WP_Site
+					&& $deleted->id === $inserted
+					&& null === $site_after_delete
+					&& null === $domain_after_delete
+					&& 0 === $row_count_after,
+				'wp_delete_site did not remove the site row, cache lookup, and domain lookup',
+				array(
+					'deleted'           => $deleted instanceof WP_Site ? $deleted->to_array() : $deleted,
+					'siteAfterDelete'   => $site_after_delete,
+					'domainAfterDelete' => $domain_after_delete,
+					'rowCountAfter'     => $row_count_after,
+				)
+			);
+		} else {
+			$network_option_details = $network_option_details ?? array();
+			$alias_option_details   = $alias_option_details ?? array();
+		}
+	} finally {
+		if ( $created_site_id > 0 ) {
+			wp_delete_site( $created_site_id );
+		}
+		component_fuzz_ms_cleanup_option( $network_id, $network_option_key );
+		component_fuzz_ms_cleanup_option( $network_id, $alias_option_key );
+		component_fuzz_ms_delete_sites( $domain, $network_id );
+		while ( ! empty( $GLOBALS['_wp_switched_stack'] ) ) {
+			restore_current_blog();
+		}
+	}
+
+	$residue = array(
+		'siteRows'          => component_fuzz_ms_site_row_count( $domain, $network_id ),
+		'networkOptionRows' => component_fuzz_ms_sitemeta_count( $network_id, $network_option_key ),
+		'aliasOptionRows'   => component_fuzz_ms_sitemeta_count( $network_id, $alias_option_key ),
+	);
+
+	component_fuzz_ms_emit(
+		array(
+			'ok'                   => array() === $failures,
+			'failures'             => $failures,
+			'events'               => $events,
+			'networkId'            => $network_id,
+			'token'                => $token,
+			'domain'               => $domain,
+			'path'                 => $path,
+			'updatedPath'          => $updated_path,
+			'networkOptionDetails' => $network_option_details ?? array(),
+			'aliasOptionDetails'   => $alias_option_details ?? array(),
+			'residue'              => $residue,
+		)
+	);
+} catch ( Throwable $e ) {
+	component_fuzz_ms_emit(
+		array(
+			'ok'        => false,
+			'failures'  => array(
+				array(
+					'message' => 'true multisite child threw',
+					'details' => array(
+						'class'   => get_class( $e ),
+						'message' => $e->getMessage(),
+						'file'    => $e->getFile(),
+						'line'    => $e->getLine(),
+					),
+				),
+			),
+			'throwable' => array(
+				'class'   => get_class( $e ),
+				'message' => $e->getMessage(),
+				'file'    => $e->getFile(),
+				'line'    => $e->getLine(),
+			),
+		),
+		1
+	);
+}
+PHP;
+	}
+
 	private static function prepare_case( \ComponentFuzz\FuzzContext $ctx ): array {
 		$case_ctx     = $ctx->fork( 'multisite-rich-case' );
 		$network_slug = self::slug( $case_ctx, 'net' );
@@ -1669,6 +2425,12 @@ final class MultisiteSurface {
 		$network_domain = $network_slug . '.' . $domain_label . '.example.test';
 		$mature         = $case_ctx->bool( 30 ) ? '1' : '0';
 		$post_count     = $case_ctx->int( 1, 999 );
+		$true_ms_token  = sprintf(
+			'cfms%si%sh%s',
+			preg_replace( '/[^0-9]/', '', (string) abs( $ctx->seed() ) ),
+			$ctx->iteration(),
+			substr( hash( 'sha256', $network_slug . '|' . $site_slug . '|' . $case_seed ), 0, 8 )
+		);
 		$raw_site_data = array(
 			'domain'       => " HTTPS://{$site_domain}/Bad Path?x=1 \n",
 			'path'         => '//' . trim( $site_path, '/' ) . '//',
@@ -1702,6 +2464,7 @@ final class MultisiteSurface {
 			'uploadPath'          => 'component-fuzz-uploads/' . $site_slug,
 			'uploadUrl'           => 'https://uploads.' . $site_domain . '/media',
 			'uploadTime'          => sprintf( '2026/%02d', $month ),
+			'trueMsToken'         => $true_ms_token,
 		);
 	}
 
@@ -2280,6 +3043,7 @@ final class MultisiteSurface {
 			'directorySlug' => $case['directorySlug'],
 			'directoryPath' => $case['directoryPath'],
 			'uploadTime'    => $case['uploadTime'],
+			'trueMsToken'   => $case['trueMsToken'],
 		);
 	}
 

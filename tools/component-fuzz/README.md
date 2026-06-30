@@ -454,7 +454,9 @@ database, network requests, or a configured site.
   resolution, blog-switch stack/cache restoration, filter-backed network option
   reads, stub-backed network option CRUD, large-network threshold/filter
   contracts, pre-query-short-circuited site/network queries, domain/path lookup
-  helpers, and current/switched URL helpers.
+  helpers, current/switched URL helpers, and an optional true-multisite
+  subprocess for DB-backed site lifecycle and `sitemeta` write paths when a
+  readable `wp-tests-config.php` is available.
 - `navigation`: nav menu location registration, theme menu assignment lookup,
   menu object and item setup filters, current-item class derivation, current-tree
   parent/ancestor propagation, walker output, depth pruning,
@@ -821,12 +823,15 @@ writes. The `media-image-edit-requests` surface complements it with bounded
 in-memory attachment rows, temp upload roots, captured AJAX termination, and a
 fake `WP_Image_Editor`; it avoids codec-dependent image decoding and
 subprocess-only `IMAGE_EDIT_OVERWRITE` branches. The `multisite` surface leaves `MULTISITE`
-disabled for the shared PHP process; true multisite `sitemeta` write paths,
-site creation/update/deletion, and DB-backed query execution are skipped unless
-short-circuited through filters, while non-multisite network-option CRUD remains
-covered by the existing option stub. The Site Health surface avoids loopback,
-WordPress.org, REST availability, update download, mail, cron, and
-filesystem-writing checks unless they are fully short-circuited. The mail
+disabled for the shared PHP process; true multisite `sitemeta` write paths and
+site creation/update/deletion run only in an isolated subprocess when a readable
+`wp-tests-config.php` points at a real multisite test database, and that row
+skips explicitly when no such config is available. Broader DB-backed multisite
+query execution remains short-circuited through filters, while non-multisite
+network-option CRUD remains covered by the existing option stub. The Site
+Health surface avoids loopback, WordPress.org, REST availability, update
+download, mail, cron, and filesystem-writing checks unless they are fully
+short-circuited. The mail
 surface intercepts PHPMailer send calls and never attempts real delivery. The
 `media-metadata` surface uses malformed local fixtures and cache-seeded
 attachments only; it does not download remote media, invoke codecs or external
