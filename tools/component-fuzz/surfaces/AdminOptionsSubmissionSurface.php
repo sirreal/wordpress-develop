@@ -8,6 +8,8 @@ final class AdminOptionsSubmissionSurface {
 	public const NAME = 'admin-options-submission';
 
 	public static function run( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::load_new_admin_email_support();
+
 		$missing = self::missing_requirements();
 		if ( array() !== $missing ) {
 			return array(
@@ -25,6 +27,7 @@ final class AdminOptionsSubmissionSurface {
 		try {
 			$rows[] = self::check_registered_settings_submission( $ctx->fork( 'registered' ) );
 			$rows[] = self::check_general_options_submission_branches( $ctx->fork( 'general' ) );
+			$rows[] = self::check_new_admin_email_pending_change( $ctx->fork( 'new-admin-email' ) );
 			$rows[] = self::check_legacy_options_page_submission( $ctx->fork( 'legacy' ) );
 			$rows[] = self::check_failure_paths( $ctx->fork( 'failures' ) );
 		} catch ( \Throwable $e ) {
@@ -45,6 +48,13 @@ final class AdminOptionsSubmissionSurface {
 		return $rows;
 	}
 
+	private static function load_new_admin_email_support(): void {
+		$misc_file = defined( 'ABSPATH' ) ? ABSPATH . 'wp-admin/includes/misc.php' : '';
+		if ( ! function_exists( 'update_option_new_admin_email' ) && $misc_file && file_exists( $misc_file ) ) {
+			require_once $misc_file;
+		}
+	}
+
 	private static function missing_requirements(): array {
 		$missing = array();
 
@@ -55,18 +65,27 @@ final class AdminOptionsSubmissionSurface {
 				'add_action',
 				'add_option',
 				'add_settings_error',
+				'admin_url',
 				'apply_filters',
 				'apply_filters_deprecated',
 				'check_admin_referer',
 				'current_user_can',
 				'delete_transient',
+				'esc_url',
 				'esc_html',
+				'get_current_user_id',
 				'get_settings_errors',
 				'get_transient',
 				'get_user_locale',
+				'get_option',
+				'has_action',
 				'has_filter',
+				'home_url',
+				'is_email',
+				'is_wp_error',
 				'load_default_textdomain',
 				'option_update_filter',
+				'restore_previous_locale',
 				'remove_action',
 				'register_setting',
 				'remove_filter',
@@ -78,13 +97,22 @@ final class AdminOptionsSubmissionSurface {
 				'set_transient',
 				'unregister_setting',
 				'update_option',
+				'update_option_new_admin_email',
 				'wp_cache_flush',
 				'wp_create_nonce',
 				'wp_die',
+				'wp_get_current_user',
 				'wp_get_referer',
+				'wp_insert_user',
+				'wp_mail',
+				'wp_rand',
 				'wp_redirect',
+				'wp_set_current_user',
 				'wp_slash',
+				'wp_specialchars_decode',
 				'wp_unslash',
+				'self_admin_url',
+				'switch_to_user_locale',
 			) as $function
 		) {
 			if ( ! function_exists( $function ) ) {
@@ -385,6 +413,216 @@ final class AdminOptionsSubmissionSurface {
 			'admin-options-submission.general-date-timezone-branches',
 			array() === $failures,
 			array( 'failures' => array_slice( $failures, 0, 4 ) )
+		);
+	}
+
+	private static function check_new_admin_email_pending_change( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures       = array();
+		$token          = strtolower( preg_replace( '/[^a-z0-9]+/', '', $ctx->identifier( 6, 12 ) ) );
+		$token          = '' === $token ? 'cfz' . substr( md5( (string) $ctx->seed() ), 0, 8 ) : $token;
+		$current_email  = 'current-admin-' . $token . '@example.com';
+		$pending_email  = 'pending-admin-' . $token . '@example.com';
+		$invalid_email  = 'not-an-email-' . $token;
+		$site_title     = 'Admin Email ' . $token;
+		$site_url       = 'https://example.com/component-fuzz-' . $token;
+		$user_login     = 'cfz_admin_email_' . $token;
+		$user_email     = $user_login . '@example.com';
+		$mail_events    = array();
+		$content_events = array();
+		$subject_events = array();
+		$cap_events      = array();
+		$cap_filter      = self::install_cap_filter( array( 'manage_options' ), $cap_events );
+		$accepted_emails = array_fill_keys( array( $current_email, $pending_email, $user_email ), true );
+		$email_filter    = static function ( $is_email, string $email ) use ( $accepted_emails ) {
+			return isset( $accepted_emails[ $email ] ) ? $email : $is_email;
+		};
+		$sanitize_email_filter = static function ( string $sanitized, string $email ) use ( $accepted_emails ): string {
+			return isset( $accepted_emails[ $email ] ) ? $email : $sanitized;
+		};
+		$pre_mail_filter = static function ( $pre, array $atts ) use ( &$mail_events ) {
+			unset( $pre );
+			$mail_events[] = $atts;
+			return true;
+		};
+		$content_filter = static function ( string $content, array $new_admin_email ) use ( &$content_events ): string {
+			$content_events[] = $new_admin_email;
+			return $content;
+		};
+		$subject_filter = static function ( string $subject ) use ( &$subject_events ): string {
+			$subject_events[] = $subject;
+			return '[cfz] ' . $subject;
+		};
+		$added_add_hook = false;
+		$added_update_hook = false;
+
+		\add_filter( 'is_email', $email_filter, 10, 2 );
+		\add_filter( 'sanitize_email', $sanitize_email_filter, 10, 2 );
+		\add_filter( 'pre_wp_mail', $pre_mail_filter, 10, 2 );
+		\add_filter( 'new_admin_email_content', $content_filter, 10, 2 );
+		\add_filter( 'new_admin_email_subject', $subject_filter, 10 );
+
+		if ( false === \has_action( 'add_option_new_admin_email', 'update_option_new_admin_email' ) ) {
+			\add_action( 'add_option_new_admin_email', 'update_option_new_admin_email', 10, 2 );
+			$added_add_hook = true;
+		}
+		if ( false === \has_action( 'update_option_new_admin_email', 'update_option_new_admin_email' ) ) {
+			\add_action( 'update_option_new_admin_email', 'update_option_new_admin_email', 10, 2 );
+			$added_update_hook = true;
+		}
+
+		try {
+			$user = self::prepare_admin_email_runtime( $current_email, $site_title, $site_url, $user_login );
+			$valid = self::dispatch_options_update(
+				array(
+					'post'    => self::general_admin_email_post( $pending_email, $site_title, $site_url ),
+					'referer' => 'http://example.test/wp-admin/options-general.php',
+				)
+			);
+			$valid_adminhash = \get_option( 'adminhash', '__missing__' );
+			$valid_mail      = $mail_events[0] ?? null;
+			$valid_message   = is_array( $valid_mail ) ? (string) ( $valid_mail['message'] ?? '' ) : '';
+			$valid_subject   = is_array( $valid_mail ) ? (string) ( $valid_mail['subject'] ?? '' ) : '';
+
+			self::collect_failure(
+				$failures,
+				'completed' === ( $valid['status'] ?? null )
+					&& self::redirect_has_settings_updated( $valid['redirect']['location'] ?? '' )
+					&& self::nonce_event_seen( $valid, 'general-options', 1 )
+					&& self::has_settings_error( $valid['settingsErrors'] ?? array(), 'general', 'settings_updated', 'success' )
+					&& $current_email === \get_option( 'admin_email' )
+					&& $pending_email === \get_option( 'new_admin_email' )
+					&& is_array( $valid_adminhash )
+					&& $pending_email === ( $valid_adminhash['newemail'] ?? null )
+					&& is_string( $valid_adminhash['hash'] ?? null )
+					&& 1 === preg_match( '/^[a-f0-9]{32}$/', (string) ( $valid_adminhash['hash'] ?? '' ) )
+					&& in_array( 'new_admin_email', $valid['updatedOptions'] ?? array(), true )
+					&& 1 === count( $mail_events )
+					&& is_array( $valid_mail )
+					&& $pending_email === ( $valid_mail['to'] ?? null )
+					&& str_starts_with( $valid_subject, '[cfz] ' )
+					&& str_contains( $subject_events[0] ?? '', $site_title )
+					&& isset( $content_events[0]['hash'], $content_events[0]['newemail'] )
+					&& ( $valid_adminhash['hash'] ?? null ) === $content_events[0]['hash']
+					&& $pending_email === $content_events[0]['newemail']
+					&& str_contains( $valid_message, $pending_email )
+					&& str_contains( $valid_message, (string) $user->user_login )
+					&& str_contains( $valid_message, 'options.php?adminhash=' . (string) ( $valid_adminhash['hash'] ?? '' ) )
+					&& str_contains( $valid_message, (string) ( $valid_adminhash['hash'] ?? '' ) )
+					&& ! str_contains( $valid_message, '###' )
+					&& self::capability_event_seen( $cap_events, 'manage_options' ),
+				'changed General Settings new_admin_email stores pending adminhash and sends one confirmation email without changing admin_email',
+				array(
+					'result'       => self::summarize_dispatch_result( $valid ),
+					'adminhash'    => $valid_adminhash,
+					'mailEvents'   => array_slice( $mail_events, 0, 3 ),
+					'contentEvents' => $content_events,
+					'subjectEvents' => $subject_events,
+					'capEvents'    => array_slice( $cap_events, 0, 8 ),
+				)
+			);
+
+			$mail_events = array();
+			$content_events = array();
+			$subject_events = array();
+			self::prepare_admin_email_runtime( $current_email, $site_title, $site_url, $user_login );
+			$same_current = self::dispatch_options_update(
+				array(
+					'post'    => self::general_admin_email_post( $current_email, $site_title, $site_url ),
+					'referer' => 'http://example.test/wp-admin/options-general.php',
+				)
+			);
+			$same_adminhash = \get_option( 'adminhash', '__missing__' );
+
+			self::collect_failure(
+				$failures,
+				'completed' === ( $same_current['status'] ?? null )
+					&& self::nonce_event_seen( $same_current, 'general-options', 1 )
+					&& self::has_settings_error( $same_current['settingsErrors'] ?? array(), 'general', 'settings_updated', 'success' )
+					&& $current_email === \get_option( 'admin_email' )
+					&& $current_email === \get_option( 'new_admin_email' )
+					&& '__missing__' === $same_adminhash
+					&& array() === $mail_events
+					&& array() === $content_events
+					&& array() === $subject_events,
+				'same-current new_admin_email persists the submitted option but does not create adminhash or send confirmation mail',
+				array(
+					'result'    => self::summarize_dispatch_result( $same_current ),
+					'adminhash' => $same_adminhash,
+					'mailEvents' => $mail_events,
+				)
+			);
+
+			$mail_events = array();
+			$content_events = array();
+			$subject_events = array();
+			self::prepare_admin_email_runtime( $current_email, $site_title, $site_url, $user_login );
+			$invalid = self::dispatch_options_update(
+				array(
+					'post'    => self::general_admin_email_post( $invalid_email, $site_title, $site_url ),
+					'referer' => 'http://example.test/wp-admin/options-general.php',
+				)
+			);
+			$invalid_adminhash = \get_option( 'adminhash', '__missing__' );
+
+			self::collect_failure(
+				$failures,
+				'completed' === ( $invalid['status'] ?? null )
+					&& self::nonce_event_seen( $invalid, 'general-options', 1 )
+					&& self::has_settings_error( $invalid['settingsErrors'] ?? array(), 'new_admin_email', 'invalid_new_admin_email', 'error' )
+					&& $current_email === \get_option( 'admin_email' )
+					&& '__missing__' === $invalid_adminhash
+					&& array() === $mail_events
+					&& array() === $content_events
+					&& array() === $subject_events,
+				'invalid new_admin_email records the sanitization error but does not create adminhash or send confirmation mail',
+				array(
+					'result'    => self::summarize_dispatch_result( $invalid ),
+					'adminhash' => $invalid_adminhash,
+					'mailEvents' => $mail_events,
+				)
+			);
+		} finally {
+			if ( $added_update_hook ) {
+				\remove_action( 'update_option_new_admin_email', 'update_option_new_admin_email', 10 );
+			}
+			if ( $added_add_hook ) {
+				\remove_action( 'add_option_new_admin_email', 'update_option_new_admin_email', 10 );
+			}
+			\remove_filter( 'new_admin_email_subject', $subject_filter, 10 );
+			\remove_filter( 'new_admin_email_content', $content_filter, 10 );
+			\remove_filter( 'pre_wp_mail', $pre_mail_filter, 10 );
+			\remove_filter( 'sanitize_email', $sanitize_email_filter, 10 );
+			\remove_filter( 'is_email', $email_filter, 10 );
+			\remove_filter( 'user_has_cap', $cap_filter, 10 );
+		}
+
+		self::collect_failure(
+			$failures,
+			false === \has_filter( 'pre_wp_mail', $pre_mail_filter )
+				&& false === \has_filter( 'new_admin_email_content', $content_filter )
+				&& false === \has_filter( 'new_admin_email_subject', $subject_filter )
+				&& false === \has_filter( 'sanitize_email', $sanitize_email_filter )
+				&& false === \has_filter( 'is_email', $email_filter )
+				&& false === \has_filter( 'user_has_cap', $cap_filter )
+				&& ( ! $added_add_hook || false === \has_action( 'add_option_new_admin_email', 'update_option_new_admin_email' ) )
+				&& ( ! $added_update_hook || false === \has_action( 'update_option_new_admin_email', 'update_option_new_admin_email' ) ),
+			'new_admin_email pending-change filters and locally installed dynamic option hooks are removed after dispatches',
+			array(
+				'preMail'    => \has_filter( 'pre_wp_mail', $pre_mail_filter ),
+				'content'    => \has_filter( 'new_admin_email_content', $content_filter ),
+				'subject'    => \has_filter( 'new_admin_email_subject', $subject_filter ),
+				'sanitize'   => \has_filter( 'sanitize_email', $sanitize_email_filter ),
+				'isEmail'    => \has_filter( 'is_email', $email_filter ),
+				'capability' => \has_filter( 'user_has_cap', $cap_filter ),
+				'addHook'    => \has_action( 'add_option_new_admin_email', 'update_option_new_admin_email' ),
+				'updateHook' => \has_action( 'update_option_new_admin_email', 'update_option_new_admin_email' ),
+			)
+		);
+
+		return $ctx->result(
+			'admin-options-submission.new-admin-email-pending-change',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, 5 ) )
 		);
 	}
 
@@ -868,6 +1106,24 @@ final class AdminOptionsSubmissionSurface {
 		);
 	}
 
+	private static function general_admin_email_post( string $new_admin_email, string $site_title, string $site_url ): array {
+		return array_merge(
+			self::general_post_defaults(),
+			array(
+				'action'          => 'update',
+				'option_page'     => 'general',
+				'_wpnonce'        => \wp_create_nonce( 'general-options' ),
+				'blogname'        => $site_title,
+				'blogdescription' => 'Admin email pending change',
+				'gmt_offset'      => '1',
+				'new_admin_email' => $new_admin_email,
+				'siteurl'         => $site_url,
+				'home'            => $site_url,
+				'timezone_string' => 'Europe/Madrid',
+			)
+		);
+	}
+
 	private static function normalize_general_post_values(): void {
 		if ( ! empty( $_POST['date_format'] ) && isset( $_POST['date_format_custom'] )
 			&& '\c\u\s\t\o\m' === \wp_unslash( $_POST['date_format'] )
@@ -973,6 +1229,34 @@ final class AdminOptionsSubmissionSurface {
 				'HTTP_REFERER'   => 'http://example.test/wp-admin/options-general.php',
 			)
 		);
+	}
+
+	private static function prepare_admin_email_runtime( string $admin_email, string $site_title, string $site_url, string $user_login ): \WP_User {
+		self::reset_runtime(
+			array(
+				'admin_email' => $admin_email,
+				'blogname'    => $site_title,
+				'home'        => $site_url,
+				'siteurl'     => $site_url,
+			)
+		);
+
+		$user_id = \wp_insert_user(
+			array(
+				'user_login'   => $user_login,
+				'user_pass'    => 'component-fuzz-admin-email-pass',
+				'user_email'   => $user_login . '@example.com',
+				'user_nicename' => $user_login,
+				'display_name' => 'Component Fuzz Admin Email',
+				'locale'       => '',
+			)
+		);
+		if ( \is_wp_error( $user_id ) ) {
+			throw new \RuntimeException( 'Unable to seed admin email current user: ' . $user_id->get_error_message() );
+		}
+
+		\wp_set_current_user( (int) $user_id );
+		return \wp_get_current_user();
 	}
 
 	private static function snapshot_state(): array {
