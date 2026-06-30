@@ -480,9 +480,11 @@ database, network requests, or a configured site.
 - `network-media`: URL parsing/sanitization/validation, URL scheme
   normalization, path normalization, filename sanitization, filetype checks,
   unique filenames, generated collision/alternate-extension filename oracles,
-  callback/filter contracts, sideload handling, multisite upload quota,
-  remaining-space, size-limit, network upload MIME allowlists, direct
-  file-too-large checks, `check_upload_size()` error/state behavior, and
+  callback/filter contracts, `wp_upload_bits()` exact-byte writes, filtered
+  upload roots, virtual subsize collision file-list short-circuits,
+  upload-bits and final upload filter payloads, sideload handling, multisite
+  upload quota, remaining-space, size-limit, network upload MIME allowlists,
+  direct file-too-large checks, `check_upload_size()` error/state behavior, and
   over-quota helpers.
 - `options-autoload`: no-DB option CRUD, cache, autoload, and filter coverage
   for generated option values, including alloptions membership, notoptions
