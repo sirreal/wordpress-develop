@@ -560,9 +560,10 @@ database, network requests, or a configured site.
 - `privacy-admin-requests`: in-memory wpdb-backed admin privacy request
   coverage, including export and erasure request list-table views, counts,
   status filtering, prepared items, row action nonce/data attributes, checkbox
-  and status markup, bulk-action and direct helper contracts, personal data
-  export/erasure AJAX success flows, capability and request-shape gates,
-  selected exporter/eraser/page callbacks, malformed callback responses,
+  and status markup, bulk complete/delete/resend and direct helper contracts,
+  resend confirmation key regeneration and intercepted confirmation mail,
+  personal data export/erasure AJAX success flows, capability and request-shape
+  gates, selected exporter/eraser/page callbacks, malformed callback responses,
   scoped Unicode email filters, runtime cache isolation, and state restoration.
 - `query`: no-DB query builder and execution APIs, including meta/tax/date
   query tree sanitization, SQL fragment generation, relation normalization,
