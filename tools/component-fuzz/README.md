@@ -655,13 +655,15 @@ database, network requests, or a configured site.
   deterministic state restoration without live uploads, remote requests, or a
   live database.
 - `rest-site-editor`: no-live-DB Site Editor REST controller coverage for
-  global styles, template/template-part response shaping, template revisions
-  and autosaves, bounded template item and lookup fallback route dispatch,
+  global styles, template/template-part response shaping, template create,
+  update, trash/reset/force-delete mutation lifecycles, template revisions and
+  autosaves, bounded template item and lookup fallback route dispatch,
   navigation fallback, direct block-template ZIP export generation, edit-site
   export guards, and subprocess-isolated live edit-site export streaming,
   including route normalization, schema/context behavior, permission and error
-  contracts, custom CSS validation, temp theme fixtures, streamed ZIP
-  inspection, archive cleanup, and state restoration.
+  contracts, custom CSS validation, temp theme fixtures, REST insert hooks,
+  origin metadata, area/theme taxonomy assignments, streamed ZIP inspection,
+  archive cleanup, and state restoration.
 - `revisions-autosaves`: in-memory wpdb-backed revision and autosave API
   coverage, including protected revision field/filter contracts, autosave
   create/update/delete and post-lock behavior, autosave and revision predicates,
@@ -918,9 +920,11 @@ The `rest-site-editor` surface creates a bounded temp theme under the harness
 `WP_CONTENT_DIR` and uses the in-memory `wpdb` stub for `wp_global_styles`,
 `wp_template`, `wp_template_part`, `revision`, and `wp_navigation` fixtures. It
 dispatches only bounded template/template-part item routes and the lookup
-fallback route through `WP_REST_Server`; broad template collection queries and
-unbounded theme/template CPT query paths remain skipped. Export coverage uses
-the direct ZIP generator and a subprocess-isolated
+fallback route through `WP_REST_Server`; direct template mutation coverage uses
+targeted controller calls, scoped capabilities, and fixture-local
+`WP_Block_Template` lookups for create/update/delete/reset oracles. Broad
+template collection queries and unbounded theme/template CPT query paths remain
+skipped. Export coverage uses the direct ZIP generator and a subprocess-isolated
 `WP_REST_Edit_Site_Export_Controller::export()` oracle with bounded
 `pre_get_block_templates` fixtures, structured stdout metadata, streamed ZIP
 inspection, generated ZIP cleanup checks, and parent-process state restoration.
