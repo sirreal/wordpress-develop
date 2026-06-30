@@ -37,10 +37,7 @@ final class UserPreferencesSurface {
 			$rows[] = self::check_screen_options_visibility_cache( $ctx->fork( 'screen-options-cache' ) );
 			$rows[] = self::check_screen_layout_rendering( $ctx->fork( 'screen-layout' ) );
 			$rows[] = self::check_screen_options_rendering_composition( $ctx->fork( 'screen-options-render' ) );
-			$rows[] = $ctx->skip(
-				'user-preferences.exiting-request-handlers',
-				'set_screen_options() redirects and AJAX preference handlers call wp_die(); lower-level helpers are covered directly.'
-			);
+			$rows[] = self::check_exiting_request_handlers( $ctx->fork( 'request-handlers' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
 				'user-preferences.surface-no-throw',
@@ -107,6 +104,460 @@ final class UserPreferencesSurface {
 		}
 
 		return $missing;
+	}
+
+	private static function check_exiting_request_handlers( \ComponentFuzz\FuzzContext $ctx ): array {
+		$missing = self::missing_request_handler_requirements();
+		if ( array() !== $missing ) {
+			return $ctx->skip(
+				'user-preferences.exiting-request-handlers',
+				'Subprocess or JSON helpers for exiting request handlers are unavailable.',
+				array( 'missing' => implode( ', ', $missing ) )
+			);
+		}
+
+		$case = self::request_handler_case( $ctx );
+		$run  = self::run_request_handler_child( $case );
+
+		if ( ! $run['ok'] || ! is_array( $run['result'] ) ) {
+			return $ctx->fail(
+				'user-preferences.exiting-request-handlers',
+				array(
+					'case'     => self::preview( $case ),
+					'exitCode' => $run['exitCode'],
+					'stdout'   => self::preview( $run['stdout'] ),
+					'stderr'   => self::preview( $run['stderr'] ),
+					'result'   => self::preview( $run['result'] ),
+				)
+			);
+		}
+
+		$result   = $run['result'];
+		$ajax     = is_array( $result['ajax'] ?? null ) ? $result['ajax'] : array();
+		$screen   = is_array( $result['screenOptions'] ?? null ) ? $result['screenOptions'] : array();
+		$failures = array();
+
+		self::collect_failure(
+			$failures,
+			'' === (string) $run['stderr']
+				&& array() === ( $result['errors'] ?? array() ),
+			'exiting request handler subprocess reports no stderr or structured child errors',
+			array(
+				'stderr' => self::preview( $run['stderr'] ),
+				'errors' => $result['errors'] ?? array(),
+			)
+		);
+
+		$closed_valid = $ajax['closedPostboxesValid'] ?? array();
+		self::collect_failure(
+			$failures,
+			'1' === (string) ( $closed_valid['dieMessage'] ?? '' )
+				&& $case['closed'] === ( $closed_valid['closedStored'] ?? null )
+				&& $case['hiddenFiltered'] === array_values( (array) ( $closed_valid['hiddenStored'] ?? array() ) ),
+			'wp_ajax_closed_postboxes() persists closed boxes, filters always-visible hidden boxes, and dies with success marker',
+			array( 'actual' => $closed_valid )
+		);
+
+		$closed_invalid = $ajax['closedPostboxesInvalidPage'] ?? array();
+		self::collect_failure(
+			$failures,
+			'0' === (string) ( $closed_invalid['dieMessage'] ?? '' )
+				&& in_array( $closed_invalid['closedStored'] ?? null, array( false, '' ), true )
+				&& in_array( $closed_invalid['hiddenStored'] ?? null, array( false, '' ), true ),
+			'wp_ajax_closed_postboxes() rejects unsanitized page names before preference writes',
+			array( 'actual' => $closed_invalid )
+		);
+
+		$hidden_columns = $ajax['hiddenColumnsValid'] ?? array();
+		self::collect_failure(
+			$failures,
+			'1' === (string) ( $hidden_columns['dieMessage'] ?? '' )
+				&& $case['hiddenColumns'] === ( $hidden_columns['stored'] ?? null ),
+			'wp_ajax_hidden_columns() stores generated column IDs under the screen-local user option',
+			array( 'actual' => $hidden_columns )
+		);
+
+		$meta_order = $ajax['metaBoxOrderValid'] ?? array();
+		$meta_order_die_args = is_array( $meta_order['dieCalls'][0]['args'] ?? null ) ? $meta_order['dieCalls'][0]['args'] : array();
+		self::collect_failure(
+			$failures,
+			true === ( $meta_order['json']['success'] ?? null )
+				&& array_key_exists( 'response', $meta_order_die_args )
+				&& null === $meta_order_die_args['response']
+				&& $case['boxOrder'] === ( $meta_order['orderStored'] ?? null )
+				&& $case['pageColumns'] === ( $meta_order['layoutStored'] ?? null ),
+			'wp_ajax_meta_box_order() stores generated order and layout columns before JSON success die',
+			array( 'actual' => $meta_order )
+		);
+
+		$color_valid = $ajax['saveUserColorSchemeValid'] ?? array();
+		$color_valid_die_args = is_array( $color_valid['dieCalls'][0]['args'] ?? null ) ? $color_valid['dieCalls'][0]['args'] : array();
+		self::collect_failure(
+			$failures,
+			true === ( $color_valid['json']['success'] ?? null )
+				&& array_key_exists( 'response', $color_valid_die_args )
+				&& null === $color_valid_die_args['response']
+				&& 'admin-color-' . $case['previousColorScheme'] === ( $color_valid['json']['data']['previousScheme'] ?? null )
+				&& 'admin-color-' . $case['colorScheme'] === ( $color_valid['json']['data']['currentScheme'] ?? null )
+				&& $case['colorScheme'] === ( $color_valid['stored'] ?? null ),
+			'wp_ajax_save_user_color_scheme() switches only to a registered generated color scheme and reports previous/current CSS classes',
+			array( 'actual' => $color_valid )
+		);
+
+		$color_invalid = $ajax['saveUserColorSchemeInvalid'] ?? array();
+		$color_invalid_die_args = is_array( $color_invalid['dieCalls'][0]['args'] ?? null ) ? $color_invalid['dieCalls'][0]['args'] : array();
+		self::collect_failure(
+			$failures,
+			false === ( $color_invalid['json']['success'] ?? null )
+				&& array_key_exists( 'response', $color_invalid_die_args )
+				&& null === $color_invalid_die_args['response']
+				&& $case['colorScheme'] === ( $color_invalid['stored'] ?? null ),
+			'wp_ajax_save_user_color_scheme() rejects unregistered generated schemes without changing the stored admin_color',
+			array( 'actual' => $color_invalid )
+		);
+
+		self::collect_failure(
+			$failures,
+			'' === (string) ( $screen['preExitOutput'] ?? '' )
+				&& in_array( $screen['invalidOptionStored'] ?? null, array( false, '' ), true )
+				&& in_array( $screen['tooLargeAfterInvalid'] ?? null, array( false, '' ), true )
+				&& $case['screenPerPage'] === ( $screen['validStored'] ?? null )
+				&& 1 === count( $screen['redirects'] ?? array() )
+				&& isset( $screen['redirects'][0]['location'] )
+				&& ! str_contains( $screen['redirects'][0]['location'], 'paged=' )
+				&& ! str_contains( $screen['redirects'][0]['location'], 'pagenum=' )
+				&& ! str_contains( $screen['redirects'][0]['location'], 'apage=' )
+				&& str_contains( $screen['redirects'][0]['location'], 'keep=1' )
+				&& str_contains( $screen['redirects'][0]['location'], 'mode=' . rawurlencode( $case['screenMode'] ) ),
+			'set_screen_options() ignores invalid requests, stores valid bounded values, strips pagination from the referer, preserves other args, adds mode, redirects, and exits',
+			array( 'actual' => $screen )
+		);
+
+		return self::result(
+			$ctx,
+			'user-preferences.exiting-request-handlers',
+			$failures,
+			array(
+				'case'      => self::preview( $case ),
+				'ajaxKeys'  => array_keys( $ajax ),
+				'exitCode'  => $run['exitCode'],
+				'stdoutSha' => sha1( (string) $run['stdout'] ),
+			)
+		);
+	}
+
+	private static function missing_request_handler_requirements(): array {
+		$missing = array();
+		foreach ( array( 'json_decode', 'json_encode', 'proc_close', 'proc_open', 'random_bytes', 'stream_get_contents' ) as $function ) {
+			if ( ! function_exists( $function ) ) {
+				$missing[] = "function {$function}";
+			}
+		}
+		if ( ! defined( 'PHP_BINARY' ) || '' === PHP_BINARY ) {
+			$missing[] = 'PHP_BINARY';
+		}
+
+		return $missing;
+	}
+
+	private static function request_handler_case( \ComponentFuzz\FuzzContext $ctx ): array {
+		$page   = 'cfz-pref-' . self::slug( $ctx->fork( 'page' ), 'page' );
+		$closed = array(
+			'box_' . self::slug( $ctx->fork( 'closed-a' ), 'closed-a' ),
+			'box_' . self::slug( $ctx->fork( 'closed-b' ), 'closed-b' ),
+		);
+		$hidden = array(
+			'submitdiv',
+			'manage-menu',
+			'box_' . self::slug( $ctx->fork( 'hidden' ), 'hidden' ),
+		);
+
+		return array(
+			'token'               => substr( hash( 'sha1', (string) $ctx->seed() ), 0, 12 ),
+			'userLogin'           => 'cfz_request_' . substr( hash( 'sha1', 'user' . $ctx->seed() ), 0, 12 ),
+			'page'                => $page,
+			'invalidPage'         => 'cfz<script>' . self::slug( $ctx->fork( 'bad-page' ), 'bad-page' ),
+			'closed'              => $closed,
+			'hidden'              => $hidden,
+			'hiddenFiltered'      => array_values( array_diff( $hidden, array( 'submitdiv', 'linksubmitdiv', 'manage-menu', 'create-menu' ) ) ),
+			'hiddenColumns'       => array(
+				'col_' . self::slug( $ctx->fork( 'column-a' ), 'column-a' ),
+				'col_' . self::slug( $ctx->fork( 'column-b' ), 'column-b' ),
+			),
+			'boxOrder'            => array(
+				'normal'   => 'box_' . self::slug( $ctx->fork( 'normal-a' ), 'normal-a' ) . ',box_' . self::slug( $ctx->fork( 'normal-b' ), 'normal-b' ),
+				'side'     => 'box_' . self::slug( $ctx->fork( 'side' ), 'side' ),
+				'advanced' => '',
+			),
+			'pageColumns'         => $ctx->int( 1, 4 ),
+			'colorScheme'         => 'cfz-' . self::slug( $ctx->fork( 'color' ), 'color' ),
+			'previousColorScheme' => 'previous-' . self::slug( $ctx->fork( 'previous-color' ), 'previous-color' ),
+			'invalidColorScheme'  => 'missing-' . self::slug( $ctx->fork( 'missing-color' ), 'missing-color' ),
+			'screenOption'        => 'users_per_page',
+			'screenPerPage'       => $ctx->int( 5, 97 ),
+			'screenTooLarge'      => $ctx->int( 1000, 1200 ),
+			'screenMode'          => 'excerpt',
+			'refererPath'         => '/wp-admin/users.php?paged=4&pagenum=8&apage=3&keep=1',
+		);
+	}
+
+	private static function run_request_handler_child( array $case ): array {
+		$dir = rtrim( sys_get_temp_dir(), DIRECTORY_SEPARATOR ) . DIRECTORY_SEPARATOR . 'component-fuzz-user-preferences';
+		\ComponentFuzz\ensure_dir( $dir );
+
+		$script = $dir . DIRECTORY_SEPARATOR . 'child-' . getmypid() . '-' . bin2hex( random_bytes( 6 ) ) . '.php';
+		file_put_contents( $script, self::request_handler_child_program() );
+
+		$descriptors = array(
+			0 => array( 'pipe', 'r' ),
+			1 => array( 'pipe', 'w' ),
+			2 => array( 'pipe', 'w' ),
+		);
+
+		// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.system_calls_proc_open -- Isolates AJAX wp_die and set_screen_options() exit paths.
+		$process = proc_open( array( PHP_BINARY, $script ), $descriptors, $pipes, \ComponentFuzz\repo_root() );
+		if ( ! is_resource( $process ) ) {
+			@unlink( $script );
+			return array(
+				'ok'       => false,
+				'exitCode' => -1,
+				'stdout'   => '',
+				'stderr'   => 'proc_open failed',
+				'result'   => null,
+			);
+		}
+
+		$payload = json_encode( $case, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE );
+		fwrite( $pipes[0], false === $payload ? '{}' : $payload );
+		fclose( $pipes[0] );
+
+		$stdout = stream_get_contents( $pipes[1] );
+		$stderr = stream_get_contents( $pipes[2] );
+		fclose( $pipes[1] );
+		fclose( $pipes[2] );
+
+		$exit_code = proc_close( $process );
+		@unlink( $script );
+
+		$result = json_decode( (string) $stdout, true );
+		return array(
+			'ok'       => 0 === $exit_code && is_array( $result ) && ! empty( $result['ok'] ),
+			'exitCode' => $exit_code,
+			'stdout'   => (string) $stdout,
+			'stderr'   => (string) $stderr,
+			'result'   => is_array( $result ) ? $result : null,
+		);
+	}
+
+	private static function request_handler_child_program(): string {
+		return <<<'PHP'
+<?php
+define( 'DOING_AJAX', true );
+define( 'WP_ADMIN', true );
+
+$case = json_decode( stream_get_contents( STDIN ), true );
+if ( ! is_array( $case ) ) {
+	$case = array();
+}
+
+require_once getcwd() . '/tools/component-fuzz/lib/autoload.php';
+\ComponentFuzz\WpBootstrap::load();
+require_once ABSPATH . 'wp-admin/includes/ajax-actions.php';
+require_once ABSPATH . 'wp-admin/includes/misc.php';
+
+$result = array(
+	'ok'            => false,
+	'ajax'          => array(),
+	'screenOptions' => array(),
+	'errors'        => array(),
+);
+$redirects = array();
+
+function component_fuzz_request_user_id( array $case ): int {
+	$login = preg_replace( '/[^A-Za-z0-9_-]+/', '', (string) ( $case['userLogin'] ?? 'cfz_request_user' ) );
+	if ( '' === $login ) {
+		$login = 'cfz_request_user';
+	}
+
+	$user_id = wp_insert_user(
+		array(
+			'user_login'   => $login,
+			'user_pass'    => 'component-fuzz-pass',
+			'user_email'   => $login . '@example.test',
+			'user_nicename' => $login,
+			'display_name' => 'Component Fuzz Request ' . $login,
+		)
+	);
+	if ( is_wp_error( $user_id ) ) {
+		throw new RuntimeException( $user_id->get_error_message() );
+	}
+
+	return (int) $user_id;
+}
+
+function component_fuzz_request_set_post( array $post ): void {
+	$_GET     = array();
+	$_POST    = $post;
+	$_REQUEST = $post;
+	$_COOKIE  = array();
+}
+
+function component_fuzz_request_post_with_nonce( string $action, string $field, array $post ): array {
+	$post[ $field ] = wp_create_nonce( $action );
+	return $post;
+}
+
+function component_fuzz_request_capture_die( callable $callback ): array {
+	$die_calls = array();
+	$handler   = static function ( $message = '', $title = '', $args = array() ) use ( &$die_calls ): void {
+		$die_calls[] = array(
+			'message' => is_scalar( $message ) ? (string) $message : gettype( $message ),
+			'title'   => is_scalar( $title ) ? (string) $title : gettype( $title ),
+			'args'    => is_array( $args ) ? $args : array( 'raw' => $args ),
+		);
+		throw new RuntimeException( 'component_fuzz_wp_die' );
+	};
+	$filter    = static function () use ( $handler ): callable {
+		return $handler;
+	};
+
+	add_filter( 'wp_die_ajax_handler', $filter, PHP_INT_MAX );
+	ob_start();
+	$throwable = null;
+	try {
+		$callback();
+	} catch ( Throwable $e ) {
+		$throwable = array(
+			'class'   => get_class( $e ),
+			'message' => $e->getMessage(),
+		);
+	}
+	$output = (string) ob_get_clean();
+	remove_filter( 'wp_die_ajax_handler', $filter, PHP_INT_MAX );
+
+	return array(
+		'output'     => $output,
+		'dieCalls'   => $die_calls,
+		'dieMessage' => $die_calls[0]['message'] ?? null,
+		'throwable'  => $throwable,
+	);
+}
+
+function component_fuzz_request_json_output( array $capture ): ?array {
+	$decoded = json_decode( (string) ( $capture['output'] ?? '' ), true );
+	return is_array( $decoded ) ? $decoded : null;
+}
+
+try {
+	$user_id = component_fuzz_request_user_id( $case );
+	wp_set_current_user( $user_id );
+
+	$page          = (string) $case['page'];
+	$invalid_page  = (string) $case['invalidPage'];
+	$closed        = array_values( (array) $case['closed'] );
+	$hidden        = array_values( (array) $case['hidden'] );
+	$columns       = array_values( (array) $case['hiddenColumns'] );
+	$order         = (array) $case['boxOrder'];
+	$screen_option = (string) $case['screenOption'];
+
+	component_fuzz_request_set_post( component_fuzz_request_post_with_nonce( 'closedpostboxes', 'closedpostboxesnonce', array( 'page' => $page, 'closed' => implode( ',', $closed ), 'hidden' => implode( ',', $hidden ) ) ) );
+	$closed_capture = component_fuzz_request_capture_die( 'wp_ajax_closed_postboxes' );
+	$result['ajax']['closedPostboxesValid'] = $closed_capture + array(
+		'closedStored' => get_user_meta( $user_id, "closedpostboxes_{$page}", true ),
+		'hiddenStored' => get_user_meta( $user_id, "metaboxhidden_{$page}", true ),
+	);
+
+	component_fuzz_request_set_post( component_fuzz_request_post_with_nonce( 'closedpostboxes', 'closedpostboxesnonce', array( 'page' => $invalid_page, 'closed' => 'badbox', 'hidden' => 'badbox' ) ) );
+	$invalid_closed_capture = component_fuzz_request_capture_die( 'wp_ajax_closed_postboxes' );
+	$result['ajax']['closedPostboxesInvalidPage'] = $invalid_closed_capture + array(
+		'closedStored' => get_user_meta( $user_id, "closedpostboxes_{$invalid_page}", true ),
+		'hiddenStored' => get_user_meta( $user_id, "metaboxhidden_{$invalid_page}", true ),
+	);
+
+	component_fuzz_request_set_post( component_fuzz_request_post_with_nonce( 'screen-options-nonce', 'screenoptionnonce', array( 'page' => $page, 'hidden' => implode( ',', $columns ) ) ) );
+	$hidden_capture = component_fuzz_request_capture_die( 'wp_ajax_hidden_columns' );
+	$result['ajax']['hiddenColumnsValid'] = $hidden_capture + array(
+		'stored' => get_user_meta( $user_id, "manage{$page}columnshidden", true ),
+	);
+
+	component_fuzz_request_set_post( component_fuzz_request_post_with_nonce( 'meta-box-order', '_ajax_nonce', array( 'page' => $page, 'order' => $order, 'page_columns' => (string) (int) $case['pageColumns'] ) ) );
+	$meta_capture = component_fuzz_request_capture_die( 'wp_ajax_meta_box_order' );
+	$result['ajax']['metaBoxOrderValid'] = $meta_capture + array(
+		'json'         => component_fuzz_request_json_output( $meta_capture ),
+		'orderStored'  => get_user_meta( $user_id, "meta-box-order_{$page}", true ),
+		'layoutStored' => get_user_meta( $user_id, "screen_layout_{$page}", true ),
+	);
+
+	$GLOBALS['_wp_admin_css_colors'] = array(
+		(string) $case['colorScheme'] => array( 'name' => 'Component Fuzz' ),
+	);
+	update_user_meta( $user_id, 'admin_color', (string) $case['previousColorScheme'] );
+
+	component_fuzz_request_set_post( component_fuzz_request_post_with_nonce( 'save-color-scheme', 'nonce', array( 'color_scheme' => (string) $case['colorScheme'] ) ) );
+	$color_capture = component_fuzz_request_capture_die( 'wp_ajax_save_user_color_scheme' );
+	$result['ajax']['saveUserColorSchemeValid'] = $color_capture + array(
+		'json'   => component_fuzz_request_json_output( $color_capture ),
+		'stored' => get_user_meta( $user_id, 'admin_color', true ),
+	);
+
+	component_fuzz_request_set_post( component_fuzz_request_post_with_nonce( 'save-color-scheme', 'nonce', array( 'color_scheme' => (string) $case['invalidColorScheme'] ) ) );
+	$invalid_color_capture = component_fuzz_request_capture_die( 'wp_ajax_save_user_color_scheme' );
+	$result['ajax']['saveUserColorSchemeInvalid'] = $invalid_color_capture + array(
+		'json'   => component_fuzz_request_json_output( $invalid_color_capture ),
+		'stored' => get_user_meta( $user_id, 'admin_color', true ),
+	);
+
+	$redirect_filter = static function ( string $location, int $status ) use ( &$redirects ): string {
+		$redirects[] = array(
+			'location' => $location,
+			'status'   => $status,
+		);
+		return $location;
+	};
+	add_filter( 'wp_redirect', $redirect_filter, PHP_INT_MAX, 2 );
+
+	register_shutdown_function(
+		static function () use ( &$result, &$redirects, $user_id, $case, $screen_option ): void {
+			$output = '';
+			if ( ob_get_level() > 0 ) {
+				$output = (string) ob_get_clean();
+			}
+
+			$result['screenOptions']['preExitOutput']       = $output;
+			$result['screenOptions']['invalidOptionStored'] = get_user_meta( $user_id, 'badoption', true );
+			$result['screenOptions']['tooLargeAfterInvalid'] = $result['screenOptions']['tooLargeAfterInvalid'] ?? null;
+			$result['screenOptions']['validStored']         = get_user_meta( $user_id, $screen_option, true );
+			$result['screenOptions']['redirects']           = $redirects;
+			$result['ok'] = true;
+
+			echo wp_json_encode( $result, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE );
+		}
+	);
+
+	$_SERVER['REQUEST_URI'] = '/wp-admin/profile.php?current=1';
+	$_SERVER['HTTP_HOST']   = 'example.test';
+
+	component_fuzz_request_set_post( component_fuzz_request_post_with_nonce( 'screen-options-nonce', 'screenoptionnonce', array( '_wp_http_referer' => (string) $case['refererPath'], 'wp_screen_options' => array( 'option' => 'bad<option', 'value' => 5 ) ) ) );
+	set_screen_options();
+
+	component_fuzz_request_set_post( component_fuzz_request_post_with_nonce( 'screen-options-nonce', 'screenoptionnonce', array( '_wp_http_referer' => (string) $case['refererPath'], 'wp_screen_options' => array( 'option' => $screen_option, 'value' => (string) (int) $case['screenTooLarge'] ) ) ) );
+	set_screen_options();
+	$result['screenOptions']['tooLargeAfterInvalid'] = get_user_meta( $user_id, $screen_option, true );
+
+	ob_start();
+	component_fuzz_request_set_post( component_fuzz_request_post_with_nonce( 'screen-options-nonce', 'screenoptionnonce', array( '_wp_http_referer' => (string) $case['refererPath'], 'mode' => (string) $case['screenMode'], 'wp_screen_options' => array( 'option' => $screen_option, 'value' => (string) (int) $case['screenPerPage'] ) ) ) );
+	set_screen_options();
+} catch ( Throwable $e ) {
+	$result['errors'][] = array(
+		'class'   => get_class( $e ),
+		'message' => $e->getMessage(),
+		'file'    => $e->getFile(),
+		'line'    => $e->getLine(),
+	);
+	$result['ok'] = false;
+	echo wp_json_encode( $result, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE );
+}
+PHP;
 	}
 
 	private static function check_user_setting_serialization( \ComponentFuzz\FuzzContext $ctx ): array {
