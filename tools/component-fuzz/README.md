@@ -613,8 +613,9 @@ database, network requests, or a configured site.
   introspection route and schema contracts, create/update/delete dispatch,
   one-time password response and stored hash agreement, `_fields` projection and
   links, REST pre/after/prepare hooks, capability-denied and availability error
-  matrices, current-user introspection, stale UUID failures, and global/filter
-  restoration.
+  matrices, current-user introspection, stale UUID failures, REST
+  application-password auth status globals, REST index authentication metadata,
+  and global/filter restoration.
 - `rest-directory-services`: no-network REST coverage for WordPress.org-backed
   directory service controllers, including block-directory, pattern-directory,
   and URL-details route/schema contracts, plugin API and HTTP short-circuits,
@@ -877,7 +878,8 @@ terms, comments, users, revisions, and attachments are covered by
 `rest-object-controllers` against the in-memory `wpdb` stub. The
 `rest-application-passwords` surface complements lower-level account-security
 coverage by dispatching the REST controller with synthetic users and scoped
-application-password metadata.
+application-password metadata, while directly asserting the REST auth-status and
+index-advertisement plumbing that sits outside controller CRUD methods.
 `rest-media-attachments` covers the bounded REST attachment upload write path
 using raw request bodies, temp upload roots, attachment postmeta, response
 projection, metadata finalization, and permission gates. It intentionally avoids

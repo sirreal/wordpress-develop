@@ -336,9 +336,9 @@
 				<tr>
 					<td><code>rest-application-passwords</code></td>
 					<td><span class="status good">local validation passed</span></td>
-					<td>Main-tree progress from scoped component worktree <code>component-fuzz-rest-application-passwords</code>; REST application password controller coverage validated before merge.</td>
-					<td>Focused runs: seed 1 passed 5 checks, seed 224 over 25 iterations passed 125 checks, adjacent <code>rest-application-passwords,account-security,auth-flow,capabilities,rest,rest-controllers,rest-object-controllers</code> smoke passed 315 checks with 20 skips, and the latest broad run passed 4649 checks with 27 skips.</td>
-					<td><code>WP_REST_Application_Passwords_Controller</code>, <code>WP_Application_Passwords</code>, synthetic users, scoped application-password usermeta filters, REST default filters for <code>_fields</code>, capability mapping, app-password availability filters, current-user globals, and REST server/global restoration.</td>
+					<td>Scoped component worktree <code>component-fuzz-rest-app-password-status</code>; REST application password controller and auth-status/index plumbing coverage validated before merge.</td>
+					<td>Latest focused runs: seed 224 passed 6 checks, seeds 1 and 224 over 25 iterations each passed 150 checks, adjacent <code>rest-application-passwords,account-security,auth-flow,capabilities,rest,rest-controllers,rest-object-controllers</code> smoke passed 67 checks with 0 skips, and broad seed 224 smoke passed 4697 checks with 5 skips.</td>
+					<td><code>WP_REST_Application_Passwords_Controller</code>, <code>WP_Application_Passwords</code>, synthetic users, scoped application-password usermeta filters, REST default filters for <code>_fields</code> and index authentication metadata, capability mapping, app-password availability filters, current-user/auth-status globals, REST auth error helpers, and REST server/global restoration.</td>
 				</tr>
 				<tr>
 					<td><code>rest-directory-services</code></td>
