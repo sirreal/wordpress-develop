@@ -10,6 +10,8 @@ final class AdminWorkflowsSurface {
 	private const PREVIEW_BYTES = 180;
 
 	public static function run( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::maybe_load_optional_ajax_support();
+
 		$missing = self::missing_requirements();
 		if ( array() !== $missing ) {
 			return array(
@@ -33,7 +35,7 @@ final class AdminWorkflowsSurface {
 			$rows[] = self::check_referer_field_helpers( $ctx->fork( 'referer-field-helpers' ) );
 			$rows[] = self::check_admin_form_controls( $ctx->fork( 'form-controls' ) );
 			$rows[] = self::skipped_core_list_table_subclasses( $ctx->fork( 'core-list-table-skips' ) );
-			$rows[] = self::skipped_exiting_ajax_wrappers( $ctx->fork( 'ajax-wrapper-skips' ) );
+			$rows[] = self::check_exiting_ajax_wrappers( $ctx->fork( 'ajax-wrappers' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
 				'admin-workflows.surface-no-throw',
@@ -89,10 +91,12 @@ final class AdminWorkflowsSurface {
 				'remove_query_arg',
 				'remove_submenu_page',
 				'sanitize_key',
+				'sanitize_option',
 				'sanitize_title',
 				'selected',
 				'set_url_scheme',
 				'submit_button',
+				'date_i18n',
 				'wp_create_nonce',
 				'wp_get_original_referer',
 				'wp_get_raw_referer',
@@ -102,6 +106,8 @@ final class AdminWorkflowsSurface {
 				'wp_original_referer_field',
 				'wp_referer_field',
 				'wp_strip_all_tags',
+				'wp_ajax_date_format',
+				'wp_ajax_time_format',
 				'wp_unslash',
 				'wp_validate_redirect',
 				'wp_verify_nonce',
@@ -113,6 +119,15 @@ final class AdminWorkflowsSurface {
 		}
 
 		return $missing;
+	}
+
+	private static function maybe_load_optional_ajax_support(): void {
+		if ( defined( 'ABSPATH' ) && ! function_exists( 'wp_ajax_date_format' ) ) {
+			$ajax_actions = ABSPATH . 'wp-admin/includes/ajax-actions.php';
+			if ( file_exists( $ajax_actions ) ) {
+				require_once $ajax_actions;
+			}
+		}
 	}
 
 	private static function check_menu_globals( \ComponentFuzz\FuzzContext $ctx ): array {
@@ -1319,19 +1334,93 @@ final class AdminWorkflowsSurface {
 		);
 	}
 
-	private static function skipped_exiting_ajax_wrappers( \ComponentFuzz\FuzzContext $ctx ): array {
-		return $ctx->skip(
-			'admin-workflows.ajax.exiting-wrappers-skipped',
-			'wp_ajax_* wrappers and wp_send_json()/wp_die() response paths are skipped in-process because '
-				. 'many terminate execution; this surface covers the shared nonce and referer helpers only '
-				. 'where stop=false or valid nonces avoid exits.',
+	private static function check_exiting_ajax_wrappers( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures        = array();
+		$local_snapshot  = self::snapshot_globals( array( '_GET', '_POST', '_REQUEST', '_COOKIE' ) );
+		$server_snapshot = self::snapshot_server( array( 'REQUEST_METHOD', 'REQUEST_URI', 'PHP_SELF' ) );
+		$token           = \sanitize_key( $ctx->identifier( 3, 8 ) );
+		$date_format     = 'Y-m-d \D\a\t\e "' . $token . '" <script>alert(1)</script>';
+		$time_format     = 'H:i \T\i\m\e "' . $token . '" <b onclick="bad">';
+		$cases           = array(
+			'date' => array(
+				'option'   => 'date_format',
+				'format'   => $date_format,
+				'function' => 'wp_ajax_date_format',
+			),
+			'time' => array(
+				'option'   => 'time_format',
+				'format'   => $time_format,
+				'function' => 'wp_ajax_time_format',
+			),
+		);
+		$results         = array();
+		$restored        = false;
+
+		try {
+			$_SERVER['REQUEST_METHOD'] = 'POST';
+			$_SERVER['REQUEST_URI']    = '/wp-admin/admin-ajax.php';
+			$_SERVER['PHP_SELF']       = '/wp-admin/admin-ajax.php';
+
+			foreach ( $cases as $name => $case ) {
+				$_GET     = array();
+				$_COOKIE  = array();
+				$_POST    = array( 'date' => addslashes( $case['format'] ) );
+				$_REQUEST = $_POST;
+
+				$capture = self::capture_ajax_call(
+					static function () use ( $case ): void {
+						$case['function']();
+					}
+				);
+
+				$results[ $name ] = array(
+					'capture'          => $capture,
+					'expected'         => \date_i18n( \sanitize_option( $case['option'], \wp_unslash( $_POST['date'] ) ) ),
+					'sanitized_format' => \sanitize_option( $case['option'], \wp_unslash( $_POST['date'] ) ),
+					'raw_format'       => $case['format'],
+				);
+			}
+		} finally {
+			self::restore_globals( $local_snapshot );
+			self::restore_server( $server_snapshot );
+			$restored = self::globals_match( $local_snapshot, array( '_GET', '_POST', '_REQUEST', '_COOKIE' ) )
+				&& self::server_matches( $server_snapshot, array( 'REQUEST_METHOD', 'REQUEST_URI', 'PHP_SELF' ) );
+		}
+
+		foreach ( $results as $name => $result ) {
+			$body = self::ajax_body( $result['capture'] ?? array() );
+			self::collect_failure(
+				$failures,
+				! empty( $result['capture']['captured'] )
+					&& null === ( $result['capture']['threw'] ?? null )
+					&& ! empty( $result['capture']['bufferBalanced'] )
+					&& ! empty( $result['capture']['filtersRestored'] )
+					&& $body === ( $result['expected'] ?? null )
+					&& ! str_contains( strtolower( $body ), '<script' )
+					&& ! str_contains( strtolower( $body ), 'onclick=' ),
+				"wp_ajax_{$name}_format() unslashes, sanitizes, formats, dies through ajax capture, and strips unsafe markup",
+				array( 'result' => $result )
+			);
+		}
+
+		self::collect_failure(
+			$failures,
+			$restored
+				&& self::all_ajax_captures_restored( array_column( $results, 'capture' ) ),
+			'date/time AJAX wrapper coverage restores request globals, server globals, filters, and output buffers',
 			array(
-				'covered_instead' => array(
-					'check_admin_referer() with a valid generated nonce',
-					'check_ajax_referer() with a valid generated nonce',
-					'check_ajax_referer() invalid nonce with stop=false',
-					'wp_nonce_url() for admin-post.php-style URLs',
-				),
+				'restored' => $restored,
+				'results'  => $results,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'admin-workflows.ajax.date-time-format-wrappers',
+			array() === $failures,
+			array(
+				'token'    => $token,
+				'failures' => array_slice( $failures, 0, 6 ),
 			)
 		);
 	}
@@ -1610,6 +1699,86 @@ final class AdminWorkflowsSurface {
 		);
 	}
 
+	private static function capture_ajax_call( callable $callback ): array {
+		$die_calls      = array();
+		$doing_ajax     = static fn (): bool => true;
+		$handler_filter = static function () use ( &$die_calls ): callable {
+			return static function ( $message = '', $title = '', $args = array() ) use ( &$die_calls ): void {
+				$die_calls[] = array(
+					'message' => $message,
+					'title'   => $title,
+					'args'    => is_array( $args ) ? $args : array( 'raw' => $args ),
+				);
+				throw new AdminWorkflowsSurface_DieCaptured( 'Captured ajax wp_die.' );
+			};
+		};
+
+		$level    = ob_get_level();
+		$output   = '';
+		$captured = false;
+		$threw    = null;
+
+		if ( ! headers_sent() ) {
+			header_remove();
+		}
+
+		\add_filter( 'wp_doing_ajax', $doing_ajax, 1 );
+		\add_filter( 'wp_die_ajax_handler', $handler_filter, 1 );
+		ob_start();
+		try {
+			$callback();
+		} catch ( AdminWorkflowsSurface_DieCaptured $e ) {
+			$captured = true;
+		} catch ( \Throwable $e ) {
+			$threw = self::describe_throwable( $e );
+		} finally {
+			$output = (string) ob_get_clean();
+			while ( ob_get_level() > $level ) {
+				ob_end_clean();
+			}
+			\remove_filter( 'wp_die_ajax_handler', $handler_filter, 1 );
+			\remove_filter( 'wp_doing_ajax', $doing_ajax, 1 );
+			if ( ! headers_sent() ) {
+				header_remove();
+			}
+		}
+
+		return array(
+			'captured'        => $captured,
+			'threw'           => $threw,
+			'output'          => $output,
+			'dieCalls'        => $die_calls,
+			'filtersRestored' => false === \has_filter( 'wp_die_ajax_handler', $handler_filter )
+				&& false === \has_filter( 'wp_doing_ajax', $doing_ajax ),
+			'bufferBalanced'  => ob_get_level() === $level,
+		);
+	}
+
+	private static function ajax_body( array $capture ): string {
+		$output = (string) ( $capture['output'] ?? '' );
+		if ( '' !== $output ) {
+			return $output;
+		}
+
+		$message = $capture['dieCalls'][0]['message'] ?? '';
+		return is_scalar( $message ) ? (string) $message : gettype( $message );
+	}
+
+	private static function all_ajax_captures_restored( array $captures ): bool {
+		foreach ( $captures as $capture ) {
+			if (
+				empty( $capture['captured'] )
+				|| ! empty( $capture['threw'] )
+				|| empty( $capture['bufferBalanced'] )
+				|| empty( $capture['filtersRestored'] )
+			) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
 	private static function row(
 		\ComponentFuzz\FuzzContext $ctx,
 		string $invariant,
@@ -1853,3 +2022,5 @@ final class AdminWorkflowsSurface {
 		return $value;
 	}
 }
+
+final class AdminWorkflowsSurface_DieCaptured extends \RuntimeException {}
