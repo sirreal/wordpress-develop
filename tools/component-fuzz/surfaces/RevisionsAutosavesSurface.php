@@ -35,11 +35,7 @@ final class RevisionsAutosavesSurface {
 			$rows[] = self::check_preview_helper( $ctx->fork( 'preview' ), $case );
 			$rows[] = self::check_latest_revision_count_and_url_helpers( $ctx->fork( 'latest-count-url' ), $case );
 			$rows[] = self::check_user_filtered_autosave_lookup( $ctx->fork( 'user-filtered-autosave' ), $case );
-			$rows[] = $ctx->skip(
-				'revisions-autosaves.browser-template-preview.skipped',
-				'Browser/admin-template and request-dispatch helpers are intentionally avoided in CLI fuzzing.',
-				array( 'apis' => array( '_show_post_preview', 'wp_print_revision_templates' ) )
-			);
+			$rows[] = self::check_revision_template_output( $ctx->fork( 'templates' ), $case );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
 				'revisions-autosaves.surface-no-throw',
@@ -68,6 +64,9 @@ final class RevisionsAutosavesSurface {
 
 		foreach (
 			array(
+				'__',
+				'_e',
+				'_ex',
 				'_set_preview',
 				'_wp_copy_post_meta',
 				'_wp_post_revision_data',
@@ -80,6 +79,9 @@ final class RevisionsAutosavesSurface {
 				'create_initial_taxonomies',
 				'current_user_can',
 				'delete_post_meta',
+				'esc_attr_e',
+				'esc_attr_x',
+				'esc_html_e',
 				'get_post',
 				'get_post_meta',
 				'get_edit_post_link',
@@ -117,6 +119,7 @@ final class RevisionsAutosavesSurface {
 				'wp_post_revision_title_expanded',
 				'wp_post_revision_meta_keys',
 				'wp_prepare_revisions_for_js',
+				'wp_print_revision_templates',
 				'wp_restore_post_revision',
 				'wp_restore_post_revision_meta',
 				'wp_revisions_enabled',
@@ -1851,6 +1854,131 @@ final class RevisionsAutosavesSurface {
 		);
 	}
 
+	private static function check_revision_template_output( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		self::prepare_runtime();
+		self::register_case_post_type( $case, true );
+
+		$failures  = array();
+		$author_id = self::insert_author( $case, 'revision-templates' );
+		$post_id   = self::insert_parent_post( $case, $author_id, 'revision-templates' );
+		$post      = \get_post( $post_id );
+
+		$GLOBALS['post'] = $post;
+		\wp_set_current_user( 0 );
+		$unlocked_output = self::capture_revision_templates();
+
+		\add_post_meta( $post_id, '_edit_lock', time() . ':' . $author_id, true );
+		$GLOBALS['post'] = \get_post( $post_id );
+		$locked_output   = self::capture_revision_templates();
+
+		$template_ids = self::revision_template_ids( $unlocked_output );
+
+		self::collect_failure(
+			$failures,
+			$post instanceof \WP_Post
+				&& array(
+					'tmpl-revisions-frame',
+					'tmpl-revisions-buttons',
+					'tmpl-revisions-slider-hidden-help',
+					'tmpl-revisions-checkbox',
+					'tmpl-revisions-meta',
+					'tmpl-revisions-diff',
+				) === $template_ids
+				&& 6 === substr_count( $unlocked_output, 'type="text/html"' )
+				&& self::revision_template_order_ok( $unlocked_output ),
+			'wp_print_revision_templates() emits the expected revision template script set in stable order',
+			array(
+				'postId'      => $post_id,
+				'templateIds' => $template_ids,
+				'output'      => self::describe_output( $unlocked_output ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			str_contains( $unlocked_output, 'class="revisions-control-frame"' )
+				&& str_contains( $unlocked_output, 'class="revisions-diff-frame"' )
+				&& str_contains( $unlocked_output, 'class="button button-compact" type="button" value="Previous"' )
+				&& str_contains( $unlocked_output, 'class="button button-compact" type="button" value="Next"' )
+				&& str_contains( $unlocked_output, 'Compare any two revisions' )
+				&& str_contains( $unlocked_output, 'Change revision by using the left and right arrow keys' )
+				&& str_contains( $unlocked_output, 'Restore This Autosave' )
+				&& str_contains( $unlocked_output, 'Restore This Revision' ),
+			'wp_print_revision_templates() includes controls, accessibility help, compare mode, and restore-button labels',
+			array( 'output' => self::describe_output( $unlocked_output ) )
+		);
+
+		self::collect_failure(
+			$failures,
+			str_contains( $unlocked_output, '<# if ( data.attributes.current ) { #>' )
+				&& 1 === substr_count( $unlocked_output, 'disabled="disabled"' )
+				&& false !== \wp_check_post_lock( $post_id )
+				&& ! str_contains( $locked_output, '<# if ( data.attributes.current ) { #>' )
+				&& 1 === substr_count( $locked_output, 'disabled="disabled"' )
+				&& strlen( $locked_output ) < strlen( $unlocked_output ),
+			'wp_print_revision_templates() switches the restore-button disabled branch when wp_check_post_lock() reports a lock',
+			array(
+				'postId'         => $post_id,
+				'lockUser'       => \wp_check_post_lock( $post_id ),
+				'unlockedOutput' => self::describe_output( $unlocked_output ),
+				'lockedOutput'   => self::describe_output( $locked_output ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			str_contains( $unlocked_output, '{{{ data.attributes.author.avatar }}}' )
+				&& str_contains( $unlocked_output, '{{ data.attributes.author.name }}' )
+				&& str_contains( $unlocked_output, '{{ data.attributes.timeAgo }}' )
+				&& str_contains( $unlocked_output, '{{ data.attributes.dateShort }}' )
+				&& str_contains( $unlocked_output, '<# _.each( data.fields, function( field ) { #>' )
+				&& str_contains( $unlocked_output, '{{ field.name }}' )
+				&& str_contains( $unlocked_output, '{{{ field.diff }}}' )
+				&& self::strings_absent(
+					$unlocked_output . $locked_output,
+					array(
+						$case['token'],
+						$case['titleFrom'],
+						$case['titleTo'],
+						$case['contentFrom'],
+						$case['contentTo'],
+						$case['excerptFrom'],
+						$case['excerptTo'],
+					)
+				)
+				&& ! str_contains( strtolower( $unlocked_output ), '<script>alert' )
+				&& ! str_contains( strtolower( $locked_output ), '<script>alert' ),
+			'wp_print_revision_templates() preserves expected underscore interpolation markers without leaking generated post content',
+			array(
+				'absentNeedles' => array_filter(
+					array(
+						$case['token'],
+						$case['titleFrom'],
+						$case['titleTo'],
+						$case['contentFrom'],
+						$case['contentTo'],
+						$case['excerptFrom'],
+						$case['excerptTo'],
+					),
+					static fn( string $value ): bool => '' !== $value
+				),
+				'output'        => self::describe_output( $unlocked_output ),
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'revisions-autosaves.revision-template-output',
+			$failures,
+			array(
+				'case'       => self::case_summary( $case ),
+				'postId'     => $post_id,
+				'templateIds' => $template_ids,
+				'notCovered'  => array( '_show_post_preview request dispatch' ),
+			)
+		);
+	}
+
 	private static function autosave_post_data( int $post_id, array $case, string $title, string $content, string $excerpt ): array {
 		return array(
 			'comment_status' => 'closed',
@@ -2176,6 +2304,69 @@ final class RevisionsAutosavesSurface {
 		}
 
 		return false;
+	}
+
+	private static function capture_revision_templates(): string {
+		$level = ob_get_level();
+		ob_start();
+		try {
+			\wp_print_revision_templates();
+			return (string) ob_get_clean();
+		} catch ( \Throwable $e ) {
+			while ( ob_get_level() > $level ) {
+				ob_end_clean();
+			}
+			throw $e;
+		}
+	}
+
+	private static function revision_template_ids( string $output ): array {
+		if ( ! preg_match_all( '/<script\\s+id="([^"]+)"\\s+type="text\\/html">/', $output, $matches ) ) {
+			return array();
+		}
+
+		return $matches[1];
+	}
+
+	private static function revision_template_order_ok( string $output ): bool {
+		$offset = 0;
+		foreach (
+			array(
+				'tmpl-revisions-frame',
+				'tmpl-revisions-buttons',
+				'tmpl-revisions-slider-hidden-help',
+				'tmpl-revisions-checkbox',
+				'tmpl-revisions-meta',
+				'tmpl-revisions-diff',
+			) as $template_id
+		) {
+			$position = strpos( $output, 'id="' . $template_id . '"', $offset );
+			if ( false === $position ) {
+				return false;
+			}
+			$offset = $position + strlen( $template_id );
+		}
+
+		return true;
+	}
+
+	private static function strings_absent( string $haystack, array $needles ): bool {
+		foreach ( $needles as $needle ) {
+			$needle = (string) $needle;
+			if ( '' !== $needle && str_contains( $haystack, $needle ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function describe_output( string $output ): array {
+		return array(
+			'bytes'   => strlen( $output ),
+			'sha1'    => sha1( $output ),
+			'preview' => substr( $output, 0, 220 ),
+		);
 	}
 
 	private static function result( \ComponentFuzz\FuzzContext $ctx, string $invariant, array $failures, array $data = array() ): array {
