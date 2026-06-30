@@ -116,9 +116,13 @@ final class PrivacyAdminRequestsSurface {
 				'get_post_meta',
 				'get_settings_errors',
 				'has_filter',
+				'home_url',
 				'is_wp_error',
 				'remove_all_filters',
 				'remove_filter',
+				'restore_previous_locale',
+				'sanitize_url',
+				'switch_to_locale',
 				'update_post_meta',
 				'wp_ajax_wp_privacy_erase_personal_data',
 				'wp_ajax_wp_privacy_export_personal_data',
@@ -126,13 +130,21 @@ final class PrivacyAdminRequestsSurface {
 				'wp_cache_set',
 				'wp_create_nonce',
 				'wp_delete_post',
+				'wp_fast_hash',
+				'wp_generate_password',
+				'wp_generate_user_request_key',
 				'wp_get_user_request',
+				'wp_login_url',
+				'wp_mail',
 				'wp_is_unicode_email',
 				'wp_json_encode',
+				'wp_send_user_request',
 				'wp_send_json_error',
 				'wp_send_json_success',
 				'wp_set_current_user',
 				'wp_sanitize_unicode_email',
+				'wp_specialchars_decode',
+				'wp_validate_user_request_key',
 				'wp_update_post',
 				'wp_verify_nonce',
 			) as $function
@@ -371,10 +383,17 @@ final class PrivacyAdminRequestsSurface {
 
 		$complete_id = 97900 + $ctx->int( 0, 50 );
 		$delete_id   = 98000 + $ctx->int( 0, 50 );
+		$resend_ids  = array(
+			'first'  => 98100 + $ctx->int( 0, 50 ),
+			'second' => 98200 + $ctx->int( 0, 50 ),
+		);
 		$invalid_id  = $complete_id + 1000;
 
 		self::seed_privacy_request( $complete_id, 'export_personal_data', 'request-confirmed', 'complete-' . $token . '@example.test', $token );
 		self::seed_privacy_request( $delete_id, 'export_personal_data', 'request-pending', 'delete-' . $token . '@example.test', $token );
+		foreach ( $resend_ids as $label => $resend_id ) {
+			self::seed_privacy_request( $resend_id, 'export_personal_data', 'request-confirmed', 'resend-' . $label . '-' . $token . '@example.com', $token );
+		}
 
 		$invalid_resend = \_wp_privacy_resend_request( $invalid_id );
 		$invalid_complete = \_wp_privacy_completed_request( $invalid_id );
@@ -401,6 +420,98 @@ final class PrivacyAdminRequestsSurface {
 		$deleted_after = \get_post( $delete_id );
 		$delete_errors = \get_settings_errors( 'bulk_action' );
 
+		$mail_events    = array();
+		$subject_events = array();
+		$content_events = array();
+		$header_events  = array();
+		$mail_filter    = static function ( $pre, array $atts ) use ( &$mail_events ) {
+			unset( $pre );
+			$mail_events[] = $atts;
+			return true;
+		};
+		$subject_filter = static function ( string $subject, string $sitename, array $email_data ) use ( &$subject_events ): string {
+			$subject_events[] = array(
+				'subject'   => $subject,
+				'sitename'  => $sitename,
+				'requestId' => (int) ( $email_data['request']->ID ?? 0 ),
+				'email'     => (string) ( $email_data['email'] ?? '' ),
+			);
+			return '[cfz] ' . $subject;
+		};
+		$content_filter = static function ( string $content, array $email_data ) use ( &$content_events ): string {
+			$content_events[] = array(
+				'requestId'  => (int) ( $email_data['request']->ID ?? 0 ),
+				'email'      => (string) ( $email_data['email'] ?? '' ),
+				'confirmUrl' => (string) ( $email_data['confirm_url'] ?? '' ),
+			);
+			return $content . "\n\nEmail: ###EMAIL###\n";
+		};
+		$headers_filter = static function ( $headers, string $subject, string $content, int $request_id, array $email_data ) use ( &$header_events, $token ) {
+			unset( $headers );
+			$header_events[] = array(
+				'requestId' => $request_id,
+				'subject'   => $subject,
+				'email'     => (string) ( $email_data['email'] ?? '' ),
+				'content'   => $content,
+			);
+			return "X-Privacy-Resend: {$token}";
+		};
+		\add_filter( 'pre_wp_mail', $mail_filter, 10, 2 );
+		\add_filter( 'user_request_action_email_subject', $subject_filter, 10, 3 );
+		\add_filter( 'user_request_action_email_content', $content_filter, 10, 2 );
+		\add_filter( 'user_request_action_email_headers', $headers_filter, 10, 5 );
+
+		$GLOBALS['wp_settings_errors'] = array();
+		$resend_before = array();
+		foreach ( $resend_ids as $label => $resend_id ) {
+			$resend_before[ $label ] = \wp_get_user_request( $resend_id );
+		}
+		$_POST = $_GET = $_REQUEST = array(
+			'action'     => 'resend',
+			'request_id' => array_merge( array_values( $resend_ids ), array( $invalid_id ) ),
+			'_wpnonce'   => \wp_create_nonce( 'bulk-privacy_requests' ),
+		);
+		try {
+			$table->process_bulk_action();
+		} finally {
+			\remove_filter( 'user_request_action_email_headers', $headers_filter, 10 );
+			\remove_filter( 'user_request_action_email_content', $content_filter, 10 );
+			\remove_filter( 'user_request_action_email_subject', $subject_filter, 10 );
+			\remove_filter( 'pre_wp_mail', $mail_filter, 10 );
+		}
+		$resend_after = array();
+		foreach ( $resend_ids as $label => $resend_id ) {
+			$resend_after[ $label ] = \wp_get_user_request( $resend_id );
+		}
+		$resend_errors = \get_settings_errors( 'bulk_action' );
+		$resend_checks = array();
+		foreach ( array_values( $resend_ids ) as $mail_index => $resend_id ) {
+			$label           = (string) array_search( $resend_id, $resend_ids, true );
+			$mail            = $mail_events[ $mail_index ] ?? null;
+			$message         = is_array( $mail ) ? (string) ( $mail['message'] ?? '' ) : '';
+			$confirm_key     = self::query_value_from_text( $message, 'confirm_key' );
+			$expected_email  = 'resend-' . $label . '-' . $token . '@example.com';
+			$resend_checks[] = array(
+				'id'             => $resend_id,
+				'beforeConfirmed' => $resend_before[ $label ] instanceof \WP_User_Request && 'request-confirmed' === $resend_before[ $label ]->status,
+				'afterPending'   => $resend_after[ $label ] instanceof \WP_User_Request && 'request-pending' === $resend_after[ $label ]->status,
+				'keyChanged'     => $resend_before[ $label ] instanceof \WP_User_Request && $resend_after[ $label ] instanceof \WP_User_Request && $resend_before[ $label ]->confirm_key !== $resend_after[ $label ]->confirm_key,
+				'keyLength'      => 20 === strlen( $confirm_key ),
+				'keyValidates'   => true === \wp_validate_user_request_key( $resend_id, $confirm_key ),
+				'mailTo'         => is_array( $mail ) && $expected_email === ( $mail['to'] ?? null ),
+				'subject'        => is_array( $mail ) && str_contains( (string) ( $mail['subject'] ?? '' ), '[cfz] ' ) && str_contains( (string) ( $mail['subject'] ?? '' ), 'Confirm Action' ),
+				'headers'        => is_array( $mail ) && "X-Privacy-Resend: {$token}" === ( $mail['headers'] ?? null ),
+				'confirmUrl'     => str_contains( $message, 'action=confirmaction' ) && str_contains( $message, 'request_id=' . $resend_id ),
+				'emailReplaced'  => str_contains( $message, 'Email: ' . $expected_email ),
+				'placeholders'   => ! str_contains( $message, '###' ),
+			);
+		}
+		$resend_ok = array_reduce(
+			$resend_checks,
+			static fn( bool $carry, array $check ): bool => $carry && ! in_array( false, $check, true ),
+			true
+		);
+
 		self::collect_failure(
 			$failures,
 			self::is_error_code( $invalid_resend, 'privacy_request_error' )
@@ -409,6 +520,38 @@ final class PrivacyAdminRequestsSurface {
 			array(
 				'resend'   => self::describe_value( $invalid_resend ),
 				'complete' => self::describe_value( $invalid_complete ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$resend_ok
+				&& 2 === count( $mail_events )
+				&& 2 === count( $subject_events )
+				&& 2 === count( $content_events )
+				&& 2 === count( $header_events )
+				&& self::has_settings_error( $resend_errors, 'error', '1 confirmation request failed to resend' )
+				&& self::has_settings_error( $resend_errors, 'success', '2 confirmation requests re-sent successfully' )
+				&& false === \has_filter( 'pre_wp_mail', $mail_filter )
+				&& false === \has_filter( 'user_request_action_email_subject', $subject_filter )
+				&& false === \has_filter( 'user_request_action_email_content', $content_filter )
+				&& false === \has_filter( 'user_request_action_email_headers', $headers_filter ),
+			'bulk resend reissues confirmation keys, sends captured confirmation emails, and reports mixed plural success/error counts',
+			array(
+				'checks'        => self::describe_value( $resend_checks ),
+				'before'        => self::describe_value( $resend_before ),
+				'after'         => self::describe_value( $resend_after ),
+				'mailEvents'    => self::describe_value( $mail_events ),
+				'subjectEvents' => self::describe_value( $subject_events ),
+				'contentEvents' => self::describe_value( $content_events ),
+				'headerEvents'  => self::describe_value( $header_events ),
+				'errors'        => self::describe_value( $resend_errors ),
+				'filters'       => array(
+					'mail'    => \has_filter( 'pre_wp_mail', $mail_filter ),
+					'subject' => \has_filter( 'user_request_action_email_subject', $subject_filter ),
+					'content' => \has_filter( 'user_request_action_email_content', $content_filter ),
+					'headers' => \has_filter( 'user_request_action_email_headers', $headers_filter ),
+				),
 			)
 		);
 
@@ -1068,6 +1211,28 @@ final class PrivacyAdminRequestsSurface {
 		}
 
 		return array();
+	}
+
+	private static function query_value_from_text( string $text, string $name ): string {
+		if ( ! preg_match( '/[?&]' . preg_quote( $name, '/' ) . '=([^\\s&#]+)/', $text, $matches ) ) {
+			return '';
+		}
+
+		return rawurldecode( html_entity_decode( $matches[1], ENT_QUOTES, 'UTF-8' ) );
+	}
+
+	private static function has_settings_error( array $errors, string $type, string $message_fragment ): bool {
+		foreach ( $errors as $error ) {
+			if (
+				is_array( $error )
+				&& $type === ( $error['type'] ?? null )
+				&& str_contains( (string) ( $error['message'] ?? '' ), $message_fragment )
+			) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	private static function db_counts_empty(): bool {
