@@ -38,18 +38,7 @@ final class RestControllersSurface {
 			$rows[] = self::check_block_patterns_controller( $ctx );
 			$rows[] = self::check_search_controller( $ctx );
 			$rows[] = self::check_route_registry_behavior( $ctx );
-			$rows[] = self::skip(
-				$ctx,
-				'rest-controllers.themes-controller.skipped',
-				'WP_REST_Themes_Controller is skipped because it inspects installed/current theme filesystem state and theme support.',
-				array( 'controller' => 'WP_REST_Themes_Controller' )
-			);
-			$rows[] = self::skip(
-				$ctx,
-				'rest-controllers.plugins-controller.skipped',
-				'WP_REST_Plugins_Controller is skipped because safe coverage would need plugin filesystem and activation/update side effects.',
-				array( 'controller' => 'WP_REST_Plugins_Controller' )
-			);
+			$rows[] = self::check_plugin_theme_controller_contracts( $ctx->fork( 'plugin-theme-controllers' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = self::row(
 				$ctx,
@@ -98,6 +87,7 @@ final class RestControllersSurface {
 				'WP_REST_Block_Patterns_Controller',
 				'WP_REST_Block_Types_Controller',
 				'WP_REST_Controller',
+				'WP_REST_Plugins_Controller',
 				'WP_REST_Post_Format_Search_Handler',
 				'WP_REST_Post_Statuses_Controller',
 				'WP_REST_Post_Search_Handler',
@@ -110,6 +100,7 @@ final class RestControllersSurface {
 				'WP_REST_Settings_Controller',
 				'WP_REST_Taxonomies_Controller',
 				'WP_REST_Term_Search_Handler',
+				'WP_REST_Themes_Controller',
 				'WP_Taxonomy',
 			) as $class
 		) {
@@ -122,8 +113,10 @@ final class RestControllersSurface {
 			array(
 				'add_filter',
 				'add_query_arg',
+				'apply_filters',
 				'current_user_can',
 				'delete_option',
+				'get_registered_theme_features',
 				'get_object_taxonomies',
 				'get_option',
 				'get_post_format_link',
@@ -139,6 +132,7 @@ final class RestControllersSurface {
 				'has_filter',
 				'is_post_type_viewable',
 				'is_wp_error',
+				'plugin_basename',
 				'register_block_style',
 				'register_block_type',
 				'register_post_status',
@@ -161,9 +155,11 @@ final class RestControllersSurface {
 				'rest_validate_request_arg',
 				'rest_validate_value_from_schema',
 				'sanitize_key',
+				'sanitize_text_field',
 				'serialize_blocks',
 				'unregister_block_type',
 				'update_option',
+				'validate_file',
 				'urlencode_deep',
 				'wp_parse_args',
 				'wp_parse_slug_list',
@@ -2087,6 +2083,318 @@ final class RestControllersSurface {
 		);
 	}
 
+	private static function check_plugin_theme_controller_contracts( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime_state();
+
+		$plugin_slug      = self::route_token( $ctx->fork( 'plugin' ), 'cfz-plugin' );
+		$theme_stylesheet = self::route_token( $ctx->fork( 'theme' ), 'cfz-theme' );
+		$failures         = array();
+
+		$previous_server  = $GLOBALS['wp_rest_server'] ?? null;
+		$had_wp_actions   = array_key_exists( 'wp_actions', $GLOBALS );
+		$previous_actions = $GLOBALS['wp_actions'] ?? null;
+
+		$server                    = new \WP_REST_Server();
+		$GLOBALS['wp_rest_server'] = $server;
+
+		if ( ! isset( $GLOBALS['wp_actions'] ) || ! is_array( $GLOBALS['wp_actions'] ) ) {
+			$GLOBALS['wp_actions'] = array();
+		}
+		$GLOBALS['wp_actions']['rest_api_init'] = max( 1, (int) ( $GLOBALS['wp_actions']['rest_api_init'] ?? 0 ) );
+
+		try {
+			$plugins = new \WP_REST_Plugins_Controller();
+			$themes  = new \WP_REST_Themes_Controller();
+
+			$plugins->register_routes();
+			$themes->register_routes();
+
+			$routes          = $server->get_routes( 'wp/v2' );
+			$registered_keys = array_keys( $routes );
+			sort( $registered_keys );
+
+			$plugin_collection_route = '/wp/v2/plugins';
+			$plugin_item_route       = '/wp/v2/plugins/(?P<plugin>[^.\/]+(?:\/[^.\/]+)?)';
+			$theme_collection_route  = '/wp/v2/themes';
+			$theme_item_route        = '/wp/v2/themes/(?P<stylesheet>[^\/:<>\*\?"\|]+(?:\/[^\/:<>\*\?"\|]+)?)';
+			$expected_routes         = array(
+				$plugin_collection_route,
+				$plugin_item_route,
+				$theme_collection_route,
+				$theme_item_route,
+			);
+			$missing_routes          = array_values( array_diff( $expected_routes, $registered_keys ) );
+
+			$plugin_collection_methods = self::route_methods( $routes[ $plugin_collection_route ] ?? array() );
+			$plugin_item_methods       = self::route_methods( $routes[ $plugin_item_route ] ?? array() );
+			$theme_collection_methods  = self::route_methods( $routes[ $theme_collection_route ] ?? array() );
+			$theme_item_methods        = self::route_methods( $routes[ $theme_item_route ] ?? array() );
+
+			self::collect_failure(
+				$failures,
+				array() === $missing_routes
+					&& array( 'GET', 'POST' ) === $plugin_collection_methods
+					&& array( 'DELETE', 'GET', 'PATCH', 'POST', 'PUT' ) === $plugin_item_methods
+					&& array( 'GET' ) === $theme_collection_methods
+					&& array( 'GET' ) === $theme_item_methods
+					&& is_callable( $server->get_route_options( $plugin_collection_route )['schema'] ?? null )
+					&& is_callable( $server->get_route_options( $plugin_item_route )['schema'] ?? null )
+					&& is_callable( $server->get_route_options( $theme_collection_route )['schema'] ?? null )
+					&& is_callable( $server->get_route_options( $theme_item_route )['schema'] ?? null ),
+				'plugin and theme controllers register expected wp/v2 route methods and schema callbacks',
+				array(
+					'expectedRoutes'           => $expected_routes,
+					'registeredRoutes'         => $registered_keys,
+					'missingRoutes'            => $missing_routes,
+					'pluginCollectionMethods'  => $plugin_collection_methods,
+					'pluginItemMethods'        => $plugin_item_methods,
+					'themeCollectionMethods'   => $theme_collection_methods,
+					'themeItemMethods'         => $theme_item_methods,
+				)
+			);
+
+			$plugin_collection_params = $plugins->get_collection_params();
+			$theme_collection_params  = $themes->get_collection_params();
+			$plugin_create_args       = self::handler_args_for_method( $routes[ $plugin_collection_route ] ?? array(), 'POST' );
+			$plugin_item_args         = self::handler_args_for_method( $routes[ $plugin_item_route ] ?? array(), 'GET' );
+			$theme_item_args          = self::handler_args_for_method( $routes[ $theme_item_route ] ?? array(), 'GET' );
+			$plugin_status_enum       = $plugin_collection_params['status']['items']['enum'] ?? array();
+			$theme_status_enum        = $theme_collection_params['status']['items']['enum'] ?? array();
+			$plugin_item_pattern      = $plugin_item_args['plugin']['pattern'] ?? null;
+			$theme_status_sorted      = is_array( $theme_status_enum ) ? $theme_status_enum : array();
+			sort( $theme_status_sorted );
+
+			self::collect_failure(
+				$failures,
+				self::collection_context_param_ok( $plugin_collection_params )
+					&& isset( $plugin_collection_params['search'] )
+					&& ! isset( $plugin_collection_params['page'], $plugin_collection_params['per_page'] )
+					&& 'array' === ( $plugin_collection_params['status']['type'] ?? null )
+					&& is_array( $plugin_status_enum )
+					&& in_array( 'inactive', $plugin_status_enum, true )
+					&& in_array( 'active', $plugin_status_enum, true )
+					&& array() === array_diff( $plugin_status_enum, array( 'inactive', 'active', 'network-active' ) )
+					&& true === ( $plugin_create_args['slug']['required'] ?? null )
+					&& '[\w\-]+' === ( $plugin_create_args['slug']['pattern'] ?? null )
+					&& 'inactive' === ( $plugin_create_args['status']['default'] ?? null )
+					&& is_callable( $plugin_item_args['plugin']['validate_callback'] ?? null )
+					&& is_callable( $plugin_item_args['plugin']['sanitize_callback'] ?? null )
+					&& '[^.\/]+(?:\/[^.\/]+)?' === $plugin_item_pattern
+					&& 'view' === ( $plugin_item_args['context']['default'] ?? null )
+					&& 'array' === ( $theme_collection_params['status']['type'] ?? null )
+					&& array( 'active', 'inactive' ) === $theme_status_sorted
+					&& is_callable( $theme_item_args['stylesheet']['sanitize_callback'] ?? null ),
+				'collection and route params expose bounded status, slug, plugin-file, and stylesheet contracts',
+				array(
+					'pluginCollectionParams' => self::param_summary( $plugin_collection_params ),
+					'themeCollectionParams'  => self::param_summary( $theme_collection_params ),
+					'pluginCreateArgs'       => self::param_summary( $plugin_create_args ),
+					'pluginItemArgs'         => self::param_summary( $plugin_item_args ),
+					'themeItemArgs'          => self::param_summary( $theme_item_args ),
+				)
+			);
+
+			$plugin_schema          = $plugins->get_item_schema();
+			$theme_schema           = $themes->get_item_schema();
+			$plugin_properties      = $plugin_schema['properties'] ?? array();
+			$theme_properties       = $theme_schema['properties'] ?? array();
+			$plugin_property_names  = array_keys( $plugin_properties );
+			$theme_property_names   = array_keys( $theme_properties );
+			$expected_plugin_props  = array(
+				'plugin',
+				'status',
+				'name',
+				'plugin_uri',
+				'author',
+				'author_uri',
+				'description',
+				'version',
+				'network_only',
+				'requires_wp',
+				'requires_php',
+				'textdomain',
+			);
+			$expected_theme_props   = array(
+				'stylesheet',
+				'stylesheet_uri',
+				'template',
+				'template_uri',
+				'author',
+				'author_uri',
+				'description',
+				'is_block_theme',
+				'name',
+				'requires_php',
+				'requires_wp',
+				'screenshot',
+				'tags',
+				'textdomain',
+				'theme_supports',
+				'theme_uri',
+				'version',
+				'status',
+				'default_template_types',
+				'default_template_part_areas',
+			);
+			$missing_plugin_props   = array_values( array_diff( $expected_plugin_props, $plugin_property_names ) );
+			$missing_theme_props    = array_values( array_diff( $expected_theme_props, $theme_property_names ) );
+			$schema_plugin_statuses = $plugin_properties['status']['enum'] ?? array();
+			$schema_theme_statuses  = $theme_properties['status']['enum'] ?? array();
+			$schema_theme_sorted    = is_array( $schema_theme_statuses ) ? $schema_theme_statuses : array();
+			sort( $schema_theme_sorted );
+
+			self::collect_failure(
+				$failures,
+				'plugin' === ( $plugin_schema['title'] ?? null )
+					&& 'object' === ( $plugin_schema['type'] ?? null )
+					&& array() === $missing_plugin_props
+					&& 'string' === ( $plugin_properties['plugin']['type'] ?? null )
+					&& '[^.\/]+(?:\/[^.\/]+)?' === ( $plugin_properties['plugin']['pattern'] ?? null )
+					&& 'boolean' === ( $plugin_properties['network_only']['type'] ?? null )
+					&& is_array( $schema_plugin_statuses )
+					&& in_array( 'inactive', $schema_plugin_statuses, true )
+					&& in_array( 'active', $schema_plugin_statuses, true )
+					&& array() === array_diff( $schema_plugin_statuses, array( 'inactive', 'active', 'network-active' ) )
+					&& 'theme' === ( $theme_schema['title'] ?? null )
+					&& 'object' === ( $theme_schema['type'] ?? null )
+					&& array() === $missing_theme_props
+					&& 'boolean' === ( $theme_properties['is_block_theme']['type'] ?? null )
+					&& 'object' === ( $theme_properties['theme_supports']['type'] ?? null )
+					&& array( 'active', 'inactive' ) === $schema_theme_sorted
+					&& 'array' === ( $theme_properties['default_template_types']['type'] ?? null ),
+				'public schemas preserve plugin and theme identity, status, metadata, and capability fields',
+				array(
+					'missingPluginProperties' => $missing_plugin_props,
+					'missingThemeProperties'  => $missing_theme_props,
+					'pluginStatusEnum'        => $schema_plugin_statuses,
+					'themeStatusEnum'         => $schema_theme_statuses,
+					'pluginPropertyCount'     => count( $plugin_property_names ),
+					'themePropertyCount'      => count( $theme_property_names ),
+				)
+			);
+
+			$plugin_file              = $plugin_slug . '/' . $plugin_slug . '.php';
+			$encoded_theme_stylesheet = rawurlencode( $theme_stylesheet . '/child' );
+
+			self::collect_failure(
+				$failures,
+				true === $plugins->validate_plugin_param( $plugin_slug )
+					&& true === $plugins->validate_plugin_param( $plugin_slug . '/' . $plugin_slug )
+					&& false === $plugins->validate_plugin_param( '../' . $plugin_slug )
+					&& false === $plugins->validate_plugin_param( array() )
+					&& $plugin_slug . '.php' === $plugins->sanitize_plugin_param( $plugin_slug )
+					&& $plugin_file === $plugins->sanitize_plugin_param( $plugin_slug . '/' . $plugin_slug )
+					&& $theme_stylesheet . '/child' === $themes->_sanitize_stylesheet_callback( $encoded_theme_stylesheet ),
+				'public sanitizers and validators normalize plugin files and encoded theme stylesheets without filesystem reads',
+				array(
+					'pluginSlug'              => $plugin_slug,
+					'pluginFile'              => $plugin_file,
+					'encodedThemeStylesheet'  => $encoded_theme_stylesheet,
+				)
+			);
+
+			$plugin_denied_list           = $plugins->get_items_permissions_check( self::request( 'GET', $plugin_collection_route ) );
+			$plugin_denied_create         = $plugins->create_item_permissions_check( self::request( 'POST', $plugin_collection_route, array( 'status' => 'inactive' ) ) );
+			$theme_denied_list            = $themes->get_items_permissions_check( self::request( 'GET', $theme_collection_route ) );
+			$theme_denied_active_list     = $themes->get_items_permissions_check( self::request( 'GET', $theme_collection_route, array( 'status' => array( 'active' ) ) ) );
+			$plugin_denied_activate       = null;
+			$plugin_allowed_list          = null;
+			$plugin_allowed_active_create = null;
+			$theme_allowed_active_list    = null;
+			$theme_allowed_list           = null;
+			$theme_allowed_item           = null;
+
+			$cap_filter = self::install_cap_filter( array( 'install_plugins' ) );
+			try {
+				$plugin_denied_activate = $plugins->create_item_permissions_check( self::request( 'POST', $plugin_collection_route, array( 'status' => 'active' ) ) );
+			} finally {
+				\remove_filter( 'user_has_cap', $cap_filter, 10 );
+			}
+
+			$cap_filter = self::install_cap_filter( array( 'activate_plugins', 'install_plugins' ) );
+			try {
+				$plugin_allowed_list          = $plugins->get_items_permissions_check( self::request( 'GET', $plugin_collection_route ) );
+				$plugin_allowed_active_create = $plugins->create_item_permissions_check( self::request( 'POST', $plugin_collection_route, array( 'status' => 'active' ) ) );
+			} finally {
+				\remove_filter( 'user_has_cap', $cap_filter, 10 );
+			}
+
+			$cap_filter = self::install_cap_filter( array( 'edit_posts' ) );
+			try {
+				$theme_allowed_active_list = $themes->get_items_permissions_check( self::request( 'GET', $theme_collection_route, array( 'status' => array( 'active' ) ) ) );
+			} finally {
+				\remove_filter( 'user_has_cap', $cap_filter, 10 );
+			}
+
+			$cap_filter = self::install_cap_filter( array( 'switch_themes' ) );
+			try {
+				$theme_allowed_list = $themes->get_items_permissions_check( self::request( 'GET', $theme_collection_route ) );
+				$theme_allowed_item = $themes->get_item_permissions_check(
+					self::request(
+						'GET',
+						$theme_item_route,
+						array(),
+						array( 'stylesheet' => $theme_stylesheet )
+					)
+				);
+			} finally {
+				\remove_filter( 'user_has_cap', $cap_filter, 10 );
+			}
+
+			self::collect_failure(
+				$failures,
+				self::wp_error_ok( $plugin_denied_list, 'rest_cannot_view_plugins', \rest_authorization_required_code() )
+					&& self::wp_error_ok( $plugin_denied_create, 'rest_cannot_install_plugin', \rest_authorization_required_code() )
+					&& self::wp_error_ok( $plugin_denied_activate, 'rest_cannot_activate_plugin', \rest_authorization_required_code() )
+					&& true === $plugin_allowed_list
+					&& true === $plugin_allowed_active_create
+					&& self::wp_error_ok( $theme_denied_list, 'rest_cannot_view_themes', \rest_authorization_required_code() )
+					&& self::wp_error_ok( $theme_denied_active_list, 'rest_cannot_view_active_theme', \rest_authorization_required_code() )
+					&& true === $theme_allowed_active_list
+					&& true === $theme_allowed_list
+					&& true === $theme_allowed_item,
+				'permission callbacks gate plugin collection/create and theme collection/item access before lifecycle callbacks run',
+				array(
+					'pluginDeniedList'          => $plugin_denied_list,
+					'pluginDeniedCreate'        => $plugin_denied_create,
+					'pluginDeniedActivate'      => $plugin_denied_activate,
+					'pluginAllowedList'         => $plugin_allowed_list,
+					'pluginAllowedActiveCreate' => $plugin_allowed_active_create,
+					'themeDeniedList'           => $theme_denied_list,
+					'themeDeniedActiveList'     => $theme_denied_active_list,
+					'themeAllowedActiveList'    => $theme_allowed_active_list,
+					'themeAllowedList'          => $theme_allowed_list,
+					'themeAllowedItem'          => $theme_allowed_item,
+				)
+			);
+		} finally {
+			if ( $had_wp_actions ) {
+				$GLOBALS['wp_actions'] = $previous_actions;
+			} else {
+				unset( $GLOBALS['wp_actions'] );
+			}
+
+			if ( null !== $previous_server ) {
+				$GLOBALS['wp_rest_server'] = $previous_server;
+			} else {
+				unset( $GLOBALS['wp_rest_server'] );
+			}
+		}
+
+		return self::row(
+			$ctx,
+			'rest-controllers.plugin-theme-controller-contracts',
+			array() === $failures,
+			array(
+				'cases'    => array(
+					'pluginSlug'      => $plugin_slug,
+					'themeStylesheet' => $theme_stylesheet,
+				),
+				'failures' => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
 	private static function check_search_controller( \ComponentFuzz\FuzzContext $ctx ): array {
 		self::reset_runtime_state();
 
@@ -3325,6 +3633,21 @@ final class RestControllersSurface {
 		$methods = array_values( array_unique( $methods ) );
 		sort( $methods );
 		return $methods;
+	}
+
+	private static function handler_args_for_method( array $handlers, string $method ): array {
+		foreach ( $handlers as $handler ) {
+			if (
+				is_array( $handler )
+				&& ! empty( $handler['methods'][ $method ] )
+				&& isset( $handler['args'] )
+				&& is_array( $handler['args'] )
+			) {
+				return $handler['args'];
+			}
+		}
+
+		return array();
 	}
 
 	private static function wp_error_ok( $error, string $code, int $status ): bool {

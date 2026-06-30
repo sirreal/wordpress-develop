@@ -590,9 +590,10 @@ database, network requests, or a configured site.
   deterministic global restoration.
 - `rest-controllers`: no-DB default REST endpoint controller coverage for
   registry-backed post types, post statuses, taxonomies, settings, block types,
-  block patterns, block pattern categories, and REST search handlers, including
-  context/_fields filtering, registered additional-field get/update/schema
-  callbacks, collection params, permission gates, namespace-specific REST links,
+  block patterns, block pattern categories, plugin/theme route/schema contracts,
+  and REST search handlers, including context/_fields filtering, registered
+  additional-field get/update/schema callbacks, collection params, permission
+  gates, namespace-specific REST links, plugin/theme sanitizer contracts,
   route-dispatched defaults/schema validation, custom search handler
   result/header/link propagation, invalid subtype rejection, public search-result
   schema callback contents, post-format search term/link and pagination behavior,
@@ -871,10 +872,11 @@ on block-theme filesystem state and template CPT queries, and for broad
 collection queries that exceed the small SQL parser in the stub. It documents
 limits for invalid enum-error formatting
 branches that are not warning-safe under the stripped bootstrap. The
-registry-backed surface also records explicit skips for the themes and plugins
-controllers because their lifecycle-heavy read and status paths are covered by
-`plugin-theme-lifecycle`, while install/update/delete controller methods are
-still avoided. Block pattern coverage is registry-backed only:
+registry-backed surface covers plugin/theme controller route, schema,
+collection parameter, sanitizer, and permission-gate contracts without
+plugin/theme filesystem lifecycle effects. Lifecycle-heavy plugin/theme read and
+status paths are covered by `plugin-theme-lifecycle`, while install/update/delete
+controller methods are still avoided. Block pattern coverage is registry-backed only:
 remote pattern and current-theme pattern loaders are short-circuited.
 The `rest-site-editor` surface creates a bounded temp theme under the harness
 `WP_CONTENT_DIR` and uses the in-memory `wpdb` stub for `wp_global_styles`,
