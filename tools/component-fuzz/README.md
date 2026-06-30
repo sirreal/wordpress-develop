@@ -615,8 +615,10 @@ database, network requests, or a configured site.
   directory service controllers, including block-directory, pattern-directory,
   and URL-details route/schema contracts, plugin API and HTTP short-circuits,
   permission matrices, request validation errors, transformed response schemas,
-  pattern and URL cache/transient behavior, HEAD/cache-hit boundaries, metadata
-  parsing and relative media URL normalization, and global/filter restoration.
+  pattern and URL cache/transient behavior, HEAD/cache-hit boundaries,
+  pattern proxy query allowlisting and derived WordPress.org argument overwrite
+  behavior, malformed/unclosed head metadata extraction, metadata parsing
+  precedence, relative media URL normalization, and global/filter restoration.
 - `rest-media-attachments`: in-memory wpdb-backed REST media attachment write
   coverage, including `Content-Disposition` filename parsing, raw upload
   validation failures, raw body `create_item()` success through the upload
