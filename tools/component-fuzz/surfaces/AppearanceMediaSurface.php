@@ -35,10 +35,7 @@ final class AppearanceMediaSurface {
 			$rows[] = self::check_custom_header_markup_and_video( $ctx->fork( 'custom-header-video' ) );
 			$rows[] = self::check_custom_logo_helpers( $ctx->fork( 'custom-logo' ) );
 			$rows[] = self::check_site_icon_helpers( $ctx->fork( 'site-icon' ) );
-			$rows[] = $ctx->skip(
-				'appearance-media.unsafe-upload-and-ajax-paths',
-				'Custom header/background uploads, crops, AJAX handlers, and full admin page dispatch can redirect, exit, or require real uploaded files; safe helper paths are covered directly.'
-			);
+			$rows[] = self::check_admin_action_guards( $ctx->fork( 'admin-action-guards' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
 				'appearance-media.surface-no-throw',
@@ -96,7 +93,9 @@ final class AppearanceMediaSurface {
 				'add_theme_support',
 				'apply_filters',
 				'checked',
+				'check_admin_referer',
 				'create_initial_post_types',
+				'current_user_can',
 				'current_theme_supports',
 				'delete_option',
 				'display_header_text',
@@ -140,6 +139,7 @@ final class AppearanceMediaSurface {
 				'wp_create_nonce',
 				'wp_get_mime_types',
 				'wp_nonce_tick',
+				'wp_verify_nonce',
 				'wp_cache_delete',
 				'wp_site_icon',
 			) as $function
@@ -815,6 +815,268 @@ final class AppearanceMediaSurface {
 		);
 	}
 
+	private static function check_admin_action_guards( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures   = array();
+		$header     = new \Custom_Image_Header( static function (): void {} );
+		$background = new \Custom_Background();
+		\add_theme_support(
+			'custom-header',
+			array(
+				'default-image'      => '%s/images/default-header.jpg',
+				'default-text-color' => '123456',
+				'header-text'        => true,
+				'width'              => 1200,
+				'height'             => 300,
+				'random-default'     => true,
+			)
+		);
+		$header->process_default_headers();
+
+		$upload_nonce = \wp_create_nonce( 'custom-header-upload' );
+		$crop_nonce   = \wp_create_nonce( 'custom-header-crop-image' );
+		$step_cases   = array(
+			array(
+				'label'    => 'default',
+				'get'      => array(),
+				'request'  => array(),
+				'expected' => 1,
+			),
+			array(
+				'label'    => 'valid-upload-step',
+				'get'      => array( 'step' => '2' ),
+				'request'  => array( '_wpnonce-custom-header-upload' => $upload_nonce ),
+				'expected' => 2,
+			),
+			array(
+				'label'    => 'invalid-upload-step',
+				'get'      => array( 'step' => '2' ),
+				'request'  => array( '_wpnonce-custom-header-upload' => 'invalid-' . $ctx->identifier( 4, 8 ) ),
+				'expected' => 1,
+			),
+			array(
+				'label'    => 'valid-crop-step',
+				'get'      => array( 'step' => '3' ),
+				'request'  => array( '_wpnonce' => $crop_nonce ),
+				'expected' => 3,
+			),
+			array(
+				'label'    => 'out-of-range-step',
+				'get'      => array( 'step' => '9' ),
+				'request'  => array(
+					'_wpnonce-custom-header-upload' => $upload_nonce,
+					'_wpnonce'                      => $crop_nonce,
+				),
+				'expected' => 1,
+			),
+		);
+
+		$step_actual = array();
+		foreach ( $step_cases as $case ) {
+			$_GET     = $case['get'];
+			$_REQUEST = array_merge( $case['get'], $case['request'] );
+			$step_actual[ $case['label'] ] = $header->step();
+		}
+
+		self::collect_failure(
+			$failures,
+			array_column( $step_cases, 'expected', 'label' ) === $step_actual,
+			'Custom_Image_Header::step accepts only bounded valid nonce-backed admin steps',
+			array(
+				'expected' => array_column( $step_cases, 'expected', 'label' ),
+				'actual'   => $step_actual,
+			)
+		);
+
+		$options_nonce = \wp_create_nonce( 'custom-header-options' );
+		\set_theme_mod( 'header_textcolor', '112233' );
+		\set_theme_mod( 'header_image', 'http://example.test/header-before-denied.jpg' );
+		\set_theme_mod(
+			'header_image_data',
+			(object) array(
+				'attachment_id' => 0,
+				'url'           => 'http://example.test/header-before-denied.jpg',
+				'thumbnail_url' => 'http://example.test/header-before-denied-thumb.jpg',
+				'width'         => 1200,
+				'height'        => 300,
+			)
+		);
+
+		$_POST    = array(
+			'_wpnonce-custom-header-options' => $options_nonce,
+			'text-color'                     => '#abcdef',
+			'display-header-text'            => '1',
+		);
+		$_REQUEST = $_POST;
+
+		$deny_filter          = self::install_cap_filter( array( 'edit_theme_options' ), false );
+		$deny_filter_restored = false;
+		try {
+			$header->take_action();
+			$denied_text_color = \get_theme_mod( 'header_textcolor' );
+			$denied_image      = \get_theme_mod( 'header_image' );
+		} finally {
+			$deny_filter_restored = self::remove_cap_filter( $deny_filter );
+		}
+
+		$grant_filter          = self::install_cap_filter( array( 'edit_theme_options' ), true );
+		$grant_filter_restored = false;
+		try {
+			$_POST    = array();
+			$_REQUEST = array();
+			$header->take_action();
+			$empty_post_text_color = \get_theme_mod( 'header_textcolor' );
+
+			$_POST    = array(
+				'_wpnonce-custom-header-options' => $options_nonce,
+				'text-color'                     => '#a1!b2?c3',
+				'display-header-text'            => '1',
+			);
+			$_REQUEST = $_POST;
+			$header->take_action();
+			$visible_text_color = \get_theme_mod( 'header_textcolor' );
+
+			$_POST    = array(
+				'_wpnonce-custom-header-options' => $options_nonce,
+				'text-color'                     => '#123456',
+			);
+			$_REQUEST = $_POST;
+			$header->take_action();
+			$hidden_text_color = \get_theme_mod( 'header_textcolor' );
+
+			$_POST    = array(
+				'_wpnonce-custom-header-options' => $options_nonce,
+				'default-header'                 => 'beta',
+			);
+			$_REQUEST = $_POST;
+			$header->take_action();
+			$selected_header      = \get_theme_mod( 'header_image' );
+			$selected_header_data = \get_theme_mod( 'header_image_data' );
+
+			$_POST    = array(
+				'_wpnonce-custom-header-options' => $options_nonce,
+				'removeheader'                   => '1',
+			);
+			$_REQUEST = $_POST;
+			$header->take_action();
+			$removed_header      = \get_theme_mod( 'header_image' );
+			$removed_header_data = \get_theme_mod( 'header_image_data', false );
+
+			$_POST    = array(
+				'_wpnonce-custom-header-options' => $options_nonce,
+				'resetheader'                    => '1',
+			);
+			$_REQUEST = $_POST;
+			$header->take_action();
+			$reset_header      = \get_theme_mod( 'header_image' );
+			$reset_header_data = \get_theme_mod( 'header_image_data' );
+		} finally {
+			$grant_filter_restored = self::remove_cap_filter( $grant_filter );
+		}
+
+		$template_uri   = \get_template_directory_uri();
+		$stylesheet_uri = \get_stylesheet_directory_uri();
+		$expected_beta  = "{$stylesheet_uri}/images/beta.jpg";
+		$expected_reset = "{$template_uri}/images/default-header.jpg";
+
+		self::collect_failure(
+			$failures,
+			'112233' === $denied_text_color
+				&& 'http://example.test/header-before-denied.jpg' === $denied_image
+				&& $deny_filter_restored
+				&& '112233' === $empty_post_text_color
+				&& 'a1b2c3' === $visible_text_color
+				&& 'blank' === $hidden_text_color
+				&& $expected_beta === $selected_header
+				&& is_array( $selected_header_data )
+				&& 'Beta & Header' === ( $selected_header_data['alt_text'] ?? null )
+				&& 'remove-header' === $removed_header
+				&& false === $removed_header_data
+				&& $expected_reset === $reset_header
+				&& $reset_header_data instanceof \stdClass
+				&& $grant_filter_restored,
+			'Custom_Image_Header::take_action no-upload branches honor caps, nonces, sanitization, default selection, and reset',
+			array(
+				'deniedTextColor'      => $denied_text_color,
+				'deniedImage'          => $denied_image,
+				'denyFilterRestored'   => $deny_filter_restored,
+				'emptyPostTextColor'   => $empty_post_text_color,
+				'visibleTextColor'     => $visible_text_color,
+				'hiddenTextColor'      => $hidden_text_color,
+				'selectedHeader'       => $selected_header,
+				'selectedHeaderData'   => self::describe_value( $selected_header_data ),
+				'removedHeader'        => $removed_header,
+				'removedHeaderData'    => self::describe_value( $removed_header_data ),
+				'resetHeader'          => $reset_header,
+				'resetHeaderData'      => self::describe_value( $reset_header_data ),
+				'grantFilterRestored'  => $grant_filter_restored,
+			)
+		);
+
+		$fields = array(
+			'component-fuzz' => array(
+				'label' => 'Component <fuzz>',
+				'input' => 'html',
+			),
+		);
+		$tabs   = array(
+			'type' => 'upload',
+			'url'  => 'http://example.test/upload?x=<tag>',
+		);
+
+		$background_before = \get_theme_mod( 'background_image', false );
+		$_FILES            = array();
+		$background->handle_upload();
+		$background_after = \get_theme_mod( 'background_image', false );
+
+		\set_theme_mod( 'background_image', 'http://example.test/background-before-reset.jpg' );
+		\set_theme_mod( 'background_image_thumb', 'http://example.test/background-before-reset-thumb.jpg' );
+		$_POST    = array();
+		$_REQUEST = array();
+		$background->take_action();
+		$background_empty_image = \get_theme_mod( 'background_image', false );
+		$background_reset_nonce = \wp_create_nonce( 'custom-background-reset' );
+		$_POST    = array(
+			'_wpnonce-custom-background-reset' => $background_reset_nonce,
+			'reset-background'                 => '1',
+		);
+		$_REQUEST = $_POST;
+		$background->take_action();
+		$background_reset_image = \get_theme_mod( 'background_image', false );
+		$background_reset_thumb = \get_theme_mod( 'background_image_thumb', false );
+
+		self::collect_failure(
+			$failures,
+			$fields === $header->attachment_fields_to_edit( $fields )
+				&& $tabs === $header->filter_upload_tabs( $tabs )
+				&& $fields === $background->attachment_fields_to_edit( $fields )
+				&& $tabs === $background->filter_upload_tabs( $tabs )
+				&& $background_before === $background_after
+				&& 'http://example.test/background-before-reset.jpg' === $background_empty_image
+				&& false === $background_reset_image
+				&& false === $background_reset_thumb,
+			'deprecated media field/tab callbacks are passthrough and empty/reset background admin branches are no-file no-ops',
+			array(
+				'fields'                 => self::describe_value( $fields ),
+				'tabs'                   => self::describe_value( $tabs ),
+				'backgroundBefore'       => self::describe_value( $background_before ),
+				'backgroundAfter'        => self::describe_value( $background_after ),
+				'backgroundEmptyImage'   => self::describe_value( $background_empty_image ),
+				'backgroundResetImage'   => self::describe_value( $background_reset_image ),
+				'backgroundResetThumb'   => self::describe_value( $background_reset_thumb ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'appearance-media.admin-action-guards.no-upload',
+			array() === $failures,
+			array(
+				'failures'   => array_slice( $failures, 0, self::MAX_FAILURES ),
+				'notCovered' => 'Real custom header/background uploads, crop image processing, AJAX JSON senders, admin-page dispatch that can wp_die(), and the redirecting remove-background flow remain intentionally out of this no-exit surface.',
+			)
+		);
+	}
+
 	private static function background_case( \ComponentFuzz\FuzzContext $ctx ): array {
 		$preset     = $ctx->choice( array( 'default', 'fill', 'fit', 'repeat', 'custom', 'invalid-preset' ) );
 		$position_x = $ctx->choice( array( 'left', 'center', 'right', 'bad-x' ) );
@@ -955,6 +1217,29 @@ final class AppearanceMediaSurface {
 		);
 	}
 
+	private static function install_cap_filter( array $caps, bool $grant ): callable {
+		$selected = array_fill_keys( $caps, $grant );
+		$filter   = static function ( array $allcaps, array $requested = array() ) use ( $selected ): array {
+			foreach ( $selected as $cap => $allowed ) {
+				$allcaps[ $cap ] = $allowed;
+			}
+			foreach ( $requested as $cap ) {
+				if ( array_key_exists( $cap, $selected ) ) {
+					$allcaps[ $cap ] = $selected[ $cap ];
+				}
+			}
+			return $allcaps;
+		};
+
+		\add_filter( 'user_has_cap', $filter, PHP_INT_MAX, 4 );
+
+		return $filter;
+	}
+
+	private static function remove_cap_filter( callable $filter ): bool {
+		return \remove_filter( 'user_has_cap', $filter, PHP_INT_MAX );
+	}
+
 	private static function snapshot_state(): array {
 		$option_names = array(
 			'stylesheet',
@@ -982,6 +1267,9 @@ final class AppearanceMediaSurface {
 					'custom_image_header',
 					'wp_current_filter',
 					'wp_filter',
+					'current_user',
+					'userdata',
+					'user_ID',
 					'wp_post_statuses',
 					'wp_post_types',
 				)
@@ -990,6 +1278,7 @@ final class AppearanceMediaSurface {
 			'post'          => $_POST,
 			'request'       => $_REQUEST,
 			'get'           => $_GET,
+			'files'         => $_FILES,
 			'obLevel'       => ob_get_level(),
 			'contentCounts' => self::content_counts(),
 		);
@@ -1012,6 +1301,7 @@ final class AppearanceMediaSurface {
 		$_POST    = $snapshot['post'];
 		$_REQUEST = $snapshot['request'];
 		$_GET     = $snapshot['get'];
+		$_FILES   = $snapshot['files'];
 	}
 
 	private static function state_diff( array $snapshot ): array {
@@ -1033,11 +1323,12 @@ final class AppearanceMediaSurface {
 			}
 		}
 
-		if ( $_POST !== $snapshot['post'] || $_REQUEST !== $snapshot['request'] || $_GET !== $snapshot['get'] ) {
+		if ( $_POST !== $snapshot['post'] || $_REQUEST !== $snapshot['request'] || $_GET !== $snapshot['get'] || $_FILES !== $snapshot['files'] ) {
 			$diff['superglobals'] = array(
 				'post'    => $_POST !== $snapshot['post'],
 				'request' => $_REQUEST !== $snapshot['request'],
 				'get'     => $_GET !== $snapshot['get'],
+				'files'   => $_FILES !== $snapshot['files'],
 			);
 		}
 
