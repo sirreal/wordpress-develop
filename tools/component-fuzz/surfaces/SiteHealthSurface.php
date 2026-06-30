@@ -17,6 +17,8 @@ final class SiteHealthSurface {
 	private static ?\WP_Error $https_detection_error = null;
 	private static ?bool $replace_override           = null;
 	private static int $http_request_count           = 0;
+	private static array $http_intercepts            = array();
+	private static array $http_request_log           = array();
 
 	public static function run( \ComponentFuzz\FuzzContext $ctx ): array {
 		$missing = self::missing_requirements();
@@ -47,6 +49,7 @@ final class SiteHealthSurface {
 			$rows[] = self::check_https_migration( $ctx, $case );
 			$rows[] = self::check_https_detection_short_circuit( $ctx, $case );
 			$rows[] = self::check_site_health_direct_tests( $ctx, $case );
+			$rows[] = self::check_loopback_rest_and_cron_direct_tests( $ctx, $case );
 			$rows[] = self::check_persistent_object_cache_direct_test( $ctx, $case );
 			$rows[] = self::check_site_status_test_registry( $ctx, $case );
 		} catch ( \Throwable $e ) {
@@ -127,9 +130,27 @@ final class SiteHealthSurface {
 	}
 
 	public static function filter_pre_http_request( $preempt, array $parsed_args, string $url ) {
-		unset( $preempt, $parsed_args, $url );
+		unset( $preempt );
 
 		++self::$http_request_count;
+		self::$http_request_log[] = array(
+			'url'     => $url,
+			'method'  => strtoupper( (string) ( $parsed_args['method'] ?? 'GET' ) ),
+			'headers' => $parsed_args['headers'] ?? array(),
+			'body'    => $parsed_args['body'] ?? null,
+			'timeout' => $parsed_args['timeout'] ?? null,
+		);
+
+		foreach ( self::$http_intercepts as $intercept ) {
+			$method_matches = empty( $intercept['method'] )
+				|| strtoupper( (string) $intercept['method'] ) === strtoupper( (string) ( $parsed_args['method'] ?? 'GET' ) );
+			$url_matches    = false === strpos( $url, (string) $intercept['contains'] ) ? false : true;
+
+			if ( $method_matches && $url_matches ) {
+				return $intercept['response'];
+			}
+		}
+
 		return new \WP_Error( 'component_fuzz_network_blocked', 'Component fuzz blocked a remote HTTP request.' );
 	}
 
@@ -737,6 +758,117 @@ final class SiteHealthSurface {
 		);
 	}
 
+	private static function check_loopback_rest_and_cron_direct_tests( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures    = array();
+		$site_health = self::site_health_with_cron_timeouts();
+		$statuses    = array(
+			'loopback' => array(),
+			'rest'     => array(),
+			'cron'     => array(),
+		);
+
+		self::apply_https_case( $case['https'] );
+		self::apply_authorization_case( $case['remoteDirectTests']['authorization'] );
+		self::$http_request_count = 0;
+		self::$http_request_log   = array();
+
+		foreach ( self::loopback_request_scenarios( $case['remoteDirectTests'] ) as $scenario ) {
+			self::$http_intercepts = array(
+				array(
+					'method'   => 'POST',
+					'contains' => 'wp-cron.php',
+					'response' => $scenario['response'],
+				),
+			);
+			$before_count          = self::$http_request_count;
+			$result                = $site_health->get_test_loopback_requests();
+			$request               = self::$http_request_log[ $before_count ] ?? null;
+			$statuses['loopback'][ $scenario['name'] ] = is_array( $result ) ? ( $result['status'] ?? null ) : null;
+
+			self::assert_site_health_result( $failures, $result, 'loopback_requests', $scenario['expectedStatus'] );
+			self::assert_loopback_request( $failures, $request, $case['remoteDirectTests']['authorization'], $scenario['name'] );
+		}
+
+		foreach ( self::rest_availability_scenarios( $case['remoteDirectTests'] ) as $scenario ) {
+			self::$http_intercepts = array(
+				array(
+					'method'   => 'GET',
+					'contains' => 'rest_route=',
+					'response' => $scenario['response'],
+				),
+			);
+			$before_count          = self::$http_request_count;
+			$result                = $site_health->get_test_rest_availability();
+			$request               = self::$http_request_log[ $before_count ] ?? null;
+			$statuses['rest'][ $scenario['name'] ] = is_array( $result ) ? ( $result['status'] ?? null ) : null;
+
+			self::assert_site_health_result( $failures, $result, 'rest_availability', $scenario['expectedStatus'] );
+			self::assert_rest_request( $failures, $request, $case['remoteDirectTests']['authorization'], $scenario['name'] );
+		}
+
+		self::$http_intercepts = array();
+
+		foreach ( self::scheduled_events_scenarios( $case['scheduledEvents'] ) as $scenario ) {
+			self::$options['cron'] = $scenario['cron'];
+			$result                = $site_health->get_test_scheduled_events();
+			$statuses['cron'][ $scenario['name'] ] = is_array( $result ) ? ( $result['status'] ?? null ) : null;
+
+			self::assert_site_health_result( $failures, $result, 'scheduled_events', $scenario['expectedStatus'] );
+			self::collect_failure(
+				$failures,
+				$scenario['expectedMissedHook'] === $site_health->last_missed_cron
+					&& $scenario['expectedLateHook'] === $site_health->last_late_cron,
+				"scheduled event last hook tracking for {$scenario['name']}",
+				array(
+					'expectedMissed' => $scenario['expectedMissedHook'],
+					'actualMissed'   => $site_health->last_missed_cron,
+					'expectedLate'   => $scenario['expectedLateHook'],
+					'actualLate'     => $site_health->last_late_cron,
+				)
+			);
+			$site_health->last_missed_cron = null;
+			$site_health->last_late_cron   = null;
+		}
+		unset( self::$options['cron'] );
+
+		$http_before_count = self::$http_request_count;
+		$http_result       = $site_health->get_test_http_requests();
+		$statuses['http']  = is_array( $http_result ) ? ( $http_result['status'] ?? null ) : null;
+		self::assert_site_health_result( $failures, $http_result, 'http_requests', self::expected_http_requests_status() );
+		self::collect_failure(
+			$failures,
+			$http_before_count === self::$http_request_count,
+			'HTTP requests direct test reads constants without making HTTP requests',
+			array(
+				'before' => $http_before_count,
+				'after'  => self::$http_request_count,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			7 === self::$http_request_count,
+			'loopback and REST direct tests make exactly the generated HTTP requests',
+			array(
+				'expected' => 7,
+				'actual'   => self::$http_request_count,
+				'requests' => self::$http_request_log,
+			)
+		);
+
+		self::$http_intercepts = array();
+
+		return $ctx->result(
+			'site-health.direct-tests.loopback-rest-cron-short-circuits',
+			array() === $failures,
+			array(
+				'statuses' => $statuses,
+				'requests' => self::describe_value( self::$http_request_log ),
+				'failures' => array_slice( $failures, 0, self::MAX_FAILURES ),
+			)
+		);
+	}
+
 	private static function check_persistent_object_cache_direct_test( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
 		$failures    = array();
 		$site_health = self::site_health_without_constructor();
@@ -1085,6 +1217,8 @@ final class SiteHealthSurface {
 			'siteHealthUpdateHttpsCap' => $ctx->bool(),
 			'authorization'          => self::authorization_case( $ctx->fork( 'authorization' ) ),
 			'blogPublic'             => $ctx->bool() ? 1 : 0,
+			'remoteDirectTests'      => self::remote_direct_tests_case( $ctx->fork( 'remote-direct-tests' ) ),
+			'scheduledEvents'        => self::scheduled_events_case( $ctx->fork( 'scheduled-events' ) ),
 			'persistentObjectCache'  => self::persistent_object_cache_case( $ctx->fork( 'persistent-object-cache' ) ),
 			'siteStatusTests'        => self::site_status_tests_case( $ctx->fork( 'site-status-tests' ) ),
 		);
@@ -1309,6 +1443,148 @@ final class SiteHealthSurface {
 			'mode' => $mode,
 			'user' => 'invalid' === $mode ? 'user-' . $ctx->int( 1, 99 ) : 'user',
 			'pass' => 'invalid' === $mode ? 'pwd-' . $ctx->int( 1, 99 ) : 'pwd',
+		);
+	}
+
+	private static function remote_direct_tests_case( \ComponentFuzz\FuzzContext $ctx ): array {
+		return array(
+			'authorization'       => self::authorization_case( $ctx->fork( 'authorization' ) ),
+			'loopbackErrorCode'   => 'component_fuzz_loopback_' . strtolower( $ctx->identifier( 4, 8 ) ),
+			'loopbackErrorMessage' => 'Generated loopback failure ' . $ctx->int( 10, 999 ),
+			'loopbackHttpStatus'  => $ctx->choice( array( 418, 429, 500, 503 ) ),
+			'restErrorCode'       => 'component_fuzz_rest_' . strtolower( $ctx->identifier( 4, 8 ) ),
+			'restErrorMessage'    => 'Generated REST failure ' . $ctx->int( 10, 999 ),
+			'restHttpStatus'      => $ctx->choice( array( 401, 403, 500, 503 ) ),
+			'restCapabilityKey'   => 'component_fuzz_cap_' . strtolower( $ctx->identifier( 4, 8 ) ),
+		);
+	}
+
+	private static function scheduled_events_case( \ComponentFuzz\FuzzContext $ctx ): array {
+		return array(
+			'missedHook' => 'component_fuzz_missed_' . strtolower( $ctx->identifier( 4, 8 ) ),
+			'lateHook'   => 'component_fuzz_late_' . strtolower( $ctx->identifier( 4, 8 ) ),
+			'futureHook' => 'component_fuzz_future_' . strtolower( $ctx->identifier( 4, 8 ) ),
+		);
+	}
+
+	private static function loopback_request_scenarios( array $case ): array {
+		return array(
+			array(
+				'name'           => 'transport-error',
+				'response'       => new \WP_Error( $case['loopbackErrorCode'], $case['loopbackErrorMessage'] ),
+				'expectedStatus' => 'critical',
+			),
+			array(
+				'name'           => 'unexpected-status',
+				'response'       => self::http_response( $case['loopbackHttpStatus'], 'Generated Loopback Status', '' ),
+				'expectedStatus' => 'recommended',
+			),
+			array(
+				'name'           => 'success',
+				'response'       => self::http_response( 200, 'OK', '' ),
+				'expectedStatus' => 'good',
+			),
+		);
+	}
+
+	private static function rest_availability_scenarios( array $case ): array {
+		return array(
+			array(
+				'name'           => 'transport-error',
+				'response'       => new \WP_Error( $case['restErrorCode'], $case['restErrorMessage'] ),
+				'expectedStatus' => 'critical',
+			),
+			array(
+				'name'           => 'unexpected-status',
+				'response'       => self::http_response( $case['restHttpStatus'], 'Generated REST Status', '{}' ),
+				'expectedStatus' => 'recommended',
+			),
+			array(
+				'name'           => 'missing-capabilities',
+				'response'       => self::http_response( 200, 'OK', wp_json_encode( array( 'name' => 'post' ) ) ),
+				'expectedStatus' => 'recommended',
+			),
+			array(
+				'name'           => 'success',
+				'response'       => self::http_response(
+					200,
+					'OK',
+					wp_json_encode(
+						array(
+							'name'         => 'post',
+							'capabilities' => array(
+								$case['restCapabilityKey'] => true,
+							),
+						)
+					)
+				),
+				'expectedStatus' => 'good',
+			),
+		);
+	}
+
+	private static function scheduled_events_scenarios( array $case ): array {
+		$now = time();
+
+		return array(
+			array(
+				'name'               => 'no-tasks',
+				'cron'               => array( 'version' => 2 ),
+				'expectedStatus'     => 'critical',
+				'expectedMissedHook' => null,
+				'expectedLateHook'   => null,
+			),
+			array(
+				'name'               => 'missed-task',
+				'cron'               => self::cron_array( $now - HOUR_IN_SECONDS, $case['missedHook'], array( 'kind' => 'missed' ) ),
+				'expectedStatus'     => 'recommended',
+				'expectedMissedHook' => $case['missedHook'],
+				'expectedLateHook'   => null,
+			),
+			array(
+				'name'               => 'late-task',
+				'cron'               => self::cron_array( $now - MINUTE_IN_SECONDS, $case['lateHook'], array( 'kind' => 'late' ) ),
+				'expectedStatus'     => 'recommended',
+				'expectedMissedHook' => null,
+				'expectedLateHook'   => $case['lateHook'],
+			),
+			array(
+				'name'               => 'future-task',
+				'cron'               => self::cron_array( $now + HOUR_IN_SECONDS, $case['futureHook'], array( 'kind' => 'future' ) ),
+				'expectedStatus'     => 'good',
+				'expectedMissedHook' => null,
+				'expectedLateHook'   => null,
+			),
+		);
+	}
+
+	private static function http_response( int $code, string $message, ?string $body ): array {
+		return array(
+			'headers'  => array(),
+			'body'     => null === $body ? '' : $body,
+			'response' => array(
+				'code'    => $code,
+				'message' => $message,
+			),
+			'cookies'  => array(),
+			'filename' => null,
+		);
+	}
+
+	private static function cron_array( int $timestamp, string $hook, array $args ): array {
+		$signature = md5( serialize( $args ) );
+
+		return array(
+			'version'    => 2,
+			$timestamp => array(
+				$hook => array(
+					$signature => array(
+						'schedule' => 'hourly',
+						'args'     => $args,
+						'interval' => HOUR_IN_SECONDS,
+					),
+				),
+			),
 		);
 	}
 
@@ -1781,6 +2057,26 @@ final class SiteHealthSurface {
 		return $reflection->newInstanceWithoutConstructor();
 	}
 
+	private static function site_health_with_cron_timeouts(): \WP_Site_Health {
+		$site_health = self::site_health_without_constructor();
+		$reflection  = new \ReflectionObject( $site_health );
+
+		foreach (
+			array(
+				'timeout_missed_cron' => -5 * MINUTE_IN_SECONDS,
+				'timeout_late_cron'   => 0,
+			) as $property => $value
+		) {
+			$reflected = $reflection->getProperty( $property );
+			if ( PHP_VERSION_ID < 80100 ) {
+				$reflected->setAccessible( true );
+			}
+			$reflected->setValue( $site_health, $value );
+		}
+
+		return $site_health;
+	}
+
 	private static function site_health_instance() {
 		$reflection = new \ReflectionClass( \WP_Site_Health::class );
 		$property   = $reflection->getProperty( 'instance' );
@@ -1831,6 +2127,83 @@ final class SiteHealthSurface {
 				'actual'         => self::describe_value( $result ),
 			)
 		);
+	}
+
+	private static function assert_loopback_request( array &$failures, $request, array $auth_case, string $scenario ): void {
+		$headers           = is_array( $request ) && is_array( $request['headers'] ?? null ) ? $request['headers'] : array();
+		$expected_auth     = self::expected_basic_auth_header( $auth_case );
+		$actual_auth       = $headers['Authorization'] ?? null;
+		$expects_auth      = null !== $expected_auth;
+		$actual_has_auth   = is_string( $actual_auth ) && '' !== $actual_auth;
+		$body              = is_array( $request ) ? ( $request['body'] ?? null ) : null;
+		$body_has_loopback = is_array( $body ) && ( $body['site-health'] ?? null ) === 'loopback-test';
+		$url_path          = is_array( $request ) ? (string) ( wp_parse_url( (string) $request['url'], PHP_URL_PATH ) ?? '' ) : '';
+
+		self::collect_failure(
+			$failures,
+			is_array( $request )
+				&& 'POST' === ( $request['method'] ?? null )
+				&& str_ends_with( $url_path, '/wp-cron.php' )
+				&& $body_has_loopback
+				&& 'no-cache' === ( $headers['Cache-Control'] ?? null )
+				&& $expects_auth === $actual_has_auth
+				&& ( ! $expects_auth || $expected_auth === $actual_auth ),
+			"loopback request shape for {$scenario}",
+			array(
+				'request'      => $request,
+				'expectedAuth' => $expects_auth,
+			)
+		);
+	}
+
+	private static function assert_rest_request( array &$failures, $request, array $auth_case, string $scenario ): void {
+		$headers         = is_array( $request ) && is_array( $request['headers'] ?? null ) ? $request['headers'] : array();
+		$expected_auth   = self::expected_basic_auth_header( $auth_case );
+		$actual_auth     = $headers['Authorization'] ?? null;
+		$expects_auth    = null !== $expected_auth;
+		$actual_has_auth = is_string( $actual_auth ) && '' !== $actual_auth;
+		$url             = is_array( $request ) ? (string) $request['url'] : '';
+		$url_path        = (string) ( wp_parse_url( $url, PHP_URL_PATH ) ?? '' );
+		$query           = array();
+		parse_str( (string) ( wp_parse_url( $url, PHP_URL_QUERY ) ?? '' ), $query );
+		$path_matches    = str_ends_with( $url_path, '/wp-json/wp/v2/types/post' )
+			|| '/wp/v2/types/post' === ( $query['rest_route'] ?? null );
+
+		self::collect_failure(
+			$failures,
+			is_array( $request )
+				&& 'GET' === ( $request['method'] ?? null )
+				&& $path_matches
+				&& 'edit' === ( $query['context'] ?? null )
+				&& 'no-cache' === ( $headers['Cache-Control'] ?? null )
+				&& is_string( $headers['X-WP-Nonce'] ?? null )
+				&& '' !== ( $headers['X-WP-Nonce'] ?? '' )
+				&& $expects_auth === $actual_has_auth
+				&& ( ! $expects_auth || $expected_auth === $actual_auth ),
+			"REST availability request shape for {$scenario}",
+			array(
+				'request'      => $request,
+				'path'         => $url_path,
+				'query'        => $query,
+				'expectedAuth' => $expects_auth,
+			)
+		);
+	}
+
+	private static function expected_basic_auth_header( array $auth_case ): ?string {
+		if ( 'missing' === ( $auth_case['mode'] ?? 'missing' ) ) {
+			return null;
+		}
+
+		return 'Basic ' . base64_encode( (string) $auth_case['user'] . ':' . (string) $auth_case['pass'] );
+	}
+
+	private static function expected_http_requests_status(): string {
+		if ( defined( 'WP_HTTP_BLOCK_EXTERNAL' ) && WP_HTTP_BLOCK_EXTERNAL ) {
+			return defined( 'WP_ACCESSIBLE_HOSTS' ) && '' !== WP_ACCESSIBLE_HOSTS ? 'recommended' : 'critical';
+		}
+
+		return 'good';
 	}
 
 	private static function generated_site_status_tests( array $registry ): array {
@@ -2218,6 +2591,7 @@ final class SiteHealthSurface {
 			'_SERVER',
 			'_ENV',
 			'_GET',
+			'_COOKIE',
 		);
 
 		foreach ( $globals as $name ) {
@@ -2347,6 +2721,8 @@ final class SiteHealthSurface {
 		self::$https_detection_error = null;
 		self::$replace_override      = null;
 		self::$http_request_count    = 0;
+		self::$http_intercepts       = array();
+		self::$http_request_log      = array();
 	}
 
 	private static function clone_value( $value ) {
