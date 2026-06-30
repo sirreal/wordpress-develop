@@ -822,7 +822,11 @@ that base coverage by loading concrete `WP_*_List_Table` subclasses with
 synthetic rows, object-cache fixtures, temporary plugin/theme/network-theme
 metadata, exact row-action nonce checks, and `posts_pre_query`,
 `comments_pre_query`, `terms_pre_query`, `users_pre_query`, and
-`sites_pre_query` short-circuits. It intentionally skips full admin dispatch,
+`sites_pre_query` short-circuits. `WP_Theme_Install_List_Table::prepare_items()`
+raw-requires `theme-install.php`, so the theme install API-argument invariant
+runs once per PHP process and later iterations seed concrete table items,
+pagination, and view globals directly to replay row/action/escaping coverage
+without triggering redeclarations. It intentionally skips full admin dispatch,
 install/update tables, destructive plugin/theme operations, real uploads, and
 true multisite write paths; privacy request tables and their AJAX handlers live
 in the dedicated `privacy-admin-requests` surface, and network site/user rows

@@ -1594,11 +1594,7 @@ final class AdminListTablesSurface {
 
 		if ( $theme_install_prepare_items_used || function_exists( 'install_themes_feature_list' ) ) {
 			$theme_install_prepare_items_used = true;
-			return $ctx->skip(
-				'admin-list-tables.theme-install.search-api-actions-escaping',
-				'WP_Theme_Install_List_Table::prepare_items() requires theme-install.php with require, so this invariant runs once per PHP process to avoid redeclaring theme-install functions.',
-				array( 'prepareItemsAlreadyUsed' => true )
-			);
+			return self::check_theme_install_table_render_replay( $ctx->fork( 'render-replay' ) );
 		}
 
 		$theme_install_prepare_items_used = true;
@@ -2051,6 +2047,295 @@ final class AdminListTablesSurface {
 				'failures' => array_slice( $failures, 0, 8 ),
 				'screen'   => $screen->id,
 				'selectedMode' => $request_modes[0]['id'] ?? '',
+			)
+		);
+	}
+
+	private static function check_theme_install_table_render_replay( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures        = array();
+		$filters         = array();
+		$current_user    = self::synthetic_user( $ctx->fork( 'current-user' ), 54600, 'theme-install-replay' );
+		$screen          = self::screen( 'theme-install' );
+		$hostile_label   = self::hostile_label( $ctx->fork( 'theme-install-replay-label' ) );
+		$token           = substr( hash( 'sha1', (string) $ctx->seed() . ':' . (string) $ctx->iteration() . ':theme-replay' ), 0, 10 );
+		$install_slug    = 'cfz-theme-replay-new-' . $token;
+		$update_slug     = 'cfz-theme-replay-update-' . $token;
+		$installed_slug  = 'cfz-theme-replay-installed-' . $token;
+		$newer_slug      = 'cfz-theme-replay-newer-' . $token;
+		$theme_root      = \trailingslashit( WP_CONTENT_DIR ) . 'themes';
+		$theme_root_preexisting = is_dir( $theme_root );
+		$update_dir      = \trailingslashit( $theme_root ) . $update_slug;
+		$installed_dir   = \trailingslashit( $theme_root ) . $installed_slug;
+		$newer_dir       = \trailingslashit( $theme_root ) . $newer_slug;
+		$global_names    = array( '_GET', '_POST', '_REQUEST', 'current_user', 'paged', 'pagenow', 'tab', 'tabs', 'themes_allowedtags', 'type', 'wp_theme_directories' );
+		$server_names    = array( 'HTTP_HOST', 'PHP_SELF', 'REQUEST_URI' );
+		$global_snapshot = self::snapshot_globals( $global_names );
+		$server_snapshot = self::snapshot_server( $server_names );
+		$options_snapshot = self::snapshot_options();
+		$action_events   = array();
+		$result          = array();
+		$filters_removed = false;
+		$globals_restored = false;
+		$options_restored = false;
+		$fixtures_removed = false;
+
+		$api_total  = 83;
+		$api_themes = array(
+			self::theme_install_api_item(
+				$install_slug,
+				'Replay Installable Theme ' . $hostile_label,
+				'1.0.0',
+				'Replay install description ' . $hostile_label,
+				array(
+					'preview_url'    => 'https://preview.example.test/themes/' . rawurlencode( $install_slug ) . '/?label=' . rawurlencode( $hostile_label ),
+					'screenshot_url' => 'https://example.test/screens/' . rawurlencode( $install_slug ) . '.png?label=' . rawurlencode( $hostile_label ) . '&raw=<script>alert(1)</script>',
+				)
+			),
+			self::theme_install_api_item(
+				$update_slug,
+				'Replay Update Theme ' . $hostile_label,
+				'2.0.0',
+				'Replay update description ' . $hostile_label,
+				array(
+					'preview_url'    => 'javascript:alert(1)',
+					'screenshot_url' => 'https://example.test/screens/' . rawurlencode( $update_slug ) . '.png?raw=' . rawurlencode( $hostile_label ),
+				)
+			),
+			self::theme_install_api_item(
+				$installed_slug,
+				'Replay Installed Theme ' . $hostile_label,
+				'1.0.0',
+				'Replay installed description ' . $hostile_label,
+				array(
+					'preview_url'    => 'https://preview.example.test/themes/' . rawurlencode( $installed_slug ) . '/',
+					'screenshot_url' => 'https://example.test/screens/' . rawurlencode( $installed_slug ) . '.png?raw=' . rawurlencode( $hostile_label ),
+				)
+			),
+			self::theme_install_api_item(
+				$newer_slug,
+				'Replay Newer Installed Theme ' . $hostile_label,
+				'0.5.0',
+				'Replay newer installed description ' . $hostile_label,
+				array(
+					'preview_url'    => 'https://preview.example.test/themes/' . rawurlencode( $newer_slug ) . '/',
+					'screenshot_url' => 'https://example.test/screens/' . rawurlencode( $newer_slug ) . '.png?raw=' . rawurlencode( $hostile_label ),
+				)
+			),
+		);
+
+		$theme_install_actions_filter = static function ( array $actions, \stdClass $theme ) use ( $token, &$action_events ): array {
+			$slug            = (string) ( $theme->slug ?? '' );
+			$action_events[] = $slug;
+			$actions[]       = sprintf(
+				'<a class="cfz-theme-install-replay-action" href="%s" data-slug="%s">%s</a>',
+				\esc_url( 'https://example.test/theme-install-replay-action/?theme=' . rawurlencode( $slug ) . '&marker=' . rawurlencode( $token ) ),
+				\esc_attr( $slug ),
+				\esc_html( 'Generated Theme Replay Action ' . $token )
+			);
+
+			return $actions;
+		};
+		$cap_filter = self::cap_filter(
+			array(
+				'install_themes',
+				'read',
+				'update_themes',
+			)
+		);
+
+		self::add_filter_record( $filters, 'theme_install_actions', $theme_install_actions_filter, 10, 2 );
+		self::add_filter_record( $filters, 'user_has_cap', $cap_filter, 10, 4 );
+
+		try {
+			self::write_theme_fixture( $update_dir, 'Theme Replay Update ' . $hostile_label );
+			self::write_theme_fixture( $installed_dir, 'Theme Replay Installed ' . $hostile_label );
+			self::write_theme_fixture( $newer_dir, 'Theme Replay Newer Installed ' . $hostile_label );
+			\register_theme_directory( $theme_root );
+			\search_theme_directories( true );
+			\wp_cache_delete( 'theme_roots', 'site-transient' );
+
+			$GLOBALS['current_user']        = $current_user;
+			$GLOBALS['paged']               = 2;
+			$GLOBALS['pagenow']             = 'theme-install.php';
+			$GLOBALS['tab']                 = 'search';
+			$GLOBALS['tabs']                = array(
+				'dashboard'  => 'Search',
+				'search'     => 'Search Results',
+				'upload'     => 'Upload',
+				'featured'   => 'Featured',
+				'new'        => 'Latest',
+				'updated'    => 'Recently Updated',
+				'cfz-custom' => 'Generated Theme Replay Tab ' . $token,
+			);
+			$GLOBALS['themes_allowedtags']  = self::theme_install_allowed_tags();
+			$GLOBALS['type']                = 'term';
+			$_GET                           = array(
+				'paged' => 2,
+				's'     => 'Replay Theme Search ' . $hostile_label,
+				'tab'   => 'search',
+				'type'  => 'term',
+			);
+			$_POST                          = array();
+			$_REQUEST                       = $_GET;
+			$_SERVER['HTTP_HOST']           = 'example.test';
+			$_SERVER['PHP_SELF']            = '/wp-admin/theme-install.php';
+			$_SERVER['REQUEST_URI']         = '/wp-admin/theme-install.php?' . http_build_query( $_GET, '', '&', PHP_QUERY_RFC3986 );
+
+			$table        = self::list_table( 'WP_Theme_Install_List_Table', $screen );
+			$table->items = $api_themes;
+			self::invoke(
+				$table,
+				'set_pagination_args',
+				array(
+					array(
+						'infinite_scroll' => true,
+						'per_page'        => 36,
+						'total_items'     => $api_total,
+					),
+				)
+			);
+			$views = self::invoke( $table, 'get_views' );
+			$row   = self::capture(
+				static function () use ( $table ): void {
+					$table->display_rows();
+				}
+			);
+			$display = self::capture(
+				static function () use ( $table ): void {
+					$table->display();
+				}
+			);
+			$ajax_allowed = $table->ajax_user_can();
+			$ajax_denied  = self::without_filter(
+				'user_has_cap',
+				$cap_filter,
+				static function () use ( $screen ) {
+					$table = self::list_table( 'WP_Theme_Install_List_Table', $screen );
+					return $table->ajax_user_can();
+				}
+			);
+			$image_sources = self::image_srcs( $row );
+
+			$result = compact(
+				'action_events',
+				'ajax_denied',
+				'ajax_allowed',
+				'display',
+				'image_sources',
+				'install_slug',
+				'installed_slug',
+				'newer_slug',
+				'row',
+				'table',
+				'update_slug',
+				'views'
+			);
+		} finally {
+			self::remove_filter_records( $filters );
+			$filters_removed = self::filters_removed( $filters );
+			self::remove_theme_fixture( $update_dir );
+			self::remove_theme_fixture( $installed_dir );
+			self::remove_theme_fixture( $newer_dir );
+			self::restore_server( $server_snapshot );
+			self::restore_globals( $global_snapshot );
+			self::reset_theme_directory_cache_after_restore( $global_snapshot, $theme_root );
+			if ( ! $theme_root_preexisting && is_dir( $theme_root ) ) {
+				@rmdir( $theme_root );
+			}
+			\wp_cache_delete( 'theme_roots', 'site-transient' );
+			self::restore_options( $options_snapshot );
+			\wp_cache_delete( 'theme_roots', 'site-transient' );
+			$globals_restored = self::globals_match( $global_snapshot, $global_names ) && self::server_match( $server_snapshot, $server_names );
+			$options_restored = self::options_match( $options_snapshot );
+			$fixtures_removed = ! is_dir( $update_dir ) && ! is_dir( $installed_dir ) && ! is_dir( $newer_dir )
+				&& ( $theme_root_preexisting || ! is_dir( $theme_root ) );
+		}
+
+		$row             = (string) ( $result['row'] ?? '' );
+		$display         = (string) ( $result['display'] ?? '' );
+		$views_html      = implode( '', $result['views'] ?? array() );
+		$image_sources   = $result['image_sources'] ?? array();
+		$action_slugs    = array_values( array_unique( $result['action_events'] ?? array() ) );
+		$expected_slugs  = array_column( $api_themes, 'slug' );
+		$expected_action_slugs = $expected_slugs;
+		sort( $action_slugs );
+		sort( $expected_action_slugs );
+
+		self::collect_failure(
+			$failures,
+			4 === count( $result['table']->items ?? array() )
+				&& 83 === ( $result['table']->get_pagination_arg( 'total_items' ) ?? null )
+				&& 3 === ( $result['table']->get_pagination_arg( 'total_pages' ) ?? null )
+				&& 36 === ( $result['table']->get_pagination_arg( 'per_page' ) ?? null )
+				&& isset( $result['views']['theme-install-search'], $result['views']['theme-install-cfz-custom'] ),
+			'theme install replay seeds concrete table items, pagination, and view globals without prepare_items',
+			array(
+				'pagination' => array(
+					'perPage'    => $result['table']->get_pagination_arg( 'per_page' ) ?? null,
+					'totalItems' => $result['table']->get_pagination_arg( 'total_items' ) ?? null,
+					'totalPages' => $result['table']->get_pagination_arg( 'total_pages' ) ?? null,
+				),
+				'viewKeys'   => array_keys( $result['views'] ?? array() ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			false === ( $result['ajax_denied'] ?? null )
+				&& true === ( $result['ajax_allowed'] ?? null )
+				&& str_contains( $row, 'action=install-theme' )
+				&& str_contains( $row, 'theme=' . rawurlencode( $install_slug ) )
+				&& str_contains( $row, 'action=upgrade-theme' )
+				&& str_contains( $row, 'theme=' . rawurlencode( $update_slug ) )
+				&& substr_count( $row, '<span class="install-now">' ) >= 2
+				&& substr_count( $row, '<span class="theme-install">' ) >= 2
+				&& str_contains( $row, 'cfz-theme-install-replay-action' )
+				&& $expected_action_slugs === $action_slugs,
+			'theme install replay rows cover install, update, installed, newer-installed, custom actions, and capability gates',
+			array(
+				'actionSlugs' => $action_slugs,
+				'ajaxAllowed' => $result['ajax_allowed'] ?? null,
+				'ajaxDenied'  => $result['ajax_denied'] ?? null,
+				'row'         => self::describe_string( $row ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			count( $image_sources ) >= count( $expected_slugs )
+				&& self::escaped_url_attributes_with_prefix( $image_sources, 'https://example.test/screens/' )
+				&& str_contains( $row, 'tab=theme-information' )
+				&& str_contains( $row, 'class="theme-preview-url"' )
+				&& self::html_has_no_raw_script( $row . $display . $views_html ),
+			'theme install replay screenshots, preview metadata, descriptions, views, and display output are escaped',
+			array(
+				'display'          => self::describe_string( $display ),
+				'imageSources'     => $image_sources,
+				'rowNoScript'      => self::html_has_no_raw_script( $row ),
+				'rowScriptContext' => self::raw_script_context( $row ),
+				'viewsNoScript'    => self::html_has_no_raw_script( $views_html ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$filters_removed && $globals_restored && $options_restored && $fixtures_removed,
+			'theme install replay action, capability, globals, server values, theme-root options/cache, and temp fixtures are restored',
+			array(
+				'filtersRemoved'  => $filters_removed,
+				'fixturesRemoved' => $fixtures_removed,
+				'globalsRestored' => $globals_restored,
+				'optionsRestored' => $options_restored,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'admin-list-tables.theme-install.render-replay-after-prepare-items',
+			array() === $failures,
+			array(
+				'failures' => array_slice( $failures, 0, 8 ),
+				'screen'   => $screen->id,
 			)
 		);
 	}
@@ -3574,6 +3859,42 @@ final class AdminListTablesSurface {
 				'version'        => $version,
 			),
 			$overrides
+		);
+	}
+
+	private static function theme_install_allowed_tags(): array {
+		if ( isset( $GLOBALS['themes_allowedtags'] ) && is_array( $GLOBALS['themes_allowedtags'] ) ) {
+			return self::clone_value( $GLOBALS['themes_allowedtags'] );
+		}
+
+		return array(
+			'a'       => array(
+				'href'   => array(),
+				'title'  => array(),
+				'target' => array(),
+			),
+			'abbr'    => array( 'title' => array() ),
+			'acronym' => array( 'title' => array() ),
+			'code'    => array(),
+			'pre'     => array(),
+			'em'      => array(),
+			'strong'  => array(),
+			'div'     => array(),
+			'p'       => array(),
+			'ul'      => array(),
+			'ol'      => array(),
+			'li'      => array(),
+			'h1'      => array(),
+			'h2'      => array(),
+			'h3'      => array(),
+			'h4'      => array(),
+			'h5'      => array(),
+			'h6'      => array(),
+			'img'     => array(
+				'src'   => array(),
+				'class' => array(),
+				'alt'   => array(),
+			),
 		);
 	}
 
