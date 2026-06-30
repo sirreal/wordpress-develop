@@ -826,9 +826,10 @@ subprocess-only `IMAGE_EDIT_OVERWRITE` branches. The `multisite` surface leaves 
 disabled for the shared PHP process; true multisite `sitemeta` write paths and
 site creation/update/deletion run only in an isolated subprocess when a readable
 `wp-tests-config.php` points at a real multisite test database, and that row
-skips explicitly when no such config is available. Broader DB-backed multisite
-query execution remains short-circuited through filters, while non-multisite
-network-option CRUD remains covered by the existing option stub. The Site
+skips explicitly when no such config is available or the configured database is
+not reachable. Broader DB-backed multisite query execution remains
+short-circuited through filters, while non-multisite network-option CRUD
+remains covered by the existing option stub. The Site
 Health surface avoids loopback, WordPress.org, REST availability, update
 download, mail, cron, and filesystem-writing checks unless they are fully
 short-circuited. The mail

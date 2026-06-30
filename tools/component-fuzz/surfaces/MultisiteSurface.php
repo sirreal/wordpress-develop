@@ -1744,7 +1744,7 @@ final class MultisiteSurface {
 	}
 
 	private static function run_true_multisite_lifecycle_child( array $case ): array {
-		$dir = rtrim( sys_get_temp_dir(), DIRECTORY_SEPARATOR ) . DIRECTORY_SEPARATOR . 'component-fuzz-multisite-true-lifecycle';
+		$dir = rtrim( sys_get_temp_dir(), DIRECTORY_SEPARATOR ) . DIRECTORY_SEPARATOR . 'component-fuzz-multisite-true-lifecycle-' . getmypid();
 		\ComponentFuzz\ensure_dir( $dir );
 
 		$script = $dir . DIRECTORY_SEPARATOR . 'child-' . getmypid() . '-' . bin2hex( random_bytes( 6 ) ) . '.php';
@@ -1873,6 +1873,32 @@ function component_fuzz_ms_find_config( string $repo_root ): ?string {
 	}
 
 	return null;
+}
+
+function component_fuzz_ms_database_reachable(): array {
+	if ( ! function_exists( 'mysqli_connect' ) ) {
+		return array( false, 'mysqli_connect is unavailable' );
+	}
+
+	foreach ( array( 'DB_HOST', 'DB_USER', 'DB_PASSWORD', 'DB_NAME' ) as $constant ) {
+		if ( ! defined( $constant ) ) {
+			return array( false, "{$constant} is not defined" );
+		}
+	}
+
+	if ( function_exists( 'mysqli_report' ) && defined( 'MYSQLI_REPORT_OFF' ) ) {
+		mysqli_report( MYSQLI_REPORT_OFF );
+	}
+
+	$link = @mysqli_connect( DB_HOST, DB_USER, DB_PASSWORD, DB_NAME );
+	if ( false === $link ) {
+		$error = function_exists( 'mysqli_connect_error' ) ? mysqli_connect_error() : '';
+		return array( false, '' === $error ? 'mysqli_connect failed' : $error );
+	}
+
+	mysqli_close( $link );
+
+	return array( true, '' );
 }
 
 function component_fuzz_ms_table_exists( string $table ): bool {
@@ -2148,6 +2174,18 @@ try {
 		component_fuzz_ms_skip(
 			'wp-tests-config.php does not define a readable ABSPATH.',
 			array( 'config' => $config )
+		);
+	}
+
+	list( $db_reachable, $db_error ) = component_fuzz_ms_database_reachable();
+	if ( ! $db_reachable ) {
+		component_fuzz_ms_skip(
+			'The configured test database is not reachable for a true multisite DB child process.',
+			array(
+				'config' => $config,
+				'dbHost' => defined( 'DB_HOST' ) ? DB_HOST : null,
+				'error'  => $db_error,
+			)
 		);
 	}
 
