@@ -405,9 +405,10 @@ database, network requests, or a configured site.
   serialized MIME output, reusable mailer cleanup/reset behavior,
   invalid From failure payloads, early failure cleanup, success/failure
   actions, and emoji email body staticization.
-- `markup`: block parse/serialize/render guards, shortcodes, text trimming,
-  excerpts, balanced tags, URL extraction, link attribute helpers, and embed
-  helpers.
+- `markup`: block parse/serialize/render guards, deterministic `do_blocks()`
+  fixture rendering for generated block trees with synthetic callback oracles
+  and block-rendering state restoration, shortcodes, text trimming, excerpts,
+  balanced tags, URL extraction, link attribute helpers, and embed helpers.
 - `media-editor`: no-DB media image editor coverage for editor selection,
   GD/Imagick availability, output format filters, abstract editor
   filename/quality/EXIF-orientation contracts, resize/save metadata,
