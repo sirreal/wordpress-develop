@@ -306,11 +306,12 @@ database, network requests, or a configured site.
   sanitization, `WP_SimplePie_File` HTTP response/error-state normalization,
   transient-backed feed cache boundaries, date/status helpers, local file
   adapter guards, no-network assertions, and state restoration.
-- `feed-rendering`: no-DB RSS2, Atom, and comments RSS2 feed template rendering
-  over synthetic query loops, including feed item/entry counts, self links,
-  self-link request URI host/filter escaping, CDATA terminator escaping,
-  excerpt/content mode switches, enclosure metadata, comment feed escaping, and
-  feed build date selection.
+- `feed-rendering`: no-DB RSS2, Atom, RDF, RSS 0.92, and comments feed template
+  rendering over synthetic query loops, including feed item/entry counts, self
+  links, legacy `do_feed()` dispatch normalization, self-link request URI
+  host/filter escaping, CDATA terminator escaping, excerpt/content mode
+  switches, enclosure metadata, comment feed escaping, and feed build date
+  selection.
 - `frontend-features`: no-DB frontend feature helper coverage for speculative
   loading and view transitions, including direct speculation rule validation,
   configuration eligibility, mode/eagerness filters, generated URL-pattern
