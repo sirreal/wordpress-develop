@@ -516,8 +516,8 @@ database, network requests, or a configured site.
   option registration/rendering, Screen Options visibility caching and filters,
   composed Screen Options output for columns, meta boxes, layout, pagination,
   view modes, and custom settings, layout column rendering and legacy filters,
-  filter locality, and state restoration without redirecting or dying request
-  handlers.
+  subprocess-isolated AJAX preference handlers and `set_screen_options()`
+  redirect/exit paths, filter locality, and state restoration.
 - `post-embeds`: in-memory wpdb-backed WordPress-as-oEmbed-provider coverage,
   including post type embeddability predicates, public visibility fail-closed
   behavior, oEmbed response width clamps, rich iframe and thumbnail conversion,
@@ -988,10 +988,11 @@ The `editor-helpers` surface exercises classic editor settings and generated
 markup without loading browser editors. It avoids live TinyMCE/Quicktags
 execution, external asset fetching, admin page dispatch, DB-backed link queries,
 and AJAX media-shortcode preview paths.
-The `user-preferences` surface avoids `set_screen_options()` and AJAX
-preference handlers because they redirect or call `wp_die()` in-process; it
-covers the underlying user-setting, user-option precedence/deletion, screen
-visibility caching, and screen preference helpers directly.
+The `user-preferences` surface exercises `set_screen_options()` and AJAX
+preference handlers in a subprocess so redirect, raw `exit`, and `wp_die()`
+paths cannot terminate the parent fuzz runner. It still covers the underlying
+user-setting, user-option precedence/deletion, screen visibility caching, and
+screen preference helpers directly in-process.
 The `update-install-upgrader` surface intentionally avoids live package
 downloads, real ZIP unpacking into `wp-content/upgrade`, real plugin/theme
 activation or switching, full plugin/theme/core update execution, core
