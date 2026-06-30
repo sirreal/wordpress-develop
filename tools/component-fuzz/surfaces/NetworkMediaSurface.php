@@ -47,6 +47,7 @@ final class NetworkMediaSurface {
 			} else {
 				self::exercise_multisite_check_upload_size_apis( $rng, $result, $temp_root );
 				self::exercise_filetype_and_unique_apis( $rng, $result, $temp_root );
+				self::exercise_upload_bits_helpers( $rng, $result, $temp_root );
 				self::exercise_sideload_helpers( $rng, $result, $temp_root );
 			}
 		} finally {
@@ -2213,6 +2214,269 @@ final class NetworkMediaSurface {
 				'filterCalls'  => self::describe_value( $filter_calls ),
 				'filterBefore' => $before_filter,
 				'filterAfter'  => \has_filter( 'wp_unique_filename', $unique_name_filter ),
+			)
+		);
+	}
+
+	private static function exercise_upload_bits_helpers( array &$rng, array &$result, string $temp_root ): void {
+		if ( ! function_exists( 'wp_upload_bits' ) ) {
+			self::skip_once( $result, 'wp_upload_bits', 'Function wp_upload_bits is unavailable.' );
+			return;
+		}
+		if ( ! function_exists( 'add_filter' ) || ! function_exists( 'remove_filter' ) || ! function_exists( 'has_filter' ) ) {
+			self::skip_once( $result, 'wp_upload_bits', 'Filter API is unavailable.' );
+			return;
+		}
+
+		++$result['caseCount'];
+		self::feature( $result, 'wp_upload_bits' );
+
+		$upload_root         = $temp_root . DIRECTORY_SEPARATOR . 'upload-bits';
+		$token               = 'cfz-' . self::rng_int( $rng, 1000, 9999 );
+		$time                = '2026/06';
+		$name                = "virtual collision {$token}.txt";
+		$bits                = "component fuzz upload bits {$token}\n";
+		$blocked_name        = "blocked {$token}.txt";
+		$blocked_error       = "blocked-by-component-fuzz-{$token}";
+		$sanitized_name      = function_exists( 'sanitize_file_name' ) ? sanitize_file_name( $name ) : $name;
+		$expected_ext        = '.' . pathinfo( $sanitized_name, PATHINFO_EXTENSION );
+		$expected_stem       = pathinfo( $sanitized_name, PATHINFO_FILENAME );
+		$expected_basename   = "{$expected_stem}-1{$expected_ext}";
+		$expected_subdir     = str_replace( '/', DIRECTORY_SEPARATOR, $time );
+		$expected_dir        = $upload_root . DIRECTORY_SEPARATOR . $expected_subdir;
+		$virtual_file_list   = array( "{$expected_stem}-150x150{$expected_ext}" );
+		$upload_bits_calls   = array();
+		$file_list_calls     = array();
+		$unique_name_calls   = array();
+		$handle_upload_calls = array();
+		$active_error        = null;
+		$yearmonth_filter    = static function () {
+			return 1;
+		};
+		$upload_bits_filter  = static function ( $payload ) use ( &$upload_bits_calls, &$active_error ) {
+			$upload_bits_calls[] = $payload;
+
+			if ( null !== $active_error ) {
+				return $active_error;
+			}
+
+			return $payload;
+		};
+		$file_list_filter    = static function ( $files, string $dir, string $filename ) use ( &$file_list_calls, $virtual_file_list ): array {
+			$file_list_calls[] = array(
+				'files'    => $files,
+				'dir'      => $dir,
+				'filename' => $filename,
+			);
+
+			return $virtual_file_list;
+		};
+		$unique_name_filter  = static function (
+			string $filename,
+			string $ext,
+			string $dir,
+			$callback,
+			array $alt_filenames,
+			$number
+		) use ( &$unique_name_calls ): string {
+			$unique_name_calls[] = array(
+				'filename' => $filename,
+				'ext'      => $ext,
+				'dir'      => $dir,
+				'callback' => $callback,
+				'altNames' => $alt_filenames,
+				'number'   => $number,
+			);
+
+			return $filename;
+		};
+		$handle_upload_filter = static function ( array $upload, string $context ) use ( &$handle_upload_calls ): array {
+			$handle_upload_calls[] = array(
+				'upload'  => $upload,
+				'context' => $context,
+			);
+
+			return $upload;
+		};
+		$before_upload_dir    = \has_filter( 'upload_dir', array( __CLASS__, 'filter_sideload_upload_dir' ) );
+		$before_yearmonth    = \has_filter( 'pre_option_uploads_use_yearmonth_folders', $yearmonth_filter );
+		$before_bits_filter   = \has_filter( 'wp_upload_bits', $upload_bits_filter );
+		$before_file_list     = \has_filter( 'pre_wp_unique_filename_file_list', $file_list_filter );
+		$before_unique_name   = \has_filter( 'wp_unique_filename', $unique_name_filter );
+		$before_handle_filter = \has_filter( 'wp_handle_upload', $handle_upload_filter );
+
+		self::ensure_dir( $upload_root );
+		self::$sideload_upload_root = $upload_root;
+		\add_filter( 'pre_option_uploads_use_yearmonth_folders', $yearmonth_filter );
+		\add_filter( 'upload_dir', array( __CLASS__, 'filter_sideload_upload_dir' ) );
+		\add_filter( 'wp_upload_bits', $upload_bits_filter );
+		\add_filter( 'pre_wp_unique_filename_file_list', $file_list_filter, 10, 3 );
+		\add_filter( 'wp_unique_filename', $unique_name_filter, 10, 6 );
+		\add_filter( 'wp_handle_upload', $handle_upload_filter, 10, 2 );
+
+		try {
+			$first = self::call_api(
+				$result,
+				'wp_upload_bits.success',
+				$name,
+				static function () use ( $name, $bits, $time ) {
+					return wp_upload_bits( $name, null, $bits, $time );
+				}
+			);
+
+			$active_error = $blocked_error;
+			$blocked      = self::call_api(
+				$result,
+				'wp_upload_bits.filtered-error',
+				$blocked_name,
+				static function () use ( $blocked_name, $time, $token ) {
+					return wp_upload_bits( $blocked_name, null, "blocked upload bits {$token}\n", $time );
+				}
+			);
+			$active_error = null;
+
+			$empty = self::call_api(
+				$result,
+				'wp_upload_bits.empty-name',
+				'',
+				static function () use ( $time ) {
+					return wp_upload_bits( '', null, 'empty-name bits', $time );
+				}
+			);
+		} finally {
+			$active_error = null;
+			\remove_filter( 'wp_handle_upload', $handle_upload_filter, 10 );
+			\remove_filter( 'wp_unique_filename', $unique_name_filter, 10 );
+			\remove_filter( 'pre_wp_unique_filename_file_list', $file_list_filter, 10 );
+			\remove_filter( 'wp_upload_bits', $upload_bits_filter );
+			\remove_filter( 'upload_dir', array( __CLASS__, 'filter_sideload_upload_dir' ) );
+			\remove_filter( 'pre_option_uploads_use_yearmonth_folders', $yearmonth_filter );
+			self::$sideload_upload_root = null;
+		}
+
+		$first_value  = $first['value'] ?? null;
+		$first_file   = is_array( $first_value ) && isset( $first_value['file'] ) ? (string) $first_value['file'] : '';
+
+		self::check_invariant(
+			$result,
+			$first['ok']
+				&& is_array( $first_value )
+				&& false === ( $first_value['error'] ?? null )
+				&& 'text/plain' === ( $first_value['type'] ?? null )
+				&& is_file( $first_file )
+				&& $bits === file_get_contents( $first_file )
+				&& self::normalize_directory_separators( $expected_dir . DIRECTORY_SEPARATOR . $expected_basename ) === self::normalize_directory_separators( $first_file )
+				&& isset( $first_value['url'] )
+				&& "http://example.test/component-fuzz-network/{$time}/{$expected_basename}" === (string) $first_value['url']
+				&& ! self::filename_has_forbidden_output_chars( basename( $first_file ) ),
+			'wp_upload_bits:success-temp-upload-and-virtual-collision-contract',
+			$name,
+			array(
+				'result'           => $first_value,
+				'expectedBasename' => $expected_basename,
+				'virtualFileList'  => $virtual_file_list,
+			)
+		);
+
+		self::check_invariant(
+			$result,
+			1 === count( $file_list_calls )
+				&& null === $file_list_calls[0]['files']
+				&& self::normalize_directory_separators( $expected_dir ) === self::normalize_directory_separators( $file_list_calls[0]['dir'] )
+				&& $sanitized_name === $file_list_calls[0]['filename']
+				&& 1 === count( $unique_name_calls )
+				&& $expected_basename === $unique_name_calls[0]['filename']
+				&& $expected_ext === $unique_name_calls[0]['ext']
+				&& self::normalize_directory_separators( $expected_dir ) === self::normalize_directory_separators( $unique_name_calls[0]['dir'] )
+				&& null === $unique_name_calls[0]['callback']
+				&& array() === $unique_name_calls[0]['altNames']
+				&& 1 === $unique_name_calls[0]['number'],
+			'wp_upload_bits:unique-filename-filter-payloads',
+			$name,
+			array(
+				'fileListCalls'   => $file_list_calls,
+				'uniqueNameCalls' => $unique_name_calls,
+			)
+		);
+
+		self::check_invariant(
+			$result,
+			$blocked['ok']
+				&& is_array( $blocked['value'] )
+				&& $blocked_error === ( $blocked['value']['error'] ?? null )
+				&& ! in_array( function_exists( 'sanitize_file_name' ) ? sanitize_file_name( $blocked_name ) : $blocked_name, self::directory_basenames( $expected_dir ), true ),
+			'wp_upload_bits:filter-error-short-circuits-file-creation',
+			$blocked_name,
+			array(
+				'result'    => $blocked['value'] ?? null,
+				'filenames' => self::directory_basenames( $expected_dir ),
+			)
+		);
+
+		self::check_invariant(
+			$result,
+			$empty['ok']
+				&& is_array( $empty['value'] )
+				&& isset( $empty['value']['error'] )
+				&& 2 === count( $upload_bits_calls ),
+			'wp_upload_bits:empty-name-fails-before-filters',
+			'',
+			array(
+				'result'          => $empty['value'] ?? null,
+				'uploadBitsCalls' => $upload_bits_calls,
+			)
+		);
+
+		$expected_payloads = array(
+			array(
+				'name' => $name,
+				'bits' => $bits,
+				'time' => $time,
+			),
+			array(
+				'name' => $blocked_name,
+				'bits' => "blocked upload bits {$token}\n",
+				'time' => $time,
+			),
+		);
+		self::check_invariant(
+			$result,
+			$expected_payloads === $upload_bits_calls
+				&& 1 === count( $handle_upload_calls )
+				&& 'sideload' === ( $handle_upload_calls[0]['context'] ?? null )
+				&& ( $handle_upload_calls[0]['upload']['file'] ?? null ) === $first_file,
+			'wp_upload_bits:filter-payloads-and-handle-upload-context',
+			$name,
+			array(
+				'expectedPayloads'  => $expected_payloads,
+				'uploadBitsCalls'   => $upload_bits_calls,
+				'handleUploadCalls' => $handle_upload_calls,
+			)
+		);
+
+		self::check_invariant(
+			$result,
+			$before_upload_dir === \has_filter( 'upload_dir', array( __CLASS__, 'filter_sideload_upload_dir' ) )
+				&& $before_yearmonth === \has_filter( 'pre_option_uploads_use_yearmonth_folders', $yearmonth_filter )
+				&& $before_bits_filter === \has_filter( 'wp_upload_bits', $upload_bits_filter )
+				&& $before_file_list === \has_filter( 'pre_wp_unique_filename_file_list', $file_list_filter )
+				&& $before_unique_name === \has_filter( 'wp_unique_filename', $unique_name_filter )
+				&& $before_handle_filter === \has_filter( 'wp_handle_upload', $handle_upload_filter ),
+			'wp_upload_bits:filters-restored',
+			$name,
+			array(
+				'uploadDirBefore' => $before_upload_dir,
+				'uploadDirAfter'  => \has_filter( 'upload_dir', array( __CLASS__, 'filter_sideload_upload_dir' ) ),
+				'yearBefore'      => $before_yearmonth,
+				'yearAfter'       => \has_filter( 'pre_option_uploads_use_yearmonth_folders', $yearmonth_filter ),
+				'bitsBefore'      => $before_bits_filter,
+				'bitsAfter'       => \has_filter( 'wp_upload_bits', $upload_bits_filter ),
+				'fileListBefore'  => $before_file_list,
+				'fileListAfter'   => \has_filter( 'pre_wp_unique_filename_file_list', $file_list_filter ),
+				'uniqueBefore'    => $before_unique_name,
+				'uniqueAfter'     => \has_filter( 'wp_unique_filename', $unique_name_filter ),
+				'handleBefore'    => $before_handle_filter,
+				'handleAfter'     => \has_filter( 'wp_handle_upload', $handle_upload_filter ),
 			)
 		);
 	}
