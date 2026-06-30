@@ -38,11 +38,7 @@ final class AdminDashboardSurface {
 			$rows[] = self::check_recent_comments_rendering( $ctx->fork( 'recent-comments' ) );
 			$rows[] = self::check_cached_rss_widget( $ctx->fork( 'cached-rss' ) );
 			$rows[] = self::check_browser_nag_remote_cache( $ctx->fork( 'browser-nag' ) );
-			$rows[] = $ctx->skip(
-				'admin-dashboard.unsafe-dispatch-and-remote-paths',
-				'wp_dashboard_setup() POST handling redirects/exits and full RSS feed parsing are skipped; the Browser Happy nag '
-					. 'and cached dashboard RSS helper are covered directly with no-live-network fixtures.'
-			);
+			$rows[] = self::check_dashboard_setup_direct_registration( $ctx->fork( 'setup' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
 				'admin-dashboard.surface-no-throw',
@@ -70,6 +66,11 @@ final class AdminDashboardSurface {
 		if ( ! function_exists( 'wp_add_dashboard_widget' ) && $dashboard_file && file_exists( $dashboard_file ) ) {
 			require_once $dashboard_file;
 		}
+
+		$misc_file = defined( 'ABSPATH' ) ? ABSPATH . 'wp-admin/includes/misc.php' : '';
+		if ( ! function_exists( 'wp_check_php_version' ) && $misc_file && file_exists( $misc_file ) ) {
+			require_once $misc_file;
+		}
 	}
 
 	private static function missing_requirements(): array {
@@ -85,11 +86,13 @@ final class AdminDashboardSurface {
 			array(
 				'_wp_dashboard_control_callback',
 				'_wp_dashboard_recent_comments_row',
+				'add_action',
 				'add_filter',
 				'add_meta_box',
 				'admin_url',
 				'convert_to_screen',
 				'current_user_can',
+				'delete_site_transient',
 				'delete_transient',
 				'do_meta_boxes',
 				'esc_attr',
@@ -101,8 +104,10 @@ final class AdminDashboardSurface {
 				'get_user_locale',
 				'has_filter',
 				'post_type_exists',
+				'remove_action',
 				'remove_filter',
 				'set_current_screen',
+				'set_site_transient',
 				'set_transient',
 				'submit_button',
 				'wp_add_dashboard_widget',
@@ -113,7 +118,9 @@ final class AdminDashboardSurface {
 				'wp_dashboard_recent_comments',
 				'wp_dashboard_recent_drafts',
 				'wp_dashboard_recent_posts',
+				'wp_dashboard_setup',
 				'wp_dashboard_trigger_widget_control',
+				'wp_check_php_version',
 				'wp_doing_ajax',
 				'wp_get_admin_notice',
 				'wp_insert_user',
@@ -1478,6 +1485,385 @@ final class AdminDashboardSurface {
 		);
 	}
 
+	private static function check_dashboard_setup_direct_registration( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures             = array();
+		$case_summaries       = array();
+		$actions              = array(
+			'wp_dashboard_setup'         => 0,
+			'wp_network_dashboard_setup' => 0,
+			'wp_user_dashboard_setup'    => 0,
+		);
+		$filters              = array(
+			'wp_dashboard_widgets'         => array(),
+			'wp_network_dashboard_widgets' => array(),
+			'wp_user_dashboard_widgets'    => array(),
+		);
+		$meta_box_actions     = array();
+		$redirects            = array();
+		$http_requests        = array();
+		$active_filter        = null;
+		$active_filter_widget = null;
+		$action_callbacks     = array();
+		$filter_callbacks     = array();
+		$registered_snapshot  = self::snapshot_globals( array( 'wp_registered_widgets', 'wp_registered_widget_controls' ) );
+		$transients           = array();
+
+		foreach ( array_keys( $actions ) as $action ) {
+			$action_callbacks[ $action ] = static function () use ( &$actions, $action ): void {
+				++$actions[ $action ];
+			};
+			\add_action( $action, $action_callbacks[ $action ] );
+		}
+
+		foreach ( array_keys( $filters ) as $filter ) {
+			$filter_callbacks[ $filter ] = static function ( array $dashboard_widgets ) use ( &$active_filter, &$active_filter_widget, &$filters, $filter ): array {
+				$return = $dashboard_widgets;
+				if ( $filter === $active_filter && is_string( $active_filter_widget ) && '' !== $active_filter_widget ) {
+					$return = array( $active_filter_widget );
+				}
+
+				$filters[ $filter ][] = array(
+					'input'    => $dashboard_widgets,
+					'returned' => $return,
+				);
+
+				return $return;
+			};
+			\add_filter( $filter, $filter_callbacks[ $filter ], 10, 1 );
+		}
+
+		$meta_box_callback = static function ( $screen_id, $context, $object ) use ( &$meta_box_actions ): void {
+			$meta_box_actions[] = array(
+				'screen'  => $screen_id,
+				'context' => $context,
+				'object'  => $object,
+			);
+		};
+		$redirect_filter   = static function ( $location, $status = null ) use ( &$redirects ) {
+			$redirects[] = array(
+				'location' => $location,
+				'status'   => $status,
+			);
+
+			return $location;
+		};
+		$http_filter       = static function ( $preempt, array $parsed_args, string $url ) use ( &$http_requests ) {
+			$http_requests[] = array(
+				'url'    => $url,
+				'method' => $parsed_args['method'] ?? null,
+			);
+
+			return new \WP_Error( 'component_fuzz_unexpected_dashboard_setup_http', 'Component fuzz blocked unexpected dashboard setup HTTP.' );
+		};
+
+		\add_action( 'do_meta_boxes', $meta_box_callback, 10, 3 );
+		\add_filter( 'wp_redirect', $redirect_filter, 10, 2 );
+		\add_filter( 'pre_http_request', $http_filter, 10, 3 );
+
+		$cases = array(
+			'site'    => array(
+				'hook'             => 'index.php',
+				'capabilities'     => array( 'create_posts', 'edit_dashboard', 'edit_posts', 'read' ),
+				'expectedAction'   => 'wp_dashboard_setup',
+				'expectedFilter'   => 'wp_dashboard_widgets',
+				'expectedScreen'   => array(
+					'id'      => 'dashboard',
+					'site'    => true,
+					'network' => false,
+					'user'    => false,
+				),
+				'expectedBoxes'    => array(
+					'dashboard_right_now'   => array( 'context' => 'normal', 'priority' => 'core' ),
+					'dashboard_activity'    => array( 'context' => 'normal', 'priority' => 'core' ),
+					'dashboard_quick_press' => array( 'context' => 'side', 'priority' => 'core' ),
+					'dashboard_primary'     => array( 'context' => 'side', 'priority' => 'core' ),
+				),
+				'unexpectedBoxes'  => array( 'network_dashboard_right_now', 'dashboard_browser_nag', 'dashboard_php_nag', 'dashboard_site_health' ),
+			),
+			'network' => array(
+				'hook'             => 'index-network',
+				'capabilities'     => array( 'edit_dashboard', 'read' ),
+				'expectedAction'   => 'wp_network_dashboard_setup',
+				'expectedFilter'   => 'wp_network_dashboard_widgets',
+				'expectedScreen'   => array(
+					'id'      => 'dashboard-network',
+					'site'    => false,
+					'network' => true,
+					'user'    => false,
+				),
+				'expectedBoxes'    => array(
+					'network_dashboard_right_now' => array( 'context' => 'normal', 'priority' => 'core' ),
+					'dashboard_primary'           => array( 'context' => 'side', 'priority' => 'core' ),
+				),
+				'unexpectedBoxes'  => array( 'dashboard_right_now', 'dashboard_activity', 'dashboard_quick_press', 'dashboard_browser_nag', 'dashboard_php_nag', 'dashboard_site_health' ),
+			),
+			'user'    => array(
+				'hook'             => 'index-user',
+				'capabilities'     => array( 'edit_dashboard', 'read' ),
+				'expectedAction'   => 'wp_user_dashboard_setup',
+				'expectedFilter'   => 'wp_user_dashboard_widgets',
+				'expectedScreen'   => array(
+					'id'      => 'dashboard-user',
+					'site'    => false,
+					'network' => false,
+					'user'    => true,
+				),
+				'expectedBoxes'    => array(
+					'dashboard_primary' => array( 'context' => 'side', 'priority' => 'core' ),
+				),
+				'unexpectedBoxes'  => array( 'dashboard_right_now', 'dashboard_activity', 'dashboard_quick_press', 'network_dashboard_right_now', 'dashboard_browser_nag', 'dashboard_php_nag', 'dashboard_site_health' ),
+			),
+		);
+
+		try {
+			foreach ( $cases as $label => $case ) {
+				self::reset_runtime();
+				$screen = self::dashboard_screen_for_hook( $case['hook'] );
+
+				if ( ! isset( $GLOBALS['wp_registered_widgets'] ) || ! is_array( $GLOBALS['wp_registered_widgets'] ) ) {
+					$GLOBALS['wp_registered_widgets'] = array();
+				}
+				if ( ! isset( $GLOBALS['wp_registered_widget_controls'] ) || ! is_array( $GLOBALS['wp_registered_widget_controls'] ) ) {
+					$GLOBALS['wp_registered_widget_controls'] = array();
+				}
+
+				$filter_widget_id   = self::id( $ctx->fork( 'filtered-' . $label ), 'cfz_dashboard_filtered' );
+				$filter_widget_name = 'Filtered ' . $label . ' ' . self::hostile_text( $ctx->fork( 'filtered-name-' . $label ) );
+				$widget_callback    = static function (): void {
+					echo '<span class="cfz-dashboard-filtered-widget"></span>';
+				};
+				$control_callback   = static function (): void {
+					echo '<span class="cfz-dashboard-filtered-control"></span>';
+				};
+				$php_transient      = 'php_check_' . md5( PHP_VERSION );
+				$transients[]       = $php_transient;
+
+				$GLOBALS['wp_registered_widgets'][ $filter_widget_id ]         = array(
+					'name'     => $filter_widget_name,
+					'callback' => $widget_callback,
+				);
+				$GLOBALS['wp_registered_widget_controls'][ $filter_widget_id ] = array(
+					'callback' => $control_callback,
+				);
+
+				$active_filter        = $case['expectedFilter'];
+				$active_filter_widget = $filter_widget_id;
+				$_SERVER['HTTP_USER_AGENT'] = '';
+				$_SERVER['REQUEST_METHOD']  = 'GET';
+				$_POST['widget_id']         = 'cfz_post_branch_probe';
+				$_REQUEST['widget_id']      = 'cfz_post_branch_probe';
+				\set_site_transient( $php_transient, array( 'is_acceptable' => true ), WEEK_IN_SECONDS );
+
+				$actions_before  = $actions;
+				$filters_before  = array_map( 'count', $filters );
+				$meta_before     = count( $meta_box_actions );
+				$redirect_before = count( $redirects );
+				$http_before     = count( $http_requests );
+
+				self::with_capabilities(
+					$case['capabilities'],
+					static function (): void {
+						\wp_dashboard_setup();
+					}
+				);
+
+				$action_deltas = array();
+				foreach ( $actions as $action => $count ) {
+					$action_deltas[ $action ] = $count - $actions_before[ $action ];
+				}
+
+				$filter_deltas = array();
+				foreach ( $filters as $filter => $records ) {
+					$filter_deltas[ $filter ] = count( $records ) - $filters_before[ $filter ];
+				}
+
+				$expected_action_only = true;
+				foreach ( $action_deltas as $action => $delta ) {
+					$expected_action_only = $expected_action_only
+						&& ( $case['expectedAction'] === $action ? 1 === $delta : 0 === $delta );
+				}
+
+				$expected_filter_only = true;
+				foreach ( $filter_deltas as $filter => $delta ) {
+					$expected_filter_only = $expected_filter_only
+						&& ( $case['expectedFilter'] === $filter ? 1 === $delta : 0 === $delta );
+				}
+
+				$expected_filter_records = array_slice( $filters[ $case['expectedFilter'] ], $filters_before[ $case['expectedFilter'] ] );
+				$expected_filter_input   = $expected_filter_records[0]['input'] ?? null;
+				$expected_filter_return  = $expected_filter_records[0]['returned'] ?? null;
+				$screen_expectation      = $case['expectedScreen'];
+				$screen_matches          = $screen_expectation['id'] === $screen->id
+					&& $screen_expectation['site'] === $screen->in_admin( 'site' )
+					&& $screen_expectation['network'] === $screen->in_admin( 'network' )
+					&& $screen_expectation['user'] === $screen->in_admin( 'user' );
+
+				$expected_box_details = array();
+				$expected_boxes_ok    = true;
+				foreach ( $case['expectedBoxes'] as $box_id => $expected ) {
+					$box = self::find_meta_box( $screen->id, $box_id );
+					$expected_box_details[ $box_id ] = is_array( $box )
+						? array(
+							'context'  => $box['context'],
+							'priority' => $box['priority'],
+						)
+						: null;
+					$expected_boxes_ok = $expected_boxes_ok
+						&& is_array( $box )
+						&& $expected['context'] === $box['context']
+						&& $expected['priority'] === $box['priority'];
+				}
+
+				$unexpected_present = array();
+				foreach ( $case['unexpectedBoxes'] as $box_id ) {
+					$box = self::find_meta_box( $screen->id, $box_id );
+					if ( is_array( $box ) ) {
+						$unexpected_present[ $box_id ] = array(
+							'context'  => $box['context'],
+							'priority' => $box['priority'],
+						);
+					}
+				}
+
+				$filtered_box = self::find_meta_box( $screen->id, $filter_widget_id );
+				$filtered_box_summary = is_array( $filtered_box )
+					? array(
+						'context'  => $filtered_box['context'],
+						'priority' => $filtered_box['priority'],
+						'title'    => self::preview( (string) ( $filtered_box['box']['title'] ?? '' ) ),
+					)
+					: null;
+				$filtered_box_ok = is_array( $filtered_box )
+					&& 'normal' === $filtered_box['context']
+					&& 'core' === $filtered_box['priority']
+					&& $widget_callback === ( $filtered_box['box']['callback'] ?? null )
+					&& $filter_widget_name === ( $filtered_box['box']['args']['__widget_basename'] ?? null )
+					&& isset( $GLOBALS['wp_dashboard_control_callbacks'][ $filter_widget_id ] )
+					&& $control_callback === $GLOBALS['wp_dashboard_control_callbacks'][ $filter_widget_id ]
+					&& str_contains( (string) ( $filtered_box['box']['title'] ?? '' ), 'class="edit-box open-box"' );
+				$new_meta_box_actions = array_slice( $meta_box_actions, $meta_before );
+				$meta_boxes_ok        = array(
+					array(
+						'screen'  => $screen->id,
+						'context' => 'normal',
+						'object'  => '',
+					),
+					array(
+						'screen'  => $screen->id,
+						'context' => 'side',
+						'object'  => '',
+					),
+				) === $new_meta_box_actions;
+				$no_dispatch_or_http  = $redirect_before === count( $redirects )
+					&& $http_before === count( $http_requests );
+
+				$case_summaries[ $label ] = array(
+					'screen'          => self::describe_screen( $screen ),
+					'actionDeltas'    => $action_deltas,
+					'filterDeltas'    => $filter_deltas,
+					'expectedBoxes'   => $expected_box_details,
+					'unexpectedBoxes' => $unexpected_present,
+					'filteredBox'     => $filtered_box_summary,
+					'metaBoxActions'  => $new_meta_box_actions,
+				);
+
+				self::collect_failure(
+					$failures,
+					$screen_matches
+						&& $expected_action_only
+						&& $expected_filter_only
+						&& array() === $expected_filter_input
+						&& array( $filter_widget_id ) === $expected_filter_return,
+					'wp_dashboard_setup() selects the matching site, network, or user dashboard action and widget filter',
+					array(
+						'label'              => $label,
+						'screen'             => self::describe_screen( $screen ),
+						'actionDeltas'       => $action_deltas,
+						'filterDeltas'       => $filter_deltas,
+						'expectedFilterInput' => $expected_filter_input,
+						'expectedReturn'      => $expected_filter_return,
+					)
+				);
+
+				self::collect_failure(
+					$failures,
+					$expected_boxes_ok
+						&& array() === $unexpected_present
+						&& $filtered_box_ok,
+					'wp_dashboard_setup() registers only the core widgets for the current admin mode and re-adds filtered registered widgets with controls',
+					array(
+						'label'             => $label,
+						'expectedBoxes'     => $expected_box_details,
+						'unexpectedPresent' => $unexpected_present,
+						'filteredBox'       => $filtered_box_summary,
+						'controlRegistered' => isset( $GLOBALS['wp_dashboard_control_callbacks'][ $filter_widget_id ] ),
+					)
+				);
+
+				self::collect_failure(
+					$failures,
+					$meta_boxes_ok
+						&& $no_dispatch_or_http,
+					'wp_dashboard_setup() GET registration triggers normal and side meta-box hooks without redirects, exits, or live HTTP',
+					array(
+						'label'          => $label,
+						'metaBoxActions' => $new_meta_box_actions,
+						'redirects'      => array_slice( $redirects, $redirect_before ),
+						'httpRequests'   => array_slice( $http_requests, $http_before ),
+					)
+				);
+			}
+		} finally {
+			$active_filter        = null;
+			$active_filter_widget = null;
+			foreach ( $action_callbacks as $action => $callback ) {
+				\remove_action( $action, $callback );
+			}
+			foreach ( $filter_callbacks as $filter => $callback ) {
+				\remove_filter( $filter, $callback, 10 );
+			}
+			\remove_action( 'do_meta_boxes', $meta_box_callback, 10 );
+			\remove_filter( 'wp_redirect', $redirect_filter, 10 );
+			\remove_filter( 'pre_http_request', $http_filter, 10 );
+			foreach ( array_unique( $transients ) as $transient ) {
+				\delete_site_transient( $transient );
+			}
+			self::restore_globals( $registered_snapshot );
+		}
+
+		$hooks_removed = false === \has_filter( 'do_meta_boxes', $meta_box_callback )
+			&& false === \has_filter( 'wp_redirect', $redirect_filter )
+			&& false === \has_filter( 'pre_http_request', $http_filter );
+		foreach ( $action_callbacks as $action => $callback ) {
+			$hooks_removed = $hooks_removed && false === \has_filter( $action, $callback );
+		}
+		foreach ( $filter_callbacks as $filter => $callback ) {
+			$hooks_removed = $hooks_removed && false === \has_filter( $filter, $callback );
+		}
+
+		self::collect_failure(
+			$failures,
+			$hooks_removed
+				&& self::globals_match( $registered_snapshot ),
+			'dashboard setup hook counters and temporary registered widgets are cleaned after direct setup checks',
+			array(
+				'hooksRemoved'          => $hooks_removed,
+				'registeredGlobalsDiff' => self::changed_globals( $registered_snapshot ),
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'admin-dashboard.setup.direct-registration-hooks',
+			$failures,
+			array(
+				'cases'                => $case_summaries,
+				'requestMethodCovered' => 'GET',
+				'remoteChecks'         => 'seeded-transients-and-empty-browser-user-agent',
+			)
+		);
+	}
+
 	private static function missing_browser_nag_requirements(): array {
 		$missing = array();
 
@@ -1668,7 +2054,11 @@ final class AdminDashboardSurface {
 	}
 
 	private static function dashboard_screen(): \WP_Screen {
-		\set_current_screen( 'index.php' );
+		return self::dashboard_screen_for_hook( 'index.php' );
+	}
+
+	private static function dashboard_screen_for_hook( string $hook ): \WP_Screen {
+		\set_current_screen( $hook );
 		$screen = \get_current_screen();
 		if ( ! $screen instanceof \WP_Screen ) {
 			throw new \RuntimeException( 'Could not initialize dashboard screen.' );

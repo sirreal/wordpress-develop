@@ -38,8 +38,9 @@ database, network requests, or a configured site.
   priority normalization, dashboard container rendering across column counts,
   safe recent draft/post/comment output helpers, activity post query
   argument/link branches, cached RSS loading/AJAX/cache replay branches,
-  Browser Happy remote/cache failure and rendering branches, explicit skips for
-  redirect-only paths, and filter/global/superglobal/output-buffer restoration.
+  Browser Happy remote/cache failure and rendering branches, direct
+  `wp_dashboard_setup()` GET registration across site/network/user dashboard
+  hooks, and filter/global/superglobal/output-buffer restoration.
 - `admin-edit-metaboxes`: no-live-DB classic edit-screen meta box callback
   coverage, including publish-box status/visibility/action branches, flat and
   hierarchical taxonomy boxes with capability gates, excerpt/trackback/custom
