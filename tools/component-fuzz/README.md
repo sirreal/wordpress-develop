@@ -522,7 +522,10 @@ database, network requests, or a configured site.
   behavior, oEmbed response width clamps, rich iframe and thumbnail conversion,
   plain/pretty/path-conflict embed URL selection, iframe/blockquote/script
   markup contracts, discovery link output, direct `WP_oEmbed_Controller`
-  item responses, and same-site `pre_oembed_result` short-circuit behavior.
+  item responses, same-site `pre_oembed_result` short-circuit behavior, and
+  REST oEmbed proxy provider-fetch/transient-cache behavior with nonce-excluded
+  cache keys, dimension cache misses, TTL/filter oracles, and no-network HTTP
+  interception.
 - `post-types`: post type and post status registry defaults, registration
   filter/action/meta-box lifecycle, REST route registration boundaries and
   late-route ordering, duplicate post-type replacement cleanup, support feature
