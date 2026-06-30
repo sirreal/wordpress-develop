@@ -31,6 +31,8 @@ final class ErrorProtectionSurface {
 			$rows[] = self::check_recovery_email_payload( $ctx->fork( 'recovery-email-payload' ) );
 			$rows[] = self::check_recovery_mode_handle_error_gates( $ctx->fork( 'recovery-mode-handle-error' ) );
 			$rows[] = self::check_fatal_error_handler_oracles( $ctx->fork( 'fatal-error-handler' ) );
+			$rows[] = self::check_fatal_handler_synthetic_dispatch( $ctx->fork( 'fatal-handler-synthetic-dispatch' ) );
+			$rows[] = self::check_recovery_link_begin_link_early_returns( $ctx->fork( 'recovery-link-early-returns' ) );
 			$rows[] = self::check_handler_and_endpoint_gates( $ctx->fork( 'handler-endpoint-gates' ) );
 			$rows[] = $ctx->skip(
 				'error-protection.process-control-paths-explicitly-skipped',
@@ -1267,6 +1269,204 @@ final class ErrorProtectionSurface {
 			'error-protection.handler-gates.endpoint-classification-and-noop-idempotence',
 			array() === $failures,
 			array( 'failures' => array_slice( $failures, 0, 5 ) )
+		);
+	}
+
+	private static function check_fatal_handler_synthetic_dispatch( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures       = array();
+		$state_snapshot = self::snapshot_state();
+		$state_restored = false;
+		$marker         = 'synthetic-' . self::token( $ctx->fork( 'marker' ), 8 );
+		$error          = self::extension_error_case( $ctx->fork( 'outside-error' ), WP_CONTENT_DIR . '/uploads/' . $marker . '/fatal.php' );
+		$error['type']  = E_ERROR;
+
+		$handler = new class( $error ) extends \WP_Fatal_Error_Handler {
+			private array $synthetic_error;
+			public int $detect_calls = 0;
+			public array $display_calls = array();
+
+			public function __construct( array $synthetic_error ) {
+				$this->synthetic_error = $synthetic_error;
+			}
+
+			protected function detect_error() {
+				++$this->detect_calls;
+				return $this->synthetic_error;
+			}
+
+			protected function display_error_template( $error, $handled ) {
+				$this->display_calls[] = array(
+					'error'   => $error,
+					'handled' => $handled,
+				);
+			}
+		};
+
+		try {
+			self::set_recovery_mode_state( true, false, '' );
+			\delete_option( \WP_Recovery_Mode_Email_Service::RATE_LIMIT_OPTION );
+			\delete_option( 'recovery_keys' );
+			\wp_cache_delete( \WP_Recovery_Mode_Email_Service::RATE_LIMIT_OPTION, 'options' );
+			\wp_cache_delete( 'recovery_keys', 'options' );
+
+			$_SERVER['HTTP_HOST']   = 'example.test';
+			$_SERVER['HTTPS']       = 'off';
+			$_SERVER['PHP_SELF']    = '/index.php';
+			$_SERVER['REQUEST_URI'] = '/component-fuzz/error-protection/' . rawurlencode( $marker );
+
+			$headers_sent_before = headers_sent();
+			$handler->handle();
+			$display_call = $handler->display_calls[0] ?? array();
+			$handled      = $display_call['handled'] ?? null;
+
+			self::collect_failure(
+				$failures,
+				1 === $handler->detect_calls
+					&& 1 === count( $handler->display_calls )
+					&& $error === ( $display_call['error'] ?? null )
+					&& self::is_error_code( $handled, 'invalid_source' )
+					&& array() === self::recovery_key_records()
+					&& false === \get_option( \WP_Recovery_Mode_Email_Service::RATE_LIMIT_OPTION, false )
+					&& array() === \wp_paused_plugins()->get_all()
+					&& array() === \wp_paused_themes()->get_all(),
+				'fatal handler handle() can be exercised with synthetic detect_error without registering a shutdown handler',
+				array(
+					'headersSentBefore' => $headers_sent_before,
+					'detectCalls'       => $handler->detect_calls,
+					'displayCalls'      => $handler->display_calls,
+					'recoveryKeys'      => self::recovery_key_records(),
+					'rateLimitOption'   => \get_option( \WP_Recovery_Mode_Email_Service::RATE_LIMIT_OPTION, false ),
+					'pausedPlugins'     => \wp_paused_plugins()->get_all(),
+					'pausedThemes'      => \wp_paused_themes()->get_all(),
+				)
+			);
+		} finally {
+			\delete_option( \WP_Recovery_Mode_Email_Service::RATE_LIMIT_OPTION );
+			\delete_option( 'recovery_keys' );
+			\wp_cache_delete( \WP_Recovery_Mode_Email_Service::RATE_LIMIT_OPTION, 'options' );
+			\wp_cache_delete( 'recovery_keys', 'options' );
+			self::restore_state( $state_snapshot );
+			$state_restored = self::state_matches( $state_snapshot );
+		}
+
+		self::collect_failure(
+			$failures,
+			$state_restored,
+			'fatal handler synthetic dispatch restores global and recovery-mode state',
+			array( 'stateRestored' => $state_restored )
+		);
+
+		return self::row(
+			$ctx,
+			'error-protection.fatal-handler.synthetic-dispatch-orchestration',
+			array() === $failures,
+			array(
+				'marker'   => $marker,
+				'failures' => array_slice( $failures, 0, 5 ),
+			)
+		);
+	}
+
+	private static function check_recovery_link_begin_link_early_returns( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures       = array();
+		$observed       = array();
+		$state_snapshot = self::snapshot_state();
+		$state_restored = false;
+		$key_service    = new \WP_Recovery_Mode_Key_Service();
+		$cookie_service = new \WP_Recovery_Mode_Cookie_Service();
+		$link_service   = new \WP_Recovery_Mode_Link_Service( $cookie_service, $key_service );
+		$token          = self::token( $ctx->fork( 'token' ), 22 );
+		$key            = self::token( $ctx->fork( 'key' ), 22 );
+		$ttl            = DAY_IN_SECONDS + $ctx->int( 1, 3600 );
+		$cases          = array(
+			array(
+				'label'   => 'non-login-page-with-looking-link',
+				'pagenow' => 'index.php',
+				'get'     => array(
+					'action'   => \WP_Recovery_Mode_Link_Service::LOGIN_ACTION_ENTER,
+					'rm_token' => $token,
+					'rm_key'   => $key,
+				),
+			),
+			array(
+				'label'   => 'login-page-missing-query',
+				'pagenow' => 'wp-login.php',
+				'get'     => array(),
+			),
+			array(
+				'label'   => 'login-page-wrong-action',
+				'pagenow' => 'wp-login.php',
+				'get'     => array(
+					'action'   => 'not-' . \WP_Recovery_Mode_Link_Service::LOGIN_ACTION_ENTER,
+					'rm_token' => $token,
+					'rm_key'   => $key,
+				),
+			),
+		);
+
+		try {
+			foreach ( $cases as $case ) {
+				\delete_option( 'recovery_keys' );
+				\wp_cache_delete( 'recovery_keys', 'options' );
+
+				$GLOBALS['pagenow'] = $case['pagenow'];
+				$_GET               = $case['get'];
+				$_COOKIE            = array();
+
+				ob_start();
+				$threw = null;
+				try {
+					$link_service->handle_begin_link( $ttl );
+				} catch ( \Throwable $e ) {
+					$threw = $e;
+				} finally {
+					$output = ob_get_clean();
+				}
+
+				$entry = array(
+					'label'        => $case['label'],
+					'pagenow'      => $case['pagenow'],
+					'getKeys'      => array_keys( $case['get'] ),
+					'threw'        => null === $threw ? null : self::describe_throwable( $threw ),
+					'output'       => self::describe_string( $output ),
+					'recoveryKeys' => self::recovery_key_records(),
+					'cookieSet'    => array_key_exists( RECOVERY_MODE_COOKIE, $_COOKIE ),
+				);
+				$observed[] = $entry;
+
+				self::collect_failure(
+					$failures,
+					null === $threw
+						&& '' === $output
+						&& array() === $entry['recoveryKeys']
+						&& false === $entry['cookieSet'],
+					'recovery link begin handler returns before validation, cookie, redirect, or die for inert requests',
+					$entry
+				);
+			}
+		} finally {
+			\delete_option( 'recovery_keys' );
+			\wp_cache_delete( 'recovery_keys', 'options' );
+			self::restore_state( $state_snapshot );
+			$state_restored = self::state_matches( $state_snapshot );
+		}
+
+		self::collect_failure(
+			$failures,
+			$state_restored,
+			'recovery link early-return invariant restores global and recovery-mode state',
+			array( 'stateRestored' => $state_restored )
+		);
+
+		return self::row(
+			$ctx,
+			'error-protection.recovery-links.begin-link-early-return-boundaries',
+			array() === $failures,
+			array(
+				'ttl'      => $ttl,
+				'observed' => $observed,
+				'failures' => array_slice( $failures, 0, 5 ),
+			)
 		);
 	}
 
