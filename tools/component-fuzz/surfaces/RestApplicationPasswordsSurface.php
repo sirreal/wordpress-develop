@@ -44,6 +44,7 @@ final class RestApplicationPasswordsSurface {
 			$rows[] = self::check_crud_hooks_and_projection( $ctx->fork( 'crud' ) );
 			$rows[] = self::check_permission_and_availability_errors( $ctx->fork( 'errors' ) );
 			$rows[] = self::check_introspection_paths( $ctx->fork( 'introspection' ) );
+			$rows[] = self::check_auth_status_and_index_plumbing( $ctx->fork( 'auth-status-index' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = self::row(
 				$ctx,
@@ -163,6 +164,8 @@ final class RestApplicationPasswordsSurface {
 			array(
 				'add_action',
 				'add_filter',
+				'admin_url',
+				'apply_filters',
 				'current_user_can',
 				'get_current_user_id',
 				'get_userdata',
@@ -173,7 +176,11 @@ final class RestApplicationPasswordsSurface {
 				'register_rest_route',
 				'remove_action',
 				'remove_filter',
+				'rest_add_application_passwords_to_index',
+				'rest_application_password_check_errors',
+				'rest_application_password_collect_status',
 				'rest_authorization_required_code',
+				'rest_api_default_filters',
 				'rest_get_authenticated_app_password',
 				'rest_is_field_included',
 				'rest_url',
@@ -649,6 +656,205 @@ final class RestApplicationPasswordsSurface {
 			array(
 				'case'     => self::case_summary( $case ),
 				'failures' => array_slice( $failures, 0, 5 ),
+			)
+		);
+	}
+
+	private static function check_auth_status_and_index_plumbing( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures       = array();
+		$case           = self::case_for_context( $ctx );
+		$local_snapshot = self::snapshot_globals(
+			array(
+				'wp_actions',
+				'wp_current_filter',
+				'wp_filter',
+				'wp_filters',
+				'wp_rest_application_password_status',
+				'wp_rest_application_password_uuid',
+				'wp_rest_server',
+			)
+		);
+		$auth_globals_before = self::stable_hash(
+			self::summarize_for_hash(
+				self::snapshot_globals(
+					array(
+						'wp_rest_application_password_status',
+						'wp_rest_application_password_uuid',
+					)
+				)
+			)
+		);
+
+		try {
+			self::reset_runtime_state();
+			self::reset_static_state();
+			self::fresh_server();
+			$users        = self::seed_users( $case );
+			$item         = self::create_password_fixture( $users['primary'], $case['nameSanitized'], $case['appId'] );
+			$uuid         = is_array( $item ) ? (string) ( $item['uuid'] ?? '' ) : '';
+			$primary_user = \get_userdata( $users['primary'] );
+
+			self::collect_failure(
+				$failures,
+				10 === \has_filter( 'rest_index', 'rest_add_application_passwords_to_index' ),
+				'application-password metadata is wired into the REST index filter by REST default filters',
+				array(
+					'restIndex' => \has_filter( 'rest_index', 'rest_add_application_passwords_to_index' ),
+				)
+			);
+
+			\rest_application_password_collect_status( $primary_user, is_array( $item ) ? $item : array() );
+			$valid_status_result = \rest_application_password_check_errors( null );
+
+			self::collect_failure(
+				$failures,
+				$primary_user instanceof \WP_User
+					&& '' !== $uuid
+					&& true === $valid_status_result
+					&& $uuid === \rest_get_authenticated_app_password()
+					&& $primary_user === ( $GLOBALS['wp_rest_application_password_status'] ?? null ),
+				'valid application-password status stores the user, exposes the authenticated UUID, and authenticates REST',
+				array(
+					'uuid'          => $uuid,
+					'statusResult'  => $valid_status_result,
+					'authenticated' => \rest_get_authenticated_app_password(),
+				)
+			);
+
+			\rest_application_password_collect_status( $primary_user, array() );
+			$no_uuid_status_result = \rest_application_password_check_errors( null );
+
+			self::collect_failure(
+				$failures,
+				$primary_user instanceof \WP_User
+					&& true === $no_uuid_status_result
+					&& null === \rest_get_authenticated_app_password(),
+				'application-password status without an app-password item authenticates but clears the UUID global',
+				array(
+					'statusResult'  => $no_uuid_status_result,
+					'authenticated' => \rest_get_authenticated_app_password(),
+				)
+			);
+
+			$default_error = new \WP_Error( 'component_fuzz_app_password_default_status', 'Default status check.' );
+			\rest_application_password_collect_status( $default_error, array() );
+			$default_error_result = \rest_application_password_check_errors( null );
+			$default_error_data   = $default_error_result instanceof \WP_Error ? $default_error_result->get_error_data() : null;
+
+			self::collect_failure(
+				$failures,
+				$default_error === $default_error_result
+					&& is_array( $default_error_data )
+					&& 401 === (int) ( $default_error_data['status'] ?? 0 )
+					&& null === \rest_get_authenticated_app_password(),
+				'application-password errors without status data receive the default REST 401 status',
+				array(
+					'errorCode'     => $default_error_result instanceof \WP_Error ? $default_error_result->get_error_code() : null,
+					'errorData'     => $default_error_data,
+					'authenticated' => \rest_get_authenticated_app_password(),
+				)
+			);
+
+			$explicit_error = new \WP_Error( 'component_fuzz_app_password_explicit_status', 'Explicit status check.', array( 'status' => 418 ) );
+			\rest_application_password_collect_status( $explicit_error, array( 'uuid' => $uuid ) );
+			$explicit_error_result = \rest_application_password_check_errors( null );
+			$explicit_error_data   = $explicit_error_result instanceof \WP_Error ? $explicit_error_result->get_error_data() : null;
+			$already_handled       = new \WP_Error( 'component_fuzz_existing_auth_error', 'Existing REST auth error.', array( 'status' => 403 ) );
+			$short_circuit_result  = \rest_application_password_check_errors( $already_handled );
+
+			self::collect_failure(
+				$failures,
+				$explicit_error === $explicit_error_result
+					&& is_array( $explicit_error_data )
+					&& 418 === (int) ( $explicit_error_data['status'] ?? 0 )
+					&& $uuid === \rest_get_authenticated_app_password()
+					&& $already_handled === $short_circuit_result,
+				'application-password errors preserve explicit status data and do not override existing auth failures',
+				array(
+					'errorCode'          => $explicit_error_result instanceof \WP_Error ? $explicit_error_result->get_error_code() : null,
+					'errorData'          => $explicit_error_data,
+					'authenticated'      => \rest_get_authenticated_app_password(),
+					'shortCircuitResult' => $short_circuit_result,
+				)
+			);
+
+			self::$application_passwords_available = true;
+			$index_response                        = new \WP_REST_Response(
+				array(
+					'name'           => 'Component Fuzz',
+					'authentication' => array(
+						'cookie' => array( 'nonce' => 'present' ),
+					),
+				)
+			);
+			$indexed_response                      = \apply_filters( 'rest_index', $index_response );
+			$indexed_data                          = $indexed_response instanceof \WP_REST_Response ? $indexed_response->get_data() : array();
+
+			self::collect_failure(
+				$failures,
+				$index_response === $indexed_response
+					&& 'present' === ( $indexed_data['authentication']['cookie']['nonce'] ?? null )
+					&& \admin_url( 'authorize-application.php' ) === ( $indexed_data['authentication']['application-passwords']['endpoints']['authorization'] ?? null ),
+				'REST index advertises the application-password authorization endpoint without replacing existing auth methods',
+				array(
+					'indexedData' => $indexed_data,
+				)
+			);
+
+			self::$application_passwords_available = false;
+			$disabled_response                     = new \WP_REST_Response(
+				array(
+					'authentication' => array(
+						'cookie' => array( 'nonce' => 'present' ),
+					),
+				)
+			);
+			$disabled_index                        = \apply_filters( 'rest_index', $disabled_response );
+			$disabled_data                         = $disabled_index instanceof \WP_REST_Response ? $disabled_index->get_data() : array();
+
+			self::collect_failure(
+				$failures,
+				$disabled_response === $disabled_index
+					&& 'present' === ( $disabled_data['authentication']['cookie']['nonce'] ?? null )
+					&& ! array_key_exists( 'application-passwords', $disabled_data['authentication'] ?? array() ),
+				'REST index omits application-password auth metadata when the feature is unavailable',
+				array(
+					'disabledData' => $disabled_data,
+				)
+			);
+		} finally {
+			self::reset_static_state();
+			self::restore_globals( $local_snapshot );
+		}
+
+		$auth_globals_after = self::stable_hash(
+			self::summarize_for_hash(
+				self::snapshot_globals(
+					array(
+						'wp_rest_application_password_status',
+						'wp_rest_application_password_uuid',
+					)
+				)
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$auth_globals_before === $auth_globals_after,
+			'application-password auth status globals are restored after REST plumbing checks',
+			array(
+				'before' => $auth_globals_before,
+				'after'  => $auth_globals_after,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'rest-application-passwords.auth-status-index-plumbing',
+			array() === $failures,
+			array(
+				'case'     => self::case_summary( $case ),
+				'failures' => array_slice( $failures, 0, 8 ),
 			)
 		);
 	}
