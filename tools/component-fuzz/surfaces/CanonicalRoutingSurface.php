@@ -27,12 +27,14 @@ final class CanonicalRoutingSurface {
 
 		try {
 			self::install_option_filters();
+			self::initialize_core_content_types();
 			$case = self::case_for_context( $ctx );
 
 			$rows[] = self::check_path_query_and_host_cleanup( $ctx->fork( 'cleanup' ), $case );
 			$rows[] = self::check_cleanup_variant_matrix( $ctx->fork( 'cleanup-matrix' ), $case );
 			$rows[] = self::check_early_bailouts( $ctx->fork( 'bailouts' ), $case );
 			$rows[] = self::check_invalid_date_redirect( $ctx->fork( 'date' ), $case );
+			$rows[] = self::check_404_guess_and_db_redirects( $ctx->fork( '404-guess' ), $case );
 			$rows[] = self::check_feed_and_paged_redirect( $ctx->fork( 'feed' ), $case );
 			$rows[] = self::check_redirect_filter_contract( $ctx->fork( 'filter' ), $case );
 			$rows[] = self::check_safe_redirect_replacement_is_returned( $ctx->fork( 'safe-filter' ), $case );
@@ -47,6 +49,7 @@ final class CanonicalRoutingSurface {
 				array( 'throwable' => self::describe_throwable( $e ) )
 			);
 		} finally {
+			self::reset_db_content();
 			self::restore_state( $snapshot );
 		}
 
@@ -112,19 +115,24 @@ final class CanonicalRoutingSurface {
 				'_remove_qs_args_if_not_in_url',
 				'add_filter',
 				'add_query_arg',
+				'create_initial_post_types',
 				'get_day_link',
 				'get_comments_pagenum_link',
 				'get_month_link',
 				'get_permalink',
+				'get_post',
+				'get_post_comments_feed_link',
 				'get_query_var',
 				'get_year_link',
 				'home_url',
 				'is_404',
 				'is_feed',
 				'redirect_canonical',
+				'redirect_guess_404_permalink',
 				'remove_query_arg',
 				'remove_filter',
 				'sanitize_title',
+				'sanitize_title_with_dashes',
 				'strip_fragment_from_url',
 				'trailingslashit',
 				'user_trailingslashit',
@@ -336,6 +344,179 @@ final class CanonicalRoutingSurface {
 				'redirect'     => $redirect,
 				'expectedPath' => $expected_path,
 				'query'        => $query,
+			)
+		);
+	}
+
+	private static function check_404_guess_and_db_redirects( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		if ( ! self::wpdb_stub_available() ) {
+			return $ctx->skip(
+				'canonical-routing.404-guess.db-backed-permalink-resolution',
+				'The wpdb content stub is unavailable for DB-backed canonical redirect guessing.'
+			);
+		}
+
+		self::reset_db_content();
+
+		$failures = array();
+		$prefix   = sanitize_title_with_dashes( 'canonical guess ' . $case['token'] . ' ' . $ctx->int( 100, 999 ) );
+		$post_id  = 63300 + $ctx->int( 0, 300 );
+		$page     = $ctx->int( 2, 5 );
+
+		$target = self::seed_post_row(
+			array(
+				'ID'            => $post_id,
+				'post_name'     => $prefix . '-target',
+				'post_title'    => 'Canonical Guess ' . $case['token'],
+				'post_status'   => 'publish',
+				'post_type'     => 'post',
+				'post_date'     => '2026-06-15 10:20:30',
+				'post_date_gmt' => '2026-06-15 10:20:30',
+			)
+		);
+		self::seed_post_row(
+			array(
+				'ID'            => $post_id + 500,
+				'post_name'     => $prefix . '-draft',
+				'post_title'    => 'Canonical Draft ' . $case['token'],
+				'post_status'   => 'draft',
+				'post_type'     => 'post',
+				'post_date'     => '2026-06-14 10:20:30',
+				'post_date_gmt' => '2026-06-14 10:20:30',
+			)
+		);
+
+		$expected_permalink = \get_permalink( $target );
+
+		self::prepare_request( array( 'name' => $prefix ), array( 'is_404' => true ) );
+		$loose_guess = \redirect_guess_404_permalink();
+
+		$strict_filter = static fn() => true;
+		\add_filter( 'strict_redirect_guess_404_permalink', $strict_filter, 10, 0 );
+		try {
+			self::prepare_request( array( 'name' => $prefix ), array( 'is_404' => true ) );
+			$strict_prefix_guess = \redirect_guess_404_permalink();
+
+			self::prepare_request( array( 'name' => $target->post_name ), array( 'is_404' => true ) );
+			$strict_exact_guess = \redirect_guess_404_permalink();
+		} finally {
+			\remove_filter( 'strict_redirect_guess_404_permalink', $strict_filter, 10 );
+		}
+
+		self::prepare_request(
+			array(
+				'name' => $prefix,
+				'feed' => 'rss2',
+			),
+			array( 'is_404' => true )
+		);
+		$feed_guess     = \redirect_guess_404_permalink();
+		$expected_feed  = \get_post_comments_feed_link( $target->ID, 'rss2' );
+
+		self::prepare_request(
+			array(
+				'name' => $prefix,
+				'page' => $page,
+			),
+			array( 'is_404' => true )
+		);
+		$paged_guess    = \redirect_guess_404_permalink();
+		$expected_paged = trailingslashit( $expected_permalink ) . user_trailingslashit( (string) $page, 'single_paged' );
+
+		self::prepare_request(
+			array(
+				'name'      => $prefix,
+				'post_type' => 'cfz_hidden',
+			),
+			array( 'is_404' => true )
+		);
+		$hidden_type_guess = \redirect_guess_404_permalink();
+
+		$pre_url    = self::HOME_URL . '/pre-guessed/' . rawurlencode( $case['token'] ) . '/';
+		$pre_filter = static fn() => $pre_url;
+		\add_filter( 'pre_redirect_guess_404_permalink', $pre_filter, 10, 0 );
+		try {
+			self::prepare_request( array(), array( 'is_404' => true ) );
+			$pre_guess = \redirect_guess_404_permalink();
+		} finally {
+			\remove_filter( 'pre_redirect_guess_404_permalink', $pre_filter, 10 );
+		}
+
+		$disable_filter = static fn() => false;
+		\add_filter( 'do_redirect_guess_404_permalink', $disable_filter, 10, 0 );
+		try {
+			self::prepare_request( array( 'name' => $prefix ), array( 'is_404' => true ) );
+			$disabled_guess = \redirect_guess_404_permalink();
+		} finally {
+			\remove_filter( 'do_redirect_guess_404_permalink', $disable_filter, 10 );
+		}
+
+		$requested = self::HOME_URL . '/missing/' . rawurlencode( $prefix ) . '/?name=' . rawurlencode( $prefix ) . '&keep=' . rawurlencode( $case['keep'] );
+		self::prepare_request(
+			array(
+				'name' => $prefix,
+				'keep' => $case['keep'],
+			),
+			array( 'is_404' => true )
+		);
+		$canonical_redirect = \redirect_canonical( $requested, false );
+		$canonical_parts    = is_string( $canonical_redirect ) ? \wp_parse_url( $canonical_redirect ) : array();
+		$canonical_query    = self::parse_query_from_parts( $canonical_parts );
+		$expected_parts     = is_string( $expected_permalink ) ? \wp_parse_url( $expected_permalink ) : array();
+
+		self::collect_failure(
+			$failures,
+			is_string( $expected_permalink )
+				&& $expected_permalink === $loose_guess
+				&& false === $strict_prefix_guess
+				&& $expected_permalink === $strict_exact_guess
+				&& $expected_feed === $feed_guess
+				&& $expected_paged === $paged_guess
+				&& false === $hidden_type_guess
+				&& $pre_url === $pre_guess
+				&& false === $disabled_guess
+				&& false === \has_filter( 'strict_redirect_guess_404_permalink', $strict_filter )
+				&& false === \has_filter( 'pre_redirect_guess_404_permalink', $pre_filter )
+				&& false === \has_filter( 'do_redirect_guess_404_permalink', $disable_filter ),
+			'redirect_guess_404_permalink resolves only public viewable DB-backed post guesses and honors filters',
+			array(
+				'expected'     => $expected_permalink,
+				'loose'        => $loose_guess,
+				'strictPrefix' => $strict_prefix_guess,
+				'strictExact'  => $strict_exact_guess,
+				'feed'         => $feed_guess,
+				'paged'        => $paged_guess,
+				'hiddenType'   => $hidden_type_guess,
+				'pre'          => $pre_guess,
+				'disabled'     => $disabled_guess,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			is_string( $canonical_redirect )
+				&& ( $expected_parts['path'] ?? null ) === ( $canonical_parts['path'] ?? null )
+				&& $case['keep'] === ( $canonical_query['keep'] ?? null )
+				&& ! isset( $canonical_query['name'], $canonical_query['post_type'], $canonical_query['feed'], $canonical_query['page'] ),
+			'redirect_canonical uses the guessed permalink for 404 requests and removes obsolete query vars',
+			array(
+				'requested' => $requested,
+				'redirect'  => $canonical_redirect,
+				'expected'  => $expected_permalink,
+				'parts'     => $canonical_parts,
+				'query'     => $canonical_query,
+			)
+		);
+
+		self::reset_db_content();
+
+		return $ctx->result(
+			'canonical-routing.404-guess.db-backed-permalink-resolution',
+			array() === $failures,
+			array(
+				'postId'   => $target->ID,
+				'prefix'   => $prefix,
+				'failures' => array_slice( $failures, 0, 4 ),
 			)
 		);
 	}
@@ -849,6 +1030,10 @@ final class CanonicalRoutingSurface {
 		}
 	}
 
+	private static function initialize_core_content_types(): void {
+		\create_initial_post_types();
+	}
+
 	private static function remove_option_filters(): void {
 		$options = array(
 			'pre_option_home'                        => array( self::class, 'filter_home' ),
@@ -945,6 +1130,71 @@ final class CanonicalRoutingSurface {
 		return new \WP_Post( $post );
 	}
 
+	private static function seed_post_row( array $overrides ): \WP_Post {
+		$row = array_merge(
+			array(
+				'ID'                    => 0,
+				'post_author'           => 1,
+				'post_date'             => '2026-06-15 10:20:30',
+				'post_date_gmt'         => '2026-06-15 10:20:30',
+				'post_content'          => 'canonical routing db-backed fixture',
+				'post_title'            => 'Canonical routing fixture',
+				'post_excerpt'          => '',
+				'post_status'           => 'publish',
+				'comment_status'        => 'open',
+				'ping_status'           => 'closed',
+				'post_password'         => '',
+				'post_name'             => 'canonical-routing-fixture',
+				'to_ping'               => '',
+				'pinged'                => '',
+				'post_modified'         => '2026-06-16 10:20:30',
+				'post_modified_gmt'     => '2026-06-16 10:20:30',
+				'post_content_filtered' => '',
+				'post_parent'           => 0,
+				'guid'                  => self::HOME_URL . '/?p=0',
+				'menu_order'            => 0,
+				'post_type'             => 'post',
+				'post_mime_type'        => '',
+				'comment_count'         => 0,
+				'filter'                => 'raw',
+			),
+			$overrides
+		);
+		$row['guid'] = $row['guid'] ?: self::HOME_URL . '/?p=' . (int) $row['ID'];
+
+		$GLOBALS['wpdb']->insert( $GLOBALS['wpdb']->posts, $row );
+		\wp_cache_delete( (int) $row['ID'], 'posts' );
+		\wp_cache_delete( (int) $row['ID'], 'post_meta' );
+
+		return new \WP_Post( (object) $row );
+	}
+
+	private static function wpdb_stub_available(): bool {
+		return isset( $GLOBALS['wpdb'] )
+			&& $GLOBALS['wpdb'] instanceof \Component_Fuzz_WPDB_Stub
+			&& method_exists( $GLOBALS['wpdb'], 'component_fuzz_reset_content' );
+	}
+
+	private static function reset_db_content(): void {
+		if ( ! self::wpdb_stub_available() ) {
+			return;
+		}
+
+		$GLOBALS['wpdb']->component_fuzz_reset_content();
+		self::flush_runtime_cache();
+	}
+
+	private static function flush_runtime_cache(): void {
+		if ( function_exists( 'wp_cache_flush_runtime' ) ) {
+			\wp_cache_flush_runtime();
+			return;
+		}
+
+		if ( function_exists( 'wp_cache_flush' ) ) {
+			\wp_cache_flush();
+		}
+	}
+
 	private static function collect_failure( array &$failures, bool $condition, string $label, array $details ): void {
 		if ( $condition ) {
 			return;
@@ -994,6 +1244,8 @@ final class CanonicalRoutingSurface {
 				'wp_actions',
 				'wp_filters',
 				'wp_current_filter',
+				'wp_post_statuses',
+				'wp_post_types',
 				'is_IIS',
 			) as $name
 		) {

@@ -156,13 +156,13 @@ database, network requests, or a configured site.
   `user_can_for_site()` wrapper contracts, role and user capability filter
   locality, generated `map_meta_cap()` filter contexts, cheap meta-cap
   mappings, and primitive/meta cap monotonicity.
-- `canonical-routing`: no-DB canonical redirect and front-end routing helpers,
+- `canonical-routing`: no-live-DB canonical redirect and front-end routing helpers,
   including method/search/preview bailouts, host/path/query cleanup, invalid
-  date redirects, feed/pagination canonicalization, redirect filter
-  cancellation and same-host replacement cascades, canonical URL output helpers
-  for status, paged, comment-page, plain-permalink, filter, and singular output
-  gates, fragment stripping, and generated query-argument removal and fragment
-  stripping helper matrices.
+  date redirects, DB-stub-backed 404 permalink guessing, feed/pagination
+  canonicalization, redirect filter cancellation and same-host replacement
+  cascades, canonical URL output helpers for status, paged, comment-page,
+  plain-permalink, filter, and singular output gates, fragment stripping, and
+  generated query-argument removal and fragment stripping helper matrices.
 - `classic-walkers`: deterministic Walker base and classic walker coverage,
   including `walk()`, `paged_walk()`, direct `display_element()` traversal,
   page/category/comment/nav rendering, current/selected classes, admin nav menu
@@ -908,9 +908,9 @@ The `auth-flow` surface short-circuits auth cookie sending and avoids browser
 redirect/login-form dispatch, real mail, application-password API requests, and
 process-exit paths.
 The `canonical-routing` surface calls `redirect_canonical()` with
-`do_redirect=false`; DB-backed guessed 404 permalink resolution, old-slug
-redirects, attachment-page redirects, and paths that call `wp_redirect()` and
-`exit` are intentionally avoided.
+`do_redirect=false`; 404 permalink guessing uses bounded in-memory post rows,
+while old-slug redirects, attachment-page redirects, and paths that call
+`wp_redirect()` and `exit` are intentionally avoided.
 The `classic-walkers` surface uses synthetic objects, object-cache fixtures, and
 local filters only. It loads the single comment/admin walker class files when
 available, but avoids nav menu AJAX quick-search, meta-box pagination, browser
