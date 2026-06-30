@@ -306,11 +306,13 @@ database, network requests, or a configured site.
   normalization, title/key/class identifier sanitizers, colors, sizes, time
   strings, UTF-8 helpers, and accent removal.
 - `feed-parsers`: local RSS/Atom parser and legacy feed utility API coverage,
-  including bounded malformed fixtures, Magpie item/channel normalization,
-  AtomParser local-file behavior, SimplePie raw-data parsing and KSES
-  sanitization, `WP_SimplePie_File` HTTP response/error-state normalization,
-  transient-backed feed cache boundaries, date/status helpers, local file
-  adapter guards, no-network assertions, and state restoration.
+  including bounded malformed fixtures, Magpie RSS/Atom/RDF item/channel
+  normalization, AtomParser local-file behavior, SimplePie raw-data parsing and
+  KSES sanitization, `WP_SimplePie_File` HTTP response/error-state
+  normalization, `fetch_feed()` empty/single/multi/error orchestration through
+  preempted HTTP responses, transient-backed feed cache hooks, date/status
+  helpers, local file adapter guards, no-network assertions, and state
+  restoration.
 - `feed-rendering`: no-DB RSS2, Atom, RDF, RSS 0.92, and comments feed template
   rendering over synthetic query loops, including feed item/entry counts, self
   links, legacy `do_feed()` dispatch normalization, self-link request URI
