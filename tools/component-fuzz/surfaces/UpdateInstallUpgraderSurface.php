@@ -53,6 +53,7 @@ final class UpdateInstallUpgraderSurface {
 			$rows[] = self::check_upgrade_no_update_paths( $ctx, $case );
 			$rows[] = self::check_auto_update_decisions( $ctx, $case );
 			$rows[] = self::check_core_update_decisions( $ctx, $case );
+			$rows[] = self::check_auto_update_plugin_theme_notifications( $ctx, $case );
 			$rows[] = self::check_maintenance_mode_guard( $ctx, $case );
 			$rows[] = $ctx->result(
 				'update-install-upgrader.no-network-attempts',
@@ -201,15 +202,19 @@ final class UpdateInstallUpgraderSurface {
 				'add_filter',
 				'apply_filters',
 				'copy_dir',
+				'delete_option',
 				'get_core_updates',
+				'get_option',
 				'get_plugin_data',
 				'get_plugin_updates',
 				'get_site_option',
 				'get_site_transient',
 				'get_theme_updates',
+				'has_filter',
 				'is_wp_error',
 				'remove_filter',
 				'trailingslashit',
+				'update_option',
 				'wp_clean_plugins_cache',
 				'wp_clean_themes_cache',
 				'wp_get_update_data',
@@ -218,6 +223,7 @@ final class UpdateInstallUpgraderSurface {
 				'wp_is_auto_update_enabled_for_type',
 				'wp_is_file_mod_allowed',
 				'wp_kses',
+				'wp_mail',
 				'wp_normalize_path',
 			) as $function
 		) {
@@ -1394,6 +1400,456 @@ final class UpdateInstallUpgraderSurface {
 				'minorNext' => $next_minor,
 				'majorNext' => $next_major,
 			)
+		);
+	}
+
+	private static function check_auto_update_plugin_theme_notifications( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures                = array();
+		$option_name             = 'auto_plugin_theme_update_emails';
+		$missing_option_sentinel = '__component_fuzz_missing_auto_plugin_theme_update_emails__';
+		$old_option              = \get_option( $option_name, $missing_option_sentinel );
+		$old_option_exists       = $missing_option_sentinel !== $old_option;
+		$mails                   = array();
+		$email_filters           = array();
+		$notification_filters    = array(
+			'plugin' => array(),
+			'theme'  => array(),
+		);
+		$disable_plugin_email    = false;
+		$disable_theme_email     = false;
+		$not_executed_call       = array(
+			'threw'     => true,
+			'throwable' => array(
+				'class'   => 'RuntimeException',
+				'message' => 'Notification branch was not executed.',
+				'file'    => __FILE__,
+				'line'    => __LINE__,
+			),
+			'value'     => null,
+		);
+		$success_call            = $not_executed_call;
+		$failure_call            = $not_executed_call;
+		$duplicate_failure_call  = $not_executed_call;
+		$mixed_call              = $not_executed_call;
+		$disabled_call           = $not_executed_call;
+		$success_option          = array();
+		$failure_option          = array();
+		$mixed_option            = array();
+		$success_mail            = array();
+		$failure_mail            = array();
+		$mixed_mail              = array();
+		$mail_count_before_duplicate = 0;
+		$filter_count_before_duplicate = 0;
+		$duplicate_mail_count    = 0;
+		$duplicate_filter_count  = 0;
+		$mail_count_before_disabled = 0;
+		$filter_count_before_disabled = 0;
+		$disabled_mail_count     = 0;
+		$disabled_filter_count   = 0;
+
+		$pre_mail = static function ( $pre, array $atts ) use ( &$mails ): bool {
+			unset( $pre );
+
+			$mails[] = array(
+				'to'      => $atts['to'] ?? null,
+				'subject' => (string) ( $atts['subject'] ?? '' ),
+				'message' => (string) ( $atts['message'] ?? '' ),
+				'headers' => $atts['headers'] ?? null,
+			);
+
+			return true;
+		};
+		$email_filter = static function ( array $email, string $type, array $successful_updates, array $failed_updates ) use ( &$email_filters ): array {
+			$email_filters[] = array(
+				'type'       => $type,
+				'successful' => self::notification_result_counts( $successful_updates ),
+				'failed'     => self::notification_result_counts( $failed_updates ),
+				'subject'    => (string) ( $email['subject'] ?? '' ),
+			);
+
+			return $email;
+		};
+		$plugin_send_filter = static function ( bool $enabled, array $update_results ) use ( &$notification_filters, &$disable_plugin_email ): bool {
+			$notification_filters['plugin'][] = array(
+				'enabled' => $enabled,
+				'count'   => count( $update_results ),
+			);
+
+			return $disable_plugin_email ? false : $enabled;
+		};
+		$theme_send_filter  = static function ( bool $enabled, array $update_results ) use ( &$notification_filters, &$disable_theme_email ): bool {
+			$notification_filters['theme'][] = array(
+				'enabled' => $enabled,
+				'count'   => count( $update_results ),
+			);
+
+			return $disable_theme_email ? false : $enabled;
+		};
+
+		\add_filter( 'pre_wp_mail', $pre_mail, 10, 2 );
+		\add_filter( 'auto_plugin_theme_update_email', $email_filter, 10, 4 );
+		\add_filter( 'auto_plugin_update_send_email', $plugin_send_filter, 10, 2 );
+		\add_filter( 'auto_theme_update_send_email', $theme_send_filter, 10, 2 );
+
+		try {
+			$updater        = self::notification_test_updater();
+			$plugin_success = self::notification_result(
+				'plugin',
+				$case,
+				true,
+				$case['plugin']['name'] . ' &amp; Success',
+				array( 'plugin success message' )
+			);
+			$theme_success  = self::notification_result(
+				'theme',
+				$case,
+				true,
+				$case['theme']['name'] . ' &amp; Success',
+				array( 'theme success message' )
+			);
+			$plugin_failure = self::notification_result(
+				'plugin',
+				$case,
+				new \WP_Error( 'component_fuzz_plugin_update_failed', 'Component fuzz plugin update failed.' ),
+				$case['plugin']['name'] . ' &amp; Failure',
+				array( 'plugin failure message' )
+			);
+			$theme_failure  = self::notification_result(
+				'theme',
+				$case,
+				new \WP_Error( 'component_fuzz_theme_update_failed', 'Component fuzz theme update failed.' ),
+				$case['theme']['name'] . ' &amp; Failure',
+				array( 'theme failure message' )
+			);
+			$unrelated_key  = 'component-fuzz-unrelated/' . $case['plugin']['slug'] . '.php';
+
+			\update_option(
+				$option_name,
+				array(
+					$case['plugin']['file'] => '0.1.0',
+					$case['theme']['slug']  => '0.1.0',
+					$unrelated_key          => '9.9.9',
+				),
+				false
+			);
+			$success_call = self::call(
+				static function () use ( $updater, $plugin_success, $theme_success ) {
+					$updater->component_fuzz_after_plugin_theme_update(
+						array(
+							'plugin' => array( $plugin_success ),
+							'theme'  => array( $theme_success ),
+						)
+					);
+
+					return true;
+				}
+			);
+			$success_option = \get_option( $option_name, array() );
+			$success_mail   = end( $mails ) ?: array();
+
+			\update_option( $option_name, array(), false );
+			$mail_count_before_duplicate = count( $mails );
+			$filter_count_before_duplicate = count( $email_filters );
+			$failure_call = self::call(
+				static function () use ( $updater, $plugin_failure, $theme_failure ) {
+					$updater->component_fuzz_after_plugin_theme_update(
+						array(
+							'plugin' => array( $plugin_failure ),
+							'theme'  => array( $theme_failure ),
+						)
+					);
+
+					return true;
+				}
+			);
+			$failure_option = \get_option( $option_name, array() );
+			$failure_mail   = end( $mails ) ?: array();
+
+			$duplicate_failure_call = self::call(
+				static function () use ( $updater, $plugin_failure, $theme_failure ) {
+					$updater->component_fuzz_after_plugin_theme_update(
+						array(
+							'plugin' => array( $plugin_failure ),
+							'theme'  => array( $theme_failure ),
+						)
+					);
+
+					return true;
+				}
+			);
+			$duplicate_mail_count   = count( $mails );
+			$duplicate_filter_count = count( $email_filters );
+
+			\update_option(
+				$option_name,
+				array(
+					$case['plugin']['file'] => $case['plugin']['newVersion'],
+					$case['theme']['slug']  => '0.1.0',
+				),
+				false
+			);
+			$mixed_call = self::call(
+				static function () use ( $updater, $plugin_success, $theme_failure ) {
+					$updater->component_fuzz_after_plugin_theme_update(
+						array(
+							'plugin' => array( $plugin_success ),
+							'theme'  => array( $theme_failure ),
+						)
+					);
+
+					return true;
+				}
+			);
+			$mixed_option = \get_option( $option_name, array() );
+			$mixed_mail   = end( $mails ) ?: array();
+
+			$disable_plugin_email = true;
+			$disable_theme_email  = true;
+			$mail_count_before_disabled = count( $mails );
+			$filter_count_before_disabled = count( $email_filters );
+			$disabled_call = self::call(
+				static function () use ( $updater, $plugin_success, $theme_success ) {
+					$updater->component_fuzz_after_plugin_theme_update(
+						array(
+							'plugin' => array( $plugin_success ),
+							'theme'  => array( $theme_success ),
+						)
+					);
+
+					return true;
+				}
+			);
+			$disabled_mail_count   = count( $mails );
+			$disabled_filter_count = count( $email_filters );
+		} finally {
+			\remove_filter( 'pre_wp_mail', $pre_mail, 10 );
+			\remove_filter( 'auto_plugin_theme_update_email', $email_filter, 10 );
+			\remove_filter( 'auto_plugin_update_send_email', $plugin_send_filter, 10 );
+			\remove_filter( 'auto_theme_update_send_email', $theme_send_filter, 10 );
+
+			if ( $old_option_exists ) {
+				\update_option( $option_name, $old_option, false );
+			} else {
+				\delete_option( $option_name );
+			}
+		}
+
+		self::record_failure_if(
+			$failures,
+			$success_call['threw'] || ! self::mail_matches(
+				$success_mail,
+				array(
+					'Some plugins and themes have automatically updated',
+					html_entity_decode( $case['plugin']['name'] . ' &amp; Success' ),
+					html_entity_decode( $case['theme']['name'] . ' &amp; Success' ),
+				),
+				array( 'failed to update' )
+			),
+			'WP_Automatic_Updater.after_plugin_theme_update.success-email-lists-plugin-and-theme',
+			array(
+				'call' => self::describe_call( $success_call ),
+				'mail' => self::describe_mail( $success_mail ),
+			)
+		);
+		self::record_failure_if(
+			$failures,
+			! is_array( $success_option )
+				|| array_key_exists( $case['plugin']['file'], $success_option )
+				|| array_key_exists( $case['theme']['slug'], $success_option )
+				|| ( $success_option[ $unrelated_key ] ?? null ) !== '9.9.9',
+			'WP_Automatic_Updater.send_plugin_theme_email.success-clears-prior-failures-only-for-updated-items',
+			array( 'option' => $success_option )
+		);
+		self::record_failure_if(
+			$failures,
+			$failure_call['threw'] || ! self::mail_matches(
+				$failure_mail,
+				array(
+					'Some plugins and themes have failed to update',
+					html_entity_decode( $case['plugin']['name'] . ' &amp; Failure' ),
+					html_entity_decode( $case['theme']['name'] . ' &amp; Failure' ),
+					'Plugins page:',
+					'Themes page:',
+				),
+				array()
+			),
+			'WP_Automatic_Updater.after_plugin_theme_update.fail-email-lists-failed-plugin-and-theme',
+			array(
+				'call' => self::describe_call( $failure_call ),
+				'mail' => self::describe_mail( $failure_mail ),
+			)
+		);
+		self::record_failure_if(
+			$failures,
+			! is_array( $failure_option )
+				|| ( $failure_option[ $case['plugin']['file'] ] ?? null ) !== $case['plugin']['newVersion']
+				|| ( $failure_option[ $case['theme']['slug'] ] ?? null ) !== $case['theme']['newVersion'],
+			'WP_Automatic_Updater.send_plugin_theme_email.fail-records-new-failure-versions',
+			array( 'option' => $failure_option )
+		);
+		self::record_failure_if(
+			$failures,
+			$duplicate_failure_call['threw']
+				|| $duplicate_mail_count !== $mail_count_before_duplicate + 1
+				|| $duplicate_filter_count !== $filter_count_before_duplicate + 1,
+			'WP_Automatic_Updater.send_plugin_theme_email.duplicate-failure-does-not-send-again',
+			array(
+				'call'                  => self::describe_call( $duplicate_failure_call ),
+				'beforeMailCount'       => $mail_count_before_duplicate,
+				'afterMailCount'        => $duplicate_mail_count,
+				'beforeEmailFilterCount' => $filter_count_before_duplicate,
+				'afterEmailFilterCount' => $duplicate_filter_count,
+			)
+		);
+		self::record_failure_if(
+			$failures,
+			$mixed_call['threw'] || ! self::mail_matches(
+				$mixed_mail,
+				array(
+					'Some themes have failed to update',
+					html_entity_decode( $case['plugin']['name'] . ' &amp; Success' ),
+					html_entity_decode( $case['theme']['name'] . ' &amp; Failure' ),
+				),
+				array()
+			),
+			'WP_Automatic_Updater.after_plugin_theme_update.mixed-email-includes-success-and-failure-lists',
+			array(
+				'call' => self::describe_call( $mixed_call ),
+				'mail' => self::describe_mail( $mixed_mail ),
+			)
+		);
+		self::record_failure_if(
+			$failures,
+			! is_array( $mixed_option )
+				|| array_key_exists( $case['plugin']['file'], $mixed_option )
+				|| ( $mixed_option[ $case['theme']['slug'] ] ?? null ) !== $case['theme']['newVersion'],
+			'WP_Automatic_Updater.send_plugin_theme_email.mixed-clears-success-and-records-failure',
+			array( 'option' => $mixed_option )
+		);
+		self::record_failure_if(
+			$failures,
+			$disabled_call['threw']
+				|| $disabled_mail_count !== $mail_count_before_disabled
+				|| $disabled_filter_count !== $filter_count_before_disabled,
+			'WP_Automatic_Updater.after_plugin_theme_update.notification-filters-can-suppress-all-mail',
+			array(
+				'call'                  => self::describe_call( $disabled_call ),
+				'beforeMailCount'       => $mail_count_before_disabled,
+				'afterMailCount'        => $disabled_mail_count,
+				'beforeEmailFilterCount' => $filter_count_before_disabled,
+				'afterEmailFilterCount' => $disabled_filter_count,
+				'notificationFilters'   => $notification_filters,
+			)
+		);
+		self::record_failure_if(
+			$failures,
+			array_column( $email_filters, 'type' ) !== array( 'success', 'fail', 'mixed' ),
+			'WP_Automatic_Updater.send_plugin_theme_email.email-filter-types-and-order',
+			array( 'emailFilters' => $email_filters )
+		);
+		self::record_failure_if(
+			$failures,
+			false !== \has_filter( 'pre_wp_mail', $pre_mail )
+				|| false !== \has_filter( 'auto_plugin_theme_update_email', $email_filter )
+				|| false !== \has_filter( 'auto_plugin_update_send_email', $plugin_send_filter )
+				|| false !== \has_filter( 'auto_theme_update_send_email', $theme_send_filter )
+				|| ( $old_option_exists ? \get_option( $option_name ) !== $old_option : $missing_option_sentinel !== \get_option( $option_name, $missing_option_sentinel ) ),
+			'update-install-upgrader.notification-test-filters-and-option-restored',
+			array(
+				'preMailFilter'       => \has_filter( 'pre_wp_mail', $pre_mail ),
+				'emailFilter'         => \has_filter( 'auto_plugin_theme_update_email', $email_filter ),
+				'pluginFilter'        => \has_filter( 'auto_plugin_update_send_email', $plugin_send_filter ),
+				'themeFilter'         => \has_filter( 'auto_theme_update_send_email', $theme_send_filter ),
+				'oldOptionExists'     => $old_option_exists,
+				'restoredOptionValue' => \get_option( $option_name, $missing_option_sentinel ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'update-install-upgrader.auto-update.plugin-theme-notification-contracts',
+			$failures,
+			array(
+				'mailCount'            => count( $mails ),
+				'emailFilters'         => $email_filters,
+				'notificationFilters'  => $notification_filters,
+				'plugin'               => $case['plugin']['file'],
+				'theme'                => $case['theme']['slug'],
+			)
+		);
+	}
+
+	private static function notification_test_updater(): object {
+		return new class() extends \WP_Automatic_Updater {
+			public function component_fuzz_after_plugin_theme_update( array $update_results ): void {
+				$this->after_plugin_theme_update( $update_results );
+			}
+		};
+	}
+
+	private static function notification_result( string $type, array $case, $result, string $name, array $messages ): object {
+		if ( 'plugin' === $type ) {
+			$item = (object) array(
+				'plugin'          => $case['plugin']['file'],
+				'slug'            => $case['plugin']['slug'],
+				'new_version'     => $case['plugin']['newVersion'],
+				'current_version' => $case['plugin']['version'],
+				'url'             => 'https://example.test/plugins/' . $case['plugin']['slug'],
+			);
+		} else {
+			$item = (object) array(
+				'theme'           => $case['theme']['slug'],
+				'new_version'     => $case['theme']['newVersion'],
+				'current_version' => $case['theme']['version'],
+				'url'             => 'https://example.test/themes/' . $case['theme']['slug'],
+			);
+		}
+
+		return (object) array(
+			'item'     => $item,
+			'result'   => $result,
+			'name'     => $name,
+			'messages' => $messages,
+		);
+	}
+
+	private static function notification_result_counts( array $updates ): array {
+		$counts = array();
+
+		foreach ( $updates as $type => $results ) {
+			$counts[ $type ] = is_array( $results ) ? count( $results ) : 0;
+		}
+
+		ksort( $counts );
+		return $counts;
+	}
+
+	private static function mail_matches( array $mail, array $required, array $forbidden ): bool {
+		if ( 'component-fuzz@example.test' !== ( $mail['to'] ?? null ) ) {
+			return false;
+		}
+
+		$haystack = (string) ( $mail['subject'] ?? '' ) . "\n" . (string) ( $mail['message'] ?? '' );
+		foreach ( $required as $needle ) {
+			if ( ! str_contains( $haystack, (string) $needle ) ) {
+				return false;
+			}
+		}
+		foreach ( $forbidden as $needle ) {
+			if ( str_contains( $haystack, (string) $needle ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function describe_mail( array $mail ): array {
+		return array(
+			'to'      => $mail['to'] ?? null,
+			'subject' => $mail['subject'] ?? null,
+			'message' => isset( $mail['message'] ) && is_string( $mail['message'] ) ? self::preview( $mail['message'] ) : null,
+			'headers' => $mail['headers'] ?? null,
 		);
 	}
 

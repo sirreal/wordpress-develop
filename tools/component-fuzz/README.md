@@ -1057,8 +1057,10 @@ downloads, real ZIP unpacking into `wp-content/upgrade`, real plugin/theme
 activation or switching, full plugin/theme/core update execution, core
 `update-core.php` replacement, language-pack updates, automatic updater run
 loops, fatal-error loopback checks, and any process-exit paths. It exercises
-safe class/helper paths directly and only uses filters to short-circuit network
-or external filesystem credentials.
+safe class/helper paths directly, including synthetic plugin/theme automatic
+update notification result classification and failure-cache behavior, and only
+uses filters to short-circuit network, email delivery, or external filesystem
+credentials.
 The `utility-internals` surface focuses on deterministic pure-PHP helpers and
 does not replace higher-level rewrite, frontend-feature, or REST coverage that
 uses the same classes incidentally. Case-insensitive token-map assertions avoid
