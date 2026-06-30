@@ -679,11 +679,13 @@ database, network requests, or a configured site.
   missed/late/future cron classification, HTTP-blocking constant checks, and
   persistent object cache threshold/filter direct-test behavior.
 - `site-health-debug`: bounded `WP_Debug_Data` coverage for Site Health Info
-  formatting and diagnostic size helpers, including private field/section
-  suppression, debug vs info labels, `debug_information` filter locality,
-  scoped `SHOW TABLE STATUS` and `SHOW VARIABLES` wpdb doubles, generated
-  directory/database/total-size aggregation, MySQL variable lookup fallbacks,
-  and explicit skips for unsafe full debug-data scans.
+  formatting, diagnostic size helpers, and an isolated full `debug_data()` scan,
+  including private field/section suppression, debug vs info labels,
+  `debug_information` filter locality, scoped `SHOW TABLE STATUS` and
+  `SHOW VARIABLES` wpdb doubles, generated directory/database/total-size
+  aggregation, MySQL variable lookup fallbacks, fake no-network WordPress.org
+  communication, bounded Ghostscript detection, path-size loading placeholders,
+  and child-process cleanup/restoration checks.
 - `state`: object cache groups, multi-operations, and cache-addition
   suspension, option, transient, cache-backed and option-backed site-transient
   APIs, update/expiration cleanup, dynamic transient filters, serialization,
