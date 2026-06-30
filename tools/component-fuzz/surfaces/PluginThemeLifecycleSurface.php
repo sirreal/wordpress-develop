@@ -41,6 +41,7 @@ final class PluginThemeLifecycleSurface {
 			$rows[] = self::check_theme_switch_support_globals( $ctx, $case );
 			$rows[] = self::check_theme_delete_paths( $ctx, $case );
 			$rows[] = self::check_rest_plugin_theme_read_paths( $ctx, $case );
+			$rows[] = self::check_rest_plugin_write_delete_paths( $ctx, $case );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
 				'plugin-theme-lifecycle.surface-no-throw',
@@ -1250,6 +1251,186 @@ final class PluginThemeLifecycleSurface {
 		);
 	}
 
+	private static function check_rest_plugin_write_delete_paths( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures = array();
+		self::clear_runtime_caches();
+
+		$controller    = new \WP_REST_Plugins_Controller();
+		$status_plugin = $case['plugins']['restStatus']['file'];
+		$delete_plugin = $case['plugins']['restDelete']['file'];
+
+		\update_option( 'active_plugins', array() );
+		\update_site_option( 'active_sitewide_plugins', array() );
+
+		$activate_request = self::rest_plugin_request(
+			'POST',
+			$status_plugin,
+			array(
+				'status' => 'active',
+			)
+		);
+		$denied_update   = $controller->update_item_permissions_check( $activate_request );
+		$before_denied   = \get_option( 'active_plugins', array() );
+
+		self::expect_wp_error_code(
+			$failures,
+			'WP_REST_Plugins_Controller.update-denied-without-manage-cap',
+			$denied_update,
+			'rest_cannot_manage_plugins'
+		);
+		if ( array() !== $before_denied ) {
+			self::record_failure(
+				$failures,
+				'WP_REST_Plugins_Controller.denied-update-does-not-mutate-active-option',
+				array( 'activePlugins' => $before_denied )
+			);
+		}
+
+		$cap_filter = self::rest_plugin_cap_filter(
+			array(
+				'activate_plugins',
+				'activate_plugin',
+				'deactivate_plugin',
+				'delete_plugins',
+			)
+		);
+		\add_filter( 'user_has_cap', $cap_filter, PHP_INT_MAX, 4 );
+
+		try {
+			$activate_allowed  = $controller->update_item_permissions_check( $activate_request );
+			$activate_response = $controller->update_item( $activate_request );
+			$activate_data     = $activate_response instanceof \WP_REST_Response ? $activate_response->get_data() : array();
+
+			if (
+				true !== $activate_allowed
+				|| ! ( $activate_response instanceof \WP_REST_Response )
+				|| ( $activate_data['plugin'] ?? null ) !== substr( $status_plugin, 0, -4 )
+				|| ( $activate_data['status'] ?? null ) !== 'active'
+				|| ( $activate_data['name'] ?? null ) !== $case['plugins']['restStatus']['name']
+				|| ! \is_plugin_active( $status_plugin )
+			) {
+				self::record_failure(
+					$failures,
+					'WP_REST_Plugins_Controller.update-item-activates-temp-plugin-and-reports-response-state',
+					array(
+						'allowed'       => self::describe_wp_error( $activate_allowed ),
+						'responseData'  => $activate_data,
+						'response'      => self::describe_value( $activate_response ),
+						'activePlugins' => \get_option( 'active_plugins', array() ),
+					)
+				);
+			}
+
+			$deactivate_request = self::rest_plugin_request(
+				'POST',
+				$status_plugin,
+				array(
+					'status' => 'inactive',
+				)
+			);
+			$deactivate_allowed  = $controller->update_item_permissions_check( $deactivate_request );
+			$deactivate_response = $controller->update_item( $deactivate_request );
+			$deactivate_data     = $deactivate_response instanceof \WP_REST_Response ? $deactivate_response->get_data() : array();
+
+			if (
+				true !== $deactivate_allowed
+				|| ! ( $deactivate_response instanceof \WP_REST_Response )
+				|| ( $deactivate_data['plugin'] ?? null ) !== substr( $status_plugin, 0, -4 )
+				|| ( $deactivate_data['status'] ?? null ) !== 'inactive'
+				|| ( $deactivate_data['name'] ?? null ) !== $case['plugins']['restStatus']['name']
+				|| \is_plugin_active( $status_plugin )
+			) {
+				self::record_failure(
+					$failures,
+					'WP_REST_Plugins_Controller.update-item-deactivates-temp-plugin-and-reports-response-state',
+					array(
+						'allowed'       => self::describe_wp_error( $deactivate_allowed ),
+						'responseData'  => $deactivate_data,
+						'response'      => self::describe_value( $deactivate_response ),
+						'activePlugins' => \get_option( 'active_plugins', array() ),
+					)
+				);
+			}
+
+			$delete_request = self::rest_plugin_request(
+				'DELETE',
+				$delete_plugin
+			);
+			$delete_allowed = $controller->delete_item_permissions_check( $delete_request );
+			$activated      = \activate_plugin( $delete_plugin, '', false, true );
+			$active_delete  = $controller->delete_item( $delete_request );
+
+			self::expect_wp_error_code(
+				$failures,
+				'WP_REST_Plugins_Controller.delete-active-plugin-fails-closed',
+				$active_delete,
+				'rest_cannot_delete_active_plugin'
+			);
+			if (
+				true !== $delete_allowed
+				|| null !== $activated
+				|| ! \is_plugin_active( $delete_plugin )
+				|| ! file_exists( $case['plugins']['restDelete']['dir'] )
+			) {
+				self::record_failure(
+					$failures,
+					'WP_REST_Plugins_Controller.active-delete-keeps-plugin-files-and-state',
+					array(
+						'allowed'       => self::describe_wp_error( $delete_allowed ),
+						'activated'     => self::describe_wp_error( $activated ),
+						'activeDelete'  => self::describe_wp_error( $active_delete ),
+						'activePlugins' => \get_option( 'active_plugins', array() ),
+						'dirExists'     => file_exists( $case['plugins']['restDelete']['dir'] ),
+					)
+				);
+			}
+
+			\deactivate_plugins( $delete_plugin, true );
+			$inactive_delete = null;
+			self::with_direct_filesystem(
+				static function () use ( $controller, $delete_request, &$inactive_delete ): void {
+					$inactive_delete = $controller->delete_item( $delete_request );
+					\wp_clean_plugins_cache( false );
+				}
+			);
+
+			$inactive_data = $inactive_delete instanceof \WP_REST_Response ? $inactive_delete->get_data() : array();
+			if (
+				! ( $inactive_delete instanceof \WP_REST_Response )
+				|| true !== ( $inactive_data['deleted'] ?? null )
+				|| ( $inactive_data['previous']['plugin'] ?? null ) !== substr( $delete_plugin, 0, -4 )
+				|| ( $inactive_data['previous']['status'] ?? null ) !== 'inactive'
+				|| file_exists( $case['plugins']['restDelete']['dir'] )
+				|| isset( \get_plugins()[ $delete_plugin ] )
+			) {
+				self::record_failure(
+					$failures,
+					'WP_REST_Plugins_Controller.delete-inactive-plugin-removes-only-temp-fixture',
+					array(
+						'response'  => self::describe_value( $inactive_delete ),
+						'dir'       => self::preview( $case['plugins']['restDelete']['dir'] ),
+						'dirExists' => file_exists( $case['plugins']['restDelete']['dir'] ),
+						'installed' => array_keys( \get_plugins() ),
+					)
+				);
+			}
+		} finally {
+			\remove_filter( 'user_has_cap', $cap_filter, PHP_INT_MAX );
+			\deactivate_plugins( array( $status_plugin, $delete_plugin ), true );
+			self::clear_runtime_caches();
+		}
+
+		return self::row(
+			$ctx,
+			'plugin-theme-lifecycle.rest.plugin-write-delete-controllers',
+			$failures,
+			array(
+				'statusPlugin' => $status_plugin,
+				'deletePlugin' => $delete_plugin,
+			)
+		);
+	}
+
 	private static function expect_plugin_validation_code( array &$failures, string $label, string $plugin, $expected ): void {
 		$result = \validate_plugin( $plugin );
 
@@ -1335,6 +1516,39 @@ final class PluginThemeLifecycleSurface {
 		return false;
 	}
 
+	private static function rest_plugin_request( string $method, string $plugin_file, array $body = array(), array $query = array() ): \WP_REST_Request {
+		$request = new \WP_REST_Request( $method, '/wp/v2/plugins/' . substr( $plugin_file, 0, -4 ) );
+		$request->set_url_params( array( 'plugin' => $plugin_file ) );
+		if ( array() !== $query ) {
+			$request->set_query_params( $query );
+		}
+		if ( array() !== $body ) {
+			$request->set_body_params( $body );
+			foreach ( $body as $key => $value ) {
+				$request->set_param( $key, $value );
+			}
+		}
+
+		return $request;
+	}
+
+	private static function rest_plugin_cap_filter( array $granted_caps ): callable {
+		$grants = array_fill_keys( $granted_caps, true );
+
+		return static function ( array $allcaps, array $caps = array() ) use ( $grants ): array {
+			foreach ( $caps as $cap ) {
+				if ( isset( $grants[ $cap ] ) ) {
+					$allcaps[ $cap ] = true;
+				}
+			}
+			foreach ( $grants as $cap => $allowed ) {
+				$allcaps[ $cap ] = $allowed;
+			}
+
+			return $allcaps;
+		};
+	}
+
 	private static function rest_theme_collection_contains( \WP_REST_Response $response, string $stylesheet, string $status ): bool {
 		foreach ( $response->get_data() as $item ) {
 			if ( is_array( $item ) && ( $item['stylesheet'] ?? null ) === $stylesheet && ( $item['status'] ?? null ) === $status ) {
@@ -1374,7 +1588,7 @@ final class PluginThemeLifecycleSurface {
 		$plugin_ctx = $ctx->fork( 'plugins' );
 		$theme_ctx  = $ctx->fork( 'themes' );
 
-		$plugin_keys = array( 'good', 'output', 'headerless', 'lateHeader', 'implicitTextDomain', 'futureWp', 'futurePhp', 'dependency', 'dependent', 'network', 'delete' );
+		$plugin_keys = array( 'good', 'output', 'headerless', 'lateHeader', 'implicitTextDomain', 'futureWp', 'futurePhp', 'dependency', 'dependent', 'network', 'delete', 'restStatus', 'restDelete' );
 		$plugins     = array();
 		foreach ( $plugin_keys as $key ) {
 			$slug            = self::slug( $plugin_ctx, 'cfz-' . $key, $used );
@@ -1548,6 +1762,24 @@ final class PluginThemeLifecycleSurface {
 				'RequiresPHP' => '5.6',
 			),
 			"// Deletion fixture.\n"
+		);
+
+		self::write_plugin(
+			$case['plugins']['restStatus'],
+			array(
+				'RequiresWP'  => '5.0',
+				'RequiresPHP' => '5.6',
+			),
+			"// REST status update fixture.\n"
+		);
+
+		self::write_plugin(
+			$case['plugins']['restDelete'],
+			array(
+				'RequiresWP'  => '5.0',
+				'RequiresPHP' => '5.6',
+			),
+			"// REST deletion fixture.\n"
 		);
 
 		self::write_theme(
