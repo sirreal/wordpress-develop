@@ -605,12 +605,15 @@ database, network requests, or a configured site.
 - `rest-controllers`: no-DB default REST endpoint controller coverage for
   registry-backed post types, post statuses, taxonomies, settings, block types,
   block patterns, block pattern categories, block-pattern remote loader
-  dispatch, plugin/theme route/schema contracts, and REST search handlers,
-  including context/_fields filtering, registered additional-field
-  get/update/schema callbacks, collection params, permission gates,
-  namespace-specific REST links, intercepted core/featured/theme pattern
-  directory requests, snake-case remote pattern normalization, duplicate
-  suppression, remote-load filter gates, plugin/theme sanitizer contracts,
+  dispatch, local theme pattern file loading, plugin/theme route/schema
+  contracts, and REST search handlers, including context/_fields filtering,
+  registered additional-field get/update/schema callbacks, collection params,
+  permission gates, namespace-specific REST links, intercepted
+  core/featured/theme pattern directory requests, snake-case remote pattern
+  normalization, duplicate suppression, remote-load filter gates,
+  `WP_Theme::get_block_patterns()` header parsing/cache behavior, lazy
+  `filePath` content loading, local pattern duplicate preservation,
+  plugin/theme sanitizer contracts,
   route-dispatched defaults/schema validation, custom search handler
   result/header/link propagation, invalid subtype rejection, public
   search-result schema callback contents, post-format search term/link and
@@ -886,8 +889,9 @@ local image byte fixtures only. It does not invoke image codecs, live uploads,
 remote media, or attachment persistence; EXIF/IPTC extraction rows are recorded
 as explicit skips when the PHP build lacks `exif_read_data()` or `iptcparse()`,
 while malformed/no-metadata image paths and filter cleanup still run. The
-`rest-controllers` surface remains registry-backed only. DB-backed posts,
-terms, comments, users, revisions, and attachments are covered by
+`rest-controllers` surface remains no-live-DB and registry-first, with bounded
+temp-file coverage only for local block pattern loader behavior. DB-backed
+posts, terms, comments, users, revisions, and attachments are covered by
 `rest-object-controllers` against the in-memory `wpdb` stub. The
 `rest-application-passwords` surface complements lower-level account-security
 coverage by dispatching the REST controller with synthetic users and scoped
@@ -918,9 +922,9 @@ collection parameter, sanitizer, and permission-gate contracts without
 plugin/theme filesystem lifecycle effects. Lifecycle-heavy plugin/theme read and
 status paths are covered by `plugin-theme-lifecycle`, while install/update/delete
 controller methods are still avoided. Block pattern coverage now includes
-registry-backed response shaping plus intercepted remote core, featured, and
-theme pattern directory loaders; local theme `patterns/` file loading remains a
-separate filesystem-oriented concern.
+registry-backed response shaping, intercepted remote core, featured, and theme
+pattern directory loaders, and local theme `patterns/` PHP file loading through
+a scoped temp theme with cache/header/duplicate/lazy-content oracles.
 The `rest-site-editor` surface creates a bounded temp theme under the harness
 `WP_CONTENT_DIR` and uses the in-memory `wpdb` stub for `wp_global_styles`,
 `wp_template`, `wp_template_part`, `revision`, and `wp_navigation` fixtures. It

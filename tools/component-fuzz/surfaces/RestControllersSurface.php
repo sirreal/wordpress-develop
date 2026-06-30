@@ -39,6 +39,7 @@ final class RestControllersSurface {
 			$rows[] = self::check_block_types_controller( $ctx );
 			$rows[] = self::check_block_patterns_controller( $ctx );
 			$rows[] = self::check_block_pattern_remote_loaders( $ctx );
+			$rows[] = self::check_block_pattern_theme_file_loader( $ctx );
 			$rows[] = self::check_search_controller( $ctx );
 			$rows[] = self::check_route_registry_behavior( $ctx );
 			$rows[] = self::check_plugin_theme_controller_contracts( $ctx->fork( 'plugin-theme-controllers' ) );
@@ -105,6 +106,7 @@ final class RestControllersSurface {
 				'WP_REST_Term_Search_Handler',
 				'WP_REST_Themes_Controller',
 				'WP_Taxonomy',
+				'WP_Theme',
 				'WP_Theme_JSON',
 				'WP_Theme_JSON_Resolver',
 			) as $class
@@ -121,7 +123,9 @@ final class RestControllersSurface {
 				'add_query_arg',
 				'apply_filters',
 				'current_user_can',
+				'delete_site_transient',
 				'delete_option',
+				'get_file_data',
 				'get_theme_support',
 				'get_registered_theme_features',
 				'get_object_taxonomies',
@@ -134,6 +138,7 @@ final class RestControllersSurface {
 				'get_post_type_object',
 				'get_post_types',
 				'get_registered_settings',
+				'get_site_transient',
 				'get_taxonomies',
 				'get_taxonomy',
 				'has_filter',
@@ -167,13 +172,21 @@ final class RestControllersSurface {
 				'sanitize_title',
 				'sanitize_text_field',
 				'serialize_blocks',
+				'set_site_transient',
+				'trailingslashit',
 				'unregister_block_type',
 				'update_option',
 				'validate_file',
+				'wp_cache_delete',
 				'urlencode_deep',
+				'_register_theme_block_patterns',
 				'wp_clean_theme_json_cache',
+				'wp_get_active_and_valid_themes',
+				'wp_get_theme',
+				'wp_is_development_mode',
 				'wp_json_encode',
 				'wp_parse_args',
+				'wp_parse_list',
 				'wp_parse_slug_list',
 				'wp_theme_has_theme_json',
 			) as $function
@@ -2058,6 +2071,340 @@ final class RestControllersSurface {
 		);
 	}
 
+	private static function check_block_pattern_theme_file_loader( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime_state();
+
+		$local_snapshot        = self::snapshot_state();
+		$case                  = self::theme_pattern_file_case( $ctx->fork( 'theme-pattern-files' ) );
+		$controller            = new \WP_REST_Block_Patterns_Controller();
+		$registry              = \WP_Block_Patterns_Registry::get_instance();
+		$failures              = array();
+		$temp_root             = self::theme_pattern_temp_root( $ctx );
+		$theme_root            = $temp_root . DIRECTORY_SEPARATOR . 'themes';
+		$theme_dir             = $theme_root . DIRECTORY_SEPARATOR . $case['stylesheet'];
+		$patterns_dir          = $theme_dir . DIRECTORY_SEPARATOR . 'patterns';
+		$cache_key             = 'wp_theme_files_patterns-' . md5( $theme_root . DIRECTORY_SEPARATOR . $case['stylesheet'] );
+		$parsed_patterns       = array();
+		$cache_value           = false;
+		$active_themes         = array();
+		$raw_before_rest       = array();
+		$response              = null;
+		$data                  = array();
+		$first_register_count  = null;
+		$second_register_count = null;
+		$theme_exists          = false;
+		$cleanup_ok            = true;
+		$theme                 = null;
+		$pattern_file_log      = array();
+		$cache_ttl_log         = array();
+		$doing_it_wrong_log    = array();
+		$theme_development_mode = \wp_is_development_mode( 'theme' );
+
+		$pattern_files_filter = static function ( array $files, string $dirpath ) use ( &$pattern_file_log ): array {
+			$basenames = array_map( 'basename', $files );
+			sort( $basenames );
+			$pattern_file_log[] = array(
+				'dirpath'   => $dirpath,
+				'basenames' => $basenames,
+			);
+			return $files;
+		};
+		$cache_ttl_filter     = static function ( int $ttl, string $cache_type ) use ( &$cache_ttl_log ): int {
+			$cache_ttl_log[] = array(
+				'inputTtl'  => $ttl,
+				'returnTtl' => 120,
+				'cacheType' => $cache_type,
+			);
+			return 120;
+		};
+		$doing_it_wrong_filter = static function ( string $function_name, string $message, string $version ) use ( &$doing_it_wrong_log ): void {
+			$doing_it_wrong_log[] = array(
+				'function' => $function_name,
+				'message'  => $message,
+				'version'  => $version,
+			);
+		};
+		$suppress_doing_it_wrong = static function (): bool {
+			return false;
+		};
+		$remote_off_filter       = static function (): bool {
+			return false;
+		};
+		$stylesheet_filter       = static function () use ( $case ): string {
+			return $case['stylesheet'];
+		};
+		$template_filter         = static function () use ( $case ): string {
+			return $case['stylesheet'];
+		};
+		$theme_root_filter       = static function () use ( $theme_root ): string {
+			return $theme_root;
+		};
+		$theme_root_uri_filter   = static function () use ( $temp_root ): string {
+			return 'http://example.test/wp-content/component-fuzz-pattern-files/' . basename( $temp_root );
+		};
+		$stylesheet_root_filter  = static function () use ( $theme_root ): string {
+			return $theme_root;
+		};
+
+		try {
+			self::write_theme_pattern_fixture( $case, $theme_dir, $patterns_dir );
+
+			if ( ! isset( $GLOBALS['wp_theme_directories'] ) || ! is_array( $GLOBALS['wp_theme_directories'] ) ) {
+				$GLOBALS['wp_theme_directories'] = array();
+			}
+			$GLOBALS['wp_theme_directories'] = array_values(
+				array_unique(
+					array_merge(
+						$GLOBALS['wp_theme_directories'],
+						array( WP_CONTENT_DIR . '/themes', $theme_root )
+					)
+				)
+			);
+			$GLOBALS['wp_stylesheet_path'] = $theme_dir;
+			$GLOBALS['wp_template_path']   = $theme_dir;
+
+			\update_option( 'stylesheet', $case['stylesheet'] );
+			\update_option( 'template', $case['stylesheet'] );
+			\update_option( 'current_theme', 'Component Fuzz Pattern Files ' . $case['token'] );
+			\update_option( 'stylesheet_root', $theme_root );
+			\update_option( 'template_root', $theme_root );
+			\delete_site_transient( 'theme_roots' );
+			\wp_cache_delete( 'theme_roots', 'site-transient' );
+
+			\add_filter( 'stylesheet', $stylesheet_filter );
+			\add_filter( 'template', $template_filter );
+			\add_filter( 'theme_root', $theme_root_filter );
+			\add_filter( 'theme_root_uri', $theme_root_uri_filter );
+			\add_filter( 'pre_option_stylesheet', $stylesheet_filter );
+			\add_filter( 'pre_option_template', $template_filter );
+			\add_filter( 'pre_option_stylesheet_root', $stylesheet_root_filter );
+			\add_filter( 'pre_option_template_root', $stylesheet_root_filter );
+			\add_filter( 'theme_block_pattern_files', $pattern_files_filter, 10, 2 );
+			\add_filter( 'wp_theme_files_cache_ttl', $cache_ttl_filter, 10, 2 );
+			\add_filter( 'doing_it_wrong_run', $doing_it_wrong_filter, 10, 3 );
+			\add_filter( 'doing_it_wrong_trigger_error', $suppress_doing_it_wrong, 10, 4 );
+			\add_filter( 'should_load_remote_block_patterns', $remote_off_filter );
+
+			$pre_registered = \register_block_pattern(
+				$case['duplicateSlug'],
+				array(
+					'title'      => $case['duplicatePreTitle'],
+					'content'    => self::pattern_content( $case['duplicatePreMarker'] ),
+					'categories' => array( 'text' ),
+					'keywords'   => array( 'preexisting' ),
+					'source'     => 'plugin',
+				)
+			);
+
+			$theme           = \wp_get_theme();
+			$theme_exists    = $theme instanceof \WP_Theme && $theme->exists();
+			$active_themes   = \wp_get_active_and_valid_themes();
+			$parsed_patterns = $theme_exists ? $theme->get_block_patterns() : array();
+			$cache_value     = \get_site_transient( $cache_key );
+
+			\_register_theme_block_patterns();
+			$raw_before_rest = self::get_object_property( $registry, 'registered_patterns' );
+			$first_register_count = is_array( $raw_before_rest ) ? count( $raw_before_rest ) : null;
+			\_register_theme_block_patterns();
+			$raw_after_second      = self::get_object_property( $registry, 'registered_patterns' );
+			$second_register_count = is_array( $raw_after_second ) ? count( $raw_after_second ) : null;
+
+			self::set_object_property( $controller, 'remote_patterns_loaded', true );
+			$response = $controller->get_items(
+				self::request(
+					'GET',
+					'/wp/v2/block-patterns/patterns',
+					array(
+						'context' => 'view',
+						'_fields' => 'name,title,description,categories,keywords,block_types,post_types,template_types,viewport_width,inserter,content,source',
+					)
+				)
+			);
+			$data     = $response instanceof \WP_REST_Response ? $response->get_data() : array();
+		} finally {
+			\remove_filter( 'stylesheet', $stylesheet_filter );
+			\remove_filter( 'template', $template_filter );
+			\remove_filter( 'theme_root', $theme_root_filter );
+			\remove_filter( 'theme_root_uri', $theme_root_uri_filter );
+			\remove_filter( 'pre_option_stylesheet', $stylesheet_filter );
+			\remove_filter( 'pre_option_template', $template_filter );
+			\remove_filter( 'pre_option_stylesheet_root', $stylesheet_root_filter );
+			\remove_filter( 'pre_option_template_root', $stylesheet_root_filter );
+			\remove_filter( 'theme_block_pattern_files', $pattern_files_filter, 10 );
+			\remove_filter( 'wp_theme_files_cache_ttl', $cache_ttl_filter, 10 );
+			\remove_filter( 'doing_it_wrong_run', $doing_it_wrong_filter, 10 );
+			\remove_filter( 'doing_it_wrong_trigger_error', $suppress_doing_it_wrong, 10 );
+			\remove_filter( 'should_load_remote_block_patterns', $remote_off_filter );
+
+			if ( $theme instanceof \WP_Theme ) {
+				$theme->delete_pattern_cache();
+			}
+			\delete_site_transient( $cache_key );
+			\delete_site_transient( 'theme_roots' );
+			\wp_cache_delete( 'theme_roots', 'site-transient' );
+			$cleanup_ok = self::remove_dir_recursive( $temp_root );
+			self::restore_state( $local_snapshot );
+		}
+
+		$parsed_valid       = $parsed_patterns[ $case['validFile'] ] ?? null;
+		$parsed_duplicate   = $parsed_patterns[ $case['duplicateFile'] ] ?? null;
+		$parsed_missing_slug = $parsed_patterns[ $case['missingSlugFile'] ] ?? null;
+		$parsed_missing_title = $parsed_patterns[ $case['missingTitleFile'] ] ?? null;
+		$raw_valid          = is_array( $raw_before_rest ) ? ( $raw_before_rest[ $case['validSlug'] ] ?? null ) : null;
+		$raw_duplicate      = is_array( $raw_before_rest ) ? ( $raw_before_rest[ $case['duplicateSlug'] ] ?? null ) : null;
+		$valid_entry        = self::pattern_entry_by_name( $data, $case['validSlug'] );
+		$duplicate_entry    = self::pattern_entry_by_name( $data, $case['duplicateSlug'] );
+		$missing_slug_entry = self::pattern_entry_by_name( $data, $case['missingSlugValue'] );
+		$missing_title_entry = self::pattern_entry_by_name( $data, $case['missingTitleSlug'] );
+		$doing_it_wrong_messages = array_map(
+			static fn ( $entry ) => is_array( $entry ) ? ( $entry['message'] ?? '' ) : '',
+			$doing_it_wrong_log
+		);
+		$logged_missing_slug = (bool) array_filter(
+			$doing_it_wrong_messages,
+			static fn ( string $message ): bool => str_contains( $message, 'Slug' ) && str_contains( $message, 'missing' )
+		);
+		$logged_missing_title = (bool) array_filter(
+			$doing_it_wrong_messages,
+			static fn ( string $message ): bool => str_contains( $message, 'Title' ) && str_contains( $message, 'missing' )
+		);
+		$scanned_basenames = $pattern_file_log[0]['basenames'] ?? array();
+		$cache_ok          = $theme_development_mode
+			? false === $cache_value
+			: is_array( $cache_value )
+				&& ( $cache_value['patterns'][ $case['validFile'] ] ?? null ) === $parsed_valid
+				&& 1 === count(
+					array_filter(
+						$cache_ttl_log,
+						static fn ( array $entry ): bool => 120 === ( $entry['returnTtl'] ?? null )
+							&& 'theme_block_patterns' === ( $entry['cacheType'] ?? null )
+					)
+				);
+
+		self::collect_failure(
+			$failures,
+			$theme_exists
+				&& array( $theme_dir ) === $active_themes
+				&& isset( $pattern_file_log[0] )
+				&& $patterns_dir === ( $pattern_file_log[0]['dirpath'] ?? null )
+				&& in_array( $case['validFile'], $scanned_basenames, true )
+				&& in_array( $case['duplicateFile'], $scanned_basenames, true )
+				&& ! in_array( $case['ignoredFile'], $scanned_basenames, true )
+				&& is_array( $parsed_valid )
+				&& is_array( $parsed_duplicate )
+				&& null === $parsed_missing_slug
+				&& null === $parsed_missing_title
+				&& $case['validTitle'] === ( $parsed_valid['title'] ?? null )
+				&& $case['validSlug'] === ( $parsed_valid['slug'] ?? null )
+				&& $case['validDescription'] === ( $parsed_valid['description'] ?? null )
+				&& $case['validViewport'] === ( $parsed_valid['viewportWidth'] ?? null )
+				&& false === ( $parsed_valid['inserter'] ?? null )
+				&& array( 'buttons', 'gallery' ) === ( $parsed_valid['categories'] ?? null )
+				&& $case['keywords'] === ( $parsed_valid['keywords'] ?? null )
+				&& array( 'core/paragraph', 'core/group' ) === ( $parsed_valid['blockTypes'] ?? null )
+				&& array( 'post', 'page' ) === ( $parsed_valid['postTypes'] ?? null )
+				&& array( 'front-page', 'single' ) === ( $parsed_valid['templateTypes'] ?? null )
+				&& $cache_ok
+				&& $logged_missing_slug
+				&& $logged_missing_title,
+			'WP_Theme::get_block_patterns scans local PHP pattern files, parses metadata types, caches results, and rejects missing required headers',
+			array(
+				'case'            => self::theme_pattern_file_summary( $case ),
+				'themeExists'     => $theme_exists,
+				'activeThemes'    => $active_themes,
+				'patternFileLog'  => $pattern_file_log,
+				'parsedValid'     => $parsed_valid,
+				'parsedDuplicate' => $parsed_duplicate,
+				'cacheValue'      => $cache_value,
+				'cacheTtlLog'     => $cache_ttl_log,
+				'doingItWrong'    => $doing_it_wrong_log,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			true === ( $pre_registered ?? false )
+				&& $response instanceof \WP_REST_Response
+				&& is_array( $raw_valid )
+				&& is_array( $raw_duplicate )
+				&& $case['validFilePath'] === ( $raw_valid['filePath'] ?? null )
+				&& ! array_key_exists( 'content', $raw_valid )
+				&& $case['duplicatePreTitle'] === ( $raw_duplicate['title'] ?? null )
+				&& isset( $raw_duplicate['content'] )
+				&& $second_register_count === $first_register_count
+				&& is_array( $valid_entry )
+				&& is_array( $duplicate_entry )
+				&& null === $missing_slug_entry
+				&& null === $missing_title_entry
+				&& $case['validSlug'] === ( $valid_entry['name'] ?? null )
+				&& $case['validTitle'] === ( $valid_entry['title'] ?? null )
+				&& $case['validDescription'] === ( $valid_entry['description'] ?? null )
+				&& in_array( 'call-to-action', $valid_entry['categories'] ?? array(), true )
+				&& in_array( 'gallery', $valid_entry['categories'] ?? array(), true )
+				&& $case['keywords'] === ( $valid_entry['keywords'] ?? null )
+				&& array( 'core/paragraph', 'core/group' ) === ( $valid_entry['block_types'] ?? null )
+				&& array( 'post', 'page' ) === ( $valid_entry['post_types'] ?? null )
+				&& array( 'front-page', 'single' ) === ( $valid_entry['template_types'] ?? null )
+				&& $case['validViewport'] === (int) ( $valid_entry['viewport_width'] ?? 0 )
+				&& false === ( $valid_entry['inserter'] ?? null )
+				&& str_contains( $valid_entry['content'] ?? '', $case['validMarker'] )
+				&& ! array_key_exists( 'source', $valid_entry )
+				&& $case['duplicatePreTitle'] === ( $duplicate_entry['title'] ?? null )
+				&& 'plugin' === ( $duplicate_entry['source'] ?? null )
+				&& str_contains( $duplicate_entry['content'] ?? '', $case['duplicatePreMarker'] ),
+			'_register_theme_block_patterns registers local file patterns lazily, preserves pre-registered duplicates, and REST exposes parsed fields/content',
+			array(
+				'case'                => self::theme_pattern_file_summary( $case ),
+				'rawValid'            => $raw_valid,
+				'rawDuplicate'        => $raw_duplicate,
+				'firstRegisterCount'  => $first_register_count ?? null,
+				'secondRegisterCount' => $second_register_count,
+				'validEntry'          => $valid_entry,
+				'duplicateEntry'      => $duplicate_entry,
+				'data'                => $data,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$cleanup_ok
+				&& ! file_exists( $temp_root )
+				&& false === \has_filter( 'stylesheet', $stylesheet_filter )
+				&& false === \has_filter( 'template', $template_filter )
+				&& false === \has_filter( 'theme_root', $theme_root_filter )
+				&& false === \has_filter( 'theme_root_uri', $theme_root_uri_filter )
+				&& false === \has_filter( 'pre_option_stylesheet', $stylesheet_filter )
+				&& false === \has_filter( 'pre_option_template', $template_filter )
+				&& false === \has_filter( 'pre_option_stylesheet_root', $stylesheet_root_filter )
+				&& false === \has_filter( 'pre_option_template_root', $stylesheet_root_filter )
+				&& false === \has_filter( 'theme_block_pattern_files', $pattern_files_filter )
+				&& false === \has_filter( 'wp_theme_files_cache_ttl', $cache_ttl_filter )
+				&& false === \has_filter( 'doing_it_wrong_run', $doing_it_wrong_filter )
+				&& false === \has_filter( 'doing_it_wrong_trigger_error', $suppress_doing_it_wrong )
+				&& false === \has_filter( 'should_load_remote_block_patterns', $remote_off_filter )
+				&& false === \get_site_transient( $cache_key ),
+			'theme pattern file loader cleanup removes temp files, cache entries, and scoped filters',
+			array(
+				'cleanupOk'     => $cleanup_ok,
+				'tempExists'    => file_exists( $temp_root ),
+				'cacheAfter'    => \get_site_transient( $cache_key ),
+				'hasFileFilter' => \has_filter( 'theme_block_pattern_files', $pattern_files_filter ),
+				'hasTtlFilter'  => \has_filter( 'wp_theme_files_cache_ttl', $cache_ttl_filter ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'rest-controllers.block-patterns.theme-files',
+			array() === $failures,
+			array(
+				'stylesheet' => $case['stylesheet'],
+				'validSlug'  => $case['validSlug'],
+				'failures'   => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
 	private static function check_route_registry_behavior( \ComponentFuzz\FuzzContext $ctx ): array {
 		self::reset_runtime_state();
 
@@ -3562,6 +3909,199 @@ final class RestControllersSurface {
 		);
 	}
 
+	private static function theme_pattern_file_case( \ComponentFuzz\FuzzContext $ctx ): array {
+		$stylesheet         = self::block_slug( $ctx->fork( 'theme' ), 'cfz-pattern-theme' );
+		$valid_file_slug    = self::block_slug( $ctx->fork( 'valid-file' ), 'local-pattern' );
+		$duplicate_file_slug = self::block_slug( $ctx->fork( 'duplicate-file' ), 'duplicate-pattern' );
+		$missing_slug_file  = self::block_slug( $ctx->fork( 'missing-slug' ), 'missing-slug' ) . '.php';
+		$missing_title_file = self::block_slug( $ctx->fork( 'missing-title' ), 'missing-title' ) . '.php';
+		$valid_file         = $valid_file_slug . '.php';
+		$duplicate_file     = $duplicate_file_slug . '.php';
+		$valid_slug         = $stylesheet . '/' . $valid_file_slug;
+		$duplicate_slug     = $stylesheet . '/' . $duplicate_file_slug;
+		$token              = substr( hash( 'sha1', 'theme-pattern-files:' . $ctx->seed() ), 0, 8 );
+
+		return array(
+			'token'             => $token,
+			'stylesheet'        => $stylesheet,
+			'validFile'         => $valid_file,
+			'validFileSlug'     => $valid_file_slug,
+			'validSlug'         => $valid_slug,
+			'validTitle'        => 'Local Pattern ' . $ctx->int( 100, 999 ),
+			'validDescription'  => 'Local pattern fixture ' . $token,
+			'validViewport'     => $ctx->int( 480, 960 ),
+			'validMarker'       => 'theme local pattern ' . $token,
+			'keywords'          => array(
+				self::block_slug( $ctx->fork( 'keyword-a' ), 'keyword' ),
+				self::block_slug( $ctx->fork( 'keyword-b' ), 'keyword' ),
+			),
+			'duplicateFile'     => $duplicate_file,
+			'duplicateSlug'     => $duplicate_slug,
+			'duplicateTitle'    => 'Duplicate File Pattern ' . $ctx->int( 100, 999 ),
+			'duplicateMarker'   => 'duplicate file pattern ' . $token,
+			'duplicatePreTitle' => 'Preexisting Duplicate Pattern ' . $ctx->int( 100, 999 ),
+			'duplicatePreMarker' => 'preexisting duplicate ' . $token,
+			'missingSlugFile'   => $missing_slug_file,
+			'missingSlugValue'  => $stylesheet . '/' . self::block_slug( $ctx->fork( 'missing-slug-value' ), 'missing-slug-pattern' ),
+			'missingTitleFile'  => $missing_title_file,
+			'missingTitleSlug'  => $stylesheet . '/' . self::block_slug( $ctx->fork( 'missing-title-value' ), 'missing-title-pattern' ),
+			'ignoredFile'       => self::block_slug( $ctx->fork( 'ignored' ), 'ignored-pattern' ) . '.txt',
+		);
+	}
+
+	private static function write_theme_pattern_fixture( array &$case, string $theme_dir, string $patterns_dir ): void {
+		self::ensure_dir( $patterns_dir );
+
+		$case['validFilePath']      = $patterns_dir . DIRECTORY_SEPARATOR . $case['validFile'];
+		$case['duplicateFilePath']  = $patterns_dir . DIRECTORY_SEPARATOR . $case['duplicateFile'];
+		$case['missingSlugPath']    = $patterns_dir . DIRECTORY_SEPARATOR . $case['missingSlugFile'];
+		$case['missingTitlePath']   = $patterns_dir . DIRECTORY_SEPARATOR . $case['missingTitleFile'];
+		$case['ignoredFilePath']    = $patterns_dir . DIRECTORY_SEPARATOR . $case['ignoredFile'];
+
+		self::write_temp_file(
+			$theme_dir . DIRECTORY_SEPARATOR . 'style.css',
+			"/*\n"
+			. 'Theme Name: Component Fuzz Pattern Files ' . $case['token'] . "\n"
+			. 'Version: 1.' . substr( $case['token'], 0, 3 ) . "\n"
+			. 'Text Domain: ' . $case['stylesheet'] . "\n"
+			. "*/\n"
+		);
+		self::write_temp_file( $theme_dir . DIRECTORY_SEPARATOR . 'index.php', "<?php\n// Component fuzz pattern file theme.\n" );
+		self::write_temp_file(
+			$case['validFilePath'],
+			self::theme_pattern_file_contents(
+				array(
+					'Title'          => $case['validTitle'],
+					'Slug'           => $case['validSlug'],
+					'Description'    => $case['validDescription'],
+					'Categories'     => 'buttons, gallery',
+					'Keywords'       => implode( ', ', $case['keywords'] ),
+					'Block Types'    => 'core/paragraph, core/group',
+					'Post Types'     => 'post, page',
+					'Template Types' => 'front-page, single',
+					'Viewport Width' => (string) $case['validViewport'],
+					'Inserter'       => 'no',
+				),
+				$case['validMarker']
+			)
+		);
+		self::write_temp_file(
+			$case['duplicateFilePath'],
+			self::theme_pattern_file_contents(
+				array(
+					'Title'       => $case['duplicateTitle'],
+					'Slug'        => $case['duplicateSlug'],
+					'Description' => 'Duplicate file should not replace a pre-registered pattern.',
+					'Categories'  => 'columns',
+					'Keywords'    => 'duplicate',
+				),
+				$case['duplicateMarker']
+			)
+		);
+		self::write_temp_file(
+			$case['missingSlugPath'],
+			self::theme_pattern_file_contents(
+				array(
+					'Title'       => 'Missing Slug Pattern ' . $case['token'],
+					'Description' => 'This file intentionally has no slug header.',
+				),
+				'missing slug ' . $case['token']
+			)
+		);
+		self::write_temp_file(
+			$case['missingTitlePath'],
+			self::theme_pattern_file_contents(
+				array(
+					'Slug'        => $case['missingTitleSlug'],
+					'Description' => 'This file intentionally has no title header.',
+				),
+				'missing title ' . $case['token']
+			)
+		);
+		self::write_temp_file( $case['ignoredFilePath'], 'Ignored non-PHP pattern fixture ' . $case['token'] );
+	}
+
+	private static function theme_pattern_file_contents( array $headers, string $marker ): string {
+		$lines = array( '<?php', '/**' );
+		foreach ( $headers as $header => $value ) {
+			$lines[] = ' * ' . $header . ': ' . $value;
+		}
+		$lines[] = ' */';
+		$lines[] = '?>';
+		$lines[] = self::pattern_content( $marker );
+		return implode( "\n", $lines ) . "\n";
+	}
+
+	private static function theme_pattern_temp_root( \ComponentFuzz\FuzzContext $ctx ): string {
+		$path = rtrim( sys_get_temp_dir(), DIRECTORY_SEPARATOR )
+			. DIRECTORY_SEPARATOR
+			. 'component-fuzz-block-pattern-files-' . $ctx->seed() . '-' . $ctx->iteration() . '-' . getmypid();
+
+		if ( file_exists( $path ) && ! self::remove_dir_recursive( $path ) ) {
+			throw new \RuntimeException( 'Could not clear stale temp root: ' . $path );
+		}
+
+		self::ensure_dir( $path );
+		return $path;
+	}
+
+	private static function ensure_dir( string $dir ): void {
+		if ( is_dir( $dir ) ) {
+			return;
+		}
+
+		if ( ! mkdir( $dir, 0777, true ) && ! is_dir( $dir ) ) {
+			throw new \RuntimeException( 'Could not create directory: ' . $dir );
+		}
+	}
+
+	private static function write_temp_file( string $path, string $contents ): void {
+		self::ensure_dir( dirname( $path ) );
+		if ( false === file_put_contents( $path, $contents ) ) {
+			throw new \RuntimeException( 'Could not write file: ' . $path );
+		}
+	}
+
+	private static function remove_dir_recursive( string $dir ): bool {
+		if ( ! file_exists( $dir ) ) {
+			return true;
+		}
+		if ( ! is_dir( $dir ) ) {
+			return @unlink( $dir );
+		}
+
+		$iterator = new \RecursiveIteratorIterator(
+			new \RecursiveDirectoryIterator( $dir, \FilesystemIterator::SKIP_DOTS ),
+			\RecursiveIteratorIterator::CHILD_FIRST
+		);
+
+		foreach ( $iterator as $item ) {
+			$path = $item->getPathname();
+			if ( $item->isDir() && ! $item->isLink() ) {
+				if ( ! @rmdir( $path ) ) {
+					return false;
+				}
+			} elseif ( ! @unlink( $path ) ) {
+				return false;
+			}
+		}
+
+		return @rmdir( $dir );
+	}
+
+	private static function theme_pattern_file_summary( array $case ): array {
+		return array(
+			'stylesheet'       => $case['stylesheet'],
+			'validFile'        => $case['validFile'],
+			'validSlug'        => $case['validSlug'],
+			'duplicateFile'    => $case['duplicateFile'],
+			'duplicateSlug'    => $case['duplicateSlug'],
+			'missingSlugFile'  => $case['missingSlugFile'],
+			'missingTitleFile' => $case['missingTitleFile'],
+			'ignoredFile'      => $case['ignoredFile'],
+		);
+	}
+
 	private static function remote_pattern(
 		string $title,
 		string $content,
@@ -4068,6 +4608,9 @@ final class RestControllersSurface {
 					'wp_rest_server',
 					'wp_rewrite',
 					'wp_taxonomies',
+					'wp_template_path',
+					'wp_theme_directories',
+					'wp_stylesheet_path',
 				)
 			),
 			'wpdbOptions'                => isset( $GLOBALS['wpdb'] ) && method_exists( $GLOBALS['wpdb'], 'component_fuzz_get_options' )
@@ -4154,6 +4697,9 @@ final class RestControllersSurface {
 				'wp_registered_settings',
 				'wp_rest_additional_fields',
 				'wp_taxonomies',
+				'wp_template_path',
+				'wp_theme_directories',
+				'wp_stylesheet_path',
 			) as $name
 		) {
 			$globals[ $name ] = self::global_signature( $name );
