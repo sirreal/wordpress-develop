@@ -42,9 +42,11 @@ final class FeedParsersSurface {
 
 			$rows[] = self::check_magpie_rss_parser( $ctx->fork( 'magpie-rss' ), $case );
 			$rows[] = self::check_magpie_atom_normalization( $ctx->fork( 'magpie-atom' ), $case );
+			$rows[] = self::check_magpie_rdf_normalization( $ctx->fork( 'magpie-rdf' ), $case );
 			$rows[] = self::check_atomlib_file_parser( $ctx->fork( 'atomlib' ), $case );
 			$rows[] = self::check_simplepie_raw_parser_and_sanitizer( $ctx->fork( 'simplepie' ), $case );
 			$rows[] = self::check_simplepie_file_http_adapter( $ctx->fork( 'simplepie-file-http' ), $case );
+			$rows[] = self::check_fetch_feed_orchestration( $ctx->fork( 'fetch-feed' ), $case );
 			$rows[] = self::check_feed_cache_adapters( $ctx->fork( 'cache' ), $case );
 			$rows[] = self::check_legacy_helpers_and_file_boundaries( $ctx->fork( 'legacy' ), $case );
 		} catch ( \Throwable $e ) {
@@ -152,6 +154,7 @@ final class FeedParsersSurface {
 				'add_filter',
 				'delete_site_transient',
 				'delete_transient',
+				'fetch_feed',
 				'get_bloginfo',
 				'get_site_transient',
 				'get_transient',
@@ -365,6 +368,88 @@ final class FeedParsersSurface {
 			'feed-parsers.magpie-atom.normalization',
 			$failures,
 			array( 'fixture' => self::preview( $case['magpieAtomXml'] ) )
+		);
+	}
+
+	private static function check_magpie_rdf_normalization( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures = array();
+		$captured = self::capture_legacy_warnings(
+			static function () use ( $case ) {
+				return new \MagpieRSS( $case['rdfXml'] );
+			}
+		);
+		$rdf      = $captured['value'];
+
+		self::collect_failure(
+			$failures,
+			$rdf instanceof \MagpieRSS && '1.0' === $rdf->is_rss() && false === $rdf->is_atom(),
+			'MagpieRSS identifies bounded RSS 1.0/RDF fixtures',
+			array(
+				'type'    => $rdf instanceof \MagpieRSS ? $rdf->feed_type : null,
+				'version' => $rdf instanceof \MagpieRSS ? $rdf->feed_version : null,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$rdf instanceof \MagpieRSS
+				&& $case['channel']['title'] === ( $rdf->channel['title'] ?? null )
+				&& $case['channel']['link'] === ( $rdf->channel['link'] ?? null )
+				&& $case['channel']['description'] === ( $rdf->channel['description'] ?? null )
+				&& $case['channel']['description'] === ( $rdf->channel['tagline'] ?? null )
+				&& count( $case['items'] ) === count( $rdf->items ),
+			'RDF channel fields normalize onto legacy RSS channel keys',
+			array( 'channel' => $rdf instanceof \MagpieRSS ? $rdf->channel : null )
+		);
+
+		if ( $rdf instanceof \MagpieRSS ) {
+			foreach ( $case['items'] as $index => $expected ) {
+				$item = $rdf->items[ $index ] ?? array();
+				self::collect_failure(
+					$failures,
+					$expected['link'] === ( $item['about'] ?? null )
+						&& $expected['title'] === ( $item['title'] ?? null )
+						&& $expected['link'] === ( $item['link'] ?? null )
+						&& $expected['description'] === ( $item['description'] ?? null )
+						&& $expected['description'] === ( $item['summary'] ?? null )
+						&& $expected['author'] === ( $item['dc']['creator'] ?? null )
+						&& $expected['content'] === ( $item['content']['encoded'] ?? null )
+						&& $expected['content'] === ( $item['atom_content'] ?? null ),
+					'RDF items preserve rdf:about, namespace fields, summaries, and atom_content normalization',
+					array(
+						'index' => $index,
+						'item'  => $item,
+					)
+				);
+			}
+
+			self::collect_failure(
+				$failures,
+				'Image ' . $case['token'] === ( $rdf->image['title'] ?? null )
+					&& 'https://example.test/images/' . rawurlencode( $case['token'] ) . '.png' === ( $rdf->image['url'] ?? null )
+					&& $case['channel']['link'] === ( $rdf->image['link'] ?? null )
+					&& 'search_' . $case['token'] === ( $rdf->textinput['name'] ?? null )
+					&& 'Search ' . $case['token'] === ( $rdf->textinput['title'] ?? null ),
+				'RDF image and textinput blocks are parsed into their dedicated Magpie arrays',
+				array(
+					'image'     => $rdf->image ?? null,
+					'textinput' => $rdf->textinput ?? null,
+				)
+			);
+		}
+
+		self::collect_failure(
+			$failures,
+			self::only_known_magpie_warnings( $captured['warnings'] ),
+			'RDF parsing emits only the known Magpie PHP 8 callback warning',
+			array( 'warnings' => array_slice( $captured['warnings'], 0, 8 ) )
+		);
+
+		return self::result(
+			$ctx,
+			'feed-parsers.magpie-rdf.rss10-namespace-normalization',
+			$failures,
+			array( 'fixture' => self::preview( $case['rdfXml'] ) )
 		);
 	}
 
@@ -751,6 +836,271 @@ final class FeedParsersSurface {
 		);
 	}
 
+	private static function check_fetch_feed_orchestration( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures         = array();
+		$token            = rawurlencode( $case['token'] );
+		$single_url       = "https://feeds.example.test/{$token}/fetch-single.rss?v=" . rawurlencode( $ctx->identifier( 3, 8 ) );
+		$array_single_url = "https://feeds.example.test/{$token}/fetch-array-single.rss?v=" . rawurlencode( $ctx->identifier( 3, 8 ) );
+		$multi_rss_url    = "https://feeds.example.test/{$token}/fetch-multi-rss.rss?v=" . rawurlencode( $ctx->identifier( 3, 8 ) );
+		$multi_atom_url   = "https://feeds.example.test/{$token}/fetch-multi-atom.atom?v=" . rawurlencode( $ctx->identifier( 3, 8 ) );
+		$error_urls       = array(
+			"https://feeds.example.test/{$token}/fetch-error-one.rss?v=" . rawurlencode( $ctx->identifier( 3, 8 ) ),
+			"https://feeds.example.test/{$token}/fetch-error-two.rss?v=" . rawurlencode( $ctx->identifier( 3, 8 ) ),
+		);
+		$expected_bodies   = array(
+			$single_url       => $case['rssXml'],
+			$array_single_url => $case['rssXml'],
+			$multi_rss_url    => $case['rssXml'],
+			$multi_atom_url   => $case['simplepieAtomXml'],
+		);
+		$lifetime         = $ctx->int( 60, 600 );
+		$requests         = array();
+		$lifetime_calls   = array();
+		$options_calls    = array();
+
+		$http_stub = static function ( $preempt, array $parsed_args, string $url ) use ( &$requests, $expected_bodies, $error_urls, $case ) {
+			$requests[] = array(
+				'url'         => $url,
+				'timeout'     => $parsed_args['timeout'] ?? null,
+				'redirection' => $parsed_args['redirection'] ?? null,
+				'headers'     => array_keys( (array) ( $parsed_args['headers'] ?? array() ) ),
+				'userAgent'   => $parsed_args['user-agent'] ?? null,
+				'preempt'     => false === $preempt ? 'false' : get_debug_type( $preempt ),
+			);
+
+			if ( isset( $expected_bodies[ $url ] ) ) {
+				return array(
+					'headers'  => array(
+						'content-type' => 'application/rss+xml; charset=UTF-8',
+						'etag'         => '"' . $case['token'] . '"',
+					),
+					'body'     => $expected_bodies[ $url ],
+					'response' => array(
+						'code'    => 200,
+						'message' => 'OK',
+					),
+					'cookies'  => array(),
+					'filename' => null,
+				);
+			}
+
+			if ( in_array( $url, $error_urls, true ) ) {
+				return array(
+					'headers'  => array( 'content-type' => 'text/plain; charset=UTF-8' ),
+					'body'     => '',
+					'response' => array(
+						'code'    => 404,
+						'message' => 'Not Found',
+					),
+					'cookies'  => array(),
+					'filename' => null,
+				);
+			}
+
+			return new \WP_Error( 'component_fuzz_unexpected_feed_url', 'Unexpected fetch_feed URL: ' . $url );
+		};
+
+		$lifetime_filter = static function ( $duration, $url ) use ( &$lifetime_calls, $lifetime ): int {
+			$lifetime_calls[] = array(
+				'duration' => $duration,
+				'returned' => $lifetime,
+				'url'      => $url,
+			);
+			return $lifetime;
+		};
+
+		$options_action = static function ( $feed, $url ) use ( &$options_calls ): void {
+			$options_calls[] = array(
+				'url'       => $url,
+				'feedClass' => is_object( $feed ) ? get_class( $feed ) : get_debug_type( $feed ),
+				'sanitize'  => isset( $feed->sanitize ) && is_object( $feed->sanitize ) ? get_class( $feed->sanitize ) : null,
+			);
+		};
+		$charset_filter = static function (): string {
+			return 'UTF-8';
+		};
+
+		\add_filter( 'wp_feed_cache_transient_lifetime', $lifetime_filter, 10, 2 );
+		\add_filter( 'wp_feed_options', $options_action, 10, 2 );
+		\add_filter( 'pre_option_blog_charset', $charset_filter, 10, 0 );
+
+		$empty_string          = null;
+		$empty_array           = null;
+		$single                = null;
+		$cached_single         = null;
+		$array_single          = null;
+		$merged                = null;
+		$error_result          = null;
+		$empty_request_count   = null;
+		$single_request_count  = null;
+		$cached_request_count  = null;
+		$throwable             = null;
+
+		try {
+			self::with_preempted_http_request(
+				$http_stub,
+				static function () use (
+					&$empty_string,
+					&$empty_array,
+					&$single,
+					&$cached_single,
+					&$array_single,
+					&$merged,
+					&$error_result,
+					&$empty_request_count,
+					&$single_request_count,
+					&$cached_request_count,
+					&$requests,
+					$single_url,
+					$array_single_url,
+					$multi_rss_url,
+					$multi_atom_url,
+					$error_urls
+				): void {
+					$empty_string        = \fetch_feed( '' );
+					$empty_array         = \fetch_feed( array() );
+					$empty_request_count = count( $requests );
+
+					$single               = \fetch_feed( $single_url );
+					$single_request_count = count( $requests );
+					$cached_single        = \fetch_feed( $single_url );
+					$cached_request_count = count( $requests );
+
+					$array_single = \fetch_feed( array( $array_single_url ) );
+					$merged       = \fetch_feed( array( $multi_rss_url, $multi_atom_url ) );
+					$error_result = \fetch_feed( $error_urls );
+				}
+			);
+		} catch ( \Throwable $e ) {
+			$throwable = self::describe_throwable( $e );
+		} finally {
+			\remove_filter( 'pre_option_blog_charset', $charset_filter, 10 );
+			\remove_filter( 'wp_feed_options', $options_action, 10 );
+			\remove_filter( 'wp_feed_cache_transient_lifetime', $lifetime_filter, 10 );
+		}
+
+		self::collect_failure(
+			$failures,
+			null === $throwable,
+			'fetch_feed orchestration does not throw for generated local responses',
+			array( 'throwable' => $throwable )
+		);
+
+		self::collect_failure(
+			$failures,
+			$empty_string instanceof \SimplePie\SimplePie
+				&& $empty_array instanceof \SimplePie\SimplePie
+				&& 0 === (int) $empty_string->get_item_quantity()
+				&& 0 === (int) $empty_array->get_item_quantity()
+				&& 0 === $empty_request_count,
+			'fetch_feed empty string and empty array return initialized SimplePie objects without HTTP',
+			array(
+				'emptyString' => self::describe_simplepie_result( $empty_string ),
+				'emptyArray'  => self::describe_simplepie_result( $empty_array ),
+				'requests'    => $empty_request_count,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$single instanceof \SimplePie\SimplePie
+				&& ! \is_wp_error( $single )
+				&& count( $case['items'] ) === (int) $single->get_item_quantity()
+				&& $single->sanitize instanceof \WP_SimplePie_Sanitize_KSES
+				&& self::simplepie_titles_include_all_tokens( $single, $case['items'] )
+				&& 1 === $single_request_count,
+			'fetch_feed single URL installs WordPress SimplePie adapters and parses bounded RSS content',
+			array(
+				'result'   => self::describe_simplepie_result( $single ),
+				'requests' => array_slice( $requests, 0, $single_request_count ?? 0 ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$cached_single instanceof \SimplePie\SimplePie
+				&& count( $case['items'] ) === (int) $cached_single->get_item_quantity()
+				&& self::simplepie_titles_include_all_tokens( $cached_single, $case['items'] )
+				&& is_int( $cached_request_count )
+				&& is_int( $single_request_count )
+				&& $cached_request_count >= $single_request_count
+				&& $cached_request_count <= $single_request_count + 1,
+			'fetch_feed repeated generated URLs remain deterministic and bounded through the cache-enabled path',
+			array(
+				'cached'         => self::describe_simplepie_result( $cached_single ),
+				'firstRequests'  => $single_request_count,
+				'cachedRequests' => $cached_request_count,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$array_single instanceof \SimplePie\SimplePie
+				&& count( $case['items'] ) === (int) $array_single->get_item_quantity()
+				&& in_array( $array_single_url, array_column( $requests, 'url' ), true ),
+			'fetch_feed collapses one-item URL arrays to the single-feed path',
+			array(
+				'result'   => self::describe_simplepie_result( $array_single ),
+				'urlSeen'  => in_array( $array_single_url, array_column( $requests, 'url' ), true ),
+				'requests' => array_slice( $requests, 0, 8 ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$merged instanceof \SimplePie\SimplePie
+				&& ( count( $case['items'] ) * 2 ) === (int) $merged->get_item_quantity()
+				&& self::simplepie_titles_include_all_tokens( $merged, $case['items'] )
+				&& self::requests_include_urls( $requests, array( $multi_rss_url, $multi_atom_url ) ),
+			'fetch_feed multi-feed success path merges generated RSS and Atom items',
+			array(
+				'result'   => self::describe_simplepie_result( $merged ),
+				'requests' => array_slice( $requests, 0, 10 ),
+			)
+		);
+
+		$error_messages = \is_wp_error( $error_result ) ? $error_result->get_error_messages() : array();
+		$first_message  = $error_messages[0] ?? null;
+		self::collect_failure(
+			$failures,
+			\is_wp_error( $error_result )
+				&& 'simplepie-error' === $error_result->get_error_code()
+				&& is_array( $first_message )
+				&& count( $error_urls ) === count( $first_message )
+				&& self::error_messages_include_urls( $first_message, $error_urls ),
+			'fetch_feed multi-feed error path aggregates every failing feed URL into one WP_Error',
+			array(
+				'code'     => \is_wp_error( $error_result ) ? $error_result->get_error_code() : null,
+				'messages' => $error_messages,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::lifetime_calls_include_url( $lifetime_calls, $single_url, $lifetime )
+				&& self::options_calls_include_url( $options_calls, $single_url )
+				&& self::options_calls_include_url( $options_calls, array( $array_single_url ) )
+				&& self::options_calls_include_url( $options_calls, array( $multi_rss_url, $multi_atom_url ) ),
+			'fetch_feed applies cache-lifetime filters and wp_feed_options before generated URL normalization',
+			array(
+				'lifetime' => array_slice( $lifetime_calls, 0, 12 ),
+				'options'  => array_slice( $options_calls, 0, 8 ),
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'feed-parsers.fetch-feed.orchestration-cache-and-error-aggregation',
+			$failures,
+			array(
+				'singleUrl' => $single_url,
+				'multiUrls' => array( $multi_rss_url, $multi_atom_url ),
+				'errors'    => $error_urls,
+				'requests'  => count( $requests ),
+			)
+		);
+	}
+
 	private static function check_feed_cache_adapters( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
 		$failures = array();
 		$name     = 'cfz_' . strtolower( $case['token'] ) . '_' . strtolower( $ctx->identifier( 4, 10 ) );
@@ -1012,6 +1362,7 @@ final class FeedParsersSurface {
 			'rssXml'           => self::build_rss_xml( $channel, $items, $category ),
 			'malformedRssXml'  => self::build_malformed_rss_xml( $channel, $items[0] ),
 			'magpieAtomXml'    => self::build_magpie_atom_xml( $channel, $items ),
+			'rdfXml'           => self::build_rdf_xml( $channel, $items, $category, $token ),
 			'atomlibXml'       => self::build_atomlib_xml( $channel, $items, $category ),
 			'malformedAtomXml' => self::build_malformed_atom_xml( $channel, $items[0] ),
 			'simplepieAtomXml' => self::build_simplepie_atom_xml( $channel, $items ),
@@ -1065,6 +1416,45 @@ final class FeedParsersSurface {
 			$xml .= "</entry>\n";
 		}
 		$xml .= "</feed>\n";
+
+		return $xml;
+	}
+
+	private static function build_rdf_xml( array $channel, array $items, string $category, string $token ): string {
+		$xml  = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
+		$xml .= '<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns="http://purl.org/rss/1.0/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:content="http://purl.org/rss/1.0/modules/content/">' . "\n";
+		$xml .= '<channel rdf:about="' . self::xml_attr( $channel['link'] ) . '">' . "\n";
+		$xml .= '<title>' . self::xml_text( $channel['title'] ) . "</title>\n";
+		$xml .= '<link>' . self::xml_text( $channel['link'] ) . "</link>\n";
+		$xml .= '<description>' . self::xml_text( $channel['description'] ) . "</description>\n";
+		$xml .= "<items><rdf:Seq>\n";
+		foreach ( $items as $item ) {
+			$xml .= '<rdf:li rdf:resource="' . self::xml_attr( $item['link'] ) . "\" />\n";
+		}
+		$xml .= "</rdf:Seq></items>\n";
+		$xml .= "</channel>\n";
+		$xml .= '<image rdf:about="https://example.test/images/' . self::xml_attr( rawurlencode( $token ) ) . '.png">' . "\n";
+		$xml .= '<title>' . self::xml_text( 'Image ' . $token ) . "</title>\n";
+		$xml .= '<url>https://example.test/images/' . self::xml_text( rawurlencode( $token ) ) . ".png</url>\n";
+		$xml .= '<link>' . self::xml_text( $channel['link'] ) . "</link>\n";
+		$xml .= "</image>\n";
+		$xml .= '<textinput rdf:about="https://example.test/search/' . self::xml_attr( rawurlencode( $token ) ) . '">' . "\n";
+		$xml .= '<title>' . self::xml_text( 'Search ' . $token ) . "</title>\n";
+		$xml .= '<description>' . self::xml_text( 'Search feed ' . $category ) . "</description>\n";
+		$xml .= '<name>' . self::xml_text( 'search_' . $token ) . "</name>\n";
+		$xml .= '<link>' . self::xml_text( $channel['link'] ) . "</link>\n";
+		$xml .= "</textinput>\n";
+		foreach ( $items as $item ) {
+			$xml .= '<item rdf:about="' . self::xml_attr( $item['link'] ) . '">' . "\n";
+			$xml .= '<title>' . self::xml_cdata( $item['title'] ) . "</title>\n";
+			$xml .= '<link>' . self::xml_text( $item['link'] ) . "</link>\n";
+			$xml .= '<description>' . self::xml_text( $item['description'] ) . "</description>\n";
+			$xml .= '<dc:creator>' . self::xml_text( $item['author'] ) . "</dc:creator>\n";
+			$xml .= '<dc:subject>' . self::xml_cdata( $category ) . "</dc:subject>\n";
+			$xml .= '<content:encoded>' . self::xml_cdata( $item['content'] ) . "</content:encoded>\n";
+			$xml .= "</item>\n";
+		}
+		$xml .= "</rdf:RDF>\n";
 
 		return $xml;
 	}
@@ -1138,6 +1528,104 @@ final class FeedParsersSurface {
 		}
 
 		return false;
+	}
+
+	private static function simplepie_titles_include_all_tokens( \SimplePie\SimplePie $feed, array $items ): bool {
+		$titles = array();
+		foreach ( $feed->get_items() as $item ) {
+			$title = $item->get_title();
+			if ( is_string( $title ) ) {
+				$titles[] = $title;
+			}
+		}
+
+		foreach ( $items as $expected ) {
+			$found = false;
+			foreach ( $titles as $title ) {
+				if ( str_contains( $title, $expected['token'] ) ) {
+					$found = true;
+					break;
+				}
+			}
+			if ( ! $found ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function requests_include_urls( array $requests, array $urls ): bool {
+		$seen = array_column( $requests, 'url' );
+		foreach ( $urls as $url ) {
+			if ( ! in_array( $url, $seen, true ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function error_messages_include_urls( array $messages, array $urls ): bool {
+		foreach ( $urls as $url ) {
+			$found = false;
+			foreach ( $messages as $message ) {
+				if ( is_string( $message ) && str_contains( $message, $url ) ) {
+					$found = true;
+					break;
+				}
+			}
+			if ( ! $found ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function lifetime_calls_include_url( array $calls, $url, int $lifetime ): bool {
+		foreach ( $calls as $call ) {
+			if ( ( $call['url'] ?? null ) === $url && $lifetime === ( $call['returned'] ?? null ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private static function options_calls_include_url( array $calls, $url ): bool {
+		foreach ( $calls as $call ) {
+			if (
+				( $call['url'] ?? null ) === $url
+				&& \SimplePie\SimplePie::class === ( $call['feedClass'] ?? null )
+				&& \WP_SimplePie_Sanitize_KSES::class === ( $call['sanitize'] ?? null )
+			) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private static function describe_simplepie_result( $value ): array {
+		if ( $value instanceof \SimplePie\SimplePie ) {
+			return array(
+				'class'       => get_class( $value ),
+				'items'       => (int) $value->get_item_quantity(),
+				'error'       => $value->error(),
+				'sanitize'    => isset( $value->sanitize ) && is_object( $value->sanitize ) ? get_class( $value->sanitize ) : null,
+			);
+		}
+
+		if ( \is_wp_error( $value ) ) {
+			return array(
+				'class'    => get_class( $value ),
+				'code'     => $value->get_error_code(),
+				'messages' => $value->get_error_messages(),
+			);
+		}
+
+		return array( 'type' => get_debug_type( $value ) );
 	}
 
 	private static function install_no_network_guard(): void {
