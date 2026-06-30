@@ -33,6 +33,7 @@ final class CustomizerPersistenceSurface {
 			$rows[] = self::check_changeset_post_content_parsing( $ctx->fork( 'changeset-parsing' ) );
 			$rows[] = self::check_changeset_lock_heartbeat_persistence( $ctx->fork( 'changeset-lock-heartbeat' ) );
 			$rows[] = self::check_save_changeset_post_transactions( $ctx->fork( 'changeset-save' ) );
+			$rows[] = self::check_save_ajax_envelope( $ctx->fork( 'save-ajax' ) );
 			$rows[] = self::check_custom_css_setting_validation_preview_update( $ctx->fork( 'custom-css-setting' ) );
 			$rows[] = self::check_custom_css_post_filters_and_round_trips( $ctx->fork( 'custom-css-post' ) );
 		} catch ( \Throwable $e ) {
@@ -82,13 +83,16 @@ final class CustomizerPersistenceSurface {
 		foreach (
 			array(
 				'add_filter',
+				'check_ajax_referer',
 				'create_initial_post_types',
 				'current_user_can',
 				'get_post',
 				'get_current_user_id',
 				'get_option',
 				'get_post_meta',
+				'get_post_status_object',
 				'get_post_status',
+				'get_post_type_object',
 				'get_post_type',
 				'get_stylesheet',
 				'get_theme_mod',
@@ -97,10 +101,13 @@ final class CustomizerPersistenceSurface {
 				'is_wp_error',
 				'remove_filter',
 				'sanitize_title',
+				'status_header',
 				'set_theme_mod',
 				'update_post_meta',
+				'wp_parse_args',
 				'wp_cache_flush',
 				'wp_check_post_lock',
+				'wp_create_nonce',
 				'wp_get_custom_css',
 				'wp_get_custom_css_post',
 				'wp_insert_post',
@@ -712,6 +719,240 @@ final class CustomizerPersistenceSurface {
 		);
 	}
 
+	private static function check_save_ajax_envelope( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime();
+
+		$failures     = array();
+		$uuid         = self::uuid( $ctx->fork( 'ajax-save' ) );
+		$option_id    = self::id( $ctx->fork( 'ajax-option' ), 'option' );
+		$option_value = 'ajax-option-' . $ctx->identifier( 4, 12 ) . '-' . $ctx->int( 100, 999 );
+		$title        = 'AJAX changeset ' . $ctx->identifier( 4, 10 );
+		$marker       = 'cfz-save-response-' . $ctx->identifier( 4, 10 );
+		$user_id      = self::insert_lock_user( $ctx, 'ajax-save' );
+
+		$unauthenticated = self::capture_ajax(
+			static function () use ( $ctx ): void {
+				\wp_set_current_user( 0 );
+				self::manager( $ctx->fork( 'unauthenticated' ) )->save();
+			}
+		);
+
+		$not_preview = self::capture_ajax(
+			static function () use ( $ctx, $user_id ): void {
+				\wp_set_current_user( $user_id );
+				self::manager( $ctx->fork( 'not-preview' ) )->save();
+			}
+		);
+
+		$invalid_nonce = self::capture_ajax(
+			static function () use ( $ctx, $user_id ): void {
+				\wp_set_current_user( $user_id );
+				$manager = self::preview_manager( $ctx->fork( 'invalid-nonce' ) );
+				self::set_ajax_post(
+					array(
+						'nonce' => 'bad-nonce',
+					)
+				);
+				self::with_capabilities(
+					static function () use ( $manager ): void {
+						$manager->save();
+					}
+				);
+			}
+		);
+
+		$bad_data = self::capture_ajax(
+			static function () use ( $ctx, $user_id ): void {
+				\wp_set_current_user( $user_id );
+				$manager = self::preview_manager( $ctx->fork( 'bad-data' ) );
+				self::set_ajax_post(
+					array(
+						'nonce'                    => \wp_create_nonce( 'save-customize_' . $manager->get_stylesheet() ),
+						'customize_changeset_data' => '{"not valid"',
+					)
+				);
+				self::with_capabilities(
+					static function () use ( $manager ): void {
+						$manager->save();
+					}
+				);
+			}
+		);
+
+		$bad_status = self::capture_ajax(
+			static function () use ( $ctx, $user_id ): void {
+				\wp_set_current_user( $user_id );
+				$manager = self::preview_manager( $ctx->fork( 'bad-status' ) );
+				self::set_ajax_post(
+					array(
+						'nonce'                      => \wp_create_nonce( 'save-customize_' . $manager->get_stylesheet() ),
+						'customize_changeset_status' => 'not-a-status',
+					)
+				);
+				self::with_capabilities(
+					static function () use ( $manager ): void {
+						$manager->save();
+					}
+				);
+			}
+		);
+
+		$bad_date = self::capture_ajax(
+			static function () use ( $ctx, $user_id ): void {
+				\wp_set_current_user( $user_id );
+				$manager = self::preview_manager( $ctx->fork( 'bad-date' ) );
+				self::set_ajax_post(
+					array(
+						'nonce'                     => \wp_create_nonce( 'save-customize_' . $manager->get_stylesheet() ),
+						'customize_changeset_date' => 'not a date ' . $ctx->identifier( 4, 8 ),
+					)
+				);
+				self::with_capabilities(
+					static function () use ( $manager ): void {
+						$manager->save();
+					}
+				);
+			}
+		);
+
+		$response_filter_calls = array();
+		$success_manager       = null;
+		$response_filter       = static function ( array $response, \WP_Customize_Manager $manager ) use ( &$response_filter_calls, $marker ): array {
+			$response_filter_calls[] = array(
+				'uuid'   => $manager->changeset_uuid(),
+				'status' => $response['changeset_status'] ?? null,
+				'keys'   => array_keys( $response ),
+			);
+			$response['component_fuzz_marker'] = $marker;
+			return $response;
+		};
+		\add_filter( 'customize_save_response', $response_filter, 10, 2 );
+		try {
+			$success = self::capture_ajax(
+				static function () use ( $ctx, $uuid, $option_id, $option_value, $title, $user_id, &$success_manager ): void {
+					\wp_set_current_user( $user_id );
+					$manager = self::preview_manager( $ctx, $uuid );
+					$success_manager = $manager;
+					$manager->add_setting(
+						$option_id,
+						array(
+							'type'       => 'option',
+							'capability' => self::CAPABILITY,
+							'default'    => 'ajax-default',
+						)
+					);
+					self::set_ajax_post(
+						array(
+							'nonce'                      => \wp_create_nonce( 'save-customize_' . $manager->get_stylesheet() ),
+							'customize_changeset_title'  => $title,
+							'customize_changeset_status' => 'draft',
+							'customize_changeset_data'   => \wp_json_encode(
+								array(
+									$option_id => array(
+										'value' => $option_value,
+									),
+								)
+							),
+						)
+					);
+					self::with_capabilities(
+						static function () use ( $manager ): void {
+							$manager->save();
+						}
+					);
+				}
+			);
+		} finally {
+			\remove_filter( 'customize_save_response', $response_filter, 10 );
+		}
+
+		$success_body = self::json_body( $success );
+		$post_id      = $success_manager instanceof \WP_Customize_Manager ? (int) $success_manager->changeset_post_id() : 0;
+		$post         = $post_id > 0 ? \get_post( $post_id ) : null;
+		$decoded      = $post instanceof \WP_Post ? json_decode( $post->post_content, true ) : null;
+		$lock         = $post_id > 0 ? \get_post_meta( $post_id, '_edit_lock', true ) : null;
+
+		self::collect_failure(
+			$failures,
+			self::json_error_code( $unauthenticated ) === 'unauthenticated'
+				&& self::json_error_code( $not_preview ) === 'not_preview'
+				&& self::json_error_code( $invalid_nonce ) === 'invalid_nonce'
+				&& self::json_error_code( $bad_data ) === 'invalid_customize_changeset_data'
+				&& self::json_error_code( $bad_status ) === 'bad_customize_changeset_status'
+				&& self::json_error_code( $bad_date ) === 'bad_customize_changeset_date'
+				&& 400 === self::status_code( $bad_status )
+				&& 400 === self::status_code( $bad_date ),
+			'Customizer save AJAX rejects auth, preview, nonce, JSON, status, and date failures with stable envelopes',
+			array(
+				'unauthenticated' => self::summarize_capture( $unauthenticated ),
+				'notPreview'      => self::summarize_capture( $not_preview ),
+				'invalidNonce'    => self::summarize_capture( $invalid_nonce ),
+				'badData'         => self::summarize_capture( $bad_data ),
+				'badStatus'       => self::summarize_capture( $bad_status ),
+				'badDate'         => self::summarize_capture( $bad_date ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::json_success( $success )
+				&& is_array( $success_body )
+				&& 'draft' === ( $success_body['data']['changeset_status'] ?? null )
+				&& $marker === ( $success_body['data']['component_fuzz_marker'] ?? null )
+				&& true === ( $success_body['data']['setting_validities'][ $option_id ] ?? null )
+				&& $post instanceof \WP_Post
+				&& 'customize_changeset' === $post->post_type
+				&& 'draft' === $post->post_status
+				&& $uuid === $post->post_name
+				&& $title === $post->post_title
+				&& is_array( $decoded )
+				&& self::same_value( $option_value, $decoded[ $option_id ]['value'] ?? null )
+				&& 'option' === ( $decoded[ $option_id ]['type'] ?? null )
+				&& self::lock_belongs_to_user( self::parse_changeset_lock( $lock ), $user_id )
+				&& 1 === count( $response_filter_calls )
+				&& false === \has_filter( 'customize_save_response', $response_filter ),
+			'Customizer save AJAX persists a draft changeset, prepares setting_validities for JS, filters the response, and sets the edit lock',
+			array(
+				'jsonSuccess'        => self::json_success( $success ),
+				'successDataKeys'    => is_array( $success_body['data'] ?? null ) ? array_keys( $success_body['data'] ) : null,
+				'changesetStatus'    => $success_body['data']['changeset_status'] ?? null,
+				'marker'             => $success_body['data']['component_fuzz_marker'] ?? null,
+				'validity'           => $success_body['data']['setting_validities'][ $option_id ] ?? null,
+				'postType'           => $post instanceof \WP_Post ? $post->post_type : null,
+				'postStatus'         => $post instanceof \WP_Post ? $post->post_status : null,
+				'postName'           => $post instanceof \WP_Post ? $post->post_name : null,
+				'postTitle'          => $post instanceof \WP_Post ? $post->post_title : null,
+				'decodedValue'       => is_array( $decoded ) ? ( $decoded[ $option_id ]['value'] ?? null ) : null,
+				'decodedType'        => is_array( $decoded ) ? ( $decoded[ $option_id ]['type'] ?? null ) : null,
+				'lock'               => self::describe_lock( $lock ),
+				'lockBelongsToUser'  => self::lock_belongs_to_user( self::parse_changeset_lock( $lock ), $user_id ),
+				'filterCallCount'    => count( $response_filter_calls ),
+				'filterRemains'      => \has_filter( 'customize_save_response', $response_filter ),
+				'throwable'          => $success['throwable'] ?? null,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'customizer-persistence.save-ajax-envelope',
+			array() === $failures,
+			array(
+				'errorCodes'      => array(
+					self::json_error_code( $unauthenticated ),
+					self::json_error_code( $not_preview ),
+					self::json_error_code( $invalid_nonce ),
+					self::json_error_code( $bad_data ),
+					self::json_error_code( $bad_status ),
+					self::json_error_code( $bad_date ),
+				),
+				'changesetStatus' => $success_body['data']['changeset_status'] ?? null,
+				'postId'          => $post_id,
+				'filterCallCount' => count( $response_filter_calls ),
+				'failures'        => $failures,
+			)
+		);
+	}
+
 	private static function check_custom_css_setting_validation_preview_update( \ComponentFuzz\FuzzContext $ctx ): array {
 		self::reset_runtime();
 
@@ -977,6 +1218,16 @@ final class CustomizerPersistenceSurface {
 		if ( false === \has_filter( 'user_has_cap', array( self::class, 'grant_runtime_capabilities' ) ) ) {
 			\add_filter( 'user_has_cap', array( self::class, 'grant_runtime_capabilities' ), 10, 4 );
 		}
+		return $manager;
+	}
+
+	private static function preview_manager( \ComponentFuzz\FuzzContext $ctx, ?string $uuid = null ): \WP_Customize_Manager {
+		$manager = self::manager( $ctx, $uuid );
+
+		$reflection = new \ReflectionProperty( $manager, 'previewing' );
+		self::make_reflection_accessible( $reflection );
+		$reflection->setValue( $manager, true );
+
 		return $manager;
 	}
 
@@ -1350,6 +1601,156 @@ final class CustomizerPersistenceSurface {
 			&& (int) ( $lock['time'] ?? 0 ) > 0;
 	}
 
+	private static function capture_ajax( callable $callback ): array {
+		$start_level       = ob_get_level();
+		$die_calls         = array();
+		$status_headers    = array();
+		$captured          = false;
+		$returned          = false;
+		$throwable         = null;
+		$output            = '';
+		$cleaned_buffers   = 0;
+		$doing_ajax_filter = static function (): bool {
+			return true;
+		};
+		$ajax_die_filter   = static function ( $handler ) use ( &$die_calls ) {
+			unset( $handler );
+			return static function ( $message = '', string $title = '', $args = array() ) use ( &$die_calls ): void {
+				$die_calls[] = array(
+					'kind'    => 'ajax',
+					'message' => $message,
+					'title'   => $title,
+					'args'    => \wp_parse_args( $args ),
+				);
+				throw new CustomizerPersistence_DieCaptured( 'Captured ajax wp_die.' );
+			};
+		};
+		$default_die_filter = static function ( $handler ) use ( &$die_calls ) {
+			unset( $handler );
+			return static function ( $message = '', string $title = '', $args = array() ) use ( &$die_calls ): void {
+				$die_calls[] = array(
+					'kind'    => 'default',
+					'message' => $message,
+					'title'   => $title,
+					'args'    => \wp_parse_args( $args ),
+				);
+				throw new CustomizerPersistence_DieCaptured( 'Captured default wp_die.' );
+			};
+		};
+		$status_filter      = static function ( string $status_header, int $code, string $description, string $protocol ) use ( &$status_headers ): string {
+			$status_headers[] = compact( 'code', 'description', 'protocol', 'status_header' );
+			return $status_header;
+		};
+		$charset_filter     = static fn() => 'UTF-8';
+
+		if ( ! headers_sent() ) {
+			header_remove();
+		}
+
+		\add_filter( 'wp_doing_ajax', $doing_ajax_filter, 9999 );
+		\add_filter( 'wp_die_ajax_handler', $ajax_die_filter, 1 );
+		\add_filter( 'wp_die_handler', $default_die_filter, 1 );
+		\add_filter( 'status_header', $status_filter, 10, 4 );
+		\add_filter( 'pre_option_blog_charset', $charset_filter, 10, 3 );
+
+		ob_start();
+		try {
+			$callback();
+			$returned = true;
+		} catch ( CustomizerPersistence_DieCaptured $e ) {
+			$captured = true;
+		} catch ( \Throwable $e ) {
+			$throwable = $e;
+		} finally {
+			while ( ob_get_level() > $start_level ) {
+				$chunk   = ob_get_clean();
+				$output  = ( false === $chunk ? '' : $chunk ) . $output;
+				++$cleaned_buffers;
+			}
+
+			\remove_filter( 'wp_doing_ajax', $doing_ajax_filter, 9999 );
+			\remove_filter( 'wp_die_ajax_handler', $ajax_die_filter, 1 );
+			\remove_filter( 'wp_die_handler', $default_die_filter, 1 );
+			\remove_filter( 'status_header', $status_filter, 10 );
+			\remove_filter( 'pre_option_blog_charset', $charset_filter, 10 );
+
+			if ( ! headers_sent() ) {
+				header_remove();
+			}
+		}
+
+		return array(
+			'bufferBalanced' => $start_level === ob_get_level() && 1 === $cleaned_buffers,
+			'captured'       => $captured,
+			'dieCalls'       => $die_calls,
+			'output'         => $output,
+			'returned'       => $returned,
+			'statusHeaders'  => $status_headers,
+			'throwable'      => null === $throwable ? null : self::describe_throwable( $throwable ),
+		);
+	}
+
+	private static function set_ajax_post( array $post ): void {
+		$_POST    = $post;
+		$_REQUEST = $post;
+	}
+
+	private static function json_body( array $capture ): ?array {
+		$body = trim( (string) ( $capture['output'] ?? '' ) );
+		foreach ( array_reverse( $capture['dieCalls'] ?? array() ) as $call ) {
+			$message = $call['message'] ?? '';
+			if ( is_string( $message ) && '' !== trim( $message ) ) {
+				$body .= trim( $message );
+				break;
+			}
+		}
+
+		$decoded = json_decode( $body, true );
+		return is_array( $decoded ) ? $decoded : null;
+	}
+
+	private static function json_success( array $capture ): bool {
+		$body = self::json_body( $capture );
+		return is_array( $body ) && true === ( $body['success'] ?? null );
+	}
+
+	private static function json_error_code( array $capture ): ?string {
+		$body = self::json_body( $capture );
+		if ( ! is_array( $body ) || true === ( $body['success'] ?? null ) ) {
+			return null;
+		}
+		if ( is_string( $body['data'] ?? null ) ) {
+			return $body['data'];
+		}
+		return is_array( $body['data'] ?? null ) && isset( $body['data']['code'] ) ? (string) $body['data']['code'] : null;
+	}
+
+	private static function status_code( array $capture ): ?int {
+		$headers = $capture['statusHeaders'] ?? array();
+		$last    = is_array( $headers ) ? end( $headers ) : false;
+		return is_array( $last ) && isset( $last['code'] ) ? (int) $last['code'] : null;
+	}
+
+	private static function ajax_die_message( array $capture ): ?string {
+		$call = $capture['dieCalls'][0] ?? null;
+		if ( ! is_array( $call ) ) {
+			return null;
+		}
+		return (string) ( $call['message'] ?? '' );
+	}
+
+	private static function summarize_capture( array $capture ): array {
+		return array(
+			'captured'       => (bool) ( $capture['captured'] ?? false ),
+			'returned'       => (bool) ( $capture['returned'] ?? false ),
+			'bufferBalanced' => (bool) ( $capture['bufferBalanced'] ?? false ),
+			'json'           => self::json_body( $capture ),
+			'dieMessage'     => self::ajax_die_message( $capture ),
+			'statusHeaders'  => $capture['statusHeaders'] ?? array(),
+			'throwable'      => $capture['throwable'] ?? null,
+		);
+	}
+
 	private static function customizer_ajax_action_names(): array {
 		return array(
 			'wp_ajax_customize_save',
@@ -1478,3 +1879,5 @@ final class CustomizerPersistenceSurface {
 		return \ComponentFuzz\preview_value( $value );
 	}
 }
+
+final class CustomizerPersistence_DieCaptured extends \RuntimeException {}

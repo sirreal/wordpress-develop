@@ -226,12 +226,13 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 4701 passed, 0 failed, 0 errored, 5 skipped at 112 surfaces over 1 iteration after adding REST plugin status update/delete coverage while preserving the five documented current-core/environment skips.</div>
+			<div class="note">Non-skipped pass rate: 4702 passed, 0 failed, 0 errored, 5 skipped at 112 surfaces over 1 iteration after adding Customizer save AJAX envelope coverage while preserving the five documented current-core/environment skips.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Latest focused addition: <code>plugin-theme-lifecycle</code> REST plugin write/delete coverage exercises capability-denied update gates without mutation, REST status transitions from inactive to active and back, active-plugin delete rejection, inactive temp-plugin deletion through direct filesystem transport, previous-response data, active option cleanup, and plugin cache refresh; focused seed 224 passed 13 checks, seeds 1 and 224 over 25 iterations each passed 325 checks, adjacent plugin/REST/filesystem smoke passed 60 checks with 1 skip, and broad seed 224 smoke passed 4701 checks with 5 skips.</div>
+			<div class="note">Latest focused addition: <code>customizer-persistence</code> save AJAX envelope coverage exercises unauthenticated, not-preview, invalid nonce, malformed changeset JSON, bad status, bad date, and successful draft save paths through captured <code>wp_send_json_*</code> responses; the success path asserts stored changeset content, JS-prepared setting validities, <code>customize_save_response</code> filtering, edit-lock ownership, and filter cleanup; focused seed 224 passed 8 checks, seeds 1 and 224 over 25 iterations each passed 200 checks, adjacent Customizer/admin smoke passed 44 checks, and broad seed 224 smoke passed 4702 checks with 5 skips.</div>
+			<div class="note">Previous focused addition: <code>plugin-theme-lifecycle</code> REST plugin write/delete coverage exercises capability-denied update gates without mutation, REST status transitions from inactive to active and back, active-plugin delete rejection, inactive temp-plugin deletion through direct filesystem transport, previous-response data, active option cleanup, and plugin cache refresh; focused seed 224 passed 13 checks, seeds 1 and 224 over 25 iterations each passed 325 checks, adjacent plugin/REST/filesystem smoke passed 60 checks with 1 skip, and broad seed 224 smoke passed 4701 checks with 5 skips.</div>
 			<div class="note">Previous focused addition: <code>rest-media-attachments</code> raw sideload coverage exercises client-side media-processing sideloads for generated subsize files and original-image metadata, non-image/PDF rejection, exact upload bytes in isolated temp roots, <code>_fields</code> response projection, <code>Location</code> headers, preserved base attachment files, and conversion/capability filter cleanup; focused seed 224 passed 7 checks, seeds 1 and 224 over 25 iterations each passed 175 checks, adjacent media/REST smoke passed 61 checks, and broad seed 224 smoke passed 4700 checks with 5 skips.</div>
 			<div class="note">Previous focused addition: <code>privacy-admin-requests</code> bulk resend coverage exercises mixed valid/invalid privacy request selections, nonce-gated <code>resend</code> bulk action accounting, regenerated confirmation keys, stored hash validation, intercepted confirmation emails, subject/content/header filters, placeholder replacement, and temporary filter cleanup; focused seed 224 passed 5 checks, seeds 1 and 224 over 25 iterations each passed 125 checks, adjacent privacy/admin/mail smoke passed 1312 checks with 1 skip, and broad seed 224 smoke passed 4699 checks with 5 skips.</div>
 			<div class="note">Previous focused addition: <code>admin-options-submission</code> pending admin email coverage exercises changed-address <code>new_admin_email</code> submissions through the documented dynamic option hooks, pending <code>adminhash</code> creation, intercepted confirmation mail, same-current and invalid-email no-mail/no-hash branches, and temporary hook/filter cleanup; focused seed 224 passed 6 checks, seeds 1 and 224 over 25 iterations each passed 150 checks, adjacent admin options/mail/email/security smoke passed 1304 checks with 1 skip, and broad seed 224 smoke passed 4699 checks with 5 skips.</div>
@@ -731,10 +732,10 @@
 				</tr>
 				<tr>
 					<td><code>customizer-persistence</code></td>
-					<td><span class="status good">review fixes passed</span></td>
-					<td>Main worktree; Euclid the 3rd implementation and Goodall the 3rd review findings fixed through <code>8f757f9079</code></td>
-					<td>Main focused run: 700 passed, 0 skipped, 0 failed; latest broad run: 8027 passed, 67 skipped, 0 failed.</td>
-					<td>Customizer classes, changeset UUID/data parsing, changeset lock/heartbeat persistence, Custom CSS setting, options/theme mods, no browser dispatch.</td>
+					<td><span class="status good">validation passed</span></td>
+					<td>Scoped worktree <code>component-fuzz-customizer-save</code> builds on earlier persistence work through <code>8f757f9079</code>.</td>
+					<td>Latest focused runs: seed 224 passed 8 checks, seeds 1 and 224 over 25 iterations each passed 200 checks, adjacent <code>customizer-persistence,customizer-nav-widgets-requests,customizer,admin-ajax,user-preferences</code> smoke passed 44 checks, and broad seed 224 smoke passed 4702 checks with 5 skips.</td>
+					<td>Customizer classes, changeset UUID/data parsing, changeset lock/heartbeat persistence, transactional changeset saves, captured <code>WP_Customize_Manager::save()</code> AJAX envelopes, nonce/status/date/JSON failure paths, successful draft save response filters, edit locks, Custom CSS settings, options/theme mods, and global/superglobal restoration.</td>
 				</tr>
 				<tr>
 					<td><code>rest-site-editor</code></td>
