@@ -684,6 +684,42 @@ final class RestDirectoryServicesSurface {
 				)
 			);
 
+			$hostile_query = array_merge(
+				$case['query'],
+				array(
+					'search'             => $case['query']['search'] . '-hostile',
+					'category'           => $case['query']['category'] + 100,
+					'keyword'            => $case['query']['keyword'] + 100,
+					'locale'             => 'zz_ZZ',
+					'wp-version'         => '0.0-hostile',
+					'pattern-categories' => '999999',
+					'pattern-keywords'   => '999998',
+					'unknown-proxy-key'  => 'must-not-leak',
+				)
+			);
+			$hostile_response = self::dispatch( $server, self::request( 'GET', '/wp/v2/pattern-directory/patterns', $hostile_query ) );
+			$hostile_call     = $http_calls[ count( $http_calls ) - 1 ] ?? array();
+			$hostile_url_args = $hostile_call['query'] ?? array();
+
+			self::collect_failure(
+				$failures,
+				200 === $hostile_response->get_status()
+					&& 2 === count( $http_calls )
+					&& $hostile_query['search'] === ( $hostile_url_args['search'] ?? null )
+					&& $hostile_query['category'] === (int) ( $hostile_url_args['pattern-categories'] ?? 0 )
+					&& $hostile_query['keyword'] === (int) ( $hostile_url_args['pattern-keywords'] ?? 0 )
+					&& 'zz_ZZ' !== ( $hostile_url_args['locale'] ?? null )
+					&& '0.0-hostile' !== ( $hostile_url_args['wp-version'] ?? null )
+					&& ! array_key_exists( 'category', $hostile_url_args )
+					&& ! array_key_exists( 'keyword', $hostile_url_args )
+					&& ! array_key_exists( 'unknown-proxy-key', $hostile_url_args ),
+				'pattern directory proxies only allowlisted query args and overwrites client-supplied derived WordPress.org args',
+				array(
+					'hostileQuery' => $hostile_query,
+					'httpCall'     => $hostile_call,
+				)
+			);
+
 			$mode         = 'invalid-json';
 			$invalid_json = self::dispatch(
 				$server,
@@ -786,6 +822,10 @@ final class RestDirectoryServicesSurface {
 
 			if ( $case['dataIconUrl'] === $url ) {
 				return self::http_response( $case['dataIconHtml'], 200 );
+			}
+
+			if ( $case['fallbackHeadUrl'] === $url ) {
+				return self::http_response( $case['fallbackHeadHtml'], 200 );
 			}
 
 			if ( $case['non200Url'] === $url ) {
@@ -922,6 +962,31 @@ final class RestDirectoryServicesSurface {
 					&& '' === ( $data_icon_data['image'] ?? null ),
 				'URL details preserves data URL icons without absolutizing them',
 				array( 'data' => $data_icon_data )
+			);
+
+			$fallback_head_response = self::dispatch(
+				$server,
+				self::request(
+					'GET',
+					'/wp-block-editor/v1/url-details',
+					array( 'url' => $case['fallbackHeadUrl'] )
+				)
+			);
+			$fallback_head_data     = $fallback_head_response->get_data();
+
+			self::collect_failure(
+				$failures,
+				200 === $fallback_head_response->get_status()
+					&& $case['expectedFallbackTitle'] === ( $fallback_head_data['title'] ?? null )
+					&& $case['expectedFallbackIcon'] === ( $fallback_head_data['icon'] ?? null )
+					&& $case['expectedFallbackDescription'] === ( $fallback_head_data['description'] ?? null )
+					&& $case['expectedFallbackImage'] === ( $fallback_head_data['image'] ?? null )
+					&& self::schema_valid( $fallback_head_data, $controller->get_item_schema() ),
+				'URL details extracts unclosed head metadata before body and preserves first matching description/image variants',
+				array(
+					'status' => $fallback_head_response->get_status(),
+					'data'   => $fallback_head_data,
+				)
 			);
 
 			$non200 = self::dispatch(
@@ -1229,22 +1294,35 @@ final class RestDirectoryServicesSurface {
 			. '<meta property="og:image" content="/images/card-' . $token . '.png">'
 			. '</head><body>ignored</body></html>';
 		$data_icon_html = '<html><head><title>Data Icon</title><link rel="icon" href="' . $data_icon . '"></head></html>';
+		$fallback_html  = '<!doctype html><html><head data-fuzz="' . $token . '"><title>Fallback &amp; <em>Title ' . $token . '</em></title>'
+			. '<link rel="shortcut icon" href="favicons/fallback-' . $token . '.ico">'
+			. '<meta name="og:description" content="OG &amp; <strong>description ' . $token . '</strong>">'
+			. '<meta name="description" content="Ignored later description ' . $token . '">'
+			. '<meta property="og:image:url" content="images/fallback-' . $token . '.png">'
+			. '<meta property="og:image" content="images/ignored-' . $token . '.png">'
+			. '<body><title>Ignored Body Title</title><meta name="description" content="ignored body ' . $token . '"></body></html>';
 
 		return array(
 			'token'                  => $token,
 			'url'                    => $url,
 			'urlNoTrailingSlash'     => untrailingslashit( $url ),
 			'dataIconUrl'            => 'https://example.test/url-details-data-icon-' . $token,
+			'fallbackHeadUrl'        => 'https://example.test/url-details-head-fallback-' . $token,
 			'non200Url'              => 'https://example.test/url-details-not-found-' . $token,
 			'emptyUrl'               => 'https://example.test/url-details-empty-' . $token,
 			'html'                   => $html,
 			'dataIconHtml'           => $data_icon_html,
+			'fallbackHeadHtml'       => $fallback_html,
 			'dataIcon'               => $data_icon,
 			'cacheTtl'               => 137 + $ctx->int( 1, 50 ),
 			'expectedTitle'          => 'Fuzz & Title ' . $token,
 			'expectedIcon'           => 'https://example.test/assets/favicon-' . $token . '.ico',
 			'expectedDescription'    => 'Remote & description ' . $token,
 			'expectedImage'          => 'https://example.test/images/card-' . $token . '.png',
+			'expectedFallbackTitle'       => 'Fallback & Title ' . $token,
+			'expectedFallbackIcon'        => 'https://example.test/favicons/fallback-' . $token . '.ico',
+			'expectedFallbackDescription' => 'OG & description ' . $token,
+			'expectedFallbackImage'       => 'https://example.test/images/fallback-' . $token . '.png',
 		);
 	}
 
