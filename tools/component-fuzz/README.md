@@ -446,7 +446,8 @@ database, network requests, or a configured site.
   override filter contracts, filter locality, and global restoration.
 - `metadata`: no-DB Metadata API registration, subtype visibility, defaults,
   registration argument edges, legacy callbacks, sanitize/auth/protected-meta
-  filters, cache-backed lookup shape, filtered and in-memory CRUD cache
+  filters, current subtype-aware API accounting for post/term/comment/user
+  metadata, cache-backed lookup shape, filtered and in-memory CRUD cache
   invalidation, by-mid short-circuit filter payloads and fail-closed inputs,
   mid-row helpers, cache priming, and duplicate-aware lazyloader queue/reset
   behavior.
