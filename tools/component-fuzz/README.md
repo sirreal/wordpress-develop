@@ -501,7 +501,9 @@ database, network requests, or a configured site.
   paths, multi-plugin deactivation scope/action payload ordering, active and
   sitewide-active option shapes, plugin/theme deletion validation, theme
   enumeration and requirement checks, safe child-theme switching, theme
-  support/template globals, and read-only REST plugin/theme controller paths.
+  support/template globals, read-only REST plugin/theme controller paths, and
+  bounded REST plugin status update/delete behavior against temp plugin
+  fixtures.
 - `update-install-upgrader`: no-network update/install/upgrader coverage,
   including generated core/plugin/theme update transient shapes, aggregate
   update counts/titles, `WP_Upgrader_Skin` and `Automatic_Upgrader_Skin`
@@ -930,9 +932,10 @@ tree and generated minimal fixtures only; it does not activate repository
 plugins or switch to repository themes. Network-wide activation is not forced
 when the shared process is not running with `MULTISITE`; in that mode the
 surface verifies sitewide option shapes and the non-multisite false branch.
-REST plugin/theme controller coverage is limited to read/status/parameter
-paths and avoids install, update, remote lookup, and destructive REST delete
-methods.
+REST plugin/theme controller coverage includes read/status/parameter paths and
+bounded REST plugin status updates plus inactive temp-plugin deletion. It avoids
+remote install/update lookups, package downloads, and destructive operations on
+repository plugins or themes.
 The `content-lifecycle` surface uses a bounded in-memory `wpdb` stub that
 recognizes the narrow SQL shapes emitted by core post, term, user, comment, and
 metadata lifecycle APIs; it is not a general SQL engine. Post metadata coverage
