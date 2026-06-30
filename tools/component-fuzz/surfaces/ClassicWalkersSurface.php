@@ -76,18 +76,17 @@ final class ClassicWalkersSurface {
 
 			if ( $admin_available ) {
 				$rows[] = self::check_admin_nav_menu_walkers( $ctx );
+				$rows[] = self::check_admin_nav_menu_direct_helpers( $ctx );
 			} else {
 				$rows[] = $ctx->skip(
 					'classic-walkers.admin-nav.walkers-available',
 					'Admin nav menu walker dependencies could not be loaded safely.'
 				);
+				$rows[] = $ctx->skip(
+					'classic-walkers.admin-nav.direct-helper-contracts',
+					'Admin nav menu helper dependencies could not be loaded safely.'
+				);
 			}
-
-			$rows[] = $ctx->skip(
-				'classic-walkers.admin-nav.dispatch-paths',
-				'Nav menu AJAX quick-search, meta-box pagination, and browser admin page dispatch '
-					. 'are intentionally not invoked in-process.'
-			);
 		} catch ( \Throwable $e ) {
 			$rows[] = self::row(
 				$ctx,
@@ -1713,6 +1712,181 @@ final class ClassicWalkersSurface {
 			array() === $failures,
 			array( 'failures' => $failures )
 		);
+	}
+
+	private static function check_admin_nav_menu_direct_helpers( \ComponentFuzz\FuzzContext $ctx ): array {
+		$missing = self::missing_admin_nav_helper_requirements();
+		if ( array() !== $missing ) {
+			return $ctx->skip(
+				'classic-walkers.admin-nav.direct-helper-contracts',
+				'Admin nav menu direct helper dependencies are unavailable.',
+				array( 'missing' => $missing )
+			);
+		}
+
+		$failures = array();
+		$base_id  = self::base_id( $ctx, 'admin-nav-helper' );
+
+		self::reset_runtime();
+
+		$page     = (object) array( 'name' => 'page' );
+		$post     = (object) array( 'name' => 'post' );
+		$category = (object) array( 'name' => 'category' );
+		$product  = (object) array( 'name' => 'product_' . $ctx->identifier( 3, 8 ) );
+		$nameless = (object) array( 'label' => 'nameless' );
+
+		$page_result     = \_wp_nav_menu_meta_box_object( $page );
+		$post_result     = \_wp_nav_menu_meta_box_object( $post );
+		$category_result = \_wp_nav_menu_meta_box_object( $category );
+		$product_result  = \_wp_nav_menu_meta_box_object( $product );
+		$nameless_result = \_wp_nav_menu_meta_box_object( $nameless );
+
+		$GLOBALS['one_theme_location_no_menus'] = false;
+		$disabled_selected_zero                 = \wp_nav_menu_disabled_check( 0, false );
+		$disabled_selected_menu                 = \wp_nav_menu_disabled_check( $base_id + 1, false );
+		$GLOBALS['one_theme_location_no_menus'] = true;
+		$disabled_one_location                  = \wp_nav_menu_disabled_check( 0, false );
+		$GLOBALS['one_theme_location_no_menus'] = false;
+
+		$GLOBALS['_nav_menu_placeholder'] = 4;
+		$GLOBALS['nav_menu_selected_id']  = 0;
+		ob_start();
+		\wp_nav_menu_item_link_meta_box();
+		$disabled_link_box = (string) ob_get_clean();
+		$disabled_placeholder = $GLOBALS['_nav_menu_placeholder'];
+
+		$GLOBALS['_nav_menu_placeholder'] = -3;
+		$GLOBALS['nav_menu_selected_id']  = $base_id + 10;
+		ob_start();
+		\wp_nav_menu_item_link_meta_box();
+		$enabled_link_box = (string) ob_get_clean();
+		$enabled_placeholder = $GLOBALS['_nav_menu_placeholder'];
+
+		$columns      = \wp_nav_menu_manage_columns();
+		$column_keys  = array_keys( $columns );
+		$column_values = array_values( $columns );
+
+		self::collect_failure(
+			$failures,
+			$page === $page_result
+				&& array(
+					'orderby'     => 'menu_order title',
+					'post_status' => 'publish',
+				) === ( $page_result->_default_query ?? null )
+				&& $post === $post_result
+				&& array( 'post_status' => 'publish' ) === ( $post_result->_default_query ?? null )
+				&& $category === $category_result
+				&& array(
+					'orderby' => 'id',
+					'order'   => 'DESC',
+				) === ( $category_result->_default_query ?? null )
+				&& $product === $product_result
+				&& array( 'post_status' => 'publish' ) === ( $product_result->_default_query ?? null )
+				&& $nameless === $nameless_result
+				&& ! isset( $nameless_result->_default_query ),
+			'_wp_nav_menu_meta_box_object() mutates known post type and taxonomy objects with their exact default query shapes',
+			array(
+				'page'     => $page_result->_default_query ?? null,
+				'post'     => $post_result->_default_query ?? null,
+				'category' => $category_result->_default_query ?? null,
+				'product'  => $product_result->_default_query ?? null,
+				'nameless' => isset( $nameless_result->_default_query ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			" disabled='disabled'" === $disabled_selected_zero
+				&& '' === $disabled_selected_menu
+				&& false === $disabled_one_location,
+			'wp_nav_menu_disabled_check() matches disabled(), selected-menu, and one-location-no-menus bypass contracts',
+			array(
+				'selectedZero' => $disabled_selected_zero,
+				'selectedMenu' => $disabled_selected_menu,
+				'oneLocation'  => $disabled_one_location,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			-1 === $disabled_placeholder
+				&& str_contains( $disabled_link_box, '<div class="customlinkdiv" id="customlinkdiv">' )
+				&& str_contains( $disabled_link_box, 'name="menu-item[-1][menu-item-type]"' )
+				&& str_contains( $disabled_link_box, 'name="menu-item[-1][menu-item-url]"' )
+				&& str_contains( $disabled_link_box, 'name="menu-item[-1][menu-item-title]"' )
+				&& str_contains( $disabled_link_box, 'name="add-custom-menu-item"' )
+				&& 3 === substr_count( $disabled_link_box, " disabled='disabled'" )
+				&& ! str_contains( strtolower( $disabled_link_box ), '<script' ),
+			'wp_nav_menu_item_link_meta_box() initializes a new negative placeholder and disables URL/title/submit controls when no menu is selected',
+			array(
+				'placeholder' => $disabled_placeholder,
+				'output'      => self::describe_string( $disabled_link_box ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			-4 === $enabled_placeholder
+				&& str_contains( $enabled_link_box, 'name="menu-item[-4][menu-item-type]"' )
+				&& str_contains( $enabled_link_box, 'id="custom-menu-item-url"' )
+				&& str_contains( $enabled_link_box, 'placeholder="https://"' )
+				&& str_contains( $enabled_link_box, 'class="button submit-add-to-menu right"' )
+				&& ! str_contains( $enabled_link_box, " disabled='disabled'" )
+				&& ! str_contains( strtolower( $enabled_link_box ), '<script' ),
+			'wp_nav_menu_item_link_meta_box() decrements existing negative placeholders and leaves controls enabled for a selected menu',
+			array(
+				'placeholder' => $enabled_placeholder,
+				'output'      => self::describe_string( $enabled_link_box ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			array( '_title', 'cb', 'link-target', 'title-attribute', 'css-classes', 'xfn', 'description' ) === $column_keys
+				&& '<input type="checkbox" />' === ( $columns['cb'] ?? null )
+				&& count( $columns ) === count( array_filter( $column_values, 'is_string' ) )
+				&& ! str_contains( strtolower( implode( ' ', $column_values ) ), '<script' ),
+			'wp_nav_menu_manage_columns() returns the stable advanced-property column keys and safe checkbox column markup',
+			array( 'columns' => $columns )
+		);
+
+		return self::row(
+			$ctx,
+			'classic-walkers.admin-nav.direct-helper-contracts',
+			array() === $failures,
+			array(
+				'failures' => $failures,
+				'covered'  => array(
+					'_wp_nav_menu_meta_box_object',
+					'wp_nav_menu_disabled_check',
+					'wp_nav_menu_item_link_meta_box',
+					'wp_nav_menu_manage_columns',
+				),
+				'notCovered' => array(
+					'nav menu AJAX quick-search dispatch',
+					'post type and taxonomy meta-box pagination queries',
+					'browser admin page dispatch',
+				),
+			)
+		);
+	}
+
+	private static function missing_admin_nav_helper_requirements(): array {
+		$missing = array();
+		foreach (
+			array(
+				'_wp_nav_menu_meta_box_object',
+				'wp_nav_menu_disabled_check',
+				'wp_nav_menu_item_link_meta_box',
+				'wp_nav_menu_manage_columns',
+			) as $function
+		) {
+			if ( ! function_exists( $function ) ) {
+				$missing[] = "function {$function}";
+			}
+		}
+
+		return $missing;
 	}
 
 	/**
