@@ -662,7 +662,7 @@ class WP_Token_Map {
 		}
 
 		foreach ( $this->large_words as $index => $group ) {
-			$prefix       = substr( $this->groups, $index * ( $this->key_length + 1 ), 2 );
+			$prefix       = substr( $this->groups, $index * ( $this->key_length + 1 ), $this->key_length );
 			$group_length = strlen( $group );
 			$at           = 0;
 			while ( $at < $group_length ) {

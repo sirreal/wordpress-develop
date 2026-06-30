@@ -29,6 +29,7 @@ final class UtilityInternalsSurface {
 			$rows[] = self::check_list_util_chained_state( $ctx->fork( 'list-chain' ) );
 			$rows[] = self::check_parse_and_array_path_helpers( $ctx->fork( 'parse-array' ) );
 			$rows[] = self::check_token_map_lookup_and_precompute( $ctx->fork( 'token-map' ) );
+			$rows[] = self::check_token_map_non_default_exports( $ctx->fork( 'token-map-export' ) );
 			$rows[] = self::check_matches_map_regex( $ctx->fork( 'matches' ) );
 			$rows[] = self::check_url_pattern_prefixer( $ctx->fork( 'prefixer' ) );
 		} catch ( \Throwable $e ) {
@@ -477,16 +478,19 @@ final class UtilityInternalsSurface {
 				&& strlen( $token ) === $length;
 		}
 
-		$exported      = 2 === $key_length ? $map->to_array() : null;
-		$precomputed_a = 2 === $key_length && $precomputed instanceof \WP_Token_Map ? $precomputed->to_array() : null;
+		$exported      = $map->to_array();
+		$precomputed_a = $precomputed instanceof \WP_Token_Map ? $precomputed->to_array() : null;
 		self::collect_failure(
 			$failures,
 			$precomputed instanceof \WP_Token_Map
 				&& $round_trips
-				&& ( 2 !== $key_length || ( $exported === $precomputed_a && array() === array_diff_assoc( $mappings, $exported ) ) )
+				&& self::same_string_map( $mappings, $exported )
+				&& self::same_string_map( $mappings, $precomputed_a )
+				&& ! self::map_has_nul_key( $exported )
+				&& ! self::map_has_nul_key( $precomputed_a )
 				&& str_contains( $source, \WP_Token_Map::STORAGE_VERSION )
 				&& str_contains( $source, '"key_length" => ' . $key_length ),
-			'precomputed token-map state and source table round-trip lookup data',
+			'precomputed token-map state and source table round-trip lookup and export data',
 			array(
 				'stateKeys'      => array_keys( $state ),
 				'exported'       => $exported,
@@ -505,6 +509,72 @@ final class UtilityInternalsSurface {
 				'mappings'  => $mappings,
 				'reads'     => $read_details,
 				'failures'  => $failures,
+			)
+		);
+	}
+
+	private static function check_token_map_non_default_exports( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$cases    = self::token_map_export_cases( $ctx );
+
+		foreach ( $cases as $case ) {
+			$key_length = $case['keyLength'];
+			$mappings   = $case['mappings'];
+			$map        = \WP_Token_Map::from_array( $mappings, $key_length );
+
+			self::collect_failure(
+				$failures,
+				$map instanceof \WP_Token_Map,
+				'WP_Token_Map constructs non-default key-length export fixtures',
+				array( 'case' => $case )
+			);
+
+			if ( ! $map instanceof \WP_Token_Map ) {
+				continue;
+			}
+
+			$lookup_ok = true;
+			foreach ( $mappings as $token => $replacement ) {
+				$length    = null;
+				$lookup_ok = $lookup_ok
+					&& $map->contains( $token )
+					&& $replacement === $map->read_token( '!' . $token . '?', 1, $length )
+					&& strlen( $token ) === $length;
+			}
+
+			$state       = self::token_map_state( $map );
+			$precomputed = \WP_Token_Map::from_precomputed_table( $state );
+			$source      = $map->precomputed_php_source_table( '  ' );
+			$exported    = $map->to_array();
+			$pre_export  = $precomputed instanceof \WP_Token_Map ? $precomputed->to_array() : null;
+
+			self::collect_failure(
+				$failures,
+				$lookup_ok
+					&& $precomputed instanceof \WP_Token_Map
+					&& self::same_string_map( $mappings, $exported )
+					&& self::same_string_map( $mappings, $pre_export )
+					&& ! self::map_has_nul_key( $exported )
+					&& ! self::map_has_nul_key( $pre_export )
+					&& str_contains( $source, '"key_length" => ' . $key_length ),
+				'WP_Token_Map to_array reconstructs non-default key-length prefixes without NUL padding or truncation',
+				array(
+					'keyLength'   => $key_length,
+					'mappings'    => $mappings,
+					'exported'    => $exported,
+					'precomputed' => $pre_export,
+					'source'      => substr( $source, 0, 220 ),
+				)
+			);
+		}
+
+		return self::row(
+			$ctx,
+			'utility-internals.token-map.non-default-key-length-exports',
+			array() === $failures,
+			array(
+				'cases'    => $cases,
+				'failures' => $failures,
 			)
 		);
 	}
@@ -724,6 +794,62 @@ final class UtilityInternalsSurface {
 			'xy' => 'pair-' . $base,
 			'MiX' . substr( $base, 0, 3 ) => 'case-' . $base,
 		);
+	}
+
+	private static function token_map_export_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$suffix = strtolower( preg_replace( '/[^a-z0-9]+/', '', $ctx->identifier( 4, 8 ) ) );
+		if ( '' === $suffix ) {
+			$suffix = 'case';
+		}
+
+		return array(
+			array(
+				'keyLength' => 1,
+				'mappings'  => array(
+					'a' => 'short-a-' . $suffix,
+					'ab' => 'prefix-ab-' . $suffix,
+					'abc' => 'prefix-abc-' . $suffix,
+					'x' => 'short-x-' . $suffix,
+					'xy' => 'prefix-xy-' . $suffix,
+					'xyz' => 'prefix-xyz-' . $suffix,
+				),
+			),
+			array(
+				'keyLength' => 3,
+				'mappings'  => array(
+					'abc' => 'short-abc-' . $suffix,
+					'abcd' => 'prefix-abcd-' . $suffix,
+					'abce' => 'prefix-abce-' . $suffix,
+					'xyz' => 'short-xyz-' . $suffix,
+					'xyza' => 'prefix-xyza-' . $suffix,
+					'xyzz' => 'prefix-xyzz-' . $suffix,
+				),
+			),
+		);
+	}
+
+	private static function same_string_map( array $expected, $actual ): bool {
+		if ( ! is_array( $actual ) || count( $expected ) !== count( $actual ) ) {
+			return false;
+		}
+
+		ksort( $expected );
+		ksort( $actual );
+		return $expected === $actual;
+	}
+
+	private static function map_has_nul_key( $map ): bool {
+		if ( ! is_array( $map ) ) {
+			return true;
+		}
+
+		foreach ( array_keys( $map ) as $key ) {
+			if ( is_string( $key ) && str_contains( $key, "\x00" ) ) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	private static function ascii_case_variant( string $token ): string {

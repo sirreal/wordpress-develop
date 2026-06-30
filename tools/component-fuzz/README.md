@@ -520,7 +520,8 @@ database, network requests, or a configured site.
   list helper wrappers, `WP_Token_Map`, `WP_MatchesMapRegex`, and
   `WP_URL_Pattern_Prefixer`, including reference filter/pluck/sort oracles,
   chained filter/sort/pluck state, parse-list and array-path helper contracts,
-  token lookup/precomputed table round trips, rewrite match substitution,
+  token lookup/precomputed table round trips, non-default key-length
+  `WP_Token_Map::to_array()` export equivalence, rewrite match substitution,
   URL-pattern prefix escaping/idempotence boundaries, and state restoration.
 - `user-preferences`: no-request-dispatch admin UI preference coverage,
   including sanitized user-setting/admin-color serialization, hidden column and
@@ -1067,7 +1068,8 @@ The `utility-internals` surface focuses on deterministic pure-PHP helpers and
 does not replace higher-level rewrite, frontend-feature, or REST coverage that
 uses the same classes incidentally. Case-insensitive token-map assertions avoid
 known ambiguous overlapping-token inputs and keep exact lookup coverage over the
-full generated mapping.
+full generated mapping; token-map export assertions cover key lengths 1, 2, and
+3 to guard prefix reconstruction and NUL padding boundaries.
 Skips are recorded in `results.ndjson` with a reason and do not mask failures
 or PHP errors.
 
