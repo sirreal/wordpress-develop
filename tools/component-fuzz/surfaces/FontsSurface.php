@@ -10,6 +10,7 @@ final class FontsSurface {
 	private const FONT_FACE_CASES = 10;
 	private const COLLECTION_CASES = 5;
 	private const REST_FONT_FACE_CASES = 6;
+	private const REST_FONT_WRITE_CASES = 2;
 
 	public static function run( \ComponentFuzz\FuzzContext $ctx ): array {
 		$missing = self::missing_requirements();
@@ -38,6 +39,7 @@ final class FontsSurface {
 			$rows[] = self::check_font_utils_normalization( $ctx->fork( 'font-utils' ) );
 			$rows[] = self::check_font_utils_schema_sanitization( $ctx->fork( 'font-utils-schema' ) );
 			$rows[] = self::check_rest_font_face_prepare_boundaries( $ctx->fork( 'rest-font-face' ) );
+			$rows[] = self::check_rest_font_write_lifecycle( $ctx->fork( 'rest-font-write-lifecycle' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = self::row(
 				$ctx,
@@ -53,6 +55,7 @@ final class FontsSurface {
 	}
 
 	private static function missing_requirements(): array {
+		self::ensure_rest_font_families_controller_loaded();
 		self::ensure_rest_font_faces_controller_loaded();
 		self::ensure_rest_font_collections_controller_loaded();
 
@@ -68,8 +71,12 @@ final class FontsSurface {
 				'WP_Font_Utils',
 				'WP_HTML_Tag_Processor',
 				'WP_Post',
+				'WP_Query',
+				'WP_Rewrite',
 				'WP_REST_Font_Collections_Controller',
+				'WP_REST_Font_Families_Controller',
 				'WP_REST_Font_Faces_Controller',
+				'WP_REST_Post_Meta_Fields',
 				'WP_REST_Request',
 				'WP_REST_Response',
 				'WP_Theme_JSON',
@@ -86,14 +93,23 @@ final class FontsSurface {
 			array(
 				'_wp_filter_font_directory',
 				'_wp_to_kebab_case',
+				'add_action',
 				'add_filter',
+				'add_post_meta',
 				'add_query_arg',
 				'apply_filters',
+				'create_initial_post_types',
+				'current_user_can',
 				'doing_filter',
+				'get_children',
+				'get_post',
+				'get_post_meta',
 				'get_theme_file_uri',
 				'has_filter',
 				'is_wp_error',
+				'post_type_exists',
 				'remove_filter',
+				'sanitize_file_name',
 				'rest_ensure_response',
 				'rest_is_field_included',
 				'rest_url',
@@ -105,13 +121,17 @@ final class FontsSurface {
 				'wp_cache_delete',
 				'wp_cache_get',
 				'wp_cache_set',
+				'wp_delete_post',
 				'wp_font_dir',
 				'wp_get_global_settings',
 				'wp_get_font_dir',
 				'wp_http_validate_url',
+				'wp_insert_post',
 				'wp_json_encode',
+				'wp_mkdir_p',
 				'wp_print_font_faces',
 				'wp_register_font_collection',
+				'wp_unique_filename',
 				'wp_unregister_font_collection',
 				'wp_upload_dir',
 			) as $function
@@ -122,6 +142,18 @@ final class FontsSurface {
 		}
 
 		return $missing;
+	}
+
+	private static function ensure_rest_font_families_controller_loaded(): void {
+		if ( class_exists( 'WP_REST_Font_Families_Controller' ) ) {
+			return;
+		}
+
+		$base = defined( 'ABSPATH' ) ? ABSPATH : \ComponentFuzz\repo_root() . DIRECTORY_SEPARATOR . 'src' . DIRECTORY_SEPARATOR;
+		$path = $base . 'wp-includes/rest-api/endpoints/class-wp-rest-font-families-controller.php';
+		if ( is_readable( $path ) ) {
+			require_once $path;
+		}
 	}
 
 	private static function ensure_rest_font_faces_controller_loaded(): void {
@@ -1415,6 +1447,324 @@ final class FontsSurface {
 		);
 	}
 
+	private static function check_rest_font_write_lifecycle( \ComponentFuzz\FuzzContext $ctx ): array {
+		$wpdb = $GLOBALS['wpdb'] ?? null;
+		if ( ! is_object( $wpdb ) || ! method_exists( $wpdb, 'component_fuzz_reset_content' ) ) {
+			return self::skip(
+				$ctx,
+				'fonts.rest-write-lifecycle.wpdb-stub-available',
+				'Component_Fuzz_WPDB_Stub content tables are unavailable.'
+			);
+		}
+
+		$failures  = array();
+		$token     = self::slug( $ctx, 'rest-write' );
+		$temp_root = self::temp_dir( $ctx->fork( 'rest-write' ) );
+		$font_root = $temp_root . DIRECTORY_SEPARATOR . 'fonts';
+		$font_url  = 'http://example.test/component-fuzz-fonts/' . $token;
+
+		$font_dir_filter = static function ( array $font_dir ) use ( $font_root, $font_url ): array {
+			$font_dir['path']    = $font_root;
+			$font_dir['url']     = $font_url;
+			$font_dir['subdir']  = '';
+			$font_dir['basedir'] = $font_root;
+			$font_dir['baseurl'] = $font_url;
+			$font_dir['error']   = false;
+			return $font_dir;
+		};
+		$cap_filter      = static function ( array $allcaps ): array {
+			$allcaps['edit_theme_options'] = true;
+			return $allcaps;
+		};
+
+		$had_family_delete_hook = false !== \has_filter( 'after_delete_post', '_wp_after_delete_font_family' );
+		$had_face_delete_hook   = false !== \has_filter( 'before_delete_post', '_wp_before_delete_font_face' );
+
+		$family_id          = null;
+		$other_family_id    = null;
+		$face_id            = null;
+		$cascade_face_id    = null;
+		$uploaded_font_file = null;
+		$cascade_font_file  = null;
+
+		try {
+			self::remove_directory( $temp_root );
+			\wp_mkdir_p( $font_root );
+
+			$GLOBALS['wp_rewrite'] = isset( $GLOBALS['wp_rewrite'] ) && $GLOBALS['wp_rewrite'] instanceof \WP_Rewrite ? $GLOBALS['wp_rewrite'] : new \WP_Rewrite();
+			if ( ! \post_type_exists( 'wp_font_family' ) || ! \post_type_exists( 'wp_font_face' ) ) {
+				\create_initial_post_types();
+			}
+
+			if ( ! $had_family_delete_hook ) {
+				\add_action( 'after_delete_post', '_wp_after_delete_font_family', 10, 2 );
+			}
+			if ( ! $had_face_delete_hook ) {
+				\add_action( 'before_delete_post', '_wp_before_delete_font_face', 10, 2 );
+			}
+
+			\add_filter( 'font_dir', $font_dir_filter, 100 );
+			\add_filter( 'user_has_cap', $cap_filter, 100 );
+			$wpdb->component_fuzz_reset_content();
+
+			$font_family_controller = self::rest_font_family_controller();
+			$font_face_controller   = self::rest_font_face_lifecycle_controller();
+
+			$family_settings = array(
+				'name'       => 'Component Fuzz Family <b>' . $token . '</b>',
+				'slug'       => 'component-fuzz-family-' . $token,
+				'fontFamily' => 'Component Fuzz Family ' . $token . ', "Noto Sans", sans-serif',
+				'preview'    => ' https://example.test/previews/' . $token . '.png?variant=1',
+			);
+			$family_json     = \wp_json_encode( $family_settings );
+			$family_validate = $font_family_controller->validate_font_family_settings(
+				$family_json,
+				self::rest_font_family_request( 'POST', '/wp/v2/font-families', array() )
+			);
+			$family_sanitized = $font_family_controller->sanitize_font_family_settings( $family_json );
+			$family_create    = $font_family_controller->create_item(
+				self::rest_font_family_request( 'POST', '/wp/v2/font-families', $family_sanitized )
+			);
+			$family_data      = $family_create instanceof \WP_REST_Response ? $family_create->get_data() : null;
+			$family_id        = is_array( $family_data ) ? ( $family_data['id'] ?? null ) : null;
+			$family_post      = $family_id ? \get_post( $family_id ) : null;
+			$family_content   = $family_post instanceof \WP_Post ? json_decode( (string) $family_post->post_content, true ) : null;
+
+			self::collect_failure(
+				$failures,
+				true === $family_validate
+					&& $family_create instanceof \WP_REST_Response
+					&& 201 === $family_create->get_status()
+					&& $family_post instanceof \WP_Post
+					&& 'wp_font_family' === $family_post->post_type
+					&& $family_sanitized['name'] === $family_post->post_title
+					&& \sanitize_title( $family_sanitized['slug'] ) === $family_post->post_name
+					&& is_array( $family_content )
+					&& ! isset( $family_content['name'], $family_content['slug'] )
+					&& $family_sanitized['fontFamily'] === ( $family_content['fontFamily'] ?? null ),
+				'REST font-family create validates, persists, and stores deduplicated settings',
+				array(
+					'validation' => self::describe_value( $family_validate ),
+					'response'   => self::describe_value( $family_data ),
+					'post'       => self::describe_value( $family_post ),
+					'content'    => $family_content,
+				)
+			);
+
+			$duplicate_family = $font_family_controller->create_item(
+				self::rest_font_family_request( 'POST', '/wp/v2/font-families', $family_sanitized )
+			);
+			$slug_update      = new \WP_REST_Request( 'POST', '/wp/v2/font-families/' . (int) $family_id );
+			$slug_update->set_param( 'id', (int) $family_id );
+			$slug_validation = $font_family_controller->validate_font_family_settings(
+				\wp_json_encode( array( 'slug' => 'mutated-' . $token ) ),
+				$slug_update
+			);
+
+			self::collect_failure(
+				$failures,
+				$duplicate_family instanceof \WP_Error
+					&& 'rest_duplicate_font_family' === $duplicate_family->get_error_code()
+					&& 400 === ( $duplicate_family->get_error_data()['status'] ?? null )
+					&& $slug_validation instanceof \WP_Error
+					&& 'rest_invalid_param' === $slug_validation->get_error_code()
+					&& 400 === ( $slug_validation->get_error_data()['status'] ?? null ),
+				'REST font-family write guards reject duplicate slugs and slug mutation on update',
+				array(
+					'duplicate'      => self::describe_value( $duplicate_family ),
+					'slugValidation' => self::describe_value( $slug_validation ),
+				)
+			);
+
+			$other_family_settings = $family_sanitized;
+			$other_family_settings['name']       = $family_sanitized['name'] . ' Other';
+			$other_family_settings['slug']       = $family_sanitized['slug'] . '-other';
+			$other_family_settings['fontFamily'] = $family_sanitized['fontFamily'] . ' Other';
+			$other_family_create                 = $font_family_controller->create_item(
+				self::rest_font_family_request( 'POST', '/wp/v2/font-families', $other_family_settings )
+			);
+			$other_family_data = $other_family_create instanceof \WP_REST_Response ? $other_family_create->get_data() : null;
+			$other_family_id   = is_array( $other_family_data ) ? ( $other_family_data['id'] ?? null ) : null;
+
+			$external_src = ' https://example.test/fonts/remote-' . $token . '.woff2';
+			$file_key     = 'font_file_' . str_replace( '-', '_', $token );
+			$tmp_font     = $temp_root . DIRECTORY_SEPARATOR . $token . '.woff2';
+			\file_put_contents( $tmp_font, "wOF2\0component-fuzz-" . $token );
+			$file_params = array(
+				$file_key => array(
+					'name'     => $token . '.woff2',
+					'type'     => 'font/woff2',
+					'tmp_name' => $tmp_font,
+					'error'    => 0,
+					'size'     => \filesize( $tmp_font ),
+				),
+			);
+			$face_settings = array(
+				'fontFamily'  => $family_sanitized['fontFamily'],
+				'fontStyle'   => $ctx->choice( array( 'normal', 'italic' ) ),
+				'fontWeight'  => $ctx->choice( array( '400', '700', '100 900' ) ),
+				'fontDisplay' => 'swap',
+				'src'         => array( $external_src, $file_key ),
+			);
+			$face_json     = \wp_json_encode( $face_settings );
+			$face_validate = $font_face_controller->validate_create_font_face_settings(
+				$face_json,
+				self::rest_font_face_request( array(), $file_params, (int) $family_id )
+			);
+			$face_sanitized = $font_face_controller->sanitize_font_face_settings( $face_json );
+			$face_create    = $font_face_controller->create_item(
+				self::rest_font_face_request( $face_sanitized, $file_params, (int) $family_id )
+			);
+			$face_data      = $face_create instanceof \WP_REST_Response ? $face_create->get_data() : null;
+			$face_id        = is_array( $face_data ) ? ( $face_data['id'] ?? null ) : null;
+			$font_meta      = $face_id ? \get_post_meta( $face_id, '_wp_font_face_file', false ) : array();
+			$font_dir       = \wp_get_font_dir();
+			$uploaded_font_file = isset( $font_meta[0] ) ? $font_dir['basedir'] . DIRECTORY_SEPARATOR . $font_meta[0] : null;
+			$face_src       = is_array( $face_data ) ? ( $face_data['font_face_settings']['src'] ?? null ) : null;
+
+			self::collect_failure(
+				$failures,
+				true === $face_validate
+					&& $face_create instanceof \WP_REST_Response
+					&& 201 === $face_create->get_status()
+					&& is_array( $face_src )
+					&& self::expected_rest_src_item( $external_src ) === ( $face_src[0] ?? null )
+					&& is_string( $face_src[1] ?? null )
+					&& str_starts_with( $face_src[1], \trailingslashit( $font_dir['baseurl'] ) )
+					&& 1 === count( $font_meta )
+					&& is_string( $uploaded_font_file )
+					&& file_exists( $uploaded_font_file ),
+				'REST font-face create rewrites uploaded src, preserves URL src, and stores relative font-file meta',
+				array(
+					'validation' => self::describe_value( $face_validate ),
+					'response'   => self::describe_value( $face_data ),
+					'meta'       => $font_meta,
+					'fontFile'   => $uploaded_font_file,
+				)
+			);
+
+			$duplicate_face = $font_face_controller->create_item(
+				self::rest_font_face_request( $face_sanitized, $file_params, (int) $family_id )
+			);
+			$mismatch_result = $font_face_controller->delete_item(
+				self::rest_font_face_delete_request( (int) $other_family_id, (int) $face_id, true )
+			);
+			$face_trash   = $font_face_controller->delete_item(
+				self::rest_font_face_delete_request( (int) $family_id, (int) $face_id, false )
+			);
+			$family_trash = $font_family_controller->delete_item(
+				self::rest_font_family_delete_request( (int) $family_id, false )
+			);
+
+			self::collect_failure(
+				$failures,
+				$duplicate_face instanceof \WP_Error
+					&& 'rest_duplicate_font_face' === $duplicate_face->get_error_code()
+					&& $mismatch_result instanceof \WP_Error
+					&& 'rest_font_face_parent_id_mismatch' === $mismatch_result->get_error_code()
+					&& $face_trash instanceof \WP_Error
+					&& 'rest_trash_not_supported' === $face_trash->get_error_code()
+					&& $family_trash instanceof \WP_Error
+					&& 'rest_trash_not_supported' === $family_trash->get_error_code(),
+				'REST font write guards reject duplicate faces, parent mismatches, and non-force deletes',
+				array(
+					'duplicateFace'  => self::describe_value( $duplicate_face ),
+					'mismatchDelete' => self::describe_value( $mismatch_result ),
+					'faceTrash'      => self::describe_value( $face_trash ),
+					'familyTrash'    => self::describe_value( $family_trash ),
+				)
+			);
+
+			$face_delete = $font_face_controller->delete_item(
+				self::rest_font_face_delete_request( (int) $family_id, (int) $face_id, true )
+			);
+			$face_delete_data = $face_delete instanceof \WP_REST_Response ? $face_delete->get_data() : null;
+
+			self::collect_failure(
+				$failures,
+				$face_delete instanceof \WP_REST_Response
+					&& true === ( $face_delete_data['deleted'] ?? null )
+					&& ! \get_post( (int) $face_id )
+					&& is_string( $uploaded_font_file )
+					&& ! file_exists( $uploaded_font_file ),
+				'REST font-face force delete removes the post and associated uploaded font file',
+				array(
+					'delete'  => self::describe_value( $face_delete_data ),
+					'post'    => self::describe_value( \get_post( (int) $face_id ) ),
+					'fontFile' => $uploaded_font_file,
+				)
+			);
+
+			$cascade_file_key = $file_key . '_cascade';
+			$cascade_tmp_font = $temp_root . DIRECTORY_SEPARATOR . $token . '-cascade.ttf';
+			\file_put_contents( $cascade_tmp_font, "\0\1\0\0component-fuzz-" . $token );
+			$cascade_file_params = array(
+				$cascade_file_key => array(
+					'name'     => $token . '-cascade.ttf',
+					'type'     => 'font/ttf',
+					'tmp_name' => $cascade_tmp_font,
+					'error'    => 0,
+					'size'     => \filesize( $cascade_tmp_font ),
+				),
+			);
+			$cascade_face_settings               = $face_sanitized;
+			$cascade_face_settings['fontWeight'] = '900';
+			$cascade_face_settings['src']        = array( $cascade_file_key, 'https://example.test/fonts/cascade-' . $token . '.ttf' );
+			$cascade_face = $font_face_controller->create_item(
+				self::rest_font_face_request( $cascade_face_settings, $cascade_file_params, (int) $family_id )
+			);
+			$cascade_face_data = $cascade_face instanceof \WP_REST_Response ? $cascade_face->get_data() : null;
+			$cascade_face_id   = is_array( $cascade_face_data ) ? ( $cascade_face_data['id'] ?? null ) : null;
+			$cascade_meta      = $cascade_face_id ? \get_post_meta( $cascade_face_id, '_wp_font_face_file', false ) : array();
+			$cascade_font_file = isset( $cascade_meta[0] ) ? $font_dir['basedir'] . DIRECTORY_SEPARATOR . $cascade_meta[0] : null;
+
+			$family_delete = $font_family_controller->delete_item(
+				self::rest_font_family_delete_request( (int) $family_id, true )
+			);
+			$family_delete_data = $family_delete instanceof \WP_REST_Response ? $family_delete->get_data() : null;
+
+			self::collect_failure(
+				$failures,
+				$cascade_face instanceof \WP_REST_Response
+					&& $family_delete instanceof \WP_REST_Response
+					&& true === ( $family_delete_data['deleted'] ?? null )
+					&& ! \get_post( (int) $family_id )
+					&& ! \get_post( (int) $cascade_face_id )
+					&& is_string( $cascade_font_file )
+					&& ! file_exists( $cascade_font_file ),
+				'REST font-family force delete cascades child font faces and removes uploaded child font files',
+				array(
+					'cascadeFace' => self::describe_value( $cascade_face_data ),
+					'delete'      => self::describe_value( $family_delete_data ),
+					'familyPost'  => self::describe_value( \get_post( (int) $family_id ) ),
+					'facePost'    => self::describe_value( \get_post( (int) $cascade_face_id ) ),
+					'fontFile'    => $cascade_font_file,
+				)
+			);
+		} finally {
+			\remove_filter( 'user_has_cap', $cap_filter, 100 );
+			\remove_filter( 'font_dir', $font_dir_filter, 100 );
+			if ( ! $had_face_delete_hook ) {
+				\remove_action( 'before_delete_post', '_wp_before_delete_font_face', 10 );
+			}
+			if ( ! $had_family_delete_hook ) {
+				\remove_action( 'after_delete_post', '_wp_after_delete_font_family', 10 );
+			}
+			$wpdb->component_fuzz_reset_content();
+			self::remove_directory( $temp_root );
+		}
+
+		return self::row(
+			$ctx,
+			'fonts.rest-write-lifecycle',
+			array() === $failures,
+			array(
+				'cases'    => self::REST_FONT_WRITE_CASES,
+				'failures' => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
 	private static function font_face_cases( \ComponentFuzz\FuzzContext $ctx ): array {
 		$cases = array();
 
@@ -1946,6 +2296,51 @@ final class FontsSurface {
 		);
 	}
 
+	private static function rest_font_family_controller(): \WP_REST_Font_Families_Controller {
+		return new \WP_REST_Font_Families_Controller( 'wp_font_family' );
+	}
+
+	private static function rest_font_face_lifecycle_controller(): \WP_REST_Font_Faces_Controller {
+		return new class( 'wp_font_face' ) extends \WP_REST_Font_Faces_Controller {
+			protected function handle_font_file_upload( $file ) {
+				if ( 0 !== (int) ( $file['error'] ?? 0 ) ) {
+					return $this->handle_font_file_upload_error( $file, 'Component fuzz font upload fixture failed.' );
+				}
+
+				$font_dir = \wp_get_font_dir();
+				if ( ! \wp_mkdir_p( $font_dir['path'] ) ) {
+					return new \WP_Error(
+						'rest_font_upload_unknown_error',
+						'Could not create the component fuzz font upload directory.',
+						array( 'status' => 500 )
+					);
+				}
+
+				$filename = \sanitize_file_name( (string) ( $file['name'] ?? 'component-fuzz-font.woff2' ) );
+				if ( '' === $filename ) {
+					$filename = 'component-fuzz-font.woff2';
+				}
+
+				$filename    = \wp_unique_filename( $font_dir['path'], $filename );
+				$destination = \trailingslashit( $font_dir['path'] ) . $filename;
+
+				if ( ! is_readable( (string) ( $file['tmp_name'] ?? '' ) ) || ! @copy( (string) $file['tmp_name'], $destination ) ) {
+					return new \WP_Error(
+						'rest_font_upload_unknown_error',
+						'Could not copy the component fuzz font upload fixture.',
+						array( 'status' => 500 )
+					);
+				}
+
+				return array(
+					'file' => $destination,
+					'url'  => \trailingslashit( $font_dir['url'] ) . $filename,
+					'type' => (string) ( $file['type'] ?? 'font/woff2' ),
+				);
+			}
+		};
+	}
+
 	private static function rest_font_face_controller(): \WP_REST_Font_Faces_Controller {
 		return new class() extends \WP_REST_Font_Faces_Controller {
 			public function __construct() {
@@ -2137,6 +2532,27 @@ final class FontsSurface {
 	private static function expected_rest_src_item( $src ): string {
 		$src = ltrim( (string) $src );
 		return false === \wp_http_validate_url( $src ) ? $src : \sanitize_url( $src );
+	}
+
+	private static function rest_font_family_request( string $method, string $path, array $settings ): \WP_REST_Request {
+		$request = new \WP_REST_Request( $method, $path );
+		$request->set_param( 'font_family_settings', $settings );
+		return $request;
+	}
+
+	private static function rest_font_family_delete_request( int $id, bool $force ): \WP_REST_Request {
+		$request = new \WP_REST_Request( 'DELETE', '/wp/v2/font-families/' . $id );
+		$request->set_param( 'id', $id );
+		$request->set_param( 'force', $force );
+		return $request;
+	}
+
+	private static function rest_font_face_delete_request( int $parent_id, int $id, bool $force ): \WP_REST_Request {
+		$request = new \WP_REST_Request( 'DELETE', '/wp/v2/font-families/' . $parent_id . '/font-faces/' . $id );
+		$request->set_param( 'font_family_id', $parent_id );
+		$request->set_param( 'id', $id );
+		$request->set_param( 'force', $force );
+		return $request;
 	}
 
 	private static function rest_font_face_request( array $settings, array $files, int $parent_id ): \WP_REST_Request {
@@ -2522,7 +2938,19 @@ final class FontsSurface {
 		$library = self::get_static_property( 'WP_Font_Library', 'instance' );
 
 		return array(
-			'globals'            => self::snapshot_globals( array( 'wp_filter', 'wp_filters', 'wp_actions', 'wp_current_filter' ) ),
+			'globals'            => self::snapshot_globals(
+				array(
+					'wp_filter',
+					'wp_filters',
+					'wp_actions',
+					'wp_current_filter',
+					'wp_post_types',
+					'wp_post_statuses',
+					'post_type_meta_caps',
+					'wp_rewrite',
+					'wp_rest_additional_fields',
+				)
+			),
 			'fontLibrary'        => $library,
 			'fontLibraryEntries' => $library instanceof \WP_Font_Library ? self::get_object_property( $library, 'collections' ) : null,
 			'themeJson'          => self::snapshot_theme_json_state(),
