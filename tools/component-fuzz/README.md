@@ -628,10 +628,12 @@ database, network requests, or a configured site.
 - `rest-media-attachments`: in-memory wpdb-backed REST media attachment write
   coverage, including `Content-Disposition` filename parsing, raw upload
   validation failures, raw body `create_item()` success through the upload
-  directory and attachment postmeta pipeline, permission gates, client-side
-  media-processing route/argument contracts, metadata finalization filters,
-  `_fields` response projection, edit-media fail-closed paths, temp upload
-  cleanup, and global/filter restoration.
+  directory and attachment postmeta pipeline, raw body client-side sideloads
+  for generated subsizes and original-image metadata, non-image/PDF sideload
+  rejection, permission gates, client-side media-processing route/argument
+  contracts, metadata finalization filters, `_fields` response projection,
+  edit-media fail-closed paths, temp upload cleanup, and global/filter
+  restoration.
 - `rest-widgets-sidebars`: no-live-DB REST widget, widget-type, and sidebar
   controller coverage, including route/schema contracts, public
   `show_in_rest` read gates, widget type sorting/projection and
@@ -883,16 +885,18 @@ terms, comments, users, revisions, and attachments are covered by
 coverage by dispatching the REST controller with synthetic users and scoped
 application-password metadata, while directly asserting the REST auth-status and
 index-advertisement plumbing that sits outside controller CRUD methods.
-`rest-media-attachments` covers the bounded REST attachment upload write path
-using raw request bodies, temp upload roots, attachment postmeta, response
-projection, metadata finalization, and permission gates. It intentionally avoids
-multipart success paths that depend on PHP's `is_uploaded_file()` state, remote
-sideload downloads, and admin image-edit request paths, which are covered by
-`media-image-edit-requests` when they can be kept process-local and
-codec-independent. `rest-widgets-sidebars` complements the lower-level widget
-surfaces by exercising REST controller permissions, schemas, instance encoding,
-sidebar mutation, legacy form-data paths, and the `/widget-types/{id}/render`
-iframe endpoint directly. The render path runs in an isolated child process so
+`rest-media-attachments` covers the bounded REST attachment upload and
+client-side media-processing write paths using raw request bodies, temp upload
+roots, attachment postmeta, response projection, metadata finalization,
+permission gates, and raw sideload metadata updates for generated subsizes and
+original-image files. It intentionally avoids multipart success paths that
+depend on PHP's `is_uploaded_file()` state, remote sideload downloads, and admin
+image-edit request paths, which are covered by `media-image-edit-requests` when
+they can be kept process-local and codec-independent. `rest-widgets-sidebars`
+complements the lower-level widget surfaces by exercising REST controller
+permissions, schemas, instance encoding, sidebar mutation, legacy form-data
+paths, and the `/widget-types/{id}/render` iframe endpoint directly. The render
+path runs in an isolated child process so
 the global `IFRAME_REQUEST` constant cannot leak into the shared runner. The
 object surface records explicit skip rows for template controllers that depend
 on block-theme filesystem state and template CPT queries. Broad collection
