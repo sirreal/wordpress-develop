@@ -57,8 +57,8 @@ database, network requests, or a configured site.
   workflows, including menu/submenu global registration and removal, hook suffix
   and menu URL behavior, parent file normalization, synthetic `WP_List_Table`
   pagination/columns/views/bulk actions/row actions/tablenav rendering, direct
-  bulk-action/month-dropdown helper contracts, and safe admin/AJAX nonce checks
-  without process exits.
+  bulk-action/month-dropdown helper contracts, safe admin/AJAX nonce checks, and
+  captured date/time AJAX format wrappers without process exits.
 - `admin-list-tables`: no-live-DB concrete admin list-table subclass coverage
   for posts, media, comments, terms, users, plugins, plugin install search
   results, themes, selected-mode theme install API results, network themes,
@@ -777,11 +777,12 @@ queries, and browser module execution while still asserting restored globals,
 filters, and output buffers.
 The
 Admin Workflows surface intentionally avoids `admin.php`/`admin-ajax.php` request
-dispatch, DB-backed core `WP_*_List_Table` subclasses, and `wp_ajax_*` wrappers
-or JSON helpers that call `wp_die()`/`die()` in-process; it covers the base list
-table API with synthetic items and referer helpers only where valid nonces or
-`stop=false` avoid exits. The `admin-ajax` surface calls selected `wp_ajax_*`
-handlers directly with captured `wp_die()` termination; attachment workflows use
+dispatch, DB-backed core `WP_*_List_Table` subclasses, and direct `die()` or
+destructive `wp_ajax_*` wrappers. It covers the base list table API with
+synthetic items, referer helpers where valid nonces or `stop=false` avoid exits,
+and deterministic date/time AJAX wrappers through captured `wp_die()`
+termination. The `admin-ajax` surface calls selected `wp_ajax_*` handlers
+directly with captured `wp_die()` termination; attachment workflows use
 synthetic attachment rows, bounded capability grants, and narrow post MIME LIKE
 support in the in-memory `wpdb` stub. The `admin-list-tables` surface complements
 that base coverage by loading concrete `WP_*_List_Table` subclasses with
