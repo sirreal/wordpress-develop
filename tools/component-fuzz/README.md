@@ -686,8 +686,9 @@ database, network requests, or a configured site.
   formatting, diagnostic size helpers, and an isolated full `debug_data()` scan,
   including private field/section suppression, debug vs info labels,
   `debug_information` filter locality, scoped `SHOW TABLE STATUS` and
-  `SHOW VARIABLES` wpdb doubles, generated directory/database/total-size
-  aggregation, MySQL variable lookup fallbacks, fake no-network WordPress.org
+  `SHOW VARIABLES` wpdb doubles, malformed database-size row boundary
+  accounting, generated directory/database/total-size aggregation, MySQL
+  variable lookup fallbacks, fake no-network WordPress.org
   communication, bounded Ghostscript detection, path-size loading placeholders,
   and child-process cleanup/restoration checks.
 - `state`: object cache groups, multi-operations, and cache-addition

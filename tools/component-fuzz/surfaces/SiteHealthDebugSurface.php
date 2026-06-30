@@ -34,13 +34,10 @@ final class SiteHealthDebugSurface {
 			$rows[] = self::check_format( $ctx->fork( 'format' ) );
 			$rows[] = self::check_debug_information_filter_locality( $ctx->fork( 'debug-information' ) );
 			$rows[] = self::check_database_size( $ctx->fork( 'database-size' ) );
+			$rows[] = self::check_database_size_malformed_rows( $ctx->fork( 'database-size-malformed' ) );
 			$rows[] = self::check_sizes( $ctx->fork( 'sizes' ) );
 			$rows[] = self::check_mysql_var( $ctx->fork( 'mysql-var' ) );
 			$rows[] = self::check_debug_data_full_scan_child( $ctx->fork( 'debug-data-full-scan' ) );
-			$rows[] = $ctx->skip(
-				'site-health-debug.database-size.malformed-row-omissions',
-				'Skipped malformed SHOW TABLE STATUS rows because get_database_size() currently assumes MySQL returns numeric Data_length and Index_length columns.'
-			);
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
 				'site-health-debug.surface-no-throw',
@@ -406,6 +403,84 @@ final class SiteHealthDebugSurface {
 				'failures'      => array_slice( $failures, 0, 4 ),
 				'generatedRows' => count( $rows ),
 				'expectedSize'  => $expected,
+			)
+		);
+	}
+
+	private static function check_database_size_malformed_rows( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$complete = array(
+			'Name'         => 'component_fuzz_complete',
+			'Data_length'  => $ctx->int( 128, 65535 ),
+			'Index_length' => $ctx->int( 64, 32767 ),
+		);
+		$rows     = array(
+			$complete,
+			array(
+				'Name'        => 'component_fuzz_missing_index',
+				'Data_length' => $ctx->int( 1, 4096 ),
+			),
+			array(
+				'Name'         => 'component_fuzz_missing_data',
+				'Index_length' => $ctx->int( 1, 4096 ),
+			),
+		);
+		$expected_omission_size = $complete['Data_length'] + $complete['Index_length'];
+		$malformed_db           = new SiteHealthDebugWpdbDouble( $rows );
+		$actual                 = null;
+		$throwable              = null;
+
+		try {
+			$actual = self::with_wpdb(
+				$malformed_db,
+				static function (): int {
+					return \WP_Debug_Data::get_database_size();
+				}
+			);
+		} catch ( \Throwable $e ) {
+			$throwable = $e;
+		}
+
+		$query_shape_ok = count( $rows ) === $malformed_db->num_rows
+			&& 'SHOW TABLE STATUS' === $malformed_db->last_query
+			&& ARRAY_A === $malformed_db->last_output
+			&& $malformed_db->restored;
+		$current_strict_boundary = $throwable instanceof \Throwable
+			&& $query_shape_ok
+			&& str_contains( $throwable->getMessage(), 'array key' );
+		$future_omission_boundary = null === $throwable
+			&& $query_shape_ok
+			&& $expected_omission_size === $actual;
+		$mode = $current_strict_boundary ? 'strict-row-shape-throws' : ( $future_omission_boundary ? 'malformed-rows-omitted' : 'unexpected' );
+
+		self::collect_failure(
+			$failures,
+			$current_strict_boundary || $future_omission_boundary,
+			'malformed SHOW TABLE STATUS rows either hit the current strict row-shape boundary or are omitted without changing valid-row sums',
+			array(
+				'mode'                 => $mode,
+				'expectedOmissionSize' => $expected_omission_size,
+				'actual'               => $actual,
+				'throwable'            => $throwable instanceof \Throwable ? self::describe_throwable( $throwable ) : null,
+				'rowCount'             => $malformed_db->num_rows,
+				'lastQuery'            => $malformed_db->last_query,
+				'lastOutput'           => $malformed_db->last_output,
+				'restored'             => $malformed_db->restored,
+				'rows'                 => $rows,
+			)
+		);
+
+		return $ctx->result(
+			'site-health-debug.database-size.malformed-row-boundary-accounting',
+			array() === $failures,
+			array(
+				'failures'             => array_slice( $failures, 0, 4 ),
+				'mode'                 => $mode,
+				'expectedOmissionSize' => $expected_omission_size,
+				'notClaimed'           => array(
+					'coercion of non-numeric SHOW TABLE STATUS size values',
+					'inclusion of malformed rows as partial zero-filled rows',
+				),
 			)
 		);
 	}
