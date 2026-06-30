@@ -103,6 +103,10 @@ final class StyleSurface {
 				'wp_get_layout_definitions',
 				'wp_get_typography_font_size_value',
 				'wp_strip_all_tags',
+				'wp_get_global_stylesheet',
+				'wp_cache_delete',
+				'wp_cache_get',
+				'wp_cache_set',
 			) as $function
 		) {
 			if ( ! function_exists( $function ) ) {
@@ -1301,18 +1305,354 @@ final class StyleSurface {
 	}
 
 	private static function check_global_stylesheet_guard( \ComponentFuzz\FuzzContext $ctx ): array {
-		if ( ! function_exists( 'wp_get_global_stylesheet' ) ) {
-			return $ctx->skip( 'style.wp-get-global-stylesheet.no-db-guard', 'wp_get_global_stylesheet() is unavailable.' );
+		$slug              = self::normalize_preset_slug( self::safe_slug( $ctx, 'global' ) );
+		$theme_color       = self::hex_color( $ctx );
+		$custom_text_color = self::hex_color( $ctx, array( $theme_color ) );
+		$spacing           = self::spacing_value( $ctx, false );
+		$font_size         = self::font_size_value( $ctx, false );
+		$resolver_before   = self::snapshot_theme_json_resolver();
+		$cache_before_found = false;
+		$cache_before       = \wp_cache_get( 'wp_get_global_stylesheet', 'theme_json', false, $cache_before_found );
+		$queries_before    = self::wpdb_stub_queries();
+		$cache_cleared     = false;
+		$cache_restored    = false;
+		$full_first        = null;
+		$full_second       = null;
+		$all_types         = null;
+		$variables         = null;
+		$styles            = null;
+		$presets           = null;
+		$custom_css        = null;
+		$cache_after_first = false;
+		$cache_after_typed = false;
+		$query_delta       = null;
+
+		try {
+			self::seed_theme_json_resolver_for_global_stylesheet( $slug, $theme_color, $custom_text_color, $spacing, $font_size );
+			\wp_cache_delete( 'wp_get_global_stylesheet', 'theme_json' );
+			$cache_cleared = false === \wp_cache_get( 'wp_get_global_stylesheet', 'theme_json' );
+
+			$full_first        = self::call( static fn() => \wp_get_global_stylesheet() );
+			$cache_after_first = \wp_cache_get( 'wp_get_global_stylesheet', 'theme_json' );
+			$full_second       = self::call( static fn() => \wp_get_global_stylesheet() );
+			$all_types         = self::call( static fn() => \wp_get_global_stylesheet( array( 'variables', 'styles', 'presets', 'custom-css' ) ) );
+			$variables         = self::call( static fn() => \wp_get_global_stylesheet( array( 'variables' ) ) );
+			$styles            = self::call( static fn() => \wp_get_global_stylesheet( array( 'styles' ) ) );
+			$presets           = self::call( static fn() => \wp_get_global_stylesheet( array( 'presets' ) ) );
+			$custom_css        = self::call( static fn() => \wp_get_global_stylesheet( array( 'custom-css' ) ) );
+			$cache_after_typed = \wp_cache_get( 'wp_get_global_stylesheet', 'theme_json' );
+		} finally {
+			self::restore_theme_json_resolver( $resolver_before );
+			if ( $cache_before_found ) {
+				\wp_cache_set( 'wp_get_global_stylesheet', $cache_before, 'theme_json' );
+			} else {
+				\wp_cache_delete( 'wp_get_global_stylesheet', 'theme_json' );
+			}
+			$cache_after_restore_found = false;
+			$cache_after_restore       = \wp_cache_get( 'wp_get_global_stylesheet', 'theme_json', false, $cache_after_restore_found );
+			$cache_restored            = $cache_before_found === $cache_after_restore_found
+				&& ( ! $cache_before_found || $cache_before === $cache_after_restore );
+
+			$queries_after = self::wpdb_stub_queries();
+			if ( null !== $queries_before && null !== $queries_after ) {
+				$query_delta = count( $queries_after ) - count( $queries_before );
+			}
 		}
 
-		return $ctx->skip(
-			'style.wp-get-global-stylesheet.no-db-guard',
-			'Skipped because the global stylesheet resolver can read active theme files and query wp_global_styles user data.',
+		$outputs = array(
+			'fullFirst'  => $full_first,
+			'fullSecond' => $full_second,
+			'allTypes'   => $all_types,
+			'variables'  => $variables,
+			'styles'     => $styles,
+			'presets'    => $presets,
+			'customCss'  => $custom_css,
+		);
+		$strings = array();
+		foreach ( $outputs as $name => $call ) {
+			$strings[ $name ] = is_array( $call ) && ! $call['threw'] && is_string( $call['value'] )
+				? $call['value']
+				: '';
+		}
+
+		$expected = array(
+			'variable'      => '--wp--preset--color--' . $slug,
+			'presetClass'   => '.has-' . $slug . '-color',
+			'customText'    => $custom_text_color,
+			'customCssRule' => '.component-fuzz-global-' . $slug,
+			'fontVariable'  => '--wp--preset--font-size--' . $slug,
+			'fontClass'     => '.has-' . $slug . '-font-family',
+			'paragraph'     => '.wp-block-paragraph',
+			'spacingValue'  => $spacing,
+		);
+
+		$all_calls_ok = true;
+		foreach ( $outputs as $call ) {
+			if ( ! is_array( $call ) || ! empty( $call['threw'] ) || ! is_string( $call['value'] ) || '' === trim( $call['value'] ) ) {
+				$all_calls_ok = false;
+				break;
+			}
+		}
+
+		$all_css_safe = true;
+		foreach ( $strings as $css ) {
+			if ( self::contains_raw_unsafe_bytes( $css ) || ! self::css_structure_ok( $css ) ) {
+				$all_css_safe = false;
+				break;
+			}
+		}
+
+		$resolver_restored = self::theme_json_resolver_matches( $resolver_before );
+		$full_css          = $strings['fullFirst'];
+		$ok                = $cache_cleared
+			&& $all_calls_ok
+			&& $strings['fullFirst'] === $strings['fullSecond']
+			&& $cache_after_first === $strings['fullFirst']
+			&& $cache_after_typed === $strings['fullFirst']
+			&& str_contains( $strings['variables'], $expected['variable'] )
+			&& str_contains( $strings['variables'], $expected['fontVariable'] )
+			&& str_contains( $strings['variables'], $expected['spacingValue'] )
+			&& str_contains( $strings['presets'], $expected['presetClass'] )
+			&& str_contains( $strings['presets'], $expected['fontClass'] )
+			&& str_contains( $strings['styles'], $expected['customText'] )
+			&& str_contains( $strings['styles'], $expected['paragraph'] )
+			&& str_contains( $strings['customCss'], $expected['customCssRule'] )
+			&& str_contains( $strings['allTypes'], $expected['customCssRule'] )
+			&& ! str_contains( $strings['fullFirst'], $expected['customCssRule'] )
+			&& str_ends_with( trim( $strings['allTypes'] ), trim( $strings['customCss'] ) )
+			&& ! str_contains( strtolower( $full_css ), 'javascript:' )
+			&& ! str_contains( strtolower( $full_css ), '<script' )
+			&& $all_css_safe
+			&& 0 === $query_delta
+			&& $resolver_restored
+			&& $cache_restored;
+
+		return $ctx->result(
+			'style.wp-get-global-stylesheet.seeded-resolver-cache',
+			$ok,
 			array(
-				'functionAvailable' => true,
-				'wpQueryLoaded'     => class_exists( 'WP_Query' ),
+				'slug'             => $slug,
+				'expected'         => $expected,
+				'cacheCleared'     => $cache_cleared,
+				'cacheReused'      => $cache_after_first === $strings['fullFirst'],
+				'cachePreservedAfterTypedCalls' => $cache_after_typed === $strings['fullFirst'],
+				'cacheBeforeFound' => $cache_before_found,
+				'cacheRestored'    => $cache_restored,
+				'queryDelta'       => $query_delta,
+				'queryTrackingAvailable' => null !== $queries_before,
+				'resolverRestored' => $resolver_restored,
+				'calls'            => array_map( array( self::class, 'describe_call' ), $outputs ),
+				'lengths'          => array_map( 'strlen', $strings ),
+				'structures'       => array_map( array( self::class, 'css_structure_report' ), $strings ),
+				'unsafeBytes'      => array_map( array( self::class, 'unsafe_byte_report' ), $strings ),
+				'notCovered'       => 'Active theme file discovery and wp_global_styles CPT querying are bypassed by seeded WP_Theme_JSON_Resolver state.',
 			)
 		);
+	}
+
+	private static function snapshot_theme_json_resolver(): array {
+		$snapshot = array();
+		foreach (
+			array(
+				'blocks_cache',
+				'core',
+				'blocks',
+				'theme',
+				'user',
+				'user_custom_post_type_id',
+				'i18n_schema',
+				'theme_json_file_cache',
+			) as $property
+		) {
+			$snapshot[ $property ] = self::get_static_property( 'WP_Theme_JSON_Resolver', $property );
+		}
+
+		return $snapshot;
+	}
+
+	private static function restore_theme_json_resolver( array $snapshot ): void {
+		foreach ( $snapshot as $property => $value ) {
+			self::set_static_property( 'WP_Theme_JSON_Resolver', $property, $value );
+		}
+	}
+
+	private static function theme_json_resolver_matches( array $snapshot ): bool {
+		foreach ( $snapshot as $property => $value ) {
+			if ( self::get_static_property( 'WP_Theme_JSON_Resolver', $property ) !== $value ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function seed_theme_json_resolver_for_global_stylesheet(
+		string $slug,
+		string $theme_color,
+		string $custom_text_color,
+		string $spacing,
+		string $font_size
+	): void {
+		$registered_blocks = array_fill_keys(
+			array_keys( \WP_Block_Type_Registry::get_instance()->get_all_registered() ),
+			true
+		);
+		$block_cache       = array(
+			'core'   => $registered_blocks,
+			'blocks' => $registered_blocks,
+			'theme'  => $registered_blocks,
+			'user'   => $registered_blocks,
+		);
+
+		self::set_static_property( 'WP_Theme_JSON_Resolver', 'blocks_cache', $block_cache );
+		self::set_static_property( 'WP_Theme_JSON_Resolver', 'theme_json_file_cache', array() );
+		self::set_static_property( 'WP_Theme_JSON_Resolver', 'user_custom_post_type_id', null );
+		self::set_static_property( 'WP_Theme_JSON_Resolver', 'core', new \WP_Theme_JSON( self::global_stylesheet_default_theme_json( $slug ), 'default' ) );
+		self::set_static_property( 'WP_Theme_JSON_Resolver', 'blocks', new \WP_Theme_JSON( self::global_stylesheet_block_theme_json( $slug ), 'blocks' ) );
+		self::set_static_property( 'WP_Theme_JSON_Resolver', 'theme', new \WP_Theme_JSON( self::global_stylesheet_theme_theme_json( $slug, $theme_color, $spacing, $font_size ), 'theme' ) );
+		self::set_static_property( 'WP_Theme_JSON_Resolver', 'user', new \WP_Theme_JSON( self::global_stylesheet_user_theme_json( $slug, $custom_text_color ), 'custom' ) );
+	}
+
+	private static function global_stylesheet_default_theme_json( string $slug ): array {
+		return array(
+			'version'  => \WP_Theme_JSON::LATEST_SCHEMA,
+			'settings' => array(
+				'color' => array(
+					'palette' => array(
+						array(
+							'name'  => 'Component Fuzz Default',
+							'slug'  => 'default-' . $slug,
+							'color' => '#102030',
+						),
+					),
+				),
+			),
+		);
+	}
+
+	private static function global_stylesheet_block_theme_json( string $slug ): array {
+		return array(
+			'version' => \WP_Theme_JSON::LATEST_SCHEMA,
+			'styles'  => array(
+				'blocks' => array(
+					'core/paragraph' => array(
+						'color' => array(
+							'text' => '#203040',
+						),
+					),
+				),
+			),
+		);
+	}
+
+	private static function global_stylesheet_theme_theme_json( string $slug, string $theme_color, string $spacing, string $font_size ): array {
+		return array(
+			'version'  => \WP_Theme_JSON::LATEST_SCHEMA,
+			'settings' => array(
+				'custom'     => array(
+					'componentFuzz' => array(
+						'token' => $spacing,
+					),
+				),
+				'color'      => array(
+					'palette' => array(
+						array(
+							'name'  => 'Component Fuzz Theme',
+							'slug'  => $slug,
+							'color' => $theme_color,
+						),
+					),
+				),
+				'spacing'    => array(
+					'units'        => array( 'px', 'rem', '%' ),
+					'spacingSizes' => array(
+						array(
+							'name' => 'Component Fuzz Space',
+							'slug' => $slug,
+							'size' => $spacing,
+						),
+					),
+				),
+				'typography' => array(
+					'fontSizes'    => array(
+						array(
+							'name' => 'Component Fuzz Font',
+							'slug' => $slug,
+							'size' => $font_size,
+						),
+					),
+					'fontFamilies' => array(
+						array(
+							'name'       => 'Component Fuzz Family',
+							'slug'       => $slug,
+							'fontFamily' => 'Inter, Arial, sans-serif',
+						),
+					),
+				),
+			),
+			'styles'   => array(
+				'color'      => array(
+					'text' => 'var:preset|color|' . $slug,
+				),
+				'spacing'    => array(
+					'padding' => array(
+						'top'    => $spacing,
+						'right'  => $spacing,
+						'bottom' => '0',
+						'left'   => '0',
+					),
+				),
+				'typography' => array(
+					'fontSize' => 'var:preset|font-size|' . $slug,
+					'fontFamily' => 'var:preset|font-family|' . $slug,
+				),
+				'blocks'     => array(
+					'core/paragraph' => array(
+						'color'      => array(
+							'text' => $theme_color,
+						),
+						'typography' => array(
+							'fontSize' => 'var:preset|font-size|' . $slug,
+						),
+					),
+				),
+			),
+		);
+	}
+
+	private static function global_stylesheet_user_theme_json( string $slug, string $custom_text_color ): array {
+		return array(
+			'version'  => \WP_Theme_JSON::LATEST_SCHEMA,
+			'styles'   => array(
+				'color' => array(
+					'text' => $custom_text_color,
+				),
+				'css'   => '.component-fuzz-global-' . $slug . '{color:' . $custom_text_color . ';}',
+			),
+		);
+	}
+
+	private static function wpdb_stub_queries(): ?array {
+		global $wpdb;
+
+		if ( is_object( $wpdb ) && method_exists( $wpdb, 'component_fuzz_get_queries' ) ) {
+			$queries = $wpdb->component_fuzz_get_queries();
+			return is_array( $queries ) ? $queries : null;
+		}
+
+		return null;
+	}
+
+	private static function normalize_preset_slug( string $slug ): string {
+		if ( function_exists( '_wp_to_kebab_case' ) ) {
+			return \_wp_to_kebab_case( $slug );
+		}
+
+		$slug = strtolower( preg_replace( '/[^a-z0-9-]+/', '-', $slug ) );
+		$slug = preg_replace( '/([a-z])([0-9])/', '$1-$2', $slug );
+		$slug = preg_replace( '/([0-9])([a-z])/', '$1-$2', $slug );
+		$slug = preg_replace( '/-+/', '-', $slug );
+		return trim( $slug, '-' );
 	}
 
 	private static function case_for_context( \ComponentFuzz\FuzzContext $ctx ): array {
