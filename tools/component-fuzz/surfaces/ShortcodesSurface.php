@@ -48,6 +48,7 @@ final class ShortcodesSurface {
 			$rows[] = self::check_escaped_shortcodes( $ctx->fork( 'escaping' ), $attribute_cases );
 			$rows[] = self::check_escaped_shortcode_boundaries( $ctx->fork( 'escaping-boundaries' ), $attribute_cases );
 			$rows[] = self::check_html_attribute_behavior( $ctx->fork( 'html-attributes' ) );
+			$rows[] = self::check_html_attribute_sanitization_boundaries( $ctx->fork( 'html-attribute-boundaries' ) );
 			$rows[] = self::check_strip_and_has_shortcode( $ctx->fork( 'strip-has' ), $attribute_cases );
 			$rows[] = self::check_strip_preservation_contracts( $ctx->fork( 'strip-preservation' ), $attribute_cases );
 			$rows[] = self::check_strip_tagnames_filter_contract( $ctx->fork( 'strip-filter' ), $attribute_cases );
@@ -94,6 +95,7 @@ final class ShortcodesSurface {
 				'_filter_do_shortcode_context',
 				'apply_shortcodes',
 				'do_shortcodes_in_html_tags',
+				'unescape_invalid_shortcodes',
 				'strip_shortcodes',
 				'has_shortcode',
 			) as $function
@@ -1438,6 +1440,222 @@ final class ShortcodesSurface {
 			array(
 				'tag'       => $tag,
 				'output'    => $html_value,
+				'callCount' => count( $calls ),
+			)
+		);
+	}
+
+	private static function check_html_attribute_sanitization_boundaries( \ComponentFuzz\FuzzContext $ctx ): array {
+		$url_tag        = self::tag( $ctx, 'html-url' );
+		$empty_tag      = self::tag( $ctx, 'html-empty' );
+		$url_path       = 'shortcode-' . self::safe_fragment( $ctx->fork( 'url-path' ), 8, false );
+		$url            = 'https://example.test/' . $url_path . '?x=1&y=2';
+		$escaped_url    = str_replace( '&', '&amp;', $url );
+		$calls          = array();
+		$registry_snapshot = self::snapshot_registry();
+		$hook              = 'wp_get_attachment_image_context';
+		$hook_snapshot     = self::snapshot_hook( $hook );
+		$hook_after        = null;
+		$failures          = array();
+		$url_callback      = static function ( $atts, $content = '', $shortcode_tag = '' ) use ( &$calls, $url ) {
+			$calls[] = array(
+				'tag'     => (string) $shortcode_tag,
+				'atts'    => self::normalize_atts( is_array( $atts ) ? $atts : array() ),
+				'content' => (string) $content,
+			);
+
+			return $url;
+		};
+		$empty_callback    = static function ( $atts, $content = '', $shortcode_tag = '' ) use ( &$calls ) {
+			$calls[] = array(
+				'tag'     => (string) $shortcode_tag,
+				'atts'    => self::normalize_atts( is_array( $atts ) ? $atts : array() ),
+				'content' => (string) $content,
+			);
+
+			return '';
+		};
+		$cases             = array(
+			'quoted-href'  => array(
+				'source'   => '<a href="[' . $url_tag . ']">x</a>',
+				'direct'   => '<a href="' . $escaped_url . '">x</a>',
+				'unescaped' => '<a href="' . $escaped_url . '">x</a>',
+				'full'     => '<a href="' . $escaped_url . '">x</a>',
+				'calls'    => array( $url_tag ),
+			),
+			'unquoted-href' => array(
+				'source'   => '<a href=[' . $url_tag . '] >x</a>',
+				'direct'   => '<a href=' . $url . ' >x</a>',
+				'unescaped' => '<a href=' . $url . ' >x</a>',
+				'full'     => '<a href=' . $url . ' >x</a>',
+				'calls'    => array( $url_tag ),
+			),
+			'quoted-title' => array(
+				'source'   => '<a title="[' . $url_tag . ']">x</a>',
+				'direct'   => '<a title="' . $escaped_url . '">x</a>',
+				'unescaped' => '<a title="' . $escaped_url . '">x</a>',
+				'full'     => '<a title="' . $escaped_url . '">x</a>',
+				'calls'    => array( $url_tag ),
+			),
+			'rejected-onclick' => array(
+				'source'   => '<a onclick="bad[' . $url_tag . ']">x</a>',
+				'direct'   => '<a onclick="bad&#91;' . $url_tag . '&#93;">x</a>',
+				'unescaped' => '<a onclick="bad[' . $url_tag . ']">x</a>',
+				'full'     => '<a onclick="bad[' . $url_tag . ']">x</a>',
+				'calls'    => array( $url_tag ),
+			),
+			'rejected-unknown-attribute' => array(
+				'source'   => '<a noise="[' . $url_tag . ']">x</a>',
+				'direct'   => '<a noise="&#91;' . $url_tag . '&#93;">x</a>',
+				'unescaped' => '<a noise="[' . $url_tag . ']">x</a>',
+				'full'     => '<a noise="[' . $url_tag . ']">x</a>',
+				'calls'    => array( $url_tag ),
+			),
+			'unquoted-shortcode-attribute' => array(
+				'source'   => '<div [' . $empty_tag . ']>x</div>',
+				'direct'   => '<div >x</div>',
+				'unescaped' => '<div >x</div>',
+				'full'     => '<div >x</div>',
+				'calls'    => array( $empty_tag ),
+			),
+			'escaped-shortcode-attribute' => array(
+				'source'   => '<div [[' . $empty_tag . ']]>x</div>',
+				'direct'   => '<div &#91;' . $empty_tag . '&#93;>x</div>',
+				'unescaped' => '<div [' . $empty_tag . ']>x</div>',
+				'full'     => '<div [' . $empty_tag . ']>x</div>',
+				'calls'    => array(),
+			),
+			'escaped-shortcode-tag-name' => array(
+				'source'   => '<[[' . $empty_tag . ']]>',
+				'direct'   => '<&#91;' . $empty_tag . '&#93;>',
+				'unescaped' => '<[' . $empty_tag . ']>',
+				'full'     => '<[' . $empty_tag . ']>',
+				'calls'    => array(),
+			),
+			'html-comment' => array(
+				'source'   => '<!--[if [' . $url_tag . ']]>',
+				'direct'   => '<!--&#91;if &#91;' . $url_tag . '&#93;&#93;>',
+				'unescaped' => '<!--[if [' . $url_tag . ']]>',
+				'full'     => '<!--[if [' . $url_tag . ']]>',
+				'calls'    => array(),
+			),
+			'cdata'       => array(
+				'source'   => '<![CDATA[[' . $url_tag . ']]]>',
+				'direct'   => '<!&#91;CDATA&#91;&#91;' . $url_tag . '&#93;&#93;&#93;>',
+				'unescaped' => '<![CDATA[[' . $url_tag . ']]]>',
+				'full'     => '<![CDATA[[' . $url_tag . ']]]>',
+				'calls'    => array(),
+			),
+		);
+
+		try {
+			self::replace_registry( array() );
+			\add_shortcode( $url_tag, $url_callback );
+			\add_shortcode( $empty_tag, $empty_callback );
+
+			foreach ( $cases as $label => $case ) {
+				$calls_before = count( $calls );
+				$direct       = \do_shortcodes_in_html_tags( $case['source'], false, array( $url_tag, $empty_tag ) );
+				$direct_calls = array_slice( $calls, $calls_before );
+				$unescaped    = \unescape_invalid_shortcodes( $direct );
+
+				$calls_before = count( $calls );
+				$full         = \do_shortcode( $case['source'], false );
+				$full_calls   = array_slice( $calls, $calls_before );
+
+				$calls_before = count( $calls );
+				$ignored_in_html = \do_shortcodes_in_html_tags( $case['source'], true, array( $url_tag, $empty_tag ) );
+				$ignore_html_calls = array_slice( $calls, $calls_before );
+				$ignored_unescaped = \unescape_invalid_shortcodes( $ignored_in_html );
+
+				$calls_before = count( $calls );
+				$full_ignored = \do_shortcode( $case['source'], true );
+				$full_ignore_calls = array_slice( $calls, $calls_before );
+
+				self::collect_failure(
+					$failures,
+					$case['direct'] === $direct
+						&& $case['unescaped'] === $unescaped
+						&& $case['full'] === $full,
+					'HTML-tag shortcode processing matches expected KSES/placeholder output',
+					array(
+						'label'     => $label,
+						'source'    => self::describe_string( $case['source'] ),
+						'direct'    => self::describe_string( $direct ),
+						'unescaped' => self::describe_string( $unescaped ),
+						'full'      => self::describe_string( $full ),
+						'expected'  => array(
+							'direct'    => self::describe_string( $case['direct'] ),
+							'unescaped' => self::describe_string( $case['unescaped'] ),
+							'full'      => self::describe_string( $case['full'] ),
+						),
+					)
+				);
+
+				self::collect_failure(
+					$failures,
+					$case['calls'] === array_column( $direct_calls, 'tag' )
+						&& $case['calls'] === array_column( $full_calls, 'tag' )
+						&& array() === $ignore_html_calls
+						&& array() === $full_ignore_calls,
+					'HTML-tag callback execution count distinguishes accepted output, KSES-rejected output, escaped shortcodes, comments, CDATA, and ignore_html',
+					array(
+						'label'            => $label,
+						'expectedCalls'    => $case['calls'],
+						'directCalls'      => self::project_calls( $direct_calls ),
+						'fullCalls'        => self::project_calls( $full_calls ),
+						'ignoreHtmlCalls'  => self::project_calls( $ignore_html_calls ),
+						'fullIgnoreCalls'  => self::project_calls( $full_ignore_calls ),
+					)
+				);
+
+				self::collect_failure(
+					$failures,
+					$case['source'] === $ignored_unescaped
+						&& $case['source'] === $full_ignored
+						&& ( ! str_contains( $case['source'], '[' ) || str_contains( $ignored_in_html, '&#91;' ) )
+						&& ( ! str_contains( $case['source'], ']' ) || str_contains( $ignored_in_html, '&#93;' ) ),
+					'ignore_html encodes shortcode delimiters inside HTML elements and full do_shortcode restores them literally without callbacks',
+					array(
+						'label'            => $label,
+						'ignoredInHtml'    => self::describe_string( $ignored_in_html ),
+						'ignoredUnescaped' => self::describe_string( $ignored_unescaped ),
+						'fullIgnored'      => self::describe_string( $full_ignored ),
+					)
+				);
+			}
+
+			$hook_after = self::snapshot_hook( $hook );
+		} finally {
+			self::restore_registry( $registry_snapshot );
+			self::restore_hook( $hook, $hook_snapshot );
+		}
+
+		self::collect_failure(
+			$failures,
+			null !== $hook_after
+				&& $hook_after['exists'] === $hook_snapshot['exists']
+				&& ( ! $hook_snapshot['exists'] || $hook_after['value'] == $hook_snapshot['value'] ),
+			'do_shortcode HTML-attribute boundary coverage restores media image context hook state',
+			array(
+				'before' => array(
+					'exists' => $hook_snapshot['exists'],
+					'value'  => $hook_snapshot['exists'] ? self::describe_value( $hook_snapshot['value'] ) : null,
+				),
+				'after'  => null === $hook_after ? null : array(
+					'exists' => $hook_after['exists'],
+					'value'  => $hook_after['exists'] ? self::describe_value( $hook_after['value'] ) : null,
+				),
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'shortcodes.html-attribute-sanitization-boundaries',
+			$failures,
+			array(
+				'tags'      => array( $url_tag, $empty_tag ),
+				'caseCount' => count( $cases ),
 				'callCount' => count( $calls ),
 			)
 		);
