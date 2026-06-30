@@ -8,6 +8,8 @@ final class RestControllersSurface {
 	public const NAME = 'rest-controllers';
 
 	public static function run( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::load_block_pattern_functions();
+
 		$missing = self::missing_requirements();
 		if ( array() !== $missing ) {
 			return array(
@@ -36,6 +38,7 @@ final class RestControllersSurface {
 			$rows[] = self::check_settings_controller( $ctx );
 			$rows[] = self::check_block_types_controller( $ctx );
 			$rows[] = self::check_block_patterns_controller( $ctx );
+			$rows[] = self::check_block_pattern_remote_loaders( $ctx );
 			$rows[] = self::check_search_controller( $ctx );
 			$rows[] = self::check_route_registry_behavior( $ctx );
 			$rows[] = self::check_plugin_theme_controller_contracts( $ctx->fork( 'plugin-theme-controllers' ) );
@@ -102,6 +105,8 @@ final class RestControllersSurface {
 				'WP_REST_Term_Search_Handler',
 				'WP_REST_Themes_Controller',
 				'WP_Taxonomy',
+				'WP_Theme_JSON',
+				'WP_Theme_JSON_Resolver',
 			) as $class
 		) {
 			if ( ! class_exists( $class ) ) {
@@ -111,11 +116,13 @@ final class RestControllersSurface {
 
 		foreach (
 			array(
+				'add_theme_support',
 				'add_filter',
 				'add_query_arg',
 				'apply_filters',
 				'current_user_can',
 				'delete_option',
+				'get_theme_support',
 				'get_registered_theme_features',
 				'get_object_taxonomies',
 				'get_option',
@@ -134,6 +141,7 @@ final class RestControllersSurface {
 				'is_wp_error',
 				'plugin_basename',
 				'register_block_style',
+				'register_block_pattern',
 				'register_block_type',
 				'register_post_status',
 				'register_post_type',
@@ -144,6 +152,7 @@ final class RestControllersSurface {
 				'remove_filter',
 				'rest_authorization_required_code',
 				'rest_default_additional_properties_to_false',
+				'rest_do_request',
 				'rest_ensure_response',
 				'rest_filter_response_by_context',
 				'rest_get_route_for_post_type_items',
@@ -155,14 +164,18 @@ final class RestControllersSurface {
 				'rest_validate_request_arg',
 				'rest_validate_value_from_schema',
 				'sanitize_key',
+				'sanitize_title',
 				'sanitize_text_field',
 				'serialize_blocks',
 				'unregister_block_type',
 				'update_option',
 				'validate_file',
 				'urlencode_deep',
+				'wp_clean_theme_json_cache',
+				'wp_json_encode',
 				'wp_parse_args',
 				'wp_parse_slug_list',
+				'wp_theme_has_theme_json',
 			) as $function
 		) {
 			if ( ! function_exists( $function ) ) {
@@ -171,6 +184,17 @@ final class RestControllersSurface {
 		}
 
 		return $missing;
+	}
+
+	private static function load_block_pattern_functions(): void {
+		if ( function_exists( 'register_block_pattern' ) || ! defined( 'ABSPATH' ) || ! defined( 'WPINC' ) ) {
+			return;
+		}
+
+		$file = ABSPATH . WPINC . '/block-patterns.php';
+		if ( file_exists( $file ) ) {
+			require_once $file;
+		}
 	}
 
 	private static function check_post_types_controller( \ComponentFuzz\FuzzContext $ctx ): array {
@@ -1784,6 +1808,256 @@ final class RestControllersSurface {
 		);
 	}
 
+	private static function check_block_pattern_remote_loaders( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime_state();
+
+		$case              = self::block_pattern_case( $ctx->fork( 'remote-patterns' ) );
+		$controller        = new \WP_REST_Block_Patterns_Controller();
+		$failures          = array();
+		$token             = substr( hash( 'sha1', 'remote-patterns:' . $ctx->seed() ), 0, 8 );
+		$core_title        = 'Core Remote Pattern ' . $token;
+		$featured_title    = 'Featured Remote Pattern ' . $token;
+		$theme_title       = 'Theme Remote Pattern ' . $token;
+		$theme_slug        = 'theme-pattern-' . $token;
+		$stylesheet        = 'cfz-pattern-theme-' . $token;
+		$temp_theme_json   = rtrim( sys_get_temp_dir(), DIRECTORY_SEPARATOR )
+			. DIRECTORY_SEPARATOR
+			. 'component-fuzz-rest-patterns-' . getmypid() . '-' . $token . '.json';
+		$dispatch_log      = array();
+		$theme_file_hits   = array();
+
+		$core_pattern      = self::remote_pattern(
+			$core_title,
+			self::pattern_content( 'core remote ' . $token ),
+			array( 'buttons' ),
+			array( 'core', $case['keyword'] ),
+			array( 'core/paragraph' ),
+			640
+		);
+		$featured_duplicate = self::remote_pattern(
+			$core_title,
+			self::pattern_content( 'featured duplicate ' . $token ),
+			array( 'columns' ),
+			array( 'duplicate' ),
+			array( 'core/group' ),
+			700
+		);
+		$featured_pattern  = self::remote_pattern(
+			$featured_title,
+			self::pattern_content( 'featured remote ' . $token ),
+			array( 'columns' ),
+			array( 'featured' ),
+			array( 'core/group' ),
+			720
+		);
+		$theme_pattern     = self::remote_pattern(
+			$theme_title,
+			self::pattern_content( 'theme remote ' . $token ),
+			array( 'query' ),
+			array( 'theme' ),
+			array( 'core/query' ),
+			880
+		);
+
+		$theme_json = \wp_json_encode(
+			array(
+				'version'  => \WP_Theme_JSON::LATEST_SCHEMA,
+				'patterns' => array( $theme_slug ),
+			),
+			JSON_UNESCAPED_SLASHES
+		);
+		$json_written = false !== file_put_contents( $temp_theme_json, false === $theme_json ? '{}' : $theme_json );
+
+		$theme_file_filter = static function ( string $path, string $file ) use ( $temp_theme_json, &$theme_file_hits ): string {
+			if ( 'theme.json' === $file ) {
+				$theme_file_hits[] = $path;
+				return $temp_theme_json;
+			}
+			return $path;
+		};
+		$rest_filter       = static function ( $result, \WP_REST_Server $server, \WP_REST_Request $request ) use (
+			$core_pattern,
+			$featured_duplicate,
+			$featured_pattern,
+			$theme_pattern,
+			$theme_slug,
+			&$dispatch_log
+		) {
+			unset( $server );
+			if ( '/wp/v2/pattern-directory/patterns' !== $request->get_route() ) {
+				return $result;
+			}
+
+			$params         = $request->get_params();
+			$dispatch_log[] = array(
+				'keyword'  => $params['keyword'] ?? null,
+				'category' => $params['category'] ?? null,
+				'slug'     => $params['slug'] ?? null,
+			);
+
+			if ( 11 === (int) ( $params['keyword'] ?? 0 ) ) {
+				return new \WP_REST_Response( array( $core_pattern ), 200 );
+			}
+
+			if ( 26 === (int) ( $params['category'] ?? 0 ) ) {
+				return new \WP_REST_Response( array( $featured_duplicate, $featured_pattern ), 200 );
+			}
+
+			$slugs = (array) ( $params['slug'] ?? array() );
+			if ( in_array( $theme_slug, $slugs, true ) ) {
+				return new \WP_REST_Response( array( $theme_pattern ), 200 );
+			}
+
+			return new \WP_REST_Response( array(), 200 );
+		};
+		$remote_off_filter = static function (): bool {
+			return false;
+		};
+
+		\add_filter( 'theme_file_path', $theme_file_filter, 10, 2 );
+		\add_filter( 'rest_pre_dispatch', $rest_filter, 10, 3 );
+		\add_theme_support( 'core-block-patterns' );
+		\update_option( 'stylesheet', $stylesheet );
+		\update_option( 'template', $stylesheet );
+		\update_option( 'current_theme', 'Component Fuzz Pattern Theme ' . $token );
+		self::clean_theme_json_runtime_cache();
+
+		try {
+			$response = $controller->get_items(
+				self::request(
+					'GET',
+					'/wp/v2/block-patterns/patterns',
+					array(
+						'context' => 'view',
+						'_fields' => 'name,title,categories,source,viewport_width,block_types,content',
+					)
+				)
+			);
+			$data     = $response instanceof \WP_REST_Response ? $response->get_data() : array();
+			$count_after_first_dispatch = count( $dispatch_log );
+
+			$second_response = $controller->get_items(
+				self::request(
+					'GET',
+					'/wp/v2/block-patterns/patterns',
+					array(
+						'context' => 'view',
+						'_fields' => 'name,source',
+					)
+				)
+			);
+			$second_data     = $second_response instanceof \WP_REST_Response ? $second_response->get_data() : array();
+
+			self::reset_block_registries();
+			$blocked_controller = new \WP_REST_Block_Patterns_Controller();
+			$blocked_dispatch_count = count( $dispatch_log );
+			\add_filter( 'should_load_remote_block_patterns', $remote_off_filter );
+			try {
+				$blocked_response = $blocked_controller->get_items(
+					self::request( 'GET', '/wp/v2/block-patterns/patterns', array( 'context' => 'view' ) )
+				);
+			} finally {
+				\remove_filter( 'should_load_remote_block_patterns', $remote_off_filter );
+			}
+			$blocked_data = $blocked_response instanceof \WP_REST_Response ? $blocked_response->get_data() : array();
+		} finally {
+			\remove_filter( 'rest_pre_dispatch', $rest_filter, 10 );
+			\remove_filter( 'theme_file_path', $theme_file_filter, 10 );
+			self::clean_theme_json_runtime_cache();
+			@unlink( $temp_theme_json );
+		}
+
+		$core_entry     = self::pattern_entry_by_name( $data, 'core/' . \sanitize_title( $core_title ) );
+		$featured_entry = self::pattern_entry_by_name( $data, \sanitize_title( $featured_title ) );
+		$theme_entry    = self::pattern_entry_by_name( $data, \sanitize_title( $theme_title ) );
+		$duplicate      = self::pattern_entry_by_name( $data, \sanitize_title( $core_title ) );
+
+		self::collect_failure(
+			$failures,
+			$json_written
+				&& $response instanceof \WP_REST_Response
+				&& $core_entry
+				&& $featured_entry
+				&& $theme_entry
+				&& null === $duplicate
+				&& 'pattern-directory/core' === ( $core_entry['source'] ?? null )
+				&& 'pattern-directory/featured' === ( $featured_entry['source'] ?? null )
+				&& 'pattern-directory/theme' === ( $theme_entry['source'] ?? null )
+				&& 640 === (int) ( $core_entry['viewport_width'] ?? 0 )
+				&& array( 'core/paragraph' ) === ( $core_entry['block_types'] ?? null )
+				&& in_array( 'call-to-action', $core_entry['categories'] ?? array(), true )
+				&& in_array( 'text', $featured_entry['categories'] ?? array(), true )
+				&& in_array( 'posts', $theme_entry['categories'] ?? array(), true )
+				&& str_contains( $theme_entry['content'] ?? '', 'theme remote' ),
+			'block pattern collection loads core, featured, and theme remote patterns through intercepted REST responses',
+			array(
+				'jsonWritten' => $json_written,
+				'data'        => $data,
+				'dispatchLog' => $dispatch_log,
+				'themeFileHits' => $theme_file_hits,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			array(
+				array(
+					'keyword'  => 11,
+					'category' => null,
+					'slug'     => null,
+				),
+				array(
+					'keyword'  => null,
+					'category' => 26,
+					'slug'     => null,
+				),
+				array(
+					'keyword'  => null,
+					'category' => null,
+					'slug'     => array( $theme_slug ),
+				),
+			) === array_slice( $dispatch_log, 0, 3 )
+				&& 3 === $count_after_first_dispatch
+				&& 3 === count( $dispatch_log )
+				&& $second_response instanceof \WP_REST_Response
+				&& count( $data ) === count( $second_data )
+				&& $blocked_response instanceof \WP_REST_Response
+				&& array() === $blocked_data
+				&& $blocked_dispatch_count === count( $dispatch_log )
+				&& false === \has_filter( 'rest_pre_dispatch', $rest_filter )
+				&& false === \has_filter( 'theme_file_path', $theme_file_filter )
+				&& false === \has_filter( 'should_load_remote_block_patterns', $remote_off_filter )
+				&& ! file_exists( $temp_theme_json ),
+			'block pattern remote loaders dispatch once, honor the remote-load filter, and clean temporary hooks and files',
+			array(
+				'dispatchLog'   => $dispatch_log,
+				'firstDispatchCount' => $count_after_first_dispatch,
+				'blockedDispatchCount' => $blocked_dispatch_count,
+				'secondCount'   => is_array( $second_data ) ? count( $second_data ) : null,
+				'blockedData'   => $blocked_data,
+				'tempExists'    => file_exists( $temp_theme_json ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'rest-controllers.block-patterns.remote-loaders',
+			array() === $failures,
+			array(
+				'loadedNames' => array_values(
+					array_filter(
+						array_map(
+							static fn ( $pattern ) => is_array( $pattern ) ? ( $pattern['name'] ?? null ) : null,
+							$data
+						)
+					)
+				),
+				'dispatchLog' => $dispatch_log,
+				'failures'    => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
 	private static function check_route_registry_behavior( \ComponentFuzz\FuzzContext $ctx ): array {
 		self::reset_runtime_state();
 
@@ -3288,6 +3562,48 @@ final class RestControllersSurface {
 		);
 	}
 
+	private static function remote_pattern(
+		string $title,
+		string $content,
+		array $categories,
+		array $keywords,
+		array $block_types,
+		int $viewport_width
+	): array {
+		return array(
+			'title'          => $title,
+			'content'        => $content,
+			'description'    => 'Remote pattern fixture for ' . $title,
+			'categories'     => $categories,
+			'keywords'       => $keywords,
+			'block_types'    => $block_types,
+			'viewport_width' => $viewport_width,
+		);
+	}
+
+	private static function pattern_content( string $text ): string {
+		return '<!-- wp:paragraph --><p>' . esc_html( $text ) . '</p><!-- /wp:paragraph -->';
+	}
+
+	private static function pattern_entry_by_name( array $patterns, string $name ): ?array {
+		foreach ( $patterns as $pattern ) {
+			if ( is_array( $pattern ) && $name === ( $pattern['name'] ?? null ) ) {
+				return $pattern;
+			}
+		}
+
+		return null;
+	}
+
+	private static function clean_theme_json_runtime_cache(): void {
+		if ( class_exists( 'WP_Theme_JSON_Resolver' ) ) {
+			\WP_Theme_JSON_Resolver::clean_cached_data();
+		}
+		if ( function_exists( 'wp_clean_theme_json_cache' ) ) {
+			\wp_clean_theme_json_cache();
+		}
+	}
+
 	private static function search_case( \ComponentFuzz\FuzzContext $ctx ): array {
 		$type       = self::route_token( $ctx->fork( 'type' ), 'cfz-search' );
 		$subtypes   = array(
@@ -3734,6 +4050,7 @@ final class RestControllersSurface {
 			'globals'                    => self::snapshot_globals(
 				array(
 					'_wp_post_type_features',
+					'_wp_theme_features',
 					'current_user',
 					'new_allowed_options',
 					'new_whitelist_options',
@@ -3827,6 +4144,7 @@ final class RestControllersSurface {
 		$globals = array();
 		foreach (
 			array(
+				'_wp_theme_features',
 				'current_user',
 				'new_allowed_options',
 				'post_type_meta_caps',

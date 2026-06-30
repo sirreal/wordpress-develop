@@ -604,14 +604,17 @@ database, network requests, or a configured site.
   deterministic global restoration.
 - `rest-controllers`: no-DB default REST endpoint controller coverage for
   registry-backed post types, post statuses, taxonomies, settings, block types,
-  block patterns, block pattern categories, plugin/theme route/schema contracts,
-  and REST search handlers, including context/_fields filtering, registered
-  additional-field get/update/schema callbacks, collection params, permission
-  gates, namespace-specific REST links, plugin/theme sanitizer contracts,
+  block patterns, block pattern categories, block-pattern remote loader
+  dispatch, plugin/theme route/schema contracts, and REST search handlers,
+  including context/_fields filtering, registered additional-field
+  get/update/schema callbacks, collection params, permission gates,
+  namespace-specific REST links, intercepted core/featured/theme pattern
+  directory requests, snake-case remote pattern normalization, duplicate
+  suppression, remote-load filter gates, plugin/theme sanitizer contracts,
   route-dispatched defaults/schema validation, custom search handler
-  result/header/link propagation, invalid subtype rejection, public search-result
-  schema callback contents, post-format search term/link and pagination behavior,
-  invalid values, and state restoration.
+  result/header/link propagation, invalid subtype rejection, public
+  search-result schema callback contents, post-format search term/link and
+  pagination behavior, invalid values, and state restoration.
 - `rest-application-passwords`: in-memory user/app-password backed REST
   application password controller coverage, including collection/item/
   introspection route and schema contracts, create/update/delete dispatch,
@@ -914,8 +917,10 @@ registry-backed surface covers plugin/theme controller route, schema,
 collection parameter, sanitizer, and permission-gate contracts without
 plugin/theme filesystem lifecycle effects. Lifecycle-heavy plugin/theme read and
 status paths are covered by `plugin-theme-lifecycle`, while install/update/delete
-controller methods are still avoided. Block pattern coverage is registry-backed only:
-remote pattern and current-theme pattern loaders are short-circuited.
+controller methods are still avoided. Block pattern coverage now includes
+registry-backed response shaping plus intercepted remote core, featured, and
+theme pattern directory loaders; local theme `patterns/` file loading remains a
+separate filesystem-oriented concern.
 The `rest-site-editor` surface creates a bounded temp theme under the harness
 `WP_CONTENT_DIR` and uses the in-memory `wpdb` stub for `wp_global_styles`,
 `wp_template`, `wp_template_part`, `revision`, and `wp_navigation` fixtures. It
