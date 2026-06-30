@@ -26,6 +26,12 @@ final class CoreBlockRenderSurface {
 		'button'                     => 'register_block_core_button',
 		'file'                       => 'register_block_core_file',
 		'image'                      => 'register_block_core_image',
+		'navigation-link'            => 'register_block_core_navigation_link',
+		'navigation-submenu'         => 'register_block_core_navigation_submenu',
+		'page-list-item'             => 'register_block_core_page_list_item',
+		'page-list'                  => 'register_block_core_page_list',
+		'home-link'                  => 'register_block_core_home_link',
+		'navigation'                 => 'register_block_core_navigation',
 	);
 
 	public static function run( \ComponentFuzz\FuzzContext $ctx ): array {
@@ -41,11 +47,13 @@ final class CoreBlockRenderSurface {
 		}
 
 		$snapshot       = self::snapshot_state();
+		$nav_snapshot   = null;
 		$rows           = array();
 		$state_restored = false;
 
 		try {
 			self::include_and_register_core_blocks();
+			$nav_snapshot = self::snapshot_navigation_renderer_state();
 			self::prepare_runtime();
 
 			$rows[] = self::check_post_context_blocks( $ctx->fork( 'post-context' ) );
@@ -54,6 +62,7 @@ final class CoreBlockRenderSurface {
 			$rows[] = self::check_query_pagination_context( $ctx->fork( 'query-pagination' ) );
 			$rows[] = self::check_search_and_loginout_blocks( $ctx->fork( 'forms-loginout' ) );
 			$rows[] = self::check_html_mutation_blocks( $ctx->fork( 'html-mutation' ) );
+			$rows[] = self::check_navigation_block_rendering( $ctx->fork( 'navigation' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
 				'core-block-render.surface-no-throw',
@@ -61,7 +70,8 @@ final class CoreBlockRenderSurface {
 			);
 		} finally {
 			self::restore_state( $snapshot );
-			$state_restored = self::state_matches( $snapshot );
+			self::restore_navigation_renderer_state( $nav_snapshot );
+			$state_restored = self::state_matches( $snapshot ) && self::navigation_renderer_state_matches( $nav_snapshot );
 		}
 
 		$rows[] = $ctx->result(
@@ -70,6 +80,7 @@ final class CoreBlockRenderSurface {
 			array(
 				'trackedGlobals' => array_keys( $snapshot['globals'] ),
 				'trackedStatics' => array_keys( $snapshot['statics'] ),
+				'navigationRendererState' => null !== $nav_snapshot ? 'tracked' : 'unavailable',
 			)
 		);
 
@@ -90,13 +101,19 @@ final class CoreBlockRenderSurface {
 				'add_filter',
 				'create_initial_post_types',
 				'get_block_wrapper_attributes',
+				'get_permalink',
+				'get_pages',
 				'register_block_type_from_metadata',
 				'remove_filter',
 				'render_block',
 				'update_option',
 				'wp_cache_set',
+				'wp_enqueue_script_module',
+				'wp_interactivity_data_wp_context',
 				'wp_parse_url',
+				'wp_script_modules',
 				'wp_set_current_user',
+				'wp_unique_id',
 			) as $function
 		) {
 			if ( ! function_exists( $function ) ) {
@@ -774,6 +791,387 @@ final class CoreBlockRenderSurface {
 		);
 	}
 
+	private static function check_navigation_block_rendering( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures            = array();
+		$failed_check_names  = array();
+		$baseline            = self::snapshot_navigation_renderer_state();
+
+		for ( $i = 0; $i < self::CASES; ++$i ) {
+			self::restore_navigation_renderer_state( $baseline );
+
+			$case_ctx      = $ctx->fork( 'nav-' . $i );
+			self::reset_content();
+			$page_fixture  = self::install_navigation_page_fixtures( $case_ctx->fork( 'pages' ), $i );
+			self::set_current_page_query( $page_fixture['child'] );
+			$case          = self::navigation_case( $case_ctx, $i, $page_fixture );
+			$counts_before = self::content_counts();
+			$navigation    = self::render_simple_block(
+				'core/navigation',
+				$case['attrs'],
+				'',
+				$case['innerBlocks'],
+				$case['innerContent']
+			);
+			$duplicate     = self::render_simple_block(
+				'core/navigation',
+				$case['attrs'],
+				'',
+				$case['innerBlocks'],
+				$case['innerContent']
+			);
+			$counts_after  = self::content_counts();
+
+			$is_responsive = 'never' !== $case['attrs']['overlayMenu'];
+			$is_interactive = $is_responsive || 'click' === $case['visibility'] || $case['attrs']['showSubmenuIcon'];
+
+			$visibility_helper = function_exists( 'block_core_navigation_get_submenu_visibility' )
+				? \block_core_navigation_get_submenu_visibility( $case['attrs'] )
+				: null;
+			$submenu_helper    = function_exists( 'block_core_navigation_submenu_get_submenu_visibility' )
+				? \block_core_navigation_submenu_get_submenu_visibility( $case['attrs'] )
+				: null;
+
+			$visibility_class_ok = true;
+			if ( 'click' === $case['visibility'] ) {
+				$visibility_class_ok = str_contains( $navigation, 'open-on-click' );
+			} elseif ( 'always' === $case['visibility'] ) {
+				$visibility_class_ok = str_contains( $navigation, 'open-always' );
+			} elseif ( $case['attrs']['showSubmenuIcon'] ) {
+				$visibility_class_ok = str_contains( $navigation, 'open-on-hover-click' );
+			} else {
+				$visibility_class_ok = ! str_contains( $navigation, 'open-on-click' )
+					&& ! str_contains( $navigation, 'open-always' )
+					&& ! str_contains( $navigation, 'open-on-hover-click' );
+			}
+
+			$checks = array(
+				'nav'                => str_contains( $navigation, '<nav ' ),
+				'navClass'           => str_contains( $navigation, 'wp-block-navigation' ),
+				'ariaLabel'          => str_contains( $navigation, 'aria-label="' . esc_attr( $case['attrs']['ariaLabel'] ) . '"' ),
+				'duplicateLabel'     => str_contains( $duplicate, 'aria-label="' . esc_attr( $case['attrs']['ariaLabel'] . ' 2' ) . '"' ),
+				'container'          => str_contains( $navigation, 'wp-block-navigation__container' ),
+				'itemContent'        => str_contains( $navigation, 'wp-block-navigation-item__content' ),
+				'linkLabel'          => str_contains( $navigation, '<strong>' . $case['token'] . ' Link</strong>' ),
+				'linkDescription'    => str_contains( $navigation, '<em>' . $case['token'] . ' Description</em>' ),
+				'rel'                => str_contains( $navigation, esc_attr( $case['rel'] ) ),
+				'title'              => str_contains( $navigation, esc_attr( $case['title'] ) ),
+				'linkUrl'            => str_contains( $navigation, esc_url( $case['linkUrl'] ) ),
+				'submenuUrl'         => 'click' === $case['visibility'] || str_contains( $navigation, esc_url( $case['submenuUrl'] ) ),
+				'childUrl'           => str_contains( $navigation, esc_url( $case['childUrl'] ) ),
+				'homeClass'          => str_contains( $navigation, 'wp-block-home-link__content' ),
+				'homeUrl'            => str_contains( $navigation, 'href="http://example.test" rel="home"' ),
+				'homeLabel'          => str_contains( $navigation, '<span>' . $case['token'] . ' Home</span>' ),
+				'pageList'           => str_contains( $navigation, 'wp-block-pages-list__item' ),
+				'pageListLink'       => str_contains( $navigation, 'wp-block-pages-list__item__link wp-block-navigation-item__content' ),
+				'currentItem'        => str_contains( $navigation, 'current-menu-item' ),
+				'currentAncestor'    => str_contains( $navigation, 'current-menu-ancestor' ),
+				'parentTitle'        => str_contains( $navigation, 'Parent ' . $page_fixture['token'] ),
+				'childTitle'         => str_contains( $navigation, 'Child ' . $page_fixture['token'] ),
+				'childPermalink'     => str_contains( $navigation, esc_url( get_permalink( $page_fixture['child'] ) ) ),
+				'visibilityClass'    => $visibility_class_ok,
+				'submenuIcon'        => ! $case['attrs']['showSubmenuIcon'] || str_contains( $navigation, 'wp-block-navigation__submenu-icon' ),
+				'responsivePresent'  => ! $is_responsive || ( str_contains( $navigation, 'wp-block-navigation__responsive-container' ) && str_contains( $navigation, 'wp-block-navigation__responsive-container-open' ) && str_contains( $navigation, 'wp-block-navigation__responsive-container-close' ) ),
+				'responsiveAbsent'   => $is_responsive || ! str_contains( $navigation, 'wp-block-navigation__responsive-container' ),
+				'interactiveData'    => ! $is_interactive || str_contains( $navigation, 'data-wp-interactive="core/navigation"' ),
+				'moduleEnqueued'     => ! $is_interactive || self::script_module_enqueued( '@wordpress/block-library/navigation/view' ),
+				'navVisibility'      => $case['visibility'] === $visibility_helper,
+				'submenuVisibility'  => $case['visibility'] === $submenu_helper,
+				'contentCounts'      => $counts_before === $counts_after,
+				'saneHtml'           => self::sane_html_fragment( $navigation, array( 'a', 'button', 'div', 'em', 'li', 'nav', 'span', 'strong', 'ul' ) ),
+			);
+			foreach ( $checks as $check_name => $ok ) {
+				if ( ! $ok ) {
+					$failed_check_names[ $check_name ] = true;
+				}
+			}
+
+			self::collect_failure(
+				$failures,
+				! in_array( false, $checks, true ),
+				"core/navigation renders explicit custom links, submenu mode, responsive controls, and unique names case {$i}",
+				array(
+					'failedChecks' => array_keys( array_filter( $checks, static fn( bool $ok ): bool => ! $ok ) ),
+					'case'        => array(
+						'visibility'      => $case['visibility'],
+						'overlayMenu'     => $case['attrs']['overlayMenu'],
+						'showSubmenuIcon' => $case['attrs']['showSubmenuIcon'],
+						'layout'          => $case['attrs']['layout'],
+					),
+					'contentDiff' => array(
+						'before' => $counts_before,
+						'after'  => $counts_after,
+					),
+				)
+			);
+		}
+
+		self::restore_navigation_renderer_state( $baseline );
+		$self_reference = self::render_simple_block(
+			'core/navigation',
+			array(
+				'ariaLabel'   => 'Self Reference Menu',
+				'overlayMenu' => 'never',
+			),
+			'',
+			array(
+				self::parsed_block(
+					'core/navigation',
+					array(
+						'ariaLabel'   => 'Nested Self Reference',
+						'overlayMenu' => 'never',
+					),
+					'',
+					array(
+						self::navigation_link_block( 'Nested link', 'https://example.test/nested' ),
+					),
+					array( null )
+				),
+			),
+			array( null )
+		);
+
+		self::collect_failure(
+			$failures,
+			'' === $self_reference,
+			'navigation blocks containing nested navigation blocks fail closed before fallback/render recursion',
+			array( 'output' => self::preview( $self_reference ) )
+		);
+
+		self::restore_navigation_renderer_state( $baseline );
+
+		return self::row(
+			$ctx,
+			'core-block-render.navigation-rendering-callbacks',
+			array() === $failures,
+			array(
+				'cases'        => self::CASES,
+				'blocks'       => array( 'core/navigation', 'core/navigation-link', 'core/navigation-submenu', 'core/home-link', 'core/page-list', 'core/page-list-item' ),
+				'failedChecks' => array_keys( $failed_check_names ),
+				'failures'     => array_slice( $failures, 0, self::MAX_FAILURES ),
+			)
+		);
+	}
+
+	private static function navigation_case( \ComponentFuzz\FuzzContext $ctx, int $index, array $page_fixture ): array {
+		$token           = self::token( $ctx, 'nav' );
+		$overlay_menu    = $ctx->choice( array( 'never', 'mobile', 'always' ) );
+		$submenu_mode    = $ctx->choice( array( 'hover', 'click', 'always' ) );
+		$legacy_present  = 0 === $index % 3;
+		$legacy_on_click = 0 === $index % 2;
+		$show_icon       = $ctx->bool();
+		$link_url        = 'https://example.test/navigation/' . rawurlencode( $token ) . '?from=top';
+		$submenu_url     = 'https://example.test/navigation/' . rawurlencode( $token ) . '/section';
+		$child_url       = 'https://example.test/navigation/' . rawurlencode( $token ) . '/child';
+		$rel             = 'nofollow ' . self::hostile_text( $token . '-rel' );
+		$title           = 'Title ' . self::hostile_text( $token . '-title' );
+		$attrs           = array(
+			'ariaLabel'        => 'Menu ' . $token,
+			'overlayMenu'      => $overlay_menu,
+			'showSubmenuIcon'  => $show_icon,
+			'submenuVisibility' => $submenu_mode,
+			'layout'           => array(
+				'justifyContent' => $ctx->choice( array( 'left', 'center', 'right', 'space-between' ) ),
+				'orientation'    => $ctx->choice( array( 'horizontal', 'vertical' ) ),
+				'flexWrap'       => $ctx->choice( array( 'wrap', 'nowrap' ) ),
+			),
+			'style'            => array(
+				'typography' => array(
+					'textDecoration' => $ctx->choice( array( 'none', 'underline', 'line-through' ) ),
+				),
+			),
+		);
+
+		if ( $legacy_present ) {
+			$attrs['openSubmenusOnClick'] = $legacy_on_click;
+		}
+
+		$visibility = $legacy_present ? ( $legacy_on_click ? 'click' : 'hover' ) : $submenu_mode;
+		$link       = self::navigation_link_block(
+			'<strong>' . $token . ' Link</strong>' . self::hostile_text( $token . '-label' ),
+			$link_url,
+			array(
+				'description'   => '<em>' . $token . ' Description</em>' . self::hostile_text( $token . '-description' ),
+				'rel'           => $rel,
+				'title'         => $title,
+				'opensInNewTab' => $ctx->bool(),
+			)
+		);
+		$submenu    = self::navigation_submenu_block(
+			$token . ' Section' . self::hostile_text( $token . '-section' ),
+			$submenu_url,
+			array(
+				self::navigation_link_block(
+					$token . ' Child',
+					$child_url,
+					array(
+						'description' => 'Child description ' . $token,
+					)
+				),
+			),
+			array(
+				'description'   => 'Section description ' . $token,
+				'rel'           => $rel,
+				'title'         => $title,
+				'opensInNewTab' => $ctx->bool(),
+			)
+		);
+		$home       = self::parsed_block(
+			'core/home-link',
+			array(
+				'label' => '<span>' . $token . ' Home</span>' . self::hostile_text( $token . '-home' ),
+			)
+		);
+		$page_list  = self::parsed_block(
+			'core/page-list',
+			array(
+				'parentPageID' => 0,
+				'isNested'     => false,
+			)
+		);
+
+		return array(
+			'token'        => $token,
+			'attrs'        => $attrs,
+			'innerBlocks'  => array( $home, $link, $submenu, $page_list ),
+			'innerContent' => array( null, "\n", null, "\n", null, "\n", null ),
+			'visibility'   => $visibility,
+			'linkUrl'      => $link_url,
+			'submenuUrl'   => $submenu_url,
+			'childUrl'     => $child_url,
+			'rel'          => $rel,
+			'title'        => $title,
+			'pageIds'      => array(
+				'parent' => $page_fixture['parent']->ID,
+				'child'  => $page_fixture['child']->ID,
+			),
+		);
+	}
+
+	private static function install_navigation_page_fixtures( \ComponentFuzz\FuzzContext $ctx, int $index ): array {
+		$token     = self::token( $ctx, 'page' );
+		$parent_id = 920000 + ( $ctx->seed() & 0xffff ) + ( $index * 10 );
+		$child_id  = $parent_id + 1;
+		$parent    = self::install_page_fixture(
+			$parent_id,
+			'Parent ' . $token . ' <script>alert(1)</script>',
+			0,
+			'parent-' . $token,
+			0
+		);
+		$child     = self::install_page_fixture(
+			$child_id,
+			'Child ' . $token . ' <img src="javascript:alert(1)" onerror="alert(1)">',
+			$parent_id,
+			'child-' . $token,
+			1
+		);
+
+		return array(
+			'token'  => $token,
+			'parent' => $parent,
+			'child'  => $child,
+		);
+	}
+
+	private static function install_page_fixture( int $id, string $title, int $parent_id, string $slug, int $menu_order ): \WP_Post {
+		$row = array(
+			'ID'                    => $id,
+			'post_author'           => 1,
+			'post_date'             => '2024-06-01 00:00:00',
+			'post_date_gmt'         => '2024-06-01 00:00:00',
+			'post_content'          => 'Page content for ' . $slug,
+			'post_title'            => $title,
+			'post_excerpt'          => '',
+			'post_status'           => 'publish',
+			'comment_status'        => 'closed',
+			'ping_status'           => 'closed',
+			'post_password'         => '',
+			'post_name'             => $slug,
+			'to_ping'               => '',
+			'pinged'                => '',
+			'post_modified'         => '2024-06-01 00:00:00',
+			'post_modified_gmt'     => '2024-06-01 00:00:00',
+			'post_content_filtered' => '',
+			'post_parent'           => $parent_id,
+			'guid'                  => 'http://example.test/?page_id=' . $id,
+			'menu_order'            => $menu_order,
+			'post_type'             => 'page',
+			'post_mime_type'        => '',
+			'comment_count'         => 0,
+			'filter'                => 'raw',
+		);
+
+		if ( isset( $GLOBALS['wpdb'] ) && method_exists( $GLOBALS['wpdb'], 'insert' ) ) {
+			$GLOBALS['wpdb']->insert( $GLOBALS['wpdb']->posts, $row );
+		}
+
+		$post = new \WP_Post( (object) $row );
+		\wp_cache_set( $post->ID, $post, 'posts' );
+
+		return $post;
+	}
+
+	private static function set_current_page_query( \WP_Post $page ): void {
+		$query                    = new \WP_Query();
+		$query->query_vars        = array(
+			'page_id' => $page->ID,
+			'p'       => $page->ID,
+		);
+		$query->post              = $page;
+		$query->posts             = array( $page );
+		$query->queried_object    = $page;
+		$query->queried_object_id = $page->ID;
+		$query->is_page           = true;
+		$query->is_singular       = true;
+		$query->is_home           = false;
+		$query->is_archive        = false;
+
+		$GLOBALS['post']         = $page;
+		$GLOBALS['id']           = $page->ID;
+		$GLOBALS['wp_query']     = $query;
+		$GLOBALS['wp_the_query'] = $query;
+	}
+
+	private static function navigation_link_block( string $label, string $url, array $attrs = array() ): array {
+		return self::parsed_block(
+			'core/navigation-link',
+			array_merge(
+				array(
+					'label' => $label,
+					'url'   => $url,
+					'kind'  => 'custom',
+					'type'  => 'custom',
+				),
+				$attrs
+			)
+		);
+	}
+
+	private static function navigation_submenu_block( string $label, string $url, array $inner_blocks, array $attrs = array() ): array {
+		$inner_content = array();
+		foreach ( $inner_blocks as $inner_block ) {
+			$inner_content[] = null;
+			$inner_content[] = "\n";
+		}
+		array_pop( $inner_content );
+
+		return self::parsed_block(
+			'core/navigation-submenu',
+			array_merge(
+				array(
+					'label' => $label,
+					'url'   => $url,
+					'kind'  => 'custom',
+					'type'  => 'custom',
+				),
+				$attrs
+			),
+			'',
+			$inner_blocks,
+			$inner_content
+		);
+	}
+
 	private static function post_block_case( \ComponentFuzz\FuzzContext $ctx, int $index ): array {
 		$token          = self::token( $ctx, 'post' );
 		$day            = $ctx->int( 1, 26 );
@@ -886,8 +1284,8 @@ final class CoreBlockRenderSurface {
 		$GLOBALS['wp_the_query'] = $query;
 	}
 
-	private static function render_simple_block( string $name, array $attrs = array(), string $inner_html = '' ): string {
-		return \render_block( self::parsed_block( $name, $attrs, $inner_html ) );
+	private static function render_simple_block( string $name, array $attrs = array(), string $inner_html = '', array $inner_blocks = array(), ?array $inner_content = null ): string {
+		return \render_block( self::parsed_block( $name, $attrs, $inner_html, $inner_blocks, $inner_content ) );
 	}
 
 	private static function render_block_with_context( array $parsed_block, array $context ): string {
@@ -1033,6 +1431,38 @@ final class CoreBlockRenderSurface {
 		return $GLOBALS['wp_filter'][ $hook_name ]->callbacks;
 	}
 
+	private static function content_counts(): array {
+		if ( isset( $GLOBALS['wpdb'] ) && method_exists( $GLOBALS['wpdb'], 'component_fuzz_content_counts' ) ) {
+			return $GLOBALS['wpdb']->component_fuzz_content_counts();
+		}
+
+		return array();
+	}
+
+	private static function reset_content(): void {
+		if ( isset( $GLOBALS['wpdb'] ) && method_exists( $GLOBALS['wpdb'], 'component_fuzz_reset_content' ) ) {
+			$GLOBALS['wpdb']->component_fuzz_reset_content();
+		}
+
+		if ( function_exists( 'wp_cache_flush' ) ) {
+			\wp_cache_flush();
+		}
+	}
+
+	private static function script_module_enqueued( string $id ): bool {
+		if ( ! function_exists( 'wp_script_modules' ) ) {
+			return false;
+		}
+
+		$modules = \wp_script_modules();
+		if ( ! is_object( $modules ) || ! property_exists( $modules, 'queue' ) ) {
+			return false;
+		}
+
+		$queue = self::get_object_property( $modules, 'queue' );
+		return is_array( $queue ) && in_array( $id, $queue, true );
+	}
+
 	private static function collect_failure( array &$failures, bool $condition, string $label, array $details = array() ): void {
 		if ( $condition || count( $failures ) >= self::MAX_FAILURES ) {
 			return;
@@ -1053,6 +1483,46 @@ final class CoreBlockRenderSurface {
 			'bytes'   => strlen( $value ),
 			'preview' => \ComponentFuzz\preview_value( $value, 220 ),
 		);
+	}
+
+	private static function snapshot_navigation_renderer_state(): ?array {
+		if ( ! class_exists( 'WP_Navigation_Block_Renderer' ) ) {
+			return null;
+		}
+
+		return self::snapshot_static_properties(
+			array(
+				'WP_Navigation_Block_Renderer' => array( 'has_submenus', 'needs_list_item_wrapper', 'seen_menu_names' ),
+			)
+		);
+	}
+
+	private static function restore_navigation_renderer_state( ?array $snapshot ): void {
+		if ( null === $snapshot ) {
+			return;
+		}
+
+		foreach ( $snapshot as $class => $properties ) {
+			foreach ( $properties as $property => $value ) {
+				self::set_static_property( $class, $property, $value );
+			}
+		}
+	}
+
+	private static function navigation_renderer_state_matches( ?array $snapshot ): bool {
+		if ( null === $snapshot ) {
+			return true;
+		}
+
+		foreach ( $snapshot as $class => $properties ) {
+			foreach ( $properties as $property => $value ) {
+				if ( self::get_static_property( $class, $property ) != $value ) {
+					return false;
+				}
+			}
+		}
+
+		return true;
 	}
 
 	private static function snapshot_state(): array {
