@@ -39,7 +39,7 @@ final class AdminListTablesSurface {
 			$rows[] = self::check_application_passwords_last_ip_boundary( $ctx->fork( 'application-passwords-last-ip' ) );
 			$rows[] = self::check_base_pagination_per_page_output( $ctx->fork( 'base-pagination' ) );
 			$rows[] = self::check_network_tables( $ctx->fork( 'network-tables' ) );
-			$rows[] = self::skipped_db_heavy_branches( $ctx->fork( 'skips' ) );
+			$rows[] = self::check_coverage_accounting( $ctx->fork( 'coverage-accounting' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
 				'admin-list-tables.surface-no-throw',
@@ -3196,15 +3196,13 @@ final class AdminListTablesSurface {
 		);
 	}
 
-	private static function skipped_db_heavy_branches( \ComponentFuzz\FuzzContext $ctx ): array {
-		return $ctx->skip(
-			'admin-list-tables.db-heavy-branches-skipped',
-			'Full admin page dispatch, destructive plugin/theme lifecycle operations, real uploads, privacy request tables, '
-				. 'and true multisite write paths remain out of scope. This surface covers concrete '
-				. 'core list-table constructors, columns, views, actions, row rendering, and pagination through synthetic rows, '
-				. 'object-cache fixtures, generated temp plugin/theme metadata, and pre-query filters.',
+	private static function check_coverage_accounting( \ComponentFuzz\FuzzContext $ctx ): array {
+		return self::row(
+			$ctx,
+			'admin-list-tables.concrete-list-table-coverage-accounted',
+			class_exists( PrivacyAdminRequestsSurface::class ),
 			array(
-				'covered_classes' => array(
+				'direct_classes'     => array(
 					'WP_Posts_List_Table',
 					'WP_Media_List_Table',
 					'WP_Comments_List_Table',
@@ -3219,9 +3217,28 @@ final class AdminListTablesSurface {
 					'WP_MS_Sites_List_Table',
 					'WP_MS_Users_List_Table',
 				),
-				'skipped_classes' => array(
-					'WP_Privacy_Data_Export_Requests_List_Table',
-					'WP_Privacy_Data_Removal_Requests_List_Table',
+				'dedicated_surface'  => PrivacyAdminRequestsSurface::NAME,
+				'dedicated_classes'  => array(
+					PrivacyAdminRequestsSurface::NAME => array(
+						'WP_Privacy_Data_Export_Requests_List_Table',
+						'WP_Privacy_Data_Removal_Requests_List_Table',
+					),
+				),
+				'covered_contracts'   => array(
+					'constructors',
+					'columns',
+					'views',
+					'bulk actions',
+					'row actions',
+					'row rendering',
+					'pagination',
+					'privacy request list-table queries and AJAX handlers',
+				),
+				'remaining_boundary'  => array(
+					'full admin page dispatch',
+					'destructive plugin/theme lifecycle operations',
+					'real uploads',
+					'true multisite write paths',
 				),
 			)
 		);
