@@ -29,6 +29,7 @@ final class ImportDiffSurface {
 
 			$rows[] = self::check_importer_registry( $ctx->fork( 'registry' ) );
 			$rows[] = self::check_import_upload_form( $ctx->fork( 'upload-form' ) );
+			$rows[] = self::check_import_upload_handler_and_cleanup( $ctx->fork( 'upload-handler' ) );
 			$rows[] = self::check_text_diff_rendering( $ctx->fork( 'text-diff' ) );
 			$rows[] = self::check_error_export_and_merge( $ctx->fork( 'error-export' ) );
 			$rows[] = self::check_error_lifecycle_ordering( $ctx->fork( 'error-lifecycle' ) );
@@ -58,7 +59,7 @@ final class ImportDiffSurface {
 	private static function missing_requirements(): array {
 		$missing = array();
 
-		foreach ( array( 'Text_Diff', 'WP_Error', 'WP_Importer', 'WP_Text_Diff_Renderer_Table' ) as $class ) {
+		foreach ( array( 'Text_Diff', 'WP_Error', 'WP_Importer', 'WP_Post', 'WP_Text_Diff_Renderer_Table' ) as $class ) {
 			if ( ! class_exists( $class ) ) {
 				$missing[] = "class {$class}";
 			}
@@ -68,9 +69,13 @@ final class ImportDiffSurface {
 			array(
 				'add_filter',
 				'get_importers',
+				'get_post',
 				'has_filter',
 				'remove_filter',
 				'register_importer',
+				'wp_delete_attachment',
+				'wp_import_cleanup',
+				'wp_import_handle_upload',
 				'wp_import_upload_form',
 				'wp_text_diff',
 			) as $function
@@ -192,6 +197,210 @@ final class ImportDiffSurface {
 		);
 
 		return self::result( $ctx, 'import-diff.import-upload-form.controls-size-and-escaping', $failures );
+	}
+
+	private static function check_import_upload_handler_and_cleanup( \ComponentFuzz\FuzzContext $ctx ): array {
+		global $wpdb;
+
+		if ( ! isset( $wpdb ) || ! method_exists( $wpdb, 'component_fuzz_content_counts' ) ) {
+			return $ctx->skip(
+				'import-diff.import-upload-handler.fail-closed-and-cleanup',
+				'The in-memory wpdb content stub is unavailable.'
+			);
+		}
+
+		$before_counts = $wpdb->component_fuzz_content_counts();
+		if ( array_sum( $before_counts ) !== 0 ) {
+			return $ctx->skip(
+				'import-diff.import-upload-handler.fail-closed-and-cleanup',
+				'The content stub was not empty before the import upload handler case.',
+				array( 'counts' => $before_counts )
+			);
+		}
+
+		$failures          = array();
+		$token             = $ctx->identifier( 5, 10 );
+		$temp_dir          = rtrim( sys_get_temp_dir(), DIRECTORY_SEPARATOR ) . DIRECTORY_SEPARATOR . 'component-fuzz-import-upload-' . getmypid() . '-' . $token;
+		$tmp_file          = $temp_dir . DIRECTORY_SEPARATOR . 'incoming-' . $token . '.xml';
+		$attachment_file   = $temp_dir . DIRECTORY_SEPARATOR . 'cleanup-' . $token . '.txt';
+		$superglobal_state = array(
+			'_FILES'   => $_FILES,
+			'_POST'    => $_POST,
+			'_REQUEST' => $_REQUEST,
+		);
+		$events            = array(
+			'prefilter' => array(),
+			'overrides' => array(),
+			'handler'   => array(),
+			'handle'    => array(),
+			'move'      => array(),
+		);
+		$prefilter         = static function ( array $file ) use ( &$events, $token ): array {
+			$events['prefilter'][] = array(
+				'name'  => $file['name'] ?? null,
+				'size'  => $file['size'] ?? null,
+				'error' => $file['error'] ?? null,
+			);
+			$file['error'] = 'component fuzz blocked import upload ' . $token;
+			return $file;
+		};
+		$overrides_filter  = static function ( $overrides, array $file ) use ( &$events ): array {
+			$events['overrides'][] = array(
+				'overrides' => $overrides,
+				'name'      => $file['name'] ?? null,
+				'error'     => $file['error'] ?? null,
+			);
+
+			$overrides                         = is_array( $overrides ) ? $overrides : array();
+			$overrides['upload_error_handler'] = static function ( array &$file, string $message ) use ( &$events ): array {
+				$events['handler'][] = array(
+					'name'    => $file['name'] ?? null,
+					'message' => $message,
+				);
+
+				return array(
+					'error' => $message,
+					'name'  => $file['name'] ?? null,
+					'size'  => $file['size'] ?? null,
+				);
+			};
+			return $overrides;
+		};
+		$handle_filter     = static function ( array $upload, string $context ) use ( &$events ): array {
+			$events['handle'][] = array(
+				'upload'  => $upload,
+				'context' => $context,
+			);
+			return $upload;
+		};
+		$move_filter       = static function ( $move, array $file, string $new_file, string $type ) use ( &$events ) {
+			$events['move'][] = array(
+				'name'    => $file['name'] ?? null,
+				'newFile' => $new_file,
+				'type'    => $type,
+			);
+			return $move;
+		};
+		$filters_after     = array();
+
+		\add_filter( 'wp_handle_upload_prefilter', $prefilter );
+		\add_filter( 'wp_handle_upload_overrides', $overrides_filter, 10, 2 );
+		\add_filter( 'wp_handle_upload', $handle_filter, 10, 2 );
+		\add_filter( 'pre_move_uploaded_file', $move_filter, 10, 4 );
+
+		try {
+			if ( ! is_dir( $temp_dir ) ) {
+				mkdir( $temp_dir, 0777, true );
+			}
+
+			unset( $_FILES['import'] );
+			$missing_upload = \wp_import_handle_upload();
+
+			self::collect_failure(
+				$failures,
+				is_array( $missing_upload )
+					&& isset( $missing_upload['error'] )
+					&& is_string( $missing_upload['error'] )
+					&& str_contains( $missing_upload['error'], 'post_max_size' )
+					&& array() === $events['prefilter']
+					&& $before_counts === $wpdb->component_fuzz_content_counts(),
+				'wp_import_handle_upload fails closed before upload hooks or DB writes when the import file is missing',
+				array(
+					'missingUpload' => self::describe_value( $missing_upload ),
+					'events'        => $events,
+					'counts'        => $wpdb->component_fuzz_content_counts(),
+				)
+			);
+
+			file_put_contents( $tmp_file, "component import fuzz {$token}\n<item>data</item>\n" );
+			$_POST    = array( 'action' => 'unexpected-action' );
+			$_REQUEST = $_POST;
+			$_FILES   = array(
+				'import' => array(
+					'name'     => 'component-import-' . $token . '.xml',
+					'type'     => 'text/xml',
+					'tmp_name' => $tmp_file,
+					'error'    => 0,
+					'size'     => filesize( $tmp_file ),
+				),
+			);
+
+			$blocked_upload     = \wp_import_handle_upload();
+			$counts_after_block = $wpdb->component_fuzz_content_counts();
+
+			self::collect_failure(
+				$failures,
+				is_array( $blocked_upload )
+					&& 'component fuzz blocked import upload ' . $token === ( $blocked_upload['error'] ?? null )
+					&& 'component-import-' . $token . '.xml.txt' === ( $blocked_upload['name'] ?? null )
+					&& array( 'test_form' => false, 'test_type' => false ) === ( $events['overrides'][0]['overrides'] ?? null )
+					&& 1 === count( $events['prefilter'] )
+					&& 1 === count( $events['overrides'] )
+					&& 1 === count( $events['handler'] )
+					&& array() === $events['handle']
+					&& array() === $events['move']
+					&& 'component-import-' . $token . '.xml.txt' === ( $_FILES['import']['name'] ?? null )
+					&& $before_counts === $counts_after_block,
+				'wp_import_handle_upload appends .txt, passes import overrides to wp_handle_upload, and returns prefiltered upload errors without move or attachment effects',
+				array(
+					'blockedUpload'    => self::describe_value( $blocked_upload ),
+					'events'           => $events,
+					'filesNameAfter'   => $_FILES['import']['name'] ?? null,
+					'countsAfterBlock' => $counts_after_block,
+				)
+			);
+
+			file_put_contents( $attachment_file, 'component import cleanup ' . $token );
+			$attachment_id     = self::insert_import_attachment( $attachment_file, $token );
+			$before_cleanup    = is_int( $attachment_id ) ? \get_post( $attachment_id ) : null;
+			$cleanup_return    = is_int( $attachment_id ) ? \wp_import_cleanup( $attachment_id ) : null;
+			$after_cleanup     = is_int( $attachment_id ) ? \get_post( $attachment_id ) : null;
+			$cleanup_completed = ! $after_cleanup || ( $after_cleanup instanceof \WP_Post && 'private' !== $after_cleanup->post_status );
+
+			self::collect_failure(
+				$failures,
+				is_int( $attachment_id )
+					&& $attachment_id > 0
+					&& $before_cleanup instanceof \WP_Post
+					&& 'attachment' === $before_cleanup->post_type
+					&& null === $cleanup_return
+					&& $cleanup_completed,
+				'wp_import_cleanup delegates to attachment deletion and does not leave the generated import attachment live',
+				array(
+					'attachmentId'     => $attachment_id,
+					'beforeCleanup'    => $before_cleanup instanceof \WP_Post ? array( 'type' => $before_cleanup->post_type, 'status' => $before_cleanup->post_status ) : self::describe_value( $before_cleanup ),
+					'cleanupReturn'    => self::describe_value( $cleanup_return ),
+					'afterCleanup'     => $after_cleanup instanceof \WP_Post ? array( 'type' => $after_cleanup->post_type, 'status' => $after_cleanup->post_status ) : self::describe_value( $after_cleanup ),
+					'countsAfterClean' => $wpdb->component_fuzz_content_counts(),
+				)
+			);
+		} finally {
+			\remove_filter( 'pre_move_uploaded_file', $move_filter, 10 );
+			\remove_filter( 'wp_handle_upload', $handle_filter, 10 );
+			\remove_filter( 'wp_handle_upload_overrides', $overrides_filter, 10 );
+			\remove_filter( 'wp_handle_upload_prefilter', $prefilter, 10 );
+			$filters_after = array(
+				'prefilter' => \has_filter( 'wp_handle_upload_prefilter', $prefilter ),
+				'overrides' => \has_filter( 'wp_handle_upload_overrides', $overrides_filter ),
+				'handle'    => \has_filter( 'wp_handle_upload', $handle_filter ),
+				'move'      => \has_filter( 'pre_move_uploaded_file', $move_filter ),
+			);
+
+			$_FILES   = $superglobal_state['_FILES'];
+			$_POST    = $superglobal_state['_POST'];
+			$_REQUEST = $superglobal_state['_REQUEST'];
+			$wpdb->component_fuzz_reset_content();
+			self::delete_tree( $temp_dir );
+		}
+
+		self::collect_failure(
+			$failures,
+			array( 'prefilter' => false, 'overrides' => false, 'handle' => false, 'move' => false ) === $filters_after,
+			'import upload handler filters are removed after the upload and cleanup checks',
+			array( 'filtersAfter' => $filters_after )
+		);
+
+		return self::result( $ctx, 'import-diff.import-upload-handler.fail-closed-and-cleanup', $failures );
 	}
 
 	private static function check_text_diff_rendering( \ComponentFuzz\FuzzContext $ctx ): array {
@@ -695,6 +904,51 @@ final class ImportDiffSurface {
 		return $post_id;
 	}
 
+	private static function insert_import_attachment( string $file, string $token ): int {
+		global $wpdb;
+
+		$url = 'https://example.test/imports/' . rawurlencode( basename( $file ) );
+		$wpdb->insert(
+			$wpdb->posts,
+			array(
+				'post_author'           => 0,
+				'post_date'             => '2026-06-30 12:00:00',
+				'post_date_gmt'         => '2026-06-30 12:00:00',
+				'post_content'          => $url,
+				'post_title'            => basename( $file ),
+				'post_excerpt'          => '',
+				'post_status'           => 'private',
+				'comment_status'        => 'closed',
+				'ping_status'           => 'closed',
+				'post_password'         => '',
+				'post_name'             => 'component-import-cleanup-' . $token,
+				'to_ping'               => '',
+				'pinged'                => '',
+				'post_modified'         => '2026-06-30 12:00:00',
+				'post_modified_gmt'     => '2026-06-30 12:00:00',
+				'post_content_filtered' => '',
+				'post_parent'           => 0,
+				'guid'                  => $url,
+				'menu_order'            => 0,
+				'post_type'             => 'attachment',
+				'post_mime_type'        => 'text/plain',
+				'comment_count'         => 0,
+			)
+		);
+		$post_id = (int) $wpdb->insert_id;
+
+		$wpdb->insert(
+			$wpdb->postmeta,
+			array(
+				'post_id'    => $post_id,
+				'meta_key'   => '_wp_attached_file',
+				'meta_value' => $file,
+			)
+		);
+
+		return $post_id;
+	}
+
 	private static function insert_comment_agent( string $comment_agent, string $label ): int {
 		global $wpdb;
 
@@ -861,5 +1115,28 @@ final class ImportDiffSurface {
 			return $copy;
 		}
 		return $value;
+	}
+
+	private static function delete_tree( string $path ): void {
+		if ( is_file( $path ) || is_link( $path ) ) {
+			@unlink( $path );
+			return;
+		}
+
+		if ( ! is_dir( $path ) ) {
+			return;
+		}
+
+		$items = scandir( $path );
+		if ( false !== $items ) {
+			foreach ( $items as $item ) {
+				if ( '.' === $item || '..' === $item ) {
+					continue;
+				}
+				self::delete_tree( $path . DIRECTORY_SEPARATOR . $item );
+			}
+		}
+
+		@rmdir( $path );
 	}
 }
