@@ -39,6 +39,7 @@ final class RestWidgetsSidebarsSurface {
 			$rows[] = self::check_route_and_schema_contracts( $ctx->fork( 'routes' ), $case );
 			$rows[] = self::check_public_read_filters( $ctx->fork( 'public-read' ), $case );
 			$rows[] = self::check_widget_type_encode_and_projection( $ctx->fork( 'widget-types' ), $case );
+			$rows[] = self::check_widget_type_render_endpoint_subprocess( $ctx->fork( 'widget-render' ), $case );
 			$rows[] = self::check_widget_crud_instance_roundtrip( $ctx->fork( 'widget-crud' ), $case );
 			$rows[] = self::check_sidebar_reorder_and_visibility( $ctx->fork( 'sidebars' ), $case );
 			$rows[] = self::check_legacy_widget_form_data_and_delete_hooks( $ctx->fork( 'legacy' ), $case );
@@ -213,6 +214,7 @@ final class RestWidgetsSidebarsSurface {
 				&& self::route_has_methods( $routes['/wp/v2/widgets'], array( 'GET', 'POST' ) )
 				&& self::route_has_methods( $routes['/wp/v2/widgets/(?P<id>[\w\-]+)'], array( 'GET', 'POST', 'PUT', 'PATCH', 'DELETE' ) )
 				&& self::route_has_methods( $routes['/wp/v2/widget-types/(?P<id>[a-zA-Z0-9_-]+)/encode'], array( 'POST' ) )
+				&& self::route_has_methods( $routes['/wp/v2/widget-types/(?P<id>[a-zA-Z0-9_-]+)/render'], array( 'POST' ) )
 				&& self::route_has_methods( $routes['/wp/v2/sidebars/(?P<id>[\w-]+)'], array( 'GET', 'POST', 'PUT', 'PATCH' ) ),
 			'controllers register expected REST route matrix',
 			array( 'routes' => array_keys( $routes ) )
@@ -415,6 +417,866 @@ final class RestWidgetsSidebarsSurface {
 		);
 
 		return self::result( $ctx, 'rest-widgets-sidebars.widget-types.encode-projection', $failures );
+	}
+
+	private static function check_widget_type_render_endpoint_subprocess( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$missing = self::widget_type_render_endpoint_child_missing_requirements();
+		if ( array() !== $missing ) {
+			return self::skip(
+				$ctx,
+				'rest-widgets-sidebars.widget-types.render-subprocess',
+				'Required child-process APIs are unavailable.',
+				array( 'missing' => $missing )
+			);
+		}
+
+		$parent_before = self::iframe_request_constant_state();
+		$run           = self::run_widget_type_render_endpoint_child( $case );
+		$parent_after  = self::iframe_request_constant_state();
+		$result        = is_array( $run['result'] ?? null ) ? $run['result'] : array();
+		$failures      = array();
+
+		self::collect_failure(
+			$failures,
+			$parent_before === $parent_after,
+			'isolated render child leaves parent IFRAME_REQUEST state unchanged',
+			array(
+				'before' => $parent_before,
+				'after'  => $parent_after,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			true === ( $run['ok'] ?? null ),
+			'isolated render child exits cleanly and returns successful JSON',
+			array(
+				'exitCode' => $run['exitCode'] ?? null,
+				'stdout'   => self::preview( (string) ( $run['stdout'] ?? '' ) ),
+				'stderr'   => self::preview( (string) ( $run['stderr'] ?? '' ) ),
+				'result'   => $result,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::widget_type_render_endpoint_child_result_has_expected_shape( $result ),
+			'isolated render child result has the expected shape',
+			array( 'resultKeys' => array_keys( $result ) )
+		);
+
+		self::collect_failure(
+			$failures,
+			'' === ( $run['stderr'] ?? '' )
+				&& '' === ( $result['unexpectedOutput'] ?? '' ),
+			'isolated render child emits no stderr or stray stdout',
+			array(
+				'stderr'           => self::preview( (string) ( $run['stderr'] ?? '' ) ),
+				'unexpectedOutput' => self::preview( (string) ( $result['unexpectedOutput'] ?? '' ) ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			false === ( $result['iframeDefinedBefore'] ?? null )
+				&& false === ( $result['iframeDefinedAfterDenied'] ?? null )
+				&& false === ( $result['iframeDefinedAfterInvalid'] ?? null )
+				&& true === ( $result['iframeDefinedAfterValid'] ?? null )
+				&& true === ( $result['iframeValueAfterValid'] ?? null ),
+			'render endpoint defines IFRAME_REQUEST only for the authorized valid render path',
+			array(
+				'before'       => $result['iframeDefinedBefore'] ?? null,
+				'afterDenied'  => $result['iframeDefinedAfterDenied'] ?? null,
+				'afterInvalid' => $result['iframeDefinedAfterInvalid'] ?? null,
+				'afterValid'   => array(
+					'defined' => $result['iframeDefinedAfterValid'] ?? null,
+					'value'   => $result['iframeValueAfterValid'] ?? null,
+				),
+			)
+		);
+
+		$denied_status = (int) ( $result['denied']['status'] ?? 0 );
+		self::collect_failure(
+			$failures,
+			'rest_cannot_manage_widgets' === ( $result['denied']['code'] ?? null )
+				&& in_array( $denied_status, array( 401, 403 ), true )
+				&& 'rest_widget_type_invalid' === ( $result['invalid']['code'] ?? null )
+				&& 404 === (int) ( $result['invalid']['status'] ?? 0 ),
+			'render endpoint fail-closed responses do not enter the iframe renderer',
+			array(
+				'denied'  => $result['denied'] ?? null,
+				'invalid' => $result['invalid'] ?? null,
+			)
+		);
+
+		$valid  = is_array( $result['valid'] ?? null ) ? $result['valid'] : array();
+		$preview = is_array( $valid['preview'] ?? null ) ? $valid['preview'] : array();
+		self::collect_failure(
+			$failures,
+			200 === (int) ( $valid['status'] ?? 0 )
+				&& array( 'preview' ) === ( $valid['dataKeys'] ?? null )
+				&& true === ( $preview['nonEmpty'] ?? null )
+				&& true === ( $preview['hasDocument'] ?? null )
+				&& true === ( $preview['hasPageShell'] ?? null )
+				&& true === ( $preview['hasTextWidget'] ?? null )
+				&& true === ( $preview['hasTitle'] ?? null )
+				&& true === ( $preview['hasText'] ?? null )
+				&& true === ( $preview['hasHeadSentinel'] ?? null )
+				&& true === ( $preview['hasFooterSentinel'] ?? null ),
+			'authorized render returns a bounded legacy-widget preview document for the generated instance',
+			array( 'valid' => $valid )
+		);
+
+		self::collect_failure(
+			$failures,
+			1 === count( $result['widgetTitleCalls'] ?? array() )
+				&& 'text' === ( $result['widgetTitleCalls'][0]['idBase'] ?? null )
+				&& $case['createInstance']['title'] === ( $result['widgetTitleCalls'][0]['title'] ?? null )
+				&& array( 'head:' . $case['token'] ) === ( $result['headCalls'] ?? null )
+				&& array( 'footer:' . $case['token'] ) === ( $result['footerCalls'] ?? null ),
+			'render endpoint fires bounded widget and iframe document hooks exactly once',
+			array(
+				'widgetTitleCalls' => $result['widgetTitleCalls'] ?? null,
+				'headCalls'        => $result['headCalls'] ?? null,
+				'footerCalls'      => $result['footerCalls'] ?? null,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			true === ( $result['renderMutableStateUnchanged'] ?? null )
+				&& true === ( $result['childMutableStateRestored'] ?? null ),
+			'render endpoint preserves widget options, sidebar placement, output buffers, and temporary text-widget filters',
+			array(
+				'stateChecks'                => $result['stateChecks'] ?? null,
+				'childMutableStateRestored'  => $result['childMutableStateRestored'] ?? null,
+				'childMutableStateDiff'      => $result['childMutableStateDiff'] ?? null,
+				'renderMutableStateUnchanged' => $result['renderMutableStateUnchanged'] ?? null,
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'rest-widgets-sidebars.widget-types.render-subprocess',
+			$failures,
+			array(
+				'parentIframeBefore' => $parent_before,
+				'parentIframeAfter'  => $parent_after,
+				'child'              => array(
+					'denied'                => $result['denied'] ?? null,
+					'invalid'               => $result['invalid'] ?? null,
+					'valid'                 => $valid,
+					'iframeDefinedAfterValid' => $result['iframeDefinedAfterValid'] ?? null,
+					'stateChecks'           => $result['stateChecks'] ?? null,
+				),
+			)
+		);
+	}
+
+	private static function widget_type_render_endpoint_child_missing_requirements(): array {
+		$missing = array();
+
+		foreach ( array( 'json_decode', 'json_encode', 'proc_close', 'proc_open', 'stream_get_contents' ) as $function ) {
+			if ( ! function_exists( $function ) ) {
+				$missing[] = "function {$function}";
+			}
+		}
+
+		if ( ! defined( 'PHP_BINARY' ) || '' === PHP_BINARY ) {
+			$missing[] = 'PHP_BINARY';
+		}
+
+		return $missing;
+	}
+
+	private static function run_widget_type_render_endpoint_child( array $case ): array {
+		$payload = json_encode(
+			array(
+				'repoRoot' => \ComponentFuzz\repo_root(),
+				'case'     => $case,
+			),
+			JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE
+		);
+
+		if ( false === $payload ) {
+			return array(
+				'ok'       => false,
+				'exitCode' => -1,
+				'stdout'   => '',
+				'stderr'   => 'json_encode failed',
+				'result'   => null,
+			);
+		}
+
+		$descriptors = array(
+			0 => array( 'pipe', 'r' ),
+			1 => array( 'pipe', 'w' ),
+			2 => array( 'pipe', 'w' ),
+		);
+
+		// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.system_calls_proc_open -- Isolates IFRAME_REQUEST in a local PHP subprocess.
+		$process = proc_open( array( PHP_BINARY, '-r', self::widget_type_render_endpoint_child_program() ), $descriptors, $pipes, \ComponentFuzz\repo_root() );
+		if ( ! is_resource( $process ) ) {
+			return array(
+				'ok'       => false,
+				'exitCode' => -1,
+				'stdout'   => '',
+				'stderr'   => 'proc_open failed',
+				'result'   => null,
+			);
+		}
+
+		fwrite( $pipes[0], $payload );
+		fclose( $pipes[0] );
+
+		$stdout = stream_get_contents( $pipes[1] );
+		$stderr = stream_get_contents( $pipes[2] );
+		fclose( $pipes[1] );
+		fclose( $pipes[2] );
+
+		$exit_code = proc_close( $process );
+		$result    = json_decode( (string) $stdout, true );
+
+		return array(
+			'ok'       => 0 === $exit_code && is_array( $result ) && true === ( $result['ok'] ?? null ),
+			'exitCode' => $exit_code,
+			'stdout'   => (string) $stdout,
+			'stderr'   => (string) $stderr,
+			'result'   => is_array( $result ) ? $result : null,
+		);
+	}
+
+	private static function widget_type_render_endpoint_child_result_has_expected_shape( array $result ): bool {
+		return array_key_exists( 'ok', $result )
+			&& is_bool( $result['ok'] )
+			&& array_key_exists( 'iframeDefinedBefore', $result )
+			&& is_bool( $result['iframeDefinedBefore'] )
+			&& array_key_exists( 'iframeDefinedAfterDenied', $result )
+			&& is_bool( $result['iframeDefinedAfterDenied'] )
+			&& array_key_exists( 'iframeDefinedAfterInvalid', $result )
+			&& is_bool( $result['iframeDefinedAfterInvalid'] )
+			&& array_key_exists( 'iframeDefinedAfterValid', $result )
+			&& is_bool( $result['iframeDefinedAfterValid'] )
+			&& array_key_exists( 'denied', $result )
+			&& is_array( $result['denied'] )
+			&& array_key_exists( 'invalid', $result )
+			&& is_array( $result['invalid'] )
+			&& array_key_exists( 'valid', $result )
+			&& is_array( $result['valid'] )
+			&& array_key_exists( 'widgetTitleCalls', $result )
+			&& is_array( $result['widgetTitleCalls'] )
+			&& array_key_exists( 'headCalls', $result )
+			&& is_array( $result['headCalls'] )
+			&& array_key_exists( 'footerCalls', $result )
+			&& is_array( $result['footerCalls'] )
+			&& array_key_exists( 'stateChecks', $result )
+			&& is_array( $result['stateChecks'] )
+			&& array_key_exists( 'renderMutableStateUnchanged', $result )
+			&& is_bool( $result['renderMutableStateUnchanged'] )
+			&& array_key_exists( 'childMutableStateRestored', $result )
+			&& is_bool( $result['childMutableStateRestored'] )
+			&& array_key_exists( 'unexpectedOutput', $result )
+			&& is_string( $result['unexpectedOutput'] );
+	}
+
+	private static function iframe_request_constant_state(): array {
+		return array(
+			'defined' => defined( 'IFRAME_REQUEST' ),
+			'value'   => defined( 'IFRAME_REQUEST' ) ? constant( 'IFRAME_REQUEST' ) : null,
+		);
+	}
+
+	private static function widget_type_render_endpoint_child_program(): string {
+		return <<<'PHP'
+ini_set( 'display_errors', 'stderr' );
+error_reporting( E_ALL & ~E_DEPRECATED & ~E_USER_DEPRECATED );
+
+function component_fuzz_rest_widgets_render_preview( string $value, int $limit = 240 ): string {
+	$printable = preg_replace_callback(
+		'/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/',
+		static function ( array $m ): string {
+			return sprintf( '\\x%02X', ord( $m[0] ) );
+		},
+		$value
+	);
+
+	if ( strlen( $printable ) > $limit ) {
+		return substr( $printable, 0, $limit ) . '...';
+	}
+
+	return $printable;
+}
+
+function component_fuzz_rest_widgets_render_describe_value( $value ) {
+	if ( is_object( $value ) ) {
+		return array( 'object' => get_class( $value ) );
+	}
+
+	if ( is_array( $value ) ) {
+		return array(
+			'type' => 'array',
+			'keys' => array_map( 'strval', array_slice( array_keys( $value ), 0, 12 ) ),
+			'count' => count( $value ),
+		);
+	}
+
+	return is_scalar( $value ) || null === $value ? $value : gettype( $value );
+}
+
+function component_fuzz_rest_widgets_render_clone_value( $value ) {
+	if ( is_array( $value ) ) {
+		$copy = array();
+		foreach ( $value as $key => $item ) {
+			$copy[ $key ] = component_fuzz_rest_widgets_render_clone_value( $item );
+		}
+		return $copy;
+	}
+
+	if ( is_object( $value ) ) {
+		if ( $value instanceof Closure ) {
+			return $value;
+		}
+
+		try {
+			return clone $value;
+		} catch ( Throwable $e ) {
+			return $value;
+		}
+	}
+
+	return $value;
+}
+
+function component_fuzz_rest_widgets_render_snapshot(): array {
+	$snapshot = array(
+		'globals' => array(),
+		'obLevel' => ob_get_level(),
+		'options' => isset( $GLOBALS['wpdb'] ) && method_exists( $GLOBALS['wpdb'], 'component_fuzz_get_options' )
+			? $GLOBALS['wpdb']->component_fuzz_get_options()
+			: null,
+		'post' => $_POST,
+		'request' => $_REQUEST,
+		'get' => $_GET,
+	);
+
+	foreach (
+		array(
+			'_wp_sidebars_widgets',
+			'current_user',
+			'post',
+			'sidebars_widgets',
+			'user_ID',
+			'wp_actions',
+			'wp_current_filter',
+			'wp_filter',
+			'wp_filters',
+			'wp_query',
+			'wp_registered_sidebars',
+			'wp_registered_widgets',
+			'wp_registered_widget_controls',
+			'wp_registered_widget_updates',
+			'wp_rest_server',
+			'wp_the_query',
+			'wp_widget_factory',
+		) as $name
+	) {
+		$snapshot['globals'][ $name ] = array(
+			'exists' => array_key_exists( $name, $GLOBALS ),
+			'value'  => array_key_exists( $name, $GLOBALS ) ? component_fuzz_rest_widgets_render_clone_value( $GLOBALS[ $name ] ) : null,
+		);
+	}
+
+	return $snapshot;
+}
+
+function component_fuzz_rest_widgets_render_restore( array $snapshot ): void {
+	if ( null !== $snapshot['options'] && isset( $GLOBALS['wpdb'] ) && method_exists( $GLOBALS['wpdb'], 'component_fuzz_reset_options' ) ) {
+		$GLOBALS['wpdb']->component_fuzz_reset_options( $snapshot['options'] );
+	}
+
+	foreach ( $snapshot['globals'] as $name => $entry ) {
+		if ( $entry['exists'] ) {
+			$GLOBALS[ $name ] = $entry['value'];
+		} else {
+			unset( $GLOBALS[ $name ] );
+		}
+	}
+
+	$_POST    = $snapshot['post'];
+	$_REQUEST = $snapshot['request'];
+	$_GET     = $snapshot['get'];
+}
+
+function component_fuzz_rest_widgets_render_state_diff( array $snapshot ): ?array {
+	if ( ob_get_level() !== (int) $snapshot['obLevel'] ) {
+		return array(
+			'key' => 'obLevel',
+			'before' => (int) $snapshot['obLevel'],
+			'after' => ob_get_level(),
+		);
+	}
+
+	if ( null !== $snapshot['options'] && isset( $GLOBALS['wpdb'] ) && method_exists( $GLOBALS['wpdb'], 'component_fuzz_get_options' ) ) {
+		$options = $GLOBALS['wpdb']->component_fuzz_get_options();
+		if ( $options != $snapshot['options'] ) {
+			return array(
+				'key' => 'options',
+				'before' => component_fuzz_rest_widgets_render_describe_value( $snapshot['options'] ),
+				'after' => component_fuzz_rest_widgets_render_describe_value( $options ),
+			);
+		}
+	}
+
+	foreach ( $snapshot['globals'] as $name => $entry ) {
+		$exists = array_key_exists( $name, $GLOBALS );
+		if ( $exists !== $entry['exists'] ) {
+			return array(
+				'key' => 'globals.' . $name . '.exists',
+				'before' => $entry['exists'],
+				'after' => $exists,
+			);
+		}
+		if ( $exists && $GLOBALS[ $name ] != $entry['value'] ) {
+			return array(
+				'key' => 'globals.' . $name,
+				'before' => component_fuzz_rest_widgets_render_describe_value( $entry['value'] ),
+				'after' => component_fuzz_rest_widgets_render_describe_value( $GLOBALS[ $name ] ),
+			);
+		}
+	}
+
+	foreach ( array( 'post' => $_POST, 'request' => $_REQUEST, 'get' => $_GET ) as $name => $value ) {
+		if ( $value != $snapshot[ $name ] ) {
+			return array(
+				'key' => $name,
+				'before' => component_fuzz_rest_widgets_render_describe_value( $snapshot[ $name ] ),
+				'after' => component_fuzz_rest_widgets_render_describe_value( $value ),
+			);
+		}
+	}
+
+	return null;
+}
+
+function component_fuzz_rest_widgets_render_reset_runtime(): void {
+	$GLOBALS['wp_registered_sidebars']        = array();
+	$GLOBALS['wp_registered_widgets']         = array();
+	$GLOBALS['wp_registered_widget_controls'] = array();
+	$GLOBALS['wp_registered_widget_updates']  = array();
+	$GLOBALS['_wp_sidebars_widgets']          = array();
+	$GLOBALS['sidebars_widgets']              = array();
+	$GLOBALS['post']                          = null;
+	$GLOBALS['wp_query']                      = new WP_Query();
+	$GLOBALS['wp_the_query']                  = $GLOBALS['wp_query'];
+
+	if ( isset( $GLOBALS['wp_widget_factory'] ) && $GLOBALS['wp_widget_factory'] instanceof WP_Widget_Factory ) {
+		$GLOBALS['wp_widget_factory']->widgets = array();
+	} else {
+		$GLOBALS['wp_widget_factory'] = new WP_Widget_Factory();
+	}
+
+	$GLOBALS['wp_rest_server'] = new WP_REST_Server();
+
+	if ( isset( $GLOBALS['wpdb'] ) && $GLOBALS['wpdb'] instanceof Component_Fuzz_WPDB_Stub ) {
+		$GLOBALS['wpdb']->component_fuzz_reset_content();
+		$GLOBALS['wpdb']->component_fuzz_reset_options(
+			array(
+				'blog_charset'      => 'UTF-8',
+				'blogdescription'   => 'Component fuzz tagline',
+				'blogname'          => 'Component Fuzz',
+				'home'              => 'http://example.test',
+				'siteurl'           => 'http://example.test',
+				'sidebars_widgets'  => array(),
+				'widget_text'       => array(),
+			)
+		);
+	} else {
+		update_option( 'home', 'http://example.test' );
+		update_option( 'siteurl', 'http://example.test' );
+		update_option( 'blog_charset', 'UTF-8' );
+		update_option( 'sidebars_widgets', array() );
+		update_option( 'widget_text', array() );
+	}
+
+	wp_cache_flush();
+	wp_set_current_user( 0 );
+	wp_widgets_init();
+
+	$legacy_widget_file = ABSPATH . WPINC . '/blocks/legacy-widget.php';
+	if ( is_readable( $legacy_widget_file ) ) {
+		require_once $legacy_widget_file;
+	}
+
+	$registry = WP_Block_Type_Registry::get_instance();
+	if ( function_exists( 'register_block_core_legacy_widget' ) && ! $registry->is_registered( 'core/legacy-widget' ) ) {
+		register_block_core_legacy_widget();
+	}
+}
+
+function component_fuzz_rest_widgets_render_setup_widget( string $id_base, int $number, array $settings ): void {
+	global $wp_widget_factory;
+
+	$option_name = "widget_{$id_base}";
+	$all         = get_option( $option_name, array() );
+	$all[ $number ] = $settings;
+	update_option( $option_name, $all );
+
+	$widget_object = $wp_widget_factory->get_widget_object( $id_base );
+	if ( $widget_object ) {
+		$widget_object->_set( $number );
+		$widget_object->_register_one( $number );
+		$widget_object->updated = false;
+		$widget_object->widget_options['show_instance_in_rest'] = true;
+	}
+}
+
+function component_fuzz_rest_widgets_render_setup_sidebar( string $id, array $attrs, array $widgets ): void {
+	register_sidebar(
+		array_merge(
+			array(
+				'id'            => $id,
+				'name'          => $id,
+				'description'   => '',
+				'before_widget' => '',
+				'after_widget'  => '',
+				'before_title'  => '',
+				'after_title'   => '',
+			),
+			$attrs
+		)
+	);
+
+	$sidebars = get_option( 'sidebars_widgets', array() );
+	if ( ! is_array( $sidebars ) ) {
+		$sidebars = array();
+	}
+	$sidebars[ $id ] = $widgets;
+	if ( ! isset( $sidebars['wp_inactive_widgets'] ) ) {
+		$sidebars['wp_inactive_widgets'] = array();
+	}
+	wp_set_sidebars_widgets( $sidebars );
+}
+
+function component_fuzz_rest_widgets_render_seed( array $case ): void {
+	component_fuzz_rest_widgets_render_setup_widget(
+		'text',
+		(int) $case['publicTextNumber'],
+		(array) $case['createInstance']
+	);
+	component_fuzz_rest_widgets_render_setup_widget(
+		'text',
+		(int) $case['hiddenTextNumber'],
+		array(
+			'title'  => (string) $case['hiddenTitle'],
+			'text'   => (string) $case['hiddenText'],
+			'filter' => false,
+			'visual' => false,
+		)
+	);
+
+	component_fuzz_rest_widgets_render_setup_sidebar(
+		(string) $case['publicSidebar'],
+		array(
+			'name'         => (string) $case['publicSidebarName'],
+			'description'  => (string) $case['publicSidebarDescription'],
+			'class'        => 'cfz-public',
+			'show_in_rest' => true,
+		),
+		array( (string) $case['publicTextId'] )
+	);
+	component_fuzz_rest_widgets_render_setup_sidebar(
+		(string) $case['hiddenSidebar'],
+		array(
+			'name'         => (string) $case['hiddenSidebarName'],
+			'description'  => (string) $case['hiddenSidebarDescription'],
+			'class'        => 'cfz-hidden',
+			'show_in_rest' => false,
+		),
+		array( (string) $case['hiddenTextId'] )
+	);
+}
+
+function component_fuzz_rest_widgets_render_install_cap_filter(): callable {
+	$filter = static function ( array $allcaps ): array {
+		$allcaps['edit_theme_options'] = true;
+		return $allcaps;
+	};
+
+	add_filter( 'user_has_cap', $filter, PHP_INT_MAX, 4 );
+
+	return $filter;
+}
+
+function component_fuzz_rest_widgets_render_request( string $method, string $route, array $params = array(), array $route_params = array() ): WP_REST_Request {
+	$request = new WP_REST_Request( $method, $route );
+	foreach ( $params as $key => $value ) {
+		$request->set_param( $key, $value );
+	}
+	if ( array() !== $route_params ) {
+		$request->set_url_params( $route_params );
+	}
+
+	return $request;
+}
+
+function component_fuzz_rest_widgets_render_encoded_instance( array $instance ): array {
+	$serialized = serialize( $instance );
+
+	return array(
+		'encoded' => base64_encode( $serialized ),
+		'hash'    => wp_hash( $serialized ),
+	);
+}
+
+function component_fuzz_rest_widgets_render_dispatch( WP_REST_Server $server, string $id, array $instance ): WP_REST_Response {
+	$route = '/wp/v2/widget-types/' . $id . '/render';
+	return rest_ensure_response(
+		$server->dispatch(
+			component_fuzz_rest_widgets_render_request(
+				'POST',
+				$route,
+				array( 'instance' => $instance ),
+				array( 'id' => $id )
+			)
+		)
+	);
+}
+
+function component_fuzz_rest_widgets_render_response_summary( WP_REST_Response $response, array $case ): array {
+	$data    = $response->get_data();
+	$summary = array(
+		'status'   => $response->get_status(),
+		'dataKeys' => is_array( $data ) ? array_keys( $data ) : array(),
+		'code'     => is_array( $data ) ? ( $data['code'] ?? null ) : null,
+	);
+
+	if ( is_array( $data ) && isset( $data['data']['status'] ) ) {
+		$summary['errorStatus'] = (int) $data['data']['status'];
+	}
+
+	if ( is_array( $data ) && isset( $data['preview'] ) && is_string( $data['preview'] ) ) {
+		$preview       = $data['preview'];
+		$plain_preview = html_entity_decode( wp_strip_all_tags( $preview ), ENT_QUOTES, 'UTF-8' );
+		$plain_text    = html_entity_decode( wp_strip_all_tags( (string) $case['createInstance']['text'] ), ENT_QUOTES, 'UTF-8' );
+
+		$summary['preview'] = array(
+			'length'            => strlen( $preview ),
+			'hash'              => hash( 'sha256', $preview ),
+			'preview'           => component_fuzz_rest_widgets_render_preview( $preview ),
+			'nonEmpty'          => '' !== trim( $preview ),
+			'hasDocument'       => str_contains( $preview, '<!doctype html>' )
+				&& str_contains( $preview, '<html' )
+				&& str_contains( $preview, '<head>' )
+				&& str_contains( $preview, '<body' ),
+			'hasPageShell'      => str_contains( $preview, 'id="page"' )
+				&& str_contains( $preview, 'id="content"' ),
+			'hasTextWidget'     => str_contains( $preview, 'textwidget' ),
+			'hasTitle'          => str_contains( $plain_preview, (string) $case['createInstance']['title'] ),
+			'hasText'           => '' === $plain_text || str_contains( $plain_preview, $plain_text ),
+			'hasHeadSentinel'   => str_contains( $preview, 'cfz-render-head' )
+				&& str_contains( $preview, (string) $case['token'] ),
+			'hasFooterSentinel' => str_contains( $preview, 'cfz-render-footer' )
+				&& str_contains( $preview, (string) $case['token'] ),
+		);
+	}
+
+	return $summary;
+}
+
+function component_fuzz_rest_widgets_render_hook_count( string $tag ): int {
+	global $wp_filter;
+
+	if ( ! isset( $wp_filter[ $tag ] ) ) {
+		return 0;
+	}
+
+	$hook = $wp_filter[ $tag ];
+	if ( $hook instanceof WP_Hook ) {
+		$count = 0;
+		foreach ( $hook->callbacks as $callbacks ) {
+			$count += is_array( $callbacks ) ? count( $callbacks ) : 0;
+		}
+		return $count;
+	}
+
+	return is_array( $hook ) ? count( $hook ) : 1;
+}
+
+function component_fuzz_rest_widgets_render_selected_state(): array {
+	return array(
+		'obLevel' => ob_get_level(),
+		'galleryHookCount' => component_fuzz_rest_widgets_render_hook_count( 'shortcode_atts_gallery' ),
+		'postExists' => array_key_exists( 'post', $GLOBALS ),
+		'post' => array_key_exists( 'post', $GLOBALS ) ? $GLOBALS['post'] : null,
+		'sidebars' => wp_get_sidebars_widgets(),
+		'widgetText' => get_option( 'widget_text', array() ),
+		'widgetTextDoShortcode' => has_filter( 'widget_text', 'do_shortcode' ),
+	);
+}
+
+function component_fuzz_rest_widgets_render_compare_selected_state( array $before, array $after ): array {
+	return array(
+		'obLevelRestored' => $before['obLevel'] === $after['obLevel'],
+		'galleryFilterRestored' => $before['galleryHookCount'] === $after['galleryHookCount'],
+		'postRestored' => $before['postExists'] === $after['postExists'] && $before['post'] == $after['post'],
+		'sidebarsUnchanged' => $before['sidebars'] == $after['sidebars'],
+		'widgetTextOptionUnchanged' => $before['widgetText'] == $after['widgetText'],
+		'widgetTextShortcodeFilterRestored' => $before['widgetTextDoShortcode'] === $after['widgetTextDoShortcode'],
+	);
+}
+
+$component_fuzz_rest_widgets_render_outer_ob_level = ob_get_level();
+ob_start();
+
+$component_fuzz_rest_widgets_render_snapshot          = null;
+$component_fuzz_rest_widgets_render_unexpected_output = '';
+$component_fuzz_rest_widgets_render_result            = array(
+	'ok'                           => false,
+	'iframeDefinedBefore'          => false,
+	'iframeDefinedAfterDenied'     => false,
+	'iframeDefinedAfterInvalid'    => false,
+	'iframeDefinedAfterValid'      => false,
+	'iframeValueAfterValid'        => null,
+	'denied'                       => array(),
+	'invalid'                      => array(),
+	'valid'                        => array(),
+	'widgetTitleCalls'             => array(),
+	'headCalls'                    => array(),
+	'footerCalls'                  => array(),
+	'stateChecks'                  => array(),
+	'renderMutableStateUnchanged'  => false,
+	'childMutableStateRestored'    => false,
+	'childMutableStateDiff'        => null,
+	'unexpectedOutput'             => '',
+);
+
+try {
+	$component_fuzz_rest_widgets_render_raw     = stream_get_contents( STDIN );
+	$component_fuzz_rest_widgets_render_fixture = json_decode( $component_fuzz_rest_widgets_render_raw, true );
+
+	if (
+		! is_array( $component_fuzz_rest_widgets_render_fixture )
+		|| empty( $component_fuzz_rest_widgets_render_fixture['repoRoot'] )
+		|| ! is_array( $component_fuzz_rest_widgets_render_fixture['case'] ?? null )
+	) {
+		throw new RuntimeException( 'Invalid REST widget render fixture.' );
+	}
+
+	$component_fuzz_rest_widgets_render_case = $component_fuzz_rest_widgets_render_fixture['case'];
+	foreach ( array( 'token', 'publicTextNumber', 'hiddenTextNumber', 'publicSidebar', 'hiddenSidebar', 'publicTextId', 'hiddenTextId', 'createInstance' ) as $required_key ) {
+		if ( ! array_key_exists( $required_key, $component_fuzz_rest_widgets_render_case ) ) {
+			throw new RuntimeException( 'Missing REST widget render case key: ' . $required_key );
+		}
+	}
+
+	require_once $component_fuzz_rest_widgets_render_fixture['repoRoot'] . '/tools/component-fuzz/lib/autoload.php';
+
+	\ComponentFuzz\WpBootstrap::load();
+	component_fuzz_rest_widgets_render_reset_runtime();
+	component_fuzz_rest_widgets_render_seed( $component_fuzz_rest_widgets_render_case );
+
+	$component_fuzz_rest_widgets_render_snapshot = component_fuzz_rest_widgets_render_snapshot();
+	$component_fuzz_rest_widgets_render_result['iframeDefinedBefore'] = defined( 'IFRAME_REQUEST' );
+
+	$component_fuzz_rest_widgets_render_server     = new WP_REST_Server();
+	$GLOBALS['wp_rest_server']                     = $component_fuzz_rest_widgets_render_server;
+	$component_fuzz_rest_widgets_render_controller = new WP_REST_Widget_Types_Controller();
+	$component_fuzz_rest_widgets_render_controller->register_routes();
+
+	$component_fuzz_rest_widgets_render_instance = component_fuzz_rest_widgets_render_encoded_instance(
+		(array) $component_fuzz_rest_widgets_render_case['createInstance']
+	);
+
+	$component_fuzz_rest_widgets_render_denied = component_fuzz_rest_widgets_render_dispatch(
+		$component_fuzz_rest_widgets_render_server,
+		'text',
+		$component_fuzz_rest_widgets_render_instance
+	);
+	$component_fuzz_rest_widgets_render_result['denied']                   = component_fuzz_rest_widgets_render_response_summary( $component_fuzz_rest_widgets_render_denied, $component_fuzz_rest_widgets_render_case );
+	$component_fuzz_rest_widgets_render_result['iframeDefinedAfterDenied'] = defined( 'IFRAME_REQUEST' );
+
+	$component_fuzz_rest_widgets_render_cap_filter = component_fuzz_rest_widgets_render_install_cap_filter();
+	$component_fuzz_rest_widgets_render_invalid_id = 'cfz_missing_' . preg_replace( '/[^a-zA-Z0-9_-]/', '_', (string) $component_fuzz_rest_widgets_render_case['token'] );
+	$component_fuzz_rest_widgets_render_invalid    = component_fuzz_rest_widgets_render_dispatch(
+		$component_fuzz_rest_widgets_render_server,
+		$component_fuzz_rest_widgets_render_invalid_id,
+		$component_fuzz_rest_widgets_render_instance
+	);
+	$component_fuzz_rest_widgets_render_result['invalid']                   = component_fuzz_rest_widgets_render_response_summary( $component_fuzz_rest_widgets_render_invalid, $component_fuzz_rest_widgets_render_case );
+	$component_fuzz_rest_widgets_render_result['iframeDefinedAfterInvalid'] = defined( 'IFRAME_REQUEST' );
+
+	$component_fuzz_rest_widgets_render_head_action = static function () use ( &$component_fuzz_rest_widgets_render_result, $component_fuzz_rest_widgets_render_case ): void {
+		$component_fuzz_rest_widgets_render_result['headCalls'][] = 'head:' . $component_fuzz_rest_widgets_render_case['token'];
+		echo '<meta name="cfz-render-head" content="' . esc_attr( (string) $component_fuzz_rest_widgets_render_case['token'] ) . '">';
+	};
+	$component_fuzz_rest_widgets_render_footer_action = static function () use ( &$component_fuzz_rest_widgets_render_result, $component_fuzz_rest_widgets_render_case ): void {
+		$component_fuzz_rest_widgets_render_result['footerCalls'][] = 'footer:' . $component_fuzz_rest_widgets_render_case['token'];
+		echo '<span class="cfz-render-footer" data-token="' . esc_attr( (string) $component_fuzz_rest_widgets_render_case['token'] ) . '"></span>';
+	};
+	$component_fuzz_rest_widgets_render_title_filter = static function ( $title, $instance, $id_base ) use ( &$component_fuzz_rest_widgets_render_result ) {
+		$component_fuzz_rest_widgets_render_result['widgetTitleCalls'][] = array(
+			'title'    => $title,
+			'idBase'   => $id_base,
+			'instance' => is_array( $instance ) ? array_keys( $instance ) : gettype( $instance ),
+		);
+		return $title;
+	};
+
+	add_action( 'wp_head', $component_fuzz_rest_widgets_render_head_action, 10 );
+	add_action( 'wp_footer', $component_fuzz_rest_widgets_render_footer_action, 10 );
+	add_filter( 'widget_title', $component_fuzz_rest_widgets_render_title_filter, 10, 3 );
+
+	$component_fuzz_rest_widgets_render_before_state = component_fuzz_rest_widgets_render_selected_state();
+	$component_fuzz_rest_widgets_render_valid        = component_fuzz_rest_widgets_render_dispatch(
+		$component_fuzz_rest_widgets_render_server,
+		'text',
+		$component_fuzz_rest_widgets_render_instance
+	);
+	$component_fuzz_rest_widgets_render_after_state = component_fuzz_rest_widgets_render_selected_state();
+	$component_fuzz_rest_widgets_render_result['valid'] = component_fuzz_rest_widgets_render_response_summary( $component_fuzz_rest_widgets_render_valid, $component_fuzz_rest_widgets_render_case );
+	$component_fuzz_rest_widgets_render_result['iframeDefinedAfterValid'] = defined( 'IFRAME_REQUEST' );
+	$component_fuzz_rest_widgets_render_result['iframeValueAfterValid']   = defined( 'IFRAME_REQUEST' ) ? constant( 'IFRAME_REQUEST' ) : null;
+	$component_fuzz_rest_widgets_render_result['stateChecks']             = component_fuzz_rest_widgets_render_compare_selected_state(
+		$component_fuzz_rest_widgets_render_before_state,
+		$component_fuzz_rest_widgets_render_after_state
+	);
+	$component_fuzz_rest_widgets_render_result['renderMutableStateUnchanged'] = ! in_array(
+		false,
+		$component_fuzz_rest_widgets_render_result['stateChecks'],
+		true
+	);
+
+	remove_filter( 'widget_title', $component_fuzz_rest_widgets_render_title_filter, 10 );
+	remove_action( 'wp_footer', $component_fuzz_rest_widgets_render_footer_action, 10 );
+	remove_action( 'wp_head', $component_fuzz_rest_widgets_render_head_action, 10 );
+	remove_filter( 'user_has_cap', $component_fuzz_rest_widgets_render_cap_filter, PHP_INT_MAX );
+
+	$component_fuzz_rest_widgets_render_result['ok'] = true;
+} catch ( Throwable $e ) {
+	$component_fuzz_rest_widgets_render_result['throwable'] = array(
+		'class'   => get_class( $e ),
+		'message' => $e->getMessage(),
+		'file'    => $e->getFile(),
+		'line'    => $e->getLine(),
+	);
+} finally {
+	if ( is_array( $component_fuzz_rest_widgets_render_snapshot ) ) {
+		component_fuzz_rest_widgets_render_restore( $component_fuzz_rest_widgets_render_snapshot );
+		$component_fuzz_rest_widgets_render_result['childMutableStateDiff']     = component_fuzz_rest_widgets_render_state_diff( $component_fuzz_rest_widgets_render_snapshot );
+		$component_fuzz_rest_widgets_render_result['childMutableStateRestored'] = null === $component_fuzz_rest_widgets_render_result['childMutableStateDiff'];
+	}
+
+	while ( ob_get_level() > $component_fuzz_rest_widgets_render_outer_ob_level ) {
+		$component_fuzz_rest_widgets_render_unexpected_output = ob_get_clean() . $component_fuzz_rest_widgets_render_unexpected_output;
+	}
+
+	$component_fuzz_rest_widgets_render_result['unexpectedOutput'] = component_fuzz_rest_widgets_render_preview( $component_fuzz_rest_widgets_render_unexpected_output );
+}
+
+$component_fuzz_rest_widgets_render_json = json_encode( $component_fuzz_rest_widgets_render_result, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE );
+echo false === $component_fuzz_rest_widgets_render_json ? '{"ok":false,"error":"json_encode failed"}' : $component_fuzz_rest_widgets_render_json;
+exit( ! empty( $component_fuzz_rest_widgets_render_result['ok'] ) ? 0 : 1 );
+PHP;
 	}
 
 	private static function check_widget_crud_instance_roundtrip( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
