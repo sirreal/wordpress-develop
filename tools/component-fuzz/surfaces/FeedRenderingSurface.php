@@ -33,6 +33,7 @@ final class FeedRenderingSurface {
 			$rows[] = self::check_comments_rss2_template( $ctx->fork( 'comments-rss2' ), $case );
 			$rows[] = self::check_comments_atom_template( $ctx->fork( 'comments-atom' ), $case );
 			$rows[] = self::check_feed_template_hook_payloads( $ctx->fork( 'hook-payloads' ), $case );
+			$rows[] = self::check_legacy_feed_templates_and_dispatch( $ctx->fork( 'legacy-dispatch' ), $case );
 			$rows[] = self::check_content_mode_switches( $ctx->fork( 'content-modes' ), $case );
 			$rows[] = self::check_feed_link_helpers( $ctx->fork( 'feed-links' ), $case );
 			$rows[] = self::check_self_link_request_uri_oracles( $ctx->fork( 'self-link' ), $case );
@@ -83,20 +84,29 @@ final class FeedRenderingSurface {
 				'convert_chars',
 				'create_initial_post_types',
 				'create_initial_taxonomies',
+				'current_filter',
+				'do_feed',
+				'do_feed_atom',
+				'do_feed_rdf',
+				'do_feed_rss',
+				'do_feed_rss2',
 				'ent2ncr',
 				'esc_html',
 				'esc_url',
+				'feed_content_type',
 				'feed_links',
 				'feed_links_extra',
 				'get_comment',
 				'get_comment_author_url',
 				'get_comment_guid',
 				'get_comment_link',
+				'get_default_feed',
 				'get_feed_build_date',
 				'get_feed_link',
 				'get_option',
 				'get_post',
 				'get_post_comments_feed_link',
+				'get_query_var',
 				'get_self_link',
 				'get_the_content_feed',
 				'has_filter',
@@ -104,8 +114,11 @@ final class FeedRenderingSurface {
 				'have_posts',
 				'html_type_rss',
 				'is_wp_error',
+				'load_template',
+				'mysql2date',
 				'remove_action',
 				'remove_filter',
+				'rewind_posts',
 				'rss_enclosure',
 				'sanitize_title_with_dashes',
 				'self_link',
@@ -113,6 +126,7 @@ final class FeedRenderingSurface {
 				'simplexml_load_string',
 				'the_category_rss',
 				'the_comment',
+				'the_author',
 				'the_content_feed',
 				'the_excerpt_rss',
 				'the_guid',
@@ -660,6 +674,253 @@ final class FeedRenderingSurface {
 		);
 
 		return self::result( $ctx, 'feed-rendering.template-hook-payloads.context-escaping-and-loop-ids', $failures, $combined );
+	}
+
+	private static function check_legacy_feed_templates_and_dispatch( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures        = array();
+		$output          = '';
+		$dispatch_events = array();
+		$events          = array(
+			'rss_tag_pre' => array(),
+			'rdf_ns'      => 0,
+			'rdf_header'  => 0,
+			'rdf_item'    => array(),
+			'rss_head'    => 0,
+			'rss_item'    => array(),
+		);
+
+		$namespace = 'https://component-fuzz.example.test/legacy-feed/' . rawurlencode( $case['token'] );
+		$marker    = 'legacy <marker> & ' . $case['token'];
+
+		$rss_tag_pre = static function ( string $feed ) use ( &$events ): void {
+			$events['rss_tag_pre'][] = $feed;
+		};
+		$rdf_ns      = static function () use ( &$events, $namespace ): void {
+			++$events['rdf_ns'];
+			echo "\txmlns:cfz=\"" . FeedRenderingSurface::xml_attr( $namespace ) . "\"\n";
+		};
+		$rdf_header  = static function () use ( &$events, $marker ): void {
+			++$events['rdf_header'];
+			echo "\t<cfz:rdf-header data-cfz=\"" . FeedRenderingSurface::xml_attr( $marker ) . '">'
+				. FeedRenderingSurface::xml_text( $marker )
+				. "</cfz:rdf-header>\n";
+		};
+		$rdf_item    = static function () use ( &$events, $marker ): void {
+			$events['rdf_item'][] = isset( $GLOBALS['post']->ID ) ? (int) $GLOBALS['post']->ID : 0;
+			echo "\t<cfz:rdf-item data-cfz=\"" . FeedRenderingSurface::xml_attr( $marker ) . '">'
+				. FeedRenderingSurface::xml_text( $marker )
+				. "</cfz:rdf-item>\n";
+		};
+		$rss_head    = static function () use ( &$events, $marker ): void {
+			++$events['rss_head'];
+			echo "\t<componentFuzzRssHeader data-cfz=\"" . FeedRenderingSurface::xml_attr( $marker ) . '">'
+				. FeedRenderingSurface::xml_text( $marker )
+				. "</componentFuzzRssHeader>\n";
+		};
+		$rss_item    = static function () use ( &$events, $marker ): void {
+			$events['rss_item'][] = isset( $GLOBALS['post']->ID ) ? (int) $GLOBALS['post']->ID : 0;
+			echo "\t\t<componentFuzzRssItem data-cfz=\"" . FeedRenderingSurface::xml_attr( $marker ) . '">'
+				. FeedRenderingSurface::xml_text( $marker )
+				. "</componentFuzzRssItem>\n";
+		};
+
+		$template_hooks = array(
+			array( 'rss_tag_pre', $rss_tag_pre, 10, 1 ),
+			array( 'rdf_ns', $rdf_ns, 10, 0 ),
+			array( 'rdf_header', $rdf_header, 10, 0 ),
+			array( 'rdf_item', $rdf_item, 10, 0 ),
+			array( 'rss_head', $rss_head, 10, 0 ),
+			array( 'rss_item', $rss_item, 10, 0 ),
+		);
+		$core_feed_actions = array(
+			array( 'do_feed_rdf', 'do_feed_rdf', 10, 0 ),
+			array( 'do_feed_rss', 'do_feed_rss', 10, 0 ),
+			array( 'do_feed_rss2', 'do_feed_rss2', 10, 1 ),
+			array( 'do_feed_atom', 'do_feed_atom', 10, 1 ),
+		);
+		$removed_core_actions = array();
+		$dispatch_observer    = static function ( bool $is_comment_feed = false, string $feed = '' ) use ( &$dispatch_events ): void {
+			$dispatch_events[] = array(
+				'hook'          => \current_filter(),
+				'feed'          => $feed,
+				'isCommentFeed' => $is_comment_feed,
+			);
+		};
+		$default_feed_filter = static function (): string {
+			return 'rdf';
+		};
+
+		try {
+			foreach ( $template_hooks as $hook ) {
+				\add_action( $hook[0], $hook[1], $hook[2], $hook[3] );
+			}
+			foreach ( $core_feed_actions as $action ) {
+				$priority = \has_filter( $action[0], $action[1] );
+				if ( false !== $priority ) {
+					\remove_action( $action[0], $action[1], $priority );
+					$removed_core_actions[] = array( $action[0], $action[1], $priority, $action[3] );
+				}
+				\add_action( $action[0], $dispatch_observer, 10, 2 );
+			}
+			\add_filter( 'default_feed', $default_feed_filter, 100 );
+
+			self::set_posts_query( $case, 'rdf', false );
+			$rdf_output = self::render_template( 'feed-rdf.php' );
+			$output    .= $rdf_output;
+
+			self::set_posts_query( $case, 'rss', false );
+			$rss_output = self::render_template( 'feed-rss.php' );
+			$output    .= $rss_output;
+
+			$direct_events     = $events;
+			$expected_post_ids = array_map( static fn ( \WP_Post $post ): int => (int) $post->ID, $case['posts'] );
+			$rdf_xml           = self::parse_xml( $rdf_output );
+			$rss_xml           = self::parse_xml( $rss_output );
+
+			self::collect_failure(
+				$failures,
+				$rdf_xml['ok']
+					&& str_contains( $rdf_output, '<rdf:RDF' )
+					&& count( $case['posts'] ) === substr_count( $rdf_output, '<rdf:li ' )
+					&& count( $case['posts'] ) === substr_count( $rdf_output, '<item rdf:about=' ),
+				'Legacy RDF feed is parseable and renders channel sequence plus one item per post',
+				array(
+					'xml'       => $rdf_xml,
+					'liCount'   => substr_count( $rdf_output, '<rdf:li ' ),
+					'itemCount' => substr_count( $rdf_output, '<item rdf:about=' ),
+				)
+			);
+			self::collect_failure(
+				$failures,
+				$case['rssUseExcerpt']
+					? 0 === substr_count( $rdf_output, '<content:encoded>' )
+					: (
+						count( $case['posts'] ) === substr_count( $rdf_output, '<content:encoded>' )
+						&& str_contains( $rdf_output, 'CDATA close ]]&gt; marker' )
+						&& ! str_contains( $rdf_output, 'CDATA close ]]> marker' )
+					),
+				'Legacy RDF feed follows rss_use_excerpt for content:encoded and escapes CDATA terminators',
+				array(
+					'rssUseExcerpt' => $case['rssUseExcerpt'],
+					'encodedCount'  => substr_count( $rdf_output, '<content:encoded>' ),
+				)
+			);
+			self::collect_failure(
+				$failures,
+				$rss_xml['ok']
+					&& str_contains( $rss_output, '<rss version="0.92">' )
+					&& count( $case['posts'] ) === substr_count( $rss_output, '<item>' )
+					&& 0 === substr_count( $rss_output, '<content:encoded>' )
+					&& str_contains( $rss_output, '<lastBuildDate>' . gmdate( 'D, d M Y H:i:s +0000', strtotime( $case['expectedBuildDate'] ) ) . '</lastBuildDate>' ),
+				'Legacy RSS 0.92 feed is parseable, excerpt-only, and uses RFC-style build dates',
+				array(
+					'xml'           => $rss_xml,
+					'itemCount'     => substr_count( $rss_output, '<item>' ),
+					'encodedCount'  => substr_count( $rss_output, '<content:encoded>' ),
+					'expectedBuild' => gmdate( 'D, d M Y H:i:s +0000', strtotime( $case['expectedBuildDate'] ) ),
+				)
+			);
+			self::collect_failure(
+				$failures,
+				array( 'rdf' ) === $direct_events['rss_tag_pre']
+					&& 1 === $direct_events['rdf_ns']
+					&& 1 === $direct_events['rdf_header']
+					&& 1 === $direct_events['rss_head']
+					&& $expected_post_ids === $direct_events['rdf_item']
+					&& $expected_post_ids === $direct_events['rss_item']
+					&& str_contains( $rdf_output, 'xmlns:cfz="' . self::xml_attr( $namespace ) . '"' )
+					&& str_contains( $output, 'data-cfz="' . self::xml_attr( $marker ) . '"' ),
+				'Legacy RDF/RSS hooks fire in loop order with escaped generated payloads',
+				array(
+					'events'   => $direct_events,
+					'expected' => $expected_post_ids,
+				)
+			);
+			self::collect_failure(
+				$failures,
+				! str_contains( $output, '<script' )
+					&& ! str_contains( $output, 'CDATA title ]]> marker' )
+					&& ( $case['rssUseExcerpt'] || str_contains( $rdf_output, 'CDATA close ]]&gt; marker' ) )
+					&& str_contains( $output, esc_html( ent2ncr( strip_tags( $case['posts'][0]->post_title ) ) ) ),
+				'Legacy RDF/RSS feeds escape generated titles and CDATA-sensitive post content',
+				array(
+					'rssUseExcerpt' => $case['rssUseExcerpt'],
+					'title'         => $case['posts'][0]->post_title,
+				)
+			);
+
+			self::set_posts_query( $case, '___rdf', false );
+			$dispatch_rdf = self::capture_output( static function (): void {
+				\do_feed();
+			} );
+
+			self::set_posts_query( $case, 'rss', false );
+			$dispatch_rss = self::capture_output( static function (): void {
+				\do_feed();
+			} );
+
+			self::set_posts_query( $case, 'feed', false );
+			$dispatch_default = self::capture_output( static function (): void {
+				\do_feed();
+			} );
+
+			self::set_posts_query( $case, 'rss2', true );
+			$GLOBALS['wp_query']->query_vars['feed'] = 'rss2';
+			$dispatch_comments = self::capture_output( static function (): void {
+				\do_feed();
+			} );
+
+			$expected_dispatch = array(
+				array(
+					'hook'          => 'do_feed_rdf',
+					'feed'          => 'rdf',
+					'isCommentFeed' => false,
+				),
+				array(
+					'hook'          => 'do_feed_rss',
+					'feed'          => 'rss',
+					'isCommentFeed' => false,
+				),
+				array(
+					'hook'          => 'do_feed_rdf',
+					'feed'          => 'rdf',
+					'isCommentFeed' => false,
+				),
+				array(
+					'hook'          => 'do_feed_rss2',
+					'feed'          => 'rss2',
+					'isCommentFeed' => true,
+				),
+			);
+
+			self::collect_failure(
+				$failures,
+				$expected_dispatch === $dispatch_events
+					&& '' === $dispatch_rdf
+					&& '' === $dispatch_rss
+					&& '' === $dispatch_default
+					&& '' === $dispatch_comments,
+				'do_feed dispatch strips leading underscores, uses default feed, and passes comment-feed state',
+				array(
+					'events'         => $dispatch_events,
+					'expected'       => $expected_dispatch,
+					'dispatchOutput' => self::preview( $dispatch_rdf . $dispatch_rss . $dispatch_default . $dispatch_comments ),
+				)
+			);
+		} finally {
+			\remove_filter( 'default_feed', $default_feed_filter, 100 );
+			foreach ( $core_feed_actions as $action ) {
+				\remove_action( $action[0], $dispatch_observer, 10 );
+			}
+			foreach ( $removed_core_actions as $action ) {
+				\add_action( $action[0], $action[1], $action[2], $action[3] );
+			}
+			foreach ( $template_hooks as $hook ) {
+				\remove_action( $hook[0], $hook[1], $hook[2] );
+			}
+		}
+
+		return self::result( $ctx, 'feed-rendering.legacy-templates-and-do-feed-dispatch', $failures, $output );
 	}
 
 	private static function check_content_mode_switches( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
