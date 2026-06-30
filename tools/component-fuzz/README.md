@@ -167,9 +167,9 @@ database, network requests, or a configured site.
 - `classic-walkers`: deterministic Walker base and classic walker coverage,
   including `walk()`, `paged_walk()`, direct `display_element()` traversal,
   page/category/comment/nav rendering, current/selected classes, admin nav menu
-  checklist/edit field names, generated has-children oracles, bounded HTML
-  balance, escaping contracts, and global/filter/superglobal/output-buffer
-  restoration.
+  checklist/edit field names, direct admin nav helper contracts, generated
+  has-children oracles, bounded HTML balance, escaping contracts, and
+  global/filter/superglobal/output-buffer restoration.
 - `content`: slashing, metadata serialization, post and term field sanitization,
   whole-post `sanitize_post()` object/array consistency and filter locality,
   `get_extended()` more-tag splitting, post-template title/excerpt/password
