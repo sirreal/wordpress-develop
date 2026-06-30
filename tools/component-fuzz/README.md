@@ -97,7 +97,8 @@ database, network requests, or a configured site.
   default script/style/module registrations, handle normalization, duplicate
   update behavior, inline/localized data placement, concatenated
   load-scripts.php/load-styles.php URL construction and exclusion boundaries,
-  tag/settings escaping, script translations, emoji settings/styles, style
+  tag/settings escaping, script translations, emoji settings/styles with
+  temporary generated loader-asset materialization, style
   JIT localization with isolated `AUTOSAVE_INTERVAL` coverage, style
   inlining, block-loader guards, strategy/fetchpriority/module interactions,
   generated classic-script module import-map/modulepreload graphs, and print
