@@ -918,7 +918,7 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 			$author_filter_sql = $status_or_handled ? $this->component_fuzz_top_level_author_filter_sql( $query ) : $query;
 			$rows              = $this->component_fuzz_filter_posts_by_author_constraints( $author_filter_sql, $rows );
 
-			foreach ( array( 'post_name', 'post_type', 'post_parent', 'post_status', 'post_password' ) as $column ) {
+			foreach ( array( 'post_name', 'post_title', 'post_type', 'post_parent', 'post_status', 'post_password' ) as $column ) {
 				if ( $status_or_handled && 'post_status' === $column ) {
 					continue;
 				}
@@ -994,6 +994,8 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 
 			$rows = $this->component_fuzz_filter_posts_by_search_like( $query, array_values( $rows ) );
 
+			$rows = $this->component_fuzz_filter_posts_by_datetime_bounds( $query, array_values( $rows ) );
+
 			$rows = $this->component_fuzz_sort_post_rows( $query, array_values( $rows ) );
 
 			if ( preg_match( '/\bSQL_CALC_FOUND_ROWS\b/i', $query ) ) {
@@ -1019,6 +1021,46 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 			}
 
 			return $rows;
+		}
+
+		private function component_fuzz_filter_posts_by_datetime_bounds( $query, array $rows ) {
+			$where = $this->component_fuzz_where_clause( $query );
+			if ( '' === $where ) {
+				return $rows;
+			}
+
+			foreach ( array( 'post_date', 'post_date_gmt', 'post_modified', 'post_modified_gmt' ) as $column ) {
+				if ( ! preg_match_all( '/(?<![A-Za-z0-9_])(?:`?wp_posts`?\.)?`?' . preg_quote( $column, '/' ) . '`?\s*(<=|>=|<|>)\s*(\'(?:\\\\.|[^\'\\\\])*\'|"[^"]*")/i', $where, $matches, PREG_SET_ORDER ) ) {
+					continue;
+				}
+
+				foreach ( $matches as $match ) {
+					$operator = $match[1];
+					$bound    = $this->component_fuzz_unquote_sql_value( $match[2] );
+					$rows     = array_filter(
+						$rows,
+						static function ( $row ) use ( $column, $operator, $bound ) {
+							$value      = (string) ( $row[ $column ] ?? '' );
+							$comparison = strcmp( $value, $bound );
+
+							switch ( $operator ) {
+								case '<':
+									return $comparison < 0;
+								case '<=':
+									return $comparison <= 0;
+								case '>':
+									return $comparison > 0;
+								case '>=':
+									return $comparison >= 0;
+							}
+
+							return true;
+						}
+					);
+				}
+			}
+
+			return array_values( $rows );
 		}
 
 		private function component_fuzz_filter_posts_by_status_or_branches( $query, array $rows ) {
