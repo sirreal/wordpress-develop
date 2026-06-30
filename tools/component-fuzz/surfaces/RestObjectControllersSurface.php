@@ -8,6 +8,8 @@ final class RestObjectControllersSurface {
 	public const NAME = 'rest-object-controllers';
 
 	public static function run( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::load_template_endpoint_classes();
+
 		$missing = self::missing_requirements();
 		if ( array() !== $missing ) {
 			return array(
@@ -42,12 +44,7 @@ final class RestObjectControllersSurface {
 			$rows[] = self::check_collection_parameter_matrix( $ctx, $case );
 			$rows[] = self::check_additional_field_registry( $ctx, $case, $additional_field_calls );
 			$rows[] = self::check_route_registry_behavior( $ctx, $case, $fixtures );
-			$rows[] = self::skip(
-				$ctx,
-				'rest-object-controllers.templates-controller.skipped',
-				'Template controllers combine block-theme filesystem state with template CPT queries, so this surface keeps them documented rather than weakening object-controller invariants.',
-				array( 'controller' => 'WP_REST_Templates_Controller' )
-			);
+			$rows[] = self::check_templates_controller( $ctx, $case );
 			$rows[] = self::skip(
 				$ctx,
 				'rest-object-controllers.collections.query-sql.skipped',
@@ -86,6 +83,23 @@ final class RestObjectControllersSurface {
 		return $rows;
 	}
 
+	private static function load_template_endpoint_classes(): void {
+		if ( ! defined( 'ABSPATH' ) ) {
+			return;
+		}
+
+		foreach (
+			array(
+				'wp-includes/rest-api/endpoints/class-wp-rest-templates-controller.php',
+			) as $file
+		) {
+			$path = ABSPATH . $file;
+			if ( file_exists( $path ) ) {
+				require_once $path;
+			}
+		}
+	}
+
 	private static function missing_requirements(): array {
 		$missing = array();
 
@@ -107,8 +121,10 @@ final class RestObjectControllersSurface {
 				'WP_REST_Server',
 				'WP_REST_Term_Meta_Fields',
 				'WP_REST_Terms_Controller',
+				'WP_REST_Templates_Controller',
 				'WP_REST_User_Meta_Fields',
 				'WP_REST_Users_Controller',
+				'WP_Block_Template',
 				'WP_Rewrite',
 				'WP_Term',
 				'WP_User',
@@ -2588,6 +2604,288 @@ final class RestObjectControllersSurface {
 		);
 	}
 
+	private static function check_templates_controller( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures = array();
+
+		$template_controller      = new \WP_REST_Templates_Controller( 'wp_template' );
+		$template_part_controller = new \WP_REST_Templates_Controller( 'wp_template_part' );
+
+		$previous_server  = $GLOBALS['wp_rest_server'] ?? null;
+		$had_wp_actions   = array_key_exists( 'wp_actions', $GLOBALS );
+		$previous_actions = $GLOBALS['wp_actions'] ?? null;
+
+		$server                    = new \WP_REST_Server();
+		$GLOBALS['wp_rest_server'] = $server;
+
+		if ( ! isset( $GLOBALS['wp_actions'] ) || ! is_array( $GLOBALS['wp_actions'] ) ) {
+			$GLOBALS['wp_actions'] = array();
+		}
+		$GLOBALS['wp_actions']['rest_api_init'] = max( 1, (int) ( $GLOBALS['wp_actions']['rest_api_init'] ?? 0 ) );
+
+		try {
+			$template_controller->register_routes();
+			$template_part_controller->register_routes();
+
+			$routes                  = $server->get_routes( 'wp/v2' );
+			$template_item_route      = self::route_key_for_prefix( $routes, '/wp/v2/templates/(?P<id>' );
+			$template_part_item_route = self::route_key_for_prefix( $routes, '/wp/v2/template-parts/(?P<id>' );
+
+			$template_collection_methods      = self::route_methods( $routes['/wp/v2/templates'] ?? array() );
+			$template_lookup_methods          = self::route_methods( $routes['/wp/v2/templates/lookup'] ?? array() );
+			$template_item_methods            = null === $template_item_route ? array() : self::route_methods( $routes[ $template_item_route ] ?? array() );
+			$template_part_collection_methods = self::route_methods( $routes['/wp/v2/template-parts'] ?? array() );
+			$template_part_lookup_methods     = self::route_methods( $routes['/wp/v2/template-parts/lookup'] ?? array() );
+			$template_part_item_methods       = null === $template_part_item_route ? array() : self::route_methods( $routes[ $template_part_item_route ] ?? array() );
+
+			self::collect_failure(
+				$failures,
+				in_array( 'wp/v2', $server->get_namespaces(), true )
+					&& array( 'GET', 'POST' ) === $template_collection_methods
+					&& array( 'GET' ) === $template_lookup_methods
+					&& array( 'DELETE', 'GET', 'PATCH', 'POST', 'PUT' ) === $template_item_methods
+					&& array( 'GET', 'POST' ) === $template_part_collection_methods
+					&& array( 'GET' ) === $template_part_lookup_methods
+					&& array( 'DELETE', 'GET', 'PATCH', 'POST', 'PUT' ) === $template_part_item_methods
+					&& is_callable( $server->get_route_options( '/wp/v2/templates' )['schema'] ?? null )
+					&& is_callable( $server->get_route_options( '/wp/v2/template-parts' )['schema'] ?? null ),
+				'template controllers register bounded collection, lookup, item routes, methods, and schemas',
+				array(
+					'templateItemRoute'              => $template_item_route,
+					'templatePartItemRoute'          => $template_part_item_route,
+					'templateCollectionMethods'      => $template_collection_methods,
+					'templateLookupMethods'          => $template_lookup_methods,
+					'templateItemMethods'            => $template_item_methods,
+					'templatePartCollectionMethods'  => $template_part_collection_methods,
+					'templatePartLookupMethods'      => $template_part_lookup_methods,
+					'templatePartItemMethods'        => $template_part_item_methods,
+				)
+			);
+
+			$template_collection_data = $server->get_data_for_route(
+				'/wp/v2/templates',
+				$routes['/wp/v2/templates'] ?? array(),
+				'help'
+			);
+			$template_part_collection_data = $server->get_data_for_route(
+				'/wp/v2/template-parts',
+				$routes['/wp/v2/template-parts'] ?? array(),
+				'help'
+			);
+
+			self::collect_failure(
+				$failures,
+				self::route_data_has_methods( $template_collection_data, array( 'GET', 'POST' ) )
+					&& self::route_data_has_methods( $template_part_collection_data, array( 'GET', 'POST' ) )
+					&& self::route_data_has_endpoint_args( $template_collection_data, array( 'GET' ), array( 'area', 'context', 'post_type', 'wp_id' ) )
+					&& self::route_data_has_endpoint_args( $template_collection_data, array( 'POST' ), array( 'content', 'slug', 'theme', 'title' ) )
+					&& self::route_data_has_endpoint_args( $template_part_collection_data, array( 'GET' ), array( 'area', 'context', 'post_type', 'wp_id' ) )
+					&& self::route_data_has_endpoint_args( $template_part_collection_data, array( 'POST' ), array( 'area', 'content', 'slug', 'theme', 'title' ) )
+					&& self::route_data_schema_has_properties( $template_collection_data, array( 'id', 'slug', 'theme', 'content', 'is_custom', 'plugin' ) )
+					&& self::route_data_schema_has_properties( $template_part_collection_data, array( 'id', 'slug', 'theme', 'content', 'area' ) )
+					&& \rest_url( 'wp/v2/templates' ) === self::route_data_self_href( $template_collection_data )
+					&& \rest_url( 'wp/v2/template-parts' ) === self::route_data_self_href( $template_part_collection_data ),
+				'template route index data exposes collection args, create args, schema fields, and self links',
+				array(
+					'templateCollectionData'     => $template_collection_data,
+					'templatePartCollectionData' => $template_part_collection_data,
+				)
+			);
+		} finally {
+			if ( $had_wp_actions ) {
+				$GLOBALS['wp_actions'] = $previous_actions;
+			} else {
+				unset( $GLOBALS['wp_actions'] );
+			}
+
+			if ( null !== $previous_server ) {
+				$GLOBALS['wp_rest_server'] = $previous_server;
+			} else {
+				unset( $GLOBALS['wp_rest_server'] );
+			}
+		}
+
+		$sanitize_cases = array(
+			'theme/home'            => 'theme//home',
+			'theme//home'           => 'theme//home',
+			'subdir/theme/index'    => 'subdir/theme//index',
+			'theme%2Fsingle'        => 'theme//single',
+			'noslash'               => 'noslash',
+		);
+		$sanitize_actual = array();
+		foreach ( $sanitize_cases as $input => $expected ) {
+			$sanitize_actual[ $input ] = $template_controller->_sanitize_template_id( $input );
+		}
+
+		self::collect_failure(
+			$failures,
+			$sanitize_cases === $sanitize_actual,
+			'template ID sanitization doubles only the final route slash and decodes encoded slashes',
+			array(
+				'expected' => $sanitize_cases,
+				'actual'   => $sanitize_actual,
+			)
+		);
+
+		$params       = $template_controller->get_collection_params();
+		$part_params  = $template_part_controller->get_collection_params();
+		$schema       = $template_controller->get_item_schema();
+		$part_schema  = $template_part_controller->get_item_schema();
+
+		self::collect_failure(
+			$failures,
+			self::template_collection_params_ok( $params )
+				&& self::template_collection_params_ok( $part_params )
+				&& self::template_schema_ok( $schema, false )
+				&& self::template_schema_ok( $part_schema, true ),
+			'template controllers expose bounded collection params and expected schema fields without querying',
+			array(
+				'params'      => self::param_summary( $params ),
+				'partParams'  => self::param_summary( $part_params ),
+				'schemaKeys'  => array_keys( $schema['properties'] ?? array() ),
+				'partKeys'    => array_keys( $part_schema['properties'] ?? array() ),
+			)
+		);
+
+		$permission_request = self::request( 'GET', '/wp/v2/templates' );
+		$denied_status      = \rest_authorization_required_code();
+		$denied            = array(
+			'items'  => $template_controller->get_items_permissions_check( $permission_request ),
+			'item'   => $template_controller->get_item_permissions_check( $permission_request ),
+			'create' => $template_controller->create_item_permissions_check( $permission_request ),
+			'update' => $template_controller->update_item_permissions_check( $permission_request ),
+			'delete' => $template_controller->delete_item_permissions_check( $permission_request ),
+		);
+
+		$read_filter          = self::install_cap_filter( array( 'edit_posts' ) );
+		$read_filter_restored = false;
+		try {
+			$read_allowed = array(
+				'items' => $template_controller->get_items_permissions_check( $permission_request ),
+				'item'  => $template_controller->get_item_permissions_check( $permission_request ),
+			);
+		} finally {
+			$read_filter_restored = self::remove_cap_filter( $read_filter );
+		}
+
+		$write_filter          = self::install_cap_filter( array( 'edit_theme_options' ) );
+		$write_filter_restored = false;
+		try {
+			$write_allowed = array(
+				'create' => $template_controller->create_item_permissions_check( $permission_request ),
+				'update' => $template_controller->update_item_permissions_check( $permission_request ),
+				'delete' => $template_controller->delete_item_permissions_check( $permission_request ),
+			);
+		} finally {
+			$write_filter_restored = self::remove_cap_filter( $write_filter );
+		}
+
+		self::collect_failure(
+			$failures,
+			self::error_matches( $denied['items'], 'rest_cannot_manage_templates', $denied_status )
+				&& self::error_matches( $denied['item'], 'rest_cannot_manage_templates', $denied_status )
+				&& self::error_matches( $denied['create'], 'rest_cannot_manage_templates', $denied_status )
+				&& self::error_matches( $denied['update'], 'rest_cannot_manage_templates', $denied_status )
+				&& self::error_matches( $denied['delete'], 'rest_cannot_manage_templates', $denied_status )
+				&& array( 'items' => true, 'item' => true ) === $read_allowed
+				&& array( 'create' => true, 'update' => true, 'delete' => true ) === $write_allowed
+				&& $read_filter_restored
+				&& $write_filter_restored,
+			'template controller permission gates fail closed and open only with scoped capabilities',
+			array(
+				'denied'              => $denied,
+				'deniedStatus'        => $denied_status,
+				'readAllowed'         => $read_allowed,
+				'writeAllowed'        => $write_allowed,
+				'readFilterRestored'  => $read_filter_restored,
+				'writeFilterRestored' => $write_filter_restored,
+			)
+		);
+
+		$template      = self::synthetic_block_template( $case, 'wp_template' );
+		$template_part = self::synthetic_block_template( $case, 'wp_template_part' );
+		$template_raw  = $template->content;
+		$part_raw      = $template_part->content;
+
+		$template_request = self::request(
+			'GET',
+			'/wp/v2/templates/' . rawurlencode( $template->id ),
+			array(
+				'context' => 'edit',
+				'_fields' => 'id,theme,content.raw,content.block_version,slug,source,origin,type,description,title.raw,title.rendered,status,wp_id,has_theme_file,is_custom,author,modified',
+			)
+		);
+		$template_part_request = self::request(
+			'GET',
+			'/wp/v2/template-parts/' . rawurlencode( $template_part->id ),
+			array(
+				'context' => 'edit',
+				'_fields' => 'id,theme,content.raw,content.block_version,slug,source,origin,type,description,title.raw,title.rendered,status,wp_id,has_theme_file,author,modified,area',
+			)
+		);
+		$template_response      = $template_controller->prepare_item_for_response( $template, $template_request );
+		$template_part_response = $template_part_controller->prepare_item_for_response( $template_part, $template_part_request );
+		$template_data          = $template_response instanceof \WP_REST_Response ? $template_response->get_data() : array();
+		$template_part_data     = $template_part_response instanceof \WP_REST_Response ? $template_part_response->get_data() : array();
+		$head_response          = $template_controller->prepare_item_for_response(
+			self::synthetic_block_template( $case, 'wp_template' ),
+			self::request( 'HEAD', '/wp/v2/templates/' . rawurlencode( $template->id ) )
+		);
+
+		self::collect_failure(
+			$failures,
+			$template_response instanceof \WP_REST_Response
+				&& $template_part_response instanceof \WP_REST_Response
+				&& self::projected_keys_match(
+					$template_data,
+					array( 'author', 'content', 'description', 'has_theme_file', 'id', 'is_custom', 'modified', 'origin', 'slug', 'source', 'status', 'theme', 'title', 'type', 'wp_id' )
+				)
+				&& self::projected_keys_match(
+					$template_part_data,
+					array( 'area', 'author', 'content', 'description', 'has_theme_file', 'id', 'modified', 'origin', 'slug', 'source', 'status', 'theme', 'title', 'type', 'wp_id' )
+				)
+				&& self::response_matches_schema_context( $template_controller, $template_data, 'edit' )
+				&& self::response_matches_schema_context( $template_part_controller, $template_part_data, 'edit' )
+				&& $template->id === ( $template_data['id'] ?? null )
+				&& $template->theme === ( $template_data['theme'] ?? null )
+				&& $template->slug === ( $template_data['slug'] ?? null )
+				&& $template->source === ( $template_data['source'] ?? null )
+				&& $template->origin === ( $template_data['origin'] ?? null )
+				&& $template->type === ( $template_data['type'] ?? null )
+				&& $template->description === ( $template_data['description'] ?? null )
+				&& $template->title === ( $template_data['title']['raw'] ?? null )
+				&& $template->title === ( $template_data['title']['rendered'] ?? null )
+				&& $template->status === ( $template_data['status'] ?? null )
+				&& 0 === (int) ( $template_data['wp_id'] ?? -1 )
+				&& false === ( $template_data['has_theme_file'] ?? null )
+				&& true === ( $template_data['is_custom'] ?? null )
+				&& (int) $template->author === (int) ( $template_data['author'] ?? -1 )
+				&& \mysql_to_rfc3339( $template->modified ) === ( $template_data['modified'] ?? null )
+				&& self::serialized_template_content( $template_raw ) === ( $template_data['content']['raw'] ?? null )
+				&& \block_version( (string) ( $template_data['content']['raw'] ?? '' ) ) === ( $template_data['content']['block_version'] ?? null )
+				&& $template_part->area === ( $template_part_data['area'] ?? null )
+				&& self::serialized_template_content( $part_raw ) === ( $template_part_data['content']['raw'] ?? null )
+				&& $head_response instanceof \WP_REST_Response
+				&& array() === $head_response->get_data(),
+			'synthetic template responses project schema-valid fields without links, author text, plugin, filesystem, or CPT queries',
+			array(
+				'templateData'     => $template_data,
+				'templatePartData' => $template_part_data,
+				'headData'         => $head_response instanceof \WP_REST_Response ? $head_response->get_data() : $head_response,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'rest-object-controllers.templates-controller.bounded-schema-routes-permissions-response',
+			array() === $failures,
+			array(
+				'case'       => self::case_summary( $case ),
+				'failures'   => array_slice( $failures, 0, 8 ),
+				'notCovered' => 'Template collection queries, fallback lookup, item lookup, writes, deletes, links, author text, plugin fields, active theme files, and template CPT queries remain covered by rest-site-editor or explicit query-boundary skips.',
+			)
+		);
+	}
+
 	private static function object_case( \ComponentFuzz\FuzzContext $ctx ): array {
 		$token = substr( hash( 'sha1', (string) $ctx->seed() . ':' . $ctx->iteration() ), 0, 10 );
 
@@ -3079,6 +3377,9 @@ final class RestObjectControllersSurface {
 			if ( 'boolean' === $single_type && is_bool( $value ) ) {
 				return true;
 			}
+			if ( 'bool' === $single_type && is_bool( $value ) ) {
+				return true;
+			}
 			if ( 'array' === $single_type && is_array( $value ) ) {
 				return true;
 			}
@@ -3088,6 +3389,108 @@ final class RestObjectControllersSurface {
 		}
 
 		return false;
+	}
+
+	private static function template_collection_params_ok( array $params ): bool {
+		return self::collection_context_param_ok( $params )
+			&& self::collection_has_params( $params, array( 'context', 'wp_id', 'area', 'post_type' ) )
+			&& 4 === count( array_intersect( array_keys( $params ), array( 'context', 'wp_id', 'area', 'post_type' ) ) )
+			&& 'integer' === ( $params['wp_id']['type'] ?? null )
+			&& 'string' === ( $params['area']['type'] ?? null )
+			&& 'string' === ( $params['post_type']['type'] ?? null );
+	}
+
+	private static function template_schema_ok( array $schema, bool $template_part ): bool {
+		$properties = is_array( $schema['properties'] ?? null ) ? $schema['properties'] : array();
+		$common     = array(
+			'id',
+			'slug',
+			'theme',
+			'type',
+			'source',
+			'origin',
+			'content',
+			'title',
+			'description',
+			'status',
+			'wp_id',
+			'has_theme_file',
+			'author',
+			'modified',
+			'author_text',
+			'original_source',
+		);
+
+		foreach ( $common as $property ) {
+			if ( ! array_key_exists( $property, $properties ) ) {
+				return false;
+			}
+		}
+
+		$slug = is_array( $properties['slug'] ?? null ) ? $properties['slug'] : array();
+		$content = is_array( $properties['content']['properties'] ?? null ) ? $properties['content']['properties'] : array();
+		$original_source = is_array( $properties['original_source'] ?? null ) ? $properties['original_source'] : array();
+
+		$original_source_enum = $original_source['enum'] ?? array();
+		sort( $original_source_enum );
+		$expected_original_source = array( 'plugin', 'site', 'theme', 'user' );
+
+		$ok = 'object' === ( $schema['type'] ?? null )
+			&& 'string' === ( $slug['type'] ?? null )
+			&& true === ( $slug['required'] ?? null )
+			&& 1 === (int) ( $slug['minLength'] ?? 0 )
+			&& '[a-zA-Z0-9_\%-]+' === ( $slug['pattern'] ?? null )
+			&& isset( $content['raw'], $content['block_version'] )
+			&& array( 'view', 'edit' ) === ( $content['raw']['context'] ?? null )
+			&& array( 'edit' ) === ( $content['block_version']['context'] ?? null )
+			&& $expected_original_source === $original_source_enum;
+
+		if ( $template_part ) {
+			return $ok
+				&& array_key_exists( 'area', $properties )
+				&& ! array_key_exists( 'is_custom', $properties )
+				&& ! array_key_exists( 'plugin', $properties );
+		}
+
+		return $ok
+			&& array_key_exists( 'is_custom', $properties )
+			&& array_key_exists( 'plugin', $properties )
+			&& ! array_key_exists( 'area', $properties );
+	}
+
+	private static function synthetic_block_template( array $case, string $type ): \WP_Block_Template {
+		$template = new \WP_Block_Template();
+		$slug     = 'template-' . $case['token'];
+		if ( 'wp_template_part' === $type ) {
+			$slug = 'part-' . $case['token'];
+		}
+
+		$template->type           = $type;
+		$template->theme          = 'component-fuzz-theme-' . $case['token'];
+		$template->slug           = $slug;
+		$template->id             = $template->theme . '//' . $slug;
+		$template->title          = 'Template ' . $case['token'];
+		$template->content        = '<!-- wp:paragraph --><p>Template ' . $case['token'] . '</p><!-- /wp:paragraph -->';
+		$template->description    = 'Template description ' . $case['token'];
+		$template->source         = 'custom';
+		$template->origin         = 'theme';
+		$template->wp_id          = 0;
+		$template->status         = 'publish';
+		$template->has_theme_file = false;
+		$template->is_custom      = true;
+		$template->author         = 0;
+		$template->plugin         = null;
+		$template->post_types     = 'wp_template' === $type ? array( 'post' ) : null;
+		$template->area           = 'wp_template_part' === $type ? 'header' : null;
+		$template->modified       = '2026-06-30 12:34:56';
+
+		return $template;
+	}
+
+	private static function serialized_template_content( string $content ): string {
+		$blocks = \parse_blocks( $content );
+		$blocks = \resolve_pattern_blocks( $blocks );
+		return \serialize_blocks( $blocks );
 	}
 
 	private static function schema_property_matches( \WP_REST_Controller $controller, string $field, array $contexts, $default ): bool {
@@ -3131,6 +3534,16 @@ final class RestObjectControllersSurface {
 			&& isset( $data['data'] )
 			&& is_array( $data['data'] )
 			&& $status === (int) ( $data['data']['status'] ?? 0 );
+	}
+
+	private static function route_key_for_prefix( array $routes, string $prefix ): ?string {
+		foreach ( array_keys( $routes ) as $route ) {
+			if ( str_starts_with( $route, $prefix ) ) {
+				return $route;
+			}
+		}
+
+		return null;
 	}
 
 	private static function route_methods( array $handlers ): array {
