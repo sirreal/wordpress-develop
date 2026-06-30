@@ -212,7 +212,7 @@
 			<div class="note">Scope: broad WordPress component fuzzing with deterministic generators and explicit invariants.</div>
 		</div>
 		<div class="updated">
-			Updated: 2026-06-30<br>
+			Updated: 2026-07-01<br>
 			Branch: <code>component-fuzzers</code>
 		</div>
 	</header>
@@ -226,12 +226,13 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 4707 passed, 0 failed, 0 errored, 5 skipped at 112 surfaces over 1 iteration after adding privacy-admin request form/default processor coverage while preserving the five documented current-core/environment skips.</div>
+			<div class="note">Non-skipped pass rate: 4708 passed, 0 failed, 0 errored, 5 skipped at 112 surfaces over 1 iteration after adding XML-RPC authenticated post write-method coverage while preserving the five documented current-core/environment skips.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Latest focused addition: <code>privacy-admin-requests</code> admin form and default processor coverage exercises <code>_wp_personal_data_handle_actions()</code>, <code>_wp_personal_data_cleanup_requests()</code>, and Core's default export/erasure AJAX processor filters through captured admin request paths; the success paths assert pending export creation with confirmation mail, username-resolved confirmed erasure creation, invalid requester rejection, retry key regeneration, expired-pending cleanup, raw export accumulation without file/mail side effects, erasure completion metadata/action dispatch, scoped filter cleanup, and narrow in-memory <code>WP_Query</code> support for request-title/date bounds; focused seed 224 passed 7 checks, seeds 1 and 224 over 25 iterations each passed 175 checks, adjacent privacy/admin/mail smoke passed 1314 checks with 1 skip, and broad seed 224 smoke passed 4707 checks with 5 skips.</div>
+			<div class="note">Latest focused addition: <code>xmlrpc</code> authenticated post write-method coverage exercises <code>wp_xmlrpc_server::wp_newPost()</code>, <code>wp_editPost()</code>, and <code>wp_deletePost()</code> against in-memory user/post fixtures; the success and fail-closed paths assert auth failure and capability denial without mutation, caller-supplied ID rejection, unknown-status draft fallback, IXR date conversion, stale edit conflicts, valid edit preservation of omitted fields, post-type change rejection, delete missing/trash behavior, scoped <code>xmlrpc_call</code>/<code>xmlrpc_wp_insert_post_data</code> hooks, no HTTP attempts, option/runtime/global cleanup, and a scoped rewrite stub for post slug generation; focused seed 224 passed 12 checks, seeds 1 and 224 over 25 iterations each passed 300 checks, adjacent XML-RPC/content smoke passed 1162 checks, and broad seed 224 smoke passed 4708 checks with 5 skips.</div>
+			<div class="note">Previous focused addition: <code>privacy-admin-requests</code> admin form and default processor coverage exercises <code>_wp_personal_data_handle_actions()</code>, <code>_wp_personal_data_cleanup_requests()</code>, and Core's default export/erasure AJAX processor filters through captured admin request paths; the success paths assert pending export creation with confirmation mail, username-resolved confirmed erasure creation, invalid requester rejection, retry key regeneration, expired-pending cleanup, raw export accumulation without file/mail side effects, erasure completion metadata/action dispatch, scoped filter cleanup, and narrow in-memory <code>WP_Query</code> support for request-title/date bounds; focused seed 224 passed 7 checks, seeds 1 and 224 over 25 iterations each passed 175 checks, adjacent privacy/admin/mail smoke passed 1314 checks with 1 skip, and broad seed 224 smoke passed 4707 checks with 5 skips.</div>
 			<div class="note">Previous focused addition: <code>admin-list-tables</code> theme install list-table replay coverage keeps the first in-process <code>WP_Theme_Install_List_Table::prepare_items()</code> API-argument invariant intact, then replays later iterations by seeding concrete table items, pagination, view globals, theme fixtures, allowed tags, and capability/action filters without re-requiring <code>theme-install.php</code>; the replay asserts install/update/latest-installed/newer-installed action states, custom action filter slugs, screenshots, preview metadata, descriptions, views, display output escaping, capability gates, and theme-root/global/server/filter cleanup; focused seed 224 passed 10 checks with 1 documented current-core skip, seeds 1 and 224 over 25 iterations each passed 250 checks with 25 current-core skips, adjacent admin smoke passed 42 checks with 1 skip, and broad seed 224 smoke passed 4705 checks with 5 skips.</div>
 			<div class="note">Previous focused addition: <code>rest-controllers</code> block pattern local theme file-loader coverage exercises <code>WP_Theme::get_block_patterns()</code>, <code>_register_theme_block_patterns()</code>, and <code>WP_REST_Block_Patterns_Controller::get_items()</code> against a scoped temp block theme; the success paths assert active-theme path resolution, <code>patterns/*.php</code> scanning, required-header rejection, comma-list/int/bool header normalization, pattern cache TTL/type behavior, lazy <code>filePath</code> content loading, category migration, duplicate slug preservation, REST field projection, local no-<code>source</code> behavior, and temporary hook/cache/file cleanup; focused seed 224 passed 14 checks, seeds 1 and 224 over 25 iterations each passed 350 checks, adjacent block/REST smoke passed 57 checks with 1 skip, and broad seed 224 smoke passed 4705 checks with 5 skips.</div>
 			<div class="note">Previous focused addition: <code>rest-controllers</code> block pattern remote-loader coverage exercises <code>WP_REST_Block_Patterns_Controller::get_items()</code> with intercepted pattern-directory REST responses for core, featured, and theme loaders; the success paths assert internal request parameters, one-shot loader dispatch, source values, snake-case field normalization, category migration, duplicate suppression, theme-json slug loading through a scoped temp file, remote-load filter gates, and temporary hook/file cleanup; focused seed 224 passed 13 checks, seeds 1 and 224 over 25 iterations each passed 325 checks, adjacent block/REST smoke passed 56 checks with 1 skip, and broad seed 224 smoke passed 4704 checks with 5 skips.</div>
@@ -331,10 +332,10 @@
 			<tbody>
 					<tr>
 						<td><code>xmlrpc</code></td>
-						<td><span class="status good">review fixes passed</span></td>
-						<td>Main worktree; authenticated read-only content/media coverage through <code>50b7b3e2a3</code>; review findings fixed before commit.</td>
-						<td>Main focused runs: seed 1 and seed 224 each 550 passed, 0 skipped, 0 failed for authenticated read-only content/media; syntax/PHPCS/diff checks passed; latest broad run: 9091 passed, 62 skipped, 0 failed.</td>
-						<td>IXR protocol helpers, <code>wp_xmlrpc_server</code> pingback methods and authenticated read-only <code>wp.getPost</code>/<code>wp.getPosts</code>/<code>wp.getMediaItem</code>/<code>wp.getMediaLibrary</code> methods, scoped option/auth/cap/media filters, <code>url_to_postid()</code> query and legacy extraction forms, <code>get_post()</code>/<code>pings_open()</code>, in-memory post/comment/user/media fixtures, duplicate pingback lookup by source URL, read-only pingback URL projection, media parent/MIME filtering, HTTP and insert tripwires, object-cache cleanup, hook restoration, and <code>wpdb</code> runtime/next-ID restoration.</td>
+						<td><span class="status good">local validation passed</span></td>
+						<td>Scoped component worktree <code>component-fuzz-xmlrpc-write-methods</code>; authenticated read-only content/media coverage through <code>50b7b3e2a3</code>.</td>
+						<td>Main focused runs: seed 224 passed 12 checks, seeds 1 and 224 over 25 iterations each passed 300 checks after authenticated post write-method coverage; adjacent <code>xmlrpc,content-lifecycle,content,comments,comment-workflow,post-types,query,metadata</code> smoke passed 1162 checks; latest broad run passed 4708 checks with 5 skips.</td>
+						<td>IXR protocol helpers, <code>wp_xmlrpc_server</code> pingback methods, authenticated read-only <code>wp.getPost</code>/<code>wp.getPosts</code>/<code>wp.getMediaItem</code>/<code>wp.getMediaLibrary</code> methods, authenticated <code>wp.newPost</code>/<code>wp.editPost</code>/<code>wp.deletePost</code> write lifecycles, scoped option/auth/cap/media/post-insert filters, <code>url_to_postid()</code> query and legacy extraction forms, <code>get_post()</code>/<code>pings_open()</code>, in-memory post/comment/user/media fixtures, duplicate pingback lookup by source URL, read-only pingback URL projection, media parent/MIME filtering, HTTP and insert tripwires, object-cache cleanup, hook restoration, and <code>wpdb</code> runtime/next-ID restoration.</td>
 					</tr>
 				<tr>
 					<td><code>rest</code></td>
@@ -947,10 +948,10 @@
 				</tr>
 					<tr>
 						<td><code>xmlrpc</code></td>
-						<td><span class="status good">review fixes passed</span></td>
-						<td>Main worktree through <code>50b7b3e2a3</code></td>
-						<td>Main focused runs: seed 1 and seed 224 each 550 passed, 0 skipped, 0 failed after authenticated read-only content/media coverage; latest broad run: 9091 passed, 62 skipped, 0 failed.</td>
-						<td>IXR value/request/message/server contracts, mixed success/fault multicall ordering, legacy post XML helpers, pingback fail-closed/read-only lookup coverage, authenticated <code>wp.getPost</code>/<code>wp.getPosts</code>/<code>wp.getMediaItem</code>/<code>wp.getMediaLibrary</code> field/auth/cap/media filtering, short-circuited <code>WP_HTTP_IXR_Client</code> transport, fault/error mapping, and scoped cleanup.</td>
+						<td><span class="status good">local validation passed</span></td>
+						<td>Scoped component worktree <code>component-fuzz-xmlrpc-write-methods</code>; prior read-only content/media coverage through <code>50b7b3e2a3</code>.</td>
+						<td>Main focused runs: seed 224 passed 12 checks, seeds 1 and 224 over 25 iterations each passed 300 checks after authenticated write-method coverage; adjacent XML-RPC/content smoke passed 1162 checks; latest broad run passed 4708 checks with 5 skips.</td>
+						<td>IXR value/request/message/server contracts, mixed success/fault multicall ordering, legacy post XML helpers, pingback fail-closed/read-only lookup coverage, authenticated <code>wp.getPost</code>/<code>wp.getPosts</code>/<code>wp.getMediaItem</code>/<code>wp.getMediaLibrary</code> field/auth/cap/media filtering, authenticated <code>wp.newPost</code>/<code>wp.editPost</code>/<code>wp.deletePost</code> auth/capability/mutation/trash branches, short-circuited <code>WP_HTTP_IXR_Client</code> transport, fault/error mapping, and scoped cleanup.</td>
 					</tr>
 				<tr>
 					<td><code>comments</code></td>
@@ -2930,10 +2931,10 @@
 					<td>9081 passed, 66 skipped, 0 failed at 2 iterations after admin-bar default callback node graph coverage.</td>
 				</tr>
 					<tr>
-						<td><code>50b7b3e2a3</code></td>
+						<td><code>component-fuzz-xmlrpc-write-methods</code></td>
 						<td><code>xmlrpc</code></td>
-						<td>Latest focused runs: 550 passed, 0 skipped, 0 failed at seeds 1 and 224 after authenticated read-only content/media coverage and review fixes; earlier XML-RPC runs passed 1000 checks for pingback fail-closed/read-only lookup coverage and 800 checks for legacy post XML helpers and short-circuited HTTP IXR client coverage.</td>
-						<td>9091 passed, 62 skipped, 0 failed at 2 iterations after XML-RPC authenticated read-only content/media coverage.</td>
+						<td>Latest focused runs: 300 passed, 0 skipped, 0 failed at seeds 1 and 224 after authenticated <code>wp.newPost</code>, <code>wp.editPost</code>, and <code>wp.deletePost</code> write-method coverage; earlier XML-RPC runs passed 550 checks for authenticated read-only content/media, 1000 checks for pingback fail-closed/read-only lookup coverage, and 800 checks for legacy post XML helpers and short-circuited HTTP IXR client coverage.</td>
+						<td>4708 passed, 5 skipped, 0 failed at 1 iteration after XML-RPC authenticated post write-method coverage.</td>
 					</tr>
 				<tr>
 					<td><code>4a2cad026c</code></td>
