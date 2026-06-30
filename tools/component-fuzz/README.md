@@ -651,8 +651,8 @@ database, network requests, or a configured site.
   latest revision count and URL helpers, user-filtered autosave lookup,
   revision insert/save/restore/delete helpers, revisioned meta copy and
   restore behavior, post type support gates, revision title/list helpers,
-  revision UI diffs, JS payload preparation, preview overlay behavior, and
-  global/filter restoration.
+  revision UI diffs, JS payload preparation, direct revision template output,
+  preview overlay behavior, and global/filter restoration.
 - `rewrite`: rewrite tags, permastruct/rule generation, collision ordering,
   endpoint expansion and mask propagation, match substitution, query arg and
   build/parse helpers, rewrite-tag removal/query-var retention boundaries, URL
