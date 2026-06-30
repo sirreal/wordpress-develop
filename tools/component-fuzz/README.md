@@ -750,7 +750,8 @@ database, network requests, or a configured site.
   synthetic posts, terms, authors, comments, and meta, including export
   argument filtering, title/content/excerpt export filters, XML/CDATA/UTF-8
   safety, meta skip filters, attachment URL/file metadata serialization, author
-  and term ordering, header observability, and state restoration.
+  and term ordering, filtered filename and XML content-type header intent with
+  observable-header assertions when available, and state restoration.
 - `xmlrpc`: no-DB IXR/XML-RPC protocol coverage, including value escaping,
   request/message round trips, invalid XML fail-closed behavior, fault XML,
   system method dispatch, mixed success/fault multicall ordering, method
