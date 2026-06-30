@@ -8,6 +8,11 @@ final class MarkupSurface {
 	public const NAME = 'markup';
 
 	private const MAX_GENERATED_BYTES = 4096;
+	private const DO_BLOCKS_FIXTURE_NAMES = array(
+		'component-fuzz/static-a',
+		'component-fuzz/static-b',
+		'component-fuzz/static-c',
+	);
 
 	/**
 	 * Runs one deterministic markup fuzz iteration.
@@ -312,23 +317,92 @@ final class MarkupSurface {
 			return;
 		}
 
-		if ( ! self::blocks_are_safe_for_do_blocks( $blocks ) ) {
-			self::skip( $checks, 'blocks.do-blocks-deterministic', 'generated block names may invoke dynamic rendering' );
+		$fixture = self::prepare_do_blocks_fixture( $serialized, $blocks, $checks, $failures );
+		if ( null === $fixture ) {
 			return;
 		}
 
-		$first_call = self::call(
-			'do_blocks:first',
-			static function () use ( $serialized ) {
-				return \do_blocks( $serialized );
+		$state_snapshot = self::do_blocks_state_snapshot();
+		$render_log     = array();
+		$registered     = true;
+		$first_call     = null;
+		$second_call    = null;
+		$first_log      = array();
+		$second_log     = array();
+
+		try {
+			if ( ! empty( $fixture['registerBlockNames'] ) ) {
+				$registered = self::register_do_blocks_fixture_blocks( $fixture['registerBlockNames'], $render_log );
 			}
-		);
-		$second_call = self::call(
-			'do_blocks:second',
-			static function () use ( $serialized ) {
-				return \do_blocks( $serialized );
+
+			if ( $registered ) {
+				$first_call = self::call(
+					'do_blocks:first',
+					static function () use ( $fixture ) {
+						return \do_blocks( $fixture['serialized'] );
+					}
+				);
+				$first_log  = $render_log;
+				$render_log = array();
+
+				$second_call = self::call(
+					'do_blocks:second',
+					static function () use ( $fixture ) {
+						return \do_blocks( $fixture['serialized'] );
+					}
+				);
+				$second_log  = $render_log;
 			}
-		);
+		} finally {
+			self::restore_do_blocks_state( $state_snapshot );
+		}
+
+		$state_restored = self::do_blocks_state_matches_snapshot( $state_snapshot );
+		if ( ! $state_restored ) {
+			self::fail(
+				$checks,
+				$failures,
+				'blocks.do-blocks-state-restored',
+				'Block rendering state was not restored after deterministic do_blocks fixture rendering.',
+				array(
+					'fixtureBlockNames' => $fixture['fixtureBlockNames'],
+				)
+			);
+		} else {
+			self::pass(
+				$checks,
+				'blocks.do-blocks-state-restored',
+				array(
+					'registeredBlockNames' => $fixture['registerBlockNames'],
+				)
+			);
+		}
+
+		if ( ! $registered ) {
+			self::fail(
+				$checks,
+				$failures,
+				'blocks.do-blocks-deterministic',
+				'Failed to register deterministic fixture block types for do_blocks.',
+				array(
+					'fixtureBlockNames' => $fixture['fixtureBlockNames'],
+				)
+			);
+			return;
+		}
+
+		if ( null === $first_call || null === $second_call ) {
+			self::fail(
+				$checks,
+				$failures,
+				'blocks.do-blocks-deterministic',
+				'do_blocks fixture calls were not executed.',
+				array(
+					'fixtureBlockNames' => $fixture['fixtureBlockNames'],
+				)
+			);
+			return;
+		}
 
 		if ( ! $first_call['ok'] || ! $second_call['ok'] || ! is_string( $first_call['value'] ) || ! is_string( $second_call['value'] ) ) {
 			self::fail(
@@ -339,6 +413,7 @@ final class MarkupSurface {
 				array(
 					'firstCall'  => self::call_summary( $first_call ),
 					'secondCall' => self::call_summary( $second_call ),
+					'fixture'    => self::do_blocks_fixture_summary( $fixture ),
 				)
 			);
 			return;
@@ -349,11 +424,60 @@ final class MarkupSurface {
 				$checks,
 				$failures,
 				'blocks.do-blocks-deterministic',
-				'Two do_blocks calls on the same serialized static block content differed.',
+				'Two do_blocks calls on the same deterministic block fixture differed.',
 				array(
 					'firstSha1'       => sha1( $first_call['value'] ),
 					'secondSha1'      => sha1( $second_call['value'] ),
 					'firstDifference' => self::first_string_difference( $first_call['value'], $second_call['value'] ),
+					'fixture'         => self::do_blocks_fixture_summary( $fixture ),
+				)
+			);
+			return;
+		}
+
+		if ( $first_log !== $second_log ) {
+			self::fail(
+				$checks,
+				$failures,
+				'blocks.do-blocks-deterministic',
+				'Deterministic fixture block callbacks received different payloads across repeated do_blocks calls.',
+				array(
+					'firstLog'  => $first_log,
+					'secondLog' => $second_log,
+					'fixture'   => self::do_blocks_fixture_summary( $fixture ),
+				)
+			);
+			return;
+		}
+
+		if ( count( $first_log ) !== $fixture['namedBlockCount'] ) {
+			self::fail(
+				$checks,
+				$failures,
+				'blocks.do-blocks-deterministic',
+				'Deterministic fixture block callbacks did not cover every named parsed block.',
+				array(
+					'callbackCount'   => count( $first_log ),
+					'namedBlockCount' => $fixture['namedBlockCount'],
+					'callbackLog'     => $first_log,
+					'fixture'         => self::do_blocks_fixture_summary( $fixture ),
+				)
+			);
+			return;
+		}
+
+		$wrapper_count = substr_count( $first_call['value'], 'data-cfz-block=' );
+		if ( $wrapper_count !== $fixture['namedBlockCount'] ) {
+			self::fail(
+				$checks,
+				$failures,
+				'blocks.do-blocks-deterministic',
+				'Rendered deterministic fixture wrapper count did not match the parsed named block count.',
+				array(
+					'wrapperCount'    => $wrapper_count,
+					'namedBlockCount' => $fixture['namedBlockCount'],
+					'outputSha1'      => sha1( $first_call['value'] ),
+					'fixture'         => self::do_blocks_fixture_summary( $fixture ),
 				)
 			);
 			return;
@@ -363,11 +487,286 @@ final class MarkupSurface {
 			$checks,
 			'blocks.do-blocks-deterministic',
 			array(
-				'outputLength' => strlen( $first_call['value'] ),
-				'outputSha1'   => sha1( $first_call['value'] ),
-				'durationMs'   => $first_call['durationMs'] + $second_call['durationMs'],
+				'outputLength'    => strlen( $first_call['value'] ),
+				'outputSha1'      => sha1( $first_call['value'] ),
+				'durationMs'      => $first_call['durationMs'] + $second_call['durationMs'],
+				'callbackCount'   => count( $first_log ),
+				'namedBlockCount' => $fixture['namedBlockCount'],
+				'fixture'         => self::do_blocks_fixture_summary( $fixture ),
 			)
 		);
+	}
+
+	private static function prepare_do_blocks_fixture( string $serialized, array $blocks, array &$checks, array &$failures ): ?array {
+		if ( empty( $blocks ) || ! self::blocks_contain_named_block( $blocks ) ) {
+			return array(
+				'serialized'          => $serialized,
+				'namedBlockCount'     => 0,
+				'sourceBlockNames'    => array(),
+				'fixtureBlockNames'   => array(),
+				'registerBlockNames'  => array(),
+				'sanitizedForRuntime' => false,
+			);
+		}
+
+		if ( ! function_exists( 'serialize_blocks' ) || ! function_exists( 'register_block_type' ) || ! class_exists( 'WP_Block_Type_Registry' ) ) {
+			self::skip( $checks, 'blocks.do-blocks-deterministic', 'serialize_blocks, register_block_type, or WP_Block_Type_Registry unavailable' );
+			return null;
+		}
+
+		$source_names  = array();
+		$fixture_names = array();
+		$ordinal       = 0;
+		$fixture_blocks = self::normalize_do_blocks_fixture_blocks(
+			$blocks,
+			$source_names,
+			$fixture_names,
+			$ordinal
+		);
+
+		$fixture_call = self::call(
+			'serialize_blocks:do_blocks_fixture',
+			static function () use ( $fixture_blocks ) {
+				return \serialize_blocks( $fixture_blocks );
+			}
+		);
+
+		if ( ! $fixture_call['ok'] || ! is_string( $fixture_call['value'] ) ) {
+			self::fail_from_call( $checks, $failures, 'blocks.do-blocks-deterministic', $fixture_call, 'Failed to serialize deterministic do_blocks fixture blocks.' );
+			return null;
+		}
+
+		return array(
+			'serialized'          => $fixture_call['value'],
+			'namedBlockCount'     => $ordinal,
+			'sourceBlockNames'    => array_values( array_unique( $source_names ) ),
+			'fixtureBlockNames'   => array_values( array_keys( $fixture_names ) ),
+			'registerBlockNames'  => array_values( array_keys( $fixture_names ) ),
+			'sanitizedForRuntime' => $fixture_call['value'] !== $serialized,
+		);
+	}
+
+	private static function normalize_do_blocks_fixture_blocks( array $blocks, array &$source_names, array &$fixture_names, int &$ordinal ): array {
+		$normalized = array();
+		foreach ( $blocks as $block ) {
+			if ( ! is_array( $block ) ) {
+				$normalized[] = $block;
+				continue;
+			}
+
+			$name = $block['blockName'] ?? null;
+			if ( is_string( $name ) && '' !== $name ) {
+				++$ordinal;
+				$fixture_name = self::DO_BLOCKS_FIXTURE_NAMES[ ( $ordinal - 1 ) % count( self::DO_BLOCKS_FIXTURE_NAMES ) ];
+				$source_names[] = $name;
+				$fixture_names[ $fixture_name ] = true;
+				$block['blockName'] = $fixture_name;
+				$block['attrs'] = is_array( $block['attrs'] ?? null ) ? $block['attrs'] : array();
+				$block['attrs']['__cfzOriginalName'] = $name;
+				$block['attrs']['__cfzOrdinal']      = $ordinal;
+			}
+
+			if ( ! empty( $block['innerBlocks'] ) && is_array( $block['innerBlocks'] ) ) {
+				$block['innerBlocks'] = self::normalize_do_blocks_fixture_blocks(
+					$block['innerBlocks'],
+					$source_names,
+					$fixture_names,
+					$ordinal
+				);
+			}
+
+			$normalized[] = $block;
+		}
+
+		return $normalized;
+	}
+
+	private static function register_do_blocks_fixture_blocks( array $names, array &$render_log ): bool {
+		$registry = \WP_Block_Type_Registry::get_instance();
+		foreach ( $names as $name ) {
+			if ( $registry->is_registered( $name ) ) {
+				return false;
+			}
+
+			$registered = \register_block_type(
+				$name,
+				array(
+					'supports'        => array(),
+					'render_callback' => static function ( array $attributes, string $content, $block ) use ( &$render_log, $name ): string {
+						$block_name = is_object( $block ) && isset( $block->name ) && is_string( $block->name ) ? $block->name : $name;
+						$attributes = self::sort_value( $attributes );
+						$attr_sha1  = sha1( self::json( $attributes ) );
+						$render_log[] = array(
+							'name'          => $block_name,
+							'originalName'  => is_string( $attributes['__cfzOriginalName'] ?? null ) ? $attributes['__cfzOriginalName'] : null,
+							'ordinal'       => is_int( $attributes['__cfzOrdinal'] ?? null ) ? $attributes['__cfzOrdinal'] : null,
+							'attrsSha1'     => $attr_sha1,
+							'contentLength' => strlen( $content ),
+							'contentSha1'   => sha1( $content ),
+						);
+
+						return '<div data-cfz-block="' . htmlspecialchars( $block_name, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' ) . '" data-cfz-attrs="' . substr( $attr_sha1, 0, 12 ) . '">' . $content . '</div>';
+					},
+				)
+			);
+
+			if ( false === $registered ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function do_blocks_fixture_summary( array $fixture ): array {
+		return array(
+			'namedBlockCount'     => $fixture['namedBlockCount'],
+			'sourceBlockNames'    => $fixture['sourceBlockNames'],
+			'fixtureBlockNames'   => $fixture['fixtureBlockNames'],
+			'sanitizedForRuntime' => $fixture['sanitizedForRuntime'],
+			'serializedLength'    => strlen( $fixture['serialized'] ),
+			'serializedSha1'      => sha1( $fixture['serialized'] ),
+		);
+	}
+
+	private static function do_blocks_state_snapshot(): array {
+		$block_registry = self::get_static_property( 'WP_Block_Type_Registry', 'instance' );
+
+		return array(
+			'obLevel'              => ob_get_level(),
+			'globals'              => self::snapshot_globals(
+				array(
+					'post',
+					'wp_actions',
+					'wp_current_filter',
+					'wp_filter',
+					'wp_filters',
+					'wp_interactivity',
+					'wp_script_modules',
+					'wp_scripts',
+					'wp_styles',
+				)
+			),
+			'blockRegistry'        => $block_registry,
+			'registeredBlockTypes' => $block_registry instanceof \WP_Block_Type_Registry ? self::get_object_property( $block_registry, 'registered_block_types' ) : null,
+			'blockToRender'        => self::get_static_property( 'WP_Block_Supports', 'block_to_render' ),
+		);
+	}
+
+	private static function restore_do_blocks_state( array $snapshot ): void {
+		while ( ob_get_level() > $snapshot['obLevel'] ) {
+			ob_end_clean();
+		}
+
+		self::restore_globals( $snapshot['globals'] );
+
+		if ( $snapshot['blockRegistry'] instanceof \WP_Block_Type_Registry ) {
+			self::set_object_property( $snapshot['blockRegistry'], 'registered_block_types', $snapshot['registeredBlockTypes'] );
+			self::set_static_property( 'WP_Block_Type_Registry', 'instance', $snapshot['blockRegistry'] );
+		} else {
+			self::set_static_property( 'WP_Block_Type_Registry', 'instance', null );
+		}
+
+		self::set_static_property( 'WP_Block_Supports', 'block_to_render', $snapshot['blockToRender'] );
+	}
+
+	private static function do_blocks_state_matches_snapshot( array $snapshot ): bool {
+		if ( ob_get_level() !== $snapshot['obLevel'] ) {
+			return false;
+		}
+
+		foreach ( $snapshot['globals'] as $name => $entry ) {
+			if ( array_key_exists( $name, $GLOBALS ) !== $entry['exists'] ) {
+				return false;
+			}
+			if ( $entry['exists'] && $GLOBALS[ $name ] != $entry['value'] ) {
+				return false;
+			}
+		}
+
+		$block_registry = self::get_static_property( 'WP_Block_Type_Registry', 'instance' );
+		if ( ( $snapshot['blockRegistry'] instanceof \WP_Block_Type_Registry ) !== ( $block_registry instanceof \WP_Block_Type_Registry ) ) {
+			return false;
+		}
+		if ( $block_registry instanceof \WP_Block_Type_Registry && self::get_object_property( $block_registry, 'registered_block_types' ) != $snapshot['registeredBlockTypes'] ) {
+			return false;
+		}
+
+		return self::get_static_property( 'WP_Block_Supports', 'block_to_render' ) === $snapshot['blockToRender'];
+	}
+
+	private static function snapshot_globals( array $names ): array {
+		$snapshot = array();
+		foreach ( $names as $name ) {
+			$snapshot[ $name ] = array(
+				'exists' => array_key_exists( $name, $GLOBALS ),
+				'value'  => array_key_exists( $name, $GLOBALS ) ? self::clone_value( $GLOBALS[ $name ] ) : null,
+			);
+		}
+
+		return $snapshot;
+	}
+
+	private static function restore_globals( array $snapshot ): void {
+		foreach ( $snapshot as $name => $entry ) {
+			if ( $entry['exists'] ) {
+				$GLOBALS[ $name ] = self::clone_value( $entry['value'] );
+			} else {
+				unset( $GLOBALS[ $name ] );
+			}
+		}
+	}
+
+	private static function get_static_property( string $class, string $property ) {
+		if ( ! class_exists( $class ) || ! property_exists( $class, $property ) ) {
+			return null;
+		}
+
+		$reflection = new \ReflectionProperty( $class, $property );
+		return $reflection->getValue();
+	}
+
+	private static function set_static_property( string $class, string $property, $value ): void {
+		if ( ! class_exists( $class ) || ! property_exists( $class, $property ) ) {
+			return;
+		}
+
+		$reflection = new \ReflectionProperty( $class, $property );
+		$reflection->setValue( null, $value );
+	}
+
+	private static function get_object_property( object $object, string $property ) {
+		$reflection = new \ReflectionProperty( $object, $property );
+		return $reflection->getValue( $object );
+	}
+
+	private static function set_object_property( object $object, string $property, $value ): void {
+		try {
+			$reflection = new \ReflectionObject( $object );
+			$property_reflection = $reflection->getProperty( $property );
+			if ( PHP_VERSION_ID < 80100 ) {
+				$property_reflection->setAccessible( true );
+			}
+			$property_reflection->setValue( $object, $value );
+		} catch ( \ReflectionException $e ) {
+			// A failed restoration is reported by do_blocks_state_matches_snapshot().
+		}
+	}
+
+	private static function clone_value( $value ) {
+		if ( is_array( $value ) ) {
+			$copy = array();
+			foreach ( $value as $key => $item ) {
+				$copy[ $key ] = self::clone_value( $item );
+			}
+			return $copy;
+		}
+
+		if ( is_object( $value ) ) {
+			return clone $value;
+		}
+
+		return $value;
 	}
 
 	private static function check_shortcodes( string $input, array &$checks, array &$failures ): void {
