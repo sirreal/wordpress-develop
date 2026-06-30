@@ -194,8 +194,9 @@ database, network requests, or a configured site.
   including IP header selection and anonymization, minimal/fail-closed request
   bodies, transient key/cache behavior, strict coordinate matching, cache
   expiration normalization, search-triggered cache refresh behavior, event
-  trimming and WordCamp pinning, response normalization, and API error
-  contracts.
+  trimming and WordCamp pinning, response normalization, API error contracts,
+  and admin AJAX `wp_ajax_get_community_events()` JSON envelope and
+  user-location persistence behavior.
 - `comment-workflow`: in-memory comment submission, duplicate/flood approval
   decisions, direct `wp_new_comment()` preprocessing and insert hooks,
   moderation short-circuits, update/status transition hooks, trash/untrash and
@@ -1044,8 +1045,8 @@ bytes so XML structure and escaping remain useful oracles. Direct self-link
 helper coverage mutates `REQUEST_URI`/`HTTP_HOST` without dispatching requests.
 The `community-events` surface short-circuits `wp_remote_get()` through
 `pre_http_request`; it never contacts api.wordpress.org and limits coverage to
-request construction, response normalization, cache behavior, and local helper
-contracts rather than dashboard browser rendering.
+request construction, response normalization, cache behavior, the local admin
+AJAX wrapper, and helper contracts rather than dashboard browser rendering.
 The `editor-helpers` surface exercises classic editor settings and generated
 markup without loading browser editors. It avoids live TinyMCE/Quicktags
 execution, external asset fetching, admin page dispatch, DB-backed link queries,

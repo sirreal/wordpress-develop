@@ -18,6 +18,8 @@ final class CommunityEventsSurface {
 	);
 
 	public static function run( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::maybe_load_ajax_actions();
+
 		$missing = self::missing_requirements();
 		if ( array() !== $missing ) {
 			return array(
@@ -43,6 +45,7 @@ final class CommunityEventsSurface {
 			$rows[] = self::check_successful_api_fetch_and_cache_hit( $ctx->fork( 'success-cache' ) );
 			$rows[] = self::check_search_bypasses_cache_and_refreshes( $ctx->fork( 'search-cache-refresh' ) );
 			$rows[] = self::check_api_failure_paths( $ctx->fork( 'failure-paths' ) );
+			$rows[] = self::check_ajax_handler_envelopes_and_location_persistence( $ctx->fork( 'ajax-handler' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
 				'community-events.surface-no-throw',
@@ -64,6 +67,15 @@ final class CommunityEventsSurface {
 		return $rows;
 	}
 
+	private static function maybe_load_ajax_actions(): void {
+		if ( defined( 'ABSPATH' ) && ! function_exists( 'wp_ajax_get_community_events' ) ) {
+			$ajax_actions = ABSPATH . 'wp-admin/includes/ajax-actions.php';
+			if ( is_readable( $ajax_actions ) ) {
+				require_once $ajax_actions;
+			}
+		}
+	}
+
 	private static function missing_requirements(): array {
 		$missing = array();
 
@@ -76,11 +88,24 @@ final class CommunityEventsSurface {
 		foreach (
 			array(
 				'add_filter',
+				'check_ajax_referer',
+				'delete_user_meta',
+				'delete_site_transient',
 				'remove_filter',
+				'get_current_user_id',
 				'get_site_transient',
+				'get_user_meta',
+				'get_user_option',
 				'has_filter',
+				'is_wp_error',
 				'set_site_transient',
+				'update_user_meta',
 				'wp_cache_flush',
+				'wp_create_nonce',
+				'wp_insert_user',
+				'wp_send_json_error',
+				'wp_send_json_success',
+				'wp_set_current_user',
 				'wp_http_supports',
 				'wp_json_encode',
 				'wp_list_pluck',
@@ -88,11 +113,17 @@ final class CommunityEventsSurface {
 				'wp_remote_get',
 				'wp_remote_retrieve_body',
 				'wp_remote_retrieve_response_code',
+				'wp_slash',
+				'wp_unslash',
 			) as $function
 		) {
 			if ( ! function_exists( $function ) ) {
 				$missing[] = "function {$function}";
 			}
+		}
+
+		if ( ! function_exists( 'wp_ajax_get_community_events' ) ) {
+			$missing[] = 'function wp_ajax_get_community_events';
 		}
 
 		return $missing;
@@ -791,6 +822,196 @@ final class CommunityEventsSurface {
 		);
 	}
 
+	private static function check_ajax_handler_envelopes_and_location_persistence( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$user_id  = self::insert_user( $ctx->fork( 'ajax-user' ) );
+
+		if ( \is_wp_error( $user_id ) ) {
+			return $ctx->fail(
+				'community-events.ajax-handler.envelopes-and-location-persistence',
+				array( 'user' => $user_id )
+			);
+		}
+
+		$remote_addr   = self::ipv4( $ctx->fork( 'ajax-ip' ), 203, 0, 113 );
+		$request_ip    = self::expected_anonymized_ip( $remote_addr );
+		$search        = 'Search ' . $ctx->identifier( 4, 10 ) . ' "Quoted"';
+		$timezone      = $ctx->choice( array( 'UTC', 'Europe/Madrid', 'America/New_York' ) );
+		$saved_ip      = array(
+			'ip'          => $request_ip,
+			'description' => 'Saved IP Location',
+		);
+		$saved_error   = array(
+			'description' => 'Saved Error Location',
+			'latitude'    => '41.3874',
+			'longitude'   => '2.1686',
+			'country'     => 'ES',
+		);
+		$searched_loc  = array(
+			'description' => 'Searched Location',
+			'latitude'    => '40.4168',
+			'longitude'   => '-3.7038',
+			'country'     => 'ES',
+		);
+		$cases         = array(
+			array(
+				'label'           => 'initial-ip-location-persists',
+				'initialLocation' => false,
+				'search'          => '',
+				'timezone'        => '',
+				'response'        => self::http_response(
+					200,
+					array(
+						'location' => array(
+							'ip'          => self::ipv4( $ctx->fork( 'api-ip' ), 198, 51, 100 ),
+							'description' => 'API IP Location',
+						),
+						'events'   => self::event_corpus( $ctx->fork( 'ajax-initial-events' ) ),
+						'ttl'      => $ctx->int( 60, 7200 ),
+					)
+				),
+				'expectSuccess'   => true,
+				'expectUpdated'   => true,
+				'expectedMeta'    => static function ( array $data ) {
+					return $data['location'] ?? null;
+				},
+				'requestOracle'   => static function ( array $body ) use ( $request_ip ): bool {
+					return 5 === ( $body['number'] ?? null )
+						&& $request_ip === ( $body['ip'] ?? null )
+						&& isset( $body['locale'] )
+						&& ! isset( $body['timezone'], $body['location'], $body['latitude'], $body['longitude'] );
+				},
+			),
+			array(
+				'label'           => 'same-ip-preserves-saved-location',
+				'initialLocation' => $saved_ip,
+				'search'          => '',
+				'timezone'        => '',
+				'response'        => self::http_response(
+					200,
+					array(
+						'location' => array(
+							'ip'          => self::ipv4( $ctx->fork( 'same-api-ip' ), 198, 51, 100 ),
+							'description' => 'API Same IP Location',
+						),
+						'events'   => self::event_corpus( $ctx->fork( 'ajax-same-ip-events' ) ),
+					)
+				),
+				'expectSuccess'   => true,
+				'expectUpdated'   => false,
+				'expectedMeta'    => static function () use ( $saved_ip ) {
+					return $saved_ip;
+				},
+				'requestOracle'   => static function ( array $body ) use ( $request_ip ): bool {
+					return $request_ip === ( $body['ip'] ?? null )
+						&& isset( $body['locale'] )
+						&& ! isset( $body['location'], $body['latitude'], $body['longitude'] );
+				},
+			),
+			array(
+				'label'           => 'manual-search-persists-response-location',
+				'initialLocation' => $saved_ip,
+				'search'          => $search,
+				'timezone'        => $timezone,
+				'response'        => self::http_response(
+					200,
+					array(
+						'location' => $searched_loc,
+						'events'   => self::event_corpus( $ctx->fork( 'ajax-search-events' ) ),
+					)
+				),
+				'expectSuccess'   => true,
+				'expectUpdated'   => true,
+				'expectedMeta'    => static function () use ( $searched_loc ) {
+					return $searched_loc;
+				},
+				'requestOracle'   => static function ( array $body ) use ( $request_ip, $search, $timezone ): bool {
+					return $request_ip === ( $body['ip'] ?? null )
+						&& $search === ( $body['location'] ?? null )
+						&& $timezone === ( $body['timezone'] ?? null )
+						&& isset( $body['locale'] )
+						&& ! isset( $body['latitude'], $body['longitude'] );
+				},
+			),
+			array(
+				'label'           => 'api-error-preserves-location',
+				'initialLocation' => $saved_error,
+				'search'          => $search,
+				'timezone'        => $timezone,
+				'response'        => new \WP_Error( 'component_fuzz_events_blocked', 'Component fuzz blocked events API.' ),
+				'expectSuccess'   => false,
+				'expectUpdated'   => false,
+				'expectedMeta'    => static function () use ( $saved_error ) {
+					return $saved_error;
+				},
+				'requestOracle'   => static function ( array $body ) use ( $request_ip, $search, $timezone ): bool {
+					return $request_ip === ( $body['ip'] ?? null )
+						&& $search === ( $body['location'] ?? null )
+						&& $timezone === ( $body['timezone'] ?? null );
+				},
+			),
+		);
+
+		foreach ( $cases as $index => $case ) {
+			$result = self::run_ajax_handler_case( $ctx->fork( 'ajax-case-' . $index ), (int) $user_id, $remote_addr, $case );
+			$json   = $result['capture']['json'];
+			$data   = is_array( $json ) ? ( $json['data'] ?? array() ) : array();
+			$meta   = $result['meta'];
+			$body   = $result['httpCalls'][0]['body'] ?? array();
+
+			$expected_meta = $case['expectedMeta']( is_array( $data ) ? $data : array() );
+			$checks        = array(
+				'captured'        => true === ( $result['capture']['captured'] ?? false ),
+				'filtersRestored' => true === ( $result['capture']['filtersRestored'] ?? false ),
+				'bufferBalanced'  => true === ( $result['capture']['bufferBalanced'] ?? false ),
+				'noThrowable'     => null === ( $result['capture']['threw'] ?? null ),
+				'dieCallCount'    => 1 === count( $result['capture']['dieCalls'] ?? array() ),
+				'httpCallCount'   => 1 === count( $result['httpCalls'] ),
+				'requestOracle'   => $case['requestOracle']( $body ),
+				'meta'            => $expected_meta === $meta,
+				'updateCalls'     => (int) $case['expectUpdated'] === count( $result['updateCalls'] ?? array() ),
+			);
+			$base_ok       = ! in_array( false, $checks, true );
+
+			$shape_ok = false;
+			if ( $case['expectSuccess'] ) {
+				$shape_ok = true === ( $json['success'] ?? null )
+					&& is_array( $data )
+					&& isset( $data['location'], $data['events'] )
+					&& ! isset( $data['ttl'] )
+					&& 3 === count( $data['events'] )
+					&& in_array( 'WordCamp & Pinned', \wp_list_pluck( $data['events'], 'title' ), true );
+			} else {
+				$shape_ok = false === ( $json['success'] ?? null )
+					&& 'Component fuzz blocked events API.' === ( $data['error'] ?? null );
+			}
+
+			self::collect_failure(
+				$failures,
+				$base_ok && $shape_ok,
+				"community events AJAX handler case {$index}",
+				array(
+					'label'        => $case['label'],
+					'failedChecks' => array_keys( array_filter( $checks, static fn( bool $ok ): bool => ! $ok ) ),
+					'shapeOk'      => $shape_ok,
+					'meta'         => $meta,
+					'expectedMeta' => $expected_meta,
+					'updateCount'  => count( $result['updateCalls'] ),
+				)
+			);
+		}
+
+		return $ctx->result(
+			'community-events.ajax-handler.envelopes-and-location-persistence',
+			array() === $failures,
+			array(
+				'cases'    => count( $cases ),
+				'userId'   => (int) $user_id,
+				'failures' => $failures,
+			)
+		);
+	}
+
 	private static function ip_fetch_case( \ComponentFuzz\FuzzContext $ctx ): array {
 		$remote_addr = self::ipv4( $ctx, 198, 51, 100 );
 		$ip          = self::expected_anonymized_ip( $remote_addr );
@@ -859,6 +1080,98 @@ final class CommunityEventsSurface {
 					&& $coords['description'] === ( $location['description'] ?? null );
 			},
 		);
+	}
+
+	private static function insert_user( \ComponentFuzz\FuzzContext $ctx ) {
+		$suffix = strtolower( preg_replace( '/[^a-z0-9]+/', '', $ctx->identifier( 8, 16 ) ) );
+		$suffix = '' === $suffix ? substr( sha1( (string) $ctx->seed() ), 0, 8 ) : $suffix;
+		$login  = 'cfz_events_' . $ctx->iteration() . '_' . $suffix;
+
+		return \wp_insert_user(
+			array(
+				'user_login'   => $login,
+				'user_pass'    => 'pass-' . $ctx->identifier( 12, 20 ),
+				'user_email'   => $login . '@example.test',
+				'display_name' => 'Community Events ' . $suffix,
+				'role'         => 'subscriber',
+			)
+		);
+	}
+
+	private static function run_ajax_handler_case( \ComponentFuzz\FuzzContext $ctx, int $user_id, string $remote_addr, array $case ): array {
+		self::reset_runtime_state();
+		self::set_address_headers( array( 'REMOTE_ADDR' => $remote_addr ) );
+		self::delete_cached_events_for_location(
+			array(
+				'ip' => self::expected_anonymized_ip( $remote_addr ),
+			)
+		);
+		self::delete_cached_events_for_location( $case['initialLocation'] );
+		\wp_set_current_user( $user_id );
+		\delete_user_meta( $user_id, 'community-events-location' );
+
+		if ( false !== $case['initialLocation'] ) {
+			\update_user_meta( $user_id, 'community-events-location', $case['initialLocation'] );
+		}
+
+		$nonce = \wp_create_nonce( 'community_events' );
+		$_POST = array(
+			'_ajax_nonce' => $nonce,
+			'location'    => \wp_slash( $case['search'] ),
+			'timezone'    => \wp_slash( $case['timezone'] ),
+		);
+		$_REQUEST = $_POST;
+
+		$http_calls    = array();
+		$update_calls  = array();
+		$http_filter   = static function ( $preempt, array $parsed_args, string $url ) use ( &$http_calls, $case ) {
+			unset( $preempt );
+
+			$http_calls[] = array(
+				'url'  => $url,
+				'body' => $parsed_args['body'] ?? array(),
+			);
+
+			return $case['response'];
+		};
+		$update_filter = static function ( $check, int $object_id, string $meta_key, $meta_value ) use ( &$update_calls, $user_id ) {
+			if ( $user_id === $object_id && 'community-events-location' === $meta_key ) {
+				$update_calls[] = $meta_value;
+			}
+
+			return $check;
+		};
+
+		\add_filter( 'pre_http_request', $http_filter, 10, 3 );
+		\add_filter( 'update_user_metadata', $update_filter, 10, 4 );
+		try {
+			$capture = self::capture_ajax_call(
+				static function (): void {
+					\wp_ajax_get_community_events();
+				}
+			);
+		} finally {
+			\remove_filter( 'update_user_metadata', $update_filter, 10 );
+			\remove_filter( 'pre_http_request', $http_filter, 10 );
+		}
+
+		return array(
+			'capture'     => $capture,
+			'httpCalls'   => $http_calls,
+			'updateCalls' => $update_calls,
+			'meta'        => \get_user_meta( $user_id, 'community-events-location', true ),
+		);
+	}
+
+	private static function delete_cached_events_for_location( $location ): void {
+		if ( ! is_array( $location ) || ! function_exists( 'delete_site_transient' ) ) {
+			return;
+		}
+
+		$key = self::probe( 0, $location )->fuzz_transient_key( $location );
+		if ( false !== $key ) {
+			\delete_site_transient( $key );
+		}
 	}
 
 	private static function probe( int $user_id, $location ): object {
@@ -970,6 +1283,66 @@ final class CommunityEventsSurface {
 		);
 	}
 
+	private static function capture_ajax_call( callable $callback ): array {
+		$die_calls      = array();
+		$doing_ajax     = static fn() => true;
+		$handler_filter = static function () use ( &$die_calls ) {
+			return static function ( $message = '', $title = '', $args = array() ) use ( &$die_calls ): void {
+				$die_calls[] = array(
+					'message' => $message,
+					'title'   => $title,
+					'args'    => $args,
+				);
+				throw new CommunityEventsSurface_DieCaptured( 'Captured ajax wp_die.' );
+			};
+		};
+
+		$level    = ob_get_level();
+		$output   = '';
+		$captured = false;
+		$threw    = null;
+
+		\add_filter( 'wp_doing_ajax', $doing_ajax, 1 );
+		\add_filter( 'wp_die_ajax_handler', $handler_filter, 1 );
+		ob_start();
+		try {
+			$callback();
+		} catch ( CommunityEventsSurface_DieCaptured $e ) {
+			$captured = true;
+		} catch ( \Throwable $e ) {
+			$threw = self::describe_throwable( $e );
+		} finally {
+			$output = (string) ob_get_clean();
+			while ( ob_get_level() > $level ) {
+				ob_end_clean();
+			}
+			\remove_filter( 'wp_die_ajax_handler', $handler_filter, 1 );
+			\remove_filter( 'wp_doing_ajax', $doing_ajax, 1 );
+		}
+
+		return array(
+			'captured'        => $captured,
+			'threw'           => $threw,
+			'output'          => self::describe_string( $output ),
+			'json'            => self::decode_json_object( $output ),
+			'dieCalls'        => $die_calls,
+			'filtersRestored' => false === \has_filter( 'wp_die_ajax_handler', $handler_filter ) && false === \has_filter( 'wp_doing_ajax', $doing_ajax ),
+			'bufferBalanced'  => ob_get_level() === $level,
+		);
+	}
+
+	private static function decode_json_object( string $json ): array {
+		$decoded = json_decode( $json, true );
+		return is_array( $decoded ) ? $decoded : array();
+	}
+
+	private static function describe_string( string $value ): array {
+		return array(
+			'length'  => strlen( $value ),
+			'preview' => strlen( $value ) > 300 ? substr( $value, 0, 300 ) . '...' : $value,
+		);
+	}
+
 	private static function reset_runtime_state(): void {
 		if ( function_exists( 'wp_cache_flush' ) ) {
 			\wp_cache_flush();
@@ -977,22 +1350,39 @@ final class CommunityEventsSurface {
 	}
 
 	private static function snapshot_state(): array {
-		$options = null;
+		$options        = null;
+		$content_counts = null;
 		if ( isset( $GLOBALS['wpdb'] ) && method_exists( $GLOBALS['wpdb'], 'component_fuzz_get_options' ) ) {
 			$options = $GLOBALS['wpdb']->component_fuzz_get_options();
 		}
+		if ( isset( $GLOBALS['wpdb'] ) && method_exists( $GLOBALS['wpdb'], 'component_fuzz_content_counts' ) ) {
+			$content_counts = $GLOBALS['wpdb']->component_fuzz_content_counts();
+		}
 
 		return array(
-			'server'  => $_SERVER,
-			'options' => $options,
+			'post'          => $_POST,
+			'request'       => $_REQUEST,
+			'server'        => $_SERVER,
+			'currentUserId' => function_exists( 'get_current_user_id' ) ? \get_current_user_id() : 0,
+			'options'       => $options,
+			'contentCounts' => $content_counts,
 		);
 	}
 
 	private static function restore_state( array $snapshot ): void {
-		$_SERVER = $snapshot['server'];
+		$_POST    = $snapshot['post'];
+		$_REQUEST = $snapshot['request'];
+		$_SERVER  = $snapshot['server'];
+
+		if ( function_exists( 'wp_set_current_user' ) ) {
+			\wp_set_current_user( (int) $snapshot['currentUserId'] );
+		}
 
 		if ( null !== $snapshot['options'] && isset( $GLOBALS['wpdb'] ) && method_exists( $GLOBALS['wpdb'], 'component_fuzz_reset_options' ) ) {
 			$GLOBALS['wpdb']->component_fuzz_reset_options( $snapshot['options'] );
+		}
+		if ( null !== $snapshot['contentCounts'] && isset( $GLOBALS['wpdb'] ) && method_exists( $GLOBALS['wpdb'], 'component_fuzz_reset_content' ) ) {
+			$GLOBALS['wpdb']->component_fuzz_reset_content();
 		}
 
 		if ( function_exists( 'wp_cache_flush' ) ) {
@@ -1001,13 +1391,21 @@ final class CommunityEventsSurface {
 	}
 
 	private static function state_matches( array $snapshot ): bool {
-		$options = null;
+		$options        = null;
+		$content_counts = null;
 		if ( isset( $GLOBALS['wpdb'] ) && method_exists( $GLOBALS['wpdb'], 'component_fuzz_get_options' ) ) {
 			$options = $GLOBALS['wpdb']->component_fuzz_get_options();
 		}
+		if ( isset( $GLOBALS['wpdb'] ) && method_exists( $GLOBALS['wpdb'], 'component_fuzz_content_counts' ) ) {
+			$content_counts = $GLOBALS['wpdb']->component_fuzz_content_counts();
+		}
 
 		return $snapshot['server'] === $_SERVER
-			&& $snapshot['options'] === $options;
+			&& $snapshot['post'] === $_POST
+			&& $snapshot['request'] === $_REQUEST
+			&& ( ! function_exists( 'get_current_user_id' ) || (int) $snapshot['currentUserId'] === \get_current_user_id() )
+			&& $snapshot['options'] === $options
+			&& $snapshot['contentCounts'] === $content_counts;
 	}
 
 	private static function collect_failure( array &$failures, bool $ok, string $message, array $data = array() ): void {
@@ -1058,3 +1456,5 @@ final class CommunityEventsSurface {
 		);
 	}
 }
+
+final class CommunityEventsSurface_DieCaptured extends \RuntimeException {}
