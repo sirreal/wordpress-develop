@@ -539,6 +539,13 @@ database, network requests, or a configured site.
   PHPMailer handoff, directory/expiration cleanup filters, anonymization
   helpers, and privacy policy suggestion/default text without real mail or
   network delivery.
+- `privacy-admin-requests`: in-memory wpdb-backed admin privacy request
+  coverage, including export and erasure request list-table views, counts,
+  status filtering, prepared items, row action nonce/data attributes, checkbox
+  and status markup, bulk-action and direct helper contracts, personal data
+  export/erasure AJAX success flows, capability and request-shape gates,
+  selected exporter/eraser/page callbacks, malformed callback responses,
+  scoped Unicode email filters, runtime cache isolation, and state restoration.
 - `query`: no-DB query builder and execution APIs, including meta/tax/date
   query tree sanitization, SQL fragment generation, relation normalization,
   query-var parsing, seeded `WP_Query` execution/found-row result oracles,
@@ -767,9 +774,10 @@ synthetic rows, object-cache fixtures, temporary plugin/theme/network-theme
 metadata, exact row-action nonce checks, and `posts_pre_query`,
 `comments_pre_query`, `terms_pre_query`, `users_pre_query`, and
 `sites_pre_query` short-circuits. It intentionally skips full admin dispatch,
-privacy request tables, install/update tables, destructive plugin/theme
-operations, real uploads, and true multisite write paths; network site/user
-rows remain synthetic when the shared PHP process is not in multisite mode. The
+install/update tables, destructive plugin/theme operations, real uploads, and
+true multisite write paths; privacy request tables and their AJAX handlers live
+in the dedicated `privacy-admin-requests` surface, and network site/user rows
+remain synthetic when the shared PHP process is not in multisite mode. The
 `post-embeds` surface covers direct provider helpers and the oEmbed item
 controller without loading the full embed template, dispatching theme rendering,
 performing remote discovery, or requiring generated build artifacts; when the
