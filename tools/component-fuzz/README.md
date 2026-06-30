@@ -412,7 +412,7 @@ database, network requests, or a configured site.
   and block-rendering state restoration, shortcodes, text trimming, excerpts,
   balanced tags, URL extraction, link attribute helpers, and embed helpers.
 - `media-editor`: no-DB media image editor coverage for editor selection,
-  GD/Imagick availability, output format filters, abstract editor
+  GD/Imagick execution or explicit availability accounting, output format filters, abstract editor
   filename/quality/EXIF-orientation contracts, resize/save metadata,
   intermediate and generated sub-sizes, missing sub-size detection, and
   cache/filter-backed attachment metadata helpers with temp-file cleanup.
