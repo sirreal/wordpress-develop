@@ -39,6 +39,7 @@ final class PostEmbedsSurface {
 			$rows[] = self::check_discovery_links( $ctx->fork( 'discovery' ), $case, $fixtures );
 			$rows[] = self::check_controller_and_pre_oembed( $ctx->fork( 'controller-pre' ), $case, $fixtures );
 			$rows[] = self::check_proxy_provider_transient_cache( $ctx->fork( 'proxy-cache' ), $case );
+			$rows[] = self::check_consumer_provider_autoembed_cache( $ctx->fork( 'consumer-cache' ), $case, $fixtures );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
 				'post-embeds.surface-no-throw',
@@ -105,6 +106,7 @@ final class PostEmbedsSurface {
 				'add_post_meta',
 				'create_initial_post_types',
 				'create_initial_taxonomies',
+				'delete_post_meta',
 				'delete_transient',
 				'do_action',
 				'get_author_posts_url',
@@ -117,6 +119,7 @@ final class PostEmbedsSurface {
 				'get_page_by_path',
 				'get_permalink',
 				'get_post',
+				'get_post_meta',
 				'get_transient',
 				'get_post_embed_html',
 				'get_post_embed_url',
@@ -137,10 +140,14 @@ final class PostEmbedsSurface {
 				'update_option',
 				'update_post_meta',
 				'wp_cache_flush',
+				'wp_embed_defaults',
 				'wp_filter_pre_oembed_result',
 				'wp_insert_post',
 				'wp_insert_user',
+				'wp_oembed_add_provider',
 				'wp_oembed_add_discovery_links',
+				'wp_oembed_get',
+				'wp_oembed_remove_provider',
 				'wp_slash',
 			) as $function
 		) {
@@ -888,6 +895,292 @@ final class PostEmbedsSurface {
 			$failures,
 			array(
 				'case' => self::case_summary( $case ),
+			)
+		);
+	}
+
+	private static function check_consumer_provider_autoembed_cache( \ComponentFuzz\FuzzContext $ctx, array $case, array $fixtures ): array {
+		$failures          = array();
+		$url               = 'https://consumer-autoembed.example.test/watch/' . rawurlencode( $case['token'] );
+		$pattern           = 'https://consumer-autoembed.example.test/watch/*';
+		$endpoint          = 'https://provider-autoembed.example.test/oembed.{format}';
+		$provider_name     = 'Component Consumer Provider ' . $case['token'];
+		$width             = $ctx->int( 260, 540 );
+		$height            = $ctx->int( 160, 360 );
+		$marker            = '<!--cfz-consumer-' . $case['token'] . '-->';
+		$oembed            = \_wp_oembed_get_object();
+		$strip_filter      = array( $oembed, '_strip_newlines' );
+		$strip_was_active  = false !== \has_filter( 'oembed_dataparse', $strip_filter );
+		$strip_was_added   = false;
+		$providers_before  = $oembed->providers;
+		$actions_had_key   = array_key_exists( 'plugins_loaded', $GLOBALS['wp_actions'] ?? array() );
+		$actions_before    = $GLOBALS['wp_actions']['plugins_loaded'] ?? null;
+		$content_before    = self::content_counts();
+		$fetch_urls        = array();
+		$remote_args       = array();
+		$embed_calls       = array();
+		$ttl_calls         = array();
+		$cache_key         = null;
+		$cache_time_key    = null;
+		$default_cache_key = null;
+		$default_time_key  = null;
+
+		$fetch_filter = static function ( string $provider, string $request_url, array $args ) use ( &$fetch_urls ): string {
+			$fetch_urls[] = array(
+				'provider' => $provider,
+				'url'      => $request_url,
+				'args'     => $args,
+				'query'    => self::url_query_args( $provider ),
+			);
+
+			return $provider;
+		};
+		$remote_args_filter = static function ( array $args, string $request_url ) use ( &$remote_args ): array {
+			$remote_args[] = array(
+				'args'  => $args,
+				'url'   => $request_url,
+				'query' => self::url_query_args( $request_url ),
+			);
+
+			return $args;
+		};
+		$embed_filter = static function ( string $html, string $request_url, array $attr, $post_id ) use ( &$embed_calls, $marker ): string {
+			$embed_calls[] = array(
+				'html'   => self::preview( $html ),
+				'url'    => $request_url,
+				'attr'   => $attr,
+				'postId' => $post_id,
+			);
+
+			return $html . $marker;
+		};
+		$ttl_filter = static function ( int $time, string $request_url, array $attr, $post_id ) use ( &$ttl_calls ): int {
+			$ttl_calls[] = array(
+				'incoming' => $time,
+				'url'      => $request_url,
+				'attr'     => $attr,
+				'postId'   => $post_id,
+			);
+
+			return DAY_IN_SECONDS;
+		};
+
+		self::$http_request_log = array();
+		self::$http_intercepts  = array(
+			array(
+				'method'   => 'GET',
+				'contains' => 'provider-autoembed.example.test/oembed.json',
+				'callback' => static function ( string $request_url, array $args ) use ( $case, $provider_name ) {
+					unset( $args );
+
+					$query  = self::url_query_args( $request_url );
+					$width  = max( 1, (int) ( $query['maxwidth'] ?? 0 ) );
+					$height = max( 1, (int) ( $query['maxheight'] ?? 0 ) );
+
+					return self::http_response(
+						json_encode(
+							array(
+								'version'       => '1.0',
+								'type'          => 'rich',
+								'provider_name' => $provider_name,
+								'provider_url'  => 'https://provider-autoembed.example.test/',
+								'title'         => 'Consumer embed ' . $case['token'],
+								'html'          => "<div class=\"cfz-consumer-embed\">\n<iframe src=\"https://provider-autoembed.example.test/embed/" . esc_attr( $case['token'] ) . "\" width=\"{$width}\" height=\"{$height}\"></iframe>\n</div>",
+								'width'         => $width,
+								'height'        => $height,
+							)
+						)
+					);
+				},
+			),
+		);
+
+		\add_filter( 'pre_http_request', array( self::class, 'filter_pre_http_request' ), 10, 3 );
+		\add_filter( 'oembed_fetch_url', $fetch_filter, 10, 3 );
+		\add_filter( 'oembed_remote_get_args', $remote_args_filter, 10, 2 );
+		\add_filter( 'embed_oembed_html', $embed_filter, 10, 4 );
+		\add_filter( 'oembed_ttl', $ttl_filter, 10, 4 );
+
+		try {
+			if ( ! $strip_was_active ) {
+				\add_filter( 'oembed_dataparse', $strip_filter, 10, 3 );
+				$strip_was_added = true;
+			}
+
+			$GLOBALS['wp_actions']['plugins_loaded'] = max( 1, (int) ( $GLOBALS['wp_actions']['plugins_loaded'] ?? 0 ) );
+			\wp_oembed_add_provider( $pattern, $endpoint, false );
+			$provider_after_add = $oembed->providers[ $pattern ] ?? null;
+
+			self::set_singular_query( \get_post( $fixtures['post'] ) );
+
+			$direct_html             = \wp_oembed_get( $url, array( 'width' => $width, 'height' => $height, 'discover' => false ) );
+			$http_count_after_direct = count( self::$http_request_log );
+
+			$embed = $GLOBALS['wp_embed'];
+			$attr  = array(
+				'width'  => $width,
+				'height' => $height,
+			);
+			$cache_suffix   = md5( $url . serialize( $attr ) );
+			$cache_key      = '_oembed_' . $cache_suffix;
+			$cache_time_key = '_oembed_time_' . $cache_suffix;
+
+			$default_attr       = \wp_embed_defaults( $url );
+			$default_suffix     = md5( $url . serialize( $default_attr ) );
+			$default_cache_key  = '_oembed_' . $default_suffix;
+			$default_time_key   = '_oembed_time_' . $default_suffix;
+			$first_shortcode    = $embed->shortcode( $attr, $url );
+			$http_count_after_first = count( self::$http_request_log );
+			$cached_html        = \get_post_meta( $fixtures['post'], $cache_key, true );
+			$cached_time        = \get_post_meta( $fixtures['post'], $cache_time_key, true );
+			$second_shortcode   = $embed->shortcode( $attr, $url );
+			$http_count_after_second = count( self::$http_request_log );
+			$autoembed          = $embed->autoembed( "before\n{$url}\n<p>{$url}</p>\n<span>{$url}</span>" );
+			$http_count_after_auto = count( self::$http_request_log );
+
+			$removed       = \wp_oembed_remove_provider( $pattern );
+			$removed_again = \wp_oembed_remove_provider( $pattern );
+			$after_remove  = \wp_oembed_get( $url, array( 'width' => $width, 'height' => $height, 'discover' => false ) );
+			$http_count_after_remove = count( self::$http_request_log );
+		} finally {
+			foreach ( array( $cache_key, $cache_time_key, $default_cache_key, $default_time_key ) as $meta_key ) {
+				if ( is_string( $meta_key ) ) {
+					\delete_post_meta( $fixtures['post'], $meta_key );
+				}
+			}
+			$oembed->providers = $providers_before;
+			if ( $actions_had_key ) {
+				$GLOBALS['wp_actions']['plugins_loaded'] = $actions_before;
+			} else {
+				unset( $GLOBALS['wp_actions']['plugins_loaded'] );
+			}
+			if ( $strip_was_added ) {
+				\remove_filter( 'oembed_dataparse', $strip_filter, 10 );
+			}
+			\remove_filter( 'oembed_ttl', $ttl_filter, 10 );
+			\remove_filter( 'embed_oembed_html', $embed_filter, 10 );
+			\remove_filter( 'oembed_remote_get_args', $remote_args_filter, 10 );
+			\remove_filter( 'oembed_fetch_url', $fetch_filter, 10 );
+			\remove_filter( 'pre_http_request', array( self::class, 'filter_pre_http_request' ), 10 );
+		}
+
+		$http_log       = self::$http_request_log;
+		$content_after  = self::content_counts();
+		$provider_query = isset( $fetch_urls[0]['provider'] ) ? self::url_query_args( (string) $fetch_urls[0]['provider'] ) : array();
+		$http_query     = isset( $http_log[0]['url'] ) ? self::url_query_args( (string) $http_log[0]['url'] ) : array();
+		self::$http_intercepts = array();
+		self::$http_request_log = array();
+
+		self::collect_failure(
+			$failures,
+			array( $endpoint, false ) === $provider_after_add
+				&& true === $removed
+				&& false === $removed_again
+				&& false === $after_remove
+				&& $http_count_after_remove === $http_count_after_auto,
+			'public provider add/remove mutates the live registry and removal disables no-discovery fetches',
+			array(
+				'providerAfterAdd'     => $provider_after_add,
+				'removed'              => $removed,
+				'removedAgain'         => $removed_again,
+				'afterRemove'          => $after_remove,
+				'httpCountAfterAuto'   => $http_count_after_auto,
+				'httpCountAfterRemove' => $http_count_after_remove,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			is_string( $direct_html )
+				&& str_contains( $direct_html, 'cfz-consumer-embed' )
+				&& str_contains( $direct_html, 'width="' . $width . '"' )
+				&& str_contains( $direct_html, 'height="' . $height . '"' )
+				&& ! str_contains( $direct_html, "\n" )
+				&& 1 === $http_count_after_direct
+				&& '1' === (string) ( $provider_query['dnt'] ?? '' )
+				&& $width === (int) ( $provider_query['maxwidth'] ?? 0 )
+				&& $height === (int) ( $provider_query['maxheight'] ?? 0 )
+				&& $url === self::decode_url_arg( $provider_query['url'] ?? '' )
+				&& 'json' === ( $http_query['format'] ?? null ),
+			'wp_oembed_get uses the custom provider, carries dimensions/dnt/original URL, and strips provider newlines',
+			array(
+				'directHtml'    => self::preview( is_string( $direct_html ) ? $direct_html : '' ),
+				'providerQuery' => $provider_query,
+				'httpQuery'     => $http_query,
+				'httpLog'       => $http_log,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			is_string( $first_shortcode )
+				&& is_string( $second_shortcode )
+				&& is_string( $cached_html )
+				&& str_contains( $first_shortcode, $marker )
+				&& str_contains( $second_shortcode, $marker )
+				&& str_contains( $cached_html, 'cfz-consumer-embed' )
+				&& ! str_contains( $cached_html, $marker )
+				&& is_numeric( $cached_time )
+				&& (int) $cached_time > 0
+				&& 2 === $http_count_after_first
+				&& 2 === $http_count_after_second
+				&& count( $embed_calls ) >= 2
+				&& count( $ttl_calls ) >= 2,
+			'WP_Embed shortcode stores unfiltered post-meta HTML and serves repeated requests from cache',
+			array(
+				'firstShortcode'  => self::preview( is_string( $first_shortcode ) ? $first_shortcode : '' ),
+				'secondShortcode' => self::preview( is_string( $second_shortcode ) ? $second_shortcode : '' ),
+				'cachedHtml'      => self::preview( is_string( $cached_html ) ? $cached_html : '' ),
+				'cachedTime'      => $cached_time,
+				'httpCounts'      => array( $http_count_after_direct, $http_count_after_first, $http_count_after_second ),
+				'embedCalls'      => $embed_calls,
+				'ttlCalls'        => $ttl_calls,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			is_string( $autoembed )
+				&& 2 === substr_count( $autoembed, 'cfz-consumer-embed' )
+				&& 2 === substr_count( $autoembed, $marker )
+				&& str_contains( $autoembed, '<span>' . $url . '</span>' )
+				&& 3 === $http_count_after_auto,
+			'WP_Embed autoembed replaces standalone and paragraph URLs, then reuses default-attribute cache',
+			array(
+				'autoembed'          => self::preview( is_string( $autoembed ) ? $autoembed : '' ),
+				'httpCountAfterAuto' => $http_count_after_auto,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$content_before === $content_after
+				&& $providers_before === $oembed->providers
+				&& $strip_was_active === ( false !== \has_filter( 'oembed_dataparse', $strip_filter ) )
+				&& $actions_before === ( $GLOBALS['wp_actions']['plugins_loaded'] ?? null )
+				&& $actions_had_key === array_key_exists( 'plugins_loaded', $GLOBALS['wp_actions'] ?? array() )
+				&& false === \has_filter( 'pre_http_request', array( self::class, 'filter_pre_http_request' ) )
+				&& false === \has_filter( 'oembed_fetch_url', $fetch_filter )
+				&& false === \has_filter( 'oembed_remote_get_args', $remote_args_filter )
+				&& false === \has_filter( 'embed_oembed_html', $embed_filter )
+				&& false === \has_filter( 'oembed_ttl', $ttl_filter ),
+			'consumer provider check restores providers, plugin-loaded marker, filters, and content counts',
+			array(
+				'contentBefore' => $content_before,
+				'contentAfter'  => $content_after,
+				'actionsBefore' => $actions_before,
+				'actionsAfter'  => $GLOBALS['wp_actions']['plugins_loaded'] ?? null,
+				'stripActive'   => false !== \has_filter( 'oembed_dataparse', $strip_filter ),
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'post-embeds.custom-provider-autoembed-post-meta-cache',
+			$failures,
+			array(
+				'case'   => self::case_summary( $case ),
+				'postId' => $fixtures['post'],
 			)
 		);
 	}
