@@ -41,7 +41,9 @@ final class ScriptLoaderRuntimeSurface {
 			$rows[] = self::check_inline_localization_data( $ctx, $case );
 			$rows[] = self::check_tag_builders_dataset_helpers( $ctx, $case );
 			$rows[] = self::check_script_translations( $ctx, $case );
-			$rows[] = self::check_emoji_settings_and_styles( $ctx, $case );
+			foreach ( self::check_emoji_settings_and_styles( $ctx, $case ) as $row ) {
+				$rows[] = $row;
+			}
 			$rows[] = self::check_style_inlining_boundaries( $ctx, $case );
 			$rows[] = self::check_block_editor_loader_guards( $ctx, $case );
 			$rows[] = self::check_strategy_module_interactions( $ctx, $case );
@@ -919,35 +921,58 @@ final class ScriptLoaderRuntimeSurface {
 	private static function check_emoji_settings_and_styles( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
 		self::reset_scripts_global();
 		self::reset_styles_global();
+		$rows = array();
 
-		\add_action( 'wp_print_styles', 'print_emoji_styles' );
+		$style_action       = \is_admin() ? 'admin_print_styles' : 'wp_print_styles';
+		$style_handle       = 'wp-emoji-styles';
+		$legacy_hook_before = false !== \has_action( $style_action, 'print_emoji_styles' );
+		\add_action( $style_action, 'print_emoji_styles' );
 		$styles_call        = self::call( static fn() => \wp_enqueue_emoji_styles() );
-		$emoji_style_data   = \wp_styles()->print_inline_style( 'wp-emoji-styles', false );
-		$style_hook_cleared = false === \has_action( 'wp_print_styles', 'print_emoji_styles' );
+		$emoji_style_data   = \wp_styles()->print_inline_style( $style_handle, false );
+		$legacy_hook_after  = false !== \has_action( $style_action, 'print_emoji_styles' );
+		$style_hook_cleared = ! $legacy_hook_after;
+		$style_enqueued     = true === \wp_style_is( $style_handle, 'enqueued' );
 		$style_ok           = ! $styles_call['threw']
-			&& true === \wp_style_is( 'wp-emoji-styles', 'enqueued' )
+			&& $style_enqueued
 			&& is_string( $emoji_style_data )
 			&& str_contains( $emoji_style_data, 'img.wp-smiley' )
 			&& $style_hook_cleared;
+		$style_data         = self::case_data( $case ) + array(
+			'styleAction'      => $style_action,
+			'styleHandle'      => $style_handle,
+			'styleData'        => self::preview( is_string( $emoji_style_data ) ? $emoji_style_data : '' ),
+			'stylesCall'       => self::describe_call( $styles_call ),
+			'styleEnqueued'    => $style_enqueued,
+			'legacyHookBefore' => $legacy_hook_before,
+			'legacyHookAfter'  => $legacy_hook_after,
+			'styleHookCleared' => $style_hook_cleared,
+		);
+
+		$rows[] = $ctx->result(
+			'script-loader-runtime.emoji-styles-enqueue-hook',
+			$style_ok,
+			$style_data
+		);
 
 		$loader_path = ABSPATH . WPINC . '/js/wp-emoji-loader' . \wp_scripts_get_suffix() . '.js';
+		$loader_data = array(
+			'loaderPath'            => $loader_path,
+			'scriptDebug'           => defined( 'SCRIPT_DEBUG' ) ? SCRIPT_DEBUG : null,
+			'scriptSuffix'          => \wp_scripts_get_suffix(),
+			'loaderReadable'        => is_readable( $loader_path ),
+			'wpIncludesJsDirExists' => is_dir( ABSPATH . WPINC . '/js' ),
+		);
 		if ( ! is_readable( $loader_path ) ) {
-			$data = self::case_data( $case ) + array(
-				'loaderPath'       => $loader_path,
-				'styleData'        => self::preview( is_string( $emoji_style_data ) ? $emoji_style_data : '' ),
-				'stylesCall'       => self::describe_call( $styles_call ),
-				'styleHookCleared' => $style_hook_cleared,
-			);
-
 			if ( ! $style_ok ) {
-				return $ctx->fail( 'script-loader-runtime.emoji-settings-styles-escaping', $data );
+				return $rows;
 			}
 
-			return $ctx->skip(
-				'script-loader-runtime.emoji-settings-styles-escaping',
-				'Emoji detection loader asset is unavailable in this source checkout for the active SCRIPT_DEBUG suffix.',
-				$data
+			$rows[] = $ctx->skip(
+				'script-loader-runtime.emoji-detection-loader-asset-unavailable',
+				'Emoji detection loader asset is unavailable for the active wp_scripts_get_suffix() path; skipping _print_emoji_detection_script() settings/module output checks only.',
+				self::case_data( $case ) + $loader_data
 			);
+			return $rows;
 		}
 
 		$emoji_url_calls = 0;
@@ -983,7 +1008,6 @@ final class ScriptLoaderRuntimeSurface {
 		$settings      = is_string( $settings_json ) ? json_decode( $settings_json, true ) : null;
 
 		$ok = ! $printed['threw']
-			&& $style_ok
 			&& 1 === $emoji_url_calls
 			&& 1 === $emoji_ext_calls
 			&& count( $src_calls ) >= 1
@@ -997,26 +1021,21 @@ final class ScriptLoaderRuntimeSurface {
 			&& ! str_contains( $printed['output'], '<tag>' )
 			&& str_contains( $printed['output'], 'id="wp-emoji-settings"' )
 			&& str_contains( $printed['output'], 'type="application/json"' )
-			&& str_contains( $printed['output'], 'type="module"' )
-			&& true === \wp_style_is( 'wp-emoji-styles', 'enqueued' )
-			&& is_string( $emoji_style_data )
-			&& str_contains( $emoji_style_data, 'img.wp-smiley' )
-			&& $style_hook_cleared;
+			&& str_contains( $printed['output'], 'type="module"' );
 
-		return $ctx->result(
-			'script-loader-runtime.emoji-settings-styles-escaping',
+		$rows[] = $ctx->result(
+			'script-loader-runtime.emoji-detection-settings-output-escaping',
 			$ok,
-			self::case_data( $case ) + array(
+			self::case_data( $case ) + $loader_data + array(
 				'emojiUrlCalls'   => $emoji_url_calls,
 				'emojiExtCalls'   => $emoji_ext_calls,
 				'scriptSrcCalls'  => array_slice( $src_calls, 0, self::FAILURE_LIMIT ),
 				'settings'        => self::preview_array( $settings ),
-				'styleData'       => self::preview( is_string( $emoji_style_data ) ? $emoji_style_data : '' ),
 				'outputPreview'   => self::preview( $printed['output'] ),
 				'printedCall'     => self::describe_call( $printed ),
-				'styleHookCleared' => $style_hook_cleared,
 			)
 		);
+		return $rows;
 	}
 
 	private static function check_style_inlining_boundaries( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
