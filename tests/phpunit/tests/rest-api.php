@@ -19,7 +19,12 @@ class Tests_REST_API extends WP_UnitTestCase {
 
 		// Override the normal server with our spying server.
 		$GLOBALS['wp_rest_server'] = new Spy_REST_Server();
-		do_action( 'rest_api_init', $GLOBALS['wp_rest_server'] );
+
+		if ( $this->requires_initial_rest_routes() ) {
+			do_action( 'rest_api_init', $GLOBALS['wp_rest_server'] );
+		} else {
+			$this->do_rest_api_init_without_initial_routes();
+		}
 	}
 
 	public function tear_down() {
@@ -29,6 +34,35 @@ class Tests_REST_API extends WP_UnitTestCase {
 
 	public function filter_wp_rest_server_class( $class_name ) {
 		return 'Spy_REST_Server';
+	}
+
+	private function do_rest_api_init_without_initial_routes() {
+		$priority = has_action( 'rest_api_init', 'create_initial_rest_routes' );
+
+		if ( false !== $priority ) {
+			remove_action( 'rest_api_init', 'create_initial_rest_routes', $priority );
+		}
+
+		try {
+			do_action( 'rest_api_init', $GLOBALS['wp_rest_server'] );
+		} finally {
+			if ( false !== $priority ) {
+				add_action( 'rest_api_init', 'create_initial_rest_routes', $priority );
+			}
+		}
+	}
+
+	private function requires_initial_rest_routes() {
+		return in_array(
+			$this->getName( false ),
+			array(
+				'test_rest_preload_api_request_with_method',
+				'test_rest_preload_api_request_removes_trailing_slashes',
+				'test_rest_preload_api_request_embeds_links',
+				'test_rest_preload_api_request_fields',
+			),
+			true
+		);
 	}
 
 	public function test_rest_get_server_fails_with_undefined_method() {

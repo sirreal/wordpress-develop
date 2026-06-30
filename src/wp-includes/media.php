@@ -6593,7 +6593,9 @@ function wp_start_cross_origin_isolation_output_buffer(): void {
 
 	ob_start(
 		static function ( string $output ): string {
-			header( 'Document-Isolation-Policy: isolate-and-credentialless' );
+			if ( ! headers_sent() ) {
+				header( 'Document-Isolation-Policy: isolate-and-credentialless' );
+			}
 
 			return wp_add_crossorigin_attributes( $output );
 		}
@@ -6674,4 +6676,3 @@ function wp_add_crossorigin_attributes( string $html ): string {
 
 	return $processor->get_updated_html();
 }
-

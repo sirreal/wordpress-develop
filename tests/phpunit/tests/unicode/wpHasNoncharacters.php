@@ -68,21 +68,12 @@ class Tests_Unicode_WpHasNoncharacters extends WP_UnitTestCase {
 	 * @ticket 63863
 	 */
 	public function test_avoids_false_positives() {
-		// Get all the noncharacters in one long string, each surrounded on both sides by null bytes.
-		$noncharacters = implode(
-			"\x00",
-			array_map(
-				static function ( $c ) {
-					return "\x00{$c}";
-				},
-				array_column( array_values( iterator_to_array( self::data_noncharacters() ) ), 0 )
-			)
-		) . "\x00";
-
 		$this->assertFalse(
 			wp_has_noncharacters( "\x00" ),
 			'Falsely detected noncharacter in U+0000'
 		);
+
+		$characters = '';
 
 		for ( $code_point = 1; $code_point <= 0x10FFFF; $code_point++ ) {
 			// Surrogate halves are invalid UTF-8.
@@ -93,18 +84,20 @@ class Tests_Unicode_WpHasNoncharacters extends WP_UnitTestCase {
 			$char     = mb_chr( $code_point );
 			$hex_char = strtoupper( str_pad( dechex( $code_point ), 4, '0', STR_PAD_LEFT ) );
 
-			if ( str_contains( $noncharacters, $char ) ) {
+			if ( ( $code_point >= 0xFDD0 && $code_point <= 0xFDEF ) || 0xFFFE === ( $code_point & 0xFFFE ) ) {
 				$this->assertTrue(
 					wp_has_noncharacters( $char ),
 					"Failed to detect noncharacter as test verification for U+{$hex_char}"
 				);
 			} else {
-				$this->assertFalse(
-					wp_has_noncharacters( $char ),
-					"Falsely detected noncharacter in U+{$hex_char}."
-				);
+				$characters .= $char;
 			}
 		}
+
+		$this->assertFalse(
+			wp_has_noncharacters( $characters ),
+			'Falsely detected a noncharacter in a string containing every valid Unicode character.'
+		);
 	}
 
 	/**

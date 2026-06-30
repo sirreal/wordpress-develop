@@ -9,6 +9,15 @@
  */
 class WP_Test_REST_Post_Statuses_Controller extends WP_Test_REST_Controller_Testcase {
 
+	protected function should_create_initial_rest_routes() {
+		return false;
+	}
+
+	protected function register_initial_rest_routes_for_test() {
+		$controller = new WP_REST_Post_Statuses_Controller();
+		$controller->register_routes();
+	}
+
 	public function test_register_routes() {
 		$routes = rest_get_server()->get_routes();
 		$this->assertArrayHasKey( '/wp/v2/statuses', $routes );

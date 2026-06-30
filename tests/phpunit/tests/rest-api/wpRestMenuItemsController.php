@@ -65,6 +65,15 @@ class Tests_REST_WpRestMenuItemsController extends WP_Test_REST_Post_Type_Contro
 		self::delete_user( self::$subscriber_id );
 	}
 
+	protected function should_create_initial_rest_routes() {
+		return false;
+	}
+
+	protected function register_initial_rest_routes_for_test() {
+		$this->register_post_type_rest_routes_for_test( array( self::POST_TYPE ) );
+		$this->register_taxonomy_rest_routes_for_test( array( 'nav_menu' ) );
+	}
+
 	/**
 	 *
 	 */

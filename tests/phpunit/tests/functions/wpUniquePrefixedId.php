@@ -19,9 +19,6 @@ class Tests_Functions_WpUniquePrefixedId extends WP_UnitTestCase {
 	 *
 	 * @dataProvider data_should_create_unique_prefixed_ids
 	 *
-	 * @runInSeparateProcess
-	 * @preserveGlobalState disabled
-	 *
 	 * @param mixed $prefix   The prefix.
 	 * @param array $expected The next two expected IDs.
 	 */
@@ -75,9 +72,6 @@ class Tests_Functions_WpUniquePrefixedId extends WP_UnitTestCase {
 	 * @ticket 59681
 	 *
 	 * @dataProvider data_should_raise_notice_and_use_empty_string_prefix_when_nonstring_given
-	 *
-	 * @runInSeparateProcess
-	 * @preserveGlobalState disabled
 	 *
 	 * @param mixed  $non_string_prefix         Non-string prefix.
 	 * @param int    $number_of_ids_to_generate Number of IDs to generate.

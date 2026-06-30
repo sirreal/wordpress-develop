@@ -213,41 +213,56 @@ function _mb_ord( $string, $encoding = null ) {
 		return false;
 	}
 
-	$byte_length    = 0;
-	$invalid_length = 0;
-	$found_count    = _wp_scan_utf8( $string, $byte_length, $invalid_length, null, 1 );
-
-	if ( 1 !== $found_count ) {
-		return false;
-	}
-
-	// These are valid code points, so no further validation is required.
 	$b0 = ord( $string[0] );
 
-	switch ( $byte_length ) {
-		case 1:
-			return $b0;
+	if ( $b0 <= 0x7F ) {
+		return $b0;
+	}
 
-		case 2:
-			return (
-				( ( $b0 & 0x1F ) << 6 ) |
-				( ( ord( $string[1] ) & 0x3F ) )
-			);
+	$b1 = ord( $string[1] ?? "\x00" );
 
-		case 3:
-			return (
-				( ( $b0 & 0x0F ) << 12 ) |
-				( ( ord( $string[1] ) & 0x3F ) << 6 ) |
-				( ( ord( $string[2] ) & 0x3F ) )
-			);
+	if ( $b0 >= 0xC2 && $b0 <= 0xDF && $b1 >= 0x80 && $b1 <= 0xBF ) {
+		return (
+			( ( $b0 & 0x1F ) << 6 ) |
+			( $b1 & 0x3F )
+		);
+	}
 
-		case 4:
-			return (
-				( ( $b0 & 0x07 ) << 18 ) |
-				( ( ord( $string[1] ) & 0x3F ) << 12 ) |
-				( ( ord( $string[2] ) & 0x3F ) << 6 ) |
-				( ( ord( $string[3] ) & 0x3F ) )
-			);
+	$b2 = ord( $string[2] ?? "\x00" );
+
+	if (
+		$b2 >= 0x80 && $b2 <= 0xBF &&
+		(
+			( 0xE0 === $b0 && $b1 >= 0xA0 && $b1 <= 0xBF ) ||
+			( $b0 >= 0xE1 && $b0 <= 0xEC && $b1 >= 0x80 && $b1 <= 0xBF ) ||
+			( 0xED === $b0 && $b1 >= 0x80 && $b1 <= 0x9F ) ||
+			( $b0 >= 0xEE && $b0 <= 0xEF && $b1 >= 0x80 && $b1 <= 0xBF )
+		)
+	) {
+		return (
+			( ( $b0 & 0x0F ) << 12 ) |
+			( ( $b1 & 0x3F ) << 6 ) |
+			( $b2 & 0x3F )
+		);
+	}
+
+	$b3 = ord( $string[3] ?? "\x00" );
+
+	if (
+		$b2 >= 0x80 && $b2 <= 0xBF &&
+		$b3 >= 0x80 && $b3 <= 0xBF &&
+		(
+			( 0xF0 === $b0 && $b1 >= 0x90 && $b1 <= 0xBF ) ||
+			( $b0 >= 0xF1 && $b0 <= 0xF3 && $b1 >= 0x80 && $b1 <= 0xBF ) ||
+			( 0xF4 === $b0 && $b1 >= 0x80 && $b1 <= 0x8F )
+		)
+	) {
+		return (
+			( ( $b0 & 0x07 ) << 18 ) |
+			( ( $b1 & 0x3F ) << 12 ) |
+			( ( $b2 & 0x3F ) << 6 ) |
+			( $b3 & 0x3F )
+		);
 	}
 
 	return false;

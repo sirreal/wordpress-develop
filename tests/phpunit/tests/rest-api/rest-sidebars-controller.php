@@ -59,6 +59,18 @@ class WP_Test_REST_Sidebars_Controller extends WP_Test_REST_Controller_Testcase 
 		update_option( 'sidebars_widgets', array() );
 	}
 
+	protected function should_create_initial_rest_routes() {
+		return false;
+	}
+
+	protected function register_initial_rest_routes_for_test() {
+		$controller = new WP_REST_Sidebars_Controller();
+		$controller->register_routes();
+
+		$controller = new WP_REST_Widgets_Controller();
+		$controller->register_routes();
+	}
+
 	public function clean_up_global_scope() {
 		global $wp_widget_factory, $wp_registered_sidebars, $wp_registered_widgets, $wp_registered_widget_controls, $wp_registered_widget_updates;
 

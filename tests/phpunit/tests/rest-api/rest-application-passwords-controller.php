@@ -67,6 +67,18 @@ class WP_Test_REST_Application_Passwords_Controller extends WP_Test_REST_Control
 		add_filter( 'wp_is_application_passwords_available', '__return_true' );
 	}
 
+	protected function should_create_initial_rest_routes() {
+		return false;
+	}
+
+	protected function register_initial_rest_routes_for_test() {
+		$controller = new WP_REST_Users_Controller();
+		$controller->register_routes();
+
+		$controller = new WP_REST_Application_Passwords_Controller();
+		$controller->register_routes();
+	}
+
 	public function tear_down() {
 		unset( $_SERVER['PHP_AUTH_USER'], $_SERVER['PHP_AUTH_PW'], $GLOBALS['wp_rest_application_password_status'], $GLOBALS['wp_rest_application_password_uuid'] );
 		parent::tear_down();

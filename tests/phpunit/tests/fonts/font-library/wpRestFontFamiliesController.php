@@ -99,6 +99,14 @@ class Tests_REST_WpRestFontFamiliesController extends WP_Test_REST_Controller_Te
 		parent::tear_down();
 	}
 
+	protected function should_create_initial_rest_routes() {
+		return false;
+	}
+
+	protected function register_initial_rest_routes_for_test() {
+		$this->register_post_type_rest_routes_for_test( array( 'wp_font_family', 'wp_font_face' ) );
+	}
+
 	public static function create_font_family_post( $settings = array() ) {
 		$settings = array_merge( self::$default_settings, $settings );
 		$post_id  = self::factory()->post->create(

@@ -98,6 +98,18 @@ class Tests_REST_WpRestTemplatesController extends WP_Test_REST_Controller_Testc
 		parent::tear_down();
 	}
 
+	protected function should_create_initial_rest_routes() {
+		return false;
+	}
+
+	protected function register_initial_rest_routes_for_test() {
+		$controller = new WP_REST_Templates_Controller( 'wp_template' );
+		$controller->register_routes();
+
+		$controller = new WP_REST_Templates_Controller( 'wp_template_part' );
+		$controller->register_routes();
+	}
+
 	/**
 	 * @covers WP_REST_Templates_Controller::register_routes
 	 * @ticket 54596

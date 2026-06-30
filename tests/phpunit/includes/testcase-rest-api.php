@@ -28,4 +28,72 @@ abstract class WP_Test_REST_TestCase extends WP_UnitTestCase {
 			$this->assertSame( $status, $data['status'], $message . ' The expected status code does not match.' );
 		}
 	}
+
+	protected function do_rest_api_init_without_initial_routes() {
+		$priority = has_action( 'rest_api_init', 'create_initial_rest_routes' );
+
+		if ( false !== $priority ) {
+			remove_action( 'rest_api_init', 'create_initial_rest_routes', $priority );
+		}
+
+		try {
+			do_action( 'rest_api_init', $GLOBALS['wp_rest_server'] );
+		} finally {
+			if ( false !== $priority ) {
+				add_action( 'rest_api_init', 'create_initial_rest_routes', $priority );
+			}
+		}
+	}
+
+	protected function register_post_type_rest_routes_for_test( $post_type_names ) {
+		foreach ( $post_type_names as $post_type_name ) {
+			$post_type = get_post_type_object( $post_type_name );
+
+			if ( ! $post_type ) {
+				continue;
+			}
+
+			$controller = $post_type->get_rest_controller();
+
+			if ( ! $controller ) {
+				continue;
+			}
+
+			if ( ! $post_type->late_route_registration ) {
+				$controller->register_routes();
+			}
+
+			$revisions_controller = $post_type->get_revisions_rest_controller();
+			if ( $revisions_controller ) {
+				$revisions_controller->register_routes();
+			}
+
+			$autosaves_controller = $post_type->get_autosave_rest_controller();
+			if ( $autosaves_controller ) {
+				$autosaves_controller->register_routes();
+			}
+
+			if ( $post_type->late_route_registration ) {
+				$controller->register_routes();
+			}
+		}
+	}
+
+	protected function register_taxonomy_rest_routes_for_test( $taxonomy_names ) {
+		foreach ( $taxonomy_names as $taxonomy_name ) {
+			$taxonomy = get_taxonomy( $taxonomy_name );
+
+			if ( ! $taxonomy ) {
+				continue;
+			}
+
+			$controller = $taxonomy->get_rest_controller();
+
+			if ( ! $controller ) {
+				continue;
+			}
+
+			$controller->register_routes();
+		}
+	}
 }

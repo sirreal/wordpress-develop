@@ -64,6 +64,17 @@ class Tests_REST_WpRestMenusController extends WP_Test_REST_Controller_Testcase 
 		);
 	}
 
+	protected function should_create_initial_rest_routes() {
+		return false;
+	}
+
+	protected function register_initial_rest_routes_for_test() {
+		$this->register_taxonomy_rest_routes_for_test( array( self::TAXONOMY ) );
+
+		$controller = new WP_REST_Menu_Locations_Controller();
+		$controller->register_routes();
+	}
+
 	/**
 	 *
 	 */

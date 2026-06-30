@@ -6,9 +6,6 @@
  *
  * @covers ::export_wp
  *
- * Tests run in a separate process to prevent "headers already sent" error.
- * @runTestsInSeparateProcesses
- * @preserveGlobalState disabled
  */
 class Tests_Admin_ExportWp extends WP_UnitTestCase {
 	/**

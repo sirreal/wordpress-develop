@@ -224,6 +224,14 @@ class WP_REST_Global_Styles_Revisions_Controller_Test extends WP_Test_REST_Contr
 		$this->revision_3_id = $this->revision_3->ID;
 	}
 
+	protected function should_create_initial_rest_routes() {
+		return false;
+	}
+
+	protected function register_initial_rest_routes_for_test() {
+		$this->register_post_type_rest_routes_for_test( array( 'wp_global_styles' ) );
+	}
+
 	/**
 	 * @ticket 58524
 	 * @ticket 59810

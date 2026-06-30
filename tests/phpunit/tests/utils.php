@@ -55,4 +55,103 @@ EOF;
 EOF;
 		$this->assertSame( $expected, mask_input_value( $in ) );
 	}
+
+	/**
+	 * @covers WP_UnitTestCase_Base::reset_core_registrations
+	 */
+	public function test_core_registration_snapshot_restore_uses_clean_clones() {
+		self::$core_registration_snapshots = array();
+
+		$this->reset_core_registrations();
+
+		$GLOBALS['wp_post_types']['post']->labels->name     = 'Mutated Posts';
+		$GLOBALS['wp_taxonomies']['category']->labels->name = 'Mutated Categories';
+		$GLOBALS['_wp_post_type_features']['post']['title'] = false;
+
+		$this->reset_core_registrations();
+
+		$this->assertNotSame( 'Mutated Posts', get_post_type_object( 'post' )->labels->name );
+		$this->assertNotSame( 'Mutated Categories', get_taxonomy( 'category' )->labels->name );
+		$this->assertNotFalse( $GLOBALS['_wp_post_type_features']['post']['title'] );
+	}
+}
+
+/**
+ * Tests registration reset behavior that must happen before parent setup.
+ *
+ * @group testsuite
+ */
+class Tests_Utils_Core_Registration_Reset extends WP_UnitTestCase {
+
+	/**
+	 * Primes the registration snapshot before this class adds label filters
+	 * ahead of parent setup.
+	 */
+	public static function set_up_before_class() {
+		parent::set_up_before_class();
+
+		self::$core_registration_snapshots = array();
+
+		$testcase = new self( 'test_core_registration_reset_cache_is_bypassed_for_label_filters_before_parent_setup' );
+		$testcase->reset_core_registrations();
+	}
+
+	/**
+	 * Adds label filters before the base setup reset runs.
+	 */
+	public function set_up() {
+		if ( ! self::$hooks_saved ) {
+			$this->_backup_hooks();
+		}
+
+		add_filter( 'post_type_labels_post', array( $this, 'filter_post_type_labels' ) );
+		add_filter( 'taxonomy_labels_category', array( $this, 'filter_taxonomy_labels' ) );
+
+		parent::set_up();
+
+		remove_filter( 'post_type_labels_post', array( $this, 'filter_post_type_labels' ) );
+		remove_filter( 'taxonomy_labels_category', array( $this, 'filter_taxonomy_labels' ) );
+	}
+
+	/**
+	 * Removes filters after parent teardown restores the saved hooks.
+	 */
+	public function tear_down() {
+		parent::tear_down();
+
+		remove_filter( 'post_type_labels_post', array( $this, 'filter_post_type_labels' ) );
+		remove_filter( 'taxonomy_labels_category', array( $this, 'filter_taxonomy_labels' ) );
+	}
+
+	/**
+	 * @covers WP_UnitTestCase_Base::reset_core_registrations
+	 */
+	public function test_core_registration_reset_cache_is_bypassed_for_label_filters_before_parent_setup() {
+		$this->assertSame( 'Filtered Posts', get_post_type_object( 'post' )->labels->name );
+		$this->assertSame( 'Filtered Categories', get_taxonomy( 'category' )->labels->name );
+	}
+
+	/**
+	 * Filters core post type labels.
+	 *
+	 * @param object $labels Post type labels.
+	 * @return object Filtered labels.
+	 */
+	public function filter_post_type_labels( $labels ) {
+		$labels->name = 'Filtered Posts';
+
+		return $labels;
+	}
+
+	/**
+	 * Filters core taxonomy labels.
+	 *
+	 * @param object $labels Taxonomy labels.
+	 * @return object Filtered labels.
+	 */
+	public function filter_taxonomy_labels( $labels ) {
+		$labels->name = 'Filtered Categories';
+
+		return $labels;
+	}
 }

@@ -35,6 +35,17 @@ class WP_REST_Navigation_Fallback_Controller_Test extends WP_Test_REST_Controlle
 		wp_set_current_user( self::$admin_user );
 	}
 
+	protected function should_create_initial_rest_routes() {
+		return false;
+	}
+
+	protected function register_initial_rest_routes_for_test() {
+		$controller = new WP_REST_Navigation_Fallback_Controller();
+		$controller->register_routes();
+
+		$this->register_post_type_rest_routes_for_test( array( 'wp_navigation' ) );
+	}
+
 	/**
 	 * @ticket 58557
 	 * @covers WP_REST_Navigation_Fallback_Controller::register_routes

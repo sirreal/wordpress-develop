@@ -36,6 +36,14 @@ class Tests_Auth extends WP_UnitTestCase {
 
 	protected static $password_length_limit = 4096;
 
+	protected static $phpass_length_limit_hash = '$P$BuCJXibHerqQlUjDbCXINsNu5pYqWd0';
+
+	protected static $plain_bcrypt_hash = '$2y$04$oPhLTndsIu9lp9LwxaaZJOscaqyfc1cAChJ0ppzRgKb11wIMoPsc.';
+
+	protected static $argon2i_hash = '$argon2i$v=19$m=1024,t=1,p=1$NUZUeUltZk1lZk9kTnNEag$y53Ml5m/6u0sE/74+f4hAc5cqqt2SFsVCuYkEhYeG+I';
+
+	protected static $argon2id_hash = '$argon2id$v=19$m=1024,t=1,p=1$Wi5seTFGMjRzeE1MbW9zTg$w9+Y093vlc6CFuQ63MnU8+dbdR91Z9HSRbmfZ/gGAh4';
+
 	/**
 	 * Action hook.
 	 */
@@ -212,8 +220,8 @@ class Tests_Auth extends WP_UnitTestCase {
 	/**
 	 * Ensure wp_check_password() remains compatible with an increase to the default bcrypt cost.
 	 *
-	 * The test verifies this by reducing the cost used to generate the hash, therefore mimicing a hash
-	 * which was generated prior to the default cost being increased.
+	 * The test verifies this by raising the active default cost after generating the hash, therefore
+	 * mimicing a hash which was generated prior to the default cost being increased.
 	 *
 	 * Notably the bcrypt cost was increased in PHP 8.4: https://wiki.php.net/rfc/bcrypt_cost_2023 .
 	 *
@@ -222,14 +230,16 @@ class Tests_Auth extends WP_UnitTestCase {
 	public function test_wp_check_password_supports_hash_with_increased_bcrypt_cost() {
 		$password = 'password';
 
-		// Reducing the cost mimics an increase to the default cost.
-		add_filter( 'wp_hash_password_options', array( $this, 'reduce_hash_cost' ) );
 		$hash = wp_hash_password( $password, PASSWORD_BCRYPT );
-		remove_filter( 'wp_hash_password_options', array( $this, 'reduce_hash_cost' ) );
+
+		// Increasing the cost before validation mimics a default cost increase.
+		add_filter( 'wp_hash_password_options', array( $this, 'increase_hash_cost' ) );
 
 		$this->assertTrue( wp_check_password( $password, $hash ) );
 		$this->assertSame( 1, did_filter( 'check_password' ) );
 		$this->assertTrue( wp_password_needs_rehash( $hash ) );
+
+		remove_filter( 'wp_hash_password_options', array( $this, 'increase_hash_cost' ) );
 	}
 
 	/**
@@ -273,8 +283,7 @@ class Tests_Auth extends WP_UnitTestCase {
 	 */
 	public function test_wp_check_password_supports_plain_bcrypt_hash_with_default_bcrypt_cost() {
 		$password = 'password';
-
-		$hash = password_hash( $password, PASSWORD_BCRYPT );
+		$hash     = self::$plain_bcrypt_hash;
 
 		$this->assertTrue( wp_check_password( $password, $hash ) );
 		$this->assertSame( 1, did_filter( 'check_password' ) );
@@ -292,7 +301,7 @@ class Tests_Auth extends WP_UnitTestCase {
 		}
 
 		$password = 'password';
-		$hash     = password_hash( trim( $password ), PASSWORD_ARGON2I );
+		$hash     = self::$argon2i_hash;
 		$this->assertTrue( wp_check_password( $password, $hash ) );
 		$this->assertSame( 1, did_filter( 'check_password' ) );
 	}
@@ -310,7 +319,7 @@ class Tests_Auth extends WP_UnitTestCase {
 		}
 
 		$password = 'password';
-		$hash     = password_hash( trim( $password ), PASSWORD_ARGON2ID );
+		$hash     = self::$argon2id_hash;
 		$this->assertTrue( wp_check_password( $password, $hash ) );
 		$this->assertSame( 1, did_filter( 'check_password' ) );
 	}
@@ -685,7 +694,7 @@ class Tests_Auth extends WP_UnitTestCase {
 		$limit = str_repeat( 'a', self::$phpass_length_limit );
 
 		// Set the user password with the old phpass algorithm.
-		self::set_user_password_with_phpass( $limit, self::$user_id );
+		self::set_user_password_hash( self::$phpass_length_limit_hash, self::$user_id );
 
 		// Authenticate.
 		$user = wp_authenticate( $this->user->user_login, 'aaaaaaaa' );
@@ -699,7 +708,7 @@ class Tests_Auth extends WP_UnitTestCase {
 		$limit = str_repeat( 'a', self::$phpass_length_limit );
 
 		// Set the user password with the old phpass algorithm.
-		self::set_user_password_with_phpass( $limit, self::$user_id );
+		self::set_user_password_hash( self::$phpass_length_limit_hash, self::$user_id );
 
 		// Authenticate.
 		$user = wp_authenticate( $this->user->user_login, $limit );
@@ -714,7 +723,7 @@ class Tests_Auth extends WP_UnitTestCase {
 		$limit = str_repeat( 'a', self::$phpass_length_limit );
 
 		// Set the user password with the old phpass algorithm.
-		self::set_user_password_with_phpass( $limit, self::$user_id );
+		self::set_user_password_hash( self::$phpass_length_limit_hash, self::$user_id );
 
 		// Authenticate with a password that is one character too long.
 		$user = wp_authenticate( $this->user->user_login, $limit . 'a' );
@@ -1038,13 +1047,10 @@ class Tests_Auth extends WP_UnitTestCase {
 		$this->assertFalse( wp_password_needs_rehash( $hash ) );
 
 		// A future upgrade from a previously lower cost.
-		$default = self::get_default_bcrypt_cost();
-		$opts    = array(
-			// Reducing the cost mimics an increase in the default cost.
-			'cost' => $default - 1,
-		);
-		$hash    = password_hash( $password, PASSWORD_BCRYPT, $opts );
+		$hash = wp_hash_password( $password );
+		add_filter( 'wp_hash_password_options', array( $this, 'increase_hash_cost' ) );
 		$this->assertTrue( wp_password_needs_rehash( $hash ) );
+		remove_filter( 'wp_hash_password_options', array( $this, 'increase_hash_cost' ) );
 
 		// Previous phpass algorithm.
 		$hash = self::$wp_hasher->HashPassword( $password );
@@ -1237,10 +1243,9 @@ class Tests_Auth extends WP_UnitTestCase {
 	public function test_bcrypt_password_is_rehashed_with_new_cost_after_successful_user_password_authentication( $username_or_email ) {
 		$password = 'password';
 
-		// Hash the user password with a lower cost than default to mimic a cost upgrade.
-		add_filter( 'wp_hash_password_options', array( $this, 'reduce_hash_cost' ) );
+		// Hash the user password before increasing the default cost.
 		wp_set_password( $password, self::$user_id );
-		remove_filter( 'wp_hash_password_options', array( $this, 'reduce_hash_cost' ) );
+		add_filter( 'wp_hash_password_options', array( $this, 'increase_hash_cost' ) );
 
 		// Verify that the password needs rehashing.
 		$hash = get_userdata( self::$user_id )->user_pass;
@@ -1249,7 +1254,7 @@ class Tests_Auth extends WP_UnitTestCase {
 		// Authenticate.
 		$user = wp_authenticate( $username_or_email, $password );
 
-		// Verify that the reduced cost password hash was valid.
+		// Verify that the previous-cost password hash was valid.
 		$this->assertNotWPError( $user );
 		$this->assertInstanceOf( 'WP_User', $user );
 		$this->assertSame( self::$user_id, $user->ID );
@@ -1257,7 +1262,7 @@ class Tests_Auth extends WP_UnitTestCase {
 		// Verify that the password has been rehashed with the increased cost.
 		$hash = get_userdata( self::$user_id )->user_pass;
 		$this->assertFalse( wp_password_needs_rehash( $hash, self::$user_id ) );
-		$this->assertSame( self::get_default_bcrypt_cost(), password_get_info( substr( $hash, 3 ) )['options']['cost'] );
+		$this->assertSame( self::get_default_bcrypt_cost() + 1, password_get_info( substr( $hash, 3 ) )['options']['cost'] );
 
 		// Authenticate a second time to ensure the new hash is valid.
 		$user = wp_authenticate( $username_or_email, $password );
@@ -1266,10 +1271,12 @@ class Tests_Auth extends WP_UnitTestCase {
 		$this->assertNotWPError( $user );
 		$this->assertInstanceOf( 'WP_User', $user );
 		$this->assertSame( self::$user_id, $user->ID );
+
+		remove_filter( 'wp_hash_password_options', array( $this, 'increase_hash_cost' ) );
 	}
 
 	public function reduce_hash_cost( array $options ): array {
-		$options['cost'] = self::get_default_bcrypt_cost() - 1;
+		$options['cost'] = max( 4, self::get_default_bcrypt_cost() - 1 );
 		return $options;
 	}
 
@@ -1916,12 +1923,16 @@ class Tests_Auth extends WP_UnitTestCase {
 	}
 
 	private static function set_user_password_with_phpass( string $password, int $user_id ) {
+		self::set_user_password_hash( self::$wp_hasher->HashPassword( $password ), $user_id );
+	}
+
+	private static function set_user_password_hash( string $hash, int $user_id ) {
 		global $wpdb;
 
 		$wpdb->update(
 			$wpdb->users,
 			array(
-				'user_pass' => self::$wp_hasher->HashPassword( $password ),
+				'user_pass' => $hash,
 			),
 			array(
 				'ID' => $user_id,
@@ -1985,7 +1996,13 @@ class Tests_Auth extends WP_UnitTestCase {
 		$wpdb->update(
 			$wpdb->users,
 			array(
-				'user_pass' => password_hash( 'password', PASSWORD_BCRYPT ),
+				'user_pass' => password_hash(
+					$password,
+					PASSWORD_BCRYPT,
+					array(
+						'cost' => self::get_default_bcrypt_cost(),
+					)
+				),
 			),
 			array(
 				'ID' => $user_id,
@@ -2022,7 +2039,16 @@ class Tests_Auth extends WP_UnitTestCase {
 	 * @return string The UUID of the application password.
 	 */
 	private static function set_application_password_with_plain_bcrypt( string $password, int $user_id ) {
-		return self::set_application_password( password_hash( $password, PASSWORD_BCRYPT ), $user_id );
+		return self::set_application_password(
+			password_hash(
+				$password,
+				PASSWORD_BCRYPT,
+				array(
+					'cost' => self::get_default_bcrypt_cost(),
+				)
+			),
+			$user_id
+		);
 	}
 
 	/**
@@ -2089,6 +2115,6 @@ class Tests_Auth extends WP_UnitTestCase {
 	}
 
 	private static function get_default_bcrypt_cost(): int {
-		return 5;
+		return 4;
 	}
 }

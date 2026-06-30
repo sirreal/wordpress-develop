@@ -66,6 +66,15 @@ class REST_Block_Type_Controller_Test extends WP_Test_REST_Controller_Testcase {
 		unregister_block_type( 'fake/false' );
 	}
 
+	protected function should_create_initial_rest_routes() {
+		return false;
+	}
+
+	protected function register_initial_rest_routes_for_test() {
+		$controller = new WP_REST_Block_Types_Controller();
+		$controller->register_routes();
+	}
+
 	/**
 	 * @ticket 47620
 	 */

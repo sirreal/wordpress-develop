@@ -23,6 +23,15 @@ class WP_Test_REST_Taxonomies_Controller extends WP_Test_REST_Controller_Testcas
 		self::delete_user( self::$contributor_id );
 	}
 
+	protected function should_create_initial_rest_routes() {
+		return false;
+	}
+
+	protected function register_initial_rest_routes_for_test() {
+		$controller = new WP_REST_Taxonomies_Controller();
+		$controller->register_routes();
+	}
+
 	public function test_register_routes() {
 		$routes = rest_get_server()->get_routes();
 
