@@ -455,10 +455,10 @@
 				</tr>
 				<tr>
 					<td><code>admin-media-chrome</code></td>
-					<td><span class="status good">review fixes passed</span></td>
-					<td>Harvey caption/send-to-editor follow-up through <code>123d7bae88</code>; Dalton review fixes through <code>5c68c49525</code></td>
-					<td>Main focused runs: seed 1 and seed 224 each 1000 passed, 200 skipped, 0 failed; syntax/PHPCS/diff checks passed; latest broad run: 8659 passed, 66 skipped, 0 failed.</td>
-					<td>Attachment edit field preparation, media item and compat markup escaping, image form controls, image editor chrome, edit attachment details form output with sanitized alt/caption/description fields, edit-only compat required/hidden fields, thumbnail/icon helpers, direct image caption/send-to-editor helpers including default caption filter registration, rel/no-rel editor URLs, media send delegation, media buttons, and state restoration.</td>
+					<td><span class="status good">skip retirement passed</span></td>
+					<td>Harvey caption/send-to-editor follow-up through <code>123d7bae88</code>; Dalton review fixes through <code>5c68c49525</code>; admin media boundary skip retirement through <code>12d7260f6c</code></td>
+					<td>Latest focused runs: seed 1 and seed 224 each 300 passed, 0 skipped, 0 failed after legacy upload shell and media enqueue/iframe boundary accounting; adjacent admin/content smoke passed 569 checks with 1 existing skip; latest broad run: 4687 passed, 8 skipped, 0 failed.</td>
+					<td>Attachment edit field preparation, media item and compat markup escaping, image form controls, image editor chrome, edit attachment details form output with sanitized alt/caption/description fields, edit-only compat required/hidden fields, thumbnail/icon helpers, direct image caption/send-to-editor helpers including default caption filter registration, rel/no-rel editor URLs, media send delegation, legacy upload tab/header/form shell hooks, media-view enqueue settings/string contracts, in-process iframe shell rendering, media buttons, and state restoration.</td>
 				</tr>
 				<tr>
 					<td><code>wpdb-sql</code></td>
@@ -1592,6 +1592,12 @@
 					<td><code>style</code></td>
 					<td>1400 passed, 100 skipped, 0 failed after block-support register/apply wrapper coverage, aggregate <code>WP_Block_Supports::apply_block_supports()</code> output, final <code>get_block_wrapper_attributes()</code> escaping/merge/dedupe oracles, skip-serialization checks, custom-only hostile style-value coverage, exact <code>render_block</code> hook restoration, and review fixes; reviewer seed 11704 also passed 350 checks with 25 skips and no actionable findings after fixes.</td>
 					<td>8661 passed, 66 skipped, 0 failed at 2 iterations after style block-support wrapper review fixes.</td>
+				</tr>
+				<tr>
+					<td><code>12d7260f6c</code></td>
+					<td><code>admin-media-chrome</code></td>
+					<td>300 passed, 0 skipped, 0 failed for seed 1 and seed 224 focused runs after replacing upload-dispatch and browser-modal skips with legacy upload shell, media enqueue data, and iframe shell boundary accounting; adjacent admin/content smoke passed 569 checks with 1 existing skip.</td>
+					<td>4687 passed, 8 skipped, 0 failed at 1 iteration after admin media boundary accounting.</td>
 				</tr>
 				<tr>
 					<td><code>123d7bae88</code> / <code>758d2f7b4f</code> / <code>eb4ee82995</code> / <code>5c68c49525</code></td>

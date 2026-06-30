@@ -74,8 +74,9 @@ database, network requests, or a configured site.
   attachment edit field preparation, media item and compat markup escaping,
   image form controls, image editor chrome from cache-seeded metadata,
   edit attachment details form output, thumbnail/icon helper filters, direct
-  caption/send-to-editor helper output, and safe media button/uploader bypass
-  output.
+  caption/send-to-editor helper output, legacy upload tab/header/form shell
+  hooks, media-view enqueue settings/string contracts, in-process iframe shell
+  rendering, and safe media button/uploader bypass output.
 - `admin-options-submission`: no-DB `wp-admin/options.php` update-flow
   coverage, including registered Settings API allowlists and sanitize
   callbacks, settings error transients, General Settings date/time/timezone
