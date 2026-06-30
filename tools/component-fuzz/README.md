@@ -537,7 +537,8 @@ database, network requests, or a configured site.
   50-item pagination, URL payloads, and registration callbacks, export
   notification recipient/subject/content/header filters through an intercepted
   PHPMailer handoff, directory/expiration cleanup filters, anonymization
-  helpers, and privacy policy suggestion/default text without real mail or
+  helpers, privacy policy suggestion/default text, suggested-text lifecycle
+  cache transitions, text-change cache and admin notices without real mail or
   network delivery.
 - `privacy-admin-requests`: in-memory wpdb-backed admin privacy request
   coverage, including export and erasure request list-table views, counts,
