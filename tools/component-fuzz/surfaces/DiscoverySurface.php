@@ -41,6 +41,7 @@ final class DiscoverySurface {
 			$rows[] = self::check_sitemap_renderer_xml( $ctx );
 			$rows[] = self::check_sitemap_renderer_field_boundaries( $ctx );
 			$rows[] = self::check_sitemap_renderer_stylesheet_filters( $ctx );
+			$rows[] = self::check_sitemap_stylesheet_output( $ctx->fork( 'sitemap-stylesheet-output' ) );
 			$rows[] = self::check_sitemap_max_url_filter( $ctx );
 			$rows[] = self::check_sitemap_posts_provider( $ctx->fork( 'sitemap-posts-provider' ) );
 			$rows[] = self::check_sitemap_taxonomies_provider( $ctx->fork( 'sitemap-taxonomies-provider' ) );
@@ -72,7 +73,9 @@ final class DiscoverySurface {
 	private static function missing_requirements(): array {
 		$missing = array();
 
-		foreach ( array( 'SimpleXMLElement', 'WP_Sitemaps', 'WP_Sitemaps_Provider', 'WP_Sitemaps_Registry', 'WP_Sitemaps_Renderer' ) as $class ) {
+		self::load_sitemap_stylesheet_class();
+
+		foreach ( array( 'SimpleXMLElement', 'WP_Locale', 'WP_Sitemaps', 'WP_Sitemaps_Provider', 'WP_Sitemaps_Registry', 'WP_Sitemaps_Renderer', 'WP_Sitemaps_Stylesheet' ) as $class ) {
 			if ( ! class_exists( $class ) ) {
 				$missing[] = "class {$class}";
 			}
@@ -82,9 +85,14 @@ final class DiscoverySurface {
 			array(
 				'add_filter',
 				'apply_filters',
+				'__',
 				'esc_attr',
+				'esc_url',
+				'esc_xml',
+				'get_language_attributes',
 				'get_sitemap_url',
 				'has_filter',
+				'is_rtl',
 				'remove_filter',
 				'wp_get_sitemap_providers',
 				'wp_register_sitemap_provider',
@@ -756,6 +764,180 @@ final class DiscoverySurface {
 			array() === $failures,
 			array(
 				'failures' => array_slice( $failures, 0, 6 ),
+			)
+		);
+	}
+
+	private static function check_sitemap_stylesheet_output( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures            = array();
+		$token               = substr( hash( 'sha1', self::NAME . ':stylesheet-output:' . $ctx->seed() ), 0, 12 );
+		$css_marker          = 'cfz-css-' . $token;
+		$sitemap_marker      = 'cfz-sitemap-xsl-' . $token;
+		$index_marker        = 'cfz-index-xsl-' . $token;
+		$css_seen            = array();
+		$content_seen        = array();
+		$had_wp_locale       = array_key_exists( 'wp_locale', $GLOBALS );
+		$previous_wp_locale  = $GLOBALS['wp_locale'] ?? null;
+		$stylesheet          = new \WP_Sitemaps_Stylesheet();
+
+		$css_filter = static function ( string $css ) use ( &$css_seen, $css_marker ): string {
+			$css_seen[] = array(
+				'bytes'      => strlen( $css ),
+				'alignLeft'  => str_contains( $css, 'text-align: left' ),
+				'alignRight' => str_contains( $css, 'text-align: right' ),
+			);
+
+			return $css . "\n					/* {$css_marker} */\n					#sitemap__table .{$css_marker} { text-align: inherit; }\n";
+		};
+
+		$sitemap_content_filter = static function ( string $xsl ) use ( &$content_seen, $sitemap_marker ): string {
+			$content_seen[] = array(
+				'hook'        => 'sitemap',
+				'hasUrlset'   => str_contains( $xsl, 'sitemap:urlset/sitemap:url' ),
+				'hasIndexSet' => str_contains( $xsl, 'sitemap:sitemapindex/sitemap:sitemap' ),
+			);
+
+			return str_replace( '</xsl:stylesheet>', "\n<!-- {$sitemap_marker} -->\n</xsl:stylesheet>", $xsl );
+		};
+
+		$index_content_filter = static function ( string $xsl ) use ( &$content_seen, $index_marker ): string {
+			$content_seen[] = array(
+				'hook'        => 'index',
+				'hasUrlset'   => str_contains( $xsl, 'sitemap:urlset/sitemap:url' ),
+				'hasIndexSet' => str_contains( $xsl, 'sitemap:sitemapindex/sitemap:sitemap' ),
+			);
+
+			return str_replace( '</xsl:stylesheet>', "\n<!-- {$index_marker} -->\n</xsl:stylesheet>", $xsl );
+		};
+
+		try {
+			\add_filter( 'wp_sitemaps_stylesheet_css', $css_filter, 10, 1 );
+			\add_filter( 'wp_sitemaps_stylesheet_content', $sitemap_content_filter, 10, 1 );
+			\add_filter( 'wp_sitemaps_stylesheet_index_content', $index_content_filter, 10, 1 );
+
+			$GLOBALS['wp_locale'] = new \WP_Locale();
+			$GLOBALS['wp_locale']->text_direction = 'ltr';
+			$ltr_css     = $stylesheet->get_stylesheet_css();
+			$sitemap_xsl = $stylesheet->get_sitemap_stylesheet();
+			$index_xsl   = $stylesheet->get_sitemap_index_stylesheet();
+
+			$GLOBALS['wp_locale']->text_direction = 'rtl';
+			$rtl_css = $stylesheet->get_stylesheet_css();
+		} finally {
+			\remove_filter( 'wp_sitemaps_stylesheet_index_content', $index_content_filter, 10 );
+			\remove_filter( 'wp_sitemaps_stylesheet_content', $sitemap_content_filter, 10 );
+			\remove_filter( 'wp_sitemaps_stylesheet_css', $css_filter, 10 );
+
+			if ( $had_wp_locale ) {
+				$GLOBALS['wp_locale'] = $previous_wp_locale;
+			} else {
+				unset( $GLOBALS['wp_locale'] );
+			}
+		}
+
+		$parsed_sitemap = is_string( $sitemap_xsl ) ? @simplexml_load_string( $sitemap_xsl ) : false;
+		$parsed_index   = is_string( $index_xsl ) ? @simplexml_load_string( $index_xsl ) : false;
+
+		self::collect_failure(
+			$failures,
+			is_string( $ltr_css )
+				&& is_string( $rtl_css )
+				&& str_contains( $ltr_css, 'text-align: left' )
+				&& ! str_contains( $ltr_css, 'text-align: right' )
+				&& str_contains( $rtl_css, 'text-align: right' )
+				&& ! str_contains( $rtl_css, 'text-align: left' )
+				&& str_contains( $ltr_css, $css_marker )
+				&& str_contains( $rtl_css, $css_marker )
+				&& 4 === count( $css_seen )
+				&& array( true, true, true, false ) === array_column( $css_seen, 'alignLeft' )
+				&& array( false, false, false, true ) === array_column( $css_seen, 'alignRight' ),
+			'WP_Sitemaps_Stylesheet CSS honors LTR/RTL text alignment and scoped CSS filters',
+			array(
+				'cssSeen' => $css_seen,
+				'ltrCss'  => self::describe_string( is_string( $ltr_css ) ? $ltr_css : '' ),
+				'rtlCss'  => self::describe_string( is_string( $rtl_css ) ? $rtl_css : '' ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			is_string( $sitemap_xsl )
+				&& false !== $parsed_sitemap
+				&& str_starts_with( $sitemap_xsl, '<?xml version="1.0" encoding="UTF-8"?>' )
+				&& str_contains( $sitemap_xsl, 'sitemap:urlset/sitemap:url' )
+				&& str_contains( $sitemap_xsl, 'count( sitemap:urlset/sitemap:url )' )
+				&& str_contains( $sitemap_xsl, 'name="has-changefreq"' )
+				&& str_contains( $sitemap_xsl, 'name="has-priority"' )
+				&& str_contains( $sitemap_xsl, 'class="changefreq"' )
+				&& str_contains( $sitemap_xsl, 'class="priority"' )
+				&& str_contains( $sitemap_xsl, $css_marker )
+				&& str_contains( $sitemap_xsl, $sitemap_marker )
+				&& ! str_contains( $sitemap_xsl, $index_marker )
+				&& 1 === substr_count( $sitemap_xsl, '<xsl:for-each' ),
+			'WP_Sitemaps_Stylesheet sitemap XSL preserves URL table columns, count expression, CSS, and content filters',
+			array(
+				'contentSeen' => $content_seen,
+				'sitemapXsl'  => self::describe_string( is_string( $sitemap_xsl ) ? $sitemap_xsl : '' ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			is_string( $index_xsl )
+				&& false !== $parsed_index
+				&& str_starts_with( $index_xsl, '<?xml version="1.0" encoding="UTF-8"?>' )
+				&& str_contains( $index_xsl, 'sitemap:sitemapindex/sitemap:sitemap' )
+				&& str_contains( $index_xsl, 'count( sitemap:sitemapindex/sitemap:sitemap )' )
+				&& str_contains( $index_xsl, 'name="has-lastmod"' )
+				&& ! str_contains( $index_xsl, 'name="has-changefreq"' )
+				&& ! str_contains( $index_xsl, 'name="has-priority"' )
+				&& ! str_contains( $index_xsl, 'class="changefreq"' )
+				&& ! str_contains( $index_xsl, 'class="priority"' )
+				&& str_contains( $index_xsl, $css_marker )
+				&& str_contains( $index_xsl, $index_marker )
+				&& ! str_contains( $index_xsl, $sitemap_marker )
+				&& 1 === substr_count( $index_xsl, '<xsl:for-each' ),
+			'WP_Sitemaps_Stylesheet index XSL preserves sitemap-index columns without sitemap-only fields',
+			array(
+				'contentSeen' => $content_seen,
+				'indexXsl'    => self::describe_string( is_string( $index_xsl ) ? $index_xsl : '' ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			array(
+				array(
+					'hook'        => 'sitemap',
+					'hasUrlset'   => true,
+					'hasIndexSet' => false,
+				),
+				array(
+					'hook'        => 'index',
+					'hasUrlset'   => false,
+					'hasIndexSet' => true,
+				),
+			) === $content_seen
+				&& false === \has_filter( 'wp_sitemaps_stylesheet_css', $css_filter )
+				&& false === \has_filter( 'wp_sitemaps_stylesheet_content', $sitemap_content_filter )
+				&& false === \has_filter( 'wp_sitemaps_stylesheet_index_content', $index_content_filter )
+				&& ( $had_wp_locale ? ( $GLOBALS['wp_locale'] ?? null ) === $previous_wp_locale : ! array_key_exists( 'wp_locale', $GLOBALS ) ),
+			'WP_Sitemaps_Stylesheet content filters are type-specific and temporary locale/filter globals are restored',
+			array(
+				'contentSeen'       => $content_seen,
+				'cssFilter'         => \has_filter( 'wp_sitemaps_stylesheet_css', $css_filter ),
+				'sitemapFilter'     => \has_filter( 'wp_sitemaps_stylesheet_content', $sitemap_content_filter ),
+				'indexFilter'       => \has_filter( 'wp_sitemaps_stylesheet_index_content', $index_content_filter ),
+				'wpLocaleRestored'  => $had_wp_locale ? ( ( $GLOBALS['wp_locale'] ?? null ) === $previous_wp_locale ) : ! array_key_exists( 'wp_locale', $GLOBALS ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'discovery.sitemaps.stylesheet-output',
+			array() === $failures,
+			array(
+				'failures' => array_slice( $failures, 0, 8 ),
 			)
 		);
 	}
@@ -1835,6 +2017,21 @@ final class DiscoverySurface {
 		}
 	}
 
+	private static function load_sitemap_stylesheet_class(): void {
+		if ( class_exists( 'WP_Sitemaps_Stylesheet' ) ) {
+			return;
+		}
+
+		if ( ! defined( 'ABSPATH' ) || ! defined( 'WPINC' ) ) {
+			return;
+		}
+
+		$path = ABSPATH . WPINC . '/sitemaps/class-wp-sitemaps-stylesheet.php';
+		if ( is_file( $path ) ) {
+			require_once $path;
+		}
+	}
+
 	private static function prepare_sitemap_provider_runtime( \ComponentFuzz\FuzzContext $ctx ): array {
 		global $wpdb, $wp_rewrite;
 
@@ -2349,7 +2546,7 @@ final class DiscoverySurface {
 			'globals'      => array(),
 		);
 
-		foreach ( array( 'wpdb', 'wp_rewrite', 'wp_sitemaps', 'wp_filter', 'wp_filters', 'wp_actions', 'wp_current_filter', 'wp_object_cache', 'wp_post_types', 'wp_taxonomies' ) as $name ) {
+		foreach ( array( 'wpdb', 'wp_rewrite', 'wp_sitemaps', 'wp_filter', 'wp_filters', 'wp_actions', 'wp_current_filter', 'wp_object_cache', 'wp_post_types', 'wp_taxonomies', 'wp_locale' ) as $name ) {
 			$snapshot['globals'][ $name ] = array(
 				'exists' => array_key_exists( $name, $GLOBALS ),
 				'value'  => array_key_exists( $name, $GLOBALS ) ? self::clone_value( $GLOBALS[ $name ] ) : null,
