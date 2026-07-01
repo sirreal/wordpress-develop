@@ -29,6 +29,11 @@ final class ContentLifecycleSurface {
 			$rows[] = self::check_user_lifecycle( $ctx->fork( 'users' ), $case );
 			$rows[] = self::check_term_lifecycle( $ctx->fork( 'terms' ), $case );
 			$rows[] = self::check_post_lifecycle( $ctx->fork( 'posts' ), $case );
+
+			self::prepare_runtime();
+			$rows[] = self::check_page_lookup_helpers( $ctx->fork( 'page-lookups' ), $case );
+
+			self::prepare_runtime();
 			$rows[] = self::check_set_post_type_mutation_and_cache_cleanup( $ctx->fork( 'set-post-type' ), $case );
 			$rows   = array_merge(
 				$rows,
@@ -58,7 +63,7 @@ final class ContentLifecycleSurface {
 	private static function missing_requirements(): array {
 		$missing = array();
 
-		foreach ( array( 'WP_Post', 'WP_Term', 'WP_User', 'WP_Comment', 'WP_Error', 'Component_Fuzz_WPDB_Stub' ) as $class ) {
+		foreach ( array( 'WP_Post', 'WP_Post_Type', 'WP_Query', 'WP_Term', 'WP_User', 'WP_Comment', 'WP_Error', 'Component_Fuzz_WPDB_Stub' ) as $class ) {
 			if ( ! class_exists( $class, false ) ) {
 				$missing[] = "class {$class}";
 			}
@@ -86,6 +91,12 @@ final class ContentLifecycleSurface {
 				'get_post_thumbnail_id',
 				'get_post_stati',
 				'get_post',
+				'get_post_type_object',
+				'get_posts',
+				'get_children',
+				'get_page_by_path',
+				'get_page_children',
+				'get_pages',
 				'get_term',
 				'get_terms',
 				'get_user_by',
@@ -121,6 +132,8 @@ final class ContentLifecycleSurface {
 				'wp_cache_flush',
 				'wp_cache_delete',
 				'wp_cache_get',
+				'wp_cache_get_last_changed',
+				'wp_cache_get_salted',
 				'wp_cache_set',
 				'wp_delete_comment',
 				'wp_delete_object_term_relationships',
@@ -362,6 +375,492 @@ final class ContentLifecycleSurface {
 				'case'     => self::case_summary( $case ),
 				'failures' => array_slice( $failures, 0, 6 ),
 				'events'   => array_slice( $events, 0, 16 ),
+			)
+		);
+	}
+
+	private static function check_page_lookup_helpers( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures      = array();
+		$post_ids      = array();
+		$token         = substr( $case['token'], 0, 8 );
+		$tree_type     = 'cf_tree_' . $token;
+		$flat_type     = 'cf_flat_' . $token;
+		$root_slug     = 'lookup-root-' . $token;
+		$child_slug    = 'lookup-child-' . $token;
+		$grand_slug    = 'lookup-grand-' . $token;
+		$sibling_slug  = 'lookup-sibling-' . $token;
+		$draft_slug    = 'lookup-draft-' . $token;
+		$media_slug    = 'lookup-media-' . $token;
+		$custom_root_slug = 'lookup-custom-root-' . $token;
+		$custom_child_slug = 'lookup-custom-child-' . $token;
+		$previous_post_exists = array_key_exists( 'post', $GLOBALS );
+		$previous_post        = $GLOBALS['post'] ?? null;
+		$query_events         = array();
+		$page_events          = array();
+		$query_filter         = static function ( array $query_args, array $parsed_args ) use ( &$query_events ): array {
+			$query_events[] = array(
+				'query'  => $query_args,
+				'parsed' => $parsed_args,
+			);
+			return $query_args;
+		};
+		$pages_filter         = static function ( array $pages, array $parsed_args ) use ( &$page_events ): array {
+			$page_events[] = array(
+				'ids'    => ContentLifecycleSurface::ids_from_posts( $pages ),
+				'parsed' => $parsed_args,
+			);
+			return $pages;
+		};
+		$insert_post = static function ( array $args ) use ( &$post_ids ) {
+			$post_id = \wp_insert_post(
+				\wp_slash(
+					array_merge(
+						array(
+							'post_status'   => 'publish',
+							'post_title'    => 'Lookup fixture',
+							'post_content'  => 'Lookup content',
+							'post_date'     => '2022-01-02 03:04:05',
+							'post_date_gmt' => '2022-01-02 03:04:05',
+						),
+						$args
+					)
+				),
+				true,
+				false
+			);
+
+			if ( is_int( $post_id ) ) {
+				$post_ids[] = $post_id;
+			}
+
+			return $post_id;
+		};
+
+		try {
+			$tree_registration = \register_post_type(
+				$tree_type,
+				array(
+					'public'       => true,
+					'hierarchical' => true,
+					'rewrite'      => false,
+					'query_var'    => false,
+					'supports'     => array( 'title', 'page-attributes' ),
+				)
+			);
+			$flat_registration = \register_post_type(
+				$flat_type,
+				array(
+					'public'       => true,
+					'hierarchical' => false,
+					'rewrite'      => false,
+					'query_var'    => false,
+					'supports'     => array( 'title' ),
+				)
+			);
+			$tree_object = \get_post_type_object( $tree_type );
+			$flat_object = \get_post_type_object( $flat_type );
+
+			self::collect_failure(
+				$failures,
+				$tree_registration instanceof \WP_Post_Type
+					&& $flat_registration instanceof \WP_Post_Type
+					&& $tree_object instanceof \WP_Post_Type
+					&& $flat_object instanceof \WP_Post_Type
+					&& true === $tree_object->hierarchical
+					&& false === $flat_object->hierarchical,
+				'page lookup fixture post types register with the expected hierarchical flags',
+				array(
+					'treeRegistration' => $tree_registration instanceof \WP_Post_Type ? $tree_registration->name : self::error_summary( $tree_registration ),
+					'flatRegistration' => $flat_registration instanceof \WP_Post_Type ? $flat_registration->name : self::error_summary( $flat_registration ),
+					'treeObject'       => $tree_object instanceof \WP_Post_Type ? array( 'name' => $tree_object->name, 'hierarchical' => $tree_object->hierarchical ) : $tree_object,
+					'flatObject'       => $flat_object instanceof \WP_Post_Type ? array( 'name' => $flat_object->name, 'hierarchical' => $flat_object->hierarchical ) : $flat_object,
+				)
+			);
+
+			$root_id = $insert_post(
+				array(
+					'post_type'   => 'page',
+					'post_title'  => 'Lookup Root ' . $token,
+					'post_name'   => $root_slug,
+					'menu_order'  => 2,
+					'post_parent' => 0,
+				)
+			);
+			$child_id = is_int( $root_id ) ? $insert_post(
+				array(
+					'post_type'   => 'page',
+					'post_title'  => 'Lookup Child ' . $token,
+					'post_name'   => $child_slug,
+					'menu_order'  => 4,
+					'post_parent' => $root_id,
+				)
+			) : $root_id;
+			$grand_id = is_int( $child_id ) ? $insert_post(
+				array(
+					'post_type'   => 'page',
+					'post_title'  => 'Lookup Grand ' . $token,
+					'post_name'   => $grand_slug,
+					'menu_order'  => 6,
+					'post_parent' => $child_id,
+				)
+			) : $child_id;
+			$sibling_id = is_int( $root_id ) ? $insert_post(
+				array(
+					'post_type'   => 'page',
+					'post_title'  => 'Lookup Sibling ' . $token,
+					'post_name'   => $sibling_slug,
+					'menu_order'  => 8,
+					'post_parent' => $root_id,
+				)
+			) : $root_id;
+			$draft_id = is_int( $root_id ) ? $insert_post(
+				array(
+					'post_type'   => 'page',
+					'post_status' => 'draft',
+					'post_title'  => 'Lookup Draft ' . $token,
+					'post_name'   => $draft_slug,
+					'menu_order'  => 10,
+					'post_parent' => $root_id,
+				)
+			) : $root_id;
+			$attachment_collision_id = is_int( $root_id ) ? $insert_post(
+				array(
+					'post_type'      => 'attachment',
+					'post_status'    => 'inherit',
+					'post_title'     => 'Lookup Attachment Collision ' . $token,
+					'post_name'      => 'attachment-collision-' . $token,
+					'post_parent'    => $root_id,
+					'post_mime_type' => 'image/jpeg',
+					'guid'           => 'http://example.test/uploads/collision-' . $token . '.jpg',
+				)
+			) : $root_id;
+			$attachment_orphan_id = $insert_post(
+				array(
+					'post_type'      => 'attachment',
+					'post_status'    => 'inherit',
+					'post_title'     => 'Lookup Attachment Orphan ' . $token,
+					'post_name'      => $media_slug,
+					'post_parent'    => 0,
+					'post_mime_type' => 'image/jpeg',
+					'guid'           => 'http://example.test/uploads/orphan-' . $token . '.jpg',
+				)
+			);
+			$custom_root_id = $insert_post(
+				array(
+					'post_type'   => $tree_type,
+					'post_title'  => 'Lookup Custom Root ' . $token,
+					'post_name'   => $custom_root_slug,
+					'post_parent' => 0,
+				)
+			);
+			$custom_child_id = is_int( $custom_root_id ) ? $insert_post(
+				array(
+					'post_type'   => $tree_type,
+					'post_title'  => 'Lookup Custom Child ' . $token,
+					'post_name'   => $custom_child_slug,
+					'post_parent' => $custom_root_id,
+				)
+			) : $custom_root_id;
+
+			$fixture_ids = array( $root_id, $child_id, $grand_id, $sibling_id, $draft_id, $attachment_collision_id, $attachment_orphan_id, $custom_root_id, $custom_child_id );
+			if ( array_filter( $fixture_ids, 'is_wp_error' ) || count( array_filter( $fixture_ids, 'is_int' ) ) !== count( $fixture_ids ) ) {
+				self::collect_failure(
+					$failures,
+					false,
+					'page lookup fixtures insert as posts without WP_Error',
+					array_map( array( self::class, 'error_summary' ), $fixture_ids )
+				);
+
+				return $ctx->result(
+					'content-lifecycle.pages.lookup-helpers',
+					false,
+					array(
+						'case'     => self::case_summary( $case ),
+						'failures' => array_slice( $failures, 0, 8 ),
+					)
+				);
+			}
+
+			$collision_updated = $GLOBALS['wpdb']->update( $GLOBALS['wpdb']->posts, array( 'post_name' => $child_slug ), array( 'ID' => $attachment_collision_id ) );
+			\clean_post_cache( $attachment_collision_id );
+			$collision_attachment = \get_post( $attachment_collision_id );
+			\wp_cache_flush();
+
+			self::collect_failure(
+				$failures,
+				1 === $collision_updated
+					&& $collision_attachment instanceof \WP_Post
+					&& $child_slug === $collision_attachment->post_name
+					&& (int) $root_id === (int) $collision_attachment->post_parent,
+				'page lookup fixture forces an attachment/page slug collision before path lookup',
+				array(
+					'updated'    => $collision_updated,
+					'attachment' => self::post_summary( $collision_attachment ),
+					'expected'   => array(
+						'post_name'   => $child_slug,
+						'post_parent' => $root_id,
+					),
+				)
+			);
+
+			$full_path       = $root_slug . '/' . $child_slug . '/' . $grand_slug;
+			$encoded_path    = '/' . rawurlencode( $root_slug ) . '/' . rawurlencode( $child_slug ) . '/' . rawurlencode( $grand_slug ) . '/';
+			$path_object     = \get_page_by_path( $full_path, OBJECT, 'page' );
+			$path_array_a    = \get_page_by_path( $encoded_path, ARRAY_A, 'page' );
+			$path_array_n    = \get_page_by_path( $full_path, ARRAY_N, 'page' );
+			$collision       = \get_page_by_path( $root_slug . '/' . $child_slug, OBJECT, 'page' );
+			$attachment_fallback = \get_page_by_path( $media_slug, OBJECT, 'page' );
+			$attachment_blocked  = \get_page_by_path( $media_slug, OBJECT, array( 'page' ) );
+			$custom_lookup       = \get_page_by_path( $custom_root_slug . '/' . $custom_child_slug, OBJECT, array( 'page', $tree_type ) );
+			$missing_lookup      = \get_page_by_path( $root_slug . '/missing-' . $token, OBJECT, 'page' );
+
+			$last_changed = \wp_cache_get_last_changed( 'posts' );
+			$hit_hash     = md5( $full_path . serialize( 'page' ) );
+			$miss_path    = $root_slug . '/missing-' . $token;
+			$miss_hash    = md5( $miss_path . serialize( 'page' ) );
+			$cached_hit   = \wp_cache_get_salted( 'get_page_by_path:' . $hit_hash, 'post-queries', $last_changed );
+			$cached_miss  = \wp_cache_get_salted( 'get_page_by_path:' . $miss_hash, 'post-queries', $last_changed );
+			\clean_post_cache( $grand_id );
+			$changed_after_clean = \wp_cache_get_last_changed( 'posts' );
+			$cache_after_clean   = \wp_cache_get_salted( 'get_page_by_path:' . $hit_hash, 'post-queries', $changed_after_clean );
+
+			self::collect_failure(
+				$failures,
+				$path_object instanceof \WP_Post
+					&& (int) $grand_id === (int) $path_object->ID
+					&& is_array( $path_array_a )
+					&& (int) $grand_id === (int) ( $path_array_a['ID'] ?? 0 )
+					&& is_array( $path_array_n )
+					&& (int) $grand_id === (int) ( $path_array_n[0] ?? 0 )
+					&& $collision instanceof \WP_Post
+					&& (int) $child_id === (int) $collision->ID
+					&& $attachment_fallback instanceof \WP_Post
+					&& (int) $attachment_orphan_id === (int) $attachment_fallback->ID
+					&& null === $attachment_blocked
+					&& $custom_lookup instanceof \WP_Post
+					&& (int) $custom_child_id === (int) $custom_lookup->ID
+					&& null === $missing_lookup
+					&& (int) $grand_id === (int) $cached_hit
+					&& 0 === (int) $cached_miss
+					&& $changed_after_clean !== $last_changed
+					&& false === $cache_after_clean,
+				'get_page_by_path resolves ancestry, output formats, custom post types, attachment fallback, and salted hit/miss caches',
+				array(
+					'pathObject'        => self::post_summary( $path_object ),
+					'pathArrayA'        => $path_array_a,
+					'pathArrayN'        => array_slice( is_array( $path_array_n ) ? $path_array_n : array(), 0, 4 ),
+					'collision'         => self::post_summary( $collision ),
+					'attachmentFallback' => self::post_summary( $attachment_fallback ),
+					'attachmentBlocked' => self::post_summary( $attachment_blocked ),
+					'customLookup'      => self::post_summary( $custom_lookup ),
+					'cachedHit'         => $cached_hit,
+					'cachedMiss'        => $cached_miss,
+					'lastChangedBefore' => $last_changed,
+					'lastChangedAfter'  => $changed_after_clean,
+					'cacheAfterClean'   => $cache_after_clean,
+				)
+			);
+
+			$page_inputs = array(
+				\get_post( $root_id ),
+				\get_post( $child_id ),
+				\get_post( $grand_id ),
+				\get_post( $sibling_id ),
+				\get_post( $draft_id ),
+				\get_post( $custom_root_id ),
+				\get_post( $custom_child_id ),
+			);
+			$root_children    = \get_page_children( $root_id, $page_inputs );
+			$child_children   = \get_page_children( $child_id, $page_inputs );
+			$unknown_children = \get_page_children( 987654321, $page_inputs );
+
+			self::collect_failure(
+				$failures,
+				self::all_wp_posts( $root_children )
+					&& self::all_wp_posts( $child_children )
+					&& array( $child_id, $grand_id, $sibling_id, $draft_id ) === self::ids_from_posts( $root_children )
+					&& array( $grand_id ) === self::ids_from_posts( $child_children )
+					&& array() === $unknown_children,
+				'get_page_children preserves input-order depth-first descendants and excludes siblings/unknown roots',
+				array(
+					'rootChildren'    => self::ids_from_posts( $root_children ),
+					'childChildren'   => self::ids_from_posts( $child_children ),
+					'unknownChildren' => $unknown_children,
+				)
+			);
+
+			$all_pages = \get_pages(
+				array(
+					'post_type'    => 'page',
+					'post_status'  => array( 'publish', 'draft' ),
+					'hierarchical' => false,
+					'sort_column'  => 'ID',
+					'sort_order'   => 'ASC',
+				)
+			);
+			$root_descendants = \get_pages(
+				array(
+					'post_type'    => 'page',
+					'post_status'  => array( 'publish', 'draft' ),
+					'child_of'     => $root_id,
+					'sort_column'  => 'ID',
+					'sort_order'   => 'ASC',
+				)
+			);
+			$direct_children = \get_pages(
+				array(
+					'post_type'    => 'page',
+					'post_status'  => array( 'publish', 'draft' ),
+					'parent'       => $root_id,
+					'sort_column'  => 'ID',
+					'sort_order'   => 'ASC',
+				)
+			);
+			$exclude_tree = \get_pages(
+				array(
+					'post_type'    => 'page',
+					'post_status'  => array( 'publish', 'draft' ),
+					'exclude_tree' => array( $child_id ),
+					'hierarchical' => false,
+					'sort_column'  => 'ID',
+					'sort_order'   => 'ASC',
+				)
+			);
+			$limited = \get_pages(
+				array(
+					'post_type'    => 'page',
+					'post_status'  => array( 'publish', 'draft' ),
+					'hierarchical' => false,
+					'number'       => 2,
+					'offset'       => 1,
+					'sort_column'  => 'ID',
+					'sort_order'   => 'ASC',
+				)
+			);
+
+			\add_filter( 'get_pages_query_args', $query_filter, 10, 2 );
+			\add_filter( 'get_pages', $pages_filter, 10, 2 );
+			try {
+				$included = \get_pages(
+					array(
+						'post_type'   => 'page',
+						'post_status' => 'publish',
+						'include'     => array( $grand_id, $root_id ),
+						'child_of'    => $root_id,
+						'parent'      => $child_id,
+						'exclude'     => array( $root_id ),
+						'meta_key'    => '_should_be_ignored_with_include',
+						'meta_value'  => 'ignored',
+					)
+				);
+			} finally {
+				\remove_filter( 'get_pages_query_args', $query_filter, 10 );
+				\remove_filter( 'get_pages', $pages_filter, 10 );
+			}
+			$non_hierarchical = \get_pages( array( 'post_type' => $flat_type ) );
+			$invalid_status   = \get_pages( array( 'post_type' => 'page', 'post_status' => 'component-fuzz-status' ) );
+
+			self::collect_failure(
+				$failures,
+				self::all_wp_posts( $all_pages )
+					&& self::all_wp_posts( $root_descendants )
+					&& self::all_wp_posts( $direct_children )
+					&& self::all_wp_posts( $exclude_tree )
+					&& self::all_wp_posts( $limited )
+					&& self::all_wp_posts( $included )
+					&& self::same_id_set( self::ids_from_posts( $all_pages ), array( $root_id, $child_id, $grand_id, $sibling_id, $draft_id ) )
+					&& array( $child_id, $grand_id, $sibling_id, $draft_id ) === self::ids_from_posts( $root_descendants )
+					&& self::same_id_set( self::ids_from_posts( $direct_children ), array( $child_id, $sibling_id, $draft_id ) )
+					&& self::same_id_set( self::ids_from_posts( $exclude_tree ), array( $root_id, $sibling_id, $draft_id ) )
+					&& array( $child_id, $grand_id ) === self::ids_from_posts( $limited )
+					&& self::same_id_set( self::ids_from_posts( $included ), array( $root_id, $grand_id ) )
+					&& false === $non_hierarchical
+					&& false === $invalid_status
+					&& 1 === count( $query_events )
+					&& 1 === count( $page_events )
+					&& self::same_id_set( $query_events[0]['query']['post__in'] ?? array(), array( $root_id, $grand_id ) )
+					&& ! isset( $query_events[0]['query']['post__not_in'], $query_events[0]['query']['post_parent'], $query_events[0]['query']['meta_key'], $query_events[0]['query']['meta_value'] )
+					&& self::same_id_set( $page_events[0]['ids'] ?? array(), array( $root_id, $grand_id ) )
+					&& false === \has_filter( 'get_pages_query_args', $query_filter )
+					&& false === \has_filter( 'get_pages', $pages_filter ),
+				'get_pages enforces hierarchical types/statuses, child/parent/exclude/limit/include rewrites, and scoped filters',
+				array(
+					'allPages'          => self::ids_from_posts( $all_pages ),
+					'rootDescendants'   => self::ids_from_posts( $root_descendants ),
+					'directChildren'    => self::ids_from_posts( $direct_children ),
+					'excludeTree'       => self::ids_from_posts( $exclude_tree ),
+					'limited'           => self::ids_from_posts( $limited ),
+					'included'          => self::ids_from_posts( $included ),
+					'nonHierarchical'   => $non_hierarchical,
+					'invalidStatus'     => $invalid_status,
+					'queryEvents'       => $query_events,
+					'pageEvents'        => $page_events,
+					'queryFilter'       => \has_filter( 'get_pages_query_args', $query_filter ),
+					'pagesFilter'       => \has_filter( 'get_pages', $pages_filter ),
+				)
+			);
+
+			$numeric_children = \get_children( $root_id, OBJECT );
+			$object_children  = \get_children( (object) array( 'post_parent' => $root_id ), ARRAY_A );
+			$GLOBALS['post']  = \get_post( $grand_id );
+			$global_children  = \get_children();
+			$field_children   = \get_children(
+				array(
+					'post_parent' => $root_id,
+					'post_type'   => 'page',
+					'post_status' => array( 'publish', 'draft' ),
+					'fields'      => 'ids',
+				)
+			);
+			unset( $GLOBALS['post'] );
+			$empty_global_children = \get_children();
+
+			self::collect_failure(
+				$failures,
+				self::all_wp_posts( array_values( $numeric_children ) )
+					&& self::all_arrays_with_id( array_values( $object_children ) )
+					&& self::all_wp_posts( array_values( $global_children ) )
+					&& self::all_ints( $field_children )
+					&& self::same_id_set( array_keys( $numeric_children ), array( $child_id, $sibling_id, $draft_id, $attachment_collision_id ) )
+					&& self::same_id_set( array_keys( $object_children ), array( $child_id, $sibling_id, $draft_id, $attachment_collision_id ) )
+					&& isset( $object_children[ $child_id ]['ID'] )
+					&& self::same_id_set( array_keys( $global_children ), array( $grand_id ) )
+					&& self::same_id_set( $field_children, array( $child_id, $sibling_id, $draft_id ) )
+					&& array() === $empty_global_children,
+				'get_children normalizes numeric/object/global args, keys object and array outputs by child ID, passes through fields, and fails closed without a global post',
+				array(
+					'numericChildren'     => array_keys( $numeric_children ),
+					'objectChildren'      => array_keys( $object_children ),
+					'globalChildren'      => array_keys( $global_children ),
+					'fieldChildren'       => $field_children,
+					'emptyGlobalChildren' => $empty_global_children,
+				)
+			);
+		} finally {
+			\remove_filter( 'get_pages_query_args', $query_filter, 10 );
+			\remove_filter( 'get_pages', $pages_filter, 10 );
+
+			if ( $previous_post_exists ) {
+				$GLOBALS['post'] = $previous_post;
+			} else {
+				unset( $GLOBALS['post'] );
+			}
+
+			foreach ( array_reverse( array_unique( array_filter( $post_ids, 'is_int' ) ) ) as $post_id ) {
+				if ( \get_post( $post_id ) instanceof \WP_Post ) {
+					\wp_delete_post( $post_id, true );
+				}
+			}
+
+			unset( $GLOBALS['wp_post_types'][ $tree_type ], $GLOBALS['wp_post_types'][ $flat_type ] );
+		}
+
+		return $ctx->result(
+			'content-lifecycle.pages.lookup-helpers',
+			array() === $failures,
+			array(
+				'case'     => self::case_summary( $case ),
+				'failures' => array_slice( $failures, 0, 8 ),
 			)
 		);
 	}
@@ -3670,6 +4169,63 @@ final class ContentLifecycleSurface {
 			'label'   => $label,
 			'details' => $details,
 		);
+	}
+
+	private static function ids_from_posts( $items ): array {
+		$ids = array();
+
+		foreach ( (array) $items as $item ) {
+			if ( $item instanceof \WP_Post ) {
+				$ids[] = (int) $item->ID;
+			} elseif ( is_array( $item ) && array_key_exists( 'ID', $item ) ) {
+				$ids[] = (int) $item['ID'];
+			} elseif ( is_object( $item ) && isset( $item->ID ) ) {
+				$ids[] = (int) $item->ID;
+			} elseif ( is_numeric( $item ) ) {
+				$ids[] = (int) $item;
+			}
+		}
+
+		return $ids;
+	}
+
+	private static function same_id_set( array $actual, array $expected ): bool {
+		$actual   = array_map( 'intval', $actual );
+		$expected = array_map( 'intval', $expected );
+		sort( $actual );
+		sort( $expected );
+
+		return $actual === $expected;
+	}
+
+	private static function all_wp_posts( $items ): bool {
+		foreach ( (array) $items as $item ) {
+			if ( ! $item instanceof \WP_Post ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function all_arrays_with_id( $items ): bool {
+		foreach ( (array) $items as $item ) {
+			if ( ! is_array( $item ) || ! array_key_exists( 'ID', $item ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function all_ints( $items ): bool {
+		foreach ( (array) $items as $item ) {
+			if ( ! is_int( $item ) ) {
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 	private static function case_summary( array $case ): array {
