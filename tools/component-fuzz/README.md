@@ -851,7 +851,8 @@ database, network requests, or a configured site.
 - `template-links`: no-DB public template and link helpers, including body and
   language attributes and filter ordering/locality, `get_post_class()`/
   `post_class()` container tokens, document title stability, resource
-  hints/preloads, pagination/search/feed/site/admin URLs, direct
+  hints/preloads, pagination/search/feed/site/admin URLs, archive post-list
+  navigation and pagination wrappers, `_navigation_markup()` escaping, direct
   `get_search_form()` HTML5/XHTML rendering, aria/query escaping, hook/filter
   ordering and null fallback behavior, canonical and shortlink head output,
   synthetic post preview/edit/delete/shortlink/permalink helpers, date and
