@@ -30,6 +30,7 @@ final class MailSurface {
 			$rows[] = self::check_phpmailer_composition( $ctx->fork( 'compose' ), $temp_root );
 			$rows[] = self::check_string_header_and_path_parsing( $ctx->fork( 'strings' ), $temp_root );
 			$rows[] = self::check_multipart_boundary_preservation( $ctx->fork( 'multipart' ) );
+			$rows[] = self::check_rfc2822_display_name_header_encoding( $ctx->fork( 'address-encoding' ) );
 			$rows[] = self::check_unicode_recipient_handoff( $ctx->fork( 'unicode' ) );
 			$rows[] = self::check_unicode_domain_recipient_handoff( $ctx->fork( 'unicode-domain' ) );
 			$rows[] = self::check_phpmailer_reuse_resets_message_state( $ctx->fork( 'reuse' ), $temp_root );
@@ -470,6 +471,138 @@ final class MailSurface {
 		}
 
 		return self::row( $ctx, 'mail.phpmailer.multipart-boundary-matrix', $failures );
+	}
+
+	private static function check_rfc2822_display_name_header_encoding( \ComponentFuzz\FuzzContext $ctx ): array {
+		if ( ! function_exists( 'iconv_mime_decode' ) ) {
+			return $ctx->skip( 'mail.phpmailer.rfc2822-display-name-header-encoding', 'iconv MIME decoding is unavailable.' );
+		}
+
+		$failures  = array();
+		$succeeded = array();
+		$token     = strtolower( preg_replace( '/[^a-z0-9]+/', '', $ctx->identifier( 4, 8 ) ) );
+		$token     = '' === $token ? 'addr' . abs( $ctx->seed() % 10000 ) : $token;
+
+		$to_name    = "Luk\u{00E1}\u{0161} To {$token}";
+		$from_name  = "Luk\u{00E1}\u{0161} From {$token}";
+		$cc_name    = "Luk\u{00E1}\u{0161} Cc {$token}";
+		$bcc_name   = "Luk\u{00E1}\u{0161} Bcc {$token}";
+		$reply_name = "Luk\u{00E1}\u{0161} Reply {$token}";
+
+		$to_email    = "to-{$token}@example.org";
+		$from_email  = "from-{$token}@example.org";
+		$cc_email    = "cc-{$token}@example.org";
+		$bcc_email   = "bcc-{$token}@example.org";
+		$reply_email = "reply-{$token}@example.org";
+		$subject     = 'Address Encoding ' . $token;
+		$message     = 'Only display names should be MIME encoded for ' . $token . '.';
+
+		$success_action = static function ( array $mail_data ) use ( &$succeeded ): void {
+			$succeeded[] = $mail_data;
+		};
+
+		MailSurfaceMailer::$mode = 'success';
+		MailSurfaceMailer::$sent = array();
+		$GLOBALS['phpmailer']    = self::new_mailer();
+
+		\add_action( 'wp_mail_succeeded', $success_action );
+		try {
+			$result = \wp_mail(
+				$to_name . ' <' . $to_email . '>',
+				$subject,
+				$message,
+				array(
+					'From: ' . $from_name . '<' . $from_email . '>',
+					'Cc: ' . $cc_name . ' <' . $cc_email . '>',
+					'Bcc: ' . $bcc_name . ' <' . $bcc_email . '>',
+					'Reply-To: ' . $reply_name . ' <' . $reply_email . '>',
+					'Content-Type: text/plain; charset=UTF-8',
+					'X-Address-Token: ' . $token,
+				)
+			);
+		} finally {
+			\remove_action( 'wp_mail_succeeded', $success_action );
+		}
+
+		$sent         = MailSurfaceMailer::$sent[0] ?? array();
+		$mime_headers = self::mime_headers( (string) ( $sent['mimeMessage'] ?? '' ) );
+		$header_lines = array(
+			'To'       => self::mime_header_lines( $mime_headers, 'To' ),
+			'From'     => self::mime_header_lines( $mime_headers, 'From' ),
+			'Cc'       => self::mime_header_lines( $mime_headers, 'Cc' ),
+			'Bcc'      => self::mime_header_lines( $mime_headers, 'Bcc' ),
+			'Reply-To' => self::mime_header_lines( $mime_headers, 'Reply-To' ),
+		);
+
+		self::collect_failure(
+			$failures,
+			true === $result
+				&& 1 === count( MailSurfaceMailer::$sent )
+				&& self::addresses_include( $sent['to'] ?? array(), $to_email, $to_name )
+				&& self::addresses_include( $sent['cc'] ?? array(), $cc_email, $cc_name )
+				&& self::addresses_include( $sent['bcc'] ?? array(), $bcc_email, $bcc_name )
+				&& self::addresses_include( $sent['replyTo'] ?? array(), $reply_email, $reply_name )
+				&& $from_email === ( $sent['from'] ?? null )
+				&& $from_name === ( $sent['fromName'] ?? null )
+				&& '' === ( $sent['sender'] ?? null )
+				&& false === ( $sent['useSMTPUTF8'] ?? true )
+				&& self::custom_headers_include( $sent['customHeaders'] ?? array(), 'X-Address-Token' )
+				&& 1 === count( $succeeded )
+				&& $to_name . ' <' . $to_email . '>' === ( $succeeded[0]['to'][0] ?? null ),
+			'RFC2822 address parts are handed to PHPMailer while Core leaves the SMTP Sender unset',
+			array(
+				'result'    => $result,
+				'sent'      => self::describe_value( $sent ),
+				'succeeded' => self::describe_value( $succeeded ),
+			)
+		);
+
+		foreach (
+			array(
+				'To'       => array( $to_name, $to_email ),
+				'From'     => array( $from_name, $from_email ),
+				'Cc'       => array( $cc_name, $cc_email ),
+				'Bcc'      => array( $bcc_name, $bcc_email ),
+				'Reply-To' => array( $reply_name, $reply_email ),
+			) as $header => $expected
+		) {
+			list( $name, $email ) = $expected;
+			$line    = $header_lines[ $header ][0] ?? '';
+			$decoded = self::decode_mime_header_value( $line, $header );
+
+			self::collect_failure(
+				$failures,
+				1 === count( $header_lines[ $header ] ?? array() )
+					&& self::address_header_encodes_name_only( $line, $header, $name, $email )
+					&& $name . ' <' . $email . '>' === $decoded,
+				$header . ' MIME header encodes only the display name, leaves the address literal, and decodes losslessly',
+				array(
+					'count'   => count( $header_lines[ $header ] ?? array() ),
+					'line'    => self::describe_string( $line ),
+					'decoded' => self::describe_value( $decoded ),
+					'name'    => self::describe_string( $name ),
+					'email'   => $email,
+				)
+			);
+		}
+
+		self::collect_failure(
+			$failures,
+			str_contains( $mime_headers, 'X-Address-Token: ' . $token )
+				&& ! str_contains( $mime_headers, $to_name )
+				&& ! str_contains( $mime_headers, $from_name )
+				&& ! str_contains( $mime_headers, $cc_name )
+				&& ! str_contains( $mime_headers, $bcc_name )
+				&& ! str_contains( $mime_headers, $reply_name )
+				&& false === \has_filter( 'wp_mail_succeeded', $success_action ),
+			'final MIME headers contain generated custom headers and no raw UTF-8 display names after cleanup',
+			array(
+				'headers'       => self::describe_string( $mime_headers ),
+				'successFilter' => \has_filter( 'wp_mail_succeeded', $success_action ),
+			)
+		);
+
+		return self::row( $ctx, 'mail.phpmailer.rfc2822-display-name-header-encoding', $failures );
 	}
 
 	private static function check_unicode_recipient_handoff( \ComponentFuzz\FuzzContext $ctx ): array {
@@ -1149,6 +1282,52 @@ final class MailSurface {
 		return $parts[0] ?? '';
 	}
 
+	private static function mime_header_lines( string $mime_headers, string $name ): array {
+		$current = '';
+		$lines   = array();
+		foreach ( explode( "\n", self::normalize_eol( $mime_headers ) ) as $line ) {
+			if ( '' !== $current && preg_match( '/^\s+/', $line ) ) {
+				$current .= ' ' . trim( $line );
+				continue;
+			}
+			if ( '' !== $current ) {
+				$lines[] = $current;
+			}
+			$current = $line;
+		}
+		if ( '' !== $current ) {
+			$lines[] = $current;
+		}
+
+		$matches = array();
+		foreach ( $lines as $line ) {
+			if ( 0 === strcasecmp( substr( $line, 0, strlen( $name ) + 1 ), $name . ':' ) ) {
+				$matches[] = $line;
+			}
+		}
+
+		return $matches;
+	}
+
+	private static function address_header_encodes_name_only( string $line, string $header, string $name, string $email ): bool {
+		return str_starts_with( $line, $header . ':' )
+			&& str_contains( $line, '=?UTF-8?' )
+			&& 1 === substr_count( $line, '<' . $email . '>' )
+			&& false === strpos( $line, $name )
+			&& false === strpos( $line, '=?UTF-8?' . $email );
+	}
+
+	private static function decode_mime_header_value( string $line, string $header ): ?string {
+		if ( '' === $line || ! str_starts_with( $line, $header . ':' ) ) {
+			return null;
+		}
+
+		$value   = trim( substr( $line, strlen( $header ) + 1 ) );
+		$decoded = iconv_mime_decode( $value, ICONV_MIME_DECODE_CONTINUE_ON_ERROR, 'UTF-8' );
+
+		return false === $decoded ? null : $decoded;
+	}
+
 	private static function make_temp_root( \ComponentFuzz\FuzzContext $ctx ): ?string {
 		$dir = rtrim( sys_get_temp_dir(), DIRECTORY_SEPARATOR ) . DIRECTORY_SEPARATOR . 'component-fuzz-mail-' . getmypid() . '-' . $ctx->seed();
 		if ( is_dir( $dir ) ) {
@@ -1314,6 +1493,8 @@ final class MailSurface {
 					'customHeaders' => $this->getCustomHeaders(),
 					'from'          => $this->From,
 					'fromName'      => $this->FromName,
+					'sender'        => $this->Sender,
+					'useSMTPUTF8'   => $this->UseSMTPUTF8,
 					'subject'       => $this->Subject,
 					'body'          => $this->Body,
 					'contentType'   => $this->ContentType,

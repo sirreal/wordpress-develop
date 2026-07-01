@@ -437,11 +437,12 @@ database, network requests, or a configured site.
 - `mail`: no-delivery `wp_mail()` composition coverage, including argument
   filters, pre-send short-circuiting, PHPMailer recipient/header/content
   handoff, UTF-8 local-part recipient/display-name preservation, IDN domain
-  punycode handoff, array and string header parsing, newline-delimited
-  attachments and embeds, multipart boundary/header/body preservation through
-  serialized MIME output, reusable mailer cleanup/reset behavior,
-  invalid From failure payloads, early failure cleanup, success/failure
-  actions, and emoji email body staticization.
+  punycode handoff, RFC2822 display-name MIME header encoding with literal
+  mailbox preservation and decoded header round trips, array and string header
+  parsing, newline-delimited attachments and embeds, multipart
+  boundary/header/body preservation through serialized MIME output, reusable
+  mailer cleanup/reset behavior, invalid From failure payloads, early failure
+  cleanup, success/failure actions, and emoji email body staticization.
 - `markup`: block parse/serialize/render guards, deterministic `do_blocks()`
   fixture rendering for generated block trees with synthetic callback oracles
   and block-rendering state restoration, shortcodes, text trimming, excerpts,
