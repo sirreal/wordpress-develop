@@ -2,7 +2,7 @@
 namespace ComponentFuzz\Surfaces;
 
 /**
- * Fuzzes local media metadata, ID3, and audio/video attachment helper paths.
+ * Fuzzes local media metadata, media shortcode rendering, ID3, and audio/video attachment helper paths.
  */
 final class MediaMetadataSurface {
 	public const NAME = 'media-metadata';
@@ -42,6 +42,7 @@ final class MediaMetadataSurface {
 				$rows[] = self::check_audio_video_parser_failure_paths( $ctx->fork( 'parser' ), $temp_root );
 				$rows[] = self::check_id3_tag_and_timestamp_helpers( $ctx->fork( 'id3-helper' ) );
 				$rows[] = self::check_extension_key_and_attachment_helpers( $ctx->fork( 'helpers' ), $temp_root );
+				$rows[] = self::check_audio_video_shortcode_rendering( $ctx->fork( 'shortcodes' ) );
 				$rows[] = self::check_attachment_metadata_get_update_helpers( $ctx->fork( 'metadata' ), $temp_root );
 				$rows[] = self::check_generated_metadata_replacement_oracles( $ctx->fork( 'metadata-shapes' ), $temp_root );
 				$rows[] = self::check_original_image_metadata_helpers( $ctx->fork( 'original-image' ), $temp_root );
@@ -79,17 +80,22 @@ final class MediaMetadataSurface {
 		$missing = array();
 		foreach (
 			array(
+				'add_filter',
 				'create_initial_post_types',
 				'create_initial_taxonomies',
 				'current_theme_supports',
+				'esc_attr',
+				'esc_url',
 				'get_attached_file',
 				'get_post_meta',
 				'get_post',
 				'get_post_mime_type',
+				'has_filter',
 				'metadata_exists',
 				'maybe_serialize',
 				'maybe_unserialize',
 				'post_type_supports',
+				'remove_filter',
 				'remove_post_type_support',
 				'remove_theme_support',
 				'sanitize_file_name',
@@ -111,6 +117,9 @@ final class MediaMetadataSurface {
 				'wp_get_upload_dir',
 				'wp_get_video_extensions',
 				'wp_image_file_matches_image_meta',
+				'wp_mediaelement_fallback',
+				'wp_audio_shortcode',
+				'wp_video_shortcode',
 				'wp_update_attachment_metadata',
 				'wp_read_audio_metadata',
 				'wp_read_video_metadata',
@@ -489,6 +498,377 @@ final class MediaMetadataSurface {
 		return self::row(
 			$ctx,
 			'media-metadata.extension-id3-key-and-attachment-helpers',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, 8 ) )
+		);
+	}
+
+	private static function check_audio_video_shortcode_rendering( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures         = array();
+		$runtime_snapshot = self::snapshot_media_shortcode_runtime();
+		$token            = $ctx->identifier( 5, 12 );
+		$audio_events     = array(
+			'override' => array(),
+			'library'  => array(),
+			'class'    => array(),
+			'output'   => array(),
+		);
+		$video_events     = array(
+			'override' => array(),
+			'library'  => array(),
+			'class'    => array(),
+			'output'   => array(),
+		);
+		$fallback_events  = array();
+		$audio_library    = 'mediaelement';
+		$video_library    = 'mediaelement';
+
+		$audio_src          = self::media_shortcode_url( $ctx->fork( 'audio-src' ), 'audio-main', 'mp3' );
+		$audio_typed_mp3    = self::media_shortcode_url( $ctx->fork( 'audio-typed-mp3' ), 'audio-typed', 'mp3' );
+		$audio_typed_ogg    = self::media_shortcode_url( $ctx->fork( 'audio-typed-ogg' ), 'audio-typed', 'ogg' );
+		$audio_invalid_src  = self::media_shortcode_url( $ctx->fork( 'audio-invalid' ), 'audio-invalid', 'txt' );
+		$audio_override_src = self::media_shortcode_url( $ctx->fork( 'audio-override' ), 'audio-override', 'mp3' );
+		$youtube_src        = 'http://www.youtube.com/watch?v=' . $ctx->identifier( 8, 12 ) . '&feature=oembed&danger=<script>';
+		$vimeo_src          = 'http://player.vimeo.com/video/' . $ctx->int( 100000, 999999 ) . '?autoplay=1&danger=<script>';
+		$video_typed_mp4    = self::media_shortcode_url( $ctx->fork( 'video-typed-mp4' ), 'video-typed', 'mp4' );
+		$video_typed_webm   = self::media_shortcode_url( $ctx->fork( 'video-typed-webm' ), 'video-typed', 'webm' );
+		$video_invalid_src  = self::media_shortcode_url( $ctx->fork( 'video-invalid' ), 'video-invalid', 'txt' );
+		$video_override_src = self::media_shortcode_url( $ctx->fork( 'video-override' ), 'video-override', 'mp4' );
+		$fallback_url       = self::media_shortcode_url( $ctx->fork( 'fallback' ), 'fallback', 'mp4' );
+
+		$audio_override_filter = static function ( string $html, array $attr, string $content, int $instance ) use ( &$audio_events, $audio_override_src, $token ): string {
+			$audio_events['override'][] = array(
+				'html'     => $html,
+				'src'      => $attr['src'] ?? null,
+				'content'  => $content,
+				'instance' => $instance,
+			);
+
+			return ( $attr['src'] ?? null ) === $audio_override_src
+				? '<span data-cfz-audio-override="' . \esc_attr( $token ) . '"></span>'
+				: '';
+		};
+		$audio_library_filter  = static function ( string $library ) use ( &$audio_events, &$audio_library ): string {
+			$audio_events['library'][] = $library;
+			return $audio_library;
+		};
+		$audio_class_filter    = static function ( string $class, array $atts ) use ( &$audio_events ): string {
+			$audio_events['class'][] = array(
+				'class'   => $class,
+				'src'     => $atts['src'] ?? null,
+				'preload' => $atts['preload'] ?? null,
+				'loop'    => $atts['loop'] ?? null,
+				'muted'   => $atts['muted'] ?? null,
+			);
+
+			return $class . ' cfz-audio-class';
+		};
+		$audio_output_filter   = static function ( string $html, array $atts, $audio, int $post_id, string $library ) use ( &$audio_events ): string {
+			$audio_events['output'][] = array(
+				'src'     => $atts['src'] ?? null,
+				'class'   => $atts['class'] ?? null,
+				'audio'   => $audio,
+				'postId'  => $post_id,
+				'library' => $library,
+			);
+
+			return $html . '<!--cfz-audio-shortcode-->';
+		};
+		$video_override_filter = static function ( string $html, array $attr, string $content, int $instance ) use ( &$video_events, $video_override_src, $token ): string {
+			$video_events['override'][] = array(
+				'html'     => $html,
+				'src'      => $attr['src'] ?? null,
+				'content'  => $content,
+				'instance' => $instance,
+			);
+
+			return ( $attr['src'] ?? null ) === $video_override_src
+				? '<span data-cfz-video-override="' . \esc_attr( $token ) . '"></span>'
+				: '';
+		};
+		$video_library_filter  = static function ( string $library ) use ( &$video_events, &$video_library ): string {
+			$video_events['library'][] = $library;
+			return $video_library;
+		};
+		$video_class_filter    = static function ( string $class, array $atts ) use ( &$video_events ): string {
+			$video_events['class'][] = array(
+				'class'   => $class,
+				'src'     => $atts['src'] ?? null,
+				'width'   => $atts['width'] ?? null,
+				'height'  => $atts['height'] ?? null,
+				'preload' => $atts['preload'] ?? null,
+			);
+
+			return $class . ' cfz-video-class';
+		};
+		$video_output_filter   = static function ( string $html, array $atts, $video, int $post_id, string $library ) use ( &$video_events ): string {
+			$video_events['output'][] = array(
+				'src'     => $atts['src'] ?? null,
+				'class'   => $atts['class'] ?? null,
+				'video'   => $video,
+				'postId'  => $post_id,
+				'library' => $library,
+			);
+
+			return $html . '<!--cfz-video-shortcode-->';
+		};
+		$fallback_filter       = static function ( string $output, string $url ) use ( &$fallback_events ): string {
+			$fallback_events[] = array(
+				'url'    => $url,
+				'output' => $output,
+			);
+
+			return $output . '<span data-cfz-mediaelement-fallback="1"></span>';
+		};
+
+		\add_filter( 'wp_audio_shortcode_override', $audio_override_filter, 10, 4 );
+		\add_filter( 'wp_audio_shortcode_library', $audio_library_filter, 10, 1 );
+		\add_filter( 'wp_audio_shortcode_class', $audio_class_filter, 10, 2 );
+		\add_filter( 'wp_audio_shortcode', $audio_output_filter, 10, 5 );
+		\add_filter( 'wp_video_shortcode_override', $video_override_filter, 10, 4 );
+		\add_filter( 'wp_video_shortcode_library', $video_library_filter, 10, 1 );
+		\add_filter( 'wp_video_shortcode_class', $video_class_filter, 10, 2 );
+		\add_filter( 'wp_video_shortcode', $video_output_filter, 10, 5 );
+		\add_filter( 'wp_mediaelement_fallback', $fallback_filter, 10, 2 );
+
+		try {
+			$GLOBALS['content_width'] = 480;
+
+			$audio_library = 'mediaelement';
+			$audio_html    = \wp_audio_shortcode(
+				array(
+					'src'      => $audio_src,
+					'loop'     => '1',
+					'autoplay' => 'true',
+					'muted'    => '1',
+					'preload'  => 'auto',
+					'class'    => 'wp-audio-shortcode cfz-base',
+					'style'    => 'width: 80%; max-width: 640px;',
+				)
+			);
+
+			$audio_invalid = \wp_audio_shortcode( array( 'src' => $audio_invalid_src ) );
+
+			$audio_library = 'html5';
+			$audio_typed   = \wp_audio_shortcode(
+				array(
+					'mp3'     => $audio_typed_mp3,
+					'ogg'     => $audio_typed_ogg,
+					'preload' => 'invalid-preload',
+				)
+			);
+
+			$audio_override = \wp_audio_shortcode( array( 'src' => $audio_override_src ), 'override content' );
+
+			$video_library = 'mediaelement';
+			$youtube_html  = \wp_video_shortcode(
+				array(
+					'src'      => $youtube_src,
+					'width'    => 320,
+					'height'   => 180,
+					'poster'   => 'https://media.example.test/poster-' . rawurlencode( $token ) . '.jpg?bad=<script>',
+					'loop'     => '1',
+					'autoplay' => 'false',
+					'muted'    => 'true',
+					'preload'  => 'invalid-preload',
+				),
+				"\n<track kind=\"captions\" srclang=\"en\" src=\"https://media.example.test/captions-{$token}.vtt\" />\n"
+			);
+
+			$vimeo_html = \wp_video_shortcode(
+				array(
+					'src'     => $vimeo_src,
+					'width'   => 360,
+					'height'  => 240,
+					'loop'    => '1',
+					'preload' => 'metadata',
+				)
+			);
+
+			$video_invalid = \wp_video_shortcode( array( 'src' => $video_invalid_src ) );
+
+			$video_library = 'html5';
+			$video_typed   = \wp_video_shortcode(
+				array(
+					'mp4'     => $video_typed_mp4,
+					'webm'    => $video_typed_webm,
+					'width'   => 300,
+					'height'  => 160,
+					'preload' => 'none',
+				)
+			);
+
+			$video_override = \wp_video_shortcode( array( 'src' => $video_override_src ), 'override content' );
+			$fallback_html  = \wp_mediaelement_fallback( $fallback_url );
+		} finally {
+			\remove_filter( 'wp_mediaelement_fallback', $fallback_filter, 10 );
+			\remove_filter( 'wp_video_shortcode', $video_output_filter, 10 );
+			\remove_filter( 'wp_video_shortcode_class', $video_class_filter, 10 );
+			\remove_filter( 'wp_video_shortcode_library', $video_library_filter, 10 );
+			\remove_filter( 'wp_video_shortcode_override', $video_override_filter, 10 );
+			\remove_filter( 'wp_audio_shortcode', $audio_output_filter, 10 );
+			\remove_filter( 'wp_audio_shortcode_class', $audio_class_filter, 10 );
+			\remove_filter( 'wp_audio_shortcode_library', $audio_library_filter, 10 );
+			\remove_filter( 'wp_audio_shortcode_override', $audio_override_filter, 10 );
+			self::restore_media_shortcode_runtime( $runtime_snapshot );
+		}
+
+		self::collect_failure(
+			$failures,
+			is_string( $audio_html )
+				&& str_contains( $audio_html, '<audio ' )
+				&& str_contains( $audio_html, ' controls="controls"' )
+				&& 1 === preg_match( '/id="audio-\d+-\d+"/', $audio_html )
+				&& str_contains( $audio_html, 'class="wp-audio-shortcode cfz-base cfz-audio-class"' )
+				&& str_contains( $audio_html, 'loop autoplay muted' )
+				&& str_contains( $audio_html, 'preload="auto"' )
+				&& str_contains( $audio_html, '<source type="audio/mpeg"' )
+				&& str_contains( $audio_html, '.mp3' )
+				&& str_contains( $audio_html, '<span data-cfz-mediaelement-fallback="1"></span>' )
+				&& str_contains( $audio_html, '<!--cfz-audio-shortcode-->' )
+				&& self::media_shortcode_markup_has_no_raw_payload( $audio_html ),
+			'audio shortcode renders escaped mediaelement markup with normalized boolean/preload attributes and fallback',
+			array( 'audio' => self::describe_string( is_string( $audio_html ) ? $audio_html : '' ) )
+		);
+
+		self::collect_failure(
+			$failures,
+			is_string( $audio_typed )
+				&& 2 === substr_count( $audio_typed, '<source ' )
+				&& str_contains( $audio_typed, '.mp3' )
+				&& str_contains( $audio_typed, '.ogg' )
+				&& ! str_contains( $audio_typed, 'invalid-preload' )
+				&& ! str_contains( $audio_typed, 'data-cfz-mediaelement-fallback' )
+				&& str_contains( $audio_typed, '<!--cfz-audio-shortcode-->' )
+				&& self::media_shortcode_markup_has_no_raw_payload( $audio_typed ),
+			'audio shortcode renders multiple typed sources and omits invalid preload values without mediaelement fallback when library changes',
+			array( 'audioTyped' => self::describe_string( is_string( $audio_typed ) ? $audio_typed : '' ) )
+		);
+
+		self::collect_failure(
+			$failures,
+			is_string( $audio_invalid )
+				&& str_starts_with( $audio_invalid, '<a class="wp-embedded-audio" href="' )
+				&& str_contains( $audio_invalid, \esc_url( $audio_invalid_src ) )
+				&& self::media_shortcode_markup_has_no_raw_payload( $audio_invalid )
+				&& '<span data-cfz-audio-override="' . \esc_attr( $token ) . '"></span>' === $audio_override,
+			'audio shortcode invalid source fallback and override filter short-circuit are deterministic',
+			array(
+				'invalid'  => self::describe_string( is_string( $audio_invalid ) ? $audio_invalid : '' ),
+				'override' => $audio_override,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			is_string( $youtube_html )
+				&& str_contains( $youtube_html, '<div style="width: 320px;" class="wp-video">' )
+				&& str_contains( $youtube_html, '<video ' )
+				&& str_contains( $youtube_html, 'class="wp-video-shortcode cfz-video-class"' )
+				&& str_contains( $youtube_html, 'width="320"' )
+				&& str_contains( $youtube_html, 'height="180"' )
+				&& str_contains( $youtube_html, 'loop muted' )
+				&& ! str_contains( $youtube_html, ' autoplay' )
+				&& ! str_contains( $youtube_html, 'invalid-preload' )
+				&& str_contains( $youtube_html, 'type="video/youtube"' )
+				&& str_contains( $youtube_html, 'https://www.youtube.com/watch?v=' )
+				&& ! str_contains( $youtube_html, 'feature=oembed' )
+				&& str_contains( $youtube_html, '<track kind="captions"' )
+				&& str_contains( $youtube_html, '<span data-cfz-mediaelement-fallback="1"></span>' )
+				&& str_contains( $youtube_html, '<!--cfz-video-shortcode-->' )
+				&& self::media_shortcode_markup_has_no_raw_payload( $youtube_html ),
+			'video shortcode normalizes YouTube mediaelement sources, dimensions, boolean attrs, captions, and output filters',
+			array( 'youtube' => self::describe_string( is_string( $youtube_html ) ? $youtube_html : '' ) )
+		);
+
+		self::collect_failure(
+			$failures,
+			is_string( $vimeo_html )
+				&& str_contains( $vimeo_html, 'type="video/vimeo"' )
+				&& str_contains( $vimeo_html, 'https://player.vimeo.com/video/' )
+				&& str_contains( $vimeo_html, 'loop=1' )
+				&& ! str_contains( $vimeo_html, 'autoplay=1' )
+				&& ! str_contains( $vimeo_html, 'danger=' )
+				&& str_contains( $vimeo_html, '<span data-cfz-mediaelement-fallback="1"></span>' )
+				&& self::media_shortcode_markup_has_no_raw_payload( $vimeo_html ),
+			'video shortcode normalizes Vimeo mediaelement URLs to HTTPS path plus loop state',
+			array( 'vimeo' => self::describe_string( is_string( $vimeo_html ) ? $vimeo_html : '' ) )
+		);
+
+		self::collect_failure(
+			$failures,
+			is_string( $video_typed )
+				&& 2 === substr_count( $video_typed, '<source ' )
+				&& str_contains( $video_typed, 'type="video/mp4"' )
+				&& str_contains( $video_typed, 'type="video/webm"' )
+				&& str_contains( $video_typed, 'preload="none"' )
+				&& ! str_contains( $video_typed, 'data-cfz-mediaelement-fallback' )
+				&& str_contains( $video_typed, '<!--cfz-video-shortcode-->' )
+				&& self::media_shortcode_markup_has_no_raw_payload( $video_typed ),
+			'video shortcode renders multiple typed sources and omits mediaelement fallback when library changes',
+			array( 'videoTyped' => self::describe_string( is_string( $video_typed ) ? $video_typed : '' ) )
+		);
+
+		self::collect_failure(
+			$failures,
+			is_string( $video_invalid )
+				&& str_starts_with( $video_invalid, '<a class="wp-embedded-video" href="' )
+				&& str_contains( $video_invalid, \esc_url( $video_invalid_src ) )
+				&& self::media_shortcode_markup_has_no_raw_payload( $video_invalid )
+				&& '<span data-cfz-video-override="' . \esc_attr( $token ) . '"></span>' === $video_override,
+			'video shortcode invalid source fallback and override filter short-circuit are deterministic',
+			array(
+				'invalid'  => self::describe_string( is_string( $video_invalid ) ? $video_invalid : '' ),
+				'override' => $video_override,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			is_string( $fallback_html )
+				&& str_contains( $fallback_html, '<a href="' . \esc_url( $fallback_url ) . '">' )
+				&& str_contains( $fallback_html, '<span data-cfz-mediaelement-fallback="1"></span>' )
+				&& self::media_shortcode_markup_has_no_raw_payload( $fallback_html ),
+			'wp_mediaelement_fallback escapes generated URLs and remains filterable',
+			array(
+				'fallback' => self::describe_string( is_string( $fallback_html ) ? $fallback_html : '' ),
+				'events'   => $fallback_events,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			4 === count( $audio_events['override'] )
+				&& 2 === count( $audio_events['library'] )
+				&& 2 === count( $audio_events['class'] )
+				&& 2 === count( $audio_events['output'] )
+				&& 5 === count( $video_events['override'] )
+				&& 3 === count( $video_events['library'] )
+				&& 3 === count( $video_events['class'] )
+				&& 3 === count( $video_events['output'] )
+				&& count( $fallback_events ) >= 4
+				&& false === \has_filter( 'wp_audio_shortcode_override', $audio_override_filter )
+				&& false === \has_filter( 'wp_audio_shortcode_library', $audio_library_filter )
+				&& false === \has_filter( 'wp_audio_shortcode_class', $audio_class_filter )
+				&& false === \has_filter( 'wp_audio_shortcode', $audio_output_filter )
+				&& false === \has_filter( 'wp_video_shortcode_override', $video_override_filter )
+				&& false === \has_filter( 'wp_video_shortcode_library', $video_library_filter )
+				&& false === \has_filter( 'wp_video_shortcode_class', $video_class_filter )
+				&& false === \has_filter( 'wp_video_shortcode', $video_output_filter )
+				&& false === \has_filter( 'wp_mediaelement_fallback', $fallback_filter )
+				&& self::media_shortcode_runtime_matches( $runtime_snapshot ),
+			'audio/video shortcode filters receive expected normalized payloads and cleanup restores filters and media globals',
+			array(
+				'audioEvents'    => $audio_events,
+				'videoEvents'    => $video_events,
+				'fallbackEvents' => $fallback_events,
+				'runtimeAfter'   => self::snapshot_media_shortcode_runtime(),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'media-metadata.audio-video-shortcode-rendering-filters',
 			array() === $failures,
 			array( 'failures' => array_slice( $failures, 0, 8 ) )
 		);
@@ -1740,6 +2120,79 @@ final class MediaMetadataSurface {
 		}
 
 		@rmdir( $dir );
+	}
+
+	private static function media_shortcode_url( \ComponentFuzz\FuzzContext $ctx, string $label, string $extension ): string {
+		$safe_label = \sanitize_file_name( $label . '-' . $ctx->identifier( 4, 10 ) );
+		$payload    = rawurlencode( 'quote"<script>&' . $ctx->identifier( 3, 8 ) );
+
+		return "https://media.example.test/{$payload}/{$safe_label}.{$extension}";
+	}
+
+	private static function media_shortcode_markup_has_no_raw_payload( string $html ): bool {
+		$lower = strtolower( $html );
+
+		return ! str_contains( $lower, '<script' )
+			&& ! str_contains( $lower, 'bad=<script>' )
+			&& ! str_contains( $lower, 'danger=<script>' )
+			&& ! str_contains( $html, '"<&' )
+			&& ! str_contains( $html, 'quote"<script>' );
+	}
+
+	private static function snapshot_media_shortcode_runtime(): array {
+		$globals = array();
+		foreach ( array( 'wp_scripts', 'wp_styles', 'content_width' ) as $name ) {
+			$globals[ $name ] = array(
+				'exists' => array_key_exists( $name, $GLOBALS ),
+				'value'  => array_key_exists( $name, $GLOBALS ) ? self::clone_runtime_value( $GLOBALS[ $name ] ) : null,
+			);
+		}
+
+		return array( 'globals' => $globals );
+	}
+
+	private static function restore_media_shortcode_runtime( array $snapshot ): void {
+		foreach ( $snapshot['globals'] as $name => $entry ) {
+			if ( $entry['exists'] ) {
+				$GLOBALS[ $name ] = self::clone_runtime_value( $entry['value'] );
+			} else {
+				unset( $GLOBALS[ $name ] );
+			}
+		}
+	}
+
+	private static function media_shortcode_runtime_matches( array $snapshot ): bool {
+		return self::snapshot_media_shortcode_runtime() == $snapshot;
+	}
+
+	private static function clone_runtime_value( $value ) {
+		if ( is_array( $value ) ) {
+			$copy = array();
+			foreach ( $value as $key => $item ) {
+				$copy[ $key ] = self::clone_runtime_value( $item );
+			}
+			return $copy;
+		}
+
+		if ( is_object( $value ) ) {
+			return clone $value;
+		}
+
+		return $value;
+	}
+
+	private static function describe_string( string $value ): array {
+		$preview = str_replace(
+			array( "\r", "\n", "\t" ),
+			array( '\\r', '\\n', '\\t' ),
+			substr( $value, 0, self::PREVIEW_BYTES )
+		);
+
+		return array(
+			'bytes'   => strlen( $value ),
+			'sha1'    => sha1( $value ),
+			'preview' => $preview,
+		);
 	}
 
 	private static function row( \ComponentFuzz\FuzzContext $ctx, string $invariant, bool $ok, array $data = array() ): array {
