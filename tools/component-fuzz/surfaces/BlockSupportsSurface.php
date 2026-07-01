@@ -36,6 +36,7 @@ final class BlockSupportsSurface {
 			$rows[] = self::check_render_filters( $ctx, $case );
 			$rows[] = self::check_elements_and_custom_css_filters( $ctx, $case );
 			$rows[] = self::check_state_and_layout_helpers( $ctx, $case );
+			$rows[] = self::check_duotone_support( $ctx, $case );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
 				'block-supports.surface-no-throw',
@@ -76,6 +77,7 @@ final class BlockSupportsSurface {
 				'WP_Theme_JSON',
 				'WP_Theme_JSON_Data',
 				'WP_Theme_JSON_Resolver',
+				'WP_Duotone',
 			) as $class
 		) {
 			if ( ! class_exists( $class ) ) {
@@ -91,6 +93,8 @@ final class BlockSupportsSurface {
 				'get_block_wrapper_attributes',
 				'register_block_type',
 				'unregister_block_type',
+				'wp_get_block_css_selector',
+				'wp_get_global_settings',
 				'wp_apply_alignment_support',
 				'wp_apply_anchor_support',
 				'wp_apply_aria_label_support',
@@ -120,6 +124,7 @@ final class BlockSupportsSurface {
 				'wp_sanitize_block_gap_value',
 				'wp_should_skip_block_supports_serialization',
 				'wp_split_selector_list',
+				'wp_style_engine_get_stylesheet_from_css_rules',
 				'wp_style_engine_get_stylesheet_from_context',
 			) as $function
 		) {
@@ -144,6 +149,7 @@ final class BlockSupportsSurface {
 		$GLOBALS['wp_styles']  = new \WP_Styles();
 
 		self::set_style_stores( array() );
+		self::reset_duotone_state();
 		self::clean_theme_json_caches();
 
 		if ( function_exists( 'wp_cache_flush' ) ) {
@@ -909,6 +915,310 @@ final class BlockSupportsSurface {
 		);
 	}
 
+	private static function check_duotone_support( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures      = array();
+		$name          = $case['blockName'] . '-duotone';
+		$unsupported   = $case['blockName'] . '-duotone-unsupported';
+		$no_global     = $case['blockName'] . '-duotone-no-global';
+		$preset_slug   = self::duotone_preset_slug( $case['slug'] );
+		$preset_filter = 'wp-duotone-' . $preset_slug;
+		$preset_attr   = 'var:preset|duotone|' . $preset_slug;
+		$custom_colors = array( '#ffffff', $case['safeColor'] );
+
+		\unregister_block_type( $name );
+		\unregister_block_type( $unsupported );
+		\unregister_block_type( $no_global );
+		self::set_style_stores( array() );
+		self::reset_duotone_state();
+
+		$theme_filter = static function ( \WP_Theme_JSON_Data $theme_json ) use ( $name, $preset_slug, $case ): \WP_Theme_JSON_Data {
+			return $theme_json->update_with(
+				array(
+					'version'  => \WP_Theme_JSON::LATEST_SCHEMA,
+					'settings' => array(
+						'color' => array(
+							'duotone' => array(
+								array(
+									'name'   => 'Component Fuzz ' . $preset_slug,
+									'slug'   => $preset_slug,
+									'colors' => array( '#000000', $case['safeColor'] ),
+								),
+							),
+						),
+					),
+					'styles'   => array(
+						'blocks' => array(
+							$name => array(
+								'filter' => array(
+									'duotone' => 'var:preset|duotone|' . $preset_slug,
+								),
+							),
+						),
+					),
+				)
+			);
+		};
+
+		\add_filter( 'wp_theme_json_data_default', $theme_filter, 10 );
+		self::clean_theme_json_caches();
+
+		try {
+			$block_type       = \register_block_type(
+				$name,
+				array(
+					'title'      => 'Component Fuzz Duotone',
+					'supports'   => array(
+						'filter' => array(
+							'duotone' => true,
+						),
+					),
+					'attributes' => self::base_attributes(),
+					'selectors'  => array(
+						'root'   => '.wp-block-component-fuzz',
+						'filter' => array(
+							'duotone' => '.wp-block-component-fuzz img,.wp-block-component-fuzz picture',
+						),
+					),
+				)
+			);
+			$unsupported_type = \register_block_type(
+				$unsupported,
+				array(
+					'title'      => 'Component Fuzz Duotone Unsupported',
+					'supports'   => array(
+						'filter' => array(
+							'duotone' => false,
+						),
+					),
+					'attributes' => self::base_attributes(),
+					'selectors'  => array(
+						'root' => '.wp-block-component-fuzz',
+					),
+				)
+			);
+			$no_global_type   = \register_block_type(
+				$no_global,
+				array(
+					'title'      => 'Component Fuzz Duotone No Global Style',
+					'supports'   => array(
+						'filter' => array(
+							'duotone' => true,
+						),
+					),
+					'attributes' => self::base_attributes(),
+					'selectors'  => array(
+						'root'   => '.wp-block-component-fuzz',
+						'filter' => array(
+							'duotone' => '.wp-block-component-fuzz img,.wp-block-component-fuzz picture',
+						),
+					),
+				)
+			);
+			\WP_Block_Supports::init();
+
+			$migrated        = \WP_Duotone::migrate_experimental_duotone_support_flag(
+				array( 'supports' => array() ),
+				array(
+					'supports' => array(
+						'color' => array(
+							'__experimentalDuotone' => '.legacy-target',
+						),
+					),
+				)
+			);
+			$not_overwritten = \WP_Duotone::migrate_experimental_duotone_support_flag(
+				array(
+					'supports' => array(
+						'filter' => array(
+							'duotone' => '.existing-target',
+						),
+					),
+				),
+				array(
+					'supports' => array(
+						'color' => array(
+							'__experimentalDuotone' => false,
+						),
+					),
+				)
+			);
+
+			$html = '<figure class="wp-block-component-fuzz"><img src="/' . $case['slug'] . '.jpg" alt=""></figure><p class="sibling">side</p>';
+
+			$preset = self::render_duotone_case(
+				$name,
+				array(
+					'style' => array(
+						'color' => array(
+							'duotone' => $preset_attr,
+						),
+					),
+				),
+				$html
+			);
+			$custom = self::render_duotone_case(
+				$name,
+				array(
+					'style' => array(
+						'color' => array(
+							'duotone' => $custom_colors,
+						),
+					),
+				),
+				$html
+			);
+			$unset  = self::render_duotone_case(
+				$name,
+				array(
+					'style' => array(
+						'color' => array(
+							'duotone' => 'unset',
+						),
+					),
+				),
+				$html
+			);
+			$global = self::render_duotone_case( $name, array(), $html );
+			$empty  = self::render_duotone_case(
+				$name,
+				array(
+					'style' => array(
+						'color' => array(
+							'duotone' => $preset_attr,
+						),
+					),
+				),
+				''
+			);
+
+			$unsupported_render = self::render_duotone_case(
+				$unsupported,
+				array(
+					'style' => array(
+						'color' => array(
+							'duotone' => $preset_attr,
+						),
+					),
+				),
+				$html
+			);
+			$without_attr       = self::render_duotone_case( $no_global, array( 'className' => 'no-duotone' ), $html );
+
+			$used_presets = (array) self::get_static_property( 'WP_Duotone', 'used_global_styles_presets' );
+			$used_svgs    = (array) self::get_static_property( 'WP_Duotone', 'used_svg_filter_data' );
+			$css_rules    = (array) self::get_static_property( 'WP_Duotone', 'block_css_declarations' );
+			$css          = (string) \wp_style_engine_get_stylesheet_from_css_rules(
+				$css_rules,
+				array(
+					'prettify' => false,
+					'optimize' => false,
+				)
+			);
+
+			$editor_settings = \WP_Duotone::add_editor_settings( array( 'styles' => array() ) );
+			$editor_css      = '';
+			$editor_assets   = '';
+			foreach ( $editor_settings['styles'] ?? array() as $style ) {
+				$editor_css    .= (string) ( $style['css'] ?? '' );
+				$editor_assets .= (string) ( $style['assets'] ?? '' );
+			}
+		} finally {
+			\remove_filter( 'wp_theme_json_data_default', $theme_filter, 10 );
+			self::clean_theme_json_caches();
+		}
+
+		self::collect_failure(
+			$failures,
+			$block_type instanceof \WP_Block_Type
+				&& $unsupported_type instanceof \WP_Block_Type
+				&& $no_global_type instanceof \WP_Block_Type
+				&& isset( $block_type->attributes['style'] )
+				&& \block_has_support( $block_type, array( 'filter', 'duotone' ), null )
+				&& \block_has_support( $no_global_type, array( 'filter', 'duotone' ), null )
+				&& ! \block_has_support( $unsupported_type, array( 'filter', 'duotone' ), null )
+				&& true === ( $migrated['supports']['filter']['duotone'] ?? null )
+				&& '.existing-target' === ( $not_overwritten['supports']['filter']['duotone'] ?? null ),
+			'duotone support registers style attributes, gates unsupported blocks, and migrates legacy metadata once',
+			array(
+				'supportedAttributes'   => $block_type instanceof \WP_Block_Type ? array_keys( (array) $block_type->attributes ) : array(),
+				'unsupportedAttributes' => $unsupported_type instanceof \WP_Block_Type ? array_keys( (array) $unsupported_type->attributes ) : array(),
+				'noGlobalAttributes'    => $no_global_type instanceof \WP_Block_Type ? array_keys( (array) $no_global_type->attributes ) : array(),
+				'migrated'              => $migrated,
+				'notOverwritten'        => $not_overwritten,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			str_contains( $preset, 'class="wp-block-component-fuzz ' . $preset_filter . '"' )
+				&& 1 === substr_count( $preset, $preset_filter )
+				&& preg_match( '/wp-duotone-ffffff-[0-9a-f]{6}-\d+/', $custom )
+				&& preg_match( '/wp-duotone-unset-\d+/', $unset )
+				&& str_contains( $global, 'class="wp-block-component-fuzz ' . $preset_filter . '"' )
+				&& '' === $empty
+				&& $html === $unsupported_render
+				&& $html === $without_attr
+				&& str_contains( $preset, '<p class="sibling">side</p>' )
+				&& self::html_is_safe( $preset . $custom . $unset . $global ),
+			'duotone render support handles preset, custom, unset, global-style, empty, and unsupported paths',
+			array(
+				'checks'      => array(
+					'presetClass'  => str_contains( $preset, 'class="wp-block-component-fuzz ' . $preset_filter . '"' ),
+					'presetCount'  => 1 === substr_count( $preset, $preset_filter ),
+					'customClass'  => (bool) preg_match( '/wp-duotone-ffffff-[0-9a-f]{6}-\d+/', $custom ),
+					'unsetClass'   => (bool) preg_match( '/wp-duotone-unset-\d+/', $unset ),
+					'globalClass'  => str_contains( $global, 'class="wp-block-component-fuzz ' . $preset_filter . '"' ),
+					'empty'        => '' === $empty,
+					'unsupported'  => $html === $unsupported_render,
+					'withoutAttr'  => $html === $without_attr,
+					'sibling'      => str_contains( $preset, '<p class="sibling">side</p>' ),
+					'safeHtml'     => self::html_is_safe( $preset . $custom . $unset . $global ),
+				),
+				'preset'      => self::preview( $preset ),
+				'custom'      => self::preview( $custom ),
+				'unset'       => self::preview( $unset ),
+				'global'      => self::preview( $global ),
+				'empty'       => $empty,
+				'unsupported' => self::preview( $unsupported_render ),
+				'withoutAttr' => self::preview( $without_attr ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			isset( $used_presets[ $preset_filter ], $used_svgs[ $preset_filter ] )
+				&& count( $css_rules ) >= 4
+				&& str_contains( $css, '.' . $preset_filter . '.wp-block-component-fuzz img' )
+				&& str_contains( $css, 'filter:var(--wp--preset--duotone--' . $preset_slug . ')' )
+				&& str_contains( $css, 'filter:unset' )
+				&& str_contains( $css, 'url(#wp-duotone-' )
+				&& str_contains( $editor_css, '--wp--preset--duotone--' . $preset_slug )
+				&& str_contains( $editor_assets, 'id="' . $preset_filter . '"' )
+				&& self::css_is_safe( $css . $editor_css )
+				&& self::html_is_safe( $editor_assets ),
+			'duotone stores safe preset SVG data, block CSS declarations, and editor settings assets',
+			array(
+				'usedPresets'  => array_keys( $used_presets ),
+				'usedSvgs'     => array_keys( $used_svgs ),
+				'cssRules'     => array_slice( $css_rules, 0, 5 ),
+				'css'          => self::preview( $css ),
+				'editorCss'    => self::preview( $editor_css ),
+				'editorAssets' => self::preview( $editor_assets ),
+			)
+		);
+
+		\unregister_block_type( $name );
+		\unregister_block_type( $unsupported );
+		\unregister_block_type( $no_global );
+
+		return self::result(
+			$ctx,
+			'block-supports.duotone.render-and-asset-state',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, 6 ) )
+		);
+	}
+
 	private static function case_for_context( \ComponentFuzz\FuzzContext $ctx ): array {
 		$slug = self::safe_slug( $ctx );
 
@@ -1162,6 +1472,32 @@ final class BlockSupportsSurface {
 			&& substr_count( $css, '{' ) === substr_count( $css, '}' );
 	}
 
+	private static function html_is_safe( string $html ): bool {
+		$lower = strtolower( $html );
+
+		return ! str_contains( $lower, '<script' )
+			&& ! str_contains( $lower, 'javascript:' );
+	}
+
+	private static function render_duotone_case( string $name, array $attrs, string $html ): string {
+		$parsed = array(
+			'blockName'    => $name,
+			'attrs'        => $attrs,
+			'innerBlocks'  => array(),
+			'innerHTML'    => $html,
+			'innerContent' => array( $html ),
+		);
+
+		return \WP_Duotone::render_duotone_support( $html, $parsed, new \WP_Block( $parsed ) );
+	}
+
+	private static function duotone_preset_slug( string $slug ): string {
+		$letters = preg_replace( '/[^a-z]+/', '-', strtolower( $slug ) );
+		$letters = trim( (string) $letters, '-' );
+
+		return 'duo-' . ( '' === $letters ? 'component' : $letters );
+	}
+
 	private static function safe_slug( \ComponentFuzz\FuzzContext $ctx ): string {
 		$raw = strtolower( $ctx->identifier( 4, 12 ) );
 		$raw = preg_replace( '/[^a-z0-9-]+/', '-', $raw );
@@ -1186,12 +1522,18 @@ final class BlockSupportsSurface {
 			'blockSupports'        => $supports instanceof \WP_Block_Supports ? self::clone_value( self::get_object_property( $supports, 'block_supports' ) ) : null,
 			'blockSupportRender'   => self::clone_value( self::get_static_property( 'WP_Block_Supports', 'block_to_render' ) ),
 			'styleStores'          => self::clone_value( self::get_static_property( 'WP_Style_Engine_CSS_Rules_Store', 'stores' ) ),
+			'duotone'              => self::snapshot_duotone_state(),
 			'themeJson'            => self::snapshot_theme_json_state(),
 			'statics'              => array(
 				'WP_Block_Type_Registry::instance'       => $block_registry,
 				'WP_Block_Supports::instance'            => $supports,
 				'WP_Block_Supports::block_to_render'     => self::get_static_property( 'WP_Block_Supports', 'block_to_render' ),
 				'WP_Style_Engine_CSS_Rules_Store::stores' => self::get_static_property( 'WP_Style_Engine_CSS_Rules_Store', 'stores' ),
+				'WP_Duotone::global_styles_block_names'  => self::get_static_property( 'WP_Duotone', 'global_styles_block_names' ),
+				'WP_Duotone::global_styles_presets'      => self::get_static_property( 'WP_Duotone', 'global_styles_presets' ),
+				'WP_Duotone::used_global_styles_presets' => self::get_static_property( 'WP_Duotone', 'used_global_styles_presets' ),
+				'WP_Duotone::used_svg_filter_data'       => self::get_static_property( 'WP_Duotone', 'used_svg_filter_data' ),
+				'WP_Duotone::block_css_declarations'     => self::get_static_property( 'WP_Duotone', 'block_css_declarations' ),
 			),
 		);
 	}
@@ -1215,6 +1557,7 @@ final class BlockSupportsSurface {
 
 		self::set_static_property( 'WP_Block_Supports', 'block_to_render', self::clone_value( $snapshot['blockSupportRender'] ) );
 		self::set_style_stores( self::clone_value( $snapshot['styleStores'] ) );
+		self::restore_duotone_state( $snapshot['duotone'] );
 		self::restore_theme_json_state( $snapshot['themeJson'] );
 	}
 
@@ -1227,7 +1570,8 @@ final class BlockSupportsSurface {
 			&& self::get_object_property( $block_registry, 'registered_block_types' ) == $snapshot['blockTypes']
 			&& self::get_object_property( $supports, 'block_supports' ) == $snapshot['blockSupports']
 			&& self::get_static_property( 'WP_Block_Supports', 'block_to_render' ) == $snapshot['blockSupportRender']
-			&& self::get_static_property( 'WP_Style_Engine_CSS_Rules_Store', 'stores' ) == $snapshot['styleStores'];
+			&& self::get_static_property( 'WP_Style_Engine_CSS_Rules_Store', 'stores' ) == $snapshot['styleStores']
+			&& self::snapshot_duotone_state() == $snapshot['duotone'];
 	}
 
 	private static function snapshot_globals( array $names ): array {
@@ -1319,6 +1663,40 @@ final class BlockSupportsSurface {
 
 	private static function set_style_stores( array $stores ): void {
 		self::set_static_property( 'WP_Style_Engine_CSS_Rules_Store', 'stores', $stores );
+	}
+
+	private static function snapshot_duotone_state(): array {
+		$state = array();
+
+		foreach ( self::duotone_static_properties() as $property ) {
+			$state[ $property ] = self::clone_value( self::get_static_property( 'WP_Duotone', $property ) );
+		}
+
+		return $state;
+	}
+
+	private static function restore_duotone_state( array $state ): void {
+		foreach ( self::duotone_static_properties() as $property ) {
+			self::set_static_property( 'WP_Duotone', $property, self::clone_value( $state[ $property ] ?? null ) );
+		}
+	}
+
+	private static function reset_duotone_state(): void {
+		self::set_static_property( 'WP_Duotone', 'global_styles_block_names', null );
+		self::set_static_property( 'WP_Duotone', 'global_styles_presets', null );
+		self::set_static_property( 'WP_Duotone', 'used_global_styles_presets', array() );
+		self::set_static_property( 'WP_Duotone', 'used_svg_filter_data', array() );
+		self::set_static_property( 'WP_Duotone', 'block_css_declarations', array() );
+	}
+
+	private static function duotone_static_properties(): array {
+		return array(
+			'global_styles_block_names',
+			'global_styles_presets',
+			'used_global_styles_presets',
+			'used_svg_filter_data',
+			'block_css_declarations',
+		);
 	}
 
 	private static function get_object_property( $object, string $property ) {

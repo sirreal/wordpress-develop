@@ -129,7 +129,8 @@ database, network requests, or a configured site.
   `WP_Block_Supports` registration and wrapper merging, auto-generated control
   markers, direct support callbacks, skip-serialization gates, background,
   dimensions, visibility, position, layout, elements, custom CSS, state-style,
-  and helper-matrix render behavior, safe stored CSS, and registry/global/style
+  helper-matrix, and duotone preset/custom/unset/global-style render behavior,
+  safe stored CSS/SVG/editor assets, and registry/global/style/duotone static
   store restoration.
 - `core-block-render`: no-DB direct render-callback coverage for representative
   dynamic core blocks, including site title/tagline option handling, search
