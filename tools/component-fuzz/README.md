@@ -719,8 +719,9 @@ database, network requests, or a configured site.
 - `rewrite`: rewrite tags, permastruct/rule generation, collision ordering,
   endpoint expansion and mask propagation, match substitution, query arg and
   build/parse helpers, rewrite-tag removal/query-var retention boundaries, URL
-  parsing, home/site URL helpers, weird path fragments, and cheap no-DB
-  `url_to_postid()` paths.
+  parsing, home/site URL helpers, weird path fragments, cheap no-DB
+  `url_to_postid()` paths, and pretty-permalink `url_to_postid()` resolution
+  through generated rewrite rules and short-circuited `WP_Query` oracles.
 - `security`: salts and HMACs, password and fast-hash verification, native
   bcrypt compatibility and migration signals, nonce generation/verification,
   nonce tick/lifetime boundaries, nonce URLs and hidden fields, referer

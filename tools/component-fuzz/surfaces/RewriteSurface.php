@@ -49,6 +49,7 @@ final class RewriteSurface {
 			$rows[] = self::check_home_site_urls( $ctx, $case );
 			$rows[] = self::check_weird_path_fragments_no_throw( $ctx, $case );
 			$rows[] = self::check_url_to_postid_cheap_paths( $ctx, $case );
+			$rows[] = self::check_url_to_postid_pretty_permalinks( $ctx->fork( 'url-to-postid-pretty' ), $case );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
 				'rewrite.surface-no-throw',
@@ -80,7 +81,7 @@ final class RewriteSurface {
 	private static function missing_requirements(): array {
 		$missing = array();
 
-		foreach ( array( 'WP', 'WP_Rewrite', 'WP_MatchesMapRegex' ) as $class ) {
+		foreach ( array( 'WP', 'WP_Post', 'WP_Query', 'WP_Rewrite', 'WP_MatchesMapRegex' ) as $class ) {
 			if ( ! class_exists( $class ) ) {
 				$missing[] = "class {$class}";
 			}
@@ -89,17 +90,26 @@ final class RewriteSurface {
 		foreach (
 			array(
 				'add_filter',
+				'add_action',
 				'add_permastruct',
 				'add_query_arg',
 				'add_rewrite_endpoint',
 				'add_rewrite_rule',
 				'add_rewrite_tag',
 				'build_query',
+				'get_post',
+				'get_post_status_object',
+				'get_post_types',
 				'home_url',
+				'post_type_exists',
+				'register_post_type',
+				'remove_action',
+				'remove_filter',
 				'remove_permastruct',
 				'remove_query_arg',
 				'remove_rewrite_tag',
 				'site_url',
+				'unregister_post_type',
 				'url_to_postid',
 				'wp_parse_str',
 				'wp_parse_url',
@@ -1235,6 +1245,201 @@ final class RewriteSurface {
 		);
 	}
 
+	private static function check_url_to_postid_pretty_permalinks( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		global $wp, $wp_rewrite;
+
+		$token             = self::safe_token( $case['token'] . '_' . substr( hash( 'crc32b', 'pretty:' . $ctx->seed() ), 0, 6 ) );
+		$post_slug         = 'article-' . str_replace( '_', '-', $token );
+		$missing_slug      = 'missing-' . str_replace( '_', '-', $token );
+		$cpt_slug          = 'book-' . str_replace( '_', '-', $token );
+		$cpt               = 'cfz_b_' . substr( $token, 0, 10 );
+		$cpt_query_var     = 'cfz_book_q_' . substr( $token, 0, 10 );
+		$private_query_var = 'cfz_private_' . substr( $token, 0, 10 );
+		$post_id           = 81000 + ( $ctx->seed() % 1000 );
+		$cpt_id            = 83000 + ( $ctx->fork( 'cpt-id' )->seed() % 1000 );
+		$post              = self::make_post(
+			$post_id,
+			array(
+				'post_name'  => $post_slug,
+				'post_title' => 'Rewrite Pretty Post ' . $post_slug,
+			)
+		);
+		$cpt_post          = self::make_post(
+			$cpt_id,
+			array(
+				'post_name'  => $cpt_slug,
+				'post_title' => 'Rewrite Pretty CPT ' . $cpt_slug,
+				'post_type'  => $cpt,
+			)
+		);
+		$rules             = array(
+			'article/([^/]+)/?$' => 'index.php?name=$matches[1]&post_status=publish&' . $private_query_var . '=$matches[1]',
+			'library/([^/]+)/?$' => 'index.php?' . $cpt_query_var . '=$matches[1]&post_status=publish&' . $private_query_var . '=$matches[1]',
+		);
+		$pre_get_events    = array();
+		$query_events      = array();
+		$returned_ids      = array();
+
+		$previous_rules               = $wp_rewrite->rules ?? null;
+		$previous_permalink_structure = $wp_rewrite->permalink_structure;
+		$previous_root                = $wp_rewrite->root;
+		$previous_front               = $wp_rewrite->front;
+		$previous_trailing            = $wp_rewrite->use_trailing_slashes;
+		$previous_verbose             = $wp_rewrite->use_verbose_page_rules;
+		$previous_public_vars         = $wp->public_query_vars;
+
+		$rewrite_rules_filter = static function () use ( $rules ): array {
+			return $rules;
+		};
+		$pre_get_posts = static function ( \WP_Query $query ) use ( &$pre_get_events ): void {
+			$pre_get_events[] = array(
+				'name'       => $query->query_vars['name'] ?? null,
+				'postType'   => $query->query_vars['post_type'] ?? null,
+				'noFoundRows' => $query->query_vars['no_found_rows'] ?? null,
+			);
+
+			$query->set( 'no_found_rows', true );
+			$query->set( 'cache_results', false );
+			$query->set( 'update_post_meta_cache', false );
+			$query->set( 'update_post_term_cache', false );
+			$query->set( 'lazy_load_term_meta', false );
+		};
+		$posts_pre_query = static function ( $posts, \WP_Query $query ) use ( &$query_events, &$returned_ids, $post, $cpt_post, $post_slug, $cpt_slug, $cpt, $cpt_query_var, $private_query_var ) {
+			unset( $posts );
+
+			$query_vars = $query->query_vars;
+			$event      = array(
+				'name'       => $query_vars['name'] ?? null,
+				'postType'   => $query_vars['post_type'] ?? null,
+				'cptVar'     => $query_vars[ $cpt_query_var ] ?? null,
+				'privateSet' => array_key_exists( $private_query_var, $query_vars ),
+			);
+
+			if ( $post_slug === ( $query_vars['name'] ?? null ) && ! array_key_exists( $private_query_var, $query_vars ) ) {
+				$query->is_single            = true;
+				$query->is_singular          = true;
+				$query->post                 = $post;
+				$query->queried_object       = $post;
+				$query->queried_object_id    = $post->ID;
+				$query->found_posts          = 1;
+				$query->max_num_pages        = 1;
+				$query_events[]              = $event + array( 'returned' => $post->ID );
+				$returned_ids[]              = $post->ID;
+				return array( $post );
+			}
+
+			if (
+				$cpt_slug === ( $query_vars['name'] ?? null )
+				&& $cpt_slug === ( $query_vars[ $cpt_query_var ] ?? null )
+				&& $cpt === ( $query_vars['post_type'] ?? null )
+				&& ! array_key_exists( $private_query_var, $query_vars )
+			) {
+				$query->is_single            = true;
+				$query->is_singular          = true;
+				$query->post                 = $cpt_post;
+				$query->queried_object       = $cpt_post;
+				$query->queried_object_id    = $cpt_post->ID;
+				$query->found_posts          = 1;
+				$query->max_num_pages        = 1;
+				$query_events[]              = $event + array( 'returned' => $cpt_post->ID );
+				$returned_ids[]              = $cpt_post->ID;
+				return array( $cpt_post );
+			}
+
+			$query->is_single     = false;
+			$query->is_singular   = false;
+			$query->found_posts   = 0;
+			$query->max_num_pages = 0;
+			$query_events[]       = $event + array( 'returned' => 0 );
+			$returned_ids[]       = 0;
+			return array();
+		};
+
+		try {
+			\register_post_type(
+				$cpt,
+				array(
+					'public'    => true,
+					'label'     => 'Component Fuzz Rewrite Book',
+					'query_var' => $cpt_query_var,
+					'rewrite'   => false,
+				)
+			);
+
+			self::configure_rewrite_structure( $wp_rewrite, '/%postname%/' );
+			$wp_rewrite->rules                  = $rules;
+			$wp_rewrite->use_verbose_page_rules = false;
+			$wp->public_query_vars              = array_values( array_unique( array_merge( $wp->public_query_vars, array( 'name', 'post_status', $cpt_query_var ) ) ) );
+			$wp->public_query_vars              = array_values( array_diff( $wp->public_query_vars, array( $private_query_var ) ) );
+
+			\add_filter( 'pre_option_rewrite_rules', $rewrite_rules_filter, 10, 0 );
+			\add_action( 'pre_get_posts', $pre_get_posts, 10, 1 );
+			\add_filter( 'posts_pre_query', $posts_pre_query, 10, 2 );
+
+			$post_url     = \home_url( '/article/' . $post_slug . '/?utm=' . rawurlencode( $case['suspiciousQuery'] ) ) . '#fragment';
+			$www_post_url = str_replace( 'https://example.test', 'http://www.example.test', \home_url( '/article/' . $post_slug . '/' ) );
+			$cpt_url      = \home_url( '/library/' . $cpt_slug . '/?ignored=1' ) . '#part';
+			$missing_url  = \home_url( '/article/' . $missing_slug . '/?ignored=1' );
+
+			$observed = array(
+				'post'    => \url_to_postid( $post_url ),
+				'www'     => \url_to_postid( $www_post_url ),
+				'cpt'     => \url_to_postid( $cpt_url ),
+				'missing' => \url_to_postid( $missing_url ),
+			);
+		} finally {
+			\remove_filter( 'posts_pre_query', $posts_pre_query, 10 );
+			\remove_action( 'pre_get_posts', $pre_get_posts, 10 );
+			\remove_filter( 'pre_option_rewrite_rules', $rewrite_rules_filter, 10 );
+			if ( function_exists( 'unregister_post_type' ) && \post_type_exists( $cpt ) ) {
+				\unregister_post_type( $cpt );
+			}
+
+			$wp_rewrite->rules                 = $previous_rules;
+			$wp_rewrite->permalink_structure   = $previous_permalink_structure;
+			$wp_rewrite->root                  = $previous_root;
+			$wp_rewrite->front                 = $previous_front;
+			$wp_rewrite->use_trailing_slashes  = $previous_trailing;
+			$wp_rewrite->use_verbose_page_rules = $previous_verbose;
+			$wp->public_query_vars             = $previous_public_vars;
+		}
+
+		$query_count = count( $query_events );
+		$cpt_event   = $query_events[2] ?? array();
+
+		$ok = array(
+			'post'    => $post->ID,
+			'www'     => $post->ID,
+			'cpt'     => $cpt_post->ID,
+			'missing' => 0,
+		) === $observed
+			&& 4 === $query_count
+			&& 4 === count( $pre_get_events )
+			&& array( $post->ID, $post->ID, $cpt_post->ID, 0 ) === $returned_ids
+			&& false === in_array( true, array_column( $query_events, 'privateSet' ), true )
+			&& $cpt === ( $cpt_event['postType'] ?? null )
+			&& $cpt_slug === ( $cpt_event['name'] ?? null )
+			&& $cpt_slug === ( $cpt_event['cptVar'] ?? null )
+			&& false === \has_filter( 'posts_pre_query', $posts_pre_query )
+			&& false === \has_filter( 'pre_get_posts', $pre_get_posts )
+			&& false === \has_filter( 'pre_option_rewrite_rules', $rewrite_rules_filter )
+			&& ! \post_type_exists( $cpt );
+
+		return $ctx->result(
+			'rewrite.url-to-postid.pretty-permalink-query-oracle',
+			$ok,
+			self::case_data( $case ) + array(
+				'postSlug'     => $post_slug,
+				'cptSlug'      => $cpt_slug,
+				'cpt'          => $cpt,
+				'cptQueryVar'  => $cpt_query_var,
+				'observed'     => $observed,
+				'queryEvents'  => $query_events,
+				'preGetEvents' => $pre_get_events,
+			)
+		);
+	}
+
 	private static function case_for_context( \ComponentFuzz\FuzzContext $ctx ): array {
 		$token = self::safe_token( $ctx->identifier( 4, 10 ) );
 
@@ -1671,6 +1876,29 @@ final class RewriteSurface {
 			'numericTag'         => $case['numericTag'],
 			'unicodeSlug'        => $case['unicodeSlug'],
 			'suspiciousQuery'    => $case['suspiciousQuery'],
+		);
+	}
+
+	private static function make_post( int $id, array $overrides = array() ): \WP_Post {
+		return new \WP_Post(
+			(object) array_merge(
+				array(
+					'ID'            => $id,
+					'post_author'   => '0',
+					'post_date'     => '2026-01-02 03:04:05',
+					'post_date_gmt' => '2026-01-02 03:04:05',
+					'post_content'  => 'component fuzz rewrite content',
+					'post_title'    => 'Component Fuzz Rewrite Post ' . $id,
+					'post_excerpt'  => '',
+					'post_status'   => 'publish',
+					'post_name'     => 'component-fuzz-rewrite-post-' . $id,
+					'post_type'     => 'post',
+					'ping_status'   => 'closed',
+					'post_password' => '',
+					'filter'        => 'raw',
+				),
+				$overrides
+			)
 		);
 	}
 
