@@ -103,7 +103,8 @@ database, network requests, or a configured site.
   filters, script modules, and printed tag escaping.
 - `script-loader-runtime`: server-side script-loader runtime helpers, including
   default script/style/module registrations, handle normalization, duplicate
-  update behavior, inline/localized data placement, concatenated
+  update behavior, conditional polyfill inline script generation,
+  inline/localized data placement, concatenated
   load-scripts.php/load-styles.php URL construction and exclusion boundaries,
   tag/settings escaping, script translations, emoji settings/styles with
   temporary generated loader-asset materialization, style

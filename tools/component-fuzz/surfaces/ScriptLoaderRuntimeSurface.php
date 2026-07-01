@@ -40,6 +40,7 @@ final class ScriptLoaderRuntimeSurface {
 			$rows[] = self::check_concat_runtime_boundaries( $ctx, $case );
 			$rows[] = self::check_inline_localization_data( $ctx, $case );
 			$rows[] = self::check_tag_builders_dataset_helpers( $ctx, $case );
+			$rows[] = self::check_script_polyfill_generation( $ctx, $case );
 			$rows[] = self::check_script_translations( $ctx, $case );
 			foreach ( self::check_emoji_settings_and_styles( $ctx, $case ) as $row ) {
 				$rows[] = $row;
@@ -100,6 +101,8 @@ final class ScriptLoaderRuntimeSurface {
 				'print_footer_scripts',
 				'print_head_scripts',
 				'script_concat_settings',
+				'add_query_arg',
+				'esc_url',
 				'wp_add_inline_script',
 				'wp_add_inline_style',
 				'wp_common_block_scripts_and_styles',
@@ -115,6 +118,7 @@ final class ScriptLoaderRuntimeSurface {
 				'wp_enqueue_script',
 				'wp_enqueue_style',
 				'wp_get_inline_script_tag',
+				'wp_get_script_polyfill',
 				'wp_get_script_tag',
 				'wp_html_custom_data_attribute_name',
 				'wp_js_dataset_name',
@@ -817,6 +821,112 @@ final class ScriptLoaderRuntimeSurface {
 				'datasetFailures'   => array_slice( $dataset_failures, 0, self::FAILURE_LIMIT ),
 				'strippedScript'    => $script_stripped,
 				'invalidScript'     => self::preview( $script_invalid ),
+			)
+		);
+	}
+
+	private static function check_script_polyfill_generation( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		self::reset_scripts_global();
+
+		$relative_handle = $case['prefix'] . '-polyfill-relative';
+		$content_handle  = $case['prefix'] . '-polyfill-content';
+		$absolute_handle = $case['prefix'] . '-polyfill-absolute';
+		$skip_handle     = $case['prefix'] . '-polyfill-skip';
+		$missing_handle  = $case['prefix'] . '-polyfill-missing';
+		$token_suffix    = str_replace( '-', '_', $case['token'] );
+
+		$relative_test = 'window.ComponentFuzzPolyfills && window.ComponentFuzzPolyfills.relative' . $token_suffix;
+		$content_test  = 'window.ComponentFuzzPolyfills && window.ComponentFuzzPolyfills.content' . $token_suffix;
+		$absolute_test = 'window.ComponentFuzzPolyfills && window.ComponentFuzzPolyfills.absolute' . $token_suffix;
+		$skip_test     = 'window.ComponentFuzzPolyfills && window.ComponentFuzzPolyfills.skip' . $token_suffix;
+		$missing_test  = 'window.ComponentFuzzPolyfills && window.ComponentFuzzPolyfills.missing' . $token_suffix;
+
+		$relative_path = 'runtime/' . rawurlencode( $case['prefix'] ) . '-polyfill-relative.js';
+		$content_src   = self::CONTENT_URL . '/component-fuzz/' . rawurlencode( $case['prefix'] ) . '-polyfill-content.js?kind=content';
+		$absolute_src  = '//cdn.example.test/component-fuzz/' . rawurlencode( $case['prefix'] ) . '-polyfill-absolute.js';
+		$skip_path     = 'runtime/' . rawurlencode( $case['prefix'] ) . '-polyfill-skip.js';
+
+		$relative_ver = 'rel-' . $case['token'];
+		$content_ver  = 'content-' . $case['token'];
+		$skip_ver     = 'skip-' . $case['token'];
+
+		$scripts = \wp_scripts();
+		$scripts->add( $relative_handle, $relative_path, array(), $relative_ver );
+		$scripts->add( $content_handle, $content_src, array(), $content_ver );
+		$scripts->add( $absolute_handle, $absolute_src, array(), false );
+		$scripts->add( $skip_handle, $skip_path, array(), $skip_ver );
+
+		$filter_calls = array();
+		$src_filter   = static function ( string $src, string $handle ) use ( &$filter_calls, $relative_handle, $skip_handle, $case ): string {
+			$filter_calls[] = array(
+				'handle' => $handle,
+				'src'    => $src,
+			);
+
+			if ( $relative_handle === $handle ) {
+				return \add_query_arg( 'filtered', $case['token'], $src );
+			}
+			if ( $skip_handle === $handle ) {
+				return '';
+			}
+
+			return $src;
+		};
+
+		$tests = array(
+			$relative_test => $relative_handle,
+			$missing_test  => $missing_handle,
+			$content_test  => $content_handle,
+			$absolute_test => $absolute_handle,
+			$skip_test     => $skip_handle,
+		);
+
+		\add_filter( 'script_loader_src', $src_filter, 10, 2 );
+		try {
+			$polyfill = \wp_get_script_polyfill( $scripts, $tests );
+		} finally {
+			\remove_filter( 'script_loader_src', $src_filter, 10 );
+		}
+
+		$expected_relative_src = \esc_url(
+			\add_query_arg(
+				'filtered',
+				$case['token'],
+				\add_query_arg( 'ver', $relative_ver, self::BASE_URL . $relative_path )
+			)
+		);
+		$expected_content_src  = \esc_url( \add_query_arg( 'ver', $content_ver, $content_src ) );
+		$expected_absolute_src = \esc_url( $absolute_src );
+		$expected_polyfill     = self::script_polyfill_snippet( $relative_test, $expected_relative_src )
+			. self::script_polyfill_snippet( $content_test, $expected_content_src )
+			. self::script_polyfill_snippet( $absolute_test, $expected_absolute_src );
+
+		$filter_handles = array_values( array_map( static fn ( array $call ): string => $call['handle'], $filter_calls ) );
+		$ok = $expected_polyfill === $polyfill
+			&& array( $relative_handle, $content_handle, $absolute_handle, $skip_handle ) === $filter_handles
+			&& false === \has_filter( 'script_loader_src', $src_filter )
+			&& 3 === substr_count( $polyfill, 'document.write' )
+			&& str_contains( $polyfill, self::BASE_URL . $relative_path )
+			&& str_contains( $polyfill, self::CONTENT_URL . '/component-fuzz/' )
+			&& str_contains( $polyfill, '//cdn.example.test/component-fuzz/' )
+			&& ! str_contains( $polyfill, $missing_test )
+			&& ! str_contains( $polyfill, $skip_test )
+			&& ! str_contains( $polyfill, $missing_handle )
+			&& ! str_contains( $polyfill, $skip_handle );
+
+		return $ctx->result(
+			'script-loader-runtime.polyfill-inline-script-generation',
+			$ok,
+			self::case_data( $case ) + array(
+				'tests'           => array_keys( $tests ),
+				'registered'      => array_keys( $scripts->registered ),
+				'filterCalls'     => $filter_calls,
+				'filterHandles'   => $filter_handles,
+				'expectedPreview' => self::preview( $expected_polyfill ),
+				'polyfillPreview' => self::preview( $polyfill ),
+				'expectedLength'  => strlen( $expected_polyfill ),
+				'polyfillLength'  => strlen( $polyfill ),
+				'filterRestored'  => false === \has_filter( 'script_loader_src', $src_filter ),
 			)
 		);
 	}
@@ -2065,6 +2175,10 @@ PHP;
 			'prefix'  => $case['prefix'],
 			'handles' => array_values( $case['handles'] ),
 		);
+	}
+
+	private static function script_polyfill_snippet( string $test, string $src ): string {
+		return '( ' . $test . ' ) || document.write( \'<script src="' . $src . '"></scr\' + \'ipt>\' );';
 	}
 
 	private static function prepare_runtime_globals(): void {
