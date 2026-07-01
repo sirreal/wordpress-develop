@@ -29,6 +29,7 @@ final class RegistriesSurface {
 				self::check_connector_helpers( $ctx->fork( 'connectors-helpers' ) ),
 				self::check_icons_registry( $ctx->fork( 'icons-registry' ) ),
 				self::check_block_metadata_registry( $ctx->fork( 'block-metadata-registry' ) ),
+				self::check_block_bindings_registry( $ctx->fork( 'block-bindings-registry' ) ),
 				self::check_speculation_helper_allowlists( $ctx->fork( 'speculation-helpers' ) ),
 				self::check_speculation_rule_matrix( $ctx->fork( 'speculation-rules' ) ),
 			);
@@ -49,6 +50,8 @@ final class RegistriesSurface {
 
 		foreach (
 			array(
+				'WP_Block_Bindings_Registry',
+				'WP_Block_Bindings_Source',
 				'WP_Block_Metadata_Registry',
 				'WP_Connector_Registry',
 				'WP_Icons_Registry',
@@ -66,9 +69,13 @@ final class RegistriesSurface {
 				'_wp_connectors_mask_api_key',
 				'add_action',
 				'add_filter',
+				'get_all_registered_block_bindings_sources',
+				'get_block_bindings_source',
 				'has_action',
+				'register_block_bindings_source',
 				'remove_action',
 				'remove_filter',
+				'unregister_block_bindings_source',
 				'wp_get_connector',
 				'wp_get_connectors',
 				'wp_is_connector_registered',
@@ -852,6 +859,337 @@ final class RegistriesSurface {
 		);
 	}
 
+	private static function check_block_bindings_registry( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		self::set_static_property( 'WP_Block_Bindings_Registry', 'instance', null );
+
+		$registry        = \WP_Block_Bindings_Registry::get_instance();
+		$registry_again  = \WP_Block_Bindings_Registry::get_instance();
+		$primary_name    = self::block_binding_source_name( $ctx->fork( 'primary' ), 'primary' );
+		$secondary_name  = self::block_binding_source_name( $ctx->fork( 'secondary' ), 'secondary' );
+		$primary_label   = 'Component Fuzz Binding ' . $ctx->identifier( 4, 10 );
+		$secondary_label = 'Component Fuzz Plain ' . $ctx->identifier( 4, 10 );
+		$callback_log    = array();
+		$filter_log      = array();
+		$callback        = static function ( array $source_args, $block_instance, string $attribute_name ) use ( $primary_name, &$callback_log ) {
+			$callback_log[] = array(
+				'args'      => $source_args,
+				'block'     => is_object( $block_instance ) ? get_class( $block_instance ) : gettype( $block_instance ),
+				'attribute' => $attribute_name,
+			);
+
+			return $primary_name . ':' . ( $source_args['key'] ?? 'missing' ) . ':' . $attribute_name;
+		};
+		$plain_callback  = static function ( array $source_args, $block_instance, string $attribute_name ) use ( $secondary_name ): string {
+			unset( $block_instance );
+			return $secondary_name . ':' . ( $source_args['key'] ?? 'missing' ) . ':' . $attribute_name;
+		};
+		$value_filter    = static function ( $value, string $source_name, array $source_args, $block_instance, string $attribute_name ) use ( &$filter_log, $primary_name, $ctx ) {
+			$filter_log[] = array(
+				'value'     => $value,
+				'source'    => $source_name,
+				'args'      => $source_args,
+				'block'     => is_object( $block_instance ) ? get_class( $block_instance ) : gettype( $block_instance ),
+				'attribute' => $attribute_name,
+			);
+
+			if ( $primary_name !== $source_name ) {
+				return $value;
+			}
+
+			return 'filtered-' . $ctx->seed() . '-' . ( $source_args['key'] ?? 'missing' ) . '-' . $attribute_name;
+		};
+
+		\add_filter( 'block_bindings_source_value', $value_filter, 10, 5 );
+		try {
+			$missing_before = \get_block_bindings_source( $primary_name );
+			$empty_before   = \get_all_registered_block_bindings_sources();
+			$primary        = \register_block_bindings_source(
+				$primary_name,
+				array(
+					'label'              => $primary_label,
+					'uses_context'       => array( 'postId', 'componentFuzz/token' ),
+					'get_value_callback' => $callback,
+				)
+			);
+			$secondary      = $registry->register(
+				$secondary_name,
+				array(
+					'label'              => $secondary_label,
+					'get_value_callback' => $plain_callback,
+				)
+			);
+
+			$primary_lookup   = \get_block_bindings_source( $primary_name );
+			$secondary_lookup = $registry->get_registered( $secondary_name );
+			$all_registered   = \get_all_registered_block_bindings_sources();
+			$block_stub       = (object) array(
+				'name'    => 'component-fuzz/block',
+				'context' => array( 'componentFuzz/token' => $ctx->identifier( 4, 9 ) ),
+			);
+			$source_args      = array(
+				'key'   => $ctx->identifier( 4, 10 ),
+				'count' => $ctx->int( 1, 99 ),
+			);
+			$primary_value    = $primary instanceof \WP_Block_Bindings_Source
+				? $primary->get_value( $source_args, $block_stub, 'content' )
+				: null;
+			$secondary_value  = $secondary instanceof \WP_Block_Bindings_Source
+				? $secondary->get_value( array( 'key' => 'plain' ), null, 'url' )
+				: null;
+
+			self::collect_failure(
+				$failures,
+				$registry instanceof \WP_Block_Bindings_Registry
+					&& $registry === $registry_again
+					&& null === $missing_before
+					&& array() === $empty_before
+					&& $primary instanceof \WP_Block_Bindings_Source
+					&& $secondary instanceof \WP_Block_Bindings_Source
+					&& $primary === $primary_lookup
+					&& $secondary === $secondary_lookup
+					&& isset( $all_registered[ $primary_name ], $all_registered[ $secondary_name ] )
+					&& array( $primary_name, $secondary_name ) === array_keys( $all_registered )
+					&& $primary_name === $primary->name
+					&& $primary_label === $primary->label
+					&& array( 'postId', 'componentFuzz/token' ) === $primary->uses_context
+					&& $secondary_name === $secondary->name
+					&& $secondary_label === $secondary->label
+					&& null === $secondary->uses_context,
+				'block bindings registry singleton and public helpers store ordered source objects with normalized properties',
+				array(
+					'primaryName'   => $primary_name,
+					'secondaryName' => $secondary_name,
+					'allKeys'       => array_keys( $all_registered ),
+					'primary'       => self::describe_value( $primary ),
+					'secondary'     => self::describe_value( $secondary ),
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				'filtered-' . $ctx->seed() . '-' . $source_args['key'] . '-content' === $primary_value
+					&& $secondary_name . ':plain:url' === $secondary_value
+					&& array(
+						array(
+							'args'      => $source_args,
+							'block'     => 'stdClass',
+							'attribute' => 'content',
+						),
+					) === $callback_log
+					&& array(
+						array(
+							'value'     => $primary_name . ':' . $source_args['key'] . ':content',
+							'source'    => $primary_name,
+							'args'      => $source_args,
+							'block'     => 'stdClass',
+							'attribute' => 'content',
+						),
+						array(
+							'value'     => $secondary_name . ':plain:url',
+							'source'    => $secondary_name,
+							'args'      => array( 'key' => 'plain' ),
+							'block'     => 'NULL',
+							'attribute' => 'url',
+						),
+					) === $filter_log,
+				'block binding source callbacks receive exact arguments and source-value filters receive unmodified payloads',
+				array(
+					'primaryValue'   => $primary_value,
+					'secondaryValue' => $secondary_value,
+					'callbackLog'    => $callback_log,
+					'filterLog'      => $filter_log,
+				)
+			);
+		} finally {
+			\remove_filter( 'block_bindings_source_value', $value_filter, 10 );
+		}
+
+		$before_invalid = $registry->get_all_registered();
+		$invalids       = array(
+			'uppercase'      => self::capture_doing_it_wrong(
+				static fn() => \register_block_bindings_source(
+					'Component-Fuzz/bad',
+					array(
+						'label'              => 'Uppercase',
+						'get_value_callback' => $callback,
+					)
+				)
+			),
+			'noNamespace'    => self::capture_doing_it_wrong(
+				static fn() => \register_block_bindings_source(
+					self::icon_slug( $ctx->fork( 'no-namespace' ), 'nonamespace' ),
+					array(
+						'label'              => 'No namespace',
+						'get_value_callback' => $callback,
+					)
+				)
+			),
+			'emptyName'      => self::capture_doing_it_wrong(
+				static fn() => \register_block_bindings_source(
+					'component-fuzz/',
+					array(
+						'label'              => 'Empty name',
+						'get_value_callback' => $callback,
+					)
+				)
+			),
+			'extraSlash'     => self::capture_doing_it_wrong(
+				static fn() => \register_block_bindings_source(
+					'component-fuzz/extra/' . self::icon_slug( $ctx->fork( 'extra-slash' ), 'slash' ),
+					array(
+						'label'              => 'Extra slash',
+						'get_value_callback' => $callback,
+					)
+				)
+			),
+			'underscore'     => self::capture_doing_it_wrong(
+				static fn() => \register_block_bindings_source(
+					'component_fuzz/' . self::icon_slug( $ctx->fork( 'underscore' ), 'underscore' ),
+					array(
+						'label'              => 'Underscore',
+						'get_value_callback' => $callback,
+					)
+				)
+			),
+			'duplicate'      => self::capture_doing_it_wrong(
+				static fn() => \register_block_bindings_source(
+					$primary_name,
+					array(
+						'label'              => 'Duplicate',
+						'get_value_callback' => $callback,
+					)
+				)
+			),
+			'missingLabel'   => self::capture_doing_it_wrong(
+				static fn() => \register_block_bindings_source(
+					self::block_binding_source_name( $ctx->fork( 'missing-label' ), 'missing-label' ),
+					array( 'get_value_callback' => $callback )
+				)
+			),
+			'nullLabel'      => self::capture_doing_it_wrong(
+				static fn() => \register_block_bindings_source(
+					self::block_binding_source_name( $ctx->fork( 'null-label' ), 'null-label' ),
+					array(
+						'label'              => null,
+						'get_value_callback' => $callback,
+					)
+				)
+			),
+			'missingCallback' => self::capture_doing_it_wrong(
+				static fn() => \register_block_bindings_source(
+					self::block_binding_source_name( $ctx->fork( 'missing-callback' ), 'missing-callback' ),
+					array( 'label' => 'Missing callback' )
+				)
+			),
+			'nullCallback'   => self::capture_doing_it_wrong(
+				static fn() => \register_block_bindings_source(
+					self::block_binding_source_name( $ctx->fork( 'null-callback' ), 'null-callback' ),
+					array(
+						'label'              => 'Null callback',
+						'get_value_callback' => null,
+					)
+				)
+			),
+			'badCallback'    => self::capture_doing_it_wrong(
+				static fn() => \register_block_bindings_source(
+					self::block_binding_source_name( $ctx->fork( 'bad-callback' ), 'bad-callback' ),
+					array(
+						'label'              => 'Bad callback',
+						'get_value_callback' => 'component_fuzz_missing_block_binding_callback',
+					)
+				)
+			),
+			'badContext'     => self::capture_doing_it_wrong(
+				static fn() => \register_block_bindings_source(
+					self::block_binding_source_name( $ctx->fork( 'bad-context' ), 'bad-context' ),
+					array(
+						'label'              => 'Bad context',
+						'uses_context'       => 'postId',
+						'get_value_callback' => $callback,
+					)
+				)
+			),
+			'badProperty'    => self::capture_doing_it_wrong(
+				static fn() => \register_block_bindings_source(
+					self::block_binding_source_name( $ctx->fork( 'bad-property' ), 'bad-property' ),
+					array(
+						'label'              => 'Bad property',
+						'get_value_callback' => $callback,
+						'description'        => 'Unexpected property',
+					)
+				)
+			),
+		);
+
+		$all_invalid_failed = true;
+		foreach ( $invalids as $invalid ) {
+			$all_invalid_failed = $all_invalid_failed
+				&& false === $invalid['value']
+				&& self::has_warning( $invalid );
+		}
+
+		self::collect_failure(
+			$failures,
+			$all_invalid_failed && $before_invalid === $registry->get_all_registered(),
+			'invalid and duplicate block binding source registrations warn and leave registry unchanged',
+			array( 'invalids' => $invalids )
+		);
+
+		$removed_primary = \unregister_block_bindings_source( $primary_name );
+		$missing_removed = self::capture_doing_it_wrong(
+			static fn() => \unregister_block_bindings_source( self::block_binding_source_name( $ctx->fork( 'missing-unregister' ), 'missing-unregister' ) )
+		);
+		$replacement_label = 'Replacement ' . $ctx->identifier( 4, 10 );
+		$replacement       = \register_block_bindings_source(
+			$primary_name,
+			array(
+				'label'              => $replacement_label,
+				'get_value_callback' => $plain_callback,
+			)
+		);
+		$after_replacement = \get_all_registered_block_bindings_sources();
+
+		self::collect_failure(
+			$failures,
+			$removed_primary instanceof \WP_Block_Bindings_Source
+				&& $removed_primary->name === $primary_name
+				&& false === $missing_removed['value']
+				&& self::has_warning( $missing_removed )
+				&& $replacement instanceof \WP_Block_Bindings_Source
+				&& $replacement !== $removed_primary
+				&& $replacement_label === $replacement->label
+				&& array( $secondary_name, $primary_name ) === array_keys( $after_replacement )
+				&& $replacement === \get_block_bindings_source( $primary_name ),
+			'unregister returns removed source objects and allows re-registration at the tail of the registry',
+			array(
+				'removed'          => self::describe_value( $removed_primary ),
+				'missingRemoved'   => $missing_removed,
+				'afterReplacement' => array_keys( $after_replacement ),
+			)
+		);
+
+		\unregister_block_bindings_source( $primary_name );
+		\unregister_block_bindings_source( $secondary_name );
+		self::collect_failure(
+			$failures,
+			array() === \get_all_registered_block_bindings_sources()
+				&& null === \get_block_bindings_source( $primary_name )
+				&& false === $registry->is_registered( $secondary_name ),
+			'block bindings registry returns to empty state after generated sources are unregistered',
+			array(
+				'remaining' => array_keys( \get_all_registered_block_bindings_sources() ),
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'registries.block-bindings.lifecycle-validation-and-value-filters',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, 8 ) )
+		);
+	}
+
 	private static function check_speculation_helper_allowlists( \ComponentFuzz\FuzzContext $ctx ): array {
 		$failures = array();
 
@@ -1136,6 +1474,10 @@ final class RegistriesSurface {
 		return 'fuzz-' . self::icon_slug( $ctx, 'ns-' . $prefix ) . '/' . self::icon_slug( $ctx->fork( 'icon' ), 'icon-' . $prefix );
 	}
 
+	private static function block_binding_source_name( \ComponentFuzz\FuzzContext $ctx, string $prefix ): string {
+		return 'component-fuzz/' . self::icon_slug( $ctx, 'binding-' . $prefix );
+	}
+
 	private static function speculation_id( \ComponentFuzz\FuzzContext $ctx, string $prefix ): string {
 		return 'r' . self::slug( $ctx, $prefix ) . '-' . substr( dechex( $ctx->seed() ), -6 );
 	}
@@ -1242,6 +1584,7 @@ final class RegistriesSurface {
 	private static function snapshot_state(): array {
 		$connector_registry = self::get_static_property( 'WP_Connector_Registry', 'instance' );
 		$icons_registry     = self::get_static_property( 'WP_Icons_Registry', 'instance' );
+		$binding_registry   = self::get_static_property( 'WP_Block_Bindings_Registry', 'instance' );
 
 		return array(
 			'globals'              => self::snapshot_globals(
@@ -1263,6 +1606,10 @@ final class RegistriesSurface {
 			'iconsRegistry'        => $icons_registry,
 			'registeredIcons'      => $icons_registry instanceof \WP_Icons_Registry
 				? self::get_object_property( $icons_registry, 'registered_icons' )
+				: null,
+			'bindingRegistry'      => $binding_registry,
+			'bindingSources'       => $binding_registry instanceof \WP_Block_Bindings_Registry
+				? self::get_object_property( $binding_registry, 'sources' )
 				: null,
 			'blockMetadata'        => array(
 				'collections'            => self::get_static_property( 'WP_Block_Metadata_Registry', 'collections' ),
@@ -1290,6 +1637,13 @@ final class RegistriesSurface {
 			self::set_static_property( 'WP_Icons_Registry', 'instance', $snapshot['iconsRegistry'] );
 		} else {
 			self::set_static_property( 'WP_Icons_Registry', 'instance', null );
+		}
+
+		if ( $snapshot['bindingRegistry'] instanceof \WP_Block_Bindings_Registry ) {
+			self::set_object_property( $snapshot['bindingRegistry'], 'sources', $snapshot['bindingSources'] );
+			self::set_static_property( 'WP_Block_Bindings_Registry', 'instance', $snapshot['bindingRegistry'] );
+		} else {
+			self::set_static_property( 'WP_Block_Bindings_Registry', 'instance', null );
 		}
 
 		self::set_static_property( 'WP_Block_Metadata_Registry', 'collections', $snapshot['blockMetadata']['collections'] );
