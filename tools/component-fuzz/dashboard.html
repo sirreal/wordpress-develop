@@ -1079,7 +1079,7 @@
 				<tr>
 					<td><code>cron</code></td>
 					<td><span class="status good">review fixes passed</span></td>
-					<td>Scoped worktree <code>component-fuzz-cron-wrapper</code>; builds on spawn/request review fixes through <code>12bde1192d</code> and pre-unschedule-hook coverage through <code>db22a88992</code>; public wrapper gap reviewed by Hegel the 2nd.</td>
+					<td>Scoped worktree <code>component-fuzz-cron-wrapper</code>; builds on spawn/request review fixes through <code>12bde1192d</code> and pre-unschedule-hook coverage through <code>db22a88992</code>; public wrapper coverage through <code>de1da7b556</code> reviewed by Hegel the 2nd.</td>
 					<td>Latest focused runs: seed 224 passed 91 checks, seeds 1, 224, and 57123 over 25 iterations each passed 2275 checks, adjacent <code>cron,request-lifecycle,http,site-health,site-health-debug,update-install-upgrader</code> smoke passed 750 checks, adjacent <code>cron,options-autoload,state,environment-load</code> smoke passed 710 checks, bootstrap smoke passed, and latest broad run passed 4776 checks with 1 skip.</td>
 					<td>In-memory cron store, schedule and next-scheduled filters, <code>pre_unschedule_hook</code> zero/false/WP_Error short-circuit contracts, duplicate windows, scheduled-event lookup order/exactness, ready-job partitioning, exact spawn request payloads, <code>doing_cron</code> lock behavior, no-network loopback short-circuiting, <code>_wp_cron()</code> ready delegation, public <code>wp_cron()</code> shutdown deferral and isolated immediate shutdown-run wrapper behavior, recurrence/unschedule/reschedule, and state restoration.</td>
 				</tr>
@@ -1214,6 +1214,12 @@
 				</tr>
 				</thead>
 				<tbody>
+					<tr>
+						<td><code>de1da7b556</code></td>
+						<td><code>cron</code></td>
+						<td><code>cron</code> seed 224 passed 91 checks, seeds 1, 224, and 57123 over 25 iterations each passed 2275 checks; adjacent <code>cron,request-lifecycle,http,site-health,site-health-debug,update-install-upgrader</code> smoke passed 750 checks; adjacent <code>cron,options-autoload,state,environment-load</code> smoke passed 710 checks; bootstrap smoke passed after adding public <code>wp_cron()</code> shutdown deferral and isolated immediate-run wrapper coverage.</td>
+						<td>4776 passed, 1 skipped, 0 failed at 1 iteration after public <code>wp_cron()</code> wrapper coverage.</td>
+					</tr>
 					<tr>
 						<td><code>69ffaf4b90</code></td>
 						<td><code>auth-flow</code></td>
