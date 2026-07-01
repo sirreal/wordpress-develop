@@ -561,7 +561,8 @@ database, network requests, or a configured site.
   `WP_Token_Map::to_array()` export equivalence, rewrite match substitution,
   URL-pattern prefix escaping/idempotence boundaries, `_wp_to_kebab_case()`
   lodash-compatibility fixtures, hierarchy-loop detection helpers, unique ID
-  and UUID contracts, boolean validation semantics, and state restoration.
+  and UUID contracts, boolean validation semantics, diagnostic/error helper
+  hook and trace contracts, and state restoration.
 - `user-preferences`: no-request-dispatch admin UI preference coverage,
   including sanitized user-setting/admin-color serialization, hidden column and
   meta-box preference defaults/saved values, postbox order/classes, screen
@@ -1150,7 +1151,11 @@ full generated mapping; token-map export assertions cover key lengths 1, 2, and
 assertions anchor block/style slug compatibility at the helper boundary, and
 hierarchy-loop assertions cover terminating chains, self loops, callback-backed
 cycles, start-parent overrides, direct tortoise-hare probes, and callback
-argument propagation.
+argument propagation. Diagnostic/error assertions cover `is_wp_error()` action
+payload and counter deltas, `wp_debug_backtrace_summary()` raw/pretty/skip/
+ignore-class behavior over a controlled stack, and `wp_trigger_error()` hook
+ordering, suppression filters, `WP_DEBUG` gating, local error-handler capture,
+and cloned hook-state restoration.
 Skips are recorded in `results.ndjson` with a reason and do not mask failures
 or PHP errors.
 

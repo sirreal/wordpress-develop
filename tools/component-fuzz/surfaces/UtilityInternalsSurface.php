@@ -35,6 +35,7 @@ final class UtilityInternalsSurface {
 			$rows[] = self::check_kebab_case_helper( $ctx->fork( 'kebab-case' ) );
 			$rows[] = self::check_hierarchy_loop_helpers( $ctx->fork( 'hierarchy-loop' ) );
 			$rows[] = self::check_unique_uuid_and_boolean_helpers( $ctx->fork( 'identity-bool' ) );
+			$rows[] = self::check_diagnostic_error_helpers( $ctx->fork( 'diagnostic-errors' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = self::row(
 				$ctx,
@@ -79,7 +80,7 @@ final class UtilityInternalsSurface {
 
 	private static function missing_requirements(): array {
 		$missing = array();
-		foreach ( array( 'WP_List_Util', 'WP_MatchesMapRegex', 'WP_Token_Map', 'WP_URL_Pattern_Prefixer' ) as $class ) {
+		foreach ( array( 'WP_Error', 'WP_List_Util', 'WP_MatchesMapRegex', 'WP_Token_Map', 'WP_URL_Pattern_Prefixer' ) as $class ) {
 			if ( ! class_exists( $class ) ) {
 				$missing[] = "class {$class}";
 			}
@@ -87,14 +88,25 @@ final class UtilityInternalsSurface {
 
 		foreach (
 			array(
+				'add_action',
+				'add_filter',
+				'current_action',
+				'current_filter',
+				'did_action',
+				'doing_action',
 				'trailingslashit',
+				'is_wp_error',
+				'remove_filter',
+				'wp_debug_backtrace_summary',
 				'wp_filter_object_list',
 				'wp_list_filter',
 				'wp_list_pluck',
 				'wp_list_sort',
+				'wp_trigger_error',
 				'wp_parse_list',
 				'wp_parse_id_list',
 				'wp_parse_slug_list',
+				'wp_kses',
 				'wp_array_slice_assoc',
 				'wp_recursive_ksort',
 				'wp_is_numeric_array',
@@ -1006,6 +1018,230 @@ final class UtilityInternalsSurface {
 		);
 	}
 
+	private static function check_diagnostic_error_helpers( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$token    = strtolower( preg_replace( '/[^a-z0-9]+/', '', $ctx->identifier( 4, 8 ) ) );
+		if ( '' === $token ) {
+			$token = 'diagnostic';
+		}
+
+		self::isolate_hook_callbacks(
+			array(
+				'is_wp_error_instance',
+				'wp_trigger_error_always_run',
+				'wp_trigger_error_trigger_error',
+				'wp_trigger_error_run',
+			)
+		);
+
+		$error       = new \WP_Error( 'component_fuzz_' . $token, 'Generated error ' . $token, array( 'seed' => $ctx->seed() ) );
+		$error_seen  = array();
+		$error_action = static function ( $thing ) use ( $error, &$error_seen ): void {
+			$error_seen[] = array(
+				'same'          => $thing === $error,
+				'codes'         => $thing instanceof \WP_Error ? $thing->get_error_codes() : array(),
+				'currentAction' => \current_action(),
+				'currentFilter' => \current_filter(),
+				'doingAction'   => \doing_action( 'is_wp_error_instance' ),
+			);
+		};
+
+		$is_wp_error_count_before = \did_action( 'is_wp_error_instance' );
+		\add_action( 'is_wp_error_instance', $error_action, 10, 1 );
+		$scalar_result = \is_wp_error( 'not an error ' . $token );
+		$array_result  = \is_wp_error( array( 'code' => $token ) );
+		$object_result = \is_wp_error( (object) array( 'code' => $token ) );
+		$throw_result  = \is_wp_error( new \Exception( 'not a wp error' ) );
+		$error_result  = \is_wp_error( $error );
+		$is_wp_error_count_after = \did_action( 'is_wp_error_instance' );
+		$expected_error_seen     = array(
+			array(
+				'same'          => true,
+				'codes'         => $error->get_error_codes(),
+				'currentAction' => 'is_wp_error_instance',
+				'currentFilter' => 'is_wp_error_instance',
+				'doingAction'   => true,
+			),
+		);
+
+		self::collect_failure(
+			$failures,
+			false === $scalar_result
+				&& false === $array_result
+				&& false === $object_result
+				&& false === $throw_result
+				&& true === $error_result
+				&& $is_wp_error_count_before + 1 === $is_wp_error_count_after
+				&& $expected_error_seen === $error_seen,
+			'is_wp_error returns true only for WP_Error and fires is_wp_error_instance once with the original object/action context',
+			array(
+				'scalarResult' => $scalar_result,
+				'arrayResult'  => $array_result,
+				'objectResult' => $object_result,
+				'throwResult'  => $throw_result,
+				'errorResult'  => $error_result,
+				'actionDelta'  => $is_wp_error_count_after - $is_wp_error_count_before,
+				'seen'         => $error_seen,
+			)
+		);
+
+		$pretty_trace = self::debug_backtrace_entry( null, 0, true );
+		$raw_trace    = self::debug_backtrace_entry( null, 0, false );
+		$skip_trace   = self::debug_backtrace_entry( null, 1, false );
+		$ignore_trace = self::debug_backtrace_entry( __CLASS__, 0, false );
+
+		self::collect_failure(
+			$failures,
+			is_string( $pretty_trace )
+				&& self::string_ordered_contains(
+					$pretty_trace,
+					array(
+						__CLASS__ . '::debug_backtrace_entry',
+						__CLASS__ . '::debug_backtrace_bridge',
+						__CLASS__ . '::collect_debug_backtrace_summary',
+					)
+				)
+				&& is_array( $raw_trace )
+				&& ( $raw_trace[0] ?? null ) === __CLASS__ . '::collect_debug_backtrace_summary'
+				&& in_array( __CLASS__ . '::debug_backtrace_bridge', $raw_trace, true )
+				&& in_array( __CLASS__ . '::debug_backtrace_entry', $raw_trace, true )
+				&& is_array( $skip_trace )
+				&& ( $skip_trace[0] ?? null ) === __CLASS__ . '::debug_backtrace_bridge'
+				&& is_array( $ignore_trace )
+				&& self::trace_omits_class( $ignore_trace, __CLASS__ ),
+			'wp_debug_backtrace_summary preserves call order, supports raw arrays, skips frames, and omits ignored classes',
+			array(
+				'pretty' => $pretty_trace,
+				'raw'    => array_slice( is_array( $raw_trace ) ? $raw_trace : array(), 0, 5 ),
+				'skip'   => array_slice( is_array( $skip_trace ) ? $skip_trace : array(), 0, 5 ),
+				'ignore' => array_slice( is_array( $ignore_trace ) ? $ignore_trace : array(), 0, 5 ),
+			)
+		);
+
+		$always_log  = array();
+		$filter_log  = array();
+		$run_log     = array();
+		$php_errors  = array();
+		$event_log   = array();
+		$suppressed  = 'component_fuzz_suppressed_' . $token;
+		$triggered   = 'component_fuzz_triggered_' . $token;
+		$message_one = 'Suppressed diagnostic ' . $token;
+		$message_two = 'Diagnostics <strong>' . $token . '</strong><script>bad()</script><a href="javascript:alert(1)">link</a><code>x</code>';
+		$wp_debug    = defined( 'WP_DEBUG' ) && WP_DEBUG;
+
+		$always = static function ( string $function_name, string $message, int $error_level ) use ( &$always_log, &$event_log ): void {
+			$event_log[]  = array( 'event' => 'always', 'function' => $function_name );
+			$always_log[] = compact( 'function_name', 'message', 'error_level' );
+		};
+		$filter = static function ( bool $trigger, string $function_name, string $message, int $error_level ) use ( $suppressed, &$filter_log, &$event_log ): bool {
+			$event_log[]  = array( 'event' => 'filter', 'function' => $function_name );
+			$filter_log[] = compact( 'trigger', 'function_name', 'message', 'error_level' );
+			return $function_name !== $suppressed;
+		};
+		$run = static function ( string $function_name, string $message, int $error_level ) use ( &$run_log, &$event_log ): void {
+			$event_log[] = array( 'event' => 'run', 'function' => $function_name );
+			$run_log[] = compact( 'function_name', 'message', 'error_level' );
+		};
+
+		\add_action( 'wp_trigger_error_always_run', $always, 10, 3 );
+		\add_filter( 'wp_trigger_error_trigger_error', $filter, 10, 4 );
+		\add_action( 'wp_trigger_error_run', $run, 10, 3 );
+
+		set_error_handler(
+			static function ( int $errno, string $errstr ) use ( &$php_errors ): bool {
+				$php_errors[] = array(
+					'errno'  => $errno,
+					'errstr' => $errstr,
+				);
+				return true;
+			}
+		);
+		try {
+			\wp_trigger_error( $suppressed, $message_one, E_USER_NOTICE );
+			\wp_trigger_error( $triggered, $message_two, E_USER_WARNING );
+		} finally {
+			restore_error_handler();
+			\remove_filter( 'wp_trigger_error_trigger_error', $filter, 10 );
+		}
+
+		$expected_run_count = $wp_debug ? 1 : 0;
+		$second_error       = $php_errors[0]['errstr'] ?? '';
+		$event_sequence     = array_map(
+			static fn( array $event ): string => $event['event'] . ':' . $event['function'],
+			$event_log
+		);
+		$expected_sequence  = array(
+			'always:' . $suppressed,
+			'filter:' . $suppressed,
+			'always:' . $triggered,
+			'filter:' . $triggered,
+		);
+		if ( $wp_debug ) {
+			$expected_sequence[] = 'run:' . $triggered;
+		}
+		self::collect_failure(
+			$failures,
+			2 === count( $always_log )
+				&& 2 === count( $filter_log )
+				&& $expected_run_count === count( $run_log )
+				&& $expected_run_count === count( $php_errors )
+				&& $expected_sequence === $event_sequence
+				&& $suppressed === ( $always_log[0]['function_name'] ?? null )
+				&& $message_one === ( $always_log[0]['message'] ?? null )
+				&& $suppressed === ( $filter_log[0]['function_name'] ?? null )
+				&& true === ( $filter_log[0]['trigger'] ?? null )
+				&& $message_one === ( $filter_log[0]['message'] ?? null )
+				&& $triggered === ( $always_log[1]['function_name'] ?? null )
+				&& $message_two === ( $always_log[1]['message'] ?? null )
+				&& $triggered === ( $filter_log[1]['function_name'] ?? null )
+				&& true === ( $filter_log[1]['trigger'] ?? null )
+				&& $message_two === ( $filter_log[1]['message'] ?? null )
+				&& (
+					! $wp_debug
+					|| (
+						$triggered === ( $run_log[0]['function_name'] ?? null )
+						&& E_USER_WARNING === ( $php_errors[0]['errno'] ?? null )
+						&& str_starts_with( $second_error, $triggered . '(): Diagnostics ' )
+						&& str_contains( $second_error, '<strong>' . $token . '</strong>' )
+						&& str_contains( $second_error, '<code>x</code>' )
+						&& ! str_contains( $second_error, '<script' )
+						&& ! str_contains( $second_error, 'javascript:' )
+					)
+				),
+			'wp_trigger_error always runs diagnostics hooks, honors suppression filters, gates PHP errors on WP_DEBUG, and sanitizes emitted messages',
+			array(
+				'wpDebug'    => $wp_debug,
+				'alwaysLog'  => $always_log,
+				'filterLog'  => $filter_log,
+				'runLog'     => $run_log,
+				'phpErrors'  => $php_errors,
+				'events'     => $event_sequence,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'utility-internals.diagnostic-error-helpers.hooks-and-traces',
+			array() === $failures,
+			array(
+				'token'    => $token,
+				'failures' => $failures,
+			)
+		);
+	}
+
+	private static function debug_backtrace_entry( ?string $ignore_class, int $skip_frames, bool $pretty ) {
+		return self::debug_backtrace_bridge( $ignore_class, $skip_frames, $pretty );
+	}
+
+	private static function debug_backtrace_bridge( ?string $ignore_class, int $skip_frames, bool $pretty ) {
+		return self::collect_debug_backtrace_summary( $ignore_class, $skip_frames, $pretty );
+	}
+
+	private static function collect_debug_backtrace_summary( ?string $ignore_class, int $skip_frames, bool $pretty ) {
+		return \wp_debug_backtrace_summary( $ignore_class, $skip_frames, $pretty );
+	}
+
 	private static function same_int_key_set( $actual, array $expected ): bool {
 		if ( ! is_array( $actual ) ) {
 			return false;
@@ -1295,9 +1531,14 @@ final class UtilityInternalsSurface {
 	private static function snapshot_state(): array {
 		$globals = array();
 		foreach ( array( 'wp_actions', 'wp_current_filter', 'wp_filter', 'wp_filters' ) as $name ) {
+			$value = $GLOBALS[ $name ] ?? null;
+			if ( 'wp_filter' === $name ) {
+				$value = self::clone_wp_filter_registry( $value );
+			}
+
 			$globals[ $name ] = array(
 				'exists' => array_key_exists( $name, $GLOBALS ),
-				'value'  => $GLOBALS[ $name ] ?? null,
+				'value'  => $value,
 			);
 		}
 		return array( 'globals' => $globals );
@@ -1306,7 +1547,7 @@ final class UtilityInternalsSurface {
 	private static function restore_state( array $snapshot ): void {
 		foreach ( $snapshot['globals'] as $name => $entry ) {
 			if ( $entry['exists'] ) {
-				$GLOBALS[ $name ] = $entry['value'];
+				$GLOBALS[ $name ] = 'wp_filter' === $name ? self::clone_wp_filter_registry( $entry['value'] ) : $entry['value'];
 			} else {
 				unset( $GLOBALS[ $name ] );
 			}
@@ -1314,7 +1555,79 @@ final class UtilityInternalsSurface {
 	}
 
 	private static function state_matches( array $snapshot ): bool {
-		return $snapshot === self::snapshot_state();
+		$current = self::snapshot_state();
+		if ( array_keys( $snapshot['globals'] ) !== array_keys( $current['globals'] ) ) {
+			return false;
+		}
+
+		foreach ( $snapshot['globals'] as $name => $entry ) {
+			$current_entry = $current['globals'][ $name ];
+			if ( $entry['exists'] !== $current_entry['exists'] ) {
+				return false;
+			}
+			if ( ! $entry['exists'] ) {
+				continue;
+			}
+
+			if ( 'wp_filter' === $name ) {
+				if ( $entry['value'] != $current_entry['value'] ) {
+					return false;
+				}
+				continue;
+			}
+
+			if ( $entry['value'] !== $current_entry['value'] ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function isolate_hook_callbacks( array $hook_names ): void {
+		if ( ! isset( $GLOBALS['wp_filter'] ) || ! is_array( $GLOBALS['wp_filter'] ) ) {
+			return;
+		}
+
+		foreach ( $hook_names as $hook_name ) {
+			unset( $GLOBALS['wp_filter'][ $hook_name ] );
+		}
+	}
+
+	private static function clone_wp_filter_registry( $registry ) {
+		if ( ! is_array( $registry ) ) {
+			return $registry instanceof \WP_Hook ? clone $registry : $registry;
+		}
+
+		$clone = array();
+		foreach ( $registry as $hook_name => $hook ) {
+			$clone[ $hook_name ] = $hook instanceof \WP_Hook ? clone $hook : $hook;
+		}
+
+		return $clone;
+	}
+
+	private static function string_ordered_contains( string $haystack, array $needles ): bool {
+		$offset = 0;
+		foreach ( $needles as $needle ) {
+			$position = strpos( $haystack, $needle, $offset );
+			if ( false === $position ) {
+				return false;
+			}
+			$offset = $position + strlen( $needle );
+		}
+
+		return true;
+	}
+
+	private static function trace_omits_class( array $trace, string $class_name ): bool {
+		foreach ( $trace as $frame ) {
+			if ( is_string( $frame ) && str_starts_with( $frame, $class_name . '::' ) ) {
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 	private static function collect_failure( array &$failures, bool $ok, string $message, array $data = array() ): void {
