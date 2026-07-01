@@ -26,6 +26,7 @@ final class StateSurface {
 
 			$rows[] = self::check_cache_basic_semantics( $ctx );
 			$rows[] = self::check_cache_group_isolation( $ctx );
+			$rows[] = self::check_cache_blog_switch_and_global_groups( $ctx );
 			$rows[] = self::check_cache_object_cloning( $ctx );
 			$rows[] = self::check_cache_multiple_equivalence( $ctx );
 			$rows[] = self::check_cache_add_multiple_contract( $ctx );
@@ -81,6 +82,7 @@ final class StateSurface {
 				'wp_cache_supports',
 				'wp_cache_add_global_groups',
 				'wp_cache_add_non_persistent_groups',
+				'wp_cache_switch_to_blog',
 				'wp_cache_get_last_changed',
 				'wp_cache_set_last_changed',
 				'wp_suspend_cache_addition',
@@ -223,6 +225,131 @@ final class StateSurface {
 				'post2'  => self::describe_value( $post2 ),
 			)
 		);
+	}
+
+	private static function check_cache_blog_switch_and_global_groups( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime();
+
+		$cache = $GLOBALS['wp_object_cache'] ?? null;
+		if ( ! is_object( $cache ) ) {
+			return $ctx->skip(
+				'state.cache.blog-switch-local-and-global-groups',
+				'Object cache instance is unavailable.',
+				array()
+			);
+		}
+
+		$old_blog_exists = array_key_exists( 'blog_id', $GLOBALS );
+		$old_blog_id     = $GLOBALS['blog_id'] ?? null;
+
+		try {
+			$cache->multisite = true;
+
+			$case         = $ctx->fork( 'cache-blog-switch' );
+			$blog_a       = 100 + $ctx->int( 1, 250 );
+			$blog_b       = $blog_a + $ctx->int( 1, 25 );
+			$key          = self::key( $ctx, 'blog-switch-shared' );
+			$local_group  = self::group( $ctx, 'blog-local' );
+			$global_group = self::group( $ctx, 'blog-global' );
+			$local_a      = self::wrapped_value( 'local-a', self::value( $case ) );
+			$local_b      = self::wrapped_value( 'local-b', self::value( $case ) );
+			$default_a    = self::wrapped_value( 'default-a', self::value( $case ) );
+			$default_b    = self::wrapped_value( 'default-b', self::value( $case ) );
+			$global_a     = self::wrapped_value( 'global-a', self::value( $case ) );
+			$global_b     = self::wrapped_value( 'global-b', self::value( $case ) );
+
+			wp_cache_add_global_groups( array( $global_group ) );
+
+			$GLOBALS['blog_id'] = $blog_a;
+			wp_cache_switch_to_blog( $blog_a );
+			$prefix_a      = $cache->blog_prefix ?? null;
+			$set_local_a   = wp_cache_set( $key, $local_a, $local_group );
+			$set_default_a = wp_cache_set( $key, $default_a, '' );
+			$set_global_a  = wp_cache_set( $key, $global_a, $global_group );
+
+			wp_cache_switch_to_blog( (string) $blog_b );
+			$prefix_b              = $cache->blog_prefix ?? null;
+			$global_blog_during_b  = get_current_blog_id();
+
+			$found_local_b_before   = null;
+			$found_default_b_before = null;
+			$local_b_before         = wp_cache_get( $key, $local_group, false, $found_local_b_before );
+			$default_b_before       = wp_cache_get( $key, '', false, $found_default_b_before );
+			$global_b_before        = wp_cache_get( $key, $global_group );
+			$set_local_b            = wp_cache_set( $key, $local_b, $local_group );
+			$set_default_b          = wp_cache_set( $key, $default_b, '' );
+			$set_global_b           = wp_cache_set( $key, $global_b, $global_group );
+
+			$raw_cache         = is_array( $cache->cache ?? null ) ? $cache->cache : array();
+			$raw_local_group   = is_array( $raw_cache[ $local_group ] ?? null ) ? $raw_cache[ $local_group ] : array();
+			$raw_default_group = is_array( $raw_cache['default'] ?? null ) ? $raw_cache['default'] : array();
+			$raw_global_group  = is_array( $raw_cache[ $global_group ] ?? null ) ? $raw_cache[ $global_group ] : array();
+			$local_key_a       = $blog_a . ':' . $key;
+			$local_key_b       = $blog_b . ':' . $key;
+
+			wp_cache_switch_to_blog( $blog_a );
+			$global_blog_after_a = get_current_blog_id();
+			$local_a_after        = wp_cache_get( $key, $local_group );
+			$default_a_after      = wp_cache_get( $key, '' );
+			$global_a_after       = wp_cache_get( $key, $global_group );
+			$delete_global_from_a = wp_cache_delete( $key, $global_group );
+
+			wp_cache_switch_to_blog( $blog_b );
+			$global_b_after_delete = wp_cache_get( $key, $global_group );
+			$local_b_after         = wp_cache_get( $key, $local_group );
+			$default_b_after       = wp_cache_get( $key, '' );
+			$delete_local_b        = wp_cache_delete( $key, $local_group );
+
+			wp_cache_switch_to_blog( $blog_a );
+			$local_a_after_delete_b = wp_cache_get( $key, $local_group );
+
+			$checks = array(
+				'prefixA'              => $blog_a . ':' === $prefix_a,
+				'prefixBStringCast'    => $blog_b . ':' === $prefix_b,
+				'directSwitchKeepsGlobalBlog' => $blog_a === $global_blog_during_b && $blog_a === $global_blog_after_a,
+				'setsSucceeded'        => true === $set_local_a && true === $set_default_a && true === $set_global_a && true === $set_local_b && true === $set_default_b && true === $set_global_b,
+				'localMissingOnBlogB'  => false === $local_b_before && false === $found_local_b_before,
+				'defaultMissingOnBlogB' => false === $default_b_before && false === $found_default_b_before,
+				'globalSharedToBlogB'  => self::same_value( $global_a, $global_b_before ),
+				'rawLocalPrefixed'     => isset( $raw_local_group[ $local_key_a ], $raw_local_group[ $local_key_b ] ) && ! isset( $raw_local_group[ $key ] ),
+				'rawDefaultPrefixed'   => isset( $raw_default_group[ $local_key_a ], $raw_default_group[ $local_key_b ] ) && ! isset( $raw_default_group[ $key ] ),
+				'rawGlobalUnprefixed'  => isset( $raw_global_group[ $key ] ) && ! isset( $raw_global_group[ $local_key_a ], $raw_global_group[ $local_key_b ] ),
+				'localARestored'       => self::same_value( $local_a, $local_a_after ),
+				'defaultARestored'     => self::same_value( $default_a, $default_a_after ),
+				'globalUpdatedForA'    => self::same_value( $global_b, $global_a_after ),
+				'globalDeleteShared'   => true === $delete_global_from_a && false === $global_b_after_delete,
+				'localBStillPresent'   => self::same_value( $local_b, $local_b_after ) && self::same_value( $default_b, $default_b_after ),
+				'deleteLocalBOnly'     => true === $delete_local_b && self::same_value( $local_a, $local_a_after_delete_b ),
+			);
+
+			return $ctx->result(
+				'state.cache.blog-switch-local-and-global-groups',
+				! in_array( false, $checks, true ),
+				array(
+					'blogA'              => $blog_a,
+					'blogB'              => $blog_b,
+					'key'                => $key,
+					'localGroup'         => $local_group,
+					'globalGroup'        => $global_group,
+					'checks'             => $checks,
+					'globalBlogDuringB'  => $global_blog_during_b,
+					'globalBlogAfterA'   => $global_blog_after_a,
+					'localBeforeBlogB'   => self::describe_value( $local_b_before ),
+					'defaultBeforeBlogB' => self::describe_value( $default_b_before ),
+					'globalBeforeBlogB'  => self::describe_value( $global_b_before ),
+					'rawLocalKeys'       => array_keys( $raw_local_group ),
+					'rawDefaultKeys'     => array_keys( $raw_default_group ),
+					'rawGlobalKeys'      => array_keys( $raw_global_group ),
+				)
+			);
+		} finally {
+			self::reset_runtime();
+			if ( $old_blog_exists ) {
+				$GLOBALS['blog_id'] = $old_blog_id;
+			} else {
+				unset( $GLOBALS['blog_id'] );
+			}
+		}
 	}
 
 	private static function check_cache_object_cloning( \ComponentFuzz\FuzzContext $ctx ): array {

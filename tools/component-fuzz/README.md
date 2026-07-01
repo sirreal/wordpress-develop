@@ -783,10 +783,11 @@ database, network requests, or a configured site.
   variable lookup fallbacks, fake no-network WordPress.org
   communication, bounded Ghostscript detection, path-size loading placeholders,
   and child-process cleanup/restoration checks.
-- `state`: object cache groups, multi-operations, and cache-addition
-  suspension, option, transient, cache-backed and option-backed site-transient
-  APIs, update/expiration cleanup, dynamic transient filters, serialization,
-  JSON, and value helpers.
+- `state`: object cache groups, direct `wp_cache_switch_to_blog()` local/global
+  group prefixing, multi-operations, and cache-addition suspension, option,
+  transient, cache-backed and option-backed site-transient APIs,
+  update/expiration cleanup, dynamic transient filters, serialization, JSON, and
+  value helpers.
 - `style`: style engine serialization, preset/classname and CSS variable
   boundaries, CSS declaration filtering, theme.json schema/data merging and
   variable resolution, block style variation declarations, registered block
