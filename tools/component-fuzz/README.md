@@ -482,11 +482,14 @@ database, network requests, or a configured site.
   bounded byte fixtures, including `wp_read_audio_metadata()` and
   `wp_read_video_metadata()` malformed-file behavior, ID3 tag helper
   sanitization, creation timestamp extraction, audio/video extension and ID3 key
-  filters, `wp_attachment_is()` MIME/extension branches, image/document
-  classification, MIME/extension disagreement, wrapper behavior, attachment
-  metadata get/update/delete filter contracts, original-image path/URL and
-  image-meta matching normalization across seeded upload storage styles, and
-  `wp_generate_attachment_metadata()` audio/video cover-art avoidance.
+  filters, public audio/video shortcode rendering and filter contracts,
+  mediaelement fallback escaping, HTML5 library switching, YouTube/Vimeo URL
+  normalization, invalid-source embedded-link fallbacks, `wp_attachment_is()`
+  MIME/extension branches, image/document classification, MIME/extension
+  disagreement, wrapper behavior, attachment metadata get/update/delete filter
+  contracts, original-image path/URL and image-meta matching normalization
+  across seeded upload storage styles, and `wp_generate_attachment_metadata()`
+  audio/video cover-art avoidance.
 - `media-remote`: no-live-network remote media helper coverage for
   `download_url()`, `media_sideload_image()`, and selected
   `media_handle_sideload()` branches, including HTTP short-circuit fixtures,
@@ -978,7 +981,10 @@ surface intercepts PHPMailer send calls and never attempts real delivery. The
 `media-metadata` surface uses malformed local fixtures and cache-seeded
 attachments only; it does not download remote media, invoke codecs or external
 binaries, insert real attachments, or enable audio/video cover attachment
-generation. The
+generation. Its shortcode rendering coverage stays on direct
+`wp_audio_shortcode()`, `wp_video_shortcode()`, and `wp_mediaelement_fallback()`
+calls with generated local-looking URLs and scoped filter/script/style cleanup,
+not gallery/playlist attachment queries or browser playback. The
 `image-metadata` surface complements that audio/video coverage with generated
 local image byte fixtures and repo-local Core image fixture replays. It does not
 invoke image codecs, live uploads, remote media, or attachment persistence;
