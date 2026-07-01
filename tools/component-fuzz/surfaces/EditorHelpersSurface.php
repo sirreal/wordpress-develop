@@ -37,6 +37,7 @@ final class EditorHelpersSurface {
 			$rows[] = self::check_editor_markup( $ctx->fork( 'editor-markup' ), $case );
 			$rows[] = self::check_mce_translation( $ctx->fork( 'mce-translation' ), $case );
 			$rows[] = self::check_tinymce_inline_scripts( $ctx->fork( 'tinymce-inline-scripts' ), $case );
+			$rows[] = self::check_link_query_and_dialog( $ctx->fork( 'link-query-dialog' ), $case );
 			$rows[] = self::check_media_view_styles( $ctx->fork( 'media-view-styles' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
@@ -66,7 +67,7 @@ final class EditorHelpersSurface {
 		self::load_editor_class();
 
 		$missing = array();
-		foreach ( array( '_WP_Editors', 'WP_Scripts', 'WP_Styles' ) as $class ) {
+		foreach ( array( '_WP_Editors', 'WP_Post', 'WP_Query', 'WP_Rewrite', 'WP_Scripts', 'WP_Styles' ) as $class ) {
 			if ( ! class_exists( $class ) ) {
 				$missing[] = "class {$class}";
 			}
@@ -78,13 +79,22 @@ final class EditorHelpersSurface {
 				'add_filter',
 				'add_thickbox',
 				'esc_attr',
+				'get_permalink',
+				'get_post_type_object',
+				'get_post_types',
 				'has_filter',
+				'mysql2date',
 				'remove_action',
 				'remove_filter',
+				'register_post_type',
 				'user_can_richedit',
+				'unregister_post_type',
+				'wp_cache_delete',
+				'wp_cache_set',
 				'wp_default_editor',
 				'wp_editor',
 				'wp_enqueue_script',
+				'wp_nonce_field',
 				'wp_enqueue_style',
 				'wp_parse_url',
 				'wp_print_scripts',
@@ -955,6 +965,258 @@ final class EditorHelpersSurface {
 		);
 	}
 
+	private static function check_link_query_and_dialog( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures   = array();
+		$marker_key = 'cf_link_' . self::safe_key( $case['marker'], 'link' );
+		$post_id    = 700000 + ( $ctx->seed() % 10000 );
+		$cpt_id     = $post_id + 1;
+		$cpt        = 'cf_link_' . self::safe_key( strtolower( substr( $case['linkTitleToken'], -5 ) ), 'cpt' );
+		$cpt_label  = 'Component Link ' . strtoupper( substr( $cpt, -3 ) );
+		$post       = self::link_query_post(
+			$post_id,
+			'post',
+			'editor-link-post-' . self::safe_key( $case['marker'], 'post' ),
+			'  Link Query ' . $case['linkTitleToken'] . ' <em>& More</em><script>bad</script>  ',
+			'2026-06-' . str_pad( (string) $ctx->int( 1, 28 ), 2, '0', STR_PAD_LEFT ) . ' 13:24:00'
+		);
+		$cpt_post   = self::link_query_post(
+			$cpt_id,
+			$cpt,
+			'editor-link-cpt-' . self::safe_key( $case['marker'], 'cpt' ),
+			'Custom Link ' . $case['linkTitleToken'] . ' <strong>& Other</strong>',
+			'2026-05-15 08:10:00'
+		);
+		$fixtures   = array( $post, $cpt_post );
+		$events     = array(
+			'args'    => array(),
+			'queries' => array(),
+			'results' => array(),
+		);
+		$post_type_names         = array();
+		$expected_post_permalink = '';
+		$expected_cpt_permalink  = '';
+		$local_globals           = self::snapshot_globals( array( 'wp_rewrite' ) );
+
+		$args_filter = static function ( array $query ) use ( &$events, $marker_key ): array {
+			$events['args'][]                         = $query;
+			$query['component_fuzz_link_query_marker'] = $marker_key;
+			$query['cache_results']                    = false;
+			return $query;
+		};
+		$posts_filter = static function ( $posts, \WP_Query $query ) use ( &$events, $fixtures, $case, $marker_key ) {
+			if ( ( $query->query_vars['component_fuzz_link_query_marker'] ?? null ) !== $marker_key ) {
+				return $posts;
+			}
+
+			$events['queries'][] = array(
+				'post_type'        => $query->query_vars['post_type'] ?? null,
+				's'                => $query->query_vars['s'] ?? null,
+				'offset'           => $query->query_vars['offset'] ?? null,
+				'posts_per_page'   => $query->query_vars['posts_per_page'] ?? null,
+				'post_status'      => $query->query_vars['post_status'] ?? null,
+				'suppress_filters' => $query->query_vars['suppress_filters'] ?? null,
+				'cache_results'    => $query->query_vars['cache_results'] ?? null,
+				'term'             => $query->query_vars['s'] ?? null,
+			);
+
+			if ( ( $query->query_vars['s'] ?? '' ) === $case['linkNoMatchSearch'] ) {
+				$query->found_posts   = 0;
+				$query->max_num_pages = 0;
+				return array();
+			}
+
+			$query->found_posts   = count( $fixtures );
+			$query->max_num_pages = 1;
+			return $fixtures;
+		};
+		$results_filter = static function ( array $results, array $query ) use ( &$events ): array {
+			$events['results'][] = array(
+				'query'   => $query,
+				'results' => $results,
+			);
+			return $results;
+		};
+
+		try {
+			if ( ! isset( $GLOBALS['wp_rewrite'] ) || ! is_object( $GLOBALS['wp_rewrite'] ) ) {
+				$GLOBALS['wp_rewrite'] = new \WP_Rewrite();
+			}
+
+			\register_post_type(
+				$cpt,
+				array(
+					'public' => true,
+					'labels' => array(
+						'name'          => $cpt_label . 's',
+						'singular_name' => $cpt_label,
+					),
+				)
+			);
+
+			foreach ( $fixtures as $fixture ) {
+				\wp_cache_set( $fixture->ID, $fixture, 'posts' );
+			}
+			$post_type_names         = array_keys( \get_post_types( array( 'public' => true ), 'objects' ) );
+			$expected_post_permalink = \get_permalink( $post->ID );
+			$expected_cpt_permalink  = \get_permalink( $cpt_post->ID );
+
+			\add_filter( 'wp_link_query_args', $args_filter, 10, 1 );
+			\add_filter( 'posts_pre_query', $posts_filter, 10, 2 );
+			\add_filter( 'wp_link_query', $results_filter, 10, 2 );
+			$results = \_WP_Editors::wp_link_query(
+				array(
+					'pagenum' => $case['linkPageNumber'],
+					's'       => $case['linkSearch'],
+				)
+			);
+			$empty_results = \_WP_Editors::wp_link_query(
+				array(
+					'pagenum' => 0,
+					's'       => $case['linkNoMatchSearch'],
+				)
+			);
+		} finally {
+			\remove_filter( 'wp_link_query', $results_filter, 10 );
+			\remove_filter( 'posts_pre_query', $posts_filter, 10 );
+			\remove_filter( 'wp_link_query_args', $args_filter, 10 );
+
+			foreach ( $fixtures as $fixture ) {
+				\wp_cache_delete( $fixture->ID, 'posts' );
+			}
+			if ( isset( $GLOBALS['wp'] ) && is_object( $GLOBALS['wp'] ) ) {
+				\unregister_post_type( $cpt );
+			} else {
+				unset( $GLOBALS['wp_post_types'][ $cpt ] );
+				\remove_action( 'future_' . $cpt, '_future_post_hook', 5 );
+			}
+			self::restore_globals( $local_globals );
+		}
+
+		$expected_post_title = 'Link Query ' . $case['linkTitleToken'] . ' &amp; Morebad';
+		$expected_cpt_title  = 'Custom Link ' . $case['linkTitleToken'] . ' &amp; Other';
+		$expected_offset     = 20 * ( $case['linkPageNumber'] - 1 );
+		$first_result        = is_array( $results ) ? ( $results[0] ?? array() ) : array();
+		$second_result       = is_array( $results ) ? ( $results[1] ?? array() ) : array();
+
+		self::record_if_false(
+			$failures,
+			is_array( $results )
+				&& 2 === count( $results )
+				&& $post->ID === ( $first_result['ID'] ?? null )
+				&& $expected_post_title === ( $first_result['title'] ?? null )
+				&& $expected_post_permalink === ( $first_result['permalink'] ?? null )
+				&& \mysql2date( __( 'Y/m/d' ), $post->post_date ) === ( $first_result['info'] ?? null )
+				&& $cpt_post->ID === ( $second_result['ID'] ?? null )
+				&& $expected_cpt_title === ( $second_result['title'] ?? null )
+				&& $expected_cpt_permalink === ( $second_result['permalink'] ?? null )
+				&& $cpt_label === ( $second_result['info'] ?? null )
+				&& false === $empty_results
+				&& ! str_contains( strtolower( wp_json_encode( $results ) ?: '' ), '<script' )
+				&& ! str_contains( strtolower( wp_json_encode( $results ) ?: '' ), 'javascript:' ),
+			'wp_link_query returns sanitized generated post/custom-post results, permalinks, info labels, and false on empty result sets',
+			array(
+				'results'      => $results,
+				'emptyResults' => $empty_results,
+				'expected'     => array(
+					'postTitle' => $expected_post_title,
+					'cptTitle'  => $expected_cpt_title,
+					'cptLabel'  => $cpt_label,
+				),
+			)
+		);
+		self::record_if_false(
+			$failures,
+			2 === count( $events['args'] )
+				&& 2 === count( $events['queries'] )
+				&& 2 === count( $events['results'] )
+				&& $case['linkSearch'] === ( $events['args'][0]['s'] ?? null )
+				&& $case['linkNoMatchSearch'] === ( $events['args'][1]['s'] ?? null )
+				&& $expected_offset === ( $events['args'][0]['offset'] ?? null )
+				&& 0 === ( $events['args'][1]['offset'] ?? null )
+				&& 20 === ( $events['args'][0]['posts_per_page'] ?? null )
+				&& true === ( $events['args'][0]['suppress_filters'] ?? null )
+				&& self::same_string_set( $events['args'][0]['post_type'] ?? array(), $post_type_names )
+				&& $case['linkSearch'] === ( $events['queries'][0]['s'] ?? null )
+				&& $expected_offset === ( $events['queries'][0]['offset'] ?? null )
+				&& 20 === ( $events['queries'][0]['posts_per_page'] ?? null )
+				&& 'publish' === ( $events['queries'][0]['post_status'] ?? null )
+				&& true === ( $events['queries'][0]['suppress_filters'] ?? null )
+				&& false === ( $events['queries'][0]['cache_results'] ?? null )
+				&& $results === ( $events['results'][0]['results'] ?? null )
+				&& array() === ( $events['results'][1]['results'] ?? null ),
+			'wp_link_query exposes deterministic query-argument, WP_Query, and result-filter payloads for generated searches',
+			array(
+				'events'          => $events,
+				'postTypeNames'   => $post_type_names,
+				'expectedOffset'  => $expected_offset,
+			)
+		);
+		self::record_if_false(
+			$failures,
+			false === \has_filter( 'wp_link_query_args', $args_filter )
+				&& false === \has_filter( 'posts_pre_query', $posts_filter )
+				&& false === \has_filter( 'wp_link_query', $results_filter )
+				&& false === \has_filter( 'future_' . $cpt, '_future_post_hook' ),
+			'wp_link_query coverage removes temporary query/result filters and generated post-type hooks',
+			array(
+				'argsFilter'    => \has_filter( 'wp_link_query_args', $args_filter ),
+				'postsFilter'   => \has_filter( 'posts_pre_query', $posts_filter ),
+				'resultsFilter' => \has_filter( 'wp_link_query', $results_filter ),
+				'futureHook'    => \has_filter( 'future_' . $cpt, '_future_post_hook' ),
+			)
+		);
+
+		self::reset_editor_statics();
+		$first_dialog = self::capture_output(
+			static function (): void {
+				\_WP_Editors::wp_link_dialog();
+			}
+		);
+		$second_dialog = self::capture_output(
+			static function (): void {
+				\_WP_Editors::wp_link_dialog();
+			}
+		);
+		$dialog_output = $first_dialog['output'] ?? '';
+		self::record_if_false(
+			$failures,
+			empty( $first_dialog['threw'] )
+				&& empty( $second_dialog['threw'] )
+				&& '' === ( $second_dialog['output'] ?? '' )
+				&& str_contains( $dialog_output, 'id="wp-link-backdrop"' )
+				&& str_contains( $dialog_output, 'id="wp-link-wrap"' )
+				&& str_contains( $dialog_output, 'role="dialog"' )
+				&& str_contains( $dialog_output, 'aria-modal="true"' )
+				&& str_contains( $dialog_output, 'id="wp-link-url"' )
+				&& str_contains( $dialog_output, 'id="wp-link-search"' )
+				&& str_contains( $dialog_output, 'name="_ajax_linking_nonce"' )
+				&& str_contains( $dialog_output, 'id="search-results"' )
+				&& str_contains( $dialog_output, 'id="most-recent-results"' )
+				&& str_contains( $dialog_output, 'id="wp-link-submit"' )
+				&& true === self::get_editor_static_property( 'link_dialog_printed' )
+				&& ! str_contains( strtolower( $dialog_output ), '<script' )
+				&& ! str_contains( strtolower( $dialog_output ), 'javascript:' ),
+			'wp_link_dialog prints the internal-linking dialog once with nonce, search/result containers, accessibility attributes, and no script output',
+			array(
+				'first'  => self::describe_call( $first_dialog ),
+				'second' => self::describe_call( $second_dialog ),
+				'output' => self::preview( $dialog_output ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'editor-helpers.link-query-dialog.query-results-and-single-print-markup',
+			$failures,
+			array(
+				'search'       => $case['linkSearch'],
+				'pageNumber'   => $case['linkPageNumber'],
+				'resultCount'  => is_array( $results ) ? count( $results ) : 0,
+				'dialogHash'   => sha1( $dialog_output ),
+			)
+		);
+	}
+
 	private static function check_media_view_styles( \ComponentFuzz\FuzzContext $ctx ): array {
 		$styles   = \wpview_media_sandbox_styles();
 		$failures = array();
@@ -1140,6 +1402,50 @@ final class EditorHelpersSurface {
 		return get_object_vars( $events );
 	}
 
+	private static function link_query_post( int $id, string $post_type, string $post_name, string $post_title, string $post_date ): \WP_Post {
+		return new \WP_Post(
+			(object) array(
+				'ID'                    => $id,
+				'post_author'           => 1,
+				'post_date'             => $post_date,
+				'post_date_gmt'         => $post_date,
+				'post_content'          => '',
+				'post_title'            => $post_title,
+				'post_excerpt'          => '',
+				'post_status'           => 'publish',
+				'comment_status'        => 'closed',
+				'ping_status'           => 'closed',
+				'post_password'         => '',
+				'post_name'             => $post_name,
+				'to_ping'               => '',
+				'pinged'                => '',
+				'post_modified'         => $post_date,
+				'post_modified_gmt'     => $post_date,
+				'post_content_filtered' => '',
+				'post_parent'           => 0,
+				'guid'                  => 'http://example.test/?p=' . $id,
+				'menu_order'            => 0,
+				'post_type'             => $post_type,
+				'post_mime_type'        => '',
+				'comment_count'         => 0,
+				'filter'                => 'raw',
+			)
+		);
+	}
+
+	private static function same_string_set( $actual, array $expected ): bool {
+		if ( ! is_array( $actual ) ) {
+			return false;
+		}
+
+		$actual   = array_values( array_map( 'strval', $actual ) );
+		$expected = array_values( array_map( 'strval', $expected ) );
+		sort( $actual );
+		sort( $expected );
+
+		return $actual === $expected;
+	}
+
 	private static function case_for_context( \ComponentFuzz\FuzzContext $ctx ): array {
 		$slug = self::safe_key( strtolower( $ctx->identifier( 4, 10 ) ), 'case' );
 
@@ -1160,6 +1466,10 @@ final class EditorHelpersSurface {
 			'editorId'            => 'cf_editor_' . $slug,
 			'externalPlugin'      => 'cf_external_' . $slug,
 			'externalUrl'         => 'https://example.test/plugins/' . $slug . '/plugin.js',
+			'linkNoMatchSearch'   => 'missing-' . $slug . ' <none>',
+			'linkPageNumber'      => $ctx->int( 2, 5 ),
+			'linkSearch'          => 'needle ' . $slug . ' & <query>',
+			'linkTitleToken'      => 'Token ' . strtoupper( substr( $slug, 0, 5 ) ),
 			'markupDefaultEditor' => $ctx->choice( array( 'tinymce', 'html' ) ),
 			'markupEditorId'      => 'cf_markup_' . $slug,
 			'markupHeight'        => $ctx->int( 50, 420 ),
@@ -1243,7 +1553,9 @@ final class EditorHelpersSurface {
 					'wp_current_filter',
 					'wp_filter',
 					'wp_filters',
+					'wp_post_types',
 					'wp_rich_edit',
+					'wp_rewrite',
 					'wp_scripts',
 					'wp_styles',
 				)
