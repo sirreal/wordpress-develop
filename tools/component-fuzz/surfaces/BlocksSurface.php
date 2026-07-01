@@ -31,6 +31,7 @@ final class BlocksSurface {
 				self::check_block_bindings_render_pipeline( $ctx ),
 				self::check_metadata_and_pattern_categories( $ctx ),
 				self::check_block_hooks_insertion_and_metadata( $ctx ),
+				self::check_block_hooks_post_object_and_rest_response( $ctx->fork( 'block-hooks-post-object' ) ),
 				self::check_block_supports( $ctx ),
 			);
 		} catch ( \Throwable $e ) {
@@ -60,6 +61,9 @@ final class BlocksSurface {
 				'WP_Block',
 				'WP_Block_Type',
 				'WP_Block_Type_Registry',
+				'Component_Fuzz_WPDB_Stub',
+				'WP_Post',
+				'WP_REST_Response',
 			) as $class
 		) {
 			if ( ! class_exists( $class ) ) {
@@ -70,15 +74,24 @@ final class BlocksSurface {
 		foreach (
 			array(
 				'add_filter',
+				'apply_filters',
 				'apply_block_hooks_to_content',
+				'apply_block_hooks_to_content_from_post_object',
 				'block_has_support',
+				'get_comment_delimited_block_content',
 				'get_all_registered_block_bindings_sources',
 				'get_block_bindings_supported_attributes',
 				'get_block_bindings_source',
 				'get_block_wrapper_attributes',
 				'get_hooked_blocks',
+				'get_post',
+				'get_post_meta',
 				'has_block',
 				'has_blocks',
+				'has_filter',
+				'insert_hooked_blocks_and_set_ignored_hooked_blocks_metadata',
+				'insert_hooked_blocks_into_rest_response',
+				'is_wp_error',
 				'parse_blocks',
 				'register_block_bindings_source',
 				'register_block_style',
@@ -91,11 +104,21 @@ final class BlocksSurface {
 				'unregister_block_bindings_source',
 				'unregister_block_style',
 				'unregister_block_type',
+				'update_ignored_hooked_blocks_postmeta',
+				'update_post_meta',
+				'wp_delete_post',
+				'wp_insert_post',
+				'wp_json_encode',
+				'wp_slash',
 			) as $function
 		) {
 			if ( ! function_exists( $function ) ) {
 				$missing[] = "function {$function}";
 			}
+		}
+
+		if ( ! isset( $GLOBALS['wpdb'] ) || ! $GLOBALS['wpdb'] instanceof \Component_Fuzz_WPDB_Stub ) {
+			$missing[] = 'global wpdb Component_Fuzz_WPDB_Stub';
 		}
 
 		return $missing;
@@ -1052,6 +1075,484 @@ final class BlocksSurface {
 		);
 	}
 
+	private static function check_block_hooks_post_object_and_rest_response( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures                       = array();
+		$case                           = self::block_hooks_case( $ctx->fork( 'post-object' ) );
+		$case                          += self::block_hooks_post_object_names( $ctx->fork( 'wrapper' ) );
+		$events                         = array();
+		$post_id                        = 0;
+		$had_rewrite                    = array_key_exists( 'wp_rewrite', $GLOBALS );
+		$previous_rewrite               = $GLOBALS['wp_rewrite'] ?? null;
+		$previous_content_hook_priority = \has_filter( 'the_content', 'apply_block_hooks_to_content_from_post_object' );
+
+		$case['registrations'] += array(
+			$case['rootFirstName']   => array(
+				'title'       => 'Component Fuzz Root First Child',
+				'api_version' => 3,
+				'block_hooks' => array( 'core/post-content' => 'first_child' ),
+			),
+			$case['rootIgnoredName'] => array(
+				'title'       => 'Component Fuzz Root Ignored Child',
+				'api_version' => 3,
+				'block_hooks' => array( 'core/post-content' => 'first_child' ),
+			),
+			$case['rootLastName']    => array(
+				'title'       => 'Component Fuzz Root Last Child',
+				'api_version' => 3,
+				'block_hooks' => array( 'core/post-content' => 'last_child' ),
+			),
+			$case['rootBeforeName']  => array(
+				'title'       => 'Component Fuzz Root Before Suppressed',
+				'api_version' => 3,
+				'block_hooks' => array( 'core/post-content' => 'before' ),
+			),
+			$case['rootAfterName']   => array(
+				'title'       => 'Component Fuzz Root After Suppressed',
+				'api_version' => 3,
+				'block_hooks' => array( 'core/post-content' => 'after' ),
+			),
+		);
+
+		$filter_hooked_block_types = static function ( array $hooked_block_types, string $relative_position, string $anchor_block_type, $context ) use ( $case, &$events ): array {
+			$events[] = array(
+				'filter'   => 'hooked_block_types',
+				'position' => $relative_position,
+				'anchor'   => $anchor_block_type,
+				'context'  => $context instanceof \WP_Post ? array( 'postId' => (int) $context->ID, 'postType' => $context->post_type ) : null,
+				'types'    => array_values( $hooked_block_types ),
+			);
+
+			if ( $case['anchorName'] === $anchor_block_type && 'before' === $relative_position ) {
+				if ( ! in_array( $case['filterName'], $hooked_block_types, true ) ) {
+					$hooked_block_types[] = $case['filterName'];
+				}
+			}
+
+			return array_values( $hooked_block_types );
+		};
+		$filter_hooked_block       = static function ( $parsed_hooked_block, string $hooked_block_type, string $relative_position, array $parsed_anchor_block, $context ) use ( $case, &$events ) {
+			$events[] = array(
+				'filter'   => 'hooked_block',
+				'type'     => $hooked_block_type,
+				'position' => $relative_position,
+				'anchor'   => $parsed_anchor_block['blockName'] ?? null,
+				'context'  => $context instanceof \WP_Post ? array( 'postId' => (int) $context->ID, 'postType' => $context->post_type ) : null,
+			);
+
+			if ( is_array( $parsed_hooked_block ) ) {
+				$parsed_hooked_block['attrs']['cfzToken']    = $case['token'];
+				$parsed_hooked_block['attrs']['cfzPosition'] = $relative_position;
+				$parsed_hooked_block['attrs']['cfzAnchor']   = $parsed_anchor_block['blockName'] ?? '';
+			}
+
+			return $parsed_hooked_block;
+		};
+		$render_marker_filter      = static function ( string $content ) use ( $case ): string {
+			return $content . '<!-- cfz-rendered-' . esc_attr( $case['token'] ) . ' -->';
+		};
+
+		foreach ( $case['registrations'] as $name => $args ) {
+			\register_block_type( $name, $args );
+		}
+
+		\add_filter( 'hooked_block_types', $filter_hooked_block_types, 10, 4 );
+		\add_filter( 'hooked_block', $filter_hooked_block, 10, 5 );
+		if ( false === $previous_content_hook_priority ) {
+			\add_filter( 'the_content', 'apply_block_hooks_to_content_from_post_object', 8 );
+		}
+		\add_filter( 'the_content', $render_marker_filter, 12 );
+
+		try {
+			$GLOBALS['wp_rewrite'] = class_exists( 'WP_Rewrite' )
+				? new \WP_Rewrite()
+				: (object) array( 'feeds' => array( 'feed', 'rdf', 'rss', 'rss2', 'atom' ) );
+
+			$content = \serialize_blocks( array( $case['anchorBlock'] ) );
+			$post_id = \wp_insert_post(
+				\wp_slash(
+					array(
+						'post_type'    => 'post',
+						'post_status'  => 'publish',
+						'post_title'   => 'Block Hooks Post Object ' . $case['token'],
+						'post_name'    => 'block-hooks-post-object-' . $case['token'],
+						'post_content' => $content,
+						'guid'         => 'http://example.test/block-hooks-post-object-' . $case['token'],
+					)
+				),
+				true,
+				false
+			);
+
+			if ( \is_wp_error( $post_id ) ) {
+				throw new \RuntimeException( 'Could not insert block hooks fixture post: ' . $post_id->get_error_message() );
+			}
+
+			\update_post_meta( (int) $post_id, '_wp_ignored_hooked_blocks', \wp_json_encode( array( $case['rootIgnoredName'] ) ) );
+			$post = \get_post( (int) $post_id );
+			if ( ! $post instanceof \WP_Post ) {
+				throw new \RuntimeException( 'Could not read block hooks fixture post.' );
+			}
+
+			$ignored_at_root = array();
+			$post_augmented  = \apply_block_hooks_to_content_from_post_object( $content, $post, 'insert_hooked_blocks_and_set_ignored_hooked_blocks_metadata', $ignored_at_root );
+			$post_tree       = \parse_blocks( $post_augmented );
+			$post_anchor     = self::find_first_block( $post_tree, $case['anchorName'] );
+			$post_top_names  = self::block_names( $post_tree );
+			$post_root_first = self::find_first_block( $post_tree, $case['rootFirstName'] );
+			$post_root_last  = self::find_first_block( $post_tree, $case['rootLastName'] );
+
+			$prepared = \update_ignored_hooked_blocks_postmeta(
+				(object) array(
+					'ID'           => (int) $post_id,
+					'post_type'    => 'post',
+					'post_content' => $content,
+				)
+			);
+			$prepared_tree       = \parse_blocks( (string) ( $prepared->post_content ?? '' ) );
+			$prepared_anchor     = self::find_first_block( $prepared_tree, $case['anchorName'] );
+			$prepared_root_meta  = self::json_list( $prepared->meta_input['_wp_ignored_hooked_blocks'] ?? '' );
+			$prepared_anchor_meta = is_array( $prepared_anchor )
+				? ( $prepared_anchor['attrs']['metadata']['ignoredHookedBlocks'] ?? array() )
+				: array();
+
+			$response = new \WP_REST_Response(
+				array(
+					'content' => array(
+						'raw'      => $content,
+						'rendered' => '<p>placeholder</p>',
+					),
+					'meta'    => array(
+						'component_fuzz_existing' => $case['token'],
+					),
+				)
+			);
+			$response       = \insert_hooked_blocks_into_rest_response( $response, $post );
+			$response_data  = $response instanceof \WP_REST_Response ? $response->get_data() : array();
+			$raw            = (string) ( $response_data['content']['raw'] ?? '' );
+			$rendered       = (string) ( $response_data['content']['rendered'] ?? '' );
+			$response_tree  = \parse_blocks( $raw );
+			$response_anchor = self::find_first_block( $response_tree, $case['anchorName'] );
+			$response_anchor_meta = is_array( $response_anchor )
+				? ( $response_anchor['attrs']['metadata']['ignoredHookedBlocks'] ?? array() )
+				: array();
+			$response_root_meta = self::json_list( $response_data['meta']['_wp_ignored_hooked_blocks'] ?? '' );
+
+			$expected_post_top_names = array(
+				$case['rootFirstName'],
+				$case['beforeName'],
+				$case['filterName'],
+				$case['anchorName'],
+				$case['afterName'],
+				$case['singleName'],
+				$case['rootLastName'],
+			);
+			$expected_root_ignored   = array( $case['rootIgnoredName'], $case['rootFirstName'], $case['rootLastName'] );
+			$expected_anchor_ignored = array(
+				$case['beforeName'],
+				$case['ignoredBeforeName'],
+				$case['filterName'],
+				$case['afterName'],
+				$case['singleName'],
+				$case['firstName'],
+				$case['lastName'],
+			);
+			$expected_rest_anchor_ignored = array(
+				$case['beforeName'],
+				$case['ignoredBeforeName'],
+				$case['filterName'],
+				$case['afterName'],
+				$case['firstName'],
+				$case['lastName'],
+			);
+
+			self::collect_failure(
+				$failures,
+				self::block_hooks_post_object_markup_matches( $post_augmented, $case ),
+				'apply_block_hooks_to_content_from_post_object inserts expected hooked block markup and suppresses ignored hooks',
+				array(
+					'counts' => self::block_comment_counts(
+						$post_augmented,
+						array(
+							$case['rootFirstName'],
+							$case['rootIgnoredName'],
+							$case['rootBeforeName'],
+							$case['rootAfterName'],
+							$case['beforeName'],
+							$case['ignoredBeforeName'],
+							$case['filterName'],
+							$case['anchorName'],
+							$case['afterName'],
+							$case['singleName'],
+							$case['firstName'],
+							$case['lastName'],
+							$case['rootLastName'],
+						)
+					),
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				self::string_lists_match_unordered( $ignored_at_root, $expected_root_ignored ),
+				'apply_block_hooks_to_content_from_post_object reports wrapper root ignored metadata by reference',
+				array(
+					'expected' => $expected_root_ignored,
+					'actual'   => $ignored_at_root,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$expected_post_top_names === $post_top_names,
+				'apply_block_hooks_to_content_from_post_object removes the temporary wrapper and preserves top-level ordering',
+				array(
+					'expected' => $expected_post_top_names,
+					'actual'   => $post_top_names,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				self::hooked_block_attrs_match( $post_root_first, $case, 'first_child', 'core/post-content' )
+					&& self::hooked_block_attrs_match( $post_root_last, $case, 'last_child', 'core/post-content' ),
+				'apply_block_hooks_to_content_from_post_object passes wrapper anchor context through hooked_block attributes',
+				array(
+					'rootFirstAttrs' => is_array( $post_root_first ) ? ( $post_root_first['attrs'] ?? array() ) : null,
+					'rootLastAttrs'  => is_array( $post_root_last ) ? ( $post_root_last['attrs'] ?? array() ) : null,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				self::hooked_block_types_event_matches_for_post(
+					$events,
+					(int) $post_id,
+					'core/post-content',
+					'first_child',
+					array( $case['rootFirstName'], $case['rootIgnoredName'] )
+				),
+				'apply_block_hooks_to_content_from_post_object invokes root first_child hooked_block_types with the fixture WP_Post context',
+				array(
+					'anchorMetadata' => is_array( $post_anchor ) ? ( $post_anchor['attrs']['metadata']['ignoredHookedBlocks'] ?? array() ) : null,
+					'events'         => array_slice( $events, 0, 18 ),
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				self::hooked_block_types_event_matches_for_post(
+					$events,
+					(int) $post_id,
+					'core/post-content',
+					'last_child',
+					array( $case['rootLastName'] )
+				),
+				'apply_block_hooks_to_content_from_post_object invokes root last_child hooked_block_types with the fixture WP_Post context',
+				array( 'events' => array_slice( $events, 0, 18 ) )
+			);
+
+			self::collect_failure(
+				$failures,
+				self::hooked_block_types_event_matches_for_post(
+					$events,
+					(int) $post_id,
+					'core/post-content',
+					'before',
+					array( $case['rootBeforeName'] )
+				)
+					&& self::hooked_block_types_event_matches_for_post(
+						$events,
+						(int) $post_id,
+						'core/post-content',
+						'after',
+						array( $case['rootAfterName'] )
+					),
+				'apply_block_hooks_to_content_from_post_object exposes wrapper before/after hook types to filters before suppressing emitted markup',
+				array( 'events' => array_slice( $events, 0, 18 ) )
+			);
+
+			self::collect_failure(
+				$failures,
+				self::hooked_block_event_matches_for_post(
+					$events,
+					(int) $post_id,
+					$case['filterName'],
+					'before',
+					$case['anchorName']
+				),
+				'apply_block_hooks_to_content_from_post_object invokes hooked_block for filtered inner anchor hook with the fixture WP_Post context',
+				array( 'events' => array_slice( $events, 0, 18 ) )
+			);
+
+			self::collect_failure(
+				$failures,
+				self::string_lists_match_unordered(
+					$prepared_root_meta,
+					array(
+						$case['rootIgnoredName'],
+						$case['rootBeforeName'],
+						$case['rootFirstName'],
+						$case['rootLastName'],
+						$case['rootAfterName'],
+					)
+				)
+					&& self::string_lists_match_unordered(
+						$prepared_anchor_meta,
+						array(
+							$case['beforeName'],
+							$case['ignoredBeforeName'],
+							$case['filterName'],
+							$case['afterName'],
+							$case['singleName'],
+							$case['firstName'],
+							$case['lastName'],
+						)
+					)
+					&& 0 === self::block_comment_count( (string) ( $prepared->post_content ?? '' ), $case['rootFirstName'] )
+					&& 0 === self::block_comment_count( (string) ( $prepared->post_content ?? '' ), $case['rootLastName'] )
+					&& 0 === self::block_comment_count( (string) ( $prepared->post_content ?? '' ), $case['beforeName'] )
+					&& 0 === self::block_comment_count( (string) ( $prepared->post_content ?? '' ), $case['afterName'] ),
+				'update_ignored_hooked_blocks_postmeta stores root ignored metadata and mutates anchor metadata without inserting hooked markup',
+				array(
+					'preparedRootMeta'   => $prepared_root_meta,
+					'preparedAnchorMeta' => $prepared_anchor_meta,
+					'preparedContent'    => (string) ( $prepared->post_content ?? '' ),
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$response instanceof \WP_REST_Response
+					&& self::block_hooks_post_object_markup_matches( $raw, $case ),
+				'insert_hooked_blocks_into_rest_response mutates content.raw with post-object hooked block markup',
+				array(
+					'rawCounts' => self::block_comment_counts(
+						$raw,
+						array(
+							$case['rootFirstName'],
+							$case['rootIgnoredName'],
+							$case['rootBeforeName'],
+							$case['rootAfterName'],
+							$case['beforeName'],
+							$case['ignoredBeforeName'],
+							$case['filterName'],
+							$case['anchorName'],
+							$case['afterName'],
+							$case['singleName'],
+							$case['firstName'],
+							$case['lastName'],
+							$case['rootLastName'],
+						)
+					),
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				self::string_lists_match_unordered( $response_root_meta, $expected_root_ignored )
+					&& $case['token'] === ( $response_data['meta']['component_fuzz_existing'] ?? null ),
+				'insert_hooked_blocks_into_rest_response stores root ignored metadata while preserving existing response meta',
+				array(
+					'responseRootMeta' => $response_root_meta,
+					'expectedRootMeta' => $expected_root_ignored,
+					'meta'             => $response_data['meta'] ?? null,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				is_array( $response_anchor )
+					&& self::string_lists_match_unordered( $response_anchor_meta, $expected_rest_anchor_ignored )
+					&& 1 === self::block_comment_count( $raw, $case['singleName'] ),
+				'insert_hooked_blocks_into_rest_response mutates inner anchor ignored metadata in content.raw',
+				array(
+					'delta'              => self::string_list_delta( $expected_rest_anchor_ignored, $response_anchor_meta ),
+					'responseAnchorMeta' => $response_anchor_meta,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				str_contains( $rendered, '<!-- cfz-rendered-' . $case['token'] . ' -->' )
+					&& 1 === self::block_comment_count( $rendered, $case['rootFirstName'] )
+					&& 1 === self::block_comment_count( $rendered, $case['rootLastName'] ),
+				'insert_hooked_blocks_into_rest_response refreshes non-empty rendered content from mutated raw content exactly once',
+				array(
+					'renderedCounts' => self::block_comment_counts( $rendered, array( $case['rootFirstName'], $case['rootLastName'] ) ),
+					'hasMarker'      => str_contains( $rendered, '<!-- cfz-rendered-' . $case['token'] . ' -->' ),
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				( false === $previous_content_hook_priority ? 8 : $previous_content_hook_priority ) === \has_filter( 'the_content', 'apply_block_hooks_to_content_from_post_object' ),
+				'insert_hooked_blocks_into_rest_response restores the_content block-hooks filter priority',
+				array(
+					'expectedPriority' => false === $previous_content_hook_priority ? 8 : $previous_content_hook_priority,
+					'actualPriority'   => \has_filter( 'the_content', 'apply_block_hooks_to_content_from_post_object' ),
+				)
+			);
+		} finally {
+			\remove_filter( 'the_content', $render_marker_filter, 12 );
+			if ( false === $previous_content_hook_priority ) {
+				\remove_filter( 'the_content', 'apply_block_hooks_to_content_from_post_object', 8 );
+			}
+			\remove_filter( 'hooked_block', $filter_hooked_block, 10 );
+			\remove_filter( 'hooked_block_types', $filter_hooked_block_types, 10 );
+
+			if ( is_int( $post_id ) && $post_id > 0 ) {
+				\wp_delete_post( $post_id, true );
+			}
+
+			if ( isset( $GLOBALS['wpdb'] ) && $GLOBALS['wpdb'] instanceof \Component_Fuzz_WPDB_Stub ) {
+				$GLOBALS['wpdb']->component_fuzz_reset_content();
+			}
+
+			foreach ( array_keys( $case['registrations'] ) as $name ) {
+				\unregister_block_type( $name );
+			}
+
+			if ( $had_rewrite ) {
+				$GLOBALS['wp_rewrite'] = $previous_rewrite;
+			} else {
+				unset( $GLOBALS['wp_rewrite'] );
+			}
+		}
+
+		$counts = isset( $GLOBALS['wpdb'] ) && method_exists( $GLOBALS['wpdb'], 'component_fuzz_content_counts' )
+			? $GLOBALS['wpdb']->component_fuzz_content_counts()
+			: array();
+
+		self::collect_failure(
+			$failures,
+			false === \has_filter( 'hooked_block_types', $filter_hooked_block_types )
+				&& false === \has_filter( 'hooked_block', $filter_hooked_block )
+				&& false === \has_filter( 'the_content', $render_marker_filter )
+				&& $previous_content_hook_priority === \has_filter( 'the_content', 'apply_block_hooks_to_content_from_post_object' )
+				&& array() === array_filter( $counts ),
+			'block hooks post-object fixture removes filters, registrations, posts, and metadata',
+			array(
+				'contentCounts' => $counts,
+				'filters'       => array(
+					'hooked_block_types' => \has_filter( 'hooked_block_types', $filter_hooked_block_types ),
+					'hooked_block'       => \has_filter( 'hooked_block', $filter_hooked_block ),
+					'the_content_marker' => \has_filter( 'the_content', $render_marker_filter ),
+					'the_content_hooks'  => \has_filter( 'the_content', 'apply_block_hooks_to_content_from_post_object' ),
+				),
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'blocks.hooks.post-object-rest-response-metadata',
+			array() === $failures,
+			array(
+				'case'     => array_diff_key( $case, array( 'anchorBlock' => true, 'registrations' => true ) ),
+				'failures' => array_slice( $failures, 0, 6 ),
+			)
+		);
+	}
+
 	private static function check_block_supports( \ComponentFuzz\FuzzContext $ctx ): array {
 		$failures     = array();
 		$supports_api = \WP_Block_Supports::get_instance();
@@ -1723,6 +2224,16 @@ final class BlocksSurface {
 		);
 	}
 
+	private static function block_hooks_post_object_names( \ComponentFuzz\FuzzContext $ctx ): array {
+		return array(
+			'rootFirstName'   => 'component-fuzz/' . self::slug( $ctx->fork( 'root-first' ), 'hook-root-first' ),
+			'rootIgnoredName' => 'component-fuzz/' . self::slug( $ctx->fork( 'root-ignored' ), 'hook-root-ignored' ),
+			'rootLastName'    => 'component-fuzz/' . self::slug( $ctx->fork( 'root-last' ), 'hook-root-last' ),
+			'rootBeforeName'  => 'component-fuzz/' . self::slug( $ctx->fork( 'root-before' ), 'hook-root-before' ),
+			'rootAfterName'   => 'component-fuzz/' . self::slug( $ctx->fork( 'root-after' ), 'hook-root-after' ),
+		);
+	}
+
 	private static function write_metadata_block_files( array $case ): string {
 		$dir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'component-fuzz-blocks-' . getmypid() . '-' . substr( sha1( $case['name'] ), 0, 12 );
 		if ( is_dir( $dir ) ) {
@@ -1939,11 +2450,87 @@ final class BlocksSurface {
 		return substr_count( $content, '<!-- wp:' . $name );
 	}
 
-	private static function hooked_block_attrs_match( ?array $block, array $case, string $position ): bool {
+	private static function block_comment_counts( string $content, array $names ): array {
+		$counts = array();
+		foreach ( $names as $name ) {
+			$counts[ $name ] = self::block_comment_count( $content, $name );
+		}
+		return $counts;
+	}
+
+	private static function hooked_block_attrs_match( ?array $block, array $case, string $position, ?string $anchor = null ): bool {
 		$attrs = is_array( $block ) && is_array( $block['attrs'] ?? null ) ? $block['attrs'] : array();
 		return $case['token'] === ( $attrs['cfzToken'] ?? null )
 			&& $position === ( $attrs['cfzPosition'] ?? null )
-			&& $case['anchorName'] === ( $attrs['cfzAnchor'] ?? null );
+			&& ( $anchor ?? $case['anchorName'] ) === ( $attrs['cfzAnchor'] ?? null );
+	}
+
+	private static function block_hooks_post_object_markup_matches( string $content, array $case ): bool {
+		foreach (
+			array(
+				$case['rootFirstName'],
+				$case['beforeName'],
+				$case['filterName'],
+				$case['anchorName'],
+				$case['afterName'],
+				$case['singleName'],
+				$case['firstName'],
+				$case['lastName'],
+				$case['rootLastName'],
+			) as $present
+		) {
+			if ( 1 !== self::block_comment_count( $content, $present ) ) {
+				return false;
+			}
+		}
+
+		foreach (
+			array(
+				$case['rootIgnoredName'],
+				$case['rootBeforeName'],
+				$case['rootAfterName'],
+				$case['ignoredBeforeName'],
+				$case['suppressedName'],
+			) as $absent
+		) {
+			if ( 0 !== self::block_comment_count( $content, $absent ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function hooked_block_types_event_matches_for_post( array $events, int $post_id, string $anchor, string $position, array $types ): bool {
+		foreach ( $events as $event ) {
+			if (
+				'hooked_block_types' === ( $event['filter'] ?? null )
+				&& $position === ( $event['position'] ?? null )
+				&& $anchor === ( $event['anchor'] ?? null )
+				&& $post_id === (int) ( $event['context']['postId'] ?? 0 )
+				&& $types === ( $event['types'] ?? null )
+			) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private static function hooked_block_event_matches_for_post( array $events, int $post_id, string $type, string $position, string $anchor ): bool {
+		foreach ( $events as $event ) {
+			if (
+				'hooked_block' === ( $event['filter'] ?? null )
+				&& $type === ( $event['type'] ?? null )
+				&& $position === ( $event['position'] ?? null )
+				&& $anchor === ( $event['anchor'] ?? null )
+				&& $post_id === (int) ( $event['context']['postId'] ?? 0 )
+			) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	private static function hooked_block_types_event_matches( array $events, string $anchor, string $position, string $context, array $types ): bool {
@@ -1994,6 +2581,26 @@ final class BlocksSurface {
 		sort( $actual, SORT_STRING );
 		sort( $expected, SORT_STRING );
 		return $expected === $actual;
+	}
+
+	private static function string_list_delta( array $expected, array $actual ): array {
+		return array(
+			'missing' => array_values( array_diff( $expected, $actual ) ),
+			'extra'   => array_values( array_diff( $actual, $expected ) ),
+		);
+	}
+
+	private static function json_list( $value ): array {
+		if ( is_array( $value ) ) {
+			return $value;
+		}
+
+		if ( ! is_string( $value ) || '' === $value ) {
+			return array();
+		}
+
+		$decoded = json_decode( $value, true );
+		return is_array( $decoded ) ? $decoded : array();
 	}
 
 	private static function log_contains( array $log, ?string $name, ?string $parent ): bool {

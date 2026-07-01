@@ -123,9 +123,10 @@ database, network requests, or a configured site.
   and session token lifecycle operations.
 - `blocks`: block parser/serializer round trips, optimized block detection,
   dynamic render filters, render-time block bindings, block type metadata,
-  variations, block hook insertion and ignored metadata, style,
-  pattern/category, bindings, and supports registries, including dynamic block
-  attribute preparation and wrapper attribute merging.
+  variations, block hook insertion, ignored metadata, post-object wrapper and
+  REST response block hook metadata, style, pattern/category, bindings, and
+  supports registries, including dynamic block attribute preparation and
+  wrapper attribute merging.
 - `block-supports`: no-DB core block-support lifecycle coverage, including
   `WP_Block_Supports` registration and wrapper merging, auto-generated control
   markers, direct support callbacks, skip-serialization gates, background,
