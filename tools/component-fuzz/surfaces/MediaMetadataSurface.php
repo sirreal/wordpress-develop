@@ -43,6 +43,7 @@ final class MediaMetadataSurface {
 				$rows[] = self::check_id3_tag_and_timestamp_helpers( $ctx->fork( 'id3-helper' ) );
 				$rows[] = self::check_extension_key_and_attachment_helpers( $ctx->fork( 'helpers' ), $temp_root );
 				$rows[] = self::check_audio_video_shortcode_rendering( $ctx->fork( 'shortcodes' ) );
+				$rows[] = self::check_gallery_playlist_shortcode_rendering( $ctx->fork( 'gallery-playlist' ) );
 				$rows[] = self::check_attachment_metadata_get_update_helpers( $ctx->fork( 'metadata' ), $temp_root );
 				$rows[] = self::check_generated_metadata_replacement_oracles( $ctx->fork( 'metadata-shapes' ), $temp_root );
 				$rows[] = self::check_original_image_metadata_helpers( $ctx->fork( 'original-image' ), $temp_root );
@@ -81,48 +82,77 @@ final class MediaMetadataSurface {
 		foreach (
 			array(
 				'add_filter',
+				'add_action',
+				'add_theme_support',
 				'create_initial_post_types',
 				'create_initial_taxonomies',
 				'current_theme_supports',
+				'current_user_can',
 				'esc_attr',
+				'esc_html',
 				'esc_url',
+				'gallery_shortcode',
 				'get_attached_file',
+				'get_attachment_link',
+				'get_children',
 				'get_post_meta',
 				'get_post',
 				'get_post_mime_type',
+				'get_post_thumbnail_id',
+				'get_posts',
+				'has_action',
 				'has_filter',
+				'is_feed',
+				'is_post_publicly_viewable',
 				'metadata_exists',
 				'maybe_serialize',
 				'maybe_unserialize',
 				'post_type_supports',
+				'post_password_required',
+				'remove_action',
 				'remove_filter',
 				'remove_post_type_support',
 				'remove_theme_support',
 				'sanitize_file_name',
+				'sanitize_html_class',
+				'shortcode_atts',
+				'tag_escape',
 				'wp_add_id3_tag_data',
 				'wp_attachment_is',
 				'wp_attachment_is_image',
 				'wp_cache_flush',
 				'wp_cache_set',
 				'wp_check_filetype',
+				'wp_enqueue_script',
+				'wp_enqueue_style',
 				'wp_filesize',
 				'wp_generate_attachment_metadata',
 				'wp_get_attachment_id3_keys',
 				'wp_get_audio_extensions',
 				'wp_get_attachment_metadata',
+				'wp_get_attachment_image',
+				'wp_get_attachment_link',
 				'wp_get_attachment_url',
+				'wp_get_mime_types',
 				'wp_get_original_image_path',
 				'wp_get_original_image_url',
 				'wp_get_media_creation_timestamp',
 				'wp_get_upload_dir',
 				'wp_get_video_extensions',
 				'wp_image_file_matches_image_meta',
+				'wp_json_encode',
 				'wp_mediaelement_fallback',
+				'wp_mime_type_icon',
+				'wp_parse_id_list',
+				'wp_playlist_shortcode',
 				'wp_audio_shortcode',
 				'wp_video_shortcode',
 				'wp_update_attachment_metadata',
 				'wp_read_audio_metadata',
 				'wp_read_video_metadata',
+				'wp_validate_boolean',
+				'wp_kses_allowed_html',
+				'wptexturize',
 				'wp_set_current_user',
 			) as $function
 		) {
@@ -131,7 +161,7 @@ final class MediaMetadataSurface {
 			}
 		}
 
-		foreach ( array( 'WP_Post', 'WP_Rewrite' ) as $class ) {
+		foreach ( array( 'WP_Post', 'WP_Query', 'WP_Rewrite' ) as $class ) {
 			if ( ! class_exists( $class ) ) {
 				$missing[] = "class {$class}";
 			}
@@ -869,6 +899,789 @@ final class MediaMetadataSurface {
 		return self::row(
 			$ctx,
 			'media-metadata.audio-video-shortcode-rendering-filters',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, 8 ) )
+		);
+	}
+
+	private static function check_gallery_playlist_shortcode_rendering( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures                 = array();
+		$runtime_snapshot         = self::snapshot_media_shortcode_runtime();
+		$previous_post_set        = array_key_exists( 'post', $GLOBALS );
+		$previous_post            = $GLOBALS['post'] ?? null;
+		$previous_wp_query_set    = array_key_exists( 'wp_query', $GLOBALS );
+		$previous_wp_query        = $GLOBALS['wp_query'] ?? null;
+		$theme_features_set       = array_key_exists( '_wp_theme_features', $GLOBALS );
+		$theme_features           = $GLOBALS['_wp_theme_features'] ?? null;
+		$footer_template_before   = \has_action( 'wp_footer', 'wp_underscore_playlist_templates' );
+		$admin_template_before    = \has_action( 'admin_footer', 'wp_underscore_playlist_templates' );
+		$base_id                  = 918000 + ( $ctx->iteration() * 100 );
+		$token                    = $ctx->identifier( 5, 12 );
+		$parent_id                = $base_id + 1;
+		$private_parent_id        = $base_id + 2;
+		$landscape_id             = $base_id + 11;
+		$portrait_id              = $base_id + 12;
+		$pdf_id                   = $base_id + 13;
+		$private_image_id         = $base_id + 14;
+		$audio_id                 = $base_id + 21;
+		$second_audio_id          = $base_id + 22;
+		$private_audio_id         = $base_id + 23;
+		$video_id                 = $base_id + 31;
+		$thumb_id                 = $base_id + 41;
+		$gallery_events           = array(
+			'override'     => array(),
+			'atts'         => array(),
+			'defaultStyle' => array(),
+			'style'        => array(),
+			'imageAttrs'   => array(),
+			'links'        => array(),
+		);
+		$playlist_events          = array(
+			'override' => array(),
+			'atts'     => array(),
+			'scripts'  => array(),
+			'id3'      => array(),
+		);
+		$query_events             = array();
+		$image_source_events      = array();
+		$attachment_url_events    = array();
+		$gallery_style_enabled    = true;
+		$footer_template_after    = null;
+		$admin_template_after     = null;
+		$filters_removed          = false;
+
+		$parent = self::seed_post_cache(
+			$parent_id,
+			array(
+				'post_title' => 'Component gallery host ' . $token,
+				'post_name'  => 'component-gallery-host-' . $token,
+			)
+		);
+		self::seed_post_cache(
+			$private_parent_id,
+			array(
+				'post_title'    => 'Private component gallery host ' . $token,
+				'post_name'     => 'private-component-gallery-host-' . $token,
+				'post_status'   => 'private',
+				'post_password' => 'secret-' . $token,
+			)
+		);
+
+		self::seed_attachment_post(
+			$landscape_id,
+			'image/jpeg',
+			'2026/06/gallery-landscape-' . $token . '.jpg',
+			array(
+				'post_parent'  => $parent_id,
+				'post_title'   => 'Landscape ' . $token,
+				'post_excerpt' => 'Landscape caption ' . $token,
+				'menu_order'   => 1,
+			),
+			array(
+				'_wp_attachment_metadata'  => array(
+					'file'   => '2026/06/gallery-landscape-' . $token . '.jpg',
+					'width'  => 1600,
+					'height' => 900,
+				),
+				'_wp_attachment_image_alt' => 'Landscape alt ' . $token,
+			)
+		);
+		self::seed_attachment_post(
+			$portrait_id,
+			'image/jpeg',
+			'2026/06/gallery-portrait-' . $token . '.jpg',
+			array(
+				'post_parent'  => $parent_id,
+				'post_title'   => 'Portrait ' . $token,
+				'post_excerpt' => 'Portrait caption ' . $token,
+				'menu_order'   => 2,
+			),
+			array(
+				'_wp_attachment_metadata'  => array(
+					'file'   => '2026/06/gallery-portrait-' . $token . '.jpg',
+					'width'  => 700,
+					'height' => 1100,
+				),
+				'_wp_attachment_image_alt' => 'Portrait alt ' . $token,
+			)
+		);
+		self::seed_attachment_post(
+			$pdf_id,
+			'application/pdf',
+			'2026/06/gallery-document-' . $token . '.pdf',
+			array(
+				'post_parent' => $parent_id,
+				'post_title'  => 'Document ' . $token,
+				'menu_order'  => 3,
+			)
+		);
+		self::seed_attachment_post(
+			$private_image_id,
+			'image/jpeg',
+			'2026/06/private-gallery-' . $token . '.jpg',
+			array(
+				'post_parent'  => $private_parent_id,
+				'post_title'   => 'Private image ' . $token,
+				'post_excerpt' => 'Private caption ' . $token,
+			),
+			array(
+				'_wp_attachment_metadata' => array(
+					'file'   => '2026/06/private-gallery-' . $token . '.jpg',
+					'width'  => 300,
+					'height' => 200,
+				),
+			)
+		);
+		self::seed_attachment_post(
+			$thumb_id,
+			'image/jpeg',
+			'2026/06/playlist-thumb-' . $token . '.jpg',
+			array(
+				'post_parent' => $parent_id,
+				'post_title'  => 'Playlist thumb ' . $token,
+			),
+			array(
+				'_wp_attachment_metadata' => array(
+					'file'   => '2026/06/playlist-thumb-' . $token . '.jpg',
+					'width'  => 640,
+					'height' => 360,
+				),
+			)
+		);
+		self::seed_attachment_post(
+			$audio_id,
+			'audio/mpeg',
+			'2026/06/playlist-audio-' . $token . '.mp3',
+			array(
+				'post_parent'  => $parent_id,
+				'post_title'   => 'Audio title ' . $token,
+				'post_excerpt' => 'Audio caption ' . $token,
+				'post_content' => 'Audio description <tag> ' . $token,
+				'menu_order'   => 1,
+			),
+			array(
+				'_thumbnail_id'            => (string) $thumb_id,
+				'_wp_attachment_metadata'  => array(
+					'artist'           => 'Artist ' . $token,
+					'album'            => 'Album ' . $token,
+					'genre'            => 'Genre ' . $token,
+					'year'             => '2026',
+					'length_formatted' => '1:23',
+					'composer'         => 'Composer ' . $token,
+				),
+			)
+		);
+		self::seed_attachment_post(
+			$second_audio_id,
+			'audio/ogg',
+			'2026/06/playlist-second-' . $token . '.ogg',
+			array(
+				'post_parent'  => $parent_id,
+				'post_title'   => 'Second audio ' . $token,
+				'post_excerpt' => 'Second caption ' . $token,
+				'menu_order'   => 2,
+			),
+			array(
+				'_wp_attachment_metadata' => array(
+					'artist'           => 'Second artist ' . $token,
+					'length_formatted' => '2:34',
+				),
+			)
+		);
+		self::seed_attachment_post(
+			$private_audio_id,
+			'audio/mpeg',
+			'2026/06/private-audio-' . $token . '.mp3',
+			array(
+				'post_parent' => $private_parent_id,
+				'post_title'  => 'Private audio ' . $token,
+			),
+			array(
+				'_wp_attachment_metadata' => array(
+					'length_formatted' => '0:42',
+				),
+			)
+		);
+		self::seed_attachment_post(
+			$video_id,
+			'video/mp4',
+			'2026/06/playlist-video-' . $token . '.mp4',
+			array(
+				'post_parent'  => $parent_id,
+				'post_title'   => 'Video title ' . $token,
+				'post_excerpt' => 'Video caption ' . $token,
+				'post_content' => 'Video description <tag> ' . $token,
+			),
+			array(
+				'_wp_attachment_metadata' => array(
+					'width'            => 1280,
+					'height'           => 720,
+					'length_formatted' => '3:21',
+				),
+			)
+		);
+
+		$fixtures = array();
+		foreach (
+			array(
+				$landscape_id      => 'image',
+				$portrait_id       => 'image',
+				$pdf_id            => 'document',
+				$private_image_id  => 'image',
+				$thumb_id          => 'image',
+				$audio_id          => 'audio',
+				$second_audio_id   => 'audio',
+				$private_audio_id  => 'audio',
+				$video_id          => 'video',
+			) as $attachment_id => $kind
+		) {
+			$fixtures[ $attachment_id ] = array(
+				'kind' => $kind,
+				'post' => \get_post( $attachment_id ),
+			);
+		}
+
+		$query_filter = static function ( $posts, \WP_Query $query ) use ( &$query_events, $fixtures ) {
+			$vars = $query->query_vars;
+			if ( 'attachment' !== ( $vars['post_type'] ?? null ) ) {
+				return $posts;
+			}
+
+			$mime_group = $vars['post_mime_type'] ?? '';
+			if ( ! in_array( $mime_group, array( 'image', 'audio', 'video' ), true ) ) {
+				return $posts;
+			}
+
+			$post__in     = array_map( 'intval', (array) ( $vars['post__in'] ?? array() ) );
+			$post__not_in = array_map( 'intval', (array) ( $vars['post__not_in'] ?? array() ) );
+			$post_parent  = isset( $vars['post_parent'] ) && '' !== $vars['post_parent'] ? (int) $vars['post_parent'] : null;
+
+			$query_events[] = array(
+				'mime'          => $mime_group,
+				'postIn'        => $post__in,
+				'postNotIn'     => $post__not_in,
+				'postParent'    => $post_parent,
+				'orderby'       => $vars['orderby'] ?? null,
+				'order'         => $vars['order'] ?? null,
+				'noFoundRows'   => $vars['no_found_rows'] ?? null,
+				'suppress'      => $vars['suppress_filters'] ?? null,
+			);
+
+			$selected = array();
+			foreach ( $fixtures as $attachment_id => $fixture ) {
+				$post = $fixture['post'];
+				if ( ! $post instanceof \WP_Post || $mime_group !== $fixture['kind'] ) {
+					continue;
+				}
+				if ( null !== $post_parent && $post_parent !== (int) $post->post_parent ) {
+					continue;
+				}
+				if ( array() !== $post__in && ! in_array( (int) $attachment_id, $post__in, true ) ) {
+					continue;
+				}
+				if ( in_array( (int) $attachment_id, $post__not_in, true ) ) {
+					continue;
+				}
+				$selected[] = $post;
+			}
+
+			if ( array() !== $post__in ) {
+				usort(
+					$selected,
+					static function ( \WP_Post $a, \WP_Post $b ) use ( $post__in ): int {
+						return array_search( (int) $a->ID, $post__in, true ) <=> array_search( (int) $b->ID, $post__in, true );
+					}
+				);
+			}
+
+			$query->found_posts   = count( $selected );
+			$query->max_num_pages = 1;
+			return array_values( $selected );
+		};
+		$gallery_override_filter = static function ( string $output, array $attr, int $instance ) use ( &$gallery_events, $token ): string {
+			$gallery_events['override'][] = array(
+				'include'  => $attr['include'] ?? null,
+				'orderby'  => $attr['orderby'] ?? null,
+				'instance' => $instance,
+				'marker'   => $attr['data-cfz'] ?? null,
+			);
+
+			if ( 'override' === ( $attr['data-cfz'] ?? null ) ) {
+				return '<div data-cfz-gallery-override="' . \esc_attr( $token ) . '" data-instance="' . (int) $instance . '"></div>';
+			}
+
+			return $output;
+		};
+		$gallery_atts_filter     = static function ( array $out, array $pairs, array $atts, string $shortcode ) use ( &$gallery_events ): array {
+			$gallery_events['atts'][] = array(
+				'shortcode' => $shortcode,
+				'columns'   => $out['columns'] ?? null,
+				'link'      => $out['link'] ?? null,
+				'rawKeys'   => array_keys( $atts ),
+			);
+
+			if ( isset( $atts['data-cfz-columns'] ) ) {
+				$out['columns'] = max( 1, (int) $atts['data-cfz-columns'] );
+			}
+
+			return $out;
+		};
+		$default_style_filter    = static function ( bool $print ) use ( &$gallery_events, &$gallery_style_enabled ): bool {
+			$gallery_events['defaultStyle'][] = $print;
+			return $gallery_style_enabled;
+		};
+		$gallery_style_filter    = static function ( string $style ) use ( &$gallery_events, $token ): string {
+			$gallery_events['style'][] = array(
+				'hasStyleTag' => str_contains( $style, '<style>' ),
+				'bytes'       => strlen( $style ),
+			);
+
+			return $style . '<!--cfz-gallery-style-' . \esc_attr( $token ) . '-->';
+		};
+		$image_source_filter     = static function ( $image, int $attachment_id, $size, bool $icon ) use ( &$image_source_events, $token ) {
+			$size_key              = is_array( $size ) ? implode( 'x', array_map( 'intval', $size ) ) : (string) $size;
+			$image_source_events[] = array(
+				'id'   => $attachment_id,
+				'size' => $size_key,
+				'icon' => $icon,
+			);
+
+			if ( str_contains( $size_key, 'full' ) ) {
+				return array( 'https://media.example.test/full-' . $attachment_id . '-' . rawurlencode( $token ) . '.jpg', 1200, 800, false );
+			}
+
+			if ( str_contains( $size_key, 'large' ) ) {
+				return array( 'https://media.example.test/large-' . $attachment_id . '-' . rawurlencode( $token ) . '.jpg', 960, 540, true );
+			}
+
+			return array( 'https://media.example.test/thumb-' . $attachment_id . '-' . rawurlencode( $token ) . '.jpg', 300, 200, true );
+		};
+		$image_attributes_filter = static function ( array $attr, \WP_Post $attachment, $size ) use ( &$gallery_events, $token ): array {
+			$gallery_events['imageAttrs'][] = array(
+				'id'       => (int) $attachment->ID,
+				'size'     => is_array( $size ) ? implode( 'x', array_map( 'intval', $size ) ) : (string) $size,
+				'hasAria'  => isset( $attr['aria-describedby'] ),
+				'hasWidth' => isset( $attr['width'] ),
+			);
+			$attr['class']              = trim( (string) ( $attr['class'] ?? '' ) . ' component-gallery-image-' . $token );
+			$attr['data-cfz-gallery']   = 'image <' . $token . '>';
+
+			return $attr;
+		};
+		$link_attributes_filter  = static function ( array $attributes, int $id ) use ( &$gallery_events, $token ): array {
+			$gallery_events['links'][] = array(
+				'id'   => $id,
+				'href' => $attributes['href'] ?? null,
+			);
+			$attributes['data-cfz-link'] = 'gallery ' . $token;
+
+			return $attributes;
+		};
+		$attachment_url_filter   = static function ( $url, int $attachment_id ) use ( &$attachment_url_events, $token ) {
+			$attachment_url_events[] = array(
+				'id'  => $attachment_id,
+				'url' => $url,
+			);
+
+			if ( is_string( $url ) ) {
+				return preg_replace( '/\.([A-Za-z0-9]+)$/', '-cfz-' . rawurlencode( $token ) . '.$1', $url ) ?? $url;
+			}
+
+			return $url;
+		};
+		$playlist_override_filter = static function ( string $output, array $attr, int $instance ) use ( &$playlist_events, $token ): string {
+			$playlist_events['override'][] = array(
+				'include'  => $attr['include'] ?? null,
+				'orderby'  => $attr['orderby'] ?? null,
+				'instance' => $instance,
+				'marker'   => $attr['data-cfz'] ?? null,
+			);
+
+			if ( 'override' === ( $attr['data-cfz'] ?? null ) ) {
+				return '<div data-cfz-playlist-override="' . \esc_attr( $token ) . '" data-instance="' . (int) $instance . '"></div>';
+			}
+
+			return $output;
+		};
+		$playlist_atts_filter    = static function ( array $out, array $pairs, array $atts, string $shortcode ) use ( &$playlist_events ): array {
+			$playlist_events['atts'][] = array(
+				'shortcode' => $shortcode,
+				'type'      => $out['type'] ?? null,
+				'style'     => $out['style'] ?? null,
+				'rawKeys'   => array_keys( $atts ),
+			);
+
+			if ( isset( $atts['data-cfz-style'] ) ) {
+				$out['style'] = (string) $atts['data-cfz-style'];
+			}
+
+			return $out;
+		};
+		$playlist_scripts_action = static function ( string $type, string $style ) use ( &$playlist_events ): void {
+			$playlist_events['scripts'][] = array(
+				'type'  => $type,
+				'style' => $style,
+			);
+		};
+		$id3_keys_filter         = static function ( array $fields, \WP_Post $attachment, string $context ) use ( &$playlist_events ): array {
+			$playlist_events['id3'][] = array(
+				'id'      => (int) $attachment->ID,
+				'context' => $context,
+				'keys'    => array_keys( $fields ),
+			);
+			$fields['composer'] = 'Composer';
+
+			return $fields;
+		};
+		$auto_sizes_filter       = static function (): bool {
+			return false;
+		};
+		$loading_filter          = static function (): array {
+			return array();
+		};
+		$has_query_event         = static function ( string $mime, ?array $post_in, ?int $parent ) use ( &$query_events ): bool {
+			foreach ( $query_events as $event ) {
+				if ( $mime !== ( $event['mime'] ?? null ) ) {
+					continue;
+				}
+				if ( null !== $parent && $parent !== ( $event['postParent'] ?? null ) ) {
+					continue;
+				}
+				if ( null !== $post_in && array_values( $post_in ) !== array_values( $event['postIn'] ?? array() ) ) {
+					continue;
+				}
+				return true;
+			}
+
+			return false;
+		};
+
+		\add_filter( 'posts_pre_query', $query_filter, 10, 2 );
+		\add_filter( 'post_gallery', $gallery_override_filter, 10, 3 );
+		\add_filter( 'shortcode_atts_gallery', $gallery_atts_filter, 10, 4 );
+		\add_filter( 'use_default_gallery_style', $default_style_filter, 10, 1 );
+		\add_filter( 'gallery_style', $gallery_style_filter, 10, 1 );
+		\add_filter( 'wp_get_attachment_image_src', $image_source_filter, 10, 4 );
+		\add_filter( 'wp_get_attachment_image_attributes', $image_attributes_filter, 10, 3 );
+		\add_filter( 'wp_get_attachment_link_attributes', $link_attributes_filter, 10, 2 );
+		\add_filter( 'wp_get_attachment_url', $attachment_url_filter, 10, 2 );
+		\add_filter( 'post_playlist', $playlist_override_filter, 10, 3 );
+		\add_filter( 'shortcode_atts_playlist', $playlist_atts_filter, 10, 4 );
+		\add_action( 'wp_playlist_scripts', $playlist_scripts_action, 1, 2 );
+		\add_filter( 'wp_get_attachment_id3_keys', $id3_keys_filter, 10, 3 );
+		\add_filter( 'wp_img_tag_add_auto_sizes', $auto_sizes_filter );
+		\add_filter( 'pre_wp_get_loading_optimization_attributes', $loading_filter, 10, 4 );
+
+		try {
+			$GLOBALS['post']          = $parent;
+			$GLOBALS['wp_query']      = new \WP_Query();
+			$GLOBALS['content_width'] = 422;
+
+			$gallery_override = \gallery_shortcode(
+				array(
+					'ids'      => "{$landscape_id},{$portrait_id}",
+					'data-cfz' => 'override',
+				)
+			);
+
+			$legacy_gallery = \gallery_shortcode(
+				array(
+					'ids'              => "{$landscape_id},{$portrait_id},{$pdf_id}",
+					'link'             => 'none',
+					'size'             => 'thumbnail',
+					'itemtag'          => 'script',
+					'icontag'          => 'style',
+					'captiontag'       => 'iframe',
+					'data-cfz-columns' => 2,
+				)
+			);
+
+			$gallery_style_enabled = false;
+			\add_theme_support( 'html5', array( 'gallery', 'style' ) );
+			$html5_gallery         = \gallery_shortcode(
+				array(
+					'ids'     => "{$portrait_id},{$landscape_id}",
+					'link'    => 'file',
+					'size'    => 'large',
+					'columns' => 3,
+				)
+			);
+
+			$private_gallery = \gallery_shortcode(
+				array(
+					'id'   => $private_parent_id,
+					'link' => 'none',
+				)
+			);
+
+			$playlist_override = \wp_playlist_shortcode(
+				array(
+					'ids'      => "{$audio_id},{$second_audio_id}",
+					'data-cfz' => 'override',
+				)
+			);
+
+			$audio_playlist = \wp_playlist_shortcode(
+				array(
+					'ids'            => "{$audio_id},{$second_audio_id}",
+					'tracklist'      => '0',
+					'tracknumbers'   => '1',
+					'images'         => '1',
+					'artists'        => '0',
+					'data-cfz-style' => 'dark',
+				)
+			);
+
+			$video_playlist = \wp_playlist_shortcode(
+				array(
+					'ids'     => (string) $video_id,
+					'type'    => 'clips',
+					'images'  => '0',
+					'artists' => '1',
+				)
+			);
+
+			$private_playlist = \wp_playlist_shortcode(
+				array(
+					'id'   => $private_parent_id,
+					'type' => 'audio',
+				)
+			);
+
+			$audio_data = self::media_playlist_json_data( is_string( $audio_playlist ) ? $audio_playlist : '' );
+			$video_data = self::media_playlist_json_data( is_string( $video_playlist ) ? $video_playlist : '' );
+		} finally {
+			\remove_filter( 'pre_wp_get_loading_optimization_attributes', $loading_filter, 10 );
+			\remove_filter( 'wp_img_tag_add_auto_sizes', $auto_sizes_filter, 10 );
+			\remove_filter( 'wp_get_attachment_id3_keys', $id3_keys_filter, 10 );
+			\remove_action( 'wp_playlist_scripts', $playlist_scripts_action, 1 );
+			\remove_filter( 'shortcode_atts_playlist', $playlist_atts_filter, 10 );
+			\remove_filter( 'post_playlist', $playlist_override_filter, 10 );
+			\remove_filter( 'wp_get_attachment_url', $attachment_url_filter, 10 );
+			\remove_filter( 'wp_get_attachment_link_attributes', $link_attributes_filter, 10 );
+			\remove_filter( 'wp_get_attachment_image_attributes', $image_attributes_filter, 10 );
+			\remove_filter( 'wp_get_attachment_image_src', $image_source_filter, 10 );
+			\remove_filter( 'gallery_style', $gallery_style_filter, 10 );
+			\remove_filter( 'use_default_gallery_style', $default_style_filter, 10 );
+			\remove_filter( 'shortcode_atts_gallery', $gallery_atts_filter, 10 );
+			\remove_filter( 'post_gallery', $gallery_override_filter, 10 );
+			\remove_filter( 'posts_pre_query', $query_filter, 10 );
+
+			if ( false === $footer_template_before && false !== \has_action( 'wp_footer', 'wp_underscore_playlist_templates' ) ) {
+				\remove_action( 'wp_footer', 'wp_underscore_playlist_templates', 0 );
+			}
+			if ( false === $admin_template_before && false !== \has_action( 'admin_footer', 'wp_underscore_playlist_templates' ) ) {
+				\remove_action( 'admin_footer', 'wp_underscore_playlist_templates', 0 );
+			}
+
+			if ( $previous_post_set ) {
+				$GLOBALS['post'] = $previous_post;
+			} else {
+				unset( $GLOBALS['post'] );
+			}
+			if ( $previous_wp_query_set ) {
+				$GLOBALS['wp_query'] = $previous_wp_query;
+			} else {
+				unset( $GLOBALS['wp_query'] );
+			}
+			if ( $theme_features_set ) {
+				$GLOBALS['_wp_theme_features'] = $theme_features;
+			} else {
+				unset( $GLOBALS['_wp_theme_features'] );
+			}
+
+			self::restore_media_shortcode_runtime( $runtime_snapshot );
+
+			$footer_template_after = \has_action( 'wp_footer', 'wp_underscore_playlist_templates' );
+			$admin_template_after  = \has_action( 'admin_footer', 'wp_underscore_playlist_templates' );
+			$filters_removed       = false === \has_filter( 'posts_pre_query', $query_filter )
+				&& false === \has_filter( 'post_gallery', $gallery_override_filter )
+				&& false === \has_filter( 'shortcode_atts_gallery', $gallery_atts_filter )
+				&& false === \has_filter( 'use_default_gallery_style', $default_style_filter )
+				&& false === \has_filter( 'gallery_style', $gallery_style_filter )
+				&& false === \has_filter( 'wp_get_attachment_image_src', $image_source_filter )
+				&& false === \has_filter( 'wp_get_attachment_image_attributes', $image_attributes_filter )
+				&& false === \has_filter( 'wp_get_attachment_link_attributes', $link_attributes_filter )
+				&& false === \has_filter( 'wp_get_attachment_url', $attachment_url_filter )
+				&& false === \has_filter( 'post_playlist', $playlist_override_filter )
+				&& false === \has_filter( 'shortcode_atts_playlist', $playlist_atts_filter )
+				&& false === \has_action( 'wp_playlist_scripts', $playlist_scripts_action )
+				&& false === \has_filter( 'wp_get_attachment_id3_keys', $id3_keys_filter )
+				&& false === \has_filter( 'wp_img_tag_add_auto_sizes', $auto_sizes_filter )
+				&& false === \has_filter( 'pre_wp_get_loading_optimization_attributes', $loading_filter );
+		}
+
+		self::collect_failure(
+			$failures,
+			is_string( $gallery_override )
+				&& str_contains( $gallery_override, 'data-cfz-gallery-override="' . \esc_attr( $token ) . '"' )
+				&& str_contains( $gallery_override, 'data-instance=' )
+				&& $landscape_id . ',' . $portrait_id === ( $gallery_events['override'][0]['include'] ?? null )
+				&& 'post__in' === ( $gallery_events['override'][0]['orderby'] ?? null ),
+			'gallery shortcode ids set include/orderby before post_gallery override short-circuit',
+			array(
+				'override' => $gallery_override,
+				'events'   => $gallery_events['override'],
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			is_string( $legacy_gallery )
+				&& str_contains( $legacy_gallery, "class='gallery galleryid-{$parent_id} gallery-columns-2 gallery-size-thumbnail'" )
+				&& str_contains( $legacy_gallery, '<!--cfz-gallery-style-' . \esc_attr( $token ) . '-->' )
+				&& 2 === substr_count( $legacy_gallery, "class='gallery-item'" )
+				&& str_contains( $legacy_gallery, "<dl class='gallery-item'>" )
+				&& str_contains( $legacy_gallery, "<dt class='gallery-icon landscape'>" )
+				&& str_contains( $legacy_gallery, "<dt class='gallery-icon portrait'>" )
+				&& str_contains( $legacy_gallery, 'aria-describedby=' )
+				&& str_contains( $legacy_gallery, 'component-gallery-image-' . $token )
+				&& str_contains( $legacy_gallery, 'data-cfz-gallery="image &lt;' . \esc_attr( $token ) . '&gt;"' )
+				&& ! str_contains( $legacy_gallery, '<a ' )
+				&& ! str_contains( $legacy_gallery, (string) $pdf_id )
+				&& self::media_shortcode_markup_has_no_raw_payload( $legacy_gallery ),
+			'gallery shortcode renders ordered image-only legacy markup with invalid tag fallback, captions, orientation, and filtered image attributes',
+			array( 'gallery' => self::describe_string( is_string( $legacy_gallery ) ? $legacy_gallery : '' ) )
+		);
+
+		self::collect_failure(
+			$failures,
+			is_string( $html5_gallery )
+				&& str_contains( $html5_gallery, "class='gallery galleryid-{$parent_id} gallery-columns-3 gallery-size-large'" )
+				&& str_contains( $html5_gallery, "<figure class='gallery-item'>" )
+				&& str_contains( $html5_gallery, "<figcaption class='wp-caption-text gallery-caption'" )
+				&& str_contains( $html5_gallery, '<a href=' )
+				&& str_contains( $html5_gallery, "data-cfz-link='gallery " . \esc_attr( $token ) . "'" )
+				&& str_contains( $html5_gallery, '-cfz-' . rawurlencode( $token ) . '.jpg' )
+				&& ! str_contains( $html5_gallery, '<style>' )
+				&& self::media_shortcode_markup_has_no_raw_payload( $html5_gallery ),
+			'gallery shortcode renders HTML5 file-link markup and honors gallery style/link filters without default style output',
+			array( 'gallery' => self::describe_string( is_string( $html5_gallery ) ? $html5_gallery : '' ) )
+		);
+
+		self::collect_failure(
+			$failures,
+			'' === $private_gallery,
+			'gallery shortcode parent selection fails closed for unreadable password-protected parents',
+			array( 'privateGallery' => $private_gallery )
+		);
+
+		self::collect_failure(
+			$failures,
+			is_string( $playlist_override )
+				&& str_contains( $playlist_override, 'data-cfz-playlist-override="' . \esc_attr( $token ) . '"' )
+				&& $audio_id . ',' . $second_audio_id === ( $playlist_events['override'][0]['include'] ?? null )
+				&& 'post__in' === ( $playlist_events['override'][0]['orderby'] ?? null ),
+			'playlist shortcode ids set include/orderby before post_playlist override short-circuit',
+			array(
+				'override' => $playlist_override,
+				'events'   => $playlist_events['override'],
+			)
+		);
+
+		$audio_playlist_checks = array(
+			'isString'         => is_string( $audio_playlist ),
+			'hasAudioClass'    => is_string( $audio_playlist ) && str_contains( $audio_playlist, 'wp-audio-playlist' ),
+			'hasDarkStyle'     => is_string( $audio_playlist ) && str_contains( $audio_playlist, 'wp-playlist-dark' ),
+			'hasAudioTag'      => is_string( $audio_playlist ) && str_contains( $audio_playlist, '<audio controls="controls" preload="none" width="400"' ),
+			'hasNoscript'      => is_string( $audio_playlist ) && str_contains( $audio_playlist, '<noscript>' ),
+			'type'             => 'audio' === ( $audio_data['type'] ?? null ),
+			'tracklistFalse'   => false === ( $audio_data['tracklist'] ?? null ),
+			'tracknumbersTrue' => true === ( $audio_data['tracknumbers'] ?? null ),
+			'imagesTrue'       => true === ( $audio_data['images'] ?? null ),
+			'artistsFalse'     => false === ( $audio_data['artists'] ?? null ),
+			'twoTracks'        => 2 === count( $audio_data['tracks'] ?? array() ),
+			'filteredSrc'      => str_contains( $audio_data['tracks'][0]['src'] ?? '', '-cfz-' . rawurlencode( $token ) . '.mp3' ),
+			'fileType'         => 'audio/mpeg' === ( $audio_data['tracks'][0]['type'] ?? null ),
+			'artistMeta'       => 'Artist ' . $token === ( $audio_data['tracks'][0]['meta']['artist'] ?? null ),
+			'composerMeta'     => 'Composer ' . $token === ( $audio_data['tracks'][0]['meta']['composer'] ?? null ),
+			'thumbImage'       => isset( $audio_data['tracks'][0]['image']['src'], $audio_data['tracks'][0]['thumb']['src'] ),
+			'mimeIcon'         => isset( $audio_data['tracks'][1]['image']['src'], $audio_data['tracks'][1]['thumb']['src'] ),
+			'escapedPayloads'  => is_string( $audio_playlist ) && self::media_playlist_markup_has_no_raw_payload( $audio_playlist ),
+		);
+		self::collect_failure(
+			$failures,
+			! in_array( false, $audio_playlist_checks, true ),
+			'audio playlist shortcode JSON/rendering',
+			array(
+				'checks'   => $audio_playlist_checks,
+				'playlist' => self::describe_string( is_string( $audio_playlist ) ? $audio_playlist : '' ),
+				'data'     => $audio_data,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			is_string( $video_playlist )
+				&& str_contains( $video_playlist, 'wp-video-playlist' )
+				&& str_contains( $video_playlist, '<video controls="controls" preload="none" width="400"' )
+				&& str_contains( $video_playlist, 'height="225"' )
+				&& 'video' === ( $video_data['type'] ?? null )
+				&& false === ( $video_data['images'] ?? null )
+				&& 1 === count( $video_data['tracks'] ?? array() )
+				&& 'video/mp4' === ( $video_data['tracks'][0]['type'] ?? null )
+				&& 1280 === ( $video_data['tracks'][0]['dimensions']['original']['width'] ?? null )
+				&& 720 === ( $video_data['tracks'][0]['dimensions']['original']['height'] ?? null )
+				&& 400 === ( $video_data['tracks'][0]['dimensions']['resized']['width'] ?? null )
+				&& 225 === ( $video_data['tracks'][0]['dimensions']['resized']['height'] ?? null )
+				&& ! isset( $video_data['tracks'][0]['image'] )
+				&& self::media_playlist_markup_has_no_raw_payload( $video_playlist ),
+			'playlist shortcode coerces non-audio types to video and scales video dimensions against content width',
+			array(
+				'playlist' => self::describe_string( is_string( $video_playlist ) ? $video_playlist : '' ),
+				'data'     => $video_data,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			'' === $private_playlist,
+			'playlist shortcode parent selection fails closed for unreadable password-protected parents',
+			array( 'privatePlaylist' => $private_playlist )
+		);
+
+		self::collect_failure(
+			$failures,
+			$has_query_event( 'image', array( $landscape_id, $portrait_id, $pdf_id ), null )
+				&& $has_query_event( 'image', array( $portrait_id, $landscape_id ), null )
+				&& $has_query_event( 'image', null, $private_parent_id )
+				&& $has_query_event( 'audio', array( $audio_id, $second_audio_id ), null )
+				&& $has_query_event( 'audio', null, $private_parent_id )
+				&& $has_query_event( 'video', array( $video_id ), null ),
+			'gallery and playlist shortcode attachment queries are mapped through posts_pre_query for include and parent selections',
+			array( 'queries' => $query_events )
+		);
+
+		self::collect_failure(
+			$failures,
+			3 <= count( $gallery_events['atts'] )
+				&& 2 <= count( $gallery_events['style'] )
+				&& 4 <= count( $gallery_events['imageAttrs'] )
+				&& 2 <= count( $gallery_events['links'] )
+				&& 3 <= count( $playlist_events['atts'] )
+				&& 3 <= count( $playlist_events['id3'] )
+				&& count( $playlist_events['scripts'] ) <= 1
+				&& $filters_removed
+				&& $footer_template_before === $footer_template_after
+				&& $admin_template_before === $admin_template_after
+				&& self::media_shortcode_runtime_matches( $runtime_snapshot ),
+			'gallery/playlist shortcode filters, playlist script hooks, media globals, and template actions are restored',
+			array(
+				'galleryEvents'  => $gallery_events,
+				'playlistEvents' => $playlist_events,
+				'imageSources'   => array_slice( $image_source_events, 0, 12 ),
+				'attachmentUrls' => array_slice( $attachment_url_events, 0, 12 ),
+				'filtersRemoved' => $filters_removed,
+				'footerBefore'   => $footer_template_before,
+				'footerAfter'    => $footer_template_after,
+				'adminBefore'    => $admin_template_before,
+				'adminAfter'     => $admin_template_after,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'media-metadata.gallery-playlist-shortcode-rendering-filters',
 			array() === $failures,
 			array( 'failures' => array_slice( $failures, 0, 8 ) )
 		);
@@ -1942,20 +2755,59 @@ final class MediaMetadataSurface {
 		);
 	}
 
-	private static function seed_attachment_post( int $attachment_id, string $mime, string $file ): void {
-		\wp_cache_set( $attachment_id, self::attachment_post_object( $attachment_id, $mime, basename( $file ) ), 'posts' );
-		\wp_cache_set(
-			$attachment_id,
+	private static function seed_post_cache( int $post_id, array $overrides = array() ): \WP_Post {
+		$data = array_merge(
 			array(
-				'_wp_attached_file' => array( $file ),
+				'ID'                    => $post_id,
+				'post_author'           => '0',
+				'post_date'             => '2026-06-23 00:00:00',
+				'post_date_gmt'         => '2026-06-23 00:00:00',
+				'post_content'          => '',
+				'post_title'            => 'Component Fuzz Post ' . $post_id,
+				'post_excerpt'          => '',
+				'post_status'           => 'publish',
+				'comment_status'        => 'closed',
+				'ping_status'           => 'closed',
+				'post_password'         => '',
+				'post_name'             => 'component-fuzz-post-' . $post_id,
+				'to_ping'               => '',
+				'pinged'                => '',
+				'post_modified'         => '2026-06-23 00:00:00',
+				'post_modified_gmt'     => '2026-06-23 00:00:00',
+				'post_content_filtered' => '',
+				'post_parent'           => 0,
+				'guid'                  => 'http://example.test/?p=' . $post_id,
+				'menu_order'            => 0,
+				'post_type'             => 'post',
+				'post_mime_type'        => '',
+				'comment_count'         => '0',
+				'filter'                => 'raw',
 			),
-			'post_meta'
+			$overrides
 		);
+		$data['ID'] = $post_id;
+
+		$post = new \WP_Post( (object) $data );
+		\wp_cache_set( $post_id, $post, 'posts' );
+		return $post;
 	}
 
-	private static function attachment_post_object( int $attachment_id, string $mime, string $title ): \WP_Post {
-		return new \WP_Post(
-			(object) array(
+	private static function seed_attachment_post( int $attachment_id, string $mime, string $file, array $post_overrides = array(), array $meta_overrides = array() ): void {
+		\wp_cache_set( $attachment_id, self::attachment_post_object( $attachment_id, $mime, basename( $file ), $post_overrides ), 'posts' );
+
+		$meta = array(
+			'_wp_attached_file' => array( $file ),
+		);
+		foreach ( $meta_overrides as $key => $value ) {
+			$meta[ $key ] = array( $value );
+		}
+
+		\wp_cache_set( $attachment_id, $meta, 'post_meta' );
+	}
+
+	private static function attachment_post_object( int $attachment_id, string $mime, string $title, array $overrides = array() ): \WP_Post {
+		$data = array_merge(
+			array(
 				'ID'                    => $attachment_id,
 				'post_author'           => '0',
 				'post_date'             => '2026-06-23 00:00:00',
@@ -1980,7 +2832,18 @@ final class MediaMetadataSurface {
 				'post_mime_type'        => $mime,
 				'comment_count'         => '0',
 				'filter'                => 'raw',
-			)
+			),
+			$overrides
+		);
+		$data['ID']             = $attachment_id;
+		$data['post_type']      = 'attachment';
+		$data['post_mime_type'] = $mime;
+		if ( ! isset( $overrides['post_name'] ) && isset( $overrides['post_title'] ) ) {
+			$data['post_name'] = \sanitize_file_name( (string) $data['post_title'] );
+		}
+
+		return new \WP_Post(
+			(object) $data
 		);
 	}
 
@@ -2137,6 +3000,27 @@ final class MediaMetadataSurface {
 			&& ! str_contains( $lower, 'danger=<script>' )
 			&& ! str_contains( $html, '"<&' )
 			&& ! str_contains( $html, 'quote"<script>' );
+	}
+
+	private static function media_playlist_json_data( string $html ): array {
+		if ( 1 !== preg_match( '/<script type="application\/json" class="wp-playlist-script">(.*?)<\/script>/s', $html, $matches ) ) {
+			return array();
+		}
+
+		$data = json_decode( $matches[1], true );
+		return is_array( $data ) ? $data : array();
+	}
+
+	private static function media_playlist_markup_has_no_raw_payload( string $html ): bool {
+		$without_playlist_json = preg_replace( '/<script type="application\/json" class="wp-playlist-script">.*?<\/script>/s', '', $html );
+		if ( ! is_string( $without_playlist_json ) ) {
+			return false;
+		}
+
+		return self::media_shortcode_markup_has_no_raw_payload( $without_playlist_json )
+			&& ! str_contains( strtolower( $html ), '<script>alert' )
+			&& ! str_contains( $html, 'Audio description <tag>' )
+			&& ! str_contains( $html, 'Video description <tag>' );
 	}
 
 	private static function snapshot_media_shortcode_runtime(): array {

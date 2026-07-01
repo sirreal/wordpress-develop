@@ -498,7 +498,10 @@ database, network requests, or a configured site.
   sanitization, creation timestamp extraction, audio/video extension and ID3 key
   filters, public audio/video shortcode rendering and filter contracts,
   mediaelement fallback escaping, HTML5 library switching, YouTube/Vimeo URL
-  normalization, invalid-source embedded-link fallbacks, `wp_attachment_is()`
+  normalization, invalid-source embedded-link fallbacks, public
+  `gallery_shortcode()`/`wp_playlist_shortcode()` rendering over cache-seeded
+  attachment selections, gallery style/attribute/link filters, playlist JSON and
+  script hooks, protected-parent fail-closed behavior, `wp_attachment_is()`
   MIME/extension branches, image/document classification, MIME/extension
   disagreement, wrapper behavior, attachment metadata get/update/delete filter
   contracts, original-image path/URL and image-meta matching normalization
@@ -1008,10 +1011,10 @@ surface intercepts PHPMailer send calls and never attempts real delivery. The
 `media-metadata` surface uses malformed local fixtures and cache-seeded
 attachments only; it does not download remote media, invoke codecs or external
 binaries, insert real attachments, or enable audio/video cover attachment
-generation. Its shortcode rendering coverage stays on direct
-`wp_audio_shortcode()`, `wp_video_shortcode()`, and `wp_mediaelement_fallback()`
-calls with generated local-looking URLs and scoped filter/script/style cleanup,
-not gallery/playlist attachment queries or browser playback. The
+generation. Its shortcode rendering coverage stays on direct shortcode helper
+calls with generated local-looking URLs, cache-seeded gallery/playlist
+attachments, `posts_pre_query` short-circuits, and scoped
+filter/script/style cleanup, not browser playback. The
 `image-metadata` surface complements that audio/video coverage with generated
 local image byte fixtures and repo-local Core image fixture replays. It does not
 invoke image codecs, live uploads, remote media, or attachment persistence;
