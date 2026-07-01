@@ -406,13 +406,13 @@ database, network requests, or a configured site.
   deprecated hook wrapper fast paths and side-effect hooks, ref-array
   deprecated dispatch, `current_filter()`, `doing_filter()`, `did_action()`.
 - `kses`: KSES policies, wrapper agreement, protocol filtering/helper contracts,
-  low-level helper contracts, filter-aware safe CSS, attribute/entity/comment
-  handling, deterministic attribute constraint matrices for required, values,
-  max/min, valueless, and callback checks, serialized block attribute KSES
-  filtering, PDF object policy and upload-host/port URL gates, dynamic URI
-  attribute filtering, full-tag attribute parsing, no-HTML filtering, custom
-  context locality, strict/custom policy monotonicity, and filter/global
-  restoration.
+  low-level helper contracts, exact `wp_kses_hair()` parser fixtures,
+  filter-aware safe CSS, attribute/entity/comment handling, deterministic
+  attribute constraint matrices for required, values, max/min, valueless, and
+  callback checks, serialized block attribute KSES filtering, PDF object policy
+  and upload-host/port URL gates, dynamic URI attribute filtering, full-tag
+  attribute parsing, no-HTML filtering, custom context locality, strict/custom
+  policy monotonicity, and filter/global restoration.
 - `l10n`: translation fallbacks, escaped translation helpers, plural/nooped
   selection, textdomain load/unload state, translation path guards, locale and
   user-locale switching including generated stack/action payload matrices,

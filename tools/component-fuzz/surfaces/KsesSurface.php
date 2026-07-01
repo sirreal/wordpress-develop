@@ -1050,6 +1050,7 @@ final class KsesSurface {
 			$results[] = self::check_attr_check_constraint_mutations( $seed );
 			$results[] = self::check_required_attr_tag_stripping( $seed );
 			$results[] = self::check_style_attr_entity_decoding( $seed );
+			$results[] = self::check_hair_exact_fixture_matrix( $seed );
 			$results[] = self::check_attr_parse_round_trips( $seed );
 			$results[] = self::check_safecss_allow_css_filter( $seed );
 		} catch ( \Throwable $e ) {
@@ -1218,6 +1219,196 @@ final class KsesSurface {
 			'mark data-required',
 			$expected,
 			$actual
+		);
+	}
+
+	private static function check_hair_exact_fixture_matrix( int $seed ): array {
+		if ( ! function_exists( 'wp_kses_hair' ) ) {
+			return self::skip(
+				$seed,
+				null,
+				'wp_kses_hair.exact-core-fixture-matrix.available',
+				'wp_kses_hair() is not loaded',
+				''
+			);
+		}
+
+		$default_protocols = self::default_protocols();
+		$cases             = array(
+			'empty attributes' => array(
+				'input'    => '',
+				'expected' => array(),
+			),
+			'prematurely terminated attributes' => array(
+				'input'    => '>',
+				'expected' => array(),
+			),
+			'prematurely terminated malformed attributes' => array(
+				'input'    => 'foo>bar="baz"',
+				'expected' => array(
+					'foo' => self::hair_bool_attr( 'foo' ),
+				),
+			),
+			'mixed quotes and unquoted values' => array(
+				'input'    => 'title="double" alt=\'single\' id=unquoted',
+				'expected' => array(
+					'title' => self::hair_value_attr( 'title', 'double' ),
+					'alt'   => self::hair_value_attr( 'alt', 'single' ),
+					'id'    => self::hair_value_attr( 'id', 'unquoted' ),
+				),
+			),
+			'entity normalization' => array(
+				'input'    => 'title="&#x3C;HEX&#X3E;" data-bad="&invalid; &#; &#x;"',
+				'expected' => array(
+					'title'    => self::hair_value_attr( 'title', '&lt;HEX&gt;' ),
+					'data-bad' => self::hair_value_attr( 'data-bad', '&amp;invalid; &amp;#; &amp;#x;' ),
+				),
+			),
+			'duplicate attributes first wins' => array(
+				'input'    => 'id="first" class="test" id="second"',
+				'expected' => array(
+					'id'    => self::hair_value_attr( 'id', 'first' ),
+					'class' => self::hair_value_attr( 'class', 'test' ),
+				),
+			),
+			'malformed unclosed double quote' => array(
+				'input'    => 'title="unclosed class="test"',
+				'expected' => array(
+					'title' => self::hair_value_attr( 'title', 'unclosed class=' ),
+					'test"' => self::hair_bool_attr( 'test"' ),
+				),
+			),
+			'attribute names with colons and dots' => array(
+				'input'    => 'xml:lang="en" data.value="test" xlink:href="#anchor"',
+				'expected' => array(
+					'xml:lang'   => self::hair_value_attr( 'xml:lang', 'en' ),
+					'data.value' => self::hair_value_attr( 'data.value', 'test' ),
+					'xlink:href' => self::hair_value_attr( 'xlink:href', '#anchor' ),
+				),
+			),
+			'invalid attribute name special chars' => array(
+				'input'    => '@invalid="value" $bad="value"',
+				'expected' => array(
+					'@invalid' => self::hair_value_attr( '@invalid', 'value' ),
+					'$bad'     => self::hair_value_attr( '$bad', 'value' ),
+				),
+			),
+			'forward slashes between attributes' => array(
+				'input'    => 'att / att2=2 /// att3="3"',
+				'expected' => array(
+					'att'  => self::hair_bool_attr( 'att' ),
+					'att2' => self::hair_value_attr( 'att2', '2' ),
+					'att3' => self::hair_value_attr( 'att3', '3' ),
+				),
+			),
+			'spaces around equals' => array(
+				'input'    => 'id = "spaced" class ="left" title= "right"',
+				'expected' => array(
+					'id'    => self::hair_value_attr( 'id', 'spaced' ),
+					'class' => self::hair_value_attr( 'class', 'left' ),
+					'title' => self::hair_value_attr( 'title', 'right' ),
+				),
+			),
+			'multiple equals signs' => array(
+				'input'    => 'att=="val"',
+				'expected' => array(
+					'att' => self::hair_value_attr( 'att', '=&quot;val&quot;' ),
+				),
+			),
+			'equals echo pattern' => array(
+				'input'    => "att==echo 'something'",
+				'expected' => array(
+					'att'         => self::hair_value_attr( 'att', '=echo' ),
+					"'something'" => self::hair_bool_attr( "'something'" ),
+				),
+			),
+			'attribute starting with equals' => array(
+				'input'    => '= bool k=v',
+				'expected' => array(
+					'='    => self::hair_bool_attr( '=' ),
+					'bool' => self::hair_bool_attr( 'bool' ),
+					'k'    => self::hair_value_attr( 'k', 'v' ),
+				),
+			),
+			'triple equals quoted whitespace' => array(
+				'input'    => '==="  "',
+				'expected' => array(
+					'=' => self::hair_value_attr( '=', '=&quot;' ),
+					'"' => self::hair_bool_attr( '"' ),
+				),
+			),
+			'empty attribute name with value' => array(
+				'input'    => '="value" class="test"',
+				'expected' => array(
+					'="value"' => self::hair_bool_attr( '="value"' ),
+					'class'    => self::hair_value_attr( 'class', 'test' ),
+				),
+			),
+			'uri protocol filtering and non-uri preservation' => array(
+				'input'    => 'href="javascript:alert(1)" data-url="javascript:alert(1)" src="data:text/html,<script>alert(1)</script>"',
+				'expected' => array(
+					'href'     => self::hair_value_attr( 'href', 'alert(1)' ),
+					'data-url' => self::hair_value_attr( 'data-url', 'javascript:alert(1)' ),
+					'src'      => self::hair_value_attr( 'src', 'text/html,&lt;script&gt;alert(1)&lt;/script&gt;' ),
+				),
+			),
+			'custom allowed protocols' => array(
+				'input'     => 'href="gopher://gopher.example.org"',
+				'protocols' => array( 'gopher' ),
+				'expected'  => array(
+					'href' => self::hair_value_attr( 'href', 'gopher://gopher.example.org' ),
+				),
+			),
+		);
+
+		$failures = array();
+		foreach ( $cases as $label => $case ) {
+			$actual = \wp_kses_hair( $case['input'], $case['protocols'] ?? $default_protocols );
+			if ( $case['expected'] !== $actual ) {
+				$failures[] = array(
+					'label'    => $label,
+					'input'    => $case['input'],
+					'expected' => $case['expected'],
+					'actual'   => $actual,
+				);
+			}
+		}
+
+		$details = array(
+			'cases'    => count( $cases ),
+			'failures' => array_slice( $failures, 0, 6 ),
+		);
+
+		if ( array() === $failures ) {
+			return self::pass( $seed, null, 'wp_kses_hair.exact-core-fixture-matrix', 'core wpKsesHair fixtures', $details );
+		}
+
+		return self::fail(
+			$seed,
+			null,
+			'wp_kses_hair.exact-core-fixture-matrix',
+			'core wpKsesHair fixtures',
+			'exact parsed attribute arrays for representative Core parser fixtures',
+			$failures,
+			$details
+		);
+	}
+
+	private static function hair_value_attr( string $name, string $value ): array {
+		return array(
+			'name'  => $name,
+			'value' => $value,
+			'whole' => $name . '="' . $value . '"',
+			'vless' => 'n',
+		);
+	}
+
+	private static function hair_bool_attr( string $name ): array {
+		return array(
+			'name'  => $name,
+			'value' => '',
+			'whole' => $name,
+			'vless' => 'y',
 		);
 	}
 
