@@ -32,6 +32,7 @@ final class AppearanceMediaSurface {
 			$rows[] = self::check_background_post_normalization( $ctx->fork( 'background' ) );
 			$rows[] = self::check_header_defaults_and_selection( $ctx->fork( 'headers' ) );
 			$rows[] = self::check_header_and_background_frontend_helpers( $ctx->fork( 'frontend' ) );
+			$rows[] = self::check_head_callback_css( $ctx->fork( 'head-callback-css' ) );
 			$rows[] = self::check_custom_header_markup_and_video( $ctx->fork( 'custom-header-video' ) );
 			$rows[] = self::check_custom_logo_helpers( $ctx->fork( 'custom-logo' ) );
 			$rows[] = self::check_site_icon_helpers( $ctx->fork( 'site-icon' ) );
@@ -126,14 +127,19 @@ final class AppearanceMediaSurface {
 				'has_site_icon',
 				'is_header_video_active',
 				'is_random_header_image',
+				'maybe_hash_hex_color',
 				'remove_all_filters',
 				'remove_filter',
 				'remove_theme_support',
 				'remove_theme_mod',
+				'sanitize_html_class',
+				'sanitize_url',
 				'set_url_scheme',
 				'set_theme_mod',
 				'the_custom_logo',
 				'the_header_video_url',
+				'_custom_background_cb',
+				'_custom_logo_header_styles',
 				'update_option',
 				'wp_check_filetype',
 				'wp_create_nonce',
@@ -389,6 +395,130 @@ final class AppearanceMediaSurface {
 		return self::row(
 			$ctx,
 			'appearance-media.frontend.helpers',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, self::MAX_FAILURES ) )
+		);
+	}
+
+	private static function check_head_callback_css( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures              = array();
+		$token                 = strtolower( preg_replace( '/[^a-z0-9-]+/', '-', $ctx->identifier( 4, 10 ) ) );
+		$background_url        = 'http://example.test/component-fuzz/bg-' . rawurlencode( $token ) . '.png?unsafe=<tag>';
+		$position_x            = $ctx->choice( array( 'left', 'center', 'right', 'bad-x' ) );
+		$position_y            = $ctx->choice( array( 'top', 'center', 'bottom', 'bad-y' ) );
+		$size                  = $ctx->choice( array( 'auto', 'contain', 'cover', 'stretch' ) );
+		$repeat                = $ctx->choice( array( 'repeat-x', 'repeat-y', 'repeat', 'no-repeat', 'round' ) );
+		$attachment            = $ctx->choice( array( 'scroll', 'fixed', 'local' ) );
+		$color                 = $ctx->choice( array( 'abc123', '#abc', '112233' ) );
+		$expected_position_x   = in_array( $position_x, array( 'left', 'center', 'right' ), true ) ? $position_x : 'left';
+		$expected_position_y   = in_array( $position_y, array( 'top', 'center', 'bottom' ), true ) ? $position_y : 'top';
+		$expected_size         = in_array( $size, array( 'auto', 'contain', 'cover' ), true ) ? $size : 'auto';
+		$expected_repeat       = in_array( $repeat, array( 'repeat-x', 'repeat-y', 'repeat', 'no-repeat' ), true ) ? $repeat : 'repeat';
+		$expected_attachment   = 'fixed' === $attachment ? 'fixed' : 'scroll';
+		$expected_url          = \sanitize_url( \set_url_scheme( str_replace( '<tag>', 'tag', $background_url ) ) );
+		$expected_color        = \maybe_hash_hex_color( $color );
+		$had_theme_features    = array_key_exists( '_wp_theme_features', $GLOBALS );
+		$theme_features_before = $GLOBALS['_wp_theme_features'] ?? null;
+		$logo_css              = '';
+		$logo_css_visible      = '';
+
+		try {
+			\set_theme_mod( 'background_image', $background_url );
+			\set_theme_mod( 'background_color', $color );
+			\set_theme_mod( 'background_position_x', $position_x );
+			\set_theme_mod( 'background_position_y', $position_y );
+			\set_theme_mod( 'background_size', $size );
+			\set_theme_mod( 'background_repeat', $repeat );
+			\set_theme_mod( 'background_attachment', $attachment );
+
+			$background_css = self::capture( static fn() => \_custom_background_cb() );
+
+			self::collect_failure(
+				$failures,
+				str_contains( $background_css, '<style id="custom-background-css">' )
+					&& str_contains( $background_css, 'body.custom-background' )
+					&& str_contains( $background_css, 'background-color: ' . $expected_color . ';' )
+					&& str_contains( $background_css, 'background-image: url(' )
+					&& str_contains( $background_css, $expected_url )
+					&& str_contains( $background_css, "background-position: {$expected_position_x} {$expected_position_y};" )
+					&& str_contains( $background_css, "background-size: {$expected_size};" )
+					&& str_contains( $background_css, "background-repeat: {$expected_repeat};" )
+					&& str_contains( $background_css, "background-attachment: {$expected_attachment};" )
+					&& ! str_contains( $background_css, '<tag>' )
+					&& ! str_contains( $background_css, 'background-position: bad-x' )
+					&& ! str_contains( $background_css, ' bad-y;' )
+					&& ! str_contains( $background_css, 'background-size: stretch;' )
+					&& ! str_contains( $background_css, 'background-repeat: round;' )
+					&& ! str_contains( $background_css, 'background-attachment: local;' ),
+				'_custom_background_cb prints escaped CSS and normalizes bounded background style theme mods',
+				array(
+					'token'              => $token,
+					'input'              => compact( 'background_url', 'position_x', 'position_y', 'size', 'repeat', 'attachment', 'color' ),
+					'expectedUrl'        => $expected_url,
+					'expectedColor'      => $expected_color,
+					'expectedPositionX'  => $expected_position_x,
+					'expectedPositionY'  => $expected_position_y,
+					'expectedSize'       => $expected_size,
+					'expectedRepeat'     => $expected_repeat,
+					'expectedAttachment' => $expected_attachment,
+					'css'                => self::preview( $background_css ),
+				)
+			);
+
+			\remove_theme_mod( 'background_image' );
+			if ( isset( $GLOBALS['_wp_theme_features']['custom-background'][0] ) ) {
+				$GLOBALS['_wp_theme_features']['custom-background'][0]['default-image'] = '';
+			}
+			\set_theme_mod( 'background_color', \get_theme_support( 'custom-background', 'default-color' ) );
+			$default_background_css = self::capture( static fn() => \_custom_background_cb() );
+
+			self::collect_failure(
+				$failures,
+				'' === $default_background_css,
+				'_custom_background_cb suppresses empty frontend CSS when only the theme default color is active',
+				array( 'css' => self::preview( $default_background_css ) )
+			);
+
+			$GLOBALS['_wp_theme_features']['custom-logo'] = array(
+				array(
+					'header-text' => array( 'site-title<script>', 'site description', $token . '%3cunsafe' ),
+				),
+			);
+			unset( $GLOBALS['_wp_theme_features']['custom-header'] );
+			\set_theme_mod( 'header_text', false );
+
+			$logo_css = self::capture( static fn() => \_custom_logo_header_styles() );
+			\set_theme_mod( 'header_text', true );
+			$logo_css_visible = self::capture( static fn() => \_custom_logo_header_styles() );
+		} finally {
+			if ( $had_theme_features ) {
+				$GLOBALS['_wp_theme_features'] = $theme_features_before;
+			} else {
+				unset( $GLOBALS['_wp_theme_features'] );
+			}
+		}
+
+		self::collect_failure(
+			$failures,
+			str_contains( $logo_css, '<style id="custom-logo-css">' )
+				&& str_contains( $logo_css, '.site-titlescript' )
+				&& str_contains( $logo_css, '.sitedescription' )
+				&& str_contains( $logo_css, '.' . \sanitize_html_class( $token . '%3cunsafe' ) )
+				&& str_contains( $logo_css, 'clip-path: inset(50%);' )
+				&& '' === $logo_css_visible
+				&& ! str_contains( $logo_css, '<script>' )
+				&& ! str_contains( $logo_css, '%3c' ),
+			'_custom_logo_header_styles prints sanitized hide-header-text CSS only when header text is disabled',
+			array(
+				'token'       => $token,
+				'logoCss'     => self::preview( $logo_css ),
+				'visibleCss'  => self::preview( $logo_css_visible ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'appearance-media.head-callback-css',
 			array() === $failures,
 			array( 'failures' => array_slice( $failures, 0, self::MAX_FAILURES ) )
 		);

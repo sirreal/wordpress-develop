@@ -743,9 +743,9 @@
 				<tr>
 					<td><code>appearance-media</code></td>
 					<td><span class="status good">validation passed</span></td>
-					<td>Main worktree; Dirac the 4th findings fixed through <code>39a5bb77d1</code>; no-upload admin guard follow-up through <code>91a7645818</code></td>
-					<td>Latest focused runs: seeds 1 and 224 each 200 passed, 0 skipped, 0 failed after no-upload admin guard coverage; adjacent media/admin smoke passed 360 checks with 15 skips; latest broad run: 4678 passed, 16 skipped, 0 failed.</td>
-					<td>Theme mods, theme support globals, custom background/header helpers, custom header video URL/settings/markup active gates, synthetic custom-logo attachment markup and filter payload oracles with DB-stub cleanup, request-scheme-aware header oracles, site icon filters, bounded <code>Custom_Image_Header::step()</code>, no-upload header/background admin action guards, deprecated media field/tab passthroughs, content-count state restoration, and post type/status bootstrap.</td>
+					<td>Scoped worktree <code>component-fuzz-appearance-media-callbacks</code> builds on Dirac the 4th fixes through <code>39a5bb77d1</code> and no-upload admin guard follow-up through <code>91a7645818</code>.</td>
+					<td>Latest focused runs: seeds 1 and 224 over 25 iterations each passed 225 checks after head-callback CSS coverage; adjacent appearance/media/customizer/frontend/script smoke passed 93 checks; latest broad run: 4721 passed, 4 skipped, 0 failed.</td>
+					<td>Theme mods, theme support globals, custom background/header helpers, custom background frontend head-callback CSS normalization and escaping, custom-logo hide-header-text CSS class sanitization, custom header video URL/settings/markup active gates, synthetic custom-logo attachment markup and filter payload oracles with DB-stub cleanup, request-scheme-aware header oracles, site icon filters, bounded <code>Custom_Image_Header::step()</code>, no-upload header/background admin action guards, deprecated media field/tab passthroughs, content-count state restoration, and post type/status bootstrap.</td>
 				</tr>
 				<tr>
 					<td><code>customizer-persistence</code></td>
