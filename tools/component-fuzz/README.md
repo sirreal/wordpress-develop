@@ -30,9 +30,10 @@ database, network requests, or a configured site.
   group/container behavior, render escaping/raw HTML contracts, and
   back-compat parent alias and tabindex rendering contracts, initialization
   hook/theme-support side effects, `show_admin_bar()` filter/global
-  restoration, default menu hook registration, and default callback-produced
+  restoration, default menu hook registration, default callback-produced
   toolbar node graphs for WordPress logo, account, appearance, comments,
-  search, and secondary groups.
+  search, secondary groups, and single-site site-menu, new-content, updates,
+  sidebar-toggle, and command-palette nodes.
 - `admin-dashboard`: no-live-DB admin dashboard API coverage, including
   dashboard widget registration/control callbacks, meta-box context and
   priority normalization, dashboard container rendering across column counts,
