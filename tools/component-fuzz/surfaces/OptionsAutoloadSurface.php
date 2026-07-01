@@ -32,6 +32,7 @@ final class OptionsAutoloadSurface {
 			$rows[] = self::check_pre_update_filters_transform_and_veto( $ctx );
 			$rows[] = self::check_option_lifecycle_actions( $ctx );
 			$rows[] = self::check_prime_option_caches_stability( $ctx );
+			$rows[] = self::check_prime_option_caches_by_group_isolation( $ctx );
 			$rows[] = self::check_notoptions_delete_add_lifecycle( $ctx );
 			$rows[] = self::check_serialized_value_cache_shape( $ctx );
 			$rows[] = self::check_option_name_boundaries( $ctx );
@@ -61,6 +62,7 @@ final class OptionsAutoloadSurface {
 				'delete_option',
 				'wp_load_alloptions',
 				'wp_prime_option_caches',
+				'wp_prime_option_caches_by_group',
 				'wp_set_option_autoload',
 				'wp_set_option_autoload_values',
 				'wp_set_options_autoload',
@@ -1147,6 +1149,211 @@ final class OptionsAutoloadSurface {
 		);
 	}
 
+	private static function check_prime_option_caches_by_group_isolation( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime();
+
+		$target_group  = 'cfz_group_' . $ctx->iteration() . '_' . substr( sha1( 'target:' . $ctx->seed() ), 0, 8 );
+		$other_group   = 'cfz_group_' . $ctx->iteration() . '_' . substr( sha1( 'other:' . $ctx->seed() ), 0, 8 );
+		$missing_group = 'cfz_group_' . $ctx->iteration() . '_' . substr( sha1( 'missing:' . $ctx->seed() ), 0, 8 );
+
+		$target_found     = self::option_name( $ctx, 'group-prime-found' );
+		$target_duplicate = self::option_name( $ctx, 'group-prime-duplicate' );
+		$target_cached    = self::option_name( $ctx, 'group-prime-preprimed' );
+		$target_autoload  = self::option_name( $ctx, 'group-prime-autoload' );
+		$target_missing   = self::option_name( $ctx, 'group-prime-missing' );
+		$other_option     = self::option_name( $ctx, 'group-prime-other' );
+
+		$target_found_value     = self::wrapped_value( 'group-prime-found', self::value( $ctx->fork( 'group-prime-found' ) ) );
+		$target_duplicate_value = self::wrapped_value( 'group-prime-duplicate', self::value( $ctx->fork( 'group-prime-duplicate' ) ) );
+		$target_cached_db_value = self::wrapped_value( 'group-prime-preprimed-db', self::value( $ctx->fork( 'group-prime-preprimed-db' ) ) );
+		$target_cached_value    = self::wrapped_value( 'group-prime-preprimed-cache', self::value( $ctx->fork( 'group-prime-preprimed-cache' ) ) );
+		$target_autoload_value  = self::wrapped_value( 'group-prime-autoload', self::value( $ctx->fork( 'group-prime-autoload' ) ) );
+		$other_value            = self::wrapped_value( 'group-prime-other', self::value( $ctx->fork( 'group-prime-other' ) ) );
+		$missing_default        = self::missing_default( $target_missing );
+
+		add_option( $target_found, $target_found_value, '', false );
+		add_option( $target_duplicate, $target_duplicate_value, '', false );
+		add_option( $target_cached, $target_cached_db_value, '', false );
+		add_option( $target_autoload, $target_autoload_value, '', true );
+		add_option( $other_option, $other_value, '', false );
+
+		wp_cache_delete( $target_found, 'options' );
+		wp_cache_delete( $target_duplicate, 'options' );
+		wp_cache_delete( $target_autoload, 'options' );
+		wp_cache_delete( $other_option, 'options' );
+		wp_cache_delete( 'notoptions', 'options' );
+		wp_cache_delete( 'alloptions', 'options' );
+		wp_cache_set( $target_cached, self::stored_value( $target_cached_value ), 'options' );
+
+		$target_cache_before_found = null;
+		wp_cache_get( $target_found, 'options', false, $target_cache_before_found );
+		$other_cache_before_found = null;
+		wp_cache_get( $other_option, 'options', false, $other_cache_before_found );
+
+		$GLOBALS['new_allowed_options'] = array(
+			$target_group => array(
+				$target_found,
+				$target_missing,
+				$target_cached,
+				$target_autoload,
+				$target_duplicate,
+				$target_found,
+			),
+			$other_group  => array(
+				$other_option,
+			),
+		);
+
+		$query_count_before = self::query_count();
+		wp_prime_option_caches_by_group( $target_group );
+		$query_count_after_first = self::query_count();
+
+		$found_cache_found = null;
+		$found_cache       = wp_cache_get( $target_found, 'options', false, $found_cache_found );
+		$duplicate_cache_found = null;
+		$duplicate_cache       = wp_cache_get( $target_duplicate, 'options', false, $duplicate_cache_found );
+		$cached_cache_found = null;
+		$cached_cache       = wp_cache_get( $target_cached, 'options', false, $cached_cache_found );
+		$autoload_cache_found = null;
+		$autoload_cache       = wp_cache_get( $target_autoload, 'options', false, $autoload_cache_found );
+		$missing_cache_found = null;
+		$missing_cache       = wp_cache_get( $target_missing, 'options', false, $missing_cache_found );
+		$other_cache_found = null;
+		$other_cache       = wp_cache_get( $other_option, 'options', false, $other_cache_found );
+		$alloptions        = wp_cache_get( 'alloptions', 'options' );
+		$notoptions        = wp_cache_get( 'notoptions', 'options' );
+
+		$found_read     = get_option( $target_found, self::missing_default( $target_found ) );
+		$duplicate_read = get_option( $target_duplicate, self::missing_default( $target_duplicate ) );
+		$cached_read    = get_option( $target_cached, self::missing_default( $target_cached ) );
+		$autoload_read  = get_option( $target_autoload, self::missing_default( $target_autoload ) );
+		$missing_read   = get_option( $target_missing, $missing_default );
+
+		$query_count_before_second = self::query_count();
+		wp_prime_option_caches_by_group( $target_group );
+		$query_count_after_second = self::query_count();
+		wp_prime_option_caches_by_group( $missing_group );
+		$query_count_after_missing_group = self::query_count();
+
+		$failures = array();
+
+		self::collect_failure(
+			$failures,
+			false === $target_cache_before_found
+				&& false === $other_cache_before_found
+				&& $query_count_after_first > $query_count_before
+				&& true === $found_cache_found
+				&& true === $duplicate_cache_found
+				&& self::stored_value( $target_found_value ) === $found_cache
+				&& self::stored_value( $target_duplicate_value ) === $duplicate_cache
+				&& self::same_value( $target_found_value, $found_read )
+				&& self::same_value( $target_duplicate_value, $duplicate_read ),
+			'group cache priming loads only uncached non-autoloaded members and tolerates duplicate group entries',
+			array(
+				'targetGroup'         => $target_group,
+				'foundCacheFound'     => $found_cache_found,
+				'duplicateCacheFound' => $duplicate_cache_found,
+				'queriesBefore'       => $query_count_before,
+				'queriesAfterFirst'   => $query_count_after_first,
+				'foundRead'           => self::describe_value( $found_read ),
+				'duplicateRead'       => self::describe_value( $duplicate_read ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			true === $cached_cache_found
+				&& self::stored_value( $target_cached_value ) === $cached_cache
+				&& self::same_value( $target_cached_value, $cached_read )
+				&& ! self::same_value( $target_cached_db_value, $cached_read ),
+			'group cache priming does not overwrite an already primed option cache entry',
+			array(
+				'targetCached'   => $target_cached,
+				'cacheFound'     => $cached_cache_found,
+				'cachedRaw'      => self::describe_value( $cached_cache ),
+				'cachedRead'     => self::describe_value( $cached_read ),
+				'databaseValue'  => self::describe_value( $target_cached_db_value ),
+				'preprimedValue' => self::describe_value( $target_cached_value ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			false === $autoload_cache_found
+				&& false === $autoload_cache
+				&& is_array( $alloptions )
+				&& isset( $alloptions[ $target_autoload ] )
+				&& self::stored_value( $target_autoload_value ) === $alloptions[ $target_autoload ]
+				&& self::same_value( $target_autoload_value, $autoload_read ),
+			'group cache priming respects alloptions membership instead of creating duplicate individual caches',
+			array(
+				'targetAutoload'     => $target_autoload,
+				'autoloadCacheFound' => $autoload_cache_found,
+				'inAlloptions'       => is_array( $alloptions ) && isset( $alloptions[ $target_autoload ] ),
+				'autoloadRead'       => self::describe_value( $autoload_read ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			false === $missing_cache_found
+				&& false === $missing_cache
+				&& is_array( $notoptions )
+				&& isset( $notoptions[ $target_missing ] )
+				&& self::same_value( $missing_default, $missing_read ),
+			'group cache priming records missing target-group options only in notoptions',
+			array(
+				'targetMissing'     => $target_missing,
+				'missingCacheFound' => $missing_cache_found,
+				'missingNotoption'  => is_array( $notoptions ) && isset( $notoptions[ $target_missing ] ),
+				'missingRead'       => self::describe_value( $missing_read ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			false === $other_cache_found
+				&& false === $other_cache
+				&& ( ! is_array( $notoptions ) || ! isset( $notoptions[ $other_option ] ) )
+				&& is_array( $alloptions )
+				&& ! isset( $alloptions[ $other_option ] ),
+			'group cache priming leaves other registered groups untouched',
+			array(
+				'otherGroup'      => $other_group,
+				'otherOption'     => $other_option,
+				'otherCacheFound' => $other_cache_found,
+				'otherNotoption'  => is_array( $notoptions ) && isset( $notoptions[ $other_option ] ),
+				'otherAlloption'  => is_array( $alloptions ) && isset( $alloptions[ $other_option ] ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$query_count_before_second === $query_count_after_second
+				&& $query_count_after_second === $query_count_after_missing_group,
+			'repeated target-group and nonexistent-group priming are query-stable after caches are warm',
+			array(
+				'queriesBeforeSecond'      => $query_count_before_second,
+				'queriesAfterSecond'       => $query_count_after_second,
+				'queriesAfterMissingGroup' => $query_count_after_missing_group,
+				'missingGroup'             => $missing_group,
+			)
+		);
+
+		return $ctx->result(
+			'options-autoload.prime-option-caches-by-group-isolates-registered-members-and-cache-states',
+			array() === $failures,
+			array(
+				'targetGroup'     => $target_group,
+				'otherGroup'      => $other_group,
+				'missingGroup'    => $missing_group,
+				'queriesFirstRun' => $query_count_after_first - $query_count_before,
+				'registeredCount' => count( $GLOBALS['new_allowed_options'][ $target_group ] ),
+				'failures'        => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
 	private static function check_notoptions_delete_add_lifecycle( \ComponentFuzz\FuzzContext $ctx ): array {
 		self::reset_runtime();
 
@@ -1334,7 +1541,7 @@ final class OptionsAutoloadSurface {
 			'globals'                  => array(),
 		);
 
-		foreach ( array( 'wp_object_cache', 'wpdb', 'wp_filter', 'wp_actions', 'wp_filters', 'wp_current_filter', '_wp_using_ext_object_cache' ) as $name ) {
+		foreach ( array( 'wp_object_cache', 'wpdb', 'wp_filter', 'wp_actions', 'wp_filters', 'wp_current_filter', '_wp_using_ext_object_cache', 'new_allowed_options' ) as $name ) {
 			$snapshot['globals'][ $name ] = array(
 				'exists' => array_key_exists( $name, $GLOBALS ),
 				'value'  => $GLOBALS[ $name ] ?? null,
