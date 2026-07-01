@@ -220,10 +220,11 @@ database, network requests, or a configured site.
   refresh behavior, and per-iteration state restoration.
 - `comments`: comment filtering, sanitizer agreement, max-length boundaries,
   type partitioning, comment classes, author URL/email links, excerpt/text
-  helpers, comment cookies, public comment count/link/popup helpers,
-  comment page navigation and pagination wrappers, reply/cancel link and
-  comment form rendering branches, and permalink pagination contracts for
-  `get_page_of_comment()`/`get_comment_link()`.
+  helpers, comment cookies, direct `wp_list_comments()` list orchestration,
+  public comment count/link/popup helpers, comment page navigation and
+  pagination wrappers, reply/cancel link and comment form rendering branches,
+  and permalink pagination contracts for `get_page_of_comment()`/
+  `get_comment_link()`.
 - `community-events`: no-network Community Events API client coverage,
   including IP header selection and anonymization, minimal/fail-closed request
   bodies, transient key/cache behavior, strict coordinate matching, cache

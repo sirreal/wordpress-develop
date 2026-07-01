@@ -34,6 +34,7 @@ final class CommentsSurface {
 
 			$rows = array_merge( $rows, self::check_max_length_oracles( $ctx ) );
 			$rows = array_merge( $rows, self::check_separate_comments( $ctx, $cases ) );
+			$rows = array_merge( $rows, self::check_wp_list_comments_rendering( $ctx->fork( 'list-comments' ) ) );
 			$rows = array_merge( $rows, self::check_comment_cookies( $ctx, $cases ) );
 			$rows = array_merge( $rows, self::check_comment_permalink_pagination( $ctx ) );
 			$rows = array_merge( $rows, self::check_comment_reply_links( $ctx ) );
@@ -89,6 +90,7 @@ final class CommentsSurface {
 				'comments_number',
 				'comments_popup_link',
 				'comments_open',
+				'get_comments',
 				'get_comment_pages_count',
 				'get_post_reply_link',
 				'get_comments_link',
@@ -97,6 +99,7 @@ final class CommentsSurface {
 				'get_comments_pagenum_link',
 				'get_next_comments_link',
 				'get_previous_comments_link',
+				'get_option',
 				'get_query_var',
 				'get_the_comments_navigation',
 				'get_the_comments_pagination',
@@ -122,6 +125,7 @@ final class CommentsSurface {
 				'post_password_required',
 				'previous_comments_link',
 				'remove_query_arg',
+				'set_query_var',
 				'site_url',
 				'clean_user_cache',
 				'update_user_caches',
@@ -129,10 +133,12 @@ final class CommentsSurface {
 				'the_comments_pagination',
 				'wp_get_current_commenter',
 				'wp_get_current_user',
+				'wp_get_unapproved_comment_author_email',
 				'wp_login_url',
 				'wp_logout_url',
 				'wp_cache_delete',
 				'wp_cache_set',
+				'wp_list_comments',
 				'wp_parse_url',
 				'wp_required_field_indicator',
 				'wp_required_field_message',
@@ -732,6 +738,348 @@ final class CommentsSurface {
 				'expected' => self::describe_value( $expected_excerpt ),
 				'actual'   => self::describe_call( $excerpt_call ),
 			)
+		);
+
+		return $rows;
+	}
+
+	private static function check_wp_list_comments_rendering( \ComponentFuzz\FuzzContext $ctx ): array {
+		$snapshot    = self::snapshot_globals();
+		$fixture     = self::list_comments_fixture( $ctx );
+		$comments    = array_values( $fixture['comments'] );
+		$ids         = $fixture['ids'];
+		$arg_events  = array();
+		$render_count = 0;
+		$rows        = array();
+
+		$args_filter = static function ( $args ) use ( &$arg_events ) {
+			if ( ! is_array( $args ) ) {
+				$arg_events[] = array( 'nonArray' => gettype( $args ) );
+				return $args;
+			}
+
+			if ( ! isset( $args['component_fuzz_marker'] ) ) {
+				$args['component_fuzz_marker'] = 'cfz-list-' . ( count( $arg_events ) + 1 );
+			}
+
+			$arg_events[] = array(
+				'type'     => (string) ( $args['type'] ?? '' ),
+				'echo'     => (bool) ( $args['echo'] ?? false ),
+				'page'     => $args['page'] ?? null,
+				'per_page' => $args['per_page'] ?? null,
+				'marker'   => (string) $args['component_fuzz_marker'],
+			);
+
+			return $args;
+		};
+
+		\add_filter( 'wp_list_comments_args', $args_filter, 10, 1 );
+
+		try {
+			$type_expectations = array(
+				'comment'   => array( $ids['empty-comment'], $ids['named-comment'], $ids['child-comment'] ),
+				'pings'     => array( $ids['pingback'], $ids['trackback'] ),
+				'pingback'  => array( $ids['pingback'] ),
+				'trackback' => array( $ids['trackback'] ),
+				'all'       => array_values( $ids ),
+			);
+			$type_details      = array();
+			$type_shape_ok     = true;
+			$type_routing_ok   = true;
+
+			foreach ( $type_expectations as $type => $expected_ids ) {
+				$walker = new CommentsSurfaceRecordingWalker();
+				++$render_count;
+				$call = self::call(
+					static fn() => \wp_list_comments(
+						array(
+							'walker' => $walker,
+							'echo'   => false,
+							'style'  => 'ol',
+							'type'   => $type,
+						),
+						$comments
+					)
+				);
+
+				$actual_ids             = $walker->calls[0]['ids'] ?? array();
+				$type_details[ $type ] = array(
+					'expectedIds' => $expected_ids,
+					'actualIds'   => $actual_ids,
+					'walkerCalls' => count( $walker->calls ),
+					'call'        => self::describe_call( $call ),
+				);
+				$type_shape_ok          = $type_shape_ok && ! $call['threw'] && is_string( $call['value'] ) && 1 === count( $walker->calls );
+				$type_routing_ok        = $type_routing_ok && $expected_ids === $actual_ids;
+			}
+
+			$rows[] = $ctx->result(
+				'comments.wp-list-comments.explicit-comments-no-throw-string-output',
+				$type_shape_ok,
+				array( 'types' => $type_details )
+			);
+			$rows[] = $ctx->result(
+				'comments.wp-list-comments.explicit-comments-route-by-type',
+				$type_routing_ok,
+				array( 'types' => $type_details )
+			);
+
+			$return_walker = new CommentsSurfaceRecordingWalker();
+			++$render_count;
+			$return_call = self::call(
+				static fn() => \wp_list_comments(
+					array(
+						'walker'                => $return_walker,
+						'echo'                  => false,
+						'type'                  => 'all',
+						'component_fuzz_marker' => 'echo-parity',
+					),
+					$comments
+				)
+			);
+
+			$echo_walker = new CommentsSurfaceRecordingWalker();
+			++$render_count;
+			$echo_call = self::capture_output(
+				static fn() => \wp_list_comments(
+					array(
+						'walker'                => $echo_walker,
+						'echo'                  => true,
+						'type'                  => 'all',
+						'component_fuzz_marker' => 'echo-parity',
+					),
+					$comments
+				)
+			);
+
+			$rows[] = $ctx->result(
+				'comments.wp-list-comments.echo-false-return-matches-echo-true-output',
+				! $return_call['threw']
+					&& ! $echo_call['threw']
+					&& is_string( $return_call['value'] )
+					&& null === $echo_call['value']
+					&& $return_call['value'] === $echo_call['output']
+					&& ( $return_walker->calls[0]['ids'] ?? array() ) === ( $echo_walker->calls[0]['ids'] ?? array() ),
+				array(
+					'returnCall' => self::describe_call( $return_call ),
+					'echoCall'   => self::describe_call( $echo_call ),
+					'returnIds'  => $return_walker->calls[0]['ids'] ?? array(),
+					'echoIds'    => $echo_walker->calls[0]['ids'] ?? array(),
+				)
+			);
+
+			self::set_comment_navigation_query_context( $fixture['post'], $comments, 2, 3 );
+			$GLOBALS['wp_query']->comments_by_type = array();
+			++$render_count;
+			$global_result = self::with_list_comments_options(
+				array(
+					'default_comments_page' => 'newest',
+					'page_comments'         => 1,
+					'thread_comments'       => 1,
+					'thread_comments_depth' => 4,
+					'comment_order'         => 'asc',
+				),
+				static function () {
+					$walker = new CommentsSurfaceRecordingWalker();
+					$call   = self::call(
+						static fn() => \wp_list_comments(
+							array(
+								'walker'                => $walker,
+								'echo'                  => false,
+								'type'                  => 'pings',
+								'component_fuzz_marker' => 'global-pings',
+							),
+							null
+						)
+					);
+
+					return array(
+						'call'             => $call,
+						'walkerCalls'      => $walker->calls,
+						'commentsByType'   => $GLOBALS['wp_query']->comments_by_type ?? array(),
+						'queryCpage'       => \get_query_var( 'cpage' ),
+					);
+				}
+			);
+			$global_call = $global_result['walkerCalls'][0] ?? array();
+
+			$rows[] = $ctx->result(
+				'comments.wp-list-comments.global-comments-populate-type-cache-and-cpage',
+				! $global_result['call']['threw']
+					&& array( $ids['pingback'], $ids['trackback'] ) === ( $global_call['ids'] ?? array() )
+					&& array( $ids['pingback'], $ids['trackback'] ) === self::comment_ids( $global_result['commentsByType']['pings'] ?? array() )
+					&& 2 === (int) ( $global_call['args']['cpage'] ?? 0 )
+					&& 0 === (int) ( $global_call['page'] ?? -1 )
+					&& 0 === (int) ( $global_call['per_page'] ?? -1 ),
+				array(
+					'call'           => self::describe_call( $global_result['call'] ),
+					'walkerCall'     => self::describe_value( $global_call ),
+					'cachedPingIds'  => self::comment_ids( $global_result['commentsByType']['pings'] ?? array() ),
+					'queryCpage'     => $global_result['queryCpage'],
+				)
+			);
+
+			self::set_comment_navigation_query_context( $fixture['post'], $comments, 3, 0 );
+			++$render_count;
+			$option_result = self::with_list_comments_options(
+				array(
+					'page_comments'         => 1,
+					'thread_comments'       => 1,
+					'thread_comments_depth' => 4,
+					'comment_order'         => 'desc',
+					'default_comments_page' => 'oldest',
+				),
+				static function () {
+					$walker = new CommentsSurfaceRecordingWalker();
+					$call   = self::call(
+						static fn() => \wp_list_comments(
+							array(
+								'walker'                => $walker,
+								'echo'                  => false,
+								'type'                  => 'all',
+								'component_fuzz_marker' => 'option-defaults',
+							),
+							null
+						)
+					);
+
+					return array(
+						'call'        => $call,
+						'walkerCalls' => $walker->calls,
+					);
+				}
+			);
+			$option_call = $option_result['walkerCalls'][0] ?? array();
+
+			$rows[] = $ctx->result(
+				'comments.wp-list-comments.option-defaults-drive-depth-pagination-and-order',
+				! $option_result['call']['threw']
+					&& array_values( $ids ) === ( $option_call['ids'] ?? array() )
+					&& 4 === (int) ( $option_call['max_depth'] ?? 0 )
+					&& 3 === (int) ( $option_call['page'] ?? 0 )
+					&& 2 === (int) ( $option_call['per_page'] ?? 0 )
+					&& true === ( $option_call['args']['reverse_top_level'] ?? null ),
+				array(
+					'call'       => self::describe_call( $option_result['call'] ),
+					'walkerCall' => self::describe_value( $option_call ),
+				)
+			);
+
+			self::set_comment_navigation_query_context( $fixture['post'], $comments, 1, 0 );
+			$_COOKIE           = array();
+			$requery_comments  = array( $comments[1], $comments[2], $comments[3] );
+			$requery_events    = array();
+			$comments_pre_query = static function ( $comment_data, $query ) use ( &$requery_events, $requery_comments ) {
+				$requery_events[] = $query->query_vars;
+				$query->found_comments = count( $requery_comments );
+				$query->max_num_pages  = 3;
+				return $requery_comments;
+			};
+			\add_filter( 'comments_pre_query', $comments_pre_query, 10, 2 );
+			try {
+				++$render_count;
+				$requery_walker = new CommentsSurfaceRecordingWalker();
+				$requery_call   = self::call(
+					static fn() => \wp_list_comments(
+						array(
+							'walker'                => $requery_walker,
+							'echo'                  => false,
+							'type'                  => 'all',
+							'page'                  => 2,
+							'per_page'              => 1,
+							'component_fuzz_marker' => 'requery',
+						),
+						null
+					)
+				);
+			} finally {
+				\remove_filter( 'comments_pre_query', $comments_pre_query, 10 );
+			}
+			$requery_vars = $requery_events[0] ?? array();
+
+			$rows[] = $ctx->result(
+				'comments.wp-list-comments.page-override-requeries-comments',
+				! $requery_call['threw']
+					&& array( $ids['named-comment'], $ids['pingback'], $ids['trackback'] ) === ( $requery_walker->calls[0]['ids'] ?? array() )
+					&& 1 === count( $requery_events )
+					&& (int) $fixture['post']->ID === (int) ( $requery_vars['post_id'] ?? 0 )
+					&& 'comment_date_gmt' === ( $requery_vars['orderby'] ?? null )
+					&& 'ASC' === ( $requery_vars['order'] ?? null )
+					&& 'approve' === ( $requery_vars['status'] ?? null ),
+				array(
+					'call'          => self::describe_call( $requery_call ),
+					'walkerCalls'   => self::describe_value( $requery_walker->calls ),
+					'queryVars'     => self::describe_value( $requery_vars ),
+					'queryVarCount' => count( $requery_events ),
+				)
+			);
+
+			self::set_comment_navigation_query_context( $fixture['post'], $comments, 0, 0 );
+			$GLOBALS['overridden_cpage'] = true;
+			++$render_count;
+			$overridden_result = self::with_list_comments_options(
+				array(
+					'page_comments'         => 1,
+					'comments_per_page'     => 2,
+					'thread_comments'       => 0,
+					'thread_comments_depth' => 3,
+					'comment_order'         => 'asc',
+					'default_comments_page' => 'newest',
+				),
+				static function () {
+					$walker = new CommentsSurfaceRecordingWalker();
+					$call   = self::call(
+						static fn() => \wp_list_comments(
+							array(
+								'walker'                => $walker,
+								'echo'                  => false,
+								'type'                  => 'all',
+								'component_fuzz_marker' => 'overridden-cpage',
+							),
+							null
+						)
+					);
+
+					return array(
+						'call'        => $call,
+						'walkerCalls' => $walker->calls,
+						'queryCpage'  => \get_query_var( 'cpage' ),
+					);
+				}
+			);
+			$overridden_call = $overridden_result['walkerCalls'][0] ?? array();
+
+			$rows[] = $ctx->result(
+				'comments.wp-list-comments.overridden-cpage-computes-and-writes-page',
+				! $overridden_result['call']['threw']
+					&& 3 === (int) ( $overridden_call['page'] ?? 0 )
+					&& 2 === (int) ( $overridden_call['per_page'] ?? 0 )
+					&& 3 === (int) $overridden_result['queryCpage'],
+				array(
+					'call'       => self::describe_call( $overridden_result['call'] ),
+					'walkerCall' => self::describe_value( $overridden_call ),
+					'queryCpage' => $overridden_result['queryCpage'],
+				)
+			);
+
+			$rows[] = $ctx->result(
+				'comments.wp-list-comments.args-filter-fires-for-each-render',
+				$render_count === count( $arg_events ) && self::all_list_comment_markers_present( $arg_events ),
+				array(
+					'expectedCount' => $render_count,
+					'actualCount'   => count( $arg_events ),
+					'events'        => self::describe_value( $arg_events ),
+				)
+			);
+		} finally {
+			\remove_filter( 'wp_list_comments_args', $args_filter, 10 );
+			self::restore_globals( $snapshot );
+		}
+
+		$rows[] = $ctx->result(
+			'comments.wp-list-comments.cleanup-restores-global-state',
+			self::globals_match( $snapshot ),
+			array()
 		);
 
 		return $rows;
@@ -2422,6 +2770,73 @@ final class CommentsSurface {
 		$GLOBALS['wp_the_query'] = $query;
 	}
 
+	private static function list_comments_fixture( \ComponentFuzz\FuzzContext $ctx ): array {
+		$base_id = 920000 + ( $ctx->iteration() * 100 );
+		$post_id = $base_id + 1;
+		$post    = self::permalink_post( $post_id, 'List Comments Fixture ' . $ctx->iteration() );
+		$rows    = array(
+			'empty-comment' => array( 11, '', 0, '2026-06-02 00:00:01' ),
+			'named-comment' => array( 12, 'comment', 0, '2026-06-02 00:00:02' ),
+			'pingback'      => array( 13, 'pingback', 0, '2026-06-02 00:00:03' ),
+			'trackback'     => array( 14, 'trackback', 0, '2026-06-02 00:00:04' ),
+			'child-comment' => array( 15, 'comment', $base_id + 12, '2026-06-02 00:00:05' ),
+		);
+		$comments = array();
+		$ids      = array();
+
+		foreach ( $rows as $alias => $row ) {
+			list( $offset, $type, $parent, $date ) = $row;
+			$comment_id            = $base_id + $offset;
+			$ids[ $alias ]         = $comment_id;
+			$comments[ $comment_id ] = self::permalink_comment( $comment_id, $post_id, $type, $parent, $date );
+		}
+
+		return array(
+			'post'     => $post,
+			'comments' => $comments,
+			'ids'      => $ids,
+		);
+	}
+
+	private static function with_list_comments_options( array $options, callable $callback ) {
+		$filters = array();
+		foreach ( $options as $option => $value ) {
+			$hook   = 'pre_option_' . $option;
+			$filter = static fn() => $value;
+			\add_filter( $hook, $filter, 9999, 0 );
+			$filters[] = array( $hook, $filter );
+		}
+
+		try {
+			return $callback();
+		} finally {
+			foreach ( array_reverse( $filters ) as $entry ) {
+				\remove_filter( $entry[0], $entry[1], 9999 );
+			}
+		}
+	}
+
+	private static function comment_ids( array $comments ): array {
+		$ids = array();
+		foreach ( $comments as $comment ) {
+			if ( is_object( $comment ) && isset( $comment->comment_ID ) ) {
+				$ids[] = (int) $comment->comment_ID;
+			}
+		}
+
+		return $ids;
+	}
+
+	private static function all_list_comment_markers_present( array $events ): bool {
+		foreach ( $events as $event ) {
+			if ( ! is_array( $event ) || '' === (string) ( $event['marker'] ?? '' ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
 	private static function comment_permalink_fixture( \ComponentFuzz\FuzzContext $ctx ): array {
 		$base_id       = 910000 + ( $ctx->iteration() * 100 );
 		$post_id       = $base_id + 1;
@@ -3082,6 +3497,8 @@ final class CommentsSurface {
 				'comment_alt',
 				'comment_depth',
 				'comment_thread_alt',
+				'in_comment_loop',
+				'overridden_cpage',
 				'wp_current_filter',
 				'wp_filter',
 				'wp_filters',
@@ -3367,5 +3784,32 @@ final class CommentsSurface {
 		}
 
 		return true;
+	}
+}
+
+final class CommentsSurfaceRecordingWalker {
+	public array $calls = array();
+
+	public function paged_walk( $elements, $max_depth, $page_num, $per_page, ...$args ): string {
+		$parsed_args = $args[0] ?? array();
+		$ids         = array();
+
+		foreach ( (array) $elements as $element ) {
+			if ( is_object( $element ) && isset( $element->comment_ID ) ) {
+				$ids[] = (int) $element->comment_ID;
+			}
+		}
+
+		$this->calls[] = array(
+			'ids'       => $ids,
+			'max_depth' => $max_depth,
+			'page'      => $page_num,
+			'per_page'  => $per_page,
+			'args'      => is_array( $parsed_args ) ? $parsed_args : array(),
+		);
+
+		$marker = is_array( $parsed_args ) ? (string) ( $parsed_args['component_fuzz_marker'] ?? '' ) : '';
+
+		return '<cfz-comment-list data-marker="' . \esc_attr( $marker ) . '" data-ids="' . \esc_attr( implode( ',', $ids ) ) . '"></cfz-comment-list>';
 	}
 }
