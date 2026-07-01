@@ -218,6 +218,7 @@ database, network requests, or a configured site.
   user-location persistence behavior.
 - `comment-workflow`: in-memory comment submission, duplicate/flood approval
   decisions, direct `wp_new_comment()` preprocessing and insert hooks,
+  notification wrapper/direct mail filter paths with intercepted delivery,
   moderation short-circuits, update/status transition hooks, trash/untrash and
   spam/unspam restoration, force-delete reparenting/meta/count/hook contracts,
   and WP_Error failure paths without process exits.

@@ -28,6 +28,7 @@ final class CommentWorkflowSurface {
 
 			$rows[] = self::check_handle_submission( $ctx->fork( 'submission' ), $case );
 			$rows[] = self::check_new_comment_pipeline( $ctx->fork( 'new-comment' ), $case );
+			$rows[] = self::check_notification_mail_paths( $ctx->fork( 'notifications' ), $case );
 			$rows[] = self::check_allow_comment_decisions( $ctx->fork( 'allow' ), $case );
 			$rows[] = self::check_update_and_status_transitions( $ctx->fork( 'status' ), $case );
 			$rows[] = self::check_trash_spam_restore_helpers( $ctx->fork( 'trash-spam' ), $case );
@@ -58,7 +59,7 @@ final class CommentWorkflowSurface {
 	private static function missing_requirements(): array {
 		$missing = array();
 
-		foreach ( array( 'WP_Post', 'WP_Comment', 'WP_Error', 'Component_Fuzz_WPDB_Stub' ) as $class ) {
+		foreach ( array( 'WP_Post', 'WP_Comment', 'WP_Error', 'WP_Http', 'WP_User', 'Component_Fuzz_WPDB_Stub' ) as $class ) {
 			if ( ! class_exists( $class, false ) ) {
 				$missing[] = "class {$class}";
 			}
@@ -72,21 +73,33 @@ final class CommentWorkflowSurface {
 				'create_initial_post_types',
 				'get_comment',
 				'get_comment_meta',
+				'get_option',
 				'get_post',
+				'get_user_by',
+				'get_userdata',
 				'has_action',
+				'has_filter',
 				'is_wp_error',
 				'remove_action',
 				'remove_filter',
+				'update_option',
+				'user_can',
 				'wp_allow_comment',
 				'wp_delete_comment',
 				'wp_handle_comment_submission',
 				'wp_insert_comment',
 				'wp_insert_post',
 				'wp_insert_user',
+				'wp_mail',
 				'wp_new_comment',
+				'wp_new_comment_notify_moderator',
+				'wp_new_comment_notify_postauthor',
+				'wp_notify_moderator',
+				'wp_notify_postauthor',
 				'wp_set_comment_status',
 				'wp_slash',
 				'wp_spam_comment',
+				'wp_set_current_user',
 				'wp_trash_comment',
 				'wp_unspam_comment',
 				'wp_untrash_comment',
@@ -315,6 +328,374 @@ final class CommentWorkflowSurface {
 			array(
 				'postId' => $post_id,
 				'userId' => $user_id,
+			)
+		);
+	}
+
+	private static function check_notification_mail_paths( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures  = array();
+		$author_id = self::insert_user( $ctx->fork( 'post-author' ), $case );
+		$post_id   = self::insert_post( $case, 'open', $author_id );
+		$author    = \get_userdata( $author_id );
+		$approved_id = \wp_insert_comment(
+			array(
+				'comment_post_ID'      => $post_id,
+				'comment_author'       => 'Notify Approved ' . $case['token'],
+				'comment_author_email' => 'approved-' . $case['token'] . '@example.test',
+				'comment_author_url'   => $case['url'],
+				'comment_content'      => 'approved notify ' . $case['content'],
+				'comment_approved'     => '1',
+				'comment_type'         => 'comment',
+				'user_id'              => 0,
+			)
+		);
+		$pending_id = \wp_insert_comment(
+			array(
+				'comment_post_ID'      => $post_id,
+				'comment_author'       => 'Notify Pending ' . $case['token'],
+				'comment_author_email' => 'pending-' . $case['token'] . '@example.test',
+				'comment_author_url'   => $case['url'],
+				'comment_content'      => 'pending notify ' . $case['content'],
+				'comment_approved'     => '0',
+				'comment_type'         => 'comment',
+				'user_id'              => 0,
+			)
+		);
+
+		$mail_calls        = array();
+		$post_events       = array();
+		$moderation_events = array();
+		$gate_events       = array();
+		$filters           = array();
+		$old_comments_notify   = \get_option( 'comments_notify' );
+		$old_moderation_notify = \get_option( 'moderation_notify' );
+		$add_filter            = static function ( string $hook, callable $callback, int $accepted_args = 1 ) use ( &$filters ): void {
+			\add_filter( $hook, $callback, 10, $accepted_args );
+			$filters[] = array( $hook, $callback, 10 );
+		};
+
+		$add_filter(
+			'pre_wp_mail',
+			static function ( $return, array $atts ) use ( &$mail_calls ) {
+				unset( $return );
+				$mail_calls[] = array(
+					'to'      => $atts['to'] ?? null,
+					'subject' => (string) ( $atts['subject'] ?? '' ),
+					'message' => (string) ( $atts['message'] ?? '' ),
+					'headers' => (string) ( $atts['headers'] ?? '' ),
+				);
+				return true;
+			},
+			2
+		);
+		$add_filter(
+			'notify_post_author',
+			static function ( $maybe_notify, int $comment_id ) use ( &$gate_events ) {
+				$gate_events[] = array(
+					'hook'      => 'notify_post_author',
+					'commentId' => $comment_id,
+					'maybe'     => (bool) $maybe_notify,
+				);
+				return $maybe_notify;
+			},
+			2
+		);
+		$add_filter(
+			'notify_moderator',
+			static function ( $maybe_notify, int $comment_id ) use ( &$gate_events ) {
+				$gate_events[] = array(
+					'hook'      => 'notify_moderator',
+					'commentId' => $comment_id,
+					'maybe'     => (bool) $maybe_notify,
+				);
+				return $maybe_notify;
+			},
+			2
+		);
+		$add_filter(
+			'map_meta_cap',
+			static function ( array $caps, string $cap, int $user_id, array $args ) use ( $author_id, $post_id ): array {
+				if ( 'read_post' === $cap && $author_id === $user_id && $post_id === (int) ( $args[0] ?? 0 ) ) {
+					return array( 'exist' );
+				}
+				return $caps;
+			},
+			4
+		);
+		$add_filter(
+			'comment_notification_recipients',
+			static function ( array $emails, $comment_id ) use ( &$post_events ): array {
+				$post_events[] = array(
+					'hook'      => 'recipients',
+					'commentId' => (int) $comment_id,
+					'emails'    => array_values( $emails ),
+				);
+				$emails[] = 'watcher-' . (int) $comment_id . '@example.test';
+				return $emails;
+			},
+			2
+		);
+		$add_filter(
+			'comment_notification_headers',
+			static function ( string $headers, $comment_id ) use ( &$post_events ): string {
+				$post_events[] = array(
+					'hook'           => 'headers',
+					'commentId'      => (int) $comment_id,
+					'hasContentType' => str_contains( $headers, 'Content-Type: text/plain; charset="UTF-8"' ),
+				);
+				return $headers . 'X-Component-Fuzz-Notification: ' . (int) $comment_id . "\n";
+			},
+			2
+		);
+		$add_filter(
+			'comment_notification_text',
+			static function ( string $message, $comment_id ) use ( &$post_events, $case ): string {
+				$post_events[] = array(
+					'hook'       => 'text',
+					'commentId'  => (int) $comment_id,
+					'hasContent' => str_contains( $message, 'approved notify' ) && str_contains( $message, $case['token'] ),
+				);
+				return $message . "\r\nComponent fuzz notification " . (int) $comment_id;
+			},
+			2
+		);
+		$add_filter(
+			'comment_notification_subject',
+			static function ( string $subject, $comment_id ) use ( &$post_events ): string {
+				$post_events[] = array(
+					'hook'      => 'subject',
+					'commentId' => (int) $comment_id,
+					'subject'   => $subject,
+				);
+				return $subject . ' [component-fuzz notification]';
+			},
+			2
+		);
+		$add_filter(
+			'comment_moderation_recipients',
+			static function ( array $emails, int $comment_id ) use ( &$moderation_events ): array {
+				$moderation_events[] = array(
+					'hook'      => 'recipients',
+					'commentId' => $comment_id,
+					'emails'    => array_values( $emails ),
+				);
+				$emails[] = 'moderator-' . $comment_id . '@example.test';
+				return $emails;
+			},
+			2
+		);
+		$add_filter(
+			'comment_moderation_headers',
+			static function ( string $headers, int $comment_id ) use ( &$moderation_events ): string {
+				$moderation_events[] = array(
+					'hook'      => 'headers',
+					'commentId' => $comment_id,
+					'headers'   => $headers,
+				);
+				return $headers . 'X-Component-Fuzz-Moderation: ' . $comment_id . "\n";
+			},
+			2
+		);
+		$add_filter(
+			'comment_moderation_text',
+			static function ( string $message, int $comment_id ) use ( &$moderation_events, $case ): string {
+				$moderation_events[] = array(
+					'hook'       => 'text',
+					'commentId'  => $comment_id,
+					'hasContent' => str_contains( $message, 'pending notify' ) && str_contains( $message, $case['token'] ),
+				);
+				return $message . "\r\nComponent fuzz moderation " . $comment_id;
+			},
+			2
+		);
+		$add_filter(
+			'comment_moderation_subject',
+			static function ( string $subject, int $comment_id ) use ( &$moderation_events ): string {
+				$moderation_events[] = array(
+					'hook'      => 'subject',
+					'commentId' => $comment_id,
+					'subject'   => $subject,
+				);
+				return $subject . ' [component-fuzz moderation]';
+			},
+			2
+		);
+
+		$approved_author_before   = 0;
+		$approved_author_after    = 0;
+		$pending_author_after     = 0;
+		$pending_moderator_after  = 0;
+		$approved_moderator_after = 0;
+		$direct_moderator_after   = 0;
+		$direct_author_after      = 0;
+		$approved_author_result   = null;
+		$pending_author_result    = null;
+		$pending_moderator_result = null;
+		$approved_moderator_result = null;
+		$direct_moderator_result   = null;
+		$direct_author_result      = null;
+
+		try {
+			\update_option( 'comments_notify', 1 );
+			\update_option( 'moderation_notify', 1 );
+			\wp_set_current_user( 0 );
+
+			$approved_author_before    = count( $mail_calls );
+			$approved_author_result    = \wp_new_comment_notify_postauthor( $approved_id );
+			$approved_author_after     = count( $mail_calls );
+			$pending_author_result     = \wp_new_comment_notify_postauthor( $pending_id );
+			$pending_author_after      = count( $mail_calls );
+			$pending_moderator_result  = \wp_new_comment_notify_moderator( $pending_id );
+			$pending_moderator_after   = count( $mail_calls );
+			$approved_moderator_result = \wp_new_comment_notify_moderator( $approved_id );
+			$approved_moderator_after  = count( $mail_calls );
+			$direct_moderator_result   = \wp_notify_moderator( $pending_id );
+			$direct_moderator_after    = count( $mail_calls );
+			$direct_author_result      = \wp_notify_postauthor( $approved_id );
+			$direct_author_after       = count( $mail_calls );
+		} finally {
+			\update_option( 'comments_notify', $old_comments_notify );
+			\update_option( 'moderation_notify', $old_moderation_notify );
+			\wp_set_current_user( 0 );
+			self::remove_filters( $filters );
+		}
+
+		$approved_author_calls = array_slice( $mail_calls, $approved_author_before, $approved_author_after - $approved_author_before );
+		$pending_moderator_calls = array_slice( $mail_calls, $pending_author_after, $pending_moderator_after - $pending_author_after );
+		$direct_moderator_calls = array_slice( $mail_calls, $approved_moderator_after, $direct_moderator_after - $approved_moderator_after );
+		$direct_author_calls = array_slice( $mail_calls, $direct_moderator_after, $direct_author_after - $direct_moderator_after );
+		$expected_author_email = $author instanceof \WP_User ? $author->user_email : null;
+
+		self::collect_failure(
+			$failures,
+			is_int( $approved_id )
+				&& is_int( $pending_id )
+				&& $author instanceof \WP_User
+				&& true === $approved_author_result
+				&& false === $pending_author_result
+				&& true === $pending_moderator_result
+				&& false === $approved_moderator_result
+				&& true === $direct_moderator_result
+				&& true === $direct_author_result,
+			'comment notification wrappers gate approved author mail and pending moderation mail while direct notifiers send',
+			array(
+				'approvedId'              => $approved_id,
+				'pendingId'               => $pending_id,
+				'approvedAuthorResult'    => $approved_author_result,
+				'pendingAuthorResult'     => $pending_author_result,
+				'pendingModeratorResult'  => $pending_moderator_result,
+				'approvedModeratorResult' => $approved_moderator_result,
+				'directModeratorResult'   => $direct_moderator_result,
+				'directAuthorResult'      => $direct_author_result,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			2 === count( $approved_author_calls )
+				&& $expected_author_email === ( $approved_author_calls[0]['to'] ?? null )
+				&& 'watcher-' . $approved_id . '@example.test' === ( $approved_author_calls[1]['to'] ?? null )
+				&& self::mail_calls_have( $approved_author_calls, 'subject', '[Component Fuzz] Comment: "Comment Workflow ' . $case['token'] . '"' )
+				&& self::mail_calls_have( $approved_author_calls, 'subject', '[component-fuzz notification]' )
+				&& self::mail_calls_have( $approved_author_calls, 'message', 'approved notify' )
+				&& self::mail_calls_have( $approved_author_calls, 'message', $case['token'] )
+				&& self::mail_calls_have( $approved_author_calls, 'headers', 'X-Component-Fuzz-Notification: ' . $approved_id )
+				&& $approved_author_after === $pending_author_after,
+			'approved post-author wrapper sends filtered author recipients through wp_mail and pending wrapper sends none',
+			array(
+				'expectedAuthorEmail' => $expected_author_email,
+				'approvedCalls'       => $approved_author_calls,
+				'pendingDelta'        => $pending_author_after - $approved_author_after,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			2 === count( $pending_moderator_calls )
+				&& 'admin@example.test' === ( $pending_moderator_calls[0]['to'] ?? null )
+				&& 'moderator-' . $pending_id . '@example.test' === ( $pending_moderator_calls[1]['to'] ?? null )
+				&& self::mail_calls_have( $pending_moderator_calls, 'subject', '[Component Fuzz] Please moderate: "Comment Workflow ' . $case['token'] . '"' )
+				&& self::mail_calls_have( $pending_moderator_calls, 'subject', '[component-fuzz moderation]' )
+				&& self::mail_calls_have( $pending_moderator_calls, 'message', 'pending notify' )
+				&& self::mail_calls_have( $pending_moderator_calls, 'message', $case['token'] )
+				&& self::mail_calls_have( $pending_moderator_calls, 'message', 'Approve it:' )
+				&& self::mail_calls_have( $pending_moderator_calls, 'headers', 'X-Component-Fuzz-Moderation: ' . $pending_id )
+				&& $pending_moderator_after === $approved_moderator_after,
+			'pending moderation wrapper sends filtered moderator recipients with moderation actions and approved wrapper sends none',
+			array(
+				'pendingModeratorCalls' => $pending_moderator_calls,
+				'approvedDelta'         => $approved_moderator_after - $pending_moderator_after,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			2 === count( $direct_moderator_calls )
+				&& 2 === count( $direct_author_calls )
+				&& 'admin@example.test' === ( $direct_moderator_calls[0]['to'] ?? null )
+				&& 'moderator-' . $pending_id . '@example.test' === ( $direct_moderator_calls[1]['to'] ?? null )
+				&& $expected_author_email === ( $direct_author_calls[0]['to'] ?? null )
+				&& 'watcher-' . $approved_id . '@example.test' === ( $direct_author_calls[1]['to'] ?? null ),
+			'direct notification functions compose the same filtered recipient sets without wrapper approval gates',
+			array(
+				'directModeratorCalls' => $direct_moderator_calls,
+				'directAuthorCalls'    => $direct_author_calls,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			self::event_hooks_seen(
+				$post_events,
+				$approved_id,
+				array(
+					'recipients',
+					'headers',
+					'text',
+					'subject',
+					'text',
+					'subject',
+					'recipients',
+					'headers',
+					'text',
+					'subject',
+					'text',
+					'subject',
+				)
+			)
+				&& self::event_hooks_seen(
+					$moderation_events,
+					$pending_id,
+					array(
+						'recipients',
+						'headers',
+						'text',
+						'subject',
+						'text',
+						'subject',
+						'recipients',
+						'headers',
+						'text',
+						'subject',
+						'text',
+						'subject',
+					)
+				)
+				&& self::notification_gates_seen( $gate_events, $approved_id, $pending_id )
+				&& self::filters_are_removed( $filters ),
+			'notification filters observe expected comment IDs, run for wrapper/direct paths, and are removed',
+			array(
+				'postEvents'       => $post_events,
+				'moderationEvents' => $moderation_events,
+				'gateEvents'       => $gate_events,
+				'filtersRemoved'   => self::filters_are_removed( $filters ),
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'comment-workflow.notifications.wrapper-direct-mail-filters',
+			$failures,
+			array(
+				'postId'    => $post_id,
+				'authorId'  => $author_id,
+				'mailCount' => count( $mail_calls ),
 			)
 		);
 	}
@@ -1058,7 +1439,7 @@ final class CommentWorkflowSurface {
 		$_SERVER['SERVER_SOFTWARE']  = 'ComponentFuzz';
 	}
 
-	private static function insert_post( array $case, string $comment_status ): int {
+	private static function insert_post( array $case, string $comment_status, int $post_author = 0 ): int {
 		return \wp_insert_post(
 			\wp_slash(
 				array(
@@ -1067,6 +1448,7 @@ final class CommentWorkflowSurface {
 					'post_content'   => 'Comment workflow host',
 					'post_status'    => 'publish',
 					'post_name'      => 'comment-workflow-' . $case['token'] . '-' . $comment_status,
+					'post_author'    => $post_author,
 					'comment_status' => $comment_status,
 					'ping_status'    => 'closed',
 				)
@@ -1161,6 +1543,12 @@ final class CommentWorkflowSurface {
 		}
 	}
 
+	private static function remove_filters( array $filters ): void {
+		foreach ( $filters as $filter ) {
+			\remove_filter( $filter[0], $filter[1], $filter[2] );
+		}
+	}
+
 	private static function hooks_are_removed( array $hooks ): bool {
 		foreach ( $hooks as $hook ) {
 			if ( false !== \has_action( $hook[0], $hook[1] ) ) {
@@ -1169,6 +1557,73 @@ final class CommentWorkflowSurface {
 		}
 
 		return true;
+	}
+
+	private static function filters_are_removed( array $filters ): bool {
+		foreach ( $filters as $filter ) {
+			if ( false !== \has_filter( $filter[0], $filter[1] ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function mail_calls_have( array $calls, string $field, string $needle ): bool {
+		foreach ( $calls as $call ) {
+			if ( str_contains( (string) ( $call[ $field ] ?? '' ), $needle ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private static function event_hooks_seen( array $events, int $comment_id, array $expected_hooks ): bool {
+		$seen = array();
+		foreach ( $events as $event ) {
+			if ( (int) ( $event['commentId'] ?? 0 ) === $comment_id ) {
+				$seen[] = (string) ( $event['hook'] ?? '' );
+			}
+		}
+
+		sort( $seen );
+		sort( $expected_hooks );
+
+		return $expected_hooks === $seen;
+	}
+
+	private static function notification_gates_seen( array $events, int $approved_id, int $pending_id ): bool {
+		$counts = array(
+			'post-approved-true'     => 0,
+			'post-pending-true'      => 0,
+			'moderator-approved-false' => 0,
+			'moderator-pending-true' => 0,
+		);
+
+		foreach ( $events as $event ) {
+			$hook       = (string) ( $event['hook'] ?? '' );
+			$comment_id = (int) ( $event['commentId'] ?? 0 );
+			$maybe      = (bool) ( $event['maybe'] ?? false );
+
+			if ( 'notify_post_author' === $hook && $approved_id === $comment_id && $maybe ) {
+				++$counts['post-approved-true'];
+			}
+			if ( 'notify_post_author' === $hook && $pending_id === $comment_id && $maybe ) {
+				++$counts['post-pending-true'];
+			}
+			if ( 'notify_moderator' === $hook && $approved_id === $comment_id && ! $maybe ) {
+				++$counts['moderator-approved-false'];
+			}
+			if ( 'notify_moderator' === $hook && $pending_id === $comment_id && $maybe ) {
+				++$counts['moderator-pending-true'];
+			}
+		}
+
+		return 1 === $counts['post-approved-true']
+			&& 1 === $counts['post-pending-true']
+			&& 1 === $counts['moderator-approved-false']
+			&& 3 === $counts['moderator-pending-true'];
 	}
 
 	private static function events_are_ordered( array $events, array $expected ): bool {
