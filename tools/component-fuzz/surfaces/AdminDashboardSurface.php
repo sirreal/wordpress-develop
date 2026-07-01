@@ -38,6 +38,7 @@ final class AdminDashboardSurface {
 			$rows[] = self::check_recent_comments_rendering( $ctx->fork( 'recent-comments' ) );
 			$rows[] = self::check_cached_rss_widget( $ctx->fork( 'cached-rss' ) );
 			$rows[] = self::check_browser_nag_remote_cache( $ctx->fork( 'browser-nag' ) );
+			$rows[] = self::check_community_events_markup_and_templates( $ctx->fork( 'community-events-markup' ) );
 			$rows[] = self::check_dashboard_setup_direct_registration( $ctx->fork( 'setup' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
@@ -111,6 +112,7 @@ final class AdminDashboardSurface {
 				'set_transient',
 				'submit_button',
 				'wp_add_dashboard_widget',
+				'wp_admin_notice',
 				'wp_cache_flush',
 				'wp_create_nonce',
 				'wp_dashboard',
@@ -125,6 +127,8 @@ final class AdminDashboardSurface {
 				'wp_get_admin_notice',
 				'wp_insert_user',
 				'wp_nonce_field',
+				'wp_print_community_events_markup',
+				'wp_print_community_events_templates',
 				'wp_set_current_user',
 				'wp_strip_all_tags',
 			) as $function
@@ -1481,6 +1485,170 @@ final class AdminDashboardSurface {
 			array(
 				'cases'        => $case_summaries,
 				'requestCount' => count( $requests ),
+			)
+		);
+	}
+
+	private static function check_community_events_markup_and_templates( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures      = array();
+		$buffer_before = ob_get_level();
+		$markup        = self::capture_output(
+			static function (): void {
+				\wp_print_community_events_markup();
+			}
+		);
+		$templates     = self::capture_output(
+			static function (): void {
+				\wp_print_community_events_templates();
+			}
+		);
+		$expected_form_action = \esc_url( \admin_url( 'admin-ajax.php' ) );
+		$markup_lower         = strtolower( $markup );
+		$template_lower       = strtolower( $templates );
+
+		$markup_fragments = array(
+			'community-events-errors',
+			'community-events-error-occurred',
+			'community-events-could-not-locate',
+			'hide-if-js',
+			'id="community-events"',
+			'class="community-events"',
+			'aria-hidden="true"',
+			'id="community-events-location-message"',
+			'button-link community-events-toggle-location',
+			'aria-expanded="false"',
+			'class="community-events-form"',
+			'action="' . $expected_form_action . '"',
+			'method="post"',
+			'for="community-events-location"',
+			'id="community-events-location"',
+			'name="community-events-location"',
+			'placeholder="Cincinnati"',
+			'name="community-events-submit"',
+			'id="community-events-submit"',
+			'community-events-cancel button-link',
+			'class="spinner"',
+			'community-events-results activity-block last',
+		);
+		$missing_markup   = array();
+		foreach ( $markup_fragments as $fragment ) {
+			if ( ! str_contains( $markup, $fragment ) ) {
+				$missing_markup[] = $fragment;
+			}
+		}
+
+		self::collect_failure(
+			$failures,
+			array() === $missing_markup,
+			'wp_print_community_events_markup() renders the hidden dashboard shell, error notice, location form, AJAX endpoint, controls, and result list',
+			array(
+				'missing' => $missing_markup,
+				'html'    => self::preview_string( $markup ),
+			)
+		);
+
+		$id_counts = array(
+			'community-events'                  => substr_count( $markup, 'id="community-events"' ),
+			'community-events-location-message' => substr_count( $markup, 'id="community-events-location-message"' ),
+			'community-events-location'         => substr_count( $markup, 'id="community-events-location"' ),
+			'community-events-submit'           => substr_count( $markup, 'id="community-events-submit"' ),
+		);
+		self::collect_failure(
+			$failures,
+			1 === $id_counts['community-events']
+				&& 1 === $id_counts['community-events-location-message']
+				&& 1 === $id_counts['community-events-location']
+				&& 1 === $id_counts['community-events-submit']
+				&& ! str_contains( $markup_lower, '<script' )
+				&& ! str_contains( $markup_lower, 'javascript:' )
+				&& ! str_contains( $markup_lower, 'onerror=' ),
+			'Community Events markup keeps stable unique IDs and does not emit executable inline script or generated event handlers',
+			array(
+				'idCounts' => $id_counts,
+				'html'     => self::preview_string( $markup ),
+			)
+		);
+
+		$template_ids = array(
+			'tmpl-community-events-attend-event-near',
+			'tmpl-community-events-could-not-locate',
+			'tmpl-community-events-event-list',
+			'tmpl-community-events-no-upcoming-events',
+		);
+		$template_id_counts = array();
+		foreach ( $template_ids as $template_id ) {
+			$template_id_counts[ $template_id ] = substr_count( $templates, 'id="' . $template_id . '"' );
+		}
+
+		$template_fragments = array(
+			'<script id="tmpl-community-events-attend-event-near" type="text/template">',
+			'{{ data.location.description }}',
+			'<script id="tmpl-community-events-could-not-locate" type="text/template">',
+			'{{data.unknownCity}}',
+			'<script id="tmpl-community-events-event-list" type="text/template">',
+			'_.each( data.events',
+			'class="event event-{{ event.type }} wp-clearfix"',
+			'href="{{ event.url }}"',
+			'{{ event.title }}',
+			'{{ event.location.location }}',
+			'{{ event.user_formatted_date }}',
+			'{{ event.user_formatted_time }} {{ event.timeZoneAbbreviation }}',
+			'class="event-none"',
+			'make.wordpress.org/community/organize-event-landing-page',
+			'<script id="tmpl-community-events-no-upcoming-events" type="text/template">',
+			'if ( data.location.description )',
+			'make.wordpress.org/community/handbook/meetup-organizer/welcome',
+		);
+		$missing_templates  = array();
+		foreach ( $template_fragments as $fragment ) {
+			if ( ! str_contains( $templates, $fragment ) ) {
+				$missing_templates[] = $fragment;
+			}
+		}
+
+		self::collect_failure(
+			$failures,
+			array() === $missing_templates
+				&& 4 === substr_count( $templates, '<script id="tmpl-community-events-' )
+				&& self::all_call_values(
+					array_map(
+						static function ( int $count ): array {
+							return array( 'count' => $count );
+						},
+						$template_id_counts
+					),
+					'count',
+					1
+				)
+				&& ! str_contains( $template_lower, 'javascript:' )
+				&& ! str_contains( $template_lower, 'onerror=' ),
+			'wp_print_community_events_templates() renders the four expected Underscore templates with event fields, city placeholders, organizer links, and no javascript URLs',
+			array(
+				'missing'  => $missing_templates,
+				'idCounts' => $template_id_counts,
+				'html'     => self::preview_string( $templates ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$buffer_before === ob_get_level(),
+			'Community Events markup/template capture restores the output buffer level',
+			array(
+				'before' => $buffer_before,
+				'after'  => ob_get_level(),
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'admin-dashboard.community-events.markup-and-templates',
+			$failures,
+			array(
+				'markupHash'    => sha1( $markup ),
+				'templatesHash' => sha1( $templates ),
+				'formAction'    => $expected_form_action,
+				'templateCount' => substr_count( $templates, '<script id="tmpl-community-events-' ),
 			)
 		);
 	}

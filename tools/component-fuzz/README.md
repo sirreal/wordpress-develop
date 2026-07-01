@@ -40,7 +40,8 @@ database, network requests, or a configured site.
   argument/link branches, cached RSS loading/AJAX/cache replay branches,
   Browser Happy remote/cache failure and rendering branches, direct
   `wp_dashboard_setup()` GET registration across site/network/user dashboard
-  hooks, and filter/global/superglobal/output-buffer restoration.
+  hooks, Community Events dashboard markup/template contracts, and
+  filter/global/superglobal/output-buffer restoration.
 - `admin-edit-metaboxes`: no-live-DB classic edit-screen meta box callback
   coverage, including publish-box status/visibility/action branches, flat and
   hierarchical taxonomy boxes with capability gates, excerpt/trackback/custom
