@@ -9,6 +9,7 @@ final class HttpSurface {
 	private const GENERATED_CHUNK_CASES        = 6;
 	private const GENERATED_REQUEST_CASES      = 4;
 	private const GENERATED_ORIGIN_CASES       = 6;
+	private const GENERATED_ENCODING_CASES     = 6;
 
 	/** @var bool|null */
 	private static $proxy_override = null;
@@ -37,6 +38,7 @@ final class HttpSurface {
 			$rows[] = self::check_remote_retrieve_helpers( $ctx );
 			$rows[] = self::check_remote_request_wrappers( $ctx );
 			$rows[] = self::check_chunk_transfer_decode( $ctx );
+			$rows[] = self::check_http_encoding_helpers( $ctx->fork( 'encoding' ) );
 			$rows[] = self::check_request_normalization_no_network( $ctx );
 			$rows[] = self::check_requests_success_path_no_network( $ctx );
 			$rows[] = self::check_response_objects( $ctx );
@@ -82,6 +84,7 @@ final class HttpSurface {
 
 	private static function missing_requirements(): array {
 		self::load_http_requests_response_bridge();
+		self::load_http_encoding_class();
 
 		$missing = array();
 
@@ -95,6 +98,7 @@ final class HttpSurface {
 				'WP_HTTP_Requests_Hooks',
 				'WP_HTTP_Requests_Response',
 				'WP_HTTP_Proxy',
+				'WP_Http_Encoding',
 				'WpOrg\Requests\Response\Headers',
 				'WpOrg\Requests\Cookie\Jar',
 			) as $class
@@ -157,6 +161,17 @@ final class HttpSurface {
 		}
 
 		return $missing;
+	}
+
+	private static function load_http_encoding_class(): void {
+		if ( class_exists( 'WP_Http_Encoding' ) || ! defined( 'ABSPATH' ) || ! defined( 'WPINC' ) ) {
+			return;
+		}
+
+		$file = ABSPATH . WPINC . '/class-wp-http-encoding.php';
+		if ( is_readable( $file ) ) {
+			require_once $file;
+		}
 	}
 
 	private static function load_http_requests_response_bridge(): void {
@@ -495,6 +510,226 @@ final class HttpSurface {
 			array(
 				'cases'    => count( $cases ),
 				'failures' => array_slice( $failures, 0, 5 ),
+			)
+		);
+	}
+
+	private static function check_http_encoding_helpers( \ComponentFuzz\FuzzContext $ctx ): array {
+		if ( ! function_exists( 'gzdeflate' ) || ! function_exists( 'gzinflate' ) || ! function_exists( 'gzcompress' ) ) {
+			return $ctx->skip(
+				'http.encoding.zlib-functions-available',
+				'Required zlib helpers for WP_Http_Encoding transfer-encoding coverage are unavailable.',
+				array(
+					'gzdeflate'  => function_exists( 'gzdeflate' ),
+					'gzinflate'  => function_exists( 'gzinflate' ),
+					'gzcompress' => function_exists( 'gzcompress' ),
+				)
+			);
+		}
+
+		$failures = array();
+		$cases    = self::encoding_payload_cases( $ctx );
+
+		foreach ( $cases as $index => $case ) {
+			$raw             = $case['raw'];
+			$level           = $case['level'];
+			$compressed      = \WP_Http_Encoding::compress( $raw, $level );
+			$raw_deflate     = gzdeflate( $raw, $level );
+			$zlib_wrapped    = gzcompress( $raw, $level );
+			$gzip_with_flags = self::gzip_member(
+				$raw,
+				array(
+					'name'    => 'payload-' . $index . '.txt',
+					'comment' => 'component-fuzz-http-encoding-' . $index,
+					'hcrc'    => 0 === $index % 2,
+				),
+				$level
+			);
+			$gzip_plain      = self::gzip_member( $raw, array(), $level );
+
+			self::collect_failure(
+				$failures,
+				is_string( $compressed )
+					&& is_string( $raw_deflate )
+					&& $compressed === $raw_deflate
+					&& $raw === \WP_Http_Encoding::decompress( $compressed ),
+				"WP_Http_Encoding::compress raw-deflate round trip {$index}",
+				array(
+					'label'      => $case['label'],
+					'level'      => $level,
+					'raw'        => self::describe_string( $raw ),
+					'compressed' => is_string( $compressed ) ? self::describe_string( $compressed ) : $compressed,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				is_string( $raw_deflate )
+					&& is_string( $zlib_wrapped )
+					&& is_string( $gzip_plain )
+					&& $raw === \WP_Http_Encoding::decompress( $raw_deflate )
+					&& $raw === \WP_Http_Encoding::decompress( $zlib_wrapped )
+					&& $raw === \WP_Http_Encoding::decompress( $gzip_plain ),
+				"WP_Http_Encoding::decompress accepts raw, zlib, and gzip payloads {$index}",
+				array(
+					'label'      => $case['label'],
+					'rawDeflate' => is_string( $raw_deflate ) ? self::describe_string( $raw_deflate ) : $raw_deflate,
+					'zlib'       => is_string( $zlib_wrapped ) ? self::describe_string( $zlib_wrapped ) : $zlib_wrapped,
+					'gzip'       => self::describe_string( $gzip_plain ),
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$raw === \WP_Http_Encoding::compatible_gzinflate( $gzip_with_flags )
+					&& $raw === \WP_Http_Encoding::compatible_gzinflate( $zlib_wrapped ),
+				"WP_Http_Encoding::compatible_gzinflate handles gzip optional fields and zlib offsets {$index}",
+				array(
+					'label' => $case['label'],
+					'gzip' => self::describe_string( $gzip_with_flags ),
+					'zlib' => is_string( $zlib_wrapped ) ? self::describe_string( $zlib_wrapped ) : $zlib_wrapped,
+				)
+			);
+		}
+
+		$invalid_cases = array(
+			'plain-text'       => 'component-fuzz-not-compressed',
+			'gzip-empty-body'   => "\x1f\x8b\x08\0\0\0\0\0\0\x03",
+			'bad-gzip-payload' => "\x1f\x8b\x08\0\0\0\0\0\0\x03bad-body-footer",
+		);
+		foreach ( $invalid_cases as $label => $invalid ) {
+			self::collect_failure(
+				$failures,
+				$invalid === \WP_Http_Encoding::decompress( $invalid )
+					&& false === \WP_Http_Encoding::compatible_gzinflate( $invalid ),
+				"WP_Http_Encoding invalid payload fails closed {$label}",
+				array(
+					'input'        => self::describe_string( $invalid ),
+					'decompressed' => self::describe_value( \WP_Http_Encoding::decompress( $invalid ) ),
+					'compatible'   => \WP_Http_Encoding::compatible_gzinflate( $invalid ),
+				)
+			);
+		}
+
+		$url          = 'https://api.example.test/component-fuzz/http/encoding/' . self::token( $ctx, 6 );
+		$default_args = array(
+			'decompress'          => true,
+			'stream'              => false,
+			'limit_response_size' => null,
+		);
+		unset( $default_args['limit_response_size'] );
+		$expected_accept = implode( ', ', self::expected_accept_encoding_types() );
+		$filter_events   = array();
+		$filter          = static function ( array $types, string $filtered_url, array $args ) use ( &$filter_events ): array {
+			$filter_events[] = array(
+				'types' => $types,
+				'url'   => $filtered_url,
+				'args'  => $args,
+			);
+			return array( 'gzip;q=0.9', 'identity;q=0.1' );
+		};
+
+		$accept_default = \WP_Http_Encoding::accept_encoding( $url, $default_args );
+		$accept_disabled = \WP_Http_Encoding::accept_encoding(
+			$url,
+			array(
+				'decompress' => false,
+				'stream'     => false,
+			)
+		);
+		$accept_stream = \WP_Http_Encoding::accept_encoding(
+			$url,
+			array(
+				'decompress' => true,
+				'stream'     => true,
+			)
+		);
+		$accept_limited = \WP_Http_Encoding::accept_encoding(
+			$url,
+			array(
+				'decompress'          => true,
+				'stream'              => false,
+				'limit_response_size' => 128,
+			)
+		);
+
+		add_filter( 'wp_http_accept_encoding', $filter, 10, 3 );
+		$accept_filtered = \WP_Http_Encoding::accept_encoding( $url, $default_args );
+		remove_filter( 'wp_http_accept_encoding', $filter, 10 );
+
+		self::collect_failure(
+			$failures,
+			$expected_accept === $accept_default
+				&& '' === $accept_disabled
+				&& '' === $accept_stream
+				&& '' === $accept_limited
+				&& 'gzip;q=0.9, identity;q=0.1' === $accept_filtered
+				&& array(
+					array(
+						'types' => self::expected_accept_encoding_types(),
+						'url'   => $url,
+						'args'  => $default_args,
+					),
+				) === $filter_events,
+			'WP_Http_Encoding::accept_encoding policy gates and filter payloads are deterministic',
+			array(
+				'expected' => $expected_accept,
+				'default'  => $accept_default,
+				'disabled' => $accept_disabled,
+				'stream'   => $accept_stream,
+				'limited'  => $accept_limited,
+				'filtered' => $accept_filtered,
+				'events'   => $filter_events,
+			)
+		);
+
+		$should_decode_cases = array(
+			'array-lowercase-nonempty' => array( array( 'content-encoding' => 'gzip' ), true ),
+			'array-lowercase-empty'    => array( array( 'content-encoding' => '' ), false ),
+			'array-uppercase-key'      => array( array( 'Content-Encoding' => 'gzip' ), false ),
+			'array-missing-key'        => array( array( 'content-type' => 'text/plain' ), false ),
+			'string-header'            => array( "HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\n", true ),
+			'string-missing-header'    => array( "HTTP/1.1 200 OK\r\nX-Fuzz-Encoding: gzip\r\n", false ),
+		);
+		foreach ( $should_decode_cases as $label => $case ) {
+			$actual = \WP_Http_Encoding::should_decode( $case[0] );
+			self::collect_failure(
+				$failures,
+				$case[1] === $actual,
+				"WP_Http_Encoding::should_decode {$label}",
+				array(
+					'input'    => self::describe_value( $case[0] ),
+					'expected' => $case[1],
+					'actual'   => $actual,
+				)
+			);
+		}
+
+		self::collect_failure(
+			$failures,
+			'deflate' === \WP_Http_Encoding::content_encoding()
+				&& \WP_Http_Encoding::is_available() === ( function_exists( 'gzuncompress' ) || function_exists( 'gzdeflate' ) || function_exists( 'gzinflate' ) ),
+			'WP_Http_Encoding content encoding and zlib availability reflect local functions',
+			array(
+				'contentEncoding' => \WP_Http_Encoding::content_encoding(),
+				'isAvailable'     => \WP_Http_Encoding::is_available(),
+				'functions'       => array(
+					'gzuncompress' => function_exists( 'gzuncompress' ),
+					'gzdeflate'    => function_exists( 'gzdeflate' ),
+					'gzinflate'    => function_exists( 'gzinflate' ),
+					'gzdecode'     => function_exists( 'gzdecode' ),
+				),
+			)
+		);
+
+		remove_filter( 'wp_http_accept_encoding', $filter, 10 );
+
+		return $ctx->result(
+			'http.encoding.transfer-encoding-contracts',
+			array() === $failures,
+			array(
+				'cases'    => count( $cases ),
+				'failures' => array_slice( $failures, 0, 6 ),
 			)
 		);
 	}
@@ -2301,6 +2536,93 @@ final class HttpSurface {
 		}
 
 		return $cases;
+	}
+
+	private static function encoding_payload_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$cases = array(
+			array(
+				'label' => 'empty',
+				'raw'   => '',
+				'level' => 0,
+			),
+			array(
+				'label' => 'ascii',
+				'raw'   => 'component fuzz HTTP transfer encoding',
+				'level' => 1,
+			),
+			array(
+				'label' => 'binary',
+				'raw'   => "binary\x00payload\xffwith\r\nnewlines",
+				'level' => 9,
+			),
+		);
+
+		for ( $i = 0; $i < self::GENERATED_ENCODING_CASES; ++$i ) {
+			$cases[] = array(
+				'label' => 'generated-' . $i,
+				'raw'   => $ctx->choice(
+					array(
+						$ctx->text( 0, 96 ),
+						$ctx->bytes( 0, 96 ),
+						str_repeat( self::token( $ctx, 3 ), $ctx->int( 0, 12 ) ),
+					)
+				),
+				'level' => $ctx->int( 0, 9 ),
+			);
+		}
+
+		return $cases;
+	}
+
+	private static function gzip_member( string $raw, array $options = array(), int $level = 6 ): string {
+		$flags    = 0;
+		$optional = '';
+
+		if ( isset( $options['extra'] ) ) {
+			$extra     = (string) $options['extra'];
+			$flags    |= 4;
+			$optional .= pack( 'v', strlen( $extra ) ) . $extra;
+		}
+		if ( isset( $options['name'] ) ) {
+			$flags    |= 8;
+			$optional .= (string) $options['name'] . "\0";
+		}
+		if ( isset( $options['comment'] ) ) {
+			$flags    |= 16;
+			$optional .= (string) $options['comment'] . "\0";
+		}
+		if ( ! empty( $options['hcrc'] ) ) {
+			$flags    |= 2;
+			$optional .= "\0\0";
+		}
+
+		$deflated = gzdeflate( $raw, $level );
+		if ( ! is_string( $deflated ) ) {
+			return '';
+		}
+
+		return "\x1f\x8b\x08" . chr( $flags ) . "\0\0\0\0\0\x03"
+			. $optional
+			. $deflated
+			. pack( 'V', crc32( $raw ) )
+			. pack( 'V', strlen( $raw ) );
+	}
+
+	private static function expected_accept_encoding_types(): array {
+		$types = array();
+		if ( \WP_Http_Encoding::is_available() ) {
+			if ( function_exists( 'gzinflate' ) ) {
+				$types[] = 'deflate;q=1.0';
+			}
+			if ( function_exists( 'gzuncompress' ) ) {
+				$types[] = 'compress;q=0.5';
+			}
+			if ( function_exists( 'gzdecode' ) ) {
+				$types[] = 'gzip;q=0.5';
+			}
+		}
+
+		return $types;
 	}
 
 	private static function synthetic_response( array $case ): array {
