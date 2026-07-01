@@ -548,8 +548,8 @@ database, network requests, or a configured site.
 - `options-autoload`: no-DB option CRUD, cache, autoload, and filter coverage
   for generated option values, including alloptions membership, notoptions
   transitions, raw serialized cache shape, default/pre/update filters, cache
-  priming stability, bulk autoload mutators, lifecycle action payload ordering,
-  and safe option-name boundary cases.
+  priming stability, registered option-group priming, bulk autoload mutators,
+  lifecycle action payload ordering, and safe option-name boundary cases.
 - `plugin-theme`: plugin headers, plugin path helpers, invalid plugin path
   validation, no-DB plugin dependency metadata, dependency slug/name/API-data
   fallbacks, active dependency option states, theme headers, parent/child
@@ -960,8 +960,8 @@ allowlist gates for post-by-email, legacy DB-version formatting options, and
 public-blog update services without loading the exiting admin controller. The
 `options-autoload` surface uses that same bounded in-memory option table and
 object cache, and deliberately focuses on core option/autoload/cache/hook
-semantics rather than admin form submission,
-network options, transients, or arbitrary SQL support. The
+semantics, including registered option-group cache priming, rather than admin
+form submission, network options, transients, or arbitrary SQL support. The
 `media-editor` surface short-circuits attachment metadata updates and
 intentionally avoids media paths that insert attachments, create cover-image
 attachments, process audio/video thumbnails, or otherwise require real postmeta

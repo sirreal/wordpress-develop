@@ -1054,10 +1054,10 @@
 				</tr>
 				<tr>
 					<td><code>options-autoload</code></td>
-					<td><span class="status good">review fixes passed</span></td>
-					<td>Main worktree; Newton the 3rd implementation and Aristotle the 3rd review findings fixed through <code>6e806f722a</code></td>
-					<td>Main focused run: 1300 passed, 0 skipped, 0 failed; latest broad run: 8054 passed, 66 skipped, 0 failed.</td>
-					<td>Option CRUD, alloptions/notoptions caches, bulk autoload mutators, lifecycle hooks, wpdb option SQL shapes, filtered default/pre/option cache boundaries, query-count cache-hit guards, and direct alloptions mutation-state checks.</td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Scoped worktree <code>component-fuzz-option-group-prime</code>; registered option-group cache priming coverage through <code>d10d0fa5bf</code>; prior review fixes through <code>6e806f722a</code>.</td>
+					<td>Latest focused runs: seed 224 passed 14 checks, seeds 1, 224, and 57123 over 25 iterations each passed 350 checks; adjacent <code>options-autoload,state,multisite,admin-options-submission,admin-workflows,security</code> smoke passed 82 checks with 1 skip; bootstrap smoke passed; latest broad run passed 4781 checks with 1 skip. Earlier main focused run passed 1300 checks.</td>
+					<td>Option CRUD, alloptions/notoptions caches, direct and registered option-group cache priming, duplicate/missing/preprimed/alloptions group-member cache boundaries, bulk autoload mutators, lifecycle hooks, wpdb option SQL shapes, filtered default/pre/option cache boundaries, query-count cache-hit guards, and direct alloptions mutation-state checks.</td>
 				</tr>
 				<tr>
 					<td><code>mail</code></td>
@@ -2611,10 +2611,10 @@
 					<td>8208 passed, 66 skipped, 0 failed at 2 iterations after shortcode parser coverage and oracle hardening.</td>
 				</tr>
 				<tr>
-					<td><code>f1f91c9ce3</code> / <code>6e806f722a</code></td>
+					<td><code>d10d0fa5bf</code></td>
 					<td><code>options-autoload</code>, wpdb option stub</td>
-					<td>1300 passed, 0 skipped, 0 failed after filtered default/pre/option cache-boundary coverage and review fixes for query-count cache-hit guards plus direct alloptions cache assertions.</td>
-					<td>8054 passed, 66 skipped, 0 failed at 2 iterations after options and hooks review fixes.</td>
+					<td>Seeds 1, 224, and 57123 over 25 iterations each passed 350 checks after registered option-group cache priming coverage for duplicate members, missing members, preprimed entries, alloptions members, non-target groups, and warm-cache query stability.</td>
+					<td>4781 passed, 1 skipped, 0 failed at seed 224 after options group-priming coverage; adjacent <code>options-autoload,state,multisite,admin-options-submission,admin-workflows,security</code> passed 82 checks with 1 skip and bootstrap smoke passed.</td>
 				</tr>
 				<tr>
 					<td><code>af998e5de5</code> / <code>6e806f722a</code></td>
