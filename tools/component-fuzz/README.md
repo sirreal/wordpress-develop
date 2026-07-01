@@ -516,11 +516,13 @@ database, network requests, or a configured site.
   `WP_Site` and `WP_Network` objects, site data normalization, cache-backed
   lookups, legacy blog identity helpers, bootstrap current-site/current-network
   resolution, blog-switch stack/cache restoration, filter-backed network option
-  reads, stub-backed network option CRUD, large-network threshold/filter
-  contracts, pre-query-short-circuited site/network queries, domain/path lookup
-  helpers, current/switched URL helpers, and an optional true-multisite
-  subprocess for DB-backed site lifecycle and `sitemeta` write paths when a
-  readable `wp-tests-config.php` is available.
+  reads, stub-backed network option CRUD, signup validation for unsafe email
+  domains, pending `wp_signups` reservations, stale reservation cleanup,
+  blogname/title/nonce contracts, large-network threshold/filter contracts,
+  pre-query-short-circuited site/network queries, domain/path lookup helpers,
+  current/switched URL helpers, and an optional true-multisite subprocess for
+  DB-backed site lifecycle and `sitemeta` write paths when a readable
+  `wp-tests-config.php` is available.
 - `navigation`: nav menu location registration, theme menu assignment lookup,
   menu object and item setup filters, current-item class derivation, current-tree
   parent/ancestor propagation, walker output, depth pruning,
