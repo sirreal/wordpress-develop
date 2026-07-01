@@ -263,6 +263,7 @@ database, network requests, or a configured site.
   and safe human time diffs.
 - `discovery`: robots meta directives, scoped public/private robots helper
   output, front-controller `do_robots()` robots.txt output and hook order,
+  front-controller `do_favicon()` favicon redirects through `template-loader.php`,
   sitemap enablement and robots.txt injection, provider registration/replacement
   filters, query/permalink sitemap URL/index expansion, escaped sitemap XML
   rendering, unsupported sitemap field boundaries, stylesheet URL filters,

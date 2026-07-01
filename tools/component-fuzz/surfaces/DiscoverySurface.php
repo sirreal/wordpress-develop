@@ -36,6 +36,7 @@ final class DiscoverySurface {
 			$rows[] = self::check_robots_directives( $ctx );
 			$rows[] = self::check_robots_public_private_option_matrix( $ctx );
 			$rows[] = self::check_robots_txt_front_controller_output( $ctx->fork( 'robots-txt-front-controller' ) );
+			$rows[] = self::check_favicon_front_controller_redirect( $ctx->fork( 'favicon-front-controller' ) );
 			$rows[] = self::check_sitemap_registry_and_urls( $ctx );
 			$rows[] = self::check_sitemap_enablement_robots_and_provider_filters( $ctx );
 			$rows[] = self::check_sitemap_provider_url_modes( $ctx );
@@ -403,6 +404,440 @@ final class DiscoverySurface {
 				'failures' => array_slice( $failures, 0, 6 ),
 			)
 		);
+	}
+
+	private static function check_favicon_front_controller_redirect( \ComponentFuzz\FuzzContext $ctx ): array {
+		$missing = self::favicon_child_missing_requirements();
+		if ( array() !== $missing ) {
+			return self::skip(
+				$ctx,
+				'discovery.favicon.front-controller-redirect',
+				'Local PHP subprocess support is unavailable for do_favicon() exit-path coverage.',
+				array( 'missing' => $missing )
+			);
+		}
+
+		$token = substr( sha1( (string) $ctx->seed() ), 0, 10 );
+		$cases = array(
+			array(
+				'label'        => 'fallback-site-path',
+				'siteUrl'      => 'http://example.test/site-' . $token . '/wp',
+				'customIcon'   => '',
+				'expectedIcon' => 'http://example.test/site-' . $token . '/wp/wp-includes/images/w-logo-gray-white-bg.png',
+			),
+			array(
+				'label'        => 'filtered-site-icon',
+				'siteUrl'      => 'https://example.test',
+				'customIcon'   => 'https://cdn.example.test/icons/favicon-' . $token . '.png?size=32',
+				'expectedIcon' => 'https://cdn.example.test/icons/favicon-' . $token . '.png?size=32',
+			),
+		);
+
+		$failures = array();
+		$runs     = array();
+
+		foreach ( $cases as $case ) {
+			$run    = self::run_favicon_child( $case );
+			$result = is_array( $run['result'] ?? null ) ? $run['result'] : array();
+			$runs[] = array(
+				'label'    => $case['label'],
+				'exitCode' => $run['exitCode'] ?? null,
+				'ok'       => $run['ok'] ?? null,
+				'result'   => $result,
+				'stderr'   => self::describe_string( (string) ( $run['stderr'] ?? '' ) ),
+			);
+
+			$redirects       = is_array( $result['redirects'] ?? null ) ? $result['redirects'] : array();
+			$redirect_status = is_array( $result['redirectStatuses'] ?? null ) ? $result['redirectStatuses'] : array();
+			$status_events   = is_array( $result['statusEvents'] ?? null ) ? $result['statusEvents'] : array();
+			$site_icon_calls = is_array( $result['siteIconCalls'] ?? null ) ? $result['siteIconCalls'] : array();
+			$headers         = is_array( $result['headers'] ?? null ) ? $result['headers'] : array();
+			$events          = is_array( $result['events'] ?? null ) ? $result['events'] : array();
+			$headers_ok      = array() === $headers || self::headers_include_location( $headers, $case['expectedIcon'] );
+
+			self::collect_failure(
+				$failures,
+				true === ( $run['ok'] ?? null )
+					&& 0 === ( $run['exitCode'] ?? null )
+					&& '' === (string) ( $run['stderr'] ?? '' )
+					&& true === ( $result['started'] ?? null )
+					&& true === ( $result['isFaviconBefore'] ?? null )
+					&& false === ( $result['reachedAfterTemplateLoader'] ?? true )
+					&& false === ( $result['returned'] ?? true )
+					&& '' === (string) ( $result['preShutdownOutput'] ?? '' )
+					&& array( 'template-redirect-before', 'template-redirect-after', 'do-favicon-before', 'do-faviconico', 'site-icon', 'redirect', 'redirect-status', 'status-header', 'x-redirect-by' ) === $events
+					&& 1 === count( $redirects )
+					&& $case['expectedIcon'] === ( $redirects[0]['location'] ?? null )
+					&& 302 === ( $redirects[0]['status'] ?? null )
+					&& 1 === count( $redirect_status )
+					&& $case['expectedIcon'] === ( $redirect_status[0]['location'] ?? null )
+					&& 302 === ( $redirect_status[0]['status'] ?? null )
+					&& 1 === count( $status_events )
+					&& 302 === ( $status_events[0]['code'] ?? null )
+					&& 'HTTP/1.1' === ( $status_events[0]['protocol'] ?? null )
+					&& 1 === count( $site_icon_calls )
+					&& 32 === ( $site_icon_calls[0]['size'] ?? null )
+					&& 0 === ( $site_icon_calls[0]['blogId'] ?? null )
+					&& $case['expectedIcon'] === ( $site_icon_calls[0]['returnedUrl'] ?? null )
+					&& str_ends_with( (string) ( $site_icon_calls[0]['fallbackUrl'] ?? '' ), '/wp-includes/images/w-logo-gray-white-bg.png' )
+					&& 'WordPress' === ( $result['xRedirectBy'][0]['value'] ?? null )
+					&& $headers_ok,
+				'template-loader favicon branch fires default do_favicon redirect and exits without output',
+				array(
+					'case'             => $case,
+					'run'              => $run,
+					'headersOk'        => $headers_ok,
+					'events'           => $events,
+					'redirects'        => $redirects,
+					'redirectStatuses' => $redirect_status,
+					'statusEvents'     => $status_events,
+					'siteIconCalls'    => $site_icon_calls,
+				)
+			);
+		}
+
+		return self::row(
+			$ctx,
+			'discovery.favicon.front-controller-redirect',
+			array() === $failures,
+			array(
+				'cases'    => count( $cases ),
+				'runs'     => $runs,
+				'failures' => array_slice( $failures, 0, 6 ),
+			)
+		);
+	}
+
+	private static function favicon_child_missing_requirements(): array {
+		$missing = array();
+
+		foreach ( array( 'json_decode', 'json_encode', 'proc_close', 'proc_open', 'stream_get_contents' ) as $function ) {
+			if ( ! function_exists( $function ) ) {
+				$missing[] = "function {$function}";
+			}
+		}
+
+		foreach ( array( 'do_favicon', 'get_site_icon_url', 'includes_url', 'is_favicon', 'redirect_canonical', 'status_header', 'wp_redirect', 'wp_using_themes' ) as $function ) {
+			if ( ! function_exists( $function ) ) {
+				$missing[] = "function {$function}";
+			}
+		}
+
+		if ( ! class_exists( 'WP_Query' ) ) {
+			$missing[] = 'class WP_Query';
+		}
+
+		if ( ! defined( 'PHP_BINARY' ) || '' === PHP_BINARY ) {
+			$missing[] = 'PHP_BINARY';
+		}
+
+		return $missing;
+	}
+
+	private static function run_favicon_child( array $case ): array {
+		$payload = json_encode(
+			array( 'case' => $case ),
+			JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE
+		);
+
+		if ( false === $payload ) {
+			return array(
+				'ok'       => false,
+				'exitCode' => -1,
+				'stdout'   => '',
+				'stderr'   => 'json_encode failed',
+				'result'   => null,
+			);
+		}
+
+		$descriptors = array(
+			0 => array( 'pipe', 'r' ),
+			1 => array( 'pipe', 'w' ),
+			2 => array( 'pipe', 'w' ),
+		);
+
+		// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.system_calls_proc_open -- Isolates the favicon front-controller path, which exits.
+		$process = proc_open( array( PHP_BINARY, '-r', self::favicon_child_program() ), $descriptors, $pipes, \ComponentFuzz\repo_root() );
+		if ( ! is_resource( $process ) ) {
+			return array(
+				'ok'       => false,
+				'exitCode' => -1,
+				'stdout'   => '',
+				'stderr'   => 'proc_open failed',
+				'result'   => null,
+			);
+		}
+
+		fwrite( $pipes[0], $payload );
+		fclose( $pipes[0] );
+
+		$stdout = stream_get_contents( $pipes[1] );
+		$stderr = stream_get_contents( $pipes[2] );
+		fclose( $pipes[1] );
+		fclose( $pipes[2] );
+
+		$exit_code = proc_close( $process );
+		$result    = json_decode( (string) $stdout, true );
+
+		return array(
+			'ok'       => 0 === $exit_code && is_array( $result ) && true === ( $result['ok'] ?? null ),
+			'exitCode' => $exit_code,
+			'stdout'   => (string) $stdout,
+			'stderr'   => (string) $stderr,
+			'result'   => is_array( $result ) ? $result : null,
+		);
+	}
+
+	private static function headers_include_location( array $headers, string $location ): bool {
+		foreach ( $headers as $header ) {
+			if ( is_string( $header ) && 0 === stripos( $header, 'Location:' ) && trim( substr( $header, 9 ) ) === $location ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private static function favicon_child_program(): string {
+		return <<<'PHP'
+$component_fuzz_favicon_raw = stream_get_contents( STDIN );
+$component_fuzz_favicon_payload = json_decode( $component_fuzz_favicon_raw, true );
+$case = is_array( $component_fuzz_favicon_payload['case'] ?? null ) ? $component_fuzz_favicon_payload['case'] : array();
+
+ini_set( 'display_errors', '0' );
+ob_start();
+
+require_once getcwd() . '/tools/component-fuzz/lib/autoload.php';
+\ComponentFuzz\WpBootstrap::load();
+
+$result = array(
+	'ok'                         => false,
+	'started'                    => false,
+	'returned'                   => false,
+	'reachedAfterTemplateLoader' => false,
+	'isFaviconBefore'            => null,
+	'events'                     => array(),
+	'redirects'                  => array(),
+	'redirectStatuses'           => array(),
+	'statusEvents'               => array(),
+	'siteIconCalls'              => array(),
+	'xRedirectBy'                => array(),
+	'headers'                    => array(),
+	'preShutdownOutput'          => '',
+	'errors'                     => array(),
+);
+
+function component_fuzz_favicon_throwable( Throwable $e ): array {
+	return array(
+		'class'   => get_class( $e ),
+		'message' => $e->getMessage(),
+		'file'    => $e->getFile(),
+		'line'    => $e->getLine(),
+	);
+}
+
+register_shutdown_function(
+	static function () use ( &$result ): void {
+		$output = '';
+		while ( ob_get_level() > 0 ) {
+			$output .= (string) ob_get_clean();
+		}
+
+		$result['preShutdownOutput'] = $output;
+		$result['headers']           = headers_list();
+		$result['ok']                = true === ( $result['started'] ?? false )
+			&& false === ( $result['returned'] ?? true )
+			&& false === ( $result['reachedAfterTemplateLoader'] ?? true )
+			&& true === ( $result['isFaviconBefore'] ?? false )
+			&& array() === ( $result['errors'] ?? array() );
+
+		echo json_encode( $result, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE );
+	}
+);
+
+try {
+	if ( array() === $case ) {
+		throw new RuntimeException( 'Invalid favicon child payload.' );
+	}
+
+	$site_url    = (string) ( $case['siteUrl'] ?? 'https://example.test' );
+	$custom_icon = (string) ( $case['customIcon'] ?? '' );
+
+	$_GET     = array();
+	$_POST    = array();
+	$_REQUEST = array();
+	$_SERVER['HTTP_HOST']       = parse_url( $site_url, PHP_URL_HOST ) ?: 'example.test';
+	$_SERVER['PHP_SELF']        = '/index.php';
+	$_SERVER['REQUEST_METHOD']  = 'GET';
+	$_SERVER['REQUEST_URI']     = '/favicon.ico';
+	$_SERVER['PATH_INFO']       = '';
+	$_SERVER['SERVER_PROTOCOL'] = 'HTTP/1.1';
+	unset( $_SERVER['HTTPS'] );
+
+	add_filter(
+		'pre_option_home',
+		static function () use ( $site_url ): string {
+			return $site_url;
+		},
+		10,
+		0
+	);
+	add_filter(
+		'pre_option_siteurl',
+		static function () use ( $site_url ): string {
+			return $site_url;
+		},
+		10,
+		0
+	);
+	add_filter(
+		'pre_option_site_icon',
+		static function (): int {
+			return 0;
+		},
+		10,
+		0
+	);
+	add_filter(
+		'wp_using_themes',
+		static function ( bool $using_themes ): bool {
+			unset( $using_themes );
+			return true;
+		},
+		10,
+		1
+	);
+	add_action(
+		'template_redirect',
+		static function () use ( &$result ): void {
+			$result['events'][] = 'template-redirect-before';
+		},
+		0,
+		0
+	);
+	if ( function_exists( 'redirect_canonical' ) && false === has_action( 'template_redirect', 'redirect_canonical' ) ) {
+		add_action( 'template_redirect', 'redirect_canonical' );
+	}
+	add_action(
+		'template_redirect',
+		static function () use ( &$result ): void {
+			$result['events'][] = 'template-redirect-after';
+		},
+		PHP_INT_MAX,
+		0
+	);
+	add_action(
+		'do_favicon',
+		static function () use ( &$result ): void {
+			$result['events'][] = 'do-favicon-before';
+		},
+		0,
+		0
+	);
+	if ( false === has_action( 'do_favicon', 'do_favicon' ) ) {
+		add_action( 'do_favicon', 'do_favicon' );
+	}
+	add_action(
+		'do_favicon',
+		static function () use ( &$result ): void {
+			$result['events'][] = 'do-favicon-after';
+		},
+		20,
+		0
+	);
+	add_action(
+		'do_faviconico',
+		static function () use ( &$result ): void {
+			$result['events'][] = 'do-faviconico';
+		},
+		10,
+		0
+	);
+	add_filter(
+		'get_site_icon_url',
+		static function ( string $url, int $size, int $blog_id ) use ( &$result, $custom_icon ): string {
+			$returned = '' === $custom_icon ? $url : $custom_icon;
+			$result['events'][]        = 'site-icon';
+			$result['siteIconCalls'][] = array(
+				'fallbackUrl' => $url,
+				'returnedUrl' => $returned,
+				'size'        => $size,
+				'blogId'      => $blog_id,
+			);
+			return $returned;
+		},
+		10,
+		3
+	);
+	add_filter(
+		'wp_redirect',
+		static function ( string $location, int $status ) use ( &$result ): string {
+			$result['events'][]    = 'redirect';
+			$result['redirects'][] = array(
+				'location' => $location,
+				'status'   => $status,
+			);
+			return $location;
+		},
+		10,
+		2
+	);
+	add_filter(
+		'wp_redirect_status',
+		static function ( int $status, string $location ) use ( &$result ): int {
+			$result['events'][]             = 'redirect-status';
+			$result['redirectStatuses'][]   = array(
+				'location' => $location,
+				'status'   => $status,
+			);
+			return $status;
+		},
+		10,
+		2
+	);
+	add_filter(
+		'status_header',
+		static function ( string $status_header, int $code, string $description, string $protocol ) use ( &$result ): string {
+			$result['events'][]       = 'status-header';
+			$result['statusEvents'][] = array(
+				'header'      => $status_header,
+				'code'        => $code,
+				'description' => $description,
+				'protocol'    => $protocol,
+			);
+			return $status_header;
+		},
+		10,
+		4
+	);
+	add_filter(
+		'x_redirect_by',
+		static function ( $x_redirect_by, int $status, string $location ) use ( &$result ) {
+			$result['events'][]      = 'x-redirect-by';
+			$result['xRedirectBy'][] = array(
+				'value'    => is_string( $x_redirect_by ) ? $x_redirect_by : $x_redirect_by,
+				'location' => $location,
+				'status'   => $status,
+			);
+			return $x_redirect_by;
+		},
+		10,
+		3
+	);
+
+	$GLOBALS['wp_query'] = new \WP_Query();
+	$GLOBALS['wp_query']->parse_query( array( 'favicon' => 1 ) );
+	$GLOBALS['wp_the_query'] = $GLOBALS['wp_query'];
+
+	$result['isFaviconBefore'] = is_favicon();
+	$result['started']         = true;
+	require ABSPATH . WPINC . '/template-loader.php';
+	$result['reachedAfterTemplateLoader'] = true;
+	$result['returned']                   = true;
+} catch ( Throwable $e ) {
+	$result['errors'][] = component_fuzz_favicon_throwable( $e );
+}
+PHP;
 	}
 
 	private static function check_sitemap_registry_and_urls( \ComponentFuzz\FuzzContext $ctx ): array {
