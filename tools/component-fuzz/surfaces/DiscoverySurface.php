@@ -35,6 +35,7 @@ final class DiscoverySurface {
 
 			$rows[] = self::check_robots_directives( $ctx );
 			$rows[] = self::check_robots_public_private_option_matrix( $ctx );
+			$rows[] = self::check_robots_txt_front_controller_output( $ctx->fork( 'robots-txt-front-controller' ) );
 			$rows[] = self::check_sitemap_registry_and_urls( $ctx );
 			$rows[] = self::check_sitemap_enablement_robots_and_provider_filters( $ctx );
 			$rows[] = self::check_sitemap_provider_url_modes( $ctx );
@@ -83,17 +84,24 @@ final class DiscoverySurface {
 
 		foreach (
 			array(
+				'add_action',
 				'add_filter',
 				'apply_filters',
 				'__',
+				'do_action',
+				'do_robots',
 				'esc_attr',
 				'esc_url',
 				'esc_xml',
 				'get_language_attributes',
+				'get_option',
 				'get_sitemap_url',
+				'has_action',
 				'has_filter',
 				'is_rtl',
+				'remove_action',
 				'remove_filter',
+				'site_url',
 				'wp_get_sitemap_providers',
 				'wp_register_sitemap_provider',
 				'wp_robots',
@@ -275,6 +283,120 @@ final class DiscoverySurface {
 		return self::row(
 			$ctx,
 			'discovery.robots.blog-public-helper-matrix',
+			array() === $failures,
+			array(
+				'cases'    => count( $cases ),
+				'failures' => array_slice( $failures, 0, 6 ),
+			)
+		);
+	}
+
+	private static function check_robots_txt_front_controller_output( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$cases    = array(
+			array(
+				'label'       => 'public-site-path',
+				'blogPublic'  => 1,
+				'siteUrl'     => 'https://example.test/site-base/wp',
+				'path'        => '/site-base/wp',
+				'marker'      => '# cfz-public-front-controller',
+				'publicValue' => true,
+			),
+			array(
+				'label'       => 'private-root',
+				'blogPublic'  => 0,
+				'siteUrl'     => 'https://example.test',
+				'path'        => '',
+				'marker'      => '# cfz-private-front-controller',
+				'publicValue' => false,
+			),
+		);
+
+		foreach ( $cases as $case ) {
+			$events   = array();
+			$observed = array();
+			$output   = '';
+
+			$blog_public_filter = static function () use ( $case ): int {
+				return $case['blogPublic'];
+			};
+			$siteurl_filter     = static function () use ( $case ): string {
+				return $case['siteUrl'];
+			};
+			$action             = static function () use ( &$events, $case ): void {
+				$events[] = 'action:' . $case['label'];
+			};
+			$robots_filter      = static function ( string $robots, bool $public ) use ( &$events, &$observed, $case ): string {
+				$events[]   = 'filter:' . $case['label'];
+				$observed[] = array(
+					'output' => $robots,
+					'public' => $public,
+				);
+
+				return $robots . $case['marker'] . "\n";
+			};
+
+			$base_output     = "User-agent: *\n"
+				. 'Disallow: ' . $case['path'] . "/wp-admin/\n"
+				. 'Allow: ' . $case['path'] . "/wp-admin/admin-ajax.php\n";
+			$expected_output = $base_output . $case['marker'] . "\n";
+			$buffer_level    = ob_get_level();
+
+			\add_filter( 'pre_option_blog_public', $blog_public_filter, 11, 0 );
+			\add_filter( 'pre_option_siteurl', $siteurl_filter, 11, 0 );
+			\add_action( 'do_robotstxt', $action, 10, 0 );
+			\add_filter( 'robots_txt', $robots_filter, 10, 2 );
+
+			try {
+				ob_start();
+				\do_robots();
+				$output = ob_get_clean();
+			} finally {
+				while ( ob_get_level() > $buffer_level ) {
+					ob_end_clean();
+				}
+
+				\remove_filter( 'robots_txt', $robots_filter, 10 );
+				\remove_action( 'do_robotstxt', $action, 10 );
+				\remove_filter( 'pre_option_siteurl', $siteurl_filter, 11 );
+				\remove_filter( 'pre_option_blog_public', $blog_public_filter, 11 );
+			}
+
+			self::collect_failure(
+				$failures,
+				$expected_output === $output
+					&& array( 'action:' . $case['label'], 'filter:' . $case['label'] ) === $events
+					&& array(
+						array(
+							'output' => $base_output,
+							'public' => $case['publicValue'],
+						),
+					) === $observed
+					&& 1 === substr_count( $output, "User-agent: *\n" )
+					&& 1 === substr_count( $output, 'Disallow: ' . $case['path'] . "/wp-admin/\n" )
+					&& 1 === substr_count( $output, 'Allow: ' . $case['path'] . "/wp-admin/admin-ajax.php\n" )
+					&& false === \has_filter( 'pre_option_blog_public', $blog_public_filter )
+					&& false === \has_filter( 'pre_option_siteurl', $siteurl_filter )
+					&& false === \has_action( 'do_robotstxt', $action )
+					&& false === \has_filter( 'robots_txt', $robots_filter ),
+				'do_robots front-controller output respects scoped options and hook order',
+				array(
+					'label'               => $case['label'],
+					'expectedOutput'      => self::describe_string( $expected_output ),
+					'actualOutput'        => self::describe_string( $output ),
+					'events'              => $events,
+					'observedFilterInput' => $observed,
+					'hasBlogFilter'       => \has_filter( 'pre_option_blog_public', $blog_public_filter ),
+					'hasSiteUrlFilter'    => \has_filter( 'pre_option_siteurl', $siteurl_filter ),
+					'hasRobotsAction'     => \has_action( 'do_robotstxt', $action ),
+					'hasRobotsFilter'     => \has_filter( 'robots_txt', $robots_filter ),
+				)
+			);
+		}
+
+		return self::row(
+			$ctx,
+			'discovery.robots.front-controller-output',
 			array() === $failures,
 			array(
 				'cases'    => count( $cases ),

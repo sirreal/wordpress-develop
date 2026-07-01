@@ -262,13 +262,14 @@ database, network requests, or a configured site.
   `wp_checkdate()` validity/filter contracts, date/human diff filter contracts,
   and safe human time diffs.
 - `discovery`: robots meta directives, scoped public/private robots helper
-  output, sitemap enablement and robots.txt injection, provider
-  registration/replacement filters, query/permalink sitemap URL/index
-  expansion, escaped sitemap XML rendering, unsupported sitemap field
-  boundaries, stylesheet URL filters, direct sitemap/index XSL stylesheet
-  output, LTR/RTL stylesheet CSS, sitemap max-URL filters, and built-in
-  posts/taxonomies/users sitemap providers with fixture-backed subtype,
-  lastmod, max-page, query-arg, pre-filter, and public/private gating oracles.
+  output, front-controller `do_robots()` robots.txt output and hook order,
+  sitemap enablement and robots.txt injection, provider registration/replacement
+  filters, query/permalink sitemap URL/index expansion, escaped sitemap XML
+  rendering, unsupported sitemap field boundaries, stylesheet URL filters,
+  direct sitemap/index XSL stylesheet output, LTR/RTL stylesheet CSS, sitemap
+  max-URL filters, and built-in posts/taxonomies/users sitemap providers with
+  fixture-backed subtype, lastmod, max-page, query-arg, pre-filter, and
+  public/private gating oracles.
 - `email`: Unicode email validation/sanitization, ASCII fallback filters,
   WHATWG-style validity, `WP_Email_Address` machine/readable and IDN/punycode
   views, generated mixed-script UTF-8 address-model round trips, raw getter
