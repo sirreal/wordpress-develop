@@ -29,6 +29,7 @@ final class BlocksSurface {
 				self::check_nested_attribute_round_trips( $ctx ),
 				self::check_style_pattern_binding_registries( $ctx ),
 				self::check_block_bindings_render_pipeline( $ctx ),
+				self::check_builtin_block_binding_sources( $ctx->fork( 'builtin-block-bindings' ) ),
 				self::check_metadata_and_pattern_categories( $ctx ),
 				self::check_block_hooks_insertion_and_metadata( $ctx ),
 				self::check_block_hooks_post_object_and_rest_response( $ctx->fork( 'block-hooks-post-object' ) ),
@@ -64,6 +65,8 @@ final class BlocksSurface {
 				'Component_Fuzz_WPDB_Stub',
 				'WP_Post',
 				'WP_REST_Response',
+				'WP_Taxonomy',
+				'WP_Term',
 			) as $class
 		) {
 			if ( ! class_exists( $class ) ) {
@@ -78,38 +81,68 @@ final class BlocksSurface {
 				'apply_block_hooks_to_content',
 				'apply_block_hooks_to_content_from_post_object',
 				'block_has_support',
+				'clean_post_cache',
+				'clean_term_cache',
+				'current_user_can',
 				'get_comment_delimited_block_content',
 				'get_all_registered_block_bindings_sources',
 				'get_block_bindings_supported_attributes',
 				'get_block_bindings_source',
 				'get_block_wrapper_attributes',
 				'get_hooked_blocks',
+				'get_permalink',
 				'get_post',
 				'get_post_meta',
+				'get_post_modified_time',
+				'get_post_time',
+				'get_registered_meta_keys',
+				'get_taxonomy',
+				'get_term',
+				'get_term_link',
+				'get_the_date',
+				'get_the_modified_date',
 				'has_block',
 				'has_blocks',
 				'has_filter',
 				'insert_hooked_blocks_and_set_ignored_hooked_blocks_metadata',
 				'insert_hooked_blocks_into_rest_response',
+				'is_post_publicly_viewable',
+				'is_post_status_viewable',
+				'is_post_type_viewable',
+				'is_protected_meta',
 				'is_wp_error',
 				'parse_blocks',
+				'post_password_required',
 				'register_block_bindings_source',
 				'register_block_style',
 				'register_block_type',
 				'register_block_type_from_metadata',
+				'register_meta',
+				'register_taxonomy',
 				'remove_filter',
 				'render_block',
 				'serialize_block',
 				'serialize_blocks',
+				'taxonomy_exists',
 				'unregister_block_bindings_source',
 				'unregister_block_style',
 				'unregister_block_type',
+				'unregister_meta_key',
+				'unregister_taxonomy',
 				'update_ignored_hooked_blocks_postmeta',
 				'update_post_meta',
 				'wp_delete_post',
 				'wp_insert_post',
 				'wp_json_encode',
 				'wp_slash',
+				'_block_bindings_pattern_overrides_get_value',
+				'_block_bindings_post_data_get_value',
+				'_block_bindings_post_meta_get_value',
+				'_block_bindings_term_data_get_value',
+				'_register_block_bindings_pattern_overrides_source',
+				'_register_block_bindings_post_data_source',
+				'_register_block_bindings_post_meta_source',
+				'_register_block_bindings_term_data_source',
 			) as $function
 		) {
 			if ( ! function_exists( $function ) ) {
@@ -781,6 +814,427 @@ final class BlocksSurface {
 			array() === $failures,
 			array(
 				'cases'    => self::CASES,
+				'failures' => array_slice( $failures, 0, 6 ),
+			)
+		);
+	}
+
+	private static function check_builtin_block_binding_sources( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures     = array();
+		$case         = self::builtin_block_binding_case( $ctx->fork( 'builtin-sources' ) );
+		$post_ids     = array();
+		$term_ids     = array();
+		$binding_registry = \WP_Block_Bindings_Registry::get_instance();
+		$previous_sources = self::get_object_property( $binding_registry, 'sources' );
+		$had_meta_keys    = array_key_exists( 'wp_meta_keys', $GLOBALS );
+		$previous_meta_keys = $GLOBALS['wp_meta_keys'] ?? null;
+		$had_taxonomies     = array_key_exists( 'wp_taxonomies', $GLOBALS );
+		$previous_taxonomies = $GLOBALS['wp_taxonomies'] ?? null;
+		$had_rewrite         = array_key_exists( 'wp_rewrite', $GLOBALS );
+		$previous_rewrite    = $GLOBALS['wp_rewrite'] ?? null;
+		$grant_private_post_read = false;
+		$grant_private_taxonomy_read = false;
+
+		$cap_filter = static function ( array $allcaps, array $caps, array $args = array() ) use ( &$grant_private_post_read, &$grant_private_taxonomy_read ): array {
+			if ( $grant_private_post_read && 'read_post' === ( $args[0] ?? null ) ) {
+				foreach ( $caps as $cap ) {
+					$allcaps[ $cap ] = true;
+				}
+			}
+
+			if ( $grant_private_taxonomy_read ) {
+				foreach ( $caps as $cap ) {
+					if ( 'read' === $cap ) {
+						$allcaps['read'] = true;
+					}
+				}
+			}
+
+			return $allcaps;
+		};
+
+		\add_filter( 'user_has_cap', $cap_filter, 10, 4 );
+
+		try {
+			$GLOBALS['wp_rewrite'] = class_exists( 'WP_Rewrite' )
+				? new \WP_Rewrite()
+				: new class() {
+					public function get_extra_permastruct( $taxonomy ) {
+						unset( $taxonomy );
+						return false;
+					}
+				};
+
+			self::set_object_property( $binding_registry, 'sources', array() );
+			\_register_block_bindings_pattern_overrides_source();
+			\_register_block_bindings_post_data_source();
+			\_register_block_bindings_post_meta_source();
+			\_register_block_bindings_term_data_source();
+			$term_source_before = \get_block_bindings_source( 'core/term-data' );
+			\_register_block_bindings_term_data_source();
+			$term_source_after = \get_block_bindings_source( 'core/term-data' );
+
+			self::collect_failure(
+				$failures,
+				self::builtin_binding_source_matches(
+					\get_block_bindings_source( 'core/pattern-overrides' ),
+					'core/pattern-overrides',
+					'Pattern Overrides',
+					'_block_bindings_pattern_overrides_get_value',
+					array( 'pattern/overrides' )
+				)
+					&& self::builtin_binding_source_matches(
+						\get_block_bindings_source( 'core/post-data' ),
+						'core/post-data',
+						'Post Data',
+						'_block_bindings_post_data_get_value',
+						array( 'postId', 'postType' )
+					)
+					&& self::builtin_binding_source_matches(
+						\get_block_bindings_source( 'core/post-meta' ),
+						'core/post-meta',
+						'Post Meta',
+						'_block_bindings_post_meta_get_value',
+						array( 'postId', 'postType' )
+					)
+					&& self::builtin_binding_source_matches(
+						$term_source_before,
+						'core/term-data',
+						'Term Data',
+						'_block_bindings_term_data_get_value',
+						array( 'termId', 'taxonomy' )
+					)
+					&& $term_source_before instanceof \WP_Block_Bindings_Source
+					&& $term_source_before === $term_source_after,
+				'built-in block binding source registration callbacks expose expected metadata and term-data is idempotent',
+				array(
+					'sources' => array_keys( \get_all_registered_block_bindings_sources() ),
+				)
+			);
+
+			$pattern_block = self::builtin_binding_block(
+				'core/paragraph',
+				array(
+					'metadata' => array(
+						'name' => $case['patternName'],
+					),
+				),
+				array(
+					'pattern/overrides' => array(
+						$case['patternName'] => array(
+							'content' => $case['patternContent'],
+							'url'     => null,
+						),
+					),
+				)
+			);
+			$pattern_missing_name = self::builtin_binding_block( 'core/paragraph', array(), $pattern_block->context );
+
+			self::collect_failure(
+				$failures,
+				$case['patternContent'] === \_block_bindings_pattern_overrides_get_value( array(), $pattern_block, 'content' )
+					&& null === \_block_bindings_pattern_overrides_get_value( array(), $pattern_block, 'url' )
+					&& null === \_block_bindings_pattern_overrides_get_value( array(), $pattern_block, 'missing' )
+					&& null === \_block_bindings_pattern_overrides_get_value( array(), $pattern_missing_name, 'content' ),
+				'pattern override source reads attribute-scoped overrides from named pattern context and preserves null values',
+				array(
+					'patternName' => $case['patternName'],
+					'context'     => $pattern_block->context,
+				)
+			);
+
+			$public_post_id = self::insert_builtin_binding_post(
+				array(
+					'post_title'        => 'Built-in Binding Public ' . $case['token'],
+					'post_name'         => 'builtin-binding-public-' . $case['token'],
+					'post_status'       => 'publish',
+					'post_date'         => $case['postDate'],
+					'post_date_gmt'     => $case['postDate'],
+					'post_modified'     => $case['postModified'],
+					'post_modified_gmt' => $case['postModified'],
+					'guid'              => 'http://example.test/builtin-binding-public-' . $case['token'],
+				)
+			);
+			$GLOBALS['wpdb']->update(
+				$GLOBALS['wpdb']->posts,
+				array(
+					'post_modified'     => $case['postModified'],
+					'post_modified_gmt' => $case['postModified'],
+				),
+				array( 'ID' => $public_post_id )
+			);
+			\clean_post_cache( $public_post_id );
+			$same_date_post_id = self::insert_builtin_binding_post(
+				array(
+					'post_title'        => 'Built-in Binding Same Date ' . $case['token'],
+					'post_name'         => 'builtin-binding-same-date-' . $case['token'],
+					'post_status'       => 'publish',
+					'post_date'         => $case['postDate'],
+					'post_date_gmt'     => $case['postDate'],
+					'post_modified'     => $case['postDate'],
+					'post_modified_gmt' => $case['postDate'],
+					'guid'              => 'http://example.test/builtin-binding-same-date-' . $case['token'],
+				)
+			);
+			$private_post_id = self::insert_builtin_binding_post(
+				array(
+					'post_title'        => 'Built-in Binding Private ' . $case['token'],
+					'post_name'         => 'builtin-binding-private-' . $case['token'],
+					'post_status'       => 'private',
+					'post_date'         => $case['postDate'],
+					'post_date_gmt'     => $case['postDate'],
+					'post_modified'     => $case['postModified'],
+					'post_modified_gmt' => $case['postModified'],
+					'guid'              => 'http://example.test/builtin-binding-private-' . $case['token'],
+				)
+			);
+			$password_post_id = self::insert_builtin_binding_post(
+				array(
+					'post_title'        => 'Built-in Binding Password ' . $case['token'],
+					'post_name'         => 'builtin-binding-password-' . $case['token'],
+					'post_status'       => 'publish',
+					'post_password'     => 'secret-' . $case['token'],
+					'post_date'         => $case['postDate'],
+					'post_date_gmt'     => $case['postDate'],
+					'post_modified'     => $case['postModified'],
+					'post_modified_gmt' => $case['postModified'],
+					'guid'              => 'http://example.test/builtin-binding-password-' . $case['token'],
+				)
+			);
+			$post_ids = array( $public_post_id, $same_date_post_id, $private_post_id, $password_post_id );
+
+			$public_post_block    = self::builtin_binding_block( 'core/paragraph', array(), array( 'postId' => $public_post_id, 'postType' => 'post' ) );
+			$same_date_post_block = self::builtin_binding_block( 'core/paragraph', array(), array( 'postId' => $same_date_post_id, 'postType' => 'post' ) );
+			$private_post_block   = self::builtin_binding_block( 'core/paragraph', array(), array( 'postId' => $private_post_id, 'postType' => 'post' ) );
+			$password_post_block  = self::builtin_binding_block( 'core/paragraph', array(), array( 'postId' => $password_post_id, 'postType' => 'post' ) );
+			$nav_post_block       = self::builtin_binding_block( 'core/navigation-link', array( 'id' => $public_post_id ), array( 'postId' => $password_post_id, 'postType' => 'post' ) );
+
+			$private_without_cap = \_block_bindings_post_data_get_value( array( 'field' => 'date' ), $private_post_block );
+			$grant_private_post_read = true;
+			$private_with_cap = \_block_bindings_post_data_get_value( array( 'field' => 'date' ), $private_post_block );
+			$grant_private_post_read = false;
+
+			$grant_private_post_read = true;
+			$post_data_checks = array(
+				'date'          => esc_attr( \get_the_date( 'c', $public_post_id ) ) === \_block_bindings_post_data_get_value( array( 'field' => 'date' ), $public_post_block ),
+				'legacyKey'     => esc_attr( \get_the_date( 'c', $public_post_id ) ) === \_block_bindings_post_data_get_value( array( 'key' => 'date' ), $public_post_block ),
+				'modified'      => esc_attr( \get_the_modified_date( 'c', $public_post_id ) ) === \_block_bindings_post_data_get_value( array( 'field' => 'modified' ), $public_post_block ),
+				'sameModified'  => '' === \_block_bindings_post_data_get_value( array( 'field' => 'modified' ), $same_date_post_block ),
+				'link'          => esc_url( \get_permalink( $public_post_id ) ) === \_block_bindings_post_data_get_value( array( 'field' => 'link' ), $public_post_block ),
+				'navigation'    => esc_url( \get_permalink( $public_post_id ) ) === \_block_bindings_post_data_get_value( array( 'field' => 'link' ), $nav_post_block ),
+				'missingField'  => null === \_block_bindings_post_data_get_value( array( 'field' => 'missing' ), $public_post_block ),
+				'missingArgs'   => null === \_block_bindings_post_data_get_value( array(), $public_post_block ),
+				'privateDenied' => null === $private_without_cap,
+				'privateRead'   => is_string( $private_with_cap ) && '' !== $private_with_cap,
+				'password'      => null === \_block_bindings_post_data_get_value( array( 'field' => 'date' ), $password_post_block ),
+			);
+
+			self::collect_failure(
+				$failures,
+				! in_array( false, $post_data_checks, true ),
+				'post-data source values and gates',
+				array(
+					'checks'     => $post_data_checks,
+					'values'     => array(
+						'modifiedExpected' => esc_attr( \get_the_modified_date( 'c', $public_post_id ) ),
+						'modifiedActual'   => \_block_bindings_post_data_get_value( array( 'field' => 'modified' ), $public_post_block ),
+						'privateDenied'    => $private_without_cap,
+						'privateRead'      => $private_with_cap,
+					),
+					'postIds'    => $post_ids,
+				)
+			);
+			$grant_private_post_read = false;
+
+			foreach (
+				array(
+					array( $case['metaKey'], 'post', true ),
+					array( $case['globalMetaKey'], '', true ),
+					array( $case['hiddenMetaKey'], 'post', false ),
+				) as $meta_registration
+			) {
+				\register_meta(
+					'post',
+					$meta_registration[0],
+					array(
+						'object_subtype' => $meta_registration[1],
+						'type'           => 'string',
+						'single'         => true,
+						'show_in_rest'   => $meta_registration[2],
+					)
+				);
+			}
+
+			\update_post_meta( $public_post_id, $case['metaKey'], $case['metaValue'] );
+			\update_post_meta( $public_post_id, $case['globalMetaKey'], $case['globalMetaValue'] );
+			\update_post_meta( $public_post_id, $case['hiddenMetaKey'], $case['hiddenMetaValue'] );
+			\update_post_meta( $public_post_id, $case['protectedMetaKey'], $case['protectedMetaValue'] );
+			\update_post_meta( $private_post_id, $case['metaKey'], $case['privateMetaValue'] );
+			\update_post_meta( $password_post_id, $case['metaKey'], $case['passwordMetaValue'] );
+
+			$private_meta_without_cap = \_block_bindings_post_meta_get_value( array( 'key' => $case['metaKey'] ), $private_post_block );
+			$grant_private_post_read  = true;
+			$private_meta_with_cap    = \_block_bindings_post_meta_get_value( array( 'key' => $case['metaKey'] ), $private_post_block );
+			$grant_private_post_read  = false;
+
+			$grant_private_post_read = true;
+			self::collect_failure(
+				$failures,
+				$case['metaValue'] === \_block_bindings_post_meta_get_value( array( 'key' => $case['metaKey'] ), $public_post_block )
+					&& $case['globalMetaValue'] === \_block_bindings_post_meta_get_value( array( 'key' => $case['globalMetaKey'] ), $public_post_block )
+					&& null === \_block_bindings_post_meta_get_value( array( 'key' => $case['hiddenMetaKey'] ), $public_post_block )
+					&& null === \_block_bindings_post_meta_get_value( array( 'key' => $case['protectedMetaKey'] ), $public_post_block )
+					&& null === \_block_bindings_post_meta_get_value( array( 'key' => $case['metaKey'] ), self::builtin_binding_block( 'core/paragraph', array(), array( 'postType' => 'post' ) ) )
+					&& null === \_block_bindings_post_meta_get_value( array(), $public_post_block )
+					&& null === $private_meta_without_cap
+					&& $case['privateMetaValue'] === $private_meta_with_cap
+					&& null === \_block_bindings_post_meta_get_value( array( 'key' => $case['metaKey'] ), $password_post_block ),
+				'post-meta source exposes only public, REST-registered, unprotected meta and enforces post visibility gates',
+				array(
+					'metaKeys'              => array( $case['metaKey'], $case['globalMetaKey'], $case['hiddenMetaKey'], $case['protectedMetaKey'] ),
+					'privateWithoutCap'     => $private_meta_without_cap,
+					'privateWithCap'        => $private_meta_with_cap,
+					'registeredSubtypeKeys' => array_keys( \get_registered_meta_keys( 'post', 'post' ) ),
+				)
+			);
+			$grant_private_post_read = false;
+
+			$public_taxonomy = \register_taxonomy(
+				$case['publicTaxonomy'],
+				'post',
+				array(
+					'public'             => true,
+					'publicly_queryable' => true,
+					'query_var'          => false,
+					'rewrite'            => false,
+				)
+			);
+			$private_taxonomy = \register_taxonomy(
+				$case['privateTaxonomy'],
+				'post',
+				array(
+					'public'             => false,
+					'publicly_queryable' => false,
+					'query_var'          => false,
+					'rewrite'            => false,
+				)
+			);
+
+			if ( \is_wp_error( $public_taxonomy ) || \is_wp_error( $private_taxonomy ) ) {
+				throw new \RuntimeException( 'Could not register built-in binding fixture taxonomies.' );
+			}
+
+			$public_term  = self::insert_builtin_binding_term( $case['publicTaxonomy'], $case['termName'], $case['termSlug'], $case['termDescription'], $case['termParent'], $case['termCount'] );
+			$private_term = self::insert_builtin_binding_term( $case['privateTaxonomy'], $case['privateTermName'], $case['privateTermSlug'], $case['privateTermDescription'], 0, 1 );
+			$term_ids     = array(
+				$public_term['term_id']  => $case['publicTaxonomy'],
+				$private_term['term_id'] => $case['privateTaxonomy'],
+			);
+
+			$public_term_block  = self::builtin_binding_block( 'core/paragraph', array(), array( 'termId' => $public_term['term_id'], 'taxonomy' => $case['publicTaxonomy'] ) );
+			$private_term_block = self::builtin_binding_block( 'core/paragraph', array(), array( 'termId' => $private_term['term_id'], 'taxonomy' => $case['privateTaxonomy'] ) );
+			$nav_term_block     = self::builtin_binding_block( 'core/navigation-submenu', array( 'id' => $public_term['term_id'], 'type' => $case['publicTaxonomy'] ), array() );
+			$public_wp_term     = \get_term( $public_term['term_id'], $case['publicTaxonomy'] );
+
+			$private_term_without_cap = \_block_bindings_term_data_get_value( array( 'field' => 'name' ), $private_term_block );
+			$grant_private_taxonomy_read = true;
+			$private_term_with_cap = \_block_bindings_term_data_get_value( array( 'field' => 'name' ), $private_term_block );
+			$grant_private_taxonomy_read = false;
+
+			self::collect_failure(
+				$failures,
+				esc_html( (string) $public_term['term_id'] ) === \_block_bindings_term_data_get_value( array( 'field' => 'id' ), $public_term_block )
+					&& esc_html( $case['termName'] ) === \_block_bindings_term_data_get_value( array( 'field' => 'name' ), $public_term_block )
+					&& esc_html( $case['termSlug'] ) === \_block_bindings_term_data_get_value( array( 'field' => 'slug' ), $public_term_block )
+					&& esc_html( (string) $case['termParent'] ) === \_block_bindings_term_data_get_value( array( 'field' => 'parent' ), $public_term_block )
+					&& esc_html( (string) $case['termCount'] ) === \_block_bindings_term_data_get_value( array( 'field' => 'count' ), $public_term_block )
+					&& wp_kses_post( $case['termDescription'] ) === \_block_bindings_term_data_get_value( array( 'field' => 'description' ), $public_term_block )
+					&& esc_url( \get_term_link( $public_wp_term ) ) === \_block_bindings_term_data_get_value( array( 'field' => 'link' ), $public_term_block )
+					&& esc_html( $case['termSlug'] ) === \_block_bindings_term_data_get_value( array( 'field' => 'slug' ), $nav_term_block )
+					&& null === \_block_bindings_term_data_get_value( array( 'field' => 'missing' ), $public_term_block )
+					&& null === \_block_bindings_term_data_get_value( array(), $public_term_block )
+					&& null === \_block_bindings_term_data_get_value( array( 'field' => 'name' ), self::builtin_binding_block( 'core/paragraph', array(), array( 'termId' => 999999, 'taxonomy' => $case['publicTaxonomy'] ) ) )
+					&& null === $private_term_without_cap
+					&& esc_html( $case['privateTermName'] ) === $private_term_with_cap,
+				'term-data source reads escaped term fields from context or navigation attributes and gates non-public taxonomies on read capability',
+				array(
+					'taxonomies'        => array( $case['publicTaxonomy'], $case['privateTaxonomy'] ),
+					'termIds'           => array_keys( $term_ids ),
+					'privateWithoutCap' => $private_term_without_cap,
+					'privateWithCap'    => $private_term_with_cap,
+				)
+			);
+		} finally {
+			\remove_filter( 'user_has_cap', $cap_filter, 10 );
+
+			foreach ( array( $case['metaKey'], $case['hiddenMetaKey'], $case['protectedMetaKey'] ) as $meta_key ) {
+				\unregister_meta_key( 'post', $meta_key, 'post' );
+			}
+			\unregister_meta_key( 'post', $case['globalMetaKey'], '' );
+			if ( $had_meta_keys ) {
+				$GLOBALS['wp_meta_keys'] = $previous_meta_keys;
+			} else {
+				unset( $GLOBALS['wp_meta_keys'] );
+			}
+
+			foreach ( array( $case['publicTaxonomy'], $case['privateTaxonomy'] ) as $taxonomy ) {
+				if ( \taxonomy_exists( $taxonomy ) ) {
+					\unregister_taxonomy( $taxonomy );
+				}
+			}
+			if ( $had_taxonomies ) {
+				$GLOBALS['wp_taxonomies'] = $previous_taxonomies;
+			} else {
+				unset( $GLOBALS['wp_taxonomies'] );
+			}
+
+			self::set_object_property( $binding_registry, 'sources', $previous_sources );
+
+			foreach ( $post_ids as $post_id ) {
+				\clean_post_cache( $post_id );
+			}
+			foreach ( $term_ids as $term_id => $taxonomy ) {
+				\clean_term_cache( (int) $term_id, $taxonomy, false );
+			}
+			if ( isset( $GLOBALS['wpdb'] ) && $GLOBALS['wpdb'] instanceof \Component_Fuzz_WPDB_Stub ) {
+				$GLOBALS['wpdb']->component_fuzz_reset_content();
+			}
+
+			if ( $had_rewrite ) {
+				$GLOBALS['wp_rewrite'] = $previous_rewrite;
+			} else {
+				unset( $GLOBALS['wp_rewrite'] );
+			}
+		}
+
+		$counts = isset( $GLOBALS['wpdb'] ) && method_exists( $GLOBALS['wpdb'], 'component_fuzz_content_counts' )
+			? $GLOBALS['wpdb']->component_fuzz_content_counts()
+			: array();
+
+		self::collect_failure(
+			$failures,
+			false === \has_filter( 'user_has_cap', $cap_filter )
+				&& array() === array_filter( $counts ),
+			'built-in block binding source fixture removes filters, posts, terms, and metadata',
+			array(
+				'capFilter'     => \has_filter( 'user_has_cap', $cap_filter ),
+				'contentCounts' => $counts,
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'blocks.block-bindings.builtin-sources',
+			array() === $failures,
+			array(
+				'case'     => array_diff_key(
+					$case,
+					array(
+						'patternContent'     => true,
+						'termDescription'    => true,
+						'privateTermDescription' => true,
+					)
+				),
 				'failures' => array_slice( $failures, 0, 6 ),
 			)
 		);
@@ -2096,6 +2550,114 @@ final class BlocksSurface {
 		);
 	}
 
+	private static function builtin_block_binding_case( \ComponentFuzz\FuzzContext $ctx ): array {
+		$token = self::slug( $ctx, 'builtin-binding' );
+
+		return array(
+			'token'                  => $token,
+			'patternName'            => 'component-fuzz-pattern-' . $token,
+			'patternContent'         => 'Pattern override <b>' . $token . '</b> & "quoted"',
+			'postDate'               => '2024-01-02 03:04:05',
+			'postModified'           => '2024-01-03 04:05:06',
+			'metaKey'                => self::short_key( $ctx->fork( 'meta' ), 'cfz_meta' ),
+			'globalMetaKey'          => self::short_key( $ctx->fork( 'global-meta' ), 'cfz_global' ),
+			'hiddenMetaKey'          => self::short_key( $ctx->fork( 'hidden-meta' ), 'cfz_hidden' ),
+			'protectedMetaKey'       => '_' . self::short_key( $ctx->fork( 'protected-meta' ), 'cfz_secret' ),
+			'metaValue'              => 'visible-meta-' . $token,
+			'globalMetaValue'        => 'global-meta-' . $token,
+			'hiddenMetaValue'        => 'hidden-meta-' . $token,
+			'protectedMetaValue'     => 'protected-meta-' . $token,
+			'privateMetaValue'       => 'private-meta-' . $token,
+			'passwordMetaValue'      => 'password-meta-' . $token,
+			'publicTaxonomy'         => self::short_key( $ctx->fork( 'public-taxonomy' ), 'cfz_pubtax' ),
+			'privateTaxonomy'        => self::short_key( $ctx->fork( 'private-taxonomy' ), 'cfz_prvtax' ),
+			'termName'               => 'Term <Fuzz> ' . $token,
+			'termSlug'               => 'term-' . $token,
+			'termDescription'        => '<strong>Term ' . esc_html( $token ) . '</strong><script>alert(1)</script>',
+			'termParent'             => $ctx->int( 2, 25 ),
+			'termCount'              => $ctx->int( 3, 30 ),
+			'privateTermName'        => 'Private Term ' . $token,
+			'privateTermSlug'        => 'private-term-' . $token,
+			'privateTermDescription' => 'Private term ' . $token,
+		);
+	}
+
+	private static function builtin_binding_block( string $name, array $attributes, array $context ): object {
+		return (object) array(
+			'name'       => $name,
+			'attributes' => $attributes,
+			'context'    => $context,
+		);
+	}
+
+	private static function builtin_binding_source_matches( $source, string $name, string $label, string $callback, array $uses_context ): bool {
+		return $source instanceof \WP_Block_Bindings_Source
+			&& $name === $source->name
+			&& $label === $source->label
+			&& $callback === self::get_object_property( $source, 'get_value_callback' )
+			&& $uses_context === array_values( (array) $source->uses_context );
+	}
+
+	private static function insert_builtin_binding_post( array $args ): int {
+		$post_id = \wp_insert_post(
+			\wp_slash(
+				array_merge(
+					array(
+						'post_type'      => 'post',
+						'post_status'    => 'publish',
+						'post_content'   => '',
+						'post_excerpt'   => '',
+						'comment_status' => 'closed',
+						'ping_status'    => 'closed',
+					),
+					$args
+				)
+			),
+			true,
+			false
+		);
+
+		if ( \is_wp_error( $post_id ) ) {
+			throw new \RuntimeException( 'Could not insert built-in block binding fixture post: ' . $post_id->get_error_message() );
+		}
+
+		if ( ! is_int( $post_id ) || $post_id <= 0 ) {
+			throw new \RuntimeException( 'Could not insert built-in block binding fixture post.' );
+		}
+
+		return $post_id;
+	}
+
+	private static function insert_builtin_binding_term( string $taxonomy, string $name, string $slug, string $description, int $parent, int $count ): array {
+		$wpdb = $GLOBALS['wpdb'];
+		$wpdb->insert(
+			$wpdb->terms,
+			array(
+				'name'       => $name,
+				'slug'       => $slug,
+				'term_group' => 0,
+			)
+		);
+		$term_id = (int) $wpdb->insert_id;
+		$wpdb->insert(
+			$wpdb->term_taxonomy,
+			array(
+				'term_id'     => $term_id,
+				'taxonomy'    => $taxonomy,
+				'description' => $description,
+				'parent'      => $parent,
+				'count'       => $count,
+			)
+		);
+		$term_taxonomy_id = (int) $wpdb->insert_id;
+		\clean_term_cache( $term_id, $taxonomy, false );
+
+		return array(
+			'term_id'          => $term_id,
+			'term_taxonomy_id' => $term_taxonomy_id,
+		);
+	}
+
 	private static function metadata_cases( \ComponentFuzz\FuzzContext $ctx ): array {
 		$cases = array();
 		for ( $i = 0; $i < self::CASES; ++$i ) {
@@ -2338,6 +2900,14 @@ final class BlocksSurface {
 		$raw = preg_replace( '/[^a-z0-9-]+/', '-', $raw );
 		$raw = trim( (string) $raw, '-' );
 		return '' === $raw ? 'fuzz-' . dechex( $ctx->seed() & 0xffff ) : substr( $raw, 0, 48 );
+	}
+
+	private static function short_key( \ComponentFuzz\FuzzContext $ctx, string $prefix ): string {
+		$key = strtolower( $prefix . '_' . str_replace( '-', '_', self::slug( $ctx, $prefix ) ) );
+		$key = preg_replace( '/[^a-z0-9_]+/', '_', $key );
+		$key = trim( (string) $key, '_' );
+
+		return substr( '' === $key ? $prefix . '_' . dechex( $ctx->seed() & 0xffff ) : $key, 0, 32 );
 	}
 
 	private static function block_tree_shape( array $blocks ): array {
