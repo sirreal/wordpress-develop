@@ -3240,9 +3240,10 @@ final class AdminListTablesSurface {
 	}
 
 	private static function check_application_passwords_last_ip_boundary( \ComponentFuzz\FuzzContext $ctx ): array {
-		$item   = self::synthetic_application_password( $ctx->fork( 'password' ), 9 );
-		$screen = self::screen( 'application-passwords-user-last-ip-' . $ctx->iteration() );
-		$table  = self::list_table( 'WP_Application_Passwords_List_Table', $screen );
+		$item       = self::synthetic_application_password( $ctx->fork( 'password' ), 9 );
+		$empty_item = self::synthetic_application_password( $ctx->fork( 'empty-password' ), 10 );
+		$screen     = self::screen( 'application-passwords-user-last-ip-' . $ctx->iteration() );
+		$table      = self::list_table( 'WP_Application_Passwords_List_Table', $screen );
 
 		$item['last_ip'] = '198.51.100.' . $ctx->int( 1, 254 ) . '<script>alert(1)</script>';
 		$row             = self::capture(
@@ -3250,23 +3251,34 @@ final class AdminListTablesSurface {
 				$table->single_row( $item );
 			}
 		);
+		$empty_item['last_ip'] = '';
+		$empty_row             = self::capture(
+			static function () use ( $empty_item, $table ): void {
+				$table->single_row( $empty_item );
+			}
+		);
 
 		if ( ! self::html_has_no_raw_script( $row ) ) {
-			return $ctx->skip(
+			return $ctx->fail(
 				'admin-list-tables.application-passwords.last-ip-escaped',
-				'Current core prints stored application-password last_ip values without escaping; hostile last_ip row coverage is documented as a boundary until core changes.',
 				array(
 					'rowScript' => self::raw_script_context( $row ),
+					'row'       => self::describe_string( $row ),
 				)
 			);
 		}
 
-		if ( ! str_contains( $row, \esc_html( $item['last_ip'] ) ) ) {
+		if (
+			! str_contains( $row, \esc_html( $item['last_ip'] ) )
+			|| ! str_contains( $empty_row, '&mdash;' )
+			|| ! self::html_has_no_raw_script( $empty_row )
+		) {
 			return $ctx->fail(
 				'admin-list-tables.application-passwords.last-ip-escaped',
 				array(
 					'expectedEscapedLastIp' => \esc_html( $item['last_ip'] ),
 					'row'                   => self::describe_string( $row ),
+					'emptyRow'              => self::describe_string( $empty_row ),
 				)
 			);
 		}
@@ -3275,6 +3287,7 @@ final class AdminListTablesSurface {
 			'admin-list-tables.application-passwords.last-ip-escaped',
 			array(
 				'escapedLastIpPresent' => true,
+				'emptyLastIpFallback'  => true,
 				'row'                  => self::describe_string( $row ),
 			)
 		);

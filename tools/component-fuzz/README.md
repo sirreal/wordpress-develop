@@ -71,7 +71,8 @@ database, network requests, or a configured site.
   fixtures, capability gates including legacy link-manager option gates,
   install/update/activate action rendering, screenshot/icon and description
   escaping, localized update-count and theme-root transient cleanup, compact
-  post-comments table rendering, JS row templates, and state/filter restoration.
+  post-comments table rendering, application-password Last IP escaping and
+  empty-value fallback, JS row templates, and state/filter restoration.
 - `admin-media-chrome`: no-DB admin media chrome helper coverage, including
   attachment edit field preparation, media item and compat markup escaping,
   image form controls, image editor chrome from cache-seeded metadata,
