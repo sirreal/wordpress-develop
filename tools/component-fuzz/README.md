@@ -110,7 +110,8 @@ database, network requests, or a configured site.
   selection, frontend header/background helpers, custom background head-callback
   CSS and custom-logo hide-header-text CSS, custom header video markup and
   settings, synthetic custom-logo attachment markup/filter contracts, site icon
-  sizes/meta tags, and state restoration without admin upload/AJAX dispatch.
+  sizes/meta tags, real site-icon attachment URL/fallback resolution, and state
+  restoration without admin upload/AJAX dispatch.
 - `auth-flow`: no-DB authentication and session flow coverage, including
   synthetic user rows, username/email/password authentication filters,
   sign-on and clear-auth-cookie actions with cookie sending short-circuited,
@@ -861,9 +862,9 @@ performing remote discovery, or requiring generated build artifacts; when the
 source checkout lacks the built `wp-embed.js` file it suppresses only that
 expected file-read warning while still asserting the generated embed markup
 shape. The
-`appearance-media` surface covers custom background/header/site icon helpers and
-frontend head callbacks without invoking media uploads, image crops, AJAX
-actions, or admin page dispatch. The
+`appearance-media` surface covers custom background/header/site icon helpers,
+frontend head callbacks, and synthetic site-icon attachment metadata without
+invoking media uploads, image crops, AJAX actions, or admin page dispatch. The
 block templates surface short-circuits template CPT queries through
 `posts_pre_query` and records the current direct-ID traversal behavior as a
 guarded skip while still asserting that file enumeration remains confined. The

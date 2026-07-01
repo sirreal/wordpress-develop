@@ -36,6 +36,7 @@ final class AppearanceMediaSurface {
 			$rows[] = self::check_custom_header_markup_and_video( $ctx->fork( 'custom-header-video' ) );
 			$rows[] = self::check_custom_logo_helpers( $ctx->fork( 'custom-logo' ) );
 			$rows[] = self::check_site_icon_helpers( $ctx->fork( 'site-icon' ) );
+			$rows[] = self::check_site_icon_attachment_urls( $ctx->fork( 'site-icon-attachment-urls' ) );
 			$rows[] = self::check_admin_action_guards( $ctx->fork( 'admin-action-guards' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
@@ -136,15 +137,23 @@ final class AppearanceMediaSurface {
 				'sanitize_url',
 				'set_url_scheme',
 				'set_theme_mod',
+				'site_icon_url',
 				'the_custom_logo',
 				'the_header_video_url',
 				'_custom_background_cb',
 				'_custom_logo_header_styles',
 				'update_option',
+				'update_post_meta',
 				'wp_check_filetype',
 				'wp_create_nonce',
+				'wp_get_attachment_image_src',
+				'wp_get_attachment_image_url',
+				'wp_get_attachment_metadata',
+				'wp_get_attachment_url',
 				'wp_get_mime_types',
+				'wp_get_upload_dir',
 				'wp_nonce_tick',
+				'wp_update_attachment_metadata',
 				'wp_verify_nonce',
 				'wp_cache_delete',
 				'wp_site_icon',
@@ -940,6 +949,183 @@ final class AppearanceMediaSurface {
 		return self::row(
 			$ctx,
 			'appearance-media.site-icon.helpers',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, self::MAX_FAILURES ) )
+		);
+	}
+
+	private static function check_site_icon_attachment_urls( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures              = array();
+		$token                 = strtolower( preg_replace( '/[^a-z0-9-]+/', '-', $ctx->identifier( 5, 12 ) ) );
+		$attachment_id         = null;
+		$content_counts_before = self::content_counts();
+		$content_counts_after  = null;
+		$url_payloads          = array();
+		$fallback              = 'http://example.test/component-fuzz/site-icon-fallback-' . rawurlencode( $token ) . '.ico?unsafe=tag';
+		$uploads_basedir       = '/tmp/component-fuzz-site-icon-' . $token;
+		$uploads_baseurl       = 'http://example.test/component-fuzz/site-icons-' . rawurlencode( $token );
+		$relative_dir          = 'component-fuzz-site-icons/' . $token;
+		$full_file             = 'site-icon-' . $token . '.png';
+		$relative_file         = $relative_dir . '/' . $full_file;
+		$full_width            = $ctx->int( 512, 1024 );
+		$full_height           = $ctx->int( 512, 1024 );
+		$full_src              = $uploads_baseurl . '/' . $relative_file;
+		$size_file             = static fn( int $size ): string => 'site-icon-' . $token . '-' . $size . '.png';
+		$size_src              = static fn( int $size ): string => $uploads_baseurl . '/' . $relative_dir . '/' . $size_file( $size );
+		$metadata              = array(
+			'width'  => $full_width,
+			'height' => $full_height,
+			'file'   => $relative_file,
+			'sizes'  => array(),
+		);
+		foreach ( array( 32, 180, 192, 270 ) as $size ) {
+			$metadata['sizes'][ 'site_icon-' . $size ] = array(
+				'file'      => $size_file( $size ),
+				'width'     => $size,
+				'height'    => $size,
+				'mime-type' => 'image/png',
+			);
+		}
+
+		$upload_dir_filter = static function ( array $uploads ) use ( $uploads_basedir, $uploads_baseurl ): array {
+			unset( $uploads );
+			return array(
+				'path'    => $uploads_basedir,
+				'url'     => $uploads_baseurl,
+				'subdir'  => '',
+				'basedir' => $uploads_basedir,
+				'baseurl' => $uploads_baseurl,
+				'error'   => false,
+			);
+		};
+		$url_filter = static function ( string $url, int $size, int $blog_id ) use ( &$url_payloads ): string {
+			$url_payloads[] = array(
+				'url'  => $url,
+				'size' => $size,
+				'blog' => $blog_id,
+			);
+			return $url;
+		};
+
+		\add_filter( 'upload_dir', $upload_dir_filter );
+		\add_filter( 'get_site_icon_url', $url_filter, 10, 3 );
+
+		try {
+			$inserted = $GLOBALS['wpdb']->insert(
+				$GLOBALS['wpdb']->posts,
+				array(
+					'post_author'    => 0,
+					'post_type'      => 'attachment',
+					'post_status'    => 'inherit',
+					'post_title'     => 'Component Fuzz Site Icon <' . $token . '>',
+					'post_name'      => 'component-fuzz-site-icon-' . $token,
+					'post_mime_type' => 'image/png',
+					'guid'           => $full_src,
+				)
+			);
+			if ( 1 === $inserted ) {
+				$attachment_id = (int) $GLOBALS['wpdb']->insert_id;
+			}
+
+			if ( null === $attachment_id || $attachment_id <= 0 ) {
+				self::collect_failure(
+					$failures,
+					false,
+					'synthetic site icon attachment inserts without live uploads',
+					array( 'attachmentId' => self::describe_value( $attachment_id ) )
+				);
+				$attachment_id = null;
+			}
+
+			if ( null !== $attachment_id ) {
+				\update_post_meta( $attachment_id, '_wp_attached_file', $relative_file );
+				\wp_update_attachment_metadata( $attachment_id, $metadata );
+				\update_option( 'site_icon', $attachment_id );
+			}
+
+			$direct_src        = null !== $attachment_id ? \wp_get_attachment_image_src( $attachment_id, array( 32, 32 ), false ) : false;
+			$direct_full       = null !== $attachment_id ? \wp_get_attachment_image_src( $attachment_id, 'full', false ) : false;
+			$attachment_url    = null !== $attachment_id ? \wp_get_attachment_url( $attachment_id ) : false;
+			$attachment_meta   = null !== $attachment_id ? \wp_get_attachment_metadata( $attachment_id, true ) : false;
+			$icon_32          = \get_site_icon_url( 32, $fallback, 0 );
+			$icon_full        = \get_site_icon_url( 512, $fallback, 0 );
+			$icon_echo        = self::capture( static fn() => \site_icon_url( 32, $fallback, 0 ) );
+			$has_icon         = \has_site_icon();
+			$meta             = self::capture( static fn() => \wp_site_icon() );
+
+			$stale_id          = $attachment_id ? $attachment_id + 100000 : 100000;
+			\update_option( 'site_icon', $stale_id );
+			$fallback_url      = \get_site_icon_url( 32, $fallback, 0 );
+			$fallback_echo     = self::capture( static fn() => \site_icon_url( 32, $fallback, 0 ) );
+			$fallback_has_icon = \has_site_icon();
+			$fallback_meta     = self::capture( static fn() => \wp_site_icon() );
+		} finally {
+			\remove_filter( 'get_site_icon_url', $url_filter, 10 );
+			\remove_filter( 'upload_dir', $upload_dir_filter );
+			\delete_option( 'site_icon' );
+			if ( null !== $attachment_id ) {
+				$GLOBALS['wpdb']->delete( $GLOBALS['wpdb']->postmeta, array( 'post_id' => $attachment_id ) );
+				$GLOBALS['wpdb']->delete( $GLOBALS['wpdb']->posts, array( 'ID' => $attachment_id ) );
+				\wp_cache_delete( $attachment_id, 'posts' );
+				\wp_cache_delete( $attachment_id, 'post_meta' );
+			}
+			$content_counts_after = self::content_counts();
+		}
+
+		self::collect_failure(
+			$failures,
+			null !== $attachment_id
+				&& $size_src( 32 ) === $icon_32
+				&& $full_src === $icon_full
+				&& \esc_url( $size_src( 32 ) ) === $icon_echo
+				&& array( $size_src( 32 ), 32, 32, true ) === $direct_src
+				&& array( $full_src, $full_width, $full_height, false ) === $direct_full
+				&& $full_src === $attachment_url
+				&& $metadata === $attachment_meta
+				&& true === $has_icon
+				&& str_contains( $meta, 'rel="icon"' )
+				&& str_contains( $meta, 'sizes="32x32"' )
+				&& str_contains( $meta, 'sizes="192x192"' )
+				&& str_contains( $meta, 'rel="apple-touch-icon"' )
+				&& str_contains( $meta, 'msapplication-TileImage' )
+				&& str_contains( $meta, \esc_url( $size_src( 32 ) ) )
+				&& str_contains( $meta, \esc_url( $size_src( 192 ) ) )
+				&& str_contains( $meta, \esc_url( $size_src( 180 ) ) )
+				&& str_contains( $meta, \esc_url( $size_src( 270 ) ) )
+				&& ! str_contains( $meta, '<tag>' )
+				&& $fallback === $fallback_url
+				&& \esc_url( $fallback ) === $fallback_echo
+				&& false === $fallback_has_icon
+				&& '' === $fallback_meta
+				&& false === \has_filter( 'get_site_icon_url', $url_filter )
+				&& false === \has_filter( 'upload_dir', $upload_dir_filter )
+				&& $content_counts_before === $content_counts_after,
+			'site icon helpers resolve the site_icon option through attachment image URLs, escape meta output, and preserve fallback semantics',
+			array(
+				'token'               => $token,
+				'attachmentId'        => $attachment_id,
+				'directSrc'           => self::describe_value( $direct_src ),
+				'directFull'          => self::describe_value( $direct_full ),
+				'attachmentUrl'       => self::preview( (string) $attachment_url ),
+				'attachmentMeta'      => self::describe_value( $attachment_meta ),
+				'icon32'              => self::preview( (string) $icon_32 ),
+				'iconFull'            => self::preview( (string) $icon_full ),
+				'iconEcho'            => self::preview( $icon_echo ),
+				'hasIcon'             => $has_icon,
+				'meta'                => self::preview( $meta ),
+				'fallbackUrl'         => self::preview( (string) $fallback_url ),
+				'fallbackEcho'        => self::preview( $fallback_echo ),
+				'fallbackHasIcon'     => $fallback_has_icon,
+				'fallbackMeta'        => self::preview( $fallback_meta ),
+				'urlPayloads'         => self::describe_value( $url_payloads ),
+				'contentCountsBefore' => $content_counts_before,
+				'contentCountsAfter'  => $content_counts_after,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'appearance-media.site-icon.attachment-url-fallbacks',
 			array() === $failures,
 			array( 'failures' => array_slice( $failures, 0, self::MAX_FAILURES ) )
 		);
