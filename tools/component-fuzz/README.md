@@ -381,10 +381,11 @@ database, network requests, or a configured site.
   real `WP_Http::request()` to Requests success-path option mapping and
   response conversion through a fake no-network transport, response objects,
   header/cookie parsing, proxy decisions, redirect safety, chunk-transfer
-  decoding, direct no-network request normalization and early error contracts,
-  URL validation, CORS/origin allowlist helpers, HTTP support capability
-  normalization, allowed HTTP request host mirroring, and relative URL
-  resolution without live network requests.
+  decoding, `WP_Http_Encoding` compression/decompression and accept-encoding
+  policy contracts, direct no-network request normalization and early error
+  contracts, URL validation, CORS/origin allowlist helpers, HTTP support
+  capability normalization, allowed HTTP request host mirroring, and relative
+  URL resolution without live network requests.
 - `icons-connectors`: no-DB Icons and Connectors API coverage, including
   connector registry lifecycle and init discovery, settings/REST key masking,
   AI-provider update validation fail-closed behavior, API-key mask/
