@@ -9,6 +9,7 @@ final class RestControllersSurface {
 
 	public static function run( \ComponentFuzz\FuzzContext $ctx ): array {
 		self::load_block_pattern_functions();
+		self::load_block_renderer_controller();
 
 		$missing = self::missing_requirements();
 		if ( array() !== $missing ) {
@@ -37,6 +38,7 @@ final class RestControllersSurface {
 			$rows[] = self::check_namespace_route_contracts( $ctx );
 			$rows[] = self::check_settings_controller( $ctx );
 			$rows[] = self::check_block_types_controller( $ctx );
+			$rows[] = self::check_block_renderer_controller( $ctx->fork( 'block-renderer' ) );
 			$rows[] = self::check_block_patterns_controller( $ctx );
 			$rows[] = self::check_block_pattern_remote_loaders( $ctx );
 			$rows[] = self::check_block_pattern_theme_file_loader( $ctx );
@@ -89,6 +91,7 @@ final class RestControllersSurface {
 				'WP_Post_Type',
 				'WP_REST_Block_Pattern_Categories_Controller',
 				'WP_REST_Block_Patterns_Controller',
+				'WP_REST_Block_Renderer_Controller',
 				'WP_REST_Block_Types_Controller',
 				'WP_REST_Controller',
 				'WP_REST_Plugins_Controller',
@@ -130,6 +133,8 @@ final class RestControllersSurface {
 				'get_registered_theme_features',
 				'get_object_taxonomies',
 				'get_option',
+				'get_dynamic_block_names',
+				'get_post',
 				'get_post_format_link',
 				'get_post_format_string',
 				'get_post_format_strings',
@@ -141,6 +146,7 @@ final class RestControllersSurface {
 				'get_site_transient',
 				'get_taxonomies',
 				'get_taxonomy',
+				'get_the_title',
 				'has_filter',
 				'is_post_type_viewable',
 				'is_wp_error',
@@ -155,6 +161,7 @@ final class RestControllersSurface {
 				'register_setting',
 				'register_taxonomy',
 				'remove_filter',
+				'render_block',
 				'rest_authorization_required_code',
 				'rest_default_additional_properties_to_false',
 				'rest_do_request',
@@ -172,6 +179,7 @@ final class RestControllersSurface {
 				'sanitize_title',
 				'sanitize_text_field',
 				'serialize_blocks',
+				'setup_postdata',
 				'set_site_transient',
 				'trailingslashit',
 				'unregister_block_type',
@@ -205,6 +213,17 @@ final class RestControllersSurface {
 		}
 
 		$file = ABSPATH . WPINC . '/block-patterns.php';
+		if ( file_exists( $file ) ) {
+			require_once $file;
+		}
+	}
+
+	private static function load_block_renderer_controller(): void {
+		if ( class_exists( 'WP_REST_Block_Renderer_Controller' ) || ! defined( 'ABSPATH' ) || ! defined( 'WPINC' ) ) {
+			return;
+		}
+
+		$file = ABSPATH . WPINC . '/rest-api/endpoints/class-wp-rest-block-renderer-controller.php';
 		if ( file_exists( $file ) ) {
 			require_once $file;
 		}
@@ -1688,6 +1707,371 @@ final class RestControllersSurface {
 		return self::row(
 			$ctx,
 			'rest-controllers.block-types.registry-fields-links',
+			array() === $failures,
+			array(
+				'case'     => $case,
+				'failures' => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
+	private static function check_block_renderer_controller( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime_state();
+
+		$case       = self::block_renderer_case( $ctx );
+		$controller = new \WP_REST_Block_Renderer_Controller();
+		$server     = new \WP_REST_Server();
+		$failures   = array();
+		$route      = '/wp/v2/block-renderer/(?P<name>[a-z0-9-]+/[a-z0-9-]+)';
+		$post       = self::block_renderer_post( $ctx->fork( 'post' ), $case );
+
+		$previous_server = $GLOBALS['wp_rest_server'] ?? null;
+		$previous_post   = $GLOBALS['post'] ?? null;
+		$render_calls    = array();
+		$pre_render_calls = array();
+
+		$GLOBALS['wp_rest_server'] = $server;
+		self::seed_post_storage( $post );
+		\register_post_status( 'publish', array( 'public' => true ) );
+		\register_post_type(
+			'post',
+			array(
+				'public'       => true,
+				'show_in_rest' => true,
+			)
+		);
+
+		$dynamic_block = \register_block_type(
+			$case['blockName'],
+			array(
+				'attributes'      => array(
+					'message' => array(
+						'type'    => 'string',
+						'default' => $case['defaultMessage'],
+					),
+					'count'   => array(
+						'type'    => 'integer',
+						'default' => $case['defaultCount'],
+					),
+					'items'   => array(
+						'type'    => 'array',
+						'items'   => array( 'type' => 'integer' ),
+						'default' => array( 1, 2 ),
+					),
+					'enabled' => array(
+						'type'    => 'boolean',
+						'default' => true,
+					),
+				),
+				'render_callback' => static function ( array $attributes ) use ( &$render_calls ): string {
+					$payload = array(
+						'attributes' => $attributes,
+						'postTitle'  => \get_the_title(),
+					);
+					$render_calls[] = $payload;
+
+					return \wp_json_encode( $payload );
+				},
+			)
+		);
+		$boolean_block = \register_block_type(
+			$case['booleanBlockName'],
+			array(
+				'attributes'      => array(
+					'flag' => array(
+						'type'    => 'boolean',
+						'default' => true,
+					),
+				),
+				'render_callback' => static function ( array $attributes ): string {
+					return \wp_json_encode( array( 'attributes' => $attributes ) );
+				},
+			)
+		);
+		$static_block  = \register_block_type( $case['staticBlockName'] );
+
+		$controller->register_routes();
+
+		$routes     = $server->get_routes();
+		$route_args = isset( $routes[ $route ] ) ? self::handler_args_for_method( $routes[ $route ], 'GET' ) : array();
+		$schema     = $controller->get_item_schema();
+		$dynamic_names = \get_dynamic_block_names();
+
+		self::collect_failure(
+			$failures,
+			$dynamic_block instanceof \WP_Block_Type
+				&& $boolean_block instanceof \WP_Block_Type
+				&& $static_block instanceof \WP_Block_Type
+				&& isset( $routes[ $route ] )
+				&& array( 'GET', 'POST' ) === self::route_methods( $routes[ $route ] )
+				&& array() === array_values( array_diff( array( 'name', 'context', 'attributes', 'post_id' ), array_keys( $route_args ) ) )
+				&& isset( $route_args['attributes']['validate_callback'], $route_args['attributes']['sanitize_callback'] )
+				&& is_callable( $route_args['attributes']['validate_callback'] )
+				&& is_callable( $route_args['attributes']['sanitize_callback'] )
+				&& in_array( $case['blockName'], $dynamic_names, true )
+				&& in_array( $case['booleanBlockName'], $dynamic_names, true )
+				&& ! in_array( $case['staticBlockName'], $dynamic_names, true )
+				&& 'rendered-block' === ( $schema['title'] ?? null )
+				&& array( 'edit' ) === ( $schema['properties']['rendered']['context'] ?? null ),
+			'block renderer registers GET/POST dynamic render route, route args, schema, and dynamic block registry state',
+			array(
+				'routeMethods' => isset( $routes[ $route ] ) ? self::route_methods( $routes[ $route ] ) : array(),
+				'routeArgs'    => self::param_summary( $route_args ),
+				'dynamicNames' => $dynamic_names,
+				'schema'       => $schema,
+			)
+		);
+
+		$denied_response = $server->dispatch(
+			self::request(
+				'GET',
+				'/wp/v2/block-renderer/' . $case['blockName'],
+				array( 'context' => 'edit' )
+			)
+		);
+
+		$map_meta_cap_filter = static function ( array $caps, string $cap, int $user_id, array $args ) use ( $post ): array {
+			unset( $user_id );
+
+			if ( 'edit_post' === $cap && isset( $args[0] ) && (int) $post->ID === (int) $args[0] ) {
+				return array( 'edit_posts' );
+			}
+
+			return $caps;
+		};
+
+		$cap_filter = self::install_cap_filter( array( 'edit_posts', 'edit_published_posts', 'read' ) );
+		\add_filter( 'map_meta_cap', $map_meta_cap_filter, 10, 4 );
+		try {
+			$missing_context = $server->dispatch(
+				self::request( 'GET', '/wp/v2/block-renderer/' . $case['blockName'] )
+			);
+			$invalid_block = $server->dispatch(
+				self::request(
+					'GET',
+					'/wp/v2/block-renderer/' . $case['namespace'] . '/missing',
+					array( 'context' => 'edit' )
+				)
+			);
+			$non_dynamic = $server->dispatch(
+				self::request(
+					'GET',
+					'/wp/v2/block-renderer/' . $case['staticBlockName'],
+					array( 'context' => 'edit' )
+				)
+			);
+
+			$invalid_attribute = $server->dispatch(
+				self::request(
+					'GET',
+					'/wp/v2/block-renderer/' . $case['blockName'],
+					array(
+						'context'    => 'edit',
+						'attributes' => array( 'count' => array( 'not-an-integer' ) ),
+					)
+				)
+			);
+			$unknown_attribute = $server->dispatch(
+				self::request(
+					'GET',
+					'/wp/v2/block-renderer/' . $case['blockName'],
+					array(
+						'context'    => 'edit',
+						'attributes' => array( 'unknown' => 'yes' ),
+					)
+				)
+			);
+
+			$normal_response = $server->dispatch(
+				self::request(
+					'GET',
+					'/wp/v2/block-renderer/' . $case['blockName'],
+					array(
+						'context'    => 'edit',
+						'attributes' => array(
+							'message' => $case['message'],
+							'count'   => (string) $case['count'],
+							'items'   => array_map( 'strval', $case['items'] ),
+							'enabled' => 'false',
+						),
+					)
+				)
+			);
+
+			$boolean_response = $server->dispatch(
+				self::request(
+					'GET',
+					'/wp/v2/block-renderer/' . $case['booleanBlockName'],
+					array(
+						'context'    => 'edit',
+						'attributes' => array( 'flag' => 'false' ),
+					)
+				)
+			);
+
+			$post_request = self::request(
+				'POST',
+				'/wp/v2/block-renderer/' . $case['blockName'],
+				array( 'context' => 'edit' )
+			);
+			$post_request->set_header( 'Content-Type', 'application/json' );
+			$post_request->set_body(
+				\wp_json_encode(
+					array(
+						'attributes' => array(
+							'message' => $case['postMessage'],
+							'count'   => (string) $case['postCount'],
+							'items'   => array_map( 'strval', $case['postItems'] ),
+							'enabled' => true,
+						),
+						'post_id'    => $post->ID,
+					)
+				)
+			);
+			$post_response = $server->dispatch( $post_request );
+
+			$pre_render_filter = static function ( $output, array $parsed_block ) use ( $case, &$pre_render_calls ) {
+				$pre_render_calls[] = array(
+					'blockName' => $parsed_block['blockName'] ?? null,
+					'attrs'     => $parsed_block['attrs'] ?? array(),
+					'output'    => $output,
+				);
+
+				if ( $case['blockName'] === ( $parsed_block['blockName'] ?? null ) ) {
+					return '<p data-cfz-render="' . \esc_attr( $case['marker'] ) . '">Alternate content.</p>';
+				}
+
+				return $output;
+			};
+
+			\add_filter( 'pre_render_block', $pre_render_filter, 10, 2 );
+			try {
+				$filtered_response = $server->dispatch(
+					self::request(
+						'GET',
+						'/wp/v2/block-renderer/' . $case['blockName'],
+						array(
+							'context'    => 'edit',
+							'attributes' => array(
+								'message' => $case['filterMessage'],
+								'count'   => (string) $case['count'],
+							),
+						)
+					)
+				);
+			} finally {
+				\remove_filter( 'pre_render_block', $pre_render_filter, 10 );
+			}
+		} finally {
+			\remove_filter( 'map_meta_cap', $map_meta_cap_filter, 10 );
+			\remove_filter( 'user_has_cap', $cap_filter, 10 );
+		}
+
+		$normal_data = $normal_response instanceof \WP_REST_Response ? $normal_response->get_data() : array();
+		$normal_rendered = isset( $normal_data['rendered'] ) && is_string( $normal_data['rendered'] )
+			? json_decode( $normal_data['rendered'], true )
+			: null;
+		$boolean_data = $boolean_response instanceof \WP_REST_Response ? $boolean_response->get_data() : array();
+		$boolean_rendered = isset( $boolean_data['rendered'] ) && is_string( $boolean_data['rendered'] )
+			? json_decode( $boolean_data['rendered'], true )
+			: null;
+		$post_data = $post_response instanceof \WP_REST_Response ? $post_response->get_data() : array();
+		$post_rendered = isset( $post_data['rendered'] ) && is_string( $post_data['rendered'] )
+			? json_decode( $post_data['rendered'], true )
+			: null;
+		$filtered_data = $filtered_response instanceof \WP_REST_Response ? $filtered_response->get_data() : array();
+
+		self::collect_failure(
+			$failures,
+			self::response_error_ok( $denied_response, 'block_cannot_read', \rest_authorization_required_code() )
+				&& self::response_error_ok( $missing_context, 'rest_invalid_param', 400 )
+				&& self::response_error_ok( $invalid_block, 'block_invalid', 404 )
+				&& self::response_error_ok( $non_dynamic, 'block_invalid', 404 )
+				&& self::response_error_ok( $invalid_attribute, 'rest_invalid_param', 400 )
+				&& self::response_error_ok( $unknown_attribute, 'rest_invalid_param', 400 ),
+			'block renderer dispatch rejects unauthorized, invalid context, missing/non-dynamic blocks, invalid attributes, and unknown attributes',
+			array(
+				'denied'           => $denied_response,
+				'missingContext'   => $missing_context,
+				'invalidBlock'     => $invalid_block,
+				'nonDynamic'       => $non_dynamic,
+				'invalidAttribute' => $invalid_attribute,
+				'unknownAttribute' => $unknown_attribute,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$normal_response instanceof \WP_REST_Response
+				&& 200 === $normal_response->get_status()
+				&& is_array( $normal_rendered )
+				&& array(
+					'message' => $case['message'],
+					'count'   => $case['count'],
+					'items'   => $case['items'],
+					'enabled' => false,
+				) === ( $normal_rendered['attributes'] ?? null )
+				&& '' === ( $normal_rendered['postTitle'] ?? null )
+				&& $boolean_response instanceof \WP_REST_Response
+				&& is_array( $boolean_rendered )
+				&& array( 'flag' => false ) === ( $boolean_rendered['attributes'] ?? null )
+				&& $post_response instanceof \WP_REST_Response
+				&& is_array( $post_rendered )
+				&& array(
+					'message' => $case['postMessage'],
+					'count'   => $case['postCount'],
+					'items'   => $case['postItems'],
+					'enabled' => true,
+				) === ( $post_rendered['attributes'] ?? null )
+				&& $case['postTitle'] === ( $post_rendered['postTitle'] ?? null ),
+			'block renderer sanitizes typed attributes, handles JSON POST bodies, and exposes post context to dynamic render callbacks',
+			array(
+				'normalRendered'  => $normal_rendered,
+				'booleanRendered' => $boolean_rendered,
+				'postRendered'    => $post_rendered,
+				'renderCalls'     => $render_calls,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$filtered_response instanceof \WP_REST_Response
+				&& 200 === $filtered_response->get_status()
+				&& '<p data-cfz-render="' . \esc_attr( $case['marker'] ) . '">Alternate content.</p>' === ( $filtered_data['rendered'] ?? null )
+				&& 1 === count( $pre_render_calls )
+				&& $case['blockName'] === ( $pre_render_calls[0]['blockName'] ?? null )
+				&& $case['filterMessage'] === ( $pre_render_calls[0]['attrs']['message'] ?? null )
+				&& false === \has_filter( 'pre_render_block', $pre_render_filter, 10 )
+				&& false === \has_filter( 'map_meta_cap', $map_meta_cap_filter, 10 )
+				&& false === \has_filter( 'user_has_cap', $cap_filter, 10 ),
+			'block renderer uses render_block filters with parsed block payloads and removes temporary filters',
+			array(
+				'filteredData'   => $filtered_data,
+				'preRenderCalls' => $pre_render_calls,
+				'preFilter'      => \has_filter( 'pre_render_block', $pre_render_filter, 10 ),
+				'mapCapFilter'   => \has_filter( 'map_meta_cap', $map_meta_cap_filter, 10 ),
+				'capFilter'      => \has_filter( 'user_has_cap', $cap_filter, 10 ),
+			)
+		);
+
+		\unregister_block_type( $case['blockName'] );
+		\unregister_block_type( $case['booleanBlockName'] );
+		\unregister_block_type( $case['staticBlockName'] );
+		self::delete_post_storage( $post->ID );
+		if ( null === $previous_server ) {
+			unset( $GLOBALS['wp_rest_server'] );
+		} else {
+			$GLOBALS['wp_rest_server'] = $previous_server;
+		}
+		if ( null === $previous_post ) {
+			unset( $GLOBALS['post'] );
+		} else {
+			$GLOBALS['post'] = $previous_post;
+		}
+
+		return self::row(
+			$ctx,
+			'rest-controllers.block-renderer.dispatch-validation',
 			array() === $failures,
 			array(
 				'case'     => $case,
@@ -3889,6 +4273,90 @@ final class RestControllersSurface {
 			'styleName'      => self::block_slug( $ctx->fork( 'style' ), 'style' ),
 			'styleLabel'     => 'Style ' . $ctx->int( 1, 99 ),
 		);
+	}
+
+	private static function block_renderer_case( \ComponentFuzz\FuzzContext $ctx ): array {
+		$namespace         = self::block_slug( $ctx->fork( 'namespace' ), 'cfzbr' );
+		$name              = self::block_slug( $ctx->fork( 'name' ), 'dynamic' );
+		$boolean_namespace = self::block_slug( $ctx->fork( 'boolean-namespace' ), 'cfzbool' );
+		$boolean_name      = self::block_slug( $ctx->fork( 'boolean-name' ), 'dynamic' );
+		$static_namespace  = self::block_slug( $ctx->fork( 'static-namespace' ), 'cfzstatic' );
+		$static_name       = self::block_slug( $ctx->fork( 'static-name' ), 'block' );
+
+		return array(
+			'namespace'        => $namespace,
+			'blockName'        => $namespace . '/' . $name,
+			'booleanBlockName' => $boolean_namespace . '/' . $boolean_name,
+			'staticBlockName'  => $static_namespace . '/' . $static_name,
+			'defaultMessage'   => 'default-' . substr( hash( 'crc32b', (string) $ctx->fork( 'default-message' )->seed() ), 0, 8 ),
+			'defaultCount'     => $ctx->fork( 'default-count' )->int( 1, 9 ),
+			'message'          => 'message-' . substr( hash( 'crc32b', (string) $ctx->fork( 'message' )->seed() ), 0, 8 ),
+			'count'            => $ctx->fork( 'count' )->int( 10, 99 ),
+			'items'            => array(
+				$ctx->fork( 'item-a' )->int( 1, 20 ),
+				$ctx->fork( 'item-b' )->int( 21, 40 ),
+			),
+			'postMessage'      => 'post-message-' . substr( hash( 'crc32b', (string) $ctx->fork( 'post-message' )->seed() ), 0, 8 ),
+			'postCount'        => $ctx->fork( 'post-count' )->int( 100, 199 ),
+			'postItems'        => array(
+				$ctx->fork( 'post-item-a' )->int( 41, 60 ),
+				$ctx->fork( 'post-item-b' )->int( 61, 80 ),
+			),
+			'postTitle'        => 'REST Block Renderer Post ' . $ctx->fork( 'post-title' )->int( 1, 999 ),
+			'filterMessage'    => 'filter-message-' . substr( hash( 'crc32b', (string) $ctx->fork( 'filter-message' )->seed() ), 0, 8 ),
+			'marker'           => substr( hash( 'sha1', 'block-renderer:' . $ctx->seed() ), 0, 12 ),
+		);
+	}
+
+	private static function block_renderer_post( \ComponentFuzz\FuzzContext $ctx, array $case ): \WP_Post {
+		$id = 51000 + ( $ctx->seed() % 1000 );
+
+		return new \WP_Post(
+			(object) array(
+				'ID'                    => $id,
+				'post_author'           => 0,
+				'post_date'             => '2026-06-24 12:00:00',
+				'post_date_gmt'         => '2026-06-24 10:00:00',
+				'post_content'          => '<!-- wp:paragraph --><p>REST block renderer context.</p><!-- /wp:paragraph -->',
+				'post_title'            => $case['postTitle'],
+				'post_excerpt'          => '',
+				'post_status'           => 'publish',
+				'comment_status'        => 'closed',
+				'ping_status'           => 'closed',
+				'post_password'         => '',
+				'post_name'             => 'rest-block-renderer-' . substr( hash( 'crc32b', (string) $ctx->seed() ), 0, 8 ),
+				'to_ping'               => '',
+				'pinged'                => '',
+				'post_modified'         => '2026-06-24 12:00:00',
+				'post_modified_gmt'     => '2026-06-24 10:00:00',
+				'post_content_filtered' => '',
+				'post_parent'           => 0,
+				'guid'                  => 'http://example.test/?p=' . $id,
+				'menu_order'            => 0,
+				'post_type'             => 'post',
+				'post_mime_type'        => '',
+				'comment_count'         => '0',
+				'filter'                => 'raw',
+			)
+		);
+	}
+
+	private static function seed_post_storage( \WP_Post $post ): void {
+		global $wpdb;
+
+		if ( isset( $wpdb ) && is_object( $wpdb ) && method_exists( $wpdb, 'insert' ) ) {
+			$wpdb->insert( $wpdb->posts, $post->to_array() );
+		}
+		\wp_cache_set( $post->ID, (object) $post->to_array(), 'posts' );
+	}
+
+	private static function delete_post_storage( int $post_id ): void {
+		global $wpdb;
+
+		if ( isset( $wpdb ) && is_object( $wpdb ) && method_exists( $wpdb, 'delete' ) ) {
+			$wpdb->delete( $wpdb->posts, array( 'ID' => $post_id ) );
+		}
+		\wp_cache_delete( $post_id, 'posts' );
 	}
 
 	private static function block_pattern_case( \ComponentFuzz\FuzzContext $ctx ): array {

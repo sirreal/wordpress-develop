@@ -939,9 +939,12 @@ EXIF/IPTC extraction rows are recorded as explicit skips when the PHP build
 lacks `exif_read_data()` or `iptcparse()`, while malformed/no-metadata image
 paths and filter cleanup still run. The
 `rest-controllers` surface remains no-live-DB and registry-first, with bounded
-temp-file coverage only for local block pattern loader behavior. DB-backed
-posts, terms, comments, users, revisions, and attachments are covered by
-`rest-object-controllers` against the in-memory `wpdb` stub. The
+temp-file coverage only for local block pattern loader behavior; it also
+dispatches the dynamic block renderer controller through a local REST server to
+cover route args, attribute validation/sanitization, POST bodies, post context,
+and `pre_render_block` filter cleanup. DB-backed posts, terms, comments, users,
+revisions, and attachments are covered by `rest-object-controllers` against the
+in-memory `wpdb` stub. The
 `rest-application-passwords` surface complements lower-level account-security
 coverage by dispatching the REST controller with synthetic users and scoped
 application-password metadata, while directly asserting the REST auth-status and
