@@ -43,6 +43,7 @@ final class RestControllersSurface {
 			$rows[] = self::check_block_pattern_remote_loaders( $ctx );
 			$rows[] = self::check_block_pattern_theme_file_loader( $ctx );
 			$rows[] = self::check_search_controller( $ctx );
+			$rows[] = self::check_menu_locations_controller( $ctx->fork( 'menu-locations' ) );
 			$rows[] = self::check_route_registry_behavior( $ctx );
 			$rows[] = self::check_plugin_theme_controller_contracts( $ctx->fork( 'plugin-theme-controllers' ) );
 		} catch ( \Throwable $e ) {
@@ -94,6 +95,7 @@ final class RestControllersSurface {
 				'WP_REST_Block_Renderer_Controller',
 				'WP_REST_Block_Types_Controller',
 				'WP_REST_Controller',
+				'WP_REST_Menu_Locations_Controller',
 				'WP_REST_Plugins_Controller',
 				'WP_REST_Post_Format_Search_Handler',
 				'WP_REST_Post_Statuses_Controller',
@@ -112,6 +114,8 @@ final class RestControllersSurface {
 				'WP_Theme',
 				'WP_Theme_JSON',
 				'WP_Theme_JSON_Resolver',
+				'WP_Term',
+				'WP_User',
 			) as $class
 		) {
 			if ( ! class_exists( $class ) ) {
@@ -143,6 +147,7 @@ final class RestControllersSurface {
 				'get_post_type_object',
 				'get_post_types',
 				'get_registered_settings',
+				'get_registered_nav_menus',
 				'get_site_transient',
 				'get_taxonomies',
 				'get_taxonomy',
@@ -151,6 +156,7 @@ final class RestControllersSurface {
 				'is_post_type_viewable',
 				'is_wp_error',
 				'plugin_basename',
+				'register_nav_menu',
 				'register_block_style',
 				'register_block_pattern',
 				'register_block_type',
@@ -168,6 +174,7 @@ final class RestControllersSurface {
 				'rest_ensure_response',
 				'rest_filter_response_by_context',
 				'rest_get_route_for_post_type_items',
+				'rest_get_route_for_term',
 				'rest_get_route_for_taxonomy_items',
 				'rest_is_field_included',
 				'rest_parse_request_arg',
@@ -182,10 +189,12 @@ final class RestControllersSurface {
 				'setup_postdata',
 				'set_site_transient',
 				'trailingslashit',
+				'unregister_nav_menu',
 				'unregister_block_type',
 				'update_option',
 				'validate_file',
 				'wp_cache_delete',
+				'wp_cache_set',
 				'urlencode_deep',
 				'_register_theme_block_patterns',
 				'wp_clean_theme_json_cache',
@@ -3864,6 +3873,272 @@ final class RestControllersSurface {
 		);
 	}
 
+	private static function check_menu_locations_controller( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime_state();
+
+		$case       = self::menu_locations_case( $ctx );
+		$controller = new \WP_REST_Menu_Locations_Controller();
+		$server     = new \WP_REST_Server();
+		$failures   = array();
+		$collection_route = '/wp/v2/menu-locations';
+		$item_route       = '/wp/v2/menu-locations/(?P<location>[\w-]+)';
+		$menu_term        = self::nav_menu_term( $case );
+
+		$previous_server       = $GLOBALS['wp_rest_server'] ?? null;
+		$had_registered_menus  = array_key_exists( '_wp_registered_nav_menus', $GLOBALS );
+		$registered_menus      = $GLOBALS['_wp_registered_nav_menus'] ?? null;
+		$had_taxonomies        = array_key_exists( 'wp_taxonomies', $GLOBALS );
+		$previous_taxonomies   = $GLOBALS['wp_taxonomies'] ?? null;
+		$had_current_user      = array_key_exists( 'current_user', $GLOBALS );
+		$previous_current_user = $GLOBALS['current_user'] ?? null;
+		$read_access_events    = array();
+		$prepare_events        = array();
+		$anonymous_status      = null;
+
+		$read_access_filter = static function ( $read_only_access, \WP_REST_Request $request, $filtered_controller ) use ( &$read_access_events ): bool {
+			$read_access_events[] = array(
+				'route'      => $request->get_route(),
+				'method'     => $request->get_method(),
+				'controller' => is_object( $filtered_controller ) ? get_class( $filtered_controller ) : gettype( $filtered_controller ),
+				'incoming'   => (bool) $read_only_access,
+				'override'   => (bool) $request->get_param( 'cfz_read_access' ),
+			);
+
+			return $request->get_param( 'cfz_read_access' ) ? true : (bool) $read_only_access;
+		};
+		$theme_mod_filter = static function () use ( $case ): array {
+			return array(
+				$case['assignedLocation'] => $case['menuId'],
+			);
+		};
+		$prepare_filter = static function ( \WP_REST_Response $response, object $location, \WP_REST_Request $request ) use ( &$prepare_events, $case ): \WP_REST_Response {
+			$prepare_events[] = array(
+				'name'   => $location->name ?? null,
+				'route'  => $request->get_route(),
+				'fields' => $request->get_param( '_fields' ),
+			);
+
+			if ( $case['assignedLocation'] === ( $location->name ?? null ) ) {
+				$data                 = $response->get_data();
+				$data['cfz_marker']   = $case['marker'];
+				$response->set_data( $data );
+			}
+
+			return $response;
+		};
+
+		$GLOBALS['wp_rest_server'] = $server;
+		$GLOBALS['_wp_registered_nav_menus'] = array();
+		\register_taxonomy(
+			'nav_menu',
+			'nav_menu_item',
+			array(
+				'public'       => false,
+				'show_in_rest' => true,
+				'rest_base'    => 'menus',
+			)
+		);
+		\register_nav_menu( $case['assignedLocation'], $case['assignedDescription'] );
+		\register_nav_menu( $case['emptyLocation'], $case['emptyDescription'] );
+		\wp_cache_set( $case['menuId'], $menu_term, 'terms' );
+		\add_filter( 'rest_menu_read_access', $read_access_filter, 10, 3 );
+		\add_filter( 'theme_mod_nav_menu_locations', $theme_mod_filter, 10, 1 );
+		\add_filter( 'rest_prepare_menu_location', $prepare_filter, 10, 3 );
+
+		try {
+			$controller->register_routes();
+
+			$routes          = $server->get_routes();
+			$collection_args = isset( $routes[ $collection_route ] ) ? self::handler_args_for_method( $routes[ $collection_route ], 'GET' ) : array();
+			$item_args       = isset( $routes[ $item_route ] ) ? self::handler_args_for_method( $routes[ $item_route ], 'GET' ) : array();
+			$schema          = $controller->get_item_schema();
+
+			self::collect_failure(
+				$failures,
+				isset( $routes[ $collection_route ], $routes[ $item_route ] )
+					&& in_array( 'GET', self::route_methods( $routes[ $collection_route ] ), true )
+					&& in_array( 'GET', self::route_methods( $routes[ $item_route ] ), true )
+					&& self::collection_context_param_ok( $collection_args )
+					&& isset( $item_args['context'] )
+					&& 'view' === ( $item_args['context']['default'] ?? null )
+					&& array( 'view', 'embed', 'edit' ) === ( $item_args['context']['enum'] ?? null )
+					&& 'menu-location' === ( $schema['title'] ?? null )
+					&& array() === array_values( array_diff( array( 'name', 'description', 'menu' ), array_keys( $schema['properties'] ?? array() ) ) )
+					&& 'integer' === ( $schema['properties']['menu']['type'] ?? null ),
+				'menu location controller registers collection/item routes with context params and public schema',
+				array(
+					'routeMethods' => array(
+						'collection' => isset( $routes[ $collection_route ] ) ? self::route_methods( $routes[ $collection_route ] ) : array(),
+						'item'       => isset( $routes[ $item_route ] ) ? self::route_methods( $routes[ $item_route ] ) : array(),
+					),
+					'collectionArgs' => self::param_summary( $collection_args ),
+					'itemArgs'       => self::param_summary( $item_args ),
+					'schema'         => $schema,
+				)
+			);
+
+			$GLOBALS['current_user'] = new \WP_User( 0 );
+			$anonymous_status        = \rest_authorization_required_code();
+			$denied_collection       = $server->dispatch( self::request( 'GET', $collection_route ) );
+			$denied_item             = $server->dispatch( self::request( 'GET', $collection_route . '/' . $case['assignedLocation'] ) );
+			$filter_allowed         = $server->dispatch(
+				self::request(
+					'GET',
+					$collection_route,
+					array(
+						'cfz_read_access' => true,
+						'_fields'         => 'name,description,menu',
+					)
+				)
+			);
+
+			$cap_filter = self::install_cap_filter( array( 'edit_theme_options' ) );
+			try {
+				$cap_allowed = $server->dispatch(
+					self::request(
+						'GET',
+						$collection_route,
+						array(
+							'context' => 'edit',
+							'_fields' => 'name,description,menu',
+						)
+					)
+				);
+				$item = $server->dispatch(
+					self::request(
+						'GET',
+						$collection_route . '/' . $case['assignedLocation'],
+						array(
+							'context' => 'edit',
+							'_fields' => 'name,menu,_links',
+						),
+						array( 'location' => $case['assignedLocation'] )
+					)
+				);
+				$invalid = $server->dispatch(
+					self::request(
+						'GET',
+						$collection_route . '/' . $case['invalidLocation'],
+						array( 'context' => 'edit' ),
+						array( 'location' => $case['invalidLocation'] )
+					)
+				);
+			} finally {
+				\remove_filter( 'user_has_cap', $cap_filter, 10 );
+			}
+		} finally {
+			\remove_filter( 'rest_menu_read_access', $read_access_filter, 10 );
+			\remove_filter( 'theme_mod_nav_menu_locations', $theme_mod_filter, 10 );
+			\remove_filter( 'rest_prepare_menu_location', $prepare_filter, 10 );
+			\unregister_nav_menu( $case['assignedLocation'] );
+			\unregister_nav_menu( $case['emptyLocation'] );
+			\wp_cache_delete( $case['menuId'], 'terms' );
+
+			if ( $had_registered_menus ) {
+				$GLOBALS['_wp_registered_nav_menus'] = $registered_menus;
+			} else {
+				unset( $GLOBALS['_wp_registered_nav_menus'] );
+			}
+
+			if ( $had_taxonomies ) {
+				$GLOBALS['wp_taxonomies'] = $previous_taxonomies;
+			} else {
+				unset( $GLOBALS['wp_taxonomies'] );
+			}
+
+			if ( $had_current_user ) {
+				$GLOBALS['current_user'] = $previous_current_user;
+			} else {
+				unset( $GLOBALS['current_user'] );
+			}
+
+			if ( null !== $previous_server ) {
+				$GLOBALS['wp_rest_server'] = $previous_server;
+			} else {
+				unset( $GLOBALS['wp_rest_server'] );
+			}
+		}
+
+		$filter_data = $filter_allowed instanceof \WP_REST_Response ? $filter_allowed->get_data() : array();
+		$cap_data    = $cap_allowed instanceof \WP_REST_Response ? $cap_allowed->get_data() : array();
+		$item_data   = $item instanceof \WP_REST_Response ? $item->get_data() : array();
+		$item_links  = $item instanceof \WP_REST_Response ? $item->get_links() : array();
+
+		self::collect_failure(
+			$failures,
+			null !== $anonymous_status
+				&& self::response_error_ok( $denied_collection, 'rest_cannot_view', $anonymous_status )
+				&& self::response_error_ok( $denied_item, 'rest_cannot_view', $anonymous_status )
+				&& $filter_allowed instanceof \WP_REST_Response
+				&& 200 === $filter_allowed->get_status()
+				&& $cap_allowed instanceof \WP_REST_Response
+				&& 200 === $cap_allowed->get_status()
+				&& array( $case['assignedLocation'], $case['emptyLocation'] ) === array_keys( $cap_data )
+				&& $case['assignedDescription'] === ( $cap_data[ $case['assignedLocation'] ]['description'] ?? null )
+				&& $case['menuId'] === ( $cap_data[ $case['assignedLocation'] ]['menu'] ?? null )
+				&& 0 === ( $cap_data[ $case['emptyLocation'] ]['menu'] ?? null )
+				&& isset( $filter_data[ $case['assignedLocation'] ] )
+				&& 0 < count( array_filter( $read_access_events, static fn( array $event ): bool => true === $event['override'] ) ),
+			'menu location permissions deny anonymous access, allow read-access filter overrides, and allow edit_theme_options users',
+			array(
+				'deniedCollection' => $denied_collection,
+				'deniedItem'       => $denied_item,
+				'filterData'       => $filter_data,
+				'capData'          => $cap_data,
+				'readAccessEvents' => $read_access_events,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$item instanceof \WP_REST_Response
+				&& 200 === $item->get_status()
+				&& array( 'cfz_marker', 'menu', 'name' ) === self::sorted_keys( $item_data )
+				&& $case['assignedLocation'] === ( $item_data['name'] ?? null )
+				&& $case['menuId'] === ( $item_data['menu'] ?? null )
+				&& $case['marker'] === ( $item_data['cfz_marker'] ?? null )
+				&& \rest_url( 'wp/v2/menu-locations/' . $case['assignedLocation'] ) === self::link_href( $item_links, 'self' )
+				&& \rest_url( 'wp/v2/menu-locations' ) === self::link_href( $item_links, 'collection' )
+				&& \rest_url( 'wp/v2/menus/' . $case['menuId'] ) === self::link_href( $item_links, 'https://api.w.org/menu' )
+				&& self::response_error_ok( $invalid, 'rest_menu_location_invalid', 404 )
+				&& 0 < count( array_filter( $prepare_events, static fn( array $event ): bool => $event['name'] === ( $item_data['name'] ?? null ) ) ),
+			'menu location item responses honor _fields, assigned menu IDs, menu links, prepare filters, and invalid-location errors',
+			array(
+				'itemData'      => $item_data,
+				'itemLinks'     => $item_links,
+				'invalid'       => $invalid,
+				'prepareEvents' => $prepare_events,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			false === \has_filter( 'rest_menu_read_access', $read_access_filter, 10 )
+				&& false === \has_filter( 'theme_mod_nav_menu_locations', $theme_mod_filter, 10 )
+				&& false === \has_filter( 'rest_prepare_menu_location', $prepare_filter, 10 )
+				&& ! isset( \get_registered_nav_menus()[ $case['assignedLocation'] ] )
+				&& ! isset( \get_registered_nav_menus()[ $case['emptyLocation'] ] )
+				&& ( null !== $previous_server ? ( $GLOBALS['wp_rest_server'] ?? null ) === $previous_server : ! array_key_exists( 'wp_rest_server', $GLOBALS ) ),
+			'menu location controller temporary filters, nav menu locations, and REST server globals are restored',
+			array(
+				'readFilter'       => \has_filter( 'rest_menu_read_access', $read_access_filter, 10 ),
+				'themeModFilter'   => \has_filter( 'theme_mod_nav_menu_locations', $theme_mod_filter, 10 ),
+				'prepareFilter'    => \has_filter( 'rest_prepare_menu_location', $prepare_filter, 10 ),
+				'registeredMenus'  => \get_registered_nav_menus(),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'rest-controllers.menu-locations.routes-permissions-links',
+			array() === $failures,
+			array(
+				'case'     => $case,
+				'failures' => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
 	private static function check_search_invalid_subtype_route_dispatch( array $case ): array {
 		$handler    = self::make_search_handler( $case['emptySubtypeType'], array(), array(), array(), 0 );
 		$controller = new \WP_REST_Search_Controller( array( $handler ) );
@@ -4684,6 +4959,40 @@ final class RestControllersSurface {
 		);
 	}
 
+	private static function menu_locations_case( \ComponentFuzz\FuzzContext $ctx ): array {
+		$assigned = self::route_token( $ctx->fork( 'assigned-location' ), 'cfz-primary' );
+		$empty    = self::route_token( $ctx->fork( 'empty-location' ), 'cfz-secondary' );
+
+		return array(
+			'assignedLocation'    => $assigned,
+			'emptyLocation'       => $empty,
+			'invalidLocation'     => self::route_token( $ctx->fork( 'invalid-location' ), 'cfz-missing' ),
+			'assignedDescription' => 'Primary menu ' . $ctx->fork( 'assigned-description' )->int( 1, 999 ),
+			'emptyDescription'    => 'Secondary menu ' . $ctx->fork( 'empty-description' )->int( 1, 999 ),
+			'menuId'              => 62000 + ( $ctx->fork( 'menu-id' )->seed() % 1000 ),
+			'menuSlug'            => self::route_token( $ctx->fork( 'menu-slug' ), 'cfz-menu' ),
+			'menuName'            => 'Menu ' . $ctx->fork( 'menu-name' )->int( 1, 999 ),
+			'marker'              => substr( hash( 'sha1', 'menu-locations:' . $ctx->seed() ), 0, 12 ),
+		);
+	}
+
+	private static function nav_menu_term( array $case ): \WP_Term {
+		return new \WP_Term(
+			(object) array(
+				'term_id'          => $case['menuId'],
+				'name'             => $case['menuName'],
+				'slug'             => $case['menuSlug'],
+				'term_group'       => 0,
+				'term_taxonomy_id' => $case['menuId'] + 1000,
+				'taxonomy'         => 'nav_menu',
+				'description'      => '',
+				'parent'           => 0,
+				'count'            => 0,
+				'filter'           => 'raw',
+			)
+		);
+	}
+
 	private static function make_search_handler( string $type, array $subtypes, array $items, array $result_ids = array(), int $result_total = 0, bool $malformed_result = false ): \WP_REST_Search_Handler {
 		return new class( $type, $subtypes, $items, $result_ids, $result_total, $malformed_result ) extends \WP_REST_Search_Handler {
 			/** @var array<int,array<string,mixed>> */
@@ -4939,6 +5248,13 @@ final class RestControllersSurface {
 		}
 
 		return $links[ $rel ][0]['href'];
+	}
+
+	private static function sorted_keys( array $value ): array {
+		$keys = array_keys( $value );
+		sort( $keys );
+
+		return $keys;
 	}
 
 	private static function route_methods( array $handlers ): array {
