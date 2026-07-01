@@ -42,6 +42,7 @@ final class ImageMetadataSurface {
 				$rows[] = self::check_xmp_alt_text_selection( $ctx->fork( 'xmp-alt' ), $temp_root );
 				$rows[] = self::check_iptc_metadata( $ctx->fork( 'iptc' ), $temp_root );
 				$rows[] = self::check_exif_metadata( $ctx->fork( 'exif' ), $temp_root );
+				$rows[] = self::check_core_fixture_metadata_matrix( $ctx->fork( 'core-fixtures' ) );
 				$rows[] = self::check_exif_helpers( $ctx->fork( 'helpers' ) );
 			}
 		} catch ( \Throwable $e ) {
@@ -705,6 +706,119 @@ final class ImageMetadataSurface {
 		);
 	}
 
+	private static function check_core_fixture_metadata_matrix( \ComponentFuzz\FuzzContext $ctx ): array {
+		if ( ! is_callable( 'exif_read_data' ) || ! is_callable( 'iptcparse' ) ) {
+			return $ctx->skip(
+				'image-metadata.core-fixtures.exif-iptc-regression-matrix',
+				'exif_read_data() or iptcparse() is unavailable in this PHP build.',
+				array(
+					'exif_read_data' => is_callable( 'exif_read_data' ),
+					'iptcparse'      => is_callable( 'iptcparse' ),
+				)
+			);
+		}
+
+		$fixture_dir = \ComponentFuzz\repo_root() . DIRECTORY_SEPARATOR . 'tests' . DIRECTORY_SEPARATOR . 'phpunit' . DIRECTORY_SEPARATOR . 'data' . DIRECTORY_SEPARATOR . 'images';
+		$fixtures    = self::core_fixture_metadata_expectations();
+		$ordered     = self::shuffled_fixture_names( $ctx, array_keys( $fixtures ) );
+		$failures    = array();
+		$observed    = array();
+		$events      = array();
+		$filter      = static function ( array $meta, string $file, int $image_type, array $iptc, array $exif ) use ( &$events ): array {
+			$events[] = array(
+				'basename'  => basename( $file ),
+				'imageType' => $image_type,
+				'iptcCount' => count( $iptc ),
+				'exifCount' => count( $exif ),
+				'metaKeys'  => array_keys( $meta ),
+			);
+			return $meta;
+		};
+
+		\add_filter( 'wp_read_image_metadata', $filter, 10, 5 );
+		try {
+			foreach ( $ordered as $filename ) {
+				$path = $fixture_dir . DIRECTORY_SEPARATOR . $filename;
+				if ( ! is_readable( $path ) ) {
+					self::collect_failure(
+						$failures,
+						false,
+						'Core image fixture is readable',
+						array(
+							'fixture' => $filename,
+							'path'    => $path,
+						)
+					);
+					continue;
+				}
+
+				$meta     = \wp_read_image_metadata( $path );
+				$expected = $fixtures[ $filename ];
+				$subset   = is_array( $meta )
+					? array_intersect_key( $meta, $expected )
+					: $meta;
+
+				self::collect_failure(
+					$failures,
+					is_array( $meta )
+						&& $expected === $subset
+						&& self::default_metadata_shape_ok( $meta )
+						&& self::metadata_text_is_clean( $meta )
+						&& self::serializable_array_ok( $meta ),
+					'Core image fixture metadata matches expected representative fields',
+					array(
+						'fixture'  => $filename,
+						'expected' => $expected,
+						'actual'   => is_array( $meta ) ? self::preview_metadata( $meta ) : $meta,
+					)
+				);
+
+				$observed[] = array(
+					'fixture'  => $filename,
+					'metadata' => is_array( $meta ) ? self::preview_metadata( $meta ) : $meta,
+				);
+			}
+		} finally {
+			\remove_filter( 'wp_read_image_metadata', $filter, 10 );
+		}
+
+		$iptc_event_seen = false;
+		$exif_event_seen = false;
+		foreach ( $events as $event ) {
+			$iptc_event_seen = $iptc_event_seen || 0 < (int) ( $event['iptcCount'] ?? 0 );
+			$exif_event_seen = $exif_event_seen || 0 < (int) ( $event['exifCount'] ?? 0 );
+		}
+
+		self::collect_failure(
+			$failures,
+			count( $events ) === count( $ordered )
+				&& $iptc_event_seen
+				&& $exif_event_seen
+				&& false === \has_filter( 'wp_read_image_metadata', $filter ),
+			'Core fixture metadata filter observes every parsed fixture and is restored',
+			array(
+				'eventCount'     => count( $events ),
+				'fixtureCount'   => count( $ordered ),
+				'iptcEventSeen'  => $iptc_event_seen,
+				'exifEventSeen'  => $exif_event_seen,
+				'hasFilter'      => \has_filter( 'wp_read_image_metadata', $filter ),
+				'eventPreview'   => array_slice( $events, 0, 5 ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'image-metadata.core-fixtures.exif-iptc-regression-matrix',
+			array() === $failures,
+			array(
+				'fixtureOrder' => $ordered,
+				'events'       => array_slice( $events, 0, 8 ),
+				'observed'     => array_slice( $observed, 0, 5 ),
+				'failures'     => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
 	private static function check_exif_helpers( \ComponentFuzz\FuzzContext $ctx ): array {
 		$failures = array();
 		$cases    = array(
@@ -744,6 +858,122 @@ final class ImageMetadataSurface {
 			array() === $failures,
 			array( 'failures' => $failures )
 		);
+	}
+
+	private static function core_fixture_metadata_expectations(): array {
+		return array(
+			'2004-07-22-DSC_0008.jpg'             => array(
+				'aperture'          => '6.3',
+				'camera'            => 'NIKON D70',
+				'created_timestamp' => '1090516499',
+				'focal_length'      => '27',
+				'iso'               => '400',
+				'shutter_speed'     => '0.025',
+				'orientation'       => '0',
+				'keywords'          => array(),
+			),
+			'2007-06-17DSC_4173.JPG'              => array(
+				'aperture'          => '0',
+				'camera'            => 'NIKON D70',
+				'caption'           => 'Copyright Alex Shiels',
+				'created_timestamp' => '1182115080',
+				'shutter_speed'     => '0.002',
+				'title'             => 'Copyright Alex Shiels',
+				'orientation'       => '1',
+				'keywords'          => array( 'Flowers' ),
+			),
+			'2004-07-22-DSC_0007.jpg'             => array(
+				'aperture'          => '6.3',
+				'credit'            => 'IPTC Creator',
+				'camera'            => 'NIKON D70',
+				'caption'           => 'IPTC Caption',
+				'created_timestamp' => '1090516475',
+				'copyright'         => 'IPTC Copyright',
+				'focal_length'      => '18',
+				'iso'               => '200',
+				'shutter_speed'     => '0.04',
+				'title'             => 'IPTC Headline',
+			),
+			'a2-small.jpg'                        => array(
+				'aperture'          => '4.5',
+				'camera'            => 'FinePix S5600',
+				'created_timestamp' => '1188814623',
+				'focal_length'      => '6.3',
+				'iso'               => '64',
+				'shutter_speed'     => '0.003125',
+				'orientation'       => '1',
+			),
+			'waffles.jpg'                         => array(
+				'aperture'          => '0',
+				'camera'            => '',
+				'created_timestamp' => '0',
+				'focal_length'      => '0',
+				'iso'               => '0',
+				'shutter_speed'     => '0',
+				'title'             => '',
+				'orientation'       => '0',
+			),
+			'canola.jpg'                          => array(
+				'aperture'          => '0',
+				'camera'            => '',
+				'created_timestamp' => '0',
+				'focal_length'      => '0',
+				'iso'               => '0',
+				'shutter_speed'     => '0',
+				'title'             => '',
+				'orientation'       => '0',
+			),
+			'IPTC-PhotometadataRef-Std2025.1.jpg' => array(
+				'credit'            => 'Credit Line (ref2025.1)',
+				'caption'           => 'The description aka caption (ref2025.1)',
+				'created_timestamp' => '1762129501',
+				'copyright'         => 'Copyright (Notice) 2025.1 IPTC - www.iptc.org  (ref2025.1)',
+				'title'             => 'The Headline (ref2025.1)',
+				'keywords'          => array( 'Keyword1ref2025.1', 'Keyword2ref2025.1', 'Keyword3ref2025.1' ),
+				'alt'               => 'This is the Alt Text description to support accessibility in 2025.1',
+			),
+			'test-image-iptc.jpg'                 => array(
+				'caption'           => 'This is a comment. / Это комментарий. / Βλέπετε ένα σχόλιο.',
+				'created_timestamp' => '0',
+				'orientation'       => '1',
+				'keywords'          => array(),
+			),
+			'33772.jpg'                           => array(
+				'aperture'          => '8',
+				'credit'            => 'Photoshop Author',
+				'camera'            => 'DMC-LX2',
+				'caption'           => 'Photoshop Description',
+				'created_timestamp' => '1306315327',
+				'copyright'         => 'Photoshop Copyrright Notice',
+				'focal_length'      => '6.3',
+				'iso'               => '100',
+				'shutter_speed'     => '0.0025',
+				'title'             => 'Photoshop Document Ttitle',
+				'orientation'       => '1',
+				'keywords'          => array( 'beach', 'baywatch', 'LA', 'sunset' ),
+			),
+			'sugarloaf-mountain.jpg'              => array(
+				'aperture'          => '0',
+				'camera'            => 'X-T1',
+				'created_timestamp' => '0',
+				'focal_length'      => '50',
+				'iso'               => '200',
+				'shutter_speed'     => '2',
+				'title'             => 'Sugarloaf Panorama',
+				'orientation'       => '1',
+			),
+		);
+	}
+
+	private static function shuffled_fixture_names( \ComponentFuzz\FuzzContext $ctx, array $fixtures ): array {
+		for ( $i = count( $fixtures ) - 1; $i > 0; $i-- ) {
+			$j              = $ctx->int( 0, $i );
+			$tmp            = $fixtures[ $i ];
+			$fixtures[ $i ] = $fixtures[ $j ];
+			$fixtures[ $j ] = $tmp;
+		}
+
+		return $fixtures;
 	}
 
 	private static function prepare_runtime(): void {

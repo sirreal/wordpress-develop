@@ -371,8 +371,10 @@ database, network requests, or a configured site.
   bounded JPEG/TIFF/PNG byte fixtures, including `wp_read_image_metadata()`
   malformed-file behavior, EXIF/IPTC field extraction and sanitization when PHP
   extensions are available, locale-aware XMP alt text extraction/fallbacks,
-  EXIF helper normalization, image metadata filters, temp-file cleanup, and
-  state restoration.
+  real Core EXIF/IPTC/XMP fixture replay for representative camera, timestamp,
+  keyword, orientation, UTF-8 caption, and accessibility-alt fields, EXIF
+  helper normalization, image metadata filters, temp-file cleanup, and state
+  restoration.
 - `identity`: usernames, emails, identity sanitizer filter contracts,
   capabilities, generated user contact-method filters and additional-key
   propagation, generated `WP_User` identity field/cache/filter behavior, avatar
@@ -923,10 +925,11 @@ attachments only; it does not download remote media, invoke codecs or external
 binaries, insert real attachments, or enable audio/video cover attachment
 generation. The
 `image-metadata` surface complements that audio/video coverage with generated
-local image byte fixtures only. It does not invoke image codecs, live uploads,
-remote media, or attachment persistence; EXIF/IPTC extraction rows are recorded
-as explicit skips when the PHP build lacks `exif_read_data()` or `iptcparse()`,
-while malformed/no-metadata image paths and filter cleanup still run. The
+local image byte fixtures and repo-local Core image fixture replays. It does not
+invoke image codecs, live uploads, remote media, or attachment persistence;
+EXIF/IPTC extraction rows are recorded as explicit skips when the PHP build
+lacks `exif_read_data()` or `iptcparse()`, while malformed/no-metadata image
+paths and filter cleanup still run. The
 `rest-controllers` surface remains no-live-DB and registry-first, with bounded
 temp-file coverage only for local block pattern loader behavior. DB-backed
 posts, terms, comments, users, revisions, and attachments are covered by

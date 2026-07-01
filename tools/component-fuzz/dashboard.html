@@ -226,12 +226,13 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 4729 passed, 0 failed, 0 errored, 1 skipped at 112 surfaces over 1 iteration after adding punycode-TLD <code>make_clickable()</code> coverage and retiring that partial-link boundary.</div>
+			<div class="note">Non-skipped pass rate: 4730 passed, 0 failed, 0 errored, 1 skipped at 112 surfaces over 1 iteration after adding real Core image metadata fixture replay coverage.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Latest focused addition: <code>email</code> <code>make_clickable()</code> coverage links full ACE/punycode final labels without leaving partial <code>xn</code> anchors, keeps malformed final labels unlinked, and converts the old punycode-TLD partial-link skip into a failing assertion; focused seed 224 passed 1248 checks, seed 1 passed 1245 checks, adjacent <code>email,mail,identity</code> smoke passed 1260 checks with no skips, and broad seed 224 smoke passed 4729 checks with 1 skip.</div>
+			<div class="note">Latest focused addition: <code>image-metadata</code> real Core fixture replay covers camera/timestamp/fraction fields, IPTC credit/caption/copyright/title, UTF-8 captions, keywords, orientation, accessibility alt text, metadata shape, final filter payloads, and filter restoration across shuffled JPEG fixtures; focused seed 224 passed 8 checks, seeds 1 and 224 over 25 iterations each passed 200 checks, adjacent media parser/chrome smoke passed 87 checks with no skips, standalone <code>rest-media-attachments</code> sanity passed 7 checks, and broad seed 224 smoke passed 4730 checks with 1 skip.</div>
+			<div class="note">Previous focused addition: <code>email</code> <code>make_clickable()</code> coverage links full ACE/punycode final labels without leaving partial <code>xn</code> anchors, keeps malformed final labels unlinked, and converts the old punycode-TLD partial-link skip into a failing assertion; focused seed 224 passed 1248 checks, seed 1 passed 1245 checks, adjacent <code>email,mail,identity</code> smoke passed 1260 checks with no skips, and broad seed 224 smoke passed 4729 checks with 1 skip.</div>
 			<div class="note">Previous focused addition: <code>block-templates</code> direct-ID path containment guards <code>get_block_file_template()</code> and <code>get_block_template()</code> against traversal slugs that point at existing files outside the active theme template directories, converts the guarded skip into a failing assertion, preserves file enumeration confinement, and keeps template CPT queries short-circuited; focused seed 224 passed 9 checks, seeds 1 and 224 over 25 iterations each passed 225 checks with no skips, adjacent block/theme/REST smoke passed 84 checks with no skips, and broad seed 224 smoke passed 4728 checks with 2 skips.</div>
 			<div class="note">Previous focused addition: <code>admin-list-tables</code> application-password Last IP coverage converts the hostile stored <code>last_ip</code> boundary into an escaping assertion, verifies the row contains <code>esc_html()</code> output, preserves the empty <code>&amp;mdash;</code> fallback, and keeps the synthetic list-table fixture path no-DB; focused seed 224 passed 12 checks, seeds 1 and 224 over 25 iterations each passed 300 checks with no skips, adjacent admin/security smoke passed 78 checks with no skips, and broad seed 224 smoke passed 4727 checks with 3 skips.</div>
 			<div class="note">Previous focused addition: <code>classic-walkers</code> nav-menu query coverage exercises direct <code>_wp_ajax_menu_quick_search()</code> post-type and taxonomy JSON responses, direct get-item JSON/markup branches, query-argument oracles for bounded quick search, post-type archive pseudo-items, post-type and taxonomy View All pagination, quick-search tab activation, escaped hostile labels/titles/terms, scoped <code>posts_pre_query</code>/<code>terms_pre_query</code> fixtures, and temporary object-type/filter cleanup; focused seed 224 passed 14 checks, seeds 1 and 224 over 25 iterations each passed 350 checks, adjacent admin/navigation/content/query smoke passed 729 checks with 1 existing skip, and broad seed 224 smoke passed 4726 checks with 4 skips.</div>
@@ -791,9 +792,9 @@
 				<tr>
 					<td><code>image-metadata</code></td>
 					<td><span class="status good">local validation passed</span></td>
-					<td>Main worktree through <code>582c472ce7</code></td>
-					<td>Main focused run: 700 passed, 0 skipped, 0 failed; latest broad run: 8503 passed, 66 skipped, 0 failed.</td>
-					<td>Admin image metadata parser, EXIF/IPTC availability, locale-aware XMP alt selection/fallbacks, local binary fixtures.</td>
+					<td>Main worktree through <code>582c472ce7</code>; real Core fixture replay follow-up in the current component slice.</td>
+					<td>Latest focused runs: seed 224 passed 8 checks, seeds 1 and 224 over 25 iterations each passed 200 checks, adjacent media parser/chrome smoke passed 87 checks with no skips, standalone <code>rest-media-attachments</code> sanity passed 7 checks, and latest broad run passed 4730 checks with 1 skip. Earlier focused run: 700 passed, 0 skipped, 0 failed.</td>
+					<td>Admin image metadata parser, EXIF/IPTC availability, locale-aware XMP alt selection/fallbacks, generated local binary fixtures, real Core EXIF/IPTC/XMP fixture replay for representative camera, timestamp, keyword, orientation, UTF-8 caption, and accessibility-alt metadata, parser filter payloads, and state restoration.</td>
 				</tr>
 				<tr>
 					<td><code>utility-internals</code></td>
