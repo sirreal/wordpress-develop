@@ -2,7 +2,7 @@
 namespace ComponentFuzz\Surfaces;
 
 /**
- * Fuzzes deterministic no-DB WordPress date/time helpers.
+ * Fuzzes deterministic no-DB WordPress date/time helpers and timezone-choice markup.
  */
 final class DateTimeSurface {
 	public const NAME = 'date-time';
@@ -36,6 +36,7 @@ final class DateTimeSurface {
 				self::check_date_i18n_oracle( $ctx, $timestamps, $timezones, $formats ),
 				self::check_mysql2date_oracle( $ctx, $mysql, $timezones ),
 				self::check_timezone_options_and_current_time( $ctx, $timezones, $offsets ),
+				self::check_timezone_choice_markup( $ctx, $timezones ),
 				self::check_gmt_local_round_trips( $ctx, $timestamps, $timezones ),
 				self::check_iso8601_offsets( $ctx, $offsets ),
 				self::check_weekstartend_windows( $ctx, $timestamps ),
@@ -76,11 +77,13 @@ final class DateTimeSurface {
 				'wp_timezone_string',
 				'wp_timezone',
 				'wp_timezone_override_offset',
+				'wp_timezone_choice',
 				'wp_checkdate',
 				'get_weekstartend',
 				'human_time_diff',
 				'get_option',
 				'add_filter',
+				'has_filter',
 				'remove_filter',
 			) as $function
 		) {
@@ -408,6 +411,184 @@ final class DateTimeSurface {
 				'cases'    => $cases,
 				'samples'  => $samples,
 				'failures' => array_slice( $failures, 0, self::FAILURE_LIMIT ),
+			)
+		);
+	}
+
+	private static function check_timezone_choice_markup( \ComponentFuzz\FuzzContext $ctx, array $timezones ): array {
+		$failures          = array();
+		$samples           = array();
+		$textdomain_events = array();
+		$locale            = 'cf_' . preg_replace( '/[^A-Za-z0-9_]+/', '_', $ctx->identifier( 5, 12 ) );
+		$hostile           = 'UTC+5.75"><script data-cf="' . $ctx->identifier( 4, 8 ) . '">&/';
+
+		$pre_load_filter = static function ( $loaded, string $domain, string $mofile, ?string $filter_locale = null ) use ( &$textdomain_events ) {
+			if ( 'continents-cities' !== $domain ) {
+				return $loaded;
+			}
+
+			$textdomain_events[] = array(
+				'domain' => $domain,
+				'mofile' => $mofile,
+				'locale' => $filter_locale,
+			);
+
+			return true;
+		};
+
+		\add_filter( 'pre_load_textdomain', $pre_load_filter, 10, 4 );
+
+		try {
+			$empty_html = \wp_timezone_choice( '', $locale );
+			$empty      = self::timezone_choice_summary( $empty_html );
+			self::sample( $samples, array( 'case' => 'empty', 'selected' => $empty['selectedValues'], 'preview' => self::describe_value( $empty_html ) ) );
+			self::collect_failure(
+				$failures,
+				array( '' ) === $empty['selectedValues']
+					&& 1 === count( $empty['selectedValues'] )
+					&& 1 === self::timezone_choice_value_count( $empty, '' )
+					&& self::timezone_choice_structure_ok( $empty ),
+				'wp_timezone_choice empty selection emits one selected placeholder and balanced option groups',
+				array( 'summary' => $empty )
+			);
+
+			$utc_html = \wp_timezone_choice( 'UTC', $locale );
+			$utc      = self::timezone_choice_summary( $utc_html );
+			self::collect_failure(
+				$failures,
+				array( 'UTC' ) === $utc['selectedValues']
+					&& 1 === self::timezone_choice_value_count( $utc, 'UTC' )
+					&& str_contains( $utc_html, '<optgroup label="UTC" dir="auto">' )
+					&& self::timezone_choice_structure_ok( $utc ),
+				'wp_timezone_choice selects the UTC option inside the UTC group',
+				array( 'summary' => $utc )
+			);
+
+			foreach ( self::timezone_choice_named_zone_cases( $ctx->fork( 'named-zones' ), $timezones ) as $zone ) {
+				$html    = \wp_timezone_choice( $zone, $locale );
+				$summary = self::timezone_choice_summary( $html );
+				self::sample( $samples, array( 'case' => 'named', 'zone' => $zone, 'selected' => $summary['selectedValues'] ) );
+				self::collect_failure(
+					$failures,
+					array( $zone ) === $summary['selectedValues']
+						&& 1 === self::timezone_choice_value_count( $summary, $zone )
+						&& self::timezone_choice_structure_ok( $summary ),
+					'wp_timezone_choice named timezone values round-trip exactly',
+					array(
+						'zone'    => $zone,
+						'summary' => $summary,
+					)
+				);
+			}
+
+			$bc_zone = self::timezone_choice_bc_only_zone( $ctx->fork( 'bc-zone' ) );
+			if ( null !== $bc_zone ) {
+				$bc_html = \wp_timezone_choice( $bc_zone, $locale );
+				$bc      = self::timezone_choice_summary( $bc_html );
+				self::collect_failure(
+					$failures,
+					array( $bc_zone ) === $bc['selectedValues']
+						&& 1 === self::timezone_choice_value_count( $bc, $bc_zone )
+						&& isset( $bc['options'][0] )
+						&& $bc_zone === ( $bc['options'][0]['value'] ?? null )
+						&& true === ( $bc['options'][0]['selected'] ?? false )
+						&& self::timezone_choice_structure_ok( $bc ),
+					'wp_timezone_choice emits selected top option for deprecated but valid BC timezone IDs',
+					array(
+						'zone'    => $bc_zone,
+						'summary' => $bc,
+					)
+				);
+			}
+
+			foreach ( self::timezone_choice_manual_offset_cases( $ctx->fork( 'manual-offsets' ) ) as $offset_value => $expected_label ) {
+				$html    = \wp_timezone_choice( $offset_value, $locale );
+				$summary = self::timezone_choice_summary( $html );
+				$option  = self::timezone_choice_option_by_value( $summary, $offset_value );
+				self::sample( $samples, array( 'case' => 'manual', 'offset' => $offset_value, 'selected' => $summary['selectedValues'] ) );
+				self::collect_failure(
+					$failures,
+					array( $offset_value ) === $summary['selectedValues']
+						&& is_array( $option )
+						&& $expected_label === ( $option['label'] ?? null )
+						&& str_contains( $html, '<optgroup label="Manual Offsets" dir="auto">' )
+						&& self::timezone_choice_structure_ok( $summary ),
+					'wp_timezone_choice manual UTC offsets keep decimal values while labels normalize quarter-hour clocks',
+					array(
+						'offset'        => $offset_value,
+						'expectedLabel' => $expected_label,
+						'option'        => $option,
+						'summary'       => $summary,
+					)
+				);
+			}
+
+			$hostile_html = \wp_timezone_choice( $hostile, $locale );
+			$hostile_sum  = self::timezone_choice_summary( $hostile_html );
+			self::collect_failure(
+				$failures,
+				array() === $hostile_sum['selectedValues']
+					&& ! str_contains( $hostile_html, $hostile )
+					&& ! str_contains( strtolower( $hostile_html ), '<script' )
+					&& self::timezone_choice_structure_ok( $hostile_sum ),
+				'wp_timezone_choice ignores hostile non-zone selected strings without raw payload leakage',
+				array(
+					'hostile' => $hostile,
+					'summary' => $hostile_sum,
+					'preview' => self::describe_value( $hostile_html ),
+				)
+			);
+
+			$locale_zone       = self::timezone_choice_named_zone_cases( $ctx->fork( 'locale-zone' ), $timezones )[0] ?? 'Europe/Madrid';
+			$default_locale    = self::timezone_choice_summary( \wp_timezone_choice( $locale_zone, null ) );
+			$explicit_locale   = self::timezone_choice_summary( \wp_timezone_choice( $locale_zone, 'en_US' ) );
+			$generated_locale  = self::timezone_choice_summary( \wp_timezone_choice( $locale_zone, $locale . '_ALT' ) );
+			$default_values    = self::timezone_choice_values( $default_locale );
+			$explicit_values   = self::timezone_choice_values( $explicit_locale );
+			$generated_values  = self::timezone_choice_values( $generated_locale );
+			self::collect_failure(
+				$failures,
+				$default_values === $explicit_values
+					&& $default_values === $generated_values
+					&& array( $locale_zone ) === $default_locale['selectedValues']
+					&& $default_locale['selectedValues'] === $explicit_locale['selectedValues']
+					&& $default_locale['selectedValues'] === $generated_locale['selectedValues'],
+				'wp_timezone_choice option values and selected state are locale-invariant',
+				array(
+					'zone'             => $locale_zone,
+					'defaultSelected'  => $default_locale['selectedValues'],
+					'explicitSelected' => $explicit_locale['selectedValues'],
+					'generatedSelected' => $generated_locale['selectedValues'],
+					'valueCounts'      => array(
+						'default'   => count( $default_values ),
+						'explicit'  => count( $explicit_values ),
+						'generated' => count( $generated_values ),
+					),
+				)
+			);
+		} finally {
+			\remove_filter( 'pre_load_textdomain', $pre_load_filter, 10 );
+		}
+
+		self::collect_failure(
+			$failures,
+			array() !== $textdomain_events
+				&& false === \has_filter( 'pre_load_textdomain', $pre_load_filter ),
+			'wp_timezone_choice textdomain pre-load filter is scoped and removed',
+			array(
+				'events'    => array_slice( $textdomain_events, 0, 6 ),
+				'hasFilter' => \has_filter( 'pre_load_textdomain', $pre_load_filter ),
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'date-time.timezone-choice-markup-and-locale-contracts',
+			$failures,
+			array(
+				'samples'          => $samples,
+				'textdomainEvents' => array_slice( $textdomain_events, 0, 6 ),
+				'failures'         => array_slice( $failures, 0, self::FAILURE_LIMIT ),
 			)
 		);
 	}
@@ -1132,6 +1313,15 @@ final class DateTimeSurface {
 			);
 		}
 
+		$l10n_fingerprint = self::l10n_state_fingerprint();
+		if ( $l10n_fingerprint !== ( $snapshot['l10nFingerprint'] ?? array() ) ) {
+			$failures[] = array(
+				'global' => 'l10n',
+				'before' => $snapshot['l10nFingerprint'] ?? array(),
+				'after'  => $l10n_fingerprint,
+			);
+		}
+
 		foreach ( $snapshot['trackedFilters'] as $hook => $before ) {
 			$after = self::filter_fingerprint( $hook );
 			if ( $after !== $before ) {
@@ -1613,6 +1803,168 @@ final class DateTimeSurface {
 		}
 	}
 
+	private static function timezone_choice_named_zone_cases( \ComponentFuzz\FuzzContext $ctx, array $timezones ): array {
+		$available = array_flip( \DateTimeZone::listIdentifiers() );
+		$preferred = array(
+			'Europe/Madrid',
+			'America/St_Johns',
+			'America/Argentina/Buenos_Aires',
+			'Asia/Kathmandu',
+			'Australia/Lord_Howe',
+			'Pacific/Chatham',
+		);
+		$zones     = array();
+
+		foreach ( array_merge( $preferred, $timezones ) as $zone ) {
+			if ( 'UTC' !== $zone && isset( $available[ $zone ] ) ) {
+				$zones[] = $zone;
+			}
+		}
+
+		$zones = array_values( array_unique( $zones ) );
+		while ( count( $zones ) < 5 && array() !== $available ) {
+			$candidate = array_keys( $available )[ $ctx->int( 0, count( $available ) - 1 ) ];
+			if ( 'UTC' !== $candidate ) {
+				$zones[] = $candidate;
+				$zones   = array_values( array_unique( $zones ) );
+			}
+		}
+
+		return array_slice( $zones, 0, 5 );
+	}
+
+	private static function timezone_choice_bc_only_zone( \ComponentFuzz\FuzzContext $ctx ): ?string {
+		$current = \DateTimeZone::listIdentifiers();
+		$all     = \DateTimeZone::listIdentifiers( \DateTimeZone::ALL_WITH_BC );
+		$bc_only = array_values( array_diff( $all, $current ) );
+
+		if ( array() === $bc_only ) {
+			return null;
+		}
+
+		sort( $bc_only, SORT_STRING );
+		return $bc_only[ $ctx->int( 0, count( $bc_only ) - 1 ) ];
+	}
+
+	private static function timezone_choice_manual_offset_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$values = array( 'UTC-12', 'UTC-0.5', 'UTC+0', 'UTC+5.75', 'UTC+8.75', 'UTC+12.75', 'UTC+14' );
+		$extra  = array( 'UTC-9.5', 'UTC-3.5', 'UTC+3.5', 'UTC+5.5', 'UTC+13.75' );
+		$values[] = $extra[ $ctx->int( 0, count( $extra ) - 1 ) ];
+
+		$cases = array();
+		foreach ( array_values( array_unique( $values ) ) as $value ) {
+			$cases[ $value ] = self::timezone_choice_offset_label( $value );
+		}
+
+		return $cases;
+	}
+
+	private static function timezone_choice_offset_label( string $value ): string {
+		return 'UTC' . str_replace( array( '.25', '.5', '.75' ), array( ':15', ':30', ':45' ), substr( $value, 3 ) );
+	}
+
+	private static function timezone_choice_summary( string $html ): array {
+		$options = self::timezone_choice_parse_options( $html );
+
+		return array(
+			'optionCount'     => count( $options ),
+			'options'         => $options,
+			'selectedValues'  => array_values(
+				array_map(
+					static fn ( array $option ): string => (string) ( $option['value'] ?? '' ),
+					array_filter( $options, static fn ( array $option ): bool => true === ( $option['selected'] ?? false ) )
+				)
+			),
+			'optgroupOpen'    => substr_count( $html, '<optgroup ' ),
+			'optgroupClose'   => substr_count( $html, '</optgroup>' ),
+			'hasUtcGroup'     => str_contains( $html, '<optgroup label="UTC" dir="auto">' ),
+			'hasManualGroup'  => str_contains( $html, '<optgroup label="Manual Offsets" dir="auto">' ),
+			'multiSelected'   => self::timezone_choice_has_multi_selected_option( $options ),
+			'rawScriptLeaked' => str_contains( strtolower( $html ), '<script' ),
+			'preview'         => self::describe_value( $html ),
+		);
+	}
+
+	private static function timezone_choice_parse_options( string $html ): array {
+		if ( 1 > preg_match_all( '/<option\b([^>]*)>(.*?)<\/option>/s', $html, $matches, PREG_SET_ORDER ) ) {
+			return array();
+		}
+
+		$options = array();
+		foreach ( $matches as $match ) {
+			$attrs     = self::timezone_choice_parse_attrs( $match[1] );
+			$options[] = array(
+				'value'         => $attrs['value'] ?? null,
+				'label'         => html_entity_decode( strip_tags( $match[2] ), ENT_QUOTES, 'UTF-8' ),
+				'selected'      => isset( $attrs['selected'] ),
+				'selectedCount' => substr_count( $match[1], 'selected="selected"' ),
+				'attrs'         => $attrs,
+			);
+		}
+
+		return $options;
+	}
+
+	private static function timezone_choice_parse_attrs( string $attrs ): array {
+		if ( 1 > preg_match_all( '/([A-Za-z0-9:_-]+)="([^"]*)"/', $attrs, $matches, PREG_SET_ORDER ) ) {
+			return array();
+		}
+
+		$parsed = array();
+		foreach ( $matches as $match ) {
+			$parsed[ $match[1] ] = html_entity_decode( $match[2], ENT_QUOTES, 'UTF-8' );
+		}
+
+		return $parsed;
+	}
+
+	private static function timezone_choice_has_multi_selected_option( array $options ): bool {
+		foreach ( $options as $option ) {
+			if ( ( $option['selectedCount'] ?? 0 ) > 1 ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private static function timezone_choice_structure_ok( array $summary ): bool {
+		return ( $summary['optionCount'] ?? 0 ) > 50
+			&& ( $summary['optgroupOpen'] ?? null ) === ( $summary['optgroupClose'] ?? null )
+			&& true === ( $summary['hasUtcGroup'] ?? false )
+			&& true === ( $summary['hasManualGroup'] ?? false )
+			&& false === ( $summary['multiSelected'] ?? true )
+			&& false === ( $summary['rawScriptLeaked'] ?? true );
+	}
+
+	private static function timezone_choice_values( array $summary ): array {
+		return array_values(
+			array_map(
+				static fn ( array $option ): ?string => $option['value'] ?? null,
+				$summary['options'] ?? array()
+			)
+		);
+	}
+
+	private static function timezone_choice_value_count( array $summary, string $value ): int {
+		return count(
+			array_filter(
+				$summary['options'] ?? array(),
+				static fn ( array $option ): bool => $value === ( $option['value'] ?? null )
+			)
+		);
+	}
+
+	private static function timezone_choice_option_by_value( array $summary, string $value ): ?array {
+		foreach ( $summary['options'] ?? array() as $option ) {
+			if ( $value === ( $option['value'] ?? null ) ) {
+				return $option;
+			}
+		}
+
+		return null;
+	}
+
 	private static function snapshot_runtime(): array {
 		$hooks = array(
 			'pre_option_timezone_string',
@@ -1623,6 +1975,7 @@ final class DateTimeSurface {
 			'wp_date',
 			'human_time_diff',
 			'wp_checkdate',
+			'pre_load_textdomain',
 		);
 
 		$tracked_filters = array();
@@ -1634,6 +1987,8 @@ final class DateTimeSurface {
 			'phpTimezone'    => date_default_timezone_get(),
 			'wpLocale'       => $GLOBALS['wp_locale'] ?? null,
 			'options'        => self::option_store_snapshot(),
+			'l10nState'      => self::snapshot_l10n_state(),
+			'l10nFingerprint' => self::l10n_state_fingerprint(),
 			'trackedFilters' => $tracked_filters,
 		);
 	}
@@ -1648,6 +2003,7 @@ final class DateTimeSurface {
 		}
 
 		self::restore_option_store( $snapshot['options'] );
+		self::restore_l10n_state( $snapshot['l10nState'] );
 	}
 
 	private static function option_store_snapshot(): array {
@@ -1662,6 +2018,153 @@ final class DateTimeSurface {
 		if ( isset( $GLOBALS['wpdb'] ) && method_exists( $GLOBALS['wpdb'], 'component_fuzz_reset_options' ) ) {
 			$GLOBALS['wpdb']->component_fuzz_reset_options( $options );
 		}
+	}
+
+	private static function snapshot_l10n_state(): array {
+		$globals = array();
+		foreach ( array( 'l10n', 'l10n_unloaded', 'locale', 'wp_textdomain_registry' ) as $name ) {
+			$globals[ $name ] = array(
+				'exists' => array_key_exists( $name, $GLOBALS ),
+				'value'  => array_key_exists( $name, $GLOBALS ) ? self::snapshot_value( $GLOBALS[ $name ] ) : null,
+			);
+		}
+
+		return array(
+			'globals'                => $globals,
+			'translationController'  => self::snapshot_translation_controller(),
+		);
+	}
+
+	private static function restore_l10n_state( array $snapshot ): void {
+		foreach ( $snapshot['globals'] as $name => $entry ) {
+			if ( ! empty( $entry['exists'] ) ) {
+				$GLOBALS[ $name ] = self::snapshot_value( $entry['value'] );
+			} else {
+				unset( $GLOBALS[ $name ] );
+			}
+		}
+
+		self::restore_translation_controller( $snapshot['translationController'] ?? null );
+	}
+
+	private static function l10n_state_fingerprint(): array {
+		$controller = self::translation_controller_fingerprint();
+
+		return array(
+			'l10nDomains'       => isset( $GLOBALS['l10n'] ) && is_array( $GLOBALS['l10n'] ) ? array_keys( $GLOBALS['l10n'] ) : array(),
+			'unloadedDomains'   => isset( $GLOBALS['l10n_unloaded'] ) && is_array( $GLOBALS['l10n_unloaded'] ) ? array_keys( $GLOBALS['l10n_unloaded'] ) : array(),
+			'locale'            => $GLOBALS['locale'] ?? null,
+			'registryClass'     => isset( $GLOBALS['wp_textdomain_registry'] ) && is_object( $GLOBALS['wp_textdomain_registry'] ) ? get_class( $GLOBALS['wp_textdomain_registry'] ) : null,
+			'controller'        => $controller,
+		);
+	}
+
+	private static function snapshot_value( $value ) {
+		if ( is_array( $value ) ) {
+			$copy = array();
+			foreach ( $value as $key => $item ) {
+				$copy[ $key ] = self::snapshot_value( $item );
+			}
+			return $copy;
+		}
+
+		if ( is_object( $value ) && ! $value instanceof \Closure ) {
+			return clone $value;
+		}
+
+		return $value;
+	}
+
+	private static function snapshot_translation_controller(): ?array {
+		if ( ! class_exists( 'WP_Translation_Controller' ) ) {
+			return null;
+		}
+
+		$reflection = new \ReflectionClass( 'WP_Translation_Controller' );
+		if ( ! $reflection->hasProperty( 'instance' ) ) {
+			return null;
+		}
+
+		$instance_property = $reflection->getProperty( 'instance' );
+		$instance          = $instance_property->getValue();
+		$snapshot          = array(
+			'instanceExists' => null !== $instance,
+			'instance'       => $instance,
+			'properties'     => array(),
+		);
+
+		if ( null === $instance ) {
+			return $snapshot;
+		}
+
+		$object_reflection = new \ReflectionObject( $instance );
+		foreach ( array( 'current_locale', 'loaded_translations', 'loaded_files' ) as $property_name ) {
+			if ( ! $object_reflection->hasProperty( $property_name ) ) {
+				continue;
+			}
+
+			$property = $object_reflection->getProperty( $property_name );
+			$snapshot['properties'][ $property_name ] = self::snapshot_value( $property->getValue( $instance ) );
+		}
+
+		return $snapshot;
+	}
+
+	private static function restore_translation_controller( ?array $snapshot ): void {
+		if ( null === $snapshot || ! class_exists( 'WP_Translation_Controller' ) ) {
+			return;
+		}
+
+		$reflection = new \ReflectionClass( 'WP_Translation_Controller' );
+		if ( ! $reflection->hasProperty( 'instance' ) ) {
+			return;
+		}
+
+		$instance_property = $reflection->getProperty( 'instance' );
+		if ( empty( $snapshot['instanceExists'] ) ) {
+			$instance_property->setValue( null, null );
+			return;
+		}
+
+		$instance          = $snapshot['instance'];
+		$object_reflection = new \ReflectionObject( $instance );
+		foreach ( $snapshot['properties'] as $property_name => $value ) {
+			if ( ! $object_reflection->hasProperty( $property_name ) ) {
+				continue;
+			}
+
+			$property = $object_reflection->getProperty( $property_name );
+			$property->setValue( $instance, self::snapshot_value( $value ) );
+		}
+
+		$instance_property->setValue( null, $instance );
+	}
+
+	private static function translation_controller_fingerprint(): ?array {
+		if ( ! class_exists( 'WP_Translation_Controller' ) ) {
+			return null;
+		}
+
+		$controller = \WP_Translation_Controller::get_instance();
+		$reflection = new \ReflectionObject( $controller );
+		$fingerprint = array(
+			'class' => get_class( $controller ),
+		);
+
+		foreach ( array( 'current_locale', 'loaded_translations', 'loaded_files' ) as $property_name ) {
+			if ( ! $reflection->hasProperty( $property_name ) ) {
+				continue;
+			}
+
+			$value = $reflection->getProperty( $property_name )->getValue( $controller );
+			if ( is_array( $value ) ) {
+				$fingerprint[ $property_name ] = array_keys( $value );
+			} else {
+				$fingerprint[ $property_name ] = $value;
+			}
+		}
+
+		return $fingerprint;
 	}
 
 	private static function filter_fingerprint( string $hook ): array {
