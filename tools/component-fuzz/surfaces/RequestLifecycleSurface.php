@@ -40,6 +40,7 @@ final class RequestLifecycleSurface {
 			$rows[] = self::check_handle_404_transitions( $ctx->fork( '404' ) );
 			$rows[] = self::check_send_headers_filters_and_actions( $ctx->fork( 'headers' ) );
 			$rows[] = self::check_feed_header_variants( $ctx->fork( 'feed-headers' ) );
+			$rows[] = self::check_send_headers_exit_paths( $ctx->fork( 'headers-exit' ) );
 			$rows[] = self::check_status_and_nocache_header_contracts( $ctx->fork( 'status-nocache' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
@@ -1580,6 +1581,269 @@ final class RequestLifecycleSurface {
 				'nocacheEvents'   => $nocache_events,
 			)
 		);
+	}
+
+	private static function check_send_headers_exit_paths( \ComponentFuzz\FuzzContext $ctx ): array {
+		$missing = self::send_headers_exit_child_missing_requirements();
+		if ( array() !== $missing ) {
+			return $ctx->skip(
+				'request-lifecycle.send-headers-exit-subprocess-requirements',
+				'Local PHP subprocess support is unavailable for send_headers() exit-path coverage.',
+				array( 'missing' => $missing )
+			);
+		}
+
+		$last_modified = '2024-04-05 06:07:08';
+		$last_modified_http = \mysql2date( 'D, d M Y H:i:s', $last_modified, false ) . ' GMT';
+		$etag          = '"' . md5( $last_modified_http ) . '"';
+		$failures      = array();
+		$observed      = array();
+
+		foreach ( self::send_headers_exit_cases( $ctx, $last_modified_http, $etag ) as $case ) {
+			$run    = self::run_send_headers_exit_child( $case + array( 'lastModified' => $last_modified ) );
+			$result = is_array( $run['result'] ?? null ) ? $run['result'] : array();
+			$headers = is_array( $result['headerEvents'][0]['headers'] ?? null ) ? $result['headerEvents'][0]['headers'] : array();
+			$statuses = is_array( $result['statusEvents'] ?? null ) ? $result['statusEvents'] : array();
+
+			$observed[] = array(
+				'label'      => $case['label'],
+				'exitCode'   => $run['exitCode'] ?? null,
+				'returned'   => $result['returned'] ?? null,
+				'statusCode' => $statuses[0]['code'] ?? null,
+				'headers'    => $headers,
+			);
+
+			self::collect_failure(
+				$failures,
+				true === ( $run['ok'] ?? null )
+					&& 0 === ( $run['exitCode'] ?? null )
+					&& '' === ( $run['stderr'] ?? '' )
+					&& false === ( $result['returned'] ?? true )
+					&& 0 === ( $result['sendActionCount'] ?? -1 )
+					&& 1 === count( $statuses )
+					&& $case['expectedStatus'] === ( $statuses[0]['code'] ?? null )
+					&& 'HTTP/1.1' === ( $statuses[0]['protocol'] ?? null )
+					&& 1 === count( $result['headerEvents'] ?? array() )
+					&& ( $case['expectFeedHeaders']
+						? (
+							$case['expectedContentType'] === ( $headers['Content-Type'] ?? null )
+							&& $last_modified_http === ( $headers['Last-Modified'] ?? null )
+							&& $etag === ( $headers['ETag'] ?? null )
+						)
+						: array() === $headers
+					),
+				"send_headers() exit-path case {$case['label']} exits after status/header filters and before send_headers action",
+				array(
+					'case'   => $case,
+					'run'    => $run,
+					'result' => $result,
+				)
+			);
+		}
+
+		return $ctx->result(
+			'request-lifecycle.send-headers-exit-conditional-and-error-paths',
+			array() === $failures,
+			array(
+				'observed' => $observed,
+				'failures' => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
+	private static function send_headers_exit_child_missing_requirements(): array {
+		$missing = array();
+
+		foreach ( array( 'json_decode', 'json_encode', 'proc_close', 'proc_open', 'stream_get_contents' ) as $function ) {
+			if ( ! function_exists( $function ) ) {
+				$missing[] = "function {$function}";
+			}
+		}
+
+		if ( ! defined( 'PHP_BINARY' ) || '' === PHP_BINARY ) {
+			$missing[] = 'PHP_BINARY';
+		}
+
+		return $missing;
+	}
+
+	private static function send_headers_exit_cases( \ComponentFuzz\FuzzContext $ctx, string $last_modified_http, string $etag ): array {
+		$fresh_plus = gmdate( 'D, d M Y H:i:s', strtotime( $last_modified_http ) + $ctx->int( 0, 60 ) ) . ' GMT';
+
+		return array(
+			array(
+				'label'               => 'feed-both-validators-match',
+				'queryVars'           => array( 'feed' => 'rss2' ),
+				'server'              => array(
+					'HTTP_IF_MODIFIED_SINCE' => $fresh_plus,
+					'HTTP_IF_NONE_MATCH'     => $etag,
+				),
+				'expectedStatus'      => 304,
+				'expectFeedHeaders'   => true,
+				'expectedContentType' => 'application/rss+xml; charset=UTF-8',
+			),
+			array(
+				'label'               => 'feed-etag-only-match',
+				'queryVars'           => array( 'feed' => 'atom' ),
+				'server'              => array(
+					'HTTP_IF_NONE_MATCH' => $etag,
+				),
+				'expectedStatus'      => 304,
+				'expectFeedHeaders'   => true,
+				'expectedContentType' => 'application/atom+xml; charset=UTF-8',
+			),
+			array(
+				'label'             => 'explicit-403-error',
+				'queryVars'         => array( 'error' => 403 ),
+				'server'            => array(),
+				'expectedStatus'    => 403,
+				'expectFeedHeaders' => false,
+			),
+		);
+	}
+
+	private static function run_send_headers_exit_child( array $case ): array {
+		$payload = json_encode( $case, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE );
+		if ( false === $payload ) {
+			return array(
+				'ok'       => false,
+				'exitCode' => -1,
+				'stdout'   => '',
+				'stderr'   => 'json_encode failed',
+				'result'   => null,
+			);
+		}
+
+		$descriptors = array(
+			0 => array( 'pipe', 'r' ),
+			1 => array( 'pipe', 'w' ),
+			2 => array( 'pipe', 'w' ),
+		);
+
+		// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.system_calls_proc_open -- Isolates WP::send_headers() exit paths in a local PHP subprocess.
+		$process = proc_open( array( PHP_BINARY, '-r', self::send_headers_exit_child_program() ), $descriptors, $pipes, \ComponentFuzz\repo_root() );
+		if ( ! is_resource( $process ) ) {
+			return array(
+				'ok'       => false,
+				'exitCode' => -1,
+				'stdout'   => '',
+				'stderr'   => 'proc_open failed',
+				'result'   => null,
+			);
+		}
+
+		fwrite( $pipes[0], $payload );
+		fclose( $pipes[0] );
+
+		$stdout = stream_get_contents( $pipes[1] );
+		$stderr = stream_get_contents( $pipes[2] );
+		fclose( $pipes[1] );
+		fclose( $pipes[2] );
+
+		$exit_code = proc_close( $process );
+		$result    = json_decode( (string) $stdout, true );
+
+		return array(
+			'ok'       => 0 === $exit_code && is_array( $result ) && true === ( $result['ok'] ?? null ),
+			'exitCode' => $exit_code,
+			'stdout'   => (string) $stdout,
+			'stderr'   => (string) $stderr,
+			'result'   => is_array( $result ) ? $result : null,
+		);
+	}
+
+	private static function send_headers_exit_child_program(): string {
+		return <<<'PHP'
+$result = array(
+	'ok'              => false,
+	'returned'        => false,
+	'statusEvents'    => array(),
+	'headerEvents'    => array(),
+	'sendActionCount' => 0,
+	'throwable'        => null,
+	'printed'          => false,
+);
+
+$print_result = static function () use ( &$result ): void {
+	if ( $result['printed'] ) {
+		return;
+	}
+	$result['printed'] = true;
+	echo json_encode( $result, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE );
+};
+
+register_shutdown_function( $print_result );
+
+try {
+	$case = json_decode( stream_get_contents( STDIN ), true );
+	if ( ! is_array( $case ) ) {
+		throw new RuntimeException( 'Invalid send_headers child payload.' );
+	}
+
+	require_once getcwd() . '/tools/component-fuzz/lib/autoload.php';
+	\ComponentFuzz\WpBootstrap::load();
+
+	add_filter( 'pre_option_home', array( \ComponentFuzz\Surfaces\RequestLifecycleSurface::class, 'filter_home' ) );
+	add_filter( 'pre_option_siteurl', array( \ComponentFuzz\Surfaces\RequestLifecycleSurface::class, 'filter_siteurl' ) );
+	add_filter( 'pre_option_blog_charset', array( \ComponentFuzz\Surfaces\RequestLifecycleSurface::class, 'filter_blog_charset' ) );
+	add_filter( 'pre_option_html_type', array( \ComponentFuzz\Surfaces\RequestLifecycleSurface::class, 'filter_html_type' ) );
+	add_filter( 'pre_get_lastpostmodified', static function () use ( $case ) {
+		return (string) ( $case['lastModified'] ?? '2024-04-05 06:07:08' );
+	}, 10, 3 );
+	add_filter( 'status_header', static function ( string $status_header, int $code, string $description, string $protocol ) use ( &$result ): string {
+		$result['statusEvents'][] = array(
+			'header'      => $status_header,
+			'code'        => $code,
+			'description' => $description,
+			'protocol'    => $protocol,
+		);
+		return $status_header;
+	}, 10, 4 );
+	add_filter( 'wp_headers', static function ( array $headers, \WP $wp ) use ( &$result ): array {
+		$result['headerEvents'][] = array(
+			'headers'   => $headers,
+			'queryVars' => $wp->query_vars,
+		);
+		return $headers;
+	}, 10, 2 );
+	add_action( 'send_headers', static function () use ( &$result ): void {
+		++$result['sendActionCount'];
+	}, 10, 1 );
+
+	$_GET     = array();
+	$_POST    = array();
+	$_REQUEST = array();
+	$_SERVER['HTTP_HOST']       = 'example.test';
+	$_SERVER['PHP_SELF']        = '/site-base/index.php';
+	$_SERVER['REQUEST_METHOD']  = 'GET';
+	$_SERVER['REQUEST_URI']     = '/site-base/send-headers-exit/';
+	$_SERVER['PATH_INFO']       = '';
+	$_SERVER['SERVER_PROTOCOL'] = 'HTTP/1.1';
+	unset( $_SERVER['HTTP_IF_NONE_MATCH'], $_SERVER['HTTP_IF_MODIFIED_SINCE'] );
+	foreach ( (array) ( $case['server'] ?? array() ) as $name => $value ) {
+		$_SERVER[ $name ] = $value;
+	}
+
+	$GLOBALS['wp_query'] = new \WP_Query();
+	$wp                  = new \WP();
+	$wp->query_vars       = (array) ( $case['queryVars'] ?? array() );
+	$result['ok']         = true;
+	$wp->send_headers();
+
+	$result['returned'] = true;
+	$result['ok']       = false;
+	$print_result();
+} catch ( Throwable $e ) {
+	$result['throwable'] = array(
+		'class'   => get_class( $e ),
+		'message' => $e->getMessage(),
+		'file'    => $e->getFile(),
+		'line'    => $e->getLine(),
+	);
+	$print_result();
+	exit( 1 );
+}
+PHP;
 	}
 
 	private static function new_wp(): \WP {

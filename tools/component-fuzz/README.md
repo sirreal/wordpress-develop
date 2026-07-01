@@ -630,8 +630,9 @@ database, network requests, or a configured site.
   query-var gates, query-var precedence and GET/POST mismatch termination,
   `WP::main()` sequencing with query short-circuits, `register_globals()`,
   `handle_404()` status transitions, and `send_headers()` filters/actions with
-  feed content-type, last-modified, ETag, stale conditional request, and
-  deterministic global restoration.
+  feed content-type, last-modified, ETag, stale conditional request,
+  subprocess-isolated 304/error exit paths, and deterministic global
+  restoration.
 - `rest-controllers`: no-DB default REST endpoint controller coverage for
   registry-backed post types, post statuses, taxonomies, settings, block types,
   block patterns, block pattern categories, block-pattern remote loader
