@@ -47,6 +47,7 @@ final class StyleSurface {
 			$rows[] = self::check_theme_style_helper_filter_restoration( $ctx, $case );
 			$rows[] = self::check_style_store_cleanup( $ctx );
 			$rows[] = self::check_global_stylesheet_guard( $ctx );
+			$rows[] = self::check_global_styles_user_data_and_getters( $ctx->fork( 'global-styles-user-data' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
 				'style.surface-no-throw',
@@ -1448,6 +1449,683 @@ final class StyleSurface {
 				'notCovered'       => 'Active theme file discovery and wp_global_styles CPT querying are bypassed by seeded WP_Theme_JSON_Resolver state.',
 			)
 		);
+	}
+
+	private static function check_global_styles_user_data_and_getters( \ComponentFuzz\FuzzContext $ctx ): array {
+		$missing = self::global_styles_user_data_requirements();
+		if ( array() !== $missing ) {
+			return $ctx->skip(
+				'style.global-styles.user-data-and-getters',
+				'Required global styles user-data APIs are unavailable.',
+				array( 'missing' => implode( ', ', $missing ) )
+			);
+		}
+
+		$slug              = self::normalize_preset_slug( self::safe_slug( $ctx, 'global-user' ) );
+		$theme_slug        = 'cfz-theme-' . $slug;
+		$wrong_theme_slug  = 'cfz-other-' . $slug;
+		$unsafe_theme_slug = 'cfz-unsafe-' . $slug;
+		$created_theme_slug = 'cfz-create-' . $slug;
+		$theme_preset_slug = 'theme-' . $slug;
+		$user_token        = 'user-token-' . $slug;
+		$theme_token       = 'theme-token-' . $slug;
+		$block_token       = 'block-token-' . $slug;
+		$theme_color       = self::hex_color( $ctx );
+		$user_color        = self::hex_color( $ctx, array( $theme_color ) );
+		$block_color       = self::hex_color( $ctx, array( $theme_color, $user_color ) );
+		$decoy_color       = self::hex_color( $ctx, array( $theme_color, $user_color, $block_color ) );
+		$resolver_before   = self::snapshot_theme_json_resolver();
+		$globals_before    = self::snapshot_globals(
+			array(
+				'_wp_post_type_features',
+				'post_type_meta_caps',
+				'wp_filter',
+				'wp_actions',
+				'wp_filters',
+				'wp_current_filter',
+				'wp_post_statuses',
+				'wp_post_types',
+				'wp_rewrite',
+				'wp_taxonomies',
+			)
+		);
+		$wpdb_before       = self::snapshot_wpdb_stub_state();
+		$before_counts     = self::wpdb_content_counts();
+		$failures          = array();
+
+		$valid_id            = 0;
+		$wrong_theme_id      = 0;
+		$draft_id            = 0;
+		$unsafe_id           = 0;
+		$created_id_first    = null;
+		$created_id_second   = null;
+		$user_cpt            = array();
+		$unsafe_user_raw     = array();
+		$created_post        = null;
+		$settings_custom     = null;
+		$settings_base       = null;
+		$settings_block      = null;
+		$styles_custom       = null;
+		$styles_base         = null;
+		$styles_base_resolved = null;
+		$styles_block        = null;
+		$custom_cache_found  = false;
+		$theme_cache_found   = false;
+		$custom_cache        = false;
+		$theme_cache         = false;
+		$cache_cleaned       = false;
+		$query_posts         = array();
+		$query_log           = array();
+		$queries_before      = self::wpdb_stub_queries();
+		$queries_after       = null;
+		$posts_pre_query_filter = static function ( $posts, \WP_Query $query ) use ( &$query_posts, &$query_log ) {
+			if ( 'wp_global_styles' !== (string) ( $query->query_vars['post_type'] ?? '' ) ) {
+				return $posts;
+			}
+
+			$theme = null;
+			foreach ( (array) ( $query->query_vars['tax_query'] ?? array() ) as $tax_query ) {
+				if ( is_array( $tax_query ) && 'wp_theme' === ( $tax_query['taxonomy'] ?? '' ) ) {
+					$terms = (array) ( $tax_query['terms'] ?? array() );
+					$theme = null === reset( $terms ) ? null : (string) reset( $terms );
+					break;
+				}
+			}
+			if ( null === $theme ) {
+				return $posts;
+			}
+
+			$statuses   = array_map( 'strval', (array) ( $query->query_vars['post_status'] ?? array( 'publish' ) ) );
+			$status_map = array_fill_keys( $statuses, true );
+			$candidates = array_values(
+				array_filter(
+					$query_posts,
+					static function ( array $entry ) use ( $theme, $status_map ): bool {
+						return $theme === $entry['theme'] && isset( $status_map[ $entry['status'] ] );
+					}
+				)
+			);
+
+			usort(
+				$candidates,
+				static function ( array $a, array $b ): int {
+					$date_compare = strcmp( $b['date'], $a['date'] );
+					return 0 !== $date_compare ? $date_compare : ( $b['id'] <=> $a['id'] );
+				}
+			);
+
+			$selected = array();
+			if ( isset( $candidates[0]['post'] ) && $candidates[0]['post'] instanceof \WP_Post ) {
+				$selected[] = $candidates[0]['post'];
+			}
+
+			$query->found_posts   = count( $selected );
+			$query->max_num_pages = count( $selected );
+			$query_log[]          = array(
+				'theme'       => $theme,
+				'statuses'    => $statuses,
+				'candidateIds' => array_column( $candidates, 'id' ),
+				'selectedIds'  => array_map(
+					static function ( \WP_Post $post ): int {
+						return (int) $post->ID;
+					},
+					$selected
+				),
+			);
+
+			return $selected;
+		};
+
+		try {
+			\add_filter( 'posts_pre_query', $posts_pre_query_filter, 10, 2 );
+			self::prepare_global_styles_user_data_runtime(
+				$theme_slug,
+				$theme_preset_slug,
+				$theme_color,
+				$theme_token,
+				$wrong_theme_slug
+			);
+
+			$wrong_theme_id = self::insert_global_styles_fixture(
+				$wrong_theme_slug,
+				self::global_styles_user_data_content(
+					true,
+					'wrong-theme-token-' . $slug,
+					'wrong-block-token-' . $slug,
+					$decoy_color,
+					$decoy_color
+				),
+				'publish',
+				'2026-06-24 12:00:00'
+			);
+			self::add_global_styles_query_fixture( $query_posts, $wrong_theme_id, $wrong_theme_slug );
+			$draft_id       = self::insert_global_styles_fixture(
+				$theme_slug,
+				self::global_styles_user_data_content(
+					true,
+					'draft-token-' . $slug,
+					'draft-block-token-' . $slug,
+					$decoy_color,
+					$decoy_color
+				),
+				'draft',
+				'2026-06-24 13:00:00'
+			);
+			self::add_global_styles_query_fixture( $query_posts, $draft_id, $theme_slug );
+			$valid_id       = self::insert_global_styles_fixture(
+				$theme_slug,
+				self::global_styles_user_data_content(
+					true,
+					$user_token,
+					$block_token,
+					$user_color,
+					$block_color
+				),
+				'publish',
+				'2026-06-24 11:00:00'
+			);
+			self::add_global_styles_query_fixture( $query_posts, $valid_id, $theme_slug );
+
+			\WP_Theme_JSON_Resolver::clean_cached_data();
+			self::seed_theme_json_resolver_for_user_data_getters( $theme_preset_slug, $theme_color, $theme_token );
+			$user_cpt = \WP_Theme_JSON_Resolver::get_user_data_from_wp_global_styles( \wp_get_theme() );
+
+			$settings_custom      = \wp_get_global_settings( array( 'custom', 'componentFuzz' ) );
+			$settings_base        = \wp_get_global_settings( array( 'custom', 'componentFuzz' ), array( 'origin' => 'base' ) );
+			$settings_block       = \wp_get_global_settings(
+				array( 'custom', 'componentFuzz', 'blockToken' ),
+				array( 'block_name' => 'core/paragraph' )
+			);
+			$styles_custom        = \wp_get_global_styles( array( 'color', 'text' ) );
+			$styles_base          = \wp_get_global_styles( array( 'color', 'text' ), array( 'origin' => 'base' ) );
+			$styles_base_resolved = \wp_get_global_styles(
+				array( 'color', 'text' ),
+				array(
+					'origin'     => 'base',
+					'transforms' => array( 'resolve-variables' ),
+				)
+			);
+			$styles_block         = \wp_get_global_styles(
+				array( 'color', 'text' ),
+				array( 'block_name' => 'core/paragraph' )
+			);
+			$custom_cache         = \wp_cache_get( 'wp_get_global_settings_custom', 'theme_json', false, $custom_cache_found );
+			$theme_cache          = \wp_cache_get( 'wp_get_global_settings_theme', 'theme_json', false, $theme_cache_found );
+
+			\wp_clean_theme_json_cache();
+			$cache_cleaned = false === \wp_cache_get( 'wp_get_global_settings_custom', 'theme_json' )
+				&& false === \wp_cache_get( 'wp_get_global_settings_theme', 'theme_json' );
+
+			\update_option( 'stylesheet', $unsafe_theme_slug, false );
+			\update_option( 'template', $unsafe_theme_slug, false );
+			$unsafe_id = self::insert_global_styles_fixture(
+				$unsafe_theme_slug,
+				self::global_styles_user_data_content(
+					false,
+					'unsafe-token-' . $slug,
+					'unsafe-block-token-' . $slug,
+					$decoy_color,
+					$decoy_color
+				),
+				'publish',
+				'2026-06-24 14:00:00'
+			);
+			self::add_global_styles_query_fixture( $query_posts, $unsafe_id, $unsafe_theme_slug );
+			\WP_Theme_JSON_Resolver::clean_cached_data();
+			$unsafe_user_raw = \WP_Theme_JSON_Resolver::get_user_data()->get_raw_data();
+
+			\update_option( 'stylesheet', $created_theme_slug, false );
+			\update_option( 'template', $created_theme_slug, false );
+			\WP_Theme_JSON_Resolver::clean_cached_data();
+			$created_id_first  = \WP_Theme_JSON_Resolver::get_user_global_styles_post_id();
+			$created_id_second = \WP_Theme_JSON_Resolver::get_user_global_styles_post_id();
+			$created_post      = is_int( $created_id_first ) ? \get_post( $created_id_first ) : null;
+			$queries_after     = self::wpdb_stub_queries();
+		} finally {
+			\remove_filter( 'posts_pre_query', $posts_pre_query_filter, 10 );
+			if ( function_exists( 'wp_cache_flush' ) ) {
+				\wp_cache_flush();
+			}
+			if ( function_exists( 'wp_clean_theme_json_cache' ) ) {
+				\wp_clean_theme_json_cache();
+			}
+			if ( function_exists( 'wp_clean_themes_cache' ) ) {
+				\wp_clean_themes_cache( false );
+			}
+			self::restore_theme_json_resolver( $resolver_before );
+			self::restore_globals( $globals_before );
+			self::restore_wpdb_stub_state( $wpdb_before );
+		}
+
+		$after_counts       = self::wpdb_content_counts();
+		$created_post_data  = $created_post instanceof \WP_Post ? get_object_vars( $created_post ) : array();
+		$created_json       = isset( $created_post_data['post_content'] ) ? json_decode( $created_post_data['post_content'], true ) : null;
+		$query_delta        = null;
+		if ( null !== $queries_before && null !== $queries_after ) {
+			$query_delta = count( $queries_after ) - count( $queries_before );
+		}
+
+		self::collect_style_failure(
+			$failures,
+			isset( $user_cpt['ID'] )
+				&& (int) $valid_id === (int) $user_cpt['ID']
+				&& (int) $wrong_theme_id !== (int) $user_cpt['ID']
+				&& (int) $draft_id !== (int) $user_cpt['ID'],
+			'published active-theme wp_global_styles post wins over draft and wrong-theme decoys',
+			array(
+				'validId'       => $valid_id,
+				'wrongThemeId'  => $wrong_theme_id,
+				'draftId'       => $draft_id,
+				'selectedId'    => $user_cpt['ID'] ?? null,
+				'selectedTitle' => $user_cpt['post_title'] ?? null,
+			)
+		);
+		self::collect_style_failure(
+			$failures,
+			is_array( $settings_custom )
+				&& ( $settings_custom['themeToken'] ?? null ) === $theme_token
+				&& ( $settings_custom['userToken'] ?? null ) === $user_token
+				&& is_array( $settings_base )
+				&& ( $settings_base['themeToken'] ?? null ) === $theme_token
+				&& ! array_key_exists( 'userToken', $settings_base )
+				&& $block_token === $settings_block,
+			'wp_get_global_settings respects custom/base origins and block-name path rewriting',
+			array(
+				'settingsCustom' => $settings_custom,
+				'settingsBase'   => $settings_base,
+				'settingsBlock'  => $settings_block,
+			)
+		);
+		self::collect_style_failure(
+			$failures,
+			$user_color === $styles_custom
+				&& is_string( $styles_base )
+				&& str_contains( $styles_base, '--wp--preset--color--' . $theme_preset_slug )
+				&& $theme_color === $styles_base_resolved
+				&& $block_color === $styles_block,
+			'wp_get_global_styles respects user override, base origin, variable resolution, and block paths',
+			array(
+				'stylesCustom'       => $styles_custom,
+				'stylesBase'         => $styles_base,
+				'stylesBaseResolved' => $styles_base_resolved,
+				'stylesBlock'        => $styles_block,
+			)
+		);
+		self::collect_style_failure(
+			$failures,
+			$custom_cache_found
+				&& $theme_cache_found
+				&& is_array( $custom_cache )
+				&& is_array( $theme_cache )
+				&& $cache_cleaned,
+			'global settings cache keys are populated and wp_clean_theme_json_cache clears them',
+			array(
+				'customCacheFound' => $custom_cache_found,
+				'themeCacheFound'  => $theme_cache_found,
+				'cacheCleaned'     => $cache_cleaned,
+			)
+		);
+		self::collect_style_failure(
+			$failures,
+			(int) $unsafe_id > 0
+				&& ( ! isset( $unsafe_user_raw['styles']['color']['text'] ) || $decoy_color !== $unsafe_user_raw['styles']['color']['text'] )
+				&& empty( $unsafe_user_raw['isGlobalStylesUserThemeJSON'] ),
+			'unsafe user global styles content without the safety flag does not enter user config',
+			array(
+				'unsafeId'      => $unsafe_id,
+				'unsafeUserRaw' => $unsafe_user_raw,
+			)
+		);
+		self::collect_style_failure(
+			$failures,
+			is_int( $created_id_first )
+				&& $created_id_first > 0
+				&& $created_id_first === $created_id_second
+				&& $created_post instanceof \WP_Post
+				&& 'wp_global_styles' === $created_post->post_type
+				&& 'publish' === $created_post->post_status
+				&& is_array( $created_json )
+				&& true === ( $created_json['isGlobalStylesUserThemeJSON'] ?? null ),
+			'get_user_global_styles_post_id creates one cached safe publish post when absent',
+			array(
+				'firstId'      => $created_id_first,
+				'secondId'     => $created_id_second,
+				'createdPost'  => $created_post_data,
+				'createdJson'  => $created_json,
+			)
+		);
+		self::collect_style_failure(
+			$failures,
+			$before_counts === $after_counts
+				&& self::theme_json_resolver_matches( $resolver_before )
+				&& self::globals_match_snapshot( $globals_before ),
+			'global styles user-data row restores resolver, globals, and content state',
+			array(
+				'beforeCounts'     => $before_counts,
+				'afterCounts'      => $after_counts,
+				'resolverRestored' => self::theme_json_resolver_matches( $resolver_before ),
+				'globalsRestored'  => self::globals_match_snapshot( $globals_before ),
+			)
+		);
+
+		return $ctx->result(
+			'style.global-styles.user-data-and-getters',
+			array() === $failures,
+			array(
+				'themeSlug'       => $theme_slug,
+				'validId'         => $valid_id,
+				'createdId'       => $created_id_first,
+				'queryDelta'      => $query_delta,
+				'queryLog'        => $query_log,
+				'queryTrackingAvailable' => null !== $queries_before,
+				'failures'        => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
+	private static function global_styles_user_data_requirements(): array {
+		$missing = array();
+
+		foreach ( array( 'Component_Fuzz_WPDB_Stub', 'WP_Post', 'WP_Query', 'WP_Rewrite', 'WP_Theme_JSON', 'WP_Theme_JSON_Resolver' ) as $class ) {
+			if ( ! class_exists( $class ) ) {
+				$missing[] = "class {$class}";
+			}
+		}
+
+		foreach (
+			array(
+				'add_filter',
+				'create_initial_post_types',
+				'create_initial_taxonomies',
+				'get_post',
+				'is_wp_error',
+				'remove_filter',
+				'update_option',
+				'wp_cache_flush',
+				'wp_clean_theme_json_cache',
+				'wp_clean_themes_cache',
+				'wp_get_global_settings',
+				'wp_get_global_styles',
+				'wp_get_theme',
+				'wp_insert_post',
+				'wp_insert_term',
+				'wp_json_encode',
+				'wp_set_object_terms',
+			) as $function
+		) {
+			if ( ! function_exists( $function ) ) {
+				$missing[] = "function {$function}";
+			}
+		}
+
+		if ( ! isset( $GLOBALS['wpdb'] ) || ! $GLOBALS['wpdb'] instanceof \Component_Fuzz_WPDB_Stub ) {
+			$missing[] = 'global wpdb Component_Fuzz_WPDB_Stub';
+		}
+
+		return $missing;
+	}
+
+	private static function prepare_global_styles_user_data_runtime(
+		string $theme_slug,
+		string $theme_preset_slug,
+		string $theme_color,
+		string $theme_token,
+		string $wrong_theme_slug
+	): void {
+		unset( $theme_preset_slug, $theme_color, $theme_token );
+
+		$GLOBALS['_wp_post_type_features'] = array();
+		$GLOBALS['post_type_meta_caps']    = array();
+		$GLOBALS['wp_post_statuses']       = array();
+		$GLOBALS['wp_post_types']          = array();
+		$GLOBALS['wp_rewrite']             = new \WP_Rewrite();
+		$GLOBALS['wp_taxonomies']          = array();
+
+		\create_initial_post_types();
+		\create_initial_taxonomies();
+
+		foreach ( array( $theme_slug, $wrong_theme_slug ) as $slug ) {
+			$term = \wp_insert_term( $slug, 'wp_theme' );
+			if ( \is_wp_error( $term ) && 'term_exists' !== $term->get_error_code() ) {
+				throw new \RuntimeException( 'Could not create wp_theme term: ' . $term->get_error_code() );
+			}
+		}
+
+		\update_option( 'current_theme', 'Component Fuzz Global Styles', false );
+		\update_option( 'stylesheet', $theme_slug, false );
+		\update_option( 'template', $theme_slug, false );
+		\WP_Theme_JSON_Resolver::clean_cached_data();
+		if ( function_exists( 'wp_clean_theme_json_cache' ) ) {
+			\wp_clean_theme_json_cache();
+		}
+	}
+
+	private static function seed_theme_json_resolver_for_user_data_getters( string $slug, string $theme_color, string $theme_token ): void {
+		$registered_blocks = array_fill_keys(
+			array_keys( \WP_Block_Type_Registry::get_instance()->get_all_registered() ),
+			true
+		);
+		$block_cache       = array(
+			'core'   => $registered_blocks,
+			'blocks' => $registered_blocks,
+			'theme'  => $registered_blocks,
+			'user'   => $registered_blocks,
+		);
+
+		self::set_static_property( 'WP_Theme_JSON_Resolver', 'blocks_cache', $block_cache );
+		self::set_static_property( 'WP_Theme_JSON_Resolver', 'theme_json_file_cache', array() );
+		self::set_static_property( 'WP_Theme_JSON_Resolver', 'user_custom_post_type_id', null );
+		self::set_static_property(
+			'WP_Theme_JSON_Resolver',
+			'core',
+			new \WP_Theme_JSON(
+				array(
+					'version' => \WP_Theme_JSON::LATEST_SCHEMA,
+				),
+				'default'
+			)
+		);
+		self::set_static_property(
+			'WP_Theme_JSON_Resolver',
+			'blocks',
+			new \WP_Theme_JSON(
+				array(
+					'version' => \WP_Theme_JSON::LATEST_SCHEMA,
+					'styles'  => array(
+						'blocks' => array(
+							'core/paragraph' => array(
+								'color' => array(
+									'text' => '#101010',
+								),
+							),
+						),
+					),
+				),
+				'blocks'
+			)
+		);
+		self::set_static_property(
+			'WP_Theme_JSON_Resolver',
+			'theme',
+			new \WP_Theme_JSON(
+				array(
+					'version'  => \WP_Theme_JSON::LATEST_SCHEMA,
+					'settings' => array(
+						'custom' => array(
+							'componentFuzz' => array(
+								'themeToken' => $theme_token,
+							),
+						),
+						'color'  => array(
+							'palette' => array(
+								array(
+									'name'  => 'Component Fuzz Theme',
+									'slug'  => $slug,
+									'color' => $theme_color,
+								),
+							),
+						),
+					),
+					'styles'   => array(
+						'color'  => array(
+							'text' => 'var:preset|color|' . $slug,
+						),
+						'blocks' => array(
+							'core/paragraph' => array(
+								'color' => array(
+									'text' => $theme_color,
+								),
+							),
+						),
+					),
+				),
+				'theme'
+			)
+		);
+		self::set_static_property( 'WP_Theme_JSON_Resolver', 'user', null );
+	}
+
+	private static function global_styles_user_data_content(
+		bool $safe_flag,
+		string $user_token,
+		string $block_token,
+		string $user_color,
+		string $block_color
+	): string {
+		return \wp_json_encode(
+			array(
+				'isGlobalStylesUserThemeJSON' => $safe_flag,
+				'version'                     => \WP_Theme_JSON::LATEST_SCHEMA,
+				'settings'                    => array(
+					'custom' => array(
+						'componentFuzz' => array(
+							'userToken' => $user_token,
+						),
+					),
+					'blocks' => array(
+						'core/paragraph' => array(
+							'custom' => array(
+								'componentFuzz' => array(
+									'blockToken' => $block_token,
+								),
+							),
+						),
+					),
+				),
+				'styles'                      => array(
+					'color'  => array(
+						'text' => $user_color,
+					),
+					'blocks' => array(
+						'core/paragraph' => array(
+							'color' => array(
+								'text' => $block_color,
+							),
+						),
+					),
+				),
+			),
+			JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP
+		);
+	}
+
+	private static function insert_global_styles_fixture( string $theme_slug, string $content, string $status, string $date ): int {
+		$post_id = \wp_insert_post(
+			array(
+				'post_author'       => 0,
+				'post_content'      => $content,
+				'post_date'         => $date,
+				'post_date_gmt'     => $date,
+				'post_modified'     => $date,
+				'post_modified_gmt' => $date,
+				'post_name'         => 'wp-global-styles-' . $theme_slug . '-' . substr( sha1( $content . $date ), 0, 8 ),
+				'post_status'       => $status,
+				'post_title'        => 'Component Fuzz Global Styles ' . $theme_slug,
+				'post_type'         => 'wp_global_styles',
+			),
+			true,
+			false
+		);
+		if ( \is_wp_error( $post_id ) ) {
+			throw new \RuntimeException( 'Could not create wp_global_styles fixture: ' . $post_id->get_error_code() );
+		}
+
+		$term = \wp_insert_term( $theme_slug, 'wp_theme' );
+		if ( \is_wp_error( $term ) && 'term_exists' !== $term->get_error_code() ) {
+			throw new \RuntimeException( 'Could not create wp_theme term: ' . $term->get_error_code() );
+		}
+
+		$assigned = \wp_set_object_terms( (int) $post_id, $theme_slug, 'wp_theme' );
+		if ( \is_wp_error( $assigned ) ) {
+			throw new \RuntimeException( 'Could not assign wp_theme term: ' . $assigned->get_error_code() );
+		}
+
+		return (int) $post_id;
+	}
+
+	private static function add_global_styles_query_fixture( array &$query_posts, int $post_id, string $theme_slug ): void {
+		$post = \get_post( $post_id );
+		if ( ! $post instanceof \WP_Post ) {
+			throw new \RuntimeException( 'Could not reload wp_global_styles fixture.' );
+		}
+
+		$query_posts[] = array(
+			'id'     => (int) $post->ID,
+			'post'   => $post,
+			'theme'  => $theme_slug,
+			'status' => (string) $post->post_status,
+			'date'   => (string) $post->post_date,
+		);
+	}
+
+	private static function collect_style_failure( array &$failures, bool $condition, string $label, array $details ): void {
+		if ( $condition ) {
+			return;
+		}
+
+		$failures[] = array(
+			'label'   => $label,
+			'details' => self::preview( $details ),
+		);
+	}
+
+	private static function snapshot_wpdb_stub_state(): ?array {
+		if ( ! isset( $GLOBALS['wpdb'] ) || ! $GLOBALS['wpdb'] instanceof \Component_Fuzz_WPDB_Stub ) {
+			return null;
+		}
+
+		return array(
+			'options' => method_exists( $GLOBALS['wpdb'], 'component_fuzz_get_options' )
+				? $GLOBALS['wpdb']->component_fuzz_get_options()
+				: null,
+			'runtime' => method_exists( $GLOBALS['wpdb'], 'component_fuzz_get_runtime_state' )
+				? $GLOBALS['wpdb']->component_fuzz_get_runtime_state()
+				: null,
+		);
+	}
+
+	private static function restore_wpdb_stub_state( ?array $snapshot ): void {
+		if ( null === $snapshot || ! isset( $GLOBALS['wpdb'] ) || ! $GLOBALS['wpdb'] instanceof \Component_Fuzz_WPDB_Stub ) {
+			return;
+		}
+
+		if ( method_exists( $GLOBALS['wpdb'], 'component_fuzz_reset_content' ) ) {
+			$GLOBALS['wpdb']->component_fuzz_reset_content();
+		}
+		if ( null !== $snapshot['options'] && method_exists( $GLOBALS['wpdb'], 'component_fuzz_reset_options' ) ) {
+			$GLOBALS['wpdb']->component_fuzz_reset_options( $snapshot['options'] );
+		}
+		if ( null !== $snapshot['runtime'] && method_exists( $GLOBALS['wpdb'], 'component_fuzz_restore_runtime_state' ) ) {
+			$GLOBALS['wpdb']->component_fuzz_restore_runtime_state( $snapshot['runtime'] );
+		}
+	}
+
+	private static function wpdb_content_counts(): ?array {
+		if ( isset( $GLOBALS['wpdb'] ) && $GLOBALS['wpdb'] instanceof \Component_Fuzz_WPDB_Stub && method_exists( $GLOBALS['wpdb'], 'component_fuzz_content_counts' ) ) {
+			return $GLOBALS['wpdb']->component_fuzz_content_counts();
+		}
+
+		return null;
 	}
 
 	private static function snapshot_theme_json_resolver(): array {

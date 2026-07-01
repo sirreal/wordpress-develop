@@ -791,7 +791,9 @@ database, network requests, or a configured site.
   variable resolution, block style variation declarations, registered block
   style `style_data` source-order injection, block-support wrapper
   serialization, selector/path helpers, scoped editor style helpers, custom
-  properties, and no-DB global style guards.
+  properties, seeded global stylesheet guards, direct global settings/styles
+  getter paths, `wp_global_styles` user-data lookup, safe-flag fail-closed
+  behavior, and global style post-ID creation/cache oracles.
 - `syndication`: oEmbed provider registration, embed handler lifecycle, oEmbed
   wildcard/regex matching, cache-key lookup, no-network fetch short-circuits,
   HTML/XML filtering, feed metadata escaping, default feed normalization,
