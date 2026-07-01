@@ -743,7 +743,7 @@
 				<tr>
 					<td><code>appearance-media</code></td>
 					<td><span class="status good">validation passed</span></td>
-					<td>Scoped worktree <code>component-fuzz-appearance-media-site-icon</code> builds on head-callback CSS follow-up through <code>643ba2fd4d</code>, Dirac the 4th fixes through <code>39a5bb77d1</code>, and no-upload admin guard follow-up through <code>91a7645818</code>.</td>
+					<td>Site-icon attachment URL follow-up through <code>a942ff51c7</code> builds on head-callback CSS follow-up through <code>643ba2fd4d</code>, Dirac the 4th fixes through <code>39a5bb77d1</code>, and no-upload admin guard follow-up through <code>91a7645818</code>.</td>
 					<td>Latest focused runs: seeds 1 and 224 over 25 iterations each passed 250 checks after real site-icon attachment URL/fallback coverage; adjacent appearance/media/customizer/frontend/script smoke passed 94 checks; latest broad run: 4722 passed, 4 skipped, 0 failed.</td>
 					<td>Theme mods, theme support globals, custom background/header helpers, custom background frontend head-callback CSS normalization and escaping, custom-logo hide-header-text CSS class sanitization, custom header video URL/settings/markup active gates, synthetic custom-logo attachment markup and filter payload oracles with DB-stub cleanup, request-scheme-aware header oracles, site icon filters, real site-icon option-to-attachment metadata URL and stale-ID fallback oracles, bounded <code>Custom_Image_Header::step()</code>, no-upload header/background admin action guards, deprecated media field/tab passthroughs, content-count state restoration, and post type/status bootstrap.</td>
 				</tr>
@@ -1165,6 +1165,12 @@
 				</tr>
 				</thead>
 				<tbody>
+					<tr>
+						<td><code>a942ff51c7</code></td>
+						<td><code>appearance-media</code></td>
+						<td><code>appearance-media</code> focused seed 224 passed 10 checks with no skips, seeds 1 and 224 over 25 iterations each passed 250 checks, and adjacent <code>appearance-media,customizer,customizer-persistence,frontend-features,admin-media-chrome,media-editor,media-metadata,image-metadata,images,network-media,script-loader-runtime</code> smoke passed 94 checks after adding real site-icon option-to-attachment metadata URL and stale-ID fallback coverage.</td>
+						<td>4722 passed, 4 skipped, 0 failed at 1 iteration after site-icon attachment URL coverage.</td>
+					</tr>
 					<tr>
 						<td><code>643ba2fd4d</code></td>
 						<td><code>appearance-media</code></td>
