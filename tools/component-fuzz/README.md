@@ -601,13 +601,13 @@ database, network requests, or a configured site.
   including post type embeddability predicates, public visibility fail-closed
   behavior, oEmbed response width clamps, rich iframe and thumbnail conversion,
   plain/pretty/path-conflict embed URL selection, iframe/blockquote/script
-  markup contracts, discovery link output, direct `WP_oEmbed_Controller`
-  item responses, same-site `pre_oembed_result` short-circuit behavior, and
-  public custom provider registration/removal, consumer `wp_oembed_get()` and
-  `WP_Embed::autoembed()` post-meta cache behavior, REST oEmbed proxy
-  provider-fetch/transient-cache behavior with nonce-excluded cache keys,
-  dimension cache misses, TTL/filter oracles, and no-network HTTP
-  interception.
+  markup contracts, discovery link output, `wp_maybe_enqueue_oembed_host_js()`
+  action-gated script enqueue behavior, direct `WP_oEmbed_Controller` item
+  responses, same-site `pre_oembed_result` short-circuit behavior, and public
+  custom provider registration/removal, consumer `wp_oembed_get()` and
+  `WP_Embed::autoembed()` post-meta cache behavior, REST oEmbed proxy provider
+  fetch/transient-cache behavior with nonce-excluded cache keys, dimension
+  cache misses, TTL/filter oracles, and no-network HTTP interception.
 - `post-types`: post type and post status registry defaults, registration
   filter/action/meta-box lifecycle, REST route registration boundaries and
   late-route ordering, duplicate post-type replacement cleanup, support feature
