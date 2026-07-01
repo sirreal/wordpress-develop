@@ -34,10 +34,7 @@ final class ErrorProtectionSurface {
 			$rows[] = self::check_fatal_handler_synthetic_dispatch( $ctx->fork( 'fatal-handler-synthetic-dispatch' ) );
 			$rows[] = self::check_recovery_link_begin_link_early_returns( $ctx->fork( 'recovery-link-early-returns' ) );
 			$rows[] = self::check_handler_and_endpoint_gates( $ctx->fork( 'handler-endpoint-gates' ) );
-			$rows[] = $ctx->skip(
-				'error-protection.process-control-paths-explicitly-skipped',
-				'Real fatal/shutdown dispatch, recovery-mode redirects, process exits, and site-health loopback checks are intentionally not invoked by this pure PHP surface.'
-			);
+			$rows[] = self::check_process_control_subprocess( $ctx->fork( 'process-control' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
 				'error-protection.surface-no-throw',
@@ -1468,6 +1465,528 @@ final class ErrorProtectionSurface {
 				'failures' => array_slice( $failures, 0, 5 ),
 			)
 		);
+	}
+
+	private static function check_process_control_subprocess( \ComponentFuzz\FuzzContext $ctx ): array {
+		$missing = self::process_control_child_missing_requirements();
+		if ( array() !== $missing ) {
+			return $ctx->skip(
+				'error-protection.process-control-subprocess-requirements',
+				'Local PHP subprocess support is unavailable for recovery-mode redirect, die, and shutdown-path coverage.',
+				array( 'missing' => $missing )
+			);
+		}
+
+		$case   = self::process_control_case( $ctx );
+		$run    = self::run_process_control_child( $case );
+		$result = is_array( $run['result'] ?? null ) ? $run['result'] : array();
+
+		$begin_valid   = is_array( $result['beginValid'] ?? null ) ? $result['beginValid'] : array();
+		$begin_invalid = is_array( $result['beginInvalid'] ?? null ) ? $result['beginInvalid'] : array();
+		$exit_inactive = is_array( $result['exitInactive'] ?? null ) ? $result['exitInactive'] : array();
+		$exit_invalid  = is_array( $result['exitInvalidNonce'] ?? null ) ? $result['exitInvalidNonce'] : array();
+		$exit_valid    = is_array( $result['exitValidNonce'] ?? null ) ? $result['exitValidNonce'] : array();
+		$shutdown      = is_array( $result['shutdown'] ?? null ) ? $result['shutdown'] : array();
+		$failures      = array();
+
+		self::collect_failure(
+			$failures,
+			true === ( $run['ok'] ?? null ),
+			'process-control subprocess returns structured JSON without child errors',
+			array(
+				'exitCode' => $run['exitCode'] ?? null,
+				'stdout'   => self::describe_string( (string) ( $run['stdout'] ?? '' ) ),
+				'stderr'   => self::describe_string( (string) ( $run['stderr'] ?? '' ) ),
+				'errors'   => $result['errors'] ?? null,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			'' === (string) ( $result['preShutdownOutput'] ?? '' )
+				&& true === ( $shutdown['handlerReadable'] ?? null )
+				&& true === ( $shutdown['enabled'] ?? null )
+				&& true === ( $shutdown['markerExists'] ?? null )
+				&& 'shutdown:' . $case['marker'] === ( $shutdown['markerValue'] ?? null ),
+			'wp_register_fatal_error_handler() registers a readable drop-in object that runs during child shutdown before JSON reporting',
+			array(
+				'preShutdownOutput' => self::describe_string( (string) ( $result['preShutdownOutput'] ?? '' ) ),
+				'shutdown'          => $shutdown,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::capture_redirected_to_action( $begin_valid, \WP_Recovery_Mode_Link_Service::LOGIN_ACTION_ENTERED )
+				&& '' === (string) ( $begin_valid['output'] ?? '' )
+				&& in_array( $begin_valid['token'] ?? null, $begin_valid['keysBefore'] ?? array(), true )
+				&& array() === ( $begin_valid['keysAfter'] ?? null ),
+			'valid recovery begin links consume the one-time key, set up the redirect target, and leave no output before exiting',
+			array( 'beginValid' => $begin_valid )
+		);
+
+		self::collect_failure(
+			$failures,
+			'' === (string) ( $begin_invalid['output'] ?? '' )
+				&& 'token_not_found' === self::first_die_code( $begin_invalid )
+				&& array() === ( $begin_invalid['keysAfter'] ?? null )
+				&& array() === ( $begin_invalid['redirects'] ?? null ),
+			'invalid recovery begin links die with a WP_Error and do not redirect or mutate stored keys',
+			array( 'beginInvalid' => $begin_invalid )
+		);
+
+		self::collect_failure(
+			$failures,
+			self::capture_redirected_to( $exit_inactive, $case['referer'] )
+				&& '' === (string) ( $exit_inactive['output'] ?? '' ),
+			'inactive recovery-mode exit requests safely redirect to the referer and exit without output',
+			array( 'exitInactive' => $exit_inactive )
+		);
+
+		self::collect_failure(
+			$failures,
+			'' === (string) ( $exit_invalid['output'] ?? '' )
+				&& 403 === self::first_die_response( $exit_invalid )
+				&& false === ( $exit_invalid['pausedCleared'] ?? true )
+				&& array() === ( $exit_invalid['redirects'] ?? null ),
+			'active recovery-mode exit requests with invalid nonces die with 403 before clearing recovery state',
+			array( 'exitInvalidNonce' => $exit_invalid )
+		);
+
+		self::collect_failure(
+			$failures,
+			self::capture_redirected_to( $exit_valid, $case['referer'] )
+				&& '' === (string) ( $exit_valid['output'] ?? '' )
+				&& true === ( $exit_valid['pausedCleared'] ?? null )
+				&& false === ( $exit_valid['rateLimit'] ?? true ),
+			'active recovery-mode exit requests with valid nonces clear paused extensions and rate limits before redirecting',
+			array( 'exitValidNonce' => $exit_valid )
+		);
+
+		return self::row(
+			$ctx,
+			'error-protection.process-control-subprocess-redirect-die-and-shutdown-paths',
+			array() === $failures,
+			array(
+				'case'     => self::describe_value( $case ),
+				'exitCode' => $run['exitCode'] ?? null,
+				'failures' => array_slice( $failures, 0, 5 ),
+			)
+		);
+	}
+
+	private static function process_control_child_missing_requirements(): array {
+		$missing = array();
+
+		foreach ( array( 'file_put_contents', 'json_decode', 'json_encode', 'proc_close', 'proc_open', 'stream_get_contents' ) as $function ) {
+			if ( ! function_exists( $function ) ) {
+				$missing[] = "function {$function}";
+			}
+		}
+
+		if ( ! defined( 'PHP_BINARY' ) || '' === PHP_BINARY ) {
+			$missing[] = 'PHP_BINARY';
+		}
+
+		return $missing;
+	}
+
+	private static function process_control_case( \ComponentFuzz\FuzzContext $ctx ): array {
+		$marker = 'process-' . self::token( $ctx->fork( 'marker' ), 10 );
+
+		return array(
+			'marker'  => $marker,
+			'referer' => 'http://example.test/wp-admin/plugins.php?page=' . rawurlencode( $marker ),
+			'ttl'     => DAY_IN_SECONDS + $ctx->int( 1, 3600 ),
+		);
+	}
+
+	private static function run_process_control_child( array $case ): array {
+		$payload = json_encode(
+			array( 'case' => $case ),
+			JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE
+		);
+
+		if ( false === $payload ) {
+			return array(
+				'ok'       => false,
+				'exitCode' => -1,
+				'stdout'   => '',
+				'stderr'   => 'json_encode failed',
+				'result'   => null,
+			);
+		}
+
+		$descriptors = array(
+			0 => array( 'pipe', 'r' ),
+			1 => array( 'pipe', 'w' ),
+			2 => array( 'pipe', 'w' ),
+		);
+
+		// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.system_calls_proc_open -- Isolates recovery-mode redirect, die, and shutdown paths in a local PHP subprocess.
+		$process = proc_open( array( PHP_BINARY, '-r', self::process_control_child_program() ), $descriptors, $pipes, \ComponentFuzz\repo_root() );
+		if ( ! is_resource( $process ) ) {
+			return array(
+				'ok'       => false,
+				'exitCode' => -1,
+				'stdout'   => '',
+				'stderr'   => 'proc_open failed',
+				'result'   => null,
+			);
+		}
+
+		fwrite( $pipes[0], $payload );
+		fclose( $pipes[0] );
+
+		$stdout = stream_get_contents( $pipes[1] );
+		$stderr = stream_get_contents( $pipes[2] );
+		fclose( $pipes[1] );
+		fclose( $pipes[2] );
+
+		$exit_code = proc_close( $process );
+		$result    = json_decode( (string) $stdout, true );
+
+		return array(
+			'ok'       => 0 === $exit_code && is_array( $result ) && true === ( $result['ok'] ?? null ),
+			'exitCode' => $exit_code,
+			'stdout'   => (string) $stdout,
+			'stderr'   => (string) $stderr,
+			'result'   => is_array( $result ) ? $result : null,
+		);
+	}
+
+	private static function capture_redirected_to_action( array $capture, string $action ): bool {
+		$redirects = is_array( $capture['redirects'] ?? null ) ? $capture['redirects'] : array();
+		$location  = (string) ( $redirects[0]['location'] ?? '' );
+
+		return 1 === count( $redirects )
+			&& 302 === ( $redirects[0]['status'] ?? null )
+			&& str_contains( $location, 'action=' . rawurlencode( $action ) )
+			&& 'component_fuzz_redirect' === ( $capture['throwable']['message'] ?? null );
+	}
+
+	private static function capture_redirected_to( array $capture, string $expected_location ): bool {
+		$redirects = is_array( $capture['redirects'] ?? null ) ? $capture['redirects'] : array();
+
+		return 1 === count( $redirects )
+			&& 302 === ( $redirects[0]['status'] ?? null )
+			&& $expected_location === ( $redirects[0]['location'] ?? null )
+			&& 'component_fuzz_redirect' === ( $capture['throwable']['message'] ?? null );
+	}
+
+	private static function first_die_code( array $capture ): ?string {
+		$die_calls = is_array( $capture['dieCalls'] ?? null ) ? $capture['dieCalls'] : array();
+		$code      = $die_calls[0]['messageCode'] ?? null;
+		return is_string( $code ) ? $code : null;
+	}
+
+	private static function first_die_response( array $capture ): ?int {
+		$die_calls = is_array( $capture['dieCalls'] ?? null ) ? $capture['dieCalls'] : array();
+		$response  = $die_calls[0]['args']['response'] ?? null;
+		return is_int( $response ) ? $response : null;
+	}
+
+	private static function process_control_child_program(): string {
+		return <<<'PHP'
+$component_fuzz_error_protection_raw = stream_get_contents( STDIN );
+$component_fuzz_error_protection_payload = json_decode( $component_fuzz_error_protection_raw, true );
+$case = is_array( $component_fuzz_error_protection_payload['case'] ?? null ) ? $component_fuzz_error_protection_payload['case'] : array();
+
+require_once getcwd() . '/tools/component-fuzz/lib/autoload.php';
+\ComponentFuzz\WpBootstrap::load();
+
+ini_set( 'display_errors', '0' );
+ob_start();
+
+$result = array(
+	'ok'                => false,
+	'beginValid'        => array(),
+	'beginInvalid'      => array(),
+	'exitInactive'      => array(),
+	'exitInvalidNonce'  => array(),
+	'exitValidNonce'    => array(),
+	'shutdown'          => array(),
+	'preShutdownOutput' => '',
+	'errors'            => array(),
+);
+
+function component_fuzz_error_protection_throwable( Throwable $e ): array {
+	return array(
+		'class'   => get_class( $e ),
+		'message' => $e->getMessage(),
+		'file'    => $e->getFile(),
+		'line'    => $e->getLine(),
+	);
+}
+
+function component_fuzz_error_protection_reset_request( array $get, string $pagenow, string $referer = '' ): void {
+	$_GET     = $get;
+	$_POST    = array();
+	$_REQUEST = $get;
+	$_COOKIE  = array();
+
+	if ( '' !== $referer ) {
+		$_REQUEST['_wp_http_referer'] = $referer;
+	}
+
+	$GLOBALS['pagenow']           = $pagenow;
+	$_SERVER['HTTP_HOST']         = 'example.test';
+	$_SERVER['HTTPS']             = 'off';
+	$_SERVER['PHP_SELF']          = '/wp-login.php';
+	$_SERVER['REQUEST_METHOD']    = 'GET';
+	$_SERVER['REQUEST_URI']       = '/wp-login.php';
+	$_SERVER['HTTP_USER_AGENT']   = 'component-fuzz/error-protection-process';
+	$_SERVER['HTTP_REFERER']      = $referer;
+	$_SERVER['REMOTE_ADDR']       = '198.51.100.99';
+}
+
+function component_fuzz_error_protection_set_recovery_state( bool $initialized, bool $active, string $session_id ): void {
+	$mode = wp_recovery_mode();
+
+	foreach (
+		array(
+			'is_initialized' => $initialized,
+			'is_active'      => $active,
+			'session_id'     => $active ? $session_id : '',
+		) as $property => $value
+	) {
+		$reflection = new ReflectionProperty( WP_Recovery_Mode::class, $property );
+		$reflection->setValue( $mode, $value );
+	}
+}
+
+function component_fuzz_error_protection_recovery_keys(): array {
+	$records = get_option( 'recovery_keys', array() );
+	return is_array( $records ) ? array_keys( $records ) : array();
+}
+
+function component_fuzz_error_protection_capture_redirect( callable $callback ): array {
+	$redirects = array();
+	$filter    = static function ( string $location, int $status ) use ( &$redirects ): string {
+		$redirects[] = array(
+			'location' => $location,
+			'status'   => $status,
+		);
+		throw new RuntimeException( 'component_fuzz_redirect' );
+	};
+
+	add_filter( 'wp_redirect', $filter, PHP_INT_MAX, 2 );
+
+	$throwable = null;
+	ob_start();
+	try {
+		$callback();
+	} catch ( Throwable $e ) {
+		$throwable = component_fuzz_error_protection_throwable( $e );
+	}
+	$output = (string) ob_get_clean();
+
+	remove_filter( 'wp_redirect', $filter, PHP_INT_MAX );
+
+	return array(
+		'output'    => $output,
+		'redirects' => $redirects,
+		'throwable' => $throwable,
+	);
+}
+
+function component_fuzz_error_protection_capture_die( callable $callback ): array {
+	$die_calls = array();
+	$handler   = static function ( $message = '', $title = '', $args = array() ) use ( &$die_calls ): void {
+		if ( is_int( $args ) ) {
+			$args = array( 'response' => $args );
+		} elseif ( is_int( $title ) ) {
+			$args  = array( 'response' => $title );
+			$title = '';
+		}
+
+		$die_calls[] = array(
+			'message'     => $message instanceof WP_Error ? $message->get_error_message() : ( is_scalar( $message ) ? (string) $message : gettype( $message ) ),
+			'messageCode' => $message instanceof WP_Error ? $message->get_error_code() : null,
+			'title'       => is_scalar( $title ) ? (string) $title : gettype( $title ),
+			'args'        => is_array( $args ) ? $args : array( 'raw' => $args ),
+		);
+		throw new RuntimeException( 'component_fuzz_wp_die' );
+	};
+	$filter    = static function () use ( $handler ): callable {
+		return $handler;
+	};
+
+	add_filter( 'wp_die_handler', $filter, PHP_INT_MAX );
+
+	$throwable = null;
+	ob_start();
+	try {
+		$callback();
+	} catch ( Throwable $e ) {
+		$throwable = component_fuzz_error_protection_throwable( $e );
+	}
+	$output = (string) ob_get_clean();
+
+	remove_filter( 'wp_die_handler', $filter, PHP_INT_MAX );
+
+	return array(
+		'output'    => $output,
+		'dieCalls'  => $die_calls,
+		'redirects' => array(),
+		'throwable' => $throwable,
+	);
+}
+
+function component_fuzz_error_protection_paused_error( string $marker ): array {
+	return array(
+		'type'    => E_ERROR,
+		'file'    => WP_PLUGIN_DIR . '/' . $marker . '/plugin.php',
+		'line'    => 17,
+		'message' => 'Component fuzz recovery exit ' . $marker,
+	);
+}
+
+try {
+	$marker = preg_replace( '/[^A-Za-z0-9_-]+/', '', (string) ( $case['marker'] ?? 'process-control' ) );
+	if ( '' === $marker ) {
+		$marker = 'process-control';
+	}
+	$ttl     = max( 1, (int) ( $case['ttl'] ?? DAY_IN_SECONDS ) );
+	$referer = (string) ( $case['referer'] ?? 'http://example.test/wp-admin/' );
+
+	update_option( 'home', 'http://example.test', false );
+	update_option( 'siteurl', 'http://example.test', false );
+	delete_option( 'recovery_keys' );
+	wp_cache_delete( 'recovery_keys', 'options' );
+
+	$key_service    = new WP_Recovery_Mode_Key_Service();
+	$cookie_service = new WP_Recovery_Mode_Cookie_Service();
+	$link_service   = new WP_Recovery_Mode_Link_Service( $cookie_service, $key_service );
+
+	$token       = $key_service->generate_recovery_mode_token();
+	$key         = $key_service->generate_and_store_recovery_mode_key( $token );
+	$keys_before = component_fuzz_error_protection_recovery_keys();
+	component_fuzz_error_protection_reset_request(
+		array(
+			'action'   => WP_Recovery_Mode_Link_Service::LOGIN_ACTION_ENTER,
+			'rm_token' => $token,
+			'rm_key'   => $key,
+		),
+		'wp-login.php'
+	);
+	$begin_valid = component_fuzz_error_protection_capture_redirect(
+		static function () use ( $link_service, $ttl ): void {
+			$link_service->handle_begin_link( $ttl );
+		}
+	);
+	$result['beginValid'] = $begin_valid + array(
+		'token'      => $token,
+		'keysBefore' => $keys_before,
+		'keysAfter'  => component_fuzz_error_protection_recovery_keys(),
+	);
+
+	delete_option( 'recovery_keys' );
+	wp_cache_delete( 'recovery_keys', 'options' );
+	component_fuzz_error_protection_reset_request(
+		array(
+			'action'   => WP_Recovery_Mode_Link_Service::LOGIN_ACTION_ENTER,
+			'rm_token' => 'missing-' . $marker,
+			'rm_key'   => 'invalid-' . $marker,
+		),
+		'wp-login.php'
+	);
+	$begin_invalid = component_fuzz_error_protection_capture_die(
+		static function () use ( $link_service, $ttl ): void {
+			$link_service->handle_begin_link( $ttl );
+		}
+	);
+	$result['beginInvalid'] = $begin_invalid + array(
+		'keysAfter' => component_fuzz_error_protection_recovery_keys(),
+	);
+
+	component_fuzz_error_protection_set_recovery_state( true, false, '' );
+	component_fuzz_error_protection_reset_request(
+		array( 'action' => WP_Recovery_Mode::EXIT_ACTION ),
+		'wp-login.php',
+		$referer
+	);
+	$result['exitInactive'] = component_fuzz_error_protection_capture_redirect(
+		static function (): void {
+			wp_recovery_mode()->handle_exit_recovery_mode();
+		}
+	);
+
+	component_fuzz_error_protection_set_recovery_state( true, true, 'session-' . $marker );
+	wp_paused_plugins()->set( $marker . '/plugin.php', component_fuzz_error_protection_paused_error( $marker ) );
+	component_fuzz_error_protection_reset_request(
+		array(
+			'action'   => WP_Recovery_Mode::EXIT_ACTION,
+			'_wpnonce' => 'bad-' . $marker,
+		),
+		'wp-login.php',
+		$referer
+	);
+	$exit_invalid = component_fuzz_error_protection_capture_die(
+		static function (): void {
+			wp_recovery_mode()->handle_exit_recovery_mode();
+		}
+	);
+	$result['exitInvalidNonce'] = $exit_invalid + array(
+		'pausedCleared' => array() === wp_paused_plugins()->get_all() && array() === wp_paused_themes()->get_all(),
+	);
+
+	component_fuzz_error_protection_set_recovery_state( true, true, 'session-' . $marker );
+	wp_paused_plugins()->set( $marker . '/plugin.php', component_fuzz_error_protection_paused_error( $marker ) );
+	wp_paused_themes()->set( $marker . '-theme', component_fuzz_error_protection_paused_error( $marker ) );
+	update_option( WP_Recovery_Mode_Email_Service::RATE_LIMIT_OPTION, time(), false );
+	$nonce = wp_create_nonce( WP_Recovery_Mode::EXIT_ACTION );
+	component_fuzz_error_protection_reset_request(
+		array(
+			'action'   => WP_Recovery_Mode::EXIT_ACTION,
+			'_wpnonce' => $nonce,
+		),
+		'wp-login.php',
+		$referer
+	);
+	$exit_valid = component_fuzz_error_protection_capture_redirect(
+		static function (): void {
+			wp_recovery_mode()->handle_exit_recovery_mode();
+		}
+	);
+	$result['exitValidNonce'] = $exit_valid + array(
+		'pausedCleared' => array() === wp_paused_plugins()->get_all() && array() === wp_paused_themes()->get_all(),
+		'rateLimit'     => get_option( WP_Recovery_Mode_Email_Service::RATE_LIMIT_OPTION, false ),
+	);
+
+	$marker_file = rtrim( sys_get_temp_dir(), DIRECTORY_SEPARATOR ) . DIRECTORY_SEPARATOR . 'component-fuzz-error-protection-' . getmypid() . '-' . $marker . '.marker';
+	$handler_php = "<?php\nreturn new class {\n\tpublic function handle(): void {\n\t\tfile_put_contents( " . var_export( $marker_file, true ) . ", " . var_export( 'shutdown:' . $marker, true ) . " );\n\t}\n};\n";
+	file_put_contents( WP_CONTENT_DIR . '/fatal-error-handler.php', $handler_php );
+	$result['shutdown']['handlerReadable'] = is_readable( WP_CONTENT_DIR . '/fatal-error-handler.php' );
+	$result['shutdown']['enabled']         = wp_is_fatal_error_handler_enabled();
+	wp_register_fatal_error_handler();
+
+	$result['ok'] = true;
+
+	register_shutdown_function(
+		static function () use ( &$result, $marker_file ): void {
+			$output = '';
+			while ( ob_get_level() > 0 ) {
+				$output .= (string) ob_get_clean();
+			}
+
+			$result['preShutdownOutput']        = $output;
+			$result['shutdown']['markerExists'] = is_file( $marker_file );
+			$result['shutdown']['markerValue']  = is_file( $marker_file ) ? (string) file_get_contents( $marker_file ) : '';
+			@unlink( $marker_file );
+
+			echo json_encode( $result, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE );
+		}
+	);
+} catch ( Throwable $e ) {
+	while ( ob_get_level() > 0 ) {
+		ob_get_clean();
+	}
+
+	$result['errors'][] = component_fuzz_error_protection_throwable( $e );
+	echo json_encode( $result, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE );
+}
+PHP;
 	}
 
 	private static function reset_runtime( \ComponentFuzz\FuzzContext $ctx ): void {
