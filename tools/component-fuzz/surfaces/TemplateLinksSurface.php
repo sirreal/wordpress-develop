@@ -44,6 +44,7 @@ final class TemplateLinksSurface {
 			$rows[] = self::check_document_title_helpers( $ctx );
 			$rows[] = self::check_resource_hints_and_preloads( $ctx );
 			$rows[] = self::check_page_and_paginate_links( $ctx );
+			$rows[] = self::check_archive_navigation_wrappers( $ctx->fork( 'archive-navigation' ) );
 			$rows[] = self::check_search_feed_site_and_admin_links( $ctx );
 			$rows[] = self::check_search_form_rendering_contracts( $ctx->fork( 'search-form' ) );
 			$rows[] = self::check_post_link_helpers( $ctx );
@@ -213,18 +214,26 @@ final class TemplateLinksSurface {
 				'get_language_attributes',
 				'get_month_link',
 				'get_next_image_link',
+				'get_next_posts_link',
+				'get_next_posts_page_link',
 				'get_next_post_link',
 				'get_pagenum_link',
 				'get_permalink',
 				'get_preview_post_link',
 				'get_post_class',
+				'get_posts_nav_link',
 				'get_previous_image_link',
+				'get_previous_posts_link',
+				'get_previous_posts_page_link',
 				'get_previous_post_link',
+				'get_query_var',
 				'get_search_feed_link',
 				'get_search_form',
 				'get_search_link',
 				'get_search_query',
 				'get_site_url',
+				'get_the_posts_navigation',
+				'get_the_posts_pagination',
 				'get_the_title',
 				'get_year_link',
 				'has_filter',
@@ -235,11 +244,17 @@ final class TemplateLinksSurface {
 				'adjacent_posts_rel_link',
 				'adjacent_posts_rel_link_wp_head',
 				'adjacent_image_link',
+				'_navigation_markup',
+				'next_posts',
+				'next_posts_link',
 				'next_post_rel_link',
 				'next_image_link',
 				'paginate_links',
 				'post_class',
+				'posts_nav_link',
 				'prev_post_rel_link',
+				'previous_posts',
+				'previous_posts_link',
 				'previous_image_link',
 				'register_taxonomy',
 				'rel_canonical',
@@ -266,6 +281,8 @@ final class TemplateLinksSurface {
 				'wp_resource_hints',
 				'wp_shortlink_wp_head',
 				'wp_title',
+				'the_posts_navigation',
+				'the_posts_pagination',
 			) as $function
 		) {
 			if ( ! function_exists( $function ) ) {
@@ -966,6 +983,382 @@ final class TemplateLinksSurface {
 		return self::row(
 			$ctx,
 			'template-links.links.pagination-and-pagenum',
+			array() === $failures,
+			array( 'failures' => $failures )
+		);
+	}
+
+	private static function check_archive_navigation_wrappers( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures       = array();
+		$marker         = 'cfz-nav-' . strtolower( $ctx->identifier( 4, 10 ) );
+		$global_snapshot = self::snapshot_globals( array( 'page', 'paged', 'post', 'wp_query', 'wp_the_query' ) );
+		$request_exists = array_key_exists( 'REQUEST_URI', $_SERVER );
+		$request_uri    = $_SERVER['REQUEST_URI'] ?? null;
+		$buffer_level   = ob_get_level();
+
+		$next_attr_events  = array();
+		$prev_attr_events  = array();
+		$pagination_events = array();
+		$template_events   = array();
+
+		$next_attr_filter = static function ( string $attributes ) use ( &$next_attr_events, $marker ): string {
+			$next_attr_events[] = $attributes;
+			return trim( $attributes . ' data-cfz-next="' . \esc_attr( $marker ) . '"' );
+		};
+		$prev_attr_filter = static function ( string $attributes ) use ( &$prev_attr_events, $marker ): string {
+			$prev_attr_events[] = $attributes;
+			return trim( $attributes . ' data-cfz-prev="' . \esc_attr( $marker ) . '"' );
+		};
+		$pagination_args_filter = static function ( array $args ) use ( &$pagination_events, $marker ): array {
+			$pagination_events[] = array(
+				'class'            => $args['class'] ?? null,
+				'midSize'          => $args['mid_size'] ?? null,
+				'screenReaderText' => $args['screen_reader_text'] ?? null,
+				'ariaLabel'        => $args['aria_label'] ?? null,
+				'type'             => $args['type'] ?? null,
+			);
+
+			$args['mid_size']           = 0;
+			$args['type']               = 'array';
+			$args['class']              = 'pagination ' . $marker . ' <script>';
+			$args['screen_reader_text'] = 'Pages <reader> ' . $marker;
+			$args['aria_label']         = 'Archive "pages" <' . $marker . '>';
+
+			return $args;
+		};
+		$navigation_template_filter = static function ( string $template, string $css_class ) use ( &$template_events, $marker ): string {
+			$template_events[] = array(
+				'template' => self::describe_string( $template ),
+				'cssClass' => $css_class,
+			);
+
+			return "\n<nav class=\"navigation %1\$s\" aria-label=\"%4\$s\" data-cfz-template=\"" . \esc_attr( $marker ) . "\">\n\t<h2 class=\"screen-reader-text\">%2\$s</h2>\n\t<div class=\"nav-links\">%3\$s</div>\n</nav>";
+		};
+
+		$middle_next_page      = '';
+		$middle_next_page_echo = '';
+		$middle_prev_page      = '';
+		$middle_prev_page_echo = '';
+		$next_link            = '';
+		$next_link_echo       = '';
+		$previous_link        = '';
+		$previous_link_echo   = '';
+		$posts_nav            = '';
+		$posts_nav_echo       = '';
+		$posts_navigation     = '';
+		$posts_navigation_echo = '';
+		$pagination           = '';
+		$pagination_echo      = '';
+		$first_navigation     = '';
+		$first_posts_nav      = '';
+		$last_navigation      = '';
+		$last_posts_nav       = '';
+		$single_pagination    = '';
+		$single_navigation    = '';
+		$singular_next_link   = null;
+		$singular_prev_link   = null;
+		$singular_posts_nav   = '';
+		$direct_markup        = '';
+		$direct_css_class     = 'archive nav <script> ' . $marker;
+
+		\add_filter( 'next_posts_link_attributes', $next_attr_filter, 10, 1 );
+		\add_filter( 'previous_posts_link_attributes', $prev_attr_filter, 10, 1 );
+		\add_filter( 'the_posts_pagination_args', $pagination_args_filter, 10, 1 );
+		\add_filter( 'navigation_markup_template', $navigation_template_filter, 10, 2 );
+
+		try {
+			self::with_permalink_structure(
+				'',
+				static function () use (
+					$marker,
+					&$middle_next_page,
+					&$middle_next_page_echo,
+					&$middle_prev_page,
+					&$middle_prev_page_echo,
+					&$next_link,
+					&$next_link_echo,
+					&$previous_link,
+					&$previous_link_echo,
+					&$posts_nav,
+					&$posts_nav_echo,
+					&$posts_navigation,
+					&$posts_navigation_echo,
+					&$pagination,
+					&$pagination_echo,
+					&$first_navigation,
+					&$first_posts_nav,
+					&$last_navigation,
+					&$last_posts_nav,
+					&$single_pagination,
+					&$single_navigation,
+					&$singular_next_link,
+					&$singular_prev_link,
+					&$singular_posts_nav,
+					&$direct_markup,
+					$direct_css_class
+				): void {
+					$_SERVER['REQUEST_URI'] = '/archive/?paged=3&keep=' . rawurlencode( $marker ) . '&unsafe=<script>#ignored';
+					self::set_archive_query( 3, 5 );
+
+					$middle_next_page      = (string) \next_posts( 5, false );
+					$middle_next_page_echo = self::capture_output(
+						static function (): void {
+							\next_posts( 5, true );
+						}
+					);
+					$middle_prev_page      = (string) \previous_posts( false );
+					$middle_prev_page_echo = self::capture_output(
+						static function (): void {
+							\previous_posts( true );
+						}
+					);
+
+					$next_label      = 'Older & Archive ' . $marker;
+					$previous_label  = 'Newer & Archive ' . $marker;
+					$next_link       = (string) \get_next_posts_link( $next_label, 5 );
+					$next_link_echo  = self::capture_output(
+						static function () use ( $next_label ): void {
+							\next_posts_link( $next_label, 5 );
+						}
+					);
+					$previous_link   = (string) \get_previous_posts_link( $previous_label );
+					$previous_link_echo = self::capture_output(
+						static function () use ( $previous_label ): void {
+							\previous_posts_link( $previous_label );
+						}
+					);
+
+					$separator      = ' | ' . $marker . ' | ';
+					$posts_nav      = (string) \get_posts_nav_link(
+						array(
+							'sep'      => $separator,
+							'prelabel' => $previous_label,
+							'nxtlabel' => $next_label,
+						)
+					);
+					$posts_nav_echo = self::capture_output(
+						static function () use ( $separator, $previous_label, $next_label ): void {
+							\posts_nav_link( $separator, $previous_label, $next_label );
+						}
+					);
+
+					$navigation_args       = array(
+						'prev_text'          => $next_label,
+						'next_text'          => $previous_label,
+						'screen_reader_text' => 'Posts <navigation> ' . $marker,
+						'aria_label'         => 'Archive navigation "' . $marker . '"',
+						'class'              => 'posts nav <script> ' . $marker,
+					);
+					$posts_navigation      = (string) \get_the_posts_navigation( $navigation_args );
+					$posts_navigation_echo = self::capture_output(
+						static function () use ( $navigation_args ): void {
+							\the_posts_navigation( $navigation_args );
+						}
+					);
+
+					$pagination      = (string) \get_the_posts_pagination(
+						array(
+							'prev_text' => 'Back ' . $marker,
+							'next_text' => 'Forward ' . $marker,
+						)
+					);
+					$pagination_echo = self::capture_output(
+						static function () use ( $marker ): void {
+							\the_posts_pagination(
+								array(
+									'prev_text' => 'Back ' . $marker,
+									'next_text' => 'Forward ' . $marker,
+								)
+							);
+						}
+					);
+
+					self::set_archive_query( 1, 5 );
+					$first_navigation = (string) \get_the_posts_navigation( $navigation_args );
+					$first_posts_nav  = (string) \get_posts_nav_link(
+						array(
+							'sep'      => $separator,
+							'prelabel' => $previous_label,
+							'nxtlabel' => $next_label,
+						)
+					);
+
+					self::set_archive_query( 5, 5 );
+					$last_navigation = (string) \get_the_posts_navigation( $navigation_args );
+					$last_posts_nav  = (string) \get_posts_nav_link(
+						array(
+							'sep'      => $separator,
+							'prelabel' => $previous_label,
+							'nxtlabel' => $next_label,
+						)
+					);
+
+					self::set_archive_query( 1, 1 );
+					$single_pagination = \get_the_posts_pagination();
+					$single_navigation = (string) \get_the_posts_navigation( $navigation_args );
+
+					self::set_current_post_query( self::current_post(), 2, false );
+					$singular_next_link = \get_next_posts_link( $next_label, 5 );
+					$singular_prev_link = \get_previous_posts_link( $previous_label );
+					$singular_posts_nav = (string) \get_posts_nav_link(
+						array(
+							'sep'      => $separator,
+							'prelabel' => $previous_label,
+							'nxtlabel' => $next_label,
+						)
+					);
+
+					$direct_markup = \_navigation_markup(
+						'<a href="http://example.test/archive/?safe=1">Anchor ' . $marker . '</a>',
+						$direct_css_class,
+						'Screen <reader> ' . $marker,
+						'Archive "label" <' . $marker . '>'
+					);
+				}
+			);
+		} finally {
+			if ( ob_get_level() > $buffer_level ) {
+				ob_end_clean();
+			}
+			\remove_filter( 'next_posts_link_attributes', $next_attr_filter, 10 );
+			\remove_filter( 'previous_posts_link_attributes', $prev_attr_filter, 10 );
+			\remove_filter( 'the_posts_pagination_args', $pagination_args_filter, 10 );
+			\remove_filter( 'navigation_markup_template', $navigation_template_filter, 10 );
+			self::restore_globals( $global_snapshot );
+			if ( $request_exists ) {
+				$_SERVER['REQUEST_URI'] = $request_uri;
+			} else {
+				unset( $_SERVER['REQUEST_URI'] );
+			}
+		}
+
+		self::collect_failure(
+			$failures,
+			'' !== $middle_next_page
+				&& $middle_next_page === $middle_next_page_echo
+				&& '' !== $middle_prev_page
+				&& $middle_prev_page === $middle_prev_page_echo
+				&& str_contains( $middle_next_page, 'paged=4' )
+				&& str_contains( $middle_prev_page, 'paged=2' )
+				&& ! str_contains( strtolower( $middle_next_page . $middle_prev_page ), '<script' ),
+			'next_posts and previous_posts wrappers echo/return matching page URLs for archive query state',
+			array(
+				'nextPage' => $middle_next_page,
+				'prevPage' => $middle_prev_page,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$next_link === $next_link_echo
+				&& $previous_link === $previous_link_echo
+				&& str_contains( $next_link, 'data-cfz-next="' . \esc_attr( $marker ) . '"' )
+				&& str_contains( $previous_link, 'data-cfz-prev="' . \esc_attr( $marker ) . '"' )
+				&& str_contains( $next_link, 'Older &#038; Archive ' . $marker )
+				&& str_contains( $previous_link, 'Newer &#038; Archive ' . $marker )
+				&& str_contains( $next_link, 'paged=4' )
+				&& str_contains( $previous_link, 'paged=2' )
+				&& 0 < count( $next_attr_events )
+				&& 0 < count( $prev_attr_events )
+				&& false === \has_filter( 'next_posts_link_attributes', $next_attr_filter, 10 )
+				&& false === \has_filter( 'previous_posts_link_attributes', $prev_attr_filter, 10 ),
+			'next/previous posts link wrappers apply scoped attribute filters, preserve echo parity, and clean up hooks',
+			array(
+				'nextLink'       => self::describe_string( $next_link ),
+				'previousLink'   => self::describe_string( $previous_link ),
+				'nextAttrEvents' => $next_attr_events,
+				'prevAttrEvents' => $prev_attr_events,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$posts_nav === $posts_nav_echo
+				&& str_contains( $posts_nav, ' | ' . $marker . ' | ' )
+				&& str_contains( $posts_nav, 'paged=2' )
+				&& str_contains( $posts_nav, 'paged=4' )
+				&& ! str_contains( $first_posts_nav, ' | ' . $marker . ' | ' )
+				&& ! str_contains( $last_posts_nav, ' | ' . $marker . ' | ' )
+				&& str_contains( $first_posts_nav, 'paged=2' )
+				&& ! str_contains( $first_posts_nav, 'paged=0' )
+				&& str_contains( $last_posts_nav, 'paged=4' )
+				&& ! str_contains( $last_posts_nav, 'paged=6' ),
+			'get_posts_nav_link adds separators only when both directions exist and posts_nav_link echoes the getter',
+			array(
+				'middle' => self::describe_string( $posts_nav ),
+				'first'  => self::describe_string( $first_posts_nav ),
+				'last'   => self::describe_string( $last_posts_nav ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$posts_navigation === $posts_navigation_echo
+				&& str_contains( $posts_navigation, 'class="nav-previous"' )
+				&& str_contains( $posts_navigation, 'class="nav-next"' )
+				&& str_contains( $posts_navigation, 'Older &#038; Archive ' . $marker )
+				&& str_contains( $posts_navigation, 'Newer &#038; Archive ' . $marker )
+				&& str_contains( $posts_navigation, 'paged=4' )
+				&& str_contains( $posts_navigation, 'paged=2' )
+				&& str_contains( $first_navigation, 'class="nav-previous"' )
+				&& ! str_contains( $first_navigation, 'class="nav-next"' )
+				&& str_contains( $last_navigation, 'class="nav-next"' )
+				&& ! str_contains( $last_navigation, 'class="nav-previous"' )
+				&& '' === $single_navigation
+				&& ! str_contains( strtolower( $posts_navigation . $first_navigation . $last_navigation ), '<script' ),
+			'get_the_posts_navigation wraps available archive directions, suppresses missing sides, and echoes exactly',
+			array(
+				'middle' => self::describe_string( $posts_navigation ),
+				'first'  => self::describe_string( $first_navigation ),
+				'last'   => self::describe_string( $last_navigation ),
+				'single' => self::describe_string( $single_navigation ),
+			)
+		);
+
+		$expected_direct_class = \sanitize_html_class( $direct_css_class );
+		self::collect_failure(
+			$failures,
+			$pagination === $pagination_echo
+				&& '' === $single_pagination
+				&& 0 < count( $pagination_events )
+				&& str_contains( $pagination, 'class="navigation ' . \sanitize_html_class( 'pagination ' . $marker . ' <script>' ) . '"' )
+				&& str_contains( $pagination, 'Pages &lt;reader&gt; ' . $marker )
+				&& str_contains( $pagination, 'Archive &quot;pages&quot; &lt;' . $marker . '&gt;' )
+				&& str_contains( $pagination, 'class="page-numbers current"' )
+				&& ! str_contains( strtolower( $pagination ), '<script' )
+				&& false === \has_filter( 'the_posts_pagination_args', $pagination_args_filter, 10 ),
+			'get_the_posts_pagination filters args, coerces array type back to string markup, escapes nav labels, and echoes exactly',
+			array(
+				'pagination'       => self::describe_string( $pagination ),
+				'singlePagination' => self::describe_value( $single_pagination ),
+				'events'           => $pagination_events,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			null === $singular_next_link
+				&& null === $singular_prev_link
+				&& '' === $singular_posts_nav
+				&& str_contains( $direct_markup, 'class="navigation ' . $expected_direct_class . '"' )
+				&& str_contains( $direct_markup, 'Screen &lt;reader&gt; ' . $marker )
+				&& str_contains( $direct_markup, 'Archive &quot;label&quot; &lt;' . $marker . '&gt;' )
+				&& str_contains( $direct_markup, '<a href="http://example.test/archive/?safe=1">Anchor ' . $marker . '</a>' )
+				&& 0 < count( $template_events )
+				&& false === \has_filter( 'navigation_markup_template', $navigation_template_filter, 10 ),
+			'archive navigation wrappers fail closed for singular queries and _navigation_markup sanitizes classes while preserving link markup',
+			array(
+				'singularNextLink' => self::describe_value( $singular_next_link ),
+				'singularPrevLink' => self::describe_value( $singular_prev_link ),
+				'singularPostsNav' => self::describe_string( $singular_posts_nav ),
+				'directMarkup'     => self::describe_string( $direct_markup ),
+				'templateEvents'   => $template_events,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'template-links.links.archive-navigation-wrappers',
 			array() === $failures,
 			array( 'failures' => $failures )
 		);
@@ -2546,6 +2939,30 @@ final class TemplateLinksSurface {
 		$query->is_paged    = $paged > 1;
 		$query->is_single   = ! $is_home;
 		$query->is_singular = ! $is_home;
+
+		$GLOBALS['post']         = $post;
+		$GLOBALS['wp_query']     = $query;
+		$GLOBALS['wp_the_query'] = $query;
+		$GLOBALS['paged']        = $paged;
+		$GLOBALS['page']         = 1;
+	}
+
+	private static function set_archive_query( int $paged, int $max_num_pages ): void {
+		$post  = self::current_post();
+		$query = self::query_for_post( $post, $paged );
+
+		$query->query_vars['p']     = 0;
+		$query->query_vars['name']  = '';
+		$query->query_vars['paged'] = $paged;
+		$query->queried_object      = null;
+		$query->queried_object_id   = 0;
+		$query->found_posts         = max( 1, $max_num_pages ) * 10;
+		$query->max_num_pages       = $max_num_pages;
+		$query->is_single           = false;
+		$query->is_singular         = false;
+		$query->is_home             = true;
+		$query->is_archive          = false;
+		$query->is_paged            = $paged > 1;
 
 		$GLOBALS['post']         = $post;
 		$GLOBALS['wp_query']     = $query;
