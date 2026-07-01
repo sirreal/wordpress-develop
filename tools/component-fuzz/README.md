@@ -328,8 +328,8 @@ database, network requests, or a configured site.
 - `editor-helpers`: no-browser classic editor helper coverage for
   `_WP_Editors` settings/state normalization, default editor selection filters,
   teeny and full TinyMCE/Quicktags filter branches, captured editor markup,
-  editor script enqueue decisions, TinyMCE translation snippets, media-view
-  stylesheet helpers, and global restoration.
+  editor script enqueue decisions, TinyMCE translation and inline settings
+  snippets, media-view stylesheet helpers, and global restoration.
 - `fonts`: font-face CSS serialization and validation, theme.json font-face
   resolution and default printing, font directory filters, Font Library
   collection registration/JSON loading, REST font collection pagination,
@@ -1162,8 +1162,9 @@ request construction, response normalization, cache behavior, the local admin
 AJAX wrapper, and helper contracts rather than dashboard browser rendering.
 The `editor-helpers` surface exercises classic editor settings and generated
 markup without loading browser editors. It avoids live TinyMCE/Quicktags
-execution, external asset fetching, admin page dispatch, DB-backed link queries,
-and AJAX media-shortcode preview paths.
+execution while still covering inline classic-block settings serialization, and
+avoids external asset fetching, admin page dispatch, DB-backed link queries, and
+AJAX media-shortcode preview paths.
 The `user-preferences` surface exercises `set_screen_options()` and AJAX
 preference handlers in a subprocess so redirect, raw `exit`, and `wp_die()`
 paths cannot terminate the parent fuzz runner. It still covers the underlying
