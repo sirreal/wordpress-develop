@@ -463,8 +463,10 @@ database, network requests, or a configured site.
   filters, current subtype-aware API accounting for post/term/comment/user
   metadata, cache-backed lookup shape, filtered and in-memory CRUD cache
   invalidation, by-mid short-circuit filter payloads and fail-closed inputs,
-  mid-row helpers, cache priming, and duplicate-aware lazyloader queue/reset
-  behavior.
+  mid-row helpers, cache priming, duplicate-aware lazyloader queue/reset
+  behavior, and REST meta field schema, custom exposed names, prepared/default
+  values, validation failures, capability-gated update paths, and reset/delete
+  semantics.
 - `multisite`: no-DB multisite/network API coverage, including synthetic
   `WP_Site` and `WP_Network` objects, site data normalization, cache-backed
   lookups, legacy blog identity helpers, bootstrap current-site/current-network
