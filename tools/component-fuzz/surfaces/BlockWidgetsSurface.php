@@ -35,6 +35,7 @@ final class BlockWidgetsSurface {
 			$rows[] = self::check_sidebars_widget_mapping( $ctx->fork( 'mapping' ) );
 			$rows[] = self::check_retrieve_widgets_remap_lost_inactive( $ctx->fork( 'retrieve-widgets' ) );
 			$rows[] = self::check_widget_id_and_cleanup_matrix( $ctx->fork( 'id-cleanup' ) );
+			$rows[] = self::check_widget_editor_dependency_warnings( $ctx->fork( 'editor-deps' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
 				'block-widgets.surface-no-throw',
@@ -59,7 +60,7 @@ final class BlockWidgetsSurface {
 	private static function missing_requirements(): array {
 		$missing = array();
 
-		foreach ( array( 'WP_Widget', 'WP_Widget_Block', 'WP_Widget_Factory' ) as $class ) {
+		foreach ( array( 'WP_Scripts', 'WP_Styles', 'WP_Widget', 'WP_Widget_Block', 'WP_Widget_Factory' ) as $class ) {
 			if ( ! class_exists( $class ) ) {
 				$missing[] = "class {$class}";
 			}
@@ -75,6 +76,7 @@ final class BlockWidgetsSurface {
 				'do_blocks',
 				'get_option',
 				'get_theme_support',
+				'has_filter',
 				'is_active_widget',
 				'parse_blocks',
 				'register_sidebar',
@@ -91,6 +93,7 @@ final class BlockWidgetsSurface {
 				'wp_kses_post',
 				'wp_map_sidebars_widgets',
 				'wp_parse_widget_id',
+				'wp_check_widget_editor_deps',
 				'wp_render_widget',
 				'wp_render_widget_control',
 				'wp_set_current_user',
@@ -754,6 +757,177 @@ final class BlockWidgetsSurface {
 		return self::result( $ctx, 'block-widgets.sidebars.widget-id-and-cleanup-matrix', $failures );
 	}
 
+	private static function check_widget_editor_dependency_warnings( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures       = array();
+		$events         = array();
+		$cases          = array(
+			'none'            => array(
+				'scripts'           => array(),
+				'styles'            => array(),
+				'expectedFunctions' => array(),
+			),
+			'editor-only'     => array(
+				'scripts'           => array( 'wp-editor' ),
+				'styles'            => array( 'wp-edit-post' ),
+				'expectedFunctions' => array(),
+			),
+			'widgets-only'    => array(
+				'scripts'           => array( 'wp-edit-widgets' ),
+				'styles'            => array(),
+				'expectedFunctions' => array(),
+			),
+			'customize-only'  => array(
+				'scripts'           => array( 'wp-customize-widgets' ),
+				'styles'            => array(),
+				'expectedFunctions' => array(),
+			),
+			'script-conflict' => array(
+				'scripts'           => array( 'wp-edit-widgets', 'wp-editor' ),
+				'styles'            => array(),
+				'expectedFunctions' => array( 'wp_enqueue_script()' ),
+			),
+			'customize-script-conflict' => array(
+				'scripts'           => array( 'wp-customize-widgets', 'wp-editor' ),
+				'styles'            => array(),
+				'expectedFunctions' => array( 'wp_enqueue_script()' ),
+			),
+			'style-conflict'  => array(
+				'scripts'           => array( 'wp-customize-widgets' ),
+				'styles'            => array( 'wp-edit-post' ),
+				'expectedFunctions' => array( 'wp_enqueue_style()' ),
+			),
+			'widgets-style-conflict' => array(
+				'scripts'           => array( 'wp-edit-widgets' ),
+				'styles'            => array( 'wp-edit-post' ),
+				'expectedFunctions' => array( 'wp_enqueue_style()' ),
+			),
+			'both-conflicts'  => array(
+				'scripts'           => array( 'wp-edit-widgets', 'wp-customize-widgets', 'wp-editor' ),
+				'styles'            => array( 'wp-edit-post' ),
+				'expectedFunctions' => array( 'wp_enqueue_script()', 'wp_enqueue_style()' ),
+			),
+			'dependency-conflicts' => array(
+				'scripts'           => array( 'component-fuzz-widget-editor-wrapper', 'component-fuzz-editor-wrapper' ),
+				'styles'            => array( 'component-fuzz-edit-post-wrapper' ),
+				'scriptDeps'        => array(
+					'component-fuzz-widget-editor-wrapper' => array( 'wp-customize-widgets' ),
+					'component-fuzz-editor-wrapper'        => array( 'wp-editor' ),
+				),
+				'styleDeps'         => array(
+					'component-fuzz-edit-post-wrapper' => array( 'wp-edit-post' ),
+				),
+				'expectedFunctions' => array( 'wp_enqueue_script()', 'wp_enqueue_style()' ),
+			),
+		);
+		$listener       = static function ( string $function_name, string $message, string $version ) use ( &$events ): void {
+			$events[] = array(
+				'function' => $function_name,
+				'message'  => $message,
+				'version'  => $version,
+			);
+		};
+		$suppress_error = static function (): bool {
+			return false;
+		};
+
+		foreach ( $cases as $label => $case ) {
+			$events = array();
+			self::prepare_editor_dependency_assets(
+				$case['scripts'],
+				$case['styles'],
+				$case['scriptDeps'] ?? array(),
+				$case['styleDeps'] ?? array()
+			);
+
+			$script_queue_before      = $GLOBALS['wp_scripts']->queue;
+			$style_queue_before       = $GLOBALS['wp_styles']->queue;
+			$script_registered_before = array_keys( $GLOBALS['wp_scripts']->registered );
+			$style_registered_before  = array_keys( $GLOBALS['wp_styles']->registered );
+
+			\add_action( 'doing_it_wrong_run', $listener, 10, 3 );
+			\add_filter( 'doing_it_wrong_trigger_error', $suppress_error, 10, 4 );
+			try {
+				\wp_check_widget_editor_deps();
+			} finally {
+				\remove_filter( 'doing_it_wrong_trigger_error', $suppress_error, 10 );
+				\remove_action( 'doing_it_wrong_run', $listener, 10 );
+			}
+
+			$script_queue_after      = $GLOBALS['wp_scripts']->queue;
+			$style_queue_after       = $GLOBALS['wp_styles']->queue;
+			$script_registered_after = array_keys( $GLOBALS['wp_scripts']->registered );
+			$style_registered_after  = array_keys( $GLOBALS['wp_styles']->registered );
+			$functions               = array_map( static fn( array $event ): string => $event['function'], $events );
+			$expected_functions      = $case['expectedFunctions'];
+			sort( $functions );
+			sort( $expected_functions );
+
+			self::collect_failure(
+				$failures,
+				$expected_functions === $functions
+					&& $script_queue_before === $script_queue_after
+					&& $style_queue_before === $style_queue_after
+					&& $script_registered_before === $script_registered_after
+					&& $style_registered_before === $style_registered_after
+					&& false === \has_filter( 'doing_it_wrong_run', $listener )
+					&& false === \has_filter( 'doing_it_wrong_trigger_error', $suppress_error ),
+				'wp_check_widget_editor_deps reports only widget editor script/style conflicts and leaves asset globals/hooks scoped',
+				array(
+					'case'                   => $label,
+					'scripts'                => $case['scripts'],
+					'styles'                 => $case['styles'],
+					'expectedFunctions'      => $expected_functions,
+					'functions'              => $functions,
+					'events'                 => $events,
+					'scriptDeps'             => $case['scriptDeps'] ?? array(),
+					'styleDeps'              => $case['styleDeps'] ?? array(),
+					'scriptQueueBefore'      => $script_queue_before,
+					'scriptQueueAfter'       => $script_queue_after,
+					'styleQueueBefore'       => $style_queue_before,
+					'styleQueueAfter'        => $style_queue_after,
+					'scriptRegisteredBefore' => $script_registered_before,
+					'scriptRegisteredAfter'  => $script_registered_after,
+					'styleRegisteredBefore'  => $style_registered_before,
+					'styleRegisteredAfter'   => $style_registered_after,
+					'listenerFilter'         => \has_filter( 'doing_it_wrong_run', $listener ),
+					'suppressFilter'         => \has_filter( 'doing_it_wrong_trigger_error', $suppress_error ),
+				)
+			);
+
+			foreach ( $events as $event ) {
+				$is_script_notice = 'wp_enqueue_script()' === $event['function'];
+				$is_style_notice  = 'wp_enqueue_style()' === $event['function'];
+
+				self::collect_failure(
+					$failures,
+					'5.8.0' === $event['version']
+						&& (
+							( $is_script_notice
+								&& str_contains( $event['message'], 'wp-editor' )
+								&& str_contains( $event['message'], 'wp-edit-widgets' )
+								&& str_contains( $event['message'], 'wp-customize-widgets' )
+								&& ! str_contains( $event['message'], 'wp-edit-post' )
+							)
+							|| ( $is_style_notice
+								&& str_contains( $event['message'], 'wp-edit-post' )
+								&& str_contains( $event['message'], 'wp-edit-widgets' )
+								&& str_contains( $event['message'], 'wp-customize-widgets' )
+								&& ! str_contains( $event['message'], 'wp-editor' )
+							)
+						),
+					'widget editor dependency warning payload names the conflicting asset group and version',
+					array(
+						'case'    => $label,
+						'event'   => $event,
+						'preview' => self::preview( $event['message'] ),
+					)
+				);
+			}
+		}
+
+		return self::result( $ctx, 'block-widgets.editor-dependency-warnings', $failures );
+	}
+
 	private static function seed_retrieve_widgets_fixture( \ComponentFuzz\FuzzContext $ctx ): array {
 		global $wp_widget_factory;
 
@@ -862,6 +1036,31 @@ final class BlockWidgetsSurface {
 		return $flat;
 	}
 
+	private static function prepare_editor_dependency_assets( array $scripts, array $styles, array $script_deps = array(), array $style_deps = array() ): void {
+		$GLOBALS['wp_scripts'] = new \WP_Scripts();
+		$GLOBALS['wp_styles']  = new \WP_Styles();
+
+		foreach ( array( 'wp-edit-widgets', 'wp-customize-widgets', 'wp-editor' ) as $handle ) {
+			$GLOBALS['wp_scripts']->add( $handle, false, array(), '1.0.0' );
+		}
+		foreach ( array( 'wp-edit-post' ) as $handle ) {
+			$GLOBALS['wp_styles']->add( $handle, false, array(), '1.0.0' );
+		}
+		foreach ( $script_deps as $handle => $deps ) {
+			$GLOBALS['wp_scripts']->add( $handle, false, $deps, '1.0.0' );
+		}
+		foreach ( $style_deps as $handle => $deps ) {
+			$GLOBALS['wp_styles']->add( $handle, false, $deps, '1.0.0' );
+		}
+
+		foreach ( $scripts as $handle ) {
+			$GLOBALS['wp_scripts']->enqueue( $handle );
+		}
+		foreach ( $styles as $handle ) {
+			$GLOBALS['wp_styles']->enqueue( $handle );
+		}
+	}
+
 	private static function sidebars_without_array_version( array $sidebars_widgets ): array {
 		unset( $sidebars_widgets['array_version'] );
 
@@ -904,6 +1103,8 @@ final class BlockWidgetsSurface {
 		$GLOBALS['sidebars_widgets']              = array();
 		$GLOBALS['wp_widget_factory']             = new \WP_Widget_Factory();
 		$GLOBALS['_wp_theme_features']            = array();
+		$GLOBALS['wp_scripts']                    = new \WP_Scripts();
+		$GLOBALS['wp_styles']                     = new \WP_Styles();
 
 		if ( isset( $GLOBALS['wpdb'] ) && $GLOBALS['wpdb'] instanceof \Component_Fuzz_WPDB_Stub ) {
 			$GLOBALS['wpdb']->component_fuzz_reset_options(
@@ -939,6 +1140,8 @@ final class BlockWidgetsSurface {
 				'wp_registered_widget_controls',
 				'wp_registered_widget_updates',
 				'wp_registered_widgets',
+				'wp_scripts',
+				'wp_styles',
 				'wp_widget_factory',
 			) as $name
 		) {
