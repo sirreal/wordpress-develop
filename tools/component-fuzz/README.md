@@ -211,7 +211,9 @@ database, network requests, or a configured site.
   metadata cache invalidation, post-to-term relationship field modes, helper
   caches, relationship hook arguments, status-transition hook/cache/default
   side-effect branches, direct `set_post_type()` row mutation and cache cleanup,
-  post and attachment count/MIME helper contracts,
+  public page/post lookup helpers for ancestry paths, attachment fallback,
+  hierarchy queries, child normalization, filter payloads, output formats, and
+  salted query-cache invalidation, post and attachment count/MIME helper contracts,
   featured-image helper lifecycle contracts, post-delete cleanup, cache/count
   refresh behavior, and per-iteration state restoration.
 - `comments`: comment filtering, sanitizer agreement, max-length boundaries,
@@ -1092,6 +1094,13 @@ Featured-image coverage asserts `set_post_thumbnail()`/`delete_post_thumbnail()`
 postmeta lifecycle behavior, `get_post_thumbnail_id()`/`has_post_thumbnail()`
 fail-closed and filter contracts, thumbnail HTML/URL/caption echo helpers,
 non-image cleanup, and `update_post_thumbnail_cache()` cache priming.
+Page lookup coverage asserts `get_page_by_path()`, `get_pages()`,
+`get_page_children()`, and `get_children()` against deterministic page trees,
+encoded and full ancestry paths, attachment fallback and page/attachment slug
+collisions, custom hierarchical post types, salted hit/miss `post-queries`
+caches, include/child/parent/exclude-tree/limit rewrites, filter payloads,
+numeric/object/global argument normalization, output shape modes, and cleanup of
+posts, filters, globals, and generated post types.
 Broader taxonomy relationship behavior is covered by `taxonomy-relationships`,
 still limited to the recognized term relationship SQL shapes emitted by the
 targeted core APIs.
