@@ -8,6 +8,7 @@ final class HttpSurface {
 	private const GENERATED_ABSOLUTE_URL_CASES = 10;
 	private const GENERATED_CHUNK_CASES        = 6;
 	private const GENERATED_REQUEST_CASES      = 4;
+	private const GENERATED_ORIGIN_CASES       = 6;
 
 	/** @var bool|null */
 	private static $proxy_override = null;
@@ -43,6 +44,7 @@ final class HttpSurface {
 			$rows[] = self::check_cookie_parsing_and_headers( $ctx );
 			$rows[] = self::check_absolute_url_resolution( $ctx );
 			$rows[] = self::check_url_validation_and_redirects( $ctx );
+			$rows[] = self::check_origin_and_capability_helpers( $ctx->fork( 'origins' ) );
 			$rows[] = self::check_proxy_contracts( $ctx );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
@@ -114,13 +116,20 @@ final class HttpSurface {
 				'add_action',
 				'add_filter',
 				'apply_filters',
+				'admin_url',
+				'allowed_http_request_hosts',
+				'get_allowed_http_origins',
+				'get_http_origin',
 				'has_action',
 				'has_filter',
 				'home_url',
+				'is_allowed_http_origin',
 				'is_wp_error',
 				'remove_action',
 				'remove_filter',
+				'send_origin_headers',
 				'wp_http_validate_url',
+				'wp_http_supports',
 				'wp_parse_url',
 				'wp_remote_get',
 				'wp_remote_head',
@@ -1964,6 +1973,219 @@ final class HttpSurface {
 			array() === $failures,
 			array( 'failures' => array_slice( $failures, 0, 5 ) )
 		);
+	}
+
+	private static function check_origin_and_capability_helpers( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures          = array();
+		$server_snapshot   = $_SERVER;
+		$filtered_origins  = array();
+		$origin_filter_log = array();
+		$forced_origin     = 'https://origin-' . self::token( $ctx, 6 ) . '.example.test';
+
+		$append_allowed_origin = static function ( array $origins ) use ( $forced_origin, &$filtered_origins ): array {
+			$filtered_origins = $origins;
+			$origins[]        = $forced_origin;
+			$origins[]        = $forced_origin;
+			return $origins;
+		};
+		$force_allowed_origin  = static function ( string $origin, $origin_arg ) use ( &$origin_filter_log ): string {
+			$origin_filter_log[] = array(
+				'origin'    => $origin,
+				'originArg' => $origin_arg,
+			);
+			return 'http://forced-origin.example.test' === $origin_arg ? $origin_arg : $origin;
+		};
+		$rewrite_http_origin   = static function ( string $origin ): string {
+			return 'http://filtered.example.test' === $origin ? 'https://filtered.example.test' : $origin;
+		};
+
+		try {
+			unset( $_SERVER['HTTP_ORIGIN'] );
+			$_SERVER['REQUEST_METHOD'] = 'GET';
+
+			$base_origins = get_allowed_http_origins();
+			self::collect_failure(
+				$failures,
+				array_values( array_unique( $base_origins ) ) === array_values( $base_origins )
+					&& in_array( 'http://example.test', $base_origins, true )
+					&& in_array( 'https://example.test', $base_origins, true )
+					&& ! in_array( 'http://example.test:8080', $base_origins, true ),
+				'get_allowed_http_origins derives unique scheme/host origins without preserving ports',
+				array( 'baseOrigins' => $base_origins )
+			);
+
+			add_filter( 'allowed_http_origins', $append_allowed_origin );
+			$allowed_with_filter = get_allowed_http_origins();
+			remove_filter( 'allowed_http_origins', $append_allowed_origin );
+
+			self::collect_failure(
+				$failures,
+				in_array( $forced_origin, $allowed_with_filter, true )
+					&& count( array_keys( $allowed_with_filter, $forced_origin, true ) ) === 2
+					&& array_values( array_unique( $filtered_origins ) ) === array_values( $filtered_origins ),
+				'allowed_http_origins filter receives base origins and can append exact-origin entries',
+				array(
+					'forcedOrigin'    => $forced_origin,
+					'filteredOrigins' => $filtered_origins,
+					'actualOrigins'   => $allowed_with_filter,
+				)
+			);
+
+			$origin_cases = array(
+				array( 'origin' => null, 'expected' => '' ),
+				array( 'origin' => 'http://example.test', 'expected' => 'http://example.test' ),
+				array( 'origin' => 'https://example.test', 'expected' => 'https://example.test' ),
+				array( 'origin' => 'http://example.test:8080', 'expected' => '' ),
+				array( 'origin' => 'http://evil.example.test', 'expected' => '' ),
+				array( 'origin' => 'http://example.test/', 'expected' => '' ),
+			);
+			for ( $i = 0; $i < self::GENERATED_ORIGIN_CASES; ++$i ) {
+				$origin_cases[] = self::origin_case( $ctx->fork( 'origin-' . $i ) );
+			}
+
+			foreach ( $origin_cases as $index => $case ) {
+				if ( null === $case['origin'] ) {
+					unset( $_SERVER['HTTP_ORIGIN'] );
+					$actual = is_allowed_http_origin();
+				} else {
+					$actual = is_allowed_http_origin( $case['origin'] );
+				}
+				self::collect_failure(
+					$failures,
+					$case['expected'] === $actual,
+					"is_allowed_http_origin exact-match case {$index}",
+					array(
+						'origin'   => $case['origin'],
+						'expected' => $case['expected'],
+						'actual'   => $actual,
+					)
+				);
+			}
+
+			add_filter( 'allowed_http_origins', $append_allowed_origin );
+			$filtered_allowed = is_allowed_http_origin( $forced_origin );
+			remove_filter( 'allowed_http_origins', $append_allowed_origin );
+
+			add_filter( 'allowed_http_origin', $force_allowed_origin, 10, 2 );
+			$forced_allowed = is_allowed_http_origin( 'http://forced-origin.example.test' );
+			remove_filter( 'allowed_http_origin', $force_allowed_origin, 10 );
+
+			self::collect_failure(
+				$failures,
+				$forced_origin === $filtered_allowed
+					&& 'http://forced-origin.example.test' === $forced_allowed
+					&& array(
+						array(
+							'origin'    => '',
+							'originArg' => 'http://forced-origin.example.test',
+						),
+					) === $origin_filter_log,
+				'is_allowed_http_origin applies allowlist and final-result filters with original arguments',
+				array(
+					'filteredAllowed' => $filtered_allowed,
+					'forcedAllowed'   => $forced_allowed,
+					'filterLog'       => $origin_filter_log,
+				)
+			);
+
+			$_SERVER['HTTP_ORIGIN'] = 'http://filtered.example.test';
+			add_filter( 'http_origin', $rewrite_http_origin );
+			$filtered_http_origin = get_http_origin();
+			remove_filter( 'http_origin', $rewrite_http_origin );
+
+			$_SERVER['HTTP_ORIGIN'] = 'http://example.test';
+			$allowed_send           = headers_sent() ? 'headers-sent' : send_origin_headers();
+
+			$_SERVER['HTTP_ORIGIN'] = 'http://evil.example.test';
+			$blocked_send           = send_origin_headers();
+
+			unset( $_SERVER['HTTP_ORIGIN'] );
+			$missing_send = send_origin_headers();
+
+			self::collect_failure(
+				$failures,
+				'https://filtered.example.test' === $filtered_http_origin
+					&& ( 'headers-sent' === $allowed_send || 'http://example.test' === $allowed_send )
+					&& false === $blocked_send
+					&& false === $missing_send,
+				'get_http_origin and non-OPTIONS send_origin_headers honor filters and allowed-origin gates',
+				array(
+					'filteredHttpOrigin' => $filtered_http_origin,
+					'allowedSend'        => $allowed_send,
+					'blockedSend'        => $blocked_send,
+					'missingSend'        => $missing_send,
+				)
+			);
+
+			$support_empty          = wp_http_supports();
+			$support_numeric_ssl    = wp_http_supports( array( 'ssl' ) );
+			$support_assoc_ssl      = wp_http_supports( array( 'ssl' => true ) );
+			$support_https_url      = wp_http_supports( array(), 'https://example.test/resource' );
+
+			self::collect_failure(
+				$failures,
+				true === $support_empty
+					&& $support_numeric_ssl === $support_assoc_ssl
+					&& $support_https_url === $support_assoc_ssl,
+				'wp_http_supports normalizes numeric SSL capabilities and URL-derived SSL requirements',
+				array(
+					'empty'      => $support_empty,
+					'numericSsl' => $support_numeric_ssl,
+					'assocSsl'   => $support_assoc_ssl,
+					'httpsUrl'   => $support_https_url,
+				)
+			);
+
+			$same_host_allowed = allowed_http_request_hosts( false, 'example.test' );
+			$evil_rejected     = allowed_http_request_hosts( false, 'evil.example.test' );
+
+			self::$allowed_redirect_hosts = array( 'evil.example.test' );
+			add_filter( 'allowed_redirect_hosts', array( __CLASS__, 'filter_allowed_redirect_hosts' ), 10, 2 );
+			$evil_allowed = allowed_http_request_hosts( false, 'evil.example.test' );
+			remove_filter( 'allowed_redirect_hosts', array( __CLASS__, 'filter_allowed_redirect_hosts' ), 10 );
+			self::$allowed_redirect_hosts = array();
+
+			self::collect_failure(
+				$failures,
+				true === $same_host_allowed
+					&& false === $evil_rejected
+					&& true === $evil_allowed,
+				'allowed_http_request_hosts mirrors wp_validate_redirect host allowlist decisions',
+				array(
+					'sameHostAllowed' => $same_host_allowed,
+					'evilRejected'    => $evil_rejected,
+					'evilAllowed'     => $evil_allowed,
+				)
+			);
+		} finally {
+			remove_filter( 'allowed_http_origins', $append_allowed_origin );
+			remove_filter( 'allowed_http_origin', $force_allowed_origin, 10 );
+			remove_filter( 'http_origin', $rewrite_http_origin );
+			remove_filter( 'allowed_redirect_hosts', array( __CLASS__, 'filter_allowed_redirect_hosts' ), 10 );
+			self::$allowed_redirect_hosts = array();
+			$_SERVER = $server_snapshot;
+		}
+
+		return $ctx->result(
+			'http.origin-cors-capability-helpers.contracts',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, 6 ) )
+		);
+	}
+
+	private static function origin_case( \ComponentFuzz\FuzzContext $ctx ): array {
+		$allowed_scheme = $ctx->choice( array( 'http', 'https' ) );
+		$allowed_origin = $allowed_scheme . '://example.test';
+		$mutations      = array(
+			array( 'origin' => $allowed_origin, 'expected' => $allowed_origin ),
+			array( 'origin' => strtoupper( $allowed_scheme ) . '://example.test', 'expected' => '' ),
+			array( 'origin' => $allowed_scheme . '://example.test:' . $ctx->choice( array( '80', '443', '8080' ) ), 'expected' => '' ),
+			array( 'origin' => $allowed_scheme . '://example.test/' . self::token( $ctx, 4 ), 'expected' => '' ),
+			array( 'origin' => $allowed_scheme . '://' . self::token( $ctx, 6 ) . '.example.test', 'expected' => '' ),
+			array( 'origin' => 'null', 'expected' => '' ),
+		);
+
+		return $ctx->choice( $mutations );
 	}
 
 	private static function check_proxy_contracts( \ComponentFuzz\FuzzContext $ctx ): array {
