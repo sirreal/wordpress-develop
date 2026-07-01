@@ -43,6 +43,7 @@ final class RestSiteEditorSurface {
 			$rows[] = self::check_template_item_route_dispatch( $ctx, $case, $fixtures );
 			$rows[] = self::check_template_lookup_fallback_dispatch( $ctx, $case );
 			$rows[] = self::check_template_revisions_autosaves( $ctx, $case, $fixtures );
+			$rows[] = self::check_template_revision_autosave_collection_dispatch( $ctx, $case, $fixtures );
 			$rows[] = self::check_navigation_fallback_controller( $ctx, $case, $fixtures );
 			$rows[] = self::check_edit_site_export_controller( $ctx );
 			$rows[] = self::check_block_templates_export_generator( $ctx, $case );
@@ -1905,7 +1906,7 @@ final class RestSiteEditorSurface {
 			array(
 				'case'       => self::case_summary( $case ),
 				'filterLog'  => $filter_log,
-				'notCovered' => 'Revision/autosave collection callbacks after permission success, template CPT queries, and filesystem-backed template traversal remain intentionally outside this bounded dispatch guard.',
+				'notCovered' => 'Template CPT queries and filesystem-backed template traversal remain intentionally outside this bounded dispatch guard.',
 			)
 		);
 	}
@@ -2263,6 +2264,373 @@ final class RestSiteEditorSurface {
 			array(
 				'revision' => $fixtures['templateRevision'],
 				'autosave' => $fixtures['templateAutosave'],
+			)
+		);
+	}
+
+	private static function check_template_revision_autosave_collection_dispatch(
+		\ComponentFuzz\FuzzContext $ctx,
+		array $case,
+		array $fixtures
+	): array {
+		$failures        = array();
+		$previous_server = $GLOBALS['wp_rest_server'] ?? null;
+		$server_existed  = array_key_exists( 'wp_rest_server', $GLOBALS );
+		$server          = new \WP_REST_Server();
+		$template        = self::template_object(
+			$case,
+			array(
+				'wp_id' => $fixtures['template'],
+			)
+		);
+		$template_filter = self::install_template_filter( $case['templateId'], 'wp_template', $template );
+		$query_log       = array();
+		$revision_log    = array();
+		$cap_filter      = null;
+		$matching_revisions = array_values(
+			array_filter(
+				array(
+					\get_post( $fixtures['templateAutosave'] ),
+					\get_post( $fixtures['templateRevision'] ),
+					\get_post( $fixtures['globalStylesRevision'] ),
+				),
+				static fn( $post ): bool => $post instanceof \WP_Post
+			)
+		);
+		$revision_query_filter = static function ( array $args, \WP_REST_Request $request ) use ( &$revision_log ): array {
+			$revision_log[] = array(
+				'parent'        => $request['parent'],
+				'page'          => $request['page'],
+				'per_page'      => $request['per_page'],
+				'offset'        => $request['offset'],
+				'fields'        => $request['_fields'],
+				'post_parent'   => $args['post_parent'] ?? null,
+				'posts_per_page' => $args['posts_per_page'] ?? null,
+				'paged'         => $args['paged'] ?? null,
+				'orderby'       => $args['orderby'] ?? null,
+				'order'         => $args['order'] ?? null,
+			);
+
+			return $args;
+		};
+		$posts_query_filter    = static function ( $posts, \WP_Query $query ) use (
+			&$query_log,
+			$fixtures,
+			$matching_revisions
+		) {
+			$vars = $query->query_vars;
+			if ( 'revision' !== ( $vars['post_type'] ?? null ) ) {
+				return $posts;
+			}
+
+			$query_log[] = array(
+				'post_parent'            => $vars['post_parent'] ?? null,
+				'post_type'              => $vars['post_type'] ?? null,
+				'post_status'            => $vars['post_status'] ?? null,
+				'posts_per_page'         => $vars['posts_per_page'] ?? null,
+				'paged'                  => $vars['paged'] ?? null,
+				'offset'                 => $vars['offset'] ?? null,
+				'fields'                 => $vars['fields'] ?? null,
+				'orderby'                => $vars['orderby'] ?? null,
+				'order'                  => $vars['order'] ?? null,
+				'update_post_term_cache' => $vars['update_post_term_cache'] ?? null,
+				'update_post_meta_cache' => $vars['update_post_meta_cache'] ?? null,
+			);
+
+			$matched = array_values(
+				array_filter(
+					$matching_revisions,
+					static function ( \WP_Post $post ) use ( $vars, $fixtures ): bool {
+						return (int) $post->post_parent === (int) ( $vars['post_parent'] ?? 0 )
+							&& (int) $post->post_parent === $fixtures['template']
+							&& 'revision' === $post->post_type
+							&& 'inherit' === $post->post_status;
+					}
+				)
+			);
+			if ( ! self::revision_order_is_date_id_desc( $vars['orderby'] ?? null, $vars['order'] ?? null ) ) {
+				$query->found_posts   = 0;
+				$query->max_num_pages = 0;
+				return array();
+			}
+
+			usort(
+				$matched,
+				static function ( \WP_Post $a, \WP_Post $b ): int {
+					$date_compare = strcmp( $b->post_date, $a->post_date );
+					if ( 0 !== $date_compare ) {
+						return $date_compare;
+					}
+					return $b->ID <=> $a->ID;
+				}
+			);
+
+			$total = count( $matched );
+			$per_page = (int) ( $vars['posts_per_page'] ?? -1 );
+			$paged    = max( 1, (int) ( $vars['paged'] ?? 1 ) );
+			$offset   = array_key_exists( 'offset', $vars ) && is_numeric( $vars['offset'] )
+				? max( 0, (int) $vars['offset'] )
+				: ( $per_page > 0 ? ( $paged - 1 ) * $per_page : 0 );
+
+			$page_items = $per_page > 0
+				? array_slice( $matched, $offset, $per_page )
+				: $matched;
+
+			$query->found_posts   = $total;
+			$query->max_num_pages = $per_page > 0 ? (int) ceil( $total / $per_page ) : ( $total > 0 ? 1 : 0 );
+
+			if ( 'ids' === ( $vars['fields'] ?? null ) ) {
+				return array_map(
+					static fn( \WP_Post $post ): int => (int) $post->ID,
+					$page_items
+				);
+			}
+
+			return array_map(
+				static fn( \WP_Post $post ): \WP_Post => clone $post,
+				$page_items
+			);
+		};
+
+		$revision_route  = '/wp/v2/templates/' . $case['templateId'] . '/revisions';
+		$autosaves_route = '/wp/v2/templates/' . $case['templateId'] . '/autosaves';
+
+		\add_filter( 'rest_revision_query', $revision_query_filter, 10, 2 );
+		\add_filter( 'posts_pre_query', $posts_query_filter, 10, 2 );
+
+		try {
+			$GLOBALS['wp_rest_server'] = $server;
+			( new \WP_REST_Template_Revisions_Controller( 'wp_template' ) )->register_routes();
+			( new \WP_REST_Template_Autosaves_Controller( 'wp_template' ) )->register_routes();
+
+			$denied_revision = $server->dispatch(
+				self::request(
+					'GET',
+					$revision_route,
+					array(
+						'context'  => 'edit',
+						'per_page' => 1,
+						'_fields'  => 'id,wp_id',
+					)
+				)
+			);
+			$denied_autosave = $server->dispatch(
+				self::request(
+					'GET',
+					$autosaves_route,
+					array(
+						'context' => 'edit',
+						'_fields' => 'id,wp_id',
+					)
+				)
+			);
+			$denied_query_log = $query_log;
+
+			$cap_filter = self::install_cap_filter( array( 'edit_posts' ) );
+			try {
+				$revision_page = $server->dispatch(
+					self::request(
+						'GET',
+						$revision_route,
+						array(
+							'context'  => 'edit',
+							'per_page' => 1,
+							'page'     => 1,
+							'_fields'  => 'id,parent,content,wp_id',
+						)
+					)
+				);
+				$revision_head = $server->dispatch(
+					self::request(
+						'HEAD',
+						$revision_route,
+						array(
+							'context'  => 'edit',
+							'per_page' => 1,
+							'page'     => 1,
+							'_fields'  => 'id,parent,wp_id',
+						)
+					)
+				);
+				$revision_oob = $server->dispatch(
+					self::request(
+						'GET',
+						$revision_route,
+						array(
+							'context'  => 'edit',
+							'per_page' => 1,
+							'page'     => 5,
+							'_fields'  => 'id,wp_id',
+						)
+					)
+				);
+				$autosave_collection = $server->dispatch(
+					self::request(
+						'GET',
+						$autosaves_route,
+						array(
+							'context' => 'edit',
+							'_fields' => 'id,parent,content,wp_id',
+						)
+					)
+				);
+				$autosave_head       = $server->dispatch(
+					self::request(
+						'HEAD',
+						$autosaves_route,
+						array(
+							'context' => 'edit',
+							'_fields' => 'id,parent,wp_id',
+						)
+					)
+				);
+			} finally {
+				if ( null !== $cap_filter ) {
+					\remove_filter( 'user_has_cap', $cap_filter, 10 );
+				}
+			}
+		} finally {
+			\remove_filter( 'posts_pre_query', $posts_query_filter, 10 );
+			\remove_filter( 'rest_revision_query', $revision_query_filter, 10 );
+			\remove_filter( 'pre_get_block_template', $template_filter, 10 );
+			if ( $server_existed ) {
+				$GLOBALS['wp_rest_server'] = $previous_server;
+			} else {
+				unset( $GLOBALS['wp_rest_server'] );
+			}
+		}
+
+		$denied_status = \rest_authorization_required_code();
+		$denied_revision_data = $denied_revision instanceof \WP_REST_Response ? $denied_revision->get_data() : array();
+		$denied_autosave_data = $denied_autosave instanceof \WP_REST_Response ? $denied_autosave->get_data() : array();
+		$revision_page_data   = $revision_page instanceof \WP_REST_Response ? $revision_page->get_data() : null;
+		$revision_head_data   = $revision_head instanceof \WP_REST_Response ? $revision_head->get_data() : null;
+		$revision_oob_data    = $revision_oob instanceof \WP_REST_Response ? $revision_oob->get_data() : array();
+		$autosave_data        = $autosave_collection instanceof \WP_REST_Response ? $autosave_collection->get_data() : null;
+		$autosave_head_data   = $autosave_head instanceof \WP_REST_Response ? $autosave_head->get_data() : null;
+		$revision_next_link   = $revision_page instanceof \WP_REST_Response ? (string) self::response_header( $revision_page, 'Link' ) : '';
+		$revision_page_keys   = is_array( $revision_page_data ) && isset( $revision_page_data[0] ) && is_array( $revision_page_data[0] )
+			? array_keys( $revision_page_data[0] )
+			: array();
+		sort( $revision_page_keys );
+
+		self::collect_failure(
+			$failures,
+			$denied_revision instanceof \WP_REST_Response
+				&& $denied_status === $denied_revision->get_status()
+				&& 'rest_cannot_read' === ( $denied_revision_data['code'] ?? null )
+				&& $denied_autosave instanceof \WP_REST_Response
+				&& $denied_status === $denied_autosave->get_status()
+				&& 'rest_cannot_read' === ( $denied_autosave_data['code'] ?? null )
+				&& array() === $denied_query_log,
+			'revision and autosave collection dispatch deny access before revision queries run',
+			array(
+				'revisionStatus' => $denied_revision instanceof \WP_REST_Response ? $denied_revision->get_status() : null,
+				'revisionData'   => $denied_revision_data,
+				'autosaveStatus' => $denied_autosave instanceof \WP_REST_Response ? $denied_autosave->get_status() : null,
+				'autosaveData'   => $denied_autosave_data,
+				'queryLog'       => $denied_query_log,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$revision_page instanceof \WP_REST_Response
+				&& 200 === $revision_page->get_status()
+				&& is_array( $revision_page_data )
+				&& 1 === count( $revision_page_data )
+				&& $case['templateId'] === ( $revision_page_data[0]['id'] ?? null )
+				&& $fixtures['template'] === (int) ( $revision_page_data[0]['parent'] ?? 0 )
+				&& $fixtures['templateAutosave'] === (int) ( $revision_page_data[0]['wp_id'] ?? 0 )
+				&& $case['templateAutosaveContent'] === ( $revision_page_data[0]['content']['raw'] ?? null )
+				&& array( 'content', 'id', 'parent', 'wp_id' ) === $revision_page_keys
+				&& '2' === self::response_header( $revision_page, 'X-WP-Total' )
+				&& '2' === self::response_header( $revision_page, 'X-WP-TotalPages' )
+				&& self::revision_link_header_targets_parent( $revision_next_link, $case['templateId'], 2, 'next' ),
+			'revision collection GET dispatch returns paginated template-shaped data with totals and _fields projection',
+			array(
+				'status'  => $revision_page instanceof \WP_REST_Response ? $revision_page->get_status() : null,
+				'data'    => $revision_page_data,
+				'keys'    => $revision_page_keys,
+				'nextLink' => $revision_next_link,
+				'headers' => $revision_page instanceof \WP_REST_Response ? $revision_page->get_headers() : array(),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$revision_head instanceof \WP_REST_Response
+				&& 200 === $revision_head->get_status()
+				&& array() === $revision_head_data
+				&& $revision_oob instanceof \WP_REST_Response
+				&& 400 === $revision_oob->get_status()
+				&& 'rest_revision_invalid_page_number' === ( $revision_oob_data['code'] ?? null ),
+			'revision collection HEAD dispatch returns an empty body and out-of-bounds pages fail closed',
+			array(
+				'headStatus' => $revision_head instanceof \WP_REST_Response ? $revision_head->get_status() : null,
+				'headData'   => $revision_head_data,
+				'headHeaders' => $revision_head instanceof \WP_REST_Response ? $revision_head->get_headers() : array(),
+				'oobStatus'  => $revision_oob instanceof \WP_REST_Response ? $revision_oob->get_status() : null,
+				'oobData'    => $revision_oob_data,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$autosave_collection instanceof \WP_REST_Response
+				&& 200 === $autosave_collection->get_status()
+				&& is_array( $autosave_data )
+				&& 1 === count( $autosave_data )
+				&& $case['templateId'] === ( $autosave_data[0]['id'] ?? null )
+				&& $fixtures['template'] === (int) ( $autosave_data[0]['parent'] ?? 0 )
+				&& $fixtures['templateAutosave'] === (int) ( $autosave_data[0]['wp_id'] ?? 0 )
+				&& $case['templateAutosaveContent'] === ( $autosave_data[0]['content']['raw'] ?? null )
+				&& ! in_array( $fixtures['templateRevision'], array_map( 'intval', array_column( $autosave_data, 'wp_id' ) ), true )
+				&& $autosave_head instanceof \WP_REST_Response
+				&& 200 === $autosave_head->get_status()
+				&& array() === $autosave_head_data,
+			'autosave collection GET dispatch filters the revision set to autosaves while HEAD returns empty data',
+			array(
+				'status'     => $autosave_collection instanceof \WP_REST_Response ? $autosave_collection->get_status() : null,
+				'data'       => $autosave_data,
+				'headStatus' => $autosave_head instanceof \WP_REST_Response ? $autosave_head->get_status() : null,
+				'headData'   => $autosave_head_data,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			count( $query_log ) >= 4
+				&& count( $revision_log ) >= 3
+				&& self::revision_query_log_has( $query_log, $fixtures['template'], 1, 1, 'all', true )
+				&& self::revision_query_log_has( $query_log, $fixtures['template'], 1, 1, 'ids', false )
+				&& self::revision_query_log_has( $query_log, $fixtures['template'], -1, 0, 'all', true )
+				&& false === \has_filter( 'posts_pre_query', $posts_query_filter )
+				&& false === \has_filter( 'rest_revision_query', $revision_query_filter )
+				&& false === \has_filter( 'pre_get_block_template', $template_filter )
+				&& ( null === $cap_filter || false === \has_filter( 'user_has_cap', $cap_filter ) ),
+			'revision and autosave collection dispatch use bounded query shapes and remove all local filters',
+			array(
+				'queryLog' => $query_log,
+				'revisionLog' => $revision_log,
+				'filters'  => array(
+					'postsPreQuery'       => \has_filter( 'posts_pre_query', $posts_query_filter ),
+					'restRevisionQuery'   => \has_filter( 'rest_revision_query', $revision_query_filter ),
+					'preGetBlockTemplate' => \has_filter( 'pre_get_block_template', $template_filter ),
+					'userHasCap'          => null === $cap_filter ? false : \has_filter( 'user_has_cap', $cap_filter ),
+				),
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'rest-site-editor.template-revision-autosave-collection-dispatch',
+			$failures,
+			array(
+				'templateId' => $case['templateId'],
+				'revision'   => $fixtures['templateRevision'],
+				'autosave'   => $fixtures['templateAutosave'],
+				'queryLog'   => $query_log,
 			)
 		);
 	}
@@ -3846,6 +4214,63 @@ PHP;
 		}
 
 		return false;
+	}
+
+	private static function revision_query_log_has(
+		array $log,
+		int $parent_id,
+		int $posts_per_page,
+		int $paged,
+		$fields,
+		$update_post_meta_cache
+	): bool {
+		foreach ( $log as $entry ) {
+			if (
+				is_array( $entry )
+				&& $parent_id === (int) ( $entry['post_parent'] ?? 0 )
+				&& 'revision' === ( $entry['post_type'] ?? null )
+				&& 'inherit' === ( $entry['post_status'] ?? null )
+				&& $posts_per_page === (int) ( $entry['posts_per_page'] ?? 0 )
+				&& $paged === (int) ( $entry['paged'] ?? 0 )
+				&& $fields === ( $entry['fields'] ?? null )
+				&& $update_post_meta_cache === ( $entry['update_post_meta_cache'] ?? null )
+				&& self::revision_order_is_date_id_desc( $entry['orderby'] ?? null, $entry['order'] ?? null )
+			) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private static function revision_order_is_date_id_desc( $orderby, $order ): bool {
+		if ( 'DESC' !== strtoupper( (string) $order ) ) {
+			return false;
+		}
+
+		if ( 'date ID' === $orderby ) {
+			return true;
+		}
+
+		if ( ! is_array( $orderby ) ) {
+			return false;
+		}
+
+		$date_order = $orderby['date'] ?? $orderby['post_date'] ?? null;
+		$id_order   = $orderby['ID'] ?? null;
+
+		return 'DESC' === strtoupper( (string) $date_order )
+			&& 'DESC' === strtoupper( (string) $id_order );
+	}
+
+	private static function revision_link_header_targets_parent( string $header, string $parent_id, int $page, string $rel ): bool {
+		$encoded_parent = rawurlencode( $parent_id );
+
+		return str_contains( $header, 'rel="' . $rel . '"' )
+			&& str_contains( $header, 'page=' . $page )
+			&& ! str_contains( $header, '/templates/0/revisions' )
+			&& ! str_contains( $header, '%2Ftemplates%2F0%2Frevisions' )
+			&& ( str_contains( $header, $parent_id ) || str_contains( $header, $encoded_parent ) );
 	}
 
 	private static function inspect_block_template_export_zip(
