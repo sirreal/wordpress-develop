@@ -226,12 +226,13 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 4732 passed, 0 failed, 0 errored, 1 skipped at 112 surfaces over 1 iteration after adding formatting file-name and username sanitizer coverage.</div>
+			<div class="note">Non-skipped pass rate: 4733 passed, 0 failed, 0 errored, 1 skipped at 112 surfaces over 1 iteration after adding post status viewability coverage.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Latest focused addition: <code>formatting</code> file-name and username sanitizer coverage exercises exact Core fixtures for multi-extension munging, Unicode space normalization, invalid UTF-8 stripping, unnamed-file fallback, percent/entity/tag removal, strict username ASCII reduction, generated path/control/extension/user cases, idempotence, unsafe-character rejection, and filter cleanup; focused seed 224 passed 15 checks, seeds 1 and 224 over 25 iterations each passed 375 checks, adjacent formatting/security/identity/l10n smoke passed 1339 checks with no skips, and broad seed 224 smoke passed 4732 checks with 1 skip.</div>
+			<div class="note">Latest focused addition: <code>post-types</code> status viewability coverage exercises <code>is_post_status_viewable()</code> with explicit public, private, custom, built-in emulation, internal, and protected status cases, generated status-property matrices, exact string/object lookup parity, unsanitized-name and non-string-scalar fail-closed paths, complete unregistered status objects, strict boolean filter return behavior, early-return filter bypass, and filter cleanup; focused seed 224 passed 13 checks, seeds 1, 224, and 49380 over 25 iterations each passed 325 checks, adjacent post/content/query/taxonomy/REST smoke passed 731 checks with no skips, and broad seed 224 smoke passed 4733 checks with 1 skip.</div>
+			<div class="note">Previous focused addition: <code>formatting</code> file-name and username sanitizer coverage exercises exact Core fixtures for multi-extension munging, Unicode space normalization, invalid UTF-8 stripping, unnamed-file fallback, percent/entity/tag removal, strict username ASCII reduction, generated path/control/extension/user cases, idempotence, unsafe-character rejection, and filter cleanup; focused seed 224 passed 15 checks, seeds 1 and 224 over 25 iterations each passed 375 checks, adjacent formatting/security/identity/l10n smoke passed 1339 checks with no skips, and broad seed 224 smoke passed 4732 checks with 1 skip.</div>
 			<div class="note">Previous focused addition: <code>block-supports</code> duotone coverage exercises support registration gates, legacy metadata migration, preset/custom/unset/global-style render paths, empty-content CSS generation, unsupported/no-attribute fail-closed paths, safe stored CSS/SVG/editor assets, Core preset slug normalization boundaries, and <code>WP_Duotone</code> static restoration; focused seed 224 passed 7 checks, seeds 1 and 224 over 25 iterations each passed 175 checks, adjacent block/editor/style smoke passed 66 checks with no skips, and broad seed 224 smoke passed 4731 checks with 1 skip.</div>
 			<div class="note">Previous focused addition: <code>image-metadata</code> real Core fixture replay covers camera/timestamp/fraction fields, IPTC credit/caption/copyright/title, UTF-8 captions, keywords, orientation, accessibility alt text, metadata shape, final filter payloads, and filter restoration across shuffled JPEG fixtures; focused seed 224 passed 8 checks, seeds 1 and 224 over 25 iterations each passed 200 checks, adjacent media parser/chrome smoke passed 87 checks with no skips, standalone <code>rest-media-attachments</code> sanity passed 7 checks, and broad seed 224 smoke passed 4730 checks with 1 skip.</div>
 			<div class="note">Previous focused addition: <code>email</code> <code>make_clickable()</code> coverage links full ACE/punycode final labels without leaving partial <code>xn</code> anchors, keeps malformed final labels unlinked, and converts the old punycode-TLD partial-link skip into a failing assertion; focused seed 224 passed 1248 checks, seed 1 passed 1245 checks, adjacent <code>email,mail,identity</code> smoke passed 1260 checks with no skips, and broad seed 224 smoke passed 4729 checks with 1 skip.</div>
@@ -898,10 +899,10 @@
 				</tr>
 				<tr>
 					<td><code>post-types</code></td>
-					<td><span class="status good">review fixes passed</span></td>
-					<td>Main worktree plus Halley the 4th worker and Noether review; duplicate registration cleanup through <code>09c2d3b4f8</code></td>
-					<td>Main focused run: 1200 passed, 0 skipped, 0 failed after duplicate-registration cleanup; post type PHPUnit: 44 tests, 133 assertions; latest broad run: 8629 passed, 66 skipped, 0 failed.</td>
-					<td>Post type/status registries, sanitized post-status key storage and overwrite behavior, duplicate post-type replacement cleanup for query vars, rewrite rules, supports, taxonomies, hooks, and meta caps, registration filters/actions and meta-box lifecycle, isolated REST route registration, support-gated revisions/autosaves, late route ordering, capabilities, query/rewrite state, unregister cleanup, archive/feed link helpers and filters.</td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Scoped worktree <code>component-fuzz-post-status-viewability</code>; builds on duplicate registration cleanup through <code>09c2d3b4f8</code>.</td>
+					<td>Latest focused runs: seed 224 passed 13 checks, seeds 1, 224, and 49380 over 25 iterations each passed 325 checks; adjacent <code>post-types,content,content-lifecycle,query,taxonomy,taxonomy-relationships,rest-controllers,metadata</code> smoke passed 731 checks with no skips; latest broad run passed 4733 checks with 1 skip. Targeted PHPUnit was unavailable because <code>wp-tests-config.php</code> is missing.</td>
+					<td>Post type/status registries, sanitized post-status key storage and overwrite behavior, generated <code>is_post_status_viewable()</code> public/private/custom/built-in/internal/protected object-property matrices, string/object lookup parity, unsanitized-name and invalid-input fail-closed paths, strict boolean <code>is_post_status_viewable</code> filter contracts and cleanup, duplicate post-type replacement cleanup for query vars, rewrite rules, supports, taxonomies, hooks, and meta caps, registration filters/actions and meta-box lifecycle, isolated REST route registration, support-gated revisions/autosaves, late route ordering, capabilities, query/rewrite state, unregister cleanup, archive/feed link helpers and filters.</td>
 				</tr>
 				<tr>
 					<td><code>style</code></td>
@@ -1320,9 +1321,9 @@
 					</tr>
 					<tr>
 						<td><code>current branch</code></td>
-						<td><code>formatting</code></td>
-						<td><code>formatting</code> passed 15 checks at seed 224 and 375 checks at seeds 1 and 224 over 25 iterations; adjacent formatting/security/identity/l10n smoke passed 1339 checks with no skips after adding file-name and username sanitizer exact/generated coverage and filter cleanup assertions.</td>
-						<td>4732 passed, 1 skipped, 0 failed at 1 iteration after adding formatting file-name and username sanitizer coverage.</td>
+						<td><code>post-types</code></td>
+						<td><code>post-types</code> passed 13 checks at seed 224 and 325 checks at seeds 1, 224, and 49380 over 25 iterations; adjacent post/content/query/taxonomy/REST smoke passed 731 checks with no skips after adding status viewability exact/generated coverage, lookup fail-closed paths, strict filter return contracts, and filter cleanup assertions.</td>
+						<td>4733 passed, 1 skipped, 0 failed at 1 iteration after adding post status viewability coverage.</td>
 					</tr>
 					<tr>
 						<td><code>cbc425b410</code></td>

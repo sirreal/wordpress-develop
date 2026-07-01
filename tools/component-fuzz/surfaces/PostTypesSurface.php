@@ -41,6 +41,7 @@ final class PostTypesSurface {
 			$rows[] = self::check_post_type_unregister_cleanup( $ctx );
 			$rows[] = self::check_post_type_archive_link_helpers( $ctx );
 			$rows[] = self::check_post_status_defaults_and_filters( $ctx );
+			$rows[] = self::check_post_status_viewability( $ctx->fork( 'status-viewability' ) );
 			$rows[] = self::check_post_status_name_sanitization_and_overwrite( $ctx->fork( 'status-name-sanitization' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = self::row(
@@ -124,6 +125,7 @@ final class PostTypesSurface {
 				'has_action',
 				'has_filter',
 				'is_post_type_viewable',
+				'is_post_status_viewable',
 				'is_wp_error',
 				'post_type_exists',
 				'post_type_supports',
@@ -1745,6 +1747,7 @@ final class PostTypesSurface {
 					&& $expected['private'] === $status->private
 					&& $expected['protected'] === $status->protected
 					&& $expected['internal'] === $status->internal
+					&& $expected['_builtin'] === $status->_builtin
 					&& $expected['publicly_queryable'] === $status->publicly_queryable
 					&& $expected['exclude_from_search'] === $status->exclude_from_search
 					&& $expected['show_in_admin_all_list'] === $status->show_in_admin_all_list
@@ -1789,6 +1792,241 @@ final class PostTypesSurface {
 		return self::row(
 			$ctx,
 			'post-types.status.defaults-and-filters',
+			array() === $failures,
+			array(
+				'cases'    => count( $cases ),
+				'failures' => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
+	private static function check_post_status_viewability( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_registries();
+
+		$failures = array();
+		$cases    = self::status_viewability_cases( $ctx->fork( 'statuses' ) );
+
+		foreach ( $cases as $index => $case ) {
+			$status = \register_post_status( $case['name'], $case['args'] );
+			if ( ! is_object( $status ) ) {
+				$failures[] = array(
+					'label'  => "post status viewability registration case {$index}",
+					'case'   => $case,
+					'result' => self::describe_value( $status ),
+				);
+				continue;
+			}
+
+			$expected      = self::expected_status_viewable( $status );
+			$string_result = \is_post_status_viewable( $case['name'] );
+			$object_result = \is_post_status_viewable( $status );
+			$lookup_result = \is_post_status_viewable( \get_post_status_object( $case['name'] ) );
+			self::collect_failure(
+				$failures,
+				$expected === $string_result
+					&& $expected === $object_result
+					&& $expected === $lookup_result,
+				"post status viewability matches object properties case {$index}",
+				array(
+					'case'         => $case,
+					'status'       => self::status_summary( $status ),
+					'expected'     => $expected,
+					'stringResult' => $string_result,
+					'objectResult' => $object_result,
+					'lookupResult' => $lookup_result,
+				)
+			);
+		}
+
+		$raw_name       = 'Viewable Status ' . $ctx->int( 100, 999 ) . '!';
+		$sanitized_name = \sanitize_key( $raw_name );
+		$raw_status     = \register_post_status(
+			$raw_name,
+			array(
+				'publicly_queryable' => true,
+				'public'             => false,
+				'_builtin'           => false,
+			)
+		);
+		$raw_result     = \is_post_status_viewable( $raw_name );
+		$clean_result   = \is_post_status_viewable( $sanitized_name );
+		self::collect_failure(
+			$failures,
+			is_object( $raw_status )
+				&& true === $clean_result
+				&& false === $raw_result,
+			'post status viewability requires exact registered key and does not sanitize lookup strings',
+			array(
+				'rawName'       => $raw_name,
+				'sanitizedName' => $sanitized_name,
+				'status'        => is_object( $raw_status ) ? self::status_summary( $raw_status ) : self::describe_value( $raw_status ),
+				'rawResult'     => $raw_result,
+				'cleanResult'   => $clean_result,
+			)
+		);
+
+		$invalid_inputs = array(
+			'unknown-string' => 'missing_' . $ctx->identifier( 4, 8 ),
+			'empty-string'   => '',
+			'false'          => false,
+			'true'           => true,
+			'int'            => $ctx->int( 1, 999 ),
+			'float'          => (float) $ctx->int( 1, 999 ),
+			'array'          => array( 'publish' ),
+			'null'           => null,
+		);
+		foreach ( $invalid_inputs as $label => $input ) {
+			$result = \is_post_status_viewable( $input );
+			self::collect_failure(
+				$failures,
+				false === $result,
+				"post status viewability rejects invalid input {$label}",
+				array(
+					'label'  => $label,
+					'input'  => self::describe_value( $input ),
+					'result' => $result,
+				)
+			);
+		}
+
+		$synthetic_status = (object) array(
+			'name'               => 'synthetic_' . $ctx->identifier( 4, 8 ),
+			'internal'           => false,
+			'protected'          => false,
+			'publicly_queryable' => false,
+			'_builtin'           => true,
+			'public'             => true,
+		);
+		$synthetic_result = \is_post_status_viewable( $synthetic_status );
+		self::collect_failure(
+			$failures,
+			true === $synthetic_result,
+			'post status viewability accepts complete unregistered status objects',
+			array(
+				'status' => self::status_summary( $synthetic_status ),
+				'result' => $synthetic_result,
+			)
+		);
+
+		$filter_calls  = array();
+		$filter_return = null;
+		$filter        = static function ( bool $is_viewable, object $post_status ) use ( &$filter_calls, &$filter_return ) {
+			$filter_calls[] = array(
+				'base'   => $is_viewable,
+				'name'   => $post_status->name ?? null,
+				'return' => $filter_return,
+			);
+
+			return $filter_return;
+		};
+
+		$filterable_status = \register_post_status(
+			self::status_name( $ctx->fork( 'filterable' ), 'view' ),
+			array(
+				'publicly_queryable' => false,
+				'public'             => false,
+				'_builtin'           => false,
+			)
+		);
+		$strict_status     = \register_post_status(
+			self::status_name( $ctx->fork( 'strict' ), 'view' ),
+			array(
+				'publicly_queryable' => true,
+				'public'             => false,
+				'_builtin'           => false,
+			)
+		);
+		$internal_status   = \register_post_status(
+			self::status_name( $ctx->fork( 'internal' ), 'view' ),
+			array(
+				'internal'           => true,
+				'publicly_queryable' => true,
+				'public'             => true,
+				'_builtin'           => true,
+			)
+		);
+		$protected_status  = \register_post_status(
+			self::status_name( $ctx->fork( 'protected' ), 'view' ),
+			array(
+				'protected'          => true,
+				'publicly_queryable' => true,
+				'public'             => true,
+				'_builtin'           => true,
+			)
+		);
+
+		\add_filter( 'is_post_status_viewable', $filter, 10, 2 );
+		try {
+			$before_early_returns = count( $filter_calls );
+			$filter_return        = true;
+			$forced_true          = \is_post_status_viewable( $filterable_status );
+			$internal_result      = \is_post_status_viewable( $internal_status );
+			$protected_result     = \is_post_status_viewable( $protected_status );
+			$after_early_returns  = count( $filter_calls );
+
+			$filter_return = 'truthy';
+			$truthy_result = \is_post_status_viewable( $strict_status );
+
+			$filter_return = 1;
+			$one_result    = \is_post_status_viewable( $strict_status );
+
+			$filter_return = false;
+			$forced_false  = \is_post_status_viewable( $strict_status );
+		} finally {
+			\remove_filter( 'is_post_status_viewable', $filter, 10 );
+		}
+
+		$expected_filter_calls = array(
+			array(
+				'base'   => false,
+				'name'   => is_object( $filterable_status ) ? $filterable_status->name : null,
+				'return' => true,
+			),
+			array(
+				'base'   => true,
+				'name'   => is_object( $strict_status ) ? $strict_status->name : null,
+				'return' => 'truthy',
+			),
+			array(
+				'base'   => true,
+				'name'   => is_object( $strict_status ) ? $strict_status->name : null,
+				'return' => 1,
+			),
+			array(
+				'base'   => true,
+				'name'   => is_object( $strict_status ) ? $strict_status->name : null,
+				'return' => false,
+			),
+		);
+
+		self::collect_failure(
+			$failures,
+			true === $forced_true
+				&& false === $internal_result
+				&& false === $protected_result
+				&& $after_early_returns === $before_early_returns + 1
+				&& false === $truthy_result
+				&& false === $one_result
+				&& false === $forced_false
+				&& $expected_filter_calls === $filter_calls
+				&& false === \has_filter( 'is_post_status_viewable', $filter, 10 ),
+			'post status viewability filter is strict boolean and skipped for internal/protected statuses',
+			array(
+				'forcedTrue'         => $forced_true,
+				'internalResult'     => $internal_result,
+				'protectedResult'    => $protected_result,
+				'truthyStringResult' => $truthy_result,
+				'intOneResult'       => $one_result,
+				'forcedFalse'        => $forced_false,
+				'calls'              => $filter_calls,
+				'expectedCalls'       => $expected_filter_calls,
+				'activeAfter'        => \has_filter( 'is_post_status_viewable', $filter, 10 ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'post-types.status.viewability-and-filter-strictness',
 			array() === $failures,
 			array(
 				'cases'    => count( $cases ),
@@ -1857,6 +2095,7 @@ final class PostTypesSurface {
 					&& $expected['private'] === $status->private
 					&& $expected['protected'] === $status->protected
 					&& $expected['internal'] === $status->internal
+					&& $expected['_builtin'] === $status->_builtin
 					&& ! $raw_key_leaked,
 				"post status sanitized key registration case {$index}",
 				array(
@@ -1885,7 +2124,8 @@ final class PostTypesSurface {
 					&& $expected['public'] === $status->public
 					&& $expected['private'] === $status->private
 					&& $expected['protected'] === $status->protected
-					&& $expected['internal'] === $status->internal,
+					&& $expected['internal'] === $status->internal
+					&& $expected['_builtin'] === $status->_builtin,
 				"post status lookup matches last sanitized registration {$key}",
 				array(
 					'key'      => $key,
@@ -2211,6 +2451,120 @@ final class PostTypesSurface {
 		return $cases;
 	}
 
+	private static function status_viewability_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$cases = array(
+			array(
+				'label' => 'implicit-internal-default',
+				'name'  => self::status_name( $ctx->fork( 'implicit' ), 'view' ),
+				'args'  => array(),
+			),
+			array(
+				'label' => 'public-default-queryable',
+				'name'  => self::status_name( $ctx->fork( 'public' ), 'view' ),
+				'args'  => array(
+					'public' => true,
+				),
+			),
+			array(
+				'label' => 'custom-public-not-queryable',
+				'name'  => self::status_name( $ctx->fork( 'custom-public' ), 'view' ),
+				'args'  => array(
+					'public'             => true,
+					'publicly_queryable' => false,
+					'_builtin'           => false,
+				),
+			),
+			array(
+				'label' => 'custom-queryable-not-public',
+				'name'  => self::status_name( $ctx->fork( 'custom-queryable' ), 'view' ),
+				'args'  => array(
+					'public'             => false,
+					'publicly_queryable' => true,
+					'_builtin'           => false,
+				),
+			),
+			array(
+				'label' => 'builtin-public-not-queryable',
+				'name'  => self::status_name( $ctx->fork( 'builtin-public' ), 'view' ),
+				'args'  => array(
+					'public'             => true,
+					'publicly_queryable' => false,
+					'_builtin'           => true,
+				),
+			),
+			array(
+				'label' => 'builtin-not-public',
+				'name'  => self::status_name( $ctx->fork( 'builtin-private' ), 'view' ),
+				'args'  => array(
+					'public'             => false,
+					'publicly_queryable' => false,
+					'_builtin'           => true,
+				),
+			),
+			array(
+				'label' => 'private-queryable',
+				'name'  => self::status_name( $ctx->fork( 'private-queryable' ), 'view' ),
+				'args'  => array(
+					'private'            => true,
+					'publicly_queryable' => true,
+				),
+			),
+			array(
+				'label' => 'private-default-not-queryable',
+				'name'  => self::status_name( $ctx->fork( 'private-default' ), 'view' ),
+				'args'  => array(
+					'private' => true,
+				),
+			),
+			array(
+				'label' => 'internal-short-circuit',
+				'name'  => self::status_name( $ctx->fork( 'internal' ), 'view' ),
+				'args'  => array(
+					'internal'           => true,
+					'publicly_queryable' => true,
+					'public'             => true,
+					'_builtin'           => true,
+				),
+			),
+			array(
+				'label' => 'protected-short-circuit',
+				'name'  => self::status_name( $ctx->fork( 'protected' ), 'view' ),
+				'args'  => array(
+					'protected'          => true,
+					'publicly_queryable' => true,
+					'public'             => true,
+					'_builtin'           => true,
+				),
+			),
+		);
+
+		for ( $i = count( $cases ); $i < self::CASES; ++$i ) {
+			$case = $ctx->fork( 'view-' . $i );
+			$args = array(
+				'public'             => $case->choice( array( null, true, false ) ),
+				'internal'           => $case->choice( array( null, true, false ) ),
+				'protected'          => $case->choice( array( null, true, false ) ),
+				'private'            => $case->choice( array( null, true, false ) ),
+				'publicly_queryable' => $case->choice( array( null, true, false ) ),
+				'_builtin'           => $case->bool(),
+			);
+			$args = array_filter(
+				$args,
+				static function ( $value ): bool {
+					return null !== $value;
+				}
+			);
+
+			$cases[] = array(
+				'label' => 'generated ' . $i,
+				'name'  => self::status_name( $case->fork( 'name' ), 'view' ),
+				'args'  => $args,
+			);
+		}
+
+		return $cases;
+	}
+
 	private static function register_case_taxonomies( array $case ): array {
 		$failures = array();
 
@@ -2513,6 +2867,7 @@ final class PostTypesSurface {
 			'private'                   => $private,
 			'protected'                 => $protected,
 			'internal'                  => $internal,
+			'_builtin'                  => (bool) ( $args['_builtin'] ?? false ),
 			'publicly_queryable'        => (bool) ( $args['publicly_queryable'] ?? $public ),
 			'exclude_from_search'       => (bool) ( $args['exclude_from_search'] ?? $internal ),
 			'show_in_admin_all_list'    => (bool) ( $args['show_in_admin_all_list'] ?? ! $internal ),
@@ -2528,6 +2883,15 @@ final class PostTypesSurface {
 				)
 				: $args['label_count'],
 		);
+	}
+
+	private static function expected_status_viewable( object $status ): bool {
+		return empty( $status->internal )
+			&& empty( $status->protected )
+			&& (
+				! empty( $status->publicly_queryable )
+				|| ( ! empty( $status->_builtin ) && ! empty( $status->public ) )
+			);
 	}
 
 	private static function post_type_props_match( \WP_Post_Type $object, array $expected ): bool {
@@ -2992,6 +3356,7 @@ final class PostTypesSurface {
 			'private'               => $status->private ?? null,
 			'protected'             => $status->protected ?? null,
 			'internal'              => $status->internal ?? null,
+			'builtin'               => $status->_builtin ?? null,
 			'publiclyQueryable'     => $status->publicly_queryable ?? null,
 			'excludeFromSearch'     => $status->exclude_from_search ?? null,
 			'showInAdminAllList'    => $status->show_in_admin_all_list ?? null,

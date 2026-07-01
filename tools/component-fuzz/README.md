@@ -571,7 +571,7 @@ database, network requests, or a configured site.
   late-route ordering, duplicate post-type replacement cleanup, support feature
   registration, capability generation, registry query operators, query/archive
   normalization, unregister cleanup, archive/feed link filters, and status
-  filtering.
+  filtering including status viewability and strict filter behavior.
 - `privacy`: no-DB user request and privacy helper coverage, including
   synthetic `WP_User_Request` objects, request lifecycle helpers, action and
   confirmation descriptions, request-key hash/expiration validation including
