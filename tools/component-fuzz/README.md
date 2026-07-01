@@ -349,7 +349,8 @@ database, network requests, or a configured site.
   `wptexturize()` rich-text punctuation and protected-region oracles,
   `wptexturize_primes()`, texturize split/shortcode regex recomposition,
   autop/shortcode cleanup, clickable text, URL sanitization, entity
-  normalization, title/key/class identifier sanitizers, file-name and username
+  normalization, deep `map_deep()`/URL-encoding/slash helper shape and round
+  trip contracts, title/key/class identifier sanitizers, file-name and username
   sanitizers, colors, sizes, time strings, UTF-8 helpers, and accent removal.
 - `feed-parsers`: local RSS/Atom parser and legacy feed utility API coverage,
   including bounded malformed fixtures, Magpie RSS/Atom/RDF item/channel
