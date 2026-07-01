@@ -34,6 +34,7 @@ final class AdminBarSurface {
 				self::check_show_admin_bar_filters( $ctx->fork( 'show-admin-bar-filters' ) ),
 				self::check_default_menu_hook_registration( $ctx->fork( 'default-menu-hooks' ) ),
 				self::check_default_callback_node_graph( $ctx->fork( 'default-callback-node-graph' ) ),
+				self::check_single_site_callback_node_graph( $ctx->fork( 'single-site-callback-node-graph' ) ),
 			);
 		} catch ( \Throwable $e ) {
 			return array(
@@ -51,7 +52,7 @@ final class AdminBarSurface {
 	private static function missing_requirements(): array {
 		$missing = array();
 
-		foreach ( array( 'WP_Admin_Bar', 'WP_User' ) as $class ) {
+		foreach ( array( 'WP_Admin_Bar', 'WP_Screen', 'WP_Scripts', 'WP_User' ) as $class ) {
 			if ( ! class_exists( $class ) ) {
 				$missing[] = "class {$class}";
 			}
@@ -69,9 +70,13 @@ final class AdminBarSurface {
 				'esc_js',
 				'esc_url',
 				'admin_url',
+				'create_initial_post_types',
+				'current_user_can',
 				'get_avatar',
+				'get_bloginfo',
 				'get_current_user_id',
 				'get_edit_profile_url',
+				'get_post_type_object',
 				'get_theme_support',
 				'home_url',
 				'has_filter',
@@ -82,27 +87,39 @@ final class AdminBarSurface {
 				'is_network_admin',
 				'is_user_admin',
 				'is_user_logged_in',
+				'network_admin_url',
 				'remove_action',
 				'remove_filter',
 				'sanitize_title',
 				'self_admin_url',
+				'set_current_screen',
 				'show_admin_bar',
 				'wp_admin_bar_add_secondary_groups',
 				'wp_admin_bar_appearance_menu',
+				'wp_admin_bar_command_palette_menu',
 				'wp_admin_bar_comments_menu',
+				'wp_admin_bar_new_content_menu',
 				'wp_admin_bar_my_account_item',
 				'wp_admin_bar_my_account_menu',
 				'wp_admin_bar_render',
 				'wp_admin_bar_search_menu',
+				'wp_admin_bar_sidebar_toggle',
+				'wp_admin_bar_site_menu',
+				'wp_admin_bar_updates_menu',
 				'wp_admin_bar_wp_menu',
+				'wp_cache_set',
 				'wp_count_comments',
 				'wp_enqueue_script',
 				'wp_enqueue_style',
 				'wp_get_current_user',
+				'wp_get_update_data',
 				'wp_is_json_request',
 				'wp_is_mobile',
 				'wp_logout_url',
 				'wp_parse_args',
+				'wp_register_script',
+				'wp_script_is',
+				'wp_scripts',
 				'wp_strip_all_tags',
 			) as $function
 		) {
@@ -1478,6 +1495,395 @@ final class AdminBarSurface {
 		);
 	}
 
+	private static function check_single_site_callback_node_graph( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures        = array();
+		$snapshot        = self::snapshot_state();
+		$server_snapshot = self::snapshot_server( array( 'HTTP_USER_AGENT' ) );
+		$wpdb_snapshot   = self::wpdb_runtime_state();
+		$user            = self::synthetic_current_user( $ctx->fork( 'user' ) );
+		$user_id         = (int) $user->ID;
+		$token           = strtolower( $ctx->identifier( 5, 10 ) );
+		$blog_name       = 'Admin Bar Site ' . $token;
+		$update_total    = $ctx->int( 2, 9 );
+
+		$cap_filter = self::default_callback_cap_filter(
+			array(
+				'activate_plugins',
+				'create_users',
+				'edit_pages',
+				'edit_posts',
+				'edit_theme_options',
+				'manage_links',
+				'manage_network',
+				'read',
+				'switch_themes',
+				'upload_files',
+			),
+			$user_id
+		);
+
+		$blogs_of_user_filter = static function ( $sites, int $filtered_user_id, bool $all ) use ( $user_id ): array {
+			unset( $sites, $all );
+
+			if ( $filtered_user_id !== $user_id ) {
+				return array();
+			}
+
+			return array(
+				1 => (object) array(
+					'userblog_id' => 1,
+					'blogname'    => 'Component Fuzz',
+					'domain'      => 'example.test',
+					'path'        => '/',
+					'site_id'     => 1,
+					'siteurl'     => 'http://example.test',
+					'archived'    => 0,
+					'mature'      => 0,
+					'spam'        => 0,
+					'deleted'     => 0,
+				),
+			);
+		};
+
+		$user_meta_filter = static function ( $value, int $filtered_user_id, string $meta_key, bool $single, string $meta_type ) use ( $user_id ) {
+			unset( $meta_key, $meta_type );
+
+			if ( $filtered_user_id !== $user_id ) {
+				return $value;
+			}
+
+			return $single ? '' : array();
+		};
+
+		$update_events           = array();
+		$update_transient_events = array();
+		$update_data_filter      = static function ( array $update_data, array $titles ) use ( &$update_events, $update_total ): array {
+			$update_events[] = array(
+				'incoming' => $update_data,
+				'titles'   => $titles,
+			);
+
+			$update_data['counts'] = array(
+				'plugins'      => 0,
+				'themes'       => 0,
+				'wordpress'    => 0,
+				'translations' => 0,
+				'total'        => $update_total,
+			);
+			$update_data['title']  = 'Component fuzz updates';
+
+			return $update_data;
+		};
+		$empty_update_filter     = static function ( array $update_data, array $titles ) use ( &$update_events ): array {
+			$update_events[] = array(
+				'incoming' => $update_data,
+				'titles'   => $titles,
+			);
+
+			$update_data['counts'] = array(
+				'plugins'      => 0,
+				'themes'       => 0,
+				'wordpress'    => 0,
+				'translations' => 0,
+				'total'        => 0,
+			);
+			$update_data['title']  = '';
+
+			return $update_data;
+		};
+		$transient_probe         = static function ( $pre, string $transient ) use ( &$update_transient_events ) {
+			$update_transient_events[] = $transient;
+			return $pre;
+		};
+
+		$option_filters = array(
+			'pre_option_blog_charset'          => static function (): string {
+				return 'UTF-8';
+			},
+			'pre_option_blogname'              => static function () use ( $blog_name ): string {
+				return $blog_name;
+			},
+			'pre_option_home'                  => static function (): string {
+				return 'http://example.test';
+			},
+			'pre_option_link_manager_enabled' => static function (): int {
+				return 1;
+			},
+			'pre_option_siteurl'               => static function (): string {
+				return 'http://example.test';
+			},
+			'pre_option_wp_user_roles'         => static function (): array {
+				return array();
+			},
+		);
+
+		try {
+			if ( ! \get_post_type_object( 'post' ) && function_exists( 'create_initial_post_types' ) ) {
+				\create_initial_post_types();
+			}
+
+			$GLOBALS['current_user'] = $user;
+			\wp_cache_set( $user_id, $user->data, 'users' );
+			unset( $GLOBALS['current_screen'] );
+			$GLOBALS['wp_scripts'] = new \WP_Scripts();
+			foreach ( array( 'widgets', 'menus', 'custom-background', 'custom-header' ) as $feature ) {
+				$GLOBALS['_wp_theme_features'][ $feature ] = true;
+			}
+
+			\add_filter( 'user_has_cap', $cap_filter, 10, 4 );
+			\add_filter( 'pre_get_blogs_of_user', $blogs_of_user_filter, 10, 3 );
+			\add_filter( 'get_user_metadata', $user_meta_filter, 10, 5 );
+			foreach ( $option_filters as $hook => $filter ) {
+				\add_filter( $hook, $filter, 10, 3 );
+			}
+
+			$site_bar = new \WP_Admin_Bar();
+			\wp_admin_bar_site_menu( $site_bar );
+
+			$new_content_bar = new \WP_Admin_Bar();
+			\wp_admin_bar_new_content_menu( $new_content_bar );
+
+			\add_filter( 'pre_site_transient_update_plugins', $transient_probe, 10, 2 );
+			\add_filter( 'pre_site_transient_update_themes', $transient_probe, 10, 2 );
+			\add_filter( 'wp_get_update_data', $update_data_filter, 10, 2 );
+			$updates_bar = new \WP_Admin_Bar();
+			\wp_admin_bar_updates_menu( $updates_bar );
+			\remove_filter( 'wp_get_update_data', $update_data_filter, 10 );
+
+			\add_filter( 'wp_get_update_data', $empty_update_filter, 10, 2 );
+			$empty_updates_bar = new \WP_Admin_Bar();
+			\wp_admin_bar_updates_menu( $empty_updates_bar );
+			\remove_filter( 'wp_get_update_data', $empty_update_filter, 10 );
+			\remove_filter( 'pre_site_transient_update_plugins', $transient_probe, 10 );
+			\remove_filter( 'pre_site_transient_update_themes', $transient_probe, 10 );
+
+			$front_toggle_bar = new \WP_Admin_Bar();
+			\wp_admin_bar_sidebar_toggle( $front_toggle_bar );
+
+			\set_current_screen( 'dashboard' );
+			$admin_toggle_bar = new \WP_Admin_Bar();
+			\wp_admin_bar_sidebar_toggle( $admin_toggle_bar );
+
+			$command_without_script_bar = new \WP_Admin_Bar();
+			\wp_admin_bar_command_palette_menu( $command_without_script_bar );
+
+			$GLOBALS['wp_scripts'] = new \WP_Scripts();
+			\wp_register_script( 'wp-core-commands', false, array(), null, true );
+			\wp_enqueue_script( 'wp-core-commands' );
+			$_SERVER['HTTP_USER_AGENT'] = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit';
+			$command_mac_bar = new \WP_Admin_Bar();
+			\wp_admin_bar_command_palette_menu( $command_mac_bar );
+
+			$GLOBALS['wp_scripts'] = new \WP_Scripts();
+			\wp_register_script( 'wp-core-commands', false, array(), null, true );
+			\wp_enqueue_script( 'wp-core-commands' );
+			$_SERVER['HTTP_USER_AGENT'] = 'Mozilla/5.0 (X11; Linux x86_64) ComponentFuzz';
+			$command_default_bar = new \WP_Admin_Bar();
+			\wp_admin_bar_command_palette_menu( $command_default_bar );
+
+			unset( $GLOBALS['current_screen'] );
+			$command_front_bar = new \WP_Admin_Bar();
+			\wp_admin_bar_command_palette_menu( $command_front_bar );
+
+			$site_name         = $site_bar->get_node( 'site-name' );
+			$dashboard         = $site_bar->get_node( 'dashboard' );
+			$plugins           = $site_bar->get_node( 'plugins' );
+			$new_content       = $new_content_bar->get_node( 'new-content' );
+			$new_post          = $new_content_bar->get_node( 'new-post' );
+			$new_media         = $new_content_bar->get_node( 'new-media' );
+			$new_link          = $new_content_bar->get_node( 'new-link' );
+			$new_page          = $new_content_bar->get_node( 'new-page' );
+			$new_user          = $new_content_bar->get_node( 'new-user' );
+			$updates           = $updates_bar->get_node( 'updates' );
+			$empty_updates     = $empty_updates_bar->get_node( 'updates' );
+			$front_toggle      = $front_toggle_bar->get_node( 'menu-toggle' );
+			$admin_toggle      = $admin_toggle_bar->get_node( 'menu-toggle' );
+			$command_no_script = $command_without_script_bar->get_node( 'command-palette' );
+			$command_mac       = $command_mac_bar->get_node( 'command-palette' );
+			$command_default   = $command_default_bar->get_node( 'command-palette' );
+			$command_front     = $command_front_bar->get_node( 'command-palette' );
+
+			\remove_filter( 'user_has_cap', $cap_filter, 10 );
+			\remove_filter( 'pre_get_blogs_of_user', $blogs_of_user_filter, 10 );
+			\remove_filter( 'get_user_metadata', $user_meta_filter, 10 );
+			\remove_filter( 'wp_get_update_data', $update_data_filter, 10 );
+			\remove_filter( 'wp_get_update_data', $empty_update_filter, 10 );
+			\remove_filter( 'pre_site_transient_update_plugins', $transient_probe, 10 );
+			\remove_filter( 'pre_site_transient_update_themes', $transient_probe, 10 );
+			foreach ( $option_filters as $hook => $filter ) {
+				\remove_filter( $hook, $filter, 10 );
+			}
+
+			$option_filters_removed = true;
+			foreach ( $option_filters as $hook => $filter ) {
+				if ( false !== \has_filter( $hook, $filter ) ) {
+					$option_filters_removed = false;
+					break;
+				}
+			}
+			$filters_removed = false === \has_filter( 'user_has_cap', $cap_filter )
+				&& false === \has_filter( 'pre_get_blogs_of_user', $blogs_of_user_filter )
+				&& false === \has_filter( 'get_user_metadata', $user_meta_filter )
+				&& false === \has_filter( 'wp_get_update_data', $update_data_filter )
+				&& false === \has_filter( 'wp_get_update_data', $empty_update_filter )
+				&& false === \has_filter( 'pre_site_transient_update_plugins', $transient_probe )
+				&& false === \has_filter( 'pre_site_transient_update_themes', $transient_probe )
+				&& $option_filters_removed;
+		} finally {
+			\remove_filter( 'user_has_cap', $cap_filter, 10 );
+			\remove_filter( 'pre_get_blogs_of_user', $blogs_of_user_filter, 10 );
+			\remove_filter( 'get_user_metadata', $user_meta_filter, 10 );
+			\remove_filter( 'wp_get_update_data', $update_data_filter, 10 );
+			\remove_filter( 'wp_get_update_data', $empty_update_filter, 10 );
+			\remove_filter( 'pre_site_transient_update_plugins', $transient_probe, 10 );
+			\remove_filter( 'pre_site_transient_update_themes', $transient_probe, 10 );
+			foreach ( $option_filters as $hook => $filter ) {
+				\remove_filter( $hook, $filter, 10 );
+			}
+			self::restore_wpdb_runtime_state( $wpdb_snapshot );
+			self::restore_state( $snapshot );
+			self::restore_server( $server_snapshot );
+		}
+
+		$filters_removed = $filters_removed ?? false;
+		$wpdb_restored   = self::wpdb_runtime_matches( $wpdb_snapshot );
+
+		self::collect_failure(
+			$failures,
+			$site_name instanceof \stdClass
+				&& 'site-name' === $site_name->id
+				&& empty( $site_name->parent )
+				&& \admin_url() === $site_name->href
+				&& $blog_name === $site_name->title
+				&& $blog_name === ( $site_name->meta['menu_title'] ?? null )
+				&& $dashboard instanceof \stdClass
+				&& 'site-name' === $dashboard->parent
+				&& \admin_url() === $dashboard->href
+				&& $plugins instanceof \stdClass
+				&& 'site-name' === $plugins->parent
+				&& \admin_url( 'plugins.php' ) === $plugins->href,
+			'site menu callback creates front-end site-name, dashboard, and plugin nodes for the synthetic user',
+			array(
+				'siteName'  => $site_name ?? null,
+				'dashboard' => $dashboard ?? null,
+				'plugins'   => $plugins ?? null,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$new_content instanceof \stdClass
+				&& \admin_url( 'post-new.php' ) === $new_content->href
+				&& 'New' === ( $new_content->meta['menu_title'] ?? null )
+				&& $new_post instanceof \stdClass
+				&& 'new-content' === $new_post->parent
+				&& \admin_url( 'post-new.php' ) === $new_post->href
+				&& $new_media instanceof \stdClass
+				&& \admin_url( 'media-new.php' ) === $new_media->href
+				&& $new_link instanceof \stdClass
+				&& \admin_url( 'link-add.php' ) === $new_link->href
+				&& $new_page instanceof \stdClass
+				&& \admin_url( 'post-new.php?post_type=page' ) === $new_page->href
+				&& $new_user instanceof \stdClass
+				&& \admin_url( 'user-new.php' ) === $new_user->href,
+			'new-content callback chooses the first permitted action and creates expected built-in child nodes',
+			array(
+				'newContent' => $new_content ?? null,
+				'newPost'    => $new_post ?? null,
+				'newMedia'   => $new_media ?? null,
+				'newLink'    => $new_link ?? null,
+				'newPage'    => $new_page ?? null,
+				'newUser'    => $new_user ?? null,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$updates instanceof \stdClass
+				&& \network_admin_url( 'update-core.php' ) === $updates->href
+				&& str_contains( $updates->title, '>' . \number_format_i18n( $update_total ) . '</span>' )
+				&& str_contains( $updates->title, 'updates available' )
+				&& null === $empty_updates
+				&& 2 === count( $update_events )
+				&& array() === $update_transient_events
+				&& 0 === (int) ( $update_events[0]['incoming']['counts']['total'] ?? -1 ),
+			'updates callback uses filtered positive totals, omits zero totals, and avoids update transient lookups when caps are denied',
+			array(
+				'updates'         => $updates ?? null,
+				'emptyUpdates'    => $empty_updates ?? null,
+				'updateEvents'    => $update_events,
+				'transientEvents' => $update_transient_events,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			null === $front_toggle
+				&& $admin_toggle instanceof \stdClass
+				&& 'menu-toggle' === $admin_toggle->id
+				&& '#' === $admin_toggle->href
+				&& str_contains( $admin_toggle->title, '<span class="ab-icon" aria-hidden="true"></span>' )
+				&& str_contains( $admin_toggle->title, '<span class="screen-reader-text">Menu</span>' ),
+			'sidebar toggle callback appears only in admin context with the expected accessible title',
+			array(
+				'frontToggle' => $front_toggle ?? null,
+				'adminToggle' => $admin_toggle ?? null,
+			)
+		);
+
+		$command_meta = $command_mac instanceof \stdClass ? $command_mac->meta : array();
+		self::collect_failure(
+			$failures,
+			null === $command_no_script
+				&& null === $command_front
+				&& $command_mac instanceof \stdClass
+				&& $command_default instanceof \stdClass
+				&& '#' === $command_mac->href
+				&& 'hide-if-no-js' === ( $command_meta['class'] ?? null )
+				&& 'wp.data.dispatch( "core/commands" ).open(); return false;' === ( $command_meta['onclick'] ?? null )
+				&& str_contains( $command_mac->title, "\xE2\x8C\x98K" )
+				&& str_contains( $command_default->title, 'Ctrl+K' )
+				&& str_contains( (string) ( $command_meta['html'] ?? '' ), 'sourceURL=wp_admin_bar_command_palette_menu' ),
+			'command palette callback requires admin context and enqueued core commands script, then emits shortcut and inline script metadata',
+			array(
+				'withoutScript' => $command_no_script ?? null,
+				'front'         => $command_front ?? null,
+				'mac'           => $command_mac ?? null,
+				'default'       => $command_default ?? null,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$filters_removed
+				&& self::global_matches( $snapshot['globals']['current_user'], 'current_user' )
+				&& self::global_matches( $snapshot['globals']['current_screen'], 'current_screen' )
+				&& self::global_matches( $snapshot['globals']['_wp_theme_features'], '_wp_theme_features' )
+				&& self::global_matches( $snapshot['globals']['wp_filter'], 'wp_filter' )
+				&& self::global_matches( $snapshot['globals']['wp_scripts'], 'wp_scripts' )
+				&& self::server_matches( $server_snapshot, 'HTTP_USER_AGENT' )
+				&& $wpdb_restored,
+			'single-site callback probe removes filters and restores user, screen, script, server, hook, and wpdb runtime state',
+			array(
+				'filtersRemoved' => $filters_removed,
+				'currentUser'    => self::global_summary( 'current_user' ),
+				'currentScreen'  => self::global_summary( 'current_screen' ),
+				'wpScripts'      => self::global_summary( 'wp_scripts' ),
+				'wpdbRestored'   => $wpdb_restored,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'admin-bar.default-callbacks.single-site-node-graph',
+			array() === $failures,
+			array(
+				'userId'   => $user_id,
+				'failures' => $failures,
+			)
+		);
+	}
+
 	private static function render_bar( \WP_Admin_Bar $bar ): string {
 		ob_start();
 		try {
@@ -1786,6 +2192,7 @@ final class AdminBarSurface {
 					'wp_current_filter',
 					'wp_filter',
 					'wp_filters',
+					'wp_object_cache',
 					'wp_query',
 					'wp_scripts',
 					'wp_styles',
@@ -1878,6 +2285,19 @@ final class AdminBarSurface {
 
 	private static function wpdb_runtime_matches( ?array $snapshot ): bool {
 		return $snapshot === self::wpdb_runtime_state();
+	}
+
+	private static function restore_wpdb_runtime_state( ?array $snapshot ): void {
+		if (
+			null === $snapshot
+			|| ! isset( $GLOBALS['wpdb'] )
+			|| ! is_object( $GLOBALS['wpdb'] )
+			|| ! method_exists( $GLOBALS['wpdb'], 'component_fuzz_restore_runtime_state' )
+		) {
+			return;
+		}
+
+		$GLOBALS['wpdb']->component_fuzz_restore_runtime_state( $snapshot );
 	}
 
 	private static function clone_value( $value ) {
