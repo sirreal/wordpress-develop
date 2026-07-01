@@ -77,6 +77,9 @@ final class ClassicWalkersSurface {
 			if ( $admin_available ) {
 				$rows[] = self::check_admin_nav_menu_walkers( $ctx );
 				$rows[] = self::check_admin_nav_menu_direct_helpers( $ctx );
+				$rows[] = self::check_admin_nav_menu_quick_search_and_metabox_queries(
+					$ctx->fork( 'admin-nav-quick-search' )
+				);
 			} else {
 				$rows[] = $ctx->skip(
 					'classic-walkers.admin-nav.walkers-available',
@@ -85,6 +88,10 @@ final class ClassicWalkersSurface {
 				$rows[] = $ctx->skip(
 					'classic-walkers.admin-nav.direct-helper-contracts',
 					'Admin nav menu helper dependencies could not be loaded safely.'
+				);
+				$rows[] = $ctx->skip(
+					'classic-walkers.admin-nav.quick-search-metabox-queries',
+					'Admin nav menu query dependencies could not be loaded safely.'
 				);
 			}
 		} catch ( \Throwable $e ) {
@@ -1863,12 +1870,537 @@ final class ClassicWalkersSurface {
 					'wp_nav_menu_manage_columns',
 				),
 				'notCovered' => array(
-					'nav menu AJAX quick-search dispatch',
-					'post type and taxonomy meta-box pagination queries',
 					'browser admin page dispatch',
 				),
 			)
 		);
+	}
+
+	private static function check_admin_nav_menu_quick_search_and_metabox_queries(
+		\ComponentFuzz\FuzzContext $ctx
+	): array {
+		$missing = self::missing_admin_nav_query_requirements();
+		if ( array() !== $missing ) {
+			return $ctx->skip(
+				'classic-walkers.admin-nav.quick-search-metabox-queries',
+				'Admin nav menu quick-search and meta-box query dependencies are unavailable.',
+				array( 'missing' => $missing )
+			);
+		}
+
+		$failures          = array();
+		$query_events      = array();
+		$term_query_events = array();
+		$base_id           = self::base_id( $ctx, 'admin-nav-query' );
+		$suffix            = substr( sha1( (string) $ctx->seed() . '|' . (string) $ctx->iteration() ), 0, 10 );
+		$post_type         = 'cfznav' . $suffix;
+		$taxonomy          = 'cfznavtax' . $suffix;
+		$post_search       = 'needle-' . substr( $suffix, 0, 6 );
+		$term_search       = 'facet-' . substr( $suffix, 0, 6 );
+		$posts             = self::nav_query_posts( $base_id, $post_type, $post_search );
+		$terms             = self::nav_query_terms( $base_id + 5000, $taxonomy, $term_search );
+		$post_filter       = static function ( $pre, \WP_Query $query ) use ( $post_type, $posts, &$query_events ) {
+			unset( $pre );
+
+			$query_vars = $query->query_vars;
+			if ( ! self::query_targets_post_type( $query_vars, $post_type ) ) {
+				return null;
+			}
+
+			$query->query_vars['update_post_meta_cache'] = false;
+			$query->query_vars['update_post_term_cache'] = false;
+			$matched = self::select_nav_posts( $posts, $query_vars );
+			$query->found_posts   = count( $matched['all'] );
+			$query->max_num_pages = (int) ceil( count( $matched['all'] ) / max( 1, (int) ( $query_vars['posts_per_page'] ?? count( $matched['all'] ) ) ) );
+			$query->post_count    = count( $matched['page'] );
+
+			$query_events[] = array(
+				'postType'     => $post_type,
+				'postsPerPage' => (int) ( $query_vars['posts_per_page'] ?? 0 ),
+				'offset'       => (int) ( $query_vars['offset'] ?? 0 ),
+				'orderby'      => $query_vars['orderby'] ?? '',
+				'order'        => $query_vars['order'] ?? '',
+				'search'       => (string) ( $query_vars['s'] ?? '' ),
+				'noFoundRows'  => (bool) ( $query_vars['no_found_rows'] ?? false ),
+				'searchCols'   => array_values( (array) ( $query_vars['search_columns'] ?? array() ) ),
+				'found'        => count( $matched['all'] ),
+				'ids'          => self::post_ids( $matched['page'] ),
+			);
+
+			return $matched['page'];
+		};
+		$term_filter       = static function ( $pre, \WP_Term_Query $query ) use ( $taxonomy, $terms, &$term_query_events ) {
+			unset( $pre );
+
+			$query_vars = $query->query_vars;
+			if ( ! self::query_targets_taxonomy( $query_vars, $taxonomy ) ) {
+				return null;
+			}
+
+			$matched = self::select_nav_terms( $terms, $query_vars );
+			$fields  = (string) ( $query_vars['fields'] ?? 'all' );
+
+			$term_query_events[] = array(
+				'taxonomy' => $taxonomy,
+				'fields'   => $fields,
+				'number'   => (int) ( $query_vars['number'] ?? 0 ),
+				'offset'   => (int) ( $query_vars['offset'] ?? 0 ),
+				'orderby'  => $query_vars['orderby'] ?? '',
+				'order'    => $query_vars['order'] ?? '',
+				'nameLike' => (string) ( $query_vars['name__like'] ?? '' ),
+				'found'    => count( $matched['all'] ),
+				'ids'      => self::term_ids( $matched['page'] ),
+			);
+
+			if ( 'count' === $fields ) {
+				return (string) count( $matched['all'] );
+			}
+
+			return $matched['page'];
+		};
+
+		self::reset_runtime();
+		$post_types_before = $GLOBALS['wp_post_types'] ?? array();
+		$taxonomies_before = $GLOBALS['wp_taxonomies'] ?? array();
+		\register_post_type(
+			$post_type,
+			array(
+				'public'            => true,
+				'show_in_nav_menus' => true,
+				'hierarchical'      => true,
+				'has_archive'       => true,
+				'labels'            => array(
+					'name'          => 'Fuzz nav posts <script>',
+					'all_items'     => 'All fuzz nav posts <script>',
+					'archives'      => 'Fuzz archive <script>',
+					'search_items'  => 'Search fuzz posts <script>',
+					'singular_name' => 'Fuzz nav post',
+				),
+			)
+		);
+		\register_taxonomy(
+			$taxonomy,
+			array( $post_type ),
+			array(
+				'public'            => true,
+				'show_in_nav_menus' => true,
+				'hierarchical'      => true,
+				'labels'            => array(
+					'name'         => 'Fuzz nav terms <script>',
+					'all_items'    => 'All fuzz nav terms <script>',
+					'most_used'    => 'Most used fuzz terms <script>',
+					'search_items' => 'Search fuzz terms <script>',
+				),
+			)
+		);
+
+		foreach ( $posts as $post ) {
+			self::cache_post( $post );
+			self::$page_links[ (int) $post->ID ] = 'https://example.test/' . $post_type . '/' . $post->post_name . '/';
+		}
+		foreach ( $terms as $term ) {
+			self::cache_term( $term );
+			self::$terms_by_id[ (int) $term->term_id ] = $term;
+			self::$term_links[ (int) $term->term_id ] = 'https://example.test/' . $taxonomy . '/' . $term->slug . '/';
+		}
+
+		\add_filter( 'posts_pre_query', $post_filter, 10, 2 );
+		\add_filter( 'terms_pre_query', $term_filter, 9, 2 );
+
+		try {
+			$GLOBALS['nav_menu_selected_id'] = $base_id + 9000;
+			$GLOBALS['_nav_menu_placeholder'] = 0;
+			$_SERVER['REQUEST_URI'] = '/wp-admin/nav-menus.php?action=edit&menu=' . ( $base_id + 9000 );
+
+			$post_quick_output = self::capture_output(
+				static function () use ( $post_type, $post_search ): void {
+					\_wp_ajax_menu_quick_search(
+						array(
+							'type'            => 'quick-search-posttype-' . $post_type,
+							'object_type'     => $post_type,
+							'q'               => $post_search,
+							'response-format' => 'bad-format',
+						)
+					);
+				}
+			);
+			$post_quick_json   = self::decode_json_lines( $post_quick_output );
+			$post_quick_ids    = array_map( 'intval', array_column( $post_quick_json, 'ID' ) );
+
+			$term_quick_output = self::capture_output(
+				static function () use ( $taxonomy, $term_search ): void {
+					\_wp_ajax_menu_quick_search(
+						array(
+							'type'            => 'quick-search-taxonomy-' . $taxonomy,
+							'object_type'     => $taxonomy,
+							'q'               => $term_search,
+							'response-format' => 'json',
+						)
+					);
+				}
+			);
+			$term_quick_json   = self::decode_json_lines( $term_quick_output );
+			$term_quick_ids    = array_map( 'intval', array_column( $term_quick_json, 'ID' ) );
+
+			$get_post_item_output = self::capture_output(
+				static function () use ( $post_type, $posts ): void {
+					\_wp_ajax_menu_quick_search(
+						array(
+							'type'            => 'get-post-item',
+							'object_type'     => $post_type,
+							'ID'              => (string) $posts[3]->ID,
+							'response-format' => 'json',
+						)
+					);
+				}
+			);
+			$get_post_item_json = self::decode_json_lines( $get_post_item_output );
+
+			$get_term_item_markup = self::capture_output(
+				static function () use ( $taxonomy, $terms ): void {
+					\_wp_ajax_menu_quick_search(
+						array(
+							'type'            => 'get-post-item',
+							'object_type'     => $taxonomy,
+							'ID'              => (string) $terms[4]->term_id,
+							'response-format' => 'markup',
+						)
+					);
+				}
+			);
+
+			$_GET = array(
+				$post_type . '-tab' => 'all',
+				'paged'             => '2',
+				'item-type'         => 'post_type',
+				'item-object'       => $post_type,
+			);
+			$_POST    = array();
+			$_REQUEST = $_GET;
+			$post_all_output = self::capture_output(
+				static function () use ( $post_type ): void {
+					\wp_nav_menu_item_post_type_meta_box(
+						null,
+						array(
+							'id'    => 'add-post-type-' . $post_type,
+							'title' => 'Fuzz posts',
+							'args'  => \_wp_nav_menu_meta_box_object( \get_post_type_object( $post_type ) ),
+						)
+					);
+				}
+			);
+			$post_all_placeholder = (int) $GLOBALS['_nav_menu_placeholder'];
+			$post_page_two        = self::select_nav_posts(
+				$posts,
+				array(
+					'post_type'      => $post_type,
+					'post_status'    => 'publish',
+					'posts_per_page' => 50,
+					'offset'         => 50,
+					'orderby'        => 'title',
+					'order'          => 'ASC',
+				)
+			);
+
+			$_GET = array(
+				'quick-search-posttype-' . $post_type => $post_search,
+				$post_type . '-tab'                   => 'search',
+				'item-type'                           => 'post_type',
+				'item-object'                         => $post_type,
+			);
+			$_REQUEST = $_GET;
+			$post_search_output = self::capture_output(
+				static function () use ( $post_type ): void {
+					\wp_nav_menu_item_post_type_meta_box(
+						null,
+						array(
+							'id'    => 'add-post-type-' . $post_type,
+							'title' => 'Fuzz posts',
+							'args'  => \_wp_nav_menu_meta_box_object( \get_post_type_object( $post_type ) ),
+						)
+					);
+				}
+			);
+
+			$_GET = array(
+				$taxonomy . '-tab' => 'all',
+				'paged'           => '2',
+				'item-type'       => 'taxonomy',
+				'item-object'     => $taxonomy,
+			);
+			$_REQUEST = $_GET;
+			$term_all_output = self::capture_output(
+				static function () use ( $taxonomy ): void {
+					\wp_nav_menu_item_taxonomy_meta_box(
+						null,
+						array(
+							'id'    => 'add-taxonomy-' . $taxonomy,
+							'title' => 'Fuzz terms',
+							'args'  => \get_taxonomy( $taxonomy ),
+						)
+					);
+				}
+			);
+			$term_page_two   = self::select_nav_terms(
+				$terms,
+				array(
+					'taxonomy' => $taxonomy,
+					'number'   => 50,
+					'offset'   => 50,
+					'orderby'  => 'name',
+					'order'    => 'ASC',
+				)
+			);
+
+			$_GET = array(
+				'quick-search-taxonomy-' . $taxonomy => $term_search,
+				$taxonomy . '-tab'                   => 'search',
+				'item-type'                          => 'taxonomy',
+				'item-object'                        => $taxonomy,
+			);
+			$_REQUEST = $_GET;
+			$term_search_output = self::capture_output(
+				static function () use ( $taxonomy ): void {
+					\wp_nav_menu_item_taxonomy_meta_box(
+						null,
+						array(
+							'id'    => 'add-taxonomy-' . $taxonomy,
+							'title' => 'Fuzz terms',
+							'args'  => \get_taxonomy( $taxonomy ),
+						)
+					);
+				}
+			);
+		} catch ( \Throwable $e ) {
+			self::collect_failure(
+				$failures,
+				false,
+				'nav menu quick-search and meta-box query coverage does not throw',
+				array( 'throwable' => self::describe_throwable( $e ) )
+			);
+		} finally {
+			\remove_filter( 'terms_pre_query', $term_filter, 9 );
+			\remove_filter( 'posts_pre_query', $post_filter, 10 );
+			$GLOBALS['wp_post_types'] = $post_types_before;
+			$GLOBALS['wp_taxonomies'] = $taxonomies_before;
+		}
+
+		$post_quick_event = self::first_query_event(
+			$query_events,
+			static function ( array $event ) use ( $post_search ): bool {
+				return 10 === (int) $event['postsPerPage']
+					&& $post_search === $event['search']
+					&& true === $event['noFoundRows'];
+			}
+		);
+		$post_page_event = self::first_query_event(
+			$query_events,
+			static function ( array $event ): bool {
+				return 50 === (int) $event['postsPerPage']
+					&& 50 === (int) $event['offset']
+					&& 'title' === $event['orderby'];
+			}
+		);
+		$term_quick_event = self::first_query_event(
+			$term_query_events,
+			static function ( array $event ) use ( $term_search ): bool {
+				return 10 === (int) $event['number']
+					&& $term_search === $event['nameLike'];
+			}
+		);
+		$term_count_event = self::first_query_event(
+			$term_query_events,
+			static function ( array $event ): bool {
+				return 'count' === $event['fields']
+					&& 0 === (int) $event['number'];
+			}
+		);
+		$post_search_event = self::first_query_event(
+			$query_events,
+			static function ( array $event ) use ( $post_search ): bool {
+				return $post_search === $event['search']
+					&& 10 !== (int) $event['postsPerPage'];
+			}
+		);
+		$term_search_event = self::first_query_event(
+			$term_query_events,
+			static function ( array $event ) use ( $term_search ): bool {
+				return $term_search === $event['nameLike']
+					&& 'count' === $event['orderby'];
+			}
+		);
+
+		self::collect_failure(
+			$failures,
+			( $post_quick_event['ids'] ?? array() ) === $post_quick_ids
+				&& 10 === count( $post_quick_json ?? array() )
+				&& array_fill( 0, 10, $post_type ) === array_values( array_column( $post_quick_json ?? array(), 'post_type' ) )
+				&& array( 'post_title' ) === ( $post_quick_event['searchCols'] ?? null ),
+			'_wp_ajax_menu_quick_search() returns bounded post-type JSON results and preserves the search-column query contract',
+			array(
+				'ids'        => $post_quick_ids ?? array(),
+				'event'      => $post_quick_event,
+				'jsonSample' => $post_quick_json[0] ?? null,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			( $term_quick_event['ids'] ?? array() ) === $term_quick_ids
+				&& 10 === count( $term_quick_json ?? array() )
+				&& array_fill( 0, 10, $taxonomy ) === array_values( array_column( $term_quick_json ?? array(), 'post_type' ) )
+				&& 10 === (int) ( $term_quick_event['number'] ?? 0 ),
+			'_wp_ajax_menu_quick_search() returns bounded taxonomy JSON results through get_terms()',
+			array(
+				'ids'        => $term_quick_ids ?? array(),
+				'event'      => $term_quick_event,
+				'jsonSample' => $term_quick_json[0] ?? null,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			(int) ( $get_post_item_json[0]['ID'] ?? 0 ) === (int) $posts[3]->ID
+				&& $post_type === ( $get_post_item_json[0]['post_type'] ?? null )
+				&& self::contains_nav_menu_object_id( $get_term_item_markup ?? '', (int) $terms[4]->term_id )
+				&& str_contains( $get_term_item_markup ?? '', 'value="' . esc_attr( $taxonomy ) . '"' )
+				&& ! str_contains( strtolower( $get_term_item_markup ?? '' ), '<script' ),
+			'get-post-item quick-search branches return direct post JSON and escaped taxonomy checklist markup',
+			array(
+				'postJson'   => $get_post_item_json[0] ?? null,
+				'termMarkup' => self::describe_string( $get_term_item_markup ?? '' ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			null !== $post_page_event
+				&& $post_all_placeholder < -1
+				&& str_contains( $post_all_output ?? '', 'id="' . esc_attr( $post_type . '-all' ) . '"' )
+				&& str_contains( $post_all_output ?? '', 'tabs-panel-view-all tabs-panel-active' )
+				&& str_contains( $post_all_output ?? '', 'class="add-menu-item-pagelinks"' )
+				&& str_contains( $post_all_output ?? '', 'value="post_type_archive"' )
+				&& str_contains( $post_all_output ?? '', 'value="' . esc_attr( $post_type ) . '"' )
+				&& self::contains_nav_menu_object_id( $post_all_output ?? '', (int) $post_page_two['page'][0]->ID )
+				&& ! str_contains( strtolower( $post_all_output ?? '' ), '<script' ),
+			'wp_nav_menu_item_post_type_meta_box() renders archive placeholder, page-2 post checklist, and pagination without raw script',
+			array(
+				'event'       => $post_page_event,
+				'pageTwoIds'  => self::post_ids( $post_page_two['page'] ?? array() ),
+				'placeholder' => $post_all_placeholder ?? null,
+				'output'      => self::describe_string( $post_all_output ?? '' ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			str_contains( $post_search_output ?? '', 'tabs-panel-active' )
+				&& str_contains( $post_search_output ?? '', 'value="' . esc_attr( $post_search ) . '"' )
+				&& str_contains( $post_search_output ?? '', 'id="submit-quick-search-posttype-' . esc_attr( $post_type ) . '"' )
+				&& self::contains_nav_menu_object_id( $post_search_output ?? '', (int) ( $post_search_event['ids'][0] ?? 0 ) )
+				&& ! str_contains( strtolower( $post_search_output ?? '' ), '<script' ),
+			'wp_nav_menu_item_post_type_meta_box() activates search output from quick-search request state and escapes labels/results',
+			array(
+				'event'  => $post_search_event,
+				'output' => self::describe_string( $post_search_output ?? '' ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			null !== $term_count_event
+				&& str_contains( $term_all_output ?? '', 'id="' . esc_attr( $taxonomy . 'checklist' ) . '"' )
+				&& str_contains( $term_all_output ?? '', 'tabs-panel-view-all tabs-panel-active' )
+				&& str_contains( $term_all_output ?? '', 'class="add-menu-item-pagelinks"' )
+				&& self::contains_nav_menu_object_id( $term_all_output ?? '', (int) $term_page_two['page'][0]->term_id )
+				&& ! str_contains( strtolower( $term_all_output ?? '' ), '<script' ),
+			'wp_nav_menu_item_taxonomy_meta_box() renders counted page-2 term checklist and pagination without raw script',
+			array(
+				'countEvent' => $term_count_event,
+				'pageTwoIds' => self::term_ids( $term_page_two['page'] ?? array() ),
+				'output'     => self::describe_string( $term_all_output ?? '' ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			str_contains( $term_search_output ?? '', 'tabs-panel-active' )
+				&& str_contains( $term_search_output ?? '', 'value="' . esc_attr( $term_search ) . '"' )
+				&& str_contains( $term_search_output ?? '', 'id="submit-quick-search-taxonomy-' . esc_attr( $taxonomy ) . '"' )
+				&& self::contains_nav_menu_object_id( $term_search_output ?? '', (int) ( $term_search_event['ids'][0] ?? 0 ) )
+				&& ! str_contains( strtolower( $term_search_output ?? '' ), '<script' ),
+			'wp_nav_menu_item_taxonomy_meta_box() activates search output from quick-search request state and escapes labels/results',
+			array(
+				'event'  => $term_search_event,
+				'output' => self::describe_string( $term_search_output ?? '' ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			false === \has_filter( 'posts_pre_query', $post_filter )
+				&& false === \has_filter( 'terms_pre_query', $term_filter )
+				&& ! \post_type_exists( $post_type )
+				&& ! \taxonomy_exists( $taxonomy ),
+			'nav menu quick-search query fixtures remove scoped filters and temporary object types',
+			array(
+				'postFilter' => \has_filter( 'posts_pre_query', $post_filter ),
+				'termFilter' => \has_filter( 'terms_pre_query', $term_filter ),
+				'postType'   => \post_type_exists( $post_type ),
+				'taxonomy'   => \taxonomy_exists( $taxonomy ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'classic-walkers.admin-nav.quick-search-metabox-queries',
+			array() === $failures,
+			array(
+				'failures'         => $failures,
+				'postQueryEvents'  => $query_events,
+				'termQueryEvents'  => $term_query_events,
+				'covered'          => array(
+					'_wp_ajax_menu_quick_search',
+					'wp_nav_menu_item_post_type_meta_box',
+					'wp_nav_menu_item_taxonomy_meta_box',
+					'Walker_Nav_Menu_Checklist query-backed rendering',
+				),
+				'notCovered'       => array( 'browser admin page dispatch' ),
+			)
+		);
+	}
+
+	private static function missing_admin_nav_query_requirements(): array {
+		$missing = array();
+		foreach ( array( 'WP_Query', 'WP_Term', 'Walker_Nav_Menu_Checklist' ) as $class ) {
+			if ( ! class_exists( $class ) ) {
+				$missing[] = "class {$class}";
+			}
+		}
+
+		foreach (
+			array(
+				'_wp_ajax_menu_quick_search',
+				'_wp_nav_menu_meta_box_object',
+				'get_post_type_object',
+				'get_taxonomy',
+				'post_type_exists',
+				'register_post_type',
+				'register_taxonomy',
+				'taxonomy_exists',
+				'walk_nav_menu_tree',
+				'wp_nav_menu_item_post_type_meta_box',
+				'wp_nav_menu_item_taxonomy_meta_box',
+				'wp_json_encode',
+				'wp_setup_nav_menu_item',
+			) as $function
+		) {
+			if ( ! function_exists( $function ) ) {
+				$missing[] = "function {$function}";
+			}
+		}
+
+		return $missing;
 	}
 
 	private static function missing_admin_nav_helper_requirements(): array {
@@ -2193,6 +2725,113 @@ final class ClassicWalkersSurface {
 		);
 	}
 
+	/**
+	 * @return WP_Post[]
+	 */
+	private static function nav_query_posts( int $base_id, string $post_type, string $search ): array {
+		$posts = array();
+		for ( $index = 0; $index < 64; $index++ ) {
+			$matches = $index < 18 || 0 === $index % 7;
+			$status  = 22 === $index || 45 === $index ? 'draft' : 'publish';
+			$parent  = $index > 0 && 0 === $index % 6 ? $base_id + $index : 0;
+			$title   = sprintf(
+				'Fuzz nav %02d %s %s',
+				$index,
+				$matches ? $search : 'plain',
+				0 === $index % 9 ? '<script>alert(11)</script>' : 'safe'
+			);
+
+			$posts[] = self::nav_query_post( $base_id + $index + 1, $post_type, $parent, $title, $status, $index );
+		}
+
+		return $posts;
+	}
+
+	private static function nav_query_post(
+		int $id,
+		string $post_type,
+		int $parent,
+		string $title,
+		string $status,
+		int $index
+	): \WP_Post {
+		$day    = 1 + ( $index % 27 );
+		$minute = $index % 60;
+
+		return new \WP_Post(
+			(object) array(
+				'ID'                    => $id,
+				'post_author'           => '0',
+				'post_date'             => sprintf( '2026-06-%02d 10:%02d:00', $day, $minute ),
+				'post_date_gmt'         => sprintf( '2026-06-%02d 10:%02d:00', $day, $minute ),
+				'post_content'          => '',
+				'post_title'            => $title,
+				'post_excerpt'          => '',
+				'post_status'           => $status,
+				'comment_status'        => 'closed',
+				'ping_status'           => 'closed',
+				'post_password'         => '',
+				'post_name'             => 'cfz-nav-' . $id,
+				'to_ping'               => '',
+				'pinged'                => '',
+				'post_modified'         => sprintf( '2026-06-%02d 11:%02d:00', $day, $minute ),
+				'post_modified_gmt'     => sprintf( '2026-06-%02d 11:%02d:00', $day, $minute ),
+				'post_content_filtered' => '',
+				'post_parent'           => $parent,
+				'guid'                  => 'https://example.test/?p=' . $id,
+				'menu_order'            => $index,
+				'post_type'             => $post_type,
+				'post_mime_type'        => '',
+				'comment_count'         => '0',
+				'filter'                => 'raw',
+			)
+		);
+	}
+
+	/**
+	 * @return WP_Term[]
+	 */
+	private static function nav_query_terms( int $base_id, string $taxonomy, string $search ): array {
+		$terms = array();
+		for ( $index = 0; $index < 64; $index++ ) {
+			$matches = $index < 18 || 0 === $index % 8;
+			$parent  = $index > 0 && 0 === $index % 5 ? $base_id + $index : 0;
+			$name    = sprintf(
+				'Fuzz term %02d %s %s',
+				$index,
+				$matches ? $search : 'plain',
+				0 === $index % 10 ? '<script>alert(12)</script>' : 'safe'
+			);
+
+			$terms[] = self::nav_query_term( $base_id + $index + 1, $taxonomy, $parent, $name, 200 - $index );
+		}
+
+		return $terms;
+	}
+
+	private static function nav_query_term(
+		int $id,
+		string $taxonomy,
+		int $parent,
+		string $name,
+		int $count
+	): \WP_Term {
+		return new \WP_Term(
+			(object) array(
+				'term_id'          => $id,
+				'name'             => $name,
+				'slug'             => 'cfz-nav-term-' . $id,
+				'term_group'       => 0,
+				'term_taxonomy_id' => $id + 1000,
+				'taxonomy'         => $taxonomy,
+				'description'      => 'Description <script>alert(13)</script>',
+				'parent'           => $parent,
+				'count'            => $count,
+				'filter'           => 'raw',
+			)
+		);
+	}
+
 	private static function comment_object( int $id, int $post_id, int $parent, string $content ): \WP_Comment {
 		return new \WP_Comment(
 			(object) array(
@@ -2438,6 +3077,188 @@ final class ClassicWalkersSurface {
 		return $leaks;
 	}
 
+	private static function query_targets_post_type( array $query_vars, string $post_type ): bool {
+		$post_types = (array) ( $query_vars['post_type'] ?? array() );
+
+		return in_array( $post_type, $post_types, true );
+	}
+
+	private static function query_targets_taxonomy( array $query_vars, string $taxonomy ): bool {
+		$taxonomies = (array) ( $query_vars['taxonomy'] ?? array() );
+
+		return in_array( $taxonomy, $taxonomies, true );
+	}
+
+	/**
+	 * @param WP_Post[] $posts
+	 * @return array{all:WP_Post[],page:WP_Post[]}
+	 */
+	private static function select_nav_posts( array $posts, array $query_vars ): array {
+		$statuses = array_values( array_filter( array_map( 'strval', (array) ( $query_vars['post_status'] ?? array() ) ) ) );
+		if ( array() === $statuses ) {
+			$statuses = array( 'publish' );
+		}
+
+		$excluded = array_map( 'intval', (array) ( $query_vars['post__not_in'] ?? array() ) );
+		$search   = strtolower( (string) ( $query_vars['s'] ?? '' ) );
+		$matched  = array_values(
+			array_filter(
+				$posts,
+				static function ( \WP_Post $post ) use ( $statuses, $excluded, $search ): bool {
+					if ( ! in_array( 'any', $statuses, true ) && ! in_array( (string) $post->post_status, $statuses, true ) ) {
+						return false;
+					}
+					if ( in_array( (int) $post->ID, $excluded, true ) ) {
+						return false;
+					}
+
+					return '' === $search || str_contains( strtolower( (string) $post->post_title ), $search );
+				}
+			)
+		);
+
+		$orderby = strtolower( is_array( $query_vars['orderby'] ?? '' ) ? implode( ' ', array_keys( $query_vars['orderby'] ) ) : (string) ( $query_vars['orderby'] ?? '' ) );
+		usort(
+			$matched,
+			static function ( \WP_Post $a, \WP_Post $b ) use ( $orderby ): int {
+				if ( str_contains( $orderby, 'post_date' ) || str_contains( $orderby, 'date' ) ) {
+					return strcmp( (string) $a->post_date, (string) $b->post_date );
+				}
+				if ( str_contains( $orderby, 'title' ) ) {
+					$title_compare = strnatcasecmp( (string) $a->post_title, (string) $b->post_title );
+					return 0 !== $title_compare ? $title_compare : (int) $a->ID <=> (int) $b->ID;
+				}
+
+				return (int) $a->ID <=> (int) $b->ID;
+			}
+		);
+
+		if ( 'DESC' === strtoupper( (string) ( $query_vars['order'] ?? 'ASC' ) ) ) {
+			$matched = array_reverse( $matched );
+		}
+
+		$offset         = max( 0, (int) ( $query_vars['offset'] ?? 0 ) );
+		$posts_per_page = isset( $query_vars['posts_per_page'] ) ? (int) $query_vars['posts_per_page'] : count( $matched );
+		$page           = $posts_per_page < 0
+			? array_slice( $matched, $offset )
+			: array_slice( $matched, $offset, $posts_per_page );
+
+		return array(
+			'all'  => $matched,
+			'page' => array_values( $page ),
+		);
+	}
+
+	/**
+	 * @param WP_Term[] $terms
+	 * @return array{all:WP_Term[],page:WP_Term[]}
+	 */
+	private static function select_nav_terms( array $terms, array $query_vars ): array {
+		$search  = strtolower( (string) ( $query_vars['name__like'] ?? '' ) );
+		$matched = array_values(
+			array_filter(
+				$terms,
+				static function ( \WP_Term $term ) use ( $search ): bool {
+					return '' === $search || str_contains( strtolower( (string) $term->name ), $search );
+				}
+			)
+		);
+
+		$orderby = strtolower( (string) ( $query_vars['orderby'] ?? 'name' ) );
+		usort(
+			$matched,
+			static function ( \WP_Term $a, \WP_Term $b ) use ( $orderby ): int {
+				if ( 'count' === $orderby ) {
+					return (int) $a->count <=> (int) $b->count;
+				}
+				if ( in_array( $orderby, array( 'id', 'term_id' ), true ) ) {
+					return (int) $a->term_id <=> (int) $b->term_id;
+				}
+
+				$name_compare = strnatcasecmp( (string) $a->name, (string) $b->name );
+				return 0 !== $name_compare ? $name_compare : (int) $a->term_id <=> (int) $b->term_id;
+			}
+		);
+
+		if ( 'DESC' === strtoupper( (string) ( $query_vars['order'] ?? 'ASC' ) ) ) {
+			$matched = array_reverse( $matched );
+		}
+
+		$offset = max( 0, (int) ( $query_vars['offset'] ?? 0 ) );
+		$number = isset( $query_vars['number'] ) && '' !== (string) $query_vars['number']
+			? (int) $query_vars['number']
+			: 0;
+		$page   = $number > 0 ? array_slice( $matched, $offset, $number ) : array_slice( $matched, $offset );
+
+		return array(
+			'all'  => $matched,
+			'page' => array_values( $page ),
+		);
+	}
+
+	private static function capture_output( callable $callback ): string {
+		ob_start();
+		try {
+			$callback();
+			return (string) ob_get_clean();
+		} catch ( \Throwable $e ) {
+			ob_end_clean();
+			throw $e;
+		}
+	}
+
+	private static function decode_json_lines( string $output ): array {
+		$decoded = array();
+		foreach ( preg_split( '/\r?\n/', trim( $output ) ) ?: array() as $line ) {
+			if ( '' === trim( $line ) ) {
+				continue;
+			}
+
+			$value = json_decode( $line, true );
+			if ( is_array( $value ) ) {
+				$decoded[] = $value;
+			}
+		}
+
+		return $decoded;
+	}
+
+	private static function first_query_event( array $events, callable $predicate ): ?array {
+		foreach ( $events as $event ) {
+			if ( $predicate( $event ) ) {
+				return $event;
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * @param WP_Post[] $posts
+	 * @return int[]
+	 */
+	private static function post_ids( array $posts ): array {
+		return array_map(
+			static function ( \WP_Post $post ): int {
+				return (int) $post->ID;
+			},
+			$posts
+		);
+	}
+
+	/**
+	 * @param WP_Term[] $terms
+	 * @return int[]
+	 */
+	private static function term_ids( array $terms ): array {
+		return array_map(
+			static function ( \WP_Term $term ): int {
+				return (int) $term->term_id;
+			},
+			$terms
+		);
+	}
+
 	private static function snapshot_state(): array {
 		$globals = array();
 		foreach ( self::tracked_globals() as $global ) {
@@ -2637,6 +3458,13 @@ final class ClassicWalkersSurface {
 		preg_match_all( '/<' . preg_quote( $tag, '/' ) . '\b[^>]*>/i', $html, $matches );
 
 		return $matches[0];
+	}
+
+	private static function contains_nav_menu_object_id( string $html, int $object_id ): bool {
+		return 1 === preg_match(
+			'/name="menu-item\[-?\d+\]\[menu-item-object-id\]" value="' . preg_quote( (string) $object_id, '/' ) . '"/',
+			$html
+		);
 	}
 
 	private static function nav_menu_matrix_tags_match_state(

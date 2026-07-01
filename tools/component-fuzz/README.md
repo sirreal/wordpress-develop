@@ -180,9 +180,11 @@ database, network requests, or a configured site.
 - `classic-walkers`: deterministic Walker base and classic walker coverage,
   including `walk()`, `paged_walk()`, direct `display_element()` traversal,
   page/category/comment/nav rendering, current/selected classes, admin nav menu
-  checklist/edit field names, direct admin nav helper contracts, generated
-  has-children oracles, bounded HTML balance, escaping contracts, and
-  global/filter/superglobal/output-buffer restoration.
+  checklist/edit field names, direct admin nav helper contracts, nav menu
+  quick-search JSON/markup dispatch, post-type and taxonomy meta-box
+  pagination/search queries, generated has-children oracles, bounded HTML
+  balance, escaping contracts, and global/filter/superglobal/output-buffer
+  restoration.
 - `content`: slashing, metadata serialization, post and term field sanitization,
   whole-post `sanitize_post()` object/array consistency and filter locality,
   `get_extended()` more-tag splitting, post-template title/excerpt/password
@@ -1016,8 +1018,10 @@ while old-slug redirects, attachment-page redirects, and paths that call
 `wp_redirect()` and `exit` are intentionally avoided.
 The `classic-walkers` surface uses synthetic objects, object-cache fixtures, and
 local filters only. It loads the single comment/admin walker class files when
-available, but avoids nav menu AJAX quick-search, meta-box pagination, browser
-admin page dispatch, and any DB-backed menu/page/category/comment queries.
+available, and covers the direct nav menu quick-search dispatcher plus
+post-type/taxonomy menu item meta-box pagination/search queries with scoped
+`posts_pre_query` and `terms_pre_query` fixtures. It still avoids browser admin
+page dispatch and any DB-backed menu/page/category/comment queries.
 The `import-diff` surface covers importer registry, importer form, imported
 post/comment lookup, fail-closed importer upload handling, cleanup, text diff,
 and WP_Error transfer/lifecycle helpers without remote importer discovery, real
