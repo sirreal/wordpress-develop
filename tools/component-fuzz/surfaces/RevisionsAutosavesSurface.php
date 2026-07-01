@@ -33,6 +33,7 @@ final class RevisionsAutosavesSurface {
 			$rows[] = self::check_revision_support_restore_edges_and_titles( $ctx->fork( 'support-restore-ui' ), $case );
 			$rows[] = self::check_revision_ui_payloads( $ctx->fork( 'ui' ), $case );
 			$rows[] = self::check_preview_helper( $ctx->fork( 'preview' ), $case );
+			$rows[] = self::check_preview_request_dispatch( $ctx->fork( 'preview-dispatch' ), $case );
 			$rows[] = self::check_latest_revision_count_and_url_helpers( $ctx->fork( 'latest-count-url' ), $case );
 			$rows[] = self::check_user_filtered_autosave_lookup( $ctx->fork( 'user-filtered-autosave' ), $case );
 			$rows[] = self::check_revision_template_output( $ctx->fork( 'templates' ), $case );
@@ -68,6 +69,7 @@ final class RevisionsAutosavesSurface {
 				'_e',
 				'_ex',
 				'_set_preview',
+				'_show_post_preview',
 				'_wp_copy_post_meta',
 				'_wp_post_revision_data',
 				'_wp_post_revision_fields',
@@ -75,6 +77,7 @@ final class RevisionsAutosavesSurface {
 				'add_action',
 				'add_filter',
 				'add_post_meta',
+				'apply_filters',
 				'create_initial_post_types',
 				'create_initial_taxonomies',
 				'current_user_can',
@@ -102,8 +105,10 @@ final class RevisionsAutosavesSurface {
 				'wp_check_invalid_utf8',
 				'wp_check_post_lock',
 				'wp_check_revisioned_meta_fields_have_changed',
+				'wp_create_nonce',
 				'wp_create_post_autosave',
 				'wp_delete_post_revision',
+				'wp_die',
 				'wp_get_post_autosave',
 				'wp_get_latest_revision_id_and_total_count',
 				'wp_get_post_revision',
@@ -130,6 +135,7 @@ final class RevisionsAutosavesSurface {
 				'wp_set_current_user',
 				'wp_slash',
 				'wp_update_post',
+				'wp_verify_nonce',
 			) as $function
 		) {
 			if ( ! function_exists( $function ) ) {
@@ -1605,6 +1611,221 @@ final class RevisionsAutosavesSurface {
 		);
 	}
 
+	private static function check_preview_request_dispatch( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		self::prepare_runtime();
+		self::register_case_post_type( $case, true );
+
+		$failures  = array();
+		$author_id = self::insert_author( $case, 'preview-dispatch' );
+		$post_id   = self::insert_parent_post( $case, $author_id, 'preview-dispatch' );
+		$autosave  = self::insert_revision_row(
+			$post_id,
+			$author_id,
+			array(
+				'post_title'        => $case['titleTo'],
+				'post_content'      => $case['contentTo'],
+				'post_excerpt'      => $case['excerptTo'],
+				'post_date'         => $case['dateTo'],
+				'post_date_gmt'     => $case['dateToGmt'],
+				'post_modified'     => $case['dateTo'],
+				'post_modified_gmt' => $case['dateToGmt'],
+			),
+			true
+		);
+
+		\wp_set_current_user( $author_id );
+
+		$action      = 'post_preview_' . $post_id;
+		$valid_nonce = \wp_create_nonce( $action );
+
+		$verify_failures       = array();
+		$admin_referer_events  = array();
+		$failure_recorder      = static function ( $nonce, $nonce_action, $user, $token ) use ( &$verify_failures ): void {
+			$verify_failures[] = array(
+				'action' => $nonce_action,
+				'nonce'  => $nonce,
+				'token'  => $token,
+				'userId' => is_object( $user ) && isset( $user->ID ) ? (int) $user->ID : null,
+			);
+		};
+		$admin_referer_recorder = static function ( $referer_action, $result ) use ( &$admin_referer_events ): void {
+			$admin_referer_events[] = array(
+				'action' => $referer_action,
+				'result' => $result,
+			);
+		};
+
+		\add_action( 'wp_verify_nonce_failed', $failure_recorder, 10, 4 );
+		\add_action( 'check_admin_referer', $admin_referer_recorder, 10, 2 );
+
+		$missing_id_capture    = self::capture_preview_dispatch( array( 'preview_nonce' => $valid_nonce ) );
+		$missing_nonce_capture = self::capture_preview_dispatch( array( 'preview_id' => (string) $post_id ) );
+		$missing_leaked_filter = false !== \has_filter( 'the_preview', '_set_preview' );
+
+		self::collect_failure(
+			$failures,
+			$missing_id_capture['returned']
+				&& $missing_nonce_capture['returned']
+				&& ! $missing_id_capture['captured']
+				&& ! $missing_nonce_capture['captured']
+				&& null === $missing_id_capture['throwable']
+				&& null === $missing_nonce_capture['throwable']
+				&& ! $missing_leaked_filter
+				&& array() === $verify_failures
+				&& array() === $admin_referer_events,
+			'_show_post_preview is a no-op unless preview_id and preview_nonce are both present',
+			array(
+				'adminRefererEvents' => $admin_referer_events,
+				'filterLeaked'       => $missing_leaked_filter,
+				'missingId'          => $missing_id_capture,
+				'missingNonce'       => $missing_nonce_capture,
+				'verifyFailures'     => $verify_failures,
+			)
+		);
+
+		$valid_get       = array(
+			'preview_id'    => (string) $post_id,
+			'preview_nonce' => $valid_nonce,
+		);
+		$valid_capture   = self::capture_preview_dispatch( $valid_get );
+		$repeat_capture  = self::capture_preview_dispatch( $valid_get );
+		$preview_filter  = \has_filter( 'the_preview', '_set_preview' );
+		$previewed       = \apply_filters( 'the_preview', \get_post( $post_id ) );
+		$terms_added     = false !== \has_filter( 'get_the_terms', '_wp_preview_terms_filter' );
+		$thumbnail_added = false !== \has_filter( 'get_post_metadata', '_wp_preview_post_thumbnail_filter' );
+		$meta_added      = false !== \has_filter( 'get_post_metadata', '_wp_preview_meta_filter' );
+
+		\remove_filter( 'the_preview', '_set_preview', 10 );
+		\remove_filter( 'get_the_terms', '_wp_preview_terms_filter', 10 );
+		\remove_filter( 'get_post_metadata', '_wp_preview_post_thumbnail_filter', 10 );
+		\remove_filter( 'get_post_metadata', '_wp_preview_meta_filter', 10 );
+		$valid_filters_removed = false === \has_filter( 'the_preview', '_set_preview' )
+			&& false === \has_filter( 'get_the_terms', '_wp_preview_terms_filter' )
+			&& false === \has_filter( 'get_post_metadata', '_wp_preview_post_thumbnail_filter' )
+			&& false === \has_filter( 'get_post_metadata', '_wp_preview_meta_filter' );
+
+		self::collect_failure(
+			$failures,
+			is_int( $autosave )
+				&& $valid_capture['returned']
+				&& $repeat_capture['returned']
+				&& ! $valid_capture['captured']
+				&& ! $repeat_capture['captured']
+				&& null === $valid_capture['throwable']
+				&& null === $repeat_capture['throwable']
+				&& 10 === $preview_filter
+				&& $previewed instanceof \WP_Post
+				&& $case['titleTo'] === $previewed->post_title
+				&& $case['contentTo'] === $previewed->post_content
+				&& $case['excerptTo'] === $previewed->post_excerpt
+				&& $terms_added
+				&& $thumbnail_added
+				&& $meta_added
+				&& $valid_filters_removed,
+			'valid _show_post_preview request installs one preview filter and overlays the latest autosave',
+			array(
+				'postId'              => $post_id,
+				'autosaveId'          => $autosave,
+				'validCapture'        => $valid_capture,
+				'repeatCapture'       => $repeat_capture,
+				'previewFilter'       => $preview_filter,
+				'previewed'           => self::post_summary( $previewed ),
+				'termsFilterAdded'    => $terms_added,
+				'thumbnailFilterAdded' => $thumbnail_added,
+				'metaFilterAdded'     => $meta_added,
+				'filtersRemoved'      => $valid_filters_removed,
+			)
+		);
+
+		$casted_capture        = self::capture_preview_dispatch(
+			array(
+				'preview_id'    => $post_id . '-junk',
+				'preview_nonce' => $valid_nonce,
+			)
+		);
+		$casted_preview_filter = \has_filter( 'the_preview', '_set_preview' );
+		\remove_filter( 'the_preview', '_set_preview', 10 );
+		$casted_filter_removed = false === \has_filter( 'the_preview', '_set_preview' );
+
+		self::collect_failure(
+			$failures,
+			$casted_capture['returned']
+				&& ! $casted_capture['captured']
+				&& null === $casted_capture['throwable']
+				&& 10 === $casted_preview_filter
+				&& $casted_filter_removed
+				&& array() === $verify_failures
+				&& array() === $admin_referer_events,
+			'_show_post_preview casts preview_id to an integer before building the nonce action',
+			array(
+				'adminRefererEvents' => $admin_referer_events,
+				'castedCapture'      => $casted_capture,
+				'filterRemoved'      => $casted_filter_removed,
+				'previewFilter'      => $casted_preview_filter,
+				'verifyFailures'     => $verify_failures,
+			)
+		);
+
+		$invalid_nonce = 'invalid-preview-' . $case['token'];
+		try {
+			$invalid_capture = self::capture_preview_dispatch(
+				array(
+					'preview_id'    => (string) $post_id,
+					'preview_nonce' => $invalid_nonce,
+				)
+			);
+		} finally {
+			\remove_action( 'wp_verify_nonce_failed', $failure_recorder, 10 );
+			\remove_action( 'check_admin_referer', $admin_referer_recorder, 10 );
+		}
+
+		$invalid_die      = $invalid_capture['die'];
+		$invalid_args     = is_array( $invalid_die['args'] ?? null ) ? $invalid_die['args'] : array();
+		$invalid_clean    = false === \has_filter( 'the_preview', '_set_preview' )
+			&& false === \has_filter( 'wp_verify_nonce_failed', $failure_recorder )
+			&& false === \has_filter( 'check_admin_referer', $admin_referer_recorder );
+		$failure_recorded = 1 === count( $verify_failures )
+			&& $invalid_nonce === ( $verify_failures[0]['nonce'] ?? null )
+			&& $action === ( $verify_failures[0]['action'] ?? null )
+			&& (int) $author_id === (int) ( $verify_failures[0]['userId'] ?? 0 );
+
+		self::collect_failure(
+			$failures,
+			$invalid_capture['captured']
+				&& ! $invalid_capture['returned']
+				&& null === $invalid_capture['throwable']
+				&& 403 === (int) ( $invalid_args['response'] ?? 0 )
+				&& is_string( $invalid_die['message'] ?? null )
+				&& str_contains( $invalid_die['message'], 'preview drafts' )
+				&& $failure_recorded
+				&& array() === $admin_referer_events
+				&& $invalid_capture['filtersRestored']
+				&& $invalid_capture['bufferBalanced']
+				&& $invalid_clean,
+			'invalid _show_post_preview nonce fails closed through wp_die without installing preview filters',
+			array(
+				'adminRefererEvents' => $admin_referer_events,
+				'filtersClean'       => $invalid_clean,
+				'invalidCapture'     => $invalid_capture,
+				'verifyFailures'     => $verify_failures,
+			)
+		);
+
+		\wp_set_current_user( 0 );
+
+		return self::result(
+			$ctx,
+			'revisions-autosaves.preview-request-dispatch',
+			$failures,
+			array(
+				'case'       => self::case_summary( $case ),
+				'postId'     => $post_id,
+				'autosaveId' => $autosave,
+				'userId'     => $author_id,
+			)
+		);
+	}
+
 	private static function check_latest_revision_count_and_url_helpers( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
 		self::prepare_runtime();
 		self::register_case_post_type( $case, true );
@@ -1974,7 +2195,6 @@ final class RevisionsAutosavesSurface {
 				'case'       => self::case_summary( $case ),
 				'postId'     => $post_id,
 				'templateIds' => $template_ids,
-				'notCovered'  => array( '_show_post_preview request dispatch' ),
 			)
 		);
 	}
@@ -2211,6 +2431,7 @@ final class RevisionsAutosavesSurface {
 			&& false === \has_filter( 'wp_save_post_revision_revisions_before_deletion' )
 			&& false === \has_filter( 'wp_delete_post_revision' )
 			&& false === \has_filter( "wp_{$case['postType']}_revisions_to_keep" )
+			&& false === \has_filter( 'the_preview', '_set_preview' )
 			&& false === \has_filter( 'get_the_terms', '_wp_preview_terms_filter' )
 			&& false === \has_filter( 'get_post_metadata', '_wp_preview_post_thumbnail_filter' )
 			&& false === \has_filter( 'get_post_metadata', '_wp_preview_meta_filter' );
@@ -2318,6 +2539,64 @@ final class RevisionsAutosavesSurface {
 			}
 			throw $e;
 		}
+	}
+
+	private static function capture_preview_dispatch( array $get ): array {
+		$previous_get     = $_GET;
+		$previous_request = $_REQUEST;
+		$start_level      = ob_get_level();
+		$die_call         = null;
+		$captured         = false;
+		$returned         = false;
+		$throwable        = null;
+		$output           = '';
+		$filter           = static function ( $handler ) use ( &$die_call ) {
+			unset( $handler );
+
+			return static function ( $message = '', $title = '', $args = array() ) use ( &$die_call ): void {
+				$die_call = array(
+					'args'    => $args,
+					'message' => $message,
+					'title'   => $title,
+				);
+				throw new RevisionsAutosavesSurface_DieCaptured( 'Captured preview wp_die.' );
+			};
+		};
+
+		$_GET     = $get;
+		$_REQUEST = array_merge( $_POST, $_GET );
+		\add_filter( 'wp_die_handler', $filter, 1 );
+
+		ob_start();
+		try {
+			\_show_post_preview();
+			$returned = true;
+		} catch ( RevisionsAutosavesSurface_DieCaptured $e ) {
+			$captured = true;
+		} catch ( \Throwable $e ) {
+			$throwable = self::describe_throwable( $e );
+		} finally {
+			while ( ob_get_level() > $start_level ) {
+				$chunk  = ob_get_clean();
+				$output = ( false === $chunk ? '' : $chunk ) . $output;
+			}
+
+			\remove_filter( 'wp_die_handler', $filter, 1 );
+			$_GET     = $previous_get;
+			$_REQUEST = $previous_request;
+		}
+
+		return array(
+			'bufferBalanced'  => $start_level === ob_get_level(),
+			'captured'        => $captured,
+			'die'             => $die_call,
+			'filtersRestored' => false === \has_filter( 'wp_die_handler', $filter ),
+			'getRestored'     => $previous_get === $_GET,
+			'output'          => $output,
+			'requestRestored' => $previous_request === $_REQUEST,
+			'returned'        => $returned,
+			'throwable'       => $throwable,
+		);
 	}
 
 	private static function revision_template_ids( string $output ): array {
@@ -2451,4 +2730,7 @@ final class RevisionsAutosavesSurface {
 			'line'    => $e->getLine(),
 		);
 	}
+}
+
+final class RevisionsAutosavesSurface_DieCaptured extends \RuntimeException {
 }
