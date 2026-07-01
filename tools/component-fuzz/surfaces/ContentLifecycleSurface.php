@@ -35,6 +35,7 @@ final class ContentLifecycleSurface {
 			);
 			$rows[] = self::check_post_term_relationship_lifecycle( $ctx->fork( 'post-terms' ), $case );
 			$rows[] = self::check_comment_lifecycle( $ctx->fork( 'comments' ), $case );
+			$rows[] = self::check_post_count_and_mime_helpers( $ctx->fork( 'post-counts-mime' ), $case );
 			$rows[] = self::check_invalid_inputs( $ctx->fork( 'invalid' ), $case );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
@@ -64,28 +65,39 @@ final class ContentLifecycleSurface {
 		foreach (
 			array(
 				'add_action',
+				'add_filter',
 				'add_post_meta',
 				'clean_post_cache',
+				'current_user_can',
 				'create_initial_post_types',
 				'create_initial_taxonomies',
 				'delete_post_meta',
+				'get_available_post_mime_types',
 				'get_the_terms',
 				'get_comment',
 				'get_post_meta',
+				'get_post_mime_types',
+				'get_post_stati',
 				'get_post',
 				'get_term',
 				'get_terms',
 				'get_user_by',
 				'get_userdata',
 				'has_action',
+				'has_filter',
 				'has_term',
 				'is_object_in_term',
+				'is_user_logged_in',
 				'is_wp_error',
 				'metadata_exists',
 				'post_type_exists',
 				'get_permalink',
+				'get_current_user_id',
+				'wp_get_ext_types',
+				'wp_get_mime_types',
 				'register_post_type',
 				'remove_action',
+				'remove_filter',
 				'sanitize_comment_cookies',
 				'sanitize_email',
 				'sanitize_post_field',
@@ -117,9 +129,12 @@ final class ContentLifecycleSurface {
 				'wp_clear_scheduled_hook',
 				'wp_next_scheduled',
 				'update_post_meta',
+				'wp_count_attachments',
+				'wp_count_posts',
 				'wp_update_post',
 				'_count_posts_cache_key',
 				'_transition_post_status',
+				'wp_post_mime_type_where',
 			) as $function
 		) {
 			if ( ! function_exists( $function ) ) {
@@ -1340,6 +1355,566 @@ final class ContentLifecycleSurface {
 		);
 	}
 
+	private static function check_post_count_and_mime_helpers( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures                 = array();
+		$post_type                = 'cf_count_' . substr( $case['token'], 0, 8 );
+		$custom_mime              = 'application/x-component-fuzz-' . substr( $case['token'], 0, 8 );
+		$sentinel_mime_group      = 'application/x-component-fuzz-group-' . substr( $case['token'], 0, 8 );
+		$post_count_events        = array();
+		$attachment_count_events  = array();
+		$post_mime_events         = array();
+		$available_mime_events    = array();
+		$available_short_circuit  = null;
+		$post_count_filter        = static function ( $counts, $type, $perm ) use ( &$post_count_events ) {
+			$post_count_events[] = array(
+				'type'    => (string) $type,
+				'perm'    => (string) $perm,
+				'counts'  => is_object( $counts ) ? get_object_vars( $counts ) : $counts,
+				'userId'  => \get_current_user_id(),
+				'loggedIn' => \is_user_logged_in(),
+			);
+
+			return $counts;
+		};
+		$attachment_count_filter  = static function ( $counts, $mime_type ) use ( &$attachment_count_events ) {
+			$attachment_count_events[] = array(
+				'mimeType' => $mime_type,
+				'counts'   => is_object( $counts ) ? get_object_vars( $counts ) : $counts,
+			);
+
+			return $counts;
+		};
+		$post_mime_filter         = static function ( $mime_types ) use ( &$post_mime_events, $sentinel_mime_group ) {
+			$post_mime_events[] = array(
+				'keys' => array_keys( (array) $mime_types ),
+			);
+
+			$mime_types[ $sentinel_mime_group ] = array(
+				'Component Fuzz',
+				'Manage Component Fuzz',
+				array(
+					'singular' => 'Component Fuzz <span class="count">(%s)</span>',
+					'plural'   => 'Component Fuzz <span class="count">(%s)</span>',
+					'context'  => null,
+					'domain'   => null,
+				),
+			);
+
+			return $mime_types;
+		};
+		$available_mime_filter    = static function ( $mime_types, $type ) use ( &$available_mime_events, &$available_short_circuit ) {
+			$available_mime_events[] = array(
+				'type'         => (string) $type,
+				'shortCircuit' => is_array( $available_short_circuit ),
+			);
+
+			return is_array( $available_short_circuit ) ? $available_short_circuit : $mime_types;
+		};
+		$filters_removed          = false;
+
+		\add_filter( 'wp_count_posts', $post_count_filter, 10, 3 );
+		\add_filter( 'wp_count_attachments', $attachment_count_filter, 10, 2 );
+		\add_filter( 'post_mime_types', $post_mime_filter );
+		\add_filter( 'pre_get_available_post_mime_types', $available_mime_filter, 10, 2 );
+
+		try {
+			\register_post_type(
+				$post_type,
+				array(
+					'public'          => true,
+					'rewrite'         => false,
+					'query_var'       => false,
+					'capability_type' => 'post',
+					'map_meta_cap'    => true,
+					'supports'        => array( 'title', 'author' ),
+				)
+			);
+
+			$author_id = self::insert_support_user( 'count-author-' . $case['token'], 'count-author-' . $case['token'] . '@example.test' );
+			$other_id  = self::insert_support_user( 'count-other-' . $case['token'], 'count-other-' . $case['token'] . '@example.test' );
+			$insert    = static function ( array $args ) use ( $case ) {
+				return \wp_insert_post(
+					\wp_slash(
+						array_merge(
+							array(
+								'post_title'   => 'Count Fixture ' . $case['token'],
+								'post_content' => 'Count fixture content ' . $case['token'],
+								'post_status'  => 'draft',
+								'post_name'    => 'count-fixture-' . $case['token'],
+							),
+							$args
+						)
+					),
+					true,
+					false
+				);
+			};
+
+			$count_post_ids = array(
+				$insert(
+					array(
+						'post_type'   => $post_type,
+						'post_status' => 'publish',
+						'post_author' => $author_id,
+						'post_name'   => 'count-publish-a-' . $case['token'],
+					)
+				),
+				$insert(
+					array(
+						'post_type'   => $post_type,
+						'post_status' => 'publish',
+						'post_author' => $other_id,
+						'post_name'   => 'count-publish-b-' . $case['token'],
+					)
+				),
+				$insert(
+					array(
+						'post_type'   => $post_type,
+						'post_status' => 'draft',
+						'post_author' => $author_id,
+						'post_name'   => 'count-draft-' . $case['token'],
+					)
+				),
+				$insert(
+					array(
+						'post_type'   => $post_type,
+						'post_status' => 'private',
+						'post_author' => $author_id,
+						'post_name'   => 'count-private-a-' . $case['token'],
+					)
+				),
+				$insert(
+					array(
+						'post_type'   => $post_type,
+						'post_status' => 'private',
+						'post_author' => $other_id,
+						'post_name'   => 'count-private-b-' . $case['token'],
+					)
+				),
+				$insert(
+					array(
+						'post_type'     => $post_type,
+						'post_status'   => 'future',
+						'post_author'   => $author_id,
+						'post_name'     => 'count-future-' . $case['token'],
+						'post_date'     => '2035-01-02 03:04:05',
+						'post_date_gmt' => '2035-01-02 03:04:05',
+					)
+				),
+				$insert(
+					array(
+						'post_type'   => $post_type,
+						'post_status' => 'trash',
+						'post_author' => $author_id,
+						'post_name'   => 'count-trash-' . $case['token'],
+					)
+				),
+			);
+			$count_posts_ok = array() === array_filter(
+				$count_post_ids,
+				static function ( $post_id ) {
+					return ! is_int( $post_id ) || $post_id <= 0;
+				}
+			);
+
+			self::collect_failure(
+				$failures,
+				$count_posts_ok,
+				'count fixture posts insert with integer IDs',
+				array( 'postIds' => $count_post_ids )
+			);
+
+			$missing_count = \wp_count_posts( $post_type . '_missing' );
+			$all_counts    = \wp_count_posts( $post_type );
+			$all_cache_key = \_count_posts_cache_key( $post_type, '' );
+			$all_cached    = \wp_cache_get( $all_cache_key, 'counts' );
+
+			self::collect_failure(
+				$failures,
+				$missing_count instanceof \stdClass && array() === get_object_vars( $missing_count ),
+				'wp_count_posts returns an empty object for missing post types',
+				array( 'missingCount' => $missing_count )
+			);
+			self::collect_failure(
+				$failures,
+				self::object_counts_include(
+					$all_counts,
+					array(
+						'publish' => 2,
+						'draft'   => 1,
+						'private' => 2,
+						'future'  => 1,
+						'trash'   => 1,
+					)
+				)
+					&& self::count_object_has_post_status_keys( $all_counts )
+					&& self::object_counts_include(
+						$all_cached,
+						array(
+							'publish' => 2,
+							'draft'   => 1,
+							'private' => 2,
+							'future'  => 1,
+							'trash'   => 1,
+						)
+					),
+				'wp_count_posts groups seeded rows by status and caches zero-filled statuses',
+				array(
+					'counts'   => $all_counts,
+					'cacheKey' => $all_cache_key,
+					'cached'   => $all_cached,
+				)
+			);
+
+			\wp_set_current_user( $author_id );
+			$read_private_cap = \get_post_type_object( $post_type )->cap->read_private_posts;
+			$readable_counts  = \wp_count_posts( $post_type, 'readable' );
+			$readable_key     = \_count_posts_cache_key( $post_type, 'readable' );
+			$readable_cached  = \wp_cache_get( $readable_key, 'counts' );
+
+			self::collect_failure(
+				$failures,
+				! \current_user_can( $read_private_cap )
+					&& str_contains( $readable_key, '_readable_' . $author_id )
+					&& self::object_counts_include(
+						$readable_counts,
+						array(
+							'publish' => 2,
+							'draft'   => 1,
+							'private' => 1,
+							'future'  => 1,
+							'trash'   => 1,
+						)
+					)
+					&& self::object_counts_include(
+						$readable_cached,
+						array(
+							'publish' => 2,
+							'draft'   => 1,
+							'private' => 1,
+							'future'  => 1,
+							'trash'   => 1,
+						)
+					),
+				'readable wp_count_posts includes own private posts and excludes other private posts',
+				array(
+					'cap'      => $read_private_cap,
+					'key'      => $readable_key,
+					'counts'   => $readable_counts,
+					'cached'   => $readable_cached,
+					'authorId' => $author_id,
+				)
+			);
+
+			$post_filter_keys = array();
+			foreach ( $post_count_events as $event ) {
+				$post_filter_keys[] = $event['type'] . ':' . $event['perm'];
+			}
+			self::collect_failure(
+				$failures,
+				in_array( $post_type . ':', $post_filter_keys, true )
+					&& in_array( $post_type . ':readable', $post_filter_keys, true ),
+				'wp_count_posts filter receives type and permission context',
+				array( 'events' => $post_count_events )
+			);
+
+			$attachment_ids = array(
+				$insert(
+					array(
+						'post_type'      => 'attachment',
+						'post_status'    => 'inherit',
+						'post_mime_type' => 'image/jpeg',
+						'post_name'      => 'count-image-jpeg-' . $case['token'],
+					)
+				),
+				$insert(
+					array(
+						'post_type'      => 'attachment',
+						'post_status'    => 'inherit',
+						'post_mime_type' => 'image/png',
+						'post_name'      => 'count-image-png-' . $case['token'],
+					)
+				),
+				$insert(
+					array(
+						'post_type'      => 'attachment',
+						'post_status'    => 'inherit',
+						'post_mime_type' => 'application/pdf',
+						'post_name'      => 'count-pdf-' . $case['token'],
+					)
+				),
+				$insert(
+					array(
+						'post_type'      => 'attachment',
+						'post_status'    => 'publish',
+						'post_mime_type' => 'text/plain',
+						'post_name'      => 'count-text-' . $case['token'],
+					)
+				),
+				$insert(
+					array(
+						'post_type'      => 'attachment',
+						'post_status'    => 'trash',
+						'post_mime_type' => 'image/jpeg',
+						'post_name'      => 'count-image-trash-' . $case['token'],
+					)
+				),
+				$insert(
+					array(
+						'post_type'      => 'attachment',
+						'post_status'    => 'trash',
+						'post_mime_type' => 'application/pdf',
+						'post_name'      => 'count-pdf-trash-' . $case['token'],
+					)
+				),
+				$insert(
+					array(
+						'post_type'      => 'attachment',
+						'post_status'    => 'inherit',
+						'post_mime_type' => '',
+						'post_name'      => 'count-empty-mime-' . $case['token'],
+					)
+				),
+			);
+			$custom_mime_ids = array(
+				$insert(
+					array(
+						'post_type'      => $post_type,
+						'post_status'    => 'publish',
+						'post_author'    => $author_id,
+						'post_mime_type' => $custom_mime,
+						'post_name'      => 'count-custom-mime-' . $case['token'],
+					)
+				),
+				$insert(
+					array(
+						'post_type'      => $post_type,
+						'post_status'    => 'publish',
+						'post_author'    => $author_id,
+						'post_mime_type' => '',
+						'post_name'      => 'count-custom-empty-mime-' . $case['token'],
+					)
+				),
+			);
+			$attachment_rows_ok = array() === array_filter(
+				array_merge( $attachment_ids, $custom_mime_ids ),
+				static function ( $post_id ) {
+					return ! is_int( $post_id ) || $post_id <= 0;
+				}
+			);
+
+			self::collect_failure(
+				$failures,
+				$attachment_rows_ok,
+				'MIME fixture posts and attachments insert with integer IDs',
+				array(
+					'attachmentIds' => $attachment_ids,
+					'customIds'     => $custom_mime_ids,
+				)
+			);
+
+			$all_attachment_counts = \wp_count_attachments();
+			$all_attachment_cache  = \wp_cache_get( 'attachments', 'counts' );
+			$image_counts          = \wp_count_attachments( 'image' );
+			$jpeg_counts           = \wp_count_attachments( 'image/jpeg' );
+			$jpeg_pdf_counts       = \wp_count_attachments( array( 'image/jpeg', 'application/pdf' ) );
+			$jpeg_cache            = \wp_cache_get( 'attachments:image_jpeg', 'counts' );
+			$jpeg_pdf_cache        = \wp_cache_get( 'attachments:image_jpeg-application_pdf', 'counts' );
+
+			self::collect_failure(
+				$failures,
+				self::object_counts_include(
+					$all_attachment_counts,
+					array(
+						'image/jpeg'      => 1,
+						'image/png'       => 1,
+						'application/pdf' => 1,
+						'text/plain'      => 1,
+						'trash'           => 2,
+					)
+				)
+					&& self::object_counts_include(
+						$all_attachment_cache,
+						array(
+							'image/jpeg'      => 1,
+							'image/png'       => 1,
+							'application/pdf' => 1,
+							'text/plain'      => 1,
+							'trash'           => 2,
+						)
+					),
+				'wp_count_attachments groups non-trash attachments and separately counts trash',
+				array(
+					'counts' => $all_attachment_counts,
+					'cached' => $all_attachment_cache,
+				)
+			);
+			self::collect_failure(
+				$failures,
+				self::object_counts_include(
+					$image_counts,
+					array(
+						'image/jpeg' => 1,
+						'image/png'  => 1,
+						'trash'      => 1,
+					)
+				)
+					&& self::object_counts_omit( $image_counts, array( 'application/pdf', 'text/plain' ) )
+					&& self::object_counts_include(
+						$jpeg_counts,
+						array(
+							'image/jpeg' => 1,
+							'trash'      => 1,
+						)
+					)
+					&& self::object_counts_omit( $jpeg_counts, array( 'image/png', 'application/pdf' ) )
+					&& self::object_counts_include(
+						$jpeg_pdf_counts,
+						array(
+							'image/jpeg'      => 1,
+							'application/pdf' => 1,
+							'trash'           => 2,
+						)
+					)
+					&& self::object_counts_include(
+						$jpeg_cache,
+						array(
+							'image/jpeg' => 1,
+							'trash'      => 1,
+						)
+					)
+					&& self::object_counts_include(
+						$jpeg_pdf_cache,
+						array(
+							'image/jpeg'      => 1,
+							'application/pdf' => 1,
+							'trash'           => 2,
+						)
+					),
+				'wp_count_attachments honors exact, wildcard, array MIME filters and cache keys',
+				array(
+					'image'        => $image_counts,
+					'jpeg'         => $jpeg_counts,
+					'jpegPdf'      => $jpeg_pdf_counts,
+					'jpegCache'    => $jpeg_cache,
+					'jpegPdfCache' => $jpeg_pdf_cache,
+				)
+			);
+			self::collect_failure(
+				$failures,
+				count( $attachment_count_events ) >= 4,
+				'wp_count_attachments filter receives MIME query context',
+				array( 'events' => $attachment_count_events )
+			);
+
+			$mime_groups       = \get_post_mime_types();
+			$mime_group_keys   = array_keys( $mime_groups );
+			$has_document_key  = false;
+			foreach ( $mime_group_keys as $mime_group_key ) {
+				if ( str_contains( (string) $mime_group_key, 'application/pdf' ) ) {
+					$has_document_key = true;
+					break;
+				}
+			}
+
+			self::collect_failure(
+				$failures,
+				isset( $mime_groups['image'], $mime_groups['audio'], $mime_groups['video'], $mime_groups[ $sentinel_mime_group ] )
+					&& ! isset( $mime_groups['document'] )
+					&& $has_document_key
+					&& self::mime_label_tuple_has_shape( $mime_groups['image'] )
+					&& self::mime_label_tuple_has_shape( $mime_groups[ $sentinel_mime_group ] ),
+				'get_post_mime_types returns converted MIME groups and applies filter additions',
+				array(
+					'keys'   => $mime_group_keys,
+					'events' => $post_mime_events,
+				)
+			);
+			self::collect_failure(
+				$failures,
+				isset( $post_mime_events[0] )
+					&& in_array( 'image', $post_mime_events[0]['keys'], true )
+					&& ! in_array( $sentinel_mime_group, $post_mime_events[0]['keys'], true ),
+				'post_mime_types filter observes converted groups before appending sentinel data',
+				array( 'events' => $post_mime_events )
+			);
+
+			$attachment_mimes = \get_available_post_mime_types( 'attachment' );
+			$custom_mimes     = \get_available_post_mime_types( $post_type );
+			$missing_mimes    = \get_available_post_mime_types( $post_type . '_missing' );
+
+			self::collect_failure(
+				$failures,
+				self::sorted_string_values( $attachment_mimes ) === self::sorted_string_values(
+					array(
+						'image/jpeg',
+						'image/png',
+						'application/pdf',
+						'text/plain',
+					)
+				)
+					&& self::sorted_string_values( $custom_mimes ) === array( $custom_mime )
+					&& array() === $missing_mimes,
+				'get_available_post_mime_types returns unique non-empty MIME values by post type',
+				array(
+					'attachment' => $attachment_mimes,
+					'custom'     => $custom_mimes,
+					'missing'    => $missing_mimes,
+				)
+			);
+
+			$query_count_before      = $GLOBALS['wpdb']->num_queries ?? null;
+			$available_short_circuit = array( '', null, false, 'image/from-filter', 'application/from-filter' );
+			$short_circuit_mimes     = \get_available_post_mime_types( 'attachment' );
+			$query_count_after       = $GLOBALS['wpdb']->num_queries ?? null;
+
+			self::collect_failure(
+				$failures,
+				array( 'image/from-filter', 'application/from-filter' ) === $short_circuit_mimes
+					&& $query_count_before === $query_count_after,
+				'pre_get_available_post_mime_types short-circuits DB queries and filters falsey entries',
+				array(
+					'before' => $query_count_before,
+					'after'  => $query_count_after,
+					'result' => $short_circuit_mimes,
+					'events' => $available_mime_events,
+				)
+			);
+		} finally {
+			\remove_filter( 'wp_count_posts', $post_count_filter, 10 );
+			\remove_filter( 'wp_count_attachments', $attachment_count_filter, 10 );
+			\remove_filter( 'post_mime_types', $post_mime_filter, 10 );
+			\remove_filter( 'pre_get_available_post_mime_types', $available_mime_filter, 10 );
+			$filters_removed = false === \has_filter( 'wp_count_posts', $post_count_filter )
+				&& false === \has_filter( 'wp_count_attachments', $attachment_count_filter )
+				&& false === \has_filter( 'post_mime_types', $post_mime_filter )
+				&& false === \has_filter( 'pre_get_available_post_mime_types', $available_mime_filter );
+			\wp_set_current_user( 0 );
+		}
+
+		self::collect_failure(
+			$failures,
+			$filters_removed,
+			'post count and MIME helper filters are removed',
+			array(
+				'wpCountPosts'      => \has_filter( 'wp_count_posts', $post_count_filter ),
+				'wpCountAttachments' => \has_filter( 'wp_count_attachments', $attachment_count_filter ),
+				'postMimeTypes'     => \has_filter( 'post_mime_types', $post_mime_filter ),
+				'availableMimes'    => \has_filter( 'pre_get_available_post_mime_types', $available_mime_filter ),
+			)
+		);
+
+		return $ctx->result(
+			'content-lifecycle.posts.counts-and-mime-helpers',
+			array() === $failures,
+			array(
+				'case'     => self::case_summary( $case ),
+				'postType' => $post_type,
+				'failures' => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
 	private static function check_invalid_inputs( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
 		$failures       = array();
 		$missing_post   = \wp_update_post( array( 'ID' => 987654321, 'post_title' => $case['title'] ), true );
@@ -2027,6 +2602,66 @@ final class ContentLifecycleSurface {
 		}
 
 		return true;
+	}
+
+	private static function object_counts_include( $counts, array $expected ): bool {
+		if ( ! is_object( $counts ) ) {
+			return false;
+		}
+
+		$actual = get_object_vars( $counts );
+		foreach ( $expected as $key => $value ) {
+			if ( ! array_key_exists( $key, $actual ) || (int) $actual[ $key ] !== (int) $value ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function object_counts_omit( $counts, array $keys ): bool {
+		if ( ! is_object( $counts ) ) {
+			return false;
+		}
+
+		$actual = get_object_vars( $counts );
+		foreach ( $keys as $key ) {
+			if ( array_key_exists( $key, $actual ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function count_object_has_post_status_keys( $counts ): bool {
+		if ( ! is_object( $counts ) ) {
+			return false;
+		}
+
+		$actual = get_object_vars( $counts );
+		foreach ( \get_post_stati() as $status ) {
+			if ( ! array_key_exists( $status, $actual ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function sorted_string_values( array $values ): array {
+		$values = array_values( array_map( 'strval', $values ) );
+		sort( $values, SORT_STRING );
+
+		return $values;
+	}
+
+	private static function mime_label_tuple_has_shape( $labels ): bool {
+		return is_array( $labels )
+			&& count( $labels ) >= 3
+			&& is_scalar( $labels[0] ?? null )
+			&& is_scalar( $labels[1] ?? null )
+			&& is_array( $labels[2] ?? null );
 	}
 
 	private static function normalize_int_list( array $values ): array {

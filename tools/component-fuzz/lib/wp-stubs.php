@@ -292,7 +292,7 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 
 			$this->component_fuzz_record_query( $query );
 
-			if ( preg_match( '/\bSELECT\s+COUNT\(\*\)/i', $this->last_query ) ) {
+			if ( preg_match( '/\bSELECT\s+COUNT\s*\(\s*\*\s*\)/i', $this->last_query ) ) {
 				return $this->component_fuzz_count_for_query( $this->last_query );
 			}
 
@@ -766,6 +766,10 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 				return $old_slug_rows;
 			}
 
+			if ( '' === $first_table && preg_match( '/\bAS\s+filtered_posts\b/i', (string) $query ) && preg_match( '/\bFROM\s+`?wp_posts`?\b/i', (string) $query ) ) {
+				return $this->component_fuzz_select_posts( $query );
+			}
+
 			if ( 'wp_options' === $first_table ) {
 				return $this->component_fuzz_select_options( $query );
 			}
@@ -879,8 +883,15 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 			);
 		}
 
-		private function component_fuzz_select_posts( $query ) {
+		private function component_fuzz_select_posts( $query, $project = true ) {
 			$rows = array_values( $this->component_fuzz_posts );
+
+			if ( $project ) {
+				$readable_count_rows = $this->component_fuzz_select_readable_post_count_rows( $query, $rows );
+				if ( null !== $readable_count_rows ) {
+					return $readable_count_rows;
+				}
+			}
 
 			$id = $this->component_fuzz_compare_value( $query, 'ID' );
 			if ( null !== $id ) {
@@ -965,6 +976,20 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 				}
 			}
 
+			foreach ( array( 'post_status', 'post_mime_type' ) as $column ) {
+				$value = $this->component_fuzz_not_compare_value( $query, $column );
+				if ( null === $value ) {
+					continue;
+				}
+
+				$rows = array_filter(
+					$rows,
+					static function ( $row ) use ( $column, $value ) {
+						return (string) $row[ $column ] !== (string) $value;
+					}
+				);
+			}
+
 			foreach ( array( 'post_name', 'post_parent', 'post_status' ) as $column ) {
 				if ( $status_or_handled && 'post_status' === $column ) {
 					continue;
@@ -1008,6 +1033,27 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 
 			$rows = $this->component_fuzz_apply_limit( $query, $rows );
 
+			if ( ! $project ) {
+				return array_values( $rows );
+			}
+
+			if ( preg_match( '/SELECT\s+COUNT\s*\(\s*\*\s*\)/i', $query ) ) {
+				return array( array( 'COUNT(*)' => count( $rows ) ) );
+			}
+
+			if ( preg_match( '/SELECT\s+post_status\s*,\s*COUNT\s*\(\s*\*\s*\)\s+AS\s+num_posts\b/i', $query ) && preg_match( '/\bGROUP\s+BY\s+post_status\b/i', $query ) ) {
+				return $this->component_fuzz_group_count_rows( $rows, 'post_status' );
+			}
+
+			if ( preg_match( '/SELECT\s+post_mime_type\s*,\s*COUNT\s*\(\s*\*\s*\)\s+AS\s+num_posts\b/i', $query ) && preg_match( '/\bGROUP\s+BY\s+post_mime_type\b/i', $query ) ) {
+				return $this->component_fuzz_group_count_rows( $rows, 'post_mime_type' );
+			}
+
+			if ( preg_match( '/SELECT\s+DISTINCT\s+post_mime_type\b/i', $query ) ) {
+				$rows = $this->component_fuzz_distinct_rows( array_values( $rows ), array( 'post_mime_type' ) );
+				return $this->component_fuzz_project_rows( $rows, array( 'post_mime_type' ) );
+			}
+
 			if ( preg_match( '/SELECT\s+post_name\b/i', $query ) ) {
 				return $this->component_fuzz_project_rows( $rows, array( 'post_name' ) );
 			}
@@ -1025,6 +1071,63 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 			}
 
 			return $rows;
+		}
+
+		private function component_fuzz_select_readable_post_count_rows( $query, array $rows ) {
+			if (
+				! preg_match( '/SELECT\s+post_status\s*,\s*COUNT\s*\(\s*\*\s*\)\s+AS\s+num_posts\b/is', $query )
+				|| ! preg_match( '/\bUNION\s+ALL\b/is', $query )
+				|| ! preg_match( '/\bAS\s+filtered_posts\b/is', $query )
+				|| ! preg_match( '/\bGROUP\s+BY\s+post_status\b/is', $query )
+			) {
+				return null;
+			}
+
+			$post_types = $this->component_fuzz_compare_values( $query, 'post_type' );
+			$author_id  = $this->component_fuzz_compare_value( $query, 'post_author' );
+			if ( array() === $post_types || null === $author_id ) {
+				return null;
+			}
+
+			$post_type = (string) reset( $post_types );
+			$filtered  = array_filter(
+				$rows,
+				static function ( $row ) use ( $post_type, $author_id ) {
+					if ( (string) $row['post_type'] !== $post_type ) {
+						return false;
+					}
+
+					if ( 'private' !== (string) $row['post_status'] ) {
+						return true;
+					}
+
+					return (int) $row['post_author'] === (int) $author_id;
+				}
+			);
+
+			return $this->component_fuzz_group_count_rows( $filtered, 'post_status' );
+		}
+
+		private function component_fuzz_group_count_rows( array $rows, $column ) {
+			$counts = array();
+
+			foreach ( $rows as $row ) {
+				$value = (string) ( $row[ $column ] ?? '' );
+				if ( ! isset( $counts[ $value ] ) ) {
+					$counts[ $value ] = 0;
+				}
+				++$counts[ $value ];
+			}
+
+			$count_rows = array();
+			foreach ( $counts as $value => $count ) {
+				$count_rows[] = array(
+					$column      => $value,
+					'num_posts' => $count,
+				);
+			}
+
+			return $count_rows;
 		}
 
 		private function component_fuzz_select_old_slug_redirect_rows( $query ) {
@@ -2295,6 +2398,10 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 
 			if ( preg_match( '/\bFROM\s+`?wp_term_relationships`?\b/i', $query ) ) {
 				return count( $this->component_fuzz_select_term_relationships( $query ) );
+			}
+
+			if ( preg_match( '/\bFROM\s+`?wp_posts`?\b/i', $query ) ) {
+				return count( $this->component_fuzz_select_posts( $this->component_fuzz_without_limit_clause( $query ), false ) );
 			}
 
 			if ( preg_match( '/\bFROM\s+`?wp_terms`?\b/i', $query ) || preg_match( '/\bFROM\s+`?wp_term_taxonomy`?\b/i', $query ) ) {

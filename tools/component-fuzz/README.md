@@ -204,8 +204,9 @@ database, network requests, or a configured site.
   duplicate and invalid-input errors, sanitizer agreement, monotonic IDs,
   metadata cache invalidation, post-to-term relationship field modes, helper
   caches, relationship hook arguments, status-transition hook/cache/default
-  side-effect branches, post-delete cleanup, cache/count refresh behavior, and
-  per-iteration state restoration.
+  side-effect branches, post and attachment count/MIME helper contracts,
+  post-delete cleanup, cache/count refresh behavior, and per-iteration state
+  restoration.
 - `comments`: comment filtering, sanitizer agreement, max-length boundaries,
   type partitioning, comment classes, author URL/email links, excerpt/text
   helpers, comment cookies, reply/cancel link rendering branches, and permalink
@@ -1034,6 +1035,10 @@ Post status transition coverage asserts hook order, direct-transition status
 storage behavior, count/timeinfo cache invalidation and preservation branches,
 empty-GUID publish repair, scheduled future-post hook clearing, and cleanup of
 the generated status post type and hooks.
+Post and attachment count coverage asserts `wp_count_posts()` status grouping,
+readable private-post filtering, count caches, `wp_count_attachments()` MIME and
+trash grouping, `get_post_mime_types()` converted group/filter behavior, and
+`get_available_post_mime_types()` DB and short-circuit filter paths.
 Broader taxonomy relationship behavior is covered by `taxonomy-relationships`,
 still limited to the recognized term relationship SQL shapes emitted by the
 targeted core APIs.
