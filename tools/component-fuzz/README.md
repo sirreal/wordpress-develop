@@ -205,8 +205,8 @@ database, network requests, or a configured site.
   metadata cache invalidation, post-to-term relationship field modes, helper
   caches, relationship hook arguments, status-transition hook/cache/default
   side-effect branches, post and attachment count/MIME helper contracts,
-  post-delete cleanup, cache/count refresh behavior, and per-iteration state
-  restoration.
+  featured-image helper lifecycle contracts, post-delete cleanup, cache/count
+  refresh behavior, and per-iteration state restoration.
 - `comments`: comment filtering, sanitizer agreement, max-length boundaries,
   type partitioning, comment classes, author URL/email links, excerpt/text
   helpers, comment cookies, reply/cancel link rendering branches, and permalink
@@ -1039,6 +1039,10 @@ Post and attachment count coverage asserts `wp_count_posts()` status grouping,
 readable private-post filtering, count caches, `wp_count_attachments()` MIME and
 trash grouping, `get_post_mime_types()` converted group/filter behavior, and
 `get_available_post_mime_types()` DB and short-circuit filter paths.
+Featured-image coverage asserts `set_post_thumbnail()`/`delete_post_thumbnail()`
+postmeta lifecycle behavior, `get_post_thumbnail_id()`/`has_post_thumbnail()`
+fail-closed and filter contracts, thumbnail HTML/URL/caption echo helpers,
+non-image cleanup, and `update_post_thumbnail_cache()` cache priming.
 Broader taxonomy relationship behavior is covered by `taxonomy-relationships`,
 still limited to the recognized term relationship SQL shapes emitted by the
 targeted core APIs.

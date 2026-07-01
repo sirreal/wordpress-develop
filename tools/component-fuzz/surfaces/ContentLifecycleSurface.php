@@ -36,6 +36,7 @@ final class ContentLifecycleSurface {
 			$rows[] = self::check_post_term_relationship_lifecycle( $ctx->fork( 'post-terms' ), $case );
 			$rows[] = self::check_comment_lifecycle( $ctx->fork( 'comments' ), $case );
 			$rows[] = self::check_post_count_and_mime_helpers( $ctx->fork( 'post-counts-mime' ), $case );
+			$rows[] = self::check_post_thumbnail_helpers( $ctx->fork( 'post-thumbnails' ), $case );
 			$rows[] = self::check_invalid_inputs( $ctx->fork( 'invalid' ), $case );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
@@ -72,11 +73,16 @@ final class ContentLifecycleSurface {
 				'create_initial_post_types',
 				'create_initial_taxonomies',
 				'delete_post_meta',
+				'delete_post_thumbnail',
 				'get_available_post_mime_types',
 				'get_the_terms',
+				'get_the_post_thumbnail',
+				'get_the_post_thumbnail_caption',
+				'get_the_post_thumbnail_url',
 				'get_comment',
 				'get_post_meta',
 				'get_post_mime_types',
+				'get_post_thumbnail_id',
 				'get_post_stati',
 				'get_post',
 				'get_term',
@@ -85,6 +91,7 @@ final class ContentLifecycleSurface {
 				'get_userdata',
 				'has_action',
 				'has_filter',
+				'has_post_thumbnail',
 				'has_term',
 				'is_object_in_term',
 				'is_user_logged_in',
@@ -104,7 +111,11 @@ final class ContentLifecycleSurface {
 				'sanitize_term_field',
 				'sanitize_title',
 				'sanitize_user',
+				'set_post_thumbnail',
 				'term_exists',
+				'the_post_thumbnail',
+				'the_post_thumbnail_caption',
+				'the_post_thumbnail_url',
 				'wp_cache_flush',
 				'wp_cache_delete',
 				'wp_cache_get',
@@ -113,6 +124,9 @@ final class ContentLifecycleSurface {
 				'wp_delete_object_term_relationships',
 				'wp_delete_post',
 				'wp_get_object_terms',
+				'wp_get_attachment_caption',
+				'wp_get_attachment_image',
+				'wp_get_attachment_image_url',
 				'wp_insert_comment',
 				'wp_insert_post',
 				'wp_insert_term',
@@ -129,6 +143,7 @@ final class ContentLifecycleSurface {
 				'wp_clear_scheduled_hook',
 				'wp_next_scheduled',
 				'update_post_meta',
+				'update_post_thumbnail_cache',
 				'wp_count_attachments',
 				'wp_count_posts',
 				'wp_update_post',
@@ -1915,6 +1930,541 @@ final class ContentLifecycleSurface {
 		);
 	}
 
+	private static function check_post_thumbnail_helpers( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures            = array();
+		$token               = $case['token'];
+		$image_sources       = array();
+		$source_events       = array();
+		$attribute_events    = array();
+		$loading_events      = array();
+		$thumbnail_id_events = array();
+		$has_events          = array();
+		$size_events         = array();
+		$fetch_events        = array();
+		$html_events         = array();
+		$url_events          = array();
+		$caption_events      = array();
+		$display_events      = array();
+		$previous_post_set   = array_key_exists( 'post', $GLOBALS );
+		$previous_post       = $GLOBALS['post'] ?? null;
+		$filters_removed     = false;
+
+		$image_source_filter = static function ( $image, int $attachment_id, $size, bool $icon ) use ( &$image_sources, &$source_events ) {
+			$size_key        = is_array( $size ) ? implode( 'x', array_map( 'intval', $size ) ) : (string) $size;
+			$source_events[] = array(
+				'id'      => $attachment_id,
+				'size'    => $size_key,
+				'icon'    => $icon,
+				'matched' => isset( $image_sources[ $attachment_id ] ),
+			);
+
+			if ( ! isset( $image_sources[ $attachment_id ] ) ) {
+				return $image;
+			}
+
+			$source = $image_sources[ $attachment_id ];
+			return array(
+				$source['base'] . '-' . $size_key . '.jpg',
+				$source['width'],
+				$source['height'],
+				true,
+			);
+		};
+		$attribute_filter    = static function ( array $attr, \WP_Post $attachment, $size ) use ( &$attribute_events, $token ): array {
+			$size_key           = is_array( $size ) ? implode( 'x', array_map( 'intval', $size ) ) : (string) $size;
+			$attribute_events[] = array(
+				'id'       => (int) $attachment->ID,
+				'size'     => $size_key,
+				'class'    => $attr['class'] ?? '',
+				'hasAlt'   => array_key_exists( 'alt', $attr ),
+				'hasWidth' => array_key_exists( 'width', $attr ),
+			);
+			$attr['class']      = trim( (string) ( $attr['class'] ?? '' ) . ' component-thumbnail-' . $token );
+			$attr['data-thumb'] = 'filtered <' . $token . '>';
+
+			return $attr;
+		};
+		$auto_sizes_filter   = static function (): bool {
+			return false;
+		};
+		$loading_filter      = static function ( $loading_attrs, string $tag_name, array $attr, string $context ) use ( &$loading_events ): array {
+			$loading_events[] = array(
+				'tag'     => $tag_name,
+				'context' => $context,
+				'keys'    => array_keys( $attr ),
+			);
+
+			return array();
+		};
+		$thumbnail_id_filter = static function ( $thumbnail_id, $post ) use ( &$thumbnail_id_events ) {
+			$thumbnail_id_events[] = array(
+				'thumbnailId' => (int) $thumbnail_id,
+				'post'        => $post instanceof \WP_Post ? (int) $post->ID : $post,
+			);
+
+			return $thumbnail_id;
+		};
+		$has_filter          = static function ( bool $has_thumbnail, $post, $thumbnail_id ) use ( &$has_events ): bool {
+			$has_events[] = array(
+				'has'         => $has_thumbnail,
+				'post'        => $post instanceof \WP_Post ? (int) $post->ID : $post,
+				'thumbnailId' => $thumbnail_id,
+			);
+
+			return $has_thumbnail;
+		};
+		$size_filter         = static function ( $size, int $post_id ) use ( &$size_events ) {
+			$size_events[] = array(
+				'postId' => $post_id,
+				'size'   => is_array( $size ) ? implode( 'x', array_map( 'intval', $size ) ) : (string) $size,
+			);
+
+			return 'post-thumbnail' === $size ? 'medium' : $size;
+		};
+		$begin_fetch_action  = static function ( int $post_id, int $thumbnail_id, $size ) use ( &$fetch_events ): void {
+			$fetch_events[] = array(
+				'hook'        => 'begin',
+				'postId'      => $post_id,
+				'thumbnailId' => $thumbnail_id,
+				'size'        => is_array( $size ) ? implode( 'x', array_map( 'intval', $size ) ) : (string) $size,
+			);
+		};
+		$end_fetch_action    = static function ( int $post_id, int $thumbnail_id, $size ) use ( &$fetch_events ): void {
+			$fetch_events[] = array(
+				'hook'        => 'end',
+				'postId'      => $post_id,
+				'thumbnailId' => $thumbnail_id,
+				'size'        => is_array( $size ) ? implode( 'x', array_map( 'intval', $size ) ) : (string) $size,
+			);
+		};
+		$html_filter         = static function ( string $html, int $post_id, int $thumbnail_id, $size, $attr ) use ( &$html_events, $token ): string {
+			$html_events[] = array(
+				'postId'      => $post_id,
+				'thumbnailId' => $thumbnail_id,
+				'size'        => is_array( $size ) ? implode( 'x', array_map( 'intval', $size ) ) : (string) $size,
+				'hasHtml'     => '' !== $html,
+				'attrKeys'    => is_array( $attr ) ? array_keys( $attr ) : array(),
+			);
+
+			if ( '' === $html ) {
+				return $html;
+			}
+
+			return $html . '<span data-component-fuzz-thumbnail="' . $token . '"></span>';
+		};
+		$url_filter          = static function ( $thumbnail_url, $post, $size ) use ( &$url_events, $token ) {
+			$url_events[] = array(
+				'url'  => $thumbnail_url,
+				'post' => $post instanceof \WP_Post ? (int) $post->ID : $post,
+				'size' => is_array( $size ) ? implode( 'x', array_map( 'intval', $size ) ) : (string) $size,
+			);
+
+			return is_string( $thumbnail_url ) ? $thumbnail_url . '?thumb=' . $token : $thumbnail_url;
+		};
+		$caption_filter      = static function ( string $caption, int $post_id ) use ( &$caption_events, $token ): string {
+			$caption_events[] = array(
+				'postId'  => $post_id,
+				'caption' => $caption,
+			);
+
+			return $caption . ' attachment-filter-' . $token;
+		};
+		$display_filter      = static function ( string $caption ) use ( &$display_events, $token ): string {
+			$display_events[] = $caption;
+
+			return 'display-' . $token . ':' . $caption;
+		};
+
+		\add_filter( 'wp_get_attachment_image_src', $image_source_filter, 10, 4 );
+		\add_filter( 'wp_get_attachment_image_attributes', $attribute_filter, 10, 3 );
+		\add_filter( 'wp_img_tag_add_auto_sizes', $auto_sizes_filter );
+		\add_filter( 'pre_wp_get_loading_optimization_attributes', $loading_filter, 10, 4 );
+		\add_filter( 'post_thumbnail_id', $thumbnail_id_filter, 10, 2 );
+		\add_filter( 'has_post_thumbnail', $has_filter, 10, 3 );
+		\add_filter( 'post_thumbnail_size', $size_filter, 10, 2 );
+		\add_action( 'begin_fetch_post_thumbnail_html', $begin_fetch_action, 10, 3 );
+		\add_action( 'end_fetch_post_thumbnail_html', $end_fetch_action, 10, 3 );
+		\add_filter( 'post_thumbnail_html', $html_filter, 10, 5 );
+		\add_filter( 'post_thumbnail_url', $url_filter, 10, 3 );
+		\add_filter( 'wp_get_attachment_caption', $caption_filter, 10, 2 );
+		\add_filter( 'the_post_thumbnail_caption', $display_filter );
+
+		try {
+			$insert = static function ( array $args ) use ( $case ) {
+				return \wp_insert_post(
+					\wp_slash(
+						array_merge(
+							array(
+								'post_type'    => 'post',
+								'post_title'   => 'Thumbnail Fixture ' . $case['token'],
+								'post_content' => 'Thumbnail fixture content ' . $case['token'],
+								'post_status'  => 'publish',
+								'post_name'    => 'thumbnail-fixture-' . $case['token'],
+							),
+							$args
+						)
+					),
+					true,
+					false
+				);
+			};
+
+			$post_id        = $insert(
+				array(
+					'post_name' => 'thumbnail-host-' . $token,
+				)
+			);
+			$cache_post_id  = $insert(
+				array(
+					'post_name' => 'thumbnail-cache-host-' . $token,
+				)
+			);
+			$image_id       = $insert(
+				array(
+					'post_type'      => 'attachment',
+					'post_status'    => 'inherit',
+					'post_parent'    => $post_id,
+					'post_mime_type' => 'image/jpeg',
+					'post_excerpt'   => 'Caption <strong>' . $token . '</strong>',
+					'post_name'      => 'thumbnail-image-' . $token,
+				)
+			);
+			$second_image_id = $insert(
+				array(
+					'post_type'      => 'attachment',
+					'post_status'    => 'inherit',
+					'post_parent'    => $post_id,
+					'post_mime_type' => 'image/png',
+					'post_excerpt'   => 'Second caption ' . $token,
+					'post_name'      => 'thumbnail-second-image-' . $token,
+				)
+			);
+			$non_image_id   = $insert(
+				array(
+					'post_type'      => 'attachment',
+					'post_status'    => 'inherit',
+					'post_parent'    => $post_id,
+					'post_mime_type' => 'text/plain',
+					'post_name'      => 'thumbnail-non-image-' . $token,
+				)
+			);
+
+			$fixture_ids_ok = array() === array_filter(
+				array( $post_id, $cache_post_id, $image_id, $second_image_id, $non_image_id ),
+				static function ( $id ) {
+					return ! is_int( $id ) || $id <= 0;
+				}
+			);
+
+			self::collect_failure(
+				$failures,
+				$fixture_ids_ok,
+				'post thumbnail fixture posts and attachments insert with integer IDs',
+				array(
+					'postId'        => $post_id,
+					'cachePostId'   => $cache_post_id,
+					'imageId'       => $image_id,
+					'secondImageId' => $second_image_id,
+					'nonImageId'    => $non_image_id,
+				)
+			);
+
+			$image_sources = array(
+				$image_id        => array(
+					'base'   => 'https://example.test/uploads/' . $token . '/primary',
+					'width'  => 640,
+					'height' => 360,
+				),
+				$second_image_id => array(
+					'base'   => 'https://example.test/uploads/' . $token . '/secondary',
+					'width'  => 320,
+					'height' => 180,
+				),
+			);
+
+			$missing_thumbnail_id = \get_post_thumbnail_id( $post_id );
+			$missing_has         = \has_post_thumbnail( $post_id );
+			$missing_html        = \get_the_post_thumbnail( $post_id );
+			$missing_url         = \get_the_post_thumbnail_url( $post_id );
+			$missing_caption     = \get_the_post_thumbnail_caption( $post_id );
+
+			self::collect_failure(
+				$failures,
+				0 === $missing_thumbnail_id
+					&& false === $missing_has
+					&& '' === $missing_html
+					&& false === $missing_url
+					&& '' === $missing_caption
+					&& false === \get_post_thumbnail_id( 987654321 ),
+				'missing thumbnails fail closed across ID, boolean, HTML, URL, and caption helpers',
+				array(
+					'id'      => $missing_thumbnail_id,
+					'has'     => $missing_has,
+					'html'    => $missing_html,
+					'url'     => $missing_url,
+					'caption' => $missing_caption,
+				)
+			);
+
+			$first_set     = \set_post_thumbnail( $post_id, $image_id );
+			$after_set_id  = \get_post_thumbnail_id( $post_id );
+			$after_set_has = \has_post_thumbnail( \get_post( $post_id ) );
+			$same_set      = \set_post_thumbnail( \get_post( $post_id ), $image_id );
+
+			self::collect_failure(
+				$failures,
+				is_int( $first_set )
+					&& $first_set > 0
+					&& $image_id === $after_set_id
+					&& true === $after_set_has
+					&& false === $same_set
+					&& \metadata_exists( 'post', $post_id, '_thumbnail_id' ),
+				'set_post_thumbnail inserts thumbnail metadata, exposes it through helpers, and rejects unchanged updates',
+				array(
+					'firstSet'    => $first_set,
+					'thumbnailId' => $after_set_id,
+					'has'         => $after_set_has,
+					'sameSet'     => $same_set,
+				)
+			);
+
+			$GLOBALS['post'] = \get_post( $post_id );
+			$thumbnail_html  = \get_the_post_thumbnail(
+				$post_id,
+				'post-thumbnail',
+				array(
+					'alt'             => 'Featured <Alt> ' . $token,
+					'class'           => 'featured-thumb',
+					'loading'         => false,
+					'decoding'        => 'sync',
+					'fetchpriority'   => false,
+					'data-raw'        => 'raw "' . $token,
+				)
+			);
+			ob_start();
+			\the_post_thumbnail(
+				'post-thumbnail',
+				array(
+					'alt'           => 'Featured <Alt> ' . $token,
+					'class'         => 'featured-thumb',
+					'loading'       => false,
+					'decoding'      => 'sync',
+					'fetchpriority' => false,
+					'data-raw'      => 'raw "' . $token,
+				)
+			);
+			$echoed_thumbnail = (string) ob_get_clean();
+
+			self::collect_failure(
+				$failures,
+				$thumbnail_html === $echoed_thumbnail
+					&& str_contains( $thumbnail_html, '<img ' )
+					&& str_contains( $thumbnail_html, 'src="https://example.test/uploads/' . $token . '/primary-medium.jpg"' )
+					&& str_contains( $thumbnail_html, 'width="640"' )
+					&& str_contains( $thumbnail_html, 'height="360"' )
+					&& str_contains( $thumbnail_html, 'alt="Featured &lt;Alt&gt; ' . $token . '"' )
+					&& str_contains( $thumbnail_html, 'class="featured-thumb component-thumbnail-' . $token . '"' )
+					&& str_contains( $thumbnail_html, 'decoding="sync"' )
+					&& str_contains( $thumbnail_html, 'data-raw="raw &quot;' . $token . '"' )
+					&& str_contains( $thumbnail_html, 'data-thumb="filtered &lt;' . $token . '&gt;"' )
+					&& str_contains( $thumbnail_html, 'data-component-fuzz-thumbnail="' . $token . '"' )
+					&& ! str_contains( $thumbnail_html, ' loading=' )
+					&& ! str_contains( $thumbnail_html, ' fetchpriority=' ),
+				'get_the_post_thumbnail and the_post_thumbnail render filtered, escaped image markup consistently',
+				array(
+					'html'      => self::describe_string( $thumbnail_html ),
+					'echoed'    => self::describe_string( $echoed_thumbnail ),
+					'attrs'     => $attribute_events,
+					'loading'   => $loading_events,
+					'htmlHooks' => $html_events,
+				)
+			);
+
+			$thumbnail_url = \get_the_post_thumbnail_url( $post_id, array( 320, 180 ) );
+			ob_start();
+			\the_post_thumbnail_url( array( 320, 180 ) );
+			$echoed_url = (string) ob_get_clean();
+
+			self::collect_failure(
+				$failures,
+				'https://example.test/uploads/' . $token . '/primary-320x180.jpg?thumb=' . $token === $thumbnail_url
+					&& \esc_url( $thumbnail_url ) === $echoed_url,
+				'post thumbnail URL helpers use attachment image URLs, filters, and escaped echo output',
+				array(
+					'url'    => $thumbnail_url,
+					'echoed' => $echoed_url,
+					'events' => $url_events,
+				)
+			);
+
+			$caption = \get_the_post_thumbnail_caption( $post_id );
+			ob_start();
+			\the_post_thumbnail_caption( $post_id );
+			$echoed_caption = (string) ob_get_clean();
+
+			self::collect_failure(
+				$failures,
+				'Caption <strong>' . $token . '</strong> attachment-filter-' . $token === $caption
+					&& 'display-' . $token . ':' . $caption === $echoed_caption,
+				'post thumbnail caption helpers read attachment excerpts and apply attachment/display filters',
+				array(
+					'caption'       => $caption,
+					'echoedCaption' => $echoed_caption,
+					'captionEvents' => $caption_events,
+					'displayEvents' => $display_events,
+				)
+			);
+
+			\update_post_meta( $cache_post_id, '_thumbnail_id', $image_id );
+			$query              = (object) array(
+				'posts'              => array( \get_post( $post_id ), $cache_post_id ),
+				'thumbnails_cached' => false,
+			);
+			\update_post_thumbnail_cache( $query );
+			$query_count_before = $GLOBALS['wpdb']->num_queries ?? null;
+			\update_post_thumbnail_cache( $query );
+			$query_count_after  = $GLOBALS['wpdb']->num_queries ?? null;
+
+			self::collect_failure(
+				$failures,
+				true === $query->thumbnails_cached
+					&& $query_count_before === $query_count_after,
+				'update_post_thumbnail_cache primes mixed post object/ID loops once and marks the query cached',
+				array(
+					'query'  => $query,
+					'before' => $query_count_before,
+					'after'  => $query_count_after,
+				)
+			);
+
+			$second_set       = \set_post_thumbnail( $post_id, $second_image_id );
+			$after_second_id = \get_post_thumbnail_id( $post_id );
+			$non_image_set   = \set_post_thumbnail( $post_id, $non_image_id );
+			$after_non_image = \get_post_thumbnail_id( $post_id );
+			$reset_set       = \set_post_thumbnail( $post_id, $image_id );
+			$delete_thumb    = \delete_post_thumbnail( \get_post( $post_id ) );
+			$after_delete    = \get_post_thumbnail_id( $post_id );
+			$missing_set     = \set_post_thumbnail( 987654321, $image_id );
+			$missing_image   = \set_post_thumbnail( $post_id, 987654321 );
+			$missing_delete  = \delete_post_thumbnail( 987654321 );
+
+			self::collect_failure(
+				$failures,
+				true === $second_set
+					&& $second_image_id === $after_second_id
+					&& true === $non_image_set
+					&& 0 === $after_non_image
+					&& is_int( $reset_set )
+					&& true === $delete_thumb
+					&& 0 === $after_delete
+					&& ! \metadata_exists( 'post', $post_id, '_thumbnail_id' )
+					&& false === $missing_set
+					&& false === $missing_image
+					&& false === $missing_delete,
+				'post thumbnail update/delete paths handle new images, non-image cleanup, and missing objects',
+				array(
+					'secondSet'     => $second_set,
+					'afterSecond'   => $after_second_id,
+					'nonImageSet'   => $non_image_set,
+					'afterNonImage' => $after_non_image,
+					'resetSet'      => $reset_set,
+					'delete'        => $delete_thumb,
+					'afterDelete'   => $after_delete,
+					'missingSet'    => $missing_set,
+					'missingImage'  => $missing_image,
+					'missingDelete' => $missing_delete,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				self::events_contain_thumbnail_fetch_pair( $fetch_events, $post_id, $image_id, 'medium' )
+					&& count( $source_events ) >= 6
+					&& count( $thumbnail_id_events ) >= 6
+					&& count( $has_events ) >= 2
+					&& in_array(
+						array(
+							'postId' => $post_id,
+							'size'   => 'post-thumbnail',
+						),
+						$size_events,
+						true
+					),
+				'post thumbnail hooks observe expected IDs, sizes, source lookups, and boolean states',
+				array(
+					'sources'      => $source_events,
+					'thumbnailIds' => $thumbnail_id_events,
+					'hasEvents'    => $has_events,
+					'sizeEvents'   => $size_events,
+					'fetchEvents'  => $fetch_events,
+				)
+			);
+		} finally {
+			\remove_filter( 'the_post_thumbnail_caption', $display_filter, 10 );
+			\remove_filter( 'wp_get_attachment_caption', $caption_filter, 10 );
+			\remove_filter( 'post_thumbnail_url', $url_filter, 10 );
+			\remove_filter( 'post_thumbnail_html', $html_filter, 10 );
+			\remove_action( 'end_fetch_post_thumbnail_html', $end_fetch_action, 10 );
+			\remove_action( 'begin_fetch_post_thumbnail_html', $begin_fetch_action, 10 );
+			\remove_filter( 'post_thumbnail_size', $size_filter, 10 );
+			\remove_filter( 'has_post_thumbnail', $has_filter, 10 );
+			\remove_filter( 'post_thumbnail_id', $thumbnail_id_filter, 10 );
+			\remove_filter( 'pre_wp_get_loading_optimization_attributes', $loading_filter, 10 );
+			\remove_filter( 'wp_img_tag_add_auto_sizes', $auto_sizes_filter, 10 );
+			\remove_filter( 'wp_get_attachment_image_attributes', $attribute_filter, 10 );
+			\remove_filter( 'wp_get_attachment_image_src', $image_source_filter, 10 );
+			$filters_removed = false === \has_filter( 'wp_get_attachment_image_src', $image_source_filter )
+				&& false === \has_filter( 'wp_get_attachment_image_attributes', $attribute_filter )
+				&& false === \has_filter( 'wp_img_tag_add_auto_sizes', $auto_sizes_filter )
+				&& false === \has_filter( 'pre_wp_get_loading_optimization_attributes', $loading_filter )
+				&& false === \has_filter( 'post_thumbnail_id', $thumbnail_id_filter )
+				&& false === \has_filter( 'has_post_thumbnail', $has_filter )
+				&& false === \has_filter( 'post_thumbnail_size', $size_filter )
+				&& false === \has_filter( 'begin_fetch_post_thumbnail_html', $begin_fetch_action )
+				&& false === \has_filter( 'end_fetch_post_thumbnail_html', $end_fetch_action )
+				&& false === \has_filter( 'post_thumbnail_html', $html_filter )
+				&& false === \has_filter( 'post_thumbnail_url', $url_filter )
+				&& false === \has_filter( 'wp_get_attachment_caption', $caption_filter )
+				&& false === \has_filter( 'the_post_thumbnail_caption', $display_filter );
+
+			if ( $previous_post_set ) {
+				$GLOBALS['post'] = $previous_post;
+			} else {
+				unset( $GLOBALS['post'] );
+			}
+		}
+
+		self::collect_failure(
+			$failures,
+			$filters_removed,
+			'post thumbnail helper filters and actions are removed',
+			array(
+				'imageSrc'       => \has_filter( 'wp_get_attachment_image_src', $image_source_filter ),
+				'imageAttrs'     => \has_filter( 'wp_get_attachment_image_attributes', $attribute_filter ),
+				'autoSizes'      => \has_filter( 'wp_img_tag_add_auto_sizes', $auto_sizes_filter ),
+				'loadingAttrs'   => \has_filter( 'pre_wp_get_loading_optimization_attributes', $loading_filter ),
+				'thumbnailId'    => \has_filter( 'post_thumbnail_id', $thumbnail_id_filter ),
+				'hasThumbnail'   => \has_filter( 'has_post_thumbnail', $has_filter ),
+				'thumbnailSize'  => \has_filter( 'post_thumbnail_size', $size_filter ),
+				'beginFetch'     => \has_filter( 'begin_fetch_post_thumbnail_html', $begin_fetch_action ),
+				'endFetch'       => \has_filter( 'end_fetch_post_thumbnail_html', $end_fetch_action ),
+				'thumbnailHtml'  => \has_filter( 'post_thumbnail_html', $html_filter ),
+				'thumbnailUrl'   => \has_filter( 'post_thumbnail_url', $url_filter ),
+				'caption'        => \has_filter( 'wp_get_attachment_caption', $caption_filter ),
+				'displayCaption' => \has_filter( 'the_post_thumbnail_caption', $display_filter ),
+			)
+		);
+
+		return $ctx->result(
+			'content-lifecycle.posts.thumbnail-helpers',
+			array() === $failures,
+			array(
+				'case'     => self::case_summary( $case ),
+				'failures' => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
 	private static function check_invalid_inputs( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
 		$failures       = array();
 		$missing_post   = \wp_update_post( array( 'ID' => 987654321, 'post_title' => $case['title'] ), true );
@@ -2604,6 +3154,32 @@ final class ContentLifecycleSurface {
 		return true;
 	}
 
+	private static function events_contain_thumbnail_fetch_pair( array $events, int $post_id, int $thumbnail_id, string $size ): bool {
+		$begin = false;
+		$end   = false;
+
+		foreach ( $events as $event ) {
+			if (
+				! is_array( $event )
+				|| (int) ( $event['postId'] ?? 0 ) !== $post_id
+				|| (int) ( $event['thumbnailId'] ?? 0 ) !== $thumbnail_id
+				|| (string) ( $event['size'] ?? '' ) !== $size
+			) {
+				continue;
+			}
+
+			if ( 'begin' === ( $event['hook'] ?? '' ) ) {
+				$begin = true;
+			}
+
+			if ( 'end' === ( $event['hook'] ?? '' ) ) {
+				$end = true;
+			}
+		}
+
+		return $begin && $end;
+	}
+
 	private static function object_counts_include( $counts, array $expected ): bool {
 		if ( ! is_object( $counts ) ) {
 			return false;
@@ -2881,6 +3457,14 @@ final class ContentLifecycleSurface {
 		return array(
 			'code' => $value->get_error_code(),
 			'data' => $value->get_error_data(),
+		);
+	}
+
+	private static function describe_string( string $value ): array {
+		return array(
+			'bytes'   => strlen( $value ),
+			'sha1'    => sha1( $value ),
+			'preview' => addcslashes( substr( $value, 0, 240 ), "\0..\37\177..\377" ),
 		);
 	}
 
