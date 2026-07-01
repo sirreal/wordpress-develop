@@ -761,6 +761,10 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 
 		private function component_fuzz_select_rows( $query ) {
 			$first_table = $this->component_fuzz_query_first_from_table( $query );
+			$old_slug_rows = $this->component_fuzz_select_old_slug_redirect_rows( $query );
+			if ( null !== $old_slug_rows ) {
+				return $old_slug_rows;
+			}
 
 			if ( 'wp_options' === $first_table ) {
 				return $this->component_fuzz_select_options( $query );
@@ -1021,6 +1025,159 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 			}
 
 			return $rows;
+		}
+
+		private function component_fuzz_select_old_slug_redirect_rows( $query ) {
+			if (
+				! preg_match( '/\bwp_postmeta\b/i', (string) $query )
+				|| ! preg_match( '/\bwp_posts\b/i', (string) $query )
+				|| ! preg_match( '/\b_wp_old_(?:slug|date)\b/', (string) $query )
+			) {
+				return null;
+			}
+
+			$meta_keys = $this->component_fuzz_compare_values( $query, 'meta_key' );
+			$has_slug  = in_array( '_wp_old_slug', $meta_keys, true );
+			$has_date  = in_array( '_wp_old_date', $meta_keys, true );
+
+			if ( $has_slug && ! $has_date ) {
+				return $this->component_fuzz_select_old_slug_redirect_by_slug( $query );
+			}
+
+			if ( $has_date && ! $has_slug ) {
+				return $this->component_fuzz_select_old_slug_redirect_by_date( $query );
+			}
+
+			if ( $has_slug && $has_date ) {
+				return $this->component_fuzz_select_old_slug_redirect_by_slug_and_date( $query );
+			}
+
+			return null;
+		}
+
+		private function component_fuzz_select_old_slug_redirect_by_slug( $query ) {
+			$post_type = $this->component_fuzz_compare_value( $query, 'post_type' );
+			$old_slug  = $this->component_fuzz_compare_value( $query, 'meta_value' );
+			if ( null === $post_type || null === $old_slug ) {
+				return array();
+			}
+
+			$rows = array();
+			foreach ( $this->component_fuzz_meta['post'] as $meta_row ) {
+				if ( '_wp_old_slug' !== (string) $meta_row['meta_key'] || (string) $old_slug !== (string) $meta_row['meta_value'] ) {
+					continue;
+				}
+
+				$post_id = (int) $meta_row['post_id'];
+				$post    = $this->component_fuzz_posts[ $post_id ] ?? null;
+				if ( ! is_array( $post ) || (string) $post_type !== (string) $post['post_type'] ) {
+					continue;
+				}
+
+				if ( ! $this->component_fuzz_date_parts_match( (string) $post['post_date'], $query, 'post_date' ) ) {
+					continue;
+				}
+
+				$rows[] = array( 'post_id' => $post_id );
+			}
+
+			return $rows;
+		}
+
+		private function component_fuzz_select_old_slug_redirect_by_date( $query ) {
+			$post_type = $this->component_fuzz_compare_value( $query, 'post_type' );
+			$post_name = $this->component_fuzz_compare_value( $query, 'post_name' );
+			if ( null === $post_type || null === $post_name ) {
+				return array();
+			}
+
+			$rows = array();
+			foreach ( $this->component_fuzz_meta['post'] as $meta_row ) {
+				if ( '_wp_old_date' !== (string) $meta_row['meta_key'] ) {
+					continue;
+				}
+
+				$post_id = (int) $meta_row['post_id'];
+				$post    = $this->component_fuzz_posts[ $post_id ] ?? null;
+				if (
+					! is_array( $post )
+					|| (string) $post_type !== (string) $post['post_type']
+					|| (string) $post_name !== (string) $post['post_name']
+				) {
+					continue;
+				}
+
+				if ( ! $this->component_fuzz_date_parts_match( (string) $meta_row['meta_value'], $query, 'meta_value' ) ) {
+					continue;
+				}
+
+				$rows[] = array( 'post_id' => $post_id );
+			}
+
+			return $rows;
+		}
+
+		private function component_fuzz_select_old_slug_redirect_by_slug_and_date( $query ) {
+			$post_type = $this->component_fuzz_compare_value( $query, 'post_type' );
+			$old_slug  = $this->component_fuzz_compare_value( $query, 'meta_value' );
+			if ( null === $post_type || null === $old_slug ) {
+				return array();
+			}
+
+			$rows = array();
+			foreach ( $this->component_fuzz_posts as $post_id => $post ) {
+				if ( (string) $post_type !== (string) $post['post_type'] ) {
+					continue;
+				}
+
+				if ( ! in_array( (string) $old_slug, $this->component_fuzz_post_meta_values( $post_id, '_wp_old_slug' ), true ) ) {
+					continue;
+				}
+
+				foreach ( $this->component_fuzz_post_meta_values( $post_id, '_wp_old_date' ) as $old_date ) {
+					if ( $this->component_fuzz_date_parts_match( (string) $old_date, $query, 'meta_value' ) ) {
+						$rows[] = array( 'ID' => (int) $post_id );
+						continue 2;
+					}
+				}
+			}
+
+			return $rows;
+		}
+
+		private function component_fuzz_date_parts_match( $datetime, $query, $column ) {
+			foreach (
+				array(
+					'YEAR'       => array( 0, 4 ),
+					'MONTH'      => array( 5, 2 ),
+					'DAYOFMONTH' => array( 8, 2 ),
+				) as $function => $slice
+			) {
+				$expected = $this->component_fuzz_sql_date_part_value( $query, $function, $column );
+				if ( null === $expected ) {
+					continue;
+				}
+
+				if ( (int) $expected !== (int) substr( (string) $datetime, $slice[0], $slice[1] ) ) {
+					return false;
+				}
+			}
+
+			return true;
+		}
+
+		private function component_fuzz_sql_date_part_value( $query, $function, $column ) {
+			if (
+				! preg_match(
+					'/\b' . preg_quote( $function, '/' ) . '\s*\(\s*(?:`?[a-z_][a-z0-9_]*`?\.)?`?' . preg_quote( $column, '/' ) . '`?\s*\)\s*=\s*(\'(?:\\\\.|[^\'\\\\])*\'|"[^"]*"|-?\d+)/i',
+					(string) $query,
+					$matches
+				)
+			) {
+				return null;
+			}
+
+			return $this->component_fuzz_unquote_sql_value( $matches[1] );
 		}
 
 		private function component_fuzz_filter_posts_by_datetime_bounds( $query, array $rows ) {

@@ -175,12 +175,13 @@ database, network requests, or a configured site.
   mappings, and primitive/meta cap monotonicity.
 - `canonical-routing`: no-live-DB canonical redirect and front-end routing helpers,
   including method/search/preview bailouts, host/path/query cleanup, invalid
-  date redirects, DB-stub-backed 404 permalink guessing, feed/pagination
-  canonicalization, attachment page permalink/raw-file redirects, redirect
-  filter cancellation and same-host replacement cascades, canonical URL output
-  helpers for status, paged, comment-page, plain-permalink, filter, and singular
-  output gates, fragment stripping, and generated query-argument removal and
-  fragment stripping helper matrices.
+  date redirects, DB-stub-backed 404 permalink guessing, old-slug and old-date
+  redirect helpers, feed/pagination canonicalization, attachment page
+  permalink/raw-file redirects, redirect filter cancellation and same-host
+  replacement cascades, canonical URL output helpers for status, paged,
+  comment-page, plain-permalink, filter, and singular output gates, fragment
+  stripping, and generated query-argument removal and fragment stripping helper
+  matrices.
 - `classic-walkers`: deterministic Walker base and classic walker coverage,
   including `walk()`, `paged_walk()`, direct `display_element()` traversal,
   page/category/comment/nav rendering, current/selected classes, admin nav menu

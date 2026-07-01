@@ -36,6 +36,7 @@ final class CanonicalRoutingSurface {
 			$rows[] = self::check_invalid_date_redirect( $ctx->fork( 'date' ), $case );
 			$rows[] = self::check_404_guess_and_db_redirects( $ctx->fork( '404-guess' ), $case );
 			$rows[] = self::check_attachment_canonical_redirects( $ctx->fork( 'attachments' ), $case );
+			$rows[] = self::check_old_slug_and_date_redirects( $ctx->fork( 'old-slug-date' ), $case );
 			$rows[] = self::check_feed_and_paged_redirect( $ctx->fork( 'feed' ), $case );
 			$rows[] = self::check_redirect_filter_contract( $ctx->fork( 'filter' ), $case );
 			$rows[] = self::check_safe_redirect_replacement_is_returned( $ctx->fork( 'safe-filter' ), $case );
@@ -128,7 +129,11 @@ final class CanonicalRoutingSurface {
 				'get_year_link',
 				'home_url',
 				'is_404',
+				'is_embed',
+				'is_post_type_hierarchical',
 				'is_feed',
+				'_find_post_by_old_date',
+				'_find_post_by_old_slug',
 				'redirect_canonical',
 				'redirect_guess_404_permalink',
 				'remove_query_arg',
@@ -141,9 +146,14 @@ final class CanonicalRoutingSurface {
 				'wp_get_attachment_url',
 				'wp_cache_delete',
 				'wp_cache_get',
+				'wp_cache_get_last_changed',
+				'wp_cache_get_salted',
 				'wp_cache_set',
+				'wp_cache_set_last_changed',
+				'wp_cache_set_salted',
 				'wp_get_canonical_url',
 				'wp_parse_url',
+				'wp_old_slug_redirect',
 				'rel_canonical',
 			) as $function
 		) {
@@ -670,6 +680,403 @@ final class CanonicalRoutingSurface {
 				'baseId'   => $base_id,
 				'file'     => $relative,
 				'failures' => array_slice( $failures, 0, 4 ),
+			)
+		);
+	}
+
+	private static function check_old_slug_and_date_redirects( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		if ( ! self::wpdb_stub_available() ) {
+			return $ctx->skip(
+				'canonical-routing.old-slug-date.db-backed-redirects',
+				'The wpdb content stub is unavailable for DB-backed old slug/date redirects.'
+			);
+		}
+
+		self::reset_db_content();
+
+		$base_id       = 65000 + ( $ctx->iteration() * 40 ) + $ctx->int( 0, 10 );
+		$month         = $ctx->int( 1, 12 );
+		$day           = $ctx->int( 2, 26 );
+		$current_date  = sprintf( '2026-%02d-%02d 10:20:30', $month, $day );
+		$old_date      = sprintf(
+			'2016-%02d-%02d 03:04:05',
+			$ctx->int( 1, 12 ),
+			$ctx->int( 2, 26 )
+		);
+		$fallback_date = sprintf(
+			'2012-%02d-%02d 06:07:08',
+			$ctx->int( 1, 12 ),
+			$ctx->int( 2, 26 )
+		);
+		$old_slug      = self::old_redirect_slug( $ctx, $case, 'old slug' );
+		$current_slug  = self::old_redirect_slug( $ctx, $case, 'current slug' );
+		$date_slug     = self::old_redirect_slug( $ctx, $case, 'date slug' );
+		$fallback_old  = self::old_redirect_slug( $ctx, $case, 'fallback old' );
+		$fallback_new  = self::old_redirect_slug( $ctx, $case, 'fallback new' );
+		$paged         = $ctx->int( 2, 5 );
+		$failures      = array();
+		$redirect_urls = array();
+		$filtered_ids  = array();
+		$observed      = array();
+
+		$id_filter = static function ( $post_id ) use ( &$filtered_ids ) {
+			$filtered_ids[] = (int) $post_id;
+			return $post_id;
+		};
+		$url_filter = static function ( $url ) use ( &$redirect_urls ) {
+			$redirect_urls[] = $url;
+			return false;
+		};
+
+		try {
+			$wrong_date_decoy = self::seed_post_row(
+				array(
+					'ID'            => $base_id,
+					'post_name'     => $current_slug . '-decoy-date',
+					'post_title'    => 'Old Slug Wrong Date ' . $case['token'],
+					'post_status'   => 'publish',
+					'post_type'     => 'post',
+					'post_date'     => '2025-01-02 10:20:30',
+					'post_date_gmt' => '2025-01-02 10:20:30',
+				)
+			);
+			self::seed_post_meta_row( $wrong_date_decoy->ID, '_wp_old_slug', $old_slug );
+
+			$wrong_type_decoy = self::seed_post_row(
+				array(
+					'ID'            => $base_id + 1,
+					'post_name'     => $current_slug . '-decoy-type',
+					'post_title'    => 'Old Slug Wrong Type ' . $case['token'],
+					'post_status'   => 'publish',
+					'post_type'     => 'cfz_private',
+					'post_date'     => $current_date,
+					'post_date_gmt' => $current_date,
+				)
+			);
+			self::seed_post_meta_row( $wrong_type_decoy->ID, '_wp_old_slug', $old_slug );
+
+			$slug_target = self::seed_post_row(
+				array(
+					'ID'            => $base_id + 2,
+					'post_name'     => $current_slug,
+					'post_title'    => 'Old Slug Target ' . $case['token'],
+					'post_status'   => 'publish',
+					'post_type'     => 'post',
+					'post_date'     => $current_date,
+					'post_date_gmt' => $current_date,
+				)
+			);
+			self::seed_post_meta_row( $slug_target->ID, '_wp_old_slug', $old_slug );
+
+			$date_target = self::seed_post_row(
+				array(
+					'ID'            => $base_id + 3,
+					'post_name'     => $date_slug,
+					'post_title'    => 'Old Date Target ' . $case['token'],
+					'post_status'   => 'publish',
+					'post_type'     => 'post',
+					'post_date'     => '2026-07-08 10:20:30',
+					'post_date_gmt' => '2026-07-08 10:20:30',
+				)
+			);
+			self::seed_post_meta_row( $date_target->ID, '_wp_old_date', $old_date );
+
+			$fallback_target = self::seed_post_row(
+				array(
+					'ID'            => $base_id + 4,
+					'post_name'     => $fallback_new,
+					'post_title'    => 'Old Date Fallback Target ' . $case['token'],
+					'post_status'   => 'publish',
+					'post_type'     => 'post',
+					'post_date'     => '2026-08-09 10:20:30',
+					'post_date_gmt' => '2026-08-09 10:20:30',
+				)
+			);
+			self::seed_post_meta_row( $fallback_target->ID, '_wp_old_slug', $fallback_old );
+			self::seed_post_meta_row( $fallback_target->ID, '_wp_old_date', $fallback_date );
+
+			self::flush_runtime_cache();
+
+			$current_parts = self::date_query_vars( $current_date );
+			self::prepare_request(
+				array_merge(
+					array(
+						'name' => $old_slug,
+					),
+					$current_parts
+				),
+				array( 'is_404' => true )
+			);
+			$queries_before_slug       = $GLOBALS['wpdb']->num_queries;
+			$old_slug_id_first         = \_find_post_by_old_slug( 'post' );
+			$queries_after_slug        = $GLOBALS['wpdb']->num_queries;
+			$old_slug_id_second        = \_find_post_by_old_slug( 'post' );
+			$queries_after_slug_cached = $GLOBALS['wpdb']->num_queries;
+			\wp_cache_set_last_changed( 'posts' );
+			$old_slug_id_after_invalidation  = \_find_post_by_old_slug( 'post' );
+			$queries_after_slug_invalidation = $GLOBALS['wpdb']->num_queries;
+
+			self::collect_failure(
+				$failures,
+				$slug_target->ID === $old_slug_id_first
+					&& $slug_target->ID === $old_slug_id_second
+					&& $slug_target->ID === $old_slug_id_after_invalidation
+					&& $queries_after_slug > $queries_before_slug
+					&& $queries_after_slug_cached === $queries_after_slug
+					&& $queries_after_slug_invalidation > $queries_after_slug_cached,
+				'_find_post_by_old_slug matches generated post type/date predicates and caches by posts last_changed salt',
+				array(
+					'expected'               => $slug_target->ID,
+					'first'                  => $old_slug_id_first,
+					'second'                 => $old_slug_id_second,
+					'afterInvalidation'      => $old_slug_id_after_invalidation,
+					'queriesBefore'          => $queries_before_slug,
+					'queriesAfterFirst'      => $queries_after_slug,
+					'queriesAfterCached'     => $queries_after_slug_cached,
+					'queriesAfterInvalidated' => $queries_after_slug_invalidation,
+				)
+			);
+
+			\add_filter( 'old_slug_redirect_post_id', $id_filter, 10, 1 );
+			\add_filter( 'old_slug_redirect_url', $url_filter, 10, 1 );
+
+			self::prepare_request(
+				array_merge(
+					array(
+						'name'  => $old_slug,
+						'paged' => $paged,
+					),
+					$current_parts
+				),
+				array( 'is_404' => true )
+			);
+			$slug_url_before = count( $redirect_urls );
+			$id_before       = count( $filtered_ids );
+			\wp_old_slug_redirect();
+			$expected_slug_url = \user_trailingslashit(
+				\trailingslashit( \get_permalink( $slug_target->ID ) ) . 'page/' . $paged
+			);
+
+			self::collect_failure(
+				$failures,
+				$slug_url_before + 1 === count( $redirect_urls )
+					&& $id_before + 1 === count( $filtered_ids )
+					&& $slug_target->ID === $filtered_ids[ $id_before ]
+					&& $expected_slug_url === $redirect_urls[ $slug_url_before ],
+				'wp_old_slug_redirect builds paged old-slug URLs and can be cancelled before wp_redirect exits',
+				array(
+					'expectedUrl' => $expected_slug_url,
+					'captured'    => $redirect_urls[ $slug_url_before ] ?? null,
+					'filteredId'  => $filtered_ids[ $id_before ] ?? null,
+				)
+			);
+
+			self::flush_runtime_cache();
+			$date_parts = self::date_query_vars( $old_date );
+			self::prepare_request(
+				array_merge(
+					array(
+						'name' => $date_slug,
+					),
+					$date_parts
+				),
+				array( 'is_404' => true )
+			);
+			$queries_before_no_date = $GLOBALS['wpdb']->num_queries;
+			self::prepare_request( array( 'name' => $date_slug ), array( 'is_404' => true ) );
+			$old_date_without_parts = \_find_post_by_old_date( 'post' );
+			$queries_after_no_date  = $GLOBALS['wpdb']->num_queries;
+
+			self::prepare_request(
+				array_merge(
+					array(
+						'name' => $date_slug,
+					),
+					$date_parts
+				),
+				array(
+					'is_404'   => true,
+					'is_embed' => true,
+				)
+			);
+			$old_date_slug_probe = \_find_post_by_old_slug( 'post' );
+			$queries_before_date       = $GLOBALS['wpdb']->num_queries;
+			$old_date_id_first         = \_find_post_by_old_date( 'post' );
+			$queries_after_date        = $GLOBALS['wpdb']->num_queries;
+			$old_date_id_second        = \_find_post_by_old_date( 'post' );
+			$queries_after_date_cached = $GLOBALS['wpdb']->num_queries;
+
+			$date_url_before = count( $redirect_urls );
+			$date_id_before  = count( $filtered_ids );
+			\wp_old_slug_redirect();
+			$expected_date_url = \user_trailingslashit(
+				\trailingslashit( \get_permalink( $date_target->ID ) ) . 'embed'
+			);
+
+			self::collect_failure(
+				$failures,
+				0 === $old_date_without_parts
+					&& $queries_after_no_date === $queries_before_no_date
+					&& 0 === $old_date_slug_probe
+					&& $date_target->ID === $old_date_id_first
+					&& $date_target->ID === $old_date_id_second
+					&& $queries_after_date > $queries_before_date
+					&& $queries_after_date_cached === $queries_after_date
+					&& $date_url_before + 1 === count( $redirect_urls )
+					&& $date_id_before + 1 === count( $filtered_ids )
+					&& $date_target->ID === $filtered_ids[ $date_id_before ]
+					&& $expected_date_url === $redirect_urls[ $date_url_before ],
+				'old-date direct lookup requires date vars, misses old-slug lookup, caches hits, and builds embed URLs',
+				array(
+					'expected'            => $date_target->ID,
+					'withoutDateParts'    => $old_date_without_parts,
+					'oldSlugProbe'        => $old_date_slug_probe,
+					'first'               => $old_date_id_first,
+					'second'              => $old_date_id_second,
+					'queriesBefore'       => $queries_before_date,
+					'queriesAfterFirst'   => $queries_after_date,
+					'queriesAfterCached'  => $queries_after_date_cached,
+					'expectedUrl'         => $expected_date_url,
+					'captured'            => $redirect_urls[ $date_url_before ] ?? null,
+				)
+			);
+
+			self::flush_runtime_cache();
+			$fallback_parts = self::date_query_vars( $fallback_date );
+			self::prepare_request(
+				array_merge(
+					array(
+						'name' => $fallback_old,
+					),
+					$fallback_parts
+				),
+				array( 'is_404' => true )
+			);
+			$fallback_slug_probe              = \_find_post_by_old_slug( 'post' );
+			$queries_before_fallback          = $GLOBALS['wpdb']->num_queries;
+			$fallback_id_first                = \_find_post_by_old_date( 'post' );
+			$queries_after_fallback           = $GLOBALS['wpdb']->num_queries;
+			$fallback_id_second               = \_find_post_by_old_date( 'post' );
+			$queries_after_fallback_cached = $GLOBALS['wpdb']->num_queries;
+
+			$fallback_url_before = count( $redirect_urls );
+			$fallback_id_before  = count( $filtered_ids );
+			\wp_old_slug_redirect();
+			$expected_fallback_url = \get_permalink( $fallback_target->ID );
+
+			self::collect_failure(
+				$failures,
+				0 === $fallback_slug_probe
+					&& $fallback_target->ID === $fallback_id_first
+					&& $fallback_target->ID === $fallback_id_second
+					&& $queries_after_fallback > $queries_before_fallback
+					&& $queries_after_fallback_cached === $queries_after_fallback
+					&& $fallback_url_before + 1 === count( $redirect_urls )
+					&& $fallback_id_before + 1 === count( $filtered_ids )
+					&& $fallback_target->ID === $filtered_ids[ $fallback_id_before ]
+					&& $expected_fallback_url === $redirect_urls[ $fallback_url_before ],
+				'old-date fallback resolves posts matching both generated old slug and old date meta',
+				array(
+					'expected'           => $fallback_target->ID,
+					'oldSlugProbe'       => $fallback_slug_probe,
+					'first'              => $fallback_id_first,
+					'second'             => $fallback_id_second,
+					'queriesBefore'      => $queries_before_fallback,
+					'queriesAfterFirst'  => $queries_after_fallback,
+					'queriesAfterCached' => $queries_after_fallback_cached,
+					'expectedUrl'        => $expected_fallback_url,
+					'captured'           => $redirect_urls[ $fallback_url_before ] ?? null,
+				)
+			);
+
+			$guard_url_before = count( $redirect_urls );
+			$guard_id_before  = count( $filtered_ids );
+
+			self::prepare_request(
+				array(
+					'name'      => $old_slug,
+					'post_type' => array( 'post', 'book' ),
+				),
+				array( 'is_404' => true )
+			);
+			\wp_old_slug_redirect();
+
+			self::prepare_request(
+				array(
+					'name'      => $old_slug,
+					'post_type' => 'page',
+				),
+				array( 'is_404' => true )
+			);
+			\wp_old_slug_redirect();
+
+			self::prepare_request(
+				array(
+					'name' => $old_slug,
+				),
+				array( 'is_single' => true )
+			);
+			\wp_old_slug_redirect();
+
+			self::prepare_request( array(), array( 'is_404' => true ) );
+			\wp_old_slug_redirect();
+
+			self::collect_failure(
+				$failures,
+				$guard_url_before === count( $redirect_urls )
+					&& $guard_id_before === count( $filtered_ids ),
+				'old slug redirect fail-closed gates avoid redirects for multi-type, hierarchical, non-404, and empty-name requests',
+				array(
+					'urlCountBefore' => $guard_url_before,
+					'urlCountAfter'  => count( $redirect_urls ),
+					'idCountBefore'  => $guard_id_before,
+					'idCountAfter'   => count( $filtered_ids ),
+				)
+			);
+
+			$observed = array(
+				'oldSlug' => array(
+					'postId' => $slug_target->ID,
+					'slug'   => $old_slug,
+					'url'    => $expected_slug_url,
+				),
+				'oldDate' => array(
+					'postId' => $date_target->ID,
+					'date'   => $old_date,
+					'url'    => $expected_date_url,
+				),
+				'fallback' => array(
+					'postId' => $fallback_target->ID,
+					'slug'   => $fallback_old,
+					'date'   => $fallback_date,
+					'url'    => $expected_fallback_url,
+				),
+			);
+		} finally {
+			\remove_filter( 'old_slug_redirect_post_id', $id_filter, 10 );
+			\remove_filter( 'old_slug_redirect_url', $url_filter, 10 );
+			self::reset_db_content();
+		}
+
+		$filters_removed = false === \has_filter( 'old_slug_redirect_post_id', $id_filter )
+			&& false === \has_filter( 'old_slug_redirect_url', $url_filter );
+
+		self::collect_failure(
+			$failures,
+			$filters_removed,
+			'old slug redirect filters are removed after generated redirect checks',
+			array(
+				'postIdFilter' => \has_filter( 'old_slug_redirect_post_id', $id_filter ),
+				'urlFilter'    => \has_filter( 'old_slug_redirect_url', $url_filter ),
+			)
+		);
+
+		return $ctx->result(
+			'canonical-routing.old-slug-date.db-backed-redirects',
+			array() === $failures,
+			array(
+				'observed' => $observed,
+				'failures' => array_slice( $failures, 0, 8 ),
 			)
 		);
 	}
@@ -1345,6 +1752,33 @@ final class CanonicalRoutingSurface {
 		\wp_cache_delete( (int) $row['ID'], 'post_meta' );
 
 		return new \WP_Post( (object) $row );
+	}
+
+	private static function seed_post_meta_row( int $post_id, string $meta_key, string $meta_value ): void {
+		$GLOBALS['wpdb']->insert(
+			$GLOBALS['wpdb']->postmeta,
+			array(
+				'post_id'    => $post_id,
+				'meta_key'   => $meta_key,
+				'meta_value' => $meta_value,
+			)
+		);
+
+		\wp_cache_delete( $post_id, 'post_meta' );
+	}
+
+	private static function date_query_vars( string $datetime ): array {
+		return array(
+			'year'     => (int) substr( $datetime, 0, 4 ),
+			'monthnum' => (int) substr( $datetime, 5, 2 ),
+			'day'      => (int) substr( $datetime, 8, 2 ),
+		);
+	}
+
+	private static function old_redirect_slug( \ComponentFuzz\FuzzContext $ctx, array $case, string $label ): string {
+		return sanitize_title_with_dashes(
+			$label . ' ' . $case['token'] . ' ' . $ctx->int( 100, 999 )
+		);
 	}
 
 	private static function wpdb_stub_available(): bool {
