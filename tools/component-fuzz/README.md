@@ -85,9 +85,11 @@ database, network requests, or a configured site.
 - `admin-options-submission`: no-DB `wp-admin/options.php` update-flow
   coverage, including registered Settings API allowlists and sanitize
   callbacks, settings error transients, General Settings date/time/timezone
-  branches, pending admin email hash/confirmation-mail semantics, legacy
-  `page_options` submissions, nonce/capability/unknown-page failure paths,
-  redirect capture, and global/filter/option restoration without process exits.
+  branches, Reading/Discussion/Media/Writing core option-page sanitization,
+  conditional Writing Settings allowlist gates, pending admin email
+  hash/confirmation-mail semantics, legacy `page_options` submissions,
+  nonce/capability/unknown-page failure paths, redirect capture, and
+  global/filter/option restoration without process exits.
 - `ai-client`: no-DB WordPress AI Client API coverage for SDK DTO
   round-trips, enum strictness, provider registry isolation, model-selection
   preferences across provider/model collisions, prompt builder ability
@@ -941,9 +943,12 @@ the in-memory `wpdb` stub. The `admin-options-submission` surface covers the
 bounded `wp-admin/options.php` submission/update branch without loading the full
 admin bootstrap, redirects, or process exits; it locally installs only the two
 documented `new_admin_email` dynamic option hooks when exercising the pending
-admin email confirmation path. The `options-autoload` surface uses that same
-bounded in-memory option table and object cache, and deliberately focuses on
-core option/autoload/cache/hook semantics rather than admin form submission,
+admin email confirmation path. It also mirrors the conditional Writing Settings
+allowlist gates for post-by-email, legacy DB-version formatting options, and
+public-blog update services without loading the exiting admin controller. The
+`options-autoload` surface uses that same bounded in-memory option table and
+object cache, and deliberately focuses on core option/autoload/cache/hook
+semantics rather than admin form submission,
 network options, transients, or arbitrary SQL support. The
 `media-editor` surface short-circuits attachment metadata updates and
 intentionally avoids media paths that insert attachments, create cover-image

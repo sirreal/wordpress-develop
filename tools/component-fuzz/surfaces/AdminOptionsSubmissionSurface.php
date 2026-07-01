@@ -27,6 +27,8 @@ final class AdminOptionsSubmissionSurface {
 		try {
 			$rows[] = self::check_registered_settings_submission( $ctx->fork( 'registered' ) );
 			$rows[] = self::check_general_options_submission_branches( $ctx->fork( 'general' ) );
+			$rows[] = self::check_core_options_page_sanitization( $ctx->fork( 'core-pages' ) );
+			$rows[] = self::check_writing_options_allowlist_gates( $ctx->fork( 'writing-gates' ) );
 			$rows[] = self::check_new_admin_email_pending_change( $ctx->fork( 'new-admin-email' ) );
 			$rows[] = self::check_legacy_options_page_submission( $ctx->fork( 'legacy' ) );
 			$rows[] = self::check_failure_paths( $ctx->fork( 'failures' ) );
@@ -75,6 +77,7 @@ final class AdminOptionsSubmissionSurface {
 				'esc_html',
 				'get_current_user_id',
 				'get_settings_errors',
+				'get_site_option',
 				'get_transient',
 				'get_user_locale',
 				'get_option',
@@ -82,6 +85,8 @@ final class AdminOptionsSubmissionSurface {
 				'has_filter',
 				'home_url',
 				'is_email',
+				'is_multisite',
+				'is_utf8_charset',
 				'is_wp_error',
 				'load_default_textdomain',
 				'option_update_filter',
@@ -411,6 +416,379 @@ final class AdminOptionsSubmissionSurface {
 
 		return $ctx->result(
 			'admin-options-submission.general-date-timezone-branches',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, 4 ) )
+		);
+	}
+
+	private static function check_core_options_page_sanitization( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$suffix   = strtolower( preg_replace( '/[^a-z0-9]+/', '', $ctx->identifier( 5, 12 ) ) );
+		$suffix   = '' === $suffix ? 'cfz' . substr( md5( (string) $ctx->seed() ), 0, 8 ) : $suffix;
+
+		$reading = self::dispatch_core_page_update(
+			'reading',
+			array(
+				'posts_per_page'  => '-7 posts',
+				'posts_per_rss'   => '0',
+				'rss_use_excerpt' => ' 1 ',
+				'show_on_front'   => 'page',
+				'page_on_front'   => '-42front',
+				'page_for_posts'  => '77posts',
+			),
+			array(
+				'posts_per_page' => 10,
+				'posts_per_rss'  => 10,
+				'blog_public'    => '0',
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::core_page_completed( $reading, 'reading' )
+				&& array( 'posts_per_page', 'posts_per_rss', 'rss_use_excerpt', 'show_on_front', 'page_on_front', 'page_for_posts', 'blog_public' ) === ( $reading['result']['updatedOptions'] ?? null )
+				&& 7 === \get_option( 'posts_per_page' )
+				&& 1 === \get_option( 'posts_per_rss' )
+				&& '1' === \get_option( 'rss_use_excerpt' )
+				&& 'page' === \get_option( 'show_on_front' )
+				&& 42 === \get_option( 'page_on_front' )
+				&& 77 === \get_option( 'page_for_posts' )
+				&& 1 === \get_option( 'blog_public' )
+				&& self::pre_update_event_seen( $reading['preUpdateEvents'], 'blog_public', '0', 1 )
+				&& self::pre_update_event_seen( $reading['preUpdateEvents'], 'posts_per_rss', 10, 1 ),
+			'reading options page sanitizes numeric pagination/front-page values and applies the missing blog_public checkbox default',
+			array(
+				'result'          => self::summarize_dispatch_result( $reading['result'] ),
+				'stored'          => self::stored_options(
+					array( 'posts_per_page', 'posts_per_rss', 'rss_use_excerpt', 'show_on_front', 'page_on_front', 'page_for_posts', 'blog_public' )
+				),
+				'preUpdateEvents' => $reading['preUpdateEvents'],
+				'capEvents'       => array_slice( $reading['capEvents'], 0, 8 ),
+			)
+		);
+
+		$discussion = self::dispatch_core_page_update(
+			'discussion',
+			array(
+				'default_pingback_flag'       => '1',
+				'default_ping_status'         => '0',
+				'default_comment_status'      => '',
+				'comments_notify'             => '1',
+				'moderation_notify'           => '0',
+				'comment_moderation'          => '1',
+				'require_name_email'          => '1',
+				'comment_previously_approved' => '0',
+				'comment_max_links'           => '-11 links',
+				'moderation_keys'             => "hold-{$suffix}\n hold-{$suffix} \nreview-{$suffix}\n\n",
+				'disallowed_keys'             => "spam-{$suffix}\n\nspam-{$suffix}\ntrash-{$suffix} ",
+				'show_avatars'                => '1',
+				'avatar_rating'               => 'pg',
+				'avatar_default'              => 'mystery',
+				'close_comments_for_old_posts' => '1',
+				'close_comments_days_old'     => '-30 days',
+				'thread_comments'             => '1',
+				'thread_comments_depth'       => '-4',
+				'page_comments'               => '1',
+				'comments_per_page'           => '-50',
+				'default_comments_page'       => 'newest',
+				'comment_order'               => 'desc',
+				'comment_registration'        => '1',
+				'show_comments_cookies_opt_in' => '1',
+				'wp_notes_notify'             => '0',
+			)
+		);
+
+		$expected_moderation = "hold-{$suffix}\nreview-{$suffix}";
+		$expected_disallowed = "spam-{$suffix}\ntrash-{$suffix}";
+		self::collect_failure(
+			$failures,
+			self::core_page_completed( $discussion, 'discussion' )
+				&& ( $discussion['result']['allowedOptions']['discussion'] ?? array() ) === ( $discussion['result']['updatedOptions'] ?? null )
+				&& 'closed' === \get_option( 'default_ping_status' )
+				&& 'closed' === \get_option( 'default_comment_status' )
+				&& 11 === \get_option( 'comment_max_links' )
+				&& $expected_moderation === \get_option( 'moderation_keys' )
+				&& $expected_disallowed === \get_option( 'disallowed_keys' )
+				&& 30 === \get_option( 'close_comments_days_old' )
+				&& 4 === \get_option( 'thread_comments_depth' )
+				&& 50 === \get_option( 'comments_per_page' )
+				&& self::pre_update_event_seen( $discussion['preUpdateEvents'], 'default_ping_status', false, 'closed' )
+				&& self::pre_update_event_seen( $discussion['preUpdateEvents'], 'moderation_keys', false, $expected_moderation ),
+			'discussion options page normalizes closed statuses, absolute integer fields, and unique keyword lists',
+			array(
+				'result'          => self::summarize_dispatch_result( $discussion['result'] ),
+				'stored'          => self::stored_options(
+					array( 'default_ping_status', 'default_comment_status', 'comment_max_links', 'moderation_keys', 'disallowed_keys', 'close_comments_days_old', 'thread_comments_depth', 'comments_per_page' )
+				),
+				'preUpdateEvents' => $discussion['preUpdateEvents'],
+				'capEvents'       => array_slice( $discussion['capEvents'], 0, 8 ),
+			)
+		);
+
+		$media = self::dispatch_core_page_update(
+			'media',
+			array(
+				'thumbnail_size_w'             => '-150px',
+				'thumbnail_size_h'             => '90px',
+				'thumbnail_crop'               => '1',
+				'medium_size_w'                => '-640',
+				'medium_size_h'                => '0',
+				'large_size_w'                 => '-2048',
+				'large_size_h'                 => '1024',
+				'image_default_size'           => 'large',
+				'image_default_align'          => 'left',
+				'image_default_link_type'      => 'file',
+				'uploads_use_yearmonth_folders' => '1',
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::core_page_completed( $media, 'media' )
+				&& ( $media['result']['allowedOptions']['media'] ?? array() ) === ( $media['result']['updatedOptions'] ?? null )
+				&& 150 === \get_option( 'thumbnail_size_w' )
+				&& 90 === \get_option( 'thumbnail_size_h' )
+				&& '1' === \get_option( 'thumbnail_crop' )
+				&& 640 === \get_option( 'medium_size_w' )
+				&& 0 === \get_option( 'medium_size_h' )
+				&& 2048 === \get_option( 'large_size_w' )
+				&& 1024 === \get_option( 'large_size_h' )
+				&& 'large' === \get_option( 'image_default_size' )
+				&& 'left' === \get_option( 'image_default_align' )
+				&& 'file' === \get_option( 'image_default_link_type' )
+				&& self::pre_update_event_seen( $media['preUpdateEvents'], 'thumbnail_size_w', false, 150 )
+				&& self::pre_update_event_seen( $media['preUpdateEvents'], 'large_size_w', false, 2048 ),
+			'media options page applies absint dimensions while preserving enumerated media defaults',
+			array(
+				'result'          => self::summarize_dispatch_result( $media['result'] ),
+				'stored'          => self::stored_options(
+					array( 'thumbnail_size_w', 'thumbnail_size_h', 'thumbnail_crop', 'medium_size_w', 'medium_size_h', 'large_size_w', 'large_size_h', 'image_default_size', 'image_default_align', 'image_default_link_type', 'uploads_use_yearmonth_folders' )
+				),
+				'preUpdateEvents' => $media['preUpdateEvents'],
+				'capEvents'       => array_slice( $media['capEvents'], 0, 8 ),
+			)
+		);
+
+		$writing = self::dispatch_core_page_update(
+			'writing',
+			array(
+				'default_category'       => '-12',
+				'default_email_category' => '34cats',
+				'default_link_category'  => '-56links',
+				'default_post_format'    => 'aside',
+				'mailserver_url'         => " mail.<b>{$suffix}</b>.example.test ",
+				'mailserver_port'        => '-110',
+				'mailserver_login'       => " login<span>{$suffix}</span> ",
+				'mailserver_pass'        => " pass<em>{$suffix}</em> ",
+			),
+			array(),
+			static function (): callable {
+				$initial_db_filter = static function () {
+					return 32453;
+				};
+				\add_filter( 'pre_site_option_initial_db_version', $initial_db_filter );
+
+				return static function () use ( $initial_db_filter ): void {
+					\remove_filter( 'pre_site_option_initial_db_version', $initial_db_filter );
+				};
+			}
+		);
+
+		self::collect_failure(
+			$failures,
+			self::core_page_completed( $writing, 'writing' )
+				&& ( $writing['result']['allowedOptions']['writing'] ?? array() ) === ( $writing['result']['updatedOptions'] ?? null )
+				&& 12 === \get_option( 'default_category' )
+				&& 34 === \get_option( 'default_email_category' )
+				&& 56 === \get_option( 'default_link_category' )
+				&& 'aside' === \get_option( 'default_post_format' )
+				&& "mail.{$suffix}.example.test" === \get_option( 'mailserver_url' )
+				&& 110 === \get_option( 'mailserver_port' )
+				&& "login{$suffix}" === \get_option( 'mailserver_login' )
+				&& "pass{$suffix}" === \get_option( 'mailserver_pass' )
+				&& self::pre_update_event_seen( $writing['preUpdateEvents'], 'mailserver_url', false, "mail.{$suffix}.example.test" )
+				&& self::pre_update_event_seen( $writing['preUpdateEvents'], 'mailserver_port', false, 110 ),
+			'writing options page sanitizes category IDs, mail server port, and stripped mail server text fields',
+			array(
+				'result'          => self::summarize_dispatch_result( $writing['result'] ),
+				'stored'          => self::stored_options(
+					array( 'default_category', 'default_email_category', 'default_link_category', 'default_post_format', 'mailserver_url', 'mailserver_port', 'mailserver_login', 'mailserver_pass' )
+				),
+				'preUpdateEvents' => $writing['preUpdateEvents'],
+				'capEvents'       => array_slice( $writing['capEvents'], 0, 8 ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			false === \has_filter( 'pre_update_option' )
+				&& false === \has_filter( 'user_has_cap' ),
+			'core page submission filters are removed after the matrix',
+			array(
+				'preUpdate' => \has_filter( 'pre_update_option' ),
+				'cap'       => \has_filter( 'user_has_cap' ),
+			)
+		);
+
+		return $ctx->result(
+			'admin-options-submission.core-page-sanitization-matrix',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, 6 ) )
+		);
+	}
+
+	private static function check_writing_options_allowlist_gates( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$suffix   = strtolower( preg_replace( '/[^a-z0-9]+/', '', $ctx->identifier( 5, 12 ) ) );
+		$suffix   = '' === $suffix ? 'cfz' . substr( md5( (string) $ctx->seed() ), 0, 8 ) : $suffix;
+
+		$enabled_ping_sites = " https://updates.example/{$suffix}\n\nhttp://example.test/{$suffix}?a=1 ";
+		$enabled = self::dispatch_core_page_update(
+			'writing',
+			array(
+				'default_category'       => '-12',
+				'default_email_category' => '34cats',
+				'default_link_category'  => '-56links',
+				'default_post_format'    => 'quote',
+				'mailserver_url'         => " mail.<b>{$suffix}</b>.example.test ",
+				'mailserver_port'        => '-110',
+				'mailserver_login'       => " login<span>{$suffix}</span> ",
+				'mailserver_pass'        => " pass<em>{$suffix}</em> ",
+				'use_smilies'            => '1',
+				'use_balanceTags'        => '0',
+				'ping_sites'             => $enabled_ping_sites,
+				'not_a_writing_option'   => 'do-not-store',
+			),
+			array(
+				'blog_public' => '1',
+			),
+			self::writing_gate_filter_installer( true, 32452 )
+		);
+		$enabled_expected = array(
+			'default_category',
+			'default_email_category',
+			'default_link_category',
+			'default_post_format',
+			'mailserver_url',
+			'mailserver_port',
+			'mailserver_login',
+			'mailserver_pass',
+			'use_smilies',
+			'use_balanceTags',
+			'ping_sites',
+		);
+		$expected_ping_sites = "https://updates.example/{$suffix}\nhttp://example.test/{$suffix}?a=1";
+
+		self::collect_failure(
+			$failures,
+			self::core_page_completed( $enabled, 'writing' )
+				&& $enabled_expected === ( $enabled['result']['allowedOptions']['writing'] ?? null )
+				&& $enabled_expected === ( $enabled['result']['updatedOptions'] ?? null )
+				&& 12 === \get_option( 'default_category' )
+				&& 34 === \get_option( 'default_email_category' )
+				&& 56 === \get_option( 'default_link_category' )
+				&& 'quote' === \get_option( 'default_post_format' )
+				&& "mail.{$suffix}.example.test" === \get_option( 'mailserver_url' )
+				&& 110 === \get_option( 'mailserver_port' )
+				&& "login{$suffix}" === \get_option( 'mailserver_login' )
+				&& "pass{$suffix}" === \get_option( 'mailserver_pass' )
+				&& '1' === \get_option( 'use_smilies' )
+				&& '0' === \get_option( 'use_balanceTags' )
+				&& $expected_ping_sites === \get_option( 'ping_sites' )
+				&& '__missing__' === \get_option( 'not_a_writing_option', '__missing__' )
+				&& self::pre_update_event_seen( $enabled['preUpdateEvents'], 'ping_sites', false, $expected_ping_sites )
+				&& self::pre_update_event_seen( $enabled['preUpdateEvents'], 'mailserver_port', false, 110 ),
+			'enabled legacy/public writing submission includes post-by-email, legacy formatting, and update-service allowlist branches',
+			array(
+				'result'          => self::summarize_dispatch_result( $enabled['result'] ),
+				'stored'          => self::stored_options(
+					array( 'default_category', 'default_email_category', 'default_link_category', 'default_post_format', 'mailserver_url', 'mailserver_port', 'mailserver_login', 'mailserver_pass', 'use_smilies', 'use_balanceTags', 'ping_sites', 'not_a_writing_option' )
+				),
+				'preUpdateEvents' => $enabled['preUpdateEvents'],
+				'capEvents'       => array_slice( $enabled['capEvents'], 0, 8 ),
+			)
+		);
+
+		$disabled = self::dispatch_core_page_update(
+			'writing',
+			array(
+				'default_category'       => '9',
+				'default_email_category' => '8',
+				'default_link_category'  => '7',
+				'default_post_format'    => 'status',
+				'mailserver_url'         => 'posted.example.test',
+				'mailserver_port'        => '995',
+				'mailserver_login'       => 'posted-login',
+				'mailserver_pass'        => 'posted-pass',
+				'use_smilies'            => '1',
+				'use_balanceTags'        => '1',
+				'ping_sites'             => 'https://posted.example.test/',
+			),
+			array(
+				'blog_public'      => '0',
+				'mailserver_url'   => 'keep.mail.example.test',
+				'mailserver_port'  => 143,
+				'mailserver_login' => 'keep-login',
+				'mailserver_pass'  => 'keep-pass',
+				'use_smilies'      => '0',
+				'use_balanceTags'  => '0',
+				'ping_sites'       => 'https://old.example.test/',
+			),
+			self::writing_gate_filter_installer( false, 32453 )
+		);
+		$disabled_expected = array(
+			'default_category',
+			'default_email_category',
+			'default_link_category',
+			'default_post_format',
+		);
+
+		self::collect_failure(
+			$failures,
+			self::core_page_completed( $disabled, 'writing' )
+				&& $disabled_expected === ( $disabled['result']['allowedOptions']['writing'] ?? null )
+				&& $disabled_expected === ( $disabled['result']['updatedOptions'] ?? null )
+				&& 9 === \get_option( 'default_category' )
+				&& 8 === \get_option( 'default_email_category' )
+				&& 7 === \get_option( 'default_link_category' )
+				&& 'status' === \get_option( 'default_post_format' )
+				&& 'keep.mail.example.test' === \get_option( 'mailserver_url' )
+				&& 143 === \get_option( 'mailserver_port' )
+				&& 'keep-login' === \get_option( 'mailserver_login' )
+				&& 'keep-pass' === \get_option( 'mailserver_pass' )
+				&& '0' === \get_option( 'use_smilies' )
+				&& '0' === \get_option( 'use_balanceTags' )
+				&& 'https://old.example.test/' === \get_option( 'ping_sites' )
+				&& ! self::pre_update_option_seen( $disabled['preUpdateEvents'], 'mailserver_url' )
+				&& ! self::pre_update_option_seen( $disabled['preUpdateEvents'], 'ping_sites' ),
+			'disabled modern/private writing submission ignores posted gated fields and updates only base writing options',
+			array(
+				'result'          => self::summarize_dispatch_result( $disabled['result'] ),
+				'stored'          => self::stored_options(
+					array( 'default_category', 'default_email_category', 'default_link_category', 'default_post_format', 'mailserver_url', 'mailserver_port', 'mailserver_login', 'mailserver_pass', 'use_smilies', 'use_balanceTags', 'ping_sites' )
+				),
+				'preUpdateEvents' => $disabled['preUpdateEvents'],
+				'capEvents'       => array_slice( $disabled['capEvents'], 0, 8 ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			false === \has_filter( 'enable_post_by_email_configuration' )
+				&& false === \has_filter( 'pre_site_option_initial_db_version' )
+				&& false === \has_filter( 'pre_update_option' )
+				&& false === \has_filter( 'user_has_cap' ),
+			'writing allowlist gate filters are removed after enabled and disabled dispatches',
+			array(
+				'postByEmail' => \has_filter( 'enable_post_by_email_configuration' ),
+				'dbVersion'   => \has_filter( 'pre_site_option_initial_db_version' ),
+				'preUpdate'   => \has_filter( 'pre_update_option' ),
+				'cap'         => \has_filter( 'user_has_cap' ),
+			)
+		);
+
+		return $ctx->result(
+			'admin-options-submission.writing-allowlist-gates',
 			array() === $failures,
 			array( 'failures' => array_slice( $failures, 0, 4 ) )
 		);
@@ -822,6 +1200,122 @@ final class AdminOptionsSubmissionSurface {
 		);
 	}
 
+	private static function dispatch_core_page_update( string $page, array $post_values, array $initial_options = array(), ?callable $install_extra_filters = null ): array {
+		self::reset_runtime( $initial_options );
+
+		$pre_update_events = array();
+		$cap_events        = array();
+		$cleanup_extra     = null;
+		$cap_filter        = self::install_cap_filter( array( 'manage_options' ), $cap_events );
+		$pre_update_filter = static function ( $value, string $option, $old_value ) use ( &$pre_update_events ) {
+			$pre_update_events[] = array(
+				'option' => $option,
+				'old'    => $old_value,
+				'value'  => $value,
+			);
+			return $value;
+		};
+
+		\add_filter( 'pre_update_option', $pre_update_filter, 10, 3 );
+		try {
+			if ( null !== $install_extra_filters ) {
+				$cleanup_extra = $install_extra_filters();
+			}
+			$result = self::dispatch_options_update(
+				array(
+					'post'    => array_merge(
+						array(
+							'action'      => 'update',
+							'option_page' => $page,
+							'_wpnonce'    => \wp_create_nonce( $page . '-options' ),
+						),
+						$post_values
+					),
+					'referer' => 'http://example.test/wp-admin/options-' . $page . '.php',
+				)
+			);
+		} finally {
+			if ( is_callable( $cleanup_extra ) ) {
+				$cleanup_extra();
+			}
+			\remove_filter( 'pre_update_option', $pre_update_filter, 10 );
+			\remove_filter( 'user_has_cap', $cap_filter, 10 );
+		}
+
+		return array(
+			'result'          => $result,
+			'preUpdateEvents' => $pre_update_events,
+			'capEvents'       => $cap_events,
+		);
+	}
+
+	private static function core_page_completed( array $dispatch, string $page ): bool {
+		$result = $dispatch['result'] ?? array();
+
+		return is_array( $result )
+			&& 'completed' === ( $result['status'] ?? null )
+			&& false === ( $result['redirectResult'] ?? null )
+			&& self::redirect_has_settings_updated( $result['redirect']['location'] ?? '' )
+			&& 302 === ( $result['redirect']['status'] ?? null )
+			&& self::nonce_event_seen( $result, $page . '-options', 1 )
+			&& self::has_settings_error( $result['settingsErrors'] ?? array(), 'general', 'settings_updated', 'success' )
+			&& ( $result['settingsErrors'] ?? array() ) === ( $result['settingsTransient'] ?? null )
+			&& self::capability_event_seen( $dispatch['capEvents'] ?? array(), 'manage_options' );
+	}
+
+	private static function pre_update_event_seen( array $events, string $option, $old_value, $new_value ): bool {
+		foreach ( $events as $event ) {
+			if (
+				is_array( $event )
+				&& $option === ( $event['option'] ?? null )
+				&& $old_value === ( $event['old'] ?? null )
+				&& $new_value === ( $event['value'] ?? null )
+			) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private static function pre_update_option_seen( array $events, string $option ): bool {
+		foreach ( $events as $event ) {
+			if ( is_array( $event ) && $option === ( $event['option'] ?? null ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private static function writing_gate_filter_installer( bool $post_by_email_enabled, int $initial_db_version ): callable {
+		return static function () use ( $post_by_email_enabled, $initial_db_version ): callable {
+			$post_by_email_filter = static function () use ( $post_by_email_enabled ): bool {
+				return $post_by_email_enabled;
+			};
+			$initial_db_filter = static function () use ( $initial_db_version ): int {
+				return $initial_db_version;
+			};
+
+			\add_filter( 'enable_post_by_email_configuration', $post_by_email_filter );
+			\add_filter( 'pre_site_option_initial_db_version', $initial_db_filter );
+
+			return static function () use ( $post_by_email_filter, $initial_db_filter ): void {
+				\remove_filter( 'enable_post_by_email_configuration', $post_by_email_filter );
+				\remove_filter( 'pre_site_option_initial_db_version', $initial_db_filter );
+			};
+		};
+	}
+
+	private static function stored_options( array $options ): array {
+		$stored = array();
+		foreach ( $options as $option ) {
+			$stored[ $option ] = \get_option( $option, '__missing__' );
+		}
+
+		return $stored;
+	}
+
 	private static function dispatch_options_update( array $request ): array {
 		$post    = is_array( $request['post'] ?? null ) ? $request['post'] : array();
 		$get     = is_array( $request['get'] ?? null ) ? $request['get'] : array();
@@ -1007,10 +1501,6 @@ final class AdminOptionsSubmissionSurface {
 				'timezone_string',
 				'WPLANG',
 				'new_admin_email',
-				'siteurl',
-				'home',
-				'users_can_register',
-				'default_role',
 			),
 			'discussion' => array(
 				'default_pingback_flag',
@@ -1050,7 +1540,6 @@ final class AdminOptionsSubmissionSurface {
 				'image_default_size',
 				'image_default_align',
 				'image_default_link_type',
-				'uploads_use_yearmonth_folders',
 			),
 			'reading'    => array(
 				'posts_per_page',
@@ -1066,15 +1555,52 @@ final class AdminOptionsSubmissionSurface {
 				'default_email_category',
 				'default_link_category',
 				'default_post_format',
-				'mailserver_url',
-				'mailserver_port',
-				'mailserver_login',
-				'mailserver_pass',
 			),
 			'misc'       => array(),
 			'options'    => array(),
 			'privacy'    => array(),
 		);
+
+		if ( \apply_filters( 'enable_post_by_email_configuration', true ) ) {
+			$allowed_options['writing'][] = 'mailserver_url';
+			$allowed_options['writing'][] = 'mailserver_port';
+			$allowed_options['writing'][] = 'mailserver_login';
+			$allowed_options['writing'][] = 'mailserver_pass';
+		}
+
+		if ( ! \is_utf8_charset() ) {
+			$allowed_options['reading'][] = 'blog_charset';
+		}
+
+		if ( \get_site_option( 'initial_db_version' ) < 32453 ) {
+			$allowed_options['writing'][] = 'use_smilies';
+			$allowed_options['writing'][] = 'use_balanceTags';
+		}
+
+		if ( ! \is_multisite() ) {
+			if ( ! defined( 'WP_SITEURL' ) ) {
+				$allowed_options['general'][] = 'siteurl';
+			}
+			if ( ! defined( 'WP_HOME' ) ) {
+				$allowed_options['general'][] = 'home';
+			}
+
+			$allowed_options['general'][] = 'users_can_register';
+			$allowed_options['general'][] = 'default_role';
+
+			if ( '1' === (string) \get_option( 'blog_public' ) ) {
+				$allowed_options['writing'][] = 'ping_sites';
+			}
+
+			$allowed_options['media'][] = 'uploads_use_yearmonth_folders';
+
+			if ( \get_option( 'upload_url_path' )
+				|| \get_option( 'upload_path' ) && 'wp-content/uploads' !== \get_option( 'upload_path' )
+			) {
+				$allowed_options['media'][] = 'upload_path';
+				$allowed_options['media'][] = 'upload_url_path';
+			}
+		}
 
 		$allowed_options = \apply_filters_deprecated(
 			'whitelist_options',
