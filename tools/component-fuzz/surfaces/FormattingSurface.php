@@ -25,6 +25,7 @@ final class FormattingSurface {
 		$rows[] = self::check_specialchars_round_trips( $ctx, $inputs['roundTripStrings'] );
 		$rows[] = self::check_text_sanitizers( $ctx, $inputs['strings'] );
 		$rows[] = self::check_normalize_whitespace( $ctx, $inputs['strings'] );
+		$rows[] = self::check_wptexturize_rich_text_oracles( $ctx->fork( 'formatting-wptexturize' ), $inputs['texturizeCases'] );
 		$rows[] = self::check_autop_shortcode_stability( $ctx, $inputs['autopCases'] );
 		$rows[] = self::check_make_clickable( $ctx, $inputs['clickableCases'] );
 		$rows[] = self::check_url_sanitizers( $ctx, $inputs['urlCases'] );
@@ -75,6 +76,7 @@ final class FormattingSurface {
 		return array(
 			'strings'          => array_values( array_map( array( self::class, 'trim_input' ), $strings ) ),
 			'roundTripStrings' => $round_trip_strings,
+			'texturizeCases'   => self::generate_wptexturize_cases( $ctx->fork( 'formatting-wptexturize' ) ),
 			'autopCases'       => self::generate_autop_cases( $ctx->fork( 'formatting-autop' ) ),
 			'clickableCases'   => self::generate_clickable_cases( $ctx->fork( 'formatting-clickable' ) ),
 			'urlCases'         => self::generate_url_cases( $ctx->fork( 'formatting-urls' ) ),
@@ -383,6 +385,243 @@ final class FormattingSurface {
 			'normalize_whitespace.canonical_shape',
 			$failures,
 			array( 'cases' => $cases )
+		);
+	}
+
+	private static function check_wptexturize_rich_text_oracles( \ComponentFuzz\FuzzContext $ctx, array $cases ): array {
+		foreach (
+			array(
+				'add_filter',
+				'add_shortcode',
+				'has_filter',
+				'remove_filter',
+				'wptexturize',
+				'wptexturize_primes',
+				'_get_wptexturize_split_regex',
+				'_get_wptexturize_shortcode_regex',
+			) as $function
+		) {
+			if ( ! function_exists( $function ) ) {
+				return self::skip_row( $ctx, 'wptexturize.rich_text_oracles', "{$function}() is unavailable." );
+			}
+		}
+
+		global $shortcode_tags;
+
+		$previous_shortcode_tags = $shortcode_tags ?? array();
+		$had_cockneyreplace      = array_key_exists( 'wp_cockneyreplace', $GLOBALS );
+		$previous_cockneyreplace = $GLOBALS['wp_cockneyreplace'] ?? null;
+		$failures                = array();
+		$checked                 = 0;
+		$tag_filter_calls        = array();
+		$shortcode_filter_calls  = array();
+		$marker_fragments        = array( '<!--oq-->', '<!--osq-->', '<!--apos-->', '<!--wp-prime-or-quote-->' );
+
+		$tag_filter = static function ( array $tags ) use ( &$tag_filter_calls ): array {
+			$tag_filter_calls[] = $tags;
+			$tags[]             = 'mark';
+			return array_values( array_unique( $tags ) );
+		};
+		$shortcode_filter = static function ( array $shortcodes ) use ( &$shortcode_filter_calls ): array {
+			$shortcode_filter_calls[] = $shortcodes;
+			$shortcodes[]             = 'fmtkeep';
+			return array_values( array_unique( $shortcodes ) );
+		};
+
+		try {
+			\add_shortcode(
+				'fmttext',
+				static function ( $atts = array(), $content = '' ) {
+					unset( $atts );
+					return (string) $content;
+				}
+			);
+			\add_shortcode(
+				'fmtkeep',
+				static function ( $atts = array(), $content = '' ) {
+					unset( $atts );
+					return (string) $content;
+				}
+			);
+			\add_filter( 'no_texturize_tags', $tag_filter, 10, 1 );
+			\add_filter( 'no_texturize_shortcodes', $shortcode_filter, 10, 1 );
+
+			\wptexturize( 'component-fuzz-reset', true );
+
+			foreach ( $cases as $case_index => $case ) {
+				$first = self::call(
+					'wptexturize',
+					static function () use ( $case ) {
+						return \wptexturize( $case['input'] );
+					}
+				);
+				++$checked;
+
+				if ( ! $first['ok'] || ! is_string( $first['value'] ) ) {
+					$failures[] = self::call_failure(
+						'wptexturize-call-failed',
+						'wptexturize() failed or returned a non-string value.',
+						$first,
+						array(
+							'caseIndex' => $case_index,
+							'label'     => $case['label'],
+							'input'     => self::describe_string( $case['input'] ),
+						)
+					);
+					continue;
+				}
+
+				$output     = $first['value'];
+				$again      = self::call(
+					'wptexturize:repeat',
+					static function () use ( $output ) {
+						return \wptexturize( $output );
+					}
+				);
+				$violations = array();
+
+				if ( isset( $case['expected'] ) && $output !== $case['expected'] ) {
+					$violations[] = 'exact-output-mismatch';
+				}
+				if ( ! $again['ok'] || $again['value'] !== $output ) {
+					$violations[] = 'not-idempotent';
+				}
+				if ( strlen( $output ) > max( 512, strlen( $case['input'] ) * 8 + 256 ) ) {
+					$violations[] = 'unexpected-expansion';
+				}
+				foreach ( $case['contains'] ?? array() as $needle ) {
+					if ( ! str_contains( $output, $needle ) ) {
+						$violations[] = 'missing-fragment:' . $needle;
+					}
+				}
+				foreach ( $case['notContains'] ?? array() as $needle ) {
+					if ( str_contains( $output, $needle ) ) {
+						$violations[] = 'unexpected-fragment:' . $needle;
+					}
+				}
+				foreach ( $marker_fragments as $marker ) {
+					if ( str_contains( $output, $marker ) ) {
+						$violations[] = 'internal-marker-leaked:' . $marker;
+					}
+				}
+
+				if ( array() !== $violations ) {
+					$failures[] = array(
+						'name'       => 'wptexturize-output-oracle-violation',
+						'message'    => 'wptexturize() output violated exact, protected-region, marker, or idempotence expectations.',
+						'caseIndex'  => $case_index,
+						'label'      => $case['label'],
+						'input'      => self::describe_string( $case['input'] ),
+						'output'     => self::describe_string( $output ),
+						'expected'   => isset( $case['expected'] ) ? self::describe_string( $case['expected'] ) : null,
+						'second'     => self::call_summary( $again ),
+						'violations' => $violations,
+						'difference' => isset( $case['expected'] ) ? self::first_string_difference( $case['expected'], $output ) : null,
+					);
+				}
+			}
+
+			$shortcode_regex = \_get_wptexturize_shortcode_regex( array( 'fmttext', 'fmtkeep' ) );
+			$split_regex     = \_get_wptexturize_split_regex( $shortcode_regex );
+			$split_input     = 'alpha <a href="http://example.test?a=1&b=2">"link"</a> [fmttext attr="<b>"]"short"[/fmttext] <!-- "comment" --> omega';
+			$split_parts     = preg_split( $split_regex, $split_input, -1, PREG_SPLIT_DELIM_CAPTURE | PREG_SPLIT_NO_EMPTY );
+			$html_regex      = \_get_wptexturize_split_regex();
+			$html_parts      = preg_split( $html_regex, $split_input, -1, PREG_SPLIT_DELIM_CAPTURE | PREG_SPLIT_NO_EMPTY );
+
+			if (
+				! is_array( $split_parts )
+				|| implode( '', $split_parts ) !== $split_input
+				|| count( $split_parts ) < 7
+				|| ! in_array( '[fmttext attr="<b>"]', $split_parts, true )
+				|| ! is_array( $html_parts )
+				|| implode( '', $html_parts ) !== $split_input
+			) {
+				$failures[] = array(
+					'name'           => 'wptexturize-split-regex-recompose-failed',
+					'message'        => 'The texturize HTML/shortcode split regexes did not split and recompose a generated mixed input losslessly.',
+					'input'          => self::describe_string( $split_input ),
+					'parts'          => is_array( $split_parts ) ? array_map( array( self::class, 'describe_string' ), $split_parts ) : self::describe_value( $split_parts ),
+					'htmlParts'      => is_array( $html_parts ) ? array_map( array( self::class, 'describe_string' ), $html_parts ) : self::describe_value( $html_parts ),
+					'shortcodeRegex' => self::describe_string( $shortcode_regex ),
+				);
+			}
+
+			$prime_cases = array(
+				array(
+					'input'    => "9'",
+					'expected' => '9&#8242;',
+					'needle'   => "'",
+					'prime'    => '&#8242;',
+					'open'     => '&#8216;',
+					'close'    => '&#8217;',
+				),
+				array(
+					'input'    => '9"',
+					'expected' => '9&#8243;',
+					'needle'   => '"',
+					'prime'    => '&#8243;',
+					'open'     => '&#8220;',
+					'close'    => '&#8221;',
+				),
+			);
+
+			foreach ( $prime_cases as $prime_index => $prime_case ) {
+				$prime_output = \wptexturize_primes(
+					$prime_case['input'],
+					$prime_case['needle'],
+					$prime_case['prime'],
+					$prime_case['open'],
+					$prime_case['close']
+				);
+				if ( $prime_output !== $prime_case['expected'] ) {
+					$failures[] = array(
+						'name'      => 'wptexturize-primes-simple-oracle-mismatch',
+						'message'   => 'wptexturize_primes() did not classify a simple numeric prime fixture as expected.',
+						'caseIndex' => $prime_index,
+						'input'     => self::describe_string( $prime_case['input'] ),
+						'expected'  => self::describe_string( $prime_case['expected'] ),
+						'actual'    => self::describe_string( $prime_output ),
+					);
+				}
+			}
+		} finally {
+			\remove_filter( 'no_texturize_shortcodes', $shortcode_filter, 10 );
+			\remove_filter( 'no_texturize_tags', $tag_filter, 10 );
+			$shortcode_tags = $previous_shortcode_tags;
+			if ( $had_cockneyreplace ) {
+				$GLOBALS['wp_cockneyreplace'] = $previous_cockneyreplace;
+			} else {
+				unset( $GLOBALS['wp_cockneyreplace'] );
+			}
+			\wptexturize( 'component-fuzz-reset', true );
+		}
+
+		if (
+			0 === count( $tag_filter_calls )
+			|| 0 === count( $shortcode_filter_calls )
+			|| false !== \has_filter( 'no_texturize_tags', $tag_filter )
+			|| false !== \has_filter( 'no_texturize_shortcodes', $shortcode_filter )
+		) {
+			$failures[] = array(
+				'name'            => 'wptexturize-filter-locality-violation',
+				'message'         => 'no_texturize filters were not invoked or were left registered after the texturize check.',
+				'tagCalls'        => count( $tag_filter_calls ),
+				'shortcodeCalls'  => count( $shortcode_filter_calls ),
+				'tagFilter'       => \has_filter( 'no_texturize_tags', $tag_filter ),
+				'shortcodeFilter' => \has_filter( 'no_texturize_shortcodes', $shortcode_filter ),
+			);
+		}
+
+		return self::check_row(
+			$ctx,
+			'wptexturize.rich_text_oracles',
+			$failures,
+			array(
+				'cases'           => $checked,
+				'tagFilterCalls'  => count( $tag_filter_calls ),
+				'shortcodeCalls'  => count( $shortcode_filter_calls ),
+				'registeredCodes' => array( 'fmttext', 'fmtkeep' ),
+			)
 		);
 	}
 
@@ -1637,6 +1876,93 @@ final class FormattingSurface {
 		}
 
 		return self::trim_input( $out );
+	}
+
+	private static function generate_wptexturize_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$token  = strtolower( preg_replace( '/[^a-z0-9]+/', '', $ctx->identifier( 4, 10 ) ) );
+		$word   = '' === $token ? 'alpha' : $token;
+		$width  = $ctx->int( 2, 99 );
+		$height = $ctx->int( 2, 99 );
+		$feet   = $ctx->int( 2, 19 );
+		$inch   = $ctx->int( 2, 47 );
+
+		$cases = array(
+			array(
+				'label'    => 'double-quotes-em-dash-dimension-ellipsis',
+				'input'    => '"' . $word . '" -- ' . $width . 'x' . $height . '...',
+				'expected' => '&#8220;' . $word . '&#8221; &#8212; ' . $width . '&#215;' . $height . '&#8230;',
+			),
+			array(
+				'label'    => 'single-quotes-en-dash-apostrophe',
+				'input'    => "'quoted' - " . $word . "'s",
+				'expected' => '&#8216;quoted&#8217; &#8211; ' . $word . '&#8217;s',
+			),
+			array(
+				'label'    => 'numeric-primes',
+				'input'    => $feet . "' by " . $inch . '"',
+				'expected' => $feet . '&#8242; by ' . $inch . '&#8243;',
+			),
+			array(
+				'label'    => 'ampersand-and-cockney',
+				'input'    => "AT&T 'twas 'til now",
+				'expected' => 'AT&#038;T &#8217;twas &#8217;til now',
+			),
+			array(
+				'label'    => 'html-attribute-ampersand-and-body-text',
+				'input'    => '<a href="http://example.test?a=1&b=2">"link"</a>',
+				'expected' => '<a href="http://example.test?a=1&#038;b=2">&#8220;link&#8221;</a>',
+			),
+			array(
+				'label'    => 'default-protected-pre',
+				'input'    => 'Before "' . $word . '" -- <pre>"raw" -- 14x24 &</pre> after \'tail\'...',
+				'expected' => 'Before &#8220;' . $word . '&#8221; &#8212; <pre>"raw" -- 14x24 &</pre> after &#8216;tail&#8217;&#8230;',
+				'contains' => array( '<pre>"raw" -- 14x24 &</pre>' ),
+			),
+			array(
+				'label'    => 'filtered-protected-mark',
+				'input'    => 'Before <mark>"raw" -- 14x24 &</mark> after "ok"',
+				'expected' => 'Before <mark>"raw" -- 14x24 &</mark> after &#8220;ok&#8221;',
+				'contains' => array( '<mark>"raw" -- 14x24 &</mark>' ),
+			),
+			array(
+				'label'    => 'filtered-protected-shortcode',
+				'input'    => 'Before [fmtkeep]"raw" -- 14x24 &[/fmtkeep] after "ok"',
+				'expected' => 'Before [fmtkeep]"raw" -- 14x24 &[/fmtkeep] after &#8220;ok&#8221;',
+				'contains' => array( '[fmtkeep]"raw" -- 14x24 &[/fmtkeep]' ),
+			),
+			array(
+				'label'    => 'registered-unprotected-shortcode-content',
+				'input'    => '[fmttext]"raw" -- ' . $width . 'x' . $height . ' &[/fmttext]',
+				'expected' => '[fmttext]&#8220;raw&#8221; &#8212; ' . $width . '&#215;' . $height . ' &#038;[/fmttext]',
+			),
+			array(
+				'label'    => 'html-comments-protected',
+				'input'    => '<!-- "raw" -- --> "' . $word . '"',
+				'expected' => '<!-- "raw" -- --> &#8220;' . $word . '&#8221;',
+				'contains' => array( '<!-- "raw" -- -->' ),
+			),
+			array(
+				'label'       => 'punycode-double-hyphen-preserved',
+				'input'       => 'xn--bcher-kva -- plain--dash',
+				'contains'    => array( 'xn--bcher-kva', '&#8212;', 'plain&#8211;dash' ),
+				'notContains' => array( 'xn&#8211;bcher-kva' ),
+			),
+		);
+
+		$plain_words = array( 'alpha', 'beta', 'gamma', 'delta', $word );
+		for ( $i = 0; $i < 6; ++$i ) {
+			$left  = $ctx->choice( $plain_words );
+			$right = $ctx->choice( $plain_words );
+			$w     = $ctx->int( 2, 99 );
+			$h     = $ctx->int( 2, 99 );
+			$cases[] = array(
+				'label'    => 'generated-pattern-' . $i,
+				'input'    => '"' . $left . '" - ' . $right . "'s " . $w . 'x' . $h . '...',
+				'expected' => '&#8220;' . $left . '&#8221; &#8211; ' . $right . '&#8217;s ' . $w . '&#215;' . $h . '&#8230;',
+			);
+		}
+
+		return $cases;
 	}
 
 	private static function generate_autop_cases( \ComponentFuzz\FuzzContext $ctx ): array {

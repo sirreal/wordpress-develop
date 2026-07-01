@@ -326,6 +326,8 @@ database, network requests, or a configured site.
   detection, direct filesystem sandboxing, metadata/time/chmod round trips, and
   missing-file failure values.
 - `formatting`: escaping helpers, text sanitizers, whitespace normalization,
+  `wptexturize()` rich-text punctuation and protected-region oracles,
+  `wptexturize_primes()`, texturize split/shortcode regex recomposition,
   autop/shortcode cleanup, clickable text, URL sanitization, entity
   normalization, title/key/class identifier sanitizers, file-name and username
   sanitizers, colors, sizes, time strings, UTF-8 helpers, and accent removal.
