@@ -6942,12 +6942,22 @@ final class EmailSurface {
 					'address' => 'user@example..com',
 					'valid'   => false,
 				),
+				array(
+					'label'   => 'invalid-punycode-tld-no-partial-link',
+					'address' => 'mail@example.xn--',
+					'valid'   => false,
+				),
+				array(
+					'label'   => 'trailing-hyphen-tld-no-partial-link',
+					'address' => 'mail@example.co-',
+					'valid'   => false,
+				),
 			)
 		);
 
-		$failures         = array();
-		$observed         = array();
-		$known_boundaries = array();
+		$failures              = array();
+		$observed              = array();
+		$partial_link_failures = array();
 
 		foreach ( $samples as $case ) {
 			$address      = $case['address'];
@@ -6975,24 +6985,14 @@ final class EmailSurface {
 			if (
 				! $expect_link
 				&& array() !== $anchors
-				&& is_string( $rendered['value'] ?? null )
-				&& self::make_clickable_known_partial_email_boundary( $address, $anchors, $rendered['value'] )
+				&& str_contains( strtolower( $address ), '.xn--' )
 			) {
-				$known_boundaries[] = array(
+				$partial_link_failures[] = array(
 					'label'    => $case['label'],
 					'address'  => self::describe_string( $address ),
 					'rendered' => self::describe_call( $rendered ),
 					'anchors'  => self::describe_value( $anchors ),
 				);
-				$observed[]         = array(
-					'label'         => $case['label'],
-					'address'       => self::describe_string( $address ),
-					'valid'         => $case['valid'],
-					'expectLink'    => $expect_link,
-					'linked'        => $actual_link,
-					'knownBoundary' => true,
-				);
-				continue;
 			}
 
 			if ( $expect_link ) {
@@ -7047,13 +7047,11 @@ final class EmailSurface {
 			),
 		);
 
-		if ( array() !== $known_boundaries ) {
-			$rows[] = $ctx->skip(
-				'email.make-clickable.punycode-tld-partial-link-boundary',
-				'Core make_clickable() currently uses an ASCII email regex that can partially link punycode TLD labels.',
-				array( 'cases' => $known_boundaries )
-			);
-		}
+		$rows[] = $ctx->result(
+			'email.make-clickable.punycode-tld-partial-link-boundary',
+			array() === $partial_link_failures,
+			array( 'cases' => $partial_link_failures )
+		);
 
 		return $rows;
 	}
@@ -7247,40 +7245,7 @@ final class EmailSurface {
 	}
 
 	private static function make_clickable_email_pattern_matches( string $address ): bool {
-		return 1 === preg_match( '/\A[.0-9a-z_+-]+@(?:[0-9a-z-]+\.)+[0-9a-z]{2,}\z/i', $address );
-	}
-
-	private static function make_clickable_known_partial_email_boundary( string $address, array $anchors, string $rendered ): bool {
-		if ( ! str_contains( $address, '.xn--' ) ) {
-			return false;
-		}
-
-		if ( 1 !== count( $anchors ) ) {
-			return false;
-		}
-
-		$anchor           = $anchors[0];
-		$href             = $anchor['href'] ?? null;
-		$text             = $anchor['text'] ?? null;
-		$expected_partial = self::make_clickable_partial_email_target( $address );
-		if ( null === $expected_partial || ! is_string( $href ) || ! is_string( $text ) ) {
-			return false;
-		}
-
-		$suffix   = substr( $address, strlen( $expected_partial ) );
-		$expected = 'Contact <a href="mailto:' . $expected_partial . '">' . $expected_partial . '</a>' . $suffix . ' now';
-
-		return $href === $expected_partial
-			&& $text === $expected_partial
-			&& $rendered === $expected;
-	}
-
-	private static function make_clickable_partial_email_target( string $address ): ?string {
-		if ( 1 !== preg_match( '/\A([.0-9a-z_+-]+@(?:[0-9a-z-]+\.)+xn)(--[0-9a-z-]+)\z/i', $address, $matches ) ) {
-			return null;
-		}
-
-		return $matches[1];
+		return 1 === preg_match( '/\A[.0-9a-z_+-]+@(?:[0-9a-z-]+\.)+(?:xn--[0-9a-z-]*[0-9a-z]|[0-9a-z]{2,})\z/i', $address );
 	}
 
 	private static function address_round_trip_ok( \WP_Email_Address $email ): bool {

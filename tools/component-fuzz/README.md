@@ -282,7 +282,8 @@ database, network requests, or a configured site.
   profile email-change confirmation request paths, password-reset Unicode recipient paths,
   password-reset notification recipient machine/readable view overrides through
   the PHPMailer handoff, current machine-view reset lookup rejection, clickable
-  mailto rendering boundaries, and generated
+  mailto rendering boundaries including punycode final-label full links and
+  malformed final-label no-partial-link cases, and generated
   mailto/rendering-context round trips for UTF-8 local parts, WHATWG delimiter
   local parts, IDN/punycode domains, escaped display hrefs, and readable text.
 - `environment-load`: no-network environment/load/compat helper coverage,
