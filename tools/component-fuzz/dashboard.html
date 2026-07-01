@@ -790,10 +790,10 @@
 				</tr>
 				<tr>
 					<td><code>template-links</code></td>
-					<td><span class="status good">review fixes passed</span></td>
-					<td>Main worktree; Ampere implementation and Pascal review findings fixed through <code>ebce407494</code></td>
-					<td>Main focused run: 1200 passed, 0 skipped, 0 failed; latest broad run: 8631 passed, 66 skipped, 0 failed.</td>
-					<td>Body/language attributes, body/language filter ordering and locality, document titles, resource hints/preloads, pagination/search/feed/site/admin URLs, canonical and shortlink head output, synthetic post helpers, date and author archive URL helper filter payloads, dirty author nicename display escaping/locality, previous/next adjacent post relation links, and bookmark rendering.</td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Scoped worktree <code>component-fuzz-template-links-post-class</code>; post container class contracts added after earlier archive/adjacent/canonical coverage.</td>
+					<td>Latest focused runs: seeds 1 and 224 over 25 iterations each passed 325 checks, seed 20260627 over 100 iterations passed 1300 checks, adjacent <code>template-links,content,taxonomy-relationships,appearance-media,canonical-routing</code> smoke passed 650 checks, bootstrap smoke passed, and broad seed 224 passed 4737 checks with 1 skip. Earlier focused run: 1200 passed, 0 skipped, 0 failed.</td>
+					<td>Body/language attributes, body/language filter ordering and locality, <code>get_post_class()</code>/<code>post_class()</code> base/custom/filter/taxonomy/sticky/password/thumbnail container tokens, document titles, resource hints/preloads, pagination/search/feed/site/admin URLs, canonical and shortlink head output, synthetic post helpers, date and author archive URL helper filter payloads, dirty author nicename display escaping/locality, previous/next adjacent post relation links, and bookmark rendering.</td>
 				</tr>
 				<tr>
 					<td><code>image-metadata</code></td>

@@ -791,8 +791,9 @@ database, network requests, or a configured site.
   `comments_template()` child/parent/custom file loading and comment-query
   contracts without leaking `COMMENTS_TEMPLATE` into the parent process.
 - `template-links`: no-DB public template and link helpers, including body and
-  language attributes and filter ordering/locality, document title stability,
-  resource hints/preloads, pagination/search/feed/site/admin URLs, canonical and
+  language attributes and filter ordering/locality, `get_post_class()`/
+  `post_class()` container tokens, document title stability, resource
+  hints/preloads, pagination/search/feed/site/admin URLs, canonical and
   shortlink head output, synthetic post preview/edit/delete/shortlink/permalink
   helpers, date and author archive URL branches, previous/next adjacent post
   relation links, and cached bookmark field/list rendering.

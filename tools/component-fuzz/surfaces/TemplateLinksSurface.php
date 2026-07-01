@@ -39,6 +39,7 @@ final class TemplateLinksSurface {
 			self::reset_runtime( $ctx );
 
 			$rows[] = self::check_body_class_and_language_attributes( $ctx );
+			$rows[] = self::check_post_class_container_contracts( $ctx->fork( 'post-class' ) );
 			$rows[] = self::check_body_language_filter_ordering( $ctx );
 			$rows[] = self::check_document_title_helpers( $ctx );
 			$rows[] = self::check_resource_hints_and_preloads( $ctx );
@@ -183,6 +184,7 @@ final class TemplateLinksSurface {
 		foreach (
 			array(
 				'_walk_bookmarks',
+				'add_theme_support',
 				'add_filter',
 				'body_class',
 				'create_initial_post_types',
@@ -206,23 +208,28 @@ final class TemplateLinksSurface {
 				'get_pagenum_link',
 				'get_permalink',
 				'get_preview_post_link',
+				'get_post_class',
 				'get_previous_post_link',
 				'get_search_feed_link',
 				'get_search_link',
 				'get_site_url',
 				'get_year_link',
+				'is_wp_error',
 				'language_attributes',
 				'adjacent_posts_rel_link',
 				'adjacent_posts_rel_link_wp_head',
 				'next_post_rel_link',
 				'paginate_links',
+				'post_class',
 				'prev_post_rel_link',
+				'register_taxonomy',
 				'rel_canonical',
 				'remove_filter',
 				'remove_post_type_support',
 				'sanitize_html_class',
 				'sanitize_title_with_dashes',
 				'taxonomy_exists',
+				'unregister_taxonomy',
 				'wp_cache_delete',
 				'wp_cache_get',
 				'wp_cache_set',
@@ -313,6 +320,281 @@ final class TemplateLinksSurface {
 		return self::row(
 			$ctx,
 			'template-links.template.body-class-and-language-attributes',
+			array() === $failures,
+			array( 'failures' => $failures )
+		);
+	}
+
+	private static function check_post_class_container_contracts( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures          = array();
+		$marker            = strtolower( $ctx->identifier( 4, 10 ) );
+		$current_post      = self::current_post();
+		$post_id           = $current_post->ID + 41000 + $ctx->int( 10, 999 );
+		$post_case         = self::post_case( $ctx->fork( 'post' ) );
+		$post              = new \WP_Post(
+			(object) array_merge(
+				$post_case->to_array(),
+				array(
+					'ID'        => $post_id,
+					'post_name' => 'post-class-' . $marker,
+					'guid'      => 'http://example.test/?p=' . $post_id,
+				)
+			)
+		);
+		$password_post     = new \WP_Post(
+			(object) array_merge(
+				$post->to_array(),
+				array(
+					'ID'            => $post->ID + 37,
+					'post_name'     => 'post-class-password-' . $marker,
+					'guid'          => 'http://example.test/?p=' . ( $post->ID + 37 ),
+					'post_password' => 'component-fuzz-pass-' . $ctx->identifier( 3, 8 ),
+				)
+			)
+		);
+		$custom_taxonomy   = 'cfz_pc_' . substr( preg_replace( '/[^a-z0-9_]/', '', $marker ) ?? '', 0, 20 );
+		$custom_taxonomy   = substr( $custom_taxonomy, 0, 32 );
+		$custom_classes    = "cfz-user-{$marker} raw<script>{$marker} duplicate-class duplicate-class spaced\t{$marker}";
+		$filter_raw_class  = 'cfz-filter<unsafe>"' . $marker;
+		$taxonomy_events   = array();
+		$post_class_events = array();
+		$global_snapshot   = self::snapshot_globals( array( 'page', 'paged', 'post', 'wp_query', 'wp_the_query' ) );
+		$options_snapshot  = self::$options;
+		$posts_snapshot    = self::$posts;
+		$buffer_level      = ob_get_level();
+		$cookie_snapshot   = $_COOKIE;
+		$theme_exists      = array_key_exists( '_wp_theme_features', $GLOBALS );
+		$theme_features    = $theme_exists ? self::clone_value( $GLOBALS['_wp_theme_features'] ) : null;
+		$registered        = false;
+
+		$taxonomy_filter = static function ( array $taxonomies, int $post_id, array $classes, array $css_class ) use (
+			&$taxonomy_events,
+			$post,
+			$custom_classes,
+			$custom_taxonomy
+		): array {
+			$taxonomy_events[] = array(
+				'postId'                 => $post_id,
+				'sawBasePostClass'       => in_array( 'post-' . $post->ID, $classes, true ),
+				'sawRawCustomArgument'   => preg_split( '#\s+#', $custom_classes ) === $css_class,
+				'originalTaxonomySample' => array_slice( $taxonomies, 0, 5 ),
+			);
+
+			if ( $post_id !== $post->ID ) {
+				return array();
+			}
+
+			return array( 'category', 'post_tag', $custom_taxonomy );
+		};
+
+		$post_class_filter = static function ( array $classes, array $css_class, int $post_id ) use (
+			&$post_class_events,
+			$post,
+			$custom_classes,
+			$marker,
+			$filter_raw_class
+		): array {
+			$post_class_events[] = array(
+				'postId'                  => $post_id,
+				'sawHentry'               => in_array( 'hentry', $classes, true ),
+				'sawEscapedCustomClass'   => in_array( \esc_attr( 'raw<script>' . $marker ), $classes, true ),
+				'sawRawCustomArgument'    => preg_split( '#\s+#', $custom_classes ) === $css_class,
+				'isPrimaryPost'           => $post_id === $post->ID,
+			);
+			$classes[]            = $filter_raw_class;
+			$classes[]            = 'hentry';
+			return $classes;
+		};
+
+		\add_filter( 'post_class_taxonomies', $taxonomy_filter, 20, 4 );
+		\add_filter( 'post_class', $post_class_filter, 10, 3 );
+
+		try {
+			self::seed_post_storage( $post );
+			self::seed_post_storage( $password_post );
+			self::set_current_post_query( $post, 0, true );
+
+			$taxonomy_result = \register_taxonomy(
+				$custom_taxonomy,
+				'post',
+				array(
+					'public'    => true,
+					'query_var' => false,
+					'rewrite'   => false,
+				)
+			);
+			$registered      = ! \is_wp_error( $taxonomy_result );
+
+			self::prime_post_class_terms(
+				$post->ID,
+				array(
+					'category'        => array(
+						self::post_class_term( 7101, 'category', 'category-' . $marker ),
+					),
+					'post_tag'        => array(
+						self::post_class_term( 7102, 'post_tag', 'tag-' . $marker ),
+					),
+					$custom_taxonomy  => array(
+						self::post_class_term( 7103, $custom_taxonomy, '12345' ),
+						self::post_class_term( 7104, $custom_taxonomy, '---' ),
+					),
+				)
+			);
+
+			\wp_cache_set( $post->ID, array( '_thumbnail_id' => array( 8801 ) ), 'post_meta' );
+			\add_theme_support( 'post-thumbnails' );
+			self::$options['sticky_posts'] = array( $post->ID );
+
+			$classes = \get_post_class( $custom_classes, $post );
+
+			ob_start();
+			\post_class( $custom_classes, $post );
+			$post_class_output = (string) ob_get_clean();
+
+			$category_token      = self::post_class_term_token( 'category', 'category-' . $marker, 7101 );
+			$tag_token           = self::post_class_term_token( 'post_tag', 'tag-' . $marker, 7102 );
+			$custom_number_token = self::post_class_term_token( $custom_taxonomy, '12345', 7103 );
+			$custom_hyphen_token = self::post_class_term_token( $custom_taxonomy, '---', 7104 );
+			$expected_output     = 'class="' . \esc_attr( implode( ' ', $classes ) ) . '"';
+			$expected_tokens     = array(
+				'post-' . $post->ID,
+				'post',
+				'type-post',
+				'status-' . $post->post_status,
+				'hentry',
+				'sticky',
+				'has-post-thumbnail',
+				$category_token,
+				$tag_token,
+				$custom_number_token,
+				$custom_hyphen_token,
+				$filter_raw_class,
+			);
+			$whitespace_tokens  = array_values(
+				array_filter(
+					$classes,
+					static fn( $class ): bool => is_string( $class ) && 1 === preg_match( '/\s/', $class )
+				)
+			);
+			$missing_tokens     = array_values( array_diff( $expected_tokens, $classes ) );
+			$output_matches     = $expected_output === $post_class_output;
+
+			self::collect_failure(
+				$failures,
+				$registered
+					&& $output_matches
+					&& array() === $missing_tokens
+					&& count( $classes ) === count( array_unique( $classes ) )
+					&& array() === $whitespace_tokens
+					&& in_array( \esc_attr( 'raw<script>' . $marker ), $classes, true )
+					&& ! str_contains( $post_class_output, $filter_raw_class )
+					&& str_contains( $post_class_output, \esc_attr( $filter_raw_class ) ),
+				'post_class echoes the escaped get_post_class token stream while preserving filter-returned raw tokens for final escaping',
+				array(
+					'classes'          => $classes,
+					'expectedOutput'   => $expected_output,
+					'actualOutput'     => $post_class_output,
+					'expectedTokens'    => $expected_tokens,
+					'whitespaceTokens'  => $whitespace_tokens,
+					'taxonomyRegistered' => $registered,
+				)
+			);
+
+			self::set_current_post_query( $post, 2, true );
+			$paged_classes = \get_post_class( array(), $post );
+			self::collect_failure(
+				$failures,
+				! in_array( 'sticky', $paged_classes, true ),
+				'sticky class is withheld for paged home queries',
+				array( 'classes' => $paged_classes )
+			);
+
+			self::set_current_post_query( $post, 0, false );
+			$non_home_classes = \get_post_class( array(), $post );
+			self::collect_failure(
+				$failures,
+				! in_array( 'sticky', $non_home_classes, true ),
+				'sticky class is withheld outside the home query',
+				array( 'classes' => $non_home_classes )
+			);
+
+			$_COOKIE = $cookie_snapshot;
+			if ( defined( 'COOKIEHASH' ) ) {
+				unset( $_COOKIE[ 'wp-postpass_' . COOKIEHASH ] );
+			}
+			self::set_current_post_query( $password_post, 0, true );
+			\wp_cache_set( $password_post->ID, array( '_thumbnail_id' => array( 8802 ) ), 'post_meta' );
+			$password_classes = \get_post_class( array(), $password_post );
+			self::collect_failure(
+				$failures,
+				in_array( 'post-password-required', $password_classes, true )
+					&& ! in_array( 'post-password-protected', $password_classes, true )
+					&& ! in_array( 'has-post-thumbnail', $password_classes, true ),
+				'password-required posts use the required token and suppress protected/thumbnail tokens',
+				array( 'classes' => $password_classes )
+			);
+
+			$primary_taxonomy_events = array_values(
+				array_filter(
+					$taxonomy_events,
+					static fn( array $event ): bool => $event['postId'] === $post->ID && $event['sawRawCustomArgument']
+				)
+			);
+			$primary_post_events     = array_values(
+				array_filter(
+					$post_class_events,
+					static fn( array $event ): bool => $event['isPrimaryPost'] && $event['sawRawCustomArgument']
+				)
+			);
+			self::collect_failure(
+				$failures,
+				count( $primary_taxonomy_events ) >= 2
+					&& count( $primary_post_events ) >= 2
+					&& ! in_array( false, array_column( $primary_taxonomy_events, 'sawBasePostClass' ), true )
+					&& ! in_array( false, array_column( $primary_post_events, 'sawHentry' ), true )
+					&& ! in_array( false, array_column( $primary_post_events, 'sawEscapedCustomClass' ), true ),
+				'post_class_taxonomies and post_class filters receive expected post id, classes, and raw css arguments',
+				array(
+					'taxonomyEvents' => $taxonomy_events,
+					'postEvents'     => $post_class_events,
+				)
+			);
+		} finally {
+			if ( ob_get_level() > $buffer_level ) {
+				ob_end_clean();
+			}
+			\remove_filter( 'post_class_taxonomies', $taxonomy_filter, 20 );
+			\remove_filter( 'post_class', $post_class_filter, 10 );
+			if ( $registered && \taxonomy_exists( $custom_taxonomy ) ) {
+				\unregister_taxonomy( $custom_taxonomy );
+			}
+			if ( $theme_exists ) {
+				$GLOBALS['_wp_theme_features'] = $theme_features;
+			} else {
+				unset( $GLOBALS['_wp_theme_features'] );
+			}
+			$_COOKIE = $cookie_snapshot;
+			self::$options['sticky_posts'] = array();
+			\wp_cache_delete( $post->ID, 'posts' );
+			\wp_cache_delete( $post->ID, 'post_meta' );
+			\wp_cache_delete( $password_post->ID, 'posts' );
+			\wp_cache_delete( $password_post->ID, 'post_meta' );
+			foreach ( array( 'category', 'post_tag', $custom_taxonomy ) as $taxonomy ) {
+				\wp_cache_delete( $post->ID, "{$taxonomy}_relationships" );
+			}
+			foreach ( array( 7101, 7102, 7103, 7104 ) as $term_id ) {
+				\wp_cache_delete( $term_id, 'terms' );
+			}
+			self::delete_post_storage( $post->ID );
+			self::delete_post_storage( $password_post->ID );
+			self::$options = $options_snapshot;
+			self::$posts   = $posts_snapshot;
+			self::restore_globals( $global_snapshot );
+		}
+
+		return self::row(
+			$ctx,
+			'template-links.template.post-class-container-contracts',
 			array() === $failures,
 			array( 'failures' => $failures )
 		);
@@ -1459,6 +1741,29 @@ final class TemplateLinksSurface {
 		);
 	}
 
+	private static function snapshot_globals( array $names ): array {
+		$snapshot = array();
+
+		foreach ( $names as $name ) {
+			$snapshot[ $name ] = array(
+				'exists' => array_key_exists( $name, $GLOBALS ),
+				'value'  => array_key_exists( $name, $GLOBALS ) ? self::clone_value( $GLOBALS[ $name ] ) : null,
+			);
+		}
+
+		return $snapshot;
+	}
+
+	private static function restore_globals( array $snapshot ): void {
+		foreach ( $snapshot as $name => $entry ) {
+			if ( $entry['exists'] ) {
+				$GLOBALS[ $name ] = $entry['value'];
+			} else {
+				unset( $GLOBALS[ $name ] );
+			}
+		}
+	}
+
 	private static function reset_runtime( \ComponentFuzz\FuzzContext $ctx ): void {
 		self::$options = self::option_cases( $ctx );
 		self::$posts   = array();
@@ -1604,6 +1909,64 @@ final class TemplateLinksSurface {
 			$wpdb->delete( $wpdb->posts, array( 'ID' => $post_id ) );
 		}
 		\wp_cache_delete( $post_id, 'posts' );
+	}
+
+	private static function post_class_term( int $term_id, string $taxonomy, string $slug ): object {
+		return (object) array(
+			'term_id'          => $term_id,
+			'name'             => 'Post Class Term ' . $term_id,
+			'slug'             => $slug,
+			'term_group'       => 0,
+			'term_taxonomy_id' => $term_id + 1000,
+			'taxonomy'         => $taxonomy,
+			'description'      => '',
+			'parent'           => 0,
+			'count'            => 1,
+			'filter'           => 'raw',
+		);
+	}
+
+	private static function post_class_term_token( string $taxonomy, string $slug, int $term_id ): string {
+		$term_class = \sanitize_html_class( $slug, (string) $term_id );
+		if ( is_numeric( $term_class ) || ! trim( $term_class, '-' ) ) {
+			$term_class = (string) $term_id;
+		}
+
+		if ( 'post_tag' === $taxonomy ) {
+			return 'tag-' . $term_class;
+		}
+
+		return \sanitize_html_class( $taxonomy . '-' . $term_class, $taxonomy . '-' . $term_id );
+	}
+
+	/**
+	 * @param array<string,object[]> $terms_by_taxonomy
+	 */
+	private static function prime_post_class_terms( int $post_id, array $terms_by_taxonomy ): void {
+		foreach ( $terms_by_taxonomy as $taxonomy => $terms ) {
+			$term_ids = array();
+			foreach ( $terms as $term ) {
+				$term_ids[] = (int) $term->term_id;
+				\wp_cache_set( (int) $term->term_id, $term, 'terms' );
+			}
+
+			\wp_cache_set( $post_id, $term_ids, "{$taxonomy}_relationships" );
+		}
+	}
+
+	private static function set_current_post_query( \WP_Post $post, int $paged, bool $is_home ): void {
+		$query = self::query_for_post( $post, $paged );
+
+		$query->is_home     = $is_home;
+		$query->is_paged    = $paged > 1;
+		$query->is_single   = ! $is_home;
+		$query->is_singular = ! $is_home;
+
+		$GLOBALS['post']         = $post;
+		$GLOBALS['wp_query']     = $query;
+		$GLOBALS['wp_the_query'] = $query;
+		$GLOBALS['paged']        = $paged;
+		$GLOBALS['page']         = 1;
 	}
 
 	private static function adjacent_where_filter( string $adjacent, int $target_id, array &$events ): callable {
