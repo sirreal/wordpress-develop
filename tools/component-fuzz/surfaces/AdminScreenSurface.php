@@ -32,6 +32,7 @@ final class AdminScreenSurface {
 			$rows[] = self::check_column_headers( $ctx->fork( 'column-headers' ) );
 			$rows[] = self::check_settings_registry( $ctx->fork( 'settings-registry' ) );
 			$rows[] = self::check_settings_rendering( $ctx->fork( 'settings-rendering' ) );
+			$rows[] = self::check_settings_errors_and_admin_notices( $ctx->fork( 'settings-errors-notices' ) );
 			$rows[] = self::check_meta_boxes( $ctx->fork( 'meta-boxes' ) );
 			$rows[] = self::check_accordion_sections( $ctx->fork( 'accordion-sections' ) );
 		} catch ( \Throwable $e ) {
@@ -61,9 +62,12 @@ final class AdminScreenSurface {
 				'add_filter',
 				'add_meta_box',
 				'add_screen_option',
+				'add_settings_error',
 				'add_settings_field',
 				'add_settings_section',
 				'convert_to_screen',
+				'delete_transient',
+				'do_action',
 				'do_accordion_sections',
 				'do_meta_boxes',
 				'do_settings_fields',
@@ -74,6 +78,8 @@ final class AdminScreenSurface {
 				'get_current_screen',
 				'get_option',
 				'get_registered_settings',
+				'get_settings_errors',
+				'get_transient',
 				'has_filter',
 				'post_type_exists',
 				'register_post_type',
@@ -87,9 +93,14 @@ final class AdminScreenSurface {
 				'sanitize_option',
 				'sanitize_text_field',
 				'set_current_screen',
+				'set_transient',
+				'settings_errors',
 				'settings_fields',
 				'taxonomy_exists',
 				'unregister_setting',
+				'update_option',
+				'wp_admin_notice',
+				'wp_get_admin_notice',
 				'wp_kses_post',
 				'wp_parse_args',
 			) as $function
@@ -1158,6 +1169,230 @@ final class AdminScreenSurface {
 		return self::row(
 			$ctx,
 			'admin-screen.settings.rendering-and-escaping',
+			array() === $failures,
+			array( 'failures' => $failures )
+		);
+	}
+
+	private static function check_settings_errors_and_admin_notices( \ComponentFuzz\FuzzContext $ctx ): array {
+		global $wp_settings_errors;
+
+		$failures = array();
+		$setting  = self::id( $ctx->fork( 'setting' ), 'cfz_notice_setting', 40 );
+		$other    = self::id( $ctx->fork( 'other-setting' ), 'cfz_other_notice_setting', 40 );
+		$code     = 'code-"quoted-' . $ctx->identifier( 3, 8 );
+		$message  = 'Capital P dangit! <em>' . \esc_html( self::fuzz_label( $ctx->fork( 'message' ) ) ) . '</em>';
+		$updated  = array(
+			'setting' => $setting,
+			'code'    => $code,
+			'message' => $message,
+			'type'    => 'updated',
+		);
+		$custom   = array(
+			'setting' => $setting,
+			'code'    => 'custom-class',
+			'message' => 'Custom class notice',
+			'type'    => 'error my-own-css-class hello world',
+		);
+		$other_error = array(
+			'setting' => $other,
+			'code'    => 'other-code',
+			'message' => 'Other setting notice',
+			'type'    => 'error',
+		);
+
+		$wp_settings_errors = array();
+		unset( $_GET['settings-updated'] );
+		\delete_transient( 'settings_errors' );
+
+		\add_settings_error( $updated['setting'], $updated['code'], $updated['message'], $updated['type'] );
+		\add_settings_error( $custom['setting'], $custom['code'], $custom['message'], $custom['type'] );
+		\add_settings_error( $other_error['setting'], $other_error['code'], $other_error['message'], $other_error['type'] );
+
+		$setting_errors = \get_settings_errors( $setting );
+		$all_errors     = \get_settings_errors();
+
+		ob_start();
+		\settings_errors( $setting );
+		$settings_html = (string) ob_get_clean();
+
+		$_GET['settings-updated'] = '1';
+		ob_start();
+		\settings_errors( $setting, false, true );
+		$hidden_html = (string) ob_get_clean();
+
+		$transient_error = array(
+			'setting' => $setting,
+			'code'    => 'transient-code',
+			'message' => 'Transient replay notice',
+			'type'    => 'info',
+		);
+		$wp_settings_errors = array();
+		\set_transient( 'settings_errors', array( $transient_error ) );
+		$transient_errors = \get_settings_errors( $setting );
+		$transient_after  = \get_transient( 'settings_errors' );
+
+		unset( $_GET['settings-updated'] );
+		$sanitize_setting = self::id( $ctx->fork( 'sanitize-setting' ), 'cfz_notice_sanitize', 40 );
+		$sanitize_calls   = array();
+		$sanitize_error   = array(
+			'setting' => $sanitize_setting,
+			'code'    => 'sanitize-code',
+			'message' => 'Sanitize side-effect notice',
+			'type'    => 'warning',
+		);
+		\register_setting(
+			'cfz_notice_group',
+			$sanitize_setting,
+			array(
+				'sanitize_callback' => static function ( $value ) use ( &$sanitize_calls, $sanitize_error ): string {
+					$sanitize_calls[] = $value;
+					\add_settings_error( $sanitize_error['setting'], $sanitize_error['code'], $sanitize_error['message'], $sanitize_error['type'] );
+					return (string) $value;
+				},
+			)
+		);
+		\update_option( $sanitize_setting, 'stored notice value' );
+		$sanitize_calls_before_replay = count( $sanitize_calls );
+		$wp_settings_errors           = array();
+		$sanitize_errors              = \get_settings_errors( $sanitize_setting, true );
+		\unregister_setting( 'cfz_notice_group', $sanitize_setting );
+
+		self::collect_failure(
+			$failures,
+			array( $updated, $custom ) === $setting_errors
+				&& array( $updated, $custom, $other_error ) === $all_errors
+				&& str_contains( $settings_html, "id='setting-error-" . \esc_attr( $code ) . "'" )
+				&& str_contains( $settings_html, "class='notice notice-success settings-error is-dismissible'" )
+				&& str_contains( $settings_html, "class='notice error my-own-css-class hello world settings-error is-dismissible'" )
+				&& str_contains( $settings_html, '<strong>' . $message . '</strong>' )
+				&& ! str_contains( $settings_html, 'notice-notice-' )
+				&& ! str_contains( $settings_html, $other_error['message'] )
+				&& '' === $hidden_html
+				&& array( $transient_error ) === $transient_errors
+				&& false === $transient_after
+				&& array( $sanitize_error ) === $sanitize_errors
+				&& count( $sanitize_calls ) > $sanitize_calls_before_replay
+				&& in_array( 'stored notice value', $sanitize_calls, true ),
+			'settings errors preserve source arrays, filter by setting, map legacy classes, hide on update, replay/delete transients, and run sanitize side effects',
+			array(
+				'settingErrors'   => $setting_errors,
+				'allErrors'       => $all_errors,
+				'settingsHtml'    => self::describe_string( $settings_html ),
+				'hiddenHtml'      => self::describe_string( $hidden_html ),
+				'transientErrors' => $transient_errors,
+				'transientAfter'  => $transient_after,
+				'sanitizeErrors'  => $sanitize_errors,
+				'sanitizeCalls'   => $sanitize_calls,
+				'sanitizeBefore'  => $sanitize_calls_before_replay,
+			)
+		);
+
+		unset( $_GET['settings-updated'] );
+		$wp_settings_errors = array();
+
+		$notice_message = '<span>Generated notice ' . \esc_html( self::fuzz_label( $ctx->fork( 'notice-message' ) ) ) . '</span>';
+		$notice_id      = 'cfz-notice-' . substr( hash( 'crc32b', (string) $ctx->seed() ), 0, 8 );
+		$notice_args    = array(
+			'type'               => 'warning',
+			'dismissible'        => true,
+			'id'                 => $notice_id,
+			'additional_classes' => array( 'inline', 'notice-alt' ),
+			'attributes'         => array(
+				'role'      => 'alert',
+				'data-cfz'  => '<tag "quoted">',
+				'data-skip' => '',
+				'hidden'    => true,
+			),
+			'paragraph_wrap'     => false,
+		);
+		$notice_markup  = \wp_get_admin_notice( $notice_message, $notice_args );
+
+		$arg_events    = array();
+		$markup_events = array();
+		$args_filter   = static function ( array $args, string $message ) use ( &$arg_events ): array {
+			$arg_events[] = array(
+				'message' => $message,
+				'type'    => $args['type'] ?? null,
+			);
+			$args['type']                 = 'success';
+			$args['additional_classes'][] = 'filtered-class';
+			return $args;
+		};
+		$markup_filter = static function ( string $markup, string $message, array $args ) use ( &$markup_events ): string {
+			$markup_events[] = array(
+				'message' => $message,
+				'type'    => $args['type'] ?? null,
+				'markup'  => $markup,
+			);
+			return $markup . '<span class="cfz-notice-filtered">filtered</span>';
+		};
+
+		\add_filter( 'wp_admin_notice_args', $args_filter, 10, 2 );
+		\add_filter( 'wp_admin_notice_markup', $markup_filter, 10, 3 );
+		try {
+			$filtered_markup = \wp_get_admin_notice( 'Filtered notice.', array( 'type' => 'error' ) );
+		} finally {
+			\remove_filter( 'wp_admin_notice_args', $args_filter, 10 );
+			\remove_filter( 'wp_admin_notice_markup', $markup_filter, 10 );
+		}
+
+		$action_events = array();
+		$notice_action = static function ( string $message, array $args ) use ( &$action_events ): void {
+			$action_events[] = array(
+				'message' => $message,
+				'type'    => $args['type'] ?? null,
+			);
+		};
+		\add_action( 'wp_admin_notice', $notice_action, 10, 2 );
+		try {
+			ob_start();
+			\wp_admin_notice(
+				'Output <strong>bold</strong><script>alert(1)</script>',
+				array(
+					'type'        => 'info',
+					'dismissible' => true,
+					'attributes'  => array( 'role' => 'status' ),
+				)
+			);
+			$admin_notice_output = (string) ob_get_clean();
+		} finally {
+			\remove_action( 'wp_admin_notice', $notice_action, 10 );
+		}
+
+		self::collect_failure(
+			$failures,
+			'<div id="' . $notice_id . '" class="notice notice-warning is-dismissible inline notice-alt" role="alert" data-cfz="&lt;tag &quot;quoted&quot;&gt;" hidden>' . $notice_message . '</div>' === $notice_markup
+				&& str_contains( $filtered_markup, 'notice notice-success filtered-class' )
+				&& str_contains( $filtered_markup, 'cfz-notice-filtered' )
+				&& 1 === count( $arg_events )
+				&& 1 === count( $markup_events )
+				&& false === \has_filter( 'wp_admin_notice_args', $args_filter )
+				&& false === \has_filter( 'wp_admin_notice_markup', $markup_filter )
+				&& 1 === count( $action_events )
+				&& 'info' === ( $action_events[0]['type'] ?? null )
+				&& str_contains( $admin_notice_output, 'notice notice-info is-dismissible' )
+				&& str_contains( $admin_notice_output, 'role="status"' )
+				&& str_contains( $admin_notice_output, '<strong>bold</strong>' )
+				&& ! str_contains( $admin_notice_output, '<script' )
+				&& false === \has_filter( 'wp_admin_notice', $notice_action ),
+			'admin notice helpers preserve exact markup, apply filters, fire output actions, sanitize wp_admin_notice output, and clean hooks',
+			array(
+				'noticeMarkup'      => self::describe_string( $notice_markup ),
+				'filteredMarkup'    => self::describe_string( $filtered_markup ),
+				'argEvents'         => $arg_events,
+				'markupEvents'      => $markup_events,
+				'actionEvents'      => $action_events,
+				'adminNoticeOutput' => self::describe_string( $admin_notice_output ),
+				'argsFilter'        => \has_filter( 'wp_admin_notice_args', $args_filter ),
+				'markupFilter'      => \has_filter( 'wp_admin_notice_markup', $markup_filter ),
+				'noticeAction'      => \has_filter( 'wp_admin_notice', $notice_action ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'admin-screen.settings-errors-and-admin-notices.rendering-filters-state',
 			array() === $failures,
 			array( 'failures' => $failures )
 		);

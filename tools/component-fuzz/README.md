@@ -53,7 +53,8 @@ database, network requests, or a configured site.
   options, rendered per-page/layout controls, screen meta/help sidebar and
   screen-reader content lifecycles, column header filter locality, settings
   registry/default/sanitize callbacks, escaped settings field and nonce output,
-  meta-box ordering/removal/callback args, and accordion section rendering.
+  settings error/admin notice rendering and filter state, meta-box
+  ordering/removal/callback args, and accordion section rendering.
 - `admin-workflows`: no-DB admin menu, list-table, and referer-helper
   workflows, including menu/submenu global registration and removal, hook suffix
   and menu URL behavior, parent file normalization, synthetic `WP_List_Table`
