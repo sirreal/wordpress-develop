@@ -233,6 +233,7 @@ database, network requests, or a configured site.
   and next-scheduled filter contracts, unschedule-hook pre-filter return
   contracts, duplicate single-event windows, scheduled-event lookup
   ordering/exactness, ready-job partitioning, spawn request/lock boundaries,
+  public `wp_cron()` shutdown deferral/immediate-run wrapper behavior,
   unscheduling and rescheduling contracts.
 - `default-widgets`: classic default widget subclass coverage, including
   constructor/options contracts, saved-instance callback lifecycles, update

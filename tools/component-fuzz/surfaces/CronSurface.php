@@ -40,6 +40,7 @@ final class CronSurface {
 
 			$rows = array_merge( $rows, self::check_ready_jobs_partition( $ctx, $store ) );
 			$rows = array_merge( $rows, self::check_spawn_request_boundaries( $ctx, $store ) );
+			$rows = array_merge( $rows, self::check_public_wp_cron_wrapper( $ctx, $store ) );
 			$rows = array_merge( $rows, self::check_clear_and_unschedule( $ctx, $store ) );
 			$rows = array_merge( $rows, self::check_unschedule_hook_pre_filter_contracts( $ctx, $store ) );
 			$rows = array_merge( $rows, self::check_reschedule_contract( $ctx, $store ) );
@@ -60,10 +61,15 @@ final class CronSurface {
 		foreach (
 			array(
 				'add_filter',
+				'add_action',
 				'apply_filters',
+				'do_action',
+				'doing_action',
 				'has_filter',
+				'has_action',
 				'remove_all_filters',
 				'remove_filter',
+				'remove_action',
 				'wp_get_schedules',
 				'wp_schedule_event',
 				'wp_schedule_single_event',
@@ -77,6 +83,7 @@ final class CronSurface {
 				'wp_get_ready_cron_jobs',
 				'_get_cron_array',
 				'_wp_cron',
+				'wp_cron',
 				'spawn_cron',
 				'get_transient',
 				'set_transient',
@@ -1105,6 +1112,324 @@ final class CronSurface {
 					'transientSets'         => self::describe_value( $transient_sets ),
 					'filtersRestored'       => $filters_restored,
 					'superglobalsRestored'  => $superglobals_restored,
+					'store'                 => self::describe_cron_store( $store ),
+				)
+			),
+		);
+	}
+
+	private static function check_public_wp_cron_wrapper( \ComponentFuzz\FuzzContext $ctx, array &$store ): array {
+		if ( defined( 'ALTERNATE_WP_CRON' ) && \ALTERNATE_WP_CRON ) {
+			return array(
+				$ctx->skip(
+					'cron.public-wrapper.shutdown-deferral-and-immediate-run',
+					'ALTERNATE_WP_CRON is enabled in this process; the non-alternate shutdown wrapper branch is skipped.'
+				),
+			);
+		}
+
+		$store              = array( 'version' => 2 );
+		$gmt_time           = microtime( true );
+		$past               = (int) $gmt_time - 60;
+		$transients         = array();
+		$transient_sets     = array();
+		$http_requests      = array();
+		$cron_requests      = array();
+		$ssl_decisions      = array();
+		$server_snapshot    = self::snapshot_array_keys( $_SERVER, array( 'HTTP_HOST', 'HTTPS', 'REQUEST_METHOD', 'REQUEST_URI', 'SERVER_NAME' ) );
+		$get_snapshot       = self::snapshot_array_keys( $_GET, array( 'doing_wp_cron' ) );
+		$current_filter_snapshot = $GLOBALS['wp_current_filter'] ?? array();
+		$wp_actions_snapshot = isset( $GLOBALS['wp_actions'] ) && is_array( $GLOBALS['wp_actions'] )
+			? self::snapshot_array_keys( $GLOBALS['wp_actions'], array( 'shutdown' ) )
+			: array();
+		$shutdown_hook_existed = isset( $GLOBALS['wp_filter'] )
+			&& is_array( $GLOBALS['wp_filter'] )
+			&& array_key_exists( 'shutdown', $GLOBALS['wp_filter'] );
+		$shutdown_hook_snapshot = $shutdown_hook_existed ? self::clone_value( $GLOBALS['wp_filter']['shutdown'] ) : null;
+
+		$pre_transient_filter = static function ( $pre, string $transient ) use ( &$transients ) {
+			unset( $pre, $transient );
+			return $transients['doing_cron'] ?? false;
+		};
+		$pre_set_transient_filter = static function ( $value, int $expiration, string $transient ) use ( &$transient_sets ) {
+			$transient_sets[] = array(
+				'transient'  => $transient,
+				'value'      => $value,
+				'expiration' => $expiration,
+			);
+
+			return $value;
+		};
+		$pre_option_transient_filter = static function ( $pre, string $option, $default ) use ( &$transients ) {
+			unset( $pre, $option, $default );
+			return $transients['doing_cron'] ?? false;
+		};
+		$transient_set_action = static function ( string $transient, $value, int $expiration ) use ( &$transients ): void {
+			unset( $expiration );
+			if ( 'doing_cron' === $transient ) {
+				$transients[ $transient ] = $value;
+			}
+		};
+		$pre_option_siteurl_filter = static function ( $pre, string $option, $default ): string {
+			unset( $pre, $option, $default );
+			return 'http://example.test';
+		};
+		$ssl_filter = static function ( bool $sslverify, ?string $url = null ) use ( &$ssl_decisions ): bool {
+			$ssl_decisions[] = array(
+				'input' => $sslverify,
+				'url'   => $url,
+			);
+
+			return true;
+		};
+		$cron_request_filter = static function ( array $request, string $doing_wp_cron ) use ( &$cron_requests ): array {
+			$cron_requests[] = array(
+				'request'        => $request,
+				'doing_wp_cron' => $doing_wp_cron,
+			);
+
+			return $request;
+		};
+		$http_filter = static function ( $response, array $parsed_args, string $url ) use ( &$http_requests ) {
+			$http_requests[] = array(
+				'url'     => $url,
+				'args'    => $parsed_args,
+				'preType' => gettype( $response ),
+			);
+
+			return array(
+				'headers'  => array(),
+				'body'     => '',
+				'response' => array(
+					'code'    => 204,
+					'message' => 'No Content',
+				),
+				'cookies'  => array(),
+				'filename' => null,
+			);
+		};
+
+		\add_filter( 'pre_transient_doing_cron', $pre_transient_filter, 10, 2 );
+		\add_filter( 'pre_set_transient_doing_cron', $pre_set_transient_filter, 10, 3 );
+		\add_filter( 'pre_option__transient_doing_cron', $pre_option_transient_filter, 10, 3 );
+		\add_filter( 'set_transient', $transient_set_action, 10, 3 );
+		\add_filter( 'pre_option_siteurl', $pre_option_siteurl_filter, 10, 3 );
+		\add_filter( 'https_local_ssl_verify', $ssl_filter, 10, 2 );
+		\add_filter( 'cron_request', $cron_request_filter, 10, 2 );
+		\add_filter( 'pre_http_request', $http_filter, 10, 3 );
+
+		try {
+			$_SERVER['HTTP_HOST']      = 'example.test';
+			$_SERVER['SERVER_NAME']    = 'example.test';
+			$_SERVER['REQUEST_METHOD'] = 'GET';
+			$_SERVER['REQUEST_URI']    = '/component-fuzz/cron-wrapper/';
+			unset( $_SERVER['HTTPS'], $_GET['doing_wp_cron'] );
+			\remove_action( 'shutdown', '_wp_cron' );
+
+			self::clear_cron_lock_option_cache();
+			$defer_hook     = 'component_fuzz_public_wp_cron_defer_' . self::safe_hook_fragment( $ctx->text( 0, 12 ) );
+			$defer_args     = array( 'case' => 'public-wrapper-defer' );
+			$defer_schedule = self::call(
+				static fn() => \wp_schedule_single_event(
+					$past,
+					$defer_hook,
+					$defer_args,
+					true
+				)
+			);
+
+			$defer_http_before      = count( $http_requests );
+			$defer_transient_before = count( $transient_sets );
+			$defer_call             = self::call( static fn() => \wp_cron() );
+			$defer_priority         = \has_action( 'shutdown', '_wp_cron' );
+			$defer_request_count    = count( $http_requests ) - $defer_http_before;
+			$defer_transient_count  = count( $transient_sets ) - $defer_transient_before;
+			$defer_ready            = self::call( static fn() => \wp_get_ready_cron_jobs() );
+			\remove_action( 'shutdown', '_wp_cron' );
+
+			$store       = array( 'version' => 2 );
+			$transients  = array();
+			self::clear_cron_lock_option_cache();
+			$schedule    = self::call(
+				static fn() => \wp_schedule_single_event(
+					$past,
+					'component_fuzz_public_wp_cron_' . self::safe_hook_fragment( $ctx->text( 0, 12 ) ),
+					array( 'case' => 'public-wrapper' ),
+					true
+				)
+			);
+
+			$run_http_before      = count( $http_requests );
+			$run_cron_before      = count( $cron_requests );
+			$run_transient_before = count( $transient_sets );
+			if ( isset( $GLOBALS['wp_filter'] ) && is_array( $GLOBALS['wp_filter'] ) ) {
+				unset( $GLOBALS['wp_filter']['shutdown'] );
+			}
+			$wrapper_observations = array();
+			$wrapper_results      = array();
+			$wrapper_callback     = static function () use ( &$wrapper_observations, &$wrapper_results ): void {
+				$index                          = count( $wrapper_observations );
+				$wrapper_observations[ $index ] = array( 'doingBefore' => \doing_action( 'shutdown' ) );
+				$wrapper_results[ $index ]      = self::call( static fn() => \wp_cron() );
+				$wrapper_observations[ $index ]['doingAfter'] = \doing_action( 'shutdown' );
+			};
+			\add_action( 'shutdown', $wrapper_callback, 10, 0 );
+			$doing_shutdown_before = \doing_action( 'shutdown' );
+			$do_shutdown           = self::call( static fn() => \do_action( 'shutdown' ) );
+			$doing_shutdown_after  = \doing_action( 'shutdown' );
+			$run_call              = $wrapper_results[0] ?? array(
+				'threw'     => true,
+				'throwable' => array(
+					'class'   => 'ComponentFuzzMissingCallback',
+					'message' => 'shutdown wrapper callback did not run',
+				),
+			);
+			$run_priority          = \has_action( 'shutdown', '_wp_cron' );
+			$run_http_requests     = array_slice( $http_requests, $run_http_before );
+			$run_cron_requests     = array_slice( $cron_requests, $run_cron_before );
+			$run_transient_sets    = array_slice( $transient_sets, $run_transient_before );
+		} finally {
+			if ( isset( $GLOBALS['wp_filter'] ) && is_array( $GLOBALS['wp_filter'] ) ) {
+				if ( $shutdown_hook_existed ) {
+					$GLOBALS['wp_filter']['shutdown'] = $shutdown_hook_snapshot;
+				} else {
+					unset( $GLOBALS['wp_filter']['shutdown'] );
+				}
+			}
+			\remove_filter( 'pre_transient_doing_cron', $pre_transient_filter, 10 );
+			\remove_filter( 'pre_set_transient_doing_cron', $pre_set_transient_filter, 10 );
+			\remove_filter( 'pre_option__transient_doing_cron', $pre_option_transient_filter, 10 );
+			\remove_filter( 'set_transient', $transient_set_action, 10 );
+			\remove_filter( 'pre_option_siteurl', $pre_option_siteurl_filter, 10 );
+			\remove_filter( 'https_local_ssl_verify', $ssl_filter, 10 );
+			\remove_filter( 'cron_request', $cron_request_filter, 10 );
+			\remove_filter( 'pre_http_request', $http_filter, 10 );
+			self::restore_array_keys( $_SERVER, $server_snapshot );
+			self::restore_array_keys( $_GET, $get_snapshot );
+			if ( isset( $GLOBALS['wp_actions'] ) && is_array( $GLOBALS['wp_actions'] ) && array() !== $wp_actions_snapshot ) {
+				self::restore_array_keys( $GLOBALS['wp_actions'], $wp_actions_snapshot );
+			}
+			$GLOBALS['wp_current_filter'] = $current_filter_snapshot;
+		}
+
+		$defer_ready_value = is_array( $defer_ready['value'] ?? null ) ? $defer_ready['value'] : array();
+		$defer_args_key    = md5( serialize( $defer_args ) );
+		$defer_due_still_ready = ! $defer_ready['threw']
+			&& isset( $defer_ready_value[ (string) $past ][ $defer_hook ][ $defer_args_key ] );
+		$run_http = $run_http_requests[0] ?? null;
+		$run_cron = $run_cron_requests[0] ?? null;
+		$run_url = is_array( $run_http ) ? ( $run_http['url'] ?? '' ) : '';
+		$run_url_parts = is_string( $run_url ) ? parse_url( $run_url ) : false;
+		$run_query = array();
+		$query_string = is_string( $run_url ) ? parse_url( $run_url, PHP_URL_QUERY ) : null;
+		if ( is_string( $query_string ) ) {
+			parse_str( $query_string, $run_query );
+		}
+
+		$cron_request = is_array( $run_cron ) ? ( $run_cron['request'] ?? array() ) : array();
+		$cron_args    = is_array( $cron_request['args'] ?? null ) ? $cron_request['args'] : array();
+		$http_args    = is_array( $run_http['args'] ?? null ) ? $run_http['args'] : array();
+		$cron_key     = $cron_request['key'] ?? null;
+		$lock_ok      = 1 === count( $run_transient_sets )
+			&& 'doing_cron' === ( $run_transient_sets[0]['transient'] ?? null )
+			&& 0 === ( $run_transient_sets[0]['expiration'] ?? null )
+			&& is_string( $cron_key )
+			&& $cron_key === ( $run_transient_sets[0]['value'] ?? null );
+		$payload_ok   = is_string( $run_url )
+			&& is_array( $run_url_parts )
+			&& 'http' === ( $run_url_parts['scheme'] ?? null )
+			&& 'example.test' === ( $run_url_parts['host'] ?? null )
+			&& '/wp-cron.php' === ( $run_url_parts['path'] ?? null )
+			&& array( 'doing_wp_cron' => $cron_key ) === $run_query
+			&& $cron_key === ( $run_cron['doing_wp_cron'] ?? null )
+			&& $run_url === ( $cron_request['url'] ?? null )
+			&& isset( $cron_args['timeout'], $http_args['timeout'] )
+			&& abs( 0.01 - (float) $cron_args['timeout'] ) < 0.000001
+			&& abs( 0.01 - (float) $http_args['timeout'] ) < 0.000001
+			&& false === ( $cron_args['blocking'] ?? null )
+			&& false === ( $http_args['blocking'] ?? null )
+			&& true === ( $cron_args['sslverify'] ?? null )
+			&& true === ( $http_args['sslverify'] ?? null )
+			&& 'POST' === ( $http_args['method'] ?? null )
+			&& 'boolean' === ( $run_http['preType'] ?? null );
+		$ssl_ok = 1 === count( $ssl_decisions )
+			&& false === ( $ssl_decisions[0]['input'] ?? null )
+			&& null === ( $ssl_decisions[0]['url'] ?? null );
+
+		$filters_restored = false === \has_filter( 'pre_transient_doing_cron', $pre_transient_filter )
+			&& false === \has_filter( 'pre_set_transient_doing_cron', $pre_set_transient_filter )
+			&& false === \has_filter( 'pre_option__transient_doing_cron', $pre_option_transient_filter )
+			&& false === \has_filter( 'set_transient', $transient_set_action )
+			&& false === \has_filter( 'pre_option_siteurl', $pre_option_siteurl_filter )
+			&& false === \has_filter( 'https_local_ssl_verify', $ssl_filter )
+			&& false === \has_filter( 'cron_request', $cron_request_filter )
+			&& false === \has_filter( 'pre_http_request', $http_filter );
+		$shutdown_hook_restored = $shutdown_hook_existed
+			? isset( $GLOBALS['wp_filter'] ) && is_array( $GLOBALS['wp_filter'] ) && array_key_exists( 'shutdown', $GLOBALS['wp_filter'] ) && $GLOBALS['wp_filter']['shutdown'] === $shutdown_hook_snapshot
+			: ( ! isset( $GLOBALS['wp_filter'] ) || ! is_array( $GLOBALS['wp_filter'] ) || ! array_key_exists( 'shutdown', $GLOBALS['wp_filter'] ) );
+		$wp_actions_restored = array() === $wp_actions_snapshot
+			|| ( isset( $GLOBALS['wp_actions'] ) && is_array( $GLOBALS['wp_actions'] ) && self::array_keys_match_snapshot( $GLOBALS['wp_actions'], $wp_actions_snapshot ) );
+
+		$ok = ! $defer_call['threw']
+			&& null === $defer_call['value']
+			&& ! $defer_schedule['threw']
+			&& true === $defer_schedule['value']
+			&& 10 === $defer_priority
+			&& 0 === $defer_request_count
+			&& 0 === $defer_transient_count
+			&& $defer_due_still_ready
+			&& ! $schedule['threw']
+			&& true === $schedule['value']
+			&& false === $doing_shutdown_before
+			&& ! $do_shutdown['threw']
+			&& false === $doing_shutdown_after
+			&& 1 === count( $wrapper_results )
+			&& true === ( $wrapper_observations[0]['doingBefore'] ?? null )
+			&& true === ( $wrapper_observations[0]['doingAfter'] ?? null )
+			&& ! $run_call['threw']
+			&& null === $run_call['value']
+			&& false === $run_priority
+			&& 1 === count( $run_http_requests )
+			&& 1 === count( $run_cron_requests )
+			&& $payload_ok
+			&& $lock_ok
+			&& $ssl_ok
+			&& $filters_restored
+			&& $shutdown_hook_restored
+			&& $wp_actions_restored
+			&& self::array_keys_match_snapshot( $_SERVER, $server_snapshot )
+			&& self::array_keys_match_snapshot( $_GET, $get_snapshot )
+			&& $current_filter_snapshot === ( $GLOBALS['wp_current_filter'] ?? array() );
+
+		return array(
+			$ctx->result(
+				'cron.public-wrapper.shutdown-deferral-and-immediate-run',
+				$ok,
+				array(
+					'deferCall'             => self::describe_call( $defer_call ),
+					'deferSchedule'         => self::describe_call( $defer_schedule ),
+					'deferPriority'         => $defer_priority,
+					'deferRequestCount'     => $defer_request_count,
+					'deferTransientCount'   => $defer_transient_count,
+					'deferDueStillReady'    => $defer_due_still_ready,
+					'deferReady'            => self::describe_call( $defer_ready ),
+					'schedule'              => self::describe_call( $schedule ),
+					'doShutdown'            => self::describe_call( $do_shutdown ),
+					'runCall'               => self::describe_call( $run_call ),
+					'runPriority'           => $run_priority,
+					'doingShutdownBefore'   => $doing_shutdown_before,
+					'doingShutdownAfter'    => $doing_shutdown_after,
+					'wrapperObservations'   => self::describe_value( $wrapper_observations ),
+					'payloadOk'             => $payload_ok,
+					'lockOk'                => $lock_ok,
+					'sslOk'                 => $ssl_ok,
+					'runHttpRequests'       => self::describe_value( $run_http_requests ),
+					'runCronRequests'       => self::describe_value( $run_cron_requests ),
+					'runTransientSets'      => self::describe_value( $run_transient_sets ),
+					'sslDecisions'          => self::describe_value( $ssl_decisions ),
+					'filtersRestored'       => $filters_restored,
+					'shutdownHookRestored'  => $shutdown_hook_restored,
+					'wpActionsRestored'     => $wp_actions_restored,
 					'store'                 => self::describe_cron_store( $store ),
 				)
 			),
