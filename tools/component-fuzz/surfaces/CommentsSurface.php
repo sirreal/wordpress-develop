@@ -37,6 +37,7 @@ final class CommentsSurface {
 			$rows = array_merge( $rows, self::check_comment_cookies( $ctx, $cases ) );
 			$rows = array_merge( $rows, self::check_comment_permalink_pagination( $ctx ) );
 			$rows = array_merge( $rows, self::check_comment_reply_links( $ctx ) );
+			$rows = array_merge( $rows, self::check_comment_count_navigation_helpers( $ctx->fork( 'count-navigation' ) ) );
 			$rows = array_merge( $rows, self::check_comment_form_rendering( $ctx->fork( 'comment-form' ) ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
@@ -84,8 +85,23 @@ final class CommentsSurface {
 				'comment_form',
 				'comment_form_title',
 				'comment_id_fields',
+				'comments_link',
+				'comments_number',
+				'comments_popup_link',
 				'comments_open',
+				'get_comment_pages_count',
 				'get_post_reply_link',
+				'get_comments_link',
+				'get_comments_number',
+				'get_comments_number_text',
+				'get_comments_pagenum_link',
+				'get_next_comments_link',
+				'get_previous_comments_link',
+				'get_query_var',
+				'get_the_comments_navigation',
+				'get_the_comments_pagination',
+				'get_the_ID',
+				'get_the_title',
 				'post_reply_link',
 				'get_cancel_comment_reply_link',
 				'cancel_comment_reply_link',
@@ -98,11 +114,19 @@ final class CommentsSurface {
 				'has_filter',
 				'has_action',
 				'is_user_logged_in',
+				'is_singular',
 				'is_wp_error',
+				'next_comments_link',
+				'number_format_i18n',
+				'paginate_comments_links',
+				'post_password_required',
+				'previous_comments_link',
 				'remove_query_arg',
 				'site_url',
 				'clean_user_cache',
 				'update_user_caches',
+				'the_comments_navigation',
+				'the_comments_pagination',
 				'wp_get_current_commenter',
 				'wp_get_current_user',
 				'wp_login_url',
@@ -121,7 +145,7 @@ final class CommentsSurface {
 			}
 		}
 
-		foreach ( array( 'WP_Comment', 'WP_Comment_Query', 'WP_Post', 'WP_Rewrite', 'WP_User' ) as $class ) {
+		foreach ( array( 'WP_Comment', 'WP_Comment_Query', 'WP_Post', 'WP_Query', 'WP_Rewrite', 'WP_User' ) as $class ) {
 			if ( ! class_exists( $class ) ) {
 				$missing[] = "class {$class}";
 			}
@@ -1299,6 +1323,484 @@ final class CommentsSurface {
 		);
 	}
 
+	private static function check_comment_count_navigation_helpers( \ComponentFuzz\FuzzContext $ctx ): array {
+		$fixture       = self::comment_permalink_fixture( $ctx );
+		$post          = $fixture['posts'][0];
+		$one_post      = self::permalink_post( (int) $post->ID + 41, 'One Comment Fixture ' . $ctx->iteration() );
+		$closed_post   = self::permalink_post( (int) $post->ID + 42, 'Closed Comment Fixture ' . $ctx->iteration() );
+		$password_post = self::permalink_post( (int) $post->ID + 43, 'Password Comment Fixture ' . $ctx->iteration() );
+		$count         = 3 + $ctx->int( 0, 6 );
+		$marker        = strtolower( $ctx->identifier( 4, 10 ) );
+		$failures      = array();
+		$events        = array(
+			'commentsLink'  => array(),
+			'commentsText'  => array(),
+			'count'         => array(),
+			'nextAttr'      => array(),
+			'pageLink'      => array(),
+			'popupAttr'     => array(),
+			'previousAttr'  => array(),
+			'respondLink'   => array(),
+		);
+		$options       = array(
+			'comments_per_page'     => 2,
+			'default_comments_page' => 'oldest',
+			'home'                  => 'http://example.test',
+			'page_comments'         => 1,
+			'permalink_structure'   => '',
+			'siteurl'               => 'http://example.test',
+			'thread_comments'       => 0,
+		);
+		$snapshot      = self::snapshot_globals();
+
+		$post->comment_count          = (string) $count;
+		$one_post->comment_count      = '1';
+		$closed_post->comment_count   = '0';
+		$closed_post->comment_status  = 'closed';
+		$closed_post->ping_status     = 'closed';
+		$password_post->comment_count = '1';
+		$password_post->post_password = 'component-fuzz-password';
+		$fixture['posts'][]           = $one_post;
+		$fixture['posts'][]           = $closed_post;
+		$fixture['posts'][]           = $password_post;
+
+		$option_filters = array();
+		foreach ( array_keys( $options ) as $option ) {
+			$option_filters[ $option ] = static function () use ( &$options, $option ) {
+				return $options[ $option ];
+			};
+		}
+
+		$count_filter = static function ( $comments_number, int $post_id ) use ( &$events ) {
+			$events['count'][] = array(
+				'number' => $comments_number,
+				'postId' => $post_id,
+			);
+			return $comments_number;
+		};
+		$text_filter  = static function ( string $text, int $comments_number ) use ( &$events ): string {
+			$events['commentsText'][] = array(
+				'number' => $comments_number,
+				'text'   => self::describe_value( $text ),
+			);
+			return $text;
+		};
+		$link_filter  = static function ( string $link, $filtered_post ) use ( &$events ): string {
+			$events['commentsLink'][] = array(
+				'link' => self::describe_value( $link ),
+				'post' => $filtered_post instanceof \WP_Post ? (int) $filtered_post->ID : (int) $filtered_post,
+			);
+			return $link;
+		};
+		$respond_filter = static function ( string $link, int $post_id ) use ( &$events, $marker ): string {
+			$events['respondLink'][] = array(
+				'link'   => self::describe_value( $link ),
+				'postId' => $post_id,
+			);
+			return str_replace( '#respond', '?cfz-respond=' . rawurlencode( $marker ) . '#respond', $link );
+		};
+		$popup_attr_filter = static function ( string $attributes ) use ( &$events, $marker ): string {
+			$events['popupAttr'][] = $attributes;
+			return $attributes . ' data-cfz-popup="' . \esc_attr( $marker ) . '"';
+		};
+		$page_link_filter  = static function ( string $link ) use ( &$events ): string {
+			$events['pageLink'][] = self::describe_value( $link );
+			return $link;
+		};
+		$next_attr_filter  = static function ( string $attributes ) use ( &$events, $marker ): string {
+			$events['nextAttr'][] = $attributes;
+			return $attributes . ' data-cfz-next="' . \esc_attr( $marker ) . '"';
+		};
+		$previous_attr_filter = static function ( string $attributes ) use ( &$events, $marker ): string {
+			$events['previousAttr'][] = $attributes;
+			return $attributes . ' data-cfz-prev="' . \esc_attr( $marker ) . '"';
+		};
+
+		try {
+			self::cache_comment_permalink_fixture( $fixture );
+			self::force_query_style_comment_links();
+			self::set_comment_navigation_query_context( $post, $fixture['comments'], 2, 3 );
+			$_COOKIE                = array();
+			$_SERVER['HTTP_HOST']   = 'example.test';
+			$_SERVER['REQUEST_URI'] = '/comments/navigation/';
+
+			foreach ( $option_filters as $option => $filter ) {
+				\add_filter( 'pre_option_' . $option, $filter, 10, 3 );
+			}
+			\add_filter( 'get_comments_number', $count_filter, 10, 2 );
+			\add_filter( 'comments_number', $text_filter, 10, 2 );
+			\add_filter( 'get_comments_link', $link_filter, 10, 2 );
+			\add_filter( 'respond_link', $respond_filter, 10, 2 );
+			\add_filter( 'comments_popup_link_attributes', $popup_attr_filter, 10, 1 );
+			\add_filter( 'get_comments_pagenum_link', $page_link_filter, 10, 1 );
+			\add_filter( 'next_comments_link_attributes', $next_attr_filter, 10, 1 );
+			\add_filter( 'previous_comments_link_attributes', $previous_attr_filter, 10, 1 );
+
+			$zero_number    = self::call( static fn() => \get_comments_number( $closed_post ) );
+			$one_number     = self::call( static fn() => \get_comments_number( $one_post ) );
+			$many_number    = self::call( static fn() => \get_comments_number( $post ) );
+			$missing_number = self::call( static fn() => \get_comments_number( 99999999 ) );
+			$zero_text      = self::call( static fn() => \get_comments_number_text( 'Zero label', 'One label', '% labels', $closed_post ) );
+			$one_text       = self::call( static fn() => \get_comments_number_text( 'Zero label', 'One label', '% labels', $one_post ) );
+			$many_text      = self::call( static fn() => \get_comments_number_text( 'Zero label', 'One label', '% labels', $post ) );
+			$number_echo    = self::capture_output(
+				static function () use ( $post ): void {
+					\comments_number( 'Zero label', 'One label', '% labels', $post );
+				}
+			);
+
+			$closed_comments_link = self::call( static fn() => \get_comments_link( $closed_post ) );
+			$many_comments_link   = self::call( static fn() => \get_comments_link( $post ) );
+			$GLOBALS['post']      = $post;
+			$comments_link_echo   = self::capture_output( static fn() => \comments_link() );
+
+			$GLOBALS['post']    = $closed_post;
+			$closed_popup       = self::capture_output(
+				static fn() => \comments_popup_link( 'Zero custom', 'One custom', '% custom', 'cfz-popup-' . $marker, 'Closed custom' )
+			);
+			$closed_post->comment_status = 'open';
+			$closed_post->ping_status    = 'open';
+			$zero_popup         = self::capture_output(
+				static fn() => \comments_popup_link( 'Zero custom', 'One custom', '% custom', 'cfz-popup-' . $marker, 'Closed custom' )
+			);
+			$GLOBALS['post']    = $one_post;
+			$one_popup          = self::capture_output(
+				static fn() => \comments_popup_link( 'Zero custom', 'One custom', '% custom', 'cfz-popup-' . $marker, 'Closed custom' )
+			);
+			$GLOBALS['post']    = $post;
+			$many_popup         = self::capture_output(
+				static fn() => \comments_popup_link( 'Zero custom', 'One custom', '% custom', 'cfz-popup-' . $marker, 'Closed custom' )
+			);
+			$GLOBALS['post']    = $password_post;
+			$password_popup     = self::capture_output(
+				static fn() => \comments_popup_link( 'Zero custom', 'One custom', '% custom', 'cfz-popup-' . $marker, 'Closed custom' )
+			);
+			$GLOBALS['post']    = $post;
+
+			$options['default_comments_page'] = 'oldest';
+			$page_one_link                    = self::call( static fn() => \get_comments_pagenum_link( 1, 3 ) );
+			$page_three_link                  = self::call( static fn() => \get_comments_pagenum_link( 3, 3 ) );
+			$options['default_comments_page'] = 'newest';
+			$newest_max_link                  = self::call( static fn() => \get_comments_pagenum_link( 3, 3 ) );
+			$newest_middle_link               = self::call( static fn() => \get_comments_pagenum_link( 2, 3 ) );
+			$options['default_comments_page'] = 'oldest';
+
+			$previous_link = self::call( static fn() => \get_previous_comments_link( 'Older & Earlier', 2 ) );
+			$next_link     = self::call( static fn() => \get_next_comments_link( 'Newer & Later', 3, 2 ) );
+			$previous_echo = self::capture_output( static fn() => \previous_comments_link( 'Older & Earlier' ) );
+			$next_echo     = self::capture_output( static fn() => \next_comments_link( 'Newer & Later', 3 ) );
+			$first_prev    = self::call( static fn() => \get_previous_comments_link( 'Older & Earlier', 1 ) );
+			$last_next     = self::call( static fn() => \get_next_comments_link( 'Newer & Later', 3, 3 ) );
+			$page_array    = self::call(
+				static fn() => \paginate_comments_links(
+					array(
+						'current'   => 2,
+						'echo'      => false,
+						'next_text' => 'Next & More',
+						'prev_text' => 'Prev & Back',
+						'total'     => 3,
+						'type'      => 'array',
+					)
+				)
+			);
+			$page_plain    = self::call(
+				static fn() => \paginate_comments_links(
+					array(
+						'current' => 2,
+						'echo'    => false,
+						'total'   => 3,
+					)
+				)
+			);
+			$nav_get       = self::call(
+				static fn() => \get_the_comments_navigation(
+					array(
+						'aria_label'         => 'Fuzz Comments Nav',
+						'class'              => 'cfz-comment-navigation',
+						'next_text'          => 'Newer & Later',
+						'prev_text'          => 'Older & Earlier',
+						'screen_reader_text' => 'Comment Navigation Heading',
+					)
+				)
+			);
+			$nav_echo      = self::capture_output(
+				static function (): void {
+					\the_comments_navigation(
+						array(
+							'aria_label'         => 'Fuzz Comments Nav',
+							'class'              => 'cfz-comment-navigation',
+							'next_text'          => 'Newer & Later',
+							'prev_text'          => 'Older & Earlier',
+							'screen_reader_text' => 'Comment Navigation Heading',
+						)
+					);
+				}
+			);
+			$pagination_get = self::call(
+				static fn() => \get_the_comments_pagination(
+					array(
+						'aria_label'         => 'Fuzz Comments Pages',
+						'class'              => 'cfz-comments-pagination',
+						'current'            => 2,
+						'screen_reader_text' => 'Comment Pagination Heading',
+						'total'              => 3,
+						'type'               => 'array',
+					)
+				)
+			);
+			$pagination_echo = self::capture_output(
+				static function (): void {
+					\the_comments_pagination(
+						array(
+							'aria_label'         => 'Fuzz Comments Pages',
+							'class'              => 'cfz-comments-pagination',
+							'current'            => 2,
+							'screen_reader_text' => 'Comment Pagination Heading',
+							'total'              => 3,
+							'type'               => 'array',
+						)
+					);
+				}
+			);
+
+			$GLOBALS['wp_query']->is_singular = false;
+			$non_singular_next                = self::call( static fn() => \get_next_comments_link( 'Newer', 3, 2 ) );
+			$non_singular_previous            = self::call( static fn() => \get_previous_comments_link( 'Older', 2 ) );
+			$non_singular_paginate            = self::call( static fn() => \paginate_comments_links( array( 'echo' => false ) ) );
+
+			self::collect_failure(
+				$failures,
+				! $zero_number['threw']
+					&& '0' === (string) $zero_number['value']
+					&& ! $one_number['threw']
+					&& '1' === (string) $one_number['value']
+					&& ! $many_number['threw']
+					&& (string) $count === (string) $many_number['value']
+					&& ! $missing_number['threw']
+					&& 0 === $missing_number['value']
+					&& ! $zero_text['threw']
+					&& 'Zero label' === $zero_text['value']
+					&& ! $one_text['threw']
+					&& 'One label' === $one_text['value']
+					&& ! $many_text['threw']
+					&& \number_format_i18n( $count ) . ' labels' === $many_text['value']
+					&& ! $number_echo['threw']
+					&& $many_text['value'] === $number_echo['output']
+					&& self::event_contains_post_id( $events['count'], (int) $post->ID )
+					&& self::event_contains_post_id( $events['count'], (int) $closed_post->ID ),
+				'comment count helpers use cached post counts, filter payloads, plural replacement, and echo/getter parity',
+				array(
+					'zeroNumber'    => self::describe_call( $zero_number ),
+					'oneNumber'     => self::describe_call( $one_number ),
+					'manyNumber'    => self::describe_call( $many_number ),
+					'missingNumber' => self::describe_call( $missing_number ),
+					'zeroText'      => self::describe_call( $zero_text ),
+					'oneText'       => self::describe_call( $one_text ),
+					'manyText'      => self::describe_call( $many_text ),
+					'echo'          => self::describe_output_call( $number_echo ),
+					'events'        => $events['count'],
+					'textEvents'    => $events['commentsText'],
+				)
+			);
+
+			$closed_link = ! $closed_comments_link['threw'] && is_string( $closed_comments_link['value'] ) ? $closed_comments_link['value'] : '';
+			$many_link   = ! $many_comments_link['threw'] && is_string( $many_comments_link['value'] ) ? $many_comments_link['value'] : '';
+			self::collect_failure(
+				$failures,
+				! $closed_comments_link['threw']
+					&& str_ends_with( $closed_link, '#respond' )
+					&& ! $many_comments_link['threw']
+					&& str_ends_with( $many_link, '#comments' )
+					&& ! $comments_link_echo['threw']
+					&& \esc_url( $many_link ) === $comments_link_echo['output']
+					&& self::event_contains_post_id( $events['commentsLink'], (int) $post->ID )
+					&& self::event_contains_post_id( $events['commentsLink'], (int) $closed_post->ID ),
+				'comment permalink helpers choose respond/comments fragments and comments_link echoes escaped getter output',
+				array(
+					'closed' => self::describe_call( $closed_comments_link ),
+					'many'   => self::describe_call( $many_comments_link ),
+					'echo'   => self::describe_output_call( $comments_link_echo ),
+					'events' => $events['commentsLink'],
+				)
+			);
+
+			$closed_popup_html   = $closed_popup['output'] ?? '';
+			$zero_popup_html     = $zero_popup['output'] ?? '';
+			$one_popup_html      = $one_popup['output'] ?? '';
+			$many_popup_html     = $many_popup['output'] ?? '';
+			$password_popup_html = $password_popup['output'] ?? '';
+			self::collect_failure(
+				$failures,
+				! $closed_popup['threw']
+					&& str_contains( $closed_popup_html, '<span class="cfz-popup-' . $marker . '">Closed custom</span>' )
+					&& ! $zero_popup['threw']
+					&& str_contains( $zero_popup_html, '?cfz-respond=' . rawurlencode( $marker ) . '#respond' )
+					&& str_contains( $zero_popup_html, 'data-cfz-popup="' . \esc_attr( $marker ) . '"' )
+					&& str_contains( $zero_popup_html, '>Zero custom</a>' )
+					&& ! $one_popup['threw']
+					&& str_contains( $one_popup_html, '#comments' )
+					&& str_contains( $one_popup_html, '>One custom</a>' )
+					&& ! $many_popup['threw']
+					&& str_contains( $many_popup_html, \number_format_i18n( $count ) . ' custom' )
+					&& ! $password_popup['threw']
+					&& str_contains( $password_popup_html, 'password' )
+					&& 1 <= count( $events['respondLink'] )
+					&& 3 <= count( $events['popupAttr'] ),
+				'comments_popup_link covers closed, password, zero/respond, one, many, custom-label, and attribute branches',
+				array(
+					'closed'      => self::describe_output_call( $closed_popup ),
+					'zero'        => self::describe_output_call( $zero_popup ),
+					'one'         => self::describe_output_call( $one_popup ),
+					'many'        => self::describe_output_call( $many_popup ),
+					'password'    => self::describe_output_call( $password_popup ),
+					'respond'     => $events['respondLink'],
+					'popupAttrs'  => $events['popupAttr'],
+				)
+			);
+
+			$page_one   = ! $page_one_link['threw'] && is_string( $page_one_link['value'] ) ? $page_one_link['value'] : '';
+			$page_three = ! $page_three_link['threw'] && is_string( $page_three_link['value'] ) ? $page_three_link['value'] : '';
+			$newest_max = ! $newest_max_link['threw'] && is_string( $newest_max_link['value'] ) ? $newest_max_link['value'] : '';
+			$newest_mid = ! $newest_middle_link['threw'] && is_string( $newest_middle_link['value'] ) ? $newest_middle_link['value'] : '';
+			$previous   = ! $previous_link['threw'] && is_string( $previous_link['value'] ) ? $previous_link['value'] : '';
+			$next       = ! $next_link['threw'] && is_string( $next_link['value'] ) ? $next_link['value'] : '';
+			$page_navigation_checks = array(
+				'pageOneNoCpage'     => ! $page_one_link['threw'] && str_ends_with( $page_one, '#comments' ) && ! self::comment_link_has_any_cpage( $page_one ),
+				'pageThreeCpage'     => ! $page_three_link['threw'] && self::comment_link_has_cpage( $page_three, 3 ),
+				'newestMaxNoCpage'   => ! $newest_max_link['threw'] && ! self::comment_link_has_any_cpage( $newest_max ),
+				'newestMiddleCpage'  => ! $newest_middle_link['threw'] && self::comment_link_has_cpage( $newest_mid, 2 ),
+				'previousAttributes' => ! $previous_link['threw'] && str_contains( $previous, 'data-cfz-prev="' . \esc_attr( $marker ) . '"' ),
+				'previousLabel'      => ! $previous_link['threw'] && str_contains( $previous, 'Older &#038; Earlier' ),
+				'nextAttributes'     => ! $next_link['threw'] && str_contains( $next, 'data-cfz-next="' . \esc_attr( $marker ) . '"' ),
+				'nextCpage'          => ! $next_link['threw'] && self::comment_link_has_cpage( $next, 3 ),
+				'nextLabel'          => ! $next_link['threw'] && str_contains( $next, 'Newer &#038; Later' ),
+				'previousEchoParity' => ! $previous_echo['threw'] && $previous === $previous_echo['output'],
+				'nextEchoParity'     => ! $next_echo['threw'] && $next === $next_echo['output'],
+				'firstPrevNull'      => ! $first_prev['threw'] && null === $first_prev['value'],
+				'lastNextNull'       => ! $last_next['threw'] && null === $last_next['value'],
+			);
+			self::collect_failure(
+				$failures,
+				! in_array( false, $page_navigation_checks, true ),
+				'comment page and adjacent navigation links respect default-page edges, attributes, label escaping, and echo/getter parity',
+				array(
+					'checks'       => $page_navigation_checks,
+					'pageOne'      => self::describe_call( $page_one_link ),
+					'pageThree'    => self::describe_call( $page_three_link ),
+					'newestMax'    => self::describe_call( $newest_max_link ),
+					'newestMiddle' => self::describe_call( $newest_middle_link ),
+					'previous'     => self::describe_call( $previous_link ),
+					'next'         => self::describe_call( $next_link ),
+					'previousEcho' => self::describe_output_call( $previous_echo ),
+					'nextEcho'     => self::describe_output_call( $next_echo ),
+					'pageEvents'   => $events['pageLink'],
+				)
+			);
+
+			$page_array_value = ! $page_array['threw'] && is_array( $page_array['value'] ) ? $page_array['value'] : array();
+			$page_plain_value = ! $page_plain['threw'] && is_string( $page_plain['value'] ) ? $page_plain['value'] : '';
+			$nav_value        = ! $nav_get['threw'] && is_string( $nav_get['value'] ) ? $nav_get['value'] : '';
+			$pagination_value = ! $pagination_get['threw'] && is_string( $pagination_get['value'] ) ? $pagination_get['value'] : '';
+			self::collect_failure(
+				$failures,
+				! $page_array['threw']
+					&& is_array( $page_array['value'] )
+					&& 5 === count( $page_array_value )
+					&& self::comment_pagination_array_has_page( $page_array_value, 1 )
+					&& self::comment_pagination_array_has_page( $page_array_value, 2 )
+					&& self::comment_pagination_array_has_page( $page_array_value, 3 )
+					&& ! $page_plain['threw']
+					&& str_contains( $page_plain_value, '#comments' )
+					&& str_contains( $page_plain_value, 'page-numbers' )
+					&& ! $nav_get['threw']
+					&& str_contains( $nav_value, 'class="navigation cfz-comment-navigation" aria-label="Fuzz Comments Nav"' )
+					&& str_contains( $nav_value, 'Comment Navigation Heading' )
+					&& str_contains( $nav_value, 'nav-previous' )
+					&& str_contains( $nav_value, 'nav-next' )
+					&& ! $nav_echo['threw']
+					&& $nav_value === $nav_echo['output']
+					&& ! $pagination_get['threw']
+					&& str_contains( $pagination_value, 'class="navigation cfz-comments-pagination" aria-label="Fuzz Comments Pages"' )
+					&& str_contains( $pagination_value, 'Comment Pagination Heading' )
+					&& str_contains( $pagination_value, 'page-numbers' )
+					&& ! $pagination_echo['threw']
+					&& $pagination_value === $pagination_echo['output'],
+				'comment pagination and navigation wrappers produce array/plain/nav output with class, aria, fragment, and echo parity',
+				array(
+					'array'          => self::describe_call( $page_array ),
+					'plain'          => self::describe_call( $page_plain ),
+					'navigation'     => self::describe_call( $nav_get ),
+					'navigationEcho' => self::describe_output_call( $nav_echo ),
+					'pagination'     => self::describe_call( $pagination_get ),
+					'paginationEcho' => self::describe_output_call( $pagination_echo ),
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				! $non_singular_next['threw']
+					&& null === $non_singular_next['value']
+					&& ! $non_singular_previous['threw']
+					&& null === $non_singular_previous['value']
+					&& ! $non_singular_paginate['threw']
+					&& null === $non_singular_paginate['value'],
+				'comment page helpers fail closed outside singular query context',
+				array(
+					'next'     => self::describe_call( $non_singular_next ),
+					'previous' => self::describe_call( $non_singular_previous ),
+					'paginate' => self::describe_call( $non_singular_paginate ),
+				)
+			);
+		} finally {
+			foreach ( $option_filters as $option => $filter ) {
+				\remove_filter( 'pre_option_' . $option, $filter, 10 );
+			}
+			\remove_filter( 'get_comments_number', $count_filter, 10 );
+			\remove_filter( 'comments_number', $text_filter, 10 );
+			\remove_filter( 'get_comments_link', $link_filter, 10 );
+			\remove_filter( 'respond_link', $respond_filter, 10 );
+			\remove_filter( 'comments_popup_link_attributes', $popup_attr_filter, 10 );
+			\remove_filter( 'get_comments_pagenum_link', $page_link_filter, 10 );
+			\remove_filter( 'next_comments_link_attributes', $next_attr_filter, 10 );
+			\remove_filter( 'previous_comments_link_attributes', $previous_attr_filter, 10 );
+			self::clear_comment_permalink_fixture_cache( $fixture );
+			self::restore_globals( $snapshot );
+		}
+
+		$filters_removed = false === \has_filter( 'get_comments_number', $count_filter )
+			&& false === \has_filter( 'comments_number', $text_filter )
+			&& false === \has_filter( 'get_comments_link', $link_filter )
+			&& false === \has_filter( 'respond_link', $respond_filter )
+			&& false === \has_filter( 'comments_popup_link_attributes', $popup_attr_filter )
+			&& false === \has_filter( 'get_comments_pagenum_link', $page_link_filter )
+			&& false === \has_filter( 'next_comments_link_attributes', $next_attr_filter )
+			&& false === \has_filter( 'previous_comments_link_attributes', $previous_attr_filter );
+
+		self::collect_failure(
+			$failures,
+			$filters_removed && self::globals_match( $snapshot ),
+			'comment count/navigation probe removes filters and restores query, post, server, cookie, and hook globals',
+			array(
+				'filtersRemoved' => $filters_removed,
+				'trackedGlobals' => array_keys( $snapshot['globals'] ),
+			)
+		);
+
+		return array(
+			$ctx->result(
+				'comments.count-navigation.public-helper-contracts',
+				array() === $failures,
+				array(
+					'failureLabels' => array_column( $failures, 'label' ),
+					'firstChecks'   => $failures[0]['details']['checks'] ?? array(),
+					'failures'      => array_slice( $failures, 0, 8 ),
+					'postId'        => (int) $post->ID,
+					'count'         => $count,
+				)
+			),
+		);
+	}
+
 	private static function check_comment_form_rendering( \ComponentFuzz\FuzzContext $ctx ): array {
 		$base_id       = 930000 + ( $ctx->iteration() * 100 );
 		$post          = self::permalink_post( $base_id + 1, 'Comment Form Fixture ' . $ctx->iteration() );
@@ -1894,6 +2396,32 @@ final class CommentsSurface {
 		}
 	}
 
+	private static function set_comment_navigation_query_context( \WP_Post $post, array $comments, int $page, int $max_page ): void {
+		$query                        = new \WP_Query();
+		$query->is_home               = false;
+		$query->is_page               = false;
+		$query->is_single             = true;
+		$query->is_singular           = true;
+		$query->post                  = $post;
+		$query->posts                 = array( $post );
+		$query->post_count            = 1;
+		$query->queried_object        = $post;
+		$query->queried_object_id     = (int) $post->ID;
+		$query->comments              = array_values( $comments );
+		$query->comment_count         = count( $comments );
+		$query->max_num_comment_pages = $max_page;
+		$query->query_vars            = array(
+			'cpage'             => $page,
+			'comments_per_page' => 2,
+			'p'                 => (int) $post->ID,
+		);
+
+		$GLOBALS['post']         = $post;
+		$GLOBALS['id']           = (int) $post->ID;
+		$GLOBALS['wp_query']     = $query;
+		$GLOBALS['wp_the_query'] = $query;
+	}
+
 	private static function comment_permalink_fixture( \ComponentFuzz\FuzzContext $ctx ): array {
 		$base_id       = 910000 + ( $ctx->iteration() * 100 );
 		$post_id       = $base_id + 1;
@@ -2102,6 +2630,10 @@ final class CommentsSurface {
 	}
 
 	private static function comment_link_has_cpage( string $link, int $page ): bool {
+		if ( str_contains( $link, 'cpage=' . $page ) ) {
+			return true;
+		}
+
 		$query_vars = self::comment_link_query_vars( $link );
 		if ( isset( $query_vars['cpage'] ) && ! is_array( $query_vars['cpage'] ) && (string) $page === (string) $query_vars['cpage'] ) {
 			return true;
@@ -2146,6 +2678,34 @@ final class CommentsSurface {
 		}
 
 		return 'comment-page';
+	}
+
+	private static function comment_pagination_array_has_page( array $links, int $page ): bool {
+		foreach ( $links as $link ) {
+			if ( ! is_string( $link ) ) {
+				continue;
+			}
+
+			if ( $page === 1 && str_contains( $link, '>1<' ) ) {
+				return true;
+			}
+
+			if ( self::comment_link_has_cpage( $link, $page ) || str_contains( $link, '>' . $page . '<' ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private static function event_contains_post_id( array $events, int $post_id ): bool {
+		foreach ( $events as $event ) {
+			if ( (int) ( $event['postId'] ?? ( $event['post'] ?? 0 ) ) === $post_id ) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	private static function expected_sanitized_cookies( array $cookies, string $hash ): array {
@@ -2450,6 +3010,17 @@ final class CommentsSurface {
 		return $ctx->result( $invariant, $ok, self::case_data( $case_index, $case, $data ) );
 	}
 
+	private static function collect_failure( array &$failures, bool $condition, string $label, array $details ): void {
+		if ( $condition ) {
+			return;
+		}
+
+		$failures[] = array(
+			'label'   => $label,
+			'details' => $details,
+		);
+	}
+
 	private static function case_data( int $case_index, array $case, array $data = array() ): array {
 		return array_merge(
 			array(
@@ -2517,6 +3088,9 @@ final class CommentsSurface {
 				'wp_actions',
 				'wpdb',
 				'wp_rewrite',
+				'wp_query',
+				'wp_the_query',
+				'id',
 			) as $key
 		) {
 			$globals[ $key ] = array(
@@ -2556,7 +3130,29 @@ final class CommentsSurface {
 			return clone $value;
 		}
 
+		if ( in_array( $key, array( 'wp_query', 'wp_the_query' ), true ) && is_object( $value ) ) {
+			return clone $value;
+		}
+
 		return $value;
+	}
+
+	private static function globals_match( array $snapshot ): bool {
+		if ( $_COOKIE !== $snapshot['_COOKIE'] || $_GET !== $snapshot['_GET'] || $_SERVER !== $snapshot['_SERVER'] ) {
+			return false;
+		}
+
+		foreach ( $snapshot['globals'] as $key => $entry ) {
+			if ( $entry['exists'] !== array_key_exists( $key, $GLOBALS ) ) {
+				return false;
+			}
+
+			if ( $entry['exists'] && $entry['value'] != $GLOBALS[ $key ] ) {
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 	private static function clone_wp_filter( $wp_filter ) {
