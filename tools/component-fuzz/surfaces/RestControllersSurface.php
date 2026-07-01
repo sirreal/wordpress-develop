@@ -90,6 +90,7 @@ final class RestControllersSurface {
 				'WP_Block_Type_Registry',
 				'WP_Error',
 				'WP_Post_Type',
+				'WP_Query',
 				'WP_REST_Block_Pattern_Categories_Controller',
 				'WP_REST_Block_Patterns_Controller',
 				'WP_REST_Block_Renderer_Controller',
@@ -115,6 +116,7 @@ final class RestControllersSurface {
 				'WP_Theme_JSON',
 				'WP_Theme_JSON_Resolver',
 				'WP_Term',
+				'WP_Term_Query',
 				'WP_User',
 			) as $class
 		) {
@@ -138,6 +140,7 @@ final class RestControllersSurface {
 				'get_object_taxonomies',
 				'get_option',
 				'get_dynamic_block_names',
+				'get_permalink',
 				'get_post',
 				'get_post_format_link',
 				'get_post_format_string',
@@ -151,11 +154,14 @@ final class RestControllersSurface {
 				'get_site_transient',
 				'get_taxonomies',
 				'get_taxonomy',
+				'get_term_link',
 				'get_the_title',
 				'has_filter',
 				'is_post_type_viewable',
 				'is_wp_error',
 				'plugin_basename',
+				'post_type_exists',
+				'post_type_supports',
 				'register_nav_menu',
 				'register_block_style',
 				'register_block_pattern',
@@ -173,6 +179,7 @@ final class RestControllersSurface {
 				'rest_do_request',
 				'rest_ensure_response',
 				'rest_filter_response_by_context',
+				'rest_get_route_for_post',
 				'rest_get_route_for_post_type_items',
 				'rest_get_route_for_term',
 				'rest_get_route_for_taxonomy_items',
@@ -188,9 +195,12 @@ final class RestControllersSurface {
 				'serialize_blocks',
 				'setup_postdata',
 				'set_site_transient',
+				'taxonomy_exists',
 				'trailingslashit',
 				'unregister_nav_menu',
 				'unregister_block_type',
+				'unregister_post_type',
+				'unregister_taxonomy',
 				'update_option',
 				'validate_file',
 				'wp_cache_delete',
@@ -198,6 +208,7 @@ final class RestControllersSurface {
 				'urlencode_deep',
 				'_register_theme_block_patterns',
 				'wp_clean_theme_json_cache',
+				'wp_count_terms',
 				'wp_get_active_and_valid_themes',
 				'wp_get_theme',
 				'wp_is_development_mode',
@@ -3733,6 +3744,14 @@ final class RestControllersSurface {
 			$post_format
 		);
 
+		$builtins = self::check_builtin_search_handlers( $ctx->fork( 'builtin-search' ) );
+		self::collect_failure(
+			$failures,
+			true === $builtins['ok'],
+			'built-in post and term search handlers map queries, preparation, links, and cleanup',
+			$builtins
+		);
+
 		return self::row(
 			$ctx,
 			'rest-controllers.search-controller.handlers-params-pagination-links',
@@ -4425,6 +4444,732 @@ final class RestControllersSurface {
 			'linkedFormats'   => $linked_formats,
 			'formatSearch'    => $format_search,
 		);
+	}
+
+	private static function check_builtin_search_handlers( \ComponentFuzz\FuzzContext $ctx ): array {
+		$case                 = self::builtin_search_case( $ctx );
+		$posts                = array();
+		$terms                = array();
+		$post_query_calls     = array();
+		$post_pre_query_calls = array();
+		$term_query_calls     = array();
+		$term_pre_query_calls = array();
+		$post_link_calls      = array();
+		$term_link_calls      = array();
+		$post_handler         = null;
+		$term_handler         = null;
+		$filter_cleanup       = false;
+
+		foreach ( $case['posts'] as $post_case ) {
+			$post = self::builtin_search_post( $post_case );
+			$posts[ $post->ID ] = $post;
+		}
+
+		foreach ( $case['terms'] as $term_case ) {
+			$term = self::builtin_search_term( $term_case );
+			$terms[ $term->term_id ] = $term;
+		}
+
+		$post_query_filter = static function ( array $query_args, \WP_REST_Request $request ) use ( &$post_query_calls ): array {
+			$post_query_calls[] = array(
+				'args'    => array_intersect_key(
+					$query_args,
+					array(
+						'post_type'           => true,
+						'post_status'         => true,
+						'paged'               => true,
+						'posts_per_page'      => true,
+						'ignore_sticky_posts' => true,
+						's'                   => true,
+						'post__in'            => true,
+						'post__not_in'        => true,
+					)
+				),
+				'route'   => $request->get_route(),
+				'type'    => $request[ \WP_REST_Search_Controller::PROP_TYPE ],
+				'subtype' => array_values( (array) $request[ \WP_REST_Search_Controller::PROP_SUBTYPE ] ),
+			);
+			return $query_args;
+		};
+		$post_pre_filter   = static function ( $short_circuit, \WP_Query $query ) use ( &$post_pre_query_calls, $posts, $case ) {
+			$post_types = array_values( (array) ( $query->query_vars['post_type'] ?? array() ) );
+			if (
+				! in_array( $case['postType'], $post_types, true )
+				&& ! in_array( $case['noTitlePostType'], $post_types, true )
+			) {
+				return $short_circuit;
+			}
+
+			$matched  = self::builtin_search_filtered_posts( $posts, $query->query_vars );
+			$page     = max( 1, (int) ( $query->query_vars['paged'] ?? 1 ) );
+			$per_page = max( 1, (int) ( $query->query_vars['posts_per_page'] ?? count( $matched ) ) );
+			$offset   = ( $page - 1 ) * $per_page;
+			$results  = array_slice( $matched, $offset, $per_page );
+
+			$query->found_posts   = count( $matched );
+			$query->max_num_pages = (int) ceil( count( $matched ) / $per_page );
+
+			$post_pre_query_calls[] = array(
+				'postType'     => $post_types,
+				'paged'        => $page,
+				'postsPerPage' => $per_page,
+				'found'        => count( $matched ),
+				'returned'     => array_values( array_map( 'intval', wp_list_pluck( $results, 'ID' ) ) ),
+			);
+
+			return $results;
+		};
+		$post_link_filter  = static function ( string $link, \WP_Post $post ) use ( &$post_link_calls, $case ): string {
+			if ( ! in_array( $post->post_type, array( $case['postType'], $case['noTitlePostType'] ), true ) ) {
+				return $link;
+			}
+
+			$post_link_calls[] = array(
+				'id'       => (int) $post->ID,
+				'postType' => $post->post_type,
+			);
+
+			return 'http://example.test/component-fuzz/builtin-posts/' . (int) $post->ID;
+		};
+		$term_query_filter = static function ( array $query_args, \WP_REST_Request $request ) use ( &$term_query_calls ): array {
+			$term_query_calls[] = array(
+				'args'    => array_intersect_key(
+					$query_args,
+					array(
+						'taxonomy'   => true,
+						'hide_empty' => true,
+						'offset'     => true,
+						'number'     => true,
+						'search'     => true,
+						'include'    => true,
+						'exclude'    => true,
+					)
+				),
+				'route'   => $request->get_route(),
+				'type'    => $request[ \WP_REST_Search_Controller::PROP_TYPE ],
+				'subtype' => array_values( (array) $request[ \WP_REST_Search_Controller::PROP_SUBTYPE ] ),
+			);
+			return $query_args;
+		};
+		$term_pre_filter   = static function ( $short_circuit, \WP_Term_Query $query ) use ( &$term_pre_query_calls, $terms, $case ) {
+			$taxonomies = array_values( (array) ( $query->query_vars['taxonomy'] ?? array() ) );
+			if ( ! in_array( $case['taxonomy'], $taxonomies, true ) ) {
+				return $short_circuit;
+			}
+
+			$fields  = $query->query_vars['fields'] ?? null;
+			if ( 'all_with_object_id' === $fields || ! empty( $query->query_vars['object_ids'] ) ) {
+				return $short_circuit;
+			}
+
+			$matched = self::builtin_search_filtered_terms( $terms, $query->query_vars );
+			$offset  = max( 0, (int) ( $query->query_vars['offset'] ?? 0 ) );
+			$number  = max( 0, (int) ( $query->query_vars['number'] ?? 0 ) );
+			$results = 0 < $number ? array_slice( $matched, $offset, $number ) : $matched;
+
+			$term_pre_query_calls[] = array(
+				'taxonomy' => $taxonomies,
+				'fields'   => $fields,
+				'offset'   => $query->query_vars['offset'] ?? null,
+				'number'   => $query->query_vars['number'] ?? null,
+				'found'    => count( $matched ),
+				'returned' => array_values( array_map( 'intval', wp_list_pluck( $results, 'term_id' ) ) ),
+			);
+
+			if ( 'count' === $fields ) {
+				return (string) count( $matched );
+			}
+
+			return $results;
+		};
+		$term_link_filter  = static function ( string $link, \WP_Term $term, string $taxonomy ) use ( &$term_link_calls, $case ): string {
+			if ( $case['taxonomy'] !== $taxonomy ) {
+				return $link;
+			}
+
+			$term_link_calls[] = array(
+				'id'       => (int) $term->term_id,
+				'taxonomy' => $taxonomy,
+			);
+
+			return 'http://example.test/component-fuzz/builtin-terms/' . (int) $term->term_id;
+		};
+
+		try {
+			\register_post_type(
+				$case['postType'],
+				array(
+					'label'        => 'Built-in Search Type',
+					'public'       => true,
+					'show_in_rest' => true,
+					'rest_base'    => $case['postRestBase'],
+					'rewrite'      => false,
+					'query_var'    => false,
+					'supports'     => array( 'title' ),
+				)
+			);
+			\register_post_type(
+				$case['noTitlePostType'],
+				array(
+					'label'        => 'Built-in Search No Title Type',
+					'public'       => true,
+					'show_in_rest' => true,
+					'rest_base'    => $case['noTitlePostRestBase'],
+					'rewrite'      => false,
+					'query_var'    => false,
+					'supports'     => false,
+				)
+			);
+			\register_post_type(
+				$case['hiddenPostType'],
+				array(
+					'label'        => 'Hidden Built-in Search Type',
+					'public'       => true,
+					'show_in_rest' => false,
+					'rewrite'      => false,
+					'query_var'    => false,
+					'supports'     => array( 'title' ),
+				)
+			);
+			\register_taxonomy(
+				$case['taxonomy'],
+				array( $case['postType'], $case['noTitlePostType'] ),
+				array(
+					'label'        => 'Built-in Search Taxonomy',
+					'public'       => true,
+					'show_in_rest' => true,
+					'rest_base'    => $case['taxonomyRestBase'],
+					'rewrite'      => false,
+					'query_var'    => false,
+				)
+			);
+			\register_taxonomy(
+				$case['hiddenTaxonomy'],
+				$case['postType'],
+				array(
+					'label'        => 'Hidden Built-in Search Taxonomy',
+					'public'       => true,
+					'show_in_rest' => false,
+					'rewrite'      => false,
+					'query_var'    => false,
+				)
+			);
+
+			foreach ( $posts as $post ) {
+				self::seed_post_storage( $post );
+			}
+			foreach ( $terms as $term ) {
+				\wp_cache_set( $term->term_id, $term, 'terms' );
+			}
+
+			\add_filter( 'rest_post_search_query', $post_query_filter, 10, 2 );
+			\add_filter( 'posts_pre_query', $post_pre_filter, 10, 2 );
+			\add_filter( 'post_type_link', $post_link_filter, 10, 2 );
+			\add_filter( 'rest_term_search_query', $term_query_filter, 10, 2 );
+			\add_filter( 'terms_pre_query', $term_pre_filter, 10, 2 );
+			\add_filter( 'term_link', $term_link_filter, 10, 3 );
+
+			$post_handler = new \WP_REST_Post_Search_Handler();
+			$term_handler = new \WP_REST_Term_Search_Handler();
+
+			$post_any_result = $post_handler->search_items(
+				self::request(
+					'GET',
+					'/wp/v2/search',
+					array(
+						'context'                                      => 'view',
+						'page'                                         => 2,
+						'per_page'                                     => 1,
+						'search'                                       => $case['search'],
+						\WP_REST_Search_Controller::PROP_TYPE          => 'post',
+						\WP_REST_Search_Controller::PROP_SUBTYPE       => array( \WP_REST_Search_Controller::TYPE_ANY ),
+						'include'                                      => $case['postInclude'],
+						'exclude'                                      => $case['postExclude'],
+					)
+				)
+			);
+			$post_subtype_result = $post_handler->search_items(
+				self::request(
+					'GET',
+					'/wp/v2/search',
+					array(
+						'context'                                      => 'view',
+						'page'                                         => 1,
+						'per_page'                                     => 2,
+						'search'                                       => $case['search'],
+						\WP_REST_Search_Controller::PROP_TYPE          => 'post',
+						\WP_REST_Search_Controller::PROP_SUBTYPE       => array( $case['postType'] ),
+						'include'                                      => $case['postInclude'],
+						'exclude'                                      => $case['postExclude'],
+					)
+				)
+			);
+			$prepared_post = $post_handler->prepare_item(
+				$case['protectedPostId'],
+				array(
+					\WP_REST_Search_Controller::PROP_ID,
+					\WP_REST_Search_Controller::PROP_TITLE,
+					\WP_REST_Search_Controller::PROP_URL,
+					\WP_REST_Search_Controller::PROP_TYPE,
+					\WP_REST_Search_Controller::PROP_SUBTYPE,
+				)
+			);
+			$prepared_no_title_post = $post_handler->prepare_item(
+				$case['noTitlePostId'],
+				array(
+					\WP_REST_Search_Controller::PROP_ID,
+					\WP_REST_Search_Controller::PROP_TITLE,
+					\WP_REST_Search_Controller::PROP_URL,
+					\WP_REST_Search_Controller::PROP_TYPE,
+					\WP_REST_Search_Controller::PROP_SUBTYPE,
+				)
+			);
+			$post_links = $post_handler->prepare_item_links( $case['postId'] );
+
+			$term_any_result = $term_handler->search_items(
+				self::request(
+					'GET',
+					'/wp/v2/search',
+					array(
+						'context'                                      => 'view',
+						'page'                                         => 2,
+						'per_page'                                     => 1,
+						'search'                                       => $case['search'],
+						\WP_REST_Search_Controller::PROP_TYPE          => 'term',
+						\WP_REST_Search_Controller::PROP_SUBTYPE       => array( \WP_REST_Search_Controller::TYPE_ANY ),
+						'include'                                      => $case['termInclude'],
+						'exclude'                                      => $case['termExclude'],
+					)
+				)
+			);
+			$term_subtype_result = $term_handler->search_items(
+				self::request(
+					'GET',
+					'/wp/v2/search',
+					array(
+						'context'                                      => 'view',
+						'page'                                         => 1,
+						'per_page'                                     => 2,
+						'search'                                       => $case['search'],
+						\WP_REST_Search_Controller::PROP_TYPE          => 'term',
+						\WP_REST_Search_Controller::PROP_SUBTYPE       => array( $case['taxonomy'] ),
+						'include'                                      => $case['termInclude'],
+						'exclude'                                      => $case['termExclude'],
+					)
+				)
+			);
+			$prepared_term = $term_handler->prepare_item(
+				$case['termId'],
+				array(
+					\WP_REST_Search_Controller::PROP_ID,
+					\WP_REST_Search_Controller::PROP_TITLE,
+					\WP_REST_Search_Controller::PROP_URL,
+					\WP_REST_Search_Controller::PROP_TYPE,
+				)
+			);
+			$term_links = $term_handler->prepare_item_links( $case['termId'] );
+		} finally {
+			\remove_filter( 'rest_post_search_query', $post_query_filter, 10 );
+			\remove_filter( 'posts_pre_query', $post_pre_filter, 10 );
+			\remove_filter( 'post_type_link', $post_link_filter, 10 );
+			\remove_filter( 'rest_term_search_query', $term_query_filter, 10 );
+			\remove_filter( 'terms_pre_query', $term_pre_filter, 10 );
+			\remove_filter( 'term_link', $term_link_filter, 10 );
+
+			$filter_cleanup = false === \has_filter( 'rest_post_search_query', $post_query_filter )
+				&& false === \has_filter( 'posts_pre_query', $post_pre_filter )
+				&& false === \has_filter( 'post_type_link', $post_link_filter )
+				&& false === \has_filter( 'rest_term_search_query', $term_query_filter )
+				&& false === \has_filter( 'terms_pre_query', $term_pre_filter )
+				&& false === \has_filter( 'term_link', $term_link_filter )
+				&& ( ! $post_handler instanceof \WP_REST_Post_Search_Handler
+					|| (
+						false === \has_filter( 'protected_title_format', array( $post_handler, 'protected_title_format' ) )
+						&& false === \has_filter( 'private_title_format', array( $post_handler, 'protected_title_format' ) )
+					)
+				);
+
+			foreach ( array_keys( $posts ) as $post_id ) {
+				self::delete_post_storage( (int) $post_id );
+			}
+			foreach ( array_keys( $terms ) as $term_id ) {
+				\wp_cache_delete( (int) $term_id, 'terms' );
+			}
+			foreach ( array( $case['taxonomy'], $case['hiddenTaxonomy'] ) as $taxonomy ) {
+				if ( \taxonomy_exists( $taxonomy ) ) {
+					\unregister_taxonomy( $taxonomy );
+				}
+			}
+			foreach ( array( $case['postType'], $case['noTitlePostType'], $case['hiddenPostType'] ) as $post_type ) {
+				if ( \post_type_exists( $post_type ) ) {
+					\unregister_post_type( $post_type );
+				}
+			}
+		}
+
+		$post_subtypes        = $post_handler instanceof \WP_REST_Post_Search_Handler ? array_values( (array) self::get_object_property( $post_handler, 'subtypes' ) ) : array();
+		$term_subtypes        = $term_handler instanceof \WP_REST_Term_Search_Handler ? array_values( (array) self::get_object_property( $term_handler, 'subtypes' ) ) : array();
+		$post_any_ids         = is_array( $post_any_result ?? null ) ? ( $post_any_result[ \WP_REST_Search_Handler::RESULT_IDS ] ?? null ) : null;
+		$post_any_total       = is_array( $post_any_result ?? null ) ? ( $post_any_result[ \WP_REST_Search_Handler::RESULT_TOTAL ] ?? null ) : null;
+		$post_subtype_ids     = is_array( $post_subtype_result ?? null ) ? ( $post_subtype_result[ \WP_REST_Search_Handler::RESULT_IDS ] ?? null ) : null;
+		$post_subtype_total   = is_array( $post_subtype_result ?? null ) ? ( $post_subtype_result[ \WP_REST_Search_Handler::RESULT_TOTAL ] ?? null ) : null;
+		$term_any_ids         = is_array( $term_any_result ?? null ) ? ( $term_any_result[ \WP_REST_Search_Handler::RESULT_IDS ] ?? null ) : null;
+		$term_any_total       = is_array( $term_any_result ?? null ) ? ( $term_any_result[ \WP_REST_Search_Handler::RESULT_TOTAL ] ?? null ) : null;
+		$term_subtype_ids     = is_array( $term_subtype_result ?? null ) ? ( $term_subtype_result[ \WP_REST_Search_Handler::RESULT_IDS ] ?? null ) : null;
+		$term_subtype_total   = is_array( $term_subtype_result ?? null ) ? ( $term_subtype_result[ \WP_REST_Search_Handler::RESULT_TOTAL ] ?? null ) : null;
+		$term_item_pre_calls  = array_values(
+			array_filter(
+				$term_pre_query_calls,
+				static fn ( array $call ): bool => 'count' !== ( $call['fields'] ?? null )
+			)
+		);
+		$term_count_pre_calls = array_values(
+			array_filter(
+				$term_pre_query_calls,
+				static fn ( array $call ): bool => 'count' === ( $call['fields'] ?? null )
+			)
+		);
+		$post_any_query       = $post_query_calls[0]['args'] ?? array();
+		$post_subtype_query   = $post_query_calls[1]['args'] ?? array();
+		$term_any_query       = $term_query_calls[0]['args'] ?? array();
+		$term_subtype_query   = $term_query_calls[1]['args'] ?? array();
+
+		return array(
+			'ok'                    => in_array( $case['postType'], $post_subtypes, true )
+				&& in_array( $case['noTitlePostType'], $post_subtypes, true )
+				&& ! in_array( $case['hiddenPostType'], $post_subtypes, true )
+				&& ! in_array( 'attachment', $post_subtypes, true )
+				&& in_array( $case['taxonomy'], $term_subtypes, true )
+				&& ! in_array( $case['hiddenTaxonomy'], $term_subtypes, true )
+				&& array( $case['protectedPostId'] ) === $post_any_ids
+				&& 3 === $post_any_total
+				&& array( $case['postId'], $case['protectedPostId'] ) === $post_subtype_ids
+				&& 2 === $post_subtype_total
+				&& 2 === count( $post_query_calls )
+				&& 2 === count( $post_pre_query_calls )
+				&& self::builtin_search_post_query_ok( $post_any_query, $case, true, 2, 1 )
+				&& self::builtin_search_post_query_ok( $post_subtype_query, $case, false, 1, 2 )
+				&& array(
+					$case['protectedPostId'],
+					$case['protectedPostTitle'],
+					'http://example.test/component-fuzz/builtin-posts/' . $case['protectedPostId'],
+					'post',
+					$case['postType'],
+				) === array(
+					$prepared_post[ \WP_REST_Search_Controller::PROP_ID ] ?? null,
+					$prepared_post[ \WP_REST_Search_Controller::PROP_TITLE ] ?? null,
+					$prepared_post[ \WP_REST_Search_Controller::PROP_URL ] ?? null,
+					$prepared_post[ \WP_REST_Search_Controller::PROP_TYPE ] ?? null,
+					$prepared_post[ \WP_REST_Search_Controller::PROP_SUBTYPE ] ?? null,
+				)
+				&& array(
+					$case['noTitlePostId'],
+					'',
+					'http://example.test/component-fuzz/builtin-posts/' . $case['noTitlePostId'],
+					'post',
+					$case['noTitlePostType'],
+				) === array(
+					$prepared_no_title_post[ \WP_REST_Search_Controller::PROP_ID ] ?? null,
+					$prepared_no_title_post[ \WP_REST_Search_Controller::PROP_TITLE ] ?? null,
+					$prepared_no_title_post[ \WP_REST_Search_Controller::PROP_URL ] ?? null,
+					$prepared_no_title_post[ \WP_REST_Search_Controller::PROP_TYPE ] ?? null,
+					$prepared_no_title_post[ \WP_REST_Search_Controller::PROP_SUBTYPE ] ?? null,
+				)
+				&& \rest_url( '/wp/v2/' . $case['postRestBase'] . '/' . $case['postId'] ) === ( $post_links['self']['href'] ?? null )
+				&& true === ( $post_links['self']['embeddable'] ?? null )
+				&& \rest_url( 'wp/v2/types/' . $case['postType'] ) === ( $post_links['about']['href'] ?? null )
+				&& array( $case['termSecondId'] ) === $term_any_ids
+				&& '2' === (string) $term_any_total
+				&& array( $case['termId'], $case['termSecondId'] ) === $term_subtype_ids
+				&& '2' === (string) $term_subtype_total
+				&& 2 === count( $term_query_calls )
+				&& 2 === count( $term_item_pre_calls )
+				&& 2 === count( $term_count_pre_calls )
+				&& self::builtin_search_term_query_ok( $term_any_query, $case, true, 1, 1 )
+				&& self::builtin_search_term_query_ok( $term_subtype_query, $case, false, 0, 2 )
+				&& array(
+					$case['termId'],
+					$case['termName'],
+					'http://example.test/component-fuzz/builtin-terms/' . $case['termId'],
+					$case['taxonomy'],
+				) === array(
+					$prepared_term[ \WP_REST_Search_Controller::PROP_ID ] ?? null,
+					$prepared_term[ \WP_REST_Search_Controller::PROP_TITLE ] ?? null,
+					$prepared_term[ \WP_REST_Search_Controller::PROP_URL ] ?? null,
+					$prepared_term[ \WP_REST_Search_Controller::PROP_TYPE ] ?? null,
+				)
+				&& \rest_url( '/wp/v2/' . $case['taxonomyRestBase'] . '/' . $case['termId'] ) === ( $term_links['self']['href'] ?? null )
+				&& true === ( $term_links['self']['embeddable'] ?? null )
+				&& \rest_url( 'wp/v2/taxonomies/' . $case['taxonomy'] ) === ( $term_links['about']['href'] ?? null )
+				&& array( $case['protectedPostId'], $case['noTitlePostId'] ) === array_values( array_map( 'intval', wp_list_pluck( $post_link_calls, 'id' ) ) )
+				&& array( $case['termId'] ) === array_values( array_map( 'intval', wp_list_pluck( $term_link_calls, 'id' ) ) )
+				&& $filter_cleanup,
+			'case'                  => $case,
+			'postSubtypes'          => $post_subtypes,
+			'termSubtypes'          => $term_subtypes,
+			'postAnyResult'         => $post_any_result ?? null,
+			'postSubtypeResult'     => $post_subtype_result ?? null,
+			'postQueryCalls'        => $post_query_calls,
+			'postPreQueryCalls'     => $post_pre_query_calls,
+			'preparedPost'          => $prepared_post ?? null,
+			'preparedNoTitlePost'   => $prepared_no_title_post ?? null,
+			'postLinks'             => $post_links ?? null,
+			'postLinkCalls'         => $post_link_calls,
+			'termAnyResult'         => $term_any_result ?? null,
+			'termSubtypeResult'     => $term_subtype_result ?? null,
+			'termQueryCalls'        => $term_query_calls,
+			'termItemPreQueryCalls' => $term_item_pre_calls,
+			'termCountPreQueryCalls' => $term_count_pre_calls,
+			'preparedTerm'          => $prepared_term ?? null,
+			'termLinks'             => $term_links ?? null,
+			'termLinkCalls'         => $term_link_calls,
+			'filterCleanup'         => $filter_cleanup,
+		);
+	}
+
+	private static function builtin_search_case( \ComponentFuzz\FuzzContext $ctx ): array {
+		$base        = 76000 + ( $ctx->seed() % 500 );
+		$term_base   = 77000 + ( $ctx->fork( 'terms' )->seed() % 500 );
+		$token       = substr( hash( 'crc32b', (string) $ctx->seed() ), 0, 8 );
+		$search      = 'needle-' . $token;
+		$post_type   = self::name_token( $ctx->fork( 'post-type' ), 'cfzspt', 20 );
+		$no_title    = self::name_token( $ctx->fork( 'no-title-post-type' ), 'cfzsnt', 20 );
+		$hidden_type = self::name_token( $ctx->fork( 'hidden-post-type' ), 'cfzshpt', 20 );
+		$taxonomy    = self::name_token( $ctx->fork( 'taxonomy' ), 'cfzstax', 28 );
+		$hidden_tax  = self::name_token( $ctx->fork( 'hidden-taxonomy' ), 'cfzshtax', 28 );
+
+		return array(
+			'postType'            => $post_type,
+			'noTitlePostType'     => $no_title,
+			'hiddenPostType'      => $hidden_type,
+			'postRestBase'        => self::route_token( $ctx->fork( 'post-rest-base' ), 'cfz-search-posts' ),
+			'noTitlePostRestBase' => self::route_token( $ctx->fork( 'no-title-post-rest-base' ), 'cfz-search-no-title' ),
+			'taxonomy'            => $taxonomy,
+			'hiddenTaxonomy'      => $hidden_tax,
+			'taxonomyRestBase'    => self::route_token( $ctx->fork( 'taxonomy-rest-base' ), 'cfz-search-terms' ),
+			'search'              => $search,
+			'postId'              => $base + 1,
+			'protectedPostId'     => $base + 2,
+			'noTitlePostId'       => $base + 3,
+			'excludedPostId'      => $base + 4,
+			'hiddenPostId'        => $base + 5,
+			'termId'              => $term_base + 1,
+			'termSecondId'        => $term_base + 2,
+			'excludedTermId'      => $term_base + 3,
+			'hiddenTermId'        => $term_base + 4,
+			'protectedPostTitle'  => 'Protected built-in search ' . $search,
+			'termName'            => 'Search term ' . $search,
+			'postInclude'         => array( $base + 1, $base + 2, $base + 3, $base + 4, $base + 5 ),
+			'postExclude'         => array( $base + 4 ),
+			'termInclude'         => array( $term_base + 1, $term_base + 2, $term_base + 3, $term_base + 4 ),
+			'termExclude'         => array( $term_base + 3 ),
+			'posts'               => array(
+				array(
+					'id'       => $base + 1,
+					'type'     => $post_type,
+					'title'    => 'Public built-in search ' . $search,
+					'name'     => 'public-' . $token,
+					'password' => '',
+				),
+				array(
+					'id'       => $base + 2,
+					'type'     => $post_type,
+					'title'    => 'Protected built-in search ' . $search,
+					'name'     => 'protected-' . $token,
+					'password' => 'pw-' . $token,
+				),
+				array(
+					'id'       => $base + 3,
+					'type'     => $no_title,
+					'title'    => 'No title built-in search ' . $search,
+					'name'     => 'no-title-' . $token,
+					'password' => '',
+				),
+				array(
+					'id'       => $base + 4,
+					'type'     => $post_type,
+					'title'    => 'Excluded built-in search ' . $search,
+					'name'     => 'excluded-' . $token,
+					'password' => '',
+				),
+				array(
+					'id'       => $base + 5,
+					'type'     => $hidden_type,
+					'title'    => 'Hidden built-in search ' . $search,
+					'name'     => 'hidden-' . $token,
+					'password' => '',
+				),
+			),
+			'terms'               => array(
+				array(
+					'id'       => $term_base + 1,
+					'taxonomy' => $taxonomy,
+					'name'     => 'Search term ' . $search,
+					'slug'     => 'term-' . $token,
+				),
+				array(
+					'id'       => $term_base + 2,
+					'taxonomy' => $taxonomy,
+					'name'     => 'Second search term ' . $search,
+					'slug'     => 'second-' . $token,
+				),
+				array(
+					'id'       => $term_base + 3,
+					'taxonomy' => $taxonomy,
+					'name'     => 'Excluded search term ' . $search,
+					'slug'     => 'excluded-' . $token,
+				),
+				array(
+					'id'       => $term_base + 4,
+					'taxonomy' => $hidden_tax,
+					'name'     => 'Hidden search term ' . $search,
+					'slug'     => 'hidden-' . $token,
+				),
+			),
+		);
+	}
+
+	private static function builtin_search_post( array $case ): \WP_Post {
+		return new \WP_Post(
+			(object) array(
+				'ID'                    => (int) $case['id'],
+				'post_author'           => 0,
+				'post_date'             => '2026-06-24 12:00:00',
+				'post_date_gmt'         => '2026-06-24 10:00:00',
+				'post_content'          => '<!-- wp:paragraph --><p>REST built-in search fixture.</p><!-- /wp:paragraph -->',
+				'post_title'            => $case['title'],
+				'post_excerpt'          => '',
+				'post_status'           => 'publish',
+				'comment_status'        => 'closed',
+				'ping_status'           => 'closed',
+				'post_password'         => $case['password'],
+				'post_name'             => $case['name'],
+				'to_ping'               => '',
+				'pinged'                => '',
+				'post_modified'         => '2026-06-24 12:00:00',
+				'post_modified_gmt'     => '2026-06-24 10:00:00',
+				'post_content_filtered' => '',
+				'post_parent'           => 0,
+				'guid'                  => 'http://example.test/?p=' . (int) $case['id'],
+				'menu_order'            => 0,
+				'post_type'             => $case['type'],
+				'post_mime_type'        => '',
+				'comment_count'         => '0',
+				'filter'                => 'raw',
+			)
+		);
+	}
+
+	private static function builtin_search_term( array $case ): \WP_Term {
+		return new \WP_Term(
+			(object) array(
+				'term_id'          => (int) $case['id'],
+				'name'             => $case['name'],
+				'slug'             => $case['slug'],
+				'term_group'       => 0,
+				'term_taxonomy_id' => (int) $case['id'] + 1000,
+				'taxonomy'         => $case['taxonomy'],
+				'description'      => '',
+				'parent'           => 0,
+				'count'            => 1,
+				'filter'           => 'raw',
+			)
+		);
+	}
+
+	private static function builtin_search_filtered_posts( array $posts, array $query_vars ): array {
+		$post_types = array_values( array_filter( (array) ( $query_vars['post_type'] ?? array() ), 'is_string' ) );
+		$include    = array_values( array_map( 'intval', (array) ( $query_vars['post__in'] ?? array() ) ) );
+		$exclude    = array_values( array_map( 'intval', (array) ( $query_vars['post__not_in'] ?? array() ) ) );
+		$search     = strtolower( (string) ( $query_vars['s'] ?? '' ) );
+		$matched    = array();
+
+		foreach ( $posts as $post ) {
+			if ( $post_types && ! in_array( $post->post_type, $post_types, true ) ) {
+				continue;
+			}
+			if ( $include && ! in_array( (int) $post->ID, $include, true ) ) {
+				continue;
+			}
+			if ( $exclude && in_array( (int) $post->ID, $exclude, true ) ) {
+				continue;
+			}
+			if ( '' !== $search && false === stripos( $post->post_title, $search ) ) {
+				continue;
+			}
+
+			$matched[] = $post;
+		}
+
+		return $matched;
+	}
+
+	private static function builtin_search_filtered_terms( array $terms, array $query_vars ): array {
+		$taxonomies = array_values( array_filter( (array) ( $query_vars['taxonomy'] ?? array() ), 'is_string' ) );
+		$include    = array_values( array_map( 'intval', (array) ( $query_vars['include'] ?? array() ) ) );
+		$exclude    = array_values( array_map( 'intval', (array) ( $query_vars['exclude'] ?? array() ) ) );
+		$search     = strtolower( (string) ( $query_vars['search'] ?? '' ) );
+		$matched    = array();
+
+		foreach ( $terms as $term ) {
+			if ( $taxonomies && ! in_array( $term->taxonomy, $taxonomies, true ) ) {
+				continue;
+			}
+			if ( $include && ! in_array( (int) $term->term_id, $include, true ) ) {
+				continue;
+			}
+			if ( $exclude && in_array( (int) $term->term_id, $exclude, true ) ) {
+				continue;
+			}
+			if ( '' !== $search && false === stripos( $term->name, $search ) ) {
+				continue;
+			}
+
+			$matched[] = $term;
+		}
+
+		return $matched;
+	}
+
+	private static function builtin_search_post_query_ok( array $query, array $case, bool $expect_any, int $page, int $per_page ): bool {
+		$post_types = array_values( (array) ( $query['post_type'] ?? array() ) );
+
+		return 'publish' === ( $query['post_status'] ?? null )
+			&& $page === (int) ( $query['paged'] ?? 0 )
+			&& $per_page === (int) ( $query['posts_per_page'] ?? 0 )
+			&& true === ( $query['ignore_sticky_posts'] ?? null )
+			&& $case['search'] === ( $query['s'] ?? null )
+			&& $case['postInclude'] === array_values( array_map( 'intval', (array) ( $query['post__in'] ?? array() ) ) )
+			&& $case['postExclude'] === array_values( array_map( 'intval', (array) ( $query['post__not_in'] ?? array() ) ) )
+			&& (
+				$expect_any
+					? (
+						in_array( $case['postType'], $post_types, true )
+						&& in_array( $case['noTitlePostType'], $post_types, true )
+						&& ! in_array( $case['hiddenPostType'], $post_types, true )
+						&& ! in_array( 'attachment', $post_types, true )
+					)
+					: array( $case['postType'] ) === $post_types
+			);
+	}
+
+	private static function builtin_search_term_query_ok( array $query, array $case, bool $expect_any, int $offset, int $number ): bool {
+		$taxonomies = array_values( (array) ( $query['taxonomy'] ?? array() ) );
+
+		return false === ( $query['hide_empty'] ?? null )
+			&& $offset === (int) ( $query['offset'] ?? -1 )
+			&& $number === (int) ( $query['number'] ?? -1 )
+			&& $case['search'] === ( $query['search'] ?? null )
+			&& $case['termInclude'] === array_values( array_map( 'intval', (array) ( $query['include'] ?? array() ) ) )
+			&& $case['termExclude'] === array_values( array_map( 'intval', (array) ( $query['exclude'] ?? array() ) ) )
+			&& (
+				$expect_any
+					? (
+						in_array( $case['taxonomy'], $taxonomies, true )
+						&& ! in_array( $case['hiddenTaxonomy'], $taxonomies, true )
+					)
+					: array( $case['taxonomy'] ) === $taxonomies
+			);
 	}
 
 	private static function post_type_case( \ComponentFuzz\FuzzContext $ctx ): array {

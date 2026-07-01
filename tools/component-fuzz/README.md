@@ -701,7 +701,10 @@ database, network requests, or a configured site.
   route-dispatched defaults/schema validation, custom search handler
   result/header/link propagation, invalid subtype rejection, public
   search-result schema callback contents, post-format search term/link and
-  pagination behavior, invalid values, and state restoration.
+  pagination behavior, built-in post/term search handler subtype discovery,
+  `TYPE_ANY` expansion, include/exclude/search/page/per-page query mapping,
+  protected-title/no-title preparation branches, REST item/about links, invalid
+  values, and state restoration.
 - `rest-application-passwords`: in-memory user/app-password backed REST
   application password controller coverage, including collection/item/
   introspection route and schema contracts, create/update/delete dispatch,
