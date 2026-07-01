@@ -35,6 +35,7 @@ final class AdminAjaxSurface {
 			$rows[] = self::check_nonce_and_capability_failures( $ctx->fork( 'nonce-cap' ) );
 			$rows[] = self::check_heartbeat_nonce_branches( $ctx->fork( 'heartbeat-nonce-branches' ) );
 			$rows[] = self::check_selected_safe_ajax_handlers( $ctx->fork( 'safe-handlers' ) );
+			$rows[] = self::check_find_posts_modal_and_ajax( $ctx->fork( 'find-posts' ) );
 			$rows[] = self::check_attachment_ajax_workflows( $ctx->fork( 'attachment-workflows' ) );
 			$rows[] = self::check_compression_test_handler( $ctx->fork( 'compression-test' ) );
 			$rows[] = self::check_malformed_request_globals_restore( $ctx->fork( 'request-restore' ) );
@@ -77,6 +78,13 @@ final class AdminAjaxSurface {
 				require_once $ajax_actions;
 			}
 		}
+
+		if ( defined( 'ABSPATH' ) && ! function_exists( 'find_posts_div' ) ) {
+			$template = ABSPATH . 'wp-admin/includes/template.php';
+			if ( file_exists( $template ) ) {
+				require_once $template;
+			}
+		}
 	}
 
 	private static function missing_requirements(): array {
@@ -98,7 +106,13 @@ final class AdminAjaxSurface {
 				'has_action',
 				'has_filter',
 				'is_wp_error',
+				'find_posts_div',
+				'get_post_type_object',
+				'get_post_types',
+				'get_posts',
+				'mysql2date',
 				'register_taxonomy',
+				'register_post_type',
 				'remove_action',
 				'remove_filter',
 				'sanitize_key',
@@ -116,6 +130,7 @@ final class AdminAjaxSurface {
 				'wp_slash',
 				'wp_unslash',
 				'wp_verify_nonce',
+				'wp_ajax_find_posts',
 			) as $function
 		) {
 			if ( ! function_exists( $function ) ) {
@@ -1044,6 +1059,292 @@ final class AdminAjaxSurface {
 		);
 	}
 
+	private static function check_find_posts_modal_and_ajax( \ComponentFuzz\FuzzContext $ctx ): array {
+		$required = array(
+			'WP_Post',
+			'WP_Post_Type',
+			'WP_Query',
+			'__',
+			'_e',
+			'check_ajax_referer',
+			'create_initial_post_types',
+			'esc_attr',
+			'esc_attr_e',
+			'esc_html',
+			'find_posts_div',
+			'get_post_type_object',
+			'get_post_types',
+			'get_posts',
+			'mysql2date',
+			'register_post_type',
+			'submit_button',
+			'wp_ajax_find_posts',
+			'wp_create_nonce',
+			'wp_nonce_field',
+			'wp_send_json_error',
+			'wp_send_json_success',
+			'wp_slash',
+		);
+		$missing  = array();
+		foreach ( $required as $symbol ) {
+			if ( str_starts_with( $symbol, 'WP_' ) ) {
+				if ( ! class_exists( $symbol ) ) {
+					$missing[] = "class {$symbol}";
+				}
+				continue;
+			}
+
+			if ( ! function_exists( $symbol ) ) {
+				$missing[] = "function {$symbol}";
+			}
+		}
+
+		if ( array() !== $missing ) {
+			return self::row(
+				$ctx,
+				'admin-ajax.find-posts.modal-query-json',
+				true,
+				array( 'missing' => $missing ),
+				'skipped'
+			);
+		}
+
+		$failures          = array();
+		$case              = self::find_posts_case( $ctx );
+		$local             = self::snapshot_superglobals();
+		$user_snapshot     = self::snapshot_globals( array( 'current_user', 'userdata', 'user_ID' ) );
+		$registry_snapshot = self::snapshot_globals( array( '_wp_post_type_features', 'post_type_meta_caps', 'wp_post_types' ) );
+		$db_before         = self::db_content_counts();
+		$start_level       = ob_get_level();
+		$query_calls       = array();
+		$mode              = 'success';
+
+		$query_filter = static function ( $posts, \WP_Query $query ) use ( &$query_calls, &$mode, $case ): array {
+			unset( $posts );
+			$filtered_posts = self::find_posts_query_posts( $case, $query, $mode );
+			$query_calls[] = array(
+				'mode'        => $mode,
+				'queryVars'   => $query->query_vars,
+				'returnedIds' => self::find_posts_post_ids( $filtered_posts ),
+			);
+
+			return $filtered_posts;
+		};
+
+		try {
+			\wp_set_current_user( 0 );
+			foreach ( $case['postTypes'] as $post_type => $args ) {
+				\register_post_type( $post_type, $args );
+			}
+
+			$expected_post_types = array_keys( \get_post_types( array( 'public' => true ), 'objects' ) );
+			$expected_post_types = array_values( array_diff( $expected_post_types, array( 'attachment' ) ) );
+			sort( $expected_post_types );
+
+			$modal = self::capture_output(
+				static function () use ( $case ): void {
+					\find_posts_div( $case['foundAction'] );
+				}
+			);
+
+			self::collect_failure(
+				$failures,
+				str_contains( $modal, 'id="find-posts"' )
+					&& str_contains( $modal, 'name="found_action" value="' . \esc_attr( $case['foundAction'] ) . '"' )
+					&& str_contains( $modal, 'name="affected" id="affected" value=""' )
+					&& str_contains( $modal, 'name="_ajax_nonce"' )
+					&& str_contains( $modal, 'id="find-posts-input" name="ps" value=""' )
+					&& str_contains( $modal, 'id="find-posts-search"' )
+					&& str_contains( $modal, 'id="find-posts-response"' )
+					&& str_contains( $modal, 'name="find-posts-submit"' )
+					&& ! str_contains( $modal, '<script>' )
+					&& ! str_contains( $modal, 'onfocus=' ),
+				'find_posts_div() prints the modal shell with escaped found_action, nonce, search, response, and submit controls',
+				array(
+					'foundAction' => $case['foundAction'],
+					'modal'       => self::describe_string( $modal ),
+				)
+			);
+
+			\add_filter( 'posts_pre_query', $query_filter, 10, 2 );
+			try {
+				self::set_request_globals(
+					array(),
+					array(
+						'action'      => 'find-posts',
+						'_ajax_nonce' => \wp_create_nonce( 'find-posts' ),
+						'ps'          => \wp_slash( $case['search'] ),
+					)
+				);
+				$success_capture = self::capture_terminating_call(
+					static function (): void {
+						\wp_ajax_find_posts();
+					},
+					true
+				);
+
+				$mode = 'empty';
+				self::set_request_globals(
+					array(),
+					array(
+						'action'      => 'find-posts',
+						'_ajax_nonce' => \wp_create_nonce( 'find-posts' ),
+						'ps'          => '',
+					)
+				);
+				$empty_capture = self::capture_terminating_call(
+					static function (): void {
+						\wp_ajax_find_posts();
+					},
+					true
+				);
+			} finally {
+				\remove_filter( 'posts_pre_query', $query_filter, 10 );
+			}
+
+			$referer_calls  = array();
+			$referer_action = static function ( $seen_action, $result ) use ( &$referer_calls ): void {
+				$referer_calls[] = array(
+					'action' => $seen_action,
+					'result' => $result,
+				);
+			};
+			\add_action( 'check_ajax_referer', $referer_action, 10, 2 );
+			try {
+				self::set_request_globals(
+					array(),
+					array(
+						'action'      => 'find-posts',
+						'_ajax_nonce' => 'bad-' . $case['token'],
+						'ps'          => \wp_slash( 'blocked ' . $case['search'] ),
+					)
+				);
+				$query_count_before_invalid = count( $query_calls );
+				$invalid_capture            = self::capture_terminating_call(
+					static function (): void {
+						\wp_ajax_find_posts();
+					},
+					true
+				);
+			} finally {
+				\remove_action( 'check_ajax_referer', $referer_action, 10 );
+			}
+		} finally {
+			\remove_filter( 'posts_pre_query', $query_filter, 10 );
+			if ( isset( $referer_action ) ) {
+				\remove_action( 'check_ajax_referer', $referer_action, 10 );
+			}
+			self::restore_superglobals( $local );
+			self::restore_globals( $user_snapshot );
+			self::restore_globals( $registry_snapshot );
+		}
+
+		$success_decoded = json_decode( self::terminal_body( $success_capture ?? array() ), true );
+		$success_html    = is_array( $success_decoded ) && is_string( $success_decoded['data'] ?? null ) ? $success_decoded['data'] : '';
+		$success_query   = $query_calls[0]['queryVars'] ?? array();
+		$empty_decoded   = json_decode( self::terminal_body( $empty_capture ?? array() ), true );
+		$empty_query     = $query_calls[1]['queryVars'] ?? array();
+		$invalid_die     = $invalid_capture['dieCalls'][0] ?? array();
+		$success_rows_ok = self::find_posts_success_rows_ok( $success_html, $case );
+		$expected_ids    = self::find_posts_post_ids( $case['expectedPosts'] );
+
+		self::collect_failure(
+			$failures,
+			is_array( $success_decoded )
+				&& true === ( $success_decoded['success'] ?? null )
+				&& $success_rows_ok
+				&& $expected_ids === ( $query_calls[0]['returnedIds'] ?? array() )
+				&& $expected_post_types === array_values( (array) ( $success_query['post_type'] ?? array() ) )
+				&& 'any' === ( $success_query['post_status'] ?? null )
+				&& 50 === (int) ( $success_query['posts_per_page'] ?? 0 )
+				&& true === ( $success_query['ignore_sticky_posts'] ?? null )
+				&& true === ( $success_query['no_found_rows'] ?? null )
+				&& $case['search'] === ( $success_query['s'] ?? null )
+				&& ! in_array( 'attachment', (array) ( $success_query['post_type'] ?? array() ), true )
+				&& $success_capture['captured']
+				&& $success_capture['bufferBalanced']
+				&& $success_capture['filtersRestored'],
+			'wp_ajax_find_posts() valid search returns escaped table rows and exact public post-type query args without attachments',
+			array(
+				'decoded'           => $success_decoded,
+				'queryVars'         => $success_query,
+				'expectedPostTypes' => $expected_post_types,
+				'expectedIds'       => $expected_ids,
+				'returnedIds'       => $query_calls[0]['returnedIds'] ?? array(),
+				'successRowsOk'     => $success_rows_ok,
+				'capture'           => $success_capture,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			is_array( $empty_decoded )
+				&& false === ( $empty_decoded['success'] ?? null )
+				&& 'No items found.' === ( $empty_decoded['data'] ?? null )
+				&& $expected_post_types === array_values( (array) ( $empty_query['post_type'] ?? array() ) )
+				&& ( ! isset( $empty_query['s'] ) || '' === $empty_query['s'] )
+				&& $empty_capture['captured']
+				&& $empty_capture['bufferBalanced']
+				&& $empty_capture['filtersRestored'],
+			'wp_ajax_find_posts() empty search omits a meaningful search term and returns the stable no-items JSON error',
+			array(
+				'decoded'   => $empty_decoded,
+				'queryVars' => $empty_query,
+				'capture'   => $empty_capture,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			isset( $query_count_before_invalid )
+				&& count( $query_calls ) === $query_count_before_invalid
+				&& '-1' === self::terminal_body( $invalid_capture ?? array() )
+				&& 403 === ( $invalid_die['processed']['args']['response'] ?? null )
+				&& array( 'find-posts' ) === array_column( $referer_calls ?? array(), 'action' )
+				&& array( false ) === array_column( $referer_calls ?? array(), 'result' )
+				&& false === \has_action( 'check_ajax_referer', $referer_action ?? '__missing_find_posts_referer_action__' )
+				&& ( $invalid_capture['captured'] ?? false )
+				&& ( $invalid_capture['bufferBalanced'] ?? false )
+				&& ( $invalid_capture['filtersRestored'] ?? false ),
+			'wp_ajax_find_posts() invalid nonce dies with -1/403 before querying posts',
+			array(
+				'queryCountBeforeInvalid' => $query_count_before_invalid ?? null,
+				'queryCountAfterInvalid'  => count( $query_calls ),
+				'capture'                 => $invalid_capture ?? null,
+				'refererCalls'            => $referer_calls ?? array(),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::superglobals_match( $local )
+				&& self::globals_match( $user_snapshot )
+				&& self::find_posts_registry_restored( $registry_snapshot, $case )
+				&& false === \has_filter( 'posts_pre_query', $query_filter )
+				&& false === \has_action( 'check_ajax_referer', $referer_action ?? '__missing_find_posts_referer_action__' )
+				&& $start_level === ob_get_level()
+				&& $db_before === self::db_content_counts(),
+			'Find Posts modal and Ajax checks restore request/user/post-type/hook state without DB mutations',
+			array(
+				'dbBefore'         => $db_before,
+				'dbAfter'          => self::db_content_counts(),
+				'queryCalls'       => $query_calls,
+				'hookRestored'     => false === \has_filter( 'posts_pre_query', $query_filter ),
+				'refererHookRestored' => false === \has_action( 'check_ajax_referer', $referer_action ?? '__missing_find_posts_referer_action__' ),
+				'startLevel'       => $start_level,
+				'endLevel'         => ob_get_level(),
+				'registryRestored' => self::find_posts_registry_restored( $registry_snapshot, $case ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'admin-ajax.find-posts.modal-query-json',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, 8 ) )
+		);
+	}
+
 	private static function check_attachment_ajax_workflows( \ComponentFuzz\FuzzContext $ctx ): array {
 		$required = array(
 			'WP_Query',
@@ -1868,6 +2169,23 @@ final class AdminAjaxSurface {
 		return '';
 	}
 
+	private static function capture_output( callable $callback ): string {
+		$start_level = ob_get_level();
+		$output      = '';
+
+		ob_start();
+		try {
+			$callback();
+		} finally {
+			while ( ob_get_level() > $start_level ) {
+				$chunk  = ob_get_clean();
+				$output = ( false === $chunk ? '' : $chunk ) . $output;
+			}
+		}
+
+		return $output;
+	}
+
 	private static function raw_die_response_is_null( array $die_call ): bool {
 		return isset( $die_call['rawArgs'] )
 			&& is_array( $die_call['rawArgs'] )
@@ -1985,6 +2303,264 @@ final class AdminAjaxSurface {
 		$slug = strtolower( preg_replace( '/[^a-zA-Z0-9_]/', '_', $ctx->identifier( 3, 18 ) ) );
 		$slug = trim( $slug, '_' );
 		return '' === $slug ? $fallback : $slug;
+	}
+
+	private static function find_posts_case( \ComponentFuzz\FuzzContext $ctx ): array {
+		$token      = self::slug( $ctx->fork( 'token' ), 'find' );
+		$primary    = 'cfz_find_' . substr( $token, 0, 10 );
+		$secondary  = 'cfz_pick_' . substr( self::slug( $ctx->fork( 'secondary' ), 'pick' ), 0, 10 );
+		$private_pt = 'cfz_hidden_' . substr( self::slug( $ctx->fork( 'hidden' ), 'hidden' ), 0, 8 );
+		$needle     = 'find_' . self::safe_label( $ctx->fork( 'search' ) );
+		$search     = $needle . ' <b>& quoted</b>';
+
+		$expected_posts = array(
+			self::find_posts_post(
+				11001 + $ctx->int( 1, 200 ),
+				$primary,
+				'publish',
+				'Published ' . $needle . ' <script>alert(1)</script> & "quoted" ' . $token,
+				'2026-07-01 10:11:12'
+			),
+			self::find_posts_post(
+				12001 + $ctx->int( 1, 200 ),
+				$secondary,
+				'private',
+				'Private ' . $needle . ' & <strong>escaped</strong> ' . $token,
+				'2026-07-02 11:12:13'
+			),
+			self::find_posts_post(
+				13001 + $ctx->int( 1, 200 ),
+				$primary,
+				'future',
+				'Scheduled ' . $needle . ' ' . $token,
+				'2026-08-03 12:13:14'
+			),
+			self::find_posts_post(
+				14001 + $ctx->int( 1, 200 ),
+				$secondary,
+				'pending',
+				'Pending ' . $needle . ' ' . $token,
+				'0000-00-00 00:00:00'
+			),
+			self::find_posts_post(
+				15001 + $ctx->int( 1, 200 ),
+				$primary,
+				'draft',
+				" \t\n",
+				'2026-09-04 13:14:15',
+				'Blank title ' . $needle . ' ' . $token
+			),
+		);
+		$excluded_posts  = array(
+			self::find_posts_post(
+				16001 + $ctx->int( 1, 200 ),
+				'attachment',
+				'publish',
+				'Attachment ' . $needle . ' excluded ' . $token,
+				'2026-10-05 14:15:16'
+			),
+			self::find_posts_post(
+				17001 + $ctx->int( 1, 200 ),
+				$private_pt,
+				'publish',
+				'Hidden type ' . $needle . ' excluded ' . $token,
+				'2026-11-06 15:16:17'
+			),
+			self::find_posts_post(
+				18001 + $ctx->int( 1, 200 ),
+				$primary,
+				'publish',
+				'Public nonmatching title ' . $token,
+				'2026-12-07 16:17:18'
+			),
+		);
+
+		return array(
+			'excludedPosts' => $excluded_posts,
+			'expectedPosts' => $expected_posts,
+			'foundAction'   => 'attach" onclick="bad()" <script>' . $token,
+			'needle'        => $needle,
+			'postTypes'     => array(
+				$primary    => array(
+					'label'        => 'Find Primary ' . $token,
+					'labels'       => array(
+						'singular_name' => 'Primary <em>Type</em> & "' . $token . '"',
+					),
+					'public'       => true,
+					'show_ui'      => false,
+					'show_in_rest' => false,
+					'rewrite'      => false,
+					'query_var'    => false,
+				),
+				$secondary  => array(
+					'label'        => 'Find Secondary ' . $token,
+					'labels'       => array(
+						'singular_name' => 'Secondary & <script>Type</script> ' . $token,
+					),
+					'public'       => true,
+					'show_ui'      => false,
+					'show_in_rest' => false,
+					'rewrite'      => false,
+					'query_var'    => false,
+				),
+				$private_pt => array(
+					'label'        => 'Hidden Find ' . $token,
+					'public'       => false,
+					'show_ui'      => false,
+					'show_in_rest' => false,
+					'rewrite'      => false,
+					'query_var'    => false,
+				),
+			),
+			'posts'         => array_merge( $expected_posts, $excluded_posts ),
+			'search'        => $search,
+			'token'         => $token,
+		);
+	}
+
+	private static function find_posts_post( int $id, string $post_type, string $status, string $title, string $date, string $content = '' ): \WP_Post {
+		return new \WP_Post(
+			(object) array(
+				'ID'                    => $id,
+				'post_author'           => 0,
+				'post_date'             => $date,
+				'post_date_gmt'         => $date,
+				'post_content'          => '' === $content ? 'Generated Find Posts content for ' . $id : $content,
+				'post_title'            => $title,
+				'post_excerpt'          => '',
+				'post_status'           => $status,
+				'comment_status'        => 'closed',
+				'ping_status'           => 'closed',
+				'post_password'         => '',
+				'post_name'             => 'cfz-find-post-' . $id,
+				'to_ping'               => '',
+				'pinged'                => '',
+				'post_modified'         => $date,
+				'post_modified_gmt'     => $date,
+				'post_content_filtered' => '',
+				'post_parent'           => 0,
+				'guid'                  => 'https://example.test/?p=' . $id,
+				'menu_order'            => 0,
+				'post_type'             => $post_type,
+				'post_mime_type'        => '',
+				'comment_count'         => 0,
+				'filter'                => 'raw',
+			)
+		);
+	}
+
+	private static function find_posts_query_posts( array $case, \WP_Query $query, string $mode ): array {
+		if ( 'empty' === $mode ) {
+			return array();
+		}
+
+		if ( $case['search'] !== (string) $query->get( 's' ) ) {
+			return array();
+		}
+
+		$post_types = (array) $query->get( 'post_type' );
+		$needle     = strtolower( $case['needle'] );
+
+		return array_values(
+			array_filter(
+				$case['posts'],
+				static function ( $post ) use ( $post_types, $needle ): bool {
+					return $post instanceof \WP_Post
+						&& in_array( $post->post_type, $post_types, true )
+						&& (
+							str_contains( strtolower( $post->post_title ), $needle )
+							|| str_contains( strtolower( $post->post_content ), $needle )
+						);
+				}
+			)
+		);
+	}
+
+	private static function find_posts_post_ids( array $posts ): array {
+		return array_map(
+			static fn ( \WP_Post $post ): int => (int) $post->ID,
+			$posts
+		);
+	}
+
+	private static function find_posts_success_rows_ok( string $html, array $case ): bool {
+		if (
+			! str_contains( $html, '<table class="widefat">' )
+			|| ! str_contains( $html, '<th>Title</th>' )
+			|| ! str_contains( $html, 'found-radio' )
+			|| str_contains( $html, '<script>' )
+			|| str_contains( $html, '<strong>' )
+			|| str_contains( $html, '<em>' )
+		) {
+			return false;
+		}
+
+		$status_labels = array(
+			'publish' => 'Published',
+			'private' => 'Published',
+			'future'  => 'Scheduled',
+			'pending' => 'Pending Review',
+			'draft'   => 'Draft',
+		);
+
+		foreach ( $case['expectedPosts'] as $post ) {
+			if ( ! $post instanceof \WP_Post ) {
+				return false;
+			}
+
+			$title      = trim( $post->post_title ) ? $post->post_title : '(no title)';
+			$type       = \get_post_type_object( $post->post_type );
+			$type_label = $type ? $type->labels->singular_name : '';
+			$time       = '0000-00-00 00:00:00' === $post->post_date ? '' : \mysql2date( __( 'Y/m/d' ), $post->post_date );
+
+			if (
+				! str_contains( $html, 'id="found-' . $post->ID . '"' )
+				|| ! str_contains( $html, 'value="' . \esc_attr( (string) $post->ID ) . '"' )
+				|| ! str_contains( $html, '<label for="found-' . $post->ID . '">' . \esc_html( $title ) . '</label>' )
+				|| ! str_contains( $html, '<td class="no-break">' . \esc_html( $type_label ) . '</td>' )
+				|| ! str_contains( $html, '<td class="no-break">' . \esc_html( $time ) . '</td>' )
+				|| ! str_contains( $html, '<td class="no-break">' . \esc_html( $status_labels[ $post->post_status ] ) . ' </td>' )
+			) {
+				return false;
+			}
+		}
+
+		foreach ( $case['excludedPosts'] as $post ) {
+			if (
+				$post instanceof \WP_Post
+				&& (
+					str_contains( $html, 'id="found-' . $post->ID . '"' )
+					|| str_contains( $html, 'value="' . \esc_attr( (string) $post->ID ) . '"' )
+				)
+			) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function find_posts_registry_restored( array $snapshot, array $case ): bool {
+		foreach ( array_keys( $case['postTypes'] ) as $post_type ) {
+			if ( isset( $GLOBALS['wp_post_types'][ $post_type ] ) ) {
+				return false;
+			}
+			if ( isset( $GLOBALS['_wp_post_type_features'][ $post_type ] ) ) {
+				return false;
+			}
+		}
+
+		foreach ( array( 'wp_post_types', '_wp_post_type_features' ) as $name ) {
+			$expected = array_keys( (array) ( $snapshot[ $name ]['value'] ?? array() ) );
+			$current  = array_keys( (array) ( $GLOBALS[ $name ] ?? array() ) );
+			sort( $expected );
+			sort( $current );
+			if ( $expected !== $current ) {
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 	private static function xml_name( \ComponentFuzz\FuzzContext $ctx, string $fallback ): string {

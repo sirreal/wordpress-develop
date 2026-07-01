@@ -23,9 +23,9 @@ database, network requests, or a configured site.
 - `admin-ajax`: bounded admin-AJAX response helper coverage, including
   captured `wp_die()` handlers, JSON response helpers, `WP_Ajax_Response`
   XML boundaries, nonce/capability failures, Heartbeat nonce hook branches,
-  selected safe AJAX handlers, attachment query/save workflows,
-  compression-test capability/body branches, and superglobal/output-buffer
-  restoration.
+  selected safe AJAX handlers, Find Posts modal/query/JSON branches,
+  attachment query/save workflows, compression-test capability/body branches,
+  and superglobal/output-buffer restoration.
 - `admin-bar`: no-DB toolbar node lifecycle, default root/submenu binding,
   group/container behavior, render escaping/raw HTML contracts, and
   back-compat parent alias and tabindex rendering contracts, initialization
