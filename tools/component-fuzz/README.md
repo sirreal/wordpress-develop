@@ -159,7 +159,8 @@ database, network requests, or a configured site.
 - `block-templates`: no-DB block template and block theme resolution coverage,
   including template registry lifecycle, file-backed templates and parts,
   parent/child theme precedence, theme.json metadata, hierarchy resolution, and
-  malformed filename/path guards with template CPT queries short-circuited.
+  malformed filename/path and direct-ID traversal guards with template CPT
+  queries short-circuited.
 - `block-editor-adjuncts`: no-DB block editor adjunct API coverage, including
   editor context objects, category and allowed-block filters, legacy widget and
   merged editor settings, local theme style helpers, iframe asset collection,
@@ -873,8 +874,8 @@ frontend head callbacks, printed custom-header script side effects, and
 synthetic site-icon attachment metadata without invoking media uploads, image
 crops, AJAX actions, or admin page dispatch. The
 block templates surface short-circuits template CPT queries through
-`posts_pre_query` and records the current direct-ID traversal behavior as a
-guarded skip while still asserting that file enumeration remains confined. The
+`posts_pre_query` and asserts that file enumeration and direct template-ID
+resolution remain confined to the active theme template directories. The
 `block-widgets` surface exercises `WP_Widget_Block`, sidebars widget option
 mapping, and `retrieve_widgets()` remap/lost-widget recovery without loading the
 browser widgets editor, performing REST persistence, or depending on theme

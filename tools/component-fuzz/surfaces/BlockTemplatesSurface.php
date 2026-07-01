@@ -791,23 +791,26 @@ final class BlockTemplatesSurface {
 			)
 		);
 
-		$traversal = \get_block_file_template( $case['theme']['childSlug'] . '//' . $case['escape']['slug'], 'wp_template' );
-		if ( $traversal instanceof \WP_Block_Template && str_contains( $traversal->content, $case['escape']['marker'] ) ) {
-			$rows[] = $ctx->skip(
+		$traversal_id     = $case['theme']['childSlug'] . '//' . $case['escape']['slug'];
+		$traversal_file   = \get_block_file_template( $traversal_id, 'wp_template' );
+		$traversal_public = \get_block_template( $traversal_id, 'wp_template' );
+		if ( null !== $traversal_file || null !== $traversal_public ) {
+			$rows[] = $ctx->fail(
 				'block-templates.path-traversal.direct-id-guard',
-				'Current Core resolves raw traversal slugs that point at existing files; enumeration remains confined and this no-DB surface records the direct-ID gap as a guarded skip.',
 				array(
-					'id'       => $case['theme']['childSlug'] . '//' . $case['escape']['slug'],
-					'resolved' => self::template_summary( $traversal ),
-					'path'     => self::preview( $case['escape']['path'] ),
+					'id'             => $traversal_id,
+					'fileResolved'   => self::template_summary( $traversal_file ),
+					'publicResolved' => self::template_summary( $traversal_public ),
+					'path'           => self::preview( $case['escape']['path'] ),
 				)
 			);
 		} else {
 			$rows[] = $ctx->pass(
 				'block-templates.path-traversal.direct-id-guard',
 				array(
-					'id'       => $case['theme']['childSlug'] . '//' . $case['escape']['slug'],
-					'resolved' => self::template_summary( $traversal ),
+					'id'             => $traversal_id,
+					'fileResolved'   => self::template_summary( $traversal_file ),
+					'publicResolved' => self::template_summary( $traversal_public ),
 				)
 			);
 		}
