@@ -135,7 +135,10 @@ database, network requests, or a configured site.
   server-side `core/navigation`/navigation-link/submenu/home-link/page-list
   rendering, responsive overlay/interactivity markup, duplicate navigation
   label uniqueness, submenu visibility migration, synthetic page-list
-  active/ancestor classes, and global/superglobal/option restoration.
+  active/ancestor classes, frontend list-style archives/categories/latest
+  posts/latest comments/tag cloud/calendar rendering, archive/calendar cache
+  key handling, posts/comments/terms query filters, and
+  global/superglobal/option restoration.
 - `block-widgets`: block-backed widget behavior, including `WP_Widget_Block`
   rendering, dynamic legacy class mapping matrix, malformed/unknown block
   fallbacks, content sanitization on update, form escaping, `the_widget()`

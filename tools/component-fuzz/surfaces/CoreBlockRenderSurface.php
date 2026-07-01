@@ -11,12 +11,18 @@ final class CoreBlockRenderSurface {
 	private const MAX_FAILURES = 8;
 
 	private const CORE_BLOCKS = array(
+		'archives'                   => 'register_block_core_archives',
+		'calendar'                   => 'register_block_core_calendar',
+		'categories'                 => 'register_block_core_categories',
 		'post-title'                 => 'register_block_core_post_title',
 		'post-date'                  => 'register_block_core_post_date',
 		'post-excerpt'               => 'register_block_core_post_excerpt',
 		'read-more'                  => 'register_block_core_read_more',
+		'latest-comments'            => 'register_block_core_latest_comments',
+		'latest-posts'               => 'register_block_core_latest_posts',
 		'site-title'                 => 'register_block_core_site_title',
 		'site-tagline'               => 'register_block_core_site_tagline',
+		'tag-cloud'                  => 'register_block_core_tag_cloud',
 		'query-pagination'           => 'register_block_core_query_pagination',
 		'query-pagination-next'      => 'register_block_core_query_pagination_next',
 		'query-pagination-previous'  => 'register_block_core_query_pagination_previous',
@@ -63,6 +69,7 @@ final class CoreBlockRenderSurface {
 			$rows[] = self::check_search_and_loginout_blocks( $ctx->fork( 'forms-loginout' ) );
 			$rows[] = self::check_html_mutation_blocks( $ctx->fork( 'html-mutation' ) );
 			$rows[] = self::check_navigation_block_rendering( $ctx->fork( 'navigation' ) );
+			$rows[] = self::check_frontend_list_blocks( $ctx->fork( 'frontend-lists' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
 				'core-block-render.surface-no-throw',
@@ -90,7 +97,7 @@ final class CoreBlockRenderSurface {
 	private static function missing_requirements(): array {
 		$missing = array();
 
-		foreach ( array( 'WP_Block', 'WP_Block_Supports', 'WP_Block_Type_Registry', 'WP_HTML_Tag_Processor', 'WP_Post', 'WP_Query' ) as $class ) {
+		foreach ( array( 'WP_Block', 'WP_Block_Supports', 'WP_Block_Type_Registry', 'WP_Comment', 'WP_Comment_Query', 'WP_HTML_Tag_Processor', 'WP_Post', 'WP_Query', 'WP_Term', 'WP_Term_Query' ) as $class ) {
 			if ( ! class_exists( $class ) ) {
 				$missing[] = "class {$class}";
 			}
@@ -100,19 +107,32 @@ final class CoreBlockRenderSurface {
 			array(
 				'add_filter',
 				'create_initial_post_types',
+				'create_initial_taxonomies',
+				'get_calendar',
 				'get_block_wrapper_attributes',
+				'get_comments',
 				'get_permalink',
 				'get_pages',
+				'get_taxonomy',
+				'has_filter',
 				'register_block_type_from_metadata',
 				'remove_filter',
 				'render_block',
 				'update_option',
 				'wp_cache_set',
+				'wp_cache_get_last_changed',
+				'wp_cache_set_salted',
+				'wp_dropdown_categories',
 				'wp_enqueue_script_module',
 				'wp_interactivity_data_wp_context',
+				'wp_get_archives',
+				'wp_list_categories',
 				'wp_parse_url',
+				'wp_recursive_ksort',
 				'wp_script_modules',
 				'wp_set_current_user',
+				'wp_style_engine_get_styles',
+				'wp_tag_cloud',
 				'wp_unique_id',
 			) as $function
 		) {
@@ -151,27 +171,35 @@ final class CoreBlockRenderSurface {
 
 	private static function prepare_runtime(): void {
 		\create_initial_post_types();
+		\create_initial_taxonomies();
 
 		if ( isset( $GLOBALS['wpdb'] ) && method_exists( $GLOBALS['wpdb'], 'component_fuzz_reset_options' ) ) {
 			$GLOBALS['wpdb']->component_fuzz_reset_content();
 			$GLOBALS['wpdb']->component_fuzz_reset_options(
 				array(
-					'home'             => 'http://example.test',
-					'siteurl'          => 'http://example.test',
-					'blogname'         => 'Component Fuzz',
-					'blogdescription'  => 'Component fuzz tagline',
-					'date_format'      => 'Y-m-d',
-					'time_format'      => 'H:i',
+					'home'                => 'http://example.test',
+					'siteurl'             => 'http://example.test',
+					'blogname'            => 'Component Fuzz',
+					'blogdescription'     => 'Component fuzz tagline',
+					'blog_charset'        => 'UTF-8',
+					'comments_per_page'   => 50,
+					'date_format'         => 'Y-m-d',
+					'time_format'         => 'H:i',
 					'permalink_structure' => '',
-					'page_for_posts'   => 0,
-					'show_on_front'    => 'posts',
-					'users_can_register' => 0,
+					'page_for_posts'      => 0,
+					'show_on_front'       => 'posts',
+					'start_of_week'       => 1,
+					'users_can_register'  => 0,
 				)
 			);
 		}
 
 		if ( function_exists( 'wp_cache_flush' ) ) {
 			\wp_cache_flush();
+		}
+
+		if ( function_exists( 'block_core_latest_posts_migrate_categories' ) && false === \has_filter( 'render_block_data', 'block_core_latest_posts_migrate_categories' ) ) {
+			\add_filter( 'render_block_data', 'block_core_latest_posts_migrate_categories' );
 		}
 
 		$_GET     = array();
@@ -952,6 +980,609 @@ final class CoreBlockRenderSurface {
 		);
 	}
 
+	private static function check_frontend_list_blocks( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures           = array();
+		$failed_check_names = array();
+		$seen               = array(
+			'archiveArgs'         => array(),
+			'archiveDropdownArgs' => array(),
+			'calendarArgs'        => array(),
+			'commentQueries'      => array(),
+			'postQueries'         => array(),
+			'termQueries'         => array(),
+		);
+
+		self::reset_content();
+		\create_initial_taxonomies();
+
+		$fixture       = self::frontend_list_fixture( $ctx->fork( 'fixture' ) );
+		$counts_before = self::content_counts();
+
+		$posts_filter = static function ( $posts, \WP_Query $query ) use ( &$seen, $fixture ) {
+			unset( $posts );
+			$seen['postQueries'][] = array(
+				'postsPerPage' => $query->get( 'posts_per_page' ),
+				'postStatus'   => $query->get( 'post_status' ),
+				'order'        => $query->get( 'order' ),
+				'orderby'      => $query->get( 'orderby' ),
+				'categoryIn'   => $query->get( 'category__in' ),
+				'author'       => $query->get( 'author' ),
+			);
+			$query->found_posts   = count( $fixture['posts'] );
+			$query->max_num_pages = 1;
+
+			return $fixture['posts'];
+		};
+		$comments_filter = static function ( $comments, \WP_Comment_Query $query ) use ( &$seen, $fixture ) {
+			unset( $comments );
+			$seen['commentQueries'][] = $query->query_vars;
+
+			return $fixture['comments'];
+		};
+		$terms_filter = static function ( $terms, \WP_Term_Query $query ) use ( &$seen, $fixture ) {
+			unset( $terms );
+			$query_vars = $query->query_vars;
+			$taxonomies = (array) ( $query_vars['taxonomy'] ?? array() );
+			$seen['termQueries'][] = array(
+				'taxonomies' => $taxonomies,
+				'number'     => $query_vars['number'] ?? null,
+				'parent'     => $query_vars['parent'] ?? null,
+				'hideEmpty'  => $query_vars['hide_empty'] ?? null,
+			);
+
+			if ( 'id=>parent' === ( $query_vars['fields'] ?? null ) && in_array( 'category', $taxonomies, true ) ) {
+				$parents = array();
+				foreach ( $fixture['categories'] as $term ) {
+					$parents[ (int) $term->term_id ] = (int) $term->parent;
+				}
+
+				return $parents;
+			}
+
+			if ( 'all_with_object_id' === ( $query_vars['fields'] ?? null ) && ! empty( $query_vars['object_ids'] ) ) {
+				$terms_for_objects = array();
+				if ( in_array( 'category', $taxonomies, true ) ) {
+					$terms_for_objects[] = $fixture['categories'][0];
+				}
+				if ( in_array( 'post_tag', $taxonomies, true ) ) {
+					$terms_for_objects[] = $fixture['tags'][0];
+				}
+
+				$object_terms = array();
+				foreach ( (array) $query_vars['object_ids'] as $object_id ) {
+					foreach ( $terms_for_objects as $term ) {
+						$term_for_object            = clone $term;
+						$term_for_object->object_id = (int) $object_id;
+						$object_terms[]             = $term_for_object;
+					}
+				}
+
+				return $object_terms;
+			}
+
+			if ( in_array( 'category', $taxonomies, true ) ) {
+				if ( isset( $query_vars['parent'] ) && '' !== $query_vars['parent'] && 0 === (int) $query_vars['parent'] ) {
+					return array_values(
+						array_filter(
+							$fixture['categories'],
+							static fn( \WP_Term $term ): bool => 0 === (int) $term->parent
+						)
+					);
+				}
+
+				return $fixture['categories'];
+			}
+
+			if ( in_array( 'post_tag', $taxonomies, true ) ) {
+				return $fixture['tags'];
+			}
+
+			return array();
+		};
+		$archive_args_filter = static function ( array $args ) use ( &$seen ): array {
+			$seen['archiveArgs'][] = $args;
+			return $args;
+		};
+		$archive_dropdown_filter = static function ( array $args ) use ( &$seen ): array {
+			$seen['archiveDropdownArgs'][] = $args;
+			return $args;
+		};
+		$calendar_filter = static function ( string $output, array $args ) use ( &$seen ): string {
+			$seen['calendarArgs'][] = $args;
+			return $output . '<!-- component-fuzz-calendar-block -->';
+		};
+
+		\add_filter( 'posts_pre_query', $posts_filter, 10, 2 );
+		\add_filter( 'comments_pre_query', $comments_filter, 10, 2 );
+		\add_filter( 'terms_pre_query', $terms_filter, 10, 2 );
+		\add_filter( 'widget_archives_args', $archive_args_filter );
+		\add_filter( 'widget_archives_dropdown_args', $archive_dropdown_filter );
+		\add_filter( 'get_calendar', $calendar_filter, 10, 2 );
+
+		try {
+			for ( $i = 0; $i < self::CASES; ++$i ) {
+				$case_ctx        = $ctx->fork( 'list-' . $i );
+				$dropdown        = $case_ctx->bool();
+				$show_label      = $case_ctx->bool();
+				$show_counts     = $case_ctx->bool();
+				$enhanced        = $case_ctx->bool();
+				$top_level_only  = $case_ctx->bool();
+				$calendar_month  = $case_ctx->int( 1, 12 );
+				$calendar_year   = 2026 + $case_ctx->int( 0, 2 );
+				$content_mode    = $case_ctx->choice( array( 'excerpt', 'full_post' ) );
+				$comment_content = $case_ctx->choice( array( 'excerpt', 'full', 'none' ) );
+				$font_unit       = $case_ctx->choice( array( 'px', 'em', 'rem', '%' ) );
+				$smallest_font   = $case_ctx->int( 8, 14 ) . $font_unit;
+				$largest_font    = $case_ctx->int( 18, 32 ) . $font_unit;
+
+				self::seed_core_archives_cache(
+					array(
+						(object) array(
+							'year'  => '2026',
+							'month' => '6',
+							'posts' => (string) $fixture['archiveCount'],
+						),
+					)
+				);
+
+				$archives = self::render_simple_block(
+					'core/archives',
+					array(
+						'displayAsDropdown' => $dropdown,
+						'showLabel'         => $show_label,
+						'showPostCounts'    => $show_counts,
+						'type'              => 'monthly',
+					)
+				);
+
+				$GLOBALS['wp_query']->query_vars['category_name'] = $fixture['categories'][0]->slug;
+				$categories = self::render_block_with_context(
+					self::parsed_block(
+						'core/categories',
+						array(
+							'displayAsDropdown' => $dropdown,
+							'label'             => '<strong>' . $fixture['token'] . ' Categories</strong>' . self::hostile_text( $fixture['token'] . '-category-label' ),
+							'showEmpty'         => true,
+							'showHierarchy'     => true,
+							'showLabel'         => $show_label,
+							'showOnlyTopLevel'  => $top_level_only,
+							'showPostCounts'    => $show_counts,
+							'taxonomy'          => 'category',
+						)
+					),
+					array( 'enhancedPagination' => $enhanced )
+				);
+
+				$excerpt_before = self::hook_callbacks( 'excerpt_length' );
+				$latest_posts   = self::render_simple_block(
+					'core/latest-posts',
+					array(
+						'addLinkToFeaturedImage'   => false,
+						'categories'               => (string) $fixture['categories'][0]->term_id,
+						'columns'                  => $case_ctx->int( 2, 4 ),
+						'displayAuthor'            => true,
+						'displayFeaturedImage'     => false,
+						'displayPostContent'       => true,
+						'displayPostContentRadio'  => $content_mode,
+						'displayPostDate'          => true,
+						'excerptLength'            => $case_ctx->int( 5, 12 ),
+						'order'                    => $case_ctx->choice( array( 'asc', 'desc' ) ),
+						'orderBy'                  => $case_ctx->choice( array( 'date', 'title' ) ),
+						'postLayout'               => $case_ctx->choice( array( 'list', 'grid' ) ),
+						'postsToShow'              => 2,
+						'selectedAuthor'           => $fixture['authorId'],
+						'style'                    => array(
+							'elements' => array(
+								'link' => array(
+									'color' => array(
+										'text' => '#135e96',
+									),
+								),
+							),
+						),
+					)
+				);
+				$excerpt_after  = self::hook_callbacks( 'excerpt_length' );
+
+				$latest_comments = self::render_simple_block(
+					'core/latest-comments',
+					array(
+						'commentsToShow' => 2,
+						'displayAvatar'  => false,
+						'displayContent' => $comment_content,
+						'displayDate'    => true,
+					)
+				);
+
+				$tag_cloud = self::render_simple_block(
+					'core/tag-cloud',
+					array(
+						'largestFontSize'  => $largest_font,
+						'numberOfTags'     => 2,
+						'showTagCounts'    => $show_counts,
+						'smallestFontSize' => $smallest_font,
+						'taxonomy'         => 'post_tag',
+					)
+				);
+
+				$previous_monthnum = $GLOBALS['monthnum'] ?? null;
+				$previous_year     = $GLOBALS['year'] ?? null;
+				$GLOBALS['monthnum'] = 11;
+				$GLOBALS['year']     = 2024;
+				\update_option( 'wp_calendar_block_has_published_posts', true );
+				\update_option( 'permalink_structure', '/%year%/%monthnum%/%postname%/' );
+				self::seed_core_calendar_cache(
+					'<table id="wp-calendar" class="wp-calendar-table"><caption>Calendar ' . esc_html( $fixture['token'] ) . '</caption><tbody><tr><td>23</td></tr></tbody></table>',
+					$calendar_month,
+					$calendar_year
+				);
+				$calendar = self::render_simple_block(
+					'core/calendar',
+					array(
+						'backgroundColor' => 'white',
+						'month'           => $calendar_month,
+						'style'           => array(
+							'color'    => array(
+								'text'       => '#123456',
+								'background' => '#f6f7f7',
+							),
+							'elements' => array(
+								'link' => array(
+									'color' => array(
+										'text' => '#135e96',
+									),
+								),
+							),
+						),
+						'textColor'       => 'black',
+						'year'            => $calendar_year,
+					)
+				);
+				$monthnum_restored = ( $GLOBALS['monthnum'] ?? null ) === 11;
+				$year_restored     = ( $GLOBALS['year'] ?? null ) === 2024;
+				$GLOBALS['monthnum'] = $previous_monthnum;
+				$GLOBALS['year']     = $previous_year;
+
+				$checks = array(
+					'archives-wrapper'         => str_contains( $archives, $dropdown ? 'wp-block-archives-dropdown' : 'wp-block-archives-list' ),
+					'archives-month'           => str_contains( $archives, 'June 2026' ),
+					'archives-count'           => ! $show_counts || str_contains( $archives, '&nbsp;(' . $fixture['archiveCount'] . ')' ),
+					'archives-dropdown-script' => ! $dropdown || ( str_contains( $archives, '<select ' ) && str_contains( $archives, 'sourceURL=block_core_archives_build_dropdown_script' ) ),
+					'archives-label-mode'      => ! $dropdown || ( $show_label ? ! str_contains( $archives, 'wp-block-archives__label screen-reader-text' ) : str_contains( $archives, 'wp-block-archives__label screen-reader-text' ) ),
+					'categories-wrapper'       => str_contains( $categories, $dropdown ? 'wp-block-categories-dropdown' : 'wp-block-categories-list' ),
+					'categories-taxonomy'      => str_contains( $categories, 'wp-block-categories-taxonomy-category' ),
+					'categories-label-sanitized' => ! $dropdown || ! $show_label || ( str_contains( $categories, '<strong>' . $fixture['token'] . ' Categories</strong>' ) && ! str_contains( $categories, $fixture['token'] . '-category-label' ) ),
+					'categories-parent-filter'  => ! $top_level_only || ! str_contains( $categories, $fixture['categories'][1]->name ),
+					'categories-child-visible'  => $top_level_only || $dropdown || str_contains( $categories, $fixture['categories'][1]->name ),
+					'categories-enhanced'       => $dropdown || ! $enhanced || str_contains( $categories, 'data-wp-on--click="core/query::actions.navigate"' ),
+					'latest-posts-wrapper'      => str_contains( $latest_posts, 'wp-block-latest-posts__list' ),
+					'latest-posts-title'        => str_contains( $latest_posts, $fixture['posts'][0]->post_title ) && str_contains( $latest_posts, $fixture['posts'][1]->post_title ),
+					'latest-posts-author'       => str_contains( $latest_posts, $fixture['authorName'] ),
+					'latest-posts-date'         => str_contains( $latest_posts, 'wp-block-latest-posts__post-date' ),
+					'latest-posts-content-mode' => 'full_post' === $content_mode ? str_contains( $latest_posts, 'wp-block-latest-posts__post-full-content' ) : str_contains( $latest_posts, 'wp-block-latest-posts__post-excerpt' ),
+					'latest-posts-migration'    => isset( $seen['postQueries'][ $i ]['categoryIn'][0] ) && (int) $fixture['categories'][0]->term_id === (int) $seen['postQueries'][ $i ]['categoryIn'][0],
+					'latest-posts-filter-restored' => $excerpt_before === $excerpt_after,
+					'latest-comments-wrapper'    => str_contains( $latest_comments, 'wp-block-latest-comments' ),
+					'latest-comments-author'     => str_contains( $latest_comments, $fixture['comments'][0]->comment_author ),
+					'latest-comments-post-title' => str_contains( $latest_comments, $fixture['posts'][0]->post_title ),
+					'latest-comments-content-mode' => 'none' === $comment_content ? ! str_contains( $latest_comments, 'wp-block-latest-comments__comment-excerpt' ) : str_contains( $latest_comments, 'wp-block-latest-comments__comment-excerpt' ),
+					'tag-cloud-wrapper'          => str_contains( $tag_cloud, '<p ' ) && str_contains( $tag_cloud, 'wp-block-tag-cloud' ),
+					'tag-cloud-terms'            => str_contains( $tag_cloud, $fixture['tags'][0]->name ) && str_contains( $tag_cloud, $fixture['tags'][1]->name ),
+					'tag-cloud-unit'             => str_contains( $tag_cloud, $font_unit ),
+					'calendar-wrapper'           => str_contains( $calendar, 'wp-block-calendar' ),
+					'calendar-cache'             => str_contains( $calendar, 'Calendar ' . $fixture['token'] ) && str_contains( $calendar, 'component-fuzz-calendar-block' ),
+					'calendar-style'             => str_contains( $calendar, 'wp-calendar-table' ) && str_contains( $calendar, 'has-link-color' ) && str_contains( $calendar, 'has-text-color' ) && str_contains( $calendar, 'has-background' ),
+					'calendar-globals-restored' => $monthnum_restored && $year_restored,
+					'sane-lists'                 => self::sane_html_fragment( $latest_posts . $latest_comments . $tag_cloud . $calendar, array( 'a', 'article', 'div', 'footer', 'li', 'ol', 'p', 'table', 'time', 'ul' ) ),
+				);
+
+				foreach ( $checks as $check_name => $ok ) {
+					if ( ! $ok ) {
+						$failed_check_names[ $check_name ] = true;
+					}
+				}
+
+				self::collect_failure(
+					$failures,
+					! in_array( false, $checks, true ),
+					"frontend list-style core block callbacks render deterministic fixtures and restore state case {$i}",
+					array(
+						'failedChecks' => array_keys( array_filter( $checks, static fn( bool $ok ): bool => ! $ok ) ),
+						'case'         => array(
+							'dropdown'       => $dropdown,
+							'showLabel'      => $show_label,
+							'showCounts'     => $show_counts,
+							'enhanced'       => $enhanced,
+							'topLevelOnly'   => $top_level_only,
+							'contentMode'    => $content_mode,
+							'commentContent' => $comment_content,
+							'fontUnit'       => $font_unit,
+							'calendarMonth'  => $calendar_month,
+							'calendarYear'   => $calendar_year,
+						),
+						'previews'     => array(
+							'archives'       => self::preview( $archives ),
+							'categories'     => self::preview( $categories ),
+							'latestPosts'    => self::preview( $latest_posts ),
+							'latestComments' => self::preview( $latest_comments ),
+							'tagCloud'       => self::preview( $tag_cloud ),
+							'calendar'       => self::preview( $calendar ),
+						),
+					)
+				);
+			}
+		} finally {
+			\remove_filter( 'get_calendar', $calendar_filter, 10 );
+			\remove_filter( 'widget_archives_dropdown_args', $archive_dropdown_filter );
+			\remove_filter( 'widget_archives_args', $archive_args_filter );
+			\remove_filter( 'terms_pre_query', $terms_filter, 10 );
+			\remove_filter( 'comments_pre_query', $comments_filter, 10 );
+			\remove_filter( 'posts_pre_query', $posts_filter, 10 );
+			\wp_set_current_user( 0 );
+		}
+
+		\update_option( 'wp_calendar_block_has_published_posts', false );
+		\wp_set_current_user( 0 );
+		$hidden_calendar = self::render_simple_block( 'core/calendar', array() );
+		\wp_set_current_user( $fixture['authorId'] );
+		$editor_calendar = self::render_simple_block( 'core/calendar', array() );
+		\wp_set_current_user( 0 );
+
+		self::collect_failure(
+			$failures,
+			'' === $hidden_calendar
+				&& str_contains( $editor_calendar, 'The calendar block is hidden because there are no published posts.' ),
+			'calendar block hides for logged-out empty sites and explains hidden state to logged-in users',
+			array(
+				'hidden' => self::preview( $hidden_calendar ),
+				'editor' => self::preview( $editor_calendar ),
+			)
+		);
+
+		$counts_after = self::content_counts();
+		self::collect_failure(
+			$failures,
+			$counts_before === $counts_after
+				&& false === \has_filter( 'posts_pre_query', $posts_filter )
+				&& false === \has_filter( 'comments_pre_query', $comments_filter )
+				&& false === \has_filter( 'terms_pre_query', $terms_filter )
+				&& false === \has_filter( 'widget_archives_args', $archive_args_filter )
+				&& false === \has_filter( 'widget_archives_dropdown_args', $archive_dropdown_filter )
+				&& false === \has_filter( 'get_calendar', $calendar_filter ),
+			'frontend list block filters and content fixture counts are restored',
+			array(
+				'countsBefore' => $counts_before,
+				'countsAfter'  => $counts_after,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'core-block-render.frontend-list-callbacks',
+			array() === $failures,
+			array(
+				'cases'        => self::CASES,
+				'blocks'       => array( 'core/archives', 'core/categories', 'core/latest-posts', 'core/latest-comments', 'core/tag-cloud', 'core/calendar' ),
+				'failedChecks' => array_keys( $failed_check_names ),
+				'seen'         => array(
+					'archiveArgs'         => count( $seen['archiveArgs'] ),
+					'archiveDropdownArgs' => count( $seen['archiveDropdownArgs'] ),
+					'calendarArgs'        => count( $seen['calendarArgs'] ),
+					'commentQueries'      => count( $seen['commentQueries'] ),
+					'postQueries'         => count( $seen['postQueries'] ),
+					'termQueries'         => count( $seen['termQueries'] ),
+				),
+				'failures'     => array_slice( $failures, 0, self::MAX_FAILURES ),
+			)
+		);
+	}
+
+	private static function frontend_list_fixture( \ComponentFuzz\FuzzContext $ctx ): array {
+		$token     = self::token( $ctx, 'list' );
+		$base_id   = 930000 + ( $ctx->seed() & 0xffff );
+		$author_id = self::install_user_fixture( $ctx->fork( 'author' ) );
+
+		$posts = array(
+			self::install_frontend_post_fixture(
+				$base_id + 1,
+				$author_id,
+				'List Alpha ' . $token,
+				'Excerpt alpha ' . $token . ' with deterministic words for latest posts.',
+				'Full post alpha ' . $token . ' with deterministic body copy for latest posts.',
+				'2026-06-23 12:00:00',
+				'list-alpha-' . $token
+			),
+			self::install_frontend_post_fixture(
+				$base_id + 2,
+				$author_id,
+				'List Beta ' . $token,
+				'Excerpt beta ' . $token . ' with deterministic words for latest posts.',
+				'Full post beta ' . $token . ' with deterministic body copy for latest posts.',
+				'2026-06-22 11:00:00',
+				'list-beta-' . $token
+			),
+		);
+
+		$category_parent = self::make_frontend_term_fixture( $base_id + 101, 'News ' . $token, 'news-' . $token, 'category', 2 );
+		$category_child  = self::make_frontend_term_fixture( $base_id + 102, 'Dispatches ' . $token, 'dispatches-' . $token, 'category', 1, (int) $category_parent->term_id );
+		\update_option( 'category_children', array( (int) $category_parent->term_id => array( (int) $category_child->term_id ) ) );
+
+		$tags            = array(
+			self::make_frontend_term_fixture( $base_id + 201, 'Alpha ' . $token, 'alpha-' . $token, 'post_tag', 5 ),
+			self::make_frontend_term_fixture( $base_id + 202, 'Beta ' . $token, 'beta-' . $token, 'post_tag', 2 ),
+		);
+
+		return array(
+			'token'        => $token,
+			'authorId'     => $author_id,
+			'authorName'   => 'Component Fuzz User',
+			'archiveCount' => count( $posts ),
+			'posts'        => $posts,
+			'categories'   => array( $category_parent, $category_child ),
+			'tags'         => $tags,
+			'comments'     => array(
+				self::make_frontend_comment_fixture( $base_id + 301, (int) $posts[0]->ID, 'Ada ' . $token, 'First latest comment ' . $token . ' with deterministic text.', $author_id ),
+				self::make_frontend_comment_fixture( $base_id + 302, (int) $posts[1]->ID, 'Grace ' . $token, 'Second latest comment ' . $token . ' with deterministic text.', $author_id ),
+			),
+		);
+	}
+
+	private static function install_frontend_post_fixture( int $id, int $author_id, string $title, string $excerpt, string $content, string $date, string $slug ): \WP_Post {
+		$row = array(
+			'ID'                    => $id,
+			'post_author'           => $author_id,
+			'post_date'             => $date,
+			'post_date_gmt'         => $date,
+			'post_content'          => $content,
+			'post_title'            => $title,
+			'post_excerpt'          => $excerpt,
+			'post_status'           => 'publish',
+			'comment_status'        => 'open',
+			'ping_status'           => 'closed',
+			'post_password'         => '',
+			'post_name'             => $slug,
+			'to_ping'               => '',
+			'pinged'                => '',
+			'post_modified'         => $date,
+			'post_modified_gmt'     => $date,
+			'post_content_filtered' => '',
+			'post_parent'           => 0,
+			'guid'                  => self::expected_permalink( $id ),
+			'menu_order'            => 0,
+			'post_type'             => 'post',
+			'post_mime_type'        => '',
+			'comment_count'         => 1,
+			'filter'                => 'raw',
+		);
+
+		if ( isset( $GLOBALS['wpdb'] ) && method_exists( $GLOBALS['wpdb'], 'insert' ) ) {
+			$GLOBALS['wpdb']->insert( $GLOBALS['wpdb']->posts, $row );
+		}
+
+		$post = new \WP_Post( (object) $row );
+		\wp_cache_set( $post->ID, $post, 'posts' );
+
+		return $post;
+	}
+
+	private static function make_frontend_term_fixture( int $id, string $name, string $slug, string $taxonomy, int $count, int $parent = 0 ): \WP_Term {
+		$row = array(
+			'term_id'          => $id,
+			'name'             => $name,
+			'slug'             => $slug,
+			'term_group'       => 0,
+			'term_taxonomy_id' => $id,
+			'taxonomy'         => $taxonomy,
+			'description'      => '',
+			'parent'           => $parent,
+			'count'            => $count,
+			'filter'           => 'raw',
+		);
+
+		if ( isset( $GLOBALS['wpdb'] ) && method_exists( $GLOBALS['wpdb'], 'insert' ) ) {
+			$GLOBALS['wpdb']->insert(
+				$GLOBALS['wpdb']->terms,
+				array(
+					'term_id'    => $id,
+					'name'       => $name,
+					'slug'       => $slug,
+					'term_group' => 0,
+				)
+			);
+			$GLOBALS['wpdb']->insert(
+				$GLOBALS['wpdb']->term_taxonomy,
+				array(
+					'term_taxonomy_id' => $id,
+					'term_id'          => $id,
+					'taxonomy'         => $taxonomy,
+					'description'      => '',
+					'parent'           => $parent,
+					'count'            => $count,
+				)
+			);
+		}
+
+		$term = new \WP_Term( (object) $row );
+		\wp_cache_set( $id, $term, 'terms' );
+
+		return $term;
+	}
+
+	private static function make_frontend_comment_fixture( int $id, int $post_id, string $author, string $content, int $user_id ): \WP_Comment {
+		$row = array(
+			'comment_ID'           => $id,
+			'comment_post_ID'      => $post_id,
+			'comment_author'       => $author,
+			'comment_author_email' => strtolower( str_replace( ' ', '.', $author ) ) . '@example.test',
+			'comment_author_url'   => '',
+			'comment_author_IP'    => '127.0.0.1',
+			'comment_date'         => '2026-06-23 12:00:00',
+			'comment_date_gmt'     => '2026-06-23 10:00:00',
+			'comment_content'      => $content,
+			'comment_karma'        => '0',
+			'comment_approved'     => '1',
+			'comment_agent'        => 'ComponentFuzz',
+			'comment_type'         => 'comment',
+			'comment_parent'       => '0',
+			'user_id'              => (string) $user_id,
+		);
+
+		if ( isset( $GLOBALS['wpdb'] ) && method_exists( $GLOBALS['wpdb'], 'insert' ) ) {
+			$GLOBALS['wpdb']->insert( $GLOBALS['wpdb']->comments, $row );
+		}
+
+		$comment = new \WP_Comment( (object) $row );
+		\wp_cache_set( $id, $comment, 'comment' );
+
+		return $comment;
+	}
+
+	private static function seed_core_archives_cache( array $results ): void {
+		global $wpdb;
+
+		$parsed_args = array(
+			'type'            => 'monthly',
+			'limit'           => '',
+			'format'          => 'html',
+			'before'          => '',
+			'after'           => '',
+			'show_post_count' => '1',
+			'echo'            => 1,
+			'order'           => 'DESC',
+			'post_type'       => 'post',
+			'year'            => '',
+			'monthnum'        => '',
+			'day'             => '',
+			'w'               => '',
+		);
+		$where       = $wpdb->prepare( "WHERE post_type = %s AND post_status = 'publish'", $parsed_args['post_type'] );
+		$query       = "SELECT YEAR(post_date) AS `year`, MONTH(post_date) AS `month`, count(ID) as posts FROM $wpdb->posts  $where GROUP BY YEAR(post_date), MONTH(post_date) ORDER BY post_date DESC ";
+		$key         = 'wp_get_archives:' . md5( $query );
+
+		\wp_cache_set_salted( $key, $results, 'post-queries', \wp_cache_get_last_changed( 'posts' ) );
+	}
+
+	private static function seed_core_calendar_cache( string $html, int $monthnum, int $year ): void {
+		$args = array(
+			'initial'   => true,
+			'display'   => true,
+			'post_type' => 'post',
+		);
+		$cache_args = $args;
+		unset( $cache_args['display'] );
+
+		$cache_args['globals'] = array(
+			'm'        => $GLOBALS['m'] ?? null,
+			'monthnum' => $monthnum,
+			'year'     => $year,
+			'week'     => isset( $_GET['w'] ) ? (int) $_GET['w'] : 0,
+		);
+
+		\wp_recursive_ksort( $cache_args );
+		$key = md5( serialize( $cache_args ) );
+		\wp_cache_set( 'get_calendar', array( $key => $html ), 'calendar' );
+	}
+
 	private static function navigation_case( \ComponentFuzz\FuzzContext $ctx, int $index, array $page_fixture ): array {
 		$token           = self::token( $ctx, 'nav' );
 		$overlay_menu    = $ctx->choice( array( 'never', 'mobile', 'always' ) );
@@ -1540,6 +2171,8 @@ final class CoreBlockRenderSurface {
 					'authordata',
 					'current_user',
 					'id',
+					'm',
+					'monthnum',
 					'page',
 					'paged',
 					'pages',
@@ -1554,13 +2187,16 @@ final class CoreBlockRenderSurface {
 					'wp_filters',
 					'wp_interactivity',
 					'wp_object_cache',
+					'wp_post_types',
 					'wp_query',
 					'wp_rewrite',
 					'wp_script_modules',
 					'wp_scripts',
 					'wp_styles',
+					'wp_taxonomies',
 					'wp_the_query',
 					'wpdb',
+					'year',
 				)
 			),
 			'blockRegistry' => $block_registry,
