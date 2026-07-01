@@ -31,6 +31,7 @@ final class AdminListTablesSurface {
 
 			$rows[] = self::check_posts_media_tables( $ctx->fork( 'posts-media' ) );
 			$rows[] = self::check_comments_terms_users_tables( $ctx->fork( 'comments-terms-users' ) );
+			$rows[] = self::check_links_and_post_comments_tables( $ctx->fork( 'links-post-comments' ) );
 			$rows[] = self::check_plugin_theme_tables( $ctx->fork( 'plugins-themes' ) );
 			$rows[] = self::check_plugin_install_table( $ctx->fork( 'plugin-install' ) );
 			$rows[] = self::check_theme_install_table( $ctx->fork( 'theme-install' ) );
@@ -913,6 +914,389 @@ final class AdminListTablesSurface {
 			array(
 				'failures' => array_slice( $failures, 0, 8 ),
 				'screens'  => array( $screen_comments->id, $screen_terms->id, $screen_users->id ),
+			)
+		);
+	}
+
+	private static function check_links_and_post_comments_tables( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures        = array();
+		$filters         = array();
+		$current_user    = self::synthetic_user( $ctx->fork( 'current-user' ), 53500, 'links-comments' );
+		$link_term       = self::synthetic_term( $ctx->fork( 'link-term' ), 65600, 'link_category' );
+		$link            = self::synthetic_bookmark( $ctx->fork( 'bookmark' ), 65800, (int) $link_term->term_id );
+		$post            = self::synthetic_post( $ctx->fork( 'comment-post' ), 63600, 'post', 'publish', (int) $current_user->ID );
+		$comment         = self::synthetic_comment( $ctx->fork( 'post-comment' ), 64600, (int) $post->ID, (int) $current_user->ID );
+		$screen_links    = self::screen( 'link-manager' );
+		$screen_comments = self::screen( 'post-comments' );
+		$link_query_events = array();
+		$comment_query_events = array();
+		$term_query_events = array();
+		$result           = array();
+		$filters_removed  = false;
+
+		self::cache_post( $post );
+		self::cache_comment( $comment );
+		self::cache_term( $link_term );
+		\wp_cache_add( (int) $link->link_id, $link, 'bookmark' );
+
+		$link_search = 'Bookmark Search ' . self::hostile_label( $ctx->fork( 'link-search' ) );
+		$link_request = array(
+			'cat_id'  => (string) $link_term->term_id,
+			'orderby' => 'url',
+			'order'   => 'DESC',
+			's'       => $link_search,
+		);
+		$link_cache_args = \wp_parse_args(
+			array(
+				'category'       => (int) $link_term->term_id,
+				'hide_empty'     => 0,
+				'hide_invisible' => 0,
+				'orderby'        => 'url',
+				'order'          => 'DESC',
+				'search'         => \sanitize_text_field( $link_search ),
+			),
+			array(
+				'orderby'        => 'name',
+				'order'          => 'ASC',
+				'limit'          => -1,
+				'category'       => '',
+				'category_name'  => '',
+				'hide_invisible' => 1,
+				'show_updated'   => 0,
+				'include'        => '',
+				'exclude'        => '',
+				'search'         => '',
+			)
+		);
+		$link_cache_key = md5( serialize( $link_cache_args ) );
+
+		$cap_filter = self::cap_filter(
+			array(
+				'edit_comment',
+				'edit_post',
+				'edit_posts',
+				'edit_published_posts',
+				'manage_links',
+				'moderate_comments',
+				'read',
+				'read_post',
+			)
+		);
+		$link_manager_enabled_filter = static function (): int {
+			return 1;
+		};
+		$get_bookmarks_filter = static function ( array $bookmarks, array $args ) use ( $link, &$link_query_events ): array {
+			$link_query_events[] = $args;
+			return array( $link );
+		};
+		$terms_pre_query_filter = static function ( $terms, \WP_Term_Query $query ) use ( $link, $link_term, &$term_query_events ) {
+			$query_vars = $query->query_vars;
+			if (
+				array( (int) $link->link_id ) === array_values( (array) ( $query_vars['object_ids'] ?? array() ) )
+				&& array( 'link_category' ) === array_values( (array) ( $query_vars['taxonomy'] ?? array() ) )
+			) {
+				$term_query_events[] = $query_vars;
+				return 'ids' === ( $query_vars['fields'] ?? '' ) ? array( (int) $link_term->term_id ) : array( $link_term );
+			}
+
+			return $terms;
+		};
+		$wp_count_comments_filter = static function () {
+			return (object) array(
+				'all'       => 1,
+				'approved'  => 1,
+				'moderated' => 0,
+				'mine'      => 1,
+				'spam'      => 0,
+				'trash'     => 0,
+			);
+		};
+		$comments_pre_query_filter = static function ( $comment_data, \WP_Comment_Query $query ) use ( $comment, &$comment_query_events ) {
+			$comment_query_events[] = $query->query_vars;
+
+			if ( $query->query_vars['count'] ) {
+				$query->found_comments = 1;
+				$query->max_num_pages  = 1;
+				return 1;
+			}
+
+			$query->found_comments = 1;
+			$query->max_num_pages  = 1;
+			return array( $comment );
+		};
+		$comment_text_filter = static function ( string $text ): string {
+			return \esc_html( $text );
+		};
+
+		self::add_filter_record( $filters, 'user_has_cap', $cap_filter, 10, 4 );
+		self::add_filter_record( $filters, 'pre_option_link_manager_enabled', $link_manager_enabled_filter, 10, 3 );
+		self::add_filter_record( $filters, 'get_bookmarks', $get_bookmarks_filter, 10, 2 );
+		self::add_filter_record( $filters, 'terms_pre_query', $terms_pre_query_filter, 10, 2 );
+		self::add_filter_record( $filters, 'wp_count_comments', $wp_count_comments_filter, 10, 2 );
+		self::add_filter_record( $filters, 'comments_pre_query', $comments_pre_query_filter, 10, 2 );
+		self::add_filter_record( $filters, 'comment_text', $comment_text_filter, 10, 1 );
+
+		try {
+			\wp_cache_set( 'get_bookmarks', array( $link_cache_key => array( $link ) ), 'bookmark' );
+
+			$GLOBALS['current_user'] = $current_user;
+			$GLOBALS['pagenow']      = 'link-manager.php';
+			$GLOBALS['cat_id']       = 0;
+			$GLOBALS['s']            = '';
+			$GLOBALS['orderby']      = '';
+			$GLOBALS['order']        = '';
+			$_GET                    = $link_request;
+			$_POST                   = array();
+			$_REQUEST                = $_GET;
+			$_SERVER['HTTP_HOST']    = 'example.test';
+			$_SERVER['PHP_SELF']     = '/wp-admin/link-manager.php';
+			$_SERVER['REQUEST_URI']  = '/wp-admin/link-manager.php?' . http_build_query( $_GET, '', '&', PHP_QUERY_RFC3986 );
+
+			$links_table = self::list_table( 'WP_Links_List_Table', $screen_links );
+			$links_table->prepare_items();
+			$links_column_info = $links_table->get_column_info();
+			$links_bulk        = self::invoke( $links_table, 'get_bulk_actions' );
+			$links_ajax_allowed = $links_table->ajax_user_can();
+			$links_ajax_denied = self::without_filter(
+				'user_has_cap',
+				$cap_filter,
+				static function () use ( $screen_links ) {
+					$table = self::list_table( 'WP_Links_List_Table', $screen_links );
+					return $table->ajax_user_can();
+				}
+			);
+			$links_row         = self::capture(
+				static function () use ( $links_table ): void {
+					$links_table->display_rows();
+				}
+			);
+			$links_custom_cell = self::capture(
+				static function () use ( $link, $links_table ): void {
+					$links_table->column_default( $link, 'cfz_link_custom' );
+				}
+			);
+
+			$GLOBALS['pagenow']     = 'edit.php';
+			$GLOBALS['post_id']     = 0;
+			$GLOBALS['mode']        = 'list';
+			$_GET                   = array(
+				'p'              => (string) $post->ID,
+				'comment_status' => 'all',
+				'orderby'        => 'comment_author',
+				'order'          => 'asc',
+			);
+			$_POST                  = array();
+			$_REQUEST               = $_GET;
+			$_SERVER['PHP_SELF']    = '/wp-admin/edit.php';
+			$_SERVER['REQUEST_URI'] = '/wp-admin/edit.php?p=' . (int) $post->ID . '&comment_status=all&orderby=comment_author&order=asc';
+
+			$post_comments_table = self::list_table( 'WP_Post_Comments_List_Table', $screen_comments );
+			$post_comments_table->prepare_items();
+			$post_comments_column_info = $post_comments_table->get_column_info();
+			$post_comments_bulk        = self::invoke( $post_comments_table, 'get_bulk_actions' );
+			$post_comments_views       = self::invoke( $post_comments_table, 'get_views' );
+			$post_comments_classes     = self::invoke( $post_comments_table, 'get_table_classes' );
+			$post_comments_display     = self::capture(
+				static function () use ( $post_comments_table ): void {
+					$post_comments_table->display();
+				}
+			);
+			$post_comments_empty_display = self::capture(
+				static function () use ( $post_comments_table ): void {
+					$post_comments_table->display( true );
+				}
+			);
+			$post_comments_ajax_allowed = $post_comments_table->ajax_user_can();
+			$post_comments_ajax_denied = self::without_filter(
+				'user_has_cap',
+				$cap_filter,
+				static function () use ( $screen_comments ) {
+					$table = self::list_table( 'WP_Post_Comments_List_Table', $screen_comments );
+					return $table->ajax_user_can();
+				}
+			);
+
+			$result = compact(
+				'comment',
+				'comment_query_events',
+				'current_user',
+				'link',
+				'link_cache_args',
+				'link_query_events',
+				'link_term',
+				'links_ajax_denied',
+				'links_ajax_allowed',
+				'links_bulk',
+				'links_column_info',
+				'links_custom_cell',
+				'links_row',
+				'links_table',
+				'post',
+				'post_comments_ajax_denied',
+				'post_comments_ajax_allowed',
+				'post_comments_bulk',
+				'post_comments_classes',
+				'post_comments_column_info',
+				'post_comments_display',
+				'post_comments_empty_display',
+				'post_comments_table',
+				'post_comments_views',
+				'term_query_events'
+			);
+		} finally {
+			self::remove_filter_records( $filters );
+			$filters_removed = self::filters_removed( $filters );
+			\wp_cache_delete( 'get_bookmarks', 'bookmark' );
+			\wp_cache_delete( (int) $link->link_id, 'bookmark' );
+		}
+
+		$links_column_info = $result['links_column_info'] ?? array();
+		$links_columns     = $links_column_info[0] ?? array();
+		$links_sortable    = $links_column_info[2] ?? array();
+		$links_primary     = $links_column_info[3] ?? null;
+		$links_row         = (string) ( $result['links_row'] ?? '' );
+		$links_custom_cell = (string) ( $result['links_custom_cell'] ?? '' );
+		$post_comments_column_info = $result['post_comments_column_info'] ?? array();
+		$post_comments_columns     = $post_comments_column_info[0] ?? array();
+		$post_comments_display     = (string) ( $result['post_comments_display'] ?? '' );
+		$post_comments_empty_display = (string) ( $result['post_comments_empty_display'] ?? '' );
+		$post_comments_views_html = implode( '', $result['post_comments_views'] ?? array() );
+
+		self::collect_failure(
+			$failures,
+			1 === count( $result['links_table']->items ?? array() )
+				&& $link_cache_args === ( $result['link_query_events'][0] ?? array() )
+				&& (int) $link->link_id === (int) ( $result['links_table']->items[0]->link_id ?? 0 )
+				&& array( 'ids' ) === array_values( array_unique( array_column( $result['term_query_events'] ?? array(), 'fields' ) ) ),
+			'links prepare_items uses generated bookmark cache, sanitized request args, and link-category term fixtures',
+			array(
+				'expectedArgs' => $link_cache_args,
+				'queryEvents'  => $result['link_query_events'] ?? array(),
+				'termEvents'   => $result['term_query_events'] ?? array(),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::stable_column_ids( $links_columns )
+				&& isset( $links_columns['cb'], $links_columns['name'], $links_columns['url'], $links_columns['categories'], $links_columns['rel'], $links_columns['visible'], $links_columns['rating'] )
+				&& isset( $links_sortable['name'], $links_sortable['url'], $links_sortable['visible'], $links_sortable['rating'] )
+				&& 'name' === $links_primary
+				&& isset( $result['links_bulk']['delete'] )
+				&& false === ( $result['links_ajax_denied'] ?? null )
+				&& true === ( $result['links_ajax_allowed'] ?? null ),
+			'links columns, sortables, primary column, bulk action, and capability gate are stable',
+			array(
+				'ajaxAllowed' => $result['links_ajax_allowed'] ?? null,
+				'ajaxDenied'  => $result['links_ajax_denied'] ?? null,
+				'bulk'        => $result['links_bulk'] ?? array(),
+				'columnInfo'  => $links_column_info,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			str_contains( $links_row, 'id="link-' . (int) $link->link_id . '"' )
+				&& str_contains( $links_row, 'name="linkcheck[]"' )
+				&& str_contains( $links_row, 'row-title' )
+				&& str_contains( $links_row, 'link.php?action=edit&amp;link_id=' . (int) $link->link_id )
+				&& str_contains( $links_row, 'link.php?action=delete' )
+				&& str_contains( $links_row, '_wpnonce=' )
+				&& str_contains( $links_row, (string) $link_term->name )
+				&& ! str_contains( $links_row, 'link-manager.php?cat_id=' . (int) $link_term->term_id )
+				&& str_contains( $links_row, \esc_attr( $link->link_name ) )
+				&& str_contains( $links_row, (string) $link->link_url )
+				&& '' === $links_custom_cell
+				&& self::html_has_no_raw_script( $links_row . $links_custom_cell ),
+			'links row output renders exact IDs, edit/delete URLs, current category text, custom-column hook path, and no raw script leakage for safe URLs',
+			array(
+				'customCell'       => self::describe_string( $links_custom_cell ),
+				'row'              => self::describe_string( $links_row ),
+				'rowScriptContext' => self::raw_script_context( $links_row ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			count( $result['comment_query_events'] ?? array() ) >= 2
+				&& 1 === count( $result['post_comments_table']->items ?? array() )
+				&& 1 === ( $result['post_comments_table']->get_pagination_arg( 'total_items' ) ?? null )
+				&& 1 === ( $result['post_comments_table']->get_pagination_arg( 'total_pages' ) ?? null )
+				&& 10 === ( $result['post_comments_table']->get_pagination_arg( 'per_page' ) ?? null )
+				&& 10 === $result['post_comments_table']->get_per_page( 'all' )
+				&& (int) $post->ID === (int) ( $result['comment_query_events'][0]['post_id'] ?? 0 )
+				&& 18 === (int) ( $result['comment_query_events'][0]['number'] ?? 0 ),
+			'post-comments prepare_items is post-scoped, has fixed per-page behavior, and uses comment query fixtures',
+			array(
+				'pagination' => array(
+					'perPage'    => $result['post_comments_table']->get_pagination_arg( 'per_page' ) ?? null,
+					'totalItems' => $result['post_comments_table']->get_pagination_arg( 'total_items' ) ?? null,
+					'totalPages' => $result['post_comments_table']->get_pagination_arg( 'total_pages' ) ?? null,
+				),
+				'queryEvents' => $result['comment_query_events'] ?? array(),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::stable_column_ids( $post_comments_columns )
+				&& array( 'author', 'comment' ) === array_keys( $post_comments_columns )
+				&& array() === ( $post_comments_column_info[1] ?? array() )
+				&& array() === ( $post_comments_column_info[2] ?? array() )
+				&& 'comment' === ( $post_comments_column_info[3] ?? null )
+				&& isset( $result['post_comments_bulk']['approve'], $result['post_comments_bulk']['trash'] )
+				&& in_array( 'wp-list-table', $result['post_comments_classes'] ?? array(), true )
+				&& in_array( 'comments-box', $result['post_comments_classes'] ?? array(), true )
+				&& false === ( $result['post_comments_ajax_denied'] ?? null )
+				&& true === ( $result['post_comments_ajax_allowed'] ?? null ),
+			'post-comments subclass columns, classes, bulk actions, and capability gate preserve the compact post metabox contract',
+			array(
+				'ajaxAllowed' => $result['post_comments_ajax_allowed'] ?? null,
+				'ajaxDenied'  => $result['post_comments_ajax_denied'] ?? null,
+				'bulk'        => $result['post_comments_bulk'] ?? array(),
+				'classes'     => $result['post_comments_classes'] ?? array(),
+				'columnInfo'  => $post_comments_column_info,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			str_contains( $post_comments_display, '<table class="' )
+				&& str_contains( $post_comments_display, 'style="display:none;"' )
+				&& str_contains( $post_comments_display, 'id="the-comment-list"' )
+				&& str_contains( $post_comments_display, "data-wp-lists='list:comment'" )
+				&& str_contains( $post_comments_display, "id='comment-" . (int) $comment->comment_ID . "'" )
+				&& str_contains( $post_comments_display, 'data-comment-id="' . (int) $comment->comment_ID . '"' )
+				&& str_contains( $post_comments_display, 'data-post-id="' . (int) $post->ID . '"' )
+				&& str_contains( $post_comments_display, 'comment.php?action=editcomment' )
+				&& ! str_contains( $post_comments_display, 'the-extra-comment-list' )
+				&& ! str_contains( $post_comments_display, 'delete_comments[]' )
+				&& ! str_contains( $post_comments_empty_display, "id='comment-" . (int) $comment->comment_ID . "'" )
+				&& isset( $result['post_comments_views']['all'], $result['post_comments_views']['mine'] )
+				&& self::html_has_no_raw_script( $post_comments_display . $post_comments_empty_display . $post_comments_views_html ),
+			'post-comments display renders the compact hidden comments-box shell, row actions, no extra-list tbody, and escaped views',
+			array(
+				'display'          => self::describe_string( $post_comments_display ),
+				'emptyDisplay'     => self::describe_string( $post_comments_empty_display ),
+				'displayScriptContext' => self::raw_script_context( $post_comments_display ),
+				'views'            => $result['post_comments_views'] ?? array(),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$filters_removed,
+			'links/post-comments bookmark, term, comment query, count, text, and capability filters are removed',
+			array( 'filtersRemoved' => $filters_removed )
+		);
+
+		return self::row(
+			$ctx,
+			'admin-list-tables.links-post-comments.subclass-contracts',
+			array() === $failures,
+			array(
+				'failures' => array_slice( $failures, 0, 8 ),
+				'screens'  => array( $screen_links->id, $screen_comments->id ),
 			)
 		);
 	}
@@ -3491,6 +3875,8 @@ final class AdminListTablesSurface {
 					'WP_Posts_List_Table',
 					'WP_Media_List_Table',
 					'WP_Comments_List_Table',
+					'WP_Post_Comments_List_Table',
+					'WP_Links_List_Table',
 					'WP_Terms_List_Table',
 					'WP_Users_List_Table',
 					'WP_Plugins_List_Table',
@@ -3590,6 +3976,9 @@ final class AdminListTablesSurface {
 	private static function bootstrap_core_types(): void {
 		if ( defined( 'ABSPATH' ) && file_exists( ABSPATH . 'wp-admin/includes/comment.php' ) ) {
 			require_once ABSPATH . 'wp-admin/includes/comment.php';
+		}
+		if ( defined( 'ABSPATH' ) && file_exists( ABSPATH . 'wp-admin/includes/bookmark.php' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/bookmark.php';
 		}
 		if ( defined( 'ABSPATH' ) && file_exists( ABSPATH . 'wp-admin/includes/ms.php' ) ) {
 			require_once ABSPATH . 'wp-admin/includes/ms.php';
@@ -3758,6 +4147,27 @@ final class AdminListTablesSurface {
 		);
 
 		return $term;
+	}
+
+	private static function synthetic_bookmark( \ComponentFuzz\FuzzContext $ctx, int $base_id, int $category_id ): \stdClass {
+		$id = $base_id + $ctx->int( 1, 999 );
+
+		return (object) array(
+			'link_id'          => $id,
+			'link_url'         => 'https://links.example.test/generated/' . $id . '/?token=' . rawurlencode( $ctx->identifier( 4, 8 ) ),
+			'link_name'        => 'Bookmark ' . self::hostile_label( $ctx->fork( 'name' ) ),
+			'link_image'       => '',
+			'link_target'      => '_blank',
+			'link_category'    => array( $category_id ),
+			'link_description' => 'Generated bookmark description ' . self::hostile_label( $ctx->fork( 'description' ) ),
+			'link_visible'     => 'Y',
+			'link_owner'       => 1,
+			'link_rating'      => $ctx->int( 0, 10 ),
+			'link_updated'     => '2026-06-22 13:00:00',
+			'link_rel'         => 'friend met',
+			'link_notes'       => '',
+			'link_rss'         => 'https://links.example.test/generated/' . $id . '/feed/',
+		);
 	}
 
 	private static function synthetic_site( \ComponentFuzz\FuzzContext $ctx, int $base_id ): \WP_Site {

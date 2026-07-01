@@ -62,14 +62,16 @@ database, network requests, or a configured site.
   captured date/time AJAX format wrappers without process exits.
 - `admin-list-tables`: no-live-DB concrete admin list-table subclass coverage
   for posts, media, comments, terms, users, plugins, plugin install search
-  results, themes, selected-mode theme install API results, network themes,
-  application passwords, and guarded network sites/users, including columns/
+  results, themes, selected-mode theme install API results, link manager,
+  post-comments metabox, network themes, application passwords, and guarded
+  network sites/users, including columns/
   hidden/sortable/default-primary logic, views, actions, bulk actions, exact row
   URL/nonce and HTML escaping, base `WP_List_Table` pagination/per-page output,
-  pagination/counts, synthetic object/pre-query/user-meta/plugin/theme fixtures,
-  capability gates, install/update/activate action rendering, screenshot/icon
-  and description escaping, localized update-count and theme-root transient
-  cleanup, JS row templates, and state/filter restoration.
+  pagination/counts, synthetic object/bookmark/pre-query/user-meta/plugin/theme
+  fixtures, capability gates including legacy link-manager option gates,
+  install/update/activate action rendering, screenshot/icon and description
+  escaping, localized update-count and theme-root transient cleanup, compact
+  post-comments table rendering, JS row templates, and state/filter restoration.
 - `admin-media-chrome`: no-DB admin media chrome helper coverage, including
   attachment edit field preparation, media item and compat markup escaping,
   image form controls, image editor chrome from cache-seeded metadata,
