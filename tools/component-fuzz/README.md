@@ -861,8 +861,10 @@ database, network requests, or a configured site.
   `get_search_form()` HTML5/XHTML rendering, aria/query escaping, hook/filter
   ordering and null fallback behavior, canonical and shortlink head output,
   synthetic post preview/edit/delete/shortlink/permalink helpers, date and
-  author archive URL branches, previous/next adjacent post relation links,
-  adjacent image attachment links, and cached bookmark field/list rendering.
+  author archive URL branches, author display/meta/link/post-count/listing
+  helpers, multi-author transient/filter behavior, previous/next adjacent post
+  relation links, adjacent image attachment links, and cached bookmark field/list
+  rendering.
 - `widgets`: classic sidebar registry lifecycle, widget factory instance
   registration, direct widget/control callbacks, generated sidebars, widget ID
   parsing, sidebar option cache/filter behavior, sidebar assignment
