@@ -89,6 +89,7 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 		public $usermeta = 'wp_usermeta';
 		public $commentmeta = 'wp_commentmeta';
 		public $termmeta = 'wp_termmeta';
+		public $signups = 'wp_signups';
 		public $prefix = 'wp_';
 		public $base_prefix = 'wp_';
 		public $charset = 'utf8mb4';
@@ -101,6 +102,7 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 		private $component_fuzz_users = array();
 		private $component_fuzz_comments = array();
 		private $component_fuzz_links = array();
+		private $component_fuzz_signups = array();
 		private $component_fuzz_meta = array();
 		private $component_fuzz_next_ids = array();
 		private $component_fuzz_queries = array();
@@ -172,6 +174,7 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 			$this->component_fuzz_users                 = array();
 			$this->component_fuzz_comments              = array();
 			$this->component_fuzz_links                 = array();
+			$this->component_fuzz_signups               = array();
 			$this->component_fuzz_meta                  = array(
 				'post'    => array(),
 				'term'    => array(),
@@ -185,6 +188,7 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 				'users'         => 1,
 				'comments'      => 1,
 				'links'         => 1,
+				'signups'       => 1,
 				'post_meta'     => 1,
 				'term_meta'     => 1,
 				'comment_meta'  => 1,
@@ -206,6 +210,7 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 				'users'              => count( $this->component_fuzz_users ),
 				'comments'           => count( $this->component_fuzz_comments ),
 				'links'              => count( $this->component_fuzz_links ),
+				'signups'            => count( $this->component_fuzz_signups ),
 				'post_meta'          => count( $this->component_fuzz_meta['post'] ),
 				'term_meta'          => count( $this->component_fuzz_meta['term'] ),
 				'comment_meta'       => count( $this->component_fuzz_meta['comment'] ),
@@ -476,6 +481,13 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 				return $this->component_fuzz_finish_insert( $id );
 			}
 
+			if ( 'signups' === $table_key ) {
+				$id                                  = $this->component_fuzz_row_id( $data, 'signup_id', 'signups' );
+				$row                                 = array_merge( $this->component_fuzz_signup_defaults(), $data, array( 'signup_id' => $id ) );
+				$this->component_fuzz_signups[ $id ] = $row;
+				return $this->component_fuzz_finish_insert( $id );
+			}
+
 			$meta_type = $this->component_fuzz_meta_type_for_table_key( $table_key );
 			if ( null !== $meta_type ) {
 				$id_column  = 'user' === $meta_type ? 'umeta_id' : 'meta_id';
@@ -548,6 +560,10 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 				return $this->component_fuzz_update_rows( $this->component_fuzz_links, $data, $where );
 			}
 
+			if ( 'signups' === $table_key ) {
+				return $this->component_fuzz_update_rows( $this->component_fuzz_signups, $data, $where );
+			}
+
 			$meta_type = $this->component_fuzz_meta_type_for_table_key( $table_key );
 			if ( null !== $meta_type ) {
 				return $this->component_fuzz_update_rows( $this->component_fuzz_meta[ $meta_type ], $data, $where );
@@ -597,6 +613,10 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 
 			if ( 'links' === $table_key ) {
 				return $this->component_fuzz_delete_rows( $this->component_fuzz_links, $where );
+			}
+
+			if ( 'signups' === $table_key ) {
+				return $this->component_fuzz_delete_rows( $this->component_fuzz_signups, $where );
 			}
 
 			$meta_type = $this->component_fuzz_meta_type_for_table_key( $table_key );
@@ -788,6 +808,10 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 
 			if ( 'wp_links' === $first_table ) {
 				return $this->component_fuzz_select_links( $query );
+			}
+
+			if ( 'wp_signups' === $first_table ) {
+				return $this->component_fuzz_select_signups( $query );
 			}
 
 			if ( 'wp_term_relationships' === $first_table ) {
@@ -1628,6 +1652,40 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 			return $rows;
 		}
 
+		private function component_fuzz_select_signups( $query ) {
+			$rows = array_values( $this->component_fuzz_signups );
+
+			foreach ( array( 'signup_id', 'domain', 'path', 'user_login', 'user_email', 'activation_key' ) as $column ) {
+				$value = $this->component_fuzz_compare_value( $query, $column );
+				if ( null === $value ) {
+					continue;
+				}
+
+				$rows = array_filter(
+					$rows,
+					static function ( $row ) use ( $column, $value ) {
+						return (string) ( $row[ $column ] ?? '' ) === (string) $value;
+					}
+				);
+			}
+
+			$rows = $this->component_fuzz_apply_limit( $query, array_values( $rows ) );
+
+			if ( preg_match( '/SELECT\s+activation_key\b/i', $query ) ) {
+				return $this->component_fuzz_project_rows( $rows, array( 'activation_key' ) );
+			}
+
+			if ( preg_match( '/SELECT\s+user_login\b/i', $query ) ) {
+				return $this->component_fuzz_project_rows( $rows, array( 'user_login' ) );
+			}
+
+			if ( preg_match( '/SELECT\s+signup_id\b/i', $query ) ) {
+				return $this->component_fuzz_project_rows( $rows, array( 'signup_id' ) );
+			}
+
+			return $rows;
+		}
+
 		private function component_fuzz_filter_users_by_published_posts_subquery( $query, array $rows ) {
 			if ( ! preg_match( '/\b(?:`?wp_users`?\.)?`?ID`?\s+IN\s*\(\s*SELECT\s+DISTINCT\s+(?:`?wp_posts`?\.)?`?post_author`?\s+FROM\s+`?wp_posts`?/is', (string) $query ) ) {
 				return $rows;
@@ -2396,6 +2454,10 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 				return count( $this->component_fuzz_select_links( $query ) );
 			}
 
+			if ( preg_match( '/\bFROM\s+`?wp_signups`?\b/i', $query ) ) {
+				return count( $this->component_fuzz_select_signups( $query ) );
+			}
+
 			if ( preg_match( '/\bFROM\s+`?wp_term_relationships`?\b/i', $query ) ) {
 				return count( $this->component_fuzz_select_term_relationships( $query ) );
 			}
@@ -2519,6 +2581,7 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 				$this->users              => 'users',
 				$this->comments           => 'comments',
 				$this->links              => 'links',
+				$this->signups            => 'signups',
 				$this->postmeta           => 'post_meta',
 				$this->termmeta           => 'term_meta',
 				$this->commentmeta        => 'comment_meta',
@@ -3013,6 +3076,22 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 				'display_name'        => '',
 				'spam'                => '0',
 				'deleted'             => '0',
+			);
+		}
+
+		private function component_fuzz_signup_defaults() {
+			return array(
+				'signup_id'      => 0,
+				'domain'         => '',
+				'path'           => '',
+				'title'          => '',
+				'user_login'     => '',
+				'user_email'     => '',
+				'registered'     => '0000-00-00 00:00:00',
+				'activated'      => '0000-00-00 00:00:00',
+				'active'         => 0,
+				'activation_key' => '',
+				'meta'           => '',
 			);
 		}
 

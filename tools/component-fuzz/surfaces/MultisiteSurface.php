@@ -57,6 +57,7 @@ final class MultisiteSurface {
 			$rows[] = self::check_switch_stack_and_cache_context( $ctx );
 			$rows[] = self::check_blog_option_helpers( $ctx, $case );
 			$rows[] = self::check_network_option_helpers( $ctx );
+			$rows[] = self::check_signup_validation_helpers( $ctx->fork( 'multisite-signup-validation' ), $case );
 			$rows[] = self::check_large_network_helpers( $ctx, $case );
 			$rows[] = self::check_site_and_network_queries( $ctx );
 			$rows[] = self::check_path_lookup_helpers( $ctx, $case );
@@ -297,7 +298,7 @@ final class MultisiteSurface {
 	private static function missing_requirements(): array {
 		$missing = array();
 
-		foreach ( array( 'WP_Site', 'WP_Network', 'WP_Site_Query', 'WP_Network_Query', 'Component_Fuzz_WPDB_Stub' ) as $class ) {
+		foreach ( array( 'WP_Site', 'WP_Network', 'WP_Site_Query', 'WP_Network_Query', 'WP_User', 'WP_Error', 'Component_Fuzz_WPDB_Stub' ) as $class ) {
 			if ( ! class_exists( $class ) ) {
 				$missing[] = "class {$class}";
 			}
@@ -356,6 +357,12 @@ final class MultisiteSurface {
 				'wp_normalize_site_data',
 				'wp_upload_dir',
 				'wp_parse_id_list',
+				'is_email_address_unsafe',
+				'signup_nonce_check',
+				'wpmu_validate_blog_signup',
+				'wpmu_validate_user_signup',
+				'wp_create_nonce',
+				'wp_verify_nonce',
 			) as $function
 		) {
 			if ( ! function_exists( $function ) ) {
@@ -1097,6 +1104,297 @@ final class MultisiteSurface {
 				'sameUpdate'     => $same_update,
 				'deleted'        => $deleted,
 				'readGone'       => self::describe_value( $read_gone ),
+			)
+		);
+	}
+
+	private static function check_signup_validation_helpers( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		global $wpdb;
+
+		foreach ( array( 'WP_Error', 'WP_User' ) as $class ) {
+			if ( ! class_exists( $class ) ) {
+				return $ctx->skip( 'multisite.signup-validation.error-and-reservation-contracts', "Required class {$class} is unavailable." );
+			}
+		}
+
+		foreach ( array( 'email_exists', 'get_user_by', 'is_email', 'sanitize_email', 'signup_nonce_check', 'username_exists', 'wpmu_validate_blog_signup', 'wpmu_validate_user_signup', 'wp_create_nonce', 'wp_verify_nonce' ) as $function ) {
+			if ( ! function_exists( $function ) ) {
+				return $ctx->skip( 'multisite.signup-validation.error-and-reservation-contracts', "Required function {$function}() is unavailable." );
+			}
+		}
+
+		$previous_post            = $_POST;
+		$previous_php_self_exists = array_key_exists( 'PHP_SELF', $_SERVER );
+		$previous_php_self        = $_SERVER['PHP_SELF'] ?? null;
+		$failures                 = array();
+		$observed                 = array();
+		$added_user_nonce_filter  = false;
+		$added_blog_nonce_filter  = false;
+		$added_email_filter          = false;
+		$added_sanitize_email_filter = false;
+
+		$illegal_login_filter = static function ( array $logins ): array {
+			$logins[] = 'filteredbad';
+			return $logins;
+		};
+		$minimum_length_filter = static function (): int {
+			return 6;
+		};
+		$new_blog_name_filter = static function ( string $blogname ): string {
+			return 'validsitea' === $blogname ? 'renamedsitea' : $blogname;
+		};
+		$unsafe_filter = static function ( bool $unsafe, string $email ): bool {
+			$email = strtolower( $email );
+			if ( 'force-allow@sub.banned.test' === $email ) {
+				return false;
+			}
+			if ( 'force-deny@example.test' === $email ) {
+				return true;
+			}
+
+			return $unsafe;
+		};
+
+		$fresh_registered = gmdate( 'Y-m-d H:i:s', time() - HOUR_IN_SECONDS );
+		$stale_registered = gmdate( 'Y-m-d H:i:s', time() - ( 3 * DAY_IN_SECONDS ) );
+		$existing_user_id = 880000 + $ctx->int( 1, 999 );
+		$reserved_user_id = $existing_user_id + 1;
+		$taken_site_id    = $case['directorySiteId'] + 1000;
+		$taken_blog       = 'takenblog' . $ctx->int( 10, 99 );
+		$pending_blog     = 'pendingsite' . $ctx->int( 10, 99 );
+		$stale_blog       = 'stalesite' . $ctx->int( 10, 99 );
+
+		self::$network_options[1]['illegal_names']         = array( 'www', 'admin', 'blockedname', 'taken' );
+		self::$network_options[1]['limited_email_domains'] = array( 'example.test', 'allowed.test' );
+		self::$network_options[1]['banned_email_domains']  = array( 'banned.test', 'blocked.example' );
+		self::$sites[] = self::site_from_parts( $taken_site_id, 'example.test', '/' . $taken_blog . '/', 1, 1, 0, 0, 0, 0 );
+		$taken_site    = self::$sites[ array_key_last( self::$sites ) ];
+		wp_cache_set( $taken_site_id, (object) $taken_site->to_array(), 'sites' );
+
+		$wpdb->insert(
+			$wpdb->users,
+			array(
+				'ID'            => $existing_user_id,
+				'user_login'    => 'usedlogin',
+				'user_nicename' => 'usedlogin',
+				'user_email'    => 'used@example.test',
+				'display_name'  => 'Used Login',
+			)
+		);
+		$wpdb->insert(
+			$wpdb->users,
+			array(
+				'ID'            => $reserved_user_id,
+				'user_login'    => 'reservedsite',
+				'user_nicename' => 'reservedsite',
+				'user_email'    => 'reservedsite@example.test',
+				'display_name'  => 'Reserved Site',
+			)
+		);
+
+		foreach (
+			array(
+				array( 'user_login' => 'pendinguser', 'user_email' => 'pending-login@example.test', 'registered' => $fresh_registered ),
+				array( 'user_login' => 'pendingmail', 'user_email' => 'pending@example.test', 'registered' => $fresh_registered ),
+				array( 'user_login' => 'staleuser', 'user_email' => 'stale@example.test', 'registered' => $stale_registered ),
+				array( 'domain' => 'example.test', 'path' => '/' . $pending_blog . '/', 'user_login' => 'pendingbloguser', 'user_email' => 'pendingblog@example.test', 'registered' => $fresh_registered ),
+				array( 'domain' => 'example.test', 'path' => '/' . $stale_blog . '/', 'user_login' => 'stalebloguser', 'user_email' => 'staleblog@example.test', 'registered' => $stale_registered ),
+			) as $signup
+		) {
+			$wpdb->insert( $wpdb->signups, $signup );
+		}
+
+		add_filter( 'illegal_user_logins', $illegal_login_filter, 10, 1 );
+		add_filter( 'minimum_site_name_length', $minimum_length_filter, 10, 0 );
+		add_filter( 'newblogname', $new_blog_name_filter, 10, 1 );
+		add_filter( 'is_email_address_unsafe', $unsafe_filter, 10, 2 );
+		if ( false === has_filter( 'wpmu_validate_user_signup', 'signup_nonce_check' ) ) {
+			add_filter( 'wpmu_validate_user_signup', 'signup_nonce_check' );
+			$added_user_nonce_filter = true;
+		}
+		if ( false === has_filter( 'wpmu_validate_blog_signup', 'signup_nonce_check' ) ) {
+			add_filter( 'wpmu_validate_blog_signup', 'signup_nonce_check' );
+			$added_blog_nonce_filter = true;
+		}
+		if ( function_exists( 'wp_is_unicode_email' ) && false === has_filter( 'is_email', 'wp_is_unicode_email' ) ) {
+			add_filter( 'is_email', 'wp_is_unicode_email', 10, 3 );
+			$added_email_filter = true;
+		}
+		if ( function_exists( 'wp_sanitize_unicode_email' ) && false === has_filter( 'sanitize_email', 'wp_sanitize_unicode_email' ) ) {
+			add_filter( 'sanitize_email', 'wp_sanitize_unicode_email', 10, 3 );
+			$added_sanitize_email_filter = true;
+		}
+
+		try {
+			$_SERVER['PHP_SELF'] = '/component-fuzz/multisite.php';
+
+			$unsafe_cases = array(
+				'exactBanned'   => is_email_address_unsafe( 'User@BANNED.test' ),
+				'subBanned'     => is_email_address_unsafe( 'user@mail.banned.test' ),
+				'lookalikeSafe' => is_email_address_unsafe( 'user@notbanned.test' ),
+				'forcedAllow'   => is_email_address_unsafe( 'force-allow@sub.banned.test' ),
+				'forcedDeny'    => is_email_address_unsafe( 'force-deny@example.test' ),
+			);
+			if ( array( true, true, false, false, true ) !== array_values( $unsafe_cases ) ) {
+				$failures[] = 'unsafe email domain matching or filter override contract changed';
+			}
+
+			$user_cases = array(
+				'valid'         => wpmu_validate_user_signup( 'freshuser', 'fresh@example.test' ),
+				'badShape'      => wpmu_validate_user_signup( 'Bad Name!', 'badshape@example.test' ),
+				'illegalOption' => wpmu_validate_user_signup( 'blockedname', 'blocked@example.test' ),
+				'illegalFilter' => wpmu_validate_user_signup( 'filteredbad', 'filtered@example.test' ),
+				'numeric'       => wpmu_validate_user_signup( '123456', 'numeric@example.test' ),
+				'limitedDomain' => wpmu_validate_user_signup( 'outsider', 'outsider@outside.test' ),
+				'bannedDomain'  => wpmu_validate_user_signup( 'banneddomain', 'person@sub.banned.test' ),
+				'existingLogin' => wpmu_validate_user_signup( 'usedlogin', 'new-used@example.test' ),
+				'existingEmail' => wpmu_validate_user_signup( 'newused', 'used@example.test' ),
+				'pendingLogin'  => wpmu_validate_user_signup( 'pendinguser', 'pending-login-new@example.test' ),
+				'pendingEmail'  => wpmu_validate_user_signup( 'pendingmailnew', 'pending@example.test' ),
+				'staleSignup'   => wpmu_validate_user_signup( 'staleuser', 'stale@example.test' ),
+			);
+
+			if ( self::signup_has_error( $user_cases['valid'], 'user_name' ) || self::signup_has_error( $user_cases['valid'], 'user_email' ) ) {
+				$failures[] = 'valid user signup unexpectedly produced user_name or user_email errors';
+			}
+			if ( ( $user_cases['badShape']['orig_username'] ?? null ) !== 'Bad Name!' || ! self::signup_has_error( $user_cases['badShape'], 'user_name' ) ) {
+				$failures[] = 'bad-shape username did not preserve orig_username or add user_name error';
+			}
+			foreach ( array( 'illegalOption', 'illegalFilter', 'numeric', 'existingLogin', 'pendingLogin' ) as $label ) {
+				if ( ! self::signup_has_error( $user_cases[ $label ], 'user_name' ) ) {
+					$failures[] = "{$label} did not produce a user_name error";
+				}
+			}
+			foreach ( array( 'limitedDomain', 'bannedDomain', 'existingEmail', 'pendingEmail' ) as $label ) {
+				if ( ! self::signup_has_error( $user_cases[ $label ], 'user_email' ) ) {
+					$failures[] = "{$label} did not produce a user_email error";
+				}
+			}
+			if ( self::signup_has_error( $user_cases['staleSignup'], 'user_name' ) || self::signup_has_error( $user_cases['staleSignup'], 'user_email' ) ) {
+				$failures[] = 'stale pending user signup still reserved the username or email';
+			}
+			if ( null !== $wpdb->get_row( $wpdb->prepare( "SELECT * FROM $wpdb->signups WHERE user_login = %s", 'staleuser' ) ) ) {
+				$failures[] = 'stale pending user signup row was not deleted';
+			}
+
+			$same_reserved_user = new \WP_User( $reserved_user_id );
+			$blog_cases = array(
+				'validRenamed'     => wpmu_validate_blog_signup( 'validsitea', '<b>Valid Site</b>', '' ),
+				'badShape'         => wpmu_validate_blog_signup( 'Bad-Site', 'Bad Shape', '' ),
+				'shortByFilter'    => wpmu_validate_blog_signup( 'abcde', 'Too Short', '' ),
+				'numeric'          => wpmu_validate_blog_signup( '123456', 'Numbers', '' ),
+				'illegalOption'    => wpmu_validate_blog_signup( 'blockedname', 'Blocked', '' ),
+				'emptyTitle'       => wpmu_validate_blog_signup( 'emptytitle', '<script></script>', '' ),
+				'existingDomain'   => wpmu_validate_blog_signup( $taken_blog, 'Taken Domain', '' ),
+				'pendingDomain'    => wpmu_validate_blog_signup( $pending_blog, 'Pending Domain', '' ),
+				'staleDomain'      => wpmu_validate_blog_signup( $stale_blog, 'Stale Domain', '' ),
+				'existingUser'     => wpmu_validate_blog_signup( 'reservedsite', 'Reserved User', '' ),
+				'sameExistingUser' => wpmu_validate_blog_signup( 'reservedsite', 'Reserved User', $same_reserved_user ),
+			);
+
+			if (
+				self::signup_has_error( $blog_cases['validRenamed'], 'blogname' )
+				|| ( $blog_cases['validRenamed']['blogname'] ?? null ) !== 'renamedsitea'
+				|| ( $blog_cases['validRenamed']['path'] ?? null ) !== '/renamedsitea/'
+				|| ( $blog_cases['validRenamed']['blog_title'] ?? null ) !== 'Valid Site'
+			) {
+				$failures[] = 'valid blog signup did not apply newblogname/title normalization or unexpectedly failed';
+			}
+			foreach ( array( 'badShape', 'shortByFilter', 'numeric', 'illegalOption', 'existingDomain', 'pendingDomain', 'existingUser' ) as $label ) {
+				if ( ! self::signup_has_error( $blog_cases[ $label ], 'blogname' ) ) {
+					$failures[] = "{$label} did not produce a blogname error";
+				}
+			}
+			if ( ! self::signup_has_error( $blog_cases['emptyTitle'], 'blog_title' ) ) {
+				$failures[] = 'empty title did not produce a blog_title error';
+			}
+			if ( self::signup_has_error( $blog_cases['staleDomain'], 'blogname' ) ) {
+				$failures[] = 'stale pending site signup still reserved the domain/path';
+			}
+			if ( null !== $wpdb->get_row( $wpdb->prepare( "SELECT * FROM $wpdb->signups WHERE domain = %s AND path = %s", 'example.test', '/' . $stale_blog . '/' ) ) ) {
+				$failures[] = 'stale pending site signup row was not deleted';
+			}
+			if ( self::signup_has_error( $blog_cases['sameExistingUser'], 'blogname' ) ) {
+				$failures[] = 'same WP_User object did not override existing-login blog reservation';
+			}
+
+			$no_signup_result = array( 'errors' => new \WP_Error() );
+			$_SERVER['PHP_SELF'] = '/wp-admin/user-new.php';
+			$_POST = array(
+				'_signup_form'   => 'definitely-invalid',
+				'signup_form_id' => 'nonce-case',
+			);
+			$no_signup_result = signup_nonce_check( $no_signup_result );
+
+			$invalid_nonce_result = array( 'errors' => new \WP_Error() );
+			$_SERVER['PHP_SELF'] = '/wp-signup.php';
+			$invalid_nonce_result = signup_nonce_check( $invalid_nonce_result );
+			$valid_nonce_result = array( 'errors' => new \WP_Error() );
+			$_POST = array(
+				'_signup_form'   => wp_create_nonce( 'signup_form_nonce-case' ),
+				'signup_form_id' => 'nonce-case',
+			);
+			$valid_nonce_result = signup_nonce_check( $valid_nonce_result );
+			if ( self::signup_has_error( $no_signup_result, 'invalid_nonce' ) ) {
+				$failures[] = 'signup_nonce_check added invalid_nonce outside wp-signup.php';
+			}
+			if ( ! self::signup_has_error( $invalid_nonce_result, 'invalid_nonce' ) ) {
+				$failures[] = 'signup_nonce_check did not add invalid_nonce for wp-signup.php invalid nonce';
+			}
+			if ( self::signup_has_error( $valid_nonce_result, 'invalid_nonce' ) ) {
+				$failures[] = 'signup_nonce_check rejected a freshly created signup nonce';
+			}
+
+			$observed = array(
+				'unsafeCases'       => $unsafe_cases,
+				'userErrorCodes'    => self::signup_case_error_codes( $user_cases ),
+				'blogErrorCodes'    => self::signup_case_error_codes( $blog_cases ),
+				'remainingSignups'  => $wpdb->component_fuzz_content_counts()['signups'] ?? null,
+				'invalidNonceCodes' => self::signup_error_codes( $invalid_nonce_result ),
+				'validNonceCodes'   => self::signup_error_codes( $valid_nonce_result ),
+			);
+		} finally {
+			if ( $added_user_nonce_filter ) {
+				remove_filter( 'wpmu_validate_user_signup', 'signup_nonce_check' );
+			}
+			if ( $added_blog_nonce_filter ) {
+				remove_filter( 'wpmu_validate_blog_signup', 'signup_nonce_check' );
+			}
+			if ( $added_email_filter ) {
+				remove_filter( 'is_email', 'wp_is_unicode_email', 10 );
+			}
+			if ( $added_sanitize_email_filter ) {
+				remove_filter( 'sanitize_email', 'wp_sanitize_unicode_email', 10 );
+			}
+			remove_filter( 'illegal_user_logins', $illegal_login_filter, 10 );
+			remove_filter( 'minimum_site_name_length', $minimum_length_filter, 10 );
+			remove_filter( 'newblogname', $new_blog_name_filter, 10 );
+			remove_filter( 'is_email_address_unsafe', $unsafe_filter, 10 );
+			self::$sites = array_values(
+				array_filter(
+					self::$sites,
+					static function ( \WP_Site $site ) use ( $taken_site_id ): bool {
+						return $site->id !== $taken_site_id;
+					}
+				)
+			);
+			wp_cache_delete( $taken_site_id, 'sites' );
+
+			$_POST = $previous_post;
+			if ( $previous_php_self_exists ) {
+				$_SERVER['PHP_SELF'] = $previous_php_self;
+			} else {
+				unset( $_SERVER['PHP_SELF'] );
+			}
+		}
+
+		return $ctx->result(
+			'multisite.signup-validation.error-and-reservation-contracts',
+			array() === $failures,
+			array(
+				'case'     => self::describe_case( $case ),
+				'failures' => $failures,
+				'observed' => $observed,
 			)
 		);
 	}
@@ -2533,10 +2831,12 @@ PHP;
 		$GLOBALS['table_prefix']       = 'wp_';
 		$GLOBALS['_wp_switched_stack'] = array();
 		$GLOBALS['switched']           = false;
+		$GLOBALS['domain']             = 'example.test';
 
 		$_SERVER['HTTP_HOST']   = 'example.test';
 		$_SERVER['SERVER_NAME'] = 'example.test';
 		$_SERVER['REQUEST_URI'] = '/component-fuzz/multisite/';
+		$_SERVER['PHP_SELF']    = '/component-fuzz/multisite.php';
 		unset( $_SERVER['HTTPS'] );
 
 		self::$blog_options = array(
@@ -2677,6 +2977,15 @@ PHP;
 				'switched',
 				'current_blog',
 				'current_site',
+				'domain',
+				'current_user',
+				'user_login',
+				'userdata',
+				'user_level',
+				'user_ID',
+				'user_email',
+				'user_url',
+				'user_identity',
 				'wp_filter',
 				'wp_actions',
 				'wp_filters',
@@ -2691,7 +3000,7 @@ PHP;
 		}
 
 		$server = array();
-		foreach ( array( 'HTTP_HOST', 'SERVER_NAME', 'REQUEST_URI', 'HTTPS' ) as $name ) {
+		foreach ( array( 'HTTP_HOST', 'SERVER_NAME', 'REQUEST_URI', 'PHP_SELF', 'HTTPS' ) as $name ) {
 			$server[ $name ] = array(
 				'exists' => array_key_exists( $name, $_SERVER ),
 				'value'  => $_SERVER[ $name ] ?? null,
@@ -3053,6 +3362,27 @@ PHP;
 		}
 
 		return $reflection->invokeArgs( $object, $args );
+	}
+
+	private static function signup_has_error( array $result, string $code ): bool {
+		return isset( $result['errors'] ) && $result['errors'] instanceof \WP_Error && in_array( $code, $result['errors']->get_error_codes(), true );
+	}
+
+	private static function signup_error_codes( array $result ): array {
+		if ( ! isset( $result['errors'] ) || ! $result['errors'] instanceof \WP_Error ) {
+			return array();
+		}
+
+		return $result['errors']->get_error_codes();
+	}
+
+	private static function signup_case_error_codes( array $cases ): array {
+		$codes = array();
+		foreach ( $cases as $label => $result ) {
+			$codes[ $label ] = is_array( $result ) ? self::signup_error_codes( $result ) : array( 'non-array-result' );
+		}
+
+		return $codes;
 	}
 
 	private static function same_value( $left, $right ): bool {
