@@ -513,8 +513,8 @@ database, network requests, or a configured site.
   sitewide-active option shapes, plugin/theme deletion validation, theme
   enumeration and requirement checks, safe child-theme switching, theme
   support/template globals, read-only REST plugin/theme controller paths, and
-  bounded REST plugin status update/delete behavior against temp plugin
-  fixtures.
+  bounded REST plugin create/install, status update, and delete behavior
+  against generated temp plugin fixtures and packages.
 - `update-install-upgrader`: no-network update/install/upgrader coverage,
   including generated core/plugin/theme update transient shapes, aggregate
   update counts/titles, `WP_Upgrader_Skin` and `Automatic_Upgrader_Skin`
@@ -942,8 +942,9 @@ branches that are not warning-safe under the stripped bootstrap. The
 registry-backed surface covers plugin/theme controller route, schema,
 collection parameter, sanitizer, and permission-gate contracts without
 plugin/theme filesystem lifecycle effects. Lifecycle-heavy plugin/theme read and
-status paths are covered by `plugin-theme-lifecycle`, while install/update/delete
-controller methods are still avoided. Block pattern coverage now includes
+status paths are covered by `plugin-theme-lifecycle`, along with bounded REST
+plugin create/install, status update, and inactive-delete controller methods.
+Block pattern coverage now includes
 registry-backed response shaping, intercepted remote core, featured, and theme
 pattern directory loaders, and local theme `patterns/` PHP file loading through
 a scoped temp theme with cache/header/duplicate/lazy-content oracles.
@@ -969,9 +970,10 @@ plugins or switch to repository themes. Network-wide activation is not forced
 when the shared process is not running with `MULTISITE`; in that mode the
 surface verifies sitewide option shapes and the non-multisite false branch.
 REST plugin/theme controller coverage includes read/status/parameter paths and
-bounded REST plugin status updates plus inactive temp-plugin deletion. It avoids
-remote install/update lookups, package downloads, and destructive operations on
-repository plugins or themes.
+bounded REST plugin create/install paths with mocked `plugins_api()` responses,
+generated ZIP packages, direct filesystem transport, active-install permission
+gates, status updates, and inactive temp-plugin deletion. It avoids live remote
+lookups/downloads and destructive operations on repository plugins or themes.
 The `content-lifecycle` surface uses a bounded in-memory `wpdb` stub that
 recognizes the narrow SQL shapes emitted by core post, term, user, comment, and
 metadata lifecycle APIs; it is not a general SQL engine. Post metadata coverage

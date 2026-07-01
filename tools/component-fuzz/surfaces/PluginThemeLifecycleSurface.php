@@ -42,6 +42,7 @@ final class PluginThemeLifecycleSurface {
 			$rows[] = self::check_theme_delete_paths( $ctx, $case );
 			$rows[] = self::check_rest_plugin_theme_read_paths( $ctx, $case );
 			$rows[] = self::check_rest_plugin_write_delete_paths( $ctx, $case );
+			$rows[] = self::check_rest_plugin_create_install_paths( $ctx, $case );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
 				'plugin-theme-lifecycle.surface-no-throw',
@@ -1431,6 +1432,333 @@ final class PluginThemeLifecycleSurface {
 		);
 	}
 
+	private static function check_rest_plugin_create_install_paths( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures = array();
+		self::clear_runtime_caches();
+
+		if ( ! class_exists( 'ZipArchive' ) ) {
+			return $ctx->skip(
+				'plugin-theme-lifecycle.rest.plugin-create-install-controller',
+				'ZipArchive is unavailable, so REST plugin install packages cannot be generated.'
+			);
+		}
+
+		$controller      = new \WP_REST_Plugins_Controller();
+		$inactive       = $case['plugins']['restInstallInactive'];
+		$active         = $case['plugins']['restInstallActive'];
+		$activate_deny  = $case['plugins']['restInstallActivateDeny'];
+		$installable    = array( $inactive, $active, $activate_deny );
+		$missing_slug   = $case['plugins']['restInstallMissingSlug'];
+		$error_slug     = $case['plugins']['restInstallErrorSlug'];
+		$package_urls   = array();
+		$api_events     = array();
+		$download_events = array();
+
+		try {
+			self::write_rest_install_packages( $installable );
+		} catch ( \Throwable $e ) {
+			self::record_failure(
+				$failures,
+				'REST-plugin-install.generated-zip-packages-are-writable',
+				array( 'throwable' => self::describe_throwable( $e ) )
+			);
+
+			return self::row(
+				$ctx,
+				'plugin-theme-lifecycle.rest.plugin-create-install-controller',
+				$failures,
+				array( 'packageRoot' => self::preview( $case['paths']['packageRoot'] ) )
+			);
+		}
+
+		foreach ( $installable as $plugin ) {
+			$package_urls[ self::rest_install_download_url( $plugin ) ] = $plugin;
+		}
+
+		$api_filter = static function ( $result, string $action, $args ) use ( &$api_events, $package_urls, $missing_slug, $error_slug ) {
+			$slug   = is_object( $args ) && isset( $args->slug ) ? (string) $args->slug : '';
+			$fields = is_object( $args ) && isset( $args->fields ) ? (array) $args->fields : array();
+
+			$api_events[] = array(
+				'action' => $action,
+				'slug'   => $slug,
+				'fields' => $fields,
+			);
+
+			if ( 'plugin_information' !== $action ) {
+				return new \WP_Error( 'component_fuzz_unexpected_plugins_api_action', 'Unexpected plugin API action during REST plugin install fuzzing.' );
+			}
+
+			if ( $missing_slug === $slug ) {
+				return new \WP_Error( 'plugins_api_failed', 'Plugin not found.' );
+			}
+
+			if ( $error_slug === $slug ) {
+				return new \WP_Error( 'plugins_api_failed', 'Synthetic plugin API failure.' );
+			}
+
+			foreach ( $package_urls as $download_url => $plugin ) {
+				if ( $plugin['slug'] !== $slug ) {
+					continue;
+				}
+
+				return (object) array(
+					'name'           => $plugin['name'],
+					'slug'           => $plugin['slug'],
+					'version'        => $plugin['version'],
+					'download_link'  => $download_url,
+					'language_packs' => array(),
+				);
+			}
+
+			unset( $result );
+			return new \WP_Error( 'plugins_api_failed', 'Plugin not found.' );
+		};
+
+		$download_filter = static function ( $result, string $package, $upgrader ) use ( &$download_events, $package_urls, $case ) {
+			if ( ! ( $upgrader instanceof \Plugin_Upgrader ) ) {
+				return $result;
+			}
+
+			$download_events[] = array(
+				'package'  => $package,
+				'upgrader' => get_class( $upgrader ),
+			);
+
+			if ( ! isset( $package_urls[ $package ] ) ) {
+				return new \WP_Error( 'component_fuzz_unexpected_plugin_download', 'Unexpected plugin download URL during REST plugin install fuzzing.' );
+			}
+
+			$plugin = $package_urls[ $package ];
+			self::ensure_dir( $case['paths']['packageRoot'] . '/downloads' );
+
+			$download_path = $case['paths']['packageRoot'] . '/downloads/' . count( $download_events ) . '-' . basename( $plugin['packageZip'] );
+			if ( ! copy( $plugin['packageZip'], $download_path ) ) {
+				return new \WP_Error( 'component_fuzz_package_copy_failed', 'Could not copy generated REST plugin install package.' );
+			}
+
+			return $download_path;
+		};
+
+		\add_filter( 'plugins_api', $api_filter, 10, 3 );
+		\add_filter( 'upgrader_pre_download', $download_filter, 10, 3 );
+		$upgrade_hooks = self::suspend_rest_install_upgrade_hooks();
+
+		try {
+			$denied_permission = $controller->create_item_permissions_check( self::rest_plugin_create_request( $inactive['slug'], 'inactive' ) );
+			self::expect_wp_error_code(
+				$failures,
+				'WP_REST_Plugins_Controller.create-denied-without-install-cap',
+				$denied_permission,
+				'rest_cannot_install_plugin'
+			);
+			if ( array() !== $api_events || array() !== $download_events || file_exists( $inactive['dir'] ) ) {
+				self::record_failure(
+					$failures,
+					'WP_REST_Plugins_Controller.create-permission-denial-does-not-query-api-or-write-files',
+					array(
+						'apiEvents'      => $api_events,
+						'downloadEvents' => $download_events,
+						'dirExists'      => file_exists( $inactive['dir'] ),
+					)
+				);
+			}
+
+			$install_only_cap_filter = self::rest_plugin_cap_filter( array( 'install_plugins' ) );
+			\add_filter( 'user_has_cap', $install_only_cap_filter, PHP_INT_MAX, 4 );
+			try {
+				$activate_permission = $controller->create_item_permissions_check( self::rest_plugin_create_request( $active['slug'], 'active' ) );
+			} finally {
+				\remove_filter( 'user_has_cap', $install_only_cap_filter, PHP_INT_MAX );
+			}
+			self::expect_wp_error_code(
+				$failures,
+				'WP_REST_Plugins_Controller.active-create-denied-without-activate-plugins-cap',
+				$activate_permission,
+				'rest_cannot_activate_plugin'
+			);
+
+			$install_cap_filter = self::rest_plugin_cap_filter( array( 'install_plugins' ) );
+			\add_filter( 'user_has_cap', $install_cap_filter, PHP_INT_MAX, 4 );
+			try {
+				$missing_result = null;
+				$error_result   = null;
+				$inactive_result = null;
+
+				self::with_direct_filesystem(
+					static function () use ( $controller, $missing_slug, $error_slug, $inactive, &$missing_result, &$error_result, &$inactive_result ): void {
+						$missing_result  = $controller->create_item( self::rest_plugin_create_request( $missing_slug, 'inactive' ) );
+						$error_result    = $controller->create_item( self::rest_plugin_create_request( $error_slug, 'inactive' ) );
+						$inactive_result = $controller->create_item( self::rest_plugin_create_request( $inactive['slug'], 'inactive' ) );
+					}
+				);
+			} finally {
+				\remove_filter( 'user_has_cap', $install_cap_filter, PHP_INT_MAX );
+			}
+
+			if ( ! \is_wp_error( $missing_result ) || 'plugins_api_failed' !== $missing_result->get_error_code() || 404 !== self::wp_error_status( $missing_result ) ) {
+				self::record_failure(
+					$failures,
+					'WP_REST_Plugins_Controller.create-missing-plugin-api-error-maps-to-404',
+					array( 'result' => self::describe_wp_error( $missing_result ) )
+				);
+			}
+
+			if ( ! \is_wp_error( $error_result ) || 'plugins_api_failed' !== $error_result->get_error_code() || 500 !== self::wp_error_status( $error_result ) ) {
+				self::record_failure(
+					$failures,
+					'WP_REST_Plugins_Controller.create-generic-plugin-api-error-maps-to-500',
+					array( 'result' => self::describe_wp_error( $error_result ) )
+				);
+			}
+
+			self::assert_rest_install_response(
+				$failures,
+				'inactive',
+				$inactive_result,
+				$inactive,
+				'inactive'
+			);
+			if ( \is_plugin_active( $inactive['file'] ) ) {
+				self::record_failure(
+					$failures,
+					'WP_REST_Plugins_Controller.create-inactive-install-does-not-activate-plugin',
+					array( 'activePlugins' => \get_option( 'active_plugins', array() ) )
+				);
+			}
+
+			$active_cap_filter = self::rest_plugin_cap_filter( array( 'install_plugins', 'activate_plugins', 'activate_plugin' ) );
+			\add_filter( 'user_has_cap', $active_cap_filter, PHP_INT_MAX, 4 );
+			try {
+				$active_allowed = $controller->create_item_permissions_check( self::rest_plugin_create_request( $active['slug'], 'active' ) );
+				$active_result  = null;
+				self::with_direct_filesystem(
+					static function () use ( $controller, $active, &$active_result ): void {
+						$active_result = $controller->create_item( self::rest_plugin_create_request( $active['slug'], 'active' ) );
+					}
+				);
+			} finally {
+				\remove_filter( 'user_has_cap', $active_cap_filter, PHP_INT_MAX );
+			}
+
+			if ( true !== $active_allowed ) {
+				self::record_failure(
+					$failures,
+					'WP_REST_Plugins_Controller.create-active-install-permission-check-allows-full-cap-set',
+					array( 'allowed' => self::describe_wp_error( $active_allowed ) )
+				);
+			}
+			self::assert_rest_install_response(
+				$failures,
+				'active',
+				$active_result,
+				$active,
+				'active'
+			);
+			if ( ! \is_plugin_active( $active['file'] ) ) {
+				self::record_failure(
+					$failures,
+					'WP_REST_Plugins_Controller.create-active-install-activates-temp-plugin',
+					array( 'activePlugins' => \get_option( 'active_plugins', array() ) )
+				);
+			}
+
+			$status_cap_filter = self::rest_plugin_activate_denial_cap_filter( $activate_deny['file'] );
+			\add_filter( 'user_has_cap', $status_cap_filter, PHP_INT_MAX, 4 );
+			try {
+				$activate_deny_allowed = $controller->create_item_permissions_check( self::rest_plugin_create_request( $activate_deny['slug'], 'active' ) );
+				$activate_deny_result  = null;
+				self::with_direct_filesystem(
+					static function () use ( $controller, $activate_deny, &$activate_deny_result ): void {
+						$activate_deny_result = $controller->create_item( self::rest_plugin_create_request( $activate_deny['slug'], 'active' ) );
+					}
+				);
+			} finally {
+				\remove_filter( 'user_has_cap', $status_cap_filter, PHP_INT_MAX );
+			}
+
+			if ( true !== $activate_deny_allowed ) {
+				self::record_failure(
+					$failures,
+					'WP_REST_Plugins_Controller.create-active-install-permission-check-allows-collection-activate-cap',
+					array( 'allowed' => self::describe_wp_error( $activate_deny_allowed ) )
+				);
+			}
+			self::expect_wp_error_code(
+				$failures,
+				'WP_REST_Plugins_Controller.create-active-install-denied-by-plugin-specific-activate-cap',
+				$activate_deny_result,
+				'rest_cannot_activate_plugin'
+			);
+			if ( ! file_exists( $activate_deny['path'] ) || \is_plugin_active( $activate_deny['file'] ) ) {
+				self::record_failure(
+					$failures,
+					'WP_REST_Plugins_Controller.create-active-install-activation-denial-leaves-installed-plugin-inactive',
+					array(
+						'fileExists'     => file_exists( $activate_deny['path'] ),
+						'activePlugins'  => \get_option( 'active_plugins', array() ),
+						'response'       => self::describe_wp_error( $activate_deny_result ),
+					)
+				);
+			}
+
+			foreach ( array( $inactive, $active, $activate_deny ) as $plugin ) {
+				if ( ! self::rest_install_api_event_seen( $api_events, $plugin['slug'] ) ) {
+					self::record_failure(
+						$failures,
+						'WP_REST_Plugins_Controller.create-install-calls-plugins-api-with-bounded-fields',
+						array(
+							'slug'      => $plugin['slug'],
+							'apiEvents' => $api_events,
+						)
+					);
+				}
+			}
+
+			foreach ( array( $missing_slug, $error_slug ) as $slug ) {
+				if ( ! self::rest_install_api_event_seen( $api_events, $slug ) ) {
+					self::record_failure(
+						$failures,
+						'WP_REST_Plugins_Controller.create-error-path-calls-plugins-api-with-bounded-fields',
+						array(
+							'slug'      => $slug,
+							'apiEvents' => $api_events,
+						)
+					);
+				}
+			}
+
+			if ( 3 !== count( $download_events ) ) {
+				self::record_failure(
+					$failures,
+					'WP_REST_Plugins_Controller.create-downloads-only-successful-install-packages',
+					array( 'downloadEvents' => $download_events )
+				);
+			}
+		} finally {
+			\remove_filter( 'plugins_api', $api_filter, 10 );
+			\remove_filter( 'upgrader_pre_download', $download_filter, 10 );
+			self::restore_rest_install_upgrade_hooks( $upgrade_hooks );
+			\deactivate_plugins( array( $inactive['file'], $active['file'], $activate_deny['file'] ), true );
+			\update_option( 'active_plugins', array() );
+			\update_site_option( 'active_sitewide_plugins', array() );
+			self::clear_runtime_caches();
+		}
+
+		return self::row(
+			$ctx,
+			'plugin-theme-lifecycle.rest.plugin-create-install-controller',
+			$failures,
+			array(
+				'inactivePlugin' => $inactive['file'],
+				'activePlugin'   => $active['file'],
+				'deniedPlugin'   => $activate_deny['file'],
+				'apiEvents'      => count( $api_events ),
+				'downloads'      => count( $download_events ),
+			)
+		);
+	}
+
 	private static function expect_plugin_validation_code( array &$failures, string $label, string $plugin, $expected ): void {
 		$result = \validate_plugin( $plugin );
 
@@ -1504,6 +1832,109 @@ final class PluginThemeLifecycleSurface {
 		}
 	}
 
+	private static function wp_error_status( $error ) {
+		if ( ! \is_wp_error( $error ) ) {
+			return null;
+		}
+
+		$data = $error->get_error_data();
+		return is_array( $data ) ? ( $data['status'] ?? null ) : null;
+	}
+
+	private static function assert_rest_install_response( array &$failures, string $label, $response, array $plugin, string $status ): void {
+		$data        = $response instanceof \WP_REST_Response ? $response->get_data() : array();
+		$location    = $response instanceof \WP_REST_Response ? $response->get_headers()['Location'] ?? '' : '';
+		$route_value = substr( $plugin['file'], 0, -4 );
+
+		if (
+			! ( $response instanceof \WP_REST_Response )
+			|| 201 !== $response->get_status()
+			|| ( $data['plugin'] ?? null ) !== $route_value
+			|| ( $data['status'] ?? null ) !== $status
+			|| ( $data['name'] ?? null ) !== $plugin['name']
+			|| ! file_exists( $plugin['path'] )
+			|| ! isset( \get_plugins()[ $plugin['file'] ] )
+			|| ! is_string( $location )
+			|| ( ! str_contains( $location, $route_value ) && ! str_contains( $location, rawurlencode( $route_value ) ) )
+		) {
+			self::record_failure(
+				$failures,
+				"WP_REST_Plugins_Controller.create-{$label}-install-response-and-files-match-package",
+				array(
+					'plugin'   => $plugin['file'],
+					'status'   => $status,
+					'response' => self::describe_value( $response ),
+					'data'     => $data,
+					'location' => $location,
+					'installed' => array_keys( \get_plugins() ),
+					'fileExists' => file_exists( $plugin['path'] ),
+				)
+			);
+		}
+	}
+
+	private static function rest_install_api_event_seen( array $events, string $slug ): bool {
+		foreach ( $events as $event ) {
+			$fields = $event['fields'] ?? array();
+			if (
+				( $event['action'] ?? null ) === 'plugin_information'
+				&& ( $event['slug'] ?? null ) === $slug
+				&& array_key_exists( 'sections', $fields )
+				&& false === $fields['sections']
+				&& array_key_exists( 'language_packs', $fields )
+				&& true === $fields['language_packs']
+			) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private static function suspend_rest_install_upgrade_hooks(): array {
+		$hooks = array(
+			array(
+				'callback'     => array( 'Language_Pack_Upgrader', 'async_upgrade' ),
+				'priority'     => 20,
+				'acceptedArgs' => 1,
+			),
+			array(
+				'callback'     => 'wp_version_check',
+				'priority'     => 10,
+				'acceptedArgs' => 0,
+			),
+			array(
+				'callback'     => 'wp_update_plugins',
+				'priority'     => 10,
+				'acceptedArgs' => 0,
+			),
+			array(
+				'callback'     => 'wp_update_themes',
+				'priority'     => 10,
+				'acceptedArgs' => 0,
+			),
+		);
+
+		foreach ( $hooks as $index => $hook ) {
+			$hooks[ $index ]['registered'] = false !== \has_action( 'upgrader_process_complete', $hook['callback'] );
+			\remove_action( 'upgrader_process_complete', $hook['callback'], $hook['priority'] );
+		}
+
+		return $hooks;
+	}
+
+	private static function restore_rest_install_upgrade_hooks( array $hooks ): void {
+		foreach ( $hooks as $hook ) {
+			if ( empty( $hook['registered'] ) ) {
+				continue;
+			}
+
+			if ( false === \has_action( 'upgrader_process_complete', $hook['callback'] ) ) {
+				\add_action( 'upgrader_process_complete', $hook['callback'], $hook['priority'], $hook['acceptedArgs'] );
+			}
+		}
+	}
+
 	private static function rest_plugin_collection_contains( \WP_REST_Response $response, string $plugin_file, string $status ): bool {
 		$expected_plugin = substr( $plugin_file, 0, -4 );
 
@@ -1532,6 +1963,21 @@ final class PluginThemeLifecycleSurface {
 		return $request;
 	}
 
+	private static function rest_plugin_create_request( string $slug, string $status ): \WP_REST_Request {
+		$request = new \WP_REST_Request( 'POST', '/wp/v2/plugins' );
+		$body    = array(
+			'slug'   => $slug,
+			'status' => $status,
+		);
+
+		$request->set_body_params( $body );
+		foreach ( $body as $key => $value ) {
+			$request->set_param( $key, $value );
+		}
+
+		return $request;
+	}
+
 	private static function rest_plugin_cap_filter( array $granted_caps ): callable {
 		$grants = array_fill_keys( $granted_caps, true );
 
@@ -1543,6 +1989,23 @@ final class PluginThemeLifecycleSurface {
 			}
 			foreach ( $grants as $cap => $allowed ) {
 				$allcaps[ $cap ] = $allowed;
+			}
+
+			return $allcaps;
+		};
+	}
+
+	private static function rest_plugin_activate_denial_cap_filter( string $plugin_file ): callable {
+		return static function ( array $allcaps, array $caps = array(), array $args = array() ) use ( $plugin_file ): array {
+			$allcaps['install_plugins']  = true;
+			$allcaps['activate_plugins'] = true;
+
+			if ( ( $args[0] ?? null ) === 'activate_plugin' && ( $args[2] ?? null ) === $plugin_file ) {
+				foreach ( $caps as $cap ) {
+					$allcaps[ $cap ] = false;
+				}
+				$allcaps['activate_plugins'] = false;
+				$allcaps['activate_plugin']  = false;
 			}
 
 			return $allcaps;
@@ -1588,7 +2051,7 @@ final class PluginThemeLifecycleSurface {
 		$plugin_ctx = $ctx->fork( 'plugins' );
 		$theme_ctx  = $ctx->fork( 'themes' );
 
-		$plugin_keys = array( 'good', 'output', 'headerless', 'lateHeader', 'implicitTextDomain', 'futureWp', 'futurePhp', 'dependency', 'dependent', 'network', 'delete', 'restStatus', 'restDelete' );
+		$plugin_keys = array( 'good', 'output', 'headerless', 'lateHeader', 'implicitTextDomain', 'futureWp', 'futurePhp', 'dependency', 'dependent', 'network', 'delete', 'restStatus', 'restDelete', 'restInstallInactive', 'restInstallActive', 'restInstallActivateDeny' );
 		$plugins     = array();
 		foreach ( $plugin_keys as $key ) {
 			$slug            = self::slug( $plugin_ctx, 'cfz-' . $key, $used );
@@ -1599,6 +2062,14 @@ final class PluginThemeLifecycleSurface {
 		$plugins['good']['deactivationOption'] = 'cfz_lifecycle_deactivated_' . str_replace( '-', '_', $plugins['good']['slug'] );
 		$plugins['missingFile']                = self::slug( $plugin_ctx, 'cfz-missing', $used ) . '/missing.php';
 		$plugins['dependent']['missingDependencySlug'] = self::slug( $plugin_ctx, 'cfz-missing-dependency', $used );
+		$plugins['restInstallMissingSlug']     = self::slug( $plugin_ctx, 'cfz-rest-install-missing', $used );
+		$plugins['restInstallErrorSlug']       = self::slug( $plugin_ctx, 'cfz-rest-install-error', $used );
+
+		$package_root = \trailingslashit( WP_CONTENT_DIR ) . 'component-fuzz-plugin-packages-' . $id;
+		foreach ( array( 'restInstallInactive', 'restInstallActive', 'restInstallActivateDeny' ) as $key ) {
+			$plugins[ $key ]['packageSourceRoot'] = $package_root . '/sources/' . $plugins[ $key ]['slug'];
+			$plugins[ $key ]['packageZip']        = $package_root . '/' . $plugins[ $key ]['slug'] . '.zip';
+		}
 
 		$theme_root = \trailingslashit( WP_CONTENT_DIR ) . 'themes';
 		$theme_keys = array( 'parent', 'child', 'futureWp', 'futurePhp', 'broken', 'delete' );
@@ -1625,6 +2096,7 @@ final class PluginThemeLifecycleSurface {
 				'pluginRoot'  => WP_PLUGIN_DIR,
 				'themeRoot'   => $theme_root,
 				'langRoot'    => WP_LANG_DIR,
+				'packageRoot' => $package_root,
 			),
 			'plugins' => $plugins,
 			'themes'  => $themes,
@@ -1828,6 +2300,47 @@ final class PluginThemeLifecycleSurface {
 		self::write_file( $plugin['path'], self::plugin_header( $plugin, $headers ) . $body );
 	}
 
+	private static function write_rest_install_packages( array $plugins ): void {
+		foreach ( $plugins as $plugin ) {
+			self::write_rest_install_package( $plugin );
+		}
+	}
+
+	private static function write_rest_install_package( array $plugin ): void {
+		$source_path = $plugin['packageSourceRoot'] . '/' . $plugin['file'];
+		self::write_file(
+			$source_path,
+			self::plugin_header(
+				$plugin,
+				array(
+					'RequiresWP'  => '5.0',
+					'RequiresPHP' => '5.6',
+				)
+			) . "// REST plugin install package fixture.\n"
+		);
+
+		self::ensure_dir( dirname( $plugin['packageZip'] ) );
+
+		$zip    = new \ZipArchive();
+		$opened = $zip->open( $plugin['packageZip'], \ZipArchive::CREATE | \ZipArchive::OVERWRITE );
+		if ( true !== $opened ) {
+			throw new \RuntimeException( 'Could not create REST plugin install package: ' . $plugin['packageZip'] );
+		}
+
+		if ( ! $zip->addFile( $source_path, $plugin['file'] ) ) {
+			$zip->close();
+			throw new \RuntimeException( 'Could not add plugin file to REST install package: ' . $plugin['file'] );
+		}
+
+		if ( ! $zip->close() ) {
+			throw new \RuntimeException( 'Could not close REST plugin install package: ' . $plugin['packageZip'] );
+		}
+	}
+
+	private static function rest_install_download_url( array $plugin ): string {
+		return 'https://downloads.example.test/component-fuzz/' . $plugin['slug'] . '.zip';
+	}
+
 	private static function plugin_header( array $plugin, array $headers ): string {
 		$headers = array_merge(
 			array(
@@ -1988,6 +2501,10 @@ final class PluginThemeLifecycleSurface {
 			if ( is_array( $theme ) && isset( $theme['dir'] ) ) {
 				$paths[] = $theme['dir'];
 			}
+		}
+
+		if ( isset( $case['paths']['packageRoot'] ) ) {
+			$paths[] = $case['paths']['packageRoot'];
 		}
 
 		return array_values( array_unique( $paths ) );
