@@ -288,8 +288,10 @@ database, network requests, or a configured site.
   recovery email payloads and `handle_error()` protected-endpoint rate limiting
   without real mail, fatal-error handler formatting oracles, synthetic
   `handle()` dispatch with injected fatal data, recovery-link early-return
-  boundaries, protected-endpoint gates, and explicit skips for redirects,
-  loopbacks, real fatal dispatch, and process exits.
+  boundaries, protected-endpoint gates, and isolated subprocess coverage for
+  fatal-error handler shutdown registration, recovery begin-link redirects and
+  dies, and recovery exit redirects, dies, and cleanup without letting process
+  exits escape the child.
 - `editor-helpers`: no-browser classic editor helper coverage for
   `_WP_Editors` settings/state normalization, default editor selection filters,
   teeny and full TinyMCE/Quicktags filter branches, captured editor markup,
