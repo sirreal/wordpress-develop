@@ -158,7 +158,8 @@ database, network requests, or a configured site.
   display callback/action flow, registered control rendering, widgets block
   editor support toggles, widget ID parsing, unregistered-widget cleanup, and
   sidebars widget mapping, `retrieve_widgets()` remapping/customizer
-  persistence boundaries, and lost/inactive block widget recovery.
+  persistence boundaries, lost/inactive block widget recovery, and widget-editor
+  script/style dependency warning contracts.
 - `bookmark-links`: no-live-DB legacy bookmark/link-manager API coverage,
   including in-memory link rows and link categories for `get_bookmark()`,
   `get_bookmarks()`, `wp_list_bookmarks()` and `_walk_bookmarks()` escaping,
@@ -949,9 +950,13 @@ block templates surface short-circuits template CPT queries through
 `posts_pre_query` and asserts that file enumeration and direct template-ID
 resolution remain confined to the active theme template directories. The
 `block-widgets` surface exercises `WP_Widget_Block`, sidebars widget option
-mapping, and `retrieve_widgets()` remap/lost-widget recovery without loading the
-browser widgets editor, performing REST persistence, or depending on theme
-files. The
+mapping, `retrieve_widgets()` remap/lost-widget recovery, and
+`wp_check_widget_editor_deps()` script/style conflict warnings without loading
+the browser widgets editor, performing REST persistence, or depending on theme
+files. Dependency-warning coverage asserts both widget-editor handles, script
+and style conflict classes, dependency-chain enqueued semantics, scoped
+`_doing_it_wrong()` capture, version/message payloads, and asset/hook/global
+restoration. The
 Admin Media Chrome surface intentionally avoids upload dispatch, real
 attachments created by browser flows, `wp_media_attach_action()` redirects,
 media modal runtime behavior, and browser-side image editor UI; server-side
