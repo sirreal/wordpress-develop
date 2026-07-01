@@ -42,6 +42,7 @@ final class TaxonomySurface {
 			$rows[] = self::check_hierarchy_helper_edges( $ctx, $case );
 			$rows[] = self::check_term_query_short_circuit_contracts( $ctx, $case );
 			$rows[] = self::check_term_link_cheap_paths( $ctx, $case );
+			$rows[] = self::check_hierarchical_term_link_filters( $ctx, $case );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
 				'taxonomy.surface-no-throw',
@@ -93,6 +94,7 @@ final class TaxonomySurface {
 				'get_term',
 				'get_term_field',
 				'get_term_link',
+				'get_term_parents_list',
 				'home_url',
 				'has_filter',
 				'is_taxonomy_hierarchical',
@@ -1621,6 +1623,226 @@ final class TaxonomySurface {
 		);
 	}
 
+	private static function check_hierarchical_term_link_filters( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		self::reset_taxonomy_registry();
+
+		$taxonomy      = 'cf_hl_' . substr( $case['token'], 0, 20 );
+		$category_tax  = 'category';
+		$tag_tax       = 'post_tag';
+		$object_type   = $case['objectTypes'][0];
+		$rewrite_slug  = 'topics-' . $case['token'];
+		$root_id       = 400 + $ctx->iteration() * 10;
+		$parent_id     = $root_id + 1;
+		$child_id      = $root_id + 2;
+		$root_slug     = 'root-' . $case['token'];
+		$parent_slug   = 'parent-' . $case['token'];
+		$child_slug    = 'child-' . $case['token'];
+		$category_slug = 'cat-child-' . $case['token'];
+		$tag_slug      = 'tag-child-' . $case['token'];
+		$events        = array();
+		$filters       = array();
+
+		$custom_tax = \register_taxonomy(
+			$taxonomy,
+			$object_type,
+			array(
+				'public'             => true,
+				'publicly_queryable' => true,
+				'hierarchical'       => true,
+				'query_var'          => false,
+				'rewrite'            => array(
+					'slug'         => $rewrite_slug,
+					'with_front'   => false,
+					'hierarchical' => true,
+					'ep_mask'      => EP_NONE,
+				),
+			)
+		);
+		$category_tax_obj = \register_taxonomy(
+			$category_tax,
+			$object_type,
+			array(
+				'public'             => true,
+				'publicly_queryable' => true,
+				'hierarchical'       => true,
+				'query_var'          => true,
+				'rewrite'            => array(
+					'slug'         => 'category',
+					'with_front'   => false,
+					'hierarchical' => true,
+					'ep_mask'      => EP_NONE,
+				),
+				'_builtin'           => true,
+			)
+		);
+		$tag_tax_obj = \register_taxonomy(
+			$tag_tax,
+			$object_type,
+			array(
+				'public'             => true,
+				'publicly_queryable' => true,
+				'hierarchical'       => true,
+				'query_var'          => true,
+				'rewrite'            => array(
+					'slug'         => 'tag',
+					'with_front'   => false,
+					'hierarchical' => true,
+					'ep_mask'      => EP_NONE,
+				),
+				'_builtin'           => true,
+			)
+		);
+
+		if ( \is_wp_error( $custom_tax ) || \is_wp_error( $category_tax_obj ) || \is_wp_error( $tag_tax_obj ) ) {
+			return $ctx->fail(
+				'taxonomy.term-links.hierarchical-rewrite-and-filters',
+				self::case_data( $case ) + array(
+					'customError'   => \is_wp_error( $custom_tax ) ? $custom_tax->get_error_code() : null,
+					'categoryError' => \is_wp_error( $category_tax_obj ) ? $category_tax_obj->get_error_code() : null,
+					'tagError'      => \is_wp_error( $tag_tax_obj ) ? $tag_tax_obj->get_error_code() : null,
+				)
+			);
+		}
+
+		try {
+			self::seed_link_term( $root_id, $taxonomy, $root_slug, 'Root ' . $case['token'], 0 );
+			self::seed_link_term( $parent_id, $taxonomy, $parent_slug, 'Parent ' . $case['token'], $root_id );
+			self::seed_link_term( $child_id, $taxonomy, $child_slug, 'Child ' . $case['token'], $parent_id );
+			self::seed_link_term( $root_id + 10, $category_tax, 'cat-root-' . $case['token'], 'Category Root ' . $case['token'], 0 );
+			self::seed_link_term( $child_id + 10, $category_tax, $category_slug, 'Category Child ' . $case['token'], $root_id + 10 );
+			self::seed_link_term( $root_id + 20, $tag_tax, 'tag-root-' . $case['token'], 'Tag Root ' . $case['token'], 0 );
+			self::seed_link_term( $child_id + 20, $tag_tax, $tag_slug, 'Tag Child ' . $case['token'], $root_id + 20 );
+
+			$pre_term_link = static function ( string $termlink, \WP_Term $term ) use ( &$events ): string {
+				$events[] = array(
+					'hook'     => 'pre_term_link',
+					'termId'   => $term->term_id,
+					'taxonomy' => $term->taxonomy,
+					'value'    => $termlink,
+				);
+				return $termlink;
+			};
+			$category_link = static function ( string $termlink, int $term_id ) use ( &$events ): string {
+				$events[] = array(
+					'hook'   => 'category_link',
+					'termId' => $term_id,
+					'value'  => $termlink,
+				);
+				return $termlink . '?legacy_category=1';
+			};
+			$tag_link = static function ( string $termlink, int $term_id ) use ( &$events ): string {
+				$events[] = array(
+					'hook'   => 'tag_link',
+					'termId' => $term_id,
+					'value'  => $termlink,
+				);
+				return $termlink . '?legacy_tag=1';
+			};
+			$term_link = static function ( string $termlink, \WP_Term $term, string $taxonomy_arg ) use ( &$events ): string {
+				$events[] = array(
+					'hook'     => 'term_link',
+					'termId'   => $term->term_id,
+					'taxonomy' => $taxonomy_arg,
+					'value'    => $termlink,
+				);
+				return $termlink . ( str_contains( $termlink, '?' ) ? '&' : '?' ) . 'final=' . rawurlencode( $taxonomy_arg );
+			};
+
+			self::add_filter_record( $filters, 'pre_term_link', $pre_term_link, 10, 2 );
+			self::add_filter_record( $filters, 'category_link', $category_link, 10, 2 );
+			self::add_filter_record( $filters, 'tag_link', $tag_link, 10, 2 );
+			self::add_filter_record( $filters, 'term_link', $term_link, 10, 3 );
+
+			$child_term       = \get_term( $child_id, $taxonomy );
+			$category_term    = \get_term( $child_id + 10, $category_tax );
+			$tag_term         = \get_term( $child_id + 20, $tag_tax );
+			$child_link       = \get_term_link( $child_id, $taxonomy );
+			$category_linked  = \get_term_link( $category_term, $category_tax );
+			$tag_linked       = \get_term_link( $tag_term, $tag_tax );
+			$parents_unlinked = \get_term_parents_list(
+				$child_id,
+				$taxonomy,
+				array(
+					'format'    => 'slug',
+					'link'      => false,
+					'inclusive' => true,
+					'separator' => ' > ',
+				)
+			);
+			$parents_linked = \get_term_parents_list(
+				$child_id,
+				$taxonomy,
+				array(
+					'format'    => 'name',
+					'link'      => true,
+					'inclusive' => false,
+					'separator' => ' | ',
+				)
+			);
+		} finally {
+			self::remove_filter_records( $filters );
+		}
+
+		$pre_events      = self::events_named( $events, 'pre_term_link' );
+		$category_events = self::events_named( $events, 'category_link' );
+		$tag_events      = self::events_named( $events, 'tag_link' );
+		$term_events     = self::events_named( $events, 'term_link' );
+
+		$index_prefix        = str_starts_with( (string) $case['permalinkStructure'], '/index.php/' ) ? '/index.php' : '';
+		$expected_child_base = self::HOME_URL . $index_prefix . '/' . $rewrite_slug . '/' . $root_slug . '/' . $parent_slug . '/' . $child_slug . '/';
+		$expected_child_link = $expected_child_base . '?final=' . rawurlencode( $taxonomy );
+		$expected_cat_base   = self::HOME_URL . $index_prefix . '/category/cat-root-' . $case['token'] . '/' . $category_slug . '/';
+		$expected_cat_link   = $expected_cat_base . '?legacy_category=1&final=' . rawurlencode( $category_tax );
+		$expected_tag_base   = self::HOME_URL . $index_prefix . '/tag/tag-root-' . $case['token'] . '/' . $tag_slug . '/';
+		$expected_tag_link   = $expected_tag_base . '?legacy_tag=1&final=' . rawurlencode( $tag_tax );
+
+		$ok = $child_term instanceof \WP_Term
+			&& $category_term instanceof \WP_Term
+			&& $tag_term instanceof \WP_Term
+			&& $expected_child_link === $child_link
+			&& $expected_cat_link === $category_linked
+			&& $expected_tag_link === $tag_linked
+			&& $root_slug . ' > ' . $parent_slug . ' > ' . $child_slug . ' > ' === $parents_unlinked
+			&& str_contains( $parents_linked, 'Root ' . $case['token'] )
+			&& str_contains( $parents_linked, 'Parent ' . $case['token'] )
+			&& ! str_contains( $parents_linked, 'Child ' . $case['token'] )
+			&& 5 === count( $pre_events )
+			&& 1 === count( $category_events )
+			&& 1 === count( $tag_events )
+			&& 5 === count( $term_events )
+			&& $child_id === ( $pre_events[0]['termId'] ?? null )
+			&& str_contains( (string) ( $pre_events[0]['value'] ?? '' ), "%{$taxonomy}%" )
+			&& $child_id === ( $term_events[0]['termId'] ?? null )
+			&& $expected_child_base === ( $term_events[0]['value'] ?? null )
+			&& ( $child_id + 10 ) === ( $category_events[0]['termId'] ?? null )
+			&& $expected_cat_base === ( $category_events[0]['value'] ?? null )
+			&& $expected_cat_base . '?legacy_category=1' === ( $term_events[1]['value'] ?? null )
+			&& ( $child_id + 20 ) === ( $tag_events[0]['termId'] ?? null )
+			&& $expected_tag_base === ( $tag_events[0]['value'] ?? null )
+			&& $expected_tag_base . '?legacy_tag=1' === ( $term_events[2]['value'] ?? null )
+			&& self::filters_absent( $filters );
+
+		return $ctx->result(
+			'taxonomy.term-links.hierarchical-rewrite-and-filters',
+			$ok,
+			self::case_data( $case ) + array(
+				'taxonomy'        => $taxonomy,
+				'rewriteSlug'     => $rewrite_slug,
+				'childLink'       => $child_link,
+				'categoryLink'    => $category_linked,
+				'tagLink'         => $tag_linked,
+				'parentsUnlinked' => $parents_unlinked,
+				'parentsLinked'   => $parents_linked,
+				'eventHooks'      => array_column( $events, 'hook' ),
+				'preEvents'       => $pre_events,
+				'categoryEvents'  => $category_events,
+				'tagEvents'       => $tag_events,
+				'termEvents'      => $term_events,
+				'filtersAbsent'   => self::filters_absent( $filters ),
+			)
+		);
+	}
+
 	private static function case_for_context( \ComponentFuzz\FuzzContext $ctx ): array {
 		$token = self::safe_token(
 			$ctx->identifier( 4, 10 ) . '_' . dechex( $ctx->seed() & 0xffff ) . '_' . $ctx->iteration()
@@ -1869,6 +2091,10 @@ final class TaxonomySurface {
 			'count'            => 0,
 			'filter'           => 'raw',
 		);
+	}
+
+	private static function seed_link_term( int $term_id, string $taxonomy, string $slug, string $name, int $parent ): void {
+		\wp_cache_set( $term_id, self::hierarchy_term( $term_id, $taxonomy, $slug, $name, $parent ), 'terms' );
 	}
 
 	private static function expected_default_term( $default_term ): array {
