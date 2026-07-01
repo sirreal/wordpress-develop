@@ -101,6 +101,13 @@ final class RestSurface {
 				}
 			);
 			$checks[] = self::run_check(
+				'batch-v1-execution',
+				'REST batch/v1 dispatch validates child requests, honors allow_batch gates, preserves child request data, envelopes responses, and restores temporary filters.',
+				function () use ( &$rng ) {
+					return self::check_batch_v1_execution( $rng );
+				}
+			);
+			$checks[] = self::run_check(
 				'response-links-envelope',
 				'WP_REST_Response links, headers, CURIE compaction, embedding, envelopes, and response conversion preserve response metadata without leaking filters.',
 				function () use ( &$rng ) {
@@ -1356,6 +1363,367 @@ final class RestSurface {
 		);
 	}
 
+	private static function check_batch_v1_execution( array &$rng ): array {
+		$namespace = self::namespace_token( $rng );
+		$token     = self::slug_token( $rng, 'batch' );
+		$server    = new \WP_REST_Server();
+
+		$had_rest_server      = array_key_exists( 'wp_rest_server', $GLOBALS );
+		$previous_rest_server = $had_rest_server ? $GLOBALS['wp_rest_server'] : null;
+		$callback_hits        = array();
+		$permission_hits      = array();
+		$gate_hits            = array();
+		$seen_requests        = array();
+		$child_pre_dispatch   = array();
+		$child_post_dispatch  = array();
+		$parent_pre_hits      = 0;
+
+		$allowed_route = '/' . $namespace . '/batch/(?P<id>[0-9]+)';
+		$allowed_path  = '/' . $namespace . '/batch/';
+		$allowed_args  = array(
+			'id'        => array(
+				'type' => 'integer',
+			),
+			'token'     => array(
+				'type'     => 'string',
+				'required' => true,
+				'pattern'  => '^batch-[a-z0-9]{6}$',
+			),
+			'mode'      => array(
+				'type'    => 'string',
+				'default' => 'alpha',
+				'enum'    => array( 'alpha', 'beta', 'gamma', 'delta' ),
+			),
+			'bodyValue' => array(
+				'type'     => 'string',
+				'required' => true,
+			),
+		);
+		$status_by_method = array(
+			'POST'   => 200,
+			'PUT'    => 201,
+			'PATCH'  => 202,
+			'DELETE' => 203,
+		);
+
+		$server->register_route(
+			$namespace,
+			$allowed_route,
+			array(
+				'allow_batch' => array( 'v1' => true ),
+				array(
+					'methods'             => 'POST, PUT, PATCH, DELETE',
+					'permission_callback' => static function ( \WP_REST_Request $request ) use ( &$permission_hits ) {
+						$route                    = $request->get_route();
+						$permission_hits[ $route ] = ( $permission_hits[ $route ] ?? 0 ) + 1;
+						return true;
+					},
+					'callback'            => static function ( \WP_REST_Request $request ) use ( &$callback_hits, &$seen_requests, $status_by_method ) {
+						$route                 = $request->get_route();
+						$method                = $request->get_method();
+						$callback_hits[ $route ] = ( $callback_hits[ $route ] ?? 0 ) + 1;
+						$seen_requests[]       = array(
+							'route'   => $route,
+							'method'  => $method,
+							'query'   => $request->get_query_params(),
+							'body'    => $request->get_body_params(),
+							'headers' => array(
+								'x_fuzz_batch' => $request->get_header_as_array( 'X-Fuzz-Batch' ),
+								'x_method'     => $request->get_header( 'X-Method' ),
+							),
+						);
+
+						return new \WP_REST_Response(
+							array(
+								'id'        => $request['id'],
+								'method'    => $method,
+								'route'     => $route,
+								'urlParams' => $request->get_url_params(),
+								'query'     => $request->get_query_params(),
+								'body'      => $request->get_body_params(),
+								'headers'   => array(
+									'x_fuzz_batch' => $request->get_header_as_array( 'X-Fuzz-Batch' ),
+									'x_method'     => $request->get_header( 'X-Method' ),
+								),
+								'params'    => array(
+									'token'     => $request['token'],
+									'mode'      => $request['mode'],
+									'bodyValue' => $request['bodyValue'],
+								),
+							),
+							$status_by_method[ $method ] ?? 200,
+							array( 'X-Batch-Child' => (string) $request['id'] )
+						);
+					},
+					'args'                => $allowed_args,
+				),
+			)
+		);
+
+		$gate_cases = array(
+			array( 'label' => 'missing' ),
+			array( 'label' => 'malformed', 'allow_batch' => true ),
+			array( 'label' => 'wrong-version', 'allow_batch' => array( 'v2' => true ) ),
+			array( 'label' => 'v1-false', 'allow_batch' => array( 'v1' => false ) ),
+		);
+		foreach ( $gate_cases as $case ) {
+			$gate_route = '/' . $namespace . '/batch-gate-' . $case['label'];
+			$route_args = array(
+				array(
+					'methods'             => 'POST',
+					'permission_callback' => static function () {
+						return true;
+					},
+					'callback'            => static function () use ( &$gate_hits, $case ) {
+						$gate_hits[ $case['label'] ] = ( $gate_hits[ $case['label'] ] ?? 0 ) + 1;
+						return array( 'gate' => $case['label'] );
+					},
+				),
+			);
+			if ( array_key_exists( 'allow_batch', $case ) ) {
+				$route_args['allow_batch'] = $case['allow_batch'];
+			}
+
+			$server->register_route( $namespace, $gate_route, $route_args );
+		}
+
+		$valid_specs = array(
+			array( 'method' => 'POST', 'id' => 101, 'mode' => 'alpha', 'queryOnly' => 'q-post', 'bodyValue' => 'body-post' ),
+			array( 'method' => 'PUT', 'id' => 102, 'mode' => 'beta', 'queryOnly' => 'q-put', 'bodyValue' => 'body-put' ),
+			array( 'method' => 'PATCH', 'id' => 103, 'mode' => 'gamma', 'queryOnly' => 'q-patch', 'bodyValue' => 'body-patch' ),
+			array( 'method' => 'DELETE', 'id' => 104, 'mode' => 'delta', 'queryOnly' => 'q-delete', 'bodyValue' => 'body-delete' ),
+		);
+		$normal_requests = array();
+		foreach ( $valid_specs as $spec ) {
+			$normal_requests[] = array(
+				'method'  => $spec['method'],
+				'path'    => $allowed_path . $spec['id'] . '?token=' . rawurlencode( $token ) . '&mode=' . $spec['mode'] . '&queryOnly=' . rawurlencode( $spec['queryOnly'] ),
+				'body'    => array(
+					'bodyValue' => $spec['bodyValue'],
+					'shared'    => 'shared-' . strtolower( $spec['method'] ),
+				),
+				'headers' => array(
+					'X-Fuzz-Batch' => array( 'header-' . strtolower( $spec['method'] ), $token ),
+					'X-Method'     => $spec['method'],
+				),
+			);
+		}
+		foreach ( $gate_cases as $case ) {
+			$normal_requests[] = array(
+				'method' => 'POST',
+				'path'   => '/' . $namespace . '/batch-gate-' . $case['label'],
+			);
+		}
+		$normal_requests[] = array(
+			'method' => 'POST',
+			'path'   => $allowed_path . '199?token=bad-token&mode=alpha',
+			'body'   => array( 'bodyValue' => 'invalid-token-body' ),
+		);
+		$normal_requests[] = array(
+			'method' => 'POST',
+			'path'   => 'http://',
+		);
+
+		$pre_filter = static function ( $result, \WP_REST_Server $filter_server, \WP_REST_Request $request ) use ( $server, &$child_pre_dispatch, &$parent_pre_hits ) {
+			if ( $filter_server !== $server ) {
+				return $result;
+			}
+			if ( '/batch/v1' === $request->get_route() ) {
+				++$parent_pre_hits;
+				return $result;
+			}
+
+			$child_pre_dispatch[] = array(
+				'route'     => $request->get_route(),
+				'method'    => $request->get_method(),
+				'urlParams' => $request->get_url_params(),
+				'attrs'     => $request->get_attributes(),
+				'defaults'  => $request->get_default_params(),
+			);
+			return $result;
+		};
+		$post_filter = static function ( \WP_REST_Response $response, \WP_REST_Server $filter_server, \WP_REST_Request $request ) use ( $server, &$child_post_dispatch ) {
+			if ( $filter_server === $server ) {
+				$child_post_dispatch[] = array(
+					'route'  => $request->get_route(),
+					'method' => $request->get_method(),
+					'status' => $response->get_status(),
+				);
+				$response->header( 'X-Post-Dispatch', 'seen' );
+			}
+
+			return $response;
+		};
+
+		add_filter( 'rest_pre_dispatch', $pre_filter, 10, 3 );
+		add_filter( 'rest_post_dispatch', $post_filter, 10, 3 );
+		try {
+			$normal_response = $server->dispatch( self::batch_request( $normal_requests, 'normal' ) );
+			$normal_data     = $normal_response->get_data();
+			$callbacks_after_normal = array_sum( $callback_hits );
+			$child_pre_after_normal = count( $child_pre_dispatch );
+			$child_post_after_normal = count( $child_post_dispatch );
+
+			$require_all_requests = array(
+				array(
+					'method' => 'POST',
+					'path'   => $allowed_path . '301?token=' . rawurlencode( $token ) . '&mode=alpha',
+					'body'   => array( 'bodyValue' => 'require-all-valid' ),
+				),
+				array(
+					'method' => 'PATCH',
+					'path'   => $allowed_path . '302?token=invalid token&mode=gamma',
+					'body'   => array( 'bodyValue' => 'require-all-invalid' ),
+				),
+			);
+			$require_all_response = $server->dispatch( self::batch_request( $require_all_requests, 'require-all-validate' ) );
+			$require_all_data     = $require_all_response->get_data();
+			$callbacks_after_require_all = array_sum( $callback_hits );
+			$child_pre_after_require_all = count( $child_pre_dispatch );
+			$child_post_after_require_all = count( $child_post_dispatch );
+		} finally {
+			remove_filter( 'rest_pre_dispatch', $pre_filter, 10 );
+			remove_filter( 'rest_post_dispatch', $post_filter, 10 );
+		}
+
+		$max_filter = static function (): int {
+			return 2;
+		};
+		add_filter( 'rest_get_max_batch_size', $max_filter );
+		try {
+			$small_batch_server = new \WP_REST_Server();
+		} finally {
+			remove_filter( 'rest_get_max_batch_size', $max_filter );
+		}
+		$overflow_response = $small_batch_server->dispatch(
+			self::batch_request(
+				array(
+					array( 'path' => '/' ),
+					array( 'path' => '/' ),
+					array( 'path' => '/' ),
+				),
+				'normal'
+			)
+		);
+		$overflow_data = $overflow_response->get_data();
+
+		$filter_removed = false === has_filter( 'rest_pre_dispatch', $pre_filter )
+			&& false === has_filter( 'rest_post_dispatch', $post_filter )
+			&& false === has_filter( 'rest_get_max_batch_size', $max_filter );
+		$rest_server_restored = $had_rest_server
+			? array_key_exists( 'wp_rest_server', $GLOBALS ) && $previous_rest_server === $GLOBALS['wp_rest_server']
+			: ! array_key_exists( 'wp_rest_server', $GLOBALS );
+
+		$normal_responses = is_array( $normal_data['responses'] ?? null ) ? $normal_data['responses'] : array();
+		$valid_ok         = 207 === $normal_response->get_status() && count( $normal_requests ) === count( $normal_responses );
+		foreach ( $valid_specs as $index => $spec ) {
+			$envelope = $normal_responses[ $index ] ?? array();
+			$body     = $envelope['body'] ?? array();
+			$headers  = $envelope['headers'] ?? array();
+			$valid_ok = $valid_ok
+				&& ( $status_by_method[ $spec['method'] ] ?? 200 ) === ( $envelope['status'] ?? null )
+				&& (string) $spec['id'] === (string) ( $headers['X-Batch-Child'] ?? null )
+				&& 'seen' === ( $headers['X-Post-Dispatch'] ?? null )
+				&& is_array( $body )
+				&& $spec['id'] === (int) ( $body['id'] ?? 0 )
+				&& $spec['method'] === ( $body['method'] ?? null )
+				&& $allowed_path . $spec['id'] === ( $body['route'] ?? null )
+				&& array( 'id' => $spec['id'] ) === ( $body['urlParams'] ?? null )
+				&& $token === ( $body['query']['token'] ?? null )
+				&& $spec['mode'] === ( $body['query']['mode'] ?? null )
+				&& $spec['queryOnly'] === ( $body['query']['queryOnly'] ?? null )
+				&& $spec['bodyValue'] === ( $body['body']['bodyValue'] ?? null )
+				&& 'shared-' . strtolower( $spec['method'] ) === ( $body['body']['shared'] ?? null )
+				&& array( 'header-' . strtolower( $spec['method'] ), $token ) === ( $body['headers']['x_fuzz_batch'] ?? null )
+				&& $spec['method'] === ( $body['headers']['x_method'] ?? null )
+				&& $token === ( $body['params']['token'] ?? null )
+				&& $spec['mode'] === ( $body['params']['mode'] ?? null )
+				&& $spec['bodyValue'] === ( $body['params']['bodyValue'] ?? null );
+		}
+
+		$gate_start_index = count( $valid_specs );
+		$gate_ok          = array() === $gate_hits;
+		foreach ( $gate_cases as $offset => $case ) {
+			$envelope = $normal_responses[ $gate_start_index + $offset ] ?? array();
+			$gate_ok  = $gate_ok
+				&& 400 === ( $envelope['status'] ?? null )
+				&& 'rest_batch_not_allowed' === ( $envelope['body']['code'] ?? null );
+		}
+
+		$invalid_index    = $gate_start_index + count( $gate_cases );
+		$parse_index      = $invalid_index + 1;
+		$normal_error_ok  = 400 === ( $normal_responses[ $parse_index ]['status'] ?? null )
+			&& 'parse_path_failed' === ( $normal_responses[ $parse_index ]['body']['code'] ?? null )
+			&& 400 === ( $normal_responses[ $invalid_index ]['status'] ?? null )
+			&& 'rest_invalid_param' === ( $normal_responses[ $invalid_index ]['body']['code'] ?? null );
+
+		$pre_routes       = array_column( $child_pre_dispatch, 'route' );
+		$post_routes      = array_column( $child_post_dispatch, 'route' );
+		$filter_locality_ok = 2 === $parent_pre_hits
+			&& count( $normal_requests ) - 1 === $child_pre_after_normal
+			&& count( $normal_requests ) - 1 === $child_post_after_normal
+			&& $child_pre_after_normal === $child_pre_after_require_all
+			&& $child_post_after_normal === $child_post_after_require_all
+			&& ! in_array( 'http://', $pre_routes, true )
+			&& ! in_array( 'http://', $post_routes, true );
+
+		$require_all_responses = is_array( $require_all_data['responses'] ?? null ) ? $require_all_data['responses'] : array();
+		$require_all_ok        = 207 === $require_all_response->get_status()
+			&& 'validation' === ( $require_all_data['failed'] ?? null )
+			&& array_key_exists( 0, $require_all_responses )
+			&& null === $require_all_responses[0]
+			&& 400 === ( $require_all_responses[1]['status'] ?? null )
+			&& 'rest_invalid_param' === ( $require_all_responses[1]['body']['code'] ?? null )
+			&& $callbacks_after_normal === $callbacks_after_require_all;
+
+		$overflow_ok = 400 === $overflow_response->get_status()
+			&& 'rest_invalid_param' === ( $overflow_data['code'] ?? null )
+			&& 'rest_too_many_items' === ( $overflow_data['data']['details']['requests']['code'] ?? null );
+
+		$callback_ok = count( $valid_specs ) === $callbacks_after_normal
+			&& count( $valid_specs ) === array_sum( $permission_hits )
+			&& count( $valid_specs ) === count( $seen_requests );
+
+		$ok = $valid_ok
+			&& $gate_ok
+			&& $normal_error_ok
+			&& $filter_locality_ok
+			&& $require_all_ok
+			&& $overflow_ok
+			&& $callback_ok
+			&& $filter_removed
+			&& $rest_server_restored;
+
+		return array(
+			'ok'       => $ok,
+			'message'  => $ok ? 'REST batch/v1 dispatch invariants held.' : 'REST batch/v1 dispatch invariant failed.',
+			'features' => array( 'batch-v1', 'allow-batch', 'batch-validation', 'batch-envelopes', 'batch-filters', 'batch-max-size' ),
+			'details'  => array(
+				'namespace'          => $namespace,
+				'token'              => $token,
+				'validOk'            => $valid_ok,
+				'gateOk'             => $gate_ok,
+				'normalErrorOk'      => $normal_error_ok,
+				'filterLocalityOk'   => $filter_locality_ok,
+				'requireAllOk'       => $require_all_ok,
+				'overflowOk'         => $overflow_ok,
+				'callbackOk'         => $callback_ok,
+				'filterRemoved'      => $filter_removed,
+				'restServerRestored' => $rest_server_restored,
+				'normalResponse'     => self::response_summary( $normal_response ),
+				'requireAllResponse' => self::response_summary( $require_all_response ),
+				'overflowResponse'   => self::response_summary( $overflow_response ),
+				'callbackHits'       => $callback_hits,
+				'permissionHits'     => $permission_hits,
+				'gateHits'           => $gate_hits,
+				'parentPreHits'      => $parent_pre_hits,
+				'childPreDispatch'   => $child_pre_dispatch,
+				'childPostDispatch'  => $child_post_dispatch,
+				'seenRequests'       => $seen_requests,
+			),
+		);
+	}
+
 	private static function check_response_links_envelope( array &$rng ): array {
 		$namespace    = self::namespace_token( $rng );
 		$token        = self::slug_token( $rng, 'resp' );
@@ -1843,6 +2211,18 @@ final class RestSurface {
 	private static function json_encode_for_body( $value ): string {
 		$json = json_encode( $value, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE );
 		return false === $json ? 'null' : $json;
+	}
+
+	private static function batch_request( array $requests, string $validation ): \WP_REST_Request {
+		$request = new \WP_REST_Request( 'POST', '/batch/v1' );
+		$request->set_body_params(
+			array(
+				'validation' => $validation,
+				'requests'   => $requests,
+			)
+		);
+
+		return $request;
 	}
 
 	private static function response_summary( $response ): array {
