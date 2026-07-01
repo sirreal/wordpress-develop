@@ -366,7 +366,7 @@
 				<tr>
 					<td><code>rest-directory-services</code></td>
 					<td><span class="status good">local validation passed</span></td>
-					<td>Scoped component worktree <code>component-fuzz-rest-directory-fields</code> builds on pattern proxy and URL-details fallback coverage through <code>e581555577</code>.</td>
+					<td>Block-directory field/link follow-up through <code>87b8fc9686</code> builds on pattern proxy and URL-details fallback coverage through <code>e581555577</code>.</td>
 					<td>Latest focused runs: seed 224 passed 6 checks, seeds 1 and 224 over 25 iterations each passed 150 checks, adjacent <code>rest-directory-services,rest,rest-controllers,rest-object-controllers,rest-media-attachments,http,blocks,block-templates,block-editor-adjuncts,plugin-theme-lifecycle</code> smoke passed 97 checks with 1 existing skip, and broad seed 224 smoke passed 4724 checks with 4 skips.</td>
 					<td><code>WP_REST_Block_Directory_Controller</code>, <code>WP_REST_Pattern_Directory_Controller</code>, <code>WP_REST_URL_Details_Controller</code>, scoped <code>plugins_api</code> and <code>pre_http_request</code> short-circuits, block-directory <code>_fields</code> projection, explicit block title/icon mapping, installed-plugin link discovery through seeded plugin cache, site-transient caches, REST permission/capability filters, pattern-directory proxy query allowlisting, derived WordPress.org argument overwrite behavior, malformed/unclosed head metadata parsing and first-match precedence, URL parser boundaries, and REST server/global restoration.</td>
 				</tr>
@@ -1166,6 +1166,12 @@
 				</tr>
 				</thead>
 				<tbody>
+					<tr>
+						<td><code>87b8fc9686</code></td>
+						<td><code>rest-directory-services</code></td>
+						<td><code>rest-directory-services</code> focused seed 224 passed 6 checks with no skips, seeds 1 and 224 over 25 iterations each passed 150 checks, and adjacent <code>rest-directory-services,rest,rest-controllers,rest-object-controllers,rest-media-attachments,http,blocks,block-templates,block-editor-adjuncts,plugin-theme-lifecycle</code> smoke passed 97 checks with 1 existing skip after adding block-directory <code>_fields</code> projection, explicit title/icon mapping, installed-plugin link discovery, and no-HTTP oracles.</td>
+						<td>4724 passed, 4 skipped, 0 failed at 1 iteration after REST directory block-directory field/link coverage.</td>
+					</tr>
 					<tr>
 						<td><code>627a726d0e</code></td>
 						<td><code>appearance-media</code></td>
