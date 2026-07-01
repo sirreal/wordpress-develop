@@ -50,6 +50,7 @@ final class AuthFlowSurface {
 			$rows[] = self::check_authenticate_filter_and_password_paths( $ctx->fork( 'authenticate' ) );
 			$rows[] = self::check_signon_cookie_actions_without_headers( $ctx->fork( 'signon' ) );
 			$rows[] = self::check_clear_auth_cookie_without_headers( $ctx->fork( 'clear-cookie' ) );
+			$rows[] = self::check_logout_lifecycle( $ctx->fork( 'logout' ) );
 			$rows[] = self::check_cookie_authentication_paths( $ctx->fork( 'cookie-auth' ) );
 			$rows[] = self::check_auth_cookie_validation_events( $ctx->fork( 'cookie-events' ) );
 			$rows[] = self::check_generated_cookie_scheme_boundaries( $ctx->fork( 'cookie-schemes' ) );
@@ -238,6 +239,18 @@ final class AuthFlowSurface {
 		self::record_event( 'clear_auth_cookie', array() );
 	}
 
+	public static function action_wp_logout( int $user_id ): void {
+		self::record_event(
+			'wp_logout',
+			array(
+				'userId'          => $user_id,
+				'currentUserId'   => \get_current_user_id(),
+				'isLoggedIn'      => \is_user_logged_in(),
+				'sessionTokenSha' => sha1( \wp_get_session_token() ),
+			)
+		);
+	}
+
 	public static function action_auth_cookie_malformed( string $cookie, string $scheme ): void {
 		self::record_cookie_event( 'auth_cookie_malformed', $cookie, $scheme );
 	}
@@ -316,6 +329,7 @@ final class AuthFlowSurface {
 				'wp_unslash',
 				'wp_validate_auth_cookie',
 				'wp_validate_logged_in_cookie',
+				'wp_logout',
 			) as $function
 		) {
 			if ( ! function_exists( $function ) ) {
@@ -661,6 +675,145 @@ final class AuthFlowSurface {
 		return self::row(
 			$ctx,
 			'auth-flow.clear-auth-cookie-action-and-send-filter',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, 5 ) )
+		);
+	}
+
+	private static function check_logout_lifecycle( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_case_state();
+		self::clear_events();
+
+		$failures       = array();
+		$user_spec      = self::user_spec( $ctx, 'logout' );
+		$user           = self::insert_synthetic_user( $user_spec );
+		$manager        = \WP_Session_Tokens::get_instance( $user_spec['ID'] );
+		$expires        = time() + DAY_IN_SECONDS + $ctx->int( 1, 3600 );
+		$current_token  = $manager->create( $expires );
+		$sibling_token  = $manager->create( $expires + HOUR_IN_SECONDS );
+		$current_cookie = \wp_generate_auth_cookie( $user_spec['ID'], $expires, 'logged_in', $current_token );
+		$sibling_cookie = \wp_generate_auth_cookie( $user_spec['ID'], $expires + HOUR_IN_SECONDS, 'logged_in', $sibling_token );
+		$headers_before = function_exists( 'headers_list' ) ? headers_list() : array();
+
+		\wp_set_current_user( $user_spec['ID'] );
+		$_COOKIE[ LOGGED_IN_COOKIE ] = $current_cookie;
+
+		$before = array(
+			'currentUserId'        => \get_current_user_id(),
+			'isLoggedIn'           => \is_user_logged_in(),
+			'sessionToken'         => \wp_get_session_token(),
+			'currentTokenValid'    => $manager->verify( $current_token ),
+			'siblingTokenValid'    => $manager->verify( $sibling_token ),
+			'currentCookieUserId'  => \wp_validate_auth_cookie( $current_cookie, 'logged_in' ),
+			'siblingCookieUserId'  => \wp_validate_auth_cookie( $sibling_cookie, 'logged_in' ),
+			'sessionCount'         => count( $manager->get_all() ),
+		);
+
+		\add_filter( 'send_auth_cookies', array( __CLASS__, 'filter_send_auth_cookies' ), 10, 6 );
+		\add_filter( 'determine_current_user', 'wp_validate_auth_cookie' );
+		\add_filter( 'determine_current_user', 'wp_validate_logged_in_cookie', 20 );
+		\add_action( 'clear_auth_cookie', array( __CLASS__, 'action_clear_auth_cookie' ), 10, 0 );
+		\add_action( 'wp_logout', array( __CLASS__, 'action_wp_logout' ), 10, 1 );
+
+		try {
+			\wp_logout();
+
+			$after = array(
+				'currentUser'          => self::describe_user_result( \wp_get_current_user() ),
+				'currentUserId'        => \get_current_user_id(),
+				'isLoggedIn'           => \is_user_logged_in(),
+				'sessionTokenSha'      => sha1( \wp_get_session_token() ),
+				'currentTokenValid'    => $manager->verify( $current_token ),
+				'siblingTokenValid'    => $manager->verify( $sibling_token ),
+				'currentCookieUserId'  => \wp_validate_auth_cookie( $current_cookie, 'logged_in' ),
+				'siblingCookieUserId'  => \wp_validate_auth_cookie( $sibling_cookie, 'logged_in' ),
+				'sessionCount'         => count( $manager->get_all() ),
+			);
+
+			unset( $GLOBALS['current_user'] );
+			$stale_cookie_user = \wp_get_current_user();
+			$after['staleCookieUser']     = self::describe_user_result( $stale_cookie_user );
+			$after['staleCookieLoggedIn'] = \is_user_logged_in();
+
+			$clear_events  = self::events( 'clear_auth_cookie' );
+			$send_events   = self::events( 'send_auth_cookies' );
+			$logout_events = self::events( 'wp_logout' );
+			$send_event    = $send_events[0] ?? array();
+			$logout_event  = $logout_events[0] ?? array();
+			$headers_after = function_exists( 'headers_list' ) ? headers_list() : array();
+
+			self::collect_failure(
+				$failures,
+				$user_spec['ID'] === $before['currentUserId']
+					&& true === $before['isLoggedIn']
+					&& $current_token === $before['sessionToken']
+					&& true === $before['currentTokenValid']
+					&& true === $before['siblingTokenValid']
+					&& $user_spec['ID'] === $before['currentCookieUserId']
+					&& $user_spec['ID'] === $before['siblingCookieUserId']
+					&& 2 === $before['sessionCount']
+					&& false === $after['currentTokenValid']
+					&& true === $after['siblingTokenValid']
+					&& false === $after['currentCookieUserId']
+					&& $user_spec['ID'] === $after['siblingCookieUserId']
+					&& 1 === $after['sessionCount'],
+				'wp_logout destroys only the cookie-selected current session and preserves sibling sessions',
+				array(
+					'user'   => self::describe_user( $user ),
+					'before' => $before,
+					'after'  => $after,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				0 === $after['currentUserId']
+					&& false === $after['isLoggedIn']
+					&& $stale_cookie_user instanceof \WP_User
+					&& 0 === (int) $stale_cookie_user->ID
+					&& false === $after['staleCookieLoggedIn']
+					&& array( array() ) === $clear_events
+					&& 1 === count( $send_events )
+					&& true === ( $send_event['send'] ?? null )
+					&& 0 === ( $send_event['expire'] ?? null )
+					&& 0 === ( $send_event['expiration'] ?? null )
+					&& 0 === ( $send_event['userId'] ?? null )
+					&& '' === ( $send_event['scheme'] ?? null )
+					&& sha1( '' ) === ( $send_event['tokenSha1'] ?? null )
+					&& false === ( $send_event['returned'] ?? null )
+					&& array(
+						array(
+							'userId'          => $user_spec['ID'],
+							'currentUserId'   => 0,
+							'isLoggedIn'      => false,
+							'sessionTokenSha' => sha1( $current_token ),
+						),
+					) === $logout_events
+					&& $headers_before === $headers_after,
+				'wp_logout clears auth cookies, resets current user before the logout action, and sends no headers when filtered',
+				array(
+					'after'         => $after,
+					'clearEvents'   => $clear_events,
+					'sendEvents'    => $send_events,
+					'logoutEvents'  => $logout_events,
+					'logoutEvent'   => $logout_event,
+					'headersBefore' => $headers_before,
+					'headersAfter'  => $headers_after,
+				)
+			);
+		} finally {
+			\remove_filter( 'send_auth_cookies', array( __CLASS__, 'filter_send_auth_cookies' ), 10 );
+			\remove_filter( 'determine_current_user', 'wp_validate_auth_cookie' );
+			\remove_filter( 'determine_current_user', 'wp_validate_logged_in_cookie', 20 );
+			\remove_action( 'clear_auth_cookie', array( __CLASS__, 'action_clear_auth_cookie' ), 10 );
+			\remove_action( 'wp_logout', array( __CLASS__, 'action_wp_logout' ), 10 );
+			unset( $_COOKIE[ AUTH_COOKIE ], $_COOKIE[ SECURE_AUTH_COOKIE ], $_COOKIE[ LOGGED_IN_COOKIE ] );
+			\wp_set_current_user( 0 );
+		}
+
+		return self::row(
+			$ctx,
+			'auth-flow.logout-destroys-current-session-and-clears-state',
 			array() === $failures,
 			array( 'failures' => array_slice( $failures, 0, 5 ) )
 		);

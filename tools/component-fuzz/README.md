@@ -121,9 +121,10 @@ database, network requests, or a configured site.
 - `auth-flow`: no-DB authentication and session flow coverage, including
   synthetic user rows, username/email/password authentication filters,
   sign-on and clear-auth-cookie actions with cookie sending short-circuited,
-  generated auth-cookie scheme boundaries and filter payloads, auth cookie
-  validation hooks/default parsing, current-user and cookie global restoration,
-  and session token lifecycle operations.
+  public `wp_logout()` composition, generated auth-cookie scheme boundaries and
+  filter payloads, auth cookie validation hooks/default parsing, current-user
+  and cookie global restoration, stale-cookie rehydration guards, and session
+  token lifecycle operations.
 - `blocks`: block parser/serializer round trips, optimized block detection,
   dynamic render filters, render-time block bindings, block type metadata,
   variations, block hook insertion, ignored metadata, post-object wrapper and
@@ -1080,9 +1081,9 @@ emitted by bookmark APIs and safe link CRUD: ID lookups, visibility/search,
 include/exclude/category joins through `link_category`, supported order/limit
 clauses, and `link_id` projections. It intentionally does not emulate arbitrary
 link-manager SQL, admin page dispatch, or live database behavior.
-The `auth-flow` surface short-circuits auth cookie sending and avoids browser
-redirect/login-form dispatch, real mail, application-password API requests, and
-process-exit paths.
+The `auth-flow` surface short-circuits auth cookie sending and covers the direct
+`wp_logout()` lifecycle, but avoids browser redirect/login-form dispatch, real
+mail, application-password API requests, and process-exit paths.
 The `canonical-routing` surface calls `redirect_canonical()` with
 `do_redirect=false`; 404 permalink guessing uses bounded in-memory post rows,
 attachment-page redirects use synthetic parent/attachment rows, and paths that
