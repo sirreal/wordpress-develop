@@ -42,6 +42,7 @@ final class RestApplicationPasswordsSurface {
 
 			$rows[] = self::check_route_and_schema_contracts( $ctx->fork( 'routes' ) );
 			$rows[] = self::check_crud_hooks_and_projection( $ctx->fork( 'crud' ) );
+			$rows[] = self::check_response_contexts_and_usage_metadata( $ctx->fork( 'response-usage' ) );
 			$rows[] = self::check_permission_and_availability_errors( $ctx->fork( 'errors' ) );
 			$rows[] = self::check_introspection_paths( $ctx->fork( 'introspection' ) );
 			$rows[] = self::check_auth_status_and_index_plumbing( $ctx->fork( 'auth-status-index' ) );
@@ -498,6 +499,274 @@ final class RestApplicationPasswordsSurface {
 		return self::row(
 			$ctx,
 			'rest-application-passwords.crud-hooks-projection',
+			array() === $failures,
+			array(
+				'case'     => self::case_summary( $case ),
+				'failures' => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
+	private static function check_response_contexts_and_usage_metadata( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$case     = self::case_for_context( $ctx );
+
+		self::reset_runtime_state();
+		self::reset_static_state();
+		$users      = self::seed_users( $case );
+		$server     = self::fresh_server();
+		$controller = new \WP_REST_Application_Passwords_Controller();
+		$controller->register_routes();
+
+		$created = \WP_Application_Passwords::create_new_application_password(
+			$users['primary'],
+			array(
+				'app_id' => $case['appId'],
+				'name'   => $case['nameRaw'],
+			)
+		);
+
+		if ( ! is_array( $created ) || ! isset( $created[0], $created[1] ) || ! is_array( $created[1] ) ) {
+			return self::row(
+				$ctx,
+				'rest-application-passwords.response-contexts-usage-metadata',
+				false,
+				array(
+					'case'    => self::case_summary( $case ),
+					'created' => self::describe_value( $created ),
+				)
+			);
+		}
+
+		$plain_password        = (string) $created[0];
+		$item                  = $created[1];
+		$uuid                  = (string) $item['uuid'];
+		$item_with_password    = $item;
+		$item_with_password['new_password'] = \WP_Application_Passwords::chunk_password( $plain_password );
+		$route                 = '/wp/v2/users/me/application-passwords/' . $uuid;
+		$expected_created      = gmdate( 'Y-m-d\TH:i:s', (int) $item['created'] );
+
+		$edit_request = self::request(
+			'GET',
+			$route,
+			array(
+				'context' => 'edit',
+				'_fields' => 'uuid,name,app_id,password,created,last_used,last_ip,_links',
+			),
+			array(
+				'user_id' => 'me',
+				'uuid'    => $uuid,
+			)
+		);
+		$edit_response = $controller->prepare_item_for_response( $item_with_password, $edit_request );
+		$edit_data     = $edit_response instanceof \WP_REST_Response ? $edit_response->get_data() : array();
+		$edit_links    = $edit_response instanceof \WP_REST_Response ? $edit_response->get_links() : array();
+
+		self::collect_failure(
+			$failures,
+			$edit_response instanceof \WP_REST_Response
+				&& array( 'app_id', 'created', 'last_ip', 'last_used', 'name', 'password', 'uuid' ) === self::sorted_keys( $edit_data )
+				&& $uuid === ( $edit_data['uuid'] ?? null )
+				&& $case['appId'] === ( $edit_data['app_id'] ?? null )
+				&& $case['nameSanitized'] === ( $edit_data['name'] ?? null )
+				&& $item_with_password['new_password'] === ( $edit_data['password'] ?? null )
+				&& ( $edit_data['password'] ?? null ) !== ( $item['password'] ?? null )
+				&& $expected_created === ( $edit_data['created'] ?? null )
+				&& null === ( $edit_data['last_used'] ?? null )
+				&& null === ( $edit_data['last_ip'] ?? null )
+				&& str_contains( (string) self::link_href( $edit_links, 'self' ), '/wp/v2/users/' . $users['primary'] . '/application-passwords/' . $uuid ),
+			'edit-context preparation exposes the one-time password, null usage metadata, formatted created date, and requested self link',
+			array(
+				'editData'  => $edit_data,
+				'editLinks' => $edit_links,
+			)
+		);
+
+		foreach (
+			array(
+				'view'  => array( 'app_id', 'created', 'last_ip', 'last_used', 'name', 'uuid' ),
+				'embed' => array( 'app_id', 'name', 'uuid' ),
+			) as $context => $expected_keys
+		) {
+			$request = self::request(
+				'GET',
+				$route,
+				array( 'context' => $context ),
+				array(
+					'user_id' => 'me',
+					'uuid'    => $uuid,
+				)
+			);
+			$response = $controller->prepare_item_for_response( $item_with_password, $request );
+			$data     = $response instanceof \WP_REST_Response ? $response->get_data() : array();
+
+			self::collect_failure(
+				$failures,
+				$response instanceof \WP_REST_Response
+					&& $expected_keys === self::sorted_keys( $data )
+					&& ! array_key_exists( 'password', $data )
+					&& $uuid === ( $data['uuid'] ?? null )
+					&& $case['nameSanitized'] === ( $data['name'] ?? null )
+					&& ( 'embed' === $context || $expected_created === ( $data['created'] ?? null ) ),
+				$context . '-context preparation filters password and context-limited fields',
+				array(
+					'context' => $context,
+					'data'    => $data,
+				)
+			);
+		}
+
+		$fields_without_links = self::dispatch(
+			$server,
+			self::request(
+				'GET',
+				$route,
+				array(
+					'context' => 'view',
+					'_fields' => 'uuid,name',
+				)
+			)
+		);
+		$fields_without_links_data  = $fields_without_links instanceof \WP_REST_Response ? $fields_without_links->get_data() : array();
+		$fields_without_links_links = $fields_without_links instanceof \WP_REST_Response ? $fields_without_links->get_links() : array();
+
+		$fields_with_links = self::dispatch(
+			$server,
+			self::request(
+				'GET',
+				$route,
+				array(
+					'context' => 'view',
+					'_fields' => 'uuid,_links.self',
+				)
+			)
+		);
+		$fields_with_links_data  = $fields_with_links instanceof \WP_REST_Response ? $fields_with_links->get_data() : array();
+		$fields_with_links_links = $fields_with_links instanceof \WP_REST_Response ? $fields_with_links->get_links() : array();
+
+		$forbidden_password = self::dispatch(
+			$server,
+			self::request(
+				'GET',
+				$route,
+				array(
+					'context' => 'view',
+					'_fields' => 'password',
+				)
+			)
+		);
+		$forbidden_password_data  = $forbidden_password instanceof \WP_REST_Response ? $forbidden_password->get_data() : array();
+		$forbidden_password_links = $forbidden_password instanceof \WP_REST_Response ? $forbidden_password->get_links() : array();
+
+		self::collect_failure(
+			$failures,
+			$fields_without_links instanceof \WP_REST_Response
+				&& 200 === $fields_without_links->get_status()
+				&& array( 'name', 'uuid' ) === self::sorted_keys( $fields_without_links_data )
+				&& $uuid === ( $fields_without_links_data['uuid'] ?? null )
+				&& $case['nameSanitized'] === ( $fields_without_links_data['name'] ?? null )
+				&& array() === $fields_without_links_links
+				&& $fields_with_links instanceof \WP_REST_Response
+				&& 200 === $fields_with_links->get_status()
+				&& array( 'uuid' ) === self::sorted_keys( $fields_with_links_data )
+				&& $uuid === ( $fields_with_links_data['uuid'] ?? null )
+				&& str_contains( (string) self::link_href( $fields_with_links_links, 'self' ), '/wp/v2/users/' . $users['primary'] . '/application-passwords/' . $uuid )
+				&& $forbidden_password instanceof \WP_REST_Response
+				&& 200 === $forbidden_password->get_status()
+				&& array() === $forbidden_password_data
+				&& array() === $forbidden_password_links,
+			'dispatched _fields responses distinguish link requests and never expose password data outside edit context',
+			array(
+				'withoutLinksData' => $fields_without_links_data,
+				'withoutLinks'     => $fields_without_links_links,
+				'withLinksData'    => $fields_with_links_data,
+				'withLinks'        => $fields_with_links_links,
+				'forbiddenData'    => $forbidden_password_data,
+				'forbiddenLinks'   => $forbidden_password_links,
+			)
+		);
+
+		$first_ip = '203.0.113.' . $ctx->int( 1, 120 );
+		$next_ip  = '203.0.113.' . $ctx->int( 121, 254 );
+		$_SERVER['REMOTE_ADDR'] = $first_ip;
+		$before_record = time();
+		$first_record  = \WP_Application_Passwords::record_application_password_usage( $users['primary'], $uuid );
+		$after_record  = time();
+		$used_item     = \WP_Application_Passwords::get_user_application_password( $users['primary'], $uuid );
+
+		$_SERVER['REMOTE_ADDR'] = $next_ip;
+		$second_record          = \WP_Application_Passwords::record_application_password_usage( $users['primary'], $uuid );
+		$second_item            = \WP_Application_Passwords::get_user_application_password( $users['primary'], $uuid );
+
+		$used_last_used = is_array( $used_item ) ? $used_item['last_used'] ?? null : null;
+		$used_last_ip   = is_array( $used_item ) ? $used_item['last_ip'] ?? null : null;
+		$second_last_used = is_array( $second_item ) ? $second_item['last_used'] ?? null : null;
+		$second_last_ip = is_array( $second_item ) ? $second_item['last_ip'] ?? null : null;
+		$before_missing_usage = \WP_Application_Passwords::get_user_application_passwords( $users['primary'] );
+		$missing_usage        = \WP_Application_Passwords::record_application_password_usage( $users['primary'], self::uuid_from_token( $case['token'] . '-usage-missing' ) );
+		$after_missing_usage  = \WP_Application_Passwords::get_user_application_passwords( $users['primary'] );
+
+		self::collect_failure(
+			$failures,
+			true === $first_record
+				&& is_int( $used_last_used )
+				&& $used_last_used >= $before_record
+				&& $used_last_used <= $after_record
+				&& $first_ip === $used_last_ip
+				&& true === $second_record
+				&& $used_last_used === $second_last_used
+				&& $first_ip === $second_last_ip
+				&& $missing_usage instanceof \WP_Error
+				&& 'application_password_not_found' === $missing_usage->get_error_code()
+				&& $before_missing_usage === $after_missing_usage,
+			'usage recording stores last_used/last_ip once, throttles same-day repeats, and missing UUIDs do not mutate storage',
+			array(
+				'firstIp'      => $first_ip,
+				'nextIp'       => $next_ip,
+				'firstRecord'  => $first_record,
+				'secondRecord' => $second_record,
+				'usedItem'     => $used_item,
+				'secondItem'   => $second_item,
+				'missingUsage' => $missing_usage,
+			)
+		);
+
+		$usage_response = self::dispatch(
+			$server,
+			self::request(
+				'GET',
+				$route,
+				array(
+					'context' => 'view',
+					'_fields' => 'uuid,last_used,last_ip,password,_links',
+				)
+			)
+		);
+		$usage_data     = $usage_response instanceof \WP_REST_Response ? $usage_response->get_data() : array();
+		$usage_links    = $usage_response instanceof \WP_REST_Response ? $usage_response->get_links() : array();
+
+		self::collect_failure(
+			$failures,
+			$usage_response instanceof \WP_REST_Response
+				&& 200 === $usage_response->get_status()
+				&& array( 'last_ip', 'last_used', 'uuid' ) === self::sorted_keys( $usage_data )
+				&& $uuid === ( $usage_data['uuid'] ?? null )
+				&& is_int( $used_last_used )
+				&& gmdate( 'Y-m-d\TH:i:s', $used_last_used ) === ( $usage_data['last_used'] ?? null )
+				&& $first_ip === ( $usage_data['last_ip'] ?? null )
+				&& ! array_key_exists( 'password', $usage_data )
+				&& str_contains( (string) self::link_href( $usage_links, 'self' ), '/wp/v2/users/' . $users['primary'] . '/application-passwords/' . $uuid ),
+			'dispatched item response applies _fields, omits edit-only password in view context, and formats recorded usage metadata',
+			array(
+				'usageStatus' => $usage_response instanceof \WP_REST_Response ? $usage_response->get_status() : null,
+				'usageData'   => $usage_data,
+				'usageLinks'  => $usage_links,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'rest-application-passwords.response-contexts-usage-metadata',
 			array() === $failures,
 			array(
 				'case'     => self::case_summary( $case ),

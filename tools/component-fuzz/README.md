@@ -663,11 +663,13 @@ database, network requests, or a configured site.
 - `rest-application-passwords`: in-memory user/app-password backed REST
   application password controller coverage, including collection/item/
   introspection route and schema contracts, create/update/delete dispatch,
-  one-time password response and stored hash agreement, `_fields` projection and
-  links, REST pre/after/prepare hooks, capability-denied and availability error
-  matrices, current-user introspection, stale UUID failures, REST
-  application-password auth status globals, REST index authentication metadata,
-  and global/filter restoration.
+  one-time password response and stored hash agreement, response context
+  filtering for edit/view/embed, created/last-used/last-IP formatting, usage
+  recording and same-day throttle behavior, `_fields` projection and links,
+  password non-exposure outside edit context, REST pre/after/prepare hooks,
+  capability-denied and availability error matrices, current-user introspection,
+  stale UUID failures, REST application-password auth status globals, REST
+  index authentication metadata, and global/filter restoration.
 - `rest-directory-services`: no-network REST coverage for WordPress.org-backed
   directory service controllers, including block-directory, pattern-directory,
   and URL-details route/schema contracts, plugin API and HTTP short-circuits,
