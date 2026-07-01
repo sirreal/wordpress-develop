@@ -41,6 +41,7 @@ final class MetadataSurface {
 			$rows[] = self::check_in_memory_crud_cache_invalidation( $ctx->fork( 'crud-cache' ) );
 			$rows[] = self::check_lazyloader_queue_and_cache( $ctx->fork( 'lazyloader' ) );
 			$rows[] = self::check_registered_metadata_by_object_subtype( $ctx->fork( 'by-subtype' ) );
+			$rows[] = self::check_rest_meta_fields_schema_value_update_paths( $ctx->fork( 'rest-meta-fields' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
 				'metadata.surface-no-throw',
@@ -60,6 +61,8 @@ final class MetadataSurface {
 			array(
 				'WP_Error',
 				'WP_Metadata_Lazyloader',
+				'WP_REST_Meta_Fields',
+				'WP_REST_Request',
 			) as $class
 		) {
 			if ( ! class_exists( $class ) ) {
@@ -90,6 +93,8 @@ final class MetadataSurface {
 				'registered_meta_key_exists',
 				'remove_action',
 				'remove_filter',
+				'rest_sanitize_value_from_schema',
+				'rest_validate_value_from_schema',
 				'sanitize_meta',
 				'unregister_meta_key',
 				'update_metadata',
@@ -100,6 +105,7 @@ final class MetadataSurface {
 				'wp_cache_flush',
 				'wp_cache_get',
 				'wp_cache_set',
+				'wp_set_current_user',
 				'wp_slash',
 			) as $function
 		) {
@@ -1904,6 +1910,262 @@ final class MetadataSurface {
 		);
 	}
 
+	private static function check_rest_meta_fields_schema_value_update_paths( \ComponentFuzz\FuzzContext $ctx ): array {
+		if ( ! self::has_in_memory_metadata_store() ) {
+			return $ctx->skip(
+				'metadata.rest-meta-fields.stub-available',
+				'REST meta field update/delete coverage requires the component fuzzer in-memory DB stub.'
+			);
+		}
+
+		self::reset_runtime();
+
+		$failures = array();
+		$failure_summaries = array();
+		$request  = new \WP_REST_Request( 'GET', '/component-fuzz/metadata' );
+
+		foreach ( self::OBJECT_TYPES as $index => $object_type ) {
+			$case              = $ctx->fork( 'rest-fields-' . $object_type );
+			$object_id         = 8100 + $case->int( 1, 5000 ) + $index;
+			$subtype           = self::object_subtype( $case, $object_type );
+			$single_key        = self::rest_meta_key( $case->fork( 'single-key' ), 'rest-single' );
+			$single_name       = self::rest_meta_key( $case->fork( 'single-name' ), 'rest-exposed-single' );
+			$multi_key         = self::rest_meta_key( $case->fork( 'multi-key' ), 'rest-multi' );
+			$object_key        = self::rest_meta_key( $case->fork( 'object-key' ), 'rest-object' );
+			$hidden_key        = self::rest_meta_key( $case->fork( 'hidden-key' ), 'rest-hidden' );
+			$initial_single    = $case->int( 1, 90 );
+			$updated_single    = $initial_single + $case->int( 3, 60 );
+			$prepare_offset    = $case->int( 2, 20 );
+			$multi_keep        = self::slug( $case->fork( 'multi-keep' ), 'keep' );
+			$multi_drop        = self::slug( $case->fork( 'multi-drop' ), 'drop' );
+			$multi_add         = self::slug( $case->fork( 'multi-add' ), 'add' );
+			$object_default    = array(
+				'label'  => 'default-' . $case->identifier( 4, 8 ),
+				'nested' => array(
+					'count' => $case->int( 1, 30 ),
+				),
+			);
+			$prepare_calls     = array();
+
+			$subtype_filter = static function ( $current, $id ) use ( $object_id, $subtype ) {
+				return (int) $id === $object_id ? $subtype : $current;
+			};
+			$prepare_callback = static function ( $value, $prepared_request, $args ) use ( &$prepare_calls, $single_key, $single_name, $prepare_offset ) {
+				$prepare_calls[] = array(
+					'value'   => $value,
+					'route'   => $prepared_request instanceof \WP_REST_Request ? $prepared_request->get_route() : '',
+					'name'    => $args['name'] ?? '',
+					'metaKey' => $single_key,
+				);
+
+				return (int) $value + $prepare_offset;
+			};
+
+			\add_filter( "get_object_subtype_{$object_type}", $subtype_filter, 10, 2 );
+
+			$registered_single = self::register_subtype_meta(
+				$object_type,
+				$subtype,
+				$single_key,
+				array(
+					'type'         => 'integer',
+					'single'       => true,
+					'default'      => $case->int( 0, 10 ),
+					'show_in_rest' => array(
+						'name'             => $single_name,
+						'prepare_callback' => $prepare_callback,
+						'schema'           => array(
+							'type'    => 'integer',
+							'minimum' => 0,
+						),
+					),
+				)
+			);
+			$registered_multi = self::register_subtype_meta(
+				$object_type,
+				$subtype,
+				$multi_key,
+				array(
+					'type'         => 'string',
+					'single'       => false,
+					'show_in_rest' => true,
+				)
+			);
+			$registered_object = self::register_subtype_meta(
+				$object_type,
+				$subtype,
+				$object_key,
+				array(
+					'type'         => 'object',
+					'single'       => true,
+					'default'      => $object_default,
+					'show_in_rest' => array(
+						'schema' => array(
+							'type'       => 'object',
+							'properties' => array(
+								'label'  => array( 'type' => 'string' ),
+								'nested' => array(
+									'type'       => 'object',
+									'properties' => array(
+										'count' => array( 'type' => 'integer' ),
+									),
+								),
+							),
+						),
+					),
+				)
+			);
+			$registered_hidden = self::register_subtype_meta(
+				$object_type,
+				$subtype,
+				$hidden_key,
+				array(
+					'type'         => 'string',
+					'single'       => true,
+					'show_in_rest' => false,
+				)
+			);
+
+			\add_metadata( $object_type, $object_id, \wp_slash( $single_key ), (string) $initial_single, true );
+			\add_metadata( $object_type, $object_id, \wp_slash( $multi_key ), \wp_slash( $multi_keep ), false );
+			\add_metadata( $object_type, $object_id, \wp_slash( $multi_key ), \wp_slash( $multi_drop ), false );
+			\add_metadata( $object_type, $object_id, \wp_slash( $hidden_key ), 'hidden-value', true );
+
+			$fields      = self::rest_meta_fields_for( $object_type, $subtype );
+			$registered  = $fields->component_fuzz_registered_fields();
+			$field_schema = $fields->get_field_schema();
+			$before      = $fields->get_value( $object_id, $request );
+			$missing     = $fields->get_value( $object_id + 10000, $request );
+			$non_array_ok = $fields->check_meta_is_array( 'not-array', $request, 'meta' );
+			$array_ok     = $fields->check_meta_is_array( array( $single_name => $updated_single ), $request, 'meta' );
+
+			\wp_set_current_user( 0 );
+			$denied_update = $fields->update_value(
+				array( $single_name => $updated_single + 100 ),
+				$object_id
+			);
+
+			$user_id    = 9000 + $index;
+			$map_filter = self::rest_meta_map_filter( $object_type );
+			$cap_filter = self::rest_meta_cap_filter( true );
+			\wp_set_current_user( $user_id );
+			\add_filter( 'map_meta_cap', $map_filter, PHP_INT_MAX, 4 );
+			\add_filter( 'user_has_cap', $cap_filter, PHP_INT_MAX, 4 );
+			try {
+				$invalid_update = $fields->update_value(
+					array( $single_name => 'not-an-integer-' . $case->identifier( 3, 8 ) ),
+					$object_id
+				);
+				$valid_update   = $fields->update_value(
+					array(
+						$single_name => $updated_single,
+						$multi_key   => array( $multi_keep, $multi_add ),
+					),
+					$object_id
+				);
+				$after_update   = $fields->get_value( $object_id, $request );
+				$delete_result  = $fields->update_value(
+					array(
+						$single_name => null,
+						$multi_key   => array(),
+					),
+					$object_id
+				);
+				$after_delete   = $fields->get_value( $object_id, $request );
+			} finally {
+				\remove_filter( 'user_has_cap', $cap_filter, PHP_INT_MAX );
+				\remove_filter( 'map_meta_cap', $map_filter, PHP_INT_MAX );
+				\wp_set_current_user( 0 );
+			}
+
+			\remove_filter( "get_object_subtype_{$object_type}", $subtype_filter, 10 );
+
+			$checks = array(
+				'registered-single'          => true === $registered_single,
+				'registered-multi'           => true === $registered_multi,
+				'registered-object'          => true === $registered_object,
+				'registered-hidden'          => true === $registered_hidden,
+				'visible-fields'             => isset( $registered[ $single_key ], $registered[ $multi_key ], $registered[ $object_key ] ),
+				'hidden-field-omitted'       => ! isset( $registered[ $hidden_key ] ),
+				'custom-name'                => $single_name === ( $registered[ $single_key ]['name'] ?? null ),
+				'single-schema'              => ( $field_schema['properties'][ $single_name ]['type'] ?? null ) === 'integer',
+				'multi-schema'               => ( $field_schema['properties'][ $multi_key ]['type'] ?? null ) === 'array'
+					&& ( $field_schema['properties'][ $multi_key ]['items']['type'] ?? null ) === 'string',
+				'object-additional-false'    => false === ( $field_schema['properties'][ $object_key ]['additionalProperties'] ?? null )
+					&& false === ( $field_schema['properties'][ $object_key ]['properties']['nested']['additionalProperties'] ?? null ),
+				'meta-array-validation'      => false === $non_array_ok && array( $single_name => $updated_single ) === $array_ok,
+				'prepared-existing-single'   => ( $initial_single + $prepare_offset ) === ( $before[ $single_name ] ?? null ),
+				'multi-existing-values'      => array( $multi_keep, $multi_drop ) === ( $before[ $multi_key ] ?? null ),
+				'object-default-value'       => self::same_value( $object_default, $before[ $object_key ] ?? null ),
+				'prepared-missing-single'    => ( ( $registered[ $single_key ]['schema']['default'] ?? null ) + $prepare_offset ) === ( $missing[ $single_name ] ?? null ),
+				'missing-multi-empty'        => array() === ( $missing[ $multi_key ] ?? null ),
+				'missing-object-default'     => self::same_value( $object_default, $missing[ $object_key ] ?? null ),
+				'denied-update-error'        => \is_wp_error( $denied_update ) && 'rest_cannot_update' === $denied_update->get_error_code(),
+				'invalid-update-error'       => \is_wp_error( $invalid_update ) && true === self::wp_error_has_code( $invalid_update, 'rest_invalid_type' ),
+				'valid-update-success'       => null === $valid_update,
+				'prepared-updated-single'    => ( $updated_single + $prepare_offset ) === ( $after_update[ $single_name ] ?? null ),
+				'multi-updated-values'       => array( $multi_keep, $multi_add ) === ( $after_update[ $multi_key ] ?? null ),
+				'delete-success'             => null === $delete_result,
+				'prepared-default-after-delete' => ( ( $registered[ $single_key ]['schema']['default'] ?? null ) + $prepare_offset ) === ( $after_delete[ $single_name ] ?? null ),
+				'multi-empty-after-delete'   => array() === ( $after_delete[ $multi_key ] ?? null ),
+				'prepare-callbacks-fired'    => count( $prepare_calls ) >= 4,
+				'subtype-filter-restored'    => false === \has_filter( "get_object_subtype_{$object_type}", $subtype_filter ),
+				'map-cap-filter-restored'    => false === \has_filter( 'map_meta_cap', $map_filter ),
+				'user-cap-filter-restored'   => false === \has_filter( 'user_has_cap', $cap_filter ),
+			);
+			$failed_checks = array_keys( array_filter( $checks, static fn ( bool $ok ): bool => ! $ok ) );
+			if ( array() !== $failed_checks ) {
+				$failure_summaries[] = sprintf(
+					'%s:%s:valid=%s:delete=%s:single=%s:multi=%s',
+					$object_type,
+					implode( '|', $failed_checks ),
+					self::compact_result_marker( $valid_update ),
+					self::compact_result_marker( $delete_result ),
+					self::compact_result_marker( $after_update[ $single_name ] ?? null ),
+					self::compact_result_marker( $after_update[ $multi_key ] ?? null )
+				);
+			}
+
+			self::collect_failure(
+				$failures,
+				! in_array( false, $checks, true ),
+				"REST meta fields expose schemas, prepare values, and update/delete {$object_type} metadata through the registry",
+				array(
+					'failedChecks'     => $failed_checks,
+					'checks'           => $checks,
+					'objectType'       => $object_type,
+					'subtype'          => $subtype,
+					'singleKey'        => $single_key,
+					'singleName'       => $single_name,
+					'multiKey'         => $multi_key,
+					'objectKey'        => $object_key,
+					'registeredKeys'   => array_keys( $registered ),
+					'schemaKeys'       => array_keys( $field_schema['properties'] ?? array() ),
+					'before'           => $before,
+					'missing'          => $missing,
+					'deniedUpdate'     => self::describe_wp_error( $denied_update ),
+					'invalidUpdate'    => self::describe_wp_error( $invalid_update ),
+					'validUpdate'      => self::describe_wp_error( $valid_update ),
+					'afterUpdate'      => $after_update,
+					'deleteResult'     => self::describe_wp_error( $delete_result ),
+					'afterDelete'      => $after_delete,
+					'prepareCalls'     => $prepare_calls,
+				)
+			);
+		}
+
+		return self::result(
+			$ctx,
+			'metadata.rest-meta-fields.schema-value-update-delete',
+			array() === $failures,
+			array(
+				'objectTypes'       => self::OBJECT_TYPES,
+				'failureSummaries'  => implode( ';', array_slice( $failure_summaries, 0, 4 ) ),
+				'failures'          => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
 	private static function register_subtype_meta(
 		string $object_type,
 		string $subtype,
@@ -1994,6 +2256,73 @@ final class MetadataSurface {
 		return $single ? $default : array( $default );
 	}
 
+	private static function rest_meta_fields_for( string $object_type, string $subtype ): \WP_REST_Meta_Fields {
+		return new class( $object_type, $subtype ) extends \WP_REST_Meta_Fields {
+			private string $component_fuzz_meta_type;
+			private string $component_fuzz_meta_subtype;
+
+			public function __construct( string $meta_type, string $meta_subtype ) {
+				$this->component_fuzz_meta_type    = $meta_type;
+				$this->component_fuzz_meta_subtype = $meta_subtype;
+			}
+
+			protected function get_meta_type() {
+				return $this->component_fuzz_meta_type;
+			}
+
+			protected function get_meta_subtype() {
+				return $this->component_fuzz_meta_subtype;
+			}
+
+			protected function get_rest_field_type() {
+				return '' === $this->component_fuzz_meta_subtype ? $this->component_fuzz_meta_type : $this->component_fuzz_meta_subtype;
+			}
+
+			public function component_fuzz_registered_fields(): array {
+				return $this->get_registered_fields();
+			}
+		};
+	}
+
+	private static function rest_meta_map_filter( string $object_type ): callable {
+		$primitive = 'component_fuzz_rest_meta_' . $object_type;
+
+		return static function ( array $caps, string $cap ) use ( $object_type, $primitive ): array {
+			if (
+				in_array(
+					$cap,
+					array(
+						"add_{$object_type}_meta",
+						"delete_{$object_type}_meta",
+						"edit_{$object_type}_meta",
+					),
+					true
+				)
+			) {
+				return array( $primitive );
+			}
+
+			return $caps;
+		};
+	}
+
+	private static function rest_meta_cap_filter( bool $allow ): callable {
+		return static function ( array $allcaps, array $caps = array(), array $args = array() ) use ( $allow ): array {
+			foreach ( $caps as $cap ) {
+				$allcaps[ $cap ] = $allow;
+			}
+			if ( isset( $args[0] ) && is_string( $args[0] ) ) {
+				$allcaps[ $args[0] ] = $allow;
+			}
+
+			return $allcaps;
+		};
+	}
+
+	private static function wp_error_has_code( $value, string $code ): bool {
+		return \is_wp_error( $value ) && in_array( $code, $value->get_error_codes(), true );
+	}
+
 	private static function object_subtype( \ComponentFuzz\FuzzContext $ctx, string $object_type ): string {
 		$prefix = array(
 			'post'    => 'post-type',
@@ -2031,6 +2360,10 @@ final class MetadataSurface {
 		$key   = 'cf_meta_' . self::slug( $ctx, $prefix ) . '_' . substr( dechex( $ctx->seed() ), -6 ) . $weird;
 
 		return '' === $key ? 'cf_meta_' . substr( dechex( $ctx->seed() ), -8 ) : $key;
+	}
+
+	private static function rest_meta_key( \ComponentFuzz\FuzzContext $ctx, string $prefix ): string {
+		return 'cf_meta_' . self::slug( $ctx, $prefix ) . '_' . substr( dechex( $ctx->seed() ), -6 );
 	}
 
 	private static function metadata_value( \ComponentFuzz\FuzzContext $ctx ) {
@@ -2198,6 +2531,42 @@ final class MetadataSurface {
 		array $data = array()
 	): array {
 		return $ok ? $ctx->pass( $invariant, $data ) : $ctx->fail( $invariant, $data );
+	}
+
+	private static function describe_wp_error( $value ) {
+		if ( ! \is_wp_error( $value ) ) {
+			return self::describe_value( $value );
+		}
+
+		return array(
+			'codes'    => $value->get_error_codes(),
+			'messages' => $value->get_error_messages(),
+			'data'     => self::describe_value( $value->get_all_error_data() ),
+		);
+	}
+
+	private static function compact_result_marker( $value ): string {
+		if ( \is_wp_error( $value ) ) {
+			return 'WP_Error(' . implode( '|', $value->get_error_codes() ) . ')';
+		}
+
+		if ( is_array( $value ) ) {
+			return '[' . implode( '|', array_map( 'strval', array_slice( $value, 0, 4 ) ) ) . ']';
+		}
+
+		if ( null === $value ) {
+			return 'null';
+		}
+
+		if ( true === $value ) {
+			return 'true';
+		}
+
+		if ( false === $value ) {
+			return 'false';
+		}
+
+		return (string) $value;
 	}
 
 	private static function same_value( $expected, $actual ): bool {
