@@ -799,7 +799,8 @@ database, network requests, or a configured site.
   hints/preloads, pagination/search/feed/site/admin URLs, canonical and
   shortlink head output, synthetic post preview/edit/delete/shortlink/permalink
   helpers, date and author archive URL branches, previous/next adjacent post
-  relation links, and cached bookmark field/list rendering.
+  relation links, adjacent image attachment links, and cached bookmark
+  field/list rendering.
 - `widgets`: classic sidebar registry lifecycle, widget factory instance
   registration, direct widget/control callbacks, generated sidebars, widget ID
   parsing, sidebar option cache/filter behavior, sidebar assignment

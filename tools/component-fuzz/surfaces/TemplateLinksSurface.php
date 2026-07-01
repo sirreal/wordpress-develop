@@ -48,6 +48,7 @@ final class TemplateLinksSurface {
 			$rows[] = self::check_post_link_helpers( $ctx );
 			$rows[] = self::check_archive_link_helpers( $ctx );
 			$rows[] = self::check_adjacent_post_link_helpers( $ctx );
+			$rows[] = self::check_adjacent_image_link_helpers( $ctx->fork( 'adjacent-image-links' ) );
 			$rows[] = self::check_canonical_and_shortlink_outputs( $ctx );
 			$rows[] = self::check_bookmark_fields_and_lists( $ctx );
 			$rows[] = self::check_restoration_probe( $ctx, $snapshot );
@@ -192,11 +193,14 @@ final class TemplateLinksSurface {
 				'esc_attr',
 				'esc_url',
 				'get_admin_url',
+				'get_attachment_link',
 				'get_adjacent_post_rel_link',
+				'get_adjacent_image_link',
 				'get_author_posts_url',
 				'get_body_class',
 				'get_bookmark',
 				'get_bookmark_field',
+				'get_children',
 				'get_day_link',
 				'get_edit_post_link',
 				'get_delete_post_link',
@@ -204,24 +208,30 @@ final class TemplateLinksSurface {
 				'get_home_url',
 				'get_language_attributes',
 				'get_month_link',
+				'get_next_image_link',
 				'get_next_post_link',
 				'get_pagenum_link',
 				'get_permalink',
 				'get_preview_post_link',
 				'get_post_class',
+				'get_previous_image_link',
 				'get_previous_post_link',
 				'get_search_feed_link',
 				'get_search_link',
 				'get_site_url',
+				'get_the_title',
 				'get_year_link',
 				'is_wp_error',
 				'language_attributes',
 				'adjacent_posts_rel_link',
 				'adjacent_posts_rel_link_wp_head',
+				'adjacent_image_link',
 				'next_post_rel_link',
+				'next_image_link',
 				'paginate_links',
 				'post_class',
 				'prev_post_rel_link',
+				'previous_image_link',
 				'register_taxonomy',
 				'rel_canonical',
 				'remove_filter',
@@ -236,6 +246,10 @@ final class TemplateLinksSurface {
 				'wp_check_invalid_utf8',
 				'wp_get_canonical_url',
 				'wp_get_document_title',
+				'wp_get_attachment_link',
+				'wp_get_attachment_image',
+				'wp_get_attachment_image_src',
+				'wp_get_attachment_url',
 				'wp_get_shortlink',
 				'wp_list_bookmarks',
 				'wp_preload_resources',
@@ -1505,6 +1519,258 @@ final class TemplateLinksSurface {
 		);
 	}
 
+	private static function check_adjacent_image_link_helpers( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures    = array();
+		$parent      = self::current_post();
+		$marker      = 'cfz-image-' . strtolower( $ctx->identifier( 4, 10 ) );
+		$text        = 'Some text';
+		$attachments = array();
+
+		$previous_post         = $GLOBALS['post'] ?? null;
+		$previous_wp_query     = $GLOBALS['wp_query'] ?? null;
+		$previous_wp_the_query = $GLOBALS['wp_the_query'] ?? null;
+		$previous_paged        = $GLOBALS['paged'] ?? null;
+		$previous_page         = $GLOBALS['page'] ?? null;
+		$buffer_level          = ob_get_level();
+
+		$previous_filter_events = array();
+		$next_filter_events     = array();
+		$previous_filter        = self::adjacent_image_filter( 'previous', $marker, $previous_filter_events );
+		$next_filter            = self::adjacent_image_filter( 'next', $marker, $next_filter_events );
+
+		$previous_text       = '';
+		$previous_getter     = '';
+		$previous_echo       = '';
+		$previous_adjacent   = '';
+		$previous_image      = '';
+		$first_previous      = null;
+		$next_text           = '';
+		$next_getter         = '';
+		$next_echo           = '';
+		$next_adjacent       = '';
+		$next_image          = '';
+		$last_next           = null;
+		$filtered_previous   = '';
+		$filtered_next       = '';
+		$expected_previous   = '';
+		$expected_next       = '';
+		$previous_image_url  = '';
+		$next_image_url      = '';
+		$previous_anchor_url = '';
+		$next_anchor_url     = '';
+
+		try {
+			for ( $index = 1; $index <= 5; $index++ ) {
+				$attachment    = self::image_attachment_case( $ctx->fork( 'image-' . $index ), $parent, $index );
+				$attachments[] = $attachment;
+
+				self::seed_post_storage( $attachment );
+				self::seed_attachment_image_meta( $attachment, $index );
+			}
+
+			self::with_permalink_structure(
+				'',
+				static function () use (
+					$attachments,
+					$text,
+					$previous_filter,
+					$next_filter,
+					&$previous_text,
+					&$previous_getter,
+					&$previous_echo,
+					&$previous_adjacent,
+					&$previous_image,
+					&$first_previous,
+					&$next_text,
+					&$next_getter,
+					&$next_echo,
+					&$next_adjacent,
+					&$next_image,
+					&$last_next,
+					&$filtered_previous,
+					&$filtered_next
+				): void {
+					self::set_current_attachment_query( $attachments[2] );
+					$previous_text     = (string) \get_adjacent_image_link( true, 'thumbnail', $text );
+					$previous_getter   = (string) \get_previous_image_link( 'thumbnail', $text );
+					$previous_echo     = self::capture_output(
+						static function () use ( $text ): void {
+							\previous_image_link( 'thumbnail', $text );
+						}
+					);
+					$previous_adjacent = self::capture_output(
+						static function () use ( $text ): void {
+							\adjacent_image_link( true, 'thumbnail', $text );
+						}
+					);
+					$previous_image    = (string) \get_previous_image_link( 'thumbnail', false );
+
+					self::set_current_attachment_query( $attachments[0] );
+					$first_previous = \get_previous_image_link( 'thumbnail', $text );
+
+					self::set_current_attachment_query( $attachments[3] );
+					$next_text     = (string) \get_adjacent_image_link( false, 'thumbnail', $text );
+					$next_getter   = (string) \get_next_image_link( 'thumbnail', $text );
+					$next_echo     = self::capture_output(
+						static function () use ( $text ): void {
+							\next_image_link( 'thumbnail', $text );
+						}
+					);
+					$next_adjacent = self::capture_output(
+						static function () use ( $text ): void {
+							\adjacent_image_link( false, 'thumbnail', $text );
+						}
+					);
+					$next_image    = (string) \get_next_image_link( 'thumbnail', false );
+
+					self::set_current_attachment_query( $attachments[4] );
+					$last_next = \get_next_image_link( 'thumbnail', $text );
+
+					\add_filter( 'previous_image_link', $previous_filter, 10, 4 );
+					\add_filter( 'next_image_link', $next_filter, 10, 4 );
+					try {
+						self::set_current_attachment_query( $attachments[2] );
+						$filtered_previous = (string) \get_previous_image_link( 'thumbnail', 'Filtered previous' );
+
+						self::set_current_attachment_query( $attachments[3] );
+						$filtered_next = (string) \get_next_image_link( 'thumbnail', 'Filtered next' );
+					} finally {
+						\remove_filter( 'previous_image_link', $previous_filter, 10 );
+						\remove_filter( 'next_image_link', $next_filter, 10 );
+					}
+				}
+			);
+		} finally {
+			if ( ob_get_level() > $buffer_level ) {
+				ob_end_clean();
+			}
+			\remove_filter( 'previous_image_link', $previous_filter, 10 );
+			\remove_filter( 'next_image_link', $next_filter, 10 );
+
+			foreach ( $attachments as $attachment ) {
+				self::delete_post_storage( $attachment->ID );
+				\wp_cache_delete( $attachment->ID, 'post_meta' );
+			}
+
+			if ( $previous_post instanceof \WP_Post ) {
+				$GLOBALS['post'] = $previous_post;
+			} else {
+				unset( $GLOBALS['post'] );
+			}
+
+			if ( $previous_wp_query instanceof \WP_Query ) {
+				$GLOBALS['wp_query'] = $previous_wp_query;
+			} else {
+				unset( $GLOBALS['wp_query'] );
+			}
+
+			if ( $previous_wp_the_query instanceof \WP_Query ) {
+				$GLOBALS['wp_the_query'] = $previous_wp_the_query;
+			} else {
+				unset( $GLOBALS['wp_the_query'] );
+			}
+
+			if ( null !== $previous_paged ) {
+				$GLOBALS['paged'] = $previous_paged;
+			} else {
+				unset( $GLOBALS['paged'] );
+			}
+
+			if ( null !== $previous_page ) {
+				$GLOBALS['page'] = $previous_page;
+			} else {
+				unset( $GLOBALS['page'] );
+			}
+		}
+
+		if ( 5 === count( $attachments ) ) {
+			$expected_previous   = "<a href='http://example.test/?attachment_id={$attachments[1]->ID}'>{$text}</a>";
+			$expected_next       = "<a href='http://example.test/?attachment_id={$attachments[4]->ID}'>{$text}</a>";
+			$previous_image_url  = 'http://example.test/wp-content/uploads/2026/07/cfz-image-2-150x150.jpg';
+			$next_image_url      = 'http://example.test/wp-content/uploads/2026/07/cfz-image-5-150x150.jpg';
+			$previous_anchor_url = "href='http://example.test/?attachment_id={$attachments[1]->ID}'";
+			$next_anchor_url     = "href='http://example.test/?attachment_id={$attachments[4]->ID}'";
+		}
+
+		self::collect_failure(
+			$failures,
+			'' !== $expected_previous
+				&& $previous_text === $expected_previous
+				&& $previous_getter === $expected_previous
+				&& $previous_echo === $expected_previous
+				&& $previous_adjacent === $expected_previous
+				&& '' === $first_previous
+				&& $next_text === $expected_next
+				&& $next_getter === $expected_next
+				&& $next_echo === $expected_next
+				&& $next_adjacent === $expected_next
+				&& '' === $last_next,
+			'adjacent image text helpers render exact sibling attachment anchors and empty edge links',
+			array(
+				'previousText'     => self::describe_string( $previous_text ),
+				'previousGetter'   => self::describe_string( $previous_getter ),
+				'previousEcho'     => self::describe_string( $previous_echo ),
+				'previousAdjacent' => self::describe_string( $previous_adjacent ),
+				'firstPrevious'    => self::describe_value( $first_previous ),
+				'nextText'         => self::describe_string( $next_text ),
+				'nextGetter'       => self::describe_string( $next_getter ),
+				'nextEcho'         => self::describe_string( $next_echo ),
+				'nextAdjacent'     => self::describe_string( $next_adjacent ),
+				'lastNext'         => self::describe_value( $last_next ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			str_contains( $previous_image, $previous_anchor_url )
+				&& str_contains( $next_image, $next_anchor_url )
+				&& str_contains( $previous_image, '<img ' )
+				&& str_contains( $next_image, '<img ' )
+				&& str_contains( $previous_image, 'attachment-thumbnail size-thumbnail' )
+				&& str_contains( $next_image, 'attachment-thumbnail size-thumbnail' )
+				&& str_contains( $previous_image, $previous_image_url )
+				&& str_contains( $next_image, $next_image_url )
+				&& str_contains( $previous_image, 'alt="Image 2' )
+				&& str_contains( $next_image, 'alt="Image 5' )
+				&& ! str_contains( strtolower( $previous_image . $next_image ), '<script' ),
+			'adjacent image helpers render attachment image markup with selected sibling URLs and escaped alt text',
+			array(
+				'previousImage' => self::describe_string( $previous_image ),
+				'nextImage'     => self::describe_string( $next_image ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			1 === count( $previous_filter_events )
+				&& 1 === count( $next_filter_events )
+				&& ( $previous_filter_events[0]['attachmentId'] ?? null ) === ( $attachments[1]->ID ?? null )
+				&& ( $next_filter_events[0]['attachmentId'] ?? null ) === ( $attachments[4]->ID ?? null )
+				&& 'thumbnail' === ( $previous_filter_events[0]['size'] ?? null )
+				&& 'thumbnail' === ( $next_filter_events[0]['size'] ?? null )
+				&& 'Filtered previous' === ( $previous_filter_events[0]['text'] ?? null )
+				&& 'Filtered next' === ( $next_filter_events[0]['text'] ?? null )
+				&& str_contains( $filtered_previous, 'data-cfz-image="' . \esc_attr( $marker . '-previous' ) . '"' )
+				&& str_contains( $filtered_next, 'data-cfz-image="' . \esc_attr( $marker . '-next' ) . '"' )
+				&& false === \has_filter( 'previous_image_link', $previous_filter, 10 )
+				&& false === \has_filter( 'next_image_link', $next_filter, 10 ),
+			'adjacent image filters receive attachment ID, size, and text payloads and are removed after use',
+			array(
+				'previousEvents'   => $previous_filter_events,
+				'nextEvents'       => $next_filter_events,
+				'filteredPrevious' => self::describe_string( $filtered_previous ),
+				'filteredNext'     => self::describe_string( $filtered_next ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'template-links.media.adjacent-image-links',
+			array() === $failures,
+			array( 'failures' => $failures )
+		);
+	}
+
 	private static function check_canonical_and_shortlink_outputs( \ComponentFuzz\FuzzContext $ctx ): array {
 		$failures = array();
 		$post     = self::current_post();
@@ -1891,6 +2157,41 @@ final class TemplateLinksSurface {
 		);
 	}
 
+	private static function image_attachment_case( \ComponentFuzz\FuzzContext $ctx, \WP_Post $parent, int $index ): \WP_Post {
+		$id    = $parent->ID + 30000 + $index;
+		$title = 'Image ' . $index . ' ' . self::safe_title_text( $ctx->text( 0, 16 ) );
+		$slug  = 'cfz-image-' . $index . '-' . substr( hash( 'crc32b', (string) $ctx->seed() ), 0, 8 );
+
+		return new \WP_Post(
+			(object) array(
+				'ID'                    => $id,
+				'post_author'           => 0,
+				'post_date'             => '2026-06-22 10:2' . $index . ':30',
+				'post_date_gmt'         => '2026-06-22 08:2' . $index . ':30',
+				'post_content'          => '',
+				'post_title'            => $title,
+				'post_excerpt'          => '',
+				'post_status'           => 'inherit',
+				'comment_status'        => 'open',
+				'ping_status'           => 'closed',
+				'post_password'         => '',
+				'post_name'             => $slug,
+				'to_ping'               => '',
+				'pinged'                => '',
+				'post_modified'         => '2026-06-22 10:2' . $index . ':30',
+				'post_modified_gmt'     => '2026-06-22 08:2' . $index . ':30',
+				'post_content_filtered' => '',
+				'post_parent'           => $parent->ID,
+				'guid'                  => 'http://example.test/wp-content/uploads/2026/07/cfz-image-' . $index . '.jpg',
+				'menu_order'            => $index,
+				'post_type'             => 'attachment',
+				'post_mime_type'        => 'image/jpeg',
+				'comment_count'         => '0',
+				'filter'                => 'raw',
+			)
+		);
+	}
+
 	private static function seed_post_storage( \WP_Post $post ): void {
 		global $wpdb;
 
@@ -1909,6 +2210,35 @@ final class TemplateLinksSurface {
 			$wpdb->delete( $wpdb->posts, array( 'ID' => $post_id ) );
 		}
 		\wp_cache_delete( $post_id, 'posts' );
+	}
+
+	private static function seed_attachment_image_meta( \WP_Post $attachment, int $index ): void {
+		$file      = '2026/07/cfz-image-' . $index . '.jpg';
+		$thumbnail = 'cfz-image-' . $index . '-150x150.jpg';
+
+		\wp_cache_set(
+			$attachment->ID,
+			array(
+				'_wp_attached_file'      => array( $file ),
+				'_wp_attachment_image_alt' => array( 'Image ' . $index . ' alt <script>' ),
+				'_wp_attachment_metadata' => array(
+					array(
+						'width'  => 640,
+						'height' => 480,
+						'file'   => $file,
+						'sizes'  => array(
+							'thumbnail' => array(
+								'file'      => $thumbnail,
+								'width'     => 150,
+								'height'    => 150,
+								'mime-type' => 'image/jpeg',
+							),
+						),
+					),
+				),
+			),
+			'post_meta'
+		);
 	}
 
 	private static function post_class_term( int $term_id, string $taxonomy, string $slug ): object {
@@ -1969,6 +2299,20 @@ final class TemplateLinksSurface {
 		$GLOBALS['page']         = 1;
 	}
 
+	private static function set_current_attachment_query( \WP_Post $attachment ): void {
+		self::set_current_post_query( $attachment, 1, false );
+
+		$query = $GLOBALS['wp_query'] ?? null;
+		if ( $query instanceof \WP_Query ) {
+			$query->is_attachment                = true;
+			$query->is_single                    = false;
+			$query->query_vars['attachment']     = $attachment->post_name;
+			$query->query_vars['attachment_id']  = $attachment->ID;
+			$query->query_vars['post_type']      = 'attachment';
+			$query->query_vars['post_mime_type'] = 'image/jpeg';
+		}
+	}
+
 	private static function adjacent_where_filter( string $adjacent, int $target_id, array &$events ): callable {
 		return static function ( string $where, bool $in_same_term, $excluded_terms, string $taxonomy, \WP_Post $post ) use (
 			$adjacent,
@@ -2022,6 +2366,24 @@ final class TemplateLinksSurface {
 				'<a ',
 				'<a data-cfz-link="' . \esc_attr( $marker . '-' . $adjacent ) . '" ',
 				$output
+			);
+		};
+	}
+
+	private static function adjacent_image_filter( string $adjacent, string $marker, array &$events ): callable {
+		return static function ( $output, $attachment_id, $size, $text ) use ( $adjacent, $marker, &$events ): string {
+			$events[] = array(
+				'adjacent'     => $adjacent,
+				'attachmentId' => (int) $attachment_id,
+				'size'         => is_array( $size ) ? array_values( $size ) : $size,
+				'text'         => $text,
+				'output'       => self::describe_string( (string) $output ),
+			);
+
+			return str_replace(
+				'<a ',
+				'<a data-cfz-image="' . \esc_attr( $marker . '-' . $adjacent ) . '" ',
+				(string) $output
 			);
 		};
 	}
@@ -2173,6 +2535,20 @@ final class TemplateLinksSurface {
 				unset( $GLOBALS['wp_rewrite'] );
 			} else {
 				$GLOBALS['wp_rewrite'] = $rewrite;
+			}
+		}
+	}
+
+	private static function capture_output( callable $callback ): string {
+		$buffer_level = ob_get_level();
+
+		ob_start();
+		try {
+			$callback();
+			return (string) ob_get_clean();
+		} finally {
+			if ( ob_get_level() > $buffer_level ) {
+				ob_end_clean();
 			}
 		}
 	}
