@@ -591,10 +591,12 @@ database, network requests, or a configured site.
   profile filter contracts, built-in media exporter author/type filtering,
   50-item pagination, URL payloads, and registration callbacks, export
   notification recipient/subject/content/header filters through an intercepted
-  PHPMailer handoff, directory/expiration cleanup filters, anonymization
-  helpers, privacy policy suggestion/default text, suggested-text lifecycle
-  cache transitions, text-change cache and admin notices without real mail or
-  network delivery.
+  PHPMailer handoff, real personal data export ZIP generation through filtered
+  temp export roots, `export.json`/`index.html` archive inspection, legacy
+  export-file meta migration, fail-closed JSON-error paths, directory/expiration
+  cleanup filters, anonymization helpers, privacy policy suggestion/default text,
+  suggested-text lifecycle cache transitions, text-change cache and admin
+  notices without real mail or network delivery.
 - `privacy-admin-requests`: in-memory wpdb-backed admin privacy request
   coverage, including export and erasure request list-table views, counts,
   status filtering, prepared items, row action nonce/data attributes, checkbox

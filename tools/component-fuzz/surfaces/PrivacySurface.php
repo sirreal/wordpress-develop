@@ -62,6 +62,7 @@ final class PrivacySurface {
 			$rows[] = self::check_comment_privacy_callbacks( $ctx->fork( 'comment-privacy-callbacks' ) );
 			$rows[] = self::check_builtin_user_media_exporters( $ctx->fork( 'builtin-user-media-exporters' ) );
 			$rows[] = self::check_export_processor( $ctx->fork( 'export-processor' ) );
+			$rows[] = self::check_export_file_generation( $ctx->fork( 'export-file-generation' ) );
 			$rows[] = self::check_export_email_notification( $ctx->fork( 'export-email' ) );
 			$rows[] = self::check_export_email_negative_paths( $ctx->fork( 'export-email-negative' ) );
 			$rows[] = self::check_erasure_processor( $ctx->fork( 'erasure-processor' ) );
@@ -270,6 +271,8 @@ final class PrivacySurface {
 				'wp_get_user_request',
 				'wp_json_encode',
 				'wp_mail',
+				'wp_mkdir_p',
+				'wp_privacy_generate_personal_data_export_file',
 				'wp_is_unicode_email',
 				'wp_sanitize_unicode_email',
 				'wp_privacy_generate_personal_data_export_group_html',
@@ -294,7 +297,9 @@ final class PrivacySurface {
 				'wp_register_comment_personal_data_exporter',
 				'wp_register_media_personal_data_exporter',
 				'wp_register_user_personal_data_exporter',
+				'wp_send_json_error',
 				'wp_user_personal_data_exporter',
+				'wp_unique_filename',
 				'_wp_privacy_account_request_confirmed',
 				'_wp_privacy_account_request_confirmed_message',
 				'_wp_privacy_completed_request',
@@ -1988,6 +1993,388 @@ final class PrivacySurface {
 				'exporters' => array_keys( self::$exporters ),
 				'actions'   => self::describe_value( self::$export_file_actions ),
 				'failures'  => $failures,
+			)
+		);
+	}
+
+	private static function check_export_file_generation( \ComponentFuzz\FuzzContext $ctx ): array {
+		if ( ! class_exists( 'ZipArchive' ) ) {
+			return self::skip(
+				$ctx,
+				'privacy.export-file.ZipArchive-available',
+				'ZipArchive is unavailable for real privacy export file generation.'
+			);
+		}
+
+		$failures = array();
+		$token    = substr( sha1( (string) $ctx->seed() . ':export-file:' . (string) $ctx->iteration() ), 0, 12 );
+		$base_dir = sys_get_temp_dir() . '/component-fuzz-privacy-export-file-' . $token;
+		$dir      = $base_dir . '/wp-personal-data-exports/';
+		$url      = 'https://privacy.example.test/generated/' . $token . '/';
+		$email    = 'privacy-export-' . $token . '@example.test';
+		$file_name = 'component-privacy-real-export-' . $token . '.zip';
+		$request_id = 92800 + $ctx->int( 1, 49 );
+		$legacy_id  = $request_id + 100;
+		$missing_id = $request_id + 200;
+		$wrong_id   = $request_id + 201;
+		$bad_email_id = $request_id + 202;
+		$json_error_id = $request_id + 203;
+		$profile_label = 'Profile <script>alert(1)</script> & Data';
+		$profile_value = 'Alice <script>alert("x")</script> & Bob';
+		$activity_value = 'Browser <b>Agent</b>';
+		$created_events = array();
+		$actions_before = self::$export_file_actions;
+
+		self::remove_tree( $base_dir );
+		if ( ! is_dir( $dir ) ) {
+			mkdir( $dir, 0777, true );
+		}
+		file_put_contents( $dir . $file_name, 'stale export should be replaced' );
+
+		self::$exporters = self::processor_exporters();
+		self::prime_request_post(
+			self::post_record(
+				array(
+					'ID'            => $request_id,
+					'post_author'   => '0',
+					'post_title'    => $email,
+					'post_name'     => 'export_personal_data',
+					'post_status'   => 'request-confirmed',
+					'post_content'  => '{"export":"real-file"}',
+					'post_password' => \wp_fast_hash( 'real-export-key-' . $token ),
+				)
+			)
+		);
+		self::set_post_meta(
+			$request_id,
+			array(
+				'_export_file_name' => $file_name,
+			)
+		);
+
+		$legacy_file = 'legacy-component-privacy-' . $token . '.zip';
+		self::prime_request_post(
+			self::post_record(
+				array(
+					'ID'            => $legacy_id,
+					'post_title'    => 'legacy-export-' . $token . '@example.test',
+					'post_name'     => 'export_personal_data',
+					'post_status'   => 'request-confirmed',
+					'post_content'  => '{"export":"legacy-file"}',
+					'post_password' => \wp_fast_hash( 'legacy-export-key-' . $token ),
+				)
+			)
+		);
+		self::set_post_meta(
+			$legacy_id,
+			array(
+				'_export_data_grouped' => array(
+					'legacy' => array(
+						'group_label'       => 'Legacy',
+						'group_description' => 'Legacy export path',
+						'items'             => array(
+							'legacy-1' => array(
+								array(
+									'name'  => 'Legacy Email',
+									'value' => 'legacy-export-' . $token . '@example.test',
+								),
+							),
+						),
+					),
+				),
+				'_export_file_path'    => $dir . $legacy_file,
+				'_export_file_url'     => $url . 'old-name.zip',
+			)
+		);
+
+		self::prime_request_post(
+			self::post_record(
+				array(
+					'ID'          => $wrong_id,
+					'post_title'  => 'wrong-action-' . $token . '@example.test',
+					'post_name'   => 'remove_personal_data',
+					'post_status' => 'request-confirmed',
+				)
+			)
+		);
+		self::prime_request_post(
+			self::post_record(
+				array(
+					'ID'          => $bad_email_id,
+					'post_title'  => 'not-an-email',
+					'post_name'   => 'export_personal_data',
+					'post_status' => 'request-confirmed',
+				)
+			)
+		);
+		self::prime_request_post(
+			self::post_record(
+				array(
+					'ID'          => $json_error_id,
+					'post_title'  => 'json-error-' . $token . '@example.test',
+					'post_name'   => 'export_personal_data',
+					'post_status' => 'request-confirmed',
+				)
+			)
+		);
+		$recursive_group = array();
+		$recursive_group['loop'] =& $recursive_group;
+		self::set_post_meta( $json_error_id, array( '_export_data_grouped' => $recursive_group ) );
+		unset( $recursive_group );
+
+		$dir_filter = static function ( string $exports_dir ) use ( $dir ): string {
+			unset( $exports_dir );
+			return $dir;
+		};
+		$url_filter = static function ( string $exports_url ) use ( $url ): string {
+			unset( $exports_url );
+			return $url;
+		};
+		$blogname_filter = static fn() => 'Privacy <Site> & Fuzz';
+		$home_filter     = static fn() => 'https://privacy.example.test/home?x=<tag>';
+		$created_action  = static function ( string $archive_pathname, string $archive_url, string $html_report_pathname, int $seen_request_id, string $json_report_pathname ) use ( &$created_events ): void {
+			$created_events[] = array(
+				'archive'       => $archive_pathname,
+				'archiveUrl'    => $archive_url,
+				'html'          => $html_report_pathname,
+				'json'          => $json_report_pathname,
+				'requestId'     => $seen_request_id,
+				'archiveExists' => file_exists( $archive_pathname ),
+				'htmlExists'    => file_exists( $html_report_pathname ),
+				'jsonExists'    => file_exists( $json_report_pathname ),
+			);
+		};
+
+		\remove_action( 'wp_privacy_personal_data_export_file', array( __CLASS__, 'record_export_file_action' ), 10 );
+		\add_action( 'wp_privacy_personal_data_export_file', 'wp_privacy_generate_personal_data_export_file', 10, 1 );
+		\add_action( 'wp_privacy_personal_data_export_file_created', $created_action, 10, 5 );
+		\add_filter( 'wp_privacy_exports_dir', $dir_filter, 10, 1 );
+		\add_filter( 'wp_privacy_exports_url', $url_filter, 10, 1 );
+		\add_filter( 'pre_option_blogname', $blogname_filter );
+		\add_filter( 'pre_option_home', $home_filter );
+
+		try {
+			$page_one = array(
+				'done' => true,
+				'data' => array(
+					self::export_datum( 'profile', $profile_label, 'profile-1', 'Display <Name>', $profile_value ),
+				),
+			);
+			$page_two = array(
+				'done' => true,
+				'data' => array(
+					self::export_datum( 'profile', $profile_label, 'profile-1', 'Email', $email ),
+					self::export_datum( 'activity', 'Activity & Logs', 'login-1', 'IP', '203.0.113.44' ),
+					self::export_datum( 'activity', 'Activity & Logs', 'login-2', 'User Agent', $activity_value ),
+				),
+			);
+
+			$page_one_result = self::call(
+				static function () use ( $page_one, $email, $request_id ) {
+					return \wp_privacy_process_personal_data_export_page( $page_one, 1, $email, 1, $request_id, false, 'component-one' );
+				}
+			);
+			$page_two_result = self::call(
+				static function () use ( $page_two, $email, $request_id ) {
+					return \wp_privacy_process_personal_data_export_page( $page_two, 2, $email, 1, $request_id, false, 'component-two' );
+				}
+			);
+			$legacy_result = self::call(
+				static function () use ( $legacy_id ) {
+					return \wp_privacy_generate_personal_data_export_file( $legacy_id );
+				}
+			);
+
+			$negative_captures = array(
+				'missing'    => self::capture_json_error_call(
+					static function () use ( $missing_id ): void {
+						\wp_privacy_generate_personal_data_export_file( $missing_id );
+					}
+				),
+				'wrongAction' => self::capture_json_error_call(
+					static function () use ( $wrong_id ): void {
+						\wp_privacy_generate_personal_data_export_file( $wrong_id );
+					}
+				),
+				'badEmail'   => self::capture_json_error_call(
+					static function () use ( $bad_email_id ): void {
+						\wp_privacy_generate_personal_data_export_file( $bad_email_id );
+					}
+				),
+				'jsonError'  => self::capture_json_error_call(
+					static function () use ( $json_error_id ): void {
+						\wp_privacy_generate_personal_data_export_file( $json_error_id );
+					}
+				),
+			);
+		} finally {
+			self::set_post_meta( $json_error_id, array() );
+			\remove_filter( 'pre_option_home', $home_filter );
+			\remove_filter( 'pre_option_blogname', $blogname_filter );
+			\remove_filter( 'wp_privacy_exports_url', $url_filter, 10 );
+			\remove_filter( 'wp_privacy_exports_dir', $dir_filter, 10 );
+			\remove_action( 'wp_privacy_personal_data_export_file_created', $created_action, 10 );
+			\remove_action( 'wp_privacy_personal_data_export_file', 'wp_privacy_generate_personal_data_export_file', 10 );
+			if ( false === \has_action( 'wp_privacy_personal_data_export_file', array( __CLASS__, 'record_export_file_action' ) ) ) {
+				\add_action( 'wp_privacy_personal_data_export_file', array( __CLASS__, 'record_export_file_action' ), 10, 1 );
+			}
+		}
+
+		$archive_path = $dir . $file_name;
+		$zip_entries  = self::read_zip_entries( $archive_path );
+		$json_export  = isset( $zip_entries['entries']['export.json'] ) ? json_decode( $zip_entries['entries']['export.json'], true ) : null;
+		$json_title   = is_array( $json_export ) ? ( array_key_first( $json_export ) ?? '' ) : '';
+		$json_groups  = is_array( $json_export ) && is_string( $json_title ) ? ( $json_export[ $json_title ] ?? null ) : null;
+		$html_export  = (string) ( $zip_entries['entries']['index.html'] ?? '' );
+		$remaining_temp_reports = glob( $dir . 'wp-personal-data-file-*.*' );
+		$legacy_zip = self::read_zip_entries( $dir . $legacy_file );
+
+		self::collect_failure(
+			$failures,
+			! $page_one_result['threw']
+				&& $page_one_result['value'] === $page_one
+				&& ! $page_two_result['threw']
+				&& is_array( $page_two_result['value'] )
+				&& true === ( $page_two_result['value']['done'] ?? null )
+				&& $url . $file_name === ( $page_two_result['value']['url'] ?? null )
+				&& file_exists( $archive_path )
+				&& 'stale export should be replaced' !== file_get_contents( $archive_path )
+				&& 'component-privacy-real-export-' . $token . '.zip' === \get_post_meta( $request_id, '_export_file_name', true )
+				&& '' === \get_post_meta( $request_id, '_export_data_raw', true )
+				&& '' === \get_post_meta( $request_id, '_export_data_grouped', true )
+				&& $actions_before === self::$export_file_actions,
+			'export-file.processor-real-generator-url-and-meta-cleanup',
+			array(
+				'pageOne'       => self::describe_call( $page_one_result ),
+				'pageTwo'       => self::describe_call( $page_two_result ),
+				'fileName'      => \get_post_meta( $request_id, '_export_file_name', true ),
+				'rawMeta'       => self::describe_value( \get_post_meta( $request_id, '_export_data_raw', true ) ),
+				'groupMeta'     => self::describe_value( \get_post_meta( $request_id, '_export_data_grouped', true ) ),
+				'actionsBefore' => self::describe_value( $actions_before ),
+				'actionsAfter'  => self::describe_value( self::$export_file_actions ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$zip_entries['ok']
+				&& array( 'export.json', 'index.html' ) === array_keys( $zip_entries['entries'] )
+				&& is_array( $json_groups )
+				&& 'Personal Data Export for ' . $email === $json_title
+				&& isset( $json_groups['about'], $json_groups['profile'], $json_groups['activity'] )
+				&& $profile_label === ( $json_groups['profile']['group_label'] ?? null )
+				&& $profile_value === ( $json_groups['profile']['items']['profile-1'][1]['value'] ?? null )
+				&& $email === ( $json_groups['profile']['items']['profile-1'][0]['value'] ?? null )
+				&& $activity_value === ( $json_groups['activity']['items']['login-2'][0]['value'] ?? null ),
+			'export-file.zip-json-contains-about-and-grouped-data',
+			array(
+				'zip'       => self::describe_value( $zip_entries ),
+				'jsonTitle' => self::describe_string( (string) $json_title ),
+				'groups'    => self::describe_value( is_array( $json_groups ) ? array_keys( $json_groups ) : $json_groups ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			str_contains( $html_export, '<div id="table_of_contents">' )
+				&& str_contains( $html_export, '<span class="count">(2)</span>' )
+				&& str_contains( $html_export, 'Profile &lt;script&gt;alert(1)&lt;/script&gt; &amp; Data' )
+				&& str_contains( $html_export, 'Alice alert("x") &amp; Bob' )
+				&& str_contains( $html_export, 'Browser <b>Agent</b>' )
+				&& ! str_contains( $html_export, '<script>alert' )
+				&& ! str_contains( $html_export, '&lt;b&gt;Agent&lt;/b&gt;' ),
+			'export-file.html-escapes-generated-labels-values-and-renders-toc',
+			array(
+				'html' => self::describe_string( $html_export ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			file_exists( $dir . 'index.php' )
+				&& array() === ( is_array( $remaining_temp_reports ) ? $remaining_temp_reports : array() )
+				&& 2 === count( $created_events )
+				&& $archive_path === ( $created_events[0]['archive'] ?? null )
+				&& $url . $file_name === ( $created_events[0]['archiveUrl'] ?? null )
+				&& $request_id === ( $created_events[0]['requestId'] ?? null )
+				&& true === ( $created_events[0]['archiveExists'] ?? null )
+				&& true === ( $created_events[0]['htmlExists'] ?? null )
+				&& true === ( $created_events[0]['jsonExists'] ?? null ),
+			'export-file.created-action-index-and-temp-report-cleanup',
+			array(
+				'createdEvents' => self::describe_value( $created_events ),
+				'remainingTemp' => self::describe_value( $remaining_temp_reports ),
+				'indexExists'   => file_exists( $dir . 'index.php' ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			! $legacy_result['threw']
+				&& null === $legacy_result['value']
+				&& $legacy_zip['ok']
+				&& array( 'export.json', 'index.html' ) === array_keys( $legacy_zip['entries'] )
+				&& $legacy_file === \get_post_meta( $legacy_id, '_export_file_name', true )
+				&& '' === \get_post_meta( $legacy_id, '_export_file_path', true )
+				&& '' === \get_post_meta( $legacy_id, '_export_file_url', true )
+				&& $dir . $legacy_file === ( $created_events[1]['archive'] ?? null )
+				&& $url . $legacy_file === ( $created_events[1]['archiveUrl'] ?? null ),
+			'export-file.legacy-path-meta-migrates-to-filename',
+			array(
+				'legacyResult' => self::describe_call( $legacy_result ),
+				'legacyZip'    => self::describe_value( $legacy_zip ),
+				'fileNameMeta' => \get_post_meta( $legacy_id, '_export_file_name', true ),
+				'pathMeta'     => \get_post_meta( $legacy_id, '_export_file_path', true ),
+				'urlMeta'      => \get_post_meta( $legacy_id, '_export_file_url', true ),
+			)
+		);
+
+		$negative_ok = self::json_error_capture_contains( $negative_captures['missing'] ?? array(), 'Invalid request ID' )
+			&& self::json_error_capture_contains( $negative_captures['wrongAction'] ?? array(), 'Invalid request ID' )
+			&& self::json_error_capture_contains( $negative_captures['badEmail'] ?? array(), 'Invalid email address' )
+			&& self::json_error_capture_contains( $negative_captures['jsonError'] ?? array(), 'Unable to encode the personal data' );
+		self::collect_failure(
+			$failures,
+			$negative_ok,
+			'export-file.invalid-request-email-and-json-errors-fail-closed',
+			array(
+				'captures' => self::describe_value( $negative_captures ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			false === \has_filter( 'wp_privacy_exports_dir', $dir_filter )
+				&& false === \has_filter( 'wp_privacy_exports_url', $url_filter )
+				&& false === \has_filter( 'pre_option_blogname', $blogname_filter )
+				&& false === \has_filter( 'pre_option_home', $home_filter )
+				&& false === \has_action( 'wp_privacy_personal_data_export_file', 'wp_privacy_generate_personal_data_export_file' )
+				&& false === \has_action( 'wp_privacy_personal_data_export_file_created', $created_action )
+				&& false !== \has_action( 'wp_privacy_personal_data_export_file', array( __CLASS__, 'record_export_file_action' ) ),
+			'export-file.filters-and-actions-restored',
+			array(
+				'dirFilter'      => \has_filter( 'wp_privacy_exports_dir', $dir_filter ),
+				'urlFilter'      => \has_filter( 'wp_privacy_exports_url', $url_filter ),
+				'blognameFilter' => \has_filter( 'pre_option_blogname', $blogname_filter ),
+				'homeFilter'     => \has_filter( 'pre_option_home', $home_filter ),
+				'realAction'     => \has_action( 'wp_privacy_personal_data_export_file', 'wp_privacy_generate_personal_data_export_file' ),
+				'createdAction'  => \has_action( 'wp_privacy_personal_data_export_file_created', $created_action ),
+				'recorderAction' => \has_action( 'wp_privacy_personal_data_export_file', array( __CLASS__, 'record_export_file_action' ) ),
+			)
+		);
+
+		self::remove_tree( $base_dir );
+
+		return self::row(
+			$ctx,
+			'privacy.export-file.real-zip-generation',
+			array() === $failures,
+			array(
+				'requestId'     => $request_id,
+				'legacyId'      => $legacy_id,
+				'fileName'      => $file_name,
+				'createdEvents' => count( $created_events ),
+				'failures'      => $failures,
 			)
 		);
 	}
@@ -4037,6 +4424,78 @@ final class PrivacySurface {
 		}
 	}
 
+	private static function capture_json_error_call( callable $callback ): array {
+		$start_level       = ob_get_level();
+		$die_calls         = array();
+		$captured          = false;
+		$returned          = false;
+		$throwable         = null;
+		$output            = '';
+		$cleaned_buffers   = 0;
+		$doing_ajax_filter = static function (): bool {
+			return true;
+		};
+		$die_filter        = static function ( $handler ) use ( &$die_calls ) {
+			unset( $handler );
+			return static function ( $message = '', string $title = '', $args = array() ) use ( &$die_calls ): void {
+				$die_calls[] = array(
+					'message' => is_scalar( $message ) ? (string) $message : gettype( $message ),
+					'title'   => $title,
+					'args'    => is_array( $args ) ? $args : array( 'raw' => $args ),
+				);
+				throw new PrivacySurface_DieCaptured( 'Captured privacy wp_die.' );
+			};
+		};
+		$charset_filter    = static function () {
+			return 'UTF-8';
+		};
+
+		if ( ! headers_sent() ) {
+			header_remove();
+		}
+
+		\add_filter( 'wp_doing_ajax', $doing_ajax_filter, 9999 );
+		\add_filter( 'wp_die_ajax_handler', $die_filter, 1 );
+		\add_filter( 'pre_option_blog_charset', $charset_filter, 10, 3 );
+
+		ob_start();
+		try {
+			$callback();
+			$returned = true;
+		} catch ( PrivacySurface_DieCaptured $e ) {
+			$captured = true;
+		} catch ( \Throwable $e ) {
+			$throwable = $e;
+		} finally {
+			while ( ob_get_level() > $start_level ) {
+				$chunk  = ob_get_clean();
+				$output = ( false === $chunk ? '' : $chunk ) . $output;
+				++$cleaned_buffers;
+			}
+
+			\remove_filter( 'pre_option_blog_charset', $charset_filter, 10 );
+			\remove_filter( 'wp_die_ajax_handler', $die_filter, 1 );
+			\remove_filter( 'wp_doing_ajax', $doing_ajax_filter, 9999 );
+
+			if ( ! headers_sent() ) {
+				header_remove();
+			}
+		}
+
+		return array(
+			'bufferBalanced'  => $start_level === ob_get_level() && 1 === $cleaned_buffers,
+			'captured'        => $captured,
+			'decoded'         => json_decode( $output, true ),
+			'dieCalls'        => $die_calls,
+			'filtersRestored' => false === \has_filter( 'wp_doing_ajax', $doing_ajax_filter )
+				&& false === \has_filter( 'wp_die_ajax_handler', $die_filter )
+				&& false === \has_filter( 'pre_option_blog_charset', $charset_filter ),
+			'output'          => $output,
+			'returned'        => $returned,
+			'throwable'       => null === $throwable ? null : self::describe_throwable( $throwable ),
+		);
+	}
+
 	private static function call( callable $callback ): array {
 		try {
 			return array(
@@ -4049,6 +4508,69 @@ final class PrivacySurface {
 				'throwable' => self::describe_throwable( $e ),
 			);
 		}
+	}
+
+	private static function json_error_capture_contains( array $capture, string $fragment ): bool {
+		$decoded = $capture['decoded'] ?? null;
+		if (
+			! ( $capture['captured'] ?? false )
+			|| ! ( $capture['bufferBalanced'] ?? false )
+			|| ! ( $capture['filtersRestored'] ?? false )
+			|| ( $capture['returned'] ?? false )
+			|| null !== ( $capture['throwable'] ?? null )
+			|| ! is_array( $decoded )
+			|| false !== ( $decoded['success'] ?? null )
+		) {
+			return false;
+		}
+
+		$data = $decoded['data'] ?? '';
+		if ( is_string( $data ) ) {
+			return str_contains( $data, $fragment );
+		}
+
+		$encoded = wp_json_encode( $data );
+		return is_string( $encoded ) && str_contains( $encoded, $fragment );
+	}
+
+	private static function read_zip_entries( string $archive_path ): array {
+		if ( ! file_exists( $archive_path ) || ! class_exists( 'ZipArchive' ) ) {
+			return array(
+				'ok'      => false,
+				'entries' => array(),
+				'error'   => 'missing-or-unavailable',
+			);
+		}
+
+		$zip  = new \ZipArchive();
+		$open = $zip->open( $archive_path );
+		if ( true !== $open ) {
+			return array(
+				'ok'      => false,
+				'entries' => array(),
+				'error'   => $open,
+			);
+		}
+
+		$entries = array();
+		for ( $i = 0; $i < $zip->numFiles; ++$i ) {
+			$stat = $zip->statIndex( $i );
+			if ( ! is_array( $stat ) || ! isset( $stat['name'] ) ) {
+				continue;
+			}
+			$name = (string) $stat['name'];
+			if ( str_ends_with( $name, '/' ) ) {
+				continue;
+			}
+			$entries[ $name ] = (string) $zip->getFromIndex( $i );
+		}
+		$zip->close();
+		ksort( $entries );
+
+		return array(
+			'ok'      => true,
+			'entries' => $entries,
+		);
 	}
 
 	private static function collect_failure( array &$failures, bool $condition, string $label, array $details ): void {
@@ -4401,6 +4923,9 @@ final class PrivacySurface {
 
 		return $value;
 	}
+}
+
+final class PrivacySurface_DieCaptured extends \RuntimeException {
 }
 
 final class PrivacySurfaceMailer {
