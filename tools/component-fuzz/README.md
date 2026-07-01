@@ -323,8 +323,8 @@ database, network requests, or a configured site.
   missing-file failure values.
 - `formatting`: escaping helpers, text sanitizers, whitespace normalization,
   autop/shortcode cleanup, clickable text, URL sanitization, entity
-  normalization, title/key/class identifier sanitizers, colors, sizes, time
-  strings, UTF-8 helpers, and accent removal.
+  normalization, title/key/class identifier sanitizers, file-name and username
+  sanitizers, colors, sizes, time strings, UTF-8 helpers, and accent removal.
 - `feed-parsers`: local RSS/Atom parser and legacy feed utility API coverage,
   including bounded malformed fixtures, Magpie RSS/Atom/RDF item/channel
   normalization, AtomParser local-file behavior, SimplePie raw-data parsing and

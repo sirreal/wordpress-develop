@@ -29,6 +29,7 @@ final class FormattingSurface {
 		$rows[] = self::check_make_clickable( $ctx, $inputs['clickableCases'] );
 		$rows[] = self::check_url_sanitizers( $ctx, $inputs['urlCases'] );
 		$rows[] = self::check_identifier_sanitizers( $ctx, $inputs['identifierCases'] );
+		$rows[] = self::check_file_and_user_sanitizers( $ctx, $inputs['fileNameCases'], $inputs['userNameCases'] );
 		$rows[] = self::check_entity_normalization( $ctx, $inputs['entityCases'] );
 		$rows[] = self::check_zeroise( $ctx, $inputs['zeroiseCases'] );
 		$rows[] = self::check_size_format( $ctx, $inputs['sizeCases'] );
@@ -78,6 +79,8 @@ final class FormattingSurface {
 			'clickableCases'   => self::generate_clickable_cases( $ctx->fork( 'formatting-clickable' ) ),
 			'urlCases'         => self::generate_url_cases( $ctx->fork( 'formatting-urls' ) ),
 			'identifierCases'  => self::generate_identifier_cases( $ctx->fork( 'formatting-identifiers' ) ),
+			'fileNameCases'    => self::generate_file_name_cases( $ctx->fork( 'formatting-filenames' ) ),
+			'userNameCases'    => self::generate_user_name_cases( $ctx->fork( 'formatting-usernames' ) ),
 			'entityCases'      => self::generate_entity_cases( $ctx->fork( 'formatting-entities' ) ),
 			'zeroiseCases'     => self::generate_zeroise_cases( $ctx->fork( 'formatting-zeroise' ) ),
 			'sizeCases'        => self::generate_size_cases( $ctx->fork( 'formatting-size' ) ),
@@ -819,6 +822,231 @@ final class FormattingSurface {
 		);
 	}
 
+	private static function check_file_and_user_sanitizers( \ComponentFuzz\FuzzContext $ctx, array $file_cases, array $user_cases ): array {
+		foreach ( array( 'sanitize_file_name', 'sanitize_user' ) as $function ) {
+			if ( ! function_exists( $function ) ) {
+				return self::skip_row( $ctx, 'file_user_sanitizers.shape_filter_contracts', "{$function}() is unavailable." );
+			}
+		}
+
+		$failures             = array();
+		$file_filter_calls    = array();
+		$file_chars_calls     = array();
+		$user_filter_calls    = array();
+		$file_filter_expected = array();
+		$user_filter_expected = array();
+
+		$file_chars_filter = static function ( array $special_chars, string $filename_raw ) use ( &$file_chars_calls ): array {
+			$file_chars_calls[] = array(
+				'raw'   => $filename_raw,
+				'count' => count( $special_chars ),
+			);
+
+			return $special_chars;
+		};
+		$file_filter       = static function ( string $filename, string $filename_raw ) use ( &$file_filter_calls ): string {
+			$file_filter_calls[] = array(
+				'sanitized' => $filename,
+				'raw'       => $filename_raw,
+			);
+
+			return $filename;
+		};
+		$user_filter       = static function ( string $username, string $raw_username, bool $strict ) use ( &$user_filter_calls ): string {
+			$user_filter_calls[] = array(
+				'sanitized' => $username,
+				'raw'       => $raw_username,
+				'strict'    => $strict,
+			);
+
+			return $username;
+		};
+
+		\add_filter( 'sanitize_file_name_chars', $file_chars_filter, 10, 2 );
+		\add_filter( 'sanitize_file_name', $file_filter, 10, 2 );
+		\add_filter( 'sanitize_user', $user_filter, 10, 3 );
+
+		try {
+			foreach ( $file_cases as $case_index => $case ) {
+				$input     = $case['input'];
+				$sanitized = self::call(
+					'sanitize_file_name',
+					static function () use ( $input ) {
+						return \sanitize_file_name( $input );
+					}
+				);
+
+				if ( ! $sanitized['ok'] || ! is_string( $sanitized['value'] ) ) {
+					$failures[] = self::call_failure(
+						'sanitize-file-name-call-failed',
+						'sanitize_file_name() failed or returned a non-string value.',
+						$sanitized,
+						array(
+							'caseIndex' => $case_index,
+							'input'     => self::describe_string( $input ),
+						)
+					);
+					continue;
+				}
+
+				$file_filter_expected[] = array(
+					'raw'       => $input,
+					'sanitized' => $sanitized['value'],
+				);
+
+				$again      = \sanitize_file_name( $sanitized['value'] );
+				$violations = self::file_name_violations( $sanitized['value'], $again );
+				if ( isset( $case['expected'] ) && $sanitized['value'] !== $case['expected'] ) {
+					$violations[] = 'known-fixture-mismatch';
+				}
+				if ( ! empty( $case['expectIntermediatePhpUnderscore'] ) && ! preg_match( '/\\.p(?:hp|html)_\\.[^.]+$/i', $sanitized['value'] ) ) {
+					$violations[] = 'intermediate-php-extension-not-suffixed';
+				}
+				if ( ! empty( $case['expectUnnamedFile'] ) && ! str_starts_with( $sanitized['value'], 'unnamed-file.' ) ) {
+					$violations[] = 'unnamed-extension-not-replaced';
+				}
+
+				if ( array() !== $violations ) {
+					$failures[] = array(
+						'name'       => 'sanitize-file-name-contract-violation',
+						'message'    => 'sanitize_file_name() returned an unsafe, non-canonical, or unexpected filename.',
+						'caseIndex'  => $case_index,
+						'input'      => self::describe_string( $input ),
+						'expected'   => $case['expected'] ?? null,
+						'sanitized'  => self::describe_string( $sanitized['value'] ),
+						'again'      => self::describe_string( $again ),
+						'violations' => $violations,
+					);
+				}
+			}
+
+			foreach ( $user_cases as $case_index => $case ) {
+				$input        = $case['input'];
+				$loose        = self::call(
+					'sanitize_user',
+					static function () use ( $input ) {
+						return \sanitize_user( $input, false );
+					}
+				);
+				$strict       = self::call(
+					'sanitize_user:strict',
+					static function () use ( $input ) {
+						return \sanitize_user( $input, true );
+					}
+				);
+				$expected_raw = array(
+					array( 'raw' => $input, 'strict' => false ),
+					array( 'raw' => $input, 'strict' => true ),
+				);
+
+				if ( ! $loose['ok'] || ! is_string( $loose['value'] ) || ! $strict['ok'] || ! is_string( $strict['value'] ) ) {
+					$failures[] = array(
+						'name'      => 'sanitize-user-call-failed',
+						'message'   => 'sanitize_user() failed or returned a non-string value.',
+						'caseIndex' => $case_index,
+						'input'     => self::describe_string( $input ),
+						'loose'     => self::call_summary( $loose ),
+						'strict'    => self::call_summary( $strict ),
+					);
+					continue;
+				}
+
+				foreach ( $expected_raw as $expected ) {
+					$user_filter_expected[] = $expected;
+				}
+
+				$loose_again  = \sanitize_user( $loose['value'], false );
+				$strict_again = \sanitize_user( $strict['value'], true );
+				$violations   = self::user_name_violations( $loose['value'], $strict['value'], $loose_again, $strict_again );
+				if ( isset( $case['expectedLoose'] ) && $loose['value'] !== $case['expectedLoose'] ) {
+					$violations[] = 'known-loose-fixture-mismatch';
+				}
+				if ( isset( $case['expectedStrict'] ) && $strict['value'] !== $case['expectedStrict'] ) {
+					$violations[] = 'known-strict-fixture-mismatch';
+				}
+
+				if ( array() !== $violations ) {
+					$failures[] = array(
+						'name'        => 'sanitize-user-contract-violation',
+						'message'     => 'sanitize_user() returned unsafe text, failed strict-mode reduction, or was not idempotent.',
+						'caseIndex'   => $case_index,
+						'input'       => self::describe_string( $input ),
+						'loose'       => self::describe_string( $loose['value'] ),
+						'strict'      => self::describe_string( $strict['value'] ),
+						'looseAgain'  => self::describe_string( $loose_again ),
+						'strictAgain' => self::describe_string( $strict_again ),
+						'violations'  => $violations,
+					);
+				}
+			}
+		} finally {
+			\remove_filter( 'sanitize_file_name_chars', $file_chars_filter, 10 );
+			\remove_filter( 'sanitize_file_name', $file_filter, 10 );
+			\remove_filter( 'sanitize_user', $user_filter, 10 );
+		}
+
+		foreach ( $file_filter_expected as $expected ) {
+			if ( ! self::has_file_filter_call( $file_filter_calls, $expected['raw'], $expected['sanitized'] ) ) {
+				$failures[] = array(
+					'name'      => 'sanitize-file-name-filter-missing',
+					'message'   => 'sanitize_file_name filter did not observe the generated raw/sanitized filename pair.',
+					'raw'       => self::describe_string( $expected['raw'] ),
+					'sanitized' => self::describe_string( $expected['sanitized'] ),
+				);
+			}
+		}
+
+		foreach ( $user_filter_expected as $expected ) {
+			if ( ! self::has_user_filter_call( $user_filter_calls, $expected['raw'], $expected['strict'] ) ) {
+				$failures[] = array(
+					'name'    => 'sanitize-user-filter-missing',
+					'message' => 'sanitize_user filter did not observe the generated raw username and strict flag.',
+					'raw'     => self::describe_string( $expected['raw'] ),
+					'strict'  => $expected['strict'],
+				);
+			}
+		}
+
+		if (
+			count( $file_chars_calls ) < count( $file_cases )
+			|| count( $file_filter_calls ) < count( $file_cases )
+			|| count( $user_filter_calls ) < count( $user_cases ) * 2
+			|| false !== \has_filter( 'sanitize_file_name_chars', $file_chars_filter, 10 )
+			|| false !== \has_filter( 'sanitize_file_name', $file_filter, 10 )
+			|| false !== \has_filter( 'sanitize_user', $user_filter, 10 )
+		) {
+			$failures[] = array(
+				'name'    => 'file-user-sanitizer-filter-contract',
+				'message' => 'File/user sanitizer filters did not receive expected calls or were not removed.',
+				'counts'  => array(
+					'fileChars' => count( $file_chars_calls ),
+					'file'      => count( $file_filter_calls ),
+					'user'      => count( $user_filter_calls ),
+				),
+				'active'  => array(
+					'fileChars' => \has_filter( 'sanitize_file_name_chars', $file_chars_filter, 10 ),
+					'file'      => \has_filter( 'sanitize_file_name', $file_filter, 10 ),
+					'user'      => \has_filter( 'sanitize_user', $user_filter, 10 ),
+				),
+			);
+		}
+
+		return self::check_row(
+			$ctx,
+			'file_user_sanitizers.shape_filter_contracts',
+			$failures,
+			array(
+				'fileCases'   => count( $file_cases ),
+				'userCases'   => count( $user_cases ),
+				'filterCalls' => array(
+					'fileChars' => count( $file_chars_calls ),
+					'file'      => count( $file_filter_calls ),
+					'user'      => count( $user_filter_calls ),
+				),
+			)
+		);
+	}
+
 	private static function check_entity_normalization( \ComponentFuzz\FuzzContext $ctx, array $cases ): array {
 		foreach ( array( 'convert_chars', 'ent2ncr' ) as $function ) {
 			if ( ! function_exists( $function ) ) {
@@ -1535,6 +1763,156 @@ final class FormattingSurface {
 		return $cases;
 	}
 
+	private static function generate_file_name_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$cases = array(
+			array(
+				'input'                           => 'test.phtml.txt',
+				'expected'                        => 'test.phtml_.txt',
+				'expectIntermediatePhpUnderscore' => true,
+			),
+			array(
+				'input'    => 'àáâãäåæçèéêëìíîïñòóôõöøùúûüýÿ',
+				'expected' => 'aaaaaaaeceeeeiiiinoooooouuuuyy',
+			),
+			array(
+				'input'    => "Filename with non-breaking\u{00A0}space.txt",
+				'expected' => 'Filename-with-non-breaking-space.txt',
+			),
+			array(
+				'input'    => "Screenshot 2025-02-19 at 2.17.33\u{202F}PM.png",
+				'expected' => 'Screenshot-2025-02-19-at-2.17.33-PM.png',
+			),
+			array(
+				'input'    => 'file.......name.png',
+				'expected' => 'file.name_.png',
+			),
+			array(
+				'input'             => '_.jpg',
+				'expected'          => 'unnamed-file.jpg',
+				'expectUnnamedFile' => true,
+			),
+			array(
+				'input'    => '_.no-extension',
+				'expected' => 'no-extension',
+			),
+			array(
+				'input'    => 'a%22b.jpg',
+				'expected' => 'a22b.jpg',
+			),
+			array(
+				'input'    => urldecode( '%B1myfile.png' ),
+				'expected' => 'myfile.png',
+			),
+			array(
+				'input'    => hex2bin( '2e2e5c62797465732dfe882d07' ),
+				'expected' => '',
+			),
+			array(
+				'input'    => "question?[slash]/back\\colon:semi;quote'\"amp&hash#null\x00.jpg",
+				'expected' => 'questionslashbackcolonsemiquoteamphashnull.jpg',
+			),
+		);
+
+		$extensions = array( 'jpg', 'png', 'txt', 'php', 'phtml', 'tar.gz', 'svg', 'webp', 'no-extension', '' );
+		$pieces     = array(
+			'alpha',
+			'Résumé',
+			"space\u{00A0}name",
+			'../escape',
+			'..\\escape',
+			'semi;colon',
+			'quote"name',
+			'plus+percent%20name',
+			'emoji🙂',
+			"bad\xC3",
+			"line\nbreak",
+			'file.......name',
+		);
+
+		for ( $i = 0; $i < 14; ++$i ) {
+			$name_parts = array();
+			$count      = $ctx->int( 1, 4 );
+			for ( $j = 0; $j < $count; ++$j ) {
+				$name_parts[] = $ctx->choice( $pieces );
+			}
+			$extension = $ctx->choice( $extensions );
+			$input     = implode( $ctx->choice( array( ' ', '-', '.', '_', '---' ) ), $name_parts );
+			if ( '' !== $extension ) {
+				$input .= '.' . $extension;
+			}
+
+			$cases[] = array( 'input' => self::trim_input( $input ) );
+		}
+
+		return $cases;
+	}
+
+	private static function generate_user_name_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$cases = array(
+			array(
+				'input'          => 'Captain <strong>Awesome</strong>',
+				'expectedLoose'  => 'Captain Awesome',
+				'expectedStrict' => 'Captain Awesome',
+			),
+			array(
+				'input'          => 'AT&amp;T',
+				'expectedLoose'  => 'ATT',
+				'expectedStrict' => 'ATT',
+			),
+			array(
+				'input'          => 'AT&amp;T Test;',
+				'expectedLoose'  => 'ATT Test;',
+				'expectedStrict' => 'ATT Test',
+			),
+			array(
+				'input'          => 'Fran%c3%a7ois',
+				'expectedLoose'  => 'Franois',
+				'expectedStrict' => 'Franois',
+			),
+			array(
+				'input'          => '()~ab~ˆcˆ!',
+				'expectedStrict' => 'abc',
+			),
+			array(
+				'input'          => " spaced\t\n name ",
+				'expectedLoose'  => 'spaced name',
+				'expectedStrict' => 'spaced name',
+			),
+			array(
+				'input'          => 'safe.name_123@example-test',
+				'expectedLoose'  => 'safe.name_123@example-test',
+				'expectedStrict' => 'safe.name_123@example-test',
+			),
+		);
+
+		$pieces = array(
+			'User',
+			'<b>Admin</b>',
+			'Fran%c3%a7ois',
+			'AT&amp;T',
+			'emoji🙂',
+			'()~symbols!',
+			"user\nname",
+			'email@example.test',
+			'wide＿under',
+			'percent%22octet',
+		);
+
+		for ( $i = 0; $i < 14; ++$i ) {
+			$count = $ctx->int( 1, 5 );
+			$parts = array();
+			for ( $j = 0; $j < $count; ++$j ) {
+				$parts[] = $ctx->choice( $pieces );
+			}
+
+			$cases[] = array(
+				'input' => self::trim_input( implode( $ctx->choice( array( ' ', "\t", '-', '_', '' ) ), $parts ) ),
+			);
+		}
+
+		return $cases;
+	}
+
 	private static function generate_entity_cases( \ComponentFuzz\FuzzContext $ctx ): array {
 		$entities = array_merge(
 			self::known_ncr_entities(),
@@ -1736,6 +2114,79 @@ final class FormattingSurface {
 		}
 
 		return str_starts_with( $value, '/' ) || str_starts_with( $value, '#' ) || str_starts_with( $value, '?' );
+	}
+
+	private static function file_name_violations( string $filename, string $again ): array {
+		$violations = array();
+
+		if ( $again !== $filename ) {
+			$violations[] = 'not-idempotent';
+		}
+		if ( preg_match( '/[\x00-\x1F\x7F\/\\\\?<>=:;,"\x27&$#*()|~`!{}%+]/', $filename ) ) {
+			$violations[] = 'unsafe-character';
+		}
+		if ( preg_match( '/\s/', $filename ) ) {
+			$violations[] = 'whitespace-not-normalized';
+		}
+		if ( str_contains( $filename, '..' ) ) {
+			$violations[] = 'consecutive-periods';
+		}
+		if ( '' !== $filename && trim( $filename, '.-_' ) !== $filename ) {
+			$violations[] = 'not-trimmed';
+		}
+		if ( str_contains( $filename, '%20' ) || str_contains( $filename, '+' ) ) {
+			$violations[] = 'encoded-space-or-plus-left';
+		}
+
+		return $violations;
+	}
+
+	private static function user_name_violations( string $loose, string $strict, string $loose_again, string $strict_again ): array {
+		$violations = array();
+
+		if ( $loose_again !== $loose ) {
+			$violations[] = 'loose-not-idempotent';
+		}
+		if ( $strict_again !== $strict ) {
+			$violations[] = 'strict-not-idempotent';
+		}
+		if ( preg_match( '/<[^>]*>|%[a-fA-F0-9]{2}|&.+?;/', $loose . $strict ) ) {
+			$violations[] = 'tag-percent-or-entity-left';
+		}
+		if ( trim( $loose ) !== $loose || trim( $strict ) !== $strict ) {
+			$violations[] = 'not-trimmed';
+		}
+		if ( preg_match( '/\s{2,}/', $loose . "\n" . $strict ) ) {
+			$violations[] = 'whitespace-not-collapsed';
+		}
+		if ( ! preg_match( '/^[A-Za-z0-9 _.\-@]*$/', $strict ) ) {
+			$violations[] = 'strict-unsafe-shape';
+		}
+		if ( strlen( $strict ) > strlen( $loose ) ) {
+			$violations[] = 'strict-longer-than-loose';
+		}
+
+		return $violations;
+	}
+
+	private static function has_file_filter_call( array $calls, string $raw, string $sanitized ): bool {
+		foreach ( $calls as $call ) {
+			if ( $raw === ( $call['raw'] ?? null ) && $sanitized === ( $call['sanitized'] ?? null ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private static function has_user_filter_call( array $calls, string $raw, bool $strict ): bool {
+		foreach ( $calls as $call ) {
+			if ( $raw === ( $call['raw'] ?? null ) && $strict === ( $call['strict'] ?? null ) ) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	private static function check_row( \ComponentFuzz\FuzzContext $ctx, string $invariant, array $failures, array $data = array() ): array {

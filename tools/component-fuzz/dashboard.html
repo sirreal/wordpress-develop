@@ -226,12 +226,13 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 4731 passed, 0 failed, 0 errored, 1 skipped at 112 surfaces over 1 iteration after adding block-support duotone render and asset-state coverage.</div>
+			<div class="note">Non-skipped pass rate: 4732 passed, 0 failed, 0 errored, 1 skipped at 112 surfaces over 1 iteration after adding formatting file-name and username sanitizer coverage.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Latest focused addition: <code>block-supports</code> duotone coverage exercises support registration gates, legacy metadata migration, preset/custom/unset/global-style render paths, empty-content CSS generation, unsupported/no-attribute fail-closed paths, safe stored CSS/SVG/editor assets, Core preset slug normalization boundaries, and <code>WP_Duotone</code> static restoration; focused seed 224 passed 7 checks, seeds 1 and 224 over 25 iterations each passed 175 checks, adjacent block/editor/style smoke passed 66 checks with no skips, and broad seed 224 smoke passed 4731 checks with 1 skip.</div>
+			<div class="note">Latest focused addition: <code>formatting</code> file-name and username sanitizer coverage exercises exact Core fixtures for multi-extension munging, Unicode space normalization, invalid UTF-8 stripping, unnamed-file fallback, percent/entity/tag removal, strict username ASCII reduction, generated path/control/extension/user cases, idempotence, unsafe-character rejection, and filter cleanup; focused seed 224 passed 15 checks, seeds 1 and 224 over 25 iterations each passed 375 checks, adjacent formatting/security/identity/l10n smoke passed 1339 checks with no skips, and broad seed 224 smoke passed 4732 checks with 1 skip.</div>
+			<div class="note">Previous focused addition: <code>block-supports</code> duotone coverage exercises support registration gates, legacy metadata migration, preset/custom/unset/global-style render paths, empty-content CSS generation, unsupported/no-attribute fail-closed paths, safe stored CSS/SVG/editor assets, Core preset slug normalization boundaries, and <code>WP_Duotone</code> static restoration; focused seed 224 passed 7 checks, seeds 1 and 224 over 25 iterations each passed 175 checks, adjacent block/editor/style smoke passed 66 checks with no skips, and broad seed 224 smoke passed 4731 checks with 1 skip.</div>
 			<div class="note">Previous focused addition: <code>image-metadata</code> real Core fixture replay covers camera/timestamp/fraction fields, IPTC credit/caption/copyright/title, UTF-8 captions, keywords, orientation, accessibility alt text, metadata shape, final filter payloads, and filter restoration across shuffled JPEG fixtures; focused seed 224 passed 8 checks, seeds 1 and 224 over 25 iterations each passed 200 checks, adjacent media parser/chrome smoke passed 87 checks with no skips, standalone <code>rest-media-attachments</code> sanity passed 7 checks, and broad seed 224 smoke passed 4730 checks with 1 skip.</div>
 			<div class="note">Previous focused addition: <code>email</code> <code>make_clickable()</code> coverage links full ACE/punycode final labels without leaving partial <code>xn</code> anchors, keeps malformed final labels unlinked, and converts the old punycode-TLD partial-link skip into a failing assertion; focused seed 224 passed 1248 checks, seed 1 passed 1245 checks, adjacent <code>email,mail,identity</code> smoke passed 1260 checks with no skips, and broad seed 224 smoke passed 4729 checks with 1 skip.</div>
 			<div class="note">Previous focused addition: <code>block-templates</code> direct-ID path containment guards <code>get_block_file_template()</code> and <code>get_block_template()</code> against traversal slugs that point at existing files outside the active theme template directories, converts the guarded skip into a failing assertion, preserves file enumeration confinement, and keeps template CPT queries short-circuited; focused seed 224 passed 9 checks, seeds 1 and 224 over 25 iterations each passed 225 checks with no skips, adjacent block/theme/REST smoke passed 84 checks with no skips, and broad seed 224 smoke passed 4728 checks with 2 skips.</div>
@@ -988,10 +989,10 @@
 				</tr>
 				<tr>
 					<td><code>formatting</code></td>
-					<td><span class="status good">review follow-up passed</span></td>
-					<td>Main worktree; identifier sanitizer follow-up through <code>30c7fcc27e</code></td>
-					<td>Main focused run: 1400 passed, 0 skipped, 0 failed; latest broad run: 8487 passed, 66 skipped, 0 failed.</td>
-					<td>Escaping, text/URL sanitizers, whitespace, clickable links, title/key/class identifier sanitizers, entities, colors, sizes.</td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Scoped worktree <code>component-fuzz-formatting-file-user-sanitizers</code>; builds on identifier sanitizer follow-up through <code>30c7fcc27e</code>.</td>
+					<td>Latest focused runs: seed 224 passed 15 checks, seeds 1 and 224 over 25 iterations each passed 375 checks, adjacent <code>formatting,email,identity,security,request-lifecycle,canonical-routing,l10n,translations,filesystem</code> smoke passed 1339 checks with no skips; latest broad run: 4732 passed, 1 skipped, 0 failed.</td>
+					<td>Escaping, text/URL sanitizers, whitespace, clickable links, title/key/class identifier sanitizers, file-name sanitizer exact fixtures for multi-extension munging, Unicode-space normalization, invalid UTF-8, unnamed-file fallback, path/control/extension generated cases, username sanitizer exact fixtures for tag/entity/percent stripping and strict ASCII mode, sanitizer filter contracts and cleanup, entities, colors, sizes, time strings, UTF-8 helpers, and accents.</td>
 				</tr>
 				<tr>
 					<td><code>network-media</code></td>
@@ -1319,9 +1320,9 @@
 					</tr>
 					<tr>
 						<td><code>current branch</code></td>
-						<td><code>block-supports</code></td>
-						<td><code>block-supports</code> passed 7 checks at seed 224 and 175 checks at seeds 1 and 224 over 25 iterations; adjacent block/editor/style smoke passed 66 checks with no skips after adding duotone registration, render-path, asset-state, and static-restoration coverage.</td>
-						<td>4731 passed, 1 skipped, 0 failed at 1 iteration after loading Core duotone support into the component bootstrap.</td>
+						<td><code>formatting</code></td>
+						<td><code>formatting</code> passed 15 checks at seed 224 and 375 checks at seeds 1 and 224 over 25 iterations; adjacent formatting/security/identity/l10n smoke passed 1339 checks with no skips after adding file-name and username sanitizer exact/generated coverage and filter cleanup assertions.</td>
+						<td>4732 passed, 1 skipped, 0 failed at 1 iteration after adding formatting file-name and username sanitizer coverage.</td>
 					</tr>
 					<tr>
 						<td><code>cbc425b410</code></td>
