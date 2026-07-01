@@ -1542,13 +1542,52 @@ final class RestSiteEditorSurface {
 		$server_existed  = array_key_exists( 'wp_rest_server', $GLOBALS );
 		$server          = new \WP_REST_Server();
 		$filter_log      = array();
-		$template_filter = static function ( $block_templates, array $query, string $template_type ) use ( &$filter_log ) {
+		$head_log        = array();
+		$collection_log  = array();
+		$template_collection = null;
+		$part_collection = null;
+		$collection_template = self::template_object(
+			$case,
+			array(
+				'id'        => $case['templateId'],
+				'slug'      => $case['templateSlug'],
+				'type'      => 'wp_template',
+				'content'   => $case['templateContent'],
+				'wp_id'     => 0,
+				'is_custom' => true,
+			)
+		);
+		$collection_part     = self::template_object(
+			$case,
+			array(
+				'id'      => $case['templatePartId'],
+				'slug'    => $case['templatePartSlug'],
+				'type'    => 'wp_template_part',
+				'title'   => $case['templatePartTitle'],
+				'area'    => 'header',
+				'content' => $case['templatePartContent'],
+				'wp_id'   => 0,
+			)
+		);
+		$template_filter = static function ( $block_templates, array $query, string $template_type ) use (
+			&$filter_log,
+			$collection_template,
+			$collection_part
+		) {
 			$filter_log[] = array(
 				'hook'  => 'pre_get_block_templates',
 				'type'  => $template_type,
 				'query' => $query,
 			);
-			return $block_templates;
+
+			if ( 'wp_template' === $template_type && 'page' === ( $query['post_type'] ?? null ) ) {
+				return array( clone $collection_template );
+			}
+			if ( 'wp_template_part' === $template_type && 'header' === ( $query['area'] ?? null ) ) {
+				return array( clone $collection_part );
+			}
+
+			return array();
 		};
 		$item_filter     = static function ( $block_template, string $requested_id, string $template_type ) use ( &$filter_log ) {
 			$filter_log[] = array(
@@ -1695,6 +1734,30 @@ final class RestSiteEditorSurface {
 						)
 					)
 				);
+				$head_log      = $filter_log;
+				$template_collection = $server->dispatch(
+					self::request(
+						'GET',
+						$template_route,
+						array(
+							'context'   => 'edit',
+							'post_type' => 'page',
+							'_fields'   => 'id,slug,theme,type,content,wp_id,is_custom',
+						)
+					)
+				);
+				$part_collection     = $server->dispatch(
+					self::request(
+						'GET',
+						$part_route,
+						array(
+							'context' => 'edit',
+							'area'    => 'header',
+							'_fields' => 'id,slug,type,area,content,wp_id',
+						)
+					)
+				);
+				$collection_log      = array_slice( $filter_log, count( $head_log ) );
 			} finally {
 				\remove_filter( 'user_has_cap', $cap_filter, 10 );
 				\remove_filter( 'pre_get_block_templates', $template_filter, 10 );
@@ -1714,6 +1777,8 @@ final class RestSiteEditorSurface {
 		$denied_lookup_data   = $denied_lookup instanceof \WP_REST_Response ? $denied_lookup->get_data() : array();
 		$head_template_data   = $head_template instanceof \WP_REST_Response ? $head_template->get_data() : null;
 		$head_part_data       = $head_part instanceof \WP_REST_Response ? $head_part->get_data() : null;
+		$template_collection_data = $template_collection instanceof \WP_REST_Response ? $template_collection->get_data() : null;
+		$part_collection_data     = $part_collection instanceof \WP_REST_Response ? $part_collection->get_data() : null;
 
 		self::collect_failure(
 			$failures,
@@ -1748,7 +1813,7 @@ final class RestSiteEditorSurface {
 				&& $head_part instanceof \WP_REST_Response
 				&& 200 === $head_part->get_status()
 				&& array() === $head_part_data
-				&& array() === $filter_log
+				&& array() === $head_log
 				&& false === \has_filter( 'pre_get_block_templates', $template_filter )
 				&& false === \has_filter( 'pre_get_block_template', $item_filter )
 				&& false === \has_filter( 'user_has_cap', $cap_filter ),
@@ -1758,7 +1823,75 @@ final class RestSiteEditorSurface {
 				'templateData'   => $head_template_data,
 				'partStatus'     => $head_part instanceof \WP_REST_Response ? $head_part->get_status() : null,
 				'partData'       => $head_part_data,
-				'filterLog'      => $filter_log,
+				'filterLog'      => $head_log,
+				'templateFilterRemoved' => false === \has_filter( 'pre_get_block_templates', $template_filter ),
+				'itemFilterRemoved' => false === \has_filter( 'pre_get_block_template', $item_filter ),
+				'capFilterRemoved' => false === \has_filter( 'user_has_cap', $cap_filter ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$template_collection instanceof \WP_REST_Response
+				&& 200 === $template_collection->get_status()
+				&& is_array( $template_collection_data )
+				&& 1 === count( $template_collection_data )
+				&& array(
+					'id',
+					'theme',
+					'content',
+					'slug',
+					'type',
+					'wp_id',
+					'is_custom',
+				) === array_keys( $template_collection_data[0] ?? array() )
+				&& $case['templateId'] === ( $template_collection_data[0]['id'] ?? null )
+				&& $case['templateSlug'] === ( $template_collection_data[0]['slug'] ?? null )
+				&& $case['themeSlug'] === ( $template_collection_data[0]['theme'] ?? null )
+				&& 'wp_template' === ( $template_collection_data[0]['type'] ?? null )
+				&& $case['templateContent'] === ( $template_collection_data[0]['content']['raw'] ?? null )
+				&& 1 === (int) ( $template_collection_data[0]['content']['block_version'] ?? 0 )
+				&& 0 === (int) ( $template_collection_data[0]['wp_id'] ?? -1 )
+				&& true === ( $template_collection_data[0]['is_custom'] ?? null )
+				&& $part_collection instanceof \WP_REST_Response
+				&& 200 === $part_collection->get_status()
+				&& is_array( $part_collection_data )
+				&& 1 === count( $part_collection_data )
+				&& array(
+					'id',
+					'content',
+					'slug',
+					'type',
+					'wp_id',
+					'area',
+				) === array_keys( $part_collection_data[0] ?? array() )
+				&& $case['templatePartId'] === ( $part_collection_data[0]['id'] ?? null )
+				&& $case['templatePartSlug'] === ( $part_collection_data[0]['slug'] ?? null )
+				&& 'wp_template_part' === ( $part_collection_data[0]['type'] ?? null )
+				&& 'header' === ( $part_collection_data[0]['area'] ?? null )
+				&& $case['templatePartContent'] === ( $part_collection_data[0]['content']['raw'] ?? null )
+				&& array(
+					array(
+						'hook'  => 'pre_get_block_templates',
+						'type'  => 'wp_template',
+						'query' => array( 'post_type' => 'page' ),
+					),
+					array(
+						'hook'  => 'pre_get_block_templates',
+						'type'  => 'wp_template_part',
+						'query' => array( 'area' => 'header' ),
+					),
+				) === $collection_log
+				&& false === \has_filter( 'pre_get_block_templates', $template_filter )
+				&& false === \has_filter( 'pre_get_block_template', $item_filter )
+				&& false === \has_filter( 'user_has_cap', $cap_filter ),
+			'template and template-part collection GET dispatch uses bounded filters, query params, and _fields projection',
+			array(
+				'templateStatus' => $template_collection instanceof \WP_REST_Response ? $template_collection->get_status() : null,
+				'templateData'   => $template_collection_data,
+				'partStatus'     => $part_collection instanceof \WP_REST_Response ? $part_collection->get_status() : null,
+				'partData'       => $part_collection_data,
+				'collectionLog'  => $collection_log,
 				'templateFilterRemoved' => false === \has_filter( 'pre_get_block_templates', $template_filter ),
 				'itemFilterRemoved' => false === \has_filter( 'pre_get_block_template', $item_filter ),
 				'capFilterRemoved' => false === \has_filter( 'user_has_cap', $cap_filter ),
@@ -1772,7 +1905,7 @@ final class RestSiteEditorSurface {
 			array(
 				'case'       => self::case_summary( $case ),
 				'filterLog'  => $filter_log,
-				'notCovered' => 'Non-HEAD template collection dispatch, revision/autosave collection callbacks after permission success, template writes, template CPT queries, and filesystem-backed template traversal remain intentionally outside this bounded dispatch guard.',
+				'notCovered' => 'Revision/autosave collection callbacks after permission success, template CPT queries, and filesystem-backed template traversal remain intentionally outside this bounded dispatch guard.',
 			)
 		);
 	}

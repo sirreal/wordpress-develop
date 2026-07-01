@@ -702,13 +702,15 @@ database, network requests, or a configured site.
 - `rest-site-editor`: no-live-DB Site Editor REST controller coverage for
   global styles, template/template-part response shaping, template create,
   update, trash/reset/force-delete mutation lifecycles, template revisions and
-  autosaves, bounded template item and lookup fallback route dispatch,
-  navigation fallback, direct block-template ZIP export generation, edit-site
-  export guards, and subprocess-isolated live edit-site export streaming,
+  autosaves, bounded template and template-part collection GET dispatch,
+  template item and lookup fallback route dispatch, navigation fallback, direct
+  block-template ZIP export generation, edit-site export guards, and
+  subprocess-isolated live edit-site export streaming,
   including route normalization, schema/context behavior, permission and error
-  contracts, custom CSS validation, temp theme fixtures, REST insert hooks,
-  origin metadata, area/theme taxonomy assignments, streamed ZIP inspection,
-  archive cleanup, and state restoration.
+  contracts, `_fields` projection, filter-backed collection query oracles,
+  custom CSS validation, temp theme fixtures, REST insert hooks, origin
+  metadata, area/theme taxonomy assignments, streamed ZIP inspection, archive
+  cleanup, and state restoration.
 - `revisions-autosaves`: in-memory wpdb-backed revision and autosave API
   coverage, including protected revision field/filter contracts, autosave
   create/update/delete and post-lock behavior, autosave and revision predicates,
