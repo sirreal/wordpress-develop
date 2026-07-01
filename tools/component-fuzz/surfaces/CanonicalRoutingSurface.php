@@ -35,6 +35,7 @@ final class CanonicalRoutingSurface {
 			$rows[] = self::check_early_bailouts( $ctx->fork( 'bailouts' ), $case );
 			$rows[] = self::check_invalid_date_redirect( $ctx->fork( 'date' ), $case );
 			$rows[] = self::check_404_guess_and_db_redirects( $ctx->fork( '404-guess' ), $case );
+			$rows[] = self::check_attachment_canonical_redirects( $ctx->fork( 'attachments' ), $case );
 			$rows[] = self::check_feed_and_paged_redirect( $ctx->fork( 'feed' ), $case );
 			$rows[] = self::check_redirect_filter_contract( $ctx->fork( 'filter' ), $case );
 			$rows[] = self::check_safe_redirect_replacement_is_returned( $ctx->fork( 'safe-filter' ), $case );
@@ -117,6 +118,7 @@ final class CanonicalRoutingSurface {
 				'add_query_arg',
 				'create_initial_post_types',
 				'get_day_link',
+				'get_attachment_link',
 				'get_comments_pagenum_link',
 				'get_month_link',
 				'get_permalink',
@@ -136,6 +138,7 @@ final class CanonicalRoutingSurface {
 				'strip_fragment_from_url',
 				'trailingslashit',
 				'user_trailingslashit',
+				'wp_get_attachment_url',
 				'wp_cache_delete',
 				'wp_cache_get',
 				'wp_cache_set',
@@ -516,6 +519,156 @@ final class CanonicalRoutingSurface {
 			array(
 				'postId'   => $target->ID,
 				'prefix'   => $prefix,
+				'failures' => array_slice( $failures, 0, 4 ),
+			)
+		);
+	}
+
+	private static function check_attachment_canonical_redirects( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		if ( ! self::wpdb_stub_available() ) {
+			return $ctx->skip(
+				'canonical-routing.attachment-pages.permalink-and-file-redirects',
+				'The wpdb content stub is unavailable for DB-backed attachment canonical redirects.'
+			);
+		}
+
+		self::reset_db_content();
+
+		$failures    = array();
+		$base_id     = 64100 + ( $ctx->iteration() * 20 ) + $ctx->int( 0, 10 );
+		$parent_slug = sanitize_title_with_dashes( 'canonical attachment parent ' . $case['token'] . ' ' . $ctx->int( 100, 999 ) );
+		$file_slug   = sanitize_title_with_dashes( 'canonical attachment file ' . $case['token'] . ' ' . $ctx->int( 100, 999 ) );
+		$relative    = '2026/07/' . $file_slug . '.jpg';
+		$upload_url  = self::HOME_URL . '/wp-content/uploads/' . $relative;
+		$attachment_pages_enabled = static fn() => 1;
+
+		try {
+			$parent = self::seed_post_row(
+				array(
+					'ID'            => $base_id,
+					'post_name'     => $parent_slug,
+					'post_title'    => 'Canonical Attachment Parent ' . $case['token'],
+					'post_status'   => 'publish',
+					'post_type'     => 'post',
+					'post_date'     => '2026-07-01 10:20:30',
+					'post_date_gmt' => '2026-07-01 10:20:30',
+				)
+			);
+			$attachment = self::seed_post_row(
+				array(
+					'ID'             => $base_id + 1,
+					'post_name'      => $file_slug,
+					'post_title'     => 'Canonical Attachment ' . $case['token'],
+					'post_status'    => 'inherit',
+					'post_type'      => 'attachment',
+					'post_parent'    => $parent->ID,
+					'post_mime_type' => 'image/jpeg',
+					'guid'           => $upload_url,
+				)
+			);
+
+			$draft_parent = self::seed_post_row(
+				array(
+					'ID'            => $base_id + 2,
+					'post_name'     => $parent_slug . '-draft',
+					'post_title'    => 'Canonical Draft Parent ' . $case['token'],
+					'post_status'   => 'draft',
+					'post_type'     => 'post',
+					'post_date'     => '2026-07-02 10:20:30',
+					'post_date_gmt' => '2026-07-02 10:20:30',
+				)
+			);
+			$draft_attachment = self::seed_post_row(
+				array(
+					'ID'             => $base_id + 3,
+					'post_name'      => $file_slug . '-draft',
+					'post_title'     => 'Canonical Draft Attachment ' . $case['token'],
+					'post_status'    => 'inherit',
+					'post_type'      => 'attachment',
+					'post_parent'    => $draft_parent->ID,
+					'post_mime_type' => 'image/jpeg',
+					'guid'           => self::HOME_URL . '/wp-content/uploads/' . dirname( $relative ) . '/' . $file_slug . '-draft.jpg',
+				)
+			);
+
+			\add_filter( 'pre_option_wp_attachment_pages_enabled', $attachment_pages_enabled, 100 );
+			try {
+				self::prepare_attachment_request(
+					$attachment,
+					array(
+						'attachment_id' => (string) $attachment->ID,
+						'keep'          => $case['keep'],
+					)
+				);
+				$query_requested = self::HOME_URL . '/?attachment_id=' . $attachment->ID . '&keep=' . rawurlencode( $case['keep'] );
+				$query_redirect  = \redirect_canonical( $query_requested, false );
+			} finally {
+				\remove_filter( 'pre_option_wp_attachment_pages_enabled', $attachment_pages_enabled, 100 );
+			}
+
+			$attachment_link    = \get_attachment_link( $attachment->ID );
+			$query_parts        = is_string( $query_redirect ) ? \wp_parse_url( $query_redirect ) : array();
+			$query_redirect_qs  = self::parse_query_from_parts( $query_parts );
+			$link_parts         = is_string( $attachment_link ) ? \wp_parse_url( $attachment_link ) : array();
+			$expected_file_url  = \wp_get_attachment_url( $attachment->ID );
+
+			self::prepare_attachment_request( $attachment );
+			$page_requested = is_string( $attachment_link ) ? $attachment_link : self::HOME_URL . '/?attachment_id=' . $attachment->ID;
+			$page_redirect  = \redirect_canonical( $page_requested, false );
+
+			self::prepare_attachment_request( $draft_attachment );
+			$draft_requested = \get_attachment_link( $draft_attachment->ID );
+			$draft_redirect  = \redirect_canonical( is_string( $draft_requested ) ? $draft_requested : self::HOME_URL . '/?attachment_id=' . $draft_attachment->ID, false );
+
+			self::collect_failure(
+				$failures,
+				is_string( $attachment_link )
+					&& is_string( $query_redirect )
+					&& ( $link_parts['path'] ?? null ) === ( $query_parts['path'] ?? null )
+					&& $case['keep'] === ( $query_redirect_qs['keep'] ?? null )
+					&& ! isset( $query_redirect_qs['attachment_id'] )
+					&& false === \has_filter( 'pre_option_wp_attachment_pages_enabled', $attachment_pages_enabled ),
+				'attachment_id query canonicalizes to the attachment permalink when attachment pages are enabled',
+				array(
+					'requested'      => $query_requested,
+					'redirect'       => $query_redirect,
+					'attachmentLink' => $attachment_link,
+					'redirectQuery'  => $query_redirect_qs,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				is_string( $expected_file_url )
+					&& $expected_file_url === $page_redirect,
+				'disabled attachment pages canonicalize public-parent attachment pages to the raw attachment URL',
+				array(
+					'requested' => $page_requested,
+					'redirect'  => $page_redirect,
+					'expected'  => $expected_file_url,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				null === $draft_redirect,
+				'disabled attachment pages do not expose attachments inheriting a non-public parent',
+				array(
+					'requested' => $draft_requested,
+					'redirect'  => $draft_redirect,
+				)
+			);
+		} finally {
+			\remove_filter( 'pre_option_wp_attachment_pages_enabled', $attachment_pages_enabled, 100 );
+			self::reset_db_content();
+		}
+
+		return $ctx->result(
+			'canonical-routing.attachment-pages.permalink-and-file-redirects',
+			array() === $failures,
+			array(
+				'baseId'   => $base_id,
+				'file'     => $relative,
 				'failures' => array_slice( $failures, 0, 4 ),
 			)
 		);
@@ -1095,6 +1248,31 @@ final class CanonicalRoutingSurface {
 		$GLOBALS['wp_query']->posts       = array( $post );
 		$GLOBALS['wp_query']->queried_object = $post;
 		$GLOBALS['wp_query']->queried_object_id = $post->ID;
+	}
+
+	private static function prepare_attachment_request( \WP_Post $attachment, array $request_query = array() ): void {
+		self::prepare_request(
+			array(
+				'attachment'    => $attachment->post_name,
+				'attachment_id' => $attachment->ID,
+			),
+			array(
+				'is_attachment' => true,
+				'is_singular'   => true,
+				'post_count'    => 1,
+			)
+		);
+
+		$GLOBALS['post']                       = $attachment;
+		$GLOBALS['wp_query']->post             = $attachment;
+		$GLOBALS['wp_query']->posts            = array( $attachment );
+		$GLOBALS['wp_query']->queried_object   = $attachment;
+		$GLOBALS['wp_query']->queried_object_id = $attachment->ID;
+		$_GET                                  = $request_query;
+		$_SERVER['REQUEST_URI']                = '/site-base/';
+		if ( array() !== $request_query ) {
+			$_SERVER['REQUEST_URI'] .= '?' . http_build_query( $request_query, '', '&', PHP_QUERY_RFC3986 );
+		}
 	}
 
 	private static function make_post( int $post_id, string $token, string $status ): \WP_Post {

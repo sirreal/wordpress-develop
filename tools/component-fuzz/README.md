@@ -176,10 +176,11 @@ database, network requests, or a configured site.
 - `canonical-routing`: no-live-DB canonical redirect and front-end routing helpers,
   including method/search/preview bailouts, host/path/query cleanup, invalid
   date redirects, DB-stub-backed 404 permalink guessing, feed/pagination
-  canonicalization, redirect filter cancellation and same-host replacement
-  cascades, canonical URL output helpers for status, paged, comment-page,
-  plain-permalink, filter, and singular output gates, fragment stripping, and
-  generated query-argument removal and fragment stripping helper matrices.
+  canonicalization, attachment page permalink/raw-file redirects, redirect
+  filter cancellation and same-host replacement cascades, canonical URL output
+  helpers for status, paged, comment-page, plain-permalink, filter, and singular
+  output gates, fragment stripping, and generated query-argument removal and
+  fragment stripping helper matrices.
 - `classic-walkers`: deterministic Walker base and classic walker coverage,
   including `walk()`, `paged_walk()`, direct `display_element()` traversal,
   page/category/comment/nav rendering, current/selected classes, admin nav menu
@@ -1021,8 +1022,9 @@ redirect/login-form dispatch, real mail, application-password API requests, and
 process-exit paths.
 The `canonical-routing` surface calls `redirect_canonical()` with
 `do_redirect=false`; 404 permalink guessing uses bounded in-memory post rows,
-while old-slug redirects, attachment-page redirects, and paths that call
-`wp_redirect()` and `exit` are intentionally avoided.
+attachment-page redirects use synthetic parent/attachment rows, and paths that
+call `wp_redirect()` and `exit` are intentionally avoided. Old-slug redirects
+remain outside the current bounded no-live-DB surface.
 The `classic-walkers` surface uses synthetic objects, object-cache fixtures, and
 local filters only. It loads the single comment/admin walker class files when
 available, and covers the direct nav menu quick-search dispatcher plus

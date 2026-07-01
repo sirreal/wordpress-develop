@@ -226,12 +226,13 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 4733 passed, 0 failed, 0 errored, 1 skipped at 112 surfaces over 1 iteration after adding post status viewability coverage.</div>
+			<div class="note">Non-skipped pass rate: 4734 passed, 0 failed, 0 errored, 1 skipped at 112 surfaces over 1 iteration after adding canonical attachment redirect coverage.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Latest focused addition: <code>post-types</code> status viewability coverage exercises <code>is_post_status_viewable()</code> with explicit public, private, custom, built-in emulation, internal, and protected status cases, generated status-property matrices, exact string/object lookup parity, unsanitized-name and non-string-scalar fail-closed paths, complete unregistered status objects, strict boolean filter return behavior, early-return filter bypass, and filter cleanup; focused seed 224 passed 13 checks, seeds 1, 224, and 49380 over 25 iterations each passed 325 checks, adjacent post/content/query/taxonomy/REST smoke passed 731 checks with no skips, and broad seed 224 smoke passed 4733 checks with 1 skip.</div>
+			<div class="note">Latest focused addition: <code>canonical-routing</code> attachment redirect coverage exercises <code>redirect_canonical()</code> with synthetic parent/attachment rows, enabled attachment-page <code>attachment_id</code> query redirects to the attachment permalink, disabled attachment pages redirecting public-parent attachments to the raw attachment URL, non-public parent fail-closed behavior, query cleanup, GUID fallback URL projection, option/filter cleanup, and DB-stub reset; focused seed 224 passed 15 checks, seeds 1 and 224 over 25 iterations each passed 375 checks, adjacent routing/content smoke passed 65 checks with no skips, and broad seed 224 smoke passed 4734 checks with 1 skip.</div>
+			<div class="note">Previous focused addition: <code>post-types</code> status viewability coverage exercises <code>is_post_status_viewable()</code> with explicit public, private, custom, built-in emulation, internal, and protected status cases, generated status-property matrices, exact string/object lookup parity, unsanitized-name and non-string-scalar fail-closed paths, complete unregistered status objects, strict boolean filter return behavior, early-return filter bypass, and filter cleanup; focused seed 224 passed 13 checks, seeds 1, 224, and 49380 over 25 iterations each passed 325 checks, adjacent post/content/query/taxonomy/REST smoke passed 731 checks with no skips, and broad seed 224 smoke passed 4733 checks with 1 skip.</div>
 			<div class="note">Previous focused addition: <code>formatting</code> file-name and username sanitizer coverage exercises exact Core fixtures for multi-extension munging, Unicode space normalization, invalid UTF-8 stripping, unnamed-file fallback, percent/entity/tag removal, strict username ASCII reduction, generated path/control/extension/user cases, idempotence, unsafe-character rejection, and filter cleanup; focused seed 224 passed 15 checks, seeds 1 and 224 over 25 iterations each passed 375 checks, adjacent formatting/security/identity/l10n smoke passed 1339 checks with no skips, and broad seed 224 smoke passed 4732 checks with 1 skip.</div>
 			<div class="note">Previous focused addition: <code>block-supports</code> duotone coverage exercises support registration gates, legacy metadata migration, preset/custom/unset/global-style render paths, empty-content CSS generation, unsupported/no-attribute fail-closed paths, safe stored CSS/SVG/editor assets, Core preset slug normalization boundaries, and <code>WP_Duotone</code> static restoration; focused seed 224 passed 7 checks, seeds 1 and 224 over 25 iterations each passed 175 checks, adjacent block/editor/style smoke passed 66 checks with no skips, and broad seed 224 smoke passed 4731 checks with 1 skip.</div>
 			<div class="note">Previous focused addition: <code>image-metadata</code> real Core fixture replay covers camera/timestamp/fraction fields, IPTC credit/caption/copyright/title, UTF-8 captions, keywords, orientation, accessibility alt text, metadata shape, final filter payloads, and filter restoration across shuffled JPEG fixtures; focused seed 224 passed 8 checks, seeds 1 and 224 over 25 iterations each passed 200 checks, adjacent media parser/chrome smoke passed 87 checks with no skips, standalone <code>rest-media-attachments</code> sanity passed 7 checks, and broad seed 224 smoke passed 4730 checks with 1 skip.</div>
@@ -1138,9 +1139,9 @@
 				<tr>
 					<td><code>rewrite</code>, <code>canonical-routing</code></td>
 					<td><span class="status good">integrated validation passed</span></td>
-					<td>Main worktree; latest canonical URL helper output through <code>53453d79ff</code>, latest rewrite update through <code>7ac42d758b</code></td>
-					<td>Canonical focused runs: seed 1 and seed 224 each 1300 passed, 0 skipped, 0 failed after review fixes; rewrite main focused run: 1800 passed, 0 skipped, 0 failed; latest broad run: 9077 passed, 66 skipped, 0 failed.</td>
-					<td>Rewrite tags, tag-removal query-var boundaries, permastructs, endpoints, rule precedence, query substitution, match maps, build/parse helpers, canonical path/query normalization, redirect filter cancellation, safe same-host replacement cascades, canonical URL status/pagination/comment/filter/output gates, and generated query-argument removal/fragment stripping helper matrices.</td>
+					<td>Main worktree plus scoped worktree <code>component-fuzz-canonical-attachment-redirects</code>; latest canonical URL helper output through <code>53453d79ff</code>, latest rewrite update through <code>7ac42d758b</code>.</td>
+					<td>Latest canonical focused runs: seed 224 passed 15 checks, seeds 1 and 224 over 25 iterations each passed 375 checks after attachment-page redirect coverage; adjacent <code>canonical-routing,request-lifecycle,template-links,content,content-lifecycle</code> smoke passed 65 checks with no skips; latest broad run passed 4734 checks with 1 skip. Earlier canonical URL helper focused runs passed 1300 checks per seed; rewrite main focused run passed 1800 checks.</td>
+					<td>Rewrite tags, tag-removal query-var boundaries, permastructs, endpoints, rule precedence, query substitution, match maps, build/parse helpers, canonical path/query normalization, DB-stub-backed 404 guessing, enabled attachment-page permalink redirects, disabled attachment-page raw-file redirects, non-public parent fail-closed behavior, redirect filter cancellation, safe same-host replacement cascades, canonical URL status/pagination/comment/filter/output gates, and generated query-argument removal/fragment stripping helper matrices.</td>
 				</tr>
 				<tr>
 					<td><code>rest-object-controllers</code></td>
@@ -1321,9 +1322,9 @@
 					</tr>
 					<tr>
 						<td><code>current branch</code></td>
-						<td><code>post-types</code></td>
-						<td><code>post-types</code> passed 13 checks at seed 224 and 325 checks at seeds 1, 224, and 49380 over 25 iterations; adjacent post/content/query/taxonomy/REST smoke passed 731 checks with no skips after adding status viewability exact/generated coverage, lookup fail-closed paths, strict filter return contracts, and filter cleanup assertions.</td>
-						<td>4733 passed, 1 skipped, 0 failed at 1 iteration after adding post status viewability coverage.</td>
+						<td><code>canonical-routing</code></td>
+						<td><code>canonical-routing</code> passed 15 checks at seed 224 and 375 checks at seeds 1 and 224 over 25 iterations; adjacent routing/content smoke passed 65 checks with no skips after adding attachment-page permalink redirects, disabled-page raw-file redirects, non-public parent fail-closed coverage, query cleanup, and DB-stub reset assertions.</td>
+						<td>4734 passed, 1 skipped, 0 failed at 1 iteration after adding canonical attachment redirect coverage.</td>
 					</tr>
 					<tr>
 						<td><code>cbc425b410</code></td>
