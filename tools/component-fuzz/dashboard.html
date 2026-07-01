@@ -226,12 +226,13 @@
 		<div class="card">
 			<div class="label">Latest Broad Run</div>
 			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 4748 passed, 0 failed, 0 errored, 1 skipped at 112 surfaces over 1 iteration after adding REST Site Editor collection GET dispatch coverage.</div>
+			<div class="note">Non-skipped pass rate: 4750 passed, 0 failed, 0 errored, 1 skipped at 112 surfaces over 1 iteration after adding filesystem archive, unzip, copy, and move coverage.</div>
 		</div>
 		<div class="card">
 			<div class="label">Latest Focused Wave</div>
 			<div class="metric good">100%</div>
-			<div class="note">Latest focused addition: <code>rest-site-editor</code> collection GET dispatch coverage exercises registered <code>/wp/v2/templates</code> and <code>/wp/v2/template-parts</code> routes through <code>WP_REST_Server</code>, capability-allowed collection callbacks, bounded <code>pre_get_block_templates</code> fixtures, post-type and area query propagation, <code>_fields</code> projection, content block-version serialization, denied-before-lookup guards, HEAD no-query behavior, and filter/server cleanup; focused seeds 1, 224, and 57123 over 25 iterations each passed 375 checks, adjacent REST/template smoke passed 310 checks, bootstrap smoke passed, and broad seed 224 smoke passed 4748 checks with 1 skip.</div>
+			<div class="note">Latest focused addition: <code>filesystem</code> archive/copy/move coverage exercises <code>wp_zip_file_is_valid()</code>, <code>unzip_file()</code> through both ZipArchive and PclZip routes, safe archive manifests, traversal and <code>__MACOSX</code> skips, unzip filter payload/restoration, standard filesystem chmod initialization, <code>copy_dir()</code> missing-source and nested skip-list contracts, and <code>move_dir()</code> same-source, existing-destination, overwrite, and copy-fallback behavior; focused seeds 1, 224, and 57123 over 25 iterations each passed 350 checks, adjacent filesystem consumer smoke passed 265 checks, bootstrap smoke passed, and broad seed 224 smoke passed 4750 checks with 1 skip.</div>
+			<div class="note">Previous focused addition: <code>rest-site-editor</code> collection GET dispatch coverage exercises registered <code>/wp/v2/templates</code> and <code>/wp/v2/template-parts</code> routes through <code>WP_REST_Server</code>, capability-allowed collection callbacks, bounded <code>pre_get_block_templates</code> fixtures, post-type and area query propagation, <code>_fields</code> projection, content block-version serialization, denied-before-lookup guards, HEAD no-query behavior, and filter/server cleanup; focused seeds 1, 224, and 57123 over 25 iterations each passed 375 checks, adjacent REST/template smoke passed 310 checks, bootstrap smoke passed, and broad seed 224 smoke passed 4748 checks with 1 skip.</div>
 			<div class="note">Previous focused addition: <code>formatting</code> <code>wptexturize()</code> coverage exercises exact quote, apostrophe, dash, ellipsis, dimension, ampersand, default protected-tag, filtered protected-tag, protected shortcode, unprotected registered-shortcode, HTML comment, punycode double-hyphen, split-regex recomposition, direct prime classification, marker-leak, idempotence, and filter-cleanup oracles; focused seeds 1 and 224 over 25 iterations each passed 400 checks, seed 100 over 50 iterations passed 800 checks, adjacent formatting/shortcodes/markup/content smoke passed 1900 checks, bootstrap smoke passed, and broad seed 224 smoke passed 4748 checks with 1 skip.</div>
 			<div class="note">Previous focused addition: <code>rewrite</code> pretty-permalink <code>url_to_postid()</code> coverage exercises generated rewrite-rule matching, site-base and <code>www</code> URL normalization, query/fragment stripping, custom post-type query-var mapping, non-public query-var filtering, short-circuited <code>WP_Query</code> singular post oracles, missing-post fail-closed behavior, and hook/post-type cleanup; focused seeds 1, 224, and 490 over 25 iterations each passed 475 checks, adjacent rewrite/request/canonical/query smoke passed 2115 checks, bootstrap smoke passed, and broad seed 224 smoke passed 4747 checks with 1 skip.</div>
 			<div class="note">Previous focused addition: <code>discovery</code> sitemap stylesheet output coverage exercises <code>WP_Sitemaps_Stylesheet</code> sitemap and index XSL structure, URL-count expressions, sitemap-only column guards, index-only field boundaries, LTR/RTL CSS alignment, CSS/content filter locality, and <code>wp_locale</code> restoration; focused seeds 1, 224, and 49949 over 25 iterations each passed 325 checks, adjacent discovery/REST/rewrite smoke passed 180 checks, bootstrap smoke passed, and broad seed 224 smoke passed 4746 checks with 1 skip.</div>
@@ -613,10 +614,10 @@
 				</tr>
 				<tr>
 					<td><code>filesystem</code></td>
-					<td><span class="status good">review follow-up passed</span></td>
-					<td>Main worktree; unique-filename callback/case follow-up through <code>b2a7077ab8</code>, recursive helper coverage through <code>60dec6d029</code></td>
-					<td>Main focused runs: 1200 passed, 0 skipped, 0 failed at seeds 1 and 224; reviewer seed 60 passed 1200 checks; latest broad smoke: 4326 passed, 33 skipped, 0 failed.</td>
-					<td>Path normalization/joining, validation classes, filename sanitization/uniqueness, callback and lowercase-extension collision metadata, temp names, <code>wp_mkdir_p()</code> recursive creation, <code>list_files()</code> hidden/exclusion/depth behavior, <code>wp_is_stream()</code>/<code>wp_is_writable()</code> contracts, direct filesystem sandboxing, metadata/time/chmod round trips, missing-file failure values.</td>
+					<td><span class="status good">validation passed</span></td>
+					<td>Scoped worktree <code>component-fuzz-filesystem-archives</code>; builds on unique-filename callback/case follow-up through <code>b2a7077ab8</code> and recursive helper coverage through <code>60dec6d029</code>.</td>
+					<td>Latest focused runs: seed 224 passed 14 checks, seeds 1, 224, and 57123 over 25 iterations each passed 350 checks, adjacent <code>filesystem,plugin-theme-lifecycle,update-install-upgrader,media-ingest,network-media</code> smoke passed 265 checks, bootstrap smoke passed, and latest broad run passed 4750 checks with 1 skip.</td>
+					<td>Path normalization/joining, validation classes, filename sanitization/uniqueness, callback and lowercase-extension collision metadata, temp names, <code>wp_mkdir_p()</code> recursive creation, <code>list_files()</code> hidden/exclusion/depth behavior, <code>wp_is_stream()</code>/<code>wp_is_writable()</code> contracts, direct filesystem sandboxing, metadata/time/chmod round trips, missing-file failure values, <code>wp_zip_file_is_valid()</code> valid/invalid archive parity, <code>unzip_file()</code> ZipArchive/PclZip extraction parity and skip guards, <code>copy_dir()</code> missing-source/skip-list behavior, and <code>move_dir()</code> overwrite and fallback-copy behavior.</td>
 				</tr>
 				<tr>
 					<td><code>classic-walkers</code></td>
@@ -1657,6 +1658,12 @@
 					<td><code>admin-list-tables</code></td>
 					<td>226 passed, 49 skipped, 0 failed at seeds 1 and 224 over 25 iterations after replacing stale privacy request table skip accounting with a passed coverage-accounting invariant tied to the dedicated <code>privacy-admin-requests</code> surface; adjacent admin/privacy smoke passed 201 checks with 14 skips.</td>
 					<td>4680 passed, 14 skipped, 0 failed at 1 iteration after admin list-table privacy coverage accounting.</td>
+				</tr>
+				<tr>
+					<td><code>current branch</code></td>
+					<td><code>filesystem</code></td>
+					<td>350 passed, 0 skipped, 0 failed at seeds 1, 224, and 57123 over 25 iterations after adding ZIP validity, ZipArchive/PclZip unzip parity, traversal and <code>__MACOSX</code> skip guards, <code>copy_dir()</code> missing-source and nested skip-list oracles, and <code>move_dir()</code> overwrite and copy-fallback contracts; adjacent filesystem consumer smoke passed 265 checks.</td>
+					<td>4750 passed, 1 skipped, 0 failed at 1 iteration after filesystem archive, unzip, copy, and move coverage.</td>
 				</tr>
 				<tr>
 					<td><code>0b57a4238a</code></td>

@@ -324,7 +324,9 @@ database, network requests, or a configured site.
   filename sanitization/uniqueness, unique-filename callback and case-collision
   filters, temp names, recursive directory creation/listing and stream wrapper
   detection, direct filesystem sandboxing, metadata/time/chmod round trips, and
-  missing-file failure values.
+  missing-file failure values, ZIP validity and `unzip_file()` ZipArchive/PclZip
+  parity over safe, traversal, and `__MACOSX` entries, plus `copy_dir()` skip/error
+  contracts and `move_dir()` overwrite and copy-fallback behavior.
 - `formatting`: escaping helpers, text sanitizers, whitespace normalization,
   `wptexturize()` rich-text punctuation and protected-region oracles,
   `wptexturize_primes()`, texturize split/shortcode regex recomposition,

@@ -44,13 +44,17 @@ final class FilesystemSurface {
 					'Could not create an isolated writable directory under /tmp.'
 				);
 			} else {
-				$unique_dir = $temp_root . DIRECTORY_SEPARATOR . 'unique';
-				$temp_dir   = $temp_root . DIRECTORY_SEPARATOR . 'tempnam';
-				$direct_dir = $temp_root . DIRECTORY_SEPARATOR . 'direct';
+				$unique_dir  = $temp_root . DIRECTORY_SEPARATOR . 'unique';
+				$temp_dir    = $temp_root . DIRECTORY_SEPARATOR . 'tempnam';
+				$direct_dir  = $temp_root . DIRECTORY_SEPARATOR . 'direct';
+				$archive_dir = $temp_root . DIRECTORY_SEPARATOR . 'archives';
+				$copy_dir    = $temp_root . DIRECTORY_SEPARATOR . 'copy-move';
 
 				self::ensure_dir( $unique_dir );
 				self::ensure_dir( $temp_dir );
 				self::ensure_dir( $direct_dir );
+				self::ensure_dir( $archive_dir );
+				self::ensure_dir( $copy_dir );
 
 				$rows[] = self::check_wp_unique_filename( $ctx, $filename_cases, $unique_dir );
 				$rows[] = self::check_wp_unique_filename_callbacks_and_case( $ctx, $unique_dir );
@@ -58,6 +62,8 @@ final class FilesystemSurface {
 				$rows[] = self::check_recursive_directory_helpers( $ctx, $filename_cases, $direct_dir );
 				$rows[] = self::check_wp_filesystem_direct( $ctx, $filename_cases, $direct_dir );
 				$rows[] = self::check_wp_filesystem_direct_metadata( $ctx, $filename_cases, $direct_dir );
+				$rows[] = self::check_zip_archive_extraction( $ctx, $archive_dir );
+				$rows[] = self::check_copy_move_dir_contracts( $ctx, $filename_cases, $copy_dir );
 			}
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
@@ -102,6 +108,10 @@ final class FilesystemSurface {
 				'wp_is_stream',
 				'wp_is_writable',
 				'list_files',
+				'wp_zip_file_is_valid',
+				'unzip_file',
+				'copy_dir',
+				'move_dir',
 			) as $function
 		) {
 			if ( ! function_exists( $function ) ) {
@@ -1443,6 +1453,413 @@ final class FilesystemSurface {
 		);
 	}
 
+	private static function check_zip_archive_extraction( \ComponentFuzz\FuzzContext $ctx, string $dir ): array {
+		if ( ! class_exists( 'ZipArchive' ) || ! class_exists( 'WP_Filesystem_Direct' ) ) {
+			return $ctx->skip(
+				'filesystem.zip-archive.available',
+				'ZipArchive or WP_Filesystem_Direct is unavailable.'
+			);
+		}
+		self::ensure_filesystem_chmod_constants();
+
+		$failures  = array();
+		$zip_file  = $dir . DIRECTORY_SEPARATOR . 'archive-' . $ctx->iteration() . '.zip';
+		$bad_file  = $dir . DIRECTORY_SEPARATOR . 'not-a-zip-' . $ctx->iteration() . '.zip';
+		$zip_to    = $dir . DIRECTORY_SEPARATOR . 'ziparchive-out';
+		$pcl_to    = $dir . DIRECTORY_SEPARATOR . 'pclzip-out';
+		$outside   = $dir . DIRECTORY_SEPARATOR . 'escape.txt';
+		$root_name = 'fixture-' . strtolower( $ctx->identifier( 5, 8 ) );
+		$fixture   = array(
+			$root_name . '/readme.txt'       => "readme seed=" . $ctx->seed() . "\n",
+			$root_name . '/nested/code.php' => "<?php\n// fixture " . $ctx->iteration() . "\n",
+			$root_name . '/nested/data.json' => '{"seed":' . $ctx->seed() . ',"iteration":' . $ctx->iteration() . '}',
+			$root_name . '/empty/'           => null,
+			'__MACOSX/._' . $root_name       => 'metadata should not extract',
+			'../escape.txt'                  => 'traversal should not extract',
+		);
+		$expected  = array(
+			$root_name . '/nested/code.php'  => $fixture[ $root_name . '/nested/code.php' ],
+			$root_name . '/nested/data.json' => $fixture[ $root_name . '/nested/data.json' ],
+			$root_name . '/readme.txt'       => $fixture[ $root_name . '/readme.txt' ],
+		);
+		ksort( $expected );
+
+		$created = self::create_zip_fixture( $zip_file, $fixture );
+		file_put_contents( $bad_file, "not a zip\n" . $ctx->bytes( 0, 12 ) );
+
+		if ( ! $created ) {
+			return $ctx->skip(
+				'filesystem.zip-archive.fixture-created',
+				'Could not create a local ZipArchive fixture.',
+				array( 'zip' => self::describe_string( $zip_file ) )
+			);
+		}
+
+		$valid_default = self::call( static function () use ( $zip_file ) {
+			return \wp_zip_file_is_valid( $zip_file );
+		} );
+		$invalid_default = self::call( static function () use ( $bad_file ) {
+			return \wp_zip_file_is_valid( $bad_file );
+		} );
+
+		$pclzip_valid_filter = static function () {
+			return false;
+		};
+		\add_filter( 'unzip_file_use_ziparchive', $pclzip_valid_filter, 20 );
+		try {
+			$valid_pclzip = self::call( static function () use ( $zip_file ) {
+				return \wp_zip_file_is_valid( $zip_file );
+			} );
+			$invalid_pclzip = self::call( static function () use ( $bad_file ) {
+				return \wp_zip_file_is_valid( $bad_file );
+			} );
+		} finally {
+			$pclzip_valid_removed = \remove_filter( 'unzip_file_use_ziparchive', $pclzip_valid_filter, 20 );
+		}
+
+		if (
+			$valid_default['threw']
+			|| $invalid_default['threw']
+			|| $valid_pclzip['threw']
+			|| $invalid_pclzip['threw']
+			|| true !== $valid_default['value']
+			|| false !== $invalid_default['value']
+			|| true !== $valid_pclzip['value']
+			|| false !== $invalid_pclzip['value']
+			|| ! $pclzip_valid_removed
+		) {
+			self::record_failure(
+				$failures,
+				'wp_zip_file_is_valid.ZipArchive-PclZip-valid-invalid-parity',
+				array( 'value' => $zip_file, 'source' => 'generated', 'features' => array( 'zip' ) ),
+				array(
+					'validDefault'    => self::describe_call( $valid_default ),
+					'invalidDefault'  => self::describe_call( $invalid_default ),
+					'validPclZip'     => self::describe_call( $valid_pclzip ),
+					'invalidPclZip'   => self::describe_call( $invalid_pclzip ),
+					'pclFilterRemove' => $pclzip_valid_removed ?? null,
+				)
+			);
+		}
+
+		$pre_events       = array();
+		$result_events    = array();
+		$zip_route_events = array();
+		$pre_filter       = static function ( $result, string $file, string $to, array $needed_dirs, float $required_space ) use ( &$pre_events ) {
+			$pre_events[] = array(
+				'file'          => $file,
+				'to'            => $to,
+				'neededDirs'    => $needed_dirs,
+				'requiredSpace' => $required_space,
+			);
+
+			return $result;
+		};
+		$result_filter    = static function ( $result, string $file, string $to, array $needed_dirs, float $required_space ) use ( &$result_events ) {
+			$result_events[] = array(
+				'result'        => true === $result ? true : ( \is_wp_error( $result ) ? $result->get_error_code() : $result ),
+				'file'          => $file,
+				'to'            => $to,
+				'neededDirs'    => $needed_dirs,
+				'requiredSpace' => $required_space,
+			);
+
+			return $result;
+		};
+		$zip_route_filter = static function ( $use_ziparchive ) use ( &$zip_route_events ) {
+			$selected_route     = 0 === count( $zip_route_events );
+			$zip_route_events[] = $selected_route;
+
+			return $selected_route;
+		};
+
+		$previous_filesystem      = $GLOBALS['wp_filesystem'] ?? null;
+		$had_previous_filesystem  = array_key_exists( 'wp_filesystem', $GLOBALS );
+		$GLOBALS['wp_filesystem'] = new \WP_Filesystem_Direct( null );
+		\add_filter( 'pre_unzip_file', $pre_filter, 10, 5 );
+		\add_filter( 'unzip_file', $result_filter, 10, 5 );
+		\add_filter( 'unzip_file_use_ziparchive', $zip_route_filter, 10 );
+
+		try {
+			$zip_result = self::call( static function () use ( $zip_file, $zip_to ) {
+				return \unzip_file( $zip_file, $zip_to );
+			} );
+			$pcl_result = self::call( static function () use ( $zip_file, $pcl_to ) {
+				return \unzip_file( $zip_file, $pcl_to );
+			} );
+		} finally {
+			$zip_route_removed = \remove_filter( 'unzip_file_use_ziparchive', $zip_route_filter, 10 );
+			$result_removed    = \remove_filter( 'unzip_file', $result_filter, 10 );
+			$pre_removed       = \remove_filter( 'pre_unzip_file', $pre_filter, 10 );
+			if ( $had_previous_filesystem ) {
+				$GLOBALS['wp_filesystem'] = $previous_filesystem;
+			} else {
+				unset( $GLOBALS['wp_filesystem'] );
+			}
+		}
+
+		$zip_manifest = self::directory_file_manifest( $zip_to );
+		$pcl_manifest = self::directory_file_manifest( $pcl_to );
+
+		if (
+			$zip_result['threw']
+			|| $pcl_result['threw']
+			|| true !== $zip_result['value']
+			|| true !== $pcl_result['value']
+			|| $zip_manifest !== $expected
+			|| $pcl_manifest !== $expected
+			|| file_exists( $outside )
+			|| is_dir( $zip_to . DIRECTORY_SEPARATOR . '__MACOSX' )
+			|| is_dir( $pcl_to . DIRECTORY_SEPARATOR . '__MACOSX' )
+			|| 2 !== count( $pre_events )
+			|| 2 !== count( $result_events )
+			|| array( true, false ) !== $zip_route_events
+			|| ! $pre_removed
+			|| ! $result_removed
+			|| ! $zip_route_removed
+			|| \has_filter( 'pre_unzip_file', $pre_filter )
+			|| \has_filter( 'unzip_file', $result_filter )
+			|| \has_filter( 'unzip_file_use_ziparchive', $zip_route_filter )
+		) {
+			self::record_failure(
+				$failures,
+				'unzip_file.ZipArchive-PclZip-parity-skips-invalid-paths-and-restores-filters',
+				array( 'value' => $zip_file, 'source' => 'generated', 'features' => array( 'zip', 'traversal', 'macosx' ) ),
+				array(
+					'zipResult'      => self::describe_call( $zip_result ),
+					'pclResult'      => self::describe_call( $pcl_result ),
+					'expected'       => array_keys( $expected ),
+					'zipManifest'    => $zip_manifest,
+					'pclManifest'    => $pcl_manifest,
+					'outsideExists'  => file_exists( $outside ),
+					'preEvents'      => $pre_events,
+					'resultEvents'   => $result_events,
+					'zipRouteEvents' => $zip_route_events,
+					'filtersRemoved' => array(
+						'pre'    => $pre_removed ?? null,
+						'result' => $result_removed ?? null,
+						'route'  => $zip_route_removed ?? null,
+					),
+				)
+			);
+		}
+
+		return self::row(
+			$ctx,
+			'filesystem.zip-validity-and-unzip-parity',
+			array(
+				array(
+					'value'    => $zip_file,
+					'source'   => 'generated',
+					'features' => array( 'zip', 'traversal', 'macosx' ),
+				),
+			),
+			$failures,
+			array(
+				'zip'            => self::describe_string( $zip_file ),
+				'rootName'       => $root_name,
+				'extractedFiles' => array_keys( $expected ),
+			)
+		);
+	}
+
+	private static function check_copy_move_dir_contracts( \ComponentFuzz\FuzzContext $ctx, array $cases, string $dir ): array {
+		if ( ! class_exists( 'WP_Filesystem_Direct' ) ) {
+			return $ctx->skip( 'filesystem.copy-move.WP_Filesystem_Direct.available', 'WP_Filesystem_Direct is unavailable.' );
+		}
+		self::ensure_filesystem_chmod_constants();
+
+		$failures      = array();
+		$leaf          = self::safe_leaf_name( $cases[ $ctx->int( 0, count( $cases ) - 1 ) ]['value'], 'payload.txt' );
+		$from          = $dir . DIRECTORY_SEPARATOR . 'copy-from';
+		$to            = $dir . DIRECTORY_SEPARATOR . 'copy-to';
+		$missing       = $dir . DIRECTORY_SEPARATOR . 'missing-source';
+		$move_from     = $dir . DIRECTORY_SEPARATOR . 'move-from';
+		$move_to       = $dir . DIRECTORY_SEPARATOR . 'move-to';
+		$fallback_from = $dir . DIRECTORY_SEPARATOR . 'fallback-from';
+		$fallback_to   = $dir . DIRECTORY_SEPARATOR . 'fallback-to';
+
+		self::write_tree_fixture(
+			$from,
+			array(
+				$leaf                    => 'copy payload ' . $ctx->seed(),
+				'code.php'               => "<?php\n// copy " . $ctx->iteration() . "\n",
+				'skip-me.txt'            => 'skip root',
+				'nested/keep.txt'        => 'nested keep',
+				'nested/skip-child.txt'  => 'skip child',
+			)
+		);
+		self::write_tree_fixture(
+			$move_from,
+			array(
+				'fresh.php'       => "<?php\n// moved\n",
+				'nested/file.txt' => 'move nested',
+			)
+		);
+		self::write_tree_fixture(
+			$move_to,
+			array(
+				'stale.txt' => 'stale destination',
+			)
+		);
+		self::write_tree_fixture(
+			$fallback_from,
+			array(
+				'fallback.php'        => "<?php\n// fallback\n",
+				'nested/fallback.txt' => 'fallback nested',
+			)
+		);
+
+		$previous_filesystem      = $GLOBALS['wp_filesystem'] ?? null;
+		$had_previous_filesystem  = array_key_exists( 'wp_filesystem', $GLOBALS );
+		$GLOBALS['wp_filesystem'] = new \WP_Filesystem_Direct( null );
+
+		try {
+			$missing_result = self::call( static function () use ( $missing, $to ) {
+				return \copy_dir( $missing, $to . '-missing' );
+			} );
+			$copy_result = self::call( static function () use ( $from, $to ) {
+				return \copy_dir( $from, $to, array( 'skip-me.txt', 'nested/skip-child.txt' ) );
+			} );
+			$same_result = self::call( static function () use ( $move_from ) {
+				return \move_dir( $move_from, $move_from );
+			} );
+			$exists_result = self::call( static function () use ( $move_from, $move_to ) {
+				return \move_dir( $move_from, $move_to, false );
+			} );
+			$overwrite_result = self::call( static function () use ( $move_from, $move_to ) {
+				return \move_dir( $move_from, $move_to, true );
+			} );
+
+			$fallback_fs = new class( null ) extends \WP_Filesystem_Direct {
+				public array $move_calls = array();
+
+				public function move( $source, $destination, $overwrite = false ) {
+					$this->move_calls[] = array(
+						'source'      => $source,
+						'destination' => $destination,
+						'overwrite'   => $overwrite,
+					);
+
+					return false;
+				}
+			};
+			$GLOBALS['wp_filesystem'] = $fallback_fs;
+			$fallback_result = self::call( static function () use ( $fallback_from, $fallback_to ) {
+				return \move_dir( $fallback_from, $fallback_to, false );
+			} );
+			$fallback_move_calls = $fallback_fs->move_calls;
+		} finally {
+			if ( $had_previous_filesystem ) {
+				$GLOBALS['wp_filesystem'] = $previous_filesystem;
+			} else {
+				unset( $GLOBALS['wp_filesystem'] );
+			}
+		}
+
+		$copy_expected = array(
+			'code.php'        => "<?php\n// copy " . $ctx->iteration() . "\n",
+			$leaf             => 'copy payload ' . $ctx->seed(),
+			'nested/keep.txt' => 'nested keep',
+		);
+		$source_expected = array(
+			'code.php'              => "<?php\n// copy " . $ctx->iteration() . "\n",
+			$leaf                   => 'copy payload ' . $ctx->seed(),
+			'nested/keep.txt'       => 'nested keep',
+			'nested/skip-child.txt' => 'skip child',
+			'skip-me.txt'           => 'skip root',
+		);
+		$move_expected = array(
+			'fresh.php'       => "<?php\n// moved\n",
+			'nested/file.txt' => 'move nested',
+		);
+		$fallback_expected = array(
+			'fallback.php'        => "<?php\n// fallback\n",
+			'nested/fallback.txt' => 'fallback nested',
+		);
+		ksort( $copy_expected );
+		ksort( $source_expected );
+		ksort( $move_expected );
+		ksort( $fallback_expected );
+
+		$missing_error_code = \is_wp_error( $missing_result['value'] ?? null ) ? $missing_result['value']->get_error_code() : null;
+		$same_error_code    = \is_wp_error( $same_result['value'] ?? null ) ? $same_result['value']->get_error_code() : null;
+		$exists_error_code  = \is_wp_error( $exists_result['value'] ?? null ) ? $exists_result['value']->get_error_code() : null;
+
+		if (
+			$missing_result['threw']
+			|| 'dirlist_failed_copy_dir' !== $missing_error_code
+			|| $copy_result['threw']
+			|| true !== $copy_result['value']
+			|| self::directory_file_manifest( $to ) !== $copy_expected
+			|| self::directory_file_manifest( $from ) !== $source_expected
+		) {
+			self::record_failure(
+				$failures,
+				'copy_dir.missing-source-error-skip-list-and-source-preservation',
+				array( 'value' => $from, 'source' => 'generated', 'features' => array( 'copy-dir', 'skip-list' ) ),
+				array(
+					'missingResult' => self::describe_call( $missing_result ),
+					'missingCode'   => $missing_error_code,
+					'copyResult'    => self::describe_call( $copy_result ),
+					'expected'      => $copy_expected,
+					'actual'        => self::directory_file_manifest( $to ),
+					'source'        => self::directory_file_manifest( $from ),
+				)
+			);
+		}
+
+		if (
+			$same_result['threw']
+			|| 'source_destination_same_move_dir' !== $same_error_code
+			|| $exists_result['threw']
+			|| 'destination_already_exists_move_dir' !== $exists_error_code
+			|| $overwrite_result['threw']
+			|| true !== $overwrite_result['value']
+			|| is_dir( $move_from )
+			|| self::directory_file_manifest( $move_to ) !== $move_expected
+			|| $fallback_result['threw']
+			|| true !== $fallback_result['value']
+			|| is_dir( $fallback_from )
+			|| self::directory_file_manifest( $fallback_to ) !== $fallback_expected
+			|| 1 !== count( $fallback_move_calls )
+		) {
+			self::record_failure(
+				$failures,
+				'move_dir.same-destination-existing-overwrite-and-copy-fallback-contracts',
+				array( 'value' => $move_from, 'source' => 'generated', 'features' => array( 'move-dir', 'fallback-copy' ) ),
+				array(
+					'sameResult'       => self::describe_call( $same_result ),
+					'sameCode'         => $same_error_code,
+					'existsResult'     => self::describe_call( $exists_result ),
+					'existsCode'       => $exists_error_code,
+					'overwriteResult'  => self::describe_call( $overwrite_result ),
+					'moveManifest'     => self::directory_file_manifest( $move_to ),
+					'fallbackResult'   => self::describe_call( $fallback_result ),
+					'fallbackManifest' => self::directory_file_manifest( $fallback_to ),
+					'fallbackMoves'    => $fallback_move_calls,
+				)
+			);
+		}
+
+		return self::row(
+			$ctx,
+			'filesystem.copy-dir-and-move-dir-contracts',
+			array(
+				array(
+					'value'    => $leaf,
+					'source'   => 'generated',
+					'features' => self::filename_features( $leaf ),
+				),
+			),
+			$failures,
+			array(
+				'sandbox' => self::describe_string( $dir ),
+				'leaf'    => self::describe_string( $leaf ),
+			)
+		);
+	}
+
 	private static function path_cases( \ComponentFuzz\FuzzContext $ctx ): array {
 		$cases = array();
 		foreach ( self::path_corpus() as $path ) {
@@ -1955,6 +2372,74 @@ final class FilesystemSurface {
 		sort( $normalized );
 
 		return $normalized;
+	}
+
+	private static function ensure_filesystem_chmod_constants(): void {
+		if ( ! defined( 'FS_CHMOD_DIR' ) ) {
+			define( 'FS_CHMOD_DIR', ( fileperms( ABSPATH ) & 0777 | 0755 ) );
+		}
+		if ( ! defined( 'FS_CHMOD_FILE' ) ) {
+			define( 'FS_CHMOD_FILE', ( fileperms( ABSPATH . 'index.php' ) & 0777 | 0644 ) );
+		}
+	}
+
+	private static function create_zip_fixture( string $zip_file, array $entries ): bool {
+		$zip = new \ZipArchive();
+		if ( true !== $zip->open( $zip_file, \ZipArchive::CREATE | \ZipArchive::OVERWRITE ) ) {
+			return false;
+		}
+
+		foreach ( $entries as $name => $contents ) {
+			if ( null === $contents ) {
+				if ( ! $zip->addEmptyDir( $name ) ) {
+					$zip->close();
+					return false;
+				}
+				continue;
+			}
+
+			if ( ! $zip->addFromString( $name, $contents ) ) {
+				$zip->close();
+				return false;
+			}
+		}
+
+		return true === $zip->close();
+	}
+
+	private static function write_tree_fixture( string $root, array $files ): void {
+		foreach ( $files as $relative => $contents ) {
+			$path = $root . DIRECTORY_SEPARATOR . str_replace( '/', DIRECTORY_SEPARATOR, $relative );
+			self::ensure_dir( dirname( $path ) );
+			file_put_contents( $path, $contents );
+		}
+	}
+
+	private static function directory_file_manifest( string $root ): array {
+		if ( ! is_dir( $root ) ) {
+			return array();
+		}
+
+		$root     = rtrim( $root, DIRECTORY_SEPARATOR );
+		$manifest = array();
+		$iterator = new \RecursiveIteratorIterator(
+			new \RecursiveDirectoryIterator( $root, \FilesystemIterator::SKIP_DOTS ),
+			\RecursiveIteratorIterator::LEAVES_ONLY
+		);
+
+		foreach ( $iterator as $file ) {
+			if ( ! $file->isFile() ) {
+				continue;
+			}
+
+			$relative              = substr( $file->getPathname(), strlen( $root ) + 1 );
+			$relative              = str_replace( DIRECTORY_SEPARATOR, '/', $relative );
+			$manifest[ $relative ] = file_get_contents( $file->getPathname() );
+		}
+
+		ksort( $manifest );
+
+		return $manifest;
 	}
 
 	private static function row( \ComponentFuzz\FuzzContext $ctx, string $invariant, array $cases, array $failures, array $extra = array() ): array {
