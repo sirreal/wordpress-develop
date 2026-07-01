@@ -29,6 +29,7 @@ final class ContentLifecycleSurface {
 			$rows[] = self::check_user_lifecycle( $ctx->fork( 'users' ), $case );
 			$rows[] = self::check_term_lifecycle( $ctx->fork( 'terms' ), $case );
 			$rows[] = self::check_post_lifecycle( $ctx->fork( 'posts' ), $case );
+			$rows[] = self::check_set_post_type_mutation_and_cache_cleanup( $ctx->fork( 'set-post-type' ), $case );
 			$rows   = array_merge(
 				$rows,
 				self::check_post_status_transition_hooks( $ctx->fork( 'post-status' ), $case )
@@ -111,6 +112,7 @@ final class ContentLifecycleSurface {
 				'sanitize_term_field',
 				'sanitize_title',
 				'sanitize_user',
+				'set_post_type',
 				'set_post_thumbnail',
 				'term_exists',
 				'the_post_thumbnail',
@@ -360,6 +362,302 @@ final class ContentLifecycleSurface {
 				'case'     => self::case_summary( $case ),
 				'failures' => array_slice( $failures, 0, 6 ),
 				'events'   => array_slice( $events, 0, 16 ),
+			)
+		);
+	}
+
+	private static function check_set_post_type_mutation_and_cache_cleanup( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures      = array();
+		$events        = array();
+		$post_ids      = array();
+		$source_type   = $case['postType'];
+		$filtered_type = 'cf_set_' . substr( $case['token'], 0, 8 );
+		$raw_type      = 'Raw Type ' . $case['token'] . ' / <script>';
+		$author_id     = self::insert_support_user( 'set-post-type-' . $case['token'], 'set-post-type-' . $case['token'] . '@example.test' );
+		$pre_filter    = static function ( $value ) use ( &$events, $filtered_type ) {
+			$events[] = array(
+				'hook'  => 'pre_post_type',
+				'value' => (string) $value,
+			);
+
+			return $filtered_type;
+		};
+		$save_filter   = static function ( $value ) use ( &$events ) {
+			$events[] = array(
+				'hook'  => 'type_save_pre',
+				'value' => (string) $value,
+			);
+
+			return $value;
+		};
+		$clean_action  = static function ( int $post_id, \WP_Post $post ) use ( &$events ): void {
+			$events[] = array(
+				'hook'   => 'clean_post_cache',
+				'postId' => $post_id,
+				'type'   => (string) $post->post_type,
+			);
+		};
+		$page_action   = static function ( int $post_id ) use ( &$events ): void {
+			$events[] = array(
+				'hook'   => 'clean_page_cache',
+				'postId' => $post_id,
+			);
+		};
+
+		try {
+			\register_post_type(
+				$source_type,
+				array(
+					'public'    => true,
+					'rewrite'   => false,
+					'query_var' => false,
+					'supports'  => array( 'title', 'editor' ),
+				)
+			);
+
+			$main_id = \wp_insert_post(
+				\wp_slash(
+					array(
+						'post_type'    => $source_type,
+						'post_title'   => 'Set post type ' . $case['title'],
+						'post_content' => 'set-post-type main ' . $case['token'],
+						'post_status'  => 'publish',
+						'post_author'  => $author_id,
+						'post_name'    => 'set-main-' . $case['token'],
+					)
+				),
+				true,
+				true
+			);
+			$page_id = \wp_insert_post(
+				\wp_slash(
+					array(
+						'post_type'    => $source_type,
+						'post_title'   => 'Page branch ' . $case['title'],
+						'post_content' => 'set-post-type page ' . $case['token'],
+						'post_status'  => 'draft',
+						'post_author'  => $author_id,
+						'post_name'    => 'set-page-' . $case['token'],
+					)
+				),
+				true,
+				true
+			);
+			$sibling_id = \wp_insert_post(
+				\wp_slash(
+					array(
+						'post_type'    => $source_type,
+						'post_title'   => 'Sibling ' . $case['title'],
+						'post_content' => 'set-post-type sibling ' . $case['token'],
+						'post_status'  => 'private',
+						'post_author'  => $author_id,
+						'post_name'    => 'set-sibling-' . $case['token'],
+					)
+				),
+				true,
+				true
+			);
+
+			foreach ( array( $main_id, $page_id, $sibling_id ) as $post_id ) {
+				if ( is_int( $post_id ) && $post_id > 0 ) {
+					$post_ids[] = $post_id;
+				}
+			}
+
+			if ( \is_wp_error( $main_id ) || \is_wp_error( $page_id ) || \is_wp_error( $sibling_id ) ) {
+				self::collect_failure(
+					$failures,
+					false,
+					'set_post_type fixtures insert without WP_Error',
+					array(
+						'main'    => self::error_summary( $main_id ),
+						'page'    => self::error_summary( $page_id ),
+						'sibling' => self::error_summary( $sibling_id ),
+					)
+				);
+
+				return $ctx->result(
+					'content-lifecycle.posts.set-post-type-mutation-cache',
+					false,
+					array(
+						'case'     => self::case_summary( $case ),
+						'failures' => array_slice( $failures, 0, 6 ),
+					)
+				);
+			}
+
+			$cached_before = \get_post( $main_id );
+			\wp_cache_set( 'post_parent:' . (string) $main_id, 'stale-parent-' . $case['token'], 'posts' );
+			\wp_cache_set( $main_id, 'stale-meta-' . $case['token'], 'post_meta' );
+			\wp_cache_set( 'wp_get_archives', 'stale-archives-' . $case['token'], 'general' );
+
+			\add_filter( 'pre_post_type', $pre_filter );
+			\add_filter( 'type_save_pre', $save_filter );
+			\add_action( 'clean_post_cache', $clean_action, 10, 2 );
+			\add_action( 'clean_page_cache', $page_action, 10, 1 );
+
+			$main_return       = \set_post_type( $main_id, $raw_type );
+			$post_cache_after  = \wp_cache_get( $main_id, 'posts' );
+			$parent_cache_after = \wp_cache_get( 'post_parent:' . (string) $main_id, 'posts' );
+			$meta_cache_after  = \wp_cache_get( $main_id, 'post_meta' );
+			$archive_after     = \wp_cache_get( 'wp_get_archives', 'general' );
+			$main_after        = \get_post( $main_id );
+			$sibling_after     = \get_post( $sibling_id );
+
+			\remove_filter( 'pre_post_type', $pre_filter, 10 );
+			\remove_filter( 'type_save_pre', $save_filter, 10 );
+
+			\wp_cache_set( 'all_page_ids', array( $page_id, 123456 ), 'posts' );
+			\wp_cache_delete( $page_id, 'posts' );
+			$page_return        = \set_post_type( $page_id, 'page' );
+			$page_after         = \get_post( $page_id );
+			$all_page_ids_after = \wp_cache_get( 'all_page_ids', 'posts' );
+
+			$missing_id     = 987654321;
+			$events_before  = count( $events );
+			$missing_return = \set_post_type( $missing_id, 'post' );
+			$missing_events = array_slice( $events, $events_before );
+
+			$pre_events   = array_values(
+				array_filter(
+					$events,
+					static function ( array $event ): bool {
+						return 'pre_post_type' === ( $event['hook'] ?? '' );
+					}
+				)
+			);
+			$save_events  = array_values(
+				array_filter(
+					$events,
+					static function ( array $event ): bool {
+						return 'type_save_pre' === ( $event['hook'] ?? '' );
+					}
+				)
+			);
+			$clean_events = array_values(
+				array_filter(
+					$events,
+					static function ( array $event ): bool {
+						return 'clean_post_cache' === ( $event['hook'] ?? '' );
+					}
+				)
+			);
+			$page_events  = array_values(
+				array_filter(
+					$events,
+					static function ( array $event ): bool {
+						return 'clean_page_cache' === ( $event['hook'] ?? '' );
+					}
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				1 === $main_return
+					&& $main_after instanceof \WP_Post
+					&& $filtered_type === $main_after->post_type
+					&& $cached_before instanceof \WP_Post
+					&& $source_type === $cached_before->post_type
+					&& false === $post_cache_after
+					&& false === $parent_cache_after
+					&& false === $meta_cache_after
+					&& false === $archive_after,
+				'set_post_type() writes the filtered post type and evicts stale post, parent, meta, and archive caches',
+				array(
+					'return'      => $main_return,
+					'before'      => self::post_summary( $cached_before ),
+					'after'       => self::post_summary( $main_after ),
+					'postCache'   => $post_cache_after,
+					'parentCache' => $parent_cache_after,
+					'metaCache'   => $meta_cache_after,
+					'archives'    => $archive_after,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				array( array( 'hook' => 'pre_post_type', 'value' => $raw_type ) ) === $pre_events
+					&& array( array( 'hook' => 'type_save_pre', 'value' => $filtered_type ) ) === $save_events
+					&& false === \has_filter( 'pre_post_type', $pre_filter )
+					&& false === \has_filter( 'type_save_pre', $save_filter ),
+				'set_post_type() passes the raw target through pre_post_type and the filtered target through type_save_pre exactly once, then filter cleanup holds',
+				array(
+					'preEvents'  => $pre_events,
+					'saveEvents' => $save_events,
+					'preFilter'  => \has_filter( 'pre_post_type', $pre_filter ),
+					'saveFilter' => \has_filter( 'type_save_pre', $save_filter ),
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				1 === $page_return
+					&& $page_after instanceof \WP_Post
+					&& 'page' === $page_after->post_type
+					&& false === $all_page_ids_after
+					&& array( array( 'hook' => 'clean_page_cache', 'postId' => $page_id ) ) === $page_events,
+				'set_post_type() to page follows the page-specific cache cleanup branch when no stale post object is cached',
+				array(
+					'return'      => $page_return,
+					'after'       => self::post_summary( $page_after ),
+					'allPageIds'  => $all_page_ids_after,
+					'pageEvents'  => $page_events,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$sibling_after instanceof \WP_Post
+					&& $source_type === $sibling_after->post_type
+					&& 0 === $missing_return
+					&& array() === $missing_events
+					&& 2 === count( $clean_events )
+					&& $main_id === ( $clean_events[0]['postId'] ?? null )
+					&& $page_id === ( $clean_events[1]['postId'] ?? null ),
+				'set_post_type() updates only matching IDs, leaves siblings untouched, and missing IDs fail closed without cache-clean actions',
+				array(
+					'sibling'       => self::post_summary( $sibling_after ),
+					'missingReturn' => $missing_return,
+					'missingEvents' => $missing_events,
+					'cleanEvents'   => $clean_events,
+				)
+			);
+		} finally {
+			\remove_filter( 'pre_post_type', $pre_filter, 10 );
+			\remove_filter( 'type_save_pre', $save_filter, 10 );
+			\remove_action( 'clean_post_cache', $clean_action, 10 );
+			\remove_action( 'clean_page_cache', $page_action, 10 );
+
+			foreach ( array_unique( $post_ids ) as $post_id ) {
+				if ( \get_post( $post_id ) instanceof \WP_Post ) {
+					\wp_delete_post( $post_id, true );
+				}
+			}
+		}
+
+		self::collect_failure(
+			$failures,
+			false === \has_filter( 'pre_post_type', $pre_filter )
+				&& false === \has_filter( 'type_save_pre', $save_filter )
+				&& false === \has_action( 'clean_post_cache', $clean_action )
+				&& false === \has_action( 'clean_page_cache', $page_action ),
+			'set_post_type filters and cache-clean observers are removed after the row',
+			array(
+				'preFilter'   => \has_filter( 'pre_post_type', $pre_filter ),
+				'saveFilter'  => \has_filter( 'type_save_pre', $save_filter ),
+				'cleanAction' => \has_action( 'clean_post_cache', $clean_action ),
+				'pageAction'  => \has_action( 'clean_page_cache', $page_action ),
+			)
+		);
+
+		return $ctx->result(
+			'content-lifecycle.posts.set-post-type-mutation-cache',
+			array() === $failures,
+			array(
+				'case'         => self::case_summary( $case ),
+				'filteredType' => $filtered_type,
+				'events'       => array_slice( $events, 0, 8 ),
+				'failures'     => array_slice( $failures, 0, 8 ),
 			)
 		);
 	}

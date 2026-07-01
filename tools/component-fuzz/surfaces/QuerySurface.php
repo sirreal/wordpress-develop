@@ -554,6 +554,9 @@ final class QuerySurface {
 					'allowedGlobalMismatches'     => self::wp_query_allowed_global_mismatches(),
 					'globalMismatches'            => $observation['globalMismatches'],
 					'unexpectedGlobalMismatches'  => $observation['unexpectedGlobalMismatches'],
+					'hookCallbacksUnchanged'      => $observation['hookCallbacksUnchanged'],
+					'hookCallbackDifferences'     => $observation['hookCallbackDifferences'],
+					'unexpectedHookDifferences'   => $observation['unexpectedHookDifferences'],
 				)
 			);
 		}
@@ -3048,12 +3051,17 @@ final class QuerySurface {
 	private static function wp_query_execution_observation( array $case ): array {
 		$query_vars                  = $case['queryVars'];
 		$global_snapshot             = self::snapshot_globals();
+		$hook_callbacks_before       = self::wp_filter_callback_snapshot();
 		$queries_before              = self::wpdb_recorded_queries();
 		$query                       = new \WP_Query();
 		$posts                       = $query->query( $query_vars );
 		$queries_after               = self::wpdb_recorded_queries();
 		$new_queries                 = array_slice( $queries_after, count( $queries_before ) );
 		$global_mismatches           = self::globals_snapshot_mismatches( $global_snapshot );
+		$hook_callbacks_after        = self::wp_filter_callback_snapshot();
+		$hook_callbacks_unchanged    = $hook_callbacks_before === $hook_callbacks_after;
+		$hook_callback_differences   = self::hook_callback_snapshot_differences( $hook_callbacks_before, $hook_callbacks_after );
+		$unexpected_hook_differences = array_values( array_filter( $hook_callback_differences, array( self::class, 'unexpected_wp_query_hook_callback_difference' ) ) );
 		$unexpected_global_mismatches = array_values( array_diff( $global_mismatches, self::wp_query_allowed_global_mismatches() ) );
 
 		return array(
@@ -3069,9 +3077,12 @@ final class QuerySurface {
 			'postIds'                    => self::post_ids_from_results( $posts ),
 			'queryVars'                  => $query->query_vars,
 			'flags'                      => self::wp_query_summary( $query )['flags'],
-			'globalsUnchanged'           => array() === $unexpected_global_mismatches,
+			'globalsUnchanged'           => array() === $unexpected_global_mismatches && array() === $unexpected_hook_differences,
 			'globalMismatches'           => $global_mismatches,
 			'unexpectedGlobalMismatches' => $unexpected_global_mismatches,
+			'hookCallbacksUnchanged'     => $hook_callbacks_unchanged,
+			'hookCallbackDifferences'    => $hook_callback_differences,
+			'unexpectedHookDifferences'  => $unexpected_hook_differences,
 			'globalSnapshot'             => $global_snapshot,
 		);
 	}
@@ -4456,11 +4467,131 @@ final class QuerySurface {
 	private static function wp_query_allowed_global_mismatches(): array {
 		return array(
 			'current_user:exists',
+			'wp_filter:value',
 			'wp_actions:value',
 			'wp_filters:value',
 			'wp_post_types:exists',
 			'wp_the_query:exists',
 		);
+	}
+
+	private static function wp_filter_callback_snapshot(): array {
+		if ( ! isset( $GLOBALS['wp_filter'] ) || ! is_array( $GLOBALS['wp_filter'] ) ) {
+			return array();
+		}
+
+		$snapshot = array();
+		foreach ( $GLOBALS['wp_filter'] as $hook => $hook_value ) {
+			if ( is_object( $hook_value ) && isset( $hook_value->callbacks ) ) {
+				$callbacks = $hook_value->callbacks;
+			} elseif ( is_array( $hook_value ) ) {
+				$callbacks = $hook_value;
+			} else {
+				$snapshot[ (string) $hook ] = array(
+					'type' => is_object( $hook_value ) ? get_class( $hook_value ) : gettype( $hook_value ),
+				);
+				continue;
+			}
+
+			$snapshot[ (string) $hook ] = self::normalize_hook_callback_snapshot( $callbacks );
+		}
+
+		ksort( $snapshot, SORT_STRING );
+
+		return $snapshot;
+	}
+
+	private static function normalize_hook_callback_snapshot( array $callbacks ): array {
+		$normalized = array();
+		ksort( $callbacks, SORT_NUMERIC );
+
+		foreach ( $callbacks as $priority => $entries ) {
+			if ( ! is_array( $entries ) ) {
+				$normalized[ (string) $priority ] = array(
+					'type' => gettype( $entries ),
+				);
+				continue;
+			}
+
+			ksort( $entries, SORT_STRING );
+			foreach ( $entries as $id => $entry ) {
+				$callback = is_array( $entry ) && array_key_exists( 'function', $entry ) ? $entry['function'] : $entry;
+				$normalized[ (string) $priority ][ (string) $id ] = array(
+					'function'      => self::callback_snapshot_id( $callback ),
+					'accepted_args' => is_array( $entry ) && array_key_exists( 'accepted_args', $entry ) ? (int) $entry['accepted_args'] : null,
+				);
+			}
+		}
+
+		return $normalized;
+	}
+
+	private static function hook_callback_snapshot_differences( array $before, array $after ): array {
+		$differences = array();
+		$hooks       = array_values( array_unique( array_merge( array_keys( $before ), array_keys( $after ) ) ) );
+		sort( $hooks, SORT_STRING );
+
+		foreach ( $hooks as $hook ) {
+			$exists_before = array_key_exists( $hook, $before );
+			$exists_after  = array_key_exists( $hook, $after );
+
+			if ( ! $exists_before || ! $exists_after ) {
+				$differences[] = array(
+					'hook'   => $hook,
+					'before' => $exists_before ? 'present' : 'missing',
+					'after'  => $exists_after ? 'present' : 'missing',
+				);
+				continue;
+			}
+
+			if ( $before[ $hook ] !== $after[ $hook ] ) {
+				$differences[] = array(
+					'hook'   => $hook,
+					'before' => self::describe_value( $before[ $hook ] ),
+					'after'  => self::describe_value( $after[ $hook ] ),
+				);
+			}
+		}
+
+		return array_slice( $differences, 0, 8 );
+	}
+
+	private static function unexpected_wp_query_hook_callback_difference( array $difference ): bool {
+		if (
+			in_array( $difference['hook'] ?? '', array( 'content_filtered_save_pre', 'content_save_pre' ), true )
+			&& 'missing' === ( $difference['before'] ?? null )
+			&& 'present' === ( $difference['after'] ?? null )
+		) {
+			return false;
+		}
+
+		return true;
+	}
+
+	private static function callback_snapshot_id( $callback ): string {
+		if ( is_string( $callback ) ) {
+			return 'function:' . $callback;
+		}
+
+		if ( $callback instanceof \Closure ) {
+			return 'closure:' . spl_object_id( $callback );
+		}
+
+		if ( is_array( $callback ) && 2 === count( $callback ) ) {
+			$target = $callback[0];
+			$method = (string) $callback[1];
+			if ( is_object( $target ) ) {
+				return 'method:' . get_class( $target ) . '#' . spl_object_id( $target ) . '::' . $method;
+			}
+
+			return 'static:' . (string) $target . '::' . $method;
+		}
+
+		if ( is_object( $callback ) ) {
+			return 'object:' . get_class( $callback ) . '#' . spl_object_id( $callback );
+		}
+
+		return gettype( $callback );
 	}
 
 	private static function user_query_defaults_present( array $query_vars ): bool {

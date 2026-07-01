@@ -205,7 +205,8 @@ database, network requests, or a configured site.
   duplicate and invalid-input errors, sanitizer agreement, monotonic IDs,
   metadata cache invalidation, post-to-term relationship field modes, helper
   caches, relationship hook arguments, status-transition hook/cache/default
-  side-effect branches, post and attachment count/MIME helper contracts,
+  side-effect branches, direct `set_post_type()` row mutation and cache cleanup,
+  post and attachment count/MIME helper contracts,
   featured-image helper lifecycle contracts, post-delete cleanup, cache/count
   refresh behavior, and per-iteration state restoration.
 - `comments`: comment filtering, sanitizer agreement, max-length boundaries,
@@ -625,7 +626,8 @@ database, network requests, or a configured site.
   relevance ranking, wpdb stub status-OR branch handling,
   cache-key/cache-hit determinism, `WP_User_Query` field/order/search/role/
   capability/has-published-post SQL-shape oracles and hook mutation locality,
-  user/comment pre-query short-circuits, and deterministic global restoration.
+  user/comment pre-query short-circuits, narrow WP_Query hook-callback
+  difference accounting, and deterministic global restoration.
 - `query-loop`: no-DB `WP_Query` execution and loop-state coverage through
   `posts_pre_query` fixtures, including loop wrapper delegation,
   setup/reset postdata globals, nested secondary-query reset and conditional
