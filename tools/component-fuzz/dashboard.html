@@ -590,7 +590,7 @@
 				<tr>
 					<td><code>auth-flow</code></td>
 					<td><span class="status good">reviewed validation passed</span></td>
-					<td>Scoped component worktree <code>component-fuzz-auth-login-form</code>; builds on public logout lifecycle coverage reviewed by Pauli the 2nd; direct login-form rendering gap reviewed by Lagrange the 2nd.</td>
+					<td>Scoped component worktree <code>component-fuzz-auth-login-form</code>; builds on public logout lifecycle coverage reviewed by Pauli the 2nd; direct login-form rendering coverage through <code>5a6cad2fcd</code> reviewed by Lagrange the 2nd.</td>
 					<td>Latest focused runs: seeds 1, 224, and 57123 over 25 iterations each passed 300 checks; adjacent <code>auth-flow,account-security,security,identity,request-lifecycle</code> smoke passed 240 checks; adjacent <code>auth-flow,rest-application-passwords,rest,rest-controllers,rest-object-controllers</code> smoke passed 285 checks; bootstrap smoke passed; latest broad run: 4777 passed, 1 skipped, 0 failed.</td>
 					<td>Synthetic user rows, authentication filters/password paths, direct <code>wp_login_form()</code> rendering/filter/escaping contracts, echo/getter parity, generated required/remember field options, HTTPS default redirect derivation, sign-on and clear-auth-cookie short-circuits, public <code>wp_logout()</code> lifecycle composition, current-session destruction with sibling preservation, stale-cookie rehydration guards, generated auth-cookie scheme boundaries and filter payloads, auth-cookie validation hooks, session lifecycle, and current-user/cookie restoration.</td>
 				</tr>
@@ -1215,6 +1215,12 @@
 				</tr>
 				</thead>
 				<tbody>
+					<tr>
+						<td><code>5a6cad2fcd</code></td>
+						<td><code>auth-flow</code></td>
+						<td><code>auth-flow</code> seeds 1, 224, and 57123 over 25 iterations each passed 300 checks; adjacent <code>auth-flow,account-security,security,identity,request-lifecycle</code> smoke passed 240 checks; adjacent <code>auth-flow,rest-application-passwords,rest,rest-controllers,rest-object-controllers</code> smoke passed 285 checks; bootstrap smoke passed after adding direct <code>wp_login_form()</code> rendering, filter, escaping, echo/getter parity, default redirect, required-field, and remember-me coverage.</td>
+						<td>4777 passed, 1 skipped, 0 failed at 1 iteration after direct <code>wp_login_form()</code> rendering coverage.</td>
+					</tr>
 					<tr>
 						<td><code>de1da7b556</code></td>
 						<td><code>cron</code></td>
