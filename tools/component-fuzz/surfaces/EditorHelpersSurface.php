@@ -36,6 +36,7 @@ final class EditorHelpersSurface {
 			$rows[] = self::check_enqueue_scripts( $ctx->fork( 'enqueue-scripts' ), $case );
 			$rows[] = self::check_editor_markup( $ctx->fork( 'editor-markup' ), $case );
 			$rows[] = self::check_mce_translation( $ctx->fork( 'mce-translation' ), $case );
+			$rows[] = self::check_tinymce_inline_scripts( $ctx->fork( 'tinymce-inline-scripts' ), $case );
 			$rows[] = self::check_media_view_styles( $ctx->fork( 'media-view-styles' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
@@ -92,6 +93,7 @@ final class EditorHelpersSurface {
 				'wp_scripts',
 				'wp_style_is',
 				'wp_styles',
+				'wp_tinymce_inline_scripts',
 				'wpview_media_sandbox_styles',
 			) as $function
 		) {
@@ -757,6 +759,199 @@ final class EditorHelpersSurface {
 			'editor-helpers.mce-translation.json-and-script-snippet',
 			$failures,
 			array( 'marker' => $case['translationMarker'] )
+		);
+	}
+
+	private static function check_tinymce_inline_scripts( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures = array();
+		$events   = array(
+			'editor_settings'       => array(),
+			'tiny_mce_plugins'      => array(),
+			'disable_captions'      => 0,
+			'mce_buttons'           => array(),
+			'mce_buttons_2'         => array(),
+			'mce_buttons_3'         => array(),
+			'mce_buttons_4'         => array(),
+			'mce_external_plugins'  => array(),
+			'tiny_mce_before_init'  => array(),
+		);
+		$inline_plugin       = 'cf_inline_plugin_' . self::safe_key( $case['marker'], 'plugin' );
+		$inline_button       = 'cf_inline_button_' . self::safe_key( $case['button1'], 'button' );
+		$inline_button_two   = 'cf_inline_button2_' . self::safe_key( $case['button2'], 'button2' );
+		$inline_button_three = 'cf_inline_button3_' . self::safe_key( $case['button4'], 'button3' );
+		$inline_button_four  = 'cf_inline_button4_' . self::safe_key( $case['teenyButton'], 'button4' );
+		$external_plugin     = 'cf_inline_external_' . self::safe_key( $case['externalPlugin'], 'external' );
+		$external_url        = 'https://example.test/classic-block/' . rawurlencode( $case['marker'] ) . '/plugin.js';
+		$plain_setting       = 'plain-' . self::safe_key( $case['marker'], 'plain' );
+		$json_setting        = '{"marker":"' . self::safe_key( $case['marker'], 'json' ) . '"}';
+		$array_setting       = '["' . self::safe_key( $case['marker'], 'array' ) . '"]';
+		$function_setting    = 'function () { return "' . self::safe_key( $case['marker'], 'fn' ) . '"; }';
+
+		$settings_filter = static function ( array $settings, string $editor_id ) use ( &$events, $plain_setting, $json_setting, $array_setting, $function_setting ): array {
+			$events['editor_settings'][] = array(
+				'editorId' => $editor_id,
+				'input'    => $settings,
+			);
+			$settings['tinymce'] = array(
+				'component_plain'    => $plain_setting,
+				'component_json'     => $json_setting,
+				'component_array'    => $array_setting,
+				'component_function' => $function_setting,
+				'wp_autoresize_on'   => true,
+			);
+			return $settings;
+		};
+		$plugins_filter = static function ( array $plugins, string $editor_id ) use ( &$events, $inline_plugin ): array {
+			$events['tiny_mce_plugins'][] = $editor_id;
+			$plugins[]                    = $inline_plugin;
+			$plugins[]                    = $inline_plugin;
+			return $plugins;
+		};
+		$disable_filter = static function () use ( &$events ): bool {
+			++$events['disable_captions'];
+			return true;
+		};
+		$buttons_filter = static function ( array $buttons, string $editor_id ) use ( &$events, $inline_button ): array {
+			$events['mce_buttons'][] = $editor_id;
+			$buttons[]               = $inline_button;
+			return $buttons;
+		};
+		$buttons_two_filter = static function ( array $buttons, string $editor_id ) use ( &$events, $inline_button_two ): array {
+			$events['mce_buttons_2'][] = $editor_id;
+			$buttons[]                 = $inline_button_two;
+			return $buttons;
+		};
+		$buttons_three_filter = static function ( array $buttons, string $editor_id ) use ( &$events, $inline_button_three ): array {
+			$events['mce_buttons_3'][] = $editor_id;
+			$buttons[]                 = $inline_button_three;
+			return $buttons;
+		};
+		$buttons_four_filter = static function ( array $buttons, string $editor_id ) use ( &$events, $inline_button_four ): array {
+			$events['mce_buttons_4'][] = $editor_id;
+			$buttons[]                 = $inline_button_four;
+			return $buttons;
+		};
+		$external_filter = static function ( array $plugins, string $editor_id ) use ( &$events, $external_plugin, $external_url ): array {
+			$events['mce_external_plugins'][] = $editor_id;
+			$plugins[ $external_plugin ]      = $external_url;
+			return $plugins;
+		};
+		$before_filter = static function ( array $settings, string $editor_id ) use ( &$events, $case ): array {
+			$events['tiny_mce_before_init'][] = array(
+				'editorId' => $editor_id,
+				'settings' => $settings,
+			);
+			$settings['component_before_marker'] = $case['marker'];
+			return $settings;
+		};
+
+		self::reset_scripts_and_styles();
+		\wp_scripts()->add( 'wp-block-library', false );
+
+		\add_filter( 'wp_editor_settings', $settings_filter, 10, 2 );
+		\add_filter( 'tiny_mce_plugins', $plugins_filter, 10, 2 );
+		\add_filter( 'disable_captions', $disable_filter );
+		\add_filter( 'mce_buttons', $buttons_filter, 10, 2 );
+		\add_filter( 'mce_buttons_2', $buttons_two_filter, 10, 2 );
+		\add_filter( 'mce_buttons_3', $buttons_three_filter, 10, 2 );
+		\add_filter( 'mce_buttons_4', $buttons_four_filter, 10, 2 );
+		\add_filter( 'mce_external_plugins', $external_filter, 10, 2 );
+		\add_filter( 'tiny_mce_before_init', $before_filter, 10, 2 );
+		try {
+			\wp_tinymce_inline_scripts();
+			$before_data = \wp_scripts()->get_data( 'wp-block-library', 'before' );
+		} finally {
+			\remove_filter( 'tiny_mce_before_init', $before_filter, 10 );
+			\remove_filter( 'mce_external_plugins', $external_filter, 10 );
+			\remove_filter( 'mce_buttons_4', $buttons_four_filter, 10 );
+			\remove_filter( 'mce_buttons_3', $buttons_three_filter, 10 );
+			\remove_filter( 'mce_buttons_2', $buttons_two_filter, 10 );
+			\remove_filter( 'mce_buttons', $buttons_filter, 10 );
+			\remove_filter( 'disable_captions', $disable_filter );
+			\remove_filter( 'tiny_mce_plugins', $plugins_filter, 10 );
+			\remove_filter( 'wp_editor_settings', $settings_filter, 10 );
+		}
+
+		$inline_scripts = is_array( $before_data ) ? array_values( array_filter( $before_data, 'is_string' ) ) : array();
+		$script         = implode( "\n", $inline_scripts );
+		$captured       = $events['tiny_mce_before_init'][0]['settings'] ?? array();
+
+		self::record_if_false(
+			$failures,
+			( $events['editor_settings'][0]['editorId'] ?? null ) === 'classic-block'
+				&& array( 'tinymce' => true ) === ( $events['editor_settings'][0]['input'] ?? null )
+				&& $events['tiny_mce_plugins'] === array( 'classic-block' )
+				&& 1 === $events['disable_captions']
+				&& $events['mce_buttons'] === array( 'classic-block' )
+				&& $events['mce_buttons_2'] === array( 'classic-block' )
+				&& $events['mce_buttons_3'] === array( 'classic-block' )
+				&& $events['mce_buttons_4'] === array( 'classic-block' )
+				&& $events['mce_external_plugins'] === array( 'classic-block' )
+				&& array( 'classic-block' ) === array_column( $events['tiny_mce_before_init'], 'editorId' ),
+			'wp_tinymce_inline_scripts applies classic-block editor filters exactly once and in the expected branch',
+			array( 'events' => self::preview( $events ) )
+		);
+		self::record_if_false(
+			$failures,
+			isset( $captured['plugins'], $captured['toolbar1'], $captured['toolbar2'], $captured['toolbar3'], $captured['toolbar4'], $captured['external_plugins'] )
+				&& 1 === substr_count( ',' . $captured['plugins'] . ',', ',' . $inline_plugin . ',' )
+				&& str_contains( $captured['toolbar1'], $inline_button )
+				&& str_contains( $captured['toolbar2'], $inline_button_two )
+				&& str_contains( $captured['toolbar3'], $inline_button_three )
+				&& str_contains( $captured['toolbar4'], $inline_button_four )
+				&& true === ( $captured['classic_block_editor'] ?? null )
+				&& true === ( $captured['wpeditimage_disable_captions'] ?? null )
+				&& true === ( $captured['wp_autoresize_on'] ?? null )
+				&& $plain_setting === ( $captured['component_plain'] ?? null )
+				&& $json_setting === ( $captured['component_json'] ?? null )
+				&& $array_setting === ( $captured['component_array'] ?? null )
+				&& $function_setting === ( $captured['component_function'] ?? null )
+				&& $external_url === ( json_decode( $captured['external_plugins'] ?? '[]', true )[ $external_plugin ] ?? null ),
+			'TinyMCE inline settings merge generated editor/plugin/button/caption/external-plugin values before serialization',
+			array( 'captured' => self::preview( $captured ) )
+		);
+		self::record_if_false(
+			$failures,
+			1 === count( $inline_scripts )
+				&& str_contains( $script, 'window.wpEditorL10n' )
+				&& str_contains( $script, 'baseURL: "http://example.test/wp-includes/js/tinymce"' )
+				&& str_contains( $script, 'component_plain:"' . $plain_setting . '"' )
+				&& str_contains( $script, 'component_json:' . $json_setting )
+				&& str_contains( $script, 'component_array:' . $array_setting )
+				&& str_contains( $script, 'component_function:' . $function_setting )
+				&& str_contains( $script, 'wp_autoresize_on:true' )
+				&& str_contains( $script, 'wpeditimage_disable_captions:true' )
+				&& str_contains( $script, 'component_before_marker:"' . $case['marker'] . '"' )
+				&& ! str_contains( $script, '<script' ),
+			'wp_tinymce_inline_scripts attaches a single before-script with expected raw, boolean, and string serialization',
+			array(
+				'inlineCount' => count( $inline_scripts ),
+				'preview'     => self::preview( $script ),
+			)
+		);
+		self::record_if_false(
+			$failures,
+			false === \has_filter( 'wp_editor_settings', $settings_filter )
+				&& false === \has_filter( 'tiny_mce_plugins', $plugins_filter )
+				&& false === \has_filter( 'disable_captions', $disable_filter )
+				&& false === \has_filter( 'mce_buttons', $buttons_filter )
+				&& false === \has_filter( 'mce_buttons_2', $buttons_two_filter )
+				&& false === \has_filter( 'mce_buttons_3', $buttons_three_filter )
+				&& false === \has_filter( 'mce_buttons_4', $buttons_four_filter )
+				&& false === \has_filter( 'mce_external_plugins', $external_filter )
+				&& false === \has_filter( 'tiny_mce_before_init', $before_filter ),
+			'wp_tinymce_inline_scripts coverage removes all temporary classic-block filters',
+			array( 'marker' => $case['marker'] )
+		);
+
+		return self::row(
+			$ctx,
+			'editor-helpers.tinymce-inline-scripts.classic-block-filter-merge',
+			$failures,
+			array(
+				'marker'     => $case['marker'],
+				'scriptHash' => sha1( $script ),
+			)
 		);
 	}
 
