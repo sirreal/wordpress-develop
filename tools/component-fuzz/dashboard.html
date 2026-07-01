@@ -605,7 +605,7 @@
 				<tr>
 					<td><code>admin-ajax</code></td>
 					<td><span class="status good">local validation passed</span></td>
-					<td>Scoped component worktree <code>component-fuzz-admin-ajax-find-posts</code>; Find Posts modal and AJAX search coverage validated before merge; earlier worker Ohm and reviewer Plato findings fixed through <code>259d6bd90e</code>.</td>
+					<td>Find Posts modal and AJAX search coverage through <code>6070f5e381</code>; earlier worker Ohm and reviewer Plato findings fixed through <code>259d6bd90e</code>.</td>
 					<td>Latest focused runs: seed 224 passed 11 checks, seeds 1 and 224 over 25 iterations each passed 275 checks, adjacent <code>admin-ajax,admin-media-chrome,admin-workflows,admin-screen,content,post-types,query</code> smoke passed 711 checks, and latest broad run passed 4725 checks with 4 skips.</td>
 					<td>Captured <code>wp_die()</code> handlers, JSON/XML response helpers, nonce/capability failures, safe AJAX handlers, Find Posts modal output and <code>wp_ajax_find_posts()</code> JSON query branches, attachment query/save workflows, heartbeat nonce/hook/server-time branches, compression-test capability/body branches, superglobal and output-buffer restoration.</td>
 				</tr>
@@ -1168,7 +1168,7 @@
 				</thead>
 				<tbody>
 					<tr>
-						<td><code>component-fuzz-admin-ajax-find-posts</code></td>
+						<td><code>6070f5e381</code></td>
 						<td><code>admin-ajax</code></td>
 						<td><code>admin-ajax</code> focused seed 224 passed 11 checks with no skips, seeds 1 and 224 over 25 iterations each passed 275 checks, and adjacent <code>admin-ajax,admin-media-chrome,admin-workflows,admin-screen,content,post-types,query</code> smoke passed 711 checks after adding Find Posts modal output, valid/empty/invalid AJAX search branches, exact public post-type query oracles, escaped table rows, nonce observability, and scoped state cleanup.</td>
 						<td>4725 passed, 4 skipped, 0 failed at 1 iteration after Find Posts modal and AJAX search coverage.</td>
