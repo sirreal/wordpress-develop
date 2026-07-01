@@ -37,6 +37,7 @@ final class CommentsSurface {
 			$rows = array_merge( $rows, self::check_comment_cookies( $ctx, $cases ) );
 			$rows = array_merge( $rows, self::check_comment_permalink_pagination( $ctx ) );
 			$rows = array_merge( $rows, self::check_comment_reply_links( $ctx ) );
+			$rows = array_merge( $rows, self::check_comment_form_rendering( $ctx->fork( 'comment-form' ) ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
 				'comments.surface-no-throw',
@@ -54,7 +55,10 @@ final class CommentsSurface {
 		foreach (
 			array(
 				'add_filter',
+				'add_action',
 				'remove_all_filters',
+				'remove_action',
+				'remove_filter',
 				'wp_filter_comment',
 				'separate_comments',
 				'sanitize_comment_cookies',
@@ -77,20 +81,39 @@ final class CommentsSurface {
 				'get_comment_link',
 				'get_comment_reply_link',
 				'comment_reply_link',
+				'comment_form',
+				'comment_form_title',
+				'comment_id_fields',
+				'comments_open',
 				'get_post_reply_link',
 				'post_reply_link',
 				'get_cancel_comment_reply_link',
 				'cancel_comment_reply_link',
+				'get_comment_id_fields',
 				'get_page_of_comment',
 				'get_permalink',
+				'get_post',
+				'current_theme_supports',
+				'get_edit_user_link',
 				'has_filter',
+				'has_action',
+				'is_user_logged_in',
 				'is_wp_error',
 				'remove_query_arg',
+				'site_url',
+				'clean_user_cache',
+				'update_user_caches',
+				'wp_get_current_commenter',
+				'wp_get_current_user',
 				'wp_login_url',
+				'wp_logout_url',
 				'wp_cache_delete',
 				'wp_cache_set',
 				'wp_parse_url',
+				'wp_required_field_indicator',
+				'wp_required_field_message',
 				'wp_trim_words',
+				'wp_set_current_user',
 			) as $function
 		) {
 			if ( ! function_exists( $function ) ) {
@@ -98,7 +121,7 @@ final class CommentsSurface {
 			}
 		}
 
-		foreach ( array( 'WP_Comment', 'WP_Comment_Query', 'WP_Post', 'WP_Rewrite' ) as $class ) {
+		foreach ( array( 'WP_Comment', 'WP_Comment_Query', 'WP_Post', 'WP_Rewrite', 'WP_User' ) as $class ) {
 			if ( ! class_exists( $class ) ) {
 				$missing[] = "class {$class}";
 			}
@@ -1276,6 +1299,517 @@ final class CommentsSurface {
 		);
 	}
 
+	private static function check_comment_form_rendering( \ComponentFuzz\FuzzContext $ctx ): array {
+		$base_id       = 930000 + ( $ctx->iteration() * 100 );
+		$post          = self::permalink_post( $base_id + 1, 'Comment Form Fixture ' . $ctx->iteration() );
+		$closed_post   = self::permalink_post( $base_id + 2, 'Closed Comment Form Fixture ' . $ctx->iteration() );
+		$reply_comment = self::permalink_comment( $base_id + 3, $post->ID, 'comment', 0, '2026-06-15 12:00:00' );
+		$closed_post->comment_status = 'closed';
+
+		$fixture = array(
+			'posts'    => array( $post, $closed_post ),
+			'comments' => array(
+				(int) $reply_comment->comment_ID => $reply_comment,
+			),
+			'aliases'  => array(),
+		);
+
+		$slug      = strtolower( $ctx->identifier( 5, 10 ) );
+		$user_id   = $base_id + 44;
+		$user      = self::fake_form_user(
+			array(
+				'ID'                  => $user_id,
+				'user_login'          => 'cfz_form_' . $slug,
+				'user_pass'           => '',
+				'user_nicename'       => 'cfz-form-' . $slug,
+				'user_email'          => 'cfz-form-' . $slug . '@example.test',
+				'user_url'            => 'https://example.test/users/' . $slug,
+				'user_registered'     => '2026-06-15 12:00:00',
+				'user_activation_key' => '',
+				'user_status'         => '0',
+				'display_name'        => 'Form User ' . $slug,
+			)
+		);
+		$options   = array(
+			'comment_registration'          => 0,
+			'comments_per_page'             => 2,
+			'default_comments_page'         => 'newest',
+			'home'                          => 'http://example.test',
+			'page_comments'                 => 0,
+			'permalink_structure'           => '',
+			'require_name_email'            => 1,
+			'show_comments_cookies_opt_in'  => 1,
+			'siteurl'                       => 'http://example.test',
+			'thread_comments'               => 1,
+			'thread_comments_depth'         => 5,
+		);
+		$commenter = array(
+			'comment_author'       => 'Form Author ' . $slug,
+			'comment_author_email' => 'form-author-' . $slug . '@example.test',
+			'comment_author_url'   => 'https://example.test/commenter/' . $slug,
+		);
+		$scenario  = 'setup';
+		$events    = array(
+			'after'               => array(),
+			'after_fields'        => array(),
+			'before'              => array(),
+			'before_fields'       => array(),
+			'closed'              => array(),
+			'comment_form'        => array(),
+			'commenter'           => array(),
+			'default_fields'      => array(),
+			'defaults'            => array(),
+			'field'               => array(),
+			'fields'              => array(),
+			'id_fields'           => array(),
+			'logged_in'           => array(),
+			'logged_in_after'     => array(),
+			'must_log_in_after'   => array(),
+			'submit_button'       => array(),
+			'submit_field'        => array(),
+			'top'                 => array(),
+		);
+		$snapshot  = self::snapshot_globals();
+
+		$option_filters = array();
+		foreach ( array_keys( $options ) as $option ) {
+			$option_filters[ $option ] = static function () use ( &$options, $option ) {
+				return $options[ $option ];
+			};
+		}
+
+		$commenter_filter = static function ( array $data ) use ( &$events, &$commenter, &$scenario ): array {
+			$events['commenter'][] = array(
+				'scenario' => $scenario,
+				'input'    => $data,
+			);
+			return $commenter;
+		};
+		$default_fields_filter = static function ( array $fields ) use ( &$events, &$scenario, $slug ): array {
+			$events['default_fields'][] = array(
+				'scenario' => $scenario,
+				'keys'     => array_keys( $fields ),
+			);
+			$fields['cfz_extra'] = '<p class="comment-form-cfz-extra"><input id="cfz-extra-' . esc_attr( $slug ) . '" name="cfz_extra" type="text" value="' . esc_attr( $scenario ) . '" /></p>';
+			return $fields;
+		};
+		$defaults_filter = static function ( array $defaults ) use ( &$events, &$scenario ): array {
+			$events['defaults'][] = array(
+				'scenario' => $scenario,
+				'format'   => $defaults['format'] ?? null,
+				'fields'   => array_keys( (array) ( $defaults['fields'] ?? array() ) ),
+			);
+			return $defaults;
+		};
+		$fields_filter = static function ( array $fields ) use ( &$events, &$scenario ): array {
+			$events['fields'][] = array(
+				'scenario' => $scenario,
+				'keys'     => array_keys( $fields ),
+			);
+			return $fields;
+		};
+		$field_filters = array();
+		foreach ( array( 'author', 'email', 'url', 'cookies', 'comment', 'cfz_extra' ) as $field_name ) {
+			$field_filters[ $field_name ] = static function ( string $field ) use ( &$events, &$scenario, $field_name ): string {
+				$events['field'][] = array(
+					'scenario' => $scenario,
+					'name'     => $field_name,
+				);
+				return $field . '<span class="cfz-field-' . esc_attr( $field_name ) . '" data-scenario="' . esc_attr( $scenario ) . '"></span>';
+			};
+		}
+		$submit_button_filter = static function ( string $button, array $args ) use ( &$events, &$scenario ): string {
+			$events['submit_button'][] = array(
+				'scenario' => $scenario,
+				'id'       => $args['id_submit'] ?? null,
+			);
+			return str_replace( '<input ', '<input data-cfz-submit="' . esc_attr( $scenario ) . '" ', $button );
+		};
+		$submit_field_filter = static function ( string $field, array $args ) use ( &$events, &$scenario ): string {
+			$events['submit_field'][] = array(
+				'scenario' => $scenario,
+				'id'       => $args['id_form'] ?? null,
+			);
+			return '<div class="cfz-submit-field" data-scenario="' . esc_attr( $scenario ) . '">' . $field . '</div>';
+		};
+		$logged_in_filter = static function ( string $html, array $filtered_commenter, string $identity ) use ( &$events, &$scenario, $slug ): string {
+			$events['logged_in'][] = array(
+				'scenario' => $scenario,
+				'identity' => $identity,
+				'email'    => $filtered_commenter['comment_author_email'] ?? null,
+			);
+			return '<p class="logged-in-as cfz-logged-in">Logged in marker ' . esc_html( $identity ) . ' ' . esc_html( $slug ) . '</p>';
+		};
+		$id_fields_filter = static function ( string $fields, int $post_id, int $reply_to_id ) use ( &$events, &$scenario ): string {
+			$events['id_fields'][] = array(
+				'scenario'  => $scenario,
+				'postId'    => $post_id,
+				'replyToId' => $reply_to_id,
+			);
+			return $fields;
+		};
+		$action_callbacks = array();
+		foreach (
+			array(
+				'comment_form_after'             => 'after',
+				'comment_form_after_fields'      => 'after_fields',
+				'comment_form_before'            => 'before',
+				'comment_form_before_fields'     => 'before_fields',
+				'comment_form_comments_closed'   => 'closed',
+				'comment_form'                   => 'comment_form',
+				'comment_form_logged_in_after'   => 'logged_in_after',
+				'comment_form_must_log_in_after' => 'must_log_in_after',
+				'comment_form_top'               => 'top',
+			) as $hook => $event_key
+		) {
+			$action_callbacks[ $hook ] = static function ( ...$args ) use ( &$events, &$scenario, $event_key ): void {
+				$events[ $event_key ][] = array(
+					'scenario' => $scenario,
+					'args'     => array_map( array( self::class, 'describe_value' ), $args ),
+				);
+			};
+		}
+
+		$cookie_action_added = false;
+		$closed_call         = array( 'threw' => true, 'output' => '', 'throwable' => array( 'message' => 'not-run' ) );
+		$title_plain_call    = $closed_call;
+		$title_reply_call    = $closed_call;
+		$html5_call          = $closed_call;
+		$xhtml_call          = $closed_call;
+		$must_login_call     = $closed_call;
+		$logged_in_call      = $closed_call;
+		$id_fields           = '';
+		$id_fields_echo      = '';
+
+		try {
+			self::cache_comment_permalink_fixture( $fixture );
+			self::force_query_style_comment_links();
+			\update_user_caches( $user );
+
+			$GLOBALS['post']        = $post;
+			$_SERVER['HTTP_HOST']   = 'example.test';
+			$_SERVER['REQUEST_URI'] = '/comments/form/?replytocom=' . rawurlencode( (string) $reply_comment->comment_ID ) . '&keep=1';
+			$_COOKIE                = array();
+			$_GET                   = array(
+				'keep'       => '1',
+				'replytocom' => (string) $reply_comment->comment_ID,
+			);
+
+			foreach ( $option_filters as $option => $filter ) {
+				\add_filter( 'pre_option_' . $option, $filter, 10, 3 );
+			}
+			\add_filter( 'wp_get_current_commenter', $commenter_filter, 10, 1 );
+			\add_filter( 'comment_form_default_fields', $default_fields_filter, 10, 1 );
+			\add_filter( 'comment_form_defaults', $defaults_filter, 10, 1 );
+			\add_filter( 'comment_form_fields', $fields_filter, 10, 1 );
+			foreach ( $field_filters as $field_name => $filter ) {
+				\add_filter( 'comment_form_field_' . $field_name, $filter, 10, 1 );
+			}
+			\add_filter( 'comment_form_submit_button', $submit_button_filter, 10, 2 );
+			\add_filter( 'comment_form_submit_field', $submit_field_filter, 10, 2 );
+			\add_filter( 'comment_form_logged_in', $logged_in_filter, 10, 3 );
+			\add_filter( 'comment_id_fields', $id_fields_filter, 10, 3 );
+			foreach ( $action_callbacks as $hook => $callback ) {
+				\add_action( $hook, $callback, 10, 99 );
+			}
+			if ( function_exists( 'wp_set_comment_cookies' ) && false === \has_filter( 'set_comment_cookies', 'wp_set_comment_cookies' ) ) {
+				\add_action( 'set_comment_cookies', 'wp_set_comment_cookies', 10, 3 );
+				$cookie_action_added = true;
+			}
+
+			$base_args = array(
+				'action'              => 'https://example.test/wp-comments-post.php?cfz=' . $slug,
+				'class_container'     => 'cfz-respond-' . $slug,
+				'class_form'          => 'cfz-comment-form',
+				'class_submit'        => 'cfz-submit',
+				'id_form'             => 'cfz-commentform',
+				'id_submit'           => 'cfz-submit',
+				'label_submit'        => 'Submit ' . $slug,
+				'name_submit'         => 'cfz-submit-name',
+				'novalidate'          => true,
+				'title_reply'         => 'Leave marker ' . $slug,
+				'title_reply_to'      => 'Reply marker to %s',
+				'title_reply_before'  => '<h3 id="cfz-reply-title" class="cfz-reply-title">',
+				'title_reply_after'   => '</h3>',
+				'cancel_reply_before' => ' <small class="cfz-cancel">',
+				'cancel_reply_after'  => '</small>',
+				'cancel_reply_link'   => 'Cancel marker ' . $slug,
+			);
+			$capture_form = static function ( array $args, \WP_Post $target_post ): array {
+				return self::capture_output(
+					static function () use ( $args, $target_post ): void {
+						self::with_non_mysql_wpdb(
+							static function () use ( $args, $target_post ): void {
+								\comment_form( $args, $target_post );
+							}
+						);
+					}
+				);
+			};
+
+			$scenario   = 'closed';
+			$closed_call = $capture_form( $base_args, $closed_post );
+
+			$scenario = 'title-plain';
+			unset( $_GET['replytocom'] );
+			$title_plain_call = self::capture_output(
+				static function () use ( $slug, $post ): void {
+					self::with_non_mysql_wpdb(
+						static function () use ( $slug, $post ): void {
+							\comment_form_title( 'Plain marker ' . $slug, 'Reply marker to %s', true, $post );
+						}
+					);
+				}
+			);
+
+			$scenario = 'title-reply';
+			$_GET['replytocom'] = (string) $reply_comment->comment_ID;
+			$title_reply_call   = self::capture_output(
+				static function () use ( $slug, $post ): void {
+					self::with_non_mysql_wpdb(
+						static function () use ( $slug, $post ): void {
+							\comment_form_title( 'Plain marker ' . $slug, 'Reply marker to %s', true, $post );
+						}
+					);
+				}
+			);
+			$id_fields          = self::with_non_mysql_wpdb( static fn() => \get_comment_id_fields( $post ) );
+			$id_fields_echo     = self::capture_output(
+				static function () use ( $post ): void {
+					self::with_non_mysql_wpdb(
+						static function () use ( $post ): void {
+							\comment_id_fields( $post );
+						}
+					);
+				}
+			);
+
+			$scenario = 'html5';
+			\wp_set_current_user( 0 );
+			$options['comment_registration']         = 0;
+			$options['require_name_email']           = 1;
+			$options['show_comments_cookies_opt_in'] = 1;
+			$_GET['replytocom']                      = (string) $reply_comment->comment_ID;
+			$html5_call = $capture_form(
+				array_merge(
+					$base_args,
+					array(
+						'format'  => 'html5',
+						'id_form' => 'cfz-commentform-html5-' . $slug,
+					)
+				),
+				$post
+			);
+
+			$scenario = 'xhtml';
+			$options['require_name_email']           = 0;
+			$options['show_comments_cookies_opt_in'] = 0;
+			unset( $_GET['replytocom'] );
+			$xhtml_call = $capture_form(
+				array_merge(
+					$base_args,
+					array(
+						'comment_notes_before' => '',
+						'format'               => 'xhtml',
+						'id_form'              => 'cfz-commentform-xhtml-' . $slug,
+					)
+				),
+				$post
+			);
+
+			$scenario = 'must-log-in';
+			$options['comment_registration'] = 1;
+			\wp_set_current_user( 0 );
+			$must_login_call = $capture_form(
+				array_merge(
+					$base_args,
+					array(
+						'format'  => 'html5',
+						'id_form' => 'cfz-commentform-must-' . $slug,
+					)
+				),
+				$post
+			);
+
+			$scenario = 'logged-in';
+			\wp_set_current_user( $user_id );
+			$logged_in_call = $capture_form(
+				array_merge(
+					$base_args,
+					array(
+						'format'  => 'html5',
+						'id_form' => 'cfz-commentform-logged-' . $slug,
+					)
+				),
+				$post
+			);
+		} finally {
+			foreach ( $option_filters as $option => $filter ) {
+				\remove_filter( 'pre_option_' . $option, $filter, 10 );
+			}
+			\remove_filter( 'wp_get_current_commenter', $commenter_filter, 10 );
+			\remove_filter( 'comment_form_default_fields', $default_fields_filter, 10 );
+			\remove_filter( 'comment_form_defaults', $defaults_filter, 10 );
+			\remove_filter( 'comment_form_fields', $fields_filter, 10 );
+			foreach ( $field_filters as $field_name => $filter ) {
+				\remove_filter( 'comment_form_field_' . $field_name, $filter, 10 );
+			}
+			\remove_filter( 'comment_form_submit_button', $submit_button_filter, 10 );
+			\remove_filter( 'comment_form_submit_field', $submit_field_filter, 10 );
+			\remove_filter( 'comment_form_logged_in', $logged_in_filter, 10 );
+			\remove_filter( 'comment_id_fields', $id_fields_filter, 10 );
+			foreach ( $action_callbacks as $hook => $callback ) {
+				\remove_action( $hook, $callback, 10 );
+			}
+			if ( $cookie_action_added ) {
+				\remove_action( 'set_comment_cookies', 'wp_set_comment_cookies', 10 );
+			}
+			\clean_user_cache( $user );
+			self::clear_comment_permalink_fixture_cache( $fixture );
+			self::restore_globals( $snapshot );
+		}
+
+		$html5  = $html5_call['output'] ?? '';
+		$xhtml  = $xhtml_call['output'] ?? '';
+		$must   = $must_login_call['output'] ?? '';
+		$logged = $logged_in_call['output'] ?? '';
+		$title_reply = $title_reply_call['output'] ?? '';
+		$id_echo = $id_fields_echo['output'] ?? '';
+
+		$scenario_seen = static function ( string $event_key, string $expected_scenario ) use ( $events ): bool {
+			return in_array( $expected_scenario, array_column( $events[ $event_key ] ?? array(), 'scenario' ), true );
+		};
+		$field_seen = static function ( string $expected_scenario, string $field_name ) use ( $events ): bool {
+			foreach ( $events['field'] as $event ) {
+				if ( $expected_scenario === ( $event['scenario'] ?? null ) && $field_name === ( $event['name'] ?? null ) ) {
+					return true;
+				}
+			}
+			return false;
+		};
+
+		return array(
+			$ctx->result(
+				'comments.comment-form.closed-post-title-and-hidden-id-contracts',
+				! $closed_call['threw']
+					&& '' === trim( $closed_call['output'] ?? '' )
+					&& $scenario_seen( 'closed', 'closed' )
+					&& ! $title_plain_call['threw']
+					&& 'Plain marker ' . $slug === ( $title_plain_call['output'] ?? '' )
+					&& ! $title_reply_call['threw']
+					&& str_contains( $title_reply, 'Reply marker to <a href="#comment-' . $reply_comment->comment_ID . '">Commenter ' . $reply_comment->comment_ID . '</a>' )
+					&& is_string( $id_fields )
+					&& $id_fields === $id_echo
+					&& str_contains( $id_fields, "name='comment_post_ID' value='" . $post->ID . "'" )
+					&& str_contains( $id_fields, "name='comment_parent' id='comment_parent' value='" . $reply_comment->comment_ID . "'" ),
+				array(
+					'closed'    => self::describe_output_call( $closed_call ),
+					'title'     => self::describe_output_call( $title_reply_call ),
+					'idFields'  => self::describe_value( $id_fields ),
+					'idEvents'  => $events['id_fields'],
+				)
+			),
+			$ctx->result(
+				'comments.comment-form.anonymous-html5-required-cookie-and-filter-contracts',
+				! $html5_call['threw']
+					&& 1 === substr_count( $html5, 'id="respond"' )
+					&& 1 === substr_count( $html5, '<form ' )
+					&& str_contains( $html5, 'action="https://example.test/wp-comments-post.php?cfz=' . $slug . '"' )
+					&& str_contains( $html5, 'id="cfz-commentform-html5-' . $slug . '"' )
+					&& str_contains( $html5, 'class="cfz-comment-form"' )
+					&& str_contains( $html5, 'novalidate' )
+					&& str_contains( $html5, 'name="author" type="text"' )
+					&& str_contains( $html5, 'name="email" type="email"' )
+					&& str_contains( $html5, 'aria-describedby="email-notes"' )
+					&& str_contains( $html5, 'name="url" type="url"' )
+					&& str_contains( $html5, 'name="wp-comment-cookies-consent" type="checkbox" value="yes" checked' )
+					&& str_contains( $html5, 'Reply marker to <a href="#comment-' . $reply_comment->comment_ID . '">Commenter ' . $reply_comment->comment_ID . '</a>' )
+					&& str_contains( $html5, "name='comment_parent' id='comment_parent' value='" . $reply_comment->comment_ID . "'" )
+					&& str_contains( $html5, 'data-cfz-submit="html5"' )
+					&& str_contains( $html5, 'class="cfz-submit-field" data-scenario="html5"' )
+					&& $field_seen( 'html5', 'comment' )
+					&& $field_seen( 'html5', 'author' )
+					&& $field_seen( 'html5', 'email' )
+					&& $field_seen( 'html5', 'url' )
+					&& $field_seen( 'html5', 'cookies' )
+					&& $field_seen( 'html5', 'cfz_extra' )
+					&& $scenario_seen( 'before_fields', 'html5' )
+					&& $scenario_seen( 'after_fields', 'html5' )
+					&& $scenario_seen( 'comment_form', 'html5' )
+					&& ! str_contains( $html5, '<script' ),
+				array(
+					'html5'          => self::describe_output_call( $html5_call ),
+					'fieldEvents'    => $events['field'],
+					'commenterCalls' => $events['commenter'],
+				)
+			),
+			$ctx->result(
+				'comments.comment-form.xhtml-optional-fields-and-email-notes-removal',
+				! $xhtml_call['threw']
+					&& str_contains( $xhtml, 'id="cfz-commentform-xhtml-' . $slug . '"' )
+					&& str_contains( $xhtml, 'name="email" type="text"' )
+					&& str_contains( $xhtml, 'name="url" type="text"' )
+					&& str_contains( $xhtml, 'required="required"' )
+					&& ! str_contains( $xhtml, 'aria-describedby="email-notes"' )
+					&& ! preg_match( '/id="author"[^>]+required/', $xhtml )
+					&& ! preg_match( '/id="email"[^>]+required/', $xhtml )
+					&& ! str_contains( $xhtml, 'wp-comment-cookies-consent' )
+					&& str_contains( $xhtml, 'data-cfz-submit="xhtml"' )
+					&& $field_seen( 'xhtml', 'author' )
+					&& $field_seen( 'xhtml', 'email' )
+					&& $field_seen( 'xhtml', 'url' )
+					&& ! $field_seen( 'xhtml', 'cookies' ),
+				array( 'xhtml' => self::describe_output_call( $xhtml_call ) )
+			),
+			$ctx->result(
+				'comments.comment-form.must-log-in-and-logged-in-branches',
+				! $must_login_call['threw']
+					&& str_contains( $must, 'class="must-log-in"' )
+					&& str_contains( $must, 'wp-login.php' )
+					&& ! str_contains( $must, '<form ' )
+					&& $scenario_seen( 'must_log_in_after', 'must-log-in' )
+					&& ! $logged_in_call['threw']
+					&& str_contains( $logged, 'id="cfz-commentform-logged-' . $slug . '"' )
+					&& str_contains( $logged, 'class="logged-in-as cfz-logged-in"' )
+					&& str_contains( $logged, 'Form User ' . $slug )
+					&& str_contains( $logged, 'name="cfz_extra"' )
+					&& ! str_contains( $logged, 'name="author"' )
+					&& ! str_contains( $logged, 'name="email"' )
+					&& ! str_contains( $logged, 'name="url"' )
+					&& $scenario_seen( 'logged_in_after', 'logged-in' )
+					&& $scenario_seen( 'comment_form', 'logged-in' ),
+				array(
+					'mustLogIn' => self::describe_output_call( $must_login_call ),
+					'loggedIn'  => self::describe_output_call( $logged_in_call ),
+					'loggedInEvents' => $events['logged_in'],
+				)
+			),
+			$ctx->result(
+				'comments.comment-form.filter-action-cleanup',
+				false === \has_filter( 'wp_get_current_commenter', $commenter_filter )
+					&& false === \has_filter( 'comment_form_default_fields', $default_fields_filter )
+					&& false === \has_filter( 'comment_form_defaults', $defaults_filter )
+					&& false === \has_filter( 'comment_form_fields', $fields_filter )
+					&& false === \has_filter( 'comment_form_submit_button', $submit_button_filter )
+					&& false === \has_filter( 'comment_form_submit_field', $submit_field_filter )
+					&& false === \has_filter( 'comment_form_logged_in', $logged_in_filter )
+					&& false === \has_filter( 'comment_id_fields', $id_fields_filter )
+					&& false === \has_filter( 'comment_form_before', $action_callbacks['comment_form_before'] )
+					&& false === \has_filter( 'comment_form_after', $action_callbacks['comment_form_after'] )
+					&& false === \has_filter( 'comment_form', $action_callbacks['comment_form'] ),
+				array(
+					'events' => array(
+						'before'       => $events['before'],
+						'after'        => $events['after'],
+						'top'          => $events['top'],
+						'submitButton' => $events['submit_button'],
+						'submitField'  => $events['submit_field'],
+					),
+				)
+			),
+		);
+	}
+
 	private static function all_permalink_scenarios_ok( array $scenario_results ): bool {
 		foreach ( $scenario_results as $result ) {
 			if (
@@ -1873,13 +2407,32 @@ final class CommentsSurface {
 		return (object) $data;
 	}
 
+	private static function fake_form_user( array $row ): \WP_User {
+		$reflection = new \ReflectionClass( 'WP_User' );
+		$user       = $reflection->newInstanceWithoutConstructor();
+		$user->ID   = (int) $row['ID'];
+		$user->data = (object) $row;
+		$user->filter = null;
+		$user->caps   = array();
+		$user->roles  = array();
+		$user->allcaps = array();
+
+		return $user;
+	}
+
 	private static function with_non_mysql_wpdb( callable $callback ) {
 		$had_wpdb = array_key_exists( 'wpdb', $GLOBALS );
 		$wpdb     = $GLOBALS['wpdb'] ?? null;
 
 		$GLOBALS['wpdb'] = new class() {
+			public string $base_prefix = 'wp_';
 			public bool $is_mysql = false;
+			public string $prefix = 'wp_';
 			public string $comments = 'wp_comments';
+
+			public function get_blog_prefix( $blog_id = null ): string {
+				return 'wp_';
+			}
 		};
 
 		try {
@@ -1919,6 +2472,30 @@ final class CommentsSurface {
 				'threw'     => true,
 				'throwable' => self::describe_throwable( $e ),
 				'value'     => null,
+			);
+		}
+	}
+
+	private static function capture_output( callable $callback ): array {
+		$level = ob_get_level();
+		ob_start();
+		try {
+			$value  = $callback();
+			$output = (string) ob_get_clean();
+			return array(
+				'threw'  => false,
+				'value'  => $value,
+				'output' => $output,
+			);
+		} catch ( \Throwable $e ) {
+			while ( ob_get_level() > $level ) {
+				ob_end_clean();
+			}
+			return array(
+				'threw'     => true,
+				'throwable' => self::describe_throwable( $e ),
+				'value'     => null,
+				'output'    => '',
 			);
 		}
 	}
@@ -2006,6 +2583,22 @@ final class CommentsSurface {
 		return array(
 			'threw' => false,
 			'value' => self::describe_value( $call['value'] ),
+		);
+	}
+
+	private static function describe_output_call( array $call ): array {
+		if ( $call['threw'] ) {
+			return array(
+				'threw'     => true,
+				'throwable' => $call['throwable'],
+			);
+		}
+
+		return array(
+			'threw'       => false,
+			'value'       => self::describe_value( $call['value'] ),
+			'outputBytes' => strlen( $call['output'] ?? '' ),
+			'output'      => self::describe_value( $call['output'] ?? '' ),
 		);
 	}
 
