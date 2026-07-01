@@ -32,6 +32,9 @@ final class UtilityInternalsSurface {
 			$rows[] = self::check_token_map_non_default_exports( $ctx->fork( 'token-map-export' ) );
 			$rows[] = self::check_matches_map_regex( $ctx->fork( 'matches' ) );
 			$rows[] = self::check_url_pattern_prefixer( $ctx->fork( 'prefixer' ) );
+			$rows[] = self::check_kebab_case_helper( $ctx->fork( 'kebab-case' ) );
+			$rows[] = self::check_hierarchy_loop_helpers( $ctx->fork( 'hierarchy-loop' ) );
+			$rows[] = self::check_unique_uuid_and_boolean_helpers( $ctx->fork( 'identity-bool' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = self::row(
 				$ctx,
@@ -97,6 +100,16 @@ final class UtilityInternalsSurface {
 				'wp_is_numeric_array',
 				'_wp_array_get',
 				'_wp_array_set',
+				'_wp_to_kebab_case',
+				'wp_find_hierarchy_loop',
+				'wp_find_hierarchy_loop_tortoise_hare',
+				'wp_generate_uuid4',
+				'wp_is_uuid',
+				'wp_json_encode',
+				'wp_unique_id',
+				'wp_unique_id_from_values',
+				'wp_unique_prefixed_id',
+				'wp_validate_boolean',
 			) as $function
 		) {
 			if ( ! function_exists( $function ) ) {
@@ -665,6 +678,363 @@ final class UtilityInternalsSurface {
 				'failures' => $failures,
 			)
 		);
+	}
+
+	private static function check_kebab_case_helper( \ComponentFuzz\FuzzContext $ctx ): array {
+		$first  = self::ascii_word_token( $ctx->identifier( 4, 8 ), 'alpha' );
+		$second = self::ascii_word_token( $ctx->identifier( 4, 8 ), 'beta' );
+		$number = (string) $ctx->int( 10, 99 );
+
+		$fixtures = array(
+			'backgroundColor'       => 'background-color',
+			'ColorPaletteV2'        => 'color-palette-v-2',
+			'HTTPResponseCode'      => 'http-response-code',
+			'2XLValue'              => '2-xl-value',
+			'foo_bar baz'           => 'foo-bar-baz',
+			"Foo's Bar"             => 'foos-bar',
+			"Don'tStop"             => 'dont-stop',
+			'rock & roll'           => 'rock-roll',
+			'var:preset|spacing|40' => 'var-preset-spacing-40',
+			'1st Place 22ND Street' => '1st-place-22nd-street',
+			'éclairÜber'            => 'éclair-Über',
+			$first . ucfirst( $second ) . $number . 'Value' => $first . '-' . $second . '-' . $number . '-value',
+			'  ' . $first . '__' . $second . '!!' . $number . '  ' => $first . '-' . $second . '-' . $number,
+		);
+
+		$failures = array();
+		$observed = array();
+		foreach ( $fixtures as $input => $expected ) {
+			$actual     = \_wp_to_kebab_case( $input );
+			$again      = \_wp_to_kebab_case( $actual );
+			$observed[] = array(
+				'input'    => $input,
+				'expected' => $expected,
+				'actual'   => $actual,
+				'again'    => $again,
+			);
+
+			self::collect_failure(
+				$failures,
+				$expected === $actual && $actual === $again,
+				'_wp_to_kebab_case matches lodash-compat fixture output and is idempotent on its own output',
+				end( $observed )
+			);
+
+			self::collect_failure(
+				$failures,
+				'' === $actual
+					|| (
+						! str_starts_with( $actual, '-' )
+						&& ! str_ends_with( $actual, '-' )
+						&& ! str_contains( $actual, '--' )
+					),
+				'_wp_to_kebab_case does not introduce leading, trailing, or doubled separators for generated sane inputs',
+				end( $observed )
+			);
+		}
+
+		return self::row(
+			$ctx,
+			'utility-internals.kebab-case-helper.lodash-compatibility',
+			array() === $failures,
+			array(
+				'observed' => $observed,
+				'failures' => $failures,
+			)
+		);
+	}
+
+	private static function check_hierarchy_loop_helpers( \ComponentFuzz\FuzzContext $ctx ): array {
+		$base       = $ctx->int( 1000, 9000 );
+		$cycle      = array(
+			$base     => $base + 1,
+			$base + 1 => $base + 2,
+			$base + 2 => $base,
+		);
+		$acyclic    = array(
+			$base + 10 => $base + 11,
+			$base + 11 => $base + 12,
+			$base + 12 => 0,
+		);
+		$self_loop  = array( $base + 20 => $base + 20 );
+		$parentless = array(
+			$base + 30 => 0,
+			$base + 31 => $base + 30,
+		);
+		$calls      = array();
+
+		$callback = static function ( int $id, array $parents, string $label ) use ( &$calls ): int {
+			$calls[] = array(
+				'id'    => $id,
+				'label' => $label,
+			);
+			return (int) ( $parents[ $id ] ?? 0 );
+		};
+
+		$failures = array();
+
+		$loop = \wp_find_hierarchy_loop( $callback, $base, null, array( $cycle, 'cycle' ) );
+		self::collect_failure(
+			$failures,
+			self::same_int_key_set( $loop, array( $base, $base + 1, $base + 2 ) ),
+			'wp_find_hierarchy_loop returns the complete detected cycle for callback-backed maps',
+			array(
+				'loop'     => $loop,
+				'expected' => array( $base, $base + 1, $base + 2 ),
+			)
+		);
+
+		$no_loop = \wp_find_hierarchy_loop( $callback, $base + 10, null, array( $acyclic, 'acyclic' ) );
+		self::collect_failure(
+			$failures,
+			array() === $no_loop,
+			'wp_find_hierarchy_loop returns an empty array for parent chains that terminate at zero',
+			array( 'result' => $no_loop )
+		);
+
+		$self_loop_result = \wp_find_hierarchy_loop( $callback, $base + 20, null, array( $self_loop, 'self' ) );
+		self::collect_failure(
+			$failures,
+			self::same_int_key_set( $self_loop_result, array( $base + 20 ) ),
+			'wp_find_hierarchy_loop handles self-parent loops as one-member cycles',
+			array( 'result' => $self_loop_result )
+		);
+
+		$override_loop = \wp_find_hierarchy_loop(
+			$callback,
+			$base + 30,
+			$base + 31,
+			array(
+				$parentless + array( $base + 32 => $base + 30 ),
+				'override',
+			)
+		);
+		self::collect_failure(
+			$failures,
+			self::same_int_key_set( $override_loop, array( $base + 30, $base + 31 ) ),
+			'wp_find_hierarchy_loop start_parent override participates in cycle detection without mutating the callback map',
+			array(
+				'result' => $override_loop,
+				'map'    => $parentless,
+			)
+		);
+
+		$detected_member = \wp_find_hierarchy_loop_tortoise_hare( $callback, $base, array(), array( $cycle, 'direct-detect' ) );
+		$direct_loop     = \wp_find_hierarchy_loop_tortoise_hare( $callback, $base + 1, array(), array( $cycle, 'direct-loop' ), true );
+		$direct_no_loop  = \wp_find_hierarchy_loop_tortoise_hare( $callback, $base + 10, array(), array( $acyclic, 'direct-acyclic' ) );
+
+		self::collect_failure(
+			$failures,
+			in_array( $detected_member, array( $base, $base + 1, $base + 2 ), true )
+				&& self::same_int_key_set( $direct_loop, array( $base, $base + 1, $base + 2 ) )
+				&& false === $direct_no_loop,
+			'wp_find_hierarchy_loop_tortoise_hare detects, enumerates, and rejects generated hierarchy loops',
+			array(
+				'detectedMember' => $detected_member,
+				'directLoop'     => $direct_loop,
+				'directNoLoop'   => $direct_no_loop,
+			)
+		);
+
+		$labels = array_values( array_unique( array_column( $calls, 'label' ) ) );
+		sort( $labels );
+		self::collect_failure(
+			$failures,
+			array() === array_diff( array( 'acyclic', 'cycle', 'direct-acyclic', 'direct-detect', 'direct-loop', 'override', 'self' ), $labels ),
+			'hierarchy loop callbacks receive callback_args for every generated scenario',
+			array(
+				'labels'     => $labels,
+				'callSample' => array_slice( $calls, 0, 12 ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'utility-internals.hierarchy-loop-helpers.generated-maps',
+			array() === $failures,
+			array(
+				'base'     => $base,
+				'failures' => $failures,
+			)
+		);
+	}
+
+	private static function check_unique_uuid_and_boolean_helpers( \ComponentFuzz\FuzzContext $ctx ): array {
+		$token    = strtolower( preg_replace( '/[^a-z0-9]+/', '', $ctx->identifier( 5, 9 ) ) );
+		$token    = '' === $token ? 'utility' : $token;
+		$prefix   = 'cfu-' . $ctx->seed() . '-' . $ctx->iteration() . '-' . $token . '-';
+		$failures = array();
+
+		$global_first  = \wp_unique_id( $prefix . 'global-' );
+		$global_second = \wp_unique_id( $prefix . 'global-' );
+		$global_first_number  = self::id_suffix_number( $global_first, $prefix . 'global-' );
+		$global_second_number = self::id_suffix_number( $global_second, $prefix . 'global-' );
+		self::collect_failure(
+			$failures,
+			null !== $global_first_number
+				&& null !== $global_second_number
+				&& $global_first_number + 1 === $global_second_number,
+			'wp_unique_id appends a process-wide monotonic integer while preserving generated prefixes',
+			array(
+				'first'        => $global_first,
+				'second'       => $global_second,
+				'firstNumber'  => $global_first_number,
+				'secondNumber' => $global_second_number,
+			)
+		);
+
+		$prefixed_a1 = \wp_unique_prefixed_id( $prefix . 'a-' );
+		$prefixed_a2 = \wp_unique_prefixed_id( $prefix . 'a-' );
+		$prefixed_b1 = \wp_unique_prefixed_id( $prefix . 'b-' );
+		self::collect_failure(
+			$failures,
+			$prefix . 'a-1' === $prefixed_a1
+				&& $prefix . 'a-2' === $prefixed_a2
+				&& $prefix . 'b-1' === $prefixed_b1,
+			'wp_unique_prefixed_id keeps independent monotonic counters per generated prefix',
+			array(
+				'a1' => $prefixed_a1,
+				'a2' => $prefixed_a2,
+				'b1' => $prefixed_b1,
+			)
+		);
+
+		$values = array(
+			'z'    => array(
+				'b' => $ctx->int( 1, 99 ),
+				'a' => $token,
+			),
+			'list' => array( true, 'false', $ctx->int( -10, 10 ) ),
+			'n'    => $ctx->int( 100, 999 ),
+		);
+		$canonical = $values;
+		\wp_recursive_ksort( $canonical );
+
+		$permuted = array(
+			'n'    => $values['n'],
+			'list' => $values['list'],
+			'z'    => array(
+				'a' => $values['z']['a'],
+				'b' => $values['z']['b'],
+			),
+		);
+		\wp_recursive_ksort( $permuted );
+
+		$hash_prefix = $prefix . 'hash-';
+		$hash_id     = \wp_unique_id_from_values( $canonical, $hash_prefix );
+		$hash_repeat = \wp_unique_id_from_values( $canonical, $hash_prefix );
+		$hash_permute = \wp_unique_id_from_values( $permuted, $hash_prefix );
+		$expected_hash = $hash_prefix . substr( md5( (string) \wp_json_encode( $canonical ) ), 0, 8 );
+		self::collect_failure(
+			$failures,
+			$expected_hash === $hash_id
+				&& $hash_id === $hash_repeat
+				&& $hash_id === $hash_permute,
+			'wp_unique_id_from_values is deterministic over canonicalized nested arrays and matches its documented hash shape',
+			array(
+				'id'       => $hash_id,
+				'repeat'   => $hash_repeat,
+				'permuted' => $hash_permute,
+				'expected' => $expected_hash,
+			)
+		);
+
+		$uuids = array( \wp_generate_uuid4(), \wp_generate_uuid4(), \wp_generate_uuid4() );
+		$uuid_valid = true;
+		foreach ( $uuids as $uuid ) {
+			$uuid_valid = $uuid_valid
+				&& \wp_is_uuid( $uuid )
+				&& \wp_is_uuid( $uuid, 4 )
+				&& strtolower( $uuid ) === $uuid
+				&& 1 === preg_match( '/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/', $uuid );
+		}
+		$version_one = '123e4567-e89b-12d3-a456-426614174000';
+		self::collect_failure(
+			$failures,
+			$uuid_valid
+				&& count( $uuids ) === count( array_unique( $uuids ) )
+				&& \wp_is_uuid( $version_one )
+				&& ! \wp_is_uuid( $version_one, 4 )
+				&& ! \wp_is_uuid( strtoupper( $uuids[0] ) )
+				&& ! \wp_is_uuid( str_replace( '-', '', $uuids[0] ) )
+				&& ! \wp_is_uuid( 12345 ),
+			'wp_generate_uuid4 and wp_is_uuid enforce lowercase UUID shape, V4 version, and variant bits',
+			array(
+				'uuids'      => $uuids,
+				'versionOne' => $version_one,
+			)
+		);
+
+		$boolean_cases = array(
+			array( 'label' => 'true-bool', 'value' => true, 'expected' => true ),
+			array( 'label' => 'false-bool', 'value' => false, 'expected' => false ),
+			array( 'label' => 'false-lower', 'value' => 'false', 'expected' => false ),
+			array( 'label' => 'false-upper', 'value' => 'FALSE', 'expected' => false ),
+			array( 'label' => 'false-title', 'value' => 'False', 'expected' => false ),
+			array( 'label' => 'true-string', 'value' => 'true', 'expected' => true ),
+			array( 'label' => 'zero-string', 'value' => '0', 'expected' => false ),
+			array( 'label' => 'one-string', 'value' => '1', 'expected' => true ),
+			array( 'label' => 'empty-string', 'value' => '', 'expected' => false ),
+			array( 'label' => 'zero-int', 'value' => 0, 'expected' => false ),
+			array( 'label' => 'one-int', 'value' => 1, 'expected' => true ),
+			array( 'label' => 'null', 'value' => null, 'expected' => false ),
+			array( 'label' => 'empty-array', 'value' => array(), 'expected' => false ),
+			array( 'label' => 'filled-array', 'value' => array( 0 ), 'expected' => true ),
+		);
+		$boolean_observed = array();
+		$boolean_ok       = true;
+		foreach ( $boolean_cases as $case ) {
+			$actual                              = \wp_validate_boolean( $case['value'] );
+			$boolean_observed[ $case['label'] ] = $actual;
+			$boolean_ok                         = $boolean_ok && $case['expected'] === $actual;
+		}
+		self::collect_failure(
+			$failures,
+			$boolean_ok,
+			'wp_validate_boolean only special-cases false strings before normal boolean casting',
+			array( 'observed' => $boolean_observed )
+		);
+
+		return self::row(
+			$ctx,
+			'utility-internals.unique-uuid-boolean-helpers.contracts',
+			array() === $failures,
+			array(
+				'prefix'   => $prefix,
+				'failures' => $failures,
+			)
+		);
+	}
+
+	private static function same_int_key_set( $actual, array $expected ): bool {
+		if ( ! is_array( $actual ) ) {
+			return false;
+		}
+
+		$actual_keys = array_map( 'intval', array_keys( $actual ) );
+		$expected    = array_map( 'intval', $expected );
+		sort( $actual_keys );
+		sort( $expected );
+
+		return $expected === $actual_keys;
+	}
+
+	private static function id_suffix_number( string $id, string $prefix ): ?int {
+		if ( ! str_starts_with( $id, $prefix ) ) {
+			return null;
+		}
+
+		$suffix = substr( $id, strlen( $prefix ) );
+		return ctype_digit( $suffix ) ? (int) $suffix : null;
+	}
+
+	private static function ascii_word_token( string $value, string $fallback ): string {
+		$value = strtolower( preg_replace( '/[^a-z]+/', '', $value ) ?? '' );
+		if ( '' === $value ) {
+			return $fallback;
+		}
+
+		return $value;
 	}
 
 	private static function list_fixture( \ComponentFuzz\FuzzContext $ctx ): array {

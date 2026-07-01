@@ -558,7 +558,9 @@ database, network requests, or a configured site.
   chained filter/sort/pluck state, parse-list and array-path helper contracts,
   token lookup/precomputed table round trips, non-default key-length
   `WP_Token_Map::to_array()` export equivalence, rewrite match substitution,
-  URL-pattern prefix escaping/idempotence boundaries, and state restoration.
+  URL-pattern prefix escaping/idempotence boundaries, `_wp_to_kebab_case()`
+  lodash-compatibility fixtures, hierarchy-loop detection helpers, unique ID
+  and UUID contracts, boolean validation semantics, and state restoration.
 - `user-preferences`: no-request-dispatch admin UI preference coverage,
   including sanitized user-setting/admin-color serialization, hidden column and
   meta-box preference defaults/saved values, postbox order/classes, screen
@@ -1143,7 +1145,11 @@ does not replace higher-level rewrite, frontend-feature, or REST coverage that
 uses the same classes incidentally. Case-insensitive token-map assertions avoid
 known ambiguous overlapping-token inputs and keep exact lookup coverage over the
 full generated mapping; token-map export assertions cover key lengths 1, 2, and
-3 to guard prefix reconstruction and NUL padding boundaries.
+3 to guard prefix reconstruction and NUL padding boundaries. Kebab-case
+assertions anchor block/style slug compatibility at the helper boundary, and
+hierarchy-loop assertions cover terminating chains, self loops, callback-backed
+cycles, start-parent overrides, direct tortoise-hare probes, and callback
+argument propagation.
 Skips are recorded in `results.ndjson` with a reason and do not mask failures
 or PHP errors.
 
