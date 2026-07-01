@@ -298,9 +298,10 @@ database, network requests, or a configured site.
   including environment type cache boundaries, isolated `WP_RUN_CORE_TESTS`
   environment-type matrices with constant precedence, server/request
   normalization, Basic Auth and SSL detection, memory-limit parsing, ini
-  mutability, installing/maintenance flags, generated JSON/XML request media
-  matrices, request guard filters, HTTPS migration short-circuits, and UTF-8
-  compatibility oracles with state restoration.
+  mutability, isolated `wp_raise_memory_limit()` context/filter negotiation,
+  installing/maintenance flags, generated JSON/XML request media matrices,
+  request guard filters, HTTPS migration short-circuits, and UTF-8
+  compatibility oracles with parent/child state restoration.
 - `error-protection`: no-shutdown error protection and recovery-mode
   infrastructure coverage, including paused-extension source normalization and
   storage, recovery key/cookie validation, recovery-link generation, filtered

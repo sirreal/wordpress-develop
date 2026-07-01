@@ -34,6 +34,7 @@ final class EnvironmentLoadSurface {
 			$rows[] = self::check_ssl_detection( $ctx->fork( 'ssl' ) );
 			$rows[] = self::check_memory_limit_parsing( $ctx->fork( 'memory' ) );
 			$rows[] = self::check_ini_mutability( $ctx->fork( 'ini' ) );
+			$rows[] = self::check_raise_memory_limit_child_process( $ctx->fork( 'raise-memory' ) );
 			$rows[] = self::check_installing_and_maintenance_flags( $ctx->fork( 'installing' ), $snapshot );
 			$rows[] = self::check_runtime_filters_and_request_guards( $ctx->fork( 'request-guards' ) );
 			$rows[] = self::check_json_xml_request_guards( $ctx->fork( 'json-xml' ) );
@@ -97,6 +98,7 @@ final class EnvironmentLoadSurface {
 				'wp_get_server_protocol',
 				'wp_has_noncharacters',
 				'wp_installing',
+				'wp_raise_memory_limit',
 				'wp_is_development_mode',
 				'wp_is_file_mod_allowed',
 				'wp_is_home_url_using_https',
@@ -1257,6 +1259,437 @@ PHP;
 				'failures' => array_slice( $failures, 0, 6 ),
 			)
 		);
+	}
+
+	private static function check_raise_memory_limit_child_process( \ComponentFuzz\FuzzContext $ctx ): array {
+		$missing = self::missing_raise_memory_limit_child_requirements();
+		if ( array() !== $missing ) {
+			return $ctx->skip(
+				'environment-load.raise-memory-limit.child-process',
+				'Child-process support for isolated wp_raise_memory_limit() coverage is unavailable.',
+				array( 'missing' => implode( ', ', $missing ) )
+			);
+		}
+
+		$custom_context = 'component_' . strtolower( preg_replace( '/[^a-z0-9_]+/', '_', $ctx->identifier( 4, 9 ) ) );
+		$custom_context = trim( $custom_context, '_' );
+		if ( '' === $custom_context ) {
+			$custom_context = 'component_custom';
+		}
+
+		$cases = array(
+			array(
+				'label'         => 'admin-default-raises-to-core-max',
+				'initial'       => '128M',
+				'context'       => 'admin',
+				'filterHook'    => null,
+				'filterLimit'   => null,
+				'expectHook'    => null,
+				'expectResult'  => WP_MAX_MEMORY_LIMIT,
+				'expectAfter'   => WP_MAX_MEMORY_LIMIT,
+			),
+			array(
+				'label'         => 'admin-high-current-is-not-lowered',
+				'initial'       => '512M',
+				'context'       => 'admin',
+				'filterHook'    => null,
+				'filterLimit'   => null,
+				'expectHook'    => null,
+				'expectResult'  => false,
+				'expectAfter'   => '512M',
+			),
+			array(
+				'label'         => 'image-filter-can-raise-above-core-max',
+				'initial'       => '128M',
+				'context'       => 'image',
+				'filterHook'    => 'image_memory_limit',
+				'filterLimit'   => '384M',
+				'expectHook'    => 'image_memory_limit',
+				'expectResult'  => '384M',
+				'expectAfter'   => '384M',
+			),
+			array(
+				'label'         => 'cron-filter-below-current-falls-back-to-core-max',
+				'initial'       => '128M',
+				'context'       => 'cron',
+				'filterHook'    => 'cron_memory_limit',
+				'filterLimit'   => '64M',
+				'expectHook'    => 'cron_memory_limit',
+				'expectResult'  => WP_MAX_MEMORY_LIMIT,
+				'expectAfter'   => WP_MAX_MEMORY_LIMIT,
+			),
+			array(
+				'label'         => 'custom-context-uses-dynamic-memory-filter',
+				'initial'       => '128M',
+				'context'       => $custom_context,
+				'filterHook'    => $custom_context . '_memory_limit',
+				'filterLimit'   => '320M',
+				'expectHook'    => $custom_context . '_memory_limit',
+				'expectResult'  => '320M',
+				'expectAfter'   => '320M',
+			),
+			array(
+				'label'         => 'unlimited-current-exits-before-filters',
+				'initial'       => '-1',
+				'context'       => 'admin',
+				'filterHook'    => 'admin_memory_limit',
+				'filterLimit'   => '512M',
+				'expectHook'    => null,
+				'expectResult'  => false,
+				'expectAfter'   => '-1',
+			),
+		);
+
+		$parent_memory_before = ini_get( 'memory_limit' );
+		$run                  = self::run_raise_memory_limit_child( $cases );
+		$parent_memory_after  = ini_get( 'memory_limit' );
+		$result               = is_array( $run['result'] ) ? $run['result'] : array();
+		$child_cases          = is_array( $result['cases'] ?? null ) ? $result['cases'] : array();
+		$failures             = array();
+
+		self::collect_failure(
+			$failures,
+			$run['ok'],
+			'isolated wp_raise_memory_limit subprocess exits cleanly and returns structured JSON',
+			array(
+				'exitCode' => $run['exitCode'],
+				'stdout'   => \ComponentFuzz\preview_value( $run['stdout'] ),
+				'stderr'   => \ComponentFuzz\preview_value( $run['stderr'] ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			'' === $run['stderr'] && '' === (string) ( $result['unexpectedOutput'] ?? '' ),
+			'isolated wp_raise_memory_limit subprocess emits no stderr or stray output',
+			array(
+				'stderr'           => \ComponentFuzz\preview_value( $run['stderr'] ),
+				'unexpectedOutput' => \ComponentFuzz\preview_value( (string) ( $result['unexpectedOutput'] ?? '' ) ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::raise_memory_limit_child_result_has_expected_shape( $result ),
+			'isolated wp_raise_memory_limit subprocess result has expected shape',
+			array(
+				'resultKeys' => array_keys( $result ),
+				'casesType'  => gettype( $result['cases'] ?? null ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$parent_memory_before === $parent_memory_after,
+			'parent process memory_limit is unchanged after child-process memory probes',
+			array(
+				'before' => $parent_memory_before,
+				'after'  => $parent_memory_after,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			count( $cases ) === count( $child_cases ),
+			'wp_raise_memory_limit child evaluates every generated memory-limit case',
+			array(
+				'expectedCount' => count( $cases ),
+				'actualCount'   => count( $child_cases ),
+			)
+		);
+
+		foreach ( $cases as $index => $case ) {
+			$child_case = $child_cases[ $index ] ?? null;
+			if ( ! is_array( $child_case ) ) {
+				self::collect_failure(
+					$failures,
+					false,
+					"wp_raise_memory_limit case {$index} is present",
+					array(
+						'case'        => $case,
+						'actualEntry' => $child_case,
+					)
+				);
+				continue;
+			}
+
+			self::collect_failure(
+				$failures,
+				( $child_case['label'] ?? null ) === $case['label']
+					&& true === ( $child_case['ok'] ?? null )
+					&& false === ( $child_case['filterStillRegistered'] ?? true ),
+				"wp_raise_memory_limit {$case['label']} branch and cleanup contract",
+				array(
+					'case'      => $case,
+					'childCase' => $child_case,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$case['expectHook'] === ( $child_case['observedHook'] ?? null ),
+				"wp_raise_memory_limit {$case['label']} uses expected memory-limit filter hook",
+				array(
+					'expectedHook' => $case['expectHook'],
+					'observedHook' => $child_case['observedHook'] ?? null,
+					'events'       => $child_case['filterEvents'] ?? array(),
+				)
+			);
+		}
+
+		return self::result(
+			$ctx,
+			'environment-load.raise-memory-limit.child-process-contracts',
+			array() === $failures,
+			array(
+				'cases'              => count( $cases ),
+				'childWpMax'         => $result['wpMaxMemoryLimit'] ?? null,
+				'childCases'         => $child_cases,
+				'parentMemoryBefore' => $parent_memory_before,
+				'parentMemoryAfter'  => $parent_memory_after,
+				'failures'           => array_slice( $failures, 0, 10 ),
+			)
+		);
+	}
+
+	private static function missing_raise_memory_limit_child_requirements(): array {
+		$missing = array();
+
+		foreach ( array( 'ini_get', 'ini_set', 'json_decode', 'json_encode', 'proc_close', 'proc_open', 'stream_get_contents' ) as $function ) {
+			if ( ! function_exists( $function ) ) {
+				$missing[] = "function {$function}";
+			}
+		}
+
+		if ( ! defined( 'PHP_BINARY' ) || '' === PHP_BINARY ) {
+			$missing[] = 'PHP_BINARY';
+		}
+
+		return $missing;
+	}
+
+	private static function run_raise_memory_limit_child( array $cases ): array {
+		$payload = json_encode(
+			array(
+				'repoRoot' => \ComponentFuzz\repo_root(),
+				'cases'    => $cases,
+			),
+			JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE
+		);
+
+		if ( false === $payload ) {
+			return array(
+				'ok'       => false,
+				'exitCode' => -1,
+				'stdout'   => '',
+				'stderr'   => 'json_encode failed',
+				'result'   => null,
+			);
+		}
+
+		$descriptors = array(
+			0 => array( 'pipe', 'r' ),
+			1 => array( 'pipe', 'w' ),
+			2 => array( 'pipe', 'w' ),
+		);
+
+		// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.system_calls_proc_open -- Isolates memory_limit mutations in a local PHP subprocess.
+		$process = proc_open( array( PHP_BINARY, '-d', 'memory_limit=256M', '-r', self::raise_memory_limit_child_program() ), $descriptors, $pipes, \ComponentFuzz\repo_root() );
+		if ( ! is_resource( $process ) ) {
+			return array(
+				'ok'       => false,
+				'exitCode' => -1,
+				'stdout'   => '',
+				'stderr'   => 'proc_open failed',
+				'result'   => null,
+			);
+		}
+
+		fwrite( $pipes[0], $payload );
+		fclose( $pipes[0] );
+
+		$stdout = stream_get_contents( $pipes[1] );
+		$stderr = stream_get_contents( $pipes[2] );
+		fclose( $pipes[1] );
+		fclose( $pipes[2] );
+
+		$exit_code = proc_close( $process );
+		$result    = json_decode( (string) $stdout, true );
+
+		return array(
+			'ok'       => 0 === $exit_code && is_array( $result ) && true === ( $result['ok'] ?? null ),
+			'exitCode' => $exit_code,
+			'stdout'   => (string) $stdout,
+			'stderr'   => (string) $stderr,
+			'result'   => is_array( $result ) ? $result : null,
+		);
+	}
+
+	private static function raise_memory_limit_child_result_has_expected_shape( array $result ): bool {
+		return array_key_exists( 'ok', $result )
+			&& is_bool( $result['ok'] )
+			&& array_key_exists( 'wpMaxMemoryLimit', $result )
+			&& is_string( $result['wpMaxMemoryLimit'] )
+			&& array_key_exists( 'cases', $result )
+			&& is_array( $result['cases'] )
+			&& array_key_exists( 'unexpectedOutput', $result )
+			&& is_string( $result['unexpectedOutput'] );
+	}
+
+	private static function raise_memory_limit_child_program(): string {
+		return <<<'PHP'
+ini_set( 'display_errors', 'stderr' );
+error_reporting( E_ALL & ~E_DEPRECATED & ~E_USER_DEPRECATED );
+
+function component_fuzz_env_memory_preview( string $value, int $limit = 240 ): string {
+	$printable = preg_replace_callback(
+		'/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/',
+		static function ( array $m ): string {
+			return sprintf( '\\x%02X', ord( $m[0] ) );
+		},
+		$value
+	);
+
+	return strlen( $printable ) > $limit ? substr( $printable, 0, $limit ) . '...' : $printable;
+}
+
+$component_fuzz_env_memory_outer_ob_level = ob_get_level();
+ob_start();
+
+$component_fuzz_env_memory_result = array(
+	'ok'                 => false,
+	'wpMaxMemoryLimit'   => '',
+	'cases'              => array(),
+	'unexpectedOutput'   => '',
+);
+$component_fuzz_env_memory_unexpected_output = '';
+
+try {
+	$component_fuzz_env_memory_raw     = stream_get_contents( STDIN );
+	$component_fuzz_env_memory_fixture = json_decode( $component_fuzz_env_memory_raw, true );
+
+	if (
+		! is_array( $component_fuzz_env_memory_fixture )
+		|| empty( $component_fuzz_env_memory_fixture['repoRoot'] )
+		|| ! is_array( $component_fuzz_env_memory_fixture['cases'] ?? null )
+	) {
+		throw new RuntimeException( 'Invalid wp_raise_memory_limit fixture.' );
+	}
+
+	require_once $component_fuzz_env_memory_fixture['repoRoot'] . '/tools/component-fuzz/lib/autoload.php';
+
+	\ComponentFuzz\WpBootstrap::load();
+
+	$component_fuzz_env_memory_result['wpMaxMemoryLimit'] = WP_MAX_MEMORY_LIMIT;
+
+	foreach ( $component_fuzz_env_memory_fixture['cases'] as $component_fuzz_env_memory_index => $component_fuzz_env_memory_case ) {
+		if (
+			! is_array( $component_fuzz_env_memory_case )
+			|| ! array_key_exists( 'label', $component_fuzz_env_memory_case )
+			|| ! array_key_exists( 'initial', $component_fuzz_env_memory_case )
+			|| ! array_key_exists( 'context', $component_fuzz_env_memory_case )
+			|| ! array_key_exists( 'filterHook', $component_fuzz_env_memory_case )
+			|| ! array_key_exists( 'filterLimit', $component_fuzz_env_memory_case )
+			|| ! array_key_exists( 'expectHook', $component_fuzz_env_memory_case )
+			|| ! array_key_exists( 'expectResult', $component_fuzz_env_memory_case )
+			|| ! array_key_exists( 'expectAfter', $component_fuzz_env_memory_case )
+		) {
+			throw new RuntimeException( 'Invalid wp_raise_memory_limit case at index ' . $component_fuzz_env_memory_index . '.' );
+		}
+
+		$component_fuzz_env_memory_case_original = ini_get( 'memory_limit' );
+		$component_fuzz_env_memory_set_initial   = false;
+		$component_fuzz_env_memory_before        = null;
+		$component_fuzz_env_memory_actual        = null;
+		$component_fuzz_env_memory_after         = null;
+		$component_fuzz_env_memory_events        = array();
+		$component_fuzz_env_memory_filter        = null;
+		try {
+			$component_fuzz_env_memory_set_initial = ini_set( 'memory_limit', (string) $component_fuzz_env_memory_case['initial'] );
+			$component_fuzz_env_memory_before      = ini_get( 'memory_limit' );
+
+			if ( is_string( $component_fuzz_env_memory_case['filterHook'] ) && null !== $component_fuzz_env_memory_case['filterLimit'] ) {
+				$component_fuzz_env_memory_filter = static function ( $limit ) use ( &$component_fuzz_env_memory_events, $component_fuzz_env_memory_case ) {
+					$component_fuzz_env_memory_events[] = array(
+						'hook'     => current_filter(),
+						'default'  => $limit,
+						'filtered' => $component_fuzz_env_memory_case['filterLimit'],
+					);
+					return $component_fuzz_env_memory_case['filterLimit'];
+				};
+				add_filter( $component_fuzz_env_memory_case['filterHook'], $component_fuzz_env_memory_filter, 10, 1 );
+			}
+
+			$component_fuzz_env_memory_actual = wp_raise_memory_limit( (string) $component_fuzz_env_memory_case['context'] );
+			$component_fuzz_env_memory_after  = ini_get( 'memory_limit' );
+		} finally {
+			if ( is_string( $component_fuzz_env_memory_case['filterHook'] ) && null !== $component_fuzz_env_memory_filter ) {
+				remove_filter( $component_fuzz_env_memory_case['filterHook'], $component_fuzz_env_memory_filter, 10 );
+			}
+			if ( is_string( $component_fuzz_env_memory_case_original ) ) {
+				ini_set( 'memory_limit', $component_fuzz_env_memory_case_original );
+			}
+		}
+
+		$component_fuzz_env_memory_observed_hook = isset( $component_fuzz_env_memory_events[0]['hook'] )
+			? $component_fuzz_env_memory_events[0]['hook']
+			: null;
+		$component_fuzz_env_memory_filter_still_registered = is_string( $component_fuzz_env_memory_case['filterHook'] ) && null !== $component_fuzz_env_memory_filter
+			? false !== has_filter( $component_fuzz_env_memory_case['filterHook'], $component_fuzz_env_memory_filter )
+			: false;
+
+		$component_fuzz_env_memory_result['cases'][] = array(
+			'index'                 => $component_fuzz_env_memory_index,
+			'label'                 => $component_fuzz_env_memory_case['label'],
+			'initial'               => $component_fuzz_env_memory_case['initial'],
+			'context'               => $component_fuzz_env_memory_case['context'],
+			'before'                => $component_fuzz_env_memory_before,
+			'after'                 => $component_fuzz_env_memory_after,
+			'setInitialReturn'      => $component_fuzz_env_memory_set_initial,
+			'actual'                => $component_fuzz_env_memory_actual,
+			'expected'              => $component_fuzz_env_memory_case['expectResult'],
+			'expectedAfter'         => $component_fuzz_env_memory_case['expectAfter'],
+			'filterEvents'          => $component_fuzz_env_memory_events,
+			'observedHook'          => $component_fuzz_env_memory_observed_hook,
+			'filterStillRegistered' => $component_fuzz_env_memory_filter_still_registered,
+			'ok'                    => $component_fuzz_env_memory_before === (string) $component_fuzz_env_memory_case['initial']
+				&& $component_fuzz_env_memory_actual === $component_fuzz_env_memory_case['expectResult']
+				&& $component_fuzz_env_memory_after === $component_fuzz_env_memory_case['expectAfter']
+				&& $component_fuzz_env_memory_observed_hook === $component_fuzz_env_memory_case['expectHook']
+				&& (
+					null === $component_fuzz_env_memory_observed_hook
+					|| (
+						isset( $component_fuzz_env_memory_events[0]['default'] )
+						&& WP_MAX_MEMORY_LIMIT === $component_fuzz_env_memory_events[0]['default']
+					)
+				)
+				&& false === $component_fuzz_env_memory_filter_still_registered,
+		);
+	}
+
+	$component_fuzz_env_memory_result['ok'] = true;
+	foreach ( $component_fuzz_env_memory_result['cases'] as $component_fuzz_env_memory_case_result ) {
+		$component_fuzz_env_memory_result['ok'] = $component_fuzz_env_memory_result['ok'] && true === $component_fuzz_env_memory_case_result['ok'];
+	}
+} catch ( Throwable $e ) {
+	$component_fuzz_env_memory_result['throwable'] = array(
+		'class'   => get_class( $e ),
+		'message' => $e->getMessage(),
+		'file'    => $e->getFile(),
+		'line'    => $e->getLine(),
+	);
+} finally {
+	while ( ob_get_level() > $component_fuzz_env_memory_outer_ob_level ) {
+		$component_fuzz_env_memory_unexpected_output = ob_get_clean() . $component_fuzz_env_memory_unexpected_output;
+	}
+
+	$component_fuzz_env_memory_result['unexpectedOutput'] = component_fuzz_env_memory_preview( $component_fuzz_env_memory_unexpected_output );
+}
+
+$component_fuzz_env_memory_json = json_encode( $component_fuzz_env_memory_result, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE );
+echo false === $component_fuzz_env_memory_json ? '{"ok":false,"error":"json_encode failed"}' : $component_fuzz_env_memory_json;
+exit( ! empty( $component_fuzz_env_memory_result['ok'] ) ? 0 : 1 );
+PHP;
 	}
 
 	private static function check_installing_and_maintenance_flags( \ComponentFuzz\FuzzContext $ctx, array $snapshot ): array {
