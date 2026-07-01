@@ -8,6 +8,8 @@ final class NavigationLifecycleSurface {
 	public const NAME = 'navigation-lifecycle';
 
 	public static function run( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::load_fallback_classes();
+
 		$missing = self::missing_requirements();
 		if ( array() !== $missing ) {
 			return array(
@@ -37,6 +39,9 @@ final class NavigationLifecycleSurface {
 			$rows[] = self::check_location_mapping( $ctx->fork( 'locations' ), $case );
 
 			self::prepare_runtime();
+			$rows[] = self::check_navigation_fallback_classic_menu_conversion( $ctx->fork( 'navigation-fallback' ), $case );
+
+			self::prepare_runtime();
 			$rows[] = self::check_rest_menus_controller( $ctx->fork( 'rest-menus' ), $case );
 
 			self::prepare_runtime();
@@ -60,14 +65,35 @@ final class NavigationLifecycleSurface {
 		return $rows;
 	}
 
+	private static function load_fallback_classes(): void {
+		if ( ! defined( 'ABSPATH' ) ) {
+			return;
+		}
+
+		foreach (
+			array(
+				'wp-includes/class-wp-classic-to-block-menu-converter.php',
+				'wp-includes/class-wp-navigation-fallback.php',
+			) as $file
+		) {
+			$path = ABSPATH . $file;
+			if ( file_exists( $path ) ) {
+				require_once $path;
+			}
+		}
+	}
+
 	private static function missing_requirements(): array {
 		$missing = array();
 
 		foreach (
 			array(
 				'Component_Fuzz_WPDB_Stub',
+				'WP_Classic_To_Block_Menu_Converter',
 				'WP_Error',
+				'WP_Navigation_Fallback',
 				'WP_Post',
+				'WP_Query',
 				'WP_REST_Menu_Items_Controller',
 				'WP_REST_Menu_Locations_Controller',
 				'WP_REST_Menus_Controller',
@@ -88,6 +114,7 @@ final class NavigationLifecycleSurface {
 				'_wp_auto_add_pages_to_menu',
 				'_wp_delete_post_menu_item',
 				'_wp_delete_tax_menu_item',
+				'_wp_menu_item_classes_by_context',
 				'_wp_reset_invalid_menu_item_parent',
 				'add_action',
 				'add_filter',
@@ -99,11 +126,14 @@ final class NavigationLifecycleSurface {
 				'get_option',
 				'get_post',
 				'get_post_meta',
+				'get_posts',
 				'get_registered_nav_menus',
 				'get_term',
 				'has_filter',
+				'is_nav_menu',
 				'is_nav_menu_item',
 				'is_wp_error',
+				'parse_blocks',
 				'register_nav_menus',
 				'remove_action',
 				'remove_filter',
@@ -113,6 +143,8 @@ final class NavigationLifecycleSurface {
 				'rest_url',
 				'sanitize_html_class',
 				'sanitize_key',
+				'serialize_block',
+				'serialize_blocks',
 				'set_theme_mod',
 				'taxonomy_exists',
 				'update_option',
@@ -620,6 +652,159 @@ final class NavigationLifecycleSurface {
 		);
 	}
 
+	private static function check_navigation_fallback_classic_menu_conversion( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures = array();
+		$fixture  = self::create_fallback_classic_menu_fixture( $case );
+
+		if ( isset( $fixture['error'] ) ) {
+			return $ctx->fail(
+				'navigation-lifecycle.navigation-fallback-classic-menu-conversion',
+				array(
+					'case'  => self::case_summary( $case ),
+					'error' => $fixture['error'],
+				)
+			);
+		}
+
+		$disable_creation = static function (): bool {
+			return false;
+		};
+		\add_filter( 'wp_navigation_should_create_fallback', $disable_creation );
+		try {
+			$disabled_fallback = \WP_Navigation_Fallback::get_fallback();
+		} finally {
+			\remove_filter( 'wp_navigation_should_create_fallback', $disable_creation );
+		}
+		$before_posts = self::published_navigation_posts();
+
+		self::collect_failure(
+			$failures,
+			null === $disabled_fallback
+				&& array() === $before_posts
+				&& false === \has_filter( 'wp_navigation_should_create_fallback', $disable_creation ),
+			'fallback creation can be disabled without inserting a wp_navigation post or leaking the filter',
+			array(
+				'disabledFallback' => $disabled_fallback,
+				'beforePosts'      => self::post_list_summary( $before_posts ),
+				'filterRemaining'  => \has_filter( 'wp_navigation_should_create_fallback', $disable_creation ),
+			)
+		);
+
+		$fallback     = \WP_Navigation_Fallback::get_fallback();
+		$after_posts  = self::published_navigation_posts();
+		$fallback_id  = $fallback instanceof \WP_Post ? (int) $fallback->ID : 0;
+		$fallback_post = $fallback instanceof \WP_Post ? $fallback : null;
+		$blocks       = $fallback_post ? \parse_blocks( $fallback_post->post_content ) : array();
+		$parent_block = self::block_by_label( $blocks, $case['fallbackParentTitle'] );
+		$child_block  = self::block_by_label( $blocks, $case['fallbackChildTitle'] );
+		$post_block   = self::block_by_label( $blocks, $case['fallbackPostTitle'] );
+
+		self::collect_failure(
+			$failures,
+			$fallback_post instanceof \WP_Post
+				&& 1 === count( $after_posts )
+				&& $fallback_id === (int) $after_posts[0]->ID
+				&& 'wp_navigation' === $fallback_post->post_type
+				&& 'publish' === $fallback_post->post_status
+				&& $fixture['assignedMenuName'] === $fallback_post->post_title
+				&& $fixture['assignedMenuSlug'] === $fallback_post->post_name,
+			'fallback creation chooses the classic menu assigned to the primary location and inserts one published wp_navigation post',
+			array(
+				'fallback'          => $fallback_post,
+				'fallbackId'        => $fallback_id,
+				'posts'             => self::post_list_summary( $after_posts ),
+				'assignedMenuId'    => $fixture['assignedMenuId'],
+				'primarySlugMenuId' => $fixture['primarySlugMenuId'],
+				'newestMenuId'      => $fixture['newestMenuId'],
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			array( $case['fallbackParentTitle'], $case['fallbackPostTitle'] ) === self::top_level_block_labels( $blocks )
+				&& self::block_has_name( $parent_block, 'core/navigation-submenu' )
+				&& self::block_has_name( $child_block, 'core/navigation-link' )
+				&& self::block_has_name( $post_block, 'core/navigation-link' ),
+			'converted fallback content preserves top-level order and represents nested classic items as a navigation-submenu tree',
+			array(
+				'topLevelLabels' => self::top_level_block_labels( $blocks ),
+				'parentBlock'    => $parent_block,
+				'childBlock'     => $child_block,
+				'postBlock'      => $post_block,
+			)
+		);
+
+		$parent_attrs = is_array( $parent_block ) ? (array) ( $parent_block['attrs'] ?? array() ) : array();
+		$child_attrs  = is_array( $child_block ) ? (array) ( $child_block['attrs'] ?? array() ) : array();
+		$post_attrs   = is_array( $post_block ) ? (array) ( $post_block['attrs'] ?? array() ) : array();
+
+		self::collect_failure(
+			$failures,
+			$case['fallbackParentTitle'] === ( $parent_attrs['label'] ?? null )
+				&& $case['fallbackParentUrl'] === ( $parent_attrs['url'] ?? null )
+				&& $case['fallbackParentDescription'] === ( $parent_attrs['description'] ?? null )
+				&& $case['fallbackParentAttrTitle'] === ( $parent_attrs['title'] ?? null )
+				&& true === ( $parent_attrs['opensInNewTab'] ?? null )
+				&& 'friend badscript' === ( $parent_attrs['rel'] ?? null )
+				&& 'custom' === ( $parent_attrs['kind'] ?? null )
+				&& 'custom' === ( $parent_attrs['type'] ?? null )
+				&& self::class_attr_contains( $parent_attrs['className'] ?? null, 'fallback-alpha' )
+				&& self::class_attr_contains( $parent_attrs['className'] ?? null, 'badscript' ),
+			'custom parent menu item attributes survive conversion with sanitized class and rel tokens',
+			array( 'parentAttrs' => $parent_attrs )
+		);
+
+		self::collect_failure(
+			$failures,
+			$case['fallbackChildTitle'] === ( $child_attrs['label'] ?? null )
+				&& $case['fallbackChildUrl'] === ( $child_attrs['url'] ?? null )
+				&& false === ( $child_attrs['opensInNewTab'] ?? null )
+				&& 'custom' === ( $child_attrs['kind'] ?? null )
+				&& 'custom' === ( $child_attrs['type'] ?? null )
+				&& self::class_attr_contains( $child_attrs['className'] ?? null, 'fallback-child' ),
+			'custom child menu item remains nested and keeps normalized custom-link attributes',
+			array( 'childAttrs' => $child_attrs )
+		);
+
+		self::collect_failure(
+			$failures,
+			$case['fallbackPostTitle'] === ( $post_attrs['label'] ?? null )
+				&& 'post-type' === ( $post_attrs['kind'] ?? null )
+				&& 'post' === ( $post_attrs['type'] ?? null )
+				&& $fixture['postId'] === (int) ( $post_attrs['id'] ?? 0 ),
+			'post-type menu items convert to navigation-link blocks with the target post identity',
+			array(
+				'postAttrs' => $post_attrs,
+				'postId'    => $fixture['postId'],
+			)
+		);
+
+		$second_fallback = \WP_Navigation_Fallback::get_fallback();
+		$second_posts    = self::published_navigation_posts();
+
+		self::collect_failure(
+			$failures,
+			$second_fallback instanceof \WP_Post
+				&& $fallback_id === (int) $second_fallback->ID
+				&& 1 === count( $second_posts ),
+			'repeated fallback lookups reuse the existing published wp_navigation post instead of creating duplicates',
+			array(
+				'firstId'     => $fallback_id,
+				'second'      => $second_fallback,
+				'secondPosts' => self::post_list_summary( $second_posts ),
+			)
+		);
+
+		return $ctx->result(
+			'navigation-lifecycle.navigation-fallback-classic-menu-conversion',
+			array() === $failures,
+			array(
+				'case'     => self::case_summary( $case ),
+				'failures' => array_slice( $failures, 0, 10 ),
+			)
+		);
+	}
+
 	private static function check_rest_menus_controller( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
 		$controller = new \WP_REST_Menus_Controller( 'nav_menu' );
 		$failures   = array();
@@ -1113,30 +1298,149 @@ final class NavigationLifecycleSurface {
 		$token = substr( hash( 'sha1', (string) $ctx->seed() . ':' . $ctx->iteration() ), 0, 10 );
 
 		return array(
-			'token'                => $token,
-			'footerLocation'       => 'footer-' . $token,
-			'itemAttrTitle'        => 'Attribute ' . $ctx->int( 10, 999 ),
-			'itemDescription'      => 'Generated item description ' . $token,
-			'itemTitle'            => 'Menu Item ' . $ctx->int( 10, 999 ),
-			'itemUrl'              => 'https://example.test/' . $token . '/item',
-			'locationMenuName'     => 'Location Menu ' . $ctx->int( 10, 999 ) . ' ' . $token,
-			'menuDescription'      => 'Generated menu description ' . $token,
-			'menuName'             => 'Lifecycle Menu ' . $ctx->int( 10, 999 ) . ' ' . $token,
-			'orphanTitle'          => 'Orphan Item ' . $ctx->int( 10, 999 ),
-			'orphanUrl'            => 'https://example.test/' . $token . '/orphan',
-			'pageTitle'            => 'Auto Page ' . $ctx->int( 10, 999 ) . ' ' . $token,
-			'postTitle'            => 'Navigation Target Post ' . $ctx->int( 10, 999 ) . ' ' . $token,
-			'primaryLocation'      => 'primary-' . $token,
-			'restItemTitle'        => 'REST Item ' . $ctx->int( 10, 999 ) . ' ' . $token,
-			'restItemUrl'          => 'https://example.test/' . $token . '/rest-item',
-			'restMenuName'         => 'REST Menu ' . $ctx->int( 10, 999 ) . ' ' . $token,
-			'restUpdatedItemTitle' => 'REST Item Updated ' . $ctx->int( 10, 999 ) . ' ' . $token,
-			'restUpdatedItemUrl'   => 'https://example.test/' . $token . '/rest-item-updated',
-			'restUpdatedMenuName'  => 'REST Menu Updated ' . $ctx->int( 10, 999 ) . ' ' . $token,
-			'termName'             => 'Navigation Target Term ' . $ctx->int( 10, 999 ) . ' ' . $token,
-			'updatedItemTitle'     => 'Updated Menu Item ' . $ctx->int( 10, 999 ),
-			'updatedItemUrl'       => 'https://example.test/' . $token . '/updated-item',
-			'updatedMenuName'      => 'Updated Lifecycle Menu ' . $ctx->int( 10, 999 ) . ' ' . $token,
+			'token'                     => $token,
+			'fallbackAssignedMenuName'  => 'Assigned Classic Menu ' . $ctx->int( 10, 999 ) . ' ' . $token,
+			'fallbackChildTitle'        => 'Fallback Child ' . $ctx->int( 10, 999 ) . ' ' . $token,
+			'fallbackChildUrl'          => 'https://example.test/' . $token . '/fallback-child',
+			'fallbackNewestMenuName'    => 'Newest Classic Menu ' . $ctx->int( 10, 999 ) . ' ' . $token,
+			'fallbackParentAttrTitle'   => 'Fallback Parent Attribute ' . $ctx->int( 10, 999 ),
+			'fallbackParentDescription' => 'Fallback parent description ' . $token,
+			'fallbackParentTitle'       => 'Fallback Parent ' . $ctx->int( 10, 999 ) . ' ' . $token,
+			'fallbackParentUrl'         => 'https://example.test/' . $token . '/fallback-parent',
+			'fallbackPostTitle'         => 'Fallback Target Post ' . $ctx->int( 10, 999 ) . ' ' . $token,
+			'footerLocation'            => 'footer-' . $token,
+			'itemAttrTitle'             => 'Attribute ' . $ctx->int( 10, 999 ),
+			'itemDescription'           => 'Generated item description ' . $token,
+			'itemTitle'                 => 'Menu Item ' . $ctx->int( 10, 999 ),
+			'itemUrl'                   => 'https://example.test/' . $token . '/item',
+			'locationMenuName'          => 'Location Menu ' . $ctx->int( 10, 999 ) . ' ' . $token,
+			'menuDescription'           => 'Generated menu description ' . $token,
+			'menuName'                  => 'Lifecycle Menu ' . $ctx->int( 10, 999 ) . ' ' . $token,
+			'orphanTitle'               => 'Orphan Item ' . $ctx->int( 10, 999 ),
+			'orphanUrl'                 => 'https://example.test/' . $token . '/orphan',
+			'pageTitle'                 => 'Auto Page ' . $ctx->int( 10, 999 ) . ' ' . $token,
+			'postTitle'                 => 'Navigation Target Post ' . $ctx->int( 10, 999 ) . ' ' . $token,
+			'primaryLocation'           => 'primary-' . $token,
+			'restItemTitle'             => 'REST Item ' . $ctx->int( 10, 999 ) . ' ' . $token,
+			'restItemUrl'               => 'https://example.test/' . $token . '/rest-item',
+			'restMenuName'              => 'REST Menu ' . $ctx->int( 10, 999 ) . ' ' . $token,
+			'restUpdatedItemTitle'      => 'REST Item Updated ' . $ctx->int( 10, 999 ) . ' ' . $token,
+			'restUpdatedItemUrl'        => 'https://example.test/' . $token . '/rest-item-updated',
+			'restUpdatedMenuName'       => 'REST Menu Updated ' . $ctx->int( 10, 999 ) . ' ' . $token,
+			'termName'                  => 'Navigation Target Term ' . $ctx->int( 10, 999 ) . ' ' . $token,
+			'updatedItemTitle'          => 'Updated Menu Item ' . $ctx->int( 10, 999 ),
+			'updatedItemUrl'            => 'https://example.test/' . $token . '/updated-item',
+			'updatedMenuName'           => 'Updated Lifecycle Menu ' . $ctx->int( 10, 999 ) . ' ' . $token,
+		);
+	}
+
+	private static function create_fallback_classic_menu_fixture( array $case ): array {
+		$assigned_menu_id = \wp_create_nav_menu( \wp_slash( $case['fallbackAssignedMenuName'] ) );
+		$primary_slug_id  = \wp_create_nav_menu( 'Primary' );
+		$newest_menu_id   = \wp_create_nav_menu( \wp_slash( $case['fallbackNewestMenuName'] ) );
+
+		if ( \is_wp_error( $assigned_menu_id ) || ! is_int( $assigned_menu_id ) ) {
+			return array( 'error' => array( 'assignedMenu' => $assigned_menu_id ) );
+		}
+		if ( \is_wp_error( $primary_slug_id ) || ! is_int( $primary_slug_id ) ) {
+			return array( 'error' => array( 'primarySlugMenu' => $primary_slug_id ) );
+		}
+		if ( \is_wp_error( $newest_menu_id ) || ! is_int( $newest_menu_id ) ) {
+			return array( 'error' => array( 'newestMenu' => $newest_menu_id ) );
+		}
+
+		\register_nav_menus( array( 'primary' => 'Primary fallback location ' . $case['token'] ) );
+		\set_theme_mod( 'nav_menu_locations', array( 'primary' => $assigned_menu_id ) );
+
+		$post_id = \wp_insert_post(
+			\wp_slash(
+				array(
+					'post_content' => 'Fallback target content ' . $case['token'],
+					'post_status'  => 'publish',
+					'post_title'   => $case['fallbackPostTitle'],
+					'post_type'    => 'post',
+				)
+			),
+			true,
+			false
+		);
+		if ( \is_wp_error( $post_id ) || ! is_int( $post_id ) ) {
+			return array( 'error' => array( 'post' => $post_id ) );
+		}
+
+		$parent_id = \wp_update_nav_menu_item(
+			$assigned_menu_id,
+			0,
+			\wp_slash(
+				array(
+					'menu-item-attr-title'  => $case['fallbackParentAttrTitle'],
+					'menu-item-classes'     => 'fallback-alpha bad<script>',
+					'menu-item-description' => $case['fallbackParentDescription'],
+					'menu-item-position'    => 1,
+					'menu-item-status'      => 'publish',
+					'menu-item-target'      => '_blank',
+					'menu-item-title'       => $case['fallbackParentTitle'],
+					'menu-item-type'        => 'custom',
+					'menu-item-url'         => $case['fallbackParentUrl'],
+					'menu-item-xfn'         => 'friend bad<script>',
+				)
+			)
+		);
+		if ( \is_wp_error( $parent_id ) || ! is_int( $parent_id ) ) {
+			return array( 'error' => array( 'parentItem' => $parent_id ) );
+		}
+
+		$child_id = \wp_update_nav_menu_item(
+			$assigned_menu_id,
+			0,
+			\wp_slash(
+				array(
+					'menu-item-classes'   => 'fallback-child',
+					'menu-item-parent-id' => $parent_id,
+					'menu-item-position'  => 2,
+					'menu-item-status'    => 'publish',
+					'menu-item-title'     => $case['fallbackChildTitle'],
+					'menu-item-type'      => 'custom',
+					'menu-item-url'       => $case['fallbackChildUrl'],
+				)
+			)
+		);
+		if ( \is_wp_error( $child_id ) || ! is_int( $child_id ) ) {
+			return array( 'error' => array( 'childItem' => $child_id ) );
+		}
+
+		$post_item_id = \wp_update_nav_menu_item(
+			$assigned_menu_id,
+			0,
+			\wp_slash(
+				array(
+					'menu-item-object'    => 'post',
+					'menu-item-object-id' => $post_id,
+					'menu-item-position'  => 3,
+					'menu-item-status'    => 'publish',
+					'menu-item-type'      => 'post_type',
+				)
+			)
+		);
+		if ( \is_wp_error( $post_item_id ) || ! is_int( $post_item_id ) ) {
+			return array( 'error' => array( 'postItem' => $post_item_id ) );
+		}
+
+		$assigned_menu = \wp_get_nav_menu_object( $assigned_menu_id );
+		if ( ! $assigned_menu instanceof \WP_Term ) {
+			return array( 'error' => array( 'assignedMenuObject' => $assigned_menu ) );
+		}
+
+		return array(
+			'assignedMenuId'    => (int) $assigned_menu_id,
+			'assignedMenuName'  => $assigned_menu->name,
+			'assignedMenuSlug'  => $assigned_menu->slug,
+			'childItemId'       => (int) $child_id,
+			'newestMenuId'      => (int) $newest_menu_id,
+			'parentItemId'      => (int) $parent_id,
+			'postId'            => (int) $post_id,
+			'postItemId'        => (int) $post_item_id,
+			'primarySlugMenuId' => (int) $primary_slug_id,
 		);
 	}
 
@@ -1209,6 +1513,8 @@ final class NavigationLifecycleSurface {
 		$GLOBALS['post_type_meta_caps']     = array();
 		$GLOBALS['wp_post_statuses']        = array();
 		$GLOBALS['wp_post_types']           = array();
+		$GLOBALS['wp_query']                = new \WP_Query();
+		$GLOBALS['wp_the_query']            = $GLOBALS['wp_query'];
 		$GLOBALS['_wp_registered_nav_menus'] = array();
 		$GLOBALS['wp_rest_server']          = new \WP_REST_Server();
 		$GLOBALS['wp_rewrite']              = new \WP_Rewrite();
@@ -1404,6 +1710,80 @@ final class NavigationLifecycleSurface {
 		return $out;
 	}
 
+	private static function post_list_summary( array $posts ): array {
+		$out = array();
+		foreach ( $posts as $post ) {
+			$out[] = array(
+				'id'     => isset( $post->ID ) ? (int) $post->ID : null,
+				'name'   => $post->post_name ?? null,
+				'status' => $post->post_status ?? null,
+				'title'  => $post->post_title ?? null,
+				'type'   => $post->post_type ?? null,
+			);
+		}
+		return $out;
+	}
+
+	private static function published_navigation_posts(): array {
+		$posts = \get_posts(
+			array(
+				'no_found_rows'          => true,
+				'numberposts'            => -1,
+				'order'                  => 'ASC',
+				'orderby'                => 'ID',
+				'post_status'            => 'publish',
+				'post_type'              => 'wp_navigation',
+				'suppress_filters'       => false,
+				'update_post_meta_cache' => false,
+				'update_post_term_cache' => false,
+			)
+		);
+
+		return is_array( $posts ) ? $posts : array();
+	}
+
+	private static function top_level_block_labels( array $blocks ): array {
+		$labels = array();
+		foreach ( $blocks as $block ) {
+			if ( ! is_array( $block ) || empty( $block['blockName'] ) ) {
+				continue;
+			}
+			$labels[] = (string) ( $block['attrs']['label'] ?? '' );
+		}
+		return $labels;
+	}
+
+	private static function block_by_label( array $blocks, string $label ): ?array {
+		foreach ( $blocks as $block ) {
+			if ( ! is_array( $block ) || empty( $block['blockName'] ) ) {
+				continue;
+			}
+
+			if ( $label === (string) ( $block['attrs']['label'] ?? '' ) ) {
+				return $block;
+			}
+
+			$inner = self::block_by_label( (array) ( $block['innerBlocks'] ?? array() ), $label );
+			if ( null !== $inner ) {
+				return $inner;
+			}
+		}
+
+		return null;
+	}
+
+	private static function block_has_name( ?array $block, string $name ): bool {
+		return is_array( $block ) && $name === ( $block['blockName'] ?? null );
+	}
+
+	private static function class_attr_contains( $class_attr, string $class_name ): bool {
+		if ( ! is_string( $class_attr ) ) {
+			return false;
+		}
+
+		return in_array( $class_name, preg_split( '/\s+/', trim( $class_attr ) ), true );
+	}
+
 	private static function case_summary( array $case ): array {
 		return array(
 			'token'           => $case['token'],
@@ -1435,6 +1815,8 @@ final class NavigationLifecycleSurface {
 					'wp_current_filter',
 					'wp_filter',
 					'wp_filters',
+					'wp_query',
+					'wp_the_query',
 					'wp_post_statuses',
 					'wp_post_types',
 					'_wp_registered_nav_menus',

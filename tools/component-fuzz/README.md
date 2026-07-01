@@ -518,7 +518,10 @@ database, network requests, or a configured site.
   auto-add page behavior, menu-location remapping, orphan/self-parent item
   normalization, sanitized menu item meta, REST menu/menu-item/location
   permission gates, invalid location/object errors, forced-delete semantics,
-  links, and state restoration.
+  links, `WP_Navigation_Fallback::get_fallback()` classic-menu-to-block
+  conversion with `core/navigation-link` and `core/navigation-submenu` oracles,
+  primary-location selection priority, duplicate-free fallback reuse, and state
+  restoration.
 - `network-media`: URL parsing/sanitization/validation, URL scheme
   normalization, path normalization, filename sanitization, filetype checks,
   unique filenames, generated collision/alternate-extension filename oracles,
