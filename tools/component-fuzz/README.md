@@ -263,11 +263,13 @@ database, network requests, or a configured site.
   custom CSS post filters, and global/superglobal restoration.
 - `date-time`: deterministic no-DB date/time helper coverage, including
   `wp_date()`/`DateTimeImmutable` agreement, `date_i18n()` and `mysql2date()`
-  timestamp oracles, timezone option filters, GMT/local round trips, ISO8601
-  offset parsing and datetime conversion across DST boundaries, week windows,
-  `current_time()`, `current_datetime()`, timezone override offsets,
-  `wp_checkdate()` validity/filter contracts, date/human diff filter contracts,
-  and safe human time diffs.
+  timestamp oracles, timezone option filters, direct `wp_timezone_choice()`
+  markup generation for empty, named, BC-only, UTC, manual-offset, hostile, and
+  locale variants, GMT/local round trips, ISO8601 offset parsing and datetime
+  conversion across DST boundaries, week windows, `current_time()`,
+  `current_datetime()`, timezone override offsets, `wp_checkdate()`
+  validity/filter contracts, date/human diff filter contracts, and safe human
+  time diffs.
 - `discovery`: robots meta directives, scoped public/private robots helper
   output, front-controller `do_robots()` robots.txt output and hook order,
   front-controller `do_favicon()` favicon redirects through `template-loader.php`,
