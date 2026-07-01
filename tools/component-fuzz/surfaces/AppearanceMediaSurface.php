@@ -39,6 +39,7 @@ final class AppearanceMediaSurface {
 			$rows[] = self::check_site_icon_helpers( $ctx->fork( 'site-icon' ) );
 			$rows[] = self::check_site_icon_attachment_urls( $ctx->fork( 'site-icon-attachment-urls' ) );
 			$rows[] = self::check_admin_action_guards( $ctx->fork( 'admin-action-guards' ) );
+			$rows[] = self::check_background_remove_redirect( $ctx->fork( 'background-remove-redirect' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
 				'appearance-media.surface-no-throw',
@@ -97,6 +98,7 @@ final class AppearanceMediaSurface {
 			array(
 				'add_filter',
 				'add_theme_support',
+				'admin_url',
 				'apply_filters',
 				'checked',
 				'check_admin_referer',
@@ -130,6 +132,7 @@ final class AppearanceMediaSurface {
 				'has_header_image',
 				'has_header_video',
 				'has_site_icon',
+				'home_url',
 				'is_header_video_active',
 				'is_random_header_image',
 				'maybe_hash_hex_color',
@@ -151,14 +154,17 @@ final class AppearanceMediaSurface {
 				'update_post_meta',
 				'wp_check_filetype',
 				'wp_create_nonce',
+				'wp_die',
 				'wp_get_attachment_image_src',
 				'wp_get_attachment_image_url',
 				'wp_get_attachment_metadata',
 				'wp_get_attachment_url',
+				'wp_get_referer',
 				'wp_get_mime_types',
 				'wp_get_upload_dir',
 				'wp_enqueue_script',
 				'wp_localize_script',
+				'wp_nonce_ays',
 				'wp_nonce_tick',
 				'wp_register_script',
 				'wp_script_is',
@@ -167,7 +173,11 @@ final class AppearanceMediaSurface {
 				'wp_verify_nonce',
 				'wp_cache_delete',
 				'wp_json_encode',
+				'wp_redirect',
+				'wp_safe_redirect',
+				'wp_sanitize_redirect',
 				'wp_site_icon',
+				'wp_validate_redirect',
 			) as $function
 		) {
 			if ( ! function_exists( $function ) ) {
@@ -1596,8 +1606,172 @@ final class AppearanceMediaSurface {
 			array() === $failures,
 			array(
 				'failures'   => array_slice( $failures, 0, self::MAX_FAILURES ),
-				'notCovered' => 'Real custom header/background uploads, crop image processing, AJAX JSON senders, admin-page dispatch that can wp_die(), and the redirecting remove-background flow remain intentionally out of this no-exit surface.',
+				'notCovered' => 'Real custom header/background uploads, crop image processing, AJAX JSON senders, and admin-page dispatch remain intentionally out of this no-exit surface.',
 			)
+		);
+	}
+
+	private static function check_background_remove_redirect( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures   = array();
+		$background = new \Custom_Background();
+		$token      = $ctx->identifier( 6, 10 );
+		$nonce      = \wp_create_nonce( 'custom-background-remove' );
+		$events     = array();
+		$recorder   = static function ( $action, $result ) use ( &$events ): void {
+			$events[] = array(
+				'action' => $action,
+				'result' => $result,
+			);
+		};
+
+		\add_filter( 'check_admin_referer', $recorder, 10, 2 );
+		try {
+			\set_theme_mod( 'background_image', 'http://example.test/background-before-remove-' . $token . '.jpg' );
+			\set_theme_mod( 'background_image_thumb', 'http://example.test/background-before-remove-' . $token . '-thumb.jpg' );
+			$safe_referer = \admin_url( 'themes.php?page=custom-background&updated=1&marker=' . rawurlencode( $token ) );
+			$safe_capture = self::capture_background_action(
+				$background,
+				array(
+					'_wp_http_referer'                 => $safe_referer,
+					'_wpnonce-custom-background-remove' => $nonce,
+					'remove-background'                => '1',
+				)
+			);
+			$safe_image   = \get_theme_mod( 'background_image', null );
+			$safe_thumb   = \get_theme_mod( 'background_image_thumb', null );
+
+			$fallback_url    = \admin_url( 'themes.php?page=custom-background-fallback&marker=' . rawurlencode( $token ) );
+			$fallback_events = array();
+			$fallback_filter = static function ( string $fallback, int $status ) use ( &$fallback_events, $fallback_url ): string {
+				$fallback_events[] = array(
+					'fallback' => $fallback,
+					'status'   => $status,
+				);
+				return $fallback_url;
+			};
+
+			\set_theme_mod( 'background_image', 'http://example.test/background-before-external-' . $token . '.jpg' );
+			\set_theme_mod( 'background_image_thumb', 'http://example.test/background-before-external-' . $token . '-thumb.jpg' );
+			\add_filter( 'wp_safe_redirect_fallback', $fallback_filter, 10, 2 );
+			try {
+				$external_capture = self::capture_background_action(
+					$background,
+					array(
+						'_wp_http_referer'                 => 'https://not-example.invalid/custom-background?marker=' . rawurlencode( $token ),
+						'_wpnonce-custom-background-remove' => $nonce,
+						'remove-background'                => '1',
+					)
+				);
+			} finally {
+				\remove_filter( 'wp_safe_redirect_fallback', $fallback_filter, 10 );
+			}
+			$external_image = \get_theme_mod( 'background_image', null );
+			$external_thumb = \get_theme_mod( 'background_image_thumb', null );
+
+			\set_theme_mod( 'background_image', 'http://example.test/background-before-invalid-' . $token . '.jpg' );
+			\set_theme_mod( 'background_image_thumb', 'http://example.test/background-before-invalid-' . $token . '-thumb.jpg' );
+			$invalid_capture = self::capture_background_action(
+				$background,
+				array(
+					'_wp_http_referer'                 => $safe_referer,
+					'_wpnonce-custom-background-remove' => 'invalid-' . $token,
+					'remove-background'                => '1',
+				)
+			);
+			$invalid_image   = \get_theme_mod( 'background_image', null );
+			$invalid_thumb   = \get_theme_mod( 'background_image_thumb', null );
+		} finally {
+			\remove_filter( 'check_admin_referer', $recorder, 10 );
+		}
+
+		$safe_redirect     = $safe_capture['redirects'][0] ?? array();
+		$external_redirect = $external_capture['redirects'][0] ?? array();
+		$invalid_die       = $invalid_capture['die'];
+		$invalid_args      = is_array( $invalid_die['args'] ?? null ) ? $invalid_die['args'] : array();
+		$events_ok         = 3 === count( $events )
+			&& array( 'custom-background-remove', 'custom-background-remove', 'custom-background-remove' ) === array_column( $events, 'action' )
+			&& 1 === (int) ( $events[0]['result'] ?? 0 )
+			&& 1 === (int) ( $events[1]['result'] ?? 0 )
+			&& false === ( $events[2]['result'] ?? true );
+		$filters_clean     = false === \has_filter( 'check_admin_referer', $recorder );
+
+		self::collect_failure(
+			$failures,
+			$safe_capture['returned']
+				&& ! $safe_capture['captured']
+				&& null === $safe_capture['throwable']
+				&& '' === $safe_image
+				&& '' === $safe_thumb
+				&& $safe_referer === ( $safe_redirect['location'] ?? null )
+				&& 302 === (int) ( $safe_redirect['status'] ?? 0 )
+				&& $safe_capture['filtersRestored']
+				&& $safe_capture['superglobalsRestored'],
+			'valid remove-background request clears background mods and attempts a same-host safe redirect',
+			array(
+				'capture'  => $safe_capture,
+				'image'    => $safe_image,
+				'thumb'    => $safe_thumb,
+				'referer'  => $safe_referer,
+				'redirect' => $safe_redirect,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$external_capture['returned']
+				&& ! $external_capture['captured']
+				&& null === $external_capture['throwable']
+				&& '' === $external_image
+				&& '' === $external_thumb
+				&& $fallback_url === ( $external_redirect['location'] ?? null )
+				&& 302 === (int) ( $external_redirect['status'] ?? 0 )
+				&& 1 === count( $fallback_events )
+				&& 302 === (int) ( $fallback_events[0]['status'] ?? 0 )
+				&& $external_capture['filtersRestored']
+				&& $external_capture['superglobalsRestored']
+				&& false === \has_filter( 'wp_safe_redirect_fallback', $fallback_filter ),
+			'remove-background redirects unsafe referers through the safe redirect fallback while still clearing background mods',
+			array(
+				'capture'        => $external_capture,
+				'fallbackEvents' => $fallback_events,
+				'fallbackUrl'    => $fallback_url,
+				'image'          => $external_image,
+				'thumb'          => $external_thumb,
+				'redirect'       => $external_redirect,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$invalid_capture['captured']
+				&& ! $invalid_capture['returned']
+				&& null === $invalid_capture['throwable']
+				&& 'http://example.test/background-before-invalid-' . $token . '.jpg' === $invalid_image
+				&& 'http://example.test/background-before-invalid-' . $token . '-thumb.jpg' === $invalid_thumb
+				&& array() === $invalid_capture['redirects']
+				&& 403 === (int) ( $invalid_args['response'] ?? 0 )
+				&& is_string( $invalid_die['message'] ?? null )
+				&& str_contains( $invalid_die['message'], 'expired' )
+				&& $invalid_capture['filtersRestored']
+				&& $invalid_capture['superglobalsRestored']
+				&& $events_ok
+				&& $filters_clean,
+			'invalid remove-background nonce fails closed through wp_die before mutating background mods or redirecting',
+			array(
+				'capture'      => $invalid_capture,
+				'events'       => $events,
+				'eventsOk'     => $events_ok,
+				'filtersClean' => $filters_clean,
+				'image'        => $invalid_image,
+				'thumb'        => $invalid_thumb,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'appearance-media.background-remove.safe-redirect',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, self::MAX_FAILURES ) )
 		);
 	}
 
@@ -1716,6 +1890,87 @@ final class AppearanceMediaSurface {
 			ob_end_clean();
 			throw $e;
 		}
+	}
+
+	private static function capture_background_action( \Custom_Background $background, array $post ): array {
+		$previous_post    = $_POST;
+		$previous_request = $_REQUEST;
+		$start_level      = ob_get_level();
+		$redirects        = array();
+		$statuses         = array();
+		$die_call         = null;
+		$captured         = false;
+		$returned         = false;
+		$throwable        = null;
+		$output           = '';
+		$redirect_filter  = static function ( $location, int $status ) use ( &$redirects ) {
+			$redirects[] = array(
+				'location' => $location,
+				'status'   => $status,
+			);
+			return false;
+		};
+		$status_filter    = static function ( int $status, $location ) use ( &$statuses ): int {
+			$statuses[] = array(
+				'location' => $location,
+				'status'   => $status,
+			);
+			return $status;
+		};
+		$die_filter       = static function ( $handler ) use ( &$die_call ) {
+			unset( $handler );
+
+			return static function ( $message = '', $title = '', $args = array() ) use ( &$die_call ): void {
+				$die_call = array(
+					'args'    => $args,
+					'message' => $message,
+					'title'   => $title,
+				);
+				throw new AppearanceMediaSurface_DieCaptured( 'Captured appearance-media wp_die.' );
+			};
+		};
+
+		$_POST    = $post;
+		$_REQUEST = $post;
+		\add_filter( 'wp_redirect', $redirect_filter, 10, 2 );
+		\add_filter( 'wp_redirect_status', $status_filter, 10, 2 );
+		\add_filter( 'wp_die_handler', $die_filter, 1 );
+
+		ob_start();
+		try {
+			$background->take_action();
+			$returned = true;
+		} catch ( AppearanceMediaSurface_DieCaptured $e ) {
+			$captured = true;
+		} catch ( \Throwable $e ) {
+			$throwable = self::describe_throwable( $e );
+		} finally {
+			while ( ob_get_level() > $start_level ) {
+				$chunk  = ob_get_clean();
+				$output = ( false === $chunk ? '' : $chunk ) . $output;
+			}
+
+			\remove_filter( 'wp_redirect', $redirect_filter, 10 );
+			\remove_filter( 'wp_redirect_status', $status_filter, 10 );
+			\remove_filter( 'wp_die_handler', $die_filter, 1 );
+			$_POST    = $previous_post;
+			$_REQUEST = $previous_request;
+		}
+
+		return array(
+			'bufferBalanced'       => $start_level === ob_get_level(),
+			'captured'             => $captured,
+			'die'                  => $die_call,
+			'filtersRestored'      => false === \has_filter( 'wp_redirect', $redirect_filter )
+				&& false === \has_filter( 'wp_redirect_status', $status_filter )
+				&& false === \has_filter( 'wp_die_handler', $die_filter ),
+			'output'               => $output,
+			'redirects'            => $redirects,
+			'returned'             => $returned,
+			'statuses'             => $statuses,
+			'superglobalsRestored' => $previous_post === $_POST && $previous_request === $_REQUEST,
+			'throwable'            => $throwable,
+		);
 	}
 
 	private static function collect_failure( array &$failures, bool $condition, string $label, array $details ): void {
@@ -1950,4 +2205,7 @@ final class AppearanceMediaSurface {
 
 		return substr( $value, 0, $limit ) . '...';
 	}
+}
+
+final class AppearanceMediaSurface_DieCaptured extends \RuntimeException {
 }
