@@ -39,6 +39,7 @@ final class RestDirectoryServicesSurface {
 
 			$rows[] = self::check_route_and_schema_contracts( $ctx->fork( 'routes' ) );
 			$rows[] = self::check_block_directory_controller( $ctx->fork( 'block-directory' ) );
+			$rows[] = self::check_block_directory_fields_and_links( $ctx->fork( 'block-directory-fields' ) );
 			$rows[] = self::check_pattern_directory_controller( $ctx->fork( 'pattern-directory' ) );
 			$rows[] = self::check_url_details_controller( $ctx->fork( 'url-details' ) );
 		} catch ( \Throwable $e ) {
@@ -152,6 +153,8 @@ final class RestDirectoryServicesSurface {
 				'sanitize_url',
 				'set_site_transient',
 				'wp_cache_flush',
+				'wp_cache_delete',
+				'wp_cache_set',
 				'wp_http_validate_url',
 				'wp_insert_user',
 				'wp_json_encode',
@@ -525,6 +528,176 @@ final class RestDirectoryServicesSurface {
 		return self::row(
 			$ctx,
 			'rest-directory-services.block-directory-transform-permissions-network',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, 6 ) )
+		);
+	}
+
+	private static function check_block_directory_fields_and_links( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime_state();
+		self::seed_current_user( $ctx, 'block-fields' );
+		self::set_granted_caps( array( 'activate_plugins', 'install_plugins' ) );
+
+		$failures     = array();
+		$case         = self::block_case( $ctx );
+		$plugin_slug  = $case['plugin']['slug'];
+		$plugin_file  = $plugin_slug . '.php';
+		$plugin_calls = array();
+		$http_calls   = array();
+		$case['plugin']['icons']['1x']       = 'https://example.test/block-directory/icon-' . $case['token'] . '.svg';
+		$case['plugin']['blocks'][0]['title'] = 'Explicit Block Title ' . $case['token'];
+
+		$plugins_filter = static function ( $result, string $action, $args ) use ( &$plugin_calls, $case ) {
+			$plugin_calls[] = array(
+				'action'   => $action,
+				'block'    => $args->block ?? null,
+				'per_page' => $args->per_page ?? null,
+				'page'     => $args->page ?? null,
+			);
+
+			if ( 'query_plugins' !== $action ) {
+				return $result;
+			}
+
+			return (object) array( 'plugins' => array( $case['plugin'] ) );
+		};
+
+		$http_guard = static function ( $preempt, array $parsed_args, string $url ) use ( &$http_calls ) {
+			unset( $parsed_args );
+			$http_calls[] = $url;
+			return new \WP_Error( 'component_fuzz_unregistered_http', 'Unexpected live HTTP from block directory fields.' );
+		};
+
+		\add_filter( 'plugins_api', $plugins_filter, 10, 3 );
+		\add_filter( 'pre_http_request', $http_guard, 10, 3 );
+
+		try {
+			\wp_cache_set(
+				'plugins',
+				array(
+					'/' . $plugin_slug => array(
+						$plugin_file => array(
+							'Name'        => 'Installed Block Directory Plugin ' . $case['token'],
+							'PluginURI'   => 'https://example.test/plugins/' . $plugin_slug,
+							'Version'     => '1.0.0',
+							'Description' => 'Installed plugin fixture for block directory link discovery.',
+							'Author'      => 'Component Fuzz',
+						),
+					),
+				),
+				'plugins'
+			);
+
+			$server     = self::fresh_server();
+			$controller = new \WP_REST_Block_Directory_Controller();
+			$controller->register_routes();
+			$schema = $controller->get_item_schema();
+			$link_request = self::request(
+				'GET',
+				'/wp/v2/block-directory/search',
+				array(
+					'term'    => $case['term'],
+					'_fields' => 'id,name,title,icon,_links',
+				)
+			);
+			$links_item   = $controller->prepare_item_for_response( $case['plugin'], $link_request );
+			$install_href = $links_item instanceof \WP_REST_Response
+				? self::link_href( $links_item->get_links(), 'https://api.w.org/install-plugin' )
+				: null;
+			$plugin_href = $links_item instanceof \WP_REST_Response
+				? self::link_href( $links_item->get_links(), 'https://api.w.org/plugin' )
+				: null;
+
+			$field_request = self::request(
+				'GET',
+				'/wp/v2/block-directory/search',
+				array(
+					'term'     => $case['term'],
+					'per_page' => $case['perPage'],
+					'page'     => $case['page'],
+					'_fields'  => 'id,name,title,icon',
+				)
+			);
+			$field_response = self::dispatch( $server, $field_request );
+			$field_data     = $field_response->get_data();
+			$field_item     = is_array( $field_data ) && isset( $field_data[0] ) && is_array( $field_data[0] ) ? $field_data[0] : array();
+			$field_keys     = array_keys( $field_item );
+			sort( $field_keys );
+			$expected_keys = array( 'icon', 'id', 'name', 'title' );
+			sort( $expected_keys );
+
+			self::collect_failure(
+				$failures,
+				200 === $field_response->get_status()
+					&& self::schema_has_properties( $schema, array( 'id', 'name', 'title', 'icon' ) )
+					&& $expected_keys === $field_keys
+					&& $plugin_slug === ( $field_item['id'] ?? null )
+					&& $case['firstBlockName'] === ( $field_item['name'] ?? null )
+					&& $case['plugin']['blocks'][0]['title'] === ( $field_item['title'] ?? null )
+					&& $case['plugin']['icons']['1x'] === ( $field_item['icon'] ?? null )
+					&& ! array_key_exists( 'rating', $field_item )
+					&& ! array_key_exists( 'author', $field_item )
+					&& $links_item instanceof \WP_REST_Response
+					&& is_string( $install_href )
+					&& ( str_contains( $install_href, '/wp/v2/plugins' ) || str_contains( $install_href, 'rest_route=%2Fwp%2Fv2%2Fplugins' ) )
+					&& str_contains( $install_href, 'slug=' . rawurlencode( $plugin_slug ) )
+					&& is_string( $plugin_href )
+					&& ( str_contains( $plugin_href, '/wp/v2/plugins/' . $plugin_slug . '/' . $plugin_slug ) || str_contains( $plugin_href, 'rest_route=%2Fwp%2Fv2%2Fplugins%2F' . rawurlencode( $plugin_slug . '/' . $plugin_slug ) ) ),
+				'block directory dispatch honors _fields, explicit block title/icon mapping, and installed-plugin links',
+				array(
+					'status'           => $field_response->get_status(),
+					'item'             => $field_item,
+					'fieldKeys'        => $field_keys,
+					'fieldKeysText'    => implode( ',', $field_keys ),
+					'expectedKeysText' => implode( ',', $expected_keys ),
+					'installHref'      => $install_href,
+					'pluginHref'       => $plugin_href,
+					'links'            => $links_item instanceof \WP_REST_Response ? $links_item->get_links() : null,
+					'schemaKeys'       => array_keys( $schema['properties'] ?? array() ),
+				)
+			);
+
+			$minimal_response = self::dispatch(
+				$server,
+				self::request(
+					'GET',
+					'/wp/v2/block-directory/search',
+					array(
+						'term'    => $case['term'] . '-minimal',
+						'_fields' => 'id,name',
+					)
+				)
+			);
+			$minimal_data = $minimal_response->get_data();
+			$minimal_item = is_array( $minimal_data ) && isset( $minimal_data[0] ) && is_array( $minimal_data[0] ) ? $minimal_data[0] : array();
+			$minimal_keys = array_keys( $minimal_item );
+			sort( $minimal_keys );
+
+			self::collect_failure(
+				$failures,
+				200 === $minimal_response->get_status()
+					&& array( 'id', 'name' ) === $minimal_keys
+					&& 2 === count( $plugin_calls )
+					&& $case['term'] === ( $plugin_calls[0]['block'] ?? null )
+					&& $case['term'] . '-minimal' === ( $plugin_calls[1]['block'] ?? null )
+					&& array() === $http_calls,
+				'block directory prunes unrequested fields and keeps directory lookups on plugins_api without HTTP',
+				array(
+					'minimalStatus' => $minimal_response->get_status(),
+					'minimalItem'   => $minimal_item,
+					'pluginCalls'   => $plugin_calls,
+					'httpCalls'     => $http_calls,
+				)
+			);
+		} finally {
+			\remove_filter( 'plugins_api', $plugins_filter, 10 );
+			\remove_filter( 'pre_http_request', $http_guard, 10 );
+			\wp_cache_delete( 'plugins', 'plugins' );
+		}
+
+		return self::row(
+			$ctx,
+			'rest-directory-services.block-directory-fields-links',
 			array() === $failures,
 			array( 'failures' => array_slice( $failures, 0, 6 ) )
 		);
