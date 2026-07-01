@@ -1078,6 +1078,11 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 				return $this->component_fuzz_project_rows( $rows, array( 'post_mime_type' ) );
 			}
 
+			if ( preg_match( '/SELECT\s+DISTINCT\s+(?:`?[a-z_]+`?\.)?`?post_author`?\b/i', $query ) ) {
+				$rows = $this->component_fuzz_distinct_rows( array_values( $rows ), array( 'post_author' ) );
+				return $this->component_fuzz_project_rows( $rows, array( 'post_author' ) );
+			}
+
 			if ( preg_match( '/SELECT\s+post_name\b/i', $query ) ) {
 				return $this->component_fuzz_project_rows( $rows, array( 'post_name' ) );
 			}

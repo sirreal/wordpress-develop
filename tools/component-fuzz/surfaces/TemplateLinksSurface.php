@@ -49,6 +49,7 @@ final class TemplateLinksSurface {
 			$rows[] = self::check_search_form_rendering_contracts( $ctx->fork( 'search-form' ) );
 			$rows[] = self::check_post_link_helpers( $ctx );
 			$rows[] = self::check_archive_link_helpers( $ctx );
+			$rows[] = self::check_author_template_helpers( $ctx->fork( 'author-template' ) );
 			$rows[] = self::check_adjacent_post_link_helpers( $ctx );
 			$rows[] = self::check_adjacent_image_link_helpers( $ctx->fork( 'adjacent-image-links' ) );
 			$rows[] = self::check_canonical_and_shortlink_outputs( $ctx );
@@ -178,7 +179,7 @@ final class TemplateLinksSurface {
 	private static function missing_requirements(): array {
 		$missing = array();
 
-		foreach ( array( 'WP_Post', 'WP_Query', 'WP_Rewrite' ) as $class ) {
+		foreach ( array( 'WP_Post', 'WP_Query', 'WP_Rewrite', 'WP_User', 'WP_User_Query' ) as $class ) {
 			if ( ! class_exists( $class ) ) {
 				$missing[] = "class {$class}";
 			}
@@ -191,9 +192,12 @@ final class TemplateLinksSurface {
 				'add_theme_support',
 				'add_filter',
 				'body_class',
+				'clean_user_cache',
+				'count_user_posts',
 				'create_initial_post_types',
 				'create_initial_taxonomies',
 				'current_theme_supports',
+				'delete_transient',
 				'esc_attr',
 				'esc_attr_x',
 				'esc_url',
@@ -202,6 +206,7 @@ final class TemplateLinksSurface {
 				'get_adjacent_post_rel_link',
 				'get_adjacent_image_link',
 				'get_author_posts_url',
+				'get_author_feed_link',
 				'get_body_class',
 				'get_bookmark',
 				'get_bookmark_field',
@@ -220,6 +225,7 @@ final class TemplateLinksSurface {
 				'get_pagenum_link',
 				'get_permalink',
 				'get_preview_post_link',
+				'get_post_meta',
 				'get_post_class',
 				'get_posts_nav_link',
 				'get_previous_image_link',
@@ -232,12 +238,22 @@ final class TemplateLinksSurface {
 				'get_search_link',
 				'get_search_query',
 				'get_site_url',
+				'get_the_author',
+				'get_the_author_link',
+				'get_the_author_meta',
+				'get_the_author_posts',
+				'get_the_author_posts_link',
+				'get_the_modified_author',
 				'get_the_posts_navigation',
 				'get_the_posts_pagination',
 				'get_the_title',
+				'get_transient',
+				'get_userdata',
+				'get_users',
 				'get_year_link',
 				'has_filter',
 				'home_url',
+				'is_multi_author',
 				'is_wp_error',
 				'language_attributes',
 				'locate_template',
@@ -263,8 +279,16 @@ final class TemplateLinksSurface {
 				'remove_post_type_support',
 				'sanitize_html_class',
 				'sanitize_title_with_dashes',
+				'set_transient',
 				'taxonomy_exists',
+				'the_author',
+				'the_author_link',
+				'the_author_meta',
+				'the_author_posts',
+				'the_author_posts_link',
+				'the_modified_author',
 				'unregister_taxonomy',
+				'update_user_caches',
 				'wp_cache_delete',
 				'wp_cache_get',
 				'wp_cache_set',
@@ -277,6 +301,7 @@ final class TemplateLinksSurface {
 				'wp_get_attachment_url',
 				'wp_get_shortlink',
 				'wp_list_bookmarks',
+				'wp_list_authors',
 				'wp_preload_resources',
 				'wp_resource_hints',
 				'wp_shortlink_wp_head',
@@ -1967,6 +1992,533 @@ final class TemplateLinksSurface {
 		);
 	}
 
+	private static function check_author_template_helpers( \ComponentFuzz\FuzzContext $ctx ): array {
+		global $wpdb;
+
+		$failures        = array();
+		$marker          = strtolower( $ctx->identifier( 4, 10 ) );
+		$base_id         = 90000 + ( $ctx->seed() % 10000 );
+		$author_id       = $base_id + 1;
+		$editor_id       = $base_id + 2;
+		$admin_id        = $base_id + 3;
+		$second_id       = $base_id + 4;
+		$author_slug     = 'author-template-' . $marker;
+		$editor_slug     = 'editor-template-' . $marker;
+		$second_slug     = 'second-template-' . $marker;
+		$author_display  = 'Author Template ' . strtoupper( substr( $marker, 0, 3 ) );
+		$editor_display  = 'Editor Template ' . strtoupper( substr( $marker, 0, 3 ) );
+		$second_display  = 'Second Template ' . strtoupper( substr( $marker, 0, 3 ) );
+		$author_url      = 'http://example.test/authors/' . $author_slug . '/';
+		$users           = array(
+			$author_id => self::author_user_row(
+				$author_id,
+				'cf_author_' . $marker,
+				$author_slug,
+				$author_display,
+				$author_url
+			),
+			$editor_id => self::author_user_row(
+				$editor_id,
+				'cf_editor_' . $marker,
+				$editor_slug,
+				$editor_display,
+				'http://example.test/editors/' . $editor_slug . '/'
+			),
+			$admin_id  => self::author_user_row(
+				$admin_id,
+				'admin',
+				'admin-' . $marker,
+				'admin',
+				'http://example.test/admin/'
+			),
+			$second_id => self::author_user_row(
+				$second_id,
+				'cf_second_' . $marker,
+				$second_slug,
+				$second_display,
+				''
+			),
+		);
+		$previous_globals = self::snapshot_globals( array( 'authordata', 'page', 'paged', 'post', 'wp_query', 'wp_the_query' ) );
+		$post_ids         = array();
+		$events           = array(
+			'theAuthor'       => array(),
+			'modifiedAuthor'  => array(),
+			'getEmail'        => array(),
+			'theEmail'        => array(),
+			'getLogin'        => array(),
+			'authorLink'      => array(),
+			'authorPostsLink' => array(),
+			'listArgs'        => array(),
+			'userQueries'     => array(),
+			'listCounts'      => array(),
+			'multiAuthor'     => array(),
+		);
+		$the_author_filter = static function ( string $display_name ) use ( &$events ): string {
+			$events['theAuthor'][] = $display_name;
+			return $display_name;
+		};
+		$modified_filter   = static function ( string $display_name ) use ( &$events ): string {
+			$events['modifiedAuthor'][] = $display_name;
+			return $display_name;
+		};
+		$get_email_filter  = static function ( $value, int $user_id, $original_user_id ) use ( &$events ) {
+			$events['getEmail'][] = array(
+				'value'          => $value,
+				'userId'         => $user_id,
+				'originalUserId' => $original_user_id,
+			);
+			return $value;
+		};
+		$the_email_filter  = static function ( $value, $user_id ) use ( &$events ) {
+			$events['theEmail'][] = array(
+				'value'  => $value,
+				'userId' => $user_id,
+			);
+			return $value;
+		};
+		$get_login_filter  = static function ( $value, int $user_id, $original_user_id ) use ( &$events ) {
+			$events['getLogin'][] = array(
+				'value'          => $value,
+				'userId'         => $user_id,
+				'originalUserId' => $original_user_id,
+			);
+			return $value;
+		};
+		$author_link_filter = static function ( string $link, string $url, \WP_User $user ) use ( &$events, $marker ): string {
+			$events['authorLink'][] = array(
+				'link' => $link,
+				'url'  => $url,
+				'user' => $user->ID,
+			);
+			return str_replace( '<a ', '<a data-cfz-author-link="' . \esc_attr( $marker ) . '" ', $link );
+		};
+		$author_posts_link_filter = static function ( string $link, string $author, string $title ) use ( &$events, $marker ): string {
+			$events['authorPostsLink'][] = array(
+				'link'   => $link,
+				'author' => $author,
+				'title'  => $title,
+			);
+			return str_replace( '<a ', '<a data-cfz-author-posts="' . \esc_attr( $marker ) . '" ', $link );
+		};
+		$list_args_filter = static function ( array $query_args, array $parsed_args ) use ( &$events ): array {
+			$events['listArgs'][] = array(
+				'query'  => $query_args,
+				'parsed' => $parsed_args,
+			);
+			return $query_args;
+		};
+		$user_query_filter = static function ( $results, \WP_User_Query $query ) use ( &$events, $author_id, $editor_id, $admin_id, $second_id ): array {
+			unset( $results );
+
+			$coerce_ids = static function ( $value ): array {
+				if ( is_array( $value ) ) {
+					return array_values( array_filter( array_map( 'intval', $value ) ) );
+				}
+
+				return array_values( array_filter( array_map( 'intval', preg_split( '/[\s,]+/', (string) $value ) ?: array() ) ) );
+			};
+			$ids        = array( $author_id, $editor_id, $admin_id, $second_id );
+			$include    = $coerce_ids( $query->query_vars['include'] ?? array() );
+			$exclude    = $coerce_ids( $query->query_vars['exclude'] ?? array() );
+
+			if ( array() !== $include ) {
+				$ids = array_values( array_intersect( $ids, $include ) );
+			}
+			if ( array() !== $exclude ) {
+				$ids = array_values( array_diff( $ids, $exclude ) );
+			}
+
+			$query->total_users      = count( $ids );
+			$events['userQueries'][] = array(
+				'fields'  => $query->query_vars['fields'] ?? null,
+				'include' => $include,
+				'exclude' => $exclude,
+				'ids'     => $ids,
+			);
+
+			return $ids;
+		};
+		$list_counts_filter = static function ( $post_counts, array $parsed_args ) use ( &$events, $author_id, $editor_id, $admin_id, $second_id ): array {
+			$counts = array(
+				$author_id => 3,
+				$editor_id => 1,
+				$admin_id  => 5,
+				$second_id => 0,
+			);
+			$events['listCounts'][] = array(
+				'input'  => $post_counts,
+				'parsed' => $parsed_args,
+				'counts' => $counts,
+			);
+			return $counts;
+		};
+		$multi_author_filter = static function ( bool $is_multi_author ) use ( &$events ): bool {
+			$events['multiAuthor'][] = $is_multi_author;
+			return false;
+		};
+
+		try {
+			foreach ( $users as $user ) {
+				if ( isset( $wpdb ) && is_object( $wpdb ) && method_exists( $wpdb, 'insert' ) ) {
+					$wpdb->insert( $wpdb->users, (array) $user );
+				}
+				\update_user_caches( $user );
+				self::prime_author_user_meta( (int) $user->ID, $user->display_name );
+			}
+
+			$current_post = self::current_post();
+			$authored     = new \WP_Post(
+				(object) array_merge(
+					$current_post->to_array(),
+					array(
+						'ID'          => $current_post->ID + 50000 + $ctx->int( 10, 999 ),
+						'post_author' => $author_id,
+						'post_name'   => 'author-template-current-' . $marker,
+						'post_title'  => 'Author Template Current ' . $marker,
+					)
+				)
+			);
+			$extra_one    = new \WP_Post(
+				(object) array_merge(
+					$authored->to_array(),
+					array(
+						'ID'        => $authored->ID + 1,
+						'post_name' => 'author-template-extra-one-' . $marker,
+					)
+				)
+			);
+			$extra_two    = new \WP_Post(
+				(object) array_merge(
+					$authored->to_array(),
+					array(
+						'ID'        => $authored->ID + 2,
+						'post_name' => 'author-template-extra-two-' . $marker,
+					)
+				)
+			);
+			$second_post  = new \WP_Post(
+				(object) array_merge(
+					$authored->to_array(),
+					array(
+						'ID'          => $authored->ID + 3,
+						'post_author' => $second_id,
+						'post_name'   => 'author-template-second-' . $marker,
+					)
+				)
+			);
+
+			foreach ( array( $authored, $extra_one, $extra_two ) as $post ) {
+				self::seed_post_storage( $post );
+				$post_ids[] = $post->ID;
+			}
+			\wp_cache_set( $authored->ID, array( '_edit_last' => array( $editor_id ) ), 'post_meta' );
+			self::set_current_post_query( $authored, 1, false );
+			$GLOBALS['authordata'] = \get_userdata( $author_id );
+
+			\add_filter( 'the_author', $the_author_filter, 10, 1 );
+			\add_filter( 'the_modified_author', $modified_filter, 10, 1 );
+			\add_filter( 'get_the_author_user_email', $get_email_filter, 10, 3 );
+			\add_filter( 'the_author_email', $the_email_filter, 10, 2 );
+			\add_filter( 'get_the_author_user_login', $get_login_filter, 10, 3 );
+			\add_filter( 'the_author_link', $author_link_filter, 10, 3 );
+			\add_filter( 'the_author_posts_link', $author_posts_link_filter, 10, 3 );
+
+			$author_name = \get_the_author();
+			$author_return = null;
+			$author_echo   = self::capture_output(
+				static function () use ( &$author_return ): void {
+					$author_return = \the_author();
+				}
+			);
+			$modified_name = \get_the_modified_author( $authored );
+			$modified_echo = self::capture_output(
+				static function (): void {
+					\the_modified_author();
+				}
+			);
+			$email_meta    = \get_the_author_meta( 'email' );
+			$email_echo    = self::capture_output(
+				static function (): void {
+					\the_author_meta( 'email' );
+				}
+			);
+			$explicit_login = \get_the_author_meta( 'login', $editor_id );
+			$GLOBALS['authordata'] = \get_userdata( $author_id );
+			$author_link_with_title = \get_the_author_link( true );
+			$author_link_no_title   = \get_the_author_link( false );
+			$author_link_echo       = self::capture_output(
+				static function (): void {
+					\the_author_link( false );
+				}
+			);
+			$author_posts_count = \get_the_author_posts();
+			$author_posts_echo  = self::capture_output(
+				static function (): void {
+					\the_author_posts();
+				}
+			);
+			$author_posts_link = \get_the_author_posts_link();
+			$author_posts_link_echo = self::capture_output(
+				static function (): void {
+					\the_author_posts_link();
+				}
+			);
+			$missing_author      = null;
+			$missing_posts_link  = null;
+			$missing_post_count  = null;
+			$without_authordata  = self::snapshot_globals( array( 'authordata', 'post' ) );
+			unset( $GLOBALS['authordata'], $GLOBALS['post'] );
+			try {
+				$missing_author     = \get_the_author();
+				$missing_posts_link = \get_the_author_posts_link();
+				$missing_post_count = \get_the_author_posts();
+			} finally {
+				self::restore_globals( $without_authordata );
+			}
+
+			self::collect_failure(
+				$failures,
+				$author_display === $author_name
+					&& $author_display === $author_return
+					&& $author_display === $author_echo
+					&& $editor_display === $modified_name
+					&& $editor_display === $modified_echo
+					&& $users[ $author_id ]->user_email === $email_meta
+					&& $users[ $author_id ]->user_email === $email_echo
+					&& $users[ $editor_id ]->user_login === $explicit_login
+					&& '' === $missing_author
+					&& '' === $missing_posts_link
+					&& 0 === $missing_post_count
+					&& in_array( $author_display, $events['theAuthor'], true )
+					&& in_array( $editor_display, $events['modifiedAuthor'], true )
+					&& self::has_author_meta_event( $events['getEmail'], $author_id, false, $users[ $author_id ]->user_email )
+					&& self::has_author_meta_event( $events['getLogin'], $editor_id, $editor_id, $users[ $editor_id ]->user_login )
+					&& array( array( 'value' => $users[ $author_id ]->user_email, 'userId' => false ) ) === $events['theEmail'],
+				'author display, modified-author, metadata alias, echo-wrapper, and no-global fail-closed contracts hold',
+				array(
+					'authorName'       => $author_name,
+					'authorReturn'     => $author_return,
+					'authorEcho'       => $author_echo,
+					'modifiedName'     => $modified_name,
+					'modifiedEcho'     => $modified_echo,
+					'emailMeta'        => $email_meta,
+					'emailEcho'        => $email_echo,
+					'explicitLogin'    => $explicit_login,
+					'missingAuthor'    => $missing_author,
+					'missingPostsLink' => $missing_posts_link,
+					'missingPostCount' => $missing_post_count,
+					'events'           => array(
+						'theAuthor'      => $events['theAuthor'],
+						'modifiedAuthor' => $events['modifiedAuthor'],
+						'getEmail'       => $events['getEmail'],
+						'theEmail'       => $events['theEmail'],
+						'getLogin'       => $events['getLogin'],
+					),
+				)
+			);
+
+			$expected_posts_href = 'http://example.test/author/' . $author_slug . '/';
+			self::collect_failure(
+				$failures,
+				str_contains( $author_link_with_title, 'data-cfz-author-link="' . $marker . '"' )
+					&& str_contains( $author_link_with_title, 'href="' . $author_url . '"' )
+					&& str_contains( $author_link_with_title, 'title="' )
+					&& str_contains( $author_link_with_title, 'rel="author external"' )
+					&& str_contains( $author_link_with_title, $author_display )
+					&& str_contains( $author_link_no_title, 'data-cfz-author-link="' . $marker . '"' )
+					&& ! str_contains( $author_link_no_title, ' title="' )
+					&& $author_link_no_title === $author_link_echo
+					&& 3 === $author_posts_count
+					&& '3' === $author_posts_echo
+					&& str_contains( $author_posts_link, 'data-cfz-author-posts="' . $marker . '"' )
+					&& str_contains( $author_posts_link, 'href="' . $expected_posts_href . '"' )
+					&& str_contains( $author_posts_link, 'rel="author"' )
+					&& ! str_contains( $author_posts_link, ' title="' )
+					&& $author_posts_link === $author_posts_link_echo
+					&& ! str_contains( strtolower( $author_link_with_title . $author_link_no_title . $author_posts_link ), '<script' )
+					&& ! str_contains( strtolower( $author_link_with_title . $author_link_no_title . $author_posts_link ), 'javascript:' )
+					&& 3 === count( $events['authorLink'] )
+					&& 2 === count( $events['authorPostsLink'] ),
+				'author link, author-posts link, and post-count helpers render expected links, counts, filters, and echo parity',
+				array(
+					'authorLinkWithTitle' => self::describe_string( $author_link_with_title ),
+					'authorLinkNoTitle'   => self::describe_string( $author_link_no_title ),
+					'authorLinkEcho'      => self::describe_string( $author_link_echo ),
+					'authorPostsCount'    => $author_posts_count,
+					'authorPostsEcho'     => $author_posts_echo,
+					'authorPostsLink'     => self::describe_string( $author_posts_link ),
+					'authorPostsLinkEcho' => self::describe_string( $author_posts_link_echo ),
+					'authorLinkEvents'    => $events['authorLink'],
+					'authorPostsEvents'   => $events['authorPostsLink'],
+				)
+			);
+
+			\add_filter( 'wp_list_authors_args', $list_args_filter, 10, 2 );
+			\add_filter( 'users_pre_query', $user_query_filter, 10, 2 );
+			\add_filter( 'pre_wp_list_authors_post_counts_query', $list_counts_filter, 10, 2 );
+			try {
+				$list_args = array(
+					'echo'          => false,
+					'include'       => array( $author_id, $editor_id, $admin_id, $second_id ),
+					'exclude'       => array( $editor_id ),
+					'exclude_admin' => true,
+					'hide_empty'    => true,
+					'show_fullname' => true,
+					'optioncount'   => true,
+					'feed'          => 'Feed <Alt>',
+					'feed_image'    => 'http://example.test/feed-' . $marker . '.png?bad=<x>',
+					'feed_type'     => 'atom',
+					'style'         => 'list',
+					'html'          => true,
+					'orderby'       => 'ID',
+				);
+				$list_html = \wp_list_authors( $list_args );
+				$list_echo = self::capture_output(
+					static function () use ( $list_args ): void {
+						\wp_list_authors( array_merge( $list_args, array( 'echo' => true ) ) );
+					}
+				);
+				$plain_list = \wp_list_authors(
+					array(
+						'echo'          => false,
+						'include'       => array( $author_id, $second_id ),
+						'exclude_admin' => false,
+						'hide_empty'    => false,
+						'html'          => false,
+						'style'         => 'none',
+						'orderby'       => 'ID',
+					)
+				);
+			} finally {
+				\remove_filter( 'pre_wp_list_authors_post_counts_query', $list_counts_filter, 10 );
+				\remove_filter( 'users_pre_query', $user_query_filter, 10 );
+				\remove_filter( 'wp_list_authors_args', $list_args_filter, 10 );
+			}
+
+			$list_checks = array(
+				'isString'       => is_string( $list_html ),
+				'echoParity'     => $list_html === $list_echo,
+				'hasListItem'    => is_string( $list_html ) && str_contains( $list_html, '<li>' ),
+				'hasHref'        => is_string( $list_html ) && str_contains( $list_html, 'href="' . $expected_posts_href . '"' ),
+				'hasFullName'    => is_string( $list_html ) && str_contains( $list_html, 'Primary Author' ),
+				'hasCount'       => is_string( $list_html ) && str_contains( $list_html, ' (3)' ),
+				'hasFeedImage'   => is_string( $list_html ) && str_contains( $list_html, '<img src="http://example.test/feed-' . $marker . '.png?bad=x"' ),
+				'hasFeedAlt'     => is_string( $list_html ) && str_contains( $list_html, 'alt="Feed &lt;Alt&gt;"' ),
+				'noEditor'       => is_string( $list_html ) && ! str_contains( $list_html, $editor_display ) && ! str_contains( $list_html, 'Editing Author' ),
+				'noAdmin'        => is_string( $list_html ) && ! str_contains( $list_html, 'admin' ) && ! str_contains( $list_html, 'Admin User' ),
+				'noSecond'       => is_string( $list_html ) && ! str_contains( $list_html, $second_display ) && ! str_contains( $list_html, 'Second Author' ),
+				'plainExpected'  => $author_display . ', ' . $second_display === $plain_list,
+				'listArgsCount'  => 3 === count( $events['listArgs'] ),
+				'userQueryCount' => 3 === count( $events['userQueries'] ),
+				'countCount'     => 3 === count( $events['listCounts'] ),
+				'queryFields'    => self::author_list_query_shapes_match( $events['listArgs'], $events['userQueries'], $author_id, $editor_id, $admin_id, $second_id ),
+			);
+			self::collect_failure(
+				$failures,
+				! in_array( false, $list_checks, true )
+					&& is_string( $list_html )
+					&& ! str_contains( strtolower( $list_html ), '<script' )
+					&& ! str_contains( strtolower( $list_html ), 'javascript:' )
+					&& false === \has_filter( 'wp_list_authors_args', $list_args_filter )
+					&& false === \has_filter( 'users_pre_query', $user_query_filter )
+					&& false === \has_filter( 'pre_wp_list_authors_post_counts_query', $list_counts_filter ),
+				'wp_list_authors honors include/exclude/admin/empty/full-name/feed/count/html/plain/echo branches with scoped query filters',
+				array(
+					'listHtml'    => self::describe_string( is_string( $list_html ) ? $list_html : '' ),
+					'listEcho'    => self::describe_string( $list_echo ),
+					'plainList'   => $plain_list,
+					'failedChecks' => implode( ',', array_keys( array_filter( $list_checks, static fn( bool $ok ): bool => ! $ok ) ) ),
+					'listArgs'    => $events['listArgs'],
+					'userQueries' => $events['userQueries'],
+					'listCounts'  => $events['listCounts'],
+					'filters'     => array(
+						'args'    => \has_filter( 'wp_list_authors_args', $list_args_filter ),
+						'users'   => \has_filter( 'users_pre_query', $user_query_filter ),
+						'counts'  => \has_filter( 'pre_wp_list_authors_post_counts_query', $list_counts_filter ),
+					),
+				)
+			);
+
+			\delete_transient( 'is_multi_author' );
+			$same_author_multi_posts = \is_multi_author();
+			self::delete_post_storage( $extra_one->ID );
+			self::delete_post_storage( $extra_two->ID );
+			$post_ids = array_values( array_diff( $post_ids, array( $extra_one->ID, $extra_two->ID ) ) );
+			\delete_transient( 'is_multi_author' );
+			$single_author = \is_multi_author();
+			self::seed_post_storage( $second_post );
+			$post_ids[] = $second_post->ID;
+			\delete_transient( 'is_multi_author' );
+			$multi_author  = \is_multi_author();
+			self::delete_post_storage( $second_post->ID );
+			$post_ids = array_values( array_diff( $post_ids, array( $second_post->ID ) ) );
+			$cached_multi  = \is_multi_author();
+			\add_filter( 'is_multi_author', $multi_author_filter, 10, 1 );
+			try {
+				$filtered_multi = \is_multi_author();
+			} finally {
+				\remove_filter( 'is_multi_author', $multi_author_filter, 10 );
+			}
+			\delete_transient( 'is_multi_author' );
+
+			self::collect_failure(
+				$failures,
+				false === $same_author_multi_posts
+					&& false === $single_author
+					&& true === $multi_author
+					&& true === $cached_multi
+					&& false === $filtered_multi
+					&& array( true ) === $events['multiAuthor']
+					&& false === \get_transient( 'is_multi_author' )
+					&& false === \has_filter( 'is_multi_author', $multi_author_filter ),
+				'is_multi_author reflects one-author misses, two-author misses, transient hits, filter overrides, and cache cleanup',
+				array(
+					'sameAuthorMultiPosts' => $same_author_multi_posts,
+					'singleAuthor'  => $single_author,
+					'multiAuthor'   => $multi_author,
+					'cachedMulti'   => $cached_multi,
+					'filteredMulti' => $filtered_multi,
+					'events'        => $events['multiAuthor'],
+					'transient'     => \get_transient( 'is_multi_author' ),
+					'filter'        => \has_filter( 'is_multi_author', $multi_author_filter ),
+				)
+			);
+		} finally {
+			\remove_filter( 'the_author', $the_author_filter, 10 );
+			\remove_filter( 'the_modified_author', $modified_filter, 10 );
+			\remove_filter( 'get_the_author_user_email', $get_email_filter, 10 );
+			\remove_filter( 'the_author_email', $the_email_filter, 10 );
+			\remove_filter( 'get_the_author_user_login', $get_login_filter, 10 );
+			\remove_filter( 'the_author_link', $author_link_filter, 10 );
+			\remove_filter( 'the_author_posts_link', $author_posts_link_filter, 10 );
+			\remove_filter( 'wp_list_authors_args', $list_args_filter, 10 );
+			\remove_filter( 'users_pre_query', $user_query_filter, 10 );
+			\remove_filter( 'pre_wp_list_authors_post_counts_query', $list_counts_filter, 10 );
+			\remove_filter( 'is_multi_author', $multi_author_filter, 10 );
+			\delete_transient( 'is_multi_author' );
+
+			foreach ( array_unique( $post_ids ) as $post_id ) {
+				self::delete_post_storage( (int) $post_id );
+			}
+			foreach ( array_keys( $users ) as $user_id ) {
+				if ( isset( $wpdb ) && is_object( $wpdb ) && method_exists( $wpdb, 'delete' ) ) {
+					$wpdb->delete( $wpdb->users, array( 'ID' => $user_id ) );
+				}
+				\clean_user_cache( $user_id );
+			}
+
+			self::restore_globals( $previous_globals );
+		}
+
+		return self::row(
+			$ctx,
+			'template-links.authors.template-helper-contracts',
+			array() === $failures,
+			array( 'failures' => $failures )
+		);
+	}
+
 	private static function check_adjacent_post_link_helpers( \ComponentFuzz\FuzzContext $ctx ): array {
 		$failures = array();
 		$current  = self::current_post();
@@ -2777,6 +3329,48 @@ final class TemplateLinksSurface {
 		);
 	}
 
+	private static function author_user_row( int $id, string $login, string $nicename, string $display_name, string $url ): object {
+		return (object) array(
+			'ID'                  => $id,
+			'user_login'          => $login,
+			'user_pass'           => '$P$componentfuzzauthor',
+			'user_nicename'       => $nicename,
+			'user_email'          => $login . '@example.test',
+			'user_url'            => $url,
+			'user_registered'     => '2026-06-20 12:00:00',
+			'user_activation_key' => '',
+			'user_status'         => 0,
+			'display_name'        => $display_name,
+		);
+	}
+
+	private static function prime_author_user_meta( int $id, string $display_name ): void {
+		$first_name = '';
+		$last_name  = 'Author';
+
+		if ( 'admin' === $display_name ) {
+			$first_name = 'Admin';
+			$last_name  = 'User';
+		} elseif ( str_starts_with( $display_name, 'Author Template ' ) ) {
+			$first_name = 'Primary';
+		} elseif ( str_starts_with( $display_name, 'Editor Template ' ) ) {
+			$first_name = 'Editing';
+		} elseif ( str_starts_with( $display_name, 'Second Template ' ) ) {
+			$first_name = 'Second';
+		}
+
+		\wp_cache_set(
+			$id,
+			array(
+				'first_name'  => array( $first_name ),
+				'last_name'   => array( $last_name ),
+				'nickname'    => array( $display_name ),
+				'description' => array( 'Author template fixture ' . $id ),
+			),
+			'user_meta'
+		);
+	}
+
 	private static function adjacent_post_case( \ComponentFuzz\FuzzContext $ctx, \WP_Post $current, string $adjacent ): \WP_Post {
 		$is_previous = 'previous' === $adjacent;
 		$id_offset   = $is_previous ? 10000 : 20000;
@@ -3334,6 +3928,63 @@ final class TemplateLinksSurface {
 		return true;
 	}
 
+	private static function has_author_meta_event( array $events, int $user_id, $original_user_id, $value ): bool {
+		foreach ( $events as $event ) {
+			if (
+				(int) ( $event['userId'] ?? 0 ) === $user_id
+				&& ( $event['originalUserId'] ?? null ) === $original_user_id
+				&& ( $event['value'] ?? null ) === $value
+			) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private static function author_list_query_shapes_match( array $list_args, array $user_queries, int $author_id, int $editor_id, int $admin_id, int $second_id ): bool {
+		if ( 3 !== count( $list_args ) || 3 !== count( $user_queries ) ) {
+			return false;
+		}
+
+		foreach ( $list_args as $event ) {
+			if ( 'ids' !== ( $event['query']['fields'] ?? null ) ) {
+				return false;
+			}
+		}
+		foreach ( $user_queries as $event ) {
+			if ( 'ids' !== ( $event['fields'] ?? null ) ) {
+				return false;
+			}
+		}
+
+		return self::same_author_id_set( $list_args[0]['query']['include'] ?? array(), array( $author_id, $editor_id, $admin_id, $second_id ) )
+			&& self::same_author_id_set( $list_args[0]['query']['exclude'] ?? array(), array( $editor_id ) )
+			&& self::same_author_id_set( $list_args[1]['query']['include'] ?? array(), array( $author_id, $editor_id, $admin_id, $second_id ) )
+			&& self::same_author_id_set( $list_args[1]['query']['exclude'] ?? array(), array( $editor_id ) )
+			&& self::same_author_id_set( $list_args[2]['query']['include'] ?? array(), array( $author_id, $second_id ) )
+			&& self::same_author_id_set( $list_args[2]['query']['exclude'] ?? array(), array() )
+			&& self::same_author_id_set( $user_queries[0]['ids'] ?? array(), array( $author_id, $admin_id, $second_id ) )
+			&& self::same_author_id_set( $user_queries[1]['ids'] ?? array(), array( $author_id, $admin_id, $second_id ) )
+			&& self::same_author_id_set( $user_queries[2]['ids'] ?? array(), array( $author_id, $second_id ) );
+	}
+
+	private static function same_author_id_set( $actual, array $expected ): bool {
+		if ( is_string( $actual ) ) {
+			$actual = preg_split( '/[\s,]+/', $actual ) ?: array();
+		}
+		if ( ! is_array( $actual ) ) {
+			$actual = array();
+		}
+
+		$actual   = array_values( array_filter( array_map( 'intval', $actual ) ) );
+		$expected = array_values( array_filter( array_map( 'intval', $expected ) ) );
+		sort( $actual );
+		sort( $expected );
+
+		return $actual === $expected;
+	}
+
 	private static function install_filters(): void {
 		foreach ( self::option_filter_names() as $option ) {
 			add_filter( "pre_option_{$option}", array( self::class, 'filter_option' ), 10, 3 );
@@ -3420,6 +4071,7 @@ final class TemplateLinksSurface {
 	private static function snapshot_state(): array {
 		$globals = array(
 			'_wp_post_type_features',
+			'authordata',
 			'page',
 			'paged',
 			'post',
