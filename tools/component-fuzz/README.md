@@ -242,8 +242,10 @@ database, network requests, or a configured site.
 - `customizer`: no-DB Customizer API coverage for manager registry lifecycles,
   setting sanitize/validate/post value flows, slashed customized JSON ingestion
   and programmatic post-value merge precedence, multidimensional option
-  previewing, container/control JSON exports, active callbacks, and selective
-  refresh partial registration/rendering without changeset persistence.
+  previewing, container/control JSON exports, active callbacks, selective
+  refresh partial registration/rendering, and direct inactive/active theme
+  preview filter/action lifecycle coverage for child-theme stylesheet/template
+  switching without changeset persistence.
 - `customizer-nav-widgets-requests`: in-memory wpdb-backed Customizer nav menu
   and widget request coverage, including loaded component/capability hook
   gates, menu available/search AJAX, auto-draft insertion and publish cleanup,
@@ -934,15 +936,16 @@ media modal runtime behavior, and browser-side image editor UI; server-side
 image-edit AJAX save, preview, crop, restore, and sub-size request branches are
 covered by `media-image-edit-requests`. The surface covers direct server-side
 helpers with synthetic attachment rows and cache/filter-backed metadata only. The
-base `customizer` surface intentionally avoids changeset save/publish,
-nav-menu persistence, widget persistence, and real post/option storage beyond
-the existing no-DB option stub. `customizer-persistence` covers changesets and
-custom CSS persistence, while `customizer-nav-widgets-requests` covers bounded
-nav-menu/widget request, remap, and selective-refresh persistence paths against
-the in-memory `wpdb` stub. The `admin-options-submission` surface covers the
-bounded `wp-admin/options.php` submission/update branch without loading the full
-admin bootstrap, redirects, or process exits; it locally installs only the two
-documented `new_admin_email` dynamic option hooks when exercising the pending
+base `customizer` surface covers direct manager/theme-preview lifecycles but
+intentionally avoids changeset save/publish, `setup_theme()`-driven theme
+switching, nav-menu persistence, widget persistence, and real post/option
+storage beyond the existing no-DB option stub. `customizer-persistence` covers
+changesets and custom CSS persistence, while `customizer-nav-widgets-requests`
+covers bounded nav-menu/widget request, remap, and selective-refresh persistence
+paths against the in-memory `wpdb` stub. The `admin-options-submission` surface
+covers the bounded `wp-admin/options.php` submission/update branch without
+loading the full admin bootstrap, redirects, or process exits; it locally
+installs only the two documented `new_admin_email` dynamic option hooks when exercising the pending
 admin email confirmation path. It also mirrors the conditional Writing Settings
 allowlist gates for post-by-email, legacy DB-version formatting options, and
 public-blog update services without loading the exiting admin controller. The

@@ -33,6 +33,7 @@ final class CustomizerSurface {
 			$rows[] = self::check_multidimensional_values( $ctx->fork( 'multidimensional' ) );
 			$rows[] = self::check_json_and_active_callbacks( $ctx->fork( 'json-active' ) );
 			$rows[] = self::check_selective_refresh_partials( $ctx->fork( 'partials' ) );
+			$rows[] = self::check_theme_preview_lifecycle( $ctx->fork( 'theme-preview' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
 				'customizer.surface-no-throw',
@@ -80,6 +81,9 @@ final class CustomizerSurface {
 				'current_user_can',
 				'esc_attr',
 				'get_option',
+				'get_raw_theme_root',
+				'get_stylesheet',
+				'get_template',
 				'has_action',
 				'has_filter',
 				'is_wp_error',
@@ -1084,18 +1088,209 @@ final class CustomizerSurface {
 		);
 	}
 
-	private static function manager( \ComponentFuzz\FuzzContext $ctx ): \WP_Customize_Manager {
+	private static function check_theme_preview_lifecycle( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures        = array();
+		$fixture         = self::create_theme_fixture( $ctx );
+		$option_snapshot = isset( $GLOBALS['wpdb'] ) && method_exists( $GLOBALS['wpdb'], 'component_fuzz_get_options' )
+			? $GLOBALS['wpdb']->component_fuzz_get_options()
+			: null;
+		$start_events    = array();
+		$stop_events     = array();
+		$preview_manager = null;
+		$active_manager  = null;
+
+		$theme_filters = array(
+			'template'                   => 'get_template',
+			'stylesheet'                 => 'get_stylesheet',
+			'pre_option_current_theme'   => 'current_theme',
+			'pre_option_stylesheet'      => 'get_stylesheet',
+			'pre_option_template'        => 'get_template',
+			'pre_option_stylesheet_root' => 'get_stylesheet_root',
+			'pre_option_template_root'   => 'get_template_root',
+		);
+
+		$start_action = static function ( \WP_Customize_Manager $manager ) use ( &$start_events, &$preview_manager, &$active_manager ): void {
+			$start_events[] = array(
+				'samePreviewManager' => null !== $preview_manager && $manager === $preview_manager,
+				'sameActiveManager'  => null !== $active_manager && $manager === $active_manager,
+				'isPreview'          => $manager->is_preview(),
+				'isThemeActive'      => $manager->is_theme_active(),
+				'stylesheet'         => $manager->get_stylesheet(),
+				'template'           => $manager->get_template(),
+			);
+		};
+		$stop_action  = static function ( \WP_Customize_Manager $manager ) use ( &$stop_events, &$preview_manager, &$active_manager ): void {
+			$stop_events[] = array(
+				'samePreviewManager' => null !== $preview_manager && $manager === $preview_manager,
+				'sameActiveManager'  => null !== $active_manager && $manager === $active_manager,
+				'isPreview'          => $manager->is_preview(),
+				'isThemeActive'      => $manager->is_theme_active(),
+				'stylesheet'         => $manager->get_stylesheet(),
+				'template'           => $manager->get_template(),
+			);
+		};
+
+		\add_action( 'start_previewing_theme', $start_action );
+		\add_action( 'stop_previewing_theme', $stop_action );
+
+		try {
+			self::seed_active_theme_options( $fixture );
+
+			$preview_manager = self::manager( $ctx, array( 'theme' => $fixture['previewSlug'] ) );
+			$before_preview_filters = self::manager_theme_filters( $preview_manager, $theme_filters );
+
+			$preview_manager->start_previewing_theme();
+			$after_start_values  = self::theme_preview_values();
+			$after_start_filters = self::manager_theme_filters( $preview_manager, $theme_filters );
+			$preview_manager->start_previewing_theme();
+			$after_second_start_events = count( $start_events );
+
+			$preview_manager->stop_previewing_theme();
+			$after_stop_values  = self::theme_preview_values();
+			$after_stop_filters = self::manager_theme_filters( $preview_manager, $theme_filters );
+			$preview_manager->stop_previewing_theme();
+			$after_second_stop_events = count( $stop_events );
+
+			self::collect_failure(
+				$failures,
+				! $preview_manager->is_theme_active()
+					&& false === $before_preview_filters['any']
+					&& true === $after_start_filters['all']
+					&& false === $after_stop_filters['any']
+					&& $fixture['previewSlug'] === $after_start_values['stylesheet']
+					&& $fixture['previewTemplate'] === $after_start_values['template']
+					&& $fixture['previewName'] === $after_start_values['currentTheme']
+					&& $fixture['rawRoot'] === $after_start_values['stylesheetRoot']
+					&& $fixture['rawRoot'] === $after_start_values['templateRoot']
+					&& $fixture['activeSlug'] === $after_stop_values['stylesheet']
+					&& $fixture['activeSlug'] === $after_stop_values['template']
+					&& $fixture['activeName'] === $after_stop_values['currentTheme']
+					&& $fixture['rawRoot'] === $after_stop_values['stylesheetRoot']
+					&& $fixture['rawRoot'] === $after_stop_values['templateRoot']
+					&& array(
+						array(
+							'samePreviewManager' => true,
+							'sameActiveManager'  => false,
+							'isPreview'          => true,
+							'isThemeActive'      => false,
+							'stylesheet'         => $fixture['previewSlug'],
+							'template'           => $fixture['previewTemplate'],
+						),
+					) === $start_events
+					&& array(
+						array(
+							'samePreviewManager' => true,
+							'sameActiveManager'  => false,
+							'isPreview'          => false,
+							'isThemeActive'      => false,
+							'stylesheet'         => $fixture['previewSlug'],
+							'template'           => $fixture['previewTemplate'],
+						),
+					) === $stop_events
+					&& 1 === $after_second_start_events
+					&& 1 === $after_second_stop_events,
+				'inactive theme preview installs theme-switching filters, exposes preview values, fires once, and cleans up on stop',
+				array(
+					'fixture'                => $fixture,
+					'beforeFilters'          => $before_preview_filters,
+					'afterStartFilters'      => $after_start_filters,
+					'afterStopFilters'       => $after_stop_filters,
+					'afterStartValues'       => $after_start_values,
+					'afterStopValues'        => $after_stop_values,
+					'startEvents'            => $start_events,
+					'stopEvents'             => $stop_events,
+					'afterSecondStartEvents' => $after_second_start_events,
+					'afterSecondStopEvents'  => $after_second_stop_events,
+				)
+			);
+
+			$start_events   = array();
+			$stop_events    = array();
+			$active_manager = self::manager( $ctx->fork( 'active' ), array( 'theme' => $fixture['activeSlug'] ) );
+			$before_active_filters = self::manager_theme_filters( $active_manager, $theme_filters );
+			$active_manager->start_previewing_theme();
+			$active_start_filters = self::manager_theme_filters( $active_manager, $theme_filters );
+			$active_manager->stop_previewing_theme();
+			$active_stop_filters = self::manager_theme_filters( $active_manager, $theme_filters );
+
+			self::collect_failure(
+				$failures,
+				$active_manager->is_theme_active()
+					&& false === $before_active_filters['any']
+					&& false === $active_start_filters['any']
+					&& false === $active_stop_filters['any']
+					&& array(
+						array(
+							'samePreviewManager' => false,
+							'sameActiveManager'  => true,
+							'isPreview'          => true,
+							'isThemeActive'      => true,
+							'stylesheet'         => $fixture['activeSlug'],
+							'template'           => $fixture['activeSlug'],
+						),
+					) === $start_events
+					&& array(
+						array(
+							'samePreviewManager' => false,
+							'sameActiveManager'  => true,
+							'isPreview'          => false,
+							'isThemeActive'      => true,
+							'stylesheet'         => $fixture['activeSlug'],
+							'template'           => $fixture['activeSlug'],
+						),
+					) === $stop_events,
+				'active theme preview toggles preview state and actions without installing theme-switching filters',
+				array(
+					'beforeFilters'      => $before_active_filters,
+					'activeStartFilters' => $active_start_filters,
+					'activeStopFilters'  => $active_stop_filters,
+					'startEvents'        => $start_events,
+					'stopEvents'         => $stop_events,
+				)
+			);
+		} finally {
+			\remove_action( 'start_previewing_theme', $start_action );
+			\remove_action( 'stop_previewing_theme', $stop_action );
+			if ( null !== $option_snapshot && isset( $GLOBALS['wpdb'] ) && method_exists( $GLOBALS['wpdb'], 'component_fuzz_reset_options' ) ) {
+				$GLOBALS['wpdb']->component_fuzz_reset_options( $option_snapshot );
+			}
+			self::remove_theme_fixture( $fixture );
+		}
+
+		self::collect_failure(
+			$failures,
+			false === \has_action( 'start_previewing_theme', $start_action )
+				&& false === \has_action( 'stop_previewing_theme', $stop_action ),
+			'theme preview lifecycle actions are removed after the check',
+			array(
+				'startAction' => \has_action( 'start_previewing_theme', $start_action ),
+				'stopAction'  => \has_action( 'stop_previewing_theme', $stop_action ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'customizer.manager.theme-preview-filter-lifecycle',
+			array() === $failures,
+			array( 'failures' => $failures )
+		);
+	}
+
+	private static function manager( \ComponentFuzz\FuzzContext $ctx, array $args = array() ): \WP_Customize_Manager {
 		$components_filter = static function (): array {
 			return array();
 		};
 		\add_filter( 'customize_loaded_components', $components_filter, 1000 );
 		try {
 			$manager = new \WP_Customize_Manager(
-				array(
-					'changeset_uuid'     => self::uuid( $ctx ),
-					'settings_previewed' => false,
-					'branching'          => true,
-					'autosaved'          => false,
+				array_merge(
+					array(
+						'changeset_uuid'     => self::uuid( $ctx ),
+						'settings_previewed' => false,
+						'branching'          => true,
+						'autosaved'          => false,
+					),
+					$args
 				)
 			);
 		} finally {
@@ -1108,6 +1303,121 @@ final class CustomizerSurface {
 			\add_filter( 'user_has_cap', array( self::class, 'grant_runtime_capabilities' ), 10, 4 );
 		}
 		return $manager;
+	}
+
+	private static function create_theme_fixture( \ComponentFuzz\FuzzContext $ctx ): array {
+		$theme_root = defined( 'WP_CONTENT_DIR' ) ? WP_CONTENT_DIR . '/themes' : sys_get_temp_dir() . '/component-fuzz-themes';
+		if ( ! is_dir( $theme_root ) ) {
+			@mkdir( $theme_root, 0777, true );
+		}
+
+		$suffix          = strtolower( preg_replace( '/[^a-z0-9-]+/', '-', $ctx->identifier( 6, 14 ) ) );
+		$suffix          = trim( $suffix, '-' );
+		$suffix          = '' === $suffix ? substr( md5( (string) $ctx->seed() ), 0, 8 ) : $suffix;
+		$active_slug     = 'cfz-active-' . $suffix;
+		$preview_parent  = 'cfz-parent-' . $suffix;
+		$preview_slug    = 'cfz-child-' . $suffix;
+		$active_name     = 'CFZ Active ' . $suffix;
+		$parent_name     = 'CFZ Parent ' . $suffix;
+		$preview_name    = 'CFZ Preview ' . $suffix;
+		$created_paths   = array(
+			$theme_root . '/' . $active_slug,
+			$theme_root . '/' . $preview_parent,
+			$theme_root . '/' . $preview_slug,
+		);
+
+		self::write_theme_files( $created_paths[0], $active_name );
+		self::write_theme_files( $created_paths[1], $parent_name );
+		self::write_theme_files( $created_paths[2], $preview_name, $preview_parent );
+		self::refresh_theme_discovery();
+
+		return array(
+			'themeRoot'       => $theme_root,
+			'rawRoot'         => \get_raw_theme_root( $preview_slug, true ),
+			'activeSlug'      => $active_slug,
+			'activeName'      => $active_name,
+			'previewSlug'     => $preview_slug,
+			'previewTemplate' => $preview_parent,
+			'previewName'     => $preview_name,
+			'createdPaths'    => $created_paths,
+		);
+	}
+
+	private static function write_theme_files( string $path, string $name, ?string $template = null ): void {
+		if ( ! is_dir( $path ) ) {
+			@mkdir( $path, 0777, true );
+		}
+
+		$headers = "/*\nTheme Name: {$name}\n";
+		if ( null !== $template ) {
+			$headers .= "Template: {$template}\n";
+		}
+		$headers .= "*/\n";
+
+		file_put_contents( $path . '/style.css', $headers );
+		file_put_contents( $path . '/index.php', "<?php\n" );
+	}
+
+	private static function refresh_theme_discovery(): void {
+		if ( function_exists( 'wp_clean_themes_cache' ) ) {
+			\wp_clean_themes_cache( true );
+		}
+		if ( function_exists( 'delete_site_transient' ) ) {
+			\delete_site_transient( 'theme_roots' );
+		}
+		if ( function_exists( 'search_theme_directories' ) ) {
+			\search_theme_directories( true );
+		}
+	}
+
+	private static function seed_active_theme_options( array $fixture ): void {
+		\update_option( 'stylesheet', $fixture['activeSlug'] );
+		\update_option( 'template', $fixture['activeSlug'] );
+		\update_option( 'current_theme', $fixture['activeName'] );
+		\update_option( 'stylesheet_root', $fixture['rawRoot'] );
+		\update_option( 'template_root', $fixture['rawRoot'] );
+	}
+
+	private static function remove_theme_fixture( array $fixture ): void {
+		foreach ( array_reverse( $fixture['createdPaths'] ?? array() ) as $path ) {
+			if ( ! is_string( $path ) ) {
+				continue;
+			}
+			@unlink( $path . '/index.php' );
+			@unlink( $path . '/style.css' );
+			@rmdir( $path );
+		}
+		self::refresh_theme_discovery();
+	}
+
+	private static function manager_theme_filters( \WP_Customize_Manager $manager, array $filters ): array {
+		$states = array();
+		foreach ( $filters as $hook => $method ) {
+			$states[ $hook ] = \has_filter( $hook, array( $manager, $method ) );
+		}
+
+		$truthy = array_filter(
+			$states,
+			static function ( $priority ): bool {
+				return false !== $priority;
+			}
+		);
+
+		return array(
+			'states' => $states,
+			'all'    => count( $states ) === count( $truthy ) && array( 10 ) === array_values( array_unique( array_values( $truthy ) ) ),
+			'any'    => array() !== $truthy,
+		);
+	}
+
+	private static function theme_preview_values(): array {
+		return array(
+			'stylesheet'     => \get_stylesheet(),
+			'template'       => \get_template(),
+			'currentTheme'   => \get_option( 'current_theme' ),
+			'stylesheetRoot' => \get_option( 'stylesheet_root' ),
+			'templateRoot'   => \get_option( 'template_root' ),
+		);
 	}
 
 	private static function with_capabilities( callable $callback ) {
@@ -1220,6 +1530,9 @@ final class CustomizerSurface {
 	private static function reset_runtime(): void {
 		unset( $_POST['customized'], $_POST['customize_changeset_data'] );
 		unset( $_REQUEST['customized'], $_REQUEST['customize_changeset_data'] );
+		unset( $_GET['customize_theme'], $_GET['theme'] );
+		unset( $_POST['customize_theme'], $_POST['theme'] );
+		unset( $_REQUEST['customize_theme'], $_REQUEST['theme'] );
 
 		if ( isset( $GLOBALS['wpdb'] ) && method_exists( $GLOBALS['wpdb'], 'component_fuzz_get_options' ) ) {
 			$options = $GLOBALS['wpdb']->component_fuzz_get_options();
@@ -1264,6 +1577,7 @@ final class CustomizerSurface {
 		return array(
 			'globals'             => self::snapshot_globals(
 				array(
+					'_GET',
 					'_POST',
 					'_REQUEST',
 					'current_user',
@@ -1273,6 +1587,9 @@ final class CustomizerSurface {
 					'wp_filter',
 					'wp_filters',
 					'wp_object_cache',
+					'wp_stylesheet_path',
+					'wp_template_path',
+					'wp_theme_directories',
 				)
 			),
 			'options'             => isset( $GLOBALS['wpdb'] ) && method_exists( $GLOBALS['wpdb'], 'component_fuzz_get_options' )
