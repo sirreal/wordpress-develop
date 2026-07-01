@@ -37,6 +37,7 @@ final class PostEmbedsSurface {
 			$rows[] = self::check_oembed_response_data( $ctx->fork( 'response-data' ), $case, $fixtures );
 			$rows[] = self::check_embed_url_and_html( $ctx->fork( 'url-html' ), $case, $fixtures );
 			$rows[] = self::check_discovery_links( $ctx->fork( 'discovery' ), $case, $fixtures );
+			$rows[] = self::check_host_script_enqueue_gate( $ctx->fork( 'host-script' ), $case );
 			$rows[] = self::check_controller_and_pre_oembed( $ctx->fork( 'controller-pre' ), $case, $fixtures );
 			$rows[] = self::check_proxy_provider_transient_cache( $ctx->fork( 'proxy-cache' ), $case );
 			$rows[] = self::check_consumer_provider_autoembed_cache( $ctx->fork( 'consumer-cache' ), $case, $fixtures );
@@ -99,6 +100,10 @@ final class PostEmbedsSurface {
 			}
 		}
 
+		if ( ! class_exists( 'WP_Scripts', false ) ) {
+			$missing[] = 'class WP_Scripts';
+		}
+
 		foreach (
 			array(
 				'add_action',
@@ -144,10 +149,16 @@ final class PostEmbedsSurface {
 				'wp_filter_pre_oembed_result',
 				'wp_insert_post',
 				'wp_insert_user',
+				'wp_enqueue_script',
+				'wp_maybe_enqueue_oembed_host_js',
 				'wp_oembed_add_provider',
 				'wp_oembed_add_discovery_links',
+				'wp_oembed_add_host_js',
 				'wp_oembed_get',
 				'wp_oembed_remove_provider',
+				'wp_register_script',
+				'wp_script_is',
+				'wp_scripts',
 				'wp_slash',
 			) as $function
 		) {
@@ -495,6 +506,98 @@ final class PostEmbedsSurface {
 		return self::result(
 			$ctx,
 			'post-embeds.discovery-link-output',
+			$failures,
+			array(
+				'case' => self::case_summary( $case ),
+			)
+		);
+	}
+
+	private static function check_host_script_enqueue_gate( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures = array();
+		$snapshot = self::snapshot_globals( array( 'wp_actions', 'wp_current_filter', 'wp_filter', 'wp_filters', 'wp_scripts' ) );
+		$token    = $case['token'];
+
+		$matching_html = '<blockquote class="wp-embedded-content" data-secret="' . \esc_attr( $token ) . '"><a href="http://example.test/post">Post ' . \esc_html( $token ) . '</a></blockquote>';
+		$single_quote_matching_html = "<blockquote class='entry wp-embedded-content' data-secret='" . \esc_attr( $token ) . "'>Single quote class</blockquote>";
+		$nonmatching_html = '<iframe class="wp-embedded-content" src="http://example.test/embed"></iframe>'
+			. '<blockquote class="not-embedded-content">No enqueue ' . \esc_html( $token ) . '</blockquote>';
+
+		$matching_return             = '';
+		$single_quote_return         = '';
+		$no_action_return            = '';
+		$nonmatching_return          = '';
+		$enqueued_after_match        = false;
+		$enqueued_after_single_quote = false;
+		$enqueued_without_action     = false;
+		$enqueued_after_nonmatching  = false;
+
+		try {
+			\remove_all_actions( 'wp_head' );
+			$GLOBALS['wp_scripts'] = new \WP_Scripts();
+			\wp_register_script( 'wp-embed', false, array(), null, true );
+			\add_action( 'wp_head', 'wp_oembed_add_host_js' );
+
+			$matching_return      = \wp_maybe_enqueue_oembed_host_js( $matching_html );
+			$enqueued_after_match = \wp_script_is( 'wp-embed', 'enqueued' );
+
+			$GLOBALS['wp_scripts'] = new \WP_Scripts();
+			\wp_register_script( 'wp-embed', false, array(), null, true );
+			\add_action( 'wp_head', 'wp_oembed_add_host_js' );
+			$single_quote_return         = \wp_maybe_enqueue_oembed_host_js( $single_quote_matching_html );
+			$enqueued_after_single_quote = \wp_script_is( 'wp-embed', 'enqueued' );
+
+			$GLOBALS['wp_scripts'] = new \WP_Scripts();
+			\wp_register_script( 'wp-embed', false, array(), null, true );
+			\remove_action( 'wp_head', 'wp_oembed_add_host_js' );
+			$no_action_return        = \wp_maybe_enqueue_oembed_host_js( $matching_html );
+			$enqueued_without_action = \wp_script_is( 'wp-embed', 'enqueued' );
+
+			$GLOBALS['wp_scripts'] = new \WP_Scripts();
+			\wp_register_script( 'wp-embed', false, array(), null, true );
+			\add_action( 'wp_head', 'wp_oembed_add_host_js' );
+			$nonmatching_return         = \wp_maybe_enqueue_oembed_host_js( $nonmatching_html );
+			$enqueued_after_nonmatching = \wp_script_is( 'wp-embed', 'enqueued' );
+		} finally {
+			\remove_action( 'wp_head', 'wp_oembed_add_host_js' );
+			self::restore_globals( $snapshot );
+		}
+
+		self::collect_failure(
+			$failures,
+			$matching_html === $matching_return
+				&& true === $enqueued_after_match
+				&& $single_quote_matching_html === $single_quote_return
+				&& true === $enqueued_after_single_quote,
+			'host script helper enqueues wp-embed after matching post-embed blockquote markup and preserves HTML',
+			array(
+				'matchingReturn'            => $matching_return,
+				'singleQuoteReturn'         => $single_quote_return,
+				'enqueuedAfterMatch'        => $enqueued_after_match,
+				'enqueuedAfterSingleQuote'  => $enqueued_after_single_quote,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$matching_html === $no_action_return
+				&& false === $enqueued_without_action
+				&& $nonmatching_html === $nonmatching_return
+				&& false === $enqueued_after_nonmatching
+				&& false === \has_action( 'wp_head', 'wp_oembed_add_host_js' ),
+			'host script helper respects the back-compat action gate, rejects non-blockquote markup, and cleans up hooks',
+			array(
+				'noActionReturn'           => $no_action_return,
+				'nonmatchingReturn'        => $nonmatching_return,
+				'enqueuedWithoutAction'    => $enqueued_without_action,
+				'enqueuedAfterNonmatching' => $enqueued_after_nonmatching,
+				'remainingHostJsAction'    => \has_action( 'wp_head', 'wp_oembed_add_host_js' ),
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'post-embeds.host-script-enqueue-gate',
 			$failures,
 			array(
 				'case' => self::case_summary( $case ),
