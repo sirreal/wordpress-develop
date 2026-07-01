@@ -120,6 +120,7 @@ database, network requests, or a configured site.
   and state restoration without admin upload/AJAX dispatch.
 - `auth-flow`: no-DB authentication and session flow coverage, including
   synthetic user rows, username/email/password authentication filters,
+  direct `wp_login_form()` rendering/filter/escaping contracts,
   sign-on and clear-auth-cookie actions with cookie sending short-circuited,
   public `wp_logout()` composition, generated auth-cookie scheme boundaries and
   filter payloads, auth cookie validation hooks/default parsing, current-user
@@ -1083,8 +1084,9 @@ include/exclude/category joins through `link_category`, supported order/limit
 clauses, and `link_id` projections. It intentionally does not emulate arbitrary
 link-manager SQL, admin page dispatch, or live database behavior.
 The `auth-flow` surface short-circuits auth cookie sending and covers the direct
-`wp_logout()` lifecycle, but avoids browser redirect/login-form dispatch, real
-mail, application-password API requests, and process-exit paths.
+`wp_login_form()` and `wp_logout()` lifecycles, but avoids browser login-page
+dispatch, redirects, real mail, application-password API requests, and
+process-exit paths.
 The `canonical-routing` surface calls `redirect_canonical()` with
 `do_redirect=false`; 404 permalink guessing uses bounded in-memory post rows,
 attachment-page redirects use synthetic parent/attachment rows, and paths that

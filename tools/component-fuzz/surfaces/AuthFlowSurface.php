@@ -48,6 +48,7 @@ final class AuthFlowSurface {
 
 			$rows[] = self::check_synthetic_user_rows( $ctx->fork( 'user-rows' ) );
 			$rows[] = self::check_authenticate_filter_and_password_paths( $ctx->fork( 'authenticate' ) );
+			$rows[] = self::check_login_form_rendering_contracts( $ctx->fork( 'login-form' ) );
 			$rows[] = self::check_signon_cookie_actions_without_headers( $ctx->fork( 'signon' ) );
 			$rows[] = self::check_clear_auth_cookie_without_headers( $ctx->fork( 'clear-cookie' ) );
 			$rows[] = self::check_logout_lifecycle( $ctx->fork( 'logout' ) );
@@ -295,15 +296,20 @@ final class AuthFlowSurface {
 				'_wp_get_current_user',
 				'add_action',
 				'add_filter',
+				'esc_attr',
+				'esc_html',
+				'esc_url',
 				'get_current_user_id',
 				'get_user_by',
 				'get_user_meta',
 				'get_userdata',
+				'has_filter',
 				'is_user_logged_in',
 				'is_wp_error',
 				'remove_action',
 				'remove_filter',
 				'sanitize_user',
+				'site_url',
 				'update_user_meta',
 				'wp_authenticate',
 				'wp_authenticate_cookie',
@@ -321,6 +327,7 @@ final class AuthFlowSurface {
 				'wp_get_session_token',
 				'wp_hash_password',
 				'wp_is_unicode_email',
+				'wp_login_form',
 				'wp_parse_auth_cookie',
 				'wp_sanitize_unicode_email',
 				'wp_set_auth_cookie',
@@ -358,6 +365,242 @@ final class AuthFlowSurface {
 		}
 
 		return $missing;
+	}
+
+	private static function check_login_form_rendering_contracts( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_case_state();
+		self::clear_events();
+
+		$failures       = array();
+		$server_before  = $_SERVER;
+		$request_path   = '/login-source/' . rawurlencode( $ctx->identifier( 4, 10 ) ) . '/?next=' . rawurlencode( $ctx->text( 0, 18 ) );
+		$form_id        = 'cfz-login-' . $ctx->identifier( 4, 10 ) . '"<x';
+		$id_username    = 'cfz-user-' . $ctx->identifier( 4, 10 ) . '"<u';
+		$id_password    = 'cfz-pass-' . $ctx->identifier( 4, 10 ) . "'<p";
+		$id_remember    = 'cfz-remember-' . $ctx->identifier( 4, 10 ) . '"<r';
+		$id_submit      = 'cfz-submit-' . $ctx->identifier( 4, 10 ) . '"<s';
+		$username_value = 'name ' . $ctx->text( 0, 18 ) . '"<&';
+		$redirect       = 'https://redirect.example.test/after-login/?token=' . rawurlencode( $ctx->text( 0, 18 ) ) . '&unsafe=<tag>';
+		$remember       = $ctx->bool();
+		$value_remember = $ctx->bool();
+		$required_user  = $ctx->bool();
+		$required_pass  = $ctx->bool();
+		$markers        = array(
+			'top'    => '<span data-cfz-login-form="top">' . \esc_html( $ctx->identifier( 4, 10 ) ) . '</span>',
+			'middle' => '<span data-cfz-login-form="middle">' . \esc_html( $ctx->identifier( 4, 10 ) ) . '</span>',
+			'bottom' => '<span data-cfz-login-form="bottom">' . \esc_html( $ctx->identifier( 4, 10 ) ) . '</span>',
+		);
+		$filter_events  = array();
+
+		$default_filter = static function ( array $defaults ) use ( &$filter_events ): array {
+			$filter_events['defaults'][] = array(
+				'keys'          => array_keys( $defaults ),
+				'formId'        => $defaults['form_id'] ?? null,
+				'remember'      => $defaults['remember'] ?? null,
+				'valueRemember' => $defaults['value_remember'] ?? null,
+			);
+			$defaults['label_log_in'] = 'Filtered Log In <default>';
+			return $defaults;
+		};
+		$top_filter = static function ( string $content, array $args ) use ( &$filter_events, $markers ): string {
+			$filter_events['top'][] = array(
+				'content' => $content,
+				'args'    => self::login_form_args_summary( $args ),
+			);
+			return $markers['top'];
+		};
+		$middle_filter = static function ( string $content, array $args ) use ( &$filter_events, $markers ): string {
+			$filter_events['middle'][] = array(
+				'content' => $content,
+				'args'    => self::login_form_args_summary( $args ),
+			);
+			return $markers['middle'];
+		};
+		$bottom_filter = static function ( string $content, array $args ) use ( &$filter_events, $markers ): string {
+			$filter_events['bottom'][] = array(
+				'content' => $content,
+				'args'    => self::login_form_args_summary( $args ),
+			);
+			return $markers['bottom'];
+		};
+
+		$args = array(
+			'echo'              => false,
+			'redirect'          => $redirect,
+			'form_id'           => $form_id,
+			'label_username'    => 'User <Name> & Email',
+			'label_password'    => 'Pass <Word> & Secret',
+			'label_remember'    => 'Remember <Me> & Later',
+			'label_log_in'      => 'Log <In> & Submit',
+			'id_username'       => $id_username,
+			'id_password'       => $id_password,
+			'id_remember'       => $id_remember,
+			'id_submit'         => $id_submit,
+			'remember'          => $remember,
+			'value_username'    => $username_value,
+			'value_remember'    => $value_remember,
+			'required_username' => $required_user,
+			'required_password' => $required_pass,
+		);
+
+		\add_filter( 'login_form_defaults', $default_filter, 10, 1 );
+		\add_filter( 'login_form_top', $top_filter, 10, 2 );
+		\add_filter( 'login_form_middle', $middle_filter, 10, 2 );
+		\add_filter( 'login_form_bottom', $bottom_filter, 10, 2 );
+
+		try {
+			$_SERVER['HTTP_HOST']   = 'auth.example.test';
+			$_SERVER['REQUEST_URI'] = $request_path;
+			$_SERVER['HTTPS']       = 'on';
+
+			$expected_action = \esc_url( \site_url( 'wp-login.php', 'login_post' ) );
+			$returned = \wp_login_form( $args );
+			$echoed   = self::capture_output(
+				static function () use ( $args ): void {
+					$echo_args         = $args;
+					$echo_args['echo'] = true;
+					\wp_login_form( $echo_args );
+				}
+			);
+			$default_form = \wp_login_form( array( 'echo' => false ) );
+		} finally {
+			\remove_filter( 'login_form_defaults', $default_filter, 10 );
+			\remove_filter( 'login_form_top', $top_filter, 10 );
+			\remove_filter( 'login_form_middle', $middle_filter, 10 );
+			\remove_filter( 'login_form_bottom', $bottom_filter, 10 );
+			$_SERVER = $server_before;
+		}
+
+		$expected_default_redirect = \esc_url( 'https://auth.example.test' . $request_path );
+		$order_positions           = array(
+			'form'     => is_string( $returned ) ? strpos( $returned, '<form ' ) : false,
+			'top'      => is_string( $returned ) ? strpos( $returned, $markers['top'] ) : false,
+			'username' => is_string( $returned ) ? strpos( $returned, 'class="login-username"' ) : false,
+			'password' => is_string( $returned ) ? strpos( $returned, 'class="login-password"' ) : false,
+			'middle'   => is_string( $returned ) ? strpos( $returned, $markers['middle'] ) : false,
+			'remember' => is_string( $returned ) ? strpos( $returned, 'class="login-remember"' ) : false,
+			'submit'   => is_string( $returned ) ? strpos( $returned, 'class="login-submit"' ) : false,
+			'bottom'   => is_string( $returned ) ? strpos( $returned, $markers['bottom'] ) : false,
+			'close'    => is_string( $returned ) ? strrpos( $returned, '</form>' ) : false,
+		);
+		if ( ! $remember ) {
+			$order_positions['remember'] = $order_positions['middle'];
+		}
+
+		self::collect_failure(
+			$failures,
+			is_string( $returned )
+				&& is_string( $echoed )
+				&& $returned === $echoed
+				&& '' !== $returned
+				&& false !== strpos( $returned, 'name="' . \esc_attr( $form_id ) . '"' )
+				&& false !== strpos( $returned, 'id="' . \esc_attr( $form_id ) . '"' )
+				&& false !== strpos( $returned, 'action="' . $expected_action . '"' )
+				&& false !== strpos( $returned, 'method="post"' )
+				&& 1 === substr_count( $returned, '<form ' )
+				&& 1 === substr_count( $returned, '</form>' ),
+			'wp_login_form return and echo modes emit the same escaped form shell',
+			array(
+				'returned'       => self::describe_string( is_string( $returned ) ? $returned : '' ),
+				'echoed'         => self::describe_string( is_string( $echoed ) ? $echoed : '' ),
+				'expectedAction' => $expected_action,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			is_string( $returned )
+				&& false !== strpos( $returned, '<label for="' . \esc_attr( $id_username ) . '">' . \esc_html( $args['label_username'] ) . '</label>' )
+				&& false !== strpos( $returned, '<input type="text" name="log" id="' . \esc_attr( $id_username ) . '" autocomplete="username" class="input" value="' . \esc_attr( $username_value ) . '" size="20"' )
+				&& false !== strpos( $returned, '<label for="' . \esc_attr( $id_password ) . '">' . \esc_html( $args['label_password'] ) . '</label>' )
+				&& false !== strpos( $returned, '<input type="password" name="pwd" id="' . \esc_attr( $id_password ) . '" autocomplete="current-password" spellcheck="false" class="input" value="" size="20"' )
+				&& false !== strpos( $returned, '<input type="submit" name="wp-submit" id="' . \esc_attr( $id_submit ) . '" class="button button-primary" value="' . \esc_attr( $args['label_log_in'] ) . '" />' )
+				&& false !== strpos( $returned, '<input type="hidden" name="redirect_to" value="' . \esc_url( $redirect ) . '" />' )
+				&& false === strpos( $returned, $form_id )
+				&& false === strpos( $returned, $id_username )
+				&& false === strpos( $returned, $username_value ),
+			'wp_login_form escapes generated IDs, labels, username values, submit labels, and redirects',
+			array(
+				'formId'        => self::describe_string( $form_id ),
+				'idUsername'    => self::describe_string( $id_username ),
+				'idPassword'    => self::describe_string( $id_password ),
+				'idSubmit'      => self::describe_string( $id_submit ),
+				'usernameValue' => self::describe_string( $username_value ),
+				'redirect'      => self::describe_string( $redirect ),
+				'returned'      => self::describe_string( is_string( $returned ) ? $returned : '' ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			is_string( $returned )
+				&& ( $required_user === ( false !== strpos( $returned, 'id="' . \esc_attr( $id_username ) . '" autocomplete="username" class="input" value="' . \esc_attr( $username_value ) . '" size="20" required="required"' ) ) )
+				&& ( $required_pass === ( false !== strpos( $returned, 'id="' . \esc_attr( $id_password ) . '" autocomplete="current-password" spellcheck="false" class="input" value="" size="20" required="required"' ) ) )
+				&& ( $remember === ( false !== $order_positions['remember'] && false !== strpos( $returned, 'name="rememberme" type="checkbox" id="' . \esc_attr( $id_remember ) . '" value="forever"' ) ) )
+				&& ( ! $remember || false !== strpos( $returned, \esc_html( $args['label_remember'] ) ) )
+				&& ( $remember && $value_remember ) === ( false !== strpos( $returned, ' checked="checked"' ) ),
+			'wp_login_form preserves generated required and remember-me option contracts',
+			array(
+				'requiredUsername' => $required_user,
+				'requiredPassword' => $required_pass,
+				'remember'         => $remember,
+				'valueRemember'    => $value_remember,
+				'positions'        => $order_positions,
+				'returned'         => self::describe_string( is_string( $returned ) ? $returned : '' ),
+			)
+		);
+
+		$ordered = ! in_array( false, $order_positions, true )
+			&& $order_positions['form'] < $order_positions['top']
+			&& $order_positions['top'] < $order_positions['username']
+			&& $order_positions['username'] < $order_positions['password']
+			&& $order_positions['password'] < $order_positions['middle']
+			&& $order_positions['middle'] <= $order_positions['remember']
+			&& $order_positions['remember'] <= $order_positions['submit']
+			&& $order_positions['submit'] < $order_positions['bottom']
+			&& $order_positions['bottom'] < $order_positions['close'];
+
+		self::collect_failure(
+			$failures,
+			$ordered
+				&& 3 === count( $filter_events['defaults'] ?? array() )
+				&& 3 === count( $filter_events['top'] ?? array() )
+				&& 3 === count( $filter_events['middle'] ?? array() )
+				&& 3 === count( $filter_events['bottom'] ?? array() )
+				&& ( $filter_events['top'][0]['args'] ?? array() ) === ( $filter_events['middle'][0]['args'] ?? null )
+				&& ( $filter_events['top'][0]['args'] ?? array() ) === ( $filter_events['bottom'][0]['args'] ?? null )
+				&& false === \has_filter( 'login_form_defaults', $default_filter )
+				&& false === \has_filter( 'login_form_top', $top_filter )
+				&& false === \has_filter( 'login_form_middle', $middle_filter )
+				&& false === \has_filter( 'login_form_bottom', $bottom_filter )
+				&& $_SERVER === $server_before,
+			'wp_login_form filter hooks receive merged args in output order and cleanup restores filters/server globals',
+			array(
+				'positions'    => $order_positions,
+				'filterEvents' => $filter_events,
+				'serverBefore' => self::describe_value( $server_before ),
+				'serverAfter'  => self::describe_value( $_SERVER ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			is_string( $default_form )
+				&& false !== strpos( $default_form, '<input type="hidden" name="redirect_to" value="' . $expected_default_redirect . '" />' )
+				&& false !== strpos( $default_form, 'value="' . \esc_attr( 'Filtered Log In <default>' ) . '" />' ),
+			'wp_login_form default redirect uses current HTTPS request URI and filtered defaults before caller overrides',
+			array(
+				'defaultForm'             => self::describe_string( is_string( $default_form ) ? $default_form : '' ),
+				'expectedDefaultRedirect' => $expected_default_redirect,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'auth-flow.login-form-rendering-filters-and-escaping',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, 5 ) )
+		);
 	}
 
 	private static function check_synthetic_user_rows( \ComponentFuzz\FuzzContext $ctx ): array {
@@ -1517,6 +1760,33 @@ final class AuthFlowSurface {
 
 	private static function clear_events(): void {
 		self::$events = array();
+	}
+
+	private static function capture_output( callable $callback ): string {
+		ob_start();
+		try {
+			$callback();
+			return (string) ob_get_clean();
+		} catch ( \Throwable $e ) {
+			ob_end_clean();
+			throw $e;
+		}
+	}
+
+	private static function login_form_args_summary( array $args ): array {
+		return array(
+			'echo'              => $args['echo'] ?? null,
+			'redirectSha1'      => isset( $args['redirect'] ) ? sha1( (string) $args['redirect'] ) : null,
+			'formIdSha1'        => isset( $args['form_id'] ) ? sha1( (string) $args['form_id'] ) : null,
+			'idUsernameSha1'    => isset( $args['id_username'] ) ? sha1( (string) $args['id_username'] ) : null,
+			'idPasswordSha1'    => isset( $args['id_password'] ) ? sha1( (string) $args['id_password'] ) : null,
+			'idRememberSha1'    => isset( $args['id_remember'] ) ? sha1( (string) $args['id_remember'] ) : null,
+			'idSubmitSha1'      => isset( $args['id_submit'] ) ? sha1( (string) $args['id_submit'] ) : null,
+			'remember'          => $args['remember'] ?? null,
+			'valueRemember'     => $args['value_remember'] ?? null,
+			'requiredUsername'  => $args['required_username'] ?? null,
+			'requiredPassword'  => $args['required_password'] ?? null,
+		);
 	}
 
 	private static function events_include_code( array $events, string $code ): bool {
