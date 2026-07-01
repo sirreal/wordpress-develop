@@ -29,6 +29,7 @@ final class FormattingSurface {
 		$rows[] = self::check_autop_shortcode_stability( $ctx, $inputs['autopCases'] );
 		$rows[] = self::check_make_clickable( $ctx, $inputs['clickableCases'] );
 		$rows[] = self::check_url_sanitizers( $ctx, $inputs['urlCases'] );
+		$rows[] = self::check_deep_mapping_helpers( $ctx->fork( 'formatting-deep-map' ), $inputs['deepCases'] );
 		$rows[] = self::check_identifier_sanitizers( $ctx, $inputs['identifierCases'] );
 		$rows[] = self::check_file_and_user_sanitizers( $ctx, $inputs['fileNameCases'], $inputs['userNameCases'] );
 		$rows[] = self::check_entity_normalization( $ctx, $inputs['entityCases'] );
@@ -80,6 +81,7 @@ final class FormattingSurface {
 			'autopCases'       => self::generate_autop_cases( $ctx->fork( 'formatting-autop' ) ),
 			'clickableCases'   => self::generate_clickable_cases( $ctx->fork( 'formatting-clickable' ) ),
 			'urlCases'         => self::generate_url_cases( $ctx->fork( 'formatting-urls' ) ),
+			'deepCases'        => self::generate_deep_map_cases( $ctx->fork( 'formatting-deep-map' ) ),
 			'identifierCases'  => self::generate_identifier_cases( $ctx->fork( 'formatting-identifiers' ) ),
 			'fileNameCases'    => self::generate_file_name_cases( $ctx->fork( 'formatting-filenames' ) ),
 			'userNameCases'    => self::generate_user_name_cases( $ctx->fork( 'formatting-usernames' ) ),
@@ -896,6 +898,217 @@ final class FormattingSurface {
 			'url_sanitizers.display_storage_contracts',
 			$failures,
 			array( 'cases' => $checked )
+		);
+	}
+
+	private static function check_deep_mapping_helpers( \ComponentFuzz\FuzzContext $ctx, array $cases ): array {
+		$required = array( 'map_deep', 'urlencode_deep', 'rawurlencode_deep', 'urldecode_deep', 'stripslashes_deep', 'wp_slash', 'wp_unslash' );
+		foreach ( $required as $function ) {
+			if ( ! function_exists( $function ) ) {
+				return self::skip_row( $ctx, 'deep_mapping_helpers.shape_roundtrip_contracts', "{$function}() is unavailable." );
+			}
+		}
+
+		$failures = array();
+		$checked  = 0;
+		$leaves   = 0;
+
+		foreach ( $cases as $case_index => $case ) {
+			$value       = $case['value'];
+			$slash_value = $case['slashValue'];
+			$leaf_count  = self::deep_leaf_count( $value );
+			$shape       = self::deep_shape_signature( $value );
+			$violations  = array();
+			$calls       = array();
+			++$checked;
+			$leaves += $leaf_count;
+
+			$seen       = 0;
+			$mapped     = self::call(
+				'map_deep:marker',
+				static function () use ( $value, &$seen ) {
+					return \map_deep(
+						self::deep_clone( $value ),
+						static function ( $leaf ) use ( &$seen ) {
+							++$seen;
+							return self::deep_map_marker( $leaf );
+						}
+					);
+				}
+			);
+			$calls['mapDeep'] = self::call_summary( $mapped );
+			if ( ! $mapped['ok'] ) {
+				$violations[] = 'map-deep-threw';
+			} else {
+				$expected_mapped = self::deep_transform(
+					$value,
+					static function ( $leaf ) {
+						return self::deep_map_marker( $leaf );
+					}
+				);
+				if ( $seen !== $leaf_count ) {
+					$violations[] = 'map-deep-leaf-count-mismatch';
+				}
+				if ( self::deep_shape_signature( $mapped['value'] ) !== $shape ) {
+					$violations[] = 'map-deep-shape-changed';
+				}
+				if ( ! self::deep_same( $mapped['value'], $expected_mapped ) ) {
+					$violations[] = 'map-deep-transform-mismatch';
+				}
+			}
+
+			$urlencoded = self::call(
+				'urlencode_deep',
+				static function () use ( $value ) {
+					return \urlencode_deep( self::deep_clone( $value ) );
+				}
+			);
+			$calls['urlencodeDeep'] = self::call_summary( $urlencoded );
+			if ( ! $urlencoded['ok'] ) {
+				$violations[] = 'urlencode-deep-threw';
+			} else {
+				$expected_urlencoded = self::deep_transform(
+					$value,
+					static function ( $leaf ): string {
+						return urlencode( $leaf );
+					}
+				);
+				if ( self::deep_shape_signature( $urlencoded['value'] ) !== $shape ) {
+					$violations[] = 'urlencode-deep-shape-changed';
+				}
+				if ( ! self::deep_same( $urlencoded['value'], $expected_urlencoded ) ) {
+					$violations[] = 'urlencode-deep-transform-mismatch';
+				}
+			}
+
+			$url_roundtrip = self::call(
+				'urldecode_deep:urlencode_deep',
+				static function () use ( $value ) {
+					return \urldecode_deep( \urlencode_deep( self::deep_clone( $value ) ) );
+				}
+			);
+			$calls['urlRoundtrip'] = self::call_summary( $url_roundtrip );
+			if ( ! $url_roundtrip['ok'] ) {
+				$violations[] = 'urlencode-urldecode-roundtrip-threw';
+			} else {
+				$expected_decoded = self::deep_transform(
+					$value,
+					static function ( $leaf ): string {
+						return urldecode( urlencode( $leaf ) );
+					}
+				);
+				if ( self::deep_shape_signature( $url_roundtrip['value'] ) !== $shape ) {
+					$violations[] = 'urlencode-urldecode-shape-changed';
+				}
+				if ( ! self::deep_same( $url_roundtrip['value'], $expected_decoded ) ) {
+					$violations[] = 'urlencode-urldecode-roundtrip-mismatch';
+				}
+			}
+
+			$rawurlencoded = self::call(
+				'rawurlencode_deep',
+				static function () use ( $value ) {
+					return \rawurlencode_deep( self::deep_clone( $value ) );
+				}
+			);
+			$calls['rawurlencodeDeep'] = self::call_summary( $rawurlencoded );
+			if ( ! $rawurlencoded['ok'] ) {
+				$violations[] = 'rawurlencode-deep-threw';
+			} else {
+				$expected_rawurlencoded = self::deep_transform(
+					$value,
+					static function ( $leaf ): string {
+						return rawurlencode( $leaf );
+					}
+				);
+				if ( self::deep_shape_signature( $rawurlencoded['value'] ) !== $shape ) {
+					$violations[] = 'rawurlencode-deep-shape-changed';
+				}
+				if ( ! self::deep_same( $rawurlencoded['value'], $expected_rawurlencoded ) ) {
+					$violations[] = 'rawurlencode-deep-transform-mismatch';
+				}
+			}
+
+			$stripped = self::call(
+				'stripslashes_deep',
+				static function () use ( $value ) {
+					return \stripslashes_deep( self::deep_clone( $value ) );
+				}
+			);
+			$calls['stripslashesDeep'] = self::call_summary( $stripped );
+			if ( ! $stripped['ok'] ) {
+				$violations[] = 'stripslashes-deep-threw';
+			} else {
+				$expected_stripped = self::deep_transform(
+					$value,
+					static function ( $leaf ) {
+						return is_string( $leaf ) ? stripslashes( $leaf ) : $leaf;
+					}
+				);
+				if ( self::deep_shape_signature( $stripped['value'] ) !== $shape ) {
+					$violations[] = 'stripslashes-deep-shape-changed';
+				}
+				if ( ! self::deep_same( $stripped['value'], $expected_stripped ) ) {
+					$violations[] = 'stripslashes-deep-transform-mismatch';
+				}
+			}
+
+			$slash_roundtrip = self::call(
+				'wp_unslash:wp_slash',
+				static function () use ( $slash_value ) {
+					return \wp_unslash( \wp_slash( self::deep_clone( $slash_value ) ) );
+				}
+			);
+			$calls['slashRoundtrip'] = self::call_summary( $slash_roundtrip );
+			if ( ! $slash_roundtrip['ok'] ) {
+				$violations[] = 'wp-slash-roundtrip-threw';
+			} elseif ( ! self::deep_same( $slash_roundtrip['value'], $slash_value ) ) {
+				$violations[] = 'wp-slash-roundtrip-mismatch';
+			}
+
+			foreach (
+				array(
+					'mapDeep'           => $mapped,
+					'urlencodeDeep'     => $urlencoded,
+					'urlRoundtrip'      => $url_roundtrip,
+					'rawurlencodeDeep'  => $rawurlencoded,
+					'stripslashesDeep'  => $stripped,
+					'slashRoundtrip'    => $slash_roundtrip,
+				) as $label => $call
+			) {
+				if ( ! $call['ok'] ) {
+					continue;
+				}
+				$max_bytes = max( 768, self::deep_serialized_bytes( 'slashRoundtrip' === $label ? $slash_value : $value ) * 8 + 256 );
+				if ( self::deep_serialized_bytes( $call['value'] ) > $max_bytes ) {
+					$violations[] = $label . '-unexpected-expansion';
+				}
+			}
+
+			if ( array() !== $violations ) {
+				$failures[] = array(
+					'name'          => 'deep-mapping-helper-contract-violation',
+					'message'       => 'Deep formatting helpers changed structure, missed leaves, failed helper-specific transforms, or expanded unexpectedly.',
+					'caseIndex'     => $case_index,
+					'label'         => $case['label'],
+					'input'         => self::deep_summary( $value ),
+					'slashInput'    => self::deep_summary( $slash_value ),
+					'leafCount'     => $leaf_count,
+					'mapSeenLeaves' => $seen,
+					'calls'         => $calls,
+					'violations'    => $violations,
+				);
+			}
+		}
+
+		return self::check_row(
+			$ctx,
+			'deep_mapping_helpers.shape_roundtrip_contracts',
+			$failures,
+			array(
+				'cases'  => $checked,
+				'leaves' => $leaves,
+			)
 		);
 	}
 
@@ -2067,6 +2280,119 @@ final class FormattingSurface {
 		return $cases;
 	}
 
+	private static function generate_deep_map_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$object        = new \stdClass();
+		$object->title = "quote'\"slash\\";
+		$object->url   = 'https://example.test/a path/?q=1&two=2';
+		$object->meta  = array(
+			'percent' => 'a+b c%20',
+			'bool'    => false,
+			'count'   => 42,
+		);
+
+		$cases = array(
+			array(
+				'label'      => 'array-object-scalar-mix',
+				'value'      => array(
+					'plain'  => 'alpha beta',
+					'nested' => array(
+						"quote'\"slash\\",
+						'two words',
+						5 => 12,
+					),
+					'object' => $object,
+				),
+				'slashValue' => array(
+					'title'  => "quote'\"slash\\",
+					'fields' => array(
+						'one' => "O'Reilly",
+						'two' => 'C:\\Temp\\file.txt',
+					),
+				),
+			),
+			array(
+				'label'      => 'encoded-bytes-and-unicode',
+				'value'      => array(
+					'bytes' => "bad\xC3 percent%2F space and+plus",
+					'utf8'  => "caf\u{00E9} e\u{0301} \u{4E2D}\u{6587}",
+					'flags' => array( true, false, 3.5 ),
+				),
+				'slashValue' => array(
+					'bytes'  => "bad\xC3",
+					'quoted' => array( '"double"', "'single'", "slash\\tail" ),
+					'flags'  => array( true, false, 3.5 ),
+				),
+			),
+		);
+
+		for ( $i = 0; $i < 8; ++$i ) {
+			$cases[] = array(
+				'label'      => 'generated-deep-' . $i,
+				'value'      => self::generate_deep_value( $ctx->fork( 'deep-value-' . $i ), 0, true ),
+				'slashValue' => self::generate_deep_value( $ctx->fork( 'deep-slash-' . $i ), 0, false ),
+			);
+		}
+
+		return $cases;
+	}
+
+	private static function generate_deep_value( \ComponentFuzz\FuzzContext $ctx, int $depth, bool $include_objects ) {
+		if ( $depth >= 3 || ( $depth > 0 && $ctx->bool( 35 ) ) ) {
+			return self::generate_deep_leaf( $ctx->fork( 'leaf-' . $depth ) );
+		}
+
+		if ( $include_objects && $ctx->bool( 35 ) ) {
+			$object = new \stdClass();
+			$count  = $ctx->int( 1, 4 );
+			for ( $i = 0; $i < $count; ++$i ) {
+				$name = preg_replace( '/[^A-Za-z0-9_]/', '', $ctx->identifier( 2, 8 ) );
+				if ( '' === $name ) {
+					$name = 'value';
+				}
+				$property            = 'p' . $i . '_' . $name;
+				$object->$property = self::generate_deep_value( $ctx->fork( 'object-' . $depth . '-' . $i ), $depth + 1, true );
+			}
+
+			return $object;
+		}
+
+		$count = $ctx->int( 1, 4 );
+		$value = array();
+		for ( $i = 0; $i < $count; ++$i ) {
+			$key           = $ctx->bool( 55 ) ? 'k' . $i . '_' . strtolower( preg_replace( '/[^a-z0-9_]+/i', '', $ctx->identifier( 2, 8 ) ) ) : $i + $ctx->int( 0, 2 );
+			$value[ $key ] = self::generate_deep_value( $ctx->fork( 'array-' . $depth . '-' . $i ), $depth + 1, $include_objects );
+		}
+
+		return $value;
+	}
+
+	private static function generate_deep_leaf( \ComponentFuzz\FuzzContext $ctx ) {
+		$strings = array(
+			'plain value',
+			'two words and+plus',
+			'percent%2Fencoded%20value',
+			"https://example.test/a path/?q=1&two=2",
+			"quote'\"slash\\",
+			"line\nbreak\tcolumn",
+			"caf\u{00E9} e\u{0301} \u{4E2D}\u{6587}",
+			"bad\xC3 bytes",
+			'<tag attr="value">&amp;</tag>',
+		);
+
+		if ( $ctx->bool( 75 ) ) {
+			return $ctx->choice( $strings );
+		}
+
+		return $ctx->choice(
+			array(
+				true,
+				false,
+				$ctx->int( -99, 999 ),
+				$ctx->int( -100, 100 ) / 10,
+			)
+		);
+	}
+
 	private static function generate_identifier_cases( \ComponentFuzz\FuzzContext $ctx ): array {
 		$cases = array(
 			array( 'input' => 'Post Title With Spaces', 'fallback' => 'fallback-title' ),
@@ -2411,6 +2737,112 @@ final class FormattingSurface {
 
 	private static function known_ncr_entities(): array {
 		return array( '&quot;', '&amp;', '&lt;', '&gt;', '&nbsp;', '&copy;', '&reg;', '&Aacute;', '&aacute;', '&mdash;', '&hellip;', '&euro;' );
+	}
+
+	private static function deep_clone( $value ) {
+		return unserialize( serialize( $value ) );
+	}
+
+	private static function deep_leaf_count( $value ): int {
+		if ( is_array( $value ) ) {
+			$count = 0;
+			foreach ( $value as $item ) {
+				$count += self::deep_leaf_count( $item );
+			}
+
+			return $count;
+		}
+
+		if ( is_object( $value ) ) {
+			$count = 0;
+			foreach ( get_object_vars( $value ) as $property_value ) {
+				$count += self::deep_leaf_count( $property_value );
+			}
+
+			return $count;
+		}
+
+		return 1;
+	}
+
+	private static function deep_transform( $value, callable $callback ) {
+		if ( is_array( $value ) ) {
+			$mapped = array();
+			foreach ( $value as $key => $item ) {
+				$mapped[ $key ] = self::deep_transform( $item, $callback );
+			}
+
+			return $mapped;
+		}
+
+		if ( is_object( $value ) ) {
+			$mapped = clone $value;
+			foreach ( get_object_vars( $mapped ) as $property_name => $property_value ) {
+				$mapped->$property_name = self::deep_transform( $property_value, $callback );
+			}
+
+			return $mapped;
+		}
+
+		return $callback( $value );
+	}
+
+	private static function deep_shape_signature( $value ) {
+		if ( is_array( $value ) ) {
+			$items = array();
+			foreach ( $value as $key => $item ) {
+				$items[] = array(
+					'key'   => $key,
+					'shape' => self::deep_shape_signature( $item ),
+				);
+			}
+
+			return array(
+				'type'  => 'array',
+				'items' => $items,
+			);
+		}
+
+		if ( is_object( $value ) ) {
+			$properties = array();
+			foreach ( get_object_vars( $value ) as $property_name => $property_value ) {
+				$properties[] = array(
+					'name'  => $property_name,
+					'shape' => self::deep_shape_signature( $property_value ),
+				);
+			}
+
+			return array(
+				'type'       => 'object',
+				'class'      => get_class( $value ),
+				'properties' => $properties,
+			);
+		}
+
+		return array( 'type' => 'leaf' );
+	}
+
+	private static function deep_map_marker( $leaf ): string {
+		return gettype( $leaf ) . ':' . sha1( serialize( $leaf ) );
+	}
+
+	private static function deep_same( $left, $right ): bool {
+		return serialize( $left ) === serialize( $right );
+	}
+
+	private static function deep_serialized_bytes( $value ): int {
+		return strlen( serialize( $value ) );
+	}
+
+	private static function deep_summary( $value ): array {
+		$shape = self::deep_shape_signature( $value );
+
+		return array(
+			'type'            => is_object( $value ) ? get_class( $value ) : gettype( $value ),
+			'leafCount'       => self::deep_leaf_count( $value ),
+			'serializedBytes' => self::deep_serialized_bytes( $value ),
+			'shapeSha1'       => sha1( serialize( $shape ) ),
+		);
 	}
 
 	private static function escaped_context_violations( string $function, string $output ): array {
