@@ -38,6 +38,7 @@ final class FeedRenderingSurface {
 			$rows[] = self::check_feed_link_helpers( $ctx->fork( 'feed-links' ), $case );
 			$rows[] = self::check_self_link_request_uri_oracles( $ctx->fork( 'self-link' ), $case );
 			$rows[] = self::check_feed_loop_helpers( $ctx->fork( 'helpers' ), $case );
+			$rows[] = self::check_rss_enclosure_fixture_matrix( $ctx->fork( 'rss-enclosure-fixtures' ), $case );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
 				'feed-rendering.surface-no-throw',
@@ -1225,6 +1226,196 @@ final class FeedRenderingSurface {
 		);
 
 		return self::result( $ctx, 'feed-rendering.loop-helpers.content-enclosures-build-date', $failures, $content_feed . $rss_enclosure . $atom_enclosure );
+	}
+
+	private static function check_rss_enclosure_fixture_matrix( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures = array();
+		$outputs  = array();
+
+		$valid_cases = array(
+			'two-break-lines'         => array(
+				"htt" . "p://example.com/sound2.mp3\n12345\naudio/mpeg",
+				'<enclosure url="http://example.com/sound2.mp3" length="12345" type="audio/mpeg" />' . "\n",
+			),
+			'three-break-lines'       => array(
+				"htt" . "p://example.com/sound2.mp3\n12345\naudio/mpeg\n",
+				'<enclosure url="http://example.com/sound2.mp3" length="12345" type="audio/mpeg" />' . "\n",
+			),
+			'extra-break-line-at-end' => array(
+				"htt" . "p://example.com/sound2.mp3\n12345\naudio/mpeg\n\n",
+				'<enclosure url="http://example.com/sound2.mp3" length="12345" type="audio/mpeg" />' . "\n",
+			),
+			'extra-type-elements'     => array(
+				"htt" . "p://example.com/sound2.mp3\n12345\naudio/mpeg mpga mp2 mp3\n",
+				'<enclosure url="http://example.com/sound2.mp3" length="12345" type="audio/mpeg" />' . "\n",
+			),
+		);
+
+		foreach ( $valid_cases as $label => $fixture ) {
+			$post   = self::insert_feed_fixture_post( $ctx->fork( 'valid-' . $label ), $case );
+			$output = self::capture_rss_enclosure_for_post( $post, array( $fixture[0] ) );
+			$outputs[] = $output;
+
+			self::collect_failure(
+				$failures,
+				$fixture[1] === $output,
+				"rss_enclosure() renders exact Core fixture {$label}",
+				array(
+					'label'    => $label,
+					'expected' => self::escape_bytes( $fixture[1] ),
+					'actual'   => self::escape_bytes( $output ),
+				)
+			);
+		}
+
+		$invalid_cases = array(
+			'empty'          => '',
+			'no-break-lines' => 'http://example.com/sound2.mp3 12345 audio/mpeg',
+			'one-break-line' => "htt" . "p://example.com/sound2.mp3\n12345 audio/mpeg",
+		);
+
+		foreach ( $invalid_cases as $label => $enclosure ) {
+			$post   = self::insert_feed_fixture_post( $ctx->fork( 'invalid-' . $label ), $case );
+			$output = self::capture_rss_enclosure_for_post( $post, array( $enclosure ) );
+			$outputs[] = $output;
+
+			self::collect_failure(
+				$failures,
+				'' === $output,
+				"rss_enclosure() suppresses malformed Core fixture {$label}",
+				array(
+					'label'  => $label,
+					'actual' => self::escape_bytes( $output ),
+				)
+			);
+		}
+
+		unset( $GLOBALS['post'], $GLOBALS['id'] );
+		$empty_global_output = self::capture_output( static function (): void {
+			\rss_enclosure();
+		} );
+		$outputs[] = $empty_global_output;
+		self::collect_failure(
+			$failures,
+			'' === $empty_global_output,
+			'rss_enclosure() emits nothing when no global post is available',
+			array( 'actual' => self::escape_bytes( $empty_global_output ) )
+		);
+
+		$post           = self::insert_feed_fixture_post( $ctx->fork( 'no-meta' ), $case );
+		$no_meta_output = self::capture_rss_enclosure_for_post( $post, array() );
+		$outputs[]      = $no_meta_output;
+		self::collect_failure(
+			$failures,
+			'' === $no_meta_output,
+			'rss_enclosure() emits nothing when the current post has no enclosure meta',
+			array( 'actual' => self::escape_bytes( $no_meta_output ) )
+		);
+
+		$first_expected  = '<enclosure url="http://example.com/first.mp3" length="10" type="audio/mpeg" />' . "\n";
+		$second_expected = '<enclosure url="http://example.com/second.ogg" length="20" type="audio/ogg" />' . "\n";
+		$post            = self::insert_feed_fixture_post( $ctx->fork( 'multiple' ), $case );
+		$multiple_output = self::capture_rss_enclosure_for_post(
+			$post,
+			array(
+				"http://example.com/first.mp3\n10\naudio/mpeg",
+				"http://example.com/second.ogg\n20\naudio/ogg ogg oga",
+			)
+		);
+		$outputs[]       = $multiple_output;
+		self::collect_failure(
+			$failures,
+			$first_expected . $second_expected === $multiple_output,
+			'rss_enclosure() renders each enclosure meta row in insertion order and keeps only the first MIME token',
+			array(
+				'expected' => self::escape_bytes( $first_expected . $second_expected ),
+				'actual'   => self::escape_bytes( $multiple_output ),
+			)
+		);
+
+		$filter_events = array();
+		$filter_output = '<enclosure data-component-fuzz="filtered" />' . "\n";
+		$filter        = static function ( string $html_link_tag ) use ( &$filter_events, $filter_output ): string {
+			$filter_events[] = $html_link_tag;
+			return $filter_output;
+		};
+		\add_filter( 'rss_enclosure', $filter, 10, 1 );
+		try {
+			$post          = self::insert_feed_fixture_post( $ctx->fork( 'filter' ), $case );
+			$filter_actual = self::capture_rss_enclosure_for_post(
+				$post,
+				array( "http://example.com/filtered.mp3\n333\naudio/mpeg" )
+			);
+		} finally {
+			\remove_filter( 'rss_enclosure', $filter, 10 );
+		}
+		$outputs[] = $filter_actual ?? '';
+		self::collect_failure(
+			$failures,
+			isset( $filter_actual )
+				&& $filter_output === $filter_actual
+				&& array( '<enclosure url="http://example.com/filtered.mp3" length="333" type="audio/mpeg" />' . "\n" ) === $filter_events
+				&& false === \has_filter( 'rss_enclosure', $filter ),
+			'rss_enclosure filter receives the generated link tag, can replace it, and is cleaned up',
+			array(
+				'events'    => array_map( array( self::class, 'escape_bytes' ), $filter_events ),
+				'actual'    => self::escape_bytes( $filter_actual ?? '' ),
+				'hasFilter' => \has_filter( 'rss_enclosure', $filter ),
+			)
+		);
+
+		self::set_posts_query( $case, 'rss2', false );
+
+		return self::result( $ctx, 'feed-rendering.rss-enclosure.exact-fixture-matrix', $failures, implode( '', $outputs ) );
+	}
+
+	private static function insert_feed_fixture_post( \ComponentFuzz\FuzzContext $ctx, array $case ): \WP_Post {
+		$post_id = \wp_insert_post(
+			\wp_slash(
+				array(
+					'post_author'       => isset( $case['posts'][0] ) ? (int) $case['posts'][0]->post_author : 0,
+					'post_date'         => '2026-06-22 12:00:00',
+					'post_date_gmt'     => '2026-06-22 10:00:00',
+					'post_modified'     => '2026-06-22 12:00:00',
+					'post_modified_gmt' => '2026-06-22 10:00:00',
+					'post_title'        => 'RSS enclosure fixture ' . self::safe_text( $ctx, 3, 18 ),
+					'post_name'         => 'rss-enclosure-' . substr( hash( 'crc32b', (string) $ctx->seed() . ':' . $ctx->identifier( 2, 8 ) ), 0, 10 ),
+					'post_content'      => 'Fixture content',
+					'post_excerpt'      => 'Fixture excerpt',
+					'post_status'       => 'publish',
+					'post_type'         => 'post',
+					'comment_status'    => 'closed',
+					'ping_status'       => 'closed',
+					'guid'              => 'https://example.test/?p=rss-enclosure-' . rawurlencode( (string) $ctx->seed() ),
+				)
+			),
+			true,
+			false
+		);
+
+		if ( \is_wp_error( $post_id ) ) {
+			throw new \RuntimeException( 'Could not insert RSS enclosure fixture post: ' . $post_id->get_error_message() );
+		}
+
+		$post = \get_post( $post_id );
+		if ( ! $post instanceof \WP_Post ) {
+			throw new \RuntimeException( 'Could not load RSS enclosure fixture post.' );
+		}
+
+		return $post;
+	}
+
+	private static function capture_rss_enclosure_for_post( \WP_Post $post, array $enclosures ): string {
+		$GLOBALS['post'] = $post;
+		$GLOBALS['id']   = (int) $post->ID;
+
+		foreach ( $enclosures as $enclosure ) {
+			\add_metadata( 'post', $post->ID, 'enclosure', $enclosure );
+		}
+
+		return self::capture_output( static function (): void {
+			\rss_enclosure();
+		} );
 	}
 
 	private static function prepare_case( \ComponentFuzz\FuzzContext $ctx ): array {

@@ -339,8 +339,8 @@ database, network requests, or a configured site.
   rendering over synthetic query loops, including feed item/entry counts, self
   links, legacy `do_feed()` dispatch normalization, self-link request URI
   host/filter escaping, CDATA terminator escaping, excerpt/content mode
-  switches, enclosure metadata, comment feed escaping, and feed build date
-  selection.
+  switches, exact `rss_enclosure()` parser fixtures, enclosure metadata, comment
+  feed escaping, and feed build date selection.
 - `frontend-features`: no-DB frontend feature helper coverage for speculative
   loading and view transitions, including direct speculation rule validation,
   configuration eligibility, mode/eagerness filters, generated URL-pattern
@@ -1081,6 +1081,8 @@ The `feed-rendering` surface renders core feed templates through synthetic
 headers, remote enclosures, DB-backed query execution, and arbitrary invalid
 bytes so XML structure and escaping remain useful oracles. Direct self-link
 helper coverage mutates `REQUEST_URI`/`HTTP_HOST` without dispatching requests.
+Direct enclosure helper coverage replays bounded `rss_enclosure()` newline and
+filter fixtures against local post meta only.
 The `community-events` surface short-circuits `wp_remote_get()` through
 `pre_http_request`; it never contacts api.wordpress.org and limits coverage to
 request construction, response normalization, cache behavior, the local admin
