@@ -45,6 +45,7 @@ final class TemplateLinksSurface {
 			$rows[] = self::check_resource_hints_and_preloads( $ctx );
 			$rows[] = self::check_page_and_paginate_links( $ctx );
 			$rows[] = self::check_search_feed_site_and_admin_links( $ctx );
+			$rows[] = self::check_search_form_rendering_contracts( $ctx->fork( 'search-form' ) );
 			$rows[] = self::check_post_link_helpers( $ctx );
 			$rows[] = self::check_archive_link_helpers( $ctx );
 			$rows[] = self::check_adjacent_post_link_helpers( $ctx );
@@ -185,12 +186,15 @@ final class TemplateLinksSurface {
 		foreach (
 			array(
 				'_walk_bookmarks',
+				'add_action',
 				'add_theme_support',
 				'add_filter',
 				'body_class',
 				'create_initial_post_types',
 				'create_initial_taxonomies',
+				'current_theme_supports',
 				'esc_attr',
+				'esc_attr_x',
 				'esc_url',
 				'get_admin_url',
 				'get_attachment_link',
@@ -217,12 +221,17 @@ final class TemplateLinksSurface {
 				'get_previous_image_link',
 				'get_previous_post_link',
 				'get_search_feed_link',
+				'get_search_form',
 				'get_search_link',
+				'get_search_query',
 				'get_site_url',
 				'get_the_title',
 				'get_year_link',
+				'has_filter',
+				'home_url',
 				'is_wp_error',
 				'language_attributes',
+				'locate_template',
 				'adjacent_posts_rel_link',
 				'adjacent_posts_rel_link_wp_head',
 				'adjacent_image_link',
@@ -234,6 +243,7 @@ final class TemplateLinksSurface {
 				'previous_image_link',
 				'register_taxonomy',
 				'rel_canonical',
+				'remove_action',
 				'remove_filter',
 				'remove_post_type_support',
 				'sanitize_html_class',
@@ -1008,6 +1018,251 @@ final class TemplateLinksSurface {
 		return self::row(
 			$ctx,
 			'template-links.links.search-feed-site-admin',
+			array() === $failures,
+			array( 'failures' => $failures )
+		);
+	}
+
+	private static function check_search_form_rendering_contracts( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures       = array();
+		$query          = 'search ' . $ctx->text( 0, 24 ) . '"<&';
+		$aria_label     = 'Search area ' . $ctx->identifier( 4, 12 ) . '"<&';
+		$home           = self::$options['home'] ?? 'http://example.test';
+		$query_snapshot = self::snapshot_query_search_state();
+		$events         = array(
+			'pre'    => array(),
+			'args'   => array(),
+			'format' => array(),
+			'form'   => array(),
+		);
+		$mode           = 'html5';
+		$sequence       = 0;
+		$buffer_level   = ob_get_level();
+
+		$pre_action = static function ( $args ) use ( &$events, &$sequence ): void {
+			$events['pre'][] = array(
+				'order'   => ++$sequence,
+				'rawType' => gettype( $args ),
+				'args'    => is_array( $args ) ? self::search_form_args_summary( $args ) : $args,
+			);
+		};
+		$args_filter = static function ( array $args ) use ( &$events, &$sequence ): array {
+			$events['args'][] = array(
+				'order' => ++$sequence,
+				'args'  => self::search_form_args_summary( $args ),
+			);
+			return $args;
+		};
+		$format_filter = static function ( string $format, array $args ) use ( &$events, &$mode, &$sequence ): string {
+			$events['format'][] = array(
+				'order'          => ++$sequence,
+				'defaultFormat'  => $format,
+				'returnedFormat' => $mode,
+				'args'           => self::search_form_args_summary( $args ),
+			);
+			return $mode;
+		};
+		$form_filter = static function ( string $form, array $args ) use ( &$events, &$mode, &$sequence ): ?string {
+			$events['form'][] = array(
+				'order'     => ++$sequence,
+				'mode'      => $mode,
+				'formSha1'  => sha1( $form ),
+				'formBytes' => strlen( $form ),
+				'args'      => self::search_form_args_summary( $args ),
+			);
+
+			if ( 'null-fallback' === $mode ) {
+				return null;
+			}
+
+			return $form . '<!--cfz-search-form-' . \esc_attr( $mode ) . '-->';
+		};
+
+		\add_action( 'pre_get_search_form', $pre_action, 10, 1 );
+		\add_filter( 'search_form_args', $args_filter, 10, 1 );
+		\add_filter( 'search_form_format', $format_filter, 10, 2 );
+		\add_filter( 'get_search_form', $form_filter, 10, 2 );
+
+		try {
+			self::set_search_query_context( $query );
+
+			$mode  = 'html5';
+			$html5 = \get_search_form(
+				array(
+					'echo'       => false,
+					'aria_label' => $aria_label,
+				)
+			);
+
+			$mode  = 'xhtml';
+			$xhtml = \get_search_form(
+				array(
+					'echo'       => false,
+					'aria_label' => $aria_label,
+				)
+			);
+
+			$echo_return = 'not-called';
+			$echoed      = self::capture_output(
+				static function () use ( &$echo_return, $aria_label ): void {
+					$echo_return = \get_search_form(
+						array(
+							'echo'       => true,
+							'aria_label' => $aria_label,
+						)
+					);
+				}
+			);
+
+			$mode   = 'html5';
+			$legacy = \get_search_form( false );
+
+			$mode          = 'null-fallback';
+			$null_fallback = \get_search_form(
+				array(
+					'echo'       => false,
+					'aria_label' => $aria_label,
+				)
+			);
+		} finally {
+			\remove_action( 'pre_get_search_form', $pre_action, 10 );
+			\remove_filter( 'search_form_args', $args_filter, 10 );
+			\remove_filter( 'search_form_format', $format_filter, 10 );
+			\remove_filter( 'get_search_form', $form_filter, 10 );
+			self::restore_query_search_state( $query_snapshot );
+		}
+
+		$escaped_query = \esc_attr( $query );
+		$escaped_aria  = \esc_attr( $aria_label );
+		$home_action   = \esc_url( \home_url( '/' ) );
+
+		self::collect_failure(
+			$failures,
+			is_string( $html5 )
+				&& 1 === substr_count( $html5, '<form ' )
+				&& 1 === substr_count( $html5, '</form>' )
+				&& str_contains( $html5, '<form role="search" aria-label="' . $escaped_aria . '" method="get" class="search-form" action="' . $home_action . '">' )
+				&& str_contains( $html5, '<input type="search" class="search-field"' )
+				&& str_contains( $html5, 'placeholder="' . \esc_attr_x( 'Search &hellip;', 'placeholder' ) . '"' )
+				&& str_contains( $html5, 'value="' . $escaped_query . '" name="s" />' )
+				&& str_contains( $html5, '<input type="submit" class="search-submit" value="' . \esc_attr_x( 'Search', 'submit button' ) . '" />' )
+				&& str_contains( $html5, '<!--cfz-search-form-html5-->' )
+				&& ! str_contains( $html5, 'id="searchform"' )
+				&& ! str_contains( strtolower( $html5 ), '<script' )
+				&& ! str_contains( strtolower( $html5 ), ' onerror=' )
+				&& ! str_contains( $html5, '"<&' ),
+			'get_search_form renders default HTML5 markup with escaped aria label, query value, action, and filter output',
+			array(
+				'html5'        => self::describe_string( is_string( $html5 ) ? $html5 : '' ),
+				'escapedQuery' => $escaped_query,
+				'escapedAria'  => $escaped_aria,
+				'homeAction'   => $home_action,
+				'homeOption'   => $home,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			is_string( $xhtml )
+				&& is_string( $echoed )
+				&& null === $echo_return
+				&& $xhtml === $echoed
+				&& str_contains( $xhtml, '<form role="search" aria-label="' . $escaped_aria . '" method="get" id="searchform" class="searchform" action="' . $home_action . '">' )
+				&& str_contains( $xhtml, '<input type="text" value="' . $escaped_query . '" name="s" id="s" />' )
+				&& str_contains( $xhtml, '<input type="submit" id="searchsubmit" value="' . \esc_attr_x( 'Search', 'submit button' ) . '" />' )
+				&& str_contains( $xhtml, '<!--cfz-search-form-xhtml-->' )
+				&& ! str_contains( $xhtml, 'type="search"' )
+				&& ! str_contains( strtolower( $xhtml ), '<script' )
+				&& ! str_contains( strtolower( $xhtml ), ' onerror=' )
+				&& ! str_contains( $xhtml, '"<&' ),
+			'get_search_form renders forced XHTML markup and echo mode exactly matches returned markup',
+			array(
+				'xhtml'      => self::describe_string( is_string( $xhtml ) ? $xhtml : '' ),
+				'echoed'     => self::describe_string( is_string( $echoed ) ? $echoed : '' ),
+				'echoReturn' => $echo_return,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			is_string( $legacy )
+				&& str_contains( $legacy, '<form role="search" method="get" class="search-form" action="' . $home_action . '">' )
+				&& ! str_contains( $legacy, 'aria-label=' )
+				&& str_contains( $legacy, '<!--cfz-search-form-html5-->' )
+				&& is_string( $null_fallback )
+				&& str_contains( $null_fallback, '<form role="search" aria-label="' . $escaped_aria . '" method="get" id="searchform" class="searchform" action="' . $home_action . '">' )
+				&& str_contains( $null_fallback, '<input type="text" value="' . $escaped_query . '" name="s" id="s" />' )
+				&& ! str_contains( $null_fallback, '<!--cfz-search-form-' ),
+			'get_search_form preserves legacy boolean return mode and null get_search_form filter fallback',
+			array(
+				'legacy'       => self::describe_string( is_string( $legacy ) ? $legacy : '' ),
+				'nullFallback' => self::describe_string( is_string( $null_fallback ) ? $null_fallback : '' ),
+			)
+		);
+
+		$orders = array_merge(
+			array_column( $events['pre'], 'order' ),
+			array_column( $events['args'], 'order' ),
+			array_column( $events['format'], 'order' ),
+			array_column( $events['form'], 'order' )
+		);
+		$sorted_orders = $orders;
+		sort( $sorted_orders );
+		$first_args    = $events['args'][0]['args'] ?? array();
+		$legacy_pre    = $events['pre'][3] ?? array();
+		$legacy_args   = $events['args'][3]['args'] ?? array();
+		$first_orders  = array(
+			$events['pre'][0]['order'] ?? null,
+			$events['args'][0]['order'] ?? null,
+			$events['format'][0]['order'] ?? null,
+			$events['form'][0]['order'] ?? null,
+		);
+		$legacy_orders = array(
+			$events['pre'][3]['order'] ?? null,
+			$events['args'][3]['order'] ?? null,
+			$events['format'][3]['order'] ?? null,
+			$events['form'][3]['order'] ?? null,
+		);
+
+		self::collect_failure(
+			$failures,
+			20 === count( $orders )
+				&& range( 1, 20 ) === $sorted_orders
+				&& array( 1, 2, 3, 4 ) === $first_orders
+				&& array( 13, 14, 15, 16 ) === $legacy_orders
+				&& 5 === count( $events['pre'] )
+				&& 5 === count( $events['args'] )
+				&& 5 === count( $events['format'] )
+				&& 5 === count( $events['form'] )
+				&& true === ( $first_args['hasAriaLabel'] ?? null )
+				&& false === ( $first_args['echo'] ?? null )
+				&& 'boolean' === ( $legacy_pre['rawType'] ?? null )
+				&& false === ( $legacy_pre['args'] ?? null )
+				&& false === ( $legacy_args['echo'] ?? null )
+				&& false === ( $legacy_args['hasAriaLabel'] ?? null )
+				&& false === \has_filter( 'pre_get_search_form', $pre_action )
+				&& false === \has_filter( 'search_form_args', $args_filter )
+				&& false === \has_filter( 'search_form_format', $format_filter )
+				&& false === \has_filter( 'get_search_form', $form_filter )
+				&& ob_get_level() === $buffer_level
+				&& self::query_search_state_matches( $query_snapshot ),
+			'get_search_form action/filter payloads are ordered and cleanup restores hooks and query globals',
+			array(
+				'events'        => $events,
+				'orders'        => $orders,
+				'sortedOrders'  => $sorted_orders,
+				'firstOrders'   => $first_orders,
+				'legacyOrders'  => $legacy_orders,
+				'bufferBefore'  => $buffer_level,
+				'bufferAfter'   => ob_get_level(),
+				'querySnapshot' => self::describe_value( $query_snapshot ),
+				'queryAfter'    => self::describe_value( self::snapshot_query_search_state() ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'template-links.search-form-rendering-filters',
 			array() === $failures,
 			array( 'failures' => $failures )
 		);
@@ -2420,6 +2675,60 @@ final class TemplateLinksSurface {
 		$query->is_paged          = $paged > 1;
 
 		return $query;
+	}
+
+	private static function snapshot_query_search_state(): array {
+		$query = $GLOBALS['wp_query'] ?? null;
+		if ( ! $query instanceof \WP_Query ) {
+			return array(
+				'exists' => false,
+			);
+		}
+
+		return array(
+			'exists'       => true,
+			'hasSearchVar' => array_key_exists( 's', $query->query_vars ),
+			'searchVar'    => $query->query_vars['s'] ?? null,
+			'isSearch'     => $query->is_search,
+		);
+	}
+
+	private static function set_search_query_context( string $query_string ): void {
+		$query = $GLOBALS['wp_query'] ?? null;
+		if ( ! $query instanceof \WP_Query ) {
+			return;
+		}
+
+		$query->query_vars['s'] = $query_string;
+		$query->is_search       = true;
+	}
+
+	private static function restore_query_search_state( array $snapshot ): void {
+		$query = $GLOBALS['wp_query'] ?? null;
+		if ( ! $query instanceof \WP_Query || empty( $snapshot['exists'] ) ) {
+			return;
+		}
+
+		if ( ! empty( $snapshot['hasSearchVar'] ) ) {
+			$query->query_vars['s'] = $snapshot['searchVar'];
+		} else {
+			unset( $query->query_vars['s'] );
+		}
+
+		$query->is_search = (bool) $snapshot['isSearch'];
+	}
+
+	private static function query_search_state_matches( array $snapshot ): bool {
+		return self::snapshot_query_search_state() === $snapshot;
+	}
+
+	private static function search_form_args_summary( array $args ): array {
+		return array(
+			'keys'          => array_keys( $args ),
+			'echo'          => $args['echo'] ?? null,
+			'hasAriaLabel'  => array_key_exists( 'aria_label', $args ) && '' !== (string) $args['aria_label'],
+			'ariaLabelSha1' => array_key_exists( 'aria_label', $args ) ? sha1( (string) $args['aria_label'] ) : null,
+		);
 	}
 
 	private static function bookmark_cases( \ComponentFuzz\FuzzContext $ctx ): array {
