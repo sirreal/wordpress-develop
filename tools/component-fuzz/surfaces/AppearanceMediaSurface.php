@@ -34,6 +34,7 @@ final class AppearanceMediaSurface {
 			$rows[] = self::check_header_and_background_frontend_helpers( $ctx->fork( 'frontend' ) );
 			$rows[] = self::check_head_callback_css( $ctx->fork( 'head-callback-css' ) );
 			$rows[] = self::check_custom_header_markup_and_video( $ctx->fork( 'custom-header-video' ) );
+			$rows[] = self::check_custom_header_markup_print_side_effects( $ctx->fork( 'custom-header-print' ) );
 			$rows[] = self::check_custom_logo_helpers( $ctx->fork( 'custom-logo' ) );
 			$rows[] = self::check_site_icon_helpers( $ctx->fork( 'site-icon' ) );
 			$rows[] = self::check_site_icon_attachment_urls( $ctx->fork( 'site-icon-attachment-urls' ) );
@@ -84,6 +85,9 @@ final class AppearanceMediaSurface {
 			if ( ! class_exists( $class, false ) ) {
 				$missing[] = "class {$class}";
 			}
+		}
+		if ( ! class_exists( 'WP_Scripts', false ) ) {
+			$missing[] = 'class WP_Scripts';
 		}
 		if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 			$missing[] = 'class Component_Fuzz_WPDB_Stub';
@@ -139,6 +143,7 @@ final class AppearanceMediaSurface {
 				'set_theme_mod',
 				'site_icon_url',
 				'the_custom_logo',
+				'the_custom_header_markup',
 				'the_header_video_url',
 				'_custom_background_cb',
 				'_custom_logo_header_styles',
@@ -152,10 +157,16 @@ final class AppearanceMediaSurface {
 				'wp_get_attachment_url',
 				'wp_get_mime_types',
 				'wp_get_upload_dir',
+				'wp_enqueue_script',
+				'wp_localize_script',
 				'wp_nonce_tick',
+				'wp_register_script',
+				'wp_script_is',
+				'wp_scripts',
 				'wp_update_attachment_metadata',
 				'wp_verify_nonce',
 				'wp_cache_delete',
+				'wp_json_encode',
 				'wp_site_icon',
 			) as $function
 		) {
@@ -666,6 +677,203 @@ final class AppearanceMediaSurface {
 		return self::row(
 			$ctx,
 			'appearance-media.custom-header.markup-video-settings',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, self::MAX_FAILURES ) )
+		);
+	}
+
+	private static function check_custom_header_markup_print_side_effects( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures               = array();
+		$token                  = strtolower( preg_replace( '/[^a-z0-9-]+/', '-', $ctx->identifier( 5, 12 ) ) );
+		$video_url              = $ctx->choice(
+			array(
+				'https://www.youtube.com/watch?v=' . rawurlencode( $token ) . '&unsafe=<tag>',
+				'https://youtu.be/' . rawurlencode( $token ) . '?unsafe=<tag>',
+				'https://example.test/media/' . rawurlencode( $token ) . '.mp4',
+				'https://example.test/media/' . rawurlencode( $token ) . '.webm',
+			)
+		);
+		$expected_video         = \set_url_scheme( str_replace( '<tag>', 'tag', $video_url ) );
+		$expected_mime          = str_contains( $expected_video, 'youtube.com/watch' ) || str_contains( $expected_video, 'youtu.be/' )
+			? 'video/x-youtube'
+			: ( str_contains( $expected_video, '.webm' ) ? 'video/webm' : 'video/mp4' );
+		$expected_header        = \set_url_scheme( 'http://example.test/printed-header-' . rawurlencode( $token ) . '.jpg?unsafe=tag' );
+		$active_callback        = static fn (): bool => true;
+		$force_inactive         = static fn (): bool => false;
+		$had_scripts            = array_key_exists( 'wp_scripts', $GLOBALS );
+		$scripts_before         = $GLOBALS['wp_scripts'] ?? null;
+		$register_header_script = static function (): void {
+			$GLOBALS['wp_scripts'] = new \WP_Scripts();
+			\wp_register_script( 'wp-custom-header', '/wp-includes/js/wp-custom-header.js', array(), false, true );
+		};
+		$localized_settings     = static function (): ?array {
+			$data = \wp_scripts()->get_data( 'wp-custom-header', 'data' );
+			if ( ! is_string( $data ) || ! preg_match( '/var _wpCustomHeaderSettings = (.*);\\s*$/s', trim( $data ), $matches ) ) {
+				return null;
+			}
+			$decoded = json_decode( $matches[1], true );
+			return is_array( $decoded ) ? $decoded : null;
+		};
+
+		try {
+			\add_theme_support(
+				'custom-header',
+				array(
+					'video'                 => true,
+					'video-active-callback' => $active_callback,
+					'width'                 => 1200,
+					'height'                => 300,
+				)
+			);
+			\set_theme_mod( 'header_image', 'http://example.test/printed-header-' . rawurlencode( $token ) . '.jpg?unsafe=<tag>' );
+			\set_theme_mod(
+				'header_image_data',
+				(object) array(
+					'attachment_id' => 0,
+					'url'           => 'http://example.test/printed-header-' . rawurlencode( $token ) . '.jpg?unsafe=<tag>',
+					'thumbnail_url' => 'http://example.test/printed-header-thumb-' . rawurlencode( $token ) . '.jpg',
+					'width'         => 1200,
+					'height'        => 300,
+				)
+			);
+			\set_theme_mod( 'external_header_video', $video_url );
+			\remove_theme_mod( 'header_video' );
+
+			$register_header_script();
+			$active_expected_markup = \get_custom_header_markup();
+			$active_expected_settings = \get_header_video_settings();
+			foreach ( $active_expected_settings as $key => $value ) {
+				if ( is_scalar( $value ) ) {
+					$active_expected_settings[ $key ] = html_entity_decode( (string) $value, ENT_QUOTES, 'UTF-8' );
+				}
+			}
+			$active_expected_data   = 'var _wpCustomHeaderSettings = ' . \wp_json_encode( $active_expected_settings, JSON_HEX_TAG | JSON_UNESCAPED_SLASHES ) . ';';
+			$active_registered      = \wp_script_is( 'wp-custom-header', 'registered' );
+			$active_enqueued_before = \wp_script_is( 'wp-custom-header', 'enqueued' );
+			$active_data_before     = \wp_scripts()->get_data( 'wp-custom-header', 'data' );
+			$active_markup   = self::capture( static fn() => \the_custom_header_markup() );
+			$active_enqueued = \wp_script_is( 'wp-custom-header', 'enqueued' );
+			$active_data     = \wp_scripts()->get_data( 'wp-custom-header', 'data' );
+			$active_settings = $localized_settings();
+
+			$register_header_script();
+			$inactive_expected_markup = \get_custom_header_markup();
+			$inactive_registered      = \wp_script_is( 'wp-custom-header', 'registered' );
+			$inactive_enqueued_before = \wp_script_is( 'wp-custom-header', 'enqueued' );
+			$inactive_data_before     = \wp_scripts()->get_data( 'wp-custom-header', 'data' );
+			\add_filter( 'is_header_video_active', $force_inactive );
+			try {
+				$inactive_markup   = self::capture( static fn() => \the_custom_header_markup() );
+				$inactive_enqueued = \wp_script_is( 'wp-custom-header', 'enqueued' );
+				$inactive_data     = \wp_scripts()->get_data( 'wp-custom-header', 'data' );
+			} finally {
+				\remove_filter( 'is_header_video_active', $force_inactive );
+			}
+
+			$register_header_script();
+			\remove_theme_mod( 'external_header_video' );
+			\remove_theme_mod( 'header_video' );
+			$no_video_expected_markup = \get_custom_header_markup();
+			$no_video_registered      = \wp_script_is( 'wp-custom-header', 'registered' );
+			$no_video_enqueued_before = \wp_script_is( 'wp-custom-header', 'enqueued' );
+			$no_video_data_before     = \wp_scripts()->get_data( 'wp-custom-header', 'data' );
+			$no_video_has_video       = \has_header_video();
+			$no_video_markup   = self::capture( static fn() => \the_custom_header_markup() );
+			$no_video_enqueued = \wp_script_is( 'wp-custom-header', 'enqueued' );
+			$no_video_data     = \wp_scripts()->get_data( 'wp-custom-header', 'data' );
+		} finally {
+			\remove_filter( 'is_header_video_active', $force_inactive );
+			\remove_theme_mod( 'external_header_video' );
+			\remove_theme_mod( 'header_video' );
+			\remove_theme_mod( 'header_image' );
+			\remove_theme_mod( 'header_image_data' );
+			\remove_theme_support( 'custom-header' );
+			if ( $had_scripts ) {
+				$GLOBALS['wp_scripts'] = $scripts_before;
+			} else {
+				unset( $GLOBALS['wp_scripts'] );
+			}
+		}
+
+		self::collect_failure(
+			$failures,
+			true === $active_registered
+				&& false === $active_enqueued_before
+				&& false === $active_data_before
+				&& $active_expected_markup === $active_markup
+				&& str_contains( $active_markup, 'id="wp-custom-header"' )
+				&& str_contains( $active_markup, 'src="' . \esc_attr( $expected_header ) . '"' )
+				&& ! str_contains( $active_markup, '<tag>' )
+				&& true === $active_enqueued
+				&& is_string( $active_data )
+				&& $active_expected_data === $active_data
+				&& is_array( $active_settings )
+				&& $active_expected_settings === $active_settings
+				&& $expected_video === ( $active_settings['videoUrl'] ?? null )
+				&& $expected_mime === ( $active_settings['mimeType'] ?? null )
+				&& $expected_header === ( $active_settings['posterUrl'] ?? null )
+				&& 1200 === (int) ( $active_settings['width'] ?? 0 )
+				&& 300 === (int) ( $active_settings['height'] ?? 0 )
+				&& true === $inactive_registered
+				&& false === $inactive_enqueued_before
+				&& false === $inactive_data_before
+				&& $inactive_expected_markup === $inactive_markup
+				&& str_contains( $inactive_markup, 'id="wp-custom-header"' )
+				&& false === $inactive_enqueued
+				&& false === $inactive_data
+				&& true === $no_video_registered
+				&& false === $no_video_enqueued_before
+				&& false === $no_video_data_before
+				&& $no_video_expected_markup === $no_video_markup
+				&& str_contains( $no_video_markup, 'id="wp-custom-header"' )
+				&& false === $no_video_has_video
+				&& false === $no_video_enqueued
+				&& false === $no_video_data
+				&& false === \has_filter( 'is_header_video_active', $force_inactive )
+				&& ( $had_scripts ? ( ( $GLOBALS['wp_scripts'] ?? null ) === $scripts_before ) : ! array_key_exists( 'wp_scripts', $GLOBALS ) ),
+			'the_custom_header_markup prints markup, enqueues and localizes video settings only for active video headers, and restores script state',
+			array(
+				'token'             => $token,
+				'inputVideo'        => $video_url,
+				'expectedVideo'     => $expected_video,
+				'expectedMime'      => $expected_mime,
+				'expectedHeader'    => $expected_header,
+				'activeRegistered'  => $active_registered,
+				'activeBefore'      => array(
+					'enqueued' => $active_enqueued_before,
+					'data'     => self::describe_value( $active_data_before ),
+				),
+				'activeMarkup'      => self::preview( $active_markup ),
+				'activeEnqueued'    => $active_enqueued,
+				'activeExpectedData' => self::preview( $active_expected_data ),
+				'activeData'        => self::describe_value( $active_data ),
+				'activeExpectedSettings' => self::describe_value( $active_expected_settings ),
+				'activeSettings'    => self::describe_value( $active_settings ),
+				'inactiveRegistered' => $inactive_registered,
+				'inactiveBefore'    => array(
+					'enqueued' => $inactive_enqueued_before,
+					'data'     => self::describe_value( $inactive_data_before ),
+				),
+				'inactiveMarkup'    => self::preview( $inactive_markup ),
+				'inactiveEnqueued'  => $inactive_enqueued,
+				'inactiveData'      => self::describe_value( $inactive_data ),
+				'noVideoRegistered' => $no_video_registered,
+				'noVideoBefore'     => array(
+					'enqueued' => $no_video_enqueued_before,
+					'data'     => self::describe_value( $no_video_data_before ),
+				),
+				'noVideoMarkup'     => self::preview( $no_video_markup ),
+				'noVideoHasVideo'   => $no_video_has_video,
+				'noVideoEnqueued'   => $no_video_enqueued,
+				'noVideoData'       => self::describe_value( $no_video_data ),
+				'filterAfter'       => \has_filter( 'is_header_video_active', $force_inactive ),
+				'scriptsRestored'   => $had_scripts ? ( ( $GLOBALS['wp_scripts'] ?? null ) === $scripts_before ) : ! array_key_exists( 'wp_scripts', $GLOBALS ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'appearance-media.custom-header.print-side-effects',
 			array() === $failures,
 			array( 'failures' => array_slice( $failures, 0, self::MAX_FAILURES ) )
 		);
