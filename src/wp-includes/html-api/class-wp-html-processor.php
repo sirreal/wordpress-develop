@@ -99,16 +99,13 @@
  *
  * The HTML Processor supports all elements other than a specific set:
  *
- *  - Any element inside a TABLE.
- *  - Any element inside foreign content, including SVG and MATH.
- *  - Any element outside the IN BODY insertion mode, e.g. doctype declarations, meta, links.
+ *  - PLAINTEXT elements.
+ *  - FRAMESET documents.
+ *  - Non-table content found inside a TABLE element, which requires foster parenting.
+ *  - Content found after closing the BODY or HTML elements which reopens them.
+ *  - META tags which change the document encoding, when parsing a full document.
  *
  * ### Supported markup
- *
- * Some kinds of non-normative HTML involve reconstruction of formatting elements and
- * re-parenting of mis-nested elements. For example, a DIV tag found inside a TABLE
- * may in fact belong _before_ the table in the DOM. If the HTML Processor encounters
- * such a case it will stop processing.
  *
  * The following list illustrates some common examples of unexpected HTML inputs that
  * the HTML Processor properly parses and represents:
@@ -120,6 +117,11 @@
  *  - Elements containing text that looks like other tags but isn't, e.g. `<title>The <img> is plaintext</title>`.
  *  - SCRIPT and STYLE tags containing text that looks like HTML but isn't, e.g. `<script>document.write('<p>Hi</p>');</script>`.
  *  - SCRIPT content which has been escaped, e.g. `<script><!-- document.write('<script>console.log("hi")</script>') --></script>`.
+ *  - Misnested formatting elements, e.g. `<b>bold <i>both</b> italic</i>`, including
+ *    reconstruction of implicitly-closed formatting elements and the adoption agency
+ *    algorithm. Formatting elements reopened by the parser appear as "virtual" nodes:
+ *    they report the attributes of the tag which opened the original element, but
+ *    cannot be modified.
  *
  * ### Unsupported Features
  *
@@ -131,9 +133,13 @@
  * parser does not add those additional attributes.
  *
  * In certain situations, elements are moved to a different part of the document in
- * a process called "adoption" and "fostering." Because the nodes move to a location
- * in the document that the parser had already processed, this parser does not support
- * these situations and will bail.
+ * processes called "adoption" and "fostering." Because a single-pass parser visits
+ * each node once, nodes which have already been visited cannot move: when adoption
+ * relocates such nodes, they are reported where they were originally found, while
+ * every node visited afterwards is reported with the path a browser would report
+ * for it. Fostering, which moves content found inside a TABLE to a location before
+ * the table, is not supported, and this parser will bail when non-table content
+ * is found inside a TABLE element.
  *
  * @since 6.4.0
  *
@@ -257,6 +263,50 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @var WP_HTML_Token|null
 	 */
 	private $context_node = null;
+
+	/**
+	 * Indicates whether the token currently being processed has already
+	 * produced a stack event of "real" provenance.
+	 *
+	 * Each token in the input HTML must be presented to a visitor of the
+	 * document at most once. Algorithms such as the adoption agency
+	 * algorithm, however, may pop multiple elements whose tag name matches
+	 * a single closing tag in the input HTML: this flag records that a tag
+	 * closer has already been matched with a popped element so that the
+	 * others are reported as closing "virtual" nodes.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @var bool
+	 */
+	private $current_token_produced_real_event = false;
+
+	/**
+	 * Reads attributes from the source tag referenced by a virtual node.
+	 *
+	 * Virtual nodes created for the tokens of existing tags, such as the
+	 * formatting elements reconstructed from the list of active formatting
+	 * elements, share the attributes of the tag which created their original
+	 * token. This processor reads those attributes on demand and is cached
+	 * here while the same virtual node remains matched.
+	 *
+	 * @see WP_HTML_Processor::get_virtual_node_attribute_reader()
+	 *
+	 * @since 7.1.0
+	 *
+	 * @var WP_HTML_Tag_Processor|null
+	 */
+	private $virtual_node_attribute_reader = null;
+
+	/**
+	 * Bookmark name of the token for which the virtual-node attribute reader
+	 * was created, indicating when the reader must be re-created.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @var string|null
+	 */
+	private $virtual_node_attribute_reader_bookmark = null;
 
 	/*
 	 * Public Interface Functions
@@ -401,10 +451,25 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 
 		$this->state->stack_of_open_elements->set_push_handler(
 			function ( WP_HTML_Token $token ): void {
-				$is_virtual            = ! isset( $this->state->current_token ) || $this->is_tag_closer();
-				$same_node             = isset( $this->state->current_token ) && $token->node_name === $this->state->current_token->node_name;
-				$provenance            = ( ! $same_node || $is_virtual ) ? 'virtual' : 'real';
-				$this->element_queue[] = new WP_HTML_Stack_Event( $token, WP_HTML_Stack_Event::PUSH, $provenance );
+				/*
+				 * A push event is "real" when it pushes the token currently being
+				 * processed and that token is a tag opener found in the input HTML.
+				 * All other pushes open "virtual" nodes: elements implied by context,
+				 * formatting elements reconstructed from the list of active formatting
+				 * elements, or clones created by the adoption agency algorithm.
+				 *
+				 * Token identity is compared instead of the tag name because multiple
+				 * nodes sharing the current token's tag name may be pushed while
+				 * processing a single token. For example, when a "B" formatting element
+				 * is reconstructed while processing the opening tag of another "B"
+				 * element, only the push for the latter is real.
+				 */
+				$is_real               = (
+					isset( $this->state->current_token ) &&
+					$token === $this->state->current_token &&
+					! $this->is_tag_closer()
+				);
+				$this->element_queue[] = new WP_HTML_Stack_Event( $token, WP_HTML_Stack_Event::PUSH, $is_real ? 'real' : 'virtual' );
 
 				$this->change_parsing_namespace( $token->integration_node_type ? 'html' : $token->namespace );
 			}
@@ -412,10 +477,27 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 
 		$this->state->stack_of_open_elements->set_pop_handler(
 			function ( WP_HTML_Token $token ): void {
-				$is_virtual            = ! isset( $this->state->current_token ) || ! $this->is_tag_closer();
-				$same_node             = isset( $this->state->current_token ) && $token->node_name === $this->state->current_token->node_name;
-				$provenance            = ( ! $same_node || $is_virtual ) ? 'virtual' : 'real';
-				$this->element_queue[] = new WP_HTML_Stack_Event( $token, WP_HTML_Stack_Event::POP, $provenance );
+				/*
+				 * A pop event is "real" when the token currently being processed is
+				 * a tag closer found in the input HTML whose tag name matches the
+				 * popped node, and when no real event has been produced for the
+				 * current token yet. All other pops close "virtual" nodes.
+				 *
+				 * At most one popped node may be matched with a given tag closer.
+				 * The adoption agency algorithm, for example, may pop multiple
+				 * elements sharing the tag name of the closing tag it processes:
+				 * only the first of them corresponds to the tag in the input HTML.
+				 */
+				$is_real = (
+					! $this->current_token_produced_real_event &&
+					isset( $this->state->current_token ) &&
+					$this->is_tag_closer() &&
+					$token->node_name === $this->state->current_token->node_name
+				);
+				if ( $is_real ) {
+					$this->current_token_produced_real_event = true;
+				}
+				$this->element_queue[] = new WP_HTML_Stack_Event( $token, WP_HTML_Stack_Event::POP, $is_real ? 'real' : 'virtual' );
 
 				$adjusted_current_node = $this->get_adjusted_current_node();
 
@@ -808,12 +890,11 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		/*
 		 * Prime the events if there are none.
 		 *
-		 * @todo In some cases, probably related to the adoption agency
-		 *       algorithm, this call to step() doesn't create any new
-		 *       events. Calling it again creates them. Figure out why
-		 *       this is and if it's inherent or if it's a bug. Looping
-		 *       until there are events or until there are no more
-		 *       tokens works in the meantime and isn't obviously wrong.
+		 * Some tokens never create stack events: tokens which the HTML
+		 * specification directs the parser to ignore, such as a stray
+		 * closing tag or a DOCTYPE found inside BODY. Stepping past such
+		 * a token succeeds but enqueues nothing, so this method recurses
+		 * until an event appears or the document is exhausted.
 		 */
 		if ( empty( $this->element_queue ) ) {
 			if ( $this->step() ) {
@@ -1072,6 +1153,8 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 				$this->has_self_closing_flag(),
 				$this->release_internal_bookmark_on_destruct
 			);
+
+			$this->current_token_produced_real_event = false;
 		}
 
 		$parse_in_current_insertion_mode = (
@@ -2859,16 +2942,26 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 							break 2;
 
 						case 'A':
+							/*
+							 * > …run the adoption agency algorithm for the token, then remove that
+							 * > element from the list of active formatting elements and the stack
+							 * > of open elements if the adoption agency algorithm didn't already
+							 * > remove it (it might not have if the element is not in table scope).
+							 *
+							 * The adoption agency algorithm cannot require "any other end tag"
+							 * treatment here: it searches the same span of the list of active
+							 * formatting elements in which this A element was just found.
+							 */
 							$this->run_adoption_agency_algorithm();
 							$this->state->active_formatting_elements->remove_node( $item );
-							$this->state->stack_of_open_elements->remove_node( $item );
+							$this->remove_node_from_stack_of_open_elements( $item );
 							break 2;
 					}
 				}
 
 				$this->reconstruct_active_formatting_elements();
 				$this->insert_html_element( $this->state->current_token );
-				$this->state->active_formatting_elements->push( $this->state->current_token );
+				$this->push_onto_active_formatting_elements( $this->state->current_token );
 				return true;
 
 			/*
@@ -2889,7 +2982,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			case '+U':
 				$this->reconstruct_active_formatting_elements();
 				$this->insert_html_element( $this->state->current_token );
-				$this->state->active_formatting_elements->push( $this->state->current_token );
+				$this->push_onto_active_formatting_elements( $this->state->current_token );
 				return true;
 
 			/*
@@ -2905,7 +2998,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 				}
 
 				$this->insert_html_element( $this->state->current_token );
-				$this->state->active_formatting_elements->push( $this->state->current_token );
+				$this->push_onto_active_formatting_elements( $this->state->current_token );
 				return true;
 
 			/*
@@ -2926,7 +3019,13 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			case '-STRONG':
 			case '-TT':
 			case '-U':
-				$this->run_adoption_agency_algorithm();
+				if ( ! $this->run_adoption_agency_algorithm() ) {
+					/*
+					 * > If there is no such element, then return and instead act as
+					 * > described in the "any other end tag" entry above.
+					 */
+					return $this->in_body_any_other_end_tag();
+				}
 				return true;
 
 			/*
@@ -5425,7 +5524,56 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @return string|true|null Value of attribute or `null` if not available. Boolean attributes return `true`.
 	 */
 	public function get_attribute( $name ) {
-		return $this->is_virtual() ? null : parent::get_attribute( $name );
+		if ( ! $this->is_virtual() ) {
+			return parent::get_attribute( $name );
+		}
+
+		$reader = $this->get_virtual_node_attribute_reader();
+		return null !== $reader ? $reader->get_attribute( $name ) : null;
+	}
+
+	/**
+	 * Returns a reader stopped at the source tag referenced by the currently-
+	 * matched virtual node, if the node refers to a tag in the input HTML.
+	 *
+	 * Virtual nodes created for elements implied by context, such as missing
+	 * HTML, HEAD, or BODY tags, do not refer to any tag in the input HTML and
+	 * have no attributes: for these, no reader exists.
+	 *
+	 * Nodes created by active format reconstruction or by the adoption agency
+	 * algorithm, however, are created for the tokens of tags in the input HTML
+	 * and share their attributes: reading such a node's attributes reads the
+	 * attributes of its source tag.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @return WP_HTML_Tag_Processor|null Reader stopped at the source tag, if one exists.
+	 */
+	private function get_virtual_node_attribute_reader(): ?WP_HTML_Tag_Processor {
+		$token = $this->current_element->token;
+
+		if ( ! isset( $token->bookmark_name, $this->bookmarks[ $token->bookmark_name ] ) ) {
+			return null;
+		}
+
+		$span = $this->bookmarks[ $token->bookmark_name ];
+		if ( 0 === $span->length ) {
+			return null;
+		}
+
+		if ( $token->bookmark_name !== $this->virtual_node_attribute_reader_bookmark ) {
+			$reader              = new WP_HTML_Tag_Processor( substr( $this->html, $span->start, $span->length ) );
+			$reader->compat_mode = $this->compat_mode;
+			$reader->change_parsing_namespace( $token->namespace );
+			if ( ! $reader->next_token() ) {
+				return null;
+			}
+
+			$this->virtual_node_attribute_reader          = $reader;
+			$this->virtual_node_attribute_reader_bookmark = $token->bookmark_name;
+		}
+
+		return $this->virtual_node_attribute_reader;
 	}
 
 	/**
@@ -5503,7 +5651,32 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @return array|null List of attribute names, or `null` when no tag opener is matched.
 	 */
 	public function get_attribute_names_with_prefix( $prefix ): ?array {
-		return $this->is_virtual() ? null : parent::get_attribute_names_with_prefix( $prefix );
+		if ( ! $this->is_virtual() ) {
+			return parent::get_attribute_names_with_prefix( $prefix );
+		}
+
+		$reader = $this->get_virtual_node_attribute_reader();
+		return null !== $reader ? $reader->get_attribute_names_with_prefix( $prefix ) : null;
+	}
+
+	/**
+	 * Returns the adjusted attribute name for a given attribute, taking into
+	 * account the current parsing context, whether HTML, SVG, or MathML.
+	 *
+	 * @since 7.1.0 Subclassed for the HTML Processor.
+	 *
+	 * @see WP_HTML_Tag_Processor::get_qualified_attribute_name
+	 *
+	 * @param string $attribute_name Which attribute to adjust.
+	 * @return string|null Adjusted attribute name, or `null` when no tag opener is matched.
+	 */
+	public function get_qualified_attribute_name( $attribute_name ): ?string {
+		if ( ! $this->is_virtual() ) {
+			return parent::get_qualified_attribute_name( $attribute_name );
+		}
+
+		$reader = $this->get_virtual_node_attribute_reader();
+		return null !== $reader ? $reader->get_qualified_attribute_name( $attribute_name ) : null;
 	}
 
 	/**
@@ -5534,16 +5707,19 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * Returns if a matched tag contains the given ASCII case-insensitive class name.
 	 *
 	 * @since 6.6.0 Subclassed for the HTML Processor.
-	 *
-	 * @todo When reconstructing active formatting elements with attributes, find a way
-	 *       to indicate if the virtually-reconstructed formatting elements contain the
-	 *       wanted class name.
+	 * @since 7.1.0 Reports class names for reconstructed formatting elements,
+	 *              which contain the class names of their source tag.
 	 *
 	 * @param string $wanted_class Look for this CSS class name, ASCII case-insensitive.
 	 * @return bool|null Whether the matched tag contains the given class name, or null if not matched.
 	 */
 	public function has_class( $wanted_class ): ?bool {
-		return $this->is_virtual() ? null : parent::has_class( $wanted_class );
+		if ( ! $this->is_virtual() ) {
+			return parent::has_class( $wanted_class );
+		}
+
+		$reader = $this->get_virtual_node_attribute_reader();
+		return null !== $reader ? $reader->has_class( $wanted_class ) : null;
 	}
 
 	/**
@@ -5563,7 +5739,12 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @since 6.6.0 Subclassed for the HTML Processor.
 	 */
 	public function class_list() {
-		return $this->is_virtual() ? null : parent::class_list();
+		if ( ! $this->is_virtual() ) {
+			return parent::class_list();
+		}
+
+		$reader = $this->get_virtual_node_attribute_reader();
+		return null !== $reader ? $reader->class_list() : null;
 	}
 
 	/**
@@ -6009,10 +6190,16 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * > in the current body, cell, or caption (whichever is youngest) that haven't
 	 * > been explicitly closed.
 	 *
+	 * Reconstructed elements are reported as "virtual" nodes: they open where the
+	 * reconstruction occurs, and reading their attributes reports the attributes
+	 * of the tag which created the formatting element being reconstructed.
+	 *
 	 * @since 6.4.0
+	 * @since 7.1.0 Full implementation: reconstructs formatting elements instead
+	 *              of bailing when reconstruction is required.
 	 * @ignore
 	 *
-	 * @throws WP_HTML_Unsupported_Exception When encountering unsupported HTML input.
+	 * @throws Exception When unable to allocate requisite bookmarks.
 	 *
 	 * @see https://html.spec.whatwg.org/#reconstruct-the-active-formatting-elements
 	 *
@@ -6046,7 +6233,47 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			return false;
 		}
 
-		$this->bail( 'Cannot reconstruct active formatting elements when advancing and rewinding is required.' );
+		/*
+		 * > Let entry be the last (most recently added) element in the list of active formatting elements.
+		 * > Rewind: If there are no entries before entry in the list of active formatting elements,
+		 * >         then jump to the step labeled create.
+		 * > Let entry be the entry one earlier than entry in the list of active formatting elements.
+		 * > If entry is neither a marker nor an element that is also in the stack of open elements,
+		 * > go to the step labeled rewind.
+		 * > Advance: Let entry be the element one later than entry in the list of active formatting elements.
+		 *
+		 * The rewind and advance steps find the run of entries at the end of the list which are
+		 * neither markers nor elements in the stack of open elements. These represent formatting
+		 * elements which were implicitly closed and must be reopened, in the order in which they
+		 * were originally opened.
+		 */
+		$entries_to_reconstruct = array();
+		foreach ( $this->state->active_formatting_elements->walk_up() as $entry ) {
+			if (
+				'marker' === $entry->node_name ||
+				$this->state->stack_of_open_elements->contains_node( $entry )
+			) {
+				break;
+			}
+
+			$entries_to_reconstruct[] = $entry;
+		}
+
+		/*
+		 * > Create: Insert an HTML element for the token for which the element entry was created,
+		 * >         to obtain new element.
+		 * > Replace the entry for entry in the list with an entry for new element.
+		 * > If the entry for new element in the list of active formatting elements is not the last
+		 * > entry in the list, return to the step labeled advance.
+		 */
+		for ( $i = count( $entries_to_reconstruct ) - 1; $i >= 0; $i-- ) {
+			$entry       = $entries_to_reconstruct[ $i ];
+			$new_element = $this->clone_token( $entry );
+			$this->insert_html_element( $new_element );
+			$this->state->active_formatting_elements->replace_node( $entry, $new_element );
+		}
+
+		return true;
 	}
 
 	/**
@@ -6245,34 +6472,61 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	/**
 	 * Runs the adoption agency algorithm.
 	 *
+	 * This algorithm handles misnested formatting elements, deciding how
+	 * formatting elements are closed and reopened ("adopted") so that
+	 * formatting applies as a browser would apply it.
+	 *
+	 * Because the HTML Processor visits a document in a single pass, nodes
+	 * which have already been visited cannot be moved: where a browser would
+	 * re-parent nodes found before the misnesting was discovered, this
+	 * processor reports them where they were originally visited. The stack of
+	 * open elements and the list of active formatting elements are maintained
+	 * as the specification demands, however, so every token visited after
+	 * this algorithm runs is reported with the ancestor chain a browser would
+	 * report for it at the same place in the document.
+	 *
 	 * @since 6.4.0
+	 * @since 7.1.0 Full implementation: handles the furthest block case and
+	 *              "any other end tag" fallback instead of bailing.
 	 * @ignore
 	 *
-	 * @throws WP_HTML_Unsupported_Exception When encountering unsupported HTML input.
+	 * @throws Exception When unable to allocate requisite bookmarks.
 	 *
 	 * @see https://html.spec.whatwg.org/#adoption-agency-algorithm
+	 *
+	 * @return bool False when the current token must instead be treated as in
+	 *              the "any other end tag" entry of the "in body" insertion
+	 *              mode, true otherwise.
 	 */
-	private function run_adoption_agency_algorithm(): void {
-		$budget       = 1000;
-		$subject      = $this->get_tag();
-		$current_node = $this->state->stack_of_open_elements->current_node();
+	private function run_adoption_agency_algorithm(): bool {
+		$stack = $this->state->stack_of_open_elements;
+		$afe   = $this->state->active_formatting_elements;
 
+		// > Let subject be token's tag name.
+		$subject = $this->get_tag();
+
+		/*
+		 * > If the current node is an HTML element whose tag name is subject, and the current
+		 * > node is not in the list of active formatting elements, then pop the current node
+		 * > off the stack of open elements and return.
+		 */
+		$current_node = $stack->current_node();
 		if (
-			// > If the current node is an HTML element whose tag name is subject
-			$current_node && $subject === $current_node->node_name &&
-			// > the current node is not in the list of active formatting elements
-			! $this->state->active_formatting_elements->contains_node( $current_node )
+			null !== $current_node &&
+			'html' === $current_node->namespace &&
+			$subject === $current_node->node_name &&
+			! $afe->contains_node( $current_node )
 		) {
-			$this->state->stack_of_open_elements->pop();
-			return;
+			$stack->pop();
+			return true;
 		}
 
-		$outer_loop_counter = 0;
-		while ( $budget-- > 0 ) {
-			if ( $outer_loop_counter++ >= 8 ) {
-				return;
-			}
-
+		/*
+		 * > Let outer loop counter be 0.
+		 * > While true: If outer loop counter is greater than or equal to 8, then return.
+		 * >             Increment outer loop counter by 1.
+		 */
+		for ( $outer_loop_counter = 0; $outer_loop_counter < 8; $outer_loop_counter++ ) {
 			/*
 			 * > Let formatting element be the last element in the list of active formatting elements that:
 			 * >   - is between the end of the list and the last marker in the list,
@@ -6280,7 +6534,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			 * >   - and has the tag name subject.
 			 */
 			$formatting_element = null;
-			foreach ( $this->state->active_formatting_elements->walk_up() as $item ) {
+			foreach ( $afe->walk_up() as $item ) {
 				if ( 'marker' === $item->node_name ) {
 					break;
 				}
@@ -6291,64 +6545,217 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 				}
 			}
 
-			// > If there is no such element, then return and instead act as described in the "any other end tag" entry above.
+			/*
+			 * > If there is no such element, then return and instead act as described in the
+			 * > "any other end tag" entry above.
+			 */
 			if ( null === $formatting_element ) {
-				$this->bail( 'Cannot run adoption agency when "any other end tag" is required.' );
-			}
-
-			// > If formatting element is not in the stack of open elements, then this is a parse error; remove the element from the list, and return.
-			if ( ! $this->state->stack_of_open_elements->contains_node( $formatting_element ) ) {
-				$this->state->active_formatting_elements->remove_node( $formatting_element );
-				return;
-			}
-
-			// > If formatting element is in the stack of open elements, but the element is not in scope, then this is a parse error; return.
-			if ( ! $this->state->stack_of_open_elements->has_element_in_scope( $formatting_element->node_name ) ) {
-				return;
+				return false;
 			}
 
 			/*
-			 * > Let furthest block be the topmost node in the stack of open elements that is lower in the stack
-			 * > than formatting element, and is an element in the special category. There might not be one.
+			 * > If formatting element is not in the stack of open elements, then this is a
+			 * > parse error; remove the element from the list, and return.
 			 */
-			$is_above_formatting_element = true;
-			$furthest_block              = null;
-			foreach ( $this->state->stack_of_open_elements->walk_down() as $item ) {
-				if ( $is_above_formatting_element && $formatting_element->bookmark_name !== $item->bookmark_name ) {
-					continue;
-				}
+			if ( ! $stack->contains_node( $formatting_element ) ) {
+				$afe->remove_node( $formatting_element );
+				return true;
+			}
 
-				if ( $is_above_formatting_element ) {
-					$is_above_formatting_element = false;
-					continue;
-				}
+			/*
+			 * > If formatting element is in the stack of open elements, but the element is
+			 * > not in scope, then this is a parse error; return.
+			 */
+			if ( ! $stack->has_node_in_scope( $formatting_element ) ) {
+				return true;
+			}
 
-				if ( self::is_special( $item ) ) {
-					$furthest_block = $item;
+			/*
+			 * > If formatting element is not the current node, this is a parse error. (But do not return.)
+			 */
+
+			/*
+			 * > Let furthest block be the topmost node in the stack of open elements that is lower in the
+			 * > stack than formatting element, and is an element in the special category. There might not
+			 * > be one.
+			 *
+			 * The stack is copied into a working array: while there is a furthest block, this algorithm
+			 * removes, replaces, and inserts nodes in a random-access fashion which the stack of open
+			 * elements cannot directly express. The working array is reconciled with the stack at the
+			 * end of the loop.
+			 */
+			$working_stack            = $stack->stack;
+			$formatting_element_index = array_search( $formatting_element, $working_stack, true );
+			$furthest_block           = null;
+			$furthest_block_index     = null;
+			for ( $i = $formatting_element_index + 1, $stack_size = count( $working_stack ); $i < $stack_size; $i++ ) {
+				if ( self::is_special( $working_stack[ $i ] ) ) {
+					$furthest_block       = $working_stack[ $i ];
+					$furthest_block_index = $i;
 					break;
 				}
 			}
 
 			/*
-			 * > If there is no furthest block, then the UA must first pop all the nodes from the bottom of the
-			 * > stack of open elements, from the current node up to and including formatting element, then
-			 * > remove formatting element from the list of active formatting elements, and finally return.
+			 * > If there is no furthest block, then the UA must first pop all the nodes from the bottom of
+			 * > the stack of open elements, from the current node up to and including formatting element,
+			 * > then remove formatting element from the list of active formatting elements, and finally
+			 * > return.
 			 */
 			if ( null === $furthest_block ) {
-				foreach ( $this->state->stack_of_open_elements->walk_up() as $item ) {
-					$this->state->stack_of_open_elements->pop();
+				foreach ( $stack->walk_up() as $item ) {
+					$stack->pop();
 
-					if ( $formatting_element->bookmark_name === $item->bookmark_name ) {
-						$this->state->active_formatting_elements->remove_node( $formatting_element );
-						return;
+					if ( $formatting_element === $item ) {
+						break;
 					}
 				}
+
+				$afe->remove_node( $formatting_element );
+				return true;
 			}
 
-			$this->bail( 'Cannot extract common ancestor in adoption agency algorithm.' );
+			/*
+			 * > Let common ancestor be the element immediately above formatting element in the stack
+			 * > of open elements.
+			 *
+			 * The common ancestor is only used as a target when re-parenting nodes which have already
+			 * been visited; since this processor cannot re-parent visited nodes, it goes unused here.
+			 */
+
+			// > Let a bookmark note the position of formatting element in the list of active formatting elements.
+			$bookmark = $afe->position_of( $formatting_element );
+
+			// > Let node and last node be furthest block.
+			$node_index         = $furthest_block_index;
+			$last_node          = $furthest_block;
+			$inner_loop_counter = 0;
+
+			while ( true ) {
+				// > Increment inner loop counter by 1.
+				++$inner_loop_counter;
+
+				/*
+				 * > Let node be the element immediately above node in the stack of open elements,
+				 * > or if node is no longer in the stack of open elements (e.g. because it got
+				 * > removed by this algorithm), the element that was immediately above node in
+				 * > the stack of open elements at the time when node was removed.
+				 *
+				 * Removed nodes are spliced out of the working array, so the element which was
+				 * above a removed node is found at the removed node's old index.
+				 */
+				$node = $working_stack[ --$node_index ];
+
+				// > If node is formatting element, then break out of the inner loop.
+				if ( $node === $formatting_element ) {
+					break;
+				}
+
+				/*
+				 * > If inner loop counter is greater than 3 and node is in the list of active
+				 * > formatting elements, then remove node from the list of active formatting elements.
+				 */
+				$node_afe_position = $afe->position_of( $node );
+				if ( $inner_loop_counter > 3 && null !== $node_afe_position ) {
+					$afe->remove_at( $node_afe_position );
+					if ( $node_afe_position < $bookmark ) {
+						--$bookmark;
+					}
+					$node_afe_position = null;
+				}
+
+				/*
+				 * > If node is not in the list of active formatting elements, then remove node
+				 * > from the stack of open elements and continue.
+				 */
+				if ( null === $node_afe_position ) {
+					array_splice( $working_stack, $node_index, 1 );
+					continue;
+				}
+
+				/*
+				 * > Create an element for the token for which the element node was created, in the
+				 * > HTML namespace, with common ancestor as the intended parent; replace the entry
+				 * > for node in the list of active formatting elements with an entry for the new
+				 * > element, replace the entry for node in the stack of open elements with an entry
+				 * > for the new element, and let node be the new element.
+				 */
+				$node_clone = $this->clone_token( $node );
+				$afe->replace_node( $node, $node_clone );
+				$working_stack[ $node_index ] = $node_clone;
+				$node                         = $node_clone;
+
+				/*
+				 * > If last node is furthest block, then move the aforementioned bookmark to be
+				 * > immediately after the new node in the list of active formatting elements.
+				 */
+				if ( $last_node === $furthest_block ) {
+					$bookmark = $node_afe_position + 1;
+				}
+
+				/*
+				 * > Insert last node into node, first removing it from its previous parent node if any.
+				 *
+				 * This re-parents a node which has already been visited: it has no effect on the
+				 * stack of open elements or on the tokens which have yet to be visited.
+				 */
+
+				// > Let last node be node.
+				$last_node = $node;
+			}
+
+			/*
+			 * > Insert whatever last node ended up being in the previous step at the appropriate place
+			 * > for inserting a node, but using common ancestor as the override target.
+			 *
+			 * As above, this re-parents a node which has already been visited and has no effect on
+			 * the parse of the remaining document.
+			 */
+
+			/*
+			 * > Create an element for the token for which formatting element was created, in the HTML
+			 * > namespace, with furthest block as the intended parent.
+			 * > Take all of the child nodes of furthest block and append them to the element created
+			 * > in the last step.
+			 * > Append that new element to furthest block.
+			 *
+			 * The children of the furthest block have already been visited and moving them has no
+			 * effect on the remaining parse. The new element itself, however, becomes an open element
+			 * below the furthest block, where content which follows will be found.
+			 */
+			$formatting_clone = $this->clone_token( $formatting_element );
+
+			/*
+			 * > Remove formatting element from the list of active formatting elements, and insert the
+			 * > new element into the list of active formatting elements at the position of the
+			 * > aforementioned bookmark.
+			 */
+			$formatting_element_afe_position = $afe->position_of( $formatting_element );
+			$afe->remove_at( $formatting_element_afe_position );
+			if ( $formatting_element_afe_position < $bookmark ) {
+				--$bookmark;
+			}
+			$afe->insert_at( $bookmark, $formatting_clone );
+
+			/*
+			 * > Remove formatting element from the stack of open elements, and insert the new element
+			 * > into the stack of open elements immediately below the position of furthest block in
+			 * > that stack.
+			 */
+			array_splice( $working_stack, array_search( $formatting_element, $working_stack, true ), 1 );
+			array_splice( $working_stack, array_search( $furthest_block, $working_stack, true ) + 1, 0, array( $formatting_clone ) );
+
+			/*
+			 * The working stack now describes the stack of open elements after this iteration of the
+			 * algorithm: reconcile the stack of open elements so that the rearrangement is expressed
+			 * as properly-nested closing and opening events.
+			 */
+			$this->reconcile_stack_of_open_elements( $working_stack );
+
+			// > Jump back to the step labeled outer loop.
 		}
 
-		$this->bail( 'Cannot run adoption agency when looping required.' );
+		return true;
 	}
 
 	/**
@@ -6455,6 +6862,220 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		$token = new WP_HTML_Token( $name, $token_name, false );
 		$this->insert_html_element( $token );
 		return $token;
+	}
+
+	/**
+	 * Creates a token that is a clone of a given element token, as when the
+	 * HTML parsing algorithms create a new element for an existing token.
+	 *
+	 * The clone receives its own bookmark spanning the same input HTML as the
+	 * original token so that its attributes may be read: reading an attribute
+	 * of a reconstructed element reports the attribute of the tag which
+	 * created its original token. The clone remains a distinct node, however,
+	 * and modifying it is not supported.
+	 *
+	 * @since 7.1.0
+	 * @ignore
+	 *
+	 * @throws Exception When unable to allocate requisite bookmark.
+	 *
+	 * @param WP_HTML_Token $token Create a clone of this token.
+	 * @return WP_HTML_Token Clone of the given token.
+	 */
+	private function clone_token( WP_HTML_Token $token ): WP_HTML_Token {
+		$name = $this->bookmark_token();
+		$here = isset( $token->bookmark_name ) ? ( $this->bookmarks[ $token->bookmark_name ] ?? null ) : null;
+
+		$this->bookmarks[ $name ] = null !== $here
+			? new WP_HTML_Span( $here->start, $here->length )
+			: new WP_HTML_Span( $this->bookmarks[ $this->state->current_token->bookmark_name ]->start, 0 );
+
+		$clone                        = new WP_HTML_Token( $name, $token->node_name, $token->has_self_closing_flag, $this->release_internal_bookmark_on_destruct );
+		$clone->namespace             = $token->namespace;
+		$clone->integration_node_type = $token->integration_node_type;
+
+		return $clone;
+	}
+
+	/**
+	 * Updates the stack of open elements to contain a given arrangement of
+	 * nodes, expressing the transformation as a properly-nested sequence of
+	 * closing and opening events.
+	 *
+	 * The HTML Processor reports a document as a stream of tokens whose
+	 * nesting structure is implied by the order of the opening and closing
+	 * events for each element. Algorithms such as the adoption agency
+	 * algorithm rearrange the stack of open elements in a random-access
+	 * fashion, which has no direct representation in a stream of properly-
+	 * nested events. This method expresses such rearrangements by closing
+	 * elements down to the deepest ancestor shared with the desired
+	 * arrangement and then opening the desired elements below it.
+	 *
+	 * Nodes which have already been visited cannot be re-parented: they were
+	 * reported where they were originally found. Every token visited after
+	 * this update, however, is reported with breadcrumbs matching the
+	 * ancestor chain a browser would report at the same place in the document.
+	 *
+	 * @since 7.1.0
+	 * @ignore
+	 *
+	 * @param WP_HTML_Token[] $desired_stack Nodes the stack of open elements should contain, in order.
+	 */
+	private function reconcile_stack_of_open_elements( array $desired_stack ): void {
+		$stack = $this->state->stack_of_open_elements;
+
+		$shared_depth = 0;
+		$max_shared   = min( $stack->count(), count( $desired_stack ) );
+		while ( $shared_depth < $max_shared && $stack->stack[ $shared_depth ] === $desired_stack[ $shared_depth ] ) {
+			++$shared_depth;
+		}
+
+		for ( $i = $stack->count(); $i > $shared_depth; $i-- ) {
+			$stack->pop();
+		}
+
+		for ( $i = $shared_depth, $desired_depth = count( $desired_stack ); $i < $desired_depth; $i++ ) {
+			$stack->push( $desired_stack[ $i ] );
+		}
+	}
+
+	/**
+	 * Removes a node from the stack of open elements, expressing the removal
+	 * as a properly-nested sequence of closing and opening events when the
+	 * node is not the current node.
+	 *
+	 * @since 7.1.0
+	 * @ignore
+	 *
+	 * @see WP_HTML_Processor::reconcile_stack_of_open_elements
+	 *
+	 * @param WP_HTML_Token $token Node to remove from the stack of open elements.
+	 * @return bool Whether the node was found and removed.
+	 */
+	private function remove_node_from_stack_of_open_elements( WP_HTML_Token $token ): bool {
+		$desired_stack = $this->state->stack_of_open_elements->stack;
+		$position      = array_search( $token, $desired_stack, true );
+		if ( false === $position ) {
+			return false;
+		}
+
+		array_splice( $desired_stack, $position, 1 );
+		$this->reconcile_stack_of_open_elements( $desired_stack );
+		return true;
+	}
+
+	/**
+	 * Pushes an element onto the list of active formatting elements, limiting
+	 * the number of equivalent elements as required by the "Noah's Ark clause".
+	 *
+	 * > If there are already three elements in the list of active formatting
+	 * > elements after the last marker, if any, or anywhere in the list if
+	 * > there are no markers, that have the same tag name, namespace, and
+	 * > attributes as element, then remove the earliest such element from the
+	 * > list of active formatting elements. For these purposes, the attributes
+	 * > must be compared as they were when the elements were created by the
+	 * > parser; two elements have the same attributes if all their parsed
+	 * > attributes can be paired such that the two attributes in each pair
+	 * > have identical names, namespaces, and values (the order of the
+	 * > attributes does not matter).
+	 *
+	 * @since 7.1.0
+	 * @ignore
+	 *
+	 * @see https://html.spec.whatwg.org/#push-onto-the-list-of-active-formatting-elements
+	 *
+	 * @param WP_HTML_Token $token Push this node onto the list of active formatting elements.
+	 */
+	private function push_onto_active_formatting_elements( WP_HTML_Token $token ): void {
+		/*
+		 * Find entries which might be equivalent to the pushed element.
+		 * Attributes are only compared once three or more entries share the
+		 * tag name and namespace, because comparing attributes requires
+		 * parsing each candidate's source tag.
+		 */
+		$candidates = array();
+		foreach ( $this->state->active_formatting_elements->walk_up() as $item ) {
+			if ( 'marker' === $item->node_name ) {
+				break;
+			}
+
+			if ( $token->node_name === $item->node_name && $token->namespace === $item->namespace ) {
+				$candidates[] = $item;
+			}
+		}
+
+		if ( count( $candidates ) >= 3 ) {
+			$signature      = $this->get_attribute_comparison_signature( $token );
+			$earliest_match = null;
+			$match_count    = 0;
+
+			// Candidates were collected from the end of the list: the last match found is the earliest.
+			foreach ( $candidates as $candidate ) {
+				if ( $signature === $this->get_attribute_comparison_signature( $candidate ) ) {
+					++$match_count;
+					$earliest_match = $candidate;
+				}
+			}
+
+			if ( $match_count >= 3 ) {
+				$this->state->active_formatting_elements->remove_node( $earliest_match );
+			}
+		}
+
+		// > Add element to the list of active formatting elements.
+		$this->state->active_formatting_elements->push( $token );
+	}
+
+	/**
+	 * Builds a canonical representation of the attribute set of a token's
+	 * source tag, for determining whether two elements have the same
+	 * attributes as required by the "Noah's Ark clause".
+	 *
+	 * Attribute names are unique within a tag, so sorting the name/value
+	 * pairs by name produces a stable representation: two tags receive the
+	 * same signature if and only if their parsed attribute sets are the same.
+	 * Attribute namespaces need not be represented: elements subject to this
+	 * comparison are HTML formatting elements, whose attributes are never
+	 * placed in a foreign namespace.
+	 *
+	 * @since 7.1.0
+	 * @ignore
+	 *
+	 * @param WP_HTML_Token $token Token whose source tag's attributes are represented.
+	 * @return string Canonical representation of the tag's attribute set.
+	 */
+	private function get_attribute_comparison_signature( WP_HTML_Token $token ): string {
+		if ( $token === $this->state->current_token ) {
+			// The parser is stopped at this tag: read its attributes directly.
+			$reader = $this;
+			$names  = parent::get_attribute_names_with_prefix( '' );
+		} else {
+			$span = isset( $token->bookmark_name ) ? ( $this->bookmarks[ $token->bookmark_name ] ?? null ) : null;
+			if ( null === $span || 0 === $span->length ) {
+				return '';
+			}
+
+			$reader = new WP_HTML_Tag_Processor( substr( $this->html, $span->start, $span->length ) );
+			if ( ! $reader->next_token() ) {
+				return '';
+			}
+			$names = $reader->get_attribute_names_with_prefix( '' );
+		}
+
+		if ( null === $names || array() === $names ) {
+			return '';
+		}
+
+		sort( $names, SORT_STRING );
+
+		$attributes = array();
+		foreach ( $names as $name ) {
+			$attributes[ $name ] = $reader === $this
+				? parent::get_attribute( $name )
+				: $reader->get_attribute( $name );
+		}
+
+		return serialize( $attributes );
 	}
 
 	/*
