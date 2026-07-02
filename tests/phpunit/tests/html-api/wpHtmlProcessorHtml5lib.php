@@ -36,6 +36,19 @@ class Tests_HtmlApi_Html5lib extends WP_UnitTestCase {
 	const SKIP_HTML_PARSER_REPARENTS_VISITED_NODES = 'Single-pass parser: the adoption agency algorithm cannot relocate nodes which have already been visited.';
 
 	/**
+	 * Reason to skip tests in which a FORM element is closed while other
+	 * elements remain open inside of it.
+	 *
+	 * In this case browsers remove the FORM from the stack of open elements
+	 * while its still-open descendants remain in place: the FORM remains an
+	 * ancestor of following content in the DOM even though no new content
+	 * can reach it. A properly-nested token stream cannot express this;
+	 * this parser reports following content outside of the closed FORM,
+	 * mirroring the stack of open elements a browser would maintain.
+	 */
+	const SKIP_HTML_PARSER_CANNOT_HOLD_FORM_OPEN = 'Single-pass parser: a FORM closed while its descendants remain open stays in the document as their ancestor, which the token stream cannot express.';
+
+	/**
 	 * Skip specific tests that may not be supported or have known issues.
 	 */
 	const SKIP_TESTS = array(
@@ -81,6 +94,7 @@ class Tests_HtmlApi_Html5lib extends WP_UnitTestCase {
 		'tests22/line0069'       => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
 		'tests22/line0117'       => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
 		'tests26/line0136'       => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests6/line0012'        => self::SKIP_HTML_PARSER_CANNOT_HOLD_FORM_OPEN,
 		'tests8/line0133'        => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
 		'tricky01/line0001'      => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
 		'tricky01/line0019'      => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,

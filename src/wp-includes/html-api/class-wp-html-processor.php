@@ -2796,13 +2796,10 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 					/*
 					 * > If node is null or if the stack of open elements does not have node
 					 * > in scope, then this is a parse error; return and ignore the token.
-					 *
-					 * @todo It's necessary to check if the form token itself is in scope, not
-					 *       simply whether any FORM is in scope.
 					 */
 					if (
 						null === $node ||
-						! $this->state->stack_of_open_elements->has_element_in_scope( 'FORM' )
+						! $this->state->stack_of_open_elements->has_node_in_scope( $node )
 					) {
 						/*
 						 * Parse error: ignore the token.
@@ -2821,10 +2818,9 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 					$this->generate_implied_end_tags();
 					if ( $node !== $this->state->stack_of_open_elements->current_node() ) {
 						// @todo Indicate a parse error once it's possible. This error does not impact the logic here.
-						$this->bail( 'Cannot close a FORM when other elements remain open as this would throw off the breadcrumbs for the following tokens.' );
 					}
 
-					$this->state->stack_of_open_elements->remove_node( $node );
+					$this->remove_node_from_stack_of_open_elements( $node );
 					return true;
 				} else {
 					/*
