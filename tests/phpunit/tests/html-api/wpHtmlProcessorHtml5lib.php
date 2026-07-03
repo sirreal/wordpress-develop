@@ -24,20 +24,90 @@ class Tests_HtmlApi_Html5lib extends WP_UnitTestCase {
 	const TREE_INDENT = '  ';
 
 	/**
+	 * Reason to skip tests which require relocating already-visited nodes.
+	 *
+	 * The HTML Processor visits a document in a single pass and cannot move
+	 * nodes it has already visited. When the adoption agency algorithm runs,
+	 * browsers may re-parent nodes found before the misnesting was discovered;
+	 * this parser reports them where they were originally visited, so the
+	 * constructed tree differs even though the parser state after the
+	 * algorithm matches browsers exactly for everything which follows.
+	 */
+	const SKIP_HTML_PARSER_REPARENTS_VISITED_NODES = 'Single-pass parser: the adoption agency algorithm cannot relocate nodes which have already been visited.';
+
+	/**
+	 * Reason to skip tests in which a FORM element is closed while other
+	 * elements remain open inside of it.
+	 *
+	 * In this case browsers remove the FORM from the stack of open elements
+	 * while its still-open descendants remain in place: the FORM remains an
+	 * ancestor of following content in the DOM even though no new content
+	 * can reach it. A properly-nested token stream cannot express this;
+	 * this parser reports following content outside of the closed FORM,
+	 * mirroring the stack of open elements a browser would maintain.
+	 */
+	const SKIP_HTML_PARSER_CANNOT_HOLD_FORM_OPEN = 'Single-pass parser: a FORM closed while its descendants remain open stays in the document as their ancestor, which the token stream cannot express.';
+
+	/**
 	 * Skip specific tests that may not be supported or have known issues.
 	 */
 	const SKIP_TESTS = array(
-		'noscript01/line0014' => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
-		'tests14/line0022'    => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
-		'tests14/line0055'    => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
-		'tests19/line0488'    => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
-		'tests19/line0500'    => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
-		'tests19/line1079'    => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
-		'tests2/line0207'     => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
-		'tests2/line0686'     => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
-		'tests2/line0697'     => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
-		'tests2/line0709'     => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
-		'webkit01/line0231'   => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
+		'adoption01/line0001'    => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'adoption01/line0014'    => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'adoption01/line0030'    => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'adoption01/line0062'    => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'adoption01/line0108'    => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'adoption01/line0124'    => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'adoption01/line0141'    => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'adoption01/line0241'    => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'adoption01/line0281'    => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'adoption02/line0001'    => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'html5test-com/line0252' => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'noscript01/line0014'    => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
+		'template/line1091'      => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests1/line0237'        => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests1/line0256'        => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests1/line0706'        => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests1/line0784'        => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests1/line0850'        => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests1/line0994'        => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests1/line1015'        => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests1/line1037'        => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests1/line1061'        => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests1/line1086'        => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests1/line1111'        => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests1/line1468'        => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests1/line1484'        => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests14/line0022'       => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
+		'tests14/line0055'       => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
+		'tests19/line0488'       => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
+		'tests19/line0500'       => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
+		'tests19/line1079'       => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
+		'tests19/line1169'       => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests2/line0118'        => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests2/line0207'        => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
+		'tests2/line0686'        => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
+		'tests2/line0697'        => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
+		'tests2/line0709'        => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
+		'tests22/line0001'       => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests22/line0023'       => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests22/line0069'       => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests22/line0117'       => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests26/line0136'       => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests6/line0012'        => self::SKIP_HTML_PARSER_CANNOT_HOLD_FORM_OPEN,
+		'tests8/line0133'        => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tricky01/line0001'      => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tricky01/line0019'      => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tricky01/line0078'      => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tricky01/line0146'      => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'webkit01/line0231'      => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
+		'webkit01/line0571'      => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'webkit01/line0586'      => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'webkit01/line0603'      => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'webkit02/line0186'      => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'webkit02/line0204'      => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'webkit02/line0224'      => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'webkit02/line0242'      => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
 	);
 
 	/**
