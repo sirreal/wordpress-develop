@@ -114,15 +114,11 @@ class WP_HTML_Active_Formatting_Elements {
 	 */
 	public function push( WP_HTML_Token $token ) {
 		/*
-		 * > If there are already three elements in the list of active formatting elements after the last marker,
-		 * > if any, or anywhere in the list if there are no markers, that have the same tag name, namespace, and
-		 * > attributes as element, then remove the earliest such element from the list of active formatting
-		 * > elements. For these purposes, the attributes must be compared as they were when the elements were
-		 * > created by the parser; two elements have the same attributes if all their parsed attributes can be
-		 * > paired such that the two attributes in each pair have identical names, namespaces, and values
-		 * > (the order of the attributes does not matter).
+		 * The "Noah's Ark clause", which limits the list to three elements sharing
+		 * a tag name, namespace, and attributes, requires reading the attributes
+		 * of the source tags and is enforced by the HTML Processor before pushing.
 		 *
-		 * @todo Implement the "Noah's Ark clause" to only add up to three of any given kind of formatting elements to the stack.
+		 * @see WP_HTML_Processor::push_onto_active_formatting_elements
 		 */
 		// > Add element to the list of active formatting elements.
 		$this->stack[] = $token;
@@ -148,6 +144,82 @@ class WP_HTML_Active_Formatting_Elements {
 		}
 
 		return false;
+	}
+
+	/**
+	 * Returns the position of a node in the list of active formatting elements.
+	 *
+	 * Positions are counted from the start of the list: the earliest entry
+	 * is at position zero.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @param WP_HTML_Token $token Find this node in the list of active formatting elements.
+	 * @return int|null Position of the node, or `null` if it isn't in the list.
+	 */
+	public function position_of( WP_HTML_Token $token ): ?int {
+		foreach ( $this->stack as $position => $item ) {
+			if ( $token === $item ) {
+				return $position;
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * Removes the node at the given position in the list of active formatting elements.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @param int $position Remove the node at this position, counting from the start of the list.
+	 * @return bool Whether a node was removed, false when the position was out of range.
+	 */
+	public function remove_at( int $position ): bool {
+		if ( $position < 0 || $position >= count( $this->stack ) ) {
+			return false;
+		}
+
+		array_splice( $this->stack, $position, 1 );
+		return true;
+	}
+
+	/**
+	 * Inserts a node at the given position in the list of active formatting elements.
+	 *
+	 * A node inserted at position zero becomes the earliest entry in the list,
+	 * while one inserted at the position returned by {@see self::count} becomes
+	 * the last (most recently added) entry.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @param int           $position Insert the node at this position, counting from the start of the list.
+	 * @param WP_HTML_Token $token    Insert this node.
+	 */
+	public function insert_at( int $position, WP_HTML_Token $token ): void {
+		array_splice( $this->stack, $position, 0, array( $token ) );
+	}
+
+	/**
+	 * Replaces a node in the list of active formatting elements with another node.
+	 *
+	 * This is distinct from removing the existing node and pushing the new one:
+	 * the replacement occupies the exact position of the node it replaces.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @param WP_HTML_Token $old_node Node to find and replace.
+	 * @param WP_HTML_Token $new_node Node to substitute in its place.
+	 * @return bool Whether the node was found and replaced.
+	 */
+	public function replace_node( WP_HTML_Token $old_node, WP_HTML_Token $new_node ): bool {
+		$position = $this->position_of( $old_node );
+		if ( null === $position ) {
+			return false;
+		}
+
+		$this->stack[ $position ] = $new_node;
+		return true;
 	}
 
 	/**

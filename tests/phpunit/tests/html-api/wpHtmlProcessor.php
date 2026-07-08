@@ -185,18 +185,42 @@ class Tests_HtmlApi_WpHtmlProcessor extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Ensures that support is added for reconstructing active formatting elements
-	 * before the HTML Processor handles situations with unclosed formats requiring it.
+	 * Ensures that unclosed formatting elements are reconstructed into each
+	 * subsequent paragraph, accumulating as a browser would accumulate them.
 	 *
 	 * @ticket 58517
 	 *
 	 * @covers WP_HTML_Processor::reconstruct_active_formatting_elements
 	 */
-	public function test_fails_to_reconstruct_formatting_elements() {
+	public function test_reconstructs_formatting_elements() {
 		$processor = WP_HTML_Processor::create_fragment( '<p><em>One<p><em>Two<p><em>Three<p><em>Four' );
 
-		$this->assertTrue( $processor->next_tag( 'EM' ), 'Could not find first EM.' );
-		$this->assertFalse( $processor->next_tag( 'EM' ), 'Should have aborted before finding second EM as it required reconstructing the first EM.' );
+		/*
+		 * Each opened EM element remains in the list of active formatting elements when its
+		 * containing P closes. Every following paragraph reconstructs all of the unclosed
+		 * EM elements and then adds its own, nesting one deeper each time:
+		 *
+		 *     <p><em>One</em></p>
+		 *     <p><em><em>Two</em></em></p>
+		 *     <p><em><em><em>Three</em></em></em></p>
+		 *     <p><em><em><em><em>Four</em></em></em></em></p>
+		 */
+		$em_count = 0;
+		$deepest  = array();
+		while ( $processor->next_tag( 'EM' ) ) {
+			++$em_count;
+			if ( count( $processor->get_breadcrumbs() ) > count( $deepest ) ) {
+				$deepest = $processor->get_breadcrumbs();
+			}
+		}
+
+		$this->assertNull( $processor->get_last_error(), 'Should have parsed the entire document without error.' );
+		$this->assertSame( 10, $em_count, 'Should have visited every EM element, including those reconstructed.' );
+		$this->assertSame(
+			array( 'HTML', 'BODY', 'P', 'EM', 'EM', 'EM', 'EM' ),
+			$deepest,
+			'Should have reconstructed three unclosed EM elements inside the last paragraph.'
+		);
 	}
 
 	/**
