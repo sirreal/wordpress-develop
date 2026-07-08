@@ -28,7 +28,7 @@ class Tests_HtmlApi_WpHtmlProcessorFosterParenting extends WP_UnitTestCase {
 	 */
 	public function test_fosters_text_found_inside_table() {
 		$processor = WP_HTML_Processor::create_fragment( '<table>lost<td>found' );
-		$processor->enable_foster_parenting();
+		$processor->enable_source_order_foster_parenting();
 
 		$this->assertTrue( $processor->next_token(), 'Failed to find the TABLE.' );
 		$this->assertSame( 'TABLE', $processor->get_token_name(), 'Should have found the TABLE first.' );
@@ -65,7 +65,7 @@ class Tests_HtmlApi_WpHtmlProcessorFosterParenting extends WP_UnitTestCase {
 	 */
 	public function test_fosters_element_and_its_contents() {
 		$processor = WP_HTML_Processor::create_fragment( '<table><div>inside<td>' );
-		$processor->enable_foster_parenting();
+		$processor->enable_source_order_foster_parenting();
 
 		$this->assertTrue( $processor->next_tag( 'DIV' ), 'Failed to find the DIV.' );
 		$this->assertTrue( $processor->is_foster_parented(), 'Should have reported the DIV as foster-parented.' );
@@ -147,7 +147,7 @@ class Tests_HtmlApi_WpHtmlProcessorFosterParenting extends WP_UnitTestCase {
 	 */
 	public function test_table_whitespace_handling( string $html, string $text, bool $is_fostered, array $expected_breadcrumbs ) {
 		$processor = WP_HTML_Processor::create_fragment( $html );
-		$processor->enable_foster_parenting();
+		$processor->enable_source_order_foster_parenting();
 
 		while ( $processor->next_token() && '#text' !== $processor->get_token_name() ) {
 			continue;
@@ -185,7 +185,7 @@ class Tests_HtmlApi_WpHtmlProcessorFosterParenting extends WP_UnitTestCase {
 	 */
 	public function test_fosters_into_template_contents() {
 		$processor = WP_HTML_Processor::create_fragment( '<table><template><tbody>lost' );
-		$processor->enable_foster_parenting();
+		$processor->enable_source_order_foster_parenting();
 
 		while ( $processor->next_token() && '#text' !== $processor->get_token_name() ) {
 			continue;
@@ -211,7 +211,7 @@ class Tests_HtmlApi_WpHtmlProcessorFosterParenting extends WP_UnitTestCase {
 	 */
 	public function test_fosters_before_the_nearest_table() {
 		$processor = WP_HTML_Processor::create_fragment( '<table><td><table>lost' );
-		$processor->enable_foster_parenting();
+		$processor->enable_source_order_foster_parenting();
 
 		while ( $processor->next_token() && '#text' !== $processor->get_token_name() ) {
 			continue;
@@ -237,7 +237,7 @@ class Tests_HtmlApi_WpHtmlProcessorFosterParenting extends WP_UnitTestCase {
 	 */
 	public function test_fosters_reconstructed_formatting_elements() {
 		$processor = WP_HTML_Processor::create_fragment( '<table><b>bold<tr>reopened' );
-		$processor->enable_foster_parenting();
+		$processor->enable_source_order_foster_parenting();
 
 		// The B is fostered before the table.
 		$this->assertTrue( $processor->next_tag( 'B' ), 'Failed to find the B.' );
@@ -273,7 +273,7 @@ class Tests_HtmlApi_WpHtmlProcessorFosterParenting extends WP_UnitTestCase {
 	 */
 	public function test_adoption_agency_fosters_last_node() {
 		$processor = WP_HTML_Processor::create_fragment( '<table><a>1<p>2</a>3' );
-		$processor->enable_foster_parenting();
+		$processor->enable_source_order_foster_parenting();
 
 		while ( $processor->next_token() && '3' !== $processor->get_modifiable_text() ) {
 			continue;
@@ -297,7 +297,7 @@ class Tests_HtmlApi_WpHtmlProcessorFosterParenting extends WP_UnitTestCase {
 	 */
 	public function test_next_tag_matches_fostered_breadcrumbs() {
 		$processor = WP_HTML_Processor::create_fragment( '<table><img loc="fostered"><td><img loc="cell">' );
-		$processor->enable_foster_parenting();
+		$processor->enable_source_order_foster_parenting();
 
 		$this->assertTrue(
 			$processor->next_tag( array( 'breadcrumbs' => array( 'BODY', 'IMG' ) ) ),
@@ -306,7 +306,7 @@ class Tests_HtmlApi_WpHtmlProcessorFosterParenting extends WP_UnitTestCase {
 		$this->assertSame( 'fostered', $processor->get_attribute( 'loc' ), 'Matched the wrong IMG as a child of BODY.' );
 
 		$processor = WP_HTML_Processor::create_fragment( '<table><img loc="fostered"><td><img loc="cell">' );
-		$processor->enable_foster_parenting();
+		$processor->enable_source_order_foster_parenting();
 
 		$this->assertTrue(
 			$processor->next_tag( array( 'breadcrumbs' => array( 'TD', 'IMG' ) ) ),
@@ -325,7 +325,7 @@ class Tests_HtmlApi_WpHtmlProcessorFosterParenting extends WP_UnitTestCase {
 	 */
 	public function test_fostered_elements_can_be_modified() {
 		$processor = WP_HTML_Processor::create_fragment( '<table><div>lost</div><td>found' );
-		$processor->enable_foster_parenting();
+		$processor->enable_source_order_foster_parenting();
 
 		$this->assertTrue( $processor->next_tag( 'DIV' ), 'Failed to find the DIV.' );
 		$this->assertTrue( $processor->is_foster_parented(), 'Should have reported the DIV as foster-parented.' );
@@ -348,7 +348,7 @@ class Tests_HtmlApi_WpHtmlProcessorFosterParenting extends WP_UnitTestCase {
 	 */
 	public function test_seek_across_fostered_content() {
 		$processor = WP_HTML_Processor::create_fragment( '<table><div>lost</div><td>found' );
-		$processor->enable_foster_parenting();
+		$processor->enable_source_order_foster_parenting();
 
 		$this->assertTrue( $processor->next_tag( 'DIV' ), 'Failed to find the DIV.' );
 		$this->assertTrue( $processor->set_bookmark( 'div' ), 'Failed to set a bookmark on the DIV.' );
@@ -380,7 +380,7 @@ class Tests_HtmlApi_WpHtmlProcessorFosterParenting extends WP_UnitTestCase {
 	 */
 	public function test_foreign_table_part_names_do_not_terminate_table_context_clearing() {
 		$processor = WP_HTML_Processor::create_fragment( '<table><tr><svg><template></tr><caption>x' );
-		$processor->enable_foster_parenting();
+		$processor->enable_source_order_foster_parenting();
 
 		$this->assertTrue( $processor->next_tag( 'CAPTION' ), 'Failed to find the CAPTION.' );
 		$this->assertSame(
@@ -408,12 +408,12 @@ class Tests_HtmlApi_WpHtmlProcessorFosterParenting extends WP_UnitTestCase {
 	 */
 	public function test_serialize_round_trips( string $html ) {
 		$processor = WP_HTML_Processor::create_fragment( $html );
-		$processor->enable_foster_parenting();
+		$processor->enable_source_order_foster_parenting();
 		$once = $processor->serialize();
 		$this->assertNotNull( $once, 'Failed to serialize the document.' );
 
 		$reprocessor = WP_HTML_Processor::create_fragment( $once );
-		$reprocessor->enable_foster_parenting();
+		$reprocessor->enable_source_order_foster_parenting();
 		$twice = $reprocessor->serialize();
 		$this->assertNotNull( $twice, 'Failed to serialize the serialized document.' );
 
@@ -444,7 +444,7 @@ class Tests_HtmlApi_WpHtmlProcessorFosterParenting extends WP_UnitTestCase {
 	 *
 	 * @ticket TBD
 	 *
-	 * @covers ::enable_foster_parenting
+	 * @covers ::enable_source_order_foster_parenting
 	 */
 	public function test_bails_on_fostered_content_by_default() {
 		$processor = WP_HTML_Processor::create_fragment( '<table>lost<td>found' );
@@ -489,12 +489,12 @@ class Tests_HtmlApi_WpHtmlProcessorFosterParenting extends WP_UnitTestCase {
 	 *
 	 * @ticket TBD
 	 *
-	 * @covers ::enable_foster_parenting
+	 * @covers ::enable_source_order_foster_parenting
 	 */
-	public function test_cannot_enable_foster_parenting_after_scanning_starts() {
+	public function test_cannot_enable_source_order_foster_parenting_after_scanning_starts() {
 		$processor = WP_HTML_Processor::create_fragment( '<table>lost<td>found' );
 
 		$this->assertTrue( $processor->next_token(), 'Failed to find the TABLE.' );
-		$this->assertFalse( $processor->enable_foster_parenting(), 'Should have refused to enable foster parenting mid-scan.' );
+		$this->assertFalse( $processor->enable_source_order_foster_parenting(), 'Should have refused to enable foster parenting mid-scan.' );
 	}
 }

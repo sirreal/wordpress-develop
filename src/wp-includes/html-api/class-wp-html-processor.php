@@ -102,7 +102,7 @@
  *  - PLAINTEXT elements.
  *  - FRAMESET documents.
  *  - Non-table content found inside a TABLE element, unless foster parenting
- *    support is enabled; see {@see WP_HTML_Processor::enable_foster_parenting}.
+ *    support is enabled; see {@see WP_HTML_Processor::enable_source_order_foster_parenting}.
  *  - Content found after closing the BODY or HTML elements which reopens them.
  *  - META tags which change the document encoding, when parsing a full document.
  *
@@ -128,7 +128,7 @@
  *    parenting"), when foster parenting support is enabled. Foster-parented nodes
  *    are visited where they were found in the input HTML — after the table element
  *    they precede in the document — and their breadcrumbs report their document
- *    ancestry; see {@see WP_HTML_Processor::enable_foster_parenting} and
+ *    ancestry; see {@see WP_HTML_Processor::enable_source_order_foster_parenting} and
  *    {@see WP_HTML_Processor::is_foster_parented}.
  *
  * ### Unsupported Features
@@ -283,7 +283,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 *
 	 * @since 7.1.0
 	 *
-	 * @see WP_HTML_Processor::enable_foster_parenting
+	 * @see WP_HTML_Processor::enable_source_order_foster_parenting
 	 *
 	 * @var bool
 	 */
@@ -1150,7 +1150,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 *     $processor->get_last_error() === WP_HTML_Processor::ERROR_UNSUPPORTED;
 	 *
 	 *     $processor = WP_HTML_Processor::create_fragment( '<table>misplaced<td>cell</td></table>' );
-	 *     $processor->enable_foster_parenting() === true;
+	 *     $processor->enable_source_order_foster_parenting() === true;
 	 *     while ( $processor->next_token() ) { … }
 	 *
 	 * @since 7.1.0
@@ -1161,7 +1161,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @return bool Whether foster parenting support was enabled: it cannot be
 	 *              enabled once the processor has started scanning.
 	 */
-	public function enable_foster_parenting(): bool {
+	public function enable_source_order_foster_parenting(): bool {
 		if ( WP_HTML_Tag_Processor::STATE_READY !== $this->parser_state ) {
 			return false;
 		}
@@ -1185,7 +1185,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * which does not contain the table context enclosing it in the input HTML.
 	 *
 	 * Foster-parented nodes are only visited after enabling foster parenting
-	 * support with {@see WP_HTML_Processor::enable_foster_parenting}; by
+	 * support with {@see WP_HTML_Processor::enable_source_order_foster_parenting}; by
 	 * default the processor aborts when content requires foster parenting.
 	 *
 	 * Example:
@@ -1196,7 +1196,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 *     $processor->is_foster_parented() === false;
 	 *
 	 *     $processor = WP_HTML_Processor::create_fragment( '<table>misplaced<td>cell</td></table>' );
-	 *     $processor->enable_foster_parenting();
+	 *     $processor->enable_source_order_foster_parenting();
 	 *     $processor->next_token();
 	 *     $processor->get_token_name() === 'TABLE';
 	 *     $processor->next_token();
@@ -1207,7 +1207,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @since 7.1.0
 	 *
 	 * @see https://html.spec.whatwg.org/#foster-parenting
-	 * @see WP_HTML_Processor::enable_foster_parenting
+	 * @see WP_HTML_Processor::enable_source_order_foster_parenting
 	 *
 	 * @return bool Whether the currently-matched node was foster-parented.
 	 */

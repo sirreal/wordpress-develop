@@ -300,7 +300,7 @@ class Tests_HtmlApi_WebPlatformTests extends WP_UnitTestCase {
 		if ( null === $processor ) {
 			throw new WP_HTML_Unsupported_Exception( "Could not create a parser with the given fragment context: {$fragment_context}.", '', 0, '', array(), array() );
 		}
-		$processor->enable_foster_parenting();
+		$processor->enable_source_order_foster_parenting();
 
 		/*
 		 * The document tree is built from nodes of this shape and serialized
