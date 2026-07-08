@@ -184,46 +184,55 @@ class Tests_HtmlApi_WebPlatformTests extends WP_UnitTestCase {
 	 * @param string      $expected_tree    Tree structure of parsed HTML.
 	 */
 	public function test_parse( ?string $fragment_context, string $html, string $expected_tree ) {
-		try {
-			$processed_tree = self::build_tree_representation( $fragment_context, $html );
-		} catch ( WP_HTML_Unsupported_Exception $e ) {
-			$this->markTestSkipped( "Unsupported markup: {$e->getMessage()}" );
-			return;
-		}
-
-		if ( null === $processed_tree ) {
-			$this->markTestSkipped( 'Test includes unsupported markup.' );
-			return;
-		}
-
-		$fragment_detail = $fragment_context ? " in context <{$fragment_context}>" : '';
-
 		/*
-		 * The HTML processor does not produce html, head, body tags if the processor does not reach them.
-		 * HTML tree construction will always produce these tags, the HTML API does not at this time.
+		 * Both presentation modes must realize the same document: the
+		 * document-order default presents nodes in tree order, while
+		 * source-order mode presents fostered nodes at their syntax with
+		 * exact ancestry, from which the tree builder places them.
 		 */
-		$auto_generated_html_head_body = "<html>\n  <head>\n  <body>\n\n";
-		$auto_generated_head_body      = "  <head>\n  <body>\n\n";
-		$auto_generated_body           = "  <body>\n\n";
-		if ( str_ends_with( $expected_tree, $auto_generated_html_head_body ) && ! str_ends_with( $processed_tree, $auto_generated_html_head_body ) ) {
-			if ( str_ends_with( $processed_tree, "<html>\n  <head>\n\n" ) ) {
-				$processed_tree = substr_replace( $processed_tree, "  <body>\n\n", -1 );
-			} elseif ( str_ends_with( $processed_tree, "<html>\n\n" ) ) {
-				$processed_tree = substr_replace( $processed_tree, "  <head>\n  <body>\n\n", -1 );
-			} else {
-				$processed_tree = substr_replace( $processed_tree, $auto_generated_html_head_body, -1 );
+		foreach ( array( false, true ) as $source_order ) {
+			$mode_detail = $source_order ? ' (source-order mode)' : ' (document-order mode)';
+			try {
+				$processed_tree = self::build_tree_representation( $fragment_context, $html, $source_order );
+			} catch ( WP_HTML_Unsupported_Exception $e ) {
+				$this->markTestSkipped( "Unsupported markup{$mode_detail}: {$e->getMessage()}" );
+				return;
 			}
-		} elseif ( str_ends_with( $expected_tree, $auto_generated_head_body ) && ! str_ends_with( $processed_tree, $auto_generated_head_body ) ) {
-			if ( str_ends_with( $processed_tree, "<head>\n\n" ) ) {
-				$processed_tree = substr_replace( $processed_tree, "  <body>\n\n", -1 );
-			} else {
-				$processed_tree = substr_replace( $processed_tree, $auto_generated_head_body, -1 );
-			}
-		} elseif ( str_ends_with( $expected_tree, $auto_generated_body ) && ! str_ends_with( $processed_tree, $auto_generated_body ) ) {
-			$processed_tree = substr_replace( $processed_tree, $auto_generated_body, -1 );
-		}
 
-		$this->assertSame( $expected_tree, $processed_tree, "HTML was not processed correctly{$fragment_detail}:\n{$html}" );
+			if ( null === $processed_tree ) {
+				$this->markTestSkipped( "Test includes unsupported markup{$mode_detail}." );
+				return;
+			}
+
+			$fragment_detail = ( $fragment_context ? " in context <{$fragment_context}>" : '' ) . $mode_detail;
+
+			/*
+			 * The HTML processor does not produce html, head, body tags if the processor does not reach them.
+			 * HTML tree construction will always produce these tags, the HTML API does not at this time.
+			 */
+			$auto_generated_html_head_body = "<html>\n  <head>\n  <body>\n\n";
+			$auto_generated_head_body      = "  <head>\n  <body>\n\n";
+			$auto_generated_body           = "  <body>\n\n";
+			if ( str_ends_with( $expected_tree, $auto_generated_html_head_body ) && ! str_ends_with( $processed_tree, $auto_generated_html_head_body ) ) {
+				if ( str_ends_with( $processed_tree, "<html>\n  <head>\n\n" ) ) {
+					$processed_tree = substr_replace( $processed_tree, "  <body>\n\n", -1 );
+				} elseif ( str_ends_with( $processed_tree, "<html>\n\n" ) ) {
+					$processed_tree = substr_replace( $processed_tree, "  <head>\n  <body>\n\n", -1 );
+				} else {
+					$processed_tree = substr_replace( $processed_tree, $auto_generated_html_head_body, -1 );
+				}
+			} elseif ( str_ends_with( $expected_tree, $auto_generated_head_body ) && ! str_ends_with( $processed_tree, $auto_generated_head_body ) ) {
+				if ( str_ends_with( $processed_tree, "<head>\n\n" ) ) {
+					$processed_tree = substr_replace( $processed_tree, "  <body>\n\n", -1 );
+				} else {
+					$processed_tree = substr_replace( $processed_tree, $auto_generated_head_body, -1 );
+				}
+			} elseif ( str_ends_with( $expected_tree, $auto_generated_body ) && ! str_ends_with( $processed_tree, $auto_generated_body ) ) {
+				$processed_tree = substr_replace( $processed_tree, $auto_generated_body, -1 );
+			}
+
+				$this->assertSame( $expected_tree, $processed_tree, "HTML was not processed correctly{$fragment_detail}:\n{$html}" );
+		}
 	}
 
 	/**
@@ -293,14 +302,16 @@ class Tests_HtmlApi_WebPlatformTests extends WP_UnitTestCase {
 	 * @param string      $html             Given test HTML.
 	 * @return string|null Tree structure of parsed HTML, if supported, else null.
 	 */
-	private static function build_tree_representation( ?string $fragment_context, string $html ) {
+	private static function build_tree_representation( ?string $fragment_context, string $html, bool $source_order = false ) {
 		$processor = $fragment_context
 			? WP_HTML_Processor::create_fragment( $html, "<{$fragment_context}>" )
 			: WP_HTML_Processor::create_full_parser( $html );
 		if ( null === $processor ) {
 			throw new WP_HTML_Unsupported_Exception( "Could not create a parser with the given fragment context: {$fragment_context}.", '', 0, '', array(), array() );
 		}
-		$processor->enable_source_order_foster_parenting();
+		if ( $source_order ) {
+			$processor->enable_source_order_foster_parenting();
+		}
 
 		/*
 		 * The document tree is built from nodes of this shape and serialized
@@ -349,11 +360,11 @@ class Tests_HtmlApi_WebPlatformTests extends WP_UnitTestCase {
 		 * Text is merged into an immediately-preceding text node at the
 		 * insertion location, as character insertion into a document does.
 		 */
-		$attach = static function ( $node ) use ( &$open_nodes, $processor ) {
+		$attach = static function ( $node ) use ( &$open_nodes, $processor, $source_order ) {
 			$parent          = end( $open_nodes );
 			$insertion_index = null;
 
-			if ( $processor->is_foster_parented() ) {
+			if ( $source_order && $processor->is_foster_parented() ) {
 				for ( $i = count( $open_nodes ) - 1; $i > 0; $i-- ) {
 					$open = $open_nodes[ $i ];
 					if ( 'html' !== $open->namespace ) {

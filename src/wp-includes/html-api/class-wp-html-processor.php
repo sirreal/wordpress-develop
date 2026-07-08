@@ -101,8 +101,10 @@
  *
  *  - PLAINTEXT elements.
  *  - FRAMESET documents.
- *  - Non-table content found inside a TABLE element, unless foster parenting
- *    support is enabled; see {@see WP_HTML_Processor::enable_source_order_foster_parenting}.
+ *  - Non-table content found inside a TABLE element whose relocation is
+ *    discovered beyond the deferral bound; see
+ *    {@see WP_HTML_Processor::MAX_BUFFERED_TABLE_EVENTS} and
+ *    {@see WP_HTML_Processor::enable_source_order_foster_parenting}.
  *  - Content found after closing the BODY or HTML elements which reopens them.
  *  - META tags which change the document encoding, when parsing a full document.
  *
@@ -125,10 +127,12 @@
  *    cannot be modified.
  *  - Non-table content found inside a TABLE element, e.g. `<table>lost<td>found`,
  *    which is inserted at a location in the document before the table ("foster
- *    parenting"), when foster parenting support is enabled. Foster-parented nodes
- *    are visited where they were found in the input HTML — after the table element
- *    they precede in the document — and their breadcrumbs report their document
- *    ancestry; see {@see WP_HTML_Processor::enable_source_order_foster_parenting} and
+ *    parenting"). By default such content is visited in document order, before
+ *    the table, by deferring the table's contents within a bound. In
+ *    source-order mode fostered nodes are instead visited where they were found
+ *    in the input HTML, with no bound; their breadcrumbs report their document
+ *    ancestry in every mode. See
+ *    {@see WP_HTML_Processor::enable_source_order_foster_parenting} and
  *    {@see WP_HTML_Processor::is_foster_parented}.
  *
  * ### Unsupported Features
@@ -146,11 +150,12 @@
  * relocates such nodes, they are reported where they were originally found, while
  * every node visited afterwards is reported with the path a browser would report
  * for it. Fostered nodes are new nodes and are always reported with the document
- * ancestry a browser would report; they are visited where they were found in the
- * input HTML, however, which is after the table element they precede in the
- * document. Because that breaks the guarantee that nodes are visited in document
- * order, this parser aborts on content requiring foster parenting unless support
- * for it has been explicitly enabled.
+ * ancestry a browser would report. By default they are also visited in document
+ * order — the parser defers each table's contents, within a bound, until the
+ * table closes — and the parser aborts when mis-nested content is discovered
+ * beyond that bound. Enabling source-order foster parenting removes the bound
+ * and the deferral: fostered nodes are then visited where they were found in
+ * the input HTML, after the table element they precede in the document.
  *
  * @since 6.4.0
  *
@@ -171,6 +176,31 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @var int
 	 */
 	const MAX_BOOKMARKS = 10_000;
+
+	/**
+	 * Bound on deferred stack events per table window in document-order mode.
+	 *
+	 * By default the processor visits every node in document order. Content
+	 * which foster parenting relocates to a document location before its
+	 * enclosing TABLE requires deferring the table's contents until the
+	 * table closes; this constant bounds that deferral. When ordinary table
+	 * content exceeds the bound, the deferred events are flushed in order
+	 * and the parse continues undeferred — well-formed tables of any size
+	 * always parse — but foster parenting encountered afterwards can no
+	 * longer be presented in document order and aborts the parse.
+	 *
+	 * Each element contributes two events (a push and a pop) and each text
+	 * or comment node two more, so this bound covers tables of roughly two
+	 * to three hundred cells. Mis-nested table content is overwhelmingly
+	 * discovered near a table's start, far within this bound.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @see WP_HTML_Processor::enable_source_order_foster_parenting
+	 *
+	 * @var int
+	 */
+	const MAX_BUFFERED_TABLE_EVENTS = 1000;
 
 	/**
 	 * Holds the working state of the parser, including the stack of
@@ -272,14 +302,15 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	private $fostered_breadcrumb_segments = array();
 
 	/**
-	 * Indicates whether this processor supports foster parenting, visiting
-	 * foster-parented nodes at the place they were found in the input HTML.
+	 * Indicates whether this processor visits foster-parented nodes at the
+	 * place they were found in the input HTML instead of deferring table
+	 * contents to preserve document order.
 	 *
 	 * By default the processor guarantees that nodes are visited in document
-	 * order: it aborts when it encounters content which belongs at a document
-	 * location before a place it has already visited, as foster-parented
-	 * content does. Enabling foster parenting trades that guarantee for the
-	 * ability to process such documents.
+	 * order, deferring the contents of each TABLE in a bounded buffer until
+	 * the table closes so that foster-parented content may be visited first.
+	 * In source-order mode nothing is deferred: fostered nodes are visited
+	 * after the TABLE they precede in the document, with no size bound.
 	 *
 	 * @since 7.1.0
 	 *
@@ -287,7 +318,135 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 *
 	 * @var bool
 	 */
-	private $is_foster_parenting_enabled = false;
+	private $is_source_order_foster_parenting_enabled = false;
+
+	/**
+	 * Deferred stack events of the currently-open table window, held in
+	 * document order until the window's TABLE element closes, or `null`
+	 * when no window is open.
+	 *
+	 * In document-order mode, the contents of each outermost TABLE element
+	 * are deferred here so that content which foster parenting relocates to
+	 * a document location before the table may be visited first. Fostered
+	 * events are inserted at their document position within this buffer;
+	 * flushing it front-to-back therefore presents the window in document
+	 * order by construction.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @see WP_HTML_Processor::MAX_BUFFERED_TABLE_EVENTS
+	 *
+	 * @var WP_HTML_Stack_Event[]|null
+	 */
+	private $table_window_events = null;
+
+	/**
+	 * The TABLE element whose subtree the open table window defers, or
+	 * `null` when no window is open. Its pop event flushes the window.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @var WP_HTML_Token|null
+	 */
+	private $table_window_table = null;
+
+	/**
+	 * Indicates that the open table window exceeded its buffering bound and
+	 * flushed early: its remaining events present immediately, and foster
+	 * parenting can no longer be presented in document order.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @var bool
+	 */
+	private $table_window_overflowed = false;
+
+	/**
+	 * Stack of open fostered runs within the table window.
+	 *
+	 * A fostered run begins when a foster-parented element is inserted and
+	 * ends when that element pops from the stack of open elements; every
+	 * stack event in between belongs to the run and is inserted
+	 * consecutively at the run's document position. Each entry holds:
+	 *
+	 *     @type WP_HTML_Token       $root       The foster-parented element which began the run.
+	 *     @type string              $anchor     'table' or 'template'.
+	 *     @type WP_HTML_Token       $anchor_token The run's foster anchor element.
+	 *     @type WP_HTML_Stack_Event $last_event The run's most recently inserted event.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @var array[]
+	 */
+	private $table_window_runs = array();
+
+	/**
+	 * Deferred events fostered into a TEMPLATE element's contents, keyed by
+	 * the bookmark name of the template's "host child": the element directly
+	 * above the TEMPLATE on the stack of open elements when the fostering
+	 * occurred.
+	 *
+	 * Template contents receive fostered content after their last child —
+	 * the host child — so these events are held aside and presented
+	 * immediately after the host child's pop event, following its entire
+	 * subtree, and before template children inserted afterwards.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @var array<string, WP_HTML_Stack_Event[]>
+	 */
+	private $table_window_template_pending = array();
+
+	/**
+	 * Number of stack events which have been visited, used to order
+	 * bookmarks by visitation.
+	 *
+	 * In document-order mode the visitation order of tokens and the byte
+	 * order of their syntax can disagree: content deferred in a table
+	 * window is visited after content whose syntax follows it. Seeking
+	 * therefore compares positions by visitation, not by byte offset.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @var int
+	 */
+	private $visitation_index = 0;
+
+	/**
+	 * Visitation index recorded for each bookmark, keyed by bookmark name.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @see WP_HTML_Processor::$visitation_index
+	 *
+	 * @var array<string, int>
+	 */
+	private $bookmark_visitation_indices = array();
+
+	/**
+	 * Indicates that visiting a deferred event moved the lexer away from
+	 * the parse frontier: before parsing may continue, the lexer must be
+	 * repositioned to the token it last parsed.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @var bool
+	 */
+	private $lexer_repositioned_for_presentation = false;
+
+	/**
+	 * Indicates that the lexer is being repositioned internally.
+	 *
+	 * The Tag Processor's seek() lexes the token at its destination through
+	 * a call to next_token(), which this class overrides to visit queued
+	 * stack events. While repositioning, next_token() must instead lex
+	 * plainly: repositioning must never consume a queued event.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @var bool
+	 */
+	private $is_repositioning_lexer = false;
 
 	/**
 	 * Current stack event, if set, representing a matched token.
@@ -519,19 +678,23 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 				$push_event = new WP_HTML_Stack_Event( $token, WP_HTML_Stack_Event::PUSH, $is_real ? 'real' : 'virtual' );
 
 				/*
-				 * A foster-parented node remains above its table context on the
-				 * stack of open elements even though that context is not part of
-				 * its document ancestry. Count how many elements below the node
-				 * its ancestry bypasses: everything above (and including) the
-				 * nearest TABLE below it on the stack, or everything above the
-				 * nearest TEMPLATE when fostered content belongs inside template
-				 * contents instead.
+				 * In source-order mode, a foster-parented node remains above
+				 * its table context on the stack of open elements even though
+				 * that context is not part of its document ancestry. Count how
+				 * many elements below the node its ancestry bypasses:
+				 * everything above (and including) the nearest TABLE below it
+				 * on the stack, or everything above the nearest TEMPLATE when
+				 * fostered content belongs inside template contents instead.
 				 *
 				 * The count is recorded on the push event because the stack may
 				 * change again before the event is visited, e.g. when the
 				 * adoption agency algorithm rearranges the stack.
+				 *
+				 * In document-order mode no count is needed: presentation
+				 * itself is reordered, so breadcrumbs are exact without
+				 * bypassing anything.
 				 */
-				if ( $token->is_foster_parented ) {
+				if ( $token->is_foster_parented && $this->is_source_order_foster_parenting_enabled ) {
 					$bypass_count      = 0;
 					$has_foster_parent = false;
 					foreach ( $this->state->stack_of_open_elements->walk_up( $token ) as $node ) {
@@ -579,7 +742,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 					$push_event->foster_bypass_count = $bypass_count;
 				}
 
-				$this->element_queue[] = $push_event;
+				$this->route_stack_event( $push_event );
 
 				$this->change_parsing_namespace( $token->integration_node_type ? 'html' : $token->namespace );
 			}
@@ -607,7 +770,20 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 				if ( $is_real ) {
 					$this->current_token_produced_real_event = true;
 				}
-				$this->element_queue[] = new WP_HTML_Stack_Event( $token, WP_HTML_Stack_Event::POP, $is_real ? 'real' : 'virtual' );
+
+				$pop_event = new WP_HTML_Stack_Event( $token, WP_HTML_Stack_Event::POP, $is_real ? 'real' : 'virtual' );
+
+				/*
+				 * A real pop is produced by a closing tag in the input HTML.
+				 * Record that closer's token: when the pop event is deferred
+				 * in a table window and visited later, the lexer repositions
+				 * to the closing tag's own syntax.
+				 */
+				if ( $is_real ) {
+					$pop_event->closer_token = $this->state->current_token;
+				}
+
+				$this->route_stack_event( $pop_event );
 
 				$adjusted_current_node = $this->get_adjusted_current_node();
 
@@ -969,7 +1145,364 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @return bool Whether a token was parsed.
 	 */
 	public function next_token(): bool {
+		if ( $this->is_repositioning_lexer ) {
+			return parent::next_token();
+		}
+
 		return $this->next_visitable_token();
+	}
+
+	/**
+	 * Routes a stack event to its presentation position.
+	 *
+	 * In document-order mode (the default), the contents of each outermost
+	 * TABLE element are deferred in a bounded table window until the table
+	 * closes, so that content which foster parenting relocates to a document
+	 * location before the table may be visited first: fostered events are
+	 * inserted at their document position within the window, and flushing
+	 * the window front-to-back presents everything in document order.
+	 *
+	 * In source-order mode every event is presented as it happens.
+	 *
+	 * @since 7.1.0
+	 * @ignore
+	 *
+	 * @see WP_HTML_Processor::MAX_BUFFERED_TABLE_EVENTS
+	 *
+	 * @throws WP_HTML_Unsupported_Exception When foster parenting cannot be
+	 *                                       presented in document order.
+	 *
+	 * @param WP_HTML_Stack_Event $event Stack event to route.
+	 */
+	private function route_stack_event( WP_HTML_Stack_Event $event ): void {
+		if ( $this->is_source_order_foster_parenting_enabled ) {
+			$this->element_queue[] = $event;
+			return;
+		}
+
+		$token   = $event->token;
+		$is_push = WP_HTML_Stack_Event::PUSH === $event->operation;
+
+		// Events inside an open fostered run follow their run, wherever it is deferred.
+		$open_run_index = count( $this->table_window_runs ) - 1;
+		if ( $open_run_index >= 0 ) {
+			if ( $this->count_deferred_table_events() >= static::MAX_BUFFERED_TABLE_EVENTS ) {
+				$this->bail( 'Foster parenting exceeded the deferral buffer before the mis-nested content was resolved: enable source-order foster parenting to process it out of document order.' );
+			}
+
+			$this->insert_deferred_event( $event, $this->table_window_runs[ $open_run_index ]['last_event'], false );
+			$this->table_window_runs[ $open_run_index ]['last_event'] = $event;
+
+			// The run ends when the fostered element which began it pops.
+			if ( ! $is_push && $token === $this->table_window_runs[ $open_run_index ]['root'] ) {
+				array_pop( $this->table_window_runs );
+			}
+			return;
+		}
+
+		// A fostered push begins a new run at its anchor's document position.
+		if ( $is_push && $token->is_foster_parented ) {
+			if ( $this->count_deferred_table_events() >= static::MAX_BUFFERED_TABLE_EVENTS ) {
+				$this->bail( 'Foster parenting exceeded the deferral buffer before the mis-nested content was resolved: enable source-order foster parenting to process it out of document order.' );
+			}
+
+			$anchor = $this->resolve_foster_anchor( $token );
+
+			if ( 'template' === $anchor['kind'] ) {
+				/*
+				 * Template contents receive fostered content after their last
+				 * child, the "host child": the element directly above the
+				 * TEMPLATE on the stack of open elements. The fostered run is
+				 * held aside and presented after the host child's subtree.
+				 */
+				$this->table_window_template_pending[ $anchor['host_child']->bookmark_name ][] = $event;
+			} else {
+				/*
+				 * Content fostered before a TABLE requires the table's push
+				 * event to still be deferred; once presented — no window, or
+				 * a window flushed by overflow — nothing can precede it.
+				 */
+				$anchor_push = null === $this->table_window_events || $this->table_window_overflowed
+					? null
+					: $this->find_deferred_push_event( $anchor['token'] );
+				if ( null === $anchor_push ) {
+					$this->bail( 'Foster parenting exceeded the deferral buffer before the mis-nested content was resolved: enable source-order foster parenting to process it out of document order.' );
+				}
+				$this->insert_deferred_event( $event, $anchor_push, true );
+			}
+
+			$this->table_window_runs[] = array(
+				'root'       => $token,
+				'last_event' => $event,
+			);
+			return;
+		}
+
+		if ( null === $this->table_window_events ) {
+			// An outermost TABLE element opens a table window over its subtree.
+			if ( $is_push && 'html' === $token->namespace && 'TABLE' === $token->node_name ) {
+				$this->table_window_events = array( $event );
+				$this->table_window_table  = $token;
+				return;
+			}
+
+			$this->element_queue[] = $event;
+			if ( ! $is_push ) {
+				$this->present_pending_fostered_content( $token );
+			}
+			return;
+		}
+
+		// The pop of the window's own TABLE flushes and closes the window.
+		if ( ! $is_push && $token === $this->table_window_table ) {
+			$this->flush_table_window();
+			$this->element_queue[] = $event;
+			$this->present_pending_fostered_content( $token );
+			$this->table_window_events     = null;
+			$this->table_window_table      = null;
+			$this->table_window_overflowed = false;
+			return;
+		}
+
+		if ( $this->table_window_overflowed ) {
+			$this->element_queue[] = $event;
+			if ( ! $is_push ) {
+				$this->present_pending_fostered_content( $token );
+			}
+			return;
+		}
+
+		// Ordinary table content appends; on overflow the window flushes and stops deferring.
+		if ( $this->count_deferred_table_events() >= static::MAX_BUFFERED_TABLE_EVENTS ) {
+			$this->flush_table_window();
+			$this->table_window_overflowed = true;
+			$this->element_queue[]         = $event;
+			if ( ! $is_push ) {
+				$this->present_pending_fostered_content( $token );
+			}
+			return;
+		}
+
+		$this->table_window_events[] = $event;
+
+		// A host child's pop is followed by the fostered content its template received.
+		if ( ! $is_push && isset( $this->table_window_template_pending[ $token->bookmark_name ] ) ) {
+			foreach ( $this->table_window_template_pending[ $token->bookmark_name ] as $pending_event ) {
+				$this->table_window_events[] = $pending_event;
+			}
+			unset( $this->table_window_template_pending[ $token->bookmark_name ] );
+		}
+	}
+
+	/**
+	 * Presents every deferred event of the open table window, in order.
+	 *
+	 * @since 7.1.0
+	 * @ignore
+	 */
+	private function flush_table_window(): void {
+		foreach ( $this->table_window_events as $deferred_event ) {
+			$deferred_event->is_deferred = true;
+			$this->element_queue[]       = $deferred_event;
+		}
+		$this->table_window_events = array();
+		$this->table_window_runs   = array();
+	}
+
+	/**
+	 * Counts the deferred events of the open table window, including
+	 * events held for template contents.
+	 *
+	 * @since 7.1.0
+	 * @ignore
+	 *
+	 * @return int Number of deferred events.
+	 */
+	private function count_deferred_table_events(): int {
+		$count = null === $this->table_window_events ? 0 : count( $this->table_window_events );
+		foreach ( $this->table_window_template_pending as $pending_events ) {
+			$count += count( $pending_events );
+		}
+		return $count;
+	}
+
+	/**
+	 * Presents the fostered content held for the given host child, directly
+	 * after its pop event, when that pop presents immediately: outside any
+	 * table window, after an overflow, or when the window closes.
+	 *
+	 * @since 7.1.0
+	 * @ignore
+	 *
+	 * @see WP_HTML_Processor::$table_window_template_pending
+	 *
+	 * @param WP_HTML_Token $host_child Element whose pop was just enqueued.
+	 */
+	private function present_pending_fostered_content( WP_HTML_Token $host_child ): void {
+		if ( ! isset( $this->table_window_template_pending[ $host_child->bookmark_name ] ) ) {
+			return;
+		}
+
+		foreach ( $this->table_window_template_pending[ $host_child->bookmark_name ] as $pending_event ) {
+			$pending_event->is_deferred = true;
+			$this->element_queue[]      = $pending_event;
+		}
+		unset( $this->table_window_template_pending[ $host_child->bookmark_name ] );
+	}
+
+	/**
+	 * Finds the foster anchor of a foster-parented node: the TABLE element
+	 * it belongs immediately before, or the TEMPLATE element whose contents
+	 * receive it.
+	 *
+	 * @since 7.1.0
+	 * @ignore
+	 *
+	 * @see https://html.spec.whatwg.org/#appropriate-place-for-inserting-a-node
+	 *
+	 * @throws WP_HTML_Unsupported_Exception When no anchor exists on the stack of open elements.
+	 *
+	 * @param WP_HTML_Token $token Foster-parented node, already on the stack of open elements.
+	 * @return array {
+	 *     @type string        $kind  'table' or 'template'.
+	 *     @type WP_HTML_Token $token The anchor element.
+	 * }
+	 */
+	private function resolve_foster_anchor( WP_HTML_Token $token ): array {
+		$previous_node = null;
+		foreach ( $this->state->stack_of_open_elements->walk_up( $token ) as $node ) {
+			if ( 'html' !== $node->namespace ) {
+				$previous_node = $node;
+				continue;
+			}
+
+			if ( 'TABLE' === $node->node_name ) {
+				return array(
+					'kind'  => 'table',
+					'token' => $node,
+				);
+			}
+
+			if ( 'TEMPLATE' === $node->node_name ) {
+				if ( null === $previous_node ) {
+					/*
+					 * Unreachable: foster parenting requires a table-part
+					 * target between the fostered node and the TEMPLATE.
+					 */
+					$this->bail( 'Foster parenting into a TEMPLATE without an open child is not supported.' );
+				}
+
+				return array(
+					'kind'       => 'template',
+					'token'      => $node,
+					'host_child' => $previous_node,
+				);
+			}
+
+			$previous_node = $node;
+		}
+
+		$this->bail( 'Foster parenting without a TABLE on the stack of open elements is not supported.' );
+	}
+
+	/**
+	 * Finds the deferred push event for the given token among the open
+	 * table window's events, including events held for template contents.
+	 *
+	 * @since 7.1.0
+	 * @ignore
+	 *
+	 * @param WP_HTML_Token $token Token whose push event to find.
+	 * @return WP_HTML_Stack_Event|null The push event, if deferred.
+	 */
+	private function find_deferred_push_event( WP_HTML_Token $token ): ?WP_HTML_Stack_Event {
+		foreach ( $this->table_window_events as $deferred_event ) {
+			if ( WP_HTML_Stack_Event::PUSH === $deferred_event->operation && $token === $deferred_event->token ) {
+				return $deferred_event;
+			}
+		}
+
+		foreach ( $this->table_window_template_pending as $pending_events ) {
+			foreach ( $pending_events as $pending_event ) {
+				if ( WP_HTML_Stack_Event::PUSH === $pending_event->operation && $token === $pending_event->token ) {
+					return $pending_event;
+				}
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * Inserts a deferred event relative to a reference event, wherever
+	 * among the open table window's lists the reference is deferred.
+	 *
+	 * @since 7.1.0
+	 * @ignore
+	 *
+	 * @throws WP_HTML_Unsupported_Exception When the reference event cannot be found.
+	 *
+	 * @param WP_HTML_Stack_Event $event     Event to insert.
+	 * @param WP_HTML_Stack_Event $reference Event next to which to insert.
+	 * @param bool                $before    Whether to insert before the reference instead of after it.
+	 */
+	private function insert_deferred_event( WP_HTML_Stack_Event $event, WP_HTML_Stack_Event $reference, bool $before ): void {
+		$at = null === $this->table_window_events ? false : array_search( $reference, $this->table_window_events, true );
+		if ( false !== $at ) {
+			array_splice( $this->table_window_events, $before ? $at : $at + 1, 0, array( $event ) );
+			return;
+		}
+
+		foreach ( $this->table_window_template_pending as &$pending_events ) {
+			$at = array_search( $reference, $pending_events, true );
+			if ( false !== $at ) {
+				array_splice( $pending_events, $before ? $at : $at + 1, 0, array( $event ) );
+				return;
+			}
+		}
+		unset( $pending_events );
+
+		$this->bail( 'Could not locate the deferred table event next to which a node belongs.' );
+	}
+
+	/**
+	 * Repositions the lexer to a token's syntax so that a deferred event may
+	 * be visited as if it were visited when it was parsed.
+	 *
+	 * Internal repositioning is unrelated to the caller's use of seek() and
+	 * doesn't count against its budget. Before parsing continues, the lexer
+	 * returns to the parse frontier.
+	 *
+	 * @since 7.1.0
+	 * @ignore
+	 *
+	 * @see WP_HTML_Processor::$lexer_repositioned_for_presentation
+	 *
+	 * @param WP_HTML_Token $token Token to whose syntax the lexer moves.
+	 * @return bool Whether the lexer was repositioned.
+	 */
+	private function reposition_lexer_to_token( WP_HTML_Token $token ): bool {
+		$seek_count_before            = $this->seek_count;
+		$this->is_repositioning_lexer = true;
+		$did_reposition               = parent::seek( $token->bookmark_name );
+		$this->is_repositioning_lexer = false;
+		$this->seek_count             = $seek_count_before;
+
+		if ( ! $did_reposition ) {
+			$this->last_error = self::ERROR_UNSUPPORTED;
+			return false;
+		}
+
+		/*
+		 * Text nodes are subdivided when first parsed; re-lexing a text
+		 * token from its starting byte reproduces the same subdivision.
+		 */
+		if ( WP_HTML_Tag_Processor::STATE_TEXT_NODE === $this->parser_state ) {
+			parent::subdivide_text_appropriately();
+		}
+
+		$this->lexer_repositioned_for_presentation = true;
+		return true;
 	}
 
 	/**
@@ -1000,20 +1533,21 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		/*
 		 * Prime the events if there are none.
 		 *
-		 * Some tokens never create stack events: tokens which the HTML
-		 * specification directs the parser to ignore, such as a stray
-		 * closing tag or a DOCTYPE found inside BODY. Stepping past such
-		 * a token succeeds but enqueues nothing, so this method recurses
+		 * Some tokens never create presentable stack events: tokens which the
+		 * HTML specification directs the parser to ignore, such as a stray
+		 * closing tag or a DOCTYPE found inside BODY, and tokens whose events
+		 * are deferred inside an open table window. Stepping past such a
+		 * token succeeds but leaves the queue empty, so this method steps
 		 * until an event appears or the document is exhausted.
 		 */
-		if ( empty( $this->element_queue ) ) {
-			if ( $this->step() ) {
-				return $this->next_visitable_token();
+		while ( empty( $this->element_queue ) ) {
+			if ( ! $this->step() ) {
+				break;
 			}
+		}
 
-			if ( isset( $this->last_error ) ) {
-				return false;
-			}
+		if ( isset( $this->last_error ) ) {
+			return false;
 		}
 
 		// Process the next event on the queue.
@@ -1026,6 +1560,8 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 
 			return empty( $this->element_queue ) ? false : $this->next_visitable_token();
 		}
+
+		++$this->visitation_index;
 
 		$is_pop = WP_HTML_Stack_Event::POP === $this->current_element->operation;
 
@@ -1076,6 +1612,26 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			return $this->next_visitable_token();
 		}
 
+		/*
+		 * An event deferred in a table window is visited after the lexer
+		 * moved past its syntax: reposition the lexer so that the token's
+		 * syntax may be read and modified as if it were visited when it
+		 * was parsed. Any real event visited while the lexer is displaced
+		 * needs the same, e.g. the pop of the window's own TABLE, visited
+		 * directly after the flushed events which displaced the lexer.
+		 * Only real events correspond to syntax in the input; a real pop's
+		 * syntax is its closing tag.
+		 */
+		if (
+			'real' === $this->current_element->provenance &&
+			( $this->current_element->is_deferred || $this->lexer_repositioned_for_presentation )
+		) {
+			$syntax_token = $is_pop ? $this->current_element->closer_token : $this->current_element->token;
+			if ( ! $this->reposition_lexer_to_token( $syntax_token ) ) {
+				return false;
+			}
+		}
+
 		return true;
 	}
 
@@ -1118,47 +1674,55 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	}
 
 	/**
-	 * Enables foster parenting support, trading the guarantee that nodes are
-	 * visited in document order for the ability to process documents whose
-	 * table content is mis-nested.
+	 * Presents foster-parented nodes at the place they were found in the
+	 * input HTML, trading the guarantee that nodes are visited in document
+	 * order for unbounded foster parenting support with no deferral.
 	 *
 	 * When content appears inside a table context where it isn't allowed, e.g.
 	 * a DIV element directly inside a TABLE, a parser inserts that content at
 	 * a location in the document before the table. This is known as "foster
-	 * parenting". Because this processor visits every node at the place it was
-	 * found in the input HTML, a foster-parented node is visited after the
-	 * TABLE element which follows it in the document: the sequence of visited
-	 * nodes is no longer a pre-order traversal of the document.
+	 * parenting".
 	 *
-	 * By default the processor preserves the traversal guarantee and aborts
-	 * when content requires foster parenting. Code which walks a document
-	 * relying only on the order and depth of what it visits, e.g. to find
-	 * where an element's subtree ends, is safe by default; it may be confused
-	 * by foster-parented content and must account for it before enabling this
-	 * support, e.g. via {@see WP_HTML_Processor::is_foster_parented}.
+	 * By default the processor visits every node in document order: the
+	 * contents of each TABLE are deferred, within a bound, until the table
+	 * closes, so that fostered content may be visited first; when mis-nested
+	 * content is discovered beyond that bound the processor aborts. Code
+	 * which walks a document relying on the order and depth of what it
+	 * visits, e.g. to find where an element's subtree ends, is always safe
+	 * in the default mode.
 	 *
-	 * Every node, including foster-parented nodes, is always reported with its
-	 * exact document ancestry: breadcrumbs are unaffected by visitation order.
+	 * In source-order mode nothing is deferred and there is no bound, but a
+	 * foster-parented node is visited after the TABLE element which follows
+	 * it in the document: the sequence of visited nodes is no longer a
+	 * pre-order traversal of the document. Consumers must account for this,
+	 * e.g. via {@see WP_HTML_Processor::is_foster_parented}, before enabling
+	 * this mode. It suits order-independent processing of arbitrary input:
+	 * per-node reads and in-place modifications keyed on tag names,
+	 * attributes, or breadcrumbs.
 	 *
-	 * Foster parenting must be enabled before the processor starts scanning.
+	 * Every node, in both modes, is always reported with its exact document
+	 * ancestry: breadcrumbs are unaffected by visitation order.
+	 *
+	 * Source-order mode must be enabled before the processor starts scanning.
 	 *
 	 * Example:
 	 *
 	 *     $processor = WP_HTML_Processor::create_fragment( '<table>misplaced<td>cell</td></table>' );
-	 *     $processor->next_token() === true;
-	 *     $processor->next_token() === false;
-	 *     $processor->get_last_error() === WP_HTML_Processor::ERROR_UNSUPPORTED;
+	 *     $processor->next_token();
+	 *     $processor->get_token_name() === '#text'; // "misplaced", visited before the TABLE.
 	 *
 	 *     $processor = WP_HTML_Processor::create_fragment( '<table>misplaced<td>cell</td></table>' );
 	 *     $processor->enable_source_order_foster_parenting() === true;
-	 *     while ( $processor->next_token() ) { … }
+	 *     $processor->next_token();
+	 *     $processor->get_token_name() === 'TABLE'; // "misplaced" is visited after it.
 	 *
 	 * @since 7.1.0
 	 *
 	 * @see https://html.spec.whatwg.org/#foster-parenting
 	 * @see WP_HTML_Processor::is_foster_parented
+	 * @see WP_HTML_Processor::MAX_BUFFERED_TABLE_EVENTS
 	 *
-	 * @return bool Whether foster parenting support was enabled: it cannot be
+	 * @return bool Whether source-order mode was enabled: it cannot be
 	 *              enabled once the processor has started scanning.
 	 */
 	public function enable_source_order_foster_parenting(): bool {
@@ -1166,7 +1730,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			return false;
 		}
 
-		$this->is_foster_parenting_enabled = true;
+		$this->is_source_order_foster_parenting_enabled = true;
 		return true;
 	}
 
@@ -1176,33 +1740,29 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * When content appears inside a table context where it isn't allowed, e.g.
 	 * a DIV element directly inside a TABLE, the parser inserts that content at
 	 * a location in the document before the table. This is known as "foster
-	 * parenting", and a document must be viewed with care once it's involved:
-	 * this processor visits every node where it was found in the input HTML,
-	 * meaning that a foster-parented node is visited after the table element
-	 * which follows it in the document.
+	 * parenting". The breadcrumbs of a foster-parented node report its document
+	 * ancestry, which does not contain the table context enclosing it in the
+	 * input HTML.
 	 *
-	 * The breadcrumbs of a foster-parented node report its document ancestry,
-	 * which does not contain the table context enclosing it in the input HTML.
-	 *
-	 * Foster-parented nodes are only visited after enabling foster parenting
-	 * support with {@see WP_HTML_Processor::enable_source_order_foster_parenting}; by
-	 * default the processor aborts when content requires foster parenting.
+	 * The marker's practical reading depends on the presentation mode. By
+	 * default nodes are visited in document order, and the marker means that
+	 * this node's syntax lies inside table markup which follows it in the
+	 * visited stream — relevant when reasoning about raw spans. In
+	 * source-order mode it additionally means that this node was visited out
+	 * of document order: it precedes, in the document, the TABLE element
+	 * which was already visited.
 	 *
 	 * Example:
 	 *
-	 *     $processor = WP_HTML_Processor::create_fragment( '<table><td>cell</td></table>misplaced' );
-	 *     $processor->next_token();
-	 *     $processor->get_token_name() === 'TABLE';
-	 *     $processor->is_foster_parented() === false;
-	 *
 	 *     $processor = WP_HTML_Processor::create_fragment( '<table>misplaced<td>cell</td></table>' );
-	 *     $processor->enable_source_order_foster_parenting();
-	 *     $processor->next_token();
-	 *     $processor->get_token_name() === 'TABLE';
 	 *     $processor->next_token();
 	 *     $processor->get_token_name() === '#text';
 	 *     $processor->is_foster_parented() === true;
 	 *     $processor->get_breadcrumbs() === array( 'HTML', 'BODY', '#text' );
+	 *
+	 *     $processor->next_token();
+	 *     $processor->get_token_name() === 'TABLE';
+	 *     $processor->is_foster_parented() === false;
 	 *
 	 * @since 7.1.0
 	 *
@@ -1333,6 +1893,26 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		// Refuse to proceed if there was a previous error.
 		if ( null !== $this->last_error ) {
 			return false;
+		}
+
+		/*
+		 * Visiting an event deferred in a table window repositions the lexer
+		 * to the deferred token's syntax. Before parsing continues, return
+		 * the lexer to the parse frontier: the token it last parsed.
+		 */
+		if ( $this->lexer_repositioned_for_presentation ) {
+			$this->lexer_repositioned_for_presentation = false;
+			if ( isset( $this->state->current_token ) ) {
+				$seek_count_before            = $this->seek_count;
+				$this->is_repositioning_lexer = true;
+				parent::seek( $this->state->current_token->bookmark_name );
+				$this->is_repositioning_lexer = false;
+				$this->seek_count             = $seek_count_before;
+
+				if ( WP_HTML_Tag_Processor::STATE_TEXT_NODE === $this->parser_state ) {
+					parent::subdivide_text_appropriately();
+				}
+			}
 		}
 
 		/*
@@ -1582,6 +2162,8 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 *    and invalid UTF-8 replaced with U+FFFD.
 	 *  - Any incomplete syntax trailing at the end will be omitted,
 	 *    for example, an unclosed comment opener will be removed.
+	 *  - Content found inside a TABLE where it isn't allowed is moved to
+	 *    its document location before the table.
 	 *
 	 * Example:
 	 *
@@ -1623,12 +2205,13 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 *    and invalid UTF-8 replaced with U+FFFD.
 	 *  - Any incomplete syntax trailing at the end will be omitted,
 	 *    for example, an unclosed comment opener will be removed.
-	 *  - When foster parenting support has been enabled, content found inside
-	 *    a TABLE where it isn't allowed is serialized where its syntax was
-	 *    found, inside the table markup; parsing the output foster-parents it
-	 *    again to its location before the table. Whitespace which was separated
-	 *    from such content only by ignored syntax joins it when the output is
-	 *    parsed.
+	 *  - Content found inside a TABLE where it isn't allowed is serialized
+	 *    at its document location before the table: parsing the output needs
+	 *    no foster parenting. In source-order mode it is instead serialized
+	 *    where its syntax was found, inside the table markup; parsing that
+	 *    output foster-parents it again to the same document location, and
+	 *    whitespace which was separated from it only by ignored syntax joins
+	 *    it when the output is parsed.
 	 *
 	 * Example:
 	 *
@@ -3744,10 +4327,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 					 */
 					if (
 						parent::TEXT_IS_WHITESPACE === $this->text_node_classification &&
-						(
-							! $this->is_foster_parenting_enabled ||
-							! $this->pending_table_character_tokens_contain_non_whitespace()
-						)
+						! $this->pending_table_character_tokens_contain_non_whitespace()
 					) {
 						$this->insert_html_element( $this->state->current_token );
 						return true;
@@ -3939,10 +4519,6 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		 * @todo Indicate a parse error once it's possible.
 		 */
 		anything_else:
-		if ( ! $this->is_foster_parenting_enabled ) {
-			$this->bail( 'Foster parenting is not enabled: cannot process content which belongs at a location before the enclosing TABLE.' );
-		}
-
 		$this->state->foster_parenting = true;
 		$step_result                   = $this->step_in_body();
 		$this->state->foster_parenting = false;
@@ -6138,6 +6714,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @return bool Whether the bookmark already existed before removal.
 	 */
 	public function release_bookmark( $bookmark_name ): bool {
+		unset( $this->bookmark_visitation_indices[ "_{$bookmark_name}" ] );
 		return parent::release_bookmark( "_{$bookmark_name}" );
 	}
 
@@ -6163,11 +6740,17 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		$this->get_updated_html();
 
 		$actual_bookmark_name = "_{$bookmark_name}";
-		$processor_started_at = $this->state->current_token
-			? $this->bookmarks[ $this->state->current_token->bookmark_name ]->start
-			: 0;
 		$bookmark_starts_at   = $this->bookmarks[ $actual_bookmark_name ]->start;
-		$direction            = $bookmark_starts_at > $processor_started_at ? 'forward' : 'backward';
+
+		/*
+		 * Direction is decided by visitation order, not byte order: in
+		 * document-order mode a node deferred in a table window is visited
+		 * after nodes whose syntax follows it, so byte offsets would walk
+		 * the wrong way. Every bookmark records the visitation index of the
+		 * node it was set on.
+		 */
+		$bookmark_visited_at = $this->bookmark_visitation_indices[ $actual_bookmark_name ] ?? 0;
+		$direction           = $bookmark_visited_at > $this->visitation_index ? 'forward' : 'backward';
 
 		/*
 		 * If seeking backwards, it's possible that the sought-after bookmark exists within an element
@@ -6225,6 +6808,13 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			$this->current_element                          = null;
 			$this->element_queue                            = array();
 			$this->fostered_breadcrumb_segments             = array();
+			$this->table_window_events                      = null;
+			$this->table_window_table                       = null;
+			$this->table_window_overflowed                  = false;
+			$this->table_window_runs                        = array();
+			$this->table_window_template_pending            = array();
+			$this->visitation_index                         = 0;
+			$this->lexer_repositioned_for_presentation      = false;
 
 			/*
 			 * The absence of a context node indicates a full parse.
@@ -6283,7 +6873,16 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			if ( $this->is_virtual() ) {
 				continue;
 			}
-			if ( $bookmark_starts_at === $this->bookmarks[ $this->state->current_token->bookmark_name ]->start ) {
+
+			/*
+			 * The visited token is identified through the visited event: in
+			 * document-order mode a deferred token may be visited while the
+			 * parser's most recently parsed token lies beyond it.
+			 */
+			if (
+				isset( $this->current_element ) &&
+				$bookmark_starts_at === $this->bookmarks[ $this->current_element->token->bookmark_name ]->start
+			) {
 				return true;
 			}
 		} while ( $this->next_token() );
@@ -6385,7 +6984,19 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			);
 			return false;
 		}
-		return parent::set_bookmark( "_{$bookmark_name}" );
+
+		$did_set = parent::set_bookmark( "_{$bookmark_name}" );
+
+		/*
+		 * Record when the bookmarked node was visited: seeking orders
+		 * positions by visitation, which in document-order mode may
+		 * disagree with the byte order of deferred tokens.
+		 */
+		if ( $did_set ) {
+			$this->bookmark_visitation_indices[ "_{$bookmark_name}" ] = $this->visitation_index;
+		}
+
+		return $did_set;
 	}
 
 	/**

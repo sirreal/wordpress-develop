@@ -90,6 +90,33 @@ class WP_HTML_Stack_Event {
 	public $foster_bypass_count = null;
 
 	/**
+	 * For a pop event of "real" provenance, references the token of the
+	 * closing tag in the input HTML which produced the pop.
+	 *
+	 * The event's own token always references the opening token. When a pop
+	 * event is deferred and visited later, the lexer must reposition to the
+	 * closing tag's own syntax, whose location this token records.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @var WP_HTML_Token|null
+	 */
+	public $closer_token = null;
+
+	/**
+	 * Indicates that this event was deferred in a table window and is being
+	 * visited after the lexer moved past its syntax: visiting it requires
+	 * repositioning the lexer to the event's token.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @see WP_HTML_Processor::MAX_BUFFERED_TABLE_EVENTS
+	 *
+	 * @var bool
+	 */
+	public $is_deferred = false;
+
+	/**
 	 * Constructor function.
 	 *
 	 * @since 6.6.0

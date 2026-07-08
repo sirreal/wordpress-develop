@@ -126,12 +126,16 @@ insertion rules:
    position (everything preceding the window was presented before the window
    opened).
 2. **Fostered node anchored inside a TEMPLATE's contents**: its push (and its
-   run, rule 3) is held aside and inserted immediately before the TEMPLATE's
-   pop event when that pop arrives. (Template contents receive fostered
-   content "after its last child", which in a pre-order stream is the
-   position just before the template closes. The template's pop always
-   arrives before the window flushes, because the template lies within the
-   window's subtree and stack unwinding is last-in-first-out.)
+   run, rule 3) is held aside and inserted immediately after the pop event of
+   the template's *host child*: the element directly above the TEMPLATE on
+   the stack of open elements when the fostering occurs. (Template contents
+   receive fostered content "after its last child". The host child is that
+   last child; the fostered content becomes its next sibling, following its
+   entire subtree in a pre-order stream, and template children inserted
+   afterwards follow the fostered content. The host child's pop always
+   arrives before the window flushes, by last-in-first-out stack unwinding.)
+   Successive runs fostered while the same host child remains open follow
+   one another in arrival order.
 3. **Events inside an open fostered run** insert consecutively at their run's
    insertion point, immediately after the run's previously inserted event;
    the run ends when the fostered element which began it pops. Runs nest: a
@@ -164,12 +168,13 @@ event belongs:
 - **An insertion anywhere else** (rules 1–3 — fostered content): the processor
   aborts with `ERROR_UNSUPPORTED`. The event's document position precedes
   already-buffered events, so no flush can make room for it without
-  presenting out of order. Likewise, if a node would be inserted via foster
-  parenting while the window is already overflowed, the processor aborts: its
-  anchor was presented when the buffer flushed. In both cases the error
-  message names the cause (the table's deferral exceeded the buffer before
-  its mis-nested content was resolved) and the remedy
-  (`enable_source_order_foster_parenting()`).
+  presenting out of order. Likewise, a node fostered before a TABLE while
+  the window is already overflowed aborts: its anchor was presented when the
+  buffer flushed. (Fostering into TEMPLATE contents remains supported after
+  an overflow: its deferral is keyed to its host child's pop, not to the
+  table buffer.) In both cases the error message names the cause (deferral
+  exceeded the buffer before the mis-nested content was resolved) and the
+  remedy (`enable_source_order_foster_parenting()`).
 - The overflowed state clears when the window closes; tables appearing later
   in the document open fresh windows.
 
@@ -261,13 +266,24 @@ input resumes. When a document ends while a window is open (unclosed table),
 the end-of-document stack unwinding pops the window's TABLE, which flushes the
 window as in §4.1.
 
-### 5.6 Fragments without a table on the stack
+### 5.6 Template fostering outside a table window
 
-Fostering with no TABLE element on the stack of open elements (possible only
-in fragment parsing contexts not currently creatable) aborts, in both modes,
-as an unsupported case.
+A TEMPLATE element whose contents include table-part elements can trigger
+foster parenting with no TABLE element on the stack of open elements at all,
+e.g. `<template><tr><div>`. No table window exists in this case; in
+document-order mode the fostered run alone is deferred, keyed to its host
+child's pop exactly as in §4.2 rule 2, bounded by the same limit, and
+presented once the host child closes. Nothing else is deferred: content
+preceding the fostered run in document order has already been presented, and
+content following it inserts inside open elements which precede it.
 
-### 5.7 Unchanged divergences
+### 5.7 Fragments with no foster anchor
+
+Fostering with neither a TABLE nor a TEMPLATE anchor on the stack of open
+elements (possible only in fragment parsing contexts not currently creatable)
+aborts, in both modes, as an unsupported case.
+
+### 5.8 Unchanged divergences
 
 This specification does not change the processor's documented single-pass
 divergences: the adoption agency algorithm cannot relocate already-visited

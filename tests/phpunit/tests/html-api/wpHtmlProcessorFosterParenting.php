@@ -438,47 +438,192 @@ class Tests_HtmlApi_WpHtmlProcessorFosterParenting extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Ensures that without enabling foster parenting, the processor preserves
-	 * its guarantee of visiting nodes in document order by aborting when
-	 * content requires foster parenting.
+	 * Ensures that by default the processor presents every node in document
+	 * order: foster-parented content is visited before the TABLE element it
+	 * precedes in the document.
 	 *
 	 * @ticket TBD
 	 *
-	 * @covers ::enable_source_order_foster_parenting
+	 * @covers ::next_token
+	 * @covers ::is_foster_parented
 	 */
-	public function test_bails_on_fostered_content_by_default() {
-		$processor = WP_HTML_Processor::create_fragment( '<table>lost<td>found' );
+	public function test_default_mode_presents_fostered_content_in_document_order() {
+		$processor = WP_HTML_Processor::create_fragment( 'a<table>b<td>c</table>d' );
 
-		$this->assertTrue( $processor->next_token(), 'Failed to find the TABLE.' );
-		$this->assertFalse( $processor->next_token(), 'Should have aborted at the fostered text.' );
-		$this->assertSame(
-			WP_HTML_Processor::ERROR_UNSUPPORTED,
-			$processor->get_last_error(),
-			'Should have reported the fostered content as unsupported.'
+		$expected_stream = array(
+			array( '#text', 'a', false, array( 'HTML', 'BODY', '#text' ) ),
+			array( '#text', 'b', true, array( 'HTML', 'BODY', '#text' ) ),
+			array( 'TABLE', null, false, array( 'HTML', 'BODY', 'TABLE' ) ),
+			array( 'TBODY', null, false, array( 'HTML', 'BODY', 'TABLE', 'TBODY' ) ),
+			array( 'TR', null, false, array( 'HTML', 'BODY', 'TABLE', 'TBODY', 'TR' ) ),
+			array( 'TD', null, false, array( 'HTML', 'BODY', 'TABLE', 'TBODY', 'TR', 'TD' ) ),
+			array( '#text', 'c', false, array( 'HTML', 'BODY', 'TABLE', 'TBODY', 'TR', 'TD', '#text' ) ),
+		);
+
+		foreach ( $expected_stream as $at => list( $token_name, $text, $is_fostered, $breadcrumbs ) ) {
+			$this->assertTrue( $processor->next_token(), "Failed to find token {$at} ({$token_name})." );
+			$this->assertSame( $token_name, $processor->get_token_name(), "Found the wrong token at position {$at}." );
+			if ( isset( $text ) ) {
+				$this->assertSame( $text, $processor->get_modifiable_text(), "Found the wrong text at position {$at}." );
+			}
+			$this->assertSame( $is_fostered, $processor->is_foster_parented(), "Wrongly reported foster parenting at position {$at}." );
+			$this->assertSame( $breadcrumbs, $processor->get_breadcrumbs(), "Reported the wrong ancestry at position {$at}." );
+		}
+
+		// The rest of the document follows in order: the table's closers, then the trailing text.
+		$suffix = array();
+		while ( $processor->next_token() ) {
+			$suffix[] = '#text' === $processor->get_token_name()
+				? $processor->get_modifiable_text()
+				: ( $processor->is_tag_closer() ? '/' : '' ) . $processor->get_token_name();
+		}
+		$this->assertNull( $processor->get_last_error(), 'Should have processed the entire document.' );
+		$this->assertSame( array( '/TD', '/TR', '/TBODY', '/TABLE', 'd' ), $suffix, 'The document should end in order.' );
+	}
+
+	/**
+	 * Ensures that content fostered before a nested table and into template
+	 * contents is presented at its document position.
+	 *
+	 * @ticket TBD
+	 *
+	 * @dataProvider data_document_order_streams
+	 *
+	 * @covers ::next_token
+	 *
+	 * @param string   $html            Input HTML.
+	 * @param string[] $expected_stream Expected visited tokens, closers prefixed with "/", text nodes by their content.
+	 */
+	public function test_default_mode_document_positions( string $html, array $expected_stream ) {
+		$processor = WP_HTML_Processor::create_fragment( $html );
+
+		$actual_stream = array();
+		while ( $processor->next_token() ) {
+			$actual_stream[] = '#text' === $processor->get_token_name()
+				? '"' . $processor->get_modifiable_text() . '"'
+				: ( $processor->is_tag_closer() ? '/' : '' ) . $processor->get_token_name();
+		}
+
+		$this->assertNull( $processor->get_last_error(), 'Should have processed the entire document.' );
+		$this->assertSame( $expected_stream, $actual_stream, 'Presented the document out of document order.' );
+	}
+
+	/**
+	 * Data provider.
+	 *
+	 * @return array[]
+	 */
+	public static function data_document_order_streams() {
+		return array(
+			'Fostered before a nested table'     => array(
+				'<table><td><table>lost<td>found',
+				array( 'TABLE', 'TBODY', 'TR', 'TD', '"lost"', 'TABLE', 'TBODY', 'TR', 'TD', '"found"', '/TD', '/TR', '/TBODY', '/TABLE', '/TD', '/TR', '/TBODY', '/TABLE' ),
+			),
+			'Fostered into template contents'    => array(
+				'<table><template><tbody>lost<tr>',
+				array( 'TABLE', 'TEMPLATE', 'TBODY', 'TR', '/TR', '/TBODY', '"lost"', '/TEMPLATE', '/TABLE' ),
+			),
+			'Fostered formatting reconstruction' => array(
+				'<table><b>x<tr>y</table>',
+				array( 'B', '"x"', '/B', 'B', '"y"', '/B', 'TABLE', 'TBODY', 'TR', '/TR', '/TBODY', '/TABLE' ),
+			),
 		);
 	}
 
 	/**
-	 * Ensures that normalization, which cannot enable foster parenting on its
-	 * internal processor, refuses documents requiring it.
+	 * Ensures that a table larger than the deferral bound parses completely
+	 * when it is well-formed, that mis-nested content discovered within the
+	 * bound is still presented in document order, and that mis-nested
+	 * content discovered beyond the bound aborts the parse.
+	 *
+	 * @ticket TBD
+	 *
+	 * @covers ::next_token
+	 */
+	public function test_deferral_bound() {
+		$rows = str_repeat( '<tr><td>x</td></tr>', intdiv( WP_HTML_Processor::MAX_BUFFERED_TABLE_EVENTS, 3 ) );
+
+		$processor = WP_HTML_Processor::create_fragment( "<table>{$rows}</table>after" );
+		$last_text = null;
+		while ( $processor->next_token() ) {
+			if ( '#text' === $processor->get_token_name() ) {
+				$last_text = $processor->get_modifiable_text();
+			}
+		}
+		$this->assertNull( $processor->get_last_error(), 'A well-formed table of any size must parse.' );
+		$this->assertSame( 'after', $last_text, 'Should have processed the entire document.' );
+
+		$processor = WP_HTML_Processor::create_fragment( "<table><div>rescued</div>{$rows}</table>" );
+		$this->assertTrue( $processor->next_tag( 'DIV' ), 'Failed to find the fostered DIV.' );
+		$this->assertTrue( $processor->is_foster_parented(), 'Should have reported the DIV as foster-parented.' );
+		$this->assertSame(
+			array( 'HTML', 'BODY', 'DIV' ),
+			$processor->get_breadcrumbs(),
+			'Mis-nested content within the bound is presented at its document position.'
+		);
+		while ( $processor->next_token() ) {
+			continue;
+		}
+		$this->assertNull( $processor->get_last_error(), 'Should have processed the oversized table after its fostered content.' );
+
+		$processor = WP_HTML_Processor::create_fragment( "<table>{$rows}<div>too late</div></table>" );
+		while ( $processor->next_token() ) {
+			continue;
+		}
+		$this->assertSame(
+			WP_HTML_Processor::ERROR_UNSUPPORTED,
+			$processor->get_last_error(),
+			'Mis-nested content beyond the bound cannot be presented in document order and must abort.'
+		);
+	}
+
+	/**
+	 * Ensures that in-place modifications apply to fostered nodes visited
+	 * before their table and to deferred table contents alike, and that
+	 * bookmarks may be sought across the reordering in both directions.
+	 *
+	 * @ticket TBD
+	 *
+	 * @covers ::seek
+	 * @covers ::set_bookmark
+	 */
+	public function test_default_mode_mutations_and_seeking() {
+		$processor = WP_HTML_Processor::create_fragment( '<table><div>lost</div><td>found' );
+
+		$this->assertTrue( $processor->next_tag( 'DIV' ), 'Failed to find the fostered DIV.' );
+		$this->assertTrue( $processor->set_attribute( 'class', 'rescued' ), 'Failed to modify the fostered DIV.' );
+		$this->assertTrue( $processor->set_bookmark( 'div' ), 'Failed to bookmark the fostered DIV.' );
+
+		$this->assertTrue( $processor->next_tag( 'TD' ), 'Failed to find the TD.' );
+		$this->assertTrue( $processor->set_attribute( 'id', 'cell' ), 'Failed to modify the deferred TD.' );
+
+		$this->assertSame(
+			'<table><div class="rescued">lost</div><td id="cell">found',
+			$processor->get_updated_html(),
+			'Modifications must apply to each token at its place in the input HTML.'
+		);
+
+		$this->assertTrue( $processor->seek( 'div' ), 'Failed to seek back to the fostered DIV.' );
+		$this->assertSame( 'DIV', $processor->get_tag(), 'Should have returned to the DIV.' );
+		$this->assertSame( 'rescued', $processor->get_attribute( 'class' ), 'Should have read the earlier modification.' );
+
+		$this->assertTrue( $processor->next_tag( 'TD' ), 'Failed to walk forward to the TD again.' );
+		$this->assertSame( 'cell', $processor->get_attribute( 'id' ), 'Should have found the TD modification after seeking.' );
+	}
+
+	/**
+	 * Ensures that normalization relocates fostered content to its document
+	 * position: the output requires no foster parenting when re-parsed.
 	 *
 	 * @ticket TBD
 	 *
 	 * @covers ::normalize
 	 */
-	public function test_normalize_refuses_fostered_content() {
-		// Refusing unsupported HTML intentionally calls wp_trigger_error() under WP_DEBUG.
-		add_filter( 'wp_trigger_error_trigger_error', '__return_false' );
-
-		try {
-			$normalized = WP_HTML_Processor::normalize( '<table>lost<td>found' );
-		} finally {
-			remove_filter( 'wp_trigger_error_trigger_error', '__return_false' );
-		}
-
-		$this->assertNull(
-			$normalized,
-			'Normalization must refuse content which requires foster parenting.'
+	public function test_normalize_relocates_fostered_content() {
+		$this->assertSame(
+			'lost<table><tbody><tr><td>found</td></tr></tbody></table>',
+			WP_HTML_Processor::normalize( '<table>lost<td>found' ),
+			'Normalization must move fostered content before the table.'
 		);
 	}
 
