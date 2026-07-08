@@ -101,6 +101,8 @@
  *
  *  - PLAINTEXT elements.
  *  - FRAMESET documents.
+ *  - Non-table content found inside a TABLE element, unless foster parenting
+ *    support is enabled; see {@see WP_HTML_Processor::enable_foster_parenting}.
  *  - Content found after closing the BODY or HTML elements which reopens them.
  *  - META tags which change the document encoding, when parsing a full document.
  *
@@ -123,9 +125,10 @@
  *    cannot be modified.
  *  - Non-table content found inside a TABLE element, e.g. `<table>lost<td>found`,
  *    which is inserted at a location in the document before the table ("foster
- *    parenting"). Foster-parented nodes are visited where they were found in the
- *    input HTML — after the table element they precede in the document — and their
- *    breadcrumbs report their document ancestry; see
+ *    parenting"), when foster parenting support is enabled. Foster-parented nodes
+ *    are visited where they were found in the input HTML — after the table element
+ *    they precede in the document — and their breadcrumbs report their document
+ *    ancestry; see {@see WP_HTML_Processor::enable_foster_parenting} and
  *    {@see WP_HTML_Processor::is_foster_parented}.
  *
  * ### Unsupported Features
@@ -145,7 +148,9 @@
  * for it. Fostered nodes are new nodes and are always reported with the document
  * ancestry a browser would report; they are visited where they were found in the
  * input HTML, however, which is after the table element they precede in the
- * document.
+ * document. Because that breaks the guarantee that nodes are visited in document
+ * order, this parser aborts on content requiring foster parenting unless support
+ * for it has been explicitly enabled.
  *
  * @since 6.4.0
  *
@@ -265,6 +270,24 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @var array<string, string[]>
 	 */
 	private $fostered_breadcrumb_segments = array();
+
+	/**
+	 * Indicates whether this processor supports foster parenting, visiting
+	 * foster-parented nodes at the place they were found in the input HTML.
+	 *
+	 * By default the processor guarantees that nodes are visited in document
+	 * order: it aborts when it encounters content which belongs at a document
+	 * location before a place it has already visited, as foster-parented
+	 * content does. Enabling foster parenting trades that guarantee for the
+	 * ability to process such documents.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @see WP_HTML_Processor::enable_foster_parenting
+	 *
+	 * @var bool
+	 */
+	private $is_foster_parenting_enabled = false;
 
 	/**
 	 * Current stack event, if set, representing a matched token.
@@ -1095,6 +1118,59 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	}
 
 	/**
+	 * Enables foster parenting support, trading the guarantee that nodes are
+	 * visited in document order for the ability to process documents whose
+	 * table content is mis-nested.
+	 *
+	 * When content appears inside a table context where it isn't allowed, e.g.
+	 * a DIV element directly inside a TABLE, a parser inserts that content at
+	 * a location in the document before the table. This is known as "foster
+	 * parenting". Because this processor visits every node at the place it was
+	 * found in the input HTML, a foster-parented node is visited after the
+	 * TABLE element which follows it in the document: the sequence of visited
+	 * nodes is no longer a pre-order traversal of the document.
+	 *
+	 * By default the processor preserves the traversal guarantee and aborts
+	 * when content requires foster parenting. Code which walks a document
+	 * relying only on the order and depth of what it visits, e.g. to find
+	 * where an element's subtree ends, is safe by default; it may be confused
+	 * by foster-parented content and must account for it before enabling this
+	 * support, e.g. via {@see WP_HTML_Processor::is_foster_parented}.
+	 *
+	 * Every node, including foster-parented nodes, is always reported with its
+	 * exact document ancestry: breadcrumbs are unaffected by visitation order.
+	 *
+	 * Foster parenting must be enabled before the processor starts scanning.
+	 *
+	 * Example:
+	 *
+	 *     $processor = WP_HTML_Processor::create_fragment( '<table>misplaced<td>cell</td></table>' );
+	 *     $processor->next_token() === true;
+	 *     $processor->next_token() === false;
+	 *     $processor->get_last_error() === WP_HTML_Processor::ERROR_UNSUPPORTED;
+	 *
+	 *     $processor = WP_HTML_Processor::create_fragment( '<table>misplaced<td>cell</td></table>' );
+	 *     $processor->enable_foster_parenting() === true;
+	 *     while ( $processor->next_token() ) { … }
+	 *
+	 * @since 7.1.0
+	 *
+	 * @see https://html.spec.whatwg.org/#foster-parenting
+	 * @see WP_HTML_Processor::is_foster_parented
+	 *
+	 * @return bool Whether foster parenting support was enabled: it cannot be
+	 *              enabled once the processor has started scanning.
+	 */
+	public function enable_foster_parenting(): bool {
+		if ( WP_HTML_Tag_Processor::STATE_READY !== $this->parser_state ) {
+			return false;
+		}
+
+		$this->is_foster_parenting_enabled = true;
+		return true;
+	}
+
+	/**
 	 * Indicates if the currently-matched node was inserted via foster parenting.
 	 *
 	 * When content appears inside a table context where it isn't allowed, e.g.
@@ -1108,6 +1184,10 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * The breadcrumbs of a foster-parented node report its document ancestry,
 	 * which does not contain the table context enclosing it in the input HTML.
 	 *
+	 * Foster-parented nodes are only visited after enabling foster parenting
+	 * support with {@see WP_HTML_Processor::enable_foster_parenting}; by
+	 * default the processor aborts when content requires foster parenting.
+	 *
 	 * Example:
 	 *
 	 *     $processor = WP_HTML_Processor::create_fragment( '<table><td>cell</td></table>misplaced' );
@@ -1116,6 +1196,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 *     $processor->is_foster_parented() === false;
 	 *
 	 *     $processor = WP_HTML_Processor::create_fragment( '<table>misplaced<td>cell</td></table>' );
+	 *     $processor->enable_foster_parenting();
 	 *     $processor->next_token();
 	 *     $processor->get_token_name() === 'TABLE';
 	 *     $processor->next_token();
@@ -1126,6 +1207,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @since 7.1.0
 	 *
 	 * @see https://html.spec.whatwg.org/#foster-parenting
+	 * @see WP_HTML_Processor::enable_foster_parenting
 	 *
 	 * @return bool Whether the currently-matched node was foster-parented.
 	 */
@@ -1500,11 +1582,6 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 *    and invalid UTF-8 replaced with U+FFFD.
 	 *  - Any incomplete syntax trailing at the end will be omitted,
 	 *    for example, an unclosed comment opener will be removed.
-	 *  - Content found inside a TABLE where it isn't allowed is serialized
-	 *    where its syntax was found, inside the table markup; parsing the
-	 *    output foster-parents it again to its location before the table.
-	 *    Whitespace which was separated from such content only by ignored
-	 *    syntax joins it when the output is parsed.
 	 *
 	 * Example:
 	 *
@@ -1546,11 +1623,12 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 *    and invalid UTF-8 replaced with U+FFFD.
 	 *  - Any incomplete syntax trailing at the end will be omitted,
 	 *    for example, an unclosed comment opener will be removed.
-	 *  - Content found inside a TABLE where it isn't allowed is serialized
-	 *    where its syntax was found, inside the table markup; parsing the
-	 *    output foster-parents it again to its location before the table.
-	 *    Whitespace which was separated from such content only by ignored
-	 *    syntax joins it when the output is parsed.
+	 *  - When foster parenting support has been enabled, content found inside
+	 *    a TABLE where it isn't allowed is serialized where its syntax was
+	 *    found, inside the table markup; parsing the output foster-parents it
+	 *    again to its location before the table. Whitespace which was separated
+	 *    from such content only by ignored syntax joins it when the output is
+	 *    parsed.
 	 *
 	 * Example:
 	 *
@@ -3666,7 +3744,10 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 					 */
 					if (
 						parent::TEXT_IS_WHITESPACE === $this->text_node_classification &&
-						! $this->pending_table_character_tokens_contain_non_whitespace()
+						(
+							! $this->is_foster_parenting_enabled ||
+							! $this->pending_table_character_tokens_contain_non_whitespace()
+						)
 					) {
 						$this->insert_html_element( $this->state->current_token );
 						return true;
@@ -3858,6 +3939,10 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		 * @todo Indicate a parse error once it's possible.
 		 */
 		anything_else:
+		if ( ! $this->is_foster_parenting_enabled ) {
+			$this->bail( 'Foster parenting is not enabled: cannot process content which belongs at a location before the enclosing TABLE.' );
+		}
+
 		$this->state->foster_parenting = true;
 		$step_result                   = $this->step_in_body();
 		$this->state->foster_parenting = false;
