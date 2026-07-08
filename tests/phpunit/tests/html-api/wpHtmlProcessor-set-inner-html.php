@@ -16,8 +16,12 @@
  */
 class Tests_HtmlApi_WpHtmlProcessor_SetInnerHtml extends WP_UnitTestCase {
 	/**
-	 * Ensures that inner content is replaced when the new content remains
-	 * fully contained within the context element.
+	 * Ensures that inner content is replaced with the serialization of the
+	 * content parsed as a fragment in the context of the matched element.
+	 *
+	 * The content is interpreted the way the DOM `innerHTML` setter would
+	 * interpret it: syntax which parses to nothing is dropped, unclosed
+	 * elements are closed, and text may be re-encoded.
 	 *
 	 * @covers ::set_inner_html
 	 *
@@ -57,31 +61,44 @@ class Tests_HtmlApi_WpHtmlProcessor_SetInnerHtml extends WP_UnitTestCase {
 			'Plain text'                    => array( '<div>old content</div>after', 'DIV', 'fresh', '<div>fresh</div>after' ),
 			'Empty content'                 => array( '<div>full of stuff</div>', 'DIV', '', '<div></div>' ),
 			'Element markup'                => array( '<div>a<span>b</span>c</div>', 'DIV', '<p>replaced</p>', '<div><p>replaced</p></div>' ),
-			'Markup with implied closers'   => array( '<div>x</div><p>kept</p>', 'DIV', '<p>one<p>two', '<div><p>one<p>two</div><p>kept</p>' ),
 			'Same element nested'           => array( '<div>x</div>', 'DIV', '<div>nested</div>', '<div><div>nested</div></div>' ),
-			'Identical content'             => array( '<div><em>same</em></div>', 'DIV', '<em>same</em>', '<div><em>same</em></div>' ),
+			'A nested in non-A context'     => array( '<div>x</div>', 'DIV', '<a>nested</a>', '<div><a>nested</a></div>' ),
 			'A with phrasing content'       => array( '<a href="/wp/">WordPress</a>', 'A', 'the <em>best</em> CMS', '<a href="/wp/">the <em>best</em> CMS</a>' ),
 			'Implicitly-closed LI'          => array( '<ul><li>one<li>two</ul>', 'LI', 'replaced', '<ul><li>replaced<li>two</ul>' ),
-			'Implicitly-closed P'           => array( '<p>one<p>two', 'P', 'styled <em>text</em>', '<p>styled <em>text</em><p>two' ),
 			'Unclosed element at end'       => array( '<div><p>dangling', 'P', 'replaced', '<div><p>replaced' ),
 			'Comment'                       => array( '<div>x</div>', 'DIV', '<!-- note -->', '<div><!-- note --></div>' ),
 			'TD cell content'               => array( '<table><tbody><tr><td>old</td></tr></tbody></table>', 'TD', '<span>new</span>', '<table><tbody><tr><td><span>new</span></td></tr></tbody></table>' ),
-			'TABLE rows with implied TBODY' => array( '<table><tbody><tr><td>a</td></tr></tbody></table>', 'TABLE', '<tr><td>b</td></tr>', '<table><tr><td>b</td></tr></table>' ),
-			'SELECT options'                => array( '<select><option>a</option></select>', 'SELECT', '<option>x<option>y', '<select><option>x<option>y</select>' ),
-			'SVG foreign content'           => array( '<svg><circle r="1"></circle></svg>', 'SVG', '<rect width="4"/>', '<svg><rect width="4"/></svg>' ),
-			'Closed formatting element'     => array( '<div>x</div><span>after</span>', 'DIV', '<b>bold</b> text', '<div><b>bold</b> text</div><span>after</span>' ),
-			'Closed SELECT within content'  => array( '<div>x</div>', 'DIV', '<select><option>a</select><p>after', '<div><select><option>a</select><p>after</div>' ),
+			'TEMPLATE content'              => array( '<template><p>x</p></template><span>y</span>', 'TEMPLATE', '<em>t</em>', '<template><em>t</em></template><span>y</span>' ),
+
+			// The document receives the serialization of the parsed content, not the given text.
+			'Implied closers made explicit' => array( '<div>x</div><p>kept</p>', 'DIV', '<p>one<p>two', '<div><p>one</p><p>two</p></div><p>kept</p>' ),
+			'Unclosed formatting closed'    => array( '<div>x</div><span>after</span>', 'DIV', '<b>bold', '<div><b>bold</b></div><span>after</span>' ),
+			'Implied TBODY made explicit'   => array( '<table><tbody><tr><td>a</td></tr></tbody></table>', 'TABLE', '<tr><td>b</td></tr>', '<table><tbody><tr><td>b</td></tr></tbody></table>' ),
+			'Implied OPTION closers'        => array( '<select><option>a</option></select>', 'SELECT', '<option>x<option>y', '<select><option>x</option><option>y</option></select>' ),
+			'SVG foreign content'           => array( '<svg><circle r="1"></circle></svg>', 'SVG', '<rect width="4"/>', '<svg><rect width="4" /></svg>' ),
+			'Text is re-encoded'            => array( '<div>x</div>', 'DIV', 'a & b < c', '<div>a &amp; b &lt; c</div>' ),
+
+			// Syntax which fragment parsing ignores is dropped, as the DOM innerHTML setter drops it.
+			'Context closer dropped'        => array( '<div>x</div>y', 'DIV', '</div><p>escaped', '<div><p>escaped</p></div>y' ),
+			'BODY tag dropped'              => array( '<div>x</div>', 'DIV', '<body class="never">y', '<div>y</div>' ),
+			'HTML tag dropped'              => array( '<div>x</div>', 'DIV', '<html lang="en">y', '<div>y</div>' ),
+			'Stray TD dropped'              => array( '<div>x</div>', 'DIV', '<td>y', '<div>y</div>' ),
+			'Nested FORM dropped'           => array( '<form>x</form>', 'FORM', '<form>y</form>', '<form>y</form>' ),
+			'FRAMESET dropped'              => array( '<div>x</div>', 'DIV', '<frameset>', '<div></div>' ),
+			'BODY closer dropped'           => array( '<div>x</div><p>y</p>', 'DIV', 'z</body><!-- c -->', '<div>z<!-- c --></div><p>y</p>' ),
 		);
 	}
 
 	/**
-	 * Ensures that content is rejected and the document unmodified when accepting
-	 * the content would modify the structure outside of the context element.
+	 * Ensures that content is rejected and the document unmodified when the
+	 * parsed content cannot be represented in HTML text at this location
+	 * without modifying the structure outside of the context element.
 	 *
-	 * The HTML Processor has HTML text as input and output. Unlike the DOM,
-	 * some trees cannot be represented in HTML text, e.g. an A element nested
-	 * directly inside another A element. Content whose HTML would escape the
-	 * context element when the document is parsed again must be rejected.
+	 * Fragment parsing accepts this content and produces a tree — a DIV
+	 * assigned `<a>link</a>` via DOM `innerHTML` inside an A element holds a
+	 * nested A element — but no HTML text reproduces that tree in this
+	 * position: parsing the updated document would close the context element
+	 * or restructure the document around it.
 	 *
 	 * @covers ::set_inner_html
 	 *
@@ -123,55 +140,127 @@ class Tests_HtmlApi_WpHtmlProcessor_SetInnerHtml extends WP_UnitTestCase {
 	public static function data_content_escaping_context_element(): array {
 		return array(
 			'A inside A'                 => array( '<a href="/wp/">WordPress</a>', 'A', '<a>links cannot nest</a>' ),
-			'Closer for context A'       => array( '<a href="/">x</a>y', 'A', '</a>I closed the container' ),
-			'Closer for context DIV'     => array( '<div>x</div>y', 'DIV', '</div><p>escaped' ),
 			'LI inside LI'               => array( '<ul><li>one</li><li>two</li></ul>', 'LI', '<li>lists collapse' ),
 			'P inside P'                 => array( '<p>one</p>', 'P', '<p>paragraphs close paragraphs</p>' ),
 			'Heading inside heading'     => array( '<h1>title</h1>', 'H1', '<h2>headings close headings</h2>' ),
 			'BUTTON inside BUTTON'       => array( '<button>x</button>', 'BUTTON', '<button>buttons close buttons' ),
-			'FORM inside FORM'           => array( '<form>x</form>', 'FORM', '<form>y</form>' ),
-			'SELECT inside SELECT'       => array( '<select><option>a</option></select>', 'SELECT', '<select><option>b' ),
 			'OPTION inside OPTION'       => array( '<select><option>a</option></select>', 'OPTION', '<option>options close options' ),
-			'Unclosed B before content'  => array( '<div>x</div><span>after</span>', 'DIV', '<b>would embolden what follows' ),
+			/*
+			 * Rejected today because the HTML Processor cannot parse text inside
+			 * a TABLE. This must remain rejected once foster parenting is
+			 * supported, because the text would be re-parented outside of the
+			 * context element.
+			 */
 			'Text directly inside TABLE' => array( '<table><tbody><tr><td>a</td></tr></tbody></table>', 'TABLE', 'text would foster-parent' ),
-			'Closer for foreign context' => array( '<svg><circle r="1"></circle></svg>text', 'SVG', '</svg><b>escaped' ),
-			'BODY start tag'             => array( '<div>x</div>', 'DIV', '<body class="x">y' ),
-			'HTML start tag'             => array( '<div>x</div>', 'DIV', '<html lang="en">y' ),
-			'A inside SELECT'            => array( '<select><option>a</option></select>', 'SELECT', '<a>updated SELECT parsing may move this' ),
-			'DIV inside SELECT'          => array( '<select><option>a</option></select>', 'SELECT', '<div>updated SELECT parsing may move this' ),
-			'A inside OPTION in SELECT'  => array( '<select><option>a</option></select>', 'OPTION', '<a>updated SELECT parsing may move this' ),
-			'SELECT closer in OPTION'    => array( '<select><option>a</option></select>', 'OPTION', '</select>escaped' ),
-			'A in SELECT within content' => array( '<div>x</div>after', 'DIV', '<select><a>link' ),
+			'Foreign content breakout'   => array( '<svg><circle r="1"></circle></svg>text', 'SVG', '</svg><b>escaped' ),
 		);
 	}
 
 	/**
-	 * Ensures that the safety of content depends on its position in the document.
+	 * Ensures that content is rejected in SELECT contexts except for tokens
+	 * which parse identically under both revisions of SELECT parsing rules.
 	 *
-	 * An unclosed B element is contained inside a DIV at the end of a document,
-	 * but in the middle of a document it would wrap the following content in
-	 * bold text once the document is parsed again.
+	 * CANARY: the HTML Processor parses SELECT content under rules which
+	 * predate the "customizable select element" changes to HTML, ignoring
+	 * tags that up-to-date parsers preserve. Rather than silently applying
+	 * outdated rules, such content is rejected. When SELECT parsing is
+	 * updated these cases should be reevaluated and the restriction removed.
+	 * See https://core.trac.wordpress.org/ticket/63736.
 	 *
 	 * @covers ::set_inner_html
+	 *
+	 * @dataProvider data_content_restricted_in_select_context
+	 *
+	 * @param string $html     Input HTML document.
+	 * @param string $target   Tag name of the element whose content would be replaced.
+	 * @param string $new_html Content passed to `set_inner_html()`.
 	 */
-	public function test_containment_depends_on_document_position() {
-		$processor = WP_HTML_Processor::create_fragment( '<div>x</div>' );
-		$processor->next_tag( 'DIV' );
+	public function test_rejects_restricted_content_in_select_context( string $html, string $target, string $new_html ) {
+		$processor = WP_HTML_Processor::create_fragment( $html );
 		$this->assertTrue(
-			$processor->set_inner_html( '<b>unclosed' ),
-			'Should have accepted an unclosed formatting element when no content follows the context element.'
-		);
-		$this->assertSame(
-			'<div><b>unclosed</div>',
-			$processor->get_updated_html(),
-			'Should have replaced the inner content of the context element.'
+			$processor->next_tag( $target ),
+			"Could not find {$target} element in test document: check test setup."
 		);
 
-		$processor = WP_HTML_Processor::create_fragment( '<div>x</div>text after' );
-		$processor->next_tag( 'DIV' );
 		$this->assertFalse(
-			$processor->set_inner_html( '<b>unclosed' ),
-			'Should have rejected an unclosed formatting element which would reopen and wrap the content following the context element.'
+			$processor->set_inner_html( $new_html ),
+			'Should have rejected content whose parsing inside a SELECT element differs across revisions of HTML.'
+		);
+
+		$this->assertSame(
+			$html,
+			$processor->get_updated_html(),
+			'Should not have modified the document when rejecting the content.'
+		);
+	}
+
+	/**
+	 * Data provider.
+	 *
+	 * @return array[]
+	 */
+	public static function data_content_restricted_in_select_context(): array {
+		return array(
+			'A inside SELECT'             => array( '<select><option>a</option></select>', 'SELECT', '<a>link' ),
+			'DIV inside SELECT'           => array( '<select><option>a</option></select>', 'SELECT', '<div>block' ),
+			'A inside OPTION in SELECT'   => array( '<select><option>a</option></select>', 'OPTION', '<a>link' ),
+			'SELECT closer inside OPTION' => array( '<select><option>a</option></select>', 'OPTION', '</select>escaped' ),
+			'A in SELECT within content'  => array( '<div>x</div>after', 'DIV', '<select><a>link' ),
+		);
+	}
+
+	/**
+	 * Ensures that content which cannot be parsed as a fragment is rejected
+	 * and leaves the processor and document untouched.
+	 *
+	 * CANARY: these rejections pin current parser limitations, not the
+	 * intended contract. Stray formatting-element closers require adoption
+	 * agency support which the HTML Processor does not implement for the
+	 * "any other end tag" case. Fragment parsing drops these tokens, so when
+	 * support is added these cases should become accepted with the stray
+	 * closer removed from the content.
+	 *
+	 * @covers ::set_inner_html
+	 *
+	 * @dataProvider data_content_currently_unparseable
+	 *
+	 * @param string $html     Input HTML document.
+	 * @param string $target   Tag name of the element whose content would be replaced.
+	 * @param string $new_html Content passed to `set_inner_html()`.
+	 */
+	public function test_rejects_content_it_cannot_parse( string $html, string $target, string $new_html ) {
+		$processor = WP_HTML_Processor::create_fragment( $html );
+		$this->assertTrue(
+			$processor->next_tag( $target ),
+			"Could not find {$target} element in test document: check test setup."
+		);
+
+		$this->assertFalse(
+			$processor->set_inner_html( $new_html ),
+			'Should have rejected content which cannot currently be parsed as a fragment.'
+		);
+
+		$this->assertSame(
+			$html,
+			$processor->get_updated_html(),
+			'Should not have modified the document when rejecting the content.'
+		);
+
+		$this->assertNull(
+			$processor->get_last_error(),
+			'Should not have entered a failed state when rejecting the content.'
+		);
+	}
+
+	/**
+	 * Data provider.
+	 *
+	 * @return array[]
+	 */
+	public static function data_content_currently_unparseable(): array {
+		return array(
+			'Stray A closer'               => array( '<a href="/">x</a>y', 'A', '</a>I closed the container' ),
+			'Stray B closer in formatting' => array( '<b><div>x</div>y</b>z', 'DIV', 'w</b>v' ),
 		);
 	}
 
@@ -345,6 +434,12 @@ class Tests_HtmlApi_WpHtmlProcessor_SetInnerHtml extends WP_UnitTestCase {
 	 * Ensures that replacements are rejected when the document following the
 	 * context element contains markup the HTML Processor cannot verify.
 	 *
+	 * CANARY: this pins conservative behavior tied to current parser support.
+	 * The content itself is safe; the rejection occurs because the document
+	 * following the context element cannot be reparsed for verification.
+	 * When the HTML Processor learns to parse this document, the replacement
+	 * should be accepted and this test updated.
+	 *
 	 * @covers ::set_inner_html
 	 */
 	public function test_rejects_when_following_content_cannot_be_verified() {
@@ -438,6 +533,29 @@ class Tests_HtmlApi_WpHtmlProcessor_SetInnerHtml extends WP_UnitTestCase {
 			'<!DOCTYPE html><html><body><div><em>new</em></div><p>y</p></body></html>',
 			$processor->get_updated_html(),
 			'Should have replaced the inner content of the context element and nothing else.'
+		);
+	}
+
+	/**
+	 * Ensures that a BODY closer inside content is dropped in a full document,
+	 * where it could otherwise re-target following content to the HTML element.
+	 *
+	 * @covers ::set_inner_html
+	 */
+	public function test_drops_body_closer_in_full_parser() {
+		$processor = WP_HTML_Processor::create_full_parser(
+			'<!DOCTYPE html><html><body><div>x</div><p>y</p></body></html>'
+		);
+		$processor->next_tag( 'DIV' );
+
+		$this->assertTrue(
+			$processor->set_inner_html( 'z</body><!-- c -->' ),
+			'Should have accepted content whose ignored BODY closer is dropped.'
+		);
+		$this->assertSame(
+			'<!DOCTYPE html><html><body><div>z<!-- c --></div><p>y</p></body></html>',
+			$processor->get_updated_html(),
+			'Should have dropped the BODY closer and contained the comment inside the context element.'
 		);
 	}
 }

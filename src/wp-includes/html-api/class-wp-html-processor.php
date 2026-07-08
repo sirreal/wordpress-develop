@@ -1533,24 +1533,27 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * which does not appear in the input HTML text (e.g. a TBODY element
 	 * implied by a TR inside a TABLE).
 	 *
-	 * Unlike the DOM `innerHTML` setter, which operates on a tree, this method
-	 * operates on the HTML text of the document. There are trees which can be
-	 * created through the DOM whose HTML serialization does not reproduce the
-	 * same tree. Content is rejected unless the final document parses with the
-	 * new content fully contained inside the context element and with no
-	 * changes of any kind outside of it.
+	 * The content is interpreted the same way a browser interprets content
+	 * assigned to the `innerHTML` property: it is parsed as an HTML fragment
+	 * in the context of the matched element, and the document is updated with
+	 * the serialization of the parsed result. The text written into the
+	 * document is therefore a normalized form of the given content: syntax
+	 * which parses to nothing is removed (e.g. `</a>` inside an A element, or
+	 * a `<body>` tag, which parsers ignore), unclosed elements are explicitly
+	 * closed, and text and attribute values may be re-encoded.
+	 *
+	 * Unlike the DOM, whose trees need not correspond to any HTML text, the
+	 * HTML Processor's document is HTML text. There are trees which can be
+	 * created through the DOM whose serialization does not reproduce the same
+	 * tree when parsed again in place. Content is rejected unless the updated
+	 * document parses with the new content fully contained inside the context
+	 * element and with no changes of any kind outside of it.
 	 *
 	 * Rejected content leaves the document unmodified and returns `false`:
 	 *
-	 *  - Content which would close the context element or continue outside of it,
-	 *    e.g. setting `</p>outside` inside a P element.
 	 *  - Content whose elements would implicitly close the context element,
 	 *    e.g. setting `<li>` inside an LI element, or `<a>` inside an A element,
 	 *    because nesting these elements cannot be represented in HTML text.
-	 *  - Content which would modify parts of the document following the context
-	 *    element, e.g. setting `<b>unclosed` inside a DIV element which is
-	 *    followed by more content, because the unclosed B element would wrap
-	 *    that following content when the document is parsed again.
 	 *  - Content which the HTML Processor cannot parse, e.g. markup requiring
 	 *    foster-parenting, such as setting `text` directly inside a TABLE element.
 	 *  - Content inside a SELECT element other than OPTION, OPTGROUP, and HR
@@ -1562,7 +1565,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 *     $processor = WP_HTML_Processor::create_fragment( '<div>old</div><p>kept</p>' );
 	 *     $processor->next_tag( 'DIV' );
 	 *     true === $processor->set_inner_html( '<p>one<p>two' );
-	 *     $processor->get_updated_html() === '<div><p>one<p>two</div><p>kept</p>';
+	 *     $processor->get_updated_html() === '<div><p>one</p><p>two</p></div><p>kept</p>';
 	 *
 	 *     $processor = WP_HTML_Processor::create_fragment( '<a href="/wp/">WordPress</a>' );
 	 *     $processor->next_tag( 'A' );
@@ -1579,7 +1582,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 *
 	 * @since 7.1.0
 	 *
-	 * @param string $html Raw HTML to replace the contents of the currently-matched element.
+	 * @param string $html HTML for the new content of the currently-matched element.
 	 * @return bool Whether the content was accepted and the document updated.
 	 */
 	public function set_inner_html( string $html ): bool {
@@ -1608,22 +1611,14 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		}
 
 		/*
-		 * Reject content whose parsing is known to diverge from browsers,
-		 * because reparsing with the HTML Processor cannot detect whether
-		 * such content modifies the document outside of the context element.
-		 *
-		 *  - When an HTML or BODY start tag appears in a document, HTML parsers
-		 *    may adopt its attributes onto the existing HTML or BODY elements,
-		 *    modifying elements outside of the context element. The HTML
-		 *    Processor ignores these tags instead of adopting the attributes.
-		 *
-		 *  - The HTML Processor still parses SELECT content under rules which
-		 *    predate the "customizable select element" changes to HTML. It
-		 *    ignores most tags inside a SELECT element, while up-to-date
-		 *    parsers allow many of them, possibly escaping the SELECT and
-		 *    reopening formatting elements beyond the context element. Only
-		 *    tokens treated identically under both revisions of HTML are
-		 *    allowed inside a SELECT element. See https://core.trac.wordpress.org/ticket/63736.
+		 * The HTML Processor still parses SELECT content under rules which
+		 * predate the "customizable select element" changes to HTML. It
+		 * ignores most tags inside a SELECT element, while up-to-date parsers
+		 * allow many of them. Silently applying the outdated rules would drop
+		 * content that browsers preserve, so only tokens treated identically
+		 * under both revisions of HTML are allowed inside a SELECT element.
+		 * Remove this restriction when SELECT parsing is updated.
+		 * See https://core.trac.wordpress.org/ticket/63736.
 		 */
 		$context_in_select = in_array( 'SELECT', $this->get_breadcrumbs(), true );
 		$select_depth      = $context_in_select ? 1 : 0;
@@ -1654,10 +1649,6 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 				continue;
 			}
 
-			if ( 'HTML' === $scanned_tag || 'BODY' === $scanned_tag ) {
-				return false;
-			}
-
 			if ( 'SELECT' === $scanned_tag ) {
 				// A SELECT element may not appear inside another SELECT element.
 				if ( $select_depth > 0 ) {
@@ -1673,6 +1664,28 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			) {
 				return false;
 			}
+		}
+
+		/*
+		 * Parse the content as an HTML fragment in the context of the matched
+		 * element, the same interpretation the DOM `innerHTML` setter applies.
+		 * The serialization of the parsed fragment, not the given text, is
+		 * what may be written into the document: this removes syntax which
+		 * every HTML parser ignores (e.g. stray tag closers) and explicitly
+		 * closes unclosed elements.
+		 */
+		$fragment = $this->create_fragment_at_current_node( $html );
+		if ( null === $fragment ) {
+			return false;
+		}
+
+		$new_content = '';
+		while ( $fragment->next_token() ) {
+			$new_content .= $fragment->serialize_token();
+		}
+
+		if ( null !== $fragment->get_last_error() ) {
+			return false;
 		}
 
 		// Apply any pending updates so that the document below is final.
@@ -1744,8 +1757,8 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		 * closing of the context element onward, the document must produce
 		 * exactly the same structure as it did without the replacement.
 		 */
-		$candidate_document = substr( $document, 0, $inner_start ) . $html . substr( $document, $inner_end );
-		$candidate_end      = $inner_start + strlen( $html );
+		$candidate_document = substr( $document, 0, $inner_start ) . $new_content . substr( $document, $inner_end );
+		$candidate_end      = $inner_start + strlen( $new_content );
 
 		$candidate = $this->create_equivalent_parser( $candidate_document );
 		if (
@@ -1819,7 +1832,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			}
 		}
 
-		$this->lexical_updates[] = new WP_HTML_Text_Replacement( $inner_start, $inner_end - $inner_start, $html );
+		$this->lexical_updates[] = new WP_HTML_Text_Replacement( $inner_start, $inner_end - $inner_start, $new_content );
 		$this->get_updated_html();
 
 		return true;
