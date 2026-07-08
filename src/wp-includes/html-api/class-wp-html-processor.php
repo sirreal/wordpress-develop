@@ -1553,9 +1553,20 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		// Process the next event on the queue.
 		$this->current_element = array_shift( $this->element_queue );
 		if ( ! isset( $this->current_element ) ) {
-			// There are no tokens left, so close all remaining open elements.
-			while ( $this->state->stack_of_open_elements->pop() ) {
-				continue;
+			/*
+			 * There are no tokens left, so close all remaining open elements.
+			 *
+			 * Routing the pop events can refuse to proceed, e.g. when an open
+			 * fostered run exceeds the deferral buffer while the document's
+			 * unclosed elements unwind; the abort is recorded by bail() before
+			 * it throws.
+			 */
+			try {
+				while ( $this->state->stack_of_open_elements->pop() ) {
+					continue;
+				}
+			} catch ( WP_HTML_Unsupported_Exception $e ) {
+				return false;
 			}
 
 			return empty( $this->element_queue ) ? false : $this->next_visitable_token();
@@ -1934,10 +1945,18 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			 *
 			 * When moving on to the next node, therefore, if the bottom-most element
 			 * on the stack is a void element, it must be closed.
+			 *
+			 * Routing the pop event can refuse to proceed, e.g. when an open
+			 * fostered run exceeds the deferral buffer; the abort is recorded
+			 * by bail() before it throws.
 			 */
-			$top_node = $this->state->stack_of_open_elements->current_node();
-			if ( isset( $top_node ) && ! $this->expects_closer( $top_node ) ) {
-				$this->state->stack_of_open_elements->pop();
+			try {
+				$top_node = $this->state->stack_of_open_elements->current_node();
+				if ( isset( $top_node ) && ! $this->expects_closer( $top_node ) ) {
+					$this->state->stack_of_open_elements->pop();
+				}
+			} catch ( WP_HTML_Unsupported_Exception $e ) {
+				return false;
 			}
 		}
 
@@ -6782,6 +6801,19 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		 * and computation time.
 		 */
 		if ( 'backward' === $direction ) {
+
+			/*
+			 * Deferred-presentation state is cleared before the stacks: the
+			 * events which clearing the stacks generates are all discarded,
+			 * and routing them through open table windows or fostered runs
+			 * could otherwise abort a legitimate seek.
+			 */
+			$this->table_window_events                 = null;
+			$this->table_window_table                  = null;
+			$this->table_window_overflowed             = false;
+			$this->table_window_runs                   = array();
+			$this->table_window_template_pending       = array();
+			$this->lexer_repositioned_for_presentation = false;
 
 			/*
 			 * When moving backward, stateful stacks should be cleared.

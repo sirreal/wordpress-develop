@@ -578,6 +578,31 @@ class Tests_HtmlApi_WpHtmlProcessorFosterParenting extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Ensures that a fostered run which exceeds the deferral bound while the
+	 * document's unclosed elements unwind aborts through the error interface
+	 * instead of letting the internal exception escape.
+	 *
+	 * @ticket TBD
+	 *
+	 * @covers ::next_token
+	 */
+	public function test_oversized_fostered_run_aborts_cleanly() {
+		$processor = WP_HTML_Processor::create_fragment(
+			'<table>' . str_repeat( '<div>', WP_HTML_Processor::MAX_BUFFERED_TABLE_EVENTS - 2 )
+		);
+
+		while ( $processor->next_token() ) {
+			continue;
+		}
+
+		$this->assertSame(
+			WP_HTML_Processor::ERROR_UNSUPPORTED,
+			$processor->get_last_error(),
+			'An oversized fostered run must abort the parse through get_last_error().'
+		);
+	}
+
+	/**
 	 * Ensures that in-place modifications apply to fostered nodes visited
 	 * before their table and to deferred table contents alike, and that
 	 * bookmarks may be sought across the reordering in both directions.
