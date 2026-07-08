@@ -165,9 +165,9 @@ class Tests_HtmlApi_WpHtmlProcessorFosterParenting extends WP_UnitTestCase {
 		return array(
 			'Whitespace alone stays in the table'        => array( "<table> \n\t<td>", " \n\t", false, array( 'HTML', 'BODY', 'TABLE', '#text' ) ),
 			'Whitespace before a tag stays in the table' => array( '<table> <tr><td>x', ' ', false, array( 'HTML', 'BODY', 'TABLE', '#text' ) ),
-			'Whitespace followed by text is fostered'     => array( '<table> abc<td>', ' ', true, array( 'HTML', 'BODY', '#text' ) ),
-			'Whitespace entity followed by text fosters'  => array( '<table>&#32;abc<td>', ' ', true, array( 'HTML', 'BODY', '#text' ) ),
-			'Non-whitespace text is fostered'             => array( '<table>abc<td>', 'abc', true, array( 'HTML', 'BODY', '#text' ) ),
+			'Whitespace followed by text is fostered'    => array( '<table> abc<td>', ' ', true, array( 'HTML', 'BODY', '#text' ) ),
+			'Whitespace entity followed by text fosters' => array( '<table>&#32;abc<td>', ' ', true, array( 'HTML', 'BODY', '#text' ) ),
+			'Non-whitespace text is fostered'            => array( '<table>abc<td>', 'abc', true, array( 'HTML', 'BODY', '#text' ) ),
 		);
 	}
 
@@ -355,6 +355,30 @@ class Tests_HtmlApi_WpHtmlProcessorFosterParenting extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Ensures that foreign elements whose tag names match HTML table-part
+	 * elements do not confuse the algorithms which clear the stack of open
+	 * elements back to a table context.
+	 *
+	 * Foster-parented foreign content places elements like an SVG TEMPLATE
+	 * directly in table contexts, where a namespace-blind name comparison
+	 * would wrongly treat them as their HTML counterparts.
+	 *
+	 * @ticket TBD
+	 *
+	 * @covers WP_HTML_Open_Elements::clear_to_table_row_context
+	 */
+	public function test_foreign_table_part_names_do_not_terminate_table_context_clearing() {
+		$processor = WP_HTML_Processor::create_fragment( '<table><tr><svg><template></tr><caption>x' );
+
+		$this->assertTrue( $processor->next_tag( 'CAPTION' ), 'Failed to find the CAPTION.' );
+		$this->assertSame(
+			array( 'HTML', 'BODY', 'TABLE', 'CAPTION' ),
+			$processor->get_breadcrumbs(),
+			'The TR end tag must clear the foreign elements, including the SVG TEMPLATE, off of the stack of open elements.'
+		);
+	}
+
+	/**
 	 * Ensures that documents containing foster-parented content serialize to
 	 * HTML which parses into the same document.
 	 *
@@ -387,13 +411,13 @@ class Tests_HtmlApi_WpHtmlProcessorFosterParenting extends WP_UnitTestCase {
 	 */
 	public static function data_fostered_documents() {
 		return array(
-			'Fostered text'              => array( '<table>lost<td>found' ),
-			'Fostered element'           => array( '<table><div>lost</div><tr><td>found' ),
-			'Fostered formatting'        => array( '<table><b>lost<tr>reopened<td>found' ),
+			'Fostered text'               => array( '<table>lost<td>found' ),
+			'Fostered element'            => array( '<table><div>lost</div><tr><td>found' ),
+			'Fostered formatting'         => array( '<table><b>lost<tr>reopened<td>found' ),
 			'Fostered before inner table' => array( '<table><td><table>lost<td>found' ),
-			'Fostered whitespace run'    => array( '<table> lost <td> found ' ),
-			'Adoption in table'          => array( '<table><a>1<p>2</a>3' ),
-			'Fostered foreign content'   => array( '<table><svg><circle r="1"></svg><td>found' ),
+			'Fostered whitespace run'     => array( '<table> lost <td> found ' ),
+			'Adoption in table'           => array( '<table><a>1<p>2</a>3' ),
+			'Fostered foreign content'    => array( '<table><svg><circle r="1"></svg><td>found' ),
 		);
 	}
 }

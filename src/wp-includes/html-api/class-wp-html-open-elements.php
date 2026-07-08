@@ -836,9 +836,12 @@ class WP_HTML_Open_Elements {
 	public function clear_to_table_context(): void {
 		foreach ( $this->walk_up() as $item ) {
 			if (
-				'TABLE' === $item->node_name ||
-				'TEMPLATE' === $item->node_name ||
-				'HTML' === $item->node_name
+				'html' === $item->namespace &&
+				(
+					'TABLE' === $item->node_name ||
+					'TEMPLATE' === $item->node_name ||
+					'HTML' === $item->node_name
+				)
 			) {
 				break;
 			}
@@ -860,11 +863,14 @@ class WP_HTML_Open_Elements {
 	public function clear_to_table_body_context(): void {
 		foreach ( $this->walk_up() as $item ) {
 			if (
-				'TBODY' === $item->node_name ||
-				'TFOOT' === $item->node_name ||
-				'THEAD' === $item->node_name ||
-				'TEMPLATE' === $item->node_name ||
-				'HTML' === $item->node_name
+				'html' === $item->namespace &&
+				(
+					'TBODY' === $item->node_name ||
+					'TFOOT' === $item->node_name ||
+					'THEAD' === $item->node_name ||
+					'TEMPLATE' === $item->node_name ||
+					'HTML' === $item->node_name
+				)
 			) {
 				break;
 			}
@@ -886,9 +892,12 @@ class WP_HTML_Open_Elements {
 	public function clear_to_table_row_context(): void {
 		foreach ( $this->walk_up() as $item ) {
 			if (
-				'TR' === $item->node_name ||
-				'TEMPLATE' === $item->node_name ||
-				'HTML' === $item->node_name
+				'html' === $item->namespace &&
+				(
+					'TR' === $item->node_name ||
+					'TEMPLATE' === $item->node_name ||
+					'HTML' === $item->node_name
+				)
 			) {
 				break;
 			}

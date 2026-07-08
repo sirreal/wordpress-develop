@@ -1500,6 +1500,11 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 *    and invalid UTF-8 replaced with U+FFFD.
 	 *  - Any incomplete syntax trailing at the end will be omitted,
 	 *    for example, an unclosed comment opener will be removed.
+	 *  - Content found inside a TABLE where it isn't allowed is serialized
+	 *    where its syntax was found, inside the table markup; parsing the
+	 *    output foster-parents it again to its location before the table.
+	 *    Whitespace which was separated from such content only by ignored
+	 *    syntax joins it when the output is parsed.
 	 *
 	 * Example:
 	 *
@@ -1541,6 +1546,11 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 *    and invalid UTF-8 replaced with U+FFFD.
 	 *  - Any incomplete syntax trailing at the end will be omitted,
 	 *    for example, an unclosed comment opener will be removed.
+	 *  - Content found inside a TABLE where it isn't allowed is serialized
+	 *    where its syntax was found, inside the table markup; parsing the
+	 *    output foster-parents it again to its location before the table.
+	 *    Whitespace which was separated from such content only by ignored
+	 *    syntax joins it when the output is parsed.
 	 *
 	 * Example:
 	 *
@@ -7029,7 +7039,10 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		// @todo Parse error if the current node is a "td" or "th" element.
 		foreach ( $this->state->stack_of_open_elements->walk_up() as $element ) {
 			$this->state->stack_of_open_elements->pop();
-			if ( 'TD' === $element->node_name || 'TH' === $element->node_name ) {
+			if (
+				'html' === $element->namespace &&
+				( 'TD' === $element->node_name || 'TH' === $element->node_name )
+			) {
 				break;
 			}
 		}
