@@ -1219,7 +1219,7 @@ class WP_HTML_Tag_Processor {
 
 			$name = substr( $class, $at, $length );
 			if ( $is_quirks ) {
-				$name = strtolower( $name );
+				$name = WP_HTML_Decoder::ascii_lowercase( $name );
 			}
 			$at += $length;
 
@@ -1257,7 +1257,9 @@ class WP_HTML_Tag_Processor {
 		foreach ( $this->class_list() as $class_name ) {
 			if (
 				strlen( $class_name ) === $wanted_length &&
-				0 === substr_compare( $class_name, $wanted_class, 0, strlen( $wanted_class ), $case_insensitive )
+				( $case_insensitive
+					? WP_HTML_Decoder::matches_ascii_case_insensitively( $class_name, $wanted_class )
+					: $class_name === $wanted_class )
 			) {
 				return true;
 			}
@@ -1448,10 +1450,7 @@ class WP_HTML_Tag_Processor {
 			 * normalization could not be part of a tag name.
 			 */
 			for ( $i = 0; $i < $tag_length; $i++ ) {
-				$tag_char  = $tag_name[ $i ];
-				$html_char = $html[ $at + $i ];
-
-				if ( $html_char !== $tag_char && strtoupper( $html_char ) !== $tag_char ) {
+				if ( ! WP_HTML_Decoder::matches_ascii_case_insensitively( $html, $tag_name[ $i ], $at + $i ) ) {
 					$at += $i;
 					continue 2;
 				}
@@ -2267,7 +2266,7 @@ class WP_HTML_Tag_Processor {
 		 *
 		 * @see https://html.spec.whatwg.org/#attribute-name-state
 		 */
-		$comparable_name = strtolower( str_replace( "\x00", "\u{FFFD}", $attribute_name ) );
+		$comparable_name = WP_HTML_Decoder::ascii_lowercase( str_replace( "\x00", "\u{FFFD}", $attribute_name ) );
 
 		// If an attribute is listed many times, only use the first declaration and ignore the rest.
 		if ( ! isset( $this->attributes[ $comparable_name ] ) ) {
@@ -2446,7 +2445,7 @@ class WP_HTML_Tag_Processor {
 		if ( $is_quirks ) {
 			foreach ( $this->classname_updates as $updated_name => $action ) {
 				if ( self::REMOVE_CLASS === $action ) {
-					$to_remove[] = strtolower( $updated_name );
+					$to_remove[] = WP_HTML_Decoder::ascii_lowercase( $updated_name );
 				}
 			}
 		} else {
@@ -2473,7 +2472,7 @@ class WP_HTML_Tag_Processor {
 			}
 
 			$name                  = substr( $existing_class, $at, $name_length );
-			$comparable_class_name = $is_quirks ? strtolower( $name ) : $name;
+			$comparable_class_name = $is_quirks ? WP_HTML_Decoder::ascii_lowercase( $name ) : $name;
 			$at                   += $name_length;
 
 			// If this class is marked for removal, remove it and move on to the next one.
@@ -2509,7 +2508,7 @@ class WP_HTML_Tag_Processor {
 
 		// Add new classes by appending those which haven't already been seen.
 		foreach ( $this->classname_updates as $name => $operation ) {
-			$comparable_name = $is_quirks ? strtolower( $name ) : $name;
+			$comparable_name = $is_quirks ? WP_HTML_Decoder::ascii_lowercase( $name ) : $name;
 			if ( self::ADD_CLASS === $operation && ! in_array( $comparable_name, $seen, true ) ) {
 				$modified = true;
 
@@ -2809,7 +2808,7 @@ class WP_HTML_Tag_Processor {
 			return null;
 		}
 
-		$comparable = strtolower( $name );
+		$comparable = WP_HTML_Decoder::ascii_lowercase( $name );
 
 		/*
 		 * For every attribute other than `class` it's possible to perform a quick check if
@@ -2912,7 +2911,7 @@ class WP_HTML_Tag_Processor {
 			return null;
 		}
 
-		$comparable = strtolower( $prefix );
+		$comparable = WP_HTML_Decoder::ascii_lowercase( $prefix );
 
 		$matches = array();
 		foreach ( array_keys( $this->attributes ) as $attr_name ) {
@@ -2958,7 +2957,7 @@ class WP_HTML_Tag_Processor {
 		$tag_name = str_replace( "\x00", "\u{FFFD}", substr( $this->html, $this->tag_name_starts_at, $this->tag_name_length ) );
 
 		if ( self::STATE_MATCHED_TAG === $this->parser_state ) {
-			return strtoupper( $tag_name );
+			return WP_HTML_Decoder::ascii_uppercase( $tag_name );
 		}
 
 		if (
@@ -2989,7 +2988,7 @@ class WP_HTML_Tag_Processor {
 			return $tag_name;
 		}
 
-		$lower_tag_name = strtolower( $tag_name );
+		$lower_tag_name = WP_HTML_Decoder::ascii_lowercase( $tag_name );
 		if ( 'math' === $this->get_namespace() ) {
 			return $lower_tag_name;
 		}
@@ -3138,7 +3137,7 @@ class WP_HTML_Tag_Processor {
 		}
 
 		$namespace  = $this->get_namespace();
-		$lower_name = strtolower( $attribute_name );
+		$lower_name = WP_HTML_Decoder::ascii_lowercase( $attribute_name );
 
 		if ( 'math' === $namespace && 'definitionurl' === $lower_name ) {
 			return 'definitionURL';
@@ -3911,9 +3910,10 @@ class WP_HTML_Tag_Processor {
 				 * HTML structure is rejected here. It’s the responsibility of calling code to
 				 * perform whatever semantic escaping is necessary to avoid problematic strings.
 				 */
+				$comparable_content = WP_HTML_Decoder::ascii_lowercase( $plaintext_content );
 				if (
-					false !== stripos( $plaintext_content, '<script' ) ||
-					false !== stripos( $plaintext_content, '</script' )
+					str_contains( $comparable_content, '<script' ) ||
+					str_contains( $comparable_content, '</script' )
 				) {
 					return false;
 				}
@@ -4038,7 +4038,7 @@ class WP_HTML_Tag_Processor {
 		$type_string = is_string( $type ) ? trim( $type, " \t\f\r\n" ) : "text/{$lang}";
 
 		// All matches are ASCII case-insensitive; eagerly lower-case for comparison.
-		$type_string = strtolower( $type_string );
+		$type_string = WP_HTML_Decoder::ascii_lowercase( $type_string );
 
 		/*
 		 * > If the script block's type string is a JavaScript MIME type essence match, then
@@ -4300,7 +4300,7 @@ class WP_HTML_Tag_Processor {
 			$has_closing_slash = $tag_name_at < $end && '/' === $sourcecode[ $tag_name_at ];
 			$tag_name_at      += $has_closing_slash ? 1 : 0;
 
-			if ( 0 !== substr_compare( $sourcecode, 'script', $tag_name_at, 6, true ) ) {
+			if ( ! WP_HTML_Decoder::matches_ascii_case_insensitively( $sourcecode, 'script', $tag_name_at ) ) {
 				$at = $tag_at + 1;
 				continue;
 			}
@@ -4415,7 +4415,7 @@ class WP_HTML_Tag_Processor {
 		if ( true === $value ) {
 			$updated_attribute = $name;
 		} else {
-			$comparable_name = strtolower( $name );
+			$comparable_name = WP_HTML_Decoder::ascii_lowercase( $name );
 
 			/**
 			 * Escape attribute values appropriately.
@@ -4451,7 +4451,7 @@ class WP_HTML_Tag_Processor {
 		 *
 		 * @see https://html.spec.whatwg.org/multipage/syntax.html#attributes-2:ascii-case-insensitive
 		 */
-		$comparable_name = strtolower( $name );
+		$comparable_name = WP_HTML_Decoder::ascii_lowercase( $name );
 
 		if ( isset( $this->attributes[ $comparable_name ] ) ) {
 			/*
@@ -4527,7 +4527,7 @@ class WP_HTML_Tag_Processor {
 		 *
 		 * @see https://html.spec.whatwg.org/multipage/syntax.html#attributes-2:ascii-case-insensitive
 		 */
-		$name = strtolower( $name );
+		$name = WP_HTML_Decoder::ascii_lowercase( $name );
 
 		/*
 		 * Any calls to update the `class` attribute directly should wipe out any
@@ -4612,7 +4612,7 @@ class WP_HTML_Tag_Processor {
 		foreach ( $this->classname_updates as $updated_name => $action ) {
 			if (
 				strlen( $updated_name ) === $class_name_length &&
-				0 === substr_compare( $updated_name, $class_name, 0, $class_name_length, true )
+				WP_HTML_Decoder::matches_ascii_case_insensitively( $updated_name, $class_name )
 			) {
 				$this->classname_updates[ $updated_name ] = self::ADD_CLASS;
 				return true;
@@ -4654,7 +4654,7 @@ class WP_HTML_Tag_Processor {
 		foreach ( $this->classname_updates as $updated_name => $action ) {
 			if (
 				strlen( $updated_name ) === $class_name_length &&
-				0 === substr_compare( $updated_name, $class_name, 0, $class_name_length, true )
+				WP_HTML_Decoder::matches_ascii_case_insensitively( $updated_name, $class_name )
 			) {
 				$this->classname_updates[ $updated_name ] = self::REMOVE_CLASS;
 				return true;
@@ -4821,7 +4821,7 @@ class WP_HTML_Tag_Processor {
 			$tag_name = $this->get_tag();
 			if (
 				strlen( $this->sought_tag_name ) !== strlen( $tag_name ) ||
-				0 !== substr_compare( $tag_name, $this->sought_tag_name, 0, null, true )
+				! WP_HTML_Decoder::matches_ascii_case_insensitively( $tag_name, $this->sought_tag_name )
 			) {
 				return false;
 			}

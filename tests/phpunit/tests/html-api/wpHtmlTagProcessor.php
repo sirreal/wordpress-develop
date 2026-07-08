@@ -3248,6 +3248,32 @@ HTML
 	}
 
 	/**
+	 * Ensures tag-name matching folds ASCII letters only, regardless of locale.
+	 *
+	 * Tag names may contain non-ASCII bytes, which must match byte-for-byte.
+	 * The byte pair 0xCC/0xEC (Ì/ì in ISO-8859-1) is a case pair in common
+	 * single-byte charmaps: a locale-sensitive comparison would treat the tag
+	 * names below as ASCII case-insensitive matches for each other.
+	 *
+	 * @ticket 65372
+	 *
+	 * @covers ::next_tag
+	 */
+	public function test_next_tag_matches_tag_names_with_ascii_case_folding_only() {
+		$processor = new WP_HTML_Tag_Processor( "<d\xCCta>" );
+		$this->assertFalse(
+			$processor->next_tag( array( 'tag_name' => "d\xECta" ) ),
+			'Should not have matched a tag name differing in non-ASCII bytes.'
+		);
+
+		$processor = new WP_HTML_Tag_Processor( "<d\xCCta>" );
+		$this->assertTrue(
+			$processor->next_tag( array( 'tag_name' => "D\xCCTA" ) ),
+			'Should have matched the tag name with ASCII letters case-folded.'
+		);
+	}
+
+	/**
 	 * Data provider.
 	 *
 	 * @return Generator<array>
