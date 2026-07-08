@@ -494,6 +494,8 @@ HTML
 			'Non-JS SCRIPT with </script>'            => array( '<script type="text/plain">Replace me</script>', 'Just a </script>' ),
 			'Non-JS SCRIPT with <script attributes>'  => array( '<script language="text">Replace me</script>', '<!-- <script sneaky>after' ),
 			'Non-JS SCRIPT with </script attributes>' => array( '<script language="text">Replace me</script>', 'before</script sneaky>after' ),
+			'Non-JS SCRIPT with </SCRIPT>'            => array( '<script type="text/plain">Replace me</script>', 'Just a </SCRIPT>' ),
+			'Non-JS SCRIPT with <SCRipt>'             => array( '<script type="text/html">Replace me</script>', '<!-- Just a <SCRipt>' ),
 		);
 	}
 
@@ -524,6 +526,13 @@ HTML
 		return array(
 			'Simple update'                         => array( '<script></script>', '{}', '<script>{}</script>' ),
 			'Needs no replacement'                  => array( '<script></script>', '<!--<scriptish>', '<script><!--<scriptish></script>' ),
+			/*
+			 * The byte 0xDD is İ (LATIN CAPITAL LETTER I WITH DOT ABOVE) in ISO-8859-9,
+			 * whose lowercase form is the ASCII letter i: under a Turkish locale a
+			 * locale-sensitive comparison would recognize "scr\xDDpt" as an ASCII
+			 * case-insensitive match for "script" and needlessly escape it.
+			 */
+			'Not script: non-ASCII byte in name'    => array( '<script></script>', "1</scr\xDDpt>/", "<script>1</scr\xDDpt>/</script>" ),
 			'var script;1<script>0'                 => array( '<script></script>', 'var script;1<script>0', '<script>var script;1<\u0073cript>0</script>' ),
 			'1</script>/'                           => array( '<script></script>', '1</script>/', '<script>1</\u0073cript>/</script>' ),
 			'var SCRIPT;1<SCRIPT>0'                 => array( '<script></script>', 'var SCRIPT;1<SCRIPT>0', '<script>var SCRIPT;1<\u0053CRIPT>0</script>' ),

@@ -837,6 +837,70 @@ class Tests_HtmlApi_WpHtmlProcessor extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Ensures quirks-mode class matching folds ASCII letters only, regardless of locale.
+	 *
+	 * The byte pair 0xCC/0xEC (Ì/ì in ISO-8859-1) is a case pair in common single-byte
+	 * charmaps: a locale-sensitive comparison would treat the class names below as
+	 * ASCII case-insensitive matches for each other.
+	 *
+	 * @ticket 65372
+	 *
+	 * @covers ::has_class
+	 */
+	public function test_has_class_quirks_mode_folds_ascii_case_only() {
+		$processor = WP_HTML_Processor::create_full_parser( "<span class='GR\xCCN'>" );
+		$processor->next_tag( 'SPAN' );
+		$this->assertTrue(
+			$processor->has_class( "gr\xCCn" ),
+			'Should have matched the class name with ASCII letters case-folded.'
+		);
+		$this->assertFalse(
+			$processor->has_class( "gr\xECn" ),
+			'Should not have case-folded non-ASCII bytes in class names.'
+		);
+	}
+
+	/**
+	 * Ensures quirks-mode class updates fold ASCII letters only, regardless of locale.
+	 *
+	 * @ticket 65372
+	 *
+	 * @covers ::add_class
+	 * @covers ::remove_class
+	 */
+	public function test_add_class_quirks_mode_folds_ascii_case_only() {
+		$processor = WP_HTML_Processor::create_full_parser( '<span>' );
+		$processor->next_tag( 'SPAN' );
+		$processor->add_class( "GR\xCCN" );
+		$processor->add_class( "gr\xCCn" );
+		$this->assertSame(
+			"<span class=\"GR\xCCN\">",
+			$processor->get_updated_html(),
+			'Should have deduplicated ASCII case variants of the same class name.'
+		);
+
+		$processor = WP_HTML_Processor::create_full_parser( '<span>' );
+		$processor->next_tag( 'SPAN' );
+		$processor->add_class( "GR\xCCN" );
+		$processor->add_class( "gr\xECn" );
+		$this->assertSame(
+			"<span class=\"GR\xCCN gr\xECn\">",
+			$processor->get_updated_html(),
+			'Should have added both class names: non-ASCII bytes are not case variants.'
+		);
+
+		$processor = WP_HTML_Processor::create_full_parser( '<span>' );
+		$processor->next_tag( 'SPAN' );
+		$processor->add_class( "GR\xCCN" );
+		$processor->remove_class( "gr\xECn" );
+		$this->assertSame(
+			"<span class=\"GR\xCCN\">",
+			$processor->get_updated_html(),
+			'Should not have cancelled a pending class addition differing in non-ASCII bytes.'
+		);
+	}
+
+	/**
 	 * Ensures that the processor correctly adjusts the namespace
 	 * for elements inside HTML integration points.
 	 *
