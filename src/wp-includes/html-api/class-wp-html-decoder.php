@@ -11,6 +11,116 @@
  */
 class WP_HTML_Decoder {
 	/**
+	 * Indicates if a span of text matches a given string, ignoring ASCII case.
+	 *
+	 * Matching is performed byte-by-byte and folds only the ASCII uppercase letters
+	 * A-Z onto their lowercase counterparts, regardless of the process locale.
+	 *
+	 * This exists because PHP's built-in case-insensitive comparisons are locale
+	 * sensitive: `substr_compare()` with its case-insensitivity flag and (before
+	 * PHP 8.2) `strcasecmp()`, `strtolower()`, and friends fold bytes according
+	 * to the current process locale, which may treat non-ASCII bytes as case
+	 * variants of each other or of ASCII letters. HTML requires ASCII
+	 * case insensitivity regardless of locale.
+	 *
+	 * The span begins at the given byte offset into the text and runs for the
+	 * byte length of the search string. A span extending past the end of the
+	 * text never matches, even if the available bytes match the search string.
+	 *
+	 * Example:
+	 *
+	 *     true  === WP_HTML_Decoder::matches_ascii_case_insensitively( 'DIV', 'div' );
+	 *     true  === WP_HTML_Decoder::matches_ascii_case_insensitively( '<!doctype html>', 'HTML', 10 );
+	 *     false === WP_HTML_Decoder::matches_ascii_case_insensitively( "\xCC", "\xEC" );
+	 *     false === WP_HTML_Decoder::matches_ascii_case_insensitively( 'DIVERT', 'div', 3 );
+	 *
+	 * @since 7.1.0
+	 *
+	 * @access private
+	 *
+	 * @see https://infra.spec.whatwg.org/#ascii-case-insensitive
+	 *
+	 * @param string $text   Text possibly containing the search string.
+	 * @param string $search Search string; its byte length determines the span length.
+	 * @param int    $offset Optional. Byte offset into the text where the span begins. Default 0.
+	 * @return bool Whether the span is an ASCII case-insensitive match for the search string.
+	 */
+	public static function matches_ascii_case_insensitively( string $text, string $search, int $offset = 0 ): bool {
+		$length = strlen( $search );
+		if ( $offset < 0 || $offset + $length > strlen( $text ) ) {
+			return false;
+		}
+
+		for ( $at = 0; $at < $length; $at++ ) {
+			$text_byte   = $text[ $offset + $at ];
+			$search_byte = $search[ $at ];
+
+			if ( $text_byte === $search_byte ) {
+				continue;
+			}
+
+			$text_ord   = ord( $text_byte );
+			$search_ord = ord( $search_byte );
+
+			// Fold uppercase ASCII letters onto their lowercase counterparts; no other bytes fold.
+			if ( $text_ord >= 0x41 && $text_ord <= 0x5A ) {
+				$text_ord += 0x20;
+			}
+			if ( $search_ord >= 0x41 && $search_ord <= 0x5A ) {
+				$search_ord += 0x20;
+			}
+
+			if ( $text_ord !== $search_ord ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	/**
+	 * Returns the ASCII lowercase version of a given string.
+	 *
+	 * Only the ASCII uppercase letters A-Z are folded onto their lowercase
+	 * counterparts; all other bytes are left unchanged. This differs from
+	 * `strtolower()`, which before PHP 8.2 folds bytes according to the
+	 * current process locale.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @access private
+	 *
+	 * @see https://infra.spec.whatwg.org/#ascii-lowercase
+	 *
+	 * @param string $text Text to fold.
+	 * @return string ASCII-lowercase version of the given text.
+	 */
+	public static function ascii_lowercase( string $text ): string {
+		return strtr( $text, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz' );
+	}
+
+	/**
+	 * Returns the ASCII uppercase version of a given string.
+	 *
+	 * Only the ASCII lowercase letters a-z are folded onto their uppercase
+	 * counterparts; all other bytes are left unchanged. This differs from
+	 * `strtoupper()`, which before PHP 8.2 folds bytes according to the
+	 * current process locale.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @access private
+	 *
+	 * @see https://infra.spec.whatwg.org/#ascii-uppercase
+	 *
+	 * @param string $text Text to fold.
+	 * @return string ASCII-uppercase version of the given text.
+	 */
+	public static function ascii_uppercase( string $text ): string {
+		return strtr( $text, 'abcdefghijklmnopqrstuvwxyz', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' );
+	}
+
+	/**
 	 * Indicates if an attribute value starts with a given raw string value.
 	 *
 	 * Use this method to determine if an attribute value starts with a given string, regardless
@@ -40,7 +150,7 @@ class WP_HTML_Decoder {
 
 		while ( $search_at < $search_length && $haystack_at < $haystack_end ) {
 			$chars_match = $loose_case
-				? strtolower( $haystack[ $haystack_at ] ) === strtolower( $search_text[ $search_at ] )
+				? self::matches_ascii_case_insensitively( $haystack, $search_text[ $search_at ], $haystack_at )
 				: $haystack[ $haystack_at ] === $search_text[ $search_at ];
 
 			$is_introducer = '&' === $haystack[ $haystack_at ];
@@ -61,7 +171,10 @@ class WP_HTML_Decoder {
 			}
 
 			// If there is a character reference, then the decoded value must exactly match what follows in the search string.
-			if ( 0 !== substr_compare( $search_text, $next_chunk, $search_at, strlen( $next_chunk ), $loose_case ) ) {
+			$chunk_matches = $loose_case
+				? self::matches_ascii_case_insensitively( $search_text, $next_chunk, $search_at )
+				: 0 === substr_compare( $search_text, $next_chunk, $search_at, strlen( $next_chunk ) );
+			if ( ! $chunk_matches ) {
 				return false;
 			}
 
