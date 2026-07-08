@@ -232,8 +232,8 @@ class WP_HTML_Doctype_Info {
 		 * > The system identifier and public identifier strings must be compared...
 		 * > in an ASCII case-insensitive manner.
 		 */
-		$public_identifier = null === $public_identifier ? '' : strtolower( $public_identifier );
-		$system_identifier = null === $system_identifier ? '' : strtolower( $system_identifier );
+		$public_identifier = null === $public_identifier ? '' : WP_HTML_Decoder::ascii_lowercase( $public_identifier );
+		$system_identifier = null === $system_identifier ? '' : WP_HTML_Decoder::ascii_lowercase( $system_identifier );
 
 		/*
 		 * > The public identifier is set to…
@@ -436,7 +436,7 @@ class WP_HTML_Doctype_Info {
 		 */
 		if (
 			$end < 9 ||
-			0 !== substr_compare( $doctype_html, '<!DOCTYPE', 0, 9, true )
+			! WP_HTML_Decoder::matches_ascii_case_insensitively( $doctype_html, '<!DOCTYPE' )
 		) {
 			return null;
 		}
@@ -489,7 +489,7 @@ class WP_HTML_Doctype_Info {
 		}
 
 		$name_length  = strcspn( $doctype_html, " \t\n\f\r", $at, $end - $at );
-		$doctype_name = str_replace( "\0", "\u{FFFD}", strtolower( substr( $doctype_html, $at, $name_length ) ) );
+		$doctype_name = str_replace( "\0", "\u{FFFD}", WP_HTML_Decoder::ascii_lowercase( substr( $doctype_html, $at, $name_length ) ) );
 
 		$at += $name_length;
 		$at += strspn( $doctype_html, " \t\n\f\r", $at, $end - $at );
@@ -514,7 +514,7 @@ class WP_HTML_Doctype_Info {
 		 * > case-insensitive match for the word "PUBLIC", then consume those characters
 		 * > and switch to the after DOCTYPE public keyword state.
 		 */
-		if ( 0 === substr_compare( $doctype_html, 'PUBLIC', $at, 6, true ) ) {
+		if ( WP_HTML_Decoder::matches_ascii_case_insensitively( $doctype_html, 'PUBLIC', $at ) ) {
 			$at += 6;
 			$at += strspn( $doctype_html, " \t\n\f\r", $at, $end - $at );
 			if ( $at >= $end ) {
@@ -528,7 +528,7 @@ class WP_HTML_Doctype_Info {
 		 * > case-insensitive match for the word "SYSTEM", then consume those characters and switch
 		 * > to the after DOCTYPE system keyword state.
 		 */
-		if ( 0 === substr_compare( $doctype_html, 'SYSTEM', $at, 6, true ) ) {
+		if ( WP_HTML_Decoder::matches_ascii_case_insensitively( $doctype_html, 'SYSTEM', $at ) ) {
 			$at += 6;
 			$at += strspn( $doctype_html, " \t\n\f\r", $at, $end - $at );
 			if ( $at >= $end ) {
