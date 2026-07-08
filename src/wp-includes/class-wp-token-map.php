@@ -452,7 +452,9 @@ class WP_Token_Map {
 			}
 
 			$term    = str_pad( $word, $this->key_length + 1, "\x00", STR_PAD_RIGHT );
-			$word_at = $ignore_case ? stripos( $this->small_words, $term ) : strpos( $this->small_words, $term );
+			$word_at = $ignore_case
+				? strpos( self::ascii_uppercase( $this->small_words ), self::ascii_uppercase( $term ) )
+				: strpos( $this->small_words, $term );
 			if ( false === $word_at ) {
 				return false;
 			}
@@ -461,7 +463,9 @@ class WP_Token_Map {
 		}
 
 		$group_key = substr( $word, 0, $this->key_length );
-		$group_at  = $ignore_case ? stripos( $this->groups, $group_key ) : strpos( $this->groups, $group_key );
+		$group_at  = $ignore_case
+			? strpos( self::ascii_uppercase( $this->groups ), self::ascii_uppercase( $group_key ) )
+			: strpos( $this->groups, $group_key );
 		if ( false === $group_at ) {
 			return false;
 		}
@@ -478,7 +482,12 @@ class WP_Token_Map {
 			$mapping_length = unpack( 'C', $group[ $at++ ] )[1];
 			$mapping_at     = $at;
 
-			if ( $token_length === $length && 0 === substr_compare( $group, $slug, $token_at, $token_length, $ignore_case ) ) {
+			if (
+				$token_length === $length &&
+				( $ignore_case
+					? self::matches_ascii_case_insensitively( $group, $slug, $token_at )
+					: 0 === substr_compare( $group, $slug, $token_at, $token_length ) )
+			) {
 				return true;
 			}
 
@@ -547,7 +556,9 @@ class WP_Token_Map {
 			}
 
 			$group_key = substr( $text, $offset, $this->key_length );
-			$group_at  = $ignore_case ? stripos( $this->groups, $group_key ) : strpos( $this->groups, $group_key );
+			$group_at  = $ignore_case
+				? strpos( self::ascii_uppercase( $this->groups ), self::ascii_uppercase( $group_key ) )
+				: strpos( $this->groups, $group_key );
 			if ( false === $group_at ) {
 				// Perhaps a short word then.
 				return strlen( $this->small_words ) > 0
@@ -565,7 +576,11 @@ class WP_Token_Map {
 				$mapping_length = unpack( 'C', $group[ $at++ ] )[1];
 				$mapping_at     = $at;
 
-				if ( 0 === substr_compare( $text, $token, $offset + $this->key_length, $token_length, $ignore_case ) ) {
+				$token_matches = $ignore_case
+					? self::matches_ascii_case_insensitively( $text, $token, $offset + $this->key_length )
+					: 0 === substr_compare( $text, $token, $offset + $this->key_length, $token_length );
+
+				if ( $token_matches ) {
 					$matched_token_byte_length = $this->key_length + $token_length;
 					return substr( $group, $mapping_at, $mapping_length );
 				}
@@ -597,7 +612,7 @@ class WP_Token_Map {
 		$small_length = strlen( $this->small_words );
 		$search_text  = substr( $text, $offset, $this->key_length );
 		if ( $ignore_case ) {
-			$search_text = strtoupper( $search_text );
+			$search_text = self::ascii_uppercase( $search_text );
 		}
 		$starting_char = $search_text[0];
 
@@ -605,7 +620,7 @@ class WP_Token_Map {
 		while ( $at < $small_length ) {
 			if (
 				$starting_char !== $this->small_words[ $at ] &&
-				( ! $ignore_case || strtoupper( $this->small_words[ $at ] ) !== $starting_char )
+				( ! $ignore_case || self::ascii_uppercase( $this->small_words[ $at ] ) !== $starting_char )
 			) {
 				$at += $this->key_length + 1;
 				continue;
@@ -619,7 +634,7 @@ class WP_Token_Map {
 
 				if (
 					$search_text[ $adjust ] !== $this->small_words[ $at + $adjust ] &&
-					( ! $ignore_case || strtoupper( $this->small_words[ $at + $adjust ] !== $search_text[ $adjust ] ) )
+					( ! $ignore_case || self::ascii_uppercase( $this->small_words[ $at + $adjust ] ) !== $search_text[ $adjust ] )
 				) {
 					$at += $this->key_length + 1;
 					continue 2;
@@ -631,6 +646,76 @@ class WP_Token_Map {
 		}
 
 		return null;
+	}
+
+	/**
+	 * Returns the ASCII uppercase version of a given string.
+	 *
+	 * Only the ASCII lowercase letters a-z are folded onto their uppercase
+	 * counterparts; all other bytes are left unchanged. This differs from
+	 * `strtoupper()`, which before PHP 8.2 folds bytes according to the
+	 * current process locale. Lookup must be locale-independent.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @param string $text Text to fold.
+	 * @return string ASCII-uppercase version of the given text.
+	 */
+	private static function ascii_uppercase( string $text ): string {
+		return strtr( $text, 'abcdefghijklmnopqrstuvwxyz', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' );
+	}
+
+	/**
+	 * Indicates if a span of text matches a given string, ignoring ASCII case.
+	 *
+	 * Matching is performed byte-by-byte and folds only the ASCII letters A-Z
+	 * and a-z onto each other, regardless of the process locale. This differs
+	 * from `substr_compare()` with its case-insensitivity flag, which folds
+	 * bytes according to the current process locale and may treat non-ASCII
+	 * bytes as case variants of each other.
+	 *
+	 * The span begins at the given byte offset into the text and runs for the
+	 * byte length of the search string. A span extending past the end of the
+	 * text never matches.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @param string $text   Text possibly containing the search string.
+	 * @param string $search Search string; its byte length determines the span length.
+	 * @param int    $offset Byte offset into the text where the span begins.
+	 * @return bool Whether the span is an ASCII case-insensitive match for the search string.
+	 */
+	private static function matches_ascii_case_insensitively( string $text, string $search, int $offset ): bool {
+		$length = strlen( $search );
+		if ( $offset < 0 || $offset + $length > strlen( $text ) ) {
+			return false;
+		}
+
+		for ( $at = 0; $at < $length; $at++ ) {
+			$text_byte   = $text[ $offset + $at ];
+			$search_byte = $search[ $at ];
+
+			if ( $text_byte === $search_byte ) {
+				continue;
+			}
+
+			$text_ord   = ord( $text_byte );
+			$search_ord = ord( $search_byte );
+
+			// Fold uppercase ASCII letters onto their lowercase counterparts; no other bytes fold.
+			if ( $text_ord >= 0x41 && $text_ord <= 0x5A ) {
+				$text_ord += 0x20;
+			}
+			if ( $search_ord >= 0x41 && $search_ord <= 0x5A ) {
+				$search_ord += 0x20;
+			}
+
+			if ( $text_ord !== $search_ord ) {
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 	/**
