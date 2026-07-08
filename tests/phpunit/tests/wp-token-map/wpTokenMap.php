@@ -382,6 +382,87 @@ class Tests_WpTokenMap extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Ensures ASCII case-insensitive lookup folds ASCII letters only, regardless of locale.
+	 *
+	 * The byte pair 0xCC/0xEC (Ì/ì in ISO-8859-1) is a case pair in common single-byte
+	 * charmaps: a locale-sensitive comparison would treat the words below as ASCII
+	 * case-insensitive matches for each other.
+	 *
+	 * @ticket 65372
+	 *
+	 * @covers ::contains
+	 * @covers ::read_token
+	 */
+	public function test_ascii_case_insensitive_lookup_folds_ascii_case_only() {
+		// Words longer than the group key length are stored in word groups.
+		$map = WP_Token_Map::from_array( array( "ab\xCC" => 'replacement' ) );
+
+		$this->assertFalse(
+			$map->contains( "ab\xEC", 'ascii-case-insensitive' ),
+			'Should not have found a word differing in non-ASCII bytes.'
+		);
+		$this->assertNull(
+			$map->read_token( "ab\xEC", 0, $token_length, 'ascii-case-insensitive' ),
+			'Should not have read a token differing in non-ASCII bytes.'
+		);
+		$this->assertTrue(
+			$map->contains( "AB\xCC", 'ascii-case-insensitive' ),
+			'Should have found the word with ASCII letters case-folded.'
+		);
+		$this->assertSame(
+			'replacement',
+			$map->read_token( "AB\xCC", 0, $token_length, 'ascii-case-insensitive' ),
+			'Should have read the token with ASCII letters case-folded.'
+		);
+
+		// Words not longer than the group key length are stored as small words.
+		$small_map = WP_Token_Map::from_array( array( "k\xCC" => 'replacement' ) );
+
+		$this->assertFalse(
+			$small_map->contains( "k\xEC", 'ascii-case-insensitive' ),
+			'Should not have found a small word differing in non-ASCII bytes.'
+		);
+		$this->assertNull(
+			$small_map->read_token( "k\xEC", 0, $token_length, 'ascii-case-insensitive' ),
+			'Should not have read a small-word token differing in non-ASCII bytes.'
+		);
+		$this->assertTrue(
+			$small_map->contains( "K\xCC", 'ascii-case-insensitive' ),
+			'Should have found the small word with ASCII letters case-folded.'
+		);
+		$this->assertSame(
+			'replacement',
+			$small_map->read_token( "K\xCC", 0, $token_length, 'ascii-case-insensitive' ),
+			'Should have read the small-word token with ASCII letters case-folded.'
+		);
+	}
+
+	/**
+	 * Ensures that contains() and read_token() agree on ASCII case-insensitive lookups.
+	 *
+	 * Previously, read_token() failed to fold ASCII case beyond the first byte of
+	 * small words, disagreeing with contains() for the same word and map.
+	 *
+	 * @ticket 65372
+	 *
+	 * @covers ::contains
+	 * @covers ::read_token
+	 */
+	public function test_reads_small_word_tokens_ascii_case_insensitively() {
+		$map = WP_Token_Map::from_array( array( 'ab' => 'replacement' ) );
+
+		$this->assertTrue(
+			$map->contains( 'AB', 'ascii-case-insensitive' ),
+			'Should have found the word with ASCII letters case-folded.'
+		);
+		$this->assertSame(
+			'replacement',
+			$map->read_token( 'AB', 0, $token_length, 'ascii-case-insensitive' ),
+			'Should have read the token with ASCII letters case-folded.'
+		);
+	}
+
+	/**
 	 * Returns a static copy of the Token Map for HTML5.
 	 * This is a test performance optimization.
 	 *
