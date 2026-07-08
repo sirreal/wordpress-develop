@@ -49,11 +49,27 @@ class Tests_HtmlApi_WebPlatformTests extends WP_UnitTestCase {
 	const SKIP_HTML_PARSER_CANNOT_HOLD_FORM_OPEN = 'Single-pass parser: a FORM closed while its descendants remain open stays in the document as their ancestor, which the token stream cannot express.';
 
 	/**
+	 * Reason to skip tests in which an A element which is not in table scope
+	 * is removed from the stack of open elements when another A element is
+	 * found.
+	 *
+	 * As with a closed FORM, browsers remove the A from the stack of open
+	 * elements while its still-open descendants — such as the TABLE which
+	 * shields it from table scope — remain in place: the A remains an
+	 * ancestor in the DOM, and content foster-parented out of that TABLE
+	 * lands inside of it. A properly-nested token stream cannot express
+	 * this; this parser reports following content outside of the removed A,
+	 * mirroring the stack of open elements a browser would maintain.
+	 */
+	const SKIP_HTML_PARSER_CANNOT_HOLD_REMOVED_A_OPEN = 'Single-pass parser: an A element removed from the stack of open elements while its descendants remain open stays in the document as their ancestor, which the token stream cannot express.';
+
+	/**
 	 * Skip specific tests that may not be supported or have known issues.
 	 */
 	const SKIP_TESTS = array(
 		'adoption01/line0001'       => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
 		'adoption01/line0014'       => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'adoption01/line0083'       => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
 		'adoption01/line0030'       => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
 		'adoption01/line0062'       => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
 		'adoption01/line0108'       => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
@@ -68,9 +84,11 @@ class Tests_HtmlApi_WebPlatformTests extends WP_UnitTestCase {
 		'menuitem-element/line0161' => 'Unimplemented: This parser does not support customizable SELECT element content.',
 		'noscript01/line0014'       => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
 		'template/line1091'         => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'template/line1595'         => self::SKIP_HTML_PARSER_CANNOT_HOLD_REMOVED_A_OPEN,
 		'tests1/line0237'           => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
 		'tests1/line0256'           => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
 		'tests1/line0355'           => 'Unimplemented: This parser does not support customizable SELECT element content.',
+		'tests1/line0373'           => self::SKIP_HTML_PARSER_CANNOT_HOLD_REMOVED_A_OPEN,
 		'tests1/line0601'           => 'Unimplemented: This parser treats processing instructions as comments.',
 		'tests1/line0602'           => 'Unimplemented: Updated Processing Instruction parsing.',
 		'tests1/line0640'           => 'Unimplemented: This parser treats processing instructions as comments.',
@@ -84,19 +102,27 @@ class Tests_HtmlApi_WebPlatformTests extends WP_UnitTestCase {
 		'tests1/line1061'           => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
 		'tests1/line1086'           => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
 		'tests1/line1111'           => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests1/line1149'           => self::SKIP_HTML_PARSER_CANNOT_HOLD_REMOVED_A_OPEN,
+		'tests1/line1387'           => self::SKIP_HTML_PARSER_CANNOT_HOLD_REMOVED_A_OPEN,
 		'tests1/line1468'           => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
 		'tests1/line1484'           => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
 		'tests1/line1532'           => 'Unimplemented: This parser does not support customizable SELECT element content.',
+		'tests1/line1559'           => self::SKIP_HTML_PARSER_CANNOT_HOLD_REMOVED_A_OPEN,
 		'tests10/line0035'          => 'Unimplemented: This parser does not support customizable SELECT element content.',
 		'tests10/line0046'          => 'Unimplemented: This parser does not support customizable SELECT element content.',
 		'tests10/line0259'          => 'Unimplemented: This parser does not support customizable SELECT element content.',
+		'tests10/line0284'          => 'Unimplemented: This parser does not support customizable SELECT element content.',
 		'tests14/line0022'          => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
 		'tests14/line0055'          => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
 		'tests18/line0227'          => 'Unimplemented: This parser does not support customizable SELECT element content.',
+		'tests18/line0240'          => 'Unimplemented: This parser does not support customizable SELECT element content.',
 		'tests19/line0488'          => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
 		'tests19/line0500'          => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
 		'tests19/line1079'          => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
+		'tests19/line1127'          => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
 		'tests19/line1169'          => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests19/line1198'          => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests19/line1258'          => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
 		'tests2/line0118'           => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
 		'tests2/line0207'           => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
 		'tests2/line0686'           => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
@@ -112,6 +138,7 @@ class Tests_HtmlApi_WebPlatformTests extends WP_UnitTestCase {
 		'tests9/line0048'           => 'Unimplemented: This parser does not support customizable SELECT element content.',
 		'tests9/line0059'           => 'Unimplemented: This parser does not support customizable SELECT element content.',
 		'tests9/line0299'           => 'Unimplemented: This parser does not support customizable SELECT element content.',
+		'tests9/line0324'           => 'Unimplemented: This parser does not support customizable SELECT element content.',
 		'tricky01/line0001'         => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
 		'tricky01/line0019'         => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
 		'tricky01/line0078'         => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
@@ -274,10 +301,95 @@ class Tests_HtmlApi_WebPlatformTests extends WP_UnitTestCase {
 			throw new WP_HTML_Unsupported_Exception( "Could not create a parser with the given fragment context: {$fragment_context}.", '', 0, '', array(), array() );
 		}
 
-		$output       = '';
-		$indent_level = 0;
-		$was_text     = null;
-		$text_node    = '';
+		/*
+		 * The document tree is built from nodes of this shape and serialized
+		 * once the parse completes. A realized tree is required because nodes
+		 * are not always visited in document order: a foster-parented node is
+		 * visited where it was found in the input HTML, after the table
+		 * element which follows it in the document.
+		 */
+		$make_node = static function ( ?string $line ) {
+			return (object) array(
+				// First output line for the node, e.g. "<div>"; `null` for the root and for text nodes.
+				'line'        => $line,
+				// Attribute lines and self-contained text, output one level deeper than the node.
+				'extra_lines' => array(),
+				// Text content for text nodes; `null` for everything else.
+				'text'        => null,
+				// Uppercase tag name and namespace, for locating TABLE and TEMPLATE ancestors.
+				'tag_name'    => null,
+				'namespace'   => null,
+				'children'    => array(),
+			);
+		};
+
+		$root = $make_node( null );
+
+		/*
+		 * Mirrors the stack of open elements as seen through the visited
+		 * tokens: tag openers which expect a closer are pushed, tag closers
+		 * pop. The root node stands in for the document itself.
+		 *
+		 * @var array<int, object> $open_nodes
+		 */
+		$open_nodes = array( $root );
+
+		/*
+		 * Attaches a node to the tree.
+		 *
+		 * Nodes are normally appended to the deepest open element. A
+		 * foster-parented node is placed where a browser would place it,
+		 * repeating the parser's own walk: everything above the nearest open
+		 * TABLE element belongs to the enclosing table context and is
+		 * bypassed; the node is inserted immediately before that TABLE.
+		 * When a TEMPLATE is found first, the node is appended inside its
+		 * template contents instead.
+		 *
+		 * Text is merged into an immediately-preceding text node at the
+		 * insertion location, as character insertion into a document does.
+		 */
+		$attach = static function ( $node ) use ( &$open_nodes, $processor ) {
+			$parent          = end( $open_nodes );
+			$insertion_index = null;
+
+			if ( $processor->is_foster_parented() ) {
+				for ( $i = count( $open_nodes ) - 1; $i > 0; $i-- ) {
+					$open = $open_nodes[ $i ];
+					if ( 'html' !== $open->namespace ) {
+						continue;
+					}
+
+					if ( 'TEMPLATE' === $open->tag_name ) {
+						$parent = $open;
+						break;
+					}
+
+					if ( 'TABLE' === $open->tag_name ) {
+						$parent          = $open_nodes[ $i - 1 ];
+						$insertion_index = array_search( $open, $parent->children, true );
+						if ( false === $insertion_index ) {
+							throw new Error( 'Could not find the TABLE element before which a foster-parented node must be inserted.' );
+						}
+						break;
+					}
+				}
+			}
+
+			if ( null === $insertion_index ) {
+				$insertion_index = count( $parent->children );
+			}
+
+			if (
+				isset( $node->text ) &&
+				$insertion_index > 0 &&
+				isset( $parent->children[ $insertion_index - 1 ]->text )
+			) {
+				$parent->children[ $insertion_index - 1 ]->text .= $node->text;
+				return;
+			}
+
+			array_splice( $parent->children, $insertion_index, 0, array( $node ) );
+		};
 
 		while ( $processor->next_token() ) {
 			if ( null !== $processor->get_last_error() ) {
@@ -288,22 +400,15 @@ class Tests_HtmlApi_WebPlatformTests extends WP_UnitTestCase {
 			$token_type = $processor->get_token_type();
 			$is_closer  = $processor->is_tag_closer();
 
-			if ( $was_text && '#text' !== $token_name ) {
-				if ( '' !== $text_node ) {
-					$output .= "{$text_node}\"\n";
-				}
-				$was_text  = false;
-				$text_node = '';
-			}
-
 			switch ( $token_type ) {
 				case '#doctype':
-					$doctype = $processor->get_doctype_info();
-					$output .= "<!DOCTYPE {$doctype->name}";
+					$doctype      = $processor->get_doctype_info();
+					$doctype_line = "<!DOCTYPE {$doctype->name}";
 					if ( null !== $doctype->public_identifier || null !== $doctype->system_identifier ) {
-						$output .= " \"{$doctype->public_identifier}\" \"{$doctype->system_identifier}\"";
+						$doctype_line .= " \"{$doctype->public_identifier}\" \"{$doctype->system_identifier}\"";
 					}
-					$output .= ">\n";
+					$doctype_line .= '>';
+					$attach( $make_node( $doctype_line ) );
 					break;
 
 				case '#tag':
@@ -313,22 +418,13 @@ class Tests_HtmlApi_WebPlatformTests extends WP_UnitTestCase {
 						: "{$namespace} {$processor->get_qualified_tag_name()}";
 
 					if ( $is_closer ) {
-						--$indent_level;
-
-						if ( 'html' === $namespace && 'TEMPLATE' === $token_name ) {
-							--$indent_level;
-						}
-
+						array_pop( $open_nodes );
 						break;
 					}
 
-					$tag_indent = $indent_level;
-
-					if ( $processor->expects_closer() ) {
-						++$indent_level;
-					}
-
-					$output .= str_repeat( self::TREE_INDENT, $tag_indent ) . "<{$tag_name}>\n";
+					$node            = $make_node( "<{$tag_name}>" );
+					$node->tag_name  = $token_name;
+					$node->namespace = $namespace;
 
 					$attribute_names = $processor->get_attribute_names_with_prefix( '' );
 					if ( $attribute_names ) {
@@ -381,21 +477,21 @@ class Tests_HtmlApi_WebPlatformTests extends WP_UnitTestCase {
 							if ( true === $val ) {
 								$val = '';
 							}
-							$output .= str_repeat( self::TREE_INDENT, $tag_indent + 1 ) . "{$display_name}=\"{$val}\"\n";
+							$node->extra_lines[] = "{$display_name}=\"{$val}\"";
 						}
 					}
 
 					// Self-contained tags contain their inner contents as modifiable text.
 					$modifiable_text = $processor->get_modifiable_text();
 					if ( '' !== $modifiable_text ) {
-						$output .= str_repeat( self::TREE_INDENT, $tag_indent + 1 ) . "\"{$modifiable_text}\"\n";
+						$node->extra_lines[] = "\"{$modifiable_text}\"";
 					}
 
-					if ( 'html' === $namespace && 'TEMPLATE' === $token_name ) {
-						$output .= str_repeat( self::TREE_INDENT, $indent_level ) . "content\n";
-						++$indent_level;
-					}
+					$attach( $node );
 
+					if ( $processor->expects_closer() ) {
+						$open_nodes[] = $node;
+					}
 					break;
 
 				case '#cdata-section':
@@ -404,21 +500,19 @@ class Tests_HtmlApi_WebPlatformTests extends WP_UnitTestCase {
 					if ( '' === $text_content ) {
 						break;
 					}
-					$was_text = true;
-					if ( '' === $text_node ) {
-						$text_node .= str_repeat( self::TREE_INDENT, $indent_level ) . '"';
-					}
-					$text_node .= $text_content;
+					$text_node       = $make_node( null );
+					$text_node->text = $text_content;
+					$attach( $text_node );
 					break;
 
 				case '#funky-comment':
 					// Comments must be "<" then "!-- " then the data then " -->".
-					$output .= str_repeat( self::TREE_INDENT, $indent_level ) . "<!-- {$processor->get_modifiable_text()} -->\n";
+					$attach( $make_node( "<!-- {$processor->get_modifiable_text()} -->" ) );
 					break;
 
 				case '#comment':
 					// Comments must be "<" then "!-- " then the data then " -->".
-					$output .= str_repeat( self::TREE_INDENT, $indent_level ) . "<!-- {$processor->get_full_comment_text()} -->\n";
+					$attach( $make_node( "<!-- {$processor->get_full_comment_text()} -->" ) );
 					break;
 
 				default:
@@ -439,12 +533,36 @@ class Tests_HtmlApi_WebPlatformTests extends WP_UnitTestCase {
 			throw new WP_HTML_Unsupported_Exception( 'Paused at incomplete token.', '', 0, '', array(), array() );
 		}
 
-		if ( '' !== $text_node ) {
-			$output .= "{$text_node}\"\n";
-		}
+		$render = static function ( $node, int $depth ) use ( &$render ): string {
+			if ( isset( $node->text ) ) {
+				return str_repeat( self::TREE_INDENT, $depth ) . "\"{$node->text}\"\n";
+			}
+
+			$output      = '';
+			$child_depth = $depth;
+			if ( isset( $node->line ) ) {
+				$output     .= str_repeat( self::TREE_INDENT, $depth ) . "{$node->line}\n";
+				$child_depth = $depth + 1;
+				foreach ( $node->extra_lines as $extra_line ) {
+					$output .= str_repeat( self::TREE_INDENT, $depth + 1 ) . "{$extra_line}\n";
+				}
+			}
+
+			// A TEMPLATE element holds its children inside its template contents.
+			if ( 'TEMPLATE' === $node->tag_name && 'html' === $node->namespace ) {
+				$output .= str_repeat( self::TREE_INDENT, $child_depth ) . "content\n";
+				++$child_depth;
+			}
+
+			foreach ( $node->children as $child ) {
+				$output .= $render( $child, $child_depth );
+			}
+
+			return $output;
+		};
 
 		// Tests always end with a trailing newline.
-		return $output . "\n";
+		return $render( $root, 0 ) . "\n";
 	}
 
 	/**

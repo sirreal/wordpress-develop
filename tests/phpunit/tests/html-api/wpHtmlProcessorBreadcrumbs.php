@@ -195,9 +195,9 @@ class Tests_HtmlApi_WpHtmlProcessorBreadcrumbs extends WP_UnitTestCase {
 	 */
 	public static function data_unsupported_markup() {
 		return array(
-			'Foster parenting of A inside TABLE' => array(
-				'<table supported><a unsupported>Fostered</a></table>',
-				'Fostered content requires moving nodes before the TABLE, which is not supported.',
+			'PLAINTEXT element' => array(
+				'<div supported><plaintext unsupported>',
+				'PLAINTEXT elements swallow the remainder of the document, which is not supported.',
 			),
 		);
 	}

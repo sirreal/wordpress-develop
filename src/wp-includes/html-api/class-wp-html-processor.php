@@ -101,7 +101,6 @@
  *
  *  - PLAINTEXT elements.
  *  - FRAMESET documents.
- *  - Non-table content found inside a TABLE element, which requires foster parenting.
  *  - Content found after closing the BODY or HTML elements which reopens them.
  *  - META tags which change the document encoding, when parsing a full document.
  *
@@ -122,6 +121,12 @@
  *    algorithm. Formatting elements reopened by the parser appear as "virtual" nodes:
  *    they report the attributes of the tag which opened the original element, but
  *    cannot be modified.
+ *  - Non-table content found inside a TABLE element, e.g. `<table>lost<td>found`,
+ *    which is inserted at a location in the document before the table ("foster
+ *    parenting"). Foster-parented nodes are visited where they were found in the
+ *    input HTML — after the table element they precede in the document — and their
+ *    breadcrumbs report their document ancestry; see
+ *    {@see WP_HTML_Processor::is_foster_parented}.
  *
  * ### Unsupported Features
  *
@@ -137,9 +142,10 @@
  * each node once, nodes which have already been visited cannot move: when adoption
  * relocates such nodes, they are reported where they were originally found, while
  * every node visited afterwards is reported with the path a browser would report
- * for it. Fostering, which moves content found inside a TABLE to a location before
- * the table, is not supported, and this parser will bail when non-table content
- * is found inside a TABLE element.
+ * for it. Fostered nodes are new nodes and are always reported with the document
+ * ancestry a browser would report; they are visited where they were found in the
+ * input HTML, however, which is after the table element they precede in the
+ * document.
  *
  * @since 6.4.0
  *
@@ -242,6 +248,23 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @var string[]
 	 */
 	private $breadcrumbs = array();
+
+	/**
+	 * Stores the breadcrumb segments hidden by open foster-parented nodes,
+	 * keyed by the bookmark name of the fostered node.
+	 *
+	 * A foster-parented node's document ancestry bypasses its enclosing
+	 * table context. While such a node is open, the breadcrumbs of the
+	 * bypassed table context are set aside here; when it closes, they are
+	 * restored.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @see WP_HTML_Stack_Event::$foster_bypass_count
+	 *
+	 * @var array<string, string[]>
+	 */
+	private $fostered_breadcrumb_segments = array();
 
 	/**
 	 * Current stack event, if set, representing a matched token.
@@ -464,12 +487,76 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 				 * is reconstructed while processing the opening tag of another "B"
 				 * element, only the push for the latter is real.
 				 */
-				$is_real               = (
+				$is_real = (
 					isset( $this->state->current_token ) &&
 					$token === $this->state->current_token &&
 					! $this->is_tag_closer()
 				);
-				$this->element_queue[] = new WP_HTML_Stack_Event( $token, WP_HTML_Stack_Event::PUSH, $is_real ? 'real' : 'virtual' );
+
+				$push_event = new WP_HTML_Stack_Event( $token, WP_HTML_Stack_Event::PUSH, $is_real ? 'real' : 'virtual' );
+
+				/*
+				 * A foster-parented node remains above its table context on the
+				 * stack of open elements even though that context is not part of
+				 * its document ancestry. Count how many elements below the node
+				 * its ancestry bypasses: everything above (and including) the
+				 * nearest TABLE below it on the stack, or everything above the
+				 * nearest TEMPLATE when fostered content belongs inside template
+				 * contents instead.
+				 *
+				 * The count is recorded on the push event because the stack may
+				 * change again before the event is visited, e.g. when the
+				 * adoption agency algorithm rearranges the stack.
+				 */
+				if ( $token->is_foster_parented ) {
+					$bypass_count      = 0;
+					$has_foster_parent = false;
+					foreach ( $this->state->stack_of_open_elements->walk_up( $token ) as $node ) {
+						++$bypass_count;
+
+						if ( 'html' !== $node->namespace ) {
+							continue;
+						}
+
+						if ( 'TABLE' === $node->node_name ) {
+							$has_foster_parent = true;
+							break;
+						}
+
+						/*
+						 * > If there is a last template and either there is no last table,
+						 * > or there is one, but last template is lower (more recently added)
+						 * > than last table in the stack of open elements, then: let adjusted
+						 * > insertion location be inside last template's template contents,
+						 * > after its last child (if any) […]
+						 *
+						 * The TEMPLATE element is the fostered node's parent: only the
+						 * elements above it are bypassed.
+						 */
+						if ( 'TEMPLATE' === $node->node_name ) {
+							--$bypass_count;
+							$has_foster_parent = true;
+							break;
+						}
+					}
+
+					if ( ! $has_foster_parent ) {
+						/*
+						 * > If there is no last table, then let adjusted insertion location be
+						 * > inside the first element in the stack of open elements (the html
+						 * > element), after its last child (if any), and abort these steps.
+						 * > (fragment case)
+						 *
+						 * This is only reachable when parsing a fragment whose context is a
+						 * table-section element; no supported fragment context creates one.
+						 */
+						$this->bail( 'Foster parenting without a TABLE on the stack of open elements is not supported.' );
+					}
+
+					$push_event->foster_bypass_count = $bypass_count;
+				}
+
+				$this->element_queue[] = $push_event;
 
 				$this->change_parsing_namespace( $token->integration_node_type ? 'html' : $token->namespace );
 			}
@@ -931,7 +1018,33 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		// Adjust the breadcrumbs for this event.
 		if ( $is_pop ) {
 			array_pop( $this->breadcrumbs );
+
+			/*
+			 * When a foster-parented node closes, restore the breadcrumbs of
+			 * the table context which its document ancestry bypassed.
+			 */
+			$bookmark_name = $this->current_element->token->bookmark_name;
+			if (
+				$this->current_element->token->is_foster_parented &&
+				isset( $this->fostered_breadcrumb_segments[ $bookmark_name ] )
+			) {
+				$this->breadcrumbs = array_merge( $this->breadcrumbs, $this->fostered_breadcrumb_segments[ $bookmark_name ] );
+				unset( $this->fostered_breadcrumb_segments[ $bookmark_name ] );
+			}
 		} else {
+			/*
+			 * A foster-parented node is inserted at a location before the
+			 * table whose context it was found in: set aside the breadcrumbs
+			 * of the bypassed table context while the node is open so that
+			 * its breadcrumbs report its document ancestry.
+			 */
+			$foster_bypass_count = $this->current_element->foster_bypass_count;
+			if ( isset( $foster_bypass_count ) && $foster_bypass_count > 0 ) {
+				$hidden_segment = array_splice( $this->breadcrumbs, -$foster_bypass_count );
+
+				$this->fostered_breadcrumb_segments[ $this->current_element->token->bookmark_name ] = $hidden_segment;
+			}
+
 			$this->breadcrumbs[] = $this->current_element->token->node_name;
 		}
 
@@ -979,6 +1092,45 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			isset( $this->current_element->provenance ) &&
 			'virtual' === $this->current_element->provenance
 		);
+	}
+
+	/**
+	 * Indicates if the currently-matched node was inserted via foster parenting.
+	 *
+	 * When content appears inside a table context where it isn't allowed, e.g.
+	 * a DIV element directly inside a TABLE, the parser inserts that content at
+	 * a location in the document before the table. This is known as "foster
+	 * parenting", and a document must be viewed with care once it's involved:
+	 * this processor visits every node where it was found in the input HTML,
+	 * meaning that a foster-parented node is visited after the table element
+	 * which follows it in the document.
+	 *
+	 * The breadcrumbs of a foster-parented node report its document ancestry,
+	 * which does not contain the table context enclosing it in the input HTML.
+	 *
+	 * Example:
+	 *
+	 *     $processor = WP_HTML_Processor::create_fragment( '<table><td>cell</td></table>misplaced' );
+	 *     $processor->next_token();
+	 *     $processor->get_token_name() === 'TABLE';
+	 *     $processor->is_foster_parented() === false;
+	 *
+	 *     $processor = WP_HTML_Processor::create_fragment( '<table>misplaced<td>cell</td></table>' );
+	 *     $processor->next_token();
+	 *     $processor->get_token_name() === 'TABLE';
+	 *     $processor->next_token();
+	 *     $processor->get_token_name() === '#text';
+	 *     $processor->is_foster_parented() === true;
+	 *     $processor->get_breadcrumbs() === array( 'HTML', 'BODY', '#text' );
+	 *
+	 * @since 7.1.0
+	 *
+	 * @see https://html.spec.whatwg.org/#foster-parenting
+	 *
+	 * @return bool Whether the currently-matched node was foster-parented.
+	 */
+	public function is_foster_parented(): bool {
+		return isset( $this->current_element ) && $this->current_element->token->is_foster_parented;
 	}
 
 	/**
@@ -1100,6 +1252,16 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		if ( null !== $this->last_error ) {
 			return false;
 		}
+
+		/*
+		 * The foster parenting flag only applies while processing the token
+		 * for which the "in table" insertion mode enabled it. Handlers which
+		 * ignore a token step to the next one or reprocess the current token
+		 * in another insertion mode without returning through the "in table"
+		 * handler which set the flag; clearing it here prevents it from
+		 * leaking beyond the token which enabled it.
+		 */
+		$this->state->foster_parenting = false;
 
 		if ( self::REPROCESS_CURRENT_NODE !== $node_to_process ) {
 			/*
@@ -3466,9 +3628,9 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 					/*
 					 * This follows the rules for "in table text" insertion mode.
 					 *
-					 * Whitespace-only text nodes are inserted in-place. Otherwise
-					 * foster parenting is enabled and the nodes would be
-					 * inserted out-of-place.
+					 * Whitespace-only text nodes are inserted in-place; text
+					 * containing other characters is a parse error and is
+					 * foster-parented following the "anything else" rules below.
 					 *
 					 * > If any of the tokens in the pending table character tokens
 					 * > list are character tokens that are not ASCII whitespace,
@@ -3480,15 +3642,26 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 					 * > Otherwise, insert the characters given by the pending table
 					 * > character tokens list.
 					 *
+					 * Because this parser visits text nodes as a single token, the
+					 * pending table character tokens list is approximated by the
+					 * current text token plus a check of the text which directly
+					 * follows it: text is subdivided so that a leading run of
+					 * whitespace (or of NULL bytes) forms its own token, yet a
+					 * browser collects the entire run into the pending list before
+					 * deciding. When any part of the pending run is not whitespace,
+					 * the whole run is foster-parented, including its leading
+					 * whitespace.
+					 *
 					 * @see https://html.spec.whatwg.org/#parsing-main-intabletext
 					 */
-					if ( parent::TEXT_IS_WHITESPACE === $this->text_node_classification ) {
+					if (
+						parent::TEXT_IS_WHITESPACE === $this->text_node_classification &&
+						! $this->pending_table_character_tokens_contain_non_whitespace()
+					) {
 						$this->insert_html_element( $this->state->current_token );
 						return true;
 					}
 
-					// Non-whitespace would trigger fostering, unsupported at this time.
-					$this->bail( 'Foster parenting is not supported.' );
 					break;
 				}
 				break;
@@ -3666,10 +3839,78 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		 * > Parse error. Enable foster parenting, process the token using the rules for the
 		 * > "in body" insertion mode, and then disable foster parenting.
 		 *
+		 * The flag is also cleared on entry to `step()`: "in body" handlers
+		 * which ignore the token advance to the next token, and handlers which
+		 * switch the insertion mode may reprocess the current token in the new
+		 * mode; in both cases processing proceeds without returning here, and
+		 * foster parenting must not apply to those insertions.
+		 *
 		 * @todo Indicate a parse error once it's possible.
 		 */
 		anything_else:
-		$this->bail( 'Foster parenting is not supported.' );
+		$this->state->foster_parenting = true;
+		$step_result                   = $this->step_in_body();
+		$this->state->foster_parenting = false;
+		return $step_result;
+	}
+
+	/**
+	 * Indicates if the text which directly follows the current whitespace-only
+	 * text token, in the same run of text, contains non-whitespace characters.
+	 *
+	 * The "in table text" rules collect an entire run of text into the pending
+	 * table character tokens list before deciding where it belongs: when any of
+	 * it is not whitespace, all of it is foster-parented, including a leading
+	 * run of whitespace. This parser subdivides a run of text so that leading
+	 * whitespace forms its own token, so when handling a whitespace-only text
+	 * token in a table context it must look ahead to the rest of the run to
+	 * make the same decision a browser would make for the entire run.
+	 *
+	 * NULL bytes are skipped because the "in table text" rules drop them from
+	 * the pending table character tokens list; character references which
+	 * decode to whitespace are treated as whitespace. The scan stops at "<"
+	 * without examining whether it opens a tag: in the rare case that it
+	 * doesn't, e.g. `<table> < b`, the leading whitespace is kept inside the
+	 * table context while a browser would have foster-parented it.
+	 *
+	 * This must only be called when the current token is a whitespace-only
+	 * text token: only then does the parser's position point at the rest of
+	 * the text run.
+	 *
+	 * @since 7.1.0
+	 * @ignore
+	 *
+	 * @see https://html.spec.whatwg.org/#parsing-main-intabletext
+	 *
+	 * @return bool Whether non-whitespace text directly follows the current
+	 *              whitespace-only text token in the same run of text.
+	 */
+	private function pending_table_character_tokens_contain_non_whitespace(): bool {
+		$html          = $this->html;
+		$current_token = $this->bookmarks[ $this->state->current_token->bookmark_name ];
+		$at            = $current_token->start + $current_token->length;
+		$end           = strlen( $html );
+
+		while ( $at < $end ) {
+			$at += strspn( $html, " \t\f\r\n\x00", $at, $end - $at );
+
+			if ( $at >= $end || '<' === $html[ $at ] ) {
+				return false;
+			}
+
+			if ( '&' === $html[ $at ] ) {
+				$matched_byte_length = null;
+				$replacement         = WP_HTML_Decoder::read_character_reference( 'data', $html, $at, $matched_byte_length );
+				if ( isset( $replacement ) && 1 === strspn( $replacement, " \t\f\r\n" ) ) {
+					$at += $matched_byte_length;
+					continue;
+				}
+			}
+
+			return true;
+		}
+
+		return false;
 	}
 
 	/**
@@ -5881,12 +6122,14 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			 * would appear on a subsequent call to `next_token()`.
 			 */
 			$this->state->frameset_ok                       = true;
+			$this->state->foster_parenting                  = false;
 			$this->state->stack_of_template_insertion_modes = array();
 			$this->state->head_element                      = null;
 			$this->state->form_element                      = null;
 			$this->state->current_token                     = null;
 			$this->current_element                          = null;
 			$this->element_queue                            = array();
+			$this->fostered_breadcrumb_segments             = array();
 
 			/*
 			 * The absence of a context node indicates a full parse.
@@ -6615,9 +6858,11 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			 * > Let common ancestor be the element immediately above formatting element in the stack
 			 * > of open elements.
 			 *
-			 * The common ancestor is only used as a target when re-parenting nodes which have already
-			 * been visited; since this processor cannot re-parent visited nodes, it goes unused here.
+			 * The common ancestor is the target when re-parenting the node this algorithm leaves
+			 * behind as the last node; it determines whether that placement is redirected by
+			 * foster parenting.
 			 */
+			$common_ancestor = $working_stack[ $formatting_element_index - 1 ] ?? null;
 
 			// > Let a bookmark note the position of formatting element in the list of active formatting elements.
 			$bookmark = $afe->position_of( $formatting_element );
@@ -6704,9 +6949,19 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			 * > Insert whatever last node ended up being in the previous step at the appropriate place
 			 * > for inserting a node, but using common ancestor as the override target.
 			 *
-			 * As above, this re-parents a node which has already been visited and has no effect on
-			 * the parse of the remaining document.
+			 * As above, this re-parents a node which has already been visited: where it moved from
+			 * doesn't affect the parse of the remaining document. Where it moved to can: when the
+			 * placement is redirected by foster parenting, last node remains an open element whose
+			 * document ancestry bypasses its enclosing table context, and the content which follows
+			 * inside of it must report the ancestor chain a browser would report.
 			 */
+			if (
+				$this->state->foster_parenting &&
+				isset( $common_ancestor ) &&
+				$this->is_foster_parenting_target( $common_ancestor )
+			) {
+				$last_node->is_foster_parented = true;
+			}
 
 			/*
 			 * > Create an element for the token for which formatting element was created, in the HTML
@@ -6786,14 +7041,63 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * Inserts an HTML element on the stack of open elements.
 	 *
 	 * @since 6.4.0
+	 * @since 7.1.0 Marks the token as foster-parented when it's inserted at
+	 *              the appropriate place for inserting a node and the foster
+	 *              parenting flag redirects the insertion location.
 	 * @ignore
 	 *
 	 * @see https://html.spec.whatwg.org/#insert-a-foreign-element
+	 * @see https://html.spec.whatwg.org/#appropriate-place-for-inserting-a-node
 	 *
 	 * @param WP_HTML_Token $token Name of bookmark pointing to element in original input HTML.
 	 */
 	private function insert_html_element( WP_HTML_Token $token ): void {
+		/*
+		 * > If foster parenting is enabled and target is a table, tbody, tfoot,
+		 * > thead, or tr element […] let adjusted insertion location be inside
+		 * > last table's parent node, immediately before last table […]
+		 *
+		 * The node is marked before it's pushed so that the push handler can
+		 * record how much of the stack of open elements its document ancestry
+		 * bypasses.
+		 */
+		if ( $this->state->foster_parenting ) {
+			$target = $this->state->stack_of_open_elements->current_node();
+			if ( isset( $target ) && $this->is_foster_parenting_target( $target ) ) {
+				$token->is_foster_parented = true;
+			}
+		}
+
 		$this->state->stack_of_open_elements->push( $token );
+	}
+
+	/**
+	 * Indicates if inserting a node with the given element as its target would
+	 * be redirected to a location before the table, were the foster parenting
+	 * flag enabled.
+	 *
+	 * > If foster parenting is enabled and target is a table, tbody, tfoot,
+	 * > thead, or tr element […]
+	 *
+	 * @since 7.1.0
+	 * @ignore
+	 *
+	 * @see https://html.spec.whatwg.org/#appropriate-place-for-inserting-a-node
+	 *
+	 * @param WP_HTML_Token $target Target element of a node insertion.
+	 * @return bool Whether foster parenting would redirect the insertion.
+	 */
+	private function is_foster_parenting_target( WP_HTML_Token $target ): bool {
+		return (
+			'html' === $target->namespace &&
+			(
+				'TABLE' === $target->node_name ||
+				'TBODY' === $target->node_name ||
+				'TFOOT' === $target->node_name ||
+				'THEAD' === $target->node_name ||
+				'TR' === $target->node_name
+			)
+		);
 	}
 
 	/**
