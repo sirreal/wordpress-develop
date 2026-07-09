@@ -121,8 +121,13 @@ class Tests_HtmlApi_Html5lib extends WP_UnitTestCase {
 	 * @param string|null $fragment_context Context element in which to parse HTML, such as BODY or SVG.
 	 * @param string      $html             Given test HTML.
 	 * @param string      $expected_tree    Tree structure of parsed HTML.
+	 * @param string|null $skip_reason      Reason to skip this test, if it is a known divergence.
 	 */
-	public function test_parse( ?string $fragment_context, string $html, string $expected_tree ) {
+	public function test_parse( ?string $fragment_context, string $html, string $expected_tree, ?string $skip_reason = null ) {
+		if ( null !== $skip_reason ) {
+			$this->markTestSkipped( $skip_reason );
+		}
+
 		try {
 			$processed_tree = self::build_tree_representation( $fragment_context, $html );
 		} catch ( WP_HTML_Unsupported_Exception $e ) {
@@ -189,34 +194,17 @@ class Tests_HtmlApi_Html5lib extends WP_UnitTestCase {
 
 				$test_context_element = $test[1];
 
-				if ( self::should_skip_test( $test_context_element, $test_name ) ) {
+				if ( null !== $test_context_element && 'body' !== $test_context_element ) {
 					continue;
 				}
 
-				yield $test_name => array_slice( $test, 1 );
+				yield $test_name => array_merge(
+					array_slice( $test, 1 ),
+					array( self::SKIP_TESTS[ $test_name ] ?? null )
+				);
 			}
 		}
 		closedir( $handle );
-	}
-
-	/**
-	 * Determines whether a test case should be skipped.
-	 *
-	 * @param string|null $test_context_element Context element for fragment parsing, or null for full document parsing.
-	 * @param string      $test_name            Test name.
-	 *
-	 * @return bool True if the test case should be skipped. False otherwise.
-	 */
-	private static function should_skip_test( ?string $test_context_element, string $test_name ): bool {
-		if ( null !== $test_context_element && 'body' !== $test_context_element ) {
-			return true;
-		}
-
-		if ( array_key_exists( $test_name, self::SKIP_TESTS ) ) {
-			return true;
-		}
-
-		return false;
 	}
 
 	/**
