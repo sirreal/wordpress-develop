@@ -15,6 +15,25 @@
  */
 class Tests_HtmlApi_WpHtmlProcessor_Serialize extends WP_UnitTestCase {
 	/**
+	 * Whether the current test has suppressed wp_trigger_error().
+	 *
+	 * @var bool
+	 */
+	private $suppressed_wp_trigger_error = false;
+
+	/**
+	 * Cleans up temporary filters.
+	 */
+	public function tear_down() {
+		if ( $this->suppressed_wp_trigger_error ) {
+			remove_filter( 'wp_trigger_error_trigger_error', '__return_false' );
+			$this->suppressed_wp_trigger_error = false;
+		}
+
+		parent::tear_down();
+	}
+
+	/**
 	 * Ensures that basic text is properly encoded when serialized.
 	 *
 	 * @ticket 62036
@@ -525,6 +544,24 @@ class Tests_HtmlApi_WpHtmlProcessor_Serialize extends WP_UnitTestCase {
 		// Use assertSame() instead of assertEmpty() so PHPUnit shows captured error messages on failure.
 		$this->assertSame( array(), $errors );
 		$this->assertSame( $expected, $normalized, 'Should have normalized the input.' );
+	}
+
+	/**
+	 * Ensures that adoption-agency inputs requiring re-parenting of already-
+	 * visited nodes are not serialized into a non-equivalent token stream.
+	 *
+	 * @ticket 65383
+	 */
+	public function test_normalize_returns_null_when_adoption_agency_reparents_visited_nodes() {
+		add_filter( 'wp_trigger_error_trigger_error', '__return_false' );
+		$this->suppressed_wp_trigger_error = true;
+
+		$normalized = WP_HTML_Processor::normalize( '<b>1<p>2</b>3' );
+
+		remove_filter( 'wp_trigger_error_trigger_error', '__return_false' );
+		$this->suppressed_wp_trigger_error = false;
+
+		$this->assertNull( $normalized, 'Should not serialize adoption output that cannot represent the browser DOM.' );
 	}
 
 	/**

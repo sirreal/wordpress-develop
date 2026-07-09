@@ -119,9 +119,9 @@
  *  - SCRIPT content which has been escaped, e.g. `<script><!-- document.write('<script>console.log("hi")</script>') --></script>`.
  *  - Misnested formatting elements, e.g. `<b>bold <i>both</b> italic</i>`, including
  *    reconstruction of implicitly-closed formatting elements and the adoption agency
- *    algorithm. Formatting elements reopened by the parser appear as "virtual" nodes:
- *    they report the attributes of the tag which opened the original element, but
- *    cannot be modified.
+ *    algorithm. Formatting elements reopened by the parser appear as "virtual"
+ *    nodes: their opener events report the attributes of the tag which opened
+ *    the original element, but cannot be modified.
  *
  * ### Unsupported Features
  *
@@ -137,9 +137,12 @@
  * each node once, nodes which have already been visited cannot move: when adoption
  * relocates such nodes, they are reported where they were originally found, while
  * every node visited afterwards is reported with the path a browser would report
- * for it. Fostering, which moves content found inside a TABLE to a location before
- * the table, is not supported, and this parser will bail when non-table content
- * is found inside a TABLE element.
+ * for it. When a FORM end tag is processed while its descendants remain open, the
+ * HTML Processor reports following content outside the FORM because the FORM has
+ * left the stack of open elements; browsers keep the closed FORM as those nodes'
+ * ancestor in the DOM. Fostering, which moves content found inside a TABLE to a
+ * location before the table, is not supported, and this parser will bail when
+ * non-table content is found inside a TABLE element.
  *
  * @since 6.4.0
  *
@@ -210,6 +213,16 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @var WP_HTML_Unsupported_Exception|null
 	 */
 	private $unsupported_exception = null;
+
+	/**
+	 * Whether parsing has produced an event stream that cannot be serialized
+	 * into browser-equivalent HTML.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @var bool
+	 */
+	private $has_unserializable_reparenting = false;
 
 	/**
 	 * Releases a bookmark when PHP garbage-collects its wrapping WP_HTML_Token instance.
@@ -307,6 +320,16 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @var string|null
 	 */
 	private $virtual_node_attribute_reader_bookmark = null;
+
+	/**
+	 * Source HTML used to create the virtual-node attribute reader, indicating
+	 * when the reader must be re-created.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @var string|null
+	 */
+	private $virtual_node_attribute_reader_html = null;
 
 	/*
 	 * Public Interface Functions
@@ -1418,6 +1441,15 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			wp_trigger_error(
 				__METHOD__,
 				"Cannot serialize HTML Processor with parsing error: {$this->get_last_error()}.",
+				E_USER_WARNING
+			);
+			return null;
+		}
+
+		if ( $this->has_unserializable_reparenting ) {
+			wp_trigger_error(
+				__METHOD__,
+				'Cannot serialize HTML Processor output when parser algorithms re-parent already-visited nodes.',
 				E_USER_WARNING
 			);
 			return null;
@@ -5515,6 +5547,8 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 *     $p->get_attribute( 'class' ) === null;
 	 *
 	 * @since 6.6.0 Subclassed for HTML Processor.
+	 * @since 7.1.0 Reports attributes for reconstructed formatting element openers,
+	 *              which contain the attributes of their source tag.
 	 *
 	 * @param string $name Name of attribute whose value is requested.
 	 * @return string|true|null Value of attribute or `null` if not available. Boolean attributes return `true`.
@@ -5536,29 +5570,32 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * HTML, HEAD, or BODY tags, do not refer to any tag in the input HTML and
 	 * have no attributes: for these, no reader exists.
 	 *
-	 * Nodes created by active format reconstruction or by the adoption agency
-	 * algorithm, however, are created for the tokens of tags in the input HTML
-	 * and share their attributes: reading such a node's attributes reads the
-	 * attributes of its source tag.
+	 * Virtual opener nodes created by active format reconstruction or by the
+	 * adoption agency algorithm, however, are created for the tokens of tags in
+	 * the input HTML and share their attributes: reading such a node's attributes
+	 * reads the attributes of its source tag. Their virtual closers have no
+	 * attributes, like real HTML tag closers.
 	 *
 	 * @since 7.1.0
 	 *
 	 * @return WP_HTML_Tag_Processor|null Reader stopped at the source tag, if one exists.
 	 */
 	private function get_virtual_node_attribute_reader(): ?WP_HTML_Tag_Processor {
-		$token = $this->current_element->token;
-
-		if ( ! isset( $token->bookmark_name, $this->bookmarks[ $token->bookmark_name ] ) ) {
+		if ( WP_HTML_Stack_Event::POP === $this->current_element->operation ) {
 			return null;
 		}
 
-		$span = $this->bookmarks[ $token->bookmark_name ];
-		if ( 0 === $span->length ) {
+		$token       = $this->current_element->token;
+		$source_html = $this->get_token_source_html( $token );
+		if ( null === $source_html || '' === $source_html ) {
 			return null;
 		}
 
-		if ( $token->bookmark_name !== $this->virtual_node_attribute_reader_bookmark ) {
-			$reader              = new WP_HTML_Tag_Processor( substr( $this->html, $span->start, $span->length ) );
+		if (
+			$token->bookmark_name !== $this->virtual_node_attribute_reader_bookmark ||
+			$source_html !== $this->virtual_node_attribute_reader_html
+		) {
+			$reader              = new WP_HTML_Tag_Processor( $source_html );
 			$reader->compat_mode = $this->compat_mode;
 			$reader->change_parsing_namespace( $token->namespace );
 			if ( ! $reader->next_token() ) {
@@ -5567,6 +5604,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 
 			$this->virtual_node_attribute_reader          = $reader;
 			$this->virtual_node_attribute_reader_bookmark = $token->bookmark_name;
+			$this->virtual_node_attribute_reader_html     = $source_html;
 		}
 
 		return $this->virtual_node_attribute_reader;
@@ -5640,6 +5678,8 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 *     $p->get_attribute_names_with_prefix( 'data-' ) === null;
 	 *
 	 * @since 6.6.0 Subclassed for the HTML Processor.
+	 * @since 7.1.0 Reports attribute names for reconstructed formatting element openers,
+	 *              which contain the attribute names of their source tag.
 	 *
 	 * @see https://html.spec.whatwg.org/multipage/syntax.html#attributes-2:ascii-case-insensitive
 	 *
@@ -5703,7 +5743,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * Returns if a matched tag contains the given ASCII case-insensitive class name.
 	 *
 	 * @since 6.6.0 Subclassed for the HTML Processor.
-	 * @since 7.1.0 Reports class names for reconstructed formatting elements,
+	 * @since 7.1.0 Reports class names for reconstructed formatting element openers,
 	 *              which contain the class names of their source tag.
 	 *
 	 * @param string $wanted_class Look for this CSS class name, ASCII case-insensitive.
@@ -5715,7 +5755,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		}
 
 		$reader = $this->get_virtual_node_attribute_reader();
-		return null !== $reader ? $reader->has_class( $wanted_class ) : null;
+		return null !== $reader ? $reader->has_class( $wanted_class ) : ( '#tag' === $this->get_token_type() ? false : null );
 	}
 
 	/**
@@ -5733,6 +5773,8 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 *     // Outputs: "free <egg> lang-en "
 	 *
 	 * @since 6.6.0 Subclassed for the HTML Processor.
+	 * @since 7.1.0 Reports class names for reconstructed formatting element openers,
+	 *              which contain the class names of their source tag.
 	 */
 	public function class_list() {
 		if ( ! $this->is_virtual() ) {
@@ -5740,7 +5782,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		}
 
 		$reader = $this->get_virtual_node_attribute_reader();
-		return null !== $reader ? $reader->class_list() : null;
+		return null !== $reader ? $reader->class_list() : new EmptyIterator();
 	}
 
 	/**
@@ -6618,6 +6660,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			 * The common ancestor is only used as a target when re-parenting nodes which have already
 			 * been visited; since this processor cannot re-parent visited nodes, it goes unused here.
 			 */
+			$this->has_unserializable_reparenting = true;
 
 			// > Let a bookmark note the position of formatting element in the list of active formatting elements.
 			$bookmark = $afe->position_of( $formatting_element );
@@ -6886,9 +6929,11 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			? new WP_HTML_Span( $here->start, $here->length )
 			: new WP_HTML_Span( $this->bookmarks[ $this->state->current_token->bookmark_name ]->start, 0 );
 
-		$clone                        = new WP_HTML_Token( $name, $token->node_name, $token->has_self_closing_flag, $this->release_internal_bookmark_on_destruct );
-		$clone->namespace             = $token->namespace;
-		$clone->integration_node_type = $token->integration_node_type;
+		$clone                                 = new WP_HTML_Token( $name, $token->node_name, $token->has_self_closing_flag, $this->release_internal_bookmark_on_destruct );
+		$clone->namespace                      = $token->namespace;
+		$clone->integration_node_type          = $token->integration_node_type;
+		$clone->attribute_comparison_signature = $token->attribute_comparison_signature;
+		$clone->attribute_source_html          = $token->attribute_source_html;
 
 		return $clone;
 	}
@@ -6983,6 +7028,14 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @param WP_HTML_Token $token Push this node onto the list of active formatting elements.
 	 */
 	private function push_onto_active_formatting_elements( WP_HTML_Token $token ): void {
+		if ( null === $token->attribute_source_html ) {
+			$token->attribute_source_html = $this->get_token_source_html( $token );
+		}
+
+		if ( null === $token->attribute_comparison_signature ) {
+			$token->attribute_comparison_signature = $this->get_attribute_comparison_signature( $token );
+		}
+
 		/*
 		 * Find entries which might be equivalent to the pushed element.
 		 * Attributes are only compared once three or more entries share the
@@ -7001,7 +7054,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		}
 
 		if ( count( $candidates ) >= 3 ) {
-			$signature      = $this->get_attribute_comparison_signature( $token );
+			$signature      = $token->attribute_comparison_signature;
 			$earliest_match = null;
 			$match_count    = 0;
 
@@ -7041,21 +7094,25 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @return string Canonical representation of the tag's attribute set.
 	 */
 	private function get_attribute_comparison_signature( WP_HTML_Token $token ): string {
-		if ( $token === $this->state->current_token ) {
-			// The parser is stopped at this tag: read its attributes directly.
-			$reader = $this;
-			$names  = parent::get_attribute_names_with_prefix( '' );
-		} else {
-			$span = isset( $token->bookmark_name ) ? ( $this->bookmarks[ $token->bookmark_name ] ?? null ) : null;
-			if ( null === $span || 0 === $span->length ) {
-				return '';
-			}
+		if ( null !== $token->attribute_comparison_signature ) {
+			return $token->attribute_comparison_signature;
+		}
 
-			$reader = new WP_HTML_Tag_Processor( substr( $this->html, $span->start, $span->length ) );
+		$source_html = $this->get_token_source_html( $token );
+		if ( null !== $source_html && '' !== $source_html ) {
+			$reader              = new WP_HTML_Tag_Processor( $source_html );
+			$reader->compat_mode = $this->compat_mode;
+			$reader->change_parsing_namespace( $token->namespace );
 			if ( ! $reader->next_token() ) {
 				return '';
 			}
 			$names = $reader->get_attribute_names_with_prefix( '' );
+		} elseif ( $token === $this->state->current_token ) {
+			// The parser is stopped at this tag: read its attributes directly.
+			$reader = $this;
+			$names  = parent::get_attribute_names_with_prefix( '' );
+		} else {
+			return '';
 		}
 
 		if ( null === $names || array() === $names ) {
@@ -7066,12 +7123,36 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 
 		$attributes = array();
 		foreach ( $names as $name ) {
-			$attributes[ $name ] = $reader === $this
+			$value = $reader === $this
 				? parent::get_attribute( $name )
 				: $reader->get_attribute( $name );
+
+			$attributes[ $name ] = true === $value ? '' : $value;
 		}
 
 		return serialize( $attributes );
+	}
+
+	/**
+	 * Returns the source HTML for a token's tag, if one exists.
+	 *
+	 * @since 7.1.0
+	 * @ignore
+	 *
+	 * @param WP_HTML_Token $token Token whose source tag HTML is requested.
+	 * @return string|null Source HTML, or null when unavailable.
+	 */
+	private function get_token_source_html( WP_HTML_Token $token ): ?string {
+		if ( null !== $token->attribute_source_html ) {
+			return $token->attribute_source_html;
+		}
+
+		$span = isset( $token->bookmark_name ) ? ( $this->bookmarks[ $token->bookmark_name ] ?? null ) : null;
+		if ( null === $span || 0 === $span->length ) {
+			return null;
+		}
+
+		return substr( $this->html, $span->start, $span->length );
 	}
 
 	/*

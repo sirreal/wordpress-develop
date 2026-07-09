@@ -108,6 +108,52 @@ class Tests_HtmlApi_WpHtmlProcessorActiveFormattingElements extends WP_UnitTestC
 	}
 
 	/**
+	 * Ensures that virtual closers for formatting elements behave like real
+	 * tag closers and do not report the attributes of the source opener.
+	 *
+	 * @ticket 65383
+	 *
+	 * @covers ::get_attribute
+	 * @covers ::get_attribute_names_with_prefix
+	 * @covers ::has_class
+	 * @covers ::class_list
+	 */
+	public function test_virtual_formatting_element_closer_reports_no_attributes() {
+		$processor = WP_HTML_Processor::create_fragment( '<p><b class="bold" data-test="1">inside</p>outside' );
+
+		while ( $processor->next_token() ) {
+			if ( 'B' !== $processor->get_token_name() || ! $processor->is_tag_closer() ) {
+				continue;
+			}
+
+			$this->assertNull(
+				$processor->get_attribute( 'class' ),
+				'Should not have reported attributes for a virtual B closer.'
+			);
+
+			$this->assertNull(
+				$processor->get_attribute_names_with_prefix( '' ),
+				'Should not have listed attribute names for a virtual B closer.'
+			);
+
+			$this->assertFalse(
+				$processor->has_class( 'bold' ),
+				'Should not have reported class names for a virtual B closer.'
+			);
+
+			$this->assertSame(
+				array(),
+				iterator_to_array( $processor->class_list() ),
+				'Should not have listed class names for a virtual B closer.'
+			);
+
+			return;
+		}
+
+		$this->fail( 'Should have found a virtual B closer.' );
+	}
+
+	/**
 	 * Ensures that reconstructed formatting elements cannot be modified.
 	 *
 	 * Reconstructed elements don't exist in the input HTML: there is no tag
@@ -176,6 +222,95 @@ class Tests_HtmlApi_WpHtmlProcessorActiveFormattingElements extends WP_UnitTestC
 			array( 'HTML', 'BODY', 'P', 'B', 'B', 'B', 'B', '#text' ),
 			$processor->get_breadcrumbs(),
 			'Should have reconstructed all four B elements since their attributes differ.'
+		);
+	}
+
+	/**
+	 * Ensures that the "Noah's Ark clause" compares no-value and empty-string
+	 * attribute values as equivalent.
+	 *
+	 * @ticket 65383
+	 *
+	 * @covers ::push_onto_active_formatting_elements
+	 */
+	public function test_noahs_ark_clause_treats_no_value_attributes_as_empty_strings() {
+		$processor = WP_HTML_Processor::create_fragment( '<p><b a><b a=""><b a><b a="">first<p>second' );
+
+		while ( $processor->next_token() && 'second' !== $processor->get_modifiable_text() ) {
+			continue;
+		}
+
+		$this->assertSame(
+			array( 'HTML', 'BODY', 'P', 'B', 'B', 'B', '#text' ),
+			$processor->get_breadcrumbs(),
+			'Should have reconstructed only three of the four equivalent B elements.'
+		);
+	}
+
+	/**
+	 * Ensures that the "Noah's Ark clause" compares attributes as they were
+	 * when the parser created each formatting element, even if the source tag
+	 * is later modified.
+	 *
+	 * @ticket 65383
+	 *
+	 * @covers ::push_onto_active_formatting_elements
+	 */
+	public function test_noahs_ark_clause_uses_attributes_from_element_creation() {
+		$html = '<p><b class=a><b class=a><b class=a><b class=a>first<p>second';
+
+		$processor_with_pending_update = WP_HTML_Processor::create_fragment( $html );
+		$this->assertTrue( $processor_with_pending_update->next_tag( 'B' ), 'Should have found the first B element.' );
+		$this->assertTrue( $processor_with_pending_update->set_attribute( 'class', 'b' ), 'Should have enqueued an attribute update.' );
+
+		while ( $processor_with_pending_update->next_token() && 'second' !== $processor_with_pending_update->get_modifiable_text() ) {
+			continue;
+		}
+
+		$processor_with_flushed_update = WP_HTML_Processor::create_fragment( $html );
+		$this->assertTrue( $processor_with_flushed_update->next_tag( 'B' ), 'Should have found the first B element.' );
+		$this->assertTrue( $processor_with_flushed_update->set_attribute( 'class', 'b' ), 'Should have enqueued an attribute update.' );
+		$processor_with_flushed_update->get_updated_html();
+
+		while ( $processor_with_flushed_update->next_token() && 'second' !== $processor_with_flushed_update->get_modifiable_text() ) {
+			continue;
+		}
+
+		$expected_breadcrumbs = array( 'HTML', 'BODY', 'P', 'B', 'B', 'B', '#text' );
+		$this->assertSame(
+			$expected_breadcrumbs,
+			$processor_with_pending_update->get_breadcrumbs(),
+			'Should have reconstructed only three B elements with the update pending.'
+		);
+
+		$this->assertSame(
+			$expected_breadcrumbs,
+			$processor_with_flushed_update->get_breadcrumbs(),
+			'Should have reconstructed only three B elements after flushing the update.'
+		);
+	}
+
+	/**
+	 * Ensures reconstructed formatting elements continue to report attributes
+	 * as they were when the parser created the element, even if the source tag
+	 * is later modified and flushed.
+	 *
+	 * @ticket 65383
+	 *
+	 * @covers ::get_attribute
+	 */
+	public function test_reconstructed_formatting_element_uses_attributes_from_element_creation() {
+		$processor = WP_HTML_Processor::create_fragment( '<p><b class="before">inside</p>outside' );
+
+		$this->assertTrue( $processor->next_tag( 'B' ), 'Should have found the original B element.' );
+		$this->assertTrue( $processor->set_attribute( 'class', 'after' ), 'Should have enqueued an attribute update.' );
+		$processor->get_updated_html();
+		$this->assertTrue( $processor->next_tag( 'B' ), 'Should have found the reconstructed B element.' );
+
+		$this->assertSame(
+			'before',
+			$processor->get_attribute( 'class' ),
+			'Should have reported the class attribute from when the parser created the formatting element.'
 		);
 	}
 

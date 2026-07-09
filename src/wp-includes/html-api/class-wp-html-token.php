@@ -79,6 +79,28 @@ class WP_HTML_Token {
 	public $integration_node_type = null;
 
 	/**
+	 * Canonical attribute signature captured when adding a formatting element
+	 * to the list of active formatting elements.
+	 *
+	 * This preserves the attributes the parser saw when creating the element,
+	 * even if the underlying source tag is later modified.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @var string|null
+	 */
+	public $attribute_comparison_signature = null;
+
+	/**
+	 * Source HTML for reading attributes from parser-created clone tokens.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @var string|null
+	 */
+	public $attribute_source_html = null;
+
+	/**
 	 * Called when token is garbage-collected or otherwise destroyed.
 	 *
 	 * @var callable|null
