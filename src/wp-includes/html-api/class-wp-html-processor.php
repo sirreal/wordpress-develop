@@ -1524,6 +1524,411 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	}
 
 	/**
+	 * Replaces the inner HTML of the currently-matched element, if possible.
+	 *
+	 * The processor must be paused on the opening tag of an element which can
+	 * contain content: it cannot be paused on a void element (e.g. an IMG
+	 * element), on a self-contained element whose contents require a special
+	 * tokenizer state (e.g. a SCRIPT or TEXTAREA element), or on any token
+	 * which does not appear in the input HTML text (e.g. a TBODY element
+	 * implied by a TR inside a TABLE).
+	 *
+	 * The content is interpreted the same way a browser interprets content
+	 * assigned to the `innerHTML` property: it is parsed as an HTML fragment
+	 * in the context of the matched element, and the document is updated with
+	 * the serialization of the parsed result. The text written into the
+	 * document is therefore a normalized form of the given content: syntax
+	 * which parses to nothing is removed (e.g. `</a>` inside an A element, or
+	 * a `<body>` tag, which parsers ignore), unclosed elements are explicitly
+	 * closed, and text and attribute values may be re-encoded.
+	 *
+	 * Unlike the DOM, whose trees need not correspond to any HTML text, the
+	 * HTML Processor's document is HTML text. There are trees which can be
+	 * created through the DOM whose serialization does not reproduce the same
+	 * tree when parsed again in place. Content is rejected unless the updated
+	 * document parses with the new content fully contained inside the context
+	 * element and with no changes of any kind outside of it.
+	 *
+	 * Rejected content leaves the document unmodified and returns `false`:
+	 *
+	 *  - Content whose elements would implicitly close the context element,
+	 *    e.g. setting `<li>` inside an LI element, or `<a>` inside an A element,
+	 *    because nesting these elements cannot be represented in HTML text.
+	 *  - Content which the HTML Processor cannot parse, e.g. markup requiring
+	 *    foster-parenting, such as setting `text` directly inside a TABLE element.
+	 *  - Content inside a SELECT element other than OPTION, OPTGROUP, and HR
+	 *    elements, text, and comments, because the parsing rules for SELECT
+	 *    elements have recently changed in HTML and differ across parsers.
+	 *
+	 * Example:
+	 *
+	 *     $processor = WP_HTML_Processor::create_fragment( '<div>old</div><p>kept</p>' );
+	 *     $processor->next_tag( 'DIV' );
+	 *     true === $processor->set_inner_html( '<p>one<p>two' );
+	 *     $processor->get_updated_html() === '<div><p>one</p><p>two</p></div><p>kept</p>';
+	 *
+	 *     $processor = WP_HTML_Processor::create_fragment( '<a href="/wp/">WordPress</a>' );
+	 *     $processor->next_tag( 'A' );
+	 *     false === $processor->set_inner_html( '<a>links cannot nest</a>' );
+	 *     $processor->get_updated_html() === '<a href="/wp/">WordPress</a>';
+	 *
+	 * After a successful replacement the processor remains paused on the opening
+	 * tag of the context element; proceeding onward parses the new content.
+	 * Bookmarks pointing to tokens within the replaced content are released.
+	 *
+	 * Verification requires reparsing the document from its beginning both with
+	 * and without the replacement; this is an expensive operation which should
+	 * not be repeated in tight loops.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @param string $html HTML for the new content of the currently-matched element.
+	 * @return bool Whether the content was accepted and the document updated.
+	 */
+	public function set_inner_html( string $html ): bool {
+		if ( null !== $this->last_error ) {
+			return false;
+		}
+
+		/*
+		 * The processor must be paused on the opening tag of an element
+		 * found in the input HTML text which expects a closing tag.
+		 */
+		if (
+			null === $this->current_element ||
+			'#tag' !== $this->get_token_type() ||
+			$this->is_tag_closer() ||
+			$this->is_virtual() ||
+			true !== $this->expects_closer() ||
+			! isset( $this->bookmarks[ $this->current_element->token->bookmark_name ] )
+		) {
+			return false;
+		}
+
+		// Only fragment parsers with a BODY context can be reproduced for verification.
+		if ( null !== $this->context_node && 'BODY' !== $this->context_node->node_name ) {
+			return false;
+		}
+
+		/*
+		 * The HTML Processor still parses SELECT content under rules which
+		 * predate the "customizable select element" changes to HTML. It
+		 * ignores most tags inside a SELECT element, while up-to-date parsers
+		 * allow many of them. Silently applying the outdated rules would drop
+		 * content that browsers preserve, so only tokens treated identically
+		 * under both revisions of HTML are allowed inside a SELECT element.
+		 * Remove this restriction when SELECT parsing is updated.
+		 * See https://core.trac.wordpress.org/ticket/63736.
+		 */
+		$context_in_select = in_array( 'SELECT', $this->get_breadcrumbs(), true );
+		$select_depth      = $context_in_select ? 1 : 0;
+
+		$scan = new WP_HTML_Tag_Processor( $html );
+		while ( $scan->next_token() ) {
+			if ( '#tag' !== $scan->get_token_type() ) {
+				continue;
+			}
+
+			$scanned_tag = $scan->get_token_name();
+
+			if ( $scan->is_tag_closer() ) {
+				if ( 'SELECT' === $scanned_tag ) {
+					// A SELECT containing the context element may not be closed.
+					if ( $context_in_select ) {
+						return false;
+					}
+					if ( $select_depth > 0 ) {
+						--$select_depth;
+					}
+				} elseif (
+					$select_depth > 0 &&
+					! in_array( $scanned_tag, array( 'OPTION', 'OPTGROUP', 'HR' ), true )
+				) {
+					return false;
+				}
+				continue;
+			}
+
+			if ( 'SELECT' === $scanned_tag ) {
+				// A SELECT element may not appear inside another SELECT element.
+				if ( $select_depth > 0 ) {
+					return false;
+				}
+				++$select_depth;
+				continue;
+			}
+
+			if (
+				$select_depth > 0 &&
+				! in_array( $scanned_tag, array( 'OPTION', 'OPTGROUP', 'HR' ), true )
+			) {
+				return false;
+			}
+		}
+
+		/*
+		 * Parse the content as an HTML fragment in the context of the matched
+		 * element, the same interpretation the DOM `innerHTML` setter applies.
+		 * The serialization of the parsed fragment, not the given text, is
+		 * what may be written into the document: this removes syntax which
+		 * every HTML parser ignores (e.g. stray tag closers) and explicitly
+		 * closes unclosed elements.
+		 */
+		$fragment = $this->create_fragment_at_current_node( $html );
+		if ( null === $fragment ) {
+			return false;
+		}
+
+		$new_content = '';
+		while ( $fragment->next_token() ) {
+			$new_content .= $fragment->serialize_token();
+		}
+
+		if ( null !== $fragment->get_last_error() ) {
+			return false;
+		}
+
+		// Apply any pending updates so that the document below is final.
+		$this->get_updated_html();
+
+		$document      = $this->html;
+		$context_token = $this->current_element->token;
+		$context_span  = $this->bookmarks[ $context_token->bookmark_name ];
+		$inner_start   = $context_span->start + $context_span->length;
+
+		/*
+		 * Walk a parser over the existing document to find where the context
+		 * element closes, and record every stack operation which occurs from
+		 * that closing through the end of the document. These operations
+		 * describe the structure of the document outside (after) the context
+		 * element, which the new content must leave fully unmodified.
+		 */
+		$original = $this->create_equivalent_parser( $document );
+		if (
+			null === $original ||
+			! self::advance_to_tag_opener_at( $original, $context_span->start, $context_token->node_name )
+		) {
+			return false;
+		}
+
+		$original_context = $original->current_element->token;
+		$found_closing    = false;
+		while ( $original->next_token() ) {
+			$event = $original->current_element;
+			if ( WP_HTML_Stack_Event::POP === $event->operation && $event->token === $original_context ) {
+				$found_closing = true;
+				break;
+			}
+		}
+
+		if ( ! $found_closing ) {
+			// The document could not be fully parsed: unable to verify the replacement.
+			return false;
+		}
+
+		/*
+		 * The inner content ends where the token responsible for closing the
+		 * context element begins: at its closing tag when explicitly closed,
+		 * at the token which implicitly closed it, or at the end of the
+		 * document when no content closed it.
+		 */
+		$at_end_of_document = (
+			WP_HTML_Tag_Processor::STATE_COMPLETE === $original->parser_state ||
+			WP_HTML_Tag_Processor::STATE_INCOMPLETE_INPUT === $original->parser_state ||
+			null === $original->state->current_token
+		);
+
+		$inner_end = $at_end_of_document
+			? strlen( $document )
+			: $original->bookmarks[ $original->state->current_token->bookmark_name ]->start;
+
+		$expected_events = array( self::stack_event_signature( $original, $inner_end ) );
+		while ( $original->next_token() ) {
+			$expected_events[] = self::stack_event_signature( $original, $inner_end );
+		}
+
+		if ( null !== $original->get_last_error() ) {
+			return false;
+		}
+
+		/*
+		 * Reparse the document with the new content in place. The new content
+		 * must remain fully contained within the context element, and from the
+		 * closing of the context element onward, the document must produce
+		 * exactly the same structure as it did without the replacement.
+		 */
+		$candidate_document = substr( $document, 0, $inner_start ) . $new_content . substr( $document, $inner_end );
+		$candidate_end      = $inner_start + strlen( $new_content );
+
+		$candidate = $this->create_equivalent_parser( $candidate_document );
+		if (
+			null === $candidate ||
+			! self::advance_to_tag_opener_at( $candidate, $context_span->start, $context_token->node_name )
+		) {
+			return false;
+		}
+
+		$candidate_context = $candidate->current_element->token;
+		$context_depth     = $candidate->get_current_depth();
+		$opened_by_content = array();
+		$found_closing     = false;
+		while ( $candidate->next_token() ) {
+			$event = $candidate->current_element;
+
+			if ( WP_HTML_Stack_Event::POP === $event->operation ) {
+				if ( $event->token === $candidate_context ) {
+					$found_closing = true;
+					break;
+				}
+
+				// Only elements opened by the new content may be closed by it.
+				if ( ! isset( $opened_by_content[ spl_object_id( $event->token ) ] ) ) {
+					return false;
+				}
+			} else {
+				// Every element opened before the context element closes must be inside of it.
+				if ( $candidate->get_current_depth() <= $context_depth ) {
+					return false;
+				}
+				$opened_by_content[ spl_object_id( $event->token ) ] = true;
+			}
+		}
+
+		if ( ! $found_closing ) {
+			return false;
+		}
+
+		$expected_count = count( $expected_events );
+		$expected_index = 0;
+		if ( self::stack_event_signature( $candidate, $candidate_end ) !== $expected_events[ $expected_index++ ] ) {
+			return false;
+		}
+
+		while ( $candidate->next_token() ) {
+			if (
+				$expected_index >= $expected_count ||
+				self::stack_event_signature( $candidate, $candidate_end ) !== $expected_events[ $expected_index++ ]
+			) {
+				return false;
+			}
+		}
+
+		if ( $expected_index !== $expected_count || null !== $candidate->get_last_error() ) {
+			return false;
+		}
+
+		/*
+		 * The replacement is proven safe: apply it to the document.
+		 *
+		 * Bookmarks pointing into the replaced content refer to tokens
+		 * which no longer exist and must be released.
+		 */
+		foreach ( $this->bookmarks as $bookmark_name => $bookmark_span ) {
+			if (
+				$bookmark_span->start < $inner_end &&
+				$bookmark_span->start + $bookmark_span->length > $inner_start
+			) {
+				unset( $this->bookmarks[ $bookmark_name ] );
+			}
+		}
+
+		$this->lexical_updates[] = new WP_HTML_Text_Replacement( $inner_start, $inner_end - $inner_start, $new_content );
+		$this->get_updated_html();
+
+		return true;
+	}
+
+	/**
+	 * Creates a new HTML Processor over the given document, constructed in
+	 * the same parsing mode as this processor, for verifying modifications.
+	 *
+	 * The base class is used intentionally so that verification follows
+	 * core HTML semantics even when called from a subclass.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @param string $document Full text of the document to parse.
+	 * @return WP_HTML_Processor|null The created processor if successful, otherwise null.
+	 */
+	private function create_equivalent_parser( string $document ): ?WP_HTML_Processor {
+		return null === $this->context_node
+			? WP_HTML_Processor::create_full_parser( $document )
+			: WP_HTML_Processor::create_fragment( $document );
+	}
+
+	/**
+	 * Advances a processor to the opening tag found at the given byte offset
+	 * in its document.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @param WP_HTML_Processor $walker    Processor to advance.
+	 * @param int               $at        Byte offset into the document where the opening tag starts.
+	 * @param string            $node_name Node name the found tag must have.
+	 * @return bool Whether the processor was paused on the described opening tag.
+	 */
+	private static function advance_to_tag_opener_at( WP_HTML_Processor $walker, int $at, string $node_name ): bool {
+		while ( $walker->next_token() ) {
+			$event = $walker->current_element;
+			if (
+				WP_HTML_Stack_Event::PUSH === $event->operation &&
+				'real' === $event->provenance &&
+				isset( $walker->bookmarks[ $event->token->bookmark_name ] ) &&
+				$walker->bookmarks[ $event->token->bookmark_name ]->start === $at
+			) {
+				return $event->token->node_name === $node_name;
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * Describes the stack operation a processor is currently paused on, in a
+	 * form which can be compared across two parses of related documents.
+	 *
+	 * The signature contains the operation, the node it operates on, where in
+	 * the document it occurred (relative to the given base offset), and the
+	 * resulting path from the root of the document. Two matching parses
+	 * produce equal signature sequences; any structural divergence produces
+	 * a differing signature.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @param WP_HTML_Processor $walker      Processor paused on a stack event.
+	 * @param int               $base_offset Byte offset from which event locations are measured.
+	 * @return array Comparable description of the stack event.
+	 */
+	private static function stack_event_signature( WP_HTML_Processor $walker, int $base_offset ): array {
+		$at_end_of_document = (
+			WP_HTML_Tag_Processor::STATE_COMPLETE === $walker->parser_state ||
+			WP_HTML_Tag_Processor::STATE_INCOMPLETE_INPUT === $walker->parser_state ||
+			null === $walker->state->current_token
+		);
+
+		if ( $at_end_of_document ) {
+			$at     = 'end-of-document';
+			$length = 0;
+		} else {
+			$span   = $walker->bookmarks[ $walker->state->current_token->bookmark_name ];
+			$at     = $span->start - $base_offset;
+			$length = $span->length;
+		}
+
+		$event = $walker->current_element;
+
+		return array(
+			'operation'  => $event->operation,
+			'provenance' => $event->provenance,
+			'node_name'  => $event->token->node_name,
+			'namespace'  => $event->token->namespace,
+			'at'         => $at,
+			'length'     => $length,
+			'path'       => implode( ' > ', $walker->get_breadcrumbs() ),
+		);
+	}
+
+	/**
 	 * Parses next element in the 'initial' insertion mode.
 	 *
 	 * This internal function performs the 'initial' insertion mode
