@@ -389,6 +389,73 @@ class Tests_HtmlApi_WpHtmlDecoder extends WP_UnitTestCase {
 			array( 'http://wordpress.org', 'Http', 'ascii-case-insensitive', true ),
 			array( 'http://wordpress.org', 'https', 'case-sensitive', false ),
 			array( 'http://wordpress.org', 'https', 'ascii-case-insensitive', false ),
+
+			/*
+			 * ASCII case insensitivity must not extend to non-ASCII bytes, no matter
+			 * the process locale. These byte pairs are case variants of each other in
+			 * common single-byte charmaps (0xCC/0xEC are Ì/ì in Latin-1) and serve as
+			 * canaries: they will match if a locale-sensitive comparison sneaks in.
+			 * The same decoded value must produce the same answer whether it appears
+			 * raw or as a character reference ("\xCC\xB8" is U+0338 in UTF-8).
+			 */
+			'Raw non-ASCII byte does not case-fold'      => array( "\xCC\xB8", "\xEC\xB8", 'ascii-case-insensitive', false ),
+			'Encoded non-ASCII byte does not case-fold'  => array( '&#x338;', "\xEC\xB8", 'ascii-case-insensitive', false ),
+			'Encoded non-ASCII matches its exact bytes'  => array( '&#x338;', "\xCC\xB8", 'ascii-case-insensitive', true ),
+			'Encoded non-ASCII exact bytes are sensible' => array( '&#x338;', "\xCC\xB8", 'case-sensitive', true ),
+			'Raw Ä does not loosely match raw ä'         => array( "\xC4", "\xE4", 'ascii-case-insensitive', false ),
+			'Encoded Ä matches its exact UTF-8 bytes'    => array( '&#xC4;', "\xC3\x84", 'ascii-case-insensitive', true ),
+			'Encoded Ä does not loosely match ä bytes'   => array( '&#xC4;', "\xC3\xA4", 'ascii-case-insensitive', false ),
+			'ASCII case folds around encoded spans'      => array( 'J&#x41;VASCRIPT:', 'javascript:', 'ascii-case-insensitive', true ),
+			'Search text ending inside an encoded span'  => array( '&hellip;', "\xE2\x80", 'ascii-case-insensitive', false ),
 		);
+	}
+
+	/**
+	 * Ensures ASCII case-insensitive matching ignores the process locale.
+	 *
+	 * Locale-sensitive case comparisons can treat non-ASCII bytes as case
+	 * variants of each other, e.g. 0xCC/0xEC (Ì/ì in Latin-1). This test
+	 * switches to a locale where the C library folds those bytes and
+	 * asserts that matching remains byte-exact outside of ASCII.
+	 *
+	 * @ticket 65372
+	 */
+	public function test_attribute_starts_with_ignores_process_locale() {
+		$folding_locale = null;
+		foreach ( array( 'de_DE.ISO8859-1', 'de_DE.iso88591', 'de_DE', 'C.UTF-8', 'C.utf8', 'en_US.UTF-8' ) as $locale ) {
+			// Detect a locale whose C-library case folding maps Ä (0xC4) onto ä (0xE4).
+			if ( false !== setlocale( LC_CTYPE, $locale ) && 0 === substr_compare( "\xC4", "\xE4", 0, 1, true ) ) {
+				$folding_locale = $locale;
+				break;
+			}
+		}
+
+		if ( self::$original_lc_ctype ) {
+			setlocale( LC_CTYPE, self::$original_lc_ctype );
+		}
+
+		if ( null === $folding_locale ) {
+			$this->markTestSkipped( 'No locale with non-ASCII case folding is available.' );
+		}
+
+		setlocale( LC_CTYPE, $folding_locale );
+		try {
+			$this->assertFalse(
+				WP_HTML_Decoder::attribute_starts_with( "\xC4hnlich", "\xE4hnlich", 'ascii-case-insensitive' ),
+				'Should not have case-folded a raw non-ASCII byte.'
+			);
+			$this->assertFalse(
+				WP_HTML_Decoder::attribute_starts_with( '&#x338;', "\xEC\xB8", 'ascii-case-insensitive' ),
+				'Should not have case-folded a decoded non-ASCII byte.'
+			);
+			$this->assertTrue(
+				WP_HTML_Decoder::attribute_starts_with( 'J&#x41;VASCRIPT:alert(1)', 'javascript:', 'ascii-case-insensitive' ),
+				'Should have case-folded ASCII letters.'
+			);
+		} finally {
+			if ( self::$original_lc_ctype ) {
+				setlocale( LC_CTYPE, self::$original_lc_ctype );
+			}
+		}
 	}
 }

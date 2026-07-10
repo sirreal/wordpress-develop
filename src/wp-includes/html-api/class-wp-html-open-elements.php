@@ -226,7 +226,12 @@ class WP_HTML_Open_Elements {
 		return (
 			$current_node_name === $identity ||
 			( '#doctype' === $identity && 'html' === $current_node_name ) ||
-			( '#tag' === $identity && ctype_upper( $current_node_name ) )
+			/*
+			 * Elements are identified by their uppercase ASCII names. This check
+			 * avoids `ctype_upper()`, whose classification of bytes outside of
+			 * ASCII depends on the process locale.
+			 */
+			( '#tag' === $identity && strlen( $current_node_name ) === strspn( $current_node_name, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' ) )
 		);
 	}
 

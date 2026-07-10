@@ -837,6 +837,155 @@ class Tests_HtmlApi_WpHtmlProcessor extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Ensures quirks-mode class matching folds ASCII letters only, regardless of locale.
+	 *
+	 * The byte pair 0xCC/0xEC (Ì/ì in ISO-8859-1) is a case pair in common single-byte
+	 * charmaps: a locale-sensitive comparison would treat the class names below as
+	 * ASCII case-insensitive matches for each other.
+	 *
+	 * @ticket 65372
+	 *
+	 * @covers ::has_class
+	 */
+	public function test_has_class_quirks_mode_folds_ascii_case_only() {
+		$processor = WP_HTML_Processor::create_full_parser( "<span class='GR\xCCN'>" );
+		$processor->next_tag( 'SPAN' );
+		$this->assertTrue(
+			$processor->has_class( "gr\xCCn" ),
+			'Should have matched the class name with ASCII letters case-folded.'
+		);
+		$this->assertFalse(
+			$processor->has_class( "gr\xECn" ),
+			'Should not have case-folded non-ASCII bytes in class names.'
+		);
+	}
+
+	/**
+	 * Ensures quirks-mode class updates fold ASCII letters only, regardless of locale.
+	 *
+	 * @ticket 65372
+	 *
+	 * @covers ::add_class
+	 * @covers ::remove_class
+	 */
+	public function test_add_class_quirks_mode_folds_ascii_case_only() {
+		$processor = WP_HTML_Processor::create_full_parser( '<span>' );
+		$processor->next_tag( 'SPAN' );
+		$processor->add_class( "GR\xCCN" );
+		$processor->add_class( "gr\xCCn" );
+		$this->assertSame(
+			"<span class=\"GR\xCCN\">",
+			$processor->get_updated_html(),
+			'Should have deduplicated ASCII case variants of the same class name.'
+		);
+
+		$processor = WP_HTML_Processor::create_full_parser( '<span>' );
+		$processor->next_tag( 'SPAN' );
+		$processor->add_class( "GR\xCCN" );
+		$processor->add_class( "gr\xECn" );
+		$this->assertSame(
+			"<span class=\"GR\xCCN gr\xECn\">",
+			$processor->get_updated_html(),
+			'Should have added both class names: non-ASCII bytes are not case variants.'
+		);
+
+		$processor = WP_HTML_Processor::create_full_parser( '<span>' );
+		$processor->next_tag( 'SPAN' );
+		$processor->add_class( "GR\xCCN" );
+		$processor->remove_class( "gr\xECn" );
+		$this->assertSame(
+			"<span class=\"GR\xCCN\">",
+			$processor->get_updated_html(),
+			'Should not have cancelled a pending class addition differing in non-ASCII bytes.'
+		);
+	}
+
+	/**
+	 * Ensures tag queries and breadcrumbs fold ASCII letters only, regardless of locale.
+	 *
+	 * Tag names may contain non-ASCII bytes, which must match byte-for-byte.
+	 * The byte pair 0xC4/0xE4 (Ä/ä in ISO-8859-1) is a case pair in common
+	 * single-byte charmaps: a locale-sensitive comparison would treat the tag
+	 * names below as ASCII case-insensitive matches for each other.
+	 *
+	 * @ticket 65372
+	 *
+	 * @covers ::next_tag
+	 * @covers ::matches_breadcrumbs
+	 */
+	public function test_tag_queries_fold_ascii_case_only() {
+		$processor = WP_HTML_Processor::create_fragment( "<d\xC4ta>" );
+		$this->assertFalse(
+			$processor->next_tag( array( 'tag_name' => "d\xE4ta" ) ),
+			'Should not have matched a tag name differing in non-ASCII bytes.'
+		);
+
+		$processor = WP_HTML_Processor::create_fragment( "<d\xC4ta>" );
+		$this->assertTrue(
+			$processor->next_tag( array( 'tag_name' => "D\xC4TA" ) ),
+			'Should have matched the tag name with ASCII letters case-folded.'
+		);
+		$this->assertTrue(
+			$processor->matches_breadcrumbs( array( 'body', "d\xC4ta" ) ),
+			'Should have matched breadcrumbs with ASCII letters case-folded.'
+		);
+		$this->assertFalse(
+			$processor->matches_breadcrumbs( array( 'body', "d\xE4ta" ) ),
+			'Should not have matched breadcrumbs differing in non-ASCII bytes.'
+		);
+	}
+
+	/**
+	 * Ensures foreign-content end tag matching folds ASCII letters only, regardless of locale.
+	 *
+	 * @ticket 65372
+	 */
+	public function test_foreign_content_end_tags_fold_ascii_case_only() {
+		$processor = WP_HTML_Processor::create_fragment( "<svg><f\xC4oo></f\xE4oo><rect>" );
+		$processor->next_tag( 'RECT' );
+		$this->assertSame(
+			array( 'HTML', 'BODY', 'SVG', "F\xC4OO", 'RECT' ),
+			$processor->get_breadcrumbs(),
+			'Should not have closed a foreign element on an end tag differing in non-ASCII bytes.'
+		);
+
+		$processor = WP_HTML_Processor::create_fragment( "<svg><f\xC4oo></f\xC4oo><rect>" );
+		$processor->next_tag( 'RECT' );
+		$this->assertSame(
+			array( 'HTML', 'BODY', 'SVG', 'RECT' ),
+			$processor->get_breadcrumbs(),
+			'Should have closed the foreign element on its exact end tag.'
+		);
+	}
+
+	/**
+	 * Ensures MathML annotation-xml encoding checks fold ASCII letters only, regardless of locale.
+	 *
+	 * The value 'application/xhtml+xml' contains the letter i: under a Turkish
+	 * locale, a locale-sensitive comparison would fail to fold I onto i and
+	 * misdetect the HTML integration point.
+	 *
+	 * @ticket 65372
+	 */
+	public function test_annotation_xml_encoding_folds_ascii_case_only() {
+		$processor = WP_HTML_Processor::create_fragment( '<math><annotation-xml encoding="APPLICATION/XHTML+XML"><p>' );
+		$processor->next_tag( 'P' );
+		$this->assertSame(
+			array( 'HTML', 'BODY', 'MATH', 'ANNOTATION-XML', 'P' ),
+			$processor->get_breadcrumbs(),
+			'Should have recognized the HTML integration point with ASCII letters case-folded.'
+		);
+
+		$processor = WP_HTML_Processor::create_fragment( "<math><annotation-xml encoding=\"application/xhtml+xm\xCC\"><p>" );
+		$processor->next_tag( 'P' );
+		$this->assertSame(
+			array( 'HTML', 'BODY', 'P' ),
+			$processor->get_breadcrumbs(),
+			'Should not have recognized an HTML integration point with an encoding differing in non-ASCII bytes.'
+		);
+	}
+
+	/**
 	 * Ensures that the processor correctly adjusts the namespace
 	 * for elements inside HTML integration points.
 	 *

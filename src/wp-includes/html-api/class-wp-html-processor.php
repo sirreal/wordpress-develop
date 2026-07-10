@@ -715,7 +715,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		}
 
 		if ( isset( $query['tag_name'] ) ) {
-			$query['tag_name'] = strtoupper( $query['tag_name'] );
+			$query['tag_name'] = WP_HTML_Decoder::ascii_uppercase( $query['tag_name'] );
 		}
 
 		$needs_class = ( isset( $query['class_name'] ) && is_string( $query['class_name'] ) )
@@ -934,13 +934,13 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		// Start at the last crumb.
 		$crumb = end( $breadcrumbs );
 
-		if ( '*' !== $crumb && $this->get_tag() !== strtoupper( $crumb ) ) {
+		if ( '*' !== $crumb && $this->get_tag() !== WP_HTML_Decoder::ascii_uppercase( $crumb ) ) {
 			return false;
 		}
 
 		for ( $i = count( $this->breadcrumbs ) - 1; $i >= 0; $i-- ) {
 			$node  = $this->breadcrumbs[ $i ];
-			$crumb = strtoupper( current( $breadcrumbs ) );
+			$crumb = WP_HTML_Decoder::ascii_uppercase( current( $breadcrumbs ) );
 
 			if ( '*' !== $crumb && $node !== $crumb ) {
 				return false;
@@ -1413,7 +1413,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 
 		$tag_name       = str_replace( "\x00", "\u{FFFD}", $this->get_tag() );
 		$in_html        = 'html' === $this->get_namespace();
-		$qualified_name = $in_html ? strtolower( $tag_name ) : $this->get_qualified_tag_name();
+		$qualified_name = $in_html ? WP_HTML_Decoder::ascii_lowercase( $tag_name ) : $this->get_qualified_tag_name();
 		$qualified_name = str_replace( "\x00", "\u{FFFD}", $qualified_name );
 
 		if ( $this->is_tag_closer() ) {
@@ -1897,7 +1897,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 				if (
 					is_string( $http_equiv ) &&
 					is_string( $content ) &&
-					0 === strcasecmp( $http_equiv, 'Content-Type' )
+					'content-type' === WP_HTML_Decoder::ascii_lowercase( $http_equiv )
 				) {
 					$this->bail( 'Cannot yet process META tags with http-equiv Content-Type to determine encoding.' );
 				}
@@ -3015,7 +3015,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 				 * > string "hidden", then: set the frameset-ok flag to "not ok".
 				 */
 				$type_attribute = $this->get_attribute( 'type' );
-				if ( ! is_string( $type_attribute ) || 'hidden' !== strtolower( $type_attribute ) ) {
+				if ( ! is_string( $type_attribute ) || 'hidden' !== WP_HTML_Decoder::ascii_lowercase( $type_attribute ) ) {
 					$this->state->frameset_ok = false;
 				}
 
@@ -3539,7 +3539,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			 */
 			case '+INPUT':
 				$type_attribute = $this->get_attribute( 'type' );
-				if ( ! is_string( $type_attribute ) || 'hidden' !== strtolower( $type_attribute ) ) {
+				if ( ! is_string( $type_attribute ) || 'hidden' !== WP_HTML_Decoder::ascii_lowercase( $type_attribute ) ) {
 					goto anything_else;
 				}
 				// @todo Indicate a parse error once it's possible.
@@ -5133,7 +5133,10 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			 * > of the token, pop elements from the stack of open elements until node has
 			 * > been popped from the stack, and then return.
 			 */
-			if ( 0 === strcasecmp( $node->node_name, $tag_name ) ) {
+			if (
+				strlen( $node->node_name ) === strlen( $tag_name ) &&
+				WP_HTML_Decoder::matches_ascii_case_insensitively( $node->node_name, $tag_name )
+			) {
 				foreach ( $this->state->stack_of_open_elements->walk_up() as $item ) {
 					$this->state->stack_of_open_elements->pop();
 					if ( $node === $item ) {
@@ -6534,14 +6537,13 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			}
 
 			$encoding = $this->get_attribute( 'encoding' );
+			if ( ! is_string( $encoding ) ) {
+				return false;
+			}
 
-			return (
-				is_string( $encoding ) &&
-				(
-					0 === strcasecmp( $encoding, 'application/xhtml+xml' ) ||
-					0 === strcasecmp( $encoding, 'text/html' )
-				)
-			);
+			$encoding = WP_HTML_Decoder::ascii_lowercase( $encoding );
+
+			return 'application/xhtml+xml' === $encoding || 'text/html' === $encoding;
 		}
 
 		$this->bail( 'Should not have reached end of HTML Integration Point detection: check HTML API code.' );
@@ -6561,10 +6563,10 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 */
 	public static function is_special( $tag_name ): bool {
 		if ( is_string( $tag_name ) ) {
-			$tag_name = strtoupper( $tag_name );
+			$tag_name = WP_HTML_Decoder::ascii_uppercase( $tag_name );
 		} else {
 			$tag_name = 'html' === $tag_name->namespace
-				? strtoupper( $tag_name->node_name )
+				? WP_HTML_Decoder::ascii_uppercase( $tag_name->node_name )
 				: "{$tag_name->namespace} {$tag_name->node_name}";
 		}
 
@@ -6681,7 +6683,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @return bool Whether the given tag is an HTML Void Element.
 	 */
 	public static function is_void( $tag_name ): bool {
-		$tag_name = strtoupper( $tag_name );
+		$tag_name = WP_HTML_Decoder::ascii_uppercase( $tag_name );
 
 		return (
 			'AREA' === $tag_name ||
@@ -6738,7 +6740,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		 * > If label is an ASCII case-insensitive match for any of the labels listed in the
 		 * > table below, then return the corresponding encoding; otherwise return failure.
 		 */
-		switch ( strtolower( $label ) ) {
+		switch ( WP_HTML_Decoder::ascii_lowercase( $label ) ) {
 			case 'unicode-1-1-utf-8':
 			case 'unicode11utf8':
 			case 'unicode20utf8':
