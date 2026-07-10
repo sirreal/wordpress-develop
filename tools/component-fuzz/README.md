@@ -786,10 +786,11 @@ database, network requests, or a configured site.
 - `security`: salts and HMACs, password and fast-hash verification, native
   bcrypt compatibility and migration signals, nonce generation/verification,
   nonce tick/lifetime boundaries, nonce URLs and hidden fields, referer
-  retrieval precedence/restoration, admin/ajax referer paths, synthetic auth
-  cookies and session token grace/failure edges, password filter locality,
-  redirect sanitization, redirect validation matrices, sanitize/validate
-  metamorphic behavior, and safe redirect filters.
+  retrieval precedence/restoration, admin/ajax referer paths including invalid
+  admin nonce `wp_nonce_ays()` termination branches, synthetic auth cookies and
+  session token grace/failure edges, password filter locality, redirect
+  sanitization, redirect validation matrices, sanitize/validate metamorphic
+  behavior, and safe redirect filters.
 - `shortcodes`: no-DB shortcode registry lifecycle, attribute parsing/default
   merging and dynamic filters, invalid registration and non-callable callback
   guards, callback argument and rendering filter contracts, nested parse
