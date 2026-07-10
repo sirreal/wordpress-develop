@@ -64,6 +64,7 @@ final class SecuritySurface {
 			$rows[] = self::check_referer_retrieval_contracts( $ctx );
 			$rows[] = self::check_ajax_referer_lookup_order( $ctx );
 			$rows[] = self::check_admin_referer_valid_paths( $ctx );
+			$rows[] = self::check_admin_referer_failure_paths( $ctx->fork( 'admin-referer-failures' ) );
 			$rows[] = self::check_auth_cookie_structure_and_validation( $ctx );
 			$rows[] = self::check_auth_cookie_grace_period_and_session_edges( $ctx );
 			$rows[] = self::check_redirect_filters_without_headers( $ctx );
@@ -204,6 +205,8 @@ final class SecuritySurface {
 			array(
 				'add_filter',
 				'add_query_arg',
+				'add_action',
+				'admin_url',
 				'apply_filters',
 				'check_admin_referer',
 				'check_ajax_referer',
@@ -211,12 +214,16 @@ final class SecuritySurface {
 				'esc_html',
 				'esc_url',
 				'get_userdata',
+				'get_bloginfo',
 				'hash_equals',
 				'hash_hmac_algos',
+				'has_action',
 				'has_filter',
 				'home_url',
+				'remove_action',
 				'remove_filter',
 				'remove_query_arg',
+				'sanitize_url',
 				'update_user_caches',
 				'wp_create_nonce',
 				'wp_check_password',
@@ -233,6 +240,7 @@ final class SecuritySurface {
 				'wp_nonce_field',
 				'wp_nonce_tick',
 				'wp_nonce_url',
+				'wp_nonce_ays',
 				'wp_original_referer_field',
 				'wp_parse_auth_cookie',
 				'wp_password_needs_rehash',
@@ -242,6 +250,8 @@ final class SecuritySurface {
 				'wp_salt',
 				'wp_sanitize_redirect',
 				'wp_unslash',
+				'wp_die',
+				'wp_logout_url',
 				'wp_validate_auth_cookie',
 				'wp_validate_redirect',
 				'wp_verify_nonce',
@@ -1330,6 +1340,149 @@ final class SecuritySurface {
 		);
 	}
 
+	private static function check_admin_referer_failure_paths( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures     = array();
+		$events       = array();
+		$snapshot     = self::snapshot_globals();
+		$action       = 'admin-fail-' . self::token( $ctx->fork( 'admin-fail-action' ), 8 );
+		$custom       = 'admin_fail_' . self::token( $ctx->fork( 'admin-fail-custom' ), 5 );
+		$invalid      = 'bad-nonce-' . self::token( $ctx->fork( 'admin-fail-nonce' ), 8 );
+		$referer      = 'http://example.test/wp/wp-admin/edit.php?updated=1&post_type=post&token=' . rawurlencode( self::token( $ctx->fork( 'admin-fail-referer' ), 6 ) );
+		$listener     = static function ( $seen_action, $result ) use ( &$events ): void {
+			$events[] = array(
+				'action' => $seen_action,
+				'result' => $result,
+			);
+		};
+		$action_clean = false;
+
+		\add_action( 'check_admin_referer', $listener, 10, 2 );
+
+		try {
+			$_SERVER['REQUEST_URI']  = '/wp-admin/edit.php?post_type=post&updated=1';
+			$_SERVER['HTTP_REFERER'] = $referer;
+			$_REQUEST                = array(
+				$custom    => $invalid,
+				'_wpnonce' => \wp_create_nonce( $action ),
+			);
+			$_GET                    = $_REQUEST;
+			$_POST                   = array();
+
+			$normal_capture = self::capture_wp_die_call(
+				static function () use ( $action, $custom ) {
+					\check_admin_referer( $action, $custom );
+				}
+			);
+			$normal_die     = $normal_capture['dieCalls'][0] ?? array();
+			$normal_message = (string) ( $normal_die['message'] ?? '' );
+			$try_again_url  = \esc_url( \wp_validate_redirect( \sanitize_url( \remove_query_arg( 'updated', $referer ) ) ) );
+
+			self::collect_failure(
+				$failures,
+				$normal_capture['captured']
+					&& 403 === ( $normal_die['processed']['args']['response'] ?? null )
+					&& str_contains( $normal_message, 'The link you followed has expired.' )
+					&& str_contains( $normal_message, '<a href="' . $try_again_url . '"' )
+					&& ! str_contains( $normal_message, 'updated=1' )
+					&& $normal_capture['filtersRestored']
+					&& $normal_capture['bufferBalanced'],
+				'check_admin_referer invalid custom nonce calls wp_nonce_ays with sanitized retry link',
+				array(
+					'capture'     => $normal_capture,
+					'tryAgainUrl' => $try_again_url,
+				)
+			);
+
+			$redirect_to = 'http://example.test/wp/wp-admin/profile.php?loggedout=1&token=' . rawurlencode( self::token( $ctx->fork( 'logout-redirect' ), 6 ) );
+			$logout_url  = \wp_logout_url( $redirect_to );
+
+			$_SERVER['REQUEST_URI']  = '/wp-admin/profile.php?action=logout';
+			$_SERVER['HTTP_REFERER'] = 'http://example.test/wp/wp-admin/profile.php';
+			$_REQUEST                = array(
+				'_wpnonce'   => $invalid,
+				'redirect_to' => $redirect_to,
+			);
+			$_GET                    = $_REQUEST;
+			$_POST                   = array();
+
+			$logout_capture = self::capture_wp_die_call(
+				static function () {
+					\check_admin_referer( 'log-out' );
+				}
+			);
+			$logout_die     = $logout_capture['dieCalls'][0] ?? array();
+			$logout_message = (string) ( $logout_die['message'] ?? '' );
+			$logout_title   = (string) ( $logout_die['title'] ?? '' );
+
+			self::collect_failure(
+				$failures,
+				$logout_capture['captured']
+					&& 403 === ( $logout_die['processed']['args']['response'] ?? null )
+					&& str_contains( $logout_title, (string) \get_bloginfo( 'name' ) )
+					&& str_contains( $logout_message, $logout_url )
+					&& str_contains( $logout_message, 'log out' )
+					&& $logout_capture['filtersRestored']
+					&& $logout_capture['bufferBalanced'],
+				'check_admin_referer log-out failure uses nonce-ays logout confirmation URL',
+				array(
+					'capture'   => $logout_capture,
+					'logoutUrl' => $logout_url,
+				)
+			);
+
+			$_SERVER['REQUEST_URI']  = '/wp-admin/tools.php?page=legacy';
+			$_SERVER['HTTP_REFERER'] = \admin_url( 'tools.php?page=legacy-referer' );
+			$_REQUEST                = array();
+			$_GET                    = array();
+			$_POST                   = array();
+
+			$legacy_capture = self::capture_wp_die_call(
+				static function () {
+					return \check_admin_referer( -1 );
+				}
+			);
+
+			self::collect_failure(
+				$failures,
+				! $legacy_capture['captured']
+					&& false === $legacy_capture['value']
+					&& ! $legacy_capture['threwUnexpected']
+					&& $legacy_capture['filtersRestored']
+					&& $legacy_capture['bufferBalanced'],
+				'check_admin_referer legacy -1 admin referer returns false without wp_nonce_ays',
+				array( 'capture' => $legacy_capture )
+			);
+		} finally {
+			\remove_action( 'check_admin_referer', $listener, 10 );
+			$action_clean = false === \has_action( 'check_admin_referer', $listener );
+			self::restore_globals( $snapshot );
+		}
+
+		$expected_events = array( $action, 'log-out', -1 );
+		self::collect_failure(
+			$failures,
+			$expected_events === array_column( $events, 'action' )
+				&& array( false, false, false ) === array_column( $events, 'result' )
+				&& $action_clean,
+			'check_admin_referer failure paths fire exact action payloads and cleanup listener',
+			array(
+				'expectedActions' => $expected_events,
+				'events'          => $events,
+				'actionClean'     => $action_clean,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'security.check-admin-referer.failure-wp-nonce-ays-paths',
+			array() === $failures,
+			array(
+				'events'   => $events,
+				'failures' => array_slice( $failures, 0, 5 ),
+			)
+		);
+	}
+
 	private static function check_auth_cookie_structure_and_validation( \ComponentFuzz\FuzzContext $ctx ): array {
 		$failures = array();
 		$user     = self::synthetic_user( $ctx->fork( 'auth-user' ) );
@@ -2184,6 +2337,74 @@ final class SecuritySurface {
 		);
 	}
 
+	private static function capture_wp_die_call( callable $callback ): array {
+		$die_calls  = array();
+		$ob_level   = ob_get_level();
+		$value      = null;
+		$captured   = false;
+		$unexpected = null;
+
+		$die_filter = static function () use ( &$die_calls ) {
+			return static function ( $message = '', $title = '', $args = array() ) use ( &$die_calls ): void {
+				$die_calls[] = array(
+					'message'   => $message,
+					'title'     => $title,
+					'args'      => $args,
+					'processed' => self::process_wp_die_input( $message, $title, $args ),
+				);
+
+				throw new SecuritySurface_DieCaptured( 'Captured security wp_die.' );
+			};
+		};
+
+		\add_filter( 'wp_die_handler', $die_filter, PHP_INT_MAX );
+		ob_start();
+
+		try {
+			$value = $callback();
+		} catch ( SecuritySurface_DieCaptured $e ) {
+			$captured = true;
+		} catch ( \Throwable $e ) {
+			$unexpected = self::describe_throwable( $e );
+		} finally {
+			$output = '';
+			while ( ob_get_level() > $ob_level ) {
+				$output .= (string) ob_get_clean();
+			}
+
+			\remove_filter( 'wp_die_handler', $die_filter, PHP_INT_MAX );
+		}
+
+		return array(
+			'captured'        => $captured,
+			'threwUnexpected' => null !== $unexpected,
+			'unexpected'      => $unexpected,
+			'value'           => $value,
+			'output'          => $output,
+			'dieCalls'        => $die_calls,
+			'filtersRestored' => false === \has_filter( 'wp_die_handler', $die_filter ),
+			'bufferBalanced'  => $ob_level === ob_get_level(),
+		);
+	}
+
+	private static function process_wp_die_input( $message, $title, $args ): array {
+		if ( function_exists( '_wp_die_process_input' ) ) {
+			list( $processed_message, $processed_title, $processed_args ) = \_wp_die_process_input( $message, $title, $args );
+
+			return array(
+				'message' => $processed_message,
+				'title'   => $processed_title,
+				'args'    => $processed_args,
+			);
+		}
+
+		return array(
+			'message' => $message,
+			'title'   => $title,
+			'args'    => is_array( $args ) ? $args : array( 'response' => $args ),
+		);
+	}
+
 	private static function row( \ComponentFuzz\FuzzContext $ctx, string $invariant, bool $ok, array $data = array(), ?string $status = null ): array {
 		return array(
 			'ok'        => $ok,
@@ -2388,3 +2609,5 @@ final class SecuritySurface_SessionTokenManager {
 		return SecuritySurface::session_tokens_for_user( $this->user_id );
 	}
 }
+
+final class SecuritySurface_DieCaptured extends \RuntimeException {}
