@@ -4745,22 +4745,63 @@ class WP_HTML_Tag_Processor {
 		 *
 		 *    Result: <div />
 		 */
-		$this->lexical_updates[ $name ] = new WP_HTML_Text_Replacement(
+		$removal_span                   = $this->get_attribute_removal_span(
 			$this->attributes[ $name ]->start,
-			$this->attributes[ $name ]->length,
+			$this->attributes[ $name ]->length
+		);
+		$this->lexical_updates[ $name ] = new WP_HTML_Text_Replacement(
+			$removal_span->start,
+			$removal_span->length,
 			''
 		);
 
 		// Removes any duplicated attributes if they were also present.
 		foreach ( $this->duplicate_attributes[ $name ] ?? array() as $attribute_token ) {
-			$this->lexical_updates[] = new WP_HTML_Text_Replacement(
+			$removal_span            = $this->get_attribute_removal_span(
 				$attribute_token->start,
-				$attribute_token->length,
+				$attribute_token->length
+			);
+			$this->lexical_updates[] = new WP_HTML_Text_Replacement(
+				$removal_span->start,
+				$removal_span->length,
 				''
 			);
 		}
 
 		return true;
+	}
+
+	/**
+	 * Returns the full span of the document to remove for an attribute.
+	 *
+	 * Solidus characters ("/") may precede an attribute name, where they act
+	 * like attribute separators and are not part of any syntax token. Such
+	 * solidus characters must be removed with the attribute; otherwise a
+	 * remaining solidus directly before the tag-closing ">" would become a
+	 * self-closing flag and change the meaning of the surrounding HTML.
+	 *
+	 * Example:
+	 *
+	 *     <svg><g /attr>inside g</svg>
+	 *
+	 * Removing only `attr` would produce `<svg><g />inside g</svg>`, where
+	 * the self-closing G element no longer contains the text that follows.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @param int $start  Byte offset into the document where the attribute starts.
+	 * @param int $length Byte length of the attribute.
+	 * @return WP_HTML_Span Span of the document to remove for the attribute.
+	 */
+	private function get_attribute_removal_span( int $start, int $length ): WP_HTML_Span {
+		$tag_name_ends_at = $this->tag_name_starts_at + $this->tag_name_length;
+
+		while ( $start > $tag_name_ends_at && '/' === $this->html[ $start - 1 ] ) {
+			--$start;
+			++$length;
+		}
+
+		return new WP_HTML_Span( $start, $length );
 	}
 
 	/**
