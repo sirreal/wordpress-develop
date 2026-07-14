@@ -2635,6 +2635,13 @@ class WP_HTML_Tag_Processor {
 			 * there because it was separated from the tag name by only solidus
 			 * characters. The copied-bytes cursor must never move backward, or
 			 * already-replaced spans of the document would be copied again.
+			 *
+			 * Only zero-length insertions may share their offset with another
+			 * update's span; the sort places them after a removal of that span,
+			 * so the inserted text lands where the removed span was. Updates
+			 * with positive length must never overlap each other: the cursor
+			 * and bookmark position accounting below assume that every update
+			 * replaces a distinct span of the document.
 			 */
 			if ( $diff->start > $bytes_already_copied ) {
 				$output_buffer .= substr( $this->html, $bytes_already_copied, $diff->start - $bytes_already_copied );
