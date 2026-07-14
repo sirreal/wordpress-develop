@@ -2629,9 +2629,19 @@ class WP_HTML_Tag_Processor {
 				$accumulated_shift_for_given_point += $shift;
 			}
 
-			$output_buffer       .= substr( $this->html, $bytes_already_copied, $diff->start - $bytes_already_copied );
+			/*
+			 * Updates may share a document offset, e.g. a new attribute inserted
+			 * at the end of the tag name and a removed attribute whose span starts
+			 * there because it was separated from the tag name by only solidus
+			 * characters. The copied-bytes cursor must never move backward, or
+			 * already-replaced spans of the document would be copied again.
+			 */
+			if ( $diff->start > $bytes_already_copied ) {
+				$output_buffer .= substr( $this->html, $bytes_already_copied, $diff->start - $bytes_already_copied );
+			}
+
 			$output_buffer       .= $diff->text;
-			$bytes_already_copied = $diff->start + $diff->length;
+			$bytes_already_copied = max( $bytes_already_copied, $diff->start + $diff->length );
 		}
 
 		$this->html = $output_buffer . substr( $this->html, $bytes_already_copied );
