@@ -4768,10 +4768,11 @@ class WP_HTML_Tag_Processor {
 		 *
 		 *    Result: <div />
 		 */
-		$removal_span                   = $this->get_attribute_removal_span(
+		$removal_span = $this->get_attribute_removal_span(
 			$this->attributes[ $name ]->start,
 			$this->attributes[ $name ]->length
 		);
+		$this->supersede_updates_in_removal_span( $removal_span );
 		$this->lexical_updates[ $name ] = new WP_HTML_Text_Replacement(
 			$removal_span->start,
 			$removal_span->length,
@@ -4784,38 +4785,45 @@ class WP_HTML_Tag_Processor {
 				$attribute_token->start,
 				$attribute_token->length
 			);
-
-			/*
-			 * Enqueue a removal for each duplicate whose span is not already
-			 * updated. Bookmark positions and the internal cursor are shifted
-			 * by every enqueued update when updates are applied, so repeated
-			 * removals of the same attribute must not enqueue removals again.
-			 *
-			 * An update already enqueued over the same span with other
-			 * replacement text is superseded: removing the attribute removes
-			 * the entire span. This also ensures that no two updates replace
-			 * overlapping spans of the document, which the position
-			 * accounting in the update application relies on.
-			 */
-			$is_missing = true;
-			foreach ( $this->lexical_updates as $update ) {
-				if ( $removal_span->start === $update->start && $removal_span->length === $update->length ) {
-					$update->text = '';
-					$is_missing   = false;
-					break;
-				}
-			}
-
-			if ( $is_missing ) {
-				$this->lexical_updates[] = new WP_HTML_Text_Replacement(
-					$removal_span->start,
-					$removal_span->length,
-					''
-				);
-			}
+			$this->supersede_updates_in_removal_span( $removal_span );
+			$this->lexical_updates[] = new WP_HTML_Text_Replacement(
+				$removal_span->start,
+				$removal_span->length,
+				''
+			);
 		}
 
 		return true;
+	}
+
+	/**
+	 * Removes enqueued lexical updates replacing spans within a removed span.
+	 *
+	 * Removing a span of the document supersedes updates already enqueued
+	 * over intersecting spans: removal replaces the entire span, and no two
+	 * updates may replace overlapping spans of the document, since bookmark
+	 * and cursor position accounting assumes that every update replaces a
+	 * distinct span. This also ensures that each removal is enqueued exactly
+	 * once, no matter how many times an attribute is removed.
+	 *
+	 * Zero-length insertions replace no spans of the document and are
+	 * unaffected; they may share their offset with a removed span.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @param WP_HTML_Span $removal_span Span of the document being removed.
+	 */
+	private function supersede_updates_in_removal_span( WP_HTML_Span $removal_span ): void {
+		$removal_span_end = $removal_span->start + $removal_span->length;
+		foreach ( $this->lexical_updates as $key => $update ) {
+			if (
+				$update->length > 0 &&
+				$update->start < $removal_span_end &&
+				$removal_span->start < $update->start + $update->length
+			) {
+				unset( $this->lexical_updates[ $key ] );
+			}
+		}
 	}
 
 	/**
