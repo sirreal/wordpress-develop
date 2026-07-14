@@ -4753,11 +4753,26 @@ class WP_HTML_Tag_Processor {
 
 		// Removes any duplicated attributes if they were also present.
 		foreach ( $this->duplicate_attributes[ $name ] ?? array() as $attribute_token ) {
-			$this->lexical_updates[] = new WP_HTML_Text_Replacement(
-				$attribute_token->start,
-				$attribute_token->length,
-				''
-			);
+			/*
+			 * Each span may adjust cursor and bookmark positions only once, so
+			 * removal supersedes an update already enqueued for the exact span.
+			 */
+			$has_update = false;
+			foreach ( $this->lexical_updates as $update ) {
+				if ( $attribute_token->start === $update->start && $attribute_token->length === $update->length ) {
+					$update->text = '';
+					$has_update   = true;
+					break;
+				}
+			}
+
+			if ( ! $has_update ) {
+				$this->lexical_updates[] = new WP_HTML_Text_Replacement(
+					$attribute_token->start,
+					$attribute_token->length,
+					''
+				);
+			}
 		}
 
 		return true;
