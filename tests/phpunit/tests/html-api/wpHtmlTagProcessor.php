@@ -1389,6 +1389,51 @@ class Tests_HtmlApi_WpHtmlTagProcessor extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Ensures that removing an attribute with its preceding solidus does not
+	 * conflict with new attributes inserted at the end of the tag name.
+	 *
+	 * When a removed attribute is separated from the tag name by only solidus
+	 * characters, the removed span starts at the end of the tag name, the same
+	 * place where new attributes are inserted.
+	 *
+	 * @ticket 65372
+	 *
+	 * @covers WP_HTML_Tag_Processor::remove_attribute
+	 * @covers WP_HTML_Tag_Processor::set_attribute
+	 * @covers WP_HTML_Tag_Processor::add_class
+	 *
+	 * @dataProvider data_set_attribute_or_add_class_while_removing_solidus_separated_attribute
+	 *
+	 * @param string $method        Method used to add an attribute: "set_attribute" or "add_class".
+	 * @param string $expected_html Expected HTML after the updates are applied.
+	 */
+	public function test_can_set_attribute_while_removing_solidus_separated_attribute( $method, $expected_html ) {
+		$processor = new WP_HTML_Tag_Processor( '<g/attr>ok' );
+		$this->assertTrue( $processor->next_tag(), 'Failed to find the tag: check test setup.' );
+
+		if ( 'set_attribute' === $method ) {
+			$processor->set_attribute( 'id', 'test' );
+		} else {
+			$processor->add_class( 'test' );
+		}
+		$this->assertTrue( $processor->remove_attribute( 'attr' ), 'Failed to remove the attribute.' );
+
+		$this->assertSame( $expected_html, $processor->get_updated_html(), 'Applying the updates produced unexpected HTML.' );
+	}
+
+	/**
+	 * Data provider.
+	 *
+	 * @return array[]
+	 */
+	public static function data_set_attribute_or_add_class_while_removing_solidus_separated_attribute() {
+		return array(
+			'set_attribute' => array( 'set_attribute', '<g id="test">ok' ),
+			'add_class'     => array( 'add_class', '<g class="test">ok' ),
+		);
+	}
+
+	/**
 	 * @ticket 58119
 	 *
 	 * @since 6.3.2 Removes all duplicated attributes as expected.
