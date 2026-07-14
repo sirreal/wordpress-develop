@@ -1355,6 +1355,93 @@ class Tests_HtmlApi_WpHtmlTagProcessor extends WP_UnitTestCase {
 	}
 
 	/**
+	 * @covers WP_HTML_Tag_Processor::remove_attribute
+	 * @covers WP_HTML_Tag_Processor::seek
+	 *
+	 * @dataProvider data_remove_attribute_with_duplicated_attributes_is_idempotent
+	 *
+	 * @param string      $html          HTML containing duplicated attributes and a later PATH tag.
+	 * @param string      $tag_name      Name of the tag containing the duplicated attributes.
+	 * @param string|null $expected_html Expected HTML after one removal, or null to use the actual result.
+	 */
+	public function test_remove_attribute_with_duplicated_attributes_is_idempotent( $html, $tag_name, $expected_html ) {
+		$single_removal = new WP_HTML_Tag_Processor( $html );
+		$this->assertTrue( $single_removal->next_tag( $tag_name ), 'Failed to find the tag containing duplicated attributes.' );
+		$this->assertTrue( $single_removal->remove_attribute( 'a' ), 'Failed to remove the attribute.' );
+		$single_removal_html = $single_removal->get_updated_html();
+		if ( null !== $expected_html ) {
+			$this->assertSame( $expected_html, $single_removal_html, 'Removing duplicated attributes once produced unexpected HTML.' );
+		}
+
+		$processor = new WP_HTML_Tag_Processor( $html );
+		$this->assertTrue( $processor->next_tag( $tag_name ), 'Failed to find the tag containing duplicated attributes.' );
+
+		$this->assertTrue( $processor->remove_attribute( 'a' ), 'Failed to remove the attribute.' );
+		$this->assertTrue( $processor->remove_attribute( 'a' ), 'Failed to remove the attribute again.' );
+
+		$this->assertTrue( $processor->next_tag( 'path' ), 'Failed to find the PATH tag.' );
+		$this->assertTrue( $processor->set_bookmark( 'path' ), 'Failed to set a bookmark on the PATH tag.' );
+
+		$this->assertSame( $single_removal_html, $processor->get_updated_html(), 'Removing duplicated attributes twice should have the same effect as removing them once.' );
+		$this->assertTrue( $processor->seek( 'path' ), 'Failed to seek to the bookmark after removing duplicated attributes twice.' );
+		$this->assertSame( 'PATH', $processor->get_tag(), 'The bookmark moved away from the bookmarked tag.' );
+		$this->assertSame( 'x', $processor->get_attribute( 'id' ), 'The bookmark moved away from the bookmarked tag attributes.' );
+	}
+
+	/**
+	 * Data provider.
+	 *
+	 * @return array[]
+	 */
+	public static function data_remove_attribute_with_duplicated_attributes_is_idempotent() {
+		return array(
+			'Duplicated attributes'               => array( '<div a a>ok<path id="x">', 'div', '<div  >ok<path id="x">' ),
+			'Duplicate attribute after a solidus' => array( '<svg><g a /a>ok<path id="x">', 'g', null ),
+		);
+	}
+
+	/**
+	 * @covers WP_HTML_Tag_Processor::remove_attribute
+	 * @covers WP_HTML_Tag_Processor::seek
+	 *
+	 * @dataProvider data_remove_attribute_supersedes_enqueued_update_to_duplicate
+	 *
+	 * @param string $enqueued_text Text already enqueued over a duplicate attribute's span.
+	 */
+	public function test_remove_attribute_supersedes_enqueued_update_to_duplicate( $enqueued_text ) {
+		$processor = new class('<g a a a>ok<path id="x">') extends WP_HTML_Tag_Processor {
+			public function enqueue_replacement( int $start, int $length, string $text ): void {
+				$this->lexical_updates[] = new WP_HTML_Text_Replacement( $start, $length, $text );
+			}
+		};
+		$this->assertTrue( $processor->next_tag( 'g' ), 'Failed to find the tag containing duplicated attributes.' );
+
+		// Enqueue an update over the first duplicate "a", at offset 5.
+		$processor->enqueue_replacement( 5, 1, $enqueued_text );
+		$this->assertTrue( $processor->remove_attribute( 'a' ), 'Failed to remove the attribute.' );
+
+		$this->assertTrue( $processor->next_tag( 'path' ), 'Failed to find the PATH tag.' );
+		$this->assertTrue( $processor->set_bookmark( 'path' ), 'Failed to set a bookmark on the PATH tag.' );
+
+		$this->assertSame( '<g   >ok<path id="x">', $processor->get_updated_html(), 'Removing the attribute produced unexpected HTML.' );
+		$this->assertTrue( $processor->seek( 'path' ), 'Failed to seek to the bookmark after removing the attribute.' );
+		$this->assertSame( 'PATH', $processor->get_tag(), 'The bookmark moved away from the bookmarked tag.' );
+		$this->assertSame( 'x', $processor->get_attribute( 'id' ), 'The bookmark moved away from the bookmarked tag attributes.' );
+	}
+
+	/**
+	 * Data provider.
+	 *
+	 * @return array[]
+	 */
+	public static function data_remove_attribute_supersedes_enqueued_update_to_duplicate() {
+		return array(
+			'Already-enqueued removal'     => array( '' ),
+			'Already-enqueued replacement' => array( 'b' ),
+		);
+	}
+
+	/**
 	 * @ticket 58119
 	 *
 	 * @since 6.3.2 Removes all duplicated attributes as expected.
