@@ -1434,6 +1434,53 @@ class Tests_HtmlApi_WpHtmlTagProcessor extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Ensures that repeating an attribute removal does not corrupt bookmarks.
+	 *
+	 * Removing an attribute also enqueues removals for its duplicates.
+	 * Repeating the removal must not enqueue those removals again: every
+	 * enqueued update shifts bookmark positions and the internal cursor
+	 * when updates are applied, so repeated updates for the same span
+	 * would shift them more than the document actually changed.
+	 *
+	 * @ticket 65372
+	 *
+	 * @covers WP_HTML_Tag_Processor::remove_attribute
+	 * @covers WP_HTML_Tag_Processor::seek
+	 *
+	 * @dataProvider data_repeated_attribute_removal_preserves_bookmarks
+	 *
+	 * @param string $html          HTML containing duplicate "a" attributes and a PATH tag.
+	 * @param string $expected_html Expected HTML after removing the attribute.
+	 */
+	public function test_repeated_attribute_removal_preserves_bookmarks( $html, $expected_html ) {
+		$processor = new WP_HTML_Tag_Processor( $html );
+		$this->assertTrue( $processor->next_tag(), 'Failed to find the first tag: check test setup.' );
+		$this->assertTrue( $processor->remove_attribute( 'a' ), 'Failed to remove the attribute.' );
+		$this->assertTrue( $processor->remove_attribute( 'a' ), 'Failed to remove the attribute again.' );
+
+		$this->assertTrue( $processor->next_tag( 'path' ), 'Failed to find the PATH tag: check test setup.' );
+		$this->assertTrue( $processor->set_bookmark( 'path' ), 'Failed to set a bookmark on the PATH tag.' );
+
+		$this->assertSame( $expected_html, $processor->get_updated_html(), 'Removing the attribute twice produced unexpected HTML.' );
+
+		$this->assertTrue( $processor->seek( 'path' ), 'Failed to seek to the bookmark.' );
+		$this->assertSame( 'PATH', $processor->get_tag(), 'Seeking to the bookmark landed on the wrong location in the document.' );
+		$this->assertSame( 'x', $processor->get_attribute( 'id' ), 'Failed to find the attribute of the tag at the bookmark.' );
+	}
+
+	/**
+	 * Data provider.
+	 *
+	 * @return array[]
+	 */
+	public static function data_repeated_attribute_removal_preserves_bookmarks() {
+		return array(
+			'Duplicate attributes'                => array( '<div a a>ok<path id="x">', '<div  >ok<path id="x">' ),
+			'Duplicate attribute after a solidus' => array( '<g a /a>ok<path id="x">', '<g  >ok<path id="x">' ),
+		);
+	}
+
+	/**
 	 * @ticket 58119
 	 *
 	 * @since 6.3.2 Removes all duplicated attributes as expected.
