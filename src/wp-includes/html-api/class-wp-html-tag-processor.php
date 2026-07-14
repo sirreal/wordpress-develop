@@ -4768,27 +4768,32 @@ class WP_HTML_Tag_Processor {
 		 *
 		 *    Result: <div />
 		 */
-		$removal_span = $this->get_attribute_removal_span(
+		$removal_spans   = array();
+		$removal_spans[] = $this->get_attribute_removal_span(
 			$this->attributes[ $name ]->start,
 			$this->attributes[ $name ]->length
 		);
-		$this->supersede_updates_in_removal_span( $removal_span );
+		foreach ( $this->duplicate_attributes[ $name ] ?? array() as $attribute_token ) {
+			$removal_spans[] = $this->get_attribute_removal_span(
+				$attribute_token->start,
+				$attribute_token->length
+			);
+		}
+
+		$this->supersede_updates_in_removal_spans( $removal_spans );
+
 		$this->lexical_updates[ $name ] = new WP_HTML_Text_Replacement(
-			$removal_span->start,
-			$removal_span->length,
+			$removal_spans[0]->start,
+			$removal_spans[0]->length,
 			''
 		);
 
 		// Removes any duplicated attributes if they were also present.
-		foreach ( $this->duplicate_attributes[ $name ] ?? array() as $attribute_token ) {
-			$removal_span = $this->get_attribute_removal_span(
-				$attribute_token->start,
-				$attribute_token->length
-			);
-			$this->supersede_updates_in_removal_span( $removal_span );
+		$removal_span_count = count( $removal_spans );
+		for ( $i = 1; $i < $removal_span_count; $i++ ) {
 			$this->lexical_updates[] = new WP_HTML_Text_Replacement(
-				$removal_span->start,
-				$removal_span->length,
+				$removal_spans[ $i ]->start,
+				$removal_spans[ $i ]->length,
 				''
 			);
 		}
@@ -4797,9 +4802,9 @@ class WP_HTML_Tag_Processor {
 	}
 
 	/**
-	 * Removes enqueued lexical updates replacing spans within a removed span.
+	 * Removes enqueued lexical updates replacing spans within removed spans.
 	 *
-	 * Removing a span of the document supersedes updates already enqueued
+	 * Removing spans of the document supersedes updates already enqueued
 	 * over intersecting spans: removal replaces the entire span, and no two
 	 * updates may replace overlapping spans of the document, since bookmark
 	 * and cursor position accounting assumes that every update replaces a
@@ -4809,18 +4814,42 @@ class WP_HTML_Tag_Processor {
 	 * Zero-length insertions replace no spans of the document and are
 	 * unaffected; they may share their offset with a removed span.
 	 *
+	 * The given spans must be sorted by starting position and must not
+	 * overlap each other, as is the case for attribute spans, which appear
+	 * in document order. Each enqueued update is then checked against the
+	 * spans with a single binary search: an update can only intersect the
+	 * last span starting before the update's end.
+	 *
 	 * @since 7.1.0
 	 *
-	 * @param WP_HTML_Span $removal_span Span of the document being removed.
+	 * @param WP_HTML_Span[] $removal_spans Non-overlapping spans of the document being
+	 *                                      removed, sorted by starting position.
 	 */
-	private function supersede_updates_in_removal_span( WP_HTML_Span $removal_span ): void {
-		$removal_span_end = $removal_span->start + $removal_span->length;
+	private function supersede_updates_in_removal_spans( array $removal_spans ): void {
+		$span_count = count( $removal_spans );
+
 		foreach ( $this->lexical_updates as $key => $update ) {
-			if (
-				$update->length > 0 &&
-				$update->start < $removal_span_end &&
-				$removal_span->start < $update->start + $update->length
-			) {
+			if ( 0 === $update->length ) {
+				continue;
+			}
+
+			$update_end = $update->start + $update->length;
+
+			// Find the last removal span starting before the end of the update.
+			$candidate = null;
+			$low       = 0;
+			$high      = $span_count - 1;
+			while ( $low <= $high ) {
+				$probe = intdiv( $low + $high, 2 );
+				if ( $removal_spans[ $probe ]->start < $update_end ) {
+					$candidate = $removal_spans[ $probe ];
+					$low       = $probe + 1;
+				} else {
+					$high = $probe - 1;
+				}
+			}
+
+			if ( null !== $candidate && $update->start < $candidate->start + $candidate->length ) {
 				unset( $this->lexical_updates[ $key ] );
 			}
 		}
