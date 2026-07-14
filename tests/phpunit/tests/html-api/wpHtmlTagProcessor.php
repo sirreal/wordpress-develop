@@ -1501,27 +1501,32 @@ class Tests_HtmlApi_WpHtmlTagProcessor extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Ensures that removing an attribute removes all of its duplicates even
-	 * when another lexical update targets a duplicate's span.
+	 * Ensures that removing an attribute removes the entire spans of the
+	 * attribute and its duplicates even when other lexical updates target
+	 * spans within them.
 	 *
-	 * Every duplicate's removal must be enqueued exactly once. Bookmark
-	 * positions and the internal cursor are shifted by every enqueued update
-	 * when updates are applied: a missing removal leaves a duplicate in the
-	 * document, and an update over an already-updated span shifts positions
-	 * more than the document actually changed. An update enqueued over a
-	 * duplicate's span by other means is superseded by the removal.
+	 * Exactly one update must replace each removed span. Bookmark positions
+	 * and the internal cursor are shifted by every enqueued update when
+	 * updates are applied: a missing removal leaves a duplicate in the
+	 * document, and updates over intersecting spans shift positions more
+	 * than the document actually changed. An update enqueued within a
+	 * removed span by other means is superseded by the removal.
 	 *
 	 * @ticket 65372
 	 *
 	 * @covers WP_HTML_Tag_Processor::remove_attribute
 	 * @covers WP_HTML_Tag_Processor::seek
 	 *
-	 * @dataProvider data_updates_targeting_duplicate_attribute_spans
+	 * @dataProvider data_updates_targeting_removed_attribute_spans
 	 *
-	 * @param string $enqueued_text Replacement text enqueued over the first duplicate's span.
+	 * @param string $html          HTML containing "a" attributes and a PATH tag.
+	 * @param int    $update_start  Byte offset of the enqueued update.
+	 * @param int    $update_length Byte length of the enqueued update.
+	 * @param string $update_text   Replacement text of the enqueued update.
+	 * @param string $expected_html Expected HTML after removing the attribute.
 	 */
-	public function test_remove_attribute_removes_duplicates_when_another_update_targets_a_duplicate_span( $enqueued_text ) {
-		$processor = new class('<g a a a>ok<path id="x">') extends WP_HTML_Tag_Processor {
+	public function test_remove_attribute_removes_attribute_spans_when_other_updates_target_them( $html, $update_start, $update_length, $update_text, $expected_html ) {
+		$processor = new class($html) extends WP_HTML_Tag_Processor {
 			public function enqueue_replacement( int $start, int $length, string $text ): void {
 				$this->lexical_updates[] = new WP_HTML_Text_Replacement( $start, $length, $text );
 			}
@@ -1529,15 +1534,14 @@ class Tests_HtmlApi_WpHtmlTagProcessor extends WP_UnitTestCase {
 
 		$this->assertTrue( $processor->next_tag(), 'Failed to find the tag: check test setup.' );
 
-		// Enqueue an update over the span of the first duplicate "a", at offset 5.
-		$processor->enqueue_replacement( 5, 1, $enqueued_text );
+		$processor->enqueue_replacement( $update_start, $update_length, $update_text );
 
 		$this->assertTrue( $processor->remove_attribute( 'a' ), 'Failed to remove the attribute.' );
 
 		$this->assertTrue( $processor->next_tag( 'path' ), 'Failed to find the PATH tag: check test setup.' );
 		$this->assertTrue( $processor->set_bookmark( 'path' ), 'Failed to set a bookmark on the PATH tag.' );
 
-		$this->assertSame( '<g   >ok<path id="x">', $processor->get_updated_html(), 'Removing the attribute produced unexpected HTML.' );
+		$this->assertSame( $expected_html, $processor->get_updated_html(), 'Removing the attribute produced unexpected HTML.' );
 
 		$this->assertTrue( $processor->seek( 'path' ), 'Failed to seek to the bookmark.' );
 		$this->assertSame( 'PATH', $processor->get_tag(), 'Seeking to the bookmark landed on the wrong location in the document.' );
@@ -1549,10 +1553,13 @@ class Tests_HtmlApi_WpHtmlTagProcessor extends WP_UnitTestCase {
 	 *
 	 * @return array[]
 	 */
-	public static function data_updates_targeting_duplicate_attribute_spans() {
+	public static function data_updates_targeting_removed_attribute_spans() {
 		return array(
-			'A removal of the duplicate'     => array( '' ),
-			'A replacement of the duplicate' => array( 'b' ),
+			'Removal of a duplicate, exact span'          => array( '<g a a a>ok<path id="x">', 5, 1, '', '<g   >ok<path id="x">' ),
+			'Replacement of a duplicate, exact span'      => array( '<g a a a>ok<path id="x">', 5, 1, 'b', '<g   >ok<path id="x">' ),
+			'Removal within extended duplicate span'      => array( '<g a /a>ok<path id="x">', 6, 1, '', '<g  >ok<path id="x">' ),
+			'Replacement within extended duplicate span'  => array( '<g a /a>ok<path id="x">', 6, 1, 'b', '<g  >ok<path id="x">' ),
+			'Replacement within extended attribute span'  => array( '<g/a>ok<path id="x">', 3, 1, 'b', '<g>ok<path id="x">' ),
 		);
 	}
 
