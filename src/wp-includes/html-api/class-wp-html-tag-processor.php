@@ -4769,19 +4769,27 @@ class WP_HTML_Tag_Processor {
 		$duplicate_attributes = $this->duplicate_attributes[ $name ] ?? array();
 		if ( count( $duplicate_attributes ) > 0 ) {
 			/*
-			 * Duplicate removals are enqueued as a batch: if the first one is
-			 * already enqueued, all of them are. Repeated removals of the same
-			 * attribute must not enqueue the batch again. Bookmark positions
-			 * and the internal cursor are shifted by every enqueued update
-			 * when updates are applied, so repeated updates for the same span
-			 * would shift them more than the document actually changed.
+			 * Duplicate removals are enqueued as a batch: if a removal of the
+			 * first duplicate's span is already enqueued, all of them are.
+			 * Repeated removals of the same attribute must not enqueue the
+			 * batch again. Bookmark positions and the internal cursor are
+			 * shifted by every enqueued update when updates are applied, so
+			 * repeated updates for the same span would shift them more than
+			 * the document actually changed.
+			 *
+			 * Only an update with empty replacement text is a removal; other
+			 * updates over the same span must not suppress the batch.
 			 */
 			$first_removal_span = $this->get_attribute_removal_span(
 				$duplicate_attributes[0]->start,
 				$duplicate_attributes[0]->length
 			);
 			foreach ( $this->lexical_updates as $update ) {
-				if ( $first_removal_span->start === $update->start && $first_removal_span->length === $update->length ) {
+				if (
+					'' === $update->text &&
+					$first_removal_span->start === $update->start &&
+					$first_removal_span->length === $update->length
+				) {
 					return true;
 				}
 			}
