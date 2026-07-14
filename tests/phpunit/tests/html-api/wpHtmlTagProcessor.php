@@ -1394,31 +1394,49 @@ class Tests_HtmlApi_WpHtmlTagProcessor extends WP_UnitTestCase {
 	 *
 	 * When a removed attribute is separated from the tag name by only solidus
 	 * characters, the removed span starts at the end of the tag name, the same
-	 * place where new attributes are inserted.
+	 * place where new attributes are inserted. The updates must apply
+	 * correctly in either order of operations, and bookmark positions must
+	 * reflect the applied updates.
 	 *
 	 * @ticket 65372
 	 *
 	 * @covers WP_HTML_Tag_Processor::remove_attribute
 	 * @covers WP_HTML_Tag_Processor::set_attribute
 	 * @covers WP_HTML_Tag_Processor::add_class
+	 * @covers WP_HTML_Tag_Processor::seek
 	 *
 	 * @dataProvider data_set_attribute_or_add_class_while_removing_solidus_separated_attribute
 	 *
 	 * @param string $method        Method used to add an attribute: "set_attribute" or "add_class".
+	 * @param string $order         Order of operations: "add first" or "remove first".
 	 * @param string $expected_html Expected HTML after the updates are applied.
 	 */
-	public function test_can_set_attribute_while_removing_solidus_separated_attribute( $method, $expected_html ) {
-		$processor = new WP_HTML_Tag_Processor( '<g/attr>ok' );
+	public function test_can_set_attribute_while_removing_solidus_separated_attribute( $method, $order, $expected_html ) {
+		$processor = new WP_HTML_Tag_Processor( '<g/attr>ok<path id="x">' );
 		$this->assertTrue( $processor->next_tag(), 'Failed to find the tag: check test setup.' );
+
+		if ( 'remove first' === $order ) {
+			$this->assertTrue( $processor->remove_attribute( 'attr' ), 'Failed to remove the attribute.' );
+		}
 
 		if ( 'set_attribute' === $method ) {
 			$processor->set_attribute( 'id', 'test' );
 		} else {
 			$processor->add_class( 'test' );
 		}
-		$this->assertTrue( $processor->remove_attribute( 'attr' ), 'Failed to remove the attribute.' );
+
+		if ( 'add first' === $order ) {
+			$this->assertTrue( $processor->remove_attribute( 'attr' ), 'Failed to remove the attribute.' );
+		}
+
+		$this->assertTrue( $processor->next_tag( 'path' ), 'Failed to find the PATH tag: check test setup.' );
+		$this->assertTrue( $processor->set_bookmark( 'path' ), 'Failed to set a bookmark on the PATH tag.' );
 
 		$this->assertSame( $expected_html, $processor->get_updated_html(), 'Applying the updates produced unexpected HTML.' );
+
+		$this->assertTrue( $processor->seek( 'path' ), 'Failed to seek to the bookmark.' );
+		$this->assertSame( 'PATH', $processor->get_tag(), 'Seeking to the bookmark landed on the wrong location in the document.' );
+		$this->assertSame( 'x', $processor->get_attribute( 'id' ), 'Failed to find the attribute of the tag at the bookmark.' );
 	}
 
 	/**
@@ -1428,8 +1446,10 @@ class Tests_HtmlApi_WpHtmlTagProcessor extends WP_UnitTestCase {
 	 */
 	public static function data_set_attribute_or_add_class_while_removing_solidus_separated_attribute() {
 		return array(
-			'set_attribute' => array( 'set_attribute', '<g id="test">ok' ),
-			'add_class'     => array( 'add_class', '<g class="test">ok' ),
+			'set_attribute, then remove' => array( 'set_attribute', 'add first', '<g id="test">ok<path id="x">' ),
+			'remove, then set_attribute' => array( 'set_attribute', 'remove first', '<g id="test">ok<path id="x">' ),
+			'add_class, then remove'     => array( 'add_class', 'add first', '<g class="test">ok<path id="x">' ),
+			'remove, then add_class'     => array( 'add_class', 'remove first', '<g class="test">ok<path id="x">' ),
 		);
 	}
 

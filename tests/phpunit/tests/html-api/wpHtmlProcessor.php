@@ -646,6 +646,40 @@ class Tests_HtmlApi_WpHtmlProcessor extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Ensures that removing an attribute preserves a genuine self-closing flag
+	 * and the resulting document structure in foreign content.
+	 *
+	 * @ticket 65372
+	 *
+	 * @covers WP_HTML_Tag_Processor::remove_attribute
+	 */
+	public function test_remove_attribute_preserves_self_closing_foreign_content(): void {
+		$processor = WP_HTML_Processor::create_fragment( '<math><mi /attr/>ok' );
+
+		$this->assertTrue( $processor->next_tag( 'MI' ), 'Failed to find the MI tag: check test setup.' );
+		$this->assertTrue( $processor->has_self_closing_flag(), 'The MI tag must have a self-closing flag: check test setup.' );
+		$this->assertFalse( $processor->expects_closer(), 'The self-closing MI tag must not expect a closer: check test setup.' );
+		$this->assertTrue( $processor->remove_attribute( 'attr' ), 'Failed to remove the attribute.' );
+
+		$updated_html = $processor->get_updated_html();
+		$this->assertSame( '<math><mi />ok', $updated_html, 'Removing the attribute produced unexpected HTML.' );
+
+		$processor = WP_HTML_Processor::create_fragment( $updated_html );
+		$this->assertTrue( $processor->next_tag( 'MI' ), 'Failed to find the MI tag in the updated HTML.' );
+		$this->assertTrue(
+			$processor->has_self_closing_flag(),
+			'Failed to preserve the self-closing flag of the MI tag when removing the attribute.'
+		);
+
+		$this->assertTrue( $processor->next_token(), 'Failed to find text following the MI tag in the updated HTML.' );
+		$this->assertSame(
+			array( 'HTML', 'BODY', 'MATH', '#text' ),
+			$processor->get_breadcrumbs(),
+			'Failed to keep text following the self-closing MI tag outside the MI element.'
+		);
+	}
+
+	/**
 	 * Ensures that expects_closer works for void-like elements in foreign content.
 	 *
 	 * For example, `<svg><input>text` creates an `svg:input` that contains a text node.
