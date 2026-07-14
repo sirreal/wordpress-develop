@@ -1555,11 +1555,11 @@ class Tests_HtmlApi_WpHtmlTagProcessor extends WP_UnitTestCase {
 	 */
 	public static function data_updates_targeting_removed_attribute_spans() {
 		return array(
-			'Removal of a duplicate, exact span'          => array( '<g a a a>ok<path id="x">', 5, 1, '', '<g   >ok<path id="x">' ),
-			'Replacement of a duplicate, exact span'      => array( '<g a a a>ok<path id="x">', 5, 1, 'b', '<g   >ok<path id="x">' ),
-			'Removal within extended duplicate span'      => array( '<g a /a>ok<path id="x">', 6, 1, '', '<g  >ok<path id="x">' ),
-			'Replacement within extended duplicate span'  => array( '<g a /a>ok<path id="x">', 6, 1, 'b', '<g  >ok<path id="x">' ),
-			'Replacement within extended attribute span'  => array( '<g/a>ok<path id="x">', 3, 1, 'b', '<g>ok<path id="x">' ),
+			'Removal of a duplicate, exact span'         => array( '<g a a a>ok<path id="x">', 5, 1, '', '<g   >ok<path id="x">' ),
+			'Replacement of a duplicate, exact span'     => array( '<g a a a>ok<path id="x">', 5, 1, 'b', '<g   >ok<path id="x">' ),
+			'Removal within extended duplicate span'     => array( '<g a /a>ok<path id="x">', 6, 1, '', '<g  >ok<path id="x">' ),
+			'Replacement within extended duplicate span' => array( '<g a /a>ok<path id="x">', 6, 1, 'b', '<g  >ok<path id="x">' ),
+			'Replacement within extended attribute span' => array( '<g/a>ok<path id="x">', 3, 1, 'b', '<g>ok<path id="x">' ),
 		);
 	}
 
