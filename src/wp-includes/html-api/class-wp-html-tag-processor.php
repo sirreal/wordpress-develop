@@ -791,6 +791,12 @@ class WP_HTML_Tag_Processor {
 	 * boundaries, however, so these should never be exposed outside of this
 	 * class or any classes which intentionally expand its functionality.
 	 *
+	 * Any code which creates these lexical updates must also ensure that no
+	 * two updates replace overlapping spans of the document: the cursor and
+	 * bookmark position accounting when applying the updates assumes that
+	 * every update replaces a distinct span. Only zero-length insertions may
+	 * share their offset with another update's span.
+	 *
 	 * These are enqueued while editing the document instead of being immediately
 	 * applied to avoid processing overhead, string allocations, and string
 	 * copies when applying many updates to a single document.
