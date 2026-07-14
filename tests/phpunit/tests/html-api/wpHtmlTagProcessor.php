@@ -1333,6 +1333,62 @@ class Tests_HtmlApi_WpHtmlTagProcessor extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Ensures that removing an attribute does not change how the rest of the tag is parsed.
+	 *
+	 * Solidus characters ("/") may appear before attribute names, where they
+	 * act like attribute separators and are not part of any syntax token. If
+	 * removing an attribute leaves a solidus directly before the tag-closing
+	 * ">", the tag would gain a self-closing flag, changing the meaning of
+	 * the surrounding HTML.
+	 *
+	 * @ticket 65372
+	 *
+	 * @covers WP_HTML_Tag_Processor::remove_attribute
+	 *
+	 * @dataProvider data_remove_attribute_preserves_self_closing_flag
+	 *
+	 * @param string $html          HTML containing an "attr" attribute to remove.
+	 * @param string $expected_html Expected HTML after removing the attribute.
+	 */
+	public function test_remove_attribute_preserves_self_closing_flag( $html, $expected_html ) {
+		$processor = new WP_HTML_Tag_Processor( $html );
+		$this->assertTrue( $processor->next_tag(), 'Failed to find the tag: check test setup.' );
+		$had_self_closing_flag = $processor->has_self_closing_flag();
+
+		$this->assertTrue( $processor->remove_attribute( 'attr' ), 'Failed to remove the attribute.' );
+
+		$updated_html = $processor->get_updated_html();
+		$this->assertSame( $expected_html, $updated_html, 'Attribute removal produced unexpected HTML.' );
+
+		$processor = new WP_HTML_Tag_Processor( $updated_html );
+		$this->assertTrue( $processor->next_tag(), 'Failed to find the tag in the updated HTML.' );
+		$this->assertSame(
+			$had_self_closing_flag,
+			$processor->has_self_closing_flag(),
+			'Attribute removal changed the self-closing flag of the tag.'
+		);
+	}
+
+	/**
+	 * Data provider.
+	 *
+	 * @return array[]
+	 */
+	public static function data_remove_attribute_preserves_self_closing_flag() {
+		return array(
+			'Solidus before the attribute'         => array( '<g /attr>ok', '<g >ok' ),
+			'Multiple solidi before the attribute' => array( '<g //attr>ok', '<g >ok' ),
+			'Solidus after the tag name'           => array( '<g/attr>ok', '<g>ok' ),
+			'Solidus before attribute with value'  => array( '<g /attr=value>ok', '<g >ok' ),
+			'Solidus after another attribute'      => array( '<g id="test"/attr>ok', '<g id="test">ok' ),
+			'Solidus before duplicate attribute'   => array( '<g attr /attr>ok', '<g  >ok' ),
+			'Solidus separated from the attribute' => array( '<g / attr>ok', '<g / >ok' ),
+			'Self-closing tag'                     => array( '<g attr/>ok', '<g />ok' ),
+			'Self-closing tag after solidus'       => array( '<g /attr/>ok', '<g />ok' ),
+		);
+	}
+
+	/**
 	 * @ticket 58119
 	 *
 	 * @since 6.3.2 Removes all duplicated attributes as expected.
