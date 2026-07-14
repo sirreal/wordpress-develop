@@ -1481,6 +1481,38 @@ class Tests_HtmlApi_WpHtmlTagProcessor extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Ensures that removing an attribute removes all of its duplicates even
+	 * when another lexical update targets a duplicate's span.
+	 *
+	 * Duplicate removals are enqueued as a batch, detected by an already-
+	 * enqueued removal of the first duplicate's span. An enqueued update
+	 * over the same span with different replacement text is not a removal
+	 * of that span and must not suppress the duplicate removals.
+	 *
+	 * @ticket 65372
+	 *
+	 * @covers WP_HTML_Tag_Processor::remove_attribute
+	 */
+	public function test_remove_attribute_removes_duplicates_when_another_update_targets_a_duplicate_span() {
+		$processor = new class('<g a a a>ok') extends WP_HTML_Tag_Processor {
+			public function enqueue_replacement( int $start, int $length, string $text ): void {
+				$this->lexical_updates[] = new WP_HTML_Text_Replacement( $start, $length, $text );
+			}
+		};
+
+		$this->assertTrue( $processor->next_tag(), 'Failed to find the tag: check test setup.' );
+
+		// Enqueue an update over the span of the first duplicate "a", at offset 5.
+		$processor->enqueue_replacement( 5, 1, 'b' );
+
+		$this->assertTrue( $processor->remove_attribute( 'a' ), 'Failed to remove the attribute.' );
+
+		$processor = new WP_HTML_Tag_Processor( $processor->get_updated_html() );
+		$this->assertTrue( $processor->next_tag(), 'Failed to find the tag in the updated HTML.' );
+		$this->assertNull( $processor->get_attribute( 'a' ), 'Failed to remove all duplicates of the attribute.' );
+	}
+
+	/**
 	 * @ticket 58119
 	 *
 	 * @since 6.3.2 Removes all duplicated attributes as expected.
