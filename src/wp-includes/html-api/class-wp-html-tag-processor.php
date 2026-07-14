@@ -4773,39 +4773,34 @@ class WP_HTML_Tag_Processor {
 		);
 
 		// Removes any duplicated attributes if they were also present.
-		$duplicate_attributes = $this->duplicate_attributes[ $name ] ?? array();
-		if ( count( $duplicate_attributes ) > 0 ) {
-			/*
-			 * Duplicate removals are enqueued as a batch: if a removal of the
-			 * first duplicate's span is already enqueued, all of them are.
-			 * Repeated removals of the same attribute must not enqueue the
-			 * batch again. Bookmark positions and the internal cursor are
-			 * shifted by every enqueued update when updates are applied, so
-			 * repeated updates for the same span would shift them more than
-			 * the document actually changed.
-			 *
-			 * Only an update with empty replacement text is a removal; other
-			 * updates over the same span must not suppress the batch.
-			 */
-			$first_removal_span = $this->get_attribute_removal_span(
-				$duplicate_attributes[0]->start,
-				$duplicate_attributes[0]->length
+		foreach ( $this->duplicate_attributes[ $name ] ?? array() as $attribute_token ) {
+			$removal_span = $this->get_attribute_removal_span(
+				$attribute_token->start,
+				$attribute_token->length
 			);
+
+			/*
+			 * Enqueue a removal for each duplicate whose span is not already
+			 * updated. Bookmark positions and the internal cursor are shifted
+			 * by every enqueued update when updates are applied, so repeated
+			 * removals of the same attribute must not enqueue removals again.
+			 *
+			 * An update already enqueued over the same span with other
+			 * replacement text is superseded: removing the attribute removes
+			 * the entire span. This also ensures that no two updates replace
+			 * overlapping spans of the document, which the position
+			 * accounting in the update application relies on.
+			 */
+			$is_missing = true;
 			foreach ( $this->lexical_updates as $update ) {
-				if (
-					'' === $update->text &&
-					$first_removal_span->start === $update->start &&
-					$first_removal_span->length === $update->length
-				) {
-					return true;
+				if ( $removal_span->start === $update->start && $removal_span->length === $update->length ) {
+					$update->text = '';
+					$is_missing   = false;
+					break;
 				}
 			}
 
-			foreach ( $duplicate_attributes as $attribute_token ) {
-				$removal_span            = $this->get_attribute_removal_span(
-					$attribute_token->start,
-					$attribute_token->length
-				);
+			if ( $is_missing ) {
 				$this->lexical_updates[] = new WP_HTML_Text_Replacement(
 					$removal_span->start,
 					$removal_span->length,
