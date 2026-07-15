@@ -30,6 +30,7 @@ final class AdminEditMetaBoxesSurface {
 			$rows[] = self::check_publish_box_matrix( $ctx->fork( 'publish-box' ) );
 			$rows[] = self::check_taxonomy_meta_boxes( $ctx->fork( 'taxonomy-boxes' ) );
 			$rows[] = self::check_content_meta_boxes( $ctx->fork( 'content-boxes' ) );
+			$rows[] = self::check_author_meta_box( $ctx->fork( 'author-box' ) );
 			$rows[] = self::check_page_media_and_link_boxes( $ctx->fork( 'page-media-link' ) );
 			$rows[] = self::check_default_registration_matrix( $ctx->fork( 'registration' ) );
 		} catch ( \Throwable $e ) {
@@ -78,6 +79,7 @@ final class AdminEditMetaBoxesSurface {
 				'get_hidden_meta_boxes',
 				'get_post',
 				'get_post_meta',
+				'get_post_type_object',
 				'get_terms_to_edit',
 				'link_advanced_meta_box',
 				'link_submit_meta_box',
@@ -108,6 +110,7 @@ final class AdminEditMetaBoxesSurface {
 				'wp_insert_post',
 				'wp_insert_term',
 				'wp_insert_user',
+				'wp_dropdown_users',
 				'wp_set_current_user',
 				'wp_set_object_terms',
 				'xfn_check',
@@ -582,6 +585,149 @@ final class AdminEditMetaBoxesSurface {
 			'admin-edit-metaboxes.content-comment-and-custom-field-callbacks',
 			$failures,
 			array( 'postId' => $post_id )
+		);
+	}
+
+	private static function check_author_meta_box( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures        = array();
+		$current_user_id = self::seed_user( $ctx->fork( 'current-user' ) );
+		\wp_set_current_user( $current_user_id );
+		\set_current_screen( 'post' );
+
+		$selected_login   = 'cfz_author_' . self::key( $ctx->fork( 'selected-login' ), 'login', 18 );
+		$selected_display = 'Author <' . self::safe_text( $ctx->fork( 'selected-display' ), 4, 12 ) . '> & "Selected"';
+		$selected_user_id = \wp_insert_user(
+			array(
+				'user_login'   => $selected_login,
+				'user_pass'    => 'password',
+				'user_email'   => 'cfz-author-meta-' . $ctx->int( 1000, 9999 ) . '@example.test',
+				'display_name' => $selected_display,
+				'role'         => 'subscriber',
+			)
+		);
+
+		if ( \is_wp_error( $selected_user_id ) ) {
+			self::collect_failure(
+				$failures,
+				false,
+				'wp_insert_user() creates the selected author fixture',
+				array( 'error' => $selected_user_id->get_error_message() )
+			);
+
+			return self::result_from_failures(
+				$ctx,
+				'admin-edit-metaboxes.author-dropdown-override-contracts',
+				$failures,
+				array( 'currentUserId' => $current_user_id )
+			);
+		}
+
+		$selected_user_id = (int) $selected_user_id;
+		$post_id          = self::insert_post(
+			array(
+				'post_type'   => 'post',
+				'post_status' => 'draft',
+				'post_title'  => 'Author override box',
+				'post_author' => $selected_user_id,
+			)
+		);
+		$post             = \get_post( $post_id );
+		$post_type_object = \get_post_type_object( $post->post_type );
+		$edit_posts_cap   = $post_type_object->cap->edit_posts;
+
+		$dropdown_args_seen = array();
+		$dropdown_filter    = static function ( array $query_args, array $parsed_args ) use ( &$dropdown_args_seen, $current_user_id ): array {
+			$filtered_query            = $query_args;
+			$filtered_query['include'] = array( $current_user_id );
+			$filtered_query['fields']  = 'all';
+
+			$dropdown_args_seen[] = array(
+				'query'         => $query_args,
+				'parsed'        => $parsed_args,
+				'filteredQuery' => $filtered_query,
+			);
+
+			return $filtered_query;
+		};
+
+		\add_filter( 'wp_dropdown_users_args', $dropdown_filter, 10, 2 );
+		try {
+			$html = self::capture_output(
+				static function () use ( $post ): void {
+					\post_author_meta_box( $post );
+				}
+			);
+		} finally {
+			\remove_filter( 'wp_dropdown_users_args', $dropdown_filter, 10 );
+		}
+
+		$dropdown_args = $dropdown_args_seen[0] ?? array();
+		$query_args    = $dropdown_args['query'] ?? array();
+		$parsed_args   = $dropdown_args['parsed'] ?? array();
+		$filtered_args = $dropdown_args['filteredQuery'] ?? array();
+		$filtered_ids  = array_map( 'intval', (array) ( $filtered_args['include'] ?? array() ) );
+
+		$raw_selected_label     = sprintf( '%s (%s)', $selected_display, $selected_login );
+		$escaped_selected_label = \esc_html( $raw_selected_label );
+
+		self::collect_failure(
+			$failures,
+			str_contains( $html, 'for="post_author_override"' )
+				&& str_contains( $html, "name='post_author_override'" )
+				&& str_contains( $html, "id='post_author_override'" ),
+			'post_author_meta_box() renders the author override dropdown name/id contract',
+			array( 'html' => self::describe_string( $html ) )
+		);
+		self::collect_failure(
+			$failures,
+			in_array( $current_user_id, $filtered_ids, true )
+				&& ! in_array( $selected_user_id, $filtered_ids, true )
+				&& self::option_is_selected( $html, (string) $selected_user_id ),
+			'post_author_meta_box() selects the post author even when include_selected must append it to the filtered user query',
+			array(
+				'currentUserId'    => $current_user_id,
+				'selectedAuthorId' => $selected_user_id,
+				'filteredUserIds'  => $filtered_ids,
+				'html'             => self::describe_string( $html ),
+			)
+		);
+		self::collect_failure(
+			$failures,
+			isset( $query_args['capability'], $parsed_args['selected'], $parsed_args['include_selected'], $parsed_args['show'] )
+				&& array( $edit_posts_cap ) === $query_args['capability']
+				&& 'post_author_override' === ( $parsed_args['name'] ?? null )
+				&& $selected_user_id === (int) $parsed_args['selected']
+				&& true === $parsed_args['include_selected']
+				&& 'display_name_with_login' === $parsed_args['show']
+				&& in_array( 'display_name', (array) ( $query_args['fields'] ?? array() ), true ),
+			'post_author_meta_box() passes the expected author dropdown query and display arguments',
+			array(
+				'expectedCapability' => $edit_posts_cap,
+				'dropdownArgs'       => $dropdown_args_seen,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			str_contains( $html, $escaped_selected_label )
+				&& ! str_contains( $html, $raw_selected_label ),
+			'post_author_meta_box() escapes display_name_with_login option labels',
+			array(
+				'rawLabel'     => $raw_selected_label,
+				'escapedLabel' => $escaped_selected_label,
+				'html'         => self::describe_string( $html ),
+			)
+		);
+
+		return self::result_from_failures(
+			$ctx,
+			'admin-edit-metaboxes.author-dropdown-override-contracts',
+			$failures,
+			array(
+				'postId'           => $post_id,
+				'currentUserId'    => $current_user_id,
+				'selectedAuthorId' => $selected_user_id,
+				'dropdownArgs'     => $dropdown_args_seen,
+			)
 		);
 	}
 
