@@ -291,9 +291,10 @@ minimizations are retried on later scans, up to `--max-minimize-retries`
 
 ## Modes and Fragment Contexts
 
-- `fragment-body`: parse as a fragment. The selected oracle uses real fragment
-  parsing (the `innerHTML` setter on a context element of an empty document),
-  not a document-wrapping approximation.
+- `fragment-body`: parse as a contextual fragment using the selected engine's
+  native mechanism: `lxb_html_parse_fragment_by_tag_id()` for Lexbor,
+  `parse_fragment()` for html5ever, or `Range.createContextualFragment()` for
+  Chrome. This is not a document-wrapping approximation.
 - `full-document`: parse as a full HTML document.
 - `auto`: weighted choice.
 
