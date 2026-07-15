@@ -97,8 +97,10 @@ tools/html-api-fuzz/preflight.sh
 # or: MAX_SEEDS=250 ./run.sh
 ```
 
-The verifier requires identical `(seed,input_sha1)` rows, exact recorded pins,
-and no oracle/worker infrastructure failures across the three result stores.
+The verifier requires an exact finite row count with no duplicate seeds, valid
+and identical `(seed,input_sha1)` rows, exact recorded pins, one persistent
+Chrome browser PID, and no oracle/worker infrastructure failures across the
+three result stores.
 
 Run indefinitely:
 

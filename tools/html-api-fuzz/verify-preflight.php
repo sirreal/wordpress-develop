@@ -15,6 +15,14 @@ $seed_stride = \HtmlApiFuzz\option_int( $options, 'seed-stride', 1 );
 if ( null === $run_dir || $max_seeds < 1 || $seed_stride < 1 ) {
 	html_api_fuzz_preflight_fail( 'Expected --run-dir, positive --max-seeds, and positive --seed-stride.' );
 }
+if ( $max_seeds > intdiv( PHP_INT_MAX, $seed_stride ) ) {
+	html_api_fuzz_preflight_fail( '--max-seeds * --seed-stride exceeds the PHP integer range.' );
+}
+$seed_delta = $max_seeds * $seed_stride;
+if ( $start_seed > PHP_INT_MAX - $seed_delta ) {
+	html_api_fuzz_preflight_fail( 'The final nextSeed exceeds the PHP integer range.' );
+}
+$expected_next_seed = $start_seed + $seed_delta;
 
 $definitions = array(
 	'lexbor' => array(
@@ -52,6 +60,8 @@ $infrastructure_failures = array(
 	'oracle-renderer-error',
 	'fatal-error',
 	'worker-timeout',
+	'worker-failed',
+	'timeout',
 );
 
 foreach ( $definitions as $label => $definition ) {
@@ -62,6 +72,13 @@ foreach ( $definitions as $label => $definition ) {
 	}
 	if ( 'max-seeds' !== ( $state['stopReason'] ?? null ) ) {
 		html_api_fuzz_preflight_fail( "{$label} stopped for " . ( $state['stopReason'] ?? 'unknown' ) . '.' );
+	}
+	if (
+		$start_seed !== ( $state['startSeed'] ?? null ) ||
+		$seed_stride !== ( $state['seedStride'] ?? null ) ||
+		$expected_next_seed !== ( $state['nextSeed'] ?? null )
+	) {
+		html_api_fuzz_preflight_fail( "{$label} recorded inconsistent seed bounds." );
 	}
 	$oracle = is_array( $state['oracle'] ?? null ) ? $state['oracle'] : array();
 	if ( $definition['kind'] !== ( $oracle['kind'] ?? null ) ) {
@@ -83,22 +100,52 @@ foreach ( $definitions as $label => $definition ) {
 
 	$db = new SQLite3( $directory . '/' . \HtmlApiFuzz\ResultStore::FILENAME, SQLITE3_OPEN_READONLY );
 	$inputs = array();
+	$attempted_seeds = array();
+	$seen_seeds = array();
 	$statuses = array();
-	$result = $db->query( 'SELECT seed, input_sha1, status, failure_class, worker_timed_out, oracle_kind FROM attempts ORDER BY id' );
+	$row_count = 0;
+	$result = $db->query( 'SELECT id, seed, ok, input_sha1, status, failure_class, worker_code, worker_timed_out, oracle_kind, oracle_browser_pid FROM attempts ORDER BY id' );
 	while ( $row = $result->fetchArray( SQLITE3_ASSOC ) ) {
-		$seed = (int) $row['seed'];
-		$inputs[ $seed ] = $row['input_sha1'];
+		++$row_count;
+		if ( ! is_int( $row['seed'] ) ) {
+			html_api_fuzz_preflight_fail( "{$label} attempt {$row['id']} recorded an invalid seed scalar." );
+		}
+		$seed = $row['seed'];
+		if ( array_key_exists( $seed, $seen_seeds ) ) {
+			html_api_fuzz_preflight_fail( "{$label} recorded duplicate seed {$seed}." );
+		}
+		$seen_seeds[ $seed ] = true;
+		$attempted_seeds[] = $seed;
+		if ( ! is_string( $row['input_sha1'] ) || 1 !== preg_match( '/^[0-9a-f]{40}$/', $row['input_sha1'] ) ) {
+			html_api_fuzz_preflight_fail( "{$label} seed {$seed} did not record a valid input SHA-1." );
+		}
+		$inputs[] = array( $seed, $row['input_sha1'] );
 		$status = (string) $row['status'];
 		$statuses[ $status ] = ( $statuses[ $status ] ?? 0 ) + 1;
+		if ( ! is_int( $row['ok'] ) || ! in_array( $row['ok'], array( 0, 1 ), true ) ) {
+			html_api_fuzz_preflight_fail( "{$label} seed {$seed} recorded an invalid ok value." );
+		}
+		if ( ! is_int( $row['worker_code'] ) || ! in_array( $row['worker_code'], array( 0, 2 ), true ) || ( 1 === $row['ok'] && 0 !== $row['worker_code'] ) ) {
+			html_api_fuzz_preflight_fail( "{$label} seed {$seed} recorded inconsistent worker status." );
+		}
+		if ( ! is_int( $row['worker_timed_out'] ) || 0 !== $row['worker_timed_out'] ) {
+			html_api_fuzz_preflight_fail( "{$label} seed {$seed} recorded an invalid worker timeout flag." );
+		}
 		if ( $definition['kind'] !== $row['oracle_kind'] ) {
 			html_api_fuzz_preflight_fail( "{$label} attempt {$seed} recorded the wrong oracle." );
 		}
-		if ( 0 !== (int) $row['worker_timed_out'] || in_array( $row['failure_class'], $infrastructure_failures, true ) ) {
+		if ( in_array( $status, array( 'worker-failed', 'timeout' ), true ) || in_array( $row['failure_class'], $infrastructure_failures, true ) ) {
 			html_api_fuzz_preflight_fail( "{$label} seed {$seed} had infrastructure failure " . ( $row['failure_class'] ?? 'worker-timeout' ) . '.' );
+		}
+		if ( \HtmlApiFuzz\OracleRenderer::KIND_CHROME_CDP === $definition['kind'] && ( ! is_int( $row['oracle_browser_pid'] ) || $row['oracle_browser_pid'] !== $oracle['browserPid'] ) ) {
+			html_api_fuzz_preflight_fail( "Chrome seed {$seed} did not use the pinned live browser PID." );
 		}
 	}
 	$db->close();
-	if ( array_keys( $inputs ) !== $expected_seeds ) {
+	if ( $row_count !== $max_seeds ) {
+		html_api_fuzz_preflight_fail( "{$label} recorded {$row_count} rows instead of {$max_seeds}." );
+	}
+	if ( $attempted_seeds !== $expected_seeds ) {
 		html_api_fuzz_preflight_fail( "{$label} did not attempt the exact requested seed sequence." );
 	}
 	if ( null === $baseline_inputs ) {
@@ -110,7 +157,7 @@ foreach ( $definitions as $label => $definition ) {
 	$summary[ $label ] = array(
 		'oracle'   => $definition['kind'],
 		'pin'      => $definition['pin'],
-		'attempts' => count( $inputs ),
+		'attempts' => $row_count,
 		'statuses' => $statuses,
 	);
 }
