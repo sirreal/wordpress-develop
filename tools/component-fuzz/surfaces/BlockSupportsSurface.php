@@ -32,6 +32,7 @@ final class BlockSupportsSurface {
 			$case = self::case_for_context( $ctx );
 
 			$rows[] = self::check_registration_and_direct_callbacks( $ctx, $case );
+			$rows[] = self::check_style_support_callbacks( $ctx, $case );
 			$rows[] = self::check_wrapper_merge_and_skip_serialization( $ctx, $case );
 			$rows[] = self::check_render_filters( $ctx, $case );
 			$rows[] = self::check_elements_and_custom_css_filters( $ctx, $case );
@@ -267,6 +268,186 @@ final class BlockSupportsSurface {
 			array() === $failures,
 			array( 'failures' => array_slice( $failures, 0, 6 ) )
 		);
+	}
+
+	private static function check_style_support_callbacks( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures    = array();
+		$name        = $case['blockName'] . '-style-callbacks';
+		$unsupported = $case['blockName'] . '-style-callbacks-unsupported';
+
+		\unregister_block_type( $name );
+		\unregister_block_type( $unsupported );
+
+		try {
+			$block_type       = \register_block_type(
+				$name,
+				array(
+					'title'      => 'Component Fuzz Style Callbacks',
+					'supports'   => self::base_supports(),
+					'attributes' => self::base_attributes(),
+					'selectors'  => self::base_selectors(),
+				)
+			);
+			$unsupported_type = \register_block_type(
+				$unsupported,
+				array(
+					'title'      => 'Component Fuzz Style Callbacks Unsupported',
+					'supports'   => array(
+						'color'                => false,
+						'spacing'              => false,
+						'typography'           => false,
+						'dimensions'           => false,
+						'shadow'               => false,
+						'__experimentalBorder' => false,
+					),
+					'attributes' => self::base_attributes(),
+					'selectors'  => self::base_selectors(),
+				)
+			);
+			\WP_Block_Supports::init();
+
+			self::collect_failure(
+				$failures,
+				$block_type instanceof \WP_Block_Type && $unsupported_type instanceof \WP_Block_Type,
+				'style callback block types register',
+				array(
+					'name'        => $name,
+					'unsupported' => $unsupported,
+				)
+			);
+
+			if ( ! $block_type instanceof \WP_Block_Type || ! $unsupported_type instanceof \WP_Block_Type ) {
+				return self::result(
+					$ctx,
+					'block-supports.style-callbacks.direct-output',
+					false,
+					array( 'failures' => $failures )
+				);
+			}
+
+			$attrs                                      = self::support_attributes( $case );
+			$attrs['borderColor']                       = $case['slug'];
+			$attrs['fontFamily']                        = $case['slug'];
+			$attrs['style']['color']['gradient']        = 'linear-gradient(135deg,#112233,#445566)';
+			$attrs['style']['spacing']['blockGap']      = $case['gap'];
+			$attrs['style']['dimensions']['aspectRatio'] = '16 / 9';
+			$attrs['style']['shadow']                   = 'var:preset|shadow|natural';
+
+			$outputs             = self::style_support_callback_outputs( $block_type, $attrs );
+			$empty_outputs       = self::style_support_callback_outputs( $block_type, array() );
+			$unsupported_outputs = self::style_support_callback_outputs( $unsupported_type, $attrs );
+
+			$class_slug            = self::preset_class_slug( $case['slug'] );
+			$background_class_slug = self::preset_class_slug( $case['slug'] . '-background' );
+			$combined_styles       = implode(
+				'',
+				array_map(
+					static fn( array $output ): string => (string) ( $output['style'] ?? '' ),
+					$outputs
+				)
+			);
+
+			$color_class = (string) ( $outputs['color']['class'] ?? '' );
+			$color_style = (string) ( $outputs['color']['style'] ?? '' );
+
+			self::collect_failure(
+				$failures,
+				str_contains( $color_class, 'has-text-color' )
+					&& str_contains( $color_class, 'has-' . $class_slug . '-color' )
+					&& str_contains( $color_class, 'has-background' )
+					&& str_contains( $color_class, 'has-' . $background_class_slug . '-background-color' )
+					&& self::css_contains_declaration( $color_style, 'background', 'linear-gradient(135deg,#112233,#445566)' ),
+				'color callback emits preset text/background classes and inline custom gradient CSS',
+				array( 'color' => $outputs['color'] )
+			);
+
+			$spacing_style = (string) ( $outputs['spacing']['style'] ?? '' );
+
+			self::collect_failure(
+				$failures,
+				self::css_contains_declaration( $spacing_style, 'padding-top', $case['gap'] )
+					&& self::css_contains_declaration( $spacing_style, 'padding-bottom', $case['gap'] )
+					&& self::css_contains_declaration( $spacing_style, 'margin-top', '2px' )
+					&& ! str_contains( $spacing_style, 'gap:' ),
+				'spacing callback emits padding and margin CSS while leaving block gap to layout serialization',
+				array( 'spacing' => $outputs['spacing'] )
+			);
+
+			$border_class = (string) ( $outputs['border']['class'] ?? '' );
+			$border_style = (string) ( $outputs['border']['style'] ?? '' );
+
+			self::collect_failure(
+				$failures,
+				str_contains( $border_class, 'has-border-color' )
+					&& str_contains( $border_class, 'has-' . $class_slug . '-border-color' )
+					&& self::css_contains_declaration( $border_style, 'border-radius', '4px' )
+					&& self::css_contains_declaration( $border_style, 'border-style', 'solid' )
+					&& self::css_contains_declaration( $border_style, 'border-width', '1px' ),
+				'border callback emits preset border color class plus radius, style, and width CSS',
+				array( 'border' => $outputs['border'] )
+			);
+
+			$typography_class = (string) ( $outputs['typography']['class'] ?? '' );
+			$typography_style = (string) ( $outputs['typography']['style'] ?? '' );
+
+			self::collect_failure(
+				$failures,
+				str_contains( $typography_class, 'has-' . $class_slug . '-font-size' )
+					&& str_contains( $typography_class, 'has-' . $class_slug . '-font-family' )
+					&& str_contains( $typography_class, 'has-text-align-right' )
+					&& self::css_contains_declaration( $typography_style, 'line-height', $case['lineHeight'] )
+					&& self::css_contains_declaration( $typography_style, 'font-style', 'italic' )
+					&& self::css_contains_declaration( $typography_style, 'font-weight', '600' ),
+				'typography callback emits preset font classes, text alignment, and inline type CSS',
+				array( 'typography' => $outputs['typography'] )
+			);
+
+			$dimensions_style = (string) ( $outputs['dimensions']['style'] ?? '' );
+
+			self::collect_failure(
+				$failures,
+				self::css_contains_declaration( $dimensions_style, 'min-height', '20px' )
+					&& self::css_contains_declaration( $dimensions_style, 'height', '40px' )
+					&& self::css_contains_declaration( $dimensions_style, 'width', '80%' )
+					&& ! str_contains( $dimensions_style, 'aspect-ratio' ),
+				'dimensions callback emits direct dimension CSS and does not leak aspect ratio render-only data',
+				array( 'dimensions' => $outputs['dimensions'] )
+			);
+
+			self::collect_failure(
+				$failures,
+				self::css_contains_declaration(
+					(string) ( $outputs['shadow']['style'] ?? '' ),
+					'box-shadow',
+					'var(--wp--preset--shadow--natural)'
+				),
+				'shadow callback emits preset shadow CSS',
+				array( 'shadow' => $outputs['shadow'] )
+			);
+
+			self::collect_failure(
+				$failures,
+				self::css_is_safe( $combined_styles )
+					&& self::style_support_outputs_are_empty( $empty_outputs )
+					&& self::style_support_outputs_are_empty( $unsupported_outputs ),
+				'style callback CSS is safe and unsupported or empty attributes fail closed',
+				array(
+					'combinedStyles' => self::preview( $combined_styles ),
+					'empty'          => $empty_outputs,
+					'unsupported'    => $unsupported_outputs,
+				)
+			);
+
+			return self::result(
+				$ctx,
+				'block-supports.style-callbacks.direct-output',
+				array() === $failures,
+				array( 'failures' => array_slice( $failures, 0, 6 ) )
+			);
+		} finally {
+			\unregister_block_type( $name );
+			\unregister_block_type( $unsupported );
+		}
 	}
 
 	private static function check_wrapper_merge_and_skip_serialization( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
@@ -1462,6 +1643,38 @@ final class BlockSupportsSurface {
 		}
 
 		return false;
+	}
+
+	private static function style_support_callback_outputs( \WP_Block_Type $block_type, array $attributes ): array {
+		return array(
+			'color'      => \wp_apply_colors_support( $block_type, $attributes ),
+			'spacing'    => \wp_apply_spacing_support( $block_type, $attributes ),
+			'border'     => \wp_apply_border_support( $block_type, $attributes ),
+			'typography' => \wp_apply_typography_support( $block_type, $attributes ),
+			'dimensions' => \wp_apply_dimensions_support( $block_type, $attributes ),
+			'shadow'     => \wp_apply_shadow_support( $block_type, $attributes ),
+		);
+	}
+
+	private static function style_support_outputs_are_empty( array $outputs ): bool {
+		foreach ( $outputs as $output ) {
+			if ( array() !== $output ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function preset_class_slug( string $slug ): string {
+		if ( function_exists( '_wp_to_kebab_case' ) ) {
+			return \_wp_to_kebab_case( $slug );
+		}
+
+		$slug = preg_replace( '/(?<!^)[A-Z]/', '-$0', $slug );
+		$slug = str_replace( array( '_', ' ' ), '-', (string) $slug );
+
+		return strtolower( $slug );
 	}
 
 	private static function css_is_safe( string $css ): bool {
