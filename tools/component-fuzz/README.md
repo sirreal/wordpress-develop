@@ -38,6 +38,9 @@ database, network requests, or a configured site.
 - `admin-dashboard`: no-live-DB admin dashboard API coverage, including
   dashboard widget registration/control callbacks, meta-box context and
   priority normalization, dashboard container rendering across column counts,
+  direct At a Glance/right-now widget rendering for publish-only post/page
+  counts, comment counts, dashboard-glance items, privacy and version/theme
+  messages, and rightnow/activity hook output,
   safe recent draft/post/comment output helpers, activity post query
   argument/link branches, cached RSS loading/AJAX/cache replay branches,
   Browser Happy remote/cache failure and rendering branches, direct

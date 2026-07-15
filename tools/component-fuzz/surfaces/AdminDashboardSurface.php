@@ -32,6 +32,7 @@ final class AdminDashboardSurface {
 			$rows[] = self::check_widget_registration( $ctx->fork( 'widget-registration' ) );
 			$rows[] = self::check_widget_control_callbacks( $ctx->fork( 'widget-controls' ) );
 			$rows[] = self::check_dashboard_rendering( $ctx->fork( 'dashboard-rendering' ) );
+			$rows[] = self::check_right_now_widget_rendering( $ctx->fork( 'right-now' ) );
 			$rows[] = self::check_recent_drafts_rendering( $ctx->fork( 'recent-drafts' ) );
 			$rows[] = self::check_recent_posts_rendering( $ctx->fork( 'recent-posts' ) );
 			$rows[] = self::check_recent_comment_rows( $ctx->fork( 'recent-comment-row' ) );
@@ -72,6 +73,11 @@ final class AdminDashboardSurface {
 		if ( ! function_exists( 'wp_check_php_version' ) && $misc_file && file_exists( $misc_file ) ) {
 			require_once $misc_file;
 		}
+
+		$update_file = defined( 'ABSPATH' ) ? ABSPATH . 'wp-admin/includes/update.php' : '';
+		if ( ! function_exists( 'update_right_now_message' ) && $update_file && file_exists( $update_file ) ) {
+			require_once $update_file;
+		}
 	}
 
 	private static function missing_requirements(): array {
@@ -89,6 +95,7 @@ final class AdminDashboardSurface {
 				'_wp_dashboard_recent_comments_row',
 				'add_action',
 				'add_filter',
+				'add_query_arg',
 				'add_meta_box',
 				'admin_url',
 				'convert_to_screen',
@@ -101,9 +108,15 @@ final class AdminDashboardSurface {
 				'esc_url',
 				'get_current_screen',
 				'get_edit_post_link',
+				'get_bloginfo',
+				'get_option',
+				'get_post_type_object',
 				'get_transient',
 				'get_user_locale',
 				'has_filter',
+				'is_network_admin',
+				'is_user_admin',
+				'number_format_i18n',
 				'post_type_exists',
 				'remove_action',
 				'remove_filter',
@@ -111,12 +124,16 @@ final class AdminDashboardSurface {
 				'set_site_transient',
 				'set_transient',
 				'submit_button',
+				'update_right_now_message',
 				'wp_add_dashboard_widget',
 				'wp_admin_notice',
 				'wp_cache_flush',
+				'wp_count_comments',
+				'wp_count_posts',
 				'wp_create_nonce',
 				'wp_dashboard',
 				'wp_dashboard_cached_rss_widget',
+				'wp_dashboard_right_now',
 				'wp_dashboard_recent_comments',
 				'wp_dashboard_recent_drafts',
 				'wp_dashboard_recent_posts',
@@ -126,6 +143,7 @@ final class AdminDashboardSurface {
 				'wp_doing_ajax',
 				'wp_get_admin_notice',
 				'wp_insert_user',
+				'wp_get_theme',
 				'wp_nonce_field',
 				'wp_print_community_events_markup',
 				'wp_print_community_events_templates',
@@ -476,6 +494,255 @@ final class AdminDashboardSurface {
 			'admin-dashboard.rendering.columns-contexts-nonces',
 			$failures,
 			array( 'seen' => $seen )
+		);
+	}
+
+	private static function check_right_now_widget_rendering( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures      = array();
+		$case_summaries = array();
+		$cases         = array(
+			'singular' => array(
+				'posts'     => 1,
+				'pages'     => 1,
+				'approved'  => 1,
+				'moderated' => 1,
+			),
+			'plural'   => array(
+				'posts'     => 2 + $ctx->int( 0, 2 ),
+				'pages'     => 3 + $ctx->int( 0, 2 ),
+				'approved'  => 3 + $ctx->int( 0, 3 ),
+				'moderated' => 0,
+			),
+		);
+
+		foreach ( $cases as $label => $case ) {
+			self::reset_runtime();
+			$options = self::options_snapshot();
+			if ( is_array( $options ) && isset( $GLOBALS['wpdb'] ) && method_exists( $GLOBALS['wpdb'], 'component_fuzz_reset_options' ) ) {
+				$options['blog_public'] = array(
+					'autoload'     => 'auto',
+					'option_value' => '0',
+				);
+				$GLOBALS['wpdb']->component_fuzz_reset_options( $options );
+			}
+
+			$user_id = self::seed_user( $ctx->fork( 'right-now-user-' . $label ) );
+			\wp_set_current_user( $user_id );
+			self::seed_right_now_posts( $ctx->fork( 'right-now-posts-' . $label ), 'post', (int) $case['posts'], 'Right Now Post ' . $label );
+			self::seed_right_now_posts( $ctx->fork( 'right-now-pages-' . $label ), 'page', (int) $case['pages'], 'Right Now Page ' . $label );
+			self::insert_post(
+				array(
+					'post_author' => $user_id,
+					'post_status' => 'draft',
+					'post_type'   => 'post',
+					'post_title'  => 'Draft should not appear ' . $label,
+				)
+			);
+			if ( function_exists( 'wp_cache_flush' ) ) {
+				\wp_cache_flush();
+			}
+
+			$glance_calls = 0;
+			$comment_calls = array();
+			$privacy_title_calls = 0;
+			$privacy_text_calls = 0;
+			$version_text_calls = 0;
+			$rightnow_calls = 0;
+			$activity_calls = 0;
+			$glance_marker = 'cfz-glance-' . self::slug( $ctx->fork( 'glance-' . $label ), 'glance' );
+			$privacy_title = 'Search indexing disabled ' . self::slug( $ctx->fork( 'privacy-title-' . $label ), 'privacy' );
+			$privacy_text  = 'Indexing off ' . self::slug( $ctx->fork( 'privacy-text-' . $label ), 'privacy' );
+			$version_text  = 'CFZ version %1$s using %2$s.';
+
+			$glance_filter = static function ( array $items ) use ( &$glance_calls, $glance_marker ): array {
+				++$glance_calls;
+				$items[] = '<span class="cfz-glance-item">' . \esc_html( $glance_marker ) . '</span>';
+				return $items;
+			};
+			$comment_filter = static function ( $count, int $post_id ) use ( &$comment_calls, $case ) {
+				$comment_calls[] = array(
+					'inputType' => is_object( $count ) ? get_class( $count ) : gettype( $count ),
+					'postId'    => $post_id,
+				);
+				return (object) array(
+					'approved'       => (int) $case['approved'],
+					'moderated'      => (int) $case['moderated'],
+					'spam'           => 0,
+					'trash'          => 0,
+					'post-trashed'   => 0,
+					'total_comments' => (int) $case['approved'] + (int) $case['moderated'],
+					'all'            => (int) $case['approved'] + (int) $case['moderated'],
+				);
+			};
+			$privacy_title_filter = static function () use ( &$privacy_title_calls, $privacy_title ): string {
+				++$privacy_title_calls;
+				return $privacy_title;
+			};
+			$privacy_text_filter = static function () use ( &$privacy_text_calls, $privacy_text ): string {
+				++$privacy_text_calls;
+				return $privacy_text;
+			};
+			$version_text_filter = static function () use ( &$version_text_calls, $version_text ): string {
+				++$version_text_calls;
+				return $version_text;
+			};
+			$rightnow_action = static function () use ( &$rightnow_calls, $label ): void {
+				++$rightnow_calls;
+				echo '<span class="cfz-rightnow-end">rightnow-' . \esc_html( $label ) . '</span>';
+			};
+			$activity_action = static function () use ( &$activity_calls, $label ): void {
+				++$activity_calls;
+				echo '<span class="cfz-activity-end">activity-' . \esc_html( $label ) . '</span>';
+			};
+
+			try {
+				\add_filter( 'dashboard_glance_items', $glance_filter, 10, 1 );
+				\add_filter( 'wp_count_comments', $comment_filter, 10, 2 );
+				\add_filter( 'privacy_on_link_title', $privacy_title_filter, 10, 1 );
+				\add_filter( 'privacy_on_link_text', $privacy_text_filter, 10, 1 );
+				\add_filter( 'update_right_now_text', $version_text_filter, 10, 1 );
+				\add_action( 'rightnow_end', $rightnow_action, 10, 0 );
+				\add_action( 'activity_box_end', $activity_action, 10, 0 );
+
+				$html = self::with_capabilities(
+					array( 'edit_posts', 'edit_pages', 'manage_options', 'read', 'switch_themes' ),
+					static function (): string {
+						return self::capture_output(
+							static function (): void {
+								\wp_dashboard_right_now();
+							}
+						);
+					}
+				);
+			} finally {
+				\remove_action( 'activity_box_end', $activity_action, 10 );
+				\remove_action( 'rightnow_end', $rightnow_action, 10 );
+				\remove_filter( 'update_right_now_text', $version_text_filter, 10 );
+				\remove_filter( 'privacy_on_link_text', $privacy_text_filter, 10 );
+				\remove_filter( 'privacy_on_link_title', $privacy_title_filter, 10 );
+				\remove_filter( 'wp_count_comments', $comment_filter, 10 );
+				\remove_filter( 'dashboard_glance_items', $glance_filter, 10 );
+			}
+
+			$post_text = sprintf( _n( '%s Published post', '%s Published posts', (int) $case['posts'] ), \number_format_i18n( (int) $case['posts'] ) );
+			$page_text = sprintf( _n( '%s Published page', '%s Published pages', (int) $case['pages'] ), \number_format_i18n( (int) $case['pages'] ) );
+			$comment_text = sprintf( _n( '%s Comment', '%s Comments', (int) $case['approved'] ), \number_format_i18n( (int) $case['approved'] ) );
+			$moderated_text = sprintf( _n( '%s Comment in moderation', '%s Comments in moderation', (int) $case['moderated'] ), \number_format_i18n( (int) $case['moderated'] ) );
+			$expected_post_url = \esc_url(
+				add_query_arg(
+					array(
+						'post_status' => 'publish',
+						'post_type'   => 'post',
+					),
+					admin_url( 'edit.php' )
+				)
+			);
+			$expected_page_url = \esc_url(
+				add_query_arg(
+					array(
+						'post_status' => 'publish',
+						'post_type'   => 'page',
+					),
+					admin_url( 'edit.php' )
+				)
+			);
+			$hooks_removed = false === \has_filter( 'dashboard_glance_items', $glance_filter )
+				&& false === \has_filter( 'wp_count_comments', $comment_filter )
+				&& false === \has_filter( 'privacy_on_link_title', $privacy_title_filter )
+				&& false === \has_filter( 'privacy_on_link_text', $privacy_text_filter )
+				&& false === \has_filter( 'update_right_now_text', $version_text_filter )
+				&& false === \has_filter( 'rightnow_end', $rightnow_action )
+				&& false === \has_filter( 'activity_box_end', $activity_action );
+
+			$case_summaries[ $label ] = array(
+				'postText'     => $post_text,
+				'pageText'     => $page_text,
+				'commentText'  => $comment_text,
+				'moderated'    => (int) $case['moderated'],
+				'htmlHash'     => sha1( $html ),
+				'glanceCalls'  => $glance_calls,
+				'commentCalls' => $comment_calls,
+			);
+
+			self::collect_failure(
+				$failures,
+				str_contains( $html, '<li class="post-count"><a href="' . $expected_post_url . '">' . \esc_html( $post_text ) . '</a></li>' )
+					&& str_contains( $html, '<li class="page-count"><a href="' . $expected_page_url . '">' . \esc_html( $page_text ) . '</a></li>' )
+					&& ! str_contains( $html, 'Draft should not appear' )
+					&& 1 === substr_count( $html, 'class="post-count"' )
+					&& 1 === substr_count( $html, 'class="page-count"' ),
+				'wp_dashboard_right_now() renders publish-only post and page counts with capability-gated edit links',
+				array(
+					'label'       => $label,
+					'postText'    => $post_text,
+					'pageText'    => $page_text,
+					'postUrl'     => $expected_post_url,
+					'pageUrl'     => $expected_page_url,
+					'htmlPreview' => self::preview_string( $html ),
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				str_contains( $html, '<li class="comment-count">' )
+					&& str_contains( $html, '<a href="edit-comments.php">' . $comment_text . '</a>' )
+					&& str_contains( $html, 'class="comments-in-moderation-text">' . $moderated_text . '</a>' )
+					&& ( (int) $case['moderated'] > 0 ? ! str_contains( $html, 'comment-mod-count hidden' ) : str_contains( $html, 'comment-mod-count hidden' ) )
+					&& array( array( 'inputType' => 'array', 'postId' => 0 ) ) === $comment_calls,
+				'wp_dashboard_right_now() renders approved and moderation comment counts from wp_count_comments()',
+				array(
+					'label'         => $label,
+					'commentText'   => $comment_text,
+					'moderatedText' => $moderated_text,
+					'commentCalls'  => $comment_calls,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				1 === $glance_calls
+					&& str_contains( $html, '<span class="cfz-glance-item">' . \esc_html( $glance_marker ) . '</span>' )
+					&& 1 === $privacy_title_calls
+					&& 1 === $privacy_text_calls
+					&& str_contains( $html, "<p class='search-engines-info'><a href='options-reading.php' title='" . $privacy_title . "'>" . $privacy_text . '</a></p>' ),
+				'wp_dashboard_right_now() renders dashboard_glance_items and search-engine privacy filters exactly once',
+				array(
+					'label'             => $label,
+					'glanceCalls'       => $glance_calls,
+					'privacyTitleCalls' => $privacy_title_calls,
+					'privacyTextCalls'  => $privacy_text_calls,
+					'marker'            => $glance_marker,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				1 === $version_text_calls
+					&& str_contains( $html, '<p id=\'wp-version-message\'>' )
+					&& str_contains( $html, '<span id="wp-version">CFZ version ' )
+					&& str_contains( $html, '<a href="themes.php">' )
+					&& 1 === $rightnow_calls
+					&& 1 === $activity_calls
+					&& str_contains( $html, '<div class="sub">' )
+					&& str_contains( $html, '<span class="cfz-rightnow-end">rightnow-' . $label . '</span>' )
+					&& str_contains( $html, '<span class="cfz-activity-end">activity-' . $label . '</span>' )
+					&& $hooks_removed,
+				'wp_dashboard_right_now() renders version/theme text plus rightnow/activity hook output and cleans temporary hooks',
+				array(
+					'label'            => $label,
+					'versionTextCalls' => $version_text_calls,
+					'rightnowCalls'    => $rightnow_calls,
+					'activityCalls'    => $activity_calls,
+					'hooksRemoved'     => $hooks_removed,
+				)
+			);
+		}
+
+		return self::result(
+			$ctx,
+			'admin-dashboard.right-now.counts-filters-hooks',
+			$failures,
+			array( 'cases' => $case_summaries )
 		);
 	}
 
@@ -2288,6 +2555,30 @@ final class AdminDashboardSurface {
 		}
 
 		return (int) $wpdb->insert_id;
+	}
+
+	private static function seed_right_now_posts( \ComponentFuzz\FuzzContext $ctx, string $post_type, int $count, string $label ): array {
+		$ids = array();
+		for ( $i = 0; $i < $count; ++$i ) {
+			$date = new \DateTimeImmutable( '2026-07-01 12:00:00', new \DateTimeZone( 'UTC' ) );
+			$date = $date->modify( '+' . $i . ' minutes' );
+			$ids[] = self::insert_post(
+				array(
+					'post_author'       => 1,
+					'post_date'         => $date->format( 'Y-m-d H:i:s' ),
+					'post_date_gmt'     => $date->format( 'Y-m-d H:i:s' ),
+					'post_modified'     => $date->format( 'Y-m-d H:i:s' ),
+					'post_modified_gmt' => $date->format( 'Y-m-d H:i:s' ),
+					'post_content'      => 'Right Now count fixture ' . $post_type . ' ' . $i,
+					'post_title'        => $label . ' ' . $i . ' ' . self::hostile_text( $ctx->fork( 'title-' . $i ) ),
+					'post_status'       => 'publish',
+					'post_type'         => $post_type,
+					'post_name'         => \sanitize_title( $label . '-' . $post_type . '-' . $i . '-' . self::slug( $ctx->fork( 'slug-' . $i ), 'right-now' ) ),
+				)
+			);
+		}
+
+		return $ids;
 	}
 
 	private static function recent_post_fixture( \ComponentFuzz\FuzzContext $ctx, int $user_id, string $status, \DateTimeInterface $date, string $label ): \WP_Post {
