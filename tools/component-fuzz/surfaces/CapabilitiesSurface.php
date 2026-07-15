@@ -33,6 +33,7 @@ final class CapabilitiesSurface {
 			$rows[] = self::check_role_registry_mutations( $ctx );
 			$rows[] = self::check_role_has_cap_filter( $ctx );
 			$rows[] = self::check_user_capability_aggregation( $ctx );
+			$rows[] = self::check_author_can_wrapper( $ctx->fork( 'author-can' ) );
 			$rows[] = self::check_user_for_site_contracts( $ctx );
 			$rows[] = self::check_user_capability_mutations( $ctx );
 			$rows[] = self::check_user_has_cap_filter_contracts( $ctx );
@@ -66,14 +67,20 @@ final class CapabilitiesSurface {
 			array(
 				'add_role',
 				'add_filter',
+				'author_can',
 				'current_user_can',
+				'get_post',
 				'get_role',
+				'get_userdata',
 				'has_filter',
 				'map_meta_cap',
 				'remove_role',
 				'remove_filter',
 				'sanitize_key',
 				'user_can',
+				'wp_cache_delete',
+				'wp_cache_get',
+				'wp_cache_set',
 				'wp_roles',
 			) as $function
 		) {
@@ -499,6 +506,216 @@ final class CapabilitiesSurface {
 				'directCap' => $direct_grant,
 				'denyCap'   => $direct_deny,
 				'levelCap'  => $direct_level,
+			)
+		);
+	}
+
+	private static function check_author_can_wrapper( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures       = array();
+		$user_data      = self::synthetic_user_data( $ctx->fork( 'author' ) );
+		$author_id      = (int) $user_data->ID;
+		$post_id        = 80000 + $ctx->int( 0, 9999 );
+		$direct_cap     = self::cap_name( $ctx->fork( 'direct' ), 'author_direct' );
+		$denied_cap     = self::cap_name( $ctx->fork( 'denied' ), 'author_denied' );
+		$unknown_cap    = self::cap_name( $ctx->fork( 'unknown' ), 'author_unknown' );
+		$meta_cap       = self::cap_name( $ctx->fork( 'meta' ), 'author_meta' );
+		$required_cap   = self::cap_name( $ctx->fork( 'required' ), 'author_required' );
+		$object_id      = 90000 + $ctx->int( 0, 9999 );
+		$context        = 'ctx-' . substr( hash( 'sha1', (string) $ctx->seed() ), 0, 8 );
+		$other_context  = $context . '-other';
+		$author_caps    = array(
+			'cfz_author'  => true,
+			$direct_cap   => true,
+			$denied_cap   => false,
+			$required_cap => true,
+		);
+		$cached_user    = \wp_cache_get( $author_id, 'users' );
+		$had_user_cache = false !== $cached_user;
+		$cached_post    = \wp_cache_get( $post_id, 'posts' );
+		$had_post_cache = false !== $cached_post;
+		$meta_calls     = array();
+		$map_calls      = array();
+		$post_for       = static function ( int $id, int $author, string $suffix ): \WP_Post {
+			return new \WP_Post(
+				(object) array(
+					'ID'                    => $id,
+					'post_author'           => (string) $author,
+					'post_date'             => '2026-01-01 00:00:00',
+					'post_date_gmt'         => '2026-01-01 00:00:00',
+					'post_content'          => 'Capability author wrapper content ' . $suffix,
+					'post_title'            => 'Capability Author Wrapper ' . $suffix,
+					'post_excerpt'          => '',
+					'post_status'           => 'publish',
+					'comment_status'        => 'closed',
+					'ping_status'           => 'closed',
+					'post_password'         => '',
+					'post_name'             => 'cap-author-wrapper-' . $suffix,
+					'to_ping'               => '',
+					'pinged'                => '',
+					'post_modified'         => '2026-01-01 00:00:00',
+					'post_modified_gmt'     => '2026-01-01 00:00:00',
+					'post_content_filtered' => '',
+					'post_parent'           => 0,
+					'guid'                  => 'https://example.test/cap-author-wrapper/' . $suffix,
+					'menu_order'            => 0,
+					'post_type'             => 'post',
+					'post_mime_type'        => '',
+					'comment_count'         => '0',
+					'filter'                => 'raw',
+				)
+			);
+		};
+		$post           = $post_for( $post_id, $author_id, substr( hash( 'crc32b', (string) $ctx->seed() ), 0, 8 ) );
+		$missing_author = $post_for( $post_id + 1, $author_id + 99999, 'missing-author' );
+
+		$get_metadata_filter = static function ( $value, int $object_id, string $meta_key, bool $single, string $meta_type ) use ( $author_id, $author_caps, &$meta_calls ) {
+			$meta_calls[] = array(
+				'objectId' => $object_id,
+				'metaKey'  => $meta_key,
+				'single'   => $single,
+				'metaType' => $meta_type,
+			);
+
+			if ( 'user' !== $meta_type || $author_id !== $object_id || ! str_ends_with( $meta_key, 'capabilities' ) ) {
+				return $value;
+			}
+
+			return array( $author_caps );
+		};
+		$map_filter = static function ( array $caps, string $cap, int $user_id, array $args ) use ( $author_id, $context, $meta_cap, $object_id, $required_cap, &$map_calls ): array {
+			$map_calls[] = array(
+				'caps'   => $caps,
+				'cap'    => $cap,
+				'userId' => $user_id,
+				'args'   => $args,
+			);
+
+			if ( $meta_cap === $cap && $author_id === $user_id && array( $object_id, $context ) === $args ) {
+				return array( $required_cap );
+			}
+
+			return $caps;
+		};
+
+		try {
+			\wp_cache_set( $author_id, $user_data, 'users' );
+			\wp_cache_set( $post_id, $post, 'posts' );
+			\add_filter( 'get_user_metadata', $get_metadata_filter, 10, 5 );
+			\add_filter( 'map_meta_cap', $map_filter, 10, 4 );
+
+			$object_checks = array(
+				'role'         => \author_can( $post, 'cfz_publish' ),
+				'direct'       => \author_can( $post, $direct_cap ),
+				'denied'       => \author_can( $post, $denied_cap ),
+				'unknown'      => \author_can( $post, $unknown_cap ),
+				'mappedMeta'   => \author_can( $post, $meta_cap, $object_id, $context ),
+				'otherContext' => \author_can( $post, $meta_cap, $object_id, $other_context ),
+			);
+			$id_checks     = array(
+				'role'       => \author_can( $post_id, 'cfz_publish' ),
+				'direct'     => \author_can( $post_id, $direct_cap ),
+				'mappedMeta' => \author_can( $post_id, $meta_cap, $object_id, $context ),
+			);
+			$missing_checks = array(
+				'post'   => \author_can( $post_id + 99999, $direct_cap ),
+				'author' => \author_can( $missing_author, $direct_cap ),
+			);
+		} finally {
+			\remove_filter( 'map_meta_cap', $map_filter, 10 );
+			\remove_filter( 'get_user_metadata', $get_metadata_filter, 10 );
+
+			if ( $had_user_cache ) {
+				\wp_cache_set( $author_id, $cached_user, 'users' );
+			} else {
+				\wp_cache_delete( $author_id, 'users' );
+			}
+
+			if ( $had_post_cache ) {
+				\wp_cache_set( $post_id, $cached_post, 'posts' );
+			} else {
+				\wp_cache_delete( $post_id, 'posts' );
+			}
+		}
+
+		$meta_call_ok = false;
+		foreach ( $meta_calls as $call ) {
+			if (
+				$author_id === ( $call['objectId'] ?? null )
+				&& 'user' === ( $call['metaType'] ?? null )
+				&& true === ( $call['single'] ?? null )
+				&& str_ends_with( (string) ( $call['metaKey'] ?? '' ), 'capabilities' )
+			) {
+				$meta_call_ok = true;
+				break;
+			}
+		}
+
+		$map_call_ok = false;
+		foreach ( $map_calls as $call ) {
+			if (
+				$meta_cap === ( $call['cap'] ?? null )
+				&& $author_id === ( $call['userId'] ?? null )
+				&& array( $object_id, $context ) === ( $call['args'] ?? null )
+			) {
+				$map_call_ok = true;
+				break;
+			}
+		}
+
+		self::collect_failure(
+			$failures,
+			array(
+				'role'         => true,
+				'direct'       => true,
+				'denied'       => false,
+				'unknown'      => false,
+				'mappedMeta'   => true,
+				'otherContext' => false,
+			) === $object_checks
+				&& array(
+					'role'       => true,
+					'direct'     => true,
+					'mappedMeta' => true,
+				) === $id_checks
+				&& array(
+					'post'   => false,
+					'author' => false,
+				) === $missing_checks,
+			'author_can resolves object and cached-ID posts through the post author and fails closed for missing inputs',
+			array(
+				'objectChecks'  => $object_checks,
+				'idChecks'      => $id_checks,
+				'missingChecks' => $missing_checks,
+				'postId'        => $post_id,
+				'authorId'      => $author_id,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			$meta_call_ok
+				&& $map_call_ok
+				&& false === \has_filter( 'get_user_metadata', $get_metadata_filter )
+				&& false === \has_filter( 'map_meta_cap', $map_filter ),
+			'author_can loads author caps and forwards variadic meta-cap arguments without leaking filters',
+			array(
+				'metaCalls' => $meta_calls,
+				'mapCalls'  => $map_calls,
+				'metaHook'  => \has_filter( 'get_user_metadata', $get_metadata_filter ),
+				'mapHook'   => \has_filter( 'map_meta_cap', $map_filter ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'capabilities.author-can.post-author-wrapper',
+			array() === $failures,
+			array(
+				'user'        => self::describe_value( $user_data ),
+				'postId'      => $post_id,
+				'directCap'   => $direct_cap,
+				'metaCap'     => $meta_cap,
+				'requiredCap' => $required_cap,
+				'failures'    => array_slice( $failures, 0, 6 ),
 			)
 		);
 	}
