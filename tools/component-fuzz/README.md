@@ -827,7 +827,8 @@ database, network requests, or a configured site.
   generated update transients and dismissed core update options, aggregate
   update counts/titles, HTTPS option booleans, migration replacement, HTTPS
   detection short-circuits, generated `site_status_tests` registry/filter
-  behavior, selected direct `WP_Site_Health` tests without remote requests,
+  behavior, plugin/theme auto-update configuration status branches, selected
+  direct `WP_Site_Health` tests without remote requests,
   synthetic loopback and REST availability request outcomes, scheduled event
   missed/late/future cron classification, HTTP-blocking constant checks, and
   persistent object cache threshold/filter direct-test behavior.

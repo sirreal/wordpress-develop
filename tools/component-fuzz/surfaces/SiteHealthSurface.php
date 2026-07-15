@@ -49,6 +49,7 @@ final class SiteHealthSurface {
 			$rows[] = self::check_https_migration( $ctx, $case );
 			$rows[] = self::check_https_detection_short_circuit( $ctx, $case );
 			$rows[] = self::check_site_health_direct_tests( $ctx, $case );
+			$rows[] = self::check_plugin_theme_auto_update_direct_test( $ctx, $case );
 			$rows[] = self::check_loopback_rest_and_cron_direct_tests( $ctx, $case );
 			$rows[] = self::check_persistent_object_cache_direct_test( $ctx, $case );
 			$rows[] = self::check_site_status_test_registry( $ctx, $case );
@@ -240,6 +241,7 @@ final class SiteHealthSurface {
 				'get_site_option',
 				'get_site_transient',
 				'get_theme_updates',
+				'has_filter',
 				'home_url',
 				'is_wp_error',
 				'remove_filter',
@@ -253,6 +255,10 @@ final class SiteHealthSurface {
 				'wp_get_translation_updates',
 				'wp_get_update_data',
 				'wp_get_environment_type',
+				'wp_installing',
+				'wp_is_auto_update_enabled_for_type',
+				'wp_is_auto_update_forced_for_item',
+				'wp_is_file_mod_allowed',
 				'wp_is_home_url_using_https',
 				'wp_is_site_url_using_https',
 				'wp_is_site_protected_by_basic_auth',
@@ -754,6 +760,331 @@ final class SiteHealthSurface {
 					'WP_DEBUG_DISPLAY' => defined( 'WP_DEBUG_DISPLAY' ) ? WP_DEBUG_DISPLAY : null,
 				),
 				'failures'       => array_slice( $failures, 0, self::MAX_FAILURES ),
+			)
+		);
+	}
+
+	private static function check_plugin_theme_auto_update_direct_test( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		unset( $case );
+
+		$failures             = array();
+		$site_health          = self::site_health_without_constructor();
+		$http_requests_before = self::$http_request_count;
+		$old_installing       = \wp_installing( false );
+		$statuses             = array();
+		$file_mod_contexts    = array();
+		$updater_disabled     = array();
+
+		$file_mod_filter = static function ( bool $allowed, string $context ) use ( &$file_mod_contexts ): bool {
+			$file_mod_contexts[] = $context;
+			return 'automatic_updater' === $context ? true : $allowed;
+		};
+		$updater_disabled_filter = static function ( bool $disabled ) use ( &$updater_disabled ): bool {
+			$updater_disabled[] = $disabled;
+			return false;
+		};
+
+		\add_filter( 'file_mod_allowed', $file_mod_filter, 10, 2 );
+		\add_filter( 'automatic_updater_disabled', $updater_disabled_filter );
+
+		try {
+			$scenarios = array(
+				array(
+					'name'             => 'good',
+					'pluginFilter'     => false,
+					'themeFilter'      => false,
+					'pluginForced'     => true,
+					'themeForced'      => true,
+					'pluginUi'         => true,
+					'themeUi'          => true,
+					'expectedStatus'   => 'good',
+					'messageNeedle'    => 'There appear to be no issues with plugin and theme auto-updates.',
+					'expectProblemRow' => false,
+				),
+				array(
+					'name'             => 'critical-ui-mismatch',
+					'pluginFilter'     => true,
+					'themeFilter'      => true,
+					'pluginForced'     => false,
+					'themeForced'      => false,
+					'pluginUi'         => true,
+					'themeUi'          => true,
+					'expectedStatus'   => 'critical',
+					'messageNeedle'    => 'Auto-updates for plugins and/or themes appear to be disabled',
+					'expectProblemRow' => true,
+				),
+				array(
+					'name'             => 'recommended-both-filters',
+					'pluginFilter'     => true,
+					'themeFilter'      => true,
+					'pluginForced'     => false,
+					'themeForced'      => false,
+					'pluginUi'         => false,
+					'themeUi'          => false,
+					'expectedStatus'   => 'recommended',
+					'messageNeedle'    => 'Auto-updates for plugins and themes appear to be disabled',
+					'expectProblemRow' => true,
+				),
+				array(
+					'name'             => 'recommended-plugin-filter',
+					'pluginFilter'     => true,
+					'themeFilter'      => false,
+					'pluginForced'     => false,
+					'themeForced'      => true,
+					'pluginUi'         => false,
+					'themeUi'          => true,
+					'expectedStatus'   => 'recommended',
+					'messageNeedle'    => 'Auto-updates for plugins appear to be disabled',
+					'expectProblemRow' => true,
+				),
+				array(
+					'name'             => 'recommended-theme-filter',
+					'pluginFilter'     => false,
+					'themeFilter'      => true,
+					'pluginForced'     => true,
+					'themeForced'      => false,
+					'pluginUi'         => true,
+					'themeUi'          => false,
+					'expectedStatus'   => 'recommended',
+					'messageNeedle'    => 'Auto-updates for themes appear to be disabled',
+					'expectProblemRow' => true,
+				),
+			);
+
+			foreach ( $scenarios as $scenario ) {
+				$plugin_ui_calls = array();
+				$theme_ui_calls  = array();
+				$plugin_calls    = array();
+				$theme_calls     = array();
+
+				$plugin_ui_filter = static function ( bool $enabled ) use ( $scenario, &$plugin_ui_calls ): bool {
+					$plugin_ui_calls[] = $enabled;
+					return $scenario['pluginUi'];
+				};
+				$theme_ui_filter  = static function ( bool $enabled ) use ( $scenario, &$theme_ui_calls ): bool {
+					$theme_ui_calls[] = $enabled;
+					return $scenario['themeUi'];
+				};
+				$plugin_filter    = static function ( $update, $item ) use ( $scenario, &$plugin_calls ): bool {
+					$plugin_calls[] = array(
+						'update'  => $update,
+						'plugin'  => is_object( $item ) ? ( $item->plugin ?? null ) : null,
+						'slug'    => is_object( $item ) ? ( $item->slug ?? null ) : null,
+						'version' => is_object( $item ) ? ( $item->new_version ?? null ) : null,
+					);
+					return $scenario['pluginForced'];
+				};
+				$theme_filter     = static function ( $update, $item ) use ( $scenario, &$theme_calls ): bool {
+					$theme_calls[] = array(
+						'update'  => $update,
+						'theme'   => is_object( $item ) ? ( $item->theme ?? null ) : null,
+						'version' => is_object( $item ) ? ( $item->new_version ?? null ) : null,
+					);
+					return $scenario['themeForced'];
+				};
+
+				\add_filter( 'plugins_auto_update_enabled', $plugin_ui_filter );
+				\add_filter( 'themes_auto_update_enabled', $theme_ui_filter );
+				if ( $scenario['pluginFilter'] ) {
+					\add_filter( 'auto_update_plugin', $plugin_filter, 10, 2 );
+				}
+				if ( $scenario['themeFilter'] ) {
+					\add_filter( 'auto_update_theme', $theme_filter, 10, 2 );
+				}
+
+				try {
+					$plugin_filter_present = false !== \has_filter( 'auto_update_plugin' );
+					$theme_filter_present  = false !== \has_filter( 'auto_update_theme' );
+					$issue                 = $site_health->detect_plugin_theme_auto_update_issues();
+					$result                = $site_health->get_test_plugin_theme_auto_updates();
+					$plugin_ui_call_count  = count( $plugin_ui_calls );
+					$theme_ui_call_count   = count( $theme_ui_calls );
+					$plugin_ui_direct      = \wp_is_auto_update_enabled_for_type( 'plugin' );
+					$theme_ui_direct       = \wp_is_auto_update_enabled_for_type( 'theme' );
+
+					$statuses[ $scenario['name'] ] = array(
+						'issue'               => is_object( $issue ) ? ( $issue->status ?? null ) : null,
+						'result'              => is_array( $result ) ? ( $result['status'] ?? null ) : null,
+						'pluginFilterPresent' => $plugin_filter_present,
+						'themeFilterPresent'  => $theme_filter_present,
+						'pluginUiCalls'       => $plugin_ui_call_count,
+						'themeUiCalls'        => $theme_ui_call_count,
+						'pluginUiDirect'      => $plugin_ui_direct,
+						'themeUiDirect'       => $theme_ui_direct,
+						'pluginForceCalls'    => count( $plugin_calls ),
+						'themeForceCalls'     => count( $theme_calls ),
+					);
+
+					self::collect_failure(
+						$failures,
+						is_object( $issue )
+							&& $scenario['expectedStatus'] === ( $issue->status ?? null )
+							&& is_string( $issue->message ?? null )
+							&& false !== strpos( $issue->message, $scenario['messageNeedle'] ),
+						"detect_plugin_theme_auto_update_issues {$scenario['name']} status/message",
+						array(
+							'expectedStatus' => $scenario['expectedStatus'],
+							'expectedNeedle' => $scenario['messageNeedle'],
+							'actual'         => self::describe_value( $issue ),
+						)
+					);
+
+					self::assert_site_health_result(
+						$failures,
+						$result,
+						'plugin_theme_auto_updates',
+						$scenario['expectedStatus']
+					);
+
+					$description = is_array( $result ) ? (string) ( $result['description'] ?? '' ) : '';
+					self::collect_failure(
+						$failures,
+						is_array( $result )
+							&& (
+								$scenario['expectProblemRow']
+									? (
+										'Your site may have problems auto-updating plugins and themes' === ( $result['label'] ?? null )
+										&& false !== strpos( $description, $scenario['messageNeedle'] )
+									)
+									: (
+										'Plugin and theme auto-updates appear to be configured correctly' === ( $result['label'] ?? null )
+										&& false !== strpos( $description, 'Plugin and theme auto-updates ensure that the latest versions are always installed.' )
+										&& false === strpos( $description, $scenario['messageNeedle'] )
+									)
+							)
+							&& '' === ( $result['actions'] ?? null )
+							&& 'Security' === ( $result['badge']['label'] ?? null )
+							&& 'blue' === ( $result['badge']['color'] ?? null ),
+						"get_test_plugin_theme_auto_updates {$scenario['name']} wrapper fields",
+						array(
+							'expectedProblemRow' => $scenario['expectProblemRow'],
+							'label'              => is_array( $result ) ? ( $result['label'] ?? null ) : null,
+							'badge'              => is_array( $result ) ? ( $result['badge'] ?? null ) : null,
+							'actions'            => is_array( $result ) ? ( $result['actions'] ?? null ) : null,
+							'description'        => self::preview( $description ),
+						)
+					);
+
+					self::collect_failure(
+						$failures,
+						$scenario['pluginFilter'] === $plugin_filter_present
+							&& $scenario['themeFilter'] === $theme_filter_present,
+						"plugin/theme auto-update {$scenario['name']} has_filter gates",
+						array(
+							'expectedPluginFilter' => $scenario['pluginFilter'],
+							'actualPluginFilter'   => $plugin_filter_present,
+							'expectedThemeFilter'  => $scenario['themeFilter'],
+							'actualThemeFilter'    => $theme_filter_present,
+						)
+					);
+
+					self::collect_failure(
+						$failures,
+						2 === $plugin_ui_call_count
+							&& 2 === $theme_ui_call_count
+							&& $scenario['pluginUi'] === $plugin_ui_direct
+							&& $scenario['themeUi'] === $theme_ui_direct,
+						"plugin/theme auto-update {$scenario['name']} UI filters drive type enablement",
+						array(
+							'pluginUiCalls'  => $plugin_ui_calls,
+							'themeUiCalls'   => $theme_ui_calls,
+							'pluginUi'       => $scenario['pluginUi'],
+							'themeUi'        => $scenario['themeUi'],
+							'pluginUiDirect' => $plugin_ui_direct,
+							'themeUiDirect'  => $theme_ui_direct,
+						)
+					);
+
+					self::collect_failure(
+						$failures,
+						$scenario['pluginFilter']
+							? (
+								2 === count( $plugin_calls )
+								&& true === ( $plugin_calls[0]['update'] ?? null )
+								&& 'a-fake-plugin/a-fake-plugin.php' === ( $plugin_calls[0]['plugin'] ?? null )
+								&& 'a-fake-plugin' === ( $plugin_calls[0]['slug'] ?? null )
+							)
+							: array() === $plugin_calls,
+						"plugin auto-update {$scenario['name']} forced-item payload",
+						array( 'calls' => $plugin_calls )
+					);
+
+					self::collect_failure(
+						$failures,
+						$scenario['themeFilter']
+							? (
+								2 === count( $theme_calls )
+								&& true === ( $theme_calls[0]['update'] ?? null )
+								&& 'a-fake-theme' === ( $theme_calls[0]['theme'] ?? null )
+							)
+							: array() === $theme_calls,
+						"theme auto-update {$scenario['name']} forced-item payload",
+						array( 'calls' => $theme_calls )
+					);
+				} finally {
+					\remove_filter( 'plugins_auto_update_enabled', $plugin_ui_filter );
+					\remove_filter( 'themes_auto_update_enabled', $theme_ui_filter );
+					if ( $scenario['pluginFilter'] ) {
+						\remove_filter( 'auto_update_plugin', $plugin_filter, 10 );
+					}
+					if ( $scenario['themeFilter'] ) {
+						\remove_filter( 'auto_update_theme', $theme_filter, 10 );
+					}
+				}
+
+				self::collect_failure(
+					$failures,
+					false === \has_filter( 'plugins_auto_update_enabled', $plugin_ui_filter )
+						&& false === \has_filter( 'themes_auto_update_enabled', $theme_ui_filter )
+						&& false === \has_filter( 'auto_update_plugin', $plugin_filter )
+						&& false === \has_filter( 'auto_update_theme', $theme_filter ),
+					"plugin/theme auto-update {$scenario['name']} filters are removed",
+					array(
+						'pluginUiFilter' => \has_filter( 'plugins_auto_update_enabled', $plugin_ui_filter ),
+						'themeUiFilter'  => \has_filter( 'themes_auto_update_enabled', $theme_ui_filter ),
+						'pluginFilter'   => \has_filter( 'auto_update_plugin', $plugin_filter ),
+						'themeFilter'    => \has_filter( 'auto_update_theme', $theme_filter ),
+					)
+				);
+			}
+		} finally {
+			\remove_filter( 'file_mod_allowed', $file_mod_filter, 10 );
+			\remove_filter( 'automatic_updater_disabled', $updater_disabled_filter );
+			\wp_installing( $old_installing );
+		}
+
+		self::collect_failure(
+			$failures,
+			self::$http_request_count === $http_requests_before,
+			'plugin/theme auto-update Site Health checks do not make HTTP requests',
+			array(
+				'before' => $http_requests_before,
+				'after'  => self::$http_request_count,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			false === \has_filter( 'file_mod_allowed', $file_mod_filter )
+				&& false === \has_filter( 'automatic_updater_disabled', $updater_disabled_filter )
+				&& $old_installing === \wp_installing(),
+			'plugin/theme auto-update Site Health environment controls are restored',
+			array(
+				'fileModFilter'                   => \has_filter( 'file_mod_allowed', $file_mod_filter ),
+				'automaticUpdaterDisabledFilter' => \has_filter( 'automatic_updater_disabled', $updater_disabled_filter ),
+				'oldInstalling'                   => $old_installing,
+				'currentInstalling'               => \wp_installing(),
+				'fileModContexts'                 => array_values( array_unique( $file_mod_contexts ) ),
+				'updaterDisabledInputs'           => array_values( array_unique( $updater_disabled ) ),
+			)
+		);
+
+		return $ctx->result(
+			'site-health.direct-tests.plugin-theme-auto-updates',
+			array() === $failures,
+			array(
+				'statuses' => $statuses,
+				'failures' => array_slice( $failures, 0, self::MAX_FAILURES ),
 			)
 		);
 	}
