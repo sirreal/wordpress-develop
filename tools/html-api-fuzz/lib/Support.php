@@ -132,20 +132,28 @@ function write_json_file( string $path, $value ): void {
 	}
 }
 
-/** Publish a JSON snapshot without ever exposing a truncated destination. */
-function write_json_file_atomic( string $path, $value ): void {
+/** Publish arbitrary bytes without exposing a partially written destination. */
+function write_file_atomic( string $path, string $contents ): void {
 	ensure_dir( dirname( $path ) );
 	$tmp = dirname( $path ) . DIRECTORY_SEPARATOR . '.' . basename( $path ) . '.tmp-' . getmypid() . '-' . bin2hex( random_bytes( 6 ) );
 	try {
-		write_json_file( $tmp, $value );
+		$written = file_put_contents( $tmp, $contents );
+		if ( strlen( $contents ) !== $written ) {
+			throw new \RuntimeException( "Could not write complete temporary file: {$tmp}" );
+		}
 		if ( ! rename( $tmp, $path ) ) {
-			throw new \RuntimeException( "Could not atomically publish JSON file: {$path}" );
+			throw new \RuntimeException( "Could not atomically publish file: {$path}" );
 		}
 	} finally {
 		if ( is_file( $tmp ) ) {
 			@unlink( $tmp );
 		}
 	}
+}
+
+/** Publish a JSON snapshot without ever exposing a truncated destination. */
+function write_json_file_atomic( string $path, $value ): void {
+	write_file_atomic( $path, json_encode_safe( $value ) . "\n" );
 }
 
 function read_json_file( string $path ) {

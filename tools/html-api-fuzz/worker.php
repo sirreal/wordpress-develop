@@ -39,7 +39,7 @@ function html_api_fuzz_worker_fatal_result( array $options, Throwable $e, ?strin
 		if ( null !== $signature ) {
 			$fallback['signature'] = $signature;
 		}
-		\HtmlApiFuzz\write_json_file( $output_dir . DIRECTORY_SEPARATOR . 'result.json', $fallback );
+		\HtmlApiFuzz\write_json_file_atomic( $output_dir . DIRECTORY_SEPARATOR . 'result.json', $fallback );
 	}
 
 	return $fallback;

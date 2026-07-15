@@ -92,13 +92,13 @@ class Worker {
 		$replay_path = $output_dir . DIRECTORY_SEPARATOR . 'replay.json';
 		$result_path = $output_dir . DIRECTORY_SEPARATOR . 'result.json';
 		$input_path  = $output_dir . DIRECTORY_SEPARATOR . 'input.bin';
-		$input_written = file_put_contents( $input_path, $input );
-		if ( strlen( $input ) !== $input_written ) {
-			throw new \RuntimeException( 'Could not write complete worker input.' );
+		$source_input_path = option_string( $options, 'input-file', null );
+		if ( null === $source_input_path || ! self::same_file( $source_input_path, $input_path ) ) {
+			write_file_atomic( $input_path, $input );
 		}
 
 		$replay = self::base_replay( $seed, $profile, $mode, $payload_policy, $fragment_context, $generator_parameters, $input_source, $input, $output_dir, $limits, $fail_unsupported, $git_metadata, $oracle_metadata, $oracle_renderer->replay_options(), $checks );
-		write_json_file( $replay_path, $replay );
+		write_json_file_atomic( $replay_path, $replay );
 
 		$result = self::evaluate_input(
 			$input,
@@ -135,8 +135,8 @@ class Worker {
 		);
 		$replay['signature'] = $signature;
 		$replay['oracleFinding'] = $result['oracleFinding'] ?? null;
-		write_json_file( $replay_path, $replay );
-		write_json_file( $result_path, $result );
+		write_json_file_atomic( $replay_path, $replay );
+		write_json_file_atomic( $result_path, $result );
 
 		return $result;
 	}
@@ -758,13 +758,16 @@ class Worker {
 		return round( max( 0, hrtime( true ) - $started_at ) / 1000000, 3 );
 	}
 
+	private static function same_file( string $left, string $right ): bool {
+		$left_real  = realpath( $left );
+		$right_real = realpath( $right );
+		return false !== $left_real && false !== $right_real && $left_real === $right_real;
+	}
+
 	private static function compact_parse_result( array $parse_result, string $output_dir, string $tree_filename ): array {
 		if ( isset( $parse_result['tree'] ) ) {
 			$tree_path = $output_dir . DIRECTORY_SEPARATOR . $tree_filename;
-			$written   = file_put_contents( $tree_path, $parse_result['tree'] );
-			if ( strlen( $parse_result['tree'] ) !== $written ) {
-				throw new \RuntimeException( "Could not write complete tree file: {$tree_path}" );
-			}
+			write_file_atomic( $tree_path, $parse_result['tree'] );
 			$parse_result['treePath']    = $tree_path;
 			$parse_result['treeSha1']    = sha1( $parse_result['tree'] );
 			$parse_result['treePreview'] = preview_bytes( $parse_result['tree'], 400 );

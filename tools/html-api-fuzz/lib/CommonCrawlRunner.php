@@ -239,12 +239,9 @@ class CommonCrawlRunner {
 
 	private function persist_initial_input( string $staging_dir, string $body, array $metadata, int $seed, string $checks ): void {
 		$input_path = $staging_dir . '/input.bin';
-		$written    = file_put_contents( $input_path, $body );
-		if ( strlen( $body ) !== $written ) {
-			throw new \RuntimeException( 'Could not persist the complete Common Crawl response body.' );
-		}
+		write_file_atomic( $input_path, $body );
 		$oracle_options = $this->oracle->replay_options();
-		write_json_file(
+		write_json_file_atomic(
 			$staging_dir . '/replay.json',
 			array(
 				'schemaVersion' => 1,
@@ -389,8 +386,8 @@ class CommonCrawlRunner {
 				'oracle'        => $result['oracle'] ?? $this->oracle->metadata(),
 				'resultPath'    => $final_dir . '/result.json',
 			);
-			write_json_file( $staging_dir . '/result.json', $result );
-			write_json_file( $staging_dir . '/replay.json', $replay );
+			write_json_file_atomic( $staging_dir . '/result.json', $result );
+			write_json_file_atomic( $staging_dir . '/replay.json', $replay );
 			$marker = "complete\n";
 			if ( strlen( $marker ) !== file_put_contents( $staging_dir . '/.complete', $marker ) ) {
 				throw new \RuntimeException( 'Could not write finding completion marker.' );

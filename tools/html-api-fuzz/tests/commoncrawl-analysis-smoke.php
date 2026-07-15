@@ -158,9 +158,60 @@ namespace {
 	);
 	html_api_fuzz_commoncrawl_smoke_assert( 0 === $replay_proc['code'], 'Expected documented timeout-artifact replay command to succeed.' );
 
+	// Kill the real Worker while its Lexbor descendant is hung. Worker receives
+	// pending/input.bin as both source and destination; it must not truncate the
+	// parent's only crash evidence, and its replay replacement must be atomic.
+	$evidence_dir  = $work_dir . '-evidence';
+	$evidence_body = '<!doctype html><p>byte-exact crash evidence</p>';
+	$oracle_started = $work_dir . '-oracle-started';
+	putenv( 'CC_ANALYZER_OUTPUT_DIR=' . $evidence_dir );
+	putenv( 'HTML_API_CC_WORKER_SCRIPT' );
+	putenv( 'HTML_API_CC_ORACLE=lexbor-source' );
+	putenv( 'HTML_API_FUZZ_LEXBOR_ORACLE=' . __DIR__ . '/fixtures/hanging-lexbor-oracle.php' );
+	putenv( 'HTML_API_FUZZ_TEST_ORACLE_STARTED=' . $oracle_started );
+	putenv( 'HTML_API_CC_PROCESS_TIMEOUT_MS=1000' );
+	putenv( 'HTML_API_CC_ORACLE_TIMEOUT_MS=5000' );
+	$evidence_runner = \HtmlApiFuzz\CommonCrawlRunner::from_environment();
+	$evidence = $evidence_runner->analyze_document(
+		new \CcAnalyzer\Analysis\HtmlAnalysisInput(
+			'urn:uuid:crash-evidence',
+			'https://example.com/evidence',
+			200,
+			'text/html',
+			'UTF-8',
+			$evidence_body,
+			'fixture:evidence'
+		)
+	);
+	html_api_fuzz_commoncrawl_smoke_assert( 'worker-timeout' === ( $evidence['failureClass'] ?? null ), 'Expected the real Worker to be killed while its oracle hangs.' );
+	html_api_fuzz_commoncrawl_smoke_assert( "started\n" === file_get_contents( $oracle_started ), 'Expected proof that Worker reached the hanging oracle before timeout.' );
+	html_api_fuzz_commoncrawl_smoke_assert( $evidence_body === file_get_contents( $evidence['artifactDir'] . '/input.bin' ), 'Expected killed Worker to preserve exact parent input.' );
+	$evidence_replay = json_decode( (string) file_get_contents( $evidence['artifactDir'] . '/replay.json' ), true );
+	html_api_fuzz_commoncrawl_smoke_assert( is_array( $evidence_replay ), 'Expected killed Worker to leave valid replay JSON.' );
+	html_api_fuzz_commoncrawl_smoke_assert( $evidence_body === base64_decode( $evidence_replay['inputBase64'] ?? '', true ), 'Expected killed Worker replay to preserve exact input.' );
+
+	// The CLI catch/fallback path is also a worker result publication path.
+	$fatal_dir = $work_dir . '-fatal-worker';
+	$fatal_proc = \HtmlApiFuzz\run_php_process(
+		array(
+			dirname( __DIR__ ) . '/worker.php',
+			'--input-base64', 'not-valid-base64%',
+			'--output-dir', $fatal_dir,
+		),
+		\HtmlApiFuzz\repo_root(),
+		5000
+	);
+	html_api_fuzz_commoncrawl_smoke_assert( 1 === $fatal_proc['code'], 'Expected forced Worker fatal fallback.' );
+	$fatal_result = json_decode( (string) file_get_contents( $fatal_dir . '/result.json' ), true );
+	html_api_fuzz_commoncrawl_smoke_assert( 'worker-fatal' === ( $fatal_result['status'] ?? null ), 'Expected complete fatal fallback result JSON.' );
+	html_api_fuzz_commoncrawl_smoke_assert( array() === glob( $fatal_dir . '/.result.json.tmp-*' ), 'Expected no abandoned fatal-result publication temp file.' );
+
 	require_once dirname( __DIR__ ) . '/lib/autoload.php';
 	\HtmlApiFuzz\remove_dir_recursive( $work_dir );
 	\HtmlApiFuzz\remove_dir_recursive( $timeout_dir );
+	\HtmlApiFuzz\remove_dir_recursive( $evidence_dir );
+	\HtmlApiFuzz\remove_dir_recursive( $fatal_dir );
+	@unlink( $oracle_started );
 	html_api_fuzz_commoncrawl_smoke_assert( ! is_dir( $work_dir ), 'Expected smoke artifacts to be cleaned up.' );
 
 	echo "OK commoncrawl-analysis-smoke\n";
