@@ -257,10 +257,11 @@ database, network requests, or a configured site.
 - `customizer`: no-DB Customizer API coverage for manager registry lifecycles,
   setting sanitize/validate/post value flows, slashed customized JSON ingestion
   and programmatic post-value merge precedence, multidimensional option
-  previewing, container/control JSON exports, active callbacks, selective
-  refresh partial registration/rendering, and direct inactive/active theme
-  preview filter/action lifecycle coverage for child-theme stylesheet/template
-  switching without changeset persistence.
+  previewing, container/control JSON exports, active callbacks, built-in
+  control rendering hooks/escaping/selection behavior, selective refresh partial
+  registration/rendering, and direct inactive/active theme preview filter/action
+  lifecycle coverage for child-theme stylesheet/template switching without
+  changeset persistence.
 - `customizer-nav-widgets-requests`: in-memory wpdb-backed Customizer nav menu
   and widget request coverage, including loaded component/capability hook
   gates, menu available/search AJAX, auto-draft insertion and publish cleanup,

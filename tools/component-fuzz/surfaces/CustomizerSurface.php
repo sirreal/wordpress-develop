@@ -32,6 +32,7 @@ final class CustomizerSurface {
 			$rows[] = self::check_manager_post_value_merging( $ctx->fork( 'post-values' ) );
 			$rows[] = self::check_multidimensional_values( $ctx->fork( 'multidimensional' ) );
 			$rows[] = self::check_json_and_active_callbacks( $ctx->fork( 'json-active' ) );
+			$rows[] = self::check_control_rendering_contracts( $ctx->fork( 'control-rendering' ) );
 			$rows[] = self::check_selective_refresh_partials( $ctx->fork( 'partials' ) );
 			$rows[] = self::check_theme_preview_lifecycle( $ctx->fork( 'theme-preview' ) );
 		} catch ( \Throwable $e ) {
@@ -78,8 +79,11 @@ final class CustomizerSurface {
 				'add_action',
 				'add_filter',
 				'apply_filters',
+				'checked',
 				'current_user_can',
 				'esc_attr',
+				'esc_html',
+				'esc_textarea',
 				'get_option',
 				'get_raw_theme_root',
 				'get_stylesheet',
@@ -89,6 +93,7 @@ final class CustomizerSurface {
 				'is_wp_error',
 				'remove_action',
 				'remove_filter',
+				'selected',
 				'update_option',
 				'wp_json_encode',
 				'wp_slash',
@@ -977,6 +982,352 @@ final class CustomizerSurface {
 		);
 	}
 
+	private static function check_control_rendering_contracts( \ComponentFuzz\FuzzContext $ctx ): array {
+		$manager  = self::manager( $ctx );
+		$failures = array();
+
+		$section_id = self::id( $ctx, 'render-section' );
+		$manager->add_section(
+			$section_id,
+			array(
+				'title'      => 'Render Section',
+				'capability' => self::CAPABILITY,
+			)
+		);
+
+		$description = '<strong>Component fuzz description</strong> &amp; details';
+		$controls    = array();
+		$events      = array();
+		$specifics   = array();
+
+		$text_setting_id = self::id( $ctx->fork( 'text-setting' ), 'render-text-setting' );
+		$text_value      = self::unsafe_string( $ctx->fork( 'text-value' ) );
+		$text_label      = 'Text label ' . self::unsafe_string( $ctx->fork( 'text-label' ) );
+		$text_attr       = '" onmouseover="componentFuzz() <b>';
+		$manager->add_setting(
+			$text_setting_id,
+			array(
+				'type'       => 'component_fuzz_render',
+				'capability' => self::CAPABILITY,
+				'default'    => $text_value,
+			)
+		);
+		$text_control_id              = self::id( $ctx->fork( 'text-control' ), 'render-text-control' );
+		$controls['text']             = $manager->add_control(
+			$text_control_id,
+			array(
+				'settings'    => $text_setting_id,
+				'section'     => $section_id,
+				'type'        => 'text',
+				'label'       => $text_label,
+				'description' => $description,
+				'capability'  => self::CAPABILITY,
+				'input_attrs' => array(
+					'placeholder'         => $text_attr,
+					'data-component-fuzz' => self::unsafe_string( $ctx->fork( 'text-attr' ) ),
+				),
+			)
+		);
+
+		$textarea_setting_id = self::id( $ctx->fork( 'textarea-setting' ), 'render-textarea-setting' );
+		$textarea_value      = self::unsafe_string( $ctx->fork( 'textarea-value' ) ) . "\nline two";
+		$textarea_label      = 'Textarea ' . self::unsafe_string( $ctx->fork( 'textarea-label' ) );
+		$manager->add_setting(
+			$textarea_setting_id,
+			array(
+				'type'       => 'component_fuzz_render',
+				'capability' => self::CAPABILITY,
+				'default'    => $textarea_value,
+			)
+		);
+		$textarea_control_id          = self::id( $ctx->fork( 'textarea-control' ), 'render-textarea-control' );
+		$controls['textarea']         = $manager->add_control(
+			$textarea_control_id,
+			array(
+				'settings'    => $textarea_setting_id,
+				'section'     => $section_id,
+				'type'        => 'textarea',
+				'label'       => $textarea_label,
+				'description' => $description,
+				'capability'  => self::CAPABILITY,
+				'input_attrs' => array(
+					'data-component-fuzz' => self::unsafe_string( $ctx->fork( 'textarea-attr' ) ),
+				),
+			)
+		);
+
+		$checkbox_setting_id = self::id( $ctx->fork( 'checkbox-setting' ), 'render-checkbox-setting' );
+		$checkbox_label      = 'Checkbox ' . self::unsafe_string( $ctx->fork( 'checkbox-label' ) );
+		$manager->add_setting(
+			$checkbox_setting_id,
+			array(
+				'type'       => 'component_fuzz_render',
+				'capability' => self::CAPABILITY,
+				'default'    => '1',
+			)
+		);
+		$checkbox_control_id          = self::id( $ctx->fork( 'checkbox-control' ), 'render-checkbox-control' );
+		$controls['checkbox']         = $manager->add_control(
+			$checkbox_control_id,
+			array(
+				'settings'    => $checkbox_setting_id,
+				'section'     => $section_id,
+				'type'        => 'checkbox',
+				'label'       => $checkbox_label,
+				'description' => $description,
+				'capability'  => self::CAPABILITY,
+			)
+		);
+
+		$radio_setting_id = self::id( $ctx->fork( 'radio-setting' ), 'render-radio-setting' );
+		$radio_value      = 'beta-' . $ctx->identifier( 3, 8 );
+		$radio_other      = 'alpha-' . $ctx->identifier( 3, 8 );
+		$radio_label      = 'Radio ' . self::unsafe_string( $ctx->fork( 'radio-label' ) );
+		$radio_choices    = array(
+			$radio_other => 'Alpha ' . self::unsafe_string( $ctx->fork( 'radio-alpha-label' ) ),
+			$radio_value => 'Beta ' . self::unsafe_string( $ctx->fork( 'radio-beta-label' ) ),
+		);
+		$manager->add_setting(
+			$radio_setting_id,
+			array(
+				'type'       => 'component_fuzz_render',
+				'capability' => self::CAPABILITY,
+				'default'    => $radio_value,
+			)
+		);
+		$radio_control_id             = self::id( $ctx->fork( 'radio-control' ), 'render-radio-control' );
+		$controls['radio']            = $manager->add_control(
+			$radio_control_id,
+			array(
+				'settings'    => $radio_setting_id,
+				'section'     => $section_id,
+				'type'        => 'radio',
+				'label'       => $radio_label,
+				'description' => $description,
+				'capability'  => self::CAPABILITY,
+				'choices'     => $radio_choices,
+			)
+		);
+
+		$select_setting_id = self::id( $ctx->fork( 'select-setting' ), 'render-select-setting' );
+		$select_value      = 'two-' . $ctx->identifier( 3, 8 );
+		$select_other      = 'one-' . $ctx->identifier( 3, 8 );
+		$select_label      = 'Select ' . self::unsafe_string( $ctx->fork( 'select-label' ) );
+		$select_choices    = array(
+			$select_other => 'One ' . self::unsafe_string( $ctx->fork( 'select-one-label' ) ),
+			$select_value => 'Two ' . self::unsafe_string( $ctx->fork( 'select-two-label' ) ),
+		);
+		$manager->add_setting(
+			$select_setting_id,
+			array(
+				'type'       => 'component_fuzz_render',
+				'capability' => self::CAPABILITY,
+				'default'    => $select_value,
+			)
+		);
+		$select_control_id            = self::id( $ctx->fork( 'select-control' ), 'render-select-control' );
+		$controls['select']           = $manager->add_control(
+			$select_control_id,
+			array(
+				'settings'    => $select_setting_id,
+				'section'     => $section_id,
+				'type'        => 'select',
+				'label'       => $select_label,
+				'description' => $description,
+				'capability'  => self::CAPABILITY,
+				'choices'     => $select_choices,
+			)
+		);
+
+		$denied_setting_id = self::id( $ctx->fork( 'denied-setting' ), 'render-denied-setting' );
+		$manager->add_setting(
+			$denied_setting_id,
+			array(
+				'type'       => 'component_fuzz_render',
+				'capability' => 'component_fuzz_denied_cap',
+				'default'    => 'denied',
+			)
+		);
+		$denied_control_id = self::id( $ctx->fork( 'denied-control' ), 'render-denied-control' );
+		$denied_control    = $manager->add_control(
+			$denied_control_id,
+			array(
+				'settings'   => $denied_setting_id,
+				'section'    => $section_id,
+				'type'       => 'text',
+				'label'      => 'Denied',
+				'capability' => 'component_fuzz_denied_cap',
+			)
+		);
+
+		$global_action = static function ( \WP_Customize_Control $control ) use ( &$events ): void {
+			$events[] = array(
+				'hook' => 'global',
+				'id'   => $control->id,
+				'type' => $control->type,
+			);
+		};
+		foreach ( array_merge( $controls, array( 'denied' => $denied_control ) ) as $kind => $control ) {
+			$specifics[ $control->id ] = static function ( \WP_Customize_Control $seen ) use ( &$events, $kind ): void {
+				$events[] = array(
+					'hook' => 'specific',
+					'kind' => $kind,
+					'id'   => $seen->id,
+					'type' => $seen->type,
+				);
+			};
+		}
+
+		\add_action( 'customize_render_control', $global_action, 10, 1 );
+		foreach ( $specifics as $control_id => $callback ) {
+			\add_action( "customize_render_control_{$control_id}", $callback, 10, 1 );
+		}
+
+		try {
+			$outputs = self::with_capabilities(
+				static function () use ( $controls, $denied_control ): array {
+					$rendered = array();
+					foreach ( $controls as $kind => $control ) {
+						$rendered[ $kind ] = $control instanceof \WP_Customize_Control ? $control->get_content() : '';
+					}
+					$rendered['denied'] = $denied_control instanceof \WP_Customize_Control ? $denied_control->get_content() : '';
+					return $rendered;
+				}
+			);
+		} finally {
+			\remove_action( 'customize_render_control', $global_action, 10 );
+			foreach ( $specifics as $control_id => $callback ) {
+				\remove_action( "customize_render_control_{$control_id}", $callback, 10 );
+			}
+		}
+
+		$rendered_ids      = array( $text_control_id, $textarea_control_id, $checkbox_control_id, $radio_control_id, $select_control_id );
+		$global_event_ids  = array_values(
+			array_map(
+				static fn ( array $event ): string => (string) $event['id'],
+				array_filter(
+					$events,
+					static fn ( array $event ): bool => 'global' === $event['hook']
+				)
+			)
+		);
+		$specific_event_ids = array_values(
+			array_map(
+				static fn ( array $event ): string => (string) $event['id'],
+				array_filter(
+					$events,
+					static fn ( array $event ): bool => 'specific' === $event['hook']
+				)
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$rendered_ids === $global_event_ids
+				&& $rendered_ids === $specific_event_ids
+				&& '' === ( $outputs['denied'] ?? null )
+				&& ! in_array( $denied_control_id, $global_event_ids, true )
+				&& ! in_array( $denied_control_id, $specific_event_ids, true )
+				&& false === \has_action( 'customize_render_control', $global_action )
+				&& self::all_specific_render_hooks_removed( $specifics ),
+			'maybe_render fires global and specific hooks for capable controls only and restores temporary hooks',
+			array(
+				'events'      => $events,
+				'globalIds'   => $global_event_ids,
+				'specificIds' => $specific_event_ids,
+				'deniedHtml'  => self::describe_value( $outputs['denied'] ?? null ),
+			)
+		);
+
+		$text_html = (string) ( $outputs['text'] ?? '' );
+		self::collect_failure(
+			$failures,
+			str_contains( $text_html, 'id="customize-control-' . esc_attr( str_replace( array( '[', ']' ), array( '-', '' ), $text_control_id ) ) . '"' )
+				&& str_contains( $text_html, 'class="customize-control customize-control-text"' )
+				&& str_contains( $text_html, esc_html( $text_label ) )
+				&& str_contains( $text_html, 'value="' . esc_attr( $text_value ) . '"' )
+				&& str_contains( $text_html, 'data-customize-setting-link="' . esc_attr( $text_setting_id ) . '"' )
+				&& str_contains( $text_html, 'placeholder="' . esc_attr( $text_attr ) . '"' )
+				&& str_contains( $text_html, $description )
+				&& ! str_contains( $text_html, $text_label )
+				&& ! str_contains( $text_html, $text_value ),
+			'text control rendering escapes labels, values, input attributes, and includes setting links',
+			array( 'html' => self::describe_string( $text_html ) )
+		);
+
+		$textarea_html = (string) ( $outputs['textarea'] ?? '' );
+		self::collect_failure(
+			$failures,
+			str_contains( $textarea_html, 'class="customize-control customize-control-textarea"' )
+				&& str_contains( $textarea_html, esc_html( $textarea_label ) )
+				&& str_contains( $textarea_html, 'rows="5"' )
+				&& str_contains( $textarea_html, 'data-customize-setting-link="' . esc_attr( $textarea_setting_id ) . '"' )
+				&& str_contains( $textarea_html, '>' . esc_textarea( $textarea_value ) . '</textarea>' )
+				&& ! str_contains( $textarea_html, $textarea_label )
+				&& ! str_contains( $textarea_html, $textarea_value ),
+			'textarea control rendering escapes label/value content and adds the default row count',
+			array( 'html' => self::describe_string( $textarea_html ) )
+		);
+
+		$checkbox_html = (string) ( $outputs['checkbox'] ?? '' );
+		self::collect_failure(
+			$failures,
+			str_contains( $checkbox_html, 'class="customize-control customize-control-checkbox"' )
+				&& str_contains( $checkbox_html, 'type="checkbox"' )
+				&& str_contains( $checkbox_html, "checked='checked'" )
+				&& str_contains( $checkbox_html, 'value="1"' )
+				&& str_contains( $checkbox_html, esc_html( $checkbox_label ) )
+				&& str_contains( $checkbox_html, 'data-customize-setting-link="' . esc_attr( $checkbox_setting_id ) . '"' )
+				&& ! str_contains( $checkbox_html, $checkbox_label ),
+			'checkbox control rendering marks truthy values checked and escapes labels',
+			array( 'html' => self::describe_string( $checkbox_html ) )
+		);
+
+		$radio_html = (string) ( $outputs['radio'] ?? '' );
+		self::collect_failure(
+			$failures,
+			str_contains( $radio_html, 'class="customize-control customize-control-radio"' )
+				&& 2 === substr_count( $radio_html, 'type="radio"' )
+				&& 1 === substr_count( $radio_html, "checked='checked'" )
+				&& str_contains( $radio_html, 'value="' . esc_attr( $radio_value ) . '"' )
+				&& str_contains( $radio_html, esc_html( $radio_choices[ $radio_other ] ) )
+				&& str_contains( $radio_html, esc_html( $radio_choices[ $radio_value ] ) )
+				&& str_contains( $radio_html, 'data-customize-setting-link="' . esc_attr( $radio_setting_id ) . '"' )
+				&& ! str_contains( $radio_html, $radio_choices[ $radio_other ] )
+				&& ! str_contains( $radio_html, $radio_choices[ $radio_value ] ),
+			'radio control rendering escapes choices and checks exactly the selected value',
+			array( 'html' => self::describe_string( $radio_html ) )
+		);
+
+		$select_html = (string) ( $outputs['select'] ?? '' );
+		self::collect_failure(
+			$failures,
+			str_contains( $select_html, 'class="customize-control customize-control-select"' )
+				&& str_contains( $select_html, '<select' )
+				&& 2 === substr_count( $select_html, '<option ' )
+				&& 1 === substr_count( $select_html, "selected='selected'" )
+				&& str_contains( $select_html, '<option value="' . esc_attr( $select_value ) . '" selected=' )
+				&& str_contains( $select_html, esc_html( $select_choices[ $select_other ] ) )
+				&& str_contains( $select_html, esc_html( $select_choices[ $select_value ] ) )
+				&& str_contains( $select_html, 'data-customize-setting-link="' . esc_attr( $select_setting_id ) . '"' )
+				&& ! str_contains( $select_html, $select_choices[ $select_other ] )
+				&& ! str_contains( $select_html, $select_choices[ $select_value ] ),
+			'select control rendering escapes option labels and selects exactly the matching value',
+			array( 'html' => self::describe_string( $select_html ) )
+		);
+
+		return self::row(
+			$ctx,
+			'customizer.controls.rendering-hooks-escaping-selection',
+			array() === $failures,
+			array(
+				'controls' => array_keys( $controls ),
+				'events'   => count( $events ),
+				'failures' => $failures,
+			)
+		);
+	}
+
 	private static function check_selective_refresh_partials( \ComponentFuzz\FuzzContext $ctx ): array {
 		$manager    = self::manager( $ctx );
 		$failures   = array();
@@ -1527,6 +1878,15 @@ final class CustomizerSurface {
 		return true;
 	}
 
+	private static function all_specific_render_hooks_removed( array $callbacks ): bool {
+		foreach ( $callbacks as $control_id => $callback ) {
+			if ( false !== \has_action( "customize_render_control_{$control_id}", $callback ) ) {
+				return false;
+			}
+		}
+		return true;
+	}
+
 	private static function reset_runtime(): void {
 		unset( $_POST['customized'], $_POST['customize_changeset_data'] );
 		unset( $_REQUEST['customized'], $_REQUEST['customize_changeset_data'] );
@@ -1698,6 +2058,10 @@ final class CustomizerSurface {
 			'file'    => $throwable->getFile(),
 			'line'    => $throwable->getLine(),
 		);
+	}
+
+	private static function describe_string( string $value ): string {
+		return \ComponentFuzz\preview_value( $value );
 	}
 
 	private static function describe_value( $value ) {
