@@ -27,6 +27,7 @@ final class CronSurface {
 
 			$rows = array_merge( $rows, self::check_schedules( $ctx ) );
 			$rows = array_merge( $rows, self::check_rejection_contracts( $ctx ) );
+			$rows = array_merge( $rows, self::check_cron_array_persistence( $ctx, $store ) );
 			$rows = array_merge( $rows, self::check_schedule_filters( $ctx, $store ) );
 			$rows = array_merge( $rows, self::check_next_scheduled_filter( $ctx, $store ) );
 			$rows = array_merge( $rows, self::check_duplicate_single_event_windows( $ctx, $store ) );
@@ -82,6 +83,8 @@ final class CronSurface {
 				'wp_reschedule_event',
 				'wp_get_ready_cron_jobs',
 				'_get_cron_array',
+				'_set_cron_array',
+				'_upgrade_cron_array',
 				'_wp_cron',
 				'wp_cron',
 				'spawn_cron',
@@ -156,6 +159,169 @@ final class CronSurface {
 				array( 'result' => self::describe_call( $invalid_single_plain ) )
 			),
 		);
+	}
+
+	private static function check_cron_array_persistence( \ComponentFuzz\FuzzContext $ctx, array &$store ): array {
+		$rows      = array();
+		$timestamp = time() + $ctx->int( \HOUR_IN_SECONDS, 3 * \DAY_IN_SECONDS );
+		$hook      = 'component_fuzz_legacy_' . self::safe_hook_fragment( $ctx->text( 0, 14 ) );
+		$args      = array(
+			'group' => 'legacy',
+			'token' => self::safe_hook_fragment( $ctx->text( 0, 14 ) ),
+			'n'     => $ctx->int( 1, 99 ),
+		);
+		$schedule  = $ctx->choice( array( 'hourly', 'twicedaily', 'daily', 'weekly', 'component_fuzz_short' ) );
+		$intervals = array(
+			'hourly'               => \HOUR_IN_SECONDS,
+			'twicedaily'           => 12 * \HOUR_IN_SECONDS,
+			'daily'                => \DAY_IN_SECONDS,
+			'weekly'               => \WEEK_IN_SECONDS,
+			'component_fuzz_short' => 37,
+		);
+		$interval  = $intervals[ $schedule ];
+		$key       = md5( serialize( $args ) );
+		$event     = array(
+			'schedule' => $schedule,
+			'args'     => $args,
+			'interval' => $interval,
+		);
+		$legacy    = array(
+			$timestamp => array(
+				$hook => $event,
+			),
+		);
+		$upgraded  = array(
+			$timestamp => array(
+				$hook => array(
+					$key => $event,
+				),
+			),
+			'version'  => 2,
+		);
+
+		$store         = 'component-fuzz-non-array-cron-option';
+		$non_array_get = self::call( static fn() => \_get_cron_array() );
+
+		$versioned_timestamp = $timestamp + $ctx->int( 10, 600 );
+		$versioned_hook      = $hook . '_versioned';
+		$versioned_args      = array(
+			'group' => 'versioned',
+			'token' => self::safe_hook_fragment( $ctx->text( 0, 14 ) ),
+		);
+		$versioned_key       = md5( serialize( $versioned_args ) );
+		$versioned_event     = array(
+			'schedule' => false,
+			'args'     => $versioned_args,
+		);
+		$versioned           = array(
+			$versioned_timestamp => array(
+				$versioned_hook => array(
+					$versioned_key => $versioned_event,
+				),
+			),
+			'version'            => 2,
+		);
+		$versioned_without   = $versioned;
+		unset( $versioned_without['version'] );
+
+		$store     = $versioned;
+		$valid_get = self::call( static fn() => \_get_cron_array() );
+
+		$rows[] = $ctx->result(
+			'cron.option.get-cron-array-normalizes-and-strips-version',
+			! $non_array_get['threw']
+				&& array() === $non_array_get['value']
+				&& ! $valid_get['threw']
+				&& $versioned_without === $valid_get['value']
+				&& 2 === ( $store['version'] ?? null )
+				&& ! array_key_exists( 'version', $valid_get['value'] )
+				&& array( $versioned_key ) === array_keys( $valid_get['value'][ $versioned_timestamp ][ $versioned_hook ] ?? array() ),
+			array(
+				'nonArrayGet' => self::describe_call( $non_array_get ),
+				'validGet'    => self::describe_call( $valid_get ),
+				'expectedKey' => $versioned_key,
+				'store'       => self::describe_cron_store( $store ),
+			)
+		);
+
+		$store_before_versioned_upgrade = $store;
+		$versioned_upgrade              = self::call( static fn() => \_upgrade_cron_array( $versioned ) );
+
+		$rows[] = $ctx->result(
+			'cron.option.upgrade-cron-array-keeps-version-two-unchanged',
+			! $versioned_upgrade['threw']
+				&& $versioned === $versioned_upgrade['value']
+				&& $store_before_versioned_upgrade === $store,
+			array(
+				'upgrade' => self::describe_call( $versioned_upgrade ),
+				'store'   => self::describe_cron_store( $store ),
+			)
+		);
+
+		$store          = array( 'version' => 2 );
+		$legacy_upgrade = self::call( static fn() => \_upgrade_cron_array( $legacy ) );
+
+		$rows[] = $ctx->result(
+			'cron.option.upgrade-cron-array-hashes-legacy-args-and-persists',
+			! $legacy_upgrade['threw']
+				&& $upgraded === $legacy_upgrade['value']
+				&& $upgraded === $store
+				&& array( $key ) === array_keys( $store[ $timestamp ][ $hook ] ?? array() )
+				&& $event === ( $store[ $timestamp ][ $hook ][ $key ] ?? null ),
+			array(
+				'upgrade'     => self::describe_call( $legacy_upgrade ),
+				'expectedKey' => $key,
+				'store'       => self::describe_cron_store( $store ),
+			)
+		);
+
+		$store      = $upgraded;
+		$set_empty  = self::call( static fn() => \_set_cron_array( 'component-fuzz-not-array', true ) );
+		$empty_cron = array( 'version' => 2 );
+
+		$rows[] = $ctx->result(
+			'cron.option.set-cron-array-normalizes-non-array-to-versioned-empty',
+			! $set_empty['threw']
+				&& true === $set_empty['value']
+				&& $empty_cron === $store,
+			array(
+				'set'   => self::describe_call( $set_empty ),
+				'store' => self::describe_cron_store( $store ),
+			)
+		);
+
+		$store          = $upgraded;
+		$failure_before = $store;
+		$failure_cron   = $versioned_without;
+		$failure_filter = static function ( $value, $old_value ) {
+			unset( $value );
+			return $old_value;
+		};
+
+		\add_filter( 'pre_update_option_cron', $failure_filter, -100, 2 );
+		try {
+			$set_failure = self::call( static fn() => \_set_cron_array( $failure_cron, true ) );
+		} finally {
+			\remove_filter( 'pre_update_option_cron', $failure_filter, -100 );
+		}
+
+		$rows[] = $ctx->result(
+			'cron.option.set-cron-array-returns-wp-error-on-update-failure',
+			! $set_failure['threw']
+				&& 'could_not_set' === self::error_code( $set_failure['value'] ?? null )
+				&& $failure_before === $store
+				&& false === \has_filter( 'pre_update_option_cron', $failure_filter ),
+			array(
+				'set'            => self::describe_call( $set_failure ),
+				'storeRestored'  => $failure_before === $store,
+				'filterRestored' => false === \has_filter( 'pre_update_option_cron', $failure_filter ),
+				'store'          => self::describe_cron_store( $store ),
+			)
+		);
+
+		$store = array( 'version' => 2 );
+
+		return $rows;
 	}
 
 	private static function check_schedule_filters( \ComponentFuzz\FuzzContext $ctx, array &$store ): array {
