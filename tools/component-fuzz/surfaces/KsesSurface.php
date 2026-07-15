@@ -76,6 +76,8 @@ final class KsesSurface {
 			$results = array_merge( $results, self::check_attribute_constraint_invariants( $seed ) );
 			$results = array_merge( $results, self::check_pdf_object_and_uri_attribute_invariants( $seed ) );
 			$results[] = self::check_helper_contract_matrix( $seed );
+			$results[] = self::check_no_null_control_matrix( $seed );
+			$results[] = self::check_kses_filter_lifecycle_invariants( $seed );
 			$results[] = self::check_pre_kses_hook_state(
 				$seed,
 				'kses.pre_kses-hook-state-before-block-attribute-check',
@@ -603,6 +605,328 @@ final class KsesSurface {
 			'kses.helper-contract-matrix',
 			implode( ',', $required ),
 			'low-level KSES helper contracts match exact bounded expectations',
+			$failures,
+			$details
+		);
+	}
+
+	private static function check_no_null_control_matrix( int $seed ): array {
+		foreach ( array( 'wp_kses_bad_protocol', 'wp_kses_no_null' ) as $function_name ) {
+			if ( ! function_exists( $function_name ) ) {
+				return self::skip(
+					$seed,
+					null,
+					'wp_kses_no_null.control-character-contracts.available',
+					$function_name . '() is not loaded',
+					''
+				);
+			}
+		}
+
+		$failures      = array();
+		$removed_bytes = array_merge( range( 0, 8 ), array( 11, 12 ), range( 14, 31 ) );
+		$kept_bytes    = array( 9, 10, 13 );
+
+		try {
+			foreach ( $removed_bytes as $byte ) {
+				$input   = 'left' . chr( $byte ) . 'right';
+				$default = \wp_kses_no_null( $input );
+				$keep    = \wp_kses_no_null( $input, array( 'slash_zero' => 'keep' ) );
+				if ( 'leftright' !== $default || 'leftright' !== $keep ) {
+					$failures[] = array(
+						'label'   => 'raw disallowed C0 controls are removed in both slash-zero modes',
+						'byte'    => $byte,
+						'default' => self::preview( $default ),
+						'keep'    => self::preview( $keep ),
+					);
+				}
+			}
+
+			foreach ( $kept_bytes as $byte ) {
+				$input   = 'left' . chr( $byte ) . 'right';
+				$default = \wp_kses_no_null( $input );
+				$keep    = \wp_kses_no_null( $input, array( 'slash_zero' => 'keep' ) );
+				if ( $input !== $default || $input !== $keep ) {
+					$failures[] = array(
+						'label'   => 'tab, line feed, and carriage return are preserved',
+						'byte'    => $byte,
+						'input'   => self::preview( $input ),
+						'default' => self::preview( $default ),
+						'keep'    => self::preview( $keep ),
+					);
+				}
+			}
+
+			$slash_cases = array(
+				'singleSlashZero'      => array(
+					'input'   => 'path\\0tail',
+					'default' => 'pathtail',
+					'keep'    => 'path\\0tail',
+				),
+				'multiSlashZeros'      => array(
+					'input'   => 'path\\\\000tail',
+					'default' => 'pathtail',
+					'keep'    => 'path\\\\000tail',
+				),
+				'internalSlashZeroRuns' => array(
+					'input'   => 'a\\00b\\\\0c',
+					'default' => 'abc',
+					'keep'    => 'a\\00b\\\\0c',
+				),
+			);
+			foreach ( $slash_cases as $label => $case ) {
+				$default = \wp_kses_no_null( $case['input'] );
+				$keep    = \wp_kses_no_null( $case['input'], array( 'slash_zero' => 'keep' ) );
+				if ( $case['default'] !== $default || $case['keep'] !== $keep ) {
+					$failures[] = array(
+						'label'           => 'literal slash-zero runs follow the slash_zero option',
+						'case'            => $label,
+						'expectedDefault' => self::preview( $case['default'] ),
+						'actualDefault'   => self::preview( $default ),
+						'expectedKeep'    => self::preview( $case['keep'] ),
+						'actualKeep'      => self::preview( $keep ),
+					);
+				}
+			}
+
+			$protocol_cases = array(
+				'slashZeroJavascript' => array(
+					'input'     => 'java\\0script:alert(1)',
+					'protocols' => array( 'http', 'https' ),
+					'expected'  => 'alert(1)',
+				),
+				'rawNullJavascript'   => array(
+					'input'     => 'java' . chr( 0 ) . 'script:alert(1)',
+					'protocols' => array( 'http', 'https' ),
+					'expected'  => 'alert(1)',
+				),
+				'slashZeroHttps'      => array(
+					'input'     => 'http\\0s://example.test/path',
+					'protocols' => array( 'https' ),
+					'expected'  => 'https://example.test/path',
+				),
+				'rawControlHttps'     => array(
+					'input'     => 'h' . chr( 8 ) . 'ttps://example.test/path',
+					'protocols' => array( 'https' ),
+					'expected'  => 'https://example.test/path',
+				),
+			);
+			foreach ( $protocol_cases as $label => $case ) {
+				$actual = \wp_kses_bad_protocol( $case['input'], $case['protocols'] );
+				if ( $case['expected'] !== $actual ) {
+					$failures[] = array(
+						'label'     => 'bad-protocol filtering consumes null-obfuscated schemes before protocol decisions',
+						'case'      => $label,
+						'protocols' => $case['protocols'],
+						'input'     => self::preview( $case['input'] ),
+						'expected'  => self::preview( $case['expected'] ),
+						'actual'    => self::preview( $actual ),
+					);
+				}
+			}
+		} catch ( \Throwable $e ) {
+			return self::throwable_result( $seed, null, 'wp_kses_no_null.control-character-contracts-no-throw', '', $e );
+		}
+
+		$details = array(
+			'removedByteCount' => count( $removed_bytes ),
+			'keptBytes'        => $kept_bytes,
+			'slashCases'       => array_keys( $slash_cases ),
+			'protocolCases'    => array_keys( $protocol_cases ),
+			'failureCount'     => count( $failures ),
+			'failures'         => array_slice( $failures, 0, 8 ),
+		);
+
+		if ( empty( $failures ) ) {
+			return self::pass( $seed, null, 'wp_kses_no_null.control-character-contracts', '', $details );
+		}
+
+		return self::fail(
+			$seed,
+			null,
+			'wp_kses_no_null.control-character-contracts',
+			'',
+			'raw C0 controls, slash-zero runs, and null-obfuscated protocols follow KSES contracts',
+			$failures,
+			$details
+		);
+	}
+
+	private static function check_kses_filter_lifecycle_invariants( int $seed ): array {
+		$required = array(
+			'add_filter',
+			'current_user_can',
+			'has_filter',
+			'kses_init',
+			'kses_init_filters',
+			'kses_remove_filters',
+			'remove_filter',
+			'wp_filter_global_styles_post',
+			'wp_filter_kses',
+			'wp_filter_post_kses',
+		);
+		foreach ( $required as $function_name ) {
+			if ( ! function_exists( $function_name ) ) {
+				return self::skip(
+					$seed,
+					null,
+					'kses.filter-lifecycle.available',
+					$function_name . '() is not loaded',
+					''
+				);
+			}
+		}
+
+		$hooks     = self::kses_filter_lifecycle_hooks();
+		$snapshot = self::snapshot_hooks( $hooks );
+		$failures = array();
+
+		$sentinels = array();
+		foreach ( $hooks as $hook ) {
+			$sentinels[ $hook ] = static function ( $value ) {
+				return $value;
+			};
+		}
+
+		$with_unfiltered_html = static function ( bool $grant, callable $callback ) {
+			$cap_filter = static function ( array $allcaps ) use ( $grant ): array {
+				$allcaps['unfiltered_html'] = $grant;
+				return $allcaps;
+			};
+
+			\add_filter( 'user_has_cap', $cap_filter, 1000, 4 );
+			try {
+				return $callback();
+			} finally {
+				\remove_filter( 'user_has_cap', $cap_filter, 1000 );
+			}
+		};
+
+		try {
+			\kses_remove_filters();
+			foreach ( $sentinels as $hook => $callback ) {
+				\add_filter( $hook, $callback, 123, 1 );
+			}
+
+			$denied = $with_unfiltered_html(
+				false,
+				static function (): array {
+					\kses_remove_filters();
+					\kses_init_filters();
+					return self::kses_filter_lifecycle_state();
+				}
+			);
+			$failures = array_merge(
+				$failures,
+				self::kses_filter_lifecycle_failures(
+					'kses_init_filters denied unfiltered_html',
+					$denied,
+					self::kses_filter_lifecycle_expected( 'denied' )
+				)
+			);
+
+			\kses_remove_filters();
+			$removed = self::kses_filter_lifecycle_state();
+			$failures = array_merge(
+				$failures,
+				self::kses_filter_lifecycle_failures(
+					'kses_remove_filters removes KSES callbacks',
+					$removed,
+					self::kses_filter_lifecycle_expected( 'removed' )
+				)
+			);
+			foreach ( $sentinels as $hook => $callback ) {
+				if ( 123 !== \has_filter( $hook, $callback ) ) {
+					$failures[] = array(
+						'label' => 'kses_remove_filters preserves unrelated callbacks',
+						'hook'  => $hook,
+						'state' => self::compact_value( self::hook_signature( $hook ) ),
+					);
+				}
+			}
+
+			$granted = $with_unfiltered_html(
+				true,
+				static function (): array {
+					\kses_remove_filters();
+					\kses_init_filters();
+					return self::kses_filter_lifecycle_state();
+				}
+			);
+			$failures = array_merge(
+				$failures,
+				self::kses_filter_lifecycle_failures(
+					'kses_init_filters granted unfiltered_html',
+					$granted,
+					self::kses_filter_lifecycle_expected( 'granted' )
+				)
+			);
+
+			$init_denied = $with_unfiltered_html(
+				false,
+				static function (): array {
+					\kses_remove_filters();
+					\kses_init();
+					return self::kses_filter_lifecycle_state();
+				}
+			);
+			$failures = array_merge(
+				$failures,
+				self::kses_filter_lifecycle_failures(
+					'kses_init denied unfiltered_html',
+					$init_denied,
+					self::kses_filter_lifecycle_expected( 'denied' )
+				)
+			);
+
+			$init_granted = $with_unfiltered_html(
+				true,
+				static function (): array {
+					\kses_remove_filters();
+					\kses_init_filters();
+					\kses_init();
+					return self::kses_filter_lifecycle_state();
+				}
+			);
+			$failures = array_merge(
+				$failures,
+				self::kses_filter_lifecycle_failures(
+					'kses_init granted unfiltered_html',
+					$init_granted,
+					self::kses_filter_lifecycle_expected( 'removed' )
+				)
+			);
+			foreach ( $sentinels as $hook => $callback ) {
+				if ( 123 !== \has_filter( $hook, $callback ) ) {
+					$failures[] = array(
+						'label' => 'kses_init preserves unrelated callbacks while removing KSES filters for unfiltered users',
+						'hook'  => $hook,
+						'state' => self::compact_value( self::hook_signature( $hook ) ),
+					);
+				}
+			}
+		} catch ( \Throwable $e ) {
+			return self::throwable_result( $seed, null, 'kses.filter-lifecycle.no-throw', '', $e );
+		} finally {
+			self::restore_hooks( $snapshot );
+		}
+
+		$details = array(
+			'hooks'        => $hooks,
+			'failureCount' => count( $failures ),
+			'failures'     => array_slice( $failures, 0, 8 ),
+		);
+
+		if ( empty( $failures ) ) {
+			return self::pass( $seed, null, 'kses.filter-lifecycle.hook-registration-capability-gates', implode( ',', $hooks ), $details );
+		}
+
+		return self::fail(
+			$seed,
+			null,
+			'kses.filter-lifecycle.hook-registration-capability-gates',
+			implode( ',', $hooks ),
+			'KSES save/comment filters are registered, removed, and capability-gated with unrelated callbacks preserved',
 			$failures,
 			$details
 		);
@@ -3808,6 +4132,95 @@ final class KsesSurface {
 		}
 
 		return array_values( array_unique( $out ) );
+	}
+
+	private static function kses_filter_lifecycle_hooks(): array {
+		return array(
+			'title_save_pre',
+			'pre_comment_content',
+			'content_save_pre',
+			'excerpt_save_pre',
+			'content_filtered_save_pre',
+		);
+	}
+
+	private static function kses_filter_lifecycle_callbacks(): array {
+		return array(
+			'wp_filter_kses',
+			'wp_filter_post_kses',
+			'wp_filter_global_styles_post',
+		);
+	}
+
+	private static function kses_filter_lifecycle_state(): array {
+		$state = array();
+		foreach ( self::kses_filter_lifecycle_hooks() as $hook ) {
+			$state[ $hook ] = array();
+			foreach ( self::kses_filter_lifecycle_callbacks() as $callback ) {
+				$priority = \has_filter( $hook, $callback );
+				$state[ $hook ][ $callback ] = false === $priority ? false : (int) $priority;
+			}
+		}
+		return $state;
+	}
+
+	private static function kses_filter_lifecycle_expected( string $mode ): array {
+		$removed = array();
+		foreach ( self::kses_filter_lifecycle_hooks() as $hook ) {
+			$removed[ $hook ] = array_fill_keys( self::kses_filter_lifecycle_callbacks(), false );
+		}
+
+		if ( 'removed' === $mode ) {
+			return $removed;
+		}
+
+		$expected = $removed;
+		$expected['title_save_pre']['wp_filter_kses'] = 10;
+		if ( 'granted' === $mode ) {
+			$expected['pre_comment_content']['wp_filter_post_kses'] = 10;
+		} else {
+			$expected['pre_comment_content']['wp_filter_kses'] = 10;
+		}
+		$expected['content_save_pre']['wp_filter_global_styles_post']          = 9;
+		$expected['content_save_pre']['wp_filter_post_kses']                  = 10;
+		$expected['excerpt_save_pre']['wp_filter_post_kses']                  = 10;
+		$expected['content_filtered_save_pre']['wp_filter_global_styles_post'] = 9;
+		$expected['content_filtered_save_pre']['wp_filter_post_kses']          = 10;
+
+		return $expected;
+	}
+
+	private static function kses_filter_lifecycle_failures( string $label, array $actual, array $expected ): array {
+		$failures = array();
+		foreach ( $expected as $hook => $callbacks ) {
+			foreach ( $callbacks as $callback => $expected_priority ) {
+				$actual_priority = $actual[ $hook ][ $callback ] ?? false;
+				if ( $expected_priority !== $actual_priority ) {
+					$failures[] = array(
+						'label'    => $label,
+						'hook'     => $hook,
+						'callback' => $callback,
+						'expected' => $expected_priority,
+						'actual'   => $actual_priority,
+					);
+				}
+			}
+		}
+		return $failures;
+	}
+
+	private static function snapshot_hooks( array $hook_names ): array {
+		$snapshot = array();
+		foreach ( $hook_names as $hook_name ) {
+			$snapshot[ $hook_name ] = self::snapshot_hook( $hook_name );
+		}
+		return $snapshot;
+	}
+
+	private static function restore_hooks( array $snapshot ): void {
+		foreach ( $snapshot as $hook_name => $hook_snapshot ) {
+			self::restore_hook( $hook_name, $hook_snapshot );
+		}
 	}
 
 	private static function snapshot_hook( string $hook_name ): array {
