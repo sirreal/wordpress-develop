@@ -421,10 +421,10 @@ database, network requests, or a configured site.
   restoration.
 - `identity`: usernames, emails, identity sanitizer filter contracts,
   capabilities, generated user contact-method filters and additional-key
-  propagation, generated `WP_User` identity field/cache/filter behavior, avatar
-  data/URL/HTML filter pipelines, text/comment filters, comment
-  cookies/current-commenter payloads, options, password hashing/checking, parse
-  helpers.
+  propagation, generic `wp_dropdown_users()` selector/filter contracts,
+  generated `WP_User` identity field/cache/filter behavior, avatar data/URL/HTML
+  filter pipelines, text/comment filters, comment cookies/current-commenter
+  payloads, options, password hashing/checking, parse helpers.
 - `import-diff`: importer registry and upload-form helpers, `WP_Importer`
   imported post/comment lookup against the in-memory stub, import upload handler
   fail-closed and cleanup paths, `wp_text_diff()` rendering/escaping/

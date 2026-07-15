@@ -33,6 +33,7 @@ final class IdentitySurface {
 			self::exercise_identity_filter_contracts( $result, $rng );
 			self::exercise_capability_keys( $result, $rng );
 			self::exercise_user_contact_methods( $result, $rng );
+			self::exercise_user_dropdowns( $result, $rng );
 			self::exercise_wp_user_identity_fields( $result, $rng );
 			self::exercise_current_user_lifecycle( $result, $rng );
 			self::exercise_user_existence_helpers( $result, $rng );
@@ -294,6 +295,209 @@ final class IdentitySurface {
 				self::check( $result, 'wp_get_user_contact_methods.filter_receives_null_and_user_payloads', 4 === count( $events ) && null === $events[0]['user'] && $user === $events[1]['user'] && $user === $events[2]['user'] && $user === $events[3]['user'], $user, 'null payload then user payloads', $events );
 				self::check( $result, '_get_additional_user_keys.includes_filtered_contact_methods', array() === array_diff( array_keys( $methods ), $additional_keys ) && in_array( 'first_name', $additional_keys, true ) && in_array( 'locale', $additional_keys, true ), $methods, 'base keys plus generated contact keys', $additional_keys );
 				self::check( $result, 'wp_get_user_contact_methods.filter_restored', $before_filter === \has_filter( 'user_contactmethods', $filter ), $methods, $before_filter, \has_filter( 'user_contactmethods', $filter ) );
+			}
+		);
+	}
+
+	private static function exercise_user_dropdowns( array &$result, array &$rng ): void {
+		if ( ! class_exists( 'WP_User' ) || ! class_exists( 'WP_User_Query' ) ) {
+			$result['skips'][] = 'user_dropdowns:missing_class:WP_User_or_WP_User_Query';
+			return;
+		}
+
+		if ( ! self::have_functions( array( '_x', 'add_filter', 'clean_user_cache', 'esc_html', 'get_userdata', 'has_filter', 'remove_filter', 'update_user_caches', 'wp_cache_get', 'wp_dropdown_users' ), $result, 'user_dropdowns' ) ) {
+			return;
+		}
+
+		$cases = array_slice( self::wp_user_identity_cases( $rng ), 0, 3 );
+
+		self::run_case(
+			$result,
+			'user_dropdowns',
+			static function () use ( &$result, $cases ): void {
+				$token        = str_replace( '-', '_', $cases[0]['token'] );
+				$rows_by_id   = array();
+				$users        = array();
+				$arg_events   = array();
+				$query_events = array();
+				$html_events  = array();
+				$mode         = '';
+				$marker       = '<!-- identity-dropdown-' . $token . ' -->';
+
+				foreach ( $cases as $case ) {
+					$row                            = $case['row'];
+					$rows_by_id[ (int) $row['ID'] ] = $row;
+				}
+
+				$ids              = array_keys( $rows_by_id );
+				$select_name      = 'identity_user_' . $token;
+				$select_id        = 'identity-user-' . $token;
+				$select_class     = 'identity-user-class-' . $token;
+				$show_option_all  = 'All identity ' . $token;
+				$show_option_none = 'No identity ' . $token;
+				$none_value       = -7000 - (int) ( $ids[0] % 997 );
+
+				$dropdown_args_filter = static function ( array $query_args, array $parsed_args ) use ( &$arg_events, &$mode, $ids ): array {
+					$arg_events[] = array(
+						'mode'       => $mode,
+						'queryArgs'  => self::user_dropdown_args_snapshot( $query_args ),
+						'parsedArgs' => self::user_dropdown_args_snapshot( $parsed_args ),
+					);
+
+					if ( 'main' === $mode ) {
+						$query_args['include'] = array( $ids[0], $ids[1] );
+						$query_args['orderby'] = 'ID';
+						$query_args['order']   = 'DESC';
+						$query_args['fields']  = array( 'ID', 'user_login', 'display_name', 'user_email' );
+					} elseif ( 'include_selected' === $mode ) {
+						$query_args['include'] = array( $ids[0] );
+						$query_args['orderby'] = 'ID';
+						$query_args['order']   = 'ASC';
+						$query_args['fields']  = array( 'ID', 'user_login' );
+					} elseif ( 'single' === $mode ) {
+						$query_args['exclude'] = array( $ids[1], $ids[2] );
+						$query_args['orderby'] = 'ID';
+						$query_args['order']   = 'ASC';
+						$query_args['fields']  = array( 'ID', 'user_login' );
+					}
+
+					return $query_args;
+				};
+
+				$users_pre_query_filter = static function ( $users, $query ) use ( &$query_events, &$mode, $rows_by_id ) {
+					if ( ! in_array( $mode, array( 'main', 'include_selected', 'single' ), true ) ) {
+						return $users;
+					}
+
+					$query_vars    = is_object( $query ) && isset( $query->query_vars ) && is_array( $query->query_vars ) ? $query->query_vars : array();
+					$query_events[] = array(
+						'mode'      => $mode,
+						'queryVars' => self::user_dropdown_args_snapshot( $query_vars ),
+					);
+
+					return self::user_dropdown_query_objects( $rows_by_id, $query_vars );
+				};
+
+				$html_filter = static function ( string $html ) use ( &$html_events, $marker ): string {
+					$html_events[] = $html;
+
+					return $html . $marker;
+				};
+
+				$before_filters = array(
+					'wp_dropdown_users_args' => \has_filter( 'wp_dropdown_users_args', $dropdown_args_filter ),
+					'users_pre_query'        => \has_filter( 'users_pre_query', $users_pre_query_filter ),
+					'wp_dropdown_users'      => \has_filter( 'wp_dropdown_users', $html_filter ),
+				);
+
+				$main_html             = null;
+				$main_echo             = null;
+				$include_selected_html = null;
+				$hidden_html           = null;
+				$thrown                = null;
+
+				try {
+					foreach ( $cases as $case ) {
+						$user    = self::fake_identity_user( $case['row'] );
+						$users[] = $user;
+						\clean_user_cache( $user );
+						\update_user_caches( $user );
+					}
+
+					\add_filter( 'wp_dropdown_users_args', $dropdown_args_filter, 999, 2 );
+					\add_filter( 'users_pre_query', $users_pre_query_filter, 999, 2 );
+					\add_filter( 'wp_dropdown_users', $html_filter, 999, 1 );
+
+					$mode = 'main';
+					ob_start();
+					try {
+						$main_html = \wp_dropdown_users(
+							array(
+								'echo'              => false,
+								'name'              => $select_name,
+								'id'                => $select_id,
+								'class'             => $select_class,
+								'show'              => 'display_name_with_login',
+								'selected'          => $ids[1],
+								'show_option_all'   => $show_option_all,
+								'show_option_none'  => $show_option_none,
+								'option_none_value' => $none_value,
+							)
+						);
+					} finally {
+						$main_echo = ob_get_clean();
+					}
+
+					\remove_filter( 'wp_dropdown_users', $html_filter, 999 );
+
+					$mode = 'include_selected';
+					$include_selected_html = \wp_dropdown_users(
+						array(
+							'echo'             => false,
+							'show'             => 'user_login',
+							'selected'         => $ids[1],
+							'include_selected' => true,
+						)
+					);
+
+					$mode        = 'single';
+					$hidden_html = \wp_dropdown_users(
+						array(
+							'echo'                    => false,
+							'hide_if_only_one_author' => true,
+							'show'                    => 'user_login',
+						)
+					);
+
+					$mode = '';
+				} catch ( \Throwable $e ) {
+					$thrown = $e;
+				} finally {
+					$mode = '';
+					\remove_filter( 'wp_dropdown_users', $html_filter, 999 );
+					\remove_filter( 'users_pre_query', $users_pre_query_filter, 999 );
+					\remove_filter( 'wp_dropdown_users_args', $dropdown_args_filter, 999 );
+
+					foreach ( $users as $user ) {
+						\clean_user_cache( $user );
+					}
+				}
+
+				$after_filters = array(
+					'wp_dropdown_users_args' => \has_filter( 'wp_dropdown_users_args', $dropdown_args_filter ),
+					'users_pre_query'        => \has_filter( 'users_pre_query', $users_pre_query_filter ),
+					'wp_dropdown_users'      => \has_filter( 'wp_dropdown_users', $html_filter ),
+				);
+
+				self::check( $result, 'wp_dropdown_users.filters_restored', $before_filters === $after_filters, array_keys( $before_filters ), $before_filters, $after_filters );
+				self::check( $result, 'wp_dropdown_users.generated_user_caches_cleaned', self::user_existence_caches_are_clean( $cases ), $cases, 'no generated user cache keys remain', self::user_existence_cache_observation( $cases ) );
+
+				if ( null !== $thrown ) {
+					throw $thrown;
+				}
+
+				$main_args_event          = $arg_events[0] ?? array();
+				$main_query_event         = $query_events[0] ?? array();
+				$include_query_event      = $query_events[1] ?? array();
+				$single_query_event       = $query_events[2] ?? array();
+				$main_original_query      = $main_args_event['queryArgs'] ?? array();
+				$main_parsed_args         = $main_args_event['parsedArgs'] ?? array();
+				$main_query_vars          = $main_query_event['queryVars'] ?? array();
+				$include_query_vars       = $include_query_event['queryVars'] ?? array();
+				$single_query_vars        = $single_query_event['queryVars'] ?? array();
+				$first_display_with_login = \esc_html( sprintf( \_x( '%1$s (%2$s)', 'user dropdown' ), $rows_by_id[ $ids[0] ]['display_name'], $rows_by_id[ $ids[0] ]['user_login'] ) );
+				$second_display_with_login = \esc_html( sprintf( \_x( '%1$s (%2$s)', 'user dropdown' ), $rows_by_id[ $ids[1] ]['display_name'], $rows_by_id[ $ids[1] ]['user_login'] ) );
+
+				self::check( $result, 'wp_dropdown_users.echo_false_returns_html_without_echoing', is_string( $main_html ) && '' !== $main_html && '' === $main_echo, $main_parsed_args, 'returned HTML and empty output buffer', array( 'html' => $main_html, 'echo' => $main_echo ) );
+				self::check( $result, 'wp_dropdown_users.renders_select_name_id_class_contracts', str_contains( (string) $main_html, "<select name='{$select_name}' id='{$select_id}' class='{$select_class}'>" ), $main_parsed_args, array( 'name' => $select_name, 'id' => $select_id, 'class' => $select_class ), $main_html );
+				self::check( $result, 'wp_dropdown_users.renders_all_none_and_selected_options', str_contains( (string) $main_html, "<option value='0'>{$show_option_all}</option>" ) && str_contains( (string) $main_html, "<option value='" . $none_value . "'>{$show_option_none}</option>" ) && str_contains( (string) $main_html, "<option value='" . $ids[1] . "' selected='selected'>" ), $main_parsed_args, array( 'all' => $show_option_all, 'none' => $show_option_none, 'selected' => $ids[1] ), $main_html );
+				self::check( $result, 'wp_dropdown_users.args_filter_receives_query_args_and_parsed_args', 'main' === ( $main_args_event['mode'] ?? null ) && 'display_name_with_login' === ( $main_parsed_args['show'] ?? null ) && array( 'ID', 'user_login', 'display_name' ) === ( $main_original_query['fields'] ?? null ) && $select_name === ( $main_parsed_args['name'] ?? null ) && $ids[1] === (int) ( $main_parsed_args['selected'] ?? 0 ), $cases, 'query args derived from show plus parsed dropdown args', $main_args_event );
+				self::check( $result, 'wp_dropdown_users.args_filter_constrains_include_order_and_fields', array( $ids[0], $ids[1] ) === self::user_dropdown_ids_from_query_arg( $main_query_vars['include'] ?? array() ) && 'ID' === ( $main_query_vars['orderby'] ?? null ) && 'DESC' === ( $main_query_vars['order'] ?? null ) && array( 'id', 'user_login', 'display_name', 'user_email' ) === ( $main_query_vars['fields'] ?? null ) && false !== strpos( (string) $main_html, "value='" . $ids[1] . "'" ) && false !== strpos( (string) $main_html, "value='" . $ids[0] . "'" ) && strpos( (string) $main_html, "value='" . $ids[1] . "'" ) < strpos( (string) $main_html, "value='" . $ids[0] . "'" ) && ! str_contains( (string) $main_html, "value='" . $ids[2] . "'" ), $cases, 'filtered include, DESC ID order, constrained fields, omitted third user', array( 'queryVars' => $main_query_vars, 'html' => $main_html ) );
+				self::check( $result, 'wp_dropdown_users.html_filter_receives_generated_html_and_appends_marker', 1 === count( $html_events ) && is_string( $html_events[0] ?? null ) && str_contains( $html_events[0], '<select ' ) && ! str_contains( $html_events[0], $marker ) && str_ends_with( (string) $main_html, $marker ), $main_parsed_args, 'one pre-marker HTML event and marker appended to return', array( 'events' => $html_events, 'html' => $main_html ) );
+				self::check( $result, 'wp_dropdown_users.display_name_with_login_labels_are_escaped', str_contains( (string) $main_html, '>' . $first_display_with_login . '</option>' ) && str_contains( (string) $main_html, '>' . $second_display_with_login . '</option>' ) && ! str_contains( (string) $main_html, $rows_by_id[ $ids[0] ]['display_name'] . ' (' . $rows_by_id[ $ids[0] ]['user_login'] . ')' ) && ! str_contains( (string) $main_html, $rows_by_id[ $ids[1] ]['display_name'] . ' (' . $rows_by_id[ $ids[1] ]['user_login'] . ')' ), $cases, array( $first_display_with_login, $second_display_with_login ), $main_html );
+				self::check( $result, 'wp_dropdown_users.include_selected_appends_cache_seeded_omitted_user', array( $ids[0] ) === self::user_dropdown_ids_from_query_arg( $include_query_vars['include'] ?? array() ) && str_contains( (string) $include_selected_html, "<option value='" . $ids[0] . "'>" . \esc_html( $rows_by_id[ $ids[0] ]['user_login'] ) . '</option>' ) && str_contains( (string) $include_selected_html, "<option value='" . $ids[1] . "' selected='selected'>" . \esc_html( $rows_by_id[ $ids[1] ]['user_login'] ) . '</option>' ), $cases, 'query includes first user; selected second user appended from cache', array( 'queryVars' => $include_query_vars, 'html' => $include_selected_html, 'selectedUserId' => $ids[1] ) );
+				self::check( $result, 'wp_dropdown_users.args_filter_constrains_exclude_for_single_author_branch', array( $ids[1], $ids[2] ) === self::user_dropdown_ids_from_query_arg( $single_query_vars['exclude'] ?? array() ), $cases, array( $ids[1], $ids[2] ), $single_query_vars );
+				self::check( $result, 'wp_dropdown_users.hide_if_only_one_author_suppresses_single_filtered_user', '' === $hidden_html, $cases, 'filtered query returns one user and dropdown output is empty', array( 'queryVars' => $single_query_vars, 'html' => $hidden_html ) );
 			}
 		);
 	}
@@ -1373,6 +1577,111 @@ final class IdentitySurface {
 		$user->allcaps = array();
 
 		return $user;
+	}
+
+	private static function user_dropdown_args_snapshot( array $args ): array {
+		$keys = array(
+			'include',
+			'exclude',
+			'orderby',
+			'order',
+			'fields',
+			'show',
+			'selected',
+			'include_selected',
+			'name',
+			'id',
+			'class',
+			'show_option_all',
+			'show_option_none',
+			'hide_if_only_one_author',
+		);
+
+		$out = array();
+		foreach ( $keys as $key ) {
+			if ( array_key_exists( $key, $args ) ) {
+				$out[ $key ] = $args[ $key ];
+			}
+		}
+
+		return $out;
+	}
+
+	private static function user_dropdown_query_objects( array $rows_by_id, array $query_vars ): array {
+		$rows    = array_values( $rows_by_id );
+		$include = self::user_dropdown_ids_from_query_arg( $query_vars['include'] ?? array() );
+		$exclude = self::user_dropdown_ids_from_query_arg( $query_vars['exclude'] ?? array() );
+
+		if ( array() !== $include ) {
+			$include_map = array_flip( $include );
+			$rows        = array_values(
+				array_filter(
+					$rows,
+					static function ( array $row ) use ( $include_map ): bool {
+						return isset( $include_map[ (int) $row['ID'] ] );
+					}
+				)
+			);
+		} elseif ( array() !== $exclude ) {
+			$exclude_map = array_flip( $exclude );
+			$rows        = array_values(
+				array_filter(
+					$rows,
+					static function ( array $row ) use ( $exclude_map ): bool {
+						return ! isset( $exclude_map[ (int) $row['ID'] ] );
+					}
+				)
+			);
+		}
+
+		$orderby = strtolower( (string) ( $query_vars['orderby'] ?? 'ID' ) );
+		$order   = strtoupper( (string) ( $query_vars['order'] ?? 'ASC' ) );
+		usort(
+			$rows,
+			static function ( array $left, array $right ) use ( $orderby, $order ): int {
+				if ( 'display_name' === $orderby ) {
+					$comparison = strcmp( (string) $left['display_name'], (string) $right['display_name'] );
+				} elseif ( 'user_login' === $orderby ) {
+					$comparison = strcmp( (string) $left['user_login'], (string) $right['user_login'] );
+				} else {
+					$comparison = (int) $left['ID'] <=> (int) $right['ID'];
+				}
+
+				return 'DESC' === $order ? -$comparison : $comparison;
+			}
+		);
+
+		$objects = array();
+		foreach ( $rows as $row ) {
+			$objects[] = (object) array(
+				'ID'           => (int) $row['ID'],
+				'user_login'   => $row['user_login'],
+				'display_name' => $row['display_name'],
+				'user_email'   => $row['user_email'],
+			);
+		}
+
+		return $objects;
+	}
+
+	private static function user_dropdown_ids_from_query_arg( $value ): array {
+		if ( null === $value || '' === $value ) {
+			return array();
+		}
+
+		if ( is_string( $value ) ) {
+			$value = preg_split( '/[\s,]+/', $value );
+		}
+
+		$ids = array();
+		foreach ( (array) $value as $item ) {
+			$id = (int) $item;
+			if ( $id > 0 ) {
+				$ids[] = $id;
+			}
+		}
+
+		return array_values( array_unique( $ids ) );
 	}
 
 	private static function current_user_expectation( array $row ): array {
