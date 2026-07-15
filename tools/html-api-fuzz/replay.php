@@ -37,6 +37,7 @@ if ( null !== $store_path ) {
 	$replay_dir  = \HtmlApiFuzz\option_string( $options, 'output-dir', dirname( $store_path ) . '/replay-' . $store_label . '-' . \HtmlApiFuzz\timestamp() );
 	\HtmlApiFuzz\ensure_dir( $replay_dir );
 	$replay_path = $replay_dir . '/source-replay.json';
+	$store_replay = \HtmlApiFuzz\OracleRenderer::replay_safe_document( $store_replay );
 	\HtmlApiFuzz\write_json_file( $replay_path, $store_replay );
 	$options['output-dir'] = $replay_dir;
 }
@@ -64,6 +65,10 @@ if ( null === $payload_policy ) {
 $original_generator = is_array( $replay['generator'] ?? null ) ? $replay['generator'] : ( $replay['originalGenerator'] ?? null );
 $source_replay = \HtmlApiFuzz\replay_source_metadata( $replay_path, $replay );
 $git_metadata_base64 = \HtmlApiFuzz\git_metadata_base64( \HtmlApiFuzz\git_metadata() );
+$explicit_chrome_socket = array_key_exists( 'chrome-socket', $options );
+if ( ! $explicit_chrome_socket ) {
+	putenv( 'HTML_API_FUZZ_CHROME_SOCKET' );
+}
 $oracle_options = $options;
 if ( null === \HtmlApiFuzz\option_string( $oracle_options, 'dom-oracle', null ) ) {
 	$oracle_options['dom-oracle'] = $replay['options']['domOracle'] ?? $replay['oracle']['kind'] ?? \HtmlApiFuzz\OracleRenderer::KIND_LEXBOR_SOURCE;
@@ -75,7 +80,6 @@ $stored_oracle_options = array(
 	'html5ever-oracle-bin' => 'html5everOracleBin',
 	'chrome-oracle-script' => 'chromeOracleScript',
 	'chrome-executable'    => 'chromeExecutable',
-	'chrome-socket'        => 'chromeSocket',
 	'node-bin'             => 'nodeBin',
 );
 foreach ( $stored_oracle_options as $option_name => $replay_key ) {

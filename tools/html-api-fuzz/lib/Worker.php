@@ -80,15 +80,16 @@ class Worker {
 			'maxNodes'  => option_int( $options, 'max-nodes', 3000 ),
 		);
 		$fail_unsupported = option_bool( $options, 'fail-unsupported', false );
-		$oracle_renderer  = OracleRenderer::from_options( $options );
-		$oracle_metadata  = $oracle_renderer->metadata();
+		$oracle_renderer        = OracleRenderer::from_options( $options );
+		$oracle_metadata        = $oracle_renderer->metadata();
+		$replay_oracle_metadata = $oracle_renderer->replay_metadata();
 
 		$replay_path = $output_dir . DIRECTORY_SEPARATOR . 'replay.json';
 		$result_path = $output_dir . DIRECTORY_SEPARATOR . 'result.json';
 		$input_path  = $output_dir . DIRECTORY_SEPARATOR . 'input.bin';
 		file_put_contents( $input_path, $input );
 
-		$replay = self::base_replay( $seed, $profile, $mode, $payload_policy, $fragment_context, $generator_parameters, $input_source, $input, $output_dir, $limits, $fail_unsupported, $git_metadata, $oracle_metadata, $oracle_renderer->replay_options() );
+		$replay = self::base_replay( $seed, $profile, $mode, $payload_policy, $fragment_context, $generator_parameters, $input_source, $input, $output_dir, $limits, $fail_unsupported, $git_metadata, $replay_oracle_metadata, $oracle_renderer->replay_options() );
 		write_json_file( $replay_path, $replay );
 
 		$result = self::evaluate_input(
@@ -120,7 +121,7 @@ class Worker {
 			'failureClass' => $result['failureClass'] ?? null,
 			'signature'    => $signature,
 			'oracleFinding' => $result['oracleFinding'] ?? null,
-			'oracle'       => $result['oracle'] ?? $oracle_metadata,
+			'oracle'       => OracleRenderer::replay_safe_metadata( is_array( $result['oracle'] ?? null ) ? $result['oracle'] : $oracle_metadata ),
 			'resultPath'   => $result_path,
 		);
 		$replay['signature'] = $signature;
@@ -376,7 +377,6 @@ class Worker {
 				'html5everOracleBin' => $oracle_options['html5everOracleBin'] ?? null,
 				'chromeOracleScript' => $oracle_options['chromeOracleScript'] ?? null,
 				'chromeExecutable'   => $oracle_options['chromeExecutable'] ?? null,
-				'chromeSocket'       => $oracle_options['chromeSocket'] ?? null,
 				'nodeBin'                => $oracle_options['nodeBin'] ?? null,
 				'oracleTimeoutMs' => $oracle_options['oracleTimeoutMs'] ?? null,
 			),

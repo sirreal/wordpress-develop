@@ -47,6 +47,9 @@ class OracleRenderer {
 		if ( ! in_array( $kind, self::kinds(), true ) ) {
 			throw new \InvalidArgumentException( 'Expected --dom-oracle to be one of: ' . implode( ', ', self::kinds() ) . '.' );
 		}
+		if ( array_key_exists( 'chrome-socket', $options ) && ( true === $options['chrome-socket'] || '' === trim( (string) $options['chrome-socket'] ) ) ) {
+			throw new \InvalidArgumentException( 'Expected --chrome-socket to be a non-empty path.' );
+		}
 		$timeout_ms = option_int( $options, 'oracle-timeout-ms', 2500 );
 		if ( $timeout_ms < 1 ) {
 			throw new \InvalidArgumentException( 'Expected --oracle-timeout-ms to be at least 1.' );
@@ -101,6 +104,25 @@ class OracleRenderer {
 				throw new \RuntimeException( "Replay oracle mismatch for {$key}: expected {$expected[ $key ]}, got " . ( $current[ $key ] ?? 'missing' ) . '.' );
 			}
 		}
+	}
+
+	public static function replay_safe_document( array $document ): array {
+		foreach ( $document as $key => $value ) {
+			if ( in_array( $key, array( 'chromeSocket', 'browserPid', 'browserInstanceId' ), true ) ) {
+				unset( $document[ $key ] );
+			} elseif ( is_array( $value ) ) {
+				$document[ $key ] = self::replay_safe_document( $value );
+			}
+		}
+		return $document;
+	}
+
+	public static function replay_safe_metadata( array $metadata ): array {
+		return self::replay_safe_document( $metadata );
+	}
+
+	public function replay_metadata(): array {
+		return self::replay_safe_metadata( $this->metadata() );
 	}
 
 	public function metadata(): array {
@@ -216,7 +238,6 @@ class OracleRenderer {
 		if ( self::KIND_CHROME_CDP === $this->kind ) {
 			$options['chromeOracleScript'] = $this->chrome_oracle_script;
 			$options['chromeExecutable']   = $this->chrome_executable;
-			$options['chromeSocket']       = $this->chrome_socket;
 			$options['nodeBin']            = $this->node_bin;
 		}
 		if ( 2500 !== $this->timeout_ms ) {
@@ -506,16 +527,19 @@ class OracleRenderer {
 		$encoded = json_encode( $request, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE );
 		$start = microtime( true );
 		$request_timeout_ms = $started_server ? max( 15000, $this->timeout_ms ) : $this->timeout_ms;
-		if ( false === $encoded || false === @fwrite( $server['pipes'][0], $encoded . "\n" ) ) {
+		$deadline = $start + ( $request_timeout_ms / 1000 );
+		if ( false === $encoded || ! self::write_all_until( $server['pipes'][0], $encoded . "\n", $deadline ) ) {
+			$command = $server['command'] ?? '';
+			$timed_out = microtime( true ) >= $deadline;
 			self::stop_chrome_server( $key );
 			if ( $may_retry ) {
 				return $this->chrome_request( $request, false );
 			}
 			return array(
-				'command'    => $server['command'] ?? '',
+				'command'    => $command,
 				'code'       => null,
-				'timedOut'   => false,
-				'durationMs' => 0,
+				'timedOut'   => $timed_out,
+				'durationMs' => (int) round( ( microtime( true ) - $start ) * 1000 ),
 				'stdout'     => '',
 				'stderr'     => 'Could not write to Chrome CDP oracle server.',
 				'output'     => 'Could not write to Chrome CDP oracle server.',
@@ -565,7 +589,7 @@ class OracleRenderer {
 					'decoded'    => null,
 				);
 			}
-			if ( ( microtime( true ) - $start ) * 1000 > $request_timeout_ms ) {
+			if ( microtime( true ) >= $deadline ) {
 				$stderr = $server['stderr'];
 				$command = $server['command'];
 				self::stop_chrome_server( $key );
@@ -589,12 +613,13 @@ class OracleRenderer {
 		$encoded = json_encode( $request, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE );
 		$start = microtime( true );
 		$timeout_ms = max( 1, $timeout_override_ms ?? $this->timeout_ms );
+		$deadline = $start + ( $timeout_ms / 1000 );
 		$socket_uri = 0 === strpos( (string) $this->chrome_socket, 'unix://' )
 			? $this->chrome_socket
 			: 'unix://' . $this->chrome_socket;
 		$errno = 0;
 		$error = '';
-		$socket = @stream_socket_client( $socket_uri, $errno, $error, max( 1.0, $timeout_ms / 1000 ) );
+		$socket = @stream_socket_client( $socket_uri, $errno, $error, max( 0.001, $timeout_ms / 1000 ) );
 		if ( ! is_resource( $socket ) ) {
 			return array(
 				'command'    => 'chrome-cdp socket ' . $this->chrome_socket,
@@ -608,15 +633,13 @@ class OracleRenderer {
 			);
 		}
 
-		$seconds = intdiv( $timeout_ms, 1000 );
-		$microseconds = ( $timeout_ms % 1000 ) * 1000;
-		stream_set_timeout( $socket, $seconds, $microseconds );
-		if ( false === $encoded || false === @fwrite( $socket, $encoded . "\n" ) ) {
+		if ( false === $encoded || ! self::write_all_until( $socket, $encoded . "\n", $deadline ) ) {
+			$timed_out = microtime( true ) >= $deadline;
 			fclose( $socket );
 			return array(
 				'command'    => 'chrome-cdp socket ' . $this->chrome_socket,
 				'code'       => null,
-				'timedOut'   => false,
+				'timedOut'   => $timed_out,
 				'durationMs' => (int) round( ( microtime( true ) - $start ) * 1000 ),
 				'stdout'     => '',
 				'stderr'     => 'Could not write to Chrome CDP socket.',
@@ -625,6 +648,8 @@ class OracleRenderer {
 			);
 		}
 		fflush( $socket );
+		$remaining_microseconds = max( 1, (int) floor( ( $deadline - microtime( true ) ) * 1000000 ) );
+		stream_set_timeout( $socket, intdiv( $remaining_microseconds, 1000000 ), $remaining_microseconds % 1000000 );
 
 		$line = false;
 		$decoded = null;
@@ -787,7 +812,7 @@ class OracleRenderer {
 		$server = self::$chrome_servers[ $key ];
 		unset( self::$chrome_servers[ $key ] );
 		if ( isset( $server['pipes'][0] ) && is_resource( $server['pipes'][0] ) ) {
-			@fwrite( $server['pipes'][0], "{\"command\":\"shutdown\"}\n" );
+			self::write_all_until( $server['pipes'][0], "{\"command\":\"shutdown\"}\n", microtime( true ) + 0.5 );
 			@fclose( $server['pipes'][0] );
 		}
 		self::await_or_terminate( $server['process'] );
@@ -808,7 +833,7 @@ class OracleRenderer {
 		$socket_path = $service['socketPath'];
 		$socket = @stream_socket_client( 'unix://' . $socket_path, $errno, $error, 0.5 );
 		if ( is_resource( $socket ) ) {
-			@fwrite( $socket, "{\"id\":0,\"command\":\"shutdown\"}\n" );
+			self::write_all_until( $socket, "{\"id\":0,\"command\":\"shutdown\"}\n", microtime( true ) + 0.5 );
 			@fflush( $socket );
 			@fclose( $socket );
 		}
@@ -837,6 +862,42 @@ class OracleRenderer {
 		$status = proc_get_status( $process );
 		if ( $status['running'] ) {
 			proc_terminate( $process, 9 );
+		}
+	}
+
+	private static function write_all_until( $stream, string $bytes, float $deadline ): bool {
+		$length = strlen( $bytes );
+		$offset = 0;
+		$was_blocking = (bool) ( stream_get_meta_data( $stream )['blocked'] ?? true );
+		if ( ! @stream_set_blocking( $stream, false ) ) {
+			return false;
+		}
+		try {
+			while ( $offset < $length ) {
+				$remaining = $deadline - microtime( true );
+				if ( $remaining <= 0 ) {
+					return false;
+				}
+				$seconds = (int) floor( $remaining );
+				$microseconds = min( 999999, max( 0, (int) floor( ( $remaining - $seconds ) * 1000000 ) ) );
+				$read = array();
+				$write = array( $stream );
+				$except = array();
+				$selected = @stream_select( $read, $write, $except, $seconds, $microseconds );
+				if ( false === $selected || 0 === $selected ) {
+					return false;
+				}
+				$written = @fwrite( $stream, substr( $bytes, $offset ) );
+				if ( false === $written ) {
+					return false;
+				}
+				$offset += $written;
+			}
+			return true;
+		} finally {
+			if ( $was_blocking ) {
+				@stream_set_blocking( $stream, true );
+			}
 		}
 	}
 

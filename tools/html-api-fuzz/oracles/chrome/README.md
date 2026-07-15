@@ -43,8 +43,11 @@ Run the end-to-end smoke test after installation:
 
 ```sh
 node tools/html-api-fuzz/oracles/chrome/smoke-test.js
+php tools/html-api-fuzz/tests/chrome-oracle-smoke.php
 ```
 
 It checks canonical formatting, full-document data-URL parsing, author-script
 suppression, network blocking, SVG/table contextual fragments, concurrent
-socket clients, Chrome-process reuse, and graceful shutdown/socket cleanup.
+socket clients, Chrome-process reuse and recovery, graceful shutdown/socket
+cleanup, and fresh-service replay/minimization without persisted transport
+state.

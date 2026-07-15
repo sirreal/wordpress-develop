@@ -268,6 +268,10 @@ if ( false === $input ) {
 }
 $original_generator = is_array( $replay['generator'] ?? null ) ? $replay['generator'] : ( $replay['originalGenerator'] ?? null );
 $source_replay = \HtmlApiFuzz\replay_source_metadata( $replay_path, $replay );
+$explicit_chrome_socket = array_key_exists( 'chrome-socket', $options );
+if ( ! $explicit_chrome_socket ) {
+	putenv( 'HTML_API_FUZZ_CHROME_SOCKET' );
+}
 $oracle_options = $options;
 if ( null === \HtmlApiFuzz\option_string( $oracle_options, 'dom-oracle', null ) ) {
 	$oracle_options['dom-oracle'] = $replay['options']['domOracle'] ?? $replay['oracle']['kind'] ?? \HtmlApiFuzz\OracleRenderer::KIND_LEXBOR_SOURCE;
@@ -279,7 +283,6 @@ $stored_oracle_options = array(
 	'html5ever-oracle-bin' => 'html5everOracleBin',
 	'chrome-oracle-script' => 'chromeOracleScript',
 	'chrome-executable'    => 'chromeExecutable',
-	'chrome-socket'        => 'chromeSocket',
 	'node-bin'             => 'nodeBin',
 );
 foreach ( $stored_oracle_options as $option_name => $replay_key ) {
@@ -489,7 +492,7 @@ $summary = array(
 	'payloadPolicy'     => $base['payloadPolicy'],
 	'originalGenerator' => $base['originalGenerator'],
 	'sourceReplay'      => $base['sourceReplay'],
-	'oracle'            => $final_result['oracle'] ?? $base['oracle'],
+	'oracle'            => \HtmlApiFuzz\OracleRenderer::replay_safe_metadata( is_array( $final_result['oracle'] ?? null ) ? $final_result['oracle'] : $base['oracle'] ),
 	'finalFailureClass' => $final_result['failureClass'] ?? null,
 	'finalStatus'       => $final_result['status'] ?? null,
 	'originalLength'    => strlen( $input ),

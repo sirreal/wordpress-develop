@@ -401,10 +401,10 @@ while ( array() !== $pending_batch || ( ( ! $has_deadline || microtime( true ) <
 				'failureClass' => $result['failureClass'] ?? null,
 				'signature'    => $result['signature'] ?? null,
 				'oracleFinding' => $result['oracleFinding'] ?? null,
-				'oracle'       => $result['oracle'] ?? $replay['oracle'] ?? $oracle_metadata,
+				'oracle'       => \HtmlApiFuzz\OracleRenderer::replay_safe_metadata( is_array( $result['oracle'] ?? null ) ? $result['oracle'] : ( is_array( $replay['oracle'] ?? null ) ? $replay['oracle'] : $oracle_metadata ) ),
 				'resultPath'   => $retain_artifacts ? $attempt_dir . '/result.json' : null,
 			);
-			$replay['oracle'] = $replay['oracle'] ?? $result['oracle'] ?? $oracle_metadata;
+			$replay['oracle'] = \HtmlApiFuzz\OracleRenderer::replay_safe_metadata( is_array( $replay['oracle'] ?? null ) ? $replay['oracle'] : ( is_array( $result['oracle'] ?? null ) ? $result['oracle'] : $oracle_metadata ) );
 			$replay['signature'] = $result['signature'] ?? null;
 			$replay['oracleFinding'] = $result['oracleFinding'] ?? null;
 			if ( $retain_artifacts ) {
