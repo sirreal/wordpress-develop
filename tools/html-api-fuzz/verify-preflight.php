@@ -80,6 +80,16 @@ foreach ( $definitions as $label => $definition ) {
 	) {
 		html_api_fuzz_preflight_fail( "{$label} recorded inconsistent seed bounds." );
 	}
+	if (
+		'text-fragment' !== ( $state['profile'] ?? null ) ||
+		\HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY !== ( $state['mode'] ?? null ) ||
+		'valid-utf8' !== ( $state['payloadPolicy'] ?? null ) ||
+		'body' !== ( $state['fragmentContext'] ?? null ) ||
+		0 !== ( $state['corpusMutatePercent'] ?? null ) ||
+		true !== ( $state['forcePrimaryOracle'] ?? null )
+	) {
+		html_api_fuzz_preflight_fail( "{$label} did not record the deterministic preflight generator configuration." );
+	}
 	$oracle = is_array( $state['oracle'] ?? null ) ? $state['oracle'] : array();
 	if ( $definition['kind'] !== ( $oracle['kind'] ?? null ) ) {
 		html_api_fuzz_preflight_fail( "{$label} recorded the wrong oracle kind." );
@@ -103,8 +113,9 @@ foreach ( $definitions as $label => $definition ) {
 	$attempted_seeds = array();
 	$seen_seeds = array();
 	$statuses = array();
+	$oracle_executions = 0;
 	$row_count = 0;
-	$result = $db->query( 'SELECT id, seed, ok, input_sha1, status, failure_class, worker_code, worker_timed_out, oracle_kind, oracle_browser_pid FROM attempts ORDER BY id' );
+	$result = $db->query( 'SELECT id, seed, ok, input_sha1, status, failure_class, worker_code, worker_timed_out, oracle_kind, oracle_browser_pid, oracle_executed FROM attempts ORDER BY id' );
 	while ( $row = $result->fetchArray( SQLITE3_ASSOC ) ) {
 		++$row_count;
 		if ( ! is_int( $row['seed'] ) ) {
@@ -131,6 +142,10 @@ foreach ( $definitions as $label => $definition ) {
 		if ( ! is_int( $row['worker_timed_out'] ) || 0 !== $row['worker_timed_out'] ) {
 			html_api_fuzz_preflight_fail( "{$label} seed {$seed} recorded an invalid worker timeout flag." );
 		}
+		if ( ! is_int( $row['oracle_executed'] ) || 1 !== $row['oracle_executed'] ) {
+			html_api_fuzz_preflight_fail( "{$label} seed {$seed} did not prove primary oracle execution." );
+		}
+		++$oracle_executions;
 		if ( $definition['kind'] !== $row['oracle_kind'] ) {
 			html_api_fuzz_preflight_fail( "{$label} attempt {$seed} recorded the wrong oracle." );
 		}
@@ -158,6 +173,7 @@ foreach ( $definitions as $label => $definition ) {
 		'oracle'   => $definition['kind'],
 		'pin'      => $definition['pin'],
 		'attempts' => $row_count,
+		'oracleExecutions' => $oracle_executions,
 		'statuses' => $statuses,
 	);
 }

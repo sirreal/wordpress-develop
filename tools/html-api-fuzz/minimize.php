@@ -28,6 +28,9 @@ function html_api_fuzz_min_worker_options( string $candidate, array $base, strin
 	if ( $base['failUnsupported'] ) {
 		$options['fail-unsupported'] = true;
 	}
+	if ( $base['forcePrimaryOracle'] ) {
+		$options['force-primary-oracle'] = true;
+	}
 	if ( null !== $base['payloadPolicy'] ) {
 		$options['payload-policy'] = $base['payloadPolicy'];
 	}
@@ -103,6 +106,9 @@ function html_api_fuzz_min_process_test( string $candidate, array $base, string 
 	if ( $base['failUnsupported'] ) {
 		$args[] = '--fail-unsupported';
 	}
+	if ( $base['forcePrimaryOracle'] ) {
+		$args[] = '--force-primary-oracle';
+	}
 	if ( null !== $base['payloadPolicy'] ) {
 		$args[] = '--payload-policy';
 		$args[] = $base['payloadPolicy'];
@@ -146,7 +152,8 @@ function html_api_fuzz_min_in_process_test( string $candidate, array $base, stri
 					'maxNodes'  => $base['maxNodes'],
 				),
 				$base['failUnsupported'],
-				$base['oracleRenderer']
+				$base['oracleRenderer'],
+				$base['forcePrimaryOracle']
 			);
 		}
 		$duration_ms = (int) round( ( microtime( true ) - $started_at ) * 1000 );
@@ -324,6 +331,7 @@ $base = array(
 	'oracleWorkerArgs'  => $oracle_renderer->worker_args(),
 	'gitMetadataBase64' => \HtmlApiFuzz\git_metadata_base64( \HtmlApiFuzz\git_metadata() ),
 	'failUnsupported'   => (bool) ( $replay['options']['failUnsupported'] ?? ( 'unsupported' === ( $replay['result']['failureClass'] ?? null ) ) ),
+	'forcePrimaryOracle'=> (bool) ( $replay['options']['forcePrimaryOracle'] ?? false ),
 	'maxTokens'         => (int) ( $replay['limits']['maxTokens'] ?? 2000 ),
 	'maxNodes'          => (int) ( $replay['limits']['maxNodes'] ?? 3000 ),
 	'probeMode'         => $probe_mode,
@@ -455,6 +463,9 @@ if ( null !== $base['gitMetadataBase64'] ) {
 }
 if ( $base['failUnsupported'] ) {
 	$args[] = '--fail-unsupported';
+}
+if ( $base['forcePrimaryOracle'] ) {
+	$args[] = '--force-primary-oracle';
 }
 if ( null !== $base['payloadPolicy'] ) {
 	$args[] = '--payload-policy';

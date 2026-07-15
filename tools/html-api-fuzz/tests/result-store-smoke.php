@@ -45,6 +45,7 @@ $pass_summary = array(
 	'inputLength'       => 4,
 	'signature'         => null,
 	'oracle'            => $chrome_oracle,
+	'oracleExecuted'    => true,
 	'artifactsRetained' => false,
 	'resultPath'        => null,
 	'replayPath'        => null,
@@ -72,6 +73,7 @@ $failure_summary = array(
 		'familyKey' => 'fam456789abc',
 	),
 	'oracle'            => $lexbor_oracle,
+	'oracleExecuted'    => true,
 	'artifactsRetained' => true,
 	'resultPath'        => $work_dir . '/seed-12/primary/result.json',
 	'replayPath'        => $work_dir . '/seed-12/primary/replay.json',
@@ -136,6 +138,7 @@ $oracle_summary = array(
 	'inputLength'       => 12,
 	'signature'         => null,
 	'oracle'            => $chrome_oracle,
+	'oracleExecuted'    => true,
 	'oracleFinding'     => array(
 		'classification' => 'oracle-bug',
 		'type'           => 'dom-xlink-dropped-local-name-after-xlink',
@@ -217,6 +220,7 @@ html_api_fuzz_smoke_assert( 1 === (int) $raw->querySingle( "SELECT COUNT(*) FROM
 html_api_fuzz_smoke_assert( 1 === (int) $raw->querySingle( "SELECT COUNT(*) FROM attempts WHERE seed = 11 AND oracle_kind = 'chrome-cdp' AND oracle_version = '150.0.7871.114' AND oracle_binary = '/tmp/chrome-for-testing'" ), 'Expected passing rows to keep Chrome oracle metadata in scalar columns.' );
 html_api_fuzz_smoke_assert( 3 === (int) $raw->querySingle( "SELECT COUNT(*) FROM attempts WHERE oracle_kind = 'lexbor-source' AND oracle_version = '2.10.0' AND oracle_commit = '481c444261a132190a3fb746d6d2f60824af3717'" ), 'Expected Lexbor oracle metadata to be queryable for failure rows.' );
 html_api_fuzz_smoke_assert( 3 === (int) $raw->querySingle( "SELECT COUNT(*) FROM attempts WHERE oracle_binary = '/tmp/lexbor-tree-oracle'" ), 'Expected Lexbor oracle binary to be stored in a scalar column.' );
+html_api_fuzz_smoke_assert( 5 === (int) $raw->querySingle( 'SELECT COUNT(*) FROM attempts WHERE oracle_executed = 1' ), 'Expected primary oracle execution to be stored for every fixture row.' );
 $raw->close();
 
 $future_db_path = $work_dir . '/future.sqlite';

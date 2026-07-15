@@ -153,6 +153,35 @@ html_api_fuzz_smoke_expect_invalid_argument(
 	'invalid-byte-heavy policy should be rejected for generated inputs.'
 );
 
+$body_override_a = \HtmlApiFuzz\Generator::generate( 12345, 'text-fragment', \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY, 'valid-utf8', 4096, 'body' );
+$body_override_b = \HtmlApiFuzz\Generator::generate( 12345, 'text-fragment', \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY, 'valid-utf8', 4096, 'body' );
+html_api_fuzz_smoke_assert( 'body' === $body_override_a['fragmentContext'], 'fragment context override should force body.' );
+html_api_fuzz_smoke_assert( 'body' === $body_override_a['parameters']['requestedFragmentContext'], 'fragment context override should be recorded.' );
+html_api_fuzz_smoke_assert( $body_override_a === $body_override_b, 'fragment context override should remain deterministic.' );
+$body_auto_override = \HtmlApiFuzz\Generator::generate( 12345, 'balanced', 'auto', 'valid-utf8', 4096, 'body' );
+html_api_fuzz_smoke_assert( 'body' === $body_auto_override['fragmentContext'], 'body context override should remain valid with auto mode.' );
+$svg_override = \HtmlApiFuzz\Generator::generate( 12345, 'text-fragment', \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY, 'valid-utf8', 4096, 'svg' );
+html_api_fuzz_smoke_assert( 'svg' === $svg_override['fragmentContext'], 'fragment context override should force SVG.' );
+html_api_fuzz_smoke_assert( in_array( 'fragment-context:svg', $svg_override['parameters']['features'], true ), 'non-body override should be recorded as a feature.' );
+html_api_fuzz_smoke_expect_invalid_argument(
+	static function (): void {
+		\HtmlApiFuzz\Generator::generate( 1, 'text-fragment', \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY, 'valid-utf8', 4096, 'bogus' );
+	},
+	'invalid fragment context override should throw.'
+);
+html_api_fuzz_smoke_expect_invalid_argument(
+	static function (): void {
+		\HtmlApiFuzz\Generator::generate( 1, 'text-fragment', 'auto', 'valid-utf8', 4096, 'svg' );
+	},
+	'non-body context override should require explicit fragment mode before auto resolution.'
+);
+html_api_fuzz_smoke_expect_invalid_argument(
+	static function (): void {
+		\HtmlApiFuzz\Generator::generate( 1, 'full-document', \HtmlApiFuzz\Generator::MODE_FULL_DOCUMENT, 'valid-utf8', 4096, 'svg' );
+	},
+	'non-body context override should be rejected for full documents.'
+);
+
 foreach ( \HtmlApiFuzz\Generator::payload_policies() as $payload_policy ) {
 	foreach ( \HtmlApiFuzz\Generator::profiles() as $profile ) {
 		foreach ( \HtmlApiFuzz\Generator::modes() as $mode ) {
@@ -503,6 +532,44 @@ html_api_fuzz_smoke_expect_invalid_argument(
 	},
 	'generated worker inputs should reject legacy invalid-byte-heavy policy.'
 );
+html_api_fuzz_smoke_expect_invalid_argument(
+	static function () use ( $tmp ): void {
+		\HtmlApiFuzz\Worker::run(
+			array(
+				'seed'             => '1',
+				'mode'             => 'auto',
+				'fragment-context' => 'svg',
+				'output-dir'       => $tmp . '/generated-auto-svg',
+			)
+		);
+	},
+	'generated worker inputs should reject non-body context with auto mode.'
+);
+html_api_fuzz_smoke_expect_invalid_argument(
+	static function () use ( $tmp ): void {
+		\HtmlApiFuzz\Worker::run(
+			array(
+				'seed'                  => '1',
+				'mode'                  => 'auto',
+				'fragment-context'      => 'svg',
+				'corpus-mutate-percent' => '100',
+				'output-dir'            => $tmp . '/corpus-auto-svg',
+			)
+		);
+	},
+	'corpus worker inputs should reject non-body context with auto mode.'
+);
+
+$direct_svg_dir = $tmp . '/direct-default-fragment-svg';
+$direct_svg_result = \HtmlApiFuzz\Worker::run(
+	array(
+		'input-base64'     => base64_encode( '<circle></circle>' ),
+		'fragment-context' => 'svg',
+		'output-dir'       => $direct_svg_dir,
+	)
+);
+html_api_fuzz_smoke_assert( \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY === ( $direct_svg_result['mode'] ?? null ), 'direct input should retain its fragment-body default mode.' );
+html_api_fuzz_smoke_assert( 'svg' === ( $direct_svg_result['fragmentContext'] ?? null ), 'direct input should accept a non-body fragment context with its fragment default.' );
 
 $worker_dir = $tmp . '/worker';
 \HtmlApiFuzz\Worker::run(
@@ -802,6 +869,26 @@ $bad_runner_proc = \HtmlApiFuzz\run_php_process(
 	$tmp . '/bad-runner.log'
 );
 html_api_fuzz_smoke_assert( 0 !== $bad_runner_proc['code'], 'runner CLI should reject invalid payload policy before starting workers.' );
+
+$bad_context_runner_dir = $tmp . '/bad-context-runner';
+$bad_context_runner_proc = \HtmlApiFuzz\run_php_process(
+	array(
+		dirname( __DIR__ ) . '/runner.php',
+		'--mode',
+		'auto',
+		'--fragment-context',
+		'svg',
+		'--max-seeds',
+		'1',
+		'--output-dir',
+		$bad_context_runner_dir,
+	),
+	\HtmlApiFuzz\repo_root(),
+	5000,
+	$tmp . '/bad-context-runner.log'
+);
+html_api_fuzz_smoke_assert( 0 !== $bad_context_runner_proc['code'], 'runner CLI should reject non-body context with auto mode.' );
+html_api_fuzz_smoke_assert( ! is_dir( $bad_context_runner_dir ), 'runner should reject invalid mode/context configuration before creating output.' );
 
 $legacy_invalid_runner_proc = \HtmlApiFuzz\run_php_process(
 	array(

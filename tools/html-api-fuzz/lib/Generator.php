@@ -75,11 +75,17 @@ class Generator {
 		return array( 'body', 'div', 'p', 'td', 'tr', 'table', 'caption', 'colgroup', 'select', 'option', 'template', 'title', 'textarea', 'script', 'style', 'svg', 'math' );
 	}
 
-	public static function generate( int $seed, string $profile = 'auto', string $mode = 'auto', string $payload_policy = 'auto', ?int $max_input_bytes = null ): array {
+	public static function generate( int $seed, string $profile = 'auto', string $mode = 'auto', string $payload_policy = 'auto', ?int $max_input_bytes = null, ?string $fragment_context_override = null ): array {
 		$rng = new Prng( $seed );
 		$requested_profile        = $profile;
 		$requested_mode           = $mode;
 		$requested_payload_policy = $payload_policy;
+		if ( null !== $fragment_context_override && ! in_array( $fragment_context_override, self::fragment_contexts(), true ) ) {
+			throw new \InvalidArgumentException( 'Unknown fragment context: ' . $fragment_context_override );
+		}
+		if ( null !== $fragment_context_override && 'body' !== $fragment_context_override && self::MODE_FRAGMENT_BODY !== $requested_mode ) {
+			throw new \InvalidArgumentException( 'Non-body fragment context requires explicit fragment-body mode.' );
+		}
 		if ( 'auto' === $profile ) {
 			$profile = $rng->weighted(
 				array(
@@ -132,13 +138,17 @@ class Generator {
 
 		$fragment_context = 'body';
 		if ( self::MODE_FRAGMENT_BODY === $mode ) {
-			$weights = array( 'body' => 240 );
-			foreach ( self::fragment_contexts() as $context ) {
-				if ( 'body' !== $context ) {
-					$weights[ $context ] = 1;
+			if ( null !== $fragment_context_override ) {
+				$fragment_context = $fragment_context_override;
+			} else {
+				$weights = array( 'body' => 240 );
+				foreach ( self::fragment_contexts() as $context ) {
+					if ( 'body' !== $context ) {
+						$weights[ $context ] = 1;
+					}
 				}
+				$fragment_context = $rng->weighted( $weights );
 			}
-			$fragment_context = $rng->weighted( $weights );
 		}
 
 		$generator = new self( $rng, $profile, $payload_policy );
@@ -171,6 +181,7 @@ class Generator {
 				'requestedProfile'       => $requested_profile,
 				'requestedMode'          => $requested_mode,
 				'requestedPayloadPolicy' => $requested_payload_policy,
+				'requestedFragmentContext' => $fragment_context_override,
 				'profile'                => $profile,
 				'mode'                   => $mode,
 				'payloadPolicy'          => $payload_policy,

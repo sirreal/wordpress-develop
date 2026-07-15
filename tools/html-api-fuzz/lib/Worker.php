@@ -13,8 +13,12 @@ class Worker {
 		$payload_policy        = $payload_policy_option ?? 'auto';
 		$max_input_bytes_value = option_int( $options, 'max-input-bytes', 0 );
 		$max_input_bytes       = $max_input_bytes_value > 0 ? $max_input_bytes_value : null;
-		$fragment_context      = option_string( $options, 'fragment-context', 'body' );
+		$fragment_context_option = option_string( $options, 'fragment-context', null );
+		$fragment_context        = $fragment_context_option ?? 'body';
 		self::validate_fragment_context_metadata( $fragment_context );
+		$has_direct_input = null !== option_string( $options, 'input-base64', null ) || null !== option_string( $options, 'input-file', null );
+		$context_mode     = $has_direct_input ? option_string( $options, 'mode', Generator::MODE_FRAGMENT_BODY ) : $mode;
+		self::validate_fragment_context_mode_metadata( $fragment_context, $context_mode );
 		$generator_parameters  = null;
 		$input_source          = 'generated';
 		$git_metadata          = null === option_string( $options, 'git-metadata-base64', null )
@@ -49,7 +53,7 @@ class Worker {
 			$corpus = self::corpus_mutated_input( $seed, $mode, $max_input_bytes );
 			if ( null === $corpus ) {
 				// Corpus unavailable: fall back to the generator.
-				$generated            = Generator::generate( $seed, $profile ?? 'auto', $mode ?? 'auto', $payload_policy ?? 'auto', $max_input_bytes );
+				$generated            = Generator::generate( $seed, $profile ?? 'auto', $mode ?? 'auto', $payload_policy ?? 'auto', $max_input_bytes, $fragment_context_option );
 				$input                = $generated['input'];
 				$profile              = $generated['profile'];
 				$mode                 = $generated['mode'];
@@ -61,12 +65,12 @@ class Worker {
 				$profile              = 'corpus-mutated';
 				$mode                 = $corpus['mode'];
 				$payload_policy       = null;
-				$fragment_context     = 'body';
+				$fragment_context     = $fragment_context_option ?? 'body';
 				$generator_parameters = $corpus['parameters'];
 				$input_source         = 'corpus-mutated';
 			}
 		} else {
-			$generated            = Generator::generate( $seed, $profile ?? 'auto', $mode ?? 'auto', $payload_policy ?? 'auto', $max_input_bytes );
+			$generated            = Generator::generate( $seed, $profile ?? 'auto', $mode ?? 'auto', $payload_policy ?? 'auto', $max_input_bytes, $fragment_context_option );
 			$input                = $generated['input'];
 			$profile              = $generated['profile'];
 			$mode                 = $generated['mode'];
@@ -79,9 +83,10 @@ class Worker {
 			'maxTokens' => option_int( $options, 'max-tokens', 2000 ),
 			'maxNodes'  => option_int( $options, 'max-nodes', 3000 ),
 		);
-		$fail_unsupported = option_bool( $options, 'fail-unsupported', false );
-		$oracle_renderer        = OracleRenderer::from_options( $options );
-		$oracle_metadata        = $oracle_renderer->metadata();
+		$fail_unsupported     = option_bool( $options, 'fail-unsupported', false );
+		$force_primary_oracle = option_bool( $options, 'force-primary-oracle', false );
+		$oracle_renderer       = OracleRenderer::from_options( $options );
+		$oracle_metadata       = $oracle_renderer->metadata();
 		$replay_oracle_metadata = $oracle_renderer->replay_metadata();
 
 		$replay_path = $output_dir . DIRECTORY_SEPARATOR . 'replay.json';
@@ -89,7 +94,7 @@ class Worker {
 		$input_path  = $output_dir . DIRECTORY_SEPARATOR . 'input.bin';
 		file_put_contents( $input_path, $input );
 
-		$replay = self::base_replay( $seed, $profile, $mode, $payload_policy, $fragment_context, $generator_parameters, $input_source, $input, $output_dir, $limits, $fail_unsupported, $git_metadata, $replay_oracle_metadata, $oracle_renderer->replay_options() );
+		$replay = self::base_replay( $seed, $profile, $mode, $payload_policy, $fragment_context, $generator_parameters, $input_source, $input, $output_dir, $limits, $fail_unsupported, $force_primary_oracle, $git_metadata, $replay_oracle_metadata, $oracle_renderer->replay_options() );
 		write_json_file( $replay_path, $replay );
 
 		$result = self::evaluate_input(
@@ -103,7 +108,8 @@ class Worker {
 			$input_source,
 			$limits,
 			$fail_unsupported,
-			$oracle_renderer
+			$oracle_renderer,
+			$force_primary_oracle
 		);
 		$result['paths'] = array(
 			'outputDir'  => $output_dir,
@@ -132,7 +138,7 @@ class Worker {
 		return $result;
 	}
 
-	public static function evaluate_input( string $input, int $seed, string $profile, string $mode, ?string $payload_policy, string $fragment_context, ?array $generator_parameters, string $input_source, array $limits, bool $fail_unsupported, OracleRenderer $oracle_renderer ): array {
+	public static function evaluate_input( string $input, int $seed, string $profile, string $mode, ?string $payload_policy, string $fragment_context, ?array $generator_parameters, string $input_source, array $limits, bool $fail_unsupported, OracleRenderer $oracle_renderer, bool $force_primary_oracle = false ): array {
 		$oracle_metadata = $oracle_renderer->metadata();
 		$tag_result      = TagInvariants::check( $input, $limits, $mode, $fragment_context );
 		$wp_result       = TreeRenderer::render_wordpress( $input, $mode, $limits, $fragment_context );
@@ -159,7 +165,10 @@ class Worker {
 			'wordpress'     => $wp_result,
 			'dom'           => $dom_result,
 			'comparison'    => null,
+			'oracleExecuted'=> false,
 		);
+
+		$comparable = true === ( $tag_result['ok'] ?? false ) && TreeRenderer::STATUS_OK === ( $wp_result['status'] ?? null );
 
 		if ( ! $tag_result['ok'] ) {
 			$result['ok']           = false;
@@ -176,8 +185,11 @@ class Worker {
 			$result['ok']           = false;
 			$result['status']       = self::is_resource_limit_failure( $wp_failure_class ) ? 'resource-limit' : 'failed';
 			$result['failureClass'] = self::is_resource_limit_failure( $wp_failure_class ) ? 'resource-limit' : $wp_failure_class;
-		} else {
+		}
+
+		if ( $comparable || $force_primary_oracle ) {
 			try {
+				$result['oracleExecuted'] = true;
 				$dom_result = $oracle_renderer->render( $input, $mode, $limits, $fragment_context );
 			} catch ( \Throwable $e ) {
 				$dom_result = array(
@@ -193,7 +205,14 @@ class Worker {
 				$result['oracle'] = $dom_result['oracle'];
 			}
 
-			if ( TreeRenderer::STATUS_ERROR === $dom_result['status'] ) {
+			if ( ! $comparable ) {
+				$dom_failure_class = $dom_result['failureClass'] ?? null;
+				if ( self::is_oracle_infrastructure_failure( $dom_failure_class ) ) {
+					$result['ok']           = false;
+					$result['status']       = 'failed';
+					$result['failureClass'] = $dom_failure_class;
+				}
+			} elseif ( TreeRenderer::STATUS_ERROR === $dom_result['status'] ) {
 				$dom_failure_class      = $dom_result['failureClass'] ?? 'oracle-renderer-error';
 				$result['failureClass'] = self::is_resource_limit_failure( $dom_failure_class ) ? 'resource-limit' : $dom_failure_class;
 				$result['status']       = self::is_resource_limit_failure( $dom_failure_class )
@@ -342,13 +361,19 @@ class Worker {
 		}
 	}
 
+	private static function validate_fragment_context_mode_metadata( string $fragment_context, string $mode ): void {
+		if ( 'body' !== $fragment_context && Generator::MODE_FRAGMENT_BODY !== $mode ) {
+			throw new \InvalidArgumentException( 'Non-body fragment context requires explicit fragment-body mode.' );
+		}
+	}
+
 	private static function validate_mode_metadata( string $mode ): void {
 		if ( ! in_array( $mode, Generator::modes(), true ) ) {
 			throw new \InvalidArgumentException( 'Unknown generator mode: ' . $mode );
 		}
 	}
 
-	private static function base_replay( int $seed, string $profile, string $mode, ?string $payload_policy, string $fragment_context, ?array $generator_parameters, string $input_source, string $input, string $output_dir, array $limits, bool $fail_unsupported, array $git_metadata, array $oracle_metadata, array $oracle_options ): array {
+	private static function base_replay( int $seed, string $profile, string $mode, ?string $payload_policy, string $fragment_context, ?array $generator_parameters, string $input_source, string $input, string $output_dir, array $limits, bool $fail_unsupported, bool $force_primary_oracle, array $git_metadata, array $oracle_metadata, array $oracle_options ): array {
 		return array(
 			'schemaVersion' => 1,
 			'kind'          => 'html-api-fuzz-replay',
@@ -372,6 +397,7 @@ class Worker {
 			'oracle'        => $oracle_metadata,
 			'options'       => array(
 				'failUnsupported' => $fail_unsupported,
+				'forcePrimaryOracle' => $force_primary_oracle,
 				'domOracle'       => $oracle_options['domOracle'] ?? OracleRenderer::KIND_LEXBOR_SOURCE,
 				'lexborOracleBin' => $oracle_options['lexborOracleBin'] ?? null,
 				'html5everOracleBin' => $oracle_options['html5everOracleBin'] ?? null,
@@ -585,6 +611,10 @@ class Worker {
 
 	private static function is_resource_limit_failure( ?string $failure_class ): bool {
 		return in_array( $failure_class, array( 'token-limit-exceeded', 'node-limit-exceeded' ), true );
+	}
+
+	private static function is_oracle_infrastructure_failure( ?string $failure_class ): bool {
+		return in_array( $failure_class, array( 'oracle-renderer-error', 'oracle-unavailable' ), true );
 	}
 
 	private static function compact_parse_result( array $parse_result, string $output_dir, string $tree_filename ): array {

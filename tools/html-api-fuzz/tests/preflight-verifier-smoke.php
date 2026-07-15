@@ -100,6 +100,12 @@ function html_api_fuzz_preflight_smoke_fixture( string $directory, string $mutat
 			'startSeed'  => $start_seed,
 			'seedStride' => $seed_stride,
 			'nextSeed'   => 19,
+			'profile'    => 'text-fragment',
+			'mode'       => \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY,
+			'payloadPolicy' => 'valid-utf8',
+			'fragmentContext' => 'body',
+			'corpusMutatePercent' => 0,
+			'forcePrimaryOracle' => true,
 			'oracle'     => $oracle,
 		);
 		$rows = array();
@@ -113,6 +119,7 @@ function html_api_fuzz_preflight_smoke_fixture( string $directory, string $mutat
 				'workerTimedOut' => false,
 				'inputSha1'      => sha1( 'shared-seed-' . $seed ),
 				'oracle'         => $oracle,
+				'oracleExecuted' => true,
 			);
 		}
 
@@ -136,6 +143,12 @@ function html_api_fuzz_preflight_smoke_fixture( string $directory, string $mutat
 			$rows[0]['workerCode'] = 2;
 		} elseif ( 'state-bounds' === $mutation && 'lexbor' === $label ) {
 			$state['nextSeed'] = 16;
+		} elseif ( 'generator-state' === $mutation && 'lexbor' === $label ) {
+			$state['fragmentContext'] = 'svg';
+		} elseif ( 'force-state' === $mutation && 'lexbor' === $label ) {
+			$state['forcePrimaryOracle'] = false;
+		} elseif ( 'oracle-not-executed' === $mutation && 'lexbor' === $label ) {
+			$rows[0]['oracleExecuted'] = false;
 		}
 
 		$lane = $directory . '/' . $label;
@@ -146,12 +159,14 @@ function html_api_fuzz_preflight_smoke_fixture( string $directory, string $mutat
 			$store->record_attempt( $row );
 		}
 		$store->close();
-		if ( 'lexbor' === $label && in_array( $mutation, array( 'malformed-seed', 'malformed-timeout' ), true ) ) {
+		if ( 'lexbor' === $label && in_array( $mutation, array( 'malformed-seed', 'malformed-timeout', 'malformed-oracle-executed' ), true ) ) {
 			$db = new SQLite3( $lane . '/' . \HtmlApiFuzz\ResultStore::FILENAME );
 			if ( 'malformed-seed' === $mutation ) {
 				$db->exec( "UPDATE attempts SET seed = '10junk' WHERE id = 1" );
-			} else {
+			} elseif ( 'malformed-timeout' === $mutation ) {
 				$db->exec( "UPDATE attempts SET worker_timed_out = 'not-a-number' WHERE id = 1" );
+			} else {
+				$db->exec( "UPDATE attempts SET oracle_executed = 'not-a-number' WHERE id = 1" );
 			}
 			$db->close();
 		}
@@ -221,6 +236,52 @@ function html_api_fuzz_preflight_smoke_v2_schema( SQLite3 $db ): void {
 	$db->exec( 'PRAGMA user_version = 2' );
 }
 
+function html_api_fuzz_preflight_smoke_v3_schema( SQLite3 $db ): void {
+	html_api_fuzz_preflight_smoke_v2_schema( $db );
+	$db->exec( 'ALTER TABLE attempts ADD COLUMN oracle_browser_pid INTEGER' );
+	$db->exec( 'PRAGMA user_version = 3' );
+}
+
+function html_api_fuzz_preflight_smoke_migration( string $path, int $source_version ): void {
+	$db = new SQLite3( $path, SQLITE3_OPEN_READWRITE | SQLITE3_OPEN_CREATE );
+	if ( 2 === $source_version ) {
+		html_api_fuzz_preflight_smoke_v2_schema( $db );
+	} else {
+		html_api_fuzz_preflight_smoke_v3_schema( $db );
+	}
+	$db->close();
+
+	$store = new \HtmlApiFuzz\ResultStore( $path );
+	$chrome_oracle = html_api_fuzz_preflight_smoke_definitions()['chrome'];
+	$chrome_oracle['browserPid'] = 5151;
+	$store->record_attempt(
+		array(
+			'seed'           => 1,
+			'ok'             => true,
+			'status'         => 'ok',
+			'inputSha1'      => sha1( 'migration-' . $source_version ),
+			'workerCode'     => 0,
+			'workerTimedOut' => false,
+			'oracle'         => $chrome_oracle,
+			'oracleExecuted' => true,
+		)
+	);
+	$store->close();
+
+	$db = new SQLite3( $path, SQLITE3_OPEN_READONLY );
+	html_api_fuzz_preflight_smoke_assert( 4 === (int) $db->querySingle( 'PRAGMA user_version' ), "Expected ResultStore v{$source_version} to migrate to v4." );
+	$columns = array();
+	$column_rows = $db->query( 'PRAGMA table_info(attempts)' );
+	while ( false !== ( $column = $column_rows->fetchArray( SQLITE3_ASSOC ) ) ) {
+		$columns[] = $column['name'];
+	}
+	html_api_fuzz_preflight_smoke_assert( in_array( 'oracle_browser_pid', $columns, true ), 'Expected migration to include oracle_browser_pid.' );
+	html_api_fuzz_preflight_smoke_assert( in_array( 'oracle_executed', $columns, true ), 'Expected migration to add oracle_executed.' );
+	html_api_fuzz_preflight_smoke_assert( 5151 === (int) $db->querySingle( 'SELECT oracle_browser_pid FROM attempts' ), 'Expected migrated store to persist browser PID.' );
+	html_api_fuzz_preflight_smoke_assert( 1 === (int) $db->querySingle( 'SELECT oracle_executed FROM attempts' ), 'Expected migrated store to persist oracle execution.' );
+	$db->close();
+}
+
 $repo_root = \HtmlApiFuzz\repo_root();
 $work_dir = sys_get_temp_dir() . '/html-api-fuzz-preflight-smoke-' . \HtmlApiFuzz\timestamp();
 \HtmlApiFuzz\ensure_dir( $work_dir );
@@ -244,8 +305,12 @@ try {
 		'worker-code-one' => 'inconsistent worker status',
 		'ok-code-two'     => 'inconsistent worker status',
 		'state-bounds'    => 'recorded inconsistent seed bounds',
+		'generator-state' => 'deterministic preflight generator configuration',
+		'force-state'     => 'deterministic preflight generator configuration',
+		'oracle-not-executed' => 'did not prove primary oracle execution',
 		'malformed-seed'  => 'invalid seed scalar',
 		'malformed-timeout' => 'invalid worker timeout flag',
+		'malformed-oracle-executed' => 'did not prove primary oracle execution',
 	);
 	foreach ( $invalid_cases as $mutation => $diagnostic ) {
 		$case_dir = $work_dir . '/' . $mutation;
@@ -253,37 +318,10 @@ try {
 		html_api_fuzz_preflight_smoke_verify( $case_dir, false, $diagnostic );
 	}
 
-	$migration_dir = $work_dir . '/migration';
+	$migration_dir = $work_dir . '/migrations';
 	\HtmlApiFuzz\ensure_dir( $migration_dir );
-	$migration_path = $migration_dir . '/results.sqlite';
-	$migration_db = new SQLite3( $migration_path, SQLITE3_OPEN_READWRITE | SQLITE3_OPEN_CREATE );
-	html_api_fuzz_preflight_smoke_v2_schema( $migration_db );
-	$migration_db->close();
-	$migrated_store = new \HtmlApiFuzz\ResultStore( $migration_path );
-	$chrome_oracle = html_api_fuzz_preflight_smoke_definitions()['chrome'];
-	$chrome_oracle['browserPid'] = 5151;
-	$migrated_store->record_attempt(
-		array(
-			'seed'           => 1,
-			'ok'             => true,
-			'status'         => 'ok',
-			'inputSha1'      => sha1( 'migration' ),
-			'workerCode'     => 0,
-			'workerTimedOut' => false,
-			'oracle'         => $chrome_oracle,
-		)
-	);
-	$migrated_store->close();
-	$migration_db = new SQLite3( $migration_path, SQLITE3_OPEN_READONLY );
-	html_api_fuzz_preflight_smoke_assert( 3 === (int) $migration_db->querySingle( 'PRAGMA user_version' ), 'Expected ResultStore v2 to migrate to v3.' );
-	$columns = array();
-	$column_rows = $migration_db->query( 'PRAGMA table_info(attempts)' );
-	while ( false !== ( $column = $column_rows->fetchArray( SQLITE3_ASSOC ) ) ) {
-		$columns[] = $column['name'];
-	}
-	html_api_fuzz_preflight_smoke_assert( in_array( 'oracle_browser_pid', $columns, true ), 'Expected migration to add oracle_browser_pid.' );
-	html_api_fuzz_preflight_smoke_assert( 5151 === (int) $migration_db->querySingle( 'SELECT oracle_browser_pid FROM attempts' ), 'Expected migrated store to persist browser PID.' );
-	$migration_db->close();
+	html_api_fuzz_preflight_smoke_migration( $migration_dir . '/v2.sqlite', 2 );
+	html_api_fuzz_preflight_smoke_migration( $migration_dir . '/v3.sqlite', 3 );
 
 	$preflight = $repo_root . '/tools/html-api-fuzz/preflight.sh';
 	$valid_environment = array(

@@ -63,7 +63,7 @@ fi
 
 LEXBOR_BIN="$SCRIPT_DIR/oracles/lexbor/build/lexbor-tree-oracle"
 HTML5EVER_BIN="$SCRIPT_DIR/oracles/html5ever/build/html5ever-tree-oracle"
-CHROME_BIN="$($SCRIPT_DIR/oracles/chrome/install.sh --print-path)"
+CHROME_BIN="$($SCRIPT_DIR/oracles/chrome/install.sh)"
 
 for binary in "$LEXBOR_BIN" "$HTML5EVER_BIN" "$CHROME_BIN"; do
 	if [[ ! -x "$binary" ]]; then
@@ -80,6 +80,12 @@ common=(
 	--duration-seconds 0
 	--batch-size "$BATCH_SIZE"
 	--max-input-bytes "$MAX_INPUT_BYTES"
+	--profile text-fragment
+	--mode fragment-body
+	--payload-policy valid-utf8
+	--fragment-context body
+	--corpus-mutate-percent 0
+	--force-primary-oracle
 )
 
 cd "$REPO_ROOT"

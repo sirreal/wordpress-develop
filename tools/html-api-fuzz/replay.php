@@ -127,6 +127,9 @@ if ( is_string( $fragment_context ) && 'body' !== $fragment_context ) {
 if ( \HtmlApiFuzz\option_bool( $options, 'fail-unsupported', (bool) ( $replay['options']['failUnsupported'] ?? false ) ) ) {
 	$args[] = '--fail-unsupported';
 }
+if ( \HtmlApiFuzz\option_bool( $options, 'force-primary-oracle', (bool) ( $replay['options']['forcePrimaryOracle'] ?? false ) ) ) {
+	$args[] = '--force-primary-oracle';
+}
 foreach ( $oracle_worker_args as $arg ) {
 	$args[] = $arg;
 }

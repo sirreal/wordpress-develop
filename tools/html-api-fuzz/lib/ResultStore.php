@@ -54,6 +54,7 @@ class ResultStore {
 				oracle_commit TEXT,
 				oracle_binary TEXT,
 				oracle_browser_pid INTEGER,
+				oracle_executed INTEGER NOT NULL DEFAULT 0,
 				profile TEXT,
 				mode TEXT,
 				payload_policy TEXT,
@@ -81,10 +82,11 @@ class ResultStore {
 		$this->ensure_column( 'attempts', 'oracle_commit', 'TEXT' );
 		$this->ensure_column( 'attempts', 'oracle_binary', 'TEXT' );
 		$this->ensure_column( 'attempts', 'oracle_browser_pid', 'INTEGER' );
+		$this->ensure_column( 'attempts', 'oracle_executed', 'INTEGER NOT NULL DEFAULT 0' );
 		$this->ensure_column( 'attempts', 'failure_artifacts_retained', 'INTEGER' );
 		$this->ensure_column( 'attempts', 'oracle_artifacts_retained', 'INTEGER' );
-		if ( (int) $this->db->querySingle( 'PRAGMA user_version' ) < 3 ) {
-			$this->db->exec( 'PRAGMA user_version = 3' );
+		if ( (int) $this->db->querySingle( 'PRAGMA user_version' ) < 4 ) {
+			$this->db->exec( 'PRAGMA user_version = 4' );
 		}
 		$this->db->exec( 'CREATE INDEX IF NOT EXISTS attempts_signature_hash ON attempts ( signature_hash )' );
 		$this->db->exec( 'CREATE INDEX IF NOT EXISTS attempts_family_key ON attempts ( family_key )' );
@@ -135,7 +137,7 @@ class ResultStore {
 			'INSERT INTO attempts (
 				created_at, seed, ok, status, failure_class, signature_hash, family_key,
 				oracle_finding_class, oracle_finding_type, oracle_suspected_owner, oracle_signature_hash, oracle_family_key,
-				oracle_kind, oracle_version, oracle_commit, oracle_binary, oracle_browser_pid,
+				oracle_kind, oracle_version, oracle_commit, oracle_binary, oracle_browser_pid, oracle_executed,
 				profile, mode, payload_policy, input_source, input_sha1, input_length,
 				duration_ms, worker_code, worker_timed_out, artifacts_retained,
 				failure_artifacts_retained, oracle_artifacts_retained,
@@ -143,7 +145,7 @@ class ResultStore {
 			) VALUES (
 				:created_at, :seed, :ok, :status, :failure_class, :signature_hash, :family_key,
 				:oracle_finding_class, :oracle_finding_type, :oracle_suspected_owner, :oracle_signature_hash, :oracle_family_key,
-				:oracle_kind, :oracle_version, :oracle_commit, :oracle_binary, :oracle_browser_pid,
+				:oracle_kind, :oracle_version, :oracle_commit, :oracle_binary, :oracle_browser_pid, :oracle_executed,
 				:profile, :mode, :payload_policy, :input_source, :input_sha1, :input_length,
 				:duration_ms, :worker_code, :worker_timed_out, :artifacts_retained,
 				:failure_artifacts_retained, :oracle_artifacts_retained,
@@ -212,6 +214,7 @@ class ResultStore {
 		$statement->bindValue( ':oracle_binary', $oracle_binary, null === $oracle_binary ? SQLITE3_NULL : SQLITE3_TEXT );
 		$oracle_browser_pid = is_int( $oracle['browserPid'] ?? null ) ? $oracle['browserPid'] : null;
 		$statement->bindValue( ':oracle_browser_pid', $oracle_browser_pid, null === $oracle_browser_pid ? SQLITE3_NULL : SQLITE3_INTEGER );
+		$statement->bindValue( ':oracle_executed', true === ( $summary['oracleExecuted'] ?? false ) ? 1 : 0, SQLITE3_INTEGER );
 		$statement->bindValue( ':profile', $summary['profile'] ?? null, null === ( $summary['profile'] ?? null ) ? SQLITE3_NULL : SQLITE3_TEXT );
 		$statement->bindValue( ':mode', $summary['mode'] ?? null, null === ( $summary['mode'] ?? null ) ? SQLITE3_NULL : SQLITE3_TEXT );
 		$statement->bindValue( ':payload_policy', $summary['payloadPolicy'] ?? null, null === ( $summary['payloadPolicy'] ?? null ) ? SQLITE3_NULL : SQLITE3_TEXT );
