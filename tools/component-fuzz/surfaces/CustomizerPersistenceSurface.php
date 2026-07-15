@@ -33,6 +33,7 @@ final class CustomizerPersistenceSurface {
 			$rows[] = self::check_changeset_post_content_parsing( $ctx->fork( 'changeset-parsing' ) );
 			$rows[] = self::check_changeset_lock_heartbeat_persistence( $ctx->fork( 'changeset-lock-heartbeat' ) );
 			$rows[] = self::check_save_changeset_post_transactions( $ctx->fork( 'changeset-save' ) );
+			$rows[] = self::check_publish_changeset_application( $ctx->fork( 'changeset-publish' ) );
 			$rows[] = self::check_save_ajax_envelope( $ctx->fork( 'save-ajax' ) );
 			$rows[] = self::check_custom_css_setting_validation_preview_update( $ctx->fork( 'custom-css-setting' ) );
 			$rows[] = self::check_custom_css_post_filters_and_round_trips( $ctx->fork( 'custom-css-post' ) );
@@ -82,6 +83,7 @@ final class CustomizerPersistenceSurface {
 
 		foreach (
 			array(
+				'add_action',
 				'add_filter',
 				'check_ajax_referer',
 				'create_initial_post_types',
@@ -100,14 +102,17 @@ final class CustomizerPersistenceSurface {
 				'has_filter',
 				'is_wp_error',
 				'remove_filter',
+				'remove_action',
 				'sanitize_title',
 				'status_header',
 				'set_theme_mod',
+				'update_option',
 				'update_post_meta',
 				'wp_parse_args',
 				'wp_cache_flush',
 				'wp_check_post_lock',
 				'wp_create_nonce',
+				'wp_generate_uuid4',
 				'wp_get_custom_css',
 				'wp_get_custom_css_post',
 				'wp_insert_post',
@@ -716,6 +721,368 @@ final class CustomizerPersistenceSurface {
 			'customizer-persistence.save-changeset-post-transactions',
 			array() === $failures,
 			array( 'failures' => $failures )
+		);
+	}
+
+	private static function check_publish_changeset_application( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime();
+
+		$failures        = array();
+		$uuid            = self::uuid( $ctx->fork( 'publish-valid' ) );
+		$manager         = self::preview_manager( $ctx, $uuid );
+		$user_id         = self::insert_lock_user( $ctx, 'publish' );
+		$option_id       = self::id( $ctx->fork( 'publish-option' ), 'option' );
+		$theme_mod_id    = self::id( $ctx->fork( 'publish-theme-mod' ), 'theme_mod' );
+		$css_id          = self::custom_css_id( self::ACTIVE_STYLESHEET );
+		$option_value    = 'publish-option-' . $ctx->identifier( 4, 12 ) . '-' . $ctx->int( 100, 999 );
+		$theme_mod_value = 'publish-theme-mod-' . $ctx->identifier( 4, 12 ) . '-' . $ctx->int( 100, 999 );
+		$css_value       = self::safe_css( $ctx->fork( 'publish-css' ) );
+		$css_marker      = 'publish-css-filter-' . $ctx->identifier( 4, 10 );
+		$stored_css      = $css_value . "\n/* {$css_marker} */";
+		$stored_pre      = 'preprocessed:' . $css_marker;
+		$title           = 'Publish changeset ' . $ctx->identifier( 4, 10 );
+		$events          = array();
+		$css_updates     = array();
+		$added_publish_callback = false;
+
+		$manager->add_setting(
+			$option_id,
+			array(
+				'type'       => 'option',
+				'capability' => self::CAPABILITY,
+				'default'    => 'publish-option-default',
+			)
+		);
+		$manager->add_setting(
+			$theme_mod_id,
+			array(
+				'type'       => 'theme_mod',
+				'capability' => self::CAPABILITY,
+				'default'    => 'publish-theme-mod-default',
+			)
+		);
+		self::add_custom_css_setting( $manager, self::ACTIVE_STYLESHEET );
+
+		$save_action = static function ( \WP_Customize_Manager $action_manager ) use ( &$events, $uuid ): void {
+			$events[] = array(
+				'name' => 'customize_save',
+				'uuid' => $action_manager->changeset_uuid(),
+				'matches' => $uuid === $action_manager->changeset_uuid(),
+			);
+		};
+		$save_after_action = static function ( \WP_Customize_Manager $action_manager ) use ( &$events, $uuid ): void {
+			$events[] = array(
+				'name' => 'customize_save_after',
+				'uuid' => $action_manager->changeset_uuid(),
+				'matches' => $uuid === $action_manager->changeset_uuid(),
+			);
+		};
+		$option_save_action = static function ( \WP_Customize_Setting $setting ) use ( &$events, $option_id, $option_value ): void {
+			$events[] = array(
+				'name'  => "customize_save_{$option_id}",
+				'id'    => $setting->id,
+				'value' => $setting->post_value( null ),
+				'matches' => $option_id === $setting->id && $option_value === $setting->post_value( null ),
+			);
+		};
+		$theme_mod_save_action = static function ( \WP_Customize_Setting $setting ) use ( &$events, $theme_mod_id, $theme_mod_value ): void {
+			$events[] = array(
+				'name'  => "customize_save_{$theme_mod_id}",
+				'id'    => $setting->id,
+				'value' => $setting->post_value( null ),
+				'matches' => $theme_mod_id === $setting->id && $theme_mod_value === $setting->post_value( null ),
+			);
+		};
+		$css_save_action = static function ( \WP_Customize_Setting $setting ) use ( &$events, $css_id, $css_value ): void {
+			$events[] = array(
+				'name'  => 'customize_save_custom_css',
+				'id'    => $setting->id,
+				'value' => self::preview( (string) $setting->post_value( null ) ),
+				'matches' => $css_id === $setting->id && $css_value === $setting->post_value( null ),
+			);
+		};
+		$css_update_filter = static function ( array $data, array $args ) use ( &$css_updates, $css_value, $stored_css, $stored_pre ): array {
+			$css_updates[] = array(
+				'stylesheet'   => $args['stylesheet'] ?? null,
+				'css'          => self::preview( $args['css'] ?? '' ),
+				'preprocessed' => self::preview( $args['preprocessed'] ?? '' ),
+			);
+
+			if ( self::ACTIVE_STYLESHEET === ( $args['stylesheet'] ?? null ) && $css_value === ( $args['css'] ?? null ) ) {
+				$data['css']          = $stored_css;
+				$data['preprocessed'] = $stored_pre;
+			}
+
+			return $data;
+		};
+
+		if ( false === \has_filter( 'transition_post_status', '_wp_customize_publish_changeset' ) ) {
+			\add_action( 'transition_post_status', '_wp_customize_publish_changeset', 10, 3 );
+			$added_publish_callback = true;
+		}
+
+		\add_action( 'customize_save', $save_action, 10, 1 );
+		\add_action( 'customize_save_after', $save_after_action, 10, 1 );
+		\add_action( "customize_save_{$option_id}", $option_save_action, 10, 1 );
+		\add_action( "customize_save_{$theme_mod_id}", $theme_mod_save_action, 10, 1 );
+		\add_action( 'customize_save_custom_css', $css_save_action, 10, 1 );
+		\add_filter( 'update_custom_css_data', $css_update_filter, 10, 2 );
+		try {
+			$publish_capture = self::capture_ajax(
+				static function () use ( $manager, $user_id, $title, $option_id, $option_value, $theme_mod_id, $theme_mod_value, $css_id, $css_value ): void {
+					\wp_set_current_user( $user_id );
+					self::set_ajax_post(
+						array(
+							'nonce'                      => \wp_create_nonce( 'save-customize_' . $manager->get_stylesheet() ),
+							'customize_changeset_title'  => $title,
+							'customize_changeset_status' => 'publish',
+							'customize_changeset_data'   => \wp_slash(
+								\wp_json_encode(
+									array(
+										$option_id    => array( 'value' => $option_value ),
+										$theme_mod_id => array( 'value' => $theme_mod_value ),
+										$css_id       => array( 'value' => $css_value ),
+									)
+								)
+							),
+						)
+					);
+					self::with_capabilities(
+						static function () use ( $manager ): void {
+							$manager->save();
+						}
+					);
+				}
+			);
+		} finally {
+			\remove_action( 'customize_save', $save_action, 10 );
+			\remove_action( 'customize_save_after', $save_after_action, 10 );
+			\remove_action( "customize_save_{$option_id}", $option_save_action, 10 );
+			\remove_action( "customize_save_{$theme_mod_id}", $theme_mod_save_action, 10 );
+			\remove_action( 'customize_save_custom_css', $css_save_action, 10 );
+			\remove_filter( 'update_custom_css_data', $css_update_filter, 10 );
+		}
+
+		$publish_body       = self::json_body( $publish_capture );
+		$publish_data       = is_array( $publish_body['data'] ?? null ) ? $publish_body['data'] : array();
+		$post_id            = (int) $manager->changeset_post_id();
+		$post               = $post_id > 0 ? \get_post( $post_id ) : null;
+		$decoded            = $post instanceof \WP_Post ? json_decode( $post->post_content, true ) : null;
+		$theme_changeset_id = self::ACTIVE_STYLESHEET . '::' . $theme_mod_id;
+		$css_post           = \wp_get_custom_css_post( self::ACTIVE_STYLESHEET );
+		$trash_status       = $post_id > 0 ? \get_post_meta( $post_id, '_wp_trash_meta_status', true ) : null;
+		$trash_time         = $post_id > 0 ? \get_post_meta( $post_id, '_wp_trash_meta_time', true ) : null;
+		$edit_lock          = $post_id > 0 ? \get_post_meta( $post_id, '_edit_lock', true ) : null;
+		$event_names        = self::event_names( $events );
+		$expected_events    = array(
+			'customize_save',
+			"customize_save_{$option_id}",
+			"customize_save_{$theme_mod_id}",
+			'customize_save_custom_css',
+			'customize_save_after',
+		);
+
+		self::collect_failure(
+			$failures,
+			self::json_success( $publish_capture )
+				&& is_array( $publish_data )
+				&& 'publish' === ( $publish_data['changeset_status'] ?? null )
+				&& isset( $publish_data['next_changeset_uuid'] )
+				&& \wp_is_uuid( $publish_data['next_changeset_uuid'] )
+				&& $uuid !== $publish_data['next_changeset_uuid']
+				&& true === ( $publish_data['setting_validities'][ $option_id ] ?? null )
+				&& true === ( $publish_data['setting_validities'][ $theme_mod_id ] ?? null )
+				&& true === ( $publish_data['setting_validities'][ $css_id ] ?? null )
+				&& ! array_key_exists( 'autosaved', $publish_data ),
+			'Customizer save AJAX publish returns coherent setting validities and a bounded next changeset UUID',
+			array(
+				'capture'           => self::summarize_capture( $publish_capture ),
+				'changesetStatus'   => $publish_data['changeset_status'] ?? null,
+				'nextChangesetUuid' => $publish_data['next_changeset_uuid'] ?? null,
+				'validities'        => $publish_data['setting_validities'] ?? null,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$post instanceof \WP_Post
+				&& 'customize_changeset' === $post->post_type
+				&& 'trash' === $post->post_status
+				&& 'publish' === $trash_status
+				&& (int) $trash_time > 0
+				&& '' === $edit_lock
+				&& $uuid === $post->post_name
+				&& $title === $post->post_title
+				&& is_array( $decoded )
+				&& self::same_value( $option_value, $decoded[ $option_id ]['value'] ?? null )
+				&& self::same_value( $theme_mod_value, $decoded[ $theme_changeset_id ]['value'] ?? null )
+				&& $css_value === ( $decoded[ $css_id ]['value'] ?? null )
+				&& 'option' === ( $decoded[ $option_id ]['type'] ?? null )
+				&& 'theme_mod' === ( $decoded[ $theme_changeset_id ]['type'] ?? null )
+				&& 'custom_css' === ( $decoded[ $css_id ]['type'] ?? null )
+				&& (int) $user_id === (int) ( $decoded[ $option_id ]['user_id'] ?? 0 )
+				&& (int) $user_id === (int) ( $decoded[ $theme_changeset_id ]['user_id'] ?? 0 )
+				&& (int) $user_id === (int) ( $decoded[ $css_id ]['user_id'] ?? 0 ),
+			'published changeset post is cleaned up as trash while preserving valid JSON content, status, and user metadata',
+			array(
+				'post'        => self::describe_post( $post ),
+				'decodedKeys' => is_array( $decoded ) ? array_keys( $decoded ) : null,
+				'trashStatus' => $trash_status,
+				'trashTime'   => $trash_time,
+				'editLock'    => self::describe_lock( $edit_lock ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$option_value === \get_option( $option_id )
+				&& $theme_mod_value === \get_theme_mod( $theme_mod_id )
+				&& $css_post instanceof \WP_Post
+				&& 'custom_css' === $css_post->post_type
+				&& 'publish' === $css_post->post_status
+				&& self::ACTIVE_STYLESHEET === $css_post->post_title
+				&& $stored_css === $css_post->post_content
+				&& $stored_pre === $css_post->post_content_filtered
+				&& $stored_css === \wp_get_custom_css( self::ACTIVE_STYLESHEET )
+				&& 1 === count( $css_updates ),
+			'published setting values are applied to options, theme mods, and the filtered Custom CSS post path exactly once',
+			array(
+				'option'       => self::describe_value( \get_option( $option_id ) ),
+				'themeMod'     => self::describe_value( \get_theme_mod( $theme_mod_id ) ),
+				'cssPost'      => self::describe_post( $css_post ),
+				'customCss'    => self::preview( \wp_get_custom_css( self::ACTIVE_STYLESHEET ) ),
+				'cssUpdates'   => $css_updates,
+				'filterActive' => \has_filter( 'update_custom_css_data', $css_update_filter ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::ordered_subsequence( $event_names, $expected_events )
+				&& self::event_counts_are_one( $event_names, $expected_events )
+				&& self::all_events_match( $events )
+				&& false === \has_filter( 'customize_save', $save_action )
+				&& false === \has_filter( 'customize_save_after', $save_after_action )
+				&& false === \has_filter( "customize_save_{$option_id}", $option_save_action )
+				&& false === \has_filter( "customize_save_{$theme_mod_id}", $theme_mod_save_action )
+				&& false === \has_filter( 'customize_save_custom_css', $css_save_action )
+				&& false === \has_filter( 'update_custom_css_data', $css_update_filter ),
+			'publish-side Customizer save hooks fire in setting order and scoped hooks/filters are removed',
+			array(
+				'events'         => $events,
+				'eventNames'     => $event_names,
+				'expectedEvents' => $expected_events,
+				'filters'        => array(
+					'customize_save'            => \has_filter( 'customize_save', $save_action ),
+					'customize_save_after'      => \has_filter( 'customize_save_after', $save_after_action ),
+					"customize_save_{$option_id}" => \has_filter( "customize_save_{$option_id}", $option_save_action ),
+					"customize_save_{$theme_mod_id}" => \has_filter( "customize_save_{$theme_mod_id}", $theme_mod_save_action ),
+					'customize_save_custom_css' => \has_filter( 'customize_save_custom_css', $css_save_action ),
+					'update_custom_css_data'    => \has_filter( 'update_custom_css_data', $css_update_filter ),
+				),
+			)
+		);
+
+		$invalid_uuid         = self::uuid( $ctx->fork( 'publish-invalid' ) );
+		$invalid_manager      = self::preview_manager( $ctx->fork( 'publish-invalid-manager' ), $invalid_uuid );
+		$invalid_user_id      = self::insert_lock_user( $ctx, 'publish-invalid' );
+		$invalid_option_id    = self::id( $ctx->fork( 'invalid-option' ), 'option' );
+		$invalid_option_value = 'invalid-option-' . $ctx->identifier( 4, 12 );
+		$unknown_id           = self::id( $ctx->fork( 'unknown-setting' ), 'unknown' );
+		$invalid_css          = self::invalid_css( $ctx->fork( 'invalid-css' ) );
+		$state_before_invalid = array(
+			'option'     => \get_option( $option_id ),
+			'themeMod'   => \get_theme_mod( $theme_mod_id ),
+			'customCss'  => \wp_get_custom_css( self::ACTIVE_STYLESHEET ),
+			'invalidOpt' => \get_option( $invalid_option_id, '__missing__' ),
+		);
+
+		$invalid_manager->add_setting(
+			$invalid_option_id,
+			array(
+				'type'       => 'option',
+				'capability' => self::CAPABILITY,
+				'default'    => 'invalid-option-default',
+			)
+		);
+		self::add_custom_css_setting( $invalid_manager, self::ACTIVE_STYLESHEET );
+
+		$invalid_capture = self::capture_ajax(
+			static function () use ( $invalid_manager, $invalid_user_id, $invalid_option_id, $invalid_option_value, $unknown_id, $css_id, $invalid_css ): void {
+				\wp_set_current_user( $invalid_user_id );
+				self::set_ajax_post(
+					array(
+						'nonce'                      => \wp_create_nonce( 'save-customize_' . $invalid_manager->get_stylesheet() ),
+						'customize_changeset_status' => 'publish',
+						'customize_changeset_data'   => \wp_slash(
+							\wp_json_encode(
+								array(
+									$invalid_option_id => array( 'value' => $invalid_option_value ),
+									$unknown_id        => array( 'value' => 'unknown-publish-value' ),
+									$css_id            => array( 'value' => $invalid_css ),
+								)
+							)
+						),
+					)
+				);
+				self::with_capabilities(
+					static function () use ( $invalid_manager ): void {
+						$invalid_manager->save();
+					}
+				);
+			}
+		);
+
+		if ( $added_publish_callback ) {
+			\remove_action( 'transition_post_status', '_wp_customize_publish_changeset', 10 );
+		}
+
+		$invalid_body = self::json_body( $invalid_capture );
+		$invalid_data = is_array( $invalid_body['data'] ?? null ) ? $invalid_body['data'] : array();
+
+		self::collect_failure(
+			$failures,
+			! self::json_success( $invalid_capture )
+				&& 'transaction_fail' === self::json_error_code( $invalid_capture )
+				&& null === $invalid_manager->changeset_post_id()
+				&& true === ( $invalid_data['setting_validities'][ $invalid_option_id ] ?? null )
+				&& self::js_validity_has_code( $invalid_data['setting_validities'][ $unknown_id ] ?? null, 'unrecognized' )
+				&& self::js_validity_has_code( $invalid_data['setting_validities'][ $css_id ] ?? null, 'illegal_markup' )
+				&& $state_before_invalid['option'] === \get_option( $option_id )
+				&& $state_before_invalid['themeMod'] === \get_theme_mod( $theme_mod_id )
+				&& $state_before_invalid['customCss'] === \wp_get_custom_css( self::ACTIVE_STYLESHEET )
+				&& $state_before_invalid['invalidOpt'] === \get_option( $invalid_option_id, '__missing__' )
+				&& ( ! $added_publish_callback || false === \has_filter( 'transition_post_status', '_wp_customize_publish_changeset' ) ),
+			'invalid publish payloads fail transactionally and do not mutate options, theme mods, Custom CSS, or changeset posts',
+			array(
+				'capture'              => self::summarize_capture( $invalid_capture ),
+				'postId'               => $invalid_manager->changeset_post_id(),
+				'validities'           => $invalid_data['setting_validities'] ?? null,
+				'publishCallback'      => \has_filter( 'transition_post_status', '_wp_customize_publish_changeset' ),
+				'stateBeforeInvalid'   => self::describe_value( $state_before_invalid ),
+				'stateAfterInvalid'    => self::describe_value(
+					array(
+						'option'     => \get_option( $option_id ),
+						'themeMod'   => \get_theme_mod( $theme_mod_id ),
+						'customCss'  => \wp_get_custom_css( self::ACTIVE_STYLESHEET ),
+						'invalidOpt' => \get_option( $invalid_option_id, '__missing__' ),
+					)
+				),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'customizer-persistence.publish-changeset-application',
+			array() === $failures,
+			array(
+				'postId'              => $post_id,
+				'changesetStatus'     => $publish_data['changeset_status'] ?? null,
+				'storedPostStatus'    => $post instanceof \WP_Post ? $post->post_status : null,
+				'eventNames'          => $event_names,
+				'invalidErrorCode'    => self::json_error_code( $invalid_capture ),
+				'failures'            => $failures,
+			)
 		);
 	}
 
@@ -1775,6 +2142,62 @@ final class CustomizerPersistenceSurface {
 			}
 		}
 		return true;
+	}
+
+	private static function event_names( array $events ): array {
+		return array_values(
+			array_map(
+				static function ( array $event ): string {
+					return (string) ( $event['name'] ?? '' );
+				},
+				$events
+			)
+		);
+	}
+
+	private static function ordered_subsequence( array $actual, array $expected ): bool {
+		$offset = 0;
+		foreach ( $expected as $expected_name ) {
+			$found = false;
+			for ( $i = $offset, $count = count( $actual ); $i < $count; ++$i ) {
+				if ( $expected_name === $actual[ $i ] ) {
+					$offset = $i + 1;
+					$found  = true;
+					break;
+				}
+			}
+
+			if ( ! $found ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function event_counts_are_one( array $actual, array $expected ): bool {
+		$counts = array_count_values( $actual );
+		foreach ( $expected as $expected_name ) {
+			if ( 1 !== ( $counts[ $expected_name ] ?? 0 ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function all_events_match( array $events ): bool {
+		foreach ( $events as $event ) {
+			if ( empty( $event['matches'] ) ) {
+				return false;
+			}
+		}
+
+		return array() !== $events;
+	}
+
+	private static function js_validity_has_code( $validity, string $code ): bool {
+		return is_array( $validity ) && array_key_exists( $code, $validity );
 	}
 
 	private static function same_value( $expected, $actual ): bool {

@@ -267,7 +267,9 @@ database, network requests, or a configured site.
   changeset UUID/data normalization, stub-backed `customize_changeset` post
   content parsing, changeset lock/heartbeat persistence, transactional
   changeset saves, `WP_Customize_Manager::save()` AJAX request gates and JSON
-  envelopes, Custom CSS setting validate/sanitize/preview/update behavior,
+  envelopes, publish-side changeset application to options, theme mods, and
+  Custom CSS posts, publish hook ordering, invalid publish transaction
+  rollback, Custom CSS setting validate/sanitize/preview/update behavior,
   custom CSS post filters, and global/superglobal restoration.
 - `date-time`: deterministic no-DB date/time helper coverage, including
   `wp_date()`/`DateTimeImmutable` agreement, `date_i18n()` and `mysql2date()`
