@@ -29,6 +29,21 @@ namespace {
 		}
 	}
 
+	function html_api_fuzz_assert_descendant_stopped( string $state_dir, string $label ): void {
+		$pid = (int) file_get_contents( $state_dir . '/descendant-pid' );
+		html_api_fuzz_commoncrawl_smoke_assert( $pid > 1, "Expected {$label} descendant PID." );
+		$heartbeat_path   = $state_dir . '/descendant-heartbeat';
+		$heartbeat_before = is_file( $heartbeat_path ) ? file_get_contents( $heartbeat_path ) : null;
+		$deadline         = microtime( true ) + 1.0;
+		while ( posix_kill( $pid, 0 ) && microtime( true ) < $deadline ) {
+			usleep( 10000 );
+		}
+		usleep( 100000 );
+		$heartbeat_after = is_file( $heartbeat_path ) ? file_get_contents( $heartbeat_path ) : null;
+		html_api_fuzz_commoncrawl_smoke_assert( ! posix_kill( $pid, 0 ), "Expected {$label} descendant process to be gone." );
+		html_api_fuzz_commoncrawl_smoke_assert( $heartbeat_before === $heartbeat_after, "Expected {$label} descendant heartbeat to stop." );
+	}
+
 	$work_dir = sys_get_temp_dir() . '/html-api-fuzz-commoncrawl-' . getmypid();
 	putenv( 'CC_ANALYZER_OUTPUT_DIR=' . $work_dir );
 	putenv( 'HTML_API_CC_ORACLE=php-dom' );
@@ -113,11 +128,16 @@ namespace {
 	putenv( 'HTML_API_CC_MAX_TOKENS' );
 
 	// A hung parser child must become a replayable finding, not hang the callback.
-	$timeout_dir = $work_dir . '-timeout';
+	$timeout_dir          = $work_dir . '-timeout';
+	$original_state_dir   = $work_dir . '-descendant-original';
+	$original_memory_file = $work_dir . '-memory-original';
+	\HtmlApiFuzz\ensure_dir( $original_state_dir );
 	putenv( 'CC_ANALYZER_OUTPUT_DIR=' . $timeout_dir );
 	putenv( 'HTML_API_CC_PROCESS_TIMEOUT_MS=150' );
 	putenv( 'HTML_API_CC_ORACLE_TIMEOUT_MS=50' );
 	putenv( 'HTML_API_CC_WORKER_SCRIPT=' . __DIR__ . '/fixtures/commoncrawl-timeout-worker.php' );
+	putenv( 'HTML_API_FUZZ_TEST_DESCENDANT_STATE_DIR=' . $original_state_dir );
+	putenv( 'HTML_API_FUZZ_TEST_MEMORY_MARKER=' . $original_memory_file );
 	$timeout_runner = \HtmlApiFuzz\CommonCrawlRunner::from_environment();
 	$timeout = $timeout_runner->analyze_document(
 		new \CcAnalyzer\Analysis\HtmlAnalysisInput(
@@ -136,27 +156,246 @@ namespace {
 	html_api_fuzz_commoncrawl_smoke_assert( '<p>persist me before starting the worker</p>' === file_get_contents( $timeout['artifactDir'] . '/input.bin' ), 'Expected byte-exact timeout input.' );
 	html_api_fuzz_commoncrawl_smoke_assert( true === ( $timeout['process']['stdoutTruncated'] ?? null ), 'Expected bounded capture of noisy worker output.' );
 	html_api_fuzz_commoncrawl_smoke_assert( true === ( $timeout['process']['processGroupIsolated'] ?? null ), 'Expected process-group isolation.' );
-	$heartbeat_path = $timeout['artifactDir'] . '/descendant-heartbeat';
-	$heartbeat_before = is_file( $heartbeat_path ) ? file_get_contents( $heartbeat_path ) : null;
-	usleep( 100000 );
-	$heartbeat_after = is_file( $heartbeat_path ) ? file_get_contents( $heartbeat_path ) : null;
-	html_api_fuzz_commoncrawl_smoke_assert( $heartbeat_before === $heartbeat_after, 'Expected no descendant to survive the worker timeout.' );
+	html_api_fuzz_assert_descendant_stopped( $original_state_dir, 'original timeout' );
+	html_api_fuzz_commoncrawl_smoke_assert( '256M' === file_get_contents( $original_memory_file ), 'Expected original Worker to receive configured memory limit.' );
 
 	$timeout_replay = json_decode( (string) file_get_contents( $timeout['artifactDir'] . '/replay.json' ), true );
 	html_api_fuzz_commoncrawl_smoke_assert( is_string( $timeout_replay['inputBase64'] ?? null ), 'Expected timeout replay to embed exact input.' );
 	html_api_fuzz_commoncrawl_smoke_assert( 'php-dom' === ( $timeout_replay['options']['domOracle'] ?? null ), 'Expected timeout replay to preserve its oracle.' );
+	html_api_fuzz_commoncrawl_smoke_assert( 150 === ( $timeout_replay['options']['processTimeoutMs'] ?? null ), 'Expected timeout replay to record process timeout.' );
+	html_api_fuzz_commoncrawl_smoke_assert( '256M' === ( $timeout_replay['options']['memoryLimit'] ?? null ), 'Expected timeout replay to record memory limit.' );
+	$malformed_policy_cases = array();
+	$malformed_options = $timeout_replay;
+	$malformed_options['options'] = 'not-an-object';
+	$malformed_policy_cases['non-array-options'] = $malformed_options;
+	$fractional_timeout = $timeout_replay;
+	$fractional_timeout['options']['processTimeoutMs'] = 1.5;
+	$malformed_policy_cases['fractional-timeout'] = $fractional_timeout;
+	$null_worker = $timeout_replay;
+	$null_worker['options']['workerScript'] = null;
+	$malformed_policy_cases['null-worker'] = $null_worker;
+	$empty_worker = $timeout_replay;
+	$empty_worker['options']['workerScript'] = '';
+	$malformed_policy_cases['empty-worker'] = $empty_worker;
+	$invalid_checks = $timeout_replay;
+	$invalid_checks['options']['checks'] = 1;
+	$malformed_policy_cases['invalid-checks'] = $invalid_checks;
+	$invalid_memory = $timeout_replay;
+	$invalid_memory['options']['memoryLimit'] = null;
+	$malformed_policy_cases['invalid-memory'] = $invalid_memory;
+	foreach ( $malformed_policy_cases as $case_name => $malformed_policy_replay ) {
+		$malformed_policy_path = $timeout_dir . '/malformed-policy-' . $case_name . '.json';
+		$malformed_policy_output = $timeout_dir . '/malformed-policy-' . $case_name;
+		\HtmlApiFuzz\write_json_file_atomic( $malformed_policy_path, $malformed_policy_replay );
+		$malformed_policy_proc = \HtmlApiFuzz\run_php_process(
+			array(
+				dirname( __DIR__ ) . '/replay.php',
+				'--replay', $malformed_policy_path,
+				'--output-dir', $malformed_policy_output,
+			),
+			\HtmlApiFuzz\repo_root(),
+			5000
+		);
+		html_api_fuzz_commoncrawl_smoke_assert( 1 === $malformed_policy_proc['code'], "Expected {$case_name} recorded policy to be rejected." );
+		html_api_fuzz_commoncrawl_smoke_assert( ! is_dir( $malformed_policy_output ), "Expected {$case_name} rejection before output creation or claim." );
+	}
+	foreach ( array( 'memory-limit', 'timeout-ms', 'worker-script', 'checks' ) as $bare_option ) {
+		$bare_option_output = $timeout_dir . '/bare-option-' . $bare_option;
+		$bare_option_proc = \HtmlApiFuzz\run_php_process(
+			array(
+				dirname( __DIR__ ) . '/replay.php',
+				'--replay', $timeout['artifactDir'] . '/replay.json',
+				'--output-dir', $bare_option_output,
+				'--' . $bare_option,
+			),
+			\HtmlApiFuzz\repo_root(),
+			5000
+		);
+		html_api_fuzz_commoncrawl_smoke_assert( 1 === $bare_option_proc['code'], "Expected bare --{$bare_option} to be rejected." );
+		html_api_fuzz_commoncrawl_smoke_assert( ! is_dir( $bare_option_output ), "Expected bare --{$bare_option} rejection before output creation or claim." );
+	}
+	$replay_state_dir   = $work_dir . '-descendant-replay';
+	$replay_memory_file = $work_dir . '-memory-replay';
+	\HtmlApiFuzz\ensure_dir( $replay_state_dir );
+	putenv( 'HTML_API_FUZZ_TEST_DESCENDANT_STATE_DIR=' . $replay_state_dir );
+	putenv( 'HTML_API_FUZZ_TEST_MEMORY_MARKER=' . $replay_memory_file );
 	$replay_proc = \HtmlApiFuzz\run_php_process(
 		array(
 			dirname( __DIR__ ) . '/replay.php',
 			'--replay', $timeout['artifactDir'] . '/replay.json',
 			'--output-dir', $timeout_dir . '/replayed',
-			'--timeout-ms', '10000',
 		),
 		\HtmlApiFuzz\repo_root(),
-		15000,
+		5000,
 		$timeout_dir . '/replay-command.log'
 	);
-	html_api_fuzz_commoncrawl_smoke_assert( 0 === $replay_proc['code'], 'Expected documented timeout-artifact replay command to succeed.' );
+	html_api_fuzz_commoncrawl_smoke_assert( 2 === $replay_proc['code'], 'Expected replay to reproduce the recorded timeout without CLI overrides.' );
+	$replayed_timeout = \HtmlApiFuzz\read_json_file( $timeout_dir . '/replayed/result.json' );
+	html_api_fuzz_commoncrawl_smoke_assert( 'worker-timeout' === ( $replayed_timeout['failureClass'] ?? null ), 'Expected replayed timeout failure class.' );
+	html_api_fuzz_commoncrawl_smoke_assert( ( $timeout['signature']['hash'] ?? null ) === ( $replayed_timeout['signature']['hash'] ?? null ), 'Expected replayed timeout signature.' );
+	html_api_fuzz_commoncrawl_smoke_assert( '256M' === file_get_contents( $replay_memory_file ), 'Expected replay to consume recorded memory limit.' );
+	html_api_fuzz_assert_descendant_stopped( $replay_state_dir, 'replay timeout' );
+	$replayed_manifest = \HtmlApiFuzz\read_json_file( $timeout_dir . '/replayed/replay.json' );
+	html_api_fuzz_commoncrawl_smoke_assert( 150 === ( $replayed_manifest['options']['processTimeoutMs'] ?? null ), 'Expected replay output to preserve the effective timeout.' );
+	html_api_fuzz_commoncrawl_smoke_assert( '256M' === ( $replayed_manifest['options']['memoryLimit'] ?? null ), 'Expected replay output to preserve the effective memory limit.' );
+
+	// Never reuse an output directory containing evidence from another attempt.
+	$stale_replay_dir = $timeout_dir . '/stale-replay';
+	\HtmlApiFuzz\ensure_dir( $stale_replay_dir );
+	\HtmlApiFuzz\write_file_atomic( $stale_replay_dir . '/result.json', "stale evidence\n" );
+	$stale_replay_proc = \HtmlApiFuzz\run_php_process(
+		array(
+			dirname( __DIR__ ) . '/replay.php',
+			'--replay', $timeout['artifactDir'] . '/replay.json',
+			'--output-dir', $stale_replay_dir,
+		),
+		\HtmlApiFuzz\repo_root(),
+		5000
+	);
+	html_api_fuzz_commoncrawl_smoke_assert( 1 === $stale_replay_proc['code'], 'Expected replay to reject a stale output directory.' );
+	html_api_fuzz_commoncrawl_smoke_assert( "stale evidence\n" === file_get_contents( $stale_replay_dir . '/result.json' ), 'Expected replay not to clobber stale evidence.' );
+	html_api_fuzz_commoncrawl_smoke_assert( ! is_file( $stale_replay_dir . '/.replay-attempt' ), 'Expected a rejected stale directory not to remain claimed.' );
+
+	// A Worker can die halfway through JSON publication. Replay must replace both
+	// malformed artifacts with the canonical supervised-process result.
+	$corrupt_state_dir   = $work_dir . '-descendant-corrupt-replay';
+	$corrupt_memory_file = $work_dir . '-memory-corrupt-replay';
+	$corrupt_replay_dir  = $timeout_dir . '/corrupt-replay';
+	\HtmlApiFuzz\ensure_dir( $corrupt_state_dir );
+	putenv( 'HTML_API_FUZZ_TEST_DESCENDANT_STATE_DIR=' . $corrupt_state_dir );
+	putenv( 'HTML_API_FUZZ_TEST_MEMORY_MARKER=' . $corrupt_memory_file );
+	putenv( 'HTML_API_FUZZ_TEST_CORRUPT_OUTPUT=1' );
+	$corrupt_replay_proc = \HtmlApiFuzz\run_php_process(
+		array(
+			dirname( __DIR__ ) . '/replay.php',
+			'--replay', $timeout['artifactDir'] . '/replay.json',
+			'--output-dir', $corrupt_replay_dir,
+		),
+		\HtmlApiFuzz\repo_root(),
+		5000
+	);
+	putenv( 'HTML_API_FUZZ_TEST_CORRUPT_OUTPUT' );
+	html_api_fuzz_commoncrawl_smoke_assert( 2 === $corrupt_replay_proc['code'], 'Expected malformed Worker artifacts to become a replayed timeout.' );
+	$corrupt_result = \HtmlApiFuzz\read_json_file( $corrupt_replay_dir . '/result.json' );
+	$corrupt_manifest = \HtmlApiFuzz\read_json_file( $corrupt_replay_dir . '/replay.json' );
+	html_api_fuzz_commoncrawl_smoke_assert( 'worker-timeout' === ( $corrupt_result['failureClass'] ?? null ), 'Expected malformed result JSON to be replaced with the canonical timeout.' );
+	html_api_fuzz_commoncrawl_smoke_assert( ( $timeout['signature']['hash'] ?? null ) === ( $corrupt_result['signature']['hash'] ?? null ), 'Expected malformed result recovery to preserve the timeout signature.' );
+	html_api_fuzz_commoncrawl_smoke_assert( 150 === ( $corrupt_manifest['options']['processTimeoutMs'] ?? null ), 'Expected malformed replay JSON recovery to preserve effective policy.' );
+	html_api_fuzz_assert_descendant_stopped( $corrupt_state_dir, 'malformed-output replay' );
+
+	// Diagnostic overrides become the concrete policy recorded by the replay.
+	// Replaying that output without overrides must consume the same policy.
+	$override_state_dir_1   = $work_dir . '-descendant-override-1';
+	$override_memory_file_1 = $work_dir . '-memory-override-1';
+	$override_replay_dir_1  = $timeout_dir . '/override-replay-1';
+	\HtmlApiFuzz\ensure_dir( $override_state_dir_1 );
+	putenv( 'HTML_API_FUZZ_TEST_DESCENDANT_STATE_DIR=' . $override_state_dir_1 );
+	putenv( 'HTML_API_FUZZ_TEST_MEMORY_MARKER=' . $override_memory_file_1 );
+	$override_replay_proc_1 = \HtmlApiFuzz\run_php_process(
+		array(
+			dirname( __DIR__ ) . '/replay.php',
+			'--replay', $timeout['artifactDir'] . '/replay.json',
+			'--output-dir', $override_replay_dir_1,
+			'--memory-limit', '192M',
+			'--timeout-ms', '180',
+			'--checks', 'full',
+		),
+		\HtmlApiFuzz\repo_root(),
+		5000
+	);
+	html_api_fuzz_commoncrawl_smoke_assert( 2 === $override_replay_proc_1['code'], 'Expected replay with explicit policy overrides to reproduce the timeout.' );
+	$override_manifest_1 = \HtmlApiFuzz\read_json_file( $override_replay_dir_1 . '/replay.json' );
+	html_api_fuzz_commoncrawl_smoke_assert( '192M' === file_get_contents( $override_memory_file_1 ), 'Expected Worker to receive the memory override.' );
+	html_api_fuzz_commoncrawl_smoke_assert( '192M' === ( $override_manifest_1['options']['memoryLimit'] ?? null ), 'Expected replay output to record the memory override.' );
+	html_api_fuzz_commoncrawl_smoke_assert( 180 === ( $override_manifest_1['options']['processTimeoutMs'] ?? null ), 'Expected replay output to record the timeout override.' );
+	html_api_fuzz_commoncrawl_smoke_assert( 'full' === ( $override_manifest_1['options']['checks'] ?? null ), 'Expected replay output to record the check override.' );
+	html_api_fuzz_commoncrawl_smoke_assert( realpath( __DIR__ . '/fixtures/commoncrawl-timeout-worker.php' ) === ( $override_manifest_1['options']['workerScript'] ?? null ), 'Expected replay output to record the resolved Worker path.' );
+	html_api_fuzz_assert_descendant_stopped( $override_state_dir_1, 'override replay' );
+
+	$override_state_dir_2   = $work_dir . '-descendant-override-2';
+	$override_memory_file_2 = $work_dir . '-memory-override-2';
+	$override_replay_dir_2  = $timeout_dir . '/override-replay-2';
+	\HtmlApiFuzz\ensure_dir( $override_state_dir_2 );
+	putenv( 'HTML_API_FUZZ_TEST_DESCENDANT_STATE_DIR=' . $override_state_dir_2 );
+	putenv( 'HTML_API_FUZZ_TEST_MEMORY_MARKER=' . $override_memory_file_2 );
+	$override_replay_proc_2 = \HtmlApiFuzz\run_php_process(
+		array(
+			dirname( __DIR__ ) . '/replay.php',
+			'--replay', $override_replay_dir_1 . '/replay.json',
+			'--output-dir', $override_replay_dir_2,
+		),
+		\HtmlApiFuzz\repo_root(),
+		5000
+	);
+	html_api_fuzz_commoncrawl_smoke_assert( 2 === $override_replay_proc_2['code'], 'Expected replay-of-replay to consume the prior effective policy.' );
+	$override_manifest_2 = \HtmlApiFuzz\read_json_file( $override_replay_dir_2 . '/replay.json' );
+	html_api_fuzz_commoncrawl_smoke_assert( '192M' === file_get_contents( $override_memory_file_2 ), 'Expected replay-of-replay to consume the recorded memory override.' );
+	html_api_fuzz_commoncrawl_smoke_assert( '192M' === ( $override_manifest_2['options']['memoryLimit'] ?? null ), 'Expected replay-of-replay to retain the effective memory policy.' );
+	html_api_fuzz_commoncrawl_smoke_assert( 180 === ( $override_manifest_2['options']['processTimeoutMs'] ?? null ), 'Expected replay-of-replay to retain the effective timeout policy.' );
+	html_api_fuzz_commoncrawl_smoke_assert( 'full' === ( $override_manifest_2['options']['checks'] ?? null ), 'Expected replay-of-replay to retain the effective check policy.' );
+	html_api_fuzz_assert_descendant_stopped( $override_state_dir_2, 'replay-of-replay' );
+
+	// A replay moved between checkouts may name a Worker that no longer exists.
+	// Its valid recorded path must remain replaceable by an explicit override.
+	$moved_worker_replay = $timeout_replay;
+	$moved_worker_replay['options']['workerScript'] = '/checkout-that-moved/tools/html-api-fuzz/worker.php';
+	$moved_worker_path = $timeout_dir . '/moved-worker-replay.json';
+	$moved_worker_dir  = $timeout_dir . '/moved-worker-replay';
+	$moved_worker_state_dir = $work_dir . '-descendant-moved-worker';
+	\HtmlApiFuzz\write_json_file_atomic( $moved_worker_path, $moved_worker_replay );
+	\HtmlApiFuzz\ensure_dir( $moved_worker_state_dir );
+	putenv( 'HTML_API_FUZZ_TEST_DESCENDANT_STATE_DIR=' . $moved_worker_state_dir );
+	$moved_worker_proc = \HtmlApiFuzz\run_php_process(
+		array(
+			dirname( __DIR__ ) . '/replay.php',
+			'--replay', $moved_worker_path,
+			'--output-dir', $moved_worker_dir,
+			'--worker-script', __DIR__ . '/fixtures/commoncrawl-timeout-worker.php',
+		),
+		\HtmlApiFuzz\repo_root(),
+		5000
+	);
+	html_api_fuzz_commoncrawl_smoke_assert( 2 === $moved_worker_proc['code'], 'Expected an explicit Worker override to replace a valid stale recorded path.' );
+	$moved_worker_manifest = \HtmlApiFuzz\read_json_file( $moved_worker_dir . '/replay.json' );
+	html_api_fuzz_commoncrawl_smoke_assert( realpath( __DIR__ . '/fixtures/commoncrawl-timeout-worker.php' ) === ( $moved_worker_manifest['options']['workerScript'] ?? null ), 'Expected moved replay to record its effective Worker override.' );
+	html_api_fuzz_assert_descendant_stopped( $moved_worker_state_dir, 'moved replay Worker override' );
+
+	// Legacy manifests have no recorded memory limit. Resolve the actual child
+	// PHP default under its inherited configuration instead of inventing one.
+	$legacy_timeout_replay = $timeout_replay;
+	unset( $legacy_timeout_replay['options']['memoryLimit'] );
+	$legacy_timeout_path = $timeout_dir . '/legacy-timeout-replay.json';
+	\HtmlApiFuzz\write_json_file_atomic( $legacy_timeout_path, $legacy_timeout_replay );
+	$legacy_php_ini_dir = $work_dir . '-legacy-php-ini';
+	$legacy_state_dir   = $work_dir . '-descendant-legacy-replay';
+	$legacy_memory_file = $work_dir . '-memory-legacy-replay';
+	$legacy_replay_dir  = $timeout_dir . '/legacy-replay';
+	\HtmlApiFuzz\ensure_dir( $legacy_php_ini_dir );
+	\HtmlApiFuzz\ensure_dir( $legacy_state_dir );
+	\HtmlApiFuzz\write_file_atomic( $legacy_php_ini_dir . '/php.ini', "memory_limit=384M\n" );
+	$previous_phprc = getenv( 'PHPRC' );
+	putenv( 'PHPRC=' . $legacy_php_ini_dir . '/php.ini' );
+	putenv( 'HTML_API_FUZZ_TEST_DESCENDANT_STATE_DIR=' . $legacy_state_dir );
+	putenv( 'HTML_API_FUZZ_TEST_MEMORY_MARKER=' . $legacy_memory_file );
+	$legacy_replay_proc = \HtmlApiFuzz\run_php_process(
+		array(
+			dirname( __DIR__ ) . '/replay.php',
+			'--replay', $legacy_timeout_path,
+			'--output-dir', $legacy_replay_dir,
+		),
+		\HtmlApiFuzz\repo_root(),
+		5000
+	);
+	if ( false === $previous_phprc ) {
+		putenv( 'PHPRC' );
+	} else {
+		putenv( 'PHPRC=' . $previous_phprc );
+	}
+	html_api_fuzz_commoncrawl_smoke_assert( 2 === $legacy_replay_proc['code'], 'Expected legacy replay to use the inherited child PHP policy.' );
+	$legacy_manifest = \HtmlApiFuzz\read_json_file( $legacy_replay_dir . '/replay.json' );
+	html_api_fuzz_commoncrawl_smoke_assert( '384M' === file_get_contents( $legacy_memory_file ), 'Expected legacy replay Worker to receive the probed child PHP memory limit.' );
+	html_api_fuzz_commoncrawl_smoke_assert( '384M' === ( $legacy_manifest['options']['memoryLimit'] ?? null ), 'Expected legacy replay output to record the probed child PHP memory limit.' );
+	html_api_fuzz_assert_descendant_stopped( $legacy_state_dir, 'legacy replay' );
 
 	// Kill the real Worker while its Lexbor descendant is hung. Worker receives
 	// pending/input.bin as both source and destination; it must not truncate the
@@ -211,7 +450,21 @@ namespace {
 	\HtmlApiFuzz\remove_dir_recursive( $timeout_dir );
 	\HtmlApiFuzz\remove_dir_recursive( $evidence_dir );
 	\HtmlApiFuzz\remove_dir_recursive( $fatal_dir );
+	\HtmlApiFuzz\remove_dir_recursive( $original_state_dir );
+	\HtmlApiFuzz\remove_dir_recursive( $replay_state_dir );
+	\HtmlApiFuzz\remove_dir_recursive( $corrupt_state_dir );
+	\HtmlApiFuzz\remove_dir_recursive( $override_state_dir_1 );
+	\HtmlApiFuzz\remove_dir_recursive( $override_state_dir_2 );
+	\HtmlApiFuzz\remove_dir_recursive( $moved_worker_state_dir );
+	\HtmlApiFuzz\remove_dir_recursive( $legacy_php_ini_dir );
+	\HtmlApiFuzz\remove_dir_recursive( $legacy_state_dir );
 	@unlink( $oracle_started );
+	@unlink( $original_memory_file );
+	@unlink( $replay_memory_file );
+	@unlink( $corrupt_memory_file );
+	@unlink( $override_memory_file_1 );
+	@unlink( $override_memory_file_2 );
+	@unlink( $legacy_memory_file );
 	html_api_fuzz_commoncrawl_smoke_assert( ! is_dir( $work_dir ), 'Expected smoke artifacts to be cleaned up.' );
 
 	echo "OK commoncrawl-analysis-smoke\n";

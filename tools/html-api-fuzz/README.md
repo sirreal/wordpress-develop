@@ -125,6 +125,12 @@ php tools/html-api-fuzz/replay.php \
   --replay artifacts/html-api-commoncrawl/findings/SIGNATURE/DOCUMENT/replay.json
 ```
 
+Replay uses the finding's recorded Worker script, PHP memory limit, whole-worker
+timeout, check pipeline, and oracle timeout by default. It applies the same
+process-group isolation and synthesizes the same timeout/OOM/crash result when
+the Worker produces none. `--worker-script`, `--memory-limit`, and
+`--timeout-ms` are explicit diagnostic overrides.
+
 Transport charset, content type, target URI, WARC record ID, analyzer state
 key, and source range are metadata only. The comparison intentionally feeds
 the same raw bytes to both parsers; it never silently transcodes one side.

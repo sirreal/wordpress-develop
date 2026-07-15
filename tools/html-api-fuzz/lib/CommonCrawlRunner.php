@@ -273,6 +273,7 @@ class CommonCrawlRunner {
 					'oracleTimeoutMs'  => $oracle_options['oracleTimeoutMs'] ?? null,
 					'memoryLimit'      => $this->memory_limit,
 					'processTimeoutMs' => $this->process_timeout_ms,
+					'workerScript'     => realpath( $this->worker_script ) ?: $this->worker_script,
 				),
 				'commonCrawl'   => $metadata,
 				'status'        => 'pending-worker',
@@ -291,34 +292,18 @@ class CommonCrawlRunner {
 			return $result;
 		}
 
-		if ( $process['timedOut'] ?? false ) {
-			$failure_class = 'worker-timeout';
-			$status        = 'timeout';
-		} elseif ( false !== stripos( (string) ( $process['stderr'] ?? '' ), 'Allowed memory size' ) ) {
-			$failure_class = 'worker-oom';
-			$status        = 'resource-limit';
-		} else {
-			$failure_class = 'worker-crash';
-			$status        = 'crashed';
-		}
-
-		return array(
-			'schemaVersion'  => 1,
-			'kind'           => 'html-api-fuzz-worker-result',
-			'createdAt'      => gmdate( 'c' ),
-			'ok'             => false,
-			'status'         => $status,
-			'failureClass'   => $failure_class,
-			'failureSnippet' => substr( trim( (string) ( $process['stderr'] ?? '' ) ), -2000 ),
-			'seed'           => $seed,
-			'profile'        => 'commoncrawl',
-			'mode'           => Generator::MODE_FULL_DOCUMENT,
-			'inputSource'    => 'commoncrawl',
-			'inputSha1'      => sha1( $body ),
-			'inputLength'    => strlen( $body ),
-			'checks'         => $checks,
-			'oracle'         => $this->oracle->metadata(),
-			'comparison'     => null,
+		return synthesize_worker_process_failure(
+			$process,
+			array(
+				'seed'        => $seed,
+				'profile'     => 'commoncrawl',
+				'mode'        => Generator::MODE_FULL_DOCUMENT,
+				'inputSource' => 'commoncrawl',
+				'inputSha1'   => sha1( $body ),
+				'inputLength' => strlen( $body ),
+				'checks'      => $checks,
+				'oracle'      => $this->oracle->metadata(),
+			)
 		);
 	}
 
@@ -370,6 +355,9 @@ class CommonCrawlRunner {
 			$replay['repoDirty']   = $this->git_metadata['dirty'] ?? null;
 			$replay['commonCrawl'] = $metadata;
 			$replay['options']['checks'] = $result['checks'] ?? $this->checks_for_seed( (int) ( $result['seed'] ?? 1 ) );
+			$replay['options']['memoryLimit'] = $this->memory_limit;
+			$replay['options']['processTimeoutMs'] = $this->process_timeout_ms;
+			$replay['options']['workerScript'] = realpath( $this->worker_script ) ?: $this->worker_script;
 			$replay['signature']     = $result['signature'] ?? null;
 			$replay['oracleFinding'] = $result['oracleFinding'] ?? null;
 			$replay['command'] = array(

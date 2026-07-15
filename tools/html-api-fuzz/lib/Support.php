@@ -538,6 +538,34 @@ function run_php_process( array $script_args, string $cwd, int $timeout_ms, ?str
 	);
 }
 
+/** Build the canonical result used when a supervised Worker produced none. */
+function synthesize_worker_process_failure( array $process, array $context ): array {
+	if ( $process['timedOut'] ?? false ) {
+		$failure_class = 'worker-timeout';
+		$status        = 'timeout';
+	} elseif ( false !== stripos( (string) ( $process['stderr'] ?? '' ), 'Allowed memory size' ) ) {
+		$failure_class = 'worker-oom';
+		$status        = 'resource-limit';
+	} else {
+		$failure_class = 'worker-crash';
+		$status        = 'crashed';
+	}
+
+	return array_merge(
+		array(
+			'schemaVersion'  => 1,
+			'kind'           => 'html-api-fuzz-worker-result',
+			'createdAt'      => gmdate( 'c' ),
+			'ok'             => false,
+			'status'         => $status,
+			'failureClass'   => $failure_class,
+			'failureSnippet' => substr( trim( (string) ( $process['stderr'] ?? '' ) ), -2000 ),
+			'comparison'     => null,
+		),
+		$context
+	);
+}
+
 function read_ndjson_records( string $path ): array {
 	$text = @file_get_contents( $path );
 	if ( false === $text ) {
