@@ -8,6 +8,8 @@ final class ContentLifecycleSurface {
 	public const NAME = 'content-lifecycle';
 
 	public static function run( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::maybe_load_optional_user_delete_support();
+
 		$missing = self::missing_requirements();
 		if ( array() !== $missing ) {
 			return array(
@@ -29,6 +31,8 @@ final class ContentLifecycleSurface {
 			$rows[] = self::check_user_lifecycle( $ctx->fork( 'users' ), $case );
 			self::prepare_runtime();
 			$rows[] = self::check_user_insert_update_filter_meta_contracts( $ctx->fork( 'user-filter-meta' ), $case );
+			self::prepare_runtime();
+			$rows[] = self::check_user_delete_reassign_lifecycle( $ctx->fork( 'user-delete' ), $case );
 			self::prepare_runtime();
 			$rows[] = self::check_term_lifecycle( $ctx->fork( 'terms' ), $case );
 			$rows[] = self::check_post_lifecycle( $ctx->fork( 'posts' ), $case );
@@ -81,15 +85,20 @@ final class ContentLifecycleSurface {
 				'add_filter',
 				'add_meta',
 				'add_post_meta',
+				'clean_bookmark_cache',
 				'clean_post_cache',
+				'clean_user_cache',
 				'current_user_can',
 				'create_initial_post_types',
 				'create_initial_taxonomies',
 				'delete_meta',
+				'delete_metadata_by_mid',
 				'delete_post_meta',
 				'delete_post_thumbnail',
 				'edit_post',
+				'email_exists',
 				'get_available_post_mime_types',
+				'get_bookmark',
 				'get_the_terms',
 				'get_the_post_thumbnail',
 				'get_the_post_thumbnail_caption',
@@ -111,6 +120,7 @@ final class ContentLifecycleSurface {
 				'get_term',
 				'get_terms',
 				'get_taxonomy',
+				'get_post_types',
 				'get_user_meta',
 				'get_user_by',
 				'get_userdata',
@@ -152,7 +162,9 @@ final class ContentLifecycleSurface {
 				'wp_cache_get_salted',
 				'wp_cache_set',
 				'wp_check_password',
+				'wp_delete_link',
 				'wp_delete_comment',
+				'wp_delete_user',
 				'wp_delete_object_term_relationships',
 				'wp_delete_post',
 				'wp_get_object_terms',
@@ -177,6 +189,7 @@ final class ContentLifecycleSurface {
 				'wp_check_post_lock',
 				'wp_clear_scheduled_hook',
 				'wp_next_scheduled',
+				'username_exists',
 				'update_post_meta',
 				'update_meta',
 				'update_post_thumbnail_cache',
@@ -201,6 +214,19 @@ final class ContentLifecycleSurface {
 		}
 
 		return $missing;
+	}
+
+	private static function maybe_load_optional_user_delete_support(): void {
+		if ( ! defined( 'ABSPATH' ) ) {
+			return;
+		}
+
+		foreach ( array( 'wp-admin/includes/bookmark.php', 'wp-admin/includes/user.php' ) as $file ) {
+			$path = ABSPATH . $file;
+			if ( file_exists( $path ) ) {
+				require_once $path;
+			}
+		}
 	}
 
 	private static function check_post_lifecycle( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
@@ -2952,6 +2978,430 @@ final class ContentLifecycleSurface {
 					'userRegister'  => $events['userRegister'],
 					'profileUpdate' => $events['profileUpdate'],
 					'wpUpdateUser'  => $events['wpUpdateUser'],
+				),
+			)
+		);
+	}
+
+	private static function check_user_delete_reassign_lifecycle( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$wpdb             = $GLOBALS['wpdb'];
+		$failures         = array();
+		$token            = substr( $case['token'], 0, 10 );
+		$phase            = 'setup';
+		$active_meta_key  = '';
+		$tracked_posts    = array();
+		$tracked_links    = array();
+		$sequence         = 0;
+		$events           = array(
+			'deleteUser'  => array(),
+			'deletedUser' => array(),
+			'postTypes'   => array(),
+			'deleteLink'  => array(),
+			'deletedLink' => array(),
+		);
+		$hooks            = array();
+		$add_hook         = static function ( string $hook, callable $callback, int $accepted_args ) use ( &$hooks ): void {
+			\add_filter( $hook, $callback, 10, $accepted_args );
+			$hooks[] = array( $hook, $callback, 10 );
+		};
+		$post_author_map  = static function ( array $post_ids ): array {
+			$authors = array();
+
+			foreach ( $post_ids as $label => $post_id ) {
+				$post              = is_numeric( $post_id ) ? \get_post( (int) $post_id ) : null;
+				$authors[ $label ] = $post instanceof \WP_Post ? (int) $post->post_author : null;
+			}
+
+			return $authors;
+		};
+		$link_owner_map   = static function ( array $link_ids ): array {
+			$owners = array();
+
+			foreach ( $link_ids as $label => $link_id ) {
+				$bookmark          = is_numeric( $link_id ) ? \get_bookmark( (int) $link_id ) : null;
+				$owners[ $label ] = is_object( $bookmark ) && ! \is_wp_error( $bookmark ) ? (int) $bookmark->link_owner : null;
+			}
+
+			return $owners;
+		};
+		$insert_link      = static function ( int $owner, string $suffix ) use ( $wpdb, $token ): int {
+			$wpdb->insert(
+				$wpdb->links,
+				array(
+					'link_url'         => 'https://example.test/delete-user/' . rawurlencode( $token ) . '/' . rawurlencode( $suffix ),
+					'link_name'        => 'Delete User Link ' . $suffix . ' ' . $token,
+					'link_image'       => '',
+					'link_target'      => '',
+					'link_description' => 'Delete user link fixture ' . $suffix,
+					'link_visible'     => 'Y',
+					'link_owner'       => $owner,
+					'link_rating'      => 0,
+					'link_rel'         => '',
+					'link_notes'       => '',
+					'link_rss'         => '',
+					'link_updated'     => '2026-01-01 00:00:00',
+				)
+			);
+
+			return (int) $wpdb->insert_id;
+		};
+		$insert_post      = static function ( int $author, string $post_type, string $suffix ) use ( $token ) {
+			return \wp_insert_post(
+				\wp_slash(
+					array(
+						'post_author'  => $author,
+						'post_type'    => $post_type,
+						'post_title'   => 'Delete User ' . $suffix . ' ' . $token,
+						'post_content' => 'Delete user content ' . $suffix . ' ' . $token,
+						'post_status'  => 'publish',
+						'post_name'    => 'delete-user-' . $suffix . '-' . $token,
+					)
+				),
+				true,
+				false
+			);
+		};
+		$events_for_phase = static function ( array $rows, string $event_phase ): array {
+			return array_values(
+				array_filter(
+					$rows,
+					static function ( array $row ) use ( $event_phase ): bool {
+						return $event_phase === ( $row['phase'] ?? null );
+					}
+				)
+			);
+		};
+
+		$user_event = static function ( string $hook, $id, $reassign, $user ) use ( &$events, &$phase, &$active_meta_key, &$tracked_posts, &$tracked_links, &$sequence, $post_author_map, $link_owner_map ): void {
+			$row = array(
+				'seq'         => ++$sequence,
+				'phase'       => $phase,
+				'id'          => (int) $id,
+				'reassign'    => null === $reassign ? null : (int) $reassign,
+				'userLogin'   => $user instanceof \WP_User ? $user->user_login : null,
+				'userExists'  => \get_userdata( (int) $id ) instanceof \WP_User,
+				'meta'        => '' === $active_meta_key ? null : \get_user_meta( (int) $id, $active_meta_key, true ),
+				'postAuthors' => $post_author_map( $tracked_posts ),
+				'linkOwners'  => $link_owner_map( $tracked_links ),
+			);
+
+			$events[ $hook ][] = $row;
+		};
+		$delete_user = static function ( $id, $reassign, $user ) use ( $user_event ): void {
+			$user_event( 'deleteUser', $id, $reassign, $user );
+		};
+		$deleted_user = static function ( $id, $reassign, $user ) use ( $user_event ): void {
+			$user_event( 'deletedUser', $id, $reassign, $user );
+		};
+		$post_types_to_delete = static function ( array $post_types, int $id ) use ( &$events, &$phase ): array {
+			$events['postTypes'][] = array(
+				'phase' => $phase,
+				'id'    => $id,
+				'types' => array_values( $post_types ),
+			);
+
+			return $post_types;
+		};
+		$delete_link = static function ( int $link_id ) use ( &$events, &$phase, &$sequence ): void {
+			$events['deleteLink'][] = array(
+				'seq'    => ++$sequence,
+				'phase'  => $phase,
+				'linkId' => $link_id,
+			);
+		};
+		$deleted_link = static function ( int $link_id ) use ( &$events, &$phase, &$sequence ): void {
+			$events['deletedLink'][] = array(
+				'seq'    => ++$sequence,
+				'phase'  => $phase,
+				'linkId' => $link_id,
+			);
+		};
+
+		foreach (
+			array(
+				array( 'delete_user', $delete_user, 3 ),
+				array( 'deleted_user', $deleted_user, 3 ),
+				array( 'post_types_to_delete_with_user', $post_types_to_delete, 2 ),
+				array( 'delete_link', $delete_link, 1 ),
+				array( 'deleted_link', $deleted_link, 1 ),
+			) as $hook
+		) {
+			$add_hook( $hook[0], $hook[1], $hook[2] );
+		}
+
+		try {
+			$reassign_meta_key      = 'cf_delete_reassign_meta_' . $token;
+			$reassign_source_login  = 'cf_del_src_' . $token;
+			$reassign_source_email  = 'delete-src-' . $case['userEmail'];
+			$reassign_target_login  = 'cf_del_target_' . $token;
+			$reassign_target_email  = 'delete-target-' . $case['userEmail'];
+			$reassign_source_id     = \wp_insert_user(
+				array(
+					'user_login' => $reassign_source_login,
+					'user_pass'  => $case['password'],
+					'user_email' => $reassign_source_email,
+					'role'       => 'author',
+					'meta_input' => array(
+						$reassign_meta_key => 'reassign source meta ' . $token,
+					),
+				)
+			);
+			$reassign_target_id     = \wp_insert_user(
+				array(
+					'user_login' => $reassign_target_login,
+					'user_pass'  => $case['password'],
+					'user_email' => $reassign_target_email,
+					'role'       => 'editor',
+				)
+			);
+			$reassign_source_user   = is_int( $reassign_source_id ) ? \get_userdata( $reassign_source_id ) : false;
+			$reassign_source_slug   = $reassign_source_user instanceof \WP_User ? $reassign_source_user->user_nicename : '';
+			$reassign_post_id       = is_int( $reassign_source_id ) ? $insert_post( $reassign_source_id, 'post', 'reassign-post' ) : 0;
+			$reassign_page_id       = is_int( $reassign_source_id ) ? $insert_post( $reassign_source_id, 'page', 'reassign-page' ) : 0;
+			$reassign_link_id       = is_int( $reassign_source_id ) ? $insert_link( $reassign_source_id, 'reassign' ) : 0;
+			$tracked_posts          = array(
+				'post' => $reassign_post_id,
+				'page' => $reassign_page_id,
+			);
+			$tracked_links          = array( 'link' => $reassign_link_id );
+			$active_meta_key        = $reassign_meta_key;
+			$phase                  = 'reassign';
+			$reassign_result        = is_int( $reassign_source_id ) && is_int( $reassign_target_id ) ? \wp_delete_user( (string) $reassign_source_id, (string) $reassign_target_id ) : false;
+			$reassign_post_authors  = $post_author_map( $tracked_posts );
+			$reassign_link_owners   = $link_owner_map( $tracked_links );
+			$reassign_delete_events = $events_for_phase( $events['deleteUser'], 'reassign' );
+			$reassign_done_events   = $events_for_phase( $events['deletedUser'], 'reassign' );
+
+			self::collect_failure(
+				$failures,
+				true === $reassign_result
+					&& is_int( $reassign_target_id )
+					&& false === \get_userdata( $reassign_source_id )
+					&& false === \get_user_by( 'login', $reassign_source_login )
+					&& false === \get_user_by( 'email', $reassign_source_email )
+					&& ( '' === $reassign_source_slug || false === \get_user_by( 'slug', $reassign_source_slug ) )
+					&& false === \username_exists( $reassign_source_login )
+					&& false === \email_exists( $reassign_source_email )
+					&& \get_userdata( $reassign_target_id ) instanceof \WP_User
+					&& '' === \get_user_meta( $reassign_source_id, $reassign_meta_key, true )
+					&& array(
+						'post' => $reassign_target_id,
+						'page' => $reassign_target_id,
+					) === $reassign_post_authors
+					&& array( 'link' => $reassign_target_id ) === $reassign_link_owners,
+				'wp_delete_user with reassignment removes source user/meta/lookups and reassigns posts and links',
+				array(
+					'result'      => $reassign_result,
+					'sourceId'    => $reassign_source_id,
+					'targetId'    => $reassign_target_id,
+					'postAuthors' => $reassign_post_authors,
+					'linkOwners'  => $reassign_link_owners,
+				)
+			);
+			self::collect_failure(
+				$failures,
+				1 === count( $reassign_delete_events )
+					&& 1 === count( $reassign_done_events )
+					&& $reassign_source_id === ( $reassign_delete_events[0]['id'] ?? null )
+					&& $reassign_target_id === ( $reassign_delete_events[0]['reassign'] ?? null )
+					&& true === ( $reassign_delete_events[0]['userExists'] ?? null )
+					&& 'reassign source meta ' . $token === ( $reassign_delete_events[0]['meta'] ?? null )
+					&& $reassign_source_id === ( $reassign_delete_events[0]['postAuthors']['post'] ?? null )
+					&& $reassign_source_id === ( $reassign_delete_events[0]['linkOwners']['link'] ?? null )
+					&& $reassign_source_id === ( $reassign_done_events[0]['id'] ?? null )
+					&& $reassign_target_id === ( $reassign_done_events[0]['reassign'] ?? null )
+					&& false === ( $reassign_done_events[0]['userExists'] ?? null )
+					&& '' === ( $reassign_done_events[0]['meta'] ?? null )
+					&& $reassign_target_id === ( $reassign_done_events[0]['postAuthors']['post'] ?? null )
+					&& $reassign_target_id === ( $reassign_done_events[0]['linkOwners']['link'] ?? null )
+					&& ( $reassign_delete_events[0]['seq'] ?? 0 ) < ( $reassign_done_events[0]['seq'] ?? 0 ),
+				'reassign delete_user/deleted_user hooks receive normalized IDs and bracket content reassignment',
+				array(
+					'deleteUser'  => $reassign_delete_events,
+					'deletedUser' => $reassign_done_events,
+				)
+			);
+
+			$delete_type       = 'cf_del_' . $token;
+			$keep_type         = 'cf_keep_' . $token;
+			\register_post_type(
+				$delete_type,
+				array(
+					'public'           => false,
+					'show_ui'          => false,
+					'supports'         => array( 'title', 'author' ),
+					'delete_with_user' => true,
+				)
+			);
+			\register_post_type(
+				$keep_type,
+				array(
+					'public'           => false,
+					'show_ui'          => false,
+					'supports'         => array( 'title', 'author' ),
+					'delete_with_user' => false,
+				)
+			);
+
+			$delete_meta_key      = 'cf_delete_user_meta_' . $token;
+			$delete_source_login  = 'cf_delete_user_' . $token;
+			$delete_source_email  = 'delete-user-' . $case['userEmail'];
+			$delete_source_id     = \wp_insert_user(
+				array(
+					'user_login' => $delete_source_login,
+					'user_pass'  => $case['password'],
+					'user_email' => $delete_source_email,
+					'role'       => 'author',
+					'meta_input' => array(
+						$delete_meta_key => 'delete source meta ' . $token,
+					),
+				)
+			);
+			$delete_source_user   = is_int( $delete_source_id ) ? \get_userdata( $delete_source_id ) : false;
+			$delete_source_slug   = $delete_source_user instanceof \WP_User ? $delete_source_user->user_nicename : '';
+			$delete_post_id       = is_int( $delete_source_id ) ? $insert_post( $delete_source_id, $delete_type, 'delete-custom' ) : 0;
+			$keep_post_id         = is_int( $delete_source_id ) ? $insert_post( $delete_source_id, $keep_type, 'keep-custom' ) : 0;
+			$delete_link_id       = is_int( $delete_source_id ) ? $insert_link( $delete_source_id, 'delete' ) : 0;
+			$tracked_posts        = array(
+				'deleteType' => $delete_post_id,
+				'keepFalse'  => $keep_post_id,
+			);
+			$tracked_links        = array( 'deleteLink' => $delete_link_id );
+			$active_meta_key      = $delete_meta_key;
+			$phase                = 'delete';
+			$delete_result        = is_int( $delete_source_id ) ? \wp_delete_user( $delete_source_id, 'novalue' ) : false;
+			$delete_post_authors  = $post_author_map( $tracked_posts );
+			$delete_link_owners   = $link_owner_map( $tracked_links );
+			$delete_events        = $events_for_phase( $events['deleteUser'], 'delete' );
+			$deleted_events       = $events_for_phase( $events['deletedUser'], 'delete' );
+			$post_type_events     = $events_for_phase( $events['postTypes'], 'delete' );
+			$delete_link_events   = $events_for_phase( $events['deleteLink'], 'delete' );
+			$deleted_link_events  = $events_for_phase( $events['deletedLink'], 'delete' );
+			$received_post_types  = $post_type_events[0]['types'] ?? array();
+
+			self::collect_failure(
+				$failures,
+				true === $delete_result
+					&& false === \get_userdata( $delete_source_id )
+					&& false === \get_user_by( 'login', $delete_source_login )
+					&& false === \get_user_by( 'email', $delete_source_email )
+					&& ( '' === $delete_source_slug || false === \get_user_by( 'slug', $delete_source_slug ) )
+					&& false === \username_exists( $delete_source_login )
+					&& false === \email_exists( $delete_source_email )
+					&& '' === \get_user_meta( $delete_source_id, $delete_meta_key, true )
+					&& array(
+						'deleteType' => null,
+						'keepFalse'  => $delete_source_id,
+					) === $delete_post_authors
+					&& array( 'deleteLink' => null ) === $delete_link_owners,
+				'wp_delete_user without reassignment deletes eligible content and links while preserving delete_with_user=false posts',
+				array(
+					'result'      => $delete_result,
+					'sourceId'    => $delete_source_id,
+					'postAuthors' => $delete_post_authors,
+					'linkOwners'  => $delete_link_owners,
+				)
+			);
+			self::collect_failure(
+				$failures,
+				1 === count( $delete_events )
+					&& 1 === count( $deleted_events )
+					&& $delete_source_id === ( $delete_events[0]['id'] ?? null )
+					&& null === ( $delete_events[0]['reassign'] ?? null )
+					&& true === ( $delete_events[0]['userExists'] ?? null )
+					&& 'delete source meta ' . $token === ( $delete_events[0]['meta'] ?? null )
+					&& $delete_source_id === ( $delete_events[0]['postAuthors']['deleteType'] ?? null )
+					&& $delete_source_id === ( $delete_events[0]['linkOwners']['deleteLink'] ?? null )
+					&& $delete_source_id === ( $deleted_events[0]['id'] ?? null )
+					&& null === ( $deleted_events[0]['reassign'] ?? null )
+					&& false === ( $deleted_events[0]['userExists'] ?? null )
+					&& '' === ( $deleted_events[0]['meta'] ?? null )
+					&& null === ( $deleted_events[0]['postAuthors']['deleteType'] ?? null )
+					&& $delete_source_id === ( $deleted_events[0]['postAuthors']['keepFalse'] ?? null )
+					&& null === ( $deleted_events[0]['linkOwners']['deleteLink'] ?? null )
+					&& ( $delete_events[0]['seq'] ?? 0 ) < ( $deleted_events[0]['seq'] ?? 0 ),
+				'novalue delete_user/deleted_user hooks normalize reassignment to null and bracket content deletion',
+				array(
+					'deleteUser'  => $delete_events,
+					'deletedUser' => $deleted_events,
+				)
+			);
+			self::collect_failure(
+				$failures,
+				1 === count( $post_type_events )
+					&& $delete_source_id === ( $post_type_events[0]['id'] ?? null )
+					&& in_array( $delete_type, $received_post_types, true )
+					&& ! in_array( $keep_type, $received_post_types, true )
+					&& 1 === count( $delete_link_events )
+					&& 1 === count( $deleted_link_events )
+					&& $delete_link_id === ( $delete_link_events[0]['linkId'] ?? null )
+					&& $delete_link_id === ( $deleted_link_events[0]['linkId'] ?? null )
+					&& ( $delete_link_events[0]['seq'] ?? 0 ) < ( $deleted_link_events[0]['seq'] ?? 0 )
+					&& ( $delete_events[0]['seq'] ?? 0 ) < ( $delete_link_events[0]['seq'] ?? 0 )
+					&& ( $deleted_link_events[0]['seq'] ?? 0 ) < ( $deleted_events[0]['seq'] ?? 0 ),
+				'no-reassign deletion exposes post-type filter payloads and link deletion hooks in order',
+				array(
+					'postTypes'   => $post_type_events,
+					'deleteLink'  => $delete_link_events,
+					'deletedLink' => $deleted_link_events,
+				)
+			);
+
+			$delete_user_count  = count( $events['deleteUser'] );
+			$deleted_user_count = count( $events['deletedUser'] );
+			$phase              = 'invalid';
+			$invalid_delete     = \wp_delete_user( 'not-a-user-id' );
+			$missing_delete     = \wp_delete_user( 987654321 );
+
+			self::collect_failure(
+				$failures,
+				false === $invalid_delete
+					&& false === $missing_delete
+					&& $delete_user_count === count( $events['deleteUser'] )
+					&& $deleted_user_count === count( $events['deletedUser'] ),
+				'wp_delete_user fails closed for non-numeric and missing users without firing delete hooks',
+				array(
+					'invalid'           => $invalid_delete,
+					'missing'           => $missing_delete,
+					'deleteUserCount'   => count( $events['deleteUser'] ),
+					'deletedUserCount'  => count( $events['deletedUser'] ),
+					'expectedHookCount' => $delete_user_count,
+				)
+			);
+		} finally {
+			self::remove_hooks( $hooks );
+		}
+
+		self::collect_failure(
+			$failures,
+			self::hooks_are_removed( $hooks ),
+			'user delete/reassign hooks are removed',
+			array(
+				'remaining' => array_values(
+					array_filter(
+						array_map(
+							static function ( array $hook ) {
+								return false === \has_filter( $hook[0], $hook[1] ) ? null : $hook[0];
+							},
+							$hooks
+						)
+					)
+				),
+			)
+		);
+
+		return $ctx->result(
+			'content-lifecycle.users.delete-reassign-hooks-content',
+			array() === $failures,
+			array(
+				'case'     => self::case_summary( $case ),
+				'failures' => array_slice( $failures, 0, 8 ),
+				'events'   => array(
+					'deleteUser'  => $events['deleteUser'],
+					'deletedUser' => $events['deletedUser'],
+					'postTypes'   => $events['postTypes'],
+					'deleteLink'  => $events['deleteLink'],
+					'deletedLink' => $events['deletedLink'],
 				),
 			)
 		);

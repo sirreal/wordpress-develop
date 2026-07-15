@@ -216,6 +216,10 @@ database, network requests, or a configured site.
   `wp_pre_insert_user_data`, default/custom user-meta filters,
   role/default-role contracts, activation-key clearing, password/email-change
   hooks and filters, illegal-login and empty-data fail-closed branches,
+  direct `wp_delete_user()` deletion/reassignment, hook ordering, usermeta
+  removal, lookup disappearance, post/link reassignment, custom post-type
+  `delete_with_user` filtering, link deletion, and invalid-user fail-closed
+  branches,
   duplicate and invalid-input errors, sanitizer agreement, monotonic IDs,
   metadata cache invalidation, post-to-term relationship field modes, helper
   caches, relationship hook arguments, status-transition hook/cache/default
