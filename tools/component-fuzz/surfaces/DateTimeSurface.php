@@ -46,6 +46,7 @@ final class DateTimeSurface {
 				self::check_date_and_human_diff_filter_contracts( $ctx, $timestamps, $timezones, $formats ),
 				self::check_named_timezone_dst_boundaries_and_iso8601_modes( $ctx, $timezones, $offsets ),
 				self::check_wp_checkdate_contract( $ctx ),
+				self::check_maybe_decline_date_locale_contract( $ctx->fork( 'decline-date' ) ),
 			);
 		} catch ( \Throwable $e ) {
 			$rows = array(
@@ -82,9 +83,11 @@ final class DateTimeSurface {
 				'get_weekstartend',
 				'human_time_diff',
 				'get_option',
+				'get_locale',
 				'add_filter',
 				'has_filter',
 				'remove_filter',
+				'wp_maybe_decline_date',
 			) as $function
 		) {
 			if ( ! function_exists( $function ) ) {
@@ -1287,6 +1290,198 @@ final class DateTimeSurface {
 		);
 	}
 
+	private static function check_maybe_decline_date_locale_contract( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures        = array();
+		$samples         = array();
+		$translation_log = array();
+		$original_locale = $GLOBALS['locale'] ?? null;
+		$locale_existed  = array_key_exists( 'locale', $GLOBALS );
+		$original_wp_locale = $GLOBALS['wp_locale'] ?? null;
+
+		if ( ! is_object( $original_wp_locale ) ) {
+			return $ctx->skip(
+				'date-time.maybe-decline-date-locale-rules',
+				'Global WP_Locale object is unavailable.'
+			);
+		}
+
+		$decline_filter = static function ( string $translation, string $text, string $context ) use ( &$translation_log ): string {
+			$translation_log[] = array(
+				'translation' => $translation,
+				'text'        => $text,
+				'context'     => $context,
+			);
+
+			if ( 'decline months names: on or off' === $context ) {
+				return 'on';
+			}
+
+			return $translation;
+		};
+		$off_filter     = static function ( string $translation, string $text, string $context ): string {
+			unset( $text );
+
+			return 'decline months names: on or off' === $context ? 'off' : $translation;
+		};
+
+		$months = self::declension_month_names();
+		$cases  = array(
+			array(
+				'name'     => 'day-month-explicit',
+				'locale'   => 'component_decline',
+				'format'   => 'j F Y',
+				'date'     => '21 Foxtrot 2026',
+				'expected' => '21 foxtrot 2026',
+			),
+			array(
+				'name'     => 'day-dot-month-explicit',
+				'locale'   => 'component_decline',
+				'format'   => 'j. F',
+				'date'     => '1. Delta',
+				'expected' => '1. delta',
+			),
+			array(
+				'name'     => 'month-day-ordinal-explicit',
+				'locale'   => 'component_decline',
+				'format'   => 'F jS Y',
+				'date'     => 'Alpha 1st 2026',
+				'expected' => '1 alpha 2026',
+			),
+			array(
+				'name'     => 'month-day-range-explicit',
+				'locale'   => 'component_decline',
+				'format'   => 'F j-j Y',
+				'date'     => 'Hotel 3-5 2026',
+				'expected' => '3-5 hotel 2026',
+			),
+			array(
+				'name'     => 'format-without-day-does-not-decline',
+				'locale'   => 'component_decline',
+				'format'   => 'F Y',
+				'date'     => 'India 2026',
+				'expected' => 'India 2026',
+			),
+			array(
+				'name'     => 'guess-day-month',
+				'locale'   => 'component_decline',
+				'format'   => '',
+				'date'     => '5 Bravo',
+				'expected' => '5 bravo',
+			),
+			array(
+				'name'     => 'guess-month-day',
+				'locale'   => 'component_decline',
+				'format'   => '',
+				'date'     => 'Charlie 12th',
+				'expected' => '12 charlie',
+			),
+			array(
+				'name'     => 'catalan-apostrophe',
+				'locale'   => 'ca',
+				'format'   => 'j F',
+				'date'     => '1 de abril',
+				'expected' => "1 d'abril",
+				'months'   => self::catalan_month_names(),
+			),
+		);
+
+		$mutated_locale = clone $original_wp_locale;
+		$GLOBALS['wp_locale'] = $mutated_locale;
+
+		\add_filter( 'gettext_with_context', $decline_filter, 10, 3 );
+		try {
+			foreach ( $cases as $case ) {
+				$case_months                         = $case['months'] ?? $months;
+				$GLOBALS['locale']                   = $case['locale'];
+				$GLOBALS['wp_locale']->month          = $case_months['month'];
+				$GLOBALS['wp_locale']->month_genitive = $case_months['month_genitive'];
+
+				$actual = \wp_maybe_decline_date( $case['date'], $case['format'] );
+
+				self::sample(
+					$samples,
+					array(
+						'name'     => $case['name'],
+						'locale'   => \get_locale(),
+						'format'   => $case['format'],
+						'date'     => $case['date'],
+						'expected' => $case['expected'],
+						'actual'   => $actual,
+					)
+				);
+
+				self::collect_failure(
+					$failures,
+					$case['expected'] === $actual,
+					"wp_maybe_decline_date applies locale month rules for {$case['name']}",
+					array(
+						'case'     => $case,
+						'actual'   => self::describe_value( $actual ),
+						'locale'   => \get_locale(),
+						'month'    => $GLOBALS['wp_locale']->month,
+						'genitive' => $GLOBALS['wp_locale']->month_genitive,
+					)
+				);
+			}
+		} finally {
+			\remove_filter( 'gettext_with_context', $decline_filter, 10 );
+		}
+
+		$GLOBALS['locale']                   = 'component_decline';
+		$GLOBALS['wp_locale']->month          = $months['month'];
+		$GLOBALS['wp_locale']->month_genitive = $months['month_genitive'];
+		\add_filter( 'gettext_with_context', $off_filter, 10, 3 );
+		try {
+			$off_actual = \wp_maybe_decline_date( '7 Golf 2026', 'j F Y' );
+		} finally {
+			\remove_filter( 'gettext_with_context', $off_filter, 10 );
+			$GLOBALS['wp_locale'] = $original_wp_locale;
+			if ( $locale_existed ) {
+				$GLOBALS['locale'] = $original_locale;
+			} else {
+				unset( $GLOBALS['locale'] );
+			}
+		}
+
+		self::collect_failure(
+			$failures,
+			'7 Golf 2026' === $off_actual,
+			'wp_maybe_decline_date leaves dates unchanged when declension translation is off',
+			array( 'actual' => self::describe_value( $off_actual ) )
+		);
+		self::collect_failure(
+			$failures,
+			array() !== $translation_log
+				&& false === \has_filter( 'gettext_with_context', $decline_filter )
+				&& false === \has_filter( 'gettext_with_context', $off_filter )
+				&& ( $GLOBALS['wp_locale'] ?? null ) === $original_wp_locale
+				&& (
+					$locale_existed
+						? ( $GLOBALS['locale'] ?? null ) === $original_locale
+						: ! array_key_exists( 'locale', $GLOBALS )
+				),
+			'wp_maybe_decline_date translation filter and locale globals are restored',
+			array(
+				'translationEvents' => array_slice( $translation_log, 0, 6 ),
+				'declineFilter'     => \has_filter( 'gettext_with_context', $decline_filter ),
+				'offFilter'         => \has_filter( 'gettext_with_context', $off_filter ),
+				'localeExisted'     => $locale_existed,
+				'currentLocale'     => $GLOBALS['locale'] ?? null,
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'date-time.maybe-decline-date-locale-rules',
+			$failures,
+			array(
+				'cases'             => count( $cases ) + 1,
+				'samples'           => $samples,
+				'translationEvents' => array_slice( $translation_log, 0, 6 ),
+			)
+		);
+	}
+
 	private static function check_runtime_restored( \ComponentFuzz\FuzzContext $ctx, array $snapshot ): array {
 		$failures = array();
 
@@ -1341,6 +1536,50 @@ final class DateTimeSurface {
 				'checkedFilters' => array_keys( $snapshot['trackedFilters'] ),
 				'failures'       => array_slice( $failures, 0, self::FAILURE_LIMIT ),
 			)
+		);
+	}
+
+	private static function declension_month_names(): array {
+		$months = array(
+			'Alpha',
+			'Bravo',
+			'Charlie',
+			'Delta',
+			'Echo',
+			'Foxtrot',
+			'Golf',
+			'Hotel',
+			'India',
+			'Juliet',
+			'Kilo',
+			'Lima',
+		);
+
+		return array(
+			'month'          => $months,
+			'month_genitive' => array_map( 'strtolower', $months ),
+		);
+	}
+
+	private static function catalan_month_names(): array {
+		$months = array(
+			'gener',
+			'febrer',
+			'marc',
+			'abril',
+			'maig',
+			'juny',
+			'juliol',
+			'agost',
+			'setembre',
+			'octubre',
+			'novembre',
+			'desembre',
+		);
+
+		return array(
+			'month'          => $months,
+			'month_genitive' => $months,
 		);
 	}
 
@@ -1976,6 +2215,7 @@ final class DateTimeSurface {
 			'human_time_diff',
 			'wp_checkdate',
 			'pre_load_textdomain',
+			'gettext_with_context',
 		);
 
 		$tracked_filters = array();

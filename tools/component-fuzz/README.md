@@ -291,8 +291,9 @@ database, network requests, or a configured site.
   locale variants, GMT/local round trips, ISO8601 offset parsing and datetime
   conversion across DST boundaries, week windows, `current_time()`,
   `current_datetime()`, timezone override offsets, `wp_checkdate()`
-  validity/filter contracts, date/human diff filter contracts, and safe human
-  time diffs.
+  validity/filter contracts, `wp_maybe_decline_date()` locale month
+  declension rules, date/human diff filter contracts, and safe human time
+  diffs.
 - `discovery`: robots meta directives, scoped public/private robots helper
   output, front-controller `do_robots()` robots.txt output and hook order,
   front-controller `do_favicon()` favicon redirects through `template-loader.php`,
