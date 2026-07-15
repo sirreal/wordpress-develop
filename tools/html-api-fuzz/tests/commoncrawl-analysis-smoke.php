@@ -83,6 +83,7 @@ namespace {
 	html_api_fuzz_commoncrawl_smoke_assert( 2 === ( $coverage['total'] ?? null ), 'Expected run-level coverage counters.' );
 	html_api_fuzz_commoncrawl_smoke_assert( 1 === ( $coverage['covered'] ?? null ), 'Expected one differentially covered document.' );
 
+	file_put_contents( $work_dir . '/coverage.json', '{corrupt snapshot' );
 	$duplicate_runner = \HtmlApiFuzz\CommonCrawlRunner::from_environment();
 	$duplicate = $duplicate_runner->analyze_document(
 		new \CcAnalyzer\Analysis\HtmlAnalysisInput(
@@ -96,6 +97,9 @@ namespace {
 		)
 	);
 	html_api_fuzz_commoncrawl_smoke_assert( $passing['artifactDir'] === $duplicate['artifactDir'], 'Expected duplicate input publication to be idempotent.' );
+	$recovered_coverage = json_decode( (string) file_get_contents( $work_dir . '/coverage.json' ), true );
+	html_api_fuzz_commoncrawl_smoke_assert( 3 === ( $recovered_coverage['total'] ?? null ), 'Expected corrupt coverage snapshot recovery from the append-only summary.' );
+	html_api_fuzz_commoncrawl_smoke_assert( 2 === ( $recovered_coverage['covered'] ?? null ), 'Expected rebuilt differential coverage count.' );
 
 	// Reusing a run directory with different semantics must fail loudly.
 	putenv( 'HTML_API_CC_MAX_TOKENS=4097' );
@@ -111,7 +115,8 @@ namespace {
 	// A hung parser child must become a replayable finding, not hang the callback.
 	$timeout_dir = $work_dir . '-timeout';
 	putenv( 'CC_ANALYZER_OUTPUT_DIR=' . $timeout_dir );
-	putenv( 'HTML_API_CC_PROCESS_TIMEOUT_MS=25' );
+	putenv( 'HTML_API_CC_PROCESS_TIMEOUT_MS=150' );
+	putenv( 'HTML_API_CC_ORACLE_TIMEOUT_MS=50' );
 	putenv( 'HTML_API_CC_WORKER_SCRIPT=' . __DIR__ . '/fixtures/commoncrawl-timeout-worker.php' );
 	$timeout_runner = \HtmlApiFuzz\CommonCrawlRunner::from_environment();
 	$timeout = $timeout_runner->analyze_document(
@@ -129,6 +134,29 @@ namespace {
 	html_api_fuzz_commoncrawl_smoke_assert( is_file( $timeout['artifactDir'] . '/input.bin' ), 'Expected timeout input retention.' );
 	html_api_fuzz_commoncrawl_smoke_assert( is_file( $timeout['artifactDir'] . '/.complete' ), 'Expected timeout finding atomic publication.' );
 	html_api_fuzz_commoncrawl_smoke_assert( '<p>persist me before starting the worker</p>' === file_get_contents( $timeout['artifactDir'] . '/input.bin' ), 'Expected byte-exact timeout input.' );
+	html_api_fuzz_commoncrawl_smoke_assert( true === ( $timeout['process']['stdoutTruncated'] ?? null ), 'Expected bounded capture of noisy worker output.' );
+	html_api_fuzz_commoncrawl_smoke_assert( true === ( $timeout['process']['processGroupIsolated'] ?? null ), 'Expected process-group isolation.' );
+	$heartbeat_path = $timeout['artifactDir'] . '/descendant-heartbeat';
+	$heartbeat_before = is_file( $heartbeat_path ) ? file_get_contents( $heartbeat_path ) : null;
+	usleep( 100000 );
+	$heartbeat_after = is_file( $heartbeat_path ) ? file_get_contents( $heartbeat_path ) : null;
+	html_api_fuzz_commoncrawl_smoke_assert( $heartbeat_before === $heartbeat_after, 'Expected no descendant to survive the worker timeout.' );
+
+	$timeout_replay = json_decode( (string) file_get_contents( $timeout['artifactDir'] . '/replay.json' ), true );
+	html_api_fuzz_commoncrawl_smoke_assert( is_string( $timeout_replay['inputBase64'] ?? null ), 'Expected timeout replay to embed exact input.' );
+	html_api_fuzz_commoncrawl_smoke_assert( 'php-dom' === ( $timeout_replay['options']['domOracle'] ?? null ), 'Expected timeout replay to preserve its oracle.' );
+	$replay_proc = \HtmlApiFuzz\run_php_process(
+		array(
+			dirname( __DIR__ ) . '/replay.php',
+			'--replay', $timeout['artifactDir'] . '/replay.json',
+			'--output-dir', $timeout_dir . '/replayed',
+			'--timeout-ms', '10000',
+		),
+		\HtmlApiFuzz\repo_root(),
+		15000,
+		$timeout_dir . '/replay-command.log'
+	);
+	html_api_fuzz_commoncrawl_smoke_assert( 0 === $replay_proc['code'], 'Expected documented timeout-artifact replay command to succeed.' );
 
 	require_once dirname( __DIR__ ) . '/lib/autoload.php';
 	\HtmlApiFuzz\remove_dir_recursive( $work_dir );

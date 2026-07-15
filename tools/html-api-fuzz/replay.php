@@ -55,7 +55,11 @@ if ( false === $input ) {
 }
 \HtmlApiFuzz\ensure_dir( $output_dir );
 $input_path = $output_dir . '/input.bin';
-file_put_contents( $input_path, $input );
+$written = file_put_contents( $input_path, $input );
+if ( strlen( $input ) !== $written ) {
+	fwrite( STDERR, "Could not write complete replay input: {$input_path}\n" );
+	exit( 1 );
+}
 $payload_policy = \HtmlApiFuzz\option_string( $options, 'payload-policy', null );
 if ( null === $payload_policy ) {
 	$payload_policy = \HtmlApiFuzz\normalize_payload_policy_label( $replay['payloadPolicy'] ?? null )

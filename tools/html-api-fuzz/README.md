@@ -11,6 +11,8 @@ No browser, Playwright, Node, or `wp-env` is involved.
 ## Requirements
 
 - PHP 8.4+ with ext-dom, for `Dom\HTMLDocument`.
+- POSIX and PCNTL PHP extensions for Common Crawl worker process-group
+  isolation.
 - Run from the repository root.
 - Optional source-built Lexbor oracle: `git`, `cmake`, and a C compiler.
 
@@ -57,6 +59,9 @@ Each accepted document runs in a separate PHP child with its own memory and
 wall-clock limit. The callback writes `input.bin` and an initial replay before
 starting that child. A timeout, memory exhaustion, crash, or signal is retained
 as a finding without terminating cc-analyzer or losing the triggering bytes.
+The child is a new process-group leader, so its Lexbor descendant is terminated
+with it. Stdout/stderr are continuously drained to `worker.log`; only bounded
+tails remain in the long-lived analyzer process.
 
 The Common Crawl adapter uses Lexbor by default. Its environment is:
 
@@ -111,7 +116,9 @@ The output root contains:
 
 Passing inputs are represented only by their summary by default. A finding's
 replay embeds the exact input body, so it remains reproducible without another
-Common Crawl download:
+Common Crawl download. This is also true when the worker died before producing
+its own manifest—the callback's pre-worker replay already contains the input,
+oracle configuration, limits, and provenance:
 
 ```sh
 php tools/html-api-fuzz/replay.php \

@@ -126,6 +126,9 @@ class CommonCrawlRunner {
 		if ( ! is_file( $worker_script ) ) {
 			throw new \RuntimeException( 'HTML_API_CC_WORKER_SCRIPT does not exist.' );
 		}
+		if ( ! function_exists( 'posix_kill' ) || ! function_exists( 'posix_setsid' ) || ! function_exists( 'pcntl_exec' ) ) {
+			throw new \RuntimeException( 'Common Crawl worker isolation requires the POSIX and PCNTL PHP extensions.' );
+		}
 
 		return new self(
 			$output_dir,
@@ -174,7 +177,7 @@ class CommonCrawlRunner {
 		$staging_dir = $this->create_staging_dir( $metadata );
 		try {
 			$this->persist_initial_input( $staging_dir, $body, $metadata, $seed, $checks );
-			$process = run_php_process( $this->worker_args( $staging_dir, $seed, $checks ), repo_root(), $this->process_timeout_ms, $staging_dir . '/worker.log' );
+			$process = run_php_process( $this->worker_args( $staging_dir, $seed, $checks ), repo_root(), $this->process_timeout_ms, $staging_dir . '/worker.log', 1048576, true );
 			$result  = $this->load_or_synthesize_result( $staging_dir, $process, $body, $seed, $checks );
 			$result['profile']      = 'commoncrawl';
 			$result['inputSource']  = 'commoncrawl';
@@ -240,6 +243,7 @@ class CommonCrawlRunner {
 		if ( strlen( $body ) !== $written ) {
 			throw new \RuntimeException( 'Could not persist the complete Common Crawl response body.' );
 		}
+		$oracle_options = $this->oracle->replay_options();
 		write_json_file(
 			$staging_dir . '/replay.json',
 			array(
@@ -250,14 +254,29 @@ class CommonCrawlRunner {
 				'repoRoot'      => repo_root(),
 				'repoCommit'    => $this->git_metadata['commit'] ?? null,
 				'repoDirty'     => $this->git_metadata['dirty'] ?? null,
+				'phpVersion'    => PHP_VERSION,
 				'seed'          => $seed,
 				'profile'       => 'commoncrawl',
 				'mode'          => Generator::MODE_FULL_DOCUMENT,
+				'payloadPolicy' => null,
+				'fragmentContext' => 'body',
+				'generator'     => null,
 				'inputSource'   => 'commoncrawl',
+				'inputBase64'   => base64_encode( $body ),
 				'inputSha1'     => sha1( $body ),
 				'inputLength'   => strlen( $body ),
+				'inputPreview'  => preview_bytes( $body ),
 				'limits'        => $this->limits,
-				'options'       => array( 'checks' => $checks ),
+				'oracle'        => $this->oracle->metadata(),
+				'options'       => array(
+					'failUnsupported' => false,
+					'checks'           => $checks,
+					'domOracle'        => $oracle_options['domOracle'] ?? OracleRenderer::KIND_LEXBOR_SOURCE,
+					'lexborOracleBin'  => $oracle_options['lexborOracleBin'] ?? null,
+					'oracleTimeoutMs'  => $oracle_options['oracleTimeoutMs'] ?? null,
+					'memoryLimit'      => $this->memory_limit,
+					'processTimeoutMs' => $this->process_timeout_ms,
+				),
 				'commonCrawl'   => $metadata,
 				'status'        => 'pending-worker',
 			)
@@ -320,6 +339,7 @@ class CommonCrawlRunner {
 		try {
 			ensure_dir( $signature_dir );
 			if ( is_file( $final_dir . '/.complete' ) ) {
+				$result = self::replace_path_prefix( $result, $staging_dir, $final_dir );
 				remove_dir_recursive( $staging_dir );
 				return $final_dir;
 			}
@@ -353,12 +373,22 @@ class CommonCrawlRunner {
 			$replay['repoDirty']   = $this->git_metadata['dirty'] ?? null;
 			$replay['commonCrawl'] = $metadata;
 			$replay['options']['checks'] = $result['checks'] ?? $this->checks_for_seed( (int) ( $result['seed'] ?? 1 ) );
+			$replay['signature']     = $result['signature'] ?? null;
+			$replay['oracleFinding'] = $result['oracleFinding'] ?? null;
 			$replay['command'] = array(
 				'program' => PHP_BINARY,
 				'args'    => array( 'tools/html-api-fuzz/replay.php', '--replay', $final_dir . '/replay.json' ),
 				'cwd'     => repo_root(),
 			);
-			$replay['result']['resultPath'] = $final_dir . '/result.json';
+			$replay['result'] = array(
+				'ok'            => $result['ok'] ?? false,
+				'status'        => $result['status'] ?? 'unknown',
+				'failureClass'  => $result['failureClass'] ?? null,
+				'signature'     => $result['signature'] ?? null,
+				'oracleFinding' => $result['oracleFinding'] ?? null,
+				'oracle'        => $result['oracle'] ?? $this->oracle->metadata(),
+				'resultPath'    => $final_dir . '/result.json',
+			);
 			write_json_file( $staging_dir . '/result.json', $result );
 			write_json_file( $staging_dir . '/replay.json', $replay );
 			$marker = "complete\n";
@@ -482,7 +512,12 @@ class CommonCrawlRunner {
 
 	private function append_summary( array $summary ): void {
 		append_ndjson( $this->output_dir . '/commoncrawl-summary.ndjson', $summary );
-		$this->update_coverage( $summary );
+		try {
+			$this->update_coverage( $summary );
+		} catch ( \Throwable $ignored ) {
+			// coverage.json is a rebuildable snapshot; summary.ndjson is the
+			// durable source of truth and must not be reclassified or duplicated.
+		}
 	}
 
 	private function update_coverage( array $summary ): void {
@@ -492,34 +527,84 @@ class CommonCrawlRunner {
 			throw new \RuntimeException( 'Could not lock Common Crawl coverage counters.' );
 		}
 		try {
-			$coverage = read_json_file( $path );
-			if ( ! is_array( $coverage ) ) {
-				$coverage = array(
-					'kind'       => 'html-api-commoncrawl-coverage',
-					'runId'      => $this->run_id,
-					'configHash' => $this->configuration_hash,
-					'total'      => 0,
-					'covered'    => 0,
-					'failures'   => 0,
-					'statuses'   => array(),
-				);
+			try {
+				$coverage = read_json_file( $path );
+			} catch ( \Throwable $ignored ) {
+				$coverage = null;
 			}
-			++$coverage['total'];
-			if ( $summary['differentialCovered'] ?? false ) {
-				++$coverage['covered'];
+			$summary_size = @filesize( $this->output_dir . '/commoncrawl-summary.ndjson' );
+			if (
+				! is_array( $coverage ) ||
+				! is_int( $coverage['summaryBytes'] ?? null ) ||
+				false === $summary_size ||
+				$coverage['summaryBytes'] > $summary_size
+			) {
+				$coverage = $this->empty_coverage();
 			}
-			if ( false === ( $summary['ok'] ?? false ) ) {
-				++$coverage['failures'];
-			}
-			$status = (string) ( $summary['status'] ?? 'unknown' );
-			$coverage['statuses'][ $status ] = 1 + (int) ( $coverage['statuses'][ $status ] ?? 0 );
+			$this->consume_summary_records( $coverage );
 			$coverage['coverageRate'] = 0 === $coverage['total'] ? 0 : round( $coverage['covered'] / $coverage['total'], 6 );
 			$coverage['updatedAt'] = gmdate( 'c' );
-			write_json_file( $path, $coverage );
+			write_json_file_atomic( $path, $coverage );
 		} finally {
 			flock( $lock, LOCK_UN );
 			fclose( $lock );
 		}
+	}
+
+	private function empty_coverage(): array {
+		return array(
+			'kind'       => 'html-api-commoncrawl-coverage',
+			'runId'      => $this->run_id,
+			'configHash' => $this->configuration_hash,
+			'total'      => 0,
+			'covered'    => 0,
+			'failures'   => 0,
+			'statuses'   => array(),
+			'summaryBytes' => 0,
+		);
+	}
+
+	private function consume_summary_records( array &$coverage ): void {
+		$path = $this->output_dir . '/commoncrawl-summary.ndjson';
+		$file = fopen( $path, 'rb' );
+		if ( false === $file || ! flock( $file, LOCK_SH ) ) {
+			throw new \RuntimeException( 'Could not read locked Common Crawl summaries for coverage.' );
+		}
+		try {
+			if ( 0 !== fseek( $file, (int) $coverage['summaryBytes'] ) ) {
+				throw new \RuntimeException( 'Could not seek Common Crawl coverage cursor.' );
+			}
+			$cursor = (int) $coverage['summaryBytes'];
+			while ( false !== ( $line = fgets( $file ) ) ) {
+				if ( '' === $line || "\n" !== substr( $line, -1 ) ) {
+					break;
+				}
+				$record = json_decode( $line, true );
+				if ( is_array( $record ) ) {
+					$this->add_coverage_record( $coverage, $record );
+				}
+				$position = ftell( $file );
+				if ( false !== $position ) {
+					$cursor = $position;
+				}
+			}
+			$coverage['summaryBytes'] = $cursor;
+		} finally {
+			flock( $file, LOCK_UN );
+			fclose( $file );
+		}
+	}
+
+	private function add_coverage_record( array &$coverage, array $summary ): void {
+		++$coverage['total'];
+		if ( $summary['differentialCovered'] ?? false ) {
+			++$coverage['covered'];
+		}
+		if ( false === ( $summary['ok'] ?? false ) ) {
+			++$coverage['failures'];
+		}
+		$status = (string) ( $summary['status'] ?? 'unknown' );
+		$coverage['statuses'][ $status ] = 1 + (int) ( $coverage['statuses'][ $status ] ?? 0 );
 	}
 
 	private function initialize_configuration(): void {
@@ -564,7 +649,7 @@ class CommonCrawlRunner {
 				return;
 			}
 			$configuration['createdAt'] = gmdate( 'c' );
-			write_json_file( $path, $configuration );
+			write_json_file_atomic( $path, $configuration );
 		} finally {
 			flock( $lock, LOCK_UN );
 			fclose( $lock );
@@ -611,7 +696,10 @@ class CommonCrawlRunner {
 			'timedOut'   => $process['timedOut'] ?? false,
 			'durationMs' => $process['durationMs'] ?? null,
 			'stderrTail' => substr( (string) ( $process['stderr'] ?? '' ), -2000 ),
+			'stdoutTruncated' => $process['stdoutTruncated'] ?? false,
+			'stderrTruncated' => $process['stderrTruncated'] ?? false,
 			'logPath'    => $process['logPath'] ?? null,
+			'processGroupIsolated' => $process['processGroupIsolated'] ?? false,
 		);
 	}
 

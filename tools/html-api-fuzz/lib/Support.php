@@ -132,6 +132,22 @@ function write_json_file( string $path, $value ): void {
 	}
 }
 
+/** Publish a JSON snapshot without ever exposing a truncated destination. */
+function write_json_file_atomic( string $path, $value ): void {
+	ensure_dir( dirname( $path ) );
+	$tmp = dirname( $path ) . DIRECTORY_SEPARATOR . '.' . basename( $path ) . '.tmp-' . getmypid() . '-' . bin2hex( random_bytes( 6 ) );
+	try {
+		write_json_file( $tmp, $value );
+		if ( ! rename( $tmp, $path ) ) {
+			throw new \RuntimeException( "Could not atomically publish JSON file: {$path}" );
+		}
+	} finally {
+		if ( is_file( $tmp ) ) {
+			@unlink( $tmp );
+		}
+	}
+}
+
 function read_json_file( string $path ) {
 	$text = @file_get_contents( $path );
 	if ( false === $text ) {
@@ -378,16 +394,41 @@ function git_metadata( int $timeout_ms = 1000, ?string $root = null, bool $use_c
 	return $metadata;
 }
 
-function run_php_process( array $script_args, string $cwd, int $timeout_ms, ?string $log_path = null ): array {
-	$command = array_merge( array( PHP_BINARY ), $script_args );
+function run_php_process( array $script_args, string $cwd, int $timeout_ms, ?string $log_path = null, int $max_capture_bytes = 1048576, bool $isolate_process_group = false ): array {
+	if ( $max_capture_bytes < 1 ) {
+		throw new \InvalidArgumentException( 'Process capture limit must be positive.' );
+	}
+	$target_command = array_merge( array( PHP_BINARY ), $script_args );
+	$command        = $target_command;
+	if ( $isolate_process_group ) {
+		if ( ! function_exists( 'posix_kill' ) ) {
+			throw new \RuntimeException( 'Process-group isolation requires the POSIX PHP extension.' );
+		}
+		$command = array_merge(
+			array( PHP_BINARY, dirname( __DIR__ ) . '/process-group.php', PHP_BINARY ),
+			$script_args
+		);
+	}
 	$spec    = array(
 		0 => array( 'pipe', 'r' ),
 		1 => array( 'pipe', 'w' ),
 		2 => array( 'pipe', 'w' ),
 	);
 
+	$log = null;
+	if ( null !== $log_path ) {
+		ensure_dir( dirname( $log_path ) );
+		$log = fopen( $log_path, 'wb' );
+		if ( false === $log ) {
+			throw new \RuntimeException( "Could not open process log: {$log_path}" );
+		}
+	}
+
 	$process = proc_open( $command, $spec, $pipes, $cwd );
 	if ( ! is_resource( $process ) ) {
+		if ( is_resource( $log ) ) {
+			fclose( $log );
+		}
 		throw new \RuntimeException( 'Could not start PHP subprocess.' );
 	}
 
@@ -397,25 +438,57 @@ function run_php_process( array $script_args, string $cwd, int $timeout_ms, ?str
 
 	$stdout    = '';
 	$stderr    = '';
+	$stdout_truncated = false;
+	$stderr_truncated = false;
 	$start     = microtime( true );
 	$timed_out = false;
+	$initial_status = proc_get_status( $process );
+	$process_pid    = (int) ( $initial_status['pid'] ?? 0 );
+	$process_group  = false;
+	$log_write_failed = false;
+
+	$drain = static function ( $pipe, string &$capture, bool &$truncated ) use ( $max_capture_bytes, $log, &$log_write_failed ): void {
+		$chunk = stream_get_contents( $pipe );
+		if ( false === $chunk || '' === $chunk ) {
+			return;
+		}
+		if ( is_resource( $log ) && strlen( $chunk ) !== fwrite( $log, $chunk ) ) {
+			$log_write_failed = true;
+		}
+		$capture .= $chunk;
+		if ( strlen( $capture ) > $max_capture_bytes ) {
+			$capture   = substr( $capture, -$max_capture_bytes );
+			$truncated = true;
+		}
+	};
 
 	while ( true ) {
-		$stdout .= stream_get_contents( $pipes[1] );
-		$stderr .= stream_get_contents( $pipes[2] );
+		$drain( $pipes[1], $stdout, $stdout_truncated );
+		$drain( $pipes[2], $stderr, $stderr_truncated );
 
 		$status = proc_get_status( $process );
+		if ( $isolate_process_group && $process_pid > 0 && function_exists( 'posix_getpgid' ) ) {
+			$process_group = $process_pid === @posix_getpgid( $process_pid );
+		}
 		if ( ! $status['running'] ) {
 			break;
 		}
 
 		if ( ( microtime( true ) - $start ) * 1000 > $timeout_ms ) {
 			$timed_out = true;
-			proc_terminate( $process );
+			if ( $process_group ) {
+				@posix_kill( -$process_pid, 15 );
+			} else {
+				proc_terminate( $process );
+			}
 			usleep( 200000 );
 			$status = proc_get_status( $process );
-			if ( $status['running'] ) {
-				proc_terminate( $process, 9 );
+			if ( $process_group ) {
+				// Kill the group even if its leader exited after SIGTERM; a child
+				// could otherwise outlive the supervised worker.
+				@posix_kill( -$process_pid, 9 );
+			} elseif ( $status['running'] ) {
+					proc_terminate( $process, 9 );
 			}
 			break;
 		}
@@ -423,10 +496,14 @@ function run_php_process( array $script_args, string $cwd, int $timeout_ms, ?str
 		usleep( 10000 );
 	}
 
-	$stdout .= stream_get_contents( $pipes[1] );
-	$stderr .= stream_get_contents( $pipes[2] );
+	$drain( $pipes[1], $stdout, $stdout_truncated );
+	$drain( $pipes[2], $stderr, $stderr_truncated );
 	fclose( $pipes[1] );
 	fclose( $pipes[2] );
+	if ( is_resource( $log ) ) {
+		fflush( $log );
+		fclose( $log );
+	}
 
 	$exit_code = proc_close( $process );
 	if ( $timed_out ) {
@@ -434,24 +511,22 @@ function run_php_process( array $script_args, string $cwd, int $timeout_ms, ?str
 	}
 
 	$output = $stdout . $stderr;
-	if ( null !== $log_path ) {
-		ensure_dir( dirname( $log_path ) );
-		$written = file_put_contents( $log_path, $output );
-		if ( strlen( $output ) !== $written ) {
-			throw new \RuntimeException( "Could not write complete process log: {$log_path}" );
-		}
+	if ( $log_write_failed ) {
+		throw new \RuntimeException( 'Could not write complete process log.' );
 	}
-
 	return array(
-		'command'    => command_string( $command ),
+		'command'    => command_string( $target_command ),
 		'code'       => $exit_code,
 		'ok'         => 0 === $exit_code && ! $timed_out,
 		'timedOut'   => $timed_out,
 		'durationMs' => (int) round( ( microtime( true ) - $start ) * 1000 ),
 		'stdout'     => $stdout,
 		'stderr'     => $stderr,
+		'stdoutTruncated' => $stdout_truncated,
+		'stderrTruncated' => $stderr_truncated,
 		'output'     => $output,
 		'logPath'    => $log_path,
+		'processGroupIsolated' => $process_group,
 	);
 }
 
