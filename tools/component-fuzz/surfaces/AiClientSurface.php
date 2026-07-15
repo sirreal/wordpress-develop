@@ -143,6 +143,7 @@ final class AiClientSurface {
 				'wp_get_ability',
 				'wp_register_ability',
 				'wp_register_ability_category',
+				'wp_prepare_json_schema_for_client',
 				'wp_supports_ai',
 			) as $function
 		) {

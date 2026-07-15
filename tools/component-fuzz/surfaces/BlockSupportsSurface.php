@@ -871,7 +871,7 @@ final class BlockSupportsSurface {
 				&& self::rules_contain_declaration( $child_rules, 'flex-shrink', '0' )
 				&& self::rules_contain_declaration( $child_rules, 'grid-column', '2 / span 3' )
 				&& 'solid' === ( $border_fallback['border-style'] ?? null )
-				&& 'unset !important' === ( $background_reset['background-image'] ?? null ),
+				&& 'unset' === ( $background_reset['background-image'] ?? null ),
 			'pure helper matrices preserve selector splitting, layout child rules, and fallback declarations',
 			array(
 				'split'           => $split,

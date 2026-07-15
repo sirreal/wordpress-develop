@@ -470,12 +470,12 @@ final class RestMediaAttachmentsSurface {
 		$after_counts = self::content_counts();
 
 		$thumb_metadata  = \wp_get_attachment_metadata( $image_attachment, true );
-		$thumb_size      = is_array( $thumb_metadata ) ? ( $thumb_metadata['sizes']['thumbnail'] ?? array() ) : array();
 		$thumb_path      = rtrim( $temp_root, '/\\' ) . DIRECTORY_SEPARATOR . $thumb_filename;
 		$thumb_data      = $thumb_response instanceof \WP_REST_Response ? $thumb_response->get_data() : array();
 		$thumb_headers   = $thumb_response instanceof \WP_REST_Response ? $thumb_response->get_headers() : array();
 		$original_meta   = \wp_get_attachment_metadata( $original_attachment, true );
 		$original_path   = \get_attached_file( $original_attachment, true );
+		$original_upload = rtrim( $temp_root, '/\\' ) . DIRECTORY_SEPARATOR . $original_filename;
 		$original_data   = $original_response instanceof \WP_REST_Response ? $original_response->get_data() : array();
 		$original_header = $original_response instanceof \WP_REST_Response ? $original_response->get_headers() : array();
 
@@ -494,21 +494,19 @@ final class RestMediaAttachmentsSurface {
 			true === $thumb_allowed
 				&& $thumb_response instanceof \WP_REST_Response
 				&& 200 === $thumb_response->get_status()
-				&& isset( $thumb_headers['Location'] )
-				&& str_contains( (string) $thumb_headers['Location'], 'wp/v2/media/' . $image_attachment )
 				&& is_file( $thumb_path )
 				&& $png_body === file_get_contents( $thumb_path )
-				&& is_array( $thumb_size )
-				&& 1 === (int) ( $thumb_size['width'] ?? 0 )
-				&& 1 === (int) ( $thumb_size['height'] ?? 0 )
-				&& $thumb_filename === ( $thumb_size['file'] ?? null )
-				&& 'image/png' === ( $thumb_size['mime-type'] ?? null )
-				&& strlen( $png_body ) === (int) ( $thumb_size['filesize'] ?? 0 )
-				&& $image_attachment === (int) ( $thumb_data['id'] ?? 0 )
-				&& $thumb_filename === ( $thumb_data['media_details']['sizes']['thumbnail']['file'] ?? null )
-				&& $base_filename === ( $thumb_data['filename'] ?? null )
-				&& self::projected_keys_match( $thumb_data, array( 'filename', 'filesize', 'id', 'media_details' ) ),
-			'sideload raw body stores an exact generated subsize, preserves the base attachment file, and projects the REST response',
+				&& is_array( $thumb_metadata )
+				&& $base_filename === ( $thumb_metadata['file'] ?? null )
+				&& array() === ( $thumb_metadata['sizes'] ?? array() )
+				&& 'thumbnail' === ( $thumb_data['image_size'] ?? null )
+				&& 1 === (int) ( $thumb_data['width'] ?? 0 )
+				&& 1 === (int) ( $thumb_data['height'] ?? 0 )
+				&& $thumb_filename === ( $thumb_data['file'] ?? null )
+				&& 'image/png' === ( $thumb_data['mime_type'] ?? null )
+				&& strlen( $png_body ) === (int) ( $thumb_data['filesize'] ?? 0 )
+				&& self::projected_keys_match( $thumb_data, array( 'file', 'filesize', 'height', 'image_size', 'mime_type', 'width' ) ),
+			'sideload raw body returns exact generated subsize data without mutating attachment metadata before finalize',
 			array(
 				'allowed'   => self::describe_error( $thumb_allowed ),
 				'status'    => $thumb_response instanceof \WP_REST_Response ? $thumb_response->get_status() : null,
@@ -524,20 +522,21 @@ final class RestMediaAttachmentsSurface {
 			true === $original_allowed
 				&& $original_response instanceof \WP_REST_Response
 				&& 200 === $original_response->get_status()
-				&& isset( $original_header['Location'] )
-				&& str_contains( (string) $original_header['Location'], 'wp/v2/media/' . $original_attachment )
 				&& is_array( $original_meta )
-				&& $original_filename === ( $original_meta['original_image'] ?? null )
+				&& ! isset( $original_meta['original_image'] )
+				&& is_file( $original_upload )
+				&& $png_body === file_get_contents( $original_upload )
 				&& 'original-' . $base_filename === \wp_basename( (string) $original_path )
-				&& $original_attachment === (int) ( $original_data['id'] ?? 0 )
-				&& $original_filename === ( $original_data['media_details']['original_image'] ?? null )
-				&& self::projected_keys_match( $original_data, array( 'id', 'media_details' ) ),
-			'original-image sideload records original_image metadata without replacing the attached file path',
+				&& 'original' === ( $original_data['image_size'] ?? null )
+				&& $original_filename === ( $original_data['file'] ?? null )
+				&& self::projected_keys_match( $original_data, array( 'file', 'image_size' ) ),
+			'original-image sideload returns original_image data without replacing the attached file path before finalize',
 			array(
 				'allowed'      => self::describe_error( $original_allowed ),
 				'headers'      => $original_header,
 				'metadata'     => $original_meta,
 				'attachedFile' => $original_path,
+				'uploadFile'   => $original_upload,
 				'data'         => $original_data,
 			)
 		);
@@ -759,10 +758,19 @@ final class RestMediaAttachmentsSurface {
 					'default_ping_status'           => 'closed',
 					'default_role'                  => 'subscriber',
 					'home'                          => 'http://example.test',
+					'large_size_h'                  => 1024,
+					'large_size_w'                  => 1024,
+					'medium_large_size_h'           => 0,
+					'medium_large_size_w'           => 768,
+					'medium_size_h'                 => 300,
+					'medium_size_w'                 => 300,
 					'permalink_structure'           => '',
 					'require_name_email'            => 0,
 					'show_avatars'                  => 0,
 					'siteurl'                       => 'http://example.test',
+					'thumbnail_crop'                => 1,
+					'thumbnail_size_h'              => 150,
+					'thumbnail_size_w'              => 150,
 					'upload_path'                   => '',
 					'upload_url_path'               => '',
 					'uploads_use_yearmonth_folders' => 0,

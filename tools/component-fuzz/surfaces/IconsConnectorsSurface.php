@@ -54,6 +54,7 @@ final class IconsConnectorsSurface {
 		foreach (
 			array(
 				'WP_Connector_Registry',
+				'WP_Icon_Collections_Registry',
 				'WP_Icons_Registry',
 				'WP_Error',
 				'WP_REST_Request',
@@ -76,6 +77,8 @@ final class IconsConnectorsSurface {
 				'_wp_connectors_resolve_ai_provider_logo_url',
 				'_wp_connectors_rest_settings_dispatch',
 				'_wp_register_default_connector_settings',
+				'_wp_register_default_icon_collections',
+				'_wp_register_default_icons',
 				'add_action',
 				'add_filter',
 				'current_user_can',
@@ -98,6 +101,7 @@ final class IconsConnectorsSurface {
 				'wp_is_file_mod_allowed',
 				'wp_json_encode',
 				'wp_kses',
+				'wp_register_icon_collection',
 			) as $function
 		) {
 			if ( ! function_exists( $function ) ) {
@@ -1047,7 +1051,18 @@ final class IconsConnectorsSurface {
 		$failures   = array();
 		$temp_files = array();
 
+		self::set_static_property( 'WP_Icon_Collections_Registry', 'instance', null );
 		self::set_static_property( 'WP_Icons_Registry', 'instance', null );
+		\_wp_register_default_icon_collections();
+		\_wp_register_default_icons();
+		\wp_register_icon_collection(
+			'cfzicons',
+			array(
+				'label'       => 'Component Fuzz Icons',
+				'description' => 'Synthetic icons for component fuzzing.',
+			)
+		);
+
 		$registry = \WP_Icons_Registry::get_instance();
 		$register = self::method( 'WP_Icons_Registry', 'register' );
 		$sanitize = self::method( 'WP_Icons_Registry', 'sanitize_icon_content' );
@@ -1125,7 +1140,7 @@ final class IconsConnectorsSurface {
 				$file_name,
 				array(
 					'label'    => 'File Icon',
-					'filePath' => $file_path,
+					'file_path' => $file_path,
 				)
 			);
 			$stored_before = self::get_object_property( $registry, 'registered_icons' );
@@ -1143,7 +1158,7 @@ final class IconsConnectorsSurface {
 					&& $first_file['content'] === $second_file['content']
 					&& $sanitized === $first_file['content']
 					&& $safe_clean !== $second_file['content'],
-				'filePath icon content is lazily sanitized and cached after first read',
+				'file_path icon content is lazily sanitized and cached after first read',
 				array(
 					'fileName'   => $file_name,
 					'hadContent' => $had_content,
@@ -1205,12 +1220,12 @@ final class IconsConnectorsSurface {
 						)
 					)
 				),
-				'badUnderscore'    => self::capture_doing_it_wrong(
+				'badSpace'         => self::capture_doing_it_wrong(
 					static fn() => $register->invoke(
 						$registry,
-						'cfzicons/bad_icon',
+						'cfzicons/bad icon',
 						array(
-							'label'   => 'Bad Underscore',
+							'label'   => 'Bad Space',
 							'content' => $safe_svg,
 						)
 					)
@@ -1270,7 +1285,7 @@ final class IconsConnectorsSurface {
 						array(
 							'label'    => 'Both',
 							'content'  => $safe_svg,
-							'filePath' => $file_path,
+							'file_path' => $file_path,
 						)
 					)
 				),
@@ -1355,10 +1370,11 @@ final class IconsConnectorsSurface {
 		self::collect_failure(
 			$failures,
 			'icon' === ( $schema['title'] ?? null )
-				&& array( 'name', 'label', 'content' ) === array_keys( $schema['properties'] ?? array() )
+				&& array( 'name', 'label', 'content', 'collection' ) === array_keys( $schema['properties'] ?? array() )
 				&& true === ( $schema['properties']['name']['readonly'] ?? null )
 				&& true === ( $schema['properties']['label']['readonly'] ?? null )
 				&& true === ( $schema['properties']['content']['readonly'] ?? null )
+				&& true === ( $schema['properties']['collection']['readonly'] ?? null )
 				&& 'view' === ( $params['context']['default'] ?? null )
 				&& isset( $params['search'] )
 				&& 'string' === ( $params['search']['type'] ?? null ),
@@ -1737,6 +1753,7 @@ final class IconsConnectorsSurface {
 
 	private static function snapshot_state(): array {
 		$connector_registry = self::get_static_property( 'WP_Connector_Registry', 'instance' );
+		$collections_registry = self::get_static_property( 'WP_Icon_Collections_Registry', 'instance' );
 		$icons_registry     = self::get_static_property( 'WP_Icons_Registry', 'instance' );
 
 		return array(
@@ -1756,6 +1773,10 @@ final class IconsConnectorsSurface {
 			'connectorRegistry'    => $connector_registry,
 			'registeredConnectors' => $connector_registry instanceof \WP_Connector_Registry
 				? self::get_object_property( $connector_registry, 'registered_connectors' )
+				: null,
+			'collectionsRegistry'  => $collections_registry,
+			'registeredCollections' => $collections_registry instanceof \WP_Icon_Collections_Registry
+				? self::get_object_property( $collections_registry, 'registered_collections' )
 				: null,
 			'iconsRegistry'        => $icons_registry,
 			'registeredIcons'      => $icons_registry instanceof \WP_Icons_Registry
@@ -1782,6 +1803,13 @@ final class IconsConnectorsSurface {
 			self::set_static_property( 'WP_Icons_Registry', 'instance', $snapshot['iconsRegistry'] );
 		} else {
 			self::set_static_property( 'WP_Icons_Registry', 'instance', null );
+		}
+
+		if ( $snapshot['collectionsRegistry'] instanceof \WP_Icon_Collections_Registry ) {
+			self::set_object_property( $snapshot['collectionsRegistry'], 'registered_collections', $snapshot['registeredCollections'] );
+			self::set_static_property( 'WP_Icon_Collections_Registry', 'instance', $snapshot['collectionsRegistry'] );
+		} else {
+			self::set_static_property( 'WP_Icon_Collections_Registry', 'instance', null );
 		}
 
 		if ( null !== $snapshot['wpdbOptions'] && isset( $GLOBALS['wpdb'] ) && method_exists( $GLOBALS['wpdb'], 'component_fuzz_reset_options' ) ) {

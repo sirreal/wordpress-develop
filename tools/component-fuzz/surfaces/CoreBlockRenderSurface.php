@@ -97,7 +97,7 @@ final class CoreBlockRenderSurface {
 	private static function missing_requirements(): array {
 		$missing = array();
 
-		foreach ( array( 'WP_Block', 'WP_Block_Supports', 'WP_Block_Type_Registry', 'WP_Comment', 'WP_Comment_Query', 'WP_HTML_Tag_Processor', 'WP_Post', 'WP_Query', 'WP_Term', 'WP_Term_Query' ) as $class ) {
+		foreach ( array( 'WP_Block', 'WP_Block_Supports', 'WP_Block_Type_Registry', 'WP_Comment', 'WP_Comment_Query', 'WP_Embed', 'WP_HTML_Tag_Processor', 'WP_Post', 'WP_Query', 'WP_Term', 'WP_Term_Query' ) as $class ) {
 			if ( ! class_exists( $class ) ) {
 				$missing[] = "class {$class}";
 			}
@@ -217,6 +217,7 @@ final class CoreBlockRenderSurface {
 		$GLOBALS['paged']        = 1;
 		$GLOBALS['wp_query']     = new \WP_Query();
 		$GLOBALS['wp_the_query'] = $GLOBALS['wp_query'];
+		$GLOBALS['wp_embed']     = new \WP_Embed();
 		\wp_set_current_user( 0 );
 	}
 
@@ -2185,6 +2186,7 @@ final class CoreBlockRenderSurface {
 					'wp_current_filter',
 					'wp_filter',
 					'wp_filters',
+					'wp_embed',
 					'wp_interactivity',
 					'wp_object_cache',
 					'wp_post_types',

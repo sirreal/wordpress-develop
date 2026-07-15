@@ -1366,7 +1366,7 @@ final class AdminBarSurface {
 				&& 'with-avatar' === ( $my_account->meta['class'] ?? null )
 				&& 'Howdy, ' . $user->display_name === ( $my_account->meta['menu_title'] ?? null )
 				&& str_contains( $my_account->title, '<span class="display-name">' . $user->display_name . '</span>' )
-				&& str_contains( $my_account->title, 'data-size="26"' ),
+				&& str_contains( $my_account->title, 'data-size="28"' ),
 			'my-account item callback binds the synthetic user display name, profile URL, avatar, and menu title',
 			array(
 				'node'         => $my_account ?? null,
@@ -1401,7 +1401,7 @@ final class AdminBarSurface {
 		self::collect_failure(
 			$failures,
 			array(
-				array( 'id' => $user_id, 'size' => 26 ),
+				array( 'id' => $user_id, 'size' => 28 ),
 				array( 'id' => $user_id, 'size' => 64 ),
 			) === $avatar_calls,
 			'account callbacks request the expected avatar sizes for the same synthetic user',

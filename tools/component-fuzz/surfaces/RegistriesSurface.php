@@ -54,6 +54,7 @@ final class RegistriesSurface {
 				'WP_Block_Bindings_Source',
 				'WP_Block_Metadata_Registry',
 				'WP_Connector_Registry',
+				'WP_Icon_Collections_Registry',
 				'WP_Icons_Registry',
 				'WP_Speculation_Rules',
 			) as $class
@@ -73,9 +74,12 @@ final class RegistriesSurface {
 				'get_block_bindings_source',
 				'has_action',
 				'register_block_bindings_source',
+				'_wp_register_default_icon_collections',
+				'_wp_register_default_icons',
 				'remove_action',
 				'remove_filter',
 				'unregister_block_bindings_source',
+				'wp_register_icon_collection',
 				'wp_get_connector',
 				'wp_get_connectors',
 				'wp_is_connector_registered',
@@ -412,7 +416,18 @@ final class RegistriesSurface {
 		$failures   = array();
 		$temp_files = array();
 
+		self::set_static_property( 'WP_Icon_Collections_Registry', 'instance', null );
 		self::set_static_property( 'WP_Icons_Registry', 'instance', null );
+		\_wp_register_default_icon_collections();
+		\_wp_register_default_icons();
+		\wp_register_icon_collection(
+			'cfzicons',
+			array(
+				'label'       => 'Component Fuzz Icons',
+				'description' => 'Synthetic icons for component fuzzing.',
+			)
+		);
+
 		$registry = \WP_Icons_Registry::get_instance();
 		$register = self::method( 'WP_Icons_Registry', 'register' );
 		$sanitize = self::method( 'WP_Icons_Registry', 'sanitize_icon_content' );
@@ -502,7 +517,7 @@ final class RegistriesSurface {
 				$file_id,
 				array(
 					'label'    => 'Fuzz file icon',
-					'filePath' => $file_path,
+					'file_path' => $file_path,
 				)
 			);
 
@@ -521,13 +536,15 @@ final class RegistriesSurface {
 					&& false === $had_content
 					&& is_array( $first_file )
 					&& is_array( $second_file )
+					&& is_string( $first_file['content'] ?? null )
+					&& is_string( $second_file['content'] ?? null )
 					&& $first_file['content'] === $second_file['content']
 					&& ! str_contains( $first_file['content'], '<script' )
 					&& ! str_contains( $first_file['content'], 'onload' )
 					&& ! str_contains( $first_file['content'], 'onclick' )
 					&& str_contains( $first_file['content'], '<svg' )
 					&& str_contains( $first_file['content'], 'M1 1h2v2z' ),
-				'filePath icon content is sanitized once and cached lazily',
+				'file_path icon content is sanitized once and cached lazily',
 				array(
 					'fileId'     => $file_id,
 					'hadContent' => $had_content,
@@ -544,7 +561,7 @@ final class RegistriesSurface {
 				$invalid_file_id,
 				array(
 					'label'    => 'Fuzz invalid file icon',
-					'filePath' => $invalid_file_path,
+					'file_path' => $invalid_file_path,
 				)
 			);
 			$trigger_events    = array();
@@ -578,14 +595,15 @@ final class RegistriesSurface {
 					&& ! isset( $stored_invalid[ $invalid_file_id ]['content'] )
 					&& is_array( $invalid_second )
 					&& is_array( $invalid_third )
-					&& isset( $invalid_second['content'], $invalid_third['content'] )
+					&& is_string( $invalid_second['content'] ?? null )
+					&& is_string( $invalid_third['content'] ?? null )
 					&& $invalid_second['content'] === $invalid_third['content']
 					&& str_contains( $invalid_second['content'], '<svg' )
 					&& str_contains( $invalid_second['content'], 'M3 3h18v18H3z' )
 					&& false === has_action( 'wp_trigger_error_always_run', $trigger_listener )
 					&& 1 === count( $trigger_events )
 					&& 'WP_Icons_Registry::get_content' === ( $trigger_events[0]['function'] ?? null ),
-				'filePath icon retrieval failures do not cache null content and can recover after file replacement',
+				'file_path icon retrieval failures do not cache null content and can recover after file replacement',
 				array(
 					'invalidFileId' => $invalid_file_id,
 					'first'         => self::describe_value( $invalid_first ),
@@ -653,7 +671,7 @@ final class RegistriesSurface {
 						array(
 							'label'    => 'Both sources',
 							'content'  => $safe_svg,
-							'filePath' => $file_path,
+							'file_path' => $file_path,
 						)
 					)
 				),
@@ -1471,7 +1489,7 @@ final class RegistriesSurface {
 	}
 
 	private static function icon_name( \ComponentFuzz\FuzzContext $ctx, string $prefix ): string {
-		return 'fuzz-' . self::icon_slug( $ctx, 'ns-' . $prefix ) . '/' . self::icon_slug( $ctx->fork( 'icon' ), 'icon-' . $prefix );
+		return 'cfzicons/' . self::icon_slug( $ctx->fork( 'icon' ), 'icon-' . $prefix );
 	}
 
 	private static function block_binding_source_name( \ComponentFuzz\FuzzContext $ctx, string $prefix ): string {
@@ -1505,8 +1523,11 @@ final class RegistriesSurface {
 		if ( false === $path ) {
 			throw new \RuntimeException( 'Could not create temporary SVG file.' );
 		}
-		file_put_contents( $path, $content );
-		return $path;
+
+		$svg_path = $path . '.svg';
+		unlink( $path );
+		file_put_contents( $svg_path, $content );
+		return $svg_path;
 	}
 
 	private static function write_temp_manifest( \ComponentFuzz\FuzzContext $ctx, array $metadata ): string {
@@ -1583,6 +1604,7 @@ final class RegistriesSurface {
 
 	private static function snapshot_state(): array {
 		$connector_registry = self::get_static_property( 'WP_Connector_Registry', 'instance' );
+		$collections_registry = self::get_static_property( 'WP_Icon_Collections_Registry', 'instance' );
 		$icons_registry     = self::get_static_property( 'WP_Icons_Registry', 'instance' );
 		$binding_registry   = self::get_static_property( 'WP_Block_Bindings_Registry', 'instance' );
 
@@ -1602,6 +1624,10 @@ final class RegistriesSurface {
 			'connectorRegistry'    => $connector_registry,
 			'registeredConnectors' => $connector_registry instanceof \WP_Connector_Registry
 				? self::get_object_property( $connector_registry, 'registered_connectors' )
+				: null,
+			'collectionsRegistry'  => $collections_registry,
+			'registeredCollections' => $collections_registry instanceof \WP_Icon_Collections_Registry
+				? self::get_object_property( $collections_registry, 'registered_collections' )
 				: null,
 			'iconsRegistry'        => $icons_registry,
 			'registeredIcons'      => $icons_registry instanceof \WP_Icons_Registry
@@ -1637,6 +1663,13 @@ final class RegistriesSurface {
 			self::set_static_property( 'WP_Icons_Registry', 'instance', $snapshot['iconsRegistry'] );
 		} else {
 			self::set_static_property( 'WP_Icons_Registry', 'instance', null );
+		}
+
+		if ( $snapshot['collectionsRegistry'] instanceof \WP_Icon_Collections_Registry ) {
+			self::set_object_property( $snapshot['collectionsRegistry'], 'registered_collections', $snapshot['registeredCollections'] );
+			self::set_static_property( 'WP_Icon_Collections_Registry', 'instance', $snapshot['collectionsRegistry'] );
+		} else {
+			self::set_static_property( 'WP_Icon_Collections_Registry', 'instance', null );
 		}
 
 		if ( $snapshot['bindingRegistry'] instanceof \WP_Block_Bindings_Registry ) {
