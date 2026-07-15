@@ -212,6 +212,10 @@ database, network requests, or a configured site.
   and title/class/key sanitizers.
 - `content-lifecycle`: in-memory wpdb-backed post, post-meta, term, user, and
   comment CRUD lifecycles, including insert/update/read/delete round trips,
+  direct `wp_insert_user()`/`wp_update_user()` pre-user filters,
+  `wp_pre_insert_user_data`, default/custom user-meta filters,
+  role/default-role contracts, activation-key clearing, password/email-change
+  hooks and filters, illegal-login and empty-data fail-closed branches,
   duplicate and invalid-input errors, sanitizer agreement, monotonic IDs,
   metadata cache invalidation, post-to-term relationship field modes, helper
   caches, relationship hook arguments, status-transition hook/cache/default

@@ -27,6 +27,9 @@ final class ContentLifecycleSurface {
 			self::prepare_runtime();
 
 			$rows[] = self::check_user_lifecycle( $ctx->fork( 'users' ), $case );
+			self::prepare_runtime();
+			$rows[] = self::check_user_insert_update_filter_meta_contracts( $ctx->fork( 'user-filter-meta' ), $case );
+			self::prepare_runtime();
 			$rows[] = self::check_term_lifecycle( $ctx->fork( 'terms' ), $case );
 			$rows[] = self::check_post_lifecycle( $ctx->fork( 'posts' ), $case );
 
@@ -108,6 +111,7 @@ final class ContentLifecycleSurface {
 				'get_term',
 				'get_terms',
 				'get_taxonomy',
+				'get_user_meta',
 				'get_user_by',
 				'get_userdata',
 				'has_action',
@@ -147,6 +151,7 @@ final class ContentLifecycleSurface {
 				'wp_cache_get_last_changed',
 				'wp_cache_get_salted',
 				'wp_cache_set',
+				'wp_check_password',
 				'wp_delete_comment',
 				'wp_delete_object_term_relationships',
 				'wp_delete_post',
@@ -163,6 +168,7 @@ final class ContentLifecycleSurface {
 				'wp_set_object_terms',
 				'wp_set_current_user',
 				'wp_set_post_lock',
+				'wp_update_user',
 				'wp_schedule_single_event',
 				'wp_slash',
 				'wp_trash_post',
@@ -2410,6 +2416,543 @@ final class ContentLifecycleSurface {
 			array(
 				'case'     => self::case_summary( $case ),
 				'failures' => array_slice( $failures, 0, 6 ),
+			)
+		);
+	}
+
+	private static function check_user_insert_update_filter_meta_contracts( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures             = array();
+		$token                = substr( $case['token'], 0, 10 );
+		$phase                = 'insert';
+		$raw_login            = 'cf_user_raw_' . $token;
+		$filtered_login       = 'cf_user_filtered_' . $token;
+		$illegal_login        = 'cf_user_illegal_' . $token;
+		$insert_email         = 'filtered-' . $case['userEmail'];
+		$raw_updated_email    = 'raw-updated-' . $case['userEmail'];
+		$updated_email        = 'updated-filtered-' . $case['userEmail'];
+		$insert_url           = 'https://example.test/users/' . rawurlencode( $token ) . '/?a=1&b=two';
+		$updated_url          = 'https://example.test/users/' . rawurlencode( $token ) . '/updated/';
+		$insert_nicename      = 'filtered-nicename-' . $token;
+		$updated_nicename     = 'updated-nicename-' . $token;
+		$insert_display       = 'Filtered Display ' . $token;
+		$updated_display      = 'Updated Filtered Display ' . $token;
+		$insert_nickname      = 'Filtered Nickname ' . $token;
+		$updated_nickname     = 'Updated Filtered Nickname ' . $token;
+		$insert_meta_nickname  = 'Meta Nickname ' . $token;
+		$updated_meta_nickname = 'Updated Meta Nickname ' . $token;
+		$first_name           = 'First ' . $token;
+		$last_name            = 'Last ' . $token;
+		$description          = 'Description ' . $token;
+		$updated_first_name   = 'Updated First ' . $token;
+		$updated_last_name    = 'Updated Last ' . $token;
+		$updated_description  = 'Updated Description ' . $token;
+		$default_meta_key     = 'cf_user_default_meta_' . $token;
+		$custom_meta_key      = 'cf_user_custom_meta_' . $token;
+		$poison_meta_key      = 'cf_user_poison_meta_' . $token;
+		$insert_default_meta  = 'default meta ' . $token;
+		$updated_default_meta = 'updated default meta ' . $token;
+		$insert_custom_meta   = 'custom meta ' . $token;
+		$updated_custom_meta  = 'updated custom meta ' . $token;
+		$activation_key       = 'activation-' . $token;
+		$updated_password     = $case['password'] . '-updated';
+		$events               = array(
+			'pre'          => array(),
+			'preData'      => array(),
+			'insertMeta'   => array(),
+			'customMeta'   => array(),
+			'userRegister' => array(),
+			'profileUpdate' => array(),
+			'wpUpdateUser' => array(),
+			'setPassword'  => array(),
+			'sendPassword' => array(),
+			'sendEmail'    => array(),
+			'illegal'      => array(),
+		);
+		$hooks                = array();
+		$add_hook             = static function ( string $hook, callable $callback, int $accepted_args ) use ( &$hooks ): void {
+			\add_filter( $hook, $callback, 10, $accepted_args );
+			$hooks[] = array( $hook, $callback, 10 );
+		};
+
+		$pre_user_login = static function ( string $value ) use ( &$events, &$phase, $filtered_login, $illegal_login ): string {
+			$events['pre'][] = array(
+				'hook'  => 'pre_user_login',
+				'phase' => $phase,
+				'value' => $value,
+			);
+
+			if ( 'illegal' === $phase ) {
+				return $illegal_login;
+			}
+
+			if ( 'empty-data' === $phase ) {
+				return $value;
+			}
+
+			return $filtered_login;
+		};
+		$pre_user_nicename = static function ( string $value ) use ( &$events, &$phase, $insert_nicename, $updated_nicename ): string {
+			$events['pre'][] = array(
+				'hook'  => 'pre_user_nicename',
+				'phase' => $phase,
+				'value' => $value,
+			);
+
+			return 'update' === $phase ? $updated_nicename : $insert_nicename;
+		};
+		$pre_user_email = static function ( string $value ) use ( &$events, &$phase, $insert_email, $updated_email ): string {
+			$events['pre'][] = array(
+				'hook'  => 'pre_user_email',
+				'phase' => $phase,
+				'value' => $value,
+			);
+
+			if ( 'empty-data' === $phase ) {
+				return $value;
+			}
+
+			return 'update' === $phase ? $updated_email : $insert_email;
+		};
+		$pre_user_url = static function ( string $value ) use ( &$events, &$phase, $insert_url, $updated_url ): string {
+			$events['pre'][] = array(
+				'hook'  => 'pre_user_url',
+				'phase' => $phase,
+				'value' => $value,
+			);
+
+			return 'update' === $phase ? $updated_url : $insert_url;
+		};
+		$pre_user_display_name = static function ( string $value ) use ( &$events, &$phase, $insert_display, $updated_display ): string {
+			$events['pre'][] = array(
+				'hook'  => 'pre_user_display_name',
+				'phase' => $phase,
+				'value' => $value,
+			);
+
+			return 'update' === $phase ? $updated_display : $insert_display;
+		};
+		$pre_user_nickname = static function ( string $value ) use ( &$events, &$phase, $insert_nickname, $updated_nickname ): string {
+			$events['pre'][] = array(
+				'hook'  => 'pre_user_nickname',
+				'phase' => $phase,
+				'value' => $value,
+			);
+
+			return 'update' === $phase ? $updated_nickname : $insert_nickname;
+		};
+		$pre_user_first_name = static function ( string $value ) use ( &$events, &$phase, $first_name, $updated_first_name ): string {
+			$events['pre'][] = array(
+				'hook'  => 'pre_user_first_name',
+				'phase' => $phase,
+				'value' => $value,
+			);
+
+			return 'update' === $phase ? $updated_first_name : $first_name;
+		};
+		$pre_user_last_name = static function ( string $value ) use ( &$events, &$phase, $last_name, $updated_last_name ): string {
+			$events['pre'][] = array(
+				'hook'  => 'pre_user_last_name',
+				'phase' => $phase,
+				'value' => $value,
+			);
+
+			return 'update' === $phase ? $updated_last_name : $last_name;
+		};
+		$pre_user_description = static function ( string $value ) use ( &$events, &$phase, $description, $updated_description ): string {
+			$events['pre'][] = array(
+				'hook'  => 'pre_user_description',
+				'phase' => $phase,
+				'value' => $value,
+			);
+
+			return 'update' === $phase ? $updated_description : $description;
+		};
+		$wp_pre_insert_user_data = static function ( array $data, bool $update, $user_id, array $userdata ) use ( &$events, &$phase ): array {
+			$events['preData'][] = array(
+				'phase'       => $phase,
+				'update'      => $update,
+				'userId'      => $user_id,
+				'dataKeys'    => array_keys( $data ),
+				'userdataKeys' => array_keys( $userdata ),
+				'login'       => $data['user_login'] ?? null,
+				'email'       => $data['user_email'] ?? null,
+			);
+
+			if ( 'empty-data' === $phase ) {
+				return array();
+			}
+
+			return $data;
+		};
+		$insert_user_meta = static function ( array $meta, \WP_User $user, bool $update, array $userdata ) use ( &$events, &$phase, $default_meta_key, $insert_default_meta, $updated_default_meta, $insert_meta_nickname, $updated_meta_nickname ): array {
+			$events['insertMeta'][] = array(
+				'phase'        => $phase,
+				'update'       => $update,
+				'userId'       => (int) $user->ID,
+				'userdataKeys' => array_keys( $userdata ),
+				'nickname'     => $meta['nickname'] ?? null,
+				'keys'         => array_keys( $meta ),
+			);
+
+			$meta['nickname']      = $update ? $updated_meta_nickname : $insert_meta_nickname;
+			$meta[ $default_meta_key ] = $update ? $updated_default_meta : $insert_default_meta;
+
+			return $meta;
+		};
+		$insert_custom_user_meta = static function ( array $custom_meta, \WP_User $user, bool $update, array $userdata ) use ( &$events, &$phase, $custom_meta_key, $poison_meta_key, $insert_custom_meta, $updated_custom_meta ): array {
+			$events['customMeta'][] = array(
+				'phase'        => $phase,
+				'update'       => $update,
+				'userId'       => (int) $user->ID,
+				'userdataKeys' => array_keys( $userdata ),
+				'keys'         => array_keys( $custom_meta ),
+			);
+
+			unset( $custom_meta[ $poison_meta_key ] );
+			$custom_meta[ $custom_meta_key ] = $update ? $updated_custom_meta : $insert_custom_meta;
+
+			return $custom_meta;
+		};
+		$user_register = static function ( int $user_id, array $userdata ) use ( &$events, $custom_meta_key ): void {
+			$events['userRegister'][] = array(
+				'userId'       => $user_id,
+				'userdataKeys' => array_keys( $userdata ),
+				'customMeta'   => \get_user_meta( $user_id, $custom_meta_key, true ),
+				'caps'         => \get_user_meta( $user_id, 'wp_capabilities', true ),
+			);
+		};
+		$profile_update = static function ( int $user_id, \WP_User $old_user_data, array $userdata ) use ( &$events, $custom_meta_key ): void {
+			$events['profileUpdate'][] = array(
+				'userId'       => $user_id,
+				'oldEmail'     => $old_user_data->user_email,
+				'oldDisplay'   => $old_user_data->display_name,
+				'oldActivation' => $old_user_data->user_activation_key,
+				'userdataKeys' => array_keys( $userdata ),
+				'customMeta'   => \get_user_meta( $user_id, $custom_meta_key, true ),
+				'caps'         => \get_user_meta( $user_id, 'wp_capabilities', true ),
+			);
+		};
+		$wp_update_user_action = static function ( int $user_id, array $userdata, array $userdata_raw ) use ( &$events ): void {
+			$events['wpUpdateUser'][] = array(
+				'userId'      => $user_id,
+				'email'       => $userdata['user_email'] ?? null,
+				'rawEmail'    => $userdata_raw['user_email'] ?? null,
+				'userdataKeys' => array_keys( $userdata ),
+				'rawKeys'     => array_keys( $userdata_raw ),
+			);
+		};
+		$wp_set_password = static function ( string $password, int $user_id, \WP_User $user ) use ( &$events, &$phase ): void {
+			$events['setPassword'][] = array(
+				'phase'    => $phase,
+				'userId'   => $user_id,
+				'password' => $password,
+				'userLogin' => $user->user_login,
+			);
+		};
+		$send_password_change_email = static function ( bool $send, array $user, array $userdata ) use ( &$events ): bool {
+			$events['sendPassword'][] = array(
+				'send'        => $send,
+				'oldEmail'    => $user['user_email'] ?? null,
+				'newEmail'    => $userdata['user_email'] ?? null,
+				'hasUserPass' => isset( $userdata['user_pass'] ),
+			);
+
+			return false;
+		};
+		$send_email_change_email = static function ( bool $send, array $user, array $userdata ) use ( &$events ): bool {
+			$events['sendEmail'][] = array(
+				'send'     => $send,
+				'oldEmail' => $user['user_email'] ?? null,
+				'newEmail' => $userdata['user_email'] ?? null,
+			);
+
+			return false;
+		};
+		$illegal_user_logins = static function ( array $logins ) use ( &$events, &$phase, $illegal_login ): array {
+			$events['illegal'][] = array(
+				'phase' => $phase,
+				'count' => count( $logins ),
+			);
+
+			return 'illegal' === $phase ? array_merge( $logins, array( $illegal_login ) ) : $logins;
+		};
+
+		foreach (
+			array(
+				array( 'pre_user_login', $pre_user_login, 1 ),
+				array( 'pre_user_nicename', $pre_user_nicename, 1 ),
+				array( 'pre_user_email', $pre_user_email, 1 ),
+				array( 'pre_user_url', $pre_user_url, 1 ),
+				array( 'pre_user_display_name', $pre_user_display_name, 1 ),
+				array( 'pre_user_nickname', $pre_user_nickname, 1 ),
+				array( 'pre_user_first_name', $pre_user_first_name, 1 ),
+				array( 'pre_user_last_name', $pre_user_last_name, 1 ),
+				array( 'pre_user_description', $pre_user_description, 1 ),
+				array( 'wp_pre_insert_user_data', $wp_pre_insert_user_data, 4 ),
+				array( 'insert_user_meta', $insert_user_meta, 4 ),
+				array( 'insert_custom_user_meta', $insert_custom_user_meta, 4 ),
+				array( 'user_register', $user_register, 2 ),
+				array( 'profile_update', $profile_update, 3 ),
+				array( 'wp_update_user', $wp_update_user_action, 3 ),
+				array( 'wp_set_password', $wp_set_password, 3 ),
+				array( 'send_password_change_email', $send_password_change_email, 3 ),
+				array( 'send_email_change_email', $send_email_change_email, 3 ),
+				array( 'illegal_user_logins', $illegal_user_logins, 1 ),
+			) as $hook
+		) {
+			$add_hook( $hook[0], $hook[1], $hook[2] );
+		}
+
+		try {
+			$user_id = \wp_insert_user(
+				array(
+					'user_login'           => $raw_login,
+					'user_pass'            => $case['password'],
+					'user_email'           => 'raw-' . $case['userEmail'],
+					'user_url'             => 'https://raw.example.test/users/' . rawurlencode( $token ),
+					'user_nicename'        => 'raw nicename ' . $token,
+					'display_name'         => 'Raw Display ' . $token,
+					'nickname'             => 'Raw Nickname ' . $token,
+					'first_name'           => 'Raw First ' . $token,
+					'last_name'            => 'Raw Last ' . $token,
+					'description'          => 'Raw Description ' . $token,
+					'rich_editing'         => 'false',
+					'syntax_highlighting'  => 'false',
+					'comment_shortcuts'    => '1',
+					'admin_color'          => 'modern<script>',
+					'use_ssl'              => 1,
+					'show_admin_bar_front' => 'false',
+					'locale'               => 'es_ES',
+					'user_activation_key'   => $activation_key,
+					'meta_input'           => array(
+						$custom_meta_key => 'raw custom ' . $token,
+						$poison_meta_key => 'poison ' . $token,
+					),
+				)
+			);
+
+			$inserted_user = is_int( $user_id ) ? \get_userdata( $user_id ) : false;
+			$inserted_caps = is_int( $user_id ) ? \get_user_meta( $user_id, 'wp_capabilities', true ) : null;
+
+			self::collect_failure(
+				$failures,
+				is_int( $user_id )
+					&& $inserted_user instanceof \WP_User
+					&& $filtered_login === $inserted_user->user_login
+					&& $insert_email === $inserted_user->user_email
+					&& $insert_url === $inserted_user->user_url
+					&& $insert_nicename === $inserted_user->user_nicename
+					&& $insert_display === $inserted_user->display_name
+					&& $activation_key === $inserted_user->user_activation_key
+					&& is_array( $inserted_caps )
+					&& true === ( $inserted_caps['subscriber'] ?? null ),
+				'wp_insert_user applies pre-user filters, default role, and activation key before persistence',
+				array(
+					'userId' => $user_id,
+					'user'   => self::user_summary( $inserted_user ),
+					'caps'   => $inserted_caps,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				is_int( $user_id )
+					&& $insert_meta_nickname === \get_user_meta( $user_id, 'nickname', true )
+					&& $first_name === \get_user_meta( $user_id, 'first_name', true )
+					&& $last_name === \get_user_meta( $user_id, 'last_name', true )
+					&& $description === \get_user_meta( $user_id, 'description', true )
+					&& 'false' === \get_user_meta( $user_id, 'rich_editing', true )
+					&& 'false' === \get_user_meta( $user_id, 'syntax_highlighting', true )
+					&& 'true' === \get_user_meta( $user_id, 'comment_shortcuts', true )
+					&& '1' === (string) \get_user_meta( $user_id, 'use_ssl', true )
+					&& 'false' === \get_user_meta( $user_id, 'show_admin_bar_front', true )
+					&& 'es_ES' === \get_user_meta( $user_id, 'locale', true )
+					&& $insert_default_meta === \get_user_meta( $user_id, $default_meta_key, true )
+					&& $insert_custom_meta === \get_user_meta( $user_id, $custom_meta_key, true )
+					&& '' === \get_user_meta( $user_id, $poison_meta_key, true ),
+				'wp_insert_user stores filtered default and custom user meta while custom-meta filter can remove inputs',
+				array(
+					'userId'      => $user_id,
+					'nickname'    => is_int( $user_id ) ? \get_user_meta( $user_id, 'nickname', true ) : null,
+					'defaultMeta' => is_int( $user_id ) ? \get_user_meta( $user_id, $default_meta_key, true ) : null,
+					'customMeta'  => is_int( $user_id ) ? \get_user_meta( $user_id, $custom_meta_key, true ) : null,
+					'poisonMeta'  => is_int( $user_id ) ? \get_user_meta( $user_id, $poison_meta_key, true ) : null,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				1 === count( $events['userRegister'] )
+					&& $user_id === ( $events['userRegister'][0]['userId'] ?? null )
+					&& $insert_custom_meta === ( $events['userRegister'][0]['customMeta'] ?? null )
+					&& true === ( $events['userRegister'][0]['caps']['subscriber'] ?? null )
+					&& isset( $events['setPassword'][0] )
+					&& 'insert' === ( $events['setPassword'][0]['phase'] ?? null )
+					&& $case['password'] === ( $events['setPassword'][0]['password'] ?? null ),
+				'wp_insert_user fires password and user_register hooks after meta and default role are available',
+				array(
+					'userRegister' => $events['userRegister'],
+					'setPassword'  => $events['setPassword'],
+				)
+			);
+
+			$phase      = 'update';
+			$updated_id = \wp_update_user(
+				array(
+					'ID'            => $user_id,
+					'user_pass'     => $updated_password,
+					'user_email'    => $raw_updated_email,
+					'user_url'      => 'https://raw.example.test/users/' . rawurlencode( $token ) . '/updated/',
+					'display_name'  => 'Raw Updated Display ' . $token,
+					'nickname'      => 'Raw Updated Nickname ' . $token,
+					'first_name'    => 'Raw Updated First ' . $token,
+					'last_name'     => 'Raw Updated Last ' . $token,
+					'description'   => 'Raw Updated Description ' . $token,
+					'role'          => 'editor',
+					'meta_input'    => array(
+						$custom_meta_key => 'raw updated custom ' . $token,
+						$poison_meta_key => 'updated poison ' . $token,
+					),
+				)
+			);
+			$updated_user = is_int( $updated_id ) ? \get_userdata( $updated_id ) : false;
+			$updated_caps = is_int( $updated_id ) ? \get_user_meta( $updated_id, 'wp_capabilities', true ) : null;
+
+			self::collect_failure(
+				$failures,
+				$updated_id === $user_id
+					&& $updated_user instanceof \WP_User
+					&& $updated_email === $updated_user->user_email
+					&& $updated_url === $updated_user->user_url
+					&& $updated_nicename === $updated_user->user_nicename
+					&& $updated_display === $updated_user->display_name
+					&& '' === $updated_user->user_activation_key
+					&& \wp_check_password( $updated_password, $updated_user->user_pass, $user_id )
+					&& is_array( $updated_caps )
+					&& true === ( $updated_caps['editor'] ?? null ),
+				'wp_update_user reuses insert pipeline, hashes changed password, clears activation key, and adds explicit role',
+				array(
+					'updatedId' => $updated_id,
+					'user'      => self::user_summary( $updated_user ),
+					'caps'      => $updated_caps,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$updated_meta_nickname === \get_user_meta( $user_id, 'nickname', true )
+					&& $updated_first_name === \get_user_meta( $user_id, 'first_name', true )
+					&& $updated_last_name === \get_user_meta( $user_id, 'last_name', true )
+					&& $updated_description === \get_user_meta( $user_id, 'description', true )
+					&& $updated_default_meta === \get_user_meta( $user_id, $default_meta_key, true )
+					&& $updated_custom_meta === \get_user_meta( $user_id, $custom_meta_key, true )
+					&& '' === \get_user_meta( $user_id, $poison_meta_key, true ),
+				'wp_update_user refreshes filtered default and custom user meta and preserves custom-meta removal',
+				array(
+					'nickname'    => \get_user_meta( $user_id, 'nickname', true ),
+					'defaultMeta' => \get_user_meta( $user_id, $default_meta_key, true ),
+					'customMeta'  => \get_user_meta( $user_id, $custom_meta_key, true ),
+					'poisonMeta'  => \get_user_meta( $user_id, $poison_meta_key, true ),
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				1 === count( $events['profileUpdate'] )
+					&& $user_id === ( $events['profileUpdate'][0]['userId'] ?? null )
+					&& $insert_email === ( $events['profileUpdate'][0]['oldEmail'] ?? null )
+					&& $insert_display === ( $events['profileUpdate'][0]['oldDisplay'] ?? null )
+					&& $activation_key === ( $events['profileUpdate'][0]['oldActivation'] ?? null )
+					&& 1 === count( $events['wpUpdateUser'] )
+					&& $user_id === ( $events['wpUpdateUser'][0]['userId'] ?? null )
+					&& $raw_updated_email === ( $events['wpUpdateUser'][0]['email'] ?? null )
+					&& $raw_updated_email === ( $events['wpUpdateUser'][0]['rawEmail'] ?? null )
+					&& isset( $events['setPassword'][1] )
+					&& 'update' === ( $events['setPassword'][1]['phase'] ?? null )
+					&& $updated_password === ( $events['setPassword'][1]['password'] ?? null )
+					&& 1 === count( $events['sendPassword'] )
+					&& true === ( $events['sendPassword'][0]['send'] ?? null )
+					&& 1 === count( $events['sendEmail'] )
+					&& true === ( $events['sendEmail'][0]['send'] ?? null ),
+				'wp_update_user fires profile/update/password/change-mail filters with old, raw, and final user payloads',
+				array(
+					'profileUpdate' => $events['profileUpdate'],
+					'wpUpdateUser'  => $events['wpUpdateUser'],
+					'setPassword'   => $events['setPassword'],
+					'sendPassword'  => $events['sendPassword'],
+					'sendEmail'     => $events['sendEmail'],
+				)
+			);
+
+			$phase        = 'illegal';
+			$illegal_user = \wp_insert_user(
+				array(
+					'user_login' => $illegal_login,
+					'user_pass'  => $case['password'],
+					'user_email' => 'illegal-' . $case['userEmail'],
+				)
+			);
+
+			$phase      = 'empty-data';
+			$empty_data = \wp_insert_user(
+				array(
+					'user_login' => 'cf_user_empty_data_' . $token,
+					'user_pass'  => $case['password'],
+					'user_email' => 'empty-data-' . $case['userEmail'],
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				\is_wp_error( $illegal_user )
+					&& 'invalid_username' === $illegal_user->get_error_code()
+					&& \is_wp_error( $empty_data )
+					&& 'empty_data' === $empty_data->get_error_code()
+					&& 1 === count( $events['userRegister'] ),
+				'wp_insert_user fails closed for illegal-login and empty-data filters without firing extra user_register hooks',
+				array(
+					'illegal'      => self::error_summary( $illegal_user ),
+					'emptyData'    => self::error_summary( $empty_data ),
+					'userRegister' => $events['userRegister'],
+					'preData'      => $events['preData'],
+				)
+			);
+		} finally {
+			self::remove_hooks( $hooks );
+		}
+
+		self::collect_failure(
+			$failures,
+			self::hooks_are_removed( $hooks ),
+			'user insert/update filter hooks are removed',
+			array(
+				'remaining' => array_values(
+					array_filter(
+						array_map(
+							static function ( array $hook ) {
+								return false === \has_filter( $hook[0], $hook[1] ) ? null : $hook[0];
+							},
+							$hooks
+						)
+					)
+				),
+			)
+		);
+
+		return $ctx->result(
+			'content-lifecycle.users.insert-update-filter-meta-hooks',
+			array() === $failures,
+			array(
+				'case'     => self::case_summary( $case ),
+				'failures' => array_slice( $failures, 0, 8 ),
+				'events'   => array(
+					'preData'       => array_slice( $events['preData'], 0, 4 ),
+					'insertMeta'    => array_slice( $events['insertMeta'], 0, 4 ),
+					'customMeta'    => array_slice( $events['customMeta'], 0, 4 ),
+					'userRegister'  => $events['userRegister'],
+					'profileUpdate' => $events['profileUpdate'],
+					'wpUpdateUser'  => $events['wpUpdateUser'],
+				),
 			)
 		);
 	}
