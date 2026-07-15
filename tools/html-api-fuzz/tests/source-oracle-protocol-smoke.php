@@ -88,10 +88,11 @@ function html_api_fuzz_source_protocol_metadata_case(
 	bool $available,
 	string $message,
 	int $version_exit = 0
-): void {
+): array {
 	$binary = html_api_fuzz_source_protocol_fake( $directory, $version, array(), $version_exit );
 	$metadata = html_api_fuzz_source_protocol_renderer( $kind, $binary )->metadata();
 	html_api_fuzz_source_protocol_assert( $available === ( $metadata['available'] ?? false ), $message );
+	return array( 'binary' => $binary, 'metadata' => $metadata );
 }
 
 function html_api_fuzz_source_protocol_render_case(
@@ -130,6 +131,16 @@ try {
 	);
 	$valid_lexbor_version = html_api_fuzz_source_protocol_version( $lexbor_oracle );
 	html_api_fuzz_source_protocol_metadata_case( $work_dir, \HtmlApiFuzz\OracleRenderer::KIND_LEXBOR_SOURCE, $valid_lexbor_version, true, 'Expected valid Lexbor identity to be available.' );
+	$untrusted_lexbor_oracle = array_merge( $lexbor_oracle, array( 'binary' => '/attacker/lexbor', 'arbitrary' => 'discard' ) );
+	$lexbor_metadata_case = html_api_fuzz_source_protocol_metadata_case(
+		$work_dir,
+		\HtmlApiFuzz\OracleRenderer::KIND_LEXBOR_SOURCE,
+		html_api_fuzz_source_protocol_version( $untrusted_lexbor_oracle ),
+		true,
+		'Expected valid Lexbor identity with unknown metadata to be available.'
+	);
+	html_api_fuzz_source_protocol_assert( $lexbor_metadata_case['binary'] === ( $lexbor_metadata_case['metadata']['binary'] ?? null ), 'Lexbor version metadata overrode the configured binary.' );
+	html_api_fuzz_source_protocol_assert( ! array_key_exists( 'arbitrary', $lexbor_metadata_case['metadata'] ), 'Lexbor version metadata retained an unknown field.' );
 
 	$lexbor_mutations = array(
 		'wrong kind'              => array( 'kind' => 'html5ever-source' ),
@@ -194,6 +205,16 @@ try {
 		true,
 		'Expected valid html5ever identity to be available.'
 	);
+	$untrusted_html5ever_oracle = array_merge( $html5ever_oracle, array( 'binary' => '/attacker/html5ever', 'arbitrary' => 'discard' ) );
+	$html5ever_metadata_case = html_api_fuzz_source_protocol_metadata_case(
+		$work_dir,
+		\HtmlApiFuzz\OracleRenderer::KIND_HTML5EVER_SOURCE,
+		html_api_fuzz_source_protocol_version( $untrusted_html5ever_oracle ),
+		true,
+		'Expected valid html5ever identity with unknown metadata to be available.'
+	);
+	html_api_fuzz_source_protocol_assert( $html5ever_metadata_case['binary'] === ( $html5ever_metadata_case['metadata']['binary'] ?? null ), 'html5ever version metadata overrode the configured binary.' );
+	html_api_fuzz_source_protocol_assert( ! array_key_exists( 'arbitrary', $html5ever_metadata_case['metadata'] ), 'html5ever version metadata retained an unknown field.' );
 	foreach ( array( 'html5everVersion', 'html5everChecksum', 'markup5everRcdomVersion', 'markup5everRcdomChecksum', 'rustToolchain' ) as $field ) {
 		$wrong = $html5ever_oracle;
 		$wrong[ $field ] = 'wrong';
@@ -218,17 +239,39 @@ try {
 	$valid_render = html_api_fuzz_source_protocol_render( $lexbor_oracle );
 	$valid = html_api_fuzz_source_protocol_render_case( $work_dir, $lexbor_oracle, $valid_render, 'ok', '', 'Expected a valid ok result.' );
 	html_api_fuzz_source_protocol_assert( "\"x\"\n\n" === ( $valid['tree'] ?? null ), 'Expected valid treeBase64 to decode.' );
+	$untrusted_render_oracle = array_merge( $lexbor_oracle, array( 'binary' => '/attacker/lexbor', 'arbitrary' => 'discard' ) );
+	$untrusted_render = html_api_fuzz_source_protocol_render_case(
+		$work_dir,
+		$lexbor_oracle,
+		html_api_fuzz_source_protocol_render( $untrusted_render_oracle ),
+		'ok',
+		'',
+		'Expected valid render identity with unknown metadata to succeed.'
+	);
+	$render_binary = $untrusted_render['oracle']['binary'] ?? null;
+	html_api_fuzz_source_protocol_assert( is_string( $render_binary ) && str_starts_with( $untrusted_render['process']['command'] ?? '', escapeshellarg( $render_binary ) . ' ' ), 'Render metadata did not retain the configured executable path.' );
+	html_api_fuzz_source_protocol_assert( ! array_key_exists( 'arbitrary', $untrusted_render['oracle'] ), 'Render metadata retained an unknown field.' );
+	$drifted_render_oracle = $lexbor_oracle;
+	$drifted_render_oracle['lexborVersion'] = 'different-version';
+	html_api_fuzz_source_protocol_render_case(
+		$work_dir,
+		$lexbor_oracle,
+		html_api_fuzz_source_protocol_render( $drifted_render_oracle ),
+		'error',
+		'oracle-renderer-error',
+		'Expected render identity drift after version validation to fail.'
+	);
 
 	$unsupported = html_api_fuzz_source_protocol_render(
 		$lexbor_oracle,
 		array(
 			'status'       => 'unsupported',
 			'failureClass' => 'oracle-unsupported',
-			'unsupported'  => array( 'message' => 'not supported' ),
+			'unsupported'  => array( 'message' => 'not supported', 'extra' => 'discard' ),
 		)
 	);
 	$unsupported_result = html_api_fuzz_source_protocol_render_case( $work_dir, $lexbor_oracle, $unsupported, 'unsupported', 'oracle-unsupported', 'Expected a well-formed unsupported result.' );
-	html_api_fuzz_source_protocol_assert( 'not supported' === ( $unsupported_result['unsupported']['message'] ?? null ), 'Expected unsupported details to survive.' );
+	html_api_fuzz_source_protocol_assert( array( 'message' => 'not supported' ) === ( $unsupported_result['unsupported'] ?? null ), 'Unsupported response retained untrusted details.' );
 
 	foreach ( array( 'oracle-parse-error', 'node-limit-exceeded', 'oracle-renderer-error' ) as $failure_class ) {
 		$semantic_error = html_api_fuzz_source_protocol_render(

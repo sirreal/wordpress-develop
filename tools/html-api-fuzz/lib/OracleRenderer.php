@@ -188,6 +188,21 @@ class OracleRenderer {
 		return null;
 	}
 
+	private function trusted_source_metadata( array $oracle, string $binary ): array {
+		$metadata = array(
+			'kind'      => $this->kind,
+			'binary'    => $binary,
+			'available' => true,
+		);
+		$identity_fields = self::KIND_LEXBOR_SOURCE === $this->kind
+			? array( 'lexborCommit', 'lexborVersion' )
+			: array( 'html5everVersion', 'html5everChecksum', 'markup5everRcdomVersion', 'markup5everRcdomChecksum', 'rustToolchain' );
+		foreach ( $identity_fields as $field ) {
+			$metadata[ $field ] = $oracle[ $field ];
+		}
+		return $metadata;
+	}
+
 	private static function cargo_locked_package( string $path, string $name ): ?array {
 		$lock = @file_get_contents( $path );
 		if ( false === $lock || ! preg_match_all( '/\[\[package\]\]\s*(.*?)(?=\n\[\[package\]\]|\z)/s', $lock, $packages ) ) {
@@ -251,8 +266,7 @@ class OracleRenderer {
 				'ok' === ( $decoded['status'] ?? null ) &&
 				null === $identity_error
 			) {
-				$metadata = array_merge( $metadata, $decoded['oracle'] );
-				$metadata['binary'] = $binary;
+				$metadata = $this->trusted_source_metadata( $decoded['oracle'], $binary );
 			} else {
 				$metadata['available'] = false;
 				$metadata['versionError'] = 'Invalid source oracle version response: ' . ( $identity_error ?? 'expected status=ok and exit code 0' ) . '. ' . trim( $version['output'] );
@@ -612,6 +626,9 @@ class OracleRenderer {
 
 		$status = $decoded['status'] ?? null;
 		$identity_error = is_array( $decoded['oracle'] ?? null ) ? $this->source_identity_error( $decoded['oracle'] ) : 'did not return oracle metadata';
+		if ( null === $identity_error && $this->trusted_source_metadata( $decoded['oracle'], $binary ) !== $metadata ) {
+			$identity_error = 'reported identity changed after version validation';
+		}
 		if (
 			! in_array( $status, array( TreeRenderer::STATUS_OK, TreeRenderer::STATUS_UNSUPPORTED, TreeRenderer::STATUS_ERROR ), true ) ||
 			null !== $identity_error ||
@@ -629,7 +646,7 @@ class OracleRenderer {
 
 		$result = array(
 			'status'       => $status,
-			'oracle'       => array_merge( $metadata, $decoded['oracle'] ),
+			'oracle'       => $metadata,
 			'nodeCount'    => $decoded['nodeCount'],
 			'process'      => self::compact_process( $proc ),
 		);
@@ -666,7 +683,7 @@ class OracleRenderer {
 				return $result;
 			}
 			$result['failureClass'] = $decoded['failureClass'];
-			$result['unsupported']  = $decoded['unsupported'];
+			$result['unsupported']  = array( 'message' => $decoded['unsupported']['message'] );
 		} elseif ( ! in_array( $decoded['failureClass'] ?? null, self::SOURCE_ERROR_FAILURE_CLASSES, true ) || ! is_string( $decoded['error'] ?? null ) ) {
 			$result['status']       = TreeRenderer::STATUS_ERROR;
 			$result['error']        = $label . ' source oracle returned malformed error details.';
