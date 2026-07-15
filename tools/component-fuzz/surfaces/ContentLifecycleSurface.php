@@ -35,6 +35,8 @@ final class ContentLifecycleSurface {
 			$rows[] = self::check_user_delete_reassign_lifecycle( $ctx->fork( 'user-delete' ), $case );
 			self::prepare_runtime();
 			$rows[] = self::check_term_lifecycle( $ctx->fork( 'terms' ), $case );
+			$rows[] = self::check_term_update_delete_lifecycle( $ctx->fork( 'term-update-delete' ), $case );
+			self::prepare_runtime();
 			$rows[] = self::check_post_lifecycle( $ctx->fork( 'posts' ), $case );
 
 			self::prepare_runtime();
@@ -164,6 +166,7 @@ final class ContentLifecycleSurface {
 				'wp_check_password',
 				'wp_delete_link',
 				'wp_delete_comment',
+				'wp_delete_term',
 				'wp_delete_user',
 				'wp_delete_object_term_relationships',
 				'wp_delete_post',
@@ -189,6 +192,7 @@ final class ContentLifecycleSurface {
 				'wp_check_post_lock',
 				'wp_clear_scheduled_hook',
 				'wp_next_scheduled',
+				'wp_update_term',
 				'username_exists',
 				'update_post_meta',
 				'update_meta',
@@ -2294,6 +2298,306 @@ final class ContentLifecycleSurface {
 			array(
 				'case'     => self::case_summary( $case ),
 				'failures' => array_slice( $failures, 0, 6 ),
+			)
+		);
+	}
+
+	private static function check_term_update_delete_lifecycle( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures = array();
+		$events   = array();
+		$hooks    = self::install_term_lifecycle_hooks( $events );
+		$token    = $case['token'];
+
+		$update_parent_name = 'Update Parent ' . $token;
+		$update_child_name  = 'Update Child ' . $token;
+		$updated_name       = 'Updated Category ' . $token;
+		$updated_desc       = 'Updated term description ' . $token;
+		$update_parent_slug = self::usable_slug( 'update-parent-' . $token, 'update-parent-' . $token );
+		$update_child_slug  = self::usable_slug( 'update-child-' . $token, 'update-child-' . $token );
+		$updated_slug       = self::usable_slug( 'updated-category-' . $token, 'updated-category-' . $token );
+		$duplicate_slug     = self::usable_slug( 'update-duplicate-' . $token, 'update-duplicate-' . $token );
+		$delete_parent_slug = self::usable_slug( 'delete-parent-' . $token, 'delete-parent-' . $token );
+		$delete_child_slug  = self::usable_slug( 'delete-child-' . $token, 'delete-child-' . $token );
+		$hooks_removed      = false;
+
+		try {
+			$update_parent = \wp_insert_term( $update_parent_name, 'category', array( 'slug' => $update_parent_slug ) );
+			$update_child  = is_array( $update_parent )
+				? \wp_insert_term(
+					$update_child_name,
+					'category',
+					array(
+						'slug'   => $update_child_slug,
+						'parent' => 0,
+					)
+				)
+				: null;
+			$duplicate     = \wp_insert_term( 'Update Duplicate ' . $token, 'category', array( 'slug' => $duplicate_slug ) );
+			$delete_parent = \wp_insert_term( 'Delete Parent ' . $token, 'category', array( 'slug' => $delete_parent_slug ) );
+			$delete_child  = is_array( $delete_parent )
+				? \wp_insert_term(
+					'Delete Child ' . $token,
+					'category',
+					array(
+						'slug'   => $delete_child_slug,
+						'parent' => (int) $delete_parent['term_id'],
+					)
+				)
+				: null;
+
+			$update_parent_id = is_array( $update_parent ) ? (int) $update_parent['term_id'] : 0;
+			$update_child_id  = is_array( $update_child ) ? (int) $update_child['term_id'] : 0;
+			$update_child_tt  = is_array( $update_child ) ? (int) $update_child['term_taxonomy_id'] : 0;
+			$duplicate_id     = is_array( $duplicate ) ? (int) $duplicate['term_id'] : 0;
+			$delete_parent_id = is_array( $delete_parent ) ? (int) $delete_parent['term_id'] : 0;
+			$delete_parent_tt = is_array( $delete_parent ) ? (int) $delete_parent['term_taxonomy_id'] : 0;
+			$delete_child_id  = is_array( $delete_child ) ? (int) $delete_child['term_id'] : 0;
+
+			self::collect_failure(
+				$failures,
+				is_array( $update_parent )
+					&& is_array( $update_child )
+					&& is_array( $duplicate )
+					&& is_array( $delete_parent )
+					&& is_array( $delete_child ),
+				'term update/delete seed terms are created',
+				array(
+					'updateParent' => $update_parent,
+					'updateChild'  => $update_child,
+					'duplicate'    => $duplicate,
+					'deleteParent' => $delete_parent,
+					'deleteChild'  => $delete_child,
+				)
+			);
+
+			$primed_child       = $update_child_id > 0 ? \get_term( $update_child_id, 'category' ) : null;
+			$updated            = $update_child_id > 0
+				? \wp_update_term(
+					$update_child_id,
+					'category',
+					array(
+						'name'        => $updated_name,
+						'slug'        => $updated_slug,
+						'description' => $updated_desc,
+						'parent'      => $update_parent_id,
+					)
+				)
+				: null;
+			$updated_term       = $update_child_id > 0 ? \get_term( $update_child_id, 'category' ) : null;
+			$updated_exists     = \term_exists( $updated_slug, 'category' );
+			$stale_slug_exists  = \term_exists( $update_child_slug, 'category' );
+			$updated_term_query = \get_terms(
+				array(
+					'taxonomy'               => 'category',
+					'include'                => array( $update_child_id ),
+					'hide_empty'             => false,
+					'update_term_meta_cache' => false,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				is_array( $updated )
+					&& $update_child_id === (int) $updated['term_id']
+					&& $update_child_tt === (int) $updated['term_taxonomy_id']
+					&& $primed_child instanceof \WP_Term
+					&& $updated_term instanceof \WP_Term
+					&& $updated_name === $updated_term->name
+					&& $updated_slug === $updated_term->slug
+					&& $updated_desc === $updated_term->description
+					&& $update_parent_id === (int) $updated_term->parent
+					&& is_array( $updated_exists )
+					&& $update_child_id === (int) $updated_exists['term_id']
+					&& null === $stale_slug_exists
+					&& is_array( $updated_term_query )
+					&& isset( $updated_term_query[0] )
+					&& $update_child_id === (int) $updated_term_query[0]->term_id,
+				'wp_update_term preserves IDs and refreshes readable term fields',
+				array(
+					'updated'       => $updated,
+					'primedChild'   => self::term_summary( $primed_child ),
+					'updatedTerm'   => self::term_summary( $updated_term ),
+					'updatedExists' => $updated_exists,
+					'staleExists'   => $stale_slug_exists,
+					'queryCount'    => is_array( $updated_term_query ) ? count( $updated_term_query ) : null,
+				)
+			);
+
+			$duplicate_update = $update_child_id > 0 ? \wp_update_term( $update_child_id, 'category', array( 'slug' => $duplicate_slug ) ) : null;
+			$missing_parent   = $update_child_id > 0 ? \wp_update_term( $update_child_id, 'category', array( 'parent' => 987654321 ) ) : null;
+			$empty_name       = $update_child_id > 0 ? \wp_update_term( $update_child_id, 'category', array( 'name' => '' ) ) : null;
+			$missing_term     = \wp_update_term( 987654321, 'category', array( 'name' => 'Missing Term ' . $token ) );
+			$after_errors     = $update_child_id > 0 ? \get_term( $update_child_id, 'category' ) : null;
+
+			self::collect_failure(
+				$failures,
+				\is_wp_error( $duplicate_update )
+					&& 'duplicate_term_slug' === $duplicate_update->get_error_code()
+					&& \is_wp_error( $missing_parent )
+					&& 'missing_parent' === $missing_parent->get_error_code()
+					&& \is_wp_error( $empty_name )
+					&& 'empty_term_name' === $empty_name->get_error_code()
+					&& \is_wp_error( $missing_term )
+					&& 'invalid_term' === $missing_term->get_error_code()
+					&& $after_errors instanceof \WP_Term
+					&& $updated_slug === $after_errors->slug
+					&& $update_parent_id === (int) $after_errors->parent,
+				'wp_update_term rejects invalid updates without mutating the term',
+				array(
+					'duplicateTermId' => $duplicate_id,
+					'duplicate'       => self::error_summary( $duplicate_update ),
+					'missingParent'   => self::error_summary( $missing_parent ),
+					'emptyName'       => self::error_summary( $empty_name ),
+					'missingTerm'     => self::error_summary( $missing_term ),
+					'afterErrors'     => self::term_summary( $after_errors ),
+				)
+			);
+
+			$delete_post_id = \wp_insert_post(
+				array(
+					'post_title'  => 'Term Delete Post ' . $token,
+					'post_status' => 'publish',
+					'post_type'   => 'post',
+				),
+				true
+			);
+			$assigned       = is_int( $delete_post_id ) && $delete_post_id > 0
+				? \wp_set_object_terms( $delete_post_id, array( $delete_parent_id, $delete_child_id ), 'category' )
+				: null;
+			$assigned_terms = is_int( $delete_post_id ) && $delete_post_id > 0
+				? \wp_get_object_terms(
+					$delete_post_id,
+					'category',
+					array(
+						'fields'  => 'ids',
+						'orderby' => 'none',
+					)
+				)
+				: null;
+			$deleted        = $delete_parent_id > 0 ? \wp_delete_term( $delete_parent_id, 'category' ) : null;
+			$deleted_again  = \wp_delete_term( 987654321, 'category' );
+			$deleted_parent = $delete_parent_id > 0 ? \get_term( $delete_parent_id, 'category' ) : null;
+			$child_after    = $delete_child_id > 0 ? \get_term( $delete_child_id, 'category' ) : null;
+			$parent_exists  = $delete_parent_id > 0 ? \term_exists( $delete_parent_id, 'category' ) : null;
+			$slug_exists    = \term_exists( $delete_parent_slug, 'category' );
+			$remaining      = is_int( $delete_post_id ) && $delete_post_id > 0
+				? \wp_get_object_terms(
+					$delete_post_id,
+					'category',
+					array(
+						'fields'  => 'ids',
+						'orderby' => 'none',
+					)
+				)
+				: null;
+			$has_deleted    = is_int( $delete_post_id ) && $delete_post_id > 0 ? \has_term( $delete_parent_id, 'category', $delete_post_id ) : null;
+			$has_child      = is_int( $delete_post_id ) && $delete_post_id > 0 ? \has_term( $delete_child_id, 'category', $delete_post_id ) : null;
+			$object_deleted = is_int( $delete_post_id ) && $delete_post_id > 0 ? \is_object_in_term( $delete_post_id, 'category', $delete_parent_id ) : null;
+
+			self::collect_failure(
+				$failures,
+				is_int( $delete_post_id )
+					&& $delete_post_id > 0
+					&& is_array( $assigned )
+					&& is_array( $assigned_terms )
+					&& self::same_id_set( $assigned_terms, array( $delete_parent_id, $delete_child_id ) ),
+				'term delete seed post receives parent and child categories',
+				array(
+					'postId'        => $delete_post_id,
+					'assigned'      => $assigned,
+					'assignedTerms' => $assigned_terms,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				true === $deleted
+					&& false === $deleted_again
+					&& ! $deleted_parent instanceof \WP_Term
+					&& null === $parent_exists
+					&& null === $slug_exists
+					&& $child_after instanceof \WP_Term
+					&& 0 === (int) $child_after->parent
+					&& is_array( $remaining )
+					&& self::same_id_set( $remaining, array( $delete_child_id ) )
+					&& false === $has_deleted
+					&& true === $has_child
+					&& false === $object_deleted,
+				'wp_delete_term removes the deleted term, reparents children, and removes relationships',
+				array(
+					'deleted'       => $deleted,
+					'deletedAgain'  => $deleted_again,
+					'deletedParent' => self::term_summary( $deleted_parent ),
+					'childAfter'    => self::term_summary( $child_after ),
+					'parentExists'  => $parent_exists,
+					'slugExists'    => $slug_exists,
+					'remaining'     => $remaining,
+					'hasDeleted'    => $has_deleted,
+					'hasChild'      => $has_child,
+					'objectDeleted' => $object_deleted,
+				)
+			);
+
+			$hook_names = array_map(
+				static fn( array $event ): string => $event['hook'],
+				$events
+			);
+			self::collect_failure(
+				$failures,
+				self::events_are_ordered(
+					$hook_names,
+					array(
+						'edit_terms',
+						'edited_terms',
+						'edit_term_taxonomy',
+						'edited_term_taxonomy',
+						'edit_term',
+						'edit_category',
+						'edited_term',
+						'edited_category',
+						'saved_term',
+						'saved_category',
+						'pre_delete_term',
+						'edit_term_taxonomies',
+						'edited_term_taxonomies',
+						'delete_term_taxonomy',
+						'deleted_term_taxonomy',
+						'delete_term',
+						'delete_category',
+					)
+				)
+					&& self::term_lifecycle_event_present( $events, 'edit_terms', $update_child_id, null, 'category' )
+					&& self::term_lifecycle_event_present( $events, 'edited_category', $update_child_id, $update_child_tt, 'category' )
+					&& self::term_lifecycle_event_present( $events, 'saved_category', $update_child_id, $update_child_tt, 'category' )
+					&& self::term_lifecycle_event_present( $events, 'pre_delete_term', $delete_parent_id, null, 'category' )
+					&& self::term_lifecycle_event_present( $events, 'delete_term_taxonomy', null, $delete_parent_tt, null )
+					&& self::term_lifecycle_event_present( $events, 'deleted_term_taxonomy', null, $delete_parent_tt, null )
+					&& self::term_lifecycle_event_present( $events, 'delete_term', $delete_parent_id, $delete_parent_tt, 'category' )
+					&& self::term_lifecycle_event_present( $events, 'delete_category', $delete_parent_id, $delete_parent_tt, 'category' ),
+				'term update/delete hooks fire in order with expected IDs',
+				array(
+					'events' => array_slice( $events, 0, 30 ),
+				)
+			);
+		} finally {
+			self::remove_hooks( $hooks );
+			$hooks_removed = self::hooks_are_removed( $hooks );
+		}
+
+		self::collect_failure(
+			$failures,
+			$hooks_removed,
+			'term lifecycle hooks are removed after update/delete check',
+			array( 'hooks' => array_map( static fn( array $hook ): string => $hook[0], $hooks ) )
+		);
+
+		return $ctx->result(
+			'content-lifecycle.terms.update-delete-hooks-relationships',
+			array() === $failures,
+			array(
+				'case'     => self::case_summary( $case ),
+				'failures' => array_slice( $failures, 0, 6 ),
+				'events'   => array_slice( $events, 0, 30 ),
 			)
 		);
 	}
@@ -5170,10 +5474,304 @@ final class ContentLifecycleSurface {
 		return $hooks;
 	}
 
+	private static function install_term_lifecycle_hooks( array &$events ): array {
+		$hooks  = array();
+		$add    = static function ( string $hook, callable $callback, int $accepted_args ) use ( &$hooks ): void {
+			\add_action( $hook, $callback, 10, $accepted_args );
+			$hooks[] = array( $hook, $callback, 10 );
+		};
+		$record = static function ( array $event ) use ( &$events ): void {
+			$events[] = $event;
+		};
+
+		$add(
+			'edit_terms',
+			static function ( $term_id, $taxonomy, $args ) use ( $record ): void {
+				$record(
+					array(
+						'hook'     => 'edit_terms',
+						'termId'   => (int) $term_id,
+						'taxonomy' => (string) $taxonomy,
+						'args'     => self::term_hook_args_summary( $args ),
+					)
+				);
+			},
+			3
+		);
+		$add(
+			'edited_terms',
+			static function ( $term_id, $taxonomy, $args ) use ( $record ): void {
+				$record(
+					array(
+						'hook'     => 'edited_terms',
+						'termId'   => (int) $term_id,
+						'taxonomy' => (string) $taxonomy,
+						'args'     => self::term_hook_args_summary( $args ),
+					)
+				);
+			},
+			3
+		);
+		$add(
+			'edit_term_taxonomy',
+			static function ( $tt_id, $taxonomy, $args = array() ) use ( $record ): void {
+				$record(
+					array(
+						'hook'     => 'edit_term_taxonomy',
+						'ttId'     => (int) $tt_id,
+						'taxonomy' => (string) $taxonomy,
+						'args'     => self::term_hook_args_summary( $args ),
+					)
+				);
+			},
+			3
+		);
+		$add(
+			'edited_term_taxonomy',
+			static function ( $tt_id, $taxonomy, $args = array() ) use ( $record ): void {
+				$record(
+					array(
+						'hook'     => 'edited_term_taxonomy',
+						'ttId'     => (int) $tt_id,
+						'taxonomy' => (string) $taxonomy,
+						'args'     => self::term_hook_args_summary( $args ),
+					)
+				);
+			},
+			3
+		);
+		$add(
+			'edit_term',
+			static function ( $term_id, $tt_id, $taxonomy, $args ) use ( $record ): void {
+				$record(
+					array(
+						'hook'     => 'edit_term',
+						'termId'   => (int) $term_id,
+						'ttId'     => (int) $tt_id,
+						'taxonomy' => (string) $taxonomy,
+						'args'     => self::term_hook_args_summary( $args ),
+					)
+				);
+			},
+			4
+		);
+		$add(
+			'edit_category',
+			static function ( $term_id, $tt_id, $args ) use ( $record ): void {
+				$record(
+					array(
+						'hook'     => 'edit_category',
+						'termId'   => (int) $term_id,
+						'ttId'     => (int) $tt_id,
+						'taxonomy' => 'category',
+						'args'     => self::term_hook_args_summary( $args ),
+					)
+				);
+			},
+			3
+		);
+		$add(
+			'edited_term',
+			static function ( $term_id, $tt_id, $taxonomy, $args ) use ( $record ): void {
+				$record(
+					array(
+						'hook'     => 'edited_term',
+						'termId'   => (int) $term_id,
+						'ttId'     => (int) $tt_id,
+						'taxonomy' => (string) $taxonomy,
+						'args'     => self::term_hook_args_summary( $args ),
+					)
+				);
+			},
+			4
+		);
+		$add(
+			'edited_category',
+			static function ( $term_id, $tt_id, $args ) use ( $record ): void {
+				$record(
+					array(
+						'hook'     => 'edited_category',
+						'termId'   => (int) $term_id,
+						'ttId'     => (int) $tt_id,
+						'taxonomy' => 'category',
+						'args'     => self::term_hook_args_summary( $args ),
+					)
+				);
+			},
+			3
+		);
+		$add(
+			'saved_term',
+			static function ( $term_id, $tt_id, $taxonomy, $update, $args ) use ( $record ): void {
+				$record(
+					array(
+						'hook'     => 'saved_term',
+						'termId'   => (int) $term_id,
+						'ttId'     => (int) $tt_id,
+						'taxonomy' => (string) $taxonomy,
+						'update'   => (bool) $update,
+						'args'     => self::term_hook_args_summary( $args ),
+					)
+				);
+			},
+			5
+		);
+		$add(
+			'saved_category',
+			static function ( $term_id, $tt_id, $update, $args ) use ( $record ): void {
+				$record(
+					array(
+						'hook'     => 'saved_category',
+						'termId'   => (int) $term_id,
+						'ttId'     => (int) $tt_id,
+						'taxonomy' => 'category',
+						'update'   => (bool) $update,
+						'args'     => self::term_hook_args_summary( $args ),
+					)
+				);
+			},
+			4
+		);
+		$add(
+			'pre_delete_term',
+			static function ( $term_id, $taxonomy ) use ( $record ): void {
+				$record(
+					array(
+						'hook'     => 'pre_delete_term',
+						'termId'   => (int) $term_id,
+						'taxonomy' => (string) $taxonomy,
+					)
+				);
+			},
+			2
+		);
+		$add(
+			'edit_term_taxonomies',
+			static function ( $tt_ids ) use ( $record ): void {
+				$record(
+					array(
+						'hook'  => 'edit_term_taxonomies',
+						'ttIds' => self::normalize_int_list( (array) $tt_ids ),
+					)
+				);
+			},
+			1
+		);
+		$add(
+			'edited_term_taxonomies',
+			static function ( $tt_ids ) use ( $record ): void {
+				$record(
+					array(
+						'hook'  => 'edited_term_taxonomies',
+						'ttIds' => self::normalize_int_list( (array) $tt_ids ),
+					)
+				);
+			},
+			1
+		);
+		$add(
+			'delete_term_taxonomy',
+			static function ( $tt_id ) use ( $record ): void {
+				$record(
+					array(
+						'hook' => 'delete_term_taxonomy',
+						'ttId' => (int) $tt_id,
+					)
+				);
+			},
+			1
+		);
+		$add(
+			'deleted_term_taxonomy',
+			static function ( $tt_id ) use ( $record ): void {
+				$record(
+					array(
+						'hook' => 'deleted_term_taxonomy',
+						'ttId' => (int) $tt_id,
+					)
+				);
+			},
+			1
+		);
+		$add(
+			'delete_term',
+			static function ( $term_id, $tt_id, $taxonomy, $deleted_term, $object_ids ) use ( $record ): void {
+				$record(
+					array(
+						'hook'      => 'delete_term',
+						'termId'    => (int) $term_id,
+						'ttId'      => (int) $tt_id,
+						'taxonomy'  => (string) $taxonomy,
+						'deleted'   => self::term_summary( $deleted_term ),
+						'objectIds' => self::normalize_int_list( (array) $object_ids ),
+					)
+				);
+			},
+			5
+		);
+		$add(
+			'delete_category',
+			static function ( $term_id, $tt_id, $deleted_term, $object_ids ) use ( $record ): void {
+				$record(
+					array(
+						'hook'      => 'delete_category',
+						'termId'    => (int) $term_id,
+						'ttId'      => (int) $tt_id,
+						'taxonomy'  => 'category',
+						'deleted'   => self::term_summary( $deleted_term ),
+						'objectIds' => self::normalize_int_list( (array) $object_ids ),
+					)
+				);
+			},
+			4
+		);
+
+		return $hooks;
+	}
+
 	private static function remove_hooks( array $hooks ): void {
 		foreach ( $hooks as $hook ) {
 			\remove_action( $hook[0], $hook[1], $hook[2] );
 		}
+	}
+
+	private static function term_hook_args_summary( $args ): array {
+		if ( ! is_array( $args ) ) {
+			return array();
+		}
+
+		$summary = array();
+		foreach ( array( 'name', 'slug', 'description', 'parent' ) as $key ) {
+			if ( array_key_exists( $key, $args ) ) {
+				$summary[ $key ] = $args[ $key ];
+			}
+		}
+
+		return $summary;
+	}
+
+	private static function term_lifecycle_event_present( array $events, string $hook, ?int $term_id, ?int $tt_id, ?string $taxonomy ): bool {
+		foreach ( $events as $event ) {
+			if ( ! is_array( $event ) || ( $event['hook'] ?? null ) !== $hook ) {
+				continue;
+			}
+
+			if ( null !== $term_id && ( ! array_key_exists( 'termId', $event ) || (int) $event['termId'] !== $term_id ) ) {
+				continue;
+			}
+
+			if ( null !== $tt_id && ( ! array_key_exists( 'ttId', $event ) || (int) $event['ttId'] !== $tt_id ) ) {
+				continue;
+			}
+
+			if ( null !== $taxonomy && ( ! array_key_exists( 'taxonomy', $event ) || (string) $event['taxonomy'] !== $taxonomy ) ) {
+				continue;
+			}
+
+			return true;
+		}
+
+		return false;
 	}
 
 	private static function events_are_ordered( array $events, array $expected ): bool {

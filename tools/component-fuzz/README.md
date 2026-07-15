@@ -224,6 +224,9 @@ database, network requests, or a configured site.
   `delete_with_user` filtering, link deletion, and invalid-user fail-closed
   branches,
   duplicate and invalid-input errors, sanitizer agreement, monotonic IDs,
+  direct `wp_update_term()`/`wp_delete_term()` ID preservation, readable field
+  refresh, duplicate-slug/missing-parent/empty-name failures, child reparenting,
+  object relationship cleanup, and term lifecycle hook payloads,
   metadata cache invalidation, post-to-term relationship field modes, helper
   caches, relationship hook arguments, status-transition hook/cache/default
   side-effect branches, direct `set_post_type()` row mutation and cache cleanup,
