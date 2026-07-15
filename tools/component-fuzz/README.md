@@ -176,9 +176,9 @@ database, network requests, or a configured site.
   queries short-circuited.
 - `block-editor-adjuncts`: no-DB block editor adjunct API coverage, including
   editor context objects, category and allowed-block filters, legacy widget and
-  merged editor settings, local theme style helpers, iframe asset collection,
-  REST preload path normalization with dispatch short-circuited, and global
-  restoration.
+  merged editor settings, local theme style helpers, editor stylesheet
+  add/get/remove lifecycle behavior, iframe asset collection, REST preload path
+  normalization with dispatch short-circuited, and global restoration.
 - `capabilities`: no-DB role registry lifecycle and mutation idempotence,
   numeric/associative and boundary capability grants, `WP_User` role/direct cap
   aggregation and mutators, `WP_User::for_site()` cap-key isolation,

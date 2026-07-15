@@ -35,6 +35,7 @@ final class BlockEditorAdjunctsSurface {
 			$rows[] = self::check_context_filters( $ctx, $case );
 			$rows[] = self::check_editor_settings_merge( $ctx, $case );
 			$rows[] = self::check_theme_styles_and_iframed_assets( $ctx, $case );
+			$rows[] = self::check_editor_stylesheet_lifecycle( $ctx, $case );
 			$rows[] = self::check_rest_preload_paths( $ctx, $case );
 			$rows[] = self::check_block_tree_helpers( $ctx, $case );
 		} catch ( \Throwable $e ) {
@@ -97,9 +98,11 @@ final class BlockEditorAdjunctsSurface {
 		foreach (
 			array(
 				'_wp_get_iframed_editor_assets',
+				'add_editor_style',
 				'add_filter',
 				'add_theme_support',
 				'block_editor_rest_api_preload',
+				'current_theme_supports',
 				'get_allowed_block_types',
 				'get_block_categories',
 				'get_block_editor_settings',
@@ -108,10 +111,19 @@ final class BlockEditorAdjunctsSurface {
 				'get_default_block_categories',
 				'get_default_block_editor_settings',
 				'get_legacy_widget_block_editor_settings',
+				'get_editor_stylesheets',
+				'get_stylesheet',
+				'get_stylesheet_directory',
+				'get_stylesheet_directory_uri',
+				'get_template',
+				'get_template_directory',
+				'get_template_directory_uri',
 				'has_filter',
 				'parse_blocks',
 				'register_block_type',
+				'remove_editor_styles',
 				'remove_filter',
+				'sanitize_url',
 				'serialize_blocks',
 				'unregister_block_type',
 				'wp_add_inline_style',
@@ -439,6 +451,215 @@ final class BlockEditorAdjunctsSurface {
 		);
 	}
 
+	private static function check_editor_stylesheet_lifecycle( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures = array();
+
+		$theme_root  = $case['tempRoot'] . DIRECTORY_SEPARATOR . 'editor-stylesheet-lifecycle';
+		$parent_slug = 'cfz-parent-' . $case['slug'];
+		$child_slug  = 'cfz-child-' . $case['slug'];
+		$parent_dir  = $theme_root . DIRECTORY_SEPARATOR . $parent_slug;
+		$child_dir   = $theme_root . DIRECTORY_SEPARATOR . $child_slug;
+		$parent_uri  = 'https://themes.example.test/component-fuzz/' . rawurlencode( $parent_slug );
+		$child_uri   = 'https://themes.example.test/component-fuzz/' . rawurlencode( $child_slug );
+
+		self::write_file( $parent_dir . DIRECTORY_SEPARATOR . 'style.css', "/* Component fuzz parent theme. */\n" );
+		self::write_file( $parent_dir . DIRECTORY_SEPARATOR . 'shared.css', '.component-fuzz-parent-shared{display:block;}' );
+		self::write_file( $child_dir . DIRECTORY_SEPARATOR . 'style.css', "/* Component fuzz child theme. */\n" );
+		self::write_file( $child_dir . DIRECTORY_SEPARATOR . 'shared.css', '.component-fuzz-child-shared{display:block;}' );
+		self::write_file( $child_dir . DIRECTORY_SEPARATOR . 'child.css', '.component-fuzz-child-only{display:block;}' );
+
+		$external_url        = 'https://cdn.example.test/editor.css';
+		$filter_extra_url    = \sanitize_url( 'https://cdn.example.test/editor-extra.css?component=' . rawurlencode( $case['slug'] ) );
+		$editor_style_inputs = array(
+			$external_url,
+			'shared.css',
+			'child.css',
+			'shared.css',
+			'missing.css',
+			'',
+		);
+		$expected_stylesheets = array(
+			\sanitize_url( $external_url ),
+			$parent_uri . '/shared.css',
+			$child_uri . '/shared.css',
+			$child_uri . '/child.css',
+		);
+		$expected_filtered_stylesheets = array_merge( $expected_stylesheets, array( $filter_extra_url ) );
+
+		$seen_stylesheet_payloads = array();
+		$stylesheet_filter        = static function () use ( $child_slug ): string {
+			return $child_slug;
+		};
+		$template_filter          = static function () use ( $parent_slug ): string {
+			return $parent_slug;
+		};
+		$stylesheet_dir_filter    = static function ( string $path, string $stylesheet, string $theme_root_path ) use ( $child_dir ): string {
+			unset( $path, $stylesheet, $theme_root_path );
+			return $child_dir;
+		};
+		$template_dir_filter      = static function ( string $path, string $template, string $theme_root_path ) use ( $parent_dir ): string {
+			unset( $path, $template, $theme_root_path );
+			return $parent_dir;
+		};
+		$stylesheet_uri_filter    = static function ( string $uri, string $stylesheet, string $theme_root_uri ) use ( $child_uri ): string {
+			unset( $uri, $stylesheet, $theme_root_uri );
+			return $child_uri;
+		};
+		$template_uri_filter      = static function ( string $uri, string $template, string $theme_root_uri ) use ( $parent_uri ): string {
+			unset( $uri, $template, $theme_root_uri );
+			return $parent_uri;
+		};
+		$editor_stylesheets_filter = static function ( array $stylesheets ) use ( &$seen_stylesheet_payloads, $filter_extra_url ): array {
+			$seen_stylesheet_payloads[] = $stylesheets;
+			$stylesheets[]             = $filter_extra_url;
+			return $stylesheets;
+		};
+
+		$filters = array(
+			array( 'pre_option_stylesheet', $stylesheet_filter, 10, 1 ),
+			array( 'stylesheet', $stylesheet_filter, 10, 1 ),
+			array( 'pre_option_template', $template_filter, 10, 1 ),
+			array( 'template', $template_filter, 10, 1 ),
+			array( 'stylesheet_directory', $stylesheet_dir_filter, 10, 3 ),
+			array( 'template_directory', $template_dir_filter, 10, 3 ),
+			array( 'stylesheet_directory_uri', $stylesheet_uri_filter, 10, 3 ),
+			array( 'template_directory_uri', $template_uri_filter, 10, 3 ),
+			array( 'editor_stylesheets', $editor_stylesheets_filter, 10, 1 ),
+		);
+		$local_globals = self::snapshot_globals(
+			array(
+				'editor_styles',
+				'_wp_theme_features',
+				'wp_stylesheet_path',
+				'wp_template_path',
+			)
+		);
+
+		$theme_identity_ok        = false;
+		$editor_styles_after_add  = null;
+		$support_after_add        = null;
+		$stylesheets              = null;
+		$first_remove             = null;
+		$second_remove            = null;
+		$support_after_first_remove = null;
+		$support_after_second_remove = null;
+
+		try {
+			if ( ! isset( $GLOBALS['_wp_theme_features'] ) || ! is_array( $GLOBALS['_wp_theme_features'] ) ) {
+				$GLOBALS['_wp_theme_features'] = array();
+			}
+			unset( $GLOBALS['_wp_theme_features']['editor-style'] );
+
+			$GLOBALS['editor_styles']      = array();
+			$GLOBALS['wp_stylesheet_path'] = $child_dir;
+			$GLOBALS['wp_template_path']   = $parent_dir;
+
+			foreach ( $filters as $filter ) {
+				\add_filter( $filter[0], $filter[1], $filter[2], $filter[3] );
+			}
+
+			$theme_identity_ok = $child_slug === \get_stylesheet()
+				&& $parent_slug === \get_template()
+				&& $child_dir === \get_stylesheet_directory()
+				&& $parent_dir === \get_template_directory()
+				&& $child_uri === \get_stylesheet_directory_uri()
+				&& $parent_uri === \get_template_directory_uri();
+
+			\add_editor_style( $editor_style_inputs );
+
+			$editor_styles_after_add = $GLOBALS['editor_styles'] ?? null;
+			$support_after_add       = \current_theme_supports( 'editor-style' );
+			$stylesheets             = \get_editor_stylesheets();
+			$first_remove            = \remove_editor_styles();
+			$support_after_first_remove = \current_theme_supports( 'editor-style' );
+			$second_remove              = \remove_editor_styles();
+			$support_after_second_remove = \current_theme_supports( 'editor-style' );
+		} finally {
+			self::remove_filters( $filters );
+			self::restore_globals( $local_globals );
+		}
+
+		$local_globals_restored = true;
+		foreach ( $local_globals as $name => $entry ) {
+			if ( ! self::global_restored( $name, $entry['exists'], $entry['value'] ) ) {
+				$local_globals_restored = false;
+				break;
+			}
+		}
+
+		self::record_if_false(
+			$failures,
+			$theme_identity_ok,
+			'editor stylesheet lifecycle forces child and parent theme identities, paths, and URIs',
+			array(
+				'stylesheet'          => $child_slug,
+				'template'            => $parent_slug,
+				'stylesheetDirectory' => self::preview( $child_dir ),
+				'templateDirectory'   => self::preview( $parent_dir ),
+			)
+		);
+
+		self::record_if_false(
+			$failures,
+			true === $support_after_add
+				&& is_array( $editor_styles_after_add )
+				&& $editor_style_inputs === array_slice( $editor_styles_after_add, -count( $editor_style_inputs ) ),
+			'add_editor_style enables editor-style support and appends generated stylesheet entries',
+			array(
+				'supportAfterAdd' => $support_after_add,
+				'editorStyles'    => $editor_styles_after_add,
+			)
+		);
+
+		self::record_if_false(
+			$failures,
+			$expected_filtered_stylesheets === $stylesheets
+				&& array( $expected_stylesheets ) === $seen_stylesheet_payloads,
+			'get_editor_stylesheets returns sanitized external, parent, child, and filtered stylesheet URLs',
+			array(
+				'expected'      => $expected_filtered_stylesheets,
+				'actual'        => $stylesheets,
+				'filterPayload' => $seen_stylesheet_payloads,
+			)
+		);
+
+		self::record_if_false(
+			$failures,
+			true === $first_remove
+				&& false === $support_after_first_remove
+				&& false === $second_remove
+				&& false === $support_after_second_remove,
+			'remove_editor_styles removes editor-style support once and then reports absent support',
+			array(
+				'firstRemove'              => $first_remove,
+				'supportAfterFirstRemove'  => $support_after_first_remove,
+				'secondRemove'             => $second_remove,
+				'supportAfterSecondRemove' => $support_after_second_remove,
+			)
+		);
+
+		self::record_if_false(
+			$failures,
+			$local_globals_restored && self::filters_removed( $filters ),
+			'editor stylesheet lifecycle restores filters and local theme globals',
+			array(
+				'globalsRestored' => $local_globals_restored,
+				'filtersRemoved'  => self::filters_removed( $filters ),
+				'trackedGlobals'  => array_keys( $local_globals ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'block-editor-adjuncts.editor-stylesheets.lifecycle-parent-child-filtered-restoring',
+			$failures,
+			array(
+				'parentStyle' => self::preview( $parent_dir . DIRECTORY_SEPARATOR . 'shared.css' ),
+				'childStyle'  => self::preview( $child_dir . DIRECTORY_SEPARATOR . 'child.css' ),
+			)
+		);
+	}
+
 	private static function check_rest_preload_paths( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
 		$failures = array();
 		self::prepare_asset_globals();
@@ -673,6 +894,7 @@ final class BlockEditorAdjunctsSurface {
 
 		return array(
 			'slug'                    => $slug,
+			'tempRoot'                => $temp_root,
 			'settingsContext'         => new \WP_Block_Editor_Context(
 				array(
 					'name' => 'core/edit-site',
@@ -1506,6 +1728,8 @@ final class BlockEditorAdjunctsSurface {
 					'post',
 					'post_ID',
 					'editor_styles',
+					'wp_stylesheet_path',
+					'wp_template_path',
 					'wp_theme_directories',
 					'_wp_theme_features',
 					'_wp_additional_image_sizes',
