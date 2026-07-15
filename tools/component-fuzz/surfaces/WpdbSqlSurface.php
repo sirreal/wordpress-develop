@@ -37,6 +37,7 @@ final class WpdbSqlSurface {
 			$rows[] = self::check_malformed_placeholders_fail_closed( $ctx, $db, self::malformed_prepare_cases( $ctx->fork( 'malformed' ) ) );
 			$rows[] = self::check_sql_builders_are_capturable( $ctx, $db, self::generate_builder_cases( $ctx->fork( 'builders' ) ) );
 			$rows[] = self::check_builder_null_formats_are_type_agnostic( $ctx, $db );
+			$rows[] = self::check_charset_invalid_text_oracles( $ctx->fork( 'charset-invalid-text' ), $db );
 		} finally {
 			self::restore_globals( $snapshot );
 		}
@@ -553,6 +554,232 @@ final class WpdbSqlSurface {
 			array(
 				'methods' => array_keys( $builder_calls ),
 				'formats' => array( '%s', '%d', '%f' ),
+			)
+		);
+	}
+
+	private static function check_charset_invalid_text_oracles( \ComponentFuzz\FuzzContext $ctx, WpdbSqlNoConnectionWpdb $db ): array {
+		if ( ! function_exists( 'mb_strlen' ) || ! function_exists( 'mb_substr' ) ) {
+			return $ctx->skip(
+				'wpdb-sql.charset.invalid-text-local-mbstring-available',
+				'Local mbstring UTF-8 helpers are unavailable for no-DB invalid-text coverage.'
+			);
+		}
+
+		$failures = array();
+		$db->reset_capture();
+		$db->reset_metadata();
+
+		foreach ( self::ascii_probe_cases( $ctx->fork( 'ascii-probes' ) ) as $case ) {
+			$actual = $db->fuzz_check_ascii( $case['value'] );
+			if ( $actual !== $case['expected'] ) {
+				$failures[] = array(
+					'name'     => 'check-ascii-mismatch',
+					'case'     => $case['name'],
+					'value'    => self::describe_string( $case['value'] ),
+					'expected' => $case['expected'],
+					'actual'   => $actual,
+				);
+			}
+		}
+
+		$strip_input    = array();
+		$strip_expected = array();
+		foreach ( self::strip_invalid_text_cases( $ctx->fork( 'strip-cases' ) ) as $case ) {
+			$strip_input[ $case['field'] ] = array(
+				'value'   => $case['value'],
+				'charset' => $case['charset'],
+				'length'  => $case['length'],
+			);
+			$strip_expected[ $case['field'] ] = $case['expected'];
+		}
+
+		$strip_actual = $db->fuzz_strip_invalid_text( $strip_input );
+		if ( is_wp_error( $strip_actual ) ) {
+			$failures[] = array(
+				'name'  => 'strip-invalid-text-wp-error',
+				'error' => $strip_actual->get_error_code(),
+			);
+		} elseif ( ! is_array( $strip_actual ) ) {
+			$failures[] = array(
+				'name'   => 'strip-invalid-text-non-array',
+				'actual' => self::describe_value( $strip_actual ),
+			);
+		} else {
+			foreach ( $strip_expected as $field => $expected ) {
+				$actual = $strip_actual[ $field ]['value'] ?? null;
+				if ( $actual !== $expected ) {
+					$failures[] = array(
+						'name'     => 'strip-invalid-text-mismatch',
+						'field'    => $field,
+						'expected' => self::describe_value( $expected ),
+						'actual'   => self::describe_value( $actual ),
+						'input'    => self::describe_value( $strip_input[ $field ]['value'] ),
+					);
+				}
+			}
+		}
+
+		$table       = self::safe_identifier( $ctx->fork( 'charset-table' ), 'cfz_charset_table' );
+		$title_col   = self::safe_identifier( $ctx->fork( 'title-column' ), 'cfz_title' );
+		$body_col    = self::safe_identifier( $ctx->fork( 'body-column' ), 'cfz_body' );
+		$count_col   = self::safe_identifier( $ctx->fork( 'count-column' ), 'cfz_count' );
+		$ratio_col   = self::safe_identifier( $ctx->fork( 'ratio-column' ), 'cfz_ratio' );
+		$null_col    = self::safe_identifier( $ctx->fork( 'null-column' ), 'cfz_null' );
+		$id_col      = self::safe_identifier( $ctx->fork( 'id-column' ), 'cfz_id' );
+		$numeric_col = self::safe_identifier( $ctx->fork( 'numeric-column' ), 'cfz_numeric' );
+
+		$db->configure_column( $table, $title_col, 'utf8mb4', array( 'type' => 'char', 'length' => 8 ) );
+		$db->configure_column( $table, $body_col, 'utf8', array( 'type' => 'char', 'length' => 12 ) );
+		$db->configure_column( $table, $count_col, false, false );
+		$db->configure_column( $table, $ratio_col, false, false );
+		$db->configure_column( $table, $null_col, 'utf8mb4', false );
+		$db->configure_column( $table, $id_col, false, false );
+		$db->configure_column( $table, $numeric_col, false, false );
+
+		$invalid_utf8 = "ok\xf0\x9f\x98\x88tail";
+		$too_long     = 'valid-' . str_repeat( 'x', 24 );
+		$valid_data   = array(
+			$title_col => 'ok-' . $ctx->int( 100, 999 ),
+			$count_col => (string) $ctx->int( 10, 99 ),
+			$ratio_col => (string) ( $ctx->int( 100, 999 ) / 10 ),
+			$null_col  => null,
+		);
+		$valid_formats = array( '%s', '%d', '%f', '%s' );
+
+		foreach (
+			array(
+				'insert-invalid-utf8' => array(
+					'method' => 'insert',
+					'data'   => array(
+						$title_col => 'valid',
+						$body_col  => $invalid_utf8,
+					),
+					'where'  => array(),
+					'fields' => array( $body_col ),
+				),
+				'replace-truncates'   => array(
+					'method' => 'replace',
+					'data'   => array(
+						$title_col => $too_long,
+						$body_col  => 'valid',
+					),
+					'where'  => array(),
+					'fields' => array( $title_col ),
+				),
+				'update-two-fields'   => array(
+					'method' => 'update',
+					'data'   => array(
+						$title_col => $too_long,
+						$body_col  => $invalid_utf8,
+					),
+					'where'  => array( $id_col => 7 ),
+					'fields' => array( $title_col, $body_col ),
+				),
+			) as $case_name => $case
+		) {
+			$db->reset_capture();
+			if ( 'update' === $case['method'] ) {
+				$result = $db->update( $table, $case['data'], $case['where'], array( '%s', '%s' ), array( '%d' ) );
+			} else {
+				$result = $db->{$case['method']}( $table, $case['data'], array_fill( 0, count( $case['data'] ), '%s' ) );
+			}
+
+			$captured = $db->captured_queries();
+			$missing  = array();
+			foreach ( $case['fields'] as $field ) {
+				if ( ! str_contains( $db->last_error, $field ) ) {
+					$missing[] = $field;
+				}
+			}
+
+			if ( false !== $result || array() !== $captured || '' === $db->last_error || array() !== $missing ) {
+				$failures[] = array(
+					'name'          => 'crud-invalid-text-did-not-fail-closed',
+					'case'          => $case_name,
+					'method'        => $case['method'],
+					'result'        => $result,
+					'capturedCount' => count( $captured ),
+					'lastError'     => self::describe_string( $db->last_error ),
+					'missingFields' => $missing,
+				);
+			}
+		}
+
+		foreach (
+			array(
+				'insert-valid'  => static function () use ( $db, $table, $valid_data, $valid_formats ) {
+					return $db->insert( $table, $valid_data, $valid_formats );
+				},
+				'replace-valid' => static function () use ( $db, $table, $valid_data, $valid_formats ) {
+					return $db->replace( $table, $valid_data, $valid_formats );
+				},
+				'update-valid'  => static function () use ( $db, $table, $valid_data, $valid_formats, $id_col ) {
+					return $db->update( $table, $valid_data, array( $id_col => '9' ), $valid_formats, array( '%d' ) );
+				},
+			) as $case_name => $callback
+		) {
+			$db->reset_capture();
+			$result   = $callback();
+			$captured = $db->captured_queries();
+			$sql      = $captured[0] ?? '';
+
+			if ( 1 !== $result || 1 !== count( $captured ) || '' !== $db->last_error || self::contains_placeholder_outside_literals( $sql ) ) {
+				$failures[] = array(
+					'name'          => 'crud-valid-text-not-captured-once',
+					'case'          => $case_name,
+					'result'        => $result,
+					'capturedCount' => count( $captured ),
+					'lastError'     => self::describe_string( $db->last_error ),
+					'sql'           => self::describe_sql( $sql ),
+				);
+			}
+		}
+
+		$db->reset_capture();
+		$column_string     = $db->strip_invalid_text_for_column( $table, $body_col, "A\xf0\x9f\x98\x88B€CD" );
+		$column_mb4        = $db->strip_invalid_text_for_column( $table, $title_col, str_repeat( '𝟜', 9 ) );
+		$column_number     = $db->strip_invalid_text_for_column( $table, $numeric_col, 'not-truncated-' . str_repeat( 'x', 20 ) );
+		$column_non_string = $db->strip_invalid_text_for_column( $table, $body_col, 12345 );
+
+		if ( 'AB€CD' !== $column_string || str_repeat( '𝟜', 8 ) !== $column_mb4 || 'not-truncated-' . str_repeat( 'x', 20 ) !== $column_number || 12345 !== $column_non_string ) {
+			$failures[] = array(
+				'name'            => 'strip-invalid-text-for-column-mismatch',
+				'columnString'    => self::describe_value( $column_string ),
+				'columnMb4'       => self::describe_value( $column_mb4 ),
+				'columnNumber'    => self::describe_value( $column_number ),
+				'columnNonString' => self::describe_value( $column_non_string ),
+			);
+		}
+
+		$db->configure_table_charset( $table, 'utf8' );
+		$query_invalid  = "INSERT INTO {$table} ({$body_col}) VALUES ('A\xf0\x9f\x98\x88B')";
+		$query_stripped = $db->fuzz_strip_invalid_text_from_query( $query_invalid );
+		$query_schema   = $db->fuzz_strip_invalid_text_from_query( "SHOW FULL COLUMNS FROM {$table}" );
+		$db->configure_table_charset( $table, 'binary' );
+		$query_binary = $db->fuzz_strip_invalid_text_from_query( $query_invalid );
+
+		if ( "INSERT INTO {$table} ({$body_col}) VALUES ('AB')" !== $query_stripped || "SHOW FULL COLUMNS FROM {$table}" !== $query_schema || $query_invalid !== $query_binary ) {
+			$failures[] = array(
+				'name'          => 'strip-invalid-text-from-query-mismatch',
+				'queryInvalid'  => self::describe_sql( $query_invalid ),
+				'queryStripped' => self::describe_value( $query_stripped ),
+				'querySchema'   => self::describe_value( $query_schema ),
+				'queryBinary'   => self::describe_value( $query_binary ),
+			);
+		}
+
+		$db->reset_metadata();
+		$db->reset_capture();
+
+		return self::check_row(
+			$ctx,
+			'charset.invalid_text_ascii_crud_and_column_oracles',
+			$failures,
+			array(
+				'asciiCases' => count( self::ascii_probe_cases( $ctx->fork( 'ascii-count' ) ) ),
+				'stripCases' => count( $strip_input ),
+				'crudCases'  => 6,
 			)
 		);
 	}
@@ -1084,6 +1311,113 @@ final class WpdbSqlSurface {
 		);
 	}
 
+	private static function ascii_probe_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		return array(
+			array(
+				'name'     => 'empty-string',
+				'value'    => '',
+				'expected' => true,
+			),
+			array(
+				'name'     => 'nul-and-del-are-ascii',
+				'value'    => "\x00A\x7F",
+				'expected' => true,
+			),
+			array(
+				'name'     => 'generated-ascii',
+				'value'    => $ctx->ascii( 1, 32 ),
+				'expected' => true,
+			),
+			array(
+				'name'     => 'high-byte',
+				'value'    => "A\x80B",
+				'expected' => false,
+			),
+			array(
+				'name'     => 'valid-utf8-non-ascii',
+				'value'    => 'Euro €',
+				'expected' => false,
+			),
+		);
+	}
+
+	private static function strip_invalid_text_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$ascii_suffix = $ctx->ascii( 0, 4 );
+
+		return array(
+			array(
+				'field'    => 'latin1_any_bytes',
+				'charset'  => 'latin1',
+				'value'    => "\xf0\x9f\x8e\xb7" . $ascii_suffix,
+				'expected' => "\xf0\x9f\x8e\xb7" . $ascii_suffix,
+				'length'   => array( 'type' => 'char', 'length' => 100 ),
+			),
+			array(
+				'field'    => 'latin1_byte_truncate',
+				'charset'  => 'latin1',
+				'value'    => 'abcdef',
+				'expected' => 'abcd',
+				'length'   => array( 'type' => 'byte', 'length' => 4 ),
+			),
+			array(
+				'field'    => 'false_charset_passthrough',
+				'charset'  => false,
+				'value'    => "not-a-string-column\xf0\xff",
+				'expected' => "not-a-string-column\xf0\xff",
+				'length'   => false,
+			),
+			array(
+				'field'    => 'non_string_passthrough',
+				'charset'  => 'utf8',
+				'value'    => 12345,
+				'expected' => 12345,
+				'length'   => array( 'type' => 'char', 'length' => 1 ),
+			),
+			array(
+				'field'    => 'utf8_rejects_four_byte_and_malformed',
+				'charset'  => 'utf8',
+				'value'    => "H€llo\xf0\x9f\x98\x88World¢\xf0\xff\xff\xff",
+				'expected' => 'H€lloWorld¢',
+				'length'   => array( 'type' => 'char', 'length' => 100 ),
+			),
+			array(
+				'field'    => 'utf8mb3_rejects_four_byte',
+				'charset'  => 'utf8mb3',
+				'value'    => "A\xf0\x9f\x98\x88B€",
+				'expected' => 'AB€',
+				'length'   => array( 'type' => 'char', 'length' => 100 ),
+			),
+			array(
+				'field'    => 'utf8_byte_truncate_no_partial',
+				'charset'  => 'utf8',
+				'value'    => str_repeat( '３', 4 ),
+				'expected' => '３３',
+				'length'   => array( 'type' => 'byte', 'length' => 7 ),
+			),
+			array(
+				'field'    => 'utf8_char_truncate',
+				'charset'  => 'utf8',
+				'value'    => str_repeat( '²３', 4 ),
+				'expected' => '²３²３²',
+				'length'   => array( 'type' => 'char', 'length' => 5 ),
+			),
+			array(
+				'field'    => 'utf8mb4_keeps_four_byte',
+				'charset'  => 'utf8mb4',
+				'value'    => "H€llo\xf0\x9f\x98\x88World¢",
+				'expected' => "H€llo\xf0\x9f\x98\x88World¢",
+				'length'   => array( 'type' => 'char', 'length' => 100 ),
+			),
+			array(
+				'field'    => 'utf8mb4_byte_truncate_no_partial',
+				'charset'  => 'utf8mb4',
+				'value'    => str_repeat( '𝟜', 4 ),
+				'expected' => '𝟜𝟜',
+				'length'   => array( 'type' => 'byte', 'length' => 10 ),
+			),
+		);
+	}
+
 	private static function safe_identifier( \ComponentFuzz\FuzzContext $ctx, string $prefix ): string {
 		$suffix = strtolower( preg_replace( '/[^A-Za-z0-9_]/', '_', $ctx->identifier( 4, 12 ) ) );
 		$value  = strtolower( preg_replace( '/[^A-Za-z0-9_]/', '_', $prefix . '_' . $suffix ) );
@@ -1550,6 +1884,12 @@ final class WpdbSqlNoConnectionWpdb extends \wpdb {
 	/** @var array<int,string> */
 	private array $captured_queries = array();
 
+	/** @var array<string,array<string,string|false>> */
+	private array $column_charsets = array();
+
+	/** @var array<string,array<string,array<string,int|string>|false>> */
+	private array $column_lengths = array();
+
 	public function __construct() {
 		$this->ready           = true;
 		$this->suppress_errors = true;
@@ -1578,18 +1918,62 @@ final class WpdbSqlNoConnectionWpdb extends \wpdb {
 		return $this->add_placeholder_escape( addslashes( (string) $data ) );
 	}
 
+	public function configure_column( string $table, string $column, $charset, $length ): void {
+		$table_key  = strtolower( $table );
+		$column_key = strtolower( $column );
+
+		$this->column_charsets[ $table_key ][ $column_key ] = $charset;
+		$this->column_lengths[ $table_key ][ $column_key ]  = $length;
+	}
+
+	public function configure_table_charset( string $table, $charset ): void {
+		$this->table_charset[ strtolower( $table ) ] = $charset;
+	}
+
+	public function reset_metadata(): void {
+		$this->column_charsets = array();
+		$this->column_lengths  = array();
+		$this->table_charset   = array();
+		$this->col_meta        = array();
+		$this->charset         = 'utf8mb4';
+		$this->collate         = 'utf8mb4_unicode_ci';
+		$this->check_current_query = true;
+	}
+
 	public function get_col_charset( $table, $column ) {
-		unset( $table, $column );
+		$table_key  = strtolower( (string) $table );
+		$column_key = strtolower( (string) $column );
+		if ( array_key_exists( $table_key, $this->column_charsets ) && array_key_exists( $column_key, $this->column_charsets[ $table_key ] ) ) {
+			return $this->column_charsets[ $table_key ][ $column_key ];
+		}
+
 		return 'utf8mb4';
 	}
 
 	public function get_col_length( $table, $column ) {
-		unset( $table, $column );
+		$table_key  = strtolower( (string) $table );
+		$column_key = strtolower( (string) $column );
+		if ( array_key_exists( $table_key, $this->column_lengths ) && array_key_exists( $column_key, $this->column_lengths[ $table_key ] ) ) {
+			return $this->column_lengths[ $table_key ][ $column_key ];
+		}
+
 		return false;
 	}
 
+	public function fuzz_check_ascii( string $input ): bool {
+		return $this->check_ascii( $input );
+	}
+
+	public function fuzz_strip_invalid_text( array $data ) {
+		return parent::strip_invalid_text( $data );
+	}
+
+	public function fuzz_strip_invalid_text_from_query( string $query ) {
+		return parent::strip_invalid_text_from_query( $query );
+	}
+
 	protected function strip_invalid_text( $data ) {
-		return $data;
+		return parent::strip_invalid_text( $data );
 	}
 
 	public function query( $query ) {
@@ -1603,10 +1987,12 @@ final class WpdbSqlNoConnectionWpdb extends \wpdb {
 	}
 
 	public function reset_capture(): void {
-		$this->captured_queries = array();
-		$this->last_query       = '';
-		$this->last_error       = '';
-		$this->rows_affected    = 0;
+		$this->captured_queries    = array();
+		$this->last_query          = '';
+		$this->last_error          = '';
+		$this->last_result         = array();
+		$this->check_current_query = true;
+		$this->rows_affected       = 0;
 	}
 
 	public function captured_queries(): array {

@@ -914,7 +914,10 @@ database, network requests, or a configured site.
   placeholder count/type handling, `%i` identifier containment, literal percent
   and LIKE escaping, malformed placeholders, and captured insert/update/delete/
   replace builder SQL shape, including null values across string, integer, and
-  float builder formats.
+  float builder formats, plus no-DB charset and invalid-text coverage for
+  `check_ascii()`, `strip_invalid_text()`, CRUD fail-closed behavior on stripped
+  or truncated `%s` fields, `strip_invalid_text_for_column()`, and guarded query
+  invalid-text stripping over deterministic column/table metadata fixtures.
 - `wxr-export`: subprocess-isolated WXR export coverage over deterministic
   synthetic posts, terms, authors, comments, and meta, including export
   argument filtering, title/content/excerpt export filters, XML/CDATA/UTF-8
