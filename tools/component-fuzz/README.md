@@ -564,10 +564,11 @@ database, network requests, or a configured site.
   unique filenames, generated collision/alternate-extension filename oracles,
   callback/filter contracts, `wp_upload_bits()` exact-byte writes, filtered
   upload roots, virtual subsize collision file-list short-circuits,
-  upload-bits and final upload filter payloads, sideload handling, multisite
-  upload quota, remaining-space, size-limit, network upload MIME allowlists,
-  direct file-too-large checks, `check_upload_size()` error/state behavior, and
-  over-quota helpers.
+  upload-bits and final upload filter payloads, sideload success plus
+  form-action, prefilter, override, MIME rejection, custom error-handler, and
+  final upload filter contracts, multisite upload quota, remaining-space,
+  size-limit, network upload MIME allowlists, direct file-too-large checks,
+  `check_upload_size()` error/state behavior, and over-quota helpers.
 - `options-autoload`: no-DB option CRUD, cache, autoload, and filter coverage
   for generated option values, including alloptions membership, notoptions
   transitions, raw serialized cache shape, default/pre/update filters, cache

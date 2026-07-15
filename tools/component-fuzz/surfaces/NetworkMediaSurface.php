@@ -49,6 +49,7 @@ final class NetworkMediaSurface {
 				self::exercise_filetype_and_unique_apis( $rng, $result, $temp_root );
 				self::exercise_upload_bits_helpers( $rng, $result, $temp_root );
 				self::exercise_sideload_helpers( $rng, $result, $temp_root );
+				self::exercise_sideload_error_filter_contracts( $rng, $result, $temp_root );
 			}
 		} finally {
 			if ( null !== $temp_root ) {
@@ -2589,6 +2590,287 @@ final class NetworkMediaSurface {
 			remove_filter( 'upload_dir', array( __CLASS__, 'filter_sideload_upload_dir' ) );
 			self::$sideload_upload_root = null;
 		}
+	}
+
+	private static function exercise_sideload_error_filter_contracts( array &$rng, array &$result, string $temp_root ): void {
+		self::load_admin_file_helpers();
+
+		if ( ! function_exists( 'wp_handle_sideload' ) ) {
+			self::skip_once( $result, 'wp_handle_sideload_error_contracts', 'Function is unavailable.' );
+			return;
+		}
+		if ( ! function_exists( 'add_filter' ) || ! function_exists( 'remove_filter' ) || ! function_exists( 'has_filter' ) ) {
+			self::skip_once( $result, 'wp_handle_sideload_error_contracts', 'Filter API is unavailable.' );
+			return;
+		}
+
+		$upload_root = $temp_root . DIRECTORY_SEPARATOR . 'sideload-contract-uploads';
+		$tmp_root    = $temp_root . DIRECTORY_SEPARATOR . 'sideload-contract-tmp';
+		self::ensure_dir( $upload_root );
+		self::ensure_dir( $tmp_root );
+
+		$token           = 'cfz-' . self::rng_int( $rng, 1000, 9999 );
+		$prefilter_error = 'component-fuzz-prefilter-blocked-' . $token;
+		$time            = '2026/07';
+		$cases           = array(
+			'form'      => array(
+				'name'   => "form {$token}.txt",
+				'type'   => 'text/plain',
+				'bytes'  => "form action {$token}\n",
+				'action' => 'wrong-action-' . $token,
+			),
+			'prefilter' => array(
+				'name'   => "prefilter {$token}.txt",
+				'type'   => 'text/plain',
+				'bytes'  => "prefilter {$token}\n",
+				'action' => 'wp_handle_sideload',
+			),
+			'mime'      => array(
+				'name'   => "blocked {$token}.component-fuzz-bin",
+				'type'   => 'application/octet-stream',
+				'bytes'  => "blocked mime {$token}\n",
+				'action' => 'wp_handle_sideload',
+			),
+			'success'   => array(
+				'name'   => "allowed {$token}.txt",
+				'type'   => 'text/plain',
+				'bytes'  => "allowed sideload {$token}\n",
+				'action' => 'wp_handle_sideload',
+			),
+		);
+
+		$prefilter_calls = array();
+		$override_calls  = array();
+		$error_calls     = array();
+		$upload_calls    = array();
+		$post_snapshot   = $_POST;
+
+		$cap_filter    = static function ( array $allcaps, array $caps ): array {
+			if ( in_array( 'unfiltered_upload', $caps, true ) ) {
+				$allcaps['unfiltered_upload'] = false;
+			}
+
+			return $allcaps;
+		};
+		$error_handler = static function ( array &$file, string $message ) use ( &$error_calls ): array {
+			$error_calls[] = array(
+				'name'    => $file['name'] ?? null,
+				'tmpName' => $file['tmp_name'] ?? null,
+				'message' => $message,
+			);
+
+			return array(
+				'error'   => 'component-fuzz-upload-error',
+				'message' => $message,
+				'name'    => $file['name'] ?? null,
+			);
+		};
+		$prefilter     = static function ( array $file ) use ( &$prefilter_calls, $cases, $prefilter_error ): array {
+			$prefilter_calls[] = array(
+				'name'    => $file['name'] ?? null,
+				'tmpName' => $file['tmp_name'] ?? null,
+				'error'   => $file['error'] ?? null,
+			);
+
+			if ( $cases['prefilter']['name'] === ( $file['name'] ?? null ) ) {
+				$file['error'] = $prefilter_error;
+			}
+
+			return $file;
+		};
+		$overrides_filter = static function ( $overrides, array $file ) use ( &$override_calls, $error_handler ): array {
+			$override_calls[] = array(
+				'name'      => $file['name'] ?? null,
+				'hasError'  => isset( $file['error'] ) && 0 !== $file['error'],
+				'overrides' => is_array( $overrides ) ? array_keys( $overrides ) : $overrides,
+			);
+
+			$overrides = is_array( $overrides ) ? $overrides : array();
+			$overrides['upload_error_handler'] = $error_handler;
+
+			return $overrides;
+		};
+		$upload_filter    = static function ( array $upload, string $context ) use ( &$upload_calls ): array {
+			$upload_calls[] = array(
+				'upload'  => $upload,
+				'context' => $context,
+			);
+
+			return $upload;
+		};
+
+		$before_upload_dir = \has_filter( 'upload_dir', array( __CLASS__, 'filter_sideload_upload_dir' ) );
+		$before_prefilter  = \has_filter( 'wp_handle_sideload_prefilter', $prefilter );
+		$before_overrides  = \has_filter( 'wp_handle_sideload_overrides', $overrides_filter );
+		$before_upload     = \has_filter( 'wp_handle_upload', $upload_filter );
+		$before_cap_filter = \has_filter( 'user_has_cap', $cap_filter );
+
+		self::$sideload_upload_root = $upload_root;
+		\add_filter( 'user_has_cap', $cap_filter, 10, 2 );
+		\add_filter( 'upload_dir', array( __CLASS__, 'filter_sideload_upload_dir' ) );
+		\add_filter( 'wp_handle_sideload_prefilter', $prefilter );
+		\add_filter( 'wp_handle_sideload_overrides', $overrides_filter, 10, 2 );
+		\add_filter( 'wp_handle_upload', $upload_filter, 10, 2 );
+
+		$results = array();
+		$files   = array();
+
+		try {
+			foreach ( $cases as $name => $case ) {
+				++$result['caseCount'];
+				self::feature( $result, 'wp_handle_sideload:error-filter-contracts' );
+
+				$tmp_name = $tmp_root . DIRECTORY_SEPARATOR . $name . '.tmp';
+				file_put_contents( $tmp_name, $case['bytes'] );
+
+				$file = array(
+					'name'     => $case['name'],
+					'type'     => $case['type'],
+					'tmp_name' => $tmp_name,
+					'error'    => 0,
+					'size'     => strlen( $case['bytes'] ),
+				);
+				$files[ $name ] = $file;
+
+				$_POST['action'] = $case['action'];
+				$overrides       = array(
+					'test_form'            => true,
+					'test_type'            => true,
+					'mimes'                => 'mime' === $name ? array( 'txt' => 'text/plain' ) : array( 'txt|asc|c|cc|h|srt' => 'text/plain' ),
+					'upload_error_handler' => $error_handler,
+				);
+
+				$results[ $name ] = self::call_api(
+					$result,
+					'wp_handle_sideload.' . $name,
+					$case,
+					static function () use ( &$file, $overrides, $time ) {
+						return wp_handle_sideload( $file, $overrides, $time );
+					}
+				);
+			}
+		} finally {
+			$_POST = $post_snapshot;
+			\remove_filter( 'wp_handle_upload', $upload_filter, 10 );
+			\remove_filter( 'wp_handle_sideload_overrides', $overrides_filter, 10 );
+			\remove_filter( 'wp_handle_sideload_prefilter', $prefilter );
+			\remove_filter( 'upload_dir', array( __CLASS__, 'filter_sideload_upload_dir' ) );
+			\remove_filter( 'user_has_cap', $cap_filter, 10 );
+			self::$sideload_upload_root = null;
+		}
+
+		$form_value      = $results['form']['value'] ?? null;
+		$prefilter_value = $results['prefilter']['value'] ?? null;
+		$mime_value      = $results['mime']['value'] ?? null;
+		$success_value   = $results['success']['value'] ?? null;
+		$success_file    = is_array( $success_value ) && isset( $success_value['file'] ) ? (string) $success_value['file'] : '';
+
+		self::check_invariant(
+			$result,
+			$results['form']['ok']
+				&& is_array( $form_value )
+				&& 'component-fuzz-upload-error' === ( $form_value['error'] ?? null )
+				&& is_string( $form_value['message'] ?? null )
+				&& is_file( $files['form']['tmp_name'] ),
+			'wp_handle_sideload:form-action-mismatch-custom-error',
+			$cases['form'],
+			array(
+				'result'    => $form_value,
+				'tmpExists' => is_file( $files['form']['tmp_name'] ),
+			)
+		);
+
+		self::check_invariant(
+			$result,
+			$results['prefilter']['ok']
+				&& is_array( $prefilter_value )
+				&& 'component-fuzz-upload-error' === ( $prefilter_value['error'] ?? null )
+				&& $prefilter_error === ( $prefilter_value['message'] ?? null )
+				&& is_file( $files['prefilter']['tmp_name'] ),
+			'wp_handle_sideload:prefilter-error-short-circuits-before-move',
+			$cases['prefilter'],
+			array(
+				'result'    => $prefilter_value,
+				'tmpExists' => is_file( $files['prefilter']['tmp_name'] ),
+			)
+		);
+
+		self::check_invariant(
+			$result,
+			$results['mime']['ok']
+				&& is_array( $mime_value )
+				&& 'component-fuzz-upload-error' === ( $mime_value['error'] ?? null )
+				&& is_file( $files['mime']['tmp_name'] ),
+			'wp_handle_sideload:mime-overrides-reject-disallowed-extension',
+			$cases['mime'],
+			array(
+				'result'    => $mime_value,
+				'tmpExists' => is_file( $files['mime']['tmp_name'] ),
+			)
+		);
+
+		self::check_invariant(
+			$result,
+			$results['success']['ok']
+				&& is_array( $success_value )
+				&& ! isset( $success_value['error'] )
+				&& is_file( $success_file )
+				&& $cases['success']['bytes'] === file_get_contents( $success_file )
+				&& ! is_file( $files['success']['tmp_name'] )
+				&& 0 === strpos( self::normalize_directory_separators( $success_file ), self::normalize_directory_separators( $upload_root ) . '/' )
+				&& 1 === count( $upload_calls )
+				&& 'sideload' === ( $upload_calls[0]['context'] ?? null )
+				&& ( $upload_calls[0]['upload']['file'] ?? null ) === $success_file,
+			'wp_handle_sideload:success-filter-context-and-move-semantics',
+			$cases['success'],
+			array(
+				'result'      => $success_value,
+				'uploadCalls' => $upload_calls,
+				'tmpExists'   => is_file( $files['success']['tmp_name'] ),
+			)
+		);
+
+		self::check_invariant(
+			$result,
+			count( $prefilter_calls ) === count( $cases )
+				&& count( $override_calls ) === count( $cases )
+				&& 3 === count( $error_calls )
+				&& array( $cases['form']['name'], $cases['prefilter']['name'], $cases['mime']['name'], $cases['success']['name'] ) === array_column( $prefilter_calls, 'name' )
+				&& array( $cases['form']['name'], $cases['prefilter']['name'], $cases['mime']['name'], $cases['success']['name'] ) === array_column( $override_calls, 'name' ),
+			'wp_handle_sideload:dynamic-filter-order-and-error-handler-payloads',
+			$token,
+			array(
+				'prefilterCalls' => $prefilter_calls,
+				'overrideCalls'  => $override_calls,
+				'errorCalls'     => $error_calls,
+			)
+		);
+
+		self::check_invariant(
+			$result,
+			$post_snapshot === $_POST
+				&& $before_upload_dir === \has_filter( 'upload_dir', array( __CLASS__, 'filter_sideload_upload_dir' ) )
+				&& $before_prefilter === \has_filter( 'wp_handle_sideload_prefilter', $prefilter )
+				&& $before_overrides === \has_filter( 'wp_handle_sideload_overrides', $overrides_filter )
+				&& $before_upload === \has_filter( 'wp_handle_upload', $upload_filter )
+				&& $before_cap_filter === \has_filter( 'user_has_cap', $cap_filter ),
+			'wp_handle_sideload:post-and-filters-restored',
+			$token,
+			array(
+				'postBefore'       => $post_snapshot,
+				'postAfter'        => $_POST,
+				'uploadDirBefore'  => $before_upload_dir,
+				'uploadDirAfter'   => \has_filter( 'upload_dir', array( __CLASS__, 'filter_sideload_upload_dir' ) ),
+				'prefilterBefore'  => $before_prefilter,
+				'prefilterAfter'   => \has_filter( 'wp_handle_sideload_prefilter', $prefilter ),
+				'overridesBefore'  => $before_overrides,
+				'overridesAfter'   => \has_filter( 'wp_handle_sideload_overrides', $overrides_filter ),
+				'uploadBefore'     => $before_upload,
+				'uploadAfter'      => \has_filter( 'wp_handle_upload', $upload_filter ),
+				'capBefore'        => $before_cap_filter,
+				'capAfter'         => \has_filter( 'user_has_cap', $cap_filter ),
+			)
+		);
 	}
 
 	private static function check_filetype_shape( string $input, $value, string $invariant, array &$result ): void {
