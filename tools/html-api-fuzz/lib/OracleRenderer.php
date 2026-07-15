@@ -5,6 +5,10 @@ class OracleRenderer {
 	public const KIND_LEXBOR_SOURCE     = 'lexbor-source';
 	public const KIND_HTML5EVER_SOURCE  = 'html5ever-source';
 	public const KIND_CHROME_CDP        = 'chrome-cdp';
+	private const CHROME_LIFECYCLE_OWNER_PREFIX = 'html-api-fuzz-chrome-owner-';
+	private const CHROME_LIFECYCLE_OWNER_FILE = 'owner-token';
+	private const CHROME_LIFECYCLE_RECORD_FILE = 'lifecycle.json';
+	private const CHROME_LIFECYCLE_TEMP_FILE = 'lifecycle.json.tmp';
 	private const SOURCE_ERROR_FAILURE_CLASSES = array(
 		'oracle-parse-error',
 		'node-limit-exceeded',
@@ -74,6 +78,14 @@ class OracleRenderer {
 		if ( self::KIND_CHROME_CDP === $kind && ( null === $chrome_oracle_script || '' === $chrome_oracle_script ) ) {
 			$chrome_oracle_script = repo_root() . '/tools/html-api-fuzz/oracles/chrome/chrome-tree-oracle.js';
 		}
+		if ( self::KIND_CHROME_CDP === $kind && is_string( $chrome_oracle_script ) && '' !== $chrome_oracle_script ) {
+			$is_absolute = DIRECTORY_SEPARATOR === substr( $chrome_oracle_script, 0, 1 ) ||
+				( '\\' === DIRECTORY_SEPARATOR && 1 === preg_match( '/^[A-Za-z]:[\\\\\\/]/', $chrome_oracle_script ) );
+			$canonical = realpath( $is_absolute ? $chrome_oracle_script : repo_root() . DIRECTORY_SEPARATOR . $chrome_oracle_script );
+			if ( false !== $canonical ) {
+				$chrome_oracle_script = $canonical;
+			}
+		}
 
 		return new self(
 			$kind,
@@ -113,7 +125,7 @@ class OracleRenderer {
 
 	public static function replay_safe_document( array $document ): array {
 		foreach ( $document as $key => $value ) {
-			if ( in_array( $key, array( 'chromeSocket', 'browserPid', 'browserInstanceId' ), true ) ) {
+			if ( in_array( $key, array( 'chromeSocket', 'browserPid', 'browserInstanceId', 'serverPid' ), true ) ) {
 				unset( $document[ $key ] );
 			} elseif ( is_array( $value ) ) {
 				$document[ $key ] = self::replay_safe_document( $value );
@@ -646,9 +658,13 @@ class OracleRenderer {
 		if ( false === $encoded || ! self::write_all_until( $server['pipes'][0], $encoded . "\n", $deadline ) ) {
 			$command = $server['command'] ?? '';
 			$timed_out = microtime( true ) >= $deadline;
-			self::stop_chrome_server( $key );
-			if ( $may_retry ) {
+			$cleanup_error = self::stop_chrome_server( $key );
+			if ( $may_retry && null === $cleanup_error ) {
 				return $this->chrome_request( $request, false );
+			}
+			$stderr = 'Could not write to Chrome CDP oracle server.';
+			if ( null !== $cleanup_error ) {
+				$stderr .= ' Cleanup failed: ' . $cleanup_error;
 			}
 			return array(
 				'command'    => $command,
@@ -656,8 +672,8 @@ class OracleRenderer {
 				'timedOut'   => $timed_out,
 				'durationMs' => (int) round( ( microtime( true ) - $start ) * 1000 ),
 				'stdout'     => '',
-				'stderr'     => 'Could not write to Chrome CDP oracle server.',
-				'output'     => 'Could not write to Chrome CDP oracle server.',
+				'stderr'     => $stderr,
+				'output'     => $stderr,
 				'decoded'    => null,
 			);
 		}
@@ -671,6 +687,7 @@ class OracleRenderer {
 				$server['stdout'] = substr( $server['stdout'], $newline + 1 );
 				$decoded = json_decode( $line, true );
 				if ( is_array( $decoded ) && ( $decoded['id'] ?? null ) === $request['id'] ) {
+					self::capture_verified_chrome_server_pid( $server, $decoded );
 					$duration_ms = (int) round( ( microtime( true ) - $start ) * 1000 );
 					return array(
 						'command'    => $server['command'],
@@ -689,9 +706,12 @@ class OracleRenderer {
 			if ( ! $status['running'] ) {
 				$stderr = $server['stderr'];
 				$command = $server['command'];
-				self::stop_chrome_server( $key );
-				if ( $may_retry ) {
+				$cleanup_error = self::stop_chrome_server( $key, $status );
+				if ( $may_retry && null === $cleanup_error ) {
 					return $this->chrome_request( $request, false );
+				}
+				if ( null !== $cleanup_error ) {
+					$stderr = implode( "\n", array_filter( array( trim( $stderr ), 'Cleanup failed: ' . $cleanup_error ), 'strlen' ) );
 				}
 				return array(
 					'command'    => $command,
@@ -707,7 +727,10 @@ class OracleRenderer {
 			if ( microtime( true ) >= $deadline ) {
 				$stderr = $server['stderr'];
 				$command = $server['command'];
-				self::stop_chrome_server( $key );
+				$cleanup_error = self::stop_chrome_server( $key );
+				if ( null !== $cleanup_error ) {
+					$stderr = implode( "\n", array_filter( array( trim( $stderr ), 'Cleanup failed: ' . $cleanup_error ), 'strlen' ) );
+				}
 				return array(
 					'command'    => $command,
 					'code'       => null,
@@ -791,6 +814,298 @@ class OracleRenderer {
 		);
 	}
 
+	private static function create_chrome_lifecycle_owner( string $script ): array {
+		for ( $attempt = 0; $attempt < 100; ++$attempt ) {
+			$token = bin2hex( random_bytes( 16 ) );
+			$root = sys_get_temp_dir() . '/' . self::CHROME_LIFECYCLE_OWNER_PREFIX . $token;
+			if ( ! @mkdir( $root, 0700 ) ) {
+				continue;
+			}
+			$owner_path = $root . '/' . self::CHROME_LIFECYCLE_OWNER_FILE;
+			if ( strlen( $token ) + 1 !== @file_put_contents( $owner_path, $token . "\n", LOCK_EX ) ) {
+				@unlink( $owner_path );
+				@rmdir( $root );
+				throw new \RuntimeException( 'Could not write Chrome lifecycle ownership marker.' );
+			}
+			return array(
+				'root'       => $root,
+				'token'      => $token,
+				'ownerPath'  => $owner_path,
+				'recordPath' => $root . '/' . self::CHROME_LIFECYCLE_RECORD_FILE,
+				'tempPath'   => $root . '/' . self::CHROME_LIFECYCLE_TEMP_FILE,
+				'script'     => $script,
+			);
+		}
+		throw new \RuntimeException( 'Could not reserve a unique Chrome lifecycle ownership root.' );
+	}
+
+	private static function restore_environment( string $name, $value ): void {
+		putenv( false === $value ? $name : $name . '=' . $value );
+	}
+
+	private static function proc_open_with_chrome_lifecycle( array $command, array $spec, &$pipes, array $lifecycle ) {
+		$old_root = getenv( 'HTML_API_FUZZ_CHROME_LIFECYCLE_ROOT' );
+		$old_token = getenv( 'HTML_API_FUZZ_CHROME_LIFECYCLE_TOKEN' );
+		putenv( 'HTML_API_FUZZ_CHROME_LIFECYCLE_ROOT=' . $lifecycle['root'] );
+		putenv( 'HTML_API_FUZZ_CHROME_LIFECYCLE_TOKEN=' . $lifecycle['token'] );
+		try {
+			return proc_open( $command, $spec, $pipes, repo_root() );
+		} finally {
+			self::restore_environment( 'HTML_API_FUZZ_CHROME_LIFECYCLE_ROOT', $old_root );
+			self::restore_environment( 'HTML_API_FUZZ_CHROME_LIFECYCLE_TOKEN', $old_token );
+		}
+	}
+
+	private static function chrome_lifecycle_owner_error( array $lifecycle ): ?string {
+		if ( ! is_dir( $lifecycle['root'] ) ) {
+			return 'Chrome lifecycle ownership root is missing';
+		}
+		$owner = @file_get_contents( $lifecycle['ownerPath'] );
+		if ( ! is_string( $owner ) || trim( $owner ) !== $lifecycle['token'] ) {
+			return 'Chrome lifecycle ownership token does not match';
+		}
+		return null;
+	}
+
+	private static function read_chrome_lifecycle_record( array $lifecycle, string $path ): array {
+		$text = @file_get_contents( $path );
+		if ( ! is_string( $text ) ) {
+			return array( 'record' => null, 'error' => 'Chrome lifecycle record could not be read' );
+		}
+		$record = json_decode( $text, true );
+		if ( ! is_array( $record ) ) {
+			return array( 'record' => null, 'error' => 'Chrome lifecycle record is not valid JSON' );
+		}
+		$profile_path = $record['profilePath'] ?? null;
+		$phase = $record['phase'] ?? null;
+		$group_pid = $record['browserGroupPid'] ?? null;
+		if (
+			1 !== ( $record['schemaVersion'] ?? null ) ||
+			$lifecycle['token'] !== ( $record['token'] ?? null ) ||
+			! is_int( $record['serverPid'] ?? null ) || $record['serverPid'] < 1 ||
+			! in_array( $phase, array( 'intent', 'gated' ), true ) ||
+			! is_string( $profile_path ) || dirname( $profile_path ) !== $lifecycle['root'] ||
+			1 !== preg_match( '/^profile-[A-Za-z0-9]{6}$/', basename( $profile_path ) ) ||
+			( 'intent' === $phase && null !== $group_pid ) ||
+			( 'gated' === $phase && ( ! is_int( $group_pid ) || $group_pid < 1 ) )
+		) {
+			return array( 'record' => null, 'error' => 'Chrome lifecycle record failed ownership validation' );
+		}
+		return array( 'record' => $record, 'error' => null );
+	}
+
+	private static function chrome_lifecycle_node_pid( array $lifecycle ): ?int {
+		if ( null !== self::chrome_lifecycle_owner_error( $lifecycle ) ) {
+			return null;
+		}
+		foreach ( array( $lifecycle['recordPath'], $lifecycle['tempPath'] ) as $path ) {
+			if ( ! file_exists( $path ) ) {
+				continue;
+			}
+			$decoded = self::read_chrome_lifecycle_record( $lifecycle, $path );
+			if ( is_array( $decoded['record'] ) ) {
+				return $decoded['record']['serverPid'];
+			}
+		}
+		return null;
+	}
+
+	private static function capture_verified_chrome_server_pid( array &$server, array $decoded ): void {
+		$server_pid = $decoded['serverPid'] ?? null;
+		if ( ! is_int( $server_pid ) || $server_pid < 1 ) {
+			return;
+		}
+		$record_pid = self::chrome_lifecycle_node_pid( $server['lifecycle'] );
+		if ( $server_pid === $record_pid ) {
+			$server['daemonPid'] = $server_pid;
+		}
+	}
+
+	private static function chrome_process_group_state( int $group_pid ): array {
+		if ( ! function_exists( 'posix_kill' ) || ! function_exists( 'posix_get_last_error' ) ) {
+			return array( 'alive' => null, 'error' => 'POSIX process-group inspection is unavailable' );
+		}
+		if ( function_exists( 'posix_clear_last_error' ) ) {
+			posix_clear_last_error();
+		}
+		if ( @posix_kill( -$group_pid, 0 ) ) {
+			return array( 'alive' => true, 'error' => null );
+		}
+		$error = posix_get_last_error();
+		$esrch = defined( 'PCNTL_ESRCH' ) ? constant( 'PCNTL_ESRCH' ) : 3;
+		if ( $esrch === $error ) {
+			return array( 'alive' => false, 'error' => null );
+		}
+		return array( 'alive' => null, 'error' => 'Could not inspect Chrome process group ' . $group_pid . ': ' . posix_strerror( $error ) );
+	}
+
+	private static function wait_for_chrome_process_group( int $group_pid, float $seconds ): array {
+		$deadline = microtime( true ) + $seconds;
+		do {
+			$state = self::chrome_process_group_state( $group_pid );
+			if ( false === $state['alive'] || null !== $state['error'] ) {
+				return $state;
+			}
+			usleep( 25000 );
+		} while ( microtime( true ) < $deadline );
+		return self::chrome_process_group_state( $group_pid );
+	}
+
+	private static function bounded_ps_command( int $pid ): ?string {
+		$spec = array(
+			0 => array( 'pipe', 'r' ),
+			1 => array( 'pipe', 'w' ),
+			2 => array( 'pipe', 'w' ),
+		);
+		$process = @proc_open( array( '/bin/ps', '-ww', '-p', (string) $pid, '-o', 'command=' ), $spec, $pipes );
+		if ( ! is_resource( $process ) ) {
+			return null;
+		}
+		@fclose( $pipes[0] );
+		stream_set_blocking( $pipes[1], false );
+		stream_set_blocking( $pipes[2], false );
+		$output = '';
+		$deadline = microtime( true ) + 1.0;
+		do {
+			$output = substr( $output . stream_get_contents( $pipes[1] ), -65536 );
+			$status = proc_get_status( $process );
+			if ( ! $status['running'] ) {
+				break;
+			}
+			usleep( 10000 );
+		} while ( microtime( true ) < $deadline );
+		$status = proc_get_status( $process );
+		if ( $status['running'] ) {
+			@proc_terminate( $process, 9 );
+		}
+		$output = substr( $output . stream_get_contents( $pipes[1] ), -65536 );
+		@fclose( $pipes[1] );
+		@fclose( $pipes[2] );
+		@proc_close( $process );
+		return trim( $output );
+	}
+
+	private static function chrome_supervisor_identity_error( int $pid, array $lifecycle, array $record ): ?string {
+		$profile = $record['profilePath'];
+		if ( 'Linux' === PHP_OS_FAMILY ) {
+			$command = @file_get_contents( '/proc/' . $pid . '/cmdline' );
+			if ( ! is_string( $command ) ) {
+				return 'Chrome supervisor group leader is missing';
+			}
+			$arguments = array_values( array_filter( explode( "\0", $command ), 'strlen' ) );
+			$profile_index = array_search( '--profile', $arguments, true );
+			if (
+				! in_array( $lifecycle['script'], $arguments, true ) ||
+				! in_array( '--chrome-supervisor', $arguments, true ) ||
+				false === $profile_index || ( $arguments[ $profile_index + 1 ] ?? null ) !== $profile
+			) {
+				return 'Chrome supervisor group leader identity does not match';
+			}
+			return null;
+		}
+		if ( 'Darwin' === PHP_OS_FAMILY ) {
+			$command = self::bounded_ps_command( $pid );
+			if (
+				! is_string( $command ) || '' === $command ||
+				false === strpos( $command, $lifecycle['script'] ) ||
+				false === strpos( $command, '--chrome-supervisor' ) ||
+				false === strpos( $command, $profile )
+			) {
+				return 'Chrome supervisor group leader identity does not match';
+			}
+			return null;
+		}
+		return 'Chrome supervisor identity validation is unsupported on ' . PHP_OS_FAMILY;
+	}
+
+	private static function remove_chrome_lifecycle_root( array $lifecycle ): ?string {
+		$deadline = microtime( true ) + 5.0;
+		$stable_since = null;
+		do {
+			if ( ! file_exists( $lifecycle['root'] ) ) {
+				$stable_since = $stable_since ?? microtime( true );
+				if ( microtime( true ) - $stable_since >= 0.5 ) {
+					return null;
+				}
+				usleep( 50000 );
+				continue;
+			}
+			$stable_since = null;
+			$owner_error = self::chrome_lifecycle_owner_error( $lifecycle );
+			if ( null !== $owner_error ) {
+				return $owner_error . '; ownership root retained';
+			}
+			$items = scandir( $lifecycle['root'] );
+			if ( false === $items ) {
+				return 'Could not inspect Chrome lifecycle ownership root; root retained';
+			}
+			foreach ( $items as $item ) {
+				if ( in_array( $item, array( '.', '..', self::CHROME_LIFECYCLE_OWNER_FILE ), true ) ) {
+					continue;
+				}
+				remove_dir_recursive( $lifecycle['root'] . '/' . $item );
+			}
+			@unlink( $lifecycle['ownerPath'] );
+			@rmdir( $lifecycle['root'] );
+			usleep( 50000 );
+		} while ( microtime( true ) < $deadline );
+		return 'Chrome lifecycle ownership root did not remain removed for 500ms';
+	}
+
+	private static function reconcile_chrome_lifecycle( array $lifecycle ): ?string {
+		if ( ! file_exists( $lifecycle['root'] ) ) {
+			return null;
+		}
+		$owner_error = self::chrome_lifecycle_owner_error( $lifecycle );
+		if ( null !== $owner_error ) {
+			return $owner_error . '; ownership root retained';
+		}
+		if ( file_exists( $lifecycle['tempPath'] ) ) {
+			return 'Chrome lifecycle temporary record survived daemon exit; ownership root retained';
+		}
+		if ( ! file_exists( $lifecycle['recordPath'] ) ) {
+			return self::remove_chrome_lifecycle_root( $lifecycle );
+		}
+		$decoded = self::read_chrome_lifecycle_record( $lifecycle, $lifecycle['recordPath'] );
+		if ( null !== $decoded['error'] ) {
+			return $decoded['error'] . '; ownership root retained';
+		}
+		$record = $decoded['record'];
+		if ( 'gated' === $record['phase'] ) {
+			$group_pid = $record['browserGroupPid'];
+			$state = self::chrome_process_group_state( $group_pid );
+			if ( null !== $state['error'] ) {
+				return $state['error'] . '; ownership root retained';
+			}
+			if ( $state['alive'] ) {
+				$identity_error = self::chrome_supervisor_identity_error( $group_pid, $lifecycle, $record );
+				if ( null !== $identity_error ) {
+					return $identity_error . '; ownership root retained';
+				}
+				@posix_kill( -$group_pid, 15 );
+				$state = self::wait_for_chrome_process_group( $group_pid, 2.0 );
+			}
+			if ( null !== $state['error'] ) {
+				return $state['error'] . '; ownership root retained';
+			}
+			if ( $state['alive'] ) {
+				$identity_error = self::chrome_supervisor_identity_error( $group_pid, $lifecycle, $record );
+				if ( null !== $identity_error ) {
+					return $identity_error . '; ownership root retained';
+				}
+				@posix_kill( -$group_pid, 9 );
+				$state = self::wait_for_chrome_process_group( $group_pid, 3.0 );
+			}
+			if ( null !== $state['error'] ) {
+				return $state['error'] . '; ownership root retained';
+			}
+			if ( $state['alive'] ) {
+				return 'Chrome supervisor process group survived SIGKILL; ownership root retained';
+			}
+		}
+		return self::remove_chrome_lifecycle_root( $lifecycle );
+	}
+
 	/**
 	 * Starts one Chrome daemon for an entire runner/minimizer lifetime. Worker
 	 * subprocesses connect to its Unix socket, preserving process isolation
@@ -821,10 +1136,26 @@ class OracleRenderer {
 			1 => array( 'pipe', 'w' ),
 			2 => array( 'pipe', 'w' ),
 		);
-		$process = proc_open( $command, $spec, $pipes, repo_root() );
-		if ( ! is_resource( $process ) ) {
-			throw new \RuntimeException( 'Could not start the persistent Chrome CDP run service.' );
+		$lifecycle = self::create_chrome_lifecycle_owner( $this->chrome_oracle_script );
+		try {
+			$process = self::proc_open_with_chrome_lifecycle( $command, $spec, $pipes, $lifecycle );
+		} catch ( \Throwable $error ) {
+			$cleanup_error = self::remove_chrome_lifecycle_root( $lifecycle );
+			$message = 'Could not start the persistent Chrome CDP run service: ' . $error->getMessage();
+			if ( null !== $cleanup_error ) {
+				$message .= '; cleanup failed: ' . $cleanup_error;
+			}
+			throw new \RuntimeException( $message, 0, $error );
 		}
+		if ( ! is_resource( $process ) ) {
+			$cleanup_error = self::remove_chrome_lifecycle_root( $lifecycle );
+			$message = 'Could not start the persistent Chrome CDP run service.';
+			if ( null !== $cleanup_error ) {
+				$message .= ' Cleanup failed: ' . $cleanup_error;
+			}
+			throw new \RuntimeException( $message );
+		}
+		$initial_status = proc_get_status( $process );
 		fclose( $pipes[0] );
 		stream_set_blocking( $pipes[1], false );
 		stream_set_blocking( $pipes[2], false );
@@ -834,6 +1165,9 @@ class OracleRenderer {
 			'pipes'      => $pipes,
 			'command'    => command_string( $command ),
 			'socketPath' => $socket_path,
+			'daemonPid'  => null,
+			'wrapperPid' => is_int( $initial_status['pid'] ?? null ) ? $initial_status['pid'] : null,
+			'lifecycle'  => $lifecycle,
 		);
 		$this->run_service_key = $key;
 		$this->chrome_socket   = $socket_path;
@@ -845,33 +1179,66 @@ class OracleRenderer {
 			$status = proc_get_status( $process );
 			if ( ! $status['running'] || microtime( true ) >= $deadline ) {
 				$stderr = stream_get_contents( $pipes[2] );
-				self::stop_chrome_run_service( $key );
+				$cleanup_error = self::stop_chrome_run_service( $key );
 				$this->run_service_key = null;
 				$this->chrome_socket = null;
-				throw new \RuntimeException( 'Persistent Chrome CDP service did not become ready: ' . trim( $stderr ) );
+				$details = implode( "\n", array_filter( array( trim( $stderr ), (string) $cleanup_error ), 'strlen' ) );
+				throw new \RuntimeException( 'Persistent Chrome CDP service did not become ready: ' . $details );
 			}
 			usleep( 10000 );
 		}
 
-		$probe = $this->chrome_socket_request( array( 'command' => 'version' ), max( 15000, $this->timeout_ms ) );
-		if (
-			'ok' !== ( $probe['decoded']['status'] ?? null ) ||
-			! is_array( $probe['decoded']['oracle'] ?? null ) ||
-			true !== ( $probe['decoded']['oracle']['available'] ?? false )
-		) {
-			self::stop_chrome_run_service( $key );
-			$this->run_service_key = null;
-			$this->chrome_socket = null;
-			throw new \RuntimeException( 'Persistent Chrome CDP service failed its readiness probe: ' . trim( (string) ( $probe['output'] ?? '' ) ) );
+		$probe = null;
+		do {
+			$remaining_ms = (int) floor( ( $deadline - microtime( true ) ) * 1000 );
+			if ( $remaining_ms < 1 ) {
+				break;
+			}
+			$probe = $this->chrome_socket_request( array( 'command' => 'version' ), $remaining_ms );
+			if ( is_array( $probe['decoded'] ?? null ) ) {
+				self::capture_verified_chrome_server_pid( self::$chrome_run_services[ $key ], $probe['decoded'] );
+			}
+			if (
+				'ok' === ( $probe['decoded']['status'] ?? null ) &&
+				is_array( $probe['decoded']['oracle'] ?? null ) &&
+				true === ( $probe['decoded']['oracle']['available'] ?? false )
+			) {
+				return;
+			}
+			if ( is_array( $probe['decoded'] ?? null ) ) {
+				break;
+			}
+			$status = proc_get_status( $process );
+			$remaining_microseconds = (int) floor( ( $deadline - microtime( true ) ) * 1000000 );
+			if ( ! $status['running'] || $remaining_microseconds < 1 ) {
+				break;
+			}
+			usleep( min( 10000, $remaining_microseconds ) );
+		} while ( true );
+
+		$stderr = trim( (string) stream_get_contents( $pipes[2] ) );
+		$probe_output = trim( (string) ( $probe['output'] ?? '' ) );
+		$details = implode( "\n", array_filter( array( $probe_output, $stderr ), 'strlen' ) );
+		$cleanup_error = self::stop_chrome_run_service( $key );
+		$this->run_service_key = null;
+		$this->chrome_socket = null;
+		if ( null !== $cleanup_error ) {
+			$details = implode( "\n", array_filter( array( $details, $cleanup_error ), 'strlen' ) );
 		}
+		throw new \RuntimeException( 'Persistent Chrome CDP service failed its readiness probe: ' . $details );
 	}
 
 	public function stop_run_service(): void {
 		if ( null === $this->run_service_key ) {
 			return;
 		}
-		self::stop_chrome_run_service( $this->run_service_key );
+		$key = $this->run_service_key;
 		$this->run_service_key = null;
+		$this->chrome_socket = null;
+		$cleanup_error = self::stop_chrome_run_service( $key );
+		if ( null !== $cleanup_error ) {
+			throw new \RuntimeException( 'Persistent Chrome CDP service cleanup failed: ' . $cleanup_error );
+		}
 	}
 
 	private function start_chrome_server( string $key ): void {
@@ -888,10 +1255,26 @@ class OracleRenderer {
 			1 => array( 'pipe', 'w' ),
 			2 => array( 'pipe', 'w' ),
 		);
-		$process = proc_open( $command, $spec, $pipes, repo_root() );
-		if ( ! is_resource( $process ) ) {
-			throw new \RuntimeException( 'Could not start Chrome CDP oracle server.' );
+		$lifecycle = self::create_chrome_lifecycle_owner( $this->chrome_oracle_script );
+		try {
+			$process = self::proc_open_with_chrome_lifecycle( $command, $spec, $pipes, $lifecycle );
+		} catch ( \Throwable $error ) {
+			$cleanup_error = self::remove_chrome_lifecycle_root( $lifecycle );
+			$message = 'Could not start Chrome CDP oracle server: ' . $error->getMessage();
+			if ( null !== $cleanup_error ) {
+				$message .= '; cleanup failed: ' . $cleanup_error;
+			}
+			throw new \RuntimeException( $message, 0, $error );
 		}
+		if ( ! is_resource( $process ) ) {
+			$cleanup_error = self::remove_chrome_lifecycle_root( $lifecycle );
+			$message = 'Could not start Chrome CDP oracle server.';
+			if ( null !== $cleanup_error ) {
+				$message .= ' Cleanup failed: ' . $cleanup_error;
+			}
+			throw new \RuntimeException( $message );
+		}
+		$initial_status = proc_get_status( $process );
 		stream_set_blocking( $pipes[1], false );
 		stream_set_blocking( $pipes[2], false );
 		self::$chrome_servers[ $key ] = array(
@@ -900,6 +1283,9 @@ class OracleRenderer {
 			'command' => command_string( $command ),
 			'stdout'  => '',
 			'stderr'  => '',
+			'daemonPid' => null,
+			'wrapperPid' => is_int( $initial_status['pid'] ?? null ) ? $initial_status['pid'] : null,
+			'lifecycle' => $lifecycle,
 		);
 		self::register_chrome_shutdown();
 	}
@@ -913,16 +1299,22 @@ class OracleRenderer {
 
 	public static function shutdown_chrome_processes(): void {
 		foreach ( array_keys( self::$chrome_servers ) as $key ) {
-			self::stop_chrome_server( $key );
+			$cleanup_error = self::stop_chrome_server( $key );
+			if ( null !== $cleanup_error ) {
+				fwrite( STDERR, "Persistent Chrome CDP stdio service cleanup failed during PHP shutdown: {$cleanup_error}\n" );
+			}
 		}
 		foreach ( array_keys( self::$chrome_run_services ) as $key ) {
-			self::stop_chrome_run_service( $key );
+			$cleanup_error = self::stop_chrome_run_service( $key );
+			if ( null !== $cleanup_error ) {
+				fwrite( STDERR, "Persistent Chrome CDP service cleanup failed during PHP shutdown: {$cleanup_error}\n" );
+			}
 		}
 	}
 
-	private static function stop_chrome_server( string $key ): void {
+	private static function stop_chrome_server( string $key, ?array $observed_status = null ): ?string {
 		if ( ! isset( self::$chrome_servers[ $key ] ) ) {
-			return;
+			return null;
 		}
 		$server = self::$chrome_servers[ $key ];
 		unset( self::$chrome_servers[ $key ] );
@@ -930,54 +1322,177 @@ class OracleRenderer {
 			self::write_all_until( $server['pipes'][0], "{\"command\":\"shutdown\"}\n", microtime( true ) + 0.5 );
 			@fclose( $server['pipes'][0] );
 		}
-		self::await_or_terminate( $server['process'] );
+		$verified_pid = self::chrome_lifecycle_node_pid( $server['lifecycle'] ) ?? ( $server['daemonPid'] ?? null );
+		$outcome = self::await_or_terminate( $server['process'], $verified_pid, $observed_status );
+		$stderr = trim( (string) ( $server['stderr'] ?? '' ) );
 		foreach ( array( 1, 2 ) as $pipe_index ) {
 			if ( isset( $server['pipes'][ $pipe_index ] ) && is_resource( $server['pipes'][ $pipe_index ] ) ) {
+				if ( 2 === $pipe_index ) {
+					$stderr = implode( "\n", array_filter( array( $stderr, trim( (string) stream_get_contents( $server['pipes'][ $pipe_index ] ) ) ), 'strlen' ) );
+				}
 				@fclose( $server['pipes'][ $pipe_index ] );
 			}
 		}
-		@proc_close( $server['process'] );
+		$close_code = null;
+		if ( ! $outcome['stillRunning'] ) {
+			$closed = @proc_close( $server['process'] );
+			$close_code = is_int( $closed ) && $closed >= 0 ? $closed : null;
+		}
+		$exit_code = is_int( $outcome['exitCode'] ) && $outcome['exitCode'] >= 0 ? $outcome['exitCode'] : $close_code;
+		$failures = array();
+		if ( $outcome['stillRunning'] ) {
+			$failures[] = 'daemon survived SIGKILL';
+		} elseif ( null !== $outcome['forced'] ) {
+			$failures[] = 'graceful shutdown failed; required ' . $outcome['forced'];
+		}
+		if ( null !== $exit_code && 0 !== $exit_code ) {
+			$failures[] = "daemon exited with code {$exit_code}";
+		}
+		$stderr = trim( $stderr );
+		if ( '' !== $stderr ) {
+			$failures[] = 'daemon stderr: ' . $stderr;
+		}
+		if ( $outcome['stillRunning'] ) {
+			$failures[] = 'Chrome lifecycle ownership root retained while daemon is still running';
+		} else {
+			$lifecycle_error = self::reconcile_chrome_lifecycle( $server['lifecycle'] );
+			if ( null !== $lifecycle_error ) {
+				$failures[] = $lifecycle_error;
+			}
+		}
+		return empty( $failures ) ? null : implode( '; ', $failures );
 	}
 
-	private static function stop_chrome_run_service( string $key ): void {
+	private static function stop_chrome_run_service( string $key ): ?string {
 		if ( ! isset( self::$chrome_run_services[ $key ] ) ) {
-			return;
+			return null;
 		}
 		$service = self::$chrome_run_services[ $key ];
 		unset( self::$chrome_run_services[ $key ] );
 		$socket_path = $service['socketPath'];
+		$acknowledged = false;
+		$shutdown_requested = false;
 		$socket = @stream_socket_client( 'unix://' . $socket_path, $errno, $error, 0.5 );
 		if ( is_resource( $socket ) ) {
-			self::write_all_until( $socket, "{\"id\":0,\"command\":\"shutdown\"}\n", microtime( true ) + 0.5 );
-			@fflush( $socket );
+			if ( self::write_all_until( $socket, "{\"id\":0,\"command\":\"shutdown\"}\n", microtime( true ) + 0.5 ) ) {
+				$shutdown_requested = true;
+				@fflush( $socket );
+				$deadline = microtime( true ) + 2.0;
+				do {
+					$remaining_microseconds = max( 1, (int) floor( ( $deadline - microtime( true ) ) * 1000000 ) );
+					@stream_set_timeout( $socket, intdiv( $remaining_microseconds, 1000000 ), $remaining_microseconds % 1000000 );
+					$line = @fgets( $socket );
+					if ( false === $line ) {
+						break;
+					}
+					$acknowledgement = json_decode( trim( $line ), true );
+					if ( is_array( $acknowledgement ) && 0 === ( $acknowledgement['id'] ?? null ) ) {
+						self::capture_verified_chrome_server_pid( $service, $acknowledgement );
+					}
+					if (
+						is_array( $acknowledgement ) &&
+						0 === ( $acknowledgement['id'] ?? null ) &&
+						'ok' === ( $acknowledgement['status'] ?? null ) &&
+						true === ( $acknowledgement['shutdown'] ?? null )
+					) {
+						$acknowledged = true;
+						break;
+					}
+				} while ( microtime( true ) < $deadline );
+			}
 			@fclose( $socket );
 		}
-		self::await_or_terminate( $service['process'] );
+		$verified_pid = self::chrome_lifecycle_node_pid( $service['lifecycle'] ) ?? ( $service['daemonPid'] ?? null );
+		$outcome = self::await_or_terminate( $service['process'], $verified_pid );
+		$stderr = '';
 		foreach ( array( 1, 2 ) as $pipe_index ) {
 			if ( isset( $service['pipes'][ $pipe_index ] ) && is_resource( $service['pipes'][ $pipe_index ] ) ) {
+				if ( 2 === $pipe_index ) {
+					$stderr = trim( (string) stream_get_contents( $service['pipes'][ $pipe_index ] ) );
+				}
 				@fclose( $service['pipes'][ $pipe_index ] );
 			}
 		}
-		@proc_close( $service['process'] );
+		$close_code = null;
+		if ( ! $outcome['stillRunning'] ) {
+			$closed = @proc_close( $service['process'] );
+			$close_code = is_int( $closed ) && $closed >= 0 ? $closed : null;
+		}
 		@unlink( $socket_path );
+
+		$exit_code = is_int( $outcome['exitCode'] ) && $outcome['exitCode'] >= 0 ? $outcome['exitCode'] : $close_code;
+		$failures = array();
+		if ( $outcome['stillRunning'] ) {
+			$failures[] = 'daemon survived SIGKILL';
+		} elseif ( null !== $outcome['forced'] ) {
+			$failures[] = 'graceful shutdown failed; required ' . $outcome['forced'];
+		}
+		if ( null !== $exit_code && 0 !== $exit_code ) {
+			$failures[] = "daemon exited with code {$exit_code}";
+		}
+		if ( '' !== $stderr ) {
+			$failures[] = 'daemon stderr: ' . $stderr;
+		}
+		if ( $shutdown_requested && ! $acknowledged ) {
+			$failures[] = 'daemon did not acknowledge shutdown';
+		}
+		if ( $outcome['stillRunning'] ) {
+			$failures[] = 'Chrome lifecycle ownership root retained while daemon is still running';
+		} else {
+			$lifecycle_error = self::reconcile_chrome_lifecycle( $service['lifecycle'] );
+			if ( null !== $lifecycle_error ) {
+				$failures[] = $lifecycle_error;
+			}
+		}
+		return empty( $failures ) ? null : implode( '; ', $failures );
 	}
 
-	private static function await_or_terminate( $process ): void {
-		$deadline = microtime( true ) + 3.0;
+	private static function await_or_terminate( $process, ?int $daemon_pid = null, ?array $observed_status = null ): array {
+		$forced = null;
+		if ( is_array( $observed_status ) && false === ( $observed_status['running'] ?? true ) ) {
+			return array( 'exitCode' => $observed_status['exitcode'] ?? null, 'forced' => null, 'stillRunning' => false );
+		}
+		$deadline = microtime( true ) + 30.0;
 		do {
 			$status = proc_get_status( $process );
 			if ( ! $status['running'] ) {
-				return;
+				return array( 'exitCode' => $status['exitcode'], 'forced' => $forced, 'stillRunning' => false );
 			}
 			usleep( 10000 );
 		} while ( microtime( true ) < $deadline );
 
-		proc_terminate( $process );
-		usleep( 200000 );
-		$status = proc_get_status( $process );
-		if ( $status['running'] ) {
-			proc_terminate( $process, 9 );
+		if ( null !== $daemon_pid && $daemon_pid > 0 && function_exists( 'posix_kill' ) ) {
+			@posix_kill( $daemon_pid, 15 );
+		} else {
+			@proc_terminate( $process );
 		}
+		$forced = 'SIGTERM';
+		$deadline = microtime( true ) + 15.0;
+		do {
+			$status = proc_get_status( $process );
+			if ( ! $status['running'] ) {
+				return array( 'exitCode' => $status['exitcode'], 'forced' => $forced, 'stillRunning' => false );
+			}
+			usleep( 10000 );
+		} while ( microtime( true ) < $deadline );
+
+		if ( null !== $daemon_pid && $daemon_pid > 0 && function_exists( 'posix_kill' ) ) {
+			@posix_kill( $daemon_pid, 9 );
+		} else {
+			@proc_terminate( $process, 9 );
+		}
+		$forced = 'SIGKILL';
+		$deadline = microtime( true ) + 3.0;
+		do {
+			$status = proc_get_status( $process );
+			if ( ! $status['running'] ) {
+				return array( 'exitCode' => $status['exitcode'], 'forced' => $forced, 'stillRunning' => false );
+			}
+			usleep( 10000 );
+		} while ( microtime( true ) < $deadline );
+
+		$status = proc_get_status( $process );
+		return array( 'exitCode' => $status['exitcode'], 'forced' => $forced, 'stillRunning' => (bool) $status['running'] );
 	}
 
 	private static function write_all_until( $stream, string $bytes, float $deadline ): bool {

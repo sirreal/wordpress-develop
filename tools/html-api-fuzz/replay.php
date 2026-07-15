@@ -144,6 +144,7 @@ if ( is_array( $output_replay ) ) {
 	$output_replay['sourceReplay'] = $source_replay;
 	\HtmlApiFuzz\write_json_file( $output_dir . '/replay.json', $output_replay );
 }
+$oracle_renderer->stop_run_service();
 echo \HtmlApiFuzz\json_encode_safe(
 	array(
 		'ok'       => $result['ok'] ?? false,

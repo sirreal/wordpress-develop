@@ -14,6 +14,102 @@ const PINNED_CHROME_VERSION = fs.readFileSync( path.join( SCRIPT_DIR, 'VERSION' 
 const HTML_NS = 'http://www.w3.org/1999/xhtml';
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const MATH_NS = 'http://www.w3.org/1998/Math/MathML';
+const SUPPORTS_POSIX_PROCESS_GROUPS = 'win32' !== process.platform;
+const LIFECYCLE_ROOT_ENV = 'HTML_API_FUZZ_CHROME_LIFECYCLE_ROOT';
+const LIFECYCLE_TOKEN_ENV = 'HTML_API_FUZZ_CHROME_LIFECYCLE_TOKEN';
+const LIFECYCLE_OWNER_FILE = 'owner-token';
+const LIFECYCLE_RECORD_FILE = 'lifecycle.json';
+const LIFECYCLE_TEMP_FILE = 'lifecycle.json.tmp';
+const TEST_INVALIDATE_SESSION_ENV = 'HTML_API_FUZZ_CHROME_TEST_ALLOW_INVALIDATE_SESSION';
+const SUPERVISOR_CHILD_PID_PREFIX = 'HTML_API_FUZZ_CHROME_CHILD_PID=';
+const SUPERVISOR_SETTLE_MS = 250;
+
+function supervisorOptions( argv ) {
+	const marker = argv.indexOf( '--chrome-supervisor' );
+	if ( -1 === marker ) {
+		return null;
+	}
+	const separator = argv.indexOf( '--', marker + 1 );
+	const profileIndex = argv.indexOf( '--profile', marker + 1 );
+	const executableIndex = argv.indexOf( '--chrome-executable', marker + 1 );
+	if (
+		-1 === separator ||
+		-1 === profileIndex || profileIndex + 1 >= separator ||
+		-1 === executableIndex || executableIndex + 1 >= separator
+	) {
+		throw new Error( 'Invalid Chrome supervisor arguments.' );
+	}
+	return {
+		profilePath: path.resolve( argv[ profileIndex + 1 ] ),
+		executable: path.resolve( argv[ executableIndex + 1 ] ),
+		chromeArguments: argv.slice( separator + 1 ),
+	};
+}
+
+async function runChromeSupervisor( options ) {
+	let escalationMode = false;
+	let child = null;
+	let parentClosed = false;
+	const latchEscalation = () => {
+		escalationMode = true;
+	};
+	process.on( 'SIGTERM', latchEscalation );
+	process.on( 'SIGINT', latchEscalation );
+
+	const lines = readline.createInterface( { input: process.stdin, crlfDelay: Infinity } );
+	const gate = await new Promise( ( resolve ) => {
+		let settled = false;
+		const finish = ( value ) => {
+			if ( settled ) {
+				return;
+			}
+			settled = true;
+			resolve( value );
+		};
+		lines.once( 'line', finish );
+		lines.once( 'close', () => finish( null ) );
+	} );
+	if ( 'start' !== gate ) {
+		lines.close();
+		return;
+	}
+	lines.once( 'close', () => {
+		parentClosed = true;
+		if ( child && null === child.exitCode && null === child.signalCode ) {
+			child.kill( 'SIGTERM' );
+			setTimeout( () => {
+				if ( child && null === child.exitCode && null === child.signalCode ) {
+					child.kill( 'SIGKILL' );
+				}
+			}, 2000 ).unref();
+		}
+	} );
+
+	child = spawn( options.executable, options.chromeArguments, {
+		detached: false,
+		stdio: [ 'ignore', 'ignore', 'pipe' ],
+	} );
+	if ( ! Number.isSafeInteger( child.pid ) || child.pid < 1 ) {
+		throw new Error( 'Chrome supervisor did not receive a child PID.' );
+	}
+	process.stderr.write( `${ SUPERVISOR_CHILD_PID_PREFIX }${ child.pid }\n` );
+	child.stderr.pipe( process.stderr, { end: false } );
+	const outcome = await new Promise( ( resolve, reject ) => {
+		child.once( 'error', reject );
+		child.once( 'exit', ( code, signal ) => {
+			resolve( { code, signal } );
+		} );
+	} );
+	await delay( SUPERVISOR_SETTLE_MS );
+	if ( escalationMode ) {
+		setInterval( () => {}, 1000 );
+		await new Promise( () => {} );
+	}
+	if ( ! parentClosed && 0 !== outcome.code ) {
+		process.exitCode = Number.isInteger( outcome.code ) ? outcome.code : 1;
+	}
+	lines.close();
+}
 
 function parseArgs( argv ) {
 	const options = { engine: 'chrome' };
@@ -127,6 +223,132 @@ function markTransportError( error ) {
 
 function isTransportError( error ) {
 	return true === error?.transportFailure || /(?:WebSocket|Chrome exited|Target closed|Session with given id not found|No target with given id)/i.test( error?.message || '' );
+}
+
+function delay( milliseconds ) {
+	return new Promise( ( resolve ) => setTimeout( resolve, milliseconds ) );
+}
+
+function chromeProcessAlive( chrome ) {
+	const pid = chrome?.pid;
+	if ( ! Number.isSafeInteger( pid ) || pid < 1 ) {
+		return false;
+	}
+	if ( ! SUPPORTS_POSIX_PROCESS_GROUPS && ( null !== chrome.exitCode || null !== chrome.signalCode ) ) {
+		return false;
+	}
+	try {
+		process.kill( SUPPORTS_POSIX_PROCESS_GROUPS ? -pid : pid, 0 );
+		return true;
+	} catch ( error ) {
+		if ( 'ESRCH' === error.code ) {
+			return false;
+		}
+		if ( 'EPERM' === error.code ) {
+			return true;
+		}
+		throw error;
+	}
+}
+
+function processPidAlive( pid ) {
+	if ( ! Number.isSafeInteger( pid ) || pid < 1 ) {
+		return false;
+	}
+	try {
+		process.kill( pid, 0 );
+		return true;
+	} catch ( error ) {
+		if ( 'ESRCH' === error.code ) {
+			return false;
+		}
+		if ( 'EPERM' === error.code ) {
+			return true;
+		}
+		throw error;
+	}
+}
+
+function signalChromeProcess( chrome, signal ) {
+	try {
+		if ( SUPPORTS_POSIX_PROCESS_GROUPS ) {
+			process.kill( -chrome.pid, signal );
+			return true;
+		}
+		return chrome.kill( signal );
+	} catch ( error ) {
+		if ( 'ESRCH' === error.code ) {
+			return false;
+		}
+		throw error;
+	}
+}
+
+async function waitForChromeProcessExit( chrome, timeoutMs ) {
+	const deadline = Date.now() + timeoutMs;
+	do {
+		if ( ! chromeProcessAlive( chrome ) ) {
+			return true;
+		}
+		await delay( 25 );
+	} while ( Date.now() < deadline );
+	return ! chromeProcessAlive( chrome );
+}
+
+async function stopChromeProcess( chrome, graceful ) {
+	if ( ! Number.isSafeInteger( chrome?.pid ) || chrome.pid < 1 ) {
+		return { confirmedAbsent: true, error: null };
+	}
+	const target = SUPPORTS_POSIX_PROCESS_GROUPS ? `process group ${ chrome.pid }` : `process ${ chrome.pid }`;
+	try {
+		if ( await waitForChromeProcessExit( chrome, 1000 ) ) {
+			return { confirmedAbsent: true, error: null };
+		}
+		if ( ! chromeProcessAlive( chrome ) ) {
+			return { confirmedAbsent: true, error: null };
+		}
+		signalChromeProcess( chrome, 'SIGTERM' );
+		if ( await waitForChromeProcessExit( chrome, 2000 ) ) {
+			return { confirmedAbsent: true, error: null };
+		}
+		signalChromeProcess( chrome, 'SIGKILL' );
+		if ( await waitForChromeProcessExit( chrome, 3000 ) ) {
+			return { confirmedAbsent: true, error: null };
+		}
+		return { confirmedAbsent: false, error: new Error( `Chrome ${ target } survived SIGKILL.` ) };
+	} catch ( error ) {
+		return { confirmedAbsent: false, error: new Error( `Could not stop Chrome ${ target }: ${ error.message }`, { cause: error } ) };
+	}
+}
+
+async function removeStableProfileDirectory( directory ) {
+	if ( ! directory ) {
+		return;
+	}
+	const deadline = Date.now() + 5000;
+	let stableSince = null;
+	let lastError = null;
+	do {
+		try {
+			fs.rmSync( directory, { recursive: true, force: true } );
+			lastError = null;
+		} catch ( error ) {
+			lastError = error;
+		}
+		if ( fs.existsSync( directory ) ) {
+			stableSince = null;
+		} else {
+			stableSince ??= Date.now();
+			if ( Date.now() - stableSince >= 500 ) {
+				return;
+			}
+		}
+		await delay( 50 );
+	} while ( Date.now() < deadline );
+	if ( lastError ) {
+		throw new Error( `Could not remove Chrome profile ${ directory }: ${ lastError.message }`, { cause: lastError } );
+	}
+	throw new Error( `Chrome profile ${ directory } did not remain removed for 500ms.` );
 }
 
 class CdpWebSocket {
@@ -613,6 +835,8 @@ class ChromeOracle {
 	constructor( options ) {
 		this.options = options;
 		this.metadata = configuredMetadata( options );
+		this.lifecycleRoot = process.env[ LIFECYCLE_ROOT_ENV ] || null;
+		this.lifecycleToken = process.env[ LIFECYCLE_TOKEN_ENV ] || null;
 		this.chrome = null;
 		this.userDataDirectory = null;
 		this.websocket = null;
@@ -631,9 +855,66 @@ class ChromeOracle {
 		return { ...this.metadata };
 	}
 
+	assertLifecycleOwner() {
+		if ( null === this.lifecycleRoot && null === this.lifecycleToken ) {
+			return;
+		}
+		if ( ! this.lifecycleRoot || ! this.lifecycleToken ) {
+			throw new Error( 'Incomplete Chrome lifecycle ownership environment.' );
+		}
+		const owner = fs.readFileSync( path.join( this.lifecycleRoot, LIFECYCLE_OWNER_FILE ), 'utf8' ).trim();
+		if ( owner !== this.lifecycleToken ) {
+			throw new Error( 'Chrome lifecycle owner token does not match.' );
+		}
+	}
+
+	createProfileDirectory() {
+		if ( ! this.lifecycleRoot ) {
+			return fs.mkdtempSync( path.join( os.tmpdir(), 'html-api-fuzz-chrome-' ) );
+		}
+		this.assertLifecycleOwner();
+		return fs.mkdtempSync( path.join( this.lifecycleRoot, 'profile-' ) );
+	}
+
+	writeLifecycleRecord( state, phase ) {
+		if ( ! this.lifecycleRoot ) {
+			return;
+		}
+		this.assertLifecycleOwner();
+		const record = {
+			schemaVersion: 1,
+			token: this.lifecycleToken,
+			serverPid: process.pid,
+			phase,
+			profilePath: state.userDataDirectory,
+			browserGroupPid: Number.isSafeInteger( state.chrome?.pid ) && state.chrome.pid > 0 ? state.chrome.pid : null,
+		};
+		const temporary = path.join( this.lifecycleRoot, LIFECYCLE_TEMP_FILE );
+		fs.writeFileSync( temporary, `${ JSON.stringify( record ) }\n`, { mode: 0o600 } );
+		fs.renameSync( temporary, path.join( this.lifecycleRoot, LIFECYCLE_RECORD_FILE ) );
+	}
+
+	clearLifecycleRecord() {
+		if ( ! this.lifecycleRoot ) {
+			return;
+		}
+		for ( const name of [ LIFECYCLE_RECORD_FILE, LIFECYCLE_TEMP_FILE ] ) {
+			try {
+				fs.unlinkSync( path.join( this.lifecycleRoot, name ) );
+			} catch ( error ) {
+				if ( 'ENOENT' !== error.code ) {
+					throw error;
+				}
+			}
+		}
+	}
+
 	async start() {
 		if ( this.closing ) {
 			throw new Error( 'Chrome oracle is shutting down.' );
+		}
+		if ( Number.isSafeInteger( this.metadata.browserPid ) && ! processPidAlive( this.metadata.browserPid ) ) {
+			this.healthy = false;
 		}
 		if ( this.healthy && this.cdp && this.sessionId && this.chrome && null === this.chrome.exitCode && null === this.chrome.signalCode ) {
 			return;
@@ -660,7 +941,8 @@ class ChromeOracle {
 		}
 		const state = {
 			chrome: null,
-			userDataDirectory: fs.mkdtempSync( path.join( os.tmpdir(), 'html-api-fuzz-chrome-' ) ),
+			browserPid: null,
+			userDataDirectory: this.createProfileDirectory(),
 			websocket: null,
 			cdp: null,
 			targetId: null,
@@ -689,7 +971,47 @@ class ChromeOracle {
 			args.unshift( '--no-sandbox' );
 		}
 		try {
-			state.chrome = spawn( this.metadata.chromeExecutable, args, { stdio: [ 'ignore', 'ignore', 'pipe' ] } );
+			this.writeLifecycleRecord( state, 'intent' );
+			if ( SUPPORTS_POSIX_PROCESS_GROUPS ) {
+				const supervisorEnvironment = { ...process.env };
+				delete supervisorEnvironment[ LIFECYCLE_ROOT_ENV ];
+				delete supervisorEnvironment[ LIFECYCLE_TOKEN_ENV ];
+				delete supervisorEnvironment[ TEST_INVALIDATE_SESSION_ENV ];
+				delete supervisorEnvironment.HTML_API_FUZZ_CHROME_TEST_PAUSE_AFTER_SUPERVISOR_SPAWN;
+				state.chrome = spawn(
+					process.execPath,
+					[
+						__filename,
+						'--chrome-supervisor',
+						'--profile',
+						state.userDataDirectory,
+						'--chrome-executable',
+						this.metadata.chromeExecutable,
+						'--',
+						...args,
+					],
+					{
+						detached: true,
+						stdio: [ 'pipe', 'ignore', 'pipe' ],
+						env: supervisorEnvironment,
+					}
+				);
+				if ( ! Number.isSafeInteger( state.chrome.pid ) || state.chrome.pid < 1 ) {
+					throw new Error( 'Chrome supervisor did not receive a process-group ID.' );
+				}
+				state.chrome.stdin.on( 'error', () => {} );
+				const pauseFile = process.env.HTML_API_FUZZ_CHROME_TEST_PAUSE_AFTER_SUPERVISOR_SPAWN;
+				if ( pauseFile ) {
+					fs.writeFileSync( pauseFile, `${ JSON.stringify( { supervisorPid: state.chrome.pid, profilePath: state.userDataDirectory } ) }\n` );
+					while ( fs.existsSync( pauseFile ) ) {
+						await delay( 10 );
+					}
+				}
+				this.writeLifecycleRecord( state, 'gated' );
+				state.chrome.stdin.write( 'start\n' );
+			} else {
+				state.chrome = spawn( this.metadata.chromeExecutable, args, { detached: false, stdio: [ 'ignore', 'ignore', 'pipe' ] } );
+			}
 			const endpoint = await new Promise( ( resolve, reject ) => {
 				let stderr = '';
 				let settled = false;
@@ -710,6 +1032,10 @@ class ChromeOracle {
 				state.chrome.once( 'exit', ( code, signal ) => finish( transportError( `Chrome exited before CDP startup (code ${ code }, signal ${ signal }). ${ stderr.trim() }` ) ) );
 				state.chrome.stderr.on( 'data', ( chunk ) => {
 					stderr = `${ stderr }${ chunk.toString( 'utf8' ) }`.slice( -16384 );
+					const childPid = stderr.match( new RegExp( `${ SUPERVISOR_CHILD_PID_PREFIX }([0-9]+)` ) );
+					if ( childPid ) {
+						state.browserPid = Number.parseInt( childPid[ 1 ], 10 );
+					}
 					const match = stderr.match( /DevTools listening on (ws:\/\/[^\s]+)/ );
 					if ( match ) {
 						finish( null, match[ 1 ] );
@@ -755,7 +1081,7 @@ class ChromeOracle {
 			this.metadata.browserVersion = liveVersion;
 			this.metadata.chromeVersion = liveVersion;
 			this.metadata.cdpProtocolVersion = browserVersion.protocolVersion;
-			this.metadata.browserPid = state.chrome.pid;
+			this.metadata.browserPid = state.browserPid || state.chrome.pid;
 			this.metadata.browserInstanceId = crypto.randomUUID();
 
 			state.chrome.once( 'exit', ( code, signal ) => {
@@ -782,6 +1108,7 @@ class ChromeOracle {
 	async resetState( graceful ) {
 		const state = {
 			chrome: this.chrome,
+			browserPid: this.metadata.browserPid || null,
 			userDataDirectory: this.userDataDirectory,
 			websocket: this.websocket,
 			cdp: this.cdp,
@@ -812,35 +1139,27 @@ class ChromeOracle {
 		} catch ( _error ) {
 			// The transport is already unusable; process cleanup below is authoritative.
 		}
-		if ( state.chrome ) {
-			const chrome = state.chrome;
-			await new Promise( ( resolve ) => {
-				if ( null !== chrome.exitCode || null !== chrome.signalCode ) {
-					resolve();
-					return;
-				}
-				let finished = false;
-				const timers = [];
-				const finish = () => {
-					if ( finished ) {
-						return;
-					}
-					finished = true;
-					for ( const timer of timers ) {
-						clearTimeout( timer );
-					}
-					resolve();
-				};
-				chrome.once( 'exit', finish );
-				const graceDelay = graceful ? 500 : 0;
-				timers.push( setTimeout( () => chrome.kill( 'SIGTERM' ), graceDelay ) );
-				timers.push( setTimeout( () => chrome.kill( 'SIGKILL' ), graceDelay + 500 ) );
-				timers.push( setTimeout( finish, graceDelay + 750 ) );
-			} );
+		if ( SUPPORTS_POSIX_PROCESS_GROUPS && state.chrome?.stdin && ! state.chrome.stdin.destroyed ) {
+			try {
+				state.chrome.stdin.end();
+			} catch ( _error ) {
+				// Process-group termination below remains the cleanup fallback.
+			}
 		}
-		if ( state.userDataDirectory ) {
-			fs.rmSync( state.userDataDirectory, { recursive: true, force: true } );
+		const stopped = await stopChromeProcess( state.chrome, graceful );
+		if ( stopped.confirmedAbsent ) {
+			await removeStableProfileDirectory( state.userDataDirectory );
+			this.clearLifecycleRecord();
 		}
+		if ( stopped.error ) {
+			throw stopped.error;
+		}
+	}
+
+	async invalidateSessionForTest() {
+		await this.start();
+		await this.cdp.send( 'Target.detachFromTarget', { sessionId: this.sessionId } );
+		return { status: 'ok', oracle: this.configuredMetadata(), invalidatedSession: true };
 	}
 
 	async navigateWithScriptsDisabled( dataUrl ) {
@@ -1006,6 +1325,9 @@ async function dispatchRequest( oracle, request ) {
 	if ( 'shutdown' === request.command ) {
 		return { status: 'ok', oracle: oracle.configuredMetadata(), shutdown: true };
 	}
+	if ( 'test-invalidate-session' === request.command && '1' === process.env[ TEST_INVALIDATE_SESSION_ENV ] ) {
+		return oracle.invalidateSessionForTest();
+	}
 	if ( request.command && 'render' !== request.command ) {
 		throw new Error( `Unknown command: ${ request.command }` );
 	}
@@ -1015,12 +1337,14 @@ async function dispatchRequest( oracle, request ) {
 function serveLines( input, output, oracle, shutdown ) {
 	const lines = readline.createInterface( { input, crlfDelay: Infinity } );
 	let queue = Promise.resolve();
+	lines.on( 'error', () => lines.close() );
 	lines.on( 'line', ( line ) => {
 		queue = queue.then( async () => {
 			let request;
 			try {
 				request = JSON.parse( line );
 				const result = await dispatchRequest( oracle, request );
+				result.serverPid = process.pid;
 				if ( undefined !== request.id ) {
 					result.id = request.id;
 				}
@@ -1029,7 +1353,9 @@ function serveLines( input, output, oracle, shutdown ) {
 					setImmediate( shutdown );
 				}
 			} catch ( error ) {
-				writeResult( output, errorResult( error, oracle.configuredMetadata(), request?.id ) );
+				const result = errorResult( error, oracle.configuredMetadata(), request?.id );
+				result.serverPid = process.pid;
+				writeResult( output, result );
 			}
 		} );
 	} );
@@ -1056,6 +1382,10 @@ async function runStdioServer( oracle ) {
 
 async function runSocketServer( oracle, socketPath ) {
 	let shutdownPromise = null;
+	let resolveShutdownStarted;
+	const shutdownStarted = new Promise( ( resolve ) => {
+		resolveShutdownStarted = resolve;
+	} );
 	const connections = new Set();
 	const server = net.createServer( ( socket ) => {
 		connections.add( socket );
@@ -1068,30 +1398,80 @@ async function runSocketServer( oracle, socketPath ) {
 			return shutdownPromise;
 		}
 		shutdownPromise = ( async () => {
-			const serverClosed = new Promise( ( resolve ) => server.once( 'close', resolve ) );
-			server.close();
-			for ( const socket of connections ) {
-				socket.end();
+			const errors = [];
+			let serverClosed;
+			try {
+				serverClosed = new Promise( ( resolve, reject ) => {
+					try {
+						server.close( ( error ) => error ? reject( error ) : resolve() );
+					} catch ( error ) {
+						reject( error );
+					}
+				} );
+			} catch ( error ) {
+				errors.push( error );
+				serverClosed = Promise.reject( error );
 			}
-			await serverClosed;
-			await oracle.close();
+			for ( const socket of [ ...connections ] ) {
+				try {
+					const forceClose = setTimeout( () => {
+						try {
+							socket.destroy();
+						} catch ( error ) {
+							errors.push( error );
+						}
+					}, 500 );
+					socket.once( 'close', () => clearTimeout( forceClose ) );
+					socket.end();
+				} catch ( error ) {
+					errors.push( error );
+					try {
+						socket.destroy();
+					} catch ( destroyError ) {
+						errors.push( destroyError );
+					}
+				}
+			}
+			let closeDeadline;
+			try {
+				const timedOut = new Promise( ( _resolve, reject ) => {
+					closeDeadline = setTimeout( () => reject( new Error( 'Chrome oracle socket server did not close within 2s.' ) ), 2000 );
+				} );
+				await Promise.race( [ serverClosed, timedOut ] );
+			} catch ( error ) {
+				errors.push( error );
+			} finally {
+				clearTimeout( closeDeadline );
+			}
+			try {
+				await oracle.close();
+			} catch ( error ) {
+				errors.push( error );
+			}
 			try {
 				fs.unlinkSync( socketPath );
 			} catch ( error ) {
 				if ( 'ENOENT' !== error.code ) {
-					throw error;
+					errors.push( error );
 				}
 			}
+			if ( 1 === errors.length ) {
+				throw errors[ 0 ];
+			}
+			if ( errors.length > 1 ) {
+				throw new AggregateError( errors, 'Chrome oracle socket shutdown failed.' );
+			}
 		} )();
+		resolveShutdownStarted( shutdownPromise );
 		return shutdownPromise;
 	};
+	server.once( 'close', shutdown );
 	await new Promise( ( resolve, reject ) => {
 		server.once( 'error', reject );
 		server.listen( socketPath, resolve );
 	} );
 	process.stdout.write( `${ JSON.stringify( { status: 'ready', socket: socketPath, oracle: oracle.configuredMetadata() } ) }\n` );
-	await new Promise( ( resolve ) => server.once( 'close', resolve ) );
-	await shutdown();
+	await shutdownStarted;
 }
 
 function printUsage() {
@@ -1103,6 +1483,11 @@ function printUsage() {
 }
 
 async function main() {
+	const supervised = supervisorOptions( process.argv );
+	if ( supervised ) {
+		await runChromeSupervisor( supervised );
+		return;
+	}
 	let options;
 	try {
 		options = parseArgs( process.argv );
@@ -1117,22 +1502,29 @@ async function main() {
 	}
 	const oracle = new ChromeOracle( options );
 	let stopping = false;
-	const stopForSignal = async () => {
+	const stopForSignal = async ( signal ) => {
 		if ( stopping ) {
 			return;
 		}
 		stopping = true;
-		await oracle.close().catch( () => {} );
+		let cleanupFailed = false;
+		try {
+			await oracle.close();
+		} catch ( error ) {
+			cleanupFailed = true;
+			process.stderr.write( `Chrome cleanup failed after ${ signal }: ${ error.stack || error.message || error }\n` );
+		}
 		if ( options.socket ) {
 			try {
 				fs.unlinkSync( path.resolve( options.socket ) );
 			} catch ( error ) {
 				if ( 'ENOENT' !== error.code ) {
+					cleanupFailed = true;
 					process.stderr.write( `${ error.message }\n` );
 				}
 			}
 		}
-		process.exit( 0 );
+		process.exit( cleanupFailed ? 1 : 0 );
 	};
 	process.once( 'SIGINT', stopForSignal );
 	process.once( 'SIGTERM', stopForSignal );

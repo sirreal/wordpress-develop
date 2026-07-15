@@ -523,5 +523,6 @@ $summary = array(
 	'phpunitSnippet'    => '$html = base64_decode( ' . var_export( base64_encode( $current ), true ) . ' );',
 );
 \HtmlApiFuzz\write_json_file( $output_dir . '/minimize-result.json', $summary );
+$oracle_renderer->stop_run_service();
 echo \HtmlApiFuzz\json_encode_safe( $summary ) . "\n";
 exit( $summary['ok'] ? 0 : 1 );

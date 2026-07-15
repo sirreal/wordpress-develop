@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 
+const crypto = require( 'node:crypto' );
 const fs = require( 'node:fs' );
 const http = require( 'node:http' );
 const net = require( 'node:net' );
@@ -113,6 +114,19 @@ function waitForExit( child ) {
 	} );
 }
 
+function waitForAnyExit( child, timeoutMs = 10000 ) {
+	if ( null !== child.exitCode || null !== child.signalCode ) {
+		return Promise.resolve( { code: child.exitCode, signal: child.signalCode } );
+	}
+	return new Promise( ( resolve, reject ) => {
+		const timer = setTimeout( () => reject( new Error( `Process ${ child.pid } did not exit.` ) ), timeoutMs );
+		child.once( 'exit', ( code, signal ) => {
+			clearTimeout( timer );
+			resolve( { code, signal } );
+		} );
+	} );
+}
+
 async function waitForProcessDeath( pid ) {
 	const deadline = Date.now() + 10000;
 	while ( Date.now() < deadline ) {
@@ -141,10 +155,10 @@ async function waitForValue( readValue, failureMessage ) {
 	throw new Error( failureMessage );
 }
 
-function chromeProfileDirectories() {
-	return fs.readdirSync( os.tmpdir(), { withFileTypes: true } )
-		.filter( ( entry ) => entry.isDirectory() && entry.name.startsWith( 'html-api-fuzz-chrome-' ) )
-		.map( ( entry ) => path.join( os.tmpdir(), entry.name ) );
+function chromeProfileDirectories( root = os.tmpdir() ) {
+	return fs.readdirSync( root, { withFileTypes: true } )
+		.filter( ( entry ) => entry.isDirectory() && /^html-api-fuzz-chrome-[A-Za-z0-9]{6}$/.test( entry.name ) )
+		.map( ( entry ) => path.join( root, entry.name ) );
 }
 
 async function testConcurrentStartupShutdown( chromeExecutable, temporaryDirectory ) {
@@ -205,6 +219,159 @@ exec "$HTML_API_FUZZ_REAL_CHROME_EXECUTABLE" "$@"
 		if ( raceProfile && fs.existsSync( raceProfile ) ) {
 			fs.rmSync( raceProfile, { recursive: true, force: true } );
 		}
+	}
+}
+
+async function testSpawnFailureProfileCleanup( pinnedVersion, temporaryDirectory ) {
+	const disappearingExecutable = path.join( temporaryDirectory, 'disappearing-chrome' );
+	const socketPath = path.join( temporaryDirectory, 'spawn-failure.sock' );
+	const fixtureTmp = path.join( temporaryDirectory, 'spawn-failure-tmp' );
+	fs.mkdirSync( fixtureTmp );
+	fs.writeFileSync( disappearingExecutable, `#!/bin/sh
+if [ "$1" = "--version" ]; then
+	rm -f -- "$0"
+	printf 'Google Chrome for Testing %s\\n' "$HTML_API_FUZZ_PINNED_CHROME_VERSION"
+	exit 0
+fi
+exit 99
+` );
+	fs.chmodSync( disappearingExecutable, 0o755 );
+	const profilesBefore = new Set( chromeProfileDirectories( fixtureTmp ) );
+	const child = spawn( process.execPath, [ SCRIPT, '--serve', '--socket', socketPath, '--chrome-executable', disappearingExecutable ], {
+		stdio: [ 'ignore', 'pipe', 'pipe' ],
+		env: {
+			...process.env,
+			HTML_API_FUZZ_PINNED_CHROME_VERSION: pinnedVersion,
+			TMPDIR: fixtureTmp,
+		},
+	} );
+	try {
+		const ready = await waitForReady( child );
+		assert( 'ready' === ready.status && true === ready.oracle?.available, 'Spawn-failure daemon did not accept the disappearing pinned executable.' );
+		assert( ! fs.existsSync( disappearingExecutable ), 'Spawn-failure executable did not remove itself after the version probe.' );
+		const failed = await request( socketPath, { id: 300, command: 'version' } );
+		assert( 'error' === failed.status, 'Chrome spawn without a PID did not report an error.' );
+		const profilesAfter = new Set( chromeProfileDirectories( fixtureTmp ) );
+		assert(
+			profilesBefore.size === profilesAfter.size && [ ...profilesBefore ].every( ( directory ) => profilesAfter.has( directory ) ),
+			'Chrome spawn failure before PID assignment left a profile behind.'
+		);
+		const exiting = waitForExit( child );
+		const shutdown = await request( socketPath, { id: 301, command: 'shutdown' } );
+		assert( 'ok' === shutdown.status && true === shutdown.shutdown, 'Spawn-failure daemon did not acknowledge shutdown.' );
+		await exiting;
+		assert( ! fs.existsSync( socketPath ), 'Spawn-failure daemon left its socket behind.' );
+	} finally {
+		if ( null === child.exitCode && ! child.killed ) {
+			child.kill( 'SIGTERM' );
+		}
+		for ( const directory of chromeProfileDirectories( fixtureTmp ) ) {
+			if ( ! profilesBefore.has( directory ) ) {
+				fs.rmSync( directory, { recursive: true, force: true } );
+			}
+		}
+	}
+}
+
+async function testSupervisorSignalSettling( temporaryDirectory ) {
+	const executable = path.join( temporaryDirectory, 'term-exit-child' );
+	const profilePath = path.join( temporaryDirectory, 'supervisor-profile' );
+	fs.writeFileSync( executable, `#!/bin/sh
+trap 'exit 0' TERM
+while :; do
+	sleep 1
+done
+` );
+	fs.chmodSync( executable, 0o755 );
+	const supervisor = spawn(
+		process.execPath,
+		[ SCRIPT, '--chrome-supervisor', '--profile', profilePath, '--chrome-executable', executable, '--' ],
+		{ detached: true, stdio: [ 'pipe', 'ignore', 'pipe' ] }
+	);
+	let stderr = '';
+	supervisor.stderr.on( 'data', ( data ) => {
+		stderr += data.toString( 'utf8' );
+	} );
+	try {
+		supervisor.stdin.write( 'start\n' );
+		const childPid = await waitForValue( () => {
+			const matched = stderr.match( /HTML_API_FUZZ_CHROME_CHILD_PID=([0-9]+)/ );
+			return matched ? Number.parseInt( matched[ 1 ], 10 ) : null;
+		}, 'Supervisor did not report its child PID.' );
+		process.kill( -supervisor.pid, 'SIGTERM' );
+		await waitForProcessDeath( childPid );
+		await new Promise( ( resolve ) => setTimeout( resolve, 400 ) );
+		process.kill( supervisor.pid, 0 );
+		const exited = waitForAnyExit( supervisor );
+		process.kill( -supervisor.pid, 'SIGKILL' );
+		const outcome = await exited;
+		assert( 'SIGKILL' === outcome.signal, 'Supervisor did not remain latched until group SIGKILL.' );
+	} finally {
+		try {
+			process.kill( -supervisor.pid, 'SIGKILL' );
+		} catch ( error ) {
+			if ( 'ESRCH' !== error.code ) {
+				throw error;
+			}
+		}
+	}
+}
+
+async function testGatedSupervisorPrepublication( chromeExecutable, temporaryDirectory ) {
+	const ownerRoot = path.join( temporaryDirectory, 'gated-owner' );
+	const token = crypto.randomBytes( 16 ).toString( 'hex' );
+	const pauseFile = path.join( temporaryDirectory, 'gated-supervisor.pause' );
+	const socketPath = path.join( temporaryDirectory, 'gated-supervisor.sock' );
+	fs.mkdirSync( ownerRoot, { mode: 0o700 } );
+	fs.writeFileSync( path.join( ownerRoot, 'owner-token' ), `${ token }\n`, { mode: 0o600 } );
+	const child = spawn( process.execPath, [ SCRIPT, '--serve', '--socket', socketPath, '--chrome-executable', chromeExecutable ], {
+		stdio: [ 'ignore', 'pipe', 'pipe' ],
+		env: {
+			...process.env,
+			HTML_API_FUZZ_CHROME_LIFECYCLE_ROOT: ownerRoot,
+			HTML_API_FUZZ_CHROME_LIFECYCLE_TOKEN: token,
+			HTML_API_FUZZ_CHROME_TEST_PAUSE_AFTER_SUPERVISOR_SPAWN: pauseFile,
+		},
+	} );
+	let supervisorPid = null;
+	try {
+		const ready = await waitForReady( child );
+		assert( 'ready' === ready.status, 'Gated prepublication daemon did not become ready.' );
+		const pending = request( socketPath, { id: 400, command: 'version' } )
+			.catch( ( error ) => ( { status: 'disconnected', error: error.message } ) );
+		const hook = await waitForValue( () => {
+			if ( ! fs.existsSync( pauseFile ) ) {
+				return null;
+			}
+			return JSON.parse( fs.readFileSync( pauseFile, 'utf8' ) );
+		}, 'Gated supervisor did not enter its prepublication pause.' );
+		supervisorPid = hook.supervisorPid;
+		const lifecycle = JSON.parse( fs.readFileSync( path.join( ownerRoot, 'lifecycle.json' ), 'utf8' ) );
+		assert( 'intent' === lifecycle.phase && null === lifecycle.browserGroupPid, 'Prepublication lifecycle advanced before its supervisor group was committed.' );
+		assert( hook.profilePath === lifecycle.profilePath && fs.existsSync( lifecycle.profilePath ), 'Prepublication profile was not confined to the fixture-owned root.' );
+		const childExit = waitForAnyExit( child );
+		child.kill( 'SIGKILL' );
+		await childExit;
+		await waitForProcessDeath( supervisorPid );
+		const result = await pending;
+		assert( 'ok' !== result.status, 'Prepublication request completed after its daemon was killed.' );
+		assert( ! fs.existsSync( `${ lifecycle.profilePath }/DevToolsActivePort` ), 'Gated supervisor started Chrome before group ownership was committed.' );
+	} finally {
+		if ( null === child.exitCode && null === child.signalCode ) {
+			child.kill( 'SIGKILL' );
+		}
+		if ( Number.isSafeInteger( supervisorPid ) ) {
+			try {
+				process.kill( -supervisorPid, 'SIGKILL' );
+			} catch ( error ) {
+				if ( 'ESRCH' !== error.code ) {
+					throw error;
+				}
+			}
+		}
+		fs.rmSync( ownerRoot, { recursive: true, force: true } );
+		fs.rmSync( pauseFile, { force: true } );
+		fs.rmSync( socketPath, { force: true } );
 	}
 }
 
@@ -381,7 +548,10 @@ async function main() {
 		assert( 'ok' === shutdown.status && true === shutdown.shutdown, 'Shutdown request failed.' );
 		await exiting;
 		assert( ! fs.existsSync( socketPath ), 'Oracle socket was not removed during shutdown.' );
+		await testSupervisorSignalSettling( temporaryDirectory );
+		await testGatedSupervisorPrepublication( versionResult.oracle.chromeExecutable, temporaryDirectory );
 		await testConcurrentStartupShutdown( versionResult.oracle.chromeExecutable, temporaryDirectory );
+		await testSpawnFailureProfileCleanup( versionResult.oracle.pinnedChromeVersion, temporaryDirectory );
 	} finally {
 		if ( null === child.exitCode && ! child.killed ) {
 			child.kill( 'SIGTERM' );
