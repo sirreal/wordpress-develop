@@ -111,6 +111,24 @@ function configuredMetadata( options ) {
 	return metadata;
 }
 
+function transportError( message, cause = undefined ) {
+	const error = new Error( message, cause ? { cause } : undefined );
+	error.transportFailure = true;
+	return error;
+}
+
+function markTransportError( error ) {
+	if ( error && 'object' === typeof error ) {
+		error.transportFailure = true;
+		return error;
+	}
+	return transportError( String( error ) );
+}
+
+function isTransportError( error ) {
+	return true === error?.transportFailure || /(?:WebSocket|Chrome exited|Target closed|Session with given id not found|No target with given id)/i.test( error?.message || '' );
+}
+
 class CdpWebSocket {
 	constructor( socket, initialData = Buffer.alloc( 0 ) ) {
 		this.socket = socket;
@@ -118,7 +136,7 @@ class CdpWebSocket {
 		this.fragmentOpcode = null;
 		this.fragments = [];
 		this.messageHandler = () => {};
-		this.closeHandler = () => {};
+		this.closeHandlers = [];
 		this.closed = false;
 		socket.on( 'data', ( data ) => this.consume( data ) );
 		socket.on( 'close', () => this.handleClose( new Error( 'CDP WebSocket closed.' ) ) );
@@ -133,7 +151,7 @@ class CdpWebSocket {
 	}
 
 	onClose( handler ) {
-		this.closeHandler = handler;
+		this.closeHandlers.push( handler );
 	}
 
 	handleClose( error ) {
@@ -141,7 +159,10 @@ class CdpWebSocket {
 			return;
 		}
 		this.closed = true;
-		this.closeHandler( error );
+		const closed = markTransportError( error );
+		for ( const handler of this.closeHandlers ) {
+			handler( closed );
+		}
 	}
 
 	consume( data ) {
@@ -270,13 +291,16 @@ function connectWebSocket( endpoint ) {
 		const socket = net.createConnection( { host: url.hostname, port: Number( url.port ) } );
 		let headers = Buffer.alloc( 0 );
 		let settled = false;
+		let timer = null;
 		const fail = ( error ) => {
 			if ( ! settled ) {
 				settled = true;
+				clearTimeout( timer );
 				socket.destroy();
 				reject( error );
 			}
 		};
+		timer = setTimeout( () => fail( transportError( 'CDP WebSocket handshake timed out.' ) ), 5000 );
 		socket.once( 'error', fail );
 		socket.once( 'connect', () => {
 			const target = `${ url.pathname }${ url.search }`;
@@ -307,6 +331,7 @@ function connectWebSocket( endpoint ) {
 				return;
 			}
 			settled = true;
+			clearTimeout( timer );
 			socket.removeListener( 'data', onData );
 			socket.removeListener( 'error', fail );
 			resolve( new CdpWebSocket( socket, remainder ) );
@@ -362,7 +387,7 @@ class CdpClient {
 		return new Promise( ( resolve, reject ) => {
 			const timer = setTimeout( () => {
 				this.pending.delete( id );
-				reject( new Error( `CDP ${ method } timed out.` ) );
+				reject( transportError( `CDP ${ method } timed out.` ) );
 			}, timeoutMs );
 			this.pending.set( id, { method, resolve, reject, timer } );
 			const message = { id, method, params };
@@ -384,7 +409,7 @@ class CdpClient {
 			const waiter = { method, sessionId, resolve, reject, timer: null };
 			waiter.timer = setTimeout( () => {
 				this.waiters.splice( this.waiters.indexOf( waiter ), 1 );
-				reject( new Error( `CDP event ${ method } timed out.` ) );
+				reject( transportError( `CDP event ${ method } timed out.` ) );
 			}, timeoutMs );
 			this.waiters.push( waiter );
 		} );
@@ -595,8 +620,11 @@ class ChromeOracle {
 		this.targetId = null;
 		this.sessionId = null;
 		this.startPromise = null;
+		this.closePromise = null;
 		this.renderQueue = Promise.resolve();
 		this.closing = false;
+		this.healthy = false;
+		this.lastTransportError = null;
 	}
 
 	configuredMetadata() {
@@ -604,13 +632,19 @@ class ChromeOracle {
 	}
 
 	async start() {
-		if ( this.cdp && this.sessionId ) {
+		if ( this.closing ) {
+			throw new Error( 'Chrome oracle is shutting down.' );
+		}
+		if ( this.healthy && this.cdp && this.sessionId && this.chrome && null === this.chrome.exitCode && null === this.chrome.signalCode ) {
 			return;
 		}
 		if ( this.startPromise ) {
 			return this.startPromise;
 		}
-		this.startPromise = this.startChrome();
+		this.startPromise = ( async () => {
+			await this.resetState( false );
+			await this.startChrome();
+		} )();
 		try {
 			await this.startPromise;
 		} finally {
@@ -624,12 +658,19 @@ class ChromeOracle {
 			error.failureClass = 'oracle-unavailable';
 			throw error;
 		}
-		this.userDataDirectory = fs.mkdtempSync( path.join( os.tmpdir(), 'html-api-fuzz-chrome-' ) );
+		const state = {
+			chrome: null,
+			userDataDirectory: fs.mkdtempSync( path.join( os.tmpdir(), 'html-api-fuzz-chrome-' ) ),
+			websocket: null,
+			cdp: null,
+			targetId: null,
+			sessionId: null,
+		};
 		const args = [
 			'--headless=new',
 			'--remote-debugging-port=0',
 			'--remote-allow-origins=*',
-			`--user-data-dir=${ this.userDataDirectory }`,
+			`--user-data-dir=${ state.userDataDirectory }`,
 			'--no-first-run',
 			'--no-default-browser-check',
 			'--disable-background-networking',
@@ -647,56 +688,159 @@ class ChromeOracle {
 		if ( 'linux' === process.platform && 0 === process.getuid?.() ) {
 			args.unshift( '--no-sandbox' );
 		}
-		this.chrome = spawn( this.metadata.chromeExecutable, args, { stdio: [ 'ignore', 'ignore', 'pipe' ] } );
-		this.metadata.browserPid = this.chrome.pid;
-		this.metadata.browserInstanceId = crypto.randomUUID();
-		const endpoint = await new Promise( ( resolve, reject ) => {
-			let stderr = '';
-			let settled = false;
-			const timer = setTimeout( () => finish( new Error( `Chrome did not expose a CDP endpoint. ${ stderr.trim() }` ) ), 15000 );
-			const finish = ( error, value ) => {
-				if ( settled ) {
-					return;
-				}
-				settled = true;
-				clearTimeout( timer );
-				if ( error ) {
-					reject( error );
-				} else {
-					resolve( value );
-				}
-			};
-			this.chrome.once( 'error', finish );
-			this.chrome.once( 'exit', ( code, signal ) => finish( new Error( `Chrome exited before CDP startup (code ${ code }, signal ${ signal }). ${ stderr.trim() }` ) ) );
-			this.chrome.stderr.on( 'data', ( chunk ) => {
-				stderr = `${ stderr }${ chunk.toString( 'utf8' ) }`.slice( -16384 );
-				const match = stderr.match( /DevTools listening on (ws:\/\/[^\s]+)/ );
-				if ( match ) {
-					finish( null, match[ 1 ] );
+		try {
+			state.chrome = spawn( this.metadata.chromeExecutable, args, { stdio: [ 'ignore', 'ignore', 'pipe' ] } );
+			const endpoint = await new Promise( ( resolve, reject ) => {
+				let stderr = '';
+				let settled = false;
+				const timer = setTimeout( () => finish( transportError( `Chrome did not expose a CDP endpoint. ${ stderr.trim() }` ) ), 15000 );
+				const finish = ( error, value ) => {
+					if ( settled ) {
+						return;
+					}
+					settled = true;
+					clearTimeout( timer );
+					if ( error ) {
+						reject( markTransportError( error ) );
+					} else {
+						resolve( value );
+					}
+				};
+				state.chrome.once( 'error', finish );
+				state.chrome.once( 'exit', ( code, signal ) => finish( transportError( `Chrome exited before CDP startup (code ${ code }, signal ${ signal }). ${ stderr.trim() }` ) ) );
+				state.chrome.stderr.on( 'data', ( chunk ) => {
+					stderr = `${ stderr }${ chunk.toString( 'utf8' ) }`.slice( -16384 );
+					const match = stderr.match( /DevTools listening on (ws:\/\/[^\s]+)/ );
+					if ( match ) {
+						finish( null, match[ 1 ] );
+					}
+				} );
+			} );
+
+			state.websocket = await connectWebSocket( endpoint );
+			state.cdp = new CdpClient( state.websocket );
+			const browserVersion = await state.cdp.send( 'Browser.getVersion' );
+			const liveVersion = ( browserVersion.product || '' ).replace( /^[^/]+\//, '' );
+			if ( liveVersion !== PINNED_CHROME_VERSION ) {
+				const error = new Error( `Live Chrome version ${ liveVersion || 'unknown' } does not match required pin ${ PINNED_CHROME_VERSION }.` );
+				error.failureClass = 'oracle-unavailable';
+				throw error;
+			}
+			const target = await state.cdp.send( 'Target.createTarget', { url: 'about:blank', background: true } );
+			state.targetId = target.targetId;
+			const attached = await state.cdp.send( 'Target.attachToTarget', { targetId: state.targetId, flatten: true } );
+			state.sessionId = attached.sessionId;
+			await state.cdp.send( 'Page.enable', {}, state.sessionId );
+			await state.cdp.send( 'Runtime.enable', {}, state.sessionId );
+			await state.cdp.send( 'Network.enable', {}, state.sessionId );
+			await state.cdp.send( 'Network.setCacheDisabled', { cacheDisabled: true }, state.sessionId );
+			await state.cdp.send( 'Network.setBypassServiceWorker', { bypass: true }, state.sessionId );
+			await state.cdp.send( 'Network.setBlockedURLs', {
+				urls: [ 'http://*', 'https://*', 'ftp://*', 'file://*', 'ws://*', 'wss://*' ],
+			}, state.sessionId );
+			await state.cdp.send( 'Browser.setDownloadBehavior', { behavior: 'deny' } );
+			if ( this.closing ) {
+				throw new Error( 'Chrome oracle is shutting down.' );
+			}
+
+			this.chrome = state.chrome;
+			this.userDataDirectory = state.userDataDirectory;
+			this.websocket = state.websocket;
+			this.cdp = state.cdp;
+			this.targetId = state.targetId;
+			this.sessionId = state.sessionId;
+			this.healthy = true;
+			this.lastTransportError = null;
+			this.metadata.available = true;
+			this.metadata.browserVersion = liveVersion;
+			this.metadata.chromeVersion = liveVersion;
+			this.metadata.cdpProtocolVersion = browserVersion.protocolVersion;
+			this.metadata.browserPid = state.chrome.pid;
+			this.metadata.browserInstanceId = crypto.randomUUID();
+
+			state.chrome.once( 'exit', ( code, signal ) => {
+				if ( this.chrome === state.chrome ) {
+					this.healthy = false;
+					this.lastTransportError = transportError( `Chrome exited during oracle operation (code ${ code }, signal ${ signal }).` );
 				}
 			} );
-		} );
+			state.websocket.onClose( ( error ) => {
+				if ( this.websocket === state.websocket ) {
+					this.healthy = false;
+					this.lastTransportError = markTransportError( error );
+				}
+			} );
+		} catch ( error ) {
+			await this.disposeState( state, false );
+			if ( error?.failureClass ) {
+				throw error;
+			}
+			throw markTransportError( error );
+		}
+	}
 
-		this.websocket = await connectWebSocket( endpoint );
-		this.cdp = new CdpClient( this.websocket );
-		const browserVersion = await this.cdp.send( 'Browser.getVersion' );
-		this.metadata.available = true;
-		this.metadata.browserVersion = ( browserVersion.product || '' ).replace( /^[^/]+\//, '' ) || this.metadata.chromeVersion;
-		this.metadata.chromeVersion = this.metadata.browserVersion;
-		this.metadata.cdpProtocolVersion = browserVersion.protocolVersion;
-		const target = await this.cdp.send( 'Target.createTarget', { url: 'about:blank', background: true } );
-		this.targetId = target.targetId;
-		const attached = await this.cdp.send( 'Target.attachToTarget', { targetId: this.targetId, flatten: true } );
-		this.sessionId = attached.sessionId;
-		await this.cdp.send( 'Page.enable', {}, this.sessionId );
-		await this.cdp.send( 'Runtime.enable', {}, this.sessionId );
-		await this.cdp.send( 'Network.enable', {}, this.sessionId );
-		await this.cdp.send( 'Network.setCacheDisabled', { cacheDisabled: true }, this.sessionId );
-		await this.cdp.send( 'Network.setBypassServiceWorker', { bypass: true }, this.sessionId );
-		await this.cdp.send( 'Network.setBlockedURLs', {
-			urls: [ 'http://*', 'https://*', 'ftp://*', 'file://*', 'ws://*', 'wss://*' ],
-		}, this.sessionId );
-		await this.cdp.send( 'Browser.setDownloadBehavior', { behavior: 'deny' } );
+	async resetState( graceful ) {
+		const state = {
+			chrome: this.chrome,
+			userDataDirectory: this.userDataDirectory,
+			websocket: this.websocket,
+			cdp: this.cdp,
+			targetId: this.targetId,
+			sessionId: this.sessionId,
+		};
+		this.chrome = null;
+		this.userDataDirectory = null;
+		this.websocket = null;
+		this.cdp = null;
+		this.targetId = null;
+		this.sessionId = null;
+		this.healthy = false;
+		delete this.metadata.browserPid;
+		delete this.metadata.browserInstanceId;
+		await this.disposeState( state, graceful );
+	}
+
+	async disposeState( state, graceful ) {
+		if ( graceful && state.cdp ) {
+			if ( state.targetId ) {
+				await state.cdp.send( 'Target.closeTarget', { targetId: state.targetId }, undefined, 500 ).catch( () => {} );
+			}
+			await state.cdp.send( 'Browser.close', {}, undefined, 1000 ).catch( () => {} );
+		}
+		try {
+			state.websocket?.close();
+		} catch ( _error ) {
+			// The transport is already unusable; process cleanup below is authoritative.
+		}
+		if ( state.chrome ) {
+			const chrome = state.chrome;
+			await new Promise( ( resolve ) => {
+				if ( null !== chrome.exitCode || null !== chrome.signalCode ) {
+					resolve();
+					return;
+				}
+				let finished = false;
+				const timers = [];
+				const finish = () => {
+					if ( finished ) {
+						return;
+					}
+					finished = true;
+					for ( const timer of timers ) {
+						clearTimeout( timer );
+					}
+					resolve();
+				};
+				chrome.once( 'exit', finish );
+				const graceDelay = graceful ? 500 : 0;
+				timers.push( setTimeout( () => chrome.kill( 'SIGTERM' ), graceDelay ) );
+				timers.push( setTimeout( () => chrome.kill( 'SIGKILL' ), graceDelay + 500 ) );
+				timers.push( setTimeout( finish, graceDelay + 750 ) );
+			} );
+		}
+		if ( state.userDataDirectory ) {
+			fs.rmSync( state.userDataDirectory, { recursive: true, force: true } );
+		}
 	}
 
 	async navigateWithScriptsDisabled( dataUrl ) {
@@ -711,9 +855,23 @@ class ChromeOracle {
 	}
 
 	render( request ) {
-		const work = this.renderQueue.then( () => this.renderNow( request ) );
+		const work = this.renderQueue.then( () => this.renderWithRecovery( request ) );
 		this.renderQueue = work.catch( () => {} );
 		return work;
+	}
+
+	async renderWithRecovery( request ) {
+		for ( let attempt = 0; attempt < 2; attempt++ ) {
+			try {
+				return await this.renderNow( request );
+			} catch ( error ) {
+				if ( 1 === attempt || this.closing || ! isTransportError( error ) ) {
+					throw error;
+				}
+				await this.resetState( false );
+			}
+		}
+		throw new Error( 'Chrome recovery loop ended unexpectedly.' );
 	}
 
 	async renderNow( request ) {
@@ -799,48 +957,17 @@ class ChromeOracle {
 		return result;
 	}
 
-	async close() {
-		if ( this.closing ) {
-			return;
+	close() {
+		if ( this.closePromise ) {
+			return this.closePromise;
 		}
 		this.closing = true;
-		await this.renderQueue.catch( () => {} );
-		if ( this.cdp ) {
-			if ( this.targetId ) {
-				await this.cdp.send( 'Target.closeTarget', { targetId: this.targetId }, undefined, 500 ).catch( () => {} );
-			}
-			await this.cdp.send( 'Browser.close', {}, undefined, 1000 ).catch( () => {} );
-		}
-		if ( this.chrome ) {
-			const chrome = this.chrome;
-			await new Promise( ( resolve ) => {
-				if ( null !== chrome.exitCode || null !== chrome.signalCode ) {
-					resolve();
-					return;
-				}
-				const timers = [];
-				const finish = () => {
-					for ( const timer of timers ) {
-						clearTimeout( timer );
-					}
-					resolve();
-				};
-				chrome.once( 'exit', finish );
-				timers.push( setTimeout( () => chrome.kill( 'SIGTERM' ), 500 ) );
-				timers.push( setTimeout( () => chrome.kill( 'SIGKILL' ), 1000 ) );
-				timers.push( setTimeout( finish, 1250 ) );
-			} );
-		}
-		this.websocket?.close();
-		if ( this.userDataDirectory ) {
-			fs.rmSync( this.userDataDirectory, { recursive: true, force: true } );
-		}
-		this.chrome = null;
-		this.cdp = null;
-		this.websocket = null;
-		this.targetId = null;
-		this.sessionId = null;
-		this.userDataDirectory = null;
+		this.closePromise = ( async () => {
+			await this.renderQueue.catch( () => {} );
+			await this.startPromise?.catch( () => {} );
+			await this.resetState( true );
+		} )();
+		return this.closePromise;
 	}
 }
 
