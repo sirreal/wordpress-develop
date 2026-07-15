@@ -713,15 +713,27 @@ final class CanonicalRoutingSurface {
 		$date_slug     = self::old_redirect_slug( $ctx, $case, 'date slug' );
 		$fallback_old  = self::old_redirect_slug( $ctx, $case, 'fallback old' );
 		$fallback_new  = self::old_redirect_slug( $ctx, $case, 'fallback new' );
+		$override_old  = self::old_redirect_slug( $ctx, $case, 'override old' );
 		$paged         = $ctx->int( 2, 5 );
 		$failures      = array();
 		$redirect_urls = array();
 		$filtered_ids  = array();
+		$cancelled_ids = array();
+		$override_ids  = array();
 		$observed      = array();
 
 		$id_filter = static function ( $post_id ) use ( &$filtered_ids ) {
 			$filtered_ids[] = (int) $post_id;
 			return $post_id;
+		};
+		$cancel_id_filter = static function ( $post_id ) use ( &$cancelled_ids ) {
+			$cancelled_ids[] = (int) $post_id;
+			return 0;
+		};
+		$override_target    = null;
+		$override_id_filter = static function ( $post_id ) use ( &$override_ids, &$override_target ) {
+			$override_ids[] = (int) $post_id;
+			return $override_target instanceof \WP_Post ? $override_target->ID : 0;
 		};
 		$url_filter = static function ( $url ) use ( &$redirect_urls ) {
 			$redirect_urls[] = $url;
@@ -794,6 +806,7 @@ final class CanonicalRoutingSurface {
 			);
 			self::seed_post_meta_row( $fallback_target->ID, '_wp_old_slug', $fallback_old );
 			self::seed_post_meta_row( $fallback_target->ID, '_wp_old_date', $fallback_date );
+			$override_target = $fallback_target;
 
 			self::flush_runtime_cache();
 
@@ -989,6 +1002,69 @@ final class CanonicalRoutingSurface {
 				)
 			);
 
+			\add_filter( 'old_slug_redirect_post_id', $cancel_id_filter, 20, 1 );
+			self::prepare_request(
+				array_merge(
+					array(
+						'name' => $old_slug,
+					),
+					$current_parts
+				),
+				array( 'is_404' => true )
+			);
+			$cancel_url_before = count( $redirect_urls );
+			$cancel_id_before  = count( $filtered_ids );
+			$cancel_before     = count( $cancelled_ids );
+			\wp_old_slug_redirect();
+			\remove_filter( 'old_slug_redirect_post_id', $cancel_id_filter, 20 );
+
+			self::collect_failure(
+				$failures,
+				$cancel_url_before === count( $redirect_urls )
+					&& $cancel_id_before + 1 === count( $filtered_ids )
+					&& $cancel_before + 1 === count( $cancelled_ids )
+					&& $slug_target->ID === $filtered_ids[ $cancel_id_before ]
+					&& $slug_target->ID === $cancelled_ids[ $cancel_before ],
+				'old_slug_redirect_post_id can cancel a matched old-slug redirect before URL filtering',
+				array(
+					'urlCountBefore' => $cancel_url_before,
+					'urlCountAfter'  => count( $redirect_urls ),
+					'filteredId'     => $filtered_ids[ $cancel_id_before ] ?? null,
+					'cancelledId'    => $cancelled_ids[ $cancel_before ] ?? null,
+				)
+			);
+
+			\add_filter( 'old_slug_redirect_post_id', $override_id_filter, 20, 1 );
+			self::prepare_request(
+				array(
+					'name' => $override_old,
+				),
+				array( 'is_404' => true )
+			);
+			$override_url_before = count( $redirect_urls );
+			$override_id_before  = count( $filtered_ids );
+			$override_before     = count( $override_ids );
+			\wp_old_slug_redirect();
+			\remove_filter( 'old_slug_redirect_post_id', $override_id_filter, 20 );
+			$expected_override_url = \get_permalink( $override_target->ID );
+
+			self::collect_failure(
+				$failures,
+				$override_url_before + 1 === count( $redirect_urls )
+					&& $override_id_before + 1 === count( $filtered_ids )
+					&& $override_before + 1 === count( $override_ids )
+					&& 0 === $filtered_ids[ $override_id_before ]
+					&& 0 === $override_ids[ $override_before ]
+					&& $expected_override_url === $redirect_urls[ $override_url_before ],
+				'old_slug_redirect_post_id can replace a failed lookup with a generated post before URL filtering',
+				array(
+					'expectedUrl' => $expected_override_url,
+					'captured'    => $redirect_urls[ $override_url_before ] ?? null,
+					'filteredId'  => $filtered_ids[ $override_id_before ] ?? null,
+					'overrideId'  => $override_ids[ $override_before ] ?? null,
+				)
+			);
+
 			$guard_url_before = count( $redirect_urls );
 			$guard_id_before  = count( $filtered_ids );
 
@@ -1051,14 +1127,23 @@ final class CanonicalRoutingSurface {
 					'date'   => $fallback_date,
 					'url'    => $expected_fallback_url,
 				),
+				'postIdFilter' => array(
+					'cancelled'   => $cancelled_ids,
+					'overridden'  => $override_ids,
+					'overrideUrl' => $expected_override_url,
+				),
 			);
 		} finally {
 			\remove_filter( 'old_slug_redirect_post_id', $id_filter, 10 );
+			\remove_filter( 'old_slug_redirect_post_id', $cancel_id_filter, 20 );
+			\remove_filter( 'old_slug_redirect_post_id', $override_id_filter, 20 );
 			\remove_filter( 'old_slug_redirect_url', $url_filter, 10 );
 			self::reset_db_content();
 		}
 
 		$filters_removed = false === \has_filter( 'old_slug_redirect_post_id', $id_filter )
+			&& false === \has_filter( 'old_slug_redirect_post_id', $cancel_id_filter )
+			&& false === \has_filter( 'old_slug_redirect_post_id', $override_id_filter )
 			&& false === \has_filter( 'old_slug_redirect_url', $url_filter );
 
 		self::collect_failure(
@@ -1066,8 +1151,10 @@ final class CanonicalRoutingSurface {
 			$filters_removed,
 			'old slug redirect filters are removed after generated redirect checks',
 			array(
-				'postIdFilter' => \has_filter( 'old_slug_redirect_post_id', $id_filter ),
-				'urlFilter'    => \has_filter( 'old_slug_redirect_url', $url_filter ),
+				'postIdFilter'   => \has_filter( 'old_slug_redirect_post_id', $id_filter ),
+				'cancelFilter'   => \has_filter( 'old_slug_redirect_post_id', $cancel_id_filter ),
+				'overrideFilter' => \has_filter( 'old_slug_redirect_post_id', $override_id_filter ),
+				'urlFilter'      => \has_filter( 'old_slug_redirect_url', $url_filter ),
 			)
 		);
 

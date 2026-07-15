@@ -1135,9 +1135,12 @@ dispatch, redirects, real mail, application-password API requests, and
 process-exit paths.
 The `canonical-routing` surface calls `redirect_canonical()` with
 `do_redirect=false`; 404 permalink guessing uses bounded in-memory post rows,
-attachment-page redirects use synthetic parent/attachment rows, and paths that
-call `wp_redirect()` and `exit` are intentionally avoided. Old-slug redirects
-remain outside the current bounded no-live-DB surface.
+attachment-page redirects use synthetic parent/attachment rows, and old-slug
+paths that would otherwise call `wp_redirect()` and `exit` are exercised only
+through bounded cancellation filters. Old-slug and old-date redirects use
+deterministic in-memory post/meta rows plus `old_slug_redirect_url`
+cancellation, so the lookup, filter, and URL-building branches are covered
+without live DB access or browser dispatch.
 The `classic-walkers` surface uses synthetic objects, object-cache fixtures, and
 local filters only. It loads the single comment/admin walker class files when
 available, and covers the direct nav menu quick-search dispatcher plus
