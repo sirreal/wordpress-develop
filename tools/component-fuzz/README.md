@@ -731,7 +731,11 @@ database, network requests, or a configured site.
   index authentication metadata, and global/filter restoration.
 - `rest-directory-services`: no-network REST coverage for WordPress.org-backed
   directory service controllers, including block-directory, pattern-directory,
-  and URL-details route/schema contracts, plugin API and HTTP short-circuits,
+  and URL-details route/schema contracts, direct `plugins_api()` and
+  `themes_api()` argument/default/result filters, plugin/theme WordPress.org
+  HTTP serialization, malformed/error JSON handling, SSL-to-HTTP fallback,
+  plugin short-circuit external markers, theme `query_themes` and
+  `feature_list` response normalization, plugin API and HTTP short-circuits,
   block-directory `_fields` projection, explicit block title/icon mapping and
   installed-plugin link discovery, permission matrices, request validation
   errors, transformed response schemas, pattern and URL cache/transient
