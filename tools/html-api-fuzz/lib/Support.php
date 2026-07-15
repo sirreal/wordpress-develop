@@ -403,6 +403,36 @@ function git_metadata( int $timeout_ms = 1000, ?string $root = null, bool $use_c
 	return $metadata;
 }
 
+function isolated_process_group_exists( int $process_group ): bool {
+	return $process_group > 1 && @posix_kill( -$process_group, 0 );
+}
+
+/** Terminate and verify an isolated group after its supervised leader exits. */
+function cleanup_isolated_process_group( int $process_group ): array {
+	$observed = isolated_process_group_exists( $process_group );
+	if ( ! $observed ) {
+		return array( 'observed' => false, 'failed' => false );
+	}
+
+	@posix_kill( -$process_group, SIGTERM );
+	$term_deadline = microtime( true ) + 0.2;
+	while ( isolated_process_group_exists( $process_group ) && microtime( true ) < $term_deadline ) {
+		usleep( 10000 );
+	}
+	if ( isolated_process_group_exists( $process_group ) ) {
+		@posix_kill( -$process_group, SIGKILL );
+	}
+	$kill_deadline = microtime( true ) + 1.0;
+	while ( isolated_process_group_exists( $process_group ) && microtime( true ) < $kill_deadline ) {
+		usleep( 10000 );
+	}
+
+	return array(
+		'observed' => true,
+		'failed'   => isolated_process_group_exists( $process_group ),
+	);
+}
+
 function run_php_process( array $script_args, string $cwd, int $timeout_ms, ?string $log_path = null, int $max_capture_bytes = 1048576, bool $isolate_process_group = false ): array {
 	if ( $max_capture_bytes < 1 ) {
 		throw new \InvalidArgumentException( 'Process capture limit must be positive.' );
@@ -477,7 +507,7 @@ function run_php_process( array $script_args, string $cwd, int $timeout_ms, ?str
 
 		$status = proc_get_status( $process );
 		if ( $isolate_process_group && $process_pid > 0 && function_exists( 'posix_getpgid' ) ) {
-			$process_group = $process_pid === @posix_getpgid( $process_pid );
+			$process_group = $process_group || $process_pid === @posix_getpgid( $process_pid );
 		}
 		if ( ! $status['running'] ) {
 			break;
@@ -485,16 +515,16 @@ function run_php_process( array $script_args, string $cwd, int $timeout_ms, ?str
 
 		if ( ( microtime( true ) - $start ) * 1000 > $timeout_ms ) {
 			$timed_out = true;
-			if ( $process_group ) {
+			if ( $process_group || ( $isolate_process_group && isolated_process_group_exists( $process_pid ) ) ) {
 				@posix_kill( -$process_pid, 15 );
 			} else {
 				proc_terminate( $process );
 			}
 			usleep( 200000 );
 			$status = proc_get_status( $process );
-			if ( $process_group ) {
+			if ( $isolate_process_group && $process_pid > 1 ) {
 				// Kill the group even if its leader exited after SIGTERM; a child
-				// could otherwise outlive the supervised worker.
+				// or an isolation-observation race could otherwise leak a child.
 				@posix_kill( -$process_pid, 9 );
 			} elseif ( $status['running'] ) {
 					proc_terminate( $process, 9 );
@@ -518,6 +548,12 @@ function run_php_process( array $script_args, string $cwd, int $timeout_ms, ?str
 	if ( $timed_out ) {
 		$exit_code = null;
 	}
+	$process_group_cleanup_failed = false;
+	if ( $isolate_process_group && $process_pid > 1 ) {
+		$cleanup = cleanup_isolated_process_group( $process_pid );
+		$process_group = $process_group || $cleanup['observed'];
+		$process_group_cleanup_failed = $cleanup['failed'];
+	}
 
 	$output = $stdout . $stderr;
 	if ( $log_write_failed ) {
@@ -526,7 +562,7 @@ function run_php_process( array $script_args, string $cwd, int $timeout_ms, ?str
 	return array(
 		'command'    => command_string( $target_command ),
 		'code'       => $exit_code,
-		'ok'         => 0 === $exit_code && ! $timed_out,
+		'ok'         => 0 === $exit_code && ! $timed_out && ! $process_group_cleanup_failed,
 		'timedOut'   => $timed_out,
 		'durationMs' => (int) round( ( microtime( true ) - $start ) * 1000 ),
 		'stdout'     => $stdout,
@@ -536,12 +572,16 @@ function run_php_process( array $script_args, string $cwd, int $timeout_ms, ?str
 		'output'     => $output,
 		'logPath'    => $log_path,
 		'processGroupIsolated' => $process_group,
+		'processGroupCleanupFailed' => $process_group_cleanup_failed,
 	);
 }
 
 /** Build the canonical result used when a supervised Worker produced none. */
 function synthesize_worker_process_failure( array $process, array $context ): array {
-	if ( $process['timedOut'] ?? false ) {
+	if ( $process['processGroupCleanupFailed'] ?? false ) {
+		$failure_class = 'worker-group-cleanup-failed';
+		$status        = 'cleanup-failed';
+	} elseif ( $process['timedOut'] ?? false ) {
 		$failure_class = 'worker-timeout';
 		$status        = 'timeout';
 	} elseif ( false !== stripos( (string) ( $process['stderr'] ?? '' ), 'Allowed memory size' ) ) {

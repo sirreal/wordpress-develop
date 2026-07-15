@@ -159,6 +159,31 @@ namespace {
 	html_api_fuzz_assert_descendant_stopped( $original_state_dir, 'original timeout' );
 	html_api_fuzz_commoncrawl_smoke_assert( '256M' === file_get_contents( $original_memory_file ), 'Expected original Worker to receive configured memory limit.' );
 
+	// A Worker can crash immediately after forking. Its detached descendant is
+	// still in the isolated group and must be reaped on the natural-exit path.
+	$fast_crash_state_dir = $work_dir . '-descendant-fast-crash';
+	\HtmlApiFuzz\ensure_dir( $fast_crash_state_dir );
+	putenv( 'HTML_API_FUZZ_TEST_DESCENDANT_STATE_DIR=' . $fast_crash_state_dir );
+	putenv( 'HTML_API_FUZZ_TEST_CRASH_AFTER_FORK=1' );
+	$fast_crash_process = \HtmlApiFuzz\run_php_process(
+		array(
+			__DIR__ . '/fixtures/commoncrawl-timeout-worker.php',
+			'--output-dir', $timeout_dir . '/fast-crash-worker',
+		),
+		\HtmlApiFuzz\repo_root(),
+		5000,
+		$timeout_dir . '/fast-crash-worker.log',
+		1048576,
+		true
+	);
+	putenv( 'HTML_API_FUZZ_TEST_CRASH_AFTER_FORK' );
+	html_api_fuzz_commoncrawl_smoke_assert( 42 === $fast_crash_process['code'] && false === $fast_crash_process['timedOut'], 'Expected deterministic fast Worker crash.' );
+	html_api_fuzz_commoncrawl_smoke_assert( true === $fast_crash_process['processGroupIsolated'], 'Expected fast-crash process-group isolation to be observed.' );
+	html_api_fuzz_commoncrawl_smoke_assert( false === $fast_crash_process['processGroupCleanupFailed'], 'Expected fast-crash process group cleanup to be verified.' );
+	html_api_fuzz_assert_descendant_stopped( $fast_crash_state_dir, 'fast-crash' );
+	$fast_crash_group = (int) file_get_contents( $fast_crash_state_dir . '/process-group-id' );
+	html_api_fuzz_commoncrawl_smoke_assert( $fast_crash_group > 1 && ! posix_kill( -$fast_crash_group, 0 ), 'Expected no surviving fast-crash process group.' );
+
 	$timeout_replay = json_decode( (string) file_get_contents( $timeout['artifactDir'] . '/replay.json' ), true );
 	html_api_fuzz_commoncrawl_smoke_assert( is_string( $timeout_replay['inputBase64'] ?? null ), 'Expected timeout replay to embed exact input.' );
 	html_api_fuzz_commoncrawl_smoke_assert( 'php-dom' === ( $timeout_replay['options']['domOracle'] ?? null ), 'Expected timeout replay to preserve its oracle.' );
@@ -452,6 +477,7 @@ namespace {
 	\HtmlApiFuzz\remove_dir_recursive( $fatal_dir );
 	\HtmlApiFuzz\remove_dir_recursive( $original_state_dir );
 	\HtmlApiFuzz\remove_dir_recursive( $replay_state_dir );
+	\HtmlApiFuzz\remove_dir_recursive( $fast_crash_state_dir );
 	\HtmlApiFuzz\remove_dir_recursive( $corrupt_state_dir );
 	\HtmlApiFuzz\remove_dir_recursive( $override_state_dir_1 );
 	\HtmlApiFuzz\remove_dir_recursive( $override_state_dir_2 );

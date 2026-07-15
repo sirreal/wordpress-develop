@@ -288,7 +288,7 @@ class CommonCrawlRunner {
 		} catch ( \Throwable $ignored ) {
 			$result = null;
 		}
-		if ( is_array( $result ) ) {
+		if ( is_array( $result ) && false === ( $process['processGroupCleanupFailed'] ?? false ) ) {
 			return $result;
 		}
 
@@ -685,6 +685,7 @@ class CommonCrawlRunner {
 			'stderrTruncated' => $process['stderrTruncated'] ?? false,
 			'logPath'    => $process['logPath'] ?? null,
 			'processGroupIsolated' => $process['processGroupIsolated'] ?? false,
+			'processGroupCleanupFailed' => $process['processGroupCleanupFailed'] ?? false,
 		);
 	}
 

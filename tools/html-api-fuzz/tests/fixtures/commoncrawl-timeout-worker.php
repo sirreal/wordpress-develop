@@ -21,6 +21,29 @@ if ( is_string( $output_dir ) ) {
 		exit( 1 );
 	}
 	$heartbeat = $state_dir . '/descendant-heartbeat';
+	if ( '1' === getenv( 'HTML_API_FUZZ_TEST_CRASH_AFTER_FORK' ) ) {
+		$child_pid = pcntl_fork();
+		if ( -1 === $child_pid ) {
+			exit( 1 );
+		}
+		if ( 0 === $child_pid ) {
+			@fclose( STDIN );
+			@fclose( STDOUT );
+			@fclose( STDERR );
+			for ( $iteration = 0; $iteration < 500; ++$iteration ) {
+				file_put_contents( $heartbeat, (string) $iteration );
+				usleep( 10000 );
+			}
+			exit( 0 );
+		}
+		file_put_contents( $state_dir . '/descendant-pid', (string) $child_pid );
+		file_put_contents( $state_dir . '/process-group-id', (string) posix_getpgrp() );
+		$heartbeat_deadline = microtime( true ) + 1.0;
+		while ( ! is_file( $heartbeat ) && microtime( true ) < $heartbeat_deadline ) {
+			usleep( 10000 );
+		}
+		exit( is_file( $heartbeat ) ? 42 : 1 );
+	}
 	$code      = '$path=$argv[1]; for($i=0;$i<500;$i++){file_put_contents($path, (string)$i); usleep(10000);}';
 	$null      = '/dev/null';
 	$child     = proc_open(

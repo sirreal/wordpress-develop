@@ -252,6 +252,9 @@ try {
 } catch ( \Throwable $ignored ) {
 	$output_replay = null;
 }
+if ( $proc['processGroupCleanupFailed'] ?? false ) {
+	$result = null;
+}
 if ( ! is_array( $result ) ) {
 	$result = \HtmlApiFuzz\synthesize_worker_process_failure(
 		$proc,
@@ -314,6 +317,8 @@ echo \HtmlApiFuzz\json_encode_safe(
 			'timedOut'   => $proc['timedOut'],
 			'durationMs' => $proc['durationMs'],
 			'logPath'    => $proc['logPath'],
+			'processGroupIsolated' => $proc['processGroupIsolated'],
+			'processGroupCleanupFailed' => $proc['processGroupCleanupFailed'],
 		),
 		'signature'     => $result['signature'] ?? null,
 		'oracleFinding' => $result['oracleFinding'] ?? null,
