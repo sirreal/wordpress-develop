@@ -35,6 +35,7 @@ final class AccountSecuritySurface {
 			$rows[] = self::check_application_password_chunking_and_hashes( $ctx->fork( 'application-password-hashes' ) );
 			$rows[] = self::check_application_password_authentication( $ctx->fork( 'application-password-authentication' ) );
 			$rows[] = self::check_password_reset_key_lifecycle( $ctx->fork( 'password-reset-key-lifecycle' ) );
+			$rows[] = self::check_reset_password_composition( $ctx->fork( 'reset-password-composition' ) );
 			$rows[] = self::check_recovery_key_service( $ctx->fork( 'recovery-key-service' ) );
 			$rows[] = self::check_recovery_cookie_service( $ctx->fork( 'recovery-cookie-service' ) );
 			$rows[] = self::check_paused_extension_storage( $ctx->fork( 'paused-extension-storage' ) );
@@ -100,7 +101,9 @@ final class AccountSecuritySurface {
 				'add_action',
 				'add_filter',
 				'check_password_reset_key',
+				'current_filter',
 				'delete_option',
+				'get_userdata',
 				'get_password_reset_key',
 				'get_user_by',
 				'get_network_option',
@@ -110,6 +113,7 @@ final class AccountSecuritySurface {
 				'is_wp_error',
 				'remove_action',
 				'remove_filter',
+				'reset_password',
 				'sanitize_text_field',
 				'update_network_option',
 				'update_option',
@@ -126,6 +130,7 @@ final class AccountSecuritySurface {
 				'wp_is_application_passwords_available_for_user',
 				'wp_is_password_reset_allowed_for_user',
 				'wp_recovery_mode',
+				'wp_set_password',
 				'wp_update_user',
 				'wp_validate_application_password',
 				'wp_verify_fast_hash',
@@ -1110,6 +1115,255 @@ final class AccountSecuritySurface {
 				'expirationEvents' => count( $expiration_events ),
 				'expiredEvents'    => count( $expired_key_events ),
 				'failures'         => array_slice( $failures, 0, 5 ),
+			)
+		);
+	}
+
+	private static function check_reset_password_composition( \ComponentFuzz\FuzzContext $ctx ): array {
+		if ( ! self::can_reset_stub_content() ) {
+			return self::skip(
+				$ctx,
+				'account-security.reset-password.hooks-storage-and-repeat-replacement',
+				'The in-memory wpdb content reset hook is unavailable.'
+			);
+		}
+
+		$failures             = array();
+		$user_id              = 0;
+		$login                = self::login_case( $ctx->fork( 'login' ) );
+		$email                = $login . '@example.test';
+		$old_password         = 'component-fuzz-old-' . self::token( $ctx->fork( 'old-password' ), 16 );
+		$new_password         = 'component-fuzz-new-' . self::token( $ctx->fork( 'new-password' ), 18 );
+		$second_password      = 'component-fuzz-next-' . self::token( $ctx->fork( 'second-password' ), 18 );
+		$activation_key       = 'component-fuzz-activation-' . self::token( $ctx->fork( 'activation-key' ), 20 );
+		$reset_events         = array();
+		$set_password_events  = array();
+		$event_sequence       = array();
+		$hooks_restored       = false;
+		$content_counts_after = null;
+
+		if ( $second_password === $new_password ) {
+			$second_password = self::mutate_secret( $second_password );
+		}
+
+		$reset_action = static function ( \WP_User $user, string $new_pass ) use ( &$reset_events, &$event_sequence ): void {
+			$fresh            = \get_userdata( $user->ID );
+			$event_sequence[] = \current_filter();
+			$reset_events[]   = array(
+				'hook'               => \current_filter(),
+				'userId'             => $user->ID,
+				'userLogin'          => $user->user_login,
+				'newPass'            => $new_pass,
+				'storedHash'         => $fresh instanceof \WP_User ? $fresh->user_pass : null,
+				'activationKey'      => $fresh instanceof \WP_User ? $fresh->user_activation_key : null,
+				'defaultPasswordNag' => \get_user_meta( $user->ID, 'default_password_nag', true ),
+			);
+		};
+		$set_password_action = static function ( string $password, int $candidate_user_id, $old_user_data ) use ( &$set_password_events, &$event_sequence ): void {
+			$fresh                 = \get_userdata( $candidate_user_id );
+			$event_sequence[]      = \current_filter();
+			$set_password_events[] = array(
+				'hook'               => \current_filter(),
+				'userId'             => $candidate_user_id,
+				'password'           => $password,
+				'oldUserId'          => $old_user_data instanceof \WP_User ? $old_user_data->ID : null,
+				'oldHash'            => $old_user_data instanceof \WP_User ? $old_user_data->user_pass : null,
+				'oldActivationKey'   => $old_user_data instanceof \WP_User ? $old_user_data->user_activation_key : null,
+				'storedHash'         => $fresh instanceof \WP_User ? $fresh->user_pass : null,
+				'activationKey'      => $fresh instanceof \WP_User ? $fresh->user_activation_key : null,
+				'defaultPasswordNag' => \get_user_meta( $candidate_user_id, 'default_password_nag', true ),
+			);
+		};
+
+		self::reset_stub_content();
+
+		try {
+			$inserted = \wp_insert_user(
+				array(
+					'user_login' => $login,
+					'user_pass'  => $old_password,
+					'user_email' => $email,
+					'role'       => 'subscriber',
+				)
+			);
+
+			if ( is_int( $inserted ) ) {
+				$user_id = $inserted;
+				\update_user_meta( $user_id, 'default_password_nag', true );
+				\wp_update_user(
+					array(
+						'ID'                  => $user_id,
+						'user_activation_key' => $activation_key,
+					)
+				);
+			}
+
+			$user = is_int( $inserted ) ? \get_userdata( $inserted ) : false;
+			self::collect_failure(
+				$failures,
+				is_int( $inserted )
+					&& $user instanceof \WP_User
+					&& $login === $user->user_login
+					&& $email === $user->user_email
+					&& \wp_check_password( $old_password, $user->user_pass, $user_id )
+					&& $activation_key === $user->user_activation_key
+					&& true === (bool) \get_user_meta( $user_id, 'default_password_nag', true ),
+				'reset_password synthetic user starts with an old password, activation key, and default-password nag',
+				array(
+					'inserted'      => self::describe_value( $inserted ),
+					'user'          => self::describe_value( $user ),
+					'login'         => self::describe_string( $login ),
+					'activationKey' => self::describe_string( $activation_key ),
+					'nag'           => is_int( $inserted ) ? \get_user_meta( $inserted, 'default_password_nag', true ) : null,
+				)
+			);
+
+			if ( $user instanceof \WP_User ) {
+				\add_action( 'password_reset', $reset_action, 10, 2 );
+				\add_action( 'wp_set_password', $set_password_action, 10, 3 );
+				\add_action( 'after_password_reset', $reset_action, 10, 2 );
+
+				\reset_password( $user, $new_password );
+				$after_first = \get_userdata( $user_id );
+
+				if ( $after_first instanceof \WP_User ) {
+					\reset_password( $after_first, $second_password );
+				}
+				$after_second = \get_userdata( $user_id );
+
+				self::collect_failure(
+					$failures,
+					array(
+						'password_reset',
+						'wp_set_password',
+						'after_password_reset',
+						'password_reset',
+						'wp_set_password',
+						'after_password_reset',
+					) === $event_sequence,
+					'reset_password fires reset, storage, and after-reset hooks in order for each reset call',
+					array(
+						'eventSequence'      => self::describe_value( $event_sequence ),
+						'resetEvents'        => self::describe_value( $reset_events ),
+						'setPasswordEvents'  => self::describe_value( $set_password_events ),
+					)
+				);
+
+				self::collect_failure(
+					$failures,
+					4 === count( $reset_events )
+						&& array( 'password_reset', 'after_password_reset', 'password_reset', 'after_password_reset' ) === array_column( $reset_events, 'hook' )
+						&& array( $user_id, $user_id, $user_id, $user_id ) === array_column( $reset_events, 'userId' )
+						&& array( $new_password, $new_password, $second_password, $second_password ) === array_column( $reset_events, 'newPass' ),
+					'password_reset and after_password_reset expose the same target user and plaintext password payloads',
+					array(
+						'resetEvents'    => self::describe_value( $reset_events ),
+						'newPassword'    => self::describe_string( $new_password ),
+						'secondPassword' => self::describe_string( $second_password ),
+					)
+				);
+
+				self::collect_failure(
+					$failures,
+					isset( $reset_events[0], $reset_events[1] )
+						&& \wp_check_password( $old_password, (string) $reset_events[0]['storedHash'], $user_id )
+						&& $activation_key === $reset_events[0]['activationKey']
+						&& true === (bool) $reset_events[0]['defaultPasswordNag']
+						&& \wp_check_password( $new_password, (string) $reset_events[1]['storedHash'], $user_id )
+						&& ! \wp_check_password( $old_password, (string) $reset_events[1]['storedHash'], $user_id )
+						&& '' === $reset_events[1]['activationKey']
+						&& false === (bool) $reset_events[1]['defaultPasswordNag'],
+					'password_reset sees pre-storage account state while after_password_reset sees replaced password and cleared nag state',
+					array(
+						'firstPasswordReset' => self::describe_value( $reset_events[0] ?? null ),
+						'firstAfterReset'    => self::describe_value( $reset_events[1] ?? null ),
+					)
+				);
+
+				self::collect_failure(
+					$failures,
+					$after_first instanceof \WP_User
+						&& \wp_check_password( $new_password, $after_first->user_pass, $user_id )
+						&& ! \wp_check_password( $old_password, $after_first->user_pass, $user_id )
+						&& '' === $after_first->user_activation_key
+						&& false === (bool) \get_user_meta( $user_id, 'default_password_nag', true ),
+					'first reset replaces the stored hash, invalidates the previous password, clears activation key, and clears default-password nag',
+					array(
+						'afterFirst'  => self::describe_value( $after_first ),
+						'currentNag'  => \get_user_meta( $user_id, 'default_password_nag', true ),
+					)
+				);
+
+				self::collect_failure(
+					$failures,
+					$after_second instanceof \WP_User
+						&& \wp_check_password( $second_password, $after_second->user_pass, $user_id )
+						&& ! \wp_check_password( $new_password, $after_second->user_pass, $user_id )
+						&& ! \wp_check_password( $old_password, $after_second->user_pass, $user_id )
+						&& '' === $after_second->user_activation_key
+						&& false === (bool) \get_user_meta( $user_id, 'default_password_nag', true ),
+					'repeated reset_password calls replace the previous reset password without reviving activation or nag state',
+					array(
+						'afterSecond'    => self::describe_value( $after_second ),
+						'secondPassword' => self::describe_string( $second_password ),
+						'currentNag'     => \get_user_meta( $user_id, 'default_password_nag', true ),
+					)
+				);
+
+				self::collect_failure(
+					$failures,
+					2 === count( $set_password_events )
+						&& array( $new_password, $second_password ) === array_column( $set_password_events, 'password' )
+						&& array( $user_id, $user_id ) === array_column( $set_password_events, 'userId' )
+						&& array( $user_id, $user_id ) === array_column( $set_password_events, 'oldUserId' )
+						&& \wp_check_password( $old_password, (string) ( $set_password_events[0]['oldHash'] ?? '' ), $user_id )
+						&& $activation_key === ( $set_password_events[0]['oldActivationKey'] ?? null )
+						&& \wp_check_password( $new_password, (string) ( $set_password_events[1]['oldHash'] ?? '' ), $user_id )
+						&& '' === ( $set_password_events[1]['oldActivationKey'] ?? null ),
+					'reset_password delegates storage through wp_set_password with old-user snapshots from before each replacement',
+					array(
+						'setPasswordEvents' => self::describe_value( $set_password_events ),
+						'oldPassword'       => self::describe_string( $old_password ),
+						'activationKey'     => self::describe_string( $activation_key ),
+					)
+				);
+			}
+		} finally {
+			\remove_action( 'password_reset', $reset_action, 10 );
+			\remove_action( 'wp_set_password', $set_password_action, 10 );
+			\remove_action( 'after_password_reset', $reset_action, 10 );
+
+			$hooks_restored = false === \has_filter( 'password_reset', $reset_action )
+				&& false === \has_filter( 'wp_set_password', $set_password_action )
+				&& false === \has_filter( 'after_password_reset', $reset_action );
+
+			self::reset_stub_content();
+			$content_counts_after = self::stub_content_counts();
+		}
+
+		self::collect_failure(
+			$failures,
+			$hooks_restored
+				&& is_array( $content_counts_after )
+				&& 0 === array_sum( array_map( 'intval', $content_counts_after ) ),
+			'reset_password composition restores scoped hooks and in-memory content state',
+			array(
+				'hooksRestored'      => $hooks_restored,
+				'contentCountsAfter' => self::describe_value( $content_counts_after ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'account-security.reset-password.hooks-storage-and-repeat-replacement',
+			array() === $failures,
+			array(
+				'userId'            => $user_id,
+				'login'             => $login,
+				'resetEvents'       => count( $reset_events ),
+				'setPasswordEvents' => count( $set_password_events ),
+				'eventSequence'     => $event_sequence,
+				'failures'          => array_slice( $failures, 0, 5 ),
 			)
 		);
 	}
