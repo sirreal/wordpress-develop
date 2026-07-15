@@ -28,6 +28,7 @@ final class FormattingSurface {
 		$rows[] = self::check_wptexturize_rich_text_oracles( $ctx->fork( 'formatting-wptexturize' ), $inputs['texturizeCases'] );
 		$rows[] = self::check_autop_shortcode_stability( $ctx, $inputs['autopCases'] );
 		$rows[] = self::check_make_clickable( $ctx, $inputs['clickableCases'] );
+		$rows[] = self::check_text_link_helpers( $ctx->fork( 'formatting-text-link-helpers' ), $inputs['textLinkCases'] );
 		$rows[] = self::check_url_sanitizers( $ctx, $inputs['urlCases'] );
 		$rows[] = self::check_deep_mapping_helpers( $ctx->fork( 'formatting-deep-map' ), $inputs['deepCases'] );
 		$rows[] = self::check_identifier_sanitizers( $ctx, $inputs['identifierCases'] );
@@ -80,6 +81,7 @@ final class FormattingSurface {
 			'texturizeCases'   => self::generate_wptexturize_cases( $ctx->fork( 'formatting-wptexturize' ) ),
 			'autopCases'       => self::generate_autop_cases( $ctx->fork( 'formatting-autop' ) ),
 			'clickableCases'   => self::generate_clickable_cases( $ctx->fork( 'formatting-clickable' ) ),
+			'textLinkCases'    => self::generate_text_link_cases( $ctx->fork( 'formatting-text-link-helpers' ) ),
 			'urlCases'         => self::generate_url_cases( $ctx->fork( 'formatting-urls' ) ),
 			'deepCases'        => self::generate_deep_map_cases( $ctx->fork( 'formatting-deep-map' ) ),
 			'identifierCases'  => self::generate_identifier_cases( $ctx->fork( 'formatting-identifiers' ) ),
@@ -813,6 +815,264 @@ final class FormattingSurface {
 			'make_clickable.bounded_idempotent_links',
 			$failures,
 			array( 'cases' => $checked )
+		);
+	}
+
+	private static function check_text_link_helpers( \ComponentFuzz\FuzzContext $ctx, array $cases ): array {
+		foreach (
+			array(
+				'add_filter',
+				'antispambot',
+				'apply_filters',
+				'capital_P_dangit',
+				'has_filter',
+				'remove_filter',
+				'wp_html_excerpt',
+				'wp_make_link_relative',
+				'wp_rel_nofollow',
+				'wp_rel_ugc',
+				'wp_slash',
+				'wp_strip_all_tags',
+				'wp_trim_words',
+				'wp_unslash',
+			) as $function
+		) {
+			if ( ! function_exists( $function ) ) {
+				return self::skip_row( $ctx, 'text_link_helpers.trim_excerpt_rel_obfuscation_contracts', "{$function}() is unavailable." );
+			}
+		}
+
+		$failures          = array();
+		$checked           = 0;
+		$trim_filter_calls = array();
+		$home_filter       = static function (): string {
+			return 'https://example.test';
+		};
+		$trim_filter       = static function ( string $trimmed, int $num_words, string $more, string $original_text ) use ( &$trim_filter_calls ): string {
+			$trim_filter_calls[] = array(
+				'trimmed'  => $trimmed,
+				'numWords' => $num_words,
+				'more'     => $more,
+				'original' => $original_text,
+			);
+
+			return $trimmed;
+		};
+
+		\add_filter( 'pre_option_home', $home_filter, 10, 3 );
+		\add_filter( 'pre_option_siteurl', $home_filter, 10, 3 );
+		\add_filter( 'wp_trim_words', $trim_filter, 10, 4 );
+		try {
+			foreach ( $cases as $case_index => $case ) {
+				$violations = array();
+				$calls      = array();
+				++$checked;
+
+				$trimmed = self::call(
+					'wp_trim_words',
+					static function () use ( $case ) {
+						return \wp_trim_words( $case['trimText'], $case['trimWords'], $case['trimMore'] );
+					}
+				);
+				$calls['trimWords'] = self::call_summary( $trimmed );
+				if ( ! $trimmed['ok'] || ! is_string( $trimmed['value'] ) ) {
+					$violations[] = 'wp-trim-words-call-failed';
+				} else {
+					$expected_trimmed = self::expected_wp_trim_words( $case['trimText'], $case['trimWords'], $case['trimMore'] );
+					if ( $expected_trimmed !== $trimmed['value'] ) {
+						$violations[] = 'wp-trim-words-mismatch';
+					}
+					if ( preg_match( '/<[^>]*>/', $trimmed['value'] ) ) {
+						$violations[] = 'wp-trim-words-kept-html-tag';
+					}
+					if ( strlen( $trimmed['value'] ) > strlen( \wp_strip_all_tags( $case['trimText'] ) ) + strlen( $case['trimMore'] ) + 4 ) {
+						$violations[] = 'wp-trim-words-expanded-unexpectedly';
+					}
+				}
+
+				$excerpt = self::call(
+					'wp_html_excerpt',
+					static function () use ( $case ) {
+						return \wp_html_excerpt( $case['excerptText'], $case['excerptCount'], $case['excerptMore'] );
+					}
+				);
+				$calls['htmlExcerpt'] = self::call_summary( $excerpt );
+				if ( ! $excerpt['ok'] || ! is_string( $excerpt['value'] ) ) {
+					$violations[] = 'wp-html-excerpt-call-failed';
+				} else {
+					$expected_excerpt = self::expected_wp_html_excerpt( $case['excerptText'], $case['excerptCount'], $case['excerptMore'] );
+					if ( $expected_excerpt !== $excerpt['value'] ) {
+						$violations[] = 'wp-html-excerpt-mismatch';
+					}
+					if ( preg_match( '/<[^>]*>/', $excerpt['value'] ) || preg_match( '/&[^;\s]{0,6}$/', $excerpt['value'] ) ) {
+						$violations[] = 'wp-html-excerpt-unsafe-or-partial-entity';
+					}
+				}
+
+				foreach ( $case['relativeLinks'] as $link => $expected ) {
+					$relative = self::call(
+						'wp_make_link_relative',
+						static function () use ( $link ) {
+							return \wp_make_link_relative( $link );
+						}
+					);
+					$calls['relativeLinks'][ $link ] = self::call_summary( $relative );
+					if ( ! $relative['ok'] || $expected !== $relative['value'] ) {
+						$violations[] = 'wp-make-link-relative-mismatch';
+					}
+				}
+
+				$nofollow = self::call(
+					'wp_rel_nofollow',
+					static function () use ( $case ) {
+						return \wp_unslash( \wp_rel_nofollow( \wp_slash( $case['relHtml'] ) ) );
+					}
+				);
+				$ugc      = self::call(
+					'wp_rel_ugc',
+					static function () use ( $case ) {
+						return \wp_unslash( \wp_rel_ugc( \wp_slash( $case['relHtml'] ) ) );
+					}
+				);
+				$ugc_twice = self::call(
+					'wp_rel_ugc:repeat',
+					static function () use ( $ugc ) {
+						return \wp_unslash( \wp_rel_ugc( \wp_slash( is_string( $ugc['value'] ?? null ) ? $ugc['value'] : '' ) ) );
+					}
+				);
+				$calls['nofollow'] = self::call_summary( $nofollow );
+				$calls['ugc']      = self::call_summary( $ugc );
+				$calls['ugcTwice'] = self::call_summary( $ugc_twice );
+				if ( ! $nofollow['ok'] || ! is_string( $nofollow['value'] ) || ! $ugc['ok'] || ! is_string( $ugc['value'] ) || ! $ugc_twice['ok'] || ! is_string( $ugc_twice['value'] ) ) {
+					$violations[] = 'rel-helper-call-failed';
+				} else {
+					$external_nofollow = self::rel_tokens_for_anchor( $nofollow['value'], 'data-link="external"' );
+					$internal_nofollow = self::rel_tokens_for_anchor( $nofollow['value'], 'data-link="internal"' );
+					$external_ugc      = self::rel_tokens_for_anchor( $ugc['value'], 'data-link="external"' );
+					$internal_ugc      = self::rel_tokens_for_anchor( $ugc['value'], 'data-link="internal"' );
+					$external_ugc_2    = self::rel_tokens_for_anchor( $ugc_twice['value'], 'data-link="external"' );
+					if (
+						! self::tokens_include_once( $external_nofollow, array( 'bookmark', 'nofollow' ) )
+						|| in_array( 'ugc', $external_nofollow, true )
+						|| ! self::tokens_include_once( $internal_nofollow, array( 'bookmark' ) )
+						|| in_array( 'nofollow', $internal_nofollow, true )
+						|| ! self::tokens_include_once( $external_ugc, array( 'bookmark', 'nofollow', 'ugc' ) )
+						|| ! self::tokens_include_once( $internal_ugc, array( 'bookmark', 'ugc' ) )
+						|| in_array( 'nofollow', $internal_ugc, true )
+						|| $external_ugc !== $external_ugc_2
+					) {
+						$violations[] = 'rel-helper-token-contract-mismatch';
+					}
+				}
+
+				foreach ( $case['emails'] as $email ) {
+					foreach ( array( 0, 1 ) as $hex_encoding ) {
+						$obfuscated = self::call(
+							'antispambot',
+							static function () use ( $email, $hex_encoding ) {
+								return \antispambot( $email, $hex_encoding );
+							}
+						);
+						$calls['antispambot'][] = self::call_summary( $obfuscated );
+						if ( ! $obfuscated['ok'] || ! is_string( $obfuscated['value'] ) ) {
+							$violations[] = 'antispambot-call-failed';
+							continue;
+						}
+
+						$decoded = html_entity_decode( rawurldecode( $obfuscated['value'] ), ENT_QUOTES | ENT_HTML5, 'UTF-8' );
+						$has_encoded_at = str_contains( $obfuscated['value'], '&#64;' ) || preg_match( '/%40/i', $obfuscated['value'] );
+						if (
+							$decoded !== $email
+							|| str_contains( $obfuscated['value'], '@' )
+							|| ! $has_encoded_at
+							|| preg_match( '/[<>]/', $obfuscated['value'] )
+							|| strlen( $obfuscated['value'] ) > ( strlen( $email ) * 12 ) + 64
+						) {
+							$violations[] = 'antispambot-roundtrip-or-shape-mismatch';
+						}
+					}
+				}
+
+				$direct_casing = \capital_P_dangit( $case['wordpressText'] );
+				\add_filter( 'the_title', 'capital_P_dangit' );
+				try {
+					$title_casing = \apply_filters( 'the_title', $case['wordpressText'] );
+				} finally {
+					\remove_filter( 'the_title', 'capital_P_dangit' );
+				}
+				$calls['capitalP'] = array(
+					'direct' => self::describe_string( $direct_casing ),
+					'title'  => self::describe_string( $title_casing ),
+				);
+				if (
+					! str_contains( $direct_casing, ' WordPress' )
+					|| ! str_contains( $direct_casing, '>WordPress' )
+					|| str_contains( $direct_casing, 'PreWordPress' )
+					|| str_contains( $title_casing, 'Wordpress' )
+					|| ! str_contains( $title_casing, 'PreWordPress' )
+				) {
+					$violations[] = 'capital-p-dangit-filter-branch-mismatch';
+				}
+
+				if ( array() !== $violations ) {
+					$failures[] = array(
+						'name'       => 'text-link-helper-contract-violation',
+						'message'    => 'Text/link formatting helpers violated exact trim/excerpt, rel-token, relative URL, obfuscation, or casing contracts.',
+						'caseIndex'  => $case_index,
+						'caseLabel'  => $case['label'],
+						'calls'      => $calls,
+						'violations' => array_values( array_unique( $violations ) ),
+					);
+				}
+			}
+		} finally {
+			\remove_filter( 'wp_trim_words', $trim_filter, 10 );
+			\remove_filter( 'pre_option_siteurl', $home_filter, 10 );
+			\remove_filter( 'pre_option_home', $home_filter, 10 );
+		}
+
+		$filter_payloads_match = count( $trim_filter_calls ) === $checked;
+		foreach ( $cases as $index => $case ) {
+			if (
+				! isset( $trim_filter_calls[ $index ] )
+				|| $case['trimWords'] !== $trim_filter_calls[ $index ]['numWords']
+				|| $case['trimMore'] !== $trim_filter_calls[ $index ]['more']
+				|| $case['trimText'] !== $trim_filter_calls[ $index ]['original']
+			) {
+				$filter_payloads_match = false;
+				break;
+			}
+		}
+
+		if (
+			! $filter_payloads_match
+			|| false !== \has_filter( 'wp_trim_words', $trim_filter, 10 )
+			|| false !== \has_filter( 'pre_option_home', $home_filter, 10 )
+			|| false !== \has_filter( 'pre_option_siteurl', $home_filter, 10 )
+			|| false !== \has_filter( 'the_title', 'capital_P_dangit' )
+		) {
+			$failures[] = array(
+				'name'         => 'text-link-helper-filter-lifecycle-violation',
+				'message'      => 'Text/link helper filters did not observe exact payloads or were not removed.',
+				'trimCalls'    => array_slice( $trim_filter_calls, 0, 5 ),
+				'expected'     => $checked,
+				'activeFilter' => array(
+					'trim'    => \has_filter( 'wp_trim_words', $trim_filter, 10 ),
+					'home'    => \has_filter( 'pre_option_home', $home_filter, 10 ),
+					'siteurl' => \has_filter( 'pre_option_siteurl', $home_filter, 10 ),
+					'title'   => \has_filter( 'the_title', 'capital_P_dangit' ),
+				),
+			);
+		}
+
+		return self::check_row(
+			$ctx,
+			'text_link_helpers.trim_excerpt_rel_obfuscation_contracts',
+			$failures,
+			array(
+				'cases'          => $checked,
+				'trimFilterCalls' => count( $trim_filter_calls ),
+			)
 		);
 	}
 
@@ -2241,6 +2501,76 @@ final class FormattingSurface {
 		return $cases;
 	}
 
+	private static function generate_text_link_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$token = strtolower( preg_replace( '/[^a-z0-9]+/', '', $ctx->identifier( 4, 10 ) ) );
+		if ( '' === $token ) {
+			$token = 'cfuzz';
+		}
+
+		$words = array( 'alpha', 'beta', 'gamma', 'delta', 'epsilon', 'zeta', $token );
+		$cases = array(
+			array(
+				'label'        => 'html-and-entity-boundary',
+				'trimText'     => '<p>alpha <strong>beta</strong> gamma delta epsilon</p>',
+				'trimWords'    => 3,
+				'trimMore'     => ' [&more]',
+				'excerptText'  => '<b>Alpha &amp; beta</b> and <script>drop()</script> trailing',
+				'excerptCount' => 12,
+				'excerptMore'  => '...',
+			),
+			array(
+				'label'        => 'newlines-and-partial-entity',
+				'trimText'     => "one\ntwo\tthree\r\nfour five",
+				'trimWords'    => 4,
+				'trimMore'     => '...',
+				'excerptText'  => 'Fish &amp; chips &notin; raw',
+				'excerptCount' => 10,
+				'excerptMore'  => ' [cut]',
+			),
+		);
+
+		for ( $i = 0; $i < 6; ++$i ) {
+			$count      = $ctx->int( 4, 8 );
+			$trim_words = array();
+			for ( $j = 0; $j < $count; ++$j ) {
+				$trim_words[] = $ctx->choice( $words );
+			}
+
+			$entity = $ctx->choice( array( '&amp;', '&#039;', '&#x27;', '&copy;' ) );
+			$cases[] = array(
+				'label'        => 'generated-text-link-' . $i,
+				'trimText'     => '<em>' . implode( "</em>\n<strong>", $trim_words ) . '</strong> tail',
+				'trimWords'    => $ctx->int( 2, max( 2, $count - 1 ) ),
+				'trimMore'     => $ctx->choice( array( '...', ' [&hellip;]', ' --more--' ) ),
+				'excerptText'  => '<span>' . $trim_words[0] . ' ' . $entity . ' ' . $trim_words[1] . '</span> ' . $ctx->choice( $words ) . ' &partial',
+				'excerptCount' => $ctx->int( 6, 20 ),
+				'excerptMore'  => $ctx->choice( array( '', '...', ' [cut]' ) ),
+			);
+		}
+
+		foreach ( $cases as &$case ) {
+			$case['relativeLinks'] = array(
+				'https://example.test/path/' . $token . '?a=1#frag' => '/path/' . $token . '?a=1#frag',
+				'//cdn.example.test/assets/' . $token . '.js'       => '/assets/' . $token . '.js',
+				'/already/relative/' . $token                      => '/already/relative/' . $token,
+				'mailto:' . $token . '@example.test'                => 'mailto:' . $token . '@example.test',
+			);
+			$case['relHtml'] = '<p>'
+				. '<a href="https://outside.example/path/' . \esc_attr( $token ) . '" rel="bookmark" data-link="external">external</a> '
+				. '<a href="https://example.test/internal/' . \esc_attr( $token ) . '" rel="bookmark" data-link="internal">internal</a>'
+				. '</p>';
+			$case['emails'] = array(
+				$token . '.person+tag@example.test',
+				'reader_' . $token . '@sub.example.test',
+			);
+			$case['wordpressText'] = 'Wordpress PreWordpress wordpress'
+				. ' and Wordpress <span>Wordpress</span> (Wordpress) &#8216;Wordpress';
+		}
+		unset( $case );
+
+		return $cases;
+	}
+
 	private static function generate_url_cases( \ComponentFuzz\FuzzContext $ctx ): array {
 		$cases = array(
 			array( 'input' => 'http://example.com/a?b=1&c=2', 'disallowedProtocol' => false ),
@@ -2945,6 +3275,51 @@ final class FormattingSurface {
 		}
 
 		return false;
+	}
+
+	private static function expected_wp_trim_words( string $text, int $num_words, string $more ): string {
+		$text        = \wp_strip_all_tags( $text );
+		$words_array = preg_split( "/[\n\r\t ]+/", $text, $num_words + 1, PREG_SPLIT_NO_EMPTY );
+
+		if ( count( $words_array ) > $num_words ) {
+			array_pop( $words_array );
+			$text = implode( ' ', $words_array ) . $more;
+		} else {
+			$text = implode( ' ', $words_array );
+		}
+
+		return $text;
+	}
+
+	private static function expected_wp_html_excerpt( string $str, int $count, string $more ): string {
+		$str     = \wp_strip_all_tags( $str, true );
+		$excerpt = mb_substr( $str, 0, $count );
+		$excerpt = preg_replace( '/&[^;\s]{0,6}$/', '', $excerpt );
+
+		if ( $str !== $excerpt ) {
+			$excerpt = trim( $excerpt ) . $more;
+		}
+
+		return $excerpt;
+	}
+
+	private static function rel_tokens_for_anchor( string $html, string $marker ): array {
+		if ( ! preg_match( '/<a\b(?=[^>]*' . preg_quote( $marker, '/' ) . ')[^>]*\brel=(["\'])(.*?)\1[^>]*>/i', $html, $matches ) ) {
+			return array();
+		}
+
+		$tokens = preg_split( '/\s+/', trim( html_entity_decode( $matches[2], ENT_QUOTES | ENT_HTML5, 'UTF-8' ) ), -1, PREG_SPLIT_NO_EMPTY );
+		return array_values( array_unique( $tokens ?: array() ) );
+	}
+
+	private static function tokens_include_once( array $tokens, array $required ): bool {
+		foreach ( $required as $token ) {
+			if ( 1 !== count( array_keys( $tokens, $token, true ) ) ) {
+				return false;
+			}
+		}
+
+		return count( $tokens ) === count( array_unique( $tokens ) );
 	}
 
 	private static function check_row( \ComponentFuzz\FuzzContext $ctx, string $invariant, array $failures, array $data = array() ): array {

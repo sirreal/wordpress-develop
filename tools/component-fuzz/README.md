@@ -378,10 +378,13 @@ database, network requests, or a configured site.
 - `formatting`: escaping helpers, text sanitizers, whitespace normalization,
   `wptexturize()` rich-text punctuation and protected-region oracles,
   `wptexturize_primes()`, texturize split/shortcode regex recomposition,
-  autop/shortcode cleanup, clickable text, URL sanitization, entity
-  normalization, deep `map_deep()`/URL-encoding/slash helper shape and round
-  trip contracts, title/key/class identifier sanitizers, file-name and username
-  sanitizers, colors, sizes, time strings, UTF-8 helpers, and accent removal.
+  autop/shortcode cleanup, clickable text, text/link helpers including
+  `wp_trim_words()`, `wp_html_excerpt()`, `wp_make_link_relative()`,
+  `wp_rel_nofollow()`, `wp_rel_ugc()`, `antispambot()`, and
+  `capital_P_dangit()` contracts, URL sanitization, entity normalization, deep
+  `map_deep()`/URL-encoding/slash helper shape and round trip contracts,
+  title/key/class identifier sanitizers, file-name and username sanitizers,
+  colors, sizes, time strings, UTF-8 helpers, and accent removal.
 - `feed-parsers`: local RSS/Atom parser and legacy feed utility API coverage,
   including bounded malformed fixtures, Magpie RSS/Atom/RDF item/channel
   normalization, AtomParser local-file behavior, SimplePie raw-data parsing and
