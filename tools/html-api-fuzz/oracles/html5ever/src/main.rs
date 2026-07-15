@@ -84,7 +84,7 @@ fn main() -> ExitCode {
         }
         Err(error) => {
             print_error(error.failure_class, &error.message, error.node_count);
-            ExitCode::from(2)
+            ExitCode::SUCCESS
         }
     }
 }
@@ -428,7 +428,7 @@ fn escaped_scalar(value: &str) -> String {
 
 fn oracle_json() -> String {
     format!(
-        "{{\"kind\":\"html5ever-source\",\"html5everVersion\":\"{HTML5EVER_VERSION}\",\"html5everChecksum\":\"{HTML5EVER_CHECKSUM}\",\"markup5everRcdomVersion\":\"{RCDOM_VERSION}\",\"markup5everRcdomChecksum\":\"{RCDOM_CHECKSUM}\",\"rustToolchain\":\"{RUST_TOOLCHAIN}\"}}"
+        "{{\"kind\":\"html5ever-source\",\"available\":true,\"html5everVersion\":\"{HTML5EVER_VERSION}\",\"html5everChecksum\":\"{HTML5EVER_CHECKSUM}\",\"markup5everRcdomVersion\":\"{RCDOM_VERSION}\",\"markup5everRcdomChecksum\":\"{RCDOM_CHECKSUM}\",\"rustToolchain\":\"{RUST_TOOLCHAIN}\"}}"
     )
 }
 

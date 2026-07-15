@@ -19,6 +19,7 @@ php -r '
 $result = json_decode( file_get_contents( $argv[1] ), true, 512, JSON_THROW_ON_ERROR );
 if ( "ok" !== ( $result["status"] ?? null ) ) { throw new Exception( "full document status" ); }
 if ( "html5ever-source" !== ( $result["oracle"]["kind"] ?? null ) ) { throw new Exception( "oracle kind" ); }
+if ( true !== ( $result["oracle"]["available"] ?? null ) ) { throw new Exception( "oracle availability" ); }
 if ( "0.39.0" !== ( $result["oracle"]["html5everVersion"] ?? null ) ) { throw new Exception( "html5ever pin" ); }
 if ( "1.88.0" !== ( $result["oracle"]["rustToolchain"] ?? null ) ) { throw new Exception( "Rust pin" ); }
 if ( base64_decode( $result["treeBase64"], true ) !== $result["tree"] ) { throw new Exception( "tree base64" ); }
@@ -143,18 +144,20 @@ foreach ( array( "<svg foreignObject>\n", "<svg altGlyph>\n", "  attributeName=\
 ' "$tmp_dir/adjusted-svg.json"
 
 printf '%s' '<b>x</b>' >"$tmp_dir/limit.html"
-if "$binary" --mode fragment-body --context body --max-nodes 1 --input "$tmp_dir/limit.html" >"$tmp_dir/limit.json"; then
-	printf '%s\n' 'Expected the node-limited parse to exit nonzero.' >&2
-	exit 1
-fi
+"$binary" --mode fragment-body --context body --max-nodes 1 --input "$tmp_dir/limit.html" >"$tmp_dir/limit.json"
 php -r '
 $result = json_decode( file_get_contents( $argv[1] ), true, 512, JSON_THROW_ON_ERROR );
+if ( "error" !== ( $result["status"] ?? null ) ) { throw new Exception( "node limit status" ); }
 if ( "node-limit-exceeded" !== ( $result["failureClass"] ?? null ) ) { throw new Exception( "node limit failure class" ); }
+if ( ! is_int( $result["nodeCount"] ?? null ) || $result["nodeCount"] < 0 ) { throw new Exception( "node limit count" ); }
+if ( true !== ( $result["oracle"]["available"] ?? null ) ) { throw new Exception( "node limit oracle availability" ); }
 ' "$tmp_dir/limit.json"
 
 "$binary" --version >"$tmp_dir/version.json"
 php -r '
 $result = json_decode( file_get_contents( $argv[1] ), true, 512, JSON_THROW_ON_ERROR );
+if ( "ok" !== ( $result["status"] ?? null ) ) { throw new Exception( "version status" ); }
+if ( true !== ( $result["oracle"]["available"] ?? null ) ) { throw new Exception( "version availability" ); }
 if ( "0.39.0+unofficial" !== ( $result["oracle"]["markup5everRcdomVersion"] ?? null ) ) { throw new Exception( "rcdom pin" ); }
 if ( "46a1761807faccc9a19e86944bbf40610014066306f96edcdedc2fb714bcb7b8" !== ( $result["oracle"]["html5everChecksum"] ?? null ) ) { throw new Exception( "html5ever checksum" ); }
 if ( "3ac010f19d6c4af81eeb4018a39d7a115de9d285af45c126a4ac02e6fc5716b7" !== ( $result["oracle"]["markup5everRcdomChecksum"] ?? null ) ) { throw new Exception( "rcdom checksum" ); }

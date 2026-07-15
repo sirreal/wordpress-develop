@@ -27,6 +27,7 @@ $oracle = \HtmlApiFuzz\OracleRenderer::from_options(
 );
 $metadata = $oracle->metadata();
 html_api_fuzz_lexbor_smoke_assert( \HtmlApiFuzz\OracleRenderer::KIND_LEXBOR_SOURCE === ( $metadata['kind'] ?? null ), 'Expected Lexbor source oracle metadata.' );
+html_api_fuzz_lexbor_smoke_assert( true === ( $metadata['available'] ?? null ), 'Expected the Lexbor source oracle to report available=true.' );
 html_api_fuzz_lexbor_smoke_assert( is_string( $metadata['lexborCommit'] ?? null ) && 1 === preg_match( '/^[0-9a-f]{40}$/', $metadata['lexborCommit'] ), 'Expected the resolved Lexbor commit in oracle metadata.' );
 $pinned_commit = trim( file_get_contents( \HtmlApiFuzz\repo_root() . '/tools/html-api-fuzz/oracles/lexbor/COMMIT' ) );
 html_api_fuzz_lexbor_smoke_assert( $pinned_commit === ( $metadata['lexborCommit'] ?? null ), 'Expected the built Lexbor commit to match the tracked pin.' );
@@ -35,6 +36,15 @@ $limits = array(
 	'maxTokens' => 200,
 	'maxNodes'  => 200,
 );
+
+$node_limited = $oracle->render( '<b>x</b>', \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY, array( 'maxNodes' => 1 ), 'body' );
+html_api_fuzz_lexbor_smoke_assert( \HtmlApiFuzz\TreeRenderer::STATUS_ERROR === ( $node_limited['status'] ?? null ), 'Expected a Lexbor node limit to be a semantic error.' );
+html_api_fuzz_lexbor_smoke_assert( 'node-limit-exceeded' === ( $node_limited['failureClass'] ?? null ), 'Expected the Lexbor node limit failure class.' );
+html_api_fuzz_lexbor_smoke_assert( 0 === ( $node_limited['process']['code'] ?? null ), 'Expected the Lexbor semantic error process to exit successfully.' );
+
+$invalid_utf8 = $oracle->render( "<p>\xC0</p>", \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY, $limits, 'body' );
+html_api_fuzz_lexbor_smoke_assert( \HtmlApiFuzz\TreeRenderer::STATUS_OK === ( $invalid_utf8['status'] ?? null ), 'Expected Lexbor to return an invalid-UTF-8 tree through treeBase64.' );
+html_api_fuzz_lexbor_smoke_assert( false !== strpos( $invalid_utf8['tree'] ?? '', "\xC0" ), 'Expected Lexbor treeBase64 to preserve the invalid byte.' );
 
 $work_dir = sys_get_temp_dir() . '/html-api-fuzz-lexbor-oracle-' . \HtmlApiFuzz\timestamp();
 \HtmlApiFuzz\ensure_dir( $work_dir );

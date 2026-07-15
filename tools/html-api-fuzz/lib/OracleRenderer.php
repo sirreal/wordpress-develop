@@ -5,6 +5,11 @@ class OracleRenderer {
 	public const KIND_LEXBOR_SOURCE     = 'lexbor-source';
 	public const KIND_HTML5EVER_SOURCE  = 'html5ever-source';
 	public const KIND_CHROME_CDP        = 'chrome-cdp';
+	private const SOURCE_ERROR_FAILURE_CLASSES = array(
+		'oracle-parse-error',
+		'node-limit-exceeded',
+		'oracle-renderer-error',
+	);
 
 	private string $kind;
 	private ?string $lexbor_oracle_bin;
@@ -125,6 +130,66 @@ class OracleRenderer {
 		return self::replay_safe_metadata( $this->metadata() );
 	}
 
+	private function source_identity_error( array $oracle ): ?string {
+		if ( $this->kind !== ( $oracle['kind'] ?? null ) ) {
+			return 'reported kind ' . ( is_scalar( $oracle['kind'] ?? null ) ? (string) $oracle['kind'] : 'missing' ) . " instead of {$this->kind}";
+		}
+		if ( true !== ( $oracle['available'] ?? null ) ) {
+			return 'did not report available=true';
+		}
+
+		if ( self::KIND_LEXBOR_SOURCE === $this->kind ) {
+			$commit_path = repo_root() . '/tools/html-api-fuzz/oracles/lexbor/COMMIT';
+			$expected_commit = trim( (string) @file_get_contents( $commit_path ) );
+			if ( '' === $expected_commit || $expected_commit !== ( $oracle['lexborCommit'] ?? null ) ) {
+				return 'reported a Lexbor commit that does not match the tracked COMMIT pin';
+			}
+			if ( ! is_string( $oracle['lexborVersion'] ?? null ) || '' === $oracle['lexborVersion'] ) {
+				return 'did not report a Lexbor version';
+			}
+			return null;
+		}
+
+		$lock_path = repo_root() . '/tools/html-api-fuzz/oracles/html5ever/Cargo.lock';
+		$html5ever = self::cargo_locked_package( $lock_path, 'html5ever' );
+		$rcdom = self::cargo_locked_package( $lock_path, 'markup5ever_rcdom' );
+		$toolchain_path = repo_root() . '/tools/html-api-fuzz/oracles/html5ever/rust-toolchain.toml';
+		$toolchain = (string) @file_get_contents( $toolchain_path );
+		preg_match( '/^channel\s*=\s*"([^"]+)"/m', $toolchain, $toolchain_match );
+		$expected = array(
+			'html5everVersion'          => $html5ever['version'] ?? null,
+			'html5everChecksum'         => $html5ever['checksum'] ?? null,
+			'markup5everRcdomVersion'   => $rcdom['version'] ?? null,
+			'markup5everRcdomChecksum'  => $rcdom['checksum'] ?? null,
+			'rustToolchain'              => $toolchain_match[1] ?? null,
+		);
+		foreach ( $expected as $key => $value ) {
+			if ( ! is_string( $value ) || '' === $value || $value !== ( $oracle[ $key ] ?? null ) ) {
+				return "reported {$key} that does not match the checked-in pin";
+			}
+		}
+		return null;
+	}
+
+	private static function cargo_locked_package( string $path, string $name ): ?array {
+		$lock = @file_get_contents( $path );
+		if ( false === $lock || ! preg_match_all( '/\[\[package\]\]\s*(.*?)(?=\n\[\[package\]\]|\z)/s', $lock, $packages ) ) {
+			return null;
+		}
+		foreach ( $packages[1] as $package ) {
+			if ( ! preg_match( '/^name\s*=\s*"([^"]+)"/m', $package, $package_name ) || $name !== $package_name[1] ) {
+				continue;
+			}
+			preg_match( '/^version\s*=\s*"([^"]+)"/m', $package, $version );
+			preg_match( '/^checksum\s*=\s*"([^"]+)"/m', $package, $checksum );
+			return array(
+				'version'  => $version[1] ?? null,
+				'checksum' => $checksum[1] ?? null,
+			);
+		}
+		return null;
+	}
+
 	public function metadata(): array {
 		if ( null !== $this->metadata ) {
 			return $this->metadata;
@@ -162,13 +227,18 @@ class OracleRenderer {
 		if ( is_string( $binary ) && is_file( $binary ) && is_executable( $binary ) ) {
 			$version = $this->run_process( array( $binary, '--version' ) );
 			$decoded = json_decode( trim( $version['stdout'] ), true );
-			if ( is_array( $decoded['oracle'] ?? null ) ) {
+			$identity_error = is_array( $decoded['oracle'] ?? null ) ? $this->source_identity_error( $decoded['oracle'] ) : 'did not return oracle metadata';
+			if (
+				! $version['timedOut'] &&
+				0 === $version['code'] &&
+				'ok' === ( $decoded['status'] ?? null ) &&
+				null === $identity_error
+			) {
 				$metadata = array_merge( $metadata, $decoded['oracle'] );
 				$metadata['binary'] = $binary;
-				$metadata['available'] = true;
 			} else {
 				$metadata['available'] = false;
-				$metadata['versionError'] = trim( $version['output'] );
+				$metadata['versionError'] = 'Invalid source oracle version response: ' . ( $identity_error ?? 'expected status=ok and exit code 0' ) . '. ' . trim( $version['output'] );
 			}
 		} else {
 			$metadata['available'] = false;
@@ -303,6 +373,15 @@ class OracleRenderer {
 				'oracle'       => $this->metadata(),
 			);
 		}
+		$metadata = $this->metadata();
+		if ( true !== ( $metadata['available'] ?? false ) ) {
+			return array(
+				'status'       => TreeRenderer::STATUS_ERROR,
+				'error'        => $metadata['versionError'] ?? $label . ' source oracle failed identity validation.',
+				'failureClass' => 'oracle-unavailable',
+				'oracle'       => $metadata,
+			);
+		}
 
 		$tmp = tempnam( sys_get_temp_dir(), 'html-api-fuzz-oracle-input-' );
 		if ( false === $tmp ) {
@@ -345,35 +424,62 @@ class OracleRenderer {
 				'status'       => TreeRenderer::STATUS_ERROR,
 				'error'        => $label . ' source oracle timed out.',
 				'failureClass' => 'oracle-renderer-error',
-				'oracle'       => $this->metadata(),
+				'oracle'       => $metadata,
+				'process'      => self::compact_process( $proc ),
+			);
+		}
+		if ( 0 !== $proc['code'] ) {
+			return array(
+				'status'       => TreeRenderer::STATUS_ERROR,
+				'error'        => $label . ' source oracle process exited with code ' . ( null === $proc['code'] ? 'unknown' : $proc['code'] ) . '.',
+				'failureClass' => 'oracle-renderer-error',
+				'oracle'       => $metadata,
 				'process'      => self::compact_process( $proc ),
 			);
 		}
 
 		$decoded = json_decode( $proc['stdout'], true );
-		if ( ! is_array( $decoded ) || ! is_string( $decoded['status'] ?? null ) ) {
+		if ( ! is_array( $decoded ) ) {
 			return array(
 				'status'       => TreeRenderer::STATUS_ERROR,
 				'error'        => $label . ' source oracle did not return a valid JSON result.',
 				'failureClass' => 'oracle-renderer-error',
-				'oracle'       => $this->metadata(),
+				'oracle'       => $metadata,
 				'process'      => self::compact_process( $proc ),
 			);
 		}
 
-		$status = $decoded['status'];
-		if ( ! in_array( $status, array( TreeRenderer::STATUS_OK, TreeRenderer::STATUS_UNSUPPORTED, TreeRenderer::STATUS_ERROR ), true ) ) {
-			$status = TreeRenderer::STATUS_ERROR;
+		$status = $decoded['status'] ?? null;
+		$identity_error = is_array( $decoded['oracle'] ?? null ) ? $this->source_identity_error( $decoded['oracle'] ) : 'did not return oracle metadata';
+		if (
+			! in_array( $status, array( TreeRenderer::STATUS_OK, TreeRenderer::STATUS_UNSUPPORTED, TreeRenderer::STATUS_ERROR ), true ) ||
+			null !== $identity_error ||
+			! is_int( $decoded['nodeCount'] ?? null ) ||
+			$decoded['nodeCount'] < 0
+		) {
+			return array(
+				'status'       => TreeRenderer::STATUS_ERROR,
+				'error'        => $label . ' source oracle returned an invalid protocol result: ' . ( $identity_error ?? 'invalid status or nodeCount' ) . '.',
+				'failureClass' => 'oracle-renderer-error',
+				'oracle'       => $metadata,
+				'process'      => self::compact_process( $proc ),
+			);
 		}
 
 		$result = array(
 			'status'       => $status,
-			'oracle'       => is_array( $decoded['oracle'] ?? null ) ? array_merge( $this->metadata(), $decoded['oracle'] ) : $this->metadata(),
-			'nodeCount'    => $decoded['nodeCount'] ?? null,
+			'oracle'       => array_merge( $metadata, $decoded['oracle'] ),
+			'nodeCount'    => $decoded['nodeCount'],
 			'process'      => self::compact_process( $proc ),
 		);
 
-		if ( TreeRenderer::STATUS_OK === $status && is_string( $decoded['treeBase64'] ?? null ) ) {
+		if ( TreeRenderer::STATUS_OK === $status ) {
+			if ( ! is_string( $decoded['treeBase64'] ?? null ) ) {
+				$result['status']       = TreeRenderer::STATUS_ERROR;
+				$result['error']        = $label . ' source oracle returned ok without treeBase64.';
+				$result['failureClass'] = 'oracle-renderer-error';
+				return $result;
+			}
 			$tree = base64_decode( $decoded['treeBase64'], true );
 			if ( false === $tree ) {
 				$result['status']       = TreeRenderer::STATUS_ERROR;
@@ -381,24 +487,33 @@ class OracleRenderer {
 				$result['failureClass'] = 'oracle-renderer-error';
 				return $result;
 			}
+			if ( array_key_exists( 'tree', $decoded ) && ( ! is_string( $decoded['tree'] ) || $decoded['tree'] !== $tree ) ) {
+				$result['status']       = TreeRenderer::STATUS_ERROR;
+				$result['error']        = $label . ' source oracle returned disagreeing tree and treeBase64 values.';
+				$result['failureClass'] = 'oracle-renderer-error';
+				return $result;
+			}
 			$result['tree'] = $tree;
-		} elseif ( TreeRenderer::STATUS_OK === $status && is_string( $decoded['tree'] ?? null ) ) {
-			$result['tree'] = $decoded['tree'];
-		}
-		if ( is_string( $decoded['failureClass'] ?? null ) ) {
+		} elseif ( TreeRenderer::STATUS_UNSUPPORTED === $status ) {
+			if (
+				'oracle-unsupported' !== ( $decoded['failureClass'] ?? null ) ||
+				! is_string( $decoded['unsupported']['message'] ?? null )
+			) {
+				$result['status']       = TreeRenderer::STATUS_ERROR;
+				$result['error']        = $label . ' source oracle returned malformed unsupported details.';
+				$result['failureClass'] = 'oracle-renderer-error';
+				return $result;
+			}
 			$result['failureClass'] = $decoded['failureClass'];
-		}
-		if ( is_string( $decoded['error'] ?? null ) ) {
-			$result['error'] = $decoded['error'];
-		}
-		if ( is_array( $decoded['unsupported'] ?? null ) ) {
-			$result['unsupported'] = $decoded['unsupported'];
-		}
-
-		if ( TreeRenderer::STATUS_OK === $status && ! is_string( $result['tree'] ?? null ) ) {
+			$result['unsupported']  = $decoded['unsupported'];
+		} elseif ( ! in_array( $decoded['failureClass'] ?? null, self::SOURCE_ERROR_FAILURE_CLASSES, true ) || ! is_string( $decoded['error'] ?? null ) ) {
 			$result['status']       = TreeRenderer::STATUS_ERROR;
-			$result['error']        = $label . ' source oracle returned ok without a tree.';
+			$result['error']        = $label . ' source oracle returned malformed error details.';
 			$result['failureClass'] = 'oracle-renderer-error';
+			return $result;
+		} else {
+			$result['failureClass'] = $decoded['failureClass'];
+			$result['error'] = $decoded['error'];
 		}
 
 		return $result;

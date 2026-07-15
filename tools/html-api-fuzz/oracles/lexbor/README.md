@@ -60,7 +60,7 @@ tools/html-api-fuzz/oracles/lexbor/build/lexbor-tree-oracle \
   --input /path/to/input.bin
 ```
 
-The oracle returns JSON with `status`, `oracle` metadata, `tree`,
-`treeBase64`, and `nodeCount`. The `treeBase64` field is the exact
-html5lib-style tree bytes consumed by the PHP adapter; `tree` is the same tree
-as a JSON-safe display string. Neither field is serialized HTML.
+Successful results always contain `treeBase64`, the authoritative exact
+html5lib-style tree bytes consumed by the PHP adapter. The optional `tree`
+field contains the same bytes as a JSON display string when the canonical tree
+is valid UTF-8; it is omitted otherwise. Neither field is serialized HTML.

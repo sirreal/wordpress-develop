@@ -68,6 +68,8 @@ static bool buffer_append_char(buffer_t *buf, char ch);
 static bool buffer_append_repeat(buffer_t *buf, const char *data, size_t len, size_t count);
 static char *buffer_take_cstr(buffer_t *buf);
 static bool append_escaped_scalar(buffer_t *buf, const lxb_char_t *data, size_t len, bool scrub);
+static size_t valid_utf8_sequence_length(const char *data, size_t len, size_t offset);
+static bool valid_utf8(const char *data, size_t len);
 static bool append_json_string(buffer_t *buf, const char *data, size_t len);
 static bool append_json_base64(buffer_t *buf, const char *data, size_t len);
 static bool append_tree_line_indent(buffer_t *buf, int indent_level);
@@ -271,6 +273,79 @@ append_escaped_scalar(buffer_t *buf, const lxb_char_t *data, size_t len, bool sc
 }
 
 static bool
+valid_utf8(const char *data, size_t len)
+{
+	size_t offset = 0;
+
+	while (offset < len) {
+		size_t sequence_len = valid_utf8_sequence_length(data, len, offset);
+		if (sequence_len == 0) {
+			return false;
+		}
+		offset += sequence_len;
+	}
+
+	return true;
+}
+
+static size_t
+valid_utf8_sequence_length(const char *data, size_t len, size_t offset)
+{
+	unsigned char byte;
+	unsigned char b1;
+	unsigned char b2;
+	unsigned char b3;
+	size_t sequence_len;
+
+	if (offset >= len) {
+		return 0;
+	}
+	byte = (unsigned char) data[offset];
+	if (byte < 0x80) {
+		return 1;
+	}
+	if (byte >= 0xC2 && byte <= 0xDF) {
+		sequence_len = 2;
+	} else if (byte >= 0xE0 && byte <= 0xEF) {
+		sequence_len = 3;
+	} else if (byte >= 0xF0 && byte <= 0xF4) {
+		sequence_len = 4;
+	} else {
+		return 0;
+	}
+	if (offset + sequence_len > len) {
+		return 0;
+	}
+
+	b1 = (unsigned char) data[offset + 1];
+	b2 = sequence_len > 2 ? (unsigned char) data[offset + 2] : 0;
+	b3 = sequence_len > 3 ? (unsigned char) data[offset + 3] : 0;
+	if (b1 < 0x80 || b1 > 0xBF) {
+		return 0;
+	}
+	if (sequence_len > 2 && (b2 < 0x80 || b2 > 0xBF)) {
+		return 0;
+	}
+	if (sequence_len > 3 && (b3 < 0x80 || b3 > 0xBF)) {
+		return 0;
+	}
+	if (byte == 0xE0 && b1 < 0xA0) {
+		return 0;
+	}
+	if (byte == 0xED && b1 > 0x9F) {
+		return 0;
+	}
+	if (byte == 0xF0 && b1 < 0x90) {
+		return 0;
+	}
+	if (byte == 0xF4 && b1 > 0x8F) {
+		return 0;
+	}
+
+	return sequence_len;
+}
+
+static bool
 append_json_string(buffer_t *buf, const char *data, size_t len)
 {
 	size_t i;
@@ -331,46 +406,9 @@ append_json_string(buffer_t *buf, const char *data, size_t len)
 						return false;
 					}
 				} else {
-					size_t sequence_len = 0;
-					bool valid = false;
+					size_t sequence_len = valid_utf8_sequence_length(data, len, i);
 
-					if (byte >= 0xC2 && byte <= 0xDF) {
-						sequence_len = 2;
-					} else if (byte >= 0xE0 && byte <= 0xEF) {
-						sequence_len = 3;
-					} else if (byte >= 0xF0 && byte <= 0xF4) {
-						sequence_len = 4;
-					}
-
-					if (sequence_len > 0 && i + sequence_len <= len) {
-						unsigned char b1 = sequence_len > 1 ? (unsigned char) data[i + 1] : 0;
-						unsigned char b2 = sequence_len > 2 ? (unsigned char) data[i + 2] : 0;
-						unsigned char b3 = sequence_len > 3 ? (unsigned char) data[i + 3] : 0;
-						valid = true;
-						if (sequence_len >= 2 && (b1 < 0x80 || b1 > 0xBF)) {
-							valid = false;
-						}
-						if (sequence_len >= 3 && (b2 < 0x80 || b2 > 0xBF)) {
-							valid = false;
-						}
-						if (sequence_len >= 4 && (b3 < 0x80 || b3 > 0xBF)) {
-							valid = false;
-						}
-						if (byte == 0xE0 && b1 < 0xA0) {
-							valid = false;
-						}
-						if (byte == 0xED && b1 > 0x9F) {
-							valid = false;
-						}
-						if (byte == 0xF0 && b1 < 0x90) {
-							valid = false;
-						}
-						if (byte == 0xF4 && b1 > 0x8F) {
-							valid = false;
-						}
-					}
-
-					if (valid) {
+					if (sequence_len > 0) {
 						if (!buffer_append_mem(buf, data + i, sequence_len)) {
 							return false;
 						}
@@ -961,7 +999,7 @@ static void
 print_version(void)
 {
 	printf(
-		"{\"status\":\"ok\",\"oracle\":{\"kind\":\"lexbor-source\",\"lexborCommit\":\"%s\",\"lexborVersion\":\"%s\"}}\n",
+		"{\"status\":\"ok\",\"oracle\":{\"kind\":\"lexbor-source\",\"available\":true,\"lexborCommit\":\"%s\",\"lexborVersion\":\"%s\"}}\n",
 		HTML_API_FUZZ_LEXBOR_COMMIT,
 		LXB_HTML_VERSION_STRING
 	);
@@ -982,7 +1020,7 @@ print_result(render_ctx_t *ctx)
 	append_json_string(&json, HTML_API_FUZZ_LEXBOR_COMMIT, strlen(HTML_API_FUZZ_LEXBOR_COMMIT));
 	buffer_append_cstr(&json, ",\n    \"lexborVersion\": ");
 	append_json_string(&json, LXB_HTML_VERSION_STRING, strlen(LXB_HTML_VERSION_STRING));
-	buffer_append_cstr(&json, "\n  }");
+	buffer_append_cstr(&json, ",\n    \"available\": true\n  }");
 
 	if (ctx->status == ORACLE_OK) {
 		if (ctx->tree.length == 0) {
@@ -993,8 +1031,10 @@ print_result(render_ctx_t *ctx)
 			}
 			buffer_append_char(&ctx->tree, '\n');
 		}
-		buffer_append_cstr(&json, ",\n  \"tree\": ");
-		append_json_string(&json, ctx->tree.data == NULL ? "" : ctx->tree.data, ctx->tree.length);
+		if (valid_utf8(ctx->tree.data == NULL ? "" : ctx->tree.data, ctx->tree.length)) {
+			buffer_append_cstr(&json, ",\n  \"tree\": ");
+			append_json_string(&json, ctx->tree.data == NULL ? "" : ctx->tree.data, ctx->tree.length);
+		}
 		buffer_append_cstr(&json, ",\n  \"treeBase64\": ");
 		append_json_base64(&json, ctx->tree.data == NULL ? "" : ctx->tree.data, ctx->tree.length);
 	}
@@ -1239,5 +1279,5 @@ main(int argc, char **argv)
 	free(input);
 	buffer_destroy(&ctx.tree);
 
-	return ctx.status == ORACLE_OK || ctx.status == ORACLE_UNSUPPORTED ? EXIT_SUCCESS : EXIT_FAILURE;
+	return EXIT_SUCCESS;
 }
