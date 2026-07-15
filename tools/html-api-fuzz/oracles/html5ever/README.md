@@ -17,7 +17,10 @@ tools/html-api-fuzz/oracles/html5ever/smoke.sh
 The installer supports arm64/x86-64 macOS and glibc Linux, installs below
 `.cache/html5ever/rust`, and does not edit shell startup files. A preinstalled
 `cargo` also works. The build script automatically finds the local install and
-verifies that the checked-in Rust 1.88.0 toolchain is active.
+verifies that the checked-in Rust 1.88.0 toolchain is active. The rustup 1.28.2
+bootstrap executable is verified against `RUSTUP_SHA256SUMS` before it is made
+executable. Those checked-in digests come from the publisher's HTTPS SHA-256
+sidecars, so a fresh checksum is not trusted alongside each download.
 
 CLI:
 

@@ -13,10 +13,17 @@ tools/html-api-fuzz/oracles/chrome/install.sh --print-path
 
 The installer supports macOS arm64/x64 and Linux x64. It downloads the
 platform archive from the versioned Chrome for Testing public URL, installs it
-under `.chrome-for-testing/<version>/<platform>`, and verifies the binary's
-reported version. Set `HTML_API_FUZZ_CHROME_INSTALL_ROOT` to use another
-install root. `--chrome-executable` may select another path, but the script
-rejects binaries whose version differs from `VERSION`.
+under `.chrome-for-testing/<version>/<platform>`, and verifies both its
+checked-in SHA-256 and the binary's reported version. Chrome does not publish
+SHA-256 sidecars; the values in `SHA256SUMS` were calculated from the exact
+immutable official HTTPS objects and cross-checked against their GCS MD5
+metadata. A verified-install marker records the version, platform, and archive
+digest. Installations made before the marker existed are replaced from a
+verified archive without executing the old binary. `--print-path` only prints
+the expected path and does not assert that the installation is verified. Set
+`HTML_API_FUZZ_CHROME_INSTALL_ROOT` to use another install root.
+`--chrome-executable` may select another path, but the oracle rejects binaries
+whose version differs from `VERSION`.
 
 For persistent operation, use newline-delimited JSON over standard input:
 

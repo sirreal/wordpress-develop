@@ -2,10 +2,11 @@
 set -eu
 
 # rustup and rustc are both pinned. The downloaded rustup-init is checked
-# against the SHA-256 file published alongside the same immutable archive.
+# against a checked-in SHA-256 obtained from the publisher's sidecar.
 rustup_version='1.28.2'
 toolchain='1.88.0'
 script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+checksum_manifest="$script_dir/RUSTUP_SHA256SUMS"
 repo_root="$(CDPATH= cd -- "$script_dir/../../../.." && pwd)"
 install_root="${HTML5EVER_RUST_ROOT:-$repo_root/.cache/html5ever/rust}"
 cargo_home="${CARGO_HOME:-$install_root/cargo}"
@@ -25,18 +26,43 @@ esac
 archive_url="https://static.rust-lang.org/rustup/archive/$rustup_version/$target/rustup-init"
 download_dir="$install_root/downloads"
 rustup_init="$download_dir/rustup-init-$rustup_version-$target"
-checksum_file="$rustup_init.sha256"
+archive_name="rustup-init-$rustup_version-$target"
 
 mkdir -p "$download_dir" "$cargo_home" "$rustup_home"
 
-if [ ! -f "$rustup_init" ]; then
-	curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
-		"$archive_url" --output "$rustup_init"
+if [ ! -f "$checksum_manifest" ]; then
+	printf 'Missing rustup checksum manifest: %s\n' "$checksum_manifest" >&2
+	exit 1
 fi
-curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
-	"$archive_url.sha256" --output "$checksum_file"
 
-expected="$(awk '{ print $1; exit }' "$checksum_file")"
+entry_count="$(awk -v name="$archive_name" '$2 == name { count++ } END { print count + 0 }' "$checksum_manifest")"
+if [ "$entry_count" -ne 1 ]; then
+	printf 'Expected exactly one checksum for %s; found %s.\n' "$archive_name" "$entry_count" >&2
+	exit 1
+fi
+
+entry_field_count="$(awk -v name="$archive_name" '$2 == name { print NF }' "$checksum_manifest")"
+expected="$(awk -v name="$archive_name" '$2 == name { print $1 }' "$checksum_manifest")"
+if [ "$entry_field_count" -ne 2 ] || [ "${#expected}" -ne 64 ]; then
+	printf 'Malformed checksum entry for %s.\n' "$archive_name" >&2
+	exit 1
+fi
+case "$expected" in
+	*[!0-9a-f]*)
+		printf 'Malformed checksum entry for %s.\n' "$archive_name" >&2
+		exit 1
+		;;
+esac
+
+if [ ! -f "$rustup_init" ]; then
+	partial="$rustup_init.partial.$$"
+	trap 'rm -f "$partial"' EXIT HUP INT TERM
+	curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
+		--retry 3 "$archive_url" --output "$partial"
+	mv "$partial" "$rustup_init"
+	trap - EXIT HUP INT TERM
+fi
+
 if command -v sha256sum >/dev/null 2>&1; then
 	actual="$(sha256sum "$rustup_init" | awk '{ print $1 }')"
 elif command -v shasum >/dev/null 2>&1; then
