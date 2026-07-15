@@ -41,6 +41,7 @@ final class RestDirectoryServicesSurface {
 			$rows[] = self::check_block_directory_controller( $ctx->fork( 'block-directory' ) );
 			$rows[] = self::check_block_directory_fields_and_links( $ctx->fork( 'block-directory-fields' ) );
 			$rows[] = self::check_pattern_directory_controller( $ctx->fork( 'pattern-directory' ) );
+			$rows[] = self::check_pattern_directory_fields_and_prepare_response( $ctx->fork( 'pattern-directory-fields' ) );
 			$rows[] = self::check_url_details_controller( $ctx->fork( 'url-details' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = self::row(
@@ -964,6 +965,195 @@ final class RestDirectoryServicesSurface {
 		return self::row(
 			$ctx,
 			'rest-directory-services.pattern-directory-query-cache-permissions',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, 7 ) )
+		);
+	}
+
+	private static function check_pattern_directory_fields_and_prepare_response( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime_state();
+		self::seed_current_user( $ctx, 'pattern-fields' );
+		self::set_granted_caps( array( 'edit_posts' ) );
+
+		$failures      = array();
+		$case          = self::pattern_case( $ctx );
+		$http_calls    = array();
+		$prepare_calls = array();
+
+		$case['rawPattern']->extra_remote_field       = '<strong>must not leak ' . $case['token'] . '</strong>';
+		$case['rawPattern']->title->rendered          = " <span>Projected {$case['token']}</span> &amp; <script>bad()</script> ";
+		$case['rawPattern']->pattern_content          = '<!-- wp:paragraph --><p>Projected <em>' . $case['token'] . '</em></p><script>bad()</script><!-- /wp:paragraph -->';
+		$case['rawPattern']->category_slugs           = array( 'Hero Section', 'CTA & Forms', '<b>Unsafe</b>' );
+		$case['rawPattern']->meta->wpop_keywords      = 'alpha,<b>beta</b>, spaced value ,' . $case['token'];
+		$case['rawPattern']->meta->wpop_description   = '<strong>Projected &amp; description ' . $case['token'] . '</strong>';
+		$case['rawPattern']->meta->wpop_viewport_width = '1440px';
+		$case['rawPattern']->meta->wpop_block_types   = array( 'core/group', '<b>core/buttons</b>', 'plugin/block-' . $case['token'] );
+
+		$expected = array(
+			'id'             => absint( $case['rawPattern']->id ),
+			'title'          => \sanitize_text_field( $case['rawPattern']->title->rendered ),
+			'content'        => \wp_kses_post( $case['rawPattern']->pattern_content ),
+			'categories'     => array_map( 'sanitize_title', $case['rawPattern']->category_slugs ),
+			'keywords'       => array_map( 'sanitize_text_field', explode( ',', $case['rawPattern']->meta->wpop_keywords ) ),
+			'description'    => \sanitize_text_field( $case['rawPattern']->meta->wpop_description ),
+			'viewport_width' => absint( $case['rawPattern']->meta->wpop_viewport_width ),
+			'block_types'    => array_map( 'sanitize_text_field', $case['rawPattern']->meta->wpop_block_types ),
+		);
+
+		$http_filter = static function ( $preempt, array $parsed_args, string $url ) use ( &$http_calls, $case ) {
+			unset( $preempt );
+			$parts = parse_url( $url );
+			if ( ! isset( $parts['host'], $parts['path'] ) || 'api.wordpress.org' !== $parts['host'] || '/patterns/1.0/' !== $parts['path'] ) {
+				return new \WP_Error( 'component_fuzz_unregistered_http', 'Unexpected live HTTP from pattern directory fields: ' . $url );
+			}
+
+			$query = array();
+			if ( isset( $parts['query'] ) ) {
+				parse_str( $parts['query'], $query );
+			}
+
+			$http_calls[] = array(
+				'url'   => $url,
+				'query' => $query,
+				'args'  => $parsed_args,
+			);
+
+			return self::http_response( \wp_json_encode( array( $case['rawPattern'] ) ), 200 );
+		};
+
+		$prepare_filter = static function ( \WP_REST_Response $response, $raw_pattern, \WP_REST_Request $request ) use ( &$prepare_calls ): \WP_REST_Response {
+			$data = $response->get_data();
+			$keys = is_array( $data ) ? array_keys( $data ) : array();
+			sort( $keys );
+
+			$prepare_calls[] = array(
+				'id'       => $raw_pattern->id ?? null,
+				'extra'    => $raw_pattern->extra_remote_field ?? null,
+				'method'   => $request->get_method(),
+				'fields'   => $request['_fields'] ?? null,
+				'dataKeys' => $keys,
+			);
+
+			return $response;
+		};
+
+		\add_filter( 'pre_http_request', $http_filter, 10, 3 );
+		\add_filter( 'rest_prepare_block_pattern', $prepare_filter, 10, 3 );
+
+		try {
+			$server     = self::fresh_server();
+			$controller = new \WP_REST_Pattern_Directory_Controller();
+			$controller->register_routes();
+
+			$direct_request  = self::request(
+				'GET',
+				'/wp/v2/pattern-directory/patterns',
+				array( '_fields' => 'id,title,content,viewport_width' )
+			);
+			$direct_response = $controller->prepare_item_for_response( $case['rawPattern'], $direct_request );
+			$direct_data     = $direct_response instanceof \WP_REST_Response ? $direct_response->get_data() : array();
+			$direct_keys     = is_array( $direct_data ) ? array_keys( $direct_data ) : array();
+			sort( $direct_keys );
+			$expected_full_keys = array_keys( $expected );
+			sort( $expected_full_keys );
+
+			self::collect_failure(
+				$failures,
+				$direct_response instanceof \WP_REST_Response
+					&& $expected === $direct_data
+					&& $expected_full_keys === $direct_keys
+					&& ! array_key_exists( 'extra_remote_field', $direct_data )
+					&& self::schema_valid( $direct_data, $controller->get_item_schema() ),
+				'pattern directory direct prepare sanitizes all schema fields and drops remote extras before REST projection',
+				array(
+					'expected' => $expected,
+					'actual'   => $direct_data,
+					'keys'     => $direct_keys,
+				)
+			);
+
+			$field_request = self::request(
+				'GET',
+				'/wp/v2/pattern-directory/patterns',
+				array_merge(
+					$case['query'],
+					array(
+						'_fields' => 'id,title,content,viewport_width',
+						'search'  => $case['query']['search'] . '-fields',
+					)
+				)
+			);
+			$field_response = self::dispatch( $server, $field_request );
+			$field_data     = $field_response->get_data();
+			$field_item     = is_array( $field_data ) && isset( $field_data[0] ) && is_array( $field_data[0] ) ? $field_data[0] : array();
+			$field_keys     = array_keys( $field_item );
+			sort( $field_keys );
+			$expected_field_keys = array( 'content', 'id', 'title', 'viewport_width' );
+
+			self::collect_failure(
+				$failures,
+				200 === $field_response->get_status()
+					&& $expected_field_keys === $field_keys
+					&& $expected['id'] === ( $field_item['id'] ?? null )
+					&& $expected['title'] === ( $field_item['title'] ?? null )
+					&& $expected['content'] === ( $field_item['content'] ?? null )
+					&& $expected['viewport_width'] === ( $field_item['viewport_width'] ?? null )
+					&& ! array_key_exists( 'categories', $field_item )
+					&& ! array_key_exists( 'keywords', $field_item )
+					&& ! array_key_exists( 'description', $field_item )
+					&& ! array_key_exists( 'block_types', $field_item )
+					&& ! array_key_exists( 'extra_remote_field', $field_item ),
+				'pattern directory dispatch honors _fields projection after preparing sanitized remote data',
+				array(
+					'status'        => $field_response->get_status(),
+					'item'          => $field_item,
+					'fieldKeys'     => $field_keys,
+					'expectedKeys'  => $expected_field_keys,
+					'expectedSlice' => array_intersect_key( $expected, array_flip( $expected_field_keys ) ),
+				)
+			);
+
+			$http_query = $http_calls[0]['query'] ?? array();
+			self::collect_failure(
+				$failures,
+				1 === count( $http_calls )
+					&& ! array_key_exists( '_fields', $http_query )
+					&& $case['query']['category'] === (int) ( $http_query['pattern-categories'] ?? 0 )
+					&& $case['query']['keyword'] === (int) ( $http_query['pattern-keywords'] ?? 0 )
+					&& ( $case['query']['search'] . '-fields' ) === ( $http_query['search'] ?? null ),
+				'pattern directory _fields affects local REST projection without leaking to WordPress.org proxy query',
+				array(
+					'httpCalls' => $http_calls,
+					'httpQuery' => $http_query,
+				)
+			);
+
+			$expected_prepare_keys = $expected_full_keys;
+			self::collect_failure(
+				$failures,
+				2 === count( $prepare_calls )
+					&& (string) $case['rawPattern']->id === (string) ( $prepare_calls[0]['id'] ?? null )
+					&& (string) $case['rawPattern']->id === (string) ( $prepare_calls[1]['id'] ?? null )
+					&& $case['rawPattern']->extra_remote_field === ( $prepare_calls[0]['extra'] ?? null )
+					&& $case['rawPattern']->extra_remote_field === ( $prepare_calls[1]['extra'] ?? null )
+					&& 'id,title,content,viewport_width' === ( $prepare_calls[0]['fields'] ?? null )
+					&& 'id,title,content,viewport_width' === ( $prepare_calls[1]['fields'] ?? null )
+					&& $expected_prepare_keys === ( $prepare_calls[0]['dataKeys'] ?? array() )
+					&& $expected_prepare_keys === ( $prepare_calls[1]['dataKeys'] ?? array() ),
+				'pattern directory rest_prepare_block_pattern receives raw remote object and full prepared data before _fields filtering',
+				array(
+					'prepareCalls' => $prepare_calls,
+					'expectedKeys' => $expected_prepare_keys,
+				)
+			);
+		} finally {
+			\remove_filter( 'rest_prepare_block_pattern', $prepare_filter, 10 );
+			\remove_filter( 'pre_http_request', $http_filter, 10 );
+		}
+
+		return self::row(
+			$ctx,
+			'rest-directory-services.pattern-directory-fields-prepare-projection',
 			array() === $failures,
 			array( 'failures' => array_slice( $failures, 0, 7 ) )
 		);

@@ -733,10 +733,11 @@ database, network requests, or a configured site.
   block-directory `_fields` projection, explicit block title/icon mapping and
   installed-plugin link discovery, permission matrices, request validation
   errors, transformed response schemas, pattern and URL cache/transient
-  behavior, HEAD/cache-hit boundaries, pattern proxy query allowlisting and
-  derived WordPress.org argument overwrite behavior, malformed/unclosed head
-  metadata extraction, metadata parsing precedence, relative media URL
-  normalization, and global/filter restoration.
+  behavior, HEAD/cache-hit boundaries, pattern-directory direct preparation,
+  sanitization, `_fields` projection, prepare-filter payloads, proxy query
+  allowlisting and derived WordPress.org argument overwrite behavior,
+  malformed/unclosed head metadata extraction, metadata parsing precedence,
+  relative media URL normalization, and global/filter restoration.
 - `rest-media-attachments`: in-memory wpdb-backed REST media attachment write
   coverage, including `Content-Disposition` filename parsing, raw upload
   validation failures, raw body `create_item()` success through the upload
