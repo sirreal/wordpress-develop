@@ -27,6 +27,7 @@ final class ErrorProtectionSurface {
 			$rows[] = self::check_paused_extension_source_and_storage( $ctx->fork( 'paused-extension-source' ) );
 			$rows[] = self::check_recovery_key_validation( $ctx->fork( 'recovery-key-validation' ) );
 			$rows[] = self::check_recovery_cookie_validation( $ctx->fork( 'recovery-cookie-validation' ) );
+			$rows[] = self::check_recovery_mode_initialization_and_storage_lifecycle( $ctx->fork( 'recovery-mode-lifecycle' ) );
 			$rows[] = self::check_recovery_link_generation( $ctx->fork( 'recovery-link-generation' ) );
 			$rows[] = self::check_recovery_email_payload( $ctx->fork( 'recovery-email-payload' ) );
 			$rows[] = self::check_recovery_mode_handle_error_gates( $ctx->fork( 'recovery-mode-handle-error' ) );
@@ -87,16 +88,20 @@ final class ErrorProtectionSurface {
 				'remove_filter',
 				'update_option',
 				'wp_cache_delete',
+				'wp_clear_scheduled_hook',
 				'wp_fast_hash',
 				'wp_get_extension_error_description',
+				'wp_installing',
 				'wp_is_fatal_error_handler_enabled',
 				'wp_login_url',
 				'wp_mail',
+				'wp_next_scheduled',
 				'wp_normalize_path',
 				'wp_paused_plugins',
 				'wp_paused_themes',
 				'wp_parse_url',
 				'wp_recovery_mode',
+				'wp_schedule_event',
 				'wp_strip_all_tags',
 				'wp_verify_fast_hash',
 			) as $function
@@ -515,6 +520,291 @@ final class ErrorProtectionSurface {
 			'error-protection.recovery-cookies.signed-shape-and-fail-closed-validation',
 			array() === $failures,
 			array( 'failures' => array_slice( $failures, 0, 5 ) )
+		);
+	}
+
+	private static function check_recovery_mode_initialization_and_storage_lifecycle( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures            = array();
+		$mode                = \wp_recovery_mode();
+		$state_snapshot      = self::snapshot_state();
+		$installing_snapshot = \wp_installing();
+		$cron_exists         = false !== \get_option( 'cron', false );
+		$cron_snapshot       = \get_option( 'cron', array() );
+		$marker              = 'lifecycle-' . self::token( $ctx->fork( 'marker' ), 8 );
+		$session_id          = 'cf_error_lifecycle_' . self::token( $ctx->fork( 'session' ), 16 );
+		$option_name         = "{$session_id}_paused_extensions";
+		$rate_limit          = 600 + $ctx->int( 0, 3600 );
+		$link_ttl            = max( 1, $rate_limit - $ctx->int( 1, 120 ) );
+		$state_restored      = false;
+
+		$rate_filter = static function () use ( $rate_limit ): int {
+			return $rate_limit;
+		};
+		$ttl_filter  = static function () use ( $link_ttl ): int {
+			return $link_ttl;
+		};
+
+		try {
+			\wp_installing( false );
+			\wp_clear_scheduled_hook( 'recovery_mode_clean_expired_keys' );
+			\delete_option( $option_name );
+			\delete_option( 'recovery_keys' );
+			\delete_option( \WP_Recovery_Mode_Email_Service::RATE_LIMIT_OPTION );
+			\wp_cache_delete( $option_name, 'options' );
+			\wp_cache_delete( 'recovery_keys', 'options' );
+			\wp_cache_delete( \WP_Recovery_Mode_Email_Service::RATE_LIMIT_OPTION, 'options' );
+
+			self::set_recovery_mode_state( false, false, '' );
+			$GLOBALS['pagenow'] = 'index.php';
+			$_GET               = array(
+				'action'   => \WP_Recovery_Mode_Link_Service::LOGIN_ACTION_ENTER,
+				'rm_token' => 'ignored-' . $marker,
+				'rm_key'   => 'ignored-' . $marker,
+			);
+
+			$mode->initialize();
+			$after_inert_initialize = self::snapshot_recovery_mode_state();
+			$scheduled_cleanup      = \wp_next_scheduled( 'recovery_mode_clean_expired_keys' );
+
+			self::collect_failure(
+				$failures,
+				true === $after_inert_initialize['is_initialized']
+					&& false === $after_inert_initialize['is_active']
+					&& '' === $after_inert_initialize['session_id']
+					&& false !== \has_filter( 'wp_logout', array( $mode, 'exit_recovery_mode' ) )
+					&& false !== \has_filter( 'login_form_' . \WP_Recovery_Mode::EXIT_ACTION, array( $mode, 'handle_exit_recovery_mode' ) )
+					&& false !== \has_filter( 'recovery_mode_clean_expired_keys', array( $mode, 'clean_expired_keys' ) )
+					&& is_int( $scheduled_cleanup )
+					&& array() === self::recovery_key_records(),
+				'initialize installs recovery-mode hooks, schedules cleanup, and leaves inert begin-link-shaped requests inactive',
+				array(
+					'state'            => $after_inert_initialize,
+					'scheduledCleanup' => $scheduled_cleanup,
+					'recoveryKeys'     => self::recovery_key_records(),
+				)
+			);
+
+			$cookie_service  = new \WP_Recovery_Mode_Cookie_Service();
+			$generate_cookie = new \ReflectionMethod( \WP_Recovery_Mode_Cookie_Service::class, 'generate_cookie' );
+			$cookie           = (string) $generate_cookie->invoke( $cookie_service );
+			$decoded          = base64_decode( $cookie, true );
+			$parts            = is_string( $decoded ) ? explode( '|', $decoded ) : array();
+			$expected_session = 4 === count( $parts ) ? sha1( $parts[2] ) : '';
+
+			self::set_recovery_mode_state( false, false, '' );
+			$GLOBALS['pagenow']           = 'wp-login.php';
+			$_GET                         = array(
+				'action'   => \WP_Recovery_Mode_Link_Service::LOGIN_ACTION_ENTER,
+				'rm_token' => 'not-a-token-' . $marker,
+				'rm_key'   => 'not-a-key-' . $marker,
+			);
+			$_COOKIE[ RECOVERY_MODE_COOKIE ] = $cookie;
+
+			$mode->initialize();
+			$after_cookie_initialize = self::snapshot_recovery_mode_state();
+
+			self::collect_failure(
+				$failures,
+				true === $after_cookie_initialize['is_initialized']
+					&& true === $after_cookie_initialize['is_active']
+					&& '' !== $expected_session
+					&& $expected_session === $after_cookie_initialize['session_id']
+					&& array() === self::recovery_key_records(),
+				'initialize gives a valid recovery cookie precedence over begin-link query parameters and activates that session',
+				array(
+					'state'           => $after_cookie_initialize,
+					'decodedCookie'   => is_string( $decoded ) ? $decoded : '',
+					'expectedSession' => $expected_session,
+					'recoveryKeys'    => self::recovery_key_records(),
+				)
+			);
+
+			unset( $_COOKIE[ RECOVERY_MODE_COOKIE ] );
+			self::set_recovery_mode_state( true, false, '' );
+
+			$inactive_error      = self::extension_error_case( $ctx->fork( 'inactive-error' ), WP_PLUGIN_DIR . '/' . $marker . '/inactive.php' );
+			$inactive_extension  = $marker . '/inactive.php';
+			$inactive_set        = \wp_paused_plugins()->set( $inactive_extension, $inactive_error );
+			$inactive_get        = \wp_paused_plugins()->get( $inactive_extension );
+			$inactive_all        = \wp_paused_plugins()->get_all();
+			$inactive_delete     = \wp_paused_plugins()->delete( $inactive_extension );
+			$inactive_delete_all = \wp_paused_plugins()->delete_all();
+			$inactive_exit       = $mode->exit_recovery_mode();
+
+			self::collect_failure(
+				$failures,
+				false === $inactive_set
+					&& null === $inactive_get
+					&& array() === $inactive_all
+					&& false === $inactive_delete
+					&& false === $inactive_delete_all
+					&& false === $inactive_exit,
+				'paused-extension storage and recovery exit fail closed while recovery mode is inactive',
+				array(
+					'inactiveSet'       => $inactive_set,
+					'inactiveGet'       => $inactive_get,
+					'inactiveAll'       => $inactive_all,
+					'inactiveDelete'    => $inactive_delete,
+					'inactiveDeleteAll' => $inactive_delete_all,
+					'inactiveExit'      => $inactive_exit,
+				)
+			);
+
+			self::set_recovery_mode_state( true, true, $session_id );
+
+			$plugin_slug   = $marker . '/plugin.php';
+			$theme_slug    = $marker . '-theme';
+			$plugin_error  = self::extension_error_case( $ctx->fork( 'plugin-error' ), WP_PLUGIN_DIR . '/' . $plugin_slug );
+			$updated_error = self::extension_error_case( $ctx->fork( 'updated-error' ), WP_PLUGIN_DIR . '/' . $plugin_slug );
+			$theme_error   = self::extension_error_case( $ctx->fork( 'theme-error' ), WP_CONTENT_DIR . '/themes/' . $theme_slug . '/functions.php' );
+
+			$set_plugin       = \wp_paused_plugins()->set( $plugin_slug, $plugin_error );
+			$get_plugin       = \wp_paused_plugins()->get( $plugin_slug );
+			$after_first_set  = \get_option( $option_name, array() );
+			$set_same_plugin  = \wp_paused_plugins()->set( $plugin_slug, $plugin_error );
+			$after_same_set   = \get_option( $option_name, array() );
+			$set_updated      = \wp_paused_plugins()->set( $plugin_slug, $updated_error );
+			$get_updated      = \wp_paused_plugins()->get( $plugin_slug );
+			$set_theme        = \wp_paused_themes()->set( $theme_slug, $theme_error );
+			$delete_plugins   = \wp_paused_plugins()->delete_all();
+			$after_plugin_del = \get_option( $option_name, array() );
+
+			self::collect_failure(
+				$failures,
+				true === $set_plugin
+					&& $plugin_error === $get_plugin
+					&& true === $set_same_plugin
+					&& $after_first_set === $after_same_set
+					&& true === $set_updated
+					&& $updated_error === $get_updated
+					&& true === $set_theme
+					&& true === $delete_plugins
+					&& ! isset( $after_plugin_del['plugin'] )
+					&& isset( $after_plugin_del['theme'][ $theme_slug ] )
+					&& $theme_error === $after_plugin_del['theme'][ $theme_slug ],
+				'active paused-extension storage supports get, idempotent same-error writes, replacement writes, and type-scoped delete_all',
+				array(
+					'optionName'       => $option_name,
+					'setPlugin'        => $set_plugin,
+					'getPlugin'        => $get_plugin,
+					'setSamePlugin'    => $set_same_plugin,
+					'setUpdated'       => $set_updated,
+					'getUpdated'       => $get_updated,
+					'setTheme'         => $set_theme,
+					'deletePlugins'    => $delete_plugins,
+					'afterPluginDel'   => $after_plugin_del,
+				)
+			);
+
+			\update_option( \WP_Recovery_Mode_Email_Service::RATE_LIMIT_OPTION, time(), false );
+			\wp_cache_delete( \WP_Recovery_Mode_Email_Service::RATE_LIMIT_OPTION, 'options' );
+			$active_exit        = $mode->exit_recovery_mode();
+			$after_active_exit  = \get_option( $option_name, false );
+			$rate_after_exit    = \get_option( \WP_Recovery_Mode_Email_Service::RATE_LIMIT_OPTION, false );
+			$paused_after_exit  = array(
+				'plugins' => \wp_paused_plugins()->get_all(),
+				'themes'  => \wp_paused_themes()->get_all(),
+			);
+
+			self::collect_failure(
+				$failures,
+				true === $active_exit
+					&& false === $after_active_exit
+					&& false === $rate_after_exit
+					&& array() === $paused_after_exit['plugins']
+					&& array() === $paused_after_exit['themes'],
+				'active recovery exit clears paused storage and the shared recovery-email rate limit',
+				array(
+					'activeExit'       => $active_exit,
+					'afterActiveExit'  => $after_active_exit,
+					'rateAfterExit'    => $rate_after_exit,
+					'pausedAfterExit'  => $paused_after_exit,
+				)
+			);
+
+			$current_time = time();
+			$fresh_token  = $marker . '|fresh';
+			$old_token    = $marker . '|old';
+			\update_option(
+				'recovery_keys',
+				array(
+					$fresh_token => array(
+						'hashed_key' => \wp_fast_hash( 'fresh-' . $marker ),
+						'created_at' => $current_time - $rate_limit + 10,
+					),
+					$old_token   => array(
+						'hashed_key' => \wp_fast_hash( 'old-' . $marker ),
+						'created_at' => $current_time - $rate_limit - 10,
+					),
+				),
+				false
+			);
+			\wp_cache_delete( 'recovery_keys', 'options' );
+
+			\add_filter( 'recovery_mode_email_rate_limit', $rate_filter );
+			\add_filter( 'recovery_mode_email_link_ttl', $ttl_filter );
+			try {
+				$mode->clean_expired_keys();
+			} finally {
+				\remove_filter( 'recovery_mode_email_rate_limit', $rate_filter );
+				\remove_filter( 'recovery_mode_email_link_ttl', $ttl_filter );
+			}
+			$after_clean = self::recovery_key_records();
+
+			self::collect_failure(
+				$failures,
+				$link_ttl < $rate_limit
+					&& isset( $after_clean[ $fresh_token ] )
+					&& ! isset( $after_clean[ $old_token ] )
+					&& false === \has_filter( 'recovery_mode_email_rate_limit', $rate_filter )
+					&& false === \has_filter( 'recovery_mode_email_link_ttl', $ttl_filter ),
+				'clean_expired_keys honors the effective max of recovery email rate limit and shorter link TTL filters',
+				array(
+					'rateLimit'  => $rate_limit,
+					'linkTtl'    => $link_ttl,
+					'afterClean' => $after_clean,
+				)
+			);
+		} finally {
+			\remove_filter( 'recovery_mode_email_rate_limit', $rate_filter );
+			\remove_filter( 'recovery_mode_email_link_ttl', $ttl_filter );
+			\delete_option( $option_name );
+			\delete_option( 'recovery_keys' );
+			\delete_option( \WP_Recovery_Mode_Email_Service::RATE_LIMIT_OPTION );
+			\wp_cache_delete( $option_name, 'options' );
+			\wp_cache_delete( 'recovery_keys', 'options' );
+			\wp_cache_delete( \WP_Recovery_Mode_Email_Service::RATE_LIMIT_OPTION, 'options' );
+
+			if ( $cron_exists ) {
+				\update_option( 'cron', $cron_snapshot, false );
+			} else {
+				\delete_option( 'cron' );
+			}
+			\wp_cache_delete( 'cron', 'options' );
+
+			\wp_installing( $installing_snapshot );
+			self::restore_state( $state_snapshot );
+			$state_restored = self::state_matches( $state_snapshot ) && \wp_installing() === $installing_snapshot;
+		}
+
+		self::collect_failure(
+			$failures,
+			$state_restored,
+			'recovery-mode lifecycle invariant restores globals, filters, superglobals, recovery state, and installing flag',
+			array(
+				'stateRestored' => $state_restored,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'error-protection.recovery-mode.initialization-storage-and-cleanup-lifecycle',
+			array() === $failures,
+			array(
+				'rateLimit' => $rate_limit,
+				'linkTtl'   => $link_ttl,
+				'failures'  => array_slice( $failures, 0, 5 ),
+			)
 		);
 	}
 

@@ -342,14 +342,16 @@ database, network requests, or a configured site.
   compatibility oracles with parent/child state restoration.
 - `error-protection`: no-shutdown error protection and recovery-mode
   infrastructure coverage, including paused-extension source normalization and
-  storage, recovery key/cookie validation, recovery-link generation, filtered
+  storage, recovery key/cookie validation, recovery-mode initialization and
+  cleanup scheduling, cookie activation precedence, active/inactive paused
+  storage and exit cleanup lifecycle, recovery-link generation, filtered
   recovery email payloads and `handle_error()` protected-endpoint rate limiting
   without real mail, fatal-error handler formatting oracles, synthetic
   `handle()` dispatch with injected fatal data, recovery-link early-return
-  boundaries, protected-endpoint gates, and isolated subprocess coverage for
-  fatal-error handler shutdown registration, recovery begin-link redirects and
-  dies, and recovery exit redirects, dies, and cleanup without letting process
-  exits escape the child.
+  boundaries, protected-endpoint gates, effective cleanup TTL filtering, and
+  isolated subprocess coverage for fatal-error handler shutdown registration,
+  recovery begin-link redirects and dies, and recovery exit redirects, dies,
+  and cleanup without letting process exits escape the child.
 - `editor-helpers`: no-browser classic editor helper coverage for
   `_WP_Editors` settings/state normalization, default editor selection filters,
   teeny and full TinyMCE/Quicktags filter branches, captured editor markup,
