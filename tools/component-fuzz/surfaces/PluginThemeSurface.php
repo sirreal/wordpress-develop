@@ -34,6 +34,7 @@ final class PluginThemeSurface {
 
 			$rows[] = self::check_plugin_headers( $ctx, $case );
 			$rows[] = self::check_plugin_path_helpers( $ctx, $case );
+			$rows = array_merge( $rows, self::check_plugin_admin_helpers( $ctx, $case ) );
 			$rows[] = self::check_plugin_dependency_metadata( $ctx, $case );
 			$rows[] = self::check_plugin_dependency_public_contracts( $ctx, $case );
 			$rows[] = self::check_theme_headers_and_relationships( $ctx, $case );
@@ -84,12 +85,19 @@ final class PluginThemeSurface {
 				'get_file_data',
 				'get_plugin_data',
 				'get_plugins',
+				'get_plugin_files',
 				'validate_file',
+				'validate_file_to_edit',
 				'validate_plugin',
+				'is_network_only_plugin',
+				'is_plugin_active',
+				'is_plugin_inactive',
+				'is_plugin_active_for_network',
 				'plugin_basename',
 				'plugin_dir_path',
 				'plugin_dir_url',
 				'plugins_url',
+				'list_files',
 				'wp_get_theme',
 				'get_theme_root',
 				'get_theme_root_uri',
@@ -106,6 +114,7 @@ final class PluginThemeSurface {
 				'is_wp_error',
 				'add_filter',
 				'remove_filter',
+				'has_filter',
 				'wp_normalize_path',
 			) as $function
 		) {
@@ -353,6 +362,307 @@ final class PluginThemeSurface {
 				'dirPath'        => self::preview( $dir_path ),
 				'dirUrl'         => $dir_url,
 				'invalidSamples' => $case['invalidPluginPaths'],
+			)
+		);
+	}
+
+	private static function check_plugin_admin_helpers( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$rows          = array();
+		$admin_case    = self::admin_plugin_case_for_context( $ctx->fork( 'admin-plugin-helpers' ), $case );
+		$plugin_dir    = $admin_case['pluginDir'];
+		$no_header_dir = $admin_case['noHeaderDir'];
+		$cleanup       = array(
+			'plugin'   => null,
+			'noHeader' => null,
+		);
+
+		try {
+			self::write_admin_plugin_case_files( $admin_case );
+			\wp_cache_delete( 'plugins', 'plugins' );
+
+			$rows[] = self::check_plugin_admin_discovery_validation_and_files( $ctx, $admin_case );
+			$rows[] = self::check_plugin_admin_file_edit_validation( $ctx, $admin_case );
+			$rows[] = self::check_plugin_admin_active_state_helpers( $ctx, $admin_case );
+		} finally {
+			\wp_cache_delete( 'plugins', 'plugins' );
+			$cleanup['plugin']   = self::remove_dir_recursive( $plugin_dir );
+			$cleanup['noHeader'] = self::remove_dir_recursive( $no_header_dir );
+			\wp_cache_delete( 'plugins', 'plugins' );
+		}
+
+		$rows[] = $ctx->result(
+			'plugin-theme.plugin.admin-helper-fixture-cleaned',
+			true === $cleanup['plugin']
+				&& true === $cleanup['noHeader']
+				&& ! file_exists( $plugin_dir )
+				&& ! file_exists( $no_header_dir ),
+			array(
+				'pluginDir'     => self::preview( $plugin_dir ),
+				'noHeaderDir'   => self::preview( $no_header_dir ),
+				'cleanup'       => $cleanup,
+				'pluginExists'  => file_exists( $plugin_dir ),
+				'noHeaderExists' => file_exists( $no_header_dir ),
+			)
+		);
+
+		return $rows;
+	}
+
+	private static function check_plugin_admin_discovery_validation_and_files( \ComponentFuzz\FuzzContext $ctx, array $admin_case ): array {
+		$failures = array();
+		\wp_cache_delete( 'plugins', 'plugins' );
+
+		$plugins         = self::call( static fn() => \get_plugins() );
+		$validate_valid  = self::call( static fn() => \validate_plugin( $admin_case['basename'] ) );
+		$validate_empty  = self::call( static fn() => \validate_plugin( $admin_case['noHeaderBasename'] ) );
+		$network_only    = self::call( static fn() => \is_network_only_plugin( $admin_case['basename'] ) );
+		$files           = self::call( static fn() => \get_plugin_files( $admin_case['basename'] ) );
+
+		if ( $plugins['threw'] || ! is_array( $plugins['value'] ) || ! isset( $plugins['value'][ $admin_case['basename'] ] ) ) {
+			self::record_failure(
+				$failures,
+				'get_plugins.discovers-generated-wp-plugin-dir-fixture',
+				array(
+					'call'     => self::describe_call( $plugins ),
+					'basename' => $admin_case['basename'],
+				)
+			);
+		} else {
+			$plugin_data = $plugins['value'][ $admin_case['basename'] ];
+			foreach ( array( 'Name', 'Version', 'TextDomain' ) as $field ) {
+				if ( ( $plugin_data[ $field ] ?? null ) !== $admin_case['expectedHeaders'][ $field ] ) {
+					self::record_failure(
+						$failures,
+						"get_plugins.{$field}.header-matches-fixture",
+						array(
+							'expected' => $admin_case['expectedHeaders'][ $field ],
+							'actual'   => $plugin_data[ $field ] ?? null,
+						)
+					);
+				}
+			}
+		}
+
+		if ( $validate_valid['threw'] || 0 !== $validate_valid['value'] ) {
+			self::record_failure(
+				$failures,
+				'validate_plugin.accepts-generated-plugin-with-valid-header',
+				array(
+					'basename' => $admin_case['basename'],
+					'call'     => self::describe_call( $validate_valid ),
+				)
+			);
+		}
+
+		if ( $validate_empty['threw'] || 'no_plugin_header' !== self::wp_error_code( $validate_empty['value'] ?? null ) ) {
+			self::record_failure(
+				$failures,
+				'validate_plugin.rejects-existing-php-file-without-plugin-header',
+				array(
+					'basename' => $admin_case['noHeaderBasename'],
+					'call'     => self::describe_call( $validate_empty ),
+				)
+			);
+		}
+
+		if ( $network_only['threw'] || $admin_case['expectedNetwork'] !== $network_only['value'] ) {
+			self::record_failure(
+				$failures,
+				'is_network_only_plugin.matches-generated-network-header',
+				array(
+					'expected'   => $admin_case['expectedNetwork'],
+					'networkRaw' => $admin_case['rawHeaders']['Network'],
+					'call'       => self::describe_call( $network_only ),
+				)
+			);
+		}
+
+		if ( $files['threw'] || ! is_array( $files['value'] ) ) {
+			self::record_failure(
+				$failures,
+				'get_plugin_files.no-throw-return-array',
+				array( 'call' => self::describe_call( $files ) )
+			);
+		} else {
+			$file_list = $files['value'];
+			foreach ( $admin_case['expectedPluginFiles'] as $expected ) {
+				if ( ! in_array( $expected, $file_list, true ) ) {
+					self::record_failure(
+						$failures,
+						'get_plugin_files.includes-editable-plugin-files',
+						array(
+							'expected' => $expected,
+							'files'    => $file_list,
+						)
+					);
+				}
+			}
+
+			foreach ( $admin_case['excludedPluginFiles'] as $excluded ) {
+				if ( in_array( $excluded, $file_list, true ) ) {
+					self::record_failure(
+						$failures,
+						'get_plugin_files.excludes-default-ignored-directories',
+						array(
+							'excluded' => $excluded,
+							'files'    => $file_list,
+						)
+					);
+				}
+			}
+
+			if ( count( $file_list ) !== count( array_unique( $file_list ) ) ) {
+				self::record_failure(
+					$failures,
+					'get_plugin_files.deduplicates-main-file',
+					array( 'files' => $file_list )
+				);
+			}
+		}
+
+		return self::row(
+			$ctx,
+			'plugin-theme.plugin.admin-discovery-validation-and-files',
+			$failures,
+			array(
+				'basename'        => $admin_case['basename'],
+				'networkRaw'      => $admin_case['rawHeaders']['Network'],
+				'expectedNetwork' => $admin_case['expectedNetwork'],
+				'expectedFiles'   => $admin_case['expectedPluginFiles'],
+			)
+		);
+	}
+
+	private static function check_plugin_admin_file_edit_validation( \ComponentFuzz\FuzzContext $ctx, array $admin_case ): array {
+		$allowed = array_merge(
+			array( $admin_case['basename'] ),
+			$admin_case['expectedPluginFiles']
+		);
+		$allowed = array_values( array_unique( $allowed ) );
+
+		$main_edit    = self::call( static fn() => \validate_file_to_edit( $admin_case['basename'], $allowed ) );
+		$nested_edit  = self::call( static fn() => \validate_file_to_edit( $admin_case['nestedFile'], $allowed ) );
+		$windows_edit = self::call( static fn() => \validate_file_to_edit( 'C:/component-fuzz/' . basename( $admin_case['mainFile'] ) ) );
+		$failures     = array();
+
+		if ( $main_edit['threw'] || $admin_case['basename'] !== $main_edit['value'] ) {
+			self::record_failure(
+				$failures,
+				'validate_file_to_edit.returns-main-plugin-file-when-explicitly-allowed',
+				array( 'call' => self::describe_call( $main_edit ) )
+			);
+		}
+
+		if ( $nested_edit['threw'] || $admin_case['nestedFile'] !== $nested_edit['value'] ) {
+			self::record_failure(
+				$failures,
+				'validate_file_to_edit.returns-nested-plugin-file-when-explicitly-allowed',
+				array( 'call' => self::describe_call( $nested_edit ) )
+			);
+		}
+
+		if ( $windows_edit['threw'] || null !== $windows_edit['value'] ) {
+			self::record_failure(
+				$failures,
+				'validate_file_to_edit.windows-drive-path-returns-null-without-die',
+				array( 'call' => self::describe_call( $windows_edit ) )
+			);
+		}
+
+		return self::row(
+			$ctx,
+			'plugin-theme.plugin.admin-file-edit-validation',
+			$failures,
+			array(
+				'basename' => $admin_case['basename'],
+				'nested'   => $admin_case['nestedFile'],
+				'allowed'  => $allowed,
+			)
+		);
+	}
+
+	private static function check_plugin_admin_active_state_helpers( \ComponentFuzz\FuzzContext $ctx, array $admin_case ): array {
+		$active_plugins = array();
+		$network_active = array();
+		$active_filter  = static function ( $pre_option = false ) use ( &$active_plugins ): array {
+			unset( $pre_option );
+			return $active_plugins;
+		};
+		$network_filter = static function ( $pre_option = false ) use ( &$network_active ): array {
+			unset( $pre_option );
+			return $network_active;
+		};
+		$failures       = array();
+
+		\add_filter( 'pre_option_active_plugins', $active_filter );
+		\add_filter( 'pre_site_option_active_sitewide_plugins', $network_filter );
+
+		try {
+			if ( \is_plugin_active( $admin_case['basename'] ) || ! \is_plugin_inactive( $admin_case['basename'] ) ) {
+				self::record_failure(
+					$failures,
+					'is_plugin_active.false-and-inactive-true-before-option-membership',
+					array(
+						'active'   => \is_plugin_active( $admin_case['basename'] ),
+						'inactive' => \is_plugin_inactive( $admin_case['basename'] ),
+					)
+				);
+			}
+
+			$active_plugins = array( $admin_case['basename'] );
+			if ( ! \is_plugin_active( $admin_case['basename'] ) || \is_plugin_inactive( $admin_case['basename'] ) ) {
+				self::record_failure(
+					$failures,
+					'is_plugin_active.honors-filtered-active-plugins-option',
+					array(
+						'activePlugins' => $active_plugins,
+						'active'        => \is_plugin_active( $admin_case['basename'] ),
+						'inactive'      => \is_plugin_inactive( $admin_case['basename'] ),
+					)
+				);
+			}
+
+			$active_plugins = array();
+			$network_active = array( $admin_case['basename'] => 1 );
+			$network_result = \is_plugin_active_for_network( $admin_case['basename'] );
+			$active_result  = \is_plugin_active( $admin_case['basename'] );
+			$expected_network_result = \is_multisite();
+			if ( $expected_network_result !== $network_result || $expected_network_result !== $active_result ) {
+				self::record_failure(
+					$failures,
+					'is_plugin_active_for_network.honors-sitewide-option-only-on-multisite',
+					array(
+						'isMultisite'   => \is_multisite(),
+						'networkActive' => $network_active,
+						'networkResult' => $network_result,
+						'activeResult'  => $active_result,
+						'expected'      => $expected_network_result,
+					)
+				);
+			}
+		} finally {
+			\remove_filter( 'pre_site_option_active_sitewide_plugins', $network_filter );
+			\remove_filter( 'pre_option_active_plugins', $active_filter );
+		}
+
+		if ( false !== \has_filter( 'pre_option_active_plugins', $active_filter ) || false !== \has_filter( 'pre_site_option_active_sitewide_plugins', $network_filter ) ) {
+			self::record_failure(
+				$failures,
+				'plugin-active-state-option-filters-restored',
+				array(
+					'activeFilter'  => \has_filter( 'pre_option_active_plugins', $active_filter ),
+					'networkFilter' => \has_filter( 'pre_site_option_active_sitewide_plugins', $network_filter ),
+				)
+			);
+		}
+
+		return self::row(
+			$ctx,
+			'plugin-theme.plugin.active-state-option-contracts',
+			$failures,
+			array(
+				'basename'    => $admin_case['basename'],
+				'isMultisite' => \is_multisite(),
 			)
 		);
 	}
@@ -1290,6 +1600,83 @@ final class PluginThemeSurface {
 		);
 	}
 
+	private static function admin_plugin_case_for_context( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$slug          = self::dependency_slug( 'admin-' . $case['plugin']['slug'] . '-' . $ctx->int( 100, 999 ) );
+		$no_header     = $slug . '-no-header';
+		$plugin_dir    = rtrim( WP_PLUGIN_DIR, '/' ) . '/' . $slug;
+		$no_header_dir = rtrim( WP_PLUGIN_DIR, '/' ) . '/' . $no_header;
+		$network_raw   = (string) $ctx->choice( array( 'true', 'TRUE', 'false', '' ) );
+		$name          = 'Admin Helper ' . self::label( $ctx, 'Plugin' );
+		$version       = '1.' . $ctx->int( 0, 9 ) . '.' . $ctx->int( 0, 99 );
+		$basename      = $slug . '/' . $slug . '.php';
+		$nested_file   = $slug . '/includes/admin.php';
+		$asset_file    = $slug . '/assets/app.js';
+		$readme_file   = $slug . '/readme.md';
+
+		return array(
+			'slug'                => $slug,
+			'pluginDir'           => $plugin_dir,
+			'mainFile'            => $plugin_dir . '/' . $slug . '.php',
+			'basename'            => $basename,
+			'nestedFile'          => $nested_file,
+			'noHeaderDir'         => $no_header_dir,
+			'noHeaderFile'        => $no_header_dir . '/' . $no_header . '.php',
+			'noHeaderBasename'    => $no_header . '/' . $no_header . '.php',
+			'rawHeaders'          => array(
+				'Name'            => $name,
+				'PluginURI'       => 'https://example.test/admin-helper/' . $slug,
+				'Version'         => $version,
+				'Description'     => 'Generated admin helper plugin fixture.',
+				'Author'          => 'Component Fuzz',
+				'AuthorURI'       => 'https://example.test/',
+				'TextDomain'      => $slug,
+				'DomainPath'      => '/languages',
+				'Network'         => $network_raw,
+				'RequiresWP'      => '',
+				'RequiresPHP'     => '',
+				'UpdateURI'       => '',
+				'RequiresPlugins' => '',
+			),
+			'expectedHeaders'     => array(
+				'Name'       => $name,
+				'Version'    => $version,
+				'TextDomain' => $slug,
+			),
+			'expectedNetwork'     => ( 'true' === strtolower( $network_raw ) ),
+			'expectedPluginFiles' => array(
+				$basename,
+				$nested_file,
+				$asset_file,
+				$readme_file,
+			),
+			'excludedPluginFiles' => array(
+				$slug . '/vendor/ignored.php',
+				$slug . '/node_modules/ignored.php',
+			),
+		);
+	}
+
+	private static function write_admin_plugin_case_files( array $admin_case ): void {
+		self::ensure_dir( WP_PLUGIN_DIR );
+		self::ensure_dir( $admin_case['pluginDir'] );
+		self::ensure_dir( $admin_case['pluginDir'] . '/includes' );
+		self::ensure_dir( $admin_case['pluginDir'] . '/assets' );
+		self::ensure_dir( $admin_case['pluginDir'] . '/vendor' );
+		self::ensure_dir( $admin_case['pluginDir'] . '/node_modules' );
+		self::ensure_dir( $admin_case['noHeaderDir'] );
+
+		self::write_file(
+			$admin_case['mainFile'],
+			"<?php\n" . self::header_block( $admin_case['rawHeaders'], self::plugin_header_labels() ) . "\n"
+		);
+		self::write_file( $admin_case['pluginDir'] . '/includes/admin.php', "<?php\n// Editable generated helper.\n" );
+		self::write_file( $admin_case['pluginDir'] . '/assets/app.js', "window.componentFuzzAdminHelper = true;\n" );
+		self::write_file( $admin_case['pluginDir'] . '/readme.md', "# Component Fuzz Admin Helper\n" );
+		self::write_file( $admin_case['pluginDir'] . '/vendor/ignored.php', "<?php\n// Excluded generated helper.\n" );
+		self::write_file( $admin_case['pluginDir'] . '/node_modules/ignored.php', "<?php\n// Excluded generated helper.\n" );
+		self::write_file( $admin_case['noHeaderFile'], "<?php\n// Existing PHP file without plugin headers.\n" );
+	}
+
 	private static function write_case_files( array $case ): void {
 		self::ensure_dir( $case['plugin']['dir'] );
 		self::ensure_dir( $case['plugin']['dir'] . '/assets' );
@@ -1822,6 +2209,14 @@ final class PluginThemeSurface {
 			'codes'    => $value->get_error_codes(),
 			'messages' => $value->get_error_messages(),
 		);
+	}
+
+	private static function wp_error_code( $value ): ?string {
+		if ( ! \is_wp_error( $value ) ) {
+			return null;
+		}
+
+		return $value->get_error_code();
 	}
 
 	private static function describe_throwable( \Throwable $e ): array {

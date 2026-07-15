@@ -572,9 +572,10 @@ database, network requests, or a configured site.
   priming stability, registered option-group priming, bulk autoload mutators,
   lifecycle action payload ordering, and safe option-name boundary cases.
 - `plugin-theme`: plugin headers, plugin path helpers, invalid plugin path
-  validation, no-DB plugin dependency metadata, dependency slug/name/API-data
-  fallbacks, active dependency option states, theme headers, parent/child
-  relationships, active theme file helpers, screenshots, and broken theme errors.
+  validation, admin helper discovery/file-edit/active-state contracts, no-DB
+  plugin dependency metadata, dependency slug/name/API-data fallbacks, active
+  dependency option states, theme headers, parent/child relationships, active
+  theme file helpers, screenshots, and broken theme errors.
 - `plugin-theme-lifecycle`: no-network plugin/theme lifecycle coverage over
   generated temp fixtures, including plugin validation and requirement errors,
   dependency failure states, activation/deactivation success and output-failure
