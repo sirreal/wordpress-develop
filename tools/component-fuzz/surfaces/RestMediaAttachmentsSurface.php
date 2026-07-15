@@ -40,6 +40,7 @@ final class RestMediaAttachmentsSurface {
 				$case   = self::case_for_context( $ctx );
 				$rows[] = self::check_disposition_parser_and_raw_errors( $ctx->fork( 'raw-errors' ), $case );
 				$rows[] = self::check_create_item_raw_upload_success( $ctx->fork( 'create-raw' ), $case, $temp_root );
+				$rows[] = self::check_create_item_url_sideload_success( $ctx->fork( 'create-url' ), $case, $temp_root );
 				$rows[] = self::check_sideload_raw_upload_metadata( $ctx->fork( 'sideload-raw' ), $case, $temp_root );
 				$rows[] = self::check_finalize_and_response_projection( $ctx->fork( 'finalize' ), $case, $temp_root );
 				$rows[] = self::check_permission_and_edit_fail_closed_paths( $ctx->fork( 'permission-edit' ), $case, $temp_root );
@@ -117,6 +118,7 @@ final class RestMediaAttachmentsSurface {
 				'__return_empty_array',
 				'__return_false',
 				'add_filter',
+				'add_action',
 				'create_initial_post_types',
 				'create_initial_taxonomies',
 				'current_user_can',
@@ -126,6 +128,7 @@ final class RestMediaAttachmentsSurface {
 				'get_post_meta',
 				'has_filter',
 				'is_wp_error',
+				'remove_action',
 				'remove_filter',
 				'rest_authorization_required_code',
 				'rest_get_route_for_post',
@@ -372,6 +375,246 @@ final class RestMediaAttachmentsSurface {
 			'rest-media-attachments.create-item-raw-upload-success',
 			$failures,
 			array( 'case' => self::case_summary( $case ) )
+		);
+	}
+
+	private static function check_create_item_url_sideload_success( \ComponentFuzz\FuzzContext $ctx, array $case, string $temp_root ): array {
+		self::reset_content_runtime();
+
+		$failures      = array();
+		$controller    = new \WP_REST_Attachments_Controller( 'attachment' );
+		$author        = self::insert_user( $case, 'url-author' );
+		$parent        = self::insert_post( $case, $author );
+		$image_body    = self::tiny_png_bytes();
+		$remote_file   = 'rest-remote-' . $case['token'] . '.png';
+		$remote_url    = 'https://media.example.test/component-fuzz/' . rawurlencode( $remote_file ) . '?token=' . rawurlencode( $case['token'] );
+		$missing_url   = 'https://media.example.test';
+		$unsupported   = 'https://media.example.test/component-fuzz/' . rawurlencode( 'unsupported-' . $case['token'] . '.php' );
+		$http_events    = array();
+		$download_paths = array();
+		$upload_events  = array();
+		$action_events  = array();
+		$routes         = array(
+			$remote_url => array(
+				'body'    => $image_body,
+				'code'    => 200,
+				'headers' => array(
+					'Content-Type' => 'image/png',
+				),
+			),
+		);
+
+		$http_filter = self::http_interceptor( $routes, $http_events, $download_paths );
+		$upload_dir_recorder = static function ( array $uploads ) use ( &$upload_events ): array {
+			$upload_events[] = array(
+				'path'   => $uploads['path'] ?? null,
+				'subdir' => $uploads['subdir'] ?? null,
+			);
+			return $uploads;
+		};
+		$after_insert_action = static function ( \WP_Post $attachment, \WP_REST_Request $request, bool $creating ) use ( &$action_events ): void {
+			$action_events[] = array(
+				'id'       => (int) $attachment->ID,
+				'creating' => $creating,
+				'context'  => $request->get_param( 'context' ),
+				'url'      => $request->get_param( 'url' ),
+			);
+		};
+
+		\add_filter( 'pre_http_request', $http_filter, 10, 3 );
+		\add_filter( 'upload_dir', $upload_dir_recorder, 101 );
+		\add_action( 'rest_after_insert_attachment', $after_insert_action, 10, 3 );
+
+		\wp_set_current_user( $author );
+		$grant = self::install_cap_filter(
+			array(
+				'create_posts',
+				'edit_post',
+				'edit_posts',
+				'edit_published_posts',
+				'read',
+				'upload_files',
+			)
+		);
+
+		$before_errors  = self::content_counts();
+		$missing_error  = null;
+		$type_error     = null;
+		$allowed        = null;
+		$response       = null;
+		$before_success = array();
+		$after_success  = array();
+		$after_errors     = $before_errors;
+		$error_http_count = 0;
+		$filter_removed   = false;
+		try {
+			$missing_error = $controller->create_item( self::url_sideload_request( $case, $parent, $missing_url ) );
+			$type_error    = $controller->create_item( self::url_sideload_request( $case, $parent, $unsupported ) );
+			$after_errors     = self::content_counts();
+			$error_http_count = count( $http_events );
+
+			$before_success = $after_errors;
+			$request        = self::url_sideload_request( $case, $parent, $remote_url );
+			$allowed        = $controller->create_item_permissions_check( $request );
+			$response       = $controller->create_item( $request );
+			$after_success  = self::content_counts();
+		} finally {
+			$filter_removed = self::remove_cap_filter( $grant );
+			\remove_action( 'rest_after_insert_attachment', $after_insert_action, 10 );
+			\remove_filter( 'upload_dir', $upload_dir_recorder, 101 );
+			\remove_filter( 'pre_http_request', $http_filter, 10 );
+		}
+
+		$data          = $response instanceof \WP_REST_Response ? $response->get_data() : array();
+		$headers       = $response instanceof \WP_REST_Response ? $response->get_headers() : array();
+		$attachment_id = (int) ( $data['id'] ?? 0 );
+		$attachment    = $attachment_id > 0 ? \get_post( $attachment_id ) : null;
+		$attached_file = $attachment_id > 0 ? \get_attached_file( $attachment_id ) : '';
+		$relative_file = $attachment_id > 0 ? \get_post_meta( $attachment_id, '_wp_attached_file', true ) : '';
+		$metadata      = $attachment_id > 0 ? \wp_get_attachment_metadata( $attachment_id ) : array();
+
+		$unregistered_events = array_filter(
+			$http_events,
+			static function ( array $event ): bool {
+				return empty( $event['registered'] );
+			}
+		);
+		$registered_events   = array_filter(
+			$http_events,
+			static function ( array $event ): bool {
+				return ! empty( $event['registered'] );
+			}
+		);
+
+		self::collect_failure(
+			$failures,
+			self::error_matches( $missing_error, 'rest_invalid_url', 400 )
+				&& self::error_matches( $type_error, 'rest_invalid_url', 400 )
+				&& $before_errors === $after_errors
+				&& 0 === $error_http_count,
+			'URL sideload rejects empty path filenames and unsupported extensions before HTTP or content mutation',
+			array(
+				'missing' => self::describe_error( $missing_error ),
+				'type'    => self::describe_error( $type_error ),
+				'before'  => $before_errors,
+				'after'   => $after_errors,
+				'http'    => array_slice( $http_events, 0, $error_http_count ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			true === $allowed
+				&& $response instanceof \WP_REST_Response
+				&& 201 === $response->get_status()
+				&& isset( $headers['Location'] )
+				&& str_contains( (string) $headers['Location'], 'wp/v2/media/' . $attachment_id )
+				&& $attachment instanceof \WP_Post
+				&& 'attachment' === $attachment->post_type
+				&& 'inherit' === $attachment->post_status
+				&& $parent === (int) $attachment->post_parent
+				&& 'image/png' === $attachment->post_mime_type
+				&& 'rest-remote-' . $case['token'] === $attachment->post_title
+				&& '' === $attachment->post_excerpt
+				&& '' === $attachment->post_content
+				&& is_string( $attached_file )
+				&& self::path_starts_with( $attached_file, rtrim( $temp_root, '/\\' ) )
+				&& is_file( $attached_file )
+				&& $image_body === file_get_contents( $attached_file )
+				&& $remote_file === \wp_basename( $attached_file )
+				&& $relative_file === \wp_basename( $attached_file )
+				&& is_array( $metadata )
+				&& strlen( $image_body ) === (int) ( $metadata['filesize'] ?? 0 ),
+			'create_item URL sideload downloads one registered image fixture into the filtered upload root and creates an attachment',
+			array(
+				'allowed'        => self::describe_error( $allowed ),
+				'responseStatus' => $response instanceof \WP_REST_Response ? $response->get_status() : null,
+				'headers'        => $headers,
+				'post'           => $attachment instanceof \WP_Post ? array(
+					'ID'             => $attachment->ID,
+					'post_parent'    => $attachment->post_parent,
+					'post_status'    => $attachment->post_status,
+					'post_title'     => $attachment->post_title,
+					'post_mime_type' => $attachment->post_mime_type,
+				) : $attachment,
+				'attachedFile'   => $attached_file,
+				'relativeFile'   => $relative_file,
+				'metadata'       => $metadata,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$attachment_id > 0
+				&& $attachment_id === (int) ( $data['id'] ?? 0 )
+				&& $parent === (int) ( $data['post'] ?? 0 )
+				&& 'image' === ( $data['media_type'] ?? null )
+				&& 'image/png' === ( $data['mime_type'] ?? null )
+				&& $remote_file === ( $data['filename'] ?? null )
+				&& strlen( $image_body ) === (int) ( $data['filesize'] ?? 0 )
+				&& str_contains( (string) ( $data['source_url'] ?? '' ), rawurlencode( $remote_file ) )
+				&& self::projected_keys_match( $data, array( 'caption', 'description', 'filename', 'filesize', 'id', 'media_type', 'mime_type', 'post', 'source_url', 'title' ) ),
+			'_fields projection for URL sideload exposes the created REST media fields without unrelated payload expansion',
+			array( 'data' => $data )
+		);
+
+		self::collect_failure(
+			$failures,
+			1 === count( $registered_events )
+				&& array() === $unregistered_events
+				&& $remote_url === ( $registered_events[0]['url'] ?? null )
+				&& ! empty( $registered_events[0]['stream'] )
+				&& self::tracked_paths_absent( $download_paths )
+				&& self::content_count_delta_matches( $before_success ?? array(), $after_success ?? array(), array( 'posts' => 1, 'post_meta' => 2 ) ),
+			'URL sideload HTTP is fully short-circuited, temporary download paths are cleaned, and only attachment content rows are added',
+			array(
+				'http'                 => $http_events,
+				'downloadPaths'        => $download_paths,
+				'trackedPathsCleaned'  => self::tracked_paths_absent( $download_paths ),
+				'beforeSuccess'        => $before_success ?? array(),
+				'afterSuccess'         => $after_success ?? array(),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			array(
+				array(
+					'id'       => $attachment_id,
+					'creating' => true,
+					'context'  => 'edit',
+					'url'      => $remote_url,
+				),
+			) === $action_events
+				&& array() !== $upload_events
+				&& self::upload_events_within_root( $upload_events, rtrim( $temp_root, '/\\' ) )
+				&& $filter_removed
+				&& false === \has_filter( 'pre_http_request', $http_filter )
+				&& false === \has_filter( 'upload_dir', $upload_dir_recorder )
+				&& false === \has_filter( 'rest_after_insert_attachment', $after_insert_action )
+				&& false === \has_filter( 'intermediate_image_sizes_advanced', '__return_empty_array' )
+				&& false === \has_filter( 'fallback_intermediate_image_sizes', '__return_empty_array' )
+				&& false === \has_filter( 'wp_image_maybe_exif_rotate', '__return_false' )
+				&& false === \has_filter( 'image_editor_output_format', '__return_empty_array' ),
+			'URL sideload fires the REST insert action once and restores HTTP, upload, capability, and client-side media filters',
+			array(
+				'actions'       => $action_events,
+				'uploads'       => $upload_events,
+				'filterRemoved' => $filter_removed,
+				'preHttp'       => \has_filter( 'pre_http_request', $http_filter ),
+				'uploadDir'     => \has_filter( 'upload_dir', $upload_dir_recorder ),
+				'afterInsert'   => \has_filter( 'rest_after_insert_attachment', $after_insert_action ),
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'rest-media-attachments.create-item-url-sideload-success',
+			$failures,
+			array(
+				'case' => self::case_summary( $case ),
+				'url'  => $remote_url,
+			)
 		);
 	}
 
@@ -861,6 +1104,98 @@ final class RestMediaAttachmentsSurface {
 		$request->set_header( 'Content-MD5', md5( $case['body'] ) );
 
 		return $request;
+	}
+
+	private static function url_sideload_request( array $case, int $parent, string $url ): \WP_REST_Request {
+		return self::request(
+			'POST',
+			'/wp/v2/media',
+			array( '_fields' => 'id,title,caption,description,media_type,mime_type,source_url,filename,filesize,post' ),
+			array(),
+			array(
+				'alt_text'           => $case['altText'],
+				'caption'            => $case['caption'],
+				'convert_format'     => false,
+				'description'        => $case['description'],
+				'generate_sub_sizes' => false,
+				'post'               => $parent,
+				'title'              => $case['title'],
+				'url'                => $url,
+			)
+		);
+	}
+
+	private static function http_interceptor( array $routes, array &$events, array &$download_paths ): \Closure {
+		return static function ( $pre, array $parsed_args, string $url ) use ( $routes, &$events, &$download_paths ) {
+			unset( $pre );
+
+			$filename   = isset( $parsed_args['filename'] ) ? (string) $parsed_args['filename'] : '';
+			$registered = array_key_exists( $url, $routes );
+			$events[]   = array(
+				'url'        => $url,
+				'registered' => $registered,
+				'stream'     => ! empty( $parsed_args['stream'] ),
+				'filename'   => $filename,
+				'timeout'    => $parsed_args['timeout'] ?? null,
+			);
+
+			if ( '' !== $filename ) {
+				$download_paths[] = $filename;
+			}
+
+			if ( ! $registered ) {
+				return new \WP_Error( 'component_fuzz_unregistered_http', 'Unregistered component-fuzz HTTP fixture.' );
+			}
+
+			$route = $routes[ $url ];
+			$body  = (string) ( $route['body'] ?? '' );
+			if ( '' !== $filename ) {
+				\ComponentFuzz\ensure_dir( dirname( $filename ) );
+				file_put_contents( $filename, $body );
+			}
+
+			return array(
+				'headers'  => self::response_headers( $route['headers'] ?? array() ),
+				'body'     => empty( $parsed_args['stream'] ) ? $body : '',
+				'response' => array(
+					'code'    => (int) ( $route['code'] ?? 200 ),
+					'message' => (string) ( $route['message'] ?? 'OK' ),
+				),
+				'cookies'  => array(),
+				'filename' => $filename,
+			);
+		};
+	}
+
+	private static function response_headers( array $headers ): \WpOrg\Requests\Utility\CaseInsensitiveDictionary {
+		return new \WpOrg\Requests\Utility\CaseInsensitiveDictionary( $headers );
+	}
+
+	private static function tracked_paths_absent( array $paths ): bool {
+		foreach ( array_unique( array_filter( $paths, 'is_string' ) ) as $path ) {
+			if ( '' !== $path && file_exists( $path ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function upload_events_within_root( array $events, string $upload_root ): bool {
+		foreach ( $events as $event ) {
+			if ( ! is_string( $event['path'] ?? null ) || ! self::path_starts_with( (string) $event['path'], $upload_root ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function path_starts_with( string $path, string $root ): bool {
+		$path = str_replace( '\\', '/', $path );
+		$root = rtrim( str_replace( '\\', '/', $root ), '/' );
+
+		return $root !== '' && ( $path === $root || str_starts_with( $path, $root . '/' ) );
 	}
 
 	private static function attachments_probe(): \WP_REST_Attachments_Controller {

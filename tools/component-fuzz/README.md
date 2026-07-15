@@ -1044,11 +1044,12 @@ index-advertisement plumbing that sits outside controller CRUD methods.
 `rest-media-attachments` covers the bounded REST attachment upload and
 client-side media-processing write paths using raw request bodies, temp upload
 roots, attachment postmeta, response projection, metadata finalization,
-permission gates, and raw sideload metadata updates for generated subsizes and
+permission gates, URL sideload downloads short-circuited through local HTTP
+fixtures, and raw sideload metadata updates for generated subsizes and
 original-image files. It intentionally avoids multipart success paths that
-depend on PHP's `is_uploaded_file()` state, remote sideload downloads, and admin
-image-edit request paths, which are covered by `media-image-edit-requests` when
-they can be kept process-local and codec-independent. `rest-widgets-sidebars`
+depend on PHP's `is_uploaded_file()` state and admin image-edit request paths,
+which are covered by `media-image-edit-requests` when they can be kept
+process-local and codec-independent. `rest-widgets-sidebars`
 complements the lower-level widget surfaces by exercising REST controller
 permissions, schemas, instance encoding, sidebar mutation, legacy form-data
 paths, and the `/widget-types/{id}/render` iframe endpoint directly. The render
