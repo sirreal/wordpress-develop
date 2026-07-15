@@ -43,6 +43,26 @@ $empty_fragment = $oracle->render( '', \HtmlApiFuzz\Generator::MODE_FRAGMENT_BOD
 html_api_fuzz_lexbor_smoke_assert( \HtmlApiFuzz\TreeRenderer::STATUS_OK === ( $empty_fragment['status'] ?? null ), 'Expected Lexbor to parse an empty fragment.' );
 html_api_fuzz_lexbor_smoke_assert( "\n" === ( $empty_fragment['tree'] ?? null ), 'Expected Lexbor empty fragment rendering to match the fuzzer tree newline contract.' );
 
+$noscript_document = $oracle->render(
+	'<!doctype html><html><head><noscript><meta name=x></noscript></head><body><noscript><b>y</b></noscript></body></html>',
+	\HtmlApiFuzz\Generator::MODE_FULL_DOCUMENT,
+	$limits,
+	'body'
+);
+html_api_fuzz_lexbor_smoke_assert( \HtmlApiFuzz\TreeRenderer::STATUS_OK === ( $noscript_document['status'] ?? null ), 'Expected Lexbor to parse a noscript document.' );
+html_api_fuzz_lexbor_smoke_assert(
+	false !== strpos( $noscript_document['tree'] ?? '', "    <noscript>\n      <meta>\n        name=\"x\"\n  <body>\n    <noscript>\n      <b>\n        \"y\"\n" ),
+	'Expected Lexbor document parsing to use scripting-disabled tree construction.'
+);
+
+$noscript_fragment = $oracle->render( '<noscript><b>x</b></noscript>', \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY, $limits, 'body' );
+html_api_fuzz_lexbor_smoke_assert( "<noscript>\n  <b>\n    \"x\"\n\n" === ( $noscript_fragment['tree'] ?? null ), 'Expected Lexbor fragment parsing to use scripting-disabled tree construction.' );
+
+foreach ( array( 'body', 'div', 'p', 'td', 'tr', 'table', 'caption', 'colgroup', 'select', 'option', 'template', 'title', 'textarea', 'script', 'style', 'svg', 'math' ) as $context ) {
+	$context_result = $oracle->render( 'x', \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY, $limits, $context );
+	html_api_fuzz_lexbor_smoke_assert( \HtmlApiFuzz\TreeRenderer::STATUS_OK === ( $context_result['status'] ?? null ), "Expected Lexbor to support the {$context} fragment context." );
+}
+
 $empty_worker_result = \HtmlApiFuzz\Worker::run(
 	array(
 		'input-base64'      => base64_encode( '' ),

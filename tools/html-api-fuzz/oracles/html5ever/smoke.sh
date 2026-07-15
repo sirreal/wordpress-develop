@@ -26,6 +26,34 @@ if ( ! str_starts_with( $result["tree"], "<!DOCTYPE html>\n<html>\n" ) ) { throw
 if ( false === strpos( $result["tree"], "      a=\"1\"\n      b=\"2\"\n      \"hi&\"" ) ) { throw new Exception( "canonical attributes/text" ); }
 ' "$tmp_dir/document.json"
 
+printf '%s' '<!doctype html><html><head><noscript><meta name=x></noscript></head><body><noscript><b>y</b></noscript></body></html>' >"$tmp_dir/noscript-document.html"
+"$binary" --mode full-document --max-nodes 100 --input "$tmp_dir/noscript-document.html" >"$tmp_dir/noscript-document.json"
+php -r '
+$result = json_decode( file_get_contents( $argv[1] ), true, 512, JSON_THROW_ON_ERROR );
+$expected = "    <noscript>\n      <meta>\n        name=\"x\"\n  <body>\n    <noscript>\n      <b>\n        \"y\"\n";
+if ( false === strpos( $result["tree"] ?? "", $expected ) ) { throw new Exception( "document scripting mode" ); }
+' "$tmp_dir/noscript-document.json"
+
+printf '%s' '<noscript><b>x</b></noscript>' >"$tmp_dir/noscript-fragment.html"
+"$binary" --mode fragment-body --context body --max-nodes 100 --input "$tmp_dir/noscript-fragment.html" >"$tmp_dir/noscript-fragment.json"
+php -r '
+$result = json_decode( file_get_contents( $argv[1] ), true, 512, JSON_THROW_ON_ERROR );
+$expected = "<noscript>\n  <b>\n    \"x\"\n\n";
+if ( $expected !== ( $result["tree"] ?? null ) ) { throw new Exception( "fragment scripting mode" ); }
+' "$tmp_dir/noscript-fragment.json"
+
+printf '%s' 'x' >"$tmp_dir/context.html"
+for context in body div p td tr table caption colgroup select option template title textarea script style svg math; do
+	"$binary" --mode fragment-body --context "$context" --max-nodes 100 --input "$tmp_dir/context.html" >"$tmp_dir/context-$context.json"
+	php -r '
+	$result = json_decode( file_get_contents( $argv[1] ), true, 512, JSON_THROW_ON_ERROR );
+	$expected = "colgroup" === $argv[2] ? "\n" : "\"x\"\n\n";
+	if ( "ok" !== ( $result["status"] ?? null ) || $expected !== ( $result["tree"] ?? null ) ) {
+		throw new Exception( "context coverage: " . $argv[2] );
+	}
+	' "$tmp_dir/context-$context.json" "$context"
+done
+
 : >"$tmp_dir/empty.html"
 "$binary" --mode fragment-body --context body --max-nodes 100 --input "$tmp_dir/empty.html" >"$tmp_dir/empty.json"
 php -r '

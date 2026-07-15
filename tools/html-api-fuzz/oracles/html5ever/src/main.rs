@@ -1,5 +1,6 @@
 use html5ever::tendril::TendrilSink;
-use html5ever::{parse_document, parse_fragment, QualName};
+use html5ever::tree_builder::TreeBuilderOpts;
+use html5ever::{parse_document, parse_fragment, ParseOpts, QualName};
 use markup5ever_rcdom::{Handle, NodeData, RcDom};
 use std::env;
 use std::fs;
@@ -201,7 +202,7 @@ fn render_fragment_children(dom: &RcDom, state: &mut RenderState) -> Result<(), 
 }
 
 fn parse_document_bytes(input: &[u8]) -> Result<RcDom, OracleError> {
-    parse_document(RcDom::default(), Default::default())
+    parse_document(RcDom::default(), scripting_disabled_parse_options())
         .from_utf8()
         .read_from(&mut Cursor::new(input))
         .map_err(|error| OracleError {
@@ -220,7 +221,7 @@ fn parse_fragment_bytes(input: &[u8], context: &str) -> Result<RcDom, OracleErro
 
     parse_fragment(
         RcDom::default(),
-        Default::default(),
+        scripting_disabled_parse_options(),
         context_name,
         Vec::new(),
         false,
@@ -232,6 +233,16 @@ fn parse_fragment_bytes(input: &[u8], context: &str) -> Result<RcDom, OracleErro
         message: format!("html5ever could not read the fragment: {error}"),
         node_count: 0,
     })
+}
+
+fn scripting_disabled_parse_options() -> ParseOpts {
+    ParseOpts {
+        tree_builder: TreeBuilderOpts {
+            scripting_enabled: false,
+            ..TreeBuilderOpts::default()
+        },
+        ..ParseOpts::default()
+    }
 }
 
 fn context_qual_name(context: &str) -> Option<QualName> {

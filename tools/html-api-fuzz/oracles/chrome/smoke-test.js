@@ -124,8 +124,11 @@ async function main() {
 		assert( Buffer.from( fragment.treeBase64, 'base64' ).toString( 'utf8' ) === fragment.tree, 'treeBase64 does not encode tree.' );
 		assert( 3 === fragment.nodeCount, 'Unexpected body fragment node count.' );
 
-		const unsafeDocument = '<!doctype html><title>x</title>' +
-			`<script>document.body.innerHTML='<p>EXECUTED</p>'</script><img src="http://127.0.0.1:${ probePort }/probe"><p>safe`;
+		const unsafeDocument = '<!doctype html><html><head><title>x</title></head>' +
+			'<body onload="this.dataset.onloadRan=\'yes\';this.insertAdjacentHTML(\'beforeend\',\'<i id=author-executed></i>\')">' +
+			'<script>document.body.innerHTML=\'<p>EXECUTED</p>\'</script>' +
+			`<img src="http://127.0.0.1:${ probePort }/probe" onerror="document.body.dataset.errorRan='yes'">` +
+			'<p>safe</p></body></html>';
 		const fullDocument = await request( socketPath, {
 			id: 2,
 			command: 'render',
@@ -133,15 +136,46 @@ async function main() {
 			mode: 'full-document',
 			context: 'body',
 			maxNodes: 100,
+			securityAuditDelayMs: 100,
 		} );
 		assert( 'ok' === fullDocument.status, fullDocument.error || 'Full-document render failed.' );
 		assert( fullDocument.tree.startsWith( '<!DOCTYPE html>\n<html>\n' ), 'Full-document navigation did not expose document.childNodes.' );
 		assert( fullDocument.tree.includes( '"safe"' ), 'Author script mutated the parsed full document.' );
 		assert( ! fullDocument.tree.includes( '<p>\n      "EXECUTED"' ), 'Author script executed during full-document parsing.' );
+		assert( ! fullDocument.tree.includes( 'data-onload-ran=' ), 'Author load handler executed after parsing.' );
+		assert( ! fullDocument.tree.includes( 'data-error-ran=' ), 'Author error handler executed after parsing.' );
+		assert( 'x' === fullDocument.securityAudit?.title, 'Author code changed the title during the delayed audit.' );
+		assert( null === fullDocument.securityAudit?.onloadRan, 'Queued author load handler ran during the instrumentation window.' );
+		assert( null === fullDocument.securityAudit?.errorRan, 'Queued author error handler ran during the instrumentation window.' );
+		assert( false === fullDocument.securityAudit?.injectedNode, 'Queued author handler injected a node during the instrumentation window.' );
+
+		const noscriptDocument = await request( socketPath, {
+			id: 3,
+			command: 'render',
+			htmlBase64: Buffer.from( '<!doctype html><html><head><noscript><meta name=x></noscript></head><body><noscript><b>y</b></noscript></body></html>' ).toString( 'base64' ),
+			mode: 'full-document',
+			context: 'body',
+			maxNodes: 100,
+		} );
+		assert( 'ok' === noscriptDocument.status, noscriptDocument.error || 'Noscript document render failed.' );
+		assert(
+			noscriptDocument.tree.includes( '    <noscript>\n      <meta>\n        name="x"\n  <body>\n    <noscript>\n      <b>\n        "y"\n' ),
+			'Chrome document parser did not use scripting-disabled tree construction.'
+		);
+
+		const noscriptFragment = await request( socketPath, {
+			id: 4,
+			command: 'render',
+			htmlBase64: Buffer.from( '<noscript><b>x</b></noscript>' ).toString( 'base64' ),
+			mode: 'fragment-body',
+			context: 'body',
+			maxNodes: 100,
+		} );
+		assert( '<noscript>\n  <b>\n    "x"\n\n' === noscriptFragment.tree, 'Chrome fragment parser did not use an inert scripting-disabled document.' );
 
 		const [ svg, table ] = await Promise.all( [
 			request( socketPath, {
-				id: 3,
+				id: 5,
 				command: 'render',
 				htmlBase64: Buffer.from( '<circle viewbox="0 0 1 1"/>' ).toString( 'base64' ),
 				mode: 'fragment-body',
@@ -149,7 +183,7 @@ async function main() {
 				maxNodes: 100,
 			} ),
 			request( socketPath, {
-				id: 4,
+				id: 6,
 				command: 'render',
 				htmlBase64: Buffer.from( '<td>x<td>y' ).toString( 'base64' ),
 				mode: 'fragment-body',
@@ -162,11 +196,45 @@ async function main() {
 		assert( fragment.oracle.browserPid === fullDocument.oracle.browserPid, 'Chrome was not reused between sequential clients.' );
 		assert( fragment.oracle.browserPid === svg.oracle.browserPid, 'Chrome was not reused between concurrent clients.' );
 		assert( fragment.oracle.browserInstanceId === table.oracle.browserInstanceId, 'Browser instance changed during socket serving.' );
+
+		const contextFixtures = [
+			[ 'body', '<p>x', '<p>\n  "x"\n\n' ],
+			[ 'div', '<p>x', '<p>\n  "x"\n\n' ],
+			[ 'p', '<b>x', '<b>\n  "x"\n\n' ],
+			[ 'td', '<b>x', '<b>\n  "x"\n\n' ],
+			[ 'tr', '<td>x', '<td>\n  "x"\n\n' ],
+			[ 'table', '<td>x', '<tbody>\n  <tr>\n    <td>\n      "x"\n\n' ],
+			[ 'caption', '<b>x', '<b>\n  "x"\n\n' ],
+			[ 'colgroup', '<col>', '<col>\n\n' ],
+			[ 'select', '<option>x<option>y', '<option>\n  "x"\n<option>\n  "y"\n\n' ],
+			[ 'option', 'x', '"x"\n\n' ],
+			[ 'template', '<b>x', '<b>\n  "x"\n\n' ],
+			[ 'title', '<b>&amp;', '"<b>&"\n\n' ],
+			[ 'textarea', '<b>&amp;', '"<b>&"\n\n' ],
+			[ 'script', '&amp;<b>', '"&amp;<b>"\n\n' ],
+			[ 'style', '&amp;<b>', '"&amp;<b>"\n\n' ],
+			[ 'svg', '<circle>', '<svg circle>\n\n' ],
+			[ 'math', '<mi>x', '<math mi>\n  "x"\n\n' ],
+		];
+		const contextResults = await Promise.all( contextFixtures.map( ( [ context, html ], index ) => request( socketPath, {
+			id: 10 + index,
+			command: 'render',
+			htmlBase64: Buffer.from( html ).toString( 'base64' ),
+			mode: 'fragment-body',
+			context,
+			maxNodes: 100,
+		} ) ) );
+		for ( let index = 0; index < contextFixtures.length; index++ ) {
+			const [ context, , expected ] = contextFixtures[ index ];
+			const result = contextResults[ index ];
+			assert( 'ok' === result.status, result.error || `${ context } context failed.` );
+			assert( expected === result.tree, `${ context } contextual fragment tree is wrong: ${ JSON.stringify( result.tree ) }` );
+		}
 		await new Promise( ( resolve ) => setTimeout( resolve, 100 ) );
 		assert( 0 === networkRequests, 'Full-document parsing made an external network request.' );
 
 		const exiting = waitForExit( child );
-		const shutdown = await request( socketPath, { id: 5, command: 'shutdown' } );
+		const shutdown = await request( socketPath, { id: 100, command: 'shutdown' } );
 		assert( 'ok' === shutdown.status && true === shutdown.shutdown, 'Shutdown request failed.' );
 		await exiting;
 		assert( ! fs.existsSync( socketPath ), 'Oracle socket was not removed during shutdown.' );

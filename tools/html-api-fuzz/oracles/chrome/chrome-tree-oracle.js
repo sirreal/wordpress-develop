@@ -555,7 +555,13 @@ function browserRender( args ) {
 	if ( 'full-document' === args.mode ) {
 		roots = document.childNodes;
 	} else {
-		const owner = document.implementation.createHTMLDocument( '' );
+		// DOMParser creates an inert document whose scripting flag is disabled.
+		// Contextual fragments must use the same scripting mode as WordPress and
+		// the source oracles, particularly for <noscript> tree construction.
+		const owner = new DOMParser().parseFromString(
+			'<!doctype html><html><head></head><body></body></html>',
+			'text/html'
+		);
 		const lower = args.context.toLowerCase();
 		let contextElement;
 		if ( 'svg' === lower ) {
@@ -721,6 +727,10 @@ class ChromeOracle {
 		if ( ! Number.isSafeInteger( maxNodes ) || maxNodes < 1 ) {
 			throw new Error( 'maxNodes must be a positive integer.' );
 		}
+		const securityAuditDelayMs = request.securityAuditDelayMs ?? 0;
+		if ( ! Number.isSafeInteger( securityAuditDelayMs ) || securityAuditDelayMs < 0 || securityAuditDelayMs > 1000 ) {
+			throw new Error( 'securityAuditDelayMs must be an integer from 0 through 1000.' );
+		}
 		const htmlBuffer = Buffer.from( request.htmlBase64 || '', 'base64' );
 		const html = htmlBuffer.toString( 'utf8' );
 		if ( 'full-document' === mode ) {
@@ -730,6 +740,7 @@ class ChromeOracle {
 		}
 
 		let evaluated;
+		let securityAudit;
 		try {
 			await this.cdp.send( 'Emulation.setScriptExecutionDisabled', { value: false }, this.sessionId );
 			const expression = `(${ browserRender.toString() })(${ JSON.stringify( { html, mode, context, maxNodes } ) })`;
@@ -739,6 +750,27 @@ class ChromeOracle {
 				awaitPromise: false,
 				userGesture: false,
 			}, this.sessionId );
+			if ( securityAuditDelayMs > 0 ) {
+				// Smoke tests deliberately hold the existing instrumentation window
+				// open so independently queued author events can run if Chrome would
+				// permit them. Inspect the same document before disabling execution.
+				await new Promise( ( resolve ) => setTimeout( resolve, securityAuditDelayMs ) );
+				const audited = await this.cdp.send( 'Runtime.evaluate', {
+					expression: `({
+						title: document.title,
+						onloadRan: document.body?.dataset.onloadRan || null,
+						errorRan: document.body?.dataset.errorRan || null,
+						injectedNode: Boolean(document.getElementById('author-executed'))
+					})`,
+					returnByValue: true,
+					awaitPromise: false,
+					userGesture: false,
+				}, this.sessionId );
+				if ( audited.exceptionDetails || ! audited.result?.value ) {
+					throw new Error( audited.exceptionDetails?.text || 'Chrome security audit failed.' );
+				}
+				securityAudit = audited.result.value;
+			}
 		} finally {
 			await this.cdp.send( 'Emulation.setScriptExecutionDisabled', { value: true }, this.sessionId ).catch( () => {} );
 		}
@@ -754,13 +786,17 @@ class ChromeOracle {
 		if ( ! rendered || 'string' !== typeof rendered.tree ) {
 			throw new Error( 'Chrome did not return a canonical tree.' );
 		}
-		return {
+		const result = {
 			status: 'ok',
 			oracle: this.configuredMetadata(),
 			tree: rendered.tree,
 			treeBase64: Buffer.from( rendered.tree, 'utf8' ).toString( 'base64' ),
 			nodeCount: rendered.nodeCount,
 		};
+		if ( securityAudit ) {
+			result.securityAudit = securityAudit;
+		}
+		return result;
 	}
 
 	async close() {
