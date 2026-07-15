@@ -34,6 +34,8 @@ final class AdminWorkflowsSurface {
 			$rows[] = self::check_referer_helpers( $ctx->fork( 'referer-helpers' ) );
 			$rows[] = self::check_referer_field_helpers( $ctx->fork( 'referer-field-helpers' ) );
 			$rows[] = self::check_admin_form_controls( $ctx->fork( 'form-controls' ) );
+			$rows[] = self::check_settings_api_rendering_and_errors( $ctx->fork( 'settings-api' ) );
+			$rows[] = self::check_admin_notice_helpers( $ctx->fork( 'admin-notices' ) );
 			$rows[] = self::check_core_list_table_coverage_accounting( $ctx->fork( 'core-list-table-accounting' ) );
 			$rows[] = self::check_exiting_ajax_wrappers( $ctx->fork( 'ajax-wrappers' ) );
 		} catch ( \Throwable $e ) {
@@ -65,12 +67,17 @@ final class AdminWorkflowsSurface {
 				'add_management_page',
 				'add_menu_page',
 				'add_query_arg',
+				'add_settings_error',
+				'add_settings_field',
+				'add_settings_section',
 				'add_submenu_page',
 				'admin_url',
 				'check_admin_referer',
 				'check_ajax_referer',
 				'convert_to_screen',
 				'current_user_can',
+				'do_settings_fields',
+				'do_settings_sections',
 				'esc_attr',
 				'esc_html',
 				'esc_url',
@@ -81,6 +88,7 @@ final class AdminWorkflowsSurface {
 				'home_url',
 				'get_plugin_page_hook',
 				'get_plugin_page_hookname',
+				'get_settings_errors',
 				'has_action',
 				'has_filter',
 				'menu_page_url',
@@ -95,10 +103,14 @@ final class AdminWorkflowsSurface {
 				'sanitize_title',
 				'selected',
 				'set_url_scheme',
+				'settings_errors',
+				'settings_fields',
 				'submit_button',
 				'date_i18n',
 				'wp_create_nonce',
+				'wp_admin_notice',
 				'wp_get_original_referer',
+				'wp_get_admin_notice',
 				'wp_get_raw_referer',
 				'wp_get_referer',
 				'wp_nonce_field',
@@ -1311,6 +1323,314 @@ final class AdminWorkflowsSurface {
 		);
 	}
 
+	private static function check_settings_api_rendering_and_errors( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures       = array();
+		$local_snapshot = self::snapshot_globals(
+			array(
+				'_GET',
+				'wp_settings_sections',
+				'wp_settings_fields',
+				'wp_settings_errors',
+			)
+		);
+		$page           = 'cfz_settings_' . \sanitize_key( $ctx->identifier( 3, 8 ) );
+		$section        = 'cfz_section_' . \sanitize_key( $ctx->fork( 'section' )->identifier( 3, 8 ) );
+		$field          = 'cfz_field_' . \sanitize_key( $ctx->fork( 'field' )->identifier( 3, 8 ) );
+		$group          = 'cfz_group_' . \sanitize_key( $ctx->fork( 'group' )->identifier( 3, 8 ) );
+		$label_for      = 'cfz-input-' . \sanitize_key( $ctx->fork( 'label-for' )->identifier( 3, 8 ) );
+		$row_class      = 'cfz-row-' . \sanitize_key( $ctx->fork( 'row-class' )->identifier( 3, 8 ) );
+		$section_class  = 'cfz-section-' . \sanitize_key( $ctx->fork( 'section-class' )->identifier( 3, 8 ) );
+		$hostile        = self::hostile_label( $ctx->fork( 'hostile' ) );
+		$safe_title     = \esc_html( 'Settings ' . $hostile );
+		$safe_field     = \esc_html( 'Field ' . $hostile );
+		$safe_message   = \esc_html( 'Message ' . $hostile );
+		$section_calls  = array();
+		$field_calls    = array();
+		$result         = array();
+		$restored       = false;
+
+		$section_callback = static function ( array $section_args ) use ( &$section_calls, $hostile ): void {
+			$section_calls[] = $section_args;
+			echo '<p class="cfz-section-callback">' . \esc_html( 'Section callback ' . $hostile ) . '</p>';
+		};
+		$field_callback   = static function ( array $field_args ) use ( &$field_calls, $hostile ): void {
+			$field_calls[] = $field_args;
+			echo '<input id="' . \esc_attr( $field_args['label_for'] ?? '' ) . '" class="cfz-field-input" value="' . \esc_attr( 'Field value ' . $hostile ) . '" />';
+		};
+
+		try {
+			$GLOBALS['wp_settings_sections'] = array();
+			$GLOBALS['wp_settings_fields']   = array();
+			$GLOBALS['wp_settings_errors']   = array();
+			$_GET                            = array();
+
+			\add_settings_section(
+				$section,
+				$safe_title,
+				$section_callback,
+				$page,
+				array(
+					'before_section' => '<div class="cfz-settings-section %s">',
+					'after_section'  => '</div>',
+					'section_class'  => $section_class,
+				)
+			);
+			\add_settings_field(
+				$field,
+				$safe_field,
+				$field_callback,
+				$page,
+				$section,
+				array(
+					'label_for'   => $label_for,
+					'class'       => $row_class,
+					'cfz_payload' => $hostile,
+				)
+			);
+
+			$result['sections']       = self::capture_output( static fn() => \do_settings_sections( $page ) );
+			$result['fields']         = self::capture_output( static fn() => \do_settings_fields( $page, $section ) );
+			$result['unknownPage']    = self::capture_output( static fn() => \do_settings_sections( $page . '-missing' ) );
+			$result['unknownFields']  = self::capture_output( static fn() => \do_settings_fields( $page, $section . '-missing' ) );
+			$result['settingsFields'] = self::capture_output( static fn() => \settings_fields( $group ) );
+			$result['sectionCalls']   = $section_calls;
+			$result['fieldCalls']     = $field_calls;
+
+			$setting_a = 'cfz_setting_' . \sanitize_key( $ctx->fork( 'setting-a' )->identifier( 3, 8 ) );
+			$setting_b = 'cfz_setting_' . \sanitize_key( $ctx->fork( 'setting-b' )->identifier( 3, 8 ) );
+			$code_a    = 'cfz_code_' . \sanitize_key( $ctx->fork( 'code-a' )->identifier( 3, 8 ) );
+			$code_b    = 'cfz_code_' . \sanitize_key( $ctx->fork( 'code-b' )->identifier( 3, 8 ) );
+			$code_c    = 'cfz_code_' . \sanitize_key( $ctx->fork( 'code-c' )->identifier( 3, 8 ) );
+
+			\add_settings_error( $setting_a, $code_a, $safe_message . ' success', 'updated' );
+			\add_settings_error( $setting_a, $code_b, $safe_message . ' warning', 'warning' );
+			\add_settings_error( $setting_b, $code_c, $safe_message . ' info', 'info' );
+
+			$result['allErrors']        = \get_settings_errors();
+			$result['settingAErrors']   = \get_settings_errors( $setting_a );
+			$result['settingBErrors']   = \get_settings_errors( $setting_b );
+			$result['settingAOutput']   = self::capture_output( static fn() => \settings_errors( $setting_a ) );
+			$result['settingBOutput']   = self::capture_output( static fn() => \settings_errors( $setting_b ) );
+			$_GET['settings-updated']   = '1';
+			$result['hiddenOnUpdate']   = self::capture_output( static fn() => \settings_errors( $setting_a, false, true ) );
+			unset( $_GET['settings-updated'] );
+			$result['settingACodes']    = array_column( $result['settingAErrors'], 'code' );
+			$result['settingBCode']     = $result['settingBErrors'][0]['code'] ?? null;
+			$result['settingACodeA']    = $code_a;
+			$result['settingACodeB']    = $code_b;
+			$result['settingBCodeWant'] = $code_c;
+		} finally {
+			self::restore_globals( $local_snapshot );
+			$restored = self::globals_match( $local_snapshot, array( '_GET', 'wp_settings_sections', 'wp_settings_fields', 'wp_settings_errors' ) );
+		}
+
+		self::collect_failure(
+			$failures,
+			1 === count( $result['sectionCalls'] ?? array() )
+				&& 2 === count( $result['fieldCalls'] ?? array() )
+				&& $section === ( $result['sectionCalls'][0]['id'] ?? null )
+				&& $label_for === ( $result['fieldCalls'][0]['label_for'] ?? null )
+				&& $row_class === ( $result['fieldCalls'][0]['class'] ?? null ),
+			'settings sections and fields invoke callbacks with exact generated arguments',
+			$result
+		);
+
+		self::collect_failure(
+			$failures,
+			is_string( $result['sections'] ?? null )
+				&& str_contains( $result['sections'], '<table class="form-table" role="presentation">' )
+				&& str_contains( $result['sections'], 'class="cfz-settings-section ' . $section_class . '"' )
+				&& str_contains( $result['sections'], 'for="' . $label_for . '"' )
+				&& str_contains( $result['sections'], 'class="' . $row_class . '"' )
+				&& str_contains( $result['sections'], $safe_title )
+				&& str_contains( $result['sections'], $safe_field )
+				&& '' === ( $result['unknownPage'] ?? null )
+				&& '' === ( $result['unknownFields'] ?? null )
+				&& self::html_has_no_unsafe_raw_markup( $result['sections'] ),
+			'do_settings_sections renders registered section/field markup and unknown pages stay silent',
+			$result
+		);
+
+		self::collect_failure(
+			$failures,
+			is_string( $result['fields'] ?? null )
+				&& str_contains( $result['fields'], '<tr class="' . $row_class . '">' )
+				&& str_contains( $result['fields'], 'id="' . $label_for . '"' )
+				&& is_string( $result['settingsFields'] ?? null )
+				&& str_contains( $result['settingsFields'], "name='option_page' value='" . $group . "'" )
+				&& str_contains( $result['settingsFields'], 'name="action" value="update"' )
+				&& self::html_has_no_unsafe_raw_markup( $result['fields'] . $result['settingsFields'] ),
+			'do_settings_fields and settings_fields render expected field rows and hidden option form inputs',
+			$result
+		);
+
+		self::collect_failure(
+			$failures,
+			3 === count( $result['allErrors'] ?? array() )
+				&& 2 === count( $result['settingAErrors'] ?? array() )
+				&& 1 === count( $result['settingBErrors'] ?? array() )
+				&& array( $result['settingACodeA'], $result['settingACodeB'] ) === ( $result['settingACodes'] ?? array() )
+				&& $result['settingBCodeWant'] === ( $result['settingBCode'] ?? null )
+				&& str_contains( $result['settingAOutput'] ?? '', 'notice-success' )
+				&& str_contains( $result['settingAOutput'] ?? '', 'notice-warning' )
+				&& ! str_contains( $result['settingAOutput'] ?? '', (string) ( $result['settingBCodeWant'] ?? '' ) )
+				&& str_contains( $result['settingBOutput'] ?? '', 'notice-info' )
+				&& '' === ( $result['hiddenOnUpdate'] ?? null )
+				&& self::html_has_no_unsafe_raw_markup( ( $result['settingAOutput'] ?? '' ) . ( $result['settingBOutput'] ?? '' ) ),
+			'settings errors filter by setting, map legacy/update types to notice classes, and hide on update',
+			$result
+		);
+
+		self::collect_failure(
+			$failures,
+			$restored,
+			'settings API globals and request state are restored',
+			array( 'restored' => $restored )
+		);
+
+		return self::row(
+			$ctx,
+			'admin-workflows.settings-api.sections-fields-errors',
+			array() === $failures,
+			array(
+				'page'     => $page,
+				'section'  => $section,
+				'field'    => $field,
+				'failures' => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
+	private static function check_admin_notice_helpers( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures       = array();
+		$local_snapshot = self::snapshot_globals( array( 'wp_actions', 'wp_current_filter', 'wp_filter', 'wp_filters' ) );
+		$hostile        = self::hostile_label( $ctx->fork( 'message' ) );
+		$message        = \esc_html( 'Notice ' . $hostile );
+		$type           = $ctx->choice( array( 'error', 'success', 'warning', 'info' ) );
+		$id             = 'cfz-notice-' . \sanitize_key( $ctx->fork( 'id' )->identifier( 3, 8 ) );
+		$class          = 'cfz-extra-' . \sanitize_key( $ctx->fork( 'class' )->identifier( 3, 8 ) );
+		$attr_value     = 'attr ' . $hostile;
+		$paragraph_wrap = $ctx->bool();
+		$args           = array(
+			'type'               => $type,
+			'dismissible'        => true,
+			'id'                 => $id,
+			'additional_classes' => array( $class ),
+			'attributes'         => array(
+				'data-cfz'     => $attr_value,
+				'data-present' => true,
+				'data-empty'   => '',
+			),
+			'paragraph_wrap'     => $paragraph_wrap,
+		);
+		$args_events    = array();
+		$markup_events  = array();
+		$action_events  = array();
+		$result         = array();
+		$restored       = false;
+
+		$args_filter = static function ( array $filtered_args, string $filtered_message ) use ( &$args_events ): array {
+			$args_events[] = array(
+				'message' => $filtered_message,
+				'args'    => $filtered_args,
+			);
+			$filtered_args['additional_classes'][]      = 'cfz-filtered';
+			$filtered_args['attributes']['data-filter'] = 'applied';
+			return $filtered_args;
+		};
+		$markup_filter = static function ( string $markup, string $filtered_message, array $filtered_args ) use ( &$markup_events ): string {
+			$markup_events[] = array(
+				'markup'  => $markup,
+				'message' => $filtered_message,
+				'args'    => $filtered_args,
+			);
+			return $markup;
+		};
+		$notice_action = static function ( string $action_message, array $action_args ) use ( &$action_events ): void {
+			$action_events[] = array(
+				'message' => $action_message,
+				'args'    => $action_args,
+			);
+		};
+
+		\add_filter( 'wp_admin_notice_args', $args_filter, 10, 2 );
+		\add_filter( 'wp_admin_notice_markup', $markup_filter, 10, 3 );
+		\add_action( 'wp_admin_notice', $notice_action, 10, 2 );
+
+		try {
+			$result['getter'] = \wp_get_admin_notice( $message, $args );
+			$result['echo']   = self::capture_output( static fn() => \wp_admin_notice( $message, $args ) );
+			$result['argsEvents']   = $args_events;
+			$result['markupEvents'] = $markup_events;
+			$result['actionEvents'] = $action_events;
+		} finally {
+			\remove_action( 'wp_admin_notice', $notice_action, 10 );
+			\remove_filter( 'wp_admin_notice_markup', $markup_filter, 10 );
+			\remove_filter( 'wp_admin_notice_args', $args_filter, 10 );
+			self::restore_globals( $local_snapshot );
+			$restored = self::globals_match( $local_snapshot, array( 'wp_actions', 'wp_current_filter', 'wp_filter', 'wp_filters' ) );
+		}
+
+		$combined = ( $result['getter'] ?? '' ) . ( $result['echo'] ?? '' );
+		self::collect_failure(
+			$failures,
+			is_string( $result['getter'] ?? null )
+				&& $result['getter'] === ( $result['echo'] ?? null )
+				&& str_contains( $result['getter'], 'id="' . $id . '"' )
+				&& str_contains( $result['getter'], 'class="notice notice-' . $type . ' is-dismissible ' . $class . ' cfz-filtered"' )
+				&& str_contains( $result['getter'], 'data-cfz="' . \esc_attr( $attr_value ) . '"' )
+				&& str_contains( $result['getter'], 'data-present' )
+				&& str_contains( $result['getter'], 'data-filter="applied"' )
+				&& ! str_contains( $result['getter'], 'data-empty' )
+				&& self::html_has_no_unsafe_raw_markup( $combined ),
+			'admin notice getter and echo output match with escaped id/classes/attributes and filtered args',
+			$result
+		);
+
+		self::collect_failure(
+			$failures,
+			( $paragraph_wrap && str_contains( $result['getter'] ?? '', '<p>' . $message . '</p>' ) )
+				|| ( ! $paragraph_wrap && str_contains( $result['getter'] ?? '', $message ) && ! str_contains( $result['getter'] ?? '', '<p>' . $message . '</p>' ) ),
+			'admin notice paragraph wrapping follows generated argument',
+			array(
+				'paragraphWrap' => $paragraph_wrap,
+				'getter'        => $result['getter'] ?? null,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			2 === count( $result['argsEvents'] ?? array() )
+				&& 2 === count( $result['markupEvents'] ?? array() )
+				&& 1 === count( $result['actionEvents'] ?? array() )
+				&& $message === ( $result['actionEvents'][0]['message'] ?? null )
+				&& false === \has_filter( 'wp_admin_notice_args', $args_filter )
+				&& false === \has_filter( 'wp_admin_notice_markup', $markup_filter )
+				&& false === \has_action( 'wp_admin_notice', $notice_action ),
+			'admin notice filters/actions receive payloads and are removed after capture',
+			$result
+		);
+
+		self::collect_failure(
+			$failures,
+			$restored,
+			'admin notice hook globals are restored',
+			array( 'restored' => $restored )
+		);
+
+		return self::row(
+			$ctx,
+			'admin-workflows.notices.getter-echo-filters-actions',
+			array() === $failures,
+			array(
+				'type'          => $type,
+				'id'            => $id,
+				'paragraphWrap' => $paragraph_wrap,
+				'failures'      => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
 	private static function check_core_list_table_coverage_accounting( \ComponentFuzz\FuzzContext $ctx ): array {
 		$admin_list_surface = AdminListTablesSurface::NAME;
 		$privacy_surface    = PrivacyAdminRequestsSurface::NAME;
@@ -1728,6 +2048,22 @@ final class AdminWorkflowsSurface {
 		);
 	}
 
+	private static function capture_output( callable $callback ): string {
+		$level = ob_get_level();
+		ob_start();
+
+		try {
+			$callback();
+			return (string) ob_get_clean();
+		} catch ( \Throwable $e ) {
+			while ( ob_get_level() > $level ) {
+				ob_end_clean();
+			}
+
+			throw $e;
+		}
+	}
+
 	private static function capture_ajax_call( callable $callback ): array {
 		$die_calls      = array();
 		$doing_ajax     = static fn (): bool => true;
@@ -1936,6 +2272,9 @@ final class AdminWorkflowsSurface {
 					'wp_current_filter',
 					'wp_filter',
 					'wp_filters',
+					'wp_settings_errors',
+					'wp_settings_fields',
+					'wp_settings_sections',
 					'_parent_pages',
 					'_registered_pages',
 					'_wp_menu_nopriv',

@@ -57,12 +57,14 @@ database, network requests, or a configured site.
   registry/default/sanitize callbacks, escaped settings field and nonce output,
   settings error/admin notice rendering and filter state, meta-box
   ordering/removal/callback args, and accordion section rendering.
-- `admin-workflows`: no-DB admin menu, list-table, and referer-helper
-  workflows, including menu/submenu global registration and removal, hook suffix
-  and menu URL behavior, parent file normalization, synthetic `WP_List_Table`
-  pagination/columns/views/bulk actions/row actions/tablenav rendering, direct
-  bulk-action/month-dropdown helper contracts, safe admin/AJAX nonce checks, and
-  captured date/time AJAX format wrappers without process exits.
+- `admin-workflows`: no-DB admin menu, list-table, referer-helper, Settings
+  API, and admin notice workflows, including menu/submenu global registration
+  and removal, hook suffix and menu URL behavior, parent file normalization,
+  synthetic `WP_List_Table` pagination/columns/views/bulk actions/row
+  actions/tablenav rendering, direct bulk-action/month-dropdown helper
+  contracts, safe admin/AJAX nonce checks, settings section/field/error
+  rendering, filtered admin notice getter/echo contracts, and captured date/time
+  AJAX format wrappers without process exits.
 - `admin-list-tables`: no-live-DB concrete admin list-table subclass coverage
   for posts, media, comments, terms, users, plugins, plugin install search
   results, themes, selected-mode theme install API results, link manager,
