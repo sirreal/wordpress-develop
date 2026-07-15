@@ -31,6 +31,9 @@ final class ContentLifecycleSurface {
 			$rows[] = self::check_post_lifecycle( $ctx->fork( 'posts' ), $case );
 
 			self::prepare_runtime();
+			$rows[] = self::check_admin_post_save_orchestration( $ctx->fork( 'admin-post-save' ), $case );
+
+			self::prepare_runtime();
 			$rows[] = self::check_page_lookup_helpers( $ctx->fork( 'page-lookups' ), $case );
 
 			self::prepare_runtime();
@@ -73,13 +76,16 @@ final class ContentLifecycleSurface {
 			array(
 				'add_action',
 				'add_filter',
+				'add_meta',
 				'add_post_meta',
 				'clean_post_cache',
 				'current_user_can',
 				'create_initial_post_types',
 				'create_initial_taxonomies',
+				'delete_meta',
 				'delete_post_meta',
 				'delete_post_thumbnail',
+				'edit_post',
 				'get_available_post_mime_types',
 				'get_the_terms',
 				'get_the_post_thumbnail',
@@ -87,9 +93,11 @@ final class ContentLifecycleSurface {
 				'get_the_post_thumbnail_url',
 				'get_comment',
 				'get_post_meta',
+				'get_post_meta_by_id',
 				'get_post_mime_types',
 				'get_post_thumbnail_id',
 				'get_post_stati',
+				'get_post_status_object',
 				'get_post',
 				'get_post_type_object',
 				'get_posts',
@@ -99,6 +107,7 @@ final class ContentLifecycleSurface {
 				'get_pages',
 				'get_term',
 				'get_terms',
+				'get_taxonomy',
 				'get_user_by',
 				'get_userdata',
 				'has_action',
@@ -110,15 +119,18 @@ final class ContentLifecycleSurface {
 				'is_wp_error',
 				'metadata_exists',
 				'post_type_exists',
+				'post_type_supports',
 				'get_permalink',
 				'get_current_user_id',
 				'wp_get_ext_types',
 				'wp_get_mime_types',
 				'register_post_type',
+				'register_taxonomy',
 				'remove_action',
 				'remove_filter',
 				'sanitize_comment_cookies',
 				'sanitize_email',
+				'sanitize_key',
 				'sanitize_post_field',
 				'sanitize_term_field',
 				'sanitize_title',
@@ -150,20 +162,26 @@ final class ContentLifecycleSurface {
 				'wp_remove_object_terms',
 				'wp_set_object_terms',
 				'wp_set_current_user',
+				'wp_set_post_lock',
 				'wp_schedule_single_event',
 				'wp_slash',
 				'wp_trash_post',
 				'wp_transition_post_status',
 				'wp_unslash',
+				'wp_check_post_lock',
 				'wp_clear_scheduled_hook',
 				'wp_next_scheduled',
 				'update_post_meta',
+				'update_meta',
 				'update_post_thumbnail_cache',
 				'wp_count_attachments',
 				'wp_count_posts',
 				'wp_update_post',
 				'_count_posts_cache_key',
+				'_fix_attachment_links',
 				'_transition_post_status',
+				'_wp_get_allowed_postdata',
+				'_wp_translate_postdata',
 				'wp_post_mime_type_where',
 			) as $function
 		) {
@@ -375,6 +393,345 @@ final class ContentLifecycleSurface {
 				'case'     => self::case_summary( $case ),
 				'failures' => array_slice( $failures, 0, 6 ),
 				'events'   => array_slice( $events, 0, 16 ),
+			)
+		);
+	}
+
+	private static function check_admin_post_save_orchestration( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures         = array();
+		$events           = array();
+		$taxonomy_events  = array();
+		$hooks            = array();
+		$cap_filter       = null;
+		$post_snapshot    = $_POST;
+		$get_snapshot     = $_GET;
+		$request_snapshot = $_REQUEST;
+		$post_type        = $case['postType'];
+		$taxonomy         = 'cf_admin_tax_' . substr( $case['token'], 0, 8 );
+		$existing_key     = 'cf_admin_existing_' . $case['token'];
+		$renamed_key      = 'cf_admin_renamed_' . $case['token'];
+		$delete_key       = 'cf_admin_delete_' . $case['token'];
+		$added_key        = 'cf_admin_added_' . $case['token'];
+		$original_guid    = 'http://example.test/original-admin-save-' . $case['token'];
+		$original_mime    = 'text/plain';
+		$visibility       = $ctx->choice( array( 'public', 'password', 'private' ) );
+		$expected_status  = 'private' === $visibility ? 'private' : $case['updatedStatus'];
+		$expected_pass    = 'password' === $visibility && 'private' !== $expected_status ? $case['password'] : '';
+
+		try {
+			\register_post_type(
+				$post_type,
+				array(
+					'public'       => true,
+					'rewrite'      => false,
+					'query_var'    => false,
+					'show_ui'      => true,
+					'supports'     => array( 'title', 'editor', 'excerpt', 'author', 'custom-fields' ),
+					'taxonomies'   => array( $taxonomy ),
+					'map_meta_cap' => true,
+				)
+			);
+
+			\register_taxonomy(
+				$taxonomy,
+				$post_type,
+				array(
+					'public'               => false,
+					'hierarchical'         => true,
+					'show_ui'              => true,
+					'show_in_quick_edit'   => true,
+					'meta_box_sanitize_cb' => static function ( string $taxonomy_name, $terms ) use ( &$taxonomy_events ): array {
+						$taxonomy_events[] = array(
+							'taxonomy' => $taxonomy_name,
+							'terms'    => array_values( (array) $terms ),
+						);
+						return array_map( 'intval', (array) $terms );
+					},
+				)
+			);
+
+			$user_id = self::insert_support_user( 'admin-save-' . $case['token'], 'admin-save-' . $case['token'] . '@example.test' );
+			\wp_set_current_user( $user_id );
+			$cap_filter = self::grant_all_caps_filter( $user_id );
+			\add_filter( 'user_has_cap', $cap_filter, 10, 4 );
+
+			$term    = \wp_insert_term( 'Admin Save ' . $case['token'], $taxonomy, array( 'slug' => 'admin-save-' . $case['token'] ) );
+			$post_id = \wp_insert_post(
+				\wp_slash(
+					array(
+						'post_type'      => $post_type,
+						'post_title'     => $case['title'],
+						'post_content'   => $case['content'],
+						'post_excerpt'   => $case['excerpt'],
+						'post_status'    => 'draft',
+						'post_author'    => $user_id,
+						'post_name'      => $case['slug'] . '-admin-original',
+						'post_password'  => 'original-password',
+						'post_mime_type' => $original_mime,
+						'comment_status' => 'open',
+						'ping_status'    => 'closed',
+						'guid'           => $original_guid,
+					)
+				),
+				true,
+				true
+			);
+
+			$existing_meta_id = is_int( $post_id ) ? \add_post_meta( $post_id, $existing_key, \wp_slash( $case['metaValue'] ) ) : false;
+			$delete_meta_id   = is_int( $post_id ) ? \add_post_meta( $post_id, $delete_key, \wp_slash( $case['metaSecondValue'] ) ) : false;
+			$fixture_post     = is_int( $post_id ) ? \get_post( $post_id ) : null;
+			$fixture_raw      = is_int( $post_id ) ? \get_post( $post_id, ARRAY_A, 'raw' ) : array();
+			$stored_mime      = $fixture_post instanceof \WP_Post ? $fixture_post->post_mime_type : $original_mime;
+			$stored_guid      = is_array( $fixture_raw ) ? (string) ( $fixture_raw['guid'] ?? '' ) : $original_guid;
+
+			self::collect_failure(
+				$failures,
+				is_int( $post_id )
+					&& is_int( $existing_meta_id )
+					&& is_int( $delete_meta_id )
+					&& $fixture_post instanceof \WP_Post
+					&& is_array( $term )
+					&& isset( $term['term_id'] ),
+				'admin save fixtures insert before edit_post orchestration',
+				array(
+					'postId'         => $post_id,
+					'existingMetaId' => $existing_meta_id,
+					'deleteMetaId'   => $delete_meta_id,
+					'fixturePost'    => self::post_summary( $fixture_post ),
+					'storedMime'     => $stored_mime,
+					'storedGuid'     => $stored_guid,
+					'term'           => $term,
+				)
+			);
+
+			if ( ! is_int( $post_id ) || ! is_int( $existing_meta_id ) || ! is_int( $delete_meta_id ) || ! $fixture_post instanceof \WP_Post || ! is_array( $term ) || ! isset( $term['term_id'] ) ) {
+				return $ctx->result(
+					'content-lifecycle.posts.admin-save-orchestration',
+					false,
+					array(
+						'case'     => self::case_summary( $case ),
+						'failures' => array_slice( $failures, 0, 6 ),
+					)
+				);
+			}
+
+			$hooks = array_merge(
+				self::install_post_hooks( $post_type, $events ),
+				self::install_post_meta_hooks_for_keys( array( $existing_key, $renamed_key, $delete_key, $added_key ), $events )
+			);
+
+			$_POST = \wp_slash(
+				array(
+					'post_ID'        => $post_id,
+					'post_type'      => 'attachment',
+					'post_mime_type' => 'image/png',
+					'post_title'     => $case['updatedTitle'],
+					'content'        => $case['updatedContent'],
+					'excerpt'        => $case['excerpt'] . ' admin save',
+					'post_status'    => $case['updatedStatus'],
+					'post_author'    => $user_id,
+					'post_name'      => $case['slug'] . '-admin-saved',
+					'post_password'  => $case['password'],
+					'visibility'     => $visibility,
+					'comment_status' => 'closed',
+					'ping_status'    => 'open',
+					'guid'           => 'http://example.test/poison-admin-save-' . $case['token'],
+					'meta_input'     => array( 'cf_admin_poison_' . $case['token'] => 'should-not-persist' ),
+					'file'           => 'poison-upload-field',
+					'filter'         => 'poison-filter-field',
+					'meta'           => array(
+						$existing_meta_id => array(
+							'key'   => $renamed_key,
+							'value' => $case['metaUpdatedValue'],
+						),
+					),
+					'deletemeta'     => array(
+						$delete_meta_id => '1',
+					),
+					'tax_input'      => array(
+						$taxonomy => array( (string) $term['term_id'] ),
+					),
+					'metakeyselect'  => '#NONE#',
+					'metakeyinput'   => $added_key,
+					'metavalue'      => $case['metaArrayValue']['text'],
+				)
+			);
+			$_GET     = array();
+			$_REQUEST = $_POST;
+
+			$result       = \edit_post();
+			$saved        = \get_post( $post_id );
+			$raw          = \get_post( $post_id, ARRAY_A, 'raw' );
+			$renamed_meta = \get_post_meta_by_id( $existing_meta_id );
+			$deleted_meta = \get_post_meta_by_id( $delete_meta_id );
+			$lock         = \get_post_meta( $post_id, '_edit_lock', true );
+			$terms        = \wp_get_object_terms( $post_id, $taxonomy, array( 'fields' => 'ids' ) );
+
+			self::collect_failure(
+				$failures,
+				$result === $post_id,
+				'edit_post returns the original post ID',
+				array( 'result' => $result, 'postId' => $post_id )
+			);
+			self::collect_failure(
+				$failures,
+				$saved instanceof \WP_Post
+					&& $post_type === $saved->post_type
+					&& $stored_mime === $saved->post_mime_type,
+				'edit_post preserves the stored post type and MIME type',
+				array(
+					'post'         => self::post_summary( $saved ),
+					'mime'         => $saved instanceof \WP_Post ? $saved->post_mime_type : null,
+					'expectedMime' => $stored_mime,
+				)
+			);
+			self::collect_failure(
+				$failures,
+				$saved instanceof \WP_Post
+					&& $expected_status === $saved->post_status
+					&& $expected_pass === $saved->post_password,
+				'edit_post applies classic visibility status and password rules',
+				array(
+					'post'           => self::post_summary( $saved ),
+					'password'       => $saved instanceof \WP_Post ? $saved->post_password : null,
+					'visibility'     => $visibility,
+					'expectedStatus' => $expected_status,
+					'expectedPass'   => $expected_pass,
+				)
+			);
+			self::collect_failure(
+				$failures,
+				$saved instanceof \WP_Post
+					&& 'closed' === $saved->comment_status
+					&& 'open' === $saved->ping_status,
+				'edit_post maps classic discussion fields',
+				array(
+					'post'           => self::post_summary( $saved ),
+					'commentStatus'  => $saved instanceof \WP_Post ? $saved->comment_status : null,
+					'pingStatus'     => $saved instanceof \WP_Post ? $saved->ping_status : null,
+				)
+			);
+			self::collect_failure(
+				$failures,
+				$stored_guid === ( $raw['guid'] ?? null ),
+				'edit_post does not let guarded guid input overwrite storage',
+				array(
+					'rawGuid'        => $raw['guid'] ?? null,
+					'expectedGuid'   => $stored_guid,
+				)
+			);
+			self::collect_failure(
+				$failures,
+				$saved instanceof \WP_Post
+					&& $case['updatedTitle'] === $saved->post_title
+					&& $case['updatedContent'] === $saved->post_content
+					&& $case['excerpt'] . ' admin save' === $saved->post_excerpt,
+				'edit_post maps classic title, content, and excerpt fields',
+				array(
+					'title'           => $saved instanceof \WP_Post ? self::describe_string( $saved->post_title ) : null,
+					'expectedTitle'   => self::describe_string( $case['updatedTitle'] ),
+					'content'         => $saved instanceof \WP_Post ? self::describe_string( $saved->post_content ) : null,
+					'expectedContent' => self::describe_string( $case['updatedContent'] ),
+					'excerpt'         => $saved instanceof \WP_Post ? self::describe_string( $saved->post_excerpt ) : null,
+					'expectedExcerpt' => self::describe_string( $case['excerpt'] . ' admin save' ),
+				)
+			);
+			self::collect_failure(
+				$failures,
+				! isset( $_POST['filter'] )
+					&& $post_type === ( $_POST['post_type'] ?? null )
+					&& $stored_mime === ( $_POST['post_mime_type'] ?? null ),
+				'edit_post normalizes global admin request internals',
+				array(
+					'hasFilter'    => isset( $_POST['filter'] ),
+					'postType'     => $_POST['post_type'] ?? null,
+					'postMimeType' => $_POST['post_mime_type'] ?? null,
+					'storedMime'   => $stored_mime,
+				)
+			);
+			self::collect_failure(
+				$failures,
+				$renamed_meta
+					&& (int) $renamed_meta->post_id === $post_id
+					&& $renamed_key === $renamed_meta->meta_key
+					&& $case['metaUpdatedValue'] === $renamed_meta->meta_value
+					&& false === \metadata_exists( 'post', $post_id, $existing_key )
+					&& false === $deleted_meta
+					&& false === \metadata_exists( 'post', $post_id, $delete_key )
+					&& $case['metaArrayValue']['text'] === \get_post_meta( $post_id, $added_key, true )
+					&& false === \metadata_exists( 'post', $post_id, 'cf_admin_poison_' . $case['token'] ),
+				'admin custom-field add, update-by-ID, delete-by-ID, and guarded meta_input paths hold',
+				array(
+					'renamedMeta'  => $renamed_meta,
+					'deletedMeta'  => $deleted_meta,
+					'addedValue'   => \get_post_meta( $post_id, $added_key, true ),
+					'poisonExists' => \metadata_exists( 'post', $post_id, 'cf_admin_poison_' . $case['token'] ),
+				)
+			);
+			self::collect_failure(
+				$failures,
+				(string) $user_id === (string) \get_post_meta( $post_id, '_edit_last', true )
+					&& is_string( $lock )
+					&& 1 === preg_match( '/^\d+:' . preg_quote( (string) $user_id, '/' ) . '$/', $lock ),
+				'admin save records edit author and post lock metadata',
+				array(
+					'editLast' => \get_post_meta( $post_id, '_edit_last', true ),
+					'lock'     => $lock,
+					'userId'   => $user_id,
+				)
+			);
+			self::collect_failure(
+				$failures,
+				array( (int) $term['term_id'] ) === self::normalize_int_list( (array) $terms )
+					&& array() !== $taxonomy_events
+					&& $taxonomy === ( $taxonomy_events[0]['taxonomy'] ?? null ),
+				'edit_post sanitizes tax_input through the registered taxonomy callback',
+				array(
+					'terms'          => $terms,
+					'expectedTermId' => (int) $term['term_id'],
+					'taxonomyEvents' => $taxonomy_events,
+				)
+			);
+			self::collect_failure(
+				$failures,
+				self::events_are_ordered(
+					$events,
+					array(
+						'update_post_meta',
+						'updated_post_meta',
+						'delete_post_meta',
+						'deleted_post_meta',
+						'add_post_meta',
+						'added_post_meta',
+						'pre_post_update',
+						"save_post_{$post_type}",
+						'save_post',
+						'wp_insert_post',
+						'wp_after_insert_post',
+					)
+				),
+				'admin meta orchestration completes before the final post update hooks',
+				array( 'events' => $events )
+			);
+		} finally {
+			if ( null !== $cap_filter ) {
+				\remove_filter( 'user_has_cap', $cap_filter, 10 );
+			}
+			self::remove_hooks( $hooks );
+			$_POST    = $post_snapshot;
+			$_GET     = $get_snapshot;
+			$_REQUEST = $request_snapshot;
+		}
+
+		return $ctx->result(
+			'content-lifecycle.posts.admin-save-orchestration',
+			array() === $failures,
+			array(
+				'case'           => self::case_summary( $case ),
+				'visibility'     => $visibility,
+				'failures'       => array_slice( $failures, 0, 8 ),
+				'events'         => array_slice( $events, 0, 18 ),
+				'taxonomyEvents' => $taxonomy_events,
 			)
 		);
 	}
@@ -3350,6 +3707,7 @@ final class ContentLifecycleSurface {
 				'permalink_structure'    => '',
 				'require_name_email'     => 0,
 				'siteurl'                => 'http://example.test',
+				'sticky_posts'           => array(),
 			)
 		);
 
@@ -3683,11 +4041,12 @@ final class ContentLifecycleSurface {
 	}
 
 	private static function install_post_meta_hooks( string $meta_key, string $unique_key, array &$events ): array {
+		return self::install_post_meta_hooks_for_keys( array( $meta_key, $unique_key ), $events );
+	}
+
+	private static function install_post_meta_hooks_for_keys( array $meta_keys, array &$events ): array {
 		$hooks = array();
-		$watch = array(
-			$meta_key   => true,
-			$unique_key => true,
-		);
+		$watch = array_fill_keys( array_map( 'strval', $meta_keys ), true );
 		$add   = static function ( string $hook, callable $callback, int $accepted_args ) use ( &$hooks ): void {
 			\add_action( $hook, $callback, 10, $accepted_args );
 			$hooks[] = array( $hook, $callback, 10 );
@@ -4065,6 +4424,45 @@ final class ContentLifecycleSurface {
 		);
 
 		return \is_wp_error( $id ) ? 0 : $id;
+	}
+
+	private static function grant_all_caps_filter( int $user_id ): \Closure {
+		return static function ( array $allcaps, array $caps, array $args, \WP_User $user ) use ( $user_id ): array {
+			unset( $args );
+
+			if ( (int) $user->ID !== $user_id ) {
+				return $allcaps;
+			}
+
+			foreach (
+				array(
+					'add_post_meta',
+					'assign_terms',
+					'delete_post_meta',
+					'edit_others_posts',
+					'edit_post',
+					'edit_post_meta',
+					'edit_posts',
+					'edit_private_posts',
+					'edit_published_posts',
+					'manage_categories',
+					'publish_posts',
+					'read',
+					'read_post',
+					'read_private_posts',
+				) as $cap
+			) {
+				$allcaps[ $cap ] = true;
+			}
+
+			foreach ( $caps as $cap ) {
+				if ( 'do_not_allow' !== $cap ) {
+					$allcaps[ $cap ] = true;
+				}
+			}
+
+			return $allcaps;
+		};
 	}
 
 	private static function case_for_context( \ComponentFuzz\FuzzContext $ctx ): array {
