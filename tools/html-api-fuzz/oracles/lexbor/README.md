@@ -35,7 +35,10 @@ binary is not at the default build path above. Replays preserve the selected
 oracle and binary path.
 
 The binary records the resolved Lexbor commit in its JSON metadata. The build
-fails if the resolved commit differs from the requested pin.
+fails if the resolved commit differs from the requested pin or if the source
+checkout contains tracked, untracked, or ignored changes. Use a separate clean
+checkout when testing local Lexbor modifications; the pinned oracle never
+builds bytes that Git cannot attribute to `COMMIT`.
 
 Use a different checkout or commit when bisecting upstream behavior:
 

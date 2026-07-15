@@ -36,6 +36,12 @@ if [ "$commit" != "$ref" ]; then
 	printf '%s\n' "Resolved Lexbor commit $commit does not match requested pin $ref." >&2
 	exit 1
 fi
+source_status="$(git -C "$source_dir" status --porcelain=v1 --untracked-files=all --ignored=matching)"
+if [ -n "$source_status" ]; then
+	printf '%s\n' "Lexbor source checkout is dirty; refusing to build unpinned bytes:" >&2
+	printf '%s\n' "$source_status" >&2
+	exit 1
+fi
 
 cmake -S "$source_dir" -B "$build_dir" \
 	-DLEXBOR_BUILD_SHARED=OFF \
