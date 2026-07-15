@@ -935,10 +935,12 @@ database, network requests, or a configured site.
   helpers, authenticated read-only `wp.getPost`, `wp.getPosts`,
   `wp.getMediaItem`, and `wp.getMediaLibrary` post/media field filtering,
   authenticated `wp.newPost`, `wp.editPost`, and `wp.deletePost` post write
-  lifecycle branches, auth/capability/error paths, media MIME/parent filters,
-  hook cleanup, and short-circuited `WP_HTTP_IXR_Client` transport/error
-  handling without option, post-sleep pingback fetch, or live network side
-  effects.
+  lifecycle branches, authenticated `wp.getTerms`, `wp.getTerm`,
+  `wp.newTerm`, `wp.editTerm`, and `wp.deleteTerm` taxonomy method lifecycles,
+  auth/capability/error paths, media MIME/parent filters, prepared-term and
+  call hooks, hook cleanup, and short-circuited `WP_HTTP_IXR_Client`
+  transport/error handling without option, post-sleep pingback fetch, or live
+  network side effects.
 
 Some checks deliberately skip cases that would invoke DB-backed or dynamic block
 rendering side effects. The Admin Screen surface intentionally avoids admin page

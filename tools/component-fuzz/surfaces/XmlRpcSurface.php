@@ -37,6 +37,7 @@ final class XmlRpcSurface {
 			$rows[] = self::check_pingback_fail_closed_and_readonly_lookups( $ctx->fork( 'pingbacks' ) );
 			$rows[] = self::check_authenticated_readonly_content_media_methods( $ctx->fork( 'readonly-content-media' ) );
 			$rows[] = self::check_authenticated_write_post_methods( $ctx->fork( 'write-post-methods' ) );
+			$rows[] = self::check_authenticated_taxonomy_term_methods( $ctx->fork( 'taxonomy-term-methods' ) );
 			$rows[] = self::check_xmlrpc_post_data_helpers( $ctx->fork( 'post-data' ) );
 			$rows[] = self::check_http_ixr_client_transport( $ctx->fork( 'http-client' ) );
 		} catch ( \Throwable $e ) {
@@ -89,7 +90,11 @@ final class XmlRpcSurface {
 				'get_post_thumbnail_id',
 				'get_post_type_object',
 				'get_posts',
+				'get_taxonomy',
+				'get_term',
+				'get_terms',
 				'has_filter',
+				'has_term_meta',
 				'image_downsize',
 				'is_sticky',
 				'is_wp_error',
@@ -97,6 +102,9 @@ final class XmlRpcSurface {
 				'remove_action',
 				'remove_filter',
 				'register_post_type',
+				'register_taxonomy',
+				'sanitize_title',
+				'taxonomy_exists',
 				'url_to_postid',
 				'wp_authenticate',
 				'wp_after_insert_post',
@@ -107,13 +115,16 @@ final class XmlRpcSurface {
 				'wp_get_attachment_url',
 				'wp_get_recent_posts',
 				'wp_insert_post',
+				'wp_insert_term',
 				'wp_next_scheduled',
 				'wp_remote_retrieve_body',
 				'wp_remote_retrieve_response_code',
 				'wp_schedule_event',
 				'wp_set_current_user',
 				'wp_slash',
+				'wp_delete_term',
 				'wp_update_post',
+				'wp_update_term',
 				'wp_safe_remote_post',
 				'xml_parser_create',
 				'xmlrpc_getpostcategory',
@@ -2037,6 +2048,603 @@ final class XmlRpcSurface {
 		);
 	}
 
+	private static function check_authenticated_taxonomy_term_methods( \ComponentFuzz\FuzzContext $ctx ): array {
+		$wpdb = $GLOBALS['wpdb'] ?? null;
+		if (
+			! is_object( $wpdb )
+			|| ! method_exists( $wpdb, 'insert' )
+			|| ! method_exists( $wpdb, 'update' )
+			|| ! method_exists( $wpdb, 'delete' )
+			|| ! method_exists( $wpdb, 'component_fuzz_content_counts' )
+			|| ! method_exists( $wpdb, 'component_fuzz_get_runtime_state' )
+			|| ! method_exists( $wpdb, 'component_fuzz_restore_runtime_state' )
+			|| ! method_exists( $wpdb, 'component_fuzz_get_options' )
+			|| ! method_exists( $wpdb, 'component_fuzz_reset_options' )
+		) {
+			return $ctx->skip(
+				'xmlrpc.authenticated-taxonomy-term-methods',
+				'Authenticated XML-RPC taxonomy-method coverage requires the component fuzzer in-memory DB stub.',
+				array()
+			);
+		}
+
+		$failures         = array();
+		$global_snapshot  = self::snapshot_globals();
+		$content_snapshot = $wpdb->component_fuzz_content_counts();
+		$runtime_snapshot = $wpdb->component_fuzz_get_runtime_state();
+		$options_snapshot = $wpdb->component_fuzz_get_options();
+		$cleanup_state    = array(
+			'authenticate'       => null,
+			'userHasCap'         => null,
+			'prepareTerm'        => null,
+			'xmlrpcCall'         => null,
+			'preHttp'            => null,
+			'contentCounts'      => null,
+			'optionsRestored'    => null,
+			'runtimeRestored'    => null,
+			'globalsRestored'    => null,
+		);
+		$token            = strtolower( preg_replace( '/[^a-z0-9_]/', '_', $ctx->identifier( 5, 9 ) ) );
+		$taxonomy         = substr( 'cf_xmlrpc_' . $token . '_' . $ctx->int( 10, 99 ), 0, 31 );
+		$marker           = 'xmlrpc-tax-' . $token;
+		$user_id          = 980000 + $ctx->int( 1, 5000 );
+		$username         = 'xmlrpc_tax_' . $ctx->identifier( 4, 9 );
+		$password         = 'xmlrpc-tax-pass-' . $ctx->identifier( 6, 12 );
+		$base_id          = 990000 + ( $ctx->int( 1, 8000 ) * 20 );
+		$parent_id        = $base_id + 1;
+		$visible_id       = $base_id + 2;
+		$hidden_id        = $base_id + 3;
+		$edit_id          = $base_id + 4;
+		$delete_id        = $base_id + 5;
+		$missing_id       = $base_id + 9000;
+		$parent_tt_id     = $base_id + 1001;
+		$visible_tt_id    = $base_id + 1002;
+		$hidden_tt_id     = $base_id + 1003;
+		$edit_tt_id       = $base_id + 1004;
+		$delete_tt_id     = $base_id + 1005;
+		$parent_name      = 'Alpha Parent ' . $token;
+		$visible_name     = 'Bravo Visible ' . $token;
+		$hidden_name      = 'Charlie Hidden ' . $token;
+		$edit_name        = 'Delta Edit ' . $token;
+		$delete_name      = 'Echo Delete ' . $token;
+		$created_name     = 'Foxtrot Created ' . $token;
+		$created_slug     = 'created-' . $token;
+		$created_desc     = 'Created XML-RPC taxonomy term ' . $marker;
+		$updated_name     = 'Golf Updated ' . $token;
+		$updated_slug     = 'updated-' . $token;
+		$updated_desc     = 'Updated XML-RPC taxonomy term ' . $marker;
+		$capabilities     = array(
+			'manage_terms' => 'manage_' . $taxonomy . '_terms',
+			'edit_terms'   => 'edit_' . $taxonomy . '_terms',
+			'delete_terms' => 'delete_' . $taxonomy . '_terms',
+			'assign_terms' => 'assign_' . $taxonomy . '_terms',
+		);
+		$grant_caps       = true;
+		$xmlrpc_calls     = array();
+		$prepared_terms   = array();
+		$http_count       = 0;
+		$created_id       = null;
+		$thrown           = null;
+		$auth_before      = null;
+		$auth_after       = null;
+		$auth_failure     = null;
+		$denial_before    = null;
+		$denial_after     = null;
+		$denied_get_terms = null;
+		$denied_get_term  = null;
+		$denied_new       = null;
+		$denied_edit      = null;
+		$denied_delete    = null;
+		$after_denied_edit = null;
+		$after_denied_delete = null;
+		$list_result      = null;
+		$single_result    = null;
+		$error_before     = null;
+		$error_after      = null;
+		$invalid_taxonomy = null;
+		$empty_new        = null;
+		$missing_parent   = null;
+		$new_result       = null;
+		$created_term     = null;
+		$missing_edit     = null;
+		$empty_edit       = null;
+		$after_empty_edit = null;
+		$valid_edit       = null;
+		$edited_term      = null;
+		$missing_delete   = null;
+		$valid_delete     = null;
+		$after_delete     = null;
+
+		$authenticate_filter = static function ( $user, string $login, string $pass ) use ( $username, $password, $user_id ) {
+			if ( $username === $login && $password === $pass ) {
+				return new \WP_User( $user_id );
+			}
+
+			return new \WP_Error( 'component_fuzz_xmlrpc_tax_auth', 'Synthetic XML-RPC taxonomy authentication failure.' );
+		};
+		$cap_filter          = static function ( array $allcaps, array $caps, array $args, \WP_User $user ) use ( &$grant_caps, $user_id, $capabilities ): array {
+			if ( (int) $user->ID !== $user_id ) {
+				return $allcaps;
+			}
+
+			foreach (
+				array_merge(
+					array_values( $capabilities ),
+					array(
+						'add_term_meta',
+						'delete_term',
+						'delete_term_meta',
+						'edit_term',
+						'edit_term_meta',
+						'read',
+					)
+				) as $primitive
+			) {
+				$allcaps[ $primitive ] = $grant_caps;
+			}
+			foreach ( $caps as $cap ) {
+				$allcaps[ $cap ] = $grant_caps && 'do_not_allow' !== $cap;
+			}
+
+			return $allcaps;
+		};
+		$prepare_filter      = static function ( array $prepared, $term ) use ( &$prepared_terms, $marker ): array {
+			$prepared['component_fuzz_marker'] = $marker;
+			$prepared_terms[]                  = array(
+				'termId'   => (string) ( $prepared['term_id'] ?? '' ),
+				'taxonomy' => (string) ( $prepared['taxonomy'] ?? '' ),
+				'name'     => (string) ( $prepared['name'] ?? '' ),
+				'source'   => is_object( $term ) ? get_class( $term ) : gettype( $term ),
+			);
+			return $prepared;
+		};
+		$xmlrpc_call_action  = static function ( string $method ) use ( &$xmlrpc_calls ): void {
+			$xmlrpc_calls[] = $method;
+		};
+		$http_filter         = static function () use ( &$http_count ) {
+			++$http_count;
+			return new \WP_Error( 'component_fuzz_xmlrpc_tax_http', 'XML-RPC taxonomy fuzz cases must not reach HTTP transport.' );
+		};
+
+		try {
+			\add_filter( 'authenticate', $authenticate_filter, 1, 3 );
+			\add_filter( 'user_has_cap', $cap_filter, 10, 4 );
+			\add_filter( 'xmlrpc_prepare_term', $prepare_filter, 10, 2 );
+			\add_action( 'xmlrpc_call', $xmlrpc_call_action, 10, 1 );
+			\add_filter( 'pre_http_request', $http_filter, 10, 3 );
+
+			\register_taxonomy(
+				$taxonomy,
+				'post',
+				array(
+					'capabilities' => $capabilities,
+					'hierarchical' => true,
+					'labels'       => array(
+						'name'          => 'Component XML-RPC Terms ' . $token,
+						'singular_name' => 'Component XML-RPC Term ' . $token,
+					),
+					'public'       => false,
+					'show_ui'      => false,
+				)
+			);
+			$term_meta_options               = $options_snapshot;
+			$term_meta_options['db_version'] = array(
+				'autoload'     => 'auto',
+				'option_value' => '60000',
+			);
+			$wpdb->component_fuzz_reset_options( $term_meta_options );
+
+			self::seed_xmlrpc_user( $user_id, $username, $password );
+			self::seed_xmlrpc_term_row( $parent_id, $parent_tt_id, $taxonomy, $parent_name, 'alpha-parent-' . $token, 'Parent term ' . $marker, 0, 0 );
+			self::seed_xmlrpc_term_row( $visible_id, $visible_tt_id, $taxonomy, $visible_name, 'bravo-visible-' . $token, 'Visible child term ' . $marker, $parent_id, 3 );
+			self::seed_xmlrpc_term_row( $hidden_id, $hidden_tt_id, $taxonomy, $hidden_name, 'charlie-hidden-' . $token, 'Hidden term ' . $marker, 0, 0 );
+			self::seed_xmlrpc_term_row( $edit_id, $edit_tt_id, $taxonomy, $edit_name, 'delta-edit-' . $token, 'Editable term ' . $marker, 0, 1 );
+			self::seed_xmlrpc_term_row( $delete_id, $delete_tt_id, $taxonomy, $delete_name, 'echo-delete-' . $token, 'Deletable term ' . $marker, 0, 1 );
+			if ( function_exists( 'wp_cache_set_terms_last_changed' ) ) {
+				\wp_cache_set_terms_last_changed();
+			}
+
+			$auth_server  = new \wp_xmlrpc_server();
+			$auth_before  = $wpdb->component_fuzz_content_counts();
+			$auth_failure = $auth_server->wp_getTerms( array( 1, $username, $password . '-wrong', $taxonomy ) );
+			$auth_after   = $wpdb->component_fuzz_content_counts();
+
+			$grant_caps          = false;
+			$denial_server       = new \wp_xmlrpc_server();
+			$denial_before       = $wpdb->component_fuzz_content_counts();
+			$denied_get_terms    = $denial_server->wp_getTerms( array( 1, $username, $password, $taxonomy ) );
+			$denied_get_term     = $denial_server->wp_getTerm( array( 1, $username, $password, $taxonomy, $visible_id ) );
+			$denied_new          = $denial_server->wp_newTerm(
+				array(
+					1,
+					$username,
+					$password,
+					array(
+						'taxonomy' => $taxonomy,
+						'name'     => 'Denied create ' . $marker,
+					),
+				)
+			);
+			$denied_edit         = $denial_server->wp_editTerm(
+				array(
+					1,
+					$username,
+					$password,
+					$edit_id,
+					array(
+						'taxonomy' => $taxonomy,
+						'name'     => 'Denied edit ' . $marker,
+					),
+				)
+			);
+			$denied_delete       = $denial_server->wp_deleteTerm( array( 1, $username, $password, $taxonomy, $delete_id ) );
+			$denial_after        = $wpdb->component_fuzz_content_counts();
+			$after_denied_edit   = \get_term( $edit_id, $taxonomy );
+			$after_denied_delete = \get_term( $delete_id, $taxonomy );
+			$grant_caps          = true;
+
+			$server        = new \wp_xmlrpc_server();
+			$list_result   = $server->wp_getTerms(
+				array(
+					1,
+					$username,
+					$password,
+					$taxonomy,
+					array(
+						'number'  => 3,
+						'offset'  => 1,
+						'orderby' => 'name',
+						'order'   => 'ASC',
+					),
+				)
+			);
+			$single_result = $server->wp_getTerm( array( 1, $username, $password, $taxonomy, $visible_id ) );
+
+			$error_before     = $wpdb->component_fuzz_content_counts();
+			$invalid_taxonomy = $server->wp_newTerm(
+				array(
+					1,
+					$username,
+					$password,
+					array(
+						'taxonomy' => $taxonomy . '_missing',
+						'name'     => 'Invalid taxonomy ' . $marker,
+					),
+				)
+			);
+			$empty_new        = $server->wp_newTerm(
+				array(
+					1,
+					$username,
+					$password,
+					array(
+						'taxonomy' => $taxonomy,
+						'name'     => " \t ",
+					),
+				)
+			);
+			$missing_parent   = $server->wp_newTerm(
+				array(
+					1,
+					$username,
+					$password,
+					array(
+						'taxonomy' => $taxonomy,
+						'name'     => 'Missing parent ' . $marker,
+						'parent'   => $missing_id,
+					),
+				)
+			);
+			$error_after      = $wpdb->component_fuzz_content_counts();
+
+			$new_result   = $server->wp_newTerm(
+				array(
+					1,
+					$username,
+					$password,
+					array(
+						'taxonomy'    => $taxonomy,
+						'name'        => $created_name,
+						'description' => $created_desc,
+						'parent'      => $parent_id,
+						'slug'        => $created_slug,
+					),
+				)
+			);
+			$created_id   = is_string( $new_result ) && ctype_digit( $new_result ) ? (int) $new_result : null;
+			$created_term = null !== $created_id ? \get_term( $created_id, $taxonomy ) : null;
+
+			$missing_edit     = $server->wp_editTerm(
+				array(
+					1,
+					$username,
+					$password,
+					$missing_id,
+					array(
+						'taxonomy' => $taxonomy,
+						'name'     => 'Missing edit ' . $marker,
+					),
+				)
+			);
+			$empty_edit       = $server->wp_editTerm(
+				array(
+					1,
+					$username,
+					$password,
+					$edit_id,
+					array(
+						'taxonomy' => $taxonomy,
+						'name'     => " \n ",
+					),
+				)
+			);
+			$after_empty_edit = \get_term( $edit_id, $taxonomy );
+			$valid_edit       = $server->wp_editTerm(
+				array(
+					1,
+					$username,
+					$password,
+					$edit_id,
+					array(
+						'taxonomy'    => $taxonomy,
+						'name'        => $updated_name,
+						'description' => $updated_desc,
+						'parent'      => $parent_id,
+						'slug'        => $updated_slug,
+					),
+				)
+			);
+			$edited_term      = \get_term( $edit_id, $taxonomy );
+
+			$missing_delete = $server->wp_deleteTerm( array( 1, $username, $password, $taxonomy, $missing_id ) );
+			$valid_delete   = $server->wp_deleteTerm( array( 1, $username, $password, $taxonomy, $delete_id ) );
+			$after_delete   = \get_term( $delete_id, $taxonomy );
+		} catch ( \Throwable $e ) {
+			$thrown = self::describe_throwable( $e );
+		} finally {
+			\remove_filter( 'pre_http_request', $http_filter, 10 );
+			\remove_action( 'xmlrpc_call', $xmlrpc_call_action, 10 );
+			\remove_filter( 'xmlrpc_prepare_term', $prepare_filter, 10 );
+			\remove_filter( 'user_has_cap', $cap_filter, 10 );
+			\remove_filter( 'authenticate', $authenticate_filter, 1 );
+
+			foreach (
+				array_unique(
+					array_filter(
+						array(
+							$parent_id,
+							$visible_id,
+							$hidden_id,
+							$edit_id,
+							$delete_id,
+							$created_id,
+						),
+						'is_int'
+					)
+				) as $term_id
+			) {
+				$wpdb->delete( $wpdb->termmeta, array( 'term_id' => $term_id ) );
+				$wpdb->delete( $wpdb->term_taxonomy, array( 'term_id' => $term_id ) );
+				$wpdb->delete( $wpdb->terms, array( 'term_id' => $term_id ) );
+				\wp_cache_delete( $term_id, 'terms' );
+				\wp_cache_delete( $term_id, 'term_meta' );
+			}
+			$wpdb->delete( $wpdb->users, array( 'ID' => $user_id ) );
+			\wp_cache_delete( $user_id, 'users' );
+			\wp_cache_delete( $username, 'userlogins' );
+			if ( function_exists( 'wp_cache_set_terms_last_changed' ) ) {
+				\wp_cache_set_terms_last_changed();
+			}
+			$wpdb->component_fuzz_reset_options( $options_snapshot );
+			$cleanup_state = array(
+				'authenticate'    => \has_filter( 'authenticate', $authenticate_filter ),
+				'userHasCap'      => \has_filter( 'user_has_cap', $cap_filter ),
+				'prepareTerm'     => \has_filter( 'xmlrpc_prepare_term', $prepare_filter ),
+				'xmlrpcCall'      => \has_filter( 'xmlrpc_call', $xmlrpc_call_action ),
+				'preHttp'         => \has_filter( 'pre_http_request', $http_filter ),
+				'contentCounts'   => $wpdb->component_fuzz_content_counts(),
+				'optionsRestored' => $options_snapshot === $wpdb->component_fuzz_get_options(),
+				'runtimeRestored' => null,
+				'globalsRestored' => null,
+			);
+			$wpdb->component_fuzz_restore_runtime_state( $runtime_snapshot );
+			$cleanup_state['runtimeRestored'] = $runtime_snapshot === $wpdb->component_fuzz_get_runtime_state();
+			self::restore_globals( $global_snapshot );
+			$cleanup_state['globalsRestored'] = self::globals_match( $global_snapshot );
+		}
+
+		if ( null !== $thrown ) {
+			$failures[] = array(
+				'message'          => 'authenticated XML-RPC taxonomy term methods do not throw',
+				'throwableClass'   => $thrown['class'] ?? null,
+				'throwableMessage' => $thrown['message'] ?? null,
+				'throwableFile'    => $thrown['file'] ?? null,
+				'throwableLine'    => $thrown['line'] ?? null,
+			);
+		}
+
+		self::collect_failure(
+			$failures,
+			403 === self::ixr_error_code( $auth_failure )
+				&& $auth_before === $auth_after,
+			'wp.getTerms authentication failures return 403 and do not mutate in-memory content',
+			array(
+				'authFailure' => self::describe_value( $auth_failure ),
+				'before'      => $auth_before,
+				'after'       => $auth_after,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			401 === self::ixr_error_code( $denied_get_terms )
+				&& 401 === self::ixr_error_code( $denied_get_term )
+				&& 401 === self::ixr_error_code( $denied_new )
+				&& 401 === self::ixr_error_code( $denied_edit )
+				&& 401 === self::ixr_error_code( $denied_delete )
+				&& $denial_before === $denial_after
+				&& $after_denied_edit instanceof \WP_Term
+				&& $edit_name === $after_denied_edit->name
+				&& $after_denied_delete instanceof \WP_Term
+				&& $delete_name === $after_denied_delete->name,
+			'XML-RPC taxonomy methods fail closed on capability denial without creating, editing, or deleting rows',
+			array(
+				'deniedGetTerms' => self::describe_value( $denied_get_terms ),
+				'deniedGetTerm'  => self::describe_value( $denied_get_term ),
+				'deniedNew'      => self::describe_value( $denied_new ),
+				'deniedEdit'     => self::describe_value( $denied_edit ),
+				'deniedDelete'   => self::describe_value( $denied_delete ),
+				'before'         => $denial_before,
+				'after'          => $denial_after,
+			)
+		);
+
+		$list_ids = self::xmlrpc_term_ids( $list_result );
+		self::collect_failure(
+			$failures,
+			is_array( $list_result )
+				&& array( (string) $visible_id, (string) $hidden_id, (string) $edit_id ) === $list_ids
+				&& isset( $list_result[0]['component_fuzz_marker'] )
+				&& $marker === $list_result[0]['component_fuzz_marker'],
+			'wp.getTerms applies XML-RPC filters, order, offset, and number to prepared term arrays',
+			array(
+				'termIds' => $list_ids,
+				'result'  => self::describe_value( $list_result ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			is_array( $single_result )
+				&& (string) $visible_id === (string) ( $single_result['term_id'] ?? '' )
+				&& (string) $visible_tt_id === (string) ( $single_result['term_taxonomy_id'] ?? '' )
+				&& (string) $parent_id === (string) ( $single_result['parent'] ?? '' )
+				&& $taxonomy === ( $single_result['taxonomy'] ?? null )
+				&& $visible_name === ( $single_result['name'] ?? null )
+				&& 3 === (int) ( $single_result['count'] ?? -1 )
+				&& $marker === ( $single_result['component_fuzz_marker'] ?? null )
+				&& array_key_exists( 'custom_fields', $single_result )
+				&& is_array( $single_result['custom_fields'] ),
+			'wp.getTerm returns stringified IDs, integer count, custom fields, and filter output for one term',
+			array(
+				'single' => self::describe_value( $single_result ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			403 === self::ixr_error_code( $invalid_taxonomy )
+				&& 403 === self::ixr_error_code( $empty_new )
+				&& 403 === self::ixr_error_code( $missing_parent )
+				&& $error_before === $error_after,
+			'wp.newTerm rejects invalid taxonomy, empty names, and missing parents before mutating rows',
+			array(
+				'invalidTaxonomy' => self::describe_value( $invalid_taxonomy ),
+				'emptyNew'        => self::describe_value( $empty_new ),
+				'missingParent'   => self::describe_value( $missing_parent ),
+				'before'          => $error_before,
+				'after'           => $error_after,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			is_string( $new_result )
+				&& null !== $created_id
+				&& $created_term instanceof \WP_Term
+				&& $created_name === $created_term->name
+				&& \sanitize_title( $created_slug ) === $created_term->slug
+				&& $created_desc === $created_term->description
+				&& $parent_id === (int) $created_term->parent,
+			'wp.newTerm creates a hierarchical term with sanitized slug, description, and parent',
+			array(
+				'result'      => self::describe_value( $new_result ),
+				'createdId'   => $created_id,
+				'createdTerm' => self::describe_value( $created_term ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			404 === self::ixr_error_code( $missing_edit )
+				&& 403 === self::ixr_error_code( $empty_edit )
+				&& $after_empty_edit instanceof \WP_Term
+				&& $edit_name === $after_empty_edit->name
+				&& true === $valid_edit
+				&& $edited_term instanceof \WP_Term
+				&& $updated_name === $edited_term->name
+				&& \sanitize_title( $updated_slug ) === $edited_term->slug
+				&& $updated_desc === $edited_term->description
+				&& $parent_id === (int) $edited_term->parent,
+			'wp.editTerm distinguishes missing and empty-name errors from valid updates while preserving omitted fields',
+			array(
+				'missingEdit' => self::describe_value( $missing_edit ),
+				'emptyEdit'   => self::describe_value( $empty_edit ),
+				'validEdit'   => self::describe_value( $valid_edit ),
+				'editedTerm'  => self::describe_value( $edited_term ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			404 === self::ixr_error_code( $missing_delete )
+				&& true === $valid_delete
+				&& ! ( $after_delete instanceof \WP_Term ),
+			'wp.deleteTerm reports missing rows and removes valid term rows',
+			array(
+				'missingDelete' => self::describe_value( $missing_delete ),
+				'validDelete'   => self::describe_value( $valid_delete ),
+				'afterDelete'   => self::describe_value( $after_delete ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			in_array( 'wp.getTerms', $xmlrpc_calls, true )
+				&& in_array( 'wp.getTerm', $xmlrpc_calls, true )
+				&& in_array( 'wp.newTerm', $xmlrpc_calls, true )
+				&& in_array( 'wp.editTerm', $xmlrpc_calls, true )
+				&& in_array( 'wp.deleteTerm', $xmlrpc_calls, true )
+				&& count( $prepared_terms ) >= 4
+				&& 0 === $http_count,
+			'XML-RPC taxonomy methods fire call/prepare filters and do not attempt HTTP',
+			array(
+				'xmlrpcCalls'   => self::describe_value( $xmlrpc_calls ),
+				'preparedTerms' => self::describe_value( $prepared_terms ),
+				'httpCount'     => $http_count,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			false === $cleanup_state['authenticate']
+				&& false === $cleanup_state['userHasCap']
+				&& false === $cleanup_state['prepareTerm']
+				&& false === $cleanup_state['xmlrpcCall']
+				&& false === $cleanup_state['preHttp']
+				&& $content_snapshot === $cleanup_state['contentCounts']
+				&& true === $cleanup_state['optionsRestored']
+				&& true === $cleanup_state['runtimeRestored']
+				&& true === $cleanup_state['globalsRestored'],
+			'authenticated XML-RPC taxonomy checks remove hooks, rows, options, runtime, and globals',
+			array(
+				'cleanup'      => $cleanup_state,
+				'beforeCounts' => $content_snapshot,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'xmlrpc.authenticated-taxonomy-term-methods',
+			array() === $failures,
+			array(
+				'failures'    => $failures,
+				'xmlrpcCalls' => $xmlrpc_calls,
+				'createdId'   => $created_id,
+			)
+		);
+	}
+
 	private static function seed_xmlrpc_user( int $user_id, string $username, string $password ): void {
 		$GLOBALS['wpdb']->insert(
 			$GLOBALS['wpdb']->users,
@@ -2071,6 +2679,31 @@ final class XmlRpcSurface {
 		\wp_cache_delete( $post_id, 'post_meta' );
 	}
 
+	private static function seed_xmlrpc_term_row( int $term_id, int $term_taxonomy_id, string $taxonomy, string $name, string $slug, string $description, int $parent, int $count ): void {
+		\wp_cache_delete( $term_id, 'terms' );
+		\wp_cache_delete( $term_id, 'term_meta' );
+		$GLOBALS['wpdb']->insert(
+			$GLOBALS['wpdb']->terms,
+			array(
+				'term_id'    => $term_id,
+				'name'       => $name,
+				'slug'       => $slug,
+				'term_group' => 0,
+			)
+		);
+		$GLOBALS['wpdb']->insert(
+			$GLOBALS['wpdb']->term_taxonomy,
+			array(
+				'term_taxonomy_id' => $term_taxonomy_id,
+				'term_id'          => $term_id,
+				'taxonomy'         => $taxonomy,
+				'description'      => $description,
+				'parent'           => $parent,
+				'count'            => $count,
+			)
+		);
+	}
+
 	private static function ixr_date_iso( $value ): ?string {
 		if ( ! $value instanceof \IXR_Date ) {
 			return null;
@@ -2088,6 +2721,20 @@ final class XmlRpcSurface {
 		foreach ( $posts as $post ) {
 			if ( is_array( $post ) && isset( $post['post_id'] ) ) {
 				$ids[] = (string) $post['post_id'];
+			}
+		}
+		return $ids;
+	}
+
+	private static function xmlrpc_term_ids( $terms ): array {
+		if ( ! is_array( $terms ) ) {
+			return array();
+		}
+
+		$ids = array();
+		foreach ( $terms as $term ) {
+			if ( is_array( $term ) && isset( $term['term_id'] ) ) {
+				$ids[] = (string) $term['term_id'];
 			}
 		}
 		return $ids;
@@ -2835,6 +3482,7 @@ final class XmlRpcSurface {
 				'wp_filters',
 				'wp_post_types',
 				'wp_rewrite',
+				'wp_taxonomies',
 			) as $name
 		) {
 			$snapshot['globals'][ $name ] = array(
