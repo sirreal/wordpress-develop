@@ -46,10 +46,23 @@ Fragments are parsed with `Range.createContextualFragment()` using an HTML,
 SVG, or MathML context element as appropriate. Successful renders return
 `status`, `oracle`, `tree`, `treeBase64`, and `nodeCount`.
 
+Custom `--chrome-oracle-script` implementations must use the same protocol.
+Every successful version or render response identifies the tracked Chrome
+pin, the canonical script and executable paths, Node, and the CDP transport.
+Socket version responses and successful or unsupported renders must also
+include a non-empty CDP protocol version and browser instance ID plus a
+positive integer browser PID. Error responses always include integer
+`nodeCount: 0`; errors produced before Chrome starts may omit all three live
+fields, while errors that include any live field must include the complete
+set. PHP accepts only `oracle-unavailable`, `oracle-renderer-error`, and
+`node-limit-exceeded` as semantic error classes, decodes `treeBase64`
+strictly, and discards response metadata outside the validated contract.
+
 Run the end-to-end smoke test after installation:
 
 ```sh
 node tools/html-api-fuzz/oracles/chrome/smoke-test.js
+php tools/html-api-fuzz/tests/chrome-oracle-protocol-smoke.php
 php tools/html-api-fuzz/tests/chrome-oracle-smoke.php
 ```
 

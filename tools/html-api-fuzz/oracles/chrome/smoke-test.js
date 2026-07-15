@@ -143,6 +143,22 @@ async function waitForProcessDeath( pid ) {
 	throw new Error( `Chrome PID ${ pid } did not exit after SIGTERM.` );
 }
 
+async function waitForProcessGroupDeath( pid ) {
+	const deadline = Date.now() + 10000;
+	while ( Date.now() < deadline ) {
+		try {
+			process.kill( -pid, 0 );
+		} catch ( error ) {
+			if ( 'ESRCH' === error.code ) {
+				return;
+			}
+			throw error;
+		}
+		await new Promise( ( resolve ) => setTimeout( resolve, 20 ) );
+	}
+	throw new Error( `Chrome process group ${ pid } did not exit.` );
+}
+
 async function waitForValue( readValue, failureMessage ) {
 	const deadline = Date.now() + 10000;
 	while ( Date.now() < deadline ) {
@@ -270,6 +286,121 @@ exit 99
 				fs.rmSync( directory, { recursive: true, force: true } );
 			}
 		}
+	}
+}
+
+async function testPostLiveRestartFailure( chromeExecutable, pinnedVersion, temporaryDirectory ) {
+	const fixtureDirectory = path.join( temporaryDirectory, 'post-live-restart-failure' );
+	const fixtureTmp = path.join( fixtureDirectory, 'tmp' );
+	const wrapper = path.join( fixtureDirectory, 'one-launch-chrome' );
+	const launchMarker = path.join( fixtureDirectory, 'launched' );
+	const groupPidFile = path.join( fixtureDirectory, 'group-pids' );
+	const socketPath = path.join( fixtureDirectory, 'oracle.sock' );
+	fs.mkdirSync( fixtureTmp, { recursive: true } );
+	fs.writeFileSync( wrapper, `#!/bin/sh
+if [ "$1" = "--version" ]; then
+	printf 'Google Chrome for Testing %s\\n' "$HTML_API_FUZZ_PINNED_CHROME_VERSION"
+	exit 0
+fi
+printf '%s\\n' "$PPID" >> "$HTML_API_FUZZ_GROUP_PID_FILE"
+if [ -e "$HTML_API_FUZZ_LAUNCH_MARKER" ]; then
+	exit 99
+fi
+: > "$HTML_API_FUZZ_LAUNCH_MARKER"
+exec "$HTML_API_FUZZ_REAL_CHROME_EXECUTABLE" "$@"
+` );
+	fs.chmodSync( wrapper, 0o755 );
+	const profilesBefore = new Set( chromeProfileDirectories( fixtureTmp ) );
+	const child = spawn( process.execPath, [ SCRIPT, '--serve', '--socket', socketPath, '--chrome-executable', wrapper ], {
+		stdio: [ 'ignore', 'pipe', 'pipe' ],
+		env: {
+			...process.env,
+			HTML_API_FUZZ_REAL_CHROME_EXECUTABLE: chromeExecutable,
+			HTML_API_FUZZ_PINNED_CHROME_VERSION: pinnedVersion,
+			HTML_API_FUZZ_LAUNCH_MARKER: launchMarker,
+			HTML_API_FUZZ_GROUP_PID_FILE: groupPidFile,
+			TMPDIR: fixtureTmp,
+		},
+	} );
+	let browserPid = null;
+	let groupPids = [];
+	const reconciledGroupPids = new Set();
+	try {
+		const ready = await waitForReady( child );
+		assert( 'ready' === ready.status && true === ready.oracle?.available, 'Post-live restart fixture did not become ready.' );
+		const live = await request( socketPath, {
+			id: 350,
+			command: 'render',
+			htmlBase64: Buffer.from( '<p>live' ).toString( 'base64' ),
+			mode: 'fragment-body',
+			context: 'body',
+			maxNodes: 20,
+		} );
+		browserPid = live.oracle?.browserPid;
+		assert( 'ok' === live.status && Number.isSafeInteger( browserPid ) && browserPid > 0, 'Post-live restart fixture did not establish a live browser.' );
+		assert( fs.existsSync( launchMarker ), 'Post-live restart fixture did not consume its one launch.' );
+		process.kill( browserPid, 'SIGTERM' );
+		await waitForProcessDeath( browserPid );
+		const failed = await request( socketPath, {
+			id: 351,
+			command: 'render',
+			htmlBase64: Buffer.from( '<p>restart' ).toString( 'base64' ),
+			mode: 'fragment-body',
+			context: 'body',
+			maxNodes: 20,
+		} );
+		assert( 'error' === failed.status && 'oracle-renderer-error' === failed.failureClass, 'Post-live restart failure did not return a semantic Node error.' );
+		assert( 0 === failed.nodeCount, 'Post-live restart failure did not report nodeCount=0.' );
+		for ( const key of [ 'cdpProtocolVersion', 'browserPid', 'browserInstanceId' ] ) {
+			assert( ! Object.hasOwn( failed.oracle || {}, key ), `Post-live restart failure retained stale ${ key }.` );
+		}
+		groupPids = fs.readFileSync( groupPidFile, 'utf8' ).trim().split( /\s+/ )
+			.map( ( value ) => Number.parseInt( value, 10 ) )
+			.filter( ( value ) => Number.isSafeInteger( value ) && value > 0 );
+		assert( groupPids.length >= 2, 'Post-live restart fixture did not observe the initial and failed launch groups.' );
+		for ( const groupPid of new Set( groupPids ) ) {
+			await waitForProcessGroupDeath( groupPid );
+			reconciledGroupPids.add( groupPid );
+		}
+		const profilesAfter = new Set( chromeProfileDirectories( fixtureTmp ) );
+		assert(
+			profilesBefore.size === profilesAfter.size && [ ...profilesBefore ].every( ( directory ) => profilesAfter.has( directory ) ),
+			'Post-live restart failure retained a Chrome profile.'
+		);
+		const exiting = waitForExit( child );
+		const shutdown = await request( socketPath, { id: 352, command: 'shutdown' } );
+		assert( 'ok' === shutdown.status && true === shutdown.shutdown, 'Post-live restart fixture did not acknowledge shutdown.' );
+		await exiting;
+		assert( ! fs.existsSync( socketPath ), 'Post-live restart fixture retained its socket.' );
+	} finally {
+		if ( null === child.exitCode && null === child.signalCode ) {
+			child.kill( 'SIGTERM' );
+			await waitForAnyExit( child ).catch( () => {} );
+		}
+		if ( fs.existsSync( groupPidFile ) ) {
+			groupPids = fs.readFileSync( groupPidFile, 'utf8' ).trim().split( /\s+/ )
+				.map( ( value ) => Number.parseInt( value, 10 ) )
+				.filter( ( value ) => Number.isSafeInteger( value ) && value > 0 );
+		}
+		for ( const groupPid of new Set( groupPids ) ) {
+			if ( reconciledGroupPids.has( groupPid ) ) {
+				continue;
+			}
+			try {
+				process.kill( -groupPid, 'SIGKILL' );
+			} catch ( error ) {
+				if ( 'ESRCH' !== error.code ) {
+					throw error;
+				}
+			}
+			await waitForProcessGroupDeath( groupPid );
+		}
+		for ( const directory of chromeProfileDirectories( fixtureTmp ) ) {
+			if ( ! profilesBefore.has( directory ) ) {
+				fs.rmSync( directory, { recursive: true, force: true } );
+			}
+		}
+		fs.rmSync( socketPath, { force: true } );
 	}
 }
 
@@ -552,6 +683,7 @@ async function main() {
 		await testGatedSupervisorPrepublication( versionResult.oracle.chromeExecutable, temporaryDirectory );
 		await testConcurrentStartupShutdown( versionResult.oracle.chromeExecutable, temporaryDirectory );
 		await testSpawnFailureProfileCleanup( versionResult.oracle.pinnedChromeVersion, temporaryDirectory );
+		await testPostLiveRestartFailure( versionResult.oracle.chromeExecutable, versionResult.oracle.pinnedChromeVersion, temporaryDirectory );
 	} finally {
 		if ( null === child.exitCode && ! child.killed ) {
 			child.kill( 'SIGTERM' );

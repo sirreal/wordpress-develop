@@ -14,6 +14,11 @@ class OracleRenderer {
 		'node-limit-exceeded',
 		'oracle-renderer-error',
 	);
+	private const CHROME_ERROR_FAILURE_CLASSES = array(
+		'oracle-unavailable',
+		'oracle-renderer-error',
+		'node-limit-exceeded',
+	);
 
 	private string $kind;
 	private ?string $lexbor_oracle_bin;
@@ -264,14 +269,7 @@ class OracleRenderer {
 	}
 
 	private function chrome_metadata(): array {
-		$metadata = array(
-			'kind'             => $this->kind,
-			'engine'           => 'chrome',
-			'script'           => $this->chrome_oracle_script,
-			'nodeBinary'       => $this->node_bin,
-			'chromeExecutable' => $this->chrome_executable,
-			'chromeSocket'     => $this->chrome_socket,
-		);
+		$metadata = $this->local_chrome_metadata();
 		if ( null === $this->chrome_oracle_script || ! is_file( $this->chrome_oracle_script ) ) {
 			$metadata['available'] = false;
 			$metadata['error']     = 'Chrome CDP oracle script is not available.';
@@ -287,24 +285,175 @@ class OracleRenderer {
 			$version = $this->run_process( $command );
 			$decoded = json_decode( trim( $version['stdout'] ), true );
 		}
+		$require_live = null !== $this->chrome_socket;
+		$identity_error = is_array( $decoded['oracle'] ?? null )
+			? $this->chrome_identity_error( $decoded['oracle'], $require_live )
+			: 'did not return oracle metadata';
 		if (
+			( $require_live || ( ! $version['timedOut'] && 0 === $version['code'] ) ) &&
 			'ok' === ( $decoded['status'] ?? null ) &&
-			is_array( $decoded['oracle'] ?? null ) &&
-			true === ( $decoded['oracle']['available'] ?? false )
+			null === $identity_error
 		) {
-			$metadata = array_merge( $metadata, $decoded['oracle'] );
-			$metadata['script'] = $this->chrome_oracle_script;
-			$metadata['nodeBinary'] = $this->node_bin;
-			$metadata['chromeSocket'] = $this->chrome_socket;
-			$metadata['available'] = true;
+			return $this->trusted_chrome_metadata( $decoded['oracle'], $require_live );
+		}
+
+		if ( ! $require_live && ( $version['timedOut'] ?? false ) ) {
+			$reason = 'version command timed out';
+		} elseif ( ! $require_live && 0 !== ( $version['code'] ?? null ) ) {
+			$reason = 'version command exited with code ' . ( null === ( $version['code'] ?? null ) ? 'unknown' : $version['code'] );
+		} elseif ( ! is_array( $decoded ) ) {
+			$reason = 'version command did not return a JSON object';
+		} elseif ( 'ok' !== ( $decoded['status'] ?? null ) ) {
+			$reason = 'version command did not report status=ok';
 		} else {
-			if ( is_array( $decoded['oracle'] ?? null ) ) {
-				$metadata = array_merge( $metadata, $decoded['oracle'] );
+			$reason = $identity_error ?? 'invalid version response';
+		}
+		$reported_error = is_string( $decoded['error'] ?? null ) ? $decoded['error'] : trim( (string) ( $version['output'] ?? '' ) );
+		$details = '' === $reported_error ? $reason : $reason . ': ' . $reported_error;
+		$metadata['available'] = false;
+		$metadata['versionError'] = 'Invalid Chrome CDP oracle version response: ' . self::bounded_chrome_protocol_reason( $details ) . '.';
+		return $metadata;
+	}
+
+	private static function canonical_chrome_path( ?string $path ): ?string {
+		if ( null === $path || '' === trim( $path ) ) {
+			return null;
+		}
+		$is_absolute = DIRECTORY_SEPARATOR === substr( $path, 0, 1 ) ||
+			( '\\' === DIRECTORY_SEPARATOR && 1 === preg_match( '/^[A-Za-z]:[\\\\\\\/]/', $path ) );
+		$absolute = $is_absolute ? $path : repo_root() . DIRECTORY_SEPARATOR . $path;
+		$canonical = realpath( $absolute );
+		return false === $canonical ? $absolute : $canonical;
+	}
+
+	private static function pinned_chrome_version(): ?string {
+		$version = trim( (string) @file_get_contents( repo_root() . '/tools/html-api-fuzz/oracles/chrome/VERSION' ) );
+		return '' === $version ? null : $version;
+	}
+
+	private function expected_chrome_executable(): ?string {
+		if ( null !== $this->chrome_executable && '' !== trim( $this->chrome_executable ) ) {
+			return self::canonical_chrome_path( $this->chrome_executable );
+		}
+		if ( null === $this->chrome_oracle_script ) {
+			return null;
+		}
+
+		$architecture = strtolower( php_uname( 'm' ) );
+		if ( 'Darwin' === PHP_OS_FAMILY && in_array( $architecture, array( 'arm64', 'aarch64' ), true ) ) {
+			$platform = 'mac-arm64';
+			$archive = 'chrome-mac-arm64';
+			$relative = 'Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
+		} elseif ( 'Darwin' === PHP_OS_FAMILY && in_array( $architecture, array( 'x86_64', 'amd64', 'x64' ), true ) ) {
+			$platform = 'mac-x64';
+			$archive = 'chrome-mac-x64';
+			$relative = 'Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
+		} elseif ( 'Linux' === PHP_OS_FAMILY && in_array( $architecture, array( 'x86_64', 'amd64', 'x64' ), true ) ) {
+			$platform = 'linux64';
+			$archive = 'chrome-linux64';
+			$relative = 'chrome';
+		} else {
+			return null;
+		}
+
+		$install_root = getenv( 'HTML_API_FUZZ_CHROME_INSTALL_ROOT' );
+		if ( false === $install_root || '' === trim( $install_root ) ) {
+			$install_root = dirname( $this->chrome_oracle_script ) . '/.chrome-for-testing';
+		}
+		$version = self::pinned_chrome_version();
+		return null === $version ? null : self::canonical_chrome_path( $install_root . '/' . $version . '/' . $platform . '/' . $archive . '/' . $relative );
+	}
+
+	private function local_chrome_metadata(): array {
+		return array(
+			'kind'                 => self::KIND_CHROME_CDP,
+			'engine'               => 'chrome',
+			'pinnedChromeVersion'  => self::pinned_chrome_version(),
+			'script'               => self::canonical_chrome_path( $this->chrome_oracle_script ),
+			'nodeBinary'           => $this->node_bin,
+			'chromeExecutable'     => $this->expected_chrome_executable(),
+			'chromeSocket'         => $this->chrome_socket,
+		);
+	}
+
+	private static function has_live_chrome_identity( array $oracle ): bool {
+		foreach ( array( 'cdpProtocolVersion', 'browserPid', 'browserInstanceId' ) as $key ) {
+			if ( array_key_exists( $key, $oracle ) ) {
+				return true;
 			}
-			$metadata['available']    = false;
-			$metadata['versionError'] = $decoded['error'] ?? trim( (string) ( $version['output'] ?? '' ) );
+		}
+		return false;
+	}
+
+	private function chrome_identity_error( array $oracle, bool $require_live ): ?string {
+		$pin = self::pinned_chrome_version();
+		$exact = array(
+			'kind'                 => self::KIND_CHROME_CDP,
+			'engine'               => 'chrome',
+			'pinnedChromeVersion'  => $pin,
+			'chromeVersion'        => $pin,
+			'browserVersion'       => $pin,
+			'cdpTransport'         => 'remote-debugging-websocket',
+		);
+		foreach ( $exact as $key => $expected ) {
+			if ( ! is_string( $expected ) || '' === $expected || ! is_string( $oracle[ $key ] ?? null ) || $expected !== $oracle[ $key ] ) {
+				return "reported invalid {$key}";
+			}
+		}
+		if ( true !== ( $oracle['available'] ?? null ) ) {
+			return 'did not report available=true';
+		}
+		if ( ! is_string( $oracle['nodeVersion'] ?? null ) || '' === trim( $oracle['nodeVersion'] ) ) {
+			return 'did not report a non-empty nodeVersion';
+		}
+
+		$expected_script = self::canonical_chrome_path( $this->chrome_oracle_script );
+		$reported_script = is_string( $oracle['script'] ?? null ) ? self::canonical_chrome_path( $oracle['script'] ) : null;
+		if ( null === $expected_script || ! is_file( $expected_script ) || $expected_script !== $reported_script ) {
+			return 'reported a script path that does not match the configured oracle script';
+		}
+		$expected_executable = $this->expected_chrome_executable();
+		$reported_executable = is_string( $oracle['chromeExecutable'] ?? null ) ? self::canonical_chrome_path( $oracle['chromeExecutable'] ) : null;
+		if (
+			null === $expected_executable || ! is_file( $expected_executable ) || ! is_executable( $expected_executable ) ||
+			$expected_executable !== $reported_executable
+		) {
+			return 'reported a Chrome executable that does not match the configured executable';
+		}
+
+		$validate_live = $require_live || self::has_live_chrome_identity( $oracle );
+		if ( $validate_live ) {
+			if ( ! is_string( $oracle['cdpProtocolVersion'] ?? null ) || '' === trim( $oracle['cdpProtocolVersion'] ) ) {
+				return 'did not report a non-empty cdpProtocolVersion';
+			}
+			if ( ! is_int( $oracle['browserPid'] ?? null ) || $oracle['browserPid'] < 1 ) {
+				return 'did not report a positive integer browserPid';
+			}
+			if ( ! is_string( $oracle['browserInstanceId'] ?? null ) || '' === trim( $oracle['browserInstanceId'] ) ) {
+				return 'did not report a non-empty browserInstanceId';
+			}
+		}
+		return null;
+	}
+
+	private function trusted_chrome_metadata( array $oracle, bool $include_live ): array {
+		$metadata = $this->local_chrome_metadata();
+		$metadata['available'] = true;
+		$metadata['chromeVersion'] = self::pinned_chrome_version();
+		$metadata['browserVersion'] = self::pinned_chrome_version();
+		$metadata['cdpTransport'] = 'remote-debugging-websocket';
+		$metadata['nodeVersion'] = $oracle['nodeVersion'];
+		if ( $include_live ) {
+			$metadata['cdpProtocolVersion'] = $oracle['cdpProtocolVersion'];
+			$metadata['browserPid'] = $oracle['browserPid'];
+			$metadata['browserInstanceId'] = $oracle['browserInstanceId'];
 		}
 		return $metadata;
+	}
+
+	private static function bounded_chrome_protocol_reason( string $reason ): string {
+		$reason = trim( preg_replace( '/\s+/', ' ', $reason ) ?? $reason );
+		return substr( $reason, 0, 512 );
 	}
 
 	public function replay_options(): array {
@@ -544,7 +693,7 @@ class OracleRenderer {
 		if ( false === ( $metadata['available'] ?? true ) ) {
 			return array(
 				'status'       => TreeRenderer::STATUS_ERROR,
-				'error'        => $metadata['error'] ?? 'Chrome CDP oracle is unavailable.',
+				'error'        => $metadata['versionError'] ?? $metadata['error'] ?? 'Chrome CDP oracle is unavailable.',
 				'failureClass' => 'oracle-unavailable',
 				'oracle'       => $metadata,
 			);
@@ -565,33 +714,58 @@ class OracleRenderer {
 				'status'       => TreeRenderer::STATUS_ERROR,
 				'error'        => 'Chrome CDP oracle timed out.',
 				'failureClass' => 'oracle-renderer-error',
-				'oracle'       => $this->metadata(),
+				'oracle'       => $metadata,
 				'process'      => self::compact_process( $proc ),
 			);
 		}
 
 		$decoded = $proc['decoded'] ?? null;
-		if ( ! is_array( $decoded ) || ! is_string( $decoded['status'] ?? null ) ) {
+		if ( ! is_array( $decoded ) ) {
 			return array(
 				'status'       => TreeRenderer::STATUS_ERROR,
 				'error'        => 'Chrome CDP oracle did not return a valid JSON result.',
 				'failureClass' => 'oracle-renderer-error',
-				'oracle'       => $this->metadata(),
+				'oracle'       => $metadata,
 				'process'      => self::compact_process( $proc ),
 			);
 		}
 
-		$status = $decoded['status'];
-		if ( ! in_array( $status, array( TreeRenderer::STATUS_OK, TreeRenderer::STATUS_UNSUPPORTED, TreeRenderer::STATUS_ERROR ), true ) ) {
-			$status = TreeRenderer::STATUS_ERROR;
+		$status = $decoded['status'] ?? null;
+		$valid_status = in_array( $status, array( TreeRenderer::STATUS_OK, TreeRenderer::STATUS_UNSUPPORTED, TreeRenderer::STATUS_ERROR ), true );
+		$require_live = in_array( $status, array( TreeRenderer::STATUS_OK, TreeRenderer::STATUS_UNSUPPORTED ), true );
+		$identity_error = is_array( $decoded['oracle'] ?? null )
+			? $this->chrome_identity_error( $decoded['oracle'], $require_live )
+			: 'did not return oracle metadata';
+		if (
+			! $valid_status ||
+			null !== $identity_error ||
+			! is_int( $decoded['nodeCount'] ?? null ) ||
+			$decoded['nodeCount'] < 0 ||
+			( TreeRenderer::STATUS_ERROR === $status && 0 !== $decoded['nodeCount'] )
+		) {
+			$reason = $identity_error ?? ( $valid_status ? 'invalid nodeCount' : 'invalid status' );
+			return array(
+				'status'       => TreeRenderer::STATUS_ERROR,
+				'error'        => 'Chrome CDP oracle returned an invalid protocol result: ' . self::bounded_chrome_protocol_reason( $reason ) . '.',
+				'failureClass' => 'oracle-renderer-error',
+				'oracle'       => $metadata,
+				'process'      => self::compact_process( $proc ),
+			);
 		}
+		$include_live = $require_live || self::has_live_chrome_identity( $decoded['oracle'] );
 		$result = array(
 			'status'    => $status,
-			'oracle'    => is_array( $decoded['oracle'] ?? null ) ? array_merge( $this->metadata(), $decoded['oracle'] ) : $this->metadata(),
-			'nodeCount' => $decoded['nodeCount'] ?? null,
+			'oracle'    => $this->trusted_chrome_metadata( $decoded['oracle'], $include_live ),
+			'nodeCount' => $decoded['nodeCount'],
 			'process'   => self::compact_process( $proc ),
 		);
-		if ( TreeRenderer::STATUS_OK === $status && is_string( $decoded['treeBase64'] ?? null ) ) {
+		if ( TreeRenderer::STATUS_OK === $status ) {
+			if ( ! is_string( $decoded['treeBase64'] ?? null ) ) {
+				$result['status']       = TreeRenderer::STATUS_ERROR;
+				$result['error']        = 'Chrome CDP oracle returned ok without treeBase64.';
+				$result['failureClass'] = 'oracle-renderer-error';
+				return $result;
+			}
 			$tree = base64_decode( $decoded['treeBase64'], true );
 			if ( false === $tree ) {
 				$result['status']       = TreeRenderer::STATUS_ERROR;
@@ -599,21 +773,32 @@ class OracleRenderer {
 				$result['failureClass'] = 'oracle-renderer-error';
 				return $result;
 			}
+			if ( array_key_exists( 'tree', $decoded ) && ( ! is_string( $decoded['tree'] ) || $decoded['tree'] !== $tree ) ) {
+				$result['status']       = TreeRenderer::STATUS_ERROR;
+				$result['error']        = 'Chrome CDP oracle returned disagreeing tree and treeBase64 values.';
+				$result['failureClass'] = 'oracle-renderer-error';
+				return $result;
+			}
 			$result['tree'] = $tree;
-		}
-		if ( is_string( $decoded['failureClass'] ?? null ) ) {
-			$result['failureClass'] = $decoded['failureClass'];
-		}
-		if ( is_string( $decoded['error'] ?? null ) ) {
-			$result['error'] = $decoded['error'];
-		}
-		if ( is_array( $decoded['unsupported'] ?? null ) ) {
-			$result['unsupported'] = $decoded['unsupported'];
-		}
-		if ( TreeRenderer::STATUS_OK === $status && ! is_string( $result['tree'] ?? null ) ) {
+		} elseif ( TreeRenderer::STATUS_UNSUPPORTED === $status ) {
+			if (
+				'oracle-unsupported' !== ( $decoded['failureClass'] ?? null ) ||
+				! is_string( $decoded['unsupported']['message'] ?? null )
+			) {
+				$result['status']       = TreeRenderer::STATUS_ERROR;
+				$result['error']        = 'Chrome CDP oracle returned malformed unsupported details.';
+				$result['failureClass'] = 'oracle-renderer-error';
+				return $result;
+			}
+			$result['failureClass'] = 'oracle-unsupported';
+			$result['unsupported'] = array( 'message' => $decoded['unsupported']['message'] );
+		} elseif ( ! in_array( $decoded['failureClass'] ?? null, self::CHROME_ERROR_FAILURE_CLASSES, true ) || ! is_string( $decoded['error'] ?? null ) ) {
 			$result['status']       = TreeRenderer::STATUS_ERROR;
-			$result['error']        = 'Chrome CDP oracle returned ok without a tree.';
+			$result['error']        = 'Chrome CDP oracle returned malformed error details.';
 			$result['failureClass'] = 'oracle-renderer-error';
+		} else {
+			$result['failureClass'] = $decoded['failureClass'];
+			$result['error'] = $decoded['error'];
 		}
 		return $result;
 	}
@@ -1189,6 +1374,7 @@ class OracleRenderer {
 		}
 
 		$probe = null;
+		$probe_identity_error = null;
 		do {
 			$remaining_ms = (int) floor( ( $deadline - microtime( true ) ) * 1000 );
 			if ( $remaining_ms < 1 ) {
@@ -1198,11 +1384,10 @@ class OracleRenderer {
 			if ( is_array( $probe['decoded'] ?? null ) ) {
 				self::capture_verified_chrome_server_pid( self::$chrome_run_services[ $key ], $probe['decoded'] );
 			}
-			if (
-				'ok' === ( $probe['decoded']['status'] ?? null ) &&
-				is_array( $probe['decoded']['oracle'] ?? null ) &&
-				true === ( $probe['decoded']['oracle']['available'] ?? false )
-			) {
+			$probe_identity_error = is_array( $probe['decoded']['oracle'] ?? null )
+				? $this->chrome_identity_error( $probe['decoded']['oracle'], true )
+				: 'did not return oracle metadata';
+			if ( 'ok' === ( $probe['decoded']['status'] ?? null ) && null === $probe_identity_error ) {
 				return;
 			}
 			if ( is_array( $probe['decoded'] ?? null ) ) {
@@ -1218,7 +1403,8 @@ class OracleRenderer {
 
 		$stderr = trim( (string) stream_get_contents( $pipes[2] ) );
 		$probe_output = trim( (string) ( $probe['output'] ?? '' ) );
-		$details = implode( "\n", array_filter( array( $probe_output, $stderr ), 'strlen' ) );
+		$identity_details = null === $probe_identity_error ? '' : 'Invalid Chrome CDP readiness identity: ' . $probe_identity_error . '.';
+		$details = implode( "\n", array_filter( array( $identity_details, $probe_output, $stderr ), 'strlen' ) );
 		$cleanup_error = self::stop_chrome_run_service( $key );
 		$this->run_service_key = null;
 		$this->chrome_socket = null;

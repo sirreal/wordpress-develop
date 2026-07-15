@@ -1122,6 +1122,7 @@ class ChromeOracle {
 		this.targetId = null;
 		this.sessionId = null;
 		this.healthy = false;
+		delete this.metadata.cdpProtocolVersion;
 		delete this.metadata.browserPid;
 		delete this.metadata.browserInstanceId;
 		await this.disposeState( state, graceful );
@@ -1297,6 +1298,7 @@ function errorResult( error, oracle, id = undefined ) {
 		failureClass: error.failureClass || ( message.includes( 'DOM node limit exceeded.' ) ? 'node-limit-exceeded' : 'oracle-renderer-error' ),
 		error: message,
 		oracle,
+		nodeCount: 0,
 	};
 	if ( undefined !== id ) {
 		result.id = id;

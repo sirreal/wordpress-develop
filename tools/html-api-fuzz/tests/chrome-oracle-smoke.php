@@ -305,16 +305,42 @@ try {
 	$hostile_oracle = null;
 
 	$cleanup_failure_script = $work_dir . '/cleanup-failure-oracle.js';
-	file_put_contents(
-		$cleanup_failure_script,
-		<<<'JS'
+	$chrome_fixture_pin = $metadata['pinnedChromeVersion'] ?? null;
+	$chrome_fixture_executable = $metadata['chromeExecutable'] ?? null;
+	html_api_fuzz_chrome_smoke_assert( is_string( $chrome_fixture_pin ) && '' !== $chrome_fixture_pin, 'Chrome fixture is missing the pinned version.' );
+	html_api_fuzz_chrome_smoke_assert( is_string( $chrome_fixture_executable ) && '' !== $chrome_fixture_executable, 'Chrome fixture is missing the configured executable.' );
+	$cleanup_failure_source = <<<'JS'
 #!/usr/bin/env node
 'use strict';
 const fs = require( 'node:fs' );
 const net = require( 'node:net' );
+const path = require( 'node:path' );
 const readline = require( 'node:readline' );
+const pinnedVersion = __PINNED_CHROME_VERSION__;
+const executableIndex = process.argv.indexOf( '--chrome-executable' );
+const chromeExecutable = path.resolve( process.argv[ executableIndex + 1 ] );
+const oracle = ( live ) => {
+	const metadata = {
+		kind: 'chrome-cdp',
+		engine: 'chrome',
+		available: true,
+		pinnedChromeVersion: pinnedVersion,
+		chromeVersion: pinnedVersion,
+		browserVersion: pinnedVersion,
+		chromeExecutable,
+		nodeVersion: process.version,
+		script: __filename,
+		cdpTransport: 'remote-debugging-websocket',
+	};
+	if ( live ) {
+		metadata.cdpProtocolVersion = 'fixture-cdp';
+		metadata.browserPid = process.pid;
+		metadata.browserInstanceId = `cleanup-fixture-${ process.pid }`;
+	}
+	return metadata;
+};
 if ( process.argv.includes( '--version' ) ) {
-	process.stdout.write( JSON.stringify( { status: 'ok', oracle: { kind: 'chrome-cdp', available: true } } ) + '\n' );
+	process.stdout.write( JSON.stringify( { status: 'ok', oracle: oracle( false ) } ) + '\n' );
 	process.exit( 0 );
 }
 const socketIndex = process.argv.indexOf( '--socket' );
@@ -334,16 +360,16 @@ const server = net.createServer( ( socket ) => {
 	lines.once( 'line', ( line ) => {
 		const request = JSON.parse( line );
 		if ( 'version' === request.command ) {
-			socket.end( JSON.stringify( { id: request.id, serverPid: process.pid, status: 'ok', oracle: { kind: 'chrome-cdp', available: true } } ) + '\n' );
+			socket.end( JSON.stringify( { id: request.id, serverPid: process.pid, status: 'ok', oracle: oracle( true ) } ) + '\n' );
 			return;
 		}
 		if ( 'render' === request.command ) {
 			const treeBase64 = process.env.HTML_API_FUZZ_CLEANUP_TREE_BASE64 || Buffer.from( '\n' ).toString( 'base64' );
-			socket.end( JSON.stringify( { id: request.id, serverPid: process.pid, status: 'ok', oracle: { kind: 'chrome-cdp', available: true }, treeBase64, nodeCount: Number( process.env.HTML_API_FUZZ_CLEANUP_NODE_COUNT || 0 ) } ) + '\n' );
+			socket.end( JSON.stringify( { id: request.id, serverPid: process.pid, status: 'ok', oracle: oracle( true ), treeBase64, nodeCount: Number( process.env.HTML_API_FUZZ_CLEANUP_NODE_COUNT || 0 ) } ) + '\n' );
 			return;
 		}
 		if ( 'shutdown' === request.command ) {
-			socket.end( JSON.stringify( { id: request.id, serverPid: process.pid, status: 'ok', shutdown: true, oracle: { kind: 'chrome-cdp', available: true } } ) + '\n' );
+			socket.end( JSON.stringify( { id: request.id, serverPid: process.pid, status: 'ok', shutdown: true, oracle: oracle( true ) } ) + '\n' );
 			server.close( () => {
 				unlinkSocket();
 				process.stderr.write( 'fixture-cleanup-failed\n' );
@@ -353,12 +379,17 @@ const server = net.createServer( ( socket ) => {
 	} );
 } );
 server.listen( socketPath, () => process.stdout.write( JSON.stringify( { status: 'ready', socket: socketPath } ) + '\n' ) );
-JS
+JS;
+	$cleanup_failure_source = str_replace( '__PINNED_CHROME_VERSION__', json_encode( $chrome_fixture_pin, JSON_THROW_ON_ERROR ), $cleanup_failure_source );
+	file_put_contents(
+		$cleanup_failure_script,
+		$cleanup_failure_source
 	);
 	$cleanup_failure_oracle = \HtmlApiFuzz\OracleRenderer::from_options(
 		array(
 			'dom-oracle'           => \HtmlApiFuzz\OracleRenderer::KIND_CHROME_CDP,
 			'chrome-oracle-script' => $cleanup_failure_script,
+			'chrome-executable'    => $chrome_fixture_executable,
 		)
 	);
 	$cleanup_failure_oracle->start_run_service( $work_dir . '/cleanup-failure' );
@@ -401,6 +432,8 @@ JS
 			\HtmlApiFuzz\OracleRenderer::KIND_CHROME_CDP,
 			'--chrome-oracle-script',
 			$cleanup_failure_script,
+			'--chrome-executable',
+			$chrome_fixture_executable,
 		),
 		\HtmlApiFuzz\repo_root(),
 		30000,
@@ -542,6 +575,8 @@ JS
 			\HtmlApiFuzz\OracleRenderer::KIND_CHROME_CDP,
 			'--chrome-oracle-script',
 			$cleanup_failure_script,
+			'--chrome-executable',
+			$chrome_fixture_executable,
 		),
 		\HtmlApiFuzz\repo_root(),
 		30000,
@@ -557,15 +592,37 @@ JS
 	putenv( 'HTML_API_FUZZ_CHROME_SOCKET' );
 	$silent_exit_script = $work_dir . '/silent-exit-oracle.js';
 	$silent_exit_marker = $work_dir . '/silent-exit-oracle.started';
-	file_put_contents(
-		$silent_exit_script,
-		<<<'JS'
+	$silent_exit_source = <<<'JS'
 #!/usr/bin/env node
 'use strict';
 const fs = require( 'node:fs' );
+const path = require( 'node:path' );
 const readline = require( 'node:readline' );
+const pinnedVersion = __PINNED_CHROME_VERSION__;
+const executableIndex = process.argv.indexOf( '--chrome-executable' );
+const chromeExecutable = path.resolve( process.argv[ executableIndex + 1 ] );
+const oracle = ( live ) => {
+	const metadata = {
+		kind: 'chrome-cdp',
+		engine: 'chrome',
+		available: true,
+		pinnedChromeVersion: pinnedVersion,
+		chromeVersion: pinnedVersion,
+		browserVersion: pinnedVersion,
+		chromeExecutable,
+		nodeVersion: process.version,
+		script: __filename,
+		cdpTransport: 'remote-debugging-websocket',
+	};
+	if ( live ) {
+		metadata.cdpProtocolVersion = 'fixture-cdp';
+		metadata.browserPid = process.pid;
+		metadata.browserInstanceId = `silent-exit-fixture-${ process.pid }`;
+	}
+	return metadata;
+};
 if ( process.argv.includes( '--version' ) ) {
-	process.stdout.write( JSON.stringify( { status: 'ok', oracle: { kind: 'chrome-cdp', available: true } } ) + '\n' );
+	process.stdout.write( JSON.stringify( { status: 'ok', oracle: oracle( false ) } ) + '\n' );
 	process.exit( 0 );
 }
 const marker = process.env.HTML_API_FUZZ_SILENT_EXIT_MARKER;
@@ -588,18 +645,23 @@ lines.on( 'line', ( line ) => {
 		id: request.id,
 		serverPid: process.pid,
 		status: 'ok',
-		oracle: { kind: 'chrome-cdp', available: true },
+		oracle: oracle( true ),
 		treeBase64: Buffer.from( '\n' ).toString( 'base64' ),
 		nodeCount: 0,
 	} ) + '\n' );
 } );
-JS
+JS;
+	$silent_exit_source = str_replace( '__PINNED_CHROME_VERSION__', json_encode( $chrome_fixture_pin, JSON_THROW_ON_ERROR ), $silent_exit_source );
+	file_put_contents(
+		$silent_exit_script,
+		$silent_exit_source
 	);
 	putenv( 'HTML_API_FUZZ_SILENT_EXIT_MARKER=' . $silent_exit_marker );
 	$silent_exit_oracle = \HtmlApiFuzz\OracleRenderer::from_options(
 		array(
 			'dom-oracle'           => \HtmlApiFuzz\OracleRenderer::KIND_CHROME_CDP,
 			'chrome-oracle-script' => $silent_exit_script,
+			'chrome-executable'    => $chrome_fixture_executable,
 		)
 	);
 	$silent_exit_result = $silent_exit_oracle->render( '', \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY, array( 'maxNodes' => 10 ), 'body' );
