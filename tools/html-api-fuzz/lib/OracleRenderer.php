@@ -38,6 +38,59 @@ class OracleRenderer {
 		return array( self::KIND_PHP_DOM, self::KIND_LEXBOR_SOURCE );
 	}
 
+	/** Return reasons the current oracle cannot faithfully replay recorded output. */
+	public static function identity_mismatches( $recorded, array $current ): array {
+		if ( ! is_array( $recorded ) ) {
+			return array( 'recorded oracle metadata is missing' );
+		}
+
+		$recorded_kind = $recorded['kind'] ?? null;
+		$current_kind  = $current['kind'] ?? null;
+		if ( ! is_string( $recorded_kind ) || ! in_array( $recorded_kind, self::kinds(), true ) ) {
+			return array( 'recorded oracle kind is invalid' );
+		}
+		if ( ! is_string( $current_kind ) || ! in_array( $current_kind, self::kinds(), true ) ) {
+			return array( 'current oracle kind is invalid' );
+		}
+		if ( $recorded_kind !== $current_kind ) {
+			return array( "oracle kind differs (recorded {$recorded_kind}, current {$current_kind})" );
+		}
+		if ( self::KIND_LEXBOR_SOURCE !== $current_kind ) {
+			return array();
+		}
+
+		$mismatches = array();
+		if ( false === ( $current['available'] ?? true ) ) {
+			$mismatches[] = 'current Lexbor oracle is unavailable';
+		}
+		if ( array_key_exists( 'versionError', $current ) ) {
+			$mismatches[] = 'current Lexbor oracle failed self-verification';
+		}
+		foreach (
+			array(
+				'lexborCommit' => array( '/^[0-9a-f]{40}$/', 'Lexbor commit' ),
+				'binarySha256' => array( '/^[0-9a-f]{64}$/', 'Lexbor binary SHA-256' ),
+			) as $field => $validation
+		) {
+			list( $pattern, $label ) = $validation;
+			$recorded_value = $recorded[ $field ] ?? null;
+			$current_value  = $current[ $field ] ?? null;
+			if ( ! is_string( $recorded_value ) || ! preg_match( $pattern, $recorded_value ) ) {
+				$mismatches[] = "recorded {$label} is missing or invalid";
+				continue;
+			}
+			if ( ! is_string( $current_value ) || ! preg_match( $pattern, $current_value ) ) {
+				$mismatches[] = "current {$label} is missing or invalid";
+				continue;
+			}
+			if ( $recorded_value !== $current_value ) {
+				$mismatches[] = "{$label} differs";
+			}
+		}
+
+		return $mismatches;
+	}
+
 	public function kind(): string {
 		return $this->kind;
 	}

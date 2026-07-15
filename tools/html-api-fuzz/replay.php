@@ -7,8 +7,8 @@ $replay_path = \HtmlApiFuzz\option_string( $options, 'replay', $options['_'][0] 
 $store_path  = \HtmlApiFuzz\option_string( $options, 'store', null );
 $stored_replay_value = null;
 if ( ( null === $replay_path && null === $store_path ) || \HtmlApiFuzz\option_bool( $options, 'help', false ) ) {
-	echo "Usage: php tools/html-api-fuzz/replay.php --replay path/to/replay.json [--output-dir DIR] [--payload-policy POLICY] [--memory-limit LIMIT] [--timeout-ms N] [--worker-script PATH] [--dom-oracle php-dom|lexbor-source] [--lexbor-oracle-bin PATH]\n";
-	echo "       php tools/html-api-fuzz/replay.php --store path/to/results.sqlite (--id N|--seed N) [--output-dir DIR] [--payload-policy POLICY] [--dom-oracle php-dom|lexbor-source] [--lexbor-oracle-bin PATH]\n";
+	echo "Usage: php tools/html-api-fuzz/replay.php --replay path/to/replay.json [--output-dir DIR] [--payload-policy POLICY] [--memory-limit LIMIT] [--timeout-ms N] [--worker-script PATH] [--dom-oracle php-dom|lexbor-source] [--lexbor-oracle-bin PATH] [--allow-oracle-mismatch]\n";
+	echo "       php tools/html-api-fuzz/replay.php --store path/to/results.sqlite (--id N|--seed N) [--output-dir DIR] [--payload-policy POLICY] [--dom-oracle php-dom|lexbor-source] [--lexbor-oracle-bin PATH] [--allow-oracle-mismatch]\n";
 	echo "The --store form reproduces a failure whose seed directory was pruned, from the replay stored in the lane's results.sqlite.\n";
 	exit( ( null === $replay_path && null === $store_path ) ? 1 : 0 );
 }
@@ -163,6 +163,13 @@ if ( null === \HtmlApiFuzz\option_string( $oracle_options, 'oracle-timeout-ms', 
 }
 $oracle_renderer    = \HtmlApiFuzz\OracleRenderer::from_options( $oracle_options );
 $oracle_worker_args = $oracle_renderer->worker_args();
+$current_oracle     = $oracle_renderer->metadata();
+$oracle_mismatches  = \HtmlApiFuzz\OracleRenderer::identity_mismatches( $replay['oracle'] ?? null, $current_oracle );
+if ( ! empty( $oracle_mismatches ) && ! \HtmlApiFuzz\option_bool( $options, 'allow-oracle-mismatch', false ) ) {
+	fwrite( STDERR, 'Oracle identity mismatch: ' . implode( '; ', $oracle_mismatches ) . ".\n" );
+	fwrite( STDERR, "Pass --allow-oracle-mismatch only for a deliberate diagnostic comparison.\n" );
+	exit( 1 );
+}
 
 \HtmlApiFuzz\ensure_dir( $output_dir );
 $claim_path = $output_dir . '/.replay-attempt';
@@ -258,7 +265,7 @@ if ( ! is_array( $result ) ) {
 			'inputSha1'       => sha1( $input ),
 			'inputLength'     => strlen( $input ),
 			'checks'          => $checks,
-			'oracle'          => $oracle_renderer->metadata(),
+			'oracle'          => $current_oracle,
 		)
 	);
 	$signature = \HtmlApiFuzz\Signature::from_result( $result );
@@ -282,7 +289,9 @@ if ( is_array( $output_replay ) && is_array( $original_generator ) ) {
 if ( is_array( $output_replay ) ) {
 	$output_replay['sourceReplay'] = $source_replay;
 	$output_options = is_array( $output_replay['options'] ?? null ) ? $output_replay['options'] : array();
-	$output_replay['options'] = array_merge( $output_options, $effective_policy );
+	unset( $output_options['domOracle'], $output_options['lexborOracleBin'], $output_options['oracleTimeoutMs'] );
+	$output_replay['options'] = array_merge( $output_options, $effective_policy, $oracle_renderer->replay_options() );
+	$output_replay['oracle'] = $current_oracle;
 	$output_replay['result'] = array(
 		'ok'            => $result['ok'] ?? false,
 		'status'        => $result['status'] ?? 'missing-result',

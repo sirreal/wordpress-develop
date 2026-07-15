@@ -131,6 +131,12 @@ process-group isolation and synthesizes the same timeout/OOM/crash result when
 the Worker produces none. `--worker-script`, `--memory-limit`, and
 `--timeout-ms` are explicit diagnostic overrides.
 
+Replay also verifies the recorded oracle identity before starting the Worker.
+For a source-built Lexbor oracle, both the resolved Lexbor commit and executable
+SHA-256 must match. Use `--allow-oracle-mismatch` only for a deliberate
+diagnostic comparison; the resulting replay records the oracle actually used
+and retains the source identity in its provenance.
+
 Transport charset, content type, target URI, WARC record ID, analyzer state
 key, and source range are metadata only. The comparison intentionally feeds
 the same raw bytes to both parsers; it never silently transcodes one side.

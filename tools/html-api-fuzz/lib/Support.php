@@ -340,6 +340,7 @@ function replay_source_metadata( string $replay_path, array $replay ): array {
 		'repoCommit'    => $replay['repoCommit'] ?? null,
 		'repoDirty'     => $replay['repoDirty'] ?? null,
 		'signatureHash' => $replay['signature']['hash'] ?? $replay['result']['signature']['hash'] ?? null,
+		'oracle'        => is_array( $replay['oracle'] ?? null ) ? $replay['oracle'] : null,
 	);
 
 	if ( is_array( $replay['sourceReplay'] ?? null ) ) {

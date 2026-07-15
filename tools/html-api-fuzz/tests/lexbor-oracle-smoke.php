@@ -163,6 +163,72 @@ html_api_fuzz_lexbor_smoke_assert( 0 === $proc['code'], 'Expected replay to pass
 $replayed = \HtmlApiFuzz\read_json_file( $replay_dir . '/result.json' );
 html_api_fuzz_lexbor_smoke_assert( \HtmlApiFuzz\OracleRenderer::KIND_LEXBOR_SOURCE === ( $replayed['oracle']['kind'] ?? null ), 'Expected replayed result to use the Lexbor source oracle.' );
 
+$identity_mismatch_replays = array();
+$hash_mismatch_replay = $worker_replay_372;
+$hash_mismatch_replay['oracle']['binarySha256'] = str_repeat( '0', 64 );
+$identity_mismatch_replays['binary-hash'] = $hash_mismatch_replay;
+$commit_mismatch_replay = $worker_replay_372;
+$commit_mismatch_replay['oracle']['lexborCommit'] = str_repeat( '0', 40 );
+$identity_mismatch_replays['lexbor-commit'] = $commit_mismatch_replay;
+$kind_mismatch_replay = $worker_replay_372;
+$kind_mismatch_replay['oracle']['kind'] = \HtmlApiFuzz\OracleRenderer::KIND_PHP_DOM;
+$identity_mismatch_replays['oracle-kind'] = $kind_mismatch_replay;
+foreach ( $identity_mismatch_replays as $mismatch_name => $mismatch_replay ) {
+	$mismatch_path = $work_dir . '/mismatch-' . $mismatch_name . '.json';
+	$mismatch_output = $work_dir . '/mismatch-' . $mismatch_name;
+	\HtmlApiFuzz\write_json_file_atomic( $mismatch_path, $mismatch_replay );
+	$mismatch_proc = \HtmlApiFuzz\run_php_process(
+		array(
+			dirname( __DIR__ ) . '/replay.php',
+			'--replay', $mismatch_path,
+			'--output-dir', $mismatch_output,
+		),
+		\HtmlApiFuzz\repo_root(),
+		10000
+	);
+	html_api_fuzz_lexbor_smoke_assert( 1 === $mismatch_proc['code'], "Expected {$mismatch_name} mismatch to reject replay." );
+	html_api_fuzz_lexbor_smoke_assert( ! is_dir( $mismatch_output ), "Expected {$mismatch_name} rejection before output creation." );
+}
+
+$kind_change_source = $worker_replay_372;
+$kind_change_source['options']['oracleTimeoutMs'] = 1234;
+$kind_change_path = $work_dir . '/kind-change-source.json';
+$kind_change_dir  = $work_dir . '/kind-change';
+\HtmlApiFuzz\write_json_file_atomic( $kind_change_path, $kind_change_source );
+$kind_change_proc = \HtmlApiFuzz\run_php_process(
+	array(
+		dirname( __DIR__ ) . '/replay.php',
+		'--replay', $kind_change_path,
+		'--output-dir', $kind_change_dir,
+		'--dom-oracle', \HtmlApiFuzz\OracleRenderer::KIND_PHP_DOM,
+		'--oracle-timeout-ms', '2500',
+		'--allow-oracle-mismatch',
+	),
+	\HtmlApiFuzz\repo_root(),
+	10000
+);
+html_api_fuzz_lexbor_smoke_assert( 0 === $kind_change_proc['code'], 'Expected an explicitly allowed Lexbor-to-PHP-DOM diagnostic replay.' );
+$kind_change_replay = \HtmlApiFuzz\read_json_file( $kind_change_dir . '/replay.json' );
+html_api_fuzz_lexbor_smoke_assert( \HtmlApiFuzz\OracleRenderer::KIND_PHP_DOM === ( $kind_change_replay['oracle']['kind'] ?? null ), 'Expected allowed mismatch output to record current oracle metadata.' );
+html_api_fuzz_lexbor_smoke_assert( \HtmlApiFuzz\OracleRenderer::KIND_PHP_DOM === ( $kind_change_replay['options']['domOracle'] ?? null ), 'Expected allowed mismatch output to record current oracle selection.' );
+html_api_fuzz_lexbor_smoke_assert( ! array_key_exists( 'lexborOracleBin', $kind_change_replay['options'] ), 'Expected allowed kind change to remove stale Lexbor binary option.' );
+html_api_fuzz_lexbor_smoke_assert( ! array_key_exists( 'oracleTimeoutMs', $kind_change_replay['options'] ), 'Expected allowed kind change to remove stale oracle timeout option.' );
+html_api_fuzz_lexbor_smoke_assert( ( $metadata['lexborCommit'] ?? null ) === ( $kind_change_replay['sourceReplay']['oracle']['lexborCommit'] ?? null ), 'Expected allowed mismatch to preserve source oracle identity.' );
+
+$kind_change_again_dir = $work_dir . '/kind-change-again';
+$kind_change_again_proc = \HtmlApiFuzz\run_php_process(
+	array(
+		dirname( __DIR__ ) . '/replay.php',
+		'--replay', $kind_change_dir . '/replay.json',
+		'--output-dir', $kind_change_again_dir,
+	),
+	\HtmlApiFuzz\repo_root(),
+	10000
+);
+html_api_fuzz_lexbor_smoke_assert( 0 === $kind_change_again_proc['code'], 'Expected replay-of-replay to use the newly recorded PHP DOM oracle without an override.' );
+$kind_change_again = \HtmlApiFuzz\read_json_file( $kind_change_again_dir . '/result.json' );
+html_api_fuzz_lexbor_smoke_assert( \HtmlApiFuzz\OracleRenderer::KIND_PHP_DOM === ( $kind_change_again['oracle']['kind'] ?? null ), 'Expected replay-of-replay result to use PHP DOM.' );
+
 $worker_result_373 = \HtmlApiFuzz\Worker::run(
 	array(
 		'input-base64'      => base64_encode( $issue_373 ),
