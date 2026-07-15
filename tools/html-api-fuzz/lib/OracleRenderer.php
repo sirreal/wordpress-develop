@@ -113,7 +113,7 @@ class OracleRenderer {
 
 	public function assert_replay_compatible( array $expected ): void {
 		$current = $this->metadata();
-		foreach ( array( 'kind', 'lexborCommit', 'html5everVersion', 'html5everChecksum', 'pinnedChromeVersion' ) as $key ) {
+		foreach ( array( 'kind', 'lexborCommit', 'html5everVersion', 'html5everChecksum', 'markup5everRcdomVersion', 'markup5everRcdomChecksum', 'rustToolchain', 'pinnedChromeVersion' ) as $key ) {
 			if ( ! is_string( $expected[ $key ] ?? null ) || '' === $expected[ $key ] ) {
 				continue;
 			}
