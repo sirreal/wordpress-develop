@@ -33,6 +33,7 @@ final class CustomizerSurface {
 			$rows[] = self::check_multidimensional_values( $ctx->fork( 'multidimensional' ) );
 			$rows[] = self::check_json_and_active_callbacks( $ctx->fork( 'json-active' ) );
 			$rows[] = self::check_control_rendering_contracts( $ctx->fork( 'control-rendering' ) );
+			$rows[] = self::check_media_control_subclasses( $ctx->fork( 'media-controls' ) );
 			$rows[] = self::check_selective_refresh_partials( $ctx->fork( 'partials' ) );
 			$rows[] = self::check_theme_preview_lifecycle( $ctx->fork( 'theme-preview' ) );
 		} catch ( \Throwable $e ) {
@@ -51,6 +52,7 @@ final class CustomizerSurface {
 		$allcaps[ self::CAPABILITY ]   = true;
 		$allcaps['customize']          = true;
 		$allcaps['edit_theme_options'] = true;
+		$allcaps['upload_files']       = true;
 		return $allcaps;
 	}
 
@@ -62,11 +64,18 @@ final class CustomizerSurface {
 				'WP_Customize_Manager',
 				'WP_Customize_Setting',
 				'WP_Customize_Control',
+				'WP_Customize_Cropped_Image_Control',
+				'WP_Customize_Image_Control',
 				'WP_Customize_Section',
+				'WP_Customize_Media_Control',
 				'WP_Customize_Panel',
 				'WP_Customize_Selective_Refresh',
 				'WP_Customize_Partial',
+				'WP_Customize_Site_Icon_Control',
+				'WP_Customize_Upload_Control',
 				'WP_Error',
+				'WP_Post',
+				'WP_Rewrite',
 			) as $class
 		) {
 			if ( ! class_exists( $class ) ) {
@@ -76,14 +85,19 @@ final class CustomizerSurface {
 
 		foreach (
 			array(
+				'__',
+				'absint',
 				'add_action',
 				'add_filter',
 				'apply_filters',
+				'attachment_url_to_postid',
 				'checked',
 				'current_user_can',
 				'esc_attr',
 				'esc_html',
+				'esc_js',
 				'esc_textarea',
+				'get_bloginfo',
 				'get_option',
 				'get_raw_theme_root',
 				'get_stylesheet',
@@ -95,7 +109,13 @@ final class CustomizerSurface {
 				'remove_filter',
 				'selected',
 				'update_option',
+				'wp_basename',
+				'wp_cache_set',
+				'wp_check_filetype',
+				'wp_get_ext_types',
 				'wp_json_encode',
+				'wp_mime_type_icon',
+				'wp_prepare_attachment_for_js',
 				'wp_slash',
 			) as $function
 		) {
@@ -1328,6 +1348,441 @@ final class CustomizerSurface {
 		);
 	}
 
+	private static function check_media_control_subclasses( \ComponentFuzz\FuzzContext $ctx ): array {
+		$manager  = self::manager( $ctx );
+		$failures = array();
+
+		if ( ! isset( $GLOBALS['wp_rewrite'] ) || ! $GLOBALS['wp_rewrite'] instanceof \WP_Rewrite ) {
+			$GLOBALS['wp_rewrite'] = new \WP_Rewrite();
+		}
+
+		$section_id = self::id( $ctx, 'media-section' );
+		$manager->add_section(
+			$section_id,
+			array(
+				'title'      => 'Media Controls',
+				'capability' => self::CAPABILITY,
+			)
+		);
+
+		$token             = substr( md5( (string) $ctx->seed() . ':' . (string) $ctx->iteration() ), 0, 10 );
+		$image_default_url = "http://example.test/wp-content/uploads/component-fuzz-media-{$token}.jpg";
+		$media_setting_id  = self::id( $ctx->fork( 'media-setting' ), 'media-setting' );
+		$media_label       = 'Media &amp; Label';
+		$select_override   = 'Choose component media ' . $token;
+		$extra_label       = 'Component extra ' . $token;
+
+		$manager->add_setting(
+			$media_setting_id,
+			array(
+				'type'       => 'component_fuzz_media',
+				'capability' => self::CAPABILITY,
+				'default'    => $image_default_url,
+			)
+		);
+		$media_control = new \WP_Customize_Media_Control(
+			$manager,
+			self::id( $ctx->fork( 'media-control' ), 'media-control' ),
+			array(
+				'settings'      => $media_setting_id,
+				'section'       => $section_id,
+				'capability'    => self::CAPABILITY,
+				'label'         => $media_label,
+				'description'   => '<strong>Component fuzz media description</strong>',
+				'mime_type'     => 'image/jpeg',
+				'button_labels' => array(
+					'select'                 => $select_override,
+					'component_fuzz_extra'   => $extra_label,
+				),
+			)
+		);
+		$manager->add_control( $media_control );
+
+		$media_json       = self::media_control_json( $media_control );
+		$media_attachment = $media_json['defaultAttachment'] ?? array();
+		$media_labels     = $media_json['button_labels'] ?? array();
+		$media_template   = self::capture_output(
+			static function () use ( $media_control ): void {
+				$media_control->content_template();
+			}
+		);
+
+		self::collect_failure(
+			$failures,
+			'media' === ( $media_json['type'] ?? null )
+				&& 'image/jpeg' === ( $media_json['mime_type'] ?? null )
+				&& 'Media & Label' === ( $media_json['label'] ?? null )
+				&& true === ( $media_json['canUpload'] ?? null )
+				&& $select_override === ( $media_labels['select'] ?? null )
+				&& $extra_label === ( $media_labels['component_fuzz_extra'] ?? null )
+				&& self::array_has_keys( $media_labels, array( 'select', 'site_icon', 'change', 'default', 'remove', 'placeholder', 'frame_title', 'frame_button' ) ),
+			'media control JSON decodes labels, reports upload capability, and merges image button labels',
+			array(
+				'json'   => $media_json,
+				'labels' => $media_labels,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			1 === (int) ( $media_attachment['id'] ?? 0 )
+				&& $image_default_url === ( $media_attachment['url'] ?? null )
+				&& 'image' === ( $media_attachment['type'] ?? null )
+				&& \wp_basename( $image_default_url ) === ( $media_attachment['title'] ?? null )
+				&& $image_default_url === ( $media_attachment['sizes']['full']['url'] ?? null )
+				&& ( $media_json['attachment'] ?? null ) == $media_attachment,
+			'image default URLs create a default attachment and alias the selected attachment when values match',
+			array(
+				'defaultAttachment' => $media_attachment,
+				'attachment'        => $media_json['attachment'] ?? null,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			str_contains( $media_template, 'customize-control-title' )
+				&& str_contains( $media_template, 'customize-control-notifications-container' )
+				&& str_contains( $media_template, 'attachment-media-view-{{ data.attachment.type }}' )
+				&& str_contains( $media_template, 'wp-audio-shortcode' )
+				&& str_contains( $media_template, 'wp-video-shortcode' )
+				&& str_contains( $media_template, 'remove-button' )
+				&& str_contains( $media_template, 'upload-button control-focus' )
+				&& str_contains( $media_template, 'default-button' )
+				&& ! str_contains( $media_template, $image_default_url )
+				&& ! str_contains( $media_template, $media_label )
+				&& ! str_contains( $media_template, $select_override ),
+			'media control template keeps media branches structural and data-driven',
+			array( 'template' => self::describe_string( $media_template ) )
+		);
+
+		$deny_upload = static function ( array $allcaps ): array {
+			$allcaps['upload_files'] = false;
+			return $allcaps;
+		};
+		\add_filter( 'user_has_cap', $deny_upload, 1000, 4 );
+		try {
+			$denied_json = self::media_control_json( $media_control );
+		} finally {
+			\remove_filter( 'user_has_cap', $deny_upload, 1000 );
+		}
+
+		self::collect_failure(
+			$failures,
+			false === ( $denied_json['canUpload'] ?? null ),
+			'media control canUpload follows the upload_files capability',
+			array( 'json' => $denied_json )
+		);
+
+		$document_url        = "http://example.test/wp-content/uploads/component-fuzz-media-{$token}.pdf";
+		$document_setting_id = self::id( $ctx->fork( 'document-setting' ), 'media-setting' );
+		$manager->add_setting(
+			$document_setting_id,
+			array(
+				'type'       => 'component_fuzz_media',
+				'capability' => self::CAPABILITY,
+				'default'    => $document_url,
+			)
+		);
+		$document_control = new \WP_Customize_Media_Control(
+			$manager,
+			self::id( $ctx->fork( 'document-control' ), 'media-control' ),
+			array(
+				'settings'   => $document_setting_id,
+				'section'    => $section_id,
+				'capability' => self::CAPABILITY,
+				'mime_type'  => 'application/pdf',
+				'label'      => 'Document Media',
+			)
+		);
+		$manager->add_control( $document_control );
+		$document_json       = self::media_control_json( $document_control );
+		$document_attachment = $document_json['defaultAttachment'] ?? array();
+
+		self::collect_failure(
+			$failures,
+			'media' === ( $document_json['type'] ?? null )
+				&& 'application/pdf' === ( $document_json['mime_type'] ?? null )
+				&& 'document' === ( $document_attachment['type'] ?? null )
+				&& $document_url === ( $document_attachment['url'] ?? null )
+				&& \wp_basename( $document_url ) === ( $document_attachment['title'] ?? null )
+				&& ! isset( $document_attachment['sizes'] )
+				&& ! array_key_exists( 'site_icon', $document_json['button_labels'] ?? array() )
+				&& ( $document_json['attachment'] ?? null ) == $document_attachment,
+			'document default URLs use document attachment models and file button labels',
+			array(
+				'json'              => $document_json,
+				'defaultAttachment' => $document_attachment,
+			)
+		);
+
+		$label_cases = array(
+			'image/png'       => array( 'word' => 'image', 'siteIcon' => true ),
+			'audio/mpeg'      => array( 'word' => 'audio', 'siteIcon' => false ),
+			'video/mp4'       => array( 'word' => 'video', 'siteIcon' => false ),
+			'application/pdf' => array( 'word' => 'file', 'siteIcon' => false ),
+		);
+		$label_results = array();
+		foreach ( $label_cases as $mime_type => $expectation ) {
+			$label_setting_id = self::id( $ctx->fork( 'labels-' . str_replace( array( '/', '-' ), '_', $mime_type ) ), 'media-label-setting' );
+			$manager->add_setting(
+				$label_setting_id,
+				array(
+					'type'       => 'component_fuzz_media',
+					'capability' => self::CAPABILITY,
+					'default'    => '',
+				)
+			);
+			$label_override = 'Override ' . $mime_type . ' ' . $token;
+			$label_control  = new \WP_Customize_Media_Control(
+				$manager,
+				self::id( $ctx->fork( 'labels-control-' . str_replace( array( '/', '-' ), '_', $mime_type ) ), 'media-label-control' ),
+				array(
+					'settings'      => $label_setting_id,
+					'section'       => $section_id,
+					'capability'    => self::CAPABILITY,
+					'mime_type'     => $mime_type,
+					'button_labels' => array( 'select' => $label_override ),
+				)
+			);
+			$manager->add_control( $label_control );
+
+			$labels  = $label_control->button_labels;
+			$has_all = self::array_has_keys( $labels, array( 'select', 'change', 'default', 'remove', 'placeholder', 'frame_title', 'frame_button' ) );
+			$ok      = $has_all
+				&& $label_override === ( $labels['select'] ?? null )
+				&& (bool) $expectation['siteIcon'] === array_key_exists( 'site_icon', $labels )
+				&& str_contains( strtolower( (string) ( $labels['placeholder'] ?? '' ) ), (string) $expectation['word'] );
+
+			$label_results[ $mime_type ] = array(
+				'ok'     => $ok,
+				'labels' => $labels,
+			);
+		}
+
+		self::collect_failure(
+			$failures,
+			array() === array_filter(
+				$label_results,
+				static fn ( array $result ): bool => ! $result['ok']
+			),
+			'media control default button labels track mime families while preserving caller overrides',
+			array( 'cases' => $label_results )
+		);
+
+		$image_control_setting_id = self::id( $ctx->fork( 'image-subclass-setting' ), 'media-setting' );
+		$manager->add_setting(
+			$image_control_setting_id,
+			array(
+				'type'       => 'component_fuzz_media',
+				'capability' => self::CAPABILITY,
+				'default'    => $image_default_url,
+			)
+		);
+		$image_control = new \WP_Customize_Image_Control(
+			$manager,
+			self::id( $ctx->fork( 'image-subclass-control' ), 'media-control' ),
+			array(
+				'settings'   => $image_control_setting_id,
+				'section'    => $section_id,
+				'capability' => self::CAPABILITY,
+			)
+		);
+		$manager->add_control( $image_control );
+		$image_control_json = self::media_control_json( $image_control );
+
+		self::collect_failure(
+			$failures,
+			'image' === ( $image_control_json['type'] ?? null )
+				&& 'image' === ( $image_control_json['mime_type'] ?? null )
+				&& 'image' === ( $image_control_json['defaultAttachment']['type'] ?? null )
+				&& array_key_exists( 'site_icon', $image_control_json['button_labels'] ?? array() ),
+			'image control inherits media JSON with the image type and image defaults',
+			array( 'json' => $image_control_json )
+		);
+
+		$upload_url        = "http://example.test/wp-content/uploads/component-fuzz-upload-{$token}.jpg";
+		$upload_setting_id = self::id( $ctx->fork( 'upload-setting' ), 'media-setting' );
+		$upload_id         = 700000 + $ctx->int( 1, 99999 );
+		self::seed_attachment( $upload_id, $upload_url, 'Uploaded ' . $token );
+		$manager->add_setting(
+			$upload_setting_id,
+			array(
+				'type'       => 'component_fuzz_media',
+				'capability' => self::CAPABILITY,
+				'default'    => $upload_url,
+			)
+		);
+		$upload_control = new \WP_Customize_Upload_Control(
+			$manager,
+			self::id( $ctx->fork( 'upload-control' ), 'media-control' ),
+			array(
+				'settings'   => $upload_setting_id,
+				'section'    => $section_id,
+				'capability' => self::CAPABILITY,
+				'mime_type'  => 'image/jpeg',
+			)
+		);
+		$manager->add_control( $upload_control );
+
+		$missing_upload_url        = "http://example.test/wp-content/uploads/component-fuzz-missing-{$token}.jpg";
+		$missing_upload_setting_id = self::id( $ctx->fork( 'upload-missing-setting' ), 'media-setting' );
+		$manager->add_setting(
+			$missing_upload_setting_id,
+			array(
+				'type'       => 'component_fuzz_media',
+				'capability' => self::CAPABILITY,
+				'default'    => $missing_upload_url,
+			)
+		);
+		$missing_upload_control = new \WP_Customize_Upload_Control(
+			$manager,
+			self::id( $ctx->fork( 'upload-missing-control' ), 'media-control' ),
+			array(
+				'settings'   => $missing_upload_setting_id,
+				'section'    => $section_id,
+				'capability' => self::CAPABILITY,
+				'mime_type'  => 'image/jpeg',
+			)
+		);
+		$manager->add_control( $missing_upload_control );
+
+		$url_resolver = static function ( $post_id, string $url ) use ( $upload_url, $upload_id ): int {
+			return $upload_url === $url ? $upload_id : 0;
+		};
+		\add_filter( 'pre_attachment_url_to_postid', $url_resolver, 10, 2 );
+		try {
+			$upload_json         = self::media_control_json( $upload_control );
+			$missing_upload_json = self::media_control_json( $missing_upload_control );
+		} finally {
+			\remove_filter( 'pre_attachment_url_to_postid', $url_resolver, 10 );
+		}
+
+		self::collect_failure(
+			$failures,
+			$upload_id === (int) ( $upload_json['attachment']['id'] ?? 0 )
+				&& $upload_url === ( $upload_json['attachment']['url'] ?? null )
+				&& 'image' === ( $upload_json['attachment']['type'] ?? null )
+				&& $upload_url === ( $upload_json['attachment']['sizes']['full']['url'] ?? null )
+				&& 1 === (int) ( $missing_upload_json['attachment']['id'] ?? 0 )
+				&& $missing_upload_url === ( $missing_upload_json['attachment']['url'] ?? null ),
+			'upload control resolves URL values to prepared attachments only when attachment_url_to_postid finds one',
+			array(
+				'resolved' => $upload_json['attachment'] ?? null,
+				'missing'  => $missing_upload_json['attachment'] ?? null,
+			)
+		);
+
+		$cropped_setting_id = self::id( $ctx->fork( 'cropped-setting' ), 'media-setting' );
+		$manager->add_setting(
+			$cropped_setting_id,
+			array(
+				'type'       => 'component_fuzz_media',
+				'capability' => self::CAPABILITY,
+				'default'    => "http://example.test/wp-content/uploads/component-fuzz-crop-{$token}.png",
+			)
+		);
+		$cropped_control = new \WP_Customize_Cropped_Image_Control(
+			$manager,
+			self::id( $ctx->fork( 'cropped-control' ), 'media-control' ),
+			array(
+				'settings'    => $cropped_setting_id,
+				'section'     => $section_id,
+				'capability'  => self::CAPABILITY,
+				'width'       => -33,
+				'height'      => '91',
+				'flex_width'  => true,
+				'flex_height' => false,
+			)
+		);
+		$manager->add_control( $cropped_control );
+		$cropped_json = self::media_control_json( $cropped_control );
+
+		self::collect_failure(
+			$failures,
+			'cropped_image' === ( $cropped_json['type'] ?? null )
+				&& 33 === ( $cropped_json['width'] ?? null )
+				&& 91 === ( $cropped_json['height'] ?? null )
+				&& 1 === ( $cropped_json['flex_width'] ?? null )
+				&& 0 === ( $cropped_json['flex_height'] ?? null )
+				&& 'image' === ( $cropped_json['defaultAttachment']['type'] ?? null ),
+			'cropped image control normalizes crop dimensions and flex flags through absint',
+			array( 'json' => $cropped_json )
+		);
+
+		$site_icon_setting_id  = self::id( $ctx->fork( 'site-icon-setting' ), 'media-setting' );
+		$site_icon_default_url = "http://example.test/wp-content/uploads/component-fuzz-site-icon-{$token}.png";
+		$site_icon_label       = 'Select Site Icon';
+		$manager->add_setting(
+			$site_icon_setting_id,
+			array(
+				'type'       => 'component_fuzz_media',
+				'capability' => self::CAPABILITY,
+				'default'    => $site_icon_default_url,
+			)
+		);
+		$had_site_icon_hook = self::hook_has_callback_at( 'customize_controls_print_styles', 'wp_site_icon', 99 );
+		$site_icon_control  = new \WP_Customize_Site_Icon_Control(
+			$manager,
+			self::id( $ctx->fork( 'site-icon-control' ), 'media-control' ),
+			array(
+				'settings'      => $site_icon_setting_id,
+				'section'       => $section_id,
+				'capability'    => self::CAPABILITY,
+				'width'         => 512,
+				'height'        => -512,
+				'flex_width'    => false,
+				'flex_height'   => true,
+				'button_labels' => array( 'site_icon' => $site_icon_label ),
+			)
+		);
+		$manager->add_control( $site_icon_control );
+		$site_icon_hook_registered = self::hook_has_callback_at( 'customize_controls_print_styles', 'wp_site_icon', 99 );
+		$site_icon_json            = self::media_control_json( $site_icon_control );
+		$site_icon_template        = self::capture_output(
+			static function () use ( $site_icon_control ): void {
+				$site_icon_control->print_template();
+			}
+		);
+		if ( ! $had_site_icon_hook ) {
+			\remove_action( 'customize_controls_print_styles', 'wp_site_icon', 99 );
+		}
+
+		self::collect_failure(
+			$failures,
+			'site_icon' === ( $site_icon_json['type'] ?? null )
+				&& 512 === ( $site_icon_json['width'] ?? null )
+				&& 512 === ( $site_icon_json['height'] ?? null )
+				&& 0 === ( $site_icon_json['flex_width'] ?? null )
+				&& 1 === ( $site_icon_json['flex_height'] ?? null )
+				&& $site_icon_hook_registered
+				&& ( $had_site_icon_hook || ! self::hook_has_callback_at( 'customize_controls_print_styles', 'wp_site_icon', 99 ) )
+				&& str_contains( $site_icon_template, 'tmpl-customize-control-site_icon-content' )
+				&& str_contains( $site_icon_template, 'site-icon-preview customizer' )
+				&& str_contains( $site_icon_template, 'app-icon-preview' )
+				&& str_contains( $site_icon_template, 'browser-icon-preview' )
+				&& str_contains( $site_icon_template, '--site-icon-url' )
+				&& str_contains( $site_icon_template, $site_icon_label )
+				&& ! str_contains( $site_icon_template, $site_icon_default_url ),
+			'site icon control installs its print-styles hook, exports cropped JSON, and prints structural preview template markup',
+			array(
+				'json'                    => $site_icon_json,
+				'hadHook'                 => $had_site_icon_hook,
+				'hookRegistered'          => $site_icon_hook_registered,
+				'hookAfterCleanup'        => self::hook_has_callback_at( 'customize_controls_print_styles', 'wp_site_icon', 99 ),
+				'template'                => self::describe_string( $site_icon_template ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'customizer.media-controls.subclass-json-templates-capabilities',
+			array() === $failures,
+			array(
+				'failures' => $failures,
+			)
+		);
+	}
+
 	private static function check_selective_refresh_partials( \ComponentFuzz\FuzzContext $ctx ): array {
 		$manager    = self::manager( $ctx );
 		$failures   = array();
@@ -1778,6 +2233,7 @@ final class CustomizerSurface {
 			$allcaps['edit_theme_options']     = true;
 			$allcaps['unfiltered_html']        = true;
 			$allcaps['edit_css']               = true;
+			$allcaps['upload_files']           = true;
 			return $allcaps;
 		};
 
@@ -1787,6 +2243,105 @@ final class CustomizerSurface {
 		} finally {
 			\remove_filter( 'user_has_cap', $cap_filter, 10 );
 		}
+	}
+
+	private static function media_control_json( \WP_Customize_Control $control ): array {
+		$control->json = array();
+		return self::with_capabilities(
+			static function () use ( $control ): array {
+				$control->to_json();
+				return $control->json;
+			}
+		);
+	}
+
+	private static function capture_output( callable $callback ): string {
+		ob_start();
+		try {
+			$callback();
+			return (string) ob_get_clean();
+		} catch ( \Throwable $e ) {
+			ob_end_clean();
+			throw $e;
+		}
+	}
+
+	private static function array_has_keys( array $array, array $keys ): bool {
+		foreach ( $keys as $key ) {
+			if ( ! array_key_exists( $key, $array ) ) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	private static function seed_attachment( int $attachment_id, string $url, string $title ): void {
+		$path      = (string) parse_url( $url, PHP_URL_PATH );
+		$filename  = \wp_basename( $path );
+		$filename  = '' === $filename ? 'component-fuzz-upload.jpg' : $filename;
+		$extension = str_contains( $filename, '.' ) ? substr( $filename, strrpos( $filename, '.' ) ) : '.jpg';
+		$stem      = str_ends_with( $filename, $extension ) ? substr( $filename, 0, -strlen( $extension ) ) : $filename;
+
+		$post = new \WP_Post(
+			(object) array(
+				'ID'                    => $attachment_id,
+				'post_author'           => 0,
+				'post_date'             => '2026-07-15 12:00:00',
+				'post_date_gmt'         => '2026-07-15 10:00:00',
+				'post_content'          => '',
+				'post_title'            => $title,
+				'post_excerpt'          => '',
+				'post_status'           => 'inherit',
+				'comment_status'        => 'closed',
+				'ping_status'           => 'closed',
+				'post_password'         => '',
+				'post_name'             => 'component-fuzz-upload-' . $attachment_id,
+				'to_ping'               => '',
+				'pinged'                => '',
+				'post_modified'         => '2026-07-15 12:00:00',
+				'post_modified_gmt'     => '2026-07-15 10:00:00',
+				'post_content_filtered' => '',
+				'post_parent'           => 0,
+				'guid'                  => $url,
+				'menu_order'            => 0,
+				'post_type'             => 'attachment',
+				'post_mime_type'        => 'image/jpeg',
+				'comment_count'         => 0,
+				'filter'                => 'raw',
+			)
+		);
+
+		\wp_cache_set( $attachment_id, (object) $post->to_array(), 'posts' );
+		\wp_cache_set(
+			$attachment_id,
+			array(
+				'_wp_attached_file'        => array( $filename ),
+				'_wp_attachment_image_alt' => array( 'Component fuzz uploaded image' ),
+				'_wp_attachment_context'   => array( '' ),
+				'_wp_attachment_metadata'  => array(
+					array(
+						'width'  => 640,
+						'height' => 480,
+						'file'   => $filename,
+						'sizes'  => array(
+							'medium' => array(
+								'file'      => $stem . '-medium' . $extension,
+								'width'     => 300,
+								'height'    => 225,
+								'mime-type' => 'image/jpeg',
+							),
+						),
+					),
+				),
+			),
+			'post_meta'
+		);
+	}
+
+	private static function hook_has_callback_at( string $hook, string $callback, int $priority ): bool {
+		return isset( $GLOBALS['wp_filter'][ $hook ] )
+			&& $GLOBALS['wp_filter'][ $hook ] instanceof \WP_Hook
+			&& isset( $GLOBALS['wp_filter'][ $hook ]->callbacks[ $priority ][ $callback ] );
 	}
 
 	private static function id( \ComponentFuzz\FuzzContext $ctx, string $prefix ): string {
@@ -1947,6 +2502,7 @@ final class CustomizerSurface {
 					'wp_filter',
 					'wp_filters',
 					'wp_object_cache',
+					'wp_rewrite',
 					'wp_stylesheet_path',
 					'wp_template_path',
 					'wp_theme_directories',
