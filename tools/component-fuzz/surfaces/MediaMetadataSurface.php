@@ -48,6 +48,7 @@ final class MediaMetadataSurface {
 				$rows[] = self::check_generated_metadata_replacement_oracles( $ctx->fork( 'metadata-shapes' ), $temp_root );
 				$rows[] = self::check_original_image_metadata_helpers( $ctx->fork( 'original-image' ), $temp_root );
 				$rows[] = self::check_generate_attachment_metadata_branches( $ctx->fork( 'generate' ), $temp_root );
+				$rows[] = self::check_generate_attachment_cover_creation_reuse( $ctx->fork( 'cover-art' ), $temp_root );
 			}
 		} catch ( \Throwable $e ) {
 			$rows[] = self::row(
@@ -83,6 +84,7 @@ final class MediaMetadataSurface {
 			array(
 				'add_filter',
 				'add_action',
+				'add_post_type_support',
 				'add_theme_support',
 				'create_initial_post_types',
 				'create_initial_taxonomies',
@@ -140,6 +142,7 @@ final class MediaMetadataSurface {
 				'wp_get_upload_dir',
 				'wp_get_video_extensions',
 				'wp_image_file_matches_image_meta',
+				'wp_insert_attachment',
 				'wp_json_encode',
 				'wp_mediaelement_fallback',
 				'wp_mime_type_icon',
@@ -147,6 +150,7 @@ final class MediaMetadataSurface {
 				'wp_playlist_shortcode',
 				'wp_audio_shortcode',
 				'wp_video_shortcode',
+				'wp_upload_bits',
 				'wp_update_attachment_metadata',
 				'wp_read_audio_metadata',
 				'wp_read_video_metadata',
@@ -2412,6 +2416,295 @@ final class MediaMetadataSurface {
 		);
 	}
 
+	private static function check_generate_attachment_cover_creation_reuse( \ComponentFuzz\FuzzContext $ctx, string $temp_root ): array {
+		$failures    = array();
+		$events      = array(
+			'generated'     => array(),
+			'handleUpload'  => array(),
+			'read'          => array(),
+			'thumbnailArgs' => array(),
+			'uploadBits'    => array(),
+			'uploadDirs'    => array(),
+		);
+		$fixture_dir = $temp_root . DIRECTORY_SEPARATOR . 'cover-fixtures';
+		$audio_path  = self::write_fixture( $fixture_dir, 'cover-audio.mp3', "ID3\x04\x00\x00\x00\x00\x00\x00" . $ctx->bytes( 8, 32 ) );
+		$video_path  = self::write_fixture( $fixture_dir, 'cover-video.mp4', self::mp4_like_bytes( $ctx ) . $ctx->bytes( 4, 16 ) );
+		$empty_path  = self::write_fixture( $fixture_dir, 'empty-cover-audio.mp3', "ID3\x04\x00\x00\x00\x00\x00\x00" . $ctx->bytes( 4, 12 ) );
+
+		if ( null === $audio_path || null === $video_path || null === $empty_path ) {
+			return $ctx->result(
+				'media-metadata.generate-attachment-cover-creation-reuse',
+				false,
+				array( 'failures' => array( array( 'message' => 'cover attachment fixtures are writable' ) ) )
+			);
+		}
+
+		$audio_id = 873000 + ( $ctx->iteration() * 10 );
+		$video_id = 873001 + ( $ctx->iteration() * 10 );
+		$empty_id = 873002 + ( $ctx->iteration() * 10 );
+
+		self::seed_attachment_post( $audio_id, 'audio/mpeg', $audio_path );
+		self::seed_attachment_post( $video_id, 'video/mp4', $video_path );
+		self::seed_attachment_post( $empty_id, 'audio/mpeg', $empty_path );
+
+		$cover_bytes       = self::tiny_png_bytes();
+		$cover_hash        = md5( $cover_bytes );
+		$cover_sha1        = sha1( $cover_bytes );
+		$cover_title       = 'Component Fuzz Cover ' . $ctx->identifier( 4, 10 );
+		$upload_root       = $temp_root . DIRECTORY_SEPARATOR . 'cover-uploads';
+		$audio_support     = \post_type_supports( 'attachment:audio', 'thumbnail' );
+		$video_support     = \post_type_supports( 'attachment:video', 'thumbnail' );
+		$before            = self::content_counts();
+		$cover_id          = 0;
+		$audio_meta        = null;
+		$video_meta        = null;
+		$empty_meta        = null;
+		$after_audio       = array();
+		$after_video       = array();
+		$after_empty       = array();
+
+		$upload_dir_filter = static function ( array $uploads ) use ( $upload_root, &$events ): array {
+			$uploads['basedir'] = $upload_root;
+			$uploads['baseurl'] = 'http://example.test/component-fuzz-media-cover';
+			$uploads['path']    = $upload_root;
+			$uploads['url']     = $uploads['baseurl'];
+			$uploads['subdir']  = '';
+			$uploads['error']   = false;
+			$events['uploadDirs'][] = $uploads['path'];
+			return $uploads;
+		};
+		$upload_bits_filter = static function ( $payload ) use ( &$events ) {
+			if ( is_array( $payload ) ) {
+				$events['uploadBits'][] = array(
+					'name'  => (string) ( $payload['name'] ?? '' ),
+					'bytes' => strlen( (string) ( $payload['bits'] ?? '' ) ),
+					'sha1'  => sha1( (string) ( $payload['bits'] ?? '' ) ),
+				);
+			}
+			return $payload;
+		};
+		$handle_upload_filter = static function ( array $upload, string $context ) use ( &$events ): array {
+			$events['handleUpload'][] = array(
+				'context' => $context,
+				'file'    => basename( (string) ( $upload['file'] ?? '' ) ),
+				'type'    => $upload['type'] ?? null,
+				'error'   => $upload['error'] ?? null,
+			);
+			return $upload;
+		};
+		$thumbnail_args_filter = static function ( array $image_attachment, array $metadata, array $uploaded ) use ( &$events, $cover_title ): array {
+			$events['thumbnailArgs'][] = array(
+				'mime'     => $image_attachment['post_mime_type'] ?? null,
+				'file'     => basename( (string) ( $uploaded['file'] ?? '' ) ),
+				'hasImage' => isset( $metadata['image']['mime'] ),
+			);
+			$image_attachment['post_title']  = $cover_title;
+			$image_attachment['post_status'] = 'inherit';
+			return $image_attachment;
+		};
+		$audio_filter = static function ( array $metadata, string $file, ?string $file_format, array $data ) use ( &$events, $audio_path, $empty_path, $cover_bytes ): array {
+			unset( $data );
+			$events['read'][] = array(
+				'type'   => 'audio',
+				'file'   => basename( $file ),
+				'format' => $file_format,
+			);
+			$metadata['component_fuzz_cover_branch'] = basename( $file ) === basename( $empty_path ) ? 'empty-audio' : 'audio';
+			$metadata['length']                      = 43;
+			$metadata['fileformat']                  = 'mp3';
+			$metadata['image']                       = array(
+				'mime'   => 'image/png',
+				'width'  => 1,
+				'height' => 1,
+			);
+
+			if ( basename( $file ) === basename( $audio_path ) ) {
+				$metadata['image']['data'] = $cover_bytes;
+			}
+
+			return $metadata;
+		};
+		$video_filter = static function ( array $metadata, string $file, ?string $file_format, array $data ) use ( &$events, $cover_bytes ): array {
+			unset( $data );
+			$events['read'][] = array(
+				'type'   => 'video',
+				'file'   => basename( $file ),
+				'format' => $file_format,
+			);
+			$metadata['component_fuzz_cover_branch'] = 'video';
+			$metadata['width']                       = 640;
+			$metadata['height']                      = 360;
+			$metadata['fileformat']                  = 'mp4';
+			$metadata['image']                       = array(
+				'data'   => $cover_bytes,
+				'mime'   => 'image/png',
+				'width'  => 1,
+				'height' => 1,
+			);
+			return $metadata;
+		};
+		$generate_filter = static function ( array $metadata, int $attachment_id, string $context ) use ( &$events ): array {
+			$events['generated'][] = array(
+				'id'      => $attachment_id,
+				'context' => $context,
+				'keys'    => array_keys( $metadata ),
+			);
+			return $metadata;
+		};
+
+		\add_post_type_support( 'attachment:audio', 'thumbnail' );
+		\add_post_type_support( 'attachment:video', 'thumbnail' );
+		\add_filter( 'upload_dir', $upload_dir_filter );
+		\add_filter( 'wp_upload_bits', $upload_bits_filter );
+		\add_filter( 'wp_handle_upload', $handle_upload_filter, 10, 2 );
+		\add_filter( 'attachment_thumbnail_args', $thumbnail_args_filter, 10, 3 );
+		\add_filter( 'wp_read_audio_metadata', $audio_filter, 10, 4 );
+		\add_filter( 'wp_read_video_metadata', $video_filter, 10, 4 );
+		\add_filter( 'wp_generate_attachment_metadata', $generate_filter, 10, 3 );
+		try {
+			$audio_meta  = \wp_generate_attachment_metadata( $audio_id, $audio_path );
+			$cover_id    = (int) \get_post_meta( $audio_id, '_thumbnail_id', true );
+			$after_audio = self::content_counts();
+			$video_meta  = \wp_generate_attachment_metadata( $video_id, $video_path );
+			$after_video = self::content_counts();
+			$empty_meta  = \wp_generate_attachment_metadata( $empty_id, $empty_path );
+			$after_empty = self::content_counts();
+		} finally {
+			\remove_filter( 'wp_generate_attachment_metadata', $generate_filter, 10 );
+			\remove_filter( 'wp_read_video_metadata', $video_filter, 10 );
+			\remove_filter( 'wp_read_audio_metadata', $audio_filter, 10 );
+			\remove_filter( 'attachment_thumbnail_args', $thumbnail_args_filter, 10 );
+			\remove_filter( 'wp_handle_upload', $handle_upload_filter, 10 );
+			\remove_filter( 'wp_upload_bits', $upload_bits_filter );
+			\remove_filter( 'upload_dir', $upload_dir_filter );
+			if ( ! $audio_support ) {
+				\remove_post_type_support( 'attachment:audio', 'thumbnail' );
+			}
+			if ( ! $video_support ) {
+				\remove_post_type_support( 'attachment:video', 'thumbnail' );
+			}
+		}
+
+		$cover_post           = $cover_id > 0 ? \get_post( $cover_id ) : null;
+		$cover_file           = $cover_id > 0 ? \get_attached_file( $cover_id, true ) : '';
+		$cover_hash_meta      = $cover_id > 0 ? \get_post_meta( $cover_id, '_cover_hash', true ) : '';
+		$audio_thumbnail      = (int) \get_post_meta( $audio_id, '_thumbnail_id', true );
+		$video_thumbnail      = (int) \get_post_meta( $video_id, '_thumbnail_id', true );
+		$empty_thumbnail      = \get_post_meta( $empty_id, '_thumbnail_id', true );
+		$generated_ids        = array_map( 'intval', array_column( $events['generated'], 'id' ) );
+
+		self::collect_failure(
+			$failures,
+			is_array( $audio_meta )
+				&& is_array( $video_meta )
+				&& is_array( $empty_meta )
+				&& 'audio' === ( $audio_meta['component_fuzz_cover_branch'] ?? null )
+				&& 'video' === ( $video_meta['component_fuzz_cover_branch'] ?? null )
+				&& 'empty-audio' === ( $empty_meta['component_fuzz_cover_branch'] ?? null )
+				&& ! isset( $audio_meta['image']['data'], $video_meta['image']['data'], $empty_meta['image']['data'] )
+				&& 'image/png' === ( $audio_meta['image']['mime'] ?? null )
+				&& 'image/png' === ( $video_meta['image']['mime'] ?? null )
+				&& 'image/png' === ( $empty_meta['image']['mime'] ?? null ),
+			'audio/video metadata generation strips cover binary data while preserving bounded image metadata',
+			array(
+				'audioMeta' => $audio_meta,
+				'videoMeta' => $video_meta,
+				'emptyMeta' => $empty_meta,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$cover_post instanceof \WP_Post
+				&& 'attachment' === $cover_post->post_type
+				&& 'inherit' === $cover_post->post_status
+				&& 'image/png' === $cover_post->post_mime_type
+				&& $cover_title === $cover_post->post_title
+				&& $cover_hash === $cover_hash_meta
+				&& 1 === count( $events['uploadBits'] )
+				&& $cover_sha1 === ( $events['uploadBits'][0]['sha1'] ?? null )
+				&& strlen( $cover_bytes ) === ( $events['uploadBits'][0]['bytes'] ?? null )
+				&& $audio_thumbnail > 0
+				&& $audio_thumbnail === $cover_id,
+			'audio cover metadata creates one child image attachment with hash, uploaded bytes, and parent thumbnail metadata',
+			array(
+				'coverId'        => $cover_id,
+				'coverPost'      => $cover_post instanceof \WP_Post ? array(
+					'ID'             => $cover_post->ID,
+					'post_type'      => $cover_post->post_type,
+					'post_status'    => $cover_post->post_status,
+					'post_mime_type' => $cover_post->post_mime_type,
+					'post_title'     => $cover_post->post_title,
+				) : $cover_post,
+				'coverFile'      => $cover_file,
+				'coverHash'      => $cover_hash_meta,
+				'uploadBits'     => $events['uploadBits'],
+				'audioThumbnail' => $audio_thumbnail,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$video_thumbnail === $cover_id
+				&& '' === (string) $empty_thumbnail
+				&& ( $after_audio['posts'] ?? null ) === ( $before['posts'] ?? 0 ) + 1
+				&& ( $after_video['posts'] ?? null ) === ( $after_audio['posts'] ?? null )
+				&& ( $after_empty['posts'] ?? null ) === ( $after_video['posts'] ?? null )
+				&& 1 === count( $events['handleUpload'] )
+				&& in_array( $audio_id, $generated_ids, true )
+				&& in_array( $video_id, $generated_ids, true )
+				&& in_array( $empty_id, $generated_ids, true )
+				&& in_array( $cover_id, $generated_ids, true ),
+			'cover hash lookup reuses an existing cover for matching video art and skips mutation for metadata without cover data',
+			array(
+				'before'         => $before,
+				'afterAudio'     => $after_audio,
+				'afterVideo'     => $after_video,
+				'afterEmpty'     => $after_empty,
+				'events'         => $events,
+				'audioThumbnail' => $audio_thumbnail,
+				'videoThumbnail' => $video_thumbnail,
+				'emptyThumbnail' => $empty_thumbnail,
+				'coverId'        => $cover_id,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			false === \has_filter( 'upload_dir', $upload_dir_filter )
+				&& false === \has_filter( 'wp_upload_bits', $upload_bits_filter )
+				&& false === \has_filter( 'wp_handle_upload', $handle_upload_filter )
+				&& false === \has_filter( 'attachment_thumbnail_args', $thumbnail_args_filter )
+				&& false === \has_filter( 'wp_read_audio_metadata', $audio_filter )
+				&& false === \has_filter( 'wp_read_video_metadata', $video_filter )
+				&& false === \has_filter( 'wp_generate_attachment_metadata', $generate_filter )
+				&& \post_type_supports( 'attachment:audio', 'thumbnail' ) === $audio_support
+				&& \post_type_supports( 'attachment:video', 'thumbnail' ) === $video_support,
+			'cover generation filters and post type support flags are restored',
+			array(
+				'uploadDir'      => \has_filter( 'upload_dir', $upload_dir_filter ),
+				'uploadBits'     => \has_filter( 'wp_upload_bits', $upload_bits_filter ),
+				'handleUpload'   => \has_filter( 'wp_handle_upload', $handle_upload_filter ),
+				'thumbnailArgs'  => \has_filter( 'attachment_thumbnail_args', $thumbnail_args_filter ),
+				'audioRead'      => \has_filter( 'wp_read_audio_metadata', $audio_filter ),
+				'videoRead'      => \has_filter( 'wp_read_video_metadata', $video_filter ),
+				'generated'      => \has_filter( 'wp_generate_attachment_metadata', $generate_filter ),
+				'audioSupport'   => \post_type_supports( 'attachment:audio', 'thumbnail' ),
+				'videoSupport'   => \post_type_supports( 'attachment:video', 'thumbnail' ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'media-metadata.generate-attachment-cover-creation-reuse',
+			array() === $failures,
+			array(
+				'coverId'  => $cover_id,
+				'failures' => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
 	private static function collect_parser_shape_failures( array &$failures, $metadata, string $path, string $label, string $type ): void {
 		self::collect_failure(
 			$failures,
@@ -2499,6 +2792,11 @@ final class MediaMetadataSurface {
 		}
 
 		return "\xFF\xD8\xFF\xE0" . $ctx->bytes( 8, 24 );
+	}
+
+	private static function tiny_png_bytes(): string {
+		$bytes = base64_decode( 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=', true );
+		return is_string( $bytes ) ? $bytes : 'component-fuzz-cover';
 	}
 
 	private static function generated_metadata_cases( \ComponentFuzz\FuzzContext $ctx, string $temp_root, string $upload_root, string $upload_url ): array {

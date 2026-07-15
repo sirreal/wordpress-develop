@@ -509,7 +509,7 @@ database, network requests, or a configured site.
   disagreement, wrapper behavior, attachment metadata get/update/delete filter
   contracts, original-image path/URL and image-meta matching normalization
   across seeded upload storage styles, and `wp_generate_attachment_metadata()`
-  audio/video cover-art avoidance.
+  audio/video cover attachment creation/reuse and no-cover skip behavior.
 - `media-remote`: no-live-network remote media helper coverage for
   `download_url()`, `media_sideload_image()`, and selected
   `media_handle_sideload()` branches, including HTTP short-circuit fixtures,
@@ -1012,12 +1012,14 @@ Health surface avoids loopback, WordPress.org, REST availability, update
 download, mail, cron, and filesystem-writing checks unless they are fully
 short-circuited. The mail
 surface intercepts PHPMailer send calls and never attempts real delivery. The
-`media-metadata` surface uses malformed local fixtures and cache-seeded
-attachments only; it does not download remote media, invoke codecs or external
-binaries, insert real attachments, or enable audio/video cover attachment
-generation. Its shortcode rendering coverage stays on direct shortcode helper
-calls with generated local-looking URLs, cache-seeded gallery/playlist
-attachments, `posts_pre_query` short-circuits, and scoped
+`media-metadata` surface uses malformed local fixtures and cache-seeded or
+in-memory stub attachments only; it does not download remote media, invoke
+codecs or external binaries, or persist attachments outside the stub/temp upload
+harness. Its `wp_generate_attachment_metadata()` coverage enables audio/video
+thumbnail support only inside a scoped row to exercise cover attachment
+creation/reuse and cleanup. Its shortcode rendering coverage stays on direct
+shortcode helper calls with generated local-looking URLs, cache-seeded
+gallery/playlist attachments, `posts_pre_query` short-circuits, and scoped
 filter/script/style cleanup, not browser playback. The
 `image-metadata` surface complements that audio/video coverage with generated
 local image byte fixtures and repo-local Core image fixture replays. It does not
