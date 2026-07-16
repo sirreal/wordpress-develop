@@ -6493,6 +6493,7 @@ final class RestObjectControllersSurface {
 		$hierarchy_events = array();
 		$status_events  = array();
 		$status_filter_events = array();
+		$publish_split_events = array();
 		$delete_events  = array();
 		$untrash_events = array();
 
@@ -6537,6 +6538,7 @@ final class RestObjectControllersSurface {
 		$untrash_transition_filter = null;
 		$untrashed_post_action    = null;
 		$delete_filter            = null;
+		$publish_split_cap_filter = null;
 		$added_hierarchy_loop_filter = false;
 		$custom_filters_restored  = false;
 		$cap_filter_restored      = false;
@@ -6545,6 +6547,7 @@ final class RestObjectControllersSurface {
 		$status_filter_restored   = false;
 		$untrash_filter_restored  = false;
 		$delete_filter_restored   = false;
+		$publish_split_filter_restored = false;
 		$default_filters_restored = false;
 		$rewrite_restored         = false;
 		$server_restored          = false;
@@ -6761,6 +6764,23 @@ final class RestObjectControllersSurface {
 						false
 					)
 				);
+				$publish_split_id = $remember_post(
+					\wp_insert_post(
+						\wp_slash(
+							array(
+								'post_type'    => $post_type,
+								'post_title'   => 'REST Parent Publish Split ' . $token,
+								'post_content' => 'REST parent publish split ' . $token,
+								'post_status'  => 'draft',
+								'post_name'    => 'rest-parent-publish-split-' . $token,
+								'post_author'  => $fixtures['author'],
+								'post_parent'  => $same_parent_id,
+							)
+						),
+						true,
+						false
+					)
+				);
 				$trash_lifecycle_id = $remember_post(
 					\wp_insert_post(
 						\wp_slash(
@@ -6918,30 +6938,29 @@ final class RestObjectControllersSurface {
 				$force_parent( $unrelated_loop_b_id, $unrelated_loop_a_id );
 
 				\wp_set_current_user( $fixtures['author'] );
-				$cap_filter = self::install_cap_filter(
-					array(
-						'delete_others_pages',
-						'delete_page',
-						'delete_pages',
-						'delete_post',
-						'delete_posts',
-						'delete_published_pages',
-						'edit_others_pages',
-						'edit_page',
-						'edit_pages',
-						'edit_post',
-						'edit_posts',
-						'edit_private_pages',
-						'edit_published_pages',
-						'publish_pages',
-						'read',
-						'read_page',
-						'read_post',
-					)
+				$parent_assignment_caps = array(
+					'delete_others_pages',
+					'delete_page',
+					'delete_pages',
+					'delete_post',
+					'delete_posts',
+					'delete_published_pages',
+					'edit_others_pages',
+					'edit_page',
+					'edit_pages',
+					'edit_post',
+					'edit_posts',
+					'edit_private_pages',
+					'edit_published_pages',
+					'publish_pages',
+					'read',
+					'read_page',
+					'read_post',
 				);
+				$cap_filter = self::install_cap_filter( $parent_assignment_caps );
 
 				$record_untrash_transition = false;
-				$status_transition_filter = static function ( string $new_status, string $old_status, \WP_Post $post ) use ( &$status_events, &$status_filter_events, $post_type, $status_update_id, $filtered_status_id ): void {
+				$status_transition_filter = static function ( string $new_status, string $old_status, \WP_Post $post ) use ( &$status_events, &$status_filter_events, &$publish_split_events, $post_type, $status_update_id, $filtered_status_id, $publish_split_id ): void {
 					if ( $post_type === $post->post_type && $status_update_id === (int) $post->ID ) {
 						$status_events[] = array(
 							'postId' => (int) $post->ID,
@@ -6952,6 +6971,16 @@ final class RestObjectControllersSurface {
 					}
 					if ( $post_type === $post->post_type && $filtered_status_id === (int) $post->ID ) {
 						$status_filter_events[] = array(
+							'hook'   => 'transition_post_status',
+							'postId' => (int) $post->ID,
+							'type'   => $post->post_type,
+							'old'    => $old_status,
+							'new'    => $new_status,
+							'parent' => (int) $post->post_parent,
+						);
+					}
+					if ( $post_type === $post->post_type && $publish_split_id === (int) $post->ID ) {
+						$publish_split_events[] = array(
 							'hook'   => 'transition_post_status',
 							'postId' => (int) $post->ID,
 							'type'   => $post->post_type,
@@ -7247,6 +7276,71 @@ final class RestObjectControllersSurface {
 				);
 				$filtered_status_collection_data = $filtered_status_collection_response instanceof \WP_REST_Response ? $filtered_status_collection_response->get_data() : array();
 
+				$publish_split_broad_filter_removed = false;
+				if ( null !== $cap_filter ) {
+					$publish_split_broad_filter_removed = self::remove_cap_filter( $cap_filter );
+					$cap_filter                         = null;
+				}
+				$publish_split_allowed_caps = array_fill_keys(
+					array(
+						'edit_others_pages',
+						'edit_page',
+						'edit_pages',
+						'edit_post',
+						'edit_posts',
+						'edit_private_pages',
+						'edit_published_pages',
+						'read',
+						'read_page',
+						'read_post',
+					),
+					true
+				);
+				$publish_split_cap_filter = static function ( array $allcaps, array $caps = array() ) use ( $publish_split_allowed_caps ): array {
+					foreach ( $publish_split_allowed_caps as $cap => $grant ) {
+						$allcaps[ $cap ] = $grant;
+					}
+					foreach ( $caps as $cap ) {
+						if ( isset( $publish_split_allowed_caps[ $cap ] ) ) {
+							$allcaps[ $cap ] = true;
+						} elseif ( 'do_not_allow' !== $cap ) {
+							$allcaps[ $cap ] = false;
+						}
+					}
+					$allcaps['publish_pages'] = false;
+
+					return $allcaps;
+				};
+				\add_filter( 'user_has_cap', $publish_split_cap_filter, 10, 4 );
+				$before_publish_split_update  = $publish_split_id > 0 ? \get_post( $publish_split_id ) : null;
+				$publish_split_update_response = self::dispatch_with_rest_post_dispatch(
+					$server,
+					self::request(
+						'PUT',
+						'/wp/v2/' . $rest_base . '/' . $publish_split_id,
+						array(
+							'_fields' => 'id,parent,slug,status,link,_links',
+							'context' => 'edit',
+						),
+						array(),
+						array(
+							'parent' => $page_parent_id,
+							'status' => 'publish',
+						)
+					)
+				);
+				$after_publish_split_update = $publish_split_id > 0 ? \get_post( $publish_split_id ) : null;
+				\remove_filter( 'user_has_cap', $publish_split_cap_filter, 10 );
+				$publish_split_filter_restored = false === \has_filter( 'user_has_cap', $publish_split_cap_filter );
+				$publish_split_cap_filter      = null;
+				$publish_split_prepare_events  = array_values(
+					array_filter(
+						$prepare_events,
+						static fn ( array $event ): bool => $publish_split_id === (int) ( $event['id'] ?? 0 )
+					)
+				);
+				$cap_filter                    = self::install_cap_filter( $parent_assignment_caps );
+
 				$trash_lifecycle_response = self::dispatch_with_rest_post_dispatch(
 					$server,
 					self::request(
@@ -7527,6 +7621,7 @@ final class RestObjectControllersSurface {
 						'updateChild'    => $post_summary( \get_post( $update_child_id ) ),
 						'statusUpdate'   => $post_summary( \get_post( $status_update_id ) ),
 						'filteredStatus' => $post_summary( \get_post( $filtered_status_id ) ),
+						'publishSplit'   => $post_summary( \get_post( $publish_split_id ) ),
 						'trashLifecycle' => $post_summary( \get_post( $trash_lifecycle_id ) ),
 						'deleteLifecycle' => $post_summary( \get_post( $delete_lifecycle_id ) ),
 						'trashLifecycleAfterUntrash' => $post_summary( $after_untrash ),
@@ -7577,6 +7672,16 @@ final class RestObjectControllersSurface {
 						'filteredStatusCollection' => array(
 							'status' => $filtered_status_collection_response instanceof \WP_REST_Response ? $filtered_status_collection_response->get_status() : null,
 							'data'   => $filtered_status_collection_data,
+						),
+						'publishSplitUpdate' => array(
+							'status'             => $publish_split_update_response instanceof \WP_REST_Response ? $publish_split_update_response->get_status() : null,
+							'data'               => $publish_split_update_response instanceof \WP_REST_Response ? $publish_split_update_response->get_data() : null,
+							'before'             => $post_summary( $before_publish_split_update ),
+							'after'              => $post_summary( $after_publish_split_update ),
+							'broadFilterRemoved' => $publish_split_broad_filter_removed,
+							'strictFilterRestored' => $publish_split_filter_restored,
+							'prepareEvents'      => $publish_split_prepare_events,
+							'statusEvents'       => $publish_split_events,
 						),
 						'trashLifecycle' => array(
 							'status'       => $trash_lifecycle_response instanceof \WP_REST_Response ? $trash_lifecycle_response->get_status() : null,
@@ -7650,6 +7755,7 @@ final class RestObjectControllersSurface {
 					'hierarchyEvents' => $hierarchy_events,
 					'statusEvents' => $status_events,
 					'statusFilterEvents' => $status_filter_events,
+					'publishSplitEvents' => $publish_split_events,
 					'deleteEvents' => $delete_events,
 					'untrashEvents' => $untrash_events,
 					'invalidCounts' => array(
@@ -7682,6 +7788,7 @@ final class RestObjectControllersSurface {
 						&& $update_child_id > 0
 						&& $status_update_id > 0
 						&& $filtered_status_id > 0
+						&& $publish_split_id > 0
 						&& $trash_lifecycle_id > 0
 						&& $delete_lifecycle_id > 0
 						&& $loop_parent_id > 0
@@ -7843,6 +7950,27 @@ final class RestObjectControllersSurface {
 						'filteredStatusCollection' => $observed['responses']['filteredStatusCollection'],
 						'statusFilterEvents'   => $status_filter_events,
 						'expected'             => $observed['expected'],
+					)
+				);
+
+				self::collect_failure(
+					$failures,
+					$publish_split_broad_filter_removed
+						&& $publish_split_filter_restored
+						&& self::response_error_ok( $publish_split_update_response, 'rest_cannot_publish', 403 )
+						&& $before_publish_split_update instanceof \WP_Post
+						&& $after_publish_split_update instanceof \WP_Post
+						&& $same_parent_id === (int) $before_publish_split_update->post_parent
+						&& $same_parent_id === (int) $after_publish_split_update->post_parent
+						&& 'draft' === $before_publish_split_update->post_status
+						&& 'draft' === $after_publish_split_update->post_status
+						&& 'rest-parent-publish-split-' . $token === $before_publish_split_update->post_name
+						&& 'rest-parent-publish-split-' . $token === $after_publish_split_update->post_name
+						&& array() === $publish_split_prepare_events
+						&& array() === $publish_split_events,
+					'custom hierarchical route-dispatched edit-only parent/status update cannot publish and preserves storage',
+					array(
+						'publishSplitUpdate' => $observed['responses']['publishSplitUpdate'],
 					)
 				);
 
@@ -8226,6 +8354,13 @@ final class RestObjectControllersSurface {
 			$delete_posts();
 			$counts_after_cleanup = self::content_counts();
 
+			if ( null !== $publish_split_cap_filter ) {
+				\remove_filter( 'user_has_cap', $publish_split_cap_filter, 10 );
+			}
+			$publish_split_filter_restored = $publish_split_filter_restored
+				|| null === $publish_split_cap_filter
+				|| false === \has_filter( 'user_has_cap', $publish_split_cap_filter );
+
 			if ( null !== $cap_filter ) {
 				$cap_filter_restored = self::remove_cap_filter( $cap_filter );
 				$cap_filter          = null;
@@ -8314,6 +8449,7 @@ final class RestObjectControllersSurface {
 				&& $status_filter_restored
 				&& $untrash_filter_restored
 				&& $delete_filter_restored
+				&& $publish_split_filter_restored
 				&& $default_filters_restored
 				&& $rewrite_restored
 				&& $wp_restored
@@ -8322,7 +8458,7 @@ final class RestObjectControllersSurface {
 				&& $current_user_restored
 				&& $post_type_restored
 				&& $query_vars_restored,
-			'custom hierarchical parent assignment restores prepare, delete, status, cap, default REST, rewrite, wp, server, actions, current user, post type, and query-var filters',
+			'custom hierarchical parent assignment restores prepare, delete, status, cap, publish-split, default REST, rewrite, wp, server, actions, current user, post type, and query-var filters',
 			array(
 				'customFiltersRestored'  => $custom_filters_restored,
 				'capFilterRestored'      => $cap_filter_restored,
@@ -8331,6 +8467,7 @@ final class RestObjectControllersSurface {
 				'statusFilterRestored'    => $status_filter_restored,
 				'untrashFilterRestored'   => $untrash_filter_restored,
 				'deleteFilterRestored'    => $delete_filter_restored,
+				'publishSplitFilterRestored' => $publish_split_filter_restored,
 				'defaultFiltersRestored' => $default_filters_restored,
 				'rewriteRestored'        => $rewrite_restored,
 				'wpRestored'             => $wp_restored,
@@ -8395,8 +8532,10 @@ final class RestObjectControllersSurface {
 			return $permalink_structure;
 		};
 		$cap_filter                = null;
+		$private_status_cap_filter = null;
 		$custom_filters_restored   = false;
 		$cap_filter_restored       = false;
+		$private_status_filter_restored = false;
 		$default_filters_restored  = false;
 		$permalink_filter_restored = false;
 		$rewrite_restored          = false;
@@ -8413,6 +8552,7 @@ final class RestObjectControllersSurface {
 		$totals_by_case            = array(
 			'parent'         => 4,
 			'parent_exclude' => 3,
+			'private_status' => 1,
 			'root'           => 1,
 		);
 
@@ -8450,6 +8590,11 @@ final class RestObjectControllersSurface {
 		$case_for_request = static function ( \WP_REST_Request $request ): string {
 			if ( array() !== (array) $request->get_param( 'parent_exclude' ) ) {
 				return 'parent_exclude';
+			}
+
+			$statuses = array_values( array_map( 'strval', (array) $request->get_param( 'status' ) ) );
+			if ( in_array( 'private', $statuses, true ) ) {
+				return 'private_status';
 			}
 
 			$parents = array_values( array_map( 'intval', (array) $request->get_param( 'parent' ) ) );
@@ -8575,6 +8720,7 @@ final class RestObjectControllersSurface {
 				$child_a1_slug = 'rest-list-child-a1-' . $token;
 				$child_a2_slug = 'rest-list-child-a2-' . $token;
 				$child_b_slug  = 'rest-list-child-b-' . $token;
+				$private_child_slug = 'rest-list-private-child-' . $token;
 				$root_slug     = 'rest-list-root-' . $token;
 
 				$parent_a_id = $remember_post(
@@ -8667,6 +8813,24 @@ final class RestObjectControllersSurface {
 						false
 					)
 				);
+				$private_child_id = $remember_post(
+					\wp_insert_post(
+						\wp_slash(
+							array(
+								'menu_order'   => 5,
+								'post_author'  => $fixtures['author'],
+								'post_content' => 'REST list private child ' . $token,
+								'post_name'    => $private_child_slug,
+								'post_parent'  => $parent_a_id,
+								'post_status'  => 'private',
+								'post_title'   => 'REST List Private Child ' . $token,
+								'post_type'    => $post_type,
+							)
+						),
+						true,
+						false
+					)
+				);
 				$root_id     = $remember_post(
 					\wp_insert_post(
 						\wp_slash(
@@ -8699,6 +8863,12 @@ final class RestObjectControllersSurface {
 							static fn ( $post ): bool => $post instanceof \WP_Post
 						)
 					),
+					'private_status' => array_values(
+						array_filter(
+							array( \get_post( $private_child_id ) ),
+							static fn ( $post ): bool => $post instanceof \WP_Post
+						)
+					),
 					'root'           => array_values(
 						array_filter(
 							array( \get_post( $root_id ) ),
@@ -8714,6 +8884,7 @@ final class RestObjectControllersSurface {
 						&& $child_a1_id > 0
 						&& $child_a2_id > 0
 						&& $child_b_id > 0
+						&& $private_child_id > 0
 						&& $root_id > 0,
 					'custom hierarchical collection fixtures create parent, child, and root scopes',
 					array(
@@ -8722,6 +8893,7 @@ final class RestObjectControllersSurface {
 						'childA1' => $post_summary( \get_post( $child_a1_id ) ),
 						'childA2' => $post_summary( \get_post( $child_a2_id ) ),
 						'childB'  => $post_summary( \get_post( $child_b_id ) ),
+						'privateChild' => $post_summary( \get_post( $private_child_id ) ),
 						'root'    => $post_summary( \get_post( $root_id ) ),
 					)
 				);
@@ -8730,6 +8902,51 @@ final class RestObjectControllersSurface {
 				\add_filter( 'posts_pre_query', $pre_filter, 10, 2 );
 				\add_filter( 'rest_prepare_' . $post_type, $prepare_filter, 10, 3 );
 				\wp_set_current_user( $fixtures['author'] );
+				$private_status_allowed_caps = array_fill_keys(
+					array(
+						'read',
+						'read_page',
+						'read_post',
+					),
+					true
+				);
+				$private_status_cap_filter = static function ( array $allcaps, array $caps = array() ) use ( $private_status_allowed_caps ): array {
+					foreach ( $private_status_allowed_caps as $cap => $grant ) {
+						$allcaps[ $cap ] = $grant;
+					}
+					foreach ( $caps as $cap ) {
+						if ( isset( $private_status_allowed_caps[ $cap ] ) ) {
+							$allcaps[ $cap ] = true;
+						} elseif ( 'do_not_allow' !== $cap ) {
+							$allcaps[ $cap ] = false;
+						}
+					}
+					$allcaps['read_private_pages'] = false;
+					$allcaps['read_private_posts'] = false;
+					$allcaps['edit_pages']         = false;
+					$allcaps['edit_posts']         = false;
+
+					return $allcaps;
+				};
+				\add_filter( 'user_has_cap', $private_status_cap_filter, 10, 4 );
+				$private_denied_response = self::dispatch_with_rest_post_dispatch(
+					$server,
+					self::request(
+						'GET',
+						'/wp/v2/' . $rest_base,
+						array(
+							'_fields'  => 'id,parent,slug,status,menu_order,_links',
+							'context'  => 'view',
+							'page'     => 1,
+							'parent'   => array( $parent_a_id ),
+							'per_page' => 1,
+							'status'   => array( 'private' ),
+						)
+					)
+				);
+				\remove_filter( 'user_has_cap', $private_status_cap_filter, 10 );
+				$private_status_filter_restored = false === \has_filter( 'user_has_cap', $private_status_cap_filter );
+				$private_status_cap_filter      = null;
 				$cap_filter = self::install_cap_filter(
 					array(
 						'edit_others_pages',
@@ -8788,6 +9005,59 @@ final class RestObjectControllersSurface {
 						)
 					)
 				);
+				$private_status_broad_filter_removed = false;
+				if ( null !== $cap_filter ) {
+					$private_status_broad_filter_removed = self::remove_cap_filter( $cap_filter );
+					$cap_filter                          = null;
+				}
+				$private_status_allowed_caps = array_fill_keys(
+					array(
+						'read',
+						'read_page',
+						'read_post',
+						'read_private_pages',
+						'read_private_posts',
+					),
+					true
+				);
+				$private_status_cap_filter = static function ( array $allcaps, array $caps = array() ) use ( $private_status_allowed_caps ): array {
+					foreach ( $private_status_allowed_caps as $cap => $grant ) {
+						$allcaps[ $cap ] = $grant;
+					}
+					foreach ( $caps as $cap ) {
+						if ( isset( $private_status_allowed_caps[ $cap ] ) ) {
+							$allcaps[ $cap ] = true;
+						} elseif ( 'do_not_allow' !== $cap ) {
+							$allcaps[ $cap ] = false;
+						}
+					}
+					$allcaps['edit_pages']   = false;
+					$allcaps['edit_posts']   = false;
+					$allcaps['publish_pages'] = false;
+
+					return $allcaps;
+				};
+				\add_filter( 'user_has_cap', $private_status_cap_filter, 10, 4 );
+				$private_allowed_response = self::dispatch_with_rest_post_dispatch(
+					$server,
+					self::request(
+						'GET',
+						'/wp/v2/' . $rest_base,
+						array(
+							'_fields'  => 'id,parent,slug,status,menu_order,_links',
+							'context'  => 'view',
+							'orderby'  => 'menu_order',
+							'page'     => 1,
+							'parent'   => array( $parent_a_id ),
+							'per_page' => 1,
+							'status'   => array( 'private' ),
+						)
+					)
+				);
+				\remove_filter( 'user_has_cap', $private_status_cap_filter, 10 );
+				$private_status_filter_restored = $private_status_filter_restored
+					&& false === \has_filter( 'user_has_cap', $private_status_cap_filter );
+				$private_status_cap_filter      = null;
 
 				$parent_data     = $parent_response instanceof \WP_REST_Response ? $parent_response->get_data() : array();
 				$parent_headers  = $parent_response instanceof \WP_REST_Response ? $parent_response->get_headers() : array();
@@ -8795,6 +9065,9 @@ final class RestObjectControllersSurface {
 				$exclude_headers = $exclude_response instanceof \WP_REST_Response ? $exclude_response->get_headers() : array();
 				$root_data       = $root_response instanceof \WP_REST_Response ? $root_response->get_data() : array();
 				$root_headers    = $root_response instanceof \WP_REST_Response ? $root_response->get_headers() : array();
+				$private_denied_data = $private_denied_response instanceof \WP_REST_Response ? $private_denied_response->get_data() : array();
+				$private_allowed_data = $private_allowed_response instanceof \WP_REST_Response ? $private_allowed_response->get_data() : array();
+				$private_allowed_headers = $private_allowed_response instanceof \WP_REST_Response ? $private_allowed_response->get_headers() : array();
 				$expected_up     = \rest_url( \rest_get_route_for_post( $parent_a_id ) );
 
 				$observed = array(
@@ -8816,12 +9089,24 @@ final class RestObjectControllersSurface {
 							'data'    => $root_data,
 							'headers' => $root_headers,
 						),
+						'privateDenied' => array(
+							'status' => $private_denied_response instanceof \WP_REST_Response ? $private_denied_response->get_status() : null,
+							'data'   => $private_denied_data,
+						),
+						'privateAllowed' => array(
+							'status'  => $private_allowed_response instanceof \WP_REST_Response ? $private_allowed_response->get_status() : null,
+							'data'    => $private_allowed_data,
+							'headers' => $private_allowed_headers,
+							'broadFilterRemoved' => $private_status_broad_filter_removed,
+							'strictFilterRestored' => $private_status_filter_restored,
+						),
 					),
 					'restArgs'      => $rest_args,
 					'queryVars'     => $query_vars,
 					'prepareEvents' => $prepare_events,
 					'expected'      => array(
 						'parentIds' => array( $child_a2_id, $child_a1_id ),
+						'privateId' => $private_child_id,
 						'rootId'    => $root_id,
 						'upHref'    => $expected_up,
 					),
@@ -8874,10 +9159,39 @@ final class RestObjectControllersSurface {
 					$observed['responses']['root']
 				);
 
+				$private_allowed_item = is_array( $private_allowed_data[0] ?? null ) ? $private_allowed_data[0] : array();
 				self::collect_failure(
 					$failures,
-					3 === count( $rest_args )
-						&& 3 === count( $query_vars )
+					$private_status_filter_restored
+						&& $private_status_broad_filter_removed
+						&& $private_denied_response instanceof \WP_REST_Response
+						&& 400 === $private_denied_response->get_status()
+						&& 'rest_invalid_param' === ( $private_denied_data['code'] ?? null )
+						&& 'rest_forbidden_status' === ( $private_denied_data['data']['details']['status']['code'] ?? null )
+						&& 403 === (int) ( $private_denied_data['data']['details']['status']['data']['status'] ?? 0 )
+						&& $private_allowed_response instanceof \WP_REST_Response
+						&& 200 === $private_allowed_response->get_status()
+						&& 1 === count( $private_allowed_data )
+						&& self::projected_keys_match( $private_allowed_item, array( '_links', 'id', 'menu_order', 'parent', 'slug', 'status' ) )
+						&& $private_child_id === (int) ( $private_allowed_item['id'] ?? 0 )
+						&& $parent_a_id === (int) ( $private_allowed_item['parent'] ?? 0 )
+						&& 5 === (int) ( $private_allowed_item['menu_order'] ?? 0 )
+						&& 'private' === ( $private_allowed_item['status'] ?? null )
+						&& $private_child_slug === ( $private_allowed_item['slug'] ?? null )
+						&& $expected_up === self::link_href( is_array( $private_allowed_item['_links'] ?? null ) ? $private_allowed_item['_links'] : array(), 'up' )
+						&& (string) $totals_by_case['private_status'] === (string) ( $private_allowed_headers['X-WP-Total'] ?? '' )
+						&& '1' === (string) ( $private_allowed_headers['X-WP-TotalPages'] ?? '' ),
+					'custom hierarchical collection status=private remains capability-gated and returns parent-scoped private child when allowed',
+					array(
+						'privateDenied'  => $observed['responses']['privateDenied'],
+						'privateAllowed' => $observed['responses']['privateAllowed'],
+					)
+				);
+
+				self::collect_failure(
+					$failures,
+					4 === count( $rest_args )
+						&& 4 === count( $query_vars )
 						&& 'GET' === ( $rest_args[0]['method'] ?? null )
 						&& 'parent' === ( $rest_args[0]['args']['component_fuzz_custom_hier_collection'] ?? null )
 						&& array( $parent_a_id ) === array_values( array_map( 'intval', (array) ( $rest_args[0]['args']['post_parent__in'] ?? array() ) ) )
@@ -8901,7 +9215,16 @@ final class RestObjectControllersSurface {
 						&& array( 0 ) === array_values( array_map( 'intval', (array) ( $rest_args[2]['args']['post_parent__in'] ?? array() ) ) )
 						&& true === ( $query_vars[2]['no_found_rows'] ?? null )
 						&& $post_type === ( $query_vars[2]['post_type'] ?? null )
-						&& array( 0 ) === array_values( array_map( 'intval', (array) ( $query_vars[2]['post_parent__in'] ?? array() ) ) ),
+						&& array( 0 ) === array_values( array_map( 'intval', (array) ( $query_vars[2]['post_parent__in'] ?? array() ) ) )
+						&& 'GET' === ( $rest_args[3]['method'] ?? null )
+						&& 'private_status' === ( $rest_args[3]['args']['component_fuzz_custom_hier_collection'] ?? null )
+						&& array( 'private' ) === array_values( array_map( 'strval', (array) ( $rest_args[3]['args']['post_status'] ?? array() ) ) )
+						&& array( $parent_a_id ) === array_values( array_map( 'intval', (array) ( $rest_args[3]['args']['post_parent__in'] ?? array() ) ) )
+						&& 'menu_order' === ( $query_vars[3]['orderby'] ?? null )
+						&& array( 'private' ) === array_values( array_map( 'strval', (array) ( $query_vars[3]['post_status'] ?? array() ) ) )
+						&& true === ( $query_vars[3]['no_found_rows'] ?? null )
+						&& $post_type === ( $query_vars[3]['post_type'] ?? null )
+						&& array( $parent_a_id ) === array_values( array_map( 'intval', (array) ( $query_vars[3]['post_parent__in'] ?? array() ) ) ),
 					'custom hierarchical collection parent filters map through rest query args into WP_Query vars',
 					array(
 						'restArgs'  => $rest_args,
@@ -8911,10 +9234,10 @@ final class RestObjectControllersSurface {
 
 				self::collect_failure(
 					$failures,
-					array( $child_a2_id, $child_a1_id, $root_id ) === array_values( array_map( static fn ( array $event ): int => (int) ( $event['id'] ?? 0 ), $prepare_events ) )
-						&& array( 'edit', 'edit', 'view' ) === array_values( array_map( static fn ( array $event ): string => (string) ( $event['context'] ?? '' ), $prepare_events ) )
-						&& array( 'GET', 'GET', 'GET' ) === array_values( array_map( static fn ( array $event ): string => (string) ( $event['method'] ?? '' ), $prepare_events ) )
-						&& array( '/wp/v2/' . $rest_base, '/wp/v2/' . $rest_base, '/wp/v2/' . $rest_base ) === array_values( array_map( static fn ( array $event ): string => (string) ( $event['route'] ?? '' ), $prepare_events ) ),
+					array( $child_a2_id, $child_a1_id, $root_id, $private_child_id ) === array_values( array_map( static fn ( array $event ): int => (int) ( $event['id'] ?? 0 ), $prepare_events ) )
+						&& array( 'edit', 'edit', 'view', 'view' ) === array_values( array_map( static fn ( array $event ): string => (string) ( $event['context'] ?? '' ), $prepare_events ) )
+						&& array( 'GET', 'GET', 'GET', 'GET' ) === array_values( array_map( static fn ( array $event ): string => (string) ( $event['method'] ?? '' ), $prepare_events ) )
+						&& array( '/wp/v2/' . $rest_base, '/wp/v2/' . $rest_base, '/wp/v2/' . $rest_base, '/wp/v2/' . $rest_base ) === array_values( array_map( static fn ( array $event ): string => (string) ( $event['route'] ?? '' ), $prepare_events ) ),
 					'custom hierarchical collection prepare hook receives only GET item responses and preserves request context',
 					array( 'prepareEvents' => $prepare_events )
 				);
@@ -8929,6 +9252,13 @@ final class RestObjectControllersSurface {
 
 			$delete_posts();
 			$counts_after_cleanup = self::content_counts();
+
+			if ( null !== $private_status_cap_filter ) {
+				\remove_filter( 'user_has_cap', $private_status_cap_filter, 10 );
+			}
+			$private_status_filter_restored = $private_status_filter_restored
+				|| null === $private_status_cap_filter
+				|| false === \has_filter( 'user_has_cap', $private_status_cap_filter );
 
 			if ( null !== $cap_filter ) {
 				$cap_filter_restored = self::remove_cap_filter( $cap_filter );
@@ -9009,6 +9339,7 @@ final class RestObjectControllersSurface {
 			$failures,
 			$custom_filters_restored
 				&& $cap_filter_restored
+				&& $private_status_filter_restored
 				&& $default_filters_restored
 				&& $permalink_filter_restored
 				&& $rewrite_restored
@@ -9017,10 +9348,11 @@ final class RestObjectControllersSurface {
 				&& $current_user_restored
 				&& $post_type_restored
 				&& $query_vars_restored,
-			'custom hierarchical collection parent filters restore REST filters, caps, permalink, rewrite, server, actions, current user, post type, and query vars',
+			'custom hierarchical collection parent filters restore REST filters, caps, private-status caps, permalink, rewrite, server, actions, current user, post type, and query vars',
 			array(
 				'customFiltersRestored'   => $custom_filters_restored,
 				'capFilterRestored'       => $cap_filter_restored,
+				'privateStatusFilterRestored' => $private_status_filter_restored,
 				'defaultFiltersRestored'  => $default_filters_restored,
 				'permalinkFilterRestored' => $permalink_filter_restored,
 				'rewriteRestored'         => $rewrite_restored,
