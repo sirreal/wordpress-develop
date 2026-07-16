@@ -36,6 +36,7 @@ final class AdminMediaChromeSurface {
 			$rows[] = self::check_thumbnail_icon_and_image_helpers( $ctx->fork( 'thumb-icons' ) );
 			$rows[] = self::check_image_caption_editor_output( $ctx->fork( 'image-caption-editor' ) );
 			$rows[] = self::check_legacy_upload_shell_helpers( $ctx->fork( 'legacy-upload-shell' ) );
+			$rows[] = self::check_media_upload_dispatch_exits( $ctx->fork( 'legacy-upload-dispatch' ) );
 			$rows[] = self::check_media_attach_action_redirect_exit( $ctx->fork( 'media-attach-action' ) );
 			$rows[] = self::check_media_enqueue_and_iframe_shell( $ctx->fork( 'modal-enqueue-shell' ) );
 			$rows[] = self::check_media_button_and_bypass_output( $ctx->fork( 'media-buttons' ) );
@@ -91,6 +92,7 @@ final class AdminMediaChromeSurface {
 				'media_buttons',
 				'media_upload_form',
 				'media_upload_flash_bypass',
+				'media_upload_form_handler',
 				'media_upload_header',
 				'media_upload_html_bypass',
 				'media_upload_tabs',
@@ -102,6 +104,7 @@ final class AdminMediaChromeSurface {
 				'wp_get_attachment_metadata',
 				'wp_get_attachment_thumb_url',
 				'wp_get_referer',
+				'wp_create_nonce',
 				'wp_die',
 				'wp_enqueue_media',
 				'wp_image_editor',
@@ -1573,8 +1576,6 @@ final class AdminMediaChromeSurface {
 			array(
 				'failures'   => $failures,
 				'notClaimed' => array(
-					'media_upload_form_handler() send/insert-gallery dispatch branches',
-					'media_upload_type_form() WP_Error branch that exits',
 					'media_handle_upload() and media_handle_sideload() real ingest paths',
 				),
 			)
@@ -1872,6 +1873,583 @@ final class AdminMediaChromeSurface {
 			array() === $failures,
 			array( 'failures' => $failures )
 		);
+	}
+
+	private static function check_media_upload_dispatch_exits( \ComponentFuzz\FuzzContext $ctx ): array {
+		$missing = self::media_attach_action_child_missing_requirements();
+		if ( array() !== $missing ) {
+			return self::row(
+				$ctx,
+				'admin-media-chrome.legacy-upload-dispatch-exits',
+				true,
+				array(
+					'missing' => $missing,
+					'reason'  => 'Required local subprocess APIs are unavailable.',
+				),
+				'skipped'
+			);
+		}
+
+		$failures = array();
+		$runs     = array();
+
+		foreach ( self::media_upload_dispatch_cases( $ctx ) as $case ) {
+			$run    = self::run_media_upload_dispatch_child_process( $case );
+			$result = is_array( $run['result'] ?? null ) ? $run['result'] : array();
+
+			$runs[ $case['label'] ] = array(
+				'ok'       => $run['ok'] ?? false,
+				'exitCode' => $run['exitCode'] ?? null,
+				'stderr'   => self::describe_string( (string) ( $run['stderr'] ?? '' ) ),
+				'stdout'   => self::describe_string( (string) ( $run['stdout'] ?? '' ) ),
+				'result'   => array(
+					'returned'       => $result['returned'] ?? null,
+					'output'         => self::describe_string( (string) ( $result['output'] ?? '' ) ),
+					'dieCalls'       => $result['dieCalls'] ?? array(),
+					'saveEventCount' => is_array( $result['saveEvents'] ?? null ) ? count( $result['saveEvents'] ) : null,
+					'sendEventCount' => is_array( $result['sendEvents'] ?? null ) ? count( $result['sendEvents'] ) : null,
+				),
+			);
+
+			self::collect_failure(
+				$failures,
+				true === ( $run['ok'] ?? false ) && self::media_upload_dispatch_child_result_has_expected_shape( $result ),
+				"{$case['label']} child exits cleanly and reports structured JSON",
+				array(
+					'run'    => $run,
+					'result' => $result,
+				)
+			);
+
+			if ( ! self::media_upload_dispatch_child_result_has_expected_shape( $result ) ) {
+				continue;
+			}
+
+			self::collect_failure(
+				$failures,
+				false === (bool) ( $result['returned'] ?? true )
+					&& null === ( $result['throwable'] ?? null )
+					&& array() === ( $result['dieCalls'] ?? array() ),
+				"{$case['label']} reaches the intended legacy exit without wp_die or unexpected exceptions",
+				array(
+					'returned'  => $result['returned'] ?? null,
+					'throwable' => $result['throwable'] ?? null,
+					'dieCalls'  => $result['dieCalls'] ?? array(),
+				)
+			);
+
+			if ( 'send' === $case['scenario'] ) {
+				self::collect_media_upload_send_failures( $failures, $case, $result );
+			} elseif ( 'insert-gallery' === $case['scenario'] ) {
+				self::collect_media_upload_gallery_exit_failures( $failures, $case, $result );
+			} else {
+				self::collect_media_upload_type_error_failures( $failures, $case, $result );
+			}
+		}
+
+		return self::row(
+			$ctx,
+			'admin-media-chrome.legacy-upload-dispatch-exits',
+			array() === $failures,
+			array(
+				'failures' => $failures,
+				'runs'     => $runs,
+			)
+		);
+	}
+
+	private static function media_upload_dispatch_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$build = static function ( string $label, string $scenario, \ComponentFuzz\FuzzContext $case_ctx ): array {
+			$token = self::media_upload_dispatch_token( 'upload_' . $case_ctx->identifier( 4, 9 ) );
+
+			return array(
+				'label'     => $label,
+				'scenario'  => $scenario,
+				'seed'      => $case_ctx->seed(),
+				'iteration' => $case_ctx->iteration(),
+				'token'     => $token,
+			);
+		};
+
+		return array(
+			$build( 'send-to-editor', 'send', $ctx->fork( 'send' ) ),
+			$build( 'insert-gallery', 'insert-gallery', $ctx->fork( 'insert-gallery' ) ),
+			$build( 'type-form-error', 'type-error', $ctx->fork( 'type-error' ) ),
+		);
+	}
+
+	private static function media_upload_dispatch_token( string $token ): string {
+		$safe = preg_replace( '/[^A-Za-z0-9_-]/', '', $token );
+		if ( ! is_string( $safe ) || '' === $safe ) {
+			return 'upload_token';
+		}
+
+		return $safe;
+	}
+
+	private static function run_media_upload_dispatch_child_process( array $case ): array {
+		$payload = json_encode(
+			array( 'case' => $case ),
+			JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE
+		);
+
+		if ( false === $payload ) {
+			return array(
+				'ok'       => false,
+				'exitCode' => -1,
+				'stdout'   => '',
+				'stderr'   => 'json_encode failed',
+				'result'   => null,
+			);
+		}
+
+		$descriptors = array(
+			0 => array( 'pipe', 'r' ),
+			1 => array( 'pipe', 'w' ),
+			2 => array( 'pipe', 'w' ),
+		);
+
+		// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.system_calls_proc_open -- Isolates legacy media upload send/gallery/error exit paths in a local PHP subprocess.
+		$process = proc_open( array( PHP_BINARY, '-r', self::media_upload_dispatch_child_program() ), $descriptors, $pipes, \ComponentFuzz\repo_root() );
+		if ( ! is_resource( $process ) ) {
+			return array(
+				'ok'       => false,
+				'exitCode' => -1,
+				'stdout'   => '',
+				'stderr'   => 'proc_open failed',
+				'result'   => null,
+			);
+		}
+
+		fwrite( $pipes[0], $payload );
+		fclose( $pipes[0] );
+
+		$stdout = stream_get_contents( $pipes[1] );
+		$stderr = stream_get_contents( $pipes[2] );
+		fclose( $pipes[1] );
+		fclose( $pipes[2] );
+
+		$exit_code = proc_close( $process );
+		$result    = json_decode( (string) $stdout, true );
+
+		return array(
+			'ok'       => 0 === $exit_code && is_array( $result ) && true === ( $result['ok'] ?? null ),
+			'exitCode' => $exit_code,
+			'stdout'   => (string) $stdout,
+			'stderr'   => (string) $stderr,
+			'result'   => is_array( $result ) ? $result : null,
+		);
+	}
+
+	private static function media_upload_dispatch_child_program(): string {
+		return <<<'PHP'
+$component_fuzz_admin_media_raw = stream_get_contents( STDIN );
+$component_fuzz_admin_media_payload = json_decode( $component_fuzz_admin_media_raw, true );
+$case = is_array( $component_fuzz_admin_media_payload['case'] ?? null ) ? $component_fuzz_admin_media_payload['case'] : array();
+
+require_once getcwd() . '/tools/component-fuzz/lib/autoload.php';
+\ComponentFuzz\WpBootstrap::load();
+
+\ComponentFuzz\Surfaces\AdminMediaChromeSurface::run_media_upload_dispatch_child( $case );
+PHP;
+	}
+
+	public static function run_media_upload_dispatch_child( array $case ): void {
+		ini_set( 'display_errors', '0' );
+		self::prepare_runtime();
+
+		$ctx      = new \ComponentFuzz\FuzzContext( (int) ( $case['seed'] ?? 1 ), self::NAME, (int) ( $case['iteration'] ?? 0 ) );
+		$scenario = (string) ( $case['scenario'] ?? 'send' );
+		$token    = self::media_upload_dispatch_token( (string) ( $case['token'] ?? $ctx->identifier( 4, 9 ) ) );
+		$state    = array(
+			'ok'             => false,
+			'label'          => (string) ( $case['label'] ?? 'upload-dispatch' ),
+			'scenario'       => $scenario,
+			'token'          => $token,
+			'parentId'       => 0,
+			'newParentId'    => 0,
+			'allowedId'      => 0,
+			'deniedId'       => 0,
+			'allTrackedIds'  => array(),
+			'postsBefore'    => array(),
+			'postsAfter'     => array(),
+			'metaBefore'     => array(),
+			'metaAfter'      => array(),
+			'queryDelta'     => array(),
+			'saveEvents'     => array(),
+			'sendEvents'     => array(),
+			'capEvents'      => array(),
+			'dieCalls'       => array(),
+			'returned'       => false,
+			'throwable'      => null,
+			'output'         => '',
+			'errorMessage'   => '',
+		);
+
+		$buffer_level = ob_get_level();
+		ob_start();
+
+		register_shutdown_function(
+			static function () use ( &$state, $buffer_level ): void {
+				$output = '';
+				while ( ob_get_level() > $buffer_level ) {
+					$chunk = ob_get_clean();
+					if ( is_string( $chunk ) ) {
+						$output = $chunk . $output;
+					}
+				}
+
+				$state['output']     = $output;
+				$state['postsAfter'] = self::media_upload_dispatch_post_state( array_map( 'intval', $state['allTrackedIds'] ) );
+				$state['metaAfter']  = self::media_upload_dispatch_alt_state( array_map( 'intval', $state['allTrackedIds'] ) );
+
+				$wpdb = $GLOBALS['wpdb'] ?? null;
+				if ( $wpdb instanceof \Component_Fuzz_WPDB_Stub ) {
+					$queries             = $wpdb->component_fuzz_get_queries();
+					$state['queryDelta'] = array_values( array_slice( $queries, (int) ( $state['queryCountBefore'] ?? 0 ) ) );
+				}
+
+				$state['ok'] = null === $state['throwable'];
+				echo json_encode( $state, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE ) . "\n";
+			}
+		);
+
+		try {
+			$parent_id    = self::seed_parent_post( $ctx->fork( 'parent' ) );
+			$new_parent   = self::seed_parent_post( $ctx->fork( 'new-parent' ) );
+			$allowed      = self::seed_attachment( $ctx->fork( 'allowed' ), 'image/jpeg', array( 'parent_id' => $parent_id ) );
+			$denied       = self::seed_attachment( $ctx->fork( 'denied' ), 'image/png', array( 'parent_id' => $parent_id ) );
+			$allowed_id   = (int) $allowed->ID;
+			$denied_id    = (int) $denied->ID;
+			$tracked_ids  = array( $parent_id, $new_parent, $allowed_id, $denied_id );
+			$allowed_caps = array_fill_keys( array( $allowed_id ), true );
+
+			$state['parentId']      = $parent_id;
+			$state['newParentId']   = $new_parent;
+			$state['allowedId']     = $allowed_id;
+			$state['deniedId']      = $denied_id;
+			$state['allTrackedIds'] = $tracked_ids;
+			$state['postsBefore']   = self::media_upload_dispatch_post_state( $tracked_ids );
+			$state['metaBefore']    = self::media_upload_dispatch_alt_state( $tracked_ids );
+
+			$GLOBALS['pagenow']         = 'media-upload.php';
+			$_SERVER['HTTP_HOST']       = 'example.test';
+			$_SERVER['HTTPS']           = 'off';
+			$_SERVER['PHP_SELF']        = '/wp-admin/media-upload.php';
+			$_SERVER['REQUEST_METHOD']  = 'POST';
+			$_SERVER['REQUEST_URI']     = '/wp-admin/media-upload.php?type=image&tab=type';
+			$_SERVER['HTTP_REFERER']    = 'http://example.test/wp-admin/media-upload.php?type=image&tab=type';
+			$_SERVER['HTTP_USER_AGENT'] = 'component-fuzz/admin-media-upload-dispatch';
+			$_SERVER['REMOTE_ADDR']     = '198.51.100.43';
+			$_SERVER['SERVER_PORT']     = '80';
+
+			$map_meta_cap_filter = static function ( array $caps, string $cap, int $user_id, array $args ) use ( &$state, $allowed_caps ): array {
+				if ( 'edit_post' !== $cap || ! isset( $args[0] ) ) {
+					return $caps;
+				}
+
+				$post_id = (int) $args[0];
+				$allowed = isset( $allowed_caps[ $post_id ] );
+				$state['capEvents'][] = array(
+					'postId'  => $post_id,
+					'allowed' => $allowed,
+				);
+
+				return $allowed ? array( 'exist' ) : array( 'do_not_allow' );
+			};
+			$user_has_cap_filter = static function ( array $allcaps, array $caps, array $args, $user = null ): array {
+				unset( $args, $user );
+				foreach ( $caps as $cap ) {
+					$allcaps[ $cap ] = 'do_not_allow' !== $cap;
+				}
+				return $allcaps;
+			};
+			$die_handler_filter  = static function () use ( &$state ): callable {
+				return static function ( $message = '', $title = '', $args = array() ) use ( &$state ): void {
+					$state['dieCalls'][] = array(
+						'message' => self::media_attach_action_die_message( $message ),
+						'title'   => self::media_attach_action_die_message( $title ),
+						'args'    => is_array( $args ) ? $args : array(),
+					);
+					exit;
+				};
+			};
+			$save_filter         = static function ( array $post, array $attachment ) use ( &$state, $token, $allowed_id ): array {
+				$state['saveEvents'][] = array(
+					'id'         => (int) ( $post['ID'] ?? 0 ),
+					'title'      => (string) ( $attachment['post_title'] ?? '' ),
+					'hasAlt'     => array_key_exists( 'image_alt', $attachment ),
+					'postParent' => (int) ( $attachment['post_parent'] ?? 0 ),
+				);
+
+				if ( $allowed_id === (int) ( $post['ID'] ?? 0 ) ) {
+					$post['post_content'] = (string) ( $post['post_content'] ?? '' ) . ' filtered-' . $token;
+				}
+
+				return $post;
+			};
+			$send_filter         = static function ( string $html, int $send_id, array $attachment ) use ( &$state, $token ): string {
+				$state['sendEvents'][] = array(
+					'id'       => $send_id,
+					'html'     => $html,
+					'title'    => (string) ( $attachment['post_title'] ?? '' ),
+					'url'      => (string) ( $attachment['url'] ?? '' ),
+					'hasRel'   => str_contains( $html, "rel='attachment wp-att-" . $send_id . "'" ),
+				);
+
+				return $html . '<span data-cfz-upload="' . esc_attr( $token ) . '">filtered</span>';
+			};
+
+			\add_filter( 'map_meta_cap', $map_meta_cap_filter, 10, 4 );
+			\add_filter( 'user_has_cap', $user_has_cap_filter, 10, 4 );
+			\add_filter( 'wp_die_handler', $die_handler_filter, PHP_INT_MAX );
+			\add_filter( 'attachment_fields_to_save', $save_filter, 10, 2 );
+			\add_filter( 'media_send_to_editor', $send_filter, 10, 3 );
+
+			\wp_set_current_user( 1 );
+			if ( isset( $GLOBALS['current_user'] ) && $GLOBALS['current_user'] instanceof \WP_User ) {
+				$GLOBALS['current_user']->allcaps = array( 'exist' => true );
+			}
+
+			$nonce = \wp_create_nonce( 'media-form' );
+			$wpdb  = $GLOBALS['wpdb'] ?? null;
+			if ( $wpdb instanceof \Component_Fuzz_WPDB_Stub ) {
+				$wpdb->rows_affected       = 0;
+				$state['queryCountBefore'] = count( $wpdb->component_fuzz_get_queries() );
+			}
+
+			if ( 'type-error' === $scenario ) {
+				$error_message          = 'Upload failed <script>alert(1)</script> ' . $token;
+				$state['errorMessage'] = $error_message;
+				$_GET                  = array();
+				$_POST                 = array();
+				$_REQUEST              = array( 'post_id' => (string) $parent_id );
+				$_COOKIE               = array();
+
+				\media_upload_type_form( 'image', null, new \WP_Error( 'component_fuzz_upload', $error_message ) );
+				$state['returned'] = true;
+				return;
+			}
+
+			$_GET     = array();
+			$_POST    = array(
+				'_wpnonce' => $nonce,
+			);
+			$_COOKIE  = array();
+
+			if ( 'insert-gallery' === $scenario ) {
+				$_POST['insert-gallery'] = '1';
+				$_REQUEST                = $_POST;
+				\media_upload_form_handler();
+				$state['returned'] = true;
+				return;
+			}
+
+			$allowed_title = 'Dispatch title ' . $token;
+			$denied_title  = 'Denied title ' . $token;
+			$_POST['send'] = array( $allowed_id => 'Send' );
+			$_POST['attachments'] = array(
+				$allowed_id => array(
+					'post_title'   => $allowed_title,
+					'post_content' => 'Dispatch content ' . $token,
+					'post_excerpt' => 'Dispatch excerpt ' . $token,
+					'menu_order'   => '7',
+					'post_parent'  => (string) $new_parent,
+					'image_alt'    => '<b>Alt ' . $token . '</b>',
+					'url'          => 'http://example.test/?attachment_id=' . $allowed_id . '&cfz=' . rawurlencode( $token ),
+				),
+				$denied_id  => array(
+					'post_title'   => $denied_title,
+					'post_content' => 'Denied content ' . $token,
+					'post_excerpt' => 'Denied excerpt ' . $token,
+					'menu_order'   => '9',
+					'post_parent'  => (string) $new_parent,
+					'image_alt'    => 'Denied alt ' . $token,
+					'url'          => 'http://example.test/denied-' . rawurlencode( $token ),
+				),
+			);
+			$_REQUEST = $_POST;
+
+			\media_upload_form_handler();
+			$state['returned'] = true;
+		} catch ( \Throwable $e ) {
+			$state['throwable'] = self::describe_throwable( $e );
+		}
+	}
+
+	private static function media_upload_dispatch_child_result_has_expected_shape( array $result ): bool {
+		return array_key_exists( 'ok', $result )
+			&& array_key_exists( 'returned', $result )
+			&& is_string( $result['output'] ?? null )
+			&& is_array( $result['postsBefore'] ?? null )
+			&& is_array( $result['postsAfter'] ?? null )
+			&& is_array( $result['metaBefore'] ?? null )
+			&& is_array( $result['metaAfter'] ?? null )
+			&& is_array( $result['saveEvents'] ?? null )
+			&& is_array( $result['sendEvents'] ?? null )
+			&& is_array( $result['dieCalls'] ?? null );
+	}
+
+	private static function collect_media_upload_send_failures( array &$failures, array $case, array $result ): void {
+		$token        = self::media_upload_dispatch_token( (string) ( $case['token'] ?? '' ) );
+		$allowed_id   = (int) ( $result['allowedId'] ?? 0 );
+		$denied_id    = (int) ( $result['deniedId'] ?? 0 );
+		$new_parent   = (int) ( $result['newParentId'] ?? 0 );
+		$output       = (string) ( $result['output'] ?? '' );
+		$before_posts = $result['postsBefore'];
+		$after_posts  = $result['postsAfter'];
+		$after_meta   = $result['metaAfter'];
+
+		self::collect_failure(
+			$failures,
+			str_contains( $output, 'win.send_to_editor(' )
+				&& str_contains( $output, 'data-cfz-upload' )
+				&& str_contains( $output, $token )
+				&& ! str_contains( $output, 'Denied title ' . $token )
+				&& 1 === count( $result['sendEvents'] )
+				&& $allowed_id === (int) ( $result['sendEvents'][0]['id'] ?? 0 )
+				&& true === ( $result['sendEvents'][0]['hasRel'] ?? null ),
+			'media_upload_form_handler() send branch exits through media_send_to_editor() with filtered allowed attachment HTML only',
+			array(
+				'output'     => self::describe_string( $output ),
+				'sendEvents' => $result['sendEvents'],
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			1 === count( $result['saveEvents'] )
+				&& $allowed_id === (int) ( $result['saveEvents'][0]['id'] ?? 0 )
+				&& self::media_upload_dispatch_post_matches(
+					$after_posts,
+					$allowed_id,
+					array(
+						'post_title'   => 'Dispatch title ' . $token,
+						'post_content' => 'Dispatch content ' . $token . ' filtered-' . $token,
+						'post_excerpt' => 'Dispatch excerpt ' . $token,
+						'menu_order'   => 7,
+						'post_parent'  => $new_parent,
+					)
+				)
+				&& ( $after_meta[ (string) $allowed_id ] ?? null ) === 'Alt ' . $token,
+			'allowed send attachment fields, parent, menu order, filtered content, and stripped alt meta are persisted',
+			array(
+				'saveEvents' => $result['saveEvents'],
+				'afterPost'  => $after_posts[ (string) $allowed_id ] ?? null,
+				'afterMeta'  => $after_meta[ (string) $allowed_id ] ?? null,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::media_upload_dispatch_post_unchanged( $before_posts, $after_posts, array( $denied_id ) )
+				&& ( $result['metaBefore'][ (string) $denied_id ] ?? null ) === ( $after_meta[ (string) $denied_id ] ?? null )
+				&& array( $allowed_id, $denied_id ) === array_map(
+					static function ( array $event ): int {
+						return (int) ( $event['postId'] ?? 0 );
+					},
+					$result['capEvents']
+				),
+			'denied attachment is capability-checked but not saved, sent, or meta-mutated',
+			array(
+				'capEvents'  => $result['capEvents'],
+				'beforePost' => $before_posts[ (string) $denied_id ] ?? null,
+				'afterPost'  => $after_posts[ (string) $denied_id ] ?? null,
+			)
+		);
+	}
+
+	private static function collect_media_upload_gallery_exit_failures( array &$failures, array $case, array $result ): void {
+		unset( $case );
+		$output = (string) ( $result['output'] ?? '' );
+
+		self::collect_failure(
+			$failures,
+			str_contains( $output, 'win.tb_remove();' )
+				&& array() === ( $result['saveEvents'] ?? array() )
+				&& array() === ( $result['sendEvents'] ?? array() )
+				&& self::media_upload_dispatch_post_unchanged( $result['postsBefore'], $result['postsAfter'], array_map( 'intval', $result['allTrackedIds'] ?? array() ) ),
+			'insert-gallery branch exits after closing Thickbox without saving or sending attachments',
+			array(
+				'output'     => self::describe_string( $output ),
+				'saveEvents' => $result['saveEvents'] ?? array(),
+				'sendEvents' => $result['sendEvents'] ?? array(),
+			)
+		);
+	}
+
+	private static function collect_media_upload_type_error_failures( array &$failures, array $case, array $result ): void {
+		unset( $case );
+		$output        = (string) ( $result['output'] ?? '' );
+		$error_message = (string) ( $result['errorMessage'] ?? '' );
+
+		self::collect_failure(
+			$failures,
+			str_contains( $output, 'id="media-upload-error"' )
+				&& str_contains( $output, 'Upload failed' )
+				&& str_contains( $output, '&lt;script&gt;alert(1)&lt;/script&gt;' )
+				&& ! str_contains( $output, $error_message )
+				&& array() === ( $result['saveEvents'] ?? array() )
+				&& array() === ( $result['sendEvents'] ?? array() ),
+			'media_upload_type_form() renders escaped WP_Error upload failure and exits before media items',
+			array(
+				'output'       => self::describe_string( $output ),
+				'errorMessage' => $error_message,
+			)
+		);
+	}
+
+	private static function media_upload_dispatch_post_matches( array $posts, int $id, array $expected ): bool {
+		$key = (string) $id;
+		foreach ( $expected as $field => $value ) {
+			if ( (string) $value !== (string) ( $posts[ $key ][ $field ] ?? null ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function media_upload_dispatch_post_unchanged( array $before, array $after, array $ids ): bool {
+		foreach ( $ids as $id ) {
+			$key = (string) (int) $id;
+			if ( ( $before[ $key ] ?? null ) !== ( $after[ $key ] ?? null ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function media_upload_dispatch_post_state( array $ids ): array {
+		$out = array();
+		foreach ( array_values( array_unique( array_map( 'intval', $ids ) ) ) as $id ) {
+			$post = \get_post( $id );
+			if ( ! $post instanceof \WP_Post ) {
+				$out[ (string) $id ] = null;
+				continue;
+			}
+
+			$out[ (string) $id ] = array(
+				'post_title'   => (string) $post->post_title,
+				'post_content' => (string) $post->post_content,
+				'post_excerpt' => (string) $post->post_excerpt,
+				'menu_order'   => (int) $post->menu_order,
+				'post_parent'  => (int) $post->post_parent,
+				'post_type'    => (string) $post->post_type,
+			);
+		}
+
+		return $out;
+	}
+
+	private static function media_upload_dispatch_alt_state( array $ids ): array {
+		$out = array();
+		foreach ( array_values( array_unique( array_map( 'intval', $ids ) ) ) as $id ) {
+			$out[ (string) $id ] = \get_post_meta( $id, '_wp_attachment_image_alt', true );
+		}
+
+		return $out;
 	}
 
 	private static function check_media_attach_action_redirect_exit( \ComponentFuzz\FuzzContext $ctx ): array {

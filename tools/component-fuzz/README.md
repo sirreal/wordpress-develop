@@ -90,9 +90,10 @@ database, network requests, or a configured site.
   image form controls, image editor chrome from cache-seeded metadata,
   edit attachment details form output, thumbnail/icon helper filters, direct
   caption/send-to-editor helper output, legacy upload tab/header/form shell
-  hooks, `wp_media_attach_action()` attach/detach redirect and denial exits,
-  media-view enqueue settings/string contracts, in-process iframe shell
-  rendering, and safe media button/uploader bypass output.
+  hooks, legacy upload send/gallery dispatch and WP_Error exit capture,
+  `wp_media_attach_action()` attach/detach redirect and denial exits, media-view
+  enqueue settings/string contracts, in-process iframe shell rendering, and safe
+  media button/uploader bypass output.
 - `admin-options-submission`: no-DB `wp-admin/options.php` update-flow
   coverage, including registered Settings API allowlists and sanitize
   callbacks, settings error transients, General Settings date/time/timezone
