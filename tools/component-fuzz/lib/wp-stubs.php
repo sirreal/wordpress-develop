@@ -1321,17 +1321,31 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 		private function component_fuzz_date_parts_match( $datetime, $query, $column ) {
 			foreach (
 				array(
-					'YEAR'       => array( 0, 4 ),
-					'MONTH'      => array( 5, 2 ),
-					'DAYOFMONTH' => array( 8, 2 ),
-					'HOUR'       => array( 11, 2 ),
-					'MINUTE'     => array( 14, 2 ),
-					'SECOND'     => array( 17, 2 ),
-				) as $function => $slice
+					'YEAR'       => (int) substr( (string) $datetime, 0, 4 ),
+					'MONTH'      => (int) substr( (string) $datetime, 5, 2 ),
+					'DAYOFMONTH' => (int) substr( (string) $datetime, 8, 2 ),
+					'HOUR'       => (int) substr( (string) $datetime, 11, 2 ),
+					'MINUTE'     => (int) substr( (string) $datetime, 14, 2 ),
+					'SECOND'     => (int) substr( (string) $datetime, 17, 2 ),
+					'DAYOFYEAR'  => $this->component_fuzz_datetime_part( (string) $datetime, 'z' ) + 1,
+					'DAYOFWEEK'  => $this->component_fuzz_datetime_part( (string) $datetime, 'w' ) + 1,
+				) as $function => $actual
 			) {
-				if ( ! $this->component_fuzz_sql_date_part_matches( $query, $function, $column, (int) substr( (string) $datetime, $slice[0], $slice[1] ) ) ) {
+				if ( ! $this->component_fuzz_sql_date_part_matches( $query, $function, $column, $actual ) ) {
 					return false;
 				}
+			}
+
+			if ( ! $this->component_fuzz_sql_weekday_iso_matches( $query, $column, $this->component_fuzz_datetime_part( (string) $datetime, 'N' ) ) ) {
+				return false;
+			}
+
+			if ( ! $this->component_fuzz_sql_week_matches( $query, $column, $this->component_fuzz_mysql_week_zero( (string) $datetime ) ) ) {
+				return false;
+			}
+
+			if ( ! $this->component_fuzz_sql_date_format_matches( $query, $column, (string) $datetime ) ) {
+				return false;
 			}
 
 			return true;
@@ -1339,11 +1353,25 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 
 		private function component_fuzz_sql_date_part_matches( $query, $function, $column, $actual ) {
 			$expression = '\b' . preg_quote( $function, '/' ) . '\s*\(\s*(?:`?[a-z_][a-z0-9_]*`?\.)?`?' . preg_quote( $column, '/' ) . '`?\s*\)';
+			return $this->component_fuzz_sql_numeric_expression_matches( $query, $expression, $actual );
+		}
+
+		private function component_fuzz_sql_weekday_iso_matches( $query, $column, $actual ) {
+			$expression = '\bWEEKDAY\s*\(\s*(?:`?[a-z_][a-z0-9_]*`?\.)?`?' . preg_quote( $column, '/' ) . '`?\s*\)\s*\+\s*1';
+			return $this->component_fuzz_sql_numeric_expression_matches( $query, $expression, $actual );
+		}
+
+		private function component_fuzz_sql_week_matches( $query, $column, $actual ) {
+			$expression = '\bWEEK\s*\(\s*(?:`?[a-z_][a-z0-9_]*`?\.)?`?' . preg_quote( $column, '/' ) . '`?\s*,\s*0\s*\)';
+			return $this->component_fuzz_sql_numeric_expression_matches( $query, $expression, $actual );
+		}
+
+		private function component_fuzz_sql_numeric_expression_matches( $query, $expression, $actual ) {
 			$value      = '(\'(?:\\\\.|[^\'\\\\])*\'|"[^"]*"|-?\d+)';
 
-			if ( preg_match_all( '/' . $expression . '\s*=\s*' . $value . '/i', (string) $query, $matches, PREG_SET_ORDER ) ) {
+			if ( preg_match_all( '/' . $expression . '\s*(=|!=|<>|<=|>=|<|>)\s*' . $value . '/i', (string) $query, $matches, PREG_SET_ORDER ) ) {
 				foreach ( $matches as $match ) {
-					if ( (int) $actual !== (int) $this->component_fuzz_unquote_sql_value( $match[1] ) ) {
+					if ( ! $this->component_fuzz_compare_numeric( (float) $actual, (float) $this->component_fuzz_unquote_sql_value( $match[2] ), $match[1] ) ) {
 						return false;
 					}
 				}
@@ -1358,17 +1386,117 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 				}
 			}
 
+			if ( preg_match_all( '/' . $expression . '\s+NOT\s+IN\s*\(([^)]*)\)/i', (string) $query, $matches, PREG_SET_ORDER ) ) {
+				foreach ( $matches as $match ) {
+					$value_map = array_fill_keys( array_map( 'intval', $this->component_fuzz_csv_values( $match[1] ) ), true );
+					if ( isset( $value_map[ (int) $actual ] ) ) {
+						return false;
+					}
+				}
+			}
+
 			if ( preg_match_all( '/' . $expression . '\s+BETWEEN\s+' . $value . '\s+AND\s+' . $value . '/i', (string) $query, $matches, PREG_SET_ORDER ) ) {
 				foreach ( $matches as $match ) {
 					$lower = (int) $this->component_fuzz_unquote_sql_value( $match[1] );
 					$upper = (int) $this->component_fuzz_unquote_sql_value( $match[2] );
-					if ( (int) $actual < min( $lower, $upper ) || (int) $actual > max( $lower, $upper ) ) {
+					if ( (int) $actual < $lower || (int) $actual > $upper ) {
+						return false;
+					}
+				}
+			}
+
+			if ( preg_match_all( '/' . $expression . '\s+NOT\s+BETWEEN\s+' . $value . '\s+AND\s+' . $value . '/i', (string) $query, $matches, PREG_SET_ORDER ) ) {
+				foreach ( $matches as $match ) {
+					$lower = (int) $this->component_fuzz_unquote_sql_value( $match[1] );
+					$upper = (int) $this->component_fuzz_unquote_sql_value( $match[2] );
+					if ( (int) $actual >= $lower && (int) $actual <= $upper ) {
 						return false;
 					}
 				}
 			}
 
 			return true;
+		}
+
+		private function component_fuzz_sql_date_format_matches( $query, $column, $datetime ) {
+			$column_regex = '(?:`?[a-z_][a-z0-9_]*`?\.)?`?' . preg_quote( $column, '/' ) . '`?';
+			if (
+				! preg_match_all(
+					'/\bDATE_FORMAT\s*\(\s*' . $column_regex . '\s*,\s*(\'(?:\\\\.|[^\'\\\\])*\'|"[^"]*")\s*\)\s*(=|!=|<>|<=|>=|<|>)\s*(-?\d+(?:\.\d+)?)/i',
+					(string) $query,
+					$matches,
+					PREG_SET_ORDER
+				)
+			) {
+				return true;
+			}
+
+			foreach ( $matches as $match ) {
+				$actual = $this->component_fuzz_datetime_format_float( $datetime, $this->component_fuzz_unquote_sql_value( $match[1] ) );
+				if ( null === $actual || ! $this->component_fuzz_compare_numeric( $actual, (float) $match[3], $match[2] ) ) {
+					return false;
+				}
+			}
+
+			return true;
+		}
+
+		private function component_fuzz_datetime_format_float( $datetime, $format ) {
+			$hour   = (int) substr( (string) $datetime, 11, 2 );
+			$minute = (int) substr( (string) $datetime, 14, 2 );
+			$second = (int) substr( (string) $datetime, 17, 2 );
+
+			switch ( (string) $format ) {
+				case '%H.%i':
+					return (float) sprintf( '%02d.%02d', $hour, $minute );
+				case '%H.%i%s':
+					return (float) sprintf( '%02d.%02d%02d', $hour, $minute, $second );
+				case '0.%i%s':
+					return (float) sprintf( '0.%02d%02d', $minute, $second );
+			}
+
+			return null;
+		}
+
+		private function component_fuzz_compare_numeric( $actual, $expected, $operator ) {
+			switch ( $operator ) {
+				case '=':
+					return abs( (float) $actual - (float) $expected ) < 0.0000001;
+				case '!=':
+				case '<>':
+					return abs( (float) $actual - (float) $expected ) >= 0.0000001;
+				case '<':
+					return (float) $actual < (float) $expected;
+				case '<=':
+					return (float) $actual <= (float) $expected || abs( (float) $actual - (float) $expected ) < 0.0000001;
+				case '>':
+					return (float) $actual > (float) $expected;
+				case '>=':
+					return (float) $actual >= (float) $expected || abs( (float) $actual - (float) $expected ) < 0.0000001;
+			}
+
+			return true;
+		}
+
+		private function component_fuzz_datetime_part( $datetime, $format ) {
+			$timestamp = strtotime( (string) $datetime . ' UTC' );
+			if ( false === $timestamp ) {
+				return 0;
+			}
+
+			return (int) gmdate( $format, $timestamp );
+		}
+
+		private function component_fuzz_mysql_week_zero( $datetime ) {
+			$timestamp = strtotime( (string) $datetime . ' UTC' );
+			if ( false === $timestamp ) {
+				return 0;
+			}
+
+			$day_of_year = (int) gmdate( 'z', $timestamp );
+			$weekday     = (int) gmdate( 'w', $timestamp );
+
+			return (int) floor( ( $day_of_year + 7 - $weekday ) / 7 );
 		}
 
 		private function component_fuzz_filter_posts_by_datetime_bounds( $query, array $rows ) {
@@ -1407,7 +1535,7 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 					);
 				}
 
-				if ( preg_match( '/\b(?:YEAR|MONTH|DAYOFMONTH|HOUR|MINUTE|SECOND)\s*\(\s*(?:`?wp_posts`?\.)?`?' . preg_quote( $column, '/' ) . '`?\s*\)/i', $where ) ) {
+				if ( preg_match( '/\b(?:YEAR|MONTH|DAYOFMONTH|HOUR|MINUTE|SECOND|DAYOFYEAR|DAYOFWEEK|WEEKDAY|WEEK|DATE_FORMAT)\s*\(/i', $where ) ) {
 					$rows = array_filter(
 						$rows,
 						function ( $row ) use ( $where, $column ) {

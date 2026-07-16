@@ -6533,19 +6533,21 @@ PHP;
 					'stderr'   => self::describe_string( (string) ( $run['stderr'] ?? '' ) ),
 					'stdout'   => self::describe_string( (string) ( $run['stdout'] ?? '' ) ),
 					'result'   => array(
-						'returned'              => $result['returned'] ?? null,
-						'returnType'            => $result['returnType'] ?? null,
-						'throwable'             => $result['throwable'] ?? null,
-						'monthRows'             => $result['monthRows'] ?? array(),
-						'listTable'             => $result['listTable'] ?? array(),
-						'queries'               => $result['queries'] ?? array(),
-						'exactTimestampIds'     => $result['exactTimestampIds'] ?? array(),
-						'dateQueryWindowIds'    => $result['dateQueryWindowIds'] ?? array(),
-						'dateQueryControlIds'   => $result['dateQueryControlIds'] ?? array(),
-						'excludedMonthStatuses' => $result['excludedMonthStatuses'] ?? array(),
-						'contentBefore'         => $result['contentBefore'] ?? array(),
-						'contentAfter'          => $result['contentAfter'] ?? array(),
-						'output'                => self::describe_string( (string) ( $result['output'] ?? '' ) ),
+						'returned'                 => $result['returned'] ?? null,
+						'returnType'               => $result['returnType'] ?? null,
+						'throwable'                => $result['throwable'] ?? null,
+						'monthRows'                => $result['monthRows'] ?? array(),
+						'listTable'                => $result['listTable'] ?? array(),
+						'queries'                  => $result['queries'] ?? array(),
+						'exactTimestampIds'        => $result['exactTimestampIds'] ?? array(),
+						'dateQueryWindowIds'       => $result['dateQueryWindowIds'] ?? array(),
+						'dateQueryScalarTimeIds'   => $result['dateQueryScalarTimeIds'] ?? array(),
+						'dateQueryCalendarUnitIds' => $result['dateQueryCalendarUnitIds'] ?? array(),
+						'dateQueryControlIds'      => $result['dateQueryControlIds'] ?? array(),
+						'excludedMonthStatuses'    => $result['excludedMonthStatuses'] ?? array(),
+						'contentBefore'            => $result['contentBefore'] ?? array(),
+						'contentAfter'             => $result['contentAfter'] ?? array(),
+						'output'                   => self::describe_string( (string) ( $result['output'] ?? '' ) ),
 					),
 				),
 			)
@@ -6635,26 +6637,28 @@ PHP;
 		$ctx   = new \ComponentFuzz\FuzzContext( (int) ( $case['seed'] ?? 1 ), self::NAME, (int) ( $case['iteration'] ?? 0 ) );
 		$token = self::media_upload_dispatch_token( (string) ( $case['token'] ?? $ctx->identifier( 4, 9 ) ) );
 		$state = array(
-			'ok'                    => false,
-			'label'                 => (string) ( $case['label'] ?? 'media-library-query-date-stub-edges' ),
-			'token'                 => $token,
-			'parentId'              => 0,
-			'exactTimestampIds'     => array(),
-			'dateQueryWindowIds'    => array(),
-			'dateQueryControlIds'   => array(),
-			'excludedMonthStatuses' => array(
+			'ok'                       => false,
+			'label'                    => (string) ( $case['label'] ?? 'media-library-query-date-stub-edges' ),
+			'token'                    => $token,
+			'parentId'                 => 0,
+			'exactTimestampIds'        => array(),
+			'dateQueryWindowIds'       => array(),
+			'dateQueryScalarTimeIds'   => array(),
+			'dateQueryCalendarUnitIds' => array(),
+			'dateQueryControlIds'      => array(),
+			'excludedMonthStatuses'    => array(
 				'autoDraftIds' => array(),
 				'trashIds'     => array(),
 			),
-			'monthRows'             => array(),
-			'listTable'             => array(),
-			'queries'               => array(),
-			'contentBefore'         => array(),
-			'contentAfter'          => array(),
-			'returned'              => false,
-			'returnType'            => null,
-			'throwable'             => null,
-			'output'                => '',
+			'monthRows'                => array(),
+			'listTable'                => array(),
+			'queries'                  => array(),
+			'contentBefore'            => array(),
+			'contentAfter'             => array(),
+			'returned'                 => false,
+			'returnType'               => null,
+			'throwable'                => null,
+			'output'                   => '',
 		);
 
 		$buffer_level = ob_get_level();
@@ -6718,8 +6722,10 @@ PHP;
 						'relative_file' => '2026/12/exact-timestamp-' . $token . '.jpg',
 					)
 				);
-				$state['exactTimestampIds'][]  = (int) $exact->ID;
-				$state['dateQueryWindowIds'][] = (int) $exact->ID;
+				$state['exactTimestampIds'][]       = (int) $exact->ID;
+				$state['dateQueryWindowIds'][]      = (int) $exact->ID;
+				$state['dateQueryScalarTimeIds'][]  = (int) $exact->ID;
+				$state['dateQueryCalendarUnitIds'][] = (int) $exact->ID;
 
 				$hour_window = self::seed_attachment(
 					$ctx->fork( 'hour-window' ),
@@ -6733,7 +6739,9 @@ PHP;
 						'relative_file' => '2026/12/hour-window-' . $token . '.jpg',
 					)
 				);
-				$state['dateQueryWindowIds'][] = (int) $hour_window->ID;
+				$state['dateQueryWindowIds'][]      = (int) $hour_window->ID;
+				$state['dateQueryScalarTimeIds'][]  = (int) $hour_window->ID;
+				$state['dateQueryCalendarUnitIds'][] = (int) $hour_window->ID;
 
 				foreach (
 					array(
@@ -6757,6 +6765,10 @@ PHP;
 						)
 					);
 					$state['dateQueryControlIds'][] = (int) $control->ID;
+					if ( in_array( $label, array( 'wrong-hour', 'wrong-minute', 'wrong-second' ), true ) ) {
+						$state['dateQueryScalarTimeIds'][]   = (int) $control->ID;
+						$state['dateQueryCalendarUnitIds'][] = (int) $control->ID;
+					}
 				}
 
 				$auto_draft = self::seed_attachment(
@@ -6847,6 +6859,44 @@ PHP;
 						),
 					)
 				);
+				$state['queries']['dateQueryScalarTime'] = self::media_library_date_stub_edge_capture_wp_query(
+					array(
+						'post_mime_type' => 'image',
+						'date_query'     => array(
+							array(
+								'compare' => 'BETWEEN',
+								'year'    => array( 2026, 2026 ),
+								'month'   => array( 12, 12 ),
+								'day'     => array( 14, 14 ),
+							),
+							array(
+								'compare' => '>=',
+								'hour'    => 6,
+								'minute'  => 7,
+								'second'  => 8,
+							),
+						),
+					)
+				);
+				$state['queries']['dateQueryCalendarUnits'] = self::media_library_date_stub_edge_capture_wp_query(
+					array(
+						'post_mime_type' => 'image',
+						'date_query'     => array(
+							array(
+								'compare'   => 'BETWEEN',
+								'dayofyear' => array( 348, 348 ),
+							),
+							array(
+								'compare'       => 'IN',
+								'dayofweek_iso' => array( 1 ),
+							),
+							array(
+								'compare' => 'IN',
+								'week'    => array( 50 ),
+							),
+						),
+					)
+				);
 
 				$state['listTable'] = self::media_library_date_stub_edge_list_table_probe();
 				$state['returnType'] = 'NULL';
@@ -6876,6 +6926,7 @@ PHP;
 		$posts = is_array( $query->posts ?? null ) ? $query->posts : array();
 
 		return array(
+			'request'     => (string) ( $query->request ?? '' ),
 			'ids'         => array_map(
 				static function ( $post ): int {
 					return (int) ( $post->ID ?? 0 );
@@ -6945,6 +6996,8 @@ PHP;
 			&& is_string( $result['output'] ?? null )
 			&& is_array( $result['exactTimestampIds'] ?? null )
 			&& is_array( $result['dateQueryWindowIds'] ?? null )
+			&& is_array( $result['dateQueryScalarTimeIds'] ?? null )
+			&& is_array( $result['dateQueryCalendarUnitIds'] ?? null )
 			&& is_array( $result['dateQueryControlIds'] ?? null )
 			&& is_array( $result['excludedMonthStatuses'] ?? null )
 			&& is_array( $result['monthRows'] ?? null )
@@ -7003,12 +7056,20 @@ PHP;
 			)
 		);
 
-		$in_query      = is_array( $result['queries']['dateQueryIn'] ?? null ) ? $result['queries']['dateQueryIn'] : array();
-		$between_query = is_array( $result['queries']['dateQueryBetween'] ?? null ) ? $result['queries']['dateQueryBetween'] : array();
-		$window_ids    = array_values( array_map( 'intval', $result['dateQueryWindowIds'] ?? array() ) );
-		$control_ids   = array_values( array_map( 'intval', $result['dateQueryControlIds'] ?? array() ) );
-		$in_ids        = array_values( array_map( 'intval', $in_query['ids'] ?? array() ) );
-		$between_ids   = array_values( array_map( 'intval', $between_query['ids'] ?? array() ) );
+		$in_query                      = is_array( $result['queries']['dateQueryIn'] ?? null ) ? $result['queries']['dateQueryIn'] : array();
+		$between_query                 = is_array( $result['queries']['dateQueryBetween'] ?? null ) ? $result['queries']['dateQueryBetween'] : array();
+		$scalar_query                  = is_array( $result['queries']['dateQueryScalarTime'] ?? null ) ? $result['queries']['dateQueryScalarTime'] : array();
+		$calendar_query                = is_array( $result['queries']['dateQueryCalendarUnits'] ?? null ) ? $result['queries']['dateQueryCalendarUnits'] : array();
+		$window_ids                    = array_values( array_map( 'intval', $result['dateQueryWindowIds'] ?? array() ) );
+		$scalar_ids                    = array_values( array_map( 'intval', $result['dateQueryScalarTimeIds'] ?? array() ) );
+		$calendar_ids                  = array_values( array_map( 'intval', $result['dateQueryCalendarUnitIds'] ?? array() ) );
+		$control_ids                   = array_values( array_map( 'intval', $result['dateQueryControlIds'] ?? array() ) );
+		$scalar_excluded_control_ids   = array_values( array_diff( $control_ids, $scalar_ids ) );
+		$calendar_excluded_control_ids = array_values( array_diff( $control_ids, $calendar_ids ) );
+		$in_ids                        = array_values( array_map( 'intval', $in_query['ids'] ?? array() ) );
+		$between_ids                   = array_values( array_map( 'intval', $between_query['ids'] ?? array() ) );
+		$scalar_result_ids             = array_values( array_map( 'intval', $scalar_query['ids'] ?? array() ) );
+		$calendar_result_ids           = array_values( array_map( 'intval', $calendar_query['ids'] ?? array() ) );
 
 		self::collect_failure(
 			$failures,
@@ -7031,6 +7092,34 @@ PHP;
 				'query'    => $between_query,
 				'expected' => $window_ids,
 				'controls' => $control_ids,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::same_int_set( $scalar_result_ids, $scalar_ids )
+				&& str_contains( (string) ( $scalar_query['request'] ?? '' ), "DATE_FORMAT( wp_posts.post_date, '%H.%i%s' ) >=" )
+				&& array() === array_intersect( $scalar_result_ids, $scalar_excluded_control_ids ),
+			'media attachment WP_Query DATE_FORMAT time projections filter generated hour/minute/second rows',
+			array(
+				'query'            => $scalar_query,
+				'expected'         => $scalar_ids,
+				'excludedControls' => $scalar_excluded_control_ids,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::same_int_set( $calendar_result_ids, $calendar_ids )
+				&& str_contains( (string) ( $calendar_query['request'] ?? '' ), 'DAYOFYEAR( wp_posts.post_date ) BETWEEN 348 AND 348' )
+				&& str_contains( (string) ( $calendar_query['request'] ?? '' ), 'WEEKDAY( wp_posts.post_date ) + 1 IN (1)' )
+				&& str_contains( (string) ( $calendar_query['request'] ?? '' ), 'WEEK( wp_posts.post_date, 0 ) IN (50)' )
+				&& array() === array_intersect( $calendar_result_ids, $calendar_excluded_control_ids ),
+			'media attachment WP_Query calendar-unit projections filter day-of-year, weekday, and week rows',
+			array(
+				'query'            => $calendar_query,
+				'expected'         => $calendar_ids,
+				'excludedControls' => $calendar_excluded_control_ids,
 			)
 		);
 

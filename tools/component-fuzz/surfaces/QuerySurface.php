@@ -2035,6 +2035,94 @@ final class QuerySurface {
 				),
 			),
 			array(
+				'label'     => 'seeded-date-format-hour-minute-window',
+				'queryVars' => array_merge(
+					$execution_defaults,
+					array(
+						'date_query'     => array(
+							array(
+								'compare' => '>=',
+								'hour'    => 11,
+								'minute'  => 30,
+							),
+						),
+						'fields'         => 'ids',
+						'post__in'       => array( 7, 23, 29 ),
+						'post_status'    => 'publish',
+						'post_type'      => 'post',
+						'posts_per_page' => -1,
+					)
+				),
+				'expect'    => array(
+					'contains' => array( "DATE_FORMAT( wp_posts.post_date, '%H.%i' ) >= 11.3" ),
+					'postIds'  => array( 29, 23, 7 ),
+				),
+			),
+			array(
+				'label'     => 'seeded-date-format-hour-minute-second-strict-window',
+				'queryVars' => array_merge(
+					$execution_defaults,
+					array(
+						'date_query'     => array(
+							array(
+								'compare' => '>',
+								'hour'    => 11,
+								'minute'  => 30,
+								'second'  => 0,
+							),
+						),
+						'fields'         => 'ids',
+						'post__in'       => array( 7, 23, 29 ),
+						'post_status'    => 'publish',
+						'post_type'      => 'post',
+						'posts_per_page' => -1,
+					)
+				),
+				'expect'    => array(
+					'contains' => array( "DATE_FORMAT( wp_posts.post_date, '%H.%i%s' ) > 11.3" ),
+					'postIds'  => array( 29, 23 ),
+				),
+			),
+			array(
+				'label'     => 'seeded-weekday-week-dayofyear-row-oracle',
+				'queryVars' => array_merge(
+					$execution_defaults,
+					array(
+						'date_query'     => array(
+							array(
+								'compare'   => 'BETWEEN',
+								'dayofyear' => array( 126, 153 ),
+							),
+							array(
+								'compare'       => 'IN',
+								'dayofweek_iso' => array( 1, 2 ),
+							),
+							array(
+								'compare'   => 'IN',
+								'dayofweek' => array( 2, 3 ),
+							),
+							array(
+								'compare' => 'IN',
+								'week'    => array( 18, 22 ),
+							),
+						),
+						'fields'         => 'ids',
+						'post_status'    => 'publish',
+						'post_type'      => 'post',
+						'posts_per_page' => -1,
+					)
+				),
+				'expect'    => array(
+					'contains' => array(
+						'DAYOFYEAR( wp_posts.post_date ) BETWEEN 126 AND 153',
+						'WEEKDAY( wp_posts.post_date ) + 1 IN (1,2)',
+						'DAYOFWEEK( wp_posts.post_date ) IN (2,3)',
+						'WEEK( wp_posts.post_date, 0 ) IN (18,22)',
+					),
+					'postIds'  => array( 29, 23 ),
+				),
+			),
+			array(
 				'label'     => 'singular-id-flags',
 				'queryVars' => array_merge(
 					$execution_defaults,
@@ -2827,7 +2915,7 @@ final class QuerySurface {
 			'inclusive' => $ctx->bool(),
 		);
 
-		foreach ( array( 'year', 'month', 'day', 'dayofweek_iso', 'hour', 'minute', 'second' ) as $unit ) {
+		foreach ( array( 'year', 'month', 'day', 'dayofyear', 'dayofweek', 'dayofweek_iso', 'week', 'hour', 'minute', 'second' ) as $unit ) {
 			if ( $ctx->bool( 35 ) ) {
 				$clause[ $unit ] = self::random_date_unit_value( $ctx, $unit, $compare );
 			}
@@ -2840,7 +2928,7 @@ final class QuerySurface {
 			$clause['before'] = self::random_date_boundary( $ctx );
 		}
 
-		if ( 0 === count( array_intersect( array_keys( $clause ), array( 'after', 'before', 'year', 'month', 'day', 'dayofweek_iso', 'hour', 'minute', 'second' ) ) ) ) {
+		if ( 0 === count( array_intersect( array_keys( $clause ), array( 'after', 'before', 'year', 'month', 'day', 'dayofyear', 'dayofweek', 'dayofweek_iso', 'week', 'hour', 'minute', 'second' ) ) ) ) {
 			$clause['year'] = $ctx->int( 1990, 2035 );
 		}
 
@@ -4705,7 +4793,10 @@ final class QuerySurface {
 			'year'          => array( 1990, 2035, 2200 ),
 			'month'         => array( 1, 12, 14 ),
 			'day'           => array( 1, 31, 35 ),
+			'dayofyear'     => array( 1, 366, 370 ),
+			'dayofweek'     => array( 1, 7, 9 ),
 			'dayofweek_iso' => array( 1, 7, 9 ),
+			'week'          => array( 0, 53, 60 ),
 			'hour'          => array( 0, 23, 27 ),
 			'minute'        => array( 0, 59, 70 ),
 			'second'        => array( 0, 59, 70 ),
