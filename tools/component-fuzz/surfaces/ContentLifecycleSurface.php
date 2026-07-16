@@ -46,6 +46,9 @@ final class ContentLifecycleSurface {
 			$rows[] = self::check_post_slug_collision_and_canonical_projection( $ctx->fork( 'post-slug-canonical' ), $case );
 
 			self::prepare_runtime();
+			$rows[] = self::check_post_slug_history_and_sample_permalink( $ctx->fork( 'post-slug-history-sample' ), $case );
+
+			self::prepare_runtime();
 			$rows[] = self::check_admin_post_save_orchestration( $ctx->fork( 'admin-post-save' ), $case );
 
 			self::prepare_runtime();
@@ -196,6 +199,7 @@ final class ContentLifecycleSurface {
 				'wp_cache_get_salted',
 				'wp_cache_set',
 				'wp_check_password',
+				'wp_check_for_changed_slugs',
 				'wp_delete_link',
 				'wp_delete_comment',
 				'wp_delete_term',
@@ -1074,6 +1078,363 @@ final class ContentLifecycleSurface {
 			array(
 				'case'     => self::case_summary( $case ),
 				'postType' => $post_type,
+				'postIds'  => $post_ids,
+				'failures' => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
+	private static function check_post_slug_history_and_sample_permalink( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures             = array();
+		$post_ids             = array();
+		$history_base_slug    = 'history-before-' . $case['token'];
+		$history_middle_slug  = 'history-middle-' . $case['token'];
+		$draft_base_slug      = 'history-draft-before-' . $case['token'];
+		$draft_after_slug     = 'history-draft-after-' . $case['token'];
+		$page_base_slug       = 'history-page-before-' . $case['token'];
+		$page_after_slug      = 'history-page-after-' . $case['token'];
+		$sample_title         = 'Sample History ' . $case['token'];
+		$sample_base_slug     = \sanitize_title( $sample_title );
+		$manual_base_slug     = 'manual-history-' . $case['token'];
+		$permalink_structure  = '/%postname%/';
+		$permalink_filter     = static function () use ( $permalink_structure ): string {
+			return $permalink_structure;
+		};
+		$previous_rewrite_set = array_key_exists( 'wp_rewrite', $GLOBALS );
+		$previous_rewrite     = $GLOBALS['wp_rewrite'] ?? null;
+		$slug_action_priority = \has_action( 'post_updated', 'wp_check_for_changed_slugs' );
+		$installed_slug_hook  = false;
+
+		try {
+			if ( ! function_exists( 'get_sample_permalink' ) && defined( 'ABSPATH' ) ) {
+				require_once ABSPATH . 'wp-admin/includes/post.php';
+			}
+
+			$GLOBALS['wp_rewrite'] = new \WP_Rewrite();
+			$GLOBALS['wp_rewrite']->permalink_structure = $permalink_structure;
+			\add_filter( 'pre_option_permalink_structure', $permalink_filter );
+
+			if ( false === $slug_action_priority ) {
+				\add_action( 'post_updated', 'wp_check_for_changed_slugs', 12, 3 );
+				$installed_slug_hook = true;
+			}
+
+			$history_id = \wp_insert_post(
+				\wp_slash(
+					array(
+						'post_type'     => 'post',
+						'post_title'    => 'Slug History ' . $case['title'],
+						'post_content'  => 'Slug history content ' . $case['content'],
+						'post_status'   => 'publish',
+						'post_name'     => $history_base_slug,
+						'post_date'     => '2024-05-01 02:03:04',
+						'post_date_gmt' => '2024-05-01 02:03:04',
+					)
+				),
+				true,
+				false
+			);
+			$draft_history_id = \wp_insert_post(
+				\wp_slash(
+					array(
+						'post_type'     => 'post',
+						'post_title'    => 'Draft Slug History ' . $case['title'],
+						'post_content'  => 'Draft slug history content ' . $case['content'],
+						'post_status'   => 'draft',
+						'post_name'     => $draft_base_slug,
+						'post_date'     => '2024-05-01 03:04:05',
+						'post_date_gmt' => '2024-05-01 03:04:05',
+					)
+				),
+				true,
+				false
+			);
+			$page_history_id  = \wp_insert_post(
+				\wp_slash(
+					array(
+						'post_type'     => 'page',
+						'post_title'    => 'Page Slug History ' . $case['title'],
+						'post_content'  => 'Page slug history content ' . $case['content'],
+						'post_status'   => 'publish',
+						'post_name'     => $page_base_slug,
+						'post_date'     => '2024-05-01 04:05:06',
+						'post_date_gmt' => '2024-05-01 04:05:06',
+					)
+				),
+				true,
+				false
+			);
+			$sample_holder_id = \wp_insert_post(
+				\wp_slash(
+					array(
+						'post_type'     => 'post',
+						'post_title'    => 'Sample Holder ' . $case['token'],
+						'post_content'  => 'Sample holder content ' . $case['token'],
+						'post_status'   => 'publish',
+						'post_name'     => $sample_base_slug,
+						'post_date'     => '2024-05-02 03:04:05',
+						'post_date_gmt' => '2024-05-02 03:04:05',
+					)
+				),
+				true,
+				false
+			);
+			$manual_holder_id = \wp_insert_post(
+				\wp_slash(
+					array(
+						'post_type'     => 'post',
+						'post_title'    => 'Manual Holder ' . $case['token'],
+						'post_content'  => 'Manual holder content ' . $case['token'],
+						'post_status'   => 'publish',
+						'post_name'     => $manual_base_slug,
+						'post_date'     => '2024-05-03 04:05:06',
+						'post_date_gmt' => '2024-05-03 04:05:06',
+					)
+				),
+				true,
+				false
+			);
+			$sample_draft_id = \wp_insert_post(
+				\wp_slash(
+					array(
+						'post_type'     => 'post',
+						'post_title'    => $sample_title,
+						'post_content'  => 'Sample draft content ' . $case['updatedContent'],
+						'post_status'   => 'draft',
+						'post_name'     => '',
+						'post_date'     => '2024-05-04 05:06:07',
+						'post_date_gmt' => '2024-05-04 05:06:07',
+					)
+				),
+				true,
+				false
+			);
+			$post_ids        = array_values(
+				array_filter(
+					array( $history_id, $draft_history_id, $page_history_id, $sample_holder_id, $manual_holder_id, $sample_draft_id ),
+					static function ( $id ): bool {
+						return is_int( $id ) && $id > 0;
+					}
+				)
+			);
+			$history_before = is_int( $history_id ) ? \get_post( $history_id ) : null;
+			$sample_before  = is_int( $sample_draft_id ) ? \get_post( $sample_draft_id ) : null;
+
+			self::collect_failure(
+				$failures,
+				function_exists( 'get_sample_permalink' )
+					&& $history_before instanceof \WP_Post
+					&& $sample_before instanceof \WP_Post
+					&& $history_base_slug === $history_before->post_name
+					&& 'draft' === $sample_before->post_status
+					&& '' === $sample_before->post_name,
+				'slug history and sample permalink fixtures insert with expected starting status and slugs',
+				array(
+					'history'         => self::post_summary( $history_before ),
+					'sampleBefore'    => self::post_summary( $sample_before ),
+					'sampleFunction'  => function_exists( 'get_sample_permalink' ),
+					'installedAction' => $installed_slug_hook,
+					'actionPriority'  => $slug_action_priority,
+				)
+			);
+
+			if ( $history_before instanceof \WP_Post ) {
+				$first_update_id = \wp_update_post(
+					\wp_slash(
+						array(
+							'ID'         => (int) $history_before->ID,
+							'post_name'  => $history_middle_slug,
+							'post_title' => 'Slug History Middle ' . $case['updatedTitle'],
+						)
+					),
+					true,
+					true
+				);
+				$history_middle = \get_post( $history_before->ID );
+				$old_after_first = array_values( (array) \get_post_meta( $history_before->ID, '_wp_old_slug' ) );
+
+				$duplicate_update_id = \wp_update_post(
+					\wp_slash(
+						array(
+							'ID'        => (int) $history_before->ID,
+							'post_name' => $history_middle_slug,
+						)
+					),
+					true,
+					true
+				);
+				$old_after_duplicate = array_values( (array) \get_post_meta( $history_before->ID, '_wp_old_slug' ) );
+
+				$revert_update_id = \wp_update_post(
+					\wp_slash(
+						array(
+							'ID'         => (int) $history_before->ID,
+							'post_name'  => $history_base_slug,
+							'post_title' => 'Slug History Reverted ' . $case['updatedTitle'],
+						)
+					),
+					true,
+					true
+				);
+				$history_reverted = \get_post( $history_before->ID );
+				$old_after_revert = array_values( (array) \get_post_meta( $history_before->ID, '_wp_old_slug' ) );
+
+				self::collect_failure(
+					$failures,
+					$first_update_id === (int) $history_before->ID
+						&& $duplicate_update_id === (int) $history_before->ID
+						&& $revert_update_id === (int) $history_before->ID
+						&& $history_middle instanceof \WP_Post
+						&& $history_reverted instanceof \WP_Post
+						&& $history_middle_slug === $history_middle->post_name
+						&& array( $history_base_slug ) === $old_after_first
+						&& array( $history_base_slug ) === $old_after_duplicate
+						&& $history_base_slug === $history_reverted->post_name
+						&& array( $history_middle_slug ) === $old_after_revert,
+					'wp_check_for_changed_slugs records the previous slug once and prunes the slug that becomes current again',
+					array(
+						'firstUpdate'       => self::error_summary( $first_update_id ),
+						'duplicateUpdate'   => self::error_summary( $duplicate_update_id ),
+						'revertUpdate'      => self::error_summary( $revert_update_id ),
+						'middle'            => self::post_summary( $history_middle ),
+						'reverted'          => self::post_summary( $history_reverted ),
+						'oldAfterFirst'     => $old_after_first,
+						'oldAfterDuplicate' => $old_after_duplicate,
+						'oldAfterRevert'    => $old_after_revert,
+					)
+				);
+			}
+
+			if ( is_int( $draft_history_id ) && is_int( $page_history_id ) ) {
+				$draft_update_id = \wp_update_post(
+					\wp_slash(
+						array(
+							'ID'        => $draft_history_id,
+							'post_name' => $draft_after_slug,
+						)
+					),
+					true,
+					true
+				);
+				$page_update_id  = \wp_update_post(
+					\wp_slash(
+						array(
+							'ID'        => $page_history_id,
+							'post_name' => $page_after_slug,
+						)
+					),
+					true,
+					true
+				);
+				$draft_after     = \get_post( $draft_history_id );
+				$page_after      = \get_post( $page_history_id );
+				$draft_old_slugs = array_values( (array) \get_post_meta( $draft_history_id, '_wp_old_slug' ) );
+				$page_old_slugs  = array_values( (array) \get_post_meta( $page_history_id, '_wp_old_slug' ) );
+
+				self::collect_failure(
+					$failures,
+					$draft_update_id === $draft_history_id
+						&& $page_update_id === $page_history_id
+						&& $draft_after instanceof \WP_Post
+						&& $page_after instanceof \WP_Post
+						&& 'draft' === $draft_after->post_status
+						&& $draft_after_slug === $draft_after->post_name
+						&& 'page' === $page_after->post_type
+						&& $page_after_slug === $page_after->post_name
+						&& array() === $draft_old_slugs
+						&& array() === $page_old_slugs,
+					'wp_check_for_changed_slugs ignores draft posts and hierarchical pages even when their slugs change',
+					array(
+						'draftUpdate' => self::error_summary( $draft_update_id ),
+						'pageUpdate'  => self::error_summary( $page_update_id ),
+						'draftAfter'  => self::post_summary( $draft_after ),
+						'pageAfter'   => self::post_summary( $page_after ),
+						'draftOld'    => $draft_old_slugs,
+						'pageOld'     => $page_old_slugs,
+					)
+				);
+			}
+
+			if ( $sample_before instanceof \WP_Post && function_exists( 'get_sample_permalink' ) ) {
+				$title_sample  = \get_sample_permalink( $sample_before->ID, $sample_title, '' );
+				$manual_sample = \get_sample_permalink( $sample_before->ID, 'Manual Title ' . $case['token'], $manual_base_slug );
+				$sample_after  = \get_post( $sample_before->ID );
+				$sample_holder = is_int( $sample_holder_id ) ? \get_post( $sample_holder_id ) : null;
+				$manual_holder = is_int( $manual_holder_id ) ? \get_post( $manual_holder_id ) : null;
+
+				self::collect_failure(
+					$failures,
+					is_array( $title_sample )
+						&& is_array( $manual_sample )
+						&& $sample_base_slug . '-2' === ( $title_sample[1] ?? null )
+						&& $manual_base_slug . '-2' === ( $manual_sample[1] ?? null )
+						&& is_string( $title_sample[0] ?? null )
+						&& is_string( $manual_sample[0] ?? null )
+						&& str_contains( $title_sample[0], 'http://example.test/' )
+						&& str_contains( $title_sample[0], '%postname%' )
+						&& str_contains( $manual_sample[0], '%postname%' )
+						&& $sample_after instanceof \WP_Post
+						&& 'draft' === $sample_after->post_status
+						&& '' === $sample_after->post_name
+						&& $sample_holder instanceof \WP_Post
+						&& $sample_base_slug === $sample_holder->post_name
+						&& $manual_holder instanceof \WP_Post
+						&& $manual_base_slug === $manual_holder->post_name,
+					'get_sample_permalink derives collision-safe title and explicit-name slugs without mutating the stored draft or holders',
+					array(
+						'titleSample'  => $title_sample,
+						'manualSample' => $manual_sample,
+						'sampleAfter'  => self::post_summary( $sample_after ),
+						'titleHolder'  => self::post_summary( $sample_holder ),
+						'manualHolder' => self::post_summary( $manual_holder ),
+					)
+				);
+			}
+		} finally {
+			if ( $installed_slug_hook ) {
+				\remove_action( 'post_updated', 'wp_check_for_changed_slugs', 12 );
+			}
+
+			\remove_filter( 'pre_option_permalink_structure', $permalink_filter );
+
+			if ( $previous_rewrite_set ) {
+				$GLOBALS['wp_rewrite'] = $previous_rewrite;
+			} else {
+				unset( $GLOBALS['wp_rewrite'] );
+			}
+
+			foreach ( array_unique( array_map( 'intval', $post_ids ) ) as $post_id ) {
+				if ( $post_id > 0 ) {
+					\wp_delete_post( $post_id, true );
+				}
+			}
+		}
+
+		$slug_action_restored = false === $slug_action_priority
+			? false === \has_action( 'post_updated', 'wp_check_for_changed_slugs' )
+			: $slug_action_priority === \has_action( 'post_updated', 'wp_check_for_changed_slugs' );
+		$rewrite_restored    = $previous_rewrite_set === array_key_exists( 'wp_rewrite', $GLOBALS )
+			&& ( ! $previous_rewrite_set || $previous_rewrite === $GLOBALS['wp_rewrite'] );
+
+		self::collect_failure(
+			$failures,
+			$slug_action_restored
+				&& false === \has_filter( 'pre_option_permalink_structure', $permalink_filter )
+				&& $rewrite_restored,
+			'post slug history sample row restores slug action, permalink filter, and rewrite global',
+			array(
+				'slugAction'      => \has_action( 'post_updated', 'wp_check_for_changed_slugs' ),
+				'expectedAction'  => $slug_action_priority,
+				'permalinkFilter' => \has_filter( 'pre_option_permalink_structure', $permalink_filter ),
+				'rewriteRestored' => $rewrite_restored,
+			)
+		);
+
+		return $ctx->result(
+			'content-lifecycle.posts.slug-history-sample-permalink',
+			array() === $failures,
+			array(
+				'case'     => self::case_summary( $case ),
 				'postIds'  => $post_ids,
 				'failures' => array_slice( $failures, 0, 8 ),
 			)

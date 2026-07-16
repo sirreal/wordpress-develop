@@ -4072,14 +4072,23 @@ final class RestObjectControllersSurface {
 		$comment_trash_filter    = static function (): bool {
 			return false;
 		};
+		$permalink_structure     = '/%postname%/';
+		$permalink_filter        = static function () use ( $permalink_structure ): string {
+			return $permalink_structure;
+		};
+		$previous_rewrite_set    = array_key_exists( 'wp_rewrite', $GLOBALS );
+		$previous_rewrite        = $GLOBALS['wp_rewrite'] ?? null;
 		$write_filter_restored   = false;
 		$post_filter_restored    = false;
 		$comment_filter_restored = false;
 		$email_filter_restored   = false;
 		$sanitize_filter_restored = false;
+		$permalink_filter_restored = false;
+		$rewrite_restored        = false;
 		$server_restored         = false;
 		$actions_restored        = false;
 		$current_user_restored   = false;
+		$create_slug_collision_id = 0;
 
 		try {
 			$controllers = array(
@@ -4093,19 +4102,24 @@ final class RestObjectControllersSurface {
 				$controller->register_routes();
 			}
 
-			$route_post_title     = 'Route Created REST Post ' . $case['token'];
-			$route_post_content   = '<p>Route created content ' . $case['token'] . '</p>';
-			$route_post_slug      = 'Route Created REST Slug ' . $case['token'];
-			$route_term_name      = 'Route Created Term ' . $case['token'];
-			$route_term_slug      = 'Route Created Term Slug ' . $case['token'];
-			$route_comment_body   = "  Route created comment {$case['token']}\n";
-			$route_comment_email  = 'route-comment-' . $case['token'] . '@example.com';
-			$route_user_login     = 'cfz_route_user_' . $case['token'];
-			$route_user_email     = 'route-user-' . $case['token'] . '@example.com';
-			$route_user_name      = 'Route Created User ' . $case['token'];
-			$route_user_password  = 'route-pass-' . $case['token'] . '-A1';
-			$route_user_slug      = 'Route Created User ' . $case['token'];
-			$accepted_emails      = array_fill_keys(
+			$GLOBALS['wp_rewrite'] = new \WP_Rewrite();
+			$GLOBALS['wp_rewrite']->permalink_structure = $permalink_structure;
+			\add_filter( 'pre_option_permalink_structure', $permalink_filter );
+
+			$route_post_title         = 'Route Created REST Post ' . $case['token'];
+			$route_post_content       = '<p>Route created content ' . $case['token'] . '</p>';
+			$route_post_slug_base     = \sanitize_title( $route_post_title );
+			$route_post_slug_expected = $route_post_slug_base . '-2';
+			$route_term_name          = 'Route Created Term ' . $case['token'];
+			$route_term_slug          = 'Route Created Term Slug ' . $case['token'];
+			$route_comment_body       = "  Route created comment {$case['token']}\n";
+			$route_comment_email      = 'route-comment-' . $case['token'] . '@example.com';
+			$route_user_login         = 'cfz_route_user_' . $case['token'];
+			$route_user_email         = 'route-user-' . $case['token'] . '@example.com';
+			$route_user_name          = 'Route Created User ' . $case['token'];
+			$route_user_password      = 'route-pass-' . $case['token'] . '-A1';
+			$route_user_slug          = 'Route Created User ' . $case['token'];
+			$accepted_emails          = array_fill_keys(
 				array(
 					$route_comment_email,
 					$route_user_email,
@@ -4118,7 +4132,22 @@ final class RestObjectControllersSurface {
 			$sanitize_email_filter = static function ( string $sanitized, string $email ) use ( $accepted_emails ): string {
 				return isset( $accepted_emails[ $email ] ) ? $email : $sanitized;
 			};
-			$counts_before        = self::content_counts();
+			$create_slug_collision_id = \wp_insert_post(
+				\wp_slash(
+					array(
+						'post_type'    => 'post',
+						'post_title'   => 'REST Create Collision Holder ' . $case['token'],
+						'post_content' => 'REST create collision holder ' . $case['token'],
+						'post_status'  => 'publish',
+						'post_name'    => $route_post_slug_base,
+						'post_author'  => $fixtures['author'],
+					)
+				),
+				true,
+				false
+			);
+			$create_slug_collision_post = is_int( $create_slug_collision_id ) ? \get_post( $create_slug_collision_id ) : null;
+			$counts_before             = self::content_counts();
 
 			\wp_set_current_user( 0 );
 			$denied_create_response = $server->dispatch(
@@ -4171,12 +4200,15 @@ final class RestObjectControllersSurface {
 					self::request(
 						'POST',
 						'/wp/v2/posts',
-						array( '_fields' => 'author,content,id,slug,status,title' ),
+						array(
+							'_fields' => 'author,content,generated_slug,id,link,permalink_template,slug,status,title',
+							'context' => 'edit',
+						),
 						array(),
 						array(
 							'author'  => $fixtures['author'],
 							'content' => $route_post_content,
-							'slug'    => $route_post_slug,
+							'slug'    => $route_post_slug_base,
 							'status'  => 'publish',
 							'title'   => $route_post_title,
 						)
@@ -4298,6 +4330,7 @@ final class RestObjectControllersSurface {
 			$created_term    = \get_term( $created_term_id, 'category' );
 			$created_comment = \get_comment( $created_comment_id );
 			$created_user    = \get_user_by( 'id', $created_user_id );
+			$created_post_link = $created_post instanceof \WP_Post ? \get_permalink( $created_post ) : null;
 
 			$observed = array(
 				'deniedCreate'   => $denied_create_response instanceof \WP_REST_Response ? $denied_create_response->get_data() : $denied_create_response,
@@ -4319,6 +4352,8 @@ final class RestObjectControllersSurface {
 							'id'      => (int) $created_post->ID,
 							'author'  => (int) $created_post->post_author,
 							'content' => $created_post->post_content,
+							'link'    => $created_post_link,
+							'slug'    => $created_post->post_name,
 							'status'  => $created_post->post_status,
 							'title'   => $created_post->post_title,
 						)
@@ -4350,6 +4385,12 @@ final class RestObjectControllersSurface {
 						)
 						: null,
 				),
+				'slugCollision'  => array(
+					'id'       => self::describe_value( $create_slug_collision_id ),
+					'postSlug' => $create_slug_collision_post instanceof \WP_Post ? $create_slug_collision_post->post_name : null,
+					'expected' => $route_post_slug_base,
+				),
+				'createdPostLocation' => $created_post_response instanceof \WP_REST_Response ? $created_post_response->get_headers()['Location'] ?? null : null,
 				'countsBefore'   => $counts_before,
 				'countsDenied'   => $counts_after_denial,
 				'countsAfter'    => $counts_after,
@@ -4378,15 +4419,25 @@ final class RestObjectControllersSurface {
 				$failures,
 				$created_post_response instanceof \WP_REST_Response
 					&& 201 === $created_post_response->get_status()
-					&& self::projected_keys_match( $created_post_data, array( 'author', 'content', 'id', 'slug', 'status', 'title' ) )
+					&& self::projected_keys_match( $created_post_data, array( 'author', 'content', 'generated_slug', 'id', 'link', 'permalink_template', 'slug', 'status', 'title' ) )
 					&& $created_post_id > 0
 					&& $fixtures['author'] === (int) ( $created_post_data['author'] ?? 0 )
 					&& $route_post_title === ( $created_post_data['title']['raw'] ?? null )
 					&& $route_post_content === ( $created_post_data['content']['raw'] ?? null )
+					&& $create_slug_collision_post instanceof \WP_Post
+					&& $route_post_slug_base === $create_slug_collision_post->post_name
+					&& $route_post_slug_expected === ( $created_post_data['slug'] ?? null )
+					&& $route_post_slug_expected === ( $created_post_data['generated_slug'] ?? null )
+					&& $created_post_link === ( $created_post_data['link'] ?? null )
+					&& \rest_url( 'wp/v2/posts/' . $created_post_id ) === ( $created_post_response->get_headers()['Location'] ?? null )
+					&& is_string( $created_post_data['permalink_template'] ?? null )
+					&& str_contains( $created_post_data['permalink_template'], 'http://example.test/' )
+					&& str_contains( $created_post_data['permalink_template'], '%postname%' )
 					&& $created_post instanceof \WP_Post
 					&& $route_post_title === $created_post->post_title
 					&& $route_post_content === $created_post->post_content
 					&& 'publish' === $created_post->post_status
+					&& $route_post_slug_expected === $created_post->post_name
 					&& $fixtures['author'] === (int) $created_post->post_author
 					&& $created_term_response instanceof \WP_REST_Response
 					&& 201 === $created_term_response->get_status()
@@ -4471,6 +4522,19 @@ final class RestObjectControllersSurface {
 				$write_filter_restored = self::remove_cap_filter( $cap_filter );
 			}
 
+			if ( is_int( $create_slug_collision_id ) && $create_slug_collision_id > 0 ) {
+				\wp_delete_post( $create_slug_collision_id, true );
+			}
+
+			\remove_filter( 'pre_option_permalink_structure', $permalink_filter );
+			$permalink_filter_restored = false === \has_filter( 'pre_option_permalink_structure', $permalink_filter );
+
+			if ( $previous_rewrite_set ) {
+				$GLOBALS['wp_rewrite'] = $previous_rewrite;
+			} else {
+				unset( $GLOBALS['wp_rewrite'] );
+			}
+
 			\wp_set_current_user( $previous_current_user_id );
 
 			if ( $had_wp_actions ) {
@@ -4491,6 +4555,8 @@ final class RestObjectControllersSurface {
 			$server_restored = null !== $previous_server
 				? $previous_server === ( $GLOBALS['wp_rest_server'] ?? null )
 				: ! array_key_exists( 'wp_rest_server', $GLOBALS );
+			$rewrite_restored = $previous_rewrite_set === array_key_exists( 'wp_rewrite', $GLOBALS )
+				&& ( ! $previous_rewrite_set || $previous_rewrite === $GLOBALS['wp_rewrite'] );
 			$current_user_restored = $previous_current_user_id === (
 				isset( $GLOBALS['current_user'] ) && $GLOBALS['current_user'] instanceof \WP_User
 					? (int) $GLOBALS['current_user']->ID
@@ -4505,6 +4571,8 @@ final class RestObjectControllersSurface {
 				&& $comment_filter_restored
 				&& $email_filter_restored
 				&& $sanitize_filter_restored
+				&& $permalink_filter_restored
+				&& $rewrite_restored
 				&& $server_restored
 				&& $actions_restored
 				&& $current_user_restored,
@@ -4515,6 +4583,8 @@ final class RestObjectControllersSurface {
 				'commentFilterRestored' => $comment_filter_restored,
 				'emailFilterRestored'   => $email_filter_restored,
 				'sanitizeFilterRestored' => $sanitize_filter_restored,
+				'permalinkFilterRestored' => $permalink_filter_restored,
+				'rewriteRestored'        => $rewrite_restored,
 				'serverRestored'        => $server_restored,
 				'actionsRestored'       => $actions_restored,
 				'currentUserRestored'   => $current_user_restored,
