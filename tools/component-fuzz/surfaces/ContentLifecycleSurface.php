@@ -5204,6 +5204,7 @@ final class ContentLifecycleSurface {
 		$bulk_hooks           = array();
 		$post_deny_filter     = null;
 		$assign_filter        = null;
+		$status_filter        = null;
 		$sticky_filter        = null;
 		$post_snapshot        = $_POST;
 		$get_snapshot         = $_GET;
@@ -5443,6 +5444,115 @@ final class ContentLifecycleSurface {
 				)
 			);
 
+			$status_publish_id = self::insert_bulk_capability_post( 'Status Publish Requested ' . $token, $user_id );
+			$status_private_id = self::insert_bulk_capability_post( 'Status Private Requested ' . $token, $user_id );
+
+			self::collect_failure(
+				$failures,
+				is_int( $status_publish_id )
+					&& is_int( $status_private_id ),
+				'bulk edit no-publish status fixtures insert editable draft posts',
+				array(
+					'publishId' => $status_publish_id,
+					'privateId' => $status_private_id,
+				)
+			);
+
+			$status_filter = self::grant_caps_except_filter( $user_id, array( 'publish_posts' ), $cap_events );
+			\add_filter( 'user_has_cap', $status_filter, 10, 4 );
+			$status_publish_result = is_int( $status_publish_id )
+				? \bulk_edit_posts(
+					\wp_slash(
+						array(
+							'post_type'  => 'post',
+							'post'       => array( $status_publish_id ),
+							'_status'    => 'publish',
+							'post_title' => 'Bulk Cap Publish Coerced ' . $token,
+							'content'    => 'Bulk cap publish coerced content ' . $token,
+						)
+					)
+				)
+				: null;
+			$status_private_result = is_int( $status_private_id )
+				? \bulk_edit_posts(
+					\wp_slash(
+						array(
+							'post_type'  => 'post',
+							'post'       => array( $status_private_id ),
+							'_status'    => 'private',
+							'post_title' => 'Bulk Cap Private Preserved ' . $token,
+							'content'    => 'Bulk cap private preserved content ' . $token,
+						)
+					)
+				)
+				: null;
+			\remove_filter( 'user_has_cap', $status_filter, 10 );
+			$status_publish_after = is_int( $status_publish_id ) ? \get_post( $status_publish_id ) : null;
+			$status_private_after = is_int( $status_private_id ) ? \get_post( $status_private_id ) : null;
+
+			self::collect_failure(
+				$failures,
+				is_int( $status_publish_id )
+					&& is_array( $status_publish_result )
+					&& array( $status_publish_id ) === self::normalize_int_list( (array) $status_publish_result['updated'] )
+					&& array() === (array) $status_publish_result['skipped']
+					&& array() === (array) $status_publish_result['locked']
+					&& $status_publish_after instanceof \WP_Post
+					&& 'pending' === $status_publish_after->post_status
+					&& 'Bulk Cap Publish Coerced ' . $token === $status_publish_after->post_title
+					&& 'Bulk cap publish coerced content ' . $token === $status_publish_after->post_content
+					&& (string) $user_id === (string) \get_post_meta( $status_publish_id, '_edit_last', true )
+					&& self::admin_bulk_event_present(
+						$bulk_events,
+						'bulk_edit_posts',
+						array(
+							'updated'    => array( $status_publish_id ),
+							'postIds'    => array( $status_publish_id ),
+							'postStatus' => 'publish',
+						)
+					)
+					&& self::capability_event_present( $cap_events, 'publish_posts' ),
+				'bulk_edit_posts coerces requested publish to pending when publish_posts is denied while preserving other edits',
+				array(
+					'result'    => $status_publish_result,
+					'post'      => self::post_summary( $status_publish_after ),
+					'editLast'  => is_int( $status_publish_id ) ? \get_post_meta( $status_publish_id, '_edit_last', true ) : null,
+					'bulkEvents' => $bulk_events,
+					'capEvents' => $cap_events,
+				)
+			);
+			self::collect_failure(
+				$failures,
+				is_int( $status_private_id )
+					&& is_array( $status_private_result )
+					&& array( $status_private_id ) === self::normalize_int_list( (array) $status_private_result['updated'] )
+					&& array() === (array) $status_private_result['skipped']
+					&& array() === (array) $status_private_result['locked']
+					&& $status_private_after instanceof \WP_Post
+					&& 'draft' === $status_private_after->post_status
+					&& 'Bulk Cap Private Preserved ' . $token === $status_private_after->post_title
+					&& 'Bulk cap private preserved content ' . $token === $status_private_after->post_content
+					&& (string) $user_id === (string) \get_post_meta( $status_private_id, '_edit_last', true )
+					&& self::admin_bulk_event_present(
+						$bulk_events,
+						'bulk_edit_posts',
+						array(
+							'updated'    => array( $status_private_id ),
+							'postIds'    => array( $status_private_id ),
+							'postStatus' => 'private',
+						)
+					)
+					&& self::capability_event_present( $cap_events, 'publish_posts' ),
+				'bulk_edit_posts preserves previous draft status for requested private when publish_posts is denied while preserving other edits',
+				array(
+					'result'    => $status_private_result,
+					'post'      => self::post_summary( $status_private_after ),
+					'editLast'  => is_int( $status_private_id ) ? \get_post_meta( $status_private_id, '_edit_last', true ) : null,
+					'bulkEvents' => $bulk_events,
+					'capEvents' => $cap_events,
+				)
+			);
+
 			$sticky_first_id  = self::insert_bulk_capability_post( 'Sticky First ' . $token, $user_id );
 			$sticky_second_id = self::insert_bulk_capability_post( 'Sticky Second ' . $token, $user_id );
 			if ( is_int( $sticky_first_id ) && is_int( $sticky_second_id ) ) {
@@ -5553,6 +5663,9 @@ final class ContentLifecycleSurface {
 			if ( null !== $assign_filter ) {
 				\remove_filter( 'user_has_cap', $assign_filter, 10 );
 			}
+			if ( null !== $status_filter ) {
+				\remove_filter( 'user_has_cap', $status_filter, 10 );
+			}
 			if ( null !== $sticky_filter ) {
 				\remove_filter( 'user_has_cap', $sticky_filter, 10 );
 			}
@@ -5560,6 +5673,7 @@ final class ContentLifecycleSurface {
 			$hooks_removed       = self::hooks_are_removed( $bulk_hooks );
 			$cap_filters_removed = ( null === $post_deny_filter || false === \has_filter( 'user_has_cap', $post_deny_filter ) )
 				&& ( null === $assign_filter || false === \has_filter( 'user_has_cap', $assign_filter ) )
+				&& ( null === $status_filter || false === \has_filter( 'user_has_cap', $status_filter ) )
 				&& ( null === $sticky_filter || false === \has_filter( 'user_has_cap', $sticky_filter ) );
 			$_POST              = $post_snapshot;
 			$_GET               = $get_snapshot;
