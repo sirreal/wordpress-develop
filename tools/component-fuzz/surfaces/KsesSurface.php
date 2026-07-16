@@ -76,6 +76,7 @@ final class KsesSurface {
 			$results[] = self::check_generated_policy_protocol_style_matrix( $seed );
 			$results[] = self::check_generated_scoped_policy_mutation_matrix( $seed );
 			$results[] = self::check_style_protocol_cross_hook_matrix( $seed );
+			$results[] = self::check_semicolon_data_url_css_parser_matrix( $seed );
 			$results = array_merge( $results, self::check_attribute_constraint_invariants( $seed ) );
 			$results = array_merge( $results, self::check_pdf_object_and_uri_attribute_invariants( $seed ) );
 			$results[] = self::check_helper_contract_matrix( $seed );
@@ -1417,6 +1418,266 @@ final class KsesSurface {
 			'kses.style-protocol-cross-hook-matrix',
 			$custom_uri_attr,
 			'CSS URL protocol checks run before permissive CSS allow filters, dynamic URI attributes are protocol-filtered, non-URI data attributes remain data-only, and hooks restore',
+			$failures,
+			$details
+		);
+	}
+
+	private static function check_semicolon_data_url_css_parser_matrix( int $seed ): array {
+		foreach ( array( 'add_filter', 'remove_filter', 'has_filter', 'safecss_filter_attr', 'wp_kses' ) as $function_name ) {
+			if ( ! function_exists( $function_name ) ) {
+				return self::skip(
+					$seed,
+					null,
+					'kses.semicolon-data-url-css-parser-matrix.available',
+					$function_name . '() is not loaded',
+					''
+				);
+			}
+		}
+
+		$rng           = self::rng( self::normalize_seed( 'kses-css-semicolon-data-url:' . $seed ) );
+		$hook_snapshot = self::snapshot_hook( 'safecss_filter_attr_allow_css' );
+		$hook_before   = self::hook_signature( 'safecss_filter_attr_allow_css' );
+		$policy        = array(
+			'div' => array(
+				'data-*' => true,
+				'style'  => true,
+			),
+		);
+		$protocols     = array( 'https' );
+		$failures      = array();
+		$cases         = array();
+		$exception     = null;
+
+		$data_url_templates = array(
+			array(
+				'label' => 'html-base64',
+				'mime'  => 'text/html',
+				'meta'  => 'base64',
+				'body'  => 'PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg',
+			),
+			array(
+				'label' => 'svg-charset',
+				'mime'  => 'image/svg+xml',
+				'meta'  => 'charset=utf-8',
+				'body'  => '%3Csvg%20onload%3Dalert(1)%3E',
+			),
+			array(
+				'label' => 'css-profile',
+				'mime'  => 'text/css',
+				'meta'  => 'profile=component-fuzz',
+				'body'  => 'body%7Bbackground-image%3Aurl(javascript%3Aalert(1))%7D',
+			),
+			array(
+				'label' => 'xml-version',
+				'mime'  => 'application/xml',
+				'meta'  => 'version=1.0',
+				'body'  => '%3Cx%20onclick%3Dalert(1)%2F%3E',
+			),
+		);
+		$properties         = array( 'background-image', 'background', 'cursor', '--cf-data-url' );
+		$quotes             = array( '', "'", '"' );
+
+		try {
+			for ( $case_index = 0; $case_index < 10; ++$case_index ) {
+				$template  = self::rng_choice( $rng, $data_url_templates );
+				$property  = self::rng_choice( $rng, $properties );
+				$quote     = self::rng_choice( $rng, $quotes );
+				$token     = substr( sha1( $seed . ':semicolon-data-url:' . $case_index . ':' . self::rng_uint32( $rng ) ), 0, 8 );
+				$data_url  = 'data:' . $template['mime'] . ';' . $template['meta'] . ',' . $template['body'] . $token;
+				$safe_url  = 'https://example.test/kses-css/' . $token . '.png';
+				$url_value = 'url(' . $quote . $data_url . $quote . ')';
+				if ( 'cursor' === $property ) {
+					$url_value .= ', auto';
+				}
+
+				$css       = $property . ':' . $url_value . ';color:red;background-image:url(' . $safe_url . ')';
+				$html      = '<div style="' . htmlspecialchars( $css, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' ) . '" data-token="' . $token . '">x</div>';
+				$case_seen = array(
+					'permissive' => array(),
+					'guarded'    => array(),
+				);
+
+				$default_css  = \safecss_filter_attr( $css );
+				$default_html = \wp_kses( $html, $policy, $protocols );
+				if ( self::contains_data_url( $default_css, $data_url ) ) {
+					$failures[] = array(
+						'case'    => $case_index,
+						'type'    => 'default-css-preserved-data-url',
+						'label'   => $template['label'],
+						'css'     => self::preview( $default_css ),
+						'dataUrl' => self::preview( $data_url, 120 ),
+					);
+				}
+				if ( self::contains_data_url( $default_html, $data_url ) ) {
+					$failures[] = array(
+						'case'    => $case_index,
+						'type'    => 'default-html-preserved-data-url',
+						'label'   => $template['label'],
+						'html'    => self::preview( $default_html ),
+						'dataUrl' => self::preview( $data_url, 120 ),
+					);
+				}
+				if ( false === strpos( $default_css, 'color:red' ) || false === strpos( $default_css, $safe_url ) ) {
+					$failures[] = array(
+						'case'       => $case_index,
+						'type'       => 'default-css-stripped-safe-neighbor',
+						'label'      => $template['label'],
+						'css'        => self::preview( $default_css ),
+						'expectedUrl' => $safe_url,
+					);
+				}
+
+				$permissive_filter = static function ( bool $allow_css, string $css_test_string ) use ( &$case_seen ): bool {
+					$case_seen['permissive'][] = array(
+						'default' => $allow_css,
+						'test'    => $css_test_string,
+					);
+					return true;
+				};
+				\add_filter( 'safecss_filter_attr_allow_css', $permissive_filter, 10, 2 );
+				try {
+					$permissive_css  = \safecss_filter_attr( $css );
+					$permissive_html = \wp_kses( $html, $policy, $protocols );
+				} finally {
+					\remove_filter( 'safecss_filter_attr_allow_css', $permissive_filter, 10 );
+				}
+
+				if ( ! self::seen_semicolon_data_url_split( $case_seen['permissive'], $data_url ) ) {
+					$failures[] = array(
+						'case'    => $case_index,
+						'type'    => 'permissive-hook-did-not-see-split-data-url-fragments',
+						'label'   => $template['label'],
+						'seen'    => $case_seen['permissive'],
+						'dataUrl' => self::preview( $data_url, 120 ),
+					);
+				}
+				if ( ! self::contains_data_url( $permissive_css, $data_url ) ) {
+					$failures[] = array(
+						'case'    => $case_index,
+						'type'    => 'permissive-css-did-not-preserve-current-edge',
+						'label'   => $template['label'],
+						'css'     => self::preview( $permissive_css ),
+						'dataUrl' => self::preview( $data_url, 120 ),
+					);
+				}
+				if ( ! self::contains_data_url( $permissive_html, $data_url ) ) {
+					$failures[] = array(
+						'case'    => $case_index,
+						'type'    => 'permissive-html-did-not-preserve-current-edge',
+						'label'   => $template['label'],
+						'html'    => self::preview( $permissive_html ),
+						'dataUrl' => self::preview( $data_url, 120 ),
+					);
+				}
+
+				$guarded_filter = static function ( bool $allow_css, string $css_test_string ) use ( &$case_seen ): bool {
+					$case_seen['guarded'][] = array(
+						'default' => $allow_css,
+						'test'    => $css_test_string,
+					);
+					return ! self::looks_like_semicolon_data_url_css_fragment( $css_test_string );
+				};
+				\add_filter( 'safecss_filter_attr_allow_css', $guarded_filter, 10, 2 );
+				try {
+					$guarded_css  = \safecss_filter_attr( $css );
+					$guarded_html = \wp_kses( $html, $policy, $protocols );
+				} finally {
+					\remove_filter( 'safecss_filter_attr_allow_css', $guarded_filter, 10 );
+				}
+
+				if ( self::contains_data_url( $guarded_css, $data_url ) ) {
+					$failures[] = array(
+						'case'    => $case_index,
+						'type'    => 'guarded-css-preserved-data-url',
+						'label'   => $template['label'],
+						'css'     => self::preview( $guarded_css ),
+						'dataUrl' => self::preview( $data_url, 120 ),
+					);
+				}
+				if ( self::contains_data_url( $guarded_html, $data_url ) ) {
+					$failures[] = array(
+						'case'    => $case_index,
+						'type'    => 'guarded-html-preserved-data-url',
+						'label'   => $template['label'],
+						'html'    => self::preview( $guarded_html ),
+						'dataUrl' => self::preview( $data_url, 120 ),
+					);
+				}
+				if ( false === strpos( $guarded_css, 'color:red' ) || false === strpos( $guarded_css, $safe_url ) ) {
+					$failures[] = array(
+						'case'       => $case_index,
+						'type'       => 'guarded-css-stripped-safe-neighbor',
+						'label'      => $template['label'],
+						'css'        => self::preview( $guarded_css ),
+						'expectedUrl' => $safe_url,
+					);
+				}
+
+				$cases[] = array(
+					'case'           => $case_index,
+					'label'          => $template['label'],
+					'property'       => $property,
+					'quote'          => $quote,
+					'defaultCss'     => self::preview( $default_css, 120 ),
+					'permissiveCss'  => self::preview( $permissive_css, 120 ),
+					'guardedCss'     => self::preview( $guarded_css, 120 ),
+					'permissiveHits' => count( $case_seen['permissive'] ),
+					'guardedHits'    => count( $case_seen['guarded'] ),
+				);
+			}
+		} catch ( \Throwable $e ) {
+			$exception = $e;
+		} finally {
+			self::restore_hook( 'safecss_filter_attr_allow_css', $hook_snapshot );
+		}
+
+		if ( null !== $exception ) {
+			return self::throwable_result(
+				$seed,
+				null,
+				'kses.semicolon-data-url-css-parser-matrix.no-throw',
+				'data:*;*',
+				$exception
+			);
+		}
+
+		$hook_after       = self::hook_signature( 'safecss_filter_attr_allow_css' );
+		$hooks_restored   = $hook_before === $hook_after;
+		$hook_was_empty   = empty( $hook_before['exists'] );
+		$css_after        = \safecss_filter_attr( 'background-image:url(data:text/html;base64,PHNj);color:red' );
+		$css_after_safe   = ! $hook_was_empty || ! self::contains_data_url( $css_after, 'data:text/html;base64,PHNj' );
+		if ( ! $hooks_restored || ! $css_after_safe ) {
+			$failures[] = array(
+				'type'          => 'filter-restoration',
+				'hooksRestored' => $hooks_restored,
+				'hookWasEmpty'  => $hook_was_empty,
+				'cssAfterSafe'  => $css_after_safe,
+				'cssAfter'      => self::preview( $css_after ),
+				'hookBefore'    => $hook_before,
+				'hookAfter'     => $hook_after,
+			);
+		}
+
+		$details = array(
+			'caseCount'    => count( $cases ),
+			'policy'       => 'default filters do not preserve complete semicolon-bearing data URLs; all-true allow-CSS exposes current split-fragment edge; guarded allow-CSS rejects split fragments',
+			'cases'        => array_slice( $cases, 0, 6 ),
+			'failureCount' => count( $failures ),
+			'failures'     => array_slice( $failures, 0, 8 ),
+		);
+
+		if ( empty( $failures ) ) {
+			return self::pass( $seed, null, 'kses.semicolon-data-url-css-parser-matrix', 'data:*;*', $details );
+		}
+
+		return self::fail(
+			$seed,
+			null,
+			'kses.semicolon-data-url-css-parser-matrix',
+			'data:*;*',
+			'default KSES CSS filtering does not preserve complete semicolon-bearing data URLs, current all-true allow-CSS hook exposure is isolated, guarded allow-CSS rejects split fragments, and hooks restore',
 			$failures,
 			$details
 		);
@@ -4943,6 +5204,52 @@ final class KsesSurface {
 	private static function strict_marker_attribute_retained( string $html, array $case ): bool {
 		$marker_attr = self::marker_attribute_expectation( $case );
 		return '' === $marker_attr || false !== strpos( $html, $marker_attr );
+	}
+
+	private static function contains_data_url( string $value, string $data_url ): bool {
+		return false !== stripos( self::decode_attribute_text( $value ), self::decode_attribute_text( $data_url ) );
+	}
+
+	private static function seen_semicolon_data_url_split( array $seen, string $data_url ): bool {
+		$decoded_url       = self::decode_attribute_text( $data_url );
+		$semicolon_offset  = strpos( $decoded_url, ';' );
+		$comma_offset      = strpos( $decoded_url, ',' );
+		$data_url_prefix   = false === $semicolon_offset ? $decoded_url : substr( $decoded_url, 0, $semicolon_offset );
+		$data_url_metadata = false === $semicolon_offset ? '' : substr(
+			$decoded_url,
+			$semicolon_offset + 1,
+			false === $comma_offset ? null : $comma_offset - $semicolon_offset - 1
+		);
+		$saw_prefix        = false;
+		$saw_metadata      = '' === $data_url_metadata;
+
+		foreach ( $seen as $hit ) {
+			if ( ! is_array( $hit ) || ! isset( $hit['test'] ) ) {
+				continue;
+			}
+
+			$test = self::decode_attribute_text( (string) $hit['test'] );
+			if ( false !== stripos( $test, 'url(' . $data_url_prefix ) || false !== stripos( $test, 'url("' . $data_url_prefix ) || false !== stripos( $test, "url('" . $data_url_prefix ) ) {
+				$saw_prefix = true;
+			}
+			if ( '' !== $data_url_metadata && false !== stripos( ltrim( $test ), $data_url_metadata . ',' ) ) {
+				$saw_metadata = true;
+			}
+		}
+
+		return $saw_prefix && $saw_metadata;
+	}
+
+	private static function looks_like_semicolon_data_url_css_fragment( string $css_test_string ): bool {
+		$test = strtolower( trim( self::decode_attribute_text( $css_test_string ) ) );
+		if ( false !== strpos( $test, 'url(data:' ) || false !== strpos( $test, 'url("data:' ) || false !== strpos( $test, "url('data:" ) ) {
+			return true;
+		}
+		if ( 1 === preg_match( '/^(?:base64|charset=[^,]+|profile=[^,]+|version=[^,]+),/i', $test ) ) {
+			return true;
+		}
+
+		return false;
 	}
 
 	private static function decode_attribute_text( string $value ): string {
