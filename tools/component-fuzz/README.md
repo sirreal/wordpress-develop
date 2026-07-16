@@ -806,9 +806,11 @@ database, network requests, or a configured site.
   safe create/update/delete error paths, route-dispatched write validation and
   response projection for object updates, route-dispatched create/delete
   validation, projection, trash-not-supported preservation,
-  force-delete/reassign lifecycle and metadata cleanup, upload-no-data paths,
-  and deterministic state restoration without live uploads, remote requests, or
-  a live database.
+  force-delete/reassign lifecycle and metadata cleanup, route-dispatched
+  taxonomy term parent/schema/capability/meta mutation coverage, term
+  insert/prepare/delete hook timing, force-delete previous-meta projection and
+  term-meta row cleanup, upload-no-data paths, and deterministic state
+  restoration without live uploads, remote requests, or a live database.
 - `rest-site-editor`: no-live-DB Site Editor REST controller coverage for
   global styles, template/template-part response shaping, template create,
   update, trash/reset/force-delete mutation lifecycles, template revisions and
@@ -1126,7 +1128,11 @@ on block-theme filesystem state and template CPT queries. Broad collection
 query translation for posts, attachments, revisions, users, comments, and terms
 is covered through REST query filters, query-class pre-query short-circuits,
 HEAD pagination headers, no broad SQL execution, and filter restoration. It
-documents limits for invalid enum-error formatting
+also dispatches taxonomy term mutation routes against category and tag
+controllers to cover parent schema boundaries, capability denial, REST-visible
+term-meta sanitization, insert/after-insert/prepare/delete hook order,
+force-delete previous-meta projection, and term-meta cleanup. It documents
+limits for invalid enum-error formatting
 branches that are not warning-safe under the stripped bootstrap. The
 registry-backed surface covers plugin/theme controller route, schema,
 collection parameter, sanitizer, and permission-gate contracts without

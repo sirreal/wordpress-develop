@@ -49,6 +49,7 @@ final class RestObjectControllersSurface {
 			$rows[] = self::check_route_dispatched_object_write_edges( $ctx->fork( 'object-write-dispatch' ), $case, $fixtures );
 			$rows[] = self::check_route_dispatched_object_create_delete_edges( $ctx->fork( 'object-create-delete-dispatch' ), $case, $fixtures );
 			$rows[] = self::check_route_dispatched_object_force_delete_edges( $ctx->fork( 'object-force-delete-dispatch' ), $case, $fixtures );
+			$rows[] = self::check_route_dispatched_term_mutation_edges( $ctx->fork( 'term-mutation-dispatch' ), $case, $fixtures );
 		} catch ( \Throwable $e ) {
 			$rows[] = self::row(
 				$ctx,
@@ -144,12 +145,14 @@ final class RestObjectControllersSurface {
 				'get_post',
 				'get_post_meta',
 				'get_term',
+				'get_term_meta',
 				'get_user_by',
 				'has_filter',
 				'is_wp_error',
 				'register_post_meta',
 				'register_rest_field',
 				'register_rest_route',
+				'register_term_meta',
 				'remove_filter',
 				'rest_ensure_response',
 				'rest_get_route_for_post',
@@ -164,6 +167,7 @@ final class RestObjectControllersSurface {
 				'update_comment_meta',
 				'update_option',
 				'update_post_meta',
+				'update_term_meta',
 				'wp_cache_flush',
 				'wp_insert_comment',
 				'wp_insert_post',
@@ -4463,6 +4467,591 @@ final class RestObjectControllersSurface {
 		);
 	}
 
+	private static function check_route_dispatched_term_mutation_edges( \ComponentFuzz\FuzzContext $ctx, array $case, array $fixtures ): array {
+		$failures = array();
+		$observed = array();
+
+		$previous_server          = $GLOBALS['wp_rest_server'] ?? null;
+		$had_wp_actions           = array_key_exists( 'wp_actions', $GLOBALS );
+		$previous_actions         = $GLOBALS['wp_actions'] ?? null;
+		$previous_current_user_id = isset( $GLOBALS['current_user'] ) && $GLOBALS['current_user'] instanceof \WP_User
+			? (int) $GLOBALS['current_user']->ID
+			: 0;
+
+		$server                    = new \WP_REST_Server();
+		$GLOBALS['wp_rest_server'] = $server;
+
+		if ( ! isset( $GLOBALS['wp_actions'] ) || ! is_array( $GLOBALS['wp_actions'] ) ) {
+			$GLOBALS['wp_actions'] = array();
+		}
+		$GLOBALS['wp_actions']['rest_api_init'] = max( 1, (int) ( $GLOBALS['wp_actions']['rest_api_init'] ?? 0 ) );
+
+		$pre_insert_events   = array();
+		$insert_events       = array();
+		$after_insert_events = array();
+		$prepare_events      = array();
+		$delete_events       = array();
+
+		$pre_insert_filter = static function ( object $prepared_term, \WP_REST_Request $request ) use ( &$pre_insert_events ): object {
+			$pre_insert_events[] = array(
+				'method'   => $request->get_method(),
+				'name'     => $prepared_term->name ?? null,
+				'parent'   => isset( $prepared_term->parent ) ? (int) $prepared_term->parent : null,
+				'metaKeys' => array_keys( (array) $request['meta'] ),
+			);
+			return $prepared_term;
+		};
+		$insert_action = static function ( \WP_Term $term, \WP_REST_Request $request, bool $creating ) use ( &$insert_events, $case ): void {
+			$insert_events[] = array(
+				'creating'   => $creating,
+				'id'         => (int) $term->term_id,
+				'method'     => $request->get_method(),
+				'name'       => $term->name,
+				'parent'     => (int) $term->parent,
+				'metaStored' => \get_term_meta( (int) $term->term_id, $case['termMetaKey'], true ),
+			);
+		};
+		$after_insert_action = static function ( \WP_Term $term, \WP_REST_Request $request, bool $creating ) use ( &$after_insert_events, $case ): void {
+			$after_insert_events[] = array(
+				'creating'   => $creating,
+				'id'         => (int) $term->term_id,
+				'method'     => $request->get_method(),
+				'name'       => $term->name,
+				'parent'     => (int) $term->parent,
+				'metaStored' => \get_term_meta( (int) $term->term_id, $case['termMetaKey'], true ),
+			);
+		};
+		$prepare_filter = static function ( \WP_REST_Response $response, \WP_Term $term, \WP_REST_Request $request ) use ( &$prepare_events ): \WP_REST_Response {
+			$prepare_events[] = array(
+				'id'     => (int) $term->term_id,
+				'method' => $request->get_method(),
+				'fields' => $request['_fields'],
+				'status' => $response->get_status(),
+			);
+			return $response;
+		};
+		$delete_action = static function ( \WP_Term $term, \WP_REST_Response $response, \WP_REST_Request $request ) use ( &$delete_events, $case ): void {
+			$data            = $response->get_data();
+			$delete_events[] = array(
+				'id'              => (int) $term->term_id,
+				'method'          => $request->get_method(),
+				'deleted'         => $data['deleted'] ?? null,
+				'previousMeta'    => $data['previous']['meta'][ $case['termMetaKey'] ] ?? null,
+				'metaAfterDelete' => \get_term_meta( (int) $term->term_id, $case['termMetaKey'], true ),
+			);
+		};
+
+		$cap_filter              = null;
+		$term_meta_registered    = false;
+		$write_filter_restored   = false;
+		$pre_filter_restored     = false;
+		$insert_filter_restored  = false;
+		$after_filter_restored   = false;
+		$prepare_filter_restored = false;
+		$delete_filter_restored  = false;
+		$server_restored         = false;
+		$actions_restored        = false;
+		$current_user_restored   = false;
+
+		try {
+			$term_meta_registered = \register_term_meta(
+				'category',
+				$case['termMetaKey'],
+				array(
+					'auth_callback'     => '__return_true',
+					'default'           => '',
+					'sanitize_callback' => 'sanitize_text_field',
+					'show_in_rest'      => true,
+					'single'            => true,
+					'type'              => 'string',
+				)
+			);
+
+			$category_controller = new \WP_REST_Terms_Controller( 'category' );
+			$tag_controller      = new \WP_REST_Terms_Controller( 'post_tag' );
+
+			$category_controller->register_routes();
+			$tag_controller->register_routes();
+
+			\add_filter( 'rest_pre_insert_category', $pre_insert_filter, 10, 2 );
+			\add_filter( 'rest_insert_category', $insert_action, 10, 3 );
+			\add_filter( 'rest_after_insert_category', $after_insert_action, 10, 3 );
+			\add_filter( 'rest_prepare_category', $prepare_filter, 10, 3 );
+			\add_filter( 'rest_delete_category', $delete_action, 10, 3 );
+
+			$routes                   = $server->get_routes( 'wp/v2' );
+			$category_collection_data = $server->get_data_for_route( '/wp/v2/categories', $routes['/wp/v2/categories'] ?? array(), 'help' );
+			$category_item_data       = $server->get_data_for_route( '/wp/v2/categories/(?P<id>[\d]+)', $routes['/wp/v2/categories/(?P<id>[\d]+)'] ?? array(), 'help' );
+			$category_schema          = $category_controller->get_item_schema();
+			$tag_schema               = $tag_controller->get_item_schema();
+
+			$schema_observed = array(
+				'termMetaRegistered' => $term_meta_registered,
+				'categoryRoutes'     => array(
+					'collection' => self::route_methods( $routes['/wp/v2/categories'] ?? array() ),
+					'item'       => self::route_methods( $routes['/wp/v2/categories/(?P<id>[\d]+)'] ?? array() ),
+				),
+				'tagRoutes'          => array(
+					'collection' => self::route_methods( $routes['/wp/v2/tags'] ?? array() ),
+					'item'       => self::route_methods( $routes['/wp/v2/tags/(?P<id>[\d]+)'] ?? array() ),
+				),
+				'categorySchemaKeys' => array_keys( $category_schema['properties'] ?? array() ),
+				'tagSchemaKeys'      => array_keys( $tag_schema['properties'] ?? array() ),
+			);
+			self::collect_failure(
+				$failures,
+				$term_meta_registered
+					&& array( 'GET', 'POST' ) === $schema_observed['categoryRoutes']['collection']
+					&& array( 'DELETE', 'GET', 'PATCH', 'POST', 'PUT' ) === $schema_observed['categoryRoutes']['item']
+					&& array( 'GET', 'POST' ) === $schema_observed['tagRoutes']['collection']
+					&& array( 'DELETE', 'GET', 'PATCH', 'POST', 'PUT' ) === $schema_observed['tagRoutes']['item']
+					&& isset( $category_schema['properties']['parent'] )
+					&& ! isset( $tag_schema['properties']['parent'] )
+					&& isset( $category_schema['properties']['meta']['properties'][ $case['termMetaKey'] ] )
+					&& self::route_data_has_endpoint_args( $category_collection_data, array( 'POST' ), array( 'description', 'meta', 'name', 'parent', 'slug' ) )
+					&& self::route_data_has_endpoint_args( $category_item_data, array( 'PATCH', 'POST', 'PUT' ), array( 'description', 'meta', 'name', 'parent', 'slug' ) )
+					&& self::route_data_schema_has_properties( $category_collection_data, array( 'id', 'meta', 'name', 'parent', 'slug', 'taxonomy' ) ),
+				'route-dispatched term routes expose hierarchical parent args and registered term meta schema',
+				$schema_observed
+			);
+
+			$counts_before = self::content_counts();
+
+			\wp_set_current_user( 0 );
+			$denied_create_response = $server->dispatch(
+				self::request(
+					'POST',
+					'/wp/v2/categories',
+					array( '_fields' => 'id,name,meta' ),
+					array(),
+					array(
+						'meta' => array( $case['termMetaKey'] => $case['termMetaInput'] ),
+						'name' => 'Denied Term ' . $case['token'],
+					)
+				)
+			);
+			$counts_after_denial = self::content_counts();
+			$hook_counts_after_denial = array(
+				'preInsert'   => count( $pre_insert_events ),
+				'insert'      => count( $insert_events ),
+				'afterInsert' => count( $after_insert_events ),
+			);
+
+			\wp_set_current_user( $fixtures['author'] );
+			$cap_filter = self::install_cap_filter(
+				array(
+					'add_term_meta',
+					'delete_categories',
+					'delete_term',
+					'delete_term_meta',
+					'delete_terms',
+					'edit_categories',
+					'edit_term',
+					'edit_term_meta',
+					'edit_terms',
+					'manage_categories',
+					'read',
+				)
+			);
+
+			try {
+				$invalid_parent_response = $server->dispatch(
+					self::request(
+						'POST',
+						'/wp/v2/categories',
+						array( '_fields' => 'id,name,parent' ),
+						array(),
+						array(
+							'name'   => 'Invalid Parent Term ' . $case['token'],
+							'parent' => 999999,
+						)
+					)
+				);
+				$flat_parent_response    = $server->dispatch(
+					self::request(
+						'POST',
+						'/wp/v2/tags',
+						array( '_fields' => 'id,name,parent' ),
+						array(),
+						array(
+							'name'   => 'Flat Parent Term ' . $case['token'],
+							'parent' => $fixtures['term'],
+						)
+					)
+				);
+				$counts_after_invalids   = self::content_counts();
+				$hook_counts_after_invalids = array(
+					'preInsert'   => count( $pre_insert_events ),
+					'insert'      => count( $insert_events ),
+					'afterInsert' => count( $after_insert_events ),
+				);
+
+				$route_term_name = 'Route Meta Term ' . $case['token'];
+				$route_term_slug = 'Route Meta Term Slug ' . $case['token'];
+				$create_response = $server->dispatch(
+					self::request(
+						'POST',
+						'/wp/v2/categories',
+						array( '_fields' => 'id,name,parent,slug,taxonomy,meta' ),
+						array(),
+						array(
+							'description' => 'Route meta term description ' . $case['token'],
+							'meta'        => array( $case['termMetaKey'] => $case['termMetaInput'] ),
+							'name'        => $route_term_name,
+							'parent'      => $fixtures['term'],
+							'slug'        => $route_term_slug,
+						)
+					)
+				);
+				$create_data     = $create_response instanceof \WP_REST_Response ? $create_response->get_data() : array();
+				$created_term_id = (int) ( $create_data['id'] ?? 0 );
+				$created_term    = \get_term( $created_term_id, 'category' );
+				$created_meta    = $created_term_id > 0 ? \get_term_meta( $created_term_id, $case['termMetaKey'], true ) : null;
+				$counts_after_create = self::content_counts();
+
+				$invalid_update_response = $server->dispatch(
+					self::request(
+						'PUT',
+						'/wp/v2/categories/' . $created_term_id,
+						array( '_fields' => 'id,parent,meta' ),
+						array(),
+						array( 'parent' => 999999 )
+					)
+				);
+				$term_after_invalid_update = \get_term( $created_term_id, 'category' );
+				$meta_after_invalid_update = $created_term_id > 0 ? \get_term_meta( $created_term_id, $case['termMetaKey'], true ) : null;
+				$counts_after_invalid_update = self::content_counts();
+
+				$updated_term_slug = 'Updated Route Meta Term Slug ' . $case['token'];
+				$update_response   = $server->dispatch(
+					self::request(
+						'PUT',
+						'/wp/v2/categories/' . $created_term_id,
+						array( '_fields' => 'id,name,parent,slug,meta' ),
+						array(),
+						array(
+							'meta'   => array( $case['termMetaKey'] => $case['termMetaUpdateInput'] ),
+							'name'   => $case['updatedTermName'],
+							'parent' => $fixtures['child_term'],
+							'slug'   => $updated_term_slug,
+						)
+					)
+				);
+				$update_data      = $update_response instanceof \WP_REST_Response ? $update_response->get_data() : array();
+				$updated_term     = \get_term( $created_term_id, 'category' );
+				$updated_meta     = $created_term_id > 0 ? \get_term_meta( $created_term_id, $case['termMetaKey'], true ) : null;
+				$counts_after_update = self::content_counts();
+
+				$delete_response = $server->dispatch(
+					self::request(
+						'DELETE',
+						'/wp/v2/categories/' . $created_term_id,
+						array(),
+						array(),
+						array( 'force' => true )
+					)
+				);
+				$delete_data      = $delete_response instanceof \WP_REST_Response ? $delete_response->get_data() : array();
+				$deleted_term     = \get_term( $created_term_id, 'category' );
+				$deleted_meta     = $created_term_id > 0 ? \get_term_meta( $created_term_id, $case['termMetaKey'], true ) : null;
+				$counts_after_delete = self::content_counts();
+			} finally {
+				$write_filter_restored = self::remove_cap_filter( $cap_filter );
+				$cap_filter            = null;
+			}
+
+			$observed = array(
+				'schema'               => $schema_observed,
+				'deniedCreate'         => $denied_create_response instanceof \WP_REST_Response ? $denied_create_response->get_data() : $denied_create_response,
+				'invalidParents'       => array(
+					'hierarchical'    => $invalid_parent_response instanceof \WP_REST_Response ? $invalid_parent_response->get_data() : $invalid_parent_response,
+					'nonHierarchical' => $flat_parent_response instanceof \WP_REST_Response ? $flat_parent_response->get_data() : $flat_parent_response,
+				),
+				'created'              => array(
+					'response'     => $create_data,
+					'status'       => $create_response instanceof \WP_REST_Response ? $create_response->get_status() : null,
+					'location'     => $create_response instanceof \WP_REST_Response ? $create_response->get_headers()['Location'] ?? null : null,
+					'stored'       => $created_term instanceof \WP_Term
+						? array(
+							'id'     => (int) $created_term->term_id,
+							'name'   => $created_term->name,
+							'parent' => (int) $created_term->parent,
+							'slug'   => $created_term->slug,
+						)
+						: null,
+					'storedMeta'   => $created_meta,
+				),
+				'invalidUpdate'        => array(
+					'response'   => $invalid_update_response instanceof \WP_REST_Response ? $invalid_update_response->get_data() : $invalid_update_response,
+					'termParent' => $term_after_invalid_update instanceof \WP_Term ? (int) $term_after_invalid_update->parent : null,
+					'meta'       => $meta_after_invalid_update,
+				),
+				'updated'              => array(
+					'response'   => $update_data,
+					'status'     => $update_response instanceof \WP_REST_Response ? $update_response->get_status() : null,
+					'termName'   => $updated_term instanceof \WP_Term ? $updated_term->name : null,
+					'termParent' => $updated_term instanceof \WP_Term ? (int) $updated_term->parent : null,
+					'termSlug'   => $updated_term instanceof \WP_Term ? $updated_term->slug : null,
+					'meta'       => $updated_meta,
+				),
+				'deleted'              => array(
+					'response'    => $delete_data,
+					'status'      => $delete_response instanceof \WP_REST_Response ? $delete_response->get_status() : null,
+					'termExists'  => $deleted_term instanceof \WP_Term,
+					'meta'        => $deleted_meta,
+				),
+				'hooks'                => array(
+					'preInsert'   => $pre_insert_events,
+					'insert'      => $insert_events,
+					'afterInsert' => $after_insert_events,
+					'prepare'     => $prepare_events,
+					'delete'      => $delete_events,
+				),
+				'hookCountsAfterDenial' => $hook_counts_after_denial,
+				'hookCountsAfterInvalids' => $hook_counts_after_invalids,
+				'counts'               => array(
+					'before'        => $counts_before,
+					'afterDenial'   => $counts_after_denial,
+					'afterInvalids' => $counts_after_invalids,
+					'afterCreate'   => $counts_after_create,
+					'afterInvalidUpdate' => $counts_after_invalid_update,
+					'afterUpdate'   => $counts_after_update,
+					'afterDelete'   => $counts_after_delete,
+				),
+			);
+
+			self::collect_failure(
+				$failures,
+				self::response_error_ok( $denied_create_response, 'rest_cannot_create', 401 )
+					&& self::content_count_delta_matches( $counts_before, $counts_after_denial, array(), array() )
+					&& array( 'preInsert' => 0, 'insert' => 0, 'afterInsert' => 0 ) === $hook_counts_after_denial,
+				'route-dispatched term create denies anonymous requests before validation hooks or row changes',
+				array(
+					'deniedCreate' => $observed['deniedCreate'],
+					'countsBefore' => $counts_before,
+					'countsDenied' => $counts_after_denial,
+					'hookCounts'   => $hook_counts_after_denial,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				self::response_error_ok( $invalid_parent_response, 'rest_term_invalid', 400 )
+					&& self::response_error_ok( $flat_parent_response, 'rest_taxonomy_not_hierarchical', 400 )
+					&& self::content_count_delta_matches( $counts_after_denial, $counts_after_invalids, array(), array() )
+					&& array( 'preInsert' => 0, 'insert' => 0, 'afterInsert' => 0 ) === $hook_counts_after_invalids,
+				'route-dispatched term parent errors reject missing parents and flat taxonomy parents before mutation',
+				array(
+					'invalidParents' => $observed['invalidParents'],
+					'countsDenied'   => $counts_after_denial,
+					'countsInvalids' => $counts_after_invalids,
+					'hookCounts'     => $hook_counts_after_invalids,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$create_response instanceof \WP_REST_Response
+					&& 201 === $create_response->get_status()
+					&& self::projected_keys_match( $create_data, array( 'id', 'meta', 'name', 'parent', 'slug', 'taxonomy' ) )
+					&& $created_term_id > 0
+					&& $route_term_name === ( $create_data['name'] ?? null )
+					&& $fixtures['term'] === (int) ( $create_data['parent'] ?? 0 )
+					&& \sanitize_title( $route_term_slug ) === ( $create_data['slug'] ?? null )
+					&& 'category' === ( $create_data['taxonomy'] ?? null )
+					&& $case['termMetaSanitized'] === ( $create_data['meta'][ $case['termMetaKey'] ] ?? null )
+					&& \rest_url( 'wp/v2/categories/' . $created_term_id ) === ( $create_response->get_headers()['Location'] ?? null )
+					&& $created_term instanceof \WP_Term
+					&& $route_term_name === $created_term->name
+					&& $fixtures['term'] === (int) $created_term->parent
+					&& $case['termMetaSanitized'] === $created_meta
+					&& self::content_count_delta_matches(
+						$counts_before,
+						$counts_after_create,
+						array(
+							'term_meta'     => 1,
+							'term_taxonomy' => 1,
+							'terms'         => 1,
+						),
+						array( 'term_meta', 'term_taxonomy', 'terms' )
+					),
+				'route-dispatched term create sanitizes meta, projects response fields, and persists parented rows',
+				$observed['created']
+			);
+
+			self::collect_failure(
+				$failures,
+				self::response_error_ok( $invalid_update_response, 'rest_term_invalid', 400 )
+					&& $fixtures['term'] === ( $term_after_invalid_update instanceof \WP_Term ? (int) $term_after_invalid_update->parent : null )
+					&& $case['termMetaSanitized'] === $meta_after_invalid_update
+					&& self::content_count_delta_matches( $counts_after_create, $counts_after_invalid_update, array(), array() )
+					&& $update_response instanceof \WP_REST_Response
+					&& 200 === $update_response->get_status()
+					&& self::projected_keys_match( $update_data, array( 'id', 'meta', 'name', 'parent', 'slug' ) )
+					&& $created_term_id === (int) ( $update_data['id'] ?? 0 )
+					&& $case['updatedTermName'] === ( $update_data['name'] ?? null )
+					&& $fixtures['child_term'] === (int) ( $update_data['parent'] ?? 0 )
+					&& \sanitize_title( $updated_term_slug ) === ( $update_data['slug'] ?? null )
+					&& $case['termMetaUpdateSanitized'] === ( $update_data['meta'][ $case['termMetaKey'] ] ?? null )
+					&& $updated_term instanceof \WP_Term
+					&& $case['updatedTermName'] === $updated_term->name
+					&& $fixtures['child_term'] === (int) $updated_term->parent
+					&& \sanitize_title( $updated_term_slug ) === $updated_term->slug
+					&& $case['termMetaUpdateSanitized'] === $updated_meta
+					&& self::content_count_delta_matches( $counts_after_create, $counts_after_update, array(), array() ),
+				'route-dispatched term update rejects invalid parents before mutating and updates parent/meta atomically',
+				array(
+					'invalidUpdate' => $observed['invalidUpdate'],
+					'updated'       => $observed['updated'],
+					'counts'        => array(
+						'afterCreate'        => $counts_after_create,
+						'afterInvalidUpdate' => $counts_after_invalid_update,
+						'afterUpdate'        => $counts_after_update,
+					),
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$delete_response instanceof \WP_REST_Response
+					&& 200 === $delete_response->get_status()
+					&& true === ( $delete_data['deleted'] ?? null )
+					&& $created_term_id === (int) ( $delete_data['previous']['id'] ?? 0 )
+					&& $case['updatedTermName'] === ( $delete_data['previous']['name'] ?? null )
+					&& $fixtures['child_term'] === (int) ( $delete_data['previous']['parent'] ?? 0 )
+					&& $case['termMetaUpdateSanitized'] === ( $delete_data['previous']['meta'][ $case['termMetaKey'] ] ?? null )
+					&& ! ( $deleted_term instanceof \WP_Term )
+					&& '' === (string) $deleted_meta
+					&& self::content_count_delta_matches( $counts_before, $counts_after_delete, array(), array() ),
+				'route-dispatched term force delete returns previous meta projection and removes rows plus term meta',
+				array(
+					'deleted'      => $observed['deleted'],
+					'countsBefore' => $counts_before,
+					'countsAfter'  => $counts_after_delete,
+				)
+			);
+		} finally {
+			if ( false !== \has_filter( 'rest_delete_category', $delete_action ) ) {
+				\remove_filter( 'rest_delete_category', $delete_action, 10 );
+			}
+			$delete_filter_restored = false === \has_filter( 'rest_delete_category', $delete_action );
+			if ( false !== \has_filter( 'rest_prepare_category', $prepare_filter ) ) {
+				\remove_filter( 'rest_prepare_category', $prepare_filter, 10 );
+			}
+			$prepare_filter_restored = false === \has_filter( 'rest_prepare_category', $prepare_filter );
+			if ( false !== \has_filter( 'rest_after_insert_category', $after_insert_action ) ) {
+				\remove_filter( 'rest_after_insert_category', $after_insert_action, 10 );
+			}
+			$after_filter_restored = false === \has_filter( 'rest_after_insert_category', $after_insert_action );
+			if ( false !== \has_filter( 'rest_insert_category', $insert_action ) ) {
+				\remove_filter( 'rest_insert_category', $insert_action, 10 );
+			}
+			$insert_filter_restored = false === \has_filter( 'rest_insert_category', $insert_action );
+			if ( false !== \has_filter( 'rest_pre_insert_category', $pre_insert_filter ) ) {
+				\remove_filter( 'rest_pre_insert_category', $pre_insert_filter, 10 );
+			}
+			$pre_filter_restored = false === \has_filter( 'rest_pre_insert_category', $pre_insert_filter );
+
+			if ( null !== $cap_filter ) {
+				$write_filter_restored = self::remove_cap_filter( $cap_filter );
+			}
+
+			\wp_set_current_user( $previous_current_user_id );
+
+			if ( $had_wp_actions ) {
+				$GLOBALS['wp_actions'] = $previous_actions;
+			} else {
+				unset( $GLOBALS['wp_actions'] );
+			}
+
+			if ( null !== $previous_server ) {
+				$GLOBALS['wp_rest_server'] = $previous_server;
+			} else {
+				unset( $GLOBALS['wp_rest_server'] );
+			}
+
+			$actions_restored = $had_wp_actions
+				? $previous_actions === ( $GLOBALS['wp_actions'] ?? null )
+				: ! array_key_exists( 'wp_actions', $GLOBALS );
+			$server_restored = null !== $previous_server
+				? $previous_server === ( $GLOBALS['wp_rest_server'] ?? null )
+				: ! array_key_exists( 'wp_rest_server', $GLOBALS );
+			$current_user_restored = $previous_current_user_id === (
+				isset( $GLOBALS['current_user'] ) && $GLOBALS['current_user'] instanceof \WP_User
+					? (int) $GLOBALS['current_user']->ID
+					: 0
+			);
+		}
+
+		$created_insert  = $insert_events[0] ?? array();
+		$updated_insert  = $insert_events[1] ?? array();
+		$created_after   = $after_insert_events[0] ?? array();
+		$updated_after   = $after_insert_events[1] ?? array();
+		$prepare_methods = array_values( array_unique( array_column( $prepare_events, 'method' ) ) );
+		sort( $prepare_methods );
+
+		self::collect_failure(
+			$failures,
+			2 === count( $pre_insert_events )
+				&& 2 === count( $insert_events )
+				&& 2 === count( $after_insert_events )
+				&& 1 === count( $delete_events )
+				&& true === ( $created_insert['creating'] ?? null )
+				&& '' === (string) ( $created_insert['metaStored'] ?? null )
+				&& true === ( $created_after['creating'] ?? null )
+				&& $case['termMetaSanitized'] === ( $created_after['metaStored'] ?? null )
+				&& false === ( $updated_insert['creating'] ?? null )
+				&& $case['termMetaSanitized'] === ( $updated_insert['metaStored'] ?? null )
+				&& false === ( $updated_after['creating'] ?? null )
+				&& $case['termMetaUpdateSanitized'] === ( $updated_after['metaStored'] ?? null )
+				&& array( 'DELETE', 'POST', 'PUT' ) === $prepare_methods
+				&& true === ( $delete_events[0]['deleted'] ?? null )
+				&& $case['termMetaUpdateSanitized'] === ( $delete_events[0]['previousMeta'] ?? null )
+				&& '' === (string) ( $delete_events[0]['metaAfterDelete'] ?? null )
+				&& $write_filter_restored
+				&& $pre_filter_restored
+				&& $insert_filter_restored
+				&& $after_filter_restored
+				&& $prepare_filter_restored
+				&& $delete_filter_restored
+				&& $server_restored
+				&& $actions_restored
+				&& $current_user_restored,
+			'route-dispatched term mutation hooks fire in meta-aware order and harness state is restored',
+			array(
+				'hooks' => array(
+					'preInsert'   => $pre_insert_events,
+					'insert'      => $insert_events,
+					'afterInsert' => $after_insert_events,
+					'prepare'     => $prepare_events,
+					'delete'      => $delete_events,
+				),
+				'restored' => array(
+					'cap'         => $write_filter_restored,
+					'preInsert'   => $pre_filter_restored,
+					'insert'      => $insert_filter_restored,
+					'afterInsert' => $after_filter_restored,
+					'prepare'     => $prepare_filter_restored,
+					'delete'      => $delete_filter_restored,
+					'server'      => $server_restored,
+					'actions'     => $actions_restored,
+					'currentUser' => $current_user_restored,
+				),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'rest-object-controllers.route-dispatched-term-parent-meta-hooks-delete-cleanup',
+			array() === $failures,
+			array(
+				'case'     => self::case_summary( $case ),
+				'failures' => array_slice( $failures, 0, 8 ),
+				'observed' => $observed,
+			)
+		);
+	}
+
 	private static function check_templates_controller( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
 		$failures = array();
 
@@ -4778,6 +5367,11 @@ final class RestObjectControllersSurface {
 			'updatedTermName'             => 'Updated Term ' . $ctx->int( 10, 999 ),
 			'termAdditionalField'         => 'cfz_term_field_' . $token,
 			'termAdditionalValue'         => 'term-extra-' . $token,
+			'termMetaKey'                 => 'cfz_term_meta_' . $token,
+			'termMetaInput'               => " <b>Term Meta {$token}</b>\n",
+			'termMetaUpdateInput'         => " Updated\tTerm {$token}<script>x</script> ",
+			'termMetaSanitized'           => \sanitize_text_field( " <b>Term Meta {$token}</b>\n" ),
+			'termMetaUpdateSanitized'     => \sanitize_text_field( " Updated\tTerm {$token}<script>x</script> " ),
 			'commentAuthorName'           => 'Commenter ' . $ctx->int( 10, 999 ),
 			'commentAuthorEmail'          => 'commenter-' . $token . '@example.test',
 			'commentContent'              => 'Fixture comment ' . $token,
