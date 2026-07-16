@@ -3779,6 +3779,59 @@ final class ContentLifecycleSurface {
 				)
 			);
 
+			$mixed_lookup_types = array( $pretty_type, $query_type );
+			$pretty_mixed_lookup = \get_page_by_path( $pretty_mixed_leaf_uri, OBJECT, $mixed_lookup_types );
+			$query_mixed_lookup = \get_page_by_path( $query_mixed_leaf_uri, OBJECT, $mixed_lookup_types );
+			$pretty_mixed_encoded_lookup = \get_page_by_path(
+				'/' . rawurlencode( $pretty_mixed_root_slug ) . '/' . rawurlencode( $query_mixed_middle_slug ) . '/' . rawurlencode( $pretty_mixed_leaf_slug ) . '/',
+				ARRAY_A,
+				$mixed_lookup_types
+			);
+			$pretty_mixed_scalar_miss = \get_page_by_path( $pretty_mixed_leaf_uri, OBJECT, $pretty_type );
+			$query_mixed_scalar_miss = \get_page_by_path( $query_mixed_leaf_uri, OBJECT, $query_type );
+			$mixed_missing_path = $pretty_mixed_root_slug . '/' . $query_mixed_middle_slug . '/missing-' . $token;
+			$mixed_missing_lookup = \get_page_by_path( $mixed_missing_path, OBJECT, $mixed_lookup_types );
+			$mixed_lookup_last_changed = \wp_cache_get_last_changed( 'posts' );
+			$pretty_mixed_hit_hash = md5( $pretty_mixed_leaf_uri . serialize( $mixed_lookup_types ) );
+			$mixed_missing_hash = md5( $mixed_missing_path . serialize( $mixed_lookup_types ) );
+			$pretty_mixed_cached_hit = \wp_cache_get_salted( 'get_page_by_path:' . $pretty_mixed_hit_hash, 'post-queries', $mixed_lookup_last_changed );
+			$mixed_cached_miss = \wp_cache_get_salted( 'get_page_by_path:' . $mixed_missing_hash, 'post-queries', $mixed_lookup_last_changed );
+			\clean_post_cache( $pretty_mixed_leaf_id );
+			$mixed_lookup_changed = \wp_cache_get_last_changed( 'posts' );
+			$pretty_mixed_cache_after_clean = \wp_cache_get_salted( 'get_page_by_path:' . $pretty_mixed_hit_hash, 'post-queries', $mixed_lookup_changed );
+
+			self::collect_failure(
+				$failures,
+				$pretty_mixed_lookup instanceof \WP_Post
+					&& $pretty_mixed_leaf_id === (int) $pretty_mixed_lookup->ID
+					&& $query_mixed_lookup instanceof \WP_Post
+					&& $query_mixed_leaf_id === (int) $query_mixed_lookup->ID
+					&& is_array( $pretty_mixed_encoded_lookup )
+					&& $pretty_mixed_leaf_id === (int) ( $pretty_mixed_encoded_lookup['ID'] ?? 0 )
+					&& null === $pretty_mixed_scalar_miss
+					&& null === $query_mixed_scalar_miss
+					&& null === $mixed_missing_lookup
+					&& $pretty_mixed_leaf_id === (int) $pretty_mixed_cached_hit
+					&& 0 === (int) $mixed_cached_miss
+					&& $mixed_lookup_changed !== $mixed_lookup_last_changed
+					&& false === $pretty_mixed_cache_after_clean,
+				'get_page_by_path resolves generated custom hierarchical mixed-depth paths only when all ancestor post types are included',
+				array(
+					'lookupTypes'      => $mixed_lookup_types,
+					'prettyLookup'     => self::post_summary( $pretty_mixed_lookup ),
+					'queryLookup'      => self::post_summary( $query_mixed_lookup ),
+					'encodedLookup'    => $pretty_mixed_encoded_lookup,
+					'prettyScalarMiss' => self::post_summary( $pretty_mixed_scalar_miss ),
+					'queryScalarMiss'  => self::post_summary( $query_mixed_scalar_miss ),
+					'missingLookup'    => self::post_summary( $mixed_missing_lookup ),
+					'cachedHit'        => $pretty_mixed_cached_hit,
+					'cachedMiss'       => $mixed_cached_miss,
+					'lastChangedBefore' => $mixed_lookup_last_changed,
+					'lastChangedAfter' => $mixed_lookup_changed,
+					'cacheAfterClean'  => $pretty_mixed_cache_after_clean,
+				)
+			);
+
 			self::collect_failure(
 				$failures,
 				$pretty_private_child_uri === \get_page_uri( $pretty_private_child_id )
