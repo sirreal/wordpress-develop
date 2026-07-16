@@ -6556,6 +6556,19 @@ final class RestObjectControllersSurface {
 
 			$post_ids = array();
 		};
+		$force_parent = static function ( int $post_id, int $parent_id ): void {
+			if ( $post_id <= 0 || ! isset( $GLOBALS['wpdb'] ) || ! $GLOBALS['wpdb'] instanceof \Component_Fuzz_WPDB_Stub ) {
+				return;
+			}
+
+			$GLOBALS['wpdb']->update(
+				$GLOBALS['wpdb']->posts,
+				array( 'post_parent' => $parent_id ),
+				array( 'ID' => $post_id )
+			);
+			\wp_cache_delete( $post_id, 'posts' );
+			\wp_cache_delete( 'post_parent:' . (string) $post_id, 'posts' );
+		};
 		$post_summary = static function ( $post ): ?array {
 			if ( ! $post instanceof \WP_Post ) {
 				return null;
@@ -6732,6 +6745,59 @@ final class RestObjectControllersSurface {
 						false
 					)
 				);
+				$unrelated_loop_a_id = $remember_post(
+					\wp_insert_post(
+						\wp_slash(
+							array(
+								'post_type'    => $post_type,
+								'post_title'   => 'REST Parent Unrelated Loop A ' . $token,
+								'post_content' => 'REST parent unrelated loop A ' . $token,
+								'post_status'  => 'publish',
+								'post_name'    => 'rest-unrelated-loop-a-' . $token,
+								'post_author'  => $fixtures['author'],
+								'post_parent'  => 0,
+							)
+						),
+						true,
+						false
+					)
+				);
+				$unrelated_loop_b_id = $remember_post(
+					\wp_insert_post(
+						\wp_slash(
+							array(
+								'post_type'    => $post_type,
+								'post_title'   => 'REST Parent Unrelated Loop B ' . $token,
+								'post_content' => 'REST parent unrelated loop B ' . $token,
+								'post_status'  => 'publish',
+								'post_name'    => 'rest-unrelated-loop-b-' . $token,
+								'post_author'  => $fixtures['author'],
+								'post_parent'  => 0,
+							)
+						),
+						true,
+						false
+					)
+				);
+				$unrelated_update_id = $remember_post(
+					\wp_insert_post(
+						\wp_slash(
+							array(
+								'post_type'    => $post_type,
+								'post_title'   => 'REST Parent Unrelated Loop Update ' . $token,
+								'post_content' => 'REST parent unrelated loop update ' . $token,
+								'post_status'  => 'publish',
+								'post_name'    => 'rest-unrelated-loop-update-' . $token,
+								'post_author'  => $fixtures['author'],
+								'post_parent'  => 0,
+							)
+						),
+						true,
+						false
+					)
+				);
+				$force_parent( $unrelated_loop_a_id, $unrelated_loop_b_id );
+				$force_parent( $unrelated_loop_b_id, $unrelated_loop_a_id );
 
 				\wp_set_current_user( $fixtures['author'] );
 				$cap_filter = self::install_cap_filter(
@@ -6940,6 +7006,26 @@ final class RestObjectControllersSurface {
 				$after_loop_child            = $loop_child_id > 0 ? \get_post( $loop_child_id ) : null;
 				$after_loop_grandchild       = $loop_grandchild_id > 0 ? \get_post( $loop_grandchild_id ) : null;
 
+				$unrelated_loop_break_update_response = self::dispatch_with_rest_post_dispatch(
+					$server,
+					self::request(
+						'PUT',
+						'/wp/v2/' . $rest_base . '/' . $unrelated_update_id,
+						array(
+							'_fields' => 'id,parent,slug,status,link,_links',
+							'context' => 'edit',
+						),
+						array(),
+						array(
+							'parent' => $unrelated_loop_a_id,
+						)
+					)
+				);
+				$unrelated_loop_break_update_data = $unrelated_loop_break_update_response instanceof \WP_REST_Response ? $unrelated_loop_break_update_response->get_data() : array();
+				$after_unrelated_loop_a           = $unrelated_loop_a_id > 0 ? \get_post( $unrelated_loop_a_id ) : null;
+				$after_unrelated_loop_b           = $unrelated_loop_b_id > 0 ? \get_post( $unrelated_loop_b_id ) : null;
+				$after_unrelated_update           = $unrelated_update_id > 0 ? \get_post( $unrelated_update_id ) : null;
+
 				$response_keys              = array( 'id', 'link', 'parent', 'slug', 'status' );
 				$query_link                 = static function ( string $path ) use ( $query_var ): string {
 					return \home_url( '?' . $query_var . '=' . $path );
@@ -6950,14 +7036,17 @@ final class RestObjectControllersSurface {
 				$root_update_link           = $query_link( 'rest-parent-update-child-' . $token );
 				$self_parent_update_link    = $query_link( 'rest-parent-update-child-' . $token );
 				$descendant_loop_update_link = $query_link( 'rest-loop-parent-' . $token );
+				$unrelated_loop_break_update_link = $query_link( 'rest-unrelated-loop-a-' . $token . '/rest-unrelated-loop-update-' . $token );
 				$same_parent_up_link        = \rest_url( \rest_get_route_for_post( $same_parent_id ) );
 				$page_parent_up_link        = \rest_url( \rest_get_route_for_post( $page_parent_id ) );
+				$unrelated_loop_a_up_link   = \rest_url( \rest_get_route_for_post( $unrelated_loop_a_id ) );
 				$same_parent_create_links   = $same_parent_create_response instanceof \WP_REST_Response ? $same_parent_create_response->get_links() : array();
 				$cross_type_create_links    = $cross_type_create_response instanceof \WP_REST_Response ? $cross_type_create_response->get_links() : array();
 				$cross_type_update_links    = $cross_type_update_response instanceof \WP_REST_Response ? $cross_type_update_response->get_links() : array();
 				$root_update_response_links = $root_update_response instanceof \WP_REST_Response ? $root_update_response->get_links() : array();
 				$self_parent_update_links   = $self_parent_update_response instanceof \WP_REST_Response ? $self_parent_update_response->get_links() : array();
 				$descendant_loop_update_links = $descendant_loop_update_response instanceof \WP_REST_Response ? $descendant_loop_update_response->get_links() : array();
+				$unrelated_loop_break_update_links = $unrelated_loop_break_update_response instanceof \WP_REST_Response ? $unrelated_loop_break_update_response->get_links() : array();
 
 				$observed = array(
 					'postType' => $post_type,
@@ -6969,6 +7058,9 @@ final class RestObjectControllersSurface {
 						'loopParent'     => $post_summary( \get_post( $loop_parent_id ) ),
 						'loopChild'      => $post_summary( \get_post( $loop_child_id ) ),
 						'loopGrandchild' => $post_summary( \get_post( $loop_grandchild_id ) ),
+						'unrelatedLoopA' => $post_summary( \get_post( $unrelated_loop_a_id ) ),
+						'unrelatedLoopB' => $post_summary( \get_post( $unrelated_loop_b_id ) ),
+						'unrelatedUpdate' => $post_summary( \get_post( $unrelated_update_id ) ),
 					),
 					'responses' => array(
 						'invalidCreate' => $invalid_create_response,
@@ -7004,6 +7096,13 @@ final class RestObjectControllersSurface {
 							'loopChild'  => $post_summary( $after_loop_child ),
 							'loopGrandchild' => $post_summary( $after_loop_grandchild ),
 						),
+						'unrelatedLoopBreakUpdate' => array(
+							'status'          => $unrelated_loop_break_update_response instanceof \WP_REST_Response ? $unrelated_loop_break_update_response->get_status() : null,
+							'data'            => $unrelated_loop_break_update_data,
+							'unrelatedLoopA'  => $post_summary( $after_unrelated_loop_a ),
+							'unrelatedLoopB'  => $post_summary( $after_unrelated_loop_b ),
+							'unrelatedUpdate' => $post_summary( $after_unrelated_update ),
+						),
 						'invalidUpdate' => $invalid_update_response,
 						'afterInvalid'  => $post_summary( $after_invalid_update ),
 					),
@@ -7020,8 +7119,10 @@ final class RestObjectControllersSurface {
 						'rootUpdateLink'  => $root_update_link,
 						'selfParentLink'  => $self_parent_update_link,
 						'descendantLoopLink' => $descendant_loop_update_link,
+						'unrelatedLoopBreakLink' => $unrelated_loop_break_update_link,
 						'sameParentUp'    => $same_parent_up_link,
 						'pageParentUp'    => $page_parent_up_link,
+						'unrelatedLoopAUp' => $unrelated_loop_a_up_link,
 					),
 				);
 
@@ -7033,6 +7134,9 @@ final class RestObjectControllersSurface {
 						&& $loop_parent_id > 0
 						&& $loop_child_id > 0
 						&& $loop_grandchild_id > 0
+						&& $unrelated_loop_a_id > 0
+						&& $unrelated_loop_b_id > 0
+						&& $unrelated_update_id > 0
 						&& self::response_error_ok( $invalid_create_response, 'rest_post_invalid_id', 400 )
 						&& self::content_count_delta_matches( $counts_before_invalid_create, $counts_after_invalid_create, array(), array() ),
 					'custom hierarchical parent assignment rejects missing parent IDs before insertion',
@@ -7148,7 +7252,7 @@ final class RestObjectControllersSurface {
 								'parent' => 0,
 								'type'   => $post_type,
 							),
-						) === $hierarchy_events,
+						) === array_slice( $hierarchy_events, 0, 4 ),
 					'custom hierarchical route-dispatched self-parent and descendant-loop updates normalize to root without breaking descendants',
 					array(
 						'selfParentUpdate'     => $observed['responses']['selfParentUpdate'],
@@ -7160,10 +7264,94 @@ final class RestObjectControllersSurface {
 
 				self::collect_failure(
 					$failures,
-					array( $same_parent_create_id, $cross_type_create_id, $update_child_id, $update_child_id, $update_child_id, $loop_parent_id ) === array_values( array_map( static fn ( array $event ): int => (int) ( $event['id'] ?? 0 ), $prepare_events ) )
-						&& array( 'POST', 'POST', 'PUT', 'PUT', 'PUT', 'PUT' ) === array_values( array_map( static fn ( array $event ): string => (string) ( $event['method'] ?? '' ), $prepare_events ) )
-						&& array( 'edit', 'edit', 'edit', 'edit', 'edit', 'edit' ) === array_values( array_map( static fn ( array $event ): string => (string) ( $event['context'] ?? '' ), $prepare_events ) )
-						&& array( '/wp/v2/' . $rest_base, '/wp/v2/' . $rest_base, '/wp/v2/' . $rest_base . '/' . $update_child_id, '/wp/v2/' . $rest_base . '/' . $update_child_id, '/wp/v2/' . $rest_base . '/' . $update_child_id, '/wp/v2/' . $rest_base . '/' . $loop_parent_id ) === array_values( array_map( static fn ( array $event ): string => (string) ( $event['route'] ?? '' ), $prepare_events ) ),
+					$unrelated_loop_break_update_response instanceof \WP_REST_Response
+						&& 200 === $unrelated_loop_break_update_response->get_status()
+						&& self::projected_keys_match( $unrelated_loop_break_update_data, $response_keys )
+						&& $unrelated_loop_a_id === (int) ( $unrelated_loop_break_update_data['parent'] ?? 0 )
+						&& $unrelated_loop_break_update_link === ( $unrelated_loop_break_update_data['link'] ?? null )
+						&& $unrelated_loop_a_up_link === self::link_href( $unrelated_loop_break_update_links, 'up' )
+						&& $after_unrelated_loop_a instanceof \WP_Post
+						&& 0 === (int) $after_unrelated_loop_a->post_parent
+						&& $after_unrelated_loop_b instanceof \WP_Post
+						&& 0 === (int) $after_unrelated_loop_b->post_parent
+						&& $after_unrelated_update instanceof \WP_Post
+						&& $unrelated_loop_a_id === (int) $after_unrelated_update->post_parent
+						&& array(
+							array(
+								'stage'  => 'before',
+								'postId' => $update_child_id,
+								'parent' => $update_child_id,
+								'type'   => $post_type,
+							),
+							array(
+								'stage'  => 'after',
+								'postId' => $update_child_id,
+								'parent' => 0,
+								'type'   => $post_type,
+							),
+							array(
+								'stage'  => 'before',
+								'postId' => $loop_parent_id,
+								'parent' => $loop_grandchild_id,
+								'type'   => $post_type,
+							),
+							array(
+								'stage'  => 'after',
+								'postId' => $loop_parent_id,
+								'parent' => 0,
+								'type'   => $post_type,
+							),
+							array(
+								'stage'  => 'before',
+								'postId' => $unrelated_update_id,
+								'parent' => $unrelated_loop_a_id,
+								'type'   => $post_type,
+							),
+							array(
+								'stage'  => 'before',
+								'postId' => $unrelated_loop_a_id,
+								'parent' => 0,
+								'type'   => $post_type,
+							),
+							array(
+								'stage'  => 'after',
+								'postId' => $unrelated_loop_a_id,
+								'parent' => 0,
+								'type'   => $post_type,
+							),
+							array(
+								'stage'  => 'before',
+								'postId' => $unrelated_loop_b_id,
+								'parent' => 0,
+								'type'   => $post_type,
+							),
+							array(
+								'stage'  => 'after',
+								'postId' => $unrelated_loop_b_id,
+								'parent' => 0,
+								'type'   => $post_type,
+							),
+							array(
+								'stage'  => 'after',
+								'postId' => $unrelated_update_id,
+								'parent' => $unrelated_loop_a_id,
+								'type'   => $post_type,
+							),
+						) === $hierarchy_events,
+					'custom hierarchical route-dispatched update breaks preexisting parent loops outside the updated post',
+					array(
+						'unrelatedLoopBreakUpdate' => $observed['responses']['unrelatedLoopBreakUpdate'],
+						'hierarchyEvents'          => $hierarchy_events,
+						'expected'                 => $observed['expected'],
+					)
+				);
+
+				self::collect_failure(
+					$failures,
+					array( $same_parent_create_id, $cross_type_create_id, $update_child_id, $update_child_id, $update_child_id, $loop_parent_id, $unrelated_update_id ) === array_values( array_map( static fn ( array $event ): int => (int) ( $event['id'] ?? 0 ), $prepare_events ) )
+						&& array( 'POST', 'POST', 'PUT', 'PUT', 'PUT', 'PUT', 'PUT' ) === array_values( array_map( static fn ( array $event ): string => (string) ( $event['method'] ?? '' ), $prepare_events ) )
+						&& array( 'edit', 'edit', 'edit', 'edit', 'edit', 'edit', 'edit' ) === array_values( array_map( static fn ( array $event ): string => (string) ( $event['context'] ?? '' ), $prepare_events ) )
+						&& array( '/wp/v2/' . $rest_base, '/wp/v2/' . $rest_base, '/wp/v2/' . $rest_base . '/' . $update_child_id, '/wp/v2/' . $rest_base . '/' . $update_child_id, '/wp/v2/' . $rest_base . '/' . $update_child_id, '/wp/v2/' . $rest_base . '/' . $loop_parent_id, '/wp/v2/' . $rest_base . '/' . $unrelated_update_id ) === array_values( array_map( static fn ( array $event ): string => (string) ( $event['route'] ?? '' ), $prepare_events ) ),
 					'custom hierarchical parent assignment prepare hook receives only successful create/update responses',
 					array( 'prepareEvents' => $prepare_events )
 				);
