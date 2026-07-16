@@ -1340,7 +1340,7 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 				return false;
 			}
 
-			if ( ! $this->component_fuzz_sql_week_matches( $query, $column, $this->component_fuzz_mysql_week_zero( (string) $datetime ) ) ) {
+			if ( ! $this->component_fuzz_sql_week_matches( $query, $column, (string) $datetime ) ) {
 				return false;
 			}
 
@@ -1361,9 +1361,25 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 			return $this->component_fuzz_sql_numeric_expression_matches( $query, $expression, $actual );
 		}
 
-		private function component_fuzz_sql_week_matches( $query, $column, $actual ) {
-			$expression = '\bWEEK\s*\(\s*(?:`?[a-z_][a-z0-9_]*`?\.)?`?' . preg_quote( $column, '/' ) . '`?\s*,\s*0\s*\)';
-			return $this->component_fuzz_sql_numeric_expression_matches( $query, $expression, $actual );
+		private function component_fuzz_sql_week_matches( $query, $column, $datetime ) {
+			$column_regex = '(?:`?[a-z_][a-z0-9_]*`?\.)?`?' . preg_quote( $column, '/' ) . '`?';
+			if ( ! $this->component_fuzz_sql_numeric_expression_matches( $query, '\bWEEK\s*\(\s*' . $column_regex . '\s*,\s*0\s*\)', $this->component_fuzz_mysql_week_zero( $datetime ) ) ) {
+				return false;
+			}
+
+			if ( ! $this->component_fuzz_sql_numeric_expression_matches( $query, '\bWEEK\s*\(\s*' . $column_regex . '\s*,\s*1\s*\)', $this->component_fuzz_mysql_week_one( $datetime ) ) ) {
+				return false;
+			}
+
+			for ( $start_of_week = 2; $start_of_week <= 6; $start_of_week++ ) {
+				$shifted_datetime = $this->component_fuzz_datetime_shift_days( $datetime, -$start_of_week );
+				$expression       = '\bWEEK\s*\(\s*DATE_SUB\s*\(\s*' . $column_regex . '\s*,\s*INTERVAL\s+' . $start_of_week . '\s+DAY\s*\)\s*,\s*0\s*\)';
+				if ( ! $this->component_fuzz_sql_numeric_expression_matches( $query, $expression, $this->component_fuzz_mysql_week_zero( $shifted_datetime ) ) ) {
+					return false;
+				}
+			}
+
+			return true;
 		}
 
 		private function component_fuzz_sql_numeric_expression_matches( $query, $expression, $actual ) {
@@ -1499,13 +1515,60 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 			return (int) floor( ( $day_of_year + 7 - $weekday ) / 7 );
 		}
 
+		private function component_fuzz_mysql_week_one( $datetime ) {
+			$timestamp = strtotime( (string) $datetime . ' UTC' );
+			if ( false === $timestamp ) {
+				return 0;
+			}
+
+			$year              = (int) gmdate( 'Y', $timestamp );
+			$jan_1             = strtotime( $year . '-01-01 00:00:00 UTC' );
+			$jan_1_weekday     = (int) gmdate( 'N', $jan_1 ) - 1;
+			$first_week_monday = $jan_1 - $jan_1_weekday * 86400;
+
+			if ( $jan_1_weekday >= 4 ) {
+				$first_week_monday += 7 * 86400;
+			}
+
+			if ( $timestamp < $first_week_monday ) {
+				return 0;
+			}
+
+			return (int) floor( ( $timestamp - $first_week_monday ) / ( 7 * 86400 ) ) + 1;
+		}
+
+		private function component_fuzz_datetime_shift_days( $datetime, $days ) {
+			$timestamp = strtotime( (string) $datetime . ' UTC' );
+			if ( false === $timestamp ) {
+				return (string) $datetime;
+			}
+
+			return gmdate( 'Y-m-d H:i:s', strtotime( (int) $days . ' days', $timestamp ) );
+		}
+
 		private function component_fuzz_filter_posts_by_datetime_bounds( $query, array $rows ) {
+			return $this->component_fuzz_filter_rows_by_datetime_bounds(
+				$query,
+				$rows,
+				array( 'post_date', 'post_date_gmt', 'post_modified', 'post_modified_gmt' )
+			);
+		}
+
+		private function component_fuzz_filter_users_by_datetime_bounds( $query, array $rows ) {
+			return $this->component_fuzz_filter_rows_by_datetime_bounds( $query, $rows, array( 'user_registered' ) );
+		}
+
+		private function component_fuzz_filter_comments_by_datetime_bounds( $query, array $rows ) {
+			return $this->component_fuzz_filter_rows_by_datetime_bounds( $query, $rows, array( 'comment_date', 'comment_date_gmt' ) );
+		}
+
+		private function component_fuzz_filter_rows_by_datetime_bounds( $query, array $rows, array $columns ) {
 			$where = $this->component_fuzz_where_clause( $query );
 			if ( '' === $where ) {
 				return $rows;
 			}
 
-			foreach ( array( 'post_date', 'post_date_gmt', 'post_modified', 'post_modified_gmt' ) as $column ) {
+			foreach ( $columns as $column ) {
 				if ( ! preg_match_all( '/(?<![A-Za-z0-9_])(?:`?wp_posts`?\.)?`?' . preg_quote( $column, '/' ) . '`?\s*(<=|>=|<|>)\s*(\'(?:\\\\.|[^\'\\\\])*\'|"[^"]*")/i', $where, $matches, PREG_SET_ORDER ) ) {
 					$matches = array();
 				}
@@ -1837,6 +1900,7 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 			}
 
 			$rows = $this->component_fuzz_filter_users_by_search_like( $query, $rows );
+			$rows = $this->component_fuzz_filter_users_by_datetime_bounds( $query, array_values( $rows ) );
 
 			$rows = $this->component_fuzz_sort_user_rows( $query, array_values( $rows ) );
 
@@ -2019,6 +2083,8 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 					}
 				);
 			}
+
+			$rows = $this->component_fuzz_filter_comments_by_datetime_bounds( $query, array_values( $rows ) );
 
 			usort(
 				$rows,

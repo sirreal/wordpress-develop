@@ -39,8 +39,10 @@ final class QuerySurface {
 			$rows = array_merge( $rows, self::check_wp_query_result_cache( $ctx ) );
 			$rows = array_merge( $rows, self::check_user_query_parsing( $ctx ) );
 			$rows = array_merge( $rows, self::check_user_query_sql_semantics( $ctx ) );
+			$rows = array_merge( $rows, self::check_user_query_date_execution( $ctx ) );
 			$rows = array_merge( $rows, self::check_user_query_pre_query( $ctx ) );
 			$rows = array_merge( $rows, self::check_comment_query_parsing( $ctx ) );
+			$rows = array_merge( $rows, self::check_comment_query_date_execution( $ctx ) );
 			$rows = array_merge( $rows, self::check_comment_query_pre_query( $ctx ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
@@ -1152,6 +1154,59 @@ final class QuerySurface {
 		return $rows;
 	}
 
+	private static function check_user_query_date_execution( \ComponentFuzz\FuzzContext $ctx ): array {
+		$rows  = array();
+		$cases = self::user_query_date_execution_cases();
+
+		foreach ( $cases as $case_index => $case ) {
+			$call = self::call_guarded(
+				static function () use ( $case ) {
+					return self::user_query_execution_observation( $case );
+				}
+			);
+
+			$rows[] = self::case_result(
+				$ctx,
+				$case_index,
+				$case,
+				'query.user-query.date-execution-no-throw',
+				$call['ok'] && is_array( $call['value'] ),
+				array( 'call' => self::describe_call( $call ) )
+			);
+
+			if ( ! $call['ok'] || ! is_array( $call['value'] ) ) {
+				continue;
+			}
+
+			$observation = $call['value'];
+			$rows[]      = self::case_result(
+				$ctx,
+				$case_index,
+				$case,
+				'query.user-query.date-execution-sql-features',
+				self::sql_expectations_match( $observation['sql'], $case['expect'] ?? array() ),
+				array(
+					'expect'      => $case['expect'] ?? array(),
+					'observation' => self::describe_value( $observation ),
+				)
+			);
+
+			$rows[] = self::case_result(
+				$ctx,
+				$case_index,
+				$case,
+				'query.user-query.date-execution-row-oracle',
+				array_values( array_map( 'intval', $case['expect']['userIds'] ?? array() ) ) === $observation['userIds'],
+				array(
+					'expected'    => $case['expect']['userIds'] ?? array(),
+					'observation' => self::describe_value( $observation ),
+				)
+			);
+		}
+
+		return $rows;
+	}
+
 	private static function check_comment_query_parsing( \ComponentFuzz\FuzzContext $ctx ): array {
 		$rows  = array();
 		$cases = self::comment_query_cases( $ctx );
@@ -1200,6 +1255,59 @@ final class QuerySurface {
 				'query.comment-query.parse-query-deterministic',
 				$second['ok'] && $observation === $second['value'],
 				array( 'second' => self::describe_call( $second ) )
+			);
+		}
+
+		return $rows;
+	}
+
+	private static function check_comment_query_date_execution( \ComponentFuzz\FuzzContext $ctx ): array {
+		$rows  = array();
+		$cases = self::comment_query_date_execution_cases();
+
+		foreach ( $cases as $case_index => $case ) {
+			$call = self::call_guarded(
+				static function () use ( $case ) {
+					return self::comment_query_execution_observation( $case );
+				}
+			);
+
+			$rows[] = self::case_result(
+				$ctx,
+				$case_index,
+				$case,
+				'query.comment-query.date-execution-no-throw',
+				$call['ok'] && is_array( $call['value'] ),
+				array( 'call' => self::describe_call( $call ) )
+			);
+
+			if ( ! $call['ok'] || ! is_array( $call['value'] ) ) {
+				continue;
+			}
+
+			$observation = $call['value'];
+			$rows[]      = self::case_result(
+				$ctx,
+				$case_index,
+				$case,
+				'query.comment-query.date-execution-sql-features',
+				self::sql_expectations_match( $observation['request'], $case['expect'] ?? array() ),
+				array(
+					'expect'      => $case['expect'] ?? array(),
+					'observation' => self::describe_value( $observation ),
+				)
+			);
+
+			$rows[] = self::case_result(
+				$ctx,
+				$case_index,
+				$case,
+				'query.comment-query.date-execution-row-oracle',
+				array_values( array_map( 'intval', $case['expect']['commentIds'] ?? array() ) ) === $observation['commentIds'],
+				array(
+					'expected'    => $case['expect']['commentIds'] ?? array(),
+					'observation' => self::describe_value( $observation ),
+				)
 			);
 		}
 
@@ -2123,6 +2231,91 @@ final class QuerySurface {
 				),
 			),
 			array(
+				'label'       => 'seeded-week-start-monday-row-oracle',
+				'startOfWeek' => 1,
+				'queryVars'   => array_merge(
+					$execution_defaults,
+					array(
+						'date_query'     => array(
+							array(
+								'compare' => 'IN',
+								'week'    => array( 19, 23 ),
+							),
+						),
+						'fields'         => 'ids',
+						'post_status'    => 'publish',
+						'post_type'      => 'post',
+						'posts_per_page' => -1,
+					)
+				),
+				'expect'      => array(
+					'contains' => array( 'WEEK( wp_posts.post_date, 1 ) IN (19,23)' ),
+					'postIds'  => array( 29, 23 ),
+				),
+			),
+			array(
+				'label'       => 'seeded-week-start-shifted-row-oracle',
+				'startOfWeek' => 3,
+				'queryVars'   => array_merge(
+					$execution_defaults,
+					array(
+						'date_query'     => array(
+							array(
+								'compare' => 'IN',
+								'week'    => array( 17, 21 ),
+							),
+						),
+						'fields'         => 'ids',
+						'post_status'    => 'publish',
+						'post_type'      => 'post',
+						'posts_per_page' => -1,
+					)
+				),
+				'expect'      => array(
+					'contains' => array( 'WEEK( DATE_SUB( wp_posts.post_date, INTERVAL 3 DAY ), 0 ) IN (17,21)' ),
+					'postIds'  => array( 29, 23 ),
+				),
+			),
+			array(
+				'label'     => 'seeded-negated-date-projection-row-oracle',
+				'queryVars' => array_merge(
+					$execution_defaults,
+					array(
+						'date_query'     => array(
+							array(
+								'compare'   => 'NOT BETWEEN',
+								'dayofyear' => array( 1, 125 ),
+							),
+							array(
+								'compare'   => 'NOT IN',
+								'dayofweek' => array( 1, 4 ),
+							),
+							array(
+								'compare'       => 'NOT IN',
+								'dayofweek_iso' => array( 1 ),
+							),
+							array(
+								'compare' => 'NOT IN',
+								'week'    => array( 22 ),
+							),
+						),
+						'fields'         => 'ids',
+						'post_status'    => 'publish',
+						'post_type'      => 'post',
+						'posts_per_page' => -1,
+					)
+				),
+				'expect'    => array(
+					'contains' => array(
+						'DAYOFYEAR( wp_posts.post_date ) NOT BETWEEN 1 AND 125',
+						'DAYOFWEEK( wp_posts.post_date ) NOT IN (1,4)',
+						'WEEKDAY( wp_posts.post_date ) + 1 NOT IN (1)',
+						'WEEK( wp_posts.post_date, 0 ) NOT IN (22)',
+					),
+					'postIds'  => array( 23 ),
+				),
+			),
+			array(
 				'label'     => 'singular-id-flags',
 				'queryVars' => array_merge(
 					$execution_defaults,
@@ -2737,6 +2930,44 @@ final class QuerySurface {
 		);
 	}
 
+	private static function user_query_date_execution_cases(): array {
+		return array(
+			array(
+				'label'     => 'user-registered-negated-date-projections',
+				'queryVars' => array(
+					'blog_id'       => 0,
+					'cache_results' => false,
+					'count_total'   => false,
+					'date_query'    => array(
+						array(
+							'compare'   => 'NOT BETWEEN',
+							'dayofyear' => array( 1, 125 ),
+						),
+						array(
+							'compare'       => 'NOT IN',
+							'dayofweek_iso' => array( 1 ),
+						),
+						array(
+							'compare' => 'NOT IN',
+							'week'    => array( 22 ),
+						),
+					),
+					'fields'        => 'ID',
+					'orderby'       => 'ID',
+					'order'         => 'ASC',
+				),
+				'expect'    => array(
+					'contains' => array(
+						'DAYOFYEAR( wp_users.user_registered ) NOT BETWEEN 1 AND 125',
+						'WEEKDAY( wp_users.user_registered ) + 1 NOT IN (1)',
+						'WEEK( wp_users.user_registered, 0 ) NOT IN (22)',
+					),
+					'userIds'  => array( 47 ),
+				),
+			),
+		);
+	}
+
 	private static function comment_query_cases( \ComponentFuzz\FuzzContext $ctx ): array {
 		$cases = array(
 			array(
@@ -2774,6 +3005,46 @@ final class QuerySurface {
 		}
 
 		return $cases;
+	}
+
+	private static function comment_query_date_execution_cases(): array {
+		return array(
+			array(
+				'label'     => 'comment-date-negated-date-projections',
+				'queryVars' => array(
+					'cache_results'             => false,
+					'date_query'                => array(
+						array(
+							'compare'   => 'NOT BETWEEN',
+							'dayofyear' => array( 1, 125 ),
+						),
+						array(
+							'compare'   => 'NOT IN',
+							'dayofweek' => array( 1, 4 ),
+						),
+						array(
+							'compare' => 'NOT IN',
+							'week'    => array( 22 ),
+						),
+					),
+					'fields'                    => 'ids',
+					'no_found_rows'             => true,
+					'orderby'                   => 'comment_ID',
+					'order'                     => 'ASC',
+					'status'                    => 'approve',
+					'update_comment_meta_cache' => false,
+					'update_comment_post_cache' => false,
+				),
+				'expect'    => array(
+					'contains'   => array(
+						'DAYOFYEAR( wp_comments.comment_date ) NOT BETWEEN 1 AND 125',
+						'DAYOFWEEK( wp_comments.comment_date ) NOT IN (1,4)',
+						'WEEK( wp_comments.comment_date, 0 ) NOT IN (22)',
+					),
+					'commentIds' => array( 307 ),
+				),
+			),
+		);
 	}
 
 	private static function meta_query_var_cases( \ComponentFuzz\FuzzContext $ctx ): array {
@@ -3142,7 +3413,24 @@ final class QuerySurface {
 		$hook_callbacks_before       = self::wp_filter_callback_snapshot();
 		$queries_before              = self::wpdb_recorded_queries();
 		$query                       = new \WP_Query();
-		$posts                       = $query->query( $query_vars );
+		$start_of_week_filter        = null;
+
+		if ( array_key_exists( 'startOfWeek', $case ) ) {
+			$start_of_week        = (int) $case['startOfWeek'];
+			$start_of_week_filter = static function () use ( $start_of_week ): int {
+				return $start_of_week;
+			};
+			\add_filter( 'pre_option_start_of_week', $start_of_week_filter, 10, 0 );
+		}
+
+		try {
+			$posts = $query->query( $query_vars );
+		} finally {
+			if ( null !== $start_of_week_filter ) {
+				\remove_filter( 'pre_option_start_of_week', $start_of_week_filter, 10 );
+			}
+		}
+
 		$queries_after               = self::wpdb_recorded_queries();
 		$new_queries                 = array_slice( $queries_after, count( $queries_before ) );
 		$global_mismatches           = self::globals_snapshot_mismatches( $global_snapshot );
@@ -3368,6 +3656,39 @@ final class QuerySurface {
 		}
 	}
 
+	private static function user_query_execution_observation( array $case ): array {
+		$queries_before = self::wpdb_recorded_queries();
+		$query          = new \WP_User_Query( $case['queryVars'] );
+		$results        = $query->get_results();
+		$queries_after  = self::wpdb_recorded_queries();
+		$new_queries    = array_slice( $queries_after, count( $queries_before ) );
+		$sql            = implode(
+			' ',
+			array_filter(
+				array(
+					$query->query_fields ?? '',
+					$query->query_from ?? '',
+					$query->query_where ?? '',
+					$query->query_orderby ?? '',
+					$query->query_limit ?? '',
+				),
+				'strlen'
+			)
+		);
+
+		return array(
+			'queryVars'      => $query->query_vars,
+			'queryFields'    => $query->query_fields ?? '',
+			'queryFrom'      => $query->query_from ?? '',
+			'queryWhere'     => $query->query_where ?? '',
+			'queryOrderby'   => $query->query_orderby ?? '',
+			'queryLimit'     => $query->query_limit ?? '',
+			'sql'            => $sql,
+			'userIds'        => self::user_ids_from_results( is_array( $results ) ? $results : array() ),
+			'wpdbNewQueries' => $new_queries,
+		);
+	}
+
 	private static function user_query_hook_mutation_observation( array $query_vars ): array {
 		$hook_snapshot           = self::snapshot_hook_runtime();
 		$pre_get_users_hits      = 0;
@@ -3491,6 +3812,25 @@ final class QuerySurface {
 
 		return array(
 			'queryVars' => $query->query_vars,
+		);
+	}
+
+	private static function comment_query_execution_observation( array $case ): array {
+		static $comment_date_execution_cache_counter = 0;
+
+		$query_vars                 = $case['queryVars'];
+		$query_vars['cache_domain'] = 'component_fuzz_comment_date_execution_' . ++$comment_date_execution_cache_counter;
+		$queries_before            = self::wpdb_recorded_queries();
+		$query                     = new \WP_Comment_Query();
+		$comments                  = $query->query( $query_vars );
+		$queries_after             = self::wpdb_recorded_queries();
+		$new_queries               = array_slice( $queries_after, count( $queries_before ) );
+
+		return array(
+			'queryVars'      => $query->query_vars,
+			'request'        => (string) ( $query->request ?? '' ),
+			'commentIds'     => self::comment_ids_from_results( is_array( $comments ) ? $comments : array() ),
+			'wpdbNewQueries' => $new_queries,
 		);
 	}
 
@@ -4523,6 +4863,23 @@ final class QuerySurface {
 		return $ids;
 	}
 
+	private static function user_ids_from_results( $users ): array {
+		if ( ! is_array( $users ) ) {
+			return array();
+		}
+
+		$ids = array();
+		foreach ( $users as $user ) {
+			if ( is_object( $user ) && isset( $user->ID ) ) {
+				$ids[] = (int) $user->ID;
+			} elseif ( is_numeric( $user ) ) {
+				$ids[] = (int) $user;
+			}
+		}
+
+		return $ids;
+	}
+
 	private static function comment_ids_from_results( $comments ): array {
 		if ( ! is_array( $comments ) ) {
 			return array();
@@ -5052,6 +5409,20 @@ final class QuerySurface {
 					'user_registered' => '2020-02-01 00:00:00',
 					'display_name'    => 'Beta User',
 				),
+				array(
+					'ID'              => 47,
+					'user_login'      => 'gamma',
+					'user_email'      => 'gamma@example.test',
+					'user_registered' => '2020-05-05 13:00:00',
+					'display_name'    => 'Gamma User',
+				),
+				array(
+					'ID'              => 53,
+					'user_login'      => 'delta',
+					'user_email'      => 'delta@example.test',
+					'user_registered' => '2020-06-01 14:00:00',
+					'display_name'    => 'Delta User',
+				),
 			) as $user
 		) {
 			$wpdb->insert( $wpdb->users, $user );
@@ -5065,6 +5436,8 @@ final class QuerySurface {
 					'comment_author_email' => 'alpha@example.test',
 					'comment_content'      => 'seed alpha',
 					'comment_approved'     => '1',
+					'comment_date'         => '2020-01-15 10:00:00',
+					'comment_date_gmt'     => '2020-01-15 10:00:00',
 				),
 				array(
 					'comment_ID'           => 303,
@@ -5072,6 +5445,26 @@ final class QuerySurface {
 					'comment_author_email' => 'beta@example.test',
 					'comment_content'      => 'seed beta',
 					'comment_approved'     => '0',
+					'comment_date'         => '2020-02-20 11:30:00',
+					'comment_date_gmt'     => '2020-02-20 11:30:00',
+				),
+				array(
+					'comment_ID'           => 307,
+					'comment_post_ID'      => 23,
+					'comment_author_email' => 'gamma@example.test',
+					'comment_content'      => 'seed gamma',
+					'comment_approved'     => '1',
+					'comment_date'         => '2020-05-05 13:00:00',
+					'comment_date_gmt'     => '2020-05-05 13:00:00',
+				),
+				array(
+					'comment_ID'           => 311,
+					'comment_post_ID'      => 29,
+					'comment_author_email' => 'delta@example.test',
+					'comment_content'      => 'seed delta',
+					'comment_approved'     => '1',
+					'comment_date'         => '2020-06-01 14:00:00',
+					'comment_date_gmt'     => '2020-06-01 14:00:00',
 				),
 			) as $comment
 		) {

@@ -94,7 +94,7 @@ database, network requests, or a configured site.
   dispatch, URL insert dispatch, gallery save iframe dispatch, type/default
   iframe dispatch, legacy library/gallery iframe rendering, legacy media query
   date/filter boundaries, query aliases/defaults, date-query stub edges for
-  scalar time and calendar-unit projections, and WP_Error exit capture,
+  scalar time, calendar-unit, and option-dependent week projections, and WP_Error exit capture,
   `wp_media_attach_action()` attach/detach redirect and denial exits, media-view
   enqueue settings/string contracts, in-process iframe shell rendering, and safe
   media button/uploader bypass output.
@@ -711,7 +711,8 @@ database, network requests, or a configured site.
 - `query`: no-DB query builder and execution APIs, including meta/tax/date
   query tree sanitization, SQL fragment generation, relation normalization,
   query-var parsing, seeded `WP_Query` execution/found-row result oracles,
-  scalar `DATE_FORMAT()` time projections, day-of-year/week/weekday row oracles,
+  scalar `DATE_FORMAT()` time projections, option-dependent week modes,
+  negated day-of-year/week/weekday row oracles across posts/users/comments,
   classic post-search parser/order/result SQL oracles for terms, exclusions,
   columns, stopwords, attachment filename left-join branches, password gates,
   literal clause-keyword searches, empty relevance-order boundaries, and

@@ -6897,6 +6897,38 @@ PHP;
 						),
 					)
 				);
+				$state['queries']['dateQueryCalendarWeekMonday'] = self::media_library_date_stub_edge_capture_wp_query(
+					array(
+						'post_mime_type' => 'image',
+						'date_query'     => array(
+							array(
+								'compare' => 'IN',
+								'week'    => array( 51 ),
+							),
+							array(
+								'compare'   => 'BETWEEN',
+								'dayofyear' => array( 348, 348 ),
+							),
+						),
+					),
+					1
+				);
+				$state['queries']['dateQueryCalendarWeekShifted'] = self::media_library_date_stub_edge_capture_wp_query(
+					array(
+						'post_mime_type' => 'image',
+						'date_query'     => array(
+							array(
+								'compare' => 'IN',
+								'week'    => array( 49 ),
+							),
+							array(
+								'compare'   => 'BETWEEN',
+								'dayofyear' => array( 348, 348 ),
+							),
+						),
+					),
+					2
+				);
 
 				$state['listTable'] = self::media_library_date_stub_edge_list_table_probe();
 				$state['returnType'] = 'NULL';
@@ -6910,18 +6942,32 @@ PHP;
 		}
 	}
 
-	private static function media_library_date_stub_edge_capture_wp_query( array $args ): array {
-		$query = new \WP_Query(
-			array_merge(
-				array(
-					'post_type'           => 'attachment',
-					'post_status'         => array( 'inherit', 'private' ),
-					'posts_per_page'      => 50,
-					'ignore_sticky_posts' => true,
-				),
-				$args
-			)
-		);
+	private static function media_library_date_stub_edge_capture_wp_query( array $args, ?int $start_of_week = null ): array {
+		$start_of_week_filter = null;
+		if ( null !== $start_of_week ) {
+			$start_of_week_filter = static function () use ( $start_of_week ): int {
+				return $start_of_week;
+			};
+			\add_filter( 'pre_option_start_of_week', $start_of_week_filter, 10, 0 );
+		}
+
+		try {
+			$query = new \WP_Query(
+				array_merge(
+					array(
+						'post_type'           => 'attachment',
+						'post_status'         => array( 'inherit', 'private' ),
+						'posts_per_page'      => 50,
+						'ignore_sticky_posts' => true,
+					),
+					$args
+				)
+			);
+		} finally {
+			if ( null !== $start_of_week_filter ) {
+				\remove_filter( 'pre_option_start_of_week', $start_of_week_filter, 10 );
+			}
+		}
 
 		$posts = is_array( $query->posts ?? null ) ? $query->posts : array();
 
@@ -7060,6 +7106,8 @@ PHP;
 		$between_query                 = is_array( $result['queries']['dateQueryBetween'] ?? null ) ? $result['queries']['dateQueryBetween'] : array();
 		$scalar_query                  = is_array( $result['queries']['dateQueryScalarTime'] ?? null ) ? $result['queries']['dateQueryScalarTime'] : array();
 		$calendar_query                = is_array( $result['queries']['dateQueryCalendarUnits'] ?? null ) ? $result['queries']['dateQueryCalendarUnits'] : array();
+		$calendar_monday_query         = is_array( $result['queries']['dateQueryCalendarWeekMonday'] ?? null ) ? $result['queries']['dateQueryCalendarWeekMonday'] : array();
+		$calendar_shifted_query        = is_array( $result['queries']['dateQueryCalendarWeekShifted'] ?? null ) ? $result['queries']['dateQueryCalendarWeekShifted'] : array();
 		$window_ids                    = array_values( array_map( 'intval', $result['dateQueryWindowIds'] ?? array() ) );
 		$scalar_ids                    = array_values( array_map( 'intval', $result['dateQueryScalarTimeIds'] ?? array() ) );
 		$calendar_ids                  = array_values( array_map( 'intval', $result['dateQueryCalendarUnitIds'] ?? array() ) );
@@ -7070,6 +7118,8 @@ PHP;
 		$between_ids                   = array_values( array_map( 'intval', $between_query['ids'] ?? array() ) );
 		$scalar_result_ids             = array_values( array_map( 'intval', $scalar_query['ids'] ?? array() ) );
 		$calendar_result_ids           = array_values( array_map( 'intval', $calendar_query['ids'] ?? array() ) );
+		$calendar_monday_ids           = array_values( array_map( 'intval', $calendar_monday_query['ids'] ?? array() ) );
+		$calendar_shifted_ids          = array_values( array_map( 'intval', $calendar_shifted_query['ids'] ?? array() ) );
 
 		self::collect_failure(
 			$failures,
@@ -7118,6 +7168,34 @@ PHP;
 			'media attachment WP_Query calendar-unit projections filter day-of-year, weekday, and week rows',
 			array(
 				'query'            => $calendar_query,
+				'expected'         => $calendar_ids,
+				'excludedControls' => $calendar_excluded_control_ids,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::same_int_set( $calendar_monday_ids, $calendar_ids )
+				&& str_contains( (string) ( $calendar_monday_query['request'] ?? '' ), 'WEEK( wp_posts.post_date, 1 ) IN (51)' )
+				&& str_contains( (string) ( $calendar_monday_query['request'] ?? '' ), 'DAYOFYEAR( wp_posts.post_date ) BETWEEN 348 AND 348' )
+				&& array() === array_intersect( $calendar_monday_ids, $calendar_excluded_control_ids ),
+			'media attachment WP_Query calendar week projection follows start_of_week=1 mode',
+			array(
+				'query'            => $calendar_monday_query,
+				'expected'         => $calendar_ids,
+				'excludedControls' => $calendar_excluded_control_ids,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::same_int_set( $calendar_shifted_ids, $calendar_ids )
+				&& str_contains( (string) ( $calendar_shifted_query['request'] ?? '' ), 'WEEK( DATE_SUB( wp_posts.post_date, INTERVAL 2 DAY ), 0 ) IN (49)' )
+				&& str_contains( (string) ( $calendar_shifted_query['request'] ?? '' ), 'DAYOFYEAR( wp_posts.post_date ) BETWEEN 348 AND 348' )
+				&& array() === array_intersect( $calendar_shifted_ids, $calendar_excluded_control_ids ),
+			'media attachment WP_Query calendar week projection follows shifted start_of_week mode',
+			array(
+				'query'            => $calendar_shifted_query,
 				'expected'         => $calendar_ids,
 				'excludedControls' => $calendar_excluded_control_ids,
 			)
