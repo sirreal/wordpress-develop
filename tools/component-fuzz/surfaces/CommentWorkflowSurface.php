@@ -29,6 +29,7 @@ final class CommentWorkflowSurface {
 			$rows[] = self::check_handle_submission( $ctx->fork( 'submission' ), $case );
 			$rows[] = self::check_new_comment_pipeline( $ctx->fork( 'new-comment' ), $case );
 			$rows[] = self::check_notification_mail_paths( $ctx->fork( 'notifications' ), $case );
+			$rows[] = self::check_moderation_transition_notifications( $ctx->fork( 'moderation-transition' ), $case );
 			$rows[] = self::check_allow_comment_decisions( $ctx->fork( 'allow' ), $case );
 			$rows[] = self::check_update_and_status_transitions( $ctx->fork( 'status' ), $case );
 			$rows[] = self::check_trash_spam_restore_helpers( $ctx->fork( 'trash-spam' ), $case );
@@ -96,6 +97,7 @@ final class CommentWorkflowSurface {
 				'wp_new_comment_notify_postauthor',
 				'wp_notify_moderator',
 				'wp_notify_postauthor',
+				'wp_count_comments',
 				'wp_set_comment_status',
 				'wp_slash',
 				'wp_spam_comment',
@@ -696,6 +698,535 @@ final class CommentWorkflowSurface {
 				'postId'    => $post_id,
 				'authorId'  => $author_id,
 				'mailCount' => count( $mail_calls ),
+			)
+		);
+	}
+
+	private static function check_moderation_transition_notifications( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures     = array();
+		$author_id    = self::insert_user( $ctx->fork( 'post-author' ), $case );
+		$moderator_id = self::insert_user( $ctx->fork( 'moderator' ), $case );
+		$denied_id    = self::insert_user( $ctx->fork( 'denied' ), $case );
+		$post_id      = self::insert_post( $case, 'open', $author_id );
+		$author       = \get_userdata( $author_id );
+		$comment_id   = \wp_insert_comment(
+			array(
+				'comment_post_ID'      => $post_id,
+				'comment_author'       => 'Moderation Flow ' . $case['token'],
+				'comment_author_email' => 'moderation-flow-' . $case['token'] . '@example.test',
+				'comment_author_url'   => $case['url'],
+				'comment_content'      => 'moderation flow ' . $case['content'],
+				'comment_approved'     => '0',
+				'comment_type'         => 'comment',
+				'user_id'              => 0,
+			)
+		);
+
+		$mail_calls        = array();
+		$gate_events       = array();
+		$map_events        = array();
+		$cap_events        = array();
+		$status_events     = array();
+		$transition_events = array();
+		$count_events      = array();
+		$cache_events      = array();
+		$filters           = array();
+		$hooks             = array();
+		$edit_cap          = 'component_fuzz_edit_comment_' . $case['token'];
+
+		$add_filter = static function ( string $hook, callable $callback, int $accepted_args = 1 ) use ( &$filters ): void {
+			\add_filter( $hook, $callback, 10, $accepted_args );
+			$filters[] = array( $hook, $callback, 10 );
+		};
+		$add_action = static function ( string $hook, callable $callback, int $accepted_args = 1 ) use ( &$hooks ): void {
+			\add_action( $hook, $callback, 10, $accepted_args );
+			$hooks[] = array( $hook, $callback, 10 );
+		};
+
+		$add_filter(
+			'pre_wp_mail',
+			static function ( $return, array $atts ) use ( &$mail_calls ) {
+				unset( $return );
+				$mail_calls[] = array(
+					'to'      => $atts['to'] ?? null,
+					'subject' => (string) ( $atts['subject'] ?? '' ),
+					'message' => (string) ( $atts['message'] ?? '' ),
+					'headers' => (string) ( $atts['headers'] ?? '' ),
+				);
+				return true;
+			},
+			2
+		);
+		$add_filter(
+			'notify_post_author',
+			static function ( $maybe_notify, int $seen_comment_id ) use ( &$gate_events ) {
+				$gate_events[] = array(
+					'hook'      => 'notify_post_author',
+					'commentId' => $seen_comment_id,
+					'maybe'     => (bool) $maybe_notify,
+				);
+				return $maybe_notify;
+			},
+			2
+		);
+		$add_filter(
+			'notify_moderator',
+			static function ( $maybe_notify, int $seen_comment_id ) use ( &$gate_events ) {
+				$gate_events[] = array(
+					'hook'      => 'notify_moderator',
+					'commentId' => $seen_comment_id,
+					'maybe'     => (bool) $maybe_notify,
+				);
+				return $maybe_notify;
+			},
+			2
+		);
+		$add_filter(
+			'map_meta_cap',
+			static function ( array $caps, string $cap, int $user_id, array $args ) use ( &$map_events, $author_id, $post_id, $comment_id, $edit_cap ): array {
+				$map_events[] = array(
+					'cap'    => $cap,
+					'userId' => $user_id,
+					'args'   => $args,
+					'caps'   => $caps,
+				);
+
+				if ( 'read_post' === $cap && $author_id === $user_id && $post_id === (int) ( $args[0] ?? 0 ) ) {
+					return array( 'exist' );
+				}
+
+				if ( 'edit_comment' === $cap && (int) $comment_id === (int) ( $args[0] ?? 0 ) ) {
+					return array( $edit_cap );
+				}
+
+				return $caps;
+			},
+			4
+		);
+		$add_filter(
+			'user_has_cap',
+			static function ( array $allcaps, array $caps, array $args, $user ) use ( &$cap_events, $moderator_id, $denied_id, $edit_cap ): array {
+				$user_id       = $user instanceof \WP_User ? (int) $user->ID : (int) ( $args[1] ?? 0 );
+				$requested_cap = (string) ( $args[0] ?? '' );
+				$cap_events[] = array(
+					'userId' => $user_id,
+					'cap'    => $requested_cap,
+					'caps'   => array_values( $caps ),
+					'args'   => $args,
+				);
+
+				if ( $moderator_id === $user_id ) {
+					$allcaps[ $edit_cap ]            = true;
+					$allcaps['moderate_comments']    = true;
+					$allcaps['component_fuzz_probe'] = true;
+				}
+
+				if ( $denied_id === $user_id ) {
+					$allcaps[ $edit_cap ]         = false;
+					$allcaps['moderate_comments'] = false;
+				}
+
+				return $allcaps;
+			},
+			4
+		);
+		$add_action(
+			'wp_set_comment_status',
+			static function ( $seen_comment_id, string $status ) use ( &$status_events ): void {
+				$status_events[] = array(
+					'id'     => (int) $seen_comment_id,
+					'status' => $status,
+				);
+			},
+			2
+		);
+		$add_action(
+			'transition_comment_status',
+			static function ( string $new_status, string $old_status, \WP_Comment $comment ) use ( &$transition_events ): void {
+				$transition_events[] = array(
+					'id'  => (int) $comment->comment_ID,
+					'new' => $new_status,
+					'old' => $old_status,
+				);
+			},
+			3
+		);
+		$add_action(
+			'wp_update_comment_count',
+			static function ( int $seen_post_id, int $new, int $old ) use ( &$count_events ): void {
+				$count_events[] = array(
+					'postId' => $seen_post_id,
+					'new'    => $new,
+					'old'    => $old,
+				);
+			},
+			3
+		);
+		$add_action(
+			'clean_comment_cache',
+			static function ( int $seen_comment_id ) use ( &$cache_events ): void {
+				$cache_events[] = $seen_comment_id;
+			}
+		);
+
+		$old_comments_notify     = \get_option( 'comments_notify' );
+		$old_moderation_notify   = \get_option( 'moderation_notify' );
+		$had_transition_notifier = false !== \has_action( 'wp_set_comment_status', 'wp_new_comment_notify_postauthor' );
+		$initial_state           = array();
+		$after_approve_state     = array();
+		$after_hold_state        = array();
+		$after_spam_state        = array();
+		$read_only_before        = array();
+		$read_only_after         = array();
+		$notification_results    = array();
+		$mail_deltas             = array();
+		$capability_results      = array();
+
+		try {
+			\update_option( 'comments_notify', 1 );
+			\update_option( 'moderation_notify', 1 );
+			\wp_set_current_user( 0 );
+
+			$initial_state = self::comment_moderation_state( $post_id, (int) $comment_id );
+
+			$pending_moderator_before = count( $mail_calls );
+			$pending_moderator_result = \wp_new_comment_notify_moderator( $comment_id );
+			$pending_moderator_after  = count( $mail_calls );
+			$pending_author_before    = count( $mail_calls );
+			$pending_author_result    = \wp_new_comment_notify_postauthor( $comment_id );
+			$pending_author_after     = count( $mail_calls );
+
+			$approve_before      = count( $mail_calls );
+			$approved            = \wp_set_comment_status( $comment_id, 'approve', true );
+			$approve_after       = count( $mail_calls );
+			$after_approve_state = self::comment_moderation_state( $post_id, (int) $comment_id );
+
+			$approved_author_before    = count( $mail_calls );
+			$approved_author_result    = \wp_new_comment_notify_postauthor( $comment_id );
+			$approved_author_after     = count( $mail_calls );
+			$approved_moderator_before = count( $mail_calls );
+			$approved_moderator_result = \wp_new_comment_notify_moderator( $comment_id );
+			$approved_moderator_after  = count( $mail_calls );
+
+			$held             = \wp_set_comment_status( $comment_id, 'hold', true );
+			$after_hold_state = self::comment_moderation_state( $post_id, (int) $comment_id );
+
+			$hold_moderator_before = count( $mail_calls );
+			$hold_moderator_result = \wp_new_comment_notify_moderator( $comment_id );
+			$hold_moderator_after  = count( $mail_calls );
+			$hold_author_before    = count( $mail_calls );
+			$hold_author_result    = \wp_new_comment_notify_postauthor( $comment_id );
+			$hold_author_after     = count( $mail_calls );
+
+			$spammed          = \wp_set_comment_status( $comment_id, 'spam', true );
+			$after_spam_state = self::comment_moderation_state( $post_id, (int) $comment_id );
+
+			$read_only_before = array(
+				'content' => self::content_counts(),
+				'state'   => self::comment_moderation_state( $post_id, (int) $comment_id ),
+			);
+
+			$spam_moderator_before = count( $mail_calls );
+			$spam_moderator_result = \wp_new_comment_notify_moderator( $comment_id );
+			$spam_moderator_after  = count( $mail_calls );
+			$spam_author_before    = count( $mail_calls );
+			$spam_author_result    = \wp_new_comment_notify_postauthor( $comment_id );
+			$spam_author_after     = count( $mail_calls );
+
+			$capability_results = array(
+				'moderatorEdit'     => \user_can( $moderator_id, 'edit_comment', $comment_id ),
+				'moderatorModerate' => \user_can( $moderator_id, 'moderate_comments' ),
+				'deniedEdit'        => \user_can( $denied_id, 'edit_comment', $comment_id ),
+				'deniedModerate'    => \user_can( $denied_id, 'moderate_comments' ),
+			);
+
+			$read_only_after = array(
+				'content' => self::content_counts(),
+				'state'   => self::comment_moderation_state( $post_id, (int) $comment_id ),
+			);
+
+			$notification_results = array(
+				'pendingModerator'  => $pending_moderator_result,
+				'pendingAuthor'     => $pending_author_result,
+				'approveTransition' => $approved,
+				'approvedAuthor'    => $approved_author_result,
+				'approvedModerator' => $approved_moderator_result,
+				'holdTransition'    => $held,
+				'holdModerator'     => $hold_moderator_result,
+				'holdAuthor'        => $hold_author_result,
+				'spamTransition'    => $spammed,
+				'spamModerator'     => $spam_moderator_result,
+				'spamAuthor'        => $spam_author_result,
+			);
+			$mail_deltas = array(
+				'pendingModerator'  => $pending_moderator_after - $pending_moderator_before,
+				'pendingAuthor'     => $pending_author_after - $pending_author_before,
+				'approveTransition' => $approve_after - $approve_before,
+				'approvedAuthor'    => $approved_author_after - $approved_author_before,
+				'approvedModerator' => $approved_moderator_after - $approved_moderator_before,
+				'holdModerator'     => $hold_moderator_after - $hold_moderator_before,
+				'holdAuthor'        => $hold_author_after - $hold_author_before,
+				'spamModerator'     => $spam_moderator_after - $spam_moderator_before,
+				'spamAuthor'        => $spam_author_after - $spam_author_before,
+			);
+		} finally {
+			\update_option( 'comments_notify', $old_comments_notify );
+			\update_option( 'moderation_notify', $old_moderation_notify );
+			\wp_set_current_user( 0 );
+			self::remove_hooks( $hooks );
+			self::remove_filters( $filters );
+			if ( ! $had_transition_notifier ) {
+				\remove_action( 'wp_set_comment_status', 'wp_new_comment_notify_postauthor' );
+			}
+		}
+
+		$expected_author_email    = $author instanceof \WP_User ? $author->user_email : null;
+		$pending_moderator_calls  = array_slice( $mail_calls, 0, $mail_deltas['pendingModerator'] ?? 0 );
+		$approve_transition_calls = array_slice(
+			$mail_calls,
+			( $mail_deltas['pendingModerator'] ?? 0 ) + ( $mail_deltas['pendingAuthor'] ?? 0 ),
+			$mail_deltas['approveTransition'] ?? 0
+		);
+		$approved_author_calls = array_slice(
+			$mail_calls,
+			( $mail_deltas['pendingModerator'] ?? 0 ) + ( $mail_deltas['pendingAuthor'] ?? 0 ) + ( $mail_deltas['approveTransition'] ?? 0 ),
+			$mail_deltas['approvedAuthor'] ?? 0
+		);
+		$hold_moderator_calls = array_slice(
+			$mail_calls,
+			( $mail_deltas['pendingModerator'] ?? 0 )
+				+ ( $mail_deltas['pendingAuthor'] ?? 0 )
+				+ ( $mail_deltas['approveTransition'] ?? 0 )
+				+ ( $mail_deltas['approvedAuthor'] ?? 0 )
+				+ ( $mail_deltas['approvedModerator'] ?? 0 ),
+			$mail_deltas['holdModerator'] ?? 0
+		);
+
+		$map_saw_edit_comment        = false;
+		$cap_saw_moderator_edit      = false;
+		$cap_saw_denied_edit         = false;
+		$cap_saw_moderator_moderate = false;
+		foreach ( $map_events as $event ) {
+			if ( 'edit_comment' === ( $event['cap'] ?? null ) && array( $comment_id ) === ( $event['args'] ?? null ) ) {
+				$map_saw_edit_comment = true;
+			}
+		}
+		foreach ( $cap_events as $event ) {
+			if ( $moderator_id === ( $event['userId'] ?? null ) && in_array( $edit_cap, $event['caps'] ?? array(), true ) ) {
+				$cap_saw_moderator_edit = true;
+			}
+			if ( $denied_id === ( $event['userId'] ?? null ) && in_array( $edit_cap, $event['caps'] ?? array(), true ) ) {
+				$cap_saw_denied_edit = true;
+			}
+			if ( $moderator_id === ( $event['userId'] ?? null ) && in_array( 'moderate_comments', $event['caps'] ?? array(), true ) ) {
+				$cap_saw_moderator_moderate = true;
+			}
+		}
+
+		self::collect_failure(
+			$failures,
+			is_int( $comment_id )
+				&& $author instanceof \WP_User
+				&& '0' === ( $initial_state['commentStatus'] ?? null )
+				&& 0 === ( $initial_state['postCount'] ?? null )
+				&& array(
+					'approved' => 0,
+					'moderated' => 1,
+					'spam'     => 0,
+					'trash'    => 0,
+					'all'      => 1,
+					'total'    => 1,
+				) === ( $initial_state['counts'] ?? null ),
+			'pending moderation fixture starts unapproved with one moderated count and no approved post count',
+			array(
+				'postId'  => $post_id,
+				'comment' => self::comment_summary( \get_comment( $comment_id ) ),
+				'state'   => $initial_state,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			true === ( $notification_results['approveTransition'] ?? null )
+				&& '1' === ( $after_approve_state['commentStatus'] ?? null )
+				&& 1 === ( $after_approve_state['postCount'] ?? null )
+				&& array(
+					'approved' => 1,
+					'moderated' => 0,
+					'spam'     => 0,
+					'trash'    => 0,
+					'all'      => 1,
+					'total'    => 1,
+				) === ( $after_approve_state['counts'] ?? null )
+				&& true === ( $notification_results['holdTransition'] ?? null )
+				&& '0' === ( $after_hold_state['commentStatus'] ?? null )
+				&& 0 === ( $after_hold_state['postCount'] ?? null )
+				&& array(
+					'approved' => 0,
+					'moderated' => 1,
+					'spam'     => 0,
+					'trash'    => 0,
+					'all'      => 1,
+					'total'    => 1,
+				) === ( $after_hold_state['counts'] ?? null )
+				&& true === ( $notification_results['spamTransition'] ?? null )
+				&& 'spam' === ( $after_spam_state['commentStatus'] ?? null )
+				&& 0 === ( $after_spam_state['postCount'] ?? null )
+				&& array(
+					'approved' => 0,
+					'moderated' => 0,
+					'spam'     => 1,
+					'trash'    => 0,
+					'all'      => 0,
+					'total'    => 1,
+				) === ( $after_spam_state['counts'] ?? null ),
+			'approve, hold, and spam transitions update stored status, post count, and wp_count_comments buckets',
+			array(
+				'afterApprove' => $after_approve_state,
+				'afterHold'    => $after_hold_state,
+				'afterSpam'    => $after_spam_state,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			array(
+				'pendingModerator'  => true,
+				'pendingAuthor'     => false,
+				'approveTransition' => true,
+				'approvedAuthor'    => true,
+				'approvedModerator' => false,
+				'holdTransition'    => true,
+				'holdModerator'     => true,
+				'holdAuthor'        => false,
+				'spamTransition'    => true,
+				'spamModerator'     => false,
+				'spamAuthor'        => false,
+			) === $notification_results
+				&& array(
+					'pendingModerator'  => 1,
+					'pendingAuthor'     => 0,
+					'approveTransition' => 1,
+					'approvedAuthor'    => 1,
+					'approvedModerator' => 0,
+					'holdModerator'     => 1,
+					'holdAuthor'        => 0,
+					'spamModerator'     => 0,
+					'spamAuthor'        => 0,
+				) === $mail_deltas
+				&& 'admin@example.test' === ( $pending_moderator_calls[0]['to'] ?? null )
+				&& $expected_author_email === ( $approve_transition_calls[0]['to'] ?? null )
+				&& $expected_author_email === ( $approved_author_calls[0]['to'] ?? null )
+				&& 'admin@example.test' === ( $hold_moderator_calls[0]['to'] ?? null )
+				&& self::mail_calls_have( $pending_moderator_calls, 'subject', 'Please moderate' )
+				&& self::mail_calls_have( $approve_transition_calls, 'subject', 'Comment:' )
+				&& self::mail_calls_have( $hold_moderator_calls, 'message', 'Approve it:' ),
+			'notification intent follows pending, approved, held, and spam statuses without sending disallowed wrappers',
+			array(
+				'results'                 => $notification_results,
+				'mailDeltas'              => $mail_deltas,
+				'pendingModeratorCalls'   => $pending_moderator_calls,
+				'approveTransitionCalls'  => $approve_transition_calls,
+				'approvedAuthorCalls'     => $approved_author_calls,
+				'holdModeratorCalls'      => $hold_moderator_calls,
+				'expectedAuthorEmail'     => $expected_author_email,
+				'gateEvents'              => $gate_events,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			array(
+				array(
+					'id'     => (int) $comment_id,
+					'status' => 'approve',
+				),
+				array(
+					'id'     => (int) $comment_id,
+					'status' => 'hold',
+				),
+				array(
+					'id'     => (int) $comment_id,
+					'status' => 'spam',
+				),
+			) === $status_events
+				&& array(
+					array(
+						'id'  => (int) $comment_id,
+						'new' => 'approved',
+						'old' => 'unapproved',
+					),
+					array(
+						'id'  => (int) $comment_id,
+						'new' => 'unapproved',
+						'old' => 'approved',
+					),
+					array(
+						'id'  => (int) $comment_id,
+						'new' => 'spam',
+						'old' => 'unapproved',
+					),
+				) === $transition_events
+				&& array(
+					array(
+						'postId' => $post_id,
+						'new'    => 1,
+						'old'    => 0,
+					),
+					array(
+						'postId' => $post_id,
+						'new'    => 0,
+						'old'    => 1,
+					),
+					array(
+						'postId' => $post_id,
+						'new'    => 0,
+						'old'    => 0,
+					),
+				) === $count_events
+				&& array( (int) $comment_id, (int) $comment_id, (int) $comment_id ) === $cache_events
+				&& self::hooks_are_removed( $hooks )
+				&& self::filters_are_removed( $filters ),
+			'status transitions fire ordered status, cache, and comment-count hooks and remove local hooks',
+			array(
+				'statusEvents'     => $status_events,
+				'transitionEvents' => $transition_events,
+				'countEvents'      => $count_events,
+				'cacheEvents'      => $cache_events,
+				'hooksRemoved'     => self::hooks_are_removed( $hooks ),
+				'filtersRemoved'   => self::filters_are_removed( $filters ),
+			)
+		);
+		self::collect_failure(
+			$failures,
+			array(
+				'moderatorEdit'     => true,
+				'moderatorModerate' => true,
+				'deniedEdit'        => false,
+				'deniedModerate'    => false,
+			) === $capability_results
+				&& $map_saw_edit_comment
+				&& $cap_saw_moderator_edit
+				&& $cap_saw_denied_edit
+				&& $cap_saw_moderator_moderate
+				&& $read_only_before === $read_only_after,
+			'capability probes are filter-scoped and notification/capability reads do not mutate comment rows',
+			array(
+				'capabilityResults' => $capability_results,
+				'mapEvents'         => $map_events,
+				'capEvents'         => $cap_events,
+				'readOnlyBefore'    => $read_only_before,
+				'readOnlyAfter'     => $read_only_after,
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'comment-workflow.moderation-transition.notifications-counts-capabilities',
+			$failures,
+			array(
+				'postId'       => $post_id,
+				'commentId'    => $comment_id,
+				'mailCount'    => count( $mail_calls ),
+				'countEvents'  => $count_events,
+				'cacheEvents'  => $cache_events,
 			)
 		);
 	}
@@ -1577,6 +2108,32 @@ final class CommentWorkflowSurface {
 		}
 
 		return false;
+	}
+
+	private static function comment_moderation_state( int $post_id, int $comment_id ): array {
+		$comment = \get_comment( $comment_id );
+		$post    = \get_post( $post_id );
+		$counts  = \wp_count_comments( $post_id );
+
+		return array(
+			'commentStatus' => $comment instanceof \WP_Comment ? (string) $comment->comment_approved : null,
+			'commentContent' => $comment instanceof \WP_Comment ? (string) $comment->comment_content : null,
+			'postCount'     => $post instanceof \WP_Post ? (int) $post->comment_count : null,
+			'counts'        => array(
+				'approved'  => isset( $counts->approved ) ? (int) $counts->approved : null,
+				'moderated' => isset( $counts->moderated ) ? (int) $counts->moderated : null,
+				'spam'      => isset( $counts->spam ) ? (int) $counts->spam : null,
+				'trash'     => isset( $counts->trash ) ? (int) $counts->trash : null,
+				'all'       => isset( $counts->all ) ? (int) $counts->all : null,
+				'total'     => isset( $counts->total_comments ) ? (int) $counts->total_comments : null,
+			),
+		);
+	}
+
+	private static function content_counts(): array {
+		return isset( $GLOBALS['wpdb'] ) && $GLOBALS['wpdb'] instanceof \Component_Fuzz_WPDB_Stub
+			? $GLOBALS['wpdb']->component_fuzz_content_counts()
+			: array();
 	}
 
 	private static function event_hooks_seen( array $events, int $comment_id, array $expected_hooks ): bool {

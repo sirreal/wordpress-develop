@@ -271,9 +271,11 @@ database, network requests, or a configured site.
 - `comment-workflow`: in-memory comment submission, duplicate/flood approval
   decisions, direct `wp_new_comment()` preprocessing and insert hooks,
   notification wrapper/direct mail filter paths with intercepted delivery,
-  moderation short-circuits, update/status transition hooks, trash/untrash and
-  spam/unspam restoration, force-delete reparenting/meta/count/hook contracts,
-  and WP_Error failure paths without process exits.
+  moderation short-circuits, update/status transition hooks, generated
+  moderation transition notification/count/cache/capability/no-mutation
+  oracles, trash/untrash and spam/unspam restoration, force-delete
+  reparenting/meta/count/hook contracts, and WP_Error failure paths without
+  process exits.
 - `cron`: in-memory cron scheduling, recurrence lookup, schedule/unschedule
   and next-scheduled filter contracts, unschedule-hook pre-filter return
   contracts, duplicate single-event windows, scheduled-event lookup
