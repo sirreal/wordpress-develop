@@ -789,9 +789,11 @@ database, network requests, or a configured site.
   `show_in_rest` read gates, widget type sorting/projection and
   `encode_form_data()` instance/hash round trips, isolated
   `/widget-types/{id}/render` iframe preview dispatch, text widget
-  create/update persistence, sidebar reassignment/reorder semantics, legacy
-  widget `form_data` updates, soft/force delete hooks, HEAD short-circuits,
-  and widget/global/filter restoration.
+  create/update persistence, route-dispatched widget create/get/update/delete
+  paths, sidebar reassignment/reorder mutation dispatch, invalid widget/sidebar
+  schema fail-closed paths, widget/sidebar/delete hook payload timing, legacy
+  widget `form_data` updates, soft/force delete hooks, HEAD short-circuits, and
+  widget/global/filter restoration.
 - `rest-object-controllers`: in-memory wpdb-backed REST object controller
   coverage for posts, terms, comments, users, revisions, and attachments,
   including schema/context/_fields filtering, deterministic collection

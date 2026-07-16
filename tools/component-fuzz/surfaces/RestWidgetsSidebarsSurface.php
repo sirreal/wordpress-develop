@@ -44,6 +44,7 @@ final class RestWidgetsSidebarsSurface {
 			$rows[] = self::check_sidebar_reorder_and_visibility( $ctx->fork( 'sidebars' ), $case );
 			$rows[] = self::check_legacy_widget_form_data_and_delete_hooks( $ctx->fork( 'legacy' ), $case );
 			$rows[] = self::check_head_short_circuit_and_field_projection( $ctx->fork( 'head-fields' ), $case );
+			$rows[] = self::check_route_dispatched_widget_sidebar_mutations( $ctx->fork( 'dispatch-mutations' ), $case );
 		} catch ( \Throwable $e ) {
 			$rows[] = self::row(
 				$ctx,
@@ -1717,6 +1718,420 @@ PHP;
 		return self::result( $ctx, 'rest-widgets-sidebars.head.short-circuit', $failures );
 	}
 
+	private static function check_route_dispatched_widget_sidebar_mutations( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		self::reset_runtime();
+		self::seed_widgets( $case );
+
+		$failures       = array();
+		$save_calls     = array();
+		$sidebar_calls  = array();
+		$delete_calls   = array();
+		$save_action    = static function ( string $id, string $sidebar_id, \WP_REST_Request $request, bool $creating ) use ( &$save_calls ): void {
+			$save_calls[] = array(
+				'id'       => $id,
+				'sidebar'  => $sidebar_id,
+				'creating' => $creating,
+				'method'   => $request->get_method(),
+			);
+		};
+		$sidebar_action = static function ( $sidebar, \WP_REST_Request $request ) use ( &$sidebar_calls ): void {
+			$sidebar_calls[] = array(
+				'id'      => is_array( $sidebar ) ? ( $sidebar['id'] ?? null ) : null,
+				'widgets' => is_array( $sidebar ) ? ( $sidebar['widgets'] ?? null ) : null,
+				'method'  => $request->get_method(),
+			);
+		};
+		$delete_action  = static function ( string $widget_id, string $sidebar_id, $response, \WP_REST_Request $request ) use ( &$delete_calls ): void {
+			$delete_calls[] = array(
+				'widget'  => $widget_id,
+				'sidebar' => $sidebar_id,
+				'force'   => (bool) $request['force'],
+				'status'  => $response instanceof \WP_REST_Response ? $response->get_status() : null,
+			);
+		};
+
+		$server = self::fresh_rest_server();
+		( new \WP_REST_Widgets_Controller() )->register_routes();
+		( new \WP_REST_Sidebars_Controller() )->register_routes();
+		( new \WP_REST_Widget_Types_Controller() )->register_routes();
+
+		$initial_sidebars              = self::sidebar_map();
+		$denied_create_response       = null;
+		$invalid_create_response      = null;
+		$create_response              = null;
+		$get_response                 = null;
+		$invalid_update_response      = null;
+		$update_response              = null;
+		$invalid_sidebar_response     = null;
+		$sidebar_response             = null;
+		$soft_delete_response         = null;
+		$force_delete_response        = null;
+		$sidebars_after_denied        = array();
+		$sidebars_after_invalid_create = array();
+		$sidebars_after_create        = array();
+		$sidebars_after_invalid_update = array();
+		$sidebars_after_update        = array();
+		$sidebars_after_invalid_sidebar = array();
+		$sidebars_after_sidebar       = array();
+		$sidebars_after_soft_delete   = array();
+		$sidebars_after_force_delete  = array();
+		$text_settings_after_update   = array();
+		$cap_filter_removed           = false;
+		$created_id                   = '';
+		$created_number               = 0;
+
+		\add_action( 'rest_after_save_widget', $save_action, 10, 4 );
+		\add_action( 'rest_save_sidebar', $sidebar_action, 10, 2 );
+		\add_action( 'rest_delete_widget', $delete_action, 10, 4 );
+
+		try {
+			\wp_set_current_user( 0 );
+			$denied_create_response = $server->dispatch(
+				self::request(
+					'POST',
+					'/wp/v2/widgets',
+					array(
+						'id_base'  => 'text',
+						'instance' => array( 'raw' => $case['createInstance'] ),
+						'sidebar'  => $case['publicSidebar'],
+					)
+				)
+			);
+			$sidebars_after_denied = self::sidebar_map();
+
+			$cap_filter = self::install_cap_filter( array( 'edit_theme_options', 'unfiltered_html' ) );
+			try {
+				$invalid_create_response = $server->dispatch(
+					self::request(
+						'POST',
+						'/wp/v2/widgets',
+						array(
+							'id_base' => 'cfz_missing_widget_type',
+							'sidebar' => $case['publicSidebar'],
+						)
+					)
+				);
+				$sidebars_after_invalid_create = self::sidebar_map();
+
+				self::reset_widget_update_guard( 'text' );
+				$create_request  = self::request(
+					'POST',
+					'/wp/v2/widgets',
+					array(
+						'_fields'  => 'id,sidebar,instance,_links',
+						'id_base'  => 'text',
+						'instance' => array( 'raw' => $case['createInstance'] ),
+						'sidebar'  => $case['publicSidebar'],
+					)
+				);
+				$create_response = self::apply_response_fields( $server->dispatch( $create_request ), $create_request );
+				$create_data    = $create_response instanceof \WP_REST_Response ? $create_response->get_data() : array();
+				$created_id     = isset( $create_data['id'] ) ? (string) $create_data['id'] : '';
+				$created_number = self::widget_number( $created_id );
+				$sidebars_after_create = self::sidebar_map();
+
+				$get_request  = self::request(
+					'GET',
+					'/wp/v2/widgets/' . $created_id,
+					array(
+						'_fields' => 'id,sidebar,instance,_links',
+						'context' => 'edit',
+					)
+				);
+				$get_response = self::apply_response_fields( $server->dispatch( $get_request ), $get_request );
+
+				self::reset_widget_update_guard( 'text' );
+				$invalid_update_response = $server->dispatch(
+					self::request(
+						'PUT',
+						'/wp/v2/widgets/' . $created_id,
+						array(
+							'instance' => array(
+								'encoded' => base64_encode( serialize( $case['updateInstance'] ) ),
+								'hash'    => 'not-the-right-hash',
+							),
+							'sidebar'  => $case['hiddenSidebar'],
+						)
+					)
+				);
+				$sidebars_after_invalid_update = self::sidebar_map();
+
+				self::reset_widget_update_guard( 'text' );
+				$update_request  = self::request(
+					'PUT',
+					'/wp/v2/widgets/' . $created_id,
+					array(
+						'_fields'  => 'id,sidebar,instance',
+						'instance' => array(
+							'encoded' => base64_encode( serialize( $case['updateInstance'] ) ),
+							'hash'    => \wp_hash( serialize( $case['updateInstance'] ) ),
+						),
+						'sidebar'  => $case['hiddenSidebar'],
+					)
+				);
+				$update_response = self::apply_response_fields( $server->dispatch( $update_request ), $update_request );
+				$sidebars_after_update = self::sidebar_map();
+				$text_settings_after_update = \get_option( 'widget_text', array() );
+
+				$invalid_sidebar_response = $server->dispatch(
+					self::request(
+						'PATCH',
+						'/wp/v2/sidebars/' . $case['publicSidebar'],
+						array( 'widgets' => array( null ) )
+					)
+				);
+				$sidebars_after_invalid_sidebar = self::sidebar_map();
+
+				$sidebar_request  = self::request(
+					'PATCH',
+					'/wp/v2/sidebars/' . $case['publicSidebar'],
+					array(
+						'_fields' => 'id,status,widgets',
+						'widgets' => array( $case['hiddenTextId'], $created_id ),
+					)
+				);
+				$sidebar_response = self::apply_response_fields( $server->dispatch( $sidebar_request ), $sidebar_request );
+				$sidebars_after_sidebar = self::sidebar_map();
+
+				$soft_delete_response = $server->dispatch(
+					self::request(
+						'DELETE',
+						'/wp/v2/widgets/' . $created_id,
+						array( 'force' => false )
+					)
+				);
+				$sidebars_after_soft_delete = self::sidebar_map();
+
+				self::reset_widget_update_guard( 'text' );
+				$force_delete_response = $server->dispatch(
+					self::request(
+						'DELETE',
+						'/wp/v2/widgets/' . $created_id,
+						array( 'force' => true )
+					)
+				);
+				$sidebars_after_force_delete = self::sidebar_map();
+			} finally {
+				$cap_filter_removed = self::remove_cap_filter( $cap_filter );
+			}
+		} finally {
+			\remove_action( 'rest_delete_widget', $delete_action, 10 );
+			\remove_action( 'rest_save_sidebar', $sidebar_action, 10 );
+			\remove_action( 'rest_after_save_widget', $save_action, 10 );
+		}
+
+		$create_data       = $create_response instanceof \WP_REST_Response ? $create_response->get_data() : array();
+		$create_links      = $create_response instanceof \WP_REST_Response ? $create_response->get_links() : array();
+		$get_data          = $get_response instanceof \WP_REST_Response ? $get_response->get_data() : array();
+		$update_data       = $update_response instanceof \WP_REST_Response ? $update_response->get_data() : array();
+		$sidebar_data      = $sidebar_response instanceof \WP_REST_Response ? $sidebar_response->get_data() : array();
+		$soft_delete_data  = $soft_delete_response instanceof \WP_REST_Response ? $soft_delete_response->get_data() : array();
+		$force_delete_data = $force_delete_response instanceof \WP_REST_Response ? $force_delete_response->get_data() : array();
+		$decoded_created   = self::decode_instance_payload( $create_data['instance'] ?? null );
+		$decoded_get       = self::decode_instance_payload( $get_data['instance'] ?? null );
+		$decoded_updated   = self::decode_instance_payload( $update_data['instance'] ?? null );
+
+		self::collect_failure(
+			$failures,
+			self::response_error_matches( $denied_create_response, 'rest_cannot_manage_widgets', 401 )
+				&& self::sidebar_maps_equal( $initial_sidebars, $sidebars_after_denied ),
+			'route-dispatched widget create denies users without manage capability before sidebar mutation',
+			array(
+				'response' => self::describe_response( $denied_create_response ),
+				'before'   => $initial_sidebars,
+				'after'    => $sidebars_after_denied,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::response_error_matches( $invalid_create_response, 'rest_invalid_widget', 400 )
+				&& self::sidebar_maps_equal( $sidebars_after_denied, $sidebars_after_invalid_create ),
+			'route-dispatched widget create rejects invalid id_base before sidebar mutation',
+			array(
+				'response' => self::describe_response( $invalid_create_response ),
+				'before'   => $sidebars_after_denied,
+				'after'    => $sidebars_after_invalid_create,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$create_response instanceof \WP_REST_Response
+				&& 201 === $create_response->get_status()
+				&& str_starts_with( $created_id, 'text-' )
+				&& $created_number > 0
+				&& $case['publicSidebar'] === ( $create_data['sidebar'] ?? null )
+				&& is_array( $decoded_created )
+				&& self::instance_contains_text( $decoded_created, $case['createInstance']['text'] )
+				&& in_array( $created_id, $sidebars_after_create[ $case['publicSidebar'] ] ?? array(), true )
+				&& isset(
+					$create_links['self'][0]['href'],
+					$create_links['collection'][0]['href'],
+					$create_links['about'][0]['href'],
+					$create_links['https://api.w.org/sidebar'][0]['href']
+				),
+			'route-dispatched widget create returns 201, a generated text widget id, links, instance payload, and sidebar assignment',
+			array(
+				'created'  => self::preview_widget_data( $create_data ),
+				'links'    => $create_links,
+				'sidebars' => $sidebars_after_create,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$get_response instanceof \WP_REST_Response
+				&& 200 === $get_response->get_status()
+				&& self::projected_keys_match( $get_data, array( 'id', 'instance', 'sidebar' ) )
+				&& $created_id === ( $get_data['id'] ?? null )
+				&& $case['publicSidebar'] === ( $get_data['sidebar'] ?? null )
+				&& is_array( $decoded_get )
+				&& self::instance_contains_text( $decoded_get, $case['createInstance']['text'] ),
+			'route-dispatched widget get applies _fields projection after create',
+			array( 'get' => self::preview_widget_data( $get_data ) )
+		);
+
+		self::collect_failure(
+			$failures,
+			self::response_error_matches( $invalid_update_response, 'rest_invalid_widget', 400 )
+				&& self::sidebar_maps_equal( $sidebars_after_create, $sidebars_after_invalid_update ),
+			'route-dispatched widget update rejects malformed encoded instance before reassignment',
+			array(
+				'response' => self::describe_response( $invalid_update_response ),
+				'before'   => $sidebars_after_create,
+				'after'    => $sidebars_after_invalid_update,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$update_response instanceof \WP_REST_Response
+				&& 200 === $update_response->get_status()
+				&& $created_id === ( $update_data['id'] ?? null )
+				&& $case['hiddenSidebar'] === ( $update_data['sidebar'] ?? null )
+				&& is_array( $decoded_updated )
+				&& self::instance_contains_text( $decoded_updated, $case['updateInstance']['text'] )
+				&& isset( $text_settings_after_update[ $created_number ] )
+				&& self::instance_contains_text( $text_settings_after_update[ $created_number ], $case['updateInstance']['text'] )
+				&& ! in_array( $created_id, $sidebars_after_update[ $case['publicSidebar'] ] ?? array(), true )
+				&& in_array( $created_id, $sidebars_after_update[ $case['hiddenSidebar'] ] ?? array(), true ),
+			'route-dispatched widget update accepts encoded instances, updates settings, and reassigns sidebar',
+			array(
+				'updated'      => self::preview_widget_data( $update_data ),
+				'decoded'      => $decoded_updated,
+				'textSettings' => $text_settings_after_update,
+				'sidebars'     => $sidebars_after_update,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::response_error_matches( $invalid_sidebar_response, 'rest_invalid_param', 400 )
+				&& self::sidebar_maps_equal( $sidebars_after_update, $sidebars_after_invalid_sidebar ),
+			'route-dispatched sidebar update rejects invalid widgets payload before sidebar mutation',
+			array(
+				'response' => self::describe_response( $invalid_sidebar_response ),
+				'before'   => $sidebars_after_update,
+				'after'    => $sidebars_after_invalid_sidebar,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$sidebar_response instanceof \WP_REST_Response
+				&& 200 === $sidebar_response->get_status()
+				&& self::projected_keys_match( $sidebar_data, array( 'id', 'status', 'widgets' ) )
+				&& $case['publicSidebar'] === ( $sidebar_data['id'] ?? null )
+				&& array( $case['hiddenTextId'], $created_id ) === ( $sidebar_data['widgets'] ?? null )
+				&& array( $case['hiddenTextId'], $created_id ) === ( $sidebars_after_sidebar[ $case['publicSidebar'] ] ?? null )
+				&& ! in_array( $case['hiddenTextId'], $sidebars_after_sidebar[ $case['hiddenSidebar'] ] ?? array(), true )
+				&& in_array( $case['publicTextId'], $sidebars_after_sidebar['wp_inactive_widgets'] ?? array(), true )
+				&& in_array( $case['legacyId'], $sidebars_after_sidebar['wp_inactive_widgets'] ?? array(), true ),
+			'route-dispatched sidebar update reorders target sidebar, steals widgets, inactivates omitted widgets, and projects fields',
+			array(
+				'response' => $sidebar_data,
+				'sidebars' => $sidebars_after_sidebar,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$soft_delete_response instanceof \WP_REST_Response
+				&& 200 === $soft_delete_response->get_status()
+				&& $created_id === ( $soft_delete_data['id'] ?? null )
+				&& 'wp_inactive_widgets' === ( $soft_delete_data['sidebar'] ?? null )
+				&& in_array( $created_id, $sidebars_after_soft_delete['wp_inactive_widgets'] ?? array(), true ),
+			'route-dispatched widget soft delete moves widget to inactive sidebar',
+			array(
+				'response' => self::preview_widget_data( $soft_delete_data ),
+				'sidebars' => $sidebars_after_soft_delete,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$force_delete_response instanceof \WP_REST_Response
+				&& 200 === $force_delete_response->get_status()
+				&& true === ( $force_delete_data['deleted'] ?? null )
+				&& $created_id === ( $force_delete_data['previous']['id'] ?? null )
+				&& 'wp_inactive_widgets' === ( $force_delete_data['previous']['sidebar'] ?? null )
+				&& ! in_array( $created_id, $sidebars_after_force_delete['wp_inactive_widgets'] ?? array(), true )
+				&& 2 === count( $delete_calls )
+				&& false === ( $delete_calls[0]['force'] ?? null )
+				&& true === ( $delete_calls[1]['force'] ?? null ),
+			'route-dispatched widget force delete returns previous payload, removes inactive widget, and records delete hook force mode',
+			array(
+				'response'    => self::preview_force_delete_data( $force_delete_data ),
+				'deleteCalls' => $delete_calls,
+				'sidebars'    => $sidebars_after_force_delete,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$cap_filter_removed
+				&& array(
+					array(
+						'id'       => $created_id,
+						'sidebar'  => $case['publicSidebar'],
+						'creating' => true,
+						'method'   => 'POST',
+					),
+					array(
+						'id'       => $created_id,
+						'sidebar'  => $case['publicSidebar'],
+						'creating' => false,
+						'method'   => 'PUT',
+					),
+				) === $save_calls
+				&& 1 === count( $sidebar_calls )
+				&& $case['publicSidebar'] === ( $sidebar_calls[0]['id'] ?? null )
+				&& null === ( $sidebar_calls[0]['widgets'] ?? null )
+				&& 'PATCH' === ( $sidebar_calls[0]['method'] ?? null )
+				&& false === \has_filter( 'rest_after_save_widget', $save_action )
+				&& false === \has_filter( 'rest_save_sidebar', $sidebar_action )
+				&& false === \has_filter( 'rest_delete_widget', $delete_action ),
+			'route-dispatched widget/sidebar mutation hooks fire with expected payloads and are removed',
+			array(
+				'capFilterRemoved' => $cap_filter_removed,
+				'saveCalls'        => $save_calls,
+				'sidebarCalls'     => $sidebar_calls,
+				'deleteCalls'      => $delete_calls,
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'rest-widgets-sidebars.route-dispatched-mutations',
+			$failures,
+			array(
+				'case'      => self::case_summary( $case ),
+				'createdId' => $created_id,
+			)
+		);
+	}
+
 	private static function reset_runtime(): void {
 		self::$legacy_widget_events = array();
 
@@ -2113,6 +2528,13 @@ PHP;
 		return $sidebars;
 	}
 
+	private static function sidebar_maps_equal( array $left, array $right ): bool {
+		ksort( $left );
+		ksort( $right );
+
+		return $left === $right;
+	}
+
 	private static function legacy_event_seen( string $type ): bool {
 		foreach ( self::$legacy_widget_events as $event ) {
 			if ( $type === ( $event['type'] ?? null ) ) {
@@ -2232,6 +2654,35 @@ PHP;
 			'code'    => $value->get_error_code(),
 			'message' => $value->get_error_message(),
 			'data'    => $value->get_error_data(),
+		);
+	}
+
+	private static function response_error_matches( $value, string $code, ?int $status = null ): bool {
+		if ( $value instanceof \WP_REST_Response ) {
+			$data = $value->get_data();
+			if ( ! is_array( $data ) || $code !== ( $data['code'] ?? null ) ) {
+				return false;
+			}
+
+			if ( null === $status ) {
+				return true;
+			}
+
+			return isset( $data['data'] ) && is_array( $data['data'] ) && $status === (int) ( $data['data']['status'] ?? 0 );
+		}
+
+		return self::error_matches( $value, $code, $status );
+	}
+
+	private static function describe_response( $value ) {
+		if ( ! $value instanceof \WP_REST_Response ) {
+			return self::describe_error( $value );
+		}
+
+		return array(
+			'status'  => $value->get_status(),
+			'data'    => $value->get_data(),
+			'headers' => $value->get_headers(),
 		);
 	}
 
