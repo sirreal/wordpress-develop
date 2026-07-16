@@ -3257,14 +3257,14 @@ final class ContentLifecycleSurface {
 			$value = $property->getValue( $query );
 			return is_string( $value ) ? $value : '';
 		};
-		$query_parent_status_bucket = static function ( string $post_type, int $parent_id, $post_status ) use ( $wp_query_cache_key ): array {
+		$query_parent_status_bucket = static function ( string $post_type, int $parent_id, $post_status, string $fields = 'ids' ) use ( $wp_query_cache_key ): array {
 			$args  = array(
 				'cache_results'          => true,
-				'fields'                 => 'ids',
+				'fields'                 => $fields,
 				'ignore_sticky_posts'    => true,
 				'no_found_rows'          => true,
 				'order'                  => 'ASC',
-				'orderby'                => 'ID',
+				'orderby'                => 'name',
 				'post_parent'            => $parent_id,
 				'post_status'            => $post_status,
 				'post_type'              => $post_type,
@@ -3273,13 +3273,60 @@ final class ContentLifecycleSurface {
 				'update_post_meta_cache' => false,
 				'update_post_term_cache' => false,
 			);
-			$query = new \WP_Query( $args );
+			$query = new \WP_Query();
+			$result = $query->query( $args );
 			$key   = $wp_query_cache_key( $query );
 			$salt  = (array) \wp_cache_get_last_changed( 'posts' );
+			$posts = is_array( $query->posts ) ? $query->posts : array();
+			$ids      = array();
+			$parents  = array();
+			$statuses = array();
+			$classes  = array();
+
+			foreach ( $posts as $post ) {
+				if ( is_int( $post ) ) {
+					$ids[] = $post;
+					continue;
+				}
+
+				if ( ! is_object( $post ) || ! isset( $post->ID ) ) {
+					continue;
+				}
+
+				$post_id = (int) $post->ID;
+				$ids[]   = $post_id;
+				$classes[ $post_id ] = get_class( $post );
+
+				if ( property_exists( $post, 'post_parent' ) ) {
+					$parents[ $post_id ] = (int) $post->post_parent;
+				}
+				if ( property_exists( $post, 'post_status' ) ) {
+					$statuses[ $post_id ] = (string) $post->post_status;
+				}
+			}
+
+			ksort( $parents );
+			ksort( $statuses );
+			ksort( $classes );
+
+			if ( 'id=>parent' === $query->query_vars['fields'] && is_array( $result ) ) {
+				$parents = array();
+				foreach ( $result as $post_id => $parent_id ) {
+					if ( is_string( $post_id ) && str_starts_with( $post_id, 'post_parent:' ) ) {
+						$post_id = substr( $post_id, strlen( 'post_parent:' ) );
+					}
+
+					$parents[ (int) $post_id ] = (int) $parent_id;
+				}
+				ksort( $parents );
+			}
 
 			return array(
 				'args'        => $args,
-				'ids'         => array_values( array_map( 'intval', $query->posts ) ),
+				'ids'         => array_values( array_map( 'intval', $ids ) ),
+				'parents'     => $parents,
+				'statuses'    => $statuses,
+				'classes'     => $classes,
 				'cacheKey'    => $key,
 				'cache'       => '' === $key ? false : \wp_cache_get_salted( $key, 'post-queries', $salt ),
 				'lastChanged' => $salt,
@@ -3966,10 +4013,68 @@ final class ContentLifecycleSurface {
 			$mutation_combined_bucket_after = $query_parent_status_bucket( $pretty_type, $mutation_parent_b_id, array( 'private', 'pending' ) );
 			$mutation_combined_after_expected = array( $mutation_child_id, $mutation_pending_child_id );
 			sort( $mutation_combined_after_expected );
+			$mutation_combined_parent_expected = array();
+			$mutation_combined_status_expected = array(
+				$mutation_child_id         => 'private',
+				$mutation_pending_child_id => 'pending',
+			);
+			foreach ( $mutation_combined_after_expected as $post_id ) {
+				\wp_cache_delete( 'post_parent:' . (string) $post_id, 'posts' );
+				$mutation_combined_parent_expected[ $post_id ] = $mutation_parent_b_id;
+			}
+			ksort( $mutation_combined_status_expected );
+			$mutation_combined_id_parent_bucket_after = $query_parent_status_bucket( $pretty_type, $mutation_parent_b_id, array( 'private', 'pending' ), 'id=>parent' );
+			$mutation_combined_object_bucket_after = $query_parent_status_bucket( $pretty_type, $mutation_parent_b_id, array( 'private', 'pending' ), 'all' );
 			$mutation_initial_after = \get_page_by_path( $mutation_initial_path, OBJECT, $mutation_lookup_types );
 			$mutation_reparented_after = \get_page_by_path( $mutation_reparented_path, ARRAY_A, $mutation_lookup_types );
 			$mutation_initial_cached_after_lookup = \wp_cache_get_salted( 'get_page_by_path:' . $mutation_initial_hash, 'post-queries', $mutation_last_changed_after );
 			$mutation_reparented_cached_after_lookup = \wp_cache_get_salted( 'get_page_by_path:' . $mutation_reparented_hash, 'post-queries', $mutation_last_changed_after );
+
+			self::collect_failure(
+				$failures,
+				$mutation_combined_bucket_after['cacheKey'] === $mutation_combined_id_parent_bucket_after['cacheKey']
+					&& $mutation_combined_bucket_after['cacheKey'] === $mutation_combined_object_bucket_after['cacheKey']
+					&& $mutation_combined_after_expected === $mutation_combined_id_parent_bucket_after['ids']
+					&& $mutation_combined_after_expected === $mutation_combined_object_bucket_after['ids']
+					&& $mutation_combined_parent_expected === $mutation_combined_id_parent_bucket_after['parents']
+					&& $mutation_combined_parent_expected === $mutation_combined_object_bucket_after['parents']
+					&& $mutation_combined_status_expected === $mutation_combined_object_bucket_after['statuses']
+					&& array_fill_keys( $mutation_combined_after_expected, 'WP_Post' ) === $mutation_combined_object_bucket_after['classes']
+					&& $query_bucket_has_ids( $mutation_combined_id_parent_bucket_after, $mutation_combined_after_expected )
+					&& $query_bucket_has_ids( $mutation_combined_object_bucket_after, $mutation_combined_after_expected ),
+				'WP_Query reuses generated custom hierarchical parent/status cache across ID, ID-parent, and object result shapes',
+				array(
+					'checks'         => array(
+						'keyIdParent' => $mutation_combined_bucket_after['cacheKey'] === $mutation_combined_id_parent_bucket_after['cacheKey'],
+						'keyObject'   => $mutation_combined_bucket_after['cacheKey'] === $mutation_combined_object_bucket_after['cacheKey'],
+						'idsParent'   => $mutation_combined_after_expected === $mutation_combined_id_parent_bucket_after['ids'],
+						'idsObject'   => $mutation_combined_after_expected === $mutation_combined_object_bucket_after['ids'],
+						'mapParent'   => $mutation_combined_parent_expected === $mutation_combined_id_parent_bucket_after['parents'],
+						'mapObject'   => $mutation_combined_parent_expected === $mutation_combined_object_bucket_after['parents'],
+						'statuses'    => $mutation_combined_status_expected === $mutation_combined_object_bucket_after['statuses'],
+						'classes'     => array_fill_keys( $mutation_combined_after_expected, 'WP_Post' ) === $mutation_combined_object_bucket_after['classes'],
+						'cacheParent' => $query_bucket_has_ids( $mutation_combined_id_parent_bucket_after, $mutation_combined_after_expected ),
+						'cacheObject' => $query_bucket_has_ids( $mutation_combined_object_bucket_after, $mutation_combined_after_expected ),
+					),
+					'hashes'         => array(
+						'keyIds'      => substr( md5( $mutation_combined_bucket_after['cacheKey'] ), 0, 8 ),
+						'keyParent'   => substr( md5( $mutation_combined_id_parent_bucket_after['cacheKey'] ), 0, 8 ),
+						'keyObject'   => substr( md5( $mutation_combined_object_bucket_after['cacheKey'] ), 0, 8 ),
+						'reqIds'      => substr( md5( $mutation_combined_bucket_after['request'] ), 0, 8 ),
+						'reqParent'   => substr( md5( $mutation_combined_id_parent_bucket_after['request'] ), 0, 8 ),
+						'reqObject'   => substr( md5( $mutation_combined_object_bucket_after['request'] ), 0, 8 ),
+					),
+					'expectedIds'    => $mutation_combined_after_expected,
+					'idParentIds'    => $mutation_combined_id_parent_bucket_after['ids'],
+					'objectIds'      => $mutation_combined_object_bucket_after['ids'],
+					'expectedParent' => $mutation_combined_parent_expected,
+					'idParentMap'    => $mutation_combined_id_parent_bucket_after['parents'],
+					'objectParents'  => $mutation_combined_object_bucket_after['parents'],
+					'expectedStatus' => $mutation_combined_status_expected,
+					'objectStatuses' => $mutation_combined_object_bucket_after['statuses'],
+					'objectClasses'  => $mutation_combined_object_bucket_after['classes'],
+				)
+			);
 
 			self::collect_failure(
 				$failures,
