@@ -187,6 +187,7 @@ class OracleRenderer {
 	public const KIND_PHP_DOM          = 'php-dom';
 	public const KIND_LEXBOR_SOURCE    = 'lexbor-source';
 	public const KIND_HTML5EVER_SOURCE = 'html5ever-source';
+	public const KIND_CHROME_CDP       = 'chrome-cdp';
 
 	private const METADATA_SCHEMA_VERSION = 1;
 	private const DEFAULT_TIMEOUT_MS = 2500;
@@ -199,19 +200,26 @@ class OracleRenderer {
 	private string $kind;
 	private ?string $source_binary;
 	private int $timeout_ms;
+	private ?ChromeOracleRenderer $chrome_renderer;
 	private ?array $metadata = null;
 	private ?string $source_manifest_sha256 = null;
 
-	private function __construct( string $kind, ?string $source_binary = null, int $timeout_ms = self::DEFAULT_TIMEOUT_MS ) {
+	private function __construct( string $kind, ?string $source_binary = null, int $timeout_ms = self::DEFAULT_TIMEOUT_MS, ?ChromeOracleRenderer $chrome_renderer = null ) {
 		$this->kind          = $kind;
 		$this->source_binary = $source_binary;
 		$this->timeout_ms    = $timeout_ms;
+		$this->chrome_renderer = $chrome_renderer;
 	}
 
 	public static function from_options( array $options ): self {
+		foreach ( array( 'dom-oracle', 'lexbor-oracle-bin', 'html5ever-oracle-bin', 'chrome-oracle-script', 'chrome-executable', 'node-bin', 'oracle-timeout-ms', 'chrome-startup-timeout-ms' ) as $value_option ) {
+			if ( array_key_exists( $value_option, $options ) && true === $options[ $value_option ] ) {
+				throw new \InvalidArgumentException( "Expected --{$value_option} to have a value." );
+			}
+		}
 		$kind = option_string( $options, 'dom-oracle', self::KIND_PHP_DOM );
 		if ( ! in_array( $kind, self::kinds(), true ) ) {
-			throw new \InvalidArgumentException( 'Expected --dom-oracle to be php-dom, lexbor-source, or html5ever-source.' );
+			throw new \InvalidArgumentException( 'Expected --dom-oracle to be php-dom, lexbor-source, html5ever-source, or chrome-cdp.' );
 		}
 
 		$source_binary = null;
@@ -232,11 +240,53 @@ class OracleRenderer {
 			throw new \InvalidArgumentException( 'Expected --oracle-timeout-ms to be positive.' );
 		}
 
-		return new self( $kind, $source_binary, $timeout_ms );
+		$chrome_renderer = null;
+		if ( self::KIND_CHROME_CDP === $kind ) {
+			$script = option_string( $options, 'chrome-oracle-script', getenv( 'HTML_API_FUZZ_CHROME_ORACLE' ) ?: null );
+			if ( array_key_exists( 'chrome-oracle-script', $options ) && '' === $script ) {
+				throw new \InvalidArgumentException( 'Expected --chrome-oracle-script to be non-empty.' );
+			}
+			if ( null === $script || '' === $script ) {
+				$script = repo_root() . '/tools/html-api-fuzz/oracles/chrome/chrome-tree-oracle.js';
+			}
+			$chrome_executable = option_string( $options, 'chrome-executable', getenv( 'HTML_API_FUZZ_CHROME_EXECUTABLE' ) ?: null );
+			if ( array_key_exists( 'chrome-executable', $options ) && '' === $chrome_executable ) {
+				throw new \InvalidArgumentException( 'Expected --chrome-executable to be non-empty.' );
+			}
+			$node_binary = option_string( $options, 'node-bin', getenv( 'HTML_API_FUZZ_NODE_BIN' ) ?: 'node' );
+			if ( null === $node_binary || '' === $node_binary ) {
+				throw new \InvalidArgumentException( 'Expected --node-bin to be non-empty.' );
+			}
+			$startup_timeout_ms = self::chrome_startup_timeout_from_options( $options );
+			$chrome_renderer = new ChromeOracleRenderer( $script, $chrome_executable, $node_binary, $timeout_ms, $startup_timeout_ms );
+		}
+
+		return new self( $kind, $source_binary, $timeout_ms, $chrome_renderer );
 	}
 
 	public static function kinds(): array {
-		return array( self::KIND_PHP_DOM, self::KIND_LEXBOR_SOURCE, self::KIND_HTML5EVER_SOURCE );
+		return array( self::KIND_PHP_DOM, self::KIND_LEXBOR_SOURCE, self::KIND_HTML5EVER_SOURCE, self::KIND_CHROME_CDP );
+	}
+
+	private static function chrome_startup_timeout_from_options( array $options ): int {
+		if ( array_key_exists( 'chrome-startup-timeout-ms', $options ) ) {
+			$value = option_int( $options, 'chrome-startup-timeout-ms', ChromeOracleRenderer::DEFAULT_STARTUP_TIMEOUT_MS );
+		} else {
+			$environment = getenv( 'HTML_API_FUZZ_CHROME_STARTUP_TIMEOUT_MS' );
+			if ( false === $environment || '' === $environment ) {
+				$value = ChromeOracleRenderer::DEFAULT_STARTUP_TIMEOUT_MS;
+			} else {
+				$parsed = filter_var( $environment, FILTER_VALIDATE_INT );
+				if ( false === $parsed ) {
+					throw new \InvalidArgumentException( 'Expected HTML_API_FUZZ_CHROME_STARTUP_TIMEOUT_MS to be an integer.' );
+				}
+				$value = (int) $parsed;
+			}
+		}
+		if ( $value < 1 ) {
+			throw new \InvalidArgumentException( 'Expected --chrome-startup-timeout-ms to be positive.' );
+		}
+		return $value;
 	}
 
 	public function kind(): string {
@@ -270,6 +320,13 @@ class OracleRenderer {
 				) : null,
 				'error'         => $available ? null : 'Dom\\HTMLDocument is not available.',
 			);
+			return $this->metadata;
+		}
+		if ( self::KIND_CHROME_CDP === $this->kind ) {
+			if ( null === $this->chrome_renderer ) {
+				throw new \LogicException( 'Chrome renderer is missing.' );
+			}
+			$this->metadata = $this->chrome_renderer->metadata();
 			return $this->metadata;
 		}
 
@@ -326,6 +383,11 @@ class OracleRenderer {
 			$options['lexborOracleBin'] = $this->source_binary;
 		} elseif ( self::KIND_HTML5EVER_SOURCE === $this->kind && null !== $this->source_binary ) {
 			$options['html5everOracleBin'] = $this->source_binary;
+		} elseif ( self::KIND_CHROME_CDP === $this->kind && null !== $this->chrome_renderer ) {
+			$options['chromeOracleScript'] = $this->chrome_renderer->script();
+			$options['chromeExecutable'] = $this->chrome_renderer->chrome_executable();
+			$options['nodeBin'] = $this->chrome_renderer->node_executable();
+			$options['chromeStartupTimeoutMs'] = $this->chrome_renderer->startup_timeout_ms();
 		}
 		if ( self::DEFAULT_TIMEOUT_MS !== $this->timeout_ms ) {
 			$options['oracleTimeoutMs'] = $this->timeout_ms;
@@ -341,6 +403,17 @@ class OracleRenderer {
 		} elseif ( self::KIND_HTML5EVER_SOURCE === $this->kind && null !== $this->source_binary ) {
 			$args[] = '--html5ever-oracle-bin';
 			$args[] = $this->source_binary;
+		} elseif ( self::KIND_CHROME_CDP === $this->kind && null !== $this->chrome_renderer ) {
+			$args[] = '--chrome-oracle-script';
+			$args[] = $this->chrome_renderer->script();
+			if ( '' !== $this->chrome_renderer->chrome_executable() ) {
+				$args[] = '--chrome-executable';
+				$args[] = $this->chrome_renderer->chrome_executable();
+			}
+			$args[] = '--node-bin';
+			$args[] = $this->chrome_renderer->node_executable();
+			$args[] = '--chrome-startup-timeout-ms';
+			$args[] = (string) $this->chrome_renderer->startup_timeout_ms();
 		}
 		if ( self::DEFAULT_TIMEOUT_MS !== $this->timeout_ms ) {
 			$args[] = '--oracle-timeout-ms';
@@ -354,6 +427,12 @@ class OracleRenderer {
 			$result = TreeRenderer::render_dom( $html, $mode, $limits, $fragment_context );
 			$result['oracle'] = $this->metadata();
 			return $result;
+		}
+		if ( self::KIND_CHROME_CDP === $this->kind ) {
+			if ( null === $this->chrome_renderer ) {
+				throw new \LogicException( 'Chrome renderer is missing.' );
+			}
+			return $this->chrome_renderer->render( $html, $mode, $limits, $fragment_context );
 		}
 
 		$metadata = $this->metadata();
@@ -403,6 +482,62 @@ class OracleRenderer {
 		} catch ( \Throwable $error ) {
 			return $this->infrastructure_result( $error->getMessage(), $process ?? null );
 		}
+	}
+
+	public function close(): void {
+		if ( null !== $this->chrome_renderer ) {
+			$this->chrome_renderer->close();
+		}
+	}
+
+	/**
+	 * Run an owner's complete renderer lifetime and always surface cleanup.
+	 *
+	 * @return mixed
+	 */
+	public static function with_explicit_close( self $renderer, callable $operation ) {
+		$value = null;
+		$operation_error = null;
+		try {
+			$value = $operation( $renderer );
+		} catch ( \Throwable $error ) {
+			$operation_error = $error;
+		}
+
+		$cleanup_error = null;
+		try {
+			$renderer->close();
+		} catch ( \Throwable $error ) {
+			$cleanup_error = $error;
+		}
+
+		if ( null !== $operation_error ) {
+			if ( null !== $cleanup_error ) {
+				throw new \RuntimeException(
+					$operation_error->getMessage() . '; oracle cleanup failed: ' . $cleanup_error->getMessage(),
+					0,
+					$operation_error
+				);
+			}
+			throw $operation_error;
+		}
+		if ( null !== $cleanup_error ) {
+			throw $cleanup_error;
+		}
+
+		return $value;
+	}
+
+	public function recommended_process_timeout_ms( string $checks, int $non_chrome_fallback ): int {
+		if ( $non_chrome_fallback < 1 ) {
+			throw new \InvalidArgumentException( 'Expected the non-Chrome process timeout fallback to be positive.' );
+		}
+		if ( ! in_array( $checks, array( 'baseline', 'full', 'sampled' ), true ) ) {
+			$checks = 'unknown';
+		}
+		return null === $this->chrome_renderer
+			? $non_chrome_fallback
+			: $this->chrome_renderer->recommended_process_timeout_ms( $checks );
 	}
 
 	private function source_metadata(): array {
@@ -1454,6 +1589,28 @@ class OracleRenderer {
 				$identity['lexborCommit'] === $build['resolvedCommit'] && 'https://github.com/lexbor/lexbor.git' === $build['upstream'] &&
 				self::nonempty_string( $build['compiler'] ) && self::nonempty_string( $build['cmake'] )
 				? null : 'Lexbor identity is invalid';
+		}
+		if ( self::KIND_CHROME_CDP === $metadata['kind'] ) {
+			$keys = array(
+				'schemaVersion', 'kind', 'platform', 'pinnedChromeVersion', 'chromeArchiveSha256',
+				'expectedChromeExecutableSha256', 'chromeExecutableSha256', 'oracleScriptSha256',
+				'fragmentContextsSha256', 'fragmentContexts', 'nodeExecutableSha256', 'nodeVersion',
+				'chromeVersion', 'cdpProtocolVersion',
+			);
+			return self::exact_keys( $identity, $keys ) &&
+				in_array( $identity['platform'], array( 'mac-arm64', 'mac-x64', 'linux64' ), true ) &&
+				self::matches( $identity['pinnedChromeVersion'], '/^[0-9]+(?:\.[0-9]+){3}$/D' ) &&
+				self::matches( $identity['chromeArchiveSha256'], '/^[0-9a-f]{64}$/D' ) &&
+				self::matches( $identity['expectedChromeExecutableSha256'], '/^[0-9a-f]{64}$/D' ) &&
+				$identity['expectedChromeExecutableSha256'] === $identity['chromeExecutableSha256'] &&
+				self::matches( $identity['oracleScriptSha256'], '/^[0-9a-f]{64}$/D' ) &&
+				self::matches( $identity['fragmentContextsSha256'], '/^[0-9a-f]{64}$/D' ) &&
+				$identity['fragmentContexts'] === Generator::fragment_contexts() &&
+				self::matches( $identity['nodeExecutableSha256'], '/^[0-9a-f]{64}$/D' ) &&
+				self::matches( $identity['nodeVersion'], '/^v[0-9]+(?:\.[0-9]+){2}(?:[-+][0-9A-Za-z.-]+)?$/D' ) &&
+				$identity['pinnedChromeVersion'] === $identity['chromeVersion'] &&
+				self::nonempty_string( $identity['cdpProtocolVersion'] )
+				? null : 'Chrome CDP identity is invalid';
 		}
 		$build = $identity['build'] ?? null;
 		$identity_keys = array( 'schemaVersion', 'kind', 'binarySha256', 'html5everVersion', 'html5everChecksum', 'markup5everRcdomVersion', 'markup5everRcdomChecksum', 'rustToolchain', 'cargoLockSha256', 'buildIdentity', 'build' );

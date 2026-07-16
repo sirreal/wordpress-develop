@@ -7,8 +7,8 @@ $replay_path = \HtmlApiFuzz\option_string( $options, 'replay', $options['_'][0] 
 $store_path  = \HtmlApiFuzz\option_string( $options, 'store', null );
 $stored_replay_value = null;
 if ( ( null === $replay_path && null === $store_path ) || \HtmlApiFuzz\option_bool( $options, 'help', false ) ) {
-	echo "Usage: php tools/html-api-fuzz/replay.php --replay path/to/replay.json [--output-dir DIR] [--payload-policy POLICY] [--memory-limit LIMIT] [--timeout-ms N] [--worker-script PATH] [--dom-oracle php-dom|lexbor-source|html5ever-source] [--lexbor-oracle-bin PATH|--html5ever-oracle-bin PATH] [--allow-oracle-mismatch]\n";
-	echo "       php tools/html-api-fuzz/replay.php --store path/to/results.sqlite (--id N|--seed N) [--output-dir DIR] [--payload-policy POLICY] [--dom-oracle php-dom|lexbor-source|html5ever-source] [--lexbor-oracle-bin PATH|--html5ever-oracle-bin PATH] [--allow-oracle-mismatch]\n";
+	echo "Usage: php tools/html-api-fuzz/replay.php --replay path/to/replay.json [--output-dir DIR] [--payload-policy POLICY] [--memory-limit LIMIT] [--timeout-ms N] [--worker-script PATH] [--dom-oracle php-dom|lexbor-source|html5ever-source|chrome-cdp] [--lexbor-oracle-bin PATH|--html5ever-oracle-bin PATH|--chrome-oracle-script PATH] [--chrome-executable PATH] [--node-bin PATH] [--chrome-startup-timeout-ms N] [--allow-oracle-mismatch]\n";
+	echo "       php tools/html-api-fuzz/replay.php --store path/to/results.sqlite (--id N|--seed N) [--output-dir DIR] [--payload-policy POLICY] [--dom-oracle php-dom|lexbor-source|html5ever-source|chrome-cdp] [oracle options] [--allow-oracle-mismatch]\n";
 	echo "The --store form reproduces a failure whose seed directory was pruned, from the replay stored in the lane's results.sqlite.\n";
 	exit( ( null === $replay_path && null === $store_path ) ? 1 : 0 );
 }
@@ -89,8 +89,9 @@ if ( ! preg_match( '/^(?:-1|[1-9][0-9]*[KMG]?)$/i', $memory_limit ) ) {
 	fwrite( STDERR, "Expected --memory-limit or replay memoryLimit to be -1 or a positive PHP limit such as 256M.\n" );
 	exit( 1 );
 }
+$recorded_timeout_present = array_key_exists( 'processTimeoutMs', $recorded_options );
 $recorded_timeout_ms = 2500;
-if ( array_key_exists( 'processTimeoutMs', $recorded_options ) ) {
+if ( $recorded_timeout_present ) {
 	$recorded_timeout_value = $recorded_options['processTimeoutMs'];
 	$parsed_timeout = ( is_int( $recorded_timeout_value ) || is_string( $recorded_timeout_value ) )
 		? filter_var( $recorded_timeout_value, FILTER_VALIDATE_INT, array( 'options' => array( 'min_range' => 1 ) ) )
@@ -101,6 +102,7 @@ if ( array_key_exists( 'processTimeoutMs', $recorded_options ) ) {
 	}
 	$recorded_timeout_ms = (int) $parsed_timeout;
 }
+$timeout_explicit = array_key_exists( 'timeout-ms', $options );
 $timeout_ms = \HtmlApiFuzz\option_int( $options, 'timeout-ms', $recorded_timeout_ms );
 if ( $timeout_ms < 1 ) {
 	fwrite( STDERR, "Expected --timeout-ms or replay processTimeoutMs to be positive.\n" );
@@ -160,13 +162,65 @@ if ( null === \HtmlApiFuzz\option_string( $oracle_options, 'lexbor-oracle-bin', 
 if ( null === \HtmlApiFuzz\option_string( $oracle_options, 'html5ever-oracle-bin', null ) && is_string( $recorded_options['html5everOracleBin'] ?? null ) ) {
 	$oracle_options['html5ever-oracle-bin'] = $recorded_options['html5everOracleBin'];
 }
-$stored_oracle_timeout_ms = $recorded_options['oracleTimeoutMs'] ?? null;
-if ( null === \HtmlApiFuzz\option_string( $oracle_options, 'oracle-timeout-ms', null ) && is_numeric( $stored_oracle_timeout_ms ) ) {
-	$oracle_options['oracle-timeout-ms'] = (string) (int) $stored_oracle_timeout_ms;
+foreach ( array( 'chromeOracleScript' => 'chrome-oracle-script', 'chromeExecutable' => 'chrome-executable', 'nodeBin' => 'node-bin' ) as $recorded_name => $option_name ) {
+	if ( ! array_key_exists( $recorded_name, $recorded_options ) ) {
+		continue;
+	}
+	if ( ! is_string( $recorded_options[ $recorded_name ] ) || '' === $recorded_options[ $recorded_name ] ) {
+		fwrite( STDERR, "Invalid recorded {$recorded_name}: expected a non-empty string.\n" );
+		exit( 1 );
+	}
+	if ( null === \HtmlApiFuzz\option_string( $oracle_options, $option_name, null ) ) {
+		$oracle_options[ $option_name ] = $recorded_options[ $recorded_name ];
+	}
 }
-$oracle_renderer    = \HtmlApiFuzz\OracleRenderer::from_options( $oracle_options );
-$oracle_worker_args = $oracle_renderer->worker_args();
-$current_oracle     = $oracle_renderer->metadata();
+if ( array_key_exists( 'chromeStartupTimeoutMs', $recorded_options ) ) {
+	$recorded_chrome_startup = $recorded_options['chromeStartupTimeoutMs'];
+	$parsed_chrome_startup = ( is_int( $recorded_chrome_startup ) || is_string( $recorded_chrome_startup ) )
+		? filter_var( $recorded_chrome_startup, FILTER_VALIDATE_INT, array( 'options' => array( 'min_range' => 1 ) ) )
+		: false;
+	if ( false === $parsed_chrome_startup ) {
+		fwrite( STDERR, "Invalid recorded chromeStartupTimeoutMs: expected a positive integer.\n" );
+		exit( 1 );
+	}
+	if ( null === \HtmlApiFuzz\option_string( $oracle_options, 'chrome-startup-timeout-ms', null ) ) {
+		$oracle_options['chrome-startup-timeout-ms'] = (string) (int) $parsed_chrome_startup;
+	}
+}
+$stored_oracle_timeout_ms = null;
+if ( array_key_exists( 'oracleTimeoutMs', $recorded_options ) ) {
+	$recorded_oracle_timeout = $recorded_options['oracleTimeoutMs'];
+	$parsed_oracle_timeout = ( is_int( $recorded_oracle_timeout ) || is_string( $recorded_oracle_timeout ) )
+		? filter_var( $recorded_oracle_timeout, FILTER_VALIDATE_INT, array( 'options' => array( 'min_range' => 1 ) ) )
+		: false;
+	if ( false === $parsed_oracle_timeout ) {
+		fwrite( STDERR, "Invalid recorded oracleTimeoutMs: expected a positive integer.\n" );
+		exit( 1 );
+	}
+	$stored_oracle_timeout_ms = (int) $parsed_oracle_timeout;
+}
+if ( null === \HtmlApiFuzz\option_string( $oracle_options, 'oracle-timeout-ms', null ) && null !== $stored_oracle_timeout_ms ) {
+	$oracle_options['oracle-timeout-ms'] = (string) $stored_oracle_timeout_ms;
+}
+$oracle_renderer = \HtmlApiFuzz\OracleRenderer::from_options( $oracle_options );
+$oracle_setup = \HtmlApiFuzz\OracleRenderer::with_explicit_close(
+	$oracle_renderer,
+	static function ( \HtmlApiFuzz\OracleRenderer $renderer ) use ( $timeout_explicit, $recorded_timeout_present, $timeout_ms, $checks ): array {
+		return array(
+			'metadata'      => $renderer->metadata(),
+			'workerArgs'    => $renderer->worker_args(),
+			'replayOptions' => $renderer->replay_options(),
+			'timeoutMs'     => ! $timeout_explicit && ! $recorded_timeout_present
+				? $renderer->recommended_process_timeout_ms( $checks, 2500 )
+				: $timeout_ms,
+		);
+	}
+);
+$current_oracle                 = $oracle_setup['metadata'];
+$oracle_worker_args             = $oracle_setup['workerArgs'];
+$current_oracle_replay_options  = $oracle_setup['replayOptions'];
+$timeout_ms                     = $oracle_setup['timeoutMs'];
+$effective_policy['processTimeoutMs'] = $timeout_ms;
 $oracle_mismatches  = \HtmlApiFuzz\OracleRenderer::identity_mismatches( $replay['oracle'] ?? null, $current_oracle );
 $allow_oracle_mismatch = \HtmlApiFuzz\option_bool( $options, 'allow-oracle-mismatch', false );
 if ( ! empty( $oracle_mismatches ) && ! $allow_oracle_mismatch ) {
@@ -224,6 +278,8 @@ $args = array(
 	(string) \HtmlApiFuzz\option_int( $options, 'max-tree-bytes', (int) ( $replay['limits']['maxTreeBytes'] ?? 16777216 ) ),
 	'--checks',
 	$checks,
+	'--process-timeout-ms',
+	(string) $timeout_ms,
 	'--git-metadata-base64',
 	$git_metadata_base64,
 );
@@ -324,8 +380,8 @@ if ( is_array( $output_replay ) && is_array( $original_generator ) ) {
 if ( is_array( $output_replay ) ) {
 	$output_replay['sourceReplay'] = $source_replay;
 	$output_options = is_array( $output_replay['options'] ?? null ) ? $output_replay['options'] : array();
-	unset( $output_options['domOracle'], $output_options['lexborOracleBin'], $output_options['html5everOracleBin'], $output_options['oracleTimeoutMs'] );
-	$output_replay['options'] = array_merge( $output_options, $effective_policy, $oracle_renderer->replay_options() );
+	unset( $output_options['domOracle'], $output_options['lexborOracleBin'], $output_options['html5everOracleBin'], $output_options['chromeOracleScript'], $output_options['chromeExecutable'], $output_options['nodeBin'], $output_options['chromeStartupTimeoutMs'], $output_options['oracleTimeoutMs'] );
+	$output_replay['options'] = array_merge( $output_options, $effective_policy, $current_oracle_replay_options );
 	$output_replay['oracle'] = $current_oracle;
 	if ( ! empty( $oracle_mismatches ) ) {
 		$output_replay['sourceOracle'] = $replay['oracle'] ?? null;

@@ -94,74 +94,88 @@ class CommonCrawlRunner {
 		if ( is_string( $html5ever_oracle_bin ) && '' !== $html5ever_oracle_bin ) {
 			$oracle_options['html5ever-oracle-bin'] = $html5ever_oracle_bin;
 		}
-
-		$oracle   = OracleRenderer::from_options( $oracle_options );
-		$metadata = $oracle->metadata();
-		if ( true !== ( $metadata['available'] ?? false ) ) {
-			throw new \RuntimeException(
-				"Selected {$oracle_kind} oracle is unavailable: " . (string) ( $metadata['error'] ?? 'unknown identity error' )
-			);
-		}
-		$expected_commit = getenv( 'HTML_API_CC_EXPECT_LEXBOR_COMMIT' );
-		if (
-			is_string( $expected_commit ) && '' !== $expected_commit &&
-			(
-				OracleRenderer::KIND_LEXBOR_SOURCE !== $oracle_kind ||
-				$expected_commit !== ( $metadata['identity']['lexborCommit'] ?? null )
-			)
-		) {
-			throw new \RuntimeException( 'Lexbor oracle commit does not match HTML_API_CC_EXPECT_LEXBOR_COMMIT.' );
-		}
-		$expected_identity_sha256 = getenv( 'HTML_API_CC_EXPECT_ORACLE_IDENTITY_SHA256' );
-		if ( is_string( $expected_identity_sha256 ) && '' !== $expected_identity_sha256 && 1 !== preg_match( '/^[0-9a-fA-F]{64}$/', $expected_identity_sha256 ) ) {
-			throw new \InvalidArgumentException( 'HTML_API_CC_EXPECT_ORACLE_IDENTITY_SHA256 must be a SHA-256 hex digest.' );
-		}
-		if (
-			is_string( $expected_identity_sha256 ) && '' !== $expected_identity_sha256 &&
-			! hash_equals( strtolower( $expected_identity_sha256 ), OracleRenderer::identity_sha256( $metadata ) )
-		) {
-			throw new \RuntimeException( 'Oracle identity does not match HTML_API_CC_EXPECT_ORACLE_IDENTITY_SHA256.' );
+		$common_chrome_startup_timeout = getenv( 'HTML_API_CC_CHROME_STARTUP_TIMEOUT_MS' );
+		if ( is_string( $common_chrome_startup_timeout ) && '' !== $common_chrome_startup_timeout ) {
+			$oracle_options['chrome-startup-timeout-ms'] = (string) self::environment_int( 'HTML_API_CC_CHROME_STARTUP_TIMEOUT_MS', ChromeOracleRenderer::DEFAULT_STARTUP_TIMEOUT_MS, 1 );
 		}
 
-		$checks = self::environment_string( 'HTML_API_CC_CHECKS', 'sampled' );
-		if ( ! in_array( $checks, array( 'baseline', 'full', 'sampled' ), true ) ) {
-			throw new \InvalidArgumentException( 'HTML_API_CC_CHECKS must be baseline, full, or sampled.' );
-		}
-		$full_sample_percent = self::environment_int( 'HTML_API_CC_FULL_SAMPLE_PERCENT', 1, 0 );
-		if ( $full_sample_percent > 100 ) {
-			throw new \InvalidArgumentException( 'HTML_API_CC_FULL_SAMPLE_PERCENT must be at most 100.' );
-		}
-		$memory_limit = self::environment_string( 'HTML_API_CC_MEMORY_LIMIT', '256M' );
-		if ( ! preg_match( '/^[1-9][0-9]*[KMG]?$/i', $memory_limit ) ) {
-			throw new \InvalidArgumentException( 'HTML_API_CC_MEMORY_LIMIT must be a positive PHP memory limit such as 256M.' );
-		}
-		$worker_script = self::environment_string( 'HTML_API_CC_WORKER_SCRIPT', repo_root() . '/tools/html-api-fuzz/worker.php' );
-		if ( ! is_file( $worker_script ) ) {
-			throw new \RuntimeException( 'HTML_API_CC_WORKER_SCRIPT does not exist.' );
-		}
-		if ( ! function_exists( 'posix_kill' ) || ! function_exists( 'posix_setsid' ) || ! function_exists( 'pcntl_exec' ) ) {
-			throw new \RuntimeException( 'Common Crawl worker isolation requires the POSIX and PCNTL PHP extensions.' );
-		}
-
-		return new self(
-			$output_dir,
+		$oracle = OracleRenderer::from_options( $oracle_options );
+		return OracleRenderer::with_explicit_close(
 			$oracle,
-			array(
-				'maxTokens'    => self::environment_int( 'HTML_API_CC_MAX_TOKENS', self::DEFAULT_MAX_TOKENS, 1 ),
-				'maxNodes'     => self::environment_int( 'HTML_API_CC_MAX_NODES', self::DEFAULT_MAX_NODES, 1 ),
-				'maxDepth'     => self::environment_int( 'HTML_API_CC_MAX_DEPTH', self::DEFAULT_MAX_DEPTH, 1 ),
-				'maxTreeBytes' => self::environment_int( 'HTML_API_CC_MAX_TREE_BYTES', self::DEFAULT_MAX_TREE_BYTES, 1 ),
-			),
-			self::environment_int( 'HTML_API_CC_MAX_INPUT_BYTES', self::DEFAULT_MAX_INPUT_BYTES, 0 ),
-			self::environment_int( 'HTML_API_CC_MAX_KEEP_PER_SIGNATURE', self::DEFAULT_KEEP_PER_SIGNATURE, 1 ),
-			self::environment_int( 'HTML_API_CC_PROCESS_TIMEOUT_MS', self::DEFAULT_PROCESS_TIMEOUT_MS, 1 ),
-			self::environment_bool( 'HTML_API_CC_REQUIRE_UTF8', true ),
-			self::environment_bool( 'HTML_API_CC_RETAIN_ALL', false ),
-			$checks,
-			$full_sample_percent,
-			$memory_limit,
-			$worker_script,
-			$run_id
+			static function ( OracleRenderer $oracle ) use ( $oracle_kind, $output_dir, $run_id ): self {
+				$metadata = $oracle->metadata();
+				if ( true !== ( $metadata['available'] ?? false ) ) {
+					throw new \RuntimeException(
+						"Selected {$oracle_kind} oracle is unavailable: " . (string) ( $metadata['error'] ?? 'unknown identity error' )
+					);
+				}
+				$expected_commit = getenv( 'HTML_API_CC_EXPECT_LEXBOR_COMMIT' );
+				if (
+					is_string( $expected_commit ) && '' !== $expected_commit &&
+					(
+						OracleRenderer::KIND_LEXBOR_SOURCE !== $oracle_kind ||
+						$expected_commit !== ( $metadata['identity']['lexborCommit'] ?? null )
+					)
+				) {
+					throw new \RuntimeException( 'Lexbor oracle commit does not match HTML_API_CC_EXPECT_LEXBOR_COMMIT.' );
+				}
+				$expected_identity_sha256 = getenv( 'HTML_API_CC_EXPECT_ORACLE_IDENTITY_SHA256' );
+				if ( is_string( $expected_identity_sha256 ) && '' !== $expected_identity_sha256 && 1 !== preg_match( '/^[0-9a-fA-F]{64}$/', $expected_identity_sha256 ) ) {
+					throw new \InvalidArgumentException( 'HTML_API_CC_EXPECT_ORACLE_IDENTITY_SHA256 must be a SHA-256 hex digest.' );
+				}
+				if (
+					is_string( $expected_identity_sha256 ) && '' !== $expected_identity_sha256 &&
+					! hash_equals( strtolower( $expected_identity_sha256 ), OracleRenderer::identity_sha256( $metadata ) )
+				) {
+					throw new \RuntimeException( 'Oracle identity does not match HTML_API_CC_EXPECT_ORACLE_IDENTITY_SHA256.' );
+				}
+
+				$checks = self::environment_string( 'HTML_API_CC_CHECKS', 'sampled' );
+				if ( ! in_array( $checks, array( 'baseline', 'full', 'sampled' ), true ) ) {
+					throw new \InvalidArgumentException( 'HTML_API_CC_CHECKS must be baseline, full, or sampled.' );
+				}
+				$full_sample_percent = self::environment_int( 'HTML_API_CC_FULL_SAMPLE_PERCENT', 1, 0 );
+				if ( $full_sample_percent > 100 ) {
+					throw new \InvalidArgumentException( 'HTML_API_CC_FULL_SAMPLE_PERCENT must be at most 100.' );
+				}
+				$memory_limit = self::environment_string( 'HTML_API_CC_MEMORY_LIMIT', '256M' );
+				if ( ! preg_match( '/^[1-9][0-9]*[KMG]?$/i', $memory_limit ) ) {
+					throw new \InvalidArgumentException( 'HTML_API_CC_MEMORY_LIMIT must be a positive PHP memory limit such as 256M.' );
+				}
+				$worker_script = self::environment_string( 'HTML_API_CC_WORKER_SCRIPT', repo_root() . '/tools/html-api-fuzz/worker.php' );
+				if ( ! is_file( $worker_script ) ) {
+					throw new \RuntimeException( 'HTML_API_CC_WORKER_SCRIPT does not exist.' );
+				}
+				if ( ! function_exists( 'posix_kill' ) || ! function_exists( 'posix_setsid' ) || ! function_exists( 'pcntl_exec' ) ) {
+					throw new \RuntimeException( 'Common Crawl worker isolation requires the POSIX and PCNTL PHP extensions.' );
+				}
+
+				$process_timeout_environment = getenv( 'HTML_API_CC_PROCESS_TIMEOUT_MS' );
+				$process_timeout_ms = is_string( $process_timeout_environment ) && '' !== $process_timeout_environment
+					? self::environment_int( 'HTML_API_CC_PROCESS_TIMEOUT_MS', self::DEFAULT_PROCESS_TIMEOUT_MS, 1 )
+					: $oracle->recommended_process_timeout_ms( $checks, self::DEFAULT_PROCESS_TIMEOUT_MS );
+
+				return new self(
+					$output_dir,
+					$oracle,
+					array(
+						'maxTokens'    => self::environment_int( 'HTML_API_CC_MAX_TOKENS', self::DEFAULT_MAX_TOKENS, 1 ),
+						'maxNodes'     => self::environment_int( 'HTML_API_CC_MAX_NODES', self::DEFAULT_MAX_NODES, 1 ),
+						'maxDepth'     => self::environment_int( 'HTML_API_CC_MAX_DEPTH', self::DEFAULT_MAX_DEPTH, 1 ),
+						'maxTreeBytes' => self::environment_int( 'HTML_API_CC_MAX_TREE_BYTES', self::DEFAULT_MAX_TREE_BYTES, 1 ),
+					),
+					self::environment_int( 'HTML_API_CC_MAX_INPUT_BYTES', self::DEFAULT_MAX_INPUT_BYTES, 0 ),
+					self::environment_int( 'HTML_API_CC_MAX_KEEP_PER_SIGNATURE', self::DEFAULT_KEEP_PER_SIGNATURE, 1 ),
+					$process_timeout_ms,
+					self::environment_bool( 'HTML_API_CC_REQUIRE_UTF8', true ),
+					self::environment_bool( 'HTML_API_CC_RETAIN_ALL', false ),
+					$checks,
+					$full_sample_percent,
+					$memory_limit,
+					$worker_script,
+					$run_id
+				);
+			}
 		);
 	}
 
@@ -256,6 +270,7 @@ class CommonCrawlRunner {
 			'--max-depth', (string) $this->limits['maxDepth'],
 			'--max-tree-bytes', (string) $this->limits['maxTreeBytes'],
 			'--checks', $checks,
+			'--process-timeout-ms', (string) $this->process_timeout_ms,
 			'--git-metadata-base64', git_metadata_base64( $this->git_metadata ),
 		);
 		return array_merge( $args, $this->oracle->worker_args() );

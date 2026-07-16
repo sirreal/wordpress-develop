@@ -157,6 +157,22 @@ function html_api_fuzz_smoke_rm_tree( string $path ): void {
 	@rmdir( $path );
 }
 
+html_api_fuzz_smoke_assert( in_array( \HtmlApiFuzz\OracleRenderer::KIND_CHROME_CDP, \HtmlApiFuzz\OracleRenderer::kinds(), true ), 'Chrome CDP should be a generic oracle kind.' );
+putenv( 'HTML_API_FUZZ_CHROME_STARTUP_TIMEOUT_MS=1234' );
+$chrome_policy = \HtmlApiFuzz\OracleRenderer::from_options( array( 'dom-oracle' => \HtmlApiFuzz\OracleRenderer::KIND_CHROME_CDP ) );
+html_api_fuzz_smoke_assert( 1234 === ( $chrome_policy->replay_options()['chromeStartupTimeoutMs'] ?? null ), 'Chrome startup timeout environment policy should be recorded.' );
+html_api_fuzz_smoke_assert( 26234 === $chrome_policy->recommended_process_timeout_ms( 'full', 2500 ), 'Chrome process policy should budget startup, four renders, cleanup, and headroom.' );
+$chrome_policy->close();
+$chrome_cli_policy = \HtmlApiFuzz\OracleRenderer::from_options( array( 'dom-oracle' => \HtmlApiFuzz\OracleRenderer::KIND_CHROME_CDP, 'chrome-startup-timeout-ms' => '2345' ) );
+html_api_fuzz_smoke_assert( 2345 === ( $chrome_cli_policy->replay_options()['chromeStartupTimeoutMs'] ?? null ), 'Chrome startup CLI policy should override its environment.' );
+$chrome_cli_policy->close();
+putenv( 'HTML_API_FUZZ_CHROME_STARTUP_TIMEOUT_MS=not-an-integer' );
+html_api_fuzz_smoke_expect_invalid_argument(
+	static fn () => \HtmlApiFuzz\OracleRenderer::from_options( array( 'dom-oracle' => \HtmlApiFuzz\OracleRenderer::KIND_CHROME_CDP ) ),
+	'Invalid Chrome startup timeout environment policy should fail closed.'
+);
+putenv( 'HTML_API_FUZZ_CHROME_STARTUP_TIMEOUT_MS' );
+
 $lexbor_identity = array(
 	'schemaVersion' => 1,
 	'kind'          => \HtmlApiFuzz\OracleRenderer::KIND_LEXBOR_SOURCE,

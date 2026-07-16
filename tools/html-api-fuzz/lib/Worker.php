@@ -86,34 +86,80 @@ class Worker {
 			throw new \InvalidArgumentException( 'Expected --checks to be baseline or full.' );
 		}
 		$fail_unsupported = option_bool( $options, 'fail-unsupported', false );
-		$oracle_renderer  = OracleRenderer::from_options( $options );
-		$oracle_metadata  = $oracle_renderer->metadata();
-
+		$process_timeout_ms = option_int( $options, 'process-timeout-ms', 0 );
+		if ( array_key_exists( 'process-timeout-ms', $options ) && $process_timeout_ms < 1 ) {
+			throw new \InvalidArgumentException( 'Expected --process-timeout-ms to be positive.' );
+		}
+		$oracle_renderer = OracleRenderer::from_options( $options );
+		$oracle_metadata = null;
+		$replay          = null;
+		$result          = null;
+		$operation_error = null;
 		$replay_path = $output_dir . DIRECTORY_SEPARATOR . 'replay.json';
 		$result_path = $output_dir . DIRECTORY_SEPARATOR . 'result.json';
 		$input_path  = $output_dir . DIRECTORY_SEPARATOR . 'input.bin';
-		$source_input_path = option_string( $options, 'input-file', null );
-		if ( null === $source_input_path || ! self::same_file( $source_input_path, $input_path ) ) {
-			write_file_atomic( $input_path, $input );
+		try {
+			$oracle_metadata = $oracle_renderer->metadata();
+			$source_input_path = option_string( $options, 'input-file', null );
+			if ( null === $source_input_path || ! self::same_file( $source_input_path, $input_path ) ) {
+				write_file_atomic( $input_path, $input );
+			}
+
+			$replay = self::base_replay( $seed, $profile, $mode, $payload_policy, $fragment_context, $generator_parameters, $input_source, $input, $output_dir, $limits, $fail_unsupported, $git_metadata, $oracle_metadata, $oracle_renderer->replay_options(), $checks );
+			if ( $process_timeout_ms > 0 ) {
+				$replay['options']['processTimeoutMs'] = $process_timeout_ms;
+			}
+			write_json_file_atomic( $replay_path, $replay );
+
+			$result = self::evaluate_input(
+				$input,
+				$seed,
+				$profile,
+				$mode,
+				$payload_policy,
+				$fragment_context,
+				$generator_parameters,
+				$input_source,
+				$limits,
+				$fail_unsupported,
+				$oracle_renderer,
+				$checks
+			);
+			if ( ! is_array( $result ) || ! is_array( $replay ) || ! is_array( $oracle_metadata ) ) {
+				throw new \LogicException( 'Worker evaluation did not produce a result.' );
+			}
+		} catch ( \Throwable $error ) {
+			$operation_error = $error;
 		}
-
-		$replay = self::base_replay( $seed, $profile, $mode, $payload_policy, $fragment_context, $generator_parameters, $input_source, $input, $output_dir, $limits, $fail_unsupported, $git_metadata, $oracle_metadata, $oracle_renderer->replay_options(), $checks );
-		write_json_file_atomic( $replay_path, $replay );
-
-		$result = self::evaluate_input(
-			$input,
-			$seed,
-			$profile,
-			$mode,
-			$payload_policy,
-			$fragment_context,
-			$generator_parameters,
-			$input_source,
-			$limits,
-			$fail_unsupported,
-			$oracle_renderer,
-			$checks
-		);
+		$cleanup_error = null;
+		try {
+			$oracle_renderer->close();
+		} catch ( \Throwable $error ) {
+			$cleanup_error = $error;
+		}
+		if ( null !== $operation_error ) {
+			$message = $operation_error->getMessage();
+			if ( null !== $cleanup_error ) {
+				$message .= '; oracle cleanup failed: ' . $cleanup_error->getMessage();
+			}
+			throw new \RuntimeException( $message, 0, $operation_error );
+		}
+		if ( null !== $cleanup_error ) {
+			$result['ok']                   = false;
+			$result['status']               = 'failed';
+			$result['failureClass']         = 'oracle-renderer-error';
+			$result['failureSnippet']       = 'Oracle cleanup failed: ' . $cleanup_error->getMessage();
+			$result['oracleInfrastructure'] = true;
+			$result['oracleCleanup']        = array(
+				'ok'    => false,
+				'error' => $cleanup_error->getMessage(),
+			);
+			unset( $result['signature'], $result['oracleFinding'] );
+			$cleanup_signature = Signature::from_result( $result );
+			if ( null !== $cleanup_signature ) {
+				$result['signature'] = $cleanup_signature;
+			}
+		}
 		$result['paths'] = array(
 			'outputDir'  => $output_dir,
 			'inputPath'  => $input_path,
@@ -210,6 +256,7 @@ class Worker {
 					'error'        => $e->getMessage(),
 					'throwable'    => get_class( $e ),
 					'failureClass' => 'oracle-renderer-error',
+					'infrastructure' => true,
 					'oracle'       => $oracle_metadata,
 				);
 			}
@@ -759,7 +806,7 @@ class Worker {
 	}
 
 	private static function is_resource_limit_failure( ?string $failure_class ): bool {
-		return in_array( $failure_class, array( 'token-limit-exceeded', 'node-limit-exceeded', 'depth-limit-exceeded', 'tree-byte-limit-exceeded', 'resource-limit' ), true );
+		return in_array( $failure_class, array( 'input-byte-limit-exceeded', 'token-limit-exceeded', 'node-limit-exceeded', 'depth-limit-exceeded', 'tree-byte-limit-exceeded', 'resource-limit' ), true );
 	}
 
 	private static function stage_elapsed_ms( int $started_at ): float {

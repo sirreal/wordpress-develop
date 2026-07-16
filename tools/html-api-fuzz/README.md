@@ -6,7 +6,9 @@ using an html5lib-style textual tree, and separately checks a set of API
 invariants described under “Invariants” below. The default oracle is PHP's
 `Dom\HTMLDocument`, preserving the historical behavior.
 
-No browser, Playwright, Node, or `wp-env` is involved.
+The PHP DOM and source-built adapters need no browser. The optional
+`chrome-cdp` adapter uses a pinned Chrome-for-Testing build through a direct,
+dependency-free Node/CDP client; it does not use Playwright or `wp-env`.
 
 ## Requirements
 
@@ -18,15 +20,18 @@ No browser, Playwright, Node, or `wp-env` is involved.
 - Optional source-built html5ever oracle: the pinned Rust toolchain installed by
   `tools/html-api-fuzz/oracles/html5ever/install-rust.sh`, or matching Rust and
   Cargo 1.88.0 executables.
+- Optional Chrome oracle: Node.js plus the exact Chrome-for-Testing archive
+  installed and verified by `tools/html-api-fuzz/oracles/chrome/install.sh`.
 
 ## Common Crawl with cc-analyzer
 
 `commoncrawl-analysis.php` is an analysis callback for `cc-analyzer.phar`. It
 accepts the analyzer's `CcAnalyzer\Analysis\HtmlAnalysisInput` value object,
 runs the raw response body through `WP_HTML_Processor` in full-document mode,
-compares the resulting tree with the selected source oracle, and records the
-Common Crawl provenance needed to locate or replay the document. Lexbor is the
-default; `html5ever-source` is an equally supported independent adapter.
+compares the resulting tree with the selected oracle, and records the Common
+Crawl provenance needed to locate or replay the document. Lexbor is the
+default; `html5ever-source` and `chrome-cdp` are equally supported independent
+adapters.
 
 Build the oracle from the current upstream `master` first:
 
@@ -39,6 +44,12 @@ Or build the fully pinned html5ever oracle:
 ```sh
 tools/html-api-fuzz/oracles/html5ever/install-rust.sh
 tools/html-api-fuzz/oracles/html5ever/build.sh
+```
+
+Or install the pinned Chrome-for-Testing oracle:
+
+```sh
+tools/html-api-fuzz/oracles/chrome/install.sh
 ```
 
 The build resolves the moving ref, uses commit-keyed build/install directories,
@@ -85,34 +96,57 @@ identity or cleanup state is an infrastructure failure and retains evidence
 instead of signaling an unverified PID. Source stdout is capped at exactly
 64 MiB and stderr at 1 MiB; either overflow is an infrastructure failure.
 
+The Chrome adapter instead keeps one authenticated `node ... --serve` process
+for the lifetime of one renderer, so a Worker's baseline and mutation renders
+reuse the same exact browser. It verifies the checked-in version/checksum
+manifests, Chrome executable, oracle script, fragment-context file, actual Node
+executable, live Chrome version, and CDP protocol version before accepting any
+tree. Request JSON is strict, duplicate keys and trailing frames are rejected,
+input is canonical base64, response frames are capped at 24 MiB, stderr at
+1 MiB, and decoded trees at 16 MiB. Accepted input is capped at exactly 2 MiB;
+2 MiB plus one byte becomes `input-byte-limit-exceeded` without sending a
+render frame. Shutdown drains and reaps the exact service and verifies that its
+private runtime/profile root disappeared. A transport failure never retries
+the current input in PHP; the Node client may perform its one authenticated
+recovery only when it observes a dead CDP session.
+
 The Common Crawl adapter uses Lexbor by default. Its environment is:
 
 - `CC_ANALYZER_OUTPUT_DIR`: shared output directory for this analyzer run. If
   absent, a unique directory is created under `artifacts/html-api-commoncrawl`.
 - `HTML_API_CC_RUN_ID`: explicit immutable run identifier. When the analyzer
   provides an output directory, the default is a stable hash of that path.
-- `HTML_API_CC_ORACLE`: `lexbor-source` (default), `html5ever-source`, or the
-  `php-dom` testing/debug escape hatch.
+- `HTML_API_CC_ORACLE`: `lexbor-source` (default), `html5ever-source`,
+  `chrome-cdp`, or the `php-dom` testing/debug escape hatch.
 - `HTML_API_FUZZ_LEXBOR_ORACLE`: non-default Lexbor oracle binary path.
 - `HTML_API_FUZZ_HTML5EVER_ORACLE`: non-default html5ever oracle binary path.
+- `HTML_API_FUZZ_CHROME_ORACLE`: non-default Chrome oracle script path.
+- `HTML_API_FUZZ_CHROME_EXECUTABLE`: non-default pinned Chrome executable.
+- `HTML_API_FUZZ_NODE_BIN`: Node command or executable path.
+- `HTML_API_FUZZ_CHROME_STARTUP_TIMEOUT_MS`: browser startup deadline; default
+  `35000`. `HTML_API_CC_CHROME_STARTUP_TIMEOUT_MS` is the Common Crawl-specific
+  override.
 - `HTML_API_CC_EXPECT_LEXBOR_COMMIT`: optional exact commit assertion; startup
   fails if the selected Lexbor executable reports another commit. Setting this
   while another oracle is selected also fails.
 - `HTML_API_CC_EXPECT_ORACLE_IDENTITY_SHA256`: optional SHA-256 of the complete
   normalized selected-oracle metadata envelope. This generic pin works for
-  PHP DOM, Lexbor, and html5ever.
-- `HTML_API_CC_ORACLE_TIMEOUT_MS`: source-oracle subprocess timeout; default
-  `10000`.
-- `HTML_API_CC_PROCESS_TIMEOUT_MS`: whole-document worker timeout; default
-  `30000`.
+  PHP DOM, Lexbor, html5ever, and Chrome.
+- `HTML_API_CC_ORACLE_TIMEOUT_MS`: per-render oracle timeout; default `10000`.
+- `HTML_API_CC_PROCESS_TIMEOUT_MS`: explicit whole-document worker timeout.
+  Without it, non-Chrome oracles use `30000`; Chrome budgets startup plus four
+  render calls plus 10 seconds of cleanup and 5 seconds of PHP headroom. With
+  the defaults here that is `90000` ms. An explicit shorter value remains an
+  exact diagnostic override and is recorded in every replay.
 - `HTML_API_CC_MEMORY_LIMIT`: PHP memory limit for each worker; default `256M`.
 - `HTML_API_CC_MAX_INPUT_BYTES`: largest response body to analyze; default
-  `2097152`, or `0` for unlimited.
+  `2097152`, or `0` for unlimited with non-Chrome oracles. Chrome retains its
+  authenticated transport ceiling of 2 MiB.
 - `HTML_API_CC_MAX_TOKENS`, `HTML_API_CC_MAX_NODES`,
   `HTML_API_CC_MAX_DEPTH`, and `HTML_API_CC_MAX_TREE_BYTES`: bounded work and
   tree-output ceilings; defaults are `50000`, `50000`, `512`, and `16777216`.
 - `HTML_API_CC_CHECKS`: `baseline`, `full`, or `sampled` (default). Baseline
-  performs the WordPress/Lexbor differential; full also runs API invariants,
+  performs the WordPress/selected-oracle differential; full also runs API invariants,
   mutation differential, and normalize preservation.
 - `HTML_API_CC_FULL_SAMPLE_PERCENT`: deterministic full-check share when using
   `sampled`; default `1`.
@@ -166,6 +200,9 @@ build identity, and executable SHA-256. Use `--allow-oracle-mismatch` only for a
 deliberate diagnostic comparison; outputs retain `sourceOracle`,
 `actualOracle`, and the exact mismatch reasons. A second identity change while
 a Worker is running is recorded separately and invalidates any stale signature.
+Chrome replay additionally restores and validates the exact script, Chrome and
+Node paths, render deadline, startup deadline, and complete durable identity;
+runtime PIDs, profiles, and debugging endpoints are deliberately excluded.
 
 Transport charset, content type, target URI, WARC record ID, analyzer state
 key, and source range are metadata only. The comparison intentionally feeds
@@ -223,6 +260,21 @@ Use `--html5ever-oracle-bin PATH` or
 `HTML_API_FUZZ_HTML5EVER_ORACLE` for a non-default build location. Source
 adapters add process-supervision overhead, so give `runner.php` a whole-worker
 `--timeout-ms` budget large enough to cover the configured oracle deadline.
+
+Install and run against the pinned direct-CDP Chrome oracle:
+
+```sh
+tools/html-api-fuzz/oracles/chrome/install.sh
+php tools/html-api-fuzz/worker.php --seed 1 --dom-oracle chrome-cdp --output-dir artifacts/html-api-fuzz/seed-1-chrome
+php tools/html-api-fuzz/runner.php --max-seeds 100 --dom-oracle chrome-cdp
+```
+
+Use `--chrome-oracle-script`, `--chrome-executable`, `--node-bin`, and
+`--chrome-startup-timeout-ms` (or their `HTML_API_FUZZ_*` environment
+equivalents) for explicit locations/deadlines. When `--timeout-ms` is omitted,
+runner, launcher, replay, and minimization use the shared Chrome budget formula:
+`startup + (1 baseline or 4 full/sampled renders) × oracle timeout + 15000`.
+The ordinary defaults are 52.5 seconds for baseline and 60 seconds for full.
 
 Run indefinitely:
 
@@ -307,7 +359,8 @@ in the watcher/minimizer triage path. This bucket includes tag/tree token
 ceilings (`tag-token-limit-exceeded`, `mutation-token-limit-exceeded`,
 `wordpress-token-limit-exceeded`) and oracle node ceilings
 (`node-limit-exceeded`, recorded as `dom-node-limit-exceeded` in historical
-signature facts). Process timeouts, PHP fatal errors, and memory failures are
+signature facts), plus the Chrome adapter's exact 2 MiB input ceiling. Process
+timeouts, PHP fatal errors, and memory failures are
 separate failures and are also in scope for triage.
 
 ## Execution Model
@@ -349,11 +402,13 @@ The runner writes:
   replay JSON documents; the replay embeds the input as base64, so a pruned
   failure can be reproduced with `replay.php --store results.sqlite --seed N`.
   `signature_hash` and `family_key` are indexed columns for grouping
-  failures without `json_extract`. `oracle_kind`, `oracle_version`,
-  `oracle_commit`, and `oracle_binary` record which oracle generated the
-  summary, including for passing rows whose JSON payloads are pruned.
-  `oracle_commit` is the Lexbor commit or html5ever build identity, while
-  `oracle_binary` is the executable SHA-256 rather than a host path. The
+  failures without `json_extract`. `oracle_kind`, `oracle_identity_sha256`,
+  `oracle_version`, `oracle_commit`, and `oracle_binary` record which oracle
+  generated the summary, including for passing rows whose JSON payloads are
+  pruned. `oracle_identity_sha256` groups the complete normalized durable
+  identity. `oracle_commit` is the Lexbor commit, html5ever build identity, or
+  Chrome script SHA-256, while `oracle_binary` is the source binary or Chrome
+  executable SHA-256 rather than a host path. The
   watcher tails these stores
   incrementally by row id. (`summary.ndjson` files from older runs are still
   scanned.) Durability is `synchronous=NORMAL`: an OS crash (not a process

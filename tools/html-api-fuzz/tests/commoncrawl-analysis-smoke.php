@@ -208,6 +208,15 @@ namespace {
 	$invalid_memory = $timeout_replay;
 	$invalid_memory['options']['memoryLimit'] = null;
 	$malformed_policy_cases['invalid-memory'] = $invalid_memory;
+	$fractional_chrome_startup = $timeout_replay;
+	$fractional_chrome_startup['options']['chromeStartupTimeoutMs'] = 1.5;
+	$malformed_policy_cases['fractional-chrome-startup'] = $fractional_chrome_startup;
+	$fractional_oracle_timeout = $timeout_replay;
+	$fractional_oracle_timeout['options']['oracleTimeoutMs'] = 1.5;
+	$malformed_policy_cases['fractional-oracle-timeout'] = $fractional_oracle_timeout;
+	$empty_chrome_script = $timeout_replay;
+	$empty_chrome_script['options']['chromeOracleScript'] = '';
+	$malformed_policy_cases['empty-chrome-script'] = $empty_chrome_script;
 	foreach ( $malformed_policy_cases as $case_name => $malformed_policy_replay ) {
 		$malformed_policy_path = $timeout_dir . '/malformed-policy-' . $case_name . '.json';
 		$malformed_policy_output = $timeout_dir . '/malformed-policy-' . $case_name;

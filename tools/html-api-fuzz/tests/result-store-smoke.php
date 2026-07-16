@@ -87,6 +87,28 @@ $html5ever_oracle = array(
 	),
 	'error'         => null,
 );
+$chrome_oracle = array(
+	'schemaVersion' => 1,
+	'kind'          => 'chrome-cdp',
+	'available'     => true,
+	'identity'      => array(
+		'schemaVersion'                  => 1,
+		'kind'                           => 'chrome-cdp',
+		'platform'                       => 'mac-arm64',
+		'pinnedChromeVersion'            => '150.0.7871.114',
+		'chromeArchiveSha256'            => str_repeat( '5', 64 ),
+		'expectedChromeExecutableSha256' => str_repeat( '6', 64 ),
+		'chromeExecutableSha256'         => str_repeat( '6', 64 ),
+		'oracleScriptSha256'             => str_repeat( '7', 64 ),
+		'fragmentContextsSha256'         => str_repeat( '8', 64 ),
+		'fragmentContexts'               => \HtmlApiFuzz\Generator::fragment_contexts(),
+		'nodeExecutableSha256'           => str_repeat( '9', 64 ),
+		'nodeVersion'                    => 'v22.23.0',
+		'chromeVersion'                  => '150.0.7871.114',
+		'cdpProtocolVersion'             => '1.3',
+	),
+	'error'         => null,
+);
 
 $pass_summary = array(
 	'kind'              => 'attempt',
@@ -229,14 +251,19 @@ $oracle_replay = array(
 	'oracleFinding' => $oracle_summary['oracleFinding'],
 );
 $oracle_id = $store->record_attempt( $oracle_summary, $oracle_result, $oracle_replay );
+$chrome_summary = $pass_summary;
+$chrome_summary['seed'] = 16;
+$chrome_summary['inputSha1'] = sha1( 'chrome-pass' );
+$chrome_summary['oracle'] = $chrome_oracle;
+$chrome_id = $store->record_attempt( $chrome_summary );
 
-html_api_fuzz_smoke_assert( 6 === $store->count_attempts(), 'Expected six recorded attempts.' );
+html_api_fuzz_smoke_assert( 7 === $store->count_attempts(), 'Expected seven recorded attempts.' );
 html_api_fuzz_smoke_assert( array( 12 ) === $store->retained_seeds( 'abc123def456' ), 'Expected seed 12 as the retained exemplar for the signature.' );
 html_api_fuzz_smoke_assert( array() === $store->retained_seeds( 'unseen' ), 'Expected no retained exemplars for an unseen signature.' );
 html_api_fuzz_smoke_assert( array( 14 ) === $store->oracle_retained_seeds( 'oracle-abc123' ), 'Expected seed 14 as the retained exemplar for the oracle signature.' );
 html_api_fuzz_smoke_assert( $store->seed_artifacts_retained( 12 ), 'Expected seed 12 to be marked as retained.' );
 html_api_fuzz_smoke_assert( ! $store->seed_artifacts_retained( 13 ), 'Expected seed 13 not to be marked as retained.' );
-html_api_fuzz_smoke_assert( 6 === $store->max_id(), 'Expected max id of six.' );
+html_api_fuzz_smoke_assert( 7 === $store->max_id(), 'Expected max id of seven.' );
 
 $stored_replay = $store->replay_for_seed( 13 );
 html_api_fuzz_smoke_assert( is_array( $stored_replay ) && base64_encode( '<b>new replay</b>' ) === ( $stored_replay['inputBase64'] ?? null ), 'Expected seed replay lookup to return the most recent replay for compatibility.' );
@@ -264,7 +291,7 @@ $store->close();
 
 // Reopen read-only as the watcher does and confirm persistence.
 $reader = new \HtmlApiFuzz\ResultStore( $db_path, true );
-html_api_fuzz_smoke_assert( 6 === $reader->count_attempts(), 'Expected attempts to persist across reopen.' );
+html_api_fuzz_smoke_assert( 7 === $reader->count_attempts(), 'Expected attempts to persist across reopen.' );
 html_api_fuzz_smoke_assert( 3 === count( $reader->failures_after( 0, $reader->max_id() ) ), 'Expected failures to persist across reopen.' );
 html_api_fuzz_smoke_assert( 1 === count( $reader->oracle_findings_after( 0, $reader->max_id() ) ), 'Expected oracle findings to persist across reopen.' );
 $reader->close();
@@ -280,6 +307,8 @@ html_api_fuzz_smoke_assert( 1 === (int) $raw->querySingle( "SELECT COUNT(*) FROM
 html_api_fuzz_smoke_assert( 3 === (int) $raw->querySingle( "SELECT COUNT(*) FROM attempts WHERE oracle_kind = 'lexbor-source' AND oracle_version = '2.10.0' AND oracle_commit = '481c444261a132190a3fb746d6d2f60824af3717'" ), 'Expected Lexbor oracle metadata to be queryable for failure rows.' );
 html_api_fuzz_smoke_assert( 3 === (int) $raw->querySingle( "SELECT COUNT(*) FROM attempts WHERE oracle_binary = '" . str_repeat( 'b', 64 ) . "'" ), 'Expected the Lexbor oracle binary hash to be stored in a scalar column.' );
 html_api_fuzz_smoke_assert( 1 === (int) $raw->querySingle( "SELECT COUNT(*) FROM attempts WHERE seed = 15 AND oracle_kind = 'html5ever-source' AND oracle_version = '0.35.0' AND oracle_commit = '" . str_repeat( '1', 64 ) . "' AND oracle_binary = '" . str_repeat( 'c', 64 ) . "'" ), 'Expected html5ever identity columns to use version, build identity, and binary hash.' );
+$chrome_identity_sha256 = \HtmlApiFuzz\OracleRenderer::identity_sha256( $chrome_oracle );
+html_api_fuzz_smoke_assert( 1 === (int) $raw->querySingle( "SELECT COUNT(*) FROM attempts WHERE seed = 16 AND oracle_kind = 'chrome-cdp' AND oracle_identity_sha256 = '" . $chrome_identity_sha256 . "' AND oracle_version = '150.0.7871.114' AND oracle_commit = '" . str_repeat( '7', 64 ) . "' AND oracle_binary = '" . str_repeat( '6', 64 ) . "'" ), 'Expected Chrome attempts to retain an exact durable identity grouping and scalar identity fields.' );
 $raw->close();
 
 $future_db_path = $work_dir . '/future.sqlite';

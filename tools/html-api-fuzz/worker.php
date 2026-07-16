@@ -20,20 +20,49 @@ function html_api_fuzz_worker_fatal_result( array $options, Throwable $e, ?strin
 		'payloadPolicy'  => \HtmlApiFuzz\option_string( $options, 'payload-policy', null ),
 		'inputSource'    => \HtmlApiFuzz\option_string( $options, 'input-file', null ) ? 'input-file' : ( \HtmlApiFuzz\option_string( $options, 'input-base64', null ) ? 'input-base64' : 'generated' ),
 	);
+	$oracle_renderer = null;
+	$oracle_metadata = null;
+	$oracle_error = null;
 	try {
-		$fallback['oracle'] = \HtmlApiFuzz\OracleRenderer::from_options( $options )->metadata();
-	} catch ( Throwable $oracle_error ) {
+		$oracle_renderer = \HtmlApiFuzz\OracleRenderer::from_options( $options );
+		$oracle_metadata = $oracle_renderer->metadata();
+	} catch ( Throwable $error ) {
+		$oracle_error = $error;
+	}
+	$oracle_cleanup_error = null;
+	if ( $oracle_renderer instanceof \HtmlApiFuzz\OracleRenderer ) {
+		try {
+			$oracle_renderer->close();
+		} catch ( Throwable $error ) {
+			$oracle_cleanup_error = $error;
+		}
+	}
+	if ( is_array( $oracle_metadata ) ) {
+		$fallback['oracle'] = $oracle_metadata;
+	} else {
 		$oracle_kind = \HtmlApiFuzz\option_string( $options, 'dom-oracle', \HtmlApiFuzz\OracleRenderer::KIND_PHP_DOM );
 		if ( ! in_array( $oracle_kind, \HtmlApiFuzz\OracleRenderer::kinds(), true ) ) {
 			$oracle_kind = \HtmlApiFuzz\OracleRenderer::KIND_PHP_DOM;
+		}
+		$oracle_message = null !== $oracle_error ? $oracle_error->getMessage() : 'Oracle metadata was not produced.';
+		if ( null !== $oracle_cleanup_error ) {
+			$oracle_message .= '; oracle cleanup failed: ' . $oracle_cleanup_error->getMessage();
 		}
 		$fallback['oracle'] = array(
 			'schemaVersion' => 1,
 			'kind'          => $oracle_kind,
 			'available'     => false,
 			'identity'      => null,
-			'error'         => $oracle_error->getMessage(),
+			'error'         => $oracle_message,
 		);
+	}
+	if ( null !== $oracle_cleanup_error ) {
+		$fallback['oracleInfrastructure'] = true;
+		$fallback['oracleCleanup'] = array(
+			'ok'    => false,
+			'error' => $oracle_cleanup_error->getMessage(),
+		);
+		$fallback['failureSnippet'] .= '; fallback oracle cleanup failed: ' . $oracle_cleanup_error->getMessage();
 	}
 
 	if ( null !== $output_dir ) {

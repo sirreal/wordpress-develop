@@ -46,6 +46,7 @@ function html_api_fuzz_min_worker_options( string $candidate, array $base, strin
 		'output-dir'   => $output_dir,
 		'max-tokens'   => (string) $base['maxTokens'],
 		'max-nodes'    => (string) $base['maxNodes'],
+		'process-timeout-ms' => (string) $base['processTimeoutMs'],
 	);
 	if ( null !== $base['gitMetadataBase64'] ) {
 		$options['git-metadata-base64'] = $base['gitMetadataBase64'];
@@ -120,6 +121,8 @@ function html_api_fuzz_min_process_test( string $candidate, array $base, string 
 		(string) $base['maxTokens'],
 		'--max-nodes',
 		(string) $base['maxNodes'],
+		'--process-timeout-ms',
+		(string) $base['processTimeoutMs'],
 	);
 	if ( null !== $base['gitMetadataBase64'] ) {
 		$args[] = '--git-metadata-base64';
@@ -268,11 +271,127 @@ function html_api_fuzz_min_probe_mode( array $options ): string {
 	return 'process';
 }
 
+function html_api_fuzz_min_reduce( string $input, array $base, string $output_dir, int $max_attempts, int $timeout_ms, bool $any_failure ): array {
+	$attempt_count = 0;
+	$probe_stats   = array(
+		'durationMs'    => 0,
+		'maxDurationMs' => 0,
+		'accepted'      => 0,
+	);
+	$current = $input;
+
+	/*
+	 * Phase 1: markup-aligned segment deletion. Splitting on tag boundaries is
+	 * token-naive (rawtext contents split incorrectly), but unsound candidates
+	 * simply fail the signature check; aligned deletions converge far faster on
+	 * HTML than blind byte chunks.
+	 */
+	$progress = true;
+	while ( $progress && $attempt_count < $max_attempts ) {
+		$progress = false;
+		preg_match_all( '/<[^>]*>?|[^<]+/s', $current, $matches );
+		$segments = $matches[0];
+		if ( count( $segments ) < 2 ) {
+			break;
+		}
+		for ( $i = count( $segments ) - 1; $i >= 0 && $attempt_count < $max_attempts; $i-- ) {
+			$candidate_segments = $segments;
+			unset( $candidate_segments[ $i ] );
+			$candidate = implode( '', $candidate_segments );
+			if ( $candidate === $current || '' === $candidate ) {
+				continue;
+			}
+			++$attempt_count;
+			$test = html_api_fuzz_min_test( $candidate, $base, $output_dir, $attempt_count, $timeout_ms, $any_failure );
+			html_api_fuzz_min_record_probe( $probe_stats, $test );
+			if ( $test['accepted'] ) {
+				$current  = $candidate;
+				$progress = true;
+				break;
+			}
+		}
+	}
+
+	// Phase 2: byte-chunk deletion for reductions that cross tag boundaries.
+	$chunks = 2;
+	while ( strlen( $current ) > 0 && $attempt_count < $max_attempts ) {
+		$length     = strlen( $current );
+		$chunk_size = (int) ceil( $length / $chunks );
+		$changed    = false;
+
+		for ( $offset = 0; $offset < $length && $attempt_count < $max_attempts; $offset += $chunk_size ) {
+			$candidate = substr( $current, 0, $offset ) . substr( $current, min( $length, $offset + $chunk_size ) );
+			if ( $candidate === $current ) {
+				continue;
+			}
+			++$attempt_count;
+			$test = html_api_fuzz_min_test( $candidate, $base, $output_dir, $attempt_count, $timeout_ms, $any_failure );
+			html_api_fuzz_min_record_probe( $probe_stats, $test );
+			if ( $test['accepted'] ) {
+				$current = $candidate;
+				$chunks  = max( 2, $chunks - 1 );
+				$changed = true;
+				break;
+			}
+		}
+
+		if ( ! $changed ) {
+			if ( $chunks >= $length ) {
+				break;
+			}
+			$chunks = min( $length, $chunks * 2 );
+		}
+	}
+
+	/*
+	 * Phase 3: per-byte canonicalization. Deletion is tried first; replacements
+	 * never grow the input. After a deletion the same index holds the next byte,
+	 * so stay in place; after a substitution move on.
+	 */
+	$simple_replacements = array( '', 'a', ' ', "\n" );
+	for ( $i = 0; $i < strlen( $current ) && $attempt_count < $max_attempts; ++$i ) {
+		foreach ( $simple_replacements as $replacement ) {
+			$candidate = substr( $current, 0, $i ) . $replacement . substr( $current, $i + 1 );
+			if ( $candidate === $current ) {
+				continue;
+			}
+			++$attempt_count;
+			$test = html_api_fuzz_min_test( $candidate, $base, $output_dir, $attempt_count, $timeout_ms, $any_failure );
+			html_api_fuzz_min_record_probe( $probe_stats, $test );
+			if ( $test['accepted'] ) {
+				$current = $candidate;
+				if ( '' === $replacement ) {
+					--$i;
+				}
+				break;
+			}
+		}
+	}
+
+	return array(
+		'current'      => $current,
+		'attemptCount' => $attempt_count,
+		'probeStats'   => $probe_stats,
+	);
+}
+
 $options = \HtmlApiFuzz\parse_cli_options( $argv );
 $replay_path = \HtmlApiFuzz\option_string( $options, 'replay', $options['_'][0] ?? null );
 if ( null === $replay_path || \HtmlApiFuzz\option_bool( $options, 'help', false ) ) {
-	echo "Usage: php tools/html-api-fuzz/minimize.php --replay path/to/replay.json [--output-dir DIR] [--target-kind failure|oracle-finding --target-hash HASH] [--dom-oracle php-dom|lexbor-source|html5ever-source] [--lexbor-oracle-bin PATH|--html5ever-oracle-bin PATH] [--allow-oracle-mismatch] [--probe-mode auto|in-process|process] [--keep-candidate-artifacts]\n";
+	echo "Usage: php tools/html-api-fuzz/minimize.php --replay path/to/replay.json [--output-dir DIR] [--target-kind failure|oracle-finding --target-hash HASH] [--dom-oracle php-dom|lexbor-source|html5ever-source|chrome-cdp] [--lexbor-oracle-bin PATH|--html5ever-oracle-bin PATH|--chrome-oracle-script PATH] [--chrome-executable PATH] [--node-bin PATH] [--chrome-startup-timeout-ms N] [--allow-oracle-mismatch] [--probe-mode auto|in-process|process] [--keep-candidate-artifacts]\n";
 	exit( null === $replay_path ? 1 : 0 );
+}
+$explicit_timeout_ms = null;
+if ( array_key_exists( 'timeout-ms', $options ) ) {
+	$explicit_timeout_value = $options['timeout-ms'];
+	$parsed_explicit_timeout = ( is_int( $explicit_timeout_value ) || is_string( $explicit_timeout_value ) )
+		? filter_var( $explicit_timeout_value, FILTER_VALIDATE_INT, array( 'options' => array( 'min_range' => 1 ) ) )
+		: false;
+	if ( false === $parsed_explicit_timeout ) {
+		fwrite( STDERR, "Invalid --timeout-ms: expected a positive integer.\n" );
+		exit( 1 );
+	}
+	$explicit_timeout_ms = (int) $parsed_explicit_timeout;
 }
 
 $replay = \HtmlApiFuzz\read_json_file( $replay_path );
@@ -280,6 +399,11 @@ if ( ! $replay || ! array_key_exists( 'inputBase64', $replay ) ) {
 	fwrite( STDERR, "Invalid replay file: {$replay_path}\n" );
 	exit( 1 );
 }
+if ( array_key_exists( 'options', $replay ) && ! is_array( $replay['options'] ) ) {
+	fwrite( STDERR, "Invalid replay options: expected an object.\n" );
+	exit( 1 );
+}
+$recorded_options = is_array( $replay['options'] ?? null ) ? $replay['options'] : array();
 
 $target      = html_api_fuzz_min_target( $replay, $options );
 $target_hash = $target['hash'];
@@ -308,147 +432,143 @@ if ( null === \HtmlApiFuzz\option_string( $oracle_options, 'lexbor-oracle-bin', 
 if ( null === \HtmlApiFuzz\option_string( $oracle_options, 'html5ever-oracle-bin', null ) && is_string( $replay['options']['html5everOracleBin'] ?? null ) ) {
 	$oracle_options['html5ever-oracle-bin'] = $replay['options']['html5everOracleBin'];
 }
-$stored_oracle_timeout_ms = $replay['options']['oracleTimeoutMs'] ?? null;
-if ( null === \HtmlApiFuzz\option_string( $oracle_options, 'oracle-timeout-ms', null ) && is_numeric( $stored_oracle_timeout_ms ) ) {
-	$oracle_options['oracle-timeout-ms'] = (string) (int) $stored_oracle_timeout_ms;
+foreach ( array( 'chromeOracleScript' => 'chrome-oracle-script', 'chromeExecutable' => 'chrome-executable', 'nodeBin' => 'node-bin' ) as $recorded_name => $option_name ) {
+	if ( ! array_key_exists( $recorded_name, $recorded_options ) ) {
+		continue;
+	}
+	if ( ! is_string( $recorded_options[ $recorded_name ] ) || '' === $recorded_options[ $recorded_name ] ) {
+		fwrite( STDERR, "Invalid recorded {$recorded_name}: expected a non-empty string.\n" );
+		exit( 1 );
+	}
+	if ( null === \HtmlApiFuzz\option_string( $oracle_options, $option_name, null ) ) {
+		$oracle_options[ $option_name ] = $recorded_options[ $recorded_name ];
+	}
 }
+if ( array_key_exists( 'chromeStartupTimeoutMs', $recorded_options ) ) {
+	$recorded_chrome_startup = $recorded_options['chromeStartupTimeoutMs'];
+	$parsed_chrome_startup = ( is_int( $recorded_chrome_startup ) || is_string( $recorded_chrome_startup ) )
+		? filter_var( $recorded_chrome_startup, FILTER_VALIDATE_INT, array( 'options' => array( 'min_range' => 1 ) ) )
+		: false;
+	if ( false === $parsed_chrome_startup ) {
+		fwrite( STDERR, "Invalid recorded chromeStartupTimeoutMs: expected a positive integer.\n" );
+		exit( 1 );
+	}
+	if ( null === \HtmlApiFuzz\option_string( $oracle_options, 'chrome-startup-timeout-ms', null ) ) {
+		$oracle_options['chrome-startup-timeout-ms'] = (string) (int) $parsed_chrome_startup;
+	}
+}
+$stored_oracle_timeout_ms = null;
+if ( array_key_exists( 'oracleTimeoutMs', $recorded_options ) ) {
+	$recorded_oracle_timeout = $recorded_options['oracleTimeoutMs'];
+	$parsed_oracle_timeout = ( is_int( $recorded_oracle_timeout ) || is_string( $recorded_oracle_timeout ) )
+		? filter_var( $recorded_oracle_timeout, FILTER_VALIDATE_INT, array( 'options' => array( 'min_range' => 1 ) ) )
+		: false;
+	if ( false === $parsed_oracle_timeout ) {
+		fwrite( STDERR, "Invalid recorded oracleTimeoutMs: expected a positive integer.\n" );
+		exit( 1 );
+	}
+	$stored_oracle_timeout_ms = (int) $parsed_oracle_timeout;
+}
+if ( null === \HtmlApiFuzz\option_string( $oracle_options, 'oracle-timeout-ms', null ) && null !== $stored_oracle_timeout_ms ) {
+	$oracle_options['oracle-timeout-ms'] = (string) $stored_oracle_timeout_ms;
+}
+$probe_mode = html_api_fuzz_min_probe_mode( $options );
+$keep_candidate_artifacts = \HtmlApiFuzz\option_bool( $options, 'keep-candidate-artifacts', false );
+$recorded_timeout_present = array_key_exists( 'processTimeoutMs', $recorded_options );
+$recorded_timeout_ms = null;
+if ( $recorded_timeout_present ) {
+	$recorded_timeout_value = $recorded_options['processTimeoutMs'];
+	$parsed_timeout = ( is_int( $recorded_timeout_value ) || is_string( $recorded_timeout_value ) )
+		? filter_var( $recorded_timeout_value, FILTER_VALIDATE_INT, array( 'options' => array( 'min_range' => 1 ) ) )
+		: false;
+	if ( false === $parsed_timeout ) {
+		fwrite( STDERR, "Invalid recorded processTimeoutMs: expected a positive integer.\n" );
+		exit( 1 );
+	}
+	$recorded_timeout_ms = (int) $parsed_timeout;
+}
+$parent_oracle_used = 'in-process' === $probe_mode && ! $keep_candidate_artifacts;
+$max_attempts = \HtmlApiFuzz\option_int( $options, 'max-attempts', 600 );
 $oracle_renderer = \HtmlApiFuzz\OracleRenderer::from_options( $oracle_options );
-$current_oracle = $oracle_renderer->metadata();
-$oracle_mismatches = \HtmlApiFuzz\OracleRenderer::identity_mismatches( $replay['oracle'] ?? null, $current_oracle );
-if ( ! empty( $oracle_mismatches ) && ! \HtmlApiFuzz\option_bool( $options, 'allow-oracle-mismatch', false ) ) {
-	fwrite( STDERR, 'Oracle identity mismatch: ' . implode( '; ', $oracle_mismatches ) . ".\n" );
-	fwrite( STDERR, "Pass --allow-oracle-mismatch only for a deliberate diagnostic minimization.\n" );
+try {
+	$setup = \HtmlApiFuzz\OracleRenderer::with_explicit_close(
+		$oracle_renderer,
+		static function ( \HtmlApiFuzz\OracleRenderer $renderer ) use ( $replay, $options, $explicit_timeout_ms, $recorded_timeout_ms, $probe_mode, $keep_candidate_artifacts, $original_generator, $target_hash, $target, $source_replay, $parent_oracle_used, $input, $output_dir, $max_attempts, $any_failure ): array {
+			$current_oracle = $renderer->metadata();
+			$current_oracle_options = $renderer->replay_options();
+			$oracle_worker_args = $renderer->worker_args();
+			$oracle_mismatches = \HtmlApiFuzz\OracleRenderer::identity_mismatches( $replay['oracle'] ?? null, $current_oracle );
+			if ( ! empty( $oracle_mismatches ) && ! \HtmlApiFuzz\option_bool( $options, 'allow-oracle-mismatch', false ) ) {
+				throw new RuntimeException(
+					'Oracle identity mismatch: ' . implode( '; ', $oracle_mismatches ) . ".\n" .
+					'Pass --allow-oracle-mismatch only for a deliberate diagnostic minimization.'
+				);
+			}
+			if ( null !== $explicit_timeout_ms ) {
+				$timeout_ms = $explicit_timeout_ms;
+			} elseif ( null !== $recorded_timeout_ms ) {
+				$timeout_ms = $recorded_timeout_ms;
+			} else {
+				$timeout_ms = $renderer->recommended_process_timeout_ms( 'full', 2500 );
+			}
+			$base = array(
+				'mode'              => $replay['mode'] ?? \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY,
+				'profile'           => $replay['profile'] ?? 'replay',
+				'payloadPolicy'     => \HtmlApiFuzz\normalize_payload_policy_label( $replay['payloadPolicy'] ?? null )
+					?? \HtmlApiFuzz\normalize_payload_policy_label( $replay['generator']['payloadPolicy'] ?? null ),
+				'fragmentContext'   => is_string( $replay['fragmentContext'] ?? null ) ? $replay['fragmentContext'] : 'body',
+				'originalGenerator' => $original_generator,
+				'seed'              => (int) ( $replay['seed'] ?? 1 ),
+				'targetHash'        => $target_hash,
+				'targetKind'        => $target['kind'] ?? 'failure',
+				'sourceReplay'      => $source_replay,
+				'oracle'            => $current_oracle,
+				'sourceOracle'      => $replay['oracle'] ?? null,
+				'oracleIdentityMismatches' => $oracle_mismatches,
+				'oracleRenderer'    => $renderer,
+				'oracleOptions'     => array(
+					'dom-oracle'         => $current_oracle_options['domOracle'] ?? \HtmlApiFuzz\OracleRenderer::KIND_PHP_DOM,
+					'lexbor-oracle-bin'  => $current_oracle_options['lexborOracleBin'] ?? null,
+					'html5ever-oracle-bin' => $current_oracle_options['html5everOracleBin'] ?? null,
+					'chrome-oracle-script' => $current_oracle_options['chromeOracleScript'] ?? null,
+					'chrome-executable'  => $current_oracle_options['chromeExecutable'] ?? null,
+					'node-bin'           => $current_oracle_options['nodeBin'] ?? null,
+					'chrome-startup-timeout-ms' => isset( $current_oracle_options['chromeStartupTimeoutMs'] ) ? (string) $current_oracle_options['chromeStartupTimeoutMs'] : null,
+					'oracle-timeout-ms'  => isset( $current_oracle_options['oracleTimeoutMs'] ) ? (string) $current_oracle_options['oracleTimeoutMs'] : null,
+				),
+				'oracleWorkerArgs'  => $oracle_worker_args,
+				'gitMetadataBase64' => \HtmlApiFuzz\git_metadata_base64( \HtmlApiFuzz\git_metadata() ),
+				'failUnsupported'   => (bool) ( $replay['options']['failUnsupported'] ?? ( 'unsupported' === ( $replay['result']['failureClass'] ?? null ) ) ),
+				'maxTokens'         => (int) ( $replay['limits']['maxTokens'] ?? 2000 ),
+				'maxNodes'          => (int) ( $replay['limits']['maxNodes'] ?? 3000 ),
+				'processTimeoutMs'  => $timeout_ms,
+				'probeMode'         => $probe_mode,
+				'keepCandidateArtifacts' => $keep_candidate_artifacts,
+			);
+			\HtmlApiFuzz\ensure_dir( $output_dir );
+			$reduction = $parent_oracle_used
+				? html_api_fuzz_min_reduce( $input, $base, $output_dir, $max_attempts, $timeout_ms, $any_failure )
+				: null;
+			unset( $base['oracleRenderer'] );
+			return array(
+				'base'       => $base,
+				'timeoutMs'  => $timeout_ms,
+				'reduction'  => $reduction,
+			);
+		}
+	);
+} catch ( Throwable $error ) {
+	fwrite( STDERR, $error->getMessage() . "\n" );
 	exit( 1 );
 }
-\HtmlApiFuzz\ensure_dir( $output_dir );
-$probe_mode      = html_api_fuzz_min_probe_mode( $options );
-$base = array(
-	'mode'              => $replay['mode'] ?? \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY,
-	'profile'           => $replay['profile'] ?? 'replay',
-	'payloadPolicy'     => \HtmlApiFuzz\normalize_payload_policy_label( $replay['payloadPolicy'] ?? null )
-		?? \HtmlApiFuzz\normalize_payload_policy_label( $replay['generator']['payloadPolicy'] ?? null ),
-	'fragmentContext'   => is_string( $replay['fragmentContext'] ?? null ) ? $replay['fragmentContext'] : 'body',
-	'originalGenerator' => $original_generator,
-	'seed'              => (int) ( $replay['seed'] ?? 1 ),
-	'targetHash'        => $target_hash,
-	'targetKind'        => $target['kind'] ?? 'failure',
-	'sourceReplay'      => $source_replay,
-	'oracle'            => $current_oracle,
-	'sourceOracle'      => $replay['oracle'] ?? null,
-	'oracleIdentityMismatches' => $oracle_mismatches,
-	'oracleRenderer'    => $oracle_renderer,
-	'oracleOptions'     => array(
-		'dom-oracle'         => \HtmlApiFuzz\option_string( $oracle_options, 'dom-oracle', \HtmlApiFuzz\OracleRenderer::KIND_PHP_DOM ),
-		'lexbor-oracle-bin'  => \HtmlApiFuzz\option_string( $oracle_options, 'lexbor-oracle-bin', null ),
-		'html5ever-oracle-bin' => \HtmlApiFuzz\option_string( $oracle_options, 'html5ever-oracle-bin', null ),
-		'oracle-timeout-ms'  => \HtmlApiFuzz\option_string( $oracle_options, 'oracle-timeout-ms', null ),
-	),
-	'oracleWorkerArgs'  => $oracle_renderer->worker_args(),
-	'gitMetadataBase64' => \HtmlApiFuzz\git_metadata_base64( \HtmlApiFuzz\git_metadata() ),
-	'failUnsupported'   => (bool) ( $replay['options']['failUnsupported'] ?? ( 'unsupported' === ( $replay['result']['failureClass'] ?? null ) ) ),
-	'maxTokens'         => (int) ( $replay['limits']['maxTokens'] ?? 2000 ),
-	'maxNodes'          => (int) ( $replay['limits']['maxNodes'] ?? 3000 ),
-	'probeMode'         => $probe_mode,
-	'keepCandidateArtifacts' => \HtmlApiFuzz\option_bool( $options, 'keep-candidate-artifacts', false ),
-);
-$timeout_ms    = \HtmlApiFuzz\option_int( $options, 'timeout-ms', 2500 );
-$max_attempts  = \HtmlApiFuzz\option_int( $options, 'max-attempts', 600 );
-$attempt_count = 0;
-$probe_stats   = array(
-	'durationMs'    => 0,
-	'maxDurationMs' => 0,
-	'accepted'      => 0,
-);
-
-$current = $input;
-
-/*
- * Phase 1: markup-aligned segment deletion. Splitting on tag boundaries is
- * token-naive (rawtext contents split incorrectly), but unsound candidates
- * simply fail the signature check; aligned deletions converge far faster on
- * HTML than blind byte chunks.
- */
-$progress = true;
-while ( $progress && $attempt_count < $max_attempts ) {
-	$progress = false;
-	preg_match_all( '/<[^>]*>?|[^<]+/s', $current, $matches );
-	$segments = $matches[0];
-	if ( count( $segments ) < 2 ) {
-		break;
-	}
-	for ( $i = count( $segments ) - 1; $i >= 0 && $attempt_count < $max_attempts; $i-- ) {
-		$candidate_segments = $segments;
-		unset( $candidate_segments[ $i ] );
-		$candidate = implode( '', $candidate_segments );
-		if ( $candidate === $current || '' === $candidate ) {
-			continue;
-		}
-		++$attempt_count;
-		$test = html_api_fuzz_min_test( $candidate, $base, $output_dir, $attempt_count, $timeout_ms, $any_failure );
-		html_api_fuzz_min_record_probe( $probe_stats, $test );
-		if ( $test['accepted'] ) {
-			$current  = $candidate;
-			$progress = true;
-			break;
-		}
-	}
-}
-
-// Phase 2: byte-chunk deletion for reductions that cross tag boundaries.
-$chunks = 2;
-while ( strlen( $current ) > 0 && $attempt_count < $max_attempts ) {
-	$length     = strlen( $current );
-	$chunk_size = (int) ceil( $length / $chunks );
-	$changed    = false;
-
-	for ( $offset = 0; $offset < $length && $attempt_count < $max_attempts; $offset += $chunk_size ) {
-		$candidate = substr( $current, 0, $offset ) . substr( $current, min( $length, $offset + $chunk_size ) );
-		if ( $candidate === $current ) {
-			continue;
-		}
-		++$attempt_count;
-		$test = html_api_fuzz_min_test( $candidate, $base, $output_dir, $attempt_count, $timeout_ms, $any_failure );
-		html_api_fuzz_min_record_probe( $probe_stats, $test );
-		if ( $test['accepted'] ) {
-			$current = $candidate;
-			$chunks  = max( 2, $chunks - 1 );
-			$changed = true;
-			break;
-		}
-	}
-
-	if ( ! $changed ) {
-		if ( $chunks >= $length ) {
-			break;
-		}
-		$chunks = min( $length, $chunks * 2 );
-	}
-}
-
-/*
- * Phase 3: per-byte canonicalization. Deletion is tried first; replacements
- * never grow the input. After a deletion the same index holds the next byte,
- * so stay in place; after a substitution move on.
- */
-$simple_replacements = array( '', 'a', ' ', "\n" );
-for ( $i = 0; $i < strlen( $current ) && $attempt_count < $max_attempts; ++$i ) {
-	foreach ( $simple_replacements as $replacement ) {
-		$candidate = substr( $current, 0, $i ) . $replacement . substr( $current, $i + 1 );
-		if ( $candidate === $current ) {
-			continue;
-		}
-		++$attempt_count;
-		$test = html_api_fuzz_min_test( $candidate, $base, $output_dir, $attempt_count, $timeout_ms, $any_failure );
-		html_api_fuzz_min_record_probe( $probe_stats, $test );
-		if ( $test['accepted'] ) {
-			$current = $candidate;
-			if ( '' === $replacement ) {
-				--$i;
-			}
-			break;
-		}
-	}
-}
+$base       = $setup['base'];
+$timeout_ms = $setup['timeoutMs'];
+$reduction  = is_array( $setup['reduction'] )
+	? $setup['reduction']
+	: html_api_fuzz_min_reduce( $input, $base, $output_dir, $max_attempts, $timeout_ms, $any_failure );
+$current       = $reduction['current'];
+$attempt_count = $reduction['attemptCount'];
+$probe_stats   = $reduction['probeStats'];
 
 $final_dir = $output_dir . '/minimized';
 \HtmlApiFuzz\ensure_dir( $final_dir );
@@ -470,6 +590,8 @@ $args = array(
 	(string) $base['maxTokens'],
 	'--max-nodes',
 	(string) $base['maxNodes'],
+	'--process-timeout-ms',
+	(string) $timeout_ms,
 );
 if ( null !== $base['gitMetadataBase64'] ) {
 	$args[] = '--git-metadata-base64';
@@ -514,6 +636,8 @@ if ( is_array( $final_replay ) && is_array( $base['originalGenerator'] ) ) {
 }
 if ( is_array( $final_replay ) ) {
 	$final_replay['sourceReplay'] = $base['sourceReplay'];
+	$final_replay['options'] = is_array( $final_replay['options'] ?? null ) ? $final_replay['options'] : array();
+	$final_replay['options']['processTimeoutMs'] = $timeout_ms;
 	if ( ! empty( $final_identity_mismatches ) ) {
 		$final_replay['oracle'] = $base['oracle'];
 		$final_replay['finalActualOracle'] = $final_result['oracle'] ?? null;
@@ -552,6 +676,7 @@ $summary = array(
 	'minimizedLength'   => strlen( $current ),
 	'attempts'          => $attempt_count,
 	'probeMode'         => $base['probeMode'],
+	'processTimeoutMs'  => $timeout_ms,
 	'candidateArtifactsRetained' => 'process' === $base['probeMode'] || $base['keepCandidateArtifacts'],
 	'probeTiming'       => array(
 		'totalDurationMs' => $probe_stats['durationMs'],

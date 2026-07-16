@@ -48,6 +48,7 @@ namespace {
 	$source_cases = array(
 		\HtmlApiFuzz\OracleRenderer::KIND_LEXBOR_SOURCE => array( 'binary' => $lexbor_binary, 'option' => 'lexborOracleBin' ),
 		\HtmlApiFuzz\OracleRenderer::KIND_HTML5EVER_SOURCE => array( 'binary' => $html5ever_binary, 'option' => 'html5everOracleBin' ),
+		\HtmlApiFuzz\OracleRenderer::KIND_CHROME_CDP => array( 'option' => 'chromeOracleScript' ),
 	);
 	$replays = array();
 	$metadata_by_kind = array();
@@ -66,6 +67,15 @@ namespace {
 	putenv( 'HTML_API_CC_MAX_TREE_BYTES=1048576' );
 
 	foreach ( $source_cases as $kind => $case ) {
+		if ( \HtmlApiFuzz\OracleRenderer::KIND_CHROME_CDP === $kind ) {
+			putenv( 'HTML_API_CC_PROCESS_TIMEOUT_MS' );
+			putenv( 'HTML_API_CC_CHECKS=sampled' );
+			putenv( 'HTML_API_CC_FULL_SAMPLE_PERCENT=0' );
+		} else {
+			putenv( 'HTML_API_CC_PROCESS_TIMEOUT_MS=30000' );
+			putenv( 'HTML_API_CC_CHECKS=baseline' );
+			putenv( 'HTML_API_CC_FULL_SAMPLE_PERCENT' );
+		}
 		$oracle = \HtmlApiFuzz\OracleRenderer::from_options(
 			array(
 				'dom-oracle' => $kind,
@@ -76,6 +86,8 @@ namespace {
 		);
 		$metadata = $oracle->metadata();
 		html_api_fuzz_cc_sources_assert( true === ( $metadata['available'] ?? false ), "Expected {$kind} availability: " . (string) ( $metadata['error'] ?? '' ) );
+		$oracle_replay_options = $oracle->replay_options();
+		$oracle->close();
 		$metadata_by_kind[ $kind ] = $metadata;
 		$output_dir = $work_dir . '/' . $kind;
 		putenv( 'CC_ANALYZER_OUTPUT_DIR=' . $output_dir );
@@ -110,15 +122,37 @@ namespace {
 		html_api_fuzz_cc_sources_assert( $metadata === ( $replay['oracle'] ?? null ), "Expected normalized {$kind} replay identity." );
 		html_api_fuzz_cc_sources_assert( $body === base64_decode( $replay['inputBase64'] ?? '', true ), "Expected exact {$kind} replay bytes." );
 		html_api_fuzz_cc_sources_assert( $kind === ( $replay['options']['domOracle'] ?? null ), "Expected {$kind} replay selection." );
-		html_api_fuzz_cc_sources_assert( $case['binary'] === ( $replay['options'][ $case['option'] ] ?? null ), "Expected {$kind} replay binary path." );
-		$irrelevant_option = 'lexborOracleBin' === $case['option'] ? 'html5everOracleBin' : 'lexborOracleBin';
-		html_api_fuzz_cc_sources_assert( ! array_key_exists( $irrelevant_option, $replay['options'] ), "Expected no stale {$irrelevant_option} for {$kind}." );
+		$expected_path = $case['binary'] ?? $oracle_replay_options[ $case['option'] ] ?? null;
+		html_api_fuzz_cc_sources_assert( $expected_path === ( $replay['options'][ $case['option'] ] ?? null ), "Expected {$kind} replay executable/script path." );
+		foreach ( array( 'lexborOracleBin', 'html5everOracleBin' ) as $source_option ) {
+			if ( $source_option !== $case['option'] ) {
+				html_api_fuzz_cc_sources_assert( ! array_key_exists( $source_option, $replay['options'] ), "Expected no stale {$source_option} for {$kind}." );
+			}
+		}
+		if ( \HtmlApiFuzz\OracleRenderer::KIND_CHROME_CDP === $kind ) {
+			html_api_fuzz_cc_sources_assert( is_string( $replay['options']['chromeExecutable'] ?? null ), 'Expected durable Chrome executable replay path.' );
+			html_api_fuzz_cc_sources_assert( is_string( $replay['options']['nodeBin'] ?? null ), 'Expected durable Node replay path.' );
+			html_api_fuzz_cc_sources_assert( 35000 === ( $replay['options']['chromeStartupTimeoutMs'] ?? null ), 'Expected effective Chrome startup timeout.' );
+			html_api_fuzz_cc_sources_assert( 90000 === ( $replay['options']['processTimeoutMs'] ?? null ), 'Expected sampled Common Crawl Chrome process budget.' );
+		}
 		html_api_fuzz_cc_sources_assert( \HtmlApiFuzz\OracleRenderer::identity_sha256( $metadata ) === ( $configuration['oracleIdentitySha256'] ?? null ), "Expected pinned {$kind} configuration identity." );
 		html_api_fuzz_cc_sources_assert( $metadata === ( $configuration['oracle'] ?? null ), "Expected normalized {$kind} configuration metadata." );
 		$replays[ $kind ] = $replay;
 	}
 
 	$source_replay = $replays[ \HtmlApiFuzz\OracleRenderer::KIND_LEXBOR_SOURCE ];
+	$chrome_replay = $replays[ \HtmlApiFuzz\OracleRenderer::KIND_CHROME_CDP ];
+	foreach ( array( 'chromeStartupTimeoutMs' => 1.5, 'chromeExecutable' => '' ) as $field => $invalid_value ) {
+		$invalid_chrome = $chrome_replay;
+		$invalid_chrome['options'][ $field ] = $invalid_value;
+		$invalid_chrome_path = $work_dir . '/invalid-chrome-' . $field . '.json';
+		$invalid_chrome_output = $work_dir . '/invalid-chrome-' . $field;
+		\HtmlApiFuzz\write_json_file_atomic( $invalid_chrome_path, $invalid_chrome );
+		$invalid_chrome_process = html_api_fuzz_cc_sources_process(
+			array( dirname( __DIR__ ) . '/replay.php', '--replay', $invalid_chrome_path, '--output-dir', $invalid_chrome_output )
+		);
+		html_api_fuzz_cc_sources_assert( 1 === $invalid_chrome_process['code'] && ! is_dir( $invalid_chrome_output ), "Expected invalid recorded {$field} rejection before output creation." );
+	}
 	$tampered = $source_replay;
 	$tampered['oracle']['identity']['binarySha256'] = str_repeat( '0', 64 );
 	$tampered_path = $work_dir . '/tampered-replay.json';
@@ -233,7 +267,7 @@ PHP;
 		array(
 			'CC_ANALYZER_OUTPUT_DIR', 'HTML_API_CC_ORACLE', 'HTML_API_CC_EXPECT_LEXBOR_COMMIT', 'HTML_API_CC_EXPECT_ORACLE_IDENTITY_SHA256',
 			'HTML_API_CC_WORKER_SCRIPT', 'HTML_API_FUZZ_LEXBOR_ORACLE', 'HTML_API_FUZZ_HTML5EVER_ORACLE', 'HTML_API_CC_RETAIN_ALL',
-			'HTML_API_CC_REQUIRE_UTF8', 'HTML_API_CC_CHECKS', 'HTML_API_CC_PROCESS_TIMEOUT_MS', 'HTML_API_CC_ORACLE_TIMEOUT_MS',
+			'HTML_API_CC_REQUIRE_UTF8', 'HTML_API_CC_CHECKS', 'HTML_API_CC_FULL_SAMPLE_PERCENT', 'HTML_API_CC_PROCESS_TIMEOUT_MS', 'HTML_API_CC_ORACLE_TIMEOUT_MS',
 			'HTML_API_CC_MAX_INPUT_BYTES', 'HTML_API_CC_MAX_TOKENS', 'HTML_API_CC_MAX_NODES', 'HTML_API_CC_MAX_DEPTH',
 			'HTML_API_CC_MAX_TREE_BYTES', 'HTML_API_FUZZ_TEST_DRIFT_ORACLE',
 		) as $environment_name

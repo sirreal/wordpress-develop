@@ -3,7 +3,7 @@
 require_once __DIR__ . '/lib/autoload.php';
 
 function html_api_fuzz_launcher_usage(): void {
-	echo "Usage: php tools/html-api-fuzz/launcher.php [--lanes N] [--output-dir DIR] [--duration-seconds N] [--max-seeds N] [--payload-policy POLICY] [--max-input-bytes N] [--dom-oracle php-dom|lexbor-source|html5ever-source] [--lexbor-oracle-bin PATH|--html5ever-oracle-bin PATH] [--max-keep-per-signature N] [--keep-all-artifacts] [--watcher] [--triage-oracle-findings]\n";
+	echo "Usage: php tools/html-api-fuzz/launcher.php [--lanes N] [--output-dir DIR] [--duration-seconds N] [--max-seeds N] [--payload-policy POLICY] [--max-input-bytes N] [--dom-oracle php-dom|lexbor-source|html5ever-source|chrome-cdp] [--lexbor-oracle-bin PATH|--html5ever-oracle-bin PATH|--chrome-oracle-script PATH] [--chrome-executable PATH] [--node-bin PATH] [--chrome-startup-timeout-ms N] [--max-keep-per-signature N] [--keep-all-artifacts] [--watcher] [--triage-oracle-findings]\n";
 	echo "Create OUTPUT_DIR/STOP (see stop.php) to stop all lanes gracefully: each finishes its current batch and exits.\n";
 	echo "--max-keep-per-signature is applied per lane; a signature seen in every lane keeps up to N x lanes exemplar directories.\n";
 	echo "--triage-oracle-findings passes oracle findings to the watcher/minimizer when --watcher is used.\n";
@@ -102,6 +102,9 @@ if ( \HtmlApiFuzz\option_bool( $options, 'help', false ) || \HtmlApiFuzz\option_
 	html_api_fuzz_launcher_usage();
 	exit( 0 );
 }
+if ( array_key_exists( 'timeout-ms', $options ) && true === $options['timeout-ms'] ) {
+	throw new InvalidArgumentException( 'Expected --timeout-ms to have a value.' );
+}
 
 $repo_root        = \HtmlApiFuzz\repo_root();
 $output_dir       = \HtmlApiFuzz\option_string( $options, 'output-dir', $repo_root . '/artifacts/html-api-fuzz/launch-' . \HtmlApiFuzz\timestamp() );
@@ -109,6 +112,7 @@ $lanes            = max( 1, \HtmlApiFuzz\option_int( $options, 'lanes', 2 ) );
 $start_seed       = \HtmlApiFuzz\option_int( $options, 'start-seed', 1 );
 $max_seeds        = \HtmlApiFuzz\option_int( $options, 'max-seeds', 0 );
 $duration_seconds = \HtmlApiFuzz\option_float( $options, 'duration-seconds', 60.0 );
+$timeout_explicit = array_key_exists( 'timeout-ms', $options );
 $timeout_ms       = \HtmlApiFuzz\option_int( $options, 'timeout-ms', 2500 );
 $profile          = \HtmlApiFuzz\option_string( $options, 'profile', 'auto' );
 $mode             = \HtmlApiFuzz\option_string( $options, 'mode', 'auto' );
@@ -142,9 +146,20 @@ $git_metadata = null === \HtmlApiFuzz\option_string( $options, 'git-metadata-bas
 	? \HtmlApiFuzz\git_metadata()
 	: \HtmlApiFuzz\git_metadata_from_base64( \HtmlApiFuzz\option_string( $options, 'git-metadata-base64' ) );
 $git_metadata_base64 = \HtmlApiFuzz\git_metadata_base64( $git_metadata );
-$oracle_renderer      = \HtmlApiFuzz\OracleRenderer::from_options( $options );
-$oracle_metadata      = $oracle_renderer->metadata();
-$oracle_worker_args   = $oracle_renderer->worker_args();
+$oracle_renderer = \HtmlApiFuzz\OracleRenderer::from_options( $options );
+$oracle_setup = \HtmlApiFuzz\OracleRenderer::with_explicit_close(
+	$oracle_renderer,
+	static function ( \HtmlApiFuzz\OracleRenderer $renderer ) use ( $timeout_explicit, $timeout_ms ): array {
+		return array(
+			'metadata'   => $renderer->metadata(),
+			'workerArgs' => $renderer->worker_args(),
+			'timeoutMs'  => $timeout_explicit ? $timeout_ms : $renderer->recommended_process_timeout_ms( 'full', 2500 ),
+		);
+	}
+);
+$oracle_metadata    = $oracle_setup['metadata'];
+$oracle_worker_args = $oracle_setup['workerArgs'];
+$timeout_ms         = $oracle_setup['timeoutMs'];
 
 $state = array(
 	'schemaVersion' => 1,
@@ -161,6 +176,7 @@ $state = array(
 	'maxInputBytes' => $max_input_bytes > 0 ? $max_input_bytes : null,
 	'git'           => $git_metadata,
 	'oracle'        => $oracle_metadata,
+	'processTimeoutMs' => $timeout_ms,
 	'finished'      => false,
 	'laneResults'   => array(),
 );
