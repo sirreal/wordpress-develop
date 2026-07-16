@@ -37,6 +37,7 @@ final class AdminMediaChromeSurface {
 			$rows[] = self::check_image_caption_editor_output( $ctx->fork( 'image-caption-editor' ) );
 			$rows[] = self::check_legacy_upload_shell_helpers( $ctx->fork( 'legacy-upload-shell' ) );
 			$rows[] = self::check_media_upload_dispatch_exits( $ctx->fork( 'legacy-upload-dispatch' ) );
+			$rows[] = self::check_media_url_insert_dispatch_exits( $ctx->fork( 'legacy-url-insert' ) );
 			$rows[] = self::check_media_attach_action_redirect_exit( $ctx->fork( 'media-attach-action' ) );
 			$rows[] = self::check_media_enqueue_and_iframe_shell( $ctx->fork( 'modal-enqueue-shell' ) );
 			$rows[] = self::check_media_button_and_bypass_output( $ctx->fork( 'media-buttons' ) );
@@ -89,6 +90,7 @@ final class AdminMediaChromeSurface {
 				'image_link_input_fields',
 				'image_media_send_to_editor',
 				'image_size_input_fields',
+				'media_send_to_editor',
 				'media_buttons',
 				'media_upload_form',
 				'media_upload_flash_bypass',
@@ -111,8 +113,10 @@ final class AdminMediaChromeSurface {
 				'wp_iframe',
 				'wp_insert_post',
 				'wp_media_attach_action',
+				'wp_media_upload_handler',
 				'wp_mime_type_icon',
 				'wp_editor',
+				'wp_ext2type',
 				'wp_redirect',
 				'wp_script_is',
 				'wp_scripts',
@@ -2450,6 +2454,453 @@ PHP;
 		}
 
 		return $out;
+	}
+
+	private static function check_media_url_insert_dispatch_exits( \ComponentFuzz\FuzzContext $ctx ): array {
+		$missing = self::media_attach_action_child_missing_requirements();
+		if ( array() !== $missing ) {
+			return self::row(
+				$ctx,
+				'admin-media-chrome.legacy-url-insert-dispatch-exits',
+				true,
+				array(
+					'missing' => $missing,
+					'reason'  => 'Required local subprocess APIs are unavailable.',
+				),
+				'skipped'
+			);
+		}
+
+		$failures = array();
+		$runs     = array();
+
+		foreach ( self::media_url_insert_cases( $ctx ) as $case ) {
+			$run    = self::run_media_url_insert_child_process( $case );
+			$result = is_array( $run['result'] ?? null ) ? $run['result'] : array();
+
+			$runs[ $case['label'] ] = array(
+				'ok'       => $run['ok'] ?? false,
+				'exitCode' => $run['exitCode'] ?? null,
+				'stderr'   => self::describe_string( (string) ( $run['stderr'] ?? '' ) ),
+				'stdout'   => self::describe_string( (string) ( $run['stdout'] ?? '' ) ),
+				'result'   => array(
+					'returned'   => $result['returned'] ?? null,
+					'output'     => self::describe_string( (string) ( $result['output'] ?? '' ) ),
+					'eventCount' => is_array( $result['events'] ?? null ) ? count( $result['events'] ) : null,
+					'before'     => $result['contentBefore'] ?? array(),
+					'after'      => $result['contentAfter'] ?? array(),
+				),
+			);
+
+			self::collect_failure(
+				$failures,
+				true === ( $run['ok'] ?? false ) && self::media_url_insert_child_result_has_expected_shape( $result ),
+				"{$case['label']} child exits cleanly and reports structured JSON",
+				array(
+					'run'    => $run,
+					'result' => $result,
+				)
+			);
+
+			if ( ! self::media_url_insert_child_result_has_expected_shape( $result ) ) {
+				continue;
+			}
+
+			self::collect_failure(
+				$failures,
+				false === (bool) ( $result['returned'] ?? true )
+					&& null === ( $result['throwable'] ?? null ),
+				"{$case['label']} reaches media_send_to_editor() exit without unexpected exceptions",
+				array(
+					'returned'  => $result['returned'] ?? null,
+					'throwable' => $result['throwable'] ?? null,
+				)
+			);
+
+			self::collect_media_url_insert_failures( $failures, $case, $result );
+		}
+
+		return self::row(
+			$ctx,
+			'admin-media-chrome.legacy-url-insert-dispatch-exits',
+			array() === $failures,
+			array(
+				'failures' => $failures,
+				'runs'     => $runs,
+			)
+		);
+	}
+
+	private static function media_url_insert_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$token = self::media_upload_dispatch_token( 'url_' . $ctx->identifier( 4, 9 ) );
+
+		return array(
+			array(
+				'label'        => 'image-relative-src',
+				'seed'         => $ctx->fork( 'image' )->seed(),
+				'iteration'    => $ctx->iteration(),
+				'token'        => $token . '_image',
+				'mediaType'    => 'image',
+				'src'          => 'media.example.test/uploads/image-' . $token . '.jpg?caption=<script>alert(1)</script>',
+				'alt'          => 'Alt <script>alert(1)</script> "' . $token,
+				'align'        => 'left" data-cfz="' . $token,
+				'title'        => '',
+				'expectedHook' => 'image_send_to_editor_url',
+				'expectedType' => 'image',
+				'expectedTag'  => 'img',
+				'expectsHttp'  => true,
+			),
+			array(
+				'label'         => 'image-default-media-type',
+				'seed'          => $ctx->fork( 'image-default' )->seed(),
+				'iteration'     => $ctx->iteration(),
+				'token'         => $token . '_image_default',
+				'mediaType'     => 'image',
+				'omitMediaType' => true,
+				'src'           => 'https://images.example.test/default-' . $token . '.png',
+				'alt'           => 'Default image alt <script>alert(1)</script> ' . $token,
+				'align'         => 'center',
+				'title'         => '',
+				'expectedHook'  => 'image_send_to_editor_url',
+				'expectedType'  => 'image',
+				'expectedTag'   => 'img',
+				'expectsHttp'   => false,
+			),
+			array(
+				'label'        => 'file-explicit-title',
+				'seed'         => $ctx->fork( 'file' )->seed(),
+				'iteration'    => $ctx->iteration(),
+				'token'        => $token . '_file',
+				'mediaType'    => 'file',
+				'src'          => 'https://files.example.test/report-' . $token . '.pdf?<script>alert(1)</script>',
+				'alt'          => '',
+				'align'        => '',
+				'title'        => 'Report <script>alert(1)</script> "' . $token,
+				'expectedHook' => 'file_send_to_editor_url',
+				'expectedType' => 'file',
+				'expectedTag'  => 'a',
+				'expectsHttp'  => false,
+			),
+			array(
+				'label'        => 'audio-basename-title',
+				'seed'         => $ctx->fork( 'audio' )->seed(),
+				'iteration'    => $ctx->iteration(),
+				'token'        => $token . '_audio',
+				'mediaType'    => 'file',
+				'src'          => 'audio.example.test/tracks/song-' . $token . '.MP3',
+				'alt'          => '',
+				'align'        => '',
+				'title'        => '',
+				'expectedHook' => 'audio_send_to_editor_url',
+				'expectedType' => 'audio',
+				'expectedTag'  => 'a',
+				'expectsHttp'  => true,
+			),
+			array(
+				'label'        => 'video-normalized-type',
+				'seed'         => $ctx->fork( 'video' )->seed(),
+				'iteration'    => $ctx->iteration(),
+				'token'        => $token . '_video',
+				'mediaType'    => 'not-image',
+				'src'          => 'https://video.example.test/clips/movie-' . $token . '.mp4',
+				'alt'          => '',
+				'align'        => '',
+				'title'        => 'Movie ' . $token,
+				'expectedHook' => 'video_send_to_editor_url',
+				'expectedType' => 'video',
+				'expectedTag'  => 'a',
+				'expectsHttp'  => false,
+			),
+			array(
+				'label'        => 'misleading-video-pdf-stays-file',
+				'seed'         => $ctx->fork( 'misleading-video' )->seed(),
+				'iteration'    => $ctx->iteration(),
+				'token'        => $token . '_video_pdf',
+				'mediaType'    => 'video',
+				'src'          => 'https://files.example.test/not-video-' . $token . '.pdf',
+				'alt'          => '',
+				'align'        => '',
+				'title'        => 'Not video ' . $token,
+				'expectedHook' => 'file_send_to_editor_url',
+				'expectedType' => 'file',
+				'expectedTag'  => 'a',
+				'expectsHttp'  => false,
+			),
+		);
+	}
+
+	private static function run_media_url_insert_child_process( array $case ): array {
+		$payload = json_encode(
+			array( 'case' => $case ),
+			JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE
+		);
+
+		if ( false === $payload ) {
+			return array(
+				'ok'       => false,
+				'exitCode' => -1,
+				'stdout'   => '',
+				'stderr'   => 'json_encode failed',
+				'result'   => null,
+			);
+		}
+
+		$descriptors = array(
+			0 => array( 'pipe', 'r' ),
+			1 => array( 'pipe', 'w' ),
+			2 => array( 'pipe', 'w' ),
+		);
+
+		// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.system_calls_proc_open -- Isolates wp_media_upload_handler() URL insert media_send_to_editor() exits in a local PHP subprocess.
+		$process = proc_open( array( PHP_BINARY, '-r', self::media_url_insert_child_program() ), $descriptors, $pipes, \ComponentFuzz\repo_root() );
+		if ( ! is_resource( $process ) ) {
+			return array(
+				'ok'       => false,
+				'exitCode' => -1,
+				'stdout'   => '',
+				'stderr'   => 'proc_open failed',
+				'result'   => null,
+			);
+		}
+
+		fwrite( $pipes[0], $payload );
+		fclose( $pipes[0] );
+
+		$stdout = stream_get_contents( $pipes[1] );
+		$stderr = stream_get_contents( $pipes[2] );
+		fclose( $pipes[1] );
+		fclose( $pipes[2] );
+
+		$exit_code = proc_close( $process );
+		$result    = json_decode( (string) $stdout, true );
+
+		return array(
+			'ok'       => 0 === $exit_code && is_array( $result ) && true === ( $result['ok'] ?? null ),
+			'exitCode' => $exit_code,
+			'stdout'   => (string) $stdout,
+			'stderr'   => (string) $stderr,
+			'result'   => is_array( $result ) ? $result : null,
+		);
+	}
+
+	private static function media_url_insert_child_program(): string {
+		return <<<'PHP'
+$component_fuzz_admin_media_raw = stream_get_contents( STDIN );
+$component_fuzz_admin_media_payload = json_decode( $component_fuzz_admin_media_raw, true );
+$case = is_array( $component_fuzz_admin_media_payload['case'] ?? null ) ? $component_fuzz_admin_media_payload['case'] : array();
+
+require_once getcwd() . '/tools/component-fuzz/lib/autoload.php';
+\ComponentFuzz\WpBootstrap::load();
+
+\ComponentFuzz\Surfaces\AdminMediaChromeSurface::run_media_url_insert_child( $case );
+PHP;
+	}
+
+	public static function run_media_url_insert_child( array $case ): void {
+		ini_set( 'display_errors', '0' );
+		self::prepare_runtime();
+
+		$state = array(
+			'ok'            => false,
+			'label'         => (string) ( $case['label'] ?? 'url-insert' ),
+			'token'         => self::media_upload_dispatch_token( (string) ( $case['token'] ?? 'url_token' ) ),
+			'events'        => array(),
+			'contentBefore' => self::media_url_insert_content_counts(),
+			'contentAfter'  => array(),
+			'returned'      => false,
+			'throwable'     => null,
+			'output'        => '',
+		);
+
+		$buffer_level = ob_get_level();
+		ob_start();
+
+		register_shutdown_function(
+			static function () use ( &$state, $buffer_level ): void {
+				$output = '';
+				while ( ob_get_level() > $buffer_level ) {
+					$chunk = ob_get_clean();
+					if ( is_string( $chunk ) ) {
+						$output = $chunk . $output;
+					}
+				}
+
+				$state['output']       = $output;
+				$state['contentAfter'] = self::media_url_insert_content_counts();
+				$state['ok']           = null === $state['throwable'];
+				echo json_encode( $state, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE ) . "\n";
+			}
+		);
+
+		try {
+			$GLOBALS['pagenow']         = 'media-upload.php';
+			$_SERVER['HTTP_HOST']       = 'example.test';
+			$_SERVER['HTTPS']           = 'off';
+			$_SERVER['PHP_SELF']        = '/wp-admin/media-upload.php';
+			$_SERVER['REQUEST_METHOD']  = 'POST';
+			$_SERVER['REQUEST_URI']     = '/wp-admin/media-upload.php?type=' . rawurlencode( (string) ( $case['mediaType'] ?? 'image' ) ) . '&tab=type_url';
+			$_SERVER['HTTP_REFERER']    = 'http://example.test/wp-admin/media-upload.php?type=image&tab=type_url';
+			$_SERVER['HTTP_USER_AGENT'] = 'component-fuzz/admin-media-url-insert';
+			$_SERVER['REMOTE_ADDR']     = '198.51.100.45';
+			$_SERVER['SERVER_PORT']     = '80';
+
+			$_GET     = array(
+				'type' => (string) ( $case['mediaType'] ?? 'image' ),
+				'tab'  => 'type_url',
+			);
+			$_POST    = array(
+				'insertonlybutton' => '1',
+				'src'              => (string) ( $case['src'] ?? '' ),
+				'title'            => (string) ( $case['title'] ?? '' ),
+				'alt'              => (string) ( $case['alt'] ?? '' ),
+				'align'            => (string) ( $case['align'] ?? '' ),
+			);
+			if ( empty( $case['omitMediaType'] ) ) {
+				$_POST['media_type'] = (string) ( $case['mediaType'] ?? 'image' );
+			}
+			$_REQUEST = $_GET + $_POST;
+			$_FILES   = array();
+			$_COOKIE  = array();
+
+			$image_filter = static function ( string $html, string $src, string $alt, string $align ) use ( &$state ): string {
+				$state['events'][] = array(
+					'hook'  => 'image_send_to_editor_url',
+					'html'  => $html,
+					'src'   => $src,
+					'alt'   => $alt,
+					'align' => $align,
+				);
+				return $html . '<span data-cfz-url="' . esc_attr( $state['token'] ) . '">image</span>';
+			};
+			$file_filter  = static function ( string $html, string $src, string $title ) use ( &$state ): string {
+				$state['events'][] = array(
+					'hook'  => current_filter(),
+					'html'  => $html,
+					'src'   => $src,
+					'title' => $title,
+				);
+				return $html . '<span data-cfz-url="' . esc_attr( $state['token'] ) . '">file</span>';
+			};
+
+			\add_filter( 'image_send_to_editor_url', $image_filter, 10, 4 );
+			\add_filter( 'file_send_to_editor_url', $file_filter, 10, 3 );
+			\add_filter( 'audio_send_to_editor_url', $file_filter, 10, 3 );
+			\add_filter( 'video_send_to_editor_url', $file_filter, 10, 3 );
+
+			try {
+				\wp_media_upload_handler();
+				$state['returned'] = true;
+			} finally {
+				\remove_filter( 'video_send_to_editor_url', $file_filter, 10 );
+				\remove_filter( 'audio_send_to_editor_url', $file_filter, 10 );
+				\remove_filter( 'file_send_to_editor_url', $file_filter, 10 );
+				\remove_filter( 'image_send_to_editor_url', $image_filter, 10 );
+			}
+		} catch ( \Throwable $e ) {
+			$state['throwable'] = self::describe_throwable( $e );
+		}
+	}
+
+	private static function media_url_insert_content_counts(): array {
+		if ( isset( $GLOBALS['wpdb'] ) && $GLOBALS['wpdb'] instanceof \Component_Fuzz_WPDB_Stub ) {
+			return $GLOBALS['wpdb']->component_fuzz_content_counts();
+		}
+
+		return array();
+	}
+
+	private static function media_url_insert_child_result_has_expected_shape( array $result ): bool {
+		return array_key_exists( 'ok', $result )
+			&& array_key_exists( 'returned', $result )
+			&& is_string( $result['output'] ?? null )
+			&& is_array( $result['events'] ?? null )
+			&& is_array( $result['contentBefore'] ?? null )
+			&& is_array( $result['contentAfter'] ?? null );
+	}
+
+	private static function collect_media_url_insert_failures( array &$failures, array $case, array $result ): void {
+		$output = (string) ( $result['output'] ?? '' );
+		$events = is_array( $result['events'] ?? null ) ? $result['events'] : array();
+		$event  = $events[0] ?? array();
+		$html   = (string) ( $event['html'] ?? '' );
+		$src    = (string) ( $event['src'] ?? '' );
+		$hook   = (string) ( $event['hook'] ?? '' );
+
+		self::collect_failure(
+			$failures,
+			1 === count( $events )
+				&& (string) ( $case['expectedHook'] ?? '' ) === $hook
+				&& str_contains( $output, 'win.send_to_editor(' )
+				&& str_contains( $output, 'data-cfz-url' )
+				&& str_contains( $output, (string) ( $result['token'] ?? '' ) )
+				&& ! str_contains( $output, '<script>alert(1)</script>' )
+				&& ! str_contains( $output, '</script><script>' ),
+			'wp_media_upload_handler() URL insert branch exits through media_send_to_editor with the expected filtered hook output',
+			array(
+				'case'   => $case,
+				'events' => $events,
+				'output' => self::describe_string( $output ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			( $result['contentBefore'] ?? array() ) === ( $result['contentAfter'] ?? array() ),
+			'URL insert dispatch does not create attachment rows or metadata',
+			array(
+				'before' => $result['contentBefore'] ?? array(),
+				'after'  => $result['contentAfter'] ?? array(),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			'' !== $src
+				&& ! str_contains( $src, '<' )
+				&& ! str_contains( $src, '>' )
+				&& ( empty( $case['expectsHttp'] ) || str_starts_with( $src, 'http://' ) ),
+			'URL insert filters receive a sanitized URL with scheme-normalized relative sources',
+			array(
+				'case' => $case,
+				'src'  => self::describe_string( $src ),
+			)
+		);
+
+		if ( 'img' === ( $case['expectedTag'] ?? null ) ) {
+			self::collect_failure(
+				$failures,
+				str_contains( $html, '<img ' )
+					&& str_contains( $html, 'src=' )
+					&& str_contains( $html, 'alt=' )
+					&& str_contains( $html, "class='align" )
+					&& ! str_contains( $html, '<script>' )
+					&& str_contains( (string) ( $event['alt'] ?? '' ), '&lt;script&gt;' )
+					&& (
+						str_contains( (string) ( $case['align'] ?? '' ), '"' )
+							? str_contains( (string) ( $event['align'] ?? '' ), '&quot;' )
+							: (string) ( $case['align'] ?? '' ) === (string) ( $event['align'] ?? '' )
+					),
+				'image URL insert escapes alt and align attributes before filtering',
+				array(
+					'event' => $event,
+					'html'  => self::describe_string( $html ),
+				)
+			);
+		} else {
+			self::collect_failure(
+				$failures,
+				str_contains( $html, '<a ' )
+					&& str_contains( $html, "href='" )
+					&& ! str_contains( $html, '<script>' )
+					&& ! str_contains( $html, '</script>' )
+					&& '' !== (string) ( $event['title'] ?? '' ),
+				'non-image URL insert renders escaped link HTML with explicit or basename-derived title text',
+				array(
+					'event' => $event,
+					'html'  => self::describe_string( $html ),
+				)
+			);
+		}
 	}
 
 	private static function check_media_attach_action_redirect_exit( \ComponentFuzz\FuzzContext $ctx ): array {
