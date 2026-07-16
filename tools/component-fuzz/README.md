@@ -799,7 +799,8 @@ database, network requests, or a configured site.
   projection, REST links, invalid IDs/types, sanitized content/meta fields,
   safe create/update/delete error paths, route-dispatched write validation and
   response projection for object updates, route-dispatched create/delete
-  validation, projection, trash-not-supported preservation, upload-no-data paths,
+  validation, projection, trash-not-supported preservation,
+  force-delete/reassign lifecycle and metadata cleanup, upload-no-data paths,
   and deterministic state restoration without live uploads, remote requests, or
   a live database.
 - `rest-site-editor`: no-live-DB Site Editor REST controller coverage for

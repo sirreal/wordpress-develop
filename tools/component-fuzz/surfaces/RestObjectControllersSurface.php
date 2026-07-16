@@ -48,6 +48,7 @@ final class RestObjectControllersSurface {
 			$rows[] = self::check_short_circuited_collection_queries( $ctx->fork( 'collection-queries' ), $case, $fixtures );
 			$rows[] = self::check_route_dispatched_object_write_edges( $ctx->fork( 'object-write-dispatch' ), $case, $fixtures );
 			$rows[] = self::check_route_dispatched_object_create_delete_edges( $ctx->fork( 'object-create-delete-dispatch' ), $case, $fixtures );
+			$rows[] = self::check_route_dispatched_object_force_delete_edges( $ctx->fork( 'object-force-delete-dispatch' ), $case, $fixtures );
 		} catch ( \Throwable $e ) {
 			$rows[] = self::row(
 				$ctx,
@@ -3929,6 +3930,530 @@ final class RestObjectControllersSurface {
 		return self::row(
 			$ctx,
 			'rest-object-controllers.route-dispatched-create-delete-validation-cleanup',
+			array() === $failures,
+			array(
+				'case'     => self::case_summary( $case ),
+				'failures' => array_slice( $failures, 0, 8 ),
+				'observed' => $observed,
+			)
+		);
+	}
+
+	private static function check_route_dispatched_object_force_delete_edges( \ComponentFuzz\FuzzContext $ctx, array $case, array $fixtures ): array {
+		$failures = array();
+		$observed = array();
+
+		$previous_server          = $GLOBALS['wp_rest_server'] ?? null;
+		$had_wp_actions           = array_key_exists( 'wp_actions', $GLOBALS );
+		$previous_actions         = $GLOBALS['wp_actions'] ?? null;
+		$previous_current_user_id = isset( $GLOBALS['current_user'] ) && $GLOBALS['current_user'] instanceof \WP_User
+			? (int) $GLOBALS['current_user']->ID
+			: 0;
+
+		$server                    = new \WP_REST_Server();
+		$GLOBALS['wp_rest_server'] = $server;
+
+		if ( ! isset( $GLOBALS['wp_actions'] ) || ! is_array( $GLOBALS['wp_actions'] ) ) {
+			$GLOBALS['wp_actions'] = array();
+		}
+		$GLOBALS['wp_actions']['rest_api_init'] = max( 1, (int) ( $GLOBALS['wp_actions']['rest_api_init'] ?? 0 ) );
+
+		$cap_filter               = null;
+		$write_filter_restored    = false;
+		$email_filter_restored    = false;
+		$sanitize_filter_restored = false;
+		$server_restored          = false;
+		$actions_restored         = false;
+		$current_user_restored    = false;
+
+		try {
+			$controllers = array(
+				new \WP_REST_Posts_Controller( 'post' ),
+				new \WP_REST_Terms_Controller( 'category' ),
+				new \WP_REST_Comments_Controller(),
+				new \WP_REST_Users_Controller(),
+			);
+
+			foreach ( $controllers as $controller ) {
+				$controller->register_routes();
+			}
+
+			$force_post_title       = 'Force Delete REST Post ' . $case['token'];
+			$force_post_content     = '<p>Force delete content ' . $case['token'] . '</p>';
+			$force_post_slug        = 'Force Delete REST Slug ' . $case['token'];
+			$force_term_name        = 'Force Delete Term ' . $case['token'];
+			$force_term_slug        = 'Force Delete Term Slug ' . $case['token'];
+			$force_comment_body     = 'Force delete comment ' . $case['token'];
+			$force_comment_email    = 'force-comment-' . $case['token'] . '@example.com';
+			$force_user_login       = 'cfz_force_user_' . $case['token'];
+			$force_user_email       = 'force-user-' . $case['token'] . '@example.com';
+			$force_user_name        = 'Force Delete User ' . $case['token'];
+			$force_user_password    = 'force-pass-' . $case['token'] . '-A1';
+			$force_user_slug        = 'Force Delete User ' . $case['token'];
+			$reassigned_post_title  = 'Force Reassigned Post ' . $case['token'];
+			$reassigned_post_slug   = 'Force Reassigned Slug ' . $case['token'];
+			$force_post_meta_key    = $case['postMetaKey'] . '_force_delete';
+			$force_term_meta_key    = 'cfz_force_term_meta_' . $case['token'];
+			$force_comment_meta_key = 'cfz_force_comment_meta_' . $case['token'];
+			$force_user_meta_key    = 'cfz_force_user_meta_' . $case['token'];
+			$accepted_emails        = array_fill_keys(
+				array(
+					$force_comment_email,
+					$force_user_email,
+				),
+				true
+			);
+			$email_filter           = static function ( $is_email, string $email ) use ( $accepted_emails ) {
+				return isset( $accepted_emails[ $email ] ) ? $email : $is_email;
+			};
+			$sanitize_email_filter  = static function ( string $sanitized, string $email ) use ( $accepted_emails ): string {
+				return isset( $accepted_emails[ $email ] ) ? $email : $sanitized;
+			};
+
+			$counts_before = self::content_counts();
+
+			\wp_set_current_user( 0 );
+			$denied_delete_response = $server->dispatch(
+				self::request(
+					'DELETE',
+					'/wp/v2/posts/' . $fixtures['post'],
+					array(),
+					array(),
+					array( 'force' => true )
+				)
+			);
+			$counts_after_denial = self::content_counts();
+
+			\wp_set_current_user( $fixtures['author'] );
+			$cap_filter = self::install_cap_filter(
+				array(
+					'create_users',
+					'delete_categories',
+					'delete_comment',
+					'delete_comments',
+					'delete_post',
+					'delete_posts',
+					'delete_user',
+					'delete_users',
+					'edit_categories',
+					'edit_comment',
+					'edit_comments',
+					'edit_others_posts',
+					'edit_post',
+					'edit_posts',
+					'edit_published_posts',
+					'edit_term',
+					'edit_terms',
+					'edit_user',
+					'edit_users',
+					'list_users',
+					'manage_categories',
+					'moderate_comments',
+					'publish_posts',
+					'read',
+				)
+			);
+			\add_filter( 'is_email', $email_filter, 10, 2 );
+			\add_filter( 'sanitize_email', $sanitize_email_filter, 10, 2 );
+
+			try {
+				$force_post_response = $server->dispatch(
+					self::request(
+						'POST',
+						'/wp/v2/posts',
+						array( '_fields' => 'author,content,id,slug,status,title' ),
+						array(),
+						array(
+							'author'  => $fixtures['author'],
+							'content' => $force_post_content,
+							'slug'    => $force_post_slug,
+							'status'  => 'publish',
+							'title'   => $force_post_title,
+						)
+					)
+				);
+				$force_post_data = $force_post_response instanceof \WP_REST_Response ? $force_post_response->get_data() : array();
+				$force_post_id   = (int) ( $force_post_data['id'] ?? 0 );
+				if ( $force_post_id > 0 ) {
+					\update_post_meta( $force_post_id, $force_post_meta_key, 'force-post-meta-' . $case['token'] );
+				}
+
+				$force_term_response = $server->dispatch(
+					self::request(
+						'POST',
+						'/wp/v2/categories',
+						array( '_fields' => 'id,name,parent,slug,taxonomy' ),
+						array(),
+						array(
+							'description' => 'Force term description ' . $case['token'],
+							'name'        => $force_term_name,
+							'parent'      => $fixtures['term'],
+							'slug'        => $force_term_slug,
+						)
+					)
+				);
+				$force_term_data = $force_term_response instanceof \WP_REST_Response ? $force_term_response->get_data() : array();
+				$force_term_id   = (int) ( $force_term_data['id'] ?? 0 );
+				if ( $force_term_id > 0 ) {
+					\update_term_meta( $force_term_id, $force_term_meta_key, 'force-term-meta-' . $case['token'] );
+				}
+
+				$force_comment_response = $server->dispatch(
+					self::request(
+						'POST',
+						'/wp/v2/comments',
+						array( '_fields' => 'content,id,parent,post,status,type' ),
+						array(),
+						array(
+							'author'       => $fixtures['author'],
+							'author_email' => $force_comment_email,
+							'author_name'  => $case['commentAuthorName'],
+							'content'      => $force_comment_body,
+							'parent'       => 0,
+							'post'         => $fixtures['post'],
+							'status'       => 'approve',
+							'type'         => 'comment',
+						)
+					)
+				);
+				$force_comment_data = $force_comment_response instanceof \WP_REST_Response ? $force_comment_response->get_data() : array();
+				$force_comment_id   = (int) ( $force_comment_data['id'] ?? 0 );
+				if ( $force_comment_id > 0 ) {
+					\update_comment_meta( $force_comment_id, $force_comment_meta_key, 'force-comment-meta-' . $case['token'] );
+				}
+
+				$force_user_response = $server->dispatch(
+					self::request(
+						'POST',
+						'/wp/v2/users',
+						array( '_fields' => 'email,id,name,slug,username' ),
+						array(),
+						array(
+							'email'    => $force_user_email,
+							'name'     => $force_user_name,
+							'password' => $force_user_password,
+							'slug'     => $force_user_slug,
+							'username' => $force_user_login,
+						)
+					)
+				);
+				$force_user_data = $force_user_response instanceof \WP_REST_Response ? $force_user_response->get_data() : array();
+				$force_user_id   = (int) ( $force_user_data['id'] ?? 0 );
+				if ( $force_user_id > 0 ) {
+					\update_user_meta( $force_user_id, $force_user_meta_key, 'force-user-meta-' . $case['token'] );
+				}
+
+				$reassigned_post_response = $server->dispatch(
+					self::request(
+						'POST',
+						'/wp/v2/posts',
+						array( '_fields' => 'author,id,slug,title' ),
+						array(),
+						array(
+							'author' => $force_user_id,
+							'slug'   => $reassigned_post_slug,
+							'status' => 'publish',
+							'title'  => $reassigned_post_title,
+						)
+					)
+				);
+				$reassigned_post_data = $reassigned_post_response instanceof \WP_REST_Response ? $reassigned_post_response->get_data() : array();
+				$reassigned_post_id   = (int) ( $reassigned_post_data['id'] ?? 0 );
+
+				$counts_after_setup = self::content_counts();
+
+				$invalid_reassign_response = $server->dispatch(
+					self::request(
+						'DELETE',
+						'/wp/v2/users/' . $force_user_id,
+						array(),
+						array(),
+						array(
+							'force'    => true,
+							'reassign' => $force_user_id,
+						)
+					)
+				);
+				$counts_after_invalid_reassign = self::content_counts();
+				$post_after_invalid_reassign   = \get_post( $reassigned_post_id );
+				$user_after_invalid_reassign   = \get_user_by( 'id', $force_user_id );
+
+				$post_delete_response = $server->dispatch(
+					self::request(
+						'DELETE',
+						'/wp/v2/posts/' . $force_post_id,
+						array(),
+						array(),
+						array( 'force' => true )
+					)
+				);
+				$term_delete_response = $server->dispatch(
+					self::request(
+						'DELETE',
+						'/wp/v2/categories/' . $force_term_id,
+						array(),
+						array(),
+						array( 'force' => true )
+					)
+				);
+				$comment_delete_response = $server->dispatch(
+					self::request(
+						'DELETE',
+						'/wp/v2/comments/' . $force_comment_id,
+						array(),
+						array(),
+						array( 'force' => true )
+					)
+				);
+				$user_delete_response = $server->dispatch(
+					self::request(
+						'DELETE',
+						'/wp/v2/users/' . $force_user_id,
+						array(),
+						array(),
+						array(
+							'force'    => true,
+							'reassign' => $fixtures['author'],
+						)
+					)
+				);
+			} finally {
+				\remove_filter( 'sanitize_email', $sanitize_email_filter, 10 );
+				$sanitize_filter_restored = false === \has_filter( 'sanitize_email', $sanitize_email_filter );
+				\remove_filter( 'is_email', $email_filter, 10 );
+				$email_filter_restored = false === \has_filter( 'is_email', $email_filter );
+				$write_filter_restored = self::remove_cap_filter( $cap_filter );
+				$cap_filter            = null;
+			}
+
+			$counts_after = self::content_counts();
+			$post_delete_data = $post_delete_response instanceof \WP_REST_Response ? $post_delete_response->get_data() : array();
+			$term_delete_data = $term_delete_response instanceof \WP_REST_Response ? $term_delete_response->get_data() : array();
+			$comment_delete_data = $comment_delete_response instanceof \WP_REST_Response ? $comment_delete_response->get_data() : array();
+			$user_delete_data = $user_delete_response instanceof \WP_REST_Response ? $user_delete_response->get_data() : array();
+			$deleted_post = \get_post( $force_post_id );
+			$deleted_term = \get_term( $force_term_id, 'category' );
+			$deleted_comment = \get_comment( $force_comment_id );
+			$deleted_user = \get_user_by( 'id', $force_user_id );
+			$reassigned_post_after_delete = \get_post( $reassigned_post_id );
+
+			$observed = array(
+				'deniedDelete'           => $denied_delete_response instanceof \WP_REST_Response ? $denied_delete_response->get_data() : $denied_delete_response,
+				'created'                => array(
+					'post'           => $force_post_data,
+					'term'           => $force_term_data,
+					'comment'        => $force_comment_data,
+					'user'           => $force_user_data,
+					'reassignedPost' => $reassigned_post_data,
+				),
+				'invalidReassign'        => $invalid_reassign_response instanceof \WP_REST_Response ? $invalid_reassign_response->get_data() : $invalid_reassign_response,
+				'deleteResponses'        => array(
+					'post'    => $post_delete_data,
+					'term'    => $term_delete_data,
+					'comment' => $comment_delete_data,
+					'user'    => $user_delete_data,
+				),
+				'storedAfterInvalid'      => array(
+					'userExists'  => $user_after_invalid_reassign instanceof \WP_User,
+					'postAuthor'  => $post_after_invalid_reassign instanceof \WP_Post ? (int) $post_after_invalid_reassign->post_author : null,
+				),
+				'storedAfterDelete'       => array(
+					'postExists'           => $deleted_post instanceof \WP_Post,
+					'termExists'           => $deleted_term instanceof \WP_Term,
+					'commentExists'        => $deleted_comment instanceof \WP_Comment,
+					'userExists'           => $deleted_user instanceof \WP_User,
+					'reassignedPostAuthor' => $reassigned_post_after_delete instanceof \WP_Post ? (int) $reassigned_post_after_delete->post_author : null,
+				),
+				'metadataAfterDelete'     => array(
+					'post'    => $force_post_id > 0 ? \get_post_meta( $force_post_id, $force_post_meta_key, true ) : null,
+					'term'    => $force_term_id > 0 ? \get_term_meta( $force_term_id, $force_term_meta_key, true ) : null,
+					'comment' => $force_comment_id > 0 ? \get_comment_meta( $force_comment_id, $force_comment_meta_key, true ) : null,
+					'user'    => $force_user_id > 0 ? \get_user_meta( $force_user_id, $force_user_meta_key, true ) : null,
+				),
+				'countsBefore'           => $counts_before,
+				'countsDenied'           => $counts_after_denial,
+				'countsAfterSetup'       => $counts_after_setup,
+				'countsAfterInvalid'     => $counts_after_invalid_reassign,
+				'countsAfter'            => $counts_after,
+				'filtersRestored'        => array(
+					'cap'           => $write_filter_restored,
+					'email'         => $email_filter_restored,
+					'sanitizeEmail' => $sanitize_filter_restored,
+				),
+			);
+
+			self::collect_failure(
+				$failures,
+				self::response_error_ok( $denied_delete_response, 'rest_cannot_delete', 401 )
+					&& self::content_count_delta_matches( $counts_before, $counts_after_denial, array(), array() ),
+				'route-dispatched force delete denies unauthenticated post deletion before row changes',
+				array(
+					'deniedDelete' => $observed['deniedDelete'],
+					'countsBefore' => $counts_before,
+					'countsDenied' => $counts_after_denial,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$force_post_response instanceof \WP_REST_Response
+					&& 201 === $force_post_response->get_status()
+					&& $force_post_id > 0
+					&& $force_post_title === ( $force_post_data['title']['raw'] ?? null )
+					&& $force_term_response instanceof \WP_REST_Response
+					&& 201 === $force_term_response->get_status()
+					&& $force_term_id > 0
+					&& $force_term_name === ( $force_term_data['name'] ?? null )
+					&& $force_comment_response instanceof \WP_REST_Response
+					&& 201 === $force_comment_response->get_status()
+					&& $force_comment_id > 0
+					&& $force_comment_body === ( $force_comment_data['content']['raw'] ?? null )
+					&& $force_user_response instanceof \WP_REST_Response
+					&& 201 === $force_user_response->get_status()
+					&& $force_user_id > 0
+					&& $force_user_login === ( $force_user_data['username'] ?? null )
+					&& $reassigned_post_response instanceof \WP_REST_Response
+					&& 201 === $reassigned_post_response->get_status()
+					&& $reassigned_post_id > 0
+					&& $force_user_id === (int) ( $reassigned_post_data['author'] ?? 0 )
+					&& self::content_count_delta_matches(
+						$counts_before,
+						$counts_after_setup,
+						array(
+							'comments'      => 1,
+							'comment_meta'  => 1,
+							'post_meta'     => 1,
+							'posts'         => 2,
+							'term_meta'     => 1,
+							'term_taxonomy' => 1,
+							'terms'         => 1,
+							'users'         => 1,
+						),
+						array( 'user_meta' )
+					),
+				'route-dispatched setup creates force-delete targets, metadata, and reassignment content',
+				$observed['created']
+			);
+
+			self::collect_failure(
+				$failures,
+				self::response_error_ok( $invalid_reassign_response, 'rest_user_invalid_reassign', 400 )
+					&& $user_after_invalid_reassign instanceof \WP_User
+					&& $post_after_invalid_reassign instanceof \WP_Post
+					&& $force_user_id === (int) $post_after_invalid_reassign->post_author
+					&& self::content_count_delta_matches( $counts_after_setup, $counts_after_invalid_reassign, array(), array() ),
+				'route-dispatched user force delete rejects self-reassign before deleting or reassigning rows',
+				array(
+					'invalidReassign'   => $observed['invalidReassign'],
+					'storedAfterInvalid' => $observed['storedAfterInvalid'],
+					'countsAfterSetup'  => $counts_after_setup,
+					'countsAfterInvalid' => $counts_after_invalid_reassign,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$post_delete_response instanceof \WP_REST_Response
+					&& 200 === $post_delete_response->get_status()
+					&& true === ( $post_delete_data['deleted'] ?? null )
+					&& $force_post_id === (int) ( $post_delete_data['previous']['id'] ?? 0 )
+					&& $force_post_title === ( $post_delete_data['previous']['title']['raw'] ?? null )
+					&& $term_delete_response instanceof \WP_REST_Response
+					&& 200 === $term_delete_response->get_status()
+					&& true === ( $term_delete_data['deleted'] ?? null )
+					&& $force_term_id === (int) ( $term_delete_data['previous']['id'] ?? 0 )
+					&& $force_term_name === ( $term_delete_data['previous']['name'] ?? null )
+					&& $comment_delete_response instanceof \WP_REST_Response
+					&& 200 === $comment_delete_response->get_status()
+					&& true === ( $comment_delete_data['deleted'] ?? null )
+					&& $force_comment_id === (int) ( $comment_delete_data['previous']['id'] ?? 0 )
+					&& $force_comment_body === ( $comment_delete_data['previous']['content']['raw'] ?? null )
+					&& $user_delete_response instanceof \WP_REST_Response
+					&& 200 === $user_delete_response->get_status()
+					&& true === ( $user_delete_data['deleted'] ?? null )
+					&& $force_user_id === (int) ( $user_delete_data['previous']['id'] ?? 0 )
+					&& $force_user_email === ( $user_delete_data['previous']['email'] ?? null )
+					&& ! ( $deleted_post instanceof \WP_Post )
+					&& ! ( $deleted_term instanceof \WP_Term )
+					&& ! ( $deleted_comment instanceof \WP_Comment )
+					&& ! ( $deleted_user instanceof \WP_User )
+					&& $reassigned_post_after_delete instanceof \WP_Post
+					&& $fixtures['author'] === (int) $reassigned_post_after_delete->post_author
+					&& '' === (string) $observed['metadataAfterDelete']['post']
+					&& '' === (string) $observed['metadataAfterDelete']['term']
+					&& '' === (string) $observed['metadataAfterDelete']['comment']
+					&& '' === (string) $observed['metadataAfterDelete']['user']
+					&& self::content_count_delta_matches(
+						$counts_before,
+						$counts_after,
+						array( 'posts' => 1 ),
+						array()
+					),
+				'route-dispatched force deletes remove target rows and metadata while reassigning user-owned content',
+				$observed
+			);
+		} finally {
+			if ( isset( $sanitize_email_filter ) && false !== \has_filter( 'sanitize_email', $sanitize_email_filter ) ) {
+				\remove_filter( 'sanitize_email', $sanitize_email_filter, 10 );
+				$sanitize_filter_restored = false === \has_filter( 'sanitize_email', $sanitize_email_filter );
+			}
+			if ( isset( $email_filter ) && false !== \has_filter( 'is_email', $email_filter ) ) {
+				\remove_filter( 'is_email', $email_filter, 10 );
+				$email_filter_restored = false === \has_filter( 'is_email', $email_filter );
+			}
+			if ( null !== $cap_filter ) {
+				$write_filter_restored = self::remove_cap_filter( $cap_filter );
+			}
+
+			\wp_set_current_user( $previous_current_user_id );
+
+			if ( $had_wp_actions ) {
+				$GLOBALS['wp_actions'] = $previous_actions;
+			} else {
+				unset( $GLOBALS['wp_actions'] );
+			}
+
+			if ( null !== $previous_server ) {
+				$GLOBALS['wp_rest_server'] = $previous_server;
+			} else {
+				unset( $GLOBALS['wp_rest_server'] );
+			}
+
+			$actions_restored = $had_wp_actions
+				? $previous_actions === ( $GLOBALS['wp_actions'] ?? null )
+				: ! array_key_exists( 'wp_actions', $GLOBALS );
+			$server_restored = null !== $previous_server
+				? $previous_server === ( $GLOBALS['wp_rest_server'] ?? null )
+				: ! array_key_exists( 'wp_rest_server', $GLOBALS );
+			$current_user_restored = $previous_current_user_id === (
+				isset( $GLOBALS['current_user'] ) && $GLOBALS['current_user'] instanceof \WP_User
+					? (int) $GLOBALS['current_user']->ID
+					: 0
+			);
+		}
+
+		self::collect_failure(
+			$failures,
+			$write_filter_restored
+				&& $email_filter_restored
+				&& $sanitize_filter_restored
+				&& $server_restored
+				&& $actions_restored
+				&& $current_user_restored,
+			'route-dispatched object force-delete harness restores caps, email filters, server, actions, and current user',
+			array(
+				'writeFilterRestored'    => $write_filter_restored,
+				'emailFilterRestored'    => $email_filter_restored,
+				'sanitizeFilterRestored' => $sanitize_filter_restored,
+				'serverRestored'         => $server_restored,
+				'actionsRestored'        => $actions_restored,
+				'currentUserRestored'    => $current_user_restored,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'rest-object-controllers.route-dispatched-force-delete-reassign-cleanup',
 			array() === $failures,
 			array(
 				'case'     => self::case_summary( $case ),
