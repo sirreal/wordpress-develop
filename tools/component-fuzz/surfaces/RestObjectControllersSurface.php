@@ -51,6 +51,7 @@ final class RestObjectControllersSurface {
 			$rows[] = self::check_route_dispatched_object_create_delete_edges( $ctx->fork( 'object-create-delete-dispatch' ), $case, $fixtures );
 			$rows[] = self::check_route_dispatched_page_parent_slug_edges( $ctx->fork( 'page-parent-slug-dispatch' ), $case, $fixtures );
 			$rows[] = self::check_route_dispatched_custom_hierarchical_post_type_permalink_edges( $ctx->fork( 'custom-hierarchical-permalink-dispatch' ), $case, $fixtures );
+			$rows[] = self::check_route_dispatched_custom_hierarchical_collection_parent_filters( $ctx->fork( 'custom-hierarchical-collection-parent-filters' ), $case, $fixtures );
 			$rows[] = self::check_route_dispatched_object_force_delete_edges( $ctx->fork( 'object-force-delete-dispatch' ), $case, $fixtures );
 			$rows[] = self::check_route_dispatched_term_mutation_edges( $ctx->fork( 'term-mutation-dispatch' ), $case, $fixtures );
 		} catch ( \Throwable $e ) {
@@ -6472,6 +6473,696 @@ final class RestObjectControllersSurface {
 		return self::row(
 			$ctx,
 			'rest-object-controllers.route-dispatched-custom-hierarchical-permalink-cleanup',
+			array() === $failures,
+			array(
+				'case'     => self::case_summary( $case ),
+				'postType' => $post_type,
+				'restBase' => $rest_base,
+				'failures' => array_slice( $failures, 0, 8 ),
+				'observed' => $observed,
+			)
+		);
+	}
+
+	private static function check_route_dispatched_custom_hierarchical_collection_parent_filters( \ComponentFuzz\FuzzContext $ctx, array $case, array $fixtures ): array {
+		$failures       = array();
+		$observed       = array();
+		$post_ids       = array();
+		$prepare_events = array();
+
+		$token                    = substr( $case['token'], 0, 8 );
+		$post_type                = 'cfc_' . $token;
+		$rest_base                = 'custom-hier-list-' . $token;
+		$rewrite_slug             = 'rest-custom-list-' . $token;
+		$marker                   = 'component-fuzz-custom-hier-collection-' . $ctx->seed() . '-' . $ctx->iteration();
+		$previous_server          = $GLOBALS['wp_rest_server'] ?? null;
+		$had_wp_actions           = array_key_exists( 'wp_actions', $GLOBALS );
+		$previous_actions         = $GLOBALS['wp_actions'] ?? null;
+		$previous_current_user_id = isset( $GLOBALS['current_user'] ) && $GLOBALS['current_user'] instanceof \WP_User
+			? (int) $GLOBALS['current_user']->ID
+			: 0;
+		$previous_rewrite_set     = array_key_exists( 'wp_rewrite', $GLOBALS );
+		$previous_rewrite         = $GLOBALS['wp_rewrite'] ?? null;
+		$had_post_type            = isset( $GLOBALS['wp_post_types'][ $post_type ] );
+		$previous_post_type       = $GLOBALS['wp_post_types'][ $post_type ] ?? null;
+		$previous_query_vars      = isset( $GLOBALS['wp'] ) && is_object( $GLOBALS['wp'] ) && property_exists( $GLOBALS['wp'], 'public_query_vars' )
+			? $GLOBALS['wp']->public_query_vars
+			: null;
+
+		$server                    = new \WP_REST_Server();
+		$GLOBALS['wp_rest_server'] = $server;
+
+		if ( ! isset( $GLOBALS['wp_actions'] ) || ! is_array( $GLOBALS['wp_actions'] ) ) {
+			$GLOBALS['wp_actions'] = array();
+		}
+		$GLOBALS['wp_actions']['rest_api_init'] = max( 1, (int) ( $GLOBALS['wp_actions']['rest_api_init'] ?? 0 ) );
+
+		$filter_snapshot           = self::rest_default_filter_state();
+		$permalink_structure       = '/%postname%/';
+		$permalink_filter          = static function () use ( $permalink_structure ): string {
+			return $permalink_structure;
+		};
+		$cap_filter                = null;
+		$custom_filters_restored   = false;
+		$cap_filter_restored       = false;
+		$default_filters_restored  = false;
+		$permalink_filter_restored = false;
+		$rewrite_restored          = false;
+		$server_restored           = false;
+		$actions_restored          = false;
+		$current_user_restored     = false;
+		$post_type_restored        = false;
+		$query_vars_restored       = false;
+		$counts_before             = self::content_counts();
+		$counts_after_cleanup      = array();
+		$rest_args                 = array();
+		$query_vars                = array();
+		$objects_by_case           = array();
+		$totals_by_case            = array(
+			'parent'         => 4,
+			'parent_exclude' => 3,
+			'root'           => 1,
+		);
+
+		$remember_post = static function ( $post_id ) use ( &$post_ids ): int {
+			if ( is_int( $post_id ) && $post_id > 0 ) {
+				$post_ids[] = $post_id;
+				return $post_id;
+			}
+
+			return 0;
+		};
+		$delete_posts  = static function () use ( &$post_ids ): void {
+			foreach ( array_reverse( array_unique( array_map( 'intval', $post_ids ) ) ) as $post_id ) {
+				if ( $post_id > 0 ) {
+					\wp_delete_post( $post_id, true );
+				}
+			}
+
+			$post_ids = array();
+		};
+		$post_summary = static function ( $post ): ?array {
+			if ( ! $post instanceof \WP_Post ) {
+				return null;
+			}
+
+			return array(
+				'id'        => (int) $post->ID,
+				'menuOrder' => (int) $post->menu_order,
+				'parent'    => (int) $post->post_parent,
+				'slug'      => $post->post_name,
+				'status'    => $post->post_status,
+				'type'      => $post->post_type,
+			);
+		};
+		$case_for_request = static function ( \WP_REST_Request $request ): string {
+			if ( array() !== (array) $request->get_param( 'parent_exclude' ) ) {
+				return 'parent_exclude';
+			}
+
+			$parents = array_values( array_map( 'intval', (array) $request->get_param( 'parent' ) ) );
+			if ( array( 0 ) === $parents ) {
+				return 'root';
+			}
+			if ( array() !== $parents ) {
+				return 'parent';
+			}
+
+			return 'unknown';
+		};
+
+		$rest_filter = static function ( array $args, \WP_REST_Request $request ) use ( &$rest_args, $case_for_request, $marker ): array {
+			$args['component_fuzz_custom_hier_collection'] = $case_for_request( $request );
+			$args['component_fuzz_custom_hier_marker']     = $marker;
+			$args['no_found_rows']                         = true;
+			$rest_args[] = array(
+				'args'   => $args,
+				'method' => $request->get_method(),
+				'params' => $request->get_params(),
+				'route'  => $request->get_route(),
+			);
+			return $args;
+		};
+		$pre_filter  = static function ( $posts, \WP_Query $query ) use ( &$query_vars, &$objects_by_case, $marker, $totals_by_case ): array {
+			if ( $marker !== ( $query->query_vars['component_fuzz_custom_hier_marker'] ?? null ) ) {
+				return $posts;
+			}
+
+			$query_vars[]          = $query->query_vars;
+			$case_name             = (string) ( $query->query_vars['component_fuzz_custom_hier_collection'] ?? 'unknown' );
+			$total                 = (int) ( $totals_by_case[ $case_name ] ?? 0 );
+			$query->found_posts    = $total;
+			$query->max_num_pages  = (int) ceil( $total / max( 1, (int) ( $query->query_vars['posts_per_page'] ?? 1 ) ) );
+			$objects               = $objects_by_case[ $case_name ] ?? array();
+
+			if ( 'ids' === ( $query->query_vars['fields'] ?? null ) ) {
+				return array_values(
+					array_map(
+						static function ( \WP_Post $post ): int {
+							return (int) $post->ID;
+						},
+						$objects
+					)
+				);
+			}
+
+			return $objects;
+		};
+		$prepare_filter = static function ( $response, $post, \WP_REST_Request $request ) use ( &$prepare_events, $post_type ) {
+			if ( $response instanceof \WP_REST_Response && $post instanceof \WP_Post && $post_type === $post->post_type ) {
+				$prepare_events[] = self::prepare_event( $post_type, (int) $post->ID, $request );
+			}
+			return $response;
+		};
+
+		try {
+			$GLOBALS['wp_rewrite'] = new \WP_Rewrite();
+			$GLOBALS['wp_rewrite']->permalink_structure = $permalink_structure;
+			\add_filter( 'pre_option_permalink_structure', $permalink_filter );
+
+			$registration = \register_post_type(
+				$post_type,
+				array(
+					'capability_type'       => 'page',
+					'hierarchical'          => true,
+					'map_meta_cap'          => true,
+					'public'                => true,
+					'query_var'             => false,
+					'rest_base'             => $rest_base,
+					'rest_controller_class' => 'WP_REST_Posts_Controller',
+					'rewrite'               => array(
+						'slug'       => $rewrite_slug,
+						'with_front' => false,
+					),
+					'show_in_rest'          => true,
+					'show_ui'               => true,
+					'supports'              => array( 'title', 'editor', 'author', 'page-attributes' ),
+				)
+			);
+			$post_type_object = \get_post_type_object( $post_type );
+			$controller       = $post_type_object instanceof \WP_Post_Type ? new \WP_REST_Posts_Controller( $post_type ) : null;
+			if ( $controller instanceof \WP_REST_Posts_Controller ) {
+				$controller->register_routes();
+			}
+			\rest_api_default_filters();
+
+			$routes            = $server->get_routes();
+			$collection_params = $controller instanceof \WP_REST_Posts_Controller ? $controller->get_collection_params() : array();
+			$item_schema       = $controller instanceof \WP_REST_Posts_Controller ? $controller->get_item_schema() : array();
+			$schema_props      = is_array( $item_schema['properties'] ?? null ) ? $item_schema['properties'] : array();
+
+			self::collect_failure(
+				$failures,
+				$registration instanceof \WP_Post_Type
+					&& $post_type_object instanceof \WP_Post_Type
+					&& $controller instanceof \WP_REST_Posts_Controller
+					&& true === $post_type_object->hierarchical
+					&& true === $post_type_object->show_in_rest
+					&& $rest_base === $post_type_object->rest_base
+					&& isset( $routes[ '/wp/v2/' . $rest_base ], $routes[ '/wp/v2/' . $rest_base . '/(?P<id>[\\d]+)' ] )
+					&& isset( $collection_params['parent'], $collection_params['parent_exclude'], $collection_params['menu_order'] )
+					&& array() === ( $collection_params['parent']['default'] ?? null )
+					&& array() === ( $collection_params['parent_exclude']['default'] ?? null )
+					&& self::collection_enum_contains( $collection_params, 'orderby', array( 'parent', 'include_slugs', 'menu_order' ) )
+					&& array_key_exists( 'parent', $schema_props )
+					&& array_key_exists( 'menu_order', $schema_props ),
+				'custom hierarchical collection route registers parent filters, menu order params, and item schema fields',
+				array(
+					'postType'         => $post_type,
+					'restBase'         => $rest_base,
+					'collectionParams' => array_keys( $collection_params ),
+					'orderbyEnum'      => $collection_params['orderby']['enum'] ?? null,
+					'schemaProps'      => array_keys( $schema_props ),
+					'routes'           => array_keys( $routes ),
+				)
+			);
+
+			if ( $controller instanceof \WP_REST_Posts_Controller ) {
+				$parent_a_slug = 'rest-list-parent-a-' . $token;
+				$parent_b_slug = 'rest-list-parent-b-' . $token;
+				$child_a1_slug = 'rest-list-child-a1-' . $token;
+				$child_a2_slug = 'rest-list-child-a2-' . $token;
+				$child_b_slug  = 'rest-list-child-b-' . $token;
+				$root_slug     = 'rest-list-root-' . $token;
+
+				$parent_a_id = $remember_post(
+					\wp_insert_post(
+						\wp_slash(
+							array(
+								'menu_order'   => 10,
+								'post_author'  => $fixtures['author'],
+								'post_content' => 'REST list parent A ' . $token,
+								'post_name'    => $parent_a_slug,
+								'post_parent'  => 0,
+								'post_status'  => 'publish',
+								'post_title'   => 'REST List Parent A ' . $token,
+								'post_type'    => $post_type,
+							)
+						),
+						true,
+						false
+					)
+				);
+				$parent_b_id = $remember_post(
+					\wp_insert_post(
+						\wp_slash(
+							array(
+								'menu_order'   => 20,
+								'post_author'  => $fixtures['author'],
+								'post_content' => 'REST list parent B ' . $token,
+								'post_name'    => $parent_b_slug,
+								'post_parent'  => 0,
+								'post_status'  => 'publish',
+								'post_title'   => 'REST List Parent B ' . $token,
+								'post_type'    => $post_type,
+							)
+						),
+						true,
+						false
+					)
+				);
+				$child_a1_id = $remember_post(
+					\wp_insert_post(
+						\wp_slash(
+							array(
+								'menu_order'   => 2,
+								'post_author'  => $fixtures['author'],
+								'post_content' => 'REST list child A1 ' . $token,
+								'post_name'    => $child_a1_slug,
+								'post_parent'  => $parent_a_id,
+								'post_status'  => 'publish',
+								'post_title'   => 'REST List Child A1 ' . $token,
+								'post_type'    => $post_type,
+							)
+						),
+						true,
+						false
+					)
+				);
+				$child_a2_id = $remember_post(
+					\wp_insert_post(
+						\wp_slash(
+							array(
+								'menu_order'   => 1,
+								'post_author'  => $fixtures['author'],
+								'post_content' => 'REST list child A2 ' . $token,
+								'post_name'    => $child_a2_slug,
+								'post_parent'  => $parent_a_id,
+								'post_status'  => 'publish',
+								'post_title'   => 'REST List Child A2 ' . $token,
+								'post_type'    => $post_type,
+							)
+						),
+						true,
+						false
+					)
+				);
+				$child_b_id  = $remember_post(
+					\wp_insert_post(
+						\wp_slash(
+							array(
+								'menu_order'   => 3,
+								'post_author'  => $fixtures['author'],
+								'post_content' => 'REST list child B ' . $token,
+								'post_name'    => $child_b_slug,
+								'post_parent'  => $parent_b_id,
+								'post_status'  => 'publish',
+								'post_title'   => 'REST List Child B ' . $token,
+								'post_type'    => $post_type,
+							)
+						),
+						true,
+						false
+					)
+				);
+				$root_id     = $remember_post(
+					\wp_insert_post(
+						\wp_slash(
+							array(
+								'menu_order'   => 4,
+								'post_author'  => $fixtures['author'],
+								'post_content' => 'REST list root ' . $token,
+								'post_name'    => $root_slug,
+								'post_parent'  => 0,
+								'post_status'  => 'publish',
+								'post_title'   => 'REST List Root ' . $token,
+								'post_type'    => $post_type,
+							)
+						),
+						true,
+						false
+					)
+				);
+
+				$objects_by_case = array(
+					'parent'         => array_values(
+						array_filter(
+							array( \get_post( $child_a2_id ), \get_post( $child_a1_id ) ),
+							static fn ( $post ): bool => $post instanceof \WP_Post
+						)
+					),
+					'parent_exclude' => array_values(
+						array_filter(
+							array( \get_post( $root_id ), \get_post( $child_b_id ) ),
+							static fn ( $post ): bool => $post instanceof \WP_Post
+						)
+					),
+					'root'           => array_values(
+						array_filter(
+							array( \get_post( $root_id ) ),
+							static fn ( $post ): bool => $post instanceof \WP_Post
+						)
+					),
+				);
+
+				self::collect_failure(
+					$failures,
+					$parent_a_id > 0
+						&& $parent_b_id > 0
+						&& $child_a1_id > 0
+						&& $child_a2_id > 0
+						&& $child_b_id > 0
+						&& $root_id > 0,
+					'custom hierarchical collection fixtures create parent, child, and root scopes',
+					array(
+						'parentA' => $post_summary( \get_post( $parent_a_id ) ),
+						'parentB' => $post_summary( \get_post( $parent_b_id ) ),
+						'childA1' => $post_summary( \get_post( $child_a1_id ) ),
+						'childA2' => $post_summary( \get_post( $child_a2_id ) ),
+						'childB'  => $post_summary( \get_post( $child_b_id ) ),
+						'root'    => $post_summary( \get_post( $root_id ) ),
+					)
+				);
+
+				\add_filter( 'rest_' . $post_type . '_query', $rest_filter, 10, 2 );
+				\add_filter( 'posts_pre_query', $pre_filter, 10, 2 );
+				\add_filter( 'rest_prepare_' . $post_type, $prepare_filter, 10, 3 );
+				\wp_set_current_user( $fixtures['author'] );
+				$cap_filter = self::install_cap_filter(
+					array(
+						'edit_others_pages',
+						'edit_page',
+						'edit_pages',
+						'edit_post',
+						'edit_posts',
+						'read',
+						'read_page',
+						'read_post',
+					)
+				);
+
+				$parent_response = self::dispatch_with_rest_post_dispatch(
+					$server,
+					self::request(
+						'GET',
+						'/wp/v2/' . $rest_base,
+						array(
+							'_fields'  => 'id,parent,slug,status,menu_order,_links',
+							'context'  => 'edit',
+							'order'    => 'asc',
+							'orderby'  => 'menu_order',
+							'page'     => 1,
+							'parent'   => array( $parent_a_id ),
+							'per_page' => 2,
+						)
+					)
+				);
+				$exclude_response = self::dispatch_with_rest_post_dispatch(
+					$server,
+					self::request(
+						'HEAD',
+						'/wp/v2/' . $rest_base,
+						array(
+							'context'        => 'view',
+							'order'          => 'asc',
+							'orderby'        => 'parent',
+							'page'           => 1,
+							'parent_exclude' => array( $parent_a_id ),
+							'per_page'       => 2,
+						)
+					)
+				);
+				$root_response = self::dispatch_with_rest_post_dispatch(
+					$server,
+					self::request(
+						'GET',
+						'/wp/v2/' . $rest_base,
+						array(
+							'_fields'  => 'id,parent,slug',
+							'context'  => 'view',
+							'page'     => 1,
+							'parent'   => array( 0 ),
+							'per_page' => 1,
+						)
+					)
+				);
+
+				$parent_data     = $parent_response instanceof \WP_REST_Response ? $parent_response->get_data() : array();
+				$parent_headers  = $parent_response instanceof \WP_REST_Response ? $parent_response->get_headers() : array();
+				$exclude_data    = $exclude_response instanceof \WP_REST_Response ? $exclude_response->get_data() : array();
+				$exclude_headers = $exclude_response instanceof \WP_REST_Response ? $exclude_response->get_headers() : array();
+				$root_data       = $root_response instanceof \WP_REST_Response ? $root_response->get_data() : array();
+				$root_headers    = $root_response instanceof \WP_REST_Response ? $root_response->get_headers() : array();
+				$expected_up     = \rest_url( \rest_get_route_for_post( $parent_a_id ) );
+
+				$observed = array(
+					'postType'      => $post_type,
+					'restBase'      => $rest_base,
+					'responses'     => array(
+						'parent'        => array(
+							'status'  => $parent_response instanceof \WP_REST_Response ? $parent_response->get_status() : null,
+							'data'    => $parent_data,
+							'headers' => $parent_headers,
+						),
+						'parentExclude' => array(
+							'status'  => $exclude_response instanceof \WP_REST_Response ? $exclude_response->get_status() : null,
+							'data'    => $exclude_data,
+							'headers' => $exclude_headers,
+						),
+						'root'          => array(
+							'status'  => $root_response instanceof \WP_REST_Response ? $root_response->get_status() : null,
+							'data'    => $root_data,
+							'headers' => $root_headers,
+						),
+					),
+					'restArgs'      => $rest_args,
+					'queryVars'     => $query_vars,
+					'prepareEvents' => $prepare_events,
+					'expected'      => array(
+						'parentIds' => array( $child_a2_id, $child_a1_id ),
+						'rootId'    => $root_id,
+						'upHref'    => $expected_up,
+					),
+				);
+
+				self::collect_failure(
+					$failures,
+					$parent_response instanceof \WP_REST_Response
+						&& 200 === $parent_response->get_status()
+						&& 2 === count( $parent_data )
+						&& array( $child_a2_id, $child_a1_id ) === array_values( array_map( static fn ( array $row ): int => (int) ( $row['id'] ?? 0 ), $parent_data ) )
+						&& self::projected_keys_match( $parent_data[0] ?? array(), array( '_links', 'id', 'menu_order', 'parent', 'slug', 'status' ) )
+						&& self::projected_keys_match( $parent_data[1] ?? array(), array( '_links', 'id', 'menu_order', 'parent', 'slug', 'status' ) )
+						&& $parent_a_id === (int) ( $parent_data[0]['parent'] ?? 0 )
+						&& $parent_a_id === (int) ( $parent_data[1]['parent'] ?? 0 )
+						&& 1 === (int) ( $parent_data[0]['menu_order'] ?? 0 )
+						&& 2 === (int) ( $parent_data[1]['menu_order'] ?? 0 )
+						&& $expected_up === self::link_href( is_array( $parent_data[0]['_links'] ?? null ) ? $parent_data[0]['_links'] : array(), 'up' )
+						&& $expected_up === self::link_href( is_array( $parent_data[1]['_links'] ?? null ) ? $parent_data[1]['_links'] : array(), 'up' )
+						&& (string) $totals_by_case['parent'] === (string) ( $parent_headers['X-WP-Total'] ?? '' )
+						&& (string) ceil( $totals_by_case['parent'] / 2 ) === (string) ( $parent_headers['X-WP-TotalPages'] ?? '' )
+						&& self::header_has_link_rel( $parent_headers, 'next' ),
+					'custom hierarchical collection GET applies parent filter, menu_order sorting, projection, pagination, and up links',
+					$observed['responses']['parent']
+				);
+
+				self::collect_failure(
+					$failures,
+					$exclude_response instanceof \WP_REST_Response
+						&& 200 === $exclude_response->get_status()
+						&& array() === $exclude_data
+						&& (string) $totals_by_case['parent_exclude'] === (string) ( $exclude_headers['X-WP-Total'] ?? '' )
+						&& (string) ceil( $totals_by_case['parent_exclude'] / 2 ) === (string) ( $exclude_headers['X-WP-TotalPages'] ?? '' ),
+					'custom hierarchical collection HEAD applies parent_exclude while returning only pagination headers',
+					$observed['responses']['parentExclude']
+				);
+
+				self::collect_failure(
+					$failures,
+					$root_response instanceof \WP_REST_Response
+						&& 200 === $root_response->get_status()
+						&& 1 === count( $root_data )
+						&& self::projected_keys_match( $root_data[0] ?? array(), array( 'id', 'parent', 'slug' ) )
+						&& $root_id === (int) ( $root_data[0]['id'] ?? 0 )
+						&& 0 === (int) ( $root_data[0]['parent'] ?? -1 )
+						&& $root_slug === ( $root_data[0]['slug'] ?? null )
+						&& (string) $totals_by_case['root'] === (string) ( $root_headers['X-WP-Total'] ?? '' )
+						&& '1' === (string) ( $root_headers['X-WP-TotalPages'] ?? '' ),
+					'custom hierarchical collection GET maps parent=0 to root item filtering',
+					$observed['responses']['root']
+				);
+
+				self::collect_failure(
+					$failures,
+					3 === count( $rest_args )
+						&& 3 === count( $query_vars )
+						&& 'GET' === ( $rest_args[0]['method'] ?? null )
+						&& 'parent' === ( $rest_args[0]['args']['component_fuzz_custom_hier_collection'] ?? null )
+						&& array( $parent_a_id ) === array_values( array_map( 'intval', (array) ( $rest_args[0]['args']['post_parent__in'] ?? array() ) ) )
+						&& 'menu_order' === ( $rest_args[0]['args']['orderby'] ?? null )
+						&& 'menu_order' === ( $query_vars[0]['orderby'] ?? null )
+						&& 'asc' === strtolower( (string) ( $query_vars[0]['order'] ?? '' ) )
+						&& true === ( $query_vars[0]['no_found_rows'] ?? null )
+						&& $post_type === ( $query_vars[0]['post_type'] ?? null )
+						&& array( $parent_a_id ) === array_values( array_map( 'intval', (array) ( $query_vars[0]['post_parent__in'] ?? array() ) ) )
+						&& 'HEAD' === ( $rest_args[1]['method'] ?? null )
+						&& 'parent_exclude' === ( $rest_args[1]['args']['component_fuzz_custom_hier_collection'] ?? null )
+						&& array( $parent_a_id ) === array_values( array_map( 'intval', (array) ( $rest_args[1]['args']['post_parent__not_in'] ?? array() ) ) )
+						&& 'parent' === ( $query_vars[1]['orderby'] ?? null )
+						&& 'ids' === ( $query_vars[1]['fields'] ?? null )
+						&& true === ( $query_vars[1]['no_found_rows'] ?? null )
+						&& false === ( $query_vars[1]['update_post_meta_cache'] ?? null )
+						&& false === ( $query_vars[1]['update_post_term_cache'] ?? null )
+						&& $post_type === ( $query_vars[1]['post_type'] ?? null )
+						&& array( $parent_a_id ) === array_values( array_map( 'intval', (array) ( $query_vars[1]['post_parent__not_in'] ?? array() ) ) )
+						&& 'root' === ( $rest_args[2]['args']['component_fuzz_custom_hier_collection'] ?? null )
+						&& array( 0 ) === array_values( array_map( 'intval', (array) ( $rest_args[2]['args']['post_parent__in'] ?? array() ) ) )
+						&& true === ( $query_vars[2]['no_found_rows'] ?? null )
+						&& $post_type === ( $query_vars[2]['post_type'] ?? null )
+						&& array( 0 ) === array_values( array_map( 'intval', (array) ( $query_vars[2]['post_parent__in'] ?? array() ) ) ),
+					'custom hierarchical collection parent filters map through rest query args into WP_Query vars',
+					array(
+						'restArgs'  => $rest_args,
+						'queryVars' => $query_vars,
+					)
+				);
+
+				self::collect_failure(
+					$failures,
+					array( $child_a2_id, $child_a1_id, $root_id ) === array_values( array_map( static fn ( array $event ): int => (int) ( $event['id'] ?? 0 ), $prepare_events ) )
+						&& array( 'edit', 'edit', 'view' ) === array_values( array_map( static fn ( array $event ): string => (string) ( $event['context'] ?? '' ), $prepare_events ) )
+						&& array( 'GET', 'GET', 'GET' ) === array_values( array_map( static fn ( array $event ): string => (string) ( $event['method'] ?? '' ), $prepare_events ) )
+						&& array( '/wp/v2/' . $rest_base, '/wp/v2/' . $rest_base, '/wp/v2/' . $rest_base ) === array_values( array_map( static fn ( array $event ): string => (string) ( $event['route'] ?? '' ), $prepare_events ) ),
+					'custom hierarchical collection prepare hook receives only GET item responses and preserves request context',
+					array( 'prepareEvents' => $prepare_events )
+				);
+			}
+		} finally {
+			\remove_filter( 'rest_' . $post_type . '_query', $rest_filter, 10 );
+			\remove_filter( 'posts_pre_query', $pre_filter, 10 );
+			\remove_filter( 'rest_prepare_' . $post_type, $prepare_filter, 10 );
+			$custom_filters_restored = false === \has_filter( 'rest_' . $post_type . '_query', $rest_filter )
+				&& false === \has_filter( 'posts_pre_query', $pre_filter )
+				&& false === \has_filter( 'rest_prepare_' . $post_type, $prepare_filter );
+
+			$delete_posts();
+			$counts_after_cleanup = self::content_counts();
+
+			if ( null !== $cap_filter ) {
+				$cap_filter_restored = self::remove_cap_filter( $cap_filter );
+				$cap_filter          = null;
+			} else {
+				$cap_filter_restored = true;
+			}
+
+			self::restore_rest_default_filters( $filter_snapshot );
+			$default_filters_restored = $filter_snapshot === self::rest_default_filter_state();
+
+			\remove_filter( 'pre_option_permalink_structure', $permalink_filter );
+			$permalink_filter_restored = false === \has_filter( 'pre_option_permalink_structure', $permalink_filter );
+
+			if ( function_exists( 'unregister_post_type' ) && \post_type_exists( $post_type ) ) {
+				\unregister_post_type( $post_type );
+			}
+			if ( $had_post_type ) {
+				$GLOBALS['wp_post_types'][ $post_type ] = $previous_post_type;
+			} else {
+				unset( $GLOBALS['wp_post_types'][ $post_type ] );
+			}
+			if ( null !== $previous_query_vars && isset( $GLOBALS['wp'] ) && is_object( $GLOBALS['wp'] ) && property_exists( $GLOBALS['wp'], 'public_query_vars' ) ) {
+				$GLOBALS['wp']->public_query_vars = $previous_query_vars;
+			}
+
+			if ( $previous_rewrite_set ) {
+				$GLOBALS['wp_rewrite'] = $previous_rewrite;
+			} else {
+				unset( $GLOBALS['wp_rewrite'] );
+			}
+
+			\wp_set_current_user( $previous_current_user_id );
+
+			if ( $had_wp_actions ) {
+				$GLOBALS['wp_actions'] = $previous_actions;
+			} else {
+				unset( $GLOBALS['wp_actions'] );
+			}
+
+			if ( null !== $previous_server ) {
+				$GLOBALS['wp_rest_server'] = $previous_server;
+			} else {
+				unset( $GLOBALS['wp_rest_server'] );
+			}
+
+			$rewrite_restored = $previous_rewrite_set === array_key_exists( 'wp_rewrite', $GLOBALS )
+				&& ( ! $previous_rewrite_set || $previous_rewrite === $GLOBALS['wp_rewrite'] );
+			$actions_restored = $had_wp_actions
+				? $previous_actions === ( $GLOBALS['wp_actions'] ?? null )
+				: ! array_key_exists( 'wp_actions', $GLOBALS );
+			$server_restored = null !== $previous_server
+				? $previous_server === ( $GLOBALS['wp_rest_server'] ?? null )
+				: ! array_key_exists( 'wp_rest_server', $GLOBALS );
+			$current_user_restored = $previous_current_user_id === (
+				isset( $GLOBALS['current_user'] ) && $GLOBALS['current_user'] instanceof \WP_User
+					? (int) $GLOBALS['current_user']->ID
+					: 0
+			);
+			$post_type_restored = $had_post_type === isset( $GLOBALS['wp_post_types'][ $post_type ] )
+				&& ( ! $had_post_type || $previous_post_type === $GLOBALS['wp_post_types'][ $post_type ] );
+			$query_vars_restored = null === $previous_query_vars
+				|| ! ( isset( $GLOBALS['wp'] ) && is_object( $GLOBALS['wp'] ) && property_exists( $GLOBALS['wp'], 'public_query_vars' ) )
+				|| $previous_query_vars === $GLOBALS['wp']->public_query_vars;
+		}
+
+		$observed['counts'] = array(
+			'before' => $counts_before,
+			'after'  => $counts_after_cleanup,
+		);
+		self::collect_failure(
+			$failures,
+			self::content_count_delta_matches( $counts_before, $counts_after_cleanup, array(), array() ),
+			'custom hierarchical collection parent filter fixtures are deleted after route dispatch',
+			$observed['counts']
+		);
+		self::collect_failure(
+			$failures,
+			$custom_filters_restored
+				&& $cap_filter_restored
+				&& $default_filters_restored
+				&& $permalink_filter_restored
+				&& $rewrite_restored
+				&& $server_restored
+				&& $actions_restored
+				&& $current_user_restored
+				&& $post_type_restored
+				&& $query_vars_restored,
+			'custom hierarchical collection parent filters restore REST filters, caps, permalink, rewrite, server, actions, current user, post type, and query vars',
+			array(
+				'customFiltersRestored'   => $custom_filters_restored,
+				'capFilterRestored'       => $cap_filter_restored,
+				'defaultFiltersRestored'  => $default_filters_restored,
+				'permalinkFilterRestored' => $permalink_filter_restored,
+				'rewriteRestored'         => $rewrite_restored,
+				'serverRestored'          => $server_restored,
+				'actionsRestored'         => $actions_restored,
+				'currentUserRestored'     => $current_user_restored,
+				'postTypeRestored'        => $post_type_restored,
+				'queryVarsRestored'       => $query_vars_restored,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'rest-object-controllers.collections.custom-hierarchical-parent-filters',
 			array() === $failures,
 			array(
 				'case'     => self::case_summary( $case ),

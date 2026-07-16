@@ -40,6 +40,7 @@ final class PostTypesSurface {
 			$rows[] = self::check_support_feature_mutation( $ctx );
 			$rows[] = self::check_post_type_unregister_cleanup( $ctx );
 			$rows[] = self::check_post_type_archive_link_helpers( $ctx );
+			$rows[] = self::check_custom_post_type_rewrite_link_matrix( $ctx->fork( 'custom-rewrite-link-matrix' ) );
 			$rows[] = self::check_post_status_defaults_and_filters( $ctx );
 			$rows[] = self::check_post_status_viewability( $ctx->fork( 'status-viewability' ) );
 			$rows[] = self::check_post_status_name_sanitization_and_overwrite( $ctx->fork( 'status-name-sanitization' ) );
@@ -1723,6 +1724,317 @@ final class PostTypesSurface {
 				'prettyType' => $pretty_type,
 				'plainType'  => $plain_type,
 				'failures'   => array_slice( $failures, 0, 6 ),
+			)
+		);
+	}
+
+	private static function check_custom_post_type_rewrite_link_matrix( \ComponentFuzz\FuzzContext $ctx ): array {
+		global $wp_rewrite;
+
+		self::reset_registries();
+
+		$failures      = array();
+		$token         = self::safe_token( $ctx->identifier( 4, 10 ) );
+		$hier_type     = self::post_type_name( $ctx->fork( 'hier-pretty' ), 'hlink' );
+		$plain_type    = self::post_type_name( $ctx->fork( 'plain-query' ), 'qlink' );
+		$front_type    = self::post_type_name( $ctx->fork( 'fronted' ), 'flink' );
+		$hidden_type   = self::post_type_name( $ctx->fork( 'hidden' ), 'nlink' );
+		$hier_slug     = 'hier-library/' . $token;
+		$front_slug    = 'front-library/' . $token;
+		$front_archive = 'archive-' . $token;
+		$plain_qv      = 'qv_' . substr( $token, 0, 12 );
+
+		if ( is_object( $wp_rewrite ) ) {
+			$wp_rewrite->front = '/front/';
+			$wp_rewrite->root  = '';
+		}
+
+		$rewrite_tag_shape = static function ( string $post_type ): array {
+			global $wp_rewrite;
+
+			if (
+				! is_object( $wp_rewrite )
+				|| ! isset( $wp_rewrite->rewritecode, $wp_rewrite->rewritereplace, $wp_rewrite->queryreplace )
+				|| ! is_array( $wp_rewrite->rewritecode )
+			) {
+				return array(
+					'regex' => null,
+					'query' => null,
+				);
+			}
+
+			$position = array_search( '%' . $post_type . '%', $wp_rewrite->rewritecode, true );
+			if ( false === $position || null === $position ) {
+				return array(
+					'regex' => null,
+					'query' => null,
+				);
+			}
+
+			return array(
+				'regex' => $wp_rewrite->rewritereplace[ $position ] ?? null,
+				'query' => $wp_rewrite->queryreplace[ $position ] ?? null,
+			);
+		};
+		$permastruct = static function ( string $post_type ): ?array {
+			global $wp_rewrite;
+
+			return is_object( $wp_rewrite ) && isset( $wp_rewrite->extra_permastructs[ $post_type ] )
+				? $wp_rewrite->extra_permastructs[ $post_type ]
+				: null;
+		};
+
+		$hier = \register_post_type(
+			$hier_type,
+			array(
+				'has_archive'  => true,
+				'hierarchical' => true,
+				'public'       => true,
+				'query_var'    => false,
+				'rewrite'      => array(
+					'feeds'      => true,
+					'pages'      => true,
+					'slug'       => $hier_slug,
+					'with_front' => false,
+				),
+				'supports'     => false,
+			)
+		);
+		$plain = \register_post_type(
+			$plain_type,
+			array(
+				'has_archive'  => true,
+				'hierarchical' => false,
+				'public'       => true,
+				'query_var'    => $plain_qv,
+				'rewrite'      => false,
+				'supports'     => false,
+			)
+		);
+		$front = \register_post_type(
+			$front_type,
+			array(
+				'has_archive'  => $front_archive,
+				'hierarchical' => true,
+				'public'       => true,
+				'query_var'    => true,
+				'rewrite'      => array(
+					'feeds'      => false,
+					'pages'      => false,
+					'slug'       => $front_slug,
+					'with_front' => true,
+				),
+				'supports'     => false,
+			)
+		);
+		$hidden = \register_post_type(
+			$hidden_type,
+			array(
+				'has_archive'  => false,
+				'hierarchical' => true,
+				'public'       => true,
+				'query_var'    => false,
+				'rewrite'      => false,
+				'supports'     => false,
+			)
+		);
+
+		$hier_obj   = \get_post_type_object( $hier_type );
+		$plain_obj  = \get_post_type_object( $plain_type );
+		$front_obj  = \get_post_type_object( $front_type );
+		$hidden_obj = \get_post_type_object( $hidden_type );
+
+		$hier_struct   = $permastruct( $hier_type );
+		$front_struct  = $permastruct( $front_type );
+		$plain_struct  = $permastruct( $plain_type );
+		$hidden_struct = $permastruct( $hidden_type );
+		$hier_tag      = $rewrite_tag_shape( $hier_type );
+		$front_tag     = $rewrite_tag_shape( $front_type );
+		$plain_tag     = $rewrite_tag_shape( $plain_type );
+		$hidden_tag    = $rewrite_tag_shape( $hidden_type );
+		$hier_regexes  = self::rewrite_rule_regexes_for_post_type( $hier_type );
+		$front_regexes = self::rewrite_rule_regexes_for_post_type( $front_type );
+		$plain_regexes = self::rewrite_rule_regexes_for_post_type( $plain_type );
+
+		$expected_hier_link      = \home_url( \user_trailingslashit( $hier_slug, 'post_type_archive' ) );
+		$expected_plain_link     = \home_url( '?post_type=' . $plain_type );
+		$expected_front_link     = \home_url( \user_trailingslashit( '/front/' . $front_archive, 'post_type_archive' ) );
+		$expected_hier_atom_feed = \trailingslashit( $expected_hier_link ) . 'feed/atom/';
+		$expected_plain_feed     = \add_query_arg( 'feed', 'rss2', $expected_plain_link );
+		$expected_front_feed     = \add_query_arg( 'feed', 'atom', $expected_front_link );
+
+		$actual_hier_link   = \get_post_type_archive_link( $hier_type );
+		$actual_plain_link  = \get_post_type_archive_link( $plain_type );
+		$actual_front_link  = \get_post_type_archive_link( $front_type );
+		$actual_hidden_link = \get_post_type_archive_link( $hidden_type );
+		$actual_hier_feed   = \get_post_type_archive_feed_link( $hier_type, 'atom' );
+		$actual_plain_feed  = \get_post_type_archive_feed_link( $plain_type, 'rss2' );
+		$actual_front_feed  = \get_post_type_archive_feed_link( $front_type, 'atom' );
+		$actual_hidden_feed = \get_post_type_archive_feed_link( $hidden_type, 'atom' );
+
+		self::collect_failure(
+			$failures,
+			$hier instanceof \WP_Post_Type
+				&& $plain instanceof \WP_Post_Type
+				&& $front instanceof \WP_Post_Type
+				&& $hidden instanceof \WP_Post_Type
+				&& $hier_obj instanceof \WP_Post_Type
+				&& $plain_obj instanceof \WP_Post_Type
+				&& $front_obj instanceof \WP_Post_Type
+				&& $hidden_obj instanceof \WP_Post_Type
+				&& true === $hier_obj->hierarchical
+				&& false === $hier_obj->query_var
+				&& true === $front_obj->hierarchical
+				&& $front_type === $front_obj->query_var
+				&& $plain_qv === $plain_obj->query_var
+				&& false === $hidden_obj->query_var
+				&& self::query_var_is_public( $plain_qv )
+				&& self::query_var_is_public( $front_type )
+				&& ! self::query_var_is_public( $hier_type )
+				&& ! self::query_var_is_public( $hidden_type ),
+			'custom post type rewrite matrix registers query vars only for enabled public query branches',
+			array(
+				'hierType'   => $hier_type,
+				'plainType'  => $plain_type,
+				'frontType'  => $front_type,
+				'hiddenType' => $hidden_type,
+				'queryVars'  => is_object( $GLOBALS['wp'] ?? null ) && isset( $GLOBALS['wp']->public_query_vars )
+					? $GLOBALS['wp']->public_query_vars
+					: array(),
+			)
+		);
+		self::collect_failure(
+			$failures,
+			is_array( $hier_struct )
+				&& $hier_slug . '/%' . $hier_type . '%' === ( $hier_struct['struct'] ?? null )
+				&& false === ( $hier_struct['with_front'] ?? null )
+				&& true === ( $hier_struct['feed'] ?? null )
+				&& true === ( $hier_struct['paged'] ?? null )
+				&& is_array( $front_struct )
+				&& '/front/' . $front_slug . '/%' . $front_type . '%' === ( $front_struct['struct'] ?? null )
+				&& true === ( $front_struct['with_front'] ?? null )
+				&& false === ( $front_struct['feed'] ?? null )
+				&& true === ( $front_struct['paged'] ?? null )
+				&& null === $plain_struct
+				&& null === $hidden_struct,
+			'custom post type rewrite matrix stores permastructs only for pretty rewrite branches with normalized feed flags',
+			array(
+				'hierStruct'   => $hier_struct,
+				'frontStruct'  => $front_struct,
+				'plainStruct'  => $plain_struct,
+				'hiddenStruct' => $hidden_struct,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			array(
+				'regex' => '(.+?)',
+				'query' => 'post_type=' . $hier_type . '&pagename=',
+			) === $hier_tag
+				&& array(
+					'regex' => '(.+?)',
+					'query' => $front_type . '=',
+				) === $front_tag
+				&& array(
+					'regex' => null,
+					'query' => null,
+				) === $plain_tag
+				&& array(
+					'regex' => null,
+					'query' => null,
+				) === $hidden_tag
+				&& self::rewrite_regexes_include_slug( $hier_regexes, $hier_slug )
+				&& self::rewrite_regexes_include_slug( $front_regexes, 'front/' . $front_archive )
+				&& array() === $plain_regexes,
+			'custom post type rewrite matrix distinguishes hierarchical rewrite tags from rewrite-disabled archive branches',
+			array(
+				'hierTag'      => $hier_tag,
+				'frontTag'     => $front_tag,
+				'plainTag'     => $plain_tag,
+				'hiddenTag'    => $hidden_tag,
+				'hierRegexes'  => $hier_regexes,
+				'frontRegexes' => $front_regexes,
+				'plainRegexes' => $plain_regexes,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			$expected_hier_link === $actual_hier_link
+				&& $expected_plain_link === $actual_plain_link
+				&& $expected_front_link === $actual_front_link
+				&& false === $actual_hidden_link
+				&& $expected_hier_atom_feed === $actual_hier_feed
+				&& $expected_plain_feed === $actual_plain_feed
+				&& $expected_front_feed === $actual_front_feed
+				&& false === $actual_hidden_feed,
+			'custom post type archive and feed links follow rewrite, with_front, and query fallback branches',
+			array(
+				'expected' => array(
+					'hierLink'   => $expected_hier_link,
+					'plainLink'  => $expected_plain_link,
+					'frontLink'  => $expected_front_link,
+					'hierFeed'   => $expected_hier_atom_feed,
+					'plainFeed'  => $expected_plain_feed,
+					'frontFeed'  => $expected_front_feed,
+				),
+				'actual'   => array(
+					'hierLink'   => $actual_hier_link,
+					'plainLink'  => $actual_plain_link,
+					'frontLink'  => $actual_front_link,
+					'hiddenLink' => $actual_hidden_link,
+					'hierFeed'   => $actual_hier_feed,
+					'plainFeed'  => $actual_plain_feed,
+					'frontFeed'  => $actual_front_feed,
+					'hiddenFeed' => $actual_hidden_feed,
+				),
+			)
+		);
+
+		$before_unregister = self::registry_shape();
+		$unregister_results = array(
+			'hier'   => \unregister_post_type( $hier_type ),
+			'plain'  => \unregister_post_type( $plain_type ),
+			'front'  => \unregister_post_type( $front_type ),
+			'hidden' => \unregister_post_type( $hidden_type ),
+		);
+		$after_unregister = self::registry_shape();
+
+		self::collect_failure(
+			$failures,
+			true === $unregister_results['hier']
+				&& true === $unregister_results['plain']
+				&& true === $unregister_results['front']
+				&& true === $unregister_results['hidden']
+				&& ! \post_type_exists( $hier_type )
+				&& ! \post_type_exists( $plain_type )
+				&& ! \post_type_exists( $front_type )
+				&& ! \post_type_exists( $hidden_type )
+				&& null === $permastruct( $hier_type )
+				&& null === $permastruct( $front_type )
+				&& array() === self::rewrite_rule_regexes_for_post_type( $hier_type )
+				&& array() === self::rewrite_rule_regexes_for_post_type( $front_type )
+				&& array( 'regex' => null, 'query' => null ) === $rewrite_tag_shape( $hier_type )
+				&& array( 'regex' => null, 'query' => null ) === $rewrite_tag_shape( $front_type )
+				&& ! self::query_var_is_public( $plain_qv )
+				&& ! self::query_var_is_public( $front_type ),
+			'custom post type rewrite matrix unregisters generated types, permastructs, archive rules, tags, and query vars',
+			array(
+				'results' => $unregister_results,
+				'before'  => $before_unregister,
+				'after'   => $after_unregister,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'post-types.rewrite-link-matrix.custom-post-types',
+			array() === $failures,
+			array(
+				'hierType'   => $hier_type,
+				'plainType'  => $plain_type,
+				'frontType'  => $front_type,
+				'hiddenType' => $hidden_type,
+				'failures'   => array_slice( $failures, 0, 8 ),
 			)
 		);
 	}
