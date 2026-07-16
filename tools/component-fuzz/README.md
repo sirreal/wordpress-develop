@@ -775,8 +775,9 @@ database, network requests, or a configured site.
   and URL-details route/schema contracts, direct `plugins_api()` and
   `themes_api()` argument/default/result filters, plugin/theme WordPress.org
   HTTP serialization, malformed/error JSON handling, SSL-to-HTTP fallback,
-  plugin short-circuit external markers, theme `query_themes` and
-  `feature_list` response normalization, plugin API and HTTP short-circuits,
+  terminal transport failure handling, generated argument/default/filter/HTTP
+  matrices, plugin short-circuit external markers, WP_Error short-circuits,
+  theme `query_themes` and `feature_list` response normalization, plugin API and HTTP short-circuits,
   block-directory `_fields` projection, explicit block title/icon mapping and
   installed-plugin link discovery, permission matrices, request validation
   errors, transformed response schemas, pattern and URL cache/transient
