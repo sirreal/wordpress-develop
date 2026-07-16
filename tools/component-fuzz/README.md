@@ -744,6 +744,9 @@ database, network requests, or a configured site.
   contracts, and REST search handlers, including context/_fields filtering,
   registered additional-field get/update/schema callbacks, collection params,
   permission gates, settings route dispatch permission/schema/update behavior,
+  default-filtered search/settings route dispatch with sanitized cross-handler
+  subtypes, `_fields` projection, `Allow` headers, editable route args, and
+  default REST filter cleanup,
   namespace-specific REST links, intercepted
   core/featured/theme pattern directory requests, snake-case remote pattern
   normalization, duplicate suppression, remote-load filter gates,

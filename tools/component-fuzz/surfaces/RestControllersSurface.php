@@ -44,6 +44,7 @@ final class RestControllersSurface {
 			$rows[] = self::check_block_pattern_remote_loaders( $ctx );
 			$rows[] = self::check_block_pattern_theme_file_loader( $ctx );
 			$rows[] = self::check_search_controller( $ctx );
+			$rows[] = self::check_search_settings_default_filtered_dispatch_matrix( $ctx->fork( 'search-settings-default-filters' ) );
 			$rows[] = self::check_menu_locations_controller( $ctx->fork( 'menu-locations' ) );
 			$rows[] = self::check_route_registry_behavior( $ctx );
 			$rows[] = self::check_plugin_theme_controller_contracts( $ctx->fork( 'plugin-theme-controllers' ) );
@@ -175,6 +176,7 @@ final class RestControllersSurface {
 				'register_taxonomy',
 				'remove_filter',
 				'render_block',
+				'rest_api_default_filters',
 				'rest_authorization_required_code',
 				'rest_default_additional_properties_to_false',
 				'rest_do_request',
@@ -213,6 +215,7 @@ final class RestControllersSurface {
 				'wp_get_active_and_valid_themes',
 				'wp_get_theme',
 				'wp_is_development_mode',
+				'wp_is_serving_rest_request',
 				'wp_json_encode',
 				'wp_parse_args',
 				'wp_parse_list',
@@ -4383,6 +4386,407 @@ final class RestControllersSurface {
 		);
 	}
 
+	private static function check_search_settings_default_filtered_dispatch_matrix( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime_state();
+
+		$search_matrix   = self::check_search_route_dispatch_matrix( self::search_case( $ctx->fork( 'search' ) ) );
+		$settings_matrix = self::check_settings_default_filtered_dispatch_matrix( self::settings_case( $ctx->fork( 'settings' ) ) );
+		$failures        = array();
+
+		self::collect_failure(
+			$failures,
+			true === ( $search_matrix['ok'] ?? false ),
+			'search route dispatch applies default REST filters, subtype sanitization, _fields, links, Allow headers, and cleanup',
+			$search_matrix
+		);
+		self::collect_failure(
+			$failures,
+			true === ( $settings_matrix['ok'] ?? false ),
+			'settings route dispatch applies permission gates, _fields, Allow headers, route args, and cleanup',
+			$settings_matrix
+		);
+
+		return self::row(
+			$ctx,
+			'rest-controllers.search-settings.default-filtered-dispatch-matrix',
+			array() === $failures,
+			array(
+				'failures' => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
+	private static function check_search_route_dispatch_matrix( array $case ): array {
+		$secondary_item = array(
+			'id'      => 201,
+			'title'   => 'Secondary relay',
+			'url'     => 'http://example.test/component-fuzz/items/201',
+			'subtype' => $case['secondarySubtypes'][0],
+		);
+		$handler        = self::make_search_handler( $case['type'], $case['subtypes'], $case['items'], array( 102, 105 ), 5 );
+		$secondary      = self::make_search_handler( $case['secondaryType'], $case['secondarySubtypes'], array( $secondary_item ), array( 201 ), 1 );
+		$controller     = new \WP_REST_Search_Controller( array( $handler, $secondary ) );
+
+		$previous_server  = $GLOBALS['wp_rest_server'] ?? null;
+		$had_wp_actions   = array_key_exists( 'wp_actions', $GLOBALS );
+		$previous_actions = $GLOBALS['wp_actions'] ?? null;
+		$filter_snapshot  = self::rest_default_filter_state();
+		$filters_installed = array();
+
+		$server                    = new \WP_REST_Server();
+		$GLOBALS['wp_rest_server'] = $server;
+
+		if ( ! isset( $GLOBALS['wp_actions'] ) || ! is_array( $GLOBALS['wp_actions'] ) ) {
+			$GLOBALS['wp_actions'] = array();
+		}
+		$GLOBALS['wp_actions']['rest_api_init'] = max( 1, (int) ( $GLOBALS['wp_actions']['rest_api_init'] ?? 0 ) );
+
+		$primary_response         = null;
+		$secondary_response       = null;
+		$cross_subtype_response   = null;
+		$head_response            = null;
+
+		$primary_request = self::request(
+			'GET',
+			'/wp/v2/search',
+			array(
+				'context'                                => 'view',
+				'_fields'                                => 'title,_links',
+				'page'                                   => 2,
+				'per_page'                               => 2,
+				'search'                                 => $case['search'],
+				\WP_REST_Search_Controller::PROP_TYPE    => $case['type'],
+				\WP_REST_Search_Controller::PROP_SUBTYPE => array( $case['subtypes'][1], $case['secondarySubtypes'][0] ),
+				'include'                                => array( 101, 102, 105, 107 ),
+				'exclude'                                => array( 107 ),
+			)
+		);
+		$secondary_request = self::request(
+			'GET',
+			'/wp/v2/search',
+			array(
+				'context'                                => 'view',
+				'_fields'                                => 'id,title,type,subtype,_links',
+				\WP_REST_Search_Controller::PROP_TYPE    => $case['secondaryType'],
+				\WP_REST_Search_Controller::PROP_SUBTYPE => array( $case['secondarySubtypes'][0] ),
+			)
+		);
+		$cross_subtype_request = self::request(
+			'GET',
+			'/wp/v2/search',
+			array(
+				\WP_REST_Search_Controller::PROP_TYPE    => $case['secondaryType'],
+				\WP_REST_Search_Controller::PROP_SUBTYPE => array( $case['subtypes'][0] ),
+			)
+		);
+		$head_request = self::request(
+			'HEAD',
+			'/wp/v2/search',
+			array(
+				'context'                                => 'view',
+				'_fields'                                => 'id,title',
+				'page'                                   => 1,
+				'per_page'                               => 3,
+				\WP_REST_Search_Controller::PROP_TYPE    => $case['type'],
+				\WP_REST_Search_Controller::PROP_SUBTYPE => array( $case['subtypes'][0] ),
+			)
+		);
+
+		try {
+			$controller->register_routes();
+			\rest_api_default_filters();
+			$filters_installed        = self::rest_default_filter_state();
+			$primary_response         = self::dispatch_with_rest_post_dispatch( $server, $primary_request );
+			$secondary_response       = self::dispatch_with_rest_post_dispatch( $server, $secondary_request );
+			$cross_subtype_response   = self::dispatch_with_rest_post_dispatch( $server, $cross_subtype_request );
+			$head_response            = self::dispatch_with_rest_post_dispatch( $server, $head_request );
+		} finally {
+			self::restore_rest_default_filters( $filter_snapshot );
+
+			if ( $had_wp_actions ) {
+				$GLOBALS['wp_actions'] = $previous_actions;
+			} else {
+				unset( $GLOBALS['wp_actions'] );
+			}
+
+			if ( null !== $previous_server ) {
+				$GLOBALS['wp_rest_server'] = $previous_server;
+			} else {
+				unset( $GLOBALS['wp_rest_server'] );
+			}
+		}
+
+		$primary_data       = $primary_response instanceof \WP_REST_Response ? $primary_response->get_data() : array();
+		$secondary_data     = $secondary_response instanceof \WP_REST_Response ? $secondary_response->get_data() : array();
+		$cross_subtype_data = $cross_subtype_response instanceof \WP_REST_Response ? $cross_subtype_response->get_data() : array();
+		$primary_headers    = $primary_response instanceof \WP_REST_Response ? $primary_response->get_headers() : array();
+		$head_headers       = $head_response instanceof \WP_REST_Response ? $head_response->get_headers() : array();
+		$primary_call       = $handler->search_calls[0] ?? array();
+		$head_call          = $handler->search_calls[1] ?? array();
+		$secondary_call     = $secondary->search_calls[0] ?? array();
+		$cross_subtype_call = $secondary->search_calls[1] ?? array();
+		$primary_first      = is_array( $primary_data[0] ?? null ) ? $primary_data[0] : array();
+		$secondary_first    = is_array( $secondary_data[0] ?? null ) ? $secondary_data[0] : array();
+		$filter_restored    = $filter_snapshot === self::rest_default_filter_state();
+		$server_restored    = null !== $previous_server ? ( $GLOBALS['wp_rest_server'] ?? null ) === $previous_server : ! array_key_exists( 'wp_rest_server', $GLOBALS );
+		$actions_restored   = $had_wp_actions ? ( $GLOBALS['wp_actions'] ?? null ) === $previous_actions : ! array_key_exists( 'wp_actions', $GLOBALS );
+		$primary_base       = \add_query_arg( \urlencode_deep( $primary_request->get_query_params() ), \rest_url( 'wp/v2/search' ) );
+		$primary_prev       = \add_query_arg( 'page', 1, $primary_base );
+		$primary_next       = \add_query_arg( 'page', 3, $primary_base );
+		$primary_link       = (string) ( $primary_headers['Link'] ?? '' );
+		$default_filters_ok = array(
+			'rest_pre_serve_request:rest_send_cors_headers'      => 10,
+			'rest_post_dispatch:rest_send_allow_header'          => 10,
+			'rest_post_dispatch:rest_filter_response_fields'     => 10,
+			'rest_pre_dispatch:rest_handle_options_request'      => 10,
+			'rest_index:rest_add_application_passwords_to_index' => 10,
+		) === $filters_installed;
+
+		return array(
+			'ok'                     => $primary_response instanceof \WP_REST_Response
+				&& 200 === $primary_response->get_status()
+				&& 2 === count( $primary_data )
+				&& array( '_links', 'title' ) === self::sorted_keys( $primary_first )
+				&& $case['items'][1]['title'] === ( $primary_first['title'] ?? null )
+				&& 'http://example.test/component-fuzz/search/102' === self::search_collection_link_href( $primary_first, 'self' )
+				&& 'http://example.test/component-fuzz/search/about/' . $case['type'] === self::search_collection_link_href( $primary_first, 'about' )
+				&& \rest_url( 'wp/v2/search' ) === self::search_collection_link_href( $primary_first, 'collection' )
+				&& 5 === (int) ( $primary_headers['X-WP-Total'] ?? 0 )
+				&& 3 === (int) ( $primary_headers['X-WP-TotalPages'] ?? 0 )
+				&& str_contains( $primary_link, '<' . $primary_prev . '>; rel="prev"' )
+				&& str_contains( $primary_link, '<' . $primary_next . '>; rel="next"' )
+				&& str_contains( (string) ( $primary_headers['Allow'] ?? '' ), 'GET' )
+				&& array(
+					'method'   => 'GET',
+					'type'     => $case['type'],
+					'subtype'  => array( $case['subtypes'][1] ),
+					'include'  => array( 101, 102, 105, 107 ),
+					'exclude'  => array( 107 ),
+					'page'     => 2,
+					'per_page' => 2,
+					'search'   => $case['search'],
+				) === $primary_call
+				&& $secondary_response instanceof \WP_REST_Response
+				&& 200 === $secondary_response->get_status()
+				&& array( 201 ) === self::search_response_ids( $secondary_response )
+				&& array( '_links', 'id', 'subtype', 'title', 'type' ) === self::sorted_keys( $secondary_first )
+				&& $case['secondaryType'] === ( $secondary_first['type'] ?? null )
+				&& $case['secondarySubtypes'][0] === ( $secondary_first['subtype'] ?? null )
+				&& 'http://example.test/component-fuzz/search/about/' . $case['secondaryType'] === self::search_collection_link_href( $secondary_first, 'about' )
+				&& array(
+					'method'   => 'GET',
+					'type'     => $case['secondaryType'],
+					'subtype'  => array( $case['secondarySubtypes'][0] ),
+					'include'  => array(),
+					'exclude'  => array(),
+					'page'     => 1,
+					'per_page' => 10,
+					'search'   => '',
+				) === $secondary_call
+				&& $cross_subtype_response instanceof \WP_REST_Response
+				&& 200 === $cross_subtype_response->get_status()
+				&& array( 201 ) === self::search_response_ids( $cross_subtype_response )
+				&& array(
+					'method'   => 'GET',
+					'type'     => $case['secondaryType'],
+					'subtype'  => array(),
+					'include'  => array(),
+					'exclude'  => array(),
+					'page'     => 1,
+					'per_page' => 10,
+					'search'   => '',
+				) === $cross_subtype_call
+				&& $head_response instanceof \WP_REST_Response
+				&& 200 === $head_response->get_status()
+				&& array() === $head_response->get_data()
+				&& 5 === (int) ( $head_headers['X-WP-Total'] ?? 0 )
+				&& 2 === (int) ( $head_headers['X-WP-TotalPages'] ?? 0 )
+				&& array(
+					'method'   => 'HEAD',
+					'type'     => $case['type'],
+					'subtype'  => array( $case['subtypes'][0] ),
+					'include'  => array(),
+					'exclude'  => array(),
+					'page'     => 1,
+					'per_page' => 3,
+					'search'   => '',
+				) === $head_call
+				&& $default_filters_ok
+				&& $filter_restored
+				&& $server_restored
+				&& $actions_restored,
+			'primaryData'            => $primary_data,
+			'primaryHeaders'         => $primary_headers,
+			'primaryCall'            => $primary_call,
+			'secondaryData'          => $secondary_data,
+			'secondaryCall'          => $secondary_call,
+			'crossSubtypeData'       => $cross_subtype_data,
+			'crossSubtypeCall'       => $cross_subtype_call,
+			'headData'               => $head_response instanceof \WP_REST_Response ? $head_response->get_data() : $head_response,
+			'headHeaders'            => $head_headers,
+			'headCall'               => $head_call,
+			'filtersInstalled'       => $filters_installed,
+			'filterSnapshot'         => $filter_snapshot,
+			'filterRestored'         => $filter_restored,
+			'serverRestored'         => $server_restored,
+			'actionsRestored'        => $actions_restored,
+		);
+	}
+
+	private static function check_settings_default_filtered_dispatch_matrix( array $case ): array {
+		$previous_server  = $GLOBALS['wp_rest_server'] ?? null;
+		$had_wp_actions   = array_key_exists( 'wp_actions', $GLOBALS );
+		$previous_actions = $GLOBALS['wp_actions'] ?? null;
+		$filter_snapshot  = self::rest_default_filter_state();
+		$filters_installed = array();
+		$cap_filter       = null;
+
+		$server                    = new \WP_REST_Server();
+		$GLOBALS['wp_rest_server'] = $server;
+
+		if ( ! isset( $GLOBALS['wp_actions'] ) || ! is_array( $GLOBALS['wp_actions'] ) ) {
+			$GLOBALS['wp_actions'] = array();
+		}
+		$GLOBALS['wp_actions']['rest_api_init'] = max( 1, (int) ( $GLOBALS['wp_actions']['rest_api_init'] ?? 0 ) );
+
+		$denied_response  = null;
+		$allowed_response = null;
+		$routes           = array();
+		$get_args         = array();
+		$editable_args    = array();
+
+		try {
+			\register_setting(
+				'component_fuzz',
+				$case['stringOption'],
+				array(
+					'type'         => 'string',
+					'default'      => $case['stringDefault'],
+					'show_in_rest' => array(
+						'name'   => $case['stringName'],
+						'schema' => array(
+							'type'      => 'string',
+							'minLength' => 1,
+							'maxLength' => 48,
+							'pattern'   => '^[A-Za-z0-9 _-]+$',
+						),
+					),
+				)
+			);
+			\register_setting(
+				'component_fuzz',
+				$case['integerOption'],
+				array(
+					'type'         => 'integer',
+					'default'      => $case['integerDefault'],
+					'show_in_rest' => array(
+						'name'   => $case['integerName'],
+						'schema' => array(
+							'type'    => 'integer',
+							'minimum' => 0,
+							'maximum' => 100,
+						),
+					),
+				)
+			);
+			\update_option( $case['stringOption'], $case['storedString'] );
+			\update_option( $case['integerOption'], $case['storedInteger'] );
+
+			$controller = new \WP_REST_Settings_Controller();
+			$controller->register_routes();
+			\rest_api_default_filters();
+			$filters_installed = self::rest_default_filter_state();
+			$routes            = $server->get_routes();
+			$get_args          = isset( $routes['/wp/v2/settings'] ) ? self::handler_args_for_method( $routes['/wp/v2/settings'], 'GET' ) : array();
+			$editable_args     = isset( $routes['/wp/v2/settings'] ) ? self::handler_args_for_method( $routes['/wp/v2/settings'], 'POST' ) : array();
+
+			$denied_response = self::dispatch_with_rest_post_dispatch(
+				$server,
+				self::request(
+					'GET',
+					'/wp/v2/settings',
+					array( '_fields' => $case['stringName'] )
+				)
+			);
+
+			$cap_filter = self::install_cap_filter( array( 'manage_options' ) );
+			$allowed_response = self::dispatch_with_rest_post_dispatch(
+				$server,
+				self::request(
+					'GET',
+					'/wp/v2/settings',
+					array( '_fields' => $case['stringName'] )
+				)
+			);
+		} finally {
+			if ( null !== $cap_filter ) {
+				\remove_filter( 'user_has_cap', $cap_filter, 10 );
+			}
+
+			self::restore_rest_default_filters( $filter_snapshot );
+
+			if ( $had_wp_actions ) {
+				$GLOBALS['wp_actions'] = $previous_actions;
+			} else {
+				unset( $GLOBALS['wp_actions'] );
+			}
+
+			if ( null !== $previous_server ) {
+				$GLOBALS['wp_rest_server'] = $previous_server;
+			} else {
+				unset( $GLOBALS['wp_rest_server'] );
+			}
+		}
+
+		$allowed_data      = $allowed_response instanceof \WP_REST_Response ? $allowed_response->get_data() : array();
+		$allowed_headers   = $allowed_response instanceof \WP_REST_Response ? $allowed_response->get_headers() : array();
+		$allowed_methods   = array_map( 'trim', explode( ',', (string) ( $allowed_headers['Allow'] ?? '' ) ) );
+		$filter_restored   = $filter_snapshot === self::rest_default_filter_state();
+		$server_restored   = null !== $previous_server ? ( $GLOBALS['wp_rest_server'] ?? null ) === $previous_server : ! array_key_exists( 'wp_rest_server', $GLOBALS );
+		$actions_restored  = $had_wp_actions ? ( $GLOBALS['wp_actions'] ?? null ) === $previous_actions : ! array_key_exists( 'wp_actions', $GLOBALS );
+		$cap_restored      = null === $cap_filter || false === \has_filter( 'user_has_cap', $cap_filter );
+		$default_filters_ok = array(
+			'rest_pre_serve_request:rest_send_cors_headers'      => 10,
+			'rest_post_dispatch:rest_send_allow_header'          => 10,
+			'rest_post_dispatch:rest_filter_response_fields'     => 10,
+			'rest_pre_dispatch:rest_handle_options_request'      => 10,
+			'rest_index:rest_add_application_passwords_to_index' => 10,
+		) === $filters_installed;
+
+		return array(
+			'ok'               => self::response_error_ok( $denied_response, 'rest_forbidden', \rest_authorization_required_code() )
+				&& $allowed_response instanceof \WP_REST_Response
+				&& 200 === $allowed_response->get_status()
+				&& array( $case['stringName'] ) === self::sorted_keys( $allowed_data )
+				&& $case['storedString'] === ( $allowed_data[ $case['stringName'] ] ?? null )
+				&& in_array( 'GET', $allowed_methods, true )
+				&& in_array( 'POST', $allowed_methods, true )
+				&& in_array( 'PUT', $allowed_methods, true )
+				&& in_array( 'PATCH', $allowed_methods, true )
+				&& isset( $routes['/wp/v2/settings'] )
+				&& array() === $get_args
+				&& isset( $editable_args[ $case['stringName'] ], $editable_args[ $case['integerName'] ] )
+				&& is_callable( $editable_args[ $case['stringName'] ]['sanitize_callback'] ?? null )
+				&& is_callable( $editable_args[ $case['integerName'] ]['sanitize_callback'] ?? null )
+				&& $default_filters_ok
+				&& $filter_restored
+				&& $server_restored
+				&& $actions_restored
+				&& $cap_restored,
+			'deniedResponse'   => $denied_response,
+			'allowedData'      => $allowed_data,
+			'allowedHeaders'   => $allowed_headers,
+			'getArgs'          => self::param_summary( $get_args ),
+			'editableArgs'     => self::param_summary( $editable_args ),
+			'filtersInstalled' => $filters_installed,
+			'filterSnapshot'   => $filter_snapshot,
+			'filterRestored'   => $filter_restored,
+			'serverRestored'   => $server_restored,
+			'actionsRestored'  => $actions_restored,
+			'capRestored'      => $cap_restored,
+		);
+	}
+
 	private static function check_search_invalid_subtype_route_dispatch( array $case ): array {
 		$handler    = self::make_search_handler( $case['emptySubtypeType'], array(), array(), array(), 0 );
 		$controller = new \WP_REST_Search_Controller( array( $handler ) );
@@ -6220,11 +6624,61 @@ final class RestControllersSurface {
 		return $links[ $rel ][0]['href'];
 	}
 
+	private static function search_collection_link_href( array $item, string $rel ): ?string {
+		if ( ! isset( $item['_links'][ $rel ][0]['href'] ) ) {
+			return null;
+		}
+
+		return $item['_links'][ $rel ][0]['href'];
+	}
+
 	private static function sorted_keys( array $value ): array {
 		$keys = array_keys( $value );
 		sort( $keys );
 
 		return $keys;
+	}
+
+	private static function dispatch_with_rest_post_dispatch( \WP_REST_Server $server, \WP_REST_Request $request ): \WP_REST_Response {
+		return \apply_filters(
+			'rest_post_dispatch',
+			\rest_ensure_response( $server->dispatch( $request ) ),
+			$server,
+			$request
+		);
+	}
+
+	private static function rest_default_filter_callbacks(): array {
+		return array(
+			'rest_pre_serve_request:rest_send_cors_headers'      => array( 'rest_pre_serve_request', 'rest_send_cors_headers', 10 ),
+			'rest_post_dispatch:rest_send_allow_header'          => array( 'rest_post_dispatch', 'rest_send_allow_header', 10 ),
+			'rest_post_dispatch:rest_filter_response_fields'     => array( 'rest_post_dispatch', 'rest_filter_response_fields', 10 ),
+			'rest_pre_dispatch:rest_handle_options_request'      => array( 'rest_pre_dispatch', 'rest_handle_options_request', 10 ),
+			'rest_index:rest_add_application_passwords_to_index' => array( 'rest_index', 'rest_add_application_passwords_to_index', 10 ),
+		);
+	}
+
+	private static function rest_default_filter_state(): array {
+		$state = array();
+
+		foreach ( self::rest_default_filter_callbacks() as $key => $callback ) {
+			list( $hook, $function ) = $callback;
+			$priority = \has_filter( $hook, $function );
+			if ( false !== $priority ) {
+				$state[ $key ] = (int) $priority;
+			}
+		}
+
+		return $state;
+	}
+
+	private static function restore_rest_default_filters( array $snapshot ): void {
+		foreach ( self::rest_default_filter_callbacks() as $key => $callback ) {
+			list( $hook, $function, $priority ) = $callback;
+			if ( ! array_key_exists( $key, $snapshot ) ) {
+				\remove_filter( $hook, $function, $priority );
+			}
+		}
 	}
 
 	private static function route_methods( array $handlers ): array {
