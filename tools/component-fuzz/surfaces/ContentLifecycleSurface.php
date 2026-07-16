@@ -43,6 +43,9 @@ final class ContentLifecycleSurface {
 			$rows[] = self::check_post_mutation_projection_cache_and_template_links( $ctx->fork( 'post-mutation-projection' ), $case );
 
 			self::prepare_runtime();
+			$rows[] = self::check_post_slug_collision_and_canonical_projection( $ctx->fork( 'post-slug-canonical' ), $case );
+
+			self::prepare_runtime();
 			$rows[] = self::check_admin_post_save_orchestration( $ctx->fork( 'admin-post-save' ), $case );
 
 			self::prepare_runtime();
@@ -200,6 +203,7 @@ final class ContentLifecycleSurface {
 				'wp_delete_user',
 				'wp_delete_object_term_relationships',
 				'wp_delete_post',
+				'wp_get_canonical_url',
 				'wp_get_post_categories',
 				'wp_get_object_terms',
 				'wp_get_attachment_caption',
@@ -768,6 +772,310 @@ final class ContentLifecycleSurface {
 				'siblingId' => $sibling_id,
 				'postType'  => $post_type,
 				'failures'  => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
+	private static function check_post_slug_collision_and_canonical_projection( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures               = array();
+		$post_ids               = array();
+		$post_type              = 'cf_canon_' . substr( $case['token'], 0, 8 );
+		$rewrite_slug           = 'canonical-' . substr( $case['token'], 0, 6 );
+		$base_slug              = 'collision-' . $case['token'];
+		$second_expected_slug   = $base_slug . '-2';
+		$updated_expected_slug  = $base_slug . '-3';
+		$permalink_structure    = '/%postname%/';
+		$permalink_filter       = static function () use ( $permalink_structure ): string {
+			return $permalink_structure;
+		};
+		$previous_rewrite_set   = array_key_exists( 'wp_rewrite', $GLOBALS );
+		$previous_rewrite       = $GLOBALS['wp_rewrite'] ?? null;
+		$previous_query_set     = array_key_exists( 'wp_query', $GLOBALS );
+		$previous_query         = $GLOBALS['wp_query'] ?? null;
+		$previous_the_query_set = array_key_exists( 'wp_the_query', $GLOBALS );
+		$previous_the_query     = $GLOBALS['wp_the_query'] ?? null;
+
+		$prepare_singular_query = static function ( \WP_Post $post ): void {
+			$query                    = new \WP_Query();
+			$query->query             = array(
+				'name'      => $post->post_name,
+				'post_type' => $post->post_type,
+			);
+			$query->query_vars        = $query->query;
+			$query->queried_object    = $post;
+			$query->queried_object_id = (int) $post->ID;
+			$query->post              = $post;
+			$query->posts             = array( $post );
+			$query->post_count        = 1;
+			$query->is_single         = true;
+			$query->is_singular       = true;
+			$GLOBALS['wp_query']      = $query;
+			$GLOBALS['wp_the_query']  = $query;
+		};
+
+		try {
+			$GLOBALS['wp_rewrite'] = new \WP_Rewrite();
+			$GLOBALS['wp_rewrite']->permalink_structure = $permalink_structure;
+			\add_filter( 'pre_option_permalink_structure', $permalink_filter );
+
+			\register_post_type(
+				$post_type,
+				array(
+					'public'    => true,
+					'rewrite'   => array( 'slug' => $rewrite_slug ),
+					'query_var' => false,
+					'supports'  => array( 'title', 'editor', 'excerpt', 'author' ),
+				)
+			);
+
+			$first_id = \wp_insert_post(
+				\wp_slash(
+					array(
+						'post_type'     => $post_type,
+						'post_title'    => 'Collision First ' . $case['token'],
+						'post_content'  => 'Collision first content ' . $case['content'],
+						'post_status'   => 'publish',
+						'post_name'     => $base_slug,
+						'post_date'     => '2024-04-05 06:07:08',
+						'post_date_gmt' => '2024-04-05 06:07:08',
+					)
+				),
+				true,
+				false
+			);
+			$second_id = \wp_insert_post(
+				\wp_slash(
+					array(
+						'post_type'     => $post_type,
+						'post_title'    => 'Collision Second ' . $case['token'],
+						'post_content'  => 'Collision second content ' . $case['updatedContent'],
+						'post_status'   => 'publish',
+						'post_name'     => $base_slug,
+						'post_date'     => '2024-04-06 07:08:09',
+						'post_date_gmt' => '2024-04-06 07:08:09',
+					)
+				),
+				true,
+				false
+			);
+			$draft_id = \wp_insert_post(
+				\wp_slash(
+					array(
+						'post_type'     => $post_type,
+						'post_title'    => 'Collision Draft ' . $case['token'],
+						'post_content'  => 'Collision draft content ' . $case['excerpt'],
+						'post_status'   => 'draft',
+						'post_name'     => 'collision-draft-' . $case['token'],
+						'post_date'     => '2024-04-07 08:09:10',
+						'post_date_gmt' => '2024-04-07 08:09:10',
+					)
+				),
+				true,
+				false
+			);
+
+			$post_ids = array_values(
+				array_filter(
+					array( $first_id, $second_id, $draft_id ),
+					static function ( $id ): bool {
+						return is_int( $id ) && $id > 0;
+					}
+				)
+			);
+
+			$first                  = is_int( $first_id ) ? \get_post( $first_id ) : null;
+			$second                 = is_int( $second_id ) ? \get_post( $second_id ) : null;
+			$draft                  = is_int( $draft_id ) ? \get_post( $draft_id ) : null;
+			$draft_canonical_before = is_int( $draft_id ) ? \wp_get_canonical_url( $draft_id ) : null;
+
+			self::collect_failure(
+				$failures,
+				$first instanceof \WP_Post
+					&& $second instanceof \WP_Post
+					&& $draft instanceof \WP_Post
+					&& $base_slug === $first->post_name
+					&& $second_expected_slug === $second->post_name
+					&& 'draft' === $draft->post_status
+					&& false === $draft_canonical_before,
+				'published insert collisions suffix generated slugs while draft canonical URLs stay unavailable',
+				array(
+					'first'          => self::post_summary( $first ),
+					'second'         => self::post_summary( $second ),
+					'draft'          => self::post_summary( $draft ),
+					'draftCanonical' => $draft_canonical_before,
+					'expectedSecond' => $second_expected_slug,
+				)
+			);
+
+			if ( $draft instanceof \WP_Post ) {
+				$updated_title = 'Collision Updated ' . $case['updatedTitle'];
+				$updated_id    = \wp_update_post(
+					\wp_slash(
+						array(
+							'ID'           => (int) $draft->ID,
+							'post_title'   => $updated_title,
+							'post_status'  => 'publish',
+							'post_name'    => $base_slug,
+							'post_content' => 'Collision updated content ' . $case['updatedContent'],
+						)
+					),
+					true,
+					true
+				);
+
+				$updated = \get_post( $draft->ID );
+				if ( $updated instanceof \WP_Post ) {
+					$prepare_singular_query( $updated );
+				}
+
+				$first_permalink   = $first instanceof \WP_Post ? \get_permalink( $first ) : null;
+				$second_permalink  = $second instanceof \WP_Post ? \get_permalink( $second ) : null;
+				$updated_permalink = $updated instanceof \WP_Post ? \get_permalink( $updated ) : null;
+				$updated_canonical = $updated instanceof \WP_Post ? \wp_get_canonical_url( $updated ) : null;
+				$base_query        = \get_posts(
+					array(
+						'post_type'              => $post_type,
+						'post_status'            => 'publish',
+						'name'                   => $base_slug,
+						'fields'                 => 'ids',
+						'numberposts'            => -1,
+						'orderby'                => 'ID',
+						'order'                  => 'ASC',
+						'suppress_filters'       => false,
+						'update_post_meta_cache' => false,
+						'update_post_term_cache' => false,
+					)
+				);
+				$second_query      = \get_posts(
+					array(
+						'post_type'              => $post_type,
+						'post_status'            => 'publish',
+						'name'                   => $second_expected_slug,
+						'fields'                 => 'ids',
+						'numberposts'            => -1,
+						'orderby'                => 'ID',
+						'order'                  => 'ASC',
+						'suppress_filters'       => false,
+						'update_post_meta_cache' => false,
+						'update_post_term_cache' => false,
+					)
+				);
+				$updated_query     = \get_posts(
+					array(
+						'post_type'              => $post_type,
+						'post_status'            => 'publish',
+						'name'                   => $updated_expected_slug,
+						'fields'                 => 'ids',
+						'numberposts'            => -1,
+						'orderby'                => 'ID',
+						'order'                  => 'ASC',
+						'suppress_filters'       => false,
+						'update_post_meta_cache' => false,
+						'update_post_term_cache' => false,
+					)
+				);
+				$base_query_ids    = self::ids_from_posts( $base_query );
+				$second_query_ids  = self::ids_from_posts( $second_query );
+				$updated_query_ids = self::ids_from_posts( $updated_query );
+
+				self::collect_failure(
+					$failures,
+					$updated_id === (int) $draft->ID
+						&& $updated instanceof \WP_Post
+						&& 'publish' === $updated->post_status
+						&& $updated_expected_slug === $updated->post_name
+						&& $updated_title === $updated->post_title
+						&& self::same_id_set( $base_query_ids, array( $first_id ) )
+						&& self::same_id_set( $second_query_ids, array( $second_id ) )
+						&& self::same_id_set( $updated_query_ids, array( $draft_id ) ),
+					'wp_update_post collision promotes draft to the next unique slug and queries address each generated slug separately',
+					array(
+						'updatedId'    => self::error_summary( $updated_id ),
+						'updated'      => self::post_summary( $updated ),
+						'baseQuery'    => $base_query_ids,
+						'secondQuery'  => $second_query_ids,
+						'updatedQuery' => $updated_query_ids,
+					)
+				);
+
+				self::collect_failure(
+					$failures,
+					is_string( $first_permalink )
+						&& is_string( $second_permalink )
+						&& is_string( $updated_permalink )
+						&& $first_permalink !== $second_permalink
+						&& $second_permalink !== $updated_permalink
+						&& str_contains( $first_permalink, '/' . $rewrite_slug . '/' . $base_slug )
+						&& str_contains( $second_permalink, '/' . $rewrite_slug . '/' . $second_expected_slug )
+						&& str_contains( $updated_permalink, '/' . $rewrite_slug . '/' . $updated_expected_slug )
+						&& $updated_permalink === $updated_canonical,
+					'permalink and canonical projections follow the stored unique collision slug',
+					array(
+						'firstPermalink'   => $first_permalink,
+						'secondPermalink'  => $second_permalink,
+						'updatedPermalink' => $updated_permalink,
+						'updatedCanonical' => $updated_canonical,
+					)
+				);
+			}
+		} finally {
+			\remove_filter( 'pre_option_permalink_structure', $permalink_filter );
+
+			if ( $previous_rewrite_set ) {
+				$GLOBALS['wp_rewrite'] = $previous_rewrite;
+			} else {
+				unset( $GLOBALS['wp_rewrite'] );
+			}
+
+			if ( $previous_query_set ) {
+				$GLOBALS['wp_query'] = $previous_query;
+			} else {
+				unset( $GLOBALS['wp_query'] );
+			}
+
+			if ( $previous_the_query_set ) {
+				$GLOBALS['wp_the_query'] = $previous_the_query;
+			} else {
+				unset( $GLOBALS['wp_the_query'] );
+			}
+
+			foreach ( array_unique( array_map( 'intval', $post_ids ) ) as $post_id ) {
+				if ( $post_id > 0 ) {
+					\wp_delete_post( $post_id, true );
+				}
+			}
+		}
+
+		$rewrite_restored   = $previous_rewrite_set === array_key_exists( 'wp_rewrite', $GLOBALS )
+			&& ( ! $previous_rewrite_set || $previous_rewrite === $GLOBALS['wp_rewrite'] );
+		$query_restored     = $previous_query_set === array_key_exists( 'wp_query', $GLOBALS )
+			&& ( ! $previous_query_set || $previous_query === $GLOBALS['wp_query'] );
+		$the_query_restored = $previous_the_query_set === array_key_exists( 'wp_the_query', $GLOBALS )
+			&& ( ! $previous_the_query_set || $previous_the_query === $GLOBALS['wp_the_query'] );
+
+		self::collect_failure(
+			$failures,
+			false === \has_filter( 'pre_option_permalink_structure', $permalink_filter )
+				&& $rewrite_restored
+				&& $query_restored
+				&& $the_query_restored,
+			'post slug collision canonical row restores permalink, rewrite, and query globals',
+			array(
+				'permalinkFilter'  => \has_filter( 'pre_option_permalink_structure', $permalink_filter ),
+				'rewriteRestored'  => $rewrite_restored,
+				'queryRestored'    => $query_restored,
+				'theQueryRestored' => $the_query_restored,
+			)
+		);
+
+		return $ctx->result(
+			'content-lifecycle.posts.slug-collision-canonical-projection',
+			array() === $failures,
+			array(
+				'case'     => self::case_summary( $case ),
+				'postType' => $post_type,
+				'postIds'  => $post_ids,
+				'failures' => array_slice( $failures, 0, 8 ),
 			)
 		);
 	}

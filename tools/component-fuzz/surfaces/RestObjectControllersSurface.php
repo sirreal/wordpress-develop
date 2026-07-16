@@ -3709,6 +3709,7 @@ final class RestObjectControllersSurface {
 		$server_restored        = false;
 		$actions_restored       = false;
 		$current_user_restored  = false;
+		$slug_collision_id      = 0;
 
 		try {
 			$controllers = array(
@@ -3722,8 +3723,25 @@ final class RestObjectControllersSurface {
 				$controller->register_routes();
 			}
 
-			$counts_before = self::content_counts();
-			$post_update_slug_input = 'Updated REST Slug ' . $case['token'];
+			$post_update_slug_input = 'rest-collision-' . $case['token'];
+			$sanitized_update_slug  = \sanitize_title( $post_update_slug_input );
+			$expected_update_slug   = $sanitized_update_slug . '-2';
+			$slug_collision_id      = \wp_insert_post(
+				\wp_slash(
+					array(
+						'post_type'    => 'post',
+						'post_title'   => 'REST Slug Collision Holder ' . $case['token'],
+						'post_content' => 'REST slug collision holder ' . $case['token'],
+						'post_status'  => 'publish',
+						'post_name'    => $sanitized_update_slug,
+						'post_author'  => $fixtures['author'],
+					)
+				),
+				true,
+				false
+			);
+			$slug_collision_post    = is_int( $slug_collision_id ) ? \get_post( $slug_collision_id ) : null;
+			$counts_before          = self::content_counts();
 
 			\wp_set_current_user( 0 );
 			$denied_post_response = $server->dispatch(
@@ -3806,7 +3824,7 @@ final class RestObjectControllersSurface {
 					self::request(
 						'PUT',
 						'/wp/v2/posts/' . $fixtures['post'],
-						array( '_fields' => 'id,slug,status,title' ),
+						array( '_fields' => 'id,link,slug,status,title' ),
 						array(),
 						array(
 							'slug'  => $post_update_slug_input,
@@ -3864,7 +3882,7 @@ final class RestObjectControllersSurface {
 			$updated_term          = \get_term( $fixtures['term'], 'category' );
 			$updated_comment       = \get_comment( $fixtures['comment'] );
 			$updated_user          = \get_user_by( 'id', $fixtures['author'] );
-			$sanitized_update_slug = \sanitize_title( $post_update_slug_input );
+			$updated_post_link     = $updated_post instanceof \WP_Post ? \get_permalink( $updated_post ) : null;
 
 			$observed = array(
 				'deniedPost'     => array(
@@ -3887,11 +3905,17 @@ final class RestObjectControllersSurface {
 				'storedRows'      => array(
 					'postTitle'       => $updated_post instanceof \WP_Post ? $updated_post->post_title : null,
 					'postSlug'        => $updated_post instanceof \WP_Post ? $updated_post->post_name : null,
+					'postLink'        => $updated_post_link,
 					'termName'        => $updated_term instanceof \WP_Term ? $updated_term->name : null,
 					'commentContent'  => $updated_comment instanceof \WP_Comment ? $updated_comment->comment_content : null,
 					'commentApproved' => $updated_comment instanceof \WP_Comment ? $updated_comment->comment_approved : null,
 					'userName'        => $updated_user instanceof \WP_User ? $updated_user->display_name : null,
 					'userEmail'       => $updated_user instanceof \WP_User ? $updated_user->user_email : null,
+				),
+				'slugCollision'   => array(
+					'id'       => self::describe_value( $slug_collision_id ),
+					'postSlug' => $slug_collision_post instanceof \WP_Post ? $slug_collision_post->post_name : null,
+					'expected' => $sanitized_update_slug,
 				),
 				'countsBefore'    => $counts_before,
 				'countsAfter'     => $counts_after,
@@ -3925,12 +3949,15 @@ final class RestObjectControllersSurface {
 				$failures,
 				$valid_post_response instanceof \WP_REST_Response
 					&& 200 === $valid_post_response->get_status()
-					&& self::projected_keys_match( $valid_post_data, array( 'id', 'slug', 'status', 'title' ) )
+					&& self::projected_keys_match( $valid_post_data, array( 'id', 'link', 'slug', 'status', 'title' ) )
 					&& $fixtures['post'] === (int) ( $valid_post_data['id'] ?? 0 )
 					&& $case['updatedPostTitle'] === ( $valid_post_data['title']['raw'] ?? null )
-					&& $sanitized_update_slug === ( $valid_post_data['slug'] ?? null )
+					&& $slug_collision_post instanceof \WP_Post
+					&& $sanitized_update_slug === $slug_collision_post->post_name
+					&& $expected_update_slug === ( $valid_post_data['slug'] ?? null )
+					&& $updated_post_link === ( $valid_post_data['link'] ?? null )
 					&& $case['updatedPostTitle'] === ( $updated_post instanceof \WP_Post ? $updated_post->post_title : null )
-					&& $sanitized_update_slug === ( $updated_post instanceof \WP_Post ? $updated_post->post_name : null )
+					&& $expected_update_slug === ( $updated_post instanceof \WP_Post ? $updated_post->post_name : null )
 					&& $valid_term_response instanceof \WP_REST_Response
 					&& 200 === $valid_term_response->get_status()
 					&& self::projected_keys_match( $valid_term_data, array( 'id', 'name', 'slug' ) )
@@ -3959,6 +3986,10 @@ final class RestObjectControllersSurface {
 		} finally {
 			if ( null !== $cap_filter ) {
 				$write_filter_restored = self::remove_cap_filter( $cap_filter );
+			}
+
+			if ( is_int( $slug_collision_id ) && $slug_collision_id > 0 ) {
+				\wp_delete_post( $slug_collision_id, true );
 			}
 
 			\wp_set_current_user( $previous_current_user_id );
