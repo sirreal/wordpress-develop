@@ -6492,6 +6492,7 @@ final class RestObjectControllersSurface {
 		$prepare_events = array();
 		$hierarchy_events = array();
 		$status_events  = array();
+		$status_filter_events = array();
 		$delete_events  = array();
 		$untrash_events = array();
 
@@ -6528,6 +6529,8 @@ final class RestObjectControllersSurface {
 		$hierarchy_before_filter  = null;
 		$hierarchy_after_filter   = null;
 		$status_transition_filter = null;
+		$status_pre_insert_filter = null;
+		$status_insert_action     = null;
 		$untrash_pre_filter       = null;
 		$untrash_post_action      = null;
 		$untrash_status_filter    = null;
@@ -6741,6 +6744,23 @@ final class RestObjectControllersSurface {
 						false
 					)
 				);
+				$filtered_status_id = $remember_post(
+					\wp_insert_post(
+						\wp_slash(
+							array(
+								'post_type'    => $post_type,
+								'post_title'   => 'REST Parent Filtered Status ' . $token,
+								'post_content' => 'REST parent filtered status ' . $token,
+								'post_status'  => 'draft',
+								'post_name'    => 'rest-parent-filtered-status-' . $token,
+								'post_author'  => $fixtures['author'],
+								'post_parent'  => $same_parent_id,
+							)
+						),
+						true,
+						false
+					)
+				);
 				$trash_lifecycle_id = $remember_post(
 					\wp_insert_post(
 						\wp_slash(
@@ -6921,7 +6941,7 @@ final class RestObjectControllersSurface {
 				);
 
 				$record_untrash_transition = false;
-				$status_transition_filter = static function ( string $new_status, string $old_status, \WP_Post $post ) use ( &$status_events, $post_type, $status_update_id ): void {
+				$status_transition_filter = static function ( string $new_status, string $old_status, \WP_Post $post ) use ( &$status_events, &$status_filter_events, $post_type, $status_update_id, $filtered_status_id ): void {
 					if ( $post_type === $post->post_type && $status_update_id === (int) $post->ID ) {
 						$status_events[] = array(
 							'postId' => (int) $post->ID,
@@ -6930,8 +6950,49 @@ final class RestObjectControllersSurface {
 							'new'    => $new_status,
 						);
 					}
+					if ( $post_type === $post->post_type && $filtered_status_id === (int) $post->ID ) {
+						$status_filter_events[] = array(
+							'hook'   => 'transition_post_status',
+							'postId' => (int) $post->ID,
+							'type'   => $post->post_type,
+							'old'    => $old_status,
+							'new'    => $new_status,
+							'parent' => (int) $post->post_parent,
+						);
+					}
 				};
 				\add_action( 'transition_post_status', $status_transition_filter, 10, 3 );
+				$status_pre_insert_filter = static function ( $prepared_post, \WP_REST_Request $request ) use ( &$status_filter_events, $post_type, $filtered_status_id, $page_parent_id ) {
+					if ( $filtered_status_id === (int) $request['id'] && is_object( $prepared_post ) && ! \is_wp_error( $prepared_post ) ) {
+						$status_filter_events[] = array(
+							'hook'           => 'rest_pre_insert_' . $post_type,
+							'postId'         => (int) $request['id'],
+							'method'         => $request->get_method(),
+							'requestedStatus' => $request['status'],
+							'preparedStatus' => $prepared_post->post_status ?? null,
+							'preparedParent' => (int) ( $prepared_post->post_parent ?? -1 ),
+						);
+						if ( 'publish' === $request['status'] && $page_parent_id === (int) ( $prepared_post->post_parent ?? 0 ) ) {
+							$prepared_post->post_status = 'pending';
+						}
+					}
+
+					return $prepared_post;
+				};
+				\add_filter( 'rest_pre_insert_' . $post_type, $status_pre_insert_filter, 10, 2 );
+				$status_insert_action = static function ( \WP_Post $post, \WP_REST_Request $request, bool $creating ) use ( &$status_filter_events, $post_type, $filtered_status_id ): void {
+					if ( $post_type === $post->post_type && $filtered_status_id === (int) $post->ID ) {
+						$status_filter_events[] = array(
+							'hook'     => 'rest_insert_' . $post_type,
+							'postId'   => (int) $post->ID,
+							'method'   => $request->get_method(),
+							'creating' => $creating,
+							'status'   => $post->post_status,
+							'parent'   => (int) $post->post_parent,
+						);
+					}
+				};
+				\add_action( 'rest_insert_' . $post_type, $status_insert_action, 10, 3 );
 				$untrash_pre_filter = static function ( $check, \WP_Post $post, string $previous_status ) use ( &$untrash_events, $post_type, $trash_lifecycle_id ) {
 					if ( $post_type === $post->post_type && $trash_lifecycle_id === (int) $post->ID ) {
 						$untrash_events[] = array(
@@ -7088,6 +7149,7 @@ final class RestObjectControllersSurface {
 						array(),
 						array(
 							'parent' => $page_parent_id,
+							'status' => 'private',
 						)
 					)
 				);
@@ -7147,6 +7209,43 @@ final class RestObjectControllersSurface {
 				);
 				$status_parent_update_data = $status_parent_update_response instanceof \WP_REST_Response ? $status_parent_update_response->get_data() : array();
 				$after_status_parent_update = $status_update_id > 0 ? \get_post( $status_update_id ) : null;
+
+				$filtered_status_update_response = self::dispatch_with_rest_post_dispatch(
+					$server,
+					self::request(
+						'PUT',
+						'/wp/v2/' . $rest_base . '/' . $filtered_status_id,
+						array(
+							'_fields' => 'id,parent,slug,status,link,_links',
+							'context' => 'edit',
+						),
+						array(),
+						array(
+							'parent' => $page_parent_id,
+							'status' => 'publish',
+						)
+					)
+				);
+				$filtered_status_update_data = $filtered_status_update_response instanceof \WP_REST_Response ? $filtered_status_update_response->get_data() : array();
+				$after_filtered_status_update = $filtered_status_id > 0 ? \get_post( $filtered_status_id ) : null;
+
+				$filtered_status_collection_response = self::dispatch_with_rest_post_dispatch(
+					$server,
+					self::request(
+						'GET',
+						'/wp/v2/' . $rest_base,
+						array(
+							'_fields'  => 'id,parent,slug,status,link,_links',
+							'context'  => 'edit',
+							'status'   => array( 'pending' ),
+							'include'  => array( $filtered_status_id ),
+							'orderby'  => 'include',
+							'parent'   => array( $page_parent_id ),
+							'per_page' => 1,
+						)
+					)
+				);
+				$filtered_status_collection_data = $filtered_status_collection_response instanceof \WP_REST_Response ? $filtered_status_collection_response->get_data() : array();
 
 				$trash_lifecycle_response = self::dispatch_with_rest_post_dispatch(
 					$server,
@@ -7396,6 +7495,7 @@ final class RestObjectControllersSurface {
 				$cross_type_update_link     = $query_link( 'rest-parent-page-' . $token . '/rest-parent-update-child-' . $token );
 				$root_update_link           = $query_link( 'rest-parent-update-child-' . $token );
 				$status_parent_update_link  = $query_link( 'rest-parent-page-' . $token . '/rest-parent-status-update-' . $token );
+				$filtered_status_update_link = $plain_link( $post_type, $filtered_status_id );
 				$trash_lifecycle_link       = $plain_link( $post_type, $trash_lifecycle_id );
 				$trash_lifecycle_trashed_slug = 'rest-parent-trash-lifecycle-' . $token . '__trashed';
 				$force_delete_previous_link = $query_link( 'rest-parent-same-' . $token . '/rest-parent-delete-lifecycle-' . $token );
@@ -7411,6 +7511,7 @@ final class RestObjectControllersSurface {
 				$cross_type_update_links    = $cross_type_update_response instanceof \WP_REST_Response ? $cross_type_update_response->get_links() : array();
 				$root_update_response_links = $root_update_response instanceof \WP_REST_Response ? $root_update_response->get_links() : array();
 				$status_parent_update_links = $status_parent_update_response instanceof \WP_REST_Response ? $status_parent_update_response->get_links() : array();
+				$filtered_status_update_links = $filtered_status_update_response instanceof \WP_REST_Response ? $filtered_status_update_response->get_links() : array();
 				$trash_lifecycle_links      = $trash_lifecycle_response instanceof \WP_REST_Response ? $trash_lifecycle_response->get_links() : array();
 				$untrash_reparent_links     = $untrash_reparent_response instanceof \WP_REST_Response ? $untrash_reparent_response->get_links() : array();
 				$self_parent_update_links   = $self_parent_update_response instanceof \WP_REST_Response ? $self_parent_update_response->get_links() : array();
@@ -7425,6 +7526,7 @@ final class RestObjectControllersSurface {
 						'pageParent'     => $post_summary( \get_post( $page_parent_id ) ),
 						'updateChild'    => $post_summary( \get_post( $update_child_id ) ),
 						'statusUpdate'   => $post_summary( \get_post( $status_update_id ) ),
+						'filteredStatus' => $post_summary( \get_post( $filtered_status_id ) ),
 						'trashLifecycle' => $post_summary( \get_post( $trash_lifecycle_id ) ),
 						'deleteLifecycle' => $post_summary( \get_post( $delete_lifecycle_id ) ),
 						'trashLifecycleAfterUntrash' => $post_summary( $after_untrash ),
@@ -7464,6 +7566,17 @@ final class RestObjectControllersSurface {
 							'data'         => $status_parent_update_data,
 							'stored'       => $post_summary( $after_status_parent_update ),
 							'statusEvents' => $status_events,
+						),
+						'filteredStatusUpdate' => array(
+							'status' => $filtered_status_update_response instanceof \WP_REST_Response ? $filtered_status_update_response->get_status() : null,
+							'data'   => $filtered_status_update_data,
+							'stored' => $post_summary( $after_filtered_status_update ),
+							'links'  => $filtered_status_update_links,
+							'events' => $status_filter_events,
+						),
+						'filteredStatusCollection' => array(
+							'status' => $filtered_status_collection_response instanceof \WP_REST_Response ? $filtered_status_collection_response->get_status() : null,
+							'data'   => $filtered_status_collection_data,
 						),
 						'trashLifecycle' => array(
 							'status'       => $trash_lifecycle_response instanceof \WP_REST_Response ? $trash_lifecycle_response->get_status() : null,
@@ -7536,6 +7649,7 @@ final class RestObjectControllersSurface {
 					'prepareEvents' => $prepare_events,
 					'hierarchyEvents' => $hierarchy_events,
 					'statusEvents' => $status_events,
+					'statusFilterEvents' => $status_filter_events,
 					'deleteEvents' => $delete_events,
 					'untrashEvents' => $untrash_events,
 					'invalidCounts' => array(
@@ -7548,6 +7662,7 @@ final class RestObjectControllersSurface {
 						'crossUpdateLink' => $cross_type_update_link,
 						'rootUpdateLink'  => $root_update_link,
 						'statusParentLink' => $status_parent_update_link,
+						'filteredStatusLink' => $filtered_status_update_link,
 						'trashLifecycleLink' => $trash_lifecycle_link,
 						'forceDeletePreviousLink' => $force_delete_previous_link,
 						'untrashReparentLink' => $untrash_reparent_link,
@@ -7566,6 +7681,7 @@ final class RestObjectControllersSurface {
 						&& $page_parent_id > 0
 						&& $update_child_id > 0
 						&& $status_update_id > 0
+						&& $filtered_status_id > 0
 						&& $trash_lifecycle_id > 0
 						&& $delete_lifecycle_id > 0
 						&& $loop_parent_id > 0
@@ -7667,6 +7783,66 @@ final class RestObjectControllersSurface {
 					array(
 						'statusParentUpdate' => $observed['responses']['statusParentUpdate'],
 						'expected'           => $observed['expected'],
+					)
+				);
+
+				$filtered_status_collection_item = is_array( $filtered_status_collection_data[0] ?? null ) ? $filtered_status_collection_data[0] : array();
+				self::collect_failure(
+					$failures,
+					$filtered_status_update_response instanceof \WP_REST_Response
+						&& 200 === $filtered_status_update_response->get_status()
+						&& self::projected_keys_match( $filtered_status_update_data, $response_keys )
+						&& $filtered_status_id === (int) ( $filtered_status_update_data['id'] ?? 0 )
+						&& $page_parent_id === (int) ( $filtered_status_update_data['parent'] ?? 0 )
+						&& 'pending' === ( $filtered_status_update_data['status'] ?? null )
+						&& 'rest-parent-filtered-status-' . $token === ( $filtered_status_update_data['slug'] ?? null )
+						&& $filtered_status_update_link === ( $filtered_status_update_data['link'] ?? null )
+						&& $page_parent_up_link === self::link_href( $filtered_status_update_links, 'up' )
+						&& $after_filtered_status_update instanceof \WP_Post
+						&& $page_parent_id === (int) $after_filtered_status_update->post_parent
+						&& 'pending' === $after_filtered_status_update->post_status
+						&& $filtered_status_collection_response instanceof \WP_REST_Response
+						&& 200 === $filtered_status_collection_response->get_status()
+						&& 1 === count( $filtered_status_collection_data )
+						&& self::projected_keys_match( $filtered_status_collection_item, array( '_links', 'id', 'link', 'parent', 'slug', 'status' ) )
+						&& $filtered_status_id === (int) ( $filtered_status_collection_item['id'] ?? 0 )
+						&& $page_parent_id === (int) ( $filtered_status_collection_item['parent'] ?? 0 )
+						&& 'pending' === ( $filtered_status_collection_item['status'] ?? null )
+						&& 'rest-parent-filtered-status-' . $token === ( $filtered_status_collection_item['slug'] ?? null )
+						&& $filtered_status_update_link === ( $filtered_status_collection_item['link'] ?? null )
+						&& $page_parent_up_link === self::link_href( is_array( $filtered_status_collection_item['_links'] ?? null ) ? $filtered_status_collection_item['_links'] : array(), 'up' )
+						&& array(
+							array(
+								'hook'           => 'rest_pre_insert_' . $post_type,
+								'postId'         => $filtered_status_id,
+								'method'         => 'PUT',
+								'requestedStatus' => 'publish',
+								'preparedStatus' => 'publish',
+								'preparedParent' => $page_parent_id,
+							),
+							array(
+								'hook'   => 'transition_post_status',
+								'postId' => $filtered_status_id,
+								'type'   => $post_type,
+								'old'    => 'draft',
+								'new'    => 'pending',
+								'parent' => $page_parent_id,
+							),
+							array(
+								'hook'     => 'rest_insert_' . $post_type,
+								'postId'   => $filtered_status_id,
+								'method'   => 'PUT',
+								'creating' => false,
+								'status'   => 'pending',
+								'parent'   => $page_parent_id,
+							),
+						) === $status_filter_events,
+					'custom hierarchical route-dispatched parent reassignment honors scoped REST status filter before pending collection readback',
+					array(
+						'filteredStatusUpdate' => $observed['responses']['filteredStatusUpdate'],
+						'filteredStatusCollection' => $observed['responses']['filteredStatusCollection'],
+						'statusFilterEvents'   => $status_filter_events,
+						'expected'             => $observed['expected'],
 					)
 				);
 
@@ -7973,9 +8149,11 @@ final class RestObjectControllersSurface {
 						&& $after_denied_update instanceof \WP_Post
 						&& $same_parent_id === (int) $before_denied_update->post_parent
 						&& $same_parent_id === (int) $after_denied_update->post_parent
+						&& 'publish' === $before_denied_update->post_status
+						&& 'publish' === $after_denied_update->post_status
 						&& array() === $denied_update_prepare_events
 						&& array() === $denied_update_hierarchy_events,
-					'custom hierarchical route-dispatched capability-denied parent update preserves storage and skips mutation hooks',
+					'custom hierarchical route-dispatched capability-denied parent/status update preserves storage and skips mutation hooks',
 					array(
 						'deniedUpdate' => $observed['responses']['deniedUpdate'],
 					)
@@ -7983,10 +8161,10 @@ final class RestObjectControllersSurface {
 
 				self::collect_failure(
 					$failures,
-					array( $same_parent_create_id, $cross_type_create_id, $update_child_id, $update_child_id, $status_update_id, $trash_lifecycle_id, $delete_lifecycle_id, $trash_lifecycle_id, $trash_lifecycle_id, $update_child_id, $loop_parent_id, $unrelated_update_id ) === array_values( array_map( static fn ( array $event ): int => (int) ( $event['id'] ?? 0 ), $prepare_events ) )
-						&& array( 'POST', 'POST', 'PUT', 'PUT', 'PUT', 'DELETE', 'DELETE', 'PUT', 'GET', 'PUT', 'PUT', 'PUT' ) === array_values( array_map( static fn ( array $event ): string => (string) ( $event['method'] ?? '' ), $prepare_events ) )
-						&& array( 'edit', 'edit', 'edit', 'edit', 'edit', 'edit', 'edit', 'edit', 'edit', 'edit', 'edit', 'edit' ) === array_values( array_map( static fn ( array $event ): string => (string) ( $event['context'] ?? '' ), $prepare_events ) )
-						&& array( '/wp/v2/' . $rest_base, '/wp/v2/' . $rest_base, '/wp/v2/' . $rest_base . '/' . $update_child_id, '/wp/v2/' . $rest_base . '/' . $update_child_id, '/wp/v2/' . $rest_base . '/' . $status_update_id, '/wp/v2/' . $rest_base . '/' . $trash_lifecycle_id, '/wp/v2/' . $rest_base . '/' . $delete_lifecycle_id, '/wp/v2/' . $rest_base . '/' . $trash_lifecycle_id, '/wp/v2/' . $rest_base, '/wp/v2/' . $rest_base . '/' . $update_child_id, '/wp/v2/' . $rest_base . '/' . $loop_parent_id, '/wp/v2/' . $rest_base . '/' . $unrelated_update_id ) === array_values( array_map( static fn ( array $event ): string => (string) ( $event['route'] ?? '' ), $prepare_events ) ),
+					array( $same_parent_create_id, $cross_type_create_id, $update_child_id, $update_child_id, $status_update_id, $filtered_status_id, $filtered_status_id, $trash_lifecycle_id, $delete_lifecycle_id, $trash_lifecycle_id, $trash_lifecycle_id, $update_child_id, $loop_parent_id, $unrelated_update_id ) === array_values( array_map( static fn ( array $event ): int => (int) ( $event['id'] ?? 0 ), $prepare_events ) )
+						&& array( 'POST', 'POST', 'PUT', 'PUT', 'PUT', 'PUT', 'GET', 'DELETE', 'DELETE', 'PUT', 'GET', 'PUT', 'PUT', 'PUT' ) === array_values( array_map( static fn ( array $event ): string => (string) ( $event['method'] ?? '' ), $prepare_events ) )
+						&& array( 'edit', 'edit', 'edit', 'edit', 'edit', 'edit', 'edit', 'edit', 'edit', 'edit', 'edit', 'edit', 'edit', 'edit' ) === array_values( array_map( static fn ( array $event ): string => (string) ( $event['context'] ?? '' ), $prepare_events ) )
+						&& array( '/wp/v2/' . $rest_base, '/wp/v2/' . $rest_base, '/wp/v2/' . $rest_base . '/' . $update_child_id, '/wp/v2/' . $rest_base . '/' . $update_child_id, '/wp/v2/' . $rest_base . '/' . $status_update_id, '/wp/v2/' . $rest_base . '/' . $filtered_status_id, '/wp/v2/' . $rest_base, '/wp/v2/' . $rest_base . '/' . $trash_lifecycle_id, '/wp/v2/' . $rest_base . '/' . $delete_lifecycle_id, '/wp/v2/' . $rest_base . '/' . $trash_lifecycle_id, '/wp/v2/' . $rest_base, '/wp/v2/' . $rest_base . '/' . $update_child_id, '/wp/v2/' . $rest_base . '/' . $loop_parent_id, '/wp/v2/' . $rest_base . '/' . $unrelated_update_id ) === array_values( array_map( static fn ( array $event ): string => (string) ( $event['route'] ?? '' ), $prepare_events ) ),
 					'custom hierarchical parent assignment prepare hook receives only successful create/update/delete responses',
 					array( 'prepareEvents' => $prepare_events )
 				);
@@ -8015,8 +8193,15 @@ final class RestObjectControllersSurface {
 			if ( null !== $status_transition_filter ) {
 				\remove_action( 'transition_post_status', $status_transition_filter, 10 );
 			}
-			$status_filter_restored = null === $status_transition_filter
-				|| false === \has_filter( 'transition_post_status', $status_transition_filter );
+			if ( null !== $status_pre_insert_filter ) {
+				\remove_filter( 'rest_pre_insert_' . $post_type, $status_pre_insert_filter, 10 );
+			}
+			if ( null !== $status_insert_action ) {
+				\remove_action( 'rest_insert_' . $post_type, $status_insert_action, 10 );
+			}
+			$status_filter_restored = ( null === $status_transition_filter || false === \has_filter( 'transition_post_status', $status_transition_filter ) )
+				&& ( null === $status_pre_insert_filter || false === \has_filter( 'rest_pre_insert_' . $post_type, $status_pre_insert_filter ) )
+				&& ( null === $status_insert_action || false === \has_filter( 'rest_insert_' . $post_type, $status_insert_action ) );
 			if ( null !== $untrash_pre_filter ) {
 				\remove_filter( 'pre_untrash_post', $untrash_pre_filter, 10 );
 			}

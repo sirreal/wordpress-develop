@@ -3331,6 +3331,9 @@ final class ContentLifecycleSurface {
 			$plain_parent_slug  = 'single-plain-parent-' . $token;
 			$plain_child_slug   = 'single-plain-child-' . $token;
 			$plain_draft_slug   = 'single-plain-draft-' . $token;
+			$mutation_parent_a_slug = 'single-mutation-parent-a-' . $token;
+			$mutation_parent_b_slug = 'single-mutation-parent-b-' . $token;
+			$mutation_child_slug    = 'single-mutation-child-' . $token;
 			$missing_parent_id  = 987654321;
 
 			$pretty_parent_id = $insert_post( $pretty_type, 'Single Pretty Parent ' . $token, $pretty_parent_slug, 0 );
@@ -3366,6 +3369,9 @@ final class ContentLifecycleSurface {
 			$plain_parent_id  = $insert_post( $plain_type, 'Single Plain Parent ' . $token, $plain_parent_slug, 0 );
 			$plain_child_id   = $insert_post( $plain_type, 'Single Plain Child ' . $token, $plain_child_slug, $plain_parent_id );
 			$plain_draft_id   = $insert_post( $plain_type, 'Single Plain Draft ' . $token, $plain_draft_slug, $plain_parent_id, 'draft' );
+			$mutation_parent_a_id = $insert_post( $pretty_type, 'Single Mutation Parent A ' . $token, $mutation_parent_a_slug, 0 );
+			$mutation_parent_b_id = $insert_post( $query_type, 'Single Mutation Parent B ' . $token, $mutation_parent_b_slug, 0 );
+			$mutation_child_id    = $insert_post( $pretty_type, 'Single Mutation Child ' . $token, $mutation_child_slug, $mutation_parent_a_id );
 			$force_parent( $pretty_missing_parent_id, $missing_parent_id );
 			$force_parent( $pretty_self_parent_id, $pretty_self_parent_id );
 			$force_parent( $query_missing_parent_id, $missing_parent_id );
@@ -3408,7 +3414,10 @@ final class ContentLifecycleSurface {
 					&& $query_mixed_leaf_id > 0
 					&& $plain_parent_id > 0
 					&& $plain_child_id > 0
-					&& $plain_draft_id > 0,
+					&& $plain_draft_id > 0
+					&& $mutation_parent_a_id > 0
+					&& $mutation_parent_b_id > 0
+					&& $mutation_child_id > 0,
 				'custom post type single permalink fallback fixtures register and insert generated hierarchy rows',
 				array(
 					'registrations' => array(
@@ -3434,6 +3443,8 @@ final class ContentLifecycleSurface {
 			$query_private_child_uri = $query_private_parent_slug . '/' . $query_private_child_slug;
 			$query_trash_child_uri = $query_trash_parent_slug . '/' . $query_trash_child_slug;
 			$query_mixed_leaf_uri = $query_mixed_root_slug . '/' . $pretty_mixed_middle_slug . '/' . $query_mixed_leaf_slug;
+			$mutation_initial_path = $mutation_parent_a_slug . '/' . $mutation_child_slug;
+			$mutation_reparented_path = $mutation_parent_b_slug . '/' . $mutation_child_slug;
 
 			$matrix = array(
 				array(
@@ -3829,6 +3840,130 @@ final class ContentLifecycleSurface {
 					'lastChangedBefore' => $mixed_lookup_last_changed,
 					'lastChangedAfter' => $mixed_lookup_changed,
 					'cacheAfterClean'  => $pretty_mixed_cache_after_clean,
+				)
+			);
+
+			$mutation_lookup_types = array( $pretty_type, $query_type );
+			$mutation_initial_lookup = \get_page_by_path( $mutation_initial_path, OBJECT, $mutation_lookup_types );
+			$mutation_reparented_before = \get_page_by_path( $mutation_reparented_path, OBJECT, $mutation_lookup_types );
+			$mutation_old_parent_publish_before = \get_posts(
+				array(
+					'fields'         => 'ids',
+					'no_found_rows'  => true,
+					'post_parent'    => $mutation_parent_a_id,
+					'post_status'    => 'publish',
+					'post_type'      => $pretty_type,
+					'suppress_filters' => false,
+				)
+			);
+			$mutation_new_parent_private_before = \get_posts(
+				array(
+					'fields'         => 'ids',
+					'no_found_rows'  => true,
+					'post_parent'    => $mutation_parent_b_id,
+					'post_status'    => 'private',
+					'post_type'      => $pretty_type,
+					'suppress_filters' => false,
+				)
+			);
+			\_prime_post_parent_id_caches( array( $mutation_child_id ) );
+			$mutation_parent_cache_before = \wp_cache_get( 'post_parent:' . (string) $mutation_child_id, 'posts' );
+			$mutation_last_changed_before = \wp_cache_get_last_changed( 'posts' );
+			$mutation_initial_hash = md5( $mutation_initial_path . serialize( $mutation_lookup_types ) );
+			$mutation_reparented_hash = md5( $mutation_reparented_path . serialize( $mutation_lookup_types ) );
+			$mutation_initial_cached = \wp_cache_get_salted( 'get_page_by_path:' . $mutation_initial_hash, 'post-queries', $mutation_last_changed_before );
+			$mutation_reparented_cached_before = \wp_cache_get_salted( 'get_page_by_path:' . $mutation_reparented_hash, 'post-queries', $mutation_last_changed_before );
+			$mutation_update_result = \wp_update_post(
+				\wp_slash(
+					array(
+						'ID'          => $mutation_child_id,
+						'post_parent' => $mutation_parent_b_id,
+						'post_status' => 'private',
+					)
+				),
+				true,
+				false
+			);
+			$mutation_after = \get_post( $mutation_child_id );
+			$mutation_parent_cache_after_update = \wp_cache_get( 'post_parent:' . (string) $mutation_child_id, 'posts' );
+			$mutation_last_changed_after = \wp_cache_get_last_changed( 'posts' );
+			$mutation_initial_cache_after_update = \wp_cache_get_salted( 'get_page_by_path:' . $mutation_initial_hash, 'post-queries', $mutation_last_changed_after );
+			$mutation_reparented_cache_after_update = \wp_cache_get_salted( 'get_page_by_path:' . $mutation_reparented_hash, 'post-queries', $mutation_last_changed_after );
+			$mutation_old_parent_publish_after = \get_posts(
+				array(
+					'fields'         => 'ids',
+					'no_found_rows'  => true,
+					'post_parent'    => $mutation_parent_a_id,
+					'post_status'    => 'publish',
+					'post_type'      => $pretty_type,
+					'suppress_filters' => false,
+				)
+			);
+			$mutation_new_parent_private_after = \get_posts(
+				array(
+					'fields'         => 'ids',
+					'no_found_rows'  => true,
+					'post_parent'    => $mutation_parent_b_id,
+					'post_status'    => 'private',
+					'post_type'      => $pretty_type,
+					'suppress_filters' => false,
+				)
+			);
+			$mutation_initial_after = \get_page_by_path( $mutation_initial_path, OBJECT, $mutation_lookup_types );
+			$mutation_reparented_after = \get_page_by_path( $mutation_reparented_path, ARRAY_A, $mutation_lookup_types );
+			$mutation_initial_cached_after_lookup = \wp_cache_get_salted( 'get_page_by_path:' . $mutation_initial_hash, 'post-queries', $mutation_last_changed_after );
+			$mutation_reparented_cached_after_lookup = \wp_cache_get_salted( 'get_page_by_path:' . $mutation_reparented_hash, 'post-queries', $mutation_last_changed_after );
+
+			self::collect_failure(
+				$failures,
+				$mutation_initial_lookup instanceof \WP_Post
+					&& $mutation_child_id === (int) $mutation_initial_lookup->ID
+					&& null === $mutation_reparented_before
+					&& array( $mutation_child_id ) === array_values( array_map( 'intval', $mutation_old_parent_publish_before ) )
+					&& array() === array_values( array_map( 'intval', $mutation_new_parent_private_before ) )
+					&& $mutation_parent_a_id === (int) $mutation_parent_cache_before
+					&& $mutation_child_id === (int) $mutation_initial_cached
+					&& 0 === (int) $mutation_reparented_cached_before
+					&& $mutation_child_id === (int) $mutation_update_result
+					&& $mutation_after instanceof \WP_Post
+					&& $mutation_parent_b_id === (int) $mutation_after->post_parent
+					&& 'private' === $mutation_after->post_status
+					&& false === $mutation_parent_cache_after_update
+					&& $mutation_last_changed_after !== $mutation_last_changed_before
+					&& false === $mutation_initial_cache_after_update
+					&& false === $mutation_reparented_cache_after_update
+					&& array() === array_values( array_map( 'intval', $mutation_old_parent_publish_after ) )
+					&& array( $mutation_child_id ) === array_values( array_map( 'intval', $mutation_new_parent_private_after ) )
+					&& null === $mutation_initial_after
+					&& is_array( $mutation_reparented_after )
+					&& $mutation_child_id === (int) ( $mutation_reparented_after['ID'] ?? 0 )
+					&& 0 === (int) $mutation_initial_cached_after_lookup
+					&& $mutation_child_id === (int) $mutation_reparented_cached_after_lookup,
+				'get_page_by_path invalidates generated custom hierarchical parent/status mutation cache boundaries',
+				array(
+					'lookupTypes'              => $mutation_lookup_types,
+					'initialPath'              => $mutation_initial_path,
+					'reparentedPath'           => $mutation_reparented_path,
+					'initialLookup'            => self::post_summary( $mutation_initial_lookup ),
+					'reparentedBefore'         => self::post_summary( $mutation_reparented_before ),
+					'oldParentPublishBefore'   => $mutation_old_parent_publish_before,
+					'newParentPrivateBefore'   => $mutation_new_parent_private_before,
+					'parentCacheBefore'        => $mutation_parent_cache_before,
+					'initialCached'            => $mutation_initial_cached,
+					'reparentedCachedBefore'   => $mutation_reparented_cached_before,
+					'updateResult'             => self::error_summary( $mutation_update_result ),
+					'afterMutation'            => self::post_summary( $mutation_after ),
+					'parentCacheAfterUpdate'   => $mutation_parent_cache_after_update,
+					'lastChangedBefore'        => $mutation_last_changed_before,
+					'lastChangedAfter'         => $mutation_last_changed_after,
+					'initialCacheAfterUpdate'  => $mutation_initial_cache_after_update,
+					'reparentedCacheAfterUpdate' => $mutation_reparented_cache_after_update,
+					'oldParentPublishAfter'    => $mutation_old_parent_publish_after,
+					'newParentPrivateAfter'    => $mutation_new_parent_private_after,
+					'initialAfter'             => self::post_summary( $mutation_initial_after ),
+					'reparentedAfter'          => $mutation_reparented_after,
+					'initialCachedAfterLookup' => $mutation_initial_cached_after_lookup,
+					'reparentedCachedAfterLookup' => $mutation_reparented_cached_after_lookup,
 				)
 			);
 
