@@ -8550,10 +8550,12 @@ final class RestObjectControllersSurface {
 		$query_vars                = array();
 		$objects_by_case           = array();
 		$totals_by_case            = array(
-			'parent'         => 4,
-			'parent_exclude' => 3,
-			'private_status' => 1,
-			'root'           => 1,
+			'parent'               => 4,
+			'parent_exclude'       => 3,
+			'parent_multi'         => 3,
+			'parent_exclude_multi' => 1,
+			'private_status'       => 1,
+			'root'                 => 1,
 		);
 
 		$remember_post = static function ( $post_id ) use ( &$post_ids ): int {
@@ -8588,7 +8590,11 @@ final class RestObjectControllersSurface {
 			);
 		};
 		$case_for_request = static function ( \WP_REST_Request $request ): string {
-			if ( array() !== (array) $request->get_param( 'parent_exclude' ) ) {
+			$excluded_parents = array_values( array_map( 'intval', (array) $request->get_param( 'parent_exclude' ) ) );
+			if ( count( array_unique( $excluded_parents ) ) > 1 ) {
+				return 'parent_exclude_multi';
+			}
+			if ( array() !== $excluded_parents ) {
 				return 'parent_exclude';
 			}
 
@@ -8600,6 +8606,9 @@ final class RestObjectControllersSurface {
 			$parents = array_values( array_map( 'intval', (array) $request->get_param( 'parent' ) ) );
 			if ( array( 0 ) === $parents ) {
 				return 'root';
+			}
+			if ( count( array_unique( $parents ) ) > 1 ) {
+				return 'parent_multi';
 			}
 			if ( array() !== $parents ) {
 				return 'parent';
@@ -8860,6 +8869,18 @@ final class RestObjectControllersSurface {
 					'parent_exclude' => array_values(
 						array_filter(
 							array( \get_post( $root_id ), \get_post( $child_b_id ) ),
+							static fn ( $post ): bool => $post instanceof \WP_Post
+						)
+					),
+					'parent_multi'   => array_values(
+						array_filter(
+							array( \get_post( $child_a2_id ), \get_post( $child_a1_id ), \get_post( $child_b_id ) ),
+							static fn ( $post ): bool => $post instanceof \WP_Post
+						)
+					),
+					'parent_exclude_multi' => array_values(
+						array_filter(
+							array( \get_post( $root_id ) ),
 							static fn ( $post ): bool => $post instanceof \WP_Post
 						)
 					),
@@ -9240,6 +9261,242 @@ final class RestObjectControllersSurface {
 						&& array( '/wp/v2/' . $rest_base, '/wp/v2/' . $rest_base, '/wp/v2/' . $rest_base, '/wp/v2/' . $rest_base ) === array_values( array_map( static fn ( array $event ): string => (string) ( $event['route'] ?? '' ), $prepare_events ) ),
 					'custom hierarchical collection prepare hook receives only GET item responses and preserves request context',
 					array( 'prepareEvents' => $prepare_events )
+				);
+
+				$variant_parent_sets = array(
+					'canonical'  => array( $parent_a_id, $parent_b_id ),
+					'reversed'   => array( $parent_b_id, $parent_a_id ),
+					'duplicated' => array( $parent_a_id, $parent_b_id, $parent_a_id, $parent_b_id ),
+				);
+				$variant_include_ids = array( $child_a1_id, $child_a2_id, $child_b_id, $root_id );
+				$expected_parent_multi_ids = array( $child_a2_id, $child_a1_id, $child_b_id );
+				$expected_parent_multi_parents = array(
+					$child_a2_id => $parent_a_id,
+					$child_a1_id => $parent_a_id,
+					$child_b_id  => $parent_b_id,
+				);
+				$expected_parent_multi_orders = array(
+					$child_a2_id => 1,
+					$child_a1_id => 2,
+					$child_b_id  => 3,
+				);
+				$expected_parent_multi_up = array(
+					$child_a2_id => $expected_up,
+					$child_a1_id => $expected_up,
+					$child_b_id  => \rest_url( \rest_get_route_for_post( $parent_b_id ) ),
+				);
+				$expected_parent_multi_statuses = array_fill_keys( $expected_parent_multi_ids, 'publish' );
+				ksort( $expected_parent_multi_parents );
+				ksort( $expected_parent_multi_orders );
+				ksort( $expected_parent_multi_up );
+				ksort( $expected_parent_multi_statuses );
+				$sort_ints = static function ( array $values ): array {
+					$values = array_values( array_map( 'intval', $values ) );
+					sort( $values );
+					return $values;
+				};
+
+				$variant_rest_start    = count( $rest_args );
+				$variant_query_start   = count( $query_vars );
+				$variant_prepare_start = count( $prepare_events );
+				$parent_variant_responses = array();
+				$exclude_variant_responses = array();
+
+				foreach ( $variant_parent_sets as $variant => $parents ) {
+					$parent_variant_responses[ $variant ] = self::dispatch_with_rest_post_dispatch(
+						$server,
+						self::request(
+							'GET',
+							'/wp/v2/' . $rest_base,
+							array(
+								'_fields'  => 'id,parent,slug,status,menu_order,_links',
+								'context'  => 'view',
+								'order'    => 'asc',
+								'orderby'  => 'menu_order',
+								'include'  => $variant_include_ids,
+								'page'     => 1,
+								'parent'   => $parents,
+								'per_page' => 3,
+							)
+						)
+					);
+				}
+
+				foreach ( $variant_parent_sets as $variant => $parents ) {
+					$exclude_variant_responses[ $variant ] = self::dispatch_with_rest_post_dispatch(
+						$server,
+						self::request(
+							'GET',
+							'/wp/v2/' . $rest_base,
+							array(
+								'_fields'        => 'id,parent,slug,status,menu_order,_links',
+								'context'        => 'view',
+								'order'          => 'asc',
+								'orderby'        => 'menu_order',
+								'include'        => $variant_include_ids,
+								'page'           => 1,
+								'parent_exclude' => $parents,
+								'per_page'       => 1,
+							)
+						)
+					);
+				}
+
+				$variant_rest_args      = array_slice( $rest_args, $variant_rest_start );
+				$variant_query_vars     = array_slice( $query_vars, $variant_query_start );
+				$variant_prepare_events = array_slice( $prepare_events, $variant_prepare_start );
+				$parent_variant_observed = array();
+				$exclude_variant_observed = array();
+				$parent_variants_ok = true;
+				$exclude_variants_ok = true;
+				foreach ( $parent_variant_responses as $variant => $response ) {
+					$data    = $response instanceof \WP_REST_Response ? $response->get_data() : array();
+					$headers = $response instanceof \WP_REST_Response ? $response->get_headers() : array();
+					$rows    = is_array( $data ) && array_is_list( $data ) ? array_values( array_filter( $data, 'is_array' ) ) : array();
+					$ids     = array_values( array_map( static fn ( array $row ): int => (int) ( $row['id'] ?? 0 ), $rows ) );
+					$parents = array();
+					$orders  = array();
+					$links   = array();
+					$statuses = array();
+					foreach ( $rows as $row ) {
+						$post_id = (int) ( $row['id'] ?? 0 );
+						$parents[ $post_id ] = (int) ( $row['parent'] ?? -1 );
+						$orders[ $post_id ] = (int) ( $row['menu_order'] ?? -1 );
+						$statuses[ $post_id ] = (string) ( $row['status'] ?? '' );
+						$links[ $post_id ] = self::link_href( is_array( $row['_links'] ?? null ) ? $row['_links'] : array(), 'up' );
+					}
+					ksort( $parents );
+					ksort( $orders );
+					ksort( $statuses );
+					ksort( $links );
+
+					$parent_variant_observed[ $variant ] = array(
+						'status'  => $response instanceof \WP_REST_Response ? $response->get_status() : null,
+						'ids'     => $ids,
+						'parents' => $parents,
+						'orders'  => $orders,
+						'statuses' => $statuses,
+						'links'   => $links,
+						'headers' => $headers,
+					);
+					$parent_variants_ok = $parent_variants_ok
+						&& $response instanceof \WP_REST_Response
+						&& 200 === $response->get_status()
+						&& $expected_parent_multi_ids === $ids
+						&& $expected_parent_multi_parents === $parents
+						&& $expected_parent_multi_orders === $orders
+						&& $expected_parent_multi_statuses === $statuses
+						&& $expected_parent_multi_up === $links
+						&& (string) $totals_by_case['parent_multi'] === (string) ( $headers['X-WP-Total'] ?? '' )
+						&& '1' === (string) ( $headers['X-WP-TotalPages'] ?? '' );
+				}
+				foreach ( $exclude_variant_responses as $variant => $response ) {
+					$data    = $response instanceof \WP_REST_Response ? $response->get_data() : array();
+					$headers = $response instanceof \WP_REST_Response ? $response->get_headers() : array();
+					$rows    = is_array( $data ) && array_is_list( $data ) ? array_values( array_filter( $data, 'is_array' ) ) : array();
+					$root_row = $rows[0] ?? array();
+					$exclude_variant_observed[ $variant ] = array(
+						'status'  => $response instanceof \WP_REST_Response ? $response->get_status() : null,
+						'data'    => $data,
+						'headers' => $headers,
+					);
+					$exclude_variants_ok = $exclude_variants_ok
+						&& $response instanceof \WP_REST_Response
+						&& 200 === $response->get_status()
+						&& 1 === count( $rows )
+						&& self::projected_keys_match( $root_row, array( '_links', 'id', 'menu_order', 'parent', 'slug', 'status' ) )
+						&& $root_id === (int) ( $root_row['id'] ?? 0 )
+						&& 0 === (int) ( $root_row['parent'] ?? -1 )
+						&& 4 === (int) ( $root_row['menu_order'] ?? -1 )
+						&& 'publish' === ( $root_row['status'] ?? null )
+						&& $root_slug === ( $root_row['slug'] ?? null )
+						&& null === self::link_href( is_array( $root_row['_links'] ?? null ) ? $root_row['_links'] : array(), 'up' )
+						&& (string) $totals_by_case['parent_exclude_multi'] === (string) ( $headers['X-WP-Total'] ?? '' )
+						&& '1' === (string) ( $headers['X-WP-TotalPages'] ?? '' );
+				}
+
+				$variant_mapping_ok = 6 === count( $variant_rest_args ) && 6 === count( $variant_query_vars );
+				$variant_index = 0;
+				foreach ( $variant_parent_sets as $variant => $parents ) {
+					$rest_entry  = $variant_rest_args[ $variant_index ] ?? array();
+					$query_entry = $variant_query_vars[ $variant_index ] ?? array();
+					$variant_mapping_ok = $variant_mapping_ok
+						&& 'GET' === ( $rest_entry['method'] ?? null )
+						&& 'parent_multi' === ( $rest_entry['args']['component_fuzz_custom_hier_collection'] ?? null )
+						&& $parents === array_values( array_map( 'intval', (array) ( $rest_entry['args']['post_parent__in'] ?? array() ) ) )
+						&& $parents === array_values( array_map( 'intval', (array) ( $rest_entry['params']['parent'] ?? array() ) ) )
+						&& $variant_include_ids === array_values( array_map( 'intval', (array) ( $rest_entry['args']['post__in'] ?? array() ) ) )
+						&& 'menu_order' === ( $rest_entry['args']['orderby'] ?? null )
+						&& 'menu_order' === ( $query_entry['orderby'] ?? null )
+						&& 'asc' === strtolower( (string) ( $query_entry['order'] ?? '' ) )
+						&& true === ( $query_entry['no_found_rows'] ?? null )
+						&& $post_type === ( $query_entry['post_type'] ?? null )
+						&& $variant_include_ids === array_values( array_map( 'intval', (array) ( $query_entry['post__in'] ?? array() ) ) )
+						&& $parents === array_values( array_map( 'intval', (array) ( $query_entry['post_parent__in'] ?? array() ) ) );
+					$variant_index++;
+				}
+				foreach ( $variant_parent_sets as $variant => $parents ) {
+					$rest_entry  = $variant_rest_args[ $variant_index ] ?? array();
+					$query_entry = $variant_query_vars[ $variant_index ] ?? array();
+					$variant_mapping_ok = $variant_mapping_ok
+						&& 'GET' === ( $rest_entry['method'] ?? null )
+						&& 'parent_exclude_multi' === ( $rest_entry['args']['component_fuzz_custom_hier_collection'] ?? null )
+						&& $parents === array_values( array_map( 'intval', (array) ( $rest_entry['args']['post_parent__not_in'] ?? array() ) ) )
+						&& $parents === array_values( array_map( 'intval', (array) ( $rest_entry['params']['parent_exclude'] ?? array() ) ) )
+						&& $variant_include_ids === array_values( array_map( 'intval', (array) ( $rest_entry['args']['post__in'] ?? array() ) ) )
+						&& 'menu_order' === ( $query_entry['orderby'] ?? null )
+						&& 'asc' === strtolower( (string) ( $query_entry['order'] ?? '' ) )
+						&& true === ( $query_entry['no_found_rows'] ?? null )
+						&& $post_type === ( $query_entry['post_type'] ?? null )
+						&& $variant_include_ids === array_values( array_map( 'intval', (array) ( $query_entry['post__in'] ?? array() ) ) )
+						&& $sort_ints( $parents ) === array_values( array_map( 'intval', (array) ( $query_entry['post_parent__not_in'] ?? array() ) ) );
+					$variant_index++;
+				}
+
+				$expected_variant_prepare_ids = array();
+				foreach ( $variant_parent_sets as $_variant => $_parents ) {
+					array_push( $expected_variant_prepare_ids, $child_a2_id, $child_a1_id, $child_b_id );
+				}
+				foreach ( $variant_parent_sets as $_variant => $_parents ) {
+					$expected_variant_prepare_ids[] = $root_id;
+				}
+				$variant_prepare_ok = $expected_variant_prepare_ids === array_values( array_map( static fn ( array $event ): int => (int) ( $event['id'] ?? 0 ), $variant_prepare_events ) )
+					&& array_fill( 0, count( $expected_variant_prepare_ids ), 'view' ) === array_values( array_map( static fn ( array $event ): string => (string) ( $event['context'] ?? '' ), $variant_prepare_events ) )
+					&& array_fill( 0, count( $expected_variant_prepare_ids ), 'GET' ) === array_values( array_map( static fn ( array $event ): string => (string) ( $event['method'] ?? '' ), $variant_prepare_events ) )
+					&& array_fill( 0, count( $expected_variant_prepare_ids ), '/wp/v2/' . $rest_base ) === array_values( array_map( static fn ( array $event ): string => (string) ( $event['route'] ?? '' ), $variant_prepare_events ) );
+
+				self::collect_failure(
+					$failures,
+					$parent_variants_ok
+						&& $exclude_variants_ok
+						&& $variant_mapping_ok
+						&& $variant_prepare_ok,
+					'custom hierarchical collection normalizes duplicate and reversed parent filter request arrays through route dispatch',
+					array(
+						'check_parentResponses' => $parent_variants_ok,
+						'check_excludeResponses' => $exclude_variants_ok,
+						'check_mapping'       => $variant_mapping_ok,
+						'check_prepare'       => $variant_prepare_ok,
+						'parentStatuses'      => implode( ',', array_map( static fn ( $response ): string => $response instanceof \WP_REST_Response ? (string) $response->get_status() : 'not-response', $parent_variant_responses ) ),
+						'parentCodes'         => implode( ',', array_map( static fn ( $response ): string => $response instanceof \WP_REST_Response && is_array( $response->get_data() ) ? (string) ( $response->get_data()['code'] ?? 'none' ) : 'none', $parent_variant_responses ) ),
+						'parentIds'           => implode( '|', array_map( static fn ( array $observed ): string => implode( ',', array_map( 'strval', $observed['ids'] ?? array() ) ), $parent_variant_observed ) ),
+						'parentKeys0'         => implode( '|', array_map( static fn ( $response ): string => $response instanceof \WP_REST_Response && is_array( $response->get_data()[0] ?? null ) ? implode( ',', array_keys( $response->get_data()[0] ) ) : 'none', $parent_variant_responses ) ),
+						'parentTotals'        => implode( ',', array_map( static fn ( array $observed ): string => (string) ( $observed['headers']['X-WP-Total'] ?? 'missing' ), $parent_variant_observed ) ),
+						'restCaseOrder'       => implode( ',', array_map( static fn ( array $entry ): string => (string) ( $entry['args']['component_fuzz_custom_hier_collection'] ?? 'missing' ), $variant_rest_args ) ),
+						'queryCaseOrder'      => implode( ',', array_map( static fn ( array $entry ): string => (string) ( $entry['component_fuzz_custom_hier_collection'] ?? 'missing' ), $variant_query_vars ) ),
+						'prepareIds'          => implode( ',', array_map( static fn ( array $event ): string => (string) ( $event['id'] ?? 'missing' ), $variant_prepare_events ) ),
+						'parentVariants'        => $parent_variant_observed,
+						'parentExcludeVariants' => $exclude_variant_observed,
+						'restArgs'              => $variant_rest_args,
+						'queryVars'             => $variant_query_vars,
+						'prepareEvents'         => $variant_prepare_events,
+						'checks'                => array(
+							'parentResponses' => $parent_variants_ok,
+							'excludeHeaders'  => $exclude_variants_ok,
+							'mapping'         => $variant_mapping_ok,
+							'prepare'         => $variant_prepare_ok,
+						),
+					)
 				);
 			}
 		} finally {
