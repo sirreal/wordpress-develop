@@ -1104,6 +1104,10 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 				return $this->component_fuzz_group_count_rows( $rows, 'post_mime_type' );
 			}
 
+			if ( preg_match( '/SELECT\s+DISTINCT\s+YEAR\s*\(\s*(?:`?wp_posts`?\.)?`?post_date`?\s*\)\s+AS\s+year\s*,\s*MONTH\s*\(\s*(?:`?wp_posts`?\.)?`?post_date`?\s*\)\s+AS\s+month\b/i', $query ) ) {
+				return $this->component_fuzz_distinct_post_month_rows( $rows );
+			}
+
 			if ( preg_match( '/SELECT\s+DISTINCT\s+post_mime_type\b/i', $query ) ) {
 				$rows = $this->component_fuzz_distinct_rows( array_values( $rows ), array( 'post_mime_type' ) );
 				return $this->component_fuzz_project_rows( $rows, array( 'post_mime_type' ) );
@@ -1355,7 +1359,7 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 
 			foreach ( array( 'post_date', 'post_date_gmt', 'post_modified', 'post_modified_gmt' ) as $column ) {
 				if ( ! preg_match_all( '/(?<![A-Za-z0-9_])(?:`?wp_posts`?\.)?`?' . preg_quote( $column, '/' ) . '`?\s*(<=|>=|<|>)\s*(\'(?:\\\\.|[^\'\\\\])*\'|"[^"]*")/i', $where, $matches, PREG_SET_ORDER ) ) {
-					continue;
+					$matches = array();
 				}
 
 				foreach ( $matches as $match ) {
@@ -1379,6 +1383,15 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 							}
 
 							return true;
+						}
+					);
+				}
+
+				if ( preg_match( '/\b(?:YEAR|MONTH|DAYOFMONTH)\s*\(\s*(?:`?wp_posts`?\.)?`?' . preg_quote( $column, '/' ) . '`?\s*\)/i', $where ) ) {
+					$rows = array_filter(
+						$rows,
+						function ( $row ) use ( $where, $column ) {
+							return $this->component_fuzz_date_parts_match( (string) ( $row[ $column ] ?? '' ), $where, $column );
 						}
 					);
 				}
@@ -2570,6 +2583,24 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 			}
 
 			return $projected;
+		}
+
+		private function component_fuzz_distinct_post_month_rows( array $rows ) {
+			$projected = array();
+
+			foreach ( $rows as $row ) {
+				$date = (string) ( $row['post_date'] ?? '' );
+				if ( ! preg_match( '/^(\d{4})-(\d{2})-\d{2}/', $date, $matches ) ) {
+					continue;
+				}
+
+				$projected[] = array(
+					'year'  => (int) $matches[1],
+					'month' => (int) $matches[2],
+				);
+			}
+
+			return $this->component_fuzz_distinct_rows( $projected, array( 'year', 'month' ) );
 		}
 
 		private function component_fuzz_distinct_rows( array $rows, array $columns ) {

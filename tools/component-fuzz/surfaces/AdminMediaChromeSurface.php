@@ -42,6 +42,7 @@ final class AdminMediaChromeSurface {
 			$rows[] = self::check_media_type_iframe_dispatch( $ctx->fork( 'legacy-type-iframe' ) );
 			$rows[] = self::check_media_upload_entry_dispatch( $ctx->fork( 'legacy-entry-dispatch' ) );
 			$rows[] = self::check_media_library_gallery_iframe_rendering( $ctx->fork( 'legacy-library-gallery' ) );
+			$rows[] = self::check_media_library_query_date_filters( $ctx->fork( 'legacy-library-query-filters' ) );
 			$rows[] = self::check_media_attach_action_redirect_exit( $ctx->fork( 'media-attach-action' ) );
 			$rows[] = self::check_media_enqueue_and_iframe_shell( $ctx->fork( 'modal-enqueue-shell' ) );
 			$rows[] = self::check_media_button_and_bypass_output( $ctx->fork( 'media-buttons' ) );
@@ -123,6 +124,7 @@ final class AdminMediaChromeSurface {
 				'update_gallery_tab',
 				'wp_count_attachments',
 				'wp_edit_attachments_query',
+				'wp_edit_attachments_query_vars',
 				'wp_match_mime_types',
 				'wp_get_attachment_image',
 				'wp_get_attachment_image_src',
@@ -5566,7 +5568,7 @@ PHP;
 	}
 
 	private static function media_library_gallery_query_summary( array $query_vars ): array {
-		$keys = array( 'post_type', 'post_status', 'post_mime_type', 'posts_per_page', 'paged', 'offset', 's', 'm', 'post_parent' );
+		$keys = array( 'post_type', 'post_status', 'post_mime_type', 'posts_per_page', 'paged', 'offset', 's', 'm', 'post_parent', 'author' );
 		$out  = array();
 		foreach ( $keys as $key ) {
 			if ( array_key_exists( $key, $query_vars ) ) {
@@ -5867,6 +5869,615 @@ PHP;
 				'output'    => self::describe_string( $output ),
 			)
 		);
+	}
+
+	private static function check_media_library_query_date_filters( \ComponentFuzz\FuzzContext $ctx ): array {
+		$missing = self::media_attach_action_child_missing_requirements();
+		if ( array() !== $missing ) {
+			return self::row(
+				$ctx,
+				'admin-media-chrome.legacy-library-query-date-filters',
+				true,
+				array(
+					'missing' => $missing,
+					'reason'  => 'Required local subprocess APIs are unavailable.',
+				),
+				'skipped'
+			);
+		}
+
+		$failures = array();
+		$runs     = array();
+
+		foreach ( self::media_library_query_date_cases( $ctx ) as $case ) {
+			$run    = self::run_media_library_query_date_child_process( $case );
+			$result = is_array( $run['result'] ?? null ) ? $run['result'] : array();
+
+			$runs[ $case['label'] ] = array(
+				'ok'       => $run['ok'] ?? false,
+				'exitCode' => $run['exitCode'] ?? null,
+				'stderr'   => self::describe_string( (string) ( $run['stderr'] ?? '' ) ),
+				'stdout'   => self::describe_string( (string) ( $run['stdout'] ?? '' ) ),
+				'result'   => array(
+					'returned'            => $result['returned'] ?? null,
+					'returnType'          => $result['returnType'] ?? null,
+					'throwable'           => $result['throwable'] ?? null,
+					'output'              => self::describe_string( (string) ( $result['output'] ?? '' ) ),
+					'monthRows'           => $result['monthRows'] ?? array(),
+					'queries'             => $result['queries'] ?? array(),
+					'filenameFilterAfter' => $result['filenameFilterAfter'] ?? null,
+					'contentBefore'       => $result['contentBefore'] ?? array(),
+					'contentAfter'        => $result['contentAfter'] ?? array(),
+				),
+			);
+
+			self::collect_failure(
+				$failures,
+				true === ( $run['ok'] ?? false ) && self::media_library_query_date_child_result_has_expected_shape( $result ),
+				"{$case['label']} child exercises media library query/date filters and reports structured JSON",
+				array(
+					'run'    => $run,
+					'result' => $result,
+				)
+			);
+
+			if ( ! self::media_library_query_date_child_result_has_expected_shape( $result ) ) {
+				continue;
+			}
+
+			self::collect_failure(
+				$failures,
+				true === (bool) ( $result['returned'] ?? false )
+					&& 'NULL' === (string) ( $result['returnType'] ?? '' )
+					&& null === ( $result['throwable'] ?? null ),
+				"{$case['label']} renders the library form normally after query filter probes",
+				array(
+					'returned'  => $result['returned'] ?? null,
+					'returnType' => $result['returnType'] ?? null,
+					'throwable' => $result['throwable'] ?? null,
+				)
+			);
+
+			self::collect_media_library_query_date_failures( $failures, $case, $result );
+		}
+
+		return self::row(
+			$ctx,
+			'admin-media-chrome.legacy-library-query-date-filters',
+			array() === $failures,
+			array(
+				'failures' => $failures,
+				'runs'     => $runs,
+			)
+		);
+	}
+
+	private static function media_library_query_date_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		return array(
+			array(
+				'label'     => 'filename-date-detached-mine',
+				'seed'      => $ctx->seed(),
+				'iteration' => $ctx->iteration(),
+				'token'     => self::media_upload_dispatch_token( 'mqdf_' . $ctx->identifier( 4, 9 ) ),
+			),
+		);
+	}
+
+	private static function run_media_library_query_date_child_process( array $case ): array {
+		$payload = json_encode(
+			array( 'case' => $case ),
+			JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE
+		);
+
+		if ( false === $payload ) {
+			return array(
+				'ok'       => false,
+				'exitCode' => -1,
+				'stdout'   => '',
+				'stderr'   => 'json_encode failed',
+				'result'   => null,
+			);
+		}
+
+		$descriptors = array(
+			0 => array( 'pipe', 'r' ),
+			1 => array( 'pipe', 'w' ),
+			2 => array( 'pipe', 'w' ),
+		);
+
+		// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.system_calls_proc_open -- Isolates media-library query globals and wp_allow_query_attachment_by_filename cleanup in a local PHP subprocess.
+		$process = proc_open( array( PHP_BINARY, '-r', self::media_library_query_date_child_program() ), $descriptors, $pipes, \ComponentFuzz\repo_root() );
+		if ( ! is_resource( $process ) ) {
+			return array(
+				'ok'       => false,
+				'exitCode' => -1,
+				'stdout'   => '',
+				'stderr'   => 'proc_open failed',
+				'result'   => null,
+			);
+		}
+
+		fwrite( $pipes[0], $payload );
+		fclose( $pipes[0] );
+
+		$stdout = stream_get_contents( $pipes[1] );
+		$stderr = stream_get_contents( $pipes[2] );
+		fclose( $pipes[1] );
+		fclose( $pipes[2] );
+
+		$exit_code = proc_close( $process );
+		$result    = json_decode( (string) $stdout, true );
+
+		return array(
+			'ok'       => 0 === $exit_code && is_array( $result ) && true === ( $result['ok'] ?? null ),
+			'exitCode' => $exit_code,
+			'stdout'   => (string) $stdout,
+			'stderr'   => (string) $stderr,
+			'result'   => is_array( $result ) ? $result : null,
+		);
+	}
+
+	private static function media_library_query_date_child_program(): string {
+		return <<<'PHP'
+$component_fuzz_admin_media_raw = stream_get_contents( STDIN );
+$component_fuzz_admin_media_payload = json_decode( $component_fuzz_admin_media_raw, true );
+$case = is_array( $component_fuzz_admin_media_payload['case'] ?? null ) ? $component_fuzz_admin_media_payload['case'] : array();
+
+require_once getcwd() . '/tools/component-fuzz/lib/autoload.php';
+\ComponentFuzz\WpBootstrap::load();
+
+\ComponentFuzz\Surfaces\AdminMediaChromeSurface::run_media_library_query_date_child( $case );
+PHP;
+	}
+
+	public static function run_media_library_query_date_child( array $case ): void {
+		ini_set( 'display_errors', '0' );
+		self::prepare_runtime();
+
+		$ctx   = new \ComponentFuzz\FuzzContext( (int) ( $case['seed'] ?? 1 ), self::NAME, (int) ( $case['iteration'] ?? 0 ) );
+		$token = self::media_upload_dispatch_token( (string) ( $case['token'] ?? $ctx->identifier( 4, 9 ) ) );
+		$state = array(
+			'ok'                     => false,
+			'label'                  => (string) ( $case['label'] ?? 'media-library-query-date' ),
+			'token'                  => $token,
+			'filenameTerm'           => 'filename-' . $token,
+			'currentUserId'          => 0,
+			'parentId'               => 0,
+			'filenameMatchIds'       => array(),
+			'filenameExpectedPage2'  => array(),
+			'outsideMonthIds'        => array(),
+			'detachedIds'            => array(),
+			'attachedControlIds'     => array(),
+			'mineIds'                => array(),
+			'otherAuthorIds'         => array(),
+			'monthRows'              => array(),
+			'queries'                => array(),
+			'filenameFilterBefore'   => null,
+			'filenameFilterAfter'    => null,
+			'contentBefore'          => array(),
+			'contentAfter'           => array(),
+			'returned'               => false,
+			'returnType'             => null,
+			'throwable'              => null,
+			'output'                 => '',
+		);
+
+		$buffer_level = ob_get_level();
+		ob_start();
+
+		register_shutdown_function(
+			static function () use ( &$state, $buffer_level ): void {
+				$output = '';
+				while ( ob_get_level() > $buffer_level ) {
+					$chunk = ob_get_clean();
+					if ( is_string( $chunk ) ) {
+						$output = $chunk . $output;
+					}
+				}
+
+				$state['output']       = $output;
+				$state['contentAfter'] = self::media_url_insert_content_counts();
+				$state['ok']           = null === $state['throwable'];
+				echo json_encode( $state, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE ) . "\n";
+			}
+		);
+
+		try {
+			$parent_id = self::seed_parent_post( $ctx->fork( 'parent' ) );
+			$state['parentId'] = $parent_id;
+
+			$current_user_id = \wp_insert_user(
+				array(
+					'user_login' => 'media-query-date-' . substr( hash( 'crc32b', $token ), 0, 8 ),
+					'user_pass'  => 'component-fuzz-password',
+					'user_email' => 'media-query-date-' . substr( hash( 'crc32b', $token ), 0, 8 ) . '@example.test',
+					'role'       => 'administrator',
+				)
+			);
+			if ( ! is_int( $current_user_id ) || $current_user_id <= 0 ) {
+				throw new \RuntimeException( 'Could not seed current user for media library mine filter.' );
+			}
+
+			$state['currentUserId'] = $current_user_id;
+			\wp_set_current_user( $current_user_id );
+			if ( isset( $GLOBALS['current_user'] ) && $GLOBALS['current_user'] instanceof \WP_User ) {
+				$GLOBALS['current_user']->allcaps = array( 'exist' => true );
+			}
+
+			$user_has_cap_filter = static function ( array $allcaps, array $caps, array $args, $user = null ): array {
+				unset( $args, $user );
+				foreach ( $caps as $cap ) {
+					$allcaps[ $cap ] = 'do_not_allow' !== $cap;
+				}
+				return $allcaps;
+			};
+			$upload_per_page_filter = static function (): int {
+				return 5;
+			};
+
+			\add_filter( 'user_has_cap', $user_has_cap_filter, 10, 4 );
+			\add_filter( 'upload_per_page', $upload_per_page_filter, 10, 0 );
+
+			try {
+				for ( $i = 0; $i < 7; ++$i ) {
+					$day        = 20 - $i;
+					$date       = sprintf( '2026-06-%02d 10:00:00', $day );
+					$attachment = self::seed_attachment(
+						$ctx->fork( 'filename-june-' . $i ),
+						'image/jpeg',
+						array(
+							'parent_id'     => $parent_id,
+							'post_author'   => 2,
+							'post_date'     => $date,
+							'post_date_gmt' => $date,
+							'post_title'    => 'June attachment ' . $i . ' ' . $token,
+							'relative_file' => '2026/06/' . $state['filenameTerm'] . '-' . $i . '.jpg',
+						)
+					);
+					$state['filenameMatchIds'][] = (int) $attachment->ID;
+				}
+				$state['filenameExpectedPage2'] = array_slice( $state['filenameMatchIds'], 5, 2 );
+
+				$may = self::seed_attachment(
+					$ctx->fork( 'filename-may' ),
+					'image/jpeg',
+					array(
+						'parent_id'     => $parent_id,
+						'post_author'   => 2,
+						'post_date'     => '2026-05-22 10:00:00',
+						'post_date_gmt' => '2026-05-22 10:00:00',
+						'post_title'    => 'May attachment outside date ' . $token,
+						'relative_file' => '2026/05/' . $state['filenameTerm'] . '-outside.jpg',
+					)
+				);
+				$state['outsideMonthIds'][] = (int) $may->ID;
+
+				for ( $i = 0; $i < 3; ++$i ) {
+					$date       = sprintf( '2026-07-%02d 09:00:00', 10 - $i );
+					$attachment = self::seed_attachment(
+						$ctx->fork( 'detached-' . $i ),
+						'image/png',
+						array(
+							'parent_id'     => 0,
+							'post_author'   => 2,
+							'post_date'     => $date,
+							'post_date_gmt' => $date,
+							'post_title'    => 'Detached image ' . $i . ' ' . $token,
+							'relative_file' => '2026/07/detached-' . $token . '-' . $i . '.png',
+						)
+					);
+					$state['detachedIds'][] = (int) $attachment->ID;
+				}
+
+				$attached_control = self::seed_attachment(
+					$ctx->fork( 'attached-control' ),
+					'image/png',
+					array(
+						'parent_id'     => $parent_id,
+						'post_author'   => 2,
+						'post_date'     => '2026-07-11 09:00:00',
+						'post_date_gmt' => '2026-07-11 09:00:00',
+						'post_title'    => 'Attached control ' . $token,
+						'relative_file' => '2026/07/attached-control-' . $token . '.png',
+					)
+				);
+				$state['attachedControlIds'][] = (int) $attached_control->ID;
+
+				for ( $i = 0; $i < 3; ++$i ) {
+					$date       = sprintf( '2026-04-%02d 08:00:00', 10 - $i );
+					$attachment = self::seed_attachment(
+						$ctx->fork( 'mine-' . $i ),
+						'application/pdf',
+						array(
+							'parent_id'     => $parent_id,
+							'post_author'   => $current_user_id,
+							'post_date'     => $date,
+							'post_date_gmt' => $date,
+							'post_title'    => 'Mine PDF ' . $i . ' ' . $token,
+							'relative_file' => '2026/04/mine-' . $token . '-' . $i . '.pdf',
+						)
+					);
+					$state['mineIds'][] = (int) $attachment->ID;
+				}
+
+				$other_author = self::seed_attachment(
+					$ctx->fork( 'other-author' ),
+					'application/pdf',
+					array(
+						'parent_id'     => $parent_id,
+						'post_author'   => 2,
+						'post_date'     => '2026-04-11 08:00:00',
+						'post_date_gmt' => '2026-04-11 08:00:00',
+						'post_title'    => 'Other author PDF ' . $token,
+						'relative_file' => '2026/04/other-author-' . $token . '.pdf',
+					)
+				);
+				$state['otherAuthorIds'][] = (int) $other_author->ID;
+
+				$state['contentBefore'] = self::media_url_insert_content_counts();
+
+				$wpdb = $GLOBALS['wpdb'] ?? null;
+				if ( is_object( $wpdb ) && method_exists( $wpdb, 'get_results' ) ) {
+					$month_rows = $wpdb->get_results(
+						"SELECT DISTINCT YEAR( post_date ) AS year, MONTH( post_date ) AS month
+						FROM {$wpdb->posts}
+						WHERE post_type = 'attachment'
+						ORDER BY post_date DESC"
+					);
+					foreach ( $month_rows as $row ) {
+						$state['monthRows'][] = array(
+							'year'  => (int) ( $row->year ?? 0 ),
+							'month' => (int) ( $row->month ?? 0 ),
+						);
+					}
+				}
+
+				$state['filenameFilterBefore'] = \has_filter( 'wp_allow_query_attachment_by_filename' );
+				$state['queries']['filenameDate'] = self::media_library_query_date_capture_query(
+					array(
+						'post_mime_type' => 'image',
+						'm'              => '202606',
+						's'              => $state['filenameTerm'],
+						'paged'          => 2,
+					)
+				);
+				$state['filenameFilterAfter'] = \has_filter( 'wp_allow_query_attachment_by_filename' );
+
+				$state['queries']['detached'] = self::media_library_query_date_capture_query(
+					array(
+						'attachment-filter' => 'detached',
+						'post_mime_type'    => 'image',
+						'paged'             => 1,
+					)
+				);
+
+				$state['queries']['mine'] = self::media_library_query_date_capture_query(
+					array(
+						'attachment-filter' => 'mine',
+						'paged'             => 1,
+					)
+				);
+
+				$GLOBALS['pagenow']      = 'media-upload.php';
+				$GLOBALS['type']         = 'image';
+				$GLOBALS['tab']          = 'library';
+				$GLOBALS['body_id']      = 'component-fuzz-query-date';
+				$GLOBALS['wp']           = new \WP();
+				$GLOBALS['wp_query']     = new \WP_Query();
+				$GLOBALS['wp_the_query'] = $GLOBALS['wp_query'];
+
+				$_SERVER['HTTP_HOST']       = 'example.test';
+				$_SERVER['HTTPS']           = 'off';
+				$_SERVER['PHP_SELF']        = '/wp-admin/media-upload.php';
+				$_SERVER['REQUEST_METHOD']  = 'GET';
+				$_SERVER['REQUEST_URI']     = '/wp-admin/media-upload.php?type=image&tab=library&m=202606&post_mime_type=image';
+				$_SERVER['HTTP_REFERER']    = 'http://example.test/wp-admin/media-upload.php?type=image&tab=library';
+				$_SERVER['HTTP_USER_AGENT'] = 'component-fuzz/admin-media-query-date';
+				$_SERVER['REMOTE_ADDR']     = '198.51.100.51';
+				$_SERVER['SERVER_PORT']     = '80';
+
+				$_GET     = array(
+					'type'           => 'image',
+					'tab'            => 'library',
+					'post_id'        => (string) $parent_id,
+					'post_mime_type' => 'image',
+					'm'              => '202606',
+				);
+				$_POST    = array();
+				$_REQUEST = $_GET;
+				$_FILES   = array();
+				$_COOKIE  = array();
+
+				$return_value = \media_upload_library();
+				$state['returnType'] = gettype( $return_value );
+				$state['returned']   = true;
+
+				$render_query = $GLOBALS['wp_the_query'] ?? null;
+				$render_posts = is_object( $render_query ) && is_array( $render_query->posts ?? null ) ? $render_query->posts : array();
+				$state['queries']['renderLibrary'] = array(
+					'ids'         => array_map(
+						static function ( $post ): int {
+							return (int) ( $post->ID ?? 0 );
+						},
+						$render_posts
+					),
+					'queryVars'   => is_object( $render_query ) && is_array( $render_query->query_vars ?? null ) ? self::media_library_gallery_query_summary( $render_query->query_vars ) : array(),
+					'foundPosts'  => is_object( $render_query ) && isset( $render_query->found_posts ) ? (int) $render_query->found_posts : null,
+					'maxNumPages' => is_object( $render_query ) && isset( $render_query->max_num_pages ) ? (int) $render_query->max_num_pages : null,
+				);
+			} finally {
+				\remove_filter( 'upload_per_page', $upload_per_page_filter, 10 );
+				\remove_filter( 'user_has_cap', $user_has_cap_filter, 10 );
+			}
+		} catch ( \Throwable $e ) {
+			$state['throwable'] = self::describe_throwable( $e );
+		}
+	}
+
+	private static function media_library_query_date_capture_query( array $args ): array {
+		$GLOBALS['wp']           = new \WP();
+		$GLOBALS['wp_query']     = new \WP_Query();
+		$GLOBALS['wp_the_query'] = $GLOBALS['wp_query'];
+
+		\wp_edit_attachments_query( $args );
+
+		$query = $GLOBALS['wp_the_query'] ?? null;
+		$posts = is_object( $query ) && is_array( $query->posts ?? null ) ? $query->posts : array();
+
+		return array(
+			'ids'         => array_map(
+				static function ( $post ): int {
+					return (int) ( $post->ID ?? 0 );
+				},
+				$posts
+			),
+			'queryVars'   => is_object( $query ) && is_array( $query->query_vars ?? null ) ? self::media_library_gallery_query_summary( $query->query_vars ) : array(),
+			'foundPosts'  => is_object( $query ) && isset( $query->found_posts ) ? (int) $query->found_posts : null,
+			'maxNumPages' => is_object( $query ) && isset( $query->max_num_pages ) ? (int) $query->max_num_pages : null,
+		);
+	}
+
+	private static function media_library_query_date_child_result_has_expected_shape( array $result ): bool {
+		return array_key_exists( 'ok', $result )
+			&& array_key_exists( 'returned', $result )
+			&& is_string( $result['output'] ?? null )
+			&& is_array( $result['filenameMatchIds'] ?? null )
+			&& is_array( $result['filenameExpectedPage2'] ?? null )
+			&& is_array( $result['outsideMonthIds'] ?? null )
+			&& is_array( $result['detachedIds'] ?? null )
+			&& is_array( $result['attachedControlIds'] ?? null )
+			&& is_array( $result['mineIds'] ?? null )
+			&& is_array( $result['otherAuthorIds'] ?? null )
+			&& is_int( $result['currentUserId'] ?? null )
+			&& is_array( $result['monthRows'] ?? null )
+			&& is_array( $result['queries'] ?? null )
+			&& is_array( $result['contentBefore'] ?? null )
+			&& is_array( $result['contentAfter'] ?? null );
+	}
+
+	private static function collect_media_library_query_date_failures( array &$failures, array $case, array $result ): void {
+		unset( $case );
+
+		$output         = (string) ( $result['output'] ?? '' );
+		$filename_query = is_array( $result['queries']['filenameDate'] ?? null ) ? $result['queries']['filenameDate'] : array();
+		$detached_query = is_array( $result['queries']['detached'] ?? null ) ? $result['queries']['detached'] : array();
+		$mine_query     = is_array( $result['queries']['mine'] ?? null ) ? $result['queries']['mine'] : array();
+		$render_query   = is_array( $result['queries']['renderLibrary'] ?? null ) ? $result['queries']['renderLibrary'] : array();
+
+		$month_keys = array_map(
+			static function ( array $row ): string {
+				return sprintf( '%04d%02d', (int) ( $row['year'] ?? 0 ), (int) ( $row['month'] ?? 0 ) );
+			},
+			$result['monthRows'] ?? array()
+		);
+
+		self::collect_failure(
+			$failures,
+			in_array( '202607', $month_keys, true )
+				&& in_array( '202606', $month_keys, true )
+				&& in_array( '202605', $month_keys, true )
+				&& in_array( '202604', $month_keys, true )
+				&& count( $month_keys ) === count( array_unique( $month_keys ) )
+				&& str_contains( $output, "<select name='m'>" )
+				&& str_contains( $output, "selected='selected' value='202606'" )
+				&& str_contains( $output, '>June 2026</option>' ),
+			'media library month dropdown receives distinct post_date year/month rows and selects the generated request month',
+			array(
+				'monthRows' => $result['monthRows'] ?? array(),
+				'output'    => self::describe_string( $output ),
+			)
+		);
+
+		$render_query_vars = is_array( $render_query['queryVars'] ?? null ) ? $render_query['queryVars'] : array();
+		self::collect_failure(
+			$failures,
+			7 === (int) ( $render_query['foundPosts'] ?? 0 )
+				&& 2 === (int) ( $render_query['maxNumPages'] ?? 0 )
+				&& 5 === (int) ( $render_query_vars['posts_per_page'] ?? 0 )
+				&& 202606 === (int) ( $render_query_vars['m'] ?? 0 )
+				&& ! str_contains( $output, 'tablenav-pages' ),
+			'legacy library form exposes the upload_per_page versus hard-coded 10 pagination boundary for generated month results',
+			array(
+				'query'  => $render_query,
+				'output' => self::describe_string( $output ),
+			)
+		);
+
+		$filename_ids          = array_values( array_map( 'intval', $filename_query['ids'] ?? array() ) );
+		$filename_expected_ids = array_values( array_map( 'intval', $result['filenameExpectedPage2'] ?? array() ) );
+		$filename_query_vars   = is_array( $filename_query['queryVars'] ?? null ) ? $filename_query['queryVars'] : array();
+
+		self::collect_failure(
+			$failures,
+			$filename_expected_ids === $filename_ids
+				&& 7 === (int) ( $filename_query['foundPosts'] ?? 0 )
+				&& 2 === (int) ( $filename_query['maxNumPages'] ?? 0 )
+				&& 5 === (int) ( $filename_query_vars['posts_per_page'] ?? 0 )
+				&& 2 === (int) ( $filename_query_vars['paged'] ?? 0 )
+				&& 202606 === (int) ( $filename_query_vars['m'] ?? 0 )
+				&& 'image' === (string) ( $filename_query_vars['post_mime_type'] ?? '' )
+				&& false === ( $result['filenameFilterAfter'] ?? null )
+				&& array() === array_intersect( $filename_ids, array_map( 'intval', $result['outsideMonthIds'] ?? array() ) ),
+			'filename search opt-in reaches _wp_attached_file matches, honors m=YYYYMM filtering and pagination, then cleans the filename query filter',
+			array(
+				'expectedIds'           => $filename_expected_ids,
+				'query'                 => $filename_query,
+				'filenameMatchIds'      => $result['filenameMatchIds'] ?? array(),
+				'outsideMonthIds'       => $result['outsideMonthIds'] ?? array(),
+				'filenameFilterBefore'  => $result['filenameFilterBefore'] ?? null,
+				'filenameFilterAfter'   => $result['filenameFilterAfter'] ?? null,
+			)
+		);
+
+		$detached_ids        = array_values( array_map( 'intval', $detached_query['ids'] ?? array() ) );
+		$detached_query_vars = is_array( $detached_query['queryVars'] ?? null ) ? $detached_query['queryVars'] : array();
+		self::collect_failure(
+			$failures,
+			self::same_int_set( $detached_ids, array_map( 'intval', $result['detachedIds'] ?? array() ) )
+				&& 0 === (int) ( $detached_query_vars['post_parent'] ?? -1 )
+				&& 'image' === (string) ( $detached_query_vars['post_mime_type'] ?? '' )
+				&& ! array_intersect( $detached_ids, array_map( 'intval', $result['attachedControlIds'] ?? array() ) ),
+			'detached media filter constrains the attachment query to parent-zero image rows',
+			array(
+				'query'              => $detached_query,
+				'detachedIds'        => $result['detachedIds'] ?? array(),
+				'attachedControlIds' => $result['attachedControlIds'] ?? array(),
+			)
+		);
+
+		$mine_ids        = array_values( array_map( 'intval', $mine_query['ids'] ?? array() ) );
+		$mine_query_vars = is_array( $mine_query['queryVars'] ?? null ) ? $mine_query['queryVars'] : array();
+		self::collect_failure(
+			$failures,
+			self::same_int_set( $mine_ids, array_map( 'intval', $result['mineIds'] ?? array() ) )
+				&& (int) ( $result['currentUserId'] ?? 0 ) === (int) ( $mine_query_vars['author'] ?? 0 )
+				&& ! array_intersect( $mine_ids, array_map( 'intval', $result['otherAuthorIds'] ?? array() ) ),
+			'mine media filter constrains the attachment query to the current user without leaking other authors',
+			array(
+				'query'          => $mine_query,
+				'mineIds'        => $result['mineIds'] ?? array(),
+				'otherAuthorIds' => $result['otherAuthorIds'] ?? array(),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			( $result['contentBefore'] ?? array() ) === ( $result['contentAfter'] ?? array() ),
+			'query/date filter probes and library form rendering do not mutate content rows',
+			array(
+				'contentBefore' => $result['contentBefore'] ?? array(),
+				'contentAfter'  => $result['contentAfter'] ?? array(),
+			)
+		);
+	}
+
+	private static function same_int_set( array $actual, array $expected ): bool {
+		$actual   = array_values( array_unique( array_map( 'intval', $actual ) ) );
+		$expected = array_values( array_unique( array_map( 'intval', $expected ) ) );
+		sort( $actual );
+		sort( $expected );
+
+		return $actual === $expected;
 	}
 
 	private static function check_media_attach_action_redirect_exit( \ComponentFuzz\FuzzContext $ctx ): array {
@@ -6522,20 +7133,26 @@ PHP;
 		$content   = (string) ( $args['post_content'] ?? 'Component fuzz description ' . $ctx->text( 0, 18 ) );
 
 		$post_id = \wp_insert_post(
-			array(
-				'post_author'    => 0,
-				'post_content'   => $content,
-				'post_excerpt'   => $excerpt,
-				'post_mime_type' => $mime,
-				'post_name'      => 'component-fuzz-attachment-' . substr( hash( 'crc32b', (string) $ctx->seed() ), 0, 8 ),
-				'post_parent'    => $parent_id,
-				'post_status'    => 'inherit',
-				'post_title'     => $title,
-				'post_type'      => 'attachment',
-				'post_date'      => '2026-06-01 12:00:00',
-				'post_date_gmt'  => '2026-06-01 12:00:00',
-				'menu_order'     => $ctx->int( 0, 12 ),
-				'guid'           => 'http://example.test/component-fuzz/' . rawurlencode( $title ) . '.' . $extension,
+			array_merge(
+				array(
+					'post_author'    => 0,
+					'post_content'   => $content,
+					'post_excerpt'   => $excerpt,
+					'post_mime_type' => $mime,
+					'post_name'      => 'component-fuzz-attachment-' . substr( hash( 'crc32b', (string) $ctx->seed() ), 0, 8 ),
+					'post_parent'    => $parent_id,
+					'post_status'    => 'inherit',
+					'post_title'     => $title,
+					'post_type'      => 'attachment',
+					'post_date'      => '2026-06-01 12:00:00',
+					'post_date_gmt'  => '2026-06-01 12:00:00',
+					'menu_order'     => $ctx->int( 0, 12 ),
+					'guid'           => 'http://example.test/component-fuzz/' . rawurlencode( $title ) . '.' . $extension,
+				),
+				array_intersect_key(
+					$args,
+					array_flip( array( 'post_author', 'post_date', 'post_date_gmt', 'post_modified', 'post_modified_gmt', 'post_name', 'post_status', 'guid', 'menu_order' ) )
+				)
 			),
 			true
 		);
@@ -6546,7 +7163,7 @@ PHP;
 
 		$unsafe_suffix = ! empty( $args['unsafe_file'] ) ? '-unsafe-<script>alert(1)</script>' : '';
 		$file_base     = 'component-fuzz-' . $post_id . $unsafe_suffix . '.' . $extension;
-		$relative_file = '2026/06/' . $file_base;
+		$relative_file = (string) ( $args['relative_file'] ?? ( '2026/06/' . $file_base ) );
 		$width         = (int) ( $args['width'] ?? $ctx->int( 640, 1600 ) );
 		$height        = (int) ( $args['height'] ?? $ctx->int( 480, 1200 ) );
 		$metadata      = array(
