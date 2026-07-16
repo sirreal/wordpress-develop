@@ -58,6 +58,9 @@ final class ContentLifecycleSurface {
 			$rows[] = self::check_sample_permalink_custom_hierarchical_post_type_matrix( $ctx->fork( 'sample-permalink-custom-hierarchical' ), $case );
 
 			self::prepare_runtime();
+			$rows[] = self::check_custom_post_type_single_permalink_fallback_matrix( $ctx->fork( 'custom-single-permalink-fallbacks' ), $case );
+
+			self::prepare_runtime();
 			$rows[] = self::check_admin_post_save_orchestration( $ctx->fork( 'admin-post-save' ), $case );
 
 			self::prepare_runtime();
@@ -123,6 +126,7 @@ final class ContentLifecycleSurface {
 				'current_user_can',
 				'create_initial_post_types',
 				'create_initial_taxonomies',
+				'add_query_arg',
 				'delete_meta',
 				'delete_metadata_by_mid',
 				'delete_post_meta',
@@ -148,6 +152,7 @@ final class ContentLifecycleSurface {
 				'get_post',
 				'get_post_type',
 				'get_post_type_object',
+				'get_post_permalink',
 				'get_posts',
 				'get_the_title',
 				'get_object_taxonomies',
@@ -3120,6 +3125,431 @@ final class ContentLifecycleSurface {
 				'matrix'   => $matrix_observed,
 				'html'     => $html_observed,
 				'failures' => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
+	private static function check_custom_post_type_single_permalink_fallback_matrix( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures             = array();
+		$post_ids             = array();
+		$link_events          = array();
+		$matrix_observed      = array();
+		$active_label         = null;
+		$token                = substr( $case['token'], 0, 8 );
+		$pretty_type          = 'cfl_' . $token;
+		$query_type           = 'cfq_' . $token;
+		$plain_type           = 'cfp_' . $token;
+		$query_var            = 'cfqv_' . $token;
+		$pretty_rewrite_slug  = 'single-pretty-' . $token;
+		$permalink_structure  = '/%postname%/';
+		$post_types           = array( $pretty_type, $query_type, $plain_type );
+		$previous_rewrite_set = array_key_exists( 'wp_rewrite', $GLOBALS );
+		$previous_rewrite     = $GLOBALS['wp_rewrite'] ?? null;
+		$previous_wp_set      = array_key_exists( 'wp', $GLOBALS );
+		$previous_wp          = $GLOBALS['wp'] ?? null;
+		$previous_post_types  = array();
+		$previous_query_vars  = isset( $GLOBALS['wp'] ) && is_object( $GLOBALS['wp'] ) && property_exists( $GLOBALS['wp'], 'public_query_vars' )
+			? $GLOBALS['wp']->public_query_vars
+			: null;
+		$counts_before        = isset( $GLOBALS['wpdb'] ) && $GLOBALS['wpdb'] instanceof \Component_Fuzz_WPDB_Stub
+			? $GLOBALS['wpdb']->component_fuzz_content_counts()
+			: array();
+		$counts_after_cleanup = array();
+
+		foreach ( $post_types as $post_type ) {
+			$previous_post_types[ $post_type ] = array(
+				'exists' => isset( $GLOBALS['wp_post_types'][ $post_type ] ),
+				'value'  => $GLOBALS['wp_post_types'][ $post_type ] ?? null,
+			);
+		}
+
+		$permalink_filter = static function () use ( $permalink_structure ): string {
+			return $permalink_structure;
+		};
+		$remember_post = static function ( $post_id ) use ( &$post_ids ): int {
+			if ( is_int( $post_id ) && $post_id > 0 ) {
+				$post_ids[] = $post_id;
+				return $post_id;
+			}
+
+			return 0;
+		};
+		$insert_post = static function ( string $post_type, string $title, string $slug, int $parent, string $status = 'publish' ) use ( $remember_post ): int {
+			return $remember_post(
+				\wp_insert_post(
+					\wp_slash(
+						array(
+							'post_type'    => $post_type,
+							'post_title'   => $title,
+							'post_content' => $title . ' content',
+							'post_status'  => $status,
+							'post_name'    => $slug,
+							'post_parent'  => $parent,
+						)
+					),
+					true,
+					false
+				)
+			);
+		};
+		$link_filter = static function ( string $link, \WP_Post $post, bool $leavename, bool $sample ) use ( &$active_label, &$link_events ): string {
+			if ( null !== $active_label ) {
+				$link_events[] = array(
+					'label'     => $active_label,
+					'link'      => $link,
+					'postId'    => (int) $post->ID,
+					'type'      => $post->post_type,
+					'name'      => $post->post_name,
+					'parent'    => (int) $post->post_parent,
+					'leavename' => $leavename,
+					'sample'    => $sample,
+				);
+			}
+
+			return $link;
+		};
+		$link_events_for_label = static function ( string $label ) use ( &$link_events ): array {
+			return array_values(
+				array_filter(
+					$link_events,
+					static function ( array $event ) use ( $label ): bool {
+						return $label === ( $event['label'] ?? null );
+					}
+				)
+			);
+		};
+		$call_link = static function ( string $label, callable $callback ) use ( &$active_label ) {
+			$active_label = $label;
+			try {
+				return $callback();
+			} finally {
+				$active_label = null;
+			}
+		};
+		$query_link = static function ( string $query_var_name, string $slug ): string {
+			return \home_url( \add_query_arg( $query_var_name, $slug, '' ) );
+		};
+		$plain_link = static function ( string $post_type, int $post_id ): string {
+			return \home_url( \add_query_arg( array( 'post_type' => $post_type, 'p' => $post_id ), '' ) );
+		};
+
+		try {
+			if ( ! isset( $GLOBALS['wp'] ) || ! $GLOBALS['wp'] instanceof \WP ) {
+				$GLOBALS['wp'] = new \WP();
+			}
+			$GLOBALS['wp_rewrite'] = new \WP_Rewrite();
+			$GLOBALS['wp_rewrite']->permalink_structure = $permalink_structure;
+			\add_filter( 'pre_option_permalink_structure', $permalink_filter );
+			\add_filter( 'post_type_link', $link_filter, 10, 4 );
+
+			$pretty_registration = \register_post_type(
+				$pretty_type,
+				array(
+					'capability_type' => 'page',
+					'hierarchical'    => true,
+					'map_meta_cap'    => true,
+					'public'          => true,
+					'query_var'       => false,
+					'rewrite'         => array(
+						'slug'       => $pretty_rewrite_slug,
+						'with_front' => false,
+					),
+					'supports'        => array( 'title', 'editor', 'page-attributes' ),
+				)
+			);
+			$query_registration = \register_post_type(
+				$query_type,
+				array(
+					'capability_type' => 'page',
+					'hierarchical'    => true,
+					'map_meta_cap'    => true,
+					'public'          => true,
+					'query_var'       => $query_var,
+					'rewrite'         => false,
+					'supports'        => array( 'title', 'editor', 'page-attributes' ),
+				)
+			);
+			$plain_registration = \register_post_type(
+				$plain_type,
+				array(
+					'capability_type' => 'page',
+					'hierarchical'    => true,
+					'map_meta_cap'    => true,
+					'public'          => true,
+					'query_var'       => false,
+					'rewrite'         => false,
+					'supports'        => array( 'title', 'editor', 'page-attributes' ),
+				)
+			);
+
+			$pretty_parent_slug = 'single-pretty-parent-' . $token;
+			$pretty_child_slug  = 'single-pretty-child-' . $token;
+			$pretty_draft_slug  = 'single-pretty-draft-' . $token;
+			$query_parent_slug  = 'single-query-parent-' . $token;
+			$query_child_slug   = 'single-query-child-' . $token;
+			$query_draft_slug   = 'single-query-draft-' . $token;
+			$plain_parent_slug  = 'single-plain-parent-' . $token;
+			$plain_child_slug   = 'single-plain-child-' . $token;
+			$plain_draft_slug   = 'single-plain-draft-' . $token;
+
+			$pretty_parent_id = $insert_post( $pretty_type, 'Single Pretty Parent ' . $token, $pretty_parent_slug, 0 );
+			$pretty_child_id  = $insert_post( $pretty_type, 'Single Pretty Child ' . $token, $pretty_child_slug, $pretty_parent_id );
+			$pretty_draft_id  = $insert_post( $pretty_type, 'Single Pretty Draft ' . $token, $pretty_draft_slug, $pretty_parent_id, 'draft' );
+			$query_parent_id  = $insert_post( $query_type, 'Single Query Parent ' . $token, $query_parent_slug, 0 );
+			$query_child_id   = $insert_post( $query_type, 'Single Query Child ' . $token, $query_child_slug, $query_parent_id );
+			$query_draft_id   = $insert_post( $query_type, 'Single Query Draft ' . $token, $query_draft_slug, $query_parent_id, 'draft' );
+			$plain_parent_id  = $insert_post( $plain_type, 'Single Plain Parent ' . $token, $plain_parent_slug, 0 );
+			$plain_child_id   = $insert_post( $plain_type, 'Single Plain Child ' . $token, $plain_child_slug, $plain_parent_id );
+			$plain_draft_id   = $insert_post( $plain_type, 'Single Plain Draft ' . $token, $plain_draft_slug, $plain_parent_id, 'draft' );
+
+			self::collect_failure(
+				$failures,
+				$pretty_registration instanceof \WP_Post_Type
+					&& $query_registration instanceof \WP_Post_Type
+					&& $plain_registration instanceof \WP_Post_Type
+					&& $pretty_parent_id > 0
+					&& $pretty_child_id > 0
+					&& $pretty_draft_id > 0
+					&& $query_parent_id > 0
+					&& $query_child_id > 0
+					&& $query_draft_id > 0
+					&& $plain_parent_id > 0
+					&& $plain_child_id > 0
+					&& $plain_draft_id > 0,
+				'custom post type single permalink fallback fixtures register and insert generated hierarchy rows',
+				array(
+					'registrations' => array(
+						'pretty' => $pretty_registration instanceof \WP_Post_Type ? $pretty_registration->name : self::error_summary( $pretty_registration ),
+						'query'  => $query_registration instanceof \WP_Post_Type ? $query_registration->name : self::error_summary( $query_registration ),
+						'plain'  => $plain_registration instanceof \WP_Post_Type ? $plain_registration->name : self::error_summary( $plain_registration ),
+					),
+					'posts'         => array_map( static fn ( int $post_id ): ?array => self::post_summary( \get_post( $post_id ) ), $post_ids ),
+				)
+			);
+
+			$pretty_child_uri = $pretty_parent_slug . '/' . $pretty_child_slug;
+			$pretty_draft_uri = $pretty_parent_slug . '/' . $pretty_draft_slug;
+			$query_child_uri  = $query_parent_slug . '/' . $query_child_slug;
+			$query_draft_uri  = $query_parent_slug . '/' . $query_draft_slug;
+
+			$matrix = array(
+				array(
+					'label'     => 'pretty-published',
+					'actual'    => $call_link( 'pretty-published', static fn () => \get_post_permalink( $pretty_child_id ) ),
+					'expected'  => \home_url( '/' . $pretty_rewrite_slug . '/' . $pretty_child_uri ),
+					'postId'    => $pretty_child_id,
+					'type'      => $pretty_type,
+					'leavename' => false,
+					'sample'    => false,
+				),
+				array(
+					'label'     => 'pretty-get-permalink',
+					'actual'    => $call_link( 'pretty-get-permalink', static fn () => \get_permalink( $pretty_child_id ) ),
+					'expected'  => \home_url( '/' . $pretty_rewrite_slug . '/' . $pretty_child_uri ),
+					'postId'    => $pretty_child_id,
+					'type'      => $pretty_type,
+					'leavename' => false,
+					'sample'    => false,
+				),
+				array(
+					'label'     => 'pretty-leavename',
+					'actual'    => $call_link( 'pretty-leavename', static fn () => \get_post_permalink( $pretty_child_id, true ) ),
+					'expected'  => \home_url( '/' . $pretty_rewrite_slug . '/%' . $pretty_type . '%' ),
+					'postId'    => $pretty_child_id,
+					'type'      => $pretty_type,
+					'leavename' => true,
+					'sample'    => false,
+				),
+				array(
+					'label'     => 'pretty-draft-plain',
+					'actual'    => $call_link( 'pretty-draft-plain', static fn () => \get_post_permalink( $pretty_draft_id ) ),
+					'expected'  => $plain_link( $pretty_type, $pretty_draft_id ),
+					'postId'    => $pretty_draft_id,
+					'type'      => $pretty_type,
+					'leavename' => false,
+					'sample'    => false,
+				),
+				array(
+					'label'     => 'pretty-draft-sample',
+					'actual'    => $call_link( 'pretty-draft-sample', static fn () => \get_post_permalink( $pretty_draft_id, false, true ) ),
+					'expected'  => \home_url( '/' . $pretty_rewrite_slug . '/' . $pretty_draft_uri ),
+					'postId'    => $pretty_draft_id,
+					'type'      => $pretty_type,
+					'leavename' => false,
+					'sample'    => true,
+				),
+				array(
+					'label'     => 'query-published',
+					'actual'    => $call_link( 'query-published', static fn () => \get_post_permalink( $query_child_id ) ),
+					'expected'  => $query_link( $query_var, $query_child_uri ),
+					'postId'    => $query_child_id,
+					'type'      => $query_type,
+					'leavename' => false,
+					'sample'    => false,
+				),
+				array(
+					'label'     => 'query-leavename',
+					'actual'    => $call_link( 'query-leavename', static fn () => \get_post_permalink( $query_child_id, true ) ),
+					'expected'  => $query_link( $query_var, $query_child_uri ),
+					'postId'    => $query_child_id,
+					'type'      => $query_type,
+					'leavename' => true,
+					'sample'    => false,
+				),
+				array(
+					'label'     => 'query-draft-plain',
+					'actual'    => $call_link( 'query-draft-plain', static fn () => \get_post_permalink( $query_draft_id ) ),
+					'expected'  => $plain_link( $query_type, $query_draft_id ),
+					'postId'    => $query_draft_id,
+					'type'      => $query_type,
+					'leavename' => false,
+					'sample'    => false,
+				),
+				array(
+					'label'     => 'query-draft-sample',
+					'actual'    => $call_link( 'query-draft-sample', static fn () => \get_post_permalink( $query_draft_id, false, true ) ),
+					'expected'  => $plain_link( $query_type, $query_draft_id ),
+					'postId'    => $query_draft_id,
+					'type'      => $query_type,
+					'leavename' => false,
+					'sample'    => true,
+				),
+				array(
+					'label'     => 'plain-published',
+					'actual'    => $call_link( 'plain-published', static fn () => \get_post_permalink( $plain_child_id ) ),
+					'expected'  => $plain_link( $plain_type, $plain_child_id ),
+					'postId'    => $plain_child_id,
+					'type'      => $plain_type,
+					'leavename' => false,
+					'sample'    => false,
+				),
+				array(
+					'label'     => 'plain-draft-sample',
+					'actual'    => $call_link( 'plain-draft-sample', static fn () => \get_post_permalink( $plain_draft_id, false, true ) ),
+					'expected'  => $plain_link( $plain_type, $plain_draft_id ),
+					'postId'    => $plain_draft_id,
+					'type'      => $plain_type,
+					'leavename' => false,
+					'sample'    => true,
+				),
+			);
+
+			$matrix_ok = true;
+			foreach ( $matrix as $entry ) {
+				$events   = $link_events_for_label( $entry['label'] );
+				$event    = $events[0] ?? null;
+				$entry_ok = $entry['expected'] === $entry['actual']
+					&& 1 === count( $events )
+					&& is_array( $event )
+					&& $entry['expected'] === ( $event['link'] ?? null )
+					&& $entry['postId'] === (int) ( $event['postId'] ?? 0 )
+					&& $entry['type'] === ( $event['type'] ?? null )
+					&& $entry['leavename'] === ( $event['leavename'] ?? null )
+					&& $entry['sample'] === ( $event['sample'] ?? null );
+				$matrix_ok = $matrix_ok && $entry_ok;
+				$matrix_observed[] = array(
+					'label'    => $entry['label'],
+					'actual'   => $entry['actual'],
+					'expected' => $entry['expected'],
+					'events'   => $events,
+					'ok'       => $entry_ok,
+				);
+			}
+
+			$missing_link = $call_link( 'missing-post', static fn () => \get_post_permalink( 987654321 ) );
+
+			self::collect_failure(
+				$failures,
+				$matrix_ok && false === $missing_link && array() === $link_events_for_label( 'missing-post' ),
+				'get_post_permalink covers custom post type pretty, query-var, plain, leavename, draft, and sample fallback branches',
+				array(
+					'matrix'      => $matrix_observed,
+					'missingLink' => $missing_link,
+					'events'      => $link_events,
+				)
+			);
+		} finally {
+			\remove_filter( 'post_type_link', $link_filter, 10 );
+			\remove_filter( 'pre_option_permalink_structure', $permalink_filter );
+
+			foreach ( array_reverse( array_unique( array_map( 'intval', $post_ids ) ) ) as $post_id ) {
+				if ( $post_id > 0 ) {
+					\wp_delete_post( $post_id, true );
+				}
+			}
+
+			foreach ( $post_types as $post_type ) {
+				if ( function_exists( 'unregister_post_type' ) && \post_type_exists( $post_type ) ) {
+					\unregister_post_type( $post_type );
+				}
+				if ( $previous_post_types[ $post_type ]['exists'] ) {
+					$GLOBALS['wp_post_types'][ $post_type ] = $previous_post_types[ $post_type ]['value'];
+				} else {
+					unset( $GLOBALS['wp_post_types'][ $post_type ] );
+				}
+			}
+			if ( null !== $previous_query_vars && isset( $GLOBALS['wp'] ) && is_object( $GLOBALS['wp'] ) && property_exists( $GLOBALS['wp'], 'public_query_vars' ) ) {
+				$GLOBALS['wp']->public_query_vars = $previous_query_vars;
+			}
+			if ( $previous_wp_set ) {
+				$GLOBALS['wp'] = $previous_wp;
+			} else {
+				unset( $GLOBALS['wp'] );
+			}
+
+			if ( $previous_rewrite_set ) {
+				$GLOBALS['wp_rewrite'] = $previous_rewrite;
+			} else {
+				unset( $GLOBALS['wp_rewrite'] );
+			}
+
+			$counts_after_cleanup = isset( $GLOBALS['wpdb'] ) && $GLOBALS['wpdb'] instanceof \Component_Fuzz_WPDB_Stub
+				? $GLOBALS['wpdb']->component_fuzz_content_counts()
+				: array();
+		}
+
+		$rewrite_restored = $previous_rewrite_set === array_key_exists( 'wp_rewrite', $GLOBALS )
+			&& ( ! $previous_rewrite_set || $previous_rewrite === $GLOBALS['wp_rewrite'] );
+		$wp_restored = $previous_wp_set === array_key_exists( 'wp', $GLOBALS )
+			&& ( ! $previous_wp_set || $previous_wp === $GLOBALS['wp'] );
+		$post_types_restored = true;
+		foreach ( $post_types as $post_type ) {
+			$post_types_restored = $post_types_restored
+				&& $previous_post_types[ $post_type ]['exists'] === isset( $GLOBALS['wp_post_types'][ $post_type ] )
+				&& ( ! $previous_post_types[ $post_type ]['exists'] || $previous_post_types[ $post_type ]['value'] === $GLOBALS['wp_post_types'][ $post_type ] );
+		}
+		$query_vars_restored = null === $previous_query_vars
+			|| ! ( isset( $GLOBALS['wp'] ) && is_object( $GLOBALS['wp'] ) && property_exists( $GLOBALS['wp'], 'public_query_vars' ) )
+			|| $previous_query_vars === $GLOBALS['wp']->public_query_vars;
+		$filters_restored = false === \has_filter( 'pre_option_permalink_structure', $permalink_filter )
+			&& false === \has_filter( 'post_type_link', $link_filter );
+		$counts_restored = array() !== $counts_before && $counts_before === $counts_after_cleanup;
+
+		self::collect_failure(
+			$failures,
+			$rewrite_restored && $wp_restored && $post_types_restored && $query_vars_restored && $filters_restored && $counts_restored,
+			'custom post type single permalink fallback row restores rewrite, wp, generated post types, query vars, filters, and content counts',
+			array(
+				'rewriteRestored'   => $rewrite_restored,
+				'wpRestored'        => $wp_restored,
+				'postTypesRestored' => $post_types_restored,
+				'queryVarsRestored' => $query_vars_restored,
+				'filtersRestored'   => $filters_restored,
+				'countsBefore'      => $counts_before,
+				'countsAfter'       => $counts_after_cleanup,
+				'postIds'           => $post_ids,
+			)
+		);
+
+		return $ctx->result(
+			'content-lifecycle.posts.custom-post-type-single-permalink-fallbacks',
+			array() === $failures,
+			array(
+				'case'      => self::case_summary( $case ),
+				'postTypes' => $post_types,
+				'postIds'   => $post_ids,
+				'matrix'    => $matrix_observed,
+				'failures'  => array_slice( $failures, 0, 8 ),
 			)
 		);
 	}

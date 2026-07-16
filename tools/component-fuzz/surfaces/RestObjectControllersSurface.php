@@ -51,6 +51,7 @@ final class RestObjectControllersSurface {
 			$rows[] = self::check_route_dispatched_object_create_delete_edges( $ctx->fork( 'object-create-delete-dispatch' ), $case, $fixtures );
 			$rows[] = self::check_route_dispatched_page_parent_slug_edges( $ctx->fork( 'page-parent-slug-dispatch' ), $case, $fixtures );
 			$rows[] = self::check_route_dispatched_custom_hierarchical_post_type_permalink_edges( $ctx->fork( 'custom-hierarchical-permalink-dispatch' ), $case, $fixtures );
+			$rows[] = self::check_route_dispatched_custom_hierarchical_parent_assignment_edges( $ctx->fork( 'custom-hierarchical-parent-assignment-dispatch' ), $case, $fixtures );
 			$rows[] = self::check_route_dispatched_custom_hierarchical_collection_parent_filters( $ctx->fork( 'custom-hierarchical-collection-parent-filters' ), $case, $fixtures );
 			$rows[] = self::check_route_dispatched_object_force_delete_edges( $ctx->fork( 'object-force-delete-dispatch' ), $case, $fixtures );
 			$rows[] = self::check_route_dispatched_term_mutation_edges( $ctx->fork( 'term-mutation-dispatch' ), $case, $fixtures );
@@ -6473,6 +6474,610 @@ final class RestObjectControllersSurface {
 		return self::row(
 			$ctx,
 			'rest-object-controllers.route-dispatched-custom-hierarchical-permalink-cleanup',
+			array() === $failures,
+			array(
+				'case'     => self::case_summary( $case ),
+				'postType' => $post_type,
+				'restBase' => $rest_base,
+				'failures' => array_slice( $failures, 0, 8 ),
+				'observed' => $observed,
+			)
+		);
+	}
+
+	private static function check_route_dispatched_custom_hierarchical_parent_assignment_edges( \ComponentFuzz\FuzzContext $ctx, array $case, array $fixtures ): array {
+		$failures       = array();
+		$observed       = array();
+		$post_ids       = array();
+		$prepare_events = array();
+
+		$token                    = substr( $case['token'], 0, 8 );
+		$post_type                = 'cpa_' . $token;
+		$rest_base                = 'custom-parent-assign-' . $token;
+		$query_var                = 'cpaqv_' . $token;
+		$previous_server          = $GLOBALS['wp_rest_server'] ?? null;
+		$had_wp_actions           = array_key_exists( 'wp_actions', $GLOBALS );
+		$previous_actions         = $GLOBALS['wp_actions'] ?? null;
+		$previous_current_user_id = isset( $GLOBALS['current_user'] ) && $GLOBALS['current_user'] instanceof \WP_User
+			? (int) $GLOBALS['current_user']->ID
+			: 0;
+		$previous_rewrite_set     = array_key_exists( 'wp_rewrite', $GLOBALS );
+		$previous_rewrite         = $GLOBALS['wp_rewrite'] ?? null;
+		$previous_wp_set          = array_key_exists( 'wp', $GLOBALS );
+		$previous_wp              = $GLOBALS['wp'] ?? null;
+		$had_post_type            = isset( $GLOBALS['wp_post_types'][ $post_type ] );
+		$previous_post_type       = $GLOBALS['wp_post_types'][ $post_type ] ?? null;
+		$previous_query_vars      = isset( $GLOBALS['wp'] ) && is_object( $GLOBALS['wp'] ) && property_exists( $GLOBALS['wp'], 'public_query_vars' )
+			? $GLOBALS['wp']->public_query_vars
+			: null;
+
+		$server                    = new \WP_REST_Server();
+		$GLOBALS['wp_rest_server'] = $server;
+
+		if ( ! isset( $GLOBALS['wp_actions'] ) || ! is_array( $GLOBALS['wp_actions'] ) ) {
+			$GLOBALS['wp_actions'] = array();
+		}
+		$GLOBALS['wp_actions']['rest_api_init'] = max( 1, (int) ( $GLOBALS['wp_actions']['rest_api_init'] ?? 0 ) );
+
+		$filter_snapshot          = self::rest_default_filter_state();
+		$cap_filter               = null;
+		$custom_filters_restored  = false;
+		$cap_filter_restored      = false;
+		$default_filters_restored = false;
+		$rewrite_restored         = false;
+		$server_restored          = false;
+		$actions_restored         = false;
+		$current_user_restored    = false;
+		$post_type_restored       = false;
+		$query_vars_restored      = false;
+		$counts_before            = self::content_counts();
+		$counts_after_cleanup     = array();
+
+		$remember_post = static function ( $post_id ) use ( &$post_ids ): int {
+			if ( is_int( $post_id ) && $post_id > 0 ) {
+				$post_ids[] = $post_id;
+				return $post_id;
+			}
+
+			return 0;
+		};
+		$delete_posts  = static function () use ( &$post_ids ): void {
+			foreach ( array_reverse( array_unique( array_map( 'intval', $post_ids ) ) ) as $post_id ) {
+				if ( $post_id > 0 ) {
+					\wp_delete_post( $post_id, true );
+				}
+			}
+
+			$post_ids = array();
+		};
+		$post_summary = static function ( $post ): ?array {
+			if ( ! $post instanceof \WP_Post ) {
+				return null;
+			}
+
+			return array(
+				'id'     => (int) $post->ID,
+				'parent' => (int) $post->post_parent,
+				'slug'   => $post->post_name,
+				'status' => $post->post_status,
+				'title'  => $post->post_title,
+				'type'   => $post->post_type,
+			);
+		};
+		$prepare_filter = static function ( $response, $post, \WP_REST_Request $request ) use ( &$prepare_events, $post_type ) {
+			if ( $response instanceof \WP_REST_Response && $post instanceof \WP_Post && $post_type === $post->post_type ) {
+				$prepare_events[] = self::prepare_event( $post_type, (int) $post->ID, $request );
+			}
+			return $response;
+		};
+
+		try {
+			if ( ! isset( $GLOBALS['wp'] ) || ! $GLOBALS['wp'] instanceof \WP ) {
+				$GLOBALS['wp'] = new \WP();
+			}
+			$GLOBALS['wp_rewrite'] = new \WP_Rewrite();
+			$GLOBALS['wp_rewrite']->permalink_structure = '/%postname%/';
+
+			$registration = \register_post_type(
+				$post_type,
+				array(
+					'capability_type'       => 'page',
+					'hierarchical'          => true,
+					'map_meta_cap'          => true,
+					'public'                => true,
+					'query_var'             => $query_var,
+					'rest_base'             => $rest_base,
+					'rest_controller_class' => 'WP_REST_Posts_Controller',
+					'rewrite'               => false,
+					'show_in_rest'          => true,
+					'show_ui'               => true,
+					'supports'              => array( 'title', 'editor', 'author', 'page-attributes' ),
+				)
+			);
+			$post_type_object = \get_post_type_object( $post_type );
+			$controller       = $post_type_object instanceof \WP_Post_Type ? new \WP_REST_Posts_Controller( $post_type ) : null;
+			if ( $controller instanceof \WP_REST_Posts_Controller ) {
+				$controller->register_routes();
+			}
+			\rest_api_default_filters();
+			\add_filter( 'rest_prepare_' . $post_type, $prepare_filter, 10, 3 );
+
+			$routes = $server->get_routes();
+			self::collect_failure(
+				$failures,
+				$registration instanceof \WP_Post_Type
+					&& $post_type_object instanceof \WP_Post_Type
+					&& $controller instanceof \WP_REST_Posts_Controller
+					&& true === $post_type_object->hierarchical
+					&& true === $post_type_object->show_in_rest
+					&& $rest_base === $post_type_object->rest_base
+					&& false === $post_type_object->rewrite
+					&& $query_var === $post_type_object->query_var
+					&& isset( $routes[ '/wp/v2/' . $rest_base ], $routes[ '/wp/v2/' . $rest_base . '/(?P<id>[\\d]+)' ] ),
+				'custom hierarchical parent-assignment fixture post type registers REST routes without rewrite support',
+				array(
+					'postType'     => $post_type,
+					'restBase'     => $rest_base,
+					'registration' => $registration instanceof \WP_Post_Type ? $registration->name : self::describe_value( $registration ),
+					'routes'       => array_keys( $routes ),
+				)
+			);
+
+			if ( $controller instanceof \WP_REST_Posts_Controller ) {
+				$same_parent_id = $remember_post(
+					\wp_insert_post(
+						\wp_slash(
+							array(
+								'post_type'    => $post_type,
+								'post_title'   => 'REST Parent Same Type ' . $token,
+								'post_content' => 'REST parent same type ' . $token,
+								'post_status'  => 'publish',
+								'post_name'    => 'rest-parent-same-' . $token,
+								'post_author'  => $fixtures['author'],
+								'post_parent'  => 0,
+							)
+						),
+						true,
+						false
+					)
+				);
+				$page_parent_id = $remember_post(
+					\wp_insert_post(
+						\wp_slash(
+							array(
+								'post_type'    => 'page',
+								'post_title'   => 'REST Parent Page ' . $token,
+								'post_content' => 'REST parent page ' . $token,
+								'post_status'  => 'publish',
+								'post_name'    => 'rest-parent-page-' . $token,
+								'post_author'  => $fixtures['author'],
+								'post_parent'  => 0,
+							)
+						),
+						true,
+						false
+					)
+				);
+				$update_child_id = $remember_post(
+					\wp_insert_post(
+						\wp_slash(
+							array(
+								'post_type'    => $post_type,
+								'post_title'   => 'REST Parent Update Child ' . $token,
+								'post_content' => 'REST parent update child ' . $token,
+								'post_status'  => 'publish',
+								'post_name'    => 'rest-parent-update-child-' . $token,
+								'post_author'  => $fixtures['author'],
+								'post_parent'  => $same_parent_id,
+							)
+						),
+						true,
+						false
+					)
+				);
+
+				\wp_set_current_user( $fixtures['author'] );
+				$cap_filter = self::install_cap_filter(
+					array(
+						'edit_others_pages',
+						'edit_page',
+						'edit_pages',
+						'edit_post',
+						'edit_posts',
+						'edit_private_pages',
+						'edit_published_pages',
+						'publish_pages',
+						'read',
+						'read_page',
+						'read_post',
+					)
+				);
+
+				$missing_parent = 987654321;
+				$counts_before_invalid_create = self::content_counts();
+				$invalid_create_response      = self::dispatch_with_rest_post_dispatch(
+					$server,
+					self::request(
+						'POST',
+						'/wp/v2/' . $rest_base,
+						array(
+							'_fields' => 'id,parent,slug,status,link,_links',
+							'context' => 'edit',
+						),
+						array(),
+						array(
+							'parent' => $missing_parent,
+							'slug'   => 'rest-parent-invalid-create-' . $token,
+							'status' => 'publish',
+							'title'  => 'REST Parent Invalid Create ' . $token,
+						)
+					)
+				);
+				$counts_after_invalid_create = self::content_counts();
+
+				$same_parent_create_response = self::dispatch_with_rest_post_dispatch(
+					$server,
+					self::request(
+						'POST',
+						'/wp/v2/' . $rest_base,
+						array(
+							'_fields' => 'id,parent,slug,status,link,_links',
+							'context' => 'edit',
+						),
+						array(),
+						array(
+							'parent' => $same_parent_id,
+							'slug'   => 'rest-parent-same-child-' . $token,
+							'status' => 'publish',
+							'title'  => 'REST Parent Same Child ' . $token,
+						)
+					)
+				);
+				$same_parent_create_data = $same_parent_create_response instanceof \WP_REST_Response ? $same_parent_create_response->get_data() : array();
+				$same_parent_create_id   = (int) ( $same_parent_create_data['id'] ?? 0 );
+				if ( $same_parent_create_id > 0 ) {
+					$post_ids[] = $same_parent_create_id;
+				}
+
+				$cross_type_create_response = self::dispatch_with_rest_post_dispatch(
+					$server,
+					self::request(
+						'POST',
+						'/wp/v2/' . $rest_base,
+						array(
+							'_fields' => 'id,parent,slug,status,link,_links',
+							'context' => 'edit',
+						),
+						array(),
+						array(
+							'parent' => $page_parent_id,
+							'slug'   => 'rest-parent-page-child-' . $token,
+							'status' => 'publish',
+							'title'  => 'REST Parent Page Child ' . $token,
+						)
+					)
+				);
+				$cross_type_create_data = $cross_type_create_response instanceof \WP_REST_Response ? $cross_type_create_response->get_data() : array();
+				$cross_type_create_id   = (int) ( $cross_type_create_data['id'] ?? 0 );
+				if ( $cross_type_create_id > 0 ) {
+					$post_ids[] = $cross_type_create_id;
+				}
+
+				$cross_type_update_response = self::dispatch_with_rest_post_dispatch(
+					$server,
+					self::request(
+						'PUT',
+						'/wp/v2/' . $rest_base . '/' . $update_child_id,
+						array(
+							'_fields' => 'id,parent,slug,status,link,_links',
+							'context' => 'edit',
+						),
+						array(),
+						array(
+							'parent' => $page_parent_id,
+						)
+					)
+				);
+				$cross_type_update_data = $cross_type_update_response instanceof \WP_REST_Response ? $cross_type_update_response->get_data() : array();
+				$after_cross_update     = $update_child_id > 0 ? \get_post( $update_child_id ) : null;
+
+				$root_update_response = self::dispatch_with_rest_post_dispatch(
+					$server,
+					self::request(
+						'PUT',
+						'/wp/v2/' . $rest_base . '/' . $update_child_id,
+						array(
+							'_fields' => 'id,parent,slug,status,link,_links',
+							'context' => 'edit',
+						),
+						array(),
+						array(
+							'parent' => 0,
+						)
+					)
+				);
+				$root_update_data = $root_update_response instanceof \WP_REST_Response ? $root_update_response->get_data() : array();
+				$after_root_update = $update_child_id > 0 ? \get_post( $update_child_id ) : null;
+
+				$invalid_update_response = self::dispatch_with_rest_post_dispatch(
+					$server,
+					self::request(
+						'PUT',
+						'/wp/v2/' . $rest_base . '/' . $update_child_id,
+						array(
+							'_fields' => 'id,parent,slug,status,link,_links',
+							'context' => 'edit',
+						),
+						array(),
+						array(
+							'parent' => $missing_parent,
+						)
+					)
+				);
+				$after_invalid_update = $update_child_id > 0 ? \get_post( $update_child_id ) : null;
+
+				$response_keys              = array( 'id', 'link', 'parent', 'slug', 'status' );
+				$query_link                 = static function ( string $path ) use ( $query_var ): string {
+					return \home_url( '?' . $query_var . '=' . $path );
+				};
+				$same_parent_create_link    = $query_link( 'rest-parent-same-' . $token . '/rest-parent-same-child-' . $token );
+				$cross_type_create_link     = $query_link( 'rest-parent-page-' . $token . '/rest-parent-page-child-' . $token );
+				$cross_type_update_link     = $query_link( 'rest-parent-page-' . $token . '/rest-parent-update-child-' . $token );
+				$root_update_link           = $query_link( 'rest-parent-update-child-' . $token );
+				$same_parent_up_link        = \rest_url( \rest_get_route_for_post( $same_parent_id ) );
+				$page_parent_up_link        = \rest_url( \rest_get_route_for_post( $page_parent_id ) );
+				$same_parent_create_links   = $same_parent_create_response instanceof \WP_REST_Response ? $same_parent_create_response->get_links() : array();
+				$cross_type_create_links    = $cross_type_create_response instanceof \WP_REST_Response ? $cross_type_create_response->get_links() : array();
+				$cross_type_update_links    = $cross_type_update_response instanceof \WP_REST_Response ? $cross_type_update_response->get_links() : array();
+				$root_update_response_links = $root_update_response instanceof \WP_REST_Response ? $root_update_response->get_links() : array();
+
+				$observed = array(
+					'postType' => $post_type,
+					'restBase' => $rest_base,
+					'fixtures' => array(
+						'sameParent'  => $post_summary( \get_post( $same_parent_id ) ),
+						'pageParent'  => $post_summary( \get_post( $page_parent_id ) ),
+						'updateChild' => $post_summary( \get_post( $update_child_id ) ),
+					),
+					'responses' => array(
+						'invalidCreate' => $invalid_create_response,
+						'sameCreate'    => array(
+							'status' => $same_parent_create_response instanceof \WP_REST_Response ? $same_parent_create_response->get_status() : null,
+							'data'   => $same_parent_create_data,
+							'stored' => $post_summary( $same_parent_create_id > 0 ? \get_post( $same_parent_create_id ) : null ),
+						),
+						'crossCreate'   => array(
+							'status' => $cross_type_create_response instanceof \WP_REST_Response ? $cross_type_create_response->get_status() : null,
+							'data'   => $cross_type_create_data,
+							'stored' => $post_summary( $cross_type_create_id > 0 ? \get_post( $cross_type_create_id ) : null ),
+						),
+						'crossUpdate'   => array(
+							'status' => $cross_type_update_response instanceof \WP_REST_Response ? $cross_type_update_response->get_status() : null,
+							'data'   => $cross_type_update_data,
+							'stored' => $post_summary( $after_cross_update ),
+						),
+						'rootUpdate'    => array(
+							'status' => $root_update_response instanceof \WP_REST_Response ? $root_update_response->get_status() : null,
+							'data'   => $root_update_data,
+							'stored' => $post_summary( $after_root_update ),
+						),
+						'invalidUpdate' => $invalid_update_response,
+						'afterInvalid'  => $post_summary( $after_invalid_update ),
+					),
+					'prepareEvents' => $prepare_events,
+					'invalidCounts' => array(
+						'before' => $counts_before_invalid_create,
+						'after'  => $counts_after_invalid_create,
+					),
+					'expected'      => array(
+						'sameCreateLink'  => $same_parent_create_link,
+						'crossCreateLink' => $cross_type_create_link,
+						'crossUpdateLink' => $cross_type_update_link,
+						'rootUpdateLink'  => $root_update_link,
+						'sameParentUp'    => $same_parent_up_link,
+						'pageParentUp'    => $page_parent_up_link,
+					),
+				);
+
+				self::collect_failure(
+					$failures,
+					$same_parent_id > 0
+						&& $page_parent_id > 0
+						&& $update_child_id > 0
+						&& self::response_error_ok( $invalid_create_response, 'rest_post_invalid_id', 400 )
+						&& self::content_count_delta_matches( $counts_before_invalid_create, $counts_after_invalid_create, array(), array() ),
+					'custom hierarchical parent assignment rejects missing parent IDs before insertion',
+					array(
+						'response' => $invalid_create_response,
+						'counts'   => $observed['invalidCounts'],
+					)
+				);
+
+				self::collect_failure(
+					$failures,
+					$same_parent_create_response instanceof \WP_REST_Response
+						&& 201 === $same_parent_create_response->get_status()
+						&& self::projected_keys_match( $same_parent_create_data, $response_keys )
+						&& $same_parent_id === (int) ( $same_parent_create_data['parent'] ?? 0 )
+						&& $same_parent_create_link === ( $same_parent_create_data['link'] ?? null )
+						&& $same_parent_up_link === self::link_href( $same_parent_create_links, 'up' )
+						&& $same_parent_create_id > 0
+						&& $post_type === ( \get_post( $same_parent_create_id )->post_type ?? null )
+						&& $same_parent_id === (int) ( \get_post( $same_parent_create_id )->post_parent ?? 0 )
+						&& $cross_type_create_response instanceof \WP_REST_Response
+						&& 201 === $cross_type_create_response->get_status()
+						&& self::projected_keys_match( $cross_type_create_data, $response_keys )
+						&& $page_parent_id === (int) ( $cross_type_create_data['parent'] ?? 0 )
+						&& $cross_type_create_link === ( $cross_type_create_data['link'] ?? null )
+						&& $page_parent_up_link === self::link_href( $cross_type_create_links, 'up' )
+						&& $cross_type_create_id > 0
+						&& $post_type === ( \get_post( $cross_type_create_id )->post_type ?? null )
+						&& $page_parent_id === (int) ( \get_post( $cross_type_create_id )->post_parent ?? 0 ),
+					'custom hierarchical route-dispatched creates accept same-type and cross-type parents with fallback links',
+					array(
+						'sameCreate'  => $observed['responses']['sameCreate'],
+						'crossCreate' => $observed['responses']['crossCreate'],
+						'expected'    => $observed['expected'],
+					)
+				);
+
+				self::collect_failure(
+					$failures,
+					$cross_type_update_response instanceof \WP_REST_Response
+						&& 200 === $cross_type_update_response->get_status()
+						&& self::projected_keys_match( $cross_type_update_data, $response_keys )
+						&& $page_parent_id === (int) ( $cross_type_update_data['parent'] ?? 0 )
+						&& $cross_type_update_link === ( $cross_type_update_data['link'] ?? null )
+						&& $page_parent_up_link === self::link_href( $cross_type_update_links, 'up' )
+						&& $after_cross_update instanceof \WP_Post
+						&& $page_parent_id === (int) $after_cross_update->post_parent
+						&& $root_update_response instanceof \WP_REST_Response
+						&& 200 === $root_update_response->get_status()
+						&& self::projected_keys_match( $root_update_data, $response_keys )
+						&& 0 === (int) ( $root_update_data['parent'] ?? -1 )
+						&& $root_update_link === ( $root_update_data['link'] ?? null )
+						&& null === self::link_href( $root_update_response_links, 'up' )
+						&& $after_root_update instanceof \WP_Post
+						&& 0 === (int) $after_root_update->post_parent
+						&& self::response_error_ok( $invalid_update_response, 'rest_post_invalid_id', 400 )
+						&& $after_invalid_update instanceof \WP_Post
+						&& 0 === (int) $after_invalid_update->post_parent,
+					'custom hierarchical route-dispatched updates maintain fallback links while rejected missing parents preserve stored parent',
+					array(
+						'crossUpdate'   => $observed['responses']['crossUpdate'],
+						'rootUpdate'    => $observed['responses']['rootUpdate'],
+						'invalidUpdate' => $observed['responses']['invalidUpdate'],
+						'afterInvalid'  => $observed['responses']['afterInvalid'],
+						'expected'      => $observed['expected'],
+					)
+				);
+
+				self::collect_failure(
+					$failures,
+					array( $same_parent_create_id, $cross_type_create_id, $update_child_id, $update_child_id ) === array_values( array_map( static fn ( array $event ): int => (int) ( $event['id'] ?? 0 ), $prepare_events ) )
+						&& array( 'POST', 'POST', 'PUT', 'PUT' ) === array_values( array_map( static fn ( array $event ): string => (string) ( $event['method'] ?? '' ), $prepare_events ) )
+						&& array( 'edit', 'edit', 'edit', 'edit' ) === array_values( array_map( static fn ( array $event ): string => (string) ( $event['context'] ?? '' ), $prepare_events ) )
+						&& array( '/wp/v2/' . $rest_base, '/wp/v2/' . $rest_base, '/wp/v2/' . $rest_base . '/' . $update_child_id, '/wp/v2/' . $rest_base . '/' . $update_child_id ) === array_values( array_map( static fn ( array $event ): string => (string) ( $event['route'] ?? '' ), $prepare_events ) ),
+					'custom hierarchical parent assignment prepare hook receives only successful create/update responses',
+					array( 'prepareEvents' => $prepare_events )
+				);
+			}
+		} finally {
+			\remove_filter( 'rest_prepare_' . $post_type, $prepare_filter, 10 );
+			$custom_filters_restored = false === \has_filter( 'rest_prepare_' . $post_type, $prepare_filter );
+
+			$delete_posts();
+			$counts_after_cleanup = self::content_counts();
+
+			if ( null !== $cap_filter ) {
+				$cap_filter_restored = self::remove_cap_filter( $cap_filter );
+				$cap_filter          = null;
+			} else {
+				$cap_filter_restored = true;
+			}
+
+			self::restore_rest_default_filters( $filter_snapshot );
+			$default_filters_restored = $filter_snapshot === self::rest_default_filter_state();
+
+			if ( function_exists( 'unregister_post_type' ) && \post_type_exists( $post_type ) ) {
+				\unregister_post_type( $post_type );
+			}
+			if ( $had_post_type ) {
+				$GLOBALS['wp_post_types'][ $post_type ] = $previous_post_type;
+			} else {
+				unset( $GLOBALS['wp_post_types'][ $post_type ] );
+			}
+			if ( null !== $previous_query_vars && isset( $GLOBALS['wp'] ) && is_object( $GLOBALS['wp'] ) && property_exists( $GLOBALS['wp'], 'public_query_vars' ) ) {
+				$GLOBALS['wp']->public_query_vars = $previous_query_vars;
+			}
+			if ( $previous_wp_set ) {
+				$GLOBALS['wp'] = $previous_wp;
+			} else {
+				unset( $GLOBALS['wp'] );
+			}
+
+			if ( $previous_rewrite_set ) {
+				$GLOBALS['wp_rewrite'] = $previous_rewrite;
+			} else {
+				unset( $GLOBALS['wp_rewrite'] );
+			}
+
+			\wp_set_current_user( $previous_current_user_id );
+
+			if ( $had_wp_actions ) {
+				$GLOBALS['wp_actions'] = $previous_actions;
+			} else {
+				unset( $GLOBALS['wp_actions'] );
+			}
+
+			if ( null !== $previous_server ) {
+				$GLOBALS['wp_rest_server'] = $previous_server;
+			} else {
+				unset( $GLOBALS['wp_rest_server'] );
+			}
+
+			$rewrite_restored = $previous_rewrite_set === array_key_exists( 'wp_rewrite', $GLOBALS )
+				&& ( ! $previous_rewrite_set || $previous_rewrite === $GLOBALS['wp_rewrite'] );
+			$wp_restored = $previous_wp_set === array_key_exists( 'wp', $GLOBALS )
+				&& ( ! $previous_wp_set || $previous_wp === $GLOBALS['wp'] );
+			$actions_restored = $had_wp_actions
+				? $previous_actions === ( $GLOBALS['wp_actions'] ?? null )
+				: ! array_key_exists( 'wp_actions', $GLOBALS );
+			$server_restored = null !== $previous_server
+				? $previous_server === ( $GLOBALS['wp_rest_server'] ?? null )
+				: ! array_key_exists( 'wp_rest_server', $GLOBALS );
+			$current_user_restored = $previous_current_user_id === (
+				isset( $GLOBALS['current_user'] ) && $GLOBALS['current_user'] instanceof \WP_User
+					? (int) $GLOBALS['current_user']->ID
+					: 0
+			);
+			$post_type_restored = $had_post_type === isset( $GLOBALS['wp_post_types'][ $post_type ] )
+				&& ( ! $had_post_type || $previous_post_type === $GLOBALS['wp_post_types'][ $post_type ] );
+			$query_vars_restored = null === $previous_query_vars
+				|| ! ( isset( $GLOBALS['wp'] ) && is_object( $GLOBALS['wp'] ) && property_exists( $GLOBALS['wp'], 'public_query_vars' ) )
+				|| $previous_query_vars === $GLOBALS['wp']->public_query_vars;
+		}
+
+		$observed['counts'] = array(
+			'before' => $counts_before,
+			'after'  => $counts_after_cleanup,
+		);
+		self::collect_failure(
+			$failures,
+			self::content_count_delta_matches( $counts_before, $counts_after_cleanup, array(), array() ),
+			'custom hierarchical parent assignment fixtures are deleted after route dispatch',
+			$observed['counts']
+		);
+		self::collect_failure(
+			$failures,
+			$custom_filters_restored
+				&& $cap_filter_restored
+				&& $default_filters_restored
+				&& $rewrite_restored
+				&& $wp_restored
+				&& $server_restored
+				&& $actions_restored
+				&& $current_user_restored
+				&& $post_type_restored
+				&& $query_vars_restored,
+			'custom hierarchical parent assignment restores prepare filter, caps, default REST filters, rewrite, wp, server, actions, current user, post type, and query vars',
+			array(
+				'customFiltersRestored'  => $custom_filters_restored,
+				'capFilterRestored'      => $cap_filter_restored,
+				'defaultFiltersRestored' => $default_filters_restored,
+				'rewriteRestored'        => $rewrite_restored,
+				'wpRestored'             => $wp_restored,
+				'serverRestored'         => $server_restored,
+				'actionsRestored'        => $actions_restored,
+				'currentUserRestored'    => $current_user_restored,
+				'postTypeRestored'       => $post_type_restored,
+				'queryVarsRestored'      => $query_vars_restored,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'rest-object-controllers.route-dispatched-custom-hierarchical-parent-assignment',
 			array() === $failures,
 			array(
 				'case'     => self::case_summary( $case ),
