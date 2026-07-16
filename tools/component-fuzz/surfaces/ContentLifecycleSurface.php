@@ -3308,6 +3308,9 @@ final class ContentLifecycleSurface {
 			$pretty_private_child_slug = 'single-pretty-private-child-' . $token;
 			$pretty_trash_parent_slug = 'single-pretty-trash-parent-' . $token;
 			$pretty_trash_child_slug = 'single-pretty-trash-child-' . $token;
+			$pretty_mixed_root_slug = 'single-pretty-mixed-root-' . $token;
+			$pretty_mixed_leaf_slug = 'single-pretty-mixed-leaf-' . $token;
+			$pretty_mixed_middle_slug = 'single-pretty-mixed-middle-' . $token;
 			$query_parent_slug  = 'single-query-parent-' . $token;
 			$query_child_slug   = 'single-query-child-' . $token;
 			$query_draft_slug   = 'single-query-draft-' . $token;
@@ -3322,6 +3325,9 @@ final class ContentLifecycleSurface {
 			$query_private_child_slug = 'single-query-private-child-' . $token;
 			$query_trash_parent_slug = 'single-query-trash-parent-' . $token;
 			$query_trash_child_slug = 'single-query-trash-child-' . $token;
+			$query_mixed_middle_slug = 'single-query-mixed-middle-' . $token;
+			$query_mixed_root_slug = 'single-query-mixed-root-' . $token;
+			$query_mixed_leaf_slug = 'single-query-mixed-leaf-' . $token;
 			$plain_parent_slug  = 'single-plain-parent-' . $token;
 			$plain_child_slug   = 'single-plain-child-' . $token;
 			$plain_draft_slug   = 'single-plain-draft-' . $token;
@@ -3336,6 +3342,9 @@ final class ContentLifecycleSurface {
 			$pretty_private_child_id = $insert_post( $pretty_type, 'Single Pretty Private Child ' . $token, $pretty_private_child_slug, $pretty_private_parent_id );
 			$pretty_trash_parent_id = $insert_post( $pretty_type, 'Single Pretty Trash Parent ' . $token, $pretty_trash_parent_slug, 0, 'trash' );
 			$pretty_trash_child_id = $insert_post( $pretty_type, 'Single Pretty Trash Child ' . $token, $pretty_trash_child_slug, $pretty_trash_parent_id );
+			$pretty_mixed_root_id = $insert_post( $pretty_type, 'Single Pretty Mixed Root ' . $token, $pretty_mixed_root_slug, 0 );
+			$query_mixed_middle_id = $insert_post( $query_type, 'Single Query Mixed Middle ' . $token, $query_mixed_middle_slug, $pretty_mixed_root_id );
+			$pretty_mixed_leaf_id = $insert_post( $pretty_type, 'Single Pretty Mixed Leaf ' . $token, $pretty_mixed_leaf_slug, $query_mixed_middle_id );
 			$query_parent_id  = $insert_post( $query_type, 'Single Query Parent ' . $token, $query_parent_slug, 0 );
 			$pretty_cross_type_child_id = $insert_post( $pretty_type, 'Single Pretty Cross Parent Child ' . $token, $pretty_cross_type_child_slug, $query_parent_id );
 			$query_child_id   = $insert_post( $query_type, 'Single Query Child ' . $token, $query_child_slug, $query_parent_id );
@@ -3351,6 +3360,9 @@ final class ContentLifecycleSurface {
 			$query_private_child_id = $insert_post( $query_type, 'Single Query Private Child ' . $token, $query_private_child_slug, $query_private_parent_id );
 			$query_trash_parent_id = $insert_post( $query_type, 'Single Query Trash Parent ' . $token, $query_trash_parent_slug, 0, 'trash' );
 			$query_trash_child_id = $insert_post( $query_type, 'Single Query Trash Child ' . $token, $query_trash_child_slug, $query_trash_parent_id );
+			$query_mixed_root_id = $insert_post( $query_type, 'Single Query Mixed Root ' . $token, $query_mixed_root_slug, 0 );
+			$pretty_mixed_middle_id = $insert_post( $pretty_type, 'Single Pretty Mixed Middle ' . $token, $pretty_mixed_middle_slug, $query_mixed_root_id );
+			$query_mixed_leaf_id = $insert_post( $query_type, 'Single Query Mixed Leaf ' . $token, $query_mixed_leaf_slug, $pretty_mixed_middle_id );
 			$plain_parent_id  = $insert_post( $plain_type, 'Single Plain Parent ' . $token, $plain_parent_slug, 0 );
 			$plain_child_id   = $insert_post( $plain_type, 'Single Plain Child ' . $token, $plain_child_slug, $plain_parent_id );
 			$plain_draft_id   = $insert_post( $plain_type, 'Single Plain Draft ' . $token, $plain_draft_slug, $plain_parent_id, 'draft' );
@@ -3374,6 +3386,9 @@ final class ContentLifecycleSurface {
 					&& $pretty_private_child_id > 0
 					&& $pretty_trash_parent_id > 0
 					&& $pretty_trash_child_id > 0
+					&& $pretty_mixed_root_id > 0
+					&& $query_mixed_middle_id > 0
+					&& $pretty_mixed_leaf_id > 0
 					&& $query_parent_id > 0
 					&& $query_child_id > 0
 					&& $query_draft_id > 0
@@ -3388,6 +3403,9 @@ final class ContentLifecycleSurface {
 					&& $query_private_child_id > 0
 					&& $query_trash_parent_id > 0
 					&& $query_trash_child_id > 0
+					&& $query_mixed_root_id > 0
+					&& $pretty_mixed_middle_id > 0
+					&& $query_mixed_leaf_id > 0
 					&& $plain_parent_id > 0
 					&& $plain_child_id > 0
 					&& $plain_draft_id > 0,
@@ -3407,6 +3425,7 @@ final class ContentLifecycleSurface {
 			$pretty_cross_type_child_uri = $query_parent_slug . '/' . $pretty_cross_type_child_slug;
 			$pretty_private_child_uri = $pretty_private_parent_slug . '/' . $pretty_private_child_slug;
 			$pretty_trash_child_uri = $pretty_trash_parent_slug . '/' . $pretty_trash_child_slug;
+			$pretty_mixed_leaf_uri = $pretty_mixed_root_slug . '/' . $query_mixed_middle_slug . '/' . $pretty_mixed_leaf_slug;
 			$query_child_uri  = $query_parent_slug . '/' . $query_child_slug;
 			$query_draft_uri  = $query_parent_slug . '/' . $query_draft_slug;
 			$query_raw_child_uri = $query_raw_parent_slug . '/' . $query_raw_child_slug;
@@ -3414,6 +3433,7 @@ final class ContentLifecycleSurface {
 			$query_cross_type_child_uri = $pretty_parent_slug . '/' . $query_cross_type_child_slug;
 			$query_private_child_uri = $query_private_parent_slug . '/' . $query_private_child_slug;
 			$query_trash_child_uri = $query_trash_parent_slug . '/' . $query_trash_child_slug;
+			$query_mixed_leaf_uri = $query_mixed_root_slug . '/' . $pretty_mixed_middle_slug . '/' . $query_mixed_leaf_slug;
 
 			$matrix = array(
 				array(
@@ -3508,6 +3528,16 @@ final class ContentLifecycleSurface {
 					'postId'    => $pretty_trash_child_id,
 					'type'      => $pretty_type,
 					'parent'    => $pretty_trash_parent_id,
+					'leavename' => false,
+					'sample'    => false,
+				),
+				array(
+					'label'     => 'pretty-mixed-depth-ancestors',
+					'actual'    => $call_link( 'pretty-mixed-depth-ancestors', static fn () => \get_post_permalink( $pretty_mixed_leaf_id ) ),
+					'expected'  => \home_url( '/' . $pretty_rewrite_slug . '/' . $pretty_mixed_leaf_uri ),
+					'postId'    => $pretty_mixed_leaf_id,
+					'type'      => $pretty_type,
+					'parent'    => $query_mixed_middle_id,
 					'leavename' => false,
 					'sample'    => false,
 				),
@@ -3634,6 +3664,16 @@ final class ContentLifecycleSurface {
 					'sample'    => false,
 				),
 				array(
+					'label'     => 'query-mixed-depth-ancestors',
+					'actual'    => $call_link( 'query-mixed-depth-ancestors', static fn () => \get_post_permalink( $query_mixed_leaf_id ) ),
+					'expected'  => $query_link( $query_var, $query_mixed_leaf_uri ),
+					'postId'    => $query_mixed_leaf_id,
+					'type'      => $query_type,
+					'parent'    => $pretty_mixed_middle_id,
+					'leavename' => false,
+					'sample'    => false,
+				),
+				array(
 					'label'     => 'plain-published',
 					'actual'    => $call_link( 'plain-published', static fn () => \get_post_permalink( $plain_child_id ) ),
 					'expected'  => $plain_link( $plain_type, $plain_child_id ),
@@ -3708,6 +3748,33 @@ final class ContentLifecycleSurface {
 						'expected' => $query_cross_type_child_uri,
 						'post'     => self::post_summary( \get_post( $query_cross_type_child_id ) ),
 						'parent'   => self::post_summary( \get_post( $pretty_parent_id ) ),
+					),
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$pretty_mixed_leaf_uri === \get_page_uri( $pretty_mixed_leaf_id )
+					&& $query_mixed_leaf_uri === \get_page_uri( $query_mixed_leaf_id )
+					&& $query_mixed_middle_id === (int) ( \get_post( $pretty_mixed_leaf_id )->post_parent ?? 0 )
+					&& $pretty_mixed_root_id === (int) ( \get_post( $query_mixed_middle_id )->post_parent ?? 0 )
+					&& $pretty_mixed_middle_id === (int) ( \get_post( $query_mixed_leaf_id )->post_parent ?? 0 )
+					&& $query_mixed_root_id === (int) ( \get_post( $pretty_mixed_middle_id )->post_parent ?? 0 ),
+				'get_page_uri follows generated custom hierarchical mixed-depth cross-type ancestor paths',
+				array(
+					'prettyMixedLeaf' => array(
+						'uri'      => \get_page_uri( $pretty_mixed_leaf_id ),
+						'expected' => $pretty_mixed_leaf_uri,
+						'post'     => self::post_summary( \get_post( $pretty_mixed_leaf_id ) ),
+						'parent'   => self::post_summary( \get_post( $query_mixed_middle_id ) ),
+						'root'     => self::post_summary( \get_post( $pretty_mixed_root_id ) ),
+					),
+					'queryMixedLeaf'  => array(
+						'uri'      => \get_page_uri( $query_mixed_leaf_id ),
+						'expected' => $query_mixed_leaf_uri,
+						'post'     => self::post_summary( \get_post( $query_mixed_leaf_id ) ),
+						'parent'   => self::post_summary( \get_post( $pretty_mixed_middle_id ) ),
+						'root'     => self::post_summary( \get_post( $query_mixed_root_id ) ),
 					),
 				)
 			);
