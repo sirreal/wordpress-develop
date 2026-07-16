@@ -93,7 +93,7 @@ database, network requests, or a configured site.
   hooks, legacy `media-upload.php` entry dispatch, legacy upload send/gallery
   dispatch, URL insert dispatch, gallery save iframe dispatch, type/default
   iframe dispatch, legacy library/gallery iframe rendering, legacy media query
-  date/filter boundaries, and WP_Error exit capture,
+  date/filter boundaries, query aliases/defaults, and WP_Error exit capture,
   `wp_media_attach_action()` attach/detach redirect and denial exits, media-view
   enqueue settings/string contracts, in-process iframe shell rendering, and safe
   media button/uploader bypass output.

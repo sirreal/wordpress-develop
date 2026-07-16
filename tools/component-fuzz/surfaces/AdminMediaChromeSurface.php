@@ -43,6 +43,7 @@ final class AdminMediaChromeSurface {
 			$rows[] = self::check_media_upload_entry_dispatch( $ctx->fork( 'legacy-entry-dispatch' ) );
 			$rows[] = self::check_media_library_gallery_iframe_rendering( $ctx->fork( 'legacy-library-gallery' ) );
 			$rows[] = self::check_media_library_query_date_filters( $ctx->fork( 'legacy-library-query-filters' ) );
+			$rows[] = self::check_media_library_query_alias_defaults( $ctx->fork( 'legacy-library-query-aliases' ) );
 			$rows[] = self::check_media_attach_action_redirect_exit( $ctx->fork( 'media-attach-action' ) );
 			$rows[] = self::check_media_enqueue_and_iframe_shell( $ctx->fork( 'modal-enqueue-shell' ) );
 			$rows[] = self::check_media_button_and_bypass_output( $ctx->fork( 'media-buttons' ) );
@@ -117,6 +118,7 @@ final class AdminMediaChromeSurface {
 				'media_upload_type_form',
 				'media_upload_type_url_form',
 				'paginate_links',
+				'_get_list_table',
 				'remove_query_arg',
 				'sanitize_html_class',
 				'size_format',
@@ -6478,6 +6480,647 @@ PHP;
 		sort( $expected );
 
 		return $actual === $expected;
+	}
+
+	private static function check_media_library_query_alias_defaults( \ComponentFuzz\FuzzContext $ctx ): array {
+		$missing = self::media_attach_action_child_missing_requirements();
+		if ( array() !== $missing ) {
+			return self::row(
+				$ctx,
+				'admin-media-chrome.legacy-library-query-alias-defaults',
+				true,
+				array(
+					'missing' => $missing,
+					'reason'  => 'Required local subprocess APIs are unavailable.',
+				),
+				'skipped'
+			);
+		}
+
+		$case   = self::media_library_query_alias_default_case( $ctx );
+		$run    = self::run_media_library_query_alias_default_child_process( $case );
+		$result = is_array( $run['result'] ?? null ) ? $run['result'] : array();
+		$failures = array();
+
+		self::collect_failure(
+			$failures,
+			true === ( $run['ok'] ?? false ) && self::media_library_query_alias_default_child_result_has_expected_shape( $result ),
+			'media query alias/default child reports structured JSON',
+			array(
+				'run'    => $run,
+				'result' => $result,
+			)
+		);
+
+		if ( self::media_library_query_alias_default_child_result_has_expected_shape( $result ) ) {
+			self::collect_failure(
+				$failures,
+				true === (bool) ( $result['returned'] ?? false )
+					&& 'NULL' === (string) ( $result['returnType'] ?? '' )
+					&& null === ( $result['throwable'] ?? null ),
+				'media query alias/default child renders the default-filtered library form without exceptions',
+				array(
+					'returned'  => $result['returned'] ?? null,
+					'returnType' => $result['returnType'] ?? null,
+					'throwable' => $result['throwable'] ?? null,
+				)
+			);
+
+			self::collect_media_library_query_alias_default_failures( $failures, $case, $result );
+		}
+
+		return self::row(
+			$ctx,
+			'admin-media-chrome.legacy-library-query-alias-defaults',
+			array() === $failures,
+			array(
+				'failures' => $failures,
+				'run'      => array(
+					'ok'       => $run['ok'] ?? false,
+					'exitCode' => $run['exitCode'] ?? null,
+					'stderr'   => self::describe_string( (string) ( $run['stderr'] ?? '' ) ),
+					'stdout'   => self::describe_string( (string) ( $run['stdout'] ?? '' ) ),
+					'result'   => array(
+						'returned'       => $result['returned'] ?? null,
+						'returnType'     => $result['returnType'] ?? null,
+						'throwable'      => $result['throwable'] ?? null,
+						'defaultQuery'   => $result['defaultQuery'] ?? array(),
+						'trashQueries'   => $result['trashQueries'] ?? array(),
+						'aliasQueries'   => $result['aliasQueries'] ?? array(),
+						'listTable'      => $result['listTable'] ?? array(),
+						'contentBefore'  => $result['contentBefore'] ?? array(),
+						'contentAfter'   => $result['contentAfter'] ?? array(),
+						'output'         => self::describe_string( (string) ( $result['output'] ?? '' ) ),
+					),
+				),
+			)
+		);
+	}
+
+	private static function media_library_query_alias_default_case( \ComponentFuzz\FuzzContext $ctx ): array {
+		return array(
+			'label'     => 'default-trash-alias-list-table',
+			'seed'      => $ctx->seed(),
+			'iteration' => $ctx->iteration(),
+			'token'     => self::media_upload_dispatch_token( 'mqal_' . $ctx->identifier( 4, 9 ) ),
+		);
+	}
+
+	private static function run_media_library_query_alias_default_child_process( array $case ): array {
+		$payload = json_encode(
+			array( 'case' => $case ),
+			JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE
+		);
+
+		if ( false === $payload ) {
+			return array(
+				'ok'       => false,
+				'exitCode' => -1,
+				'stdout'   => '',
+				'stderr'   => 'json_encode failed',
+				'result'   => null,
+			);
+		}
+
+		$descriptors = array(
+			0 => array( 'pipe', 'r' ),
+			1 => array( 'pipe', 'w' ),
+			2 => array( 'pipe', 'w' ),
+		);
+
+		// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.system_calls_proc_open -- Isolates media library query alias/default globals and list-table state in a local PHP subprocess.
+		$process = proc_open( array( PHP_BINARY, '-r', self::media_library_query_alias_default_child_program() ), $descriptors, $pipes, \ComponentFuzz\repo_root() );
+		if ( ! is_resource( $process ) ) {
+			return array(
+				'ok'       => false,
+				'exitCode' => -1,
+				'stdout'   => '',
+				'stderr'   => 'proc_open failed',
+				'result'   => null,
+			);
+		}
+
+		fwrite( $pipes[0], $payload );
+		fclose( $pipes[0] );
+
+		$stdout = stream_get_contents( $pipes[1] );
+		$stderr = stream_get_contents( $pipes[2] );
+		fclose( $pipes[1] );
+		fclose( $pipes[2] );
+
+		$exit_code = proc_close( $process );
+		$result    = json_decode( (string) $stdout, true );
+
+		return array(
+			'ok'       => 0 === $exit_code && is_array( $result ) && true === ( $result['ok'] ?? null ),
+			'exitCode' => $exit_code,
+			'stdout'   => (string) $stdout,
+			'stderr'   => (string) $stderr,
+			'result'   => is_array( $result ) ? $result : null,
+		);
+	}
+
+	private static function media_library_query_alias_default_child_program(): string {
+		return <<<'PHP'
+$component_fuzz_admin_media_raw = stream_get_contents( STDIN );
+$component_fuzz_admin_media_payload = json_decode( $component_fuzz_admin_media_raw, true );
+$case = is_array( $component_fuzz_admin_media_payload['case'] ?? null ) ? $component_fuzz_admin_media_payload['case'] : array();
+
+require_once getcwd() . '/tools/component-fuzz/lib/autoload.php';
+\ComponentFuzz\WpBootstrap::load();
+
+\ComponentFuzz\Surfaces\AdminMediaChromeSurface::run_media_library_query_alias_default_child( $case );
+PHP;
+	}
+
+	public static function run_media_library_query_alias_default_child( array $case ): void {
+		ini_set( 'display_errors', '0' );
+		self::prepare_runtime();
+
+		$ctx   = new \ComponentFuzz\FuzzContext( (int) ( $case['seed'] ?? 1 ), self::NAME, (int) ( $case['iteration'] ?? 0 ) );
+		$token = self::media_upload_dispatch_token( (string) ( $case['token'] ?? $ctx->identifier( 4, 9 ) ) );
+		$state = array(
+			'ok'                    => false,
+			'label'                 => (string) ( $case['label'] ?? 'media-library-query-alias-default' ),
+			'token'                 => $token,
+			'currentUserId'         => 0,
+			'parentId'              => 0,
+			'defaultImageIds'       => array(),
+			'defaultNonImageIds'    => array(),
+			'normalIds'             => array(),
+			'trashIds'              => array(),
+			'detachedIds'           => array(),
+			'attachedControlIds'    => array(),
+			'mineIds'               => array(),
+			'otherAuthorIds'        => array(),
+			'defaultQuery'          => array(),
+			'trashQueries'          => array(),
+			'aliasQueries'          => array(),
+			'listTable'             => array(),
+			'contentBefore'         => array(),
+			'contentAfter'          => array(),
+			'returned'              => false,
+			'returnType'            => null,
+			'throwable'             => null,
+			'output'                => '',
+		);
+
+		$buffer_level = ob_get_level();
+		ob_start();
+
+		register_shutdown_function(
+			static function () use ( &$state, $buffer_level ): void {
+				$output = '';
+				while ( ob_get_level() > $buffer_level ) {
+					$chunk = ob_get_clean();
+					if ( is_string( $chunk ) ) {
+						$output = $chunk . $output;
+					}
+				}
+
+				$state['output']       = $output;
+				$state['contentAfter'] = self::media_url_insert_content_counts();
+				$state['ok']           = null === $state['throwable'];
+				echo json_encode( $state, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE ) . "\n";
+			}
+		);
+
+		try {
+			if ( defined( 'ABSPATH' ) ) {
+				require_once ABSPATH . 'wp-admin/includes/class-wp-list-table.php';
+				require_once ABSPATH . 'wp-admin/includes/class-wp-media-list-table.php';
+			}
+
+			$parent_id = self::seed_parent_post( $ctx->fork( 'parent' ) );
+			$state['parentId'] = $parent_id;
+
+			$current_user_id = \wp_insert_user(
+				array(
+					'user_login' => 'media-query-alias-' . substr( hash( 'crc32b', $token ), 0, 8 ),
+					'user_pass'  => 'component-fuzz-password',
+					'user_email' => 'media-query-alias-' . substr( hash( 'crc32b', $token ), 0, 8 ) . '@example.test',
+					'role'       => 'administrator',
+				)
+			);
+			if ( ! is_int( $current_user_id ) || $current_user_id <= 0 ) {
+				throw new \RuntimeException( 'Could not seed current user for media library alias/default filters.' );
+			}
+
+			$state['currentUserId'] = $current_user_id;
+			\wp_set_current_user( $current_user_id );
+			if ( isset( $GLOBALS['current_user'] ) && $GLOBALS['current_user'] instanceof \WP_User ) {
+				$GLOBALS['current_user']->allcaps = array( 'exist' => true );
+			}
+
+			$user_has_cap_filter = static function ( array $allcaps, array $caps, array $args, $user = null ): array {
+				unset( $args, $user );
+				foreach ( $caps as $cap ) {
+					$allcaps[ $cap ] = 'do_not_allow' !== $cap;
+				}
+				return $allcaps;
+			};
+			$upload_per_page_filter = static function (): int {
+				return 50;
+			};
+
+			\add_filter( 'user_has_cap', $user_has_cap_filter, 10, 4 );
+			\add_filter( 'upload_per_page', $upload_per_page_filter, 10, 0 );
+
+			try {
+				for ( $i = 0; $i < 3; ++$i ) {
+					$attachment = self::seed_attachment(
+						$ctx->fork( 'default-image-' . $i ),
+						'image/jpeg',
+						array(
+							'parent_id'     => $parent_id,
+							'post_author'   => 2,
+							'post_date'     => sprintf( '2026-08-%02d 10:00:00', 20 - $i ),
+							'post_date_gmt' => sprintf( '2026-08-%02d 10:00:00', 20 - $i ),
+							'post_title'    => 'Default image ' . $i . ' ' . $token,
+							'relative_file' => '2026/08/default-image-' . $token . '-' . $i . '.jpg',
+						)
+					);
+					$state['defaultImageIds'][] = (int) $attachment->ID;
+					$state['normalIds'][]       = (int) $attachment->ID;
+				}
+
+				for ( $i = 0; $i < 2; ++$i ) {
+					$attachment = self::seed_attachment(
+						$ctx->fork( 'default-pdf-' . $i ),
+						'application/pdf',
+						array(
+							'parent_id'     => $parent_id,
+							'post_author'   => 2,
+							'post_date'     => sprintf( '2026-08-%02d 09:00:00', 10 - $i ),
+							'post_date_gmt' => sprintf( '2026-08-%02d 09:00:00', 10 - $i ),
+							'post_title'    => 'Default PDF ' . $i . ' ' . $token,
+							'relative_file' => '2026/08/default-pdf-' . $token . '-' . $i . '.pdf',
+						)
+					);
+					$state['defaultNonImageIds'][] = (int) $attachment->ID;
+					$state['normalIds'][]          = (int) $attachment->ID;
+				}
+
+				for ( $i = 0; $i < 2; ++$i ) {
+					$attachment = self::seed_attachment(
+						$ctx->fork( 'trash-' . $i ),
+						'image/png',
+						array(
+							'parent_id'     => $parent_id,
+							'post_author'   => 2,
+							'post_status'   => 'trash',
+							'post_date'     => sprintf( '2026-09-%02d 09:00:00', 10 - $i ),
+							'post_date_gmt' => sprintf( '2026-09-%02d 09:00:00', 10 - $i ),
+							'post_title'    => 'Trash image ' . $i . ' ' . $token,
+							'relative_file' => '2026/09/trash-' . $token . '-' . $i . '.png',
+						)
+					);
+					$state['trashIds'][] = (int) $attachment->ID;
+				}
+
+				for ( $i = 0; $i < 2; ++$i ) {
+					$attachment = self::seed_attachment(
+						$ctx->fork( 'detached-' . $i ),
+						'image/png',
+						array(
+							'parent_id'     => 0,
+							'post_author'   => 2,
+							'post_date'     => sprintf( '2026-10-%02d 09:00:00', 10 - $i ),
+							'post_date_gmt' => sprintf( '2026-10-%02d 09:00:00', 10 - $i ),
+							'post_title'    => 'Detached alias ' . $i . ' ' . $token,
+							'relative_file' => '2026/10/detached-alias-' . $token . '-' . $i . '.png',
+						)
+					);
+					$state['detachedIds'][]     = (int) $attachment->ID;
+					$state['defaultImageIds'][] = (int) $attachment->ID;
+					$state['normalIds'][]       = (int) $attachment->ID;
+				}
+
+				$attached_control = self::seed_attachment(
+					$ctx->fork( 'attached-control' ),
+					'image/png',
+					array(
+						'parent_id'     => $parent_id,
+						'post_author'   => 2,
+						'post_date'     => '2026-10-11 09:00:00',
+						'post_date_gmt' => '2026-10-11 09:00:00',
+						'post_title'    => 'Attached alias control ' . $token,
+						'relative_file' => '2026/10/attached-control-' . $token . '.png',
+					)
+				);
+				$state['attachedControlIds'][] = (int) $attached_control->ID;
+				$state['defaultImageIds'][]    = (int) $attached_control->ID;
+				$state['normalIds'][]          = (int) $attached_control->ID;
+
+				for ( $i = 0; $i < 2; ++$i ) {
+					$attachment = self::seed_attachment(
+						$ctx->fork( 'mine-' . $i ),
+						'application/pdf',
+						array(
+							'parent_id'     => $parent_id,
+							'post_author'   => $current_user_id,
+							'post_date'     => sprintf( '2026-11-%02d 08:00:00', 10 - $i ),
+							'post_date_gmt' => sprintf( '2026-11-%02d 08:00:00', 10 - $i ),
+							'post_title'    => 'Mine alias PDF ' . $i . ' ' . $token,
+							'relative_file' => '2026/11/mine-alias-' . $token . '-' . $i . '.pdf',
+						)
+					);
+					$state['mineIds'][]       = (int) $attachment->ID;
+					$state['normalIds'][]     = (int) $attachment->ID;
+					$state['defaultNonImageIds'][] = (int) $attachment->ID;
+				}
+
+				$other_author = self::seed_attachment(
+					$ctx->fork( 'other-author' ),
+					'application/pdf',
+					array(
+						'parent_id'     => $parent_id,
+						'post_author'   => 2,
+						'post_date'     => '2026-11-11 08:00:00',
+						'post_date_gmt' => '2026-11-11 08:00:00',
+						'post_title'    => 'Other alias author PDF ' . $token,
+						'relative_file' => '2026/11/other-alias-author-' . $token . '.pdf',
+					)
+				);
+				$state['otherAuthorIds'][]    = (int) $other_author->ID;
+				$state['normalIds'][]         = (int) $other_author->ID;
+				$state['defaultNonImageIds'][] = (int) $other_author->ID;
+
+				$state['contentBefore'] = self::media_url_insert_content_counts();
+
+				$state['trashQueries']['statusOnly'] = self::media_library_query_date_capture_query(
+					array( 'status' => 'trash' )
+				);
+				$state['trashQueries']['attachmentFilter'] = self::media_library_query_date_capture_query(
+					array( 'attachment-filter' => 'trash' )
+				);
+				$state['aliasQueries']['rawDetached'] = self::media_library_query_date_capture_query(
+					array(
+						'detached'       => '1',
+						'post_mime_type' => 'image',
+					)
+				);
+				$state['aliasQueries']['filterDetached'] = self::media_library_query_date_capture_query(
+					array(
+						'attachment-filter' => 'detached',
+						'post_mime_type'    => 'image',
+					)
+				);
+				$state['aliasQueries']['rawMine'] = self::media_library_query_date_capture_query(
+					array( 'mine' => '1' )
+				);
+				$state['aliasQueries']['filterMine'] = self::media_library_query_date_capture_query(
+					array( 'attachment-filter' => 'mine' )
+				);
+
+				$GLOBALS['pagenow']      = 'media-upload.php';
+				$GLOBALS['type']         = 'image';
+				$GLOBALS['tab']          = 'library';
+				$GLOBALS['body_id']      = 'component-fuzz-query-alias-default';
+				$GLOBALS['wp']           = new \WP();
+				$GLOBALS['wp_query']     = new \WP_Query();
+				$GLOBALS['wp_the_query'] = $GLOBALS['wp_query'];
+
+				$_SERVER['HTTP_HOST']       = 'example.test';
+				$_SERVER['HTTPS']           = 'off';
+				$_SERVER['PHP_SELF']        = '/wp-admin/media-upload.php';
+				$_SERVER['REQUEST_METHOD']  = 'GET';
+				$_SERVER['REQUEST_URI']     = '/wp-admin/media-upload.php?type=image&tab=library';
+				$_SERVER['HTTP_REFERER']    = 'http://example.test/wp-admin/media-upload.php?type=image&tab=library';
+				$_SERVER['HTTP_USER_AGENT'] = 'component-fuzz/admin-media-query-alias-default';
+				$_SERVER['REMOTE_ADDR']     = '198.51.100.52';
+				$_SERVER['SERVER_PORT']     = '80';
+
+				$_GET     = array(
+					'type'    => 'image',
+					'tab'     => 'library',
+					'post_id' => (string) $parent_id,
+				);
+				$_POST    = array();
+				$_REQUEST = $_GET;
+				$_FILES   = array();
+				$_COOKIE  = array();
+
+				$return_value = \media_upload_library();
+				$state['returnType'] = gettype( $return_value );
+				$state['returned']   = true;
+
+				$default_query = $GLOBALS['wp_the_query'] ?? null;
+				$default_posts = is_object( $default_query ) && is_array( $default_query->posts ?? null ) ? $default_query->posts : array();
+				$state['defaultQuery'] = array(
+					'ids'         => array_map(
+						static function ( $post ): int {
+							return (int) ( $post->ID ?? 0 );
+						},
+						$default_posts
+					),
+					'queryVars'   => is_object( $default_query ) && is_array( $default_query->query_vars ?? null ) ? self::media_library_gallery_query_summary( $default_query->query_vars ) : array(),
+					'foundPosts'  => is_object( $default_query ) && isset( $default_query->found_posts ) ? (int) $default_query->found_posts : null,
+					'maxNumPages' => is_object( $default_query ) && isset( $default_query->max_num_pages ) ? (int) $default_query->max_num_pages : null,
+					'getPostMimeTypeAfterRender' => $_GET['post_mime_type'] ?? null,
+				);
+
+				$screen = \convert_to_screen( 'upload' );
+				$state['listTable']['rawDetached'] = self::media_library_alias_default_list_table_probe(
+					array(
+						'detached'       => '1',
+						'post_mime_type' => 'image',
+					),
+					$screen
+				);
+				$state['listTable']['filterDetached'] = self::media_library_alias_default_list_table_probe(
+					array(
+						'attachment-filter' => 'detached',
+						'post_mime_type'    => 'image',
+					),
+					$screen
+				);
+			} finally {
+				\remove_filter( 'upload_per_page', $upload_per_page_filter, 10 );
+				\remove_filter( 'user_has_cap', $user_has_cap_filter, 10 );
+			}
+		} catch ( \Throwable $e ) {
+			$state['throwable'] = self::describe_throwable( $e );
+		}
+	}
+
+	private static function media_library_alias_default_list_table_probe( array $request, \WP_Screen $screen ): array {
+		$GLOBALS['pagenow']      = 'upload.php';
+		$GLOBALS['wp']           = new \WP();
+		$GLOBALS['wp_query']     = new \WP_Query();
+		$GLOBALS['wp_the_query'] = $GLOBALS['wp_query'];
+		$_GET                    = $request;
+		$_POST                   = array();
+		$_REQUEST                = $request;
+		$_SERVER['PHP_SELF']     = '/wp-admin/upload.php';
+		$_SERVER['REQUEST_URI']  = '/wp-admin/upload.php?' . http_build_query( $request, '', '&', PHP_QUERY_RFC3986 );
+
+		$table = \_get_list_table( 'WP_Media_List_Table', array( 'screen' => $screen ) );
+		if ( ! $table instanceof \WP_List_Table ) {
+			throw new \RuntimeException( 'Could not load WP_Media_List_Table.' );
+		}
+
+		$table->prepare_items();
+		$views = self::invoke_object_method( $table, 'get_views' );
+
+		$query = $GLOBALS['wp_the_query'] ?? null;
+		$posts = is_object( $query ) && is_array( $query->posts ?? null ) ? $query->posts : array();
+
+		return array(
+			'ids'              => array_map(
+				static function ( $post ): int {
+					return (int) ( $post->ID ?? 0 );
+				},
+				$posts
+			),
+			'queryVars'        => is_object( $query ) && is_array( $query->query_vars ?? null ) ? self::media_library_gallery_query_summary( $query->query_vars ) : array(),
+			'foundPosts'       => is_object( $query ) && isset( $query->found_posts ) ? (int) $query->found_posts : null,
+			'views'            => is_array( $views ) ? $views : array(),
+			'detachedSelected' => is_array( $views ) && str_contains( (string) ( $views['detached'] ?? '' ), 'selected="selected"' ),
+		);
+	}
+
+	private static function invoke_object_method( object $object, string $method, array $args = array() ) {
+		$reflection = new \ReflectionMethod( $object, $method );
+		return $reflection->invokeArgs( $object, $args );
+	}
+
+	private static function media_library_query_alias_default_child_result_has_expected_shape( array $result ): bool {
+		return array_key_exists( 'ok', $result )
+			&& array_key_exists( 'returned', $result )
+			&& is_string( $result['output'] ?? null )
+			&& is_int( $result['currentUserId'] ?? null )
+			&& is_array( $result['defaultImageIds'] ?? null )
+			&& is_array( $result['defaultNonImageIds'] ?? null )
+			&& is_array( $result['normalIds'] ?? null )
+			&& is_array( $result['trashIds'] ?? null )
+			&& is_array( $result['detachedIds'] ?? null )
+			&& is_array( $result['attachedControlIds'] ?? null )
+			&& is_array( $result['mineIds'] ?? null )
+			&& is_array( $result['otherAuthorIds'] ?? null )
+			&& is_array( $result['defaultQuery'] ?? null )
+			&& is_array( $result['trashQueries'] ?? null )
+			&& is_array( $result['aliasQueries'] ?? null )
+			&& is_array( $result['listTable'] ?? null )
+			&& is_array( $result['contentBefore'] ?? null )
+			&& is_array( $result['contentAfter'] ?? null );
+	}
+
+	private static function collect_media_library_query_alias_default_failures( array &$failures, array $case, array $result ): void {
+		unset( $case );
+
+		$output             = (string) ( $result['output'] ?? '' );
+		$default_query      = is_array( $result['defaultQuery'] ?? null ) ? $result['defaultQuery'] : array();
+		$default_query_vars = is_array( $default_query['queryVars'] ?? null ) ? $default_query['queryVars'] : array();
+		$default_ids        = array_values( array_map( 'intval', $default_query['ids'] ?? array() ) );
+
+		self::collect_failure(
+			$failures,
+			self::same_int_set( $default_ids, array_map( 'intval', $result['defaultImageIds'] ?? array() ) )
+				&& 'image' === (string) ( $default_query_vars['post_mime_type'] ?? '' )
+				&& 'image' === (string) ( $default_query['getPostMimeTypeAfterRender'] ?? '' )
+				&& ! array_intersect( $default_ids, array_map( 'intval', $result['defaultNonImageIds'] ?? array() ) )
+				&& str_contains( $output, 'name="post_mime_type" value=""' )
+				&& str_contains( $output, 'post_mime_type=image' )
+				&& str_contains( $output, 'class="current">Images' ),
+			'legacy library form reruns the query through the default media type while preserving the initially empty hidden post_mime_type input',
+			array(
+				'defaultQuery'       => $default_query,
+				'defaultImageIds'    => $result['defaultImageIds'] ?? array(),
+				'defaultNonImageIds' => $result['defaultNonImageIds'] ?? array(),
+				'output'             => self::describe_string( $output ),
+			)
+		);
+
+		$status_query = is_array( $result['trashQueries']['statusOnly'] ?? null ) ? $result['trashQueries']['statusOnly'] : array();
+		$filter_query = is_array( $result['trashQueries']['attachmentFilter'] ?? null ) ? $result['trashQueries']['attachmentFilter'] : array();
+		$status_ids   = array_values( array_map( 'intval', $status_query['ids'] ?? array() ) );
+		$filter_ids   = array_values( array_map( 'intval', $filter_query['ids'] ?? array() ) );
+		$status_vars  = is_array( $status_query['queryVars'] ?? null ) ? $status_query['queryVars'] : array();
+		$filter_vars  = is_array( $filter_query['queryVars'] ?? null ) ? $filter_query['queryVars'] : array();
+
+		self::collect_failure(
+			$failures,
+			self::same_int_set( $status_ids, array_map( 'intval', $result['normalIds'] ?? array() ) )
+				&& self::same_int_set( $filter_ids, array_map( 'intval', $result['trashIds'] ?? array() ) )
+				&& 'trash' !== (string) ( $status_vars['post_status'] ?? '' )
+				&& 'trash' === (string) ( $filter_vars['post_status'] ?? '' )
+				&& ! array_intersect( $status_ids, array_map( 'intval', $result['trashIds'] ?? array() ) ),
+			'status=trash alone is normalized back to non-trash media while attachment-filter=trash selects trash attachments',
+			array(
+				'statusOnly'       => $status_query,
+				'attachmentFilter' => $filter_query,
+				'normalIds'        => $result['normalIds'] ?? array(),
+				'trashIds'         => $result['trashIds'] ?? array(),
+			)
+		);
+
+		$raw_detached    = is_array( $result['aliasQueries']['rawDetached'] ?? null ) ? $result['aliasQueries']['rawDetached'] : array();
+		$filter_detached = is_array( $result['aliasQueries']['filterDetached'] ?? null ) ? $result['aliasQueries']['filterDetached'] : array();
+		$raw_mine        = is_array( $result['aliasQueries']['rawMine'] ?? null ) ? $result['aliasQueries']['rawMine'] : array();
+		$filter_mine     = is_array( $result['aliasQueries']['filterMine'] ?? null ) ? $result['aliasQueries']['filterMine'] : array();
+		$raw_detached_ids = array_values( array_map( 'intval', $raw_detached['ids'] ?? array() ) );
+		$filter_detached_ids = array_values( array_map( 'intval', $filter_detached['ids'] ?? array() ) );
+		$raw_mine_ids = array_values( array_map( 'intval', $raw_mine['ids'] ?? array() ) );
+		$filter_mine_ids = array_values( array_map( 'intval', $filter_mine['ids'] ?? array() ) );
+
+		self::collect_failure(
+			$failures,
+			self::same_int_set( $raw_detached_ids, array_map( 'intval', $result['detachedIds'] ?? array() ) )
+				&& self::same_int_set( $filter_detached_ids, array_map( 'intval', $result['detachedIds'] ?? array() ) )
+				&& ! array_intersect( $raw_detached_ids, array_map( 'intval', $result['attachedControlIds'] ?? array() ) )
+				&& 0 === (int) ( $raw_detached['queryVars']['post_parent'] ?? -1 )
+				&& 0 === (int) ( $filter_detached['queryVars']['post_parent'] ?? -1 ),
+			'raw detached alias and attachment-filter=detached both constrain the media query to parent-zero rows',
+			array(
+				'rawDetached'     => $raw_detached,
+				'filterDetached'  => $filter_detached,
+				'detachedIds'     => $result['detachedIds'] ?? array(),
+				'attachedControlIds' => $result['attachedControlIds'] ?? array(),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::same_int_set( $raw_mine_ids, array_map( 'intval', $result['mineIds'] ?? array() ) )
+				&& self::same_int_set( $filter_mine_ids, array_map( 'intval', $result['mineIds'] ?? array() ) )
+				&& (int) ( $result['currentUserId'] ?? 0 ) === (int) ( $raw_mine['queryVars']['author'] ?? 0 )
+				&& (int) ( $result['currentUserId'] ?? 0 ) === (int) ( $filter_mine['queryVars']['author'] ?? 0 )
+				&& ! array_intersect( $raw_mine_ids, array_map( 'intval', $result['otherAuthorIds'] ?? array() ) ),
+			'raw mine alias and attachment-filter=mine both constrain the media query to current-user rows',
+			array(
+				'rawMine'        => $raw_mine,
+				'filterMine'     => $filter_mine,
+				'mineIds'        => $result['mineIds'] ?? array(),
+				'otherAuthorIds' => $result['otherAuthorIds'] ?? array(),
+			)
+		);
+
+		$raw_table    = is_array( $result['listTable']['rawDetached'] ?? null ) ? $result['listTable']['rawDetached'] : array();
+		$filter_table = is_array( $result['listTable']['filterDetached'] ?? null ) ? $result['listTable']['filterDetached'] : array();
+		self::collect_failure(
+			$failures,
+			self::same_int_set( array_map( 'intval', $raw_table['ids'] ?? array() ), array_map( 'intval', $result['detachedIds'] ?? array() ) )
+				&& self::same_int_set( array_map( 'intval', $filter_table['ids'] ?? array() ), array_map( 'intval', $result['detachedIds'] ?? array() ) )
+				&& false === ( $raw_table['detachedSelected'] ?? null )
+				&& true === ( $filter_table['detachedSelected'] ?? null ),
+			'WP_Media_List_Table query honors raw detached but only attachment-filter=detached selects the Unattached UI view',
+			array(
+				'rawTable'     => $raw_table,
+				'filterTable'  => $filter_table,
+				'detachedIds'  => $result['detachedIds'] ?? array(),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			( $result['contentBefore'] ?? array() ) === ( $result['contentAfter'] ?? array() ),
+			'query alias/default probes and default media library rendering do not mutate content rows',
+			array(
+				'contentBefore' => $result['contentBefore'] ?? array(),
+				'contentAfter'  => $result['contentAfter'] ?? array(),
+			)
+		);
 	}
 
 	private static function check_media_attach_action_redirect_exit( \ComponentFuzz\FuzzContext $ctx ): array {
