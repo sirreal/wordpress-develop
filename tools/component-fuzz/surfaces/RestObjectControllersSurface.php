@@ -47,6 +47,7 @@ final class RestObjectControllersSurface {
 			$rows[] = self::check_templates_controller( $ctx, $case );
 			$rows[] = self::check_short_circuited_collection_queries( $ctx->fork( 'collection-queries' ), $case, $fixtures );
 			$rows[] = self::check_route_dispatched_object_write_edges( $ctx->fork( 'object-write-dispatch' ), $case, $fixtures );
+			$rows[] = self::check_route_dispatched_object_create_delete_edges( $ctx->fork( 'object-create-delete-dispatch' ), $case, $fixtures );
 		} catch ( \Throwable $e ) {
 			$rows[] = self::row(
 				$ctx,
@@ -3441,6 +3442,493 @@ final class RestObjectControllersSurface {
 		return self::row(
 			$ctx,
 			'rest-object-controllers.route-dispatched-write-validation-projection-cleanup',
+			array() === $failures,
+			array(
+				'case'     => self::case_summary( $case ),
+				'failures' => array_slice( $failures, 0, 8 ),
+				'observed' => $observed,
+			)
+		);
+	}
+
+	private static function check_route_dispatched_object_create_delete_edges( \ComponentFuzz\FuzzContext $ctx, array $case, array $fixtures ): array {
+		$failures = array();
+		$observed = array();
+
+		$previous_server          = $GLOBALS['wp_rest_server'] ?? null;
+		$had_wp_actions           = array_key_exists( 'wp_actions', $GLOBALS );
+		$previous_actions         = $GLOBALS['wp_actions'] ?? null;
+		$previous_current_user_id = isset( $GLOBALS['current_user'] ) && $GLOBALS['current_user'] instanceof \WP_User
+			? (int) $GLOBALS['current_user']->ID
+			: 0;
+
+		$server                    = new \WP_REST_Server();
+		$GLOBALS['wp_rest_server'] = $server;
+
+		if ( ! isset( $GLOBALS['wp_actions'] ) || ! is_array( $GLOBALS['wp_actions'] ) ) {
+			$GLOBALS['wp_actions'] = array();
+		}
+		$GLOBALS['wp_actions']['rest_api_init'] = max( 1, (int) ( $GLOBALS['wp_actions']['rest_api_init'] ?? 0 ) );
+
+		$cap_filter              = null;
+		$post_trash_filter       = static function (): bool {
+			return false;
+		};
+		$comment_trash_filter    = static function (): bool {
+			return false;
+		};
+		$write_filter_restored   = false;
+		$post_filter_restored    = false;
+		$comment_filter_restored = false;
+		$email_filter_restored   = false;
+		$sanitize_filter_restored = false;
+		$server_restored         = false;
+		$actions_restored        = false;
+		$current_user_restored   = false;
+
+		try {
+			$controllers = array(
+				new \WP_REST_Posts_Controller( 'post' ),
+				new \WP_REST_Terms_Controller( 'category' ),
+				new \WP_REST_Comments_Controller(),
+				new \WP_REST_Users_Controller(),
+			);
+
+			foreach ( $controllers as $controller ) {
+				$controller->register_routes();
+			}
+
+			$route_post_title     = 'Route Created REST Post ' . $case['token'];
+			$route_post_content   = '<p>Route created content ' . $case['token'] . '</p>';
+			$route_post_slug      = 'Route Created REST Slug ' . $case['token'];
+			$route_term_name      = 'Route Created Term ' . $case['token'];
+			$route_term_slug      = 'Route Created Term Slug ' . $case['token'];
+			$route_comment_body   = "  Route created comment {$case['token']}\n";
+			$route_comment_email  = 'route-comment-' . $case['token'] . '@example.com';
+			$route_user_login     = 'cfz_route_user_' . $case['token'];
+			$route_user_email     = 'route-user-' . $case['token'] . '@example.com';
+			$route_user_name      = 'Route Created User ' . $case['token'];
+			$route_user_password  = 'route-pass-' . $case['token'] . '-A1';
+			$route_user_slug      = 'Route Created User ' . $case['token'];
+			$accepted_emails      = array_fill_keys(
+				array(
+					$route_comment_email,
+					$route_user_email,
+				),
+				true
+			);
+			$email_filter         = static function ( $is_email, string $email ) use ( $accepted_emails ) {
+				return isset( $accepted_emails[ $email ] ) ? $email : $is_email;
+			};
+			$sanitize_email_filter = static function ( string $sanitized, string $email ) use ( $accepted_emails ): string {
+				return isset( $accepted_emails[ $email ] ) ? $email : $sanitized;
+			};
+			$counts_before        = self::content_counts();
+
+			\wp_set_current_user( 0 );
+			$denied_create_response = $server->dispatch(
+				self::request(
+					'POST',
+					'/wp/v2/posts',
+					array( '_fields' => 'id,title' ),
+					array(),
+					array( 'title' => $route_post_title )
+				)
+			);
+			$counts_after_denial = self::content_counts();
+
+			\wp_set_current_user( $fixtures['author'] );
+			$cap_filter = self::install_cap_filter(
+				array(
+					'create_users',
+					'delete_categories',
+					'delete_comment',
+					'delete_comments',
+					'delete_post',
+					'delete_posts',
+					'delete_user',
+					'delete_users',
+					'edit_categories',
+					'edit_comment',
+					'edit_comments',
+					'edit_others_posts',
+					'edit_post',
+					'edit_posts',
+					'edit_published_posts',
+					'edit_term',
+					'edit_terms',
+					'edit_user',
+					'edit_users',
+					'list_users',
+					'manage_categories',
+					'moderate_comments',
+					'publish_posts',
+					'read',
+				)
+			);
+			\add_filter( 'rest_post_trashable', $post_trash_filter, 10, 2 );
+			\add_filter( 'rest_comment_trashable', $comment_trash_filter, 10, 2 );
+			\add_filter( 'is_email', $email_filter, 10, 2 );
+			\add_filter( 'sanitize_email', $sanitize_email_filter, 10, 2 );
+
+			try {
+				$created_post_response = $server->dispatch(
+					self::request(
+						'POST',
+						'/wp/v2/posts',
+						array( '_fields' => 'author,content,id,slug,status,title' ),
+						array(),
+						array(
+							'author'  => $fixtures['author'],
+							'content' => $route_post_content,
+							'slug'    => $route_post_slug,
+							'status'  => 'publish',
+							'title'   => $route_post_title,
+						)
+					)
+				);
+				$created_post_data = $created_post_response instanceof \WP_REST_Response ? $created_post_response->get_data() : array();
+				$created_post_id   = (int) ( $created_post_data['id'] ?? 0 );
+
+				$created_term_response = $server->dispatch(
+					self::request(
+						'POST',
+						'/wp/v2/categories',
+						array( '_fields' => 'id,name,parent,slug,taxonomy' ),
+						array(),
+						array(
+							'description' => 'Route term description ' . $case['token'],
+							'name'        => $route_term_name,
+							'parent'      => $fixtures['term'],
+							'slug'        => $route_term_slug,
+						)
+					)
+				);
+				$created_term_data = $created_term_response instanceof \WP_REST_Response ? $created_term_response->get_data() : array();
+				$created_term_id   = (int) ( $created_term_data['id'] ?? 0 );
+
+				$created_comment_response = $server->dispatch(
+					self::request(
+						'POST',
+						'/wp/v2/comments',
+						array( '_fields' => 'content,id,parent,post,status,type' ),
+						array(),
+						array(
+							'author'       => $fixtures['author'],
+							'author_email' => $route_comment_email,
+							'author_name'  => $case['commentAuthorName'],
+							'content'      => $route_comment_body,
+							'parent'       => $fixtures['comment'],
+							'post'         => $fixtures['post'],
+							'status'       => 'approve',
+							'type'         => 'comment',
+						)
+					)
+				);
+				$created_comment_data = $created_comment_response instanceof \WP_REST_Response ? $created_comment_response->get_data() : array();
+				$created_comment_id   = (int) ( $created_comment_data['id'] ?? 0 );
+
+				$created_user_response = $server->dispatch(
+					self::request(
+						'POST',
+						'/wp/v2/users',
+						array( '_fields' => 'email,id,name,slug,username' ),
+						array(),
+						array(
+							'email'    => $route_user_email,
+							'name'     => $route_user_name,
+							'password' => $route_user_password,
+							'slug'     => $route_user_slug,
+							'username' => $route_user_login,
+						)
+					)
+				);
+				$created_user_data = $created_user_response instanceof \WP_REST_Response ? $created_user_response->get_data() : array();
+				$created_user_id   = (int) ( $created_user_data['id'] ?? 0 );
+
+				$post_delete_response = $server->dispatch(
+					self::request(
+						'DELETE',
+						'/wp/v2/posts/' . $created_post_id,
+						array(),
+						array(),
+						array( 'force' => false )
+					)
+				);
+				$term_delete_response = $server->dispatch(
+					self::request(
+						'DELETE',
+						'/wp/v2/categories/' . $created_term_id,
+						array(),
+						array(),
+						array( 'force' => false )
+					)
+				);
+				$comment_delete_response = $server->dispatch(
+					self::request(
+						'DELETE',
+						'/wp/v2/comments/' . $created_comment_id,
+						array(),
+						array(),
+						array( 'force' => false )
+					)
+				);
+				$user_delete_response = $server->dispatch(
+					self::request(
+						'DELETE',
+						'/wp/v2/users/' . $created_user_id,
+						array(),
+						array(),
+						array(
+							'force'    => false,
+							'reassign' => false,
+						)
+					)
+				);
+			} finally {
+				\remove_filter( 'sanitize_email', $sanitize_email_filter, 10 );
+				$sanitize_filter_restored = false === \has_filter( 'sanitize_email', $sanitize_email_filter );
+				\remove_filter( 'is_email', $email_filter, 10 );
+				$email_filter_restored = false === \has_filter( 'is_email', $email_filter );
+				\remove_filter( 'rest_comment_trashable', $comment_trash_filter, 10 );
+				$comment_filter_restored = false === \has_filter( 'rest_comment_trashable', $comment_trash_filter );
+				\remove_filter( 'rest_post_trashable', $post_trash_filter, 10 );
+				$post_filter_restored  = false === \has_filter( 'rest_post_trashable', $post_trash_filter );
+				$write_filter_restored = self::remove_cap_filter( $cap_filter );
+				$cap_filter            = null;
+			}
+
+			$counts_after    = self::content_counts();
+			$created_post    = \get_post( $created_post_id );
+			$created_term    = \get_term( $created_term_id, 'category' );
+			$created_comment = \get_comment( $created_comment_id );
+			$created_user    = \get_user_by( 'id', $created_user_id );
+
+			$observed = array(
+				'deniedCreate'   => $denied_create_response instanceof \WP_REST_Response ? $denied_create_response->get_data() : $denied_create_response,
+				'created'        => array(
+					'post'    => $created_post_data,
+					'term'    => $created_term_data,
+					'comment' => $created_comment_data,
+					'user'    => $created_user_data,
+				),
+				'deleteErrors'   => array(
+					'post'    => $post_delete_response instanceof \WP_REST_Response ? $post_delete_response->get_data() : $post_delete_response,
+					'term'    => $term_delete_response instanceof \WP_REST_Response ? $term_delete_response->get_data() : $term_delete_response,
+					'comment' => $comment_delete_response instanceof \WP_REST_Response ? $comment_delete_response->get_data() : $comment_delete_response,
+					'user'    => $user_delete_response instanceof \WP_REST_Response ? $user_delete_response->get_data() : $user_delete_response,
+				),
+				'storedRows'     => array(
+					'post'    => $created_post instanceof \WP_Post
+						? array(
+							'id'      => (int) $created_post->ID,
+							'author'  => (int) $created_post->post_author,
+							'content' => $created_post->post_content,
+							'status'  => $created_post->post_status,
+							'title'   => $created_post->post_title,
+						)
+						: null,
+					'term'    => $created_term instanceof \WP_Term
+						? array(
+							'id'     => (int) $created_term->term_id,
+							'name'   => $created_term->name,
+							'parent' => (int) $created_term->parent,
+							'slug'   => $created_term->slug,
+						)
+						: null,
+					'comment' => $created_comment instanceof \WP_Comment
+						? array(
+							'id'       => (int) $created_comment->comment_ID,
+							'approved' => $created_comment->comment_approved,
+							'content'  => $created_comment->comment_content,
+							'parent'   => (int) $created_comment->comment_parent,
+							'post'     => (int) $created_comment->comment_post_ID,
+						)
+						: null,
+					'user'    => $created_user instanceof \WP_User
+						? array(
+							'id'       => (int) $created_user->ID,
+							'email'    => $created_user->user_email,
+							'login'    => $created_user->user_login,
+							'nicename' => $created_user->user_nicename,
+							'name'     => $created_user->display_name,
+						)
+						: null,
+				),
+				'countsBefore'   => $counts_before,
+				'countsDenied'   => $counts_after_denial,
+				'countsAfter'    => $counts_after,
+				'filterRestored' => array(
+					'cap'           => $write_filter_restored,
+					'post'          => $post_filter_restored,
+					'comment'       => $comment_filter_restored,
+					'email'         => $email_filter_restored,
+					'sanitizeEmail' => $sanitize_filter_restored,
+				),
+			);
+
+			self::collect_failure(
+				$failures,
+				self::response_error_ok( $denied_create_response, 'rest_cannot_create', 401 )
+					&& self::content_count_delta_matches( $counts_before, $counts_after_denial, array(), array() ),
+				'route-dispatched post create denies unauthenticated requests before row changes',
+				array(
+					'deniedCreate' => $observed['deniedCreate'],
+					'countsBefore' => $counts_before,
+					'countsDenied' => $counts_after_denial,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$created_post_response instanceof \WP_REST_Response
+					&& 201 === $created_post_response->get_status()
+					&& self::projected_keys_match( $created_post_data, array( 'author', 'content', 'id', 'slug', 'status', 'title' ) )
+					&& $created_post_id > 0
+					&& $fixtures['author'] === (int) ( $created_post_data['author'] ?? 0 )
+					&& $route_post_title === ( $created_post_data['title']['raw'] ?? null )
+					&& $route_post_content === ( $created_post_data['content']['raw'] ?? null )
+					&& $created_post instanceof \WP_Post
+					&& $route_post_title === $created_post->post_title
+					&& $route_post_content === $created_post->post_content
+					&& 'publish' === $created_post->post_status
+					&& $fixtures['author'] === (int) $created_post->post_author
+					&& $created_term_response instanceof \WP_REST_Response
+					&& 201 === $created_term_response->get_status()
+					&& self::projected_keys_match( $created_term_data, array( 'id', 'name', 'parent', 'slug', 'taxonomy' ) )
+					&& $created_term_id > 0
+					&& $route_term_name === ( $created_term_data['name'] ?? null )
+					&& $fixtures['term'] === (int) ( $created_term_data['parent'] ?? 0 )
+					&& 'category' === ( $created_term_data['taxonomy'] ?? null )
+					&& $created_term instanceof \WP_Term
+					&& $route_term_name === $created_term->name
+					&& $fixtures['term'] === (int) $created_term->parent
+					&& $created_comment_response instanceof \WP_REST_Response
+					&& 201 === $created_comment_response->get_status()
+					&& self::projected_keys_match( $created_comment_data, array( 'content', 'id', 'parent', 'post', 'status', 'type' ) )
+					&& $created_comment_id > 0
+					&& trim( $route_comment_body ) === ( $created_comment_data['content']['raw'] ?? null )
+					&& $fixtures['comment'] === (int) ( $created_comment_data['parent'] ?? 0 )
+					&& $fixtures['post'] === (int) ( $created_comment_data['post'] ?? 0 )
+					&& 'approved' === ( $created_comment_data['status'] ?? null )
+					&& $created_comment instanceof \WP_Comment
+					&& trim( $route_comment_body ) === $created_comment->comment_content
+					&& '1' === (string) $created_comment->comment_approved
+					&& $fixtures['comment'] === (int) $created_comment->comment_parent
+					&& $created_user_response instanceof \WP_REST_Response
+					&& 201 === $created_user_response->get_status()
+					&& self::projected_keys_match( $created_user_data, array( 'email', 'id', 'name', 'slug', 'username' ) )
+					&& $created_user_id > 0
+					&& $route_user_login === ( $created_user_data['username'] ?? null )
+					&& $route_user_email === ( $created_user_data['email'] ?? null )
+					&& $route_user_name === ( $created_user_data['name'] ?? null )
+					&& $created_user instanceof \WP_User
+					&& $route_user_login === $created_user->user_login
+					&& $route_user_email === $created_user->user_email
+					&& $route_user_name === $created_user->display_name,
+				'route-dispatched creates normalize payloads, project requested fields, and persist stored rows',
+				$observed
+			);
+
+			self::collect_failure(
+				$failures,
+				self::response_error_ok( $post_delete_response, 'rest_trash_not_supported', 501 )
+					&& self::response_error_ok( $term_delete_response, 'rest_trash_not_supported', 501 )
+					&& self::response_error_ok( $comment_delete_response, 'rest_trash_not_supported', 501 )
+					&& self::response_error_ok( $user_delete_response, 'rest_trash_not_supported', 501 )
+					&& $created_post instanceof \WP_Post
+					&& $created_term instanceof \WP_Term
+					&& $created_comment instanceof \WP_Comment
+					&& $created_user instanceof \WP_User
+					&& self::content_count_delta_matches(
+						$counts_before,
+						$counts_after,
+						array(
+							'comments'      => 1,
+							'posts'         => 1,
+							'term_taxonomy' => 1,
+							'terms'         => 1,
+							'users'         => 1,
+						),
+						array( 'comments', 'posts', 'term_taxonomy', 'terms', 'user_meta', 'users' )
+					),
+				'route-dispatched delete requests without trash support fail closed and preserve created rows',
+				$observed
+			);
+		} finally {
+			if ( isset( $sanitize_email_filter ) && false !== \has_filter( 'sanitize_email', $sanitize_email_filter ) ) {
+				\remove_filter( 'sanitize_email', $sanitize_email_filter, 10 );
+				$sanitize_filter_restored = false === \has_filter( 'sanitize_email', $sanitize_email_filter );
+			}
+			if ( isset( $email_filter ) && false !== \has_filter( 'is_email', $email_filter ) ) {
+				\remove_filter( 'is_email', $email_filter, 10 );
+				$email_filter_restored = false === \has_filter( 'is_email', $email_filter );
+			}
+			if ( false !== \has_filter( 'rest_comment_trashable', $comment_trash_filter ) ) {
+				\remove_filter( 'rest_comment_trashable', $comment_trash_filter, 10 );
+				$comment_filter_restored = false === \has_filter( 'rest_comment_trashable', $comment_trash_filter );
+			}
+			if ( false !== \has_filter( 'rest_post_trashable', $post_trash_filter ) ) {
+				\remove_filter( 'rest_post_trashable', $post_trash_filter, 10 );
+				$post_filter_restored = false === \has_filter( 'rest_post_trashable', $post_trash_filter );
+			}
+			if ( null !== $cap_filter ) {
+				$write_filter_restored = self::remove_cap_filter( $cap_filter );
+			}
+
+			\wp_set_current_user( $previous_current_user_id );
+
+			if ( $had_wp_actions ) {
+				$GLOBALS['wp_actions'] = $previous_actions;
+			} else {
+				unset( $GLOBALS['wp_actions'] );
+			}
+
+			if ( null !== $previous_server ) {
+				$GLOBALS['wp_rest_server'] = $previous_server;
+			} else {
+				unset( $GLOBALS['wp_rest_server'] );
+			}
+
+			$actions_restored = $had_wp_actions
+				? $previous_actions === ( $GLOBALS['wp_actions'] ?? null )
+				: ! array_key_exists( 'wp_actions', $GLOBALS );
+			$server_restored = null !== $previous_server
+				? $previous_server === ( $GLOBALS['wp_rest_server'] ?? null )
+				: ! array_key_exists( 'wp_rest_server', $GLOBALS );
+			$current_user_restored = $previous_current_user_id === (
+				isset( $GLOBALS['current_user'] ) && $GLOBALS['current_user'] instanceof \WP_User
+					? (int) $GLOBALS['current_user']->ID
+					: 0
+			);
+		}
+
+		self::collect_failure(
+			$failures,
+			$write_filter_restored
+				&& $post_filter_restored
+				&& $comment_filter_restored
+				&& $email_filter_restored
+				&& $sanitize_filter_restored
+				&& $server_restored
+				&& $actions_restored
+				&& $current_user_restored,
+			'route-dispatched object create/delete harness restores caps, trash filters, server, actions, and current user',
+			array(
+				'writeFilterRestored'   => $write_filter_restored,
+				'postFilterRestored'    => $post_filter_restored,
+				'commentFilterRestored' => $comment_filter_restored,
+				'emailFilterRestored'   => $email_filter_restored,
+				'sanitizeFilterRestored' => $sanitize_filter_restored,
+				'serverRestored'        => $server_restored,
+				'actionsRestored'       => $actions_restored,
+				'currentUserRestored'   => $current_user_restored,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'rest-object-controllers.route-dispatched-create-delete-validation-cleanup',
 			array() === $failures,
 			array(
 				'case'     => self::case_summary( $case ),
