@@ -916,7 +916,10 @@ database, network requests, or a configured site.
   removal, membership/object lookup helpers, invalid-input fail-closed paths,
   `get_the_terms()` relationship cache population/invalidation, and generated
   multi-object `update_object_term_cache()`/`clean_object_term_cache()`
-  priming, empty-entry, warm-cache, and re-prime invariants.
+  priming, empty-entry, warm-cache, and re-prime invariants, plus generated
+  multi-object mutation/removal/delete sequences with independent expected
+  relationship, per-taxonomy cache-invalidation, term-count, relationship-hook,
+  and post-type feature/meta-cap restoration oracles for REST/XML-RPC adjacency.
 - `template-hierarchy`: no-DB classic PHP template hierarchy coverage,
   including child/parent lookup priority, query-template filters, direct
   archive/page/search/404/embed/author/date/home/front-page/privacy/singular/

@@ -3293,6 +3293,8 @@ final class QueryLoopSurface {
 					'wp_filter',
 					'wp_filters',
 					'wp_object_cache',
+					'_wp_post_type_features',
+					'post_type_meta_caps',
 					'wp_post_statuses',
 					'wp_post_types',
 					'wp_taxonomies',

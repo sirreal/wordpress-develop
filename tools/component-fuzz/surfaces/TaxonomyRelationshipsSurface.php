@@ -49,6 +49,9 @@ final class TaxonomyRelationshipsSurface {
 			$rows[] = self::check_object_term_cache_priming_and_cleaning( $ctx->fork( 'cache-prime-clean' ), $case );
 
 			self::prepare_runtime( $case );
+			$rows[] = self::check_generated_mutation_sequence( $ctx->fork( 'mutation-sequence' ), $case );
+
+			self::prepare_runtime( $case );
 			$rows[] = self::check_filter_action_locality( $ctx->fork( 'hooks' ), $case );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
@@ -110,6 +113,7 @@ final class TaxonomyRelationshipsSurface {
 				'wp_get_object_terms',
 				'wp_insert_post',
 				'wp_insert_term',
+				'wp_delete_object_term_relationships',
 				'wp_remove_object_terms',
 				'wp_set_current_user',
 				'wp_set_object_terms',
@@ -1122,6 +1126,367 @@ final class TaxonomyRelationshipsSurface {
 		);
 	}
 
+	private static function check_generated_mutation_sequence( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$fixture = self::create_fixture( $case, 'mutations' );
+		if ( isset( $fixture['error'] ) ) {
+			return $ctx->fail(
+				'taxonomy-relationships.generated-mutation-sequence',
+				array(
+					'case'  => self::case_summary( $case ),
+					'error' => $fixture['error'],
+				)
+			);
+		}
+
+		$third_post_id = self::create_host_post( $case, 'third-mutations' );
+		if ( \is_wp_error( $third_post_id ) ) {
+			return $ctx->fail(
+				'taxonomy-relationships.generated-mutation-sequence',
+				array(
+					'case'  => self::case_summary( $case ),
+					'error' => self::error_summary( $third_post_id ),
+				)
+			);
+		}
+
+		$failures   = array();
+		$primary    = $fixture['primary'];
+		$secondary  = $fixture['secondary'];
+		$objects    = array(
+			'first'  => (int) $fixture['postId'],
+			'second' => (int) $fixture['secondPostId'],
+			'third'  => (int) $third_post_id,
+		);
+		$taxonomies = array(
+			'primary'   => $case['primaryTaxonomy'],
+			'secondary' => $case['secondaryTaxonomy'],
+		);
+		$term_sets  = array(
+			'primary'   => $primary,
+			'secondary' => $secondary,
+		);
+		$expected   = self::empty_expected_relationship_keys( array_values( $objects ), array_values( $taxonomies ) );
+
+		$initial_first_primary = \wp_set_object_terms(
+			$objects['first'],
+			array( $primary['alpha']['term_id'], $primary['beta']['slug'] ),
+			$case['primaryTaxonomy'],
+			false
+		);
+		self::expected_set_relationship_keys( $expected, $objects['first'], $case['primaryTaxonomy'], array( 'alpha', 'beta' ), false );
+
+		$initial_first_secondary = \wp_set_object_terms( $objects['first'], array( $secondary['one']['term_id'] ), $case['secondaryTaxonomy'], false );
+		self::expected_set_relationship_keys( $expected, $objects['first'], $case['secondaryTaxonomy'], array( 'one' ), false );
+
+		$initial_second_primary = \wp_set_object_terms(
+			$objects['second'],
+			array( $primary['alpha']['term_id'], $primary['gamma']['term_id'] ),
+			$case['primaryTaxonomy'],
+			false
+		);
+		self::expected_set_relationship_keys( $expected, $objects['second'], $case['primaryTaxonomy'], array( 'alpha', 'gamma' ), false );
+
+		$initial_second_secondary = \wp_set_object_terms( $objects['second'], array( $secondary['two']['slug'] ), $case['secondaryTaxonomy'], false );
+		self::expected_set_relationship_keys( $expected, $objects['second'], $case['secondaryTaxonomy'], array( 'two' ), false );
+
+		$initial_third_primary = \wp_set_object_terms( $objects['third'], array( $primary['delta']['term_id'] ), $case['primaryTaxonomy'], false );
+		self::expected_set_relationship_keys( $expected, $objects['third'], $case['primaryTaxonomy'], array( 'delta' ), false );
+
+		$initial_third_secondary = \wp_set_object_terms( $objects['third'], array(), $case['secondaryTaxonomy'], false );
+
+		self::collect_failure(
+			$failures,
+			self::same_int_set( $initial_first_primary, self::tt_ids( array( $primary['alpha'], $primary['beta'] ) ) )
+				&& self::same_int_set( $initial_first_secondary, self::tt_ids( array( $secondary['one'] ) ) )
+				&& self::same_int_set( $initial_second_primary, self::tt_ids( array( $primary['alpha'], $primary['gamma'] ) ) )
+				&& self::same_int_set( $initial_second_secondary, self::tt_ids( array( $secondary['two'] ) ) )
+				&& self::same_int_set( $initial_third_primary, self::tt_ids( array( $primary['delta'] ) ) )
+				&& array() === $initial_third_secondary
+				&& array() === self::expected_relationship_mismatches( $expected, $term_sets, $taxonomies ),
+			'generated mutation fixture starts with the expected multi-object taxonomy map',
+			array(
+				'objects'          => $objects,
+				'firstPrimary'     => $initial_first_primary,
+				'firstSecondary'   => $initial_first_secondary,
+				'secondPrimary'    => $initial_second_primary,
+				'secondSecondary'  => $initial_second_secondary,
+				'thirdPrimary'     => $initial_third_primary,
+				'thirdSecondary'   => $initial_third_secondary,
+				'expected'         => self::expected_relationship_summary( $expected, $term_sets, $taxonomies ),
+				'relationshipRows' => self::relationship_rows(),
+			)
+		);
+
+		$all_object_ids  = array_values( $objects );
+		$all_taxonomies  = array_values( $taxonomies );
+		$expected_cache  = self::expected_relationship_cache_map( $expected, $term_sets, $taxonomies );
+		$prime_result    = \update_object_term_cache( $all_object_ids, $case['postType'] );
+		$cache_after_prime = self::relationship_cache_map( $all_object_ids, $all_taxonomies );
+		self::collect_failure(
+			$failures,
+			( null === $prime_result || false === $prime_result )
+				&& self::relationship_cache_maps_equal( $cache_after_prime, $expected_cache ),
+			'initial generated mutation fixture primes the object relationship caches',
+			array(
+				'primeResult' => $prime_result,
+				'expected'    => $expected_cache,
+				'actual'      => $cache_after_prime,
+			)
+		);
+
+		$events = array(
+			'actions' => array(),
+			'cache'   => array(),
+			'counts'  => array(),
+		);
+
+		$add_term_relationship = static function ( $object_id, $tt_id, $taxonomy ) use ( &$events ) {
+			$events['actions'][] = array(
+				'hook'     => 'add_term_relationship',
+				'objectId' => (int) $object_id,
+				'ttIds'    => array( (int) $tt_id ),
+				'taxonomy' => (string) $taxonomy,
+			);
+		};
+		$added_term_relationship = static function ( $object_id, $tt_id, $taxonomy ) use ( &$events ) {
+			$events['actions'][] = array(
+				'hook'     => 'added_term_relationship',
+				'objectId' => (int) $object_id,
+				'ttIds'    => array( (int) $tt_id ),
+				'taxonomy' => (string) $taxonomy,
+			);
+		};
+		$set_object_terms = static function ( $object_id, $terms, $tt_ids, $taxonomy, $append, $old_tt_ids ) use ( &$events ) {
+			$events['actions'][] = array(
+				'hook'     => 'set_object_terms',
+				'objectId' => (int) $object_id,
+				'terms'    => self::compact_scalars( $terms ),
+				'ttIds'    => self::to_ints( $tt_ids ),
+				'taxonomy' => (string) $taxonomy,
+				'append'   => (bool) $append,
+				'oldTtIds' => self::to_ints( $old_tt_ids ),
+			);
+		};
+		$delete_term_relationships = static function ( $object_id, $tt_ids, $taxonomy ) use ( &$events ) {
+			$events['actions'][] = array(
+				'hook'     => 'delete_term_relationships',
+				'objectId' => (int) $object_id,
+				'ttIds'    => self::to_ints( $tt_ids ),
+				'taxonomy' => (string) $taxonomy,
+			);
+		};
+		$deleted_term_relationships = static function ( $object_id, $tt_ids, $taxonomy ) use ( &$events ) {
+			$events['actions'][] = array(
+				'hook'     => 'deleted_term_relationships',
+				'objectId' => (int) $object_id,
+				'ttIds'    => self::to_ints( $tt_ids ),
+				'taxonomy' => (string) $taxonomy,
+			);
+		};
+		$clean_object_term_cache = static function ( $object_ids, $object_type ) use ( &$events ) {
+			$events['cache'][] = array(
+				'objectIds'  => self::to_ints( $object_ids ),
+				'objectType' => (string) $object_type,
+			);
+		};
+		$update_term_count = static function ( $tt_id, $taxonomy, $count ) use ( &$events ) {
+			$events['counts'][] = array(
+				'ttIds'    => array( (int) $tt_id ),
+				'taxonomy' => (string) $taxonomy,
+				'count'    => (int) $count,
+			);
+		};
+
+		\add_action( 'add_term_relationship', $add_term_relationship, 10, 3 );
+		\add_action( 'added_term_relationship', $added_term_relationship, 10, 3 );
+		\add_action( 'set_object_terms', $set_object_terms, 10, 6 );
+		\add_action( 'delete_term_relationships', $delete_term_relationships, 10, 3 );
+		\add_action( 'deleted_term_relationships', $deleted_term_relationships, 10, 3 );
+		\add_action( 'clean_object_term_cache', $clean_object_term_cache, 10, 2 );
+		\add_action( 'update_term_count', $update_term_count, 10, 3 );
+
+		$operation_summaries = array();
+		$expected_added_tt_ids = array();
+		$expected_deleted_tt_ids = array();
+		$set_operation_count = 0;
+
+		try {
+			foreach ( $case['mutationCases'] as $index => $operation ) {
+				$object_id = $objects[ $operation['object'] ];
+				$before    = $expected;
+
+				\update_object_term_cache( $all_object_ids, $case['postType'] );
+				$cache_before = self::relationship_cache_map( $all_object_ids, $all_taxonomies );
+				$cache_expected_before = self::expected_relationship_cache_map( $expected, $term_sets, $taxonomies );
+				self::collect_failure(
+					$failures,
+					self::relationship_cache_maps_equal( $cache_before, $cache_expected_before ),
+					"generated mutation {$index} starts from a warm expected cache",
+					array(
+						'operation' => $operation,
+						'expected'  => $cache_expected_before,
+						'actual'    => $cache_before,
+					)
+				);
+
+				$result = null;
+				$return_ok = false;
+				$changed_taxonomies = array();
+
+				if ( 'delete' === $operation['type'] ) {
+					$taxonomy_names = array();
+					foreach ( $operation['taxonomies'] as $role ) {
+						$taxonomy_names[] = $taxonomies[ $role ];
+					}
+
+					$result = \wp_delete_object_term_relationships( $object_id, $taxonomy_names );
+					foreach ( $operation['taxonomies'] as $role ) {
+						if ( array() !== ( $before[ $object_id ][ $taxonomies[ $role ] ] ?? array() ) ) {
+							$changed_taxonomies[] = $taxonomies[ $role ];
+						}
+						self::expected_set_relationship_keys( $expected, $object_id, $taxonomies[ $role ], array(), false );
+					}
+					$return_ok = null === $result;
+				} else {
+					$role     = $operation['taxonomy'];
+					$taxonomy = $taxonomies[ $role ];
+					$terms    = $term_sets[ $role ];
+					$input    = self::term_input_values( $terms, $operation['terms'] );
+					$keys     = self::unique_term_keys_from_specs( $operation['terms'] );
+					$changed_taxonomies = array( $taxonomy );
+
+					if ( 'set' === $operation['type'] ) {
+						++$set_operation_count;
+						$result = \wp_set_object_terms( $object_id, $input, $taxonomy, $operation['append'] );
+						self::expected_set_relationship_keys( $expected, $object_id, $taxonomy, $keys, $operation['append'] );
+						$return_ok = self::same_int_list( self::to_ints( $result ), self::term_input_tt_ids( $terms, $operation['terms'] ) );
+					} elseif ( 'remove' === $operation['type'] ) {
+						$before_keys = $expected[ $object_id ][ $taxonomy ] ?? array();
+						$removed_any = array() !== array_intersect( $before_keys, $keys );
+						$result      = \wp_remove_object_terms( $object_id, $input, $taxonomy );
+						self::expected_remove_relationship_keys( $expected, $object_id, $taxonomy, $keys );
+						$return_ok = $removed_any ? true === $result : false === $result;
+					}
+				}
+
+				$added_tt_ids = self::expected_added_tt_ids( $before, $expected, $object_id, $term_sets, $taxonomies );
+				$deleted_tt_ids = self::expected_deleted_tt_ids( $before, $expected, $object_id, $term_sets, $taxonomies );
+				$expected_added_tt_ids = array_merge( $expected_added_tt_ids, $added_tt_ids );
+				$expected_deleted_tt_ids = array_merge( $expected_deleted_tt_ids, $deleted_tt_ids );
+				$relationship_changed = array() !== $added_tt_ids || array() !== $deleted_tt_ids;
+				$cache_after_mutation = self::relationship_cache_map( $all_object_ids, $all_taxonomies );
+				$cache_ok = self::mutation_cache_effect_matches( $cache_before, $cache_after_mutation, $all_object_ids, $all_taxonomies, $object_id, $changed_taxonomies, $relationship_changed );
+				$relationship_mismatches = self::expected_relationship_mismatches( $expected, $term_sets, $taxonomies );
+				$counts_mismatches = self::expected_count_mismatches( $expected, $term_sets, $taxonomies );
+
+				self::collect_failure(
+					$failures,
+					$return_ok
+						&& $cache_ok
+						&& array() === $relationship_mismatches
+						&& array() === $counts_mismatches
+						&& self::relationship_rows_have_unique_keys( self::relationship_rows() ),
+					"generated mutation {$index} preserves relationship, cache, and count invariants",
+					array(
+						'operation'              => $operation,
+						'result'                 => $result,
+						'returnOk'               => $return_ok,
+						'relationshipChanged'    => $relationship_changed,
+						'addedTtIds'             => $added_tt_ids,
+						'deletedTtIds'           => $deleted_tt_ids,
+						'cacheBefore'            => $cache_before,
+						'cacheAfterMutation'     => $cache_after_mutation,
+						'cacheOk'                => $cache_ok,
+						'relationshipMismatches' => $relationship_mismatches,
+						'countMismatches'        => $counts_mismatches,
+						'expected'               => self::expected_relationship_summary( $expected, $term_sets, $taxonomies ),
+						'rows'                   => self::relationship_rows(),
+					)
+				);
+
+				$operation_summaries[] = array(
+					'label'        => $operation['label'],
+					'type'         => $operation['type'],
+					'object'       => $operation['object'],
+					'changed'      => $relationship_changed,
+					'addedTtIds'   => $added_tt_ids,
+					'deletedTtIds' => $deleted_tt_ids,
+				);
+			}
+		} finally {
+			\remove_action( 'add_term_relationship', $add_term_relationship, 10 );
+			\remove_action( 'added_term_relationship', $added_term_relationship, 10 );
+			\remove_action( 'set_object_terms', $set_object_terms, 10 );
+			\remove_action( 'delete_term_relationships', $delete_term_relationships, 10 );
+			\remove_action( 'deleted_term_relationships', $deleted_term_relationships, 10 );
+			\remove_action( 'clean_object_term_cache', $clean_object_term_cache, 10 );
+			\remove_action( 'update_term_count', $update_term_count, 10 );
+		}
+
+		$known_tt_ids = array_merge( self::tt_ids( $primary ), self::tt_ids( $secondary ) );
+		self::collect_failure(
+			$failures,
+			$set_operation_count === count( self::events_by_hook( $events['actions'], 'set_object_terms' ) )
+				&& self::contains_int_set( self::event_tt_ids_by_hook( $events['actions'], 'add_term_relationship' ), $expected_added_tt_ids )
+				&& self::contains_int_set( self::event_tt_ids_by_hook( $events['actions'], 'added_term_relationship' ), $expected_added_tt_ids )
+				&& self::contains_int_set( self::event_tt_ids_by_hook( $events['actions'], 'delete_term_relationships' ), $expected_deleted_tt_ids )
+				&& self::contains_int_set( self::event_tt_ids_by_hook( $events['actions'], 'deleted_term_relationships' ), $expected_deleted_tt_ids )
+				&& self::events_only_reference( $events['actions'], $all_object_ids, $all_taxonomies )
+				&& self::cache_events_only_reference( $events['cache'], $all_object_ids, array( $case['postType'] ) )
+				&& self::count_events_only_reference( $events['counts'], $known_tt_ids, $all_taxonomies )
+				&& false === \has_filter( 'add_term_relationship', $add_term_relationship )
+				&& false === \has_filter( 'added_term_relationship', $added_term_relationship )
+				&& false === \has_filter( 'set_object_terms', $set_object_terms )
+				&& false === \has_filter( 'delete_term_relationships', $delete_term_relationships )
+				&& false === \has_filter( 'deleted_term_relationships', $deleted_term_relationships )
+				&& false === \has_filter( 'clean_object_term_cache', $clean_object_term_cache )
+				&& false === \has_filter( 'update_term_count', $update_term_count ),
+			'generated mutation sequence relationship hooks and cache/count hooks remain local and restored',
+			array(
+				'setOperationCount'   => $set_operation_count,
+				'actionCounts'        => self::event_counts_by_hook( $events['actions'] ),
+				'cacheEventCount'     => count( $events['cache'] ),
+				'countEventCount'     => count( $events['counts'] ),
+				'expectedAddedTtIds'  => self::sorted_ints( $expected_added_tt_ids ),
+				'expectedDeletedTtIds'=> self::sorted_ints( $expected_deleted_tt_ids ),
+				'actions'             => array_slice( $events['actions'], 0, 20 ),
+				'cacheEvents'         => array_slice( $events['cache'], 0, 10 ),
+				'countEvents'         => array_slice( $events['counts'], 0, 10 ),
+			)
+		);
+
+		$final_cache_prime = \update_object_term_cache( $all_object_ids, $case['postType'] );
+		$final_cache       = self::relationship_cache_map( $all_object_ids, $all_taxonomies );
+		$expected_final_cache = self::expected_relationship_cache_map( $expected, $term_sets, $taxonomies );
+		self::collect_failure(
+			$failures,
+			( null === $final_cache_prime || false === $final_cache_prime )
+				&& self::relationship_cache_maps_equal( $final_cache, $expected_final_cache ),
+			'generated mutation sequence can re-prime caches to the final expected relationship map',
+			array(
+				'primeResult' => $final_cache_prime,
+				'expected'    => $expected_final_cache,
+				'actual'      => $final_cache,
+			)
+		);
+
+		return $ctx->result(
+			'taxonomy-relationships.generated-mutation-sequence',
+			array() === $failures,
+			array(
+				'case'        => self::case_summary( $case ),
+				'objects'     => $objects,
+				'operations'  => $operation_summaries,
+				'eventCounts' => array(
+					'actions' => self::event_counts_by_hook( $events['actions'] ),
+					'cache'   => count( $events['cache'] ),
+					'counts'  => count( $events['counts'] ),
+				),
+				'failures'    => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
 	private static function check_filter_action_locality( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
 		$fixture = self::create_fixture( $case, 'hooks' );
 		if ( isset( $fixture['error'] ) ) {
@@ -1370,6 +1735,8 @@ final class TaxonomyRelationshipsSurface {
 				'wp_filters',
 				'wp_current_filter',
 				'wp_object_cache',
+				'_wp_post_type_features',
+				'post_type_meta_caps',
 				'wp_post_types',
 				'wp_post_statuses',
 				'wp_taxonomies',
@@ -1594,6 +1961,8 @@ final class TaxonomyRelationshipsSurface {
 				'wp_filters',
 				'wp_current_filter',
 				'wp_object_cache',
+				'_wp_post_type_features',
+				'post_type_meta_caps',
 				'wp_post_types',
 				'wp_post_statuses',
 				'wp_taxonomies',
@@ -1917,6 +2286,7 @@ final class TaxonomyRelationshipsSurface {
 	private static function case_for_context( \ComponentFuzz\FuzzContext $ctx ): array {
 		$token          = substr( hash( 'sha256', $ctx->seed() . ':' . $ctx->iteration() ), 0, 10 );
 		$assignment_ctx = $ctx->fork( 'assignment-cases' );
+		$mutation_ctx   = $ctx->fork( 'mutation-cases' );
 
 		return array(
 			'token'                 => $token,
@@ -1937,6 +2307,8 @@ final class TaxonomyRelationshipsSurface {
 			'secondaryTerms'        => self::term_specs( $ctx->fork( 'secondary-terms' ), 'secondary', $token, array( 'one', 'two' ) ),
 			'assignmentSeed'        => $assignment_ctx->seed(),
 			'assignmentCases'       => self::assignment_cases( $assignment_ctx ),
+			'mutationSeed'          => $mutation_ctx->seed(),
+			'mutationCases'         => self::mutation_cases( $mutation_ctx ),
 		);
 	}
 
@@ -2031,6 +2403,116 @@ final class TaxonomyRelationshipsSurface {
 				'append'  => $case_ctx->bool(),
 				'initial' => self::generated_term_input_specs( $case_ctx->fork( 'initial' ), $keys, $case_ctx->int( 0, 3 ) ),
 				'input'   => self::generated_term_input_specs( $case_ctx->fork( 'input' ), $keys, $case_ctx->int( 0, 5 ) ),
+			);
+		}
+
+		return $cases;
+	}
+
+	private static function mutation_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$cases = array(
+			array(
+				'label'    => 'replace-first-primary-with-overlap',
+				'type'     => 'set',
+				'object'   => 'first',
+				'taxonomy' => 'primary',
+				'append'   => false,
+				'terms'    => array(
+					self::term_input_spec( 'beta', 'slug' ),
+					self::term_input_spec( 'gamma', 'id' ),
+					self::term_input_spec( 'beta', 'id' ),
+				),
+			),
+			array(
+				'label'    => 'append-second-primary-existing-and-new',
+				'type'     => 'set',
+				'object'   => 'second',
+				'taxonomy' => 'primary',
+				'append'   => true,
+				'terms'    => array(
+					self::term_input_spec( 'gamma', 'id' ),
+					self::term_input_spec( 'delta', 'slug' ),
+					self::term_input_spec( 'alpha', 'slug' ),
+				),
+			),
+			array(
+				'label'    => 'remove-third-primary-present-and-missing',
+				'type'     => 'remove',
+				'object'   => 'third',
+				'taxonomy' => 'primary',
+				'terms'    => array(
+					self::term_input_spec( 'delta', 'slug' ),
+					self::term_input_spec( 'alpha', 'id' ),
+				),
+			),
+			array(
+				'label'    => 'append-first-secondary-duplicate',
+				'type'     => 'set',
+				'object'   => 'first',
+				'taxonomy' => 'secondary',
+				'append'   => true,
+				'terms'    => array(
+					self::term_input_spec( 'one', 'id' ),
+					self::term_input_spec( 'two', 'slug' ),
+					self::term_input_spec( 'two', 'slug' ),
+				),
+			),
+			array(
+				'label'      => 'delete-second-primary-relationships',
+				'type'       => 'delete',
+				'object'     => 'second',
+				'taxonomies' => array( 'primary' ),
+			),
+			array(
+				'label'    => 'clear-first-primary-via-empty-replace',
+				'type'     => 'set',
+				'object'   => 'first',
+				'taxonomy' => 'primary',
+				'append'   => false,
+				'terms'    => array(),
+			),
+			array(
+				'label'      => 'delete-first-all-taxonomy-relationships',
+				'type'       => 'delete',
+				'object'     => 'first',
+				'taxonomies' => array( 'primary', 'secondary' ),
+			),
+		);
+
+		$objects = array( 'first', 'second', 'third' );
+		for ( $i = 0; $i < 4; ++$i ) {
+			$case_ctx = $ctx->fork( 'generated-' . $i );
+			$type     = $case_ctx->weightedChoice(
+				array(
+					array( 5, 'set' ),
+					array( 3, 'remove' ),
+					array( 2, 'delete' ),
+				)
+			);
+			$object   = $case_ctx->choice( $objects );
+
+			if ( 'delete' === $type ) {
+				$roles = $case_ctx->bool( 30 ) ? array( 'primary', 'secondary' ) : array( $case_ctx->choice( array( 'primary', 'secondary' ) ) );
+				$cases[] = array(
+					'label'      => 'generated-' . $i . '-delete',
+					'type'       => 'delete',
+					'object'     => $object,
+					'taxonomies' => $roles,
+				);
+				continue;
+			}
+
+			$role = $case_ctx->choice( array( 'primary', 'secondary' ) );
+			$keys = 'primary' === $role ? array( 'alpha', 'beta', 'gamma', 'delta' ) : array( 'one', 'two' );
+			$count = 'set' === $type ? $case_ctx->int( 0, 4 ) : $case_ctx->int( 1, 3 );
+
+			$cases[] = array(
+				'label'    => 'generated-' . $i . '-' . $type,
+				'type'     => $type,
+				'object'   => $object,
+				'taxonomy' => $role,
+				'append'   => 'set' === $type ? $case_ctx->bool() : false,
+				'terms'    => self::generated_term_input_specs( $case_ctx->fork( 'terms' ), $keys, $count ),
 			);
 		}
 
@@ -2157,6 +2639,228 @@ final class TaxonomyRelationshipsSurface {
 				return false;
 			}
 			$keys[ $key ] = true;
+		}
+
+		return true;
+	}
+
+	private static function empty_expected_relationship_keys( array $object_ids, array $taxonomies ): array {
+		$expected = array();
+
+		foreach ( self::to_ints( $object_ids ) as $object_id ) {
+			$expected[ $object_id ] = array();
+			foreach ( array_map( 'strval', $taxonomies ) as $taxonomy ) {
+				$expected[ $object_id ][ $taxonomy ] = array();
+			}
+		}
+
+		return $expected;
+	}
+
+	private static function expected_set_relationship_keys( array &$expected, int $object_id, string $taxonomy, array $keys, bool $append ): void {
+		$keys = self::unique_strings( $keys );
+		if ( $append ) {
+			$expected[ $object_id ][ $taxonomy ] = self::unique_strings(
+				array_merge( $expected[ $object_id ][ $taxonomy ] ?? array(), $keys )
+			);
+			return;
+		}
+
+		$expected[ $object_id ][ $taxonomy ] = $keys;
+	}
+
+	private static function expected_remove_relationship_keys( array &$expected, int $object_id, string $taxonomy, array $keys ): void {
+		$remove = array_fill_keys( array_map( 'strval', $keys ), true );
+		$kept   = array();
+
+		foreach ( $expected[ $object_id ][ $taxonomy ] ?? array() as $key ) {
+			if ( ! isset( $remove[ (string) $key ] ) ) {
+				$kept[] = (string) $key;
+			}
+		}
+
+		$expected[ $object_id ][ $taxonomy ] = $kept;
+	}
+
+	private static function unique_strings( array $values ): array {
+		$out = array();
+		$set = array();
+
+		foreach ( $values as $value ) {
+			$value = (string) $value;
+			if ( isset( $set[ $value ] ) ) {
+				continue;
+			}
+			$set[ $value ] = true;
+			$out[]         = $value;
+		}
+
+		return $out;
+	}
+
+	private static function expected_relationship_mismatches( array $expected, array $term_sets, array $taxonomies ): array {
+		$mismatches = array();
+
+		foreach ( $expected as $object_id => $by_taxonomy ) {
+			foreach ( $taxonomies as $role => $taxonomy ) {
+				$keys           = $by_taxonomy[ $taxonomy ] ?? array();
+				$expected_terms = self::terms_for_keys( $term_sets[ $role ], $keys );
+				$expected_ids   = self::term_ids( $expected_terms );
+				$expected_tt_ids = self::tt_ids( $expected_terms );
+				$expected_slugs = self::term_slugs( $expected_terms );
+				$ids            = \wp_get_object_terms( (int) $object_id, $taxonomy, self::term_query_args( 'ids' ) );
+				$tt_ids         = \wp_get_object_terms( (int) $object_id, $taxonomy, self::term_query_args( 'tt_ids' ) );
+				$slugs          = \wp_get_object_terms( (int) $object_id, $taxonomy, self::term_query_args( 'slugs' ) );
+				$rows           = self::relationship_tt_ids_for_taxonomy( (int) $object_id, $term_sets[ $role ] );
+				$has_any        = \is_object_in_term( (int) $object_id, $taxonomy );
+				$first_key      = $keys[0] ?? null;
+				$first_term     = null === $first_key ? null : $term_sets[ $role ][ $first_key ];
+				$has_first      = null === $first_term ? false : \is_object_in_term( (int) $object_id, $taxonomy, $first_term['term_id'] );
+
+				if (
+					! self::same_int_set( $ids, $expected_ids )
+					|| ! self::same_int_set( $tt_ids, $expected_tt_ids )
+					|| ! self::same_string_set( $slugs, $expected_slugs )
+					|| ! self::same_int_set( $rows, $expected_tt_ids )
+					|| ( array() === $expected_ids ? false !== $has_any : true !== $has_any )
+					|| ( null !== $first_term && true !== $has_first )
+				) {
+					$mismatches[] = array(
+						'objectId'    => (int) $object_id,
+						'taxonomy'    => $taxonomy,
+						'expectedIds' => $expected_ids,
+						'ids'         => $ids,
+						'expectedTtIds' => $expected_tt_ids,
+						'ttIds'       => $tt_ids,
+						'expectedSlugs' => $expected_slugs,
+						'slugs'       => $slugs,
+						'rows'        => $rows,
+						'hasAny'      => $has_any,
+						'hasFirst'    => $has_first,
+					);
+				}
+			}
+		}
+
+		return $mismatches;
+	}
+
+	private static function expected_relationship_cache_map( array $expected, array $term_sets, array $taxonomies ): array {
+		$map = array();
+
+		foreach ( $expected as $object_id => $by_taxonomy ) {
+			foreach ( $taxonomies as $role => $taxonomy ) {
+				$terms = self::terms_for_keys( $term_sets[ $role ], $by_taxonomy[ $taxonomy ] ?? array() );
+				$map[ $taxonomy ][ (int) $object_id ] = self::term_ids( $terms );
+			}
+		}
+
+		return self::normalize_relationship_cache_map( $map );
+	}
+
+	private static function expected_count_mismatches( array $expected, array $term_sets, array $taxonomies ): array {
+		$mismatches = array();
+
+		foreach ( $taxonomies as $role => $taxonomy ) {
+			$actual = self::term_counts( $term_sets[ $role ] );
+			if ( ! self::term_counts_supported( $actual ) ) {
+				continue;
+			}
+
+			$expected_counts = array_fill_keys( array_keys( $term_sets[ $role ] ), 0 );
+			foreach ( $expected as $by_taxonomy ) {
+				foreach ( $by_taxonomy[ $taxonomy ] ?? array() as $key ) {
+					if ( array_key_exists( $key, $expected_counts ) ) {
+						++$expected_counts[ $key ];
+					}
+				}
+			}
+
+			foreach ( $expected_counts as $key => $count ) {
+				if ( ! array_key_exists( $key, $actual ) || (int) $actual[ $key ] !== (int) $count ) {
+					$mismatches[] = array(
+						'taxonomy' => $taxonomy,
+						'term'     => $key,
+						'expected' => (int) $count,
+						'actual'   => $actual[ $key ] ?? null,
+						'allActual'=> $actual,
+					);
+				}
+			}
+		}
+
+		return $mismatches;
+	}
+
+	private static function expected_added_tt_ids( array $before, array $after, int $object_id, array $term_sets, array $taxonomies ): array {
+		return self::expected_tt_id_diff( $before, $after, $object_id, $term_sets, $taxonomies );
+	}
+
+	private static function expected_deleted_tt_ids( array $before, array $after, int $object_id, array $term_sets, array $taxonomies ): array {
+		return self::expected_tt_id_diff( $after, $before, $object_id, $term_sets, $taxonomies );
+	}
+
+	private static function expected_tt_id_diff( array $left, array $right, int $object_id, array $term_sets, array $taxonomies ): array {
+		$out = array();
+
+		foreach ( $taxonomies as $role => $taxonomy ) {
+			$left_terms  = self::terms_for_keys( $term_sets[ $role ], $left[ $object_id ][ $taxonomy ] ?? array() );
+			$right_terms = self::terms_for_keys( $term_sets[ $role ], $right[ $object_id ][ $taxonomy ] ?? array() );
+			$left_ids    = array_fill_keys( self::tt_ids( $left_terms ), true );
+
+			foreach ( self::tt_ids( $right_terms ) as $tt_id ) {
+				if ( ! isset( $left_ids[ $tt_id ] ) ) {
+					$out[] = (int) $tt_id;
+				}
+			}
+		}
+
+		return $out;
+	}
+
+	private static function mutation_cache_effect_matches( array $before, array $after, array $object_ids, array $taxonomies, int $changed_object_id, array $changed_taxonomies, bool $relationship_changed ): bool {
+		$changed_taxonomy_map = array_fill_keys( array_map( 'strval', $changed_taxonomies ), true );
+
+		foreach ( self::to_ints( $object_ids ) as $object_id ) {
+			foreach ( array_map( 'strval', $taxonomies ) as $taxonomy ) {
+				$actual = $after[ $taxonomy ][ $object_id ] ?? null;
+				if ( $object_id === $changed_object_id && $relationship_changed && isset( $changed_taxonomy_map[ $taxonomy ] ) ) {
+					if ( false !== $actual ) {
+						return false;
+					}
+					continue;
+				}
+
+				if ( $actual !== ( $before[ $taxonomy ][ $object_id ] ?? null ) && false !== $actual ) {
+					return false;
+				}
+			}
+		}
+
+		return true;
+	}
+
+	private static function expected_relationship_summary( array $expected, array $term_sets, array $taxonomies ): array {
+		$summary = array();
+
+		foreach ( $expected as $object_id => $by_taxonomy ) {
+			foreach ( $taxonomies as $role => $taxonomy ) {
+				$summary[ (int) $object_id ][ $taxonomy ] = self::tt_ids(
+					self::terms_for_keys( $term_sets[ $role ], $by_taxonomy[ $taxonomy ] ?? array() )
+				);
+			}
+		}
+
+		return $summary;
+	}
+
+	private static function contains_int_set( array $actual, array $expected ): bool {
+		$actual_map = array_fill_keys( self::to_ints( $actual ), true );
+
+		foreach ( self::to_ints( $expected ) as $value ) {
+			if ( ! isset( $actual_map[ $value ] ) ) {
+				return false;
+			}
 		}
 
 		return true;
@@ -2506,6 +3210,43 @@ final class TaxonomyRelationshipsSurface {
 		);
 	}
 
+	private static function events_by_hook( array $events, string $hook ): array {
+		return array_values(
+			array_filter(
+				$events,
+				static function ( $event ) use ( $hook ) {
+					return $hook === ( $event['hook'] ?? null );
+				}
+			)
+		);
+	}
+
+	private static function event_tt_ids_by_hook( array $events, string $hook ): array {
+		$out = array();
+		foreach ( self::events_by_hook( $events, $hook ) as $event ) {
+			$out = array_merge( $out, self::to_ints( $event['ttIds'] ?? array() ) );
+		}
+
+		return $out;
+	}
+
+	private static function event_counts_by_hook( array $events ): array {
+		$counts = array();
+		foreach ( $events as $event ) {
+			$hook = (string) ( $event['hook'] ?? '' );
+			if ( '' === $hook ) {
+				continue;
+			}
+			if ( ! isset( $counts[ $hook ] ) ) {
+				$counts[ $hook ] = 0;
+			}
+			++$counts[ $hook ];
+		}
+		ksort( $counts );
+
+		return $counts;
+	}
+
 	private static function events_only_reference( array $events, array $object_ids, array $taxonomies ): bool {
 		$object_map  = array_fill_keys( self::to_ints( $object_ids ), true );
 		$taxonomy_map = array_fill_keys( array_map( 'strval', $taxonomies ), true );
@@ -2514,6 +3255,44 @@ final class TaxonomyRelationshipsSurface {
 			if ( null !== ( $event['objectId'] ?? null ) && ! isset( $object_map[ (int) $event['objectId'] ] ) ) {
 				return false;
 			}
+			if ( ! isset( $taxonomy_map[ (string) ( $event['taxonomy'] ?? '' ) ] ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function cache_events_only_reference( array $events, array $object_ids, array $object_types ): bool {
+		$object_map = array_fill_keys( self::to_ints( $object_ids ), true );
+		$type_map   = array_fill_keys( array_map( 'strval', $object_types ), true );
+
+		foreach ( $events as $event ) {
+			foreach ( self::to_ints( $event['objectIds'] ?? array() ) as $object_id ) {
+				if ( ! isset( $object_map[ $object_id ] ) ) {
+					return false;
+				}
+			}
+
+			if ( ! isset( $type_map[ (string) ( $event['objectType'] ?? '' ) ] ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function count_events_only_reference( array $events, array $tt_ids, array $taxonomies ): bool {
+		$tt_map       = array_fill_keys( self::to_ints( $tt_ids ), true );
+		$taxonomy_map = array_fill_keys( array_map( 'strval', $taxonomies ), true );
+
+		foreach ( $events as $event ) {
+			foreach ( self::to_ints( $event['ttIds'] ?? array() ) as $tt_id ) {
+				if ( ! isset( $tt_map[ $tt_id ] ) ) {
+					return false;
+				}
+			}
+
 			if ( ! isset( $taxonomy_map[ (string) ( $event['taxonomy'] ?? '' ) ] ) ) {
 				return false;
 			}

@@ -6174,7 +6174,7 @@ final class ContentLifecycleSurface {
 
 	private static function snapshot_state(): array {
 		$globals = array();
-		foreach ( array( 'wp_filter', 'wp_actions', 'wp_filters', 'wp_current_filter', 'wp_post_types', 'wp_post_statuses', 'wp_taxonomies', 'wp_rewrite', 'current_user', 'user_ID' ) as $name ) {
+		foreach ( array( 'wp_filter', 'wp_actions', 'wp_filters', 'wp_current_filter', '_wp_post_type_features', 'post_type_meta_caps', 'wp_post_types', 'wp_post_statuses', 'wp_taxonomies', 'wp_rewrite', 'current_user', 'user_ID' ) as $name ) {
 			$globals[ $name ] = array(
 				'exists' => array_key_exists( $name, $GLOBALS ),
 				'value'  => $GLOBALS[ $name ] ?? null,
