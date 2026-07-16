@@ -6491,6 +6491,7 @@ final class RestObjectControllersSurface {
 		$post_ids       = array();
 		$prepare_events = array();
 		$hierarchy_events = array();
+		$status_events  = array();
 
 		$token                    = substr( $case['token'], 0, 8 );
 		$post_type                = 'cpa_' . $token;
@@ -6524,11 +6525,13 @@ final class RestObjectControllersSurface {
 		$cap_filter               = null;
 		$hierarchy_before_filter  = null;
 		$hierarchy_after_filter   = null;
+		$status_transition_filter = null;
 		$added_hierarchy_loop_filter = false;
 		$custom_filters_restored  = false;
 		$cap_filter_restored      = false;
 		$hierarchy_filters_restored = false;
 		$hierarchy_loop_filter_restored = false;
+		$status_filter_restored   = false;
 		$default_filters_restored = false;
 		$rewrite_restored         = false;
 		$server_restored          = false;
@@ -6694,6 +6697,23 @@ final class RestObjectControllersSurface {
 						false
 					)
 				);
+				$status_update_id = $remember_post(
+					\wp_insert_post(
+						\wp_slash(
+							array(
+								'post_type'    => $post_type,
+								'post_title'   => 'REST Parent Status Update ' . $token,
+								'post_content' => 'REST parent status update ' . $token,
+								'post_status'  => 'draft',
+								'post_name'    => 'rest-parent-status-update-' . $token,
+								'post_author'  => $fixtures['author'],
+								'post_parent'  => $same_parent_id,
+							)
+						),
+						true,
+						false
+					)
+				);
 				$loop_parent_id = $remember_post(
 					\wp_insert_post(
 						\wp_slash(
@@ -6833,6 +6853,18 @@ final class RestObjectControllersSurface {
 					)
 				);
 
+				$status_transition_filter = static function ( string $new_status, string $old_status, \WP_Post $post ) use ( &$status_events, $post_type, $status_update_id ): void {
+					if ( $post_type === $post->post_type && $status_update_id === (int) $post->ID ) {
+						$status_events[] = array(
+							'postId' => (int) $post->ID,
+							'type'   => $post->post_type,
+							'old'    => $old_status,
+							'new'    => $new_status,
+						);
+					}
+				};
+				\add_action( 'transition_post_status', $status_transition_filter, 10, 3 );
+
 				$missing_parent = 987654321;
 				$counts_before_invalid_create = self::content_counts();
 				$invalid_create_response      = self::dispatch_with_rest_post_dispatch(
@@ -6955,6 +6987,25 @@ final class RestObjectControllersSurface {
 					)
 				);
 				$after_invalid_update = $update_child_id > 0 ? \get_post( $update_child_id ) : null;
+
+				$status_parent_update_response = self::dispatch_with_rest_post_dispatch(
+					$server,
+					self::request(
+						'PUT',
+						'/wp/v2/' . $rest_base . '/' . $status_update_id,
+						array(
+							'_fields' => 'id,parent,slug,status,link,_links',
+							'context' => 'edit',
+						),
+						array(),
+						array(
+							'parent' => $page_parent_id,
+							'status' => 'private',
+						)
+					)
+				);
+				$status_parent_update_data = $status_parent_update_response instanceof \WP_REST_Response ? $status_parent_update_response->get_data() : array();
+				$after_status_parent_update = $status_update_id > 0 ? \get_post( $status_update_id ) : null;
 
 				if ( false === \has_filter( 'wp_insert_post_parent', 'wp_check_post_hierarchy_for_loops' ) ) {
 					\add_filter( 'wp_insert_post_parent', 'wp_check_post_hierarchy_for_loops', 10, 2 );
@@ -7086,6 +7137,7 @@ final class RestObjectControllersSurface {
 				$cross_type_create_link     = $query_link( 'rest-parent-page-' . $token . '/rest-parent-page-child-' . $token );
 				$cross_type_update_link     = $query_link( 'rest-parent-page-' . $token . '/rest-parent-update-child-' . $token );
 				$root_update_link           = $query_link( 'rest-parent-update-child-' . $token );
+				$status_parent_update_link  = $query_link( 'rest-parent-page-' . $token . '/rest-parent-status-update-' . $token );
 				$self_parent_update_link    = $query_link( 'rest-parent-update-child-' . $token );
 				$descendant_loop_update_link = $query_link( 'rest-loop-parent-' . $token );
 				$unrelated_loop_break_update_link = $query_link( 'rest-unrelated-loop-a-' . $token . '/rest-unrelated-loop-update-' . $token );
@@ -7096,6 +7148,7 @@ final class RestObjectControllersSurface {
 				$cross_type_create_links    = $cross_type_create_response instanceof \WP_REST_Response ? $cross_type_create_response->get_links() : array();
 				$cross_type_update_links    = $cross_type_update_response instanceof \WP_REST_Response ? $cross_type_update_response->get_links() : array();
 				$root_update_response_links = $root_update_response instanceof \WP_REST_Response ? $root_update_response->get_links() : array();
+				$status_parent_update_links = $status_parent_update_response instanceof \WP_REST_Response ? $status_parent_update_response->get_links() : array();
 				$self_parent_update_links   = $self_parent_update_response instanceof \WP_REST_Response ? $self_parent_update_response->get_links() : array();
 				$descendant_loop_update_links = $descendant_loop_update_response instanceof \WP_REST_Response ? $descendant_loop_update_response->get_links() : array();
 				$unrelated_loop_break_update_links = $unrelated_loop_break_update_response instanceof \WP_REST_Response ? $unrelated_loop_break_update_response->get_links() : array();
@@ -7107,6 +7160,7 @@ final class RestObjectControllersSurface {
 						'sameParent'     => $post_summary( \get_post( $same_parent_id ) ),
 						'pageParent'     => $post_summary( \get_post( $page_parent_id ) ),
 						'updateChild'    => $post_summary( \get_post( $update_child_id ) ),
+						'statusUpdate'   => $post_summary( \get_post( $status_update_id ) ),
 						'loopParent'     => $post_summary( \get_post( $loop_parent_id ) ),
 						'loopChild'      => $post_summary( \get_post( $loop_child_id ) ),
 						'loopGrandchild' => $post_summary( \get_post( $loop_grandchild_id ) ),
@@ -7136,6 +7190,12 @@ final class RestObjectControllersSurface {
 							'status' => $root_update_response instanceof \WP_REST_Response ? $root_update_response->get_status() : null,
 							'data'   => $root_update_data,
 							'stored' => $post_summary( $after_root_update ),
+						),
+						'statusParentUpdate' => array(
+							'status'       => $status_parent_update_response instanceof \WP_REST_Response ? $status_parent_update_response->get_status() : null,
+							'data'         => $status_parent_update_data,
+							'stored'       => $post_summary( $after_status_parent_update ),
+							'statusEvents' => $status_events,
 						),
 						'selfParentUpdate' => array(
 							'status' => $self_parent_update_response instanceof \WP_REST_Response ? $self_parent_update_response->get_status() : null,
@@ -7170,6 +7230,7 @@ final class RestObjectControllersSurface {
 					),
 					'prepareEvents' => $prepare_events,
 					'hierarchyEvents' => $hierarchy_events,
+					'statusEvents' => $status_events,
 					'invalidCounts' => array(
 						'before' => $counts_before_invalid_create,
 						'after'  => $counts_after_invalid_create,
@@ -7179,6 +7240,7 @@ final class RestObjectControllersSurface {
 						'crossCreateLink' => $cross_type_create_link,
 						'crossUpdateLink' => $cross_type_update_link,
 						'rootUpdateLink'  => $root_update_link,
+						'statusParentLink' => $status_parent_update_link,
 						'selfParentLink'  => $self_parent_update_link,
 						'descendantLoopLink' => $descendant_loop_update_link,
 						'unrelatedLoopBreakLink' => $unrelated_loop_break_update_link,
@@ -7193,6 +7255,7 @@ final class RestObjectControllersSurface {
 					$same_parent_id > 0
 						&& $page_parent_id > 0
 						&& $update_child_id > 0
+						&& $status_update_id > 0
 						&& $loop_parent_id > 0
 						&& $loop_child_id > 0
 						&& $loop_grandchild_id > 0
@@ -7265,6 +7328,33 @@ final class RestObjectControllersSurface {
 						'invalidUpdate' => $observed['responses']['invalidUpdate'],
 						'afterInvalid'  => $observed['responses']['afterInvalid'],
 						'expected'      => $observed['expected'],
+					)
+				);
+
+				self::collect_failure(
+					$failures,
+					$status_parent_update_response instanceof \WP_REST_Response
+						&& 200 === $status_parent_update_response->get_status()
+						&& self::projected_keys_match( $status_parent_update_data, $response_keys )
+						&& $page_parent_id === (int) ( $status_parent_update_data['parent'] ?? 0 )
+						&& 'private' === ( $status_parent_update_data['status'] ?? null )
+						&& $status_parent_update_link === ( $status_parent_update_data['link'] ?? null )
+						&& $page_parent_up_link === self::link_href( $status_parent_update_links, 'up' )
+						&& $after_status_parent_update instanceof \WP_Post
+						&& $page_parent_id === (int) $after_status_parent_update->post_parent
+						&& 'private' === $after_status_parent_update->post_status
+						&& array(
+							array(
+								'postId' => $status_update_id,
+								'type'   => $post_type,
+								'old'    => 'draft',
+								'new'    => 'private',
+							),
+						) === $status_events,
+					'custom hierarchical route-dispatched parent reassignment preserves link parity across draft-to-private status transition',
+					array(
+						'statusParentUpdate' => $observed['responses']['statusParentUpdate'],
+						'expected'           => $observed['expected'],
 					)
 				);
 
@@ -7427,10 +7517,10 @@ final class RestObjectControllersSurface {
 
 				self::collect_failure(
 					$failures,
-					array( $same_parent_create_id, $cross_type_create_id, $update_child_id, $update_child_id, $update_child_id, $loop_parent_id, $unrelated_update_id ) === array_values( array_map( static fn ( array $event ): int => (int) ( $event['id'] ?? 0 ), $prepare_events ) )
-						&& array( 'POST', 'POST', 'PUT', 'PUT', 'PUT', 'PUT', 'PUT' ) === array_values( array_map( static fn ( array $event ): string => (string) ( $event['method'] ?? '' ), $prepare_events ) )
-						&& array( 'edit', 'edit', 'edit', 'edit', 'edit', 'edit', 'edit' ) === array_values( array_map( static fn ( array $event ): string => (string) ( $event['context'] ?? '' ), $prepare_events ) )
-						&& array( '/wp/v2/' . $rest_base, '/wp/v2/' . $rest_base, '/wp/v2/' . $rest_base . '/' . $update_child_id, '/wp/v2/' . $rest_base . '/' . $update_child_id, '/wp/v2/' . $rest_base . '/' . $update_child_id, '/wp/v2/' . $rest_base . '/' . $loop_parent_id, '/wp/v2/' . $rest_base . '/' . $unrelated_update_id ) === array_values( array_map( static fn ( array $event ): string => (string) ( $event['route'] ?? '' ), $prepare_events ) ),
+					array( $same_parent_create_id, $cross_type_create_id, $update_child_id, $update_child_id, $status_update_id, $update_child_id, $loop_parent_id, $unrelated_update_id ) === array_values( array_map( static fn ( array $event ): int => (int) ( $event['id'] ?? 0 ), $prepare_events ) )
+						&& array( 'POST', 'POST', 'PUT', 'PUT', 'PUT', 'PUT', 'PUT', 'PUT' ) === array_values( array_map( static fn ( array $event ): string => (string) ( $event['method'] ?? '' ), $prepare_events ) )
+						&& array( 'edit', 'edit', 'edit', 'edit', 'edit', 'edit', 'edit', 'edit' ) === array_values( array_map( static fn ( array $event ): string => (string) ( $event['context'] ?? '' ), $prepare_events ) )
+						&& array( '/wp/v2/' . $rest_base, '/wp/v2/' . $rest_base, '/wp/v2/' . $rest_base . '/' . $update_child_id, '/wp/v2/' . $rest_base . '/' . $update_child_id, '/wp/v2/' . $rest_base . '/' . $status_update_id, '/wp/v2/' . $rest_base . '/' . $update_child_id, '/wp/v2/' . $rest_base . '/' . $loop_parent_id, '/wp/v2/' . $rest_base . '/' . $unrelated_update_id ) === array_values( array_map( static fn ( array $event ): string => (string) ( $event['route'] ?? '' ), $prepare_events ) ),
 					'custom hierarchical parent assignment prepare hook receives only successful create/update responses',
 					array( 'prepareEvents' => $prepare_events )
 				);
@@ -7451,6 +7541,11 @@ final class RestObjectControllersSurface {
 				&& ( null === $hierarchy_after_filter || false === \has_filter( 'wp_insert_post_parent', $hierarchy_after_filter ) );
 			$hierarchy_loop_filter_restored = ! $added_hierarchy_loop_filter
 				|| false === \has_filter( 'wp_insert_post_parent', 'wp_check_post_hierarchy_for_loops' );
+			if ( null !== $status_transition_filter ) {
+				\remove_action( 'transition_post_status', $status_transition_filter, 10 );
+			}
+			$status_filter_restored = null === $status_transition_filter
+				|| false === \has_filter( 'transition_post_status', $status_transition_filter );
 
 			$delete_posts();
 			$counts_after_cleanup = self::content_counts();
@@ -7540,6 +7635,7 @@ final class RestObjectControllersSurface {
 				&& $cap_filter_restored
 				&& $hierarchy_filters_restored
 				&& $hierarchy_loop_filter_restored
+				&& $status_filter_restored
 				&& $default_filters_restored
 				&& $rewrite_restored
 				&& $wp_restored
@@ -7548,12 +7644,13 @@ final class RestObjectControllersSurface {
 				&& $current_user_restored
 				&& $post_type_restored
 				&& $query_vars_restored,
-			'custom hierarchical parent assignment restores prepare filter, caps, default REST filters, rewrite, wp, server, actions, current user, post type, and query vars',
+			'custom hierarchical parent assignment restores prepare, status, cap, default REST, rewrite, wp, server, actions, current user, post type, and query-var filters',
 			array(
 				'customFiltersRestored'  => $custom_filters_restored,
 				'capFilterRestored'      => $cap_filter_restored,
 				'hierarchyFiltersRestored' => $hierarchy_filters_restored,
 				'hierarchyLoopFilterRestored' => $hierarchy_loop_filter_restored,
+				'statusFilterRestored'    => $status_filter_restored,
 				'defaultFiltersRestored' => $default_filters_restored,
 				'rewriteRestored'        => $rewrite_restored,
 				'wpRestored'             => $wp_restored,

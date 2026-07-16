@@ -3304,6 +3304,10 @@ final class ContentLifecycleSurface {
 			$pretty_missing_parent_slug = 'single-pretty-missing-parent-' . $token;
 			$pretty_self_parent_slug = 'single-pretty-self-parent-' . $token;
 			$pretty_cross_type_child_slug = 'single-pretty-cross-child-' . $token;
+			$pretty_private_parent_slug = 'single-pretty-private-parent-' . $token;
+			$pretty_private_child_slug = 'single-pretty-private-child-' . $token;
+			$pretty_trash_parent_slug = 'single-pretty-trash-parent-' . $token;
+			$pretty_trash_child_slug = 'single-pretty-trash-child-' . $token;
 			$query_parent_slug  = 'single-query-parent-' . $token;
 			$query_child_slug   = 'single-query-child-' . $token;
 			$query_draft_slug   = 'single-query-draft-' . $token;
@@ -3314,6 +3318,10 @@ final class ContentLifecycleSurface {
 			$query_missing_parent_slug = 'single-query-missing-parent-' . $token;
 			$query_self_parent_slug = 'single-query-self-parent-' . $token;
 			$query_cross_type_child_slug = 'single-query-cross-child-' . $token;
+			$query_private_parent_slug = 'single-query-private-parent-' . $token;
+			$query_private_child_slug = 'single-query-private-child-' . $token;
+			$query_trash_parent_slug = 'single-query-trash-parent-' . $token;
+			$query_trash_child_slug = 'single-query-trash-child-' . $token;
 			$plain_parent_slug  = 'single-plain-parent-' . $token;
 			$plain_child_slug   = 'single-plain-child-' . $token;
 			$plain_draft_slug   = 'single-plain-draft-' . $token;
@@ -3324,6 +3332,10 @@ final class ContentLifecycleSurface {
 			$pretty_draft_id  = $insert_post( $pretty_type, 'Single Pretty Draft ' . $token, $pretty_draft_slug, $pretty_parent_id, 'draft' );
 			$pretty_missing_parent_id = $insert_post( $pretty_type, 'Single Pretty Missing Parent ' . $token, $pretty_missing_parent_slug, 0 );
 			$pretty_self_parent_id = $insert_post( $pretty_type, 'Single Pretty Self Parent ' . $token, $pretty_self_parent_slug, 0 );
+			$pretty_private_parent_id = $insert_post( $pretty_type, 'Single Pretty Private Parent ' . $token, $pretty_private_parent_slug, 0, 'private' );
+			$pretty_private_child_id = $insert_post( $pretty_type, 'Single Pretty Private Child ' . $token, $pretty_private_child_slug, $pretty_private_parent_id );
+			$pretty_trash_parent_id = $insert_post( $pretty_type, 'Single Pretty Trash Parent ' . $token, $pretty_trash_parent_slug, 0, 'trash' );
+			$pretty_trash_child_id = $insert_post( $pretty_type, 'Single Pretty Trash Child ' . $token, $pretty_trash_child_slug, $pretty_trash_parent_id );
 			$query_parent_id  = $insert_post( $query_type, 'Single Query Parent ' . $token, $query_parent_slug, 0 );
 			$pretty_cross_type_child_id = $insert_post( $pretty_type, 'Single Pretty Cross Parent Child ' . $token, $pretty_cross_type_child_slug, $query_parent_id );
 			$query_child_id   = $insert_post( $query_type, 'Single Query Child ' . $token, $query_child_slug, $query_parent_id );
@@ -3335,6 +3347,10 @@ final class ContentLifecycleSurface {
 			$query_missing_parent_id = $insert_post( $query_type, 'Single Query Missing Parent ' . $token, $query_missing_parent_slug, 0 );
 			$query_self_parent_id = $insert_post( $query_type, 'Single Query Self Parent ' . $token, $query_self_parent_slug, 0 );
 			$query_cross_type_child_id = $insert_post( $query_type, 'Single Query Cross Parent Child ' . $token, $query_cross_type_child_slug, $pretty_parent_id );
+			$query_private_parent_id = $insert_post( $query_type, 'Single Query Private Parent ' . $token, $query_private_parent_slug, 0, 'private' );
+			$query_private_child_id = $insert_post( $query_type, 'Single Query Private Child ' . $token, $query_private_child_slug, $query_private_parent_id );
+			$query_trash_parent_id = $insert_post( $query_type, 'Single Query Trash Parent ' . $token, $query_trash_parent_slug, 0, 'trash' );
+			$query_trash_child_id = $insert_post( $query_type, 'Single Query Trash Child ' . $token, $query_trash_child_slug, $query_trash_parent_id );
 			$plain_parent_id  = $insert_post( $plain_type, 'Single Plain Parent ' . $token, $plain_parent_slug, 0 );
 			$plain_child_id   = $insert_post( $plain_type, 'Single Plain Child ' . $token, $plain_child_slug, $plain_parent_id );
 			$plain_draft_id   = $insert_post( $plain_type, 'Single Plain Draft ' . $token, $plain_draft_slug, $plain_parent_id, 'draft' );
@@ -3354,6 +3370,10 @@ final class ContentLifecycleSurface {
 					&& $pretty_missing_parent_id > 0
 					&& $pretty_self_parent_id > 0
 					&& $pretty_cross_type_child_id > 0
+					&& $pretty_private_parent_id > 0
+					&& $pretty_private_child_id > 0
+					&& $pretty_trash_parent_id > 0
+					&& $pretty_trash_child_id > 0
 					&& $query_parent_id > 0
 					&& $query_child_id > 0
 					&& $query_draft_id > 0
@@ -3364,6 +3384,10 @@ final class ContentLifecycleSurface {
 					&& $query_missing_parent_id > 0
 					&& $query_self_parent_id > 0
 					&& $query_cross_type_child_id > 0
+					&& $query_private_parent_id > 0
+					&& $query_private_child_id > 0
+					&& $query_trash_parent_id > 0
+					&& $query_trash_child_id > 0
 					&& $plain_parent_id > 0
 					&& $plain_child_id > 0
 					&& $plain_draft_id > 0,
@@ -3381,11 +3405,15 @@ final class ContentLifecycleSurface {
 			$pretty_child_uri = $pretty_parent_slug . '/' . $pretty_child_slug;
 			$pretty_draft_uri = $pretty_parent_slug . '/' . $pretty_draft_slug;
 			$pretty_cross_type_child_uri = $query_parent_slug . '/' . $pretty_cross_type_child_slug;
+			$pretty_private_child_uri = $pretty_private_parent_slug . '/' . $pretty_private_child_slug;
+			$pretty_trash_child_uri = $pretty_trash_parent_slug . '/' . $pretty_trash_child_slug;
 			$query_child_uri  = $query_parent_slug . '/' . $query_child_slug;
 			$query_draft_uri  = $query_parent_slug . '/' . $query_draft_slug;
 			$query_raw_child_uri = $query_raw_parent_slug . '/' . $query_raw_child_slug;
 			$query_slash_child_uri = $query_slash_parent_slug . '/' . $query_slash_child_slug;
 			$query_cross_type_child_uri = $pretty_parent_slug . '/' . $query_cross_type_child_slug;
+			$query_private_child_uri = $query_private_parent_slug . '/' . $query_private_child_slug;
+			$query_trash_child_uri = $query_trash_parent_slug . '/' . $query_trash_child_slug;
 
 			$matrix = array(
 				array(
@@ -3460,6 +3488,26 @@ final class ContentLifecycleSurface {
 					'postId'    => $pretty_cross_type_child_id,
 					'type'      => $pretty_type,
 					'parent'    => $query_parent_id,
+					'leavename' => false,
+					'sample'    => false,
+				),
+				array(
+					'label'     => 'pretty-private-parent',
+					'actual'    => $call_link( 'pretty-private-parent', static fn () => \get_post_permalink( $pretty_private_child_id ) ),
+					'expected'  => \home_url( '/' . $pretty_rewrite_slug . '/' . $pretty_private_child_uri ),
+					'postId'    => $pretty_private_child_id,
+					'type'      => $pretty_type,
+					'parent'    => $pretty_private_parent_id,
+					'leavename' => false,
+					'sample'    => false,
+				),
+				array(
+					'label'     => 'pretty-trash-parent',
+					'actual'    => $call_link( 'pretty-trash-parent', static fn () => \get_post_permalink( $pretty_trash_child_id ) ),
+					'expected'  => \home_url( '/' . $pretty_rewrite_slug . '/' . $pretty_trash_child_uri ),
+					'postId'    => $pretty_trash_child_id,
+					'type'      => $pretty_type,
+					'parent'    => $pretty_trash_parent_id,
 					'leavename' => false,
 					'sample'    => false,
 				),
@@ -3566,6 +3614,26 @@ final class ContentLifecycleSurface {
 					'sample'    => false,
 				),
 				array(
+					'label'     => 'query-private-parent',
+					'actual'    => $call_link( 'query-private-parent', static fn () => \get_post_permalink( $query_private_child_id ) ),
+					'expected'  => $query_link( $query_var, $query_private_child_uri ),
+					'postId'    => $query_private_child_id,
+					'type'      => $query_type,
+					'parent'    => $query_private_parent_id,
+					'leavename' => false,
+					'sample'    => false,
+				),
+				array(
+					'label'     => 'query-trash-parent',
+					'actual'    => $call_link( 'query-trash-parent', static fn () => \get_post_permalink( $query_trash_child_id ) ),
+					'expected'  => $query_link( $query_var, $query_trash_child_uri ),
+					'postId'    => $query_trash_child_id,
+					'type'      => $query_type,
+					'parent'    => $query_trash_parent_id,
+					'leavename' => false,
+					'sample'    => false,
+				),
+				array(
 					'label'     => 'plain-published',
 					'actual'    => $call_link( 'plain-published', static fn () => \get_post_permalink( $plain_child_id ) ),
 					'expected'  => $plain_link( $plain_type, $plain_child_id ),
@@ -3640,6 +3708,49 @@ final class ContentLifecycleSurface {
 						'expected' => $query_cross_type_child_uri,
 						'post'     => self::post_summary( \get_post( $query_cross_type_child_id ) ),
 						'parent'   => self::post_summary( \get_post( $pretty_parent_id ) ),
+					),
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$pretty_private_child_uri === \get_page_uri( $pretty_private_child_id )
+					&& $pretty_trash_child_uri === \get_page_uri( $pretty_trash_child_id )
+					&& $query_private_child_uri === \get_page_uri( $query_private_child_id )
+					&& $query_trash_child_uri === \get_page_uri( $query_trash_child_id )
+					&& ! \is_post_publicly_viewable( $pretty_private_parent_id )
+					&& ! \is_post_publicly_viewable( $pretty_trash_parent_id )
+					&& ! \is_post_publicly_viewable( $query_private_parent_id )
+					&& ! \is_post_publicly_viewable( $query_trash_parent_id )
+					&& \is_post_publicly_viewable( $pretty_private_child_id )
+					&& \is_post_publicly_viewable( $pretty_trash_child_id )
+					&& \is_post_publicly_viewable( $query_private_child_id )
+					&& \is_post_publicly_viewable( $query_trash_child_id ),
+				'get_page_uri follows generated custom hierarchical private and trashed ancestor paths while visibility remains post-local',
+				array(
+					'prettyPrivate' => array(
+						'uri'      => \get_page_uri( $pretty_private_child_id ),
+						'expected' => $pretty_private_child_uri,
+						'parent'   => self::post_summary( \get_post( $pretty_private_parent_id ) ),
+						'child'    => self::post_summary( \get_post( $pretty_private_child_id ) ),
+					),
+					'prettyTrash'   => array(
+						'uri'      => \get_page_uri( $pretty_trash_child_id ),
+						'expected' => $pretty_trash_child_uri,
+						'parent'   => self::post_summary( \get_post( $pretty_trash_parent_id ) ),
+						'child'    => self::post_summary( \get_post( $pretty_trash_child_id ) ),
+					),
+					'queryPrivate'  => array(
+						'uri'      => \get_page_uri( $query_private_child_id ),
+						'expected' => $query_private_child_uri,
+						'parent'   => self::post_summary( \get_post( $query_private_parent_id ) ),
+						'child'    => self::post_summary( \get_post( $query_private_child_id ) ),
+					),
+					'queryTrash'    => array(
+						'uri'      => \get_page_uri( $query_trash_child_id ),
+						'expected' => $query_trash_child_uri,
+						'parent'   => self::post_summary( \get_post( $query_trash_parent_id ) ),
+						'child'    => self::post_summary( \get_post( $query_trash_child_id ) ),
 					),
 				)
 			);
