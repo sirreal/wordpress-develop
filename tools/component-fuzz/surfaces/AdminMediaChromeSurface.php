@@ -39,6 +39,7 @@ final class AdminMediaChromeSurface {
 			$rows[] = self::check_media_upload_dispatch_exits( $ctx->fork( 'legacy-upload-dispatch' ) );
 			$rows[] = self::check_media_url_insert_dispatch_exits( $ctx->fork( 'legacy-url-insert' ) );
 			$rows[] = self::check_media_gallery_save_iframe_dispatch( $ctx->fork( 'legacy-gallery-save' ) );
+			$rows[] = self::check_media_type_iframe_dispatch( $ctx->fork( 'legacy-type-iframe' ) );
 			$rows[] = self::check_media_attach_action_redirect_exit( $ctx->fork( 'media-attach-action' ) );
 			$rows[] = self::check_media_enqueue_and_iframe_shell( $ctx->fork( 'modal-enqueue-shell' ) );
 			$rows[] = self::check_media_button_and_bypass_output( $ctx->fork( 'media-buttons' ) );
@@ -74,6 +75,9 @@ final class AdminMediaChromeSurface {
 			array(
 				'attachment_submitbox_metadata',
 				'add_query_arg',
+				'_device_can_upload',
+				'_wp_admin_html_begin',
+				'admin_url',
 				'clean_attachment_cache',
 				'create_initial_post_types',
 				'create_initial_taxonomies',
@@ -86,6 +90,9 @@ final class AdminMediaChromeSurface {
 				'get_image_tag',
 				'get_media_item',
 				'get_media_items',
+				'get_submit_button',
+				'get_user_option',
+				'get_user_setting',
 				'image_align_input_fields',
 				'image_add_caption',
 				'image_edit_apply_changes',
@@ -102,7 +109,10 @@ final class AdminMediaChromeSurface {
 				'media_upload_html_bypass',
 				'media_upload_tabs',
 				'media_upload_type_form',
+				'media_upload_type_url_form',
 				'remove_query_arg',
+				'sanitize_html_class',
+				'size_format',
 				'the_media_upload_tabs',
 				'wp_get_attachment_image',
 				'wp_get_attachment_image_src',
@@ -113,11 +123,16 @@ final class AdminMediaChromeSurface {
 				'wp_die',
 				'wp_enqueue_media',
 				'wp_enqueue_script',
+				'wp_enqueue_style',
 				'wp_image_editor',
 				'wp_iframe',
 				'wp_insert_post',
+				'wp_is_mobile',
+				'wp_json_encode',
+				'wp_max_upload_size',
 				'wp_media_attach_action',
 				'wp_media_upload_handler',
+				'wp_media_insert_url_form',
 				'wp_mime_type_icon',
 				'wp_editor',
 				'wp_ext2type',
@@ -3339,6 +3354,17 @@ PHP;
 		return $status;
 	}
 
+	private static function media_type_iframe_style_status(): array {
+		$status = array();
+		foreach ( array( 'colors', 'deprecated-media' ) as $handle ) {
+			$status[ $handle ] = array();
+			foreach ( array( 'registered', 'enqueued', 'queue', 'to_do', 'done' ) as $state ) {
+				$status[ $handle ][ $state ] = \wp_style_is( $handle, $state );
+			}
+		}
+		return $status;
+	}
+
 	private static function collect_media_gallery_save_failures( array &$failures, array $case, array $result ): void {
 		$output       = (string) ( $result['output'] ?? '' );
 		$token        = self::media_upload_dispatch_token( (string) ( $result['token'] ?? $case['token'] ?? '' ) );
@@ -3451,6 +3477,681 @@ PHP;
 				'saveEvents'  => $result['saveEvents'] ?? array(),
 				'sendEvents'  => $result['sendEvents'] ?? array(),
 			)
+		);
+	}
+
+	private static function check_media_type_iframe_dispatch( \ComponentFuzz\FuzzContext $ctx ): array {
+		$missing = self::media_attach_action_child_missing_requirements();
+		if ( array() !== $missing ) {
+			return self::row(
+				$ctx,
+				'admin-media-chrome.legacy-type-iframe-dispatch',
+				true,
+				array(
+					'missing' => $missing,
+					'reason'  => 'Required local subprocess APIs are unavailable.',
+				),
+				'skipped'
+			);
+		}
+
+		$failures = array();
+		$runs     = array();
+
+		foreach ( self::media_type_iframe_cases( $ctx ) as $case ) {
+			$run    = self::run_media_type_iframe_child_process( $case );
+			$result = is_array( $run['result'] ?? null ) ? $run['result'] : array();
+
+			$runs[ $case['label'] ] = array(
+				'ok'       => $run['ok'] ?? false,
+				'exitCode' => $run['exitCode'] ?? null,
+				'stderr'   => self::describe_string( (string) ( $run['stderr'] ?? '' ) ),
+				'stdout'   => self::describe_string( (string) ( $run['stdout'] ?? '' ) ),
+				'result'   => array(
+					'returned'          => $result['returned'] ?? null,
+					'returnType'        => $result['returnType'] ?? null,
+					'output'            => self::describe_string( (string) ( $result['output'] ?? '' ) ),
+					'contentBefore'     => $result['contentBefore'] ?? array(),
+					'contentAfter'      => $result['contentAfter'] ?? array(),
+					'formUrlEvents'     => $result['formUrlEvents'] ?? array(),
+					'typeUrlEventCount' => is_array( $result['typeUrlEvents'] ?? null ) ? count( $result['typeUrlEvents'] ) : null,
+					'uploadParamCount'  => is_array( $result['uploadPostParamEvents'] ?? null ) ? count( $result['uploadPostParamEvents'] ) : null,
+					'pluploadCount'     => is_array( $result['pluploadEvents'] ?? null ) ? count( $result['pluploadEvents'] ) : null,
+					'iframeActions'     => $result['iframeActionCounts'] ?? array(),
+					'styleStatus'       => $result['styleStatus'] ?? array(),
+					'saveEventCount'    => is_array( $result['saveEvents'] ?? null ) ? count( $result['saveEvents'] ) : null,
+					'sendEventCount'    => is_array( $result['sendEvents'] ?? null ) ? count( $result['sendEvents'] ) : null,
+					'dieCalls'          => $result['dieCalls'] ?? array(),
+				),
+			);
+
+			self::collect_failure(
+				$failures,
+				true === ( $run['ok'] ?? false ) && self::media_type_iframe_child_result_has_expected_shape( $result ),
+				"{$case['label']} child renders type iframe and reports structured JSON",
+				array(
+					'run'    => $run,
+					'result' => $result,
+				)
+			);
+
+			if ( ! self::media_type_iframe_child_result_has_expected_shape( $result ) ) {
+				continue;
+			}
+
+			self::collect_failure(
+				$failures,
+				true === (bool) ( $result['returned'] ?? false )
+					&& 'NULL' === (string) ( $result['returnType'] ?? '' )
+					&& null === ( $result['throwable'] ?? null )
+					&& array() === ( $result['dieCalls'] ?? array() ),
+				"{$case['label']} returns normally after wp_iframe() without wp_die or unexpected exceptions",
+				array(
+					'returned'  => $result['returned'] ?? null,
+					'returnType' => $result['returnType'] ?? null,
+					'throwable' => $result['throwable'] ?? null,
+					'dieCalls'  => $result['dieCalls'] ?? array(),
+				)
+			);
+
+			self::collect_media_type_iframe_failures( $failures, $case, $result );
+		}
+
+		return self::row(
+			$ctx,
+			'admin-media-chrome.legacy-type-iframe-dispatch',
+			array() === $failures,
+			array(
+				'failures' => $failures,
+				'runs'     => $runs,
+			)
+		);
+	}
+
+	private static function media_type_iframe_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$build = static function ( string $label, string $scenario, array $args, \ComponentFuzz\FuzzContext $case_ctx ): array {
+			$token = self::media_upload_dispatch_token( 'type_' . $case_ctx->identifier( 4, 9 ) );
+
+			return array_merge(
+				array(
+					'label'     => $label,
+					'scenario'  => $scenario,
+					'seed'      => $case_ctx->seed(),
+					'iteration' => $case_ctx->iteration(),
+					'token'     => $token,
+				),
+				$args
+			);
+		};
+
+		return array(
+			$build(
+				'type-url-default-image',
+				'type-url',
+				array(
+					'requestType'     => null,
+					'expectedType'    => 'image',
+					'disableCaptions' => false,
+					'chromeless'      => false,
+				),
+				$ctx->fork( 'type-url-default-image' )
+			),
+			$build(
+				'type-url-video',
+				'type-url',
+				array(
+					'requestType'     => 'video',
+					'expectedType'    => 'video',
+					'disableCaptions' => true,
+					'chromeless'      => false,
+				),
+				$ctx->fork( 'type-url-video' )
+			),
+			$build(
+				'type-url-invalid-coerces-image',
+				'type-url',
+				array(
+					'requestType'     => 'svg</script><script>alert(1)</script>',
+					'expectedType'    => 'image',
+					'disableCaptions' => true,
+					'chromeless'      => true,
+				),
+				$ctx->fork( 'type-url-invalid' )
+			),
+			$build(
+				'default-ignores-request-type',
+				'default',
+				array(
+					'requestType'     => 'audio</script><script>alert(2)</script>',
+					'requestTab'      => 'library',
+					'expectedType'    => 'image',
+					'disableCaptions' => false,
+					'chromeless'      => false,
+				),
+				$ctx->fork( 'default-type-form' )
+			),
+		);
+	}
+
+	private static function run_media_type_iframe_child_process( array $case ): array {
+		$payload = json_encode(
+			array( 'case' => $case ),
+			JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE
+		);
+
+		if ( false === $payload ) {
+			return array(
+				'ok'       => false,
+				'exitCode' => -1,
+				'stdout'   => '',
+				'stderr'   => 'json_encode failed',
+				'result'   => null,
+			);
+		}
+
+		$descriptors = array(
+			0 => array( 'pipe', 'r' ),
+			1 => array( 'pipe', 'w' ),
+			2 => array( 'pipe', 'w' ),
+		);
+
+		// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.system_calls_proc_open -- Isolates wp_media_upload_handler() no-POST iframe branches in a local PHP subprocess.
+		$process = proc_open( array( PHP_BINARY, '-r', self::media_type_iframe_child_program() ), $descriptors, $pipes, \ComponentFuzz\repo_root() );
+		if ( ! is_resource( $process ) ) {
+			return array(
+				'ok'       => false,
+				'exitCode' => -1,
+				'stdout'   => '',
+				'stderr'   => 'proc_open failed',
+				'result'   => null,
+			);
+		}
+
+		fwrite( $pipes[0], $payload );
+		fclose( $pipes[0] );
+
+		$stdout = stream_get_contents( $pipes[1] );
+		$stderr = stream_get_contents( $pipes[2] );
+		fclose( $pipes[1] );
+		fclose( $pipes[2] );
+
+		$exit_code = proc_close( $process );
+		$result    = json_decode( (string) $stdout, true );
+
+		return array(
+			'ok'       => 0 === $exit_code && is_array( $result ) && true === ( $result['ok'] ?? null ),
+			'exitCode' => $exit_code,
+			'stdout'   => (string) $stdout,
+			'stderr'   => (string) $stderr,
+			'result'   => is_array( $result ) ? $result : null,
+		);
+	}
+
+	private static function media_type_iframe_child_program(): string {
+		return <<<'PHP'
+$component_fuzz_admin_media_raw = stream_get_contents( STDIN );
+$component_fuzz_admin_media_payload = json_decode( $component_fuzz_admin_media_raw, true );
+$case = is_array( $component_fuzz_admin_media_payload['case'] ?? null ) ? $component_fuzz_admin_media_payload['case'] : array();
+
+require_once getcwd() . '/tools/component-fuzz/lib/autoload.php';
+\ComponentFuzz\WpBootstrap::load();
+
+\ComponentFuzz\Surfaces\AdminMediaChromeSurface::run_media_type_iframe_child( $case );
+PHP;
+	}
+
+	public static function run_media_type_iframe_child( array $case ): void {
+		ini_set( 'display_errors', '0' );
+		self::prepare_runtime();
+
+		$ctx      = new \ComponentFuzz\FuzzContext( (int) ( $case['seed'] ?? 1 ), self::NAME, (int) ( $case['iteration'] ?? 0 ) );
+		$scenario = (string) ( $case['scenario'] ?? 'type-url' );
+		$token    = self::media_upload_dispatch_token( (string) ( $case['token'] ?? $ctx->identifier( 4, 9 ) ) );
+		$state    = array(
+			'ok'                    => false,
+			'label'                 => (string) ( $case['label'] ?? 'type-iframe' ),
+			'scenario'              => $scenario,
+			'token'                 => $token,
+			'postId'                => 0,
+			'expectedType'          => (string) ( $case['expectedType'] ?? 'image' ),
+			'requestType'           => $case['requestType'] ?? null,
+			'requestTab'            => $case['requestTab'] ?? null,
+			'contentBefore'         => array(),
+			'contentAfter'          => array(),
+			'formUrlEvents'         => array(),
+			'typeUrlEvents'         => array(),
+			'disableCaptionEvents'  => array(),
+			'uploadPostParamEvents' => array(),
+			'pluploadEvents'        => array(),
+			'uploadActionCounts'    => array(),
+			'iframeActionCounts'    => array(),
+			'adminEnqueueArgs'      => array(),
+			'styleStatus'           => array(),
+			'saveEvents'            => array(),
+			'sendEvents'            => array(),
+			'dieCalls'              => array(),
+			'returned'              => false,
+			'returnType'            => null,
+			'throwable'             => null,
+			'output'                => '',
+		);
+
+		$buffer_level = ob_get_level();
+		ob_start();
+
+		register_shutdown_function(
+			static function () use ( &$state, $buffer_level ): void {
+				$output = '';
+				while ( ob_get_level() > $buffer_level ) {
+					$chunk = ob_get_clean();
+					if ( is_string( $chunk ) ) {
+						$output = $chunk . $output;
+					}
+				}
+
+				$state['output']       = $output;
+				$state['contentAfter'] = self::media_url_insert_content_counts();
+				$state['styleStatus']  = self::media_type_iframe_style_status();
+				$state['ok']           = null === $state['throwable'];
+				echo json_encode( $state, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE ) . "\n";
+			}
+		);
+
+		try {
+			$post_id                  = self::seed_parent_post( $ctx->fork( 'post' ) );
+			$state['postId']          = $post_id;
+			$state['contentBefore']   = self::media_url_insert_content_counts();
+			$request_type             = $case['requestType'] ?? null;
+			$request_tab              = (string) ( $case['requestTab'] ?? ( 'type-url' === $scenario ? 'type_url' : 'type' ) );
+			$unsafe_post_id           = (string) $post_id . '</script><script>alert(9)</script>';
+			$GLOBALS['pagenow']       = 'media-upload.php';
+			$GLOBALS['type']          = is_string( $request_type ) ? $request_type : 'image';
+			$GLOBALS['tab']           = $request_tab;
+			$GLOBALS['body_id']       = 'component-fuzz-type-iframe';
+
+			$_SERVER['HTTP_HOST']       = 'example.test';
+			$_SERVER['HTTPS']           = 'off';
+			$_SERVER['PHP_SELF']        = '/wp-admin/media-upload.php';
+			$_SERVER['REQUEST_METHOD']  = 'GET';
+			$_SERVER['REQUEST_URI']     = '/wp-admin/media-upload.php?tab=' . rawurlencode( $request_tab ) . '&post_id=' . rawurlencode( $unsafe_post_id );
+			$_SERVER['HTTP_REFERER']    = 'http://example.test/wp-admin/media-upload.php?tab=' . rawurlencode( $request_tab );
+			$_SERVER['HTTP_USER_AGENT'] = 'component-fuzz/admin-media-type-iframe';
+			$_SERVER['REMOTE_ADDR']     = '198.51.100.47';
+			$_SERVER['SERVER_PORT']     = '80';
+
+			$_GET = array(
+				'tab'     => $request_tab,
+				'post_id' => $unsafe_post_id,
+			);
+			if ( null !== $request_type ) {
+				$_GET['type'] = (string) $request_type;
+			}
+			if ( ! empty( $case['chromeless'] ) ) {
+				$_GET['chromeless'] = '1';
+			}
+			$_POST    = array();
+			$_REQUEST = $_GET;
+			$_FILES   = array();
+			$_COOKIE  = array();
+
+			$form_url_filter = static function ( string $url, string $type ) use ( &$state, $token ): string {
+				$state['formUrlEvents'][] = array(
+					'url'  => $url,
+					'type' => $type,
+				);
+				return \add_query_arg( 'cfz_type_iframe', $token, $url );
+			};
+			$type_url_filter = static function ( string $form_html ) use ( &$state, $token ): string {
+				$state['typeUrlEvents'][] = array(
+					'hasImageOnly' => str_contains( $form_html, 'id="image-only"' ),
+					'hasNotImage'  => str_contains( $form_html, 'id="not-image"' ),
+					'hasCaption'   => str_contains( $form_html, 'id="caption"' ),
+					'bytes'        => strlen( $form_html ),
+				);
+				return $form_html . '<input type="hidden" id="cfz-type-url-' . esc_attr( $token ) . '" value="' . esc_attr( $token ) . '" />';
+			};
+			$disable_captions_filter = static function ( $disabled ) use ( &$state, $case ): bool {
+				$state['disableCaptionEvents'][] = $disabled;
+				return ! empty( $case['disableCaptions'] );
+			};
+			$upload_post_params_filter = static function ( array $params ) use ( &$state, $token ): array {
+				$state['uploadPostParamEvents'][] = $params;
+				$params['component_fuzz_type_iframe'] = $token;
+				return $params;
+			};
+			$plupload_filter = static function ( array $init ) use ( &$state, $token ): array {
+				$state['pluploadEvents'][] = $init;
+				$init['component_fuzz_type_iframe'] = $token;
+				return $init;
+			};
+			$save_filter = static function ( array $post, array $attachment ) use ( &$state ): array {
+				$state['saveEvents'][] = array(
+					'id'    => (int) ( $post['ID'] ?? 0 ),
+					'title' => (string) ( $attachment['post_title'] ?? '' ),
+				);
+				return $post;
+			};
+			$send_filter = static function ( string $html, int $send_id, array $attachment ) use ( &$state ): string {
+				$state['sendEvents'][] = array(
+					'id'    => $send_id,
+					'html'  => $html,
+					'title' => (string) ( $attachment['post_title'] ?? '' ),
+				);
+				return $html;
+			};
+			$user_has_cap_filter = static function ( array $allcaps, array $caps, array $args, $user = null ): array {
+				unset( $args, $user );
+				foreach ( $caps as $cap ) {
+					$allcaps[ $cap ] = 'do_not_allow' !== $cap;
+				}
+				return $allcaps;
+			};
+			$die_handler_filter = static function () use ( &$state ): callable {
+				return static function ( $message = '', $title = '', $args = array() ) use ( &$state ): void {
+					$state['dieCalls'][] = array(
+						'message' => self::media_attach_action_die_message( $message ),
+						'title'   => self::media_attach_action_die_message( $title ),
+						'args'    => is_array( $args ) ? $args : array(),
+					);
+					exit;
+				};
+			};
+			$tracked_actions = array(
+				'pre-upload-ui',
+				'pre-plupload-upload-ui',
+				'post-plupload-upload-ui',
+				'pre-html-upload-ui',
+				'post-html-upload-ui',
+				'post-upload-ui',
+			);
+			$action_callbacks = array();
+			foreach ( $tracked_actions as $hook ) {
+				$state['uploadActionCounts'][ $hook ] = 0;
+				$action_callbacks[ $hook ] = static function () use ( &$state, $hook ): void {
+					++$state['uploadActionCounts'][ $hook ];
+				};
+			}
+			$iframe_hooks = array(
+				'admin_enqueue_scripts',
+				'admin_print_styles-media-upload-popup',
+				'admin_print_styles',
+				'admin_print_scripts-media-upload-popup',
+				'admin_print_scripts',
+				'admin_head-media-upload-popup',
+				'admin_head',
+				'admin_print_footer_scripts',
+				'type-url' === $scenario ? 'admin_head_media_upload_type_url_form' : 'admin_head_media_upload_type_form',
+			);
+			$iframe_action_callbacks = array();
+			foreach ( $iframe_hooks as $hook ) {
+				$state['iframeActionCounts'][ $hook ] = 0;
+				$iframe_action_callbacks[ $hook ] = static function ( $arg = null ) use ( &$state, $hook ): void {
+					++$state['iframeActionCounts'][ $hook ];
+					if ( 'admin_enqueue_scripts' === $hook ) {
+						$state['adminEnqueueArgs'][] = $arg;
+					}
+				};
+			}
+
+			\add_filter( 'media_upload_form_url', $form_url_filter, 10, 2 );
+			\add_filter( 'type_url_form_media', $type_url_filter, 10, 1 );
+			\add_filter( 'disable_captions', $disable_captions_filter, 10, 1 );
+			\add_filter( 'upload_post_params', $upload_post_params_filter, 10, 1 );
+			\add_filter( 'plupload_init', $plupload_filter, 10, 1 );
+			\add_filter( 'attachment_fields_to_save', $save_filter, 10, 2 );
+			\add_filter( 'media_send_to_editor', $send_filter, 10, 3 );
+			\add_filter( 'user_has_cap', $user_has_cap_filter, 10, 4 );
+			\add_filter( 'wp_die_handler', $die_handler_filter, PHP_INT_MAX );
+			foreach ( $iframe_action_callbacks as $hook => $callback ) {
+				\add_action( $hook, $callback, 10, 1 );
+			}
+			foreach ( $action_callbacks as $hook => $callback ) {
+				\add_action( $hook, $callback );
+			}
+
+			\wp_set_current_user( 1 );
+			if ( isset( $GLOBALS['current_user'] ) && $GLOBALS['current_user'] instanceof \WP_User ) {
+				$GLOBALS['current_user']->allcaps = array( 'exist' => true );
+			}
+
+			try {
+				$return_value        = \wp_media_upload_handler();
+				$state['returnType'] = gettype( $return_value );
+				$state['returned']   = true;
+			} finally {
+				foreach ( $action_callbacks as $hook => $callback ) {
+					\remove_action( $hook, $callback );
+				}
+				foreach ( $iframe_action_callbacks as $hook => $callback ) {
+					\remove_action( $hook, $callback, 10 );
+				}
+				\remove_filter( 'wp_die_handler', $die_handler_filter, PHP_INT_MAX );
+				\remove_filter( 'user_has_cap', $user_has_cap_filter, 10 );
+				\remove_filter( 'media_send_to_editor', $send_filter, 10 );
+				\remove_filter( 'attachment_fields_to_save', $save_filter, 10 );
+				\remove_filter( 'plupload_init', $plupload_filter, 10 );
+				\remove_filter( 'upload_post_params', $upload_post_params_filter, 10 );
+				\remove_filter( 'disable_captions', $disable_captions_filter, 10 );
+				\remove_filter( 'type_url_form_media', $type_url_filter, 10 );
+				\remove_filter( 'media_upload_form_url', $form_url_filter, 10 );
+			}
+		} catch ( \Throwable $e ) {
+			$state['throwable'] = self::describe_throwable( $e );
+		}
+	}
+
+	private static function media_type_iframe_child_result_has_expected_shape( array $result ): bool {
+		return array_key_exists( 'ok', $result )
+			&& array_key_exists( 'returned', $result )
+			&& is_string( $result['output'] ?? null )
+			&& is_array( $result['contentBefore'] ?? null )
+			&& is_array( $result['contentAfter'] ?? null )
+			&& is_array( $result['formUrlEvents'] ?? null )
+			&& is_array( $result['typeUrlEvents'] ?? null )
+			&& is_array( $result['disableCaptionEvents'] ?? null )
+			&& is_array( $result['uploadPostParamEvents'] ?? null )
+			&& is_array( $result['pluploadEvents'] ?? null )
+			&& is_array( $result['uploadActionCounts'] ?? null )
+			&& is_array( $result['iframeActionCounts'] ?? null )
+			&& is_array( $result['adminEnqueueArgs'] ?? null )
+			&& is_array( $result['styleStatus'] ?? null )
+			&& is_array( $result['saveEvents'] ?? null )
+			&& is_array( $result['sendEvents'] ?? null )
+			&& is_array( $result['dieCalls'] ?? null );
+	}
+
+	private static function collect_media_type_iframe_failures( array &$failures, array $case, array $result ): void {
+		$output        = (string) ( $result['output'] ?? '' );
+		$token         = self::media_upload_dispatch_token( (string) ( $result['token'] ?? $case['token'] ?? '' ) );
+		$expected_type = (string) ( $case['expectedType'] ?? 'image' );
+		$is_type_url   = 'type-url' === (string) ( $case['scenario'] ?? '' );
+		$post_id       = (int) ( $result['postId'] ?? 0 );
+		$request_type  = is_string( $case['requestType'] ?? null ) ? (string) $case['requestType'] : '';
+		$dynamic_hook  = $is_type_url ? 'admin_head_media_upload_type_url_form' : 'admin_head_media_upload_type_form';
+
+		self::collect_failure(
+			$failures,
+			str_contains( $output, 'pagenow = \'media-upload-popup\'' )
+				&& str_contains( $output, '<body id="component-fuzz-type-iframe" class="wp-core-ui no-js ' )
+				&& str_contains( $output, '</html>' )
+				&& str_contains( $output, '<script>post_id = ' . $post_id . ';</script>' )
+				&& str_contains( $output, 'id="' . $expected_type . '-form"' )
+				&& str_contains( $output, 'cfz_type_iframe=' . rawurlencode( $token ) )
+				&& ! str_contains( $output, '</script><script>alert(' ),
+			'no-POST media handler branch renders a complete iframe shell with cast post ID and filtered form action URL',
+			array(
+				'output'       => self::describe_string( $output ),
+				'expectedType' => $expected_type,
+				'postId'       => $post_id,
+			)
+		);
+
+		$iframe_hooks = array(
+			'admin_enqueue_scripts',
+			'admin_print_styles-media-upload-popup',
+			'admin_print_styles',
+			'admin_print_scripts-media-upload-popup',
+			'admin_print_scripts',
+			'admin_head-media-upload-popup',
+			'admin_head',
+			'admin_print_footer_scripts',
+			$dynamic_hook,
+		);
+		$iframe_counts = is_array( $result['iframeActionCounts'] ?? null ) ? $result['iframeActionCounts'] : array();
+		$iframe_hooks_ok = true;
+		foreach ( $iframe_hooks as $hook ) {
+			$iframe_hooks_ok = $iframe_hooks_ok && 1 === (int) ( $iframe_counts[ $hook ] ?? 0 );
+		}
+		$style_status = is_array( $result['styleStatus'] ?? null ) ? $result['styleStatus'] : array();
+		self::collect_failure(
+			$failures,
+			$iframe_hooks_ok
+				&& array( 'media-upload-popup' ) === ( $result['adminEnqueueArgs'] ?? array() )
+				&& isset( $style_status['colors'], $style_status['deprecated-media'] ),
+			'wp_iframe() fires legacy popup hooks for the selected callback and records popup style status',
+			array(
+				'iframeActionCounts' => $iframe_counts,
+				'adminEnqueueArgs'   => $result['adminEnqueueArgs'] ?? array(),
+				'styleStatus'        => $style_status,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			1 === count( $result['formUrlEvents'] ?? array() )
+				&& $expected_type === (string) ( $result['formUrlEvents'][0]['type'] ?? '' )
+				&& str_contains( (string) ( $result['formUrlEvents'][0]['url'] ?? '' ), 'type=' . $expected_type )
+				&& str_contains( (string) ( $result['formUrlEvents'][0]['url'] ?? '' ), 'tab=type' )
+				&& str_contains( (string) ( $result['formUrlEvents'][0]['url'] ?? '' ), 'post_id=' . $post_id ),
+			'media_upload_form_url receives the coerced callback media type and cast post ID',
+			array( 'formUrlEvents' => $result['formUrlEvents'] ?? array() )
+		);
+
+		if ( $is_type_url ) {
+			self::collect_media_type_url_iframe_failures( $failures, $case, $result, $output, $token, $expected_type );
+		} else {
+			self::collect_media_default_type_iframe_failures( $failures, $case, $result, $output, $token, $expected_type );
+		}
+
+		self::collect_failure(
+			$failures,
+			( $result['contentBefore'] ?? array() ) === ( $result['contentAfter'] ?? array() )
+				&& array() === ( $result['saveEvents'] ?? array() )
+				&& array() === ( $result['sendEvents'] ?? array() ),
+			'no-POST iframe dispatch does not mutate content or enter save/send-to-editor server paths',
+			array(
+				'contentBefore' => $result['contentBefore'] ?? array(),
+				'contentAfter'  => $result['contentAfter'] ?? array(),
+				'saveEvents'    => $result['saveEvents'] ?? array(),
+				'sendEvents'    => $result['sendEvents'] ?? array(),
+			)
+		);
+
+		if ( '' !== $request_type && ! in_array( $request_type, array( 'audio', 'video', 'file' ), true ) ) {
+			self::collect_failure(
+				$failures,
+				'image' === $expected_type
+					&& ! str_contains( $output, 'id="' . $request_type . '-form"' )
+					&& ! str_contains( $output, '</script><script>alert(' ),
+				'invalid requested media types are coerced to the image callback without raw script leakage',
+				array(
+					'requestType'  => self::describe_string( $request_type ),
+					'expectedType' => $expected_type,
+					'output'       => self::describe_string( $output ),
+				)
+			);
+		}
+	}
+
+	private static function collect_media_type_url_iframe_failures( array &$failures, array $case, array $result, string $output, string $token, string $expected_type ): void {
+		self::collect_failure(
+			$failures,
+			str_contains( $output, 'Insert media from another website' )
+				&& str_contains( $output, 'id="src"' )
+				&& str_contains( $output, 'name="insertonlybutton"' )
+				&& str_contains( $output, 'addExtImage' )
+				&& str_contains( $output, 'id="cfz-type-url-' . $token . '"' )
+				&& 1 === count( $result['typeUrlEvents'] ?? array() )
+				&& array() === ( $result['uploadPostParamEvents'] ?? array() )
+				&& array() === ( $result['pluploadEvents'] ?? array() ),
+			'type_url branch selects media_upload_type_url_form(), applies type_url_form_media, and avoids uploader initialization',
+			array(
+				'typeUrlEvents'         => $result['typeUrlEvents'] ?? array(),
+				'uploadPostParamEvents' => $result['uploadPostParamEvents'] ?? array(),
+				'pluploadEvents'        => $result['pluploadEvents'] ?? array(),
+				'output'                => self::describe_string( $output ),
+			)
+		);
+
+		$is_image = 'image' === $expected_type;
+		self::collect_failure(
+			$failures,
+			$is_image
+				? (
+					str_contains( $output, 'id="image-only" checked=' )
+					&& ! str_contains( $output, '<table class="describe not-image">' )
+				)
+				: (
+					str_contains( $output, 'id="not-image" checked=' )
+					&& str_contains( $output, '<table class="describe not-image">' )
+				),
+			'type_url branch marks the expected image/generic URL form view after media type coercion',
+			array(
+				'expectedType' => $expected_type,
+				'output'       => self::describe_string( $output ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			! empty( $case['disableCaptions'] )
+				? ! str_contains( $output, 'id="caption"' )
+				: str_contains( $output, 'id="caption"' ),
+			'type_url branch threads disable_captions through the URL form caption controls',
+			array(
+				'disableCaptions'      => $case['disableCaptions'] ?? false,
+				'disableCaptionEvents' => $result['disableCaptionEvents'] ?? array(),
+				'output'               => self::describe_string( $output ),
+			)
+		);
+	}
+
+	private static function collect_media_default_type_iframe_failures( array &$failures, array $case, array $result, string $output, string $token, string $expected_type ): void {
+		unset( $case );
+
+		self::collect_failure(
+			$failures,
+			'image' === $expected_type
+				&& str_contains( $output, 'Add media files from your computer' )
+				&& str_contains( $output, 'id="media-upload-notice"' )
+				&& str_contains( $output, 'id="media-upload-error"' )
+				&& str_contains( $output, 'id="async-upload"' )
+				&& str_contains( $output, 'name="html-upload"' )
+				&& str_contains( $output, 'wpUploaderInit = ' )
+				&& ! str_contains( $output, 'Insert media from another website' )
+				&& array() === ( $result['typeUrlEvents'] ?? array() )
+				&& 1 === count( $result['uploadPostParamEvents'] ?? array() )
+				&& 1 === count( $result['pluploadEvents'] ?? array() )
+				&& $token === ( $result['pluploadEvents'][0]['multipart_params']['component_fuzz_type_iframe'] ?? null ),
+			'default no-POST branch selects media_upload_type_form() image upload UI and initializes upload filters only there',
+			array(
+				'uploadPostParamEvents' => $result['uploadPostParamEvents'] ?? array(),
+				'pluploadEvents'        => $result['pluploadEvents'] ?? array(),
+				'typeUrlEvents'         => $result['typeUrlEvents'] ?? array(),
+				'output'                => self::describe_string( $output ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			array() === array_filter(
+				$result['uploadActionCounts'] ?? array(),
+				static function ( int $count ): bool {
+					return 1 !== $count;
+				}
+			),
+			'default no-POST branch fires upload UI hooks once while rendering the type form',
+			array( 'uploadActionCounts' => $result['uploadActionCounts'] ?? array() )
 		);
 	}
 
