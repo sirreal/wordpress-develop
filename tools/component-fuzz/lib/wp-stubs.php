@@ -1826,15 +1826,26 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 			}
 
 			$authors = $this->component_fuzz_in_values( $query, 'post_author' );
-			if ( array() === $authors ) {
+			if ( array() !== $authors ) {
+				$author_map = array_fill_keys( array_map( 'intval', $authors ), true );
+				$rows       = array_filter(
+					$rows,
+					static function ( $row ) use ( $author_map ) {
+						return isset( $author_map[ (int) $row['post_author'] ] );
+					}
+				);
+			}
+
+			$not_authors = $this->component_fuzz_not_in_values( $query, 'post_author' );
+			if ( array() === $not_authors ) {
 				return $rows;
 			}
 
-			$author_map = array_fill_keys( array_map( 'intval', $authors ), true );
+			$not_author_map = array_fill_keys( array_map( 'intval', $not_authors ), true );
 			return array_filter(
 				$rows,
-				static function ( $row ) use ( $author_map ) {
-					return isset( $author_map[ (int) $row['post_author'] ] );
+				static function ( $row ) use ( $not_author_map ) {
+					return ! isset( $not_author_map[ (int) $row['post_author'] ] );
 				}
 			);
 		}

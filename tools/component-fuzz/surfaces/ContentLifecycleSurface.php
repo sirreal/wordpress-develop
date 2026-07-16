@@ -3132,6 +3132,7 @@ final class ContentLifecycleSurface {
 	private static function check_custom_post_type_single_permalink_fallback_matrix( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
 		$failures             = array();
 		$post_ids             = array();
+		$user_ids             = array();
 		$link_events          = array();
 		$matrix_observed      = array();
 		$active_label         = null;
@@ -3174,19 +3175,22 @@ final class ContentLifecycleSurface {
 
 			return 0;
 		};
-		$insert_post = static function ( string $post_type, string $title, string $slug, int $parent, string $status = 'publish' ) use ( $remember_post ): int {
+		$insert_post = static function ( string $post_type, string $title, string $slug, int $parent, string $status = 'publish', int $author_id = 0 ) use ( $remember_post ): int {
+			$post_data = array(
+				'post_type'    => $post_type,
+				'post_title'   => $title,
+				'post_content' => $title . ' content',
+				'post_status'  => $status,
+				'post_name'    => $slug,
+				'post_parent'  => $parent,
+			);
+			if ( $author_id > 0 ) {
+				$post_data['post_author'] = $author_id;
+			}
+
 			return $remember_post(
 				\wp_insert_post(
-					\wp_slash(
-						array(
-							'post_type'    => $post_type,
-							'post_title'   => $title,
-							'post_content' => $title . ' content',
-							'post_status'  => $status,
-							'post_name'    => $slug,
-							'post_parent'  => $parent,
-						)
-					),
+					\wp_slash( $post_data ),
 					true,
 					false
 				)
@@ -3458,9 +3462,12 @@ final class ContentLifecycleSurface {
 			$mutation_child_slug    = 'single-mutation-child-' . $token;
 			$mutation_pending_child_slug = 'single-mutation-pending-child-' . $token;
 			$missing_parent_id  = 987654321;
+			$author_excluded_a_id = self::insert_support_user( 'query-author-a-' . $token, 'query-author-a-' . $token . '@example.test' );
+			$author_excluded_b_id = self::insert_support_user( 'query-author-b-' . $token, 'query-author-b-' . $token . '@example.test' );
+			$user_ids             = array_filter( array( $author_excluded_a_id, $author_excluded_b_id ), static fn ( $user_id ): bool => is_int( $user_id ) && $user_id > 0 );
 
 			$pretty_parent_id = $insert_post( $pretty_type, 'Single Pretty Parent ' . $token, $pretty_parent_slug, 0 );
-			$pretty_child_id  = $insert_post( $pretty_type, 'Single Pretty Child ' . $token, $pretty_child_slug, $pretty_parent_id );
+			$pretty_child_id  = $insert_post( $pretty_type, 'Single Pretty Child ' . $token, $pretty_child_slug, $pretty_parent_id, 'publish', $author_excluded_a_id );
 			$pretty_draft_id  = $insert_post( $pretty_type, 'Single Pretty Draft ' . $token, $pretty_draft_slug, $pretty_parent_id, 'draft' );
 			$pretty_missing_parent_id = $insert_post( $pretty_type, 'Single Pretty Missing Parent ' . $token, $pretty_missing_parent_slug, 0 );
 			$pretty_self_parent_id = $insert_post( $pretty_type, 'Single Pretty Self Parent ' . $token, $pretty_self_parent_slug, 0 );
@@ -3472,7 +3479,7 @@ final class ContentLifecycleSurface {
 			$query_mixed_middle_id = $insert_post( $query_type, 'Single Query Mixed Middle ' . $token, $query_mixed_middle_slug, $pretty_mixed_root_id );
 			$pretty_mixed_leaf_id = $insert_post( $pretty_type, 'Single Pretty Mixed Leaf ' . $token, $pretty_mixed_leaf_slug, $query_mixed_middle_id );
 			$query_parent_id  = $insert_post( $query_type, 'Single Query Parent ' . $token, $query_parent_slug, 0 );
-			$pretty_cross_type_child_id = $insert_post( $pretty_type, 'Single Pretty Cross Parent Child ' . $token, $pretty_cross_type_child_slug, $query_parent_id );
+			$pretty_cross_type_child_id = $insert_post( $pretty_type, 'Single Pretty Cross Parent Child ' . $token, $pretty_cross_type_child_slug, $query_parent_id, 'publish', $author_excluded_b_id );
 			$query_child_id   = $insert_post( $query_type, 'Single Query Child ' . $token, $query_child_slug, $query_parent_id );
 			$query_draft_id   = $insert_post( $query_type, 'Single Query Draft ' . $token, $query_draft_slug, $query_parent_id, 'draft' );
 			$query_raw_parent_id = $insert_post( $query_type, 'Single Query Raw Parent ' . $token, $query_raw_parent_slug, 0 );
@@ -3542,7 +3549,9 @@ final class ContentLifecycleSurface {
 					&& $mutation_parent_a_id > 0
 					&& $mutation_parent_b_id > 0
 					&& $mutation_child_id > 0
-					&& $mutation_pending_child_id > 0,
+					&& $mutation_pending_child_id > 0
+					&& $author_excluded_a_id > 0
+					&& $author_excluded_b_id > 0,
 				'custom post type single permalink fallback fixtures register and insert generated hierarchy rows',
 				array(
 					'registrations' => array(
@@ -3551,6 +3560,10 @@ final class ContentLifecycleSurface {
 						'plain'  => $plain_registration instanceof \WP_Post_Type ? $plain_registration->name : self::error_summary( $plain_registration ),
 					),
 					'posts'         => array_map( static fn ( int $post_id ): ?array => self::post_summary( \get_post( $post_id ) ), $post_ids ),
+					'authors'       => array(
+						'excludedA' => $author_excluded_a_id,
+						'excludedB' => $author_excluded_b_id,
+					),
 				)
 			);
 
@@ -4377,6 +4390,86 @@ final class ContentLifecycleSurface {
 			);
 			$excluded_post_key_boundaries_hold = ! in_array( false, $excluded_post_canonical_reversed_keys_shared, true )
 				&& ! in_array( false, $excluded_post_duplicate_keys_distinct, true );
+			$excluded_author_variants = array(
+				'canonical'  => array(
+					'authors' => array( $author_excluded_a_id, $author_excluded_b_id ),
+				),
+				'reversed'   => array(
+					'authors' => array( $author_excluded_b_id, $author_excluded_a_id ),
+				),
+				'duplicated' => array(
+					'authors' => array( $author_excluded_a_id, $author_excluded_b_id, $author_excluded_a_id, $author_excluded_b_id ),
+				),
+			);
+			$excluded_author_keys = array(
+				'ids'      => array(),
+				'idParent' => array(),
+				'object'   => array(),
+			);
+			$excluded_author_checks = array();
+			$excluded_author_query_var_checks = array();
+			$excluded_author_actual = array();
+			foreach ( $excluded_author_variants as $variant => $config ) {
+				$variant_args = array_merge(
+					$ordering_id_args,
+					array(
+						'post_parent__in'     => null,
+						'post_parent__not_in' => null,
+						'post__not_in'        => null,
+						'author__not_in'      => $config['authors'],
+					)
+				);
+				$buckets = array(
+					'ids'      => $query_parent_status_bucket( $pretty_type, 0, 'publish', 'ids', $variant_args ),
+					'idParent' => $query_parent_status_bucket( $pretty_type, 0, 'publish', 'id=>parent', $variant_args ),
+					'object'   => $query_parent_status_bucket( $pretty_type, 0, 'publish', 'all', $variant_args ),
+				);
+				$expected_query_var = array_values( array_unique( array_map( 'absint', $config['authors'] ) ) );
+				sort( $expected_query_var );
+
+				$excluded_author_checks[ $variant ] = $query_ordering_family_is_valid( $buckets['ids'], $buckets['idParent'], $buckets['object'], $excluded_parent_expected, $excluded_parent_map_expected, $excluded_parent_status_expected );
+				$excluded_author_query_var_checks[ $variant ] = $expected_query_var === array_values( array_map( 'intval', (array) ( $buckets['ids']['queryVars']['author__not_in'] ?? array() ) ) )
+					&& $expected_query_var === array_values( array_map( 'intval', (array) ( $buckets['idParent']['queryVars']['author__not_in'] ?? array() ) ) )
+					&& $expected_query_var === array_values( array_map( 'intval', (array) ( $buckets['object']['queryVars']['author__not_in'] ?? array() ) ) );
+				$excluded_author_keys['ids'][] = $buckets['ids']['cacheKey'];
+				$excluded_author_keys['idParent'][] = $buckets['idParent']['cacheKey'];
+				$excluded_author_keys['object'][] = $buckets['object']['cacheKey'];
+				$excluded_author_actual[ $variant ] = array(
+					'authorsArg' => $config['authors'],
+					'queryVar'   => array(
+						'ids'      => array_values( array_map( 'intval', (array) ( $buckets['ids']['queryVars']['author__not_in'] ?? array() ) ) ),
+						'idParent' => array_values( array_map( 'intval', (array) ( $buckets['idParent']['queryVars']['author__not_in'] ?? array() ) ) ),
+						'object'   => array_values( array_map( 'intval', (array) ( $buckets['object']['queryVars']['author__not_in'] ?? array() ) ) ),
+					),
+					'keys'       => array(
+						'ids'      => substr( md5( $buckets['ids']['cacheKey'] ), 0, 8 ),
+						'idParent' => substr( md5( $buckets['idParent']['cacheKey'] ), 0, 8 ),
+						'object'   => substr( md5( $buckets['object']['cacheKey'] ), 0, 8 ),
+					),
+					'requests'   => array(
+						'ids'      => substr( md5( $buckets['ids']['request'] ), 0, 8 ),
+						'idParent' => substr( md5( $buckets['idParent']['request'] ), 0, 8 ),
+						'object'   => substr( md5( $buckets['object']['request'] ), 0, 8 ),
+					),
+					'ids'        => array(
+						'ids'      => $buckets['ids']['ids'],
+						'idParent' => $buckets['idParent']['ids'],
+						'object'   => $buckets['object']['ids'],
+					),
+					'parents'    => array(
+						'idParent' => $buckets['idParent']['parents'],
+						'object'   => $buckets['object']['parents'],
+					),
+					'statuses'   => $buckets['object']['statuses'],
+				);
+			}
+			$excluded_author_valid = ! in_array( false, $excluded_author_checks, true )
+				&& ! in_array( false, $excluded_author_query_var_checks, true );
+			$excluded_author_keys_shared_by_field = array();
+			foreach ( $excluded_author_keys as $field => $keys ) {
+				$excluded_author_keys_shared_by_field[ $field ] = 1 === count( array_unique( $keys ) );
+			}
+			$excluded_author_keys_shared = ! in_array( false, $excluded_author_keys_shared_by_field, true );
 			$normalized_slug_variants = array(
 				'canonical'  => array(
 					'slugs' => array( $pretty_child_slug, $pretty_cross_type_child_slug ),
@@ -4639,6 +4732,36 @@ final class ContentLifecycleSurface {
 
 			self::collect_failure(
 				$failures,
+				$excluded_author_valid
+					&& $excluded_author_keys_shared,
+				'WP_Query normalizes generated custom hierarchical author exclusion cache keys across duplicate and reversed author arrays',
+				array(
+					'checks'           => array(
+						'variantsValid'               => $excluded_author_checks,
+						'queryVarsSortedUnique'       => $excluded_author_query_var_checks,
+						'keysSharedByField'           => $excluded_author_keys_shared_by_field,
+					),
+					'excludedAuthors'  => array(
+						$author_excluded_a_id,
+						$author_excluded_b_id,
+					),
+					'excludedIds'      => array(
+						$pretty_child_id,
+						$pretty_cross_type_child_id,
+					),
+					'expectedIds'      => $excluded_parent_expected,
+					'expectedParents'  => $excluded_parent_map_expected,
+					'expectedStatuses' => $excluded_parent_status_expected,
+					'uniqueKeyHashes'  => array_map(
+						static fn ( array $keys ): array => array_values( array_unique( array_map( static fn ( string $key ): string => substr( md5( $key ), 0, 8 ), $keys ) ) ),
+						$excluded_author_keys
+					),
+					'variants'         => $excluded_author_actual,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
 				$normalized_slug_valid
 					&& $normalized_slug_keys_shared,
 				'WP_Query normalizes generated custom hierarchical slug filter cache keys across duplicate and reversed post_name arrays',
@@ -4828,6 +4951,14 @@ final class ContentLifecycleSurface {
 				}
 			}
 
+			if ( function_exists( 'wp_delete_user' ) ) {
+				foreach ( array_reverse( array_unique( array_map( 'intval', $user_ids ) ) ) as $user_id ) {
+					if ( $user_id > 0 ) {
+						\wp_delete_user( $user_id );
+					}
+				}
+			}
+
 			foreach ( $post_types as $post_type ) {
 				if ( function_exists( 'unregister_post_type' ) && \post_type_exists( $post_type ) ) {
 					\unregister_post_type( $post_type );
@@ -4888,6 +5019,7 @@ final class ContentLifecycleSurface {
 				'countsBefore'      => $counts_before,
 				'countsAfter'       => $counts_after_cleanup,
 				'postIds'           => $post_ids,
+				'userIds'           => $user_ids,
 			)
 		);
 
