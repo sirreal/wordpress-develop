@@ -1095,6 +1095,10 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 				return $this->component_fuzz_project_rows( $rows, array( 'ID', 'post_name', 'post_parent', 'post_type' ) );
 			}
 
+			if ( preg_match( '/SELECT\s+ID\s*,\s*post_parent\b/i', $query ) ) {
+				return $this->component_fuzz_project_rows( $rows, array( 'ID', 'post_parent' ) );
+			}
+
 			if ( preg_match( '/SELECT\s+ID\b/i', $query ) ) {
 				return $this->component_fuzz_project_rows( $rows, array( 'ID' ) );
 			}
