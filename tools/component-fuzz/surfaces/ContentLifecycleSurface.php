@@ -4090,6 +4090,39 @@ final class ContentLifecycleSurface {
 			$ordering_parent_in_ids_bucket = $query_parent_status_bucket( $pretty_type, 0, 'publish', 'ids', $ordering_parent_in_args );
 			$ordering_parent_in_id_parent_bucket = $query_parent_status_bucket( $pretty_type, 0, 'publish', 'id=>parent', $ordering_parent_in_args );
 			$ordering_parent_in_object_bucket = $query_parent_status_bucket( $pretty_type, 0, 'publish', 'all', $ordering_parent_in_args );
+			$normalized_parent_variants = array(
+				'canonical'  => array(
+					'parents' => array( $query_parent_id, $pretty_parent_id ),
+					'buckets' => array(
+						'ids'      => $ordering_id_ids_bucket,
+						'idParent' => $ordering_id_id_parent_bucket,
+						'object'   => $ordering_id_object_bucket,
+					),
+				),
+				'reversed'   => array(
+					'parents' => array( $pretty_parent_id, $query_parent_id ),
+				),
+				'duplicated' => array(
+					'parents' => array( $query_parent_id, $pretty_parent_id, $pretty_parent_id, $query_parent_id ),
+				),
+			);
+			foreach ( $normalized_parent_variants as $variant => $config ) {
+				if ( isset( $config['buckets'] ) ) {
+					continue;
+				}
+
+				$variant_args = array_merge(
+					$ordering_id_args,
+					array(
+						'post_parent__in' => $config['parents'],
+					)
+				);
+				$normalized_parent_variants[ $variant ]['buckets'] = array(
+					'ids'      => $query_parent_status_bucket( $pretty_type, 0, 'publish', 'ids', $variant_args ),
+					'idParent' => $query_parent_status_bucket( $pretty_type, 0, 'publish', 'id=>parent', $variant_args ),
+					'object'   => $query_parent_status_bucket( $pretty_type, 0, 'publish', 'all', $variant_args ),
+				);
+			}
 			$ordering_id_keys = array(
 				$ordering_id_ids_bucket['cacheKey'],
 				$ordering_id_id_parent_bucket['cacheKey'],
@@ -4103,6 +4136,49 @@ final class ContentLifecycleSurface {
 			$ordering_id_family_valid = $query_ordering_family_is_valid( $ordering_id_ids_bucket, $ordering_id_id_parent_bucket, $ordering_id_object_bucket, $ordering_id_expected, $ordering_parent_expected, $ordering_status_expected );
 			$ordering_parent_in_family_valid = $query_ordering_family_is_valid( $ordering_parent_in_ids_bucket, $ordering_parent_in_id_parent_bucket, $ordering_parent_in_object_bucket, $ordering_parent_in_expected, $ordering_parent_expected, $ordering_status_expected );
 			$ordering_keys_disjoint = array() === array_intersect( $ordering_id_keys, $ordering_parent_in_keys );
+			$normalized_parent_filter_keys = array(
+				'ids'      => array(),
+				'idParent' => array(),
+				'object'   => array(),
+			);
+			$normalized_parent_filter_checks = array();
+			$normalized_parent_filter_actual = array();
+			foreach ( $normalized_parent_variants as $variant => $config ) {
+				$buckets = $config['buckets'];
+				$normalized_parent_filter_checks[ $variant ] = $query_ordering_family_is_valid( $buckets['ids'], $buckets['idParent'], $buckets['object'], $ordering_id_expected, $ordering_parent_expected, $ordering_status_expected );
+				$normalized_parent_filter_keys['ids'][] = $buckets['ids']['cacheKey'];
+				$normalized_parent_filter_keys['idParent'][] = $buckets['idParent']['cacheKey'];
+				$normalized_parent_filter_keys['object'][] = $buckets['object']['cacheKey'];
+				$normalized_parent_filter_actual[ $variant ] = array(
+					'parentsArg' => $config['parents'],
+					'keys'       => array(
+						'ids'      => substr( md5( $buckets['ids']['cacheKey'] ), 0, 8 ),
+						'idParent' => substr( md5( $buckets['idParent']['cacheKey'] ), 0, 8 ),
+						'object'   => substr( md5( $buckets['object']['cacheKey'] ), 0, 8 ),
+					),
+					'requests'   => array(
+						'ids'      => substr( md5( $buckets['ids']['request'] ), 0, 8 ),
+						'idParent' => substr( md5( $buckets['idParent']['request'] ), 0, 8 ),
+						'object'   => substr( md5( $buckets['object']['request'] ), 0, 8 ),
+					),
+					'ids'        => array(
+						'ids'      => $buckets['ids']['ids'],
+						'idParent' => $buckets['idParent']['ids'],
+						'object'   => $buckets['object']['ids'],
+					),
+					'parents'    => array(
+						'idParent' => $buckets['idParent']['parents'],
+						'object'   => $buckets['object']['parents'],
+					),
+					'statuses'   => $buckets['object']['statuses'],
+				);
+			}
+			$normalized_parent_filter_valid = ! in_array( false, $normalized_parent_filter_checks, true );
+			$normalized_parent_filter_keys_shared_by_field = array();
+			foreach ( $normalized_parent_filter_keys as $field => $keys ) {
+				$normalized_parent_filter_keys_shared_by_field[ $field ] = 1 === count( array_unique( $keys ) );
+			}
+			$normalized_parent_filter_keys_shared = ! in_array( false, $normalized_parent_filter_keys_shared_by_field, true );
 			$mutation_initial_after = \get_page_by_path( $mutation_initial_path, OBJECT, $mutation_lookup_types );
 			$mutation_reparented_after = \get_page_by_path( $mutation_reparented_path, ARRAY_A, $mutation_lookup_types );
 			$mutation_initial_cached_after_lookup = \wp_cache_get_salted( 'get_page_by_path:' . $mutation_initial_hash, 'post-queries', $mutation_last_changed_after );
@@ -4210,6 +4286,27 @@ final class ContentLifecycleSurface {
 						'idOrdered'     => $ordering_id_object_bucket['statuses'],
 						'parentOrdered' => $ordering_parent_in_object_bucket['statuses'],
 					),
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$normalized_parent_filter_valid
+					&& $normalized_parent_filter_keys_shared,
+				'WP_Query normalizes generated custom hierarchical parent filter cache keys across duplicate and reversed parent arrays',
+				array(
+					'checks'           => array(
+						'variantsValid'     => $normalized_parent_filter_checks,
+						'keysSharedByField' => $normalized_parent_filter_keys_shared_by_field,
+					),
+					'expectedIds'      => $ordering_id_expected,
+					'expectedParents'  => $ordering_parent_expected,
+					'expectedStatuses' => $ordering_status_expected,
+					'uniqueKeyHashes'  => array_map(
+						static fn ( array $keys ): array => array_values( array_unique( array_map( static fn ( string $key ): string => substr( md5( $key ), 0, 8 ), $keys ) ) ),
+						$normalized_parent_filter_keys
+					),
+					'variants'         => $normalized_parent_filter_actual,
 				)
 			);
 
