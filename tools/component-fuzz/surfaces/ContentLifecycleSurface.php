@@ -3337,6 +3337,7 @@ final class ContentLifecycleSurface {
 				'cache'       => '' === $key ? false : \wp_cache_get_salted( $key, 'post-queries', $salt ),
 				'lastChanged' => $salt,
 				'request'     => $query->request,
+				'queryVars'   => $query->query_vars,
 			);
 		};
 		$query_bucket_has_ids = static function ( array $bucket, array $expected_ids ): bool {
@@ -4179,6 +4180,117 @@ final class ContentLifecycleSurface {
 				$normalized_parent_filter_keys_shared_by_field[ $field ] = 1 === count( array_unique( $keys ) );
 			}
 			$normalized_parent_filter_keys_shared = ! in_array( false, $normalized_parent_filter_keys_shared_by_field, true );
+			$excluded_parent_variants = array(
+				'canonical'  => array(
+					'parents' => array( $query_parent_id, $pretty_parent_id ),
+				),
+				'reversed'   => array(
+					'parents' => array( $pretty_parent_id, $query_parent_id ),
+				),
+				'duplicated' => array(
+					'parents' => array( $query_parent_id, $pretty_parent_id, $pretty_parent_id, $query_parent_id ),
+				),
+			);
+			$excluded_parent_expected = array(
+				$pretty_parent_id,
+				$pretty_missing_parent_id,
+				$pretty_self_parent_id,
+				$pretty_private_child_id,
+				$pretty_trash_child_id,
+				$pretty_mixed_root_id,
+				$pretty_mixed_leaf_id,
+				$pretty_mixed_middle_id,
+				$mutation_parent_a_id,
+			);
+			sort( $excluded_parent_expected );
+			$excluded_parent_map_expected = array(
+				$pretty_parent_id         => 0,
+				$pretty_missing_parent_id => $missing_parent_id,
+				$pretty_self_parent_id    => $pretty_self_parent_id,
+				$pretty_private_child_id  => $pretty_private_parent_id,
+				$pretty_trash_child_id    => $pretty_trash_parent_id,
+				$pretty_mixed_root_id     => 0,
+				$pretty_mixed_leaf_id     => $query_mixed_middle_id,
+				$pretty_mixed_middle_id   => $query_mixed_root_id,
+				$mutation_parent_a_id     => 0,
+			);
+			$excluded_parent_status_expected = array_fill_keys( $excluded_parent_expected, 'publish' );
+			ksort( $excluded_parent_map_expected );
+			ksort( $excluded_parent_status_expected );
+			$excluded_parent_keys = array(
+				'ids'      => array(),
+				'idParent' => array(),
+				'object'   => array(),
+			);
+			$excluded_parent_checks = array();
+			$excluded_parent_query_var_checks = array();
+			$excluded_parent_actual = array();
+			foreach ( $excluded_parent_variants as $variant => $config ) {
+				$variant_args = array_merge(
+					$ordering_id_args,
+					array(
+						'post_parent__in'     => null,
+						'post_parent__not_in' => $config['parents'],
+					)
+				);
+				$buckets = array(
+					'ids'      => $query_parent_status_bucket( $pretty_type, 0, 'publish', 'ids', $variant_args ),
+					'idParent' => $query_parent_status_bucket( $pretty_type, 0, 'publish', 'id=>parent', $variant_args ),
+					'object'   => $query_parent_status_bucket( $pretty_type, 0, 'publish', 'all', $variant_args ),
+				);
+				$expected_query_var = array_values( array_map( 'intval', $config['parents'] ) );
+				sort( $expected_query_var );
+
+				$excluded_parent_checks[ $variant ] = $query_ordering_family_is_valid( $buckets['ids'], $buckets['idParent'], $buckets['object'], $excluded_parent_expected, $excluded_parent_map_expected, $excluded_parent_status_expected );
+				$excluded_parent_query_var_checks[ $variant ] = $expected_query_var === array_values( array_map( 'intval', (array) ( $buckets['ids']['queryVars']['post_parent__not_in'] ?? array() ) ) )
+					&& $expected_query_var === array_values( array_map( 'intval', (array) ( $buckets['idParent']['queryVars']['post_parent__not_in'] ?? array() ) ) )
+					&& $expected_query_var === array_values( array_map( 'intval', (array) ( $buckets['object']['queryVars']['post_parent__not_in'] ?? array() ) ) );
+				$excluded_parent_keys['ids'][] = $buckets['ids']['cacheKey'];
+				$excluded_parent_keys['idParent'][] = $buckets['idParent']['cacheKey'];
+				$excluded_parent_keys['object'][] = $buckets['object']['cacheKey'];
+				$excluded_parent_actual[ $variant ] = array(
+					'parentsArg' => $config['parents'],
+					'queryVar'   => array(
+						'ids'      => array_values( array_map( 'intval', (array) ( $buckets['ids']['queryVars']['post_parent__not_in'] ?? array() ) ) ),
+						'idParent' => array_values( array_map( 'intval', (array) ( $buckets['idParent']['queryVars']['post_parent__not_in'] ?? array() ) ) ),
+						'object'   => array_values( array_map( 'intval', (array) ( $buckets['object']['queryVars']['post_parent__not_in'] ?? array() ) ) ),
+					),
+					'keys'       => array(
+						'ids'      => substr( md5( $buckets['ids']['cacheKey'] ), 0, 8 ),
+						'idParent' => substr( md5( $buckets['idParent']['cacheKey'] ), 0, 8 ),
+						'object'   => substr( md5( $buckets['object']['cacheKey'] ), 0, 8 ),
+					),
+					'requests'   => array(
+						'ids'      => substr( md5( $buckets['ids']['request'] ), 0, 8 ),
+						'idParent' => substr( md5( $buckets['idParent']['request'] ), 0, 8 ),
+						'object'   => substr( md5( $buckets['object']['request'] ), 0, 8 ),
+					),
+					'ids'        => array(
+						'ids'      => $buckets['ids']['ids'],
+						'idParent' => $buckets['idParent']['ids'],
+						'object'   => $buckets['object']['ids'],
+					),
+					'parents'    => array(
+						'idParent' => $buckets['idParent']['parents'],
+						'object'   => $buckets['object']['parents'],
+					),
+					'statuses'   => $buckets['object']['statuses'],
+				);
+			}
+			$excluded_parent_valid = ! in_array( false, $excluded_parent_checks, true )
+				&& ! in_array( false, $excluded_parent_query_var_checks, true );
+			$excluded_parent_canonical_reversed_keys_shared = array(
+				'ids'      => ( $excluded_parent_keys['ids'][0] ?? null ) === ( $excluded_parent_keys['ids'][1] ?? false ),
+				'idParent' => ( $excluded_parent_keys['idParent'][0] ?? null ) === ( $excluded_parent_keys['idParent'][1] ?? false ),
+				'object'   => ( $excluded_parent_keys['object'][0] ?? null ) === ( $excluded_parent_keys['object'][1] ?? false ),
+			);
+			$excluded_parent_duplicate_keys_distinct = array(
+				'ids'      => ( $excluded_parent_keys['ids'][0] ?? null ) !== ( $excluded_parent_keys['ids'][2] ?? null ),
+				'idParent' => ( $excluded_parent_keys['idParent'][0] ?? null ) !== ( $excluded_parent_keys['idParent'][2] ?? null ),
+				'object'   => ( $excluded_parent_keys['object'][0] ?? null ) !== ( $excluded_parent_keys['object'][2] ?? null ),
+			);
+			$excluded_parent_key_boundaries_hold = ! in_array( false, $excluded_parent_canonical_reversed_keys_shared, true )
+				&& ! in_array( false, $excluded_parent_duplicate_keys_distinct, true );
 			$mutation_initial_after = \get_page_by_path( $mutation_initial_path, OBJECT, $mutation_lookup_types );
 			$mutation_reparented_after = \get_page_by_path( $mutation_reparented_path, ARRAY_A, $mutation_lookup_types );
 			$mutation_initial_cached_after_lookup = \wp_cache_get_salted( 'get_page_by_path:' . $mutation_initial_hash, 'post-queries', $mutation_last_changed_after );
@@ -4307,6 +4419,29 @@ final class ContentLifecycleSurface {
 						$normalized_parent_filter_keys
 					),
 					'variants'         => $normalized_parent_filter_actual,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$excluded_parent_valid
+					&& $excluded_parent_key_boundaries_hold,
+				'WP_Query preserves generated custom hierarchical parent exclusion cache-key boundaries across duplicate and reversed parent arrays',
+				array(
+					'checks'           => array(
+						'variantsValid'                 => $excluded_parent_checks,
+						'queryVarsSortedWithDuplicates' => $excluded_parent_query_var_checks,
+						'canonicalReversedKeysShared'   => $excluded_parent_canonical_reversed_keys_shared,
+						'duplicateKeysDistinct'         => $excluded_parent_duplicate_keys_distinct,
+					),
+					'expectedIds'      => $excluded_parent_expected,
+					'expectedParents'  => $excluded_parent_map_expected,
+					'expectedStatuses' => $excluded_parent_status_expected,
+					'uniqueKeyHashes'  => array_map(
+						static fn ( array $keys ): array => array_values( array_unique( array_map( static fn ( string $key ): string => substr( md5( $key ), 0, 8 ), $keys ) ) ),
+						$excluded_parent_keys
+					),
+					'variants'         => $excluded_parent_actual,
 				)
 			);
 

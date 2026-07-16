@@ -969,6 +969,17 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 				);
 			}
 
+			$not_ids = $this->component_fuzz_not_in_values( $query, 'ID' );
+			if ( array() !== $not_ids ) {
+				$not_id_map = array_fill_keys( array_map( 'intval', $not_ids ), true );
+				$rows       = array_filter(
+					$rows,
+					static function ( $row ) use ( $not_id_map ) {
+						return ! isset( $not_id_map[ (int) $row['ID'] ] );
+					}
+				);
+			}
+
 			$id_not = $this->component_fuzz_not_compare_value( $query, 'ID' );
 			if ( null !== $id_not ) {
 				$rows = array_filter(
@@ -1061,6 +1072,24 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 					$rows,
 					static function ( $row ) use ( $column, $value_map ) {
 						return isset( $value_map[ (string) $row[ $column ] ] );
+					}
+				);
+			}
+
+			foreach ( array( 'post_name', 'post_parent', 'post_status' ) as $column ) {
+				if ( $status_or_handled && 'post_status' === $column ) {
+					continue;
+				}
+
+				$values = $this->component_fuzz_not_in_values( $query, $column );
+				if ( array() === $values ) {
+					continue;
+				}
+				$value_map = array_fill_keys( array_map( 'strval', $values ), true );
+				$rows      = array_filter(
+					$rows,
+					static function ( $row ) use ( $column, $value_map ) {
+						return ! isset( $value_map[ (string) $row[ $column ] ] );
 					}
 				);
 			}
@@ -3269,6 +3298,15 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 		private function component_fuzz_in_values( $query, $column ) {
 			$column = preg_quote( $column, '/' );
 			if ( ! preg_match( '/(?<![A-Za-z0-9_])(?:`?[a-z_][a-z0-9_]*`?\.)?`?' . $column . '`?(?![A-Za-z0-9_])\s+IN\s*\(([^)]*)\)/i', (string) $query, $matches ) ) {
+				return array();
+			}
+
+			return $this->component_fuzz_csv_values( $matches[1] );
+		}
+
+		private function component_fuzz_not_in_values( $query, $column ) {
+			$column = preg_quote( $column, '/' );
+			if ( ! preg_match( '/(?<![A-Za-z0-9_])(?:`?[a-z_][a-z0-9_]*`?\.)?`?' . $column . '`?(?![A-Za-z0-9_])\s+NOT\s+IN\s*\(([^)]*)\)/i', (string) $query, $matches ) ) {
 				return array();
 			}
 
