@@ -40,6 +40,7 @@ final class AdminMediaChromeSurface {
 			$rows[] = self::check_media_url_insert_dispatch_exits( $ctx->fork( 'legacy-url-insert' ) );
 			$rows[] = self::check_media_gallery_save_iframe_dispatch( $ctx->fork( 'legacy-gallery-save' ) );
 			$rows[] = self::check_media_type_iframe_dispatch( $ctx->fork( 'legacy-type-iframe' ) );
+			$rows[] = self::check_media_upload_entry_dispatch( $ctx->fork( 'legacy-entry-dispatch' ) );
 			$rows[] = self::check_media_attach_action_redirect_exit( $ctx->fork( 'media-attach-action' ) );
 			$rows[] = self::check_media_enqueue_and_iframe_shell( $ctx->fork( 'modal-enqueue-shell' ) );
 			$rows[] = self::check_media_button_and_bypass_output( $ctx->fork( 'media-buttons' ) );
@@ -114,6 +115,7 @@ final class AdminMediaChromeSurface {
 				'sanitize_html_class',
 				'size_format',
 				'the_media_upload_tabs',
+				'update_gallery_tab',
 				'wp_get_attachment_image',
 				'wp_get_attachment_image_src',
 				'wp_get_attachment_metadata',
@@ -137,11 +139,13 @@ final class AdminMediaChromeSurface {
 				'wp_editor',
 				'wp_ext2type',
 				'wp_register_script',
+				'wp_register_style',
 				'wp_redirect',
 				'wp_script_is',
 				'wp_scripts',
 				'wp_set_current_user',
 				'wp_style_is',
+				'wp_styles',
 			) as $function
 		) {
 			if ( ! function_exists( $function ) ) {
@@ -4152,6 +4156,897 @@ PHP;
 			),
 			'default no-POST branch fires upload UI hooks once while rendering the type form',
 			array( 'uploadActionCounts' => $result['uploadActionCounts'] ?? array() )
+		);
+	}
+
+	private static function check_media_upload_entry_dispatch( \ComponentFuzz\FuzzContext $ctx ): array {
+		$missing = self::media_attach_action_child_missing_requirements();
+		if ( array() !== $missing ) {
+			return self::row(
+				$ctx,
+				'admin-media-chrome.legacy-media-upload-entry-dispatch',
+				true,
+				array(
+					'missing' => $missing,
+					'reason'  => 'Required local subprocess APIs are unavailable.',
+				),
+				'skipped'
+			);
+		}
+
+		$failures = array();
+		$runs     = array();
+
+		foreach ( self::media_upload_entry_cases( $ctx ) as $case ) {
+			$run    = self::run_media_upload_entry_child_process( $case );
+			$result = is_array( $run['result'] ?? null ) ? $run['result'] : array();
+
+			$runs[ $case['label'] ] = array(
+				'ok'       => $run['ok'] ?? false,
+				'exitCode' => $run['exitCode'] ?? null,
+				'stderr'   => self::describe_string( (string) ( $run['stderr'] ?? '' ) ),
+				'stdout'   => self::describe_string( (string) ( $run['stdout'] ?? '' ) ),
+				'result'   => array(
+					'returned'                => $result['returned'] ?? null,
+					'throwable'               => $result['throwable'] ?? null,
+					'dieCalls'                => $result['dieCalls'] ?? array(),
+					'actionEvents'            => $result['actionEvents'] ?? array(),
+					'defaultTypeEventCount'   => is_array( $result['defaultTypeEvents'] ?? null ) ? count( $result['defaultTypeEvents'] ) : null,
+					'defaultTabEventCount'    => is_array( $result['defaultTabEvents'] ?? null ) ? count( $result['defaultTabEvents'] ) : null,
+					'tabsEventCount'          => is_array( $result['tabsEvents'] ?? null ) ? count( $result['tabsEvents'] ) : null,
+					'uploadCapEvents'         => $result['uploadCapEvents'] ?? array(),
+					'postCapEvents'           => $result['postCapEvents'] ?? array(),
+					'resolvedType'            => $result['resolvedType'] ?? null,
+					'resolvedTab'             => $result['resolvedTab'] ?? null,
+					'resolvedBodyId'          => $result['resolvedBodyId'] ?? null,
+					'iframeRequestDefined'    => $result['iframeRequestDefined'] ?? null,
+					'sourceBootstrapRemovals' => $result['sourceBootstrapRemovals'] ?? null,
+					'assetStatus'             => $result['assetStatus'] ?? array(),
+					'output'                  => self::describe_string( (string) ( $result['output'] ?? '' ) ),
+				),
+			);
+
+			self::collect_failure(
+				$failures,
+				true === ( $run['ok'] ?? false ) && self::media_upload_entry_child_result_has_expected_shape( $result ),
+				"{$case['label']} child evaluates media-upload.php entry source and reports structured JSON",
+				array(
+					'run'    => $run,
+					'result' => $result,
+				)
+			);
+
+			if ( ! self::media_upload_entry_child_result_has_expected_shape( $result ) ) {
+				continue;
+			}
+
+			self::collect_media_upload_entry_failures( $failures, $case, $result );
+		}
+
+		return self::row(
+			$ctx,
+			'admin-media-chrome.legacy-media-upload-entry-dispatch',
+			array() === $failures,
+			array(
+				'failures' => $failures,
+				'runs'     => $runs,
+			)
+		);
+	}
+
+	private static function media_upload_entry_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$build = static function ( string $label, array $args, \ComponentFuzz\FuzzContext $case_ctx ): array {
+			$token = self::media_upload_dispatch_token( 'entry_' . $case_ctx->identifier( 4, 9 ) );
+
+			return array_merge(
+				array(
+					'label'                    => $label,
+					'seed'                     => $case_ctx->seed(),
+					'iteration'                => $case_ctx->iteration(),
+					'token'                    => $token,
+					'allowUpload'              => true,
+					'allowPostEdit'            => true,
+					'requestType'              => null,
+					'requestTab'               => null,
+					'requestPostId'            => null,
+					'requestInline'            => false,
+					'localAction'              => null,
+					'localId'                  => null,
+					'localPostId'              => null,
+					'defaultType'              => 'file',
+					'defaultTab'               => 'type',
+					'registerTab'              => null,
+					'expectedHook'             => null,
+					'expectedType'             => null,
+					'expectedTab'              => null,
+					'expectedBodyId'           => 'media-upload',
+					'expectedIframe'           => true,
+					'expectedEnqueued'         => true,
+					'expectedReturned'         => true,
+					'expectedDieText'          => null,
+					'expectDefaultTypeFilter'  => false,
+					'expectDefaultTabFilter'   => false,
+					'expectTabsFilter'         => false,
+					'expectedResolvedId'       => null,
+					'expectedResolvedPostId'   => null,
+					'expectPostCapabilityGate' => false,
+					'expectedPostCapabilityAllowed' => null,
+					'expectedPostCapabilityPostId'  => null,
+					'applyUpdateGalleryTab'    => false,
+					'seedGalleryAttachment'    => false,
+					'expectedTabsContain'      => array(),
+					'expectedTabsMissing'      => array(),
+				),
+				$args
+			);
+		};
+
+		$unsafe_type = 'image</script><script>alert(4)</script>';
+
+		return array(
+			$build(
+				'default-filters-select-type-action',
+				array(
+					'defaultType'             => 'video',
+					'defaultTab'              => 'type',
+					'expectedHook'            => 'media_upload_video',
+					'expectedType'            => 'video',
+					'expectedTab'             => 'type',
+					'expectDefaultTypeFilter' => true,
+					'expectDefaultTabFilter'  => true,
+				),
+				$ctx->fork( 'default-filters' )
+			),
+			$build(
+				'registered-library-tab-dispatch',
+				array(
+					'requestType'            => 'image',
+					'requestTab'             => 'library',
+					'localPostId'            => '77</script><script>alert(1)</script>',
+					'expectedHook'           => 'media_upload_library',
+					'expectedType'           => 'image',
+					'expectedTab'            => 'library',
+					'expectTabsFilter'       => true,
+					'expectedResolvedPostId' => 77,
+				),
+				$ctx->fork( 'library-tab' )
+			),
+			$build(
+				'unknown-tab-falls-back-to-type',
+				array(
+					'requestType'        => 'audio',
+					'requestTab'         => 'missing_component_tab',
+					'expectedHook'       => 'media_upload_audio',
+					'expectedType'       => 'audio',
+					'expectedTab'        => 'missing_component_tab',
+					'expectTabsFilter'   => true,
+				),
+				$ctx->fork( 'unknown-tab' )
+			),
+			$build(
+				'custom-tab-dispatches-tab-action',
+				array(
+					'requestType'      => 'file',
+					'requestTab'       => 'cfz_entry_tab',
+					'registerTab'      => 'cfz_entry_tab',
+					'expectedHook'     => 'media_upload_cfz_entry_tab',
+					'expectedType'     => 'file',
+					'expectedTab'      => 'cfz_entry_tab',
+					'expectTabsFilter' => true,
+				),
+				$ctx->fork( 'custom-tab' )
+			),
+			$build(
+				'type-url-dispatches-type-action',
+				array(
+					'requestType'  => 'file',
+					'requestTab'   => 'type_url',
+					'expectedHook' => 'media_upload_file',
+					'expectedType' => 'file',
+					'expectedTab'  => 'type_url',
+				),
+				$ctx->fork( 'type-url' )
+			),
+			$build(
+				'inline-request-skips-iframe-constant',
+				array(
+					'requestType'     => 'image',
+					'requestTab'      => 'type',
+					'requestInline'   => true,
+					'expectedHook'    => 'media_upload_image',
+					'expectedType'    => 'image',
+					'expectedTab'     => 'type',
+					'expectedIframe'  => false,
+				),
+				$ctx->fork( 'inline' )
+			),
+			$build(
+				'unsafe-type-unknown-tab-uses-raw-dynamic-hook',
+				array(
+					'requestType'      => $unsafe_type,
+					'requestTab'       => 'unknown-unsafe-tab',
+					'expectedHook'     => 'media_upload_' . $unsafe_type,
+					'expectedType'     => $unsafe_type,
+					'expectedTab'      => 'unknown-unsafe-tab',
+					'expectTabsFilter' => true,
+				),
+				$ctx->fork( 'unsafe-type' )
+			),
+			$build(
+				'gallery-without-post-id-falls-back-to-type',
+				array(
+					'requestType'           => 'image',
+					'requestTab'            => 'gallery',
+					'applyUpdateGalleryTab' => true,
+					'expectedHook'          => 'media_upload_image',
+					'expectedType'          => 'image',
+					'expectedTab'           => 'gallery',
+					'expectTabsFilter'      => true,
+					'expectedTabsMissing'   => array( 'gallery' ),
+				),
+				$ctx->fork( 'gallery-no-post' )
+			),
+			$build(
+				'gallery-with-attachments-dispatches-gallery-tab',
+				array(
+					'requestType'                   => 'image',
+					'requestTab'                    => 'gallery',
+					'applyUpdateGalleryTab'         => true,
+					'seedGalleryAttachment'         => true,
+					'expectedHook'                  => 'media_upload_gallery',
+					'expectedType'                  => 'image',
+					'expectedTab'                   => 'gallery',
+					'expectTabsFilter'              => true,
+					'expectPostCapabilityGate'      => true,
+					'expectedPostCapabilityAllowed' => true,
+					'expectedTabsContain'           => array( 'gallery' ),
+				),
+				$ctx->fork( 'gallery-with-attachment' )
+			),
+			$build(
+				'upload-capability-denied',
+				array(
+					'allowUpload'      => false,
+					'expectedReturned' => false,
+					'expectedDieText'  => 'not allowed to upload files',
+					'expectedEnqueued' => false,
+					'expectedBodyId'   => null,
+					'expectedIframe'   => true,
+				),
+				$ctx->fork( 'upload-denied' )
+			),
+			$build(
+				'post-edit-capability-denied',
+				array(
+					'requestType'               => 'image',
+					'requestTab'                => 'type',
+					'requestPostId'             => '123</script><script>alert(2)</script>',
+					'allowPostEdit'             => false,
+					'expectedReturned'          => false,
+					'expectedDieText'           => 'not allowed to edit this item',
+					'expectedType'              => null,
+					'expectedTab'               => null,
+					'expectedBodyId'            => null,
+					'expectPostCapabilityGate'  => true,
+					'expectedPostCapabilityAllowed' => false,
+					'expectedPostCapabilityPostId'  => 123,
+				),
+				$ctx->fork( 'post-denied' )
+			),
+			$build(
+				'edit-action-missing-id-denied',
+				array(
+					'requestType'      => 'image',
+					'requestTab'       => 'type',
+					'localAction'      => 'edit',
+					'expectedReturned' => false,
+					'expectedDieText'  => 'Invalid item ID',
+					'expectedType'     => null,
+					'expectedTab'      => null,
+					'expectedBodyId'   => null,
+				),
+				$ctx->fork( 'edit-missing-id' )
+			),
+		);
+	}
+
+	private static function run_media_upload_entry_child_process( array $case ): array {
+		$payload = json_encode(
+			array( 'case' => $case ),
+			JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE
+		);
+
+		if ( false === $payload ) {
+			return array(
+				'ok'       => false,
+				'exitCode' => -1,
+				'stdout'   => '',
+				'stderr'   => 'json_encode failed',
+				'result'   => null,
+			);
+		}
+
+		$descriptors = array(
+			0 => array( 'pipe', 'r' ),
+			1 => array( 'pipe', 'w' ),
+			2 => array( 'pipe', 'w' ),
+		);
+
+		// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.system_calls_proc_open -- Isolates media-upload.php top-level dispatch and wp_die branches in a local PHP subprocess.
+		$process = proc_open( array( PHP_BINARY, '-r', self::media_upload_entry_child_program() ), $descriptors, $pipes, \ComponentFuzz\repo_root() );
+		if ( ! is_resource( $process ) ) {
+			return array(
+				'ok'       => false,
+				'exitCode' => -1,
+				'stdout'   => '',
+				'stderr'   => 'proc_open failed',
+				'result'   => null,
+			);
+		}
+
+		fwrite( $pipes[0], $payload );
+		fclose( $pipes[0] );
+
+		$stdout = stream_get_contents( $pipes[1] );
+		$stderr = stream_get_contents( $pipes[2] );
+		fclose( $pipes[1] );
+		fclose( $pipes[2] );
+
+		$exit_code = proc_close( $process );
+		$result    = json_decode( (string) $stdout, true );
+
+		return array(
+			'ok'       => 0 === $exit_code && is_array( $result ) && true === ( $result['ok'] ?? null ),
+			'exitCode' => $exit_code,
+			'stdout'   => (string) $stdout,
+			'stderr'   => (string) $stderr,
+			'result'   => is_array( $result ) ? $result : null,
+		);
+	}
+
+	private static function media_upload_entry_child_program(): string {
+		return <<<'PHP'
+$component_fuzz_admin_media_raw = stream_get_contents( STDIN );
+$component_fuzz_admin_media_payload = json_decode( $component_fuzz_admin_media_raw, true );
+$case = is_array( $component_fuzz_admin_media_payload['case'] ?? null ) ? $component_fuzz_admin_media_payload['case'] : array();
+
+require_once getcwd() . '/tools/component-fuzz/lib/autoload.php';
+\ComponentFuzz\WpBootstrap::load();
+
+\ComponentFuzz\Surfaces\AdminMediaChromeSurface::run_media_upload_entry_child( $case );
+PHP;
+	}
+
+	public static function run_media_upload_entry_child( array $case ): void {
+		ini_set( 'display_errors', '0' );
+		self::prepare_runtime();
+
+		if ( function_exists( 'update_option' ) ) {
+			\update_option( 'html_type', 'text/html' );
+		}
+
+		$ctx   = new \ComponentFuzz\FuzzContext( (int) ( $case['seed'] ?? 1 ), self::NAME, (int) ( $case['iteration'] ?? 0 ) );
+		$token = self::media_upload_dispatch_token( (string) ( $case['token'] ?? $ctx->identifier( 4, 9 ) ) );
+		$state = array(
+			'ok'                      => false,
+			'label'                   => (string) ( $case['label'] ?? 'entry-dispatch' ),
+			'token'                   => $token,
+			'sourceBootstrapRemovals' => 0,
+			'returned'                => false,
+			'throwable'               => null,
+			'output'                  => '',
+			'contentBefore'           => self::media_url_insert_content_counts(),
+			'contentAfter'            => array(),
+			'assetStatus'             => array(),
+			'actionEvents'            => array(),
+			'defaultTypeEvents'       => array(),
+			'defaultTabEvents'        => array(),
+			'tabsEvents'              => array(),
+			'uploadCapEvents'         => array(),
+			'postCapEvents'           => array(),
+			'dieCalls'                => array(),
+			'resolvedType'            => null,
+			'resolvedTab'             => null,
+			'resolvedBodyId'          => null,
+			'resolvedId'              => null,
+			'resolvedPostId'          => null,
+			'iframeRequestDefined'    => false,
+			'headers'                 => array(),
+			'galleryParentId'         => 0,
+			'galleryAttachmentId'     => 0,
+		);
+
+		$buffer_level = ob_get_level();
+		ob_start();
+
+		register_shutdown_function(
+			static function () use ( &$state, $buffer_level ): void {
+				$output = '';
+				while ( ob_get_level() > $buffer_level ) {
+					$chunk = ob_get_clean();
+					if ( is_string( $chunk ) ) {
+						$output = $chunk . $output;
+					}
+				}
+
+				$state['output']               = $output;
+				$state['contentAfter']         = self::media_url_insert_content_counts();
+				$state['assetStatus']          = self::media_upload_entry_asset_status();
+				$state['iframeRequestDefined'] = defined( 'IFRAME_REQUEST' );
+				$state['headers']              = function_exists( 'headers_list' ) ? headers_list() : array();
+				$state['ok']                   = null === $state['throwable'];
+				echo json_encode( $state, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE ) . "\n";
+			}
+		);
+
+		try {
+			$GLOBALS['pagenow']         = 'media-upload.php';
+			$_SERVER['HTTP_HOST']       = 'example.test';
+			$_SERVER['HTTPS']           = 'off';
+			$_SERVER['PHP_SELF']        = '/wp-admin/media-upload.php';
+			$_SERVER['REQUEST_METHOD']  = 'GET';
+			$_SERVER['HTTP_REFERER']    = 'http://example.test/wp-admin/media-upload.php';
+			$_SERVER['HTTP_USER_AGENT'] = 'component-fuzz/admin-media-upload-entry';
+			$_SERVER['REMOTE_ADDR']     = '198.51.100.49';
+			$_SERVER['SERVER_PORT']     = '80';
+
+			$request = array();
+			if ( null !== ( $case['requestType'] ?? null ) ) {
+				$request['type'] = (string) $case['requestType'];
+			}
+			if ( null !== ( $case['requestTab'] ?? null ) ) {
+				$request['tab'] = (string) $case['requestTab'];
+			}
+			if ( null !== ( $case['requestPostId'] ?? null ) ) {
+				$request['post_id'] = (string) $case['requestPostId'];
+			}
+			if ( ! empty( $case['requestInline'] ) ) {
+				$request['inline'] = '1';
+			}
+			if ( ! empty( $case['seedGalleryAttachment'] ) ) {
+				$gallery_parent     = self::seed_parent_post( $ctx->fork( 'gallery-parent' ) );
+				$gallery_attachment = self::seed_attachment( $ctx->fork( 'gallery-attachment' ), 'image/jpeg', array( 'parent_id' => $gallery_parent ) );
+
+				$state['galleryParentId']     = $gallery_parent;
+				$state['galleryAttachmentId'] = (int) $gallery_attachment->ID;
+				$request['post_id']           = (string) $gallery_parent;
+			}
+
+			$query = http_build_query( $request, '', '&', PHP_QUERY_RFC3986 );
+			$_SERVER['REQUEST_URI'] = '/wp-admin/media-upload.php' . ( '' === $query ? '' : '?' . $query );
+			$_GET                   = $request;
+			$_POST                  = array();
+			$_REQUEST               = $request;
+			$_FILES                 = array();
+			$_COOKIE                = array();
+
+			if ( null !== ( $case['localAction'] ?? null ) ) {
+				$action = (string) $case['localAction'];
+			}
+			if ( array_key_exists( 'localId', $case ) && null !== $case['localId'] ) {
+				$ID = $case['localId']; // phpcs:ignore WordPress.NamingConventions.ValidVariableName
+			}
+			if ( array_key_exists( 'localPostId', $case ) && null !== $case['localPostId'] ) {
+				$post_id = $case['localPostId'];
+			}
+
+			$default_type_filter = static function ( string $type ) use ( &$state, $case ): string {
+				$state['defaultTypeEvents'][] = array( 'input' => $type );
+				return (string) ( $case['defaultType'] ?? $type );
+			};
+			$default_tab_filter  = static function ( string $tab ) use ( &$state, $case ): string {
+				$state['defaultTabEvents'][] = array( 'input' => $tab );
+				return (string) ( $case['defaultTab'] ?? $tab );
+			};
+			$tabs_filter         = static function ( array $tabs ) use ( &$state, $case ): array {
+				$before = array_keys( $tabs );
+				if ( null !== ( $case['registerTab'] ?? null ) ) {
+					$tabs[ (string) $case['registerTab'] ] = 'Component Fuzz';
+				}
+				if ( ! empty( $case['applyUpdateGalleryTab'] ) ) {
+					$tabs = \update_gallery_tab( $tabs );
+				}
+				$state['tabsEvents'][] = array(
+					'before' => $before,
+					'after'  => array_keys( $tabs ),
+				);
+				return $tabs;
+			};
+			$map_meta_cap_filter = static function ( array $caps, string $cap, int $user_id, array $args ) use ( &$state, $case ): array {
+				if ( 'edit_post' !== $cap ) {
+					return $caps;
+				}
+
+				$post_id = (int) ( $args[0] ?? 0 );
+				$allowed = ! empty( $case['allowPostEdit'] );
+				$state['postCapEvents'][] = array(
+					'postId'  => $post_id,
+					'allowed' => $allowed,
+				);
+
+				return $allowed ? array( 'exist' ) : array( 'do_not_allow' );
+			};
+			$user_has_cap_filter = static function ( array $allcaps, array $caps, array $args, $user = null ) use ( &$state, $case ): array {
+				unset( $user );
+				if ( in_array( 'upload_files', $caps, true ) ) {
+					$allowed = ! empty( $case['allowUpload'] );
+					$state['uploadCapEvents'][] = array(
+						'allowed' => $allowed,
+						'args'    => $args,
+					);
+					$allcaps['upload_files'] = $allowed;
+				}
+
+				foreach ( $caps as $cap ) {
+					if ( 'upload_files' === $cap ) {
+						continue;
+					}
+					$allcaps[ $cap ] = 'do_not_allow' !== $cap;
+				}
+
+				return $allcaps;
+			};
+			$die_handler_filter  = static function () use ( &$state ): callable {
+				return static function ( $message = '', $title = '', $args = array() ) use ( &$state ): void {
+					$state['dieCalls'][] = array(
+						'message' => self::media_attach_action_die_message( $message ),
+						'title'   => self::media_attach_action_die_message( $title ),
+						'args'    => is_array( $args ) ? $args : array(),
+					);
+					exit;
+				};
+			};
+			$entry_action        = static function () use ( &$state ): void {
+				$state['actionEvents'][] = array(
+					'hook'     => current_filter(),
+					'didCount' => did_action( current_filter() ),
+				);
+			};
+
+			\add_filter( 'media_upload_default_type', $default_type_filter, 10, 1 );
+			\add_filter( 'media_upload_default_tab', $default_tab_filter, 10, 1 );
+			\add_filter( 'media_upload_tabs', $tabs_filter, 10, 1 );
+			\add_filter( 'map_meta_cap', $map_meta_cap_filter, 10, 4 );
+			\add_filter( 'user_has_cap', $user_has_cap_filter, 10, 4 );
+			\add_filter( 'wp_die_handler', $die_handler_filter, PHP_INT_MAX );
+			if ( is_string( $case['expectedHook'] ?? null ) && '' !== $case['expectedHook'] ) {
+				\add_action( (string) $case['expectedHook'], $entry_action, 10, 0 );
+			}
+
+			\wp_set_current_user( 1 );
+			if ( isset( $GLOBALS['current_user'] ) && $GLOBALS['current_user'] instanceof \WP_User ) {
+				$GLOBALS['current_user']->allcaps = array(
+					'exist'        => true,
+					'upload_files' => ! empty( $case['allowUpload'] ),
+				);
+			}
+
+			foreach ( array( 'plupload-handlers', 'image-edit', 'set-post-thumbnail', 'media-gallery' ) as $handle ) {
+				\wp_register_script( $handle, '/wp-admin/js/' . $handle . '.js', array(), false );
+			}
+			\wp_register_style( 'imgareaselect', '/wp-includes/js/imgareaselect/imgareaselect.css', array(), false );
+			$state['contentBefore'] = self::media_url_insert_content_counts();
+
+			$source_path = \ComponentFuzz\repo_root() . DIRECTORY_SEPARATOR . 'src' . DIRECTORY_SEPARATOR . 'wp-admin' . DIRECTORY_SEPARATOR . 'media-upload.php';
+			$source      = file_get_contents( $source_path );
+			if ( ! is_string( $source ) ) {
+				throw new \RuntimeException( 'Could not read media-upload.php entry source.' );
+			}
+
+			$source = str_replace(
+				"require_once __DIR__ . '/admin.php';",
+				'/* component-fuzz skips the normal admin bootstrap; WpBootstrap already loaded a no-DB runtime. */',
+				$source,
+				$removals
+			);
+			$state['sourceBootstrapRemovals'] = $removals;
+			if ( 1 !== $removals ) {
+				throw new \RuntimeException( 'Could not isolate media-upload.php admin bootstrap include.' );
+			}
+
+			try {
+				// phpcs:ignore Squiz.PHP.Eval.Discouraged -- Evaluates the real media-upload.php entry source after removing only the normal admin bootstrap include.
+				eval( '?>' . $source );
+				$state['returned'] = true;
+			} finally {
+				if ( isset( $type ) ) {
+					$state['resolvedType'] = (string) $type;
+				}
+				if ( isset( $tab ) ) {
+					$state['resolvedTab'] = (string) $tab;
+				}
+				if ( isset( $body_id ) ) {
+					$state['resolvedBodyId'] = (string) $body_id;
+				}
+				if ( isset( $ID ) ) { // phpcs:ignore WordPress.NamingConventions.ValidVariableName
+					$state['resolvedId'] = (int) $ID; // phpcs:ignore WordPress.NamingConventions.ValidVariableName
+				}
+				if ( isset( $post_id ) ) {
+					$state['resolvedPostId'] = (int) $post_id;
+				}
+
+				if ( is_string( $case['expectedHook'] ?? null ) && '' !== $case['expectedHook'] ) {
+					\remove_action( (string) $case['expectedHook'], $entry_action, 10 );
+				}
+				\remove_filter( 'wp_die_handler', $die_handler_filter, PHP_INT_MAX );
+				\remove_filter( 'user_has_cap', $user_has_cap_filter, 10 );
+				\remove_filter( 'map_meta_cap', $map_meta_cap_filter, 10 );
+				\remove_filter( 'media_upload_tabs', $tabs_filter, 10 );
+				\remove_filter( 'media_upload_default_tab', $default_tab_filter, 10 );
+				\remove_filter( 'media_upload_default_type', $default_type_filter, 10 );
+			}
+		} catch ( \Throwable $e ) {
+			$state['throwable'] = self::describe_throwable( $e );
+		}
+	}
+
+	private static function media_upload_entry_asset_status(): array {
+		$wp_scripts = function_exists( 'wp_scripts' ) ? \wp_scripts() : null;
+		$wp_styles  = function_exists( 'wp_styles' ) ? \wp_styles() : null;
+
+		$scripts = array();
+		foreach ( array( 'plupload-handlers', 'image-edit', 'set-post-thumbnail', 'media-gallery' ) as $handle ) {
+			$scripts[ $handle ] = array(
+				'enqueued'   => function_exists( 'wp_script_is' ) ? \wp_script_is( $handle, 'enqueued' ) : null,
+				'registered' => function_exists( 'wp_script_is' ) ? \wp_script_is( $handle, 'registered' ) : null,
+				'queued'     => is_object( $wp_scripts ) && property_exists( $wp_scripts, 'queue' ) && in_array( $handle, $wp_scripts->queue, true ),
+			);
+		}
+
+		$styles = array();
+		foreach ( array( 'imgareaselect' ) as $handle ) {
+			$styles[ $handle ] = array(
+				'enqueued'   => function_exists( 'wp_style_is' ) ? \wp_style_is( $handle, 'enqueued' ) : null,
+				'registered' => function_exists( 'wp_style_is' ) ? \wp_style_is( $handle, 'registered' ) : null,
+				'queued'     => is_object( $wp_styles ) && property_exists( $wp_styles, 'queue' ) && in_array( $handle, $wp_styles->queue, true ),
+			);
+		}
+
+		return array(
+			'scripts' => $scripts,
+			'styles'  => $styles,
+		);
+	}
+
+	private static function media_upload_entry_assets_match( array $asset_status, bool $expected_enqueued ): bool {
+		foreach ( array( 'plupload-handlers', 'image-edit', 'set-post-thumbnail', 'media-gallery' ) as $handle ) {
+			$observed = (bool) ( $asset_status['scripts'][ $handle ]['enqueued'] ?? false )
+				|| (bool) ( $asset_status['scripts'][ $handle ]['queued'] ?? false );
+			if ( $expected_enqueued !== $observed ) {
+				return false;
+			}
+		}
+
+		$style_observed = (bool) ( $asset_status['styles']['imgareaselect']['enqueued'] ?? false )
+			|| (bool) ( $asset_status['styles']['imgareaselect']['queued'] ?? false );
+
+		return $expected_enqueued === $style_observed;
+	}
+
+	private static function media_upload_entry_child_result_has_expected_shape( array $result ): bool {
+		return array_key_exists( 'ok', $result )
+			&& array_key_exists( 'returned', $result )
+			&& is_string( $result['output'] ?? null )
+			&& is_array( $result['contentBefore'] ?? null )
+			&& is_array( $result['contentAfter'] ?? null )
+			&& is_array( $result['assetStatus'] ?? null )
+			&& is_array( $result['actionEvents'] ?? null )
+			&& is_array( $result['defaultTypeEvents'] ?? null )
+			&& is_array( $result['defaultTabEvents'] ?? null )
+			&& is_array( $result['tabsEvents'] ?? null )
+			&& is_array( $result['uploadCapEvents'] ?? null )
+			&& is_array( $result['postCapEvents'] ?? null )
+			&& is_array( $result['dieCalls'] ?? null );
+	}
+
+	private static function collect_media_upload_entry_failures( array &$failures, array $case, array $result ): void {
+		$output        = (string) ( $result['output'] ?? '' );
+		$expected_hook = (string) ( $case['expectedHook'] ?? '' );
+		$expects_die   = is_string( $case['expectedDieText'] ?? null );
+
+		self::collect_failure(
+			$failures,
+			1 === (int) ( $result['sourceBootstrapRemovals'] ?? 0 )
+				&& null === ( $result['throwable'] ?? null ),
+			'media-upload.php entry source is evaluated after removing exactly the normal admin bootstrap include',
+			array(
+				'sourceBootstrapRemovals' => $result['sourceBootstrapRemovals'] ?? null,
+				'throwable'               => $result['throwable'] ?? null,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::media_upload_entry_assets_match(
+				is_array( $result['assetStatus'] ?? null ) ? $result['assetStatus'] : array(),
+				! empty( $case['expectedEnqueued'] )
+			),
+			'entry file enqueues legacy media assets only after the upload_files gate passes',
+			array(
+				'expectedEnqueued' => ! empty( $case['expectedEnqueued'] ),
+				'assetStatus'      => $result['assetStatus'] ?? array(),
+			)
+		);
+
+		if ( $expects_die ) {
+			$die_calls = is_array( $result['dieCalls'] ?? null ) ? $result['dieCalls'] : array();
+			$die_text  = (string) ( $case['expectedDieText'] ?? '' );
+			self::collect_failure(
+				$failures,
+				false === (bool) ( $result['returned'] ?? true )
+					&& 1 === count( $die_calls )
+					&& str_contains( (string) ( $die_calls[0]['message'] ?? '' ), $die_text )
+					&& array() === ( $result['actionEvents'] ?? array() ),
+				'entry capability and edit gates stop before dynamic media_upload_* dispatch',
+				array(
+					'expectedDieText' => $die_text,
+					'dieCalls'        => $die_calls,
+					'actionEvents'    => $result['actionEvents'] ?? array(),
+					'returned'        => $result['returned'] ?? null,
+				)
+			);
+		} else {
+			self::collect_failure(
+				$failures,
+				true === (bool) ( $result['returned'] ?? false )
+					&& array() === ( $result['dieCalls'] ?? array() )
+					&& 1 === count( $result['actionEvents'] ?? array() )
+					&& $expected_hook === (string) ( $result['actionEvents'][0]['hook'] ?? '' ),
+				'entry dispatch reaches exactly the expected dynamic media_upload_* hook without wp_die',
+				array(
+					'expectedHook' => $expected_hook,
+					'actionEvents' => $result['actionEvents'] ?? array(),
+					'dieCalls'     => $result['dieCalls'] ?? array(),
+					'returned'     => $result['returned'] ?? null,
+				)
+			);
+		}
+
+		self::collect_failure(
+			$failures,
+			(bool) ( $case['expectedIframe'] ?? true ) === (bool) ( $result['iframeRequestDefined'] ?? false ),
+			'entry file defines IFRAME_REQUEST unless the inline request flag is present',
+			array(
+				'expectedIframe'        => $case['expectedIframe'] ?? true,
+				'iframeRequestDefined' => $result['iframeRequestDefined'] ?? null,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			( $case['expectedType'] ?? null ) === ( $result['resolvedType'] ?? null )
+				&& ( $case['expectedTab'] ?? null ) === ( $result['resolvedTab'] ?? null )
+				&& ( $case['expectedBodyId'] ?? null ) === ( $result['resolvedBodyId'] ?? null ),
+			'entry file resolves type, tab, and body ID according to request/default filter routing',
+			array(
+				'expectedType'   => $case['expectedType'] ?? null,
+				'resolvedType'   => $result['resolvedType'] ?? null,
+				'expectedTab'    => $case['expectedTab'] ?? null,
+				'resolvedTab'    => $result['resolvedTab'] ?? null,
+				'expectedBodyId' => $case['expectedBodyId'] ?? null,
+				'resolvedBodyId' => $result['resolvedBodyId'] ?? null,
+			)
+		);
+
+		if ( array_key_exists( 'expectedResolvedId', $case ) && null !== $case['expectedResolvedId'] ) {
+			self::collect_failure(
+				$failures,
+				(int) $case['expectedResolvedId'] === (int) ( $result['resolvedId'] ?? -1 ),
+				'entry edit gate casts the local ID before validating edit requests',
+				array(
+					'expectedResolvedId' => $case['expectedResolvedId'],
+					'resolvedId'         => $result['resolvedId'] ?? null,
+				)
+			);
+		}
+
+		if ( array_key_exists( 'expectedResolvedPostId', $case ) && null !== $case['expectedResolvedPostId'] ) {
+			self::collect_failure(
+				$failures,
+				(int) $case['expectedResolvedPostId'] === (int) ( $result['resolvedPostId'] ?? -1 ),
+				'entry file casts the local post_id variable without leaking hostile bytes',
+				array(
+					'expectedResolvedPostId' => $case['expectedResolvedPostId'],
+					'resolvedPostId'         => $result['resolvedPostId'] ?? null,
+				)
+			);
+		}
+
+		self::collect_failure(
+			$failures,
+			! empty( $case['expectDefaultTypeFilter'] ) === ( 1 === count( $result['defaultTypeEvents'] ?? array() ) )
+				&& ! empty( $case['expectDefaultTabFilter'] ) === ( 1 === count( $result['defaultTabEvents'] ?? array() ) )
+				&& ! empty( $case['expectTabsFilter'] ) === ( 1 === count( $result['tabsEvents'] ?? array() ) ),
+			'entry routing applies default type/tab filters only when request values are absent and tab registry only when needed',
+			array(
+				'expectDefaultTypeFilter' => ! empty( $case['expectDefaultTypeFilter'] ),
+				'defaultTypeEvents'       => $result['defaultTypeEvents'] ?? array(),
+				'expectDefaultTabFilter'  => ! empty( $case['expectDefaultTabFilter'] ),
+				'defaultTabEvents'        => $result['defaultTabEvents'] ?? array(),
+				'expectTabsFilter'        => ! empty( $case['expectTabsFilter'] ),
+				'tabsEvents'              => $result['tabsEvents'] ?? array(),
+			)
+		);
+
+		if ( null !== ( $case['registerTab'] ?? null ) && isset( $result['tabsEvents'][0]['after'] ) ) {
+			self::collect_failure(
+				$failures,
+				in_array( (string) $case['registerTab'], $result['tabsEvents'][0]['after'], true ),
+				'custom media_upload_tabs entries participate in registered-tab dispatch',
+				array(
+					'registerTab' => $case['registerTab'],
+					'tabsEvents'  => $result['tabsEvents'] ?? array(),
+				)
+			);
+		}
+
+		if ( isset( $result['tabsEvents'][0]['after'] ) ) {
+			$tabs_after = is_array( $result['tabsEvents'][0]['after'] ) ? $result['tabsEvents'][0]['after'] : array();
+			foreach ( (array) ( $case['expectedTabsContain'] ?? array() ) as $tab ) {
+				self::collect_failure(
+					$failures,
+					in_array( (string) $tab, $tabs_after, true ),
+					'media_upload_tabs filtering keeps expected registered tabs available for dispatch',
+					array(
+						'expectedTab' => $tab,
+						'tabsEvents'  => $result['tabsEvents'] ?? array(),
+					)
+				);
+			}
+			foreach ( (array) ( $case['expectedTabsMissing'] ?? array() ) as $tab ) {
+				self::collect_failure(
+					$failures,
+					! in_array( (string) $tab, $tabs_after, true ),
+					'media_upload_tabs filtering removes unavailable registered tabs before dispatch fallback',
+					array(
+						'removedTab'  => $tab,
+						'tabsEvents'  => $result['tabsEvents'] ?? array(),
+					)
+				);
+			}
+		}
+
+		$post_cap_events = is_array( $result['postCapEvents'] ?? null ) ? $result['postCapEvents'] : array();
+		$post_cap_ok     = array() === $post_cap_events;
+		if ( ! empty( $case['expectPostCapabilityGate'] ) ) {
+			$post_cap_allowed = $case['expectedPostCapabilityAllowed'] ?? null;
+			$post_cap_id      = $case['expectedPostCapabilityPostId'] ?? null;
+			if ( null === $post_cap_id && ! empty( $result['galleryParentId'] ) ) {
+				$post_cap_id = (int) $result['galleryParentId'];
+			}
+			$post_cap_ok = 1 === count( $post_cap_events )
+				&& ( null === $post_cap_allowed || (bool) $post_cap_allowed === (bool) ( $post_cap_events[0]['allowed'] ?? null ) )
+				&& ( null === $post_cap_id || (int) $post_cap_id === (int) ( $post_cap_events[0]['postId'] ?? 0 ) );
+		}
+
+		self::collect_failure(
+			$failures,
+			1 === count( $result['uploadCapEvents'] ?? array() )
+				&& ! empty( $case['allowUpload'] ) === (bool) ( $result['uploadCapEvents'][0]['allowed'] ?? false )
+				&& $post_cap_ok,
+			'entry file checks upload_files first and checks edit_post only for non-empty request post_id',
+			array(
+				'allowUpload'                   => $case['allowUpload'] ?? null,
+				'uploadCapEvents'              => $result['uploadCapEvents'] ?? array(),
+				'expectPostCapabilityGate'      => ! empty( $case['expectPostCapabilityGate'] ),
+				'expectedPostCapabilityAllowed' => $case['expectedPostCapabilityAllowed'] ?? null,
+				'expectedPostCapabilityPostId'  => $case['expectedPostCapabilityPostId'] ?? null,
+				'galleryParentId'              => $result['galleryParentId'] ?? null,
+				'postCapEvents'                => $post_cap_events,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			'' === $output
+				&& ! str_contains( $output, '</script><script>' )
+				&& ( $result['contentBefore'] ?? array() ) === ( $result['contentAfter'] ?? array() ),
+			'entry dispatch does not emit body output, leak hostile request script bytes, or mutate content rows',
+			array(
+				'output'        => self::describe_string( $output ),
+				'contentBefore' => $result['contentBefore'] ?? array(),
+				'contentAfter'  => $result['contentAfter'] ?? array(),
+			)
 		);
 	}
 
