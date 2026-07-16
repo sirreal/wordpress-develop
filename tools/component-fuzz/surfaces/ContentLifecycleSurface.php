@@ -45,6 +45,8 @@ final class ContentLifecycleSurface {
 			self::prepare_runtime();
 			$rows[] = self::check_admin_bulk_post_edit_lifecycle( $ctx->fork( 'admin-bulk-post-edit' ), $case );
 			$rows[] = self::check_admin_bulk_post_edit_edge_cases( $ctx->fork( 'admin-bulk-post-edit-edges' ), $case );
+			self::prepare_runtime();
+			$rows[] = self::check_admin_bulk_post_edit_capability_edges( $ctx->fork( 'admin-bulk-post-edit-capabilities' ), $case );
 
 			self::prepare_runtime();
 			$rows[] = self::check_page_lookup_helpers( $ctx->fork( 'page-lookups' ), $case );
@@ -1522,6 +1524,397 @@ final class ContentLifecycleSurface {
 				'case'     => self::case_summary( $case ),
 				'failures' => array_slice( $failures, 0, 8 ),
 				'events'   => array_slice( $events, 0, 18 ),
+			)
+		);
+	}
+
+	private static function check_admin_bulk_post_edit_capability_edges( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures             = array();
+		$bulk_events          = array();
+		$cap_events           = array();
+		$bulk_hooks           = array();
+		$post_deny_filter     = null;
+		$assign_filter        = null;
+		$sticky_filter        = null;
+		$post_snapshot        = $_POST;
+		$get_snapshot         = $_GET;
+		$request_snapshot     = $_REQUEST;
+		$token                = $case['token'];
+		$hooks_removed        = false;
+		$cap_filters_removed  = false;
+
+		try {
+			$user_id = self::insert_support_user( 'bulk-cap-editor-' . $token, 'bulk-cap-editor-' . $token . '@example.test' );
+			\wp_set_current_user( $user_id );
+			$bulk_hooks = self::install_admin_bulk_edit_hooks( $bulk_events );
+
+			$denied_cat      = \wp_insert_term( 'Bulk Cap Denied Cat ' . $token, 'category', array( 'slug' => 'bulk-cap-denied-cat-' . $token ) );
+			$denied_tag_name = 'Bulk Cap Denied Tag ' . $token;
+			$denied_tag      = \wp_insert_term( $denied_tag_name, 'post_tag', array( 'slug' => 'bulk-cap-denied-tag-' . $token ) );
+			$denied_post_id  = \wp_insert_post(
+				\wp_slash(
+					array(
+						'post_type'      => 'post',
+						'post_title'     => 'Bulk Cap Denied ' . $token,
+						'post_content'   => 'Bulk cap denied content ' . $token,
+						'post_status'    => 'draft',
+						'post_author'    => $user_id,
+						'comment_status' => 'open',
+						'ping_status'    => 'closed',
+						'post_date'      => '2022-04-05 06:07:08',
+						'post_date_gmt'  => '2022-04-05 06:07:08',
+					)
+				),
+				true,
+				false
+			);
+			if ( is_int( $denied_post_id ) && is_array( $denied_cat ) && is_array( $denied_tag ) ) {
+				\wp_set_object_terms( $denied_post_id, array( (int) $denied_cat['term_id'] ), 'category' );
+				\wp_set_object_terms( $denied_post_id, array( (int) $denied_tag['term_id'] ), 'post_tag' );
+				\update_option( 'sticky_posts', array( $denied_post_id ) );
+			}
+
+			self::collect_failure(
+				$failures,
+				$user_id > 0
+					&& is_array( $denied_cat )
+					&& is_array( $denied_tag )
+					&& is_int( $denied_post_id ),
+				'bulk edit capability denial fixtures insert before wp_die capture',
+				array(
+					'userId'       => $user_id,
+					'deniedCat'    => $denied_cat,
+					'deniedTag'    => $denied_tag,
+					'deniedPostId' => $denied_post_id,
+				)
+			);
+
+			if ( $user_id <= 0 || ! is_array( $denied_cat ) || ! is_array( $denied_tag ) || ! is_int( $denied_post_id ) ) {
+				return $ctx->result(
+					'content-lifecycle.posts.admin-bulk-edit-capability-edges',
+					false,
+					array(
+						'case'     => self::case_summary( $case ),
+						'failures' => array_slice( $failures, 0, 6 ),
+					)
+				);
+			}
+
+			$post_deny_filter = self::grant_caps_except_filter( $user_id, array( 'edit_posts' ), $cap_events );
+			\add_filter( 'user_has_cap', $post_deny_filter, 10, 4 );
+			$denial_capture = self::capture_wp_die_call(
+				static function () use ( $denied_post_id, $token ) {
+					return \bulk_edit_posts(
+						\wp_slash(
+							array(
+								'post_type'  => 'post',
+								'post'       => array( $denied_post_id ),
+								'_status'    => 'publish',
+								'post_title' => 'Bulk Cap Denied Mutated ' . $token,
+								'sticky'     => 'unsticky',
+							)
+						)
+					);
+				}
+			);
+			\remove_filter( 'user_has_cap', $post_deny_filter, 10 );
+			$denied_post_after  = \get_post( $denied_post_id );
+			$denied_post_cats   = \wp_get_object_terms( $denied_post_id, 'category', array( 'fields' => 'ids' ) );
+			$denied_post_tags   = \wp_get_object_terms( $denied_post_id, 'post_tag', array( 'fields' => 'names' ) );
+			$sticky_after_denial = \get_option( 'sticky_posts' );
+
+			self::collect_failure(
+				$failures,
+				$denial_capture['captured']
+					&& ! $denial_capture['threwUnexpected']
+					&& $denial_capture['filtersRestored']
+					&& $denial_capture['bufferBalanced']
+					&& str_contains( (string) ( $denial_capture['dieCalls'][0]['message'] ?? '' ), 'not allowed to edit posts' )
+					&& self::capability_event_present( $cap_events, 'edit_posts' )
+					&& array() === $bulk_events,
+				'bulk_edit_posts captures top-level edit_posts denial through wp_die before any bulk action fires',
+				array(
+					'capture'    => $denial_capture,
+					'bulkEvents' => $bulk_events,
+					'capEvents'  => $cap_events,
+				)
+			);
+			self::collect_failure(
+				$failures,
+				$denied_post_after instanceof \WP_Post
+					&& 'draft' === $denied_post_after->post_status
+					&& 'Bulk Cap Denied ' . $token === $denied_post_after->post_title
+					&& self::same_id_set( (array) $denied_post_cats, array( (int) $denied_cat['term_id'] ) )
+					&& self::sorted_string_values( (array) $denied_post_tags ) === self::sorted_string_values( array( $denied_tag_name ) )
+					&& is_array( $sticky_after_denial )
+					&& self::same_id_set( $sticky_after_denial, array( $denied_post_id ) )
+					&& '' === (string) \get_post_meta( $denied_post_id, '_edit_last', true ),
+				'bulk_edit_posts wp_die denial leaves post, terms, sticky state, and edit metadata unchanged',
+				array(
+					'post'     => self::post_summary( $denied_post_after ),
+					'cats'     => $denied_post_cats,
+					'tags'     => $denied_post_tags,
+					'sticky'   => $sticky_after_denial,
+					'editLast' => \get_post_meta( $denied_post_id, '_edit_last', true ),
+				)
+			);
+
+			$cat_a        = \wp_insert_term( 'Bulk Cap Cat A ' . $token, 'category', array( 'slug' => 'bulk-cap-cat-a-' . $token ) );
+			$cat_b        = \wp_insert_term( 'Bulk Cap Cat B ' . $token, 'category', array( 'slug' => 'bulk-cap-cat-b-' . $token ) );
+			$tag_a_name   = 'Bulk Cap Tag A ' . $token;
+			$tag_b_name   = 'Bulk Cap Tag B ' . $token;
+			$new_tag_name = 'Bulk Cap New Tag ' . $token;
+			$tag_a        = \wp_insert_term( $tag_a_name, 'post_tag', array( 'slug' => 'bulk-cap-tag-a-' . $token ) );
+			$tag_b        = \wp_insert_term( $tag_b_name, 'post_tag', array( 'slug' => 'bulk-cap-tag-b-' . $token ) );
+			$assign_first_id  = self::insert_bulk_capability_post( 'Assign First ' . $token, $user_id );
+			$assign_second_id = self::insert_bulk_capability_post( 'Assign Second ' . $token, $user_id );
+
+			foreach ( array( $assign_first_id, $assign_second_id ) as $post_id ) {
+				if ( is_int( $post_id ) && is_array( $cat_a ) && is_array( $tag_a ) ) {
+					\wp_set_object_terms( $post_id, array( (int) $cat_a['term_id'] ), 'category' );
+					\wp_set_object_terms( $post_id, array( (int) $tag_a['term_id'] ), 'post_tag' );
+				}
+			}
+
+			self::collect_failure(
+				$failures,
+				is_array( $cat_a )
+					&& is_array( $cat_b )
+					&& is_array( $tag_a )
+					&& is_array( $tag_b )
+					&& is_int( $assign_first_id )
+					&& is_int( $assign_second_id ),
+				'bulk edit assign-term capability fixtures insert before filtered term update',
+				array(
+					'catA'           => $cat_a,
+					'catB'           => $cat_b,
+					'tagA'           => $tag_a,
+					'tagB'           => $tag_b,
+					'assignFirstId'  => $assign_first_id,
+					'assignSecondId' => $assign_second_id,
+				)
+			);
+
+			if (
+				! is_array( $cat_a )
+				|| ! is_array( $cat_b )
+				|| ! is_array( $tag_a )
+				|| ! is_array( $tag_b )
+				|| ! is_int( $assign_first_id )
+				|| ! is_int( $assign_second_id )
+			) {
+				return $ctx->result(
+					'content-lifecycle.posts.admin-bulk-edit-capability-edges',
+					false,
+					array(
+						'case'     => self::case_summary( $case ),
+						'failures' => array_slice( $failures, 0, 8 ),
+					)
+				);
+			}
+
+			$assign_filter = self::grant_caps_except_filter( $user_id, array( 'assign_post_tags' ), $cap_events );
+			\add_filter( 'user_has_cap', $assign_filter, 10, 4 );
+			$assign_result = \bulk_edit_posts(
+				\wp_slash(
+					array(
+						'post_type'                   => 'post',
+						'post'                        => array( $assign_first_id, $assign_second_id ),
+						'_status'                     => '-1',
+						'post_title'                  => 'Bulk Cap Assign Updated ' . $token,
+						'post_category'               => array( (int) $cat_a['term_id'], (int) $cat_b['term_id'] ),
+						'indeterminate_post_category' => array( (int) $cat_a['term_id'] ),
+						'tax_input'                   => array(
+							'post_tag' => $tag_b_name . ',' . $new_tag_name,
+						),
+					)
+				)
+			);
+			\remove_filter( 'user_has_cap', $assign_filter, 10 );
+			$assign_first_after  = \get_post( $assign_first_id );
+			$assign_second_after = \get_post( $assign_second_id );
+			$assign_first_cats   = \wp_get_object_terms( $assign_first_id, 'category', array( 'fields' => 'ids' ) );
+			$assign_second_cats  = \wp_get_object_terms( $assign_second_id, 'category', array( 'fields' => 'ids' ) );
+			$assign_first_tags   = \wp_get_object_terms( $assign_first_id, 'post_tag', array( 'fields' => 'names' ) );
+			$assign_second_tags  = \wp_get_object_terms( $assign_second_id, 'post_tag', array( 'fields' => 'names' ) );
+
+			self::collect_failure(
+				$failures,
+				is_array( $assign_result )
+					&& self::normalize_int_list( array( $assign_first_id, $assign_second_id ) ) === self::normalize_int_list( (array) $assign_result['updated'] )
+					&& array() === (array) $assign_result['skipped']
+					&& array() === (array) $assign_result['locked']
+					&& $assign_first_after instanceof \WP_Post
+					&& $assign_second_after instanceof \WP_Post
+					&& 'Bulk Cap Assign Updated ' . $token === $assign_first_after->post_title
+					&& 'Bulk Cap Assign Updated ' . $token === $assign_second_after->post_title
+					&& (string) $user_id === (string) \get_post_meta( $assign_first_id, '_edit_last', true )
+					&& (string) $user_id === (string) \get_post_meta( $assign_second_id, '_edit_last', true ),
+				'bulk_edit_posts updates editable posts while post_tag assignment is denied',
+				array(
+					'result' => $assign_result,
+					'first'  => self::post_summary( $assign_first_after ),
+					'second' => self::post_summary( $assign_second_after ),
+				)
+			);
+			self::collect_failure(
+				$failures,
+				self::same_id_set( (array) $assign_first_cats, array( (int) $cat_a['term_id'], (int) $cat_b['term_id'] ) )
+					&& self::same_id_set( (array) $assign_second_cats, array( (int) $cat_a['term_id'], (int) $cat_b['term_id'] ) )
+					&& self::sorted_string_values( (array) $assign_first_tags ) === self::sorted_string_values( array( $tag_a_name ) )
+					&& self::sorted_string_values( (array) $assign_second_tags ) === self::sorted_string_values( array( $tag_a_name ) )
+					&& self::capability_event_present( $cap_events, 'assign_post_tags' ),
+				'bulk_edit_posts applies allowed categories while denied post_tag assign_terms preserves existing tags',
+				array(
+					'firstCats'  => $assign_first_cats,
+					'secondCats' => $assign_second_cats,
+					'firstTags'  => $assign_first_tags,
+					'secondTags' => $assign_second_tags,
+					'capEvents'  => $cap_events,
+				)
+			);
+
+			$sticky_first_id  = self::insert_bulk_capability_post( 'Sticky First ' . $token, $user_id );
+			$sticky_second_id = self::insert_bulk_capability_post( 'Sticky Second ' . $token, $user_id );
+			if ( is_int( $sticky_first_id ) && is_int( $sticky_second_id ) ) {
+				\update_option( 'sticky_posts', array() );
+			}
+
+			$sticky_filter = self::grant_caps_except_filter( $user_id, array( 'edit_others_posts' ), $cap_events );
+			\add_filter( 'user_has_cap', $sticky_filter, 10, 4 );
+			$stick_result = is_int( $sticky_first_id ) && is_int( $sticky_second_id )
+				? \bulk_edit_posts(
+					\wp_slash(
+						array(
+							'post_type'  => 'post',
+							'post'       => array( $sticky_first_id, $sticky_second_id ),
+							'_status'    => '-1',
+							'post_title' => 'Bulk Cap Sticky Add Denied ' . $token,
+							'sticky'     => 'sticky',
+						)
+					)
+				)
+				: null;
+			$sticky_after_add_denied = \get_option( 'sticky_posts' );
+			if ( is_int( $sticky_first_id ) && is_int( $sticky_second_id ) ) {
+				\update_option( 'sticky_posts', array( $sticky_first_id, $sticky_second_id ) );
+			}
+			$unstick_result = is_int( $sticky_first_id ) && is_int( $sticky_second_id )
+				? \bulk_edit_posts(
+					\wp_slash(
+						array(
+							'post_type'  => 'post',
+							'post'       => array( $sticky_first_id, $sticky_second_id ),
+							'_status'    => '-1',
+							'post_title' => 'Bulk Cap Sticky Remove Denied ' . $token,
+							'sticky'     => 'unsticky',
+						)
+					)
+				)
+				: null;
+			\remove_filter( 'user_has_cap', $sticky_filter, 10 );
+			$sticky_after_remove_denied = \get_option( 'sticky_posts' );
+
+			self::collect_failure(
+				$failures,
+				is_int( $sticky_first_id )
+					&& is_int( $sticky_second_id )
+					&& is_array( $stick_result )
+					&& self::normalize_int_list( array( $sticky_first_id, $sticky_second_id ) ) === self::normalize_int_list( (array) $stick_result['updated'] )
+					&& array() === (array) $stick_result['skipped']
+					&& array() === (array) $stick_result['locked']
+					&& is_array( $sticky_after_add_denied )
+					&& array() === self::normalize_int_list( $sticky_after_add_denied )
+					&& is_array( $unstick_result )
+					&& self::normalize_int_list( array( $sticky_first_id, $sticky_second_id ) ) === self::normalize_int_list( (array) $unstick_result['updated'] )
+					&& is_array( $sticky_after_remove_denied )
+					&& self::same_id_set( $sticky_after_remove_denied, array( $sticky_first_id, $sticky_second_id ) )
+					&& self::capability_event_present( $cap_events, 'edit_others_posts' )
+					&& ! self::admin_bulk_event_present( $bulk_events, 'post_stuck', array( 'postId' => $sticky_first_id ) )
+					&& ! self::admin_bulk_event_present( $bulk_events, 'post_stuck', array( 'postId' => $sticky_second_id ) )
+					&& ! self::admin_bulk_event_present( $bulk_events, 'post_unstuck', array( 'postId' => $sticky_first_id ) )
+					&& ! self::admin_bulk_event_present( $bulk_events, 'post_unstuck', array( 'postId' => $sticky_second_id ) ),
+				'bulk_edit_posts gates sticky add and remove mutations behind edit_others_posts while still updating posts',
+				array(
+					'stickyFirstId'           => $sticky_first_id,
+					'stickySecondId'          => $sticky_second_id,
+					'stickResult'             => $stick_result,
+					'stickyAfterAddDenied'    => $sticky_after_add_denied,
+					'unstickResult'           => $unstick_result,
+					'stickyAfterRemoveDenied' => $sticky_after_remove_denied,
+					'bulkEvents'              => $bulk_events,
+					'capEvents'               => $cap_events,
+				)
+			);
+			self::collect_failure(
+				$failures,
+				self::admin_bulk_event_present(
+					$bulk_events,
+					'bulk_edit_posts',
+					array(
+						'updated' => array( $assign_first_id, $assign_second_id ),
+						'postIds' => array( $assign_first_id, $assign_second_id ),
+					)
+				)
+					&& self::admin_bulk_event_present(
+						$bulk_events,
+						'bulk_edit_posts',
+						array(
+							'updated' => array( $sticky_first_id, $sticky_second_id ),
+							'postIds' => array( $sticky_first_id, $sticky_second_id ),
+							'sticky'  => 'sticky',
+						)
+					)
+					&& self::admin_bulk_event_present(
+						$bulk_events,
+						'bulk_edit_posts',
+						array(
+							'updated' => array( $sticky_first_id, $sticky_second_id ),
+							'postIds' => array( $sticky_first_id, $sticky_second_id ),
+							'sticky'  => 'unsticky',
+						)
+					),
+				'bulk_edit_posts capability edge final actions preserve selected IDs and denied sticky intent',
+				array( 'bulkEvents' => $bulk_events )
+			);
+		} finally {
+			if ( null !== $post_deny_filter ) {
+				\remove_filter( 'user_has_cap', $post_deny_filter, 10 );
+			}
+			if ( null !== $assign_filter ) {
+				\remove_filter( 'user_has_cap', $assign_filter, 10 );
+			}
+			if ( null !== $sticky_filter ) {
+				\remove_filter( 'user_has_cap', $sticky_filter, 10 );
+			}
+			self::remove_hooks( $bulk_hooks );
+			$hooks_removed       = self::hooks_are_removed( $bulk_hooks );
+			$cap_filters_removed = ( null === $post_deny_filter || false === \has_filter( 'user_has_cap', $post_deny_filter ) )
+				&& ( null === $assign_filter || false === \has_filter( 'user_has_cap', $assign_filter ) )
+				&& ( null === $sticky_filter || false === \has_filter( 'user_has_cap', $sticky_filter ) );
+			$_POST              = $post_snapshot;
+			$_GET               = $get_snapshot;
+			$_REQUEST           = $request_snapshot;
+		}
+
+		self::collect_failure(
+			$failures,
+			$hooks_removed && $cap_filters_removed,
+			'admin bulk edit capability hooks and filters are removed after edge checks',
+			array(
+				'hooksRemoved'      => $hooks_removed,
+				'capFiltersRemoved' => $cap_filters_removed,
+			)
+		);
+
+		return $ctx->result(
+			'content-lifecycle.posts.admin-bulk-edit-capability-edges',
+			array() === $failures,
+			array(
+				'case'       => self::case_summary( $case ),
+				'failures'   => array_slice( $failures, 0, 8 ),
+				'bulkEvents' => array_slice( $bulk_events, 0, 16 ),
+				'capEvents'  => array_slice( $cap_events, 0, 32 ),
 			)
 		);
 	}
@@ -6612,6 +7005,24 @@ final class ContentLifecycleSurface {
 		return false;
 	}
 
+	private static function capability_event_present( array $events, string $capability ): bool {
+		foreach ( $events as $event ) {
+			if ( ! is_array( $event ) ) {
+				continue;
+			}
+
+			if ( $capability === (string) ( $event['requested'] ?? '' ) ) {
+				return true;
+			}
+
+			if ( in_array( $capability, (array) ( $event['caps'] ?? array() ), true ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
 	private static function events_are_ordered( array $events, array $expected ): bool {
 		$offset = -1;
 		foreach ( $expected as $event ) {
@@ -6855,6 +7266,26 @@ final class ContentLifecycleSurface {
 		return \is_wp_error( $id ) ? 0 : $id;
 	}
 
+	private static function insert_bulk_capability_post( string $title, int $user_id ) {
+		return \wp_insert_post(
+			\wp_slash(
+				array(
+					'post_type'      => 'post',
+					'post_title'     => $title,
+					'post_content'   => $title . ' content',
+					'post_status'    => 'draft',
+					'post_author'    => $user_id,
+					'comment_status' => 'open',
+					'ping_status'    => 'closed',
+					'post_date'      => '2022-06-07 08:09:10',
+					'post_date_gmt'  => '2022-06-07 08:09:10',
+				)
+			),
+			true,
+			false
+		);
+	}
+
 	private static function grant_all_caps_filter( int $user_id ): \Closure {
 		return static function ( array $allcaps, array $caps, array $args, \WP_User $user ) use ( $user_id ): array {
 			unset( $args );
@@ -6892,6 +7323,140 @@ final class ContentLifecycleSurface {
 
 			return $allcaps;
 		};
+	}
+
+	private static function grant_caps_except_filter( int $user_id, array $denied_caps, array &$events ): \Closure {
+		$denied_caps = array_values( array_map( 'strval', $denied_caps ) );
+		$denied_map  = array_fill_keys( $denied_caps, true );
+		$base_caps   = array(
+			'add_post_meta',
+			'assign_terms',
+			'delete_post_meta',
+			'edit_others_pages',
+			'edit_others_posts',
+			'edit_page',
+			'edit_pages',
+			'edit_post',
+			'edit_post_meta',
+			'edit_posts',
+			'edit_private_pages',
+			'edit_private_posts',
+			'edit_published_pages',
+			'edit_published_posts',
+			'manage_categories',
+			'publish_pages',
+			'publish_posts',
+			'read',
+			'read_page',
+			'read_post',
+			'read_private_pages',
+			'read_private_posts',
+		);
+
+		return static function ( array $allcaps, array $caps, array $args, \WP_User $user ) use ( $user_id, $denied_caps, $denied_map, $base_caps, &$events ): array {
+			if ( (int) $user->ID !== $user_id ) {
+				return $allcaps;
+			}
+
+			$requested = (string) ( $args[0] ?? '' );
+			$caps      = array_values( array_map( 'strval', $caps ) );
+			$deny_requested = isset( $denied_map[ $requested ] );
+			$events[]  = array(
+				'requested' => $requested,
+				'caps'      => $caps,
+				'denied'    => array_values(
+					array_unique(
+						array_merge(
+							array_intersect( array_merge( array( $requested ), $caps ), $denied_caps ),
+							$deny_requested ? $caps : array()
+						)
+					)
+				),
+			);
+
+			foreach ( array_merge( $base_caps, $caps, array( $requested ) ) as $cap ) {
+				if ( '' !== $cap && 'do_not_allow' !== $cap ) {
+					$allcaps[ $cap ] = true;
+				}
+			}
+
+			foreach ( $denied_map as $cap => $ignored ) {
+				unset( $ignored );
+				$allcaps[ $cap ] = false;
+			}
+
+			if ( $deny_requested ) {
+				foreach ( $caps as $cap ) {
+					if ( '' !== $cap && 'do_not_allow' !== $cap ) {
+						$allcaps[ $cap ] = false;
+					}
+				}
+			}
+
+			return $allcaps;
+		};
+	}
+
+	private static function capture_wp_die_call( callable $callback ): array {
+		$die_calls  = array();
+		$ob_level   = ob_get_level();
+		$value      = null;
+		$captured   = false;
+		$unexpected = null;
+		$output     = '';
+
+		$die_filter = static function () use ( &$die_calls ): callable {
+			return static function ( $message = '', $title = '', $args = array() ) use ( &$die_calls ): void {
+				$die_calls[] = array(
+					'message' => self::describe_wp_die_value( $message ),
+					'title'   => self::describe_wp_die_value( $title ),
+					'args'    => $args,
+				);
+
+				throw new ContentLifecycleSurface_DieCaptured( 'Captured content lifecycle wp_die.' );
+			};
+		};
+
+		\add_filter( 'wp_die_handler', $die_filter, PHP_INT_MAX );
+		ob_start();
+
+		try {
+			$value = $callback();
+		} catch ( ContentLifecycleSurface_DieCaptured $e ) {
+			$captured = true;
+		} catch ( \Throwable $e ) {
+			$unexpected = self::describe_throwable( $e );
+		} finally {
+			while ( ob_get_level() > $ob_level ) {
+				$chunk   = ob_get_clean();
+				$output .= false === $chunk ? '' : (string) $chunk;
+			}
+
+			\remove_filter( 'wp_die_handler', $die_filter, PHP_INT_MAX );
+		}
+
+		return array(
+			'captured'        => $captured,
+			'threwUnexpected' => null !== $unexpected,
+			'unexpected'      => $unexpected,
+			'value'           => $value,
+			'output'          => $output,
+			'dieCalls'        => $die_calls,
+			'filtersRestored' => false === \has_filter( 'wp_die_handler', $die_filter ),
+			'bufferBalanced'  => $ob_level === ob_get_level(),
+		);
+	}
+
+	private static function describe_wp_die_value( $value ) {
+		if ( is_scalar( $value ) || null === $value ) {
+			return (string) $value;
+		}
+
+		if ( \is_wp_error( $value ) ) {
+			return self::error_summary( $value );
+		}
+
+		return get_debug_type( $value );
 	}
 
 	private static function case_for_context( \ComponentFuzz\FuzzContext $ctx ): array {
@@ -7158,3 +7723,5 @@ final class ContentLifecycleSurface {
 		);
 	}
 }
+
+final class ContentLifecycleSurface_DieCaptured extends \RuntimeException {}

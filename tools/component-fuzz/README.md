@@ -234,7 +234,8 @@ database, network requests, or a configured site.
   preservation, status/author/title/content/excerpt/discussion/date updates,
   category/tag/post-format/sticky mutations, bulk/sticky hook payloads,
   sentinel/no-stomp preservation, invalid-date fail-closed behavior, and page
-  parent ancestry skips,
+  parent ancestry skips, top-level capability-denial `wp_die()` capture,
+  permission-filtered tag assignment, and sticky edit capability gates,
   public page/post lookup helpers for ancestry paths, attachment fallback,
   hierarchy queries, child normalization, filter payloads, output formats, and
   salted query-cache invalidation, post and attachment count/MIME helper contracts,
