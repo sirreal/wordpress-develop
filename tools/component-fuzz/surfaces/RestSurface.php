@@ -101,6 +101,13 @@ final class RestSurface {
 				}
 			);
 			$checks[] = self::run_check(
+				'argument-validation-error-envelope-parity',
+				'Route argument sanitization, validation, required-param errors, direct envelopes, and batch child envelopes retain stable REST error structure before permission callbacks run.',
+				function () use ( &$rng ) {
+					return self::check_argument_validation_error_envelope_parity( $rng );
+				}
+			);
+			$checks[] = self::run_check(
 				'batch-v1-execution',
 				'REST batch/v1 dispatch validates child requests, honors allow_batch gates, preserves child request data, envelopes responses, and restores temporary filters.',
 				function () use ( &$rng ) {
@@ -1359,6 +1366,322 @@ final class RestSurface {
 			'details'  => array(
 				'namespace' => $namespace,
 				'cases'     => $results,
+			),
+		);
+	}
+
+	private static function check_argument_validation_error_envelope_parity( array &$rng ): array {
+		$namespace         = self::namespace_token( $rng );
+		$token             = self::slug_token( $rng, 'arg' );
+		$route             = '/' . $namespace . '/arg-errors/(?P<id>[0-9]+)';
+		$path              = '/' . $namespace . '/arg-errors/42';
+		$server            = new \WP_REST_Server();
+		$permission_hits   = 0;
+		$callback_hits     = 0;
+		$sanitize_hits     = array();
+		$validate_hits     = array();
+		$callback_params   = array();
+		$valid_label       = '  Clean <b>' . $token . '</b>  ';
+		$valid_sanitized   = \sanitize_text_field( $valid_label );
+		$sanitize_error    = new \WP_Error(
+			'cfuzz_arg_sanitize_error',
+			'Custom sanitizer rejected ' . $token,
+			array(
+				'status' => 400,
+				'param'  => 'customSanitize',
+				'token'  => $token,
+			)
+		);
+		$validate_error    = new \WP_Error(
+			'cfuzz_arg_validate_error',
+			'Custom validator rejected ' . $token,
+			array(
+				'status' => 400,
+				'param'  => 'customValidate',
+				'token'  => $token,
+			)
+		);
+		$valid_common_body = array(
+			'requiredToken'  => $token,
+			'schemaCount'   => '4',
+			'schemaFlag'    => 'true',
+			'schemaPattern' => 'ok-' . substr( $token, -6 ),
+		);
+
+		$server->register_route(
+			$namespace,
+			$route,
+			array(
+				'allow_batch' => array( 'v1' => true ),
+				array(
+					'methods'             => 'POST',
+					'permission_callback' => static function () use ( &$permission_hits ): bool {
+						++$permission_hits;
+						return true;
+					},
+					'callback'            => static function ( \WP_REST_Request $request ) use ( &$callback_hits, &$callback_params ): \WP_REST_Response {
+						++$callback_hits;
+						$callback_params[] = $request->get_params();
+
+						return new \WP_REST_Response(
+							array(
+								'params' => $request->get_params(),
+								'route'  => $request->get_route(),
+								'method' => $request->get_method(),
+							),
+							201,
+							array( 'X-Arg-Route' => 'seen' )
+						);
+					},
+					'args'                => array(
+						'id'             => array(
+							'type'    => 'integer',
+							'minimum' => 1,
+						),
+						'requiredToken'  => array(
+							'type'     => 'string',
+							'required' => true,
+							'pattern'  => '^arg-[a-z0-9]{6}$',
+						),
+						'schemaCount'   => array(
+							'type'    => 'integer',
+							'minimum' => 2,
+							'maximum' => 5,
+						),
+						'schemaFlag'    => array(
+							'type' => 'boolean',
+						),
+						'schemaPattern' => array(
+							'type'    => 'string',
+							'pattern' => '^ok-[a-z0-9]+$',
+						),
+						'customSanitize' => array(
+							'sanitize_callback' => static function ( $value, \WP_REST_Request $request, string $param ) use ( &$sanitize_hits, $sanitize_error ) {
+								$sanitize_hits[] = array(
+									'param' => $param,
+									'value' => $value,
+									'route' => $request->get_route(),
+								);
+
+								if ( 'sanitize-error' === $value ) {
+									return $sanitize_error;
+								}
+
+								return \sanitize_text_field( $value );
+							},
+						),
+						'customValidate' => array(
+							'validate_callback' => static function ( $value, \WP_REST_Request $request, string $param ) use ( &$validate_hits, $validate_error, $token ) {
+								$validate_hits[] = array(
+									'param' => $param,
+									'value' => $value,
+									'route' => $request->get_route(),
+								);
+
+								if ( 'valid-' . $token === $value ) {
+									return true;
+								}
+
+								return $validate_error;
+							},
+						),
+					),
+				),
+			)
+		);
+
+		$schema_invalid_body = array_merge(
+			$valid_common_body,
+			array(
+				'schemaCount'   => 1,
+				'schemaFlag'    => 'not-bool',
+				'schemaPattern' => 'bad pattern',
+			)
+		);
+		$schema_request      = new \WP_REST_Request( 'POST', $path );
+		$schema_request->set_body_params( $schema_invalid_body );
+		$schema_response = $server->dispatch( $schema_request );
+		$schema_data     = $schema_response->get_data();
+
+		$sanitize_request = new \WP_REST_Request( 'POST', $path );
+		$sanitize_request->set_body_params(
+			array_merge(
+				$valid_common_body,
+				array(
+					'customSanitize' => 'sanitize-error',
+				)
+			)
+		);
+		$sanitize_response = $server->dispatch( $sanitize_request );
+		$sanitize_data     = $sanitize_response->get_data();
+
+		$missing_request = new \WP_REST_Request( 'POST', $path );
+		$missing_request->set_body_params(
+			array(
+				'schemaCount'   => 3,
+				'schemaFlag'    => false,
+				'schemaPattern' => 'ok-' . substr( $token, -6 ),
+			)
+		);
+		$missing_response = $server->dispatch( $missing_request );
+		$missing_data     = $missing_response->get_data();
+
+		$validate_request = new \WP_REST_Request( 'POST', $path );
+		$validate_request->set_body_params(
+			array_merge(
+				$valid_common_body,
+				array(
+					'customSanitize' => $valid_label,
+					'customValidate' => 'invalid-' . $token,
+				)
+			)
+		);
+		$validate_response = $server->dispatch( $validate_request );
+		$validate_data     = $validate_response->get_data();
+
+		$invalid_permission_hits = $permission_hits;
+		$invalid_callback_hits   = $callback_hits;
+
+		$valid_request = new \WP_REST_Request( 'POST', $path );
+		$valid_request->set_body_params(
+			array_merge(
+				$valid_common_body,
+				array(
+					'customSanitize' => $valid_label,
+					'customValidate' => 'valid-' . $token,
+				)
+			)
+		);
+		$valid_response = $server->dispatch( $valid_request );
+		$valid_data     = $valid_response->get_data();
+
+		$schema_envelope   = $server->envelope_response( $schema_response, false );
+		$sanitize_envelope = $server->envelope_response( $sanitize_response, false );
+		$validate_envelope = $server->envelope_response( $validate_response, false );
+		$batch_response    = $server->dispatch(
+			self::batch_request(
+				array(
+					array(
+						'method' => 'POST',
+						'path'   => $path,
+						'body'   => $schema_invalid_body,
+					),
+				),
+				'normal'
+			)
+		);
+		$batch_data        = $batch_response->get_data();
+		$batch_child       = is_array( $batch_data['responses'][0] ?? null ) ? $batch_data['responses'][0] : array();
+
+		$schema_params = is_array( $schema_data['data']['params'] ?? null ) ? array_keys( $schema_data['data']['params'] ) : array();
+		sort( $schema_params, SORT_STRING );
+		$schema_details = is_array( $schema_data['data']['details'] ?? null ) ? $schema_data['data']['details'] : array();
+		$schema_ok      = 400 === $schema_response->get_status()
+			&& 'rest_invalid_param' === ( $schema_data['code'] ?? null )
+			&& 400 === ( $schema_data['data']['status'] ?? null )
+			&& array( 'schemaCount', 'schemaFlag', 'schemaPattern' ) === $schema_params
+			&& 'rest_out_of_bounds' === ( $schema_details['schemaCount']['code'] ?? null )
+			&& 'rest_invalid_type' === ( $schema_details['schemaFlag']['code'] ?? null )
+			&& 'rest_invalid_pattern' === ( $schema_details['schemaPattern']['code'] ?? null );
+
+		$sanitize_params = is_array( $sanitize_data['data']['params'] ?? null ) ? array_keys( $sanitize_data['data']['params'] ) : array();
+		$sanitize_ok     = 400 === $sanitize_response->get_status()
+			&& 'rest_invalid_param' === ( $sanitize_data['code'] ?? null )
+			&& array( 'customSanitize' ) === $sanitize_params
+			&& \rest_convert_error_to_response( $sanitize_error )->get_data() === ( $sanitize_data['data']['details']['customSanitize'] ?? null );
+
+		$missing_ok = 400 === $missing_response->get_status()
+			&& 'rest_missing_callback_param' === ( $missing_data['code'] ?? null )
+			&& 400 === ( $missing_data['data']['status'] ?? null )
+			&& array( 'requiredToken' ) === ( $missing_data['data']['params'] ?? null );
+
+		$validate_params = is_array( $validate_data['data']['params'] ?? null ) ? array_keys( $validate_data['data']['params'] ) : array();
+		$validate_ok     = 400 === $validate_response->get_status()
+			&& 'rest_invalid_param' === ( $validate_data['code'] ?? null )
+			&& array( 'customValidate' ) === $validate_params
+			&& \rest_convert_error_to_response( $validate_error )->get_data() === ( $validate_data['data']['details']['customValidate'] ?? null );
+
+		$envelope_ok = 200 === $schema_envelope->get_status()
+			&& array(
+				'body'    => $schema_data,
+				'status'  => 400,
+				'headers' => $schema_response->get_headers(),
+			) === $schema_envelope->get_data()
+			&& 200 === $sanitize_envelope->get_status()
+			&& array(
+				'body'    => $sanitize_data,
+				'status'  => 400,
+				'headers' => $sanitize_response->get_headers(),
+			) === $sanitize_envelope->get_data()
+			&& 200 === $validate_envelope->get_status()
+			&& array(
+				'body'    => $validate_data,
+				'status'  => 400,
+				'headers' => $validate_response->get_headers(),
+			) === $validate_envelope->get_data();
+
+		$batch_ok = 207 === $batch_response->get_status()
+			&& 400 === ( $batch_child['status'] ?? null )
+			&& $schema_data === ( $batch_child['body'] ?? null )
+			&& $schema_response->get_headers() === ( $batch_child['headers'] ?? null );
+
+		$valid_params = is_array( $valid_data['params'] ?? null ) ? $valid_data['params'] : array();
+		$valid_ok     = 201 === $valid_response->get_status()
+			&& 1 === $permission_hits
+			&& 1 === $callback_hits
+			&& array(
+				'id'             => 42,
+				'requiredToken'  => $token,
+				'schemaCount'   => 4,
+				'schemaFlag'    => true,
+				'schemaPattern' => 'ok-' . substr( $token, -6 ),
+				'customSanitize' => $valid_sanitized,
+				'customValidate' => 'valid-' . $token,
+			) === $valid_params
+			&& array( $valid_params ) === $callback_params
+			&& 'seen' === ( $valid_response->get_headers()['X-Arg-Route'] ?? null );
+
+		$callback_order_ok = 0 === $invalid_permission_hits
+			&& 0 === $invalid_callback_hits
+			&& 2 === count( $sanitize_hits )
+			&& 2 === count( $validate_hits );
+
+		$ok = $schema_ok
+			&& $sanitize_ok
+			&& $missing_ok
+			&& $validate_ok
+			&& $envelope_ok
+			&& $batch_ok
+			&& $valid_ok
+			&& $callback_order_ok;
+
+		return array(
+			'ok'       => $ok,
+			'message'  => $ok ? 'REST argument validation and envelope parity invariants held.' : 'REST argument validation or envelope parity invariant failed.',
+			'features' => array( 'route-args', 'rest-invalid-param', 'rest-missing-callback-param', 'error-details', 'envelope-parity', 'batch-child-error-envelope' ),
+			'details'  => array(
+				'namespace'             => $namespace,
+				'route'                 => $route,
+				'schemaOk'              => $schema_ok,
+				'sanitizeOk'            => $sanitize_ok,
+				'missingOk'             => $missing_ok,
+				'validateOk'            => $validate_ok,
+				'envelopeOk'            => $envelope_ok,
+				'batchOk'               => $batch_ok,
+				'validOk'               => $valid_ok,
+				'callbackOrderOk'       => $callback_order_ok,
+				'invalidPermissionHits' => $invalid_permission_hits,
+				'invalidCallbackHits'   => $invalid_callback_hits,
+				'permissionHits'        => $permission_hits,
+				'callbackHits'          => $callback_hits,
+				'sanitizeHits'          => $sanitize_hits,
+				'validateHits'          => $validate_hits,
+				'schemaResponse'        => self::response_summary( $schema_response ),
+				'sanitizeResponse'      => self::response_summary( $sanitize_response ),
+				'missingResponse'       => self::response_summary( $missing_response ),
+				'validateResponse'      => self::response_summary( $validate_response ),
+				'validResponse'         => self::response_summary( $valid_response ),
+				'batchResponse'         => self::response_summary( $batch_response ),
 			),
 		);
 	}
