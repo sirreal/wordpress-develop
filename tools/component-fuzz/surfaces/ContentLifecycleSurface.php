@@ -3248,6 +3248,49 @@ final class ContentLifecycleSurface {
 		$plain_link = static function ( string $post_type, int $post_id ): string {
 			return \home_url( \add_query_arg( array( 'post_type' => $post_type, 'p' => $post_id ), '' ) );
 		};
+		$wp_query_cache_key = static function ( \WP_Query $query ): string {
+			$property = new \ReflectionProperty( $query, 'query_cache_key' );
+			if ( PHP_VERSION_ID < 80100 ) {
+				$property->setAccessible( true );
+			}
+
+			$value = $property->getValue( $query );
+			return is_string( $value ) ? $value : '';
+		};
+		$query_parent_status_bucket = static function ( string $post_type, int $parent_id, $post_status ) use ( $wp_query_cache_key ): array {
+			$args  = array(
+				'cache_results'          => true,
+				'fields'                 => 'ids',
+				'ignore_sticky_posts'    => true,
+				'no_found_rows'          => true,
+				'order'                  => 'ASC',
+				'orderby'                => 'ID',
+				'post_parent'            => $parent_id,
+				'post_status'            => $post_status,
+				'post_type'              => $post_type,
+				'posts_per_page'         => -1,
+				'suppress_filters'       => false,
+				'update_post_meta_cache' => false,
+				'update_post_term_cache' => false,
+			);
+			$query = new \WP_Query( $args );
+			$key   = $wp_query_cache_key( $query );
+			$salt  = (array) \wp_cache_get_last_changed( 'posts' );
+
+			return array(
+				'args'        => $args,
+				'ids'         => array_values( array_map( 'intval', $query->posts ) ),
+				'cacheKey'    => $key,
+				'cache'       => '' === $key ? false : \wp_cache_get_salted( $key, 'post-queries', $salt ),
+				'lastChanged' => $salt,
+				'request'     => $query->request,
+			);
+		};
+		$query_bucket_has_ids = static function ( array $bucket, array $expected_ids ): bool {
+			return is_array( $bucket['cache'] ?? null )
+				&& isset( $bucket['cache']['posts'] )
+				&& $expected_ids === array_values( array_map( 'intval', (array) $bucket['cache']['posts'] ) );
+		};
 
 		try {
 			if ( ! isset( $GLOBALS['wp'] ) || ! $GLOBALS['wp'] instanceof \WP ) {
@@ -3334,6 +3377,7 @@ final class ContentLifecycleSurface {
 			$mutation_parent_a_slug = 'single-mutation-parent-a-' . $token;
 			$mutation_parent_b_slug = 'single-mutation-parent-b-' . $token;
 			$mutation_child_slug    = 'single-mutation-child-' . $token;
+			$mutation_pending_child_slug = 'single-mutation-pending-child-' . $token;
 			$missing_parent_id  = 987654321;
 
 			$pretty_parent_id = $insert_post( $pretty_type, 'Single Pretty Parent ' . $token, $pretty_parent_slug, 0 );
@@ -3372,6 +3416,7 @@ final class ContentLifecycleSurface {
 			$mutation_parent_a_id = $insert_post( $pretty_type, 'Single Mutation Parent A ' . $token, $mutation_parent_a_slug, 0 );
 			$mutation_parent_b_id = $insert_post( $query_type, 'Single Mutation Parent B ' . $token, $mutation_parent_b_slug, 0 );
 			$mutation_child_id    = $insert_post( $pretty_type, 'Single Mutation Child ' . $token, $mutation_child_slug, $mutation_parent_a_id );
+			$mutation_pending_child_id = $insert_post( $pretty_type, 'Single Mutation Pending Child ' . $token, $mutation_pending_child_slug, $mutation_parent_b_id, 'pending' );
 			$force_parent( $pretty_missing_parent_id, $missing_parent_id );
 			$force_parent( $pretty_self_parent_id, $pretty_self_parent_id );
 			$force_parent( $query_missing_parent_id, $missing_parent_id );
@@ -3417,7 +3462,8 @@ final class ContentLifecycleSurface {
 					&& $plain_draft_id > 0
 					&& $mutation_parent_a_id > 0
 					&& $mutation_parent_b_id > 0
-					&& $mutation_child_id > 0,
+					&& $mutation_child_id > 0
+					&& $mutation_pending_child_id > 0,
 				'custom post type single permalink fallback fixtures register and insert generated hierarchy rows',
 				array(
 					'registrations' => array(
@@ -3846,6 +3892,9 @@ final class ContentLifecycleSurface {
 			$mutation_lookup_types = array( $pretty_type, $query_type );
 			$mutation_initial_lookup = \get_page_by_path( $mutation_initial_path, OBJECT, $mutation_lookup_types );
 			$mutation_reparented_before = \get_page_by_path( $mutation_reparented_path, OBJECT, $mutation_lookup_types );
+			$mutation_private_bucket_before = $query_parent_status_bucket( $pretty_type, $mutation_parent_b_id, 'private' );
+			$mutation_pending_bucket_before = $query_parent_status_bucket( $pretty_type, $mutation_parent_b_id, 'pending' );
+			$mutation_combined_bucket_before = $query_parent_status_bucket( $pretty_type, $mutation_parent_b_id, array( 'private', 'pending' ) );
 			$mutation_old_parent_publish_before = \get_posts(
 				array(
 					'fields'         => 'ids',
@@ -3889,6 +3938,9 @@ final class ContentLifecycleSurface {
 			$mutation_last_changed_after = \wp_cache_get_last_changed( 'posts' );
 			$mutation_initial_cache_after_update = \wp_cache_get_salted( 'get_page_by_path:' . $mutation_initial_hash, 'post-queries', $mutation_last_changed_after );
 			$mutation_reparented_cache_after_update = \wp_cache_get_salted( 'get_page_by_path:' . $mutation_reparented_hash, 'post-queries', $mutation_last_changed_after );
+			$mutation_private_bucket_stale_after_update = \wp_cache_get_salted( $mutation_private_bucket_before['cacheKey'], 'post-queries', (array) $mutation_last_changed_after );
+			$mutation_pending_bucket_stale_after_update = \wp_cache_get_salted( $mutation_pending_bucket_before['cacheKey'], 'post-queries', (array) $mutation_last_changed_after );
+			$mutation_combined_bucket_stale_after_update = \wp_cache_get_salted( $mutation_combined_bucket_before['cacheKey'], 'post-queries', (array) $mutation_last_changed_after );
 			$mutation_old_parent_publish_after = \get_posts(
 				array(
 					'fields'         => 'ids',
@@ -3909,6 +3961,11 @@ final class ContentLifecycleSurface {
 					'suppress_filters' => false,
 				)
 			);
+			$mutation_private_bucket_after = $query_parent_status_bucket( $pretty_type, $mutation_parent_b_id, 'private' );
+			$mutation_pending_bucket_after = $query_parent_status_bucket( $pretty_type, $mutation_parent_b_id, 'pending' );
+			$mutation_combined_bucket_after = $query_parent_status_bucket( $pretty_type, $mutation_parent_b_id, array( 'private', 'pending' ) );
+			$mutation_combined_after_expected = array( $mutation_child_id, $mutation_pending_child_id );
+			sort( $mutation_combined_after_expected );
 			$mutation_initial_after = \get_page_by_path( $mutation_initial_path, OBJECT, $mutation_lookup_types );
 			$mutation_reparented_after = \get_page_by_path( $mutation_reparented_path, ARRAY_A, $mutation_lookup_types );
 			$mutation_initial_cached_after_lookup = \wp_cache_get_salted( 'get_page_by_path:' . $mutation_initial_hash, 'post-queries', $mutation_last_changed_after );
@@ -3919,6 +3976,18 @@ final class ContentLifecycleSurface {
 				$mutation_initial_lookup instanceof \WP_Post
 					&& $mutation_child_id === (int) $mutation_initial_lookup->ID
 					&& null === $mutation_reparented_before
+					&& array() === $mutation_private_bucket_before['ids']
+					&& array( $mutation_pending_child_id ) === $mutation_pending_bucket_before['ids']
+					&& array( $mutation_pending_child_id ) === $mutation_combined_bucket_before['ids']
+					&& '' !== $mutation_private_bucket_before['cacheKey']
+					&& '' !== $mutation_pending_bucket_before['cacheKey']
+					&& '' !== $mutation_combined_bucket_before['cacheKey']
+					&& $mutation_private_bucket_before['cacheKey'] !== $mutation_pending_bucket_before['cacheKey']
+					&& $mutation_private_bucket_before['cacheKey'] !== $mutation_combined_bucket_before['cacheKey']
+					&& $mutation_pending_bucket_before['cacheKey'] !== $mutation_combined_bucket_before['cacheKey']
+					&& $query_bucket_has_ids( $mutation_private_bucket_before, array() )
+					&& $query_bucket_has_ids( $mutation_pending_bucket_before, array( $mutation_pending_child_id ) )
+					&& $query_bucket_has_ids( $mutation_combined_bucket_before, array( $mutation_pending_child_id ) )
 					&& array( $mutation_child_id ) === array_values( array_map( 'intval', $mutation_old_parent_publish_before ) )
 					&& array() === array_values( array_map( 'intval', $mutation_new_parent_private_before ) )
 					&& $mutation_parent_a_id === (int) $mutation_parent_cache_before
@@ -3932,8 +4001,20 @@ final class ContentLifecycleSurface {
 					&& $mutation_last_changed_after !== $mutation_last_changed_before
 					&& false === $mutation_initial_cache_after_update
 					&& false === $mutation_reparented_cache_after_update
+					&& false === $mutation_private_bucket_stale_after_update
+					&& false === $mutation_pending_bucket_stale_after_update
+					&& false === $mutation_combined_bucket_stale_after_update
 					&& array() === array_values( array_map( 'intval', $mutation_old_parent_publish_after ) )
 					&& array( $mutation_child_id ) === array_values( array_map( 'intval', $mutation_new_parent_private_after ) )
+					&& array( $mutation_child_id ) === $mutation_private_bucket_after['ids']
+					&& array( $mutation_pending_child_id ) === $mutation_pending_bucket_after['ids']
+					&& $mutation_combined_after_expected === $mutation_combined_bucket_after['ids']
+					&& $mutation_private_bucket_before['cacheKey'] === $mutation_private_bucket_after['cacheKey']
+					&& $mutation_pending_bucket_before['cacheKey'] === $mutation_pending_bucket_after['cacheKey']
+					&& $mutation_combined_bucket_before['cacheKey'] === $mutation_combined_bucket_after['cacheKey']
+					&& $query_bucket_has_ids( $mutation_private_bucket_after, array( $mutation_child_id ) )
+					&& $query_bucket_has_ids( $mutation_pending_bucket_after, array( $mutation_pending_child_id ) )
+					&& $query_bucket_has_ids( $mutation_combined_bucket_after, $mutation_combined_after_expected )
 					&& null === $mutation_initial_after
 					&& is_array( $mutation_reparented_after )
 					&& $mutation_child_id === (int) ( $mutation_reparented_after['ID'] ?? 0 )
@@ -3946,6 +4027,9 @@ final class ContentLifecycleSurface {
 					'reparentedPath'           => $mutation_reparented_path,
 					'initialLookup'            => self::post_summary( $mutation_initial_lookup ),
 					'reparentedBefore'         => self::post_summary( $mutation_reparented_before ),
+					'privateBucketBefore'      => $mutation_private_bucket_before,
+					'pendingBucketBefore'      => $mutation_pending_bucket_before,
+					'combinedBucketBefore'     => $mutation_combined_bucket_before,
 					'oldParentPublishBefore'   => $mutation_old_parent_publish_before,
 					'newParentPrivateBefore'   => $mutation_new_parent_private_before,
 					'parentCacheBefore'        => $mutation_parent_cache_before,
@@ -3958,8 +4042,14 @@ final class ContentLifecycleSurface {
 					'lastChangedAfter'         => $mutation_last_changed_after,
 					'initialCacheAfterUpdate'  => $mutation_initial_cache_after_update,
 					'reparentedCacheAfterUpdate' => $mutation_reparented_cache_after_update,
+					'privateBucketStaleAfterUpdate' => $mutation_private_bucket_stale_after_update,
+					'pendingBucketStaleAfterUpdate' => $mutation_pending_bucket_stale_after_update,
+					'combinedBucketStaleAfterUpdate' => $mutation_combined_bucket_stale_after_update,
 					'oldParentPublishAfter'    => $mutation_old_parent_publish_after,
 					'newParentPrivateAfter'    => $mutation_new_parent_private_after,
+					'privateBucketAfter'       => $mutation_private_bucket_after,
+					'pendingBucketAfter'       => $mutation_pending_bucket_after,
+					'combinedBucketAfter'      => $mutation_combined_bucket_after,
 					'initialAfter'             => self::post_summary( $mutation_initial_after ),
 					'reparentedAfter'          => $mutation_reparented_after,
 					'initialCachedAfterLookup' => $mutation_initial_cached_after_lookup,
