@@ -75,6 +75,7 @@ final class KsesSurface {
 			$results = array_merge( $results, self::check_custom_policy_and_filter_invariants( $seed ) );
 			$results[] = self::check_generated_policy_protocol_style_matrix( $seed );
 			$results[] = self::check_generated_scoped_policy_mutation_matrix( $seed );
+			$results[] = self::check_style_protocol_cross_hook_matrix( $seed );
 			$results = array_merge( $results, self::check_attribute_constraint_invariants( $seed ) );
 			$results = array_merge( $results, self::check_pdf_object_and_uri_attribute_invariants( $seed ) );
 			$results[] = self::check_helper_contract_matrix( $seed );
@@ -1110,6 +1111,312 @@ final class KsesSurface {
 			'kses.generated-scoped-policy-mutation-matrix',
 			$policy_prefix,
 			'generated context policies, URI attributes, and safe CSS filters remain scoped while enforcing allow/deny oracles',
+			$failures,
+			$details
+		);
+	}
+
+	private static function check_style_protocol_cross_hook_matrix( int $seed ): array {
+		foreach ( array( 'add_filter', 'remove_filter', 'has_filter', 'safecss_filter_attr', 'wp_kses', 'wp_kses_hair', 'wp_kses_attr', 'wp_kses_uri_attributes' ) as $function_name ) {
+			if ( ! function_exists( $function_name ) ) {
+				return self::skip(
+					$seed,
+					null,
+					'kses.style-protocol-cross-hook-matrix.available',
+					$function_name . '() is not loaded',
+					''
+				);
+			}
+		}
+
+		$rng             = self::rng( self::normalize_seed( 'kses-style-protocol-cross-hook:' . $seed ) );
+		$custom_uri_attr = 'data-style-url';
+		$added_css_prop  = 'list-style-image';
+		$protocols       = array( 'https' );
+		$hook_names      = array( 'safe_style_css', 'safecss_filter_attr_allow_css', 'wp_kses_uri_attributes' );
+		$hook_snapshot   = self::snapshot_hooks( $hook_names );
+		$hook_before     = array();
+		foreach ( $hook_names as $hook_name ) {
+			$hook_before[ $hook_name ] = self::hook_signature( $hook_name );
+		}
+
+		$filter_hits = array(
+			'safeStyleCss' => 0,
+			'allowCss'     => array(),
+			'uriAttrs'     => 0,
+		);
+		$failures    = array();
+		$cases       = array();
+		$exception   = null;
+
+		$style_filter = static function ( $properties ) use ( &$filter_hits, $added_css_prop ) {
+			++$filter_hits['safeStyleCss'];
+			if ( is_array( $properties ) ) {
+				$properties[] = $added_css_prop;
+			}
+
+			return $properties;
+		};
+		$allow_filter = static function ( bool $allow_css, string $css_test_string ) use ( &$filter_hits ): bool {
+			$filter_hits['allowCss'][] = array(
+				'default' => $allow_css,
+				'test'    => $css_test_string,
+			);
+			return true;
+		};
+		$uri_filter   = static function ( array $attributes ) use ( &$filter_hits, $custom_uri_attr ): array {
+			++$filter_hits['uriAttrs'];
+			$attributes[] = $custom_uri_attr;
+			return array_values( array_unique( $attributes ) );
+		};
+
+		\add_filter( 'safe_style_css', $style_filter, 10, 1 );
+		\add_filter( 'safecss_filter_attr_allow_css', $allow_filter, 10, 2 );
+		\add_filter( 'wp_kses_uri_attributes', $uri_filter, 10, 1 );
+
+		try {
+			$unsafe_urls = array(
+				'javascript:evil',
+				'vbscript:evil',
+				'livescript:evil',
+				'mocha:evil',
+			);
+			$policy      = array(
+				'a'    => array(
+					'href'           => true,
+					$custom_uri_attr => true,
+				),
+				'div'  => array(
+					'data-*'         => true,
+					'style'          => true,
+					$custom_uri_attr => true,
+				),
+				'span' => array(
+					'data-*'         => true,
+					'style'          => true,
+					$custom_uri_attr => true,
+				),
+			);
+
+			for ( $case_index = 0; $case_index < 8; ++$case_index ) {
+				$token        = substr( sha1( $seed . ':style-protocol:' . $case_index . ':' . self::rng_uint32( $rng ) ), 0, 8 );
+				$safe_url     = 'https://example.test/kses/' . $token . '.png';
+				$route_url    = 'https://example.test/route/' . $token;
+				$unsafe_url   = self::rng_choice( $rng, $unsafe_urls );
+				$custom_prop  = '--cf-url-' . $token;
+				$css          = 'background-image:url(' . $safe_url . ')'
+					. ';background:url(' . $unsafe_url . ')'
+					. ';' . $added_css_prop . ':url("' . $safe_url . '?list=1")'
+					. ';' . $added_css_prop . ':url(' . $unsafe_url . ')'
+					. ';' . $custom_prop . ':url(' . $safe_url . '?var=1)'
+					. ';' . $custom_prop . '-bad:url(' . $unsafe_url . ')'
+					. ';cursor:url(' . $unsafe_url . '), auto'
+					. ';color:red';
+				$case_failures = array();
+
+				$filtered_css = \safecss_filter_attr( $css );
+				$css_violations = self::css_policy_violations( $filtered_css, $protocols );
+				if ( ! empty( $css_violations ) ) {
+					$case_failures[] = array(
+						'type'       => 'direct-css-violations',
+						'violations' => array_slice( $css_violations, 0, 6 ),
+						'css'        => self::preview( $filtered_css ),
+					);
+				}
+				foreach ( array( $safe_url, $safe_url . '?list=1', $safe_url . '?var=1' ) as $expected_url ) {
+					if ( false === strpos( $filtered_css, $expected_url ) ) {
+						$case_failures[] = array(
+							'type'   => 'safe-css-url-stripped',
+							'url'    => $expected_url,
+							'css'    => self::preview( $filtered_css ),
+						);
+					}
+				}
+				if ( false !== strpos( self::decode_attribute_text( $filtered_css ), self::decode_attribute_text( $unsafe_url ) ) ) {
+					$case_failures[] = array(
+						'type'      => 'unsafe-css-url-preserved',
+						'unsafeUrl' => $unsafe_url,
+						'css'       => self::preview( $filtered_css ),
+					);
+				}
+
+				$html     = '<div style="' . $css . '" ' . $custom_uri_attr . '="' . $route_url . '" data-style-token="' . $token . '">'
+					. '<a href="' . $unsafe_url . '" ' . $custom_uri_attr . '="' . $route_url . '">bad-link</a>'
+					. '<span style="' . $css . '" ' . $custom_uri_attr . '="' . $unsafe_url . '" data-style-token="' . $token . '">span</span>'
+					. '</div>';
+				$filtered = \wp_kses( $html, $policy, $protocols );
+				$refiltered = \wp_kses( $filtered, $policy, $protocols );
+				$html_violations = array_merge(
+					self::policy_violations( $filtered, $policy, $protocols ),
+					self::attribute_boundary_violations( $filtered ),
+					self::style_attribute_violations( $filtered, $protocols )
+				);
+				if ( $filtered !== $refiltered ) {
+					$case_failures[] = array(
+						'type'       => 'html-idempotence',
+						'filtered'   => self::preview( $filtered ),
+						'refiltered' => self::preview( $refiltered ),
+					);
+				}
+				if ( ! empty( $html_violations ) ) {
+					$case_failures[] = array(
+						'type'       => 'html-policy-violations',
+						'violations' => array_slice( $html_violations, 0, 6 ),
+						'html'       => self::preview( $filtered ),
+					);
+				}
+				if ( false === strpos( $filtered, $custom_uri_attr . '="' . $route_url . '"' ) ) {
+					$case_failures[] = array(
+						'type'   => 'safe-dynamic-uri-attribute-stripped',
+						'attr'   => $custom_uri_attr,
+						'url'    => $route_url,
+						'html'   => self::preview( $filtered ),
+					);
+				}
+				if ( false === strpos( $filtered, 'data-style-token="' . $token . '"' ) ) {
+					$case_failures[] = array(
+						'type'   => 'non-uri-data-attribute-stripped',
+						'html'   => self::preview( $filtered ),
+					);
+				}
+				if ( false !== strpos( self::decode_attribute_text( $filtered ), self::decode_attribute_text( $unsafe_url ) ) ) {
+					$case_failures[] = array(
+						'type'      => 'unsafe-html-url-preserved',
+						'unsafeUrl' => $unsafe_url,
+						'html'      => self::preview( $filtered ),
+					);
+				}
+
+				$attrs = 'href="' . $unsafe_url . '" ' . $custom_uri_attr . '="' . $unsafe_url . '" data-plain="' . $unsafe_url . '" src="' . $safe_url . '"';
+				$hair  = \wp_kses_hair( $attrs, $protocols );
+				if ( $unsafe_url === ( $hair['href']['value'] ?? null ) || $unsafe_url === ( $hair[ $custom_uri_attr ]['value'] ?? null ) ) {
+					$case_failures[] = array(
+						'type'  => 'hair-uri-attribute-not-filtered',
+						'hair'  => self::compact_value( $hair ),
+						'attrs' => $attrs,
+					);
+				}
+				if ( $unsafe_url !== ( $hair['data-plain']['value'] ?? null ) ) {
+					$case_failures[] = array(
+						'type'  => 'hair-non-uri-data-attribute-filtered',
+						'hair'  => self::compact_value( $hair ),
+						'attrs' => $attrs,
+					);
+				}
+
+				$attr_filtered = \wp_kses_attr(
+					'div',
+					' style="' . $css . '" ' . $custom_uri_attr . '="' . $unsafe_url . '" data-style-token="' . $token . '"',
+					$policy,
+					$protocols
+				);
+				if (
+					false !== strpos( self::decode_attribute_text( $attr_filtered ), self::decode_attribute_text( $unsafe_url ) )
+					|| ! empty( self::style_attribute_violations( $attr_filtered, $protocols ) )
+				) {
+					$case_failures[] = array(
+						'type'         => 'wp-kses-attr-cross-hook-violation',
+						'attrFiltered' => self::preview( $attr_filtered ),
+					);
+				}
+
+				$cases[] = array(
+					'token'       => $token,
+					'unsafeUrl'   => self::preview( $unsafe_url, 80 ),
+					'filteredCss' => self::preview( $filtered_css, 120 ),
+				);
+				if ( ! empty( $case_failures ) ) {
+					$failures[] = array(
+						'case'     => $case_index,
+						'token'    => $token,
+						'failures' => $case_failures,
+					);
+				}
+			}
+		} catch ( \Throwable $e ) {
+			$exception = $e;
+		} finally {
+			\remove_filter( 'safe_style_css', $style_filter, 10 );
+			\remove_filter( 'safecss_filter_attr_allow_css', $allow_filter, 10 );
+			\remove_filter( 'wp_kses_uri_attributes', $uri_filter, 10 );
+			self::restore_hooks( $hook_snapshot );
+		}
+
+		if ( null !== $exception ) {
+			return self::throwable_result(
+				$seed,
+				null,
+				'kses.style-protocol-cross-hook-matrix.no-throw',
+				$custom_uri_attr,
+				$exception
+			);
+		}
+
+		$hook_after = array();
+		foreach ( $hook_names as $hook_name ) {
+			$hook_after[ $hook_name ] = self::hook_signature( $hook_name );
+		}
+		$filters_removed = false === \has_filter( 'safe_style_css', $style_filter )
+			&& false === \has_filter( 'safecss_filter_attr_allow_css', $allow_filter )
+			&& false === \has_filter( 'wp_kses_uri_attributes', $uri_filter );
+		$css_after = \safecss_filter_attr( $added_css_prop . ':url(https://example.test/after.png);color:red' );
+		$uri_after = \wp_kses_uri_attributes();
+		if (
+			! $filters_removed
+			|| $hook_before !== $hook_after
+			|| false !== strpos( $css_after, $added_css_prop )
+			|| in_array( $custom_uri_attr, self::lowercase_list( is_array( $uri_after ) ? $uri_after : array() ), true )
+		) {
+			$failures[] = array(
+				'type'                 => 'filter-restoration',
+				'filtersRemoved'       => $filters_removed,
+				'hooksRestored'        => $hook_before === $hook_after,
+				'cssAfter'             => self::preview( $css_after ),
+				'customUriAttrPresent' => in_array( $custom_uri_attr, self::lowercase_list( is_array( $uri_after ) ? $uri_after : array() ), true ),
+				'hookBefore'           => $hook_before,
+				'hookAfter'            => $hook_after,
+			);
+		}
+		foreach ( $filter_hits['allowCss'] as $hit ) {
+			$decoded_test = self::decode_attribute_text( $hit['test'] );
+			foreach ( self::DANGEROUS_PROTOCOLS as $protocol ) {
+				if ( false !== stripos( $decoded_test, $protocol . ':' ) ) {
+					$failures[] = array(
+						'type'     => 'allow-css-filter-saw-unfiltered-dangerous-url',
+						'protocol' => $protocol,
+						'hit'      => $hit,
+					);
+					break 2;
+				}
+			}
+		}
+
+		$details = array(
+			'caseCount'      => count( $cases ),
+			'customUriAttr'  => $custom_uri_attr,
+			'addedCssProp'   => $added_css_prop,
+			'filterHits'     => array(
+				'safeStyleCss' => $filter_hits['safeStyleCss'],
+				'allowCss'     => count( $filter_hits['allowCss'] ),
+				'uriAttrs'     => $filter_hits['uriAttrs'],
+			),
+			'filtersRemoved' => $filters_removed,
+			'cssAfter'       => self::preview( $css_after ),
+			'cases'          => array_slice( $cases, 0, 5 ),
+			'failureCount'   => count( $failures ),
+			'failures'       => array_slice( $failures, 0, 8 ),
+		);
+
+		if ( empty( $failures ) ) {
+			return self::pass( $seed, null, 'kses.style-protocol-cross-hook-matrix', $custom_uri_attr, $details );
+		}
+
+		return self::fail(
+			$seed,
+			null,
+			'kses.style-protocol-cross-hook-matrix',
+			$custom_uri_attr,
+			'CSS URL protocol checks run before permissive CSS allow filters, dynamic URI attributes are protocol-filtered, non-URI data attributes remain data-only, and hooks restore',
 			$failures,
 			$details
 		);

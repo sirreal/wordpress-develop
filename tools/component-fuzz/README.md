@@ -495,7 +495,9 @@ database, network requests, or a configured site.
   explicit null/control-character stripping and slash-zero handling,
   filter-aware safe CSS, generated policy/protocol/style mutation matrices,
   scoped generated context policy mutation matrices with custom URI attribute
-  and safe CSS filters,
+  and safe CSS filters, cross-hook CSS URL protocol checks combining
+  `safe_style_css`, `safecss_filter_attr_allow_css`, and dynamic
+  `wp_kses_uri_attributes`,
   attribute/entity/comment handling, deterministic attribute constraint
   matrices for required, values, max/min, valueless, and callback checks,
   serialized block attribute KSES filtering, PDF object policy and
