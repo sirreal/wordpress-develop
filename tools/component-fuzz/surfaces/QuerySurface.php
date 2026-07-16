@@ -5,6 +5,7 @@ final class QuerySurface {
 	public const NAME = 'query';
 
 	private const GENERATED_CASES = 6;
+	private const DATE_BOUND_EXECUTION_CASES = 4;
 	private const SAMPLE_BYTES     = 180;
 	private const TAXONOMY         = 'component_fuzz_tax';
 
@@ -2970,6 +2971,9 @@ final class QuerySurface {
 		for ( $i = 0; $i < self::GENERATED_CASES; $i++ ) {
 			$cases[] = self::generated_user_query_date_execution_case( $ctx->fork( 'user-date-execution-' . $i ), $i );
 		}
+		for ( $i = 0; $i < self::DATE_BOUND_EXECUTION_CASES; $i++ ) {
+			$cases[] = self::generated_user_query_date_bound_execution_case( $ctx->fork( 'user-date-bound-execution-' . $i ), $i );
+		}
 
 		return $cases;
 	}
@@ -3055,16 +3059,34 @@ final class QuerySurface {
 		for ( $i = 0; $i < self::GENERATED_CASES; $i++ ) {
 			$cases[] = self::generated_comment_query_date_execution_case( $ctx->fork( 'comment-date-execution-' . $i ), $i );
 		}
+		for ( $i = 0; $i < self::DATE_BOUND_EXECUTION_CASES; $i++ ) {
+			$cases[] = self::generated_comment_query_date_bound_execution_case( $ctx->fork( 'comment-date-bound-execution-' . $i ), $i );
+		}
 
 		return $cases;
 	}
 
 	private static function generated_user_query_date_execution_case( \ComponentFuzz\FuzzContext $ctx, int $index ): array {
-		$template      = self::generated_seeded_date_execution_template( $ctx, 'user', $index );
+		$template = self::generated_seeded_date_execution_template( $ctx, 'user', $index );
+		return self::user_query_date_execution_case_from_template(
+			$template,
+			'generated-user-date-execution-' . $index . '-' . $template['label']
+		);
+	}
+
+	private static function generated_user_query_date_bound_execution_case( \ComponentFuzz\FuzzContext $ctx, int $index ): array {
+		$template = self::generated_seeded_date_bound_execution_template( $ctx, 'user', $index );
+		return self::user_query_date_execution_case_from_template(
+			$template,
+			'generated-user-date-bound-execution-' . $index . '-' . $template['label']
+		);
+	}
+
+	private static function user_query_date_execution_case_from_template( array $template, string $label ): array {
 		$date_query    = $template['dateQuery'];
 		$start_of_week = (int) ( $template['startOfWeek'] ?? 0 );
 		$case          = array(
-			'label'     => 'generated-user-date-execution-' . $index . '-' . $template['label'],
+			'label'     => $label,
 			'queryVars' => array(
 				'blog_id'       => 0,
 				'cache_results' => false,
@@ -3088,11 +3110,26 @@ final class QuerySurface {
 	}
 
 	private static function generated_comment_query_date_execution_case( \ComponentFuzz\FuzzContext $ctx, int $index ): array {
-		$template      = self::generated_seeded_date_execution_template( $ctx, 'comment', $index );
+		$template = self::generated_seeded_date_execution_template( $ctx, 'comment', $index );
+		return self::comment_query_date_execution_case_from_template(
+			$template,
+			'generated-comment-date-execution-' . $index . '-' . $template['label']
+		);
+	}
+
+	private static function generated_comment_query_date_bound_execution_case( \ComponentFuzz\FuzzContext $ctx, int $index ): array {
+		$template = self::generated_seeded_date_bound_execution_template( $ctx, 'comment', $index );
+		return self::comment_query_date_execution_case_from_template(
+			$template,
+			'generated-comment-date-bound-execution-' . $index . '-' . $template['label']
+		);
+	}
+
+	private static function comment_query_date_execution_case_from_template( array $template, string $label ): array {
 		$date_query    = $template['dateQuery'];
 		$start_of_week = (int) ( $template['startOfWeek'] ?? 0 );
 		$case          = array(
-			'label'     => 'generated-comment-date-execution-' . $index . '-' . $template['label'],
+			'label'     => $label,
 			'queryVars' => array(
 				'cache_results'             => false,
 				'date_query'                => $date_query,
@@ -3219,6 +3256,74 @@ final class QuerySurface {
 		return $template;
 	}
 
+	private static function generated_seeded_date_bound_execution_template( \ComponentFuzz\FuzzContext $ctx, string $kind, int $index ): array {
+		$templates = array(
+			array(
+				'label'     => 'inclusive-late-bounds',
+				'dateQuery' => array(
+					array(
+						'after'     => '2020-05-01 00:00:00',
+						'before'    => '2020-06-01 14:00:00',
+						'inclusive' => true,
+					),
+				),
+			),
+			array(
+				'label'     => 'exclusive-middle-bounds',
+				'dateQuery' => array(
+					array(
+						'after'     => '2020-01-15 10:00:00',
+						'before'    => '2020-05-05 13:00:00',
+						'inclusive' => false,
+					),
+				),
+			),
+			array(
+				'label'     => 'lower-bound-with-week',
+				'dateQuery' => array(
+					array(
+						'after'     => '2020-05-05 13:00:00',
+						'inclusive' => true,
+					),
+					array(
+						'compare' => 'IN',
+						'week'    => array( 18, 22 ),
+					),
+				),
+			),
+			array(
+				'label'     => 'upper-bound-with-time',
+				'dateQuery' => array(
+					array(
+						'before'    => '2020-06-01 14:00:00',
+						'inclusive' => false,
+					),
+					array(
+						'compare' => '>=',
+						'hour'    => 10,
+					),
+				),
+			),
+		);
+
+		$template = $templates[ $index % count( $templates ) ];
+
+		if ( $ctx->bool( 40 ) ) {
+			$template['dateQuery'][] = array(
+				'compare' => '=',
+				'year'    => 2020,
+			);
+			$template['label']      .= '-year';
+		}
+
+		if ( 'comment' === $kind && $ctx->bool( 50 ) ) {
+			$template['dateQuery'] = self::date_execution_query_with_column( $template['dateQuery'], 'comment_date_gmt' );
+			$template['label']    .= '-gmt';
+		}
+
+		return $template;
+	}
+
 	private static function date_execution_query_with_column( array $date_query, string $column ): array {
 		foreach ( $date_query as $key => $clause ) {
 			if ( ! is_int( $key ) || ! is_array( $clause ) ) {
@@ -3238,6 +3343,12 @@ final class QuerySurface {
 		foreach ( $date_query as $key => $clause ) {
 			if ( ! is_int( $key ) || ! is_array( $clause ) ) {
 				continue;
+			}
+
+			foreach ( array( 'after', 'before' ) as $boundary ) {
+				if ( array_key_exists( $boundary, $clause ) ) {
+					$contains[] = self::date_execution_sql_bound_condition( $kind, $clause, $boundary );
+				}
 			}
 
 			foreach ( self::date_execution_units() as $unit ) {
@@ -3322,6 +3433,15 @@ final class QuerySurface {
 		return $expression . ' ' . $compare . ' ' . (int) ( $values[0] ?? 0 );
 	}
 
+	private static function date_execution_sql_bound_condition( string $kind, array $clause, string $boundary ): string {
+		$inclusive = ! empty( $clause['inclusive'] );
+		$operator  = 'after' === $boundary
+			? ( $inclusive ? '>=' : '>' )
+			: ( $inclusive ? '<=' : '<' );
+
+		return self::date_execution_sql_column( $kind, $clause ) . ' ' . $operator . " '" . self::date_execution_boundary_datetime( $clause[ $boundary ] ) . "'";
+	}
+
 	private static function date_execution_expected_ids( string $kind, array $date_query, int $start_of_week ): array {
 		$ids = array();
 
@@ -3368,7 +3488,7 @@ final class QuerySurface {
 			$matches[] = self::date_execution_query_matches_datetime( $clause, $datetime, $start_of_week );
 		}
 
-		if ( array() === $matches && self::date_execution_clause_has_unit( $query ) ) {
+		if ( array() === $matches && self::date_execution_clause_has_predicate( $query ) ) {
 			return self::date_execution_clause_matches_datetime( $query, $datetime, $start_of_week );
 		}
 
@@ -3379,12 +3499,28 @@ final class QuerySurface {
 		return 'OR' === $relation ? in_array( true, $matches, true ) : ! in_array( false, $matches, true );
 	}
 
-	private static function date_execution_clause_has_unit( array $clause ): bool {
-		return array() !== array_intersect( self::date_execution_units(), array_keys( $clause ) );
+	private static function date_execution_clause_has_predicate( array $clause ): bool {
+		return array() !== array_intersect( self::date_execution_units(), array_keys( $clause ) )
+			|| array_key_exists( 'after', $clause )
+			|| array_key_exists( 'before', $clause );
 	}
 
 	private static function date_execution_clause_matches_datetime( array $clause, string $datetime, int $start_of_week ): bool {
 		$compare = strtoupper( (string) ( $clause['compare'] ?? '=' ) );
+
+		if (
+			array_key_exists( 'after', $clause )
+			&& ! self::date_execution_bound_matches( $datetime, 'after', $clause['after'], ! empty( $clause['inclusive'] ) )
+		) {
+			return false;
+		}
+
+		if (
+			array_key_exists( 'before', $clause )
+			&& ! self::date_execution_bound_matches( $datetime, 'before', $clause['before'], ! empty( $clause['inclusive'] ) )
+		) {
+			return false;
+		}
 
 		foreach ( self::date_execution_units() as $unit ) {
 			if ( ! array_key_exists( $unit, $clause ) ) {
@@ -3397,6 +3533,20 @@ final class QuerySurface {
 		}
 
 		return true;
+	}
+
+	private static function date_execution_bound_matches( string $datetime, string $boundary, $expected, bool $inclusive ): bool {
+		$comparison = strcmp( $datetime, self::date_execution_boundary_datetime( $expected ) );
+
+		if ( 'after' === $boundary ) {
+			return $inclusive ? $comparison >= 0 : $comparison > 0;
+		}
+
+		return $inclusive ? $comparison <= 0 : $comparison < 0;
+	}
+
+	private static function date_execution_boundary_datetime( $boundary ): string {
+		return is_array( $boundary ) ? implode( '-', array_map( 'strval', $boundary ) ) : (string) $boundary;
 	}
 
 	private static function date_execution_units(): array {

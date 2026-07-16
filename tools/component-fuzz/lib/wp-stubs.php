@@ -1569,7 +1569,7 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 			}
 
 			foreach ( $columns as $column ) {
-				if ( ! preg_match_all( '/(?<![A-Za-z0-9_])(?:`?wp_posts`?\.)?`?' . preg_quote( $column, '/' ) . '`?\s*(<=|>=|<|>)\s*(\'(?:\\\\.|[^\'\\\\])*\'|"[^"]*")/i', $where, $matches, PREG_SET_ORDER ) ) {
+				if ( ! preg_match_all( '/(?<![A-Za-z0-9_])(?:`?[a-z_][a-z0-9_]*`?\.)?`?' . preg_quote( $column, '/' ) . '`?\s*(<=|>=|<|>)\s*(\'(?:\\\\.|[^\'\\\\])*\'|"[^"]*")/i', $where, $matches, PREG_SET_ORDER ) ) {
 					$matches = array();
 				}
 
