@@ -433,9 +433,44 @@ function cleanup_isolated_process_group( int $process_group ): array {
 	);
 }
 
-function run_php_process( array $script_args, string $cwd, int $timeout_ms, ?string $log_path = null, int $max_capture_bytes = 1048576, bool $isolate_process_group = false ): array {
+function run_php_process(
+	array $script_args,
+	string $cwd,
+	int $timeout_ms,
+	?string $log_path = null,
+	int $max_capture_bytes = 1048576,
+	bool $isolate_process_group = false,
+	?array $environment = null,
+	bool $replace_environment = false,
+	?string $stdout_log_path = null,
+	?string $stderr_log_path = null
+): array {
 	if ( $max_capture_bytes < 1 ) {
 		throw new \InvalidArgumentException( 'Process capture limit must be positive.' );
+	}
+	if ( $timeout_ms < 1 ) {
+		throw new \InvalidArgumentException( 'Process timeout must be positive.' );
+	}
+	$log_paths = array_values( array_filter( array( $log_path, $stdout_log_path, $stderr_log_path ), static fn ( $path ): bool => null !== $path ) );
+	if ( count( $log_paths ) !== count( array_unique( $log_paths ) ) ) {
+		throw new \InvalidArgumentException( 'Process combined, stdout, and stderr logs must use distinct paths.' );
+	}
+	$validated_environment = array();
+	foreach ( $environment ?? array() as $name => $value ) {
+		if ( ! is_string( $name ) || 1 !== preg_match( '/^[A-Za-z_][A-Za-z0-9_]*$/', $name ) ) {
+			throw new \InvalidArgumentException( 'Process environment contains an invalid variable name.' );
+		}
+		if ( ! is_string( $value ) || false !== strpos( $value, "\0" ) ) {
+			throw new \InvalidArgumentException( "Process environment value for {$name} must be a NUL-free string." );
+		}
+		$validated_environment[ $name ] = $value;
+	}
+	$process_environment = null;
+	if ( $replace_environment ) {
+		$process_environment = $validated_environment;
+	} elseif ( null !== $environment ) {
+		$inherited = getenv();
+		$process_environment = array_merge( is_array( $inherited ) ? $inherited : array(), $validated_environment );
 	}
 	$target_command = array_merge( array( PHP_BINARY ), $script_args );
 	$command        = $target_command;
@@ -455,6 +490,8 @@ function run_php_process( array $script_args, string $cwd, int $timeout_ms, ?str
 	);
 
 	$log = null;
+	$stdout_log = null;
+	$stderr_log = null;
 	if ( null !== $log_path ) {
 		ensure_dir( dirname( $log_path ) );
 		$log = fopen( $log_path, 'wb' );
@@ -462,11 +499,38 @@ function run_php_process( array $script_args, string $cwd, int $timeout_ms, ?str
 			throw new \RuntimeException( "Could not open process log: {$log_path}" );
 		}
 	}
+	foreach ( array( 'stdout' => $stdout_log_path, 'stderr' => $stderr_log_path ) as $stream_name => $stream_path ) {
+		if ( null === $stream_path ) {
+			continue;
+		}
+		ensure_dir( dirname( $stream_path ) );
+		$stream_log = fopen( $stream_path, 'wb' );
+		if ( false === $stream_log ) {
+			if ( is_resource( $log ) ) {
+				fclose( $log );
+			}
+			if ( is_resource( $stdout_log ) ) {
+				fclose( $stdout_log );
+			}
+			throw new \RuntimeException( "Could not open process {$stream_name} log: {$stream_path}" );
+		}
+		if ( 'stdout' === $stream_name ) {
+			$stdout_log = $stream_log;
+		} else {
+			$stderr_log = $stream_log;
+		}
+	}
 
-	$process = proc_open( $command, $spec, $pipes, $cwd );
+	$process = proc_open( $command, $spec, $pipes, $cwd, $process_environment, array( 'bypass_shell' => true ) );
 	if ( ! is_resource( $process ) ) {
 		if ( is_resource( $log ) ) {
 			fclose( $log );
+		}
+		if ( is_resource( $stdout_log ) ) {
+			fclose( $stdout_log );
+		}
+		if ( is_resource( $stderr_log ) ) {
+			fclose( $stderr_log );
 		}
 		throw new \RuntimeException( 'Could not start PHP subprocess.' );
 	}
@@ -486,12 +550,15 @@ function run_php_process( array $script_args, string $cwd, int $timeout_ms, ?str
 	$process_group  = false;
 	$log_write_failed = false;
 
-	$drain = static function ( $pipe, string &$capture, bool &$truncated ) use ( $max_capture_bytes, $log, &$log_write_failed ): void {
+	$drain = static function ( $pipe, string &$capture, bool &$truncated, $stream_log ) use ( $max_capture_bytes, $log, &$log_write_failed ): void {
 		$chunk = stream_get_contents( $pipe );
 		if ( false === $chunk || '' === $chunk ) {
 			return;
 		}
 		if ( is_resource( $log ) && strlen( $chunk ) !== fwrite( $log, $chunk ) ) {
+			$log_write_failed = true;
+		}
+		if ( is_resource( $stream_log ) && strlen( $chunk ) !== fwrite( $stream_log, $chunk ) ) {
 			$log_write_failed = true;
 		}
 		$capture .= $chunk;
@@ -502,8 +569,8 @@ function run_php_process( array $script_args, string $cwd, int $timeout_ms, ?str
 	};
 
 	while ( true ) {
-		$drain( $pipes[1], $stdout, $stdout_truncated );
-		$drain( $pipes[2], $stderr, $stderr_truncated );
+		$drain( $pipes[1], $stdout, $stdout_truncated, $stdout_log );
+		$drain( $pipes[2], $stderr, $stderr_truncated, $stderr_log );
 
 		$status = proc_get_status( $process );
 		if ( $isolate_process_group && $process_pid > 0 && function_exists( 'posix_getpgid' ) ) {
@@ -535,13 +602,18 @@ function run_php_process( array $script_args, string $cwd, int $timeout_ms, ?str
 		usleep( 10000 );
 	}
 
-	$drain( $pipes[1], $stdout, $stdout_truncated );
-	$drain( $pipes[2], $stderr, $stderr_truncated );
+	$drain( $pipes[1], $stdout, $stdout_truncated, $stdout_log );
+	$drain( $pipes[2], $stderr, $stderr_truncated, $stderr_log );
 	fclose( $pipes[1] );
 	fclose( $pipes[2] );
-	if ( is_resource( $log ) ) {
-		fflush( $log );
-		fclose( $log );
+	foreach ( array( $log, $stdout_log, $stderr_log ) as $evidence_log ) {
+		if ( is_resource( $evidence_log ) ) {
+			$flushed = fflush( $evidence_log );
+			$closed = fclose( $evidence_log );
+			if ( ! $flushed || ! $closed ) {
+				$log_write_failed = true;
+			}
+		}
 	}
 
 	$exit_code = proc_close( $process );
@@ -571,6 +643,8 @@ function run_php_process( array $script_args, string $cwd, int $timeout_ms, ?str
 		'stderrTruncated' => $stderr_truncated,
 		'output'     => $output,
 		'logPath'    => $log_path,
+		'stdoutLogPath' => $stdout_log_path,
+		'stderrLogPath' => $stderr_log_path,
 		'processGroupIsolated' => $process_group,
 		'processGroupCleanupFailed' => $process_group_cleanup_failed,
 	);

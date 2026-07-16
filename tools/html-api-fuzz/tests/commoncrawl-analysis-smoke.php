@@ -91,6 +91,13 @@ namespace {
 	html_api_fuzz_commoncrawl_smoke_assert( is_file( $passing['artifactDir'] . '/.complete' ), 'Expected an atomically published completion marker.' );
 	html_api_fuzz_commoncrawl_smoke_assert( is_string( $passing['runId'] ?? null ), 'Expected every summary to identify its run.' );
 	html_api_fuzz_commoncrawl_smoke_assert( is_string( $passing['configHash'] ?? null ), 'Expected every summary to identify its configuration.' );
+	$passing_body = '<!doctype html><html><head><title>T</title></head><body><p>Hello</p></body></html>';
+	html_api_fuzz_commoncrawl_smoke_assert( hash( 'sha256', $passing_body ) === ( $passing['inputSha256'] ?? null ), 'Expected parent-computed SHA-256 in the summary.' );
+	html_api_fuzz_commoncrawl_smoke_assert( hash( 'sha256', $passing_body ) === ( $passing['commonCrawl']['inputSha256'] ?? null ), 'Expected parent-computed SHA-256 in Common Crawl metadata.' );
+	$passing_replay = json_decode( (string) file_get_contents( $passing['artifactDir'] . '/replay.json' ), true );
+	html_api_fuzz_commoncrawl_smoke_assert( hash( 'sha256', $passing_body ) === ( $passing_replay['inputSha256'] ?? null ), 'Expected retained replay SHA-256.' );
+	$legacy_configuration = json_decode( (string) file_get_contents( $work_dir . '/configuration.json' ), true );
+	html_api_fuzz_commoncrawl_smoke_assert( null === ( $legacy_configuration['ccAnalyzer']['coordinator'] ?? null ), 'Expected direct legacy mode without coordinator provenance.' );
 	html_api_fuzz_commoncrawl_smoke_assert( 'skipped-invalid-utf8' === ( $skipped['status'] ?? null ), 'Expected invalid UTF-8 to be skipped by default policy.' );
 	html_api_fuzz_commoncrawl_smoke_assert( false === ( $skipped['differentialCovered'] ?? null ), 'Expected no differential coverage for a skipped fixture.' );
 
@@ -126,6 +133,53 @@ namespace {
 	}
 	html_api_fuzz_commoncrawl_smoke_assert( $config_mismatch, 'Expected configuration mismatch detection.' );
 	putenv( 'HTML_API_CC_MAX_TOKENS' );
+
+	// Coordinator provenance is all-or-none even for direct adapter construction.
+	$partial_provenance_dir = $work_dir . '-partial-provenance';
+	putenv( 'CC_ANALYZER_OUTPUT_DIR=' . $partial_provenance_dir );
+	putenv( 'HTML_API_CC_COORDINATOR_ID=partial-provenance' );
+	$partial_provenance_failed = false;
+	try {
+		\HtmlApiFuzz\CommonCrawlRunner::from_environment();
+	} catch ( \InvalidArgumentException $error ) {
+		$partial_provenance_failed = false !== strpos( $error->getMessage(), 'complete block' );
+	}
+	putenv( 'HTML_API_CC_COORDINATOR_ID' );
+	html_api_fuzz_commoncrawl_smoke_assert( $partial_provenance_failed, 'Expected partial coordinator provenance rejection.' );
+
+	// A result that lies about its input is retained as Worker infrastructure
+	// evidence before any oracle-result identity can be trusted.
+	$input_drift_dir = $work_dir . '-input-drift';
+	$input_drift_worker = $work_dir . '-input-drift-worker.php';
+	$input_drift_source = <<<'PHP'
+<?php
+require_once __AUTOLOAD__;
+$output = null;
+for ( $i = 1; $i + 1 < $argc; ++$i ) {
+	if ( '--output-dir' === $argv[ $i ] ) { $output = $argv[ $i + 1 ]; break; }
+}
+$renderer = \HtmlApiFuzz\OracleRenderer::from_options( array( 'dom-oracle' => 'php-dom' ) );
+$oracle = \HtmlApiFuzz\OracleRenderer::with_explicit_close( $renderer, static fn ( $r ) => $r->metadata() );
+\HtmlApiFuzz\write_json_file_atomic( $output . '/result.json', array(
+	'ok' => true, 'status' => 'passed', 'inputSha1' => str_repeat( '0', 40 ), 'inputLength' => 1,
+	'oracle' => $oracle, 'comparison' => array( 'ok' => true ), 'wordpress' => array(), 'dom' => array(),
+) );
+PHP;
+	$input_drift_source = str_replace( '__AUTOLOAD__', var_export( dirname( __DIR__ ) . '/lib/autoload.php', true ), $input_drift_source );
+	\HtmlApiFuzz\write_file_atomic( $input_drift_worker, $input_drift_source );
+	putenv( 'CC_ANALYZER_OUTPUT_DIR=' . $input_drift_dir );
+	putenv( 'HTML_API_CC_WORKER_SCRIPT=' . $input_drift_worker );
+	putenv( 'HTML_API_CC_PROCESS_TIMEOUT_MS=5000' );
+	$input_drift_runner = \HtmlApiFuzz\CommonCrawlRunner::from_environment();
+	$input_drift = $input_drift_runner->analyze_document(
+		new \CcAnalyzer\Analysis\HtmlAnalysisInput(
+			'urn:uuid:input-drift', 'https://example.com/input-drift', 200, 'text/html', 'UTF-8', '<p>parent bytes</p>', 'fixture:input-drift'
+		)
+	);
+	html_api_fuzz_commoncrawl_smoke_assert( 'worker-input-identity-drift' === ( $input_drift['failureClass'] ?? null ) && true === ( $input_drift['artifactsRetained'] ?? false ), 'Expected retained Worker input identity drift.' );
+	$input_drift_result = json_decode( (string) file_get_contents( $input_drift['artifactDir'] . '/result.json' ), true );
+	html_api_fuzz_commoncrawl_smoke_assert( true === ( $input_drift_result['workerInfrastructure'] ?? false ) && is_array( $input_drift_result['expectedInputIdentity'] ?? null ), 'Expected explicit Worker input drift evidence.' );
+	@unlink( $input_drift_worker );
 
 	// A hung parser child must become a replayable finding, not hang the callback.
 	$timeout_dir          = $work_dir . '-timeout';
@@ -499,6 +553,8 @@ namespace {
 
 	require_once dirname( __DIR__ ) . '/lib/autoload.php';
 	\HtmlApiFuzz\remove_dir_recursive( $work_dir );
+	\HtmlApiFuzz\remove_dir_recursive( $partial_provenance_dir );
+	\HtmlApiFuzz\remove_dir_recursive( $input_drift_dir );
 	\HtmlApiFuzz\remove_dir_recursive( $timeout_dir );
 	\HtmlApiFuzz\remove_dir_recursive( $evidence_dir );
 	\HtmlApiFuzz\remove_dir_recursive( $hanging_oracle_dir );

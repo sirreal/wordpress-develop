@@ -14,3 +14,4 @@ require_once __DIR__ . '/OracleFinding.php';
 require_once __DIR__ . '/ResultStore.php';
 require_once __DIR__ . '/Worker.php';
 require_once __DIR__ . '/CommonCrawlRunner.php';
+require_once __DIR__ . '/CommonCrawlBatchCoordinator.php';

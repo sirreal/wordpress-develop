@@ -34,6 +34,7 @@ class CommonCrawlRunner {
 	private array $git_metadata;
 	private string $run_id;
 	private string $configuration_hash;
+	private ?array $coordinator_provenance;
 
 	private function __construct(
 		string $output_dir,
@@ -48,7 +49,8 @@ class CommonCrawlRunner {
 		int $full_sample_percent,
 		string $memory_limit,
 		string $worker_script,
-		string $run_id
+		string $run_id,
+		?array $coordinator_provenance
 	) {
 		$this->output_dir             = $output_dir;
 		$this->oracle                 = $oracle;
@@ -64,6 +66,7 @@ class CommonCrawlRunner {
 		$this->worker_script          = $worker_script;
 		$this->git_metadata           = git_metadata( 1000, null, false );
 		$this->run_id                 = $run_id;
+		$this->coordinator_provenance = $coordinator_provenance;
 
 		ensure_dir( $this->output_dir );
 		$this->initialize_configuration();
@@ -99,10 +102,11 @@ class CommonCrawlRunner {
 			$oracle_options['chrome-startup-timeout-ms'] = (string) self::environment_int( 'HTML_API_CC_CHROME_STARTUP_TIMEOUT_MS', ChromeOracleRenderer::DEFAULT_STARTUP_TIMEOUT_MS, 1 );
 		}
 
+		$coordinator_provenance = self::coordinator_provenance_from_environment();
 		$oracle = OracleRenderer::from_options( $oracle_options );
 		return OracleRenderer::with_explicit_close(
 			$oracle,
-			static function ( OracleRenderer $oracle ) use ( $oracle_kind, $output_dir, $run_id ): self {
+			static function ( OracleRenderer $oracle ) use ( $oracle_kind, $output_dir, $run_id, $coordinator_provenance ): self {
 				$metadata = $oracle->metadata();
 				if ( true !== ( $metadata['available'] ?? false ) ) {
 					throw new \RuntimeException(
@@ -173,7 +177,8 @@ class CommonCrawlRunner {
 					$full_sample_percent,
 					$memory_limit,
 					$worker_script,
-					$run_id
+					$run_id,
+					$coordinator_provenance
 				);
 			}
 		);
@@ -189,8 +194,9 @@ class CommonCrawlRunner {
 			return $this->record_callback_error( $metadata, new \InvalidArgumentException( 'cc-analyzer document body must be a string.' ), $started_at );
 		}
 
-		$metadata['byteLength'] = strlen( $body );
-		$metadata['inputSha1']  = sha1( $body );
+		$metadata['byteLength']  = strlen( $body );
+		$metadata['inputSha1']   = sha1( $body );
+		$metadata['inputSha256'] = hash( 'sha256', $body );
 		$metadata['utf8Valid']  = 1 === preg_match( '//u', $body );
 		if ( $this->max_input_bytes > 0 && strlen( $body ) > $this->max_input_bytes ) {
 			return $this->record_skip( $metadata, 'skipped-input-too-large', $started_at );
@@ -206,9 +212,11 @@ class CommonCrawlRunner {
 			$this->persist_initial_input( $staging_dir, $body, $metadata, $seed, $checks );
 			$process = run_php_process( $this->worker_args( $staging_dir, $seed, $checks ), repo_root(), $this->process_timeout_ms, $staging_dir . '/worker.log', 1048576, true );
 			$result  = $this->load_or_synthesize_result( $staging_dir, $process, $body, $seed, $checks );
+			$result  = $this->enforce_worker_input_identity( $result, $body );
 			$result  = $this->enforce_worker_oracle_identity( $result );
 			$result['profile']      = 'commoncrawl';
 			$result['inputSource']  = 'commoncrawl';
+			$result['inputSha256']  = $metadata['inputSha256'];
 			$result['commonCrawl']  = $metadata;
 			$result['run']          = $this->run_metadata();
 			$result['repo']         = $this->git_metadata;
@@ -252,6 +260,30 @@ class CommonCrawlRunner {
 		$result['sourceOracle'] = $expected;
 		$result['actualOracle'] = $actual;
 		$result['oracleIdentityMismatches'] = $mismatches;
+		unset( $result['signature'], $result['oracleFinding'], $result['comparison'] );
+		return $result;
+	}
+
+	private function enforce_worker_input_identity( array $result, string $body ): array {
+		$expected = array(
+			'inputSha1'   => sha1( $body ),
+			'inputLength' => strlen( $body ),
+		);
+		$actual = array(
+			'inputSha1'   => $result['inputSha1'] ?? null,
+			'inputLength' => $result['inputLength'] ?? null,
+		);
+		if ( $expected === $actual ) {
+			return $result;
+		}
+
+		$result['ok']                   = false;
+		$result['status']               = 'worker-input-identity-drift';
+		$result['failureClass']         = 'worker-input-identity-drift';
+		$result['failureSnippet']       = 'Worker result input identity did not match the parent-persisted Common Crawl body.';
+		$result['workerInfrastructure'] = true;
+		$result['expectedInputIdentity'] = $expected;
+		$result['actualInputIdentity']   = $actual;
 		unset( $result['signature'], $result['oracleFinding'], $result['comparison'] );
 		return $result;
 	}
@@ -317,6 +349,7 @@ class CommonCrawlRunner {
 				'inputSource'   => 'commoncrawl',
 				'inputBase64'   => base64_encode( $body ),
 				'inputSha1'     => sha1( $body ),
+				'inputSha256'   => hash( 'sha256', $body ),
 				'inputLength'   => strlen( $body ),
 				'inputPreview'  => preview_bytes( $body ),
 				'limits'        => $this->limits,
@@ -347,6 +380,7 @@ class CommonCrawlRunner {
 				'mode'        => Generator::MODE_FULL_DOCUMENT,
 				'inputSource' => 'commoncrawl',
 				'inputSha1'   => sha1( $body ),
+				'inputSha256' => hash( 'sha256', $body ),
 				'inputLength' => strlen( $body ),
 				'checks'      => $checks,
 				'oracle'      => $this->oracle->metadata(),
@@ -401,6 +435,9 @@ class CommonCrawlRunner {
 			$replay['repoCommit']  = $this->git_metadata['commit'] ?? null;
 			$replay['repoDirty']   = $this->git_metadata['dirty'] ?? null;
 			$replay['commonCrawl'] = $metadata;
+			$replay['inputSha1']    = $metadata['inputSha1'] ?? $replay['inputSha1'] ?? null;
+			$replay['inputSha256']  = $metadata['inputSha256'] ?? null;
+			$replay['inputLength']  = $metadata['byteLength'] ?? $replay['inputLength'] ?? null;
 			$replay['oracle']      = $this->oracle->metadata();
 			if ( 'oracle-identity-drift' === ( $result['failureClass'] ?? null ) ) {
 				$replay['sourceOracle'] = $result['sourceOracle'] ?? $this->oracle->metadata();
@@ -497,6 +534,7 @@ class CommonCrawlRunner {
 			'mode'           => Generator::MODE_FULL_DOCUMENT,
 			'inputSource'    => 'commoncrawl',
 			'inputSha1'      => $metadata['inputSha1'] ?? ( null === $body ? null : sha1( $body ) ),
+			'inputSha256'    => $metadata['inputSha256'] ?? ( null === $body ? null : hash( 'sha256', $body ) ),
 			'inputLength'    => $metadata['byteLength'] ?? ( null === $body ? null : strlen( $body ) ),
 			'oracle'         => $this->oracle->metadata(),
 			'commonCrawl'    => $metadata,
@@ -521,8 +559,9 @@ class CommonCrawlRunner {
 			'differentialCovered' => is_array( $result['comparison'] ?? null ),
 			'seed'                => $result['seed'] ?? null,
 			'checks'              => $result['checks'] ?? $this->checks,
-			'inputSha1'           => $result['inputSha1'] ?? $metadata['inputSha1'] ?? null,
-			'inputLength'         => $result['inputLength'] ?? $metadata['byteLength'] ?? null,
+			'inputSha1'           => $metadata['inputSha1'] ?? null,
+			'inputSha256'         => $metadata['inputSha256'] ?? null,
+			'inputLength'         => $metadata['byteLength'] ?? null,
 			'signature'           => $result['signature'] ?? null,
 			'oracleFinding'       => $result['oracleFinding'] ?? null,
 			'oracle'              => $result['oracle'] ?? $this->oracle->metadata(),
@@ -548,6 +587,7 @@ class CommonCrawlRunner {
 			'profile'     => 'commoncrawl',
 			'mode'        => Generator::MODE_FULL_DOCUMENT,
 			'inputSource' => 'commoncrawl',
+			'coordinator' => $this->coordinator_provenance,
 		);
 	}
 
@@ -671,6 +711,7 @@ class CommonCrawlRunner {
 				'version'    => getenv( 'CC_ANALYZER_VERSION' ) ?: null,
 				'crawl'      => getenv( 'CC_ANALYZER_CRAWL' ) ?: null,
 				'invocation' => getenv( 'CC_ANALYZER_INVOCATION' ) ?: null,
+				'coordinator' => $this->coordinator_provenance,
 			),
 		);
 		$this->configuration_hash = hash( 'sha256', json_encode( self::canonicalize( $configuration ), JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE ) );
@@ -703,6 +744,7 @@ class CommonCrawlRunner {
 			'runId'      => $this->run_id,
 			'configHash' => $this->configuration_hash,
 			'outputDir'  => $this->output_dir,
+			'coordinator' => $this->coordinator_provenance,
 		);
 	}
 
@@ -760,6 +802,131 @@ class CommonCrawlRunner {
 
 	private static function elapsed_ms( int $started_at ): int {
 		return (int) round( max( 0, hrtime( true ) - $started_at ) / 1000000 );
+	}
+
+	private static function coordinator_provenance_from_environment(): ?array {
+		$variables = array(
+			'id'                   => 'HTML_API_CC_COORDINATOR_ID',
+			'batchName'            => 'HTML_API_CC_BATCH_NAME',
+			'cachePath'            => 'HTML_API_CC_CACHE_PATH',
+			'batchManifestPath'    => 'HTML_API_CC_BATCH_MANIFEST_PATH',
+			'batchManifestSha256'  => 'HTML_API_CC_BATCH_MANIFEST_SHA256',
+			'corpusFingerprint'    => 'HTML_API_CC_CORPUS_FINGERPRINT',
+			'documentCount'        => 'HTML_API_CC_DOCUMENT_COUNT',
+			'crawlId'              => 'HTML_API_CC_CRAWL_ID',
+			'pharPath'             => 'HTML_API_CC_PHAR_PATH',
+			'pharSha256'           => 'HTML_API_CC_PHAR_SHA256',
+			'invocationBase64'     => 'HTML_API_CC_INVOCATION_BASE64',
+			'callbackSha256'       => 'HTML_API_CC_CALLBACK_SHA256',
+			'workerSha256'         => 'HTML_API_CC_WORKER_SHA256',
+			'repositoryCommit'     => 'HTML_API_CC_REPOSITORY_COMMIT',
+			'repositoryDirty'      => 'HTML_API_CC_REPOSITORY_DIRTY',
+			'repositoryCodeSha256' => 'HTML_API_CC_REPOSITORY_CODE_SHA256',
+			'repositoryStateSha256'=> 'HTML_API_CC_REPOSITORY_STATE_SHA256',
+			'runtimeSha256'        => 'HTML_API_CC_RUNTIME_SHA256',
+			'trustBundleSha256'    => 'HTML_API_CC_TRUST_BUNDLE_SHA256',
+		);
+		$values = array();
+		$present = 0;
+		foreach ( $variables as $key => $name ) {
+			$value = getenv( $name );
+			if ( false !== $value && '' !== $value ) {
+				++$present;
+				$values[ $key ] = (string) $value;
+		}
+		}
+		if ( 0 === $present ) {
+			return null;
+		}
+		if ( count( $variables ) !== $present ) {
+			throw new \InvalidArgumentException( 'Coordinator provenance environment must be supplied as one complete block.' );
+		}
+
+		foreach ( array( 'id', 'batchName' ) as $key ) {
+			if ( 1 !== preg_match( '/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/', $values[ $key ] ) ) {
+				throw new \InvalidArgumentException( "Coordinator provenance {$key} is invalid." );
+			}
+		}
+		foreach ( array( 'batchManifestSha256', 'corpusFingerprint', 'pharSha256', 'callbackSha256', 'workerSha256', 'repositoryCodeSha256', 'repositoryStateSha256', 'runtimeSha256', 'trustBundleSha256' ) as $key ) {
+			if ( 1 !== preg_match( '/^[0-9a-f]{64}$/', $values[ $key ] ) ) {
+				throw new \InvalidArgumentException( "Coordinator provenance {$key} must be a lowercase SHA-256 digest." );
+			}
+		}
+		if ( 1 !== preg_match( '/^[0-9a-f]{40}$/', $values['repositoryCommit'] ) ) {
+			throw new \InvalidArgumentException( 'Coordinator repository commit must be a lowercase Git object ID.' );
+		}
+		if ( ! in_array( $values['repositoryDirty'], array( '0', '1' ), true ) ) {
+			throw new \InvalidArgumentException( 'Coordinator repository dirty state must be 0 or 1.' );
+		}
+		$document_count = filter_var( $values['documentCount'], FILTER_VALIDATE_INT, array( 'options' => array( 'min_range' => 1 ) ) );
+		if ( false === $document_count ) {
+			throw new \InvalidArgumentException( 'Coordinator document count must be a positive integer.' );
+		}
+		foreach ( array( 'crawlId', 'cachePath', 'batchManifestPath', 'pharPath' ) as $key ) {
+			if ( '' === trim( $values[ $key ] ) ) {
+				throw new \InvalidArgumentException( "Coordinator provenance {$key} must be non-empty." );
+			}
+		}
+		$cache_path = realpath( $values['cachePath'] );
+		$manifest_path = realpath( $values['batchManifestPath'] );
+		$phar_path = realpath( $values['pharPath'] );
+		if ( false === $cache_path || ! is_file( $cache_path ) || false === $manifest_path || ! is_file( $manifest_path ) || false === $phar_path || ! is_file( $phar_path ) ) {
+			throw new \RuntimeException( 'Coordinator provenance paths must resolve to regular files.' );
+		}
+		if ( ! hash_equals( $values['pharSha256'], hash_file( 'sha256', $phar_path ) ?: '' ) ) {
+			throw new \RuntimeException( 'Coordinator PHAR hash changed before Common Crawl callback initialization.' );
+		}
+		$callback_path = dirname( __DIR__ ) . '/commoncrawl-analysis.php';
+		if ( ! hash_equals( $values['callbackSha256'], hash_file( 'sha256', $callback_path ) ?: '' ) ) {
+			throw new \RuntimeException( 'Coordinator callback hash does not match commoncrawl-analysis.php.' );
+		}
+		$worker_path = realpath( self::environment_string( 'HTML_API_CC_WORKER_SCRIPT', dirname( __DIR__ ) . '/worker.php' ) );
+		if ( false === $worker_path || ! hash_equals( $values['workerSha256'], hash_file( 'sha256', $worker_path ) ?: '' ) ) {
+			throw new \RuntimeException( 'Coordinator Worker hash does not match the selected Worker script.' );
+		}
+		if ( 'batch' !== getenv( 'CC_ANALYZER_MODE' ) || $values['batchName'] !== getenv( 'CC_ANALYZER_BATCH' ) ) {
+			throw new \RuntimeException( 'Coordinator provenance requires the matching cc-analyzer batch callback mode.' );
+		}
+		$cc_manifest = realpath( (string) getenv( 'CC_ANALYZER_MANIFEST' ) );
+		if ( false === $cc_manifest || $cache_path !== $cc_manifest ) {
+			throw new \RuntimeException( 'Coordinator cache path does not match CC_ANALYZER_MANIFEST.' );
+		}
+
+		$invocation_json = base64_decode( $values['invocationBase64'], true );
+		if ( false === $invocation_json ) {
+			throw new \InvalidArgumentException( 'Coordinator invocation is not valid base64.' );
+		}
+		$invocation = StrictJsonParser::decode( $invocation_json );
+		if ( ! is_array( $invocation ) || array_keys( $invocation ) !== range( 0, count( $invocation ) - 1 ) || empty( $invocation ) ) {
+			throw new \InvalidArgumentException( 'Coordinator invocation must be a non-empty JSON string list.' );
+		}
+		foreach ( $invocation as $argument ) {
+			if ( ! is_string( $argument ) || '' === $argument || false !== strpos( $argument, "\0" ) ) {
+				throw new \InvalidArgumentException( 'Coordinator invocation contains an invalid argument.' );
+			}
+		}
+
+		return array(
+			'id'                   => $values['id'],
+			'batchName'            => $values['batchName'],
+			'cachePath'            => $cache_path,
+			'batchManifestPath'    => $manifest_path,
+			'batchManifestSha256'  => $values['batchManifestSha256'],
+			'corpusFingerprint'    => $values['corpusFingerprint'],
+			'documentCount'        => (int) $document_count,
+			'crawlId'              => $values['crawlId'],
+			'pharPath'             => $phar_path,
+			'pharSha256'           => $values['pharSha256'],
+			'invocation'           => $invocation,
+			'callbackSha256'       => $values['callbackSha256'],
+			'workerSha256'         => $values['workerSha256'],
+			'repositoryCommit'     => $values['repositoryCommit'],
+			'repositoryDirty'      => '1' === $values['repositoryDirty'],
+			'repositoryCodeSha256' => $values['repositoryCodeSha256'],
+			'repositoryStateSha256'=> $values['repositoryStateSha256'],
+			'runtimeSha256'        => $values['runtimeSha256'],
+			'trustBundleSha256'    => $values['trustBundleSha256'],
+		);
 	}
 
 	private static function environment_string( string $name, string $default ): string {

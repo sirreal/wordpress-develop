@@ -69,13 +69,65 @@ Then point cc-analyzer's HTML analysis-file argument at the absolute path to:
 tools/html-api-fuzz/commoncrawl-analysis.php
 ```
 
+Fetch a named batch exactly once, with an explicit crawl, then run that cached
+batch through all three required oracles with the checked coordinator. The
+coordinator never fetches or substitutes documents:
+
+```sh
+PHAR=/absolute/path/to/cc-analyzer.phar
+WORKSPACE=/absolute/path/to/cc-workspace
+BATCH=wp-html-api-canary-2026-30
+
+php "$PHAR" --workspace "$WORKSPACE" batch fetch "$BATCH" \
+  --crawl CC-MAIN-2026-30 --limit 20 --progress text --output json
+
+php tools/html-api-fuzz/commoncrawl-batch.php \
+  --cc-analyzer "$PHAR" --workspace "$WORKSPACE" --batch "$BATCH" \
+  --output-dir /absolute/new/path/shared-corpus-canary \
+  --batch-timeout-ms 1800000 --process-timeout-ms 90000 \
+  --lexbor-oracle-bin tools/html-api-fuzz/oracles/lexbor/build/lexbor-tree-oracle \
+  --html5ever-oracle-bin tools/html-api-fuzz/oracles/html5ever/build/html5ever-tree-oracle \
+  --chrome-oracle-script tools/html-api-fuzz/oracles/chrome/chrome-tree-oracle.js \
+  --chrome-executable /absolute/path/to/pinned/chrome \
+  --node-bin /absolute/path/to/node --retain-all
+```
+
+The output path must not exist. It is claimed once and contains separate
+`lexbor-source/`, `html5ever-source/`, and `chrome-cdp/` directories. Each gets
+its own immutable configuration, stdout and stderr evidence, append-only
+summary, exact sorted `replacement-environment.json`, complete marker, and
+file-hash seal. `batch-manifest.json` hashes the
+cached bytes and records every ordered record ID, state key, target, input
+range, SHA-256, and length. `shared-corpus.json` is published only after each
+run reports the exact batch count and the three ordered
+`(record ID, SHA-256, length)` vectors match. Missing, duplicate, partial,
+reordered, changed-cache, identity-drift, or trust-drift runs fail and retain
+their partial evidence without a success marker.
+
+Coordinator children receive a recorded replacement environment, not the
+caller's ambient `HTML_API_*`, `NODE_OPTIONS`, PHP configuration overrides, or
+loader-injection variables. It probes PHP and every oracle in that environment
+and brackets each trust capture with live cache reads. It rechecks the PHAR,
+PHP/ini runtime, complete executed repository code set, Git state, normalized
+oracle identities, every raw oracle trust file's path/type/mode/bytes, and
+cached bodies immediately before and after every run. Before sealing, it
+rereads the on-disk batch
+manifest, batch stdout, configurations, summaries, and environments. The
+sealed `shared-corpus.payload.json` is written first. After all validation and
+sealing, the coordinator publishes `shared-corpus.json`, then the per-run
+markers, and finally the root `.complete` as the sole authoritative completion
+marker and last fallible operation. Consumers must require that root marker;
+an interrupted directory may contain an otherwise valid manifest or seal but
+is not complete. A successful directory is write-once; use a new output path
+for every canary or full run.
+
 The PHAR owns crawl selection, ranges, checkpoints, and concurrency. The
 callback boundary is the same as other cc-analyzer HTML analyses: the file
 returns a `static function (HtmlAnalysisInput $document): void` closure. Use
 `php /path/to/cc-analyzer.phar --help` for the binary's crawl-specific command
-and argument names. This checkout does not contain `cc-analyzer.phar`, so the
-real PHAR CLI boundary is deliberately not claimed as tested; the included
-smoke test exercises a value object matching the observed callback contract.
+and argument names. The committed coordinator smoke exercises the same batch
+schemas and callback contract with an isolated fake analyzer. Real-PHAR runs
+are a separate external gate and are not claimed by that code-only smoke.
 
 Each accepted document runs in a separate PHP child with its own memory and
 wall-clock limit. The callback writes `input.bin` and an initial replay before
