@@ -90,24 +90,37 @@ class CommonCrawlRunner {
 		if ( is_string( $oracle_bin ) && '' !== $oracle_bin ) {
 			$oracle_options['lexbor-oracle-bin'] = $oracle_bin;
 		}
+		$html5ever_oracle_bin = getenv( 'HTML_API_FUZZ_HTML5EVER_ORACLE' );
+		if ( is_string( $html5ever_oracle_bin ) && '' !== $html5ever_oracle_bin ) {
+			$oracle_options['html5ever-oracle-bin'] = $html5ever_oracle_bin;
+		}
 
 		$oracle   = OracleRenderer::from_options( $oracle_options );
 		$metadata = $oracle->metadata();
-		if (
-			OracleRenderer::KIND_LEXBOR_SOURCE === $oracle_kind &&
-			( false === ( $metadata['available'] ?? true ) || isset( $metadata['versionError'] ) )
-		) {
+		if ( true !== ( $metadata['available'] ?? false ) ) {
 			throw new \RuntimeException(
-				'Lexbor oracle is unavailable. Run tools/html-api-fuzz/oracles/lexbor/build.sh '
-				. 'or set HTML_API_FUZZ_LEXBOR_ORACLE to an executable oracle binary.'
+				"Selected {$oracle_kind} oracle is unavailable: " . (string) ( $metadata['error'] ?? 'unknown identity error' )
 			);
 		}
 		$expected_commit = getenv( 'HTML_API_CC_EXPECT_LEXBOR_COMMIT' );
 		if (
 			is_string( $expected_commit ) && '' !== $expected_commit &&
-			$expected_commit !== ( $metadata['lexborCommit'] ?? null )
+			(
+				OracleRenderer::KIND_LEXBOR_SOURCE !== $oracle_kind ||
+				$expected_commit !== ( $metadata['identity']['lexborCommit'] ?? null )
+			)
 		) {
 			throw new \RuntimeException( 'Lexbor oracle commit does not match HTML_API_CC_EXPECT_LEXBOR_COMMIT.' );
+		}
+		$expected_identity_sha256 = getenv( 'HTML_API_CC_EXPECT_ORACLE_IDENTITY_SHA256' );
+		if ( is_string( $expected_identity_sha256 ) && '' !== $expected_identity_sha256 && 1 !== preg_match( '/^[0-9a-fA-F]{64}$/', $expected_identity_sha256 ) ) {
+			throw new \InvalidArgumentException( 'HTML_API_CC_EXPECT_ORACLE_IDENTITY_SHA256 must be a SHA-256 hex digest.' );
+		}
+		if (
+			is_string( $expected_identity_sha256 ) && '' !== $expected_identity_sha256 &&
+			! hash_equals( strtolower( $expected_identity_sha256 ), OracleRenderer::identity_sha256( $metadata ) )
+		) {
+			throw new \RuntimeException( 'Oracle identity does not match HTML_API_CC_EXPECT_ORACLE_IDENTITY_SHA256.' );
 		}
 
 		$checks = self::environment_string( 'HTML_API_CC_CHECKS', 'sampled' );
@@ -179,6 +192,7 @@ class CommonCrawlRunner {
 			$this->persist_initial_input( $staging_dir, $body, $metadata, $seed, $checks );
 			$process = run_php_process( $this->worker_args( $staging_dir, $seed, $checks ), repo_root(), $this->process_timeout_ms, $staging_dir . '/worker.log', 1048576, true );
 			$result  = $this->load_or_synthesize_result( $staging_dir, $process, $body, $seed, $checks );
+			$result  = $this->enforce_worker_oracle_identity( $result );
 			$result['profile']      = 'commoncrawl';
 			$result['inputSource']  = 'commoncrawl';
 			$result['commonCrawl']  = $metadata;
@@ -208,6 +222,24 @@ class CommonCrawlRunner {
 			// Deliberately leave staging in pending/ for manual recovery.
 			return $this->record_callback_error( $metadata, $throwable, $started_at, $body, $staging_dir );
 		}
+	}
+
+	private function enforce_worker_oracle_identity( array $result ): array {
+		$expected = $this->oracle->metadata();
+		$actual = $result['oracle'] ?? null;
+		$mismatches = OracleRenderer::identity_mismatches( $expected, is_array( $actual ) ? $actual : array() );
+		if ( empty( $mismatches ) ) {
+			return $result;
+		}
+		$result['ok'] = false;
+		$result['status'] = 'oracle-identity-drift';
+		$result['failureClass'] = 'oracle-identity-drift';
+		$result['failureSnippet'] = implode( '; ', $mismatches );
+		$result['sourceOracle'] = $expected;
+		$result['actualOracle'] = $actual;
+		$result['oracleIdentityMismatches'] = $mismatches;
+		unset( $result['signature'], $result['oracleFinding'], $result['comparison'] );
+		return $result;
 	}
 
 	private function worker_args( string $staging_dir, int $seed, string $checks ): array {
@@ -241,6 +273,15 @@ class CommonCrawlRunner {
 		$input_path = $staging_dir . '/input.bin';
 		write_file_atomic( $input_path, $body );
 		$oracle_options = $this->oracle->replay_options();
+		$replay_options = array_merge(
+			array( 'failUnsupported' => false, 'checks' => $checks ),
+			$oracle_options,
+			array(
+				'memoryLimit'      => $this->memory_limit,
+				'processTimeoutMs' => $this->process_timeout_ms,
+				'workerScript'     => realpath( $this->worker_script ) ?: $this->worker_script,
+			)
+		);
 		write_json_file_atomic(
 			$staging_dir . '/replay.json',
 			array(
@@ -265,16 +306,7 @@ class CommonCrawlRunner {
 				'inputPreview'  => preview_bytes( $body ),
 				'limits'        => $this->limits,
 				'oracle'        => $this->oracle->metadata(),
-				'options'       => array(
-					'failUnsupported' => false,
-					'checks'           => $checks,
-					'domOracle'        => $oracle_options['domOracle'] ?? OracleRenderer::KIND_LEXBOR_SOURCE,
-					'lexborOracleBin'  => $oracle_options['lexborOracleBin'] ?? null,
-					'oracleTimeoutMs'  => $oracle_options['oracleTimeoutMs'] ?? null,
-					'memoryLimit'      => $this->memory_limit,
-					'processTimeoutMs' => $this->process_timeout_ms,
-					'workerScript'     => realpath( $this->worker_script ) ?: $this->worker_script,
-				),
+				'options'       => $replay_options,
 				'commonCrawl'   => $metadata,
 				'status'        => 'pending-worker',
 			)
@@ -354,6 +386,12 @@ class CommonCrawlRunner {
 			$replay['repoCommit']  = $this->git_metadata['commit'] ?? null;
 			$replay['repoDirty']   = $this->git_metadata['dirty'] ?? null;
 			$replay['commonCrawl'] = $metadata;
+			$replay['oracle']      = $this->oracle->metadata();
+			if ( 'oracle-identity-drift' === ( $result['failureClass'] ?? null ) ) {
+				$replay['sourceOracle'] = $result['sourceOracle'] ?? $this->oracle->metadata();
+				$replay['actualOracle'] = $result['actualOracle'] ?? null;
+				$replay['oracleIdentityMismatches'] = $result['oracleIdentityMismatches'] ?? array();
+			}
 			$replay['options']['checks'] = $result['checks'] ?? $this->checks_for_seed( (int) ( $result['seed'] ?? 1 ) );
 			$replay['options']['memoryLimit'] = $this->memory_limit;
 			$replay['options']['processTimeoutMs'] = $this->process_timeout_ms;
@@ -473,6 +511,9 @@ class CommonCrawlRunner {
 			'signature'           => $result['signature'] ?? null,
 			'oracleFinding'       => $result['oracleFinding'] ?? null,
 			'oracle'              => $result['oracle'] ?? $this->oracle->metadata(),
+			'sourceOracle'        => $result['sourceOracle'] ?? null,
+			'actualOracle'        => $result['actualOracle'] ?? null,
+			'oracleIdentityMismatches' => $result['oracleIdentityMismatches'] ?? array(),
 			'artifactsRetained'   => null !== $artifact_dir,
 			'artifactDir'         => $artifact_dir,
 			'durationMs'          => $result['durationMs'] ?? null,
@@ -599,6 +640,7 @@ class CommonCrawlRunner {
 			'repo'                => $this->git_metadata,
 			'phpVersion'          => PHP_VERSION,
 			'oracle'              => $this->oracle->metadata(),
+			'oracleIdentitySha256' => OracleRenderer::identity_sha256( $this->oracle->metadata() ),
 			'limits'              => $this->limits,
 			'maxInputBytes'       => $this->max_input_bytes,
 			'maxKeepPerSignature' => $this->max_keep_per_signature,

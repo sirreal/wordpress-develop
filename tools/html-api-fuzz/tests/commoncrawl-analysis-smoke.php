@@ -428,12 +428,30 @@ namespace {
 	$evidence_dir  = $work_dir . '-evidence';
 	$evidence_body = '<!doctype html><p>byte-exact crash evidence</p>';
 	$oracle_started = $work_dir . '-oracle-started';
+	$hanging_oracle_dir = $work_dir . '-hanging-oracle';
+	$hanging_oracle = $hanging_oracle_dir . '/hanging-lexbor-oracle.php';
+	\HtmlApiFuzz\ensure_dir( $hanging_oracle_dir );
+	html_api_fuzz_commoncrawl_smoke_assert( copy( __DIR__ . '/fixtures/hanging-lexbor-oracle.php', $hanging_oracle ), 'Expected a private hanging-oracle fixture copy.' );
+	html_api_fuzz_commoncrawl_smoke_assert( chmod( $hanging_oracle, 0500 ), 'Expected the hanging-oracle fixture to be executable.' );
+	\HtmlApiFuzz\write_json_file(
+		$hanging_oracle_dir . '/build-manifest.json',
+		array(
+			'kind'           => 'html-api-fuzz-lexbor-build',
+			'requestedRef'   => 'test-hanging-oracle',
+			'resolvedCommit' => str_repeat( '0', 40 ),
+			'upstream'       => 'https://github.com/lexbor/lexbor.git',
+			'builtAt'        => gmdate( 'c' ),
+			'binarySha256'   => hash_file( 'sha256', $hanging_oracle ),
+			'compiler'       => 'test fixture',
+			'cmake'          => 'test fixture',
+		)
+	);
 	putenv( 'CC_ANALYZER_OUTPUT_DIR=' . $evidence_dir );
 	putenv( 'HTML_API_CC_WORKER_SCRIPT' );
 	putenv( 'HTML_API_CC_ORACLE=lexbor-source' );
-	putenv( 'HTML_API_FUZZ_LEXBOR_ORACLE=' . __DIR__ . '/fixtures/hanging-lexbor-oracle.php' );
+	putenv( 'HTML_API_FUZZ_LEXBOR_ORACLE=' . $hanging_oracle );
 	putenv( 'HTML_API_FUZZ_TEST_ORACLE_STARTED=' . $oracle_started );
-	putenv( 'HTML_API_CC_PROCESS_TIMEOUT_MS=1000' );
+	putenv( 'HTML_API_CC_PROCESS_TIMEOUT_MS=3000' );
 	putenv( 'HTML_API_CC_ORACLE_TIMEOUT_MS=5000' );
 	$evidence_runner = \HtmlApiFuzz\CommonCrawlRunner::from_environment();
 	$evidence = $evidence_runner->analyze_document(
@@ -474,6 +492,7 @@ namespace {
 	\HtmlApiFuzz\remove_dir_recursive( $work_dir );
 	\HtmlApiFuzz\remove_dir_recursive( $timeout_dir );
 	\HtmlApiFuzz\remove_dir_recursive( $evidence_dir );
+	\HtmlApiFuzz\remove_dir_recursive( $hanging_oracle_dir );
 	\HtmlApiFuzz\remove_dir_recursive( $fatal_dir );
 	\HtmlApiFuzz\remove_dir_recursive( $original_state_dir );
 	\HtmlApiFuzz\remove_dir_recursive( $replay_state_dir );

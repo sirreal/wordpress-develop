@@ -3,7 +3,7 @@
 require_once __DIR__ . '/lib/autoload.php';
 
 function html_api_fuzz_runner_usage(): void {
-	echo "Usage: php tools/html-api-fuzz/runner.php [--output-dir DIR] [--start-seed N] [--seed-stride N] [--max-seeds N] [--duration-seconds N] [--payload-policy POLICY] [--max-input-bytes N] [--dom-oracle php-dom|lexbor-source] [--lexbor-oracle-bin PATH] [--max-keep-per-signature N] [--keep-all-artifacts] [--stop-file PATH]\n";
+	echo "Usage: php tools/html-api-fuzz/runner.php [--output-dir DIR] [--start-seed N] [--seed-stride N] [--max-seeds N] [--duration-seconds N] [--payload-policy POLICY] [--max-input-bytes N] [--dom-oracle php-dom|lexbor-source|html5ever-source] [--lexbor-oracle-bin PATH|--html5ever-oracle-bin PATH] [--max-keep-per-signature N] [--keep-all-artifacts] [--stop-file PATH]\n";
 	echo "Use --duration-seconds 0 with --max-seeds 0 for an indefinite run.\n";
 	echo "Create the stop file (default OUTPUT_DIR/STOP) to stop gracefully: the current batch finishes and no new batch starts.\n";
 	echo "Oracle findings are recorded separately from failures; pass --triage-oracle-findings to watcher.php to process them.\n";

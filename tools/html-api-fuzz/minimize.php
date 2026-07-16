@@ -12,6 +12,31 @@ function html_api_fuzz_min_accepts_result( ?array $result, array $base, bool $an
 		: ( $any_failure ? ! ( $result['ok'] ?? true ) : ( ( $result['signature']['hash'] ?? null ) === $base['targetHash'] ) );
 }
 
+function html_api_fuzz_min_probe_terminal_error( ?array $result, array $base ): ?string {
+	if ( null === $result ) {
+		return null;
+	}
+	$mismatches = \HtmlApiFuzz\OracleRenderer::identity_mismatches( $base['oracle'], is_array( $result['oracle'] ?? null ) ? $result['oracle'] : array() );
+	if ( ! empty( $mismatches ) ) {
+		return 'Oracle identity drift during minimization: ' . implode( '; ', $mismatches );
+	}
+	if (
+		'oracle-renderer-error' === ( $result['failureClass'] ?? null ) ||
+		'oracle-renderer-error' === ( $result['dom']['failureClass'] ?? null ) ||
+		'oracle-renderer-error' === ( $result['mutation']['renderResult']['failureClass'] ?? null ) ||
+		true === ( $result['oracleInfrastructure'] ?? false ) ||
+		true === ( $result['dom']['infrastructure'] ?? false ) ||
+		true === ( $result['mutation']['oracleInfrastructure'] ?? false ) ||
+		true === ( $result['mutation']['renderResult']['infrastructure'] ?? false )
+	) {
+		return 'Oracle infrastructure failure during minimization: ' . (string) ( $result['dom']['error'] ?? $result['mutation']['renderResult']['error'] ?? $result['failureSnippet'] ?? 'unknown failure' );
+	}
+	if ( 'worker-fatal' === ( $result['status'] ?? null ) ) {
+		return 'Worker infrastructure failure during minimization: ' . (string) ( $result['failureSnippet'] ?? 'unknown failure' );
+	}
+	return null;
+}
+
 function html_api_fuzz_min_worker_options( string $candidate, array $base, string $output_dir ): array {
 	$options = array(
 		'input-base64' => base64_encode( $candidate ),
@@ -120,8 +145,9 @@ function html_api_fuzz_min_process_test( string $candidate, array $base, string 
 		return array( 'accepted' => false, 'result' => null, 'process' => $proc );
 	}
 
-	$accepted = html_api_fuzz_min_accepts_result( $result, $base, $any_failure );
-	return array( 'accepted' => $accepted, 'result' => $result, 'process' => $proc );
+	$terminal_error = html_api_fuzz_min_probe_terminal_error( $result, $base );
+	$accepted = null === $terminal_error && html_api_fuzz_min_accepts_result( $result, $base, $any_failure );
+	return array( 'accepted' => $accepted, 'result' => $result, 'process' => $proc, 'terminalError' => $terminal_error );
 }
 
 function html_api_fuzz_min_in_process_test( string $candidate, array $base, string $work_dir, int $attempt, bool $any_failure ): array {
@@ -155,9 +181,11 @@ function html_api_fuzz_min_in_process_test( string $candidate, array $base, stri
 		$result      = html_api_fuzz_min_fatal_result( $base, $e, $duration_ms );
 	}
 
+	$terminal_error = html_api_fuzz_min_probe_terminal_error( $result, $base );
 	return array(
-		'accepted' => html_api_fuzz_min_accepts_result( $result, $base, $any_failure ),
+		'accepted' => null === $terminal_error && html_api_fuzz_min_accepts_result( $result, $base, $any_failure ),
 		'result'   => $result,
+		'terminalError' => $terminal_error,
 		'process'  => array(
 			'code'       => null,
 			'timedOut'   => false,
@@ -176,6 +204,9 @@ function html_api_fuzz_min_test( string $candidate, array $base, string $work_di
 }
 
 function html_api_fuzz_min_record_probe( array &$stats, array $test ): void {
+	if ( is_string( $test['terminalError'] ?? null ) ) {
+		throw new \RuntimeException( $test['terminalError'] );
+	}
 	$duration_ms = $test['process']['durationMs'] ?? null;
 	if ( ! is_numeric( $duration_ms ) ) {
 		return;
@@ -240,7 +271,7 @@ function html_api_fuzz_min_probe_mode( array $options ): string {
 $options = \HtmlApiFuzz\parse_cli_options( $argv );
 $replay_path = \HtmlApiFuzz\option_string( $options, 'replay', $options['_'][0] ?? null );
 if ( null === $replay_path || \HtmlApiFuzz\option_bool( $options, 'help', false ) ) {
-	echo "Usage: php tools/html-api-fuzz/minimize.php --replay path/to/replay.json [--output-dir DIR] [--target-kind failure|oracle-finding --target-hash HASH] [--dom-oracle php-dom|lexbor-source] [--lexbor-oracle-bin PATH] [--probe-mode auto|in-process|process] [--keep-candidate-artifacts]\n";
+	echo "Usage: php tools/html-api-fuzz/minimize.php --replay path/to/replay.json [--output-dir DIR] [--target-kind failure|oracle-finding --target-hash HASH] [--dom-oracle php-dom|lexbor-source|html5ever-source] [--lexbor-oracle-bin PATH|--html5ever-oracle-bin PATH] [--allow-oracle-mismatch] [--probe-mode auto|in-process|process] [--keep-candidate-artifacts]\n";
 	exit( null === $replay_path ? 1 : 0 );
 }
 
@@ -259,7 +290,6 @@ if ( null === $target_hash && ! $any_failure ) {
 }
 
 $output_dir = \HtmlApiFuzz\option_string( $options, 'output-dir', dirname( $replay_path ) . '/minimized-' . \HtmlApiFuzz\timestamp() );
-\HtmlApiFuzz\ensure_dir( $output_dir );
 
 $input = base64_decode( $replay['inputBase64'], true );
 if ( false === $input ) {
@@ -275,11 +305,22 @@ if ( null === \HtmlApiFuzz\option_string( $oracle_options, 'dom-oracle', null ) 
 if ( null === \HtmlApiFuzz\option_string( $oracle_options, 'lexbor-oracle-bin', null ) && is_string( $replay['options']['lexborOracleBin'] ?? null ) ) {
 	$oracle_options['lexbor-oracle-bin'] = $replay['options']['lexborOracleBin'];
 }
+if ( null === \HtmlApiFuzz\option_string( $oracle_options, 'html5ever-oracle-bin', null ) && is_string( $replay['options']['html5everOracleBin'] ?? null ) ) {
+	$oracle_options['html5ever-oracle-bin'] = $replay['options']['html5everOracleBin'];
+}
 $stored_oracle_timeout_ms = $replay['options']['oracleTimeoutMs'] ?? null;
 if ( null === \HtmlApiFuzz\option_string( $oracle_options, 'oracle-timeout-ms', null ) && is_numeric( $stored_oracle_timeout_ms ) ) {
 	$oracle_options['oracle-timeout-ms'] = (string) (int) $stored_oracle_timeout_ms;
 }
 $oracle_renderer = \HtmlApiFuzz\OracleRenderer::from_options( $oracle_options );
+$current_oracle = $oracle_renderer->metadata();
+$oracle_mismatches = \HtmlApiFuzz\OracleRenderer::identity_mismatches( $replay['oracle'] ?? null, $current_oracle );
+if ( ! empty( $oracle_mismatches ) && ! \HtmlApiFuzz\option_bool( $options, 'allow-oracle-mismatch', false ) ) {
+	fwrite( STDERR, 'Oracle identity mismatch: ' . implode( '; ', $oracle_mismatches ) . ".\n" );
+	fwrite( STDERR, "Pass --allow-oracle-mismatch only for a deliberate diagnostic minimization.\n" );
+	exit( 1 );
+}
+\HtmlApiFuzz\ensure_dir( $output_dir );
 $probe_mode      = html_api_fuzz_min_probe_mode( $options );
 $base = array(
 	'mode'              => $replay['mode'] ?? \HtmlApiFuzz\Generator::MODE_FRAGMENT_BODY,
@@ -292,11 +333,14 @@ $base = array(
 	'targetHash'        => $target_hash,
 	'targetKind'        => $target['kind'] ?? 'failure',
 	'sourceReplay'      => $source_replay,
-	'oracle'            => $oracle_renderer->metadata(),
+	'oracle'            => $current_oracle,
+	'sourceOracle'      => $replay['oracle'] ?? null,
+	'oracleIdentityMismatches' => $oracle_mismatches,
 	'oracleRenderer'    => $oracle_renderer,
 	'oracleOptions'     => array(
 		'dom-oracle'         => \HtmlApiFuzz\option_string( $oracle_options, 'dom-oracle', \HtmlApiFuzz\OracleRenderer::KIND_PHP_DOM ),
 		'lexbor-oracle-bin'  => \HtmlApiFuzz\option_string( $oracle_options, 'lexbor-oracle-bin', null ),
+		'html5ever-oracle-bin' => \HtmlApiFuzz\option_string( $oracle_options, 'html5ever-oracle-bin', null ),
 		'oracle-timeout-ms'  => \HtmlApiFuzz\option_string( $oracle_options, 'oracle-timeout-ms', null ),
 	),
 	'oracleWorkerArgs'  => $oracle_renderer->worker_args(),
@@ -448,19 +492,46 @@ foreach ( $base['oracleWorkerArgs'] as $arg ) {
 \HtmlApiFuzz\run_php_process( $args, \HtmlApiFuzz\repo_root(), $timeout_ms, $final_dir . '/worker.log' );
 $final_result = \HtmlApiFuzz\read_json_file( $final_dir . '/result.json' );
 $final_replay = \HtmlApiFuzz\read_json_file( $final_dir . '/replay.json' );
+$final_identity_mismatches = \HtmlApiFuzz\OracleRenderer::identity_mismatches( $base['oracle'], is_array( $final_result['oracle'] ?? null ) ? $final_result['oracle'] : array() );
+if ( ! empty( $final_identity_mismatches ) ) {
+	$final_result['ok'] = false;
+	$final_result['status'] = 'oracle-identity-drift';
+	$final_result['failureClass'] = 'oracle-identity-drift';
+	$final_result['failureSnippet'] = implode( '; ', $final_identity_mismatches );
+	$final_result['sourceOracle'] = $base['oracle'];
+	$final_result['actualOracle'] = $final_result['oracle'] ?? null;
+	$final_result['oracleIdentityMismatches'] = $final_identity_mismatches;
+	unset( $final_result['signature'], $final_result['oracleFinding'], $final_result['comparison'] );
+	$drift_signature = \HtmlApiFuzz\Signature::from_result( $final_result );
+	if ( null !== $drift_signature ) {
+		$final_result['signature'] = $drift_signature;
+	}
+	\HtmlApiFuzz\write_json_file_atomic( $final_dir . '/result.json', $final_result );
+}
+$final_terminal_error = html_api_fuzz_min_probe_terminal_error( $final_result, $base );
 if ( is_array( $final_replay ) && is_array( $base['originalGenerator'] ) ) {
 	$final_replay['originalGenerator'] = $base['originalGenerator'];
 }
 if ( is_array( $final_replay ) ) {
 	$final_replay['sourceReplay'] = $base['sourceReplay'];
-	\HtmlApiFuzz\write_json_file( $final_dir . '/replay.json', $final_replay );
+	if ( ! empty( $final_identity_mismatches ) ) {
+		$final_replay['oracle'] = $base['oracle'];
+		$final_replay['finalActualOracle'] = $final_result['oracle'] ?? null;
+		$final_replay['finalOracleIdentityMismatches'] = $final_identity_mismatches;
+	}
+	if ( ! empty( $base['oracleIdentityMismatches'] ) ) {
+		$final_replay['sourceOracle'] = $base['sourceOracle'];
+		$final_replay['actualOracle'] = $base['oracle'];
+		$final_replay['oracleIdentityMismatches'] = $base['oracleIdentityMismatches'];
+	}
+	\HtmlApiFuzz\write_json_file_atomic( $final_dir . '/replay.json', $final_replay );
 }
 
 $summary = array(
 	'schemaVersion'     => 1,
 	'kind'              => 'html-api-fuzz-minimize-result',
 	'createdAt'         => gmdate( 'c' ),
-	'ok'                => null !== $final_result && ( 'oracle-finding' === $base['targetKind'] ? ( ( $final_result['oracleFinding']['signature']['hash'] ?? null ) === $target_hash ) : ( $any_failure ? ! ( $final_result['ok'] ?? true ) : ( ( $final_result['signature']['hash'] ?? null ) === $target_hash ) ) ),
+	'ok'                => null === $final_terminal_error && ( 'oracle-finding' === $base['targetKind'] ? ( ( $final_result['oracleFinding']['signature']['hash'] ?? null ) === $target_hash ) : ( $any_failure ? ! ( $final_result['ok'] ?? true ) : ( ( $final_result['signature']['hash'] ?? null ) === $target_hash ) ) ),
 	'targetHash'        => $target_hash,
 	'targetKind'        => $base['targetKind'],
 	'finalHash'         => $final_result['signature']['hash'] ?? null,
@@ -471,8 +542,12 @@ $summary = array(
 	'originalGenerator' => $base['originalGenerator'],
 	'sourceReplay'      => $base['sourceReplay'],
 	'oracle'            => $final_result['oracle'] ?? $base['oracle'],
+	'sourceOracle'      => empty( $base['oracleIdentityMismatches'] ) ? null : $base['sourceOracle'],
+	'actualOracle'      => empty( $base['oracleIdentityMismatches'] ) ? null : $base['oracle'],
+	'oracleIdentityMismatches' => $base['oracleIdentityMismatches'],
 	'finalFailureClass' => $final_result['failureClass'] ?? null,
 	'finalStatus'       => $final_result['status'] ?? null,
+	'terminalError'     => $final_terminal_error,
 	'originalLength'    => strlen( $input ),
 	'minimizedLength'   => strlen( $current ),
 	'attempts'          => $attempt_count,

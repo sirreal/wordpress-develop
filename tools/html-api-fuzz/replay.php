@@ -7,8 +7,8 @@ $replay_path = \HtmlApiFuzz\option_string( $options, 'replay', $options['_'][0] 
 $store_path  = \HtmlApiFuzz\option_string( $options, 'store', null );
 $stored_replay_value = null;
 if ( ( null === $replay_path && null === $store_path ) || \HtmlApiFuzz\option_bool( $options, 'help', false ) ) {
-	echo "Usage: php tools/html-api-fuzz/replay.php --replay path/to/replay.json [--output-dir DIR] [--payload-policy POLICY] [--memory-limit LIMIT] [--timeout-ms N] [--worker-script PATH] [--dom-oracle php-dom|lexbor-source] [--lexbor-oracle-bin PATH] [--allow-oracle-mismatch]\n";
-	echo "       php tools/html-api-fuzz/replay.php --store path/to/results.sqlite (--id N|--seed N) [--output-dir DIR] [--payload-policy POLICY] [--dom-oracle php-dom|lexbor-source] [--lexbor-oracle-bin PATH] [--allow-oracle-mismatch]\n";
+	echo "Usage: php tools/html-api-fuzz/replay.php --replay path/to/replay.json [--output-dir DIR] [--payload-policy POLICY] [--memory-limit LIMIT] [--timeout-ms N] [--worker-script PATH] [--dom-oracle php-dom|lexbor-source|html5ever-source] [--lexbor-oracle-bin PATH|--html5ever-oracle-bin PATH] [--allow-oracle-mismatch]\n";
+	echo "       php tools/html-api-fuzz/replay.php --store path/to/results.sqlite (--id N|--seed N) [--output-dir DIR] [--payload-policy POLICY] [--dom-oracle php-dom|lexbor-source|html5ever-source] [--lexbor-oracle-bin PATH|--html5ever-oracle-bin PATH] [--allow-oracle-mismatch]\n";
 	echo "The --store form reproduces a failure whose seed directory was pruned, from the replay stored in the lane's results.sqlite.\n";
 	exit( ( null === $replay_path && null === $store_path ) ? 1 : 0 );
 }
@@ -157,6 +157,9 @@ if ( null === \HtmlApiFuzz\option_string( $oracle_options, 'dom-oracle', null ) 
 if ( null === \HtmlApiFuzz\option_string( $oracle_options, 'lexbor-oracle-bin', null ) && is_string( $recorded_options['lexborOracleBin'] ?? null ) ) {
 	$oracle_options['lexbor-oracle-bin'] = $recorded_options['lexborOracleBin'];
 }
+if ( null === \HtmlApiFuzz\option_string( $oracle_options, 'html5ever-oracle-bin', null ) && is_string( $recorded_options['html5everOracleBin'] ?? null ) ) {
+	$oracle_options['html5ever-oracle-bin'] = $recorded_options['html5everOracleBin'];
+}
 $stored_oracle_timeout_ms = $recorded_options['oracleTimeoutMs'] ?? null;
 if ( null === \HtmlApiFuzz\option_string( $oracle_options, 'oracle-timeout-ms', null ) && is_numeric( $stored_oracle_timeout_ms ) ) {
 	$oracle_options['oracle-timeout-ms'] = (string) (int) $stored_oracle_timeout_ms;
@@ -165,7 +168,8 @@ $oracle_renderer    = \HtmlApiFuzz\OracleRenderer::from_options( $oracle_options
 $oracle_worker_args = $oracle_renderer->worker_args();
 $current_oracle     = $oracle_renderer->metadata();
 $oracle_mismatches  = \HtmlApiFuzz\OracleRenderer::identity_mismatches( $replay['oracle'] ?? null, $current_oracle );
-if ( ! empty( $oracle_mismatches ) && ! \HtmlApiFuzz\option_bool( $options, 'allow-oracle-mismatch', false ) ) {
+$allow_oracle_mismatch = \HtmlApiFuzz\option_bool( $options, 'allow-oracle-mismatch', false );
+if ( ! empty( $oracle_mismatches ) && ! $allow_oracle_mismatch ) {
 	fwrite( STDERR, 'Oracle identity mismatch: ' . implode( '; ', $oracle_mismatches ) . ".\n" );
 	fwrite( STDERR, "Pass --allow-oracle-mismatch only for a deliberate diagnostic comparison.\n" );
 	exit( 1 );
@@ -286,15 +290,53 @@ if ( ! is_array( $result ) ) {
 if ( ! is_array( $output_replay ) ) {
 	$output_replay = $replay;
 }
+$worker_oracle_mismatches = \HtmlApiFuzz\OracleRenderer::identity_mismatches( $current_oracle, is_array( $result['oracle'] ?? null ) ? $result['oracle'] : array() );
+$worker_oracle_drift      = ! empty( $worker_oracle_mismatches );
+if ( $worker_oracle_drift ) {
+	$result['ok'] = false;
+	$result['status'] = 'oracle-identity-drift';
+	$result['failureClass'] = 'oracle-identity-drift';
+	$result['failureSnippet'] = implode( '; ', $worker_oracle_mismatches );
+	$result['sourceOracle'] = $current_oracle;
+	$result['actualOracle'] = $result['oracle'] ?? null;
+	$result['oracleIdentityMismatches'] = $worker_oracle_mismatches;
+	unset( $result['signature'], $result['oracleFinding'], $result['comparison'] );
+	$drift_signature = \HtmlApiFuzz\Signature::from_result( $result );
+	if ( null !== $drift_signature ) {
+		$result['signature'] = $drift_signature;
+	}
+}
+if ( ! empty( $oracle_mismatches ) ) {
+	if ( $worker_oracle_drift ) {
+		$result['requestedSourceOracle'] = $replay['oracle'] ?? null;
+		$result['requestedActualOracle'] = $current_oracle;
+		$result['requestedOracleIdentityMismatches'] = $oracle_mismatches;
+	} else {
+		$result['sourceOracle'] = $replay['oracle'] ?? null;
+		$result['actualOracle'] = $current_oracle;
+		$result['oracleIdentityMismatches'] = $oracle_mismatches;
+	}
+}
+\HtmlApiFuzz\write_json_file_atomic( $output_dir . '/result.json', $result );
 if ( is_array( $output_replay ) && is_array( $original_generator ) ) {
 	$output_replay['originalGenerator'] = $original_generator;
 }
 if ( is_array( $output_replay ) ) {
 	$output_replay['sourceReplay'] = $source_replay;
 	$output_options = is_array( $output_replay['options'] ?? null ) ? $output_replay['options'] : array();
-	unset( $output_options['domOracle'], $output_options['lexborOracleBin'], $output_options['oracleTimeoutMs'] );
+	unset( $output_options['domOracle'], $output_options['lexborOracleBin'], $output_options['html5everOracleBin'], $output_options['oracleTimeoutMs'] );
 	$output_replay['options'] = array_merge( $output_options, $effective_policy, $oracle_renderer->replay_options() );
 	$output_replay['oracle'] = $current_oracle;
+	if ( ! empty( $oracle_mismatches ) ) {
+		$output_replay['sourceOracle'] = $replay['oracle'] ?? null;
+		$output_replay['actualOracle'] = $current_oracle;
+		$output_replay['oracleIdentityMismatches'] = $oracle_mismatches;
+	}
+	if ( $worker_oracle_drift ) {
+		$output_replay['workerSourceOracle'] = $current_oracle;
+		$output_replay['workerActualOracle'] = $result['oracle'] ?? null;
+		$output_replay['workerOracleIdentityMismatches'] = $worker_oracle_mismatches;
+	}
 	$output_replay['result'] = array(
 		'ok'            => $result['ok'] ?? false,
 		'status'        => $result['status'] ?? 'missing-result',

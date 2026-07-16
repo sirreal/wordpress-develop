@@ -121,6 +121,7 @@ class ResultStore {
 		$ok             = (bool) ( $summary['ok'] ?? false );
 		$oracle_finding = is_array( $summary['oracleFinding'] ?? null ) ? $summary['oracleFinding'] : null;
 		$oracle         = is_array( $summary['oracle'] ?? null ) ? $summary['oracle'] : null;
+		$oracle_identity = is_array( $oracle['identity'] ?? null ) ? $oracle['identity'] : array();
 		$store_json     = ! $ok || null !== $oracle_finding;
 		$artifacts_retained = (bool) ( $summary['artifactsRetained'] ?? false );
 		$failure_artifacts_retained = array_key_exists( 'failureArtifactsRetained', $summary )
@@ -202,11 +203,11 @@ class ResultStore {
 		$statement->bindValue( ':oracle_family_key', $oracle_family_key, null === $oracle_family_key ? SQLITE3_NULL : SQLITE3_TEXT );
 		$oracle_kind = $oracle['kind'] ?? null;
 		$statement->bindValue( ':oracle_kind', $oracle_kind, null === $oracle_kind ? SQLITE3_NULL : SQLITE3_TEXT );
-		$oracle_version = $oracle['lexborVersion'] ?? $oracle['phpVersion'] ?? null;
+		$oracle_version = $oracle_identity['lexborVersion'] ?? $oracle_identity['html5everVersion'] ?? $oracle_identity['phpVersion'] ?? null;
 		$statement->bindValue( ':oracle_version', $oracle_version, null === $oracle_version ? SQLITE3_NULL : SQLITE3_TEXT );
-		$oracle_commit = $oracle['lexborCommit'] ?? null;
+		$oracle_commit = $oracle_identity['lexborCommit'] ?? $oracle_identity['buildIdentity'] ?? null;
 		$statement->bindValue( ':oracle_commit', $oracle_commit, null === $oracle_commit ? SQLITE3_NULL : SQLITE3_TEXT );
-		$oracle_binary = $oracle['binary'] ?? null;
+		$oracle_binary = $oracle_identity['binarySha256'] ?? null;
 		$statement->bindValue( ':oracle_binary', $oracle_binary, null === $oracle_binary ? SQLITE3_NULL : SQLITE3_TEXT );
 		$statement->bindValue( ':profile', $summary['profile'] ?? null, null === ( $summary['profile'] ?? null ) ? SQLITE3_NULL : SQLITE3_TEXT );
 		$statement->bindValue( ':mode', $summary['mode'] ?? null, null === ( $summary['mode'] ?? null ) ? SQLITE3_NULL : SQLITE3_TEXT );

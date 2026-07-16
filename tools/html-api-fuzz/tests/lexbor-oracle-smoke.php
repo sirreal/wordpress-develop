@@ -27,10 +27,11 @@ $oracle = \HtmlApiFuzz\OracleRenderer::from_options(
 );
 $metadata = $oracle->metadata();
 html_api_fuzz_lexbor_smoke_assert( \HtmlApiFuzz\OracleRenderer::KIND_LEXBOR_SOURCE === ( $metadata['kind'] ?? null ), 'Expected Lexbor source oracle metadata.' );
-html_api_fuzz_lexbor_smoke_assert( is_string( $metadata['lexborCommit'] ?? null ) && 1 === preg_match( '/^[0-9a-f]{40}$/', $metadata['lexborCommit'] ), 'Expected the resolved Lexbor commit in oracle metadata.' );
-html_api_fuzz_lexbor_smoke_assert( is_string( $metadata['binarySha256'] ?? null ) && 64 === strlen( $metadata['binarySha256'] ), 'Expected the oracle binary SHA-256.' );
-html_api_fuzz_lexbor_smoke_assert( ( $metadata['lexborCommit'] ?? null ) === ( $metadata['buildManifest']['resolvedCommit'] ?? null ), 'Expected build manifest and binary commit agreement.' );
-html_api_fuzz_lexbor_smoke_assert( ( $metadata['binarySha256'] ?? null ) === ( $metadata['buildManifest']['binarySha256'] ?? null ), 'Expected build manifest and binary hash agreement.' );
+html_api_fuzz_lexbor_smoke_assert( array( 'schemaVersion', 'kind', 'available', 'identity', 'error' ) === array_keys( $metadata ), 'Expected the normalized exact oracle metadata envelope.' );
+html_api_fuzz_lexbor_smoke_assert( true === ( $metadata['available'] ?? null ) && null === ( $metadata['error'] ?? null ), 'Expected Lexbor source oracle availability.' );
+html_api_fuzz_lexbor_smoke_assert( is_string( $metadata['identity']['lexborCommit'] ?? null ) && 1 === preg_match( '/^[0-9a-f]{40}$/', $metadata['identity']['lexborCommit'] ), 'Expected the resolved Lexbor commit in oracle metadata.' );
+html_api_fuzz_lexbor_smoke_assert( is_string( $metadata['identity']['binarySha256'] ?? null ) && 64 === strlen( $metadata['identity']['binarySha256'] ), 'Expected the oracle binary SHA-256.' );
+html_api_fuzz_lexbor_smoke_assert( ( $metadata['identity']['lexborCommit'] ?? null ) === ( $metadata['identity']['build']['resolvedCommit'] ?? null ), 'Expected build manifest and binary commit agreement.' );
 
 $limits = array(
 	'maxTokens'    => 200,
@@ -144,7 +145,7 @@ html_api_fuzz_lexbor_smoke_assert( \HtmlApiFuzz\OracleRenderer::KIND_LEXBOR_SOUR
 $worker_replay_372 = \HtmlApiFuzz\read_json_file( $work_dir . '/issue-372/replay.json' );
 html_api_fuzz_lexbor_smoke_assert( \HtmlApiFuzz\OracleRenderer::KIND_LEXBOR_SOURCE === ( $worker_replay_372['options']['domOracle'] ?? null ), 'Expected replay options to preserve the Lexbor source oracle kind.' );
 html_api_fuzz_lexbor_smoke_assert( $binary === ( $worker_replay_372['options']['lexborOracleBin'] ?? null ), 'Expected replay options to preserve the Lexbor source oracle binary.' );
-html_api_fuzz_lexbor_smoke_assert( ( $metadata['lexborCommit'] ?? null ) === ( $worker_replay_372['oracle']['lexborCommit'] ?? null ), 'Expected replay metadata to preserve the Lexbor source commit.' );
+html_api_fuzz_lexbor_smoke_assert( ( $metadata['identity']['lexborCommit'] ?? null ) === ( $worker_replay_372['oracle']['identity']['lexborCommit'] ?? null ), 'Expected replay metadata to preserve the Lexbor source commit.' );
 
 $replay_dir = $work_dir . '/issue-372-replay';
 $proc = \HtmlApiFuzz\run_php_process(
@@ -154,6 +155,8 @@ $proc = \HtmlApiFuzz\run_php_process(
 		$work_dir . '/issue-372/replay.json',
 		'--output-dir',
 		$replay_dir,
+		'--timeout-ms',
+		'10000',
 	),
 	\HtmlApiFuzz\repo_root(),
 	10000,
@@ -165,10 +168,11 @@ html_api_fuzz_lexbor_smoke_assert( \HtmlApiFuzz\OracleRenderer::KIND_LEXBOR_SOUR
 
 $identity_mismatch_replays = array();
 $hash_mismatch_replay = $worker_replay_372;
-$hash_mismatch_replay['oracle']['binarySha256'] = str_repeat( '0', 64 );
+$hash_mismatch_replay['oracle']['identity']['binarySha256'] = str_repeat( '0', 64 );
 $identity_mismatch_replays['binary-hash'] = $hash_mismatch_replay;
 $commit_mismatch_replay = $worker_replay_372;
-$commit_mismatch_replay['oracle']['lexborCommit'] = str_repeat( '0', 40 );
+$commit_mismatch_replay['oracle']['identity']['lexborCommit'] = str_repeat( '0', 40 );
+$commit_mismatch_replay['oracle']['identity']['build']['resolvedCommit'] = str_repeat( '0', 40 );
 $identity_mismatch_replays['lexbor-commit'] = $commit_mismatch_replay;
 $kind_mismatch_replay = $worker_replay_372;
 $kind_mismatch_replay['oracle']['kind'] = \HtmlApiFuzz\OracleRenderer::KIND_PHP_DOM;
@@ -213,7 +217,10 @@ html_api_fuzz_lexbor_smoke_assert( \HtmlApiFuzz\OracleRenderer::KIND_PHP_DOM ===
 html_api_fuzz_lexbor_smoke_assert( \HtmlApiFuzz\OracleRenderer::KIND_PHP_DOM === ( $kind_change_replay['options']['domOracle'] ?? null ), 'Expected allowed mismatch output to record current oracle selection.' );
 html_api_fuzz_lexbor_smoke_assert( ! array_key_exists( 'lexborOracleBin', $kind_change_replay['options'] ), 'Expected allowed kind change to remove stale Lexbor binary option.' );
 html_api_fuzz_lexbor_smoke_assert( ! array_key_exists( 'oracleTimeoutMs', $kind_change_replay['options'] ), 'Expected allowed kind change to remove stale oracle timeout option.' );
-html_api_fuzz_lexbor_smoke_assert( ( $metadata['lexborCommit'] ?? null ) === ( $kind_change_replay['sourceReplay']['oracle']['lexborCommit'] ?? null ), 'Expected allowed mismatch to preserve source oracle identity.' );
+html_api_fuzz_lexbor_smoke_assert( ( $metadata['identity']['lexborCommit'] ?? null ) === ( $kind_change_replay['sourceReplay']['oracle']['identity']['lexborCommit'] ?? null ), 'Expected allowed mismatch to preserve source oracle identity.' );
+html_api_fuzz_lexbor_smoke_assert( $worker_replay_372['oracle'] === ( $kind_change_replay['sourceOracle'] ?? null ), 'Expected allowed mismatch provenance to preserve the source oracle.' );
+html_api_fuzz_lexbor_smoke_assert( ( $kind_change_replay['oracle'] ?? null ) === ( $kind_change_replay['actualOracle'] ?? null ), 'Expected allowed mismatch provenance to preserve the actual oracle.' );
+html_api_fuzz_lexbor_smoke_assert( ! empty( $kind_change_replay['oracleIdentityMismatches'] ?? array() ), 'Expected allowed mismatch provenance to record mismatch reasons.' );
 
 $kind_change_again_dir = $work_dir . '/kind-change-again';
 $kind_change_again_proc = \HtmlApiFuzz\run_php_process(

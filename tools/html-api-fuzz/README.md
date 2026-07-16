@@ -15,19 +15,30 @@ No browser, Playwright, Node, or `wp-env` is involved.
   isolation.
 - Run from the repository root.
 - Optional source-built Lexbor oracle: `git`, `cmake`, and a C compiler.
+- Optional source-built html5ever oracle: the pinned Rust toolchain installed by
+  `tools/html-api-fuzz/oracles/html5ever/install-rust.sh`, or matching Rust and
+  Cargo 1.88.0 executables.
 
 ## Common Crawl with cc-analyzer
 
 `commoncrawl-analysis.php` is an analysis callback for `cc-analyzer.phar`. It
 accepts the analyzer's `CcAnalyzer\Analysis\HtmlAnalysisInput` value object,
 runs the raw response body through `WP_HTML_Processor` in full-document mode,
-compares the resulting tree with Lexbor, and records the Common Crawl
-provenance needed to locate or replay the document.
+compares the resulting tree with the selected source oracle, and records the
+Common Crawl provenance needed to locate or replay the document. Lexbor is the
+default; `html5ever-source` is an equally supported independent adapter.
 
 Build the oracle from the current upstream `master` first:
 
 ```sh
 tools/html-api-fuzz/oracles/lexbor/build.sh
+```
+
+Or build the fully pinned html5ever oracle:
+
+```sh
+tools/html-api-fuzz/oracles/html5ever/install-rust.sh
+tools/html-api-fuzz/oracles/html5ever/build.sh
 ```
 
 The build resolves the moving ref, uses commit-keyed build/install directories,
@@ -59,9 +70,20 @@ Each accepted document runs in a separate PHP child with its own memory and
 wall-clock limit. The callback writes `input.bin` and an initial replay before
 starting that child. A timeout, memory exhaustion, crash, or signal is retained
 as a finding without terminating cc-analyzer or losing the triggering bytes.
-The child is a new process-group leader, so its Lexbor descendant is terminated
-with it. Stdout/stderr are continuously drained to `worker.log`; only bounded
-tails remain in the long-lived analyzer process.
+The child is a new process-group leader, so its source-oracle descendants are
+terminated with it. Stdout/stderr are continuously drained to `worker.log`;
+only bounded tails remain in the long-lived analyzer process.
+
+Each source-oracle identity probe and render also runs through a dedicated
+POSIX/PCNTL supervisor. It creates a private `0700` ownership root, copies the
+descriptor-stable executable and supervisor to `0500` snapshots, starts a new
+session with a persistent process-group anchor, and does not release the target
+until authenticated state has been durably published. Cleanup reauthenticates
+the exact process identities, sends group `TERM`, waits 250 ms, then sends one
+`KILL` and verifies group/root absence. Owner EOF uses the same path. Uncertain
+identity or cleanup state is an infrastructure failure and retains evidence
+instead of signaling an unverified PID. Source stdout is capped at exactly
+64 MiB and stderr at 1 MiB; either overflow is an infrastructure failure.
 
 The Common Crawl adapter uses Lexbor by default. Its environment is:
 
@@ -69,10 +91,18 @@ The Common Crawl adapter uses Lexbor by default. Its environment is:
   absent, a unique directory is created under `artifacts/html-api-commoncrawl`.
 - `HTML_API_CC_RUN_ID`: explicit immutable run identifier. When the analyzer
   provides an output directory, the default is a stable hash of that path.
+- `HTML_API_CC_ORACLE`: `lexbor-source` (default), `html5ever-source`, or the
+  `php-dom` testing/debug escape hatch.
 - `HTML_API_FUZZ_LEXBOR_ORACLE`: non-default Lexbor oracle binary path.
+- `HTML_API_FUZZ_HTML5EVER_ORACLE`: non-default html5ever oracle binary path.
 - `HTML_API_CC_EXPECT_LEXBOR_COMMIT`: optional exact commit assertion; startup
-  fails if the executable reports another commit.
-- `HTML_API_CC_ORACLE_TIMEOUT_MS`: Lexbor subprocess timeout; default `10000`.
+  fails if the selected Lexbor executable reports another commit. Setting this
+  while another oracle is selected also fails.
+- `HTML_API_CC_EXPECT_ORACLE_IDENTITY_SHA256`: optional SHA-256 of the complete
+  normalized selected-oracle metadata envelope. This generic pin works for
+  PHP DOM, Lexbor, and html5ever.
+- `HTML_API_CC_ORACLE_TIMEOUT_MS`: source-oracle subprocess timeout; default
+  `10000`.
 - `HTML_API_CC_PROCESS_TIMEOUT_MS`: whole-document worker timeout; default
   `30000`.
 - `HTML_API_CC_MEMORY_LIMIT`: PHP memory limit for each worker; default `256M`.
@@ -93,17 +123,14 @@ The Common Crawl adapter uses Lexbor by default. Its environment is:
 - `HTML_API_CC_MAX_KEEP_PER_SIGNATURE`: retained examples per distinct
   signature; default `3`.
 - `HTML_API_CC_RETAIN_ALL`: retain passing inputs too; default `0`.
-- `HTML_API_CC_ORACLE=php-dom`: testing/debug escape hatch. Normal Common
-  Crawl runs should leave this unset so the independent source-built Lexbor
-  oracle is used.
 - `CC_ANALYZER_VERSION`, `CC_ANALYZER_CRAWL`, and `CC_ANALYZER_INVOCATION`:
   optional provenance strings recorded verbatim in the immutable run config.
 
 The output root contains:
 
 - `configuration.json`: run ID and exact configuration fingerprint plus Git,
-  PHP, Lexbor build manifest/hash, limits, and analyzer provenance. Reusing the
-  directory with different settings fails at startup.
+  PHP, normalized selected-oracle identity/hash, limits, and analyzer
+  provenance. Reusing the directory with different settings fails at startup.
 - `commoncrawl-summary.ndjson`: one locked, append-only record per document;
   safe for concurrent analyzer workers.
 - `coverage.json`: aggregate total, covered, failed, and per-status counts.
@@ -131,11 +158,14 @@ process-group isolation and synthesizes the same timeout/OOM/crash result when
 the Worker produces none. `--worker-script`, `--memory-limit`, and
 `--timeout-ms` are explicit diagnostic overrides.
 
-Replay also verifies the recorded oracle identity before starting the Worker.
-For a source-built Lexbor oracle, both the resolved Lexbor commit and executable
-SHA-256 must match. Use `--allow-oracle-mismatch` only for a deliberate
-diagnostic comparison; the resulting replay records the oracle actually used
-and retains the source identity in its provenance.
+Replay and minimization verify the complete recorded oracle identity before
+creating or claiming an output directory. Lexbor pins its resolved commit,
+manifest fields, self-report, and executable SHA-256. html5ever additionally
+pins the checked source/lock/toolchain hashes, direct crate versions/checksums,
+build identity, and executable SHA-256. Use `--allow-oracle-mismatch` only for a
+deliberate diagnostic comparison; outputs retain `sourceOracle`,
+`actualOracle`, and the exact mismatch reasons. A second identity change while
+a Worker is running is recorded separately and invalidates any stale signature.
 
 Transport charset, content type, target URI, WARC record ID, analyzer state
 key, and source range are metadata only. The comparison intentionally feeds
@@ -179,6 +209,20 @@ php tools/html-api-fuzz/runner.php --max-seeds 100 --dom-oracle lexbor-source --
 Use `--lexbor-oracle-bin PATH` or `HTML_API_FUZZ_LEXBOR_ORACLE` when the
 oracle binary is not at
 `tools/html-api-fuzz/oracles/lexbor/build/lexbor-tree-oracle`.
+
+Build and run against the pinned html5ever oracle:
+
+```sh
+tools/html-api-fuzz/oracles/html5ever/install-rust.sh
+tools/html-api-fuzz/oracles/html5ever/build.sh
+php tools/html-api-fuzz/worker.php --seed 1 --dom-oracle html5ever-source --output-dir artifacts/html-api-fuzz/seed-1-html5ever
+php tools/html-api-fuzz/runner.php --max-seeds 100 --dom-oracle html5ever-source --timeout-ms 10000
+```
+
+Use `--html5ever-oracle-bin PATH` or
+`HTML_API_FUZZ_HTML5EVER_ORACLE` for a non-default build location. Source
+adapters add process-supervision overhead, so give `runner.php` a whole-worker
+`--timeout-ms` budget large enough to cover the configured oracle deadline.
 
 Run indefinitely:
 
@@ -307,7 +351,9 @@ The runner writes:
   `signature_hash` and `family_key` are indexed columns for grouping
   failures without `json_extract`. `oracle_kind`, `oracle_version`,
   `oracle_commit`, and `oracle_binary` record which oracle generated the
-  summary, including for passing rows whose JSON payloads are pruned. The
+  summary, including for passing rows whose JSON payloads are pruned.
+  `oracle_commit` is the Lexbor commit or html5ever build identity, while
+  `oracle_binary` is the executable SHA-256 rather than a host path. The
   watcher tails these stores
   incrementally by row id. (`summary.ndjson` files from older runs are still
   scanned.) Durability is `synchronous=NORMAL`: an OS crash (not a process

@@ -20,14 +20,72 @@ $db_path = $work_dir . '/' . \HtmlApiFuzz\ResultStore::FILENAME;
 $store = new \HtmlApiFuzz\ResultStore( $db_path );
 
 $php_oracle = array(
-	'kind'       => 'php-dom',
-	'phpVersion' => PHP_VERSION,
+	'schemaVersion' => 1,
+	'kind'          => 'php-dom',
+	'available'     => true,
+	'identity'      => array(
+		'schemaVersion'   => 1,
+		'kind'            => 'php-dom',
+		'phpVersion'      => PHP_VERSION,
+		'phpVersionId'    => PHP_VERSION_ID,
+		'phpSapi'         => PHP_SAPI,
+		'zendVersion'     => zend_version(),
+		'libxmlVersion'   => defined( 'LIBXML_DOTTED_VERSION' ) ? LIBXML_DOTTED_VERSION : null,
+		'domHtmlDocument' => true,
+	),
+	'error'         => null,
 );
 $lexbor_oracle = array(
+	'schemaVersion' => 1,
 	'kind'          => 'lexbor-source',
-	'lexborVersion' => '2.10.0',
-	'lexborCommit'  => '481c444261a132190a3fb746d6d2f60824af3717',
-	'binary'        => '/tmp/lexbor-tree-oracle',
+	'available'     => true,
+	'identity'      => array(
+		'schemaVersion' => 1,
+		'kind'          => 'lexbor-source',
+		'binarySha256'  => str_repeat( 'b', 64 ),
+		'lexborVersion' => '2.10.0',
+		'lexborCommit'  => '481c444261a132190a3fb746d6d2f60824af3717',
+		'build'         => array(
+			'kind'           => 'html-api-fuzz-lexbor-build',
+			'requestedRef'   => 'test',
+			'resolvedCommit' => '481c444261a132190a3fb746d6d2f60824af3717',
+			'upstream'       => 'https://github.com/lexbor/lexbor.git',
+			'compiler'       => 'test-cc',
+			'cmake'          => 'test-cmake',
+		),
+	),
+	'error'         => null,
+);
+$html5ever_oracle = array(
+	'schemaVersion' => 1,
+	'kind'          => 'html5ever-source',
+	'available'     => true,
+	'identity'      => array(
+		'schemaVersion'            => 1,
+		'kind'                     => 'html5ever-source',
+		'binarySha256'             => str_repeat( 'c', 64 ),
+		'html5everVersion'          => '0.35.0',
+		'html5everChecksum'         => str_repeat( 'd', 64 ),
+		'markup5everRcdomVersion'  => '0.35.0+unofficial',
+		'markup5everRcdomChecksum' => str_repeat( 'e', 64 ),
+		'rustToolchain'             => '1.88.0',
+		'cargoLockSha256'           => str_repeat( 'f', 64 ),
+		'buildIdentity'             => str_repeat( '1', 64 ),
+		'build'                     => array(
+			'schemaVersion'       => 1,
+			'kind'                => 'html-api-fuzz-html5ever-build',
+			'publicationProtocol' => 'manifest-last-v1',
+			'cargoTomlSha256'     => str_repeat( '2', 64 ),
+			'cargoLockSha256'     => str_repeat( 'f', 64 ),
+			'rustToolchainSha256' => str_repeat( '3', 64 ),
+			'sourceSha256'        => str_repeat( '4', 64 ),
+			'rustc'               => 'rustc test',
+			'cargo'               => 'cargo test',
+			'html5ever'           => array( 'version' => '0.35.0', 'checksum' => str_repeat( 'd', 64 ) ),
+			'markup5everRcdom'    => array( 'version' => '0.35.0+unofficial', 'checksum' => str_repeat( 'e', 64 ) ),
+		),
+	),
+	'error'         => null,
 );
 
 $pass_summary = array(
@@ -53,6 +111,11 @@ $pass_summary = array(
 	'workerTimedOut'    => false,
 );
 $pass_id = $store->record_attempt( $pass_summary );
+$html5ever_summary = $pass_summary;
+$html5ever_summary['seed'] = 15;
+$html5ever_summary['inputSha1'] = sha1( 'html5ever-pass' );
+$html5ever_summary['oracle'] = $html5ever_oracle;
+$html5ever_id = $store->record_attempt( $html5ever_summary );
 
 $failure_summary = array(
 	'kind'              => 'failure',
@@ -167,13 +230,13 @@ $oracle_replay = array(
 );
 $oracle_id = $store->record_attempt( $oracle_summary, $oracle_result, $oracle_replay );
 
-html_api_fuzz_smoke_assert( 5 === $store->count_attempts(), 'Expected five recorded attempts.' );
+html_api_fuzz_smoke_assert( 6 === $store->count_attempts(), 'Expected six recorded attempts.' );
 html_api_fuzz_smoke_assert( array( 12 ) === $store->retained_seeds( 'abc123def456' ), 'Expected seed 12 as the retained exemplar for the signature.' );
 html_api_fuzz_smoke_assert( array() === $store->retained_seeds( 'unseen' ), 'Expected no retained exemplars for an unseen signature.' );
 html_api_fuzz_smoke_assert( array( 14 ) === $store->oracle_retained_seeds( 'oracle-abc123' ), 'Expected seed 14 as the retained exemplar for the oracle signature.' );
 html_api_fuzz_smoke_assert( $store->seed_artifacts_retained( 12 ), 'Expected seed 12 to be marked as retained.' );
 html_api_fuzz_smoke_assert( ! $store->seed_artifacts_retained( 13 ), 'Expected seed 13 not to be marked as retained.' );
-html_api_fuzz_smoke_assert( 5 === $store->max_id(), 'Expected max id of five.' );
+html_api_fuzz_smoke_assert( 6 === $store->max_id(), 'Expected max id of six.' );
 
 $stored_replay = $store->replay_for_seed( 13 );
 html_api_fuzz_smoke_assert( is_array( $stored_replay ) && base64_encode( '<b>new replay</b>' ) === ( $stored_replay['inputBase64'] ?? null ), 'Expected seed replay lookup to return the most recent replay for compatibility.' );
@@ -201,7 +264,7 @@ $store->close();
 
 // Reopen read-only as the watcher does and confirm persistence.
 $reader = new \HtmlApiFuzz\ResultStore( $db_path, true );
-html_api_fuzz_smoke_assert( 5 === $reader->count_attempts(), 'Expected attempts to persist across reopen.' );
+html_api_fuzz_smoke_assert( 6 === $reader->count_attempts(), 'Expected attempts to persist across reopen.' );
 html_api_fuzz_smoke_assert( 3 === count( $reader->failures_after( 0, $reader->max_id() ) ), 'Expected failures to persist across reopen.' );
 html_api_fuzz_smoke_assert( 1 === count( $reader->oracle_findings_after( 0, $reader->max_id() ) ), 'Expected oracle findings to persist across reopen.' );
 $reader->close();
@@ -215,7 +278,8 @@ html_api_fuzz_smoke_assert( 1 === (int) $raw->querySingle( "SELECT COUNT(*) FROM
 html_api_fuzz_smoke_assert( 1 === (int) $raw->querySingle( "SELECT COUNT(*) FROM attempts WHERE oracle_signature_hash = 'oracle-abc123' AND oracle_artifacts_retained = 1" ), 'Expected oracle retention to use its own budget flag.' );
 html_api_fuzz_smoke_assert( 1 === (int) $raw->querySingle( "SELECT COUNT(*) FROM attempts WHERE seed = 11 AND oracle_kind = 'php-dom' AND oracle_version = '" . SQLite3::escapeString( PHP_VERSION ) . "'" ), 'Expected passing rows to keep PHP DOM oracle metadata in scalar columns.' );
 html_api_fuzz_smoke_assert( 3 === (int) $raw->querySingle( "SELECT COUNT(*) FROM attempts WHERE oracle_kind = 'lexbor-source' AND oracle_version = '2.10.0' AND oracle_commit = '481c444261a132190a3fb746d6d2f60824af3717'" ), 'Expected Lexbor oracle metadata to be queryable for failure rows.' );
-html_api_fuzz_smoke_assert( 3 === (int) $raw->querySingle( "SELECT COUNT(*) FROM attempts WHERE oracle_binary = '/tmp/lexbor-tree-oracle'" ), 'Expected Lexbor oracle binary to be stored in a scalar column.' );
+html_api_fuzz_smoke_assert( 3 === (int) $raw->querySingle( "SELECT COUNT(*) FROM attempts WHERE oracle_binary = '" . str_repeat( 'b', 64 ) . "'" ), 'Expected the Lexbor oracle binary hash to be stored in a scalar column.' );
+html_api_fuzz_smoke_assert( 1 === (int) $raw->querySingle( "SELECT COUNT(*) FROM attempts WHERE seed = 15 AND oracle_kind = 'html5ever-source' AND oracle_version = '0.35.0' AND oracle_commit = '" . str_repeat( '1', 64 ) . "' AND oracle_binary = '" . str_repeat( 'c', 64 ) . "'" ), 'Expected html5ever identity columns to use version, build identity, and binary hash.' );
 $raw->close();
 
 $future_db_path = $work_dir . '/future.sqlite';

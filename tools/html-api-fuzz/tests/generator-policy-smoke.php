@@ -158,31 +158,83 @@ function html_api_fuzz_smoke_rm_tree( string $path ): void {
 }
 
 $lexbor_identity = array(
+	'schemaVersion' => 1,
 	'kind'          => \HtmlApiFuzz\OracleRenderer::KIND_LEXBOR_SOURCE,
-	'lexborCommit'  => str_repeat( 'a', 40 ),
-	'binarySha256'  => str_repeat( 'b', 64 ),
+	'available'     => true,
+	'identity'      => array(
+		'schemaVersion'  => 1,
+		'kind'           => \HtmlApiFuzz\OracleRenderer::KIND_LEXBOR_SOURCE,
+		'binarySha256'   => str_repeat( 'b', 64 ),
+		'lexborCommit'   => str_repeat( 'a', 40 ),
+		'lexborVersion'  => 'test-version',
+		'build'          => array(
+			'kind'           => 'html-api-fuzz-lexbor-build',
+			'requestedRef'   => 'test-ref',
+			'resolvedCommit' => str_repeat( 'a', 40 ),
+			'upstream'       => 'https://github.com/lexbor/lexbor.git',
+			'compiler'       => 'test-cc',
+			'cmake'          => 'test-cmake',
+		),
+	),
+	'error'         => null,
+);
+$php_identity = array(
+	'schemaVersion' => 1,
+	'kind'          => \HtmlApiFuzz\OracleRenderer::KIND_PHP_DOM,
+	'available'     => true,
+	'identity'      => array(
+		'schemaVersion'   => 1,
+		'kind'            => \HtmlApiFuzz\OracleRenderer::KIND_PHP_DOM,
+		'phpVersion'      => PHP_VERSION,
+		'phpVersionId'    => PHP_VERSION_ID,
+		'phpSapi'         => PHP_SAPI,
+		'zendVersion'     => zend_version(),
+		'libxmlVersion'   => defined( 'LIBXML_DOTTED_VERSION' ) ? LIBXML_DOTTED_VERSION : null,
+		'domHtmlDocument' => true,
+	),
+	'error'         => null,
 );
 html_api_fuzz_smoke_assert( array() === \HtmlApiFuzz\OracleRenderer::identity_mismatches( $lexbor_identity, $lexbor_identity ), 'Matching Lexbor identities should be replayable.' );
-html_api_fuzz_smoke_assert( array() === \HtmlApiFuzz\OracleRenderer::identity_mismatches( array( 'kind' => 'php-dom' ), array( 'kind' => 'php-dom' ) ), 'Matching PHP DOM kinds should be replayable.' );
+html_api_fuzz_smoke_assert( array() === \HtmlApiFuzz\OracleRenderer::identity_mismatches( $php_identity, $php_identity ), 'Matching PHP DOM identities should be replayable.' );
 $oracle_identity_mismatch_cases = array(
 	'missing metadata'       => null,
 	'missing recorded kind'  => array(),
 	'kind difference'        => array_merge( $lexbor_identity, array( 'kind' => 'php-dom' ) ),
-	'missing commit'         => array_diff_key( $lexbor_identity, array( 'lexborCommit' => true ) ),
-	'malformed commit'       => array_merge( $lexbor_identity, array( 'lexborCommit' => 'not-a-commit' ) ),
-	'different commit'       => array_merge( $lexbor_identity, array( 'lexborCommit' => str_repeat( 'c', 40 ) ) ),
-	'missing binary hash'    => array_diff_key( $lexbor_identity, array( 'binarySha256' => true ) ),
-	'malformed binary hash'  => array_merge( $lexbor_identity, array( 'binarySha256' => 'not-a-hash' ) ),
-	'different binary hash'  => array_merge( $lexbor_identity, array( 'binarySha256' => str_repeat( 'd', 64 ) ) ),
 );
+$missing_commit = $lexbor_identity;
+unset( $missing_commit['identity']['lexborCommit'] );
+$oracle_identity_mismatch_cases['missing commit'] = $missing_commit;
+$malformed_commit = $lexbor_identity;
+$malformed_commit['identity']['lexborCommit'] = 'not-a-commit';
+$oracle_identity_mismatch_cases['malformed commit'] = $malformed_commit;
+$different_commit = $lexbor_identity;
+$different_commit['identity']['lexborCommit'] = str_repeat( 'c', 40 );
+$different_commit['identity']['build']['resolvedCommit'] = str_repeat( 'c', 40 );
+$oracle_identity_mismatch_cases['different commit'] = $different_commit;
+$missing_binary_hash = $lexbor_identity;
+unset( $missing_binary_hash['identity']['binarySha256'] );
+$oracle_identity_mismatch_cases['missing binary hash'] = $missing_binary_hash;
+$malformed_binary_hash = $lexbor_identity;
+$malformed_binary_hash['identity']['binarySha256'] = 'not-a-hash';
+$oracle_identity_mismatch_cases['malformed binary hash'] = $malformed_binary_hash;
+$different_binary_hash = $lexbor_identity;
+$different_binary_hash['identity']['binarySha256'] = str_repeat( 'd', 64 );
+$oracle_identity_mismatch_cases['different binary hash'] = $different_binary_hash;
 foreach ( $oracle_identity_mismatch_cases as $identity_label => $recorded_identity ) {
 	html_api_fuzz_smoke_assert( ! empty( \HtmlApiFuzz\OracleRenderer::identity_mismatches( $recorded_identity, $lexbor_identity ) ), "Expected {$identity_label} to reject oracle identity." );
 }
-$unavailable_lexbor_identity = array_merge( $lexbor_identity, array( 'available' => false ) );
+$unavailable_lexbor_identity = array(
+	'schemaVersion' => 1,
+	'kind'          => \HtmlApiFuzz\OracleRenderer::KIND_LEXBOR_SOURCE,
+	'available'     => false,
+	'identity'      => null,
+	'error'         => 'test oracle unavailable',
+);
 html_api_fuzz_smoke_assert( ! empty( \HtmlApiFuzz\OracleRenderer::identity_mismatches( $lexbor_identity, $unavailable_lexbor_identity ) ), 'Unavailable current Lexbor should reject oracle identity.' );
 $unverified_lexbor_identity = array_merge( $lexbor_identity, array( 'versionError' => 'bad manifest' ) );
 html_api_fuzz_smoke_assert( ! empty( \HtmlApiFuzz\OracleRenderer::identity_mismatches( $lexbor_identity, $unverified_lexbor_identity ) ), 'Unverified current Lexbor should reject oracle identity.' );
-$malformed_current_lexbor = array_merge( $lexbor_identity, array( 'binarySha256' => 'bad' ) );
+$malformed_current_lexbor = $lexbor_identity;
+$malformed_current_lexbor['identity']['binarySha256'] = 'bad';
 html_api_fuzz_smoke_assert( ! empty( \HtmlApiFuzz\OracleRenderer::identity_mismatches( $lexbor_identity, $malformed_current_lexbor ) ), 'Malformed current Lexbor identity should be rejected.' );
 
 $valid = null;

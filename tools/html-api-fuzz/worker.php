@@ -23,9 +23,16 @@ function html_api_fuzz_worker_fatal_result( array $options, Throwable $e, ?strin
 	try {
 		$fallback['oracle'] = \HtmlApiFuzz\OracleRenderer::from_options( $options )->metadata();
 	} catch ( Throwable $oracle_error ) {
+		$oracle_kind = \HtmlApiFuzz\option_string( $options, 'dom-oracle', \HtmlApiFuzz\OracleRenderer::KIND_PHP_DOM );
+		if ( ! in_array( $oracle_kind, \HtmlApiFuzz\OracleRenderer::kinds(), true ) ) {
+			$oracle_kind = \HtmlApiFuzz\OracleRenderer::KIND_PHP_DOM;
+		}
 		$fallback['oracle'] = array(
-			'kind'  => \HtmlApiFuzz\option_string( $options, 'dom-oracle', \HtmlApiFuzz\OracleRenderer::KIND_PHP_DOM ),
-			'error' => $oracle_error->getMessage(),
+			'schemaVersion' => 1,
+			'kind'          => $oracle_kind,
+			'available'     => false,
+			'identity'      => null,
+			'error'         => $oracle_error->getMessage(),
 		);
 	}
 

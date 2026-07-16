@@ -3,7 +3,7 @@
 require_once __DIR__ . '/lib/autoload.php';
 
 function html_api_fuzz_launcher_usage(): void {
-	echo "Usage: php tools/html-api-fuzz/launcher.php [--lanes N] [--output-dir DIR] [--duration-seconds N] [--max-seeds N] [--payload-policy POLICY] [--max-input-bytes N] [--dom-oracle php-dom|lexbor-source] [--lexbor-oracle-bin PATH] [--max-keep-per-signature N] [--keep-all-artifacts] [--watcher] [--triage-oracle-findings]\n";
+	echo "Usage: php tools/html-api-fuzz/launcher.php [--lanes N] [--output-dir DIR] [--duration-seconds N] [--max-seeds N] [--payload-policy POLICY] [--max-input-bytes N] [--dom-oracle php-dom|lexbor-source|html5ever-source] [--lexbor-oracle-bin PATH|--html5ever-oracle-bin PATH] [--max-keep-per-signature N] [--keep-all-artifacts] [--watcher] [--triage-oracle-findings]\n";
 	echo "Create OUTPUT_DIR/STOP (see stop.php) to stop all lanes gracefully: each finishes its current batch and exits.\n";
 	echo "--max-keep-per-signature is applied per lane; a signature seen in every lane keeps up to N x lanes exemplar directories.\n";
 	echo "--triage-oracle-findings passes oracle findings to the watcher/minimizer when --watcher is used.\n";

@@ -217,6 +217,9 @@ class Worker {
 			$result['dom'] = $dom_result;
 
 			if ( TreeRenderer::STATUS_ERROR === $dom_result['status'] ) {
+				if ( true === ( $dom_result['infrastructure'] ?? false ) ) {
+					$result['oracleInfrastructure'] = true;
+				}
 				$dom_failure_class      = $dom_result['failureClass'] ?? 'oracle-renderer-error';
 				$result['failureClass'] = self::is_resource_limit_failure( $dom_failure_class ) ? 'resource-limit' : $dom_failure_class;
 				$result['status']       = self::is_resource_limit_failure( $dom_failure_class )
@@ -277,6 +280,9 @@ class Worker {
 			$result['timingsMs']['mutation'] = self::stage_elapsed_ms( $stage_started );
 			$result['mutation'] = $mutation;
 			if ( false === $mutation['ok'] ) {
+				if ( true === ( $mutation['oracleInfrastructure'] ?? false ) ) {
+					$result['oracleInfrastructure'] = true;
+				}
 				$result['ok']           = false;
 				$result['status']       = 'failed';
 				$result['failureClass'] = $mutation['failureClass'];
@@ -399,6 +405,10 @@ class Worker {
 	}
 
 	private static function base_replay( int $seed, string $profile, string $mode, ?string $payload_policy, string $fragment_context, ?array $generator_parameters, string $input_source, string $input, string $output_dir, array $limits, bool $fail_unsupported, array $git_metadata, array $oracle_metadata, array $oracle_options, string $checks ): array {
+		$replay_options = array_merge(
+			array( 'failUnsupported' => $fail_unsupported, 'checks' => $checks ),
+			$oracle_options
+		);
 		return array(
 			'schemaVersion' => 1,
 			'kind'          => 'html-api-fuzz-replay',
@@ -420,13 +430,7 @@ class Worker {
 			'inputPreview'  => preview_bytes( $input ),
 			'limits'        => $limits,
 			'oracle'        => $oracle_metadata,
-			'options'       => array(
-				'failUnsupported' => $fail_unsupported,
-				'checks'           => $checks,
-				'domOracle'       => $oracle_options['domOracle'] ?? OracleRenderer::KIND_PHP_DOM,
-				'lexborOracleBin' => $oracle_options['lexborOracleBin'] ?? null,
-				'oracleTimeoutMs' => $oracle_options['oracleTimeoutMs'] ?? null,
-			),
+			'options'       => $replay_options,
 			'command'       => array(
 				'program' => PHP_BINARY,
 				'args'    => array(
@@ -491,12 +495,16 @@ class Worker {
 		if ( TreeRenderer::STATUS_OK !== $dom_updated['status'] ) {
 			if ( TreeRenderer::STATUS_UNSUPPORTED !== $dom_updated['status'] ) {
 				$failure_class = $dom_updated['failureClass'] ?? 'mutation-oracle-render-error';
-				return array(
+				$result = array(
 					'ok'           => false,
 					'status'       => self::is_resource_limit_failure( $failure_class ) ? 'resource-limit' : 'failed',
 					'failureClass' => self::is_resource_limit_failure( $failure_class ) ? 'resource-limit' : 'mutation-oracle-render-error',
 					'renderResult' => $dom_updated,
 				);
+				if ( true === ( $dom_updated['infrastructure'] ?? false ) ) {
+					$result['oracleInfrastructure'] = true;
+				}
+				return $result;
 			}
 			return array(
 				'ok'     => true,
