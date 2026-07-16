@@ -40,6 +40,9 @@ final class ContentLifecycleSurface {
 			$rows[] = self::check_post_lifecycle( $ctx->fork( 'posts' ), $case );
 
 			self::prepare_runtime();
+			$rows[] = self::check_post_mutation_projection_cache_and_template_links( $ctx->fork( 'post-mutation-projection' ), $case );
+
+			self::prepare_runtime();
 			$rows[] = self::check_admin_post_save_orchestration( $ctx->fork( 'admin-post-save' ), $case );
 
 			self::prepare_runtime();
@@ -131,6 +134,7 @@ final class ContentLifecycleSurface {
 				'get_post_type',
 				'get_post_type_object',
 				'get_posts',
+				'get_the_title',
 				'get_object_taxonomies',
 				'get_children',
 				'get_page_by_path',
@@ -460,6 +464,310 @@ final class ContentLifecycleSurface {
 				'case'     => self::case_summary( $case ),
 				'failures' => array_slice( $failures, 0, 6 ),
 				'events'   => array_slice( $events, 0, 16 ),
+			)
+		);
+	}
+
+	private static function check_post_mutation_projection_cache_and_template_links( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures             = array();
+		$post_id              = 0;
+		$sibling_id           = 0;
+		$post_type            = 'cf_proj_' . substr( $case['token'], 0, 8 );
+		$initial_slug         = 'projection-before-' . $case['token'];
+		$updated_slug         = 'projection-after-' . $case['token'];
+		$updated_title        = 'Projection Updated ' . $case['updatedTitle'];
+		$updated_content      = 'Projection content ' . $case['updatedContent'];
+		$updated_excerpt      = 'Projection excerpt ' . $case['excerpt'];
+		$permalink_structure  = '/%postname%/';
+		$permalink_filter     = static function () use ( $permalink_structure ): string {
+			return $permalink_structure;
+		};
+		$previous_rewrite_set = array_key_exists( 'wp_rewrite', $GLOBALS );
+		$previous_rewrite     = $GLOBALS['wp_rewrite'] ?? null;
+
+		try {
+			$GLOBALS['wp_rewrite'] = new \WP_Rewrite();
+			$GLOBALS['wp_rewrite']->permalink_structure = $permalink_structure;
+			\add_filter( 'pre_option_permalink_structure', $permalink_filter );
+
+			\register_post_type(
+				$post_type,
+				array(
+					'public'    => true,
+					'rewrite'   => array( 'slug' => 'projection-' . substr( $case['token'], 0, 6 ) ),
+					'query_var' => false,
+					'supports'  => array( 'title', 'editor', 'excerpt', 'comments' ),
+				)
+			);
+
+			$post_id = \wp_insert_post(
+				\wp_slash(
+					array(
+						'post_type'      => $post_type,
+						'post_title'     => 'Projection Initial ' . $case['title'],
+						'post_content'   => 'Projection initial content ' . $case['content'],
+						'post_excerpt'   => 'Projection initial excerpt ' . $case['excerpt'],
+						'post_status'    => 'draft',
+						'post_name'      => $initial_slug,
+						'post_date'      => '2023-03-04 05:06:07',
+						'post_date_gmt'  => '2023-03-04 05:06:07',
+						'comment_status' => 'open',
+						'ping_status'    => 'closed',
+					)
+				),
+				true,
+				false
+			);
+			$sibling_id = \wp_insert_post(
+				\wp_slash(
+					array(
+						'post_type'      => $post_type,
+						'post_title'     => 'Projection Sibling ' . $case['token'],
+						'post_content'   => 'Projection sibling content ' . $case['token'],
+						'post_status'    => 'publish',
+						'post_name'      => 'projection-sibling-' . $case['token'],
+						'post_date'      => '2023-03-05 06:07:08',
+						'post_date_gmt'  => '2023-03-05 06:07:08',
+						'comment_status' => 'closed',
+						'ping_status'    => 'closed',
+					)
+				),
+				true,
+				false
+			);
+
+			$before = is_int( $post_id ) && $post_id > 0 ? \get_post( $post_id ) : null;
+			self::collect_failure(
+				$failures,
+				is_int( $post_id )
+					&& $post_id > 0
+					&& is_int( $sibling_id )
+					&& $sibling_id > $post_id
+					&& $before instanceof \WP_Post
+					&& 'draft' === $before->post_status
+					&& \sanitize_title( $initial_slug ) === $before->post_name,
+				'post mutation projection fixtures insert as draft plus published sibling',
+				array(
+					'postId'    => self::error_summary( $post_id ),
+					'siblingId' => self::error_summary( $sibling_id ),
+					'before'    => self::post_summary( $before ),
+				)
+			);
+
+			if ( $before instanceof \WP_Post ) {
+				\wp_cache_set(
+					$post_id,
+					(object) array_merge(
+						get_object_vars( $before ),
+						array(
+							'post_title' => 'Stale Projection ' . $case['token'],
+							'post_name'  => 'stale-projection-' . $case['token'],
+						)
+					),
+					'posts'
+				);
+				\wp_cache_set( 'post_parent:' . (string) $post_id, 'stale-parent-' . $case['token'], 'posts' );
+				\wp_cache_set( $post_id, 'stale-meta-' . $case['token'], 'post_meta' );
+				\wp_cache_set( 'wp_get_archives', 'stale-archives-' . $case['token'], 'general' );
+
+				$query_cache_args = array(
+					'post_type'              => $post_type,
+					'post_status'            => 'publish',
+					'name'                   => \sanitize_title( $updated_slug ),
+					'fields'                 => 'ids',
+					'cache_results'          => true,
+					'posts_per_page'         => -1,
+					'orderby'                => 'ID',
+					'order'                  => 'ASC',
+					'suppress_filters'       => false,
+					'update_post_meta_cache' => false,
+					'update_post_term_cache' => false,
+				);
+				$cached_query_before = new \WP_Query( $query_cache_args );
+
+				$updated_id = \wp_update_post(
+					\wp_slash(
+						array(
+							'ID'           => $post_id,
+							'post_title'   => $updated_title,
+							'post_content' => $updated_content,
+							'post_excerpt' => $updated_excerpt,
+							'post_status'  => 'publish',
+							'post_name'    => $updated_slug,
+						)
+					),
+					true,
+					true
+				);
+
+				$updated            = \get_post( $post_id );
+				$cached_post        = \wp_cache_get( $post_id, 'posts' );
+				$cached_parent      = \wp_cache_get( 'post_parent:' . (string) $post_id, 'posts' );
+				$cached_meta        = \wp_cache_get( $post_id, 'post_meta' );
+				$cached_archives    = \wp_cache_get( 'wp_get_archives', 'general' );
+				$permalink          = \get_permalink( $post_id );
+				$title              = \get_the_title( $post_id );
+				$classes            = \get_post_class( array( 'cfz-projection-' . $case['token'] ), $post_id );
+				$cached_query_after = new \WP_Query( $query_cache_args );
+				$updated_query      = \get_posts(
+					array(
+						'post_type'              => $post_type,
+						'post_status'            => 'publish',
+						'name'                   => \sanitize_title( $updated_slug ),
+						'numberposts'            => -1,
+						'orderby'                => 'ID',
+						'order'                  => 'ASC',
+						'suppress_filters'       => false,
+						'update_post_meta_cache' => false,
+						'update_post_term_cache' => false,
+					)
+				);
+				$old_slug_query     = \get_posts(
+					array(
+						'post_type'              => $post_type,
+						'post_status'            => array( 'draft', 'publish', 'private' ),
+						'name'                   => \sanitize_title( $initial_slug ),
+						'numberposts'            => -1,
+						'orderby'                => 'ID',
+						'order'                  => 'ASC',
+						'suppress_filters'       => false,
+						'update_post_meta_cache' => false,
+						'update_post_term_cache' => false,
+					)
+				);
+				$published_query    = \get_posts(
+					array(
+						'post_type'              => $post_type,
+						'post_status'            => 'publish',
+						'numberposts'            => -1,
+						'orderby'                => 'ID',
+						'order'                  => 'ASC',
+						'suppress_filters'       => false,
+						'update_post_meta_cache' => false,
+						'update_post_term_cache' => false,
+					)
+				);
+				$updated_query_ids  = self::ids_from_posts( $updated_query );
+				$old_slug_query_ids = self::ids_from_posts( $old_slug_query );
+				$published_ids      = self::ids_from_posts( $published_query );
+				$cached_before_ids  = self::ids_from_posts( $cached_query_before->posts ?? array() );
+				$cached_after_ids   = self::ids_from_posts( $cached_query_after->posts ?? array() );
+				$updated_post_name  = $updated instanceof \WP_Post ? $updated->post_name : '';
+
+				self::collect_failure(
+					$failures,
+					$updated_id === $post_id
+						&& $updated instanceof \WP_Post
+						&& 'publish' === $updated->post_status
+						&& \sanitize_title( $updated_slug ) === $updated->post_name
+						&& $updated_title === $updated->post_title
+						&& $updated_content === $updated->post_content
+						&& $updated_excerpt === $updated->post_excerpt,
+					'wp_update_post promotes the generated draft and persists slug, title, content, and excerpt mutations',
+					array(
+						'updatedId' => self::error_summary( $updated_id ),
+						'updated'   => self::post_summary( $updated ),
+						'title'     => $updated instanceof \WP_Post ? $updated->post_title : null,
+						'slug'      => $updated instanceof \WP_Post ? $updated->post_name : null,
+					)
+				);
+
+				self::collect_failure(
+					$failures,
+					is_object( $cached_post )
+						&& (int) ( $cached_post->ID ?? 0 ) === $post_id
+						&& 'publish' === (string) ( $cached_post->post_status ?? '' )
+						&& $updated_title === (string) ( $cached_post->post_title ?? '' )
+						&& \sanitize_title( $updated_slug ) === (string) ( $cached_post->post_name ?? '' )
+						&& false === $cached_parent
+						&& false === $cached_meta
+						&& false === $cached_archives,
+					'wp_update_post refreshes the post cache and evicts stale parent, metadata, and archive cache entries',
+					array(
+						'cachedPost'   => is_object( $cached_post ) ? self::post_summary( \get_post( (int) $cached_post->ID ) ) : $cached_post,
+						'cachedTitle'  => is_object( $cached_post ) ? ( $cached_post->post_title ?? null ) : null,
+						'cachedParent' => $cached_parent,
+						'cachedMeta'   => $cached_meta,
+						'archives'     => $cached_archives,
+					)
+				);
+
+				self::collect_failure(
+					$failures,
+					array() === $cached_before_ids
+						&& self::same_id_set( $cached_after_ids, array( $post_id ) )
+						&& self::same_id_set( $updated_query_ids, array( $post_id ) )
+						&& array() === $old_slug_query_ids
+						&& self::same_id_set( $published_ids, array( $post_id, $sibling_id ) ),
+					'cached WP_Query and get_posts project the updated publish status and slug without leaking the old slug',
+					array(
+						'cachedBeforeIds' => $cached_before_ids,
+						'cachedAfterIds'  => $cached_after_ids,
+						'updatedQueryIds' => $updated_query_ids,
+						'oldSlugQueryIds' => $old_slug_query_ids,
+						'publishedIds'    => $published_ids,
+					)
+				);
+
+				self::collect_failure(
+					$failures,
+					is_string( $permalink )
+						&& '' !== $updated_post_name
+						&& str_contains( $permalink, '/' . $updated_post_name )
+						&& str_contains( $permalink, '/projection-' . substr( $case['token'], 0, 6 ) . '/' )
+						&& ! str_contains( $permalink, $before->post_name )
+						&& $updated_title === $title
+						&& in_array( 'post-' . $post_id, $classes, true )
+						&& in_array( 'type-' . $post_type, $classes, true )
+						&& in_array( 'status-publish', $classes, true )
+						&& in_array( 'cfz-projection-' . $case['token'], $classes, true ),
+					'template link helpers project the updated slug, title, type, and publish status',
+					array(
+						'permalink' => $permalink,
+						'title'     => $title,
+						'classes'   => $classes,
+					)
+				);
+			}
+		} finally {
+			\remove_filter( 'pre_option_permalink_structure', $permalink_filter );
+
+			if ( $previous_rewrite_set ) {
+				$GLOBALS['wp_rewrite'] = $previous_rewrite;
+			} else {
+				unset( $GLOBALS['wp_rewrite'] );
+			}
+
+			if ( is_int( $post_id ) && $post_id > 0 ) {
+				\wp_delete_post( $post_id, true );
+			}
+			if ( is_int( $sibling_id ) && $sibling_id > 0 ) {
+				\wp_delete_post( $sibling_id, true );
+			}
+		}
+
+		self::collect_failure(
+			$failures,
+			false === \has_filter( 'pre_option_permalink_structure', $permalink_filter )
+				&& ( $previous_rewrite_set === array_key_exists( 'wp_rewrite', $GLOBALS ) )
+				&& ( ! $previous_rewrite_set || $previous_rewrite === $GLOBALS['wp_rewrite'] ),
+			'post mutation projection permalink filter and rewrite global are restored',
+			array(
+				'permalinkFilter' => \has_filter( 'pre_option_permalink_structure', $permalink_filter ),
+				'rewriteRestored' => $previous_rewrite_set === array_key_exists( 'wp_rewrite', $GLOBALS )
+					&& ( ! $previous_rewrite_set || $previous_rewrite === $GLOBALS['wp_rewrite'] ),
+			)
+		);
+
+		return $ctx->result(
+			'content-lifecycle.posts.mutation-cache-query-template-projection',
+			array() === $failures,
+			array(
+				'case'      => self::case_summary( $case ),
+				'postId'    => $post_id,
+				'siblingId' => $sibling_id,
+				'postType'  => $post_type,
+				'failures'  => array_slice( $failures, 0, 8 ),
 			)
 		);
 	}
