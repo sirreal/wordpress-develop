@@ -1104,6 +1104,14 @@ final class ContentLifecycleSurface {
 		$previous_rewrite     = $GLOBALS['wp_rewrite'] ?? null;
 		$slug_action_priority = \has_action( 'post_updated', 'wp_check_for_changed_slugs' );
 		$installed_slug_hook  = false;
+		$previous_user_id     = isset( $GLOBALS['current_user'] ) && $GLOBALS['current_user'] instanceof \WP_User ? (int) $GLOBALS['current_user']->ID : 0;
+		$cap_filter           = null;
+		$editable_filter      = null;
+		$sample_filter        = null;
+		$html_filter          = null;
+		$editable_events      = array();
+		$sample_events        = array();
+		$html_events          = array();
 
 		try {
 			if ( ! function_exists( 'get_sample_permalink' ) && defined( 'ABSPATH' ) ) {
@@ -1389,8 +1397,139 @@ final class ContentLifecycleSurface {
 						'manualHolder' => self::post_summary( $manual_holder ),
 					)
 				);
+
+				$html_user_id = self::insert_support_user( 'sample-html-' . $case['token'], 'sample-html-' . $case['token'] . '@example.test' );
+				\wp_set_current_user( $html_user_id );
+				$cap_filter = self::grant_all_caps_filter( $html_user_id );
+				\add_filter( 'user_has_cap', $cap_filter, 10, 4 );
+
+				$filter_slug    = 'html-filter-' . $case['token'];
+				$published_slug = 'published-html-' . $case['token'];
+				$filtered_slugs = array(
+					$filter_slug    => $filter_slug . '-editable',
+					$published_slug => $published_slug . '-editable',
+				);
+				$editable_filter = static function ( string $slug, \WP_Post $post ) use ( &$editable_events, $filtered_slugs ): string {
+					$editable_events[] = array(
+						'postId' => (int) $post->ID,
+						'slug'   => $slug,
+						'status' => $post->post_status,
+						'name'   => $post->post_name,
+						'filter' => $post->filter ?? null,
+					);
+					return $filtered_slugs[ $slug ] ?? $slug;
+				};
+				$sample_filter   = static function ( array $permalink, int $post_id, $title, $name, \WP_Post $post ) use ( &$sample_events ): array {
+					$sample_events[] = array(
+						'postId'     => $post_id,
+						'title'      => $title,
+						'name'       => $name,
+						'status'     => $post->post_status,
+						'postName'   => $post->post_name,
+						'postFilter' => $post->filter ?? null,
+						'sampleSlug' => $permalink[1] ?? null,
+					);
+					return $permalink;
+				};
+				$html_filter     = static function ( string $html, int $post_id, $new_title, $new_slug, \WP_Post $post ) use ( &$html_events, $case ): string {
+					$html_events[] = array(
+						'postId'   => $post_id,
+						'title'    => $new_title,
+						'slug'     => $new_slug,
+						'status'   => $post->post_status,
+						'postName' => $post->post_name,
+					);
+					return $html . '<span data-cfz-sample-html="' . $case['token'] . '">filtered</span>';
+				};
+				\add_filter( 'editable_slug', $editable_filter, 10, 2 );
+				\add_filter( 'get_sample_permalink', $sample_filter, 10, 5 );
+				\add_filter( 'get_sample_permalink_html', $html_filter, 10, 5 );
+
+				$filtered_title         = 'HTML Filtered ' . $case['token'];
+				$filtered_direct_sample = \get_sample_permalink( $sample_before->ID, $filtered_title, $filter_slug );
+				$draft_html             = function_exists( 'get_sample_permalink_html' )
+					? \get_sample_permalink_html( $sample_before->ID, $filtered_title, $filter_slug )
+					: '';
+				$published_html         = function_exists( 'get_sample_permalink_html' ) && $history_before instanceof \WP_Post
+					? \get_sample_permalink_html( $history_before->ID, null, $published_slug )
+					: '';
+				$sample_after_html      = \get_post( $sample_before->ID );
+				$published_after_html   = $history_before instanceof \WP_Post ? \get_post( $history_before->ID ) : null;
+				$preview_link           = $sample_after_html instanceof \WP_Post ? \get_preview_post_link( $sample_after_html ) : null;
+				$published_permalink    = $published_after_html instanceof \WP_Post ? \get_permalink( $published_after_html ) : null;
+				$sample_event_slugs     = array_values(
+					array_map(
+						static function ( array $event ) {
+							return $event['sampleSlug'] ?? null;
+						},
+						$sample_events
+					)
+				);
+				$editable_events_ok     = 3 === count( $editable_events );
+				foreach ( $editable_events as $editable_event ) {
+					if (
+						'publish' !== ( $editable_event['status'] ?? null )
+						|| 'sample' !== ( $editable_event['filter'] ?? null )
+						|| ! in_array( $editable_event['slug'] ?? null, array( $filter_slug, $filter_slug . '-editable', $published_slug ), true )
+					) {
+						$editable_events_ok = false;
+						break;
+					}
+				}
+
+				self::collect_failure(
+					$failures,
+					is_array( $filtered_direct_sample )
+						&& $filter_slug . '-editable' === ( $filtered_direct_sample[1] ?? null )
+						&& is_string( $draft_html )
+						&& str_contains( $draft_html, 'id="sample-permalink"' )
+						&& str_contains( $draft_html, 'id="editable-post-name"' )
+						&& str_contains( $draft_html, 'id="editable-post-name-full">' . $filter_slug . '-editable</span>' )
+						&& str_contains( $draft_html, "target='wp-preview-{$sample_before->ID}'" )
+						&& is_string( $preview_link )
+						&& str_contains( $draft_html, 'preview=true' )
+						&& is_string( $published_html )
+						&& is_string( $published_permalink )
+						&& str_contains( $published_html, 'href="' . $published_permalink . '"' )
+						&& str_contains( $published_html, 'id="editable-post-name-full">' . $published_slug . '-editable</span>' )
+						&& $editable_events_ok
+						&& 3 === count( $sample_events )
+						&& 2 === count( $html_events )
+						&& in_array( $filter_slug . '-editable', $sample_event_slugs, true )
+						&& in_array( $published_slug . '-editable', $sample_event_slugs, true )
+						&& $sample_after_html instanceof \WP_Post
+						&& 'draft' === $sample_after_html->post_status
+						&& '' === $sample_after_html->post_name,
+					'get_sample_permalink_html projects draft preview and published view links through editable slug and HTML filters without mutating stored posts',
+					array(
+						'directSample'       => $filtered_direct_sample,
+						'draftHtml'          => $draft_html,
+						'publishedHtml'      => $published_html,
+						'previewLink'        => $preview_link,
+						'publishedPermalink' => $published_permalink,
+						'editableEvents'     => $editable_events,
+						'sampleEvents'       => $sample_events,
+						'htmlEvents'         => $html_events,
+						'sampleAfter'        => self::post_summary( $sample_after_html ),
+						'publishedAfter'     => self::post_summary( $published_after_html ),
+					)
+				);
 			}
 		} finally {
+			if ( null !== $html_filter ) {
+				\remove_filter( 'get_sample_permalink_html', $html_filter, 10 );
+			}
+			if ( null !== $sample_filter ) {
+				\remove_filter( 'get_sample_permalink', $sample_filter, 10 );
+			}
+			if ( null !== $editable_filter ) {
+				\remove_filter( 'editable_slug', $editable_filter, 10 );
+			}
+			if ( null !== $cap_filter ) {
+				\remove_filter( 'user_has_cap', $cap_filter, 10 );
+			}
+			\wp_set_current_user( $previous_user_id );
+
 			if ( $installed_slug_hook ) {
 				\remove_action( 'post_updated', 'wp_check_for_changed_slugs', 12 );
 			}
@@ -1415,18 +1554,27 @@ final class ContentLifecycleSurface {
 			: $slug_action_priority === \has_action( 'post_updated', 'wp_check_for_changed_slugs' );
 		$rewrite_restored    = $previous_rewrite_set === array_key_exists( 'wp_rewrite', $GLOBALS )
 			&& ( ! $previous_rewrite_set || $previous_rewrite === $GLOBALS['wp_rewrite'] );
+		$sample_filters_restored = ( null === $editable_filter || false === \has_filter( 'editable_slug', $editable_filter ) )
+			&& ( null === $sample_filter || false === \has_filter( 'get_sample_permalink', $sample_filter ) )
+			&& ( null === $html_filter || false === \has_filter( 'get_sample_permalink_html', $html_filter ) )
+			&& ( null === $cap_filter || false === \has_filter( 'user_has_cap', $cap_filter ) );
+		$current_user_restored = $previous_user_id === ( isset( $GLOBALS['current_user'] ) && $GLOBALS['current_user'] instanceof \WP_User ? (int) $GLOBALS['current_user']->ID : 0 );
 
 		self::collect_failure(
 			$failures,
 			$slug_action_restored
 				&& false === \has_filter( 'pre_option_permalink_structure', $permalink_filter )
-				&& $rewrite_restored,
-			'post slug history sample row restores slug action, permalink filter, and rewrite global',
+				&& $rewrite_restored
+				&& $sample_filters_restored
+				&& $current_user_restored,
+			'post slug history sample row restores slug action, sample filters, current user, permalink filter, and rewrite global',
 			array(
 				'slugAction'      => \has_action( 'post_updated', 'wp_check_for_changed_slugs' ),
 				'expectedAction'  => $slug_action_priority,
 				'permalinkFilter' => \has_filter( 'pre_option_permalink_structure', $permalink_filter ),
 				'rewriteRestored' => $rewrite_restored,
+				'sampleFilters'   => $sample_filters_restored,
+				'currentUser'     => isset( $GLOBALS['current_user'] ) && $GLOBALS['current_user'] instanceof \WP_User ? (int) $GLOBALS['current_user']->ID : 0,
 			)
 		);
 
