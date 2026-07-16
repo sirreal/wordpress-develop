@@ -66,9 +66,12 @@ database, network requests, or a configured site.
   and removal, hook suffix and menu URL behavior, parent file normalization,
   synthetic `WP_List_Table` pagination/columns/views/bulk actions/row
   actions/tablenav rendering, direct bulk-action/month-dropdown helper
-  contracts, safe admin/AJAX nonce checks, settings section/field/error
-  rendering, filtered admin notice getter/echo contracts, and captured date/time
-  AJAX format wrappers without process exits.
+  contracts, generated request/action matrices for `current_action()`,
+  capability-gated row and bulk actions, view/bulk filters, nonce URLs,
+  custom bulk-action dispatch, selected item normalization, safe redirect
+  cleanup/fallback behavior, allowed-host checks, safe admin/AJAX nonce checks,
+  settings section/field/error rendering, filtered admin notice getter/echo
+  contracts, and captured date/time AJAX format wrappers without process exits.
 - `admin-list-tables`: no-live-DB concrete admin list-table subclass coverage
   for posts, media, comments, terms, users, plugins, plugin install search
   results, themes, selected-mode theme install API results, link manager,

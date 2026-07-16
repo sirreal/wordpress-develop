@@ -31,6 +31,7 @@ final class AdminWorkflowsSurface {
 			$rows[] = self::check_menu_globals( $ctx->fork( 'menu-globals' ) );
 			$rows[] = self::check_synthetic_list_table( $ctx->fork( 'list-table' ) );
 			$rows[] = self::check_list_table_action_and_month_helpers( $ctx->fork( 'list-table-helpers' ) );
+			$rows[] = self::check_list_table_request_action_matrix( $ctx->fork( 'list-table-action-matrix' ) );
 			$rows[] = self::check_referer_helpers( $ctx->fork( 'referer-helpers' ) );
 			$rows[] = self::check_referer_field_helpers( $ctx->fork( 'referer-field-helpers' ) );
 			$rows[] = self::check_admin_form_controls( $ctx->fork( 'form-controls' ) );
@@ -72,6 +73,7 @@ final class AdminWorkflowsSurface {
 				'add_settings_section',
 				'add_submenu_page',
 				'admin_url',
+				'apply_filters',
 				'check_admin_referer',
 				'check_ajax_referer',
 				'convert_to_screen',
@@ -84,6 +86,7 @@ final class AdminWorkflowsSurface {
 				'get_admin_page_parent',
 				'get_admin_page_title',
 				'get_column_headers',
+				'get_current_screen',
 				'get_hidden_columns',
 				'home_url',
 				'get_plugin_page_hook',
@@ -103,6 +106,7 @@ final class AdminWorkflowsSurface {
 				'sanitize_title',
 				'selected',
 				'set_url_scheme',
+				'set_current_screen',
 				'settings_errors',
 				'settings_fields',
 				'submit_button',
@@ -117,6 +121,8 @@ final class AdminWorkflowsSurface {
 				'wp_nonce_url',
 				'wp_original_referer_field',
 				'wp_referer_field',
+				'wp_redirect',
+				'wp_safe_redirect',
 				'wp_strip_all_tags',
 				'wp_ajax_date_format',
 				'wp_ajax_time_format',
@@ -936,6 +942,563 @@ final class AdminWorkflowsSurface {
 			array() === $failures,
 			array( 'failures' => array_slice( $failures, 0, 8 ) )
 		);
+	}
+
+	private static function check_list_table_request_action_matrix( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures        = array();
+		$local_snapshot  = self::snapshot_globals(
+			array(
+				'_GET',
+				'_POST',
+				'_REQUEST',
+				'current_screen',
+				'current_user',
+				'hook_suffix',
+				'pagenow',
+				'taxnow',
+				'typenow',
+				'wp_actions',
+				'wp_current_filter',
+				'wp_filter',
+				'wp_filters',
+			)
+		);
+		$server_snapshot = self::snapshot_server( array( 'HTTP_HOST', 'HTTP_REFERER', 'REQUEST_URI', 'PHP_SELF' ) );
+		$screen_id       = self::screen_id( $ctx->fork( 'screen' ) );
+		$screen          = \convert_to_screen( $screen_id );
+		$hostile_label   = self::hostile_label( $ctx->fork( 'label' ) );
+		$bulk_cap        = self::capability( $ctx->fork( 'bulk-cap' ), 'bulk' );
+		$delete_cap      = self::capability( $ctx->fork( 'delete-cap' ), 'delete' );
+		$item_id         = 'cfz-action-' . substr( hash( 'crc32b', (string) $ctx->fork( 'item' )->seed() ), 0, 8 );
+		$second_id       = $item_id . '-second';
+		$top_action      = 'feature-' . substr( hash( 'crc32b', (string) $ctx->fork( 'top-action' )->seed() ), 0, 8 );
+		$bottom_action   = 'archive-' . substr( hash( 'crc32b', (string) $ctx->fork( 'bottom-action' )->seed() ), 0, 8 );
+		$delete_action   = 'delete-' . substr( hash( 'crc32b', (string) $ctx->fork( 'delete-action' )->seed() ), 0, 8 );
+		$base_url        = \admin_url( 'admin.php?page=' . rawurlencode( $screen_id ) );
+		$trusted_host    = 'trusted-' . substr( hash( 'crc32b', (string) $ctx->fork( 'trusted-host' )->seed() ), 0, 8 ) . '.example';
+		$tables          = array();
+		$view_events     = array();
+		$bulk_events     = array();
+		$allowed_hosts   = array();
+		$result          = array();
+		$filters_removed = false;
+		$restored        = false;
+
+		$config = array(
+			'bulk_cap'      => $bulk_cap,
+			'delete_action' => $delete_action,
+			'delete_cap'    => $delete_cap,
+			'items'         => array(
+				array(
+					'delete_url' => \admin_url( 'admin.php?page=' . rawurlencode( $screen_id ) . '&action=delete&item=' . rawurlencode( $item_id ) ),
+					'edit_url'   => \admin_url( 'admin.php?page=' . rawurlencode( $screen_id ) . '&action=edit&item=' . rawurlencode( $item_id ) ),
+					'id'         => $item_id,
+					'status'     => 'Pending ' . $hostile_label,
+					'title'      => 'Matrix ' . $hostile_label,
+					'url'        => 'https://example.test/admin-workflows/matrix/?label=' . rawurlencode( $hostile_label ),
+				),
+				array(
+					'delete_url' => \admin_url( 'admin.php?page=' . rawurlencode( $screen_id ) . '&action=delete&item=' . rawurlencode( $second_id ) ),
+					'edit_url'   => \admin_url( 'admin.php?page=' . rawurlencode( $screen_id ) . '&action=edit&item=' . rawurlencode( $second_id ) ),
+					'id'         => $second_id,
+					'status'     => 'Published',
+					'title'      => 'Second ' . $ctx->identifier( 3, 8 ),
+					'url'        => 'https://example.test/admin-workflows/matrix/second/',
+				),
+			),
+			'screen'        => $screen,
+			'top_action'    => $top_action,
+			'bottom_action' => $bottom_action,
+			'view_links'    => array(
+				'all'      => array(
+					'url'     => $base_url . '&view=all',
+					'label'   => \esc_html( 'All ' . $hostile_label ),
+					'current' => true,
+				),
+				'filtered' => array(
+					'url'     => $base_url . '&view=filtered&raw=' . rawurlencode( $hostile_label ),
+					'label'   => \esc_html( 'Filtered ' . $hostile_label ),
+					'current' => false,
+				),
+			),
+		);
+
+		$views_filter = static function ( array $views ) use ( &$view_events, $base_url, $hostile_label, $screen ): array {
+			$view_events[] = array(
+				'screen' => $screen->id,
+				'keys'   => array_keys( $views ),
+			);
+			$views['mine'] = self::view_link( $base_url . '&view=mine&raw=' . rawurlencode( $hostile_label ), 'Mine ' . $hostile_label, false );
+			return $views;
+		};
+		$bulk_filter = static function ( array $actions ) use ( &$bulk_events, $hostile_label, $screen ): array {
+			$bulk_events[] = array(
+				'screen' => $screen->id,
+				'keys'   => array_keys( $actions ),
+			);
+			$actions['review'] = \esc_html( 'Review ' . $hostile_label );
+			return $actions;
+		};
+		$allowed_hosts_filter = static function ( array $hosts, string $host ) use ( &$allowed_hosts, $trusted_host ): array {
+			$allowed_hosts[] = array(
+				'incoming' => $host,
+				'hosts'    => $hosts,
+			);
+			$hosts[] = $trusted_host;
+			return $hosts;
+		};
+
+		$_SERVER['HTTP_HOST']   = 'example.test';
+		$_SERVER['PHP_SELF']    = '/wp-admin/admin.php';
+		$_SERVER['REQUEST_URI'] = '/wp-admin/admin.php?page=' . rawurlencode( $screen_id )
+			. '&action=' . rawurlencode( $top_action )
+			. '&ids%5B%5D=' . rawurlencode( $item_id );
+
+		\add_filter( "views_{$screen->id}", $views_filter, 10, 1 );
+		\add_filter( "bulk_actions-{$screen->id}", $bulk_filter, 10, 1 );
+		\add_filter( 'allowed_redirect_hosts', $allowed_hosts_filter, 10, 2 );
+
+		try {
+			$matrix_table = self::new_action_matrix_list_table( $config );
+			$tables[]     = $matrix_table;
+			$matrix_table->prepare_items();
+
+			$action_cases = array(
+				'filter-suppresses' => array(
+					'request'  => array(
+						'action'        => $top_action,
+						'action2'       => $bottom_action,
+						'filter_action' => 'Filter',
+					),
+					'expected' => false,
+				),
+				'top-precedence'    => array(
+					'request'  => array(
+						'action'  => $top_action,
+						'action2' => $bottom_action,
+					),
+					'expected' => $top_action,
+				),
+				'bottom-ignored'    => array(
+					'request'  => array(
+						'action'  => '-1',
+						'action2' => $bottom_action,
+					),
+					'expected' => false,
+				),
+				'empty-action'      => array(
+					'request'  => array(
+						'action2' => $bottom_action,
+					),
+					'expected' => false,
+				),
+			);
+			$action_results = array();
+			foreach ( $action_cases as $name => $case ) {
+				$_GET     = $case['request'];
+				$_POST    = array();
+				$_REQUEST = $case['request'];
+				$action_results[ $name ] = $matrix_table->current_action();
+			}
+
+			$denied_table = self::new_action_matrix_list_table( $config );
+			$tables[]     = $denied_table;
+			$denied_table->prepare_items();
+			$denied_top_html = $denied_table->expose_bulk_actions( 'top' );
+			$denied_row_html = $denied_table->expose_display_rows();
+
+			$allowed = self::with_capabilities(
+				array( $bulk_cap, $delete_cap ),
+				static function () use ( $config, &$tables ): array {
+					$table    = self::new_action_matrix_list_table( $config );
+					$tables[] = $table;
+					$table->prepare_items();
+
+					return array(
+						'top'     => $table->expose_bulk_actions( 'top' ),
+						'bottom'  => $table->expose_bulk_actions( 'bottom' ),
+						'rows'    => $table->expose_display_rows(),
+						'views'   => $table->expose_views(),
+						'tablenav' => $table->expose_display_tablenav( 'top' ),
+					);
+				}
+			);
+
+			$safe_target    = $base_url . '&action=' . rawurlencode( $top_action ) . '&ids=' . rawurlencode( $item_id . ',' . $second_id );
+			$unsafe_target  = 'https://evil.example/wp-admin/admin.php?page=' . rawurlencode( $screen_id );
+			$trusted_target = 'https://' . $trusted_host . '/wp-admin/admin.php?page=' . rawurlencode( $screen_id );
+			$redirects      = array(
+				'sameHost' => \wp_validate_redirect( $safe_target, $base_url ),
+				'unsafe'   => \wp_validate_redirect( $unsafe_target, $base_url ),
+				'trusted'  => \wp_validate_redirect( $trusted_target, $base_url ),
+			);
+			$bulk_redirects = array(
+				'denied'  => self::run_action_matrix_bulk_redirect_case( $ctx->fork( 'bulk-denied' ), $screen, $config, $base_url, $top_action, $bottom_action, $item_id, $second_id, $bulk_cap, false ),
+				'allowed' => self::with_capabilities(
+					array( $bulk_cap ),
+					static function () use ( $ctx, $screen, $config, $base_url, $top_action, $bottom_action, $item_id, $second_id, $bulk_cap ): array {
+						return self::run_action_matrix_bulk_redirect_case( $ctx->fork( 'bulk-allowed' ), $screen, $config, $base_url, $top_action, $bottom_action, $item_id, $second_id, $bulk_cap, false );
+					}
+				),
+				'unsafe'  => self::with_capabilities(
+					array( $bulk_cap ),
+					static function () use ( $ctx, $screen, $config, $base_url, $top_action, $bottom_action, $item_id, $second_id, $bulk_cap ): array {
+						return self::run_action_matrix_bulk_redirect_case( $ctx->fork( 'bulk-unsafe' ), $screen, $config, $base_url, $top_action, $bottom_action, $item_id, $second_id, $bulk_cap, true );
+					}
+				),
+			);
+
+			$result = compact(
+				'action_cases',
+				'action_results',
+				'allowed',
+				'allowed_hosts',
+				'bulk_redirects',
+				'denied_row_html',
+				'denied_top_html',
+				'redirects',
+				'safe_target',
+				'trusted_target',
+				'view_events',
+				'bulk_events'
+			);
+		} finally {
+			foreach ( $tables as $table ) {
+				if ( $table instanceof \WP_List_Table ) {
+					\remove_filter( "manage_{$screen->id}_columns", array( $table, 'get_columns' ), 0 );
+				}
+			}
+			\remove_filter( "views_{$screen->id}", $views_filter, 10 );
+			\remove_filter( "bulk_actions-{$screen->id}", $bulk_filter, 10 );
+			\remove_filter( 'allowed_redirect_hosts', $allowed_hosts_filter, 10 );
+
+			$filters_removed = false === \has_filter( "views_{$screen->id}", $views_filter )
+				&& false === \has_filter( "bulk_actions-{$screen->id}", $bulk_filter )
+				&& false === \has_filter( 'allowed_redirect_hosts', $allowed_hosts_filter );
+			foreach ( $tables as $table ) {
+				if ( $table instanceof \WP_List_Table && false !== \has_filter( "manage_{$screen->id}_columns", array( $table, 'get_columns' ) ) ) {
+					$filters_removed = false;
+				}
+			}
+
+			self::restore_server( $server_snapshot );
+			self::restore_globals( $local_snapshot );
+			$restored = self::globals_match(
+				$local_snapshot,
+				array( '_GET', '_POST', '_REQUEST', 'current_screen', 'current_user', 'hook_suffix', 'pagenow', 'taxnow', 'typenow' )
+			);
+		}
+
+		$allowed_top      = (string) ( $result['allowed']['top'] ?? '' );
+		$allowed_bottom   = (string) ( $result['allowed']['bottom'] ?? '' );
+		$allowed_rows     = (string) ( $result['allowed']['rows'] ?? '' );
+		$allowed_views    = (string) ( $result['allowed']['views'] ?? '' );
+		$allowed_tablenav = (string) ( $result['allowed']['tablenav'] ?? '' );
+		$denied_top       = (string) ( $result['denied_top_html'] ?? '' );
+		$denied_rows      = (string) ( $result['denied_row_html'] ?? '' );
+		$delete_nonce     = \wp_create_nonce( 'delete-cfz_' . $item_id );
+
+		self::collect_failure(
+			$failures,
+			array(
+				'filter-suppresses' => false,
+				'top-precedence'    => $top_action,
+				'bottom-ignored'    => false,
+				'empty-action'      => false,
+			) === ( $result['action_results'] ?? array() ),
+			'generated request action matrix follows current_action precedence and bottom-action boundary',
+			array(
+				'cases'   => $result['action_cases'] ?? array(),
+				'results' => $result['action_results'] ?? array(),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			str_contains( $denied_top, 'value="review"' )
+				&& ! str_contains( $denied_top, 'value="' . $top_action . '"' )
+				&& ! str_contains( $denied_top, 'value="' . $delete_action . '"' )
+				&& ! str_contains( $denied_rows, $delete_nonce )
+				&& str_contains( $allowed_top, 'value="' . $top_action . '"' )
+				&& str_contains( $allowed_top, 'value="' . $delete_action . '"' )
+				&& str_contains( $allowed_top, '<optgroup label="Danger ' )
+				&& str_contains( $allowed_bottom, 'name="action2"' )
+				&& str_contains( $allowed_bottom, 'bulk-action-selector-bottom' )
+				&& str_contains( $allowed_rows, '_wpnonce=' . $delete_nonce )
+				&& self::html_has_no_unsafe_raw_markup( $denied_top . $denied_rows . $allowed_top . $allowed_bottom . $allowed_rows ),
+			'capability-gated bulk and row actions render expected actions, nonce URLs, and escaped labels',
+			array(
+				'deniedTop'     => self::describe_string( $denied_top ),
+				'deniedRows'    => self::describe_string( $denied_rows ),
+				'allowedTop'    => self::describe_string( $allowed_top ),
+				'allowedBottom' => self::describe_string( $allowed_bottom ),
+				'allowedRows'   => self::describe_string( $allowed_rows ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			str_contains( $allowed_views, "class='subsubsub'" )
+				&& str_contains( $allowed_views, 'aria-current="page"' )
+				&& str_contains( $allowed_views, 'view=mine' )
+				&& str_contains( $allowed_tablenav, 'name="_wpnonce"' )
+				&& str_contains( $allowed_tablenav, 'bulk-action-selector-top' )
+				&& 0 < count( $result['view_events'] ?? array() )
+				&& 0 < count( $result['bulk_events'] ?? array() )
+				&& self::html_has_no_unsafe_raw_markup( $allowed_views . $allowed_tablenav ),
+			'views and tablenav run screen-local filters, include nonces, and escape generated labels',
+			array(
+				'views'       => self::describe_string( $allowed_views ),
+				'tablenav'    => self::describe_string( $allowed_tablenav ),
+				'viewEvents'  => $result['view_events'] ?? array(),
+				'bulkEvents'  => $result['bulk_events'] ?? array(),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			( $result['safe_target'] ?? null ) === ( $result['redirects']['sameHost'] ?? null )
+				&& $base_url === ( $result['redirects']['unsafe'] ?? null )
+				&& ( $result['trusted_target'] ?? null ) === ( $result['redirects']['trusted'] ?? null )
+				&& 0 < count( $result['allowed_hosts'] ?? array() ),
+			'admin action redirect targets keep same-host URLs, reject unsafe hosts, and honor scoped allowed-host filters',
+			array(
+				'redirects'    => $result['redirects'] ?? array(),
+				'safeTarget'   => $result['safe_target'] ?? null,
+				'trustedTarget' => $result['trusted_target'] ?? null,
+				'allowedHosts' => $result['allowed_hosts'] ?? array(),
+			)
+		);
+
+		$bulk_denied        = $result['bulk_redirects']['denied'] ?? array();
+		$bulk_allowed       = $result['bulk_redirects']['allowed'] ?? array();
+		$bulk_unsafe        = $result['bulk_redirects']['unsafe'] ?? array();
+		$allowed_query      = array();
+		$allowed_location   = (string) ( $bulk_allowed['redirectEvents'][0]['location'] ?? '' );
+		$unsafe_location    = (string) ( $bulk_unsafe['redirectEvents'][0]['location'] ?? '' );
+		$unsafe_fallback    = (string) ( $bulk_unsafe['fallbackEvents'][0]['fallback'] ?? '' );
+		$allowed_query_part = parse_url( $allowed_location, PHP_URL_QUERY );
+		if ( is_string( $allowed_query_part ) ) {
+			parse_str( $allowed_query_part, $allowed_query );
+		}
+
+		self::collect_failure(
+			$failures,
+			false === ( $bulk_denied['dispatched'] ?? null )
+				&& array() === ( $bulk_denied['nonceEvents'] ?? array() )
+				&& array() === ( $bulk_denied['handlerEvents'] ?? array() )
+				&& array() === ( $bulk_denied['redirectEvents'] ?? array() )
+				&& true === ( $bulk_allowed['dispatched'] ?? null )
+				&& true === ( $bulk_allowed['nonceAccepted'] ?? null )
+				&& $screen->id === ( $bulk_allowed['currentScreenId'] ?? null )
+				&& $top_action === ( $bulk_allowed['currentAction'] ?? null )
+				&& array( $item_id, $second_id ) === ( $bulk_allowed['handlerEvents'][0]['selected'] ?? array() )
+				&& $top_action === ( $bulk_allowed['handlerEvents'][0]['action'] ?? null )
+				&& array() === ( $bulk_allowed['neighborEvents'] ?? array() )
+				&& false === ( $bulk_allowed['redirectResult'] ?? null )
+				&& '2' === ( $allowed_query['cfz_done'] ?? null )
+				&& '1' === ( $allowed_query['keep'] ?? null )
+				&& '3' === ( $allowed_query['paged'] ?? null )
+				&& ! array_key_exists( 'action', $allowed_query )
+				&& ! array_key_exists( 'action2', $allowed_query )
+				&& ! array_key_exists( '_wpnonce', $allowed_query )
+				&& ! array_key_exists( '_wp_http_referer', $allowed_query )
+				&& ! array_key_exists( 'cfz_matrix_item', $allowed_query )
+				&& true === ( $bulk_unsafe['dispatched'] ?? null )
+				&& false === ( $bulk_unsafe['redirectResult'] ?? null )
+				&& '' !== $unsafe_fallback
+				&& $unsafe_fallback === $unsafe_location
+				&& array() === ( $bulk_unsafe['neighborEvents'] ?? array() )
+				&& ( $bulk_denied['filtersRemoved'] ?? false )
+				&& ( $bulk_allowed['filtersRemoved'] ?? false )
+				&& ( $bulk_unsafe['filtersRemoved'] ?? false ),
+			'custom bulk-action dispatch checks nonce, current screen hook, selected IDs, safe redirect cleanup, and denied capability boundary',
+			array(
+				'denied'        => $bulk_denied,
+				'allowed'       => $bulk_allowed,
+				'allowedQuery'  => $allowed_query,
+				'unsafe'        => $bulk_unsafe,
+				'unsafeTarget'  => $unsafe_location,
+				'unsafeFallback' => $unsafe_fallback,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$filters_removed && $restored,
+			'request/action matrix filters, request globals, screen globals, and server metadata are restored',
+			array(
+				'filtersRemoved' => $filters_removed,
+				'restored'       => $restored,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'admin-workflows.list-table.request-action-matrix',
+			array() === $failures,
+			array(
+				'failures' => array_slice( $failures, 0, 8 ),
+				'screen'   => $screen->id,
+			)
+		);
+	}
+
+	private static function run_action_matrix_bulk_redirect_case(
+		\ComponentFuzz\FuzzContext $ctx,
+		\WP_Screen $screen,
+		array $config,
+		string $base_url,
+		string $top_action,
+		string $bottom_action,
+		string $item_id,
+		string $second_id,
+		string $bulk_cap,
+		bool $handler_returns_unsafe
+	): array {
+		$table              = self::new_action_matrix_list_table( $config );
+		$neighbor_screen_id = self::screen_id( $ctx->fork( 'neighbor' ) );
+		if ( $neighbor_screen_id === $screen->id ) {
+			$neighbor_screen_id .= '-neighbor';
+		}
+
+		$nonce_action    = 'bulk-cfz_matrix_items';
+		$nonce           = \wp_create_nonce( $nonce_action );
+		$referer         = \add_query_arg(
+			array(
+				'_wp_http_referer' => '/wp-admin/admin.php?page=' . rawurlencode( $screen->id ),
+				'_wpnonce'         => $nonce,
+				'action'           => $top_action,
+				'action2'          => $bottom_action,
+				'cfz_matrix_item'  => $item_id,
+				'keep'             => '1',
+				'paged'            => '3',
+			),
+			$base_url
+		);
+		$request         = array(
+			'_wp_http_referer' => $referer,
+			'_wpnonce'         => $nonce,
+			'action'           => $top_action,
+			'action2'          => $bottom_action,
+			'cfz_matrix_item'  => array( $item_id, $second_id ),
+			'keep'             => '1',
+			'paged'            => '1',
+		);
+		$handler_events  = array();
+		$neighbor_events = array();
+		$nonce_events    = array();
+		$redirect_events = array();
+		$fallback_events = array();
+		$result          = array(
+			'currentAction'  => null,
+			'currentScreenId' => null,
+			'dispatched'     => false,
+			'filtersRemoved' => false,
+			'handlerEvents'  => array(),
+			'neighborEvents' => array(),
+			'nonceAccepted'  => false,
+			'nonceEvents'    => array(),
+			'redirectEvents' => array(),
+			'fallbackEvents' => array(),
+			'redirectResult' => null,
+		);
+
+		$handler = static function ( string $sendback, string $action, array $selected ) use ( &$handler_events, $base_url, $handler_returns_unsafe ): string {
+			$selected         = array_values( array_map( 'strval', $selected ) );
+			$handler_events[] = array(
+				'action'   => $action,
+				'selected' => $selected,
+				'sendback' => $sendback,
+			);
+
+			if ( $handler_returns_unsafe ) {
+				return 'https://evil.example/wp-admin/admin.php?cfz_done=' . count( $selected );
+			}
+
+			return \add_query_arg( 'cfz_done', (string) count( $selected ), $sendback );
+		};
+		$neighbor_handler = static function ( string $sendback, string $action, array $selected ) use ( &$neighbor_events ): string {
+			$neighbor_events[] = array(
+				'action'   => $action,
+				'selected' => array_values( array_map( 'strval', $selected ) ),
+			);
+			return $sendback;
+		};
+		$nonce_listener   = static function ( string $action, $nonce_result ) use ( &$nonce_events ): void {
+			$nonce_events[] = array(
+				'action' => $action,
+				'result' => $nonce_result,
+			);
+		};
+		$redirect_filter  = static function ( $location, int $status ) use ( &$redirect_events ) {
+			$redirect_events[] = array(
+				'location' => $location,
+				'status'   => $status,
+			);
+			return false;
+		};
+		$fallback_filter  = static function ( string $fallback, int $status ) use ( &$fallback_events, $base_url ): string {
+			$fallback = \add_query_arg( 'fallback', '1', $base_url );
+			$fallback_events[] = array(
+				'fallback' => $fallback,
+				'status'   => $status,
+			);
+			return $fallback;
+		};
+
+		\add_filter( "handle_bulk_actions-{$screen->id}", $handler, 10, 3 );
+		\add_filter( "handle_bulk_actions-{$neighbor_screen_id}", $neighbor_handler, 10, 3 );
+		\add_action( 'check_admin_referer', $nonce_listener, 10, 2 );
+		\add_filter( 'wp_redirect', $redirect_filter, 10, 2 );
+		\add_filter( 'wp_safe_redirect_fallback', $fallback_filter, 10, 2 );
+
+		try {
+			$_GET                    = $request;
+			$_POST                   = array();
+			$_REQUEST                = $request;
+			$_SERVER['HTTP_REFERER'] = $referer;
+			$table->prepare_items();
+			\set_current_screen( $screen );
+
+			$current_screen             = \get_current_screen();
+			$result['currentScreenId']  = $current_screen instanceof \WP_Screen ? $current_screen->id : null;
+			$result['currentAction']    = $table->current_action();
+			$result['capabilityPassed'] = \current_user_can( $bulk_cap );
+
+			if ( $result['currentAction'] && $result['capabilityPassed'] ) {
+				$nonce_result              = \check_admin_referer( $nonce_action );
+				$result['nonceAccepted']   = false !== $nonce_result;
+				$result['checkAdminNonce'] = $nonce_result;
+				$selected                  = array_values( array_map( 'strval', (array) ( $_REQUEST['cfz_matrix_item'] ?? array() ) ) );
+				$sendback                  = \apply_filters( "handle_bulk_actions-{$result['currentScreenId']}", $referer, (string) $result['currentAction'], $selected );
+				$sendback                  = \remove_query_arg( array( 'action', 'action2', '_wpnonce', '_wp_http_referer', 'cfz_matrix_item' ), $sendback );
+				$result['sendback']        = $sendback;
+				$result['redirectResult']  = \wp_safe_redirect( $sendback, 303, 'ComponentFuzz' );
+				$result['dispatched']      = true;
+			}
+		} finally {
+			\remove_filter( "handle_bulk_actions-{$screen->id}", $handler, 10 );
+			\remove_filter( "handle_bulk_actions-{$neighbor_screen_id}", $neighbor_handler, 10 );
+			\remove_action( 'check_admin_referer', $nonce_listener, 10 );
+			\remove_filter( 'wp_redirect', $redirect_filter, 10 );
+			\remove_filter( 'wp_safe_redirect_fallback', $fallback_filter, 10 );
+			\remove_filter( "manage_{$screen->id}_columns", array( $table, 'get_columns' ), 0 );
+
+			$result['handlerEvents']  = $handler_events;
+			$result['neighborEvents'] = $neighbor_events;
+			$result['nonceEvents']    = $nonce_events;
+			$result['redirectEvents'] = $redirect_events;
+			$result['fallbackEvents'] = $fallback_events;
+			$result['filtersRemoved'] = false === \has_filter( "handle_bulk_actions-{$screen->id}", $handler )
+				&& false === \has_filter( "handle_bulk_actions-{$neighbor_screen_id}", $neighbor_handler )
+				&& false === \has_action( 'check_admin_referer', $nonce_listener )
+				&& false === \has_filter( 'wp_redirect', $redirect_filter )
+				&& false === \has_filter( 'wp_safe_redirect_fallback', $fallback_filter )
+				&& false === \has_filter( "manage_{$screen->id}_columns", array( $table, 'get_columns' ) );
+		}
+
+		return $result;
 	}
 
 	private static function check_referer_helpers( \ComponentFuzz\FuzzContext $ctx ): array {
@@ -1850,6 +2413,156 @@ final class AdminWorkflowsSurface {
 				echo '<input class="cfz-extra-filter" id="cfz-extra-filter-' . \esc_attr( $which ) . '" ';
 				echo 'name="cfz_extra_' . \esc_attr( $which ) . '" value="' . \esc_attr( $this->config['extra_label'] ) . '" />';
 				echo '</div>';
+			}
+		};
+	}
+
+	private static function new_action_matrix_list_table( array $config ): \WP_List_Table {
+		return new class( $config ) extends \WP_List_Table {
+			private array $config;
+
+			public function __construct( array $config ) {
+				$this->config = $config;
+				parent::__construct(
+					array(
+						'ajax'     => false,
+						'plural'   => 'cfz_matrix_items',
+						'screen'   => $config['screen'],
+						'singular' => 'cfz_matrix_item',
+					)
+				);
+			}
+
+			public function get_columns(): array {
+				return array(
+					'cb'     => '<span class="screen-reader-text">' . \esc_html__( 'Select item' ) . '</span>',
+					'title'  => \esc_html__( 'Title' ),
+					'status' => \esc_html__( 'Status' ),
+				);
+			}
+
+			public function prepare_items(): void {
+				$this->items = $this->config['items'];
+				$this->set_pagination_args(
+					array(
+						'per_page'    => 2,
+						'total_items' => count( $this->items ),
+					)
+				);
+			}
+
+			protected function get_bulk_actions(): array {
+				$actions = array();
+
+				if ( \current_user_can( $this->config['bulk_cap'] ) ) {
+					$actions[ $this->config['top_action'] ] = \esc_html__( 'Feature' );
+				}
+
+				if ( \current_user_can( $this->config['delete_cap'] ) ) {
+					$actions[ 'Danger ' . $this->config['delete_action'] ] = array(
+						$this->config['delete_action'] => \esc_html__( 'Delete permanently' ),
+					);
+				}
+
+				return $actions;
+			}
+
+			protected function get_views(): array {
+				return $this->get_views_links( $this->config['view_links'] );
+			}
+
+			protected function column_cb( $item ): string {
+				return '<input type="checkbox" name="cfz_matrix_item[]" value="' . \esc_attr( $item['id'] ) . '" />';
+			}
+
+			public function column_title( $item ): string {
+				return '<strong><a href="' . \esc_url( $item['url'] ) . '">' . \esc_html( $item['title'] ) . '</a></strong>';
+			}
+
+			public function column_status( $item ): string {
+				return '<span class="cfz-status">' . \esc_html( $item['status'] ) . '</span>';
+			}
+
+			protected function column_default( $item, $column_name ): string {
+				return \esc_html( (string) ( $item[ $column_name ] ?? '' ) );
+			}
+
+			protected function handle_row_actions( $item, $column_name, $primary ): string {
+				if ( $column_name !== $primary ) {
+					return '';
+				}
+
+				$actions = array(
+					'view' => '<a href="' . \esc_url( $item['url'] ) . '">' . \esc_html__( 'View' ) . '</a>',
+				);
+
+				if ( \current_user_can( $this->config['bulk_cap'] ) ) {
+					$actions['edit'] = '<a href="' . \esc_url( $item['edit_url'] ) . '">' . \esc_html__( 'Edit' ) . '</a>';
+				}
+
+				if ( \current_user_can( $this->config['delete_cap'] ) ) {
+					$actions['delete'] = '<a href="'
+						. \esc_url( \wp_nonce_url( $item['delete_url'], 'delete-cfz_' . $item['id'], '_wpnonce' ) )
+						. '">' . \esc_html__( 'Delete' ) . '</a>';
+				}
+
+				return $this->row_actions( $actions, true );
+			}
+
+			public function expose_bulk_actions( string $which ): string {
+				$level = ob_get_level();
+				ob_start();
+				try {
+					$this->bulk_actions( $which );
+					return (string) ob_get_clean();
+				} catch ( \Throwable $e ) {
+					while ( ob_get_level() > $level ) {
+						ob_end_clean();
+					}
+					throw $e;
+				}
+			}
+
+			public function expose_display_rows(): string {
+				$level = ob_get_level();
+				ob_start();
+				try {
+					$this->display_rows();
+					return (string) ob_get_clean();
+				} catch ( \Throwable $e ) {
+					while ( ob_get_level() > $level ) {
+						ob_end_clean();
+					}
+					throw $e;
+				}
+			}
+
+			public function expose_views(): string {
+				$level = ob_get_level();
+				ob_start();
+				try {
+					$this->views();
+					return (string) ob_get_clean();
+				} catch ( \Throwable $e ) {
+					while ( ob_get_level() > $level ) {
+						ob_end_clean();
+					}
+					throw $e;
+				}
+			}
+
+			public function expose_display_tablenav( string $which ): string {
+				$level = ob_get_level();
+				ob_start();
+				try {
+					$this->display_tablenav( $which );
+					return (string) ob_get_clean();
+				} catch ( \Throwable $e ) {
+					while ( ob_get_level() > $level ) {
+						ob_end_clean();
+					}
+					throw $e;
+				}
 			}
 		};
 	}
