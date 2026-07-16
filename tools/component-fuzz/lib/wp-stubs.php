@@ -390,6 +390,10 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 				return $this->component_fuzz_query_update_comment_statuses( $this->last_query );
 			}
 
+			if ( preg_match( '/\bUPDATE\s+`?wp_posts`?\s+SET\b/i', $this->last_query ) && preg_match( '/\bpost_parent\s*=/i', $this->last_query ) ) {
+				return $this->component_fuzz_query_update_attachment_parents( $this->last_query );
+			}
+
 			return 0;
 		}
 
@@ -700,6 +704,33 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 				$this->component_fuzz_options[ $option ]['autoload'] = (string) $autoload;
 				++$this->rows_affected;
 			}
+
+			return $this->rows_affected;
+		}
+
+		private function component_fuzz_query_update_attachment_parents( $query ) {
+			$parent_id = $this->component_fuzz_compare_value( $query, 'post_parent' );
+			$post_type = $this->component_fuzz_compare_value( $query, 'post_type' );
+			$ids       = $this->component_fuzz_in_values( $query, 'ID' );
+
+			if ( null === $parent_id || 'attachment' !== (string) $post_type || array() === $ids ) {
+				return 0;
+			}
+
+			$id_map = array_fill_keys( array_map( 'intval', $ids ), true );
+			foreach ( $this->component_fuzz_posts as &$row ) {
+				if ( ! isset( $id_map[ (int) $row['ID'] ] ) || 'attachment' !== (string) $row['post_type'] ) {
+					continue;
+				}
+
+				if ( (int) $row['post_parent'] === (int) $parent_id ) {
+					continue;
+				}
+
+				$row['post_parent'] = (int) $parent_id;
+				++$this->rows_affected;
+			}
+			unset( $row );
 
 			return $this->rows_affected;
 		}

@@ -90,7 +90,8 @@ database, network requests, or a configured site.
   image form controls, image editor chrome from cache-seeded metadata,
   edit attachment details form output, thumbnail/icon helper filters, direct
   caption/send-to-editor helper output, legacy upload tab/header/form shell
-  hooks, media-view enqueue settings/string contracts, in-process iframe shell
+  hooks, `wp_media_attach_action()` attach/detach redirect and denial exits,
+  media-view enqueue settings/string contracts, in-process iframe shell
   rendering, and safe media button/uploader bypass output.
 - `admin-options-submission`: no-DB `wp-admin/options.php` update-flow
   coverage, including registered Settings API allowlists and sanitize
@@ -1053,8 +1054,9 @@ and style conflict classes, dependency-chain enqueued semantics, scoped
 `_doing_it_wrong()` capture, version/message payloads, and asset/hook/global
 restoration. The
 Admin Media Chrome surface intentionally avoids upload dispatch, real
-attachments created by browser flows, `wp_media_attach_action()` redirects,
-media modal runtime behavior, and browser-side image editor UI; server-side
+attachments created by browser flows, media modal runtime behavior, and
+browser-side image editor UI; it covers `wp_media_attach_action()` attach and
+detach redirect exits through isolated child processes. Server-side
 image-edit AJAX save, preview, crop, restore, and sub-size request branches are
 covered by `media-image-edit-requests`. The surface covers direct server-side
 helpers with synthetic attachment rows and cache/filter-backed metadata only. The

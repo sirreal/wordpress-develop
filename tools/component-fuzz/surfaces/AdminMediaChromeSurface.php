@@ -36,6 +36,7 @@ final class AdminMediaChromeSurface {
 			$rows[] = self::check_thumbnail_icon_and_image_helpers( $ctx->fork( 'thumb-icons' ) );
 			$rows[] = self::check_image_caption_editor_output( $ctx->fork( 'image-caption-editor' ) );
 			$rows[] = self::check_legacy_upload_shell_helpers( $ctx->fork( 'legacy-upload-shell' ) );
+			$rows[] = self::check_media_attach_action_redirect_exit( $ctx->fork( 'media-attach-action' ) );
 			$rows[] = self::check_media_enqueue_and_iframe_shell( $ctx->fork( 'modal-enqueue-shell' ) );
 			$rows[] = self::check_media_button_and_bypass_output( $ctx->fork( 'media-buttons' ) );
 		} catch ( \Throwable $e ) {
@@ -69,8 +70,11 @@ final class AdminMediaChromeSurface {
 		foreach (
 			array(
 				'attachment_submitbox_metadata',
+				'add_query_arg',
+				'clean_attachment_cache',
 				'create_initial_post_types',
 				'create_initial_taxonomies',
+				'current_user_can',
 				'edit_form_image_editor',
 				'get_attachment_link',
 				'get_attachment_fields_to_edit',
@@ -91,17 +95,22 @@ final class AdminMediaChromeSurface {
 				'media_upload_html_bypass',
 				'media_upload_tabs',
 				'media_upload_type_form',
+				'remove_query_arg',
 				'the_media_upload_tabs',
 				'wp_get_attachment_image',
 				'wp_get_attachment_image_src',
 				'wp_get_attachment_metadata',
 				'wp_get_attachment_thumb_url',
+				'wp_get_referer',
+				'wp_die',
 				'wp_enqueue_media',
 				'wp_image_editor',
 				'wp_iframe',
 				'wp_insert_post',
+				'wp_media_attach_action',
 				'wp_mime_type_icon',
 				'wp_editor',
+				'wp_redirect',
 				'wp_script_is',
 				'wp_scripts',
 				'wp_set_current_user',
@@ -1566,7 +1575,6 @@ final class AdminMediaChromeSurface {
 				'notClaimed' => array(
 					'media_upload_form_handler() send/insert-gallery dispatch branches',
 					'media_upload_type_form() WP_Error branch that exits',
-					'wp_media_attach_action() redirect/exit branch',
 					'media_handle_upload() and media_handle_sideload() real ingest paths',
 				),
 			)
@@ -1864,6 +1872,651 @@ final class AdminMediaChromeSurface {
 			array() === $failures,
 			array( 'failures' => $failures )
 		);
+	}
+
+	private static function check_media_attach_action_redirect_exit( \ComponentFuzz\FuzzContext $ctx ): array {
+		$missing = self::media_attach_action_child_missing_requirements();
+		if ( array() !== $missing ) {
+			return self::row(
+				$ctx,
+				'admin-media-chrome.media-attach-action-redirect-exit',
+				true,
+				array(
+					'missing' => $missing,
+					'reason'  => 'Required local subprocess APIs are unavailable.',
+				),
+				'skipped'
+			);
+		}
+
+		$failures = array();
+		$runs     = array();
+
+		foreach ( self::media_attach_action_cases( $ctx ) as $case ) {
+			$run    = self::run_media_attach_action_child_process( $case );
+			$result = is_array( $run['result'] ?? null ) ? $run['result'] : array();
+
+			$runs[ $case['label'] ] = array(
+				'ok'       => $run['ok'] ?? false,
+				'exitCode' => $run['exitCode'] ?? null,
+				'stderr'   => self::describe_string( (string) ( $run['stderr'] ?? '' ) ),
+				'stdout'   => self::describe_string( (string) ( $run['stdout'] ?? '' ) ),
+				'result'   => array(
+					'returned'         => $result['returned'] ?? null,
+					'redirects'        => $result['redirects'] ?? array(),
+					'dieCalls'         => $result['dieCalls'] ?? array(),
+					'rowsAffected'     => $result['rowsAffected'] ?? null,
+					'queryDeltaCount'  => is_array( $result['queryDelta'] ?? null ) ? count( $result['queryDelta'] ) : null,
+					'preReportOutput'  => self::describe_string( (string) ( $result['preReportOutput'] ?? '' ) ),
+					'actionEventCount' => is_array( $result['actionEvents'] ?? null ) ? count( $result['actionEvents'] ) : null,
+					'cacheEventCount'  => is_array( $result['cacheEvents'] ?? null ) ? count( $result['cacheEvents'] ) : null,
+				),
+			);
+
+			self::collect_failure(
+				$failures,
+				true === ( $run['ok'] ?? false ) && self::media_attach_action_child_result_has_expected_shape( $result ),
+				"{$case['label']} child process exits cleanly and reports structured JSON",
+				array(
+					'run'    => $run,
+					'result' => $result,
+				)
+			);
+
+			if ( ! self::media_attach_action_child_result_has_expected_shape( $result ) ) {
+				continue;
+			}
+
+			self::collect_failure(
+				$failures,
+				'' === (string) ( $result['preReportOutput'] ?? '' ) && null === ( $result['throwable'] ?? null ),
+				"{$case['label']} child emits no pre-report output and throws no unexpected exception",
+				array(
+					'preReportOutput' => $result['preReportOutput'] ?? null,
+					'throwable'       => $result['throwable'] ?? null,
+				)
+			);
+
+			if ( 'update' === $case['scenario'] ) {
+				self::collect_media_attach_action_update_failures( $failures, $case, $result );
+			} else {
+				self::collect_media_attach_action_noop_failures( $failures, $case, $result );
+			}
+		}
+
+		return self::row(
+			$ctx,
+			'admin-media-chrome.media-attach-action-redirect-exit',
+			array() === $failures,
+			array(
+				'failures' => $failures,
+				'runs'     => $runs,
+			)
+		);
+	}
+
+	private static function media_attach_action_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$build = static function ( string $label, string $scenario, string $action, \ComponentFuzz\FuzzContext $case_ctx ): array {
+			$marker = 'cfz_' . $label . '_' . $case_ctx->identifier( 4, 9 );
+			$paged  = (string) $case_ctx->int( 1, 9 );
+
+			return array(
+				'label'          => $label,
+				'scenario'       => $scenario,
+				'action'         => $action,
+				'seed'           => $case_ctx->seed(),
+				'iteration'      => $case_ctx->iteration(),
+				'referer'        => 'http://example.test/wp-admin/upload.php?mode=list&attached=stale-attached&detach=stale-detach&cfz_marker=' . rawurlencode( $marker ) . '&paged=' . $paged,
+				'preservedQuery' => array(
+					'mode'       => 'list',
+					'cfz_marker' => $marker,
+					'paged'      => $paged,
+				),
+			);
+		};
+
+		return array(
+			$build( 'attach', 'update', 'attach', $ctx->fork( 'attach' ) ),
+			$build( 'detach', 'update', 'detach', $ctx->fork( 'detach' ) ),
+			$build( 'parent-zero', 'parent-zero', $ctx->bool() ? 'attach' : 'detach', $ctx->fork( 'parent-zero' ) ),
+			$build( 'denied-parent', 'denied-parent', 'attach', $ctx->fork( 'denied-parent' ) ),
+		);
+	}
+
+	private static function media_attach_action_child_missing_requirements(): array {
+		$missing = array();
+
+		foreach ( array( 'json_decode', 'json_encode', 'proc_close', 'proc_open', 'stream_get_contents' ) as $function ) {
+			if ( ! function_exists( $function ) ) {
+				$missing[] = "function {$function}";
+			}
+		}
+
+		if ( ! defined( 'PHP_BINARY' ) || '' === PHP_BINARY ) {
+			$missing[] = 'PHP_BINARY';
+		}
+
+		return $missing;
+	}
+
+	private static function run_media_attach_action_child_process( array $case ): array {
+		$payload = json_encode(
+			array( 'case' => $case ),
+			JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE
+		);
+
+		if ( false === $payload ) {
+			return array(
+				'ok'       => false,
+				'exitCode' => -1,
+				'stdout'   => '',
+				'stderr'   => 'json_encode failed',
+				'result'   => null,
+			);
+		}
+
+		$descriptors = array(
+			0 => array( 'pipe', 'r' ),
+			1 => array( 'pipe', 'w' ),
+			2 => array( 'pipe', 'w' ),
+		);
+
+		// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.system_calls_proc_open -- Isolates wp_media_attach_action() redirect, die, and exit branches in a local PHP subprocess.
+		$process = proc_open( array( PHP_BINARY, '-r', self::media_attach_action_child_program() ), $descriptors, $pipes, \ComponentFuzz\repo_root() );
+		if ( ! is_resource( $process ) ) {
+			return array(
+				'ok'       => false,
+				'exitCode' => -1,
+				'stdout'   => '',
+				'stderr'   => 'proc_open failed',
+				'result'   => null,
+			);
+		}
+
+		fwrite( $pipes[0], $payload );
+		fclose( $pipes[0] );
+
+		$stdout = stream_get_contents( $pipes[1] );
+		$stderr = stream_get_contents( $pipes[2] );
+		fclose( $pipes[1] );
+		fclose( $pipes[2] );
+
+		$exit_code = proc_close( $process );
+		$result    = json_decode( (string) $stdout, true );
+
+		return array(
+			'ok'       => 0 === $exit_code && is_array( $result ) && true === ( $result['ok'] ?? null ),
+			'exitCode' => $exit_code,
+			'stdout'   => (string) $stdout,
+			'stderr'   => (string) $stderr,
+			'result'   => is_array( $result ) ? $result : null,
+		);
+	}
+
+	private static function media_attach_action_child_program(): string {
+		return <<<'PHP'
+$component_fuzz_admin_media_raw = stream_get_contents( STDIN );
+$component_fuzz_admin_media_payload = json_decode( $component_fuzz_admin_media_raw, true );
+$case = is_array( $component_fuzz_admin_media_payload['case'] ?? null ) ? $component_fuzz_admin_media_payload['case'] : array();
+
+require_once getcwd() . '/tools/component-fuzz/lib/autoload.php';
+\ComponentFuzz\WpBootstrap::load();
+
+\ComponentFuzz\Surfaces\AdminMediaChromeSurface::run_media_attach_action_child( $case );
+PHP;
+	}
+
+	public static function run_media_attach_action_child( array $case ): void {
+		ini_set( 'display_errors', '0' );
+		self::prepare_runtime();
+
+		$ctx      = new \ComponentFuzz\FuzzContext( (int) ( $case['seed'] ?? 1 ), self::NAME, (int) ( $case['iteration'] ?? 0 ) );
+		$label    = (string) ( $case['label'] ?? 'media-attach' );
+		$scenario = (string) ( $case['scenario'] ?? 'update' );
+		$action   = 'detach' === (string) ( $case['action'] ?? 'attach' ) ? 'detach' : 'attach';
+		$state    = array(
+			'ok'                   => false,
+			'label'                => $label,
+			'scenario'             => $scenario,
+			'action'               => $action,
+			'parentId'             => 0,
+			'parentArgument'       => 0,
+			'oldParentId'          => 0,
+			'allowedAttachmentIds' => array(),
+			'deniedAttachmentId'   => 0,
+			'allTrackedIds'        => array(),
+			'allowedEditIds'       => array(),
+			'requestMedia'         => array(),
+			'parentsBefore'        => array(),
+			'parentsAfter'         => array(),
+			'queryCountBefore'     => 0,
+			'queryDelta'           => array(),
+			'rowsAffected'         => null,
+			'redirects'            => array(),
+			'dieCalls'             => array(),
+			'actionEvents'         => array(),
+			'cacheEvents'          => array(),
+			'capEvents'            => array(),
+			'returned'             => false,
+			'throwable'            => null,
+			'preReportOutput'      => '',
+		);
+
+		$buffer_level = ob_get_level();
+		ob_start();
+
+		register_shutdown_function(
+			static function () use ( &$state, $buffer_level ): void {
+				$output = '';
+				while ( ob_get_level() > $buffer_level ) {
+					$chunk = ob_get_clean();
+					if ( is_string( $chunk ) ) {
+						$output = $chunk . $output;
+					}
+				}
+
+				$state['preReportOutput'] = $output;
+				$state['parentsAfter']    = self::media_attach_action_post_state( array_map( 'intval', $state['allTrackedIds'] ) );
+
+				$wpdb = $GLOBALS['wpdb'] ?? null;
+				if ( $wpdb instanceof \Component_Fuzz_WPDB_Stub ) {
+					$queries               = $wpdb->component_fuzz_get_queries();
+					$state['queryDelta']   = array_values( array_slice( $queries, (int) $state['queryCountBefore'] ) );
+					$state['rowsAffected'] = (int) $wpdb->rows_affected;
+				}
+
+				$state['ok'] = null === $state['throwable'];
+				echo json_encode( $state, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE ) . "\n";
+			}
+		);
+
+		try {
+			$parent_id      = self::seed_parent_post( $ctx->fork( 'target-parent' ) );
+			$old_parent     = self::seed_parent_post( $ctx->fork( 'old-parent' ) );
+			$initial_parent = 'detach' === $action ? $parent_id : $old_parent;
+			$allowed_one    = self::seed_attachment( $ctx->fork( 'allowed-one' ), 'image/jpeg', array( 'parent_id' => $initial_parent ) );
+			$allowed_two    = self::seed_attachment( $ctx->fork( 'allowed-two' ), 'image/png', array( 'parent_id' => $initial_parent ) );
+			$denied         = self::seed_attachment( $ctx->fork( 'denied' ), 'image/webp', array( 'parent_id' => $initial_parent ) );
+			$parent_arg     = 'parent-zero' === $scenario ? 0 : $parent_id;
+			$request_media  = array(
+				(string) $allowed_one->ID,
+				'not-a-media-id',
+				(string) $denied->ID,
+				'0',
+				(string) $allowed_two->ID,
+			);
+
+			$state['parentId']             = $parent_id;
+			$state['parentArgument']       = $parent_arg;
+			$state['oldParentId']          = $old_parent;
+			$state['allowedAttachmentIds'] = array( (int) $allowed_one->ID, (int) $allowed_two->ID );
+			$state['deniedAttachmentId']   = (int) $denied->ID;
+			$state['allTrackedIds']        = array( $parent_id, $old_parent, (int) $allowed_one->ID, (int) $allowed_two->ID, (int) $denied->ID );
+			$state['requestMedia']         = $request_media;
+			$state['parentsBefore']        = self::media_attach_action_post_state( $state['allTrackedIds'] );
+
+			$_GET     = array( 'media' => $request_media );
+			$_POST    = array();
+			$_REQUEST = array( 'media' => $request_media );
+			$_COOKIE  = array();
+
+			$GLOBALS['pagenow']         = 'upload.php';
+			$_SERVER['HTTP_HOST']       = 'example.test';
+			$_SERVER['HTTPS']           = 'off';
+			$_SERVER['PHP_SELF']        = '/wp-admin/upload.php';
+			$_SERVER['REQUEST_METHOD']  = 'GET';
+			$_SERVER['REQUEST_URI']     = '/wp-admin/upload.php?component-fuzz-current=' . rawurlencode( $label );
+			$_SERVER['HTTP_REFERER']    = (string) ( $case['referer'] ?? '' );
+			$_SERVER['HTTP_USER_AGENT'] = 'component-fuzz/admin-media-attach';
+			$_SERVER['REMOTE_ADDR']     = '198.51.100.42';
+			$_SERVER['SERVER_PORT']     = '80';
+
+			$allowed_edit_ids = array( (int) $allowed_one->ID, (int) $allowed_two->ID );
+			if ( 'denied-parent' !== $scenario && 0 !== $parent_arg ) {
+				$allowed_edit_ids[] = $parent_id;
+			}
+			$allowed_edit_map        = array_fill_keys( $allowed_edit_ids, true );
+			$state['allowedEditIds'] = array_values( $allowed_edit_ids );
+			$map_meta_cap_filter     = static function ( array $caps, string $cap, int $user_id, array $args ) use ( &$state, $allowed_edit_map ): array {
+				if ( 'edit_post' !== $cap || ! isset( $args[0] ) ) {
+					return $caps;
+				}
+
+				$post_id = (int) $args[0];
+				$allowed = isset( $allowed_edit_map[ $post_id ] );
+				$state['capEvents'][] = array(
+					'cap'     => $cap,
+					'userId'  => $user_id,
+					'postId'  => $post_id,
+					'allowed' => $allowed,
+				);
+
+				return $allowed ? array( 'exist' ) : array( 'do_not_allow' );
+			};
+			$user_has_cap_filter     = static function ( array $allcaps, array $caps, array $args, $user = null ): array {
+				unset( $args, $user );
+				foreach ( $caps as $cap ) {
+					$allcaps[ $cap ] = 'do_not_allow' !== $cap;
+				}
+				return $allcaps;
+			};
+			$redirect_filter         = static function ( string $location, int $status ) use ( &$state ): string {
+				$state['redirects'][] = array(
+					'location' => $location,
+					'status'   => $status,
+				);
+				return $location;
+			};
+			$die_handler_filter      = static function () use ( &$state ): callable {
+				return static function ( $message = '', $title = '', $args = array() ) use ( &$state ): void {
+					$state['dieCalls'][] = array(
+						'message' => self::media_attach_action_die_message( $message ),
+						'title'   => self::media_attach_action_die_message( $title ),
+						'args'    => is_array( $args ) ? $args : array(),
+					);
+					exit;
+				};
+			};
+			$media_action            = static function ( string $event_action, int $attachment_id, int $event_parent_id ) use ( &$state ): void {
+				$state['actionEvents'][] = array(
+					'action'       => $event_action,
+					'attachmentId' => $attachment_id,
+					'parentId'     => $event_parent_id,
+				);
+			};
+			$cache_action            = static function ( int $attachment_id ) use ( &$state ): void {
+				$state['cacheEvents'][] = array( 'attachmentId' => $attachment_id );
+			};
+
+			\add_filter( 'map_meta_cap', $map_meta_cap_filter, 10, 4 );
+			\add_filter( 'user_has_cap', $user_has_cap_filter, 10, 4 );
+			\add_filter( 'wp_redirect', $redirect_filter, PHP_INT_MAX, 2 );
+			\add_filter( 'wp_die_handler', $die_handler_filter, PHP_INT_MAX );
+			\add_action( 'wp_media_attach_action', $media_action, 10, 3 );
+			\add_action( 'clean_attachment_cache', $cache_action, 10, 1 );
+
+			\wp_set_current_user( 1 );
+			if ( isset( $GLOBALS['current_user'] ) && $GLOBALS['current_user'] instanceof \WP_User ) {
+				$GLOBALS['current_user']->allcaps = array( 'exist' => true );
+			}
+
+			$wpdb = $GLOBALS['wpdb'] ?? null;
+			if ( $wpdb instanceof \Component_Fuzz_WPDB_Stub ) {
+				$wpdb->rows_affected         = 0;
+				$state['queryCountBefore'] = count( $wpdb->component_fuzz_get_queries() );
+			}
+
+			\wp_media_attach_action( $parent_arg, $action );
+			$state['returned'] = true;
+		} catch ( \Throwable $e ) {
+			$state['throwable'] = self::describe_throwable( $e );
+		}
+	}
+
+	private static function media_attach_action_child_result_has_expected_shape( array $result ): bool {
+		return array_key_exists( 'ok', $result )
+			&& array_key_exists( 'returned', $result )
+			&& is_array( $result['redirects'] ?? null )
+			&& is_array( $result['dieCalls'] ?? null )
+			&& is_array( $result['actionEvents'] ?? null )
+			&& is_array( $result['cacheEvents'] ?? null )
+			&& is_array( $result['parentsBefore'] ?? null )
+			&& is_array( $result['parentsAfter'] ?? null )
+			&& is_array( $result['queryDelta'] ?? null );
+	}
+
+	private static function collect_media_attach_action_update_failures( array &$failures, array $case, array $result ): void {
+		$action          = (string) ( $case['action'] ?? 'attach' );
+		$allowed_ids     = array_map( 'intval', $result['allowedAttachmentIds'] ?? array() );
+		$denied_id       = (int) ( $result['deniedAttachmentId'] ?? 0 );
+		$parent_id       = (int) ( $result['parentId'] ?? 0 );
+		$expected_parent = 'attach' === $action ? $parent_id : 0;
+		$rows_affected   = (int) ( $result['rowsAffected'] ?? -1 );
+		$parents_before  = is_array( $result['parentsBefore'] ?? null ) ? $result['parentsBefore'] : array();
+		$parents_after   = is_array( $result['parentsAfter'] ?? null ) ? $result['parentsAfter'] : array();
+		$updates         = self::media_attach_action_update_queries( $result['queryDelta'] ?? array() );
+		$hook_ids        = array_map(
+			static function ( array $event ): int {
+				return (int) ( $event['attachmentId'] ?? 0 );
+			},
+			$result['actionEvents']
+		);
+		$cache_ids       = array_map(
+			static function ( array $event ): int {
+				return (int) ( $event['attachmentId'] ?? 0 );
+			},
+			$result['cacheEvents']
+		);
+		$redirects       = $result['redirects'];
+		$redirect        = $redirects[0] ?? array();
+		$query_args      = self::media_attach_action_url_query_args( (string) ( $redirect['location'] ?? '' ) );
+		$key             = 'attach' === $action ? 'attached' : 'detach';
+		$other_key       = 'attach' === $action ? 'detach' : 'attached';
+
+		self::collect_failure(
+			$failures,
+			false === (bool) ( $result['returned'] ?? true ) && array() === ( $result['dieCalls'] ?? array() ),
+			"{$case['label']} reaches wp_redirect() and exits without wp_die()",
+			array(
+				'returned' => $result['returned'] ?? null,
+				'dieCalls' => $result['dieCalls'] ?? array(),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			1 === count( $updates ) && self::media_attach_action_update_query_matches( (string) $updates[0], $expected_parent, $allowed_ids ),
+			"{$case['label']} issues exactly one attachment post_parent UPDATE for allowed IDs",
+			array(
+				'updates'        => $updates,
+				'expectedParent' => $expected_parent,
+				'allowedIds'     => $allowed_ids,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			count( $allowed_ids ) === $rows_affected
+				&& self::media_attach_action_post_parent_equals( $parents_after, $allowed_ids, $expected_parent )
+				&& self::media_attach_action_parent_unchanged( $parents_before, $parents_after, array( $denied_id ) ),
+			"{$case['label']} mutates only allowed attachment parents and reports changed row count",
+			array(
+				'rowsAffected'  => $rows_affected,
+				'parentsBefore' => $parents_before,
+				'parentsAfter'  => $parents_after,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$allowed_ids === $hook_ids
+				&& $allowed_ids === $cache_ids
+				&& array() === array_filter(
+					$result['actionEvents'],
+					static function ( array $event ) use ( $action, $parent_id ): bool {
+						return $action !== ( $event['action'] ?? null ) || $parent_id !== (int) ( $event['parentId'] ?? 0 );
+					}
+				),
+			"{$case['label']} fires attach-action and cache-clean events once per allowed attachment",
+			array(
+				'actionEvents' => $result['actionEvents'],
+				'cacheEvents'  => $result['cacheEvents'],
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			1 === count( $redirects )
+				&& 302 === (int) ( $redirect['status'] ?? 0 )
+				&& isset( $query_args[ $key ] )
+				&& (string) $rows_affected === (string) $query_args[ $key ]
+				&& ! isset( $query_args[ $other_key ] )
+				&& self::media_attach_action_preserved_query_matches( $case['preservedQuery'] ?? array(), $query_args ),
+			"{$case['label']} redirects back to upload.php with stale attach/detach args replaced by result count",
+			array(
+				'redirect'  => $redirect,
+				'queryArgs' => $query_args,
+			)
+		);
+	}
+
+	private static function collect_media_attach_action_noop_failures( array &$failures, array $case, array $result ): void {
+		$label          = (string) $case['label'];
+		$parents_before = is_array( $result['parentsBefore'] ?? null ) ? $result['parentsBefore'] : array();
+		$parents_after  = is_array( $result['parentsAfter'] ?? null ) ? $result['parentsAfter'] : array();
+		$tracked_ids    = array_map( 'intval', $result['allTrackedIds'] ?? array() );
+		$updates        = self::media_attach_action_update_queries( $result['queryDelta'] ?? array() );
+		$is_parent_zero = 'parent-zero' === ( $case['scenario'] ?? null );
+
+		self::collect_failure(
+			$failures,
+			array() === $updates
+				&& array() === ( $result['redirects'] ?? array() )
+				&& array() === ( $result['actionEvents'] ?? array() )
+				&& array() === ( $result['cacheEvents'] ?? array() )
+				&& self::media_attach_action_parent_unchanged( $parents_before, $parents_after, $tracked_ids ),
+			"{$label} does not update posts, redirect, fire hooks, or change parents",
+			array(
+				'updates'       => $updates,
+				'redirects'     => $result['redirects'] ?? array(),
+				'actionEvents'  => $result['actionEvents'] ?? array(),
+				'cacheEvents'   => $result['cacheEvents'] ?? array(),
+				'parentsBefore' => $parents_before,
+				'parentsAfter'  => $parents_after,
+			)
+		);
+
+		if ( $is_parent_zero ) {
+			self::collect_failure(
+				$failures,
+				true === (bool) ( $result['returned'] ?? false )
+					&& array() === ( $result['dieCalls'] ?? array() )
+					&& array() === ( $result['capEvents'] ?? array() ),
+				'parent-zero returns before permission checks or die handling',
+				array(
+					'returned'  => $result['returned'] ?? null,
+					'dieCalls'  => $result['dieCalls'] ?? array(),
+					'capEvents' => $result['capEvents'] ?? array(),
+				)
+			);
+			return;
+		}
+
+		$die_calls = $result['dieCalls'] ?? array();
+		$die_text  = (string) ( $die_calls[0]['message'] ?? '' );
+		self::collect_failure(
+			$failures,
+			false === (bool) ( $result['returned'] ?? true )
+				&& 1 === count( $die_calls )
+				&& str_contains( $die_text, 'not allowed to edit this post' )
+				&& 1 === count( $result['capEvents'] ?? array() )
+				&& (int) ( $result['capEvents'][0]['postId'] ?? 0 ) === (int) ( $result['parentId'] ?? 0 ),
+			'denied-parent dies before processing media IDs',
+			array(
+				'returned'  => $result['returned'] ?? null,
+				'dieCalls'  => $die_calls,
+				'capEvents' => $result['capEvents'] ?? array(),
+			)
+		);
+	}
+
+	private static function media_attach_action_update_queries( array $queries ): array {
+		return array_values(
+			array_filter(
+				$queries,
+				static function ( $query ): bool {
+					return is_string( $query ) && preg_match( '/\bUPDATE\s+`?wp_posts`?\s+SET\s+`?post_parent`?\s*=/i', $query );
+				}
+			)
+		);
+	}
+
+	private static function media_attach_action_update_query_matches( string $query, int $expected_parent, array $expected_ids ): bool {
+		if ( ! preg_match( '/\bUPDATE\s+`?wp_posts`?\s+SET\s+`?post_parent`?\s*=\s*' . preg_quote( (string) $expected_parent, '/' ) . '\s+WHERE\s+`?post_type`?\s*=\s*\'attachment\'\s+AND\s+`?ID`?\s+IN\s*\(([^)]*)\)/i', $query, $matches ) ) {
+			return false;
+		}
+
+		$actual_ids = array_map( 'intval', preg_split( '/\s*,\s*/', trim( $matches[1] ) ) ?: array() );
+		sort( $actual_ids );
+		$expected_ids = array_values( array_unique( array_map( 'intval', $expected_ids ) ) );
+		sort( $expected_ids );
+
+		return $expected_ids === $actual_ids;
+	}
+
+	private static function media_attach_action_url_query_args( string $url ): array {
+		$query = parse_url( $url, PHP_URL_QUERY );
+		if ( ! is_string( $query ) ) {
+			return array();
+		}
+
+		$args = array();
+		parse_str( $query, $args );
+		return $args;
+	}
+
+	private static function media_attach_action_preserved_query_matches( array $expected, array $actual ): bool {
+		foreach ( $expected as $key => $value ) {
+			if ( (string) $value !== (string) ( $actual[ $key ] ?? null ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function media_attach_action_post_parent_equals( array $parents, array $ids, int $expected_parent ): bool {
+		foreach ( $ids as $id ) {
+			$key = (string) (int) $id;
+			if ( $expected_parent !== (int) ( $parents[ $key ]['post_parent'] ?? -1 ) || 'attachment' !== ( $parents[ $key ]['post_type'] ?? null ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function media_attach_action_parent_unchanged( array $before, array $after, array $ids ): bool {
+		foreach ( $ids as $id ) {
+			$key = (string) (int) $id;
+			if ( ( $before[ $key ]['post_parent'] ?? null ) !== ( $after[ $key ]['post_parent'] ?? null ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function media_attach_action_post_state( array $ids ): array {
+		$out = array();
+		foreach ( array_values( array_unique( array_map( 'intval', $ids ) ) ) as $id ) {
+			$post = \get_post( $id );
+			if ( ! $post instanceof \WP_Post ) {
+				$out[ (string) $id ] = null;
+				continue;
+			}
+
+			$out[ (string) $id ] = array(
+				'post_parent' => (int) $post->post_parent,
+				'post_type'   => (string) $post->post_type,
+			);
+		}
+
+		return $out;
+	}
+
+	private static function media_attach_action_die_message( $message ): string {
+		if ( $message instanceof \WP_Error ) {
+			return $message->get_error_message();
+		}
+
+		if ( is_scalar( $message ) || null === $message ) {
+			$message = (string) $message;
+		} else {
+			$message = gettype( $message );
+		}
+
+		return function_exists( 'wp_strip_all_tags' ) ? \wp_strip_all_tags( $message ) : strip_tags( $message );
 	}
 
 	private static function seed_attachment( \ComponentFuzz\FuzzContext $ctx, string $mime, array $args = array() ): \WP_Post {
