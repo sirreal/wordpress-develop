@@ -26,6 +26,7 @@ final class OptionsAutoloadSurface {
 			$rows[] = self::check_duplicate_add_preserves_existing_value( $ctx );
 			$rows[] = self::check_update_missing_creates_option_and_clears_notoptions( $ctx );
 			$rows[] = self::check_alloptions_autoload_membership_and_transitions( $ctx );
+			$rows[] = self::check_default_autoload_policy_filters_and_cache_membership( $ctx );
 			$rows[] = self::check_bulk_autoload_mutators_and_cache_coherence( $ctx );
 			$rows[] = self::check_get_option_filters( $ctx );
 			$rows[] = self::check_filter_cache_boundaries_across_prime_and_mutation( $ctx );
@@ -33,6 +34,7 @@ final class OptionsAutoloadSurface {
 			$rows[] = self::check_option_lifecycle_actions( $ctx );
 			$rows[] = self::check_prime_option_caches_stability( $ctx );
 			$rows[] = self::check_prime_option_caches_by_group_isolation( $ctx );
+			$rows[] = self::check_generated_persistence_sequence( $ctx );
 			$rows[] = self::check_notoptions_delete_add_lifecycle( $ctx );
 			$rows[] = self::check_serialized_value_cache_shape( $ctx );
 			$rows[] = self::check_option_name_boundaries( $ctx );
@@ -54,6 +56,7 @@ final class OptionsAutoloadSurface {
 			array(
 				'add_filter',
 				'remove_filter',
+				'has_filter',
 				'add_action',
 				'remove_action',
 				'get_option',
@@ -325,6 +328,221 @@ final class OptionsAutoloadSurface {
 			array(
 				'cases'    => count( $cases ),
 				'failures' => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
+	private static function check_default_autoload_policy_filters_and_cache_membership( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime();
+
+		$auto_member       = self::option_name( $ctx, 'policy-auto-member' );
+		$auto_to_large     = self::option_name( $ctx, 'policy-auto-to-large' );
+		$forced_on         = self::option_name( $ctx, 'policy-forced-on' );
+		$forced_off        = self::option_name( $ctx, 'policy-forced-off' );
+		$large             = self::option_name( $ctx, 'policy-large' );
+		$explicit_on       = self::option_name( $ctx, 'policy-explicit-on' );
+		$explicit_off      = self::option_name( $ctx, 'policy-explicit-off' );
+		$hostile_extra     = self::option_name( $ctx, 'policy-hostile-extra' );
+		$small_value       = self::wrapped_value( 'policy-small', self::value( $ctx->fork( 'policy-small' ) ) );
+		$auto_large_value  = str_repeat( 'A', 48 );
+		$explicit_large_value = str_repeat( 'B', 52 );
+		$large_value       = str_repeat( 'L', 50 );
+		$forced_on_value   = self::wrapped_value( 'policy-forced-on', self::value( $ctx->fork( 'policy-forced-on' ) ) );
+		$forced_off_value  = self::wrapped_value( 'policy-forced-off', self::value( $ctx->fork( 'policy-forced-off' ) ) );
+		$explicit_on_value = self::wrapped_value( 'policy-explicit-on', self::value( $ctx->fork( 'policy-explicit-on' ) ) );
+		$explicit_off_value = self::wrapped_value( 'policy-explicit-off', self::value( $ctx->fork( 'policy-explicit-off' ) ) );
+		$failures          = array();
+		$default_events    = array();
+		$max_size_events   = array();
+		$autoload_values_events = array();
+		$added_core_size_filter = false;
+		$apply_update_size_limit = false;
+
+		$default_autoload_filter = static function ( $autoload, $option, $value, $serialized_value ) use ( &$default_events, $forced_on, $forced_off ) {
+			if ( ! in_array( $option, array( $forced_on, $forced_off ), true ) ) {
+				return $autoload;
+			}
+
+			$forced           = $option === $forced_on;
+			$default_events[] = array(
+				'option'     => (string) $option,
+				'incoming'   => $autoload,
+				'forced'     => $forced,
+				'value'      => $value,
+				'serialized' => (string) $serialized_value,
+			);
+
+			return $forced;
+		};
+		$max_size_filter = static function ( $size, $option ) use ( &$max_size_events, &$apply_update_size_limit, $large, $auto_to_large ) {
+			$max_size_events[] = array(
+				'option' => (string) $option,
+				'size'   => (int) $size,
+			);
+
+			if ( $option === $large || ( $apply_update_size_limit && $option === $auto_to_large ) ) {
+				return 16;
+			}
+
+			return $size;
+		};
+		$autoload_values_filter = static function ( $values ) use ( &$autoload_values_events ) {
+			$autoload_values_events[] = array_values( $values );
+			return array( 'on', 'auto-on', 'extra' );
+		};
+
+		if ( false === has_filter( 'wp_default_autoload_value', 'wp_filter_default_autoload_value_via_option_size' ) ) {
+			add_filter( 'wp_default_autoload_value', 'wp_filter_default_autoload_value_via_option_size', 5, 4 );
+			$added_core_size_filter = true;
+		}
+		add_filter( 'wp_default_autoload_value', $default_autoload_filter, 10, 4 );
+		add_filter( 'wp_max_autoloaded_option_size', $max_size_filter, 10, 2 );
+
+		try {
+			$adds = array(
+				'autoMember'  => add_option( $auto_member, $small_value, '', null ),
+				'autoToLarge' => add_option( $auto_to_large, $small_value, '', null ),
+				'forcedOn'    => add_option( $forced_on, $forced_on_value, '', null ),
+				'forcedOff'   => add_option( $forced_off, $forced_off_value, '', null ),
+				'large'       => add_option( $large, $large_value, '', null ),
+				'explicitOn'  => add_option( $explicit_on, $explicit_on_value, '', true ),
+				'explicitOff' => add_option( $explicit_off, $explicit_off_value, '', false ),
+			);
+			$GLOBALS['wpdb']->query(
+				$GLOBALS['wpdb']->prepare(
+					"INSERT INTO `{$GLOBALS['wpdb']->options}` (`option_name`, `option_value`, `autoload`) VALUES (%s, %s, %s)",
+					$hostile_extra,
+					self::stored_value( self::wrapped_value( 'policy-hostile-extra', 'raw-extra' ) ),
+					'extra'
+				)
+			);
+
+			$store_after_add = self::option_store();
+			wp_cache_delete( 'alloptions', 'options' );
+			$alloptions_default = wp_load_alloptions( true );
+
+			$apply_update_size_limit = true;
+			$auto_update = update_option( $auto_to_large, $auto_large_value, null );
+			$explicit_update = update_option( $explicit_on, $explicit_large_value, null );
+			$store_after_update = self::option_store();
+			$alloptions_after_update = wp_load_alloptions( true );
+			$auto_individual_after_update = wp_cache_get( $auto_to_large, 'options' );
+
+			add_filter( 'wp_autoload_values_to_autoload', $autoload_values_filter, 10, 1 );
+			wp_cache_delete( 'alloptions', 'options' );
+			$filtered_autoload_values = wp_autoload_values_to_autoload();
+			$alloptions_filtered      = wp_load_alloptions( true );
+		} finally {
+			remove_filter( 'wp_autoload_values_to_autoload', $autoload_values_filter, 10 );
+			remove_filter( 'wp_max_autoloaded_option_size', $max_size_filter, 10 );
+			remove_filter( 'wp_default_autoload_value', $default_autoload_filter, 10 );
+			if ( $added_core_size_filter ) {
+				remove_filter( 'wp_default_autoload_value', 'wp_filter_default_autoload_value_via_option_size', 5 );
+			}
+		}
+
+		self::collect_failure(
+			$failures,
+			array(
+				'autoMember'  => true,
+				'autoToLarge' => true,
+				'forcedOn'    => true,
+				'forcedOff'   => true,
+				'large'       => true,
+				'explicitOn'  => true,
+				'explicitOff' => true,
+			) === $adds
+				&& 'auto' === ( $store_after_add[ $auto_member ]['autoload'] ?? null )
+				&& 'auto' === ( $store_after_add[ $auto_to_large ]['autoload'] ?? null )
+				&& 'auto-on' === ( $store_after_add[ $forced_on ]['autoload'] ?? null )
+				&& 'auto-off' === ( $store_after_add[ $forced_off ]['autoload'] ?? null )
+				&& 'auto-off' === ( $store_after_add[ $large ]['autoload'] ?? null )
+				&& 'on' === ( $store_after_add[ $explicit_on ]['autoload'] ?? null )
+				&& 'off' === ( $store_after_add[ $explicit_off ]['autoload'] ?? null )
+				&& 'extra' === ( $store_after_add[ $hostile_extra ]['autoload'] ?? null ),
+			'null, explicit, size-filtered, and raw hostile autoload rows store exact expected values',
+			array(
+				'adds'      => $adds,
+				'autoloads' => self::option_autoloads(
+					$store_after_add,
+					array( $auto_member, $auto_to_large, $forced_on, $forced_off, $large, $explicit_on, $explicit_off, $hostile_extra )
+				),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			isset( $alloptions_default[ $auto_member ], $alloptions_default[ $auto_to_large ], $alloptions_default[ $forced_on ], $alloptions_default[ $explicit_on ] )
+				&& ! isset( $alloptions_default[ $forced_off ], $alloptions_default[ $large ], $alloptions_default[ $explicit_off ], $alloptions_default[ $hostile_extra ] )
+				&& self::stored_value( $small_value ) === $alloptions_default[ $auto_member ]
+				&& self::stored_value( $small_value ) === $alloptions_default[ $auto_to_large ]
+				&& self::stored_value( $forced_on_value ) === $alloptions_default[ $forced_on ]
+				&& self::stored_value( $explicit_on_value ) === $alloptions_default[ $explicit_on ],
+			'default alloptions membership includes auto/auto-on/on and excludes auto-off/off/hostile values',
+			array(
+				'alloptions' => self::describe_value( $alloptions_default ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			true === $auto_update
+				&& true === $explicit_update
+				&& 'auto-off' === ( $store_after_update[ $auto_to_large ]['autoload'] ?? null )
+				&& 'on' === ( $store_after_update[ $explicit_on ]['autoload'] ?? null )
+				&& ! isset( $alloptions_after_update[ $auto_to_large ] )
+				&& isset( $alloptions_after_update[ $explicit_on ] )
+				&& self::stored_value( $auto_large_value ) === $auto_individual_after_update
+				&& self::stored_value( $explicit_large_value ) === $alloptions_after_update[ $explicit_on ],
+			'update_option with null autoload reevaluates prior auto rows but preserves explicit on rows',
+			array(
+				'autoUpdate'                => $auto_update,
+				'explicitUpdate'            => $explicit_update,
+				'autoloads'                 => self::option_autoloads( $store_after_update, array( $auto_to_large, $explicit_on ) ),
+				'autoInAlloptions'          => isset( $alloptions_after_update[ $auto_to_large ] ),
+				'explicitInAlloptions'      => isset( $alloptions_after_update[ $explicit_on ] ),
+				'autoIndividualAfterUpdate' => self::describe_value( $auto_individual_after_update ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			array( 'on', 'auto-on' ) === array_values( $filtered_autoload_values )
+				&& isset( $alloptions_filtered[ $forced_on ], $alloptions_filtered[ $explicit_on ] )
+				&& ! isset( $alloptions_filtered[ $auto_member ], $alloptions_filtered[ $auto_to_large ], $alloptions_filtered[ $forced_off ], $alloptions_filtered[ $large ], $alloptions_filtered[ $explicit_off ], $alloptions_filtered[ $hostile_extra ] ),
+			'filtered autoload membership may remove auto but cannot add hostile autoload values',
+			array(
+				'filteredValues' => $filtered_autoload_values,
+				'alloptions'     => self::describe_value( $alloptions_filtered ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			2 === count( $default_events )
+				&& self::default_policy_events_match( $default_events, array( $forced_on => true, $forced_off => false ) )
+				&& self::max_size_events_include( $max_size_events, array( $large, $auto_to_large ) )
+				&& array() !== $autoload_values_events
+				&& false === has_filter( 'wp_default_autoload_value', $default_autoload_filter )
+				&& false === has_filter( 'wp_max_autoloaded_option_size', $max_size_filter )
+				&& false === has_filter( 'wp_autoload_values_to_autoload', $autoload_values_filter ),
+			'default autoload policy filters receive expected payloads and are removed before returning',
+			array(
+				'defaultEvents'        => self::describe_default_policy_events( $default_events ),
+				'maxSizeEvents'        => $max_size_events,
+				'autoloadValuesEvents' => $autoload_values_events,
+			)
+		);
+
+		return $ctx->result(
+			'options-autoload.default-autoload-policy-filters-and-cache-membership',
+			array() === $failures,
+			array(
+				'autoloads' => self::option_autoloads(
+					self::option_store(),
+					array( $auto_member, $auto_to_large, $forced_on, $forced_off, $large, $explicit_on, $explicit_off, $hostile_extra )
+				),
+				'failures'  => array_slice( $failures, 0, 8 ),
 			)
 		);
 	}
@@ -1354,6 +1572,232 @@ final class OptionsAutoloadSurface {
 		);
 	}
 
+	private static function check_generated_persistence_sequence( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime();
+
+		$case               = $ctx->fork( 'persistence-sequence' );
+		$autoloaded         = self::option_name( $ctx, 'sequence-autoloaded' );
+		$manual             = self::option_name( $ctx, 'sequence-manual' );
+		$auto_default       = self::option_name( $ctx, 'sequence-auto-default' );
+		$created            = self::option_name( $ctx, 'sequence-created' );
+		$update_missing     = self::option_name( $ctx, 'sequence-update-missing' );
+		$generated          = self::option_name( $ctx, 'sequence-generated' );
+		$missing            = self::option_name( $ctx, 'sequence-missing' );
+		$names              = array( $autoloaded, $manual, $auto_default, $created, $update_missing, $generated, $missing );
+		$model              = array();
+		$failures           = array();
+		$operation_summaries = array();
+		$expected_actions   = array();
+		$events             = array(
+			'actions'          => array(),
+			'defaultAutoloads' => array(),
+		);
+
+		$default_autoload_filter = static function ( $autoload, $option, $value, $serialized_value ) use ( &$events, $auto_default, $update_missing, $generated ) {
+			if ( ! in_array( $option, array( $auto_default, $update_missing, $generated ), true ) ) {
+				return $autoload;
+			}
+
+			$forced = $option === $auto_default ? false : true;
+			$events['defaultAutoloads'][] = array(
+				'option'    => (string) $option,
+				'forced'    => $forced,
+				'value'     => $value,
+				'serialized'=> (string) $serialized_value,
+			);
+
+			return $forced;
+		};
+
+		$record_action = static function ( string $hook, string $option, array $args ) use ( &$events ): void {
+			$events['actions'][] = array(
+				'hook'   => $hook,
+				'option' => $option,
+				'args'   => $args,
+			);
+		};
+
+		$add_before = static function ( $option, $value ) use ( $record_action ): void {
+			$record_action( 'add_option', (string) $option, array( $option, $value ) );
+		};
+		$added = static function ( $option, $value ) use ( $record_action ): void {
+			$record_action( 'added_option', (string) $option, array( $option, $value ) );
+		};
+		$update_before = static function ( $option, $old_value, $value ) use ( $record_action ): void {
+			$record_action( 'update_option', (string) $option, array( $option, $old_value, $value ) );
+		};
+		$updated = static function ( $option, $old_value, $value ) use ( $record_action ): void {
+			$record_action( 'updated_option', (string) $option, array( $option, $old_value, $value ) );
+		};
+		$delete_before = static function ( $option ) use ( $record_action ): void {
+			$record_action( 'delete_option', (string) $option, array( $option ) );
+		};
+		$deleted = static function ( $option ) use ( $record_action ): void {
+			$record_action( 'deleted_option', (string) $option, array( $option ) );
+		};
+
+		add_filter( 'wp_default_autoload_value', $default_autoload_filter, 10, 4 );
+		add_action( 'add_option', $add_before, 10, 2 );
+		add_action( 'added_option', $added, 10, 2 );
+		add_action( 'update_option', $update_before, 10, 3 );
+		add_action( 'updated_option', $updated, 10, 3 );
+		add_action( 'delete_option', $delete_before, 10, 1 );
+		add_action( 'deleted_option', $deleted, 10, 1 );
+
+		try {
+			$initial_options = array(
+				array(
+					'name'     => $autoloaded,
+					'value'    => self::wrapped_value( 'sequence-initial-autoloaded', self::value( $case->fork( 'initial-autoloaded' ) ) ),
+					'autoload' => true,
+				),
+				array(
+					'name'     => $manual,
+					'value'    => self::wrapped_value( 'sequence-initial-manual', self::value( $case->fork( 'initial-manual' ) ) ),
+					'autoload' => false,
+				),
+				array(
+					'name'     => $auto_default,
+					'value'    => self::wrapped_value( 'sequence-initial-auto-default', self::value( $case->fork( 'initial-auto-default' ) ) ),
+					'autoload' => null,
+				),
+			);
+
+			foreach ( $initial_options as $initial ) {
+				$result = add_option( $initial['name'], $initial['value'], '', $initial['autoload'] );
+				if ( true === $result ) {
+					self::option_model_set( $model, $initial['name'], $initial['value'], $initial['autoload'] );
+					$expected_actions[] = array( 'add_option', $initial['name'] );
+					$expected_actions[] = array( 'added_option', $initial['name'] );
+				}
+
+				self::collect_failure(
+					$failures,
+					true === $result,
+					"initial sequence option {$initial['name']} is created",
+					array( 'result' => $result )
+				);
+			}
+
+			$operations = self::option_persistence_operations(
+				$case,
+				array(
+					'autoloaded'     => $autoloaded,
+					'manual'         => $manual,
+					'autoDefault'    => $auto_default,
+					'created'        => $created,
+					'updateMissing'  => $update_missing,
+					'generated'      => $generated,
+					'missing'        => $missing,
+				)
+			);
+
+			foreach ( $operations as $index => $operation ) {
+				self::warm_option_sequence_caches( $names );
+				$before_model = $model;
+				$result       = self::apply_option_persistence_operation( $operation, $model, $expected_actions );
+				$cache_after  = self::option_sequence_cache_snapshot( $names );
+				$store_mismatches = self::option_model_store_mismatches( $model, $names );
+				$cache_mismatches = self::option_model_cache_mismatches( $model, $names, $cache_after );
+				$read_mismatches  = self::option_model_read_mismatches( $model, $names );
+				$return_ok        = self::option_operation_return_matches( $operation, $result, $before_model, $model );
+
+				self::collect_failure(
+					$failures,
+					$return_ok
+						&& array() === $store_mismatches
+						&& array() === $cache_mismatches
+						&& array() === $read_mismatches,
+					"generated persistence operation {$index} preserves store, cache, and public read invariants",
+					array(
+						'operation'       => self::describe_option_operation( $operation ),
+						'result'          => self::describe_value( $result ),
+						'returnOk'        => $return_ok,
+						'storeMismatches' => $store_mismatches,
+						'cacheMismatches' => $cache_mismatches,
+						'readMismatches'  => $read_mismatches,
+						'cacheAfter'      => self::describe_option_cache_snapshot( $cache_after ),
+						'model'           => self::describe_option_model( $model ),
+					)
+				);
+
+				$operation_summaries[] = array(
+					'label'  => $operation['label'],
+					'type'   => $operation['type'],
+					'option' => $operation['option'] ?? null,
+					'result' => self::describe_value( $result ),
+				);
+			}
+		} finally {
+			remove_filter( 'wp_default_autoload_value', $default_autoload_filter, 10 );
+			remove_action( 'add_option', $add_before, 10 );
+			remove_action( 'added_option', $added, 10 );
+			remove_action( 'update_option', $update_before, 10 );
+			remove_action( 'updated_option', $updated, 10 );
+			remove_action( 'delete_option', $delete_before, 10 );
+			remove_action( 'deleted_option', $deleted, 10 );
+		}
+
+		$final_prime = wp_prime_option_caches( $names );
+		$final_alloptions = wp_load_alloptions( true );
+		$final_cache = self::option_sequence_cache_snapshot( $names );
+		$expected_action_summary = array_map(
+			static function ( array $event ): string {
+				return $event[0] . ':' . $event[1];
+			},
+			$expected_actions
+		);
+		$actual_action_summary = array_map(
+			static function ( array $event ): string {
+				return $event['hook'] . ':' . $event['option'];
+			},
+			$events['actions']
+		);
+
+		self::collect_failure(
+			$failures,
+			$expected_action_summary === $actual_action_summary
+				&& self::actions_only_reference_options( $events['actions'], $names )
+				&& self::default_autoload_events_match_tracked_options( $events['defaultAutoloads'], array( $auto_default, $update_missing, $generated ) )
+				&& false === has_filter( 'wp_default_autoload_value', $default_autoload_filter )
+				&& false === has_filter( 'add_option', $add_before )
+				&& false === has_filter( 'added_option', $added )
+				&& false === has_filter( 'update_option', $update_before )
+				&& false === has_filter( 'updated_option', $updated )
+				&& false === has_filter( 'delete_option', $delete_before )
+				&& false === has_filter( 'deleted_option', $deleted ),
+			'generated persistence sequence option hooks and autoload filters remain local and restored',
+			array(
+				'expectedActions'       => $expected_action_summary,
+				'actualActions'         => $actual_action_summary,
+				'defaultAutoloadEvents' => self::describe_default_autoload_events( $events['defaultAutoloads'] ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			null === $final_prime
+				&& array() === self::option_model_cache_mismatches( $model, $names, $final_cache )
+				&& self::alloptions_match_model( $model, $final_alloptions ),
+			'generated persistence sequence can re-prime caches to the final expected option model',
+			array(
+				'finalAlloptions' => self::describe_value( $final_alloptions ),
+				'finalCache'      => self::describe_option_cache_snapshot( $final_cache ),
+				'model'           => self::describe_option_model( $model ),
+			)
+		);
+
+		return $ctx->result(
+			'options-autoload.generated-persistence-sequence-store-cache-hooks',
+			array() === $failures,
+			array(
+				'operations' => $operation_summaries,
+				'model'      => self::describe_option_model( $model ),
+				'failures'   => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
 	private static function check_notoptions_delete_add_lifecycle( \ComponentFuzz\FuzzContext $ctx ): array {
 		self::reset_runtime();
 
@@ -1504,6 +1948,585 @@ final class OptionsAutoloadSurface {
 				'trimDelete'        => $trim_delete,
 				'numericDelete'     => $numeric_delete,
 			)
+		);
+	}
+
+	private static function option_persistence_operations( \ComponentFuzz\FuzzContext $ctx, array $names ): array {
+		$operations = array(
+			array(
+				'label'    => 'duplicate-add-autoloaded',
+				'type'     => 'add',
+				'option'   => $names['autoloaded'],
+				'value'    => self::wrapped_value( 'sequence-duplicate-add', self::value( $ctx->fork( 'duplicate-add' ) ) ),
+				'autoload' => false,
+			),
+			array(
+				'label'    => 'add-created-manual',
+				'type'     => 'add',
+				'option'   => $names['created'],
+				'value'    => self::wrapped_value( 'sequence-created', self::value( $ctx->fork( 'created' ) ) ),
+				'autoload' => false,
+			),
+			array(
+				'label'    => 'update-autoloaded-to-manual',
+				'type'     => 'update',
+				'option'   => $names['autoloaded'],
+				'value'    => self::wrapped_value( 'sequence-autoloaded-to-manual', self::value( $ctx->fork( 'autoloaded-to-manual' ) ) ),
+				'autoload' => false,
+			),
+			array(
+				'label'    => 'update-manual-to-autoloaded',
+				'type'     => 'update',
+				'option'   => $names['manual'],
+				'value'    => self::wrapped_value( 'sequence-manual-to-autoloaded', self::value( $ctx->fork( 'manual-to-autoloaded' ) ) ),
+				'autoload' => true,
+			),
+			array(
+				'label'    => 'update-auto-default-with-null-autoload',
+				'type'     => 'update',
+				'option'   => $names['autoDefault'],
+				'value'    => self::wrapped_value( 'sequence-auto-default-updated', self::value( $ctx->fork( 'auto-default-updated' ) ) ),
+				'autoload' => null,
+			),
+			array(
+				'label'  => 'delete-created',
+				'type'   => 'delete',
+				'option' => $names['created'],
+			),
+			array(
+				'label'  => 'delete-missing',
+				'type'   => 'delete',
+				'option' => $names['missing'],
+			),
+			array(
+				'label'    => 'update-missing-creates-autoloaded',
+				'type'     => 'update',
+				'option'   => $names['updateMissing'],
+				'value'    => self::wrapped_value( 'sequence-update-missing-created', self::value( $ctx->fork( 'update-missing-created' ) ) ),
+				'autoload' => null,
+			),
+			array(
+				'label'     => 'bulk-autoload-reshuffle',
+				'type'      => 'set_autoload_values',
+				'autoloads' => array(
+					$names['autoloaded']    => true,
+					$names['manual']        => false,
+					$names['autoDefault']   => false,
+					$names['updateMissing'] => 'yes',
+					$names['missing']       => true,
+				),
+			),
+			array(
+				'label'   => 'prime-all-sequence-options',
+				'type'    => 'prime',
+				'options' => array_values( $names ),
+			),
+			array(
+				'label'   => 'read-missing-with-default',
+				'type'    => 'read',
+				'option'  => $names['missing'],
+				'default' => self::missing_default( $names['missing'] ),
+			),
+		);
+
+		for ( $i = 0; $i < 4; ++$i ) {
+			$op_ctx = $ctx->fork( 'generated-op-' . $i );
+			$type   = $op_ctx->weightedChoice(
+				array(
+					array( 4, 'update' ),
+					array( 2, 'add' ),
+					array( 2, 'delete' ),
+					array( 2, 'set_autoload_values' ),
+					array( 1, 'read' ),
+				)
+			);
+
+			if ( 'set_autoload_values' === $type ) {
+				$target_names = array( $names['autoloaded'], $names['manual'], $names['autoDefault'], $names['updateMissing'], $names['generated'] );
+				$autoloads    = array();
+				foreach ( $target_names as $target_name ) {
+					if ( $op_ctx->bool( 55 ) ) {
+						$autoloads[ $target_name ] = $op_ctx->choice( array( true, false, 'yes', 'no', 'on', 'off' ) );
+					}
+				}
+				if ( array() === $autoloads ) {
+					$autoloads[ $op_ctx->choice( $target_names ) ] = $op_ctx->bool();
+				}
+				$operations[] = array(
+					'label'     => 'generated-' . $i . '-autoloads',
+					'type'      => 'set_autoload_values',
+					'autoloads' => $autoloads,
+				);
+				continue;
+			}
+
+			$option = $op_ctx->choice( array( $names['autoloaded'], $names['manual'], $names['autoDefault'], $names['updateMissing'], $names['generated'], $names['missing'] ) );
+			if ( 'delete' === $type ) {
+				$operations[] = array(
+					'label'  => 'generated-' . $i . '-delete',
+					'type'   => 'delete',
+					'option' => $option,
+				);
+				continue;
+			}
+
+			if ( 'read' === $type ) {
+				$operations[] = array(
+					'label'   => 'generated-' . $i . '-read',
+					'type'    => 'read',
+					'option'  => $option,
+					'default' => self::missing_default( $option ),
+				);
+				continue;
+			}
+
+			$operations[] = array(
+				'label'    => 'generated-' . $i . '-' . $type,
+				'type'     => $type,
+				'option'   => $option,
+				'value'    => self::wrapped_value( 'sequence-generated-' . $i, self::value( $op_ctx->fork( 'value' ) ) ),
+				'autoload' => $op_ctx->choice( array( null, true, false, 'yes', 'no', 'on', 'off' ) ),
+			);
+		}
+
+		return $operations;
+	}
+
+	private static function apply_option_persistence_operation( array $operation, array &$model, array &$expected_actions ) {
+		if ( 'add' === $operation['type'] ) {
+			$exists = isset( $model[ $operation['option'] ] );
+			$result = add_option( $operation['option'], $operation['value'], '', $operation['autoload'] );
+			if ( ! $exists && true === $result ) {
+				self::option_model_set( $model, $operation['option'], $operation['value'], $operation['autoload'] );
+				$expected_actions[] = array( 'add_option', $operation['option'] );
+				$expected_actions[] = array( 'added_option', $operation['option'] );
+			}
+
+			return $result;
+		}
+
+		if ( 'update' === $operation['type'] ) {
+			$exists     = isset( $model[ $operation['option'] ] );
+			$old_raw    = $exists ? $model[ $operation['option'] ]['raw'] : self::stored_value( false );
+			$new_raw    = self::stored_value( $operation['value'] );
+			$will_write = $exists ? $old_raw !== $new_raw : false !== $operation['value'];
+			$result     = update_option( $operation['option'], $operation['value'], $operation['autoload'] );
+
+			if ( $will_write && true === $result ) {
+				if ( $exists ) {
+					self::option_model_update_existing( $model, $operation['option'], $operation['value'], $operation['autoload'] );
+					$expected_actions[] = array( 'update_option', $operation['option'] );
+					$expected_actions[] = array( 'updated_option', $operation['option'] );
+				} else {
+					self::option_model_set( $model, $operation['option'], $operation['value'], $operation['autoload'] );
+					$expected_actions[] = array( 'add_option', $operation['option'] );
+					$expected_actions[] = array( 'added_option', $operation['option'] );
+				}
+			}
+
+			return $result;
+		}
+
+		if ( 'delete' === $operation['type'] ) {
+			$exists = isset( $model[ $operation['option'] ] );
+			$result = delete_option( $operation['option'] );
+			if ( $exists && true === $result ) {
+				unset( $model[ $operation['option'] ] );
+				$expected_actions[] = array( 'delete_option', $operation['option'] );
+				$expected_actions[] = array( 'deleted_option', $operation['option'] );
+			}
+
+			return $result;
+		}
+
+		if ( 'set_autoload_values' === $operation['type'] ) {
+			$expected = array();
+			foreach ( $operation['autoloads'] as $option => $autoload ) {
+				$normalized         = self::normalized_bulk_autoload( $autoload );
+				$expected[ $option ] = isset( $model[ $option ] ) && $model[ $option ]['autoload'] !== $normalized;
+			}
+
+			$result = wp_set_option_autoload_values( $operation['autoloads'] );
+			foreach ( $expected as $option => $changed ) {
+				if ( $changed && true === ( $result[ $option ] ?? false ) ) {
+					$model[ $option ]['autoload'] = self::normalized_bulk_autoload( $operation['autoloads'][ $option ] );
+				}
+			}
+
+			return $result;
+		}
+
+		if ( 'prime' === $operation['type'] ) {
+			return wp_prime_option_caches( $operation['options'] );
+		}
+
+		if ( 'read' === $operation['type'] ) {
+			return get_option( $operation['option'], $operation['default'] );
+		}
+
+		return null;
+	}
+
+	private static function option_operation_return_matches( array $operation, $result, array $before_model, array $after_model ): bool {
+		if ( 'add' === $operation['type'] ) {
+			return isset( $before_model[ $operation['option'] ] ) ? false === $result : true === $result;
+		}
+
+		if ( 'update' === $operation['type'] ) {
+			if ( isset( $before_model[ $operation['option'] ] ) ) {
+				return ( $before_model[ $operation['option'] ]['raw'] === self::stored_value( $operation['value'] ) ) ? false === $result : true === $result;
+			}
+
+			return false === $operation['value'] ? false === $result : true === $result;
+		}
+
+		if ( 'delete' === $operation['type'] ) {
+			return isset( $before_model[ $operation['option'] ] ) ? true === $result : false === $result;
+		}
+
+		if ( 'set_autoload_values' === $operation['type'] ) {
+			$expected = array();
+			foreach ( $operation['autoloads'] as $option => $autoload ) {
+				$normalized         = self::normalized_bulk_autoload( $autoload );
+				$expected[ $option ] = isset( $before_model[ $option ] ) && $before_model[ $option ]['autoload'] !== $normalized;
+			}
+			return $expected === $result;
+		}
+
+		if ( 'prime' === $operation['type'] ) {
+			return null === $result;
+		}
+
+		if ( 'read' === $operation['type'] ) {
+			if ( isset( $after_model[ $operation['option'] ] ) ) {
+				return self::same_value( self::returned_value_for_storage( $after_model[ $operation['option'] ]['value'] ), $result );
+			}
+			return self::same_value( $operation['default'], $result );
+		}
+
+		return false;
+	}
+
+	private static function option_model_set( array &$model, string $option, $value, $autoload ): void {
+		$model[ $option ] = array(
+			'value'    => $value,
+			'raw'      => self::stored_value( $value ),
+			'autoload' => self::expected_autoload( $option, $value, $autoload ),
+		);
+	}
+
+	private static function option_model_update_existing( array &$model, string $option, $value, $autoload ): void {
+		$autoload_value = $model[ $option ]['autoload'];
+		if ( null !== $autoload ) {
+			$autoload_value = self::expected_autoload( $option, $value, $autoload );
+		} elseif ( in_array( $autoload_value, array( 'auto-on', 'auto-off', 'auto' ), true ) ) {
+			$autoload_value = self::expected_autoload( $option, $value, null );
+		}
+
+		$model[ $option ] = array(
+			'value'    => $value,
+			'raw'      => self::stored_value( $value ),
+			'autoload' => $autoload_value,
+		);
+	}
+
+	private static function normalized_bulk_autoload( $autoload ): string {
+		return ( 'off' === $autoload || 'no' === $autoload || false === $autoload ) ? 'off' : 'on';
+	}
+
+	private static function warm_option_sequence_caches( array $names ): void {
+		wp_load_alloptions( true );
+		wp_prime_option_caches( $names );
+		foreach ( $names as $name ) {
+			get_option( $name, self::missing_default( $name ) );
+		}
+	}
+
+	private static function option_sequence_cache_snapshot( array $names ): array {
+		$alloptions_found = null;
+		$alloptions       = wp_cache_get( 'alloptions', 'options', false, $alloptions_found );
+		$notoptions       = wp_cache_get( 'notoptions', 'options' );
+		$options          = array();
+
+		foreach ( $names as $name ) {
+			$found            = null;
+			$value            = wp_cache_get( $name, 'options', false, $found );
+			$options[ $name ] = array(
+				'found' => $found,
+				'value' => $value,
+			);
+		}
+
+		return array(
+			'alloptionsFound' => $alloptions_found,
+			'alloptions'      => $alloptions,
+			'notoptions'      => $notoptions,
+			'options'         => $options,
+		);
+	}
+
+	private static function option_model_store_mismatches( array $model, array $names ): array {
+		$store      = self::option_store();
+		$mismatches = array();
+
+		foreach ( $names as $name ) {
+			if ( isset( $model[ $name ] ) ) {
+				if ( ! isset( $store[ $name ] ) ) {
+					$mismatches[] = array( 'option' => $name, 'reason' => 'missing-store-row' );
+					continue;
+				}
+				if ( $model[ $name ]['raw'] !== ( $store[ $name ]['option_value'] ?? null ) || $model[ $name ]['autoload'] !== ( $store[ $name ]['autoload'] ?? null ) ) {
+					$mismatches[] = array(
+						'option'   => $name,
+						'reason'   => 'store-row-differs',
+						'expected' => array(
+							'raw'      => self::describe_value( $model[ $name ]['raw'] ),
+							'autoload' => $model[ $name ]['autoload'],
+						),
+						'actual'   => array(
+							'raw'      => self::describe_value( $store[ $name ]['option_value'] ?? null ),
+							'autoload' => $store[ $name ]['autoload'] ?? null,
+						),
+					);
+				}
+			} elseif ( isset( $store[ $name ] ) ) {
+				$mismatches[] = array( 'option' => $name, 'reason' => 'unexpected-store-row' );
+			}
+		}
+
+		return $mismatches;
+	}
+
+	private static function option_model_cache_mismatches( array $model, array $names, array $cache ): array {
+		$mismatches     = array();
+		$autoload_values = wp_autoload_values_to_autoload();
+		$alloptions     = is_array( $cache['alloptions'] ?? null ) ? $cache['alloptions'] : null;
+		$notoptions     = is_array( $cache['notoptions'] ?? null ) ? $cache['notoptions'] : array();
+
+		if ( is_array( $alloptions ) ) {
+			foreach ( $names as $name ) {
+				$is_autoloaded = isset( $model[ $name ] ) && in_array( $model[ $name ]['autoload'], $autoload_values, true );
+				if ( $is_autoloaded ) {
+					if ( ! array_key_exists( $name, $alloptions ) || $model[ $name ]['raw'] !== $alloptions[ $name ] ) {
+						$mismatches[] = array( 'option' => $name, 'reason' => 'alloptions-missing-or-stale' );
+					}
+				} elseif ( array_key_exists( $name, $alloptions ) ) {
+					$mismatches[] = array( 'option' => $name, 'reason' => 'alloptions-unexpected-member' );
+				}
+			}
+		}
+
+		foreach ( $names as $name ) {
+			if ( isset( $notoptions[ $name ] ) && isset( $model[ $name ] ) ) {
+				$mismatches[] = array( 'option' => $name, 'reason' => 'existing-option-in-notoptions' );
+			}
+
+			$entry = $cache['options'][ $name ] ?? array( 'found' => false, 'value' => false );
+			if ( true !== ( $entry['found'] ?? false ) ) {
+				continue;
+			}
+
+			if ( ! isset( $model[ $name ] ) ) {
+				$mismatches[] = array( 'option' => $name, 'reason' => 'missing-option-has-positive-cache' );
+				continue;
+			}
+
+			if ( in_array( $model[ $name ]['autoload'], $autoload_values, true ) ) {
+				$mismatches[] = array( 'option' => $name, 'reason' => 'autoloaded-option-has-individual-cache' );
+				continue;
+			}
+
+			if ( $model[ $name ]['raw'] !== ( $entry['value'] ?? null ) ) {
+				$mismatches[] = array(
+					'option'   => $name,
+					'reason'   => 'individual-cache-stale',
+					'expected' => self::describe_value( $model[ $name ]['raw'] ),
+					'actual'   => self::describe_value( $entry['value'] ?? null ),
+				);
+			}
+		}
+
+		return $mismatches;
+	}
+
+	private static function option_model_read_mismatches( array $model, array $names ): array {
+		$mismatches = array();
+		foreach ( $names as $name ) {
+			$default = self::missing_default( $name );
+			$actual  = get_option( $name, $default );
+			if ( isset( $model[ $name ] ) ) {
+				$expected = self::returned_value_for_storage( $model[ $name ]['value'] );
+				if ( ! self::same_value( $expected, $actual ) ) {
+					$mismatches[] = array(
+						'option'   => $name,
+						'reason'   => 'public-read-differs',
+						'expected' => self::describe_value( $expected ),
+						'actual'   => self::describe_value( $actual ),
+					);
+				}
+			} elseif ( ! self::same_value( $default, $actual ) ) {
+				$mismatches[] = array(
+					'option'   => $name,
+					'reason'   => 'missing-read-differs',
+					'expected' => self::describe_value( $default ),
+					'actual'   => self::describe_value( $actual ),
+				);
+			}
+		}
+
+		return $mismatches;
+	}
+
+	private static function alloptions_match_model( array $model, array $alloptions ): bool {
+		$autoload_values = wp_autoload_values_to_autoload();
+		foreach ( $model as $option => $entry ) {
+			if ( in_array( $entry['autoload'], $autoload_values, true ) ) {
+				if ( ! array_key_exists( $option, $alloptions ) || $entry['raw'] !== $alloptions[ $option ] ) {
+					return false;
+				}
+			} elseif ( array_key_exists( $option, $alloptions ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function actions_only_reference_options( array $events, array $names ): bool {
+		$name_map = array_fill_keys( array_map( 'strval', $names ), true );
+		foreach ( $events as $event ) {
+			if ( ! isset( $name_map[ (string) ( $event['option'] ?? '' ) ] ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function default_autoload_events_match_tracked_options( array $events, array $names ): bool {
+		$name_map = array_fill_keys( array_map( 'strval', $names ), true );
+		$seen     = array();
+		foreach ( $events as $event ) {
+			$option = (string) ( $event['option'] ?? '' );
+			if ( ! isset( $name_map[ $option ] ) ) {
+				return false;
+			}
+			$seen[ $option ] = true;
+			if ( (string) ( $event['serialized'] ?? '' ) !== self::stored_value( $event['value'] ?? null ) ) {
+				return false;
+			}
+		}
+
+		return isset( $seen[ $names[0] ], $seen[ $names[1] ] );
+	}
+
+	private static function describe_option_operation( array $operation ): array {
+		$out = array(
+			'label' => $operation['label'] ?? null,
+			'type'  => $operation['type'] ?? null,
+		);
+		foreach ( array( 'option', 'autoload', 'autoloads', 'options', 'default' ) as $key ) {
+			if ( array_key_exists( $key, $operation ) ) {
+				$out[ $key ] = self::describe_value( $operation[ $key ] );
+			}
+		}
+		if ( array_key_exists( 'value', $operation ) ) {
+			$out['value'] = self::describe_value( $operation['value'] );
+		}
+
+		return $out;
+	}
+
+	private static function describe_option_model( array $model ): array {
+		$out = array();
+		foreach ( $model as $option => $entry ) {
+			$out[ $option ] = array(
+				'autoload' => $entry['autoload'],
+				'raw'      => self::describe_value( $entry['raw'] ),
+				'value'    => self::describe_value( $entry['value'] ),
+			);
+		}
+
+		return $out;
+	}
+
+	private static function describe_option_cache_snapshot( array $cache ): array {
+		$options = array();
+		foreach ( $cache['options'] ?? array() as $option => $entry ) {
+			$options[ $option ] = array(
+				'found' => $entry['found'] ?? null,
+				'value' => self::describe_value( $entry['value'] ?? null ),
+			);
+		}
+
+		return array(
+			'alloptionsFound' => $cache['alloptionsFound'] ?? null,
+			'alloptions'      => self::describe_value( $cache['alloptions'] ?? null ),
+			'notoptions'      => self::describe_value( $cache['notoptions'] ?? null ),
+			'options'         => $options,
+		);
+	}
+
+	private static function describe_default_autoload_events( array $events ): array {
+		return array_map(
+			static function ( array $event ): array {
+				return array(
+					'option'    => $event['option'] ?? null,
+					'forced'    => $event['forced'] ?? null,
+					'serialized'=> isset( $event['serialized'] ) ? sha1( (string) $event['serialized'] ) : null,
+				);
+			},
+			$events
+		);
+	}
+
+	private static function default_policy_events_match( array $events, array $expected ): bool {
+		if ( count( $events ) !== count( $expected ) ) {
+			return false;
+		}
+
+		foreach ( $events as $event ) {
+			$option = (string) ( $event['option'] ?? '' );
+			if ( ! array_key_exists( $option, $expected ) ) {
+				return false;
+			}
+			if ( $expected[ $option ] !== ( $event['forced'] ?? null ) ) {
+				return false;
+			}
+			if ( (string) ( $event['serialized'] ?? '' ) !== self::stored_value( $event['value'] ?? null ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function max_size_events_include( array $events, array $expected_options ): bool {
+		$seen = array();
+		foreach ( $events as $event ) {
+			$seen[ (string) ( $event['option'] ?? '' ) ] = true;
+		}
+
+		foreach ( $expected_options as $option ) {
+			if ( ! isset( $seen[ (string) $option ] ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function describe_default_policy_events( array $events ): array {
+		return array_map(
+			static function ( array $event ): array {
+				return array(
+					'option'    => $event['option'] ?? null,
+					'incoming'  => $event['incoming'] ?? null,
+					'forced'    => $event['forced'] ?? null,
+					'serialized'=> isset( $event['serialized'] ) ? sha1( (string) $event['serialized'] ) : null,
+				);
+			},
+			$events
 		);
 	}
 

@@ -607,7 +607,10 @@ database, network requests, or a configured site.
   for generated option values, including alloptions membership, notoptions
   transitions, raw serialized cache shape, default/pre/update filters, cache
   priming stability, registered option-group priming, bulk autoload mutators,
-  lifecycle action payload ordering, and safe option-name boundary cases.
+  lifecycle action payload ordering, safe option-name boundary cases, exact
+  default autoload policy filter/cache membership behavior, and generated
+  persistence sequences with independent option table, alloptions/notoptions,
+  individual-cache, public-read, autoload-filter, and lifecycle-hook oracles.
 - `plugin-theme`: plugin headers, plugin path helpers, invalid plugin path
   validation, admin helper discovery/file-edit/active-state contracts, no-DB
   plugin dependency metadata, dependency slug/name/API-data fallbacks, active
