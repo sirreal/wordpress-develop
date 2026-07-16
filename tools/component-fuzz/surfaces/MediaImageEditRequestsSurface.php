@@ -68,6 +68,7 @@ final class MediaImageEditRequestsSurface {
 				$rows[] = self::check_preview_stream_and_ajax( $ctx->fork( 'preview' ), $temp_root );
 				$rows[] = self::check_save_image_workflow( $ctx->fork( 'save-image' ), $temp_root );
 				$rows[] = self::check_restore_image_metadata( $ctx->fork( 'restore-image' ), $temp_root );
+				$rows[] = self::check_image_editor_ajax_request_matrix( $ctx->fork( 'image-editor-request-matrix' ), $temp_root );
 				$rows[] = self::check_ajax_failure_envelopes( $ctx->fork( 'ajax-gates' ), $temp_root );
 				$rows[] = self::check_crop_ajax_success_filters( $ctx->fork( 'crop-ajax' ), $temp_root );
 				$rows[] = self::check_media_create_subsizes_ajax( $ctx->fork( 'subsizes-ajax' ), $temp_root );
@@ -764,6 +765,301 @@ final class MediaImageEditRequestsSurface {
 			'media-image-edit-requests.restore-image-metadata',
 			array() === $failures,
 			array( 'failures' => array_slice( $failures, 0, 4 ) )
+		);
+	}
+
+	private static function check_image_editor_ajax_request_matrix( \ComponentFuzz\FuzzContext $ctx, string $temp_root ): array {
+		$failures      = array();
+		$upload_filter = self::upload_dir_filter( $temp_root );
+		$editor_filter = self::fake_editor_filter();
+		$cap_filter    = self::cap_grant_filter( array( 'edit_post' ) );
+		$superglobals  = self::snapshot_superglobals();
+		$fixture_ids   = array();
+		$result        = array();
+
+		\add_filter( 'upload_dir', $upload_filter );
+		\add_filter( 'wp_image_editors', $editor_filter );
+		MediaImageEditRequestsFakeEditor::reset();
+		try {
+			$denied_fixture = self::seed_attachment_fixture( $ctx->fork( 'denied-fixture' ), $temp_root, 'image-editor-denied' );
+			$fixture_ids[]  = $denied_fixture['id'];
+			\wp_set_current_user( 0 );
+			$_POST    = array(
+				'postid' => (string) $denied_fixture['id'],
+				'do'     => 'save',
+			);
+			$_REQUEST = $_POST;
+			$result['denied'] = self::capture_terminating_call(
+				static function (): void {
+					\wp_ajax_image_editor();
+				},
+				true
+			);
+
+			\add_filter( 'map_meta_cap', $cap_filter, 10, 4 );
+			\wp_set_current_user( $ctx->int( 1, 99999 ) );
+
+			$bad_nonce_fixture = self::seed_attachment_fixture( $ctx->fork( 'bad-nonce-fixture' ), $temp_root, 'image-editor-bad-nonce' );
+			$fixture_ids[]     = $bad_nonce_fixture['id'];
+			$_POST             = array(
+				'_ajax_nonce' => 'bad-' . $ctx->identifier( 3, 8 ),
+				'postid'      => (string) $bad_nonce_fixture['id'],
+				'do'          => 'save',
+			);
+			$_REQUEST          = $_POST;
+			$result['badNonce'] = self::capture_terminating_call(
+				static function (): void {
+					\wp_ajax_image_editor();
+				},
+				true
+			);
+
+			$save_fixture = self::seed_attachment_fixture( $ctx->fork( 'save-fixture' ), $temp_root, 'image-editor-save', array( 'withSizes' => true ) );
+			$fixture_ids[] = $save_fixture['id'];
+			MediaImageEditRequestsFakeEditor::$sizes_by_file[ $save_fixture['file'] ] = array(
+				'width'  => $save_fixture['metadata']['width'],
+				'height' => $save_fixture['metadata']['height'],
+			);
+			$history = array(
+				(object) array( 'r' => 90 ),
+				(object) array(
+					'c' => (object) array(
+						'x' => $ctx->int( 1, 15 ),
+						'y' => $ctx->int( 1, 15 ),
+						'w' => $ctx->int( 180, 260 ),
+						'h' => $ctx->int( 120, 220 ),
+						'r' => 2,
+					),
+				),
+			);
+			$_POST  = array(
+				'_ajax_nonce' => \wp_create_nonce( 'image_editor-' . $save_fixture['id'] ),
+				'postid'      => (string) $save_fixture['id'],
+				'do'          => 'save',
+				'history'     => \wp_json_encode( $history ),
+				'target'      => 'full',
+				'context'     => 'edit-attachment',
+			);
+			$_REQUEST = $_POST;
+			$result['save'] = self::capture_terminating_call(
+				static function (): void {
+					\wp_ajax_image_editor();
+				},
+				true
+			);
+			$result['saveJson']    = json_decode( self::terminal_body( $result['save'] ), true );
+			$result['saveFile']    = \get_attached_file( $save_fixture['id'] );
+			$result['saveMeta']    = \wp_get_attachment_metadata( $save_fixture['id'], true );
+			$result['saveBackups'] = \get_post_meta( $save_fixture['id'], '_wp_attachment_backup_sizes', true );
+			$result['saveOps']     = array_map(
+				static fn( MediaImageEditRequestsFakeEditor $editor ): array => $editor->operations,
+				MediaImageEditRequestsFakeEditor::$instances
+			);
+
+			$scale_fixture = self::seed_attachment_fixture( $ctx->fork( 'scale-fixture' ), $temp_root, 'image-editor-scale' );
+			$fixture_ids[] = $scale_fixture['id'];
+			MediaImageEditRequestsFakeEditor::$sizes_by_file[ $scale_fixture['file'] ] = array(
+				'width'  => $scale_fixture['metadata']['width'],
+				'height' => $scale_fixture['metadata']['height'],
+			);
+			$_POST  = array(
+				'_ajax_nonce' => \wp_create_nonce( 'image_editor-' . $scale_fixture['id'] ),
+				'postid'      => (string) $scale_fixture['id'],
+				'do'          => 'scale',
+				'fwidth'      => (string) ( $scale_fixture['metadata']['width'] + $ctx->int( 1, 30 ) ),
+				'fheight'     => (string) ( $scale_fixture['metadata']['height'] + $ctx->int( 1, 30 ) ),
+				'target'      => 'full',
+			);
+			$_REQUEST = $_POST;
+			$result['scaleError'] = self::capture_terminating_call(
+				static function (): void {
+					\wp_ajax_image_editor();
+				},
+				true
+			);
+			$result['scaleJson'] = json_decode( self::terminal_body( $result['scaleError'] ), true );
+
+			$restore_fixture = self::seed_attachment_fixture( $ctx->fork( 'restore-fixture' ), $temp_root, 'image-editor-restore', array( 'edited' => true ) );
+			$fixture_ids[]   = $restore_fixture['id'];
+			$restore_backup  = array(
+				'full-orig'      => array(
+					'file'     => 'image-editor-restore-original.jpg',
+					'width'    => 1400,
+					'height'   => 875,
+					'filesize' => 37,
+				),
+				'thumbnail-orig' => array(
+					'file'      => 'image-editor-restore-thumbnail.jpg',
+					'width'     => 150,
+					'height'    => 150,
+					'mime-type' => 'image/jpeg',
+					'filesize'  => 19,
+				),
+			);
+			file_put_contents( $restore_fixture['dir'] . '/image-editor-restore-original.jpg', 'component-fuzz-ajax-restore-original' );
+			file_put_contents( $restore_fixture['dir'] . '/image-editor-restore-thumbnail.jpg', 'component-fuzz-ajax-restore-thumbnail' );
+			\update_post_meta( $restore_fixture['id'], '_wp_attachment_backup_sizes', $restore_backup );
+			$_POST    = array(
+				'_ajax_nonce' => \wp_create_nonce( 'image_editor-' . $restore_fixture['id'] ),
+				'postid'      => (string) $restore_fixture['id'],
+				'do'          => 'restore',
+			);
+			$_REQUEST = $_POST;
+			$result['restore'] = self::capture_terminating_call(
+				static function (): void {
+					\wp_ajax_image_editor();
+				},
+				true
+			);
+			$result['restoreJson'] = json_decode( self::terminal_body( $result['restore'] ), true );
+			$result['restoreFile'] = \get_attached_file( $restore_fixture['id'] );
+			$result['restoreMeta'] = \wp_get_attachment_metadata( $restore_fixture['id'], true );
+
+			$unknown_fixture = self::seed_attachment_fixture( $ctx->fork( 'unknown-fixture' ), $temp_root, 'image-editor-unknown', array( 'withSizes' => true ) );
+			$fixture_ids[]   = $unknown_fixture['id'];
+			$_POST           = array(
+				'_ajax_nonce' => \wp_create_nonce( 'image_editor-' . $unknown_fixture['id'] ),
+				'postid'      => (string) $unknown_fixture['id'],
+				'do'          => 'cfz-' . $ctx->identifier( 3, 8 ),
+			);
+			$_REQUEST        = $_POST;
+			$result['unknown'] = self::capture_terminating_call(
+				static function (): void {
+					\wp_ajax_image_editor();
+				},
+				true
+			);
+			$result['unknownJson'] = json_decode( self::terminal_body( $result['unknown'] ), true );
+		} finally {
+			self::restore_superglobals( $superglobals );
+			\remove_filter( 'map_meta_cap', $cap_filter, 10 );
+			\remove_filter( 'wp_image_editors', $editor_filter );
+			\remove_filter( 'upload_dir', $upload_filter );
+			self::delete_fixtures( $fixture_ids );
+		}
+
+		$save_file_realpath    = is_string( $result['saveFile'] ?? null ) && file_exists( $result['saveFile'] ) ? realpath( $result['saveFile'] ) : false;
+		$save_methods          = array();
+		foreach ( $result['saveOps'] ?? array() as $operations ) {
+			foreach ( $operations as $operation ) {
+				$save_methods[] = $operation['method'] ?? null;
+			}
+		}
+
+		self::collect_failure(
+			$failures,
+			isset( $result['denied'], $result['badNonce'] )
+				&& $result['denied']['captured']
+				&& '-1' === trim( self::terminal_body( $result['denied'] ) )
+				&& $result['denied']['filtersRestored']
+				&& $result['badNonce']['captured']
+				&& '-1' === trim( self::terminal_body( $result['badNonce'] ) )
+				&& $result['badNonce']['filtersRestored'],
+			'image editor AJAX fails closed before mutation for denied capabilities and invalid nonces',
+			array(
+				'denied'   => $result['denied'] ?? null,
+				'badNonce' => $result['badNonce'] ?? null,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			is_array( $result['saveJson'] ?? null )
+				&& true === ( $result['saveJson']['success'] ?? null )
+				&& isset( $result['saveJson']['data']['msg'] )
+				&& false !== $save_file_realpath
+				&& str_starts_with( $save_file_realpath, realpath( $temp_root ) )
+				&& preg_match( '/-e[0-9]{13}\.jpg$/', wp_basename( (string) ( $result['saveFile'] ?? '' ) ) )
+				&& is_array( $result['saveMeta'] ?? null )
+				&& str_ends_with( (string) $result['saveMeta']['file'], wp_basename( (string) ( $result['saveFile'] ?? '' ) ) )
+				&& is_array( $result['saveBackups'] ?? null )
+				&& isset( $result['saveBackups']['full-orig'] )
+				&& in_array( 'rotate', $save_methods, true )
+				&& in_array( 'crop', $save_methods, true )
+				&& in_array( 'save', $save_methods, true )
+				&& ( $result['save'] ?? array() )['captured']
+				&& ( $result['save'] ?? array() )['filtersRestored'],
+			'image editor AJAX save accepts generated history, writes edited image metadata, and returns a success JSON message',
+			array(
+				'json'      => $result['saveJson'] ?? null,
+				'file'      => $result['saveFile'] ?? null,
+				'meta'      => $result['saveMeta'] ?? null,
+				'backups'   => $result['saveBackups'] ?? null,
+				'methods'   => $save_methods,
+				'capture'   => $result['save'] ?? null,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			is_array( $result['scaleJson'] ?? null )
+				&& false === ( $result['scaleJson']['success'] ?? null )
+				&& isset( $result['scaleJson']['data']['message']['error'] )
+				&& isset( $result['scaleJson']['data']['html'] )
+				&& str_contains( (string) $result['scaleJson']['data']['html'], 'imgedit-panel-content' )
+				&& ( $result['scaleError'] ?? array() )['captured']
+				&& ( $result['scaleError'] ?? array() )['filtersRestored'],
+			'image editor AJAX scale rejects oversized requests with an error envelope plus refreshed editor HTML',
+			array(
+				'json'    => $result['scaleJson'] ?? null,
+				'capture' => $result['scaleError'] ?? null,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			is_array( $result['restoreJson'] ?? null )
+				&& true === ( $result['restoreJson']['success'] ?? null )
+				&& isset( $result['restoreJson']['data']['message']['msg'] )
+				&& is_string( $result['restoreFile'] ?? null )
+				&& str_ends_with( $result['restoreFile'], '/image-editor-restore-original.jpg' )
+				&& is_array( $result['restoreMeta'] ?? null )
+				&& '2026/06/image-editor-restore-original.jpg' === ( $result['restoreMeta']['file'] ?? null )
+				&& 1400 === (int) ( $result['restoreMeta']['width'] ?? 0 )
+				&& 875 === (int) ( $result['restoreMeta']['height'] ?? 0 )
+				&& isset( $result['restoreJson']['data']['html'] )
+				&& str_contains( (string) $result['restoreJson']['data']['html'], 'imgedit-panel-content' )
+				&& ( $result['restore'] ?? array() )['captured']
+				&& ( $result['restore'] ?? array() )['filtersRestored'],
+			'image editor AJAX restore rehydrates original metadata and returns refreshed editor HTML',
+			array(
+				'json'    => $result['restoreJson'] ?? null,
+				'file'    => $result['restoreFile'] ?? null,
+				'meta'    => $result['restoreMeta'] ?? null,
+				'capture' => $result['restore'] ?? null,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			is_array( $result['unknownJson'] ?? null )
+				&& true === ( $result['unknownJson']['success'] ?? null )
+				&& false === ( $result['unknownJson']['data']['message'] ?? null )
+				&& isset( $result['unknownJson']['data']['html'] )
+				&& str_contains( (string) $result['unknownJson']['data']['html'], 'imgedit-panel-content' )
+				&& ( $result['unknown'] ?? array() )['captured']
+				&& ( $result['unknown'] ?? array() )['filtersRestored']
+				&& self::snapshot_superglobals() === $superglobals
+				&& false === \has_filter( 'map_meta_cap', $cap_filter )
+				&& false === \has_filter( 'wp_image_editors', $editor_filter )
+				&& false === \has_filter( 'upload_dir', $upload_filter ),
+			'image editor AJAX unknown actions render a no-mutation editor refresh and restore request/filter state',
+			array(
+				'json'       => $result['unknownJson'] ?? null,
+				'capture'    => $result['unknown'] ?? null,
+				'hasFilters' => array(
+					'cap'     => \has_filter( 'map_meta_cap', $cap_filter ),
+					'editors' => \has_filter( 'wp_image_editors', $editor_filter ),
+					'upload'  => \has_filter( 'upload_dir', $upload_filter ),
+				),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'media-image-edit-requests.image-editor-ajax-request-matrix',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, 6 ) )
 		);
 	}
 

@@ -526,9 +526,11 @@ database, network requests, or a configured site.
   cache/filter-backed attachment metadata helpers with temp-file cleanup.
 - `media-image-edit-requests`: admin media image-edit request coverage for
   history normalization, preview streaming, save/restore metadata, crop
-  wrappers, AJAX preview/crop/sub-size boundaries, nonce/capability gates,
-  file/metadata/id filters, and temp-root attachment fixtures using a
-  deterministic fake image editor.
+  wrappers, generated `wp_ajax_image_editor()` request matrices for denied,
+  bad-nonce, save, scale-error, restore, and unknown-action branches, AJAX
+  preview/crop/sub-size boundaries, nonce/capability gates, file/metadata/id
+  filters, and temp-root attachment fixtures using a deterministic fake image
+  editor.
 - `media-ingest`: no-network media upload and sideload ingest coverage over
   generated temp fixtures, including upload directory filters, MIME/filetype
   boundaries, sanitized unique filenames, direct handle prefilter/move hooks,
