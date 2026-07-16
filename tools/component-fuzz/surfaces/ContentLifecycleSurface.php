@@ -4150,6 +4150,104 @@ final class ContentLifecycleSurface {
 			$ordering_id_family_valid = $query_ordering_family_is_valid( $ordering_id_ids_bucket, $ordering_id_id_parent_bucket, $ordering_id_object_bucket, $ordering_id_expected, $ordering_parent_expected, $ordering_status_expected );
 			$ordering_parent_in_family_valid = $query_ordering_family_is_valid( $ordering_parent_in_ids_bucket, $ordering_parent_in_id_parent_bucket, $ordering_parent_in_object_bucket, $ordering_parent_in_expected, $ordering_parent_expected, $ordering_status_expected );
 			$ordering_keys_disjoint = array() === array_intersect( $ordering_id_keys, $ordering_parent_in_keys );
+			$normalized_status_variants = array(
+				'canonical'  => array(
+					'statuses' => array( 'publish', 'private' ),
+				),
+				'reversed'   => array(
+					'statuses' => array( 'private', 'publish' ),
+				),
+				'duplicated' => array(
+					'statuses' => array( 'publish', 'private', 'publish', 'private' ),
+				),
+			);
+			$normalized_status_parent_args = array(
+				$pretty_parent_id,
+				$mutation_parent_b_id,
+			);
+			$normalized_status_expected = array(
+				$pretty_child_id,
+				$mutation_child_id,
+			);
+			sort( $normalized_status_expected );
+			$normalized_status_parent_expected = array(
+				$pretty_child_id    => $pretty_parent_id,
+				$mutation_child_id  => $mutation_parent_b_id,
+			);
+			$normalized_status_status_expected = array(
+				$pretty_child_id    => 'publish',
+				$mutation_child_id  => 'private',
+			);
+			ksort( $normalized_status_parent_expected );
+			ksort( $normalized_status_status_expected );
+			$normalized_status_keys = array(
+				'ids'      => array(),
+				'idParent' => array(),
+				'object'   => array(),
+			);
+			$normalized_status_checks = array();
+			$normalized_status_query_var_checks = array();
+			$normalized_status_actual = array();
+			foreach ( $normalized_status_variants as $variant => $config ) {
+				$variant_args = array_merge(
+					$ordering_id_args,
+					array(
+						'post_parent__in'     => $normalized_status_parent_args,
+						'post_parent__not_in' => null,
+						'post__not_in'        => null,
+					)
+				);
+				$buckets = array(
+					'ids'      => $query_parent_status_bucket( $pretty_type, 0, $config['statuses'], 'ids', $variant_args ),
+					'idParent' => $query_parent_status_bucket( $pretty_type, 0, $config['statuses'], 'id=>parent', $variant_args ),
+					'object'   => $query_parent_status_bucket( $pretty_type, 0, $config['statuses'], 'all', $variant_args ),
+				);
+				$expected_query_var = array_values( array_unique( array_map( 'sanitize_key', $config['statuses'] ) ) );
+				sort( $expected_query_var );
+
+				$normalized_status_checks[ $variant ] = $query_ordering_family_is_valid( $buckets['ids'], $buckets['idParent'], $buckets['object'], $normalized_status_expected, $normalized_status_parent_expected, $normalized_status_status_expected );
+				$normalized_status_query_var_checks[ $variant ] = $expected_query_var === array_values( array_map( 'strval', (array) ( $buckets['ids']['queryVars']['post_status'] ?? array() ) ) )
+					&& $expected_query_var === array_values( array_map( 'strval', (array) ( $buckets['idParent']['queryVars']['post_status'] ?? array() ) ) )
+					&& $expected_query_var === array_values( array_map( 'strval', (array) ( $buckets['object']['queryVars']['post_status'] ?? array() ) ) );
+				$normalized_status_keys['ids'][] = $buckets['ids']['cacheKey'];
+				$normalized_status_keys['idParent'][] = $buckets['idParent']['cacheKey'];
+				$normalized_status_keys['object'][] = $buckets['object']['cacheKey'];
+				$normalized_status_actual[ $variant ] = array(
+					'statusesArg' => $config['statuses'],
+					'queryVar'    => array(
+						'ids'      => array_values( array_map( 'strval', (array) ( $buckets['ids']['queryVars']['post_status'] ?? array() ) ) ),
+						'idParent' => array_values( array_map( 'strval', (array) ( $buckets['idParent']['queryVars']['post_status'] ?? array() ) ) ),
+						'object'   => array_values( array_map( 'strval', (array) ( $buckets['object']['queryVars']['post_status'] ?? array() ) ) ),
+					),
+					'keys'        => array(
+						'ids'      => substr( md5( $buckets['ids']['cacheKey'] ), 0, 8 ),
+						'idParent' => substr( md5( $buckets['idParent']['cacheKey'] ), 0, 8 ),
+						'object'   => substr( md5( $buckets['object']['cacheKey'] ), 0, 8 ),
+					),
+					'requests'    => array(
+						'ids'      => substr( md5( $buckets['ids']['request'] ), 0, 8 ),
+						'idParent' => substr( md5( $buckets['idParent']['request'] ), 0, 8 ),
+						'object'   => substr( md5( $buckets['object']['request'] ), 0, 8 ),
+					),
+					'ids'         => array(
+						'ids'      => $buckets['ids']['ids'],
+						'idParent' => $buckets['idParent']['ids'],
+						'object'   => $buckets['object']['ids'],
+					),
+					'parents'     => array(
+						'idParent' => $buckets['idParent']['parents'],
+						'object'   => $buckets['object']['parents'],
+					),
+					'statuses'    => $buckets['object']['statuses'],
+				);
+			}
+			$normalized_status_valid = ! in_array( false, $normalized_status_checks, true )
+				&& ! in_array( false, $normalized_status_query_var_checks, true );
+			$normalized_status_keys_shared_by_field = array();
+			foreach ( $normalized_status_keys as $field => $keys ) {
+				$normalized_status_keys_shared_by_field[ $field ] = 1 === count( array_unique( $keys ) );
+			}
+			$normalized_status_keys_shared = ! in_array( false, $normalized_status_keys_shared_by_field, true );
 			$normalized_parent_filter_keys = array(
 				'ids'      => array(),
 				'idParent' => array(),
@@ -4874,6 +4972,28 @@ final class ContentLifecycleSurface {
 						'idOrdered'     => $ordering_id_object_bucket['statuses'],
 						'parentOrdered' => $ordering_parent_in_object_bucket['statuses'],
 					),
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$normalized_status_valid
+					&& $normalized_status_keys_shared,
+				'WP_Query normalizes generated custom hierarchical post status cache keys across duplicate and reversed status arrays',
+				array(
+					'checks'           => array(
+						'variantsValid'           => $normalized_status_checks,
+						'queryVarsSortedUnique'   => $normalized_status_query_var_checks,
+						'keysSharedByField'       => $normalized_status_keys_shared_by_field,
+					),
+					'expectedIds'      => $normalized_status_expected,
+					'expectedParents'  => $normalized_status_parent_expected,
+					'expectedStatuses' => $normalized_status_status_expected,
+					'uniqueKeyHashes'  => array_map(
+						static fn ( array $keys ): array => array_values( array_unique( array_map( static fn ( string $key ): string => substr( md5( $key ), 0, 8 ), $keys ) ) ),
+						$normalized_status_keys
+					),
+					'variants'         => $normalized_status_actual,
 				)
 			);
 
