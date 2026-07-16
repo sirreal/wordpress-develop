@@ -726,11 +726,13 @@ database, network requests, or a configured site.
 - `request-lifecycle`: no-DB front-controller lifecycle coverage for
   `WP::parse_request()`, rewrite/pathinfo/index matching, public/private
   query-var gates, query-var precedence and GET/POST mismatch termination,
-  `WP::main()` sequencing with query short-circuits, `register_globals()`,
-  `handle_404()` status transitions, and `send_headers()` filters/actions with
-  feed content-type, last-modified, ETag, stale conditional request,
-  subprocess-isolated 304/error exit paths, and deterministic global
-  restoration.
+  generated query-var and conditional-tag matrices over single/page/search/feed
+  request shapes, canonical redirect cancellation/bailout guards that preserve
+  query/global/request state, `WP::main()` sequencing with query
+  short-circuits, `register_globals()`, `handle_404()` status transitions, and
+  `send_headers()` filters/actions with feed content-type, last-modified, ETag,
+  stale conditional request, subprocess-isolated 304/error exit paths, and
+  deterministic global restoration.
 - `rest-controllers`: no-DB default REST endpoint controller coverage for
   registry-backed post types, post statuses, taxonomies, settings, block types,
   block patterns, block pattern categories, block-pattern remote loader

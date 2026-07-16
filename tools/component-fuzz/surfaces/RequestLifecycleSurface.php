@@ -37,6 +37,7 @@ final class RequestLifecycleSurface {
 			$rows[] = self::check_parse_request_short_circuit( $ctx->fork( 'short-circuit' ) );
 			$rows[] = self::check_register_globals( $ctx->fork( 'globals' ), $case );
 			$rows[] = self::check_main_sequence_with_query_short_circuit( $ctx->fork( 'main-sequence' ), $case );
+			$rows[] = self::check_generated_query_conditionals_and_canonical_guards( $ctx->fork( 'query-canonical' ), $case );
 			$rows[] = self::check_handle_404_transitions( $ctx->fork( '404' ) );
 			$rows[] = self::check_send_headers_filters_and_actions( $ctx->fork( 'headers' ) );
 			$rows[] = self::check_feed_header_variants( $ctx->fork( 'feed-headers' ) );
@@ -1018,6 +1019,357 @@ final class RequestLifecycleSurface {
 		);
 	}
 
+	private static function check_generated_query_conditionals_and_canonical_guards(
+		\ComponentFuzz\FuzzContext $ctx,
+		array $case
+	): array {
+		foreach ( array( 'redirect_canonical', 'wp_parse_url', 'is_home', 'is_single', 'is_page', 'is_search', 'is_feed', 'is_preview' ) as $function ) {
+			if ( ! function_exists( $function ) ) {
+				return $ctx->skip(
+					'request-lifecycle.query-conditionals-canonical.available',
+					$function . '() is not loaded'
+				);
+			}
+		}
+
+		$token        = strtolower( str_replace( array( '-', ':' ), '_', $ctx->identifier( 6, 12 ) ) );
+		$matrix_var   = self::query_var_name( 'cfuzz_matrix_', $token );
+		$leak_var     = self::query_var_name( 'cfuzz_leak_', $token );
+		$search_var   = self::query_var_name( 'cfuzz_search_', $token );
+		$post_slug    = self::slug_for_context( $ctx, 'Matrix Post ' . $token . ' ' . $ctx->int( 100, 999 ) );
+		$page_id      = $ctx->int( 20000, 29999 );
+		$search       = 'find ' . str_replace( '_', ' ', $token );
+		$matrix_rules = array(
+			'matrix/post/([^/]+)/?$'   => 'index.php?name=$matches[1]&' . $matrix_var . '=post',
+			'matrix/page/([0-9]+)/?$'  => 'index.php?page_id=$matches[1]&post_type=page&' . $matrix_var . '=page',
+			'matrix/search/([^/]+)/?$' => 'index.php?s=$matches[1]&' . $search_var . '=$matches[1]&' . $matrix_var . '=search',
+			'matrix/feed/([^/]+)/?$'   => 'index.php?feed=rss2&' . $matrix_var . '=feed',
+		);
+		$cases        = array(
+			array(
+				'label'           => 'single-post',
+				'path'            => 'matrix/post/' . $post_slug . '/',
+				'get'             => array(),
+				'expectedFlags'   => array(
+					'isHome'    => false,
+					'isSingle'  => true,
+					'isPage'    => false,
+					'isSearch'  => false,
+					'isFeed'    => false,
+					'isPreview' => false,
+					'is404'     => false,
+				),
+				'canonicalMode'   => 'cancel',
+				'canonicalTarget' => 'http://www.example.test/site-base/index.php/matrix/post/' . $post_slug . '/?utm_source=fuzz',
+			),
+			array(
+				'label'           => 'page-preview',
+				'path'            => 'matrix/page/' . $page_id . '/',
+				'get'             => array( 'preview' => '1' ),
+				'expectedFlags'   => array(
+					'isHome'    => false,
+					'isSingle'  => false,
+					'isPage'    => true,
+					'isSearch'  => false,
+					'isFeed'    => false,
+					'isPreview' => true,
+					'is404'     => false,
+				),
+				'canonicalMode'   => 'bailout',
+				'canonicalTarget' => 'http://www.example.test/site-base/index.php/matrix/page/' . $page_id . '/?preview=1',
+			),
+			array(
+				'label'           => 'search',
+				'path'            => 'matrix/search/' . rawurlencode( str_replace( ' ', '+', $search ) ) . '/',
+				'get'             => array(),
+				'expectedFlags'   => array(
+					'isHome'    => false,
+					'isSingle'  => false,
+					'isPage'    => false,
+					'isSearch'  => true,
+					'isFeed'    => false,
+					'isPreview' => false,
+					'is404'     => false,
+				),
+				'canonicalMode'   => 'bailout',
+				'canonicalTarget' => 'http://www.example.test/site-base/index.php/matrix/search/' . rawurlencode( $search ) . '/?s=' . rawurlencode( $search ),
+			),
+			array(
+				'label'           => 'feed',
+				'path'            => 'matrix/feed/' . $token . '/',
+				'get'             => array(),
+				'expectedFlags'   => array(
+					'isHome'    => false,
+					'isSingle'  => false,
+					'isPage'    => false,
+					'isSearch'  => false,
+					'isFeed'    => true,
+					'isPreview' => false,
+					'is404'     => false,
+				),
+				'canonicalMode'   => 'cancel',
+				'canonicalTarget' => 'http://www.example.test/site-base/index.php/matrix/feed/' . $token . '/?feed=rss',
+			),
+		);
+
+		$failures       = array();
+		$observed       = array();
+		$canonical_guard_event_count = 0;
+		$method_snapshot = self::snapshot_state();
+		$previous_rules = self::$rewrite_rules;
+		$option_filters = array(
+			'pre_option_comments_per_page' => static function ( $pre_option ): string {
+				unset( $pre_option );
+				return '50';
+			},
+			'pre_option_default_comments_page' => static function ( $pre_option ): string {
+				unset( $pre_option );
+				return 'newest';
+			},
+			'pre_option_page_comments' => static function ( $pre_option ): string {
+				unset( $pre_option );
+				return '0';
+			},
+			'pre_option_posts_per_page' => static function ( $pre_option ): string {
+				unset( $pre_option );
+				return '10';
+			},
+			'pre_option_page_for_posts' => static function ( $pre_option ): string {
+				unset( $pre_option );
+				return '0';
+			},
+			'pre_option_page_on_front' => static function ( $pre_option ): string {
+				unset( $pre_option );
+				return '0';
+			},
+			'pre_option_show_on_front' => static function ( $pre_option ): string {
+				unset( $pre_option );
+				return 'posts';
+			},
+			'pre_option_sticky_posts' => static function ( $pre_option ): array {
+				unset( $pre_option );
+				return array();
+			},
+		);
+		foreach ( $option_filters as $option_filter_name => $option_filter ) {
+			add_filter( $option_filter_name, $option_filter );
+		}
+
+		try {
+			foreach ( $cases as $matrix_case ) {
+				$wp               = self::new_wp();
+				$wp->add_query_var( $matrix_var );
+				$wp->add_query_var( $leak_var );
+				$wp->add_query_var( $search_var );
+				$parse_events     = array();
+				$request_events   = array();
+				$canonical_events = array();
+				$request_filter   = static function ( array $query_vars ) use ( &$request_events ): array {
+					$request_events[] = $query_vars;
+					return $query_vars;
+				};
+				$parse_action     = static function ( \WP $seen_wp ) use ( &$parse_events, $wp ): void {
+					$parse_events[] = array(
+						'same'      => $seen_wp === $wp,
+						'request'   => $seen_wp->request,
+						'rule'      => $seen_wp->matched_rule,
+						'queryVars' => $seen_wp->query_vars,
+					);
+				};
+				$canonical_filter = static function ( $redirect_url, string $requested_url ) use ( &$canonical_events ): bool {
+					$parts = is_string( $redirect_url ) ? \wp_parse_url( $redirect_url ) : array();
+					$canonical_events[] = array(
+						'redirect'  => $redirect_url,
+						'requested' => $requested_url,
+						'host'      => $parts['host'] ?? null,
+						'path'      => $parts['path'] ?? null,
+						'query'     => $parts['query'] ?? null,
+					);
+
+					return false;
+				};
+
+				self::set_rewrite_rules( $matrix_rules );
+				self::prepare_rewrite_globals();
+				self::prepare_request_server( '/site-base/' . $matrix_case['path'], '' );
+				self::set_request_superglobals(
+					$matrix_case['get'] + array( $leak_var => 'from-get' ),
+					array()
+				);
+				$GLOBALS['wp']           = $wp;
+				$GLOBALS['wp_the_query'] = null;
+				$GLOBALS['wp_query']     = null;
+
+				add_filter( 'request', $request_filter );
+				add_action( 'parse_request', $parse_action, 10, 1 );
+				add_filter( 'redirect_canonical', $canonical_filter, 10, 2 );
+				try {
+					$parsed                 = $wp->parse_request( array( $leak_var => 'from-extra' ) );
+					$query                  = new \WP_Query();
+					$query->parse_query( $wp->query_vars );
+					$GLOBALS['wp_the_query'] = $query;
+					$GLOBALS['wp_query']     = $query;
+					$query_flags_before     = self::query_conditional_flags( $query );
+					$global_flags_before    = self::global_conditional_flags();
+					$query_vars_before      = $wp->query_vars;
+					$request_before         = array(
+						'server'  => self::interesting_server_state(),
+						'get'     => $_GET,
+						'post'    => $_POST,
+						'request' => $_REQUEST,
+					);
+					$canonical_result       = \redirect_canonical( $matrix_case['canonicalTarget'], false );
+					$query_flags_after      = self::query_conditional_flags( $query );
+					$global_flags_after     = self::global_conditional_flags();
+					$query_vars_after       = $wp->query_vars;
+					$request_after          = array(
+						'server'  => self::interesting_server_state(),
+						'get'     => $_GET,
+						'post'    => $_POST,
+						'request' => $_REQUEST,
+					);
+				} finally {
+					remove_filter( 'request', $request_filter );
+					remove_action( 'parse_request', $parse_action, 10 );
+					remove_filter( 'redirect_canonical', $canonical_filter, 10 );
+				}
+
+				$canonical_same_host = true;
+				foreach ( $canonical_events as $canonical_event ) {
+					if ( null !== ( $canonical_event['host'] ?? null ) && 'example.test' !== $canonical_event['host'] ) {
+						$canonical_same_host = false;
+					}
+				}
+				if ( 'cancel' === $matrix_case['canonicalMode'] ) {
+					$canonical_guard_event_count += count( $canonical_events );
+				}
+
+				$expected_query_vars = array(
+					$matrix_var => $matrix_case['expectedFlags']['isSingle']
+						? 'post'
+						: ( $matrix_case['expectedFlags']['isPage']
+							? 'page'
+							: ( $matrix_case['expectedFlags']['isSearch'] ? 'search' : 'feed' ) ),
+				);
+				self::collect_failure(
+					$failures,
+					$matrix_case['expectedFlags'] === $query_flags_before
+						&& $query_flags_before === $global_flags_before
+						&& $query_flags_before === $query_flags_after
+						&& $global_flags_before === $global_flags_after,
+					"conditional flags are stable across canonical guard for {$matrix_case['label']}",
+					array(
+						'expected'     => $matrix_case['expectedFlags'],
+						'beforeQuery'  => $query_flags_before,
+						'beforeGlobal' => $global_flags_before,
+						'afterQuery'   => $query_flags_after,
+						'afterGlobal'  => $global_flags_after,
+					)
+				);
+				self::collect_failure(
+					$failures,
+					$expected_query_vars[ $matrix_var ] === ( $query_vars_before[ $matrix_var ] ?? null )
+						&& 'from-extra' === ( $query_vars_before[ $leak_var ] ?? null )
+						&& $query_vars_before === $query_vars_after,
+					"generated query vars preserve extra precedence and survive canonical guard for {$matrix_case['label']}",
+					array(
+						'expected' => $expected_query_vars + array( $leak_var => 'from-extra' ),
+						'before'   => $query_vars_before,
+						'after'    => $query_vars_after,
+					)
+				);
+				self::collect_failure(
+					$failures,
+					$request_before === $request_after,
+					"canonical guard leaves request superglobals/server stable for {$matrix_case['label']}",
+					array(
+						'before' => $request_before,
+						'after'  => $request_after,
+					)
+				);
+				self::collect_failure(
+					$failures,
+					$canonical_same_host
+						&& (
+							'cancel' === $matrix_case['canonicalMode']
+								? ( false === $canonical_result || null === $canonical_result )
+								: (
+									empty( $canonical_events )
+									&& ( false === $canonical_result || null === $canonical_result )
+								)
+						),
+					"canonical {$matrix_case['canonicalMode']} guard behaves without unsafe redirect for {$matrix_case['label']}",
+					array(
+						'result'           => $canonical_result,
+						'events'           => $canonical_events,
+						'canonicalSameHost' => $canonical_same_host,
+					)
+				);
+				self::collect_failure(
+					$failures,
+					true === $parsed
+						&& 1 === count( $request_events )
+						&& 1 === count( $parse_events )
+						&& true === ( $parse_events[0]['same'] ?? null )
+						&& false === has_filter( 'request', $request_filter )
+						&& false === has_filter( 'parse_request', $parse_action )
+						&& false === has_filter( 'redirect_canonical', $canonical_filter ),
+					"request/canonical hooks are scoped and parse dispatch sees the active WP instance for {$matrix_case['label']}",
+					array(
+						'parsed'            => $parsed,
+						'requestEvents'     => $request_events,
+						'parseEvents'       => $parse_events,
+						'hasRequestFilter'  => has_filter( 'request', $request_filter ),
+						'hasParseAction'    => has_filter( 'parse_request', $parse_action ),
+						'hasCanonicalFilter' => has_filter( 'redirect_canonical', $canonical_filter ),
+					)
+				);
+
+				$observed[] = array(
+					'label'        => $matrix_case['label'],
+					'queryFlags'   => $query_flags_before,
+					'queryVars'    => array_intersect_key( $query_vars_before, array_flip( array( $matrix_var, $leak_var, $search_var, 'name', 'page_id', 'post_type', 'feed', 'preview' ) ) ),
+					'canonical'    => array(
+						'mode'   => $matrix_case['canonicalMode'],
+						'result' => $canonical_result,
+						'events' => $canonical_events,
+					),
+				);
+			}
+
+			self::collect_failure(
+				$failures,
+				$canonical_guard_event_count > 0,
+				'generated canonical guard matrix exercises at least one cancelable redirect candidate',
+				array(
+					'canonicalGuardEventCount' => $canonical_guard_event_count,
+					'cases'                    => array_column( $cases, 'label' ),
+				)
+			);
+		} finally {
+			foreach ( $option_filters as $option_filter_name => $option_filter ) {
+				remove_filter( $option_filter_name, $option_filter );
+			}
+			self::set_rewrite_rules( $previous_rules );
+			self::restore_state( $method_snapshot );
+		}
+
+		return $ctx->result(
+			'request-lifecycle.query-conditionals-canonical.generated-matrix',
+			array() === $failures,
+			array(
+				'matrixVar'     => $matrix_var,
+				'leakVar'       => $leak_var,
+				'searchVar'     => $search_var,
+				'cases'         => array_column( $cases, 'label' ),
+				'canonicalGuardEventCount' => $canonical_guard_event_count,
+				'observed'      => $observed,
+				'failureCount'  => count( $failures ),
+				'failures'      => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
 	private static function check_handle_404_transitions( \ComponentFuzz\FuzzContext $ctx ): array {
 		$statuses        = array();
 		$nocache_headers = array();
@@ -1965,6 +2317,52 @@ PHP;
 		$_SERVER['SERVER_PROTOCOL'] = 'HTTP/1.1';
 		unset( $_SERVER['HTTP_IF_NONE_MATCH'], $_SERVER['HTTP_IF_MODIFIED_SINCE'] );
 		unset( $_SERVER['CONTENT_TYPE'], $_SERVER['HTTP_ACCEPT'], $_SERVER['HTTP_X_REQUESTED_WITH'] );
+	}
+
+	private static function interesting_server_state(): array {
+		$state = array();
+		foreach (
+			array(
+				'HTTP_HOST',
+				'PHP_SELF',
+				'REQUEST_METHOD',
+				'REQUEST_URI',
+				'PATH_INFO',
+				'SERVER_PROTOCOL',
+				'HTTP_IF_NONE_MATCH',
+				'HTTP_IF_MODIFIED_SINCE',
+			) as $name
+		) {
+			if ( array_key_exists( $name, $_SERVER ) ) {
+				$state[ $name ] = $_SERVER[ $name ];
+			}
+		}
+
+		return $state;
+	}
+
+	private static function query_conditional_flags( \WP_Query $query ): array {
+		return array(
+			'isHome'    => $query->is_home(),
+			'isSingle'  => $query->is_single(),
+			'isPage'    => $query->is_page(),
+			'isSearch'  => $query->is_search(),
+			'isFeed'    => $query->is_feed(),
+			'isPreview' => $query->is_preview(),
+			'is404'     => $query->is_404(),
+		);
+	}
+
+	private static function global_conditional_flags(): array {
+		return array(
+			'isHome'    => \is_home(),
+			'isSingle'  => \is_single(),
+			'isPage'    => \is_page(),
+			'isSearch'  => \is_search(),
+			'isFeed'    => \is_feed(),
+			'isPreview' => \is_preview(),
+			'is404'     => \is_404(),
+		);
 	}
 
 	private static function set_request_superglobals( array $get, array $post ): void {
