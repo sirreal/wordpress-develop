@@ -3427,9 +3427,14 @@ final class RestDirectoryServicesSurface {
 	private static function snapshot_globals( array $names ): array {
 		$snapshot = array();
 		foreach ( $names as $name ) {
+			$value = array_key_exists( $name, $GLOBALS ) ? $GLOBALS[ $name ] : null;
+			if ( 'wp_filter' === $name ) {
+				$value = self::clone_wp_filter_registry( $value );
+			}
+
 			$snapshot[ $name ] = array(
 				'exists' => array_key_exists( $name, $GLOBALS ),
-				'value'  => array_key_exists( $name, $GLOBALS ) ? $GLOBALS[ $name ] : null,
+				'value'  => $value,
 			);
 		}
 		return $snapshot;
@@ -3438,11 +3443,30 @@ final class RestDirectoryServicesSurface {
 	private static function restore_globals( array $snapshot ): void {
 		foreach ( $snapshot as $name => $entry ) {
 			if ( $entry['exists'] ) {
-				$GLOBALS[ $name ] = $entry['value'];
+				$GLOBALS[ $name ] = 'wp_filter' === $name
+					? self::clone_wp_filter_registry( $entry['value'] )
+					: $entry['value'];
 			} else {
 				unset( $GLOBALS[ $name ] );
 			}
 		}
+	}
+
+	private static function clone_wp_filter_registry( $registry ) {
+		if ( $registry instanceof \WP_Hook ) {
+			return clone $registry;
+		}
+
+		if ( ! is_array( $registry ) ) {
+			return $registry;
+		}
+
+		$clone = array();
+		foreach ( $registry as $hook_name => $hook ) {
+			$clone[ $hook_name ] = $hook instanceof \WP_Hook ? clone $hook : $hook;
+		}
+
+		return $clone;
 	}
 
 	private static function snapshot_wpdb(): ?array {
@@ -3519,6 +3543,9 @@ final class RestDirectoryServicesSurface {
 			if ( $value instanceof \WP_REST_Response ) {
 				return array( 'WP_REST_Response' => self::summarize_for_hash( $value->get_data(), $depth + 1 ) );
 			}
+			if ( $value instanceof \WP_Hook ) {
+				return array( 'WP_Hook' => self::summarize_hook_callbacks( $value ) );
+			}
 			if ( $value instanceof \Closure ) {
 				return array( 'Closure' => true );
 			}
@@ -3526,6 +3553,40 @@ final class RestDirectoryServicesSurface {
 		}
 
 		return $value;
+	}
+
+	private static function summarize_hook_callbacks( \WP_Hook $hook ): array {
+		$summary = array();
+		foreach ( $hook->callbacks as $priority => $callbacks ) {
+			$priority_key             = (string) $priority;
+			$summary[ $priority_key ] = array();
+			foreach ( $callbacks as $id => $callback ) {
+				$summary[ $priority_key ][ (string) $id ] = array(
+					'acceptedArgs' => (int) ( $callback['accepted_args'] ?? 0 ),
+					'function'     => self::summarize_callable( $callback['function'] ?? null ),
+				);
+			}
+			ksort( $summary[ $priority_key ] );
+		}
+		ksort( $summary );
+		return $summary;
+	}
+
+	private static function summarize_callable( $callback ): string {
+		if ( is_string( $callback ) ) {
+			return $callback;
+		}
+		if ( $callback instanceof \Closure ) {
+			return 'Closure';
+		}
+		if ( is_array( $callback ) && 2 === count( $callback ) ) {
+			$target = is_object( $callback[0] ) ? get_class( $callback[0] ) : (string) $callback[0];
+			return $target . '::' . (string) $callback[1];
+		}
+		if ( is_object( $callback ) && method_exists( $callback, '__invoke' ) ) {
+			return get_class( $callback ) . '::__invoke';
+		}
+		return gettype( $callback );
 	}
 
 	private static function first_difference( $before, $after, string $path = '' ) {

@@ -817,7 +817,8 @@ database, network requests, or a configured site.
   sanitization, `_fields` projection, prepare-filter payloads, proxy query
   allowlisting and derived WordPress.org argument overwrite behavior,
   malformed/unclosed head metadata extraction, metadata parsing precedence,
-  relative media URL normalization, and global/filter restoration.
+  relative media URL normalization, cloned `WP_Hook` snapshot restoration,
+  REST default-filter isolation, and global/filter restoration.
 - `rest-media-attachments`: in-memory wpdb-backed REST media attachment write
   coverage, including `Content-Disposition` filename parsing, raw upload
   validation failures, raw body `create_item()` success through the upload
@@ -1160,6 +1161,12 @@ route-dispatched mutation matrix also covers logged-out and invalid create
 failures, valid one-time password creation, PUT `app_id` immutability,
 introspection, delete denial/removal, bulk deletion, hook payload timing, and
 REST default-filter isolation.
+`rest-directory-services` complements the REST controller surfaces by exercising
+WordPress.org-backed directory controllers and direct plugin/theme directory
+APIs without live network access. Its runtime now clones `WP_Hook` entries when
+snapshotting/restoring `wp_filter` and fingerprints hook callback shape, so REST
+default filters installed during directory-controller dispatch cannot leak into
+later `/batch/v1` REST checks.
 `rest-media-attachments` covers the bounded REST attachment upload and
 client-side media-processing write paths using raw request bodies, temp upload
 roots, attachment postmeta, response projection, metadata finalization,
