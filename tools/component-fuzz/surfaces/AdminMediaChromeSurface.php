@@ -41,6 +41,7 @@ final class AdminMediaChromeSurface {
 			$rows[] = self::check_media_gallery_save_iframe_dispatch( $ctx->fork( 'legacy-gallery-save' ) );
 			$rows[] = self::check_media_type_iframe_dispatch( $ctx->fork( 'legacy-type-iframe' ) );
 			$rows[] = self::check_media_upload_entry_dispatch( $ctx->fork( 'legacy-entry-dispatch' ) );
+			$rows[] = self::check_media_library_gallery_iframe_rendering( $ctx->fork( 'legacy-library-gallery' ) );
 			$rows[] = self::check_media_attach_action_redirect_exit( $ctx->fork( 'media-attach-action' ) );
 			$rows[] = self::check_media_enqueue_and_iframe_shell( $ctx->fork( 'modal-enqueue-shell' ) );
 			$rows[] = self::check_media_button_and_bypass_output( $ctx->fork( 'media-buttons' ) );
@@ -105,17 +106,24 @@ final class AdminMediaChromeSurface {
 				'media_upload_form',
 				'media_upload_flash_bypass',
 				'media_upload_form_handler',
+				'media_upload_gallery',
 				'media_upload_gallery_form',
 				'media_upload_header',
 				'media_upload_html_bypass',
+				'media_upload_library',
+				'media_upload_library_form',
 				'media_upload_tabs',
 				'media_upload_type_form',
 				'media_upload_type_url_form',
+				'paginate_links',
 				'remove_query_arg',
 				'sanitize_html_class',
 				'size_format',
 				'the_media_upload_tabs',
 				'update_gallery_tab',
+				'wp_count_attachments',
+				'wp_edit_attachments_query',
+				'wp_match_mime_types',
 				'wp_get_attachment_image',
 				'wp_get_attachment_image_src',
 				'wp_get_attachment_metadata',
@@ -5046,6 +5054,817 @@ PHP;
 				'output'        => self::describe_string( $output ),
 				'contentBefore' => $result['contentBefore'] ?? array(),
 				'contentAfter'  => $result['contentAfter'] ?? array(),
+			)
+		);
+	}
+
+	private static function check_media_library_gallery_iframe_rendering( \ComponentFuzz\FuzzContext $ctx ): array {
+		$missing = self::media_attach_action_child_missing_requirements();
+		if ( array() !== $missing ) {
+			return self::row(
+				$ctx,
+				'admin-media-chrome.legacy-library-gallery-iframe-rendering',
+				true,
+				array(
+					'missing' => $missing,
+					'reason'  => 'Required local subprocess APIs are unavailable.',
+				),
+				'skipped'
+			);
+		}
+
+		$failures = array();
+		$runs     = array();
+
+		foreach ( self::media_library_gallery_cases( $ctx ) as $case ) {
+			$run    = self::run_media_library_gallery_child_process( $case );
+			$result = is_array( $run['result'] ?? null ) ? $run['result'] : array();
+
+			$runs[ $case['label'] ] = array(
+				'ok'       => $run['ok'] ?? false,
+				'exitCode' => $run['exitCode'] ?? null,
+				'stderr'   => self::describe_string( (string) ( $run['stderr'] ?? '' ) ),
+				'stdout'   => self::describe_string( (string) ( $run['stdout'] ?? '' ) ),
+				'result'   => array(
+					'returned'          => $result['returned'] ?? null,
+					'returnType'        => $result['returnType'] ?? null,
+					'throwable'         => $result['throwable'] ?? null,
+					'output'            => self::describe_string( (string) ( $result['output'] ?? '' ) ),
+					'formUrlEvents'     => $result['formUrlEvents'] ?? array(),
+					'fieldEventCount'   => is_array( $result['fieldEvents'] ?? null ) ? count( $result['fieldEvents'] ) : null,
+					'mimeLinkCount'     => is_array( $result['mimeLinkEvents'] ?? null ) ? count( $result['mimeLinkEvents'] ) : null,
+					'getMediaItemCount' => is_array( $result['getMediaItemArgsEvents'] ?? null ) ? count( $result['getMediaItemArgsEvents'] ) : null,
+					'queryPostIds'      => $result['queryPostIds'] ?? array(),
+					'expectedIds'       => $result['expectedIds'] ?? array(),
+					'absentIds'         => $result['absentIds'] ?? array(),
+					'iframeActions'     => $result['iframeActionCounts'] ?? array(),
+					'scriptStatus'      => $result['scriptStatus'] ?? array(),
+					'saveEventCount'    => is_array( $result['saveEvents'] ?? null ) ? count( $result['saveEvents'] ) : null,
+					'sendEventCount'    => is_array( $result['sendEvents'] ?? null ) ? count( $result['sendEvents'] ) : null,
+					'dieCalls'          => $result['dieCalls'] ?? array(),
+				),
+			);
+
+			self::collect_failure(
+				$failures,
+				true === ( $run['ok'] ?? false ) && self::media_library_gallery_child_result_has_expected_shape( $result ),
+				"{$case['label']} child renders legacy library/gallery iframe and reports structured JSON",
+				array(
+					'run'    => $run,
+					'result' => $result,
+				)
+			);
+
+			if ( ! self::media_library_gallery_child_result_has_expected_shape( $result ) ) {
+				continue;
+			}
+
+			self::collect_failure(
+				$failures,
+				true === (bool) ( $result['returned'] ?? false )
+					&& 'NULL' === (string) ( $result['returnType'] ?? '' )
+					&& null === ( $result['throwable'] ?? null )
+					&& array() === ( $result['dieCalls'] ?? array() ),
+				"{$case['label']} returns normally after wp_iframe() without wp_die or unexpected exceptions",
+				array(
+					'returned'  => $result['returned'] ?? null,
+					'returnType' => $result['returnType'] ?? null,
+					'throwable' => $result['throwable'] ?? null,
+					'dieCalls'  => $result['dieCalls'] ?? array(),
+				)
+			);
+
+			self::collect_media_library_gallery_failures( $failures, $case, $result );
+		}
+
+		return self::row(
+			$ctx,
+			'admin-media-chrome.legacy-library-gallery-iframe-rendering',
+			array() === $failures,
+			array(
+				'failures' => $failures,
+				'runs'     => $runs,
+			)
+		);
+	}
+
+	private static function media_library_gallery_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$build = static function ( string $label, string $scenario, array $args, \ComponentFuzz\FuzzContext $case_ctx ): array {
+			$token = self::media_upload_dispatch_token( 'libgal_' . $case_ctx->identifier( 4, 9 ) );
+
+			return array_merge(
+				array(
+					'label'       => $label,
+					'scenario'    => $scenario,
+					'seed'        => $case_ctx->seed(),
+					'iteration'   => $case_ctx->iteration(),
+					'token'       => $token,
+					'type'        => 'image',
+					'chromeless'  => false,
+					'requestArgs' => array(),
+				),
+				$args
+			);
+		};
+
+		return array(
+			$build(
+				'library-image-page-two-search',
+				'library',
+				array(
+					'requestArgs' => array(
+						'post_mime_type' => 'image',
+						'paged'          => '2',
+						's'              => 'Library',
+						'context'        => 'display</script><script>alert(1)</script>',
+					),
+				),
+				$ctx->fork( 'library-page-two' )
+			),
+			$build(
+				'library-invalid-paged-all-types',
+				'library',
+				array(
+					'type'        => 'file',
+					'requestArgs' => array(
+						'post_mime_type' => 'all',
+						'paged'          => '-9</script><script>alert(2)</script>',
+						's'              => 'Library',
+					),
+				),
+				$ctx->fork( 'library-invalid-paged' )
+			),
+			$build(
+				'gallery-parent-get',
+				'gallery-parent',
+				array(),
+				$ctx->fork( 'gallery-parent' )
+			),
+			$build(
+				'gallery-attachment-get-chromeless',
+				'gallery-attachment',
+				array( 'chromeless' => true ),
+				$ctx->fork( 'gallery-attachment' )
+			),
+		);
+	}
+
+	private static function run_media_library_gallery_child_process( array $case ): array {
+		$payload = json_encode(
+			array( 'case' => $case ),
+			JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE
+		);
+
+		if ( false === $payload ) {
+			return array(
+				'ok'       => false,
+				'exitCode' => -1,
+				'stdout'   => '',
+				'stderr'   => 'json_encode failed',
+				'result'   => null,
+			);
+		}
+
+		$descriptors = array(
+			0 => array( 'pipe', 'r' ),
+			1 => array( 'pipe', 'w' ),
+			2 => array( 'pipe', 'w' ),
+		);
+
+		// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.system_calls_proc_open -- Isolates legacy media library/gallery iframe output in a local PHP subprocess.
+		$process = proc_open( array( PHP_BINARY, '-r', self::media_library_gallery_child_program() ), $descriptors, $pipes, \ComponentFuzz\repo_root() );
+		if ( ! is_resource( $process ) ) {
+			return array(
+				'ok'       => false,
+				'exitCode' => -1,
+				'stdout'   => '',
+				'stderr'   => 'proc_open failed',
+				'result'   => null,
+			);
+		}
+
+		fwrite( $pipes[0], $payload );
+		fclose( $pipes[0] );
+
+		$stdout = stream_get_contents( $pipes[1] );
+		$stderr = stream_get_contents( $pipes[2] );
+		fclose( $pipes[1] );
+		fclose( $pipes[2] );
+
+		$exit_code = proc_close( $process );
+		$result    = json_decode( (string) $stdout, true );
+
+		return array(
+			'ok'       => 0 === $exit_code && is_array( $result ) && true === ( $result['ok'] ?? null ),
+			'exitCode' => $exit_code,
+			'stdout'   => (string) $stdout,
+			'stderr'   => (string) $stderr,
+			'result'   => is_array( $result ) ? $result : null,
+		);
+	}
+
+	private static function media_library_gallery_child_program(): string {
+		return <<<'PHP'
+$component_fuzz_admin_media_raw = stream_get_contents( STDIN );
+$component_fuzz_admin_media_payload = json_decode( $component_fuzz_admin_media_raw, true );
+$case = is_array( $component_fuzz_admin_media_payload['case'] ?? null ) ? $component_fuzz_admin_media_payload['case'] : array();
+
+require_once getcwd() . '/tools/component-fuzz/lib/autoload.php';
+\ComponentFuzz\WpBootstrap::load();
+
+\ComponentFuzz\Surfaces\AdminMediaChromeSurface::run_media_library_gallery_child( $case );
+PHP;
+	}
+
+	public static function run_media_library_gallery_child( array $case ): void {
+		ini_set( 'display_errors', '0' );
+		self::prepare_runtime();
+
+		$ctx      = new \ComponentFuzz\FuzzContext( (int) ( $case['seed'] ?? 1 ), self::NAME, (int) ( $case['iteration'] ?? 0 ) );
+		$scenario = (string) ( $case['scenario'] ?? 'library' );
+		$token    = self::media_upload_dispatch_token( (string) ( $case['token'] ?? $ctx->identifier( 4, 9 ) ) );
+		$type     = (string) ( $case['type'] ?? 'image' );
+		$tab      = 'library' === $scenario ? 'library' : 'gallery';
+		$state    = array(
+			'ok'                     => false,
+			'label'                  => (string) ( $case['label'] ?? 'library-gallery' ),
+			'scenario'               => $scenario,
+			'token'                  => $token,
+			'type'                   => $type,
+			'tab'                    => $tab,
+			'postId'                 => 0,
+			'parentId'               => 0,
+			'libraryImageIds'        => array(),
+			'libraryOtherIds'        => array(),
+			'expectedIds'            => array(),
+			'absentIds'              => array(),
+			'queryPostIds'           => array(),
+			'queryVars'              => array(),
+			'foundPosts'             => null,
+			'contentBefore'          => array(),
+			'contentAfter'           => array(),
+			'formUrlEvents'          => array(),
+			'fieldEvents'            => array(),
+			'mimeLinkEvents'         => array(),
+			'getMediaItemArgsEvents' => array(),
+			'saveEvents'             => array(),
+			'sendEvents'             => array(),
+			'dieCalls'               => array(),
+			'iframeActionCounts'     => array(),
+			'adminEnqueueArgs'       => array(),
+			'scriptStatus'           => array(),
+			'returned'               => false,
+			'returnType'             => null,
+			'throwable'              => null,
+			'output'                 => '',
+		);
+
+		$buffer_level = ob_get_level();
+		ob_start();
+
+		register_shutdown_function(
+			static function () use ( &$state, $buffer_level ): void {
+				$output = '';
+				while ( ob_get_level() > $buffer_level ) {
+					$chunk = ob_get_clean();
+					if ( is_string( $chunk ) ) {
+						$output = $chunk . $output;
+					}
+				}
+
+				$wp_the_query = $GLOBALS['wp_the_query'] ?? null;
+				if ( is_object( $wp_the_query ) ) {
+					$posts = is_array( $wp_the_query->posts ?? null ) ? $wp_the_query->posts : array();
+					$state['queryPostIds'] = array_map(
+						static function ( $post ): int {
+							return (int) ( $post->ID ?? 0 );
+						},
+						$posts
+					);
+					$state['queryVars']  = is_array( $wp_the_query->query_vars ?? null ) ? self::media_library_gallery_query_summary( $wp_the_query->query_vars ) : array();
+					$state['foundPosts'] = isset( $wp_the_query->found_posts ) ? (int) $wp_the_query->found_posts : null;
+				}
+
+				$state['output']       = $output;
+				$state['contentAfter'] = self::media_url_insert_content_counts();
+				$state['scriptStatus'] = self::media_gallery_save_script_status( 'admin-gallery' );
+				$state['ok']           = null === $state['throwable'];
+				echo json_encode( $state, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE ) . "\n";
+			}
+		);
+
+		try {
+			$parent_id = self::seed_parent_post( $ctx->fork( 'parent' ) );
+			$image_ids = array();
+			for ( $i = 0; $i < 12; ++$i ) {
+				$image = self::seed_attachment(
+					$ctx->fork( 'library-image-' . $i ),
+					'image/jpeg',
+					array(
+						'parent_id'  => $parent_id,
+						'post_title' => 'Library image ' . $i . ' <script>alert(1)</script> ' . $token,
+						'alt'        => 'Library alt ' . $i . ' <script>alert(1)</script> ' . $token,
+					)
+				);
+				$image_ids[] = (int) $image->ID;
+			}
+
+			$pdf = self::seed_attachment(
+				$ctx->fork( 'library-pdf' ),
+				'application/pdf',
+				array(
+					'parent_id'  => $parent_id,
+					'post_title' => 'Library PDF <script>alert(1)</script> ' . $token,
+				)
+			);
+			$audio = self::seed_attachment(
+				$ctx->fork( 'library-audio' ),
+				'audio/mpeg',
+				array(
+					'parent_id'  => $parent_id,
+					'post_title' => 'Library audio <script>alert(1)</script> ' . $token,
+				)
+			);
+			$other_ids = array( (int) $pdf->ID, (int) $audio->ID );
+
+			$post_id = $parent_id;
+			if ( 'gallery-attachment' === $scenario ) {
+				$post_id = $image_ids[0];
+			}
+
+			$state['postId']          = $post_id;
+			$state['parentId']        = $parent_id;
+			$state['libraryImageIds'] = $image_ids;
+			$state['libraryOtherIds'] = $other_ids;
+			$state['contentBefore']   = self::media_url_insert_content_counts();
+
+			$GLOBALS['pagenow']      = 'media-upload.php';
+			$GLOBALS['type']         = $type;
+			$GLOBALS['tab']          = $tab;
+			$GLOBALS['body_id']      = 'component-fuzz-library-gallery';
+			$GLOBALS['wp']           = new \WP();
+			$GLOBALS['wp_query']     = new \WP_Query();
+			$GLOBALS['wp_the_query'] = $GLOBALS['wp_query'];
+
+			$_SERVER['HTTP_HOST']       = 'example.test';
+			$_SERVER['HTTPS']           = 'off';
+			$_SERVER['PHP_SELF']        = '/wp-admin/media-upload.php';
+			$_SERVER['REQUEST_METHOD']  = 'GET';
+			$_SERVER['HTTP_REFERER']    = 'http://example.test/wp-admin/media-upload.php?type=' . rawurlencode( $type ) . '&tab=' . rawurlencode( $tab );
+			$_SERVER['HTTP_USER_AGENT'] = 'component-fuzz/admin-media-library-gallery';
+			$_SERVER['REMOTE_ADDR']     = '198.51.100.50';
+			$_SERVER['SERVER_PORT']     = '80';
+
+			$request = array_merge(
+				array(
+					'type'    => $type,
+					'tab'     => $tab,
+					'post_id' => (string) $post_id,
+				),
+				is_array( $case['requestArgs'] ?? null ) ? $case['requestArgs'] : array()
+			);
+			if ( ! empty( $case['chromeless'] ) ) {
+				$request['chromeless'] = '1';
+			}
+			$query = http_build_query( $request, '', '&', PHP_QUERY_RFC3986 );
+			$_SERVER['REQUEST_URI'] = '/wp-admin/media-upload.php?' . $query;
+			$_GET                   = $request;
+			$_POST                  = array();
+			$_REQUEST               = $request;
+			$_FILES                 = array();
+			$_COOKIE                = array();
+
+			\wp_register_script( 'admin-gallery', '/wp-admin/js/gallery.js', array(), false );
+
+			$form_url_filter = static function ( string $url, string $url_type ) use ( &$state, $token ): string {
+				$state['formUrlEvents'][] = array(
+					'url'  => $url,
+					'type' => $url_type,
+				);
+				return \add_query_arg( 'cfz_library_gallery', $token, $url );
+			};
+			$fields_filter   = static function ( array $fields, \WP_Post $post ) use ( &$state, $token ): array {
+				$state['fieldEvents'][] = array(
+					'id'       => (int) $post->ID,
+					'title'    => (string) $post->post_title,
+					'mimeType' => (string) $post->post_mime_type,
+				);
+				$fields['component_fuzz_library_gallery'] = array(
+					'label' => 'Component Fuzz Library Gallery',
+					'value' => 'Library gallery field <script>alert(1)</script> ' . $token,
+				);
+				return $fields;
+			};
+			$mime_links_filter = static function ( array $links ) use ( &$state, $token ): array {
+				$state['mimeLinkEvents'][] = array(
+					'count' => count( $links ),
+					'html'  => implode( '|', $links ),
+				);
+				$links[] = '<li><a id="cfz-mime-' . esc_attr( $token ) . '" href="#">Component Fuzz</a>';
+				return $links;
+			};
+			$item_args_filter = static function ( array $args ) use ( &$state ): array {
+				$state['getMediaItemArgsEvents'][] = $args;
+				return $args;
+			};
+			$upload_per_page_filter = static function (): int {
+				return 10;
+			};
+			$save_filter = static function ( array $post, array $attachment ) use ( &$state ): array {
+				$state['saveEvents'][] = array(
+					'id'    => (int) ( $post['ID'] ?? 0 ),
+					'title' => (string) ( $attachment['post_title'] ?? '' ),
+				);
+				return $post;
+			};
+			$send_filter = static function ( string $html, int $send_id, array $attachment ) use ( &$state ): string {
+				$state['sendEvents'][] = array(
+					'id'    => $send_id,
+					'html'  => $html,
+					'title' => (string) ( $attachment['post_title'] ?? '' ),
+				);
+				return $html;
+			};
+			$user_has_cap_filter = static function ( array $allcaps, array $caps, array $args, $user = null ): array {
+				unset( $args, $user );
+				foreach ( $caps as $cap ) {
+					$allcaps[ $cap ] = 'do_not_allow' !== $cap;
+				}
+				return $allcaps;
+			};
+			$die_handler_filter = static function () use ( &$state ): callable {
+				return static function ( $message = '', $title = '', $args = array() ) use ( &$state ): void {
+					$state['dieCalls'][] = array(
+						'message' => self::media_attach_action_die_message( $message ),
+						'title'   => self::media_attach_action_die_message( $title ),
+						'args'    => is_array( $args ) ? $args : array(),
+					);
+					exit;
+				};
+			};
+			$iframe_hooks = array(
+				'admin_enqueue_scripts',
+				'admin_print_styles-media-upload-popup',
+				'admin_print_styles',
+				'admin_print_scripts-media-upload-popup',
+				'admin_print_scripts',
+				'admin_head-media-upload-popup',
+				'admin_head',
+				'admin_print_footer_scripts',
+				'library' === $scenario ? 'admin_head_media_upload_library_form' : 'admin_head_media_upload_gallery_form',
+			);
+			$iframe_action_callbacks = array();
+			foreach ( $iframe_hooks as $hook ) {
+				$state['iframeActionCounts'][ $hook ] = 0;
+				$iframe_action_callbacks[ $hook ] = static function ( $arg = null ) use ( &$state, $hook ): void {
+					++$state['iframeActionCounts'][ $hook ];
+					if ( 'admin_enqueue_scripts' === $hook ) {
+						$state['adminEnqueueArgs'][] = $arg;
+					}
+				};
+			}
+
+			\add_filter( 'media_upload_form_url', $form_url_filter, 10, 2 );
+			\add_filter( 'attachment_fields_to_edit', $fields_filter, 11, 2 );
+			\add_filter( 'media_upload_mime_type_links', $mime_links_filter, 10, 1 );
+			\add_filter( 'get_media_item_args', $item_args_filter, 10, 1 );
+			\add_filter( 'upload_per_page', $upload_per_page_filter, 10, 0 );
+			\add_filter( 'attachment_fields_to_save', $save_filter, 10, 2 );
+			\add_filter( 'media_send_to_editor', $send_filter, 10, 3 );
+			\add_filter( 'user_has_cap', $user_has_cap_filter, 10, 4 );
+			\add_filter( 'wp_die_handler', $die_handler_filter, PHP_INT_MAX );
+			foreach ( $iframe_action_callbacks as $hook => $callback ) {
+				\add_action( $hook, $callback, 10, 1 );
+			}
+
+			\wp_set_current_user( 1 );
+			if ( isset( $GLOBALS['current_user'] ) && $GLOBALS['current_user'] instanceof \WP_User ) {
+				$GLOBALS['current_user']->allcaps = array( 'exist' => true );
+			}
+
+			try {
+				$return_value = 'library' === $scenario ? \media_upload_library() : \media_upload_gallery();
+				$state['returnType'] = gettype( $return_value );
+				$state['returned']   = true;
+			} finally {
+				foreach ( $iframe_action_callbacks as $hook => $callback ) {
+					\remove_action( $hook, $callback, 10 );
+				}
+				\remove_filter( 'wp_die_handler', $die_handler_filter, PHP_INT_MAX );
+				\remove_filter( 'user_has_cap', $user_has_cap_filter, 10 );
+				\remove_filter( 'media_send_to_editor', $send_filter, 10 );
+				\remove_filter( 'attachment_fields_to_save', $save_filter, 10 );
+				\remove_filter( 'upload_per_page', $upload_per_page_filter, 10 );
+				\remove_filter( 'get_media_item_args', $item_args_filter, 10 );
+				\remove_filter( 'media_upload_mime_type_links', $mime_links_filter, 10 );
+				\remove_filter( 'attachment_fields_to_edit', $fields_filter, 11 );
+				\remove_filter( 'media_upload_form_url', $form_url_filter, 10 );
+			}
+		} catch ( \Throwable $e ) {
+			$state['throwable'] = self::describe_throwable( $e );
+		}
+	}
+
+	private static function media_library_gallery_query_summary( array $query_vars ): array {
+		$keys = array( 'post_type', 'post_status', 'post_mime_type', 'posts_per_page', 'paged', 'offset', 's', 'm', 'post_parent' );
+		$out  = array();
+		foreach ( $keys as $key ) {
+			if ( array_key_exists( $key, $query_vars ) ) {
+				$out[ $key ] = $query_vars[ $key ];
+			}
+		}
+		return $out;
+	}
+
+	private static function media_library_gallery_child_result_has_expected_shape( array $result ): bool {
+		return array_key_exists( 'ok', $result )
+			&& array_key_exists( 'returned', $result )
+			&& is_string( $result['output'] ?? null )
+			&& is_array( $result['contentBefore'] ?? null )
+			&& is_array( $result['contentAfter'] ?? null )
+			&& is_array( $result['formUrlEvents'] ?? null )
+			&& is_array( $result['fieldEvents'] ?? null )
+			&& is_array( $result['mimeLinkEvents'] ?? null )
+			&& is_array( $result['getMediaItemArgsEvents'] ?? null )
+			&& is_array( $result['queryPostIds'] ?? null )
+			&& is_array( $result['queryVars'] ?? null )
+			&& is_array( $result['saveEvents'] ?? null )
+			&& is_array( $result['sendEvents'] ?? null )
+			&& is_array( $result['dieCalls'] ?? null )
+			&& is_array( $result['iframeActionCounts'] ?? null )
+			&& is_array( $result['adminEnqueueArgs'] ?? null )
+			&& is_array( $result['scriptStatus'] ?? null );
+	}
+
+	private static function collect_media_library_gallery_failures( array &$failures, array $case, array $result ): void {
+		$output      = (string) ( $result['output'] ?? '' );
+		$scenario    = (string) ( $case['scenario'] ?? '' );
+		$is_library  = 'library' === $scenario;
+		$token       = self::media_upload_dispatch_token( (string) ( $result['token'] ?? $case['token'] ?? '' ) );
+		$dynamic_hook = $is_library ? 'admin_head_media_upload_library_form' : 'admin_head_media_upload_gallery_form';
+
+		self::collect_failure(
+			$failures,
+			str_contains( $output, 'pagenow = \'media-upload-popup\'' )
+				&& str_contains( $output, '<body id="component-fuzz-library-gallery" class="wp-core-ui no-js ' )
+				&& str_contains( $output, '</html>' )
+				&& str_contains( $output, 'cfz_library_gallery=' . rawurlencode( $token ) )
+				&& ! str_contains( $output, '</script><script>alert(' ),
+			'legacy library/gallery callback renders a complete iframe shell with the filtered form action token and escaped hostile request bytes',
+			array(
+				'output' => self::describe_string( $output ),
+				'token'  => $token,
+			)
+		);
+
+		$iframe_hooks = array(
+			'admin_enqueue_scripts',
+			'admin_print_styles-media-upload-popup',
+			'admin_print_styles',
+			'admin_print_scripts-media-upload-popup',
+			'admin_print_scripts',
+			'admin_head-media-upload-popup',
+			'admin_head',
+			'admin_print_footer_scripts',
+			$dynamic_hook,
+		);
+		$iframe_counts = is_array( $result['iframeActionCounts'] ?? null ) ? $result['iframeActionCounts'] : array();
+		$iframe_hooks_ok = true;
+		foreach ( $iframe_hooks as $hook ) {
+			$iframe_hooks_ok = $iframe_hooks_ok && 1 === (int) ( $iframe_counts[ $hook ] ?? 0 );
+		}
+
+		self::collect_failure(
+			$failures,
+			$iframe_hooks_ok && array( 'media-upload-popup' ) === ( $result['adminEnqueueArgs'] ?? array() ),
+			'wp_iframe() fires the expected generic and callback-specific popup hooks',
+			array(
+				'iframeActionCounts' => $iframe_counts,
+				'adminEnqueueArgs'   => $result['adminEnqueueArgs'] ?? array(),
+				'dynamicHook'        => $dynamic_hook,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			( $result['contentBefore'] ?? array() ) === ( $result['contentAfter'] ?? array() )
+				&& array() === ( $result['saveEvents'] ?? array() )
+				&& array() === ( $result['sendEvents'] ?? array() ),
+			'GET library/gallery iframe rendering does not mutate content or enter save/send-to-editor paths',
+			array(
+				'contentBefore' => $result['contentBefore'] ?? array(),
+				'contentAfter'  => $result['contentAfter'] ?? array(),
+				'saveEvents'    => $result['saveEvents'] ?? array(),
+				'sendEvents'    => $result['sendEvents'] ?? array(),
+			)
+		);
+
+		if ( $is_library ) {
+			self::collect_media_library_iframe_failures( $failures, $case, $result, $output, $token );
+		} else {
+			self::collect_media_gallery_get_iframe_failures( $failures, $case, $result, $output );
+		}
+	}
+
+	private static function collect_media_library_iframe_failures( array &$failures, array $case, array $result, string $output, string $token ): void {
+		$query_ids  = array_values( array_filter( array_map( 'intval', $result['queryPostIds'] ?? array() ) ) );
+		$field_ids  = array_map(
+			static function ( array $event ): int {
+				return (int) ( $event['id'] ?? 0 );
+			},
+			$result['fieldEvents'] ?? array()
+		);
+		$other_ids  = array_values( array_map( 'intval', $result['libraryOtherIds'] ?? array() ) );
+		$image_ids  = array_values( array_map( 'intval', $result['libraryImageIds'] ?? array() ) );
+		$request    = is_array( $case['requestArgs'] ?? null ) ? $case['requestArgs'] : array();
+		$query_vars = is_array( $result['queryVars'] ?? null ) ? $result['queryVars'] : array();
+
+		$rendered_query_ids = true;
+		foreach ( $query_ids as $id ) {
+			$rendered_query_ids = $rendered_query_ids
+				&& str_contains( $output, "id='media-item-$id'" )
+				&& str_contains( $output, "attachments[$id][component_fuzz_library_gallery]" );
+		}
+		$other_ids_absent = true;
+		foreach ( $other_ids as $id ) {
+			$other_ids_absent = $other_ids_absent && ! str_contains( $output, "id='media-item-$id'" );
+		}
+
+		self::collect_failure(
+			$failures,
+			str_contains( $output, 'id="filter"' )
+				&& str_contains( $output, 'id="library-form"' )
+				&& str_contains( $output, 'id="media-search-input"' )
+				&& str_contains( $output, '<ul class="subsubsub">' )
+				&& str_contains( $output, 'id="cfz-mime-' . $token . '"' )
+				&& ! str_contains( $output, 'id="gallery-form"' )
+				&& ! str_contains( $output, 'id="gallery-settings"' ),
+			'library tab renders search/filter chrome, MIME links, and library form without gallery-only controls',
+			array( 'output' => self::describe_string( $output ) )
+		);
+
+		self::collect_failure(
+			$failures,
+			1 === count( $result['formUrlEvents'] ?? array() )
+				&& (string) ( $result['type'] ?? '' ) === (string) ( $result['formUrlEvents'][0]['type'] ?? '' )
+				&& str_contains( (string) ( $result['formUrlEvents'][0]['url'] ?? '' ), 'tab=library' )
+				&& str_contains( (string) ( $result['formUrlEvents'][0]['url'] ?? '' ), 'post_id=' . (string) ( $result['postId'] ?? 0 ) ),
+			'library form action receives the current media type and cast post ID through media_upload_form_url',
+			array( 'formUrlEvents' => $result['formUrlEvents'] ?? array() )
+		);
+
+		self::collect_failure(
+			$failures,
+			$query_ids !== array()
+				&& $query_ids === $field_ids
+				&& count( $query_ids ) <= 10
+				&& $rendered_query_ids
+				&& $other_ids_absent,
+			'library tab renders exactly the paged attachment query result and excludes non-matching MIME rows',
+			array(
+				'queryPostIds' => $query_ids,
+				'fieldIds'     => $field_ids,
+				'otherIds'     => $other_ids,
+				'output'       => self::describe_string( $output ),
+			)
+		);
+
+		if ( 'image' === ( $request['post_mime_type'] ?? null ) ) {
+			self::collect_failure(
+				$failures,
+				array_diff( $query_ids, $image_ids ) === array()
+					&& ! array_intersect( $query_ids, $other_ids ),
+				'library image MIME filter confines the query result to seeded image attachments',
+				array(
+					'queryPostIds' => $query_ids,
+					'imageIds'     => $image_ids,
+					'otherIds'     => $other_ids,
+				)
+			);
+		}
+
+		self::collect_failure(
+			$failures,
+			10 === (int) ( $query_vars['posts_per_page'] ?? 0 )
+				&& ( isset( $request['paged'] ) && (int) $request['paged'] < 1 ? 1 : max( 1, (int) ( $request['paged'] ?? 1 ) ) ) === (int) ( $query_vars['paged'] ?? 0 )
+				&& 'attachment' === (string) ( $query_vars['post_type'] ?? '' )
+				&& str_contains( $output, 'tablenav-pages' ),
+			'library request normalizes pagination/query vars and emits pagination controls for the generated attachment set',
+			array(
+				'requestArgs' => $request,
+				'queryVars'   => $query_vars,
+				'foundPosts'  => $result['foundPosts'] ?? null,
+				'output'      => self::describe_string( $output ),
+			)
+		);
+
+		$context_ok = ! isset( $request['context'] )
+			|| (
+				! str_contains( $output, 'display</script><script>' )
+				&& str_contains( $output, 'display&lt;/script&gt;&lt;script&gt;alert(1)&lt;/script&gt;' )
+			);
+
+		self::collect_failure(
+			$failures,
+			str_contains( $output, 'value="Library"' )
+				&& $context_ok,
+			'library search and hidden context request values are escaped in filter controls',
+			array(
+				'requestArgs' => $request,
+				'output'      => self::describe_string( $output ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			1 === count( $result['mimeLinkEvents'] ?? array() )
+				&& count( $result['getMediaItemArgsEvents'] ?? array() ) === count( $query_ids ),
+			'library tab applies MIME-link and media-item argument filters once per rendered query page',
+			array(
+				'mimeLinkEvents'         => $result['mimeLinkEvents'] ?? array(),
+				'getMediaItemArgsEvents' => $result['getMediaItemArgsEvents'] ?? array(),
+				'queryPostIds'           => $query_ids,
+			)
+		);
+	}
+
+	private static function collect_media_gallery_get_iframe_failures( array &$failures, array $case, array $result, string $output ): void {
+		$expected_ids = 'gallery-attachment' === (string) ( $case['scenario'] ?? '' )
+			? array( (int) ( $result['postId'] ?? 0 ) )
+			: array_merge(
+				array_values( array_map( 'intval', $result['libraryImageIds'] ?? array() ) ),
+				array_values( array_map( 'intval', $result['libraryOtherIds'] ?? array() ) )
+			);
+		$expected_ids = array_values( array_filter( $expected_ids ) );
+		$field_ids    = array_map(
+			static function ( array $event ): int {
+				return (int) ( $event['id'] ?? 0 );
+			},
+			$result['fieldEvents'] ?? array()
+		);
+		sort( $expected_ids );
+		sort( $field_ids );
+
+		$expected_markup = true;
+		foreach ( $expected_ids as $id ) {
+			$expected_markup = $expected_markup
+				&& str_contains( $output, "id='media-item-$id'" )
+				&& str_contains( $output, "attachments[$id][menu_order]" )
+				&& str_contains( $output, "attachments[$id][component_fuzz_library_gallery]" );
+		}
+
+		self::collect_failure(
+			$failures,
+			str_contains( $output, 'id="gallery-form"' )
+				&& str_contains( $output, 'id="sort-buttons"' )
+				&& str_contains( $output, 'id="gallery-settings"' )
+				&& str_contains( $output, 'id="insert-gallery"' )
+				&& str_contains( $output, 'id="save-all"' )
+				&& ! str_contains( $output, 'id="library-form"' )
+				&& ! str_contains( $output, 'id="media-search-input"' )
+				&& $expected_markup,
+			'gallery GET tab renders gallery sorting/settings controls and the expected attachment set',
+			array(
+				'expectedIds' => $expected_ids,
+				'fieldIds'    => $field_ids,
+				'output'      => self::describe_string( $output ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$expected_ids === $field_ids
+				&& 1 === count( $result['formUrlEvents'] ?? array() )
+				&& 'image' === (string) ( $result['formUrlEvents'][0]['type'] ?? '' )
+				&& str_contains( (string) ( $result['formUrlEvents'][0]['url'] ?? '' ), 'tab=gallery' )
+				&& str_contains( (string) ( $result['formUrlEvents'][0]['url'] ?? '' ), 'post_id=' . (string) ( $result['postId'] ?? 0 ) ),
+			'gallery GET tab routes form URL and attachment edit fields for the selected parent or attachment',
+			array(
+				'formUrlEvents' => $result['formUrlEvents'] ?? array(),
+				'fieldEvents'   => $result['fieldEvents'] ?? array(),
+				'expectedIds'   => $expected_ids,
+			)
+		);
+
+		$script_status = $result['scriptStatus'] ?? array();
+		self::collect_failure(
+			$failures,
+			true === ( $script_status['enqueued'] ?? false )
+				|| true === ( $script_status['to_do'] ?? false )
+				|| true === ( $script_status['done'] ?? false ),
+			'gallery GET tab enqueues the legacy admin-gallery script handle before rendering',
+			array( 'scriptStatus' => $script_status )
+		);
+
+		self::collect_failure(
+			$failures,
+			empty( $case['chromeless'] )
+				? str_contains( $output, 'id="media-upload-header"' )
+				: ! str_contains( $output, 'id="media-upload-header"' ),
+			'gallery GET tab honors the chromeless request flag in media_upload_header()',
+			array(
+				'chromeless' => $case['chromeless'] ?? false,
+				'output'    => self::describe_string( $output ),
 			)
 		);
 	}

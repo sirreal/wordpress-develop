@@ -92,7 +92,7 @@ database, network requests, or a configured site.
   caption/send-to-editor helper output, legacy upload tab/header/form shell
   hooks, legacy `media-upload.php` entry dispatch, legacy upload send/gallery
   dispatch, URL insert dispatch, gallery save iframe dispatch, type/default
-  iframe dispatch, and WP_Error exit capture,
+  iframe dispatch, legacy library/gallery iframe rendering, and WP_Error exit capture,
   `wp_media_attach_action()` attach/detach redirect and denial exits, media-view
   enqueue settings/string contracts, in-process iframe shell rendering, and safe
   media button/uploader bypass output.
