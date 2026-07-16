@@ -44,6 +44,7 @@ final class RestMediaAttachmentsSurface {
 				$rows[] = self::check_sideload_raw_upload_metadata( $ctx->fork( 'sideload-raw' ), $case, $temp_root );
 				$rows[] = self::check_finalize_and_response_projection( $ctx->fork( 'finalize' ), $case, $temp_root );
 				$rows[] = self::check_permission_and_edit_fail_closed_paths( $ctx->fork( 'permission-edit' ), $case, $temp_root );
+				$rows[] = self::check_route_dispatched_edit_post_process_edges( $ctx->fork( 'edit-post-process-dispatch' ), $case, $temp_root );
 				$rows[] = self::check_client_side_route_contracts( $ctx->fork( 'client-side-routes' ) );
 			}
 		} catch ( \Throwable $e ) {
@@ -140,6 +141,7 @@ final class RestMediaAttachmentsSurface {
 				'wp_basename',
 				'wp_attachment_is',
 				'wp_attachment_is_image',
+				'wp_cache_delete',
 				'wp_cache_flush',
 				'wp_create_nonce',
 				'wp_get_attachment_metadata',
@@ -943,6 +945,432 @@ final class RestMediaAttachmentsSurface {
 		);
 	}
 
+	private static function check_route_dispatched_edit_post_process_edges( \ComponentFuzz\FuzzContext $ctx, array $case, string $temp_root ): array {
+		self::reset_content_runtime();
+		RestMediaAttachmentsMockImageEditor::reset();
+
+		$failures  = array();
+		$author    = self::insert_user( $case, 'route-editor' );
+		$parent    = self::insert_post( $case, $author );
+		$png_body  = self::tiny_png_bytes();
+		$filename  = 'route-edit-' . $case['token'] . '.png';
+		$metadata  = array(
+			'file'       => $filename,
+			'width'      => 120,
+			'height'     => 80,
+			'filesize'   => strlen( $png_body ),
+			'sizes'      => array(),
+			'image_meta' => array(
+				'camera'      => 'ComponentFuzz',
+				'credit'      => 'REST media route dispatch',
+				'orientation' => 6,
+			),
+		);
+		$attachment = self::insert_attachment_fixture( $case, $author, $temp_root, $filename, $png_body, true, 'image/png', $metadata );
+		\update_post_meta( $attachment, '_wp_attachment_image_alt', 'Original alt ' . $case['token'] );
+
+		$previous_server          = $GLOBALS['wp_rest_server'] ?? null;
+		$previous_current_user_id = isset( $GLOBALS['current_user'] ) && $GLOBALS['current_user'] instanceof \WP_User
+			? (int) $GLOBALS['current_user']->ID
+			: 0;
+		$server                   = new \WP_REST_Server();
+		$GLOBALS['wp_rest_server'] = $server;
+
+		$controller = new \WP_REST_Attachments_Controller( 'attachment' );
+		$controller->register_routes();
+
+		$cap_filter                   = null;
+		$cap_filter_removed           = false;
+		$image_editors_filter_removed = false;
+		$missing_sizes_filter_removed = false;
+		$advanced_sizes_filter_removed = false;
+		$metadata_filter_removed      = false;
+		$edited_filter_removed        = false;
+		$metadata_filter_log          = array();
+		$edited_filter_log            = array();
+		$missing_size_name            = 'component_fuzz_route_' . substr( $case['token'], 0, 6 );
+		$edited_title                 = 'Route Edited Title ' . $case['token'];
+		$edited_caption               = 'Route edited caption ' . $case['token'];
+		$edited_description           = 'Route edited description ' . $case['token'];
+		$edited_alt                   = 'Edited route alt ' . $case['token'] . '<script>bad</script>';
+
+		$image_editors_filter = static function (): array {
+			return array( RestMediaAttachmentsMockImageEditor::class );
+		};
+		$missing_sizes_filter = static function ( array $missing_sizes, array $image_meta, int $attachment_id ) use ( $attachment, $missing_size_name ): array {
+			if ( $attachment !== $attachment_id ) {
+				return $missing_sizes;
+			}
+
+			return array(
+				$missing_size_name => array(
+					'width'  => 60,
+					'height' => 40,
+					'crop'   => false,
+				),
+			);
+		};
+		$advanced_sizes_filter = static function ( array $sizes ): array {
+			return array();
+		};
+		$metadata_filter = static function ( array $image_meta, int $attachment_id, string $context ) use ( &$metadata_filter_log, $attachment, $case ): array {
+			$metadata_filter_log[] = array(
+				'id'      => $attachment_id,
+				'context' => $context,
+			);
+
+			if ( $attachment === $attachment_id && 'update' === $context ) {
+				$image_meta['component_fuzz_post_processed'] = $case['token'];
+			}
+
+			return $image_meta;
+		};
+		$edited_filter = static function ( array $image_meta, int $new_attachment_id, int $parent_attachment_id ) use ( &$edited_filter_log, $attachment, $case ): array {
+			$edited_filter_log[] = array(
+				'new'    => $new_attachment_id,
+				'parent' => $parent_attachment_id,
+			);
+
+			if ( $attachment === $parent_attachment_id ) {
+				$image_meta['component_fuzz_edited'] = $case['token'];
+			}
+
+			return $image_meta;
+		};
+
+		$counts_after_setup = self::content_counts();
+		$invalid_post_process_response = null;
+		$denied_edit_response          = null;
+		$post_process_response         = null;
+		$edit_response                 = null;
+		$counts_after_invalid          = array();
+		$counts_after_denied           = array();
+		$counts_after_post_process     = array();
+		$counts_after_edit             = array();
+
+		try {
+			$invalid_post_process_response = $server->dispatch(
+				self::request(
+					'POST',
+					'/wp/v2/media/' . $attachment . '/post-process',
+					array(),
+					array(),
+					array( 'action' => 'component-fuzz-invalid-action' )
+				)
+			);
+			$counts_after_invalid = self::content_counts();
+
+			\wp_set_current_user( 0 );
+			$denied_edit_response = $server->dispatch(
+				self::request(
+					'POST',
+					'/wp/v2/media/' . $attachment . '/edit',
+					array(),
+					array(),
+					array(
+						'modifiers' => array(
+							array(
+								'type' => 'rotate',
+								'args' => array( 'angle' => 90 ),
+							),
+						),
+						'src'       => \wp_get_attachment_url( $attachment ),
+					)
+				)
+			);
+			$counts_after_denied = self::content_counts();
+
+			\wp_set_current_user( $author );
+			$cap_filter = self::install_cap_filter(
+				array(
+					'create_posts',
+					'edit_post',
+					'edit_posts',
+					'edit_published_posts',
+					'read',
+					'upload_files',
+				)
+			);
+			\add_filter( 'wp_image_editors', $image_editors_filter, PHP_INT_MAX );
+			\add_filter( 'wp_get_missing_image_subsizes', $missing_sizes_filter, 10, 3 );
+			\add_filter( 'intermediate_image_sizes_advanced', $advanced_sizes_filter, 100, 3 );
+			\add_filter( 'wp_generate_attachment_metadata', $metadata_filter, 10, 3 );
+			\add_filter( 'wp_edited_image_metadata', $edited_filter, 10, 3 );
+			\wp_cache_delete( 'wp_image_editor_choose', 'image_editor' );
+
+			$post_process_response = $server->dispatch(
+				self::request(
+					'POST',
+					'/wp/v2/media/' . $attachment . '/post-process',
+					array( '_fields' => 'id,filename,filesize,media_details,mime_type' ),
+					array(),
+					array( 'action' => 'create-image-subsizes' )
+				)
+			);
+			$counts_after_post_process = self::content_counts();
+
+			$edit_response = $server->dispatch(
+				self::request(
+					'POST',
+					'/wp/v2/media/' . $attachment . '/edit',
+					array( '_fields' => 'alt_text,caption,description,filename,filesize,id,media_details,mime_type,post,source_url,title' ),
+					array(),
+					array(
+						'alt_text'    => $edited_alt,
+						'caption'     => $edited_caption,
+						'description' => $edited_description,
+						'modifiers'   => array(
+							array(
+								'type' => 'flip',
+								'args' => array(
+									'flip' => array(
+										'horizontal' => true,
+										'vertical'   => false,
+									),
+								),
+							),
+							array(
+								'type' => 'rotate',
+								'args' => array( 'angle' => 90 ),
+							),
+							array(
+								'type' => 'crop',
+								'args' => array(
+									'height' => 40,
+									'left'   => 10,
+									'top'    => 5,
+									'width'  => 50,
+								),
+							),
+						),
+						'post'        => $parent,
+						'src'         => \wp_get_attachment_url( $attachment ),
+						'title'       => $edited_title,
+					)
+				)
+			);
+			$counts_after_edit = self::content_counts();
+		} finally {
+			if ( null !== $cap_filter ) {
+				$cap_filter_removed = self::remove_cap_filter( $cap_filter );
+			}
+			\remove_filter( 'wp_edited_image_metadata', $edited_filter, 10 );
+			$edited_filter_removed = false === \has_filter( 'wp_edited_image_metadata', $edited_filter );
+			\remove_filter( 'wp_generate_attachment_metadata', $metadata_filter, 10 );
+			$metadata_filter_removed = false === \has_filter( 'wp_generate_attachment_metadata', $metadata_filter );
+			\remove_filter( 'intermediate_image_sizes_advanced', $advanced_sizes_filter, 100 );
+			$advanced_sizes_filter_removed = false === \has_filter( 'intermediate_image_sizes_advanced', $advanced_sizes_filter );
+			\remove_filter( 'wp_get_missing_image_subsizes', $missing_sizes_filter, 10 );
+			$missing_sizes_filter_removed = false === \has_filter( 'wp_get_missing_image_subsizes', $missing_sizes_filter );
+			\remove_filter( 'wp_image_editors', $image_editors_filter, PHP_INT_MAX );
+			$image_editors_filter_removed = false === \has_filter( 'wp_image_editors', $image_editors_filter );
+			\wp_cache_delete( 'wp_image_editor_choose', 'image_editor' );
+			\wp_set_current_user( $previous_current_user_id );
+
+			if ( null !== $previous_server ) {
+				$GLOBALS['wp_rest_server'] = $previous_server;
+			} else {
+				unset( $GLOBALS['wp_rest_server'] );
+			}
+		}
+
+		$post_process_data = $post_process_response instanceof \WP_REST_Response ? $post_process_response->get_data() : array();
+		$edit_data         = $edit_response instanceof \WP_REST_Response ? $edit_response->get_data() : array();
+		$edit_headers      = $edit_response instanceof \WP_REST_Response ? $edit_response->get_headers() : array();
+		$new_attachment_id = (int) ( $edit_data['id'] ?? 0 );
+		$new_attachment    = $new_attachment_id > 0 ? \get_post( $new_attachment_id ) : null;
+		$new_file          = $new_attachment_id > 0 ? \get_attached_file( $new_attachment_id ) : '';
+		$new_metadata      = $new_attachment_id > 0 ? \wp_get_attachment_metadata( $new_attachment_id ) : array();
+		$parent_metadata   = \wp_get_attachment_metadata( $attachment );
+		$editor_events     = RestMediaAttachmentsMockImageEditor::$events;
+		$event_signature   = implode(
+			'|',
+			array_map(
+				static function ( array $event ): string {
+					if ( 'crop' === ( $event['op'] ?? null ) ) {
+						return 'crop:' . ( $event['src_x'] ?? '?' ) . ',' . ( $event['src_y'] ?? '?' ) . ',' . ( $event['src_w'] ?? '?' ) . ',' . ( $event['src_h'] ?? '?' );
+					}
+					if ( 'multi_resize' === ( $event['op'] ?? null ) ) {
+						return 'multi_resize:' . implode( ',', $event['keys'] ?? array() );
+					}
+					if ( 'flip' === ( $event['op'] ?? null ) ) {
+						return 'flip:' . (int) ( $event['horizontal'] ?? false ) . ',' . (int) ( $event['vertical'] ?? false );
+					}
+					if ( 'rotate' === ( $event['op'] ?? null ) ) {
+						return 'rotate:' . ( $event['angle'] ?? '?' );
+					}
+					return (string) ( $event['op'] ?? 'unknown' );
+				},
+				$editor_events
+			)
+		);
+		$edit_checks       = array(
+			'response'       => $edit_response instanceof \WP_REST_Response,
+			'status'         => $edit_response instanceof \WP_REST_Response && 201 === $edit_response->get_status(),
+			'post'           => $new_attachment instanceof \WP_Post,
+			'newId'          => $new_attachment_id > 0 && $new_attachment_id !== $attachment,
+			'location'       => isset( $edit_headers['Location'] ) && str_contains( (string) $edit_headers['Location'], 'wp/v2/media/' . $new_attachment_id ),
+			'postShape'      => $new_attachment instanceof \WP_Post && 'attachment' === $new_attachment->post_type && 'inherit' === $new_attachment->post_status && 'image/png' === $new_attachment->post_mime_type,
+			'parent'         => $new_attachment instanceof \WP_Post && $parent === (int) $new_attachment->post_parent,
+			'title'          => $new_attachment instanceof \WP_Post && $edited_title === $new_attachment->post_title,
+			'caption'        => $new_attachment instanceof \WP_Post && $edited_caption === $new_attachment->post_excerpt,
+			'description'    => $new_attachment instanceof \WP_Post && $edited_description === $new_attachment->post_content,
+			'altMeta'        => \sanitize_text_field( $edited_alt ) === \get_post_meta( $new_attachment_id, '_wp_attachment_image_alt', true ),
+			'fileRoot'       => is_string( $new_file ) && self::path_starts_with( $new_file, rtrim( $temp_root, '/\\' ) ),
+			'fileExists'     => is_file( (string) $new_file ),
+			'filename'       => str_contains( \wp_basename( (string) $new_file ), 'route-edit-' . $case['token'] . '-edited' ),
+			'metadata'       => is_array( $new_metadata ) && $case['token'] === ( $new_metadata['component_fuzz_edited'] ?? null ),
+			'parentMetaId'   => is_array( $new_metadata ) && $attachment === (int) ( $new_metadata['parent_image']['attachment_id'] ?? 0 ),
+			'parentMetaFile' => is_array( $new_metadata ) && $filename === ( $new_metadata['parent_image']['file'] ?? null ),
+			'dataId'         => $new_attachment_id === (int) ( $edit_data['id'] ?? 0 ),
+			'dataParent'     => $parent === (int) ( $edit_data['post'] ?? 0 ),
+			'dataTitle'      => $edited_title === ( $edit_data['title']['rendered'] ?? null ),
+			'dataCaption'    => $edited_caption === ( $edit_data['caption']['rendered'] ?? null ),
+			'dataDescription' => $edited_description === ( $edit_data['description']['rendered'] ?? null ),
+			'dataAlt'        => \sanitize_text_field( $edited_alt ) === ( $edit_data['alt_text'] ?? null ),
+			'projectedKeys'  => self::projected_keys_match( $edit_data, array( 'alt_text', 'caption', 'description', 'filename', 'filesize', 'id', 'media_details', 'mime_type', 'post', 'source_url', 'title' ) ),
+			'counts'         => self::content_count_delta_matches( $counts_after_post_process, $counts_after_edit, array( 'post_meta' => 3, 'posts' => 1 ) ),
+		);
+		$failed_edit_checks = array_keys(
+			array_filter(
+				$edit_checks,
+				static function ( bool $ok ): bool {
+					return ! $ok;
+				}
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::response_error_matches( $invalid_post_process_response, 'rest_invalid_param', 400 )
+				&& self::content_count_delta_matches( $counts_after_setup, $counts_after_invalid, array() ),
+			'route-dispatched post-process rejects invalid action enum before content mutation',
+			array(
+				'response' => self::describe_response( $invalid_post_process_response ),
+				'before'   => $counts_after_setup,
+				'after'    => $counts_after_invalid,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::response_error_matches( $denied_edit_response, 'rest_cannot_edit_image', 401 )
+				&& self::content_count_delta_matches( $counts_after_invalid, $counts_after_denied, array() ),
+			'route-dispatched edit rejects users without upload permission before content mutation',
+			array(
+				'response' => self::describe_response( $denied_edit_response ),
+				'before'   => $counts_after_invalid,
+				'after'    => $counts_after_denied,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$post_process_response instanceof \WP_REST_Response
+				&& 200 === $post_process_response->get_status()
+				&& $attachment === (int) ( $post_process_data['id'] ?? 0 )
+				&& $filename === ( $post_process_data['filename'] ?? null )
+				&& 'image/png' === ( $post_process_data['mime_type'] ?? null )
+				&& isset( $post_process_data['media_details']['sizes'][ $missing_size_name ] )
+				&& $case['token'] === ( $post_process_data['media_details']['component_fuzz_post_processed'] ?? null )
+				&& is_array( $parent_metadata )
+				&& $case['token'] === ( $parent_metadata['component_fuzz_post_processed'] ?? null )
+				&& isset( $parent_metadata['sizes'][ $missing_size_name ] )
+				&& self::content_count_delta_matches( $counts_after_denied, $counts_after_post_process, array() ),
+			'route-dispatched post-process creates missing subsize metadata and projects edit-context attachment fields',
+			array(
+				'status'           => $post_process_response instanceof \WP_REST_Response ? $post_process_response->get_status() : null,
+				'data'             => $post_process_data,
+				'parentMetadata'   => $parent_metadata,
+				'metadataFilterLog' => $metadata_filter_log,
+				'before'           => $counts_after_denied,
+				'after'            => $counts_after_post_process,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			array() === $failed_edit_checks,
+			'route-dispatched edit applies modifiers, creates a new attachment, copies parent metadata, and projects requested fields',
+			array(
+				'failedChecks' => $failed_edit_checks,
+				'status'       => $edit_response instanceof \WP_REST_Response ? $edit_response->get_status() : null,
+				'newId'        => $new_attachment_id,
+				'newFile'      => is_string( $new_file ) ? \wp_basename( $new_file ) : null,
+				'dataKeys'     => array_keys( $edit_data ),
+				'metaKeys'     => is_array( $new_metadata ) ? array_keys( $new_metadata ) : array(),
+				'countDelta'   => array(
+					'posts'     => (int) ( $counts_after_edit['posts'] ?? 0 ) - (int) ( $counts_after_post_process['posts'] ?? 0 ),
+					'post_meta' => (int) ( $counts_after_edit['post_meta'] ?? 0 ) - (int) ( $counts_after_post_process['post_meta'] ?? 0 ),
+				),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			'multi_resize:' . $missing_size_name . '|flip:0,1|rotate:-90|crop:12,4,60,32|save' === $event_signature
+				&& array(
+					array(
+						'id'      => $attachment,
+						'context' => 'update',
+					),
+					array(
+						'id'      => $new_attachment_id,
+						'context' => 'create',
+					),
+				) === $metadata_filter_log
+				&& array(
+					array(
+						'new'    => $new_attachment_id,
+						'parent' => $attachment,
+					),
+				) === $edited_filter_log,
+			'route-dispatched edit and post-process use the expected editor operations and metadata filters',
+			array(
+				'editorEvents'      => $editor_events,
+				'metadataFilterLog' => $metadata_filter_log,
+				'editedFilterLog'   => $edited_filter_log,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$cap_filter_removed
+				&& $image_editors_filter_removed
+				&& $missing_sizes_filter_removed
+				&& $advanced_sizes_filter_removed
+				&& $metadata_filter_removed
+				&& $edited_filter_removed
+				&& false === \has_filter( 'wp_image_editors', $image_editors_filter )
+				&& false === \has_filter( 'wp_get_missing_image_subsizes', $missing_sizes_filter )
+				&& false === \has_filter( 'intermediate_image_sizes_advanced', $advanced_sizes_filter )
+				&& false === \has_filter( 'wp_generate_attachment_metadata', $metadata_filter )
+				&& false === \has_filter( 'wp_edited_image_metadata', $edited_filter ),
+			'route-dispatched edit/post-process restores capability, editor, image-size, and metadata filters',
+			array(
+				'capFilterRemoved'            => $cap_filter_removed,
+				'imageEditorsFilterRemoved'   => $image_editors_filter_removed,
+				'missingSizesFilterRemoved'   => $missing_sizes_filter_removed,
+				'advancedSizesFilterRemoved'  => $advanced_sizes_filter_removed,
+				'metadataFilterRemoved'       => $metadata_filter_removed,
+				'editedFilterRemoved'         => $edited_filter_removed,
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'rest-media-attachments.route-dispatched-edit-post-process',
+			$failures,
+			array(
+				'case'             => self::case_summary( $case ),
+				'attachment'       => $attachment,
+				'parent'           => $parent,
+				'failedEditChecks' => $failed_edit_checks,
+				'eventSignature'   => $event_signature,
+			)
+		);
+	}
+
 	private static function check_client_side_route_contracts( \ComponentFuzz\FuzzContext $ctx ): array {
 		self::reset_content_runtime();
 
@@ -1390,6 +1818,23 @@ final class RestMediaAttachmentsSurface {
 		return is_array( $data ) && $status === (int) ( $data['status'] ?? 0 );
 	}
 
+	private static function response_error_matches( $value, string $code, ?int $status = null ): bool {
+		if ( $value instanceof \WP_REST_Response ) {
+			$data = $value->get_data();
+			if ( ! is_array( $data ) || $code !== ( $data['code'] ?? null ) ) {
+				return false;
+			}
+
+			if ( null === $status ) {
+				return true;
+			}
+
+			return $status === (int) ( $data['data']['status'] ?? 0 );
+		}
+
+		return self::error_matches( $value, $code, $status );
+	}
+
 	private static function describe_errors( array $values ): array {
 		$out = array();
 		foreach ( $values as $key => $value ) {
@@ -1409,6 +1854,18 @@ final class RestMediaAttachmentsSurface {
 			'message' => $value->get_error_message(),
 			'data'    => $value->get_error_data(),
 		);
+	}
+
+	private static function describe_response( $value ) {
+		if ( $value instanceof \WP_REST_Response ) {
+			return array(
+				'status'  => $value->get_status(),
+				'data'    => $value->get_data(),
+				'headers' => $value->get_headers(),
+			);
+		}
+
+		return self::describe_error( $value );
 	}
 
 	private static function describe_throwable( \Throwable $e ): array {
@@ -1679,5 +2136,151 @@ final class RestMediaAttachmentsSurface {
 		}
 
 		@rmdir( $dir );
+	}
+}
+
+if ( ! class_exists( __NAMESPACE__ . '\\RestMediaAttachmentsMockImageEditor', false ) ) {
+	final class RestMediaAttachmentsMockImageEditor {
+		public static array $events = array();
+		private string $file;
+		private array $size = array(
+			'width'  => 120,
+			'height' => 80,
+		);
+
+		public function __construct( string $file ) {
+			$this->file = $file;
+		}
+
+		public static function reset(): void {
+			self::$events = array();
+		}
+
+		public static function test( $args = array() ) {
+			unset( $args );
+
+			return true;
+		}
+
+		public static function supports_mime_type( $mime_type ) {
+			unset( $mime_type );
+
+			return true;
+		}
+
+		public function load() {
+			return true;
+		}
+
+		public function get_size(): array {
+			return $this->size;
+		}
+
+		public function maybe_exif_rotate() {
+			return false;
+		}
+
+		public function resize( $max_w, $max_h, $crop = false ) {
+			self::$events[] = array(
+				'op'    => 'resize',
+				'max_w' => $max_w,
+				'max_h' => $max_h,
+				'crop'  => $crop,
+			);
+
+			return true;
+		}
+
+		public function multi_resize( $sizes ) {
+			self::$events[] = array(
+				'op'   => 'multi_resize',
+				'keys' => array_keys( (array) $sizes ),
+			);
+
+			$out = array();
+			foreach ( (array) $sizes as $name => $size ) {
+				$out[ $name ] = array(
+					'file'      => 'component-fuzz-' . sanitize_file_name( (string) $name ) . '.png',
+					'width'     => max( 1, (int) ( $size['width'] ?? 1 ) ),
+					'height'    => max( 1, (int) ( $size['height'] ?? 1 ) ),
+					'mime-type' => 'image/png',
+					'filesize'  => strlen( self::image_bytes() ),
+				);
+			}
+
+			return $out;
+		}
+
+		public function crop( $src_x, $src_y, $src_w, $src_h, $dst_w = null, $dst_h = null, $src_abs = false ) {
+			self::$events[] = array(
+				'op'      => 'crop',
+				'src_x'   => $src_x,
+				'src_y'   => $src_y,
+				'src_w'   => $src_w,
+				'src_h'   => $src_h,
+				'dst_w'   => $dst_w,
+				'dst_h'   => $dst_h,
+				'src_abs' => $src_abs,
+			);
+
+			return true;
+		}
+
+		public function rotate( $angle ) {
+			self::$events[] = array(
+				'op'    => 'rotate',
+				'angle' => $angle,
+			);
+
+			return true;
+		}
+
+		public function flip( $horz, $vert ) {
+			self::$events[] = array(
+				'op'         => 'flip',
+				'horizontal' => $horz,
+				'vertical'   => $vert,
+			);
+
+			return true;
+		}
+
+		public function save( $destfilename = null, $mime_type = null ) {
+			if ( null === $destfilename ) {
+				$info         = pathinfo( $this->file );
+				$destfilename = ( $info['dirname'] ?? '.' ) . DIRECTORY_SEPARATOR . ( $info['filename'] ?? 'component-fuzz' ) . '-edited.' . ( $info['extension'] ?? 'png' );
+			}
+
+			$mime_type = $mime_type ?: 'image/png';
+			\ComponentFuzz\ensure_dir( dirname( $destfilename ) );
+			file_put_contents( $destfilename, self::image_bytes() );
+
+			self::$events[] = array(
+				'op'        => 'save',
+				'path'      => $destfilename,
+				'mime_type' => $mime_type,
+			);
+
+			return array(
+				'path'      => $destfilename,
+				'file'      => wp_basename( $destfilename ),
+				'width'     => 60,
+				'height'    => 40,
+				'mime-type' => 'image/png',
+				'filesize'  => filesize( $destfilename ),
+			);
+		}
+
+		public function stream( $mime_type = null ) {
+			unset( $mime_type );
+
+			return true;
+		}
+
+		private static function image_bytes(): string {
+			return base64_decode(
+				'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII='
+			);
+		}
 	}
 }

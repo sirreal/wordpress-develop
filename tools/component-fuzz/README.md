@@ -780,9 +780,10 @@ database, network requests, or a configured site.
   directory and attachment postmeta pipeline, raw body client-side sideloads
   for generated subsizes and original-image metadata, non-image/PDF sideload
   rejection, permission gates, client-side media-processing route/argument
-  contracts, metadata finalization filters, `_fields` response projection,
-  edit-media fail-closed paths, temp upload cleanup, and global/filter
-  restoration.
+  contracts, metadata finalization filters, route-dispatched post-process and
+  edit paths, deterministic image-editor operations, edited attachment
+  creation, parent-image metadata, `_fields` response projection, edit-media
+  fail-closed paths, temp upload cleanup, and global/filter restoration.
 - `rest-widgets-sidebars`: no-live-DB REST widget, widget-type, and sidebar
   controller coverage, including route/schema contracts, public
   `show_in_rest` read gates, widget type sorting/projection and
