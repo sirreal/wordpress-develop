@@ -3229,6 +3229,9 @@ final class ContentLifecycleSurface {
 		$query_link = static function ( string $query_var_name, string $slug ): string {
 			return \home_url( \add_query_arg( $query_var_name, $slug, '' ) );
 		};
+		$raw_query_link = static function ( string $query_var_name, string $slug ): string {
+			return \home_url( '?' . $query_var_name . '=' . $slug );
+		};
 		$plain_link = static function ( string $post_type, int $post_id ): string {
 			return \home_url( \add_query_arg( array( 'post_type' => $post_type, 'p' => $post_id ), '' ) );
 		};
@@ -3288,6 +3291,10 @@ final class ContentLifecycleSurface {
 			$query_parent_slug  = 'single-query-parent-' . $token;
 			$query_child_slug   = 'single-query-child-' . $token;
 			$query_draft_slug   = 'single-query-draft-' . $token;
+			$query_raw_parent_slug = 'single query parent ' . $token;
+			$query_raw_child_slug  = 'child+plus&raw%2F' . $token;
+			$query_slash_parent_slug = 'single/query-parent-' . $token;
+			$query_slash_child_slug  = 'child/slash-' . $token;
 			$plain_parent_slug  = 'single-plain-parent-' . $token;
 			$plain_child_slug   = 'single-plain-child-' . $token;
 			$plain_draft_slug   = 'single-plain-draft-' . $token;
@@ -3298,6 +3305,10 @@ final class ContentLifecycleSurface {
 			$query_parent_id  = $insert_post( $query_type, 'Single Query Parent ' . $token, $query_parent_slug, 0 );
 			$query_child_id   = $insert_post( $query_type, 'Single Query Child ' . $token, $query_child_slug, $query_parent_id );
 			$query_draft_id   = $insert_post( $query_type, 'Single Query Draft ' . $token, $query_draft_slug, $query_parent_id, 'draft' );
+			$query_raw_parent_id = $insert_post( $query_type, 'Single Query Raw Parent ' . $token, $query_raw_parent_slug, 0 );
+			$query_raw_child_id  = $insert_post( $query_type, 'Single Query Raw Child ' . $token, $query_raw_child_slug, $query_raw_parent_id );
+			$query_slash_parent_id = $insert_post( $query_type, 'Single Query Slash Parent ' . $token, $query_slash_parent_slug, 0 );
+			$query_slash_child_id  = $insert_post( $query_type, 'Single Query Slash Child ' . $token, $query_slash_child_slug, $query_slash_parent_id );
 			$plain_parent_id  = $insert_post( $plain_type, 'Single Plain Parent ' . $token, $plain_parent_slug, 0 );
 			$plain_child_id   = $insert_post( $plain_type, 'Single Plain Child ' . $token, $plain_child_slug, $plain_parent_id );
 			$plain_draft_id   = $insert_post( $plain_type, 'Single Plain Draft ' . $token, $plain_draft_slug, $plain_parent_id, 'draft' );
@@ -3313,6 +3324,10 @@ final class ContentLifecycleSurface {
 					&& $query_parent_id > 0
 					&& $query_child_id > 0
 					&& $query_draft_id > 0
+					&& $query_raw_parent_id > 0
+					&& $query_raw_child_id > 0
+					&& $query_slash_parent_id > 0
+					&& $query_slash_child_id > 0
 					&& $plain_parent_id > 0
 					&& $plain_child_id > 0
 					&& $plain_draft_id > 0,
@@ -3331,6 +3346,8 @@ final class ContentLifecycleSurface {
 			$pretty_draft_uri = $pretty_parent_slug . '/' . $pretty_draft_slug;
 			$query_child_uri  = $query_parent_slug . '/' . $query_child_slug;
 			$query_draft_uri  = $query_parent_slug . '/' . $query_draft_slug;
+			$query_raw_child_uri = $query_raw_parent_slug . '/' . $query_raw_child_slug;
+			$query_slash_child_uri = $query_slash_parent_slug . '/' . $query_slash_child_slug;
 
 			$matrix = array(
 				array(
@@ -3415,6 +3432,42 @@ final class ContentLifecycleSurface {
 					'sample'    => true,
 				),
 				array(
+					'label'     => 'query-raw-reserved',
+					'actual'    => $call_link( 'query-raw-reserved', static fn () => \get_post_permalink( $query_raw_child_id ) ),
+					'expected'  => $raw_query_link( $query_var, $query_raw_child_uri ),
+					'postId'    => $query_raw_child_id,
+					'type'      => $query_type,
+					'leavename' => false,
+					'sample'    => false,
+				),
+				array(
+					'label'     => 'query-raw-get-permalink',
+					'actual'    => $call_link( 'query-raw-get-permalink', static fn () => \get_permalink( $query_raw_child_id ) ),
+					'expected'  => $raw_query_link( $query_var, $query_raw_child_uri ),
+					'postId'    => $query_raw_child_id,
+					'type'      => $query_type,
+					'leavename' => false,
+					'sample'    => false,
+				),
+				array(
+					'label'     => 'query-raw-leavename',
+					'actual'    => $call_link( 'query-raw-leavename', static fn () => \get_post_permalink( $query_raw_child_id, true ) ),
+					'expected'  => $raw_query_link( $query_var, $query_raw_child_uri ),
+					'postId'    => $query_raw_child_id,
+					'type'      => $query_type,
+					'leavename' => true,
+					'sample'    => false,
+				),
+				array(
+					'label'     => 'query-slash-segments',
+					'actual'    => $call_link( 'query-slash-segments', static fn () => \get_post_permalink( $query_slash_child_id ) ),
+					'expected'  => $raw_query_link( $query_var, $query_slash_child_uri ),
+					'postId'    => $query_slash_child_id,
+					'type'      => $query_type,
+					'leavename' => false,
+					'sample'    => false,
+				),
+				array(
 					'label'     => 'plain-published',
 					'actual'    => $call_link( 'plain-published', static fn () => \get_post_permalink( $plain_child_id ) ),
 					'expected'  => $plain_link( $plain_type, $plain_child_id ),
@@ -3461,7 +3514,7 @@ final class ContentLifecycleSurface {
 			self::collect_failure(
 				$failures,
 				$matrix_ok && false === $missing_link && array() === $link_events_for_label( 'missing-post' ),
-				'get_post_permalink covers custom post type pretty, query-var, plain, leavename, draft, and sample fallback branches',
+				'get_post_permalink covers custom post type pretty, query-var, raw encoded, plain, leavename, draft, and sample fallback branches',
 				array(
 					'matrix'      => $matrix_observed,
 					'missingLink' => $missing_link,
