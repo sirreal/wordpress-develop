@@ -37,6 +37,7 @@ final class RestControllersSurface {
 			$rows[] = self::check_additional_fields_controller_callbacks( $ctx );
 			$rows[] = self::check_namespace_route_contracts( $ctx );
 			$rows[] = self::check_settings_controller( $ctx );
+			$rows[] = self::check_settings_controller_dispatch_edges( $ctx->fork( 'settings-dispatch' ) );
 			$rows[] = self::check_block_types_controller( $ctx );
 			$rows[] = self::check_block_renderer_controller( $ctx->fork( 'block-renderer' ) );
 			$rows[] = self::check_block_patterns_controller( $ctx );
@@ -1568,6 +1569,230 @@ final class RestControllersSurface {
 		return self::row(
 			$ctx,
 			'rest-controllers.settings.schema-sanitize-update-permissions',
+			array() === $failures,
+			array(
+				'case'     => $case,
+				'failures' => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
+	private static function check_settings_controller_dispatch_edges( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime_state();
+
+		$case             = self::settings_case( $ctx->fork( 'settings-dispatch' ) );
+		$failures         = array();
+		$previous_server  = $GLOBALS['wp_rest_server'] ?? null;
+		$had_wp_actions   = array_key_exists( 'wp_actions', $GLOBALS );
+		$previous_actions = $GLOBALS['wp_actions'] ?? null;
+		$cap_filter       = null;
+		$server_restored  = false;
+		$actions_restored = false;
+		$cap_restored     = false;
+
+		$server                    = new \WP_REST_Server();
+		$GLOBALS['wp_rest_server'] = $server;
+
+		if ( ! isset( $GLOBALS['wp_actions'] ) || ! is_array( $GLOBALS['wp_actions'] ) ) {
+			$GLOBALS['wp_actions'] = array();
+		}
+		$GLOBALS['wp_actions']['rest_api_init'] = max( 1, (int) ( $GLOBALS['wp_actions']['rest_api_init'] ?? 0 ) );
+
+		try {
+			\register_setting(
+				'component_fuzz',
+				$case['stringOption'],
+				array(
+					'type'         => 'string',
+					'default'      => $case['stringDefault'],
+					'show_in_rest' => array(
+						'name'   => $case['stringName'],
+						'schema' => array(
+							'type'      => 'string',
+							'minLength' => 1,
+							'maxLength' => 48,
+							'pattern'   => '^[A-Za-z0-9 _-]+$',
+						),
+					),
+				)
+			);
+			\register_setting(
+				'component_fuzz',
+				$case['integerOption'],
+				array(
+					'type'         => 'integer',
+					'default'      => $case['integerDefault'],
+					'show_in_rest' => array(
+						'name'   => $case['integerName'],
+						'schema' => array(
+							'type'    => 'integer',
+							'minimum' => 0,
+							'maximum' => 100,
+						),
+					),
+				)
+			);
+			\register_setting(
+				'component_fuzz',
+				$case['arrayOption'],
+				array(
+					'type'         => 'array',
+					'default'      => array( $case['arrayDefault'] ),
+					'show_in_rest' => array(
+						'name'   => $case['arrayName'],
+						'schema' => array(
+							'type'     => 'array',
+							'minItems' => 1,
+							'maxItems' => 3,
+							'items'    => array(
+								'type'    => 'string',
+								'pattern' => '^item-[a-z0-9]+$',
+							),
+						),
+					),
+				)
+			);
+
+			\update_option( $case['stringOption'], $case['storedString'] );
+			\update_option( $case['integerOption'], $case['storedInteger'] );
+			\update_option( $case['arrayOption'], array( $case['storedArrayItem'] ) );
+
+			$controller = new \WP_REST_Settings_Controller();
+			$controller->register_routes();
+
+			$denied_request = self::request( 'PUT', '/wp/v2/settings' );
+			$denied_request->set_body_params(
+				array(
+					$case['stringName'] => $case['updatedString'],
+				)
+			);
+			$denied_response = $server->dispatch( $denied_request );
+
+			self::collect_failure(
+				$failures,
+				self::response_error_ok( $denied_response, 'rest_forbidden', \rest_authorization_required_code() )
+					&& $case['storedString'] === \get_option( $case['stringOption'] )
+					&& $case['storedInteger'] === \get_option( $case['integerOption'] )
+					&& array( $case['storedArrayItem'] ) === \get_option( $case['arrayOption'] ),
+				'settings route dispatch rejects unauthorized updates before mutating options',
+				array(
+					'deniedResponse' => $denied_response,
+					'storedOptions'  => array(
+						'string'  => \get_option( $case['stringOption'] ),
+						'integer' => \get_option( $case['integerOption'] ),
+						'array'   => \get_option( $case['arrayOption'] ),
+					),
+				)
+			);
+
+			$cap_filter = self::install_cap_filter( array( 'manage_options' ) );
+			$invalid_request = self::request( 'PUT', '/wp/v2/settings' );
+			$invalid_request->set_body_params(
+				array(
+					$case['stringName']  => 'bad/value!',
+					$case['integerName'] => 101,
+					$case['arrayName']   => array( 'bad value!' ),
+				)
+			);
+			$invalid_response = $server->dispatch( $invalid_request );
+			$invalid_data     = $invalid_response instanceof \WP_REST_Response ? $invalid_response->get_data() : array();
+			$invalid_params   = is_array( $invalid_data ) && isset( $invalid_data['data']['params'] ) && is_array( $invalid_data['data']['params'] )
+				? array_keys( $invalid_data['data']['params'] )
+				: array();
+			sort( $invalid_params, SORT_STRING );
+
+			self::collect_failure(
+				$failures,
+				self::response_error_ok( $invalid_response, 'rest_invalid_param', 400 )
+					&& array( $case['arrayName'], $case['integerName'], $case['stringName'] ) === $invalid_params
+					&& $case['storedString'] === \get_option( $case['stringOption'] )
+					&& $case['storedInteger'] === \get_option( $case['integerOption'] )
+					&& array( $case['storedArrayItem'] ) === \get_option( $case['arrayOption'] ),
+				'settings route dispatch validates schema before update_item and preserves stored values on invalid payloads',
+				array(
+					'invalidResponse' => $invalid_response,
+					'invalidParams'   => $invalid_params,
+					'storedOptions'   => array(
+						'string'  => \get_option( $case['stringOption'] ),
+						'integer' => \get_option( $case['integerOption'] ),
+						'array'   => \get_option( $case['arrayOption'] ),
+					),
+				)
+			);
+
+			$valid_request = self::request( 'PUT', '/wp/v2/settings' );
+			$valid_request->set_body_params(
+				array(
+					$case['stringName']  => $case['updatedString'],
+					$case['integerName'] => (string) $case['updatedInteger'],
+					$case['arrayName']   => array( $case['updatedArrayItem'] ),
+				)
+			);
+			$valid_response = $server->dispatch( $valid_request );
+			$valid_data     = $valid_response instanceof \WP_REST_Response ? $valid_response->get_data() : array();
+			\remove_filter( 'user_has_cap', $cap_filter, 10 );
+
+			self::collect_failure(
+				$failures,
+				$valid_response instanceof \WP_REST_Response
+					&& 200 === $valid_response->get_status()
+					&& $case['updatedString'] === \get_option( $case['stringOption'] )
+					&& $case['updatedInteger'] === \get_option( $case['integerOption'] )
+					&& array( $case['updatedArrayItem'] ) === \get_option( $case['arrayOption'] )
+					&& $case['updatedString'] === ( $valid_data[ $case['stringName'] ] ?? null )
+					&& $case['updatedInteger'] === ( $valid_data[ $case['integerName'] ] ?? null )
+					&& array( $case['updatedArrayItem'] ) === ( $valid_data[ $case['arrayName'] ] ?? null ),
+				'settings route dispatch sanitizes valid body params and returns updated setting values',
+				array(
+					'validResponse' => $valid_response,
+					'validData'     => $valid_data,
+					'storedOptions' => array(
+						'string'  => \get_option( $case['stringOption'] ),
+						'integer' => \get_option( $case['integerOption'] ),
+						'array'   => \get_option( $case['arrayOption'] ),
+					),
+				)
+			);
+		} finally {
+			if ( null !== $cap_filter ) {
+				\remove_filter( 'user_has_cap', $cap_filter, 10 );
+			}
+
+			$cap_restored = null === $cap_filter || false === \has_filter( 'user_has_cap', $cap_filter );
+
+			if ( $had_wp_actions ) {
+				$GLOBALS['wp_actions'] = $previous_actions;
+			} else {
+				unset( $GLOBALS['wp_actions'] );
+			}
+			$actions_restored = $had_wp_actions
+				? $previous_actions === ( $GLOBALS['wp_actions'] ?? null )
+				: ! array_key_exists( 'wp_actions', $GLOBALS );
+
+			if ( null !== $previous_server ) {
+				$GLOBALS['wp_rest_server'] = $previous_server;
+			} else {
+				unset( $GLOBALS['wp_rest_server'] );
+			}
+			$server_restored = null !== $previous_server
+				? $previous_server === ( $GLOBALS['wp_rest_server'] ?? null )
+				: ! array_key_exists( 'wp_rest_server', $GLOBALS );
+		}
+
+		self::collect_failure(
+			$failures,
+			$cap_restored && $actions_restored && $server_restored,
+			'settings route dispatch restores cap filter, wp_actions, and REST server globals',
+			array(
+				'capRestored'     => $cap_restored,
+				'actionsRestored' => $actions_restored,
+				'serverRestored'  => $server_restored,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'rest-controllers.settings.dispatch-permission-schema-updates',
 			array() === $failures,
 			array(
 				'case'     => $case,

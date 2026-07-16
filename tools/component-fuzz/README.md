@@ -735,7 +735,8 @@ database, network requests, or a configured site.
   menu-location route/permission/link contracts, plugin/theme route/schema
   contracts, and REST search handlers, including context/_fields filtering,
   registered additional-field get/update/schema callbacks, collection params,
-  permission gates, namespace-specific REST links, intercepted
+  permission gates, settings route dispatch permission/schema/update behavior,
+  namespace-specific REST links, intercepted
   core/featured/theme pattern directory requests, snake-case remote pattern
   normalization, duplicate suppression, remote-load filter gates,
   `WP_Theme::get_block_patterns()` header parsing/cache behavior, lazy
