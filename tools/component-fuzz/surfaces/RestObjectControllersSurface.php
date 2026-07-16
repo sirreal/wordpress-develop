@@ -4089,18 +4089,14 @@ final class RestObjectControllersSurface {
 		$actions_restored        = false;
 		$current_user_restored   = false;
 		$create_slug_collision_id = 0;
-		$unguarded_draft_create_id = 0;
-		$guarded_draft_create_id = 0;
-		$guarded_pending_create_id = 0;
-		$guarded_draft_update_id = 0;
-		$guarded_pending_update_id = 0;
-		$draft_guard_filter      = null;
+		$draft_create_id        = 0;
+		$pending_create_id      = 0;
+		$draft_update_id        = 0;
+		$pending_update_id      = 0;
 		$unique_slug_filter      = null;
-		$draft_guard_restored    = false;
 		$unique_slug_restored    = false;
-		$draft_guard_events      = array();
 		$unique_slug_events      = array();
-		$draft_guard_observed    = array();
+		$draft_pending_observed = array();
 
 		try {
 			$controllers = array(
@@ -4225,11 +4221,25 @@ final class RestObjectControllersSurface {
 					'title'   => $pending_collision_title,
 				);
 				$draft_counts_before     = self::content_counts();
-				$unguarded_draft_error   = null;
-				$unguarded_draft_response = null;
+				$draft_create_error      = null;
+				$pending_create_error    = null;
+				$draft_create_response   = null;
+				$pending_create_response = null;
+				$unique_slug_filter = static function ( $override_slug, string $slug, int $post_id, string $post_status, string $post_type, int $post_parent ) use ( &$unique_slug_events ) {
+					$unique_slug_events[] = array(
+						'slug'     => $slug,
+						'postId'   => $post_id,
+						'status'   => $post_status,
+						'type'     => $post_type,
+						'parent'   => $post_parent,
+						'override' => $override_slug,
+					);
+					return $override_slug;
+				};
+				\add_filter( 'pre_wp_unique_post_slug', $unique_slug_filter, 10, 6 );
 
 				try {
-					$unguarded_draft_response = $server->dispatch(
+					$draft_create_response = $server->dispatch(
 						self::request(
 							'POST',
 							'/wp/v2/posts',
@@ -4242,78 +4252,32 @@ final class RestObjectControllersSurface {
 						)
 					);
 				} catch ( \Throwable $e ) {
-					$unguarded_draft_error = $e;
+					$draft_create_error = $e;
 				}
+				$draft_create_data = $draft_create_response instanceof \WP_REST_Response ? $draft_create_response->get_data() : array();
+				$draft_create_id   = (int) ( $draft_create_data['id'] ?? 0 );
+				$draft_create_post = $draft_create_id > 0 ? \get_post( $draft_create_id ) : null;
 
-				$unguarded_draft_data = $unguarded_draft_response instanceof \WP_REST_Response ? $unguarded_draft_response->get_data() : array();
-				$unguarded_draft_create_id = (int) ( $unguarded_draft_data['id'] ?? 0 );
-				if ( $unguarded_draft_create_id > 0 ) {
-					\wp_delete_post( $unguarded_draft_create_id, true );
-					$unguarded_draft_create_id = 0;
-				}
-
-				$draft_guard_filter = static function ( $prepared_post, \WP_REST_Request $request ) use ( &$draft_guard_events ) {
-					if ( is_object( $prepared_post ) ) {
-						$draft_guard_events[] = array(
-							'route'     => $request->get_route(),
-							'status'    => $prepared_post->post_status ?? null,
-							'postName'  => $prepared_post->post_name ?? null,
-							'hadId'     => isset( $prepared_post->id ),
-							'hadParent' => isset( $prepared_post->post_parent ),
-						);
-						if ( ! isset( $prepared_post->id ) ) {
-							$prepared_post->id = 0;
-						}
-						if ( ! isset( $prepared_post->post_parent ) ) {
-							$prepared_post->post_parent = 0;
-						}
-					}
-					return $prepared_post;
-				};
-				$unique_slug_filter = static function ( $override_slug, string $slug, int $post_id, string $post_status, string $post_type, int $post_parent ) use ( &$unique_slug_events ) {
-					$unique_slug_events[] = array(
-						'slug'     => $slug,
-						'postId'   => $post_id,
-						'status'   => $post_status,
-						'type'     => $post_type,
-						'parent'   => $post_parent,
-						'override' => $override_slug,
+				try {
+					$pending_create_response = $server->dispatch(
+						self::request(
+							'POST',
+							'/wp/v2/posts',
+							array(
+								'_fields' => 'id,slug,status,title',
+								'context' => 'edit',
+							),
+							array(),
+							$pending_request_body
+						)
 					);
-					return $override_slug;
-				};
-				\add_filter( 'rest_pre_insert_post', $draft_guard_filter, 10, 2 );
-				\add_filter( 'pre_wp_unique_post_slug', $unique_slug_filter, 10, 6 );
-				$guarded_draft_response = $server->dispatch(
-					self::request(
-						'POST',
-						'/wp/v2/posts',
-						array(
-							'_fields' => 'id,slug,status,title',
-							'context' => 'edit',
-						),
-						array(),
-						$draft_request_body
-					)
-				);
-				$guarded_draft_data      = $guarded_draft_response instanceof \WP_REST_Response ? $guarded_draft_response->get_data() : array();
-				$guarded_draft_create_id = (int) ( $guarded_draft_data['id'] ?? 0 );
-				$guarded_draft_post      = $guarded_draft_create_id > 0 ? \get_post( $guarded_draft_create_id ) : null;
-				$guarded_pending_response = $server->dispatch(
-					self::request(
-						'POST',
-						'/wp/v2/posts',
-						array(
-							'_fields' => 'id,slug,status,title',
-							'context' => 'edit',
-						),
-						array(),
-						$pending_request_body
-					)
-				);
-				$guarded_pending_data      = $guarded_pending_response instanceof \WP_REST_Response ? $guarded_pending_response->get_data() : array();
-				$guarded_pending_create_id = (int) ( $guarded_pending_data['id'] ?? 0 );
-				$guarded_pending_post      = $guarded_pending_create_id > 0 ? \get_post( $guarded_pending_create_id ) : null;
-				$guarded_draft_update_id   = \wp_insert_post(
+				} catch ( \Throwable $e ) {
+					$pending_create_error = $e;
+				}
+				$pending_create_data = $pending_create_response instanceof \WP_REST_Response ? $pending_create_response->get_data() : array();
+				$pending_create_id   = (int) ( $pending_create_data['id'] ?? 0 );
+				$pending_create_post = $pending_create_id > 0 ? \get_post( $pending_create_id ) : null;
+				$draft_update_id     = \wp_insert_post(
 					\wp_slash(
 						array(
 							'post_type'    => 'post',
@@ -4327,7 +4291,7 @@ final class RestObjectControllersSurface {
 					true,
 					false
 				);
-				$guarded_pending_update_id = \wp_insert_post(
+				$pending_update_id = \wp_insert_post(
 					\wp_slash(
 						array(
 							'post_type'    => 'post',
@@ -4344,7 +4308,7 @@ final class RestObjectControllersSurface {
 				$draft_update_response = $server->dispatch(
 					self::request(
 						'PUT',
-						'/wp/v2/posts/' . (int) $guarded_draft_update_id,
+						'/wp/v2/posts/' . (int) $draft_update_id,
 						array(
 							'_fields' => 'id,slug,status,title',
 							'context' => 'edit',
@@ -4360,7 +4324,7 @@ final class RestObjectControllersSurface {
 				$pending_update_response = $server->dispatch(
 					self::request(
 						'PUT',
-						'/wp/v2/posts/' . (int) $guarded_pending_update_id,
+						'/wp/v2/posts/' . (int) $pending_update_id,
 						array(
 							'_fields' => 'id,slug,status,title',
 							'context' => 'edit',
@@ -4375,90 +4339,85 @@ final class RestObjectControllersSurface {
 				);
 				$draft_update_data       = $draft_update_response instanceof \WP_REST_Response ? $draft_update_response->get_data() : array();
 				$pending_update_data     = $pending_update_response instanceof \WP_REST_Response ? $pending_update_response->get_data() : array();
-				$draft_update_post       = is_int( $guarded_draft_update_id ) && $guarded_draft_update_id > 0 ? \get_post( $guarded_draft_update_id ) : null;
-				$pending_update_post     = is_int( $guarded_pending_update_id ) && $guarded_pending_update_id > 0 ? \get_post( $guarded_pending_update_id ) : null;
-				\remove_filter( 'rest_pre_insert_post', $draft_guard_filter, 10 );
+				$draft_update_post       = is_int( $draft_update_id ) && $draft_update_id > 0 ? \get_post( $draft_update_id ) : null;
+				$pending_update_post     = is_int( $pending_update_id ) && $pending_update_id > 0 ? \get_post( $pending_update_id ) : null;
 				\remove_filter( 'pre_wp_unique_post_slug', $unique_slug_filter, 10 );
-				$draft_guard_restored = false === \has_filter( 'rest_pre_insert_post', $draft_guard_filter );
 				$unique_slug_restored = false === \has_filter( 'pre_wp_unique_post_slug', $unique_slug_filter );
 				$draft_holder_after   = $create_slug_collision_post instanceof \WP_Post ? \get_post( $create_slug_collision_post->ID ) : null;
-				if ( $guarded_draft_create_id > 0 ) {
-					\wp_delete_post( $guarded_draft_create_id, true );
-					$guarded_draft_create_id = 0;
+				if ( $draft_create_id > 0 ) {
+					\wp_delete_post( $draft_create_id, true );
+					$draft_create_id = 0;
 				}
-				if ( $guarded_pending_create_id > 0 ) {
-					\wp_delete_post( $guarded_pending_create_id, true );
-					$guarded_pending_create_id = 0;
+				if ( $pending_create_id > 0 ) {
+					\wp_delete_post( $pending_create_id, true );
+					$pending_create_id = 0;
 				}
-				if ( is_int( $guarded_draft_update_id ) && $guarded_draft_update_id > 0 ) {
-					\wp_delete_post( $guarded_draft_update_id, true );
-					$guarded_draft_update_id = 0;
+				if ( is_int( $draft_update_id ) && $draft_update_id > 0 ) {
+					\wp_delete_post( $draft_update_id, true );
+					$draft_update_id = 0;
 				}
-				if ( is_int( $guarded_pending_update_id ) && $guarded_pending_update_id > 0 ) {
-					\wp_delete_post( $guarded_pending_update_id, true );
-					$guarded_pending_update_id = 0;
+				if ( is_int( $pending_update_id ) && $pending_update_id > 0 ) {
+					\wp_delete_post( $pending_update_id, true );
+					$pending_update_id = 0;
 				}
 				$draft_counts_after   = self::content_counts();
-				$draft_guard_observed = array(
-					'unguarded' => array(
-						'response' => $unguarded_draft_response instanceof \WP_REST_Response ? $unguarded_draft_data : null,
-						'error'    => $unguarded_draft_error instanceof \Throwable ? self::describe_throwable( $unguarded_draft_error ) : null,
-					),
-					'guarded'   => array(
-						'response' => $guarded_draft_data,
-						'status'   => $guarded_draft_response instanceof \WP_REST_Response ? $guarded_draft_response->get_status() : null,
-						'stored'   => $guarded_draft_post instanceof \WP_Post
+				$draft_pending_observed = array(
+					'draftCreate' => array(
+						'response' => $draft_create_data,
+						'status'   => $draft_create_response instanceof \WP_REST_Response ? $draft_create_response->get_status() : null,
+						'error'    => $draft_create_error instanceof \Throwable ? self::describe_throwable( $draft_create_error ) : null,
+						'stored'   => $draft_create_post instanceof \WP_Post
 							? array(
-								'id'     => (int) $guarded_draft_post->ID,
-								'slug'   => $guarded_draft_post->post_name,
-								'status' => $guarded_draft_post->post_status,
+								'id'     => (int) $draft_create_post->ID,
+								'slug'   => $draft_create_post->post_name,
+								'status' => $draft_create_post->post_status,
 							)
 							: null,
-						'pending'  => array(
-							'response' => $guarded_pending_data,
-							'status'   => $guarded_pending_response instanceof \WP_REST_Response ? $guarded_pending_response->get_status() : null,
-							'stored'   => $guarded_pending_post instanceof \WP_Post
+					),
+					'pendingCreate' => array(
+						'response' => $pending_create_data,
+						'status'   => $pending_create_response instanceof \WP_REST_Response ? $pending_create_response->get_status() : null,
+						'error'    => $pending_create_error instanceof \Throwable ? self::describe_throwable( $pending_create_error ) : null,
+						'stored'   => $pending_create_post instanceof \WP_Post
+							? array(
+								'id'     => (int) $pending_create_post->ID,
+								'slug'   => $pending_create_post->post_name,
+								'status' => $pending_create_post->post_status,
+							)
+							: null,
+					),
+					'updates'  => array(
+						'draft'   => array(
+							'response' => $draft_update_data,
+							'status'   => $draft_update_response instanceof \WP_REST_Response ? $draft_update_response->get_status() : null,
+							'stored'   => $draft_update_post instanceof \WP_Post
 								? array(
-									'id'     => (int) $guarded_pending_post->ID,
-									'slug'   => $guarded_pending_post->post_name,
-									'status' => $guarded_pending_post->post_status,
+									'id'     => (int) $draft_update_post->ID,
+									'slug'   => $draft_update_post->post_name,
+									'status' => $draft_update_post->post_status,
 								)
 								: null,
 						),
-						'updates'  => array(
-							'draft'   => array(
-								'response' => $draft_update_data,
-								'status'   => $draft_update_response instanceof \WP_REST_Response ? $draft_update_response->get_status() : null,
-								'stored'   => $draft_update_post instanceof \WP_Post
-									? array(
-										'id'     => (int) $draft_update_post->ID,
-										'slug'   => $draft_update_post->post_name,
-										'status' => $draft_update_post->post_status,
-									)
-									: null,
-							),
-							'pending' => array(
-								'response' => $pending_update_data,
-								'status'   => $pending_update_response instanceof \WP_REST_Response ? $pending_update_response->get_status() : null,
-								'stored'   => $pending_update_post instanceof \WP_Post
-									? array(
-										'id'     => (int) $pending_update_post->ID,
-										'slug'   => $pending_update_post->post_name,
-										'status' => $pending_update_post->post_status,
-									)
-									: null,
-							),
+						'pending' => array(
+							'response' => $pending_update_data,
+							'status'   => $pending_update_response instanceof \WP_REST_Response ? $pending_update_response->get_status() : null,
+							'stored'   => $pending_update_post instanceof \WP_Post
+								? array(
+									'id'     => (int) $pending_update_post->ID,
+									'slug'   => $pending_update_post->post_name,
+									'status' => $pending_update_post->post_status,
+								)
+								: null,
 						),
-						'holder'   => $draft_holder_after instanceof \WP_Post
-							? array(
-								'id'     => (int) $draft_holder_after->ID,
-								'slug'   => $draft_holder_after->post_name,
-								'status' => $draft_holder_after->post_status,
-							)
-							: null,
-						'events'   => $draft_guard_events,
-						'unique'   => $unique_slug_events,
 					),
+					'holder'   => $draft_holder_after instanceof \WP_Post
+						? array(
+							'id'     => (int) $draft_holder_after->ID,
+							'slug'   => $draft_holder_after->post_name,
+							'status' => $draft_holder_after->post_status,
+						)
+						: null,
+					'unique'   => $unique_slug_events,
 					'counts'    => array(
 						'before' => $draft_counts_before,
 						'after'  => $draft_counts_after,
@@ -4684,12 +4643,6 @@ final class RestObjectControllersSurface {
 				)
 			);
 
-			$unguarded_draft_ok = $unguarded_draft_error instanceof \Throwable
-				&& str_contains( $unguarded_draft_error->getMessage(), 'Undefined property' );
-			if ( ! $unguarded_draft_ok && $unguarded_draft_response instanceof \WP_REST_Response ) {
-				$unguarded_draft_ok = 201 === $unguarded_draft_response->get_status()
-					&& $route_post_slug_expected === ( $unguarded_draft_data['slug'] ?? null );
-			}
 			$unique_slug_publish_statuses = array_filter(
 				$unique_slug_events,
 				static function ( array $event ) use ( $route_post_slug_base ): bool {
@@ -4702,25 +4655,25 @@ final class RestObjectControllersSurface {
 
 			self::collect_failure(
 				$failures,
-				$unguarded_draft_ok
-					&& $draft_guard_restored
+				null === $draft_create_error
+					&& null === $pending_create_error
 					&& $unique_slug_restored
-					&& $guarded_draft_response instanceof \WP_REST_Response
-					&& 201 === $guarded_draft_response->get_status()
-					&& self::projected_keys_match( $guarded_draft_data, array( 'id', 'slug', 'status', 'title' ) )
-					&& $route_post_slug_expected === ( $guarded_draft_data['slug'] ?? null )
-					&& 'draft' === ( $guarded_draft_data['status'] ?? null )
-					&& $guarded_draft_post instanceof \WP_Post
-					&& $route_post_slug_expected === $guarded_draft_post->post_name
-					&& 'draft' === $guarded_draft_post->post_status
-					&& $guarded_pending_response instanceof \WP_REST_Response
-					&& 201 === $guarded_pending_response->get_status()
-					&& self::projected_keys_match( $guarded_pending_data, array( 'id', 'slug', 'status', 'title' ) )
-					&& $route_post_slug_base . '-3' === ( $guarded_pending_data['slug'] ?? null )
-					&& 'pending' === ( $guarded_pending_data['status'] ?? null )
-					&& $guarded_pending_post instanceof \WP_Post
-					&& $route_post_slug_base . '-3' === $guarded_pending_post->post_name
-					&& 'pending' === $guarded_pending_post->post_status
+					&& $draft_create_response instanceof \WP_REST_Response
+					&& 201 === $draft_create_response->get_status()
+					&& self::projected_keys_match( $draft_create_data, array( 'id', 'slug', 'status', 'title' ) )
+					&& $route_post_slug_expected === ( $draft_create_data['slug'] ?? null )
+					&& 'draft' === ( $draft_create_data['status'] ?? null )
+					&& $draft_create_post instanceof \WP_Post
+					&& $route_post_slug_expected === $draft_create_post->post_name
+					&& 'draft' === $draft_create_post->post_status
+					&& $pending_create_response instanceof \WP_REST_Response
+					&& 201 === $pending_create_response->get_status()
+					&& self::projected_keys_match( $pending_create_data, array( 'id', 'slug', 'status', 'title' ) )
+					&& $route_post_slug_base . '-3' === ( $pending_create_data['slug'] ?? null )
+					&& 'pending' === ( $pending_create_data['status'] ?? null )
+					&& $pending_create_post instanceof \WP_Post
+					&& $route_post_slug_base . '-3' === $pending_create_post->post_name
+					&& 'pending' === $pending_create_post->post_status
 					&& $draft_update_response instanceof \WP_REST_Response
 					&& 200 === $draft_update_response->get_status()
 					&& self::projected_keys_match( $draft_update_data, array( 'id', 'slug', 'status', 'title' ) )
@@ -4742,8 +4695,8 @@ final class RestObjectControllersSurface {
 					&& $draft_holder_after instanceof \WP_Post
 					&& $route_post_slug_base === $draft_holder_after->post_name
 					&& self::content_count_delta_matches( $draft_counts_before, $draft_counts_after, array(), array() ),
-				'route-dispatched draft and pending post create/update slug uniqueness uses publish-status checks without leaking warnings or rows',
-				$draft_guard_observed
+				'route-dispatched draft and pending post create/update slug uniqueness uses unguarded publish-status checks without leaking warnings or rows',
+				$draft_pending_observed
 			);
 
 			self::collect_failure(
@@ -4853,28 +4806,21 @@ final class RestObjectControllersSurface {
 				$write_filter_restored = self::remove_cap_filter( $cap_filter );
 			}
 
-			if ( null !== $draft_guard_filter && false !== \has_filter( 'rest_pre_insert_post', $draft_guard_filter ) ) {
-				\remove_filter( 'rest_pre_insert_post', $draft_guard_filter, 10 );
-				$draft_guard_restored = false === \has_filter( 'rest_pre_insert_post', $draft_guard_filter );
-			}
 			if ( null !== $unique_slug_filter && false !== \has_filter( 'pre_wp_unique_post_slug', $unique_slug_filter ) ) {
 				\remove_filter( 'pre_wp_unique_post_slug', $unique_slug_filter, 10 );
 				$unique_slug_restored = false === \has_filter( 'pre_wp_unique_post_slug', $unique_slug_filter );
 			}
-			if ( is_int( $guarded_draft_create_id ) && $guarded_draft_create_id > 0 ) {
-				\wp_delete_post( $guarded_draft_create_id, true );
+			if ( is_int( $draft_create_id ) && $draft_create_id > 0 ) {
+				\wp_delete_post( $draft_create_id, true );
 			}
-			if ( is_int( $guarded_pending_create_id ) && $guarded_pending_create_id > 0 ) {
-				\wp_delete_post( $guarded_pending_create_id, true );
+			if ( is_int( $pending_create_id ) && $pending_create_id > 0 ) {
+				\wp_delete_post( $pending_create_id, true );
 			}
-			if ( is_int( $guarded_draft_update_id ) && $guarded_draft_update_id > 0 ) {
-				\wp_delete_post( $guarded_draft_update_id, true );
+			if ( is_int( $draft_update_id ) && $draft_update_id > 0 ) {
+				\wp_delete_post( $draft_update_id, true );
 			}
-			if ( is_int( $guarded_pending_update_id ) && $guarded_pending_update_id > 0 ) {
-				\wp_delete_post( $guarded_pending_update_id, true );
-			}
-			if ( is_int( $unguarded_draft_create_id ) && $unguarded_draft_create_id > 0 ) {
-				\wp_delete_post( $unguarded_draft_create_id, true );
+			if ( is_int( $pending_update_id ) && $pending_update_id > 0 ) {
+				\wp_delete_post( $pending_update_id, true );
 			}
 			if ( is_int( $create_slug_collision_id ) && $create_slug_collision_id > 0 ) {
 				\wp_delete_post( $create_slug_collision_id, true );
@@ -4927,7 +4873,6 @@ final class RestObjectControllersSurface {
 				&& $sanitize_filter_restored
 				&& $permalink_filter_restored
 				&& $rewrite_restored
-				&& $draft_guard_restored
 				&& $unique_slug_restored
 				&& $server_restored
 				&& $actions_restored
@@ -4941,7 +4886,6 @@ final class RestObjectControllersSurface {
 				'sanitizeFilterRestored' => $sanitize_filter_restored,
 				'permalinkFilterRestored' => $permalink_filter_restored,
 				'rewriteRestored'        => $rewrite_restored,
-				'draftGuardRestored'     => $draft_guard_restored,
 				'uniqueSlugRestored'     => $unique_slug_restored,
 				'serverRestored'        => $server_restored,
 				'actionsRestored'       => $actions_restored,

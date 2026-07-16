@@ -49,6 +49,9 @@ final class ContentLifecycleSurface {
 			$rows[] = self::check_post_slug_history_and_sample_permalink( $ctx->fork( 'post-slug-history-sample' ), $case );
 
 			self::prepare_runtime();
+			$rows[] = self::check_sample_permalink_numeric_archive_and_plain_html( $ctx->fork( 'sample-permalink-numeric-plain' ), $case );
+
+			self::prepare_runtime();
 			$rows[] = self::check_admin_post_save_orchestration( $ctx->fork( 'admin-post-save' ), $case );
 
 			self::prepare_runtime();
@@ -1584,6 +1587,475 @@ final class ContentLifecycleSurface {
 			array(
 				'case'     => self::case_summary( $case ),
 				'postIds'  => $post_ids,
+				'failures' => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
+	private static function check_sample_permalink_numeric_archive_and_plain_html( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures                    = array();
+		$post_ids                    = array();
+		$current_permalink_structure = '/%postname%/';
+		$active_unique_label         = null;
+		$unique_slug_events          = array();
+		$numeric_observed            = array();
+		$plain_observed              = array();
+		$previous_rewrite_set        = array_key_exists( 'wp_rewrite', $GLOBALS );
+		$previous_rewrite            = $GLOBALS['wp_rewrite'] ?? null;
+		$previous_user_id            = isset( $GLOBALS['current_user'] ) && $GLOBALS['current_user'] instanceof \WP_User ? (int) $GLOBALS['current_user']->ID : 0;
+		$manage_cap_filter           = null;
+		$read_cap_filter             = null;
+
+		$permalink_filter = static function () use ( &$current_permalink_structure ): string {
+			return $current_permalink_structure;
+		};
+		$show_on_front_filter = static function (): string {
+			return 'posts';
+		};
+		$page_on_front_filter = static function (): int {
+			return 0;
+		};
+		$set_permalink_structure = static function ( string $structure ) use ( &$current_permalink_structure ): void {
+			$current_permalink_structure = $structure;
+
+			if ( isset( $GLOBALS['wp_rewrite'] ) && $GLOBALS['wp_rewrite'] instanceof \WP_Rewrite ) {
+				$GLOBALS['wp_rewrite']->permalink_structure = $structure;
+			}
+		};
+		$remember_post = static function ( $post_id ) use ( &$post_ids ): int {
+			if ( is_int( $post_id ) && $post_id > 0 ) {
+				$post_ids[] = $post_id;
+				return $post_id;
+			}
+
+			return 0;
+		};
+		$html_has_no_slug_editor = static function ( string $html ): bool {
+			return ! str_contains( $html, 'editable-post-name' )
+				&& ! str_contains( $html, 'editable-post-name-full' )
+				&& ! str_contains( $html, 'edit-slug' )
+				&& ! str_contains( $html, '%postname%' )
+				&& ! str_contains( $html, '%pagename%' );
+		};
+		$unique_slug_filter = static function ( $override_slug, string $slug, int $post_id, string $post_status, string $post_type, int $post_parent ) use ( &$active_unique_label, &$unique_slug_events ) {
+			if ( null !== $active_unique_label ) {
+				$unique_slug_events[] = array(
+					'label'    => $active_unique_label,
+					'slug'     => $slug,
+					'postId'   => $post_id,
+					'status'   => $post_status,
+					'type'     => $post_type,
+					'parent'   => $post_parent,
+					'override' => $override_slug,
+				);
+			}
+
+			return $override_slug;
+		};
+
+		try {
+			if ( ( ! function_exists( 'get_sample_permalink' ) || ! function_exists( 'get_sample_permalink_html' ) ) && defined( 'ABSPATH' ) ) {
+				require_once ABSPATH . 'wp-admin/includes/post.php';
+			}
+
+			$GLOBALS['wp_rewrite'] = new \WP_Rewrite();
+			$set_permalink_structure( $current_permalink_structure );
+			\add_filter( 'pre_option_permalink_structure', $permalink_filter );
+			\add_filter( 'pre_option_show_on_front', $show_on_front_filter );
+			\add_filter( 'pre_option_page_on_front', $page_on_front_filter );
+			\add_filter( 'pre_wp_unique_post_slug', $unique_slug_filter, 10, 6 );
+
+			$functions_available = function_exists( 'get_sample_permalink' ) && function_exists( 'get_sample_permalink_html' );
+			self::collect_failure(
+				$failures,
+				$functions_available,
+				'sample permalink admin helpers are available for numeric and plain permalink checks',
+				array(
+					'getSamplePermalink'     => function_exists( 'get_sample_permalink' ),
+					'getSamplePermalinkHtml' => function_exists( 'get_sample_permalink_html' ),
+				)
+			);
+
+			if ( $functions_available ) {
+				$numeric_matrix = array(
+					array(
+						'label'     => 'year-root',
+						'structure' => '/%postname%/',
+						'slug'      => '2015',
+						'expected'  => '2015-2',
+					),
+					array(
+						'label'     => 'year-after-year',
+						'structure' => '/%year%/%postname%/',
+						'slug'      => '2015',
+						'expected'  => '2015',
+					),
+					array(
+						'label'     => 'month-after-year',
+						'structure' => '/%year%/%postname%/',
+						'slug'      => '11',
+						'expected'  => '11-2',
+					),
+					array(
+						'label'     => 'invalid-month-after-year',
+						'structure' => '/%year%/%postname%/',
+						'slug'      => '13',
+						'expected'  => '13',
+					),
+					array(
+						'label'     => 'day-after-month',
+						'structure' => '/%year%/%monthnum%/%postname%/',
+						'slug'      => '30',
+						'expected'  => '30-2',
+					),
+					array(
+						'label'     => 'day-after-month-iterate',
+						'structure' => '/%year%/%monthnum%/%postname%/',
+						'slug'      => '30',
+						'expected'  => '30-3',
+						'holder'    => '30-2',
+					),
+					array(
+						'label'     => 'invalid-day-after-month',
+						'structure' => '/%year%/%monthnum%/%postname%/',
+						'slug'      => '32',
+						'expected'  => '32',
+					),
+					array(
+						'label'     => 'postname-after-day',
+						'structure' => '/%year%/%monthnum%/%day%/%postname%/',
+						'slug'      => '30',
+						'expected'  => '30',
+					),
+				);
+				$numeric_matrix_ok = true;
+
+				foreach ( $numeric_matrix as $index => $entry ) {
+					$set_permalink_structure( $entry['structure'] );
+					$holder_id   = 0;
+					$holder_post = null;
+
+					if ( isset( $entry['holder'] ) ) {
+						$holder_id = $remember_post(
+							\wp_insert_post(
+								\wp_slash(
+									array(
+										'post_type'    => 'post',
+										'post_title'   => 'Sample Permalink Holder ' . $entry['label'] . ' ' . $case['token'],
+										'post_content' => 'Sample permalink holder content ' . $case['token'],
+										'post_status'  => 'publish',
+										'post_name'    => $entry['holder'],
+									)
+								),
+								true,
+								false
+							)
+						);
+						$holder_post = $holder_id > 0 ? \get_post( $holder_id ) : null;
+					}
+
+					$draft_id = $remember_post(
+						\wp_insert_post(
+							\wp_slash(
+								array(
+									'post_type'     => 'post',
+									'post_title'    => 'Sample Numeric ' . $entry['label'] . ' ' . $case['token'],
+									'post_content'  => 'Sample numeric content ' . $case['updatedContent'],
+									'post_status'   => 'draft',
+									'post_name'     => 'sample-numeric-' . $entry['label'] . '-' . $case['token'],
+									'post_date'     => '2024-06-' . str_pad( (string) ( $index + 1 ), 2, '0', STR_PAD_LEFT ) . ' 02:03:04',
+									'post_date_gmt' => '2024-06-' . str_pad( (string) ( $index + 1 ), 2, '0', STR_PAD_LEFT ) . ' 02:03:04',
+								)
+							),
+							true,
+							false
+						)
+					);
+					$before = $draft_id > 0 ? \get_post( $draft_id ) : null;
+					$sample = array();
+
+					$active_unique_label = $entry['label'];
+					try {
+						$sample = $draft_id > 0 ? \get_sample_permalink( $draft_id, null, $entry['slug'] ) : array();
+					} finally {
+						$active_unique_label = null;
+					}
+
+					$after = $draft_id > 0 ? \get_post( $draft_id ) : null;
+					$event = null;
+					foreach ( $unique_slug_events as $unique_slug_event ) {
+						if ( $entry['label'] === ( $unique_slug_event['label'] ?? null ) ) {
+							$event = $unique_slug_event;
+							break;
+						}
+					}
+
+					$entry_ok = is_array( $sample )
+						&& $entry['expected'] === ( $sample[1] ?? null )
+						&& is_string( $sample[0] ?? null )
+						&& str_contains( $sample[0], 'http://example.test/' )
+						&& str_contains( $sample[0], '%postname%' )
+						&& $before instanceof \WP_Post
+						&& $after instanceof \WP_Post
+						&& 'draft' === $after->post_status
+						&& $before->post_name === $after->post_name
+						&& $before->post_status === $after->post_status
+						&& is_array( $event )
+						&& $entry['slug'] === ( $event['slug'] ?? null )
+						&& $draft_id === (int) ( $event['postId'] ?? 0 )
+						&& 'publish' === ( $event['status'] ?? null )
+						&& 'post' === ( $event['type'] ?? null )
+						&& 0 === (int) ( $event['parent'] ?? -1 )
+						&& (
+							! isset( $entry['holder'] )
+							|| (
+								$holder_post instanceof \WP_Post
+								&& $entry['holder'] === $holder_post->post_name
+								&& 'publish' === $holder_post->post_status
+							)
+						);
+					$numeric_matrix_ok = $numeric_matrix_ok && $entry_ok;
+					$numeric_observed[] = array(
+						'label'     => $entry['label'],
+						'structure' => $entry['structure'],
+						'slug'      => $entry['slug'],
+						'expected'  => $entry['expected'],
+						'sample'    => $sample,
+						'before'    => self::post_summary( $before ),
+						'after'     => self::post_summary( $after ),
+						'holder'    => self::post_summary( $holder_post ),
+						'event'     => $event,
+						'ok'        => $entry_ok,
+					);
+				}
+
+				self::collect_failure(
+					$failures,
+					$numeric_matrix_ok && count( $numeric_matrix ) === count( $unique_slug_events ),
+					'get_sample_permalink applies date-archive numeric slug rules through publish-status uniqueness without mutating stored drafts or holders',
+					array(
+						'matrix' => $numeric_observed,
+						'events' => $unique_slug_events,
+					)
+				);
+
+				$set_permalink_structure( '' );
+				$future_date = gmdate( 'Y-m-d H:i:s', time() + 2592000 );
+				$plain_future_id = $remember_post(
+					\wp_insert_post(
+						\wp_slash(
+							array(
+								'post_type'     => 'post',
+								'post_title'    => 'Plain Future ' . $case['token'],
+								'post_content'  => 'Plain future content ' . $case['token'],
+								'post_status'   => 'future',
+								'post_name'     => 'plain-future-' . $case['token'],
+								'post_date'     => $future_date,
+								'post_date_gmt' => $future_date,
+							)
+						),
+						true,
+						false
+					)
+				);
+				$plain_draft_id = $remember_post(
+					\wp_insert_post(
+						\wp_slash(
+							array(
+								'post_type'    => 'post',
+								'post_title'   => 'Plain Draft ' . $case['token'],
+								'post_content' => 'Plain draft content ' . $case['token'],
+								'post_status'  => 'draft',
+								'post_name'    => '',
+							)
+						),
+						true,
+						false
+					)
+				);
+				$plain_read_id = $remember_post(
+					\wp_insert_post(
+						\wp_slash(
+							array(
+								'post_type'    => 'post',
+								'post_title'   => 'Plain Read Only ' . $case['token'],
+								'post_content' => 'Plain read only content ' . $case['token'],
+								'post_status'  => 'publish',
+								'post_name'    => 'plain-read-only-' . $case['token'],
+							)
+						),
+						true,
+						false
+					)
+				);
+				$plain_no_read_id = $remember_post(
+					\wp_insert_post(
+						\wp_slash(
+							array(
+								'post_type'    => 'post',
+								'post_title'   => 'Plain No Read ' . $case['token'],
+								'post_content' => 'Plain no read content ' . $case['token'],
+								'post_status'  => 'publish',
+								'post_name'    => 'plain-no-read-' . $case['token'],
+							)
+						),
+						true,
+						false
+					)
+				);
+
+				$manage_user_id = self::insert_support_user( 'plain-manage-' . $case['token'], 'plain-manage-' . $case['token'] . '@example.test' );
+				if ( $manage_user_id > 0 ) {
+					$manage_cap_filter = self::grant_all_caps_filter( (int) $manage_user_id );
+					\wp_set_current_user( (int) $manage_user_id );
+					\add_filter( 'user_has_cap', $manage_cap_filter, 10, 4 );
+				}
+
+				$plain_future_html = $plain_future_id > 0 ? \get_sample_permalink_html( $plain_future_id ) : '';
+				$plain_draft_html  = $plain_draft_id > 0 ? \get_sample_permalink_html( $plain_draft_id ) : '';
+				$plain_future_url  = $plain_future_id > 0 ? \get_option( 'home' ) . '/?p=' . $plain_future_id : '';
+				$plain_draft_preview = $plain_draft_id > 0 ? \get_preview_post_link( $plain_draft_id ) : null;
+
+				$read_user_id = self::insert_support_user( 'plain-read-' . $case['token'], 'plain-read-' . $case['token'] . '@example.test' );
+				if ( $read_user_id > 0 ) {
+					$read_cap_filter = static function ( array $allcaps, array $caps, array $args, \WP_User $user ) use ( $read_user_id ): array {
+						unset( $args );
+
+						if ( (int) $user->ID !== (int) $read_user_id ) {
+							return $allcaps;
+						}
+
+						foreach ( $caps as $cap ) {
+							if ( 'do_not_allow' !== $cap && 'manage_options' !== $cap ) {
+								$allcaps[ $cap ] = true;
+							}
+						}
+
+						$allcaps['read']           = true;
+						$allcaps['read_post']      = true;
+						$allcaps['manage_options'] = false;
+
+						return $allcaps;
+					};
+					\wp_set_current_user( (int) $read_user_id );
+					\add_filter( 'user_has_cap', $read_cap_filter, 10, 4 );
+				}
+
+				$plain_read_html = $plain_read_id > 0 ? \get_sample_permalink_html( $plain_read_id ) : '';
+				$plain_read_url  = $plain_read_id > 0 ? \get_option( 'home' ) . '/?p=' . $plain_read_id : '';
+
+				\wp_set_current_user( 0 );
+				$plain_no_read_html = $plain_no_read_id > 0 ? \get_sample_permalink_html( $plain_no_read_id ) : '';
+				$plain_no_read_url  = $plain_no_read_id > 0 ? \get_option( 'home' ) . '/?p=' . $plain_no_read_id : '';
+
+				$plain_observed = array(
+					'manageUser' => $manage_user_id,
+					'readUser'   => $read_user_id,
+					'future'     => array(
+						'id'   => $plain_future_id,
+						'url'  => $plain_future_url,
+						'html' => $plain_future_html,
+					),
+					'draft'      => array(
+						'id'      => $plain_draft_id,
+						'preview' => $plain_draft_preview,
+						'html'    => $plain_draft_html,
+					),
+					'readOnly'   => array(
+						'id'   => $plain_read_id,
+						'url'  => $plain_read_url,
+						'html' => $plain_read_html,
+					),
+					'noRead'     => array(
+						'id'   => $plain_no_read_id,
+						'url'  => $plain_no_read_url,
+						'html' => $plain_no_read_html,
+					),
+				);
+
+				self::collect_failure(
+					$failures,
+					$manage_user_id > 0
+						&& $read_user_id > 0
+						&& is_string( $plain_future_html )
+						&& str_contains( $plain_future_html, 'href="' . $plain_future_url . '"' )
+						&& str_contains( $plain_future_html, '>' . $plain_future_url . '<' )
+						&& str_contains( $plain_future_html, 'id="change-permalinks"' )
+						&& $html_has_no_slug_editor( $plain_future_html )
+						&& is_string( $plain_draft_html )
+						&& str_contains( $plain_draft_html, "target='wp-preview-{$plain_draft_id}'" )
+						&& str_contains( $plain_draft_html, 'preview=true' )
+						&& $html_has_no_slug_editor( $plain_draft_html )
+						&& is_string( $plain_read_html )
+						&& str_contains( $plain_read_html, 'href="' . $plain_read_url . '"' )
+						&& ! str_contains( $plain_read_html, 'id="change-permalinks"' )
+						&& $html_has_no_slug_editor( $plain_read_html )
+						&& is_string( $plain_no_read_html )
+						&& str_contains( $plain_no_read_html, '<span id="sample-permalink">' . $plain_no_read_url . '</span>' )
+						&& ! str_contains( $plain_no_read_html, '<a id="sample-permalink"' )
+						&& ! str_contains( $plain_no_read_html, 'href="' )
+						&& ! str_contains( $plain_no_read_html, 'id="change-permalinks"' )
+						&& $html_has_no_slug_editor( $plain_no_read_html ),
+					'get_sample_permalink_html uses the plain-permalink no-placeholder branch for read, preview, no-read, and manage-options variants',
+					$plain_observed
+				);
+			}
+		} finally {
+			if ( null !== $read_cap_filter ) {
+				\remove_filter( 'user_has_cap', $read_cap_filter, 10 );
+			}
+			if ( null !== $manage_cap_filter ) {
+				\remove_filter( 'user_has_cap', $manage_cap_filter, 10 );
+			}
+			\remove_filter( 'pre_wp_unique_post_slug', $unique_slug_filter, 10 );
+			\remove_filter( 'pre_option_page_on_front', $page_on_front_filter );
+			\remove_filter( 'pre_option_show_on_front', $show_on_front_filter );
+			\remove_filter( 'pre_option_permalink_structure', $permalink_filter );
+			\wp_set_current_user( $previous_user_id );
+
+			if ( $previous_rewrite_set ) {
+				$GLOBALS['wp_rewrite'] = $previous_rewrite;
+			} else {
+				unset( $GLOBALS['wp_rewrite'] );
+			}
+
+			foreach ( array_unique( array_map( 'intval', $post_ids ) ) as $post_id ) {
+				if ( $post_id > 0 ) {
+					\wp_delete_post( $post_id, true );
+				}
+			}
+		}
+
+		$rewrite_restored = $previous_rewrite_set === array_key_exists( 'wp_rewrite', $GLOBALS )
+			&& ( ! $previous_rewrite_set || $previous_rewrite === $GLOBALS['wp_rewrite'] );
+		$current_user_restored = $previous_user_id === ( isset( $GLOBALS['current_user'] ) && $GLOBALS['current_user'] instanceof \WP_User ? (int) $GLOBALS['current_user']->ID : 0 );
+		$filters_restored = false === \has_filter( 'pre_option_permalink_structure', $permalink_filter )
+			&& false === \has_filter( 'pre_option_show_on_front', $show_on_front_filter )
+			&& false === \has_filter( 'pre_option_page_on_front', $page_on_front_filter )
+			&& false === \has_filter( 'pre_wp_unique_post_slug', $unique_slug_filter )
+			&& ( null === $manage_cap_filter || false === \has_filter( 'user_has_cap', $manage_cap_filter ) )
+			&& ( null === $read_cap_filter || false === \has_filter( 'user_has_cap', $read_cap_filter ) );
+
+		self::collect_failure(
+			$failures,
+			$rewrite_restored && $current_user_restored && $filters_restored,
+			'sample permalink numeric/plain row restores rewrite, current user, option filters, uniqueness filter, and capability filters',
+			array(
+				'rewriteRestored'     => $rewrite_restored,
+				'currentUserRestored' => $current_user_restored,
+				'filtersRestored'     => $filters_restored,
+				'postIds'             => $post_ids,
+			)
+		);
+
+		return $ctx->result(
+			'content-lifecycle.posts.sample-permalink-numeric-plain-html',
+			array() === $failures,
+			array(
+				'case'     => self::case_summary( $case ),
+				'postIds'  => $post_ids,
+				'numeric'  => $numeric_observed,
+				'plain'    => $plain_observed,
 				'failures' => array_slice( $failures, 0, 8 ),
 			)
 		);
