@@ -57,6 +57,8 @@ final class ContentLifecycleSurface {
 				$rows,
 				self::check_post_status_transition_hooks( $ctx->fork( 'post-status' ), $case )
 			);
+			self::prepare_runtime();
+			$rows[] = self::check_post_page_transition_render_visibility( $ctx->fork( 'post-page-transition-render' ), $case );
 			$rows[] = self::check_post_term_relationship_lifecycle( $ctx->fork( 'post-terms' ), $case );
 			$rows[] = self::check_comment_lifecycle( $ctx->fork( 'comments' ), $case );
 			$rows[] = self::check_post_count_and_mime_helpers( $ctx->fork( 'post-counts-mime' ), $case );
@@ -119,9 +121,11 @@ final class ContentLifecycleSurface {
 				'get_post_meta',
 				'get_post_meta_by_id',
 				'get_post_mime_types',
+				'get_post_class',
 				'get_post_thumbnail_id',
 				'get_post_format',
 				'get_post_stati',
+				'get_post_status',
 				'get_post_status_object',
 				'get_post',
 				'get_post_type',
@@ -147,9 +151,11 @@ final class ContentLifecycleSurface {
 				'is_taxonomy_hierarchical',
 				'is_user_logged_in',
 				'is_wp_error',
+				'is_post_publicly_viewable',
 				'metadata_exists',
 				'post_type_exists',
 				'post_type_supports',
+				'post_password_required',
 				'get_permalink',
 				'get_option',
 				'get_gmt_from_date',
@@ -230,6 +236,7 @@ final class ContentLifecycleSurface {
 				'_wp_get_allowed_postdata',
 				'_wp_translate_postdata',
 				'wp_post_mime_type_where',
+				'wp_publish_post',
 			) as $function
 		) {
 			if ( ! function_exists( $function ) ) {
@@ -2883,6 +2890,536 @@ final class ContentLifecycleSurface {
 				array() === $side_failures,
 				array_merge( $data, array( 'failures' => array_slice( $side_failures, 0, 6 ) ) )
 			),
+		);
+	}
+
+	private static function check_post_page_transition_render_visibility( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures          = array();
+		$events            = array();
+		$cap_events        = array();
+		$hooks             = array();
+		$render_events     = array();
+		$post_id           = 0;
+		$page_id           = 0;
+		$user_id           = 0;
+		$viewer_id         = 0;
+		$cap_filters       = array();
+		$post_class_filter = null;
+		$token             = $case['token'];
+		$previous_post_set = array_key_exists( 'post', $GLOBALS );
+		$previous_post     = $GLOBALS['post'] ?? null;
+		$cookie_key        = defined( 'COOKIEHASH' ) ? 'wp-postpass_' . COOKIEHASH : null;
+		$cookie_had        = null !== $cookie_key && array_key_exists( $cookie_key, $_COOKIE );
+		$cookie_previous   = null !== $cookie_key ? ( $_COOKIE[ $cookie_key ] ?? null ) : null;
+		$previous_user_id  = isset( $GLOBALS['current_user'] ) && $GLOBALS['current_user'] instanceof \WP_User ? (int) $GLOBALS['current_user']->ID : 0;
+		$hooks_removed     = false;
+		$filters_removed   = false;
+		$cap_removed       = false;
+		$globals_restored  = false;
+
+		$get_counts = static function (): array {
+			return isset( $GLOBALS['wpdb'] ) && $GLOBALS['wpdb'] instanceof \Component_Fuzz_WPDB_Stub
+				? $GLOBALS['wpdb']->component_fuzz_content_counts()
+				: array();
+		};
+
+		$event_for_post = static function ( string $hook, $post, array $extra = array() ) use ( &$events ): void {
+			$post_obj = $post instanceof \WP_Post ? $post : \get_post( $post );
+			$events[] = array_merge(
+				array(
+					'hook'       => $hook,
+					'postId'     => $post_obj instanceof \WP_Post ? (int) $post_obj->ID : 0,
+					'postType'   => $post_obj instanceof \WP_Post ? $post_obj->post_type : null,
+					'postStatus' => $post_obj instanceof \WP_Post ? $post_obj->post_status : null,
+				),
+				$extra
+			);
+		};
+
+		$add = static function ( string $hook, callable $callback, int $accepted_args ) use ( &$hooks ): void {
+			\add_action( $hook, $callback, 10, $accepted_args );
+			$hooks[] = array( $hook, $callback, 10 );
+		};
+
+		try {
+			$user_id = \wp_insert_user(
+				array(
+					'user_login'   => 'cf_transition_' . $token,
+					'user_pass'    => 'transition-pass-' . $token,
+					'user_email'   => 'transition-' . $token . '@example.test',
+					'display_name' => 'Transition User ' . $token,
+					'role'         => 'editor',
+				)
+			);
+			$viewer_id = \wp_insert_user(
+				array(
+					'user_login'   => 'cf_transition_viewer_' . $token,
+					'user_pass'    => 'transition-viewer-pass-' . $token,
+					'user_email'   => 'transition-viewer-' . $token . '@example.test',
+					'display_name' => 'Transition Viewer ' . $token,
+					'role'         => 'editor',
+				)
+			);
+			$post_id = \wp_insert_post(
+				\wp_slash(
+					array(
+						'post_type'      => 'post',
+						'post_title'     => 'Transition Render Post ' . $token,
+						'post_content'   => 'Transition render post content ' . $token,
+						'post_excerpt'   => 'Transition render excerpt ' . $token,
+						'post_status'    => 'draft',
+						'post_name'      => 'transition-render-post-' . $token,
+						'post_author'    => is_int( $user_id ) ? $user_id : 0,
+						'post_password'  => 'secret-' . $token,
+						'post_date'      => '2022-08-09 10:11:12',
+						'post_date_gmt'  => '2022-08-09 10:11:12',
+						'guid'           => '',
+						'comment_status' => 'open',
+						'ping_status'    => 'closed',
+					)
+				),
+				true,
+				false
+			);
+			$page_id = \wp_insert_post(
+				\wp_slash(
+					array(
+						'post_type'      => 'page',
+						'post_title'     => 'Transition Render Page ' . $token,
+						'post_content'   => 'Transition render page content ' . $token,
+						'post_status'    => 'publish',
+						'post_name'      => 'transition-render-page-' . $token,
+						'post_author'    => is_int( $user_id ) ? $user_id : 0,
+						'post_date'      => '2022-09-10 11:12:13',
+						'post_date_gmt'  => '2022-09-10 11:12:13',
+						'comment_status' => 'closed',
+						'ping_status'    => 'closed',
+					)
+				),
+				true,
+				false
+			);
+
+			$fixtures_ok = is_int( $user_id )
+				&& $user_id > 0
+				&& is_int( $viewer_id )
+				&& $viewer_id > 0
+				&& is_int( $post_id )
+				&& $post_id > 0
+				&& is_int( $page_id )
+				&& $page_id > 0;
+
+			self::collect_failure(
+				$failures,
+				$fixtures_ok,
+				'post/page transition render fixtures insert with integer IDs',
+				array(
+					'userId'   => self::error_summary( $user_id ),
+					'viewerId' => self::error_summary( $viewer_id ),
+					'postId'   => self::error_summary( $post_id ),
+					'pageId'   => self::error_summary( $page_id ),
+				)
+			);
+
+			if ( $fixtures_ok ) {
+				if ( false === \has_action( 'transition_post_status', '_transition_post_status' ) ) {
+					\add_action( 'transition_post_status', '_transition_post_status', 5, 3 );
+					$hooks[] = array( 'transition_post_status', '_transition_post_status', 5 );
+				}
+
+				$add(
+					'transition_post_status',
+					static function ( string $new_status, string $old_status, \WP_Post $post ) use ( $event_for_post ): void {
+						$event_for_post(
+							'transition_post_status',
+							$post,
+							array(
+								'new' => $new_status,
+								'old' => $old_status,
+							)
+						);
+					},
+					3
+				);
+				$add(
+					'draft_to_publish',
+					static function ( \WP_Post $post ) use ( $event_for_post ): void {
+						$event_for_post(
+							'draft_to_publish',
+							$post,
+							array(
+								'new' => 'publish',
+								'old' => 'draft',
+							)
+						);
+					},
+					1
+				);
+				$add(
+					'publish_to_private',
+					static function ( \WP_Post $post ) use ( $event_for_post ): void {
+						$event_for_post(
+							'publish_to_private',
+							$post,
+							array(
+								'new' => 'private',
+								'old' => 'publish',
+							)
+						);
+					},
+					1
+				);
+				foreach ( array( 'publish_post', 'private_page' ) as $dynamic_hook ) {
+					$add(
+						$dynamic_hook,
+						static function ( $post_id, \WP_Post $post, $old_status ) use ( $event_for_post, $dynamic_hook ): void {
+							unset( $post_id );
+							$event_for_post(
+								$dynamic_hook,
+								$post,
+								array(
+									'new' => str_starts_with( $dynamic_hook, 'publish_' ) ? 'publish' : 'private',
+									'old' => (string) $old_status,
+								)
+							);
+						},
+						3
+					);
+				}
+				foreach ( array( 'edit_post_post', 'edit_post_page' ) as $edit_hook ) {
+					$add(
+						$edit_hook,
+						static function ( $post_id, \WP_Post $post ) use ( $event_for_post, $edit_hook ): void {
+							unset( $post_id );
+							$event_for_post( $edit_hook, $post );
+						},
+						2
+					);
+				}
+				$add(
+					'edit_post',
+					static function ( $post_id, \WP_Post $post ) use ( $event_for_post ): void {
+						unset( $post_id );
+						$event_for_post( 'edit_post', $post );
+					},
+					2
+				);
+				$add(
+					'post_updated',
+					static function ( $post_id, \WP_Post $post_after, \WP_Post $post_before ) use ( $event_for_post ): void {
+						unset( $post_id );
+						$event_for_post(
+							'post_updated',
+							$post_after,
+							array(
+								'beforeStatus' => $post_before->post_status,
+							)
+						);
+					},
+					3
+				);
+				foreach ( array( 'save_post_post', 'save_post_page' ) as $save_hook ) {
+					$add(
+						$save_hook,
+						static function ( $post_id, \WP_Post $post, $update ) use ( $event_for_post, $save_hook ): void {
+							unset( $post_id );
+							$event_for_post( $save_hook, $post, array( 'update' => (bool) $update ) );
+						},
+						3
+					);
+				}
+				foreach ( array( 'save_post', 'wp_insert_post' ) as $save_hook ) {
+					$add(
+						$save_hook,
+						static function ( $post_id, \WP_Post $post, $update ) use ( $event_for_post, $save_hook ): void {
+							unset( $post_id );
+							$event_for_post( $save_hook, $post, array( 'update' => (bool) $update ) );
+						},
+						3
+					);
+				}
+				$add(
+					'wp_after_insert_post',
+					static function ( $post, $update, $post_before ) use ( $event_for_post ): void {
+						$event_for_post(
+							'wp_after_insert_post',
+							$post,
+							array(
+								'update'       => (bool) $update,
+								'beforeStatus' => $post_before instanceof \WP_Post ? $post_before->post_status : null,
+							)
+						);
+					},
+					3
+				);
+
+				$counts_before_transition = $get_counts();
+				\wp_publish_post( $post_id );
+				$page_update = \wp_update_post(
+					array(
+						'ID'          => $page_id,
+						'post_status' => 'private',
+						'post_title'  => 'Private Transition Render Page ' . $token,
+					),
+					true,
+					true
+				);
+				$counts_after_transition = $get_counts();
+				$published_post          = \get_post( $post_id );
+				$private_page            = \get_post( $page_id );
+
+				self::collect_failure(
+					$failures,
+					$page_id === $page_update
+						&& $post_id === ( $published_post instanceof \WP_Post ? (int) $published_post->ID : 0 )
+						&& $page_id === ( $private_page instanceof \WP_Post ? (int) $private_page->ID : 0 )
+						&& 'publish' === \get_post_status( $post_id )
+						&& 'private' === \get_post_status( $page_id )
+						&& $published_post instanceof \WP_Post
+						&& '' !== $published_post->guid
+						&& $private_page instanceof \WP_Post
+						&& 'Private Transition Render Page ' . $token === $private_page->post_title
+						&& \is_post_publicly_viewable( $post_id )
+						&& ! \is_post_publicly_viewable( $page_id ),
+					'wp_publish_post and wp_update_post persist generated post/page status transitions and visibility state',
+					array(
+						'pageUpdate' => self::error_summary( $page_update ),
+						'post'       => self::post_summary( $published_post ),
+						'page'       => self::post_summary( $private_page ),
+						'postStatus' => \get_post_status( $post_id ),
+						'pageStatus' => \get_post_status( $page_id ),
+					)
+				);
+
+				self::collect_failure(
+					$failures,
+					self::transition_render_events_include_sequence(
+						$events,
+						array(
+							array( 'hook' => 'transition_post_status', 'postId' => $post_id, 'postType' => 'post', 'old' => 'draft', 'new' => 'publish' ),
+							array( 'hook' => 'draft_to_publish', 'postId' => $post_id, 'postType' => 'post', 'old' => 'draft', 'new' => 'publish' ),
+							array( 'hook' => 'publish_post', 'postId' => $post_id, 'postType' => 'post', 'old' => 'draft', 'new' => 'publish' ),
+							array( 'hook' => 'edit_post_post', 'postId' => $post_id, 'postType' => 'post' ),
+							array( 'hook' => 'edit_post', 'postId' => $post_id, 'postType' => 'post' ),
+							array( 'hook' => 'save_post_post', 'postId' => $post_id, 'postType' => 'post', 'update' => true ),
+							array( 'hook' => 'save_post', 'postId' => $post_id, 'postType' => 'post', 'update' => true ),
+							array( 'hook' => 'wp_insert_post', 'postId' => $post_id, 'postType' => 'post', 'update' => true ),
+							array( 'hook' => 'wp_after_insert_post', 'postId' => $post_id, 'postType' => 'post', 'update' => true ),
+						)
+					)
+						&& self::transition_render_events_include_sequence(
+							$events,
+							array(
+								array( 'hook' => 'transition_post_status', 'postId' => $page_id, 'postType' => 'page', 'old' => 'publish', 'new' => 'private' ),
+								array( 'hook' => 'publish_to_private', 'postId' => $page_id, 'postType' => 'page', 'old' => 'publish', 'new' => 'private' ),
+								array( 'hook' => 'private_page', 'postId' => $page_id, 'postType' => 'page', 'old' => 'publish', 'new' => 'private' ),
+								array( 'hook' => 'edit_post_page', 'postId' => $page_id, 'postType' => 'page' ),
+								array( 'hook' => 'edit_post', 'postId' => $page_id, 'postType' => 'page' ),
+								array( 'hook' => 'post_updated', 'postId' => $page_id, 'postType' => 'page', 'beforeStatus' => 'publish' ),
+								array( 'hook' => 'save_post_page', 'postId' => $page_id, 'postType' => 'page', 'update' => true ),
+								array( 'hook' => 'save_post', 'postId' => $page_id, 'postType' => 'page', 'update' => true ),
+								array( 'hook' => 'wp_insert_post', 'postId' => $page_id, 'postType' => 'page', 'update' => true ),
+								array( 'hook' => 'wp_after_insert_post', 'postId' => $page_id, 'postType' => 'page', 'update' => true ),
+							)
+						),
+					'stored post/page transitions fire transition, dynamic status, edit, save, insert, and after-insert hooks in order',
+					array( 'events' => $events )
+				);
+
+				self::collect_failure(
+					$failures,
+					$counts_before_transition === $counts_after_transition,
+					'post/page status transitions update rows without creating or deleting content records',
+					array(
+						'before' => $counts_before_transition,
+						'after'  => $counts_after_transition,
+					)
+				);
+
+				$event_count_before_noop = count( $events );
+				$counts_before_noop      = $get_counts();
+				\wp_publish_post( $post_id );
+				self::collect_failure(
+					$failures,
+					$event_count_before_noop === count( $events )
+						&& $counts_before_noop === $get_counts()
+						&& 'publish' === \get_post_status( $post_id ),
+					'wp_publish_post on an already-published post is a no-op for hooks, counts, and stored status',
+					array(
+						'eventsBefore' => $event_count_before_noop,
+						'eventsAfter'  => count( $events ),
+						'countsBefore' => $counts_before_noop,
+						'countsAfter'  => $get_counts(),
+						'status'       => \get_post_status( $post_id ),
+					)
+				);
+
+				if ( null !== $cookie_key ) {
+					unset( $_COOKIE[ $cookie_key ] );
+				}
+
+				$post_class_filter = static function ( array $classes, array $css_class, $post_id ) use ( &$render_events, $token ): array {
+					$render_events[] = array(
+						'postId'   => (int) $post_id,
+						'classes'  => $classes,
+						'requested' => $css_class,
+					);
+					$classes[]       = 'cfz-rendered-' . $token;
+					return $classes;
+				};
+				\add_filter( 'post_class', $post_class_filter, 10, 3 );
+
+				$counts_before_render = $get_counts();
+				$GLOBALS['post']      = $published_post;
+				$post_classes         = \get_post_class( array( 'cfz-requested-' . $token ), $post_id );
+				$GLOBALS['post']      = $private_page;
+				$page_classes         = \get_post_class( array( 'cfz-page-' . $token ), $page_id );
+
+				\wp_set_current_user( $viewer_id );
+
+				$private_denied_filter = self::grant_caps_except_filter( $viewer_id, array( 'read_private_pages' ), $cap_events );
+				\add_filter( 'user_has_cap', $private_denied_filter, 10, 4 );
+				$cap_filters[]          = array( 'user_has_cap', $private_denied_filter, 10 );
+				$denied_read_page       = \current_user_can( 'read_post', $page_id );
+				$denied_read_post       = \current_user_can( 'read_post', $post_id );
+				\remove_filter( 'user_has_cap', $private_denied_filter, 10 );
+
+				$all_caps_filter = self::grant_caps_except_filter( $viewer_id, array(), $cap_events );
+				\add_filter( 'user_has_cap', $all_caps_filter, 10, 4 );
+				$cap_filters[]       = array( 'user_has_cap', $all_caps_filter, 10 );
+				$all_caps_read_page = \current_user_can( 'read_post', $page_id );
+				$all_caps_read_post = \current_user_can( 'read_post', $post_id );
+				$counts_after_render = $get_counts();
+
+				self::collect_failure(
+					$failures,
+					in_array( 'post-' . $post_id, $post_classes, true )
+						&& in_array( 'post', $post_classes, true )
+						&& in_array( 'type-post', $post_classes, true )
+						&& in_array( 'status-publish', $post_classes, true )
+						&& in_array( 'post-password-required', $post_classes, true )
+						&& in_array( 'hentry', $post_classes, true )
+						&& in_array( 'cfz-requested-' . $token, $post_classes, true )
+						&& in_array( 'cfz-rendered-' . $token, $post_classes, true )
+						&& in_array( 'post-' . $page_id, $page_classes, true )
+						&& in_array( 'page', $page_classes, true )
+						&& in_array( 'type-page', $page_classes, true )
+						&& in_array( 'status-private', $page_classes, true )
+						&& in_array( 'cfz-page-' . $token, $page_classes, true )
+						&& in_array( 'cfz-rendered-' . $token, $page_classes, true ),
+					'get_post_class renders stored publish/private status and password state through filterable classes',
+					array(
+						'postClasses'  => $post_classes,
+						'pageClasses'  => $page_classes,
+						'renderEvents' => $render_events,
+					)
+				);
+
+				self::collect_failure(
+					$failures,
+					true === $denied_read_post
+						&& false === $denied_read_page
+						&& true === $all_caps_read_page
+						&& true === $all_caps_read_post
+						&& self::capability_event_present( $cap_events, 'read_post' )
+						&& self::capability_event_present( $cap_events, 'read_private_pages' ),
+					'read_post capability follows published post versus private page visibility after transition',
+					array(
+						'deniedPost'  => $denied_read_post,
+						'deniedPage'  => $denied_read_page,
+						'allCapsPost' => $all_caps_read_post,
+						'allCapsPage' => $all_caps_read_page,
+						'capEvents'   => $cap_events,
+					)
+				);
+
+				self::collect_failure(
+					$failures,
+					$counts_before_render === $counts_after_render,
+					'post/page render and capability probes do not mutate content tables',
+					array(
+						'before' => $counts_before_render,
+						'after'  => $counts_after_render,
+					)
+				);
+			}
+		} finally {
+			self::remove_hooks( $hooks );
+			$hooks_removed = self::hooks_are_removed( $hooks );
+
+			foreach ( $cap_filters as $cap_filter ) {
+				\remove_filter( $cap_filter[0], $cap_filter[1], $cap_filter[2] );
+			}
+			$cap_removed = self::hooks_are_removed( $cap_filters );
+
+			if ( null !== $post_class_filter ) {
+				\remove_filter( 'post_class', $post_class_filter, 10 );
+				$filters_removed = false === \has_filter( 'post_class', $post_class_filter );
+			} else {
+				$filters_removed = true;
+			}
+
+			\wp_set_current_user( $previous_user_id );
+
+			if ( $previous_post_set ) {
+				$GLOBALS['post'] = $previous_post;
+			} else {
+				unset( $GLOBALS['post'] );
+			}
+
+			if ( null !== $cookie_key ) {
+				if ( $cookie_had ) {
+					$_COOKIE[ $cookie_key ] = $cookie_previous;
+				} else {
+					unset( $_COOKIE[ $cookie_key ] );
+				}
+			}
+
+			$globals_restored = ( $previous_user_id === ( isset( $GLOBALS['current_user'] ) && $GLOBALS['current_user'] instanceof \WP_User ? (int) $GLOBALS['current_user']->ID : 0 ) )
+				&& ( $previous_post_set === array_key_exists( 'post', $GLOBALS ) )
+				&& ( ! $previous_post_set || $previous_post === $GLOBALS['post'] )
+				&& ( null === $cookie_key || $cookie_had === array_key_exists( $cookie_key, $_COOKIE ) )
+				&& ( null === $cookie_key || ! $cookie_had || $cookie_previous === $_COOKIE[ $cookie_key ] );
+
+			if ( is_int( $post_id ) && $post_id > 0 ) {
+				\wp_delete_post( $post_id, true );
+			}
+			if ( is_int( $page_id ) && $page_id > 0 ) {
+				\wp_delete_post( $page_id, true );
+			}
+			if ( is_int( $user_id ) && $user_id > 0 && function_exists( 'wp_delete_user' ) ) {
+				\wp_delete_user( $user_id );
+			}
+			if ( is_int( $viewer_id ) && $viewer_id > 0 && function_exists( 'wp_delete_user' ) ) {
+				\wp_delete_user( $viewer_id );
+			}
+		}
+
+		self::collect_failure(
+			$failures,
+			$hooks_removed && $filters_removed && $cap_removed && $globals_restored,
+			'post/page transition render hooks, filters, caps, user, post, and cookie state are restored',
+			array(
+				'hooksRemoved'   => $hooks_removed,
+				'filtersRemoved' => $filters_removed,
+				'capRemoved'     => $cap_removed,
+				'globalsRestored' => $globals_restored,
+			)
+		);
+
+		return $ctx->result(
+			'content-lifecycle.posts.transition-render-visibility',
+			array() === $failures,
+			array(
+				'case'         => self::case_summary( $case ),
+				'postId'       => $post_id,
+				'pageId'       => $page_id,
+				'viewerId'     => $viewer_id,
+				'events'       => array_slice( $events, 0, 28 ),
+				'renderEvents' => $render_events,
+				'capEvents'    => array_slice( $cap_events, 0, 12 ),
+				'failures'     => array_slice( $failures, 0, 8 ),
+			)
 		);
 	}
 
@@ -6417,6 +6954,38 @@ final class ContentLifecycleSurface {
 		);
 
 		return array_values( $events ) === $expected;
+	}
+
+	private static function transition_render_events_include_sequence( array $events, array $expected ): bool {
+		$offset = -1;
+		foreach ( $expected as $expected_event ) {
+			$matched = false;
+			for ( $i = $offset + 1, $count = count( $events ); $i < $count; ++$i ) {
+				if ( ! is_array( $events[ $i ] ) ) {
+					continue;
+				}
+
+				$event_matches = true;
+				foreach ( $expected_event as $key => $value ) {
+					if ( ! array_key_exists( $key, $events[ $i ] ) || $events[ $i ][ $key ] !== $value ) {
+						$event_matches = false;
+						break;
+					}
+				}
+
+				if ( $event_matches ) {
+					$offset  = $i;
+					$matched = true;
+					break;
+				}
+			}
+
+			if ( ! $matched ) {
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 	private static function seed_transition_caches( string $post_type, string $label ): void {

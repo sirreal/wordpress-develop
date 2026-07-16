@@ -238,7 +238,11 @@ database, network requests, or a configured site.
   object relationship cleanup, and term lifecycle hook payloads,
   metadata cache invalidation, post-to-term relationship field modes, helper
   caches, relationship hook arguments, status-transition hook/cache/default
-  side-effect branches, direct `set_post_type()` row mutation and cache cleanup,
+  side-effect branches, persisted post/page transition render and visibility
+  oracles for `wp_publish_post()`, `wp_update_post()`, `get_post_class()`,
+  `is_post_publicly_viewable()`, `read_post` capability paths, hook timing,
+  and read-only no-mutation probes, direct `set_post_type()` row mutation and
+  cache cleanup,
   classic admin `bulk_edit_posts()` return partitioning, locked/skipped
   preservation, status/author/title/content/excerpt/discussion/date updates,
   category/tag/post-format/sticky mutations, bulk/sticky hook payloads,
