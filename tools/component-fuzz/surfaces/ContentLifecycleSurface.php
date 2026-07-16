@@ -4291,6 +4291,92 @@ final class ContentLifecycleSurface {
 			);
 			$excluded_parent_key_boundaries_hold = ! in_array( false, $excluded_parent_canonical_reversed_keys_shared, true )
 				&& ! in_array( false, $excluded_parent_duplicate_keys_distinct, true );
+			$excluded_post_variants = array(
+				'canonical'  => array(
+					'ids' => array( $pretty_child_id, $pretty_cross_type_child_id ),
+				),
+				'reversed'   => array(
+					'ids' => array( $pretty_cross_type_child_id, $pretty_child_id ),
+				),
+				'duplicated' => array(
+					'ids' => array( $pretty_child_id, $pretty_cross_type_child_id, $pretty_child_id, $pretty_cross_type_child_id ),
+				),
+			);
+			$excluded_post_keys = array(
+				'ids'      => array(),
+				'idParent' => array(),
+				'object'   => array(),
+			);
+			$excluded_post_checks = array();
+			$excluded_post_query_var_checks = array();
+			$excluded_post_actual = array();
+			foreach ( $excluded_post_variants as $variant => $config ) {
+				$variant_args = array_merge(
+					$ordering_id_args,
+					array(
+						'post_parent__in'     => null,
+						'post_parent__not_in' => null,
+						'post__not_in'        => $config['ids'],
+					)
+				);
+				$buckets = array(
+					'ids'      => $query_parent_status_bucket( $pretty_type, 0, 'publish', 'ids', $variant_args ),
+					'idParent' => $query_parent_status_bucket( $pretty_type, 0, 'publish', 'id=>parent', $variant_args ),
+					'object'   => $query_parent_status_bucket( $pretty_type, 0, 'publish', 'all', $variant_args ),
+				);
+				$expected_query_var = array_values( array_map( 'intval', $config['ids'] ) );
+				sort( $expected_query_var );
+
+				$excluded_post_checks[ $variant ] = $query_ordering_family_is_valid( $buckets['ids'], $buckets['idParent'], $buckets['object'], $excluded_parent_expected, $excluded_parent_map_expected, $excluded_parent_status_expected );
+				$excluded_post_query_var_checks[ $variant ] = $expected_query_var === array_values( array_map( 'intval', (array) ( $buckets['ids']['queryVars']['post__not_in'] ?? array() ) ) )
+					&& $expected_query_var === array_values( array_map( 'intval', (array) ( $buckets['idParent']['queryVars']['post__not_in'] ?? array() ) ) )
+					&& $expected_query_var === array_values( array_map( 'intval', (array) ( $buckets['object']['queryVars']['post__not_in'] ?? array() ) ) );
+				$excluded_post_keys['ids'][] = $buckets['ids']['cacheKey'];
+				$excluded_post_keys['idParent'][] = $buckets['idParent']['cacheKey'];
+				$excluded_post_keys['object'][] = $buckets['object']['cacheKey'];
+				$excluded_post_actual[ $variant ] = array(
+					'idsArg'   => $config['ids'],
+					'queryVar' => array(
+						'ids'      => array_values( array_map( 'intval', (array) ( $buckets['ids']['queryVars']['post__not_in'] ?? array() ) ) ),
+						'idParent' => array_values( array_map( 'intval', (array) ( $buckets['idParent']['queryVars']['post__not_in'] ?? array() ) ) ),
+						'object'   => array_values( array_map( 'intval', (array) ( $buckets['object']['queryVars']['post__not_in'] ?? array() ) ) ),
+					),
+					'keys'     => array(
+						'ids'      => substr( md5( $buckets['ids']['cacheKey'] ), 0, 8 ),
+						'idParent' => substr( md5( $buckets['idParent']['cacheKey'] ), 0, 8 ),
+						'object'   => substr( md5( $buckets['object']['cacheKey'] ), 0, 8 ),
+					),
+					'requests' => array(
+						'ids'      => substr( md5( $buckets['ids']['request'] ), 0, 8 ),
+						'idParent' => substr( md5( $buckets['idParent']['request'] ), 0, 8 ),
+						'object'   => substr( md5( $buckets['object']['request'] ), 0, 8 ),
+					),
+					'ids'      => array(
+						'ids'      => $buckets['ids']['ids'],
+						'idParent' => $buckets['idParent']['ids'],
+						'object'   => $buckets['object']['ids'],
+					),
+					'parents'  => array(
+						'idParent' => $buckets['idParent']['parents'],
+						'object'   => $buckets['object']['parents'],
+					),
+					'statuses' => $buckets['object']['statuses'],
+				);
+			}
+			$excluded_post_valid = ! in_array( false, $excluded_post_checks, true )
+				&& ! in_array( false, $excluded_post_query_var_checks, true );
+			$excluded_post_canonical_reversed_keys_shared = array(
+				'ids'      => ( $excluded_post_keys['ids'][0] ?? null ) === ( $excluded_post_keys['ids'][1] ?? false ),
+				'idParent' => ( $excluded_post_keys['idParent'][0] ?? null ) === ( $excluded_post_keys['idParent'][1] ?? false ),
+				'object'   => ( $excluded_post_keys['object'][0] ?? null ) === ( $excluded_post_keys['object'][1] ?? false ),
+			);
+			$excluded_post_duplicate_keys_distinct = array(
+				'ids'      => ( $excluded_post_keys['ids'][0] ?? null ) !== ( $excluded_post_keys['ids'][2] ?? null ),
+				'idParent' => ( $excluded_post_keys['idParent'][0] ?? null ) !== ( $excluded_post_keys['idParent'][2] ?? null ),
+				'object'   => ( $excluded_post_keys['object'][0] ?? null ) !== ( $excluded_post_keys['object'][2] ?? null ),
+			);
+			$excluded_post_key_boundaries_hold = ! in_array( false, $excluded_post_canonical_reversed_keys_shared, true )
+				&& ! in_array( false, $excluded_post_duplicate_keys_distinct, true );
 			$mutation_initial_after = \get_page_by_path( $mutation_initial_path, OBJECT, $mutation_lookup_types );
 			$mutation_reparented_after = \get_page_by_path( $mutation_reparented_path, ARRAY_A, $mutation_lookup_types );
 			$mutation_initial_cached_after_lookup = \wp_cache_get_salted( 'get_page_by_path:' . $mutation_initial_hash, 'post-queries', $mutation_last_changed_after );
@@ -4442,6 +4528,33 @@ final class ContentLifecycleSurface {
 						$excluded_parent_keys
 					),
 					'variants'         => $excluded_parent_actual,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$excluded_post_valid
+					&& $excluded_post_key_boundaries_hold,
+				'WP_Query preserves generated custom hierarchical post exclusion cache-key boundaries across duplicate and reversed post arrays',
+				array(
+					'checks'           => array(
+						'variantsValid'                 => $excluded_post_checks,
+						'queryVarsSortedWithDuplicates' => $excluded_post_query_var_checks,
+						'canonicalReversedKeysShared'   => $excluded_post_canonical_reversed_keys_shared,
+						'duplicateKeysDistinct'         => $excluded_post_duplicate_keys_distinct,
+					),
+					'excludedIds'      => array(
+						$pretty_child_id,
+						$pretty_cross_type_child_id,
+					),
+					'expectedIds'      => $excluded_parent_expected,
+					'expectedParents'  => $excluded_parent_map_expected,
+					'expectedStatuses' => $excluded_parent_status_expected,
+					'uniqueKeyHashes'  => array_map(
+						static fn ( array $keys ): array => array_values( array_unique( array_map( static fn ( string $key ): string => substr( md5( $key ), 0, 8 ), $keys ) ) ),
+						$excluded_post_keys
+					),
+					'variants'         => $excluded_post_actual,
 				)
 			);
 
