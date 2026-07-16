@@ -4470,6 +4470,86 @@ final class ContentLifecycleSurface {
 				$excluded_author_keys_shared_by_field[ $field ] = 1 === count( array_unique( $keys ) );
 			}
 			$excluded_author_keys_shared = ! in_array( false, $excluded_author_keys_shared_by_field, true );
+			$included_author_variants = array(
+				'canonical'  => array(
+					'authors' => array( $author_excluded_a_id, $author_excluded_b_id ),
+				),
+				'reversed'   => array(
+					'authors' => array( $author_excluded_b_id, $author_excluded_a_id ),
+				),
+				'duplicated' => array(
+					'authors' => array( $author_excluded_a_id, $author_excluded_b_id, $author_excluded_a_id, $author_excluded_b_id ),
+				),
+			);
+			$included_author_keys = array(
+				'ids'      => array(),
+				'idParent' => array(),
+				'object'   => array(),
+			);
+			$included_author_checks = array();
+			$included_author_query_var_checks = array();
+			$included_author_actual = array();
+			foreach ( $included_author_variants as $variant => $config ) {
+				$variant_args = array_merge(
+					$ordering_id_args,
+					array(
+						'post_parent__not_in' => null,
+						'post__not_in'        => null,
+						'author__in'          => $config['authors'],
+						'author__not_in'      => null,
+					)
+				);
+				$buckets = array(
+					'ids'      => $query_parent_status_bucket( $pretty_type, 0, 'publish', 'ids', $variant_args ),
+					'idParent' => $query_parent_status_bucket( $pretty_type, 0, 'publish', 'id=>parent', $variant_args ),
+					'object'   => $query_parent_status_bucket( $pretty_type, 0, 'publish', 'all', $variant_args ),
+				);
+				$expected_query_var = array_values( array_unique( array_map( 'absint', $config['authors'] ) ) );
+				sort( $expected_query_var );
+
+				$included_author_checks[ $variant ] = $query_ordering_family_is_valid( $buckets['ids'], $buckets['idParent'], $buckets['object'], $ordering_id_expected, $ordering_parent_expected, $ordering_status_expected );
+				$included_author_query_var_checks[ $variant ] = $expected_query_var === array_values( array_map( 'intval', (array) ( $buckets['ids']['queryVars']['author__in'] ?? array() ) ) )
+					&& $expected_query_var === array_values( array_map( 'intval', (array) ( $buckets['idParent']['queryVars']['author__in'] ?? array() ) ) )
+					&& $expected_query_var === array_values( array_map( 'intval', (array) ( $buckets['object']['queryVars']['author__in'] ?? array() ) ) );
+				$included_author_keys['ids'][] = $buckets['ids']['cacheKey'];
+				$included_author_keys['idParent'][] = $buckets['idParent']['cacheKey'];
+				$included_author_keys['object'][] = $buckets['object']['cacheKey'];
+				$included_author_actual[ $variant ] = array(
+					'authorsArg' => $config['authors'],
+					'queryVar'   => array(
+						'ids'      => array_values( array_map( 'intval', (array) ( $buckets['ids']['queryVars']['author__in'] ?? array() ) ) ),
+						'idParent' => array_values( array_map( 'intval', (array) ( $buckets['idParent']['queryVars']['author__in'] ?? array() ) ) ),
+						'object'   => array_values( array_map( 'intval', (array) ( $buckets['object']['queryVars']['author__in'] ?? array() ) ) ),
+					),
+					'keys'       => array(
+						'ids'      => substr( md5( $buckets['ids']['cacheKey'] ), 0, 8 ),
+						'idParent' => substr( md5( $buckets['idParent']['cacheKey'] ), 0, 8 ),
+						'object'   => substr( md5( $buckets['object']['cacheKey'] ), 0, 8 ),
+					),
+					'requests'   => array(
+						'ids'      => substr( md5( $buckets['ids']['request'] ), 0, 8 ),
+						'idParent' => substr( md5( $buckets['idParent']['request'] ), 0, 8 ),
+						'object'   => substr( md5( $buckets['object']['request'] ), 0, 8 ),
+					),
+					'ids'        => array(
+						'ids'      => $buckets['ids']['ids'],
+						'idParent' => $buckets['idParent']['ids'],
+						'object'   => $buckets['object']['ids'],
+					),
+					'parents'    => array(
+						'idParent' => $buckets['idParent']['parents'],
+						'object'   => $buckets['object']['parents'],
+					),
+					'statuses'   => $buckets['object']['statuses'],
+				);
+			}
+			$included_author_valid = ! in_array( false, $included_author_checks, true )
+				&& ! in_array( false, $included_author_query_var_checks, true );
+			$included_author_keys_shared_by_field = array();
+			foreach ( $included_author_keys as $field => $keys ) {
+				$included_author_keys_shared_by_field[ $field ] = 1 === count( array_unique( $keys ) );
+			}
+			$included_author_keys_shared = ! in_array( false, $included_author_keys_shared_by_field, true );
 			$normalized_slug_variants = array(
 				'canonical'  => array(
 					'slugs' => array( $pretty_child_slug, $pretty_cross_type_child_slug ),
@@ -4757,6 +4837,32 @@ final class ContentLifecycleSurface {
 						$excluded_author_keys
 					),
 					'variants'         => $excluded_author_actual,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$included_author_valid
+					&& $included_author_keys_shared,
+				'WP_Query normalizes generated custom hierarchical author inclusion cache keys across duplicate and reversed author arrays',
+				array(
+					'checks'           => array(
+						'variantsValid'         => $included_author_checks,
+						'queryVarsSortedUnique' => $included_author_query_var_checks,
+						'keysSharedByField'     => $included_author_keys_shared_by_field,
+					),
+					'includedAuthors'  => array(
+						$author_excluded_a_id,
+						$author_excluded_b_id,
+					),
+					'expectedIds'      => $ordering_id_expected,
+					'expectedParents'  => $ordering_parent_expected,
+					'expectedStatuses' => $ordering_status_expected,
+					'uniqueKeyHashes'  => array_map(
+						static fn ( array $keys ): array => array_values( array_unique( array_map( static fn ( string $key ): string => substr( md5( $key ), 0, 8 ), $keys ) ) ),
+						$included_author_keys
+					),
+					'variants'         => $included_author_actual,
 				)
 			);
 
