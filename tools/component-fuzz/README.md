@@ -488,6 +488,8 @@ database, network requests, or a configured site.
   low-level helper contracts, exact `wp_kses_hair()` parser fixtures,
   explicit null/control-character stripping and slash-zero handling,
   filter-aware safe CSS, generated policy/protocol/style mutation matrices,
+  scoped generated context policy mutation matrices with custom URI attribute
+  and safe CSS filters,
   attribute/entity/comment handling, deterministic attribute constraint
   matrices for required, values, max/min, valueless, and callback checks,
   serialized block attribute KSES filtering, PDF object policy and
