@@ -46,6 +46,7 @@ final class RestObjectControllersSurface {
 			$rows[] = self::check_route_registry_behavior( $ctx, $case, $fixtures );
 			$rows[] = self::check_templates_controller( $ctx, $case );
 			$rows[] = self::check_short_circuited_collection_queries( $ctx->fork( 'collection-queries' ), $case, $fixtures );
+			$rows[] = self::check_route_dispatched_collection_get_edges( $ctx->fork( 'collection-get-dispatch' ), $case, $fixtures, $additional_field_calls );
 			$rows[] = self::check_route_dispatched_object_write_edges( $ctx->fork( 'object-write-dispatch' ), $case, $fixtures );
 			$rows[] = self::check_route_dispatched_object_create_delete_edges( $ctx->fork( 'object-create-delete-dispatch' ), $case, $fixtures );
 			$rows[] = self::check_route_dispatched_object_force_delete_edges( $ctx->fork( 'object-force-delete-dispatch' ), $case, $fixtures );
@@ -154,6 +155,7 @@ final class RestObjectControllersSurface {
 				'register_rest_route',
 				'register_term_meta',
 				'remove_filter',
+				'rest_api_default_filters',
 				'rest_ensure_response',
 				'rest_get_route_for_post',
 				'rest_get_route_for_taxonomy_items',
@@ -2214,6 +2216,563 @@ final class RestObjectControllersSurface {
 					'fullSqlExecution' => 'The in-memory wpdb SQL parser is intentionally bypassed; this invariant covers REST argument translation, query-class short-circuit hooks, HEAD pagination, and filter restoration.',
 					'templates'        => 'Template collection query execution remains covered by schema/param checks and dedicated site-editor surfaces, not this query-class short-circuit invariant.',
 				),
+			)
+		);
+	}
+
+	private static function check_route_dispatched_collection_get_edges( \ComponentFuzz\FuzzContext $ctx, array $case, array $fixtures, array &$additional_field_calls ): array {
+		$failures       = array();
+		$observed       = array();
+		$prepare_events = array();
+
+		$previous_server          = $GLOBALS['wp_rest_server'] ?? null;
+		$had_wp_actions           = array_key_exists( 'wp_actions', $GLOBALS );
+		$previous_actions         = $GLOBALS['wp_actions'] ?? null;
+		$previous_current_user_id = isset( $GLOBALS['current_user'] ) && $GLOBALS['current_user'] instanceof \WP_User
+			? (int) $GLOBALS['current_user']->ID
+			: 0;
+
+		$server                    = new \WP_REST_Server();
+		$GLOBALS['wp_rest_server'] = $server;
+
+		if ( ! isset( $GLOBALS['wp_actions'] ) || ! is_array( $GLOBALS['wp_actions'] ) ) {
+			$GLOBALS['wp_actions'] = array();
+		}
+		$GLOBALS['wp_actions']['rest_api_init'] = max( 1, (int) ( $GLOBALS['wp_actions']['rest_api_init'] ?? 0 ) );
+
+		$filter_snapshot = self::rest_default_filter_state();
+		$cap_filter      = null;
+		$counts_before   = self::content_counts();
+
+		$post_rest_args    = array();
+		$post_query_vars   = array();
+		$term_rest_args    = array();
+		$term_query_vars   = array();
+		$comment_rest_args = array();
+		$comment_query_vars = array();
+		$user_rest_args    = array();
+		$user_query_vars   = array();
+
+		$post_total    = 5;
+		$post_per_page = 2;
+		$term_total    = 6;
+		$term_per_page = 2;
+		$comment_total = 4;
+		$comment_per_page = 2;
+		$user_total    = 3;
+		$user_per_page = 1;
+
+		$post_objects = array_values(
+			array_filter(
+				array( \get_post( $fixtures['post'] ), \get_post( $fixtures['other_post'] ) ),
+				static fn ( $post ): bool => $post instanceof \WP_Post
+			)
+		);
+		$term_objects = array_values(
+			array_filter(
+				array( \get_term( $fixtures['term'], 'category' ), \get_term( $fixtures['child_term'], 'category' ) ),
+				static fn ( $term ): bool => $term instanceof \WP_Term
+			)
+		);
+		$comment_objects = array_values(
+			array_filter(
+				array( \get_comment( $fixtures['comment'] ), \get_comment( $fixtures['second_comment'] ) ),
+				static fn ( $comment ): bool => $comment instanceof \WP_Comment
+			)
+		);
+		$user_ids = array( $fixtures['author'] );
+
+		$post_rest_filter = static function ( array $args, \WP_REST_Request $request ) use ( &$post_rest_args ): array {
+			$args['component_fuzz_collection_get'] = 'posts';
+			$post_rest_args[] = array(
+				'args'   => $args,
+				'method' => $request->get_method(),
+				'route'  => $request->get_route(),
+			);
+			return $args;
+		};
+		$post_pre_filter  = static function ( $posts, \WP_Query $query ) use ( &$post_query_vars, $post_objects, $post_total, $post_per_page ): array {
+			if ( 'posts' !== ( $query->query_vars['component_fuzz_collection_get'] ?? null ) ) {
+				return $posts;
+			}
+
+			$post_query_vars[]    = $query->query_vars;
+			$query->found_posts   = $post_total;
+			$query->max_num_pages = (int) ceil( $post_total / $post_per_page );
+			return $post_objects;
+		};
+
+		$term_rest_filter = static function ( array $args, \WP_REST_Request $request ) use ( &$term_rest_args ): array {
+			$args['component_fuzz_collection_get'] = 'terms';
+			$term_rest_args[] = array(
+				'args'   => $args,
+				'method' => $request->get_method(),
+				'route'  => $request->get_route(),
+			);
+			return $args;
+		};
+		$term_pre_filter  = static function ( $terms, \WP_Term_Query $query ) use ( &$term_query_vars, $term_objects, $term_total ) {
+			if ( 'terms' !== ( $query->query_vars['component_fuzz_collection_get'] ?? null ) ) {
+				return $terms;
+			}
+
+			$term_query_vars[] = $query->query_vars;
+			if ( 'count' === ( $query->query_vars['fields'] ?? null ) ) {
+				return (string) $term_total;
+			}
+			return $term_objects;
+		};
+
+		$comment_rest_filter = static function ( array $args, \WP_REST_Request $request ) use ( &$comment_rest_args ): array {
+			$args['component_fuzz_collection_get'] = 'comments';
+			$comment_rest_args[] = array(
+				'args'   => $args,
+				'method' => $request->get_method(),
+				'route'  => $request->get_route(),
+			);
+			return $args;
+		};
+		$comment_pre_filter  = static function ( $comments, \WP_Comment_Query $query ) use ( &$comment_query_vars, $comment_objects, $comment_total, $comment_per_page ): array {
+			if ( 'comments' !== ( $query->query_vars['component_fuzz_collection_get'] ?? null ) ) {
+				return $comments;
+			}
+
+			$comment_query_vars[]   = $query->query_vars;
+			$query->found_comments  = $comment_total;
+			$query->max_num_pages   = (int) ceil( $comment_total / $comment_per_page );
+			return $comment_objects;
+		};
+
+		$user_rest_filter = static function ( array $args, \WP_REST_Request $request ) use ( &$user_rest_args ): array {
+			$args['component_fuzz_collection_get'] = 'users';
+			$user_rest_args[] = array(
+				'args'   => $args,
+				'method' => $request->get_method(),
+				'route'  => $request->get_route(),
+			);
+			return $args;
+		};
+		$user_pre_filter  = static function ( $results, \WP_User_Query $query ) use ( &$user_query_vars, $user_ids, $user_total ): array {
+			if ( 'users' !== ( $query->query_vars['component_fuzz_collection_get'] ?? null ) ) {
+				return $results;
+			}
+
+			$user_query_vars[]  = $query->query_vars;
+			$query->total_users = $user_total;
+			return $user_ids;
+		};
+
+		$post_prepare_filter = static function ( $response, $post, \WP_REST_Request $request ) use ( &$prepare_events ) {
+			if ( $response instanceof \WP_REST_Response && $post instanceof \WP_Post ) {
+				$prepare_events[] = self::prepare_event( 'post', (int) $post->ID, $request );
+			}
+			return $response;
+		};
+		$term_prepare_filter = static function ( $response, $term, \WP_REST_Request $request ) use ( &$prepare_events ) {
+			if ( $response instanceof \WP_REST_Response && $term instanceof \WP_Term ) {
+				$prepare_events[] = self::prepare_event( 'term', (int) $term->term_id, $request );
+			}
+			return $response;
+		};
+		$comment_prepare_filter = static function ( $response, $comment, \WP_REST_Request $request ) use ( &$prepare_events ) {
+			if ( $response instanceof \WP_REST_Response && $comment instanceof \WP_Comment ) {
+				$prepare_events[] = self::prepare_event( 'comment', (int) $comment->comment_ID, $request );
+			}
+			return $response;
+		};
+		$user_prepare_filter = static function ( $response, $user, \WP_REST_Request $request ) use ( &$prepare_events ) {
+			if ( $response instanceof \WP_REST_Response && $user instanceof \WP_User ) {
+				$prepare_events[] = self::prepare_event( 'user', (int) $user->ID, $request );
+			}
+			return $response;
+		};
+
+		$default_filters_restored = false;
+		$custom_filters_restored  = false;
+		$cap_filter_restored      = false;
+		$server_restored          = false;
+		$actions_restored         = false;
+		$current_user_restored    = false;
+
+		try {
+			$controllers = array(
+				new \WP_REST_Posts_Controller( 'post' ),
+				new \WP_REST_Terms_Controller( 'category' ),
+				new \WP_REST_Comments_Controller(),
+				new \WP_REST_Users_Controller(),
+			);
+
+			foreach ( $controllers as $controller ) {
+				$controller->register_routes();
+			}
+
+			\rest_api_default_filters();
+
+			\wp_set_current_user( 0 );
+			$invalid_post_response = self::dispatch_with_rest_post_dispatch(
+				$server,
+				self::request(
+					'GET',
+					'/wp/v2/posts',
+					array(
+						'_fields'  => 'id',
+						'per_page' => 0,
+					)
+				)
+			);
+			$denied_user_response = self::dispatch_with_rest_post_dispatch(
+				$server,
+				self::request(
+					'GET',
+					'/wp/v2/users',
+					array(
+						'_fields' => 'id',
+						'roles'   => array( 'administrator' ),
+					)
+				)
+			);
+
+			\add_filter( 'rest_post_query', $post_rest_filter, 10, 2 );
+			\add_filter( 'posts_pre_query', $post_pre_filter, 10, 2 );
+			\add_filter( 'rest_category_query', $term_rest_filter, 10, 2 );
+			\add_filter( 'terms_pre_query', $term_pre_filter, 10, 2 );
+			\add_filter( 'rest_comment_query', $comment_rest_filter, 10, 2 );
+			\add_filter( 'comments_pre_query', $comment_pre_filter, 10, 2 );
+			\add_filter( 'rest_user_query', $user_rest_filter, 10, 2 );
+			\add_filter( 'users_pre_query', $user_pre_filter, 10, 2 );
+			\add_filter( 'rest_prepare_post', $post_prepare_filter, 10, 3 );
+			\add_filter( 'rest_prepare_category', $term_prepare_filter, 10, 3 );
+			\add_filter( 'rest_prepare_comment', $comment_prepare_filter, 10, 3 );
+			\add_filter( 'rest_prepare_user', $user_prepare_filter, 10, 3 );
+
+			\wp_set_current_user( $fixtures['author'] );
+			$cap_filter = self::install_cap_filter( array( 'edit_user', 'edit_users', 'list_users', 'read' ) );
+			$sentinel   = 'component-fuzz-rest-object-collection-get-' . $ctx->seed() . '-' . $ctx->iteration();
+			$last_query_set = self::set_wpdb_last_query( $sentinel );
+			$term_extra_calls_before = self::additional_field_call_count( $additional_field_calls, 'category', $case['termAdditionalField'], 'view' );
+			$user_extra_calls_before = self::additional_field_call_count( $additional_field_calls, 'user', $case['userAdditionalField'], 'edit' );
+
+			$post_response = self::dispatch_with_rest_post_dispatch(
+				$server,
+				self::request(
+					'GET',
+					'/wp/v2/posts',
+					array(
+						'_fields'  => 'id,slug,title',
+						'context'  => 'view',
+						'include'  => array( $fixtures['post'], $fixtures['other_post'] ),
+						'order'    => 'asc',
+						'orderby'  => 'include',
+						'page'     => 1,
+						'per_page' => $post_per_page,
+					)
+				)
+			);
+			$term_response = self::dispatch_with_rest_post_dispatch(
+				$server,
+				self::request(
+					'GET',
+					'/wp/v2/categories',
+					array(
+						'_fields'    => 'id,name,parent,slug,taxonomy,' . $case['termAdditionalField'],
+						'context'    => 'view',
+						'hide_empty' => '0',
+						'include'    => array( $fixtures['term'], $fixtures['child_term'] ),
+						'order'      => 'asc',
+						'orderby'    => 'include',
+						'page'       => 1,
+						'per_page'   => $term_per_page,
+					)
+				)
+			);
+			$comment_response = self::dispatch_with_rest_post_dispatch(
+				$server,
+				self::request(
+					'GET',
+					'/wp/v2/comments',
+					array(
+						'_fields'  => 'id,parent,post,status,type',
+						'context'  => 'view',
+						'include'  => array( $fixtures['comment'], $fixtures['second_comment'] ),
+						'order'    => 'asc',
+						'orderby'  => 'include',
+						'page'     => 1,
+						'per_page' => $comment_per_page,
+						'post'     => array( $fixtures['post'] ),
+						'status'   => 'approve',
+						'type'     => 'comment',
+					)
+				)
+			);
+			$user_response = self::dispatch_with_rest_post_dispatch(
+				$server,
+				self::request(
+					'GET',
+					'/wp/v2/users',
+					array(
+						'_fields'  => 'email,id,name,slug,username,' . $case['userAdditionalField'],
+						'context'  => 'edit',
+						'include'  => array( $fixtures['author'] ),
+						'order'    => 'desc',
+						'orderby'  => 'include',
+						'page'     => 1,
+						'per_page' => $user_per_page,
+					)
+				)
+			);
+
+			$last_query_after = self::wpdb_last_query();
+			$counts_after     = self::content_counts();
+
+			$post_data       = $post_response instanceof \WP_REST_Response ? $post_response->get_data() : array();
+			$term_data       = $term_response instanceof \WP_REST_Response ? $term_response->get_data() : array();
+			$comment_data    = $comment_response instanceof \WP_REST_Response ? $comment_response->get_data() : array();
+			$user_data       = $user_response instanceof \WP_REST_Response ? $user_response->get_data() : array();
+			$post_headers    = $post_response instanceof \WP_REST_Response ? $post_response->get_headers() : array();
+			$term_headers    = $term_response instanceof \WP_REST_Response ? $term_response->get_headers() : array();
+			$comment_headers = $comment_response instanceof \WP_REST_Response ? $comment_response->get_headers() : array();
+			$user_headers    = $user_response instanceof \WP_REST_Response ? $user_response->get_headers() : array();
+			$term_extra_calls_after = self::additional_field_call_count( $additional_field_calls, 'category', $case['termAdditionalField'], 'view' );
+			$user_extra_calls_after = self::additional_field_call_count( $additional_field_calls, 'user', $case['userAdditionalField'], 'edit' );
+
+			$observed = array(
+				'invalidPost' => $invalid_post_response,
+				'deniedUser'  => $denied_user_response,
+				'posts'       => array(
+					'data'      => $post_data,
+					'headers'   => $post_headers,
+					'restArgs'  => $post_rest_args,
+					'queryVars' => $post_query_vars,
+				),
+				'terms'       => array(
+					'data'      => $term_data,
+					'headers'   => $term_headers,
+					'restArgs'  => $term_rest_args,
+					'queryVars' => $term_query_vars,
+				),
+				'comments'    => array(
+					'data'      => $comment_data,
+					'headers'   => $comment_headers,
+					'restArgs'  => $comment_rest_args,
+					'queryVars' => $comment_query_vars,
+				),
+				'users'       => array(
+					'data'      => $user_data,
+					'headers'   => $user_headers,
+					'restArgs'  => $user_rest_args,
+					'queryVars' => $user_query_vars,
+				),
+				'prepareEvents' => $prepare_events,
+				'additionalFields' => array(
+					'termBefore' => $term_extra_calls_before,
+					'termAfter'  => $term_extra_calls_after,
+					'userBefore' => $user_extra_calls_before,
+					'userAfter'  => $user_extra_calls_after,
+				),
+				'lastQuery'     => array(
+					'set'    => $last_query_set,
+					'before' => $sentinel,
+					'after'  => $last_query_after,
+				),
+				'counts'        => array(
+					'before' => $counts_before,
+					'after'  => $counts_after,
+				),
+			);
+
+			self::collect_failure(
+				$failures,
+				self::response_error_ok( $invalid_post_response, 'rest_invalid_param', 400 )
+					&& (
+						self::response_error_ok( $denied_user_response, 'rest_user_cannot_view', 401 )
+						|| self::response_error_ok( $denied_user_response, 'rest_user_cannot_view', 403 )
+					),
+				'route-dispatched collection GET rejects invalid parameters and privileged filters before query dispatch',
+				array(
+					'invalidPost' => $invalid_post_response,
+					'deniedUser'  => $denied_user_response,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$post_response instanceof \WP_REST_Response
+					&& 200 === $post_response->get_status()
+					&& self::collection_projected_rows_ok( new \WP_REST_Posts_Controller( 'post' ), $post_data, array( $fixtures['post'], $fixtures['other_post'] ), array( 'id', 'slug', 'title' ), 'view' )
+					&& (string) $post_total === (string) ( $post_headers['X-WP-Total'] ?? '' )
+					&& (string) ceil( $post_total / $post_per_page ) === (string) ( $post_headers['X-WP-TotalPages'] ?? '' )
+					&& self::header_has_link_rel( $post_headers, 'next' )
+					&& 1 === count( $post_rest_args )
+					&& 1 === count( $post_query_vars )
+					&& 'GET' === ( $post_rest_args[0]['method'] ?? null )
+					&& array( $fixtures['post'], $fixtures['other_post'] ) === array_values( array_map( 'intval', (array) ( $post_rest_args[0]['args']['post__in'] ?? array() ) ) )
+					&& 'post__in' === ( $post_query_vars[0]['orderby'] ?? null ),
+				'post collection route dispatch applies _fields projection, pagination headers, and include ordering',
+				$observed['posts']
+			);
+
+			self::collect_failure(
+				$failures,
+				$term_response instanceof \WP_REST_Response
+					&& 200 === $term_response->get_status()
+					&& self::collection_projected_rows_ok( new \WP_REST_Terms_Controller( 'category' ), $term_data, array( $fixtures['term'], $fixtures['child_term'] ), array( 'id', 'name', 'parent', 'slug', 'taxonomy', $case['termAdditionalField'] ), 'view' )
+					&& self::collection_field_value_ok( $term_data, $case['termAdditionalField'], $case['termAdditionalValue'] )
+					&& (string) $term_total === (string) ( $term_headers['X-WP-Total'] ?? '' )
+					&& (string) ceil( $term_total / $term_per_page ) === (string) ( $term_headers['X-WP-TotalPages'] ?? '' )
+					&& self::header_has_link_rel( $term_headers, 'next' )
+					&& 1 === count( $term_rest_args )
+					&& in_array( 'count', array_map( static fn ( array $vars ): string => (string) ( $vars['fields'] ?? '' ), $term_query_vars ), true )
+					&& 'category' === ( $term_rest_args[0]['args']['taxonomy'] ?? null )
+					&& $term_extra_calls_before + 2 === $term_extra_calls_after,
+				'term collection route dispatch applies _fields projection, pagination headers, and count short-circuiting',
+				$observed['terms']
+			);
+
+			self::collect_failure(
+				$failures,
+				$comment_response instanceof \WP_REST_Response
+					&& 200 === $comment_response->get_status()
+					&& self::collection_projected_rows_ok( new \WP_REST_Comments_Controller(), $comment_data, array( $fixtures['comment'], $fixtures['second_comment'] ), array( 'id', 'parent', 'post', 'status', 'type' ), 'view' )
+					&& (string) $comment_total === (string) ( $comment_headers['X-WP-Total'] ?? '' )
+					&& (string) ceil( $comment_total / $comment_per_page ) === (string) ( $comment_headers['X-WP-TotalPages'] ?? '' )
+					&& self::header_has_link_rel( $comment_headers, 'next' )
+					&& 1 === count( $comment_rest_args )
+					&& 1 === count( $comment_query_vars )
+					&& array( $fixtures['comment'], $fixtures['second_comment'] ) === array_values( array_map( 'intval', (array) ( $comment_rest_args[0]['args']['comment__in'] ?? array() ) ) )
+					&& 'comment__in' === ( $comment_query_vars[0]['orderby'] ?? null ),
+				'comment collection route dispatch applies _fields projection, pagination headers, and include ordering',
+				$observed['comments']
+			);
+
+			self::collect_failure(
+				$failures,
+				$user_response instanceof \WP_REST_Response
+					&& 200 === $user_response->get_status()
+					&& self::collection_projected_rows_ok( new \WP_REST_Users_Controller(), $user_data, array( $fixtures['author'] ), array( 'email', 'id', 'name', 'slug', 'username', $case['userAdditionalField'] ), 'edit' )
+					&& self::collection_field_value_ok( $user_data, $case['userAdditionalField'], $case['userAdditionalValue'] )
+					&& (string) $user_total === (string) ( $user_headers['X-WP-Total'] ?? '' )
+					&& (string) ceil( $user_total / $user_per_page ) === (string) ( $user_headers['X-WP-TotalPages'] ?? '' )
+					&& self::header_has_link_rel( $user_headers, 'next' )
+					&& 1 === count( $user_rest_args )
+					&& 1 === count( $user_query_vars )
+					&& array( $fixtures['author'] ) === array_values( array_map( 'intval', (array) ( $user_rest_args[0]['args']['include'] ?? array() ) ) )
+					&& 'include' === ( $user_query_vars[0]['orderby'] ?? null )
+					&& $user_extra_calls_before + 1 === $user_extra_calls_after,
+				'user collection route dispatch applies edit-context _fields projection, pagination headers, and permission-gated query dispatch',
+				$observed['users']
+			);
+
+			self::collect_failure(
+				$failures,
+				self::prepare_events_match( $prepare_events, 'post', array( $fixtures['post'], $fixtures['other_post'] ), '/wp/v2/posts', 'GET', 'view' )
+					&& self::prepare_events_match( $prepare_events, 'term', array( $fixtures['term'], $fixtures['child_term'] ), '/wp/v2/categories', 'GET', 'view' )
+					&& self::prepare_events_match( $prepare_events, 'comment', array( $fixtures['comment'], $fixtures['second_comment'] ), '/wp/v2/comments', 'GET', 'view' )
+					&& self::prepare_events_match( $prepare_events, 'user', array( $fixtures['author'] ), '/wp/v2/users', 'GET', 'edit' ),
+				'collection prepare hooks receive the route-dispatched request and generated fixture IDs before projection',
+				array( 'prepareEvents' => $prepare_events )
+			);
+
+			self::collect_failure(
+				$failures,
+				self::content_count_delta_matches( $counts_before, $counts_after, array(), array() )
+					&& 1 === count( $post_query_vars )
+					&& 2 <= count( $term_query_vars )
+					&& 1 === count( $comment_query_vars )
+					&& 1 === count( $user_query_vars ),
+				'route-dispatched collection GET paths do not mutate content tables and use generated query short-circuits',
+				array(
+					'countsBefore' => $counts_before,
+					'countsAfter'  => $counts_after,
+					'lastQuerySet' => $last_query_set,
+					'lastQuery'    => $last_query_after,
+				)
+			);
+		} finally {
+			\remove_filter( 'rest_post_query', $post_rest_filter, 10 );
+			\remove_filter( 'posts_pre_query', $post_pre_filter, 10 );
+			\remove_filter( 'rest_category_query', $term_rest_filter, 10 );
+			\remove_filter( 'terms_pre_query', $term_pre_filter, 10 );
+			\remove_filter( 'rest_comment_query', $comment_rest_filter, 10 );
+			\remove_filter( 'comments_pre_query', $comment_pre_filter, 10 );
+			\remove_filter( 'rest_user_query', $user_rest_filter, 10 );
+			\remove_filter( 'users_pre_query', $user_pre_filter, 10 );
+			\remove_filter( 'rest_prepare_post', $post_prepare_filter, 10 );
+			\remove_filter( 'rest_prepare_category', $term_prepare_filter, 10 );
+			\remove_filter( 'rest_prepare_comment', $comment_prepare_filter, 10 );
+			\remove_filter( 'rest_prepare_user', $user_prepare_filter, 10 );
+
+			$custom_filters_restored = false === \has_filter( 'rest_post_query', $post_rest_filter )
+				&& false === \has_filter( 'posts_pre_query', $post_pre_filter )
+				&& false === \has_filter( 'rest_category_query', $term_rest_filter )
+				&& false === \has_filter( 'terms_pre_query', $term_pre_filter )
+				&& false === \has_filter( 'rest_comment_query', $comment_rest_filter )
+				&& false === \has_filter( 'comments_pre_query', $comment_pre_filter )
+				&& false === \has_filter( 'rest_user_query', $user_rest_filter )
+				&& false === \has_filter( 'users_pre_query', $user_pre_filter )
+				&& false === \has_filter( 'rest_prepare_post', $post_prepare_filter )
+				&& false === \has_filter( 'rest_prepare_category', $term_prepare_filter )
+				&& false === \has_filter( 'rest_prepare_comment', $comment_prepare_filter )
+				&& false === \has_filter( 'rest_prepare_user', $user_prepare_filter );
+
+			if ( null !== $cap_filter ) {
+				$cap_filter_restored = self::remove_cap_filter( $cap_filter );
+				$cap_filter          = null;
+			} else {
+				$cap_filter_restored = true;
+			}
+
+			self::restore_rest_default_filters( $filter_snapshot );
+			$default_filters_restored = $filter_snapshot === self::rest_default_filter_state();
+
+			\wp_set_current_user( $previous_current_user_id );
+			$current_user_restored = $previous_current_user_id === ( isset( $GLOBALS['current_user'] ) && $GLOBALS['current_user'] instanceof \WP_User ? (int) $GLOBALS['current_user']->ID : 0 );
+
+			if ( $had_wp_actions ) {
+				$GLOBALS['wp_actions'] = $previous_actions;
+			} else {
+				unset( $GLOBALS['wp_actions'] );
+			}
+			$actions_restored = $had_wp_actions === array_key_exists( 'wp_actions', $GLOBALS )
+				&& ( ! $had_wp_actions || $previous_actions === $GLOBALS['wp_actions'] );
+
+			if ( null !== $previous_server ) {
+				$GLOBALS['wp_rest_server'] = $previous_server;
+			} else {
+				unset( $GLOBALS['wp_rest_server'] );
+			}
+			$server_restored = ( null !== $previous_server && $previous_server === ( $GLOBALS['wp_rest_server'] ?? null ) )
+				|| ( null === $previous_server && ! isset( $GLOBALS['wp_rest_server'] ) );
+		}
+
+		self::collect_failure(
+			$failures,
+			$custom_filters_restored
+				&& $cap_filter_restored
+				&& $default_filters_restored
+				&& $server_restored
+				&& $actions_restored
+				&& $current_user_restored,
+			'collection route dispatch restores query, prepare, capability, default REST filter, server, action, and current-user state',
+			array(
+				'customFiltersRestored'  => $custom_filters_restored,
+				'capFilterRestored'      => $cap_filter_restored,
+				'defaultFiltersRestored' => $default_filters_restored,
+				'serverRestored'         => $server_restored,
+				'actionsRestored'        => $actions_restored,
+				'currentUserRestored'    => $current_user_restored,
+				'observed'               => $observed,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'rest-object-controllers.collections.route-dispatched-get-projection-pagination',
+			array() === $failures,
+			array(
+				'case'       => self::case_summary( $case ),
+				'controllers' => array( 'posts', 'terms', 'comments', 'users' ),
+				'failures'   => array_slice( $failures, 0, 8 ),
+				'observed'   => $observed,
 			)
 		);
 	}
@@ -5783,6 +6342,67 @@ final class RestObjectControllersSurface {
 		return $expected_keys === $actual_keys;
 	}
 
+	private static function header_has_link_rel( array $headers, string $rel ): bool {
+		$link = $headers['Link'] ?? '';
+		return is_string( $link ) && false !== strpos( $link, 'rel="' . $rel . '"' );
+	}
+
+	private static function collection_projected_rows_ok( \WP_REST_Controller $controller, array $rows, array $expected_ids, array $expected_keys, string $context ): bool {
+		if ( count( $expected_ids ) !== count( $rows ) ) {
+			return false;
+		}
+
+		$actual_ids = array();
+		foreach ( $rows as $row ) {
+			if ( ! is_array( $row ) || ! isset( $row['id'] ) ) {
+				return false;
+			}
+
+			$actual_ids[] = (int) $row['id'];
+			if ( ! self::projected_keys_match( $row, $expected_keys ) || ! self::response_matches_schema_context( $controller, $row, $context ) ) {
+				return false;
+			}
+		}
+
+		return array_values( $expected_ids ) === $actual_ids;
+	}
+
+	private static function collection_field_value_ok( array $rows, string $field, $expected_value ): bool {
+		foreach ( $rows as $row ) {
+			if ( ! is_array( $row ) || ! array_key_exists( $field, $row ) || $expected_value !== $row[ $field ] ) {
+				return false;
+			}
+		}
+
+		return array() !== $rows;
+	}
+
+	private static function prepare_event( string $type, int $id, \WP_REST_Request $request ): array {
+		return array(
+			'type'    => $type,
+			'id'      => $id,
+			'method'  => $request->get_method(),
+			'route'   => $request->get_route(),
+			'context' => $request->get_param( 'context' ) ?: 'view',
+			'fields'  => $request->get_param( '_fields' ),
+		);
+	}
+
+	private static function prepare_events_match( array $events, string $type, array $expected_ids, string $route, string $method, string $context ): bool {
+		$matched = array();
+		foreach ( $events as $event ) {
+			if ( ! is_array( $event ) || $type !== ( $event['type'] ?? null ) ) {
+				continue;
+			}
+			if ( $route !== ( $event['route'] ?? null ) || $method !== ( $event['method'] ?? null ) || $context !== ( $event['context'] ?? null ) ) {
+				return false;
+			}
+			$matched[] = (int) ( $event['id'] ?? 0 );
+		}
+
+		return array_values( $expected_ids ) === $matched;
+	}
+
 	private static function response_matches_schema_context( \WP_REST_Controller $controller, array $data, string $context ): bool {
 		$schema     = $controller->get_item_schema();
 		$properties = $schema['properties'] ?? array();
@@ -5842,6 +6462,48 @@ final class RestObjectControllersSurface {
 		}
 
 		return false;
+	}
+
+	private static function dispatch_with_rest_post_dispatch( \WP_REST_Server $server, \WP_REST_Request $request ): \WP_REST_Response {
+		return \apply_filters(
+			'rest_post_dispatch',
+			\rest_ensure_response( $server->dispatch( $request ) ),
+			$server,
+			$request
+		);
+	}
+
+	private static function rest_default_filter_callbacks(): array {
+		return array(
+			'rest_pre_serve_request:rest_send_cors_headers'      => array( 'rest_pre_serve_request', 'rest_send_cors_headers', 10 ),
+			'rest_post_dispatch:rest_send_allow_header'          => array( 'rest_post_dispatch', 'rest_send_allow_header', 10 ),
+			'rest_post_dispatch:rest_filter_response_fields'     => array( 'rest_post_dispatch', 'rest_filter_response_fields', 10 ),
+			'rest_pre_dispatch:rest_handle_options_request'      => array( 'rest_pre_dispatch', 'rest_handle_options_request', 10 ),
+			'rest_index:rest_add_application_passwords_to_index' => array( 'rest_index', 'rest_add_application_passwords_to_index', 10 ),
+		);
+	}
+
+	private static function rest_default_filter_state(): array {
+		$state = array();
+
+		foreach ( self::rest_default_filter_callbacks() as $key => $callback ) {
+			list( $hook, $function ) = $callback;
+			$priority = \has_filter( $hook, $function );
+			if ( false !== $priority ) {
+				$state[ $key ] = (int) $priority;
+			}
+		}
+
+		return $state;
+	}
+
+	private static function restore_rest_default_filters( array $snapshot ): void {
+		foreach ( self::rest_default_filter_callbacks() as $key => $callback ) {
+			list( $hook, $function, $priority ) = $callback;
+			if ( ! array_key_exists( $key, $snapshot ) ) {
+				\remove_filter( $hook, $function, $priority );
+			}
+		}
 	}
 
 	private static function template_collection_params_ok( array $params ): bool {

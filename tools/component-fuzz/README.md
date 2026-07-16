@@ -833,8 +833,10 @@ database, network requests, or a configured site.
 - `rest-object-controllers`: in-memory wpdb-backed REST object controller
   coverage for posts, terms, comments, users, revisions, and attachments,
   including schema/context/_fields filtering, deterministic collection
-  parameter sanitizer/validation matrices, permission gates, route
-  registration/dispatch, route index/help-data
+  parameter sanitizer/validation matrices, route-dispatched collection GET
+  projection, pagination header/link, prepare-hook, permission, and
+  query-short-circuit oracles across posts, categories, comments, and users,
+  permission gates, route registration/dispatch, route index/help-data
   projection, REST links, invalid IDs/types, sanitized content/meta fields,
   safe create/update/delete error paths, route-dispatched write validation and
   response projection for object updates, route-dispatched create/delete
