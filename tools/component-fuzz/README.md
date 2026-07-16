@@ -716,6 +716,8 @@ database, network requests, or a configured site.
   generated user/comment date-query execution row oracles with fixture-modeled
   expected IDs, scoped start-of-week filters, and comment cache-domain freshness,
   direct `after`/`before` bound filtering across user/comment datetime columns,
+  one-level `OR` relation row oracles across user/comment date bounds and
+  projections,
   classic post-search parser/order/result SQL oracles for terms, exclusions,
   columns, stopwords, attachment filename left-join branches, password gates,
   literal clause-keyword searches, empty relevance-order boundaries, and

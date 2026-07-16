@@ -6,6 +6,7 @@ final class QuerySurface {
 
 	private const GENERATED_CASES = 6;
 	private const DATE_BOUND_EXECUTION_CASES = 4;
+	private const DATE_RELATION_EXECUTION_CASES = 4;
 	private const SAMPLE_BYTES     = 180;
 	private const TAXONOMY         = 'component_fuzz_tax';
 
@@ -2974,6 +2975,9 @@ final class QuerySurface {
 		for ( $i = 0; $i < self::DATE_BOUND_EXECUTION_CASES; $i++ ) {
 			$cases[] = self::generated_user_query_date_bound_execution_case( $ctx->fork( 'user-date-bound-execution-' . $i ), $i );
 		}
+		for ( $i = 0; $i < self::DATE_RELATION_EXECUTION_CASES; $i++ ) {
+			$cases[] = self::generated_user_query_date_relation_execution_case( $ctx->fork( 'user-date-relation-execution-' . $i ), $i );
+		}
 
 		return $cases;
 	}
@@ -3062,6 +3066,9 @@ final class QuerySurface {
 		for ( $i = 0; $i < self::DATE_BOUND_EXECUTION_CASES; $i++ ) {
 			$cases[] = self::generated_comment_query_date_bound_execution_case( $ctx->fork( 'comment-date-bound-execution-' . $i ), $i );
 		}
+		for ( $i = 0; $i < self::DATE_RELATION_EXECUTION_CASES; $i++ ) {
+			$cases[] = self::generated_comment_query_date_relation_execution_case( $ctx->fork( 'comment-date-relation-execution-' . $i ), $i );
+		}
 
 		return $cases;
 	}
@@ -3079,6 +3086,14 @@ final class QuerySurface {
 		return self::user_query_date_execution_case_from_template(
 			$template,
 			'generated-user-date-bound-execution-' . $index . '-' . $template['label']
+		);
+	}
+
+	private static function generated_user_query_date_relation_execution_case( \ComponentFuzz\FuzzContext $ctx, int $index ): array {
+		$template = self::generated_seeded_date_relation_execution_template( $ctx, 'user', $index );
+		return self::user_query_date_execution_case_from_template(
+			$template,
+			'generated-user-date-relation-execution-' . $index . '-' . $template['label']
 		);
 	}
 
@@ -3122,6 +3137,14 @@ final class QuerySurface {
 		return self::comment_query_date_execution_case_from_template(
 			$template,
 			'generated-comment-date-bound-execution-' . $index . '-' . $template['label']
+		);
+	}
+
+	private static function generated_comment_query_date_relation_execution_case( \ComponentFuzz\FuzzContext $ctx, int $index ): array {
+		$template = self::generated_seeded_date_relation_execution_template( $ctx, 'comment', $index );
+		return self::comment_query_date_execution_case_from_template(
+			$template,
+			'generated-comment-date-relation-execution-' . $index . '-' . $template['label']
 		);
 	}
 
@@ -3315,6 +3338,81 @@ final class QuerySurface {
 			);
 			$template['label']      .= '-year';
 		}
+
+		if ( 'comment' === $kind && $ctx->bool( 50 ) ) {
+			$template['dateQuery'] = self::date_execution_query_with_column( $template['dateQuery'], 'comment_date_gmt' );
+			$template['label']    .= '-gmt';
+		}
+
+		return $template;
+	}
+
+	private static function generated_seeded_date_relation_execution_template( \ComponentFuzz\FuzzContext $ctx, string $kind, int $index ): array {
+		$templates = array(
+			array(
+				'label'     => 'bound-or-week',
+				'dateQuery' => array(
+					'relation' => 'OR',
+					array(
+						'after'     => '2020-05-01 00:00:00',
+						'before'    => '2020-05-05 13:00:00',
+						'inclusive' => true,
+					),
+					array(
+						'compare' => 'IN',
+						'week'    => array( 22 ),
+					),
+				),
+			),
+			array(
+				'label'     => 'early-dayofyear-or-lower-bound',
+				'dateQuery' => array(
+					'relation' => 'OR',
+					array(
+						'compare'   => 'BETWEEN',
+						'dayofyear' => array( 1, 32 ),
+					),
+					array(
+						'after'     => '2020-06-01 14:00:00',
+						'inclusive' => true,
+					),
+				),
+			),
+			array(
+				'label'       => 'monday-week-or-early-bound',
+				'startOfWeek' => 1,
+				'dateQuery'   => array(
+					'relation' => 'OR',
+					array(
+						'compare' => 'IN',
+						'week'    => array( 19 ),
+					),
+					array(
+						'before'    => '2020-02-01 00:00:00',
+						'inclusive' => true,
+					),
+				),
+			),
+			array(
+				'label'     => 'branch-and-or-branch-and',
+				'dateQuery' => array(
+					'relation' => 'OR',
+					array(
+						'after'          => '2020-05-01 00:00:00',
+						'inclusive'      => true,
+						'compare'        => 'IN',
+						'dayofweek_iso'  => array( 2 ),
+					),
+					array(
+						'compare' => 'IN',
+						'week'    => array( 22 ),
+						'hour'    => array( 14 ),
+					),
+				),
+			),
+		);
+
+		$template = $templates[ $index % count( $templates ) ];
 
 		if ( 'comment' === $kind && $ctx->bool( 50 ) ) {
 			$template['dateQuery'] = self::date_execution_query_with_column( $template['dateQuery'], 'comment_date_gmt' );

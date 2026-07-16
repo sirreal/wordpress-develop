@@ -1569,46 +1569,156 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 			}
 
 			foreach ( $columns as $column ) {
-				if ( ! preg_match_all( '/(?<![A-Za-z0-9_])(?:`?[a-z_][a-z0-9_]*`?\.)?`?' . preg_quote( $column, '/' ) . '`?\s*(<=|>=|<|>)\s*(\'(?:\\\\.|[^\'\\\\])*\'|"[^"]*")/i', $where, $matches, PREG_SET_ORDER ) ) {
-					$matches = array();
+				if ( ! $this->component_fuzz_datetime_sql_has_predicate( $where, $column ) ) {
+					continue;
 				}
 
-				foreach ( $matches as $match ) {
-					$operator = $match[1];
-					$bound    = $this->component_fuzz_unquote_sql_value( $match[2] );
-					$rows     = array_filter(
-						$rows,
-						static function ( $row ) use ( $column, $operator, $bound ) {
-							$value      = (string) ( $row[ $column ] ?? '' );
-							$comparison = strcmp( $value, $bound );
-
-							switch ( $operator ) {
-								case '<':
-									return $comparison < 0;
-								case '<=':
-									return $comparison <= 0;
-								case '>':
-									return $comparison > 0;
-								case '>=':
-									return $comparison >= 0;
-							}
-
-							return true;
-						}
-					);
-				}
-
-				if ( preg_match( '/\b(?:YEAR|MONTH|DAYOFMONTH|HOUR|MINUTE|SECOND|DAYOFYEAR|DAYOFWEEK|WEEKDAY|WEEK|DATE_FORMAT)\s*\(/i', $where ) ) {
-					$rows = array_filter(
-						$rows,
-						function ( $row ) use ( $where, $column ) {
-							return $this->component_fuzz_date_parts_match( (string) ( $row[ $column ] ?? '' ), $where, $column );
-						}
-					);
-				}
+				$rows = array_filter(
+					$rows,
+					function ( $row ) use ( $where, $column ) {
+						return $this->component_fuzz_datetime_sql_matches( (string) ( $row[ $column ] ?? '' ), $where, $column );
+					}
+				);
 			}
 
 			return array_values( $rows );
+		}
+
+		private function component_fuzz_datetime_sql_matches( $datetime, $sql, $column ) {
+			$sql = $this->component_fuzz_strip_outer_sql_parentheses( trim( (string) $sql ) );
+			if ( '' === $sql || ! $this->component_fuzz_datetime_sql_has_predicate( $sql, $column ) ) {
+				return true;
+			}
+
+			$or_terms = $this->component_fuzz_split_sql_top_level_terms( $sql, 'OR' );
+			if ( count( $or_terms ) > 1 ) {
+				foreach ( $or_terms as $term ) {
+					if (
+						$this->component_fuzz_datetime_sql_has_predicate( $term, $column )
+						&& $this->component_fuzz_datetime_sql_matches( $datetime, $term, $column )
+					) {
+						return true;
+					}
+				}
+
+				return false;
+			}
+
+			$and_terms = $this->component_fuzz_split_sql_top_level_terms( $sql, 'AND' );
+			if ( count( $and_terms ) > 1 ) {
+				foreach ( $and_terms as $term ) {
+					if (
+						$this->component_fuzz_datetime_sql_has_predicate( $term, $column )
+						&& ! $this->component_fuzz_datetime_sql_matches( $datetime, $term, $column )
+					) {
+						return false;
+					}
+				}
+
+				return true;
+			}
+
+			return $this->component_fuzz_datetime_bounds_match( $datetime, $sql, $column )
+				&& $this->component_fuzz_date_parts_match( $datetime, $sql, $column );
+		}
+
+		private function component_fuzz_datetime_sql_has_predicate( $sql, $column ) {
+			$column_regex = '(?:`?[a-z_][a-z0-9_]*`?\.)?`?' . preg_quote( $column, '/' ) . '`?';
+
+			return (bool) (
+				preg_match( '/(?<![A-Za-z0-9_])' . $column_regex . '\s*(?:<=|>=|<|>)\s*(?:\'(?:\\\\.|[^\'\\\\])*\'|"[^"]*")/i', (string) $sql )
+				|| preg_match( '/\b(?:YEAR|MONTH|DAYOFMONTH|HOUR|MINUTE|SECOND|DAYOFYEAR|DAYOFWEEK|WEEKDAY|WEEK|DATE_FORMAT)\s*\([^)]*' . $column_regex . '/i', (string) $sql )
+			);
+		}
+
+		private function component_fuzz_datetime_bounds_match( $datetime, $sql, $column ) {
+			if ( ! preg_match_all( '/(?<![A-Za-z0-9_])(?:`?[a-z_][a-z0-9_]*`?\.)?`?' . preg_quote( $column, '/' ) . '`?\s*(<=|>=|<|>)\s*(\'(?:\\\\.|[^\'\\\\])*\'|"[^"]*")/i', (string) $sql, $matches, PREG_SET_ORDER ) ) {
+				return true;
+			}
+
+			foreach ( $matches as $match ) {
+				$operator   = $match[1];
+				$bound      = $this->component_fuzz_unquote_sql_value( $match[2] );
+				$comparison = strcmp( (string) $datetime, (string) $bound );
+
+				switch ( $operator ) {
+					case '<':
+						if ( ! ( $comparison < 0 ) ) {
+							return false;
+						}
+						break;
+					case '<=':
+						if ( ! ( $comparison <= 0 ) ) {
+							return false;
+						}
+						break;
+					case '>':
+						if ( ! ( $comparison > 0 ) ) {
+							return false;
+						}
+						break;
+					case '>=':
+						if ( ! ( $comparison >= 0 ) ) {
+							return false;
+						}
+						break;
+				}
+			}
+
+			return true;
+		}
+
+		private function component_fuzz_strip_outer_sql_parentheses( $sql ) {
+			$sql = trim( (string) $sql );
+			while ( strlen( $sql ) >= 2 && '(' === $sql[0] && ')' === $sql[ strlen( $sql ) - 1 ] && $this->component_fuzz_outer_parentheses_wrap_sql( $sql ) ) {
+				$sql = trim( substr( $sql, 1, -1 ) );
+			}
+
+			return $sql;
+		}
+
+		private function component_fuzz_outer_parentheses_wrap_sql( $sql ) {
+			$length    = strlen( (string) $sql );
+			$depth     = 0;
+			$in_string = false;
+			$quote     = '';
+			$escaped   = false;
+
+			for ( $i = 0; $i < $length; $i++ ) {
+				$char = $sql[ $i ];
+
+				if ( $in_string ) {
+					if ( '\\' === $char && ! $escaped ) {
+						$escaped = true;
+						continue;
+					}
+
+					if ( $quote === $char && ! $escaped ) {
+						$in_string = false;
+					}
+
+					$escaped = false;
+					continue;
+				}
+
+				if ( "'" === $char || '"' === $char ) {
+					$in_string = true;
+					$quote     = $char;
+					$escaped   = false;
+					continue;
+				}
+
+				if ( '(' === $char ) {
+					++$depth;
+				} elseif ( ')' === $char ) {
+					--$depth;
+					if ( 0 === $depth && $i < $length - 1 ) {
+						return false;
+					}
+				}
+			}
+
+			return 0 === $depth;
 		}
 
 		private function component_fuzz_filter_posts_by_status_or_branches( $query, array $rows ) {
@@ -3042,6 +3152,12 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 
 				$end = 0 === $depth ? $this->component_fuzz_sql_keyword_match_end_at( $sql, $i, $keyword ) : null;
 				if ( null !== $end ) {
+					if ( 'AND' === strtoupper( (string) $keyword ) && $this->component_fuzz_sql_term_awaits_between_upper_bound( $current ) ) {
+						$current .= substr( (string) $sql, $i, $end - $i );
+						$i        = $end - 1;
+						continue;
+					}
+
 					$terms[] = $current;
 					$current = '';
 					$i       = $end - 1;
@@ -3053,6 +3169,11 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 
 			$terms[] = $current;
 			return $terms;
+		}
+
+		private function component_fuzz_sql_term_awaits_between_upper_bound( $sql ) {
+			$value = '(?:\'(?:\\\\.|[^\'\\\\])*\'|"[^"]*"|-?\d+(?:\.\d+)?)';
+			return (bool) preg_match( '/\bBETWEEN\s+' . $value . '\s*$/i', (string) $sql );
 		}
 
 		private function component_fuzz_sql_keyword_match_end_at( $sql, $offset, $keyword ) {
