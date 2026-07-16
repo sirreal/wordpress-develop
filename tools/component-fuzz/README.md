@@ -478,13 +478,16 @@ database, network requests, or a configured site.
 - `kses`: KSES policies, wrapper agreement, protocol filtering/helper contracts,
   low-level helper contracts, exact `wp_kses_hair()` parser fixtures,
   explicit null/control-character stripping and slash-zero handling,
-  filter-aware safe CSS, attribute/entity/comment handling, deterministic
-  attribute constraint matrices for required, values, max/min, valueless, and
-  callback checks, serialized block attribute KSES filtering, PDF object policy
-  and upload-host/port URL gates, dynamic URI attribute filtering, full-tag
+  filter-aware safe CSS, generated policy/protocol/style mutation matrices,
+  attribute/entity/comment handling, deterministic attribute constraint
+  matrices for required, values, max/min, valueless, and callback checks,
+  serialized block attribute KSES filtering, PDF object policy and
+  upload-host/port URL gates, dynamic URI attribute filtering, full-tag
   attribute parsing, no-HTML filtering, custom context locality, strict/custom
-  policy monotonicity, save/comment filter lifecycle wiring, capability-gated
-  KSES initialization, and filter/global restoration.
+  policy monotonicity, generated widened-policy idempotence, block/comment
+  boundary inputs, temporary CSS allow-list restoration, save/comment filter
+  lifecycle wiring, capability-gated KSES initialization, and filter/global
+  restoration.
 - `l10n`: translation fallbacks, escaped translation helpers, plural/nooped
   selection, textdomain load/unload state, translation path guards, locale and
   user-locale switching including generated stack/action payload matrices,

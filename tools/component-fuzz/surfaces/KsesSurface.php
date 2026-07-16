@@ -73,6 +73,7 @@ final class KsesSurface {
 		try {
 			$results = array_merge( $results, self::check_allowed_html_contracts( $seed ) );
 			$results = array_merge( $results, self::check_custom_policy_and_filter_invariants( $seed ) );
+			$results[] = self::check_generated_policy_protocol_style_matrix( $seed );
 			$results = array_merge( $results, self::check_attribute_constraint_invariants( $seed ) );
 			$results = array_merge( $results, self::check_pdf_object_and_uri_attribute_invariants( $seed ) );
 			$results[] = self::check_helper_contract_matrix( $seed );
@@ -424,6 +425,301 @@ final class KsesSurface {
 		}
 
 		return $results;
+	}
+
+	private static function check_generated_policy_protocol_style_matrix( int $seed ): array {
+		foreach ( array( 'add_filter', 'remove_filter', 'has_filter', 'safecss_filter_attr', 'wp_kses' ) as $function_name ) {
+			if ( ! function_exists( $function_name ) ) {
+				return self::skip(
+					$seed,
+					null,
+					'kses.generated-policy-protocol-style-matrix.available',
+					$function_name . '() is not loaded',
+					''
+				);
+			}
+		}
+
+		$rng             = self::rng( self::normalize_seed( 'kses-policy-style:' . $seed ) );
+		$custom_property = 'component-fuzz-css-' . substr( sha1( 'safe-style:' . $seed ), 0, 8 );
+		$style_probe     = 'color:red;' . $custom_property . ':uppercase;background-image:url(javascript:alert(1));foo:bar';
+		$style_filter    = static function ( $properties ) use ( $custom_property ) {
+			if ( is_array( $properties ) ) {
+				$properties[] = $custom_property;
+			}
+
+			return $properties;
+		};
+
+		$protocol_profiles = array(
+			array( 'https', 'mailto' ),
+			array( 'http', 'https' ),
+			array( 'https', 'ftp' ),
+			array( 'mailto' ),
+			array( 'https' ),
+		);
+		$unsafe_urls       = array(
+			'javascript:alert(1)',
+			'java&#x0a;script:alert(1)',
+			'vbscript:msgbox(1)',
+			'data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==',
+		);
+		$wrappers          = array( 'div', 'section', 'mark' );
+		$failures          = array();
+		$case_labels       = array();
+		$filtered_css      = '';
+		$filters_removed   = false;
+		$exception         = null;
+
+		\add_filter( 'safe_style_css', $style_filter, 10, 1 );
+		try {
+			$filtered_css = \safecss_filter_attr( $style_probe );
+			if (
+				false === strpos( $filtered_css, 'color:red' )
+				|| false === strpos( $filtered_css, $custom_property . ':uppercase' )
+				|| ! empty( self::css_policy_violations( $filtered_css, array( 'https' ) ) )
+			) {
+				$failures[] = array(
+					'label'       => 'temporary safe_style_css property is active and still strips unsafe CSS',
+					'input'       => self::preview( $style_probe ),
+					'output'      => self::preview( $filtered_css ),
+					'violations'  => self::css_policy_violations( $filtered_css, array( 'https' ) ),
+					'customProp'  => $custom_property,
+				);
+			}
+
+			for ( $case_index = 0; $case_index < 12; ++$case_index ) {
+				$token          = substr( sha1( $seed . ':policy-style:' . $case_index . ':' . self::rng_uint32( $rng ) ), 0, 8 );
+				$protocols      = self::rng_choice( $rng, $protocol_profiles );
+				$safe_scheme    = self::rng_choice( $rng, $protocols );
+				$safe_url       = 'mailto' === $safe_scheme
+					? 'mailto:reader-' . $token . '@example.test'
+					: $safe_scheme . '://example.test/component-fuzz-' . $token;
+				$unsafe_url     = self::rng_choice( $rng, $unsafe_urls );
+				$allow_style    = self::rng_chance( $rng, 65 );
+				$allow_img      = self::rng_chance( $rng, 50 );
+				$allow_cite     = self::rng_chance( $rng, 50 );
+				$wrapper        = self::rng_choice( $rng, $wrappers );
+				$block_attrs    = array(
+					'class'  => true,
+					'data-*' => true,
+				);
+				$inline_attrs   = array(
+					'data-*' => true,
+					'title'  => true,
+				);
+				if ( $allow_style ) {
+					$block_attrs['style']  = true;
+					$inline_attrs['style'] = true;
+				}
+
+				$policy = array(
+					'a'       => array(
+						'href'   => true,
+						'title'  => true,
+						'data-*' => true,
+					),
+					'br'      => array(),
+					'div'     => $block_attrs,
+					'mark'    => $inline_attrs,
+					'p'       => $block_attrs,
+					'section' => $block_attrs,
+					'span'    => $inline_attrs,
+				);
+				if ( $allow_img ) {
+					$policy['img'] = array(
+						'alt'    => true,
+						'data-*' => true,
+						'src'    => true,
+					);
+				}
+				if ( $allow_cite ) {
+					$policy['blockquote'] = array(
+						'cite'   => true,
+						'data-*' => true,
+					);
+				}
+
+				$wide_block_attrs = array(
+					'class'  => true,
+					'data-*' => true,
+					'style'  => true,
+					'title'  => true,
+				);
+				$wide_inline_attrs = array(
+					'class'  => true,
+					'data-*' => true,
+					'style'  => true,
+					'title'  => true,
+				);
+				$wide_policy      = $policy + array(
+					'blockquote' => array(
+						'cite'   => true,
+						'data-*' => true,
+					),
+					'code'       => array(),
+					'em'         => array(),
+					'img'        => array(
+						'alt'    => true,
+						'data-*' => true,
+						'src'    => true,
+					),
+					'strong'     => array(),
+				);
+				foreach ( array( 'div', 'p', 'section' ) as $tag_name ) {
+					$wide_policy[ $tag_name ] = $wide_block_attrs;
+				}
+				foreach ( array( 'mark', 'span' ) as $tag_name ) {
+					$wide_policy[ $tag_name ] = $wide_inline_attrs;
+				}
+
+				$style = 'color:red;' . $custom_property . ':uppercase;background-image:url(' . $unsafe_url . ');foo:bar';
+				$html  = '<!-- wp:paragraph {"componentFuzz":"' . $token . '"} -->'
+					. '<' . $wrapper . ' class="cf-' . $token . '" data-cf="' . $token . '" style="' . $style . '" onclick="evil()">'
+					. '<a href="' . $safe_url . '" title="safe-' . $token . '" data-cf="' . $token . '">safe link</a>'
+					. '<a href="' . $unsafe_url . '" data-cf="bad" onclick="evil()">bad link</a>'
+					. '<span data-cf="' . $token . '" data-cf.bad="drop" title="ok">span</span>'
+					. '<img src="' . $safe_url . '" alt="image-' . $token . '" onerror="evil">'
+					. '<blockquote cite="' . $unsafe_url . '">quote</blockquote>'
+					. '<!-- malformed -- comment --><script>alert(1)</script><strong>tail</strong>'
+					. '</' . $wrapper . '><!-- /wp:paragraph -->';
+
+				$filtered       = \wp_kses( $html, $policy, $protocols );
+				$refiltered     = \wp_kses( $filtered, $policy, $protocols );
+				$widened_filter = \wp_kses( $filtered, $wide_policy, $protocols );
+				$violations     = array_merge(
+					self::policy_violations( $filtered, $policy, $protocols ),
+					self::attribute_boundary_violations( $filtered ),
+					self::comment_syntax_violations( $filtered ),
+					self::style_attribute_violations( $filtered, $protocols )
+				);
+				$case_failures  = array();
+
+				if ( $filtered !== $refiltered ) {
+					$case_failures[] = array(
+						'type'       => 'idempotence',
+						'filtered'   => self::preview( $filtered ),
+						'refiltered' => self::preview( $refiltered ),
+					);
+				}
+				if ( $filtered !== $widened_filter ) {
+					$case_failures[] = array(
+						'type'     => 'widened-policy-stability',
+						'filtered' => self::preview( $filtered ),
+						'widened'  => self::preview( $widened_filter ),
+					);
+				}
+				if ( ! empty( $violations ) ) {
+					$case_failures[] = array(
+						'type'       => 'structural-violations',
+						'violations' => array_slice( $violations, 0, 6 ),
+						'output'     => self::preview( $filtered ),
+					);
+				}
+				if ( false === strpos( $filtered, 'href="' . $safe_url . '"' ) ) {
+					$case_failures[] = array(
+						'type'    => 'safe-href-stripped',
+						'href'    => $safe_url,
+						'output'  => self::preview( $filtered ),
+					);
+				}
+				if ( false !== stripos( $filtered, 'onclick' ) || false !== stripos( $filtered, 'onerror' ) || false !== stripos( $filtered, '<script' ) ) {
+					$case_failures[] = array(
+						'type'   => 'event-or-script-token-survived',
+						'output' => self::preview( $filtered ),
+					);
+				}
+				if ( ! $allow_style && ! empty( self::style_attribute_values( $filtered ) ) ) {
+					$case_failures[] = array(
+						'type'   => 'style-attribute-survived-disallowed-policy',
+						'styles' => self::style_attribute_values( $filtered ),
+					);
+				}
+				if (
+					$allow_style
+					&& (
+						false === strpos( $filtered, 'color:red' )
+						|| false === strpos( $filtered, $custom_property . ':uppercase' )
+					)
+				) {
+					$case_failures[] = array(
+						'type'       => 'allowed-safe-style-not-preserved',
+						'style'      => $style,
+						'output'     => self::preview( $filtered ),
+						'allowStyle' => $allow_style,
+					);
+				}
+
+				$case_labels[] = array(
+					'token'      => $token,
+					'protocols'  => $protocols,
+					'style'      => $allow_style,
+					'img'        => $allow_img,
+					'blockquote' => $allow_cite,
+				);
+				if ( ! empty( $case_failures ) ) {
+					$failures[] = array(
+						'case'     => $case_index,
+						'label'    => end( $case_labels ),
+						'failures' => $case_failures,
+					);
+				}
+			}
+		} catch ( \Throwable $e ) {
+			$exception = $e;
+		} finally {
+			\remove_filter( 'safe_style_css', $style_filter, 10 );
+			$filters_removed = false === \has_filter( 'safe_style_css', $style_filter );
+		}
+
+		if ( null !== $exception ) {
+			return self::throwable_result(
+				$seed,
+				null,
+				'kses.generated-policy-protocol-style-matrix.no-throw',
+				$style_probe,
+				$exception
+			);
+		}
+
+		$css_after = \safecss_filter_attr( $style_probe );
+		if (
+			! $filters_removed
+			|| false !== strpos( $css_after, $custom_property )
+			|| ! empty( self::css_policy_violations( $css_after, array( 'https' ) ) )
+		) {
+			$failures[] = array(
+				'label'          => 'temporary safe_style_css property is removed after generated matrix',
+				'filtersRemoved' => $filters_removed,
+				'cssAfter'       => self::preview( $css_after ),
+				'violations'     => self::css_policy_violations( $css_after, array( 'https' ) ),
+			);
+		}
+
+		$details = array(
+			'caseCount'       => count( $case_labels ),
+			'customProperty'  => $custom_property,
+			'filteredCss'     => self::preview( $filtered_css ),
+			'filteredCssPost' => self::preview( $css_after ),
+			'filtersRemoved'  => $filters_removed,
+			'cases'           => array_slice( $case_labels, 0, 6 ),
+			'failureCount'    => count( $failures ),
+			'failures'        => array_slice( $failures, 0, 8 ),
+		);
+
+		if ( empty( $failures ) ) {
+			return self::pass( $seed, null, 'kses.generated-policy-protocol-style-matrix', $custom_property, $details );
+		}
+
+		return self::fail(
+			$seed,
+			null,
+			'kses.generated-policy-protocol-style-matrix',
+			$custom_property,
+			'generated policies remain idempotent, monotonic under wider policies, protocol-safe, style-filtered, and comment-boundary safe',
+			$failures,
+			$details
+		);
 	}
 
 	private static function check_pdf_object_and_uri_attribute_invariants( int $seed ): array {
