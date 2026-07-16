@@ -1453,6 +1453,7 @@ final class RestMediaAttachmentsSurface {
 		self::$upload_root = $temp_root;
 		\add_filter( 'upload_dir', array( __CLASS__, 'filter_upload_dir' ), 100 );
 		\wp_cache_flush();
+		\wp_upload_dir( null, false, true );
 
 		$GLOBALS['_wp_post_type_features'] = array();
 		$GLOBALS['post_type_meta_caps']    = array();
@@ -1683,7 +1684,17 @@ final class RestMediaAttachmentsSurface {
 			false
 		);
 
-		return is_int( $post_id ) ? $post_id : 0;
+		if ( ! is_int( $post_id ) || $post_id <= 0 ) {
+			return 0;
+		}
+
+		$post = \get_post( $post_id );
+		if ( $post instanceof \WP_Post && ! str_starts_with( $post->post_date, '0000-00-00' ) ) {
+			// The REST attachments controller keys raw uploads by parent post date.
+			\wp_upload_dir( $post->post_date, false, true );
+		}
+
+		return $post_id;
 	}
 
 	private static function insert_attachment_fixture(
@@ -1983,6 +1994,7 @@ final class RestMediaAttachmentsSurface {
 		}
 
 		\wp_cache_flush();
+		\wp_upload_dir( null, false, true );
 		foreach ( $snapshot['globals'] as $name => $entry ) {
 			if ( $entry['exists'] ) {
 				$GLOBALS[ $name ] = $entry['value'];

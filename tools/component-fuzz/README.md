@@ -827,7 +827,8 @@ database, network requests, or a configured site.
   contracts, metadata finalization filters, route-dispatched post-process and
   edit paths, deterministic image-editor operations, edited attachment
   creation, parent-image metadata, `_fields` response projection, edit-media
-  fail-closed paths, temp upload cleanup, and global/filter restoration.
+  fail-closed paths, upload-directory cache isolation across ordered media
+  surfaces, temp upload cleanup, and global/filter restoration.
 - `rest-widgets-sidebars`: no-live-DB REST widget, widget-type, and sidebar
   controller coverage, including route/schema contracts, public
   `show_in_rest` read gates, widget type sorting/projection and
@@ -1164,10 +1165,13 @@ client-side media-processing write paths using raw request bodies, temp upload
 roots, attachment postmeta, response projection, metadata finalization,
 permission gates, URL sideload downloads short-circuited through local HTTP
 fixtures, and raw sideload metadata updates for generated subsizes and
-original-image files. It intentionally avoids multipart success paths that
-depend on PHP's `is_uploaded_file()` state and admin image-edit request paths,
-which are covered by `media-image-edit-requests` when they can be kept
-process-local and codec-independent. `rest-widgets-sidebars`
+original-image files. Its runtime explicitly refreshes default and
+parent-date-keyed upload-directory cache entries so previous media surfaces
+cannot leak year/month upload paths into raw REST uploads. It intentionally
+avoids multipart success paths that depend on PHP's `is_uploaded_file()` state
+and admin image-edit request paths, which are covered by
+`media-image-edit-requests` when they can be kept process-local and
+codec-independent. `rest-widgets-sidebars`
 complements the lower-level widget surfaces by exercising REST controller
 permissions, schemas, instance encoding, sidebar mutation, legacy form-data
 paths, and the `/widget-types/{id}/render` iframe endpoint directly. The render
