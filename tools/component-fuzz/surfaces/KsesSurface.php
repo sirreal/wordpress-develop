@@ -77,6 +77,7 @@ final class KsesSurface {
 			$results[] = self::check_generated_scoped_policy_mutation_matrix( $seed );
 			$results[] = self::check_style_protocol_cross_hook_matrix( $seed );
 			$results[] = self::check_semicolon_data_url_css_parser_matrix( $seed );
+			$results[] = self::check_css_url_protocol_fragment_matrix( $seed );
 			$results = array_merge( $results, self::check_attribute_constraint_invariants( $seed ) );
 			$results = array_merge( $results, self::check_pdf_object_and_uri_attribute_invariants( $seed ) );
 			$results[] = self::check_helper_contract_matrix( $seed );
@@ -1678,6 +1679,373 @@ final class KsesSurface {
 			'kses.semicolon-data-url-css-parser-matrix',
 			'data:*;*',
 			'default KSES CSS filtering does not preserve complete semicolon-bearing data URLs, current all-true allow-CSS hook exposure is isolated, guarded allow-CSS rejects split fragments, and hooks restore',
+			$failures,
+			$details
+		);
+	}
+
+	private static function check_css_url_protocol_fragment_matrix( int $seed ): array {
+		foreach ( array( 'add_filter', 'remove_filter', 'has_filter', 'safecss_filter_attr', 'wp_kses' ) as $function_name ) {
+			if ( ! function_exists( $function_name ) ) {
+				return self::skip(
+					$seed,
+					null,
+					'kses.css-url-protocol-fragment-matrix.available',
+					$function_name . '() is not loaded',
+					''
+				);
+			}
+		}
+
+		$rng           = self::rng( self::normalize_seed( 'kses-css-url-protocol-fragments:' . $seed ) );
+		$hook_snapshot = self::snapshot_hook( 'safecss_filter_attr_allow_css' );
+		$hook_before   = self::hook_signature( 'safecss_filter_attr_allow_css' );
+		$policy        = array(
+			'div' => array(
+				'data-*' => true,
+				'style'  => true,
+			),
+		);
+		$protocols     = array( 'https' );
+		$bad_protocols = array( 'javascript', 'vbscript', 'livescript', 'mocha' );
+		$properties    = array( 'background-image', 'background', 'cursor', '--cf-fragment-url' );
+		$quotes        = array( '', "'", '"' );
+		$data_templates = array(
+			array(
+				'label' => 'bare-comma',
+				'url'   => 'data:,hello-',
+			),
+			array(
+				'label' => 'text-plain-comma',
+				'url'   => 'data:text/plain,hello-',
+			),
+			array(
+				'label' => 'json-comma',
+				'url'   => 'data:application/json,%7B%22token%22%3A%22',
+			),
+			array(
+				'label' => 'png-comma',
+				'url'   => 'data:image/png,iVBORw0KGgo',
+			),
+		);
+		$split_prefixes = array(
+			'javascript' => 'java',
+			'vbscript'   => 'vb',
+			'livescript' => 'live',
+			'mocha'      => 'moc',
+		);
+		$function_names = array(
+			'javascript' => 'alert',
+			'vbscript'   => 'msgbox',
+			'livescript' => 'alert',
+			'mocha'      => 'evil',
+		);
+		$failures      = array();
+		$cases         = array();
+		$exception     = null;
+
+		try {
+			for ( $case_index = 0; $case_index < 8; ++$case_index ) {
+				$token    = substr( sha1( $seed . ':css-protocol-fragment:' . $case_index . ':' . self::rng_uint32( $rng ) ), 0, 8 );
+				$safe_url = 'https://example.test/kses-fragment/' . $token . '.png';
+
+				$data_template = self::rng_choice( $rng, $data_templates );
+				$data_property = self::rng_choice( $rng, $properties );
+				$data_quote    = self::rng_choice( $rng, $quotes );
+				$data_url      = $data_template['url'] . $token;
+				$data_value    = 'url(' . $data_quote . $data_url . $data_quote . ')';
+				if ( 'cursor' === $data_property ) {
+					$data_value .= ', auto';
+				}
+				$data_css  = $data_property . ':' . $data_value . ';color:red;background-image:url(' . $safe_url . ')';
+				$data_html = '<div style="' . htmlspecialchars( $data_css, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' ) . '" data-token="' . $token . '">data</div>';
+
+				$data_seen = array(
+					'permissive' => array(),
+					'guarded'    => array(),
+				);
+				$data_default_css  = \safecss_filter_attr( $data_css );
+				$data_default_html = \wp_kses( $data_html, $policy, $protocols );
+
+				$data_permissive_filter = static function ( bool $allow_css, string $css_test_string ) use ( &$data_seen ): bool {
+					$data_seen['permissive'][] = array(
+						'default' => $allow_css,
+						'test'    => $css_test_string,
+					);
+					return true;
+				};
+				\add_filter( 'safecss_filter_attr_allow_css', $data_permissive_filter, 10, 2 );
+				try {
+					$data_permissive_css  = \safecss_filter_attr( $data_css );
+					$data_permissive_html = \wp_kses( $data_html, $policy, $protocols );
+				} finally {
+					\remove_filter( 'safecss_filter_attr_allow_css', $data_permissive_filter, 10 );
+				}
+
+				$data_guarded_filter = static function ( bool $allow_css, string $css_test_string ) use ( &$data_seen ): bool {
+					$data_seen['guarded'][] = array(
+						'default' => $allow_css,
+						'test'    => $css_test_string,
+					);
+					return $allow_css && ! self::looks_like_fragmented_bad_protocol_css_fragment( $css_test_string );
+				};
+				\add_filter( 'safecss_filter_attr_allow_css', $data_guarded_filter, 10, 2 );
+				try {
+					$data_guarded_css  = \safecss_filter_attr( $data_css );
+					$data_guarded_html = \wp_kses( $data_html, $policy, $protocols );
+				} finally {
+					\remove_filter( 'safecss_filter_attr_allow_css', $data_guarded_filter, 10 );
+				}
+
+				foreach (
+					array(
+						'default-css'     => $data_default_css,
+						'default-html'    => $data_default_html,
+						'permissive-css'  => $data_permissive_css,
+						'permissive-html' => $data_permissive_html,
+						'guarded-css'     => $data_guarded_css,
+						'guarded-html'    => $data_guarded_html,
+					) as $label => $output
+				) {
+					if ( self::contains_data_url( $output, $data_url ) || self::contains_protocol_marker( $output, 'data' ) ) {
+						$failures[] = array(
+							'case'    => $case_index,
+							'type'    => 'semicolon-free-data-url-preserved',
+							'label'   => $label,
+							'dataUrl' => self::preview( $data_url, 120 ),
+							'output'  => self::preview( $output ),
+						);
+					}
+				}
+				foreach ( array( $data_default_css, $data_permissive_css, $data_guarded_css ) as $label => $output ) {
+					if ( false === strpos( $output, 'color:red' ) || false === strpos( $output, $safe_url ) ) {
+						$failures[] = array(
+							'case'       => $case_index,
+							'type'       => 'data-url-safe-neighbor-stripped',
+							'label'      => $label,
+							'output'     => self::preview( $output ),
+							'expectedUrl' => $safe_url,
+						);
+					}
+				}
+				foreach ( $data_seen['permissive'] as $hit ) {
+					if ( is_array( $hit ) && isset( $hit['test'] ) && self::contains_protocol_marker( (string) $hit['test'], 'data' ) ) {
+						$failures[] = array(
+							'case' => $case_index,
+							'type' => 'data-url-reached-allow-css-filter',
+							'hit'  => $hit,
+						);
+						break;
+					}
+				}
+
+				$protocol       = self::rng_choice( $rng, $bad_protocols );
+				$fragment_shape = self::rng_choice( $rng, array( 'payload-semicolon', 'after-colon-semicolon', 'split-scheme-semicolon' ) );
+				$fragment_prop  = self::rng_choice( $rng, $properties );
+				$fragment_quote = self::rng_choice( $rng, $quotes );
+				$function_name  = $function_names[ $protocol ];
+				if ( 'payload-semicolon' === $fragment_shape ) {
+					$fragment_url = $protocol . ':' . $function_name . '-' . $token . ';payload';
+					$expected_permissive_marker = $protocol . ':';
+					$expect_protocol_marker     = true;
+					$expect_default_false_hit    = true;
+				} elseif ( 'split-scheme-semicolon' === $fragment_shape ) {
+					$fragment_url = $split_prefixes[ $protocol ] . ';' . substr( $protocol, strlen( $split_prefixes[ $protocol ] ) ) . ':' . $function_name . '(' . $token . ')';
+					$expected_permissive_marker = 'url(' . $fragment_quote . $split_prefixes[ $protocol ];
+					$expect_protocol_marker     = false;
+					$expect_default_false_hit    = true;
+				} else {
+					$fragment_url = $protocol . ':;payload-' . $token;
+					$expected_permissive_marker = $protocol . ':';
+					$expect_protocol_marker     = true;
+					$expect_default_false_hit    = true;
+				}
+				$fragment_value = 'url(' . $fragment_quote . $fragment_url . $fragment_quote . ')';
+				if ( 'cursor' === $fragment_prop ) {
+					$fragment_value .= ', auto';
+				}
+				$fragment_css  = $fragment_prop . ':' . $fragment_value . ';color:red;background-image:url(' . $safe_url . '?fragment=1)';
+				$fragment_html = '<div style="' . htmlspecialchars( $fragment_css, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' ) . '" data-token="' . $token . '">fragment</div>';
+				$fragment_seen = array(
+					'permissive' => array(),
+					'guarded'    => array(),
+				);
+
+				$fragment_default_css  = \safecss_filter_attr( $fragment_css );
+				$fragment_default_html = \wp_kses( $fragment_html, $policy, $protocols );
+				$fragment_permissive_filter = static function ( bool $allow_css, string $css_test_string ) use ( &$fragment_seen ): bool {
+					$fragment_seen['permissive'][] = array(
+						'default' => $allow_css,
+						'test'    => $css_test_string,
+					);
+					return true;
+				};
+				\add_filter( 'safecss_filter_attr_allow_css', $fragment_permissive_filter, 10, 2 );
+				try {
+					$fragment_permissive_css  = \safecss_filter_attr( $fragment_css );
+					$fragment_permissive_html = \wp_kses( $fragment_html, $policy, $protocols );
+				} finally {
+					\remove_filter( 'safecss_filter_attr_allow_css', $fragment_permissive_filter, 10 );
+				}
+
+				$fragment_guarded_filter = static function ( bool $allow_css, string $css_test_string ) use ( &$fragment_seen ): bool {
+					$fragment_seen['guarded'][] = array(
+						'default' => $allow_css,
+						'test'    => $css_test_string,
+					);
+					return $allow_css && ! self::looks_like_fragmented_bad_protocol_css_fragment( $css_test_string );
+				};
+				\add_filter( 'safecss_filter_attr_allow_css', $fragment_guarded_filter, 10, 2 );
+				try {
+					$fragment_guarded_css  = \safecss_filter_attr( $fragment_css );
+					$fragment_guarded_html = \wp_kses( $fragment_html, $policy, $protocols );
+				} finally {
+					\remove_filter( 'safecss_filter_attr_allow_css', $fragment_guarded_filter, 10 );
+				}
+
+				foreach (
+					array(
+						'default-css'  => $fragment_default_css,
+						'default-html' => $fragment_default_html,
+						'guarded-css'  => $fragment_guarded_css,
+						'guarded-html' => $fragment_guarded_html,
+					) as $label => $output
+				) {
+					if ( self::contains_protocol_marker( $output, $protocol ) || self::contains_decoded_text( $output, 'url(' . $fragment_quote . $split_prefixes[ $protocol ] ) ) {
+						$failures[] = array(
+							'case'     => $case_index,
+							'type'     => 'bad-protocol-fragment-preserved-outside-permissive-filter',
+							'label'    => $label,
+							'protocol' => $protocol,
+							'shape'    => $fragment_shape,
+							'output'   => self::preview( $output ),
+						);
+					}
+				}
+				if ( false === self::contains_decoded_text( $fragment_permissive_css, $expected_permissive_marker ) || false === self::contains_decoded_text( $fragment_permissive_html, $expected_permissive_marker ) ) {
+					$failures[] = array(
+						'case'       => $case_index,
+						'type'       => 'permissive-filter-did-not-expose-current-fragment-behavior',
+						'protocol'   => $protocol,
+						'shape'      => $fragment_shape,
+						'expected'   => $expected_permissive_marker,
+						'css'        => self::preview( $fragment_permissive_css ),
+						'html'       => self::preview( $fragment_permissive_html ),
+						'seen'       => $fragment_seen['permissive'],
+					);
+				}
+				if ( $expect_protocol_marker && ( ! self::contains_protocol_marker( $fragment_permissive_css, $protocol ) || ! self::contains_protocol_marker( $fragment_permissive_html, $protocol ) ) ) {
+					$failures[] = array(
+						'case'     => $case_index,
+						'type'     => 'permissive-filter-missing-protocol-marker',
+						'protocol' => $protocol,
+						'shape'    => $fragment_shape,
+						'css'      => self::preview( $fragment_permissive_css ),
+						'html'     => self::preview( $fragment_permissive_html ),
+					);
+				}
+				foreach ( array( $fragment_default_css, $fragment_permissive_css, $fragment_guarded_css ) as $label => $output ) {
+					if ( false === strpos( $output, 'color:red' ) || false === strpos( $output, $safe_url . '?fragment=1' ) ) {
+						$failures[] = array(
+							'case'       => $case_index,
+							'type'       => 'fragment-safe-neighbor-stripped',
+							'label'      => $label,
+							'output'     => self::preview( $output ),
+							'expectedUrl' => $safe_url . '?fragment=1',
+						);
+					}
+				}
+				$saw_default_false_fragment = false;
+				foreach ( $fragment_seen['permissive'] as $hit ) {
+					if ( is_array( $hit ) && isset( $hit['default'], $hit['test'] ) && false === $hit['default'] && ( false !== strpos( (string) $hit['test'], 'url(' ) || self::contains_protocol_marker( (string) $hit['test'], $protocol ) ) ) {
+						$saw_default_false_fragment = true;
+						break;
+					}
+				}
+				if ( $expect_default_false_hit && ! $saw_default_false_fragment ) {
+					$failures[] = array(
+						'case'     => $case_index,
+						'type'     => 'permissive-filter-did-not-observe-default-rejected-fragment',
+						'protocol' => $protocol,
+						'shape'    => $fragment_shape,
+						'seen'     => $fragment_seen['permissive'],
+					);
+				}
+				if ( ! $expect_default_false_hit ) {
+					foreach ( $fragment_seen['permissive'] as $hit ) {
+						if ( is_array( $hit ) && isset( $hit['test'] ) && self::contains_protocol_marker( (string) $hit['test'], $protocol ) ) {
+							$failures[] = array(
+								'case'     => $case_index,
+								'type'     => 'argument-semicolon-protocol-reached-allow-css-filter',
+								'protocol' => $protocol,
+								'shape'    => $fragment_shape,
+								'hit'      => $hit,
+							);
+							break;
+						}
+					}
+				}
+
+				$cases[] = array(
+					'case'               => $case_index,
+					'dataLabel'          => $data_template['label'],
+					'dataProperty'       => $data_property,
+					'dataPermissiveHits' => count( $data_seen['permissive'] ),
+					'fragmentProtocol'   => $protocol,
+					'fragmentShape'      => $fragment_shape,
+					'fragmentProperty'   => $fragment_prop,
+					'defaultFragmentCss' => self::preview( $fragment_default_css, 120 ),
+					'permissiveFragmentCss' => self::preview( $fragment_permissive_css, 120 ),
+					'guardedFragmentCss' => self::preview( $fragment_guarded_css, 120 ),
+				);
+			}
+		} catch ( \Throwable $e ) {
+			$exception = $e;
+		} finally {
+			self::restore_hook( 'safecss_filter_attr_allow_css', $hook_snapshot );
+		}
+
+		if ( null !== $exception ) {
+			return self::throwable_result(
+				$seed,
+				null,
+				'kses.css-url-protocol-fragment-matrix.no-throw',
+				'data:,|bad-protocol;fragment',
+				$exception
+			);
+		}
+
+		$hook_after     = self::hook_signature( 'safecss_filter_attr_allow_css' );
+		$hooks_restored = $hook_before === $hook_after;
+		$css_after      = \safecss_filter_attr( 'background-image:url(data:,after);background:url(javascript:;after);color:red' );
+		if ( ! $hooks_restored || self::contains_protocol_marker( $css_after, 'data' ) || self::contains_protocol_marker( $css_after, 'javascript' ) ) {
+			$failures[] = array(
+				'type'          => 'filter-restoration',
+				'hooksRestored' => $hooks_restored,
+				'cssAfter'      => self::preview( $css_after ),
+				'hookBefore'    => $hook_before,
+				'hookAfter'     => $hook_after,
+			);
+		}
+
+		$details = array(
+			'caseCount'    => count( $cases ),
+			'policy'       => 'semicolon-free data URLs are rejected before allow-CSS filters; all-true allow-CSS exposes semicolon-fragmented non-data bad-protocol fragments; guarded filters retain safe neighbors while rejecting those fragments',
+			'cases'        => array_slice( $cases, 0, 6 ),
+			'failureCount' => count( $failures ),
+			'failures'     => array_slice( $failures, 0, 8 ),
+		);
+
+		if ( empty( $failures ) ) {
+			return self::pass( $seed, null, 'kses.css-url-protocol-fragment-matrix', 'data:,|bad-protocol;fragment', $details );
+		}
+
+		return self::fail(
+			$seed,
+			null,
+			'kses.css-url-protocol-fragment-matrix',
+			'data:,|bad-protocol;fragment',
+			'semicolon-free data URLs are rejected before allow-CSS filters, semicolon-fragmented bad-protocol behavior is isolated, guarded filters reject fragments, safe neighbors survive, and hooks restore',
 			$failures,
 			$details
 		);
@@ -5210,6 +5578,14 @@ final class KsesSurface {
 		return false !== stripos( self::decode_attribute_text( $value ), self::decode_attribute_text( $data_url ) );
 	}
 
+	private static function contains_decoded_text( string $value, string $needle ): bool {
+		return false !== stripos( self::decode_attribute_text( $value ), self::decode_attribute_text( $needle ) );
+	}
+
+	private static function contains_protocol_marker( string $value, string $protocol ): bool {
+		return self::contains_decoded_text( $value, $protocol . ':' );
+	}
+
 	private static function seen_semicolon_data_url_split( array $seen, string $data_url ): bool {
 		$decoded_url       = self::decode_attribute_text( $data_url );
 		$semicolon_offset  = strpos( $decoded_url, ';' );
@@ -5246,6 +5622,21 @@ final class KsesSurface {
 			return true;
 		}
 		if ( 1 === preg_match( '/^(?:base64|charset=[^,]+|profile=[^,]+|version=[^,]+),/i', $test ) ) {
+			return true;
+		}
+
+		return false;
+	}
+
+	private static function looks_like_fragmented_bad_protocol_css_fragment( string $css_test_string ): bool {
+		$test = strtolower( trim( self::decode_attribute_text( $css_test_string ) ) );
+		foreach ( array( 'javascript', 'vbscript', 'livescript', 'mocha' ) as $protocol ) {
+			$quoted_protocol = preg_quote( $protocol, '/' );
+			if ( 1 === preg_match( '/url\(\s*[\'"]?' . $quoted_protocol . '\s*:/i', $test ) ) {
+				return true;
+			}
+		}
+		if ( 1 === preg_match( '/url\(\s*[\'"]?(?:java|vb|vbs|live|moc)$/i', $test ) ) {
 			return true;
 		}
 
