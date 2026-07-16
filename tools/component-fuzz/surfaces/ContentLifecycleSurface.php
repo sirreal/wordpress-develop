@@ -4248,6 +4248,101 @@ final class ContentLifecycleSurface {
 				$normalized_status_keys_shared_by_field[ $field ] = 1 === count( array_unique( $keys ) );
 			}
 			$normalized_status_keys_shared = ! in_array( false, $normalized_status_keys_shared_by_field, true );
+			$normalized_type_variants = array(
+				'canonical'  => array(
+					'types' => array( $pretty_type, $query_type ),
+				),
+				'reversed'   => array(
+					'types' => array( $query_type, $pretty_type ),
+				),
+				'duplicated' => array(
+					'types' => array( $pretty_type, $query_type, $pretty_type, $query_type ),
+				),
+			);
+			$normalized_type_expected = array(
+				$pretty_child_id,
+				$pretty_cross_type_child_id,
+				$query_child_id,
+				$query_cross_type_child_id,
+			);
+			sort( $normalized_type_expected );
+			$normalized_type_parent_expected = array(
+				$pretty_child_id            => $pretty_parent_id,
+				$pretty_cross_type_child_id => $query_parent_id,
+				$query_child_id             => $query_parent_id,
+				$query_cross_type_child_id  => $pretty_parent_id,
+			);
+			$normalized_type_status_expected = array_fill_keys( $normalized_type_expected, 'publish' );
+			ksort( $normalized_type_parent_expected );
+			ksort( $normalized_type_status_expected );
+			$normalized_type_keys = array(
+				'ids'      => array(),
+				'idParent' => array(),
+				'object'   => array(),
+			);
+			$normalized_type_checks = array();
+			$normalized_type_query_var_checks = array();
+			$normalized_type_actual = array();
+			foreach ( $normalized_type_variants as $variant => $config ) {
+				$variant_args = array_merge(
+					$ordering_id_args,
+					array(
+						'post_parent__not_in' => null,
+						'post__not_in'        => null,
+						'post_type'           => $config['types'],
+					)
+				);
+				$buckets = array(
+					'ids'      => $query_parent_status_bucket( $pretty_type, 0, 'publish', 'ids', $variant_args ),
+					'idParent' => $query_parent_status_bucket( $pretty_type, 0, 'publish', 'id=>parent', $variant_args ),
+					'object'   => $query_parent_status_bucket( $pretty_type, 0, 'publish', 'all', $variant_args ),
+				);
+				$expected_query_var = array_values( array_unique( array_map( 'sanitize_key', $config['types'] ) ) );
+				sort( $expected_query_var );
+
+				$normalized_type_checks[ $variant ] = $query_ordering_family_is_valid( $buckets['ids'], $buckets['idParent'], $buckets['object'], $normalized_type_expected, $normalized_type_parent_expected, $normalized_type_status_expected );
+				$normalized_type_query_var_checks[ $variant ] = $expected_query_var === array_values( array_map( 'strval', (array) ( $buckets['ids']['queryVars']['post_type'] ?? array() ) ) )
+					&& $expected_query_var === array_values( array_map( 'strval', (array) ( $buckets['idParent']['queryVars']['post_type'] ?? array() ) ) )
+					&& $expected_query_var === array_values( array_map( 'strval', (array) ( $buckets['object']['queryVars']['post_type'] ?? array() ) ) );
+				$normalized_type_keys['ids'][] = $buckets['ids']['cacheKey'];
+				$normalized_type_keys['idParent'][] = $buckets['idParent']['cacheKey'];
+				$normalized_type_keys['object'][] = $buckets['object']['cacheKey'];
+				$normalized_type_actual[ $variant ] = array(
+					'typesArg' => $config['types'],
+					'queryVar' => array(
+						'ids'      => array_values( array_map( 'strval', (array) ( $buckets['ids']['queryVars']['post_type'] ?? array() ) ) ),
+						'idParent' => array_values( array_map( 'strval', (array) ( $buckets['idParent']['queryVars']['post_type'] ?? array() ) ) ),
+						'object'   => array_values( array_map( 'strval', (array) ( $buckets['object']['queryVars']['post_type'] ?? array() ) ) ),
+					),
+					'keys'     => array(
+						'ids'      => substr( md5( $buckets['ids']['cacheKey'] ), 0, 8 ),
+						'idParent' => substr( md5( $buckets['idParent']['cacheKey'] ), 0, 8 ),
+						'object'   => substr( md5( $buckets['object']['cacheKey'] ), 0, 8 ),
+					),
+					'requests' => array(
+						'ids'      => substr( md5( $buckets['ids']['request'] ), 0, 8 ),
+						'idParent' => substr( md5( $buckets['idParent']['request'] ), 0, 8 ),
+						'object'   => substr( md5( $buckets['object']['request'] ), 0, 8 ),
+					),
+					'ids'      => array(
+						'ids'      => $buckets['ids']['ids'],
+						'idParent' => $buckets['idParent']['ids'],
+						'object'   => $buckets['object']['ids'],
+					),
+					'parents'  => array(
+						'idParent' => $buckets['idParent']['parents'],
+						'object'   => $buckets['object']['parents'],
+					),
+					'statuses' => $buckets['object']['statuses'],
+				);
+			}
+			$normalized_type_valid = ! in_array( false, $normalized_type_checks, true )
+				&& ! in_array( false, $normalized_type_query_var_checks, true );
+			$normalized_type_keys_shared_by_field = array();
+			foreach ( $normalized_type_keys as $field => $keys ) {
+				$normalized_type_keys_shared_by_field[ $field ] = 1 === count( array_unique( $keys ) );
+			}
+			$normalized_type_keys_shared = ! in_array( false, $normalized_type_keys_shared_by_field, true );
 			$normalized_parent_filter_keys = array(
 				'ids'      => array(),
 				'idParent' => array(),
@@ -4994,6 +5089,32 @@ final class ContentLifecycleSurface {
 						$normalized_status_keys
 					),
 					'variants'         => $normalized_status_actual,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$normalized_type_valid
+					&& $normalized_type_keys_shared,
+				'WP_Query normalizes generated custom hierarchical post type cache keys across duplicate and reversed post type arrays',
+				array(
+					'checks'           => array(
+						'variantsValid'         => $normalized_type_checks,
+						'queryVarsSortedUnique' => $normalized_type_query_var_checks,
+						'keysSharedByField'     => $normalized_type_keys_shared_by_field,
+					),
+					'postTypes'        => array(
+						$pretty_type,
+						$query_type,
+					),
+					'expectedIds'      => $normalized_type_expected,
+					'expectedParents'  => $normalized_type_parent_expected,
+					'expectedStatuses' => $normalized_type_status_expected,
+					'uniqueKeyHashes'  => array_map(
+						static fn ( array $keys ): array => array_values( array_unique( array_map( static fn ( string $key ): string => substr( md5( $key ), 0, 8 ), $keys ) ) ),
+						$normalized_type_keys
+					),
+					'variants'         => $normalized_type_actual,
 				)
 			);
 
