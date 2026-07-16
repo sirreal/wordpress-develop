@@ -46,6 +46,7 @@ final class RestObjectControllersSurface {
 			$rows[] = self::check_route_registry_behavior( $ctx, $case, $fixtures );
 			$rows[] = self::check_templates_controller( $ctx, $case );
 			$rows[] = self::check_short_circuited_collection_queries( $ctx->fork( 'collection-queries' ), $case, $fixtures );
+			$rows[] = self::check_route_dispatched_object_write_edges( $ctx->fork( 'object-write-dispatch' ), $case, $fixtures );
 		} catch ( \Throwable $e ) {
 			$rows[] = self::row(
 				$ctx,
@@ -3115,6 +3116,336 @@ final class RestObjectControllersSurface {
 			array(
 				'case'     => self::case_summary( $case ),
 				'failures' => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
+	private static function check_route_dispatched_object_write_edges( \ComponentFuzz\FuzzContext $ctx, array $case, array $fixtures ): array {
+		$failures = array();
+		$observed = array();
+
+		$previous_server          = $GLOBALS['wp_rest_server'] ?? null;
+		$had_wp_actions           = array_key_exists( 'wp_actions', $GLOBALS );
+		$previous_actions         = $GLOBALS['wp_actions'] ?? null;
+		$previous_current_user_id = isset( $GLOBALS['current_user'] ) && $GLOBALS['current_user'] instanceof \WP_User
+			? (int) $GLOBALS['current_user']->ID
+			: 0;
+
+		$server                    = new \WP_REST_Server();
+		$GLOBALS['wp_rest_server'] = $server;
+
+		if ( ! isset( $GLOBALS['wp_actions'] ) || ! is_array( $GLOBALS['wp_actions'] ) ) {
+			$GLOBALS['wp_actions'] = array();
+		}
+		$GLOBALS['wp_actions']['rest_api_init'] = max( 1, (int) ( $GLOBALS['wp_actions']['rest_api_init'] ?? 0 ) );
+
+		$cap_filter             = null;
+		$write_filter_restored  = false;
+		$server_restored        = false;
+		$actions_restored       = false;
+		$current_user_restored  = false;
+
+		try {
+			$controllers = array(
+				new \WP_REST_Posts_Controller( 'post' ),
+				new \WP_REST_Terms_Controller( 'category' ),
+				new \WP_REST_Comments_Controller(),
+				new \WP_REST_Users_Controller(),
+			);
+
+			foreach ( $controllers as $controller ) {
+				$controller->register_routes();
+			}
+
+			$counts_before = self::content_counts();
+			$post_update_slug_input = 'Updated REST Slug ' . $case['token'];
+
+			\wp_set_current_user( 0 );
+			$denied_post_response = $server->dispatch(
+				self::request(
+					'PUT',
+					'/wp/v2/posts/' . $fixtures['post'],
+					array( '_fields' => 'id,title' ),
+					array(),
+					array( 'title' => $case['updatedPostTitle'] )
+				)
+			);
+			$post_after_denial    = \get_post( $fixtures['post'] );
+			$denied_post_data     = $denied_post_response instanceof \WP_REST_Response
+				? $denied_post_response->get_data()
+				: array();
+			$denied_post_status   = $denied_post_response instanceof \WP_REST_Response
+				? $denied_post_response->get_status()
+				: 0;
+
+			\wp_set_current_user( $fixtures['author'] );
+			$cap_filter = self::install_cap_filter(
+				array(
+					'edit_categories',
+					'edit_comment',
+					'edit_comments',
+					'edit_others_posts',
+					'edit_post',
+					'edit_posts',
+					'edit_published_posts',
+					'edit_term',
+					'edit_terms',
+					'edit_user',
+					'edit_users',
+					'list_users',
+					'manage_categories',
+					'moderate_comments',
+					'publish_posts',
+					'read',
+				)
+			);
+			try {
+				$invalid_post_response = $server->dispatch(
+					self::request(
+						'PUT',
+						'/wp/v2/posts/' . $fixtures['post'],
+						array( '_fields' => 'author,id,title' ),
+						array(),
+						array( 'author' => 'not-an-integer-' . $case['token'] )
+					)
+				);
+				$invalid_term_response = $server->dispatch(
+					self::request(
+						'PUT',
+						'/wp/v2/categories/' . $fixtures['term'],
+						array( '_fields' => 'id,parent' ),
+						array(),
+						array( 'parent' => 'not-an-integer-' . $case['token'] )
+					)
+				);
+				$invalid_comment_response = $server->dispatch(
+					self::request(
+						'PUT',
+						'/wp/v2/comments/' . $fixtures['comment'],
+						array( '_fields' => 'id,author_email' ),
+						array(),
+						array( 'author_email' => 'not-an-email-' . $case['token'] )
+					)
+				);
+				$invalid_user_response = $server->dispatch(
+					self::request(
+						'PUT',
+						'/wp/v2/users/' . $fixtures['author'],
+						array( '_fields' => 'id,email' ),
+						array(),
+						array( 'email' => 'not-an-email-' . $case['token'] )
+					)
+				);
+
+				$valid_post_response = $server->dispatch(
+					self::request(
+						'PUT',
+						'/wp/v2/posts/' . $fixtures['post'],
+						array( '_fields' => 'id,slug,status,title' ),
+						array(),
+						array(
+							'slug'  => $post_update_slug_input,
+							'title' => $case['updatedPostTitle'],
+						)
+					)
+				);
+				$valid_term_response = $server->dispatch(
+					self::request(
+						'PUT',
+						'/wp/v2/categories/' . $fixtures['term'],
+						array( '_fields' => 'id,name,slug' ),
+						array(),
+						array( 'name' => $case['updatedTermName'] )
+					)
+				);
+				$valid_comment_response = $server->dispatch(
+					self::request(
+						'PUT',
+						'/wp/v2/comments/' . $fixtures['comment'],
+						array( '_fields' => 'id,content,status' ),
+						array(),
+						array(
+							'content' => $case['updatedCommentContent'],
+							'status'  => 'hold',
+						)
+					)
+				);
+				$valid_user_response = $server->dispatch(
+					self::request(
+						'PUT',
+						'/wp/v2/users/' . $fixtures['author'],
+						array( '_fields' => 'id,email,name' ),
+						array(),
+						array( 'name' => $case['updatedUserName'] )
+					)
+				);
+			} finally {
+				if ( null !== $cap_filter ) {
+					$write_filter_restored = self::remove_cap_filter( $cap_filter );
+					$cap_filter            = null;
+				}
+			}
+
+			$counts_after          = self::content_counts();
+			$invalid_post_data     = $invalid_post_response instanceof \WP_REST_Response ? $invalid_post_response->get_data() : array();
+			$invalid_term_data     = $invalid_term_response instanceof \WP_REST_Response ? $invalid_term_response->get_data() : array();
+			$invalid_comment_data  = $invalid_comment_response instanceof \WP_REST_Response ? $invalid_comment_response->get_data() : array();
+			$invalid_user_data     = $invalid_user_response instanceof \WP_REST_Response ? $invalid_user_response->get_data() : array();
+			$valid_post_data       = $valid_post_response instanceof \WP_REST_Response ? $valid_post_response->get_data() : array();
+			$valid_term_data       = $valid_term_response instanceof \WP_REST_Response ? $valid_term_response->get_data() : array();
+			$valid_comment_data    = $valid_comment_response instanceof \WP_REST_Response ? $valid_comment_response->get_data() : array();
+			$valid_user_data       = $valid_user_response instanceof \WP_REST_Response ? $valid_user_response->get_data() : array();
+			$updated_post          = \get_post( $fixtures['post'] );
+			$updated_term          = \get_term( $fixtures['term'], 'category' );
+			$updated_comment       = \get_comment( $fixtures['comment'] );
+			$updated_user          = \get_user_by( 'id', $fixtures['author'] );
+			$sanitized_update_slug = \sanitize_title( $post_update_slug_input );
+
+			$observed = array(
+				'deniedPost'     => array(
+					'data'            => $denied_post_data,
+					'status'          => $denied_post_status,
+					'titleAfterDenial' => $post_after_denial instanceof \WP_Post ? $post_after_denial->post_title : null,
+				),
+				'invalidPayloads' => array(
+					'post'    => $invalid_post_data,
+					'term'    => $invalid_term_data,
+					'comment' => $invalid_comment_data,
+					'user'    => $invalid_user_data,
+				),
+				'validResponses'  => array(
+					'post'    => $valid_post_data,
+					'term'    => $valid_term_data,
+					'comment' => $valid_comment_data,
+					'user'    => $valid_user_data,
+				),
+				'storedRows'      => array(
+					'postTitle'       => $updated_post instanceof \WP_Post ? $updated_post->post_title : null,
+					'postSlug'        => $updated_post instanceof \WP_Post ? $updated_post->post_name : null,
+					'termName'        => $updated_term instanceof \WP_Term ? $updated_term->name : null,
+					'commentContent'  => $updated_comment instanceof \WP_Comment ? $updated_comment->comment_content : null,
+					'commentApproved' => $updated_comment instanceof \WP_Comment ? $updated_comment->comment_approved : null,
+					'userName'        => $updated_user instanceof \WP_User ? $updated_user->display_name : null,
+					'userEmail'       => $updated_user instanceof \WP_User ? $updated_user->user_email : null,
+				),
+				'countsBefore'    => $counts_before,
+				'countsAfter'     => $counts_after,
+			);
+
+			self::collect_failure(
+				$failures,
+				$denied_post_response instanceof \WP_REST_Response
+					&& in_array( $denied_post_status, array( 401, 403 ), true )
+					&& 'rest_cannot_edit' === ( $denied_post_data['code'] ?? null )
+					&& $case['postTitle'] === ( $post_after_denial instanceof \WP_Post ? $post_after_denial->post_title : null ),
+				'route-dispatched post update denies unauthenticated requests before mutation',
+				$observed['deniedPost']
+			);
+
+			self::collect_failure(
+				$failures,
+				self::response_error_ok( $invalid_post_response, 'rest_invalid_param', 400 )
+					&& isset( $invalid_post_data['data']['params']['author'] )
+					&& self::response_error_ok( $invalid_term_response, 'rest_invalid_param', 400 )
+					&& isset( $invalid_term_data['data']['params']['parent'] )
+					&& self::response_error_ok( $invalid_comment_response, 'rest_invalid_param', 400 )
+					&& isset( $invalid_comment_data['data']['params']['author_email'] )
+					&& self::response_error_ok( $invalid_user_response, 'rest_invalid_param', 400 )
+					&& isset( $invalid_user_data['data']['params']['email'] ),
+				'route-dispatched object updates reject invalid body params through request validation',
+				$observed['invalidPayloads']
+			);
+
+			self::collect_failure(
+				$failures,
+				$valid_post_response instanceof \WP_REST_Response
+					&& 200 === $valid_post_response->get_status()
+					&& self::projected_keys_match( $valid_post_data, array( 'id', 'slug', 'status', 'title' ) )
+					&& $fixtures['post'] === (int) ( $valid_post_data['id'] ?? 0 )
+					&& $case['updatedPostTitle'] === ( $valid_post_data['title']['raw'] ?? null )
+					&& $sanitized_update_slug === ( $valid_post_data['slug'] ?? null )
+					&& $case['updatedPostTitle'] === ( $updated_post instanceof \WP_Post ? $updated_post->post_title : null )
+					&& $sanitized_update_slug === ( $updated_post instanceof \WP_Post ? $updated_post->post_name : null )
+					&& $valid_term_response instanceof \WP_REST_Response
+					&& 200 === $valid_term_response->get_status()
+					&& self::projected_keys_match( $valid_term_data, array( 'id', 'name', 'slug' ) )
+					&& $fixtures['term'] === (int) ( $valid_term_data['id'] ?? 0 )
+					&& $case['updatedTermName'] === ( $valid_term_data['name'] ?? null )
+					&& $case['updatedTermName'] === ( $updated_term instanceof \WP_Term ? $updated_term->name : null )
+					&& $valid_comment_response instanceof \WP_REST_Response
+					&& 200 === $valid_comment_response->get_status()
+					&& self::projected_keys_match( $valid_comment_data, array( 'content', 'id', 'status' ) )
+					&& $fixtures['comment'] === (int) ( $valid_comment_data['id'] ?? 0 )
+					&& $case['updatedCommentContent'] === ( $valid_comment_data['content']['raw'] ?? null )
+					&& 'hold' === ( $valid_comment_data['status'] ?? null )
+					&& $case['updatedCommentContent'] === ( $updated_comment instanceof \WP_Comment ? $updated_comment->comment_content : null )
+					&& '0' === (string) ( $updated_comment instanceof \WP_Comment ? $updated_comment->comment_approved : null )
+					&& $valid_user_response instanceof \WP_REST_Response
+					&& 200 === $valid_user_response->get_status()
+					&& self::projected_keys_match( $valid_user_data, array( 'email', 'id', 'name' ) )
+					&& $fixtures['author'] === (int) ( $valid_user_data['id'] ?? 0 )
+					&& $case['updatedUserName'] === ( $valid_user_data['name'] ?? null )
+					&& $case['updatedUserName'] === ( $updated_user instanceof \WP_User ? $updated_user->display_name : null )
+					&& $case['authorEmail'] === ( $updated_user instanceof \WP_User ? $updated_user->user_email : null )
+					&& self::content_count_delta_matches( $counts_before, $counts_after, array(), array() ),
+				'route-dispatched object updates project requested response fields and persist only row updates',
+				$observed
+			);
+		} finally {
+			if ( null !== $cap_filter ) {
+				$write_filter_restored = self::remove_cap_filter( $cap_filter );
+			}
+
+			\wp_set_current_user( $previous_current_user_id );
+
+			if ( $had_wp_actions ) {
+				$GLOBALS['wp_actions'] = $previous_actions;
+			} else {
+				unset( $GLOBALS['wp_actions'] );
+			}
+
+			if ( null !== $previous_server ) {
+				$GLOBALS['wp_rest_server'] = $previous_server;
+			} else {
+				unset( $GLOBALS['wp_rest_server'] );
+			}
+
+			$actions_restored = $had_wp_actions
+				? $previous_actions === ( $GLOBALS['wp_actions'] ?? null )
+				: ! array_key_exists( 'wp_actions', $GLOBALS );
+			$server_restored = null !== $previous_server
+				? $previous_server === ( $GLOBALS['wp_rest_server'] ?? null )
+				: ! array_key_exists( 'wp_rest_server', $GLOBALS );
+			$current_user_restored = $previous_current_user_id === (
+				isset( $GLOBALS['current_user'] ) && $GLOBALS['current_user'] instanceof \WP_User
+					? (int) $GLOBALS['current_user']->ID
+					: 0
+			);
+		}
+
+		self::collect_failure(
+			$failures,
+			$write_filter_restored
+				&& $server_restored
+				&& $actions_restored
+				&& $current_user_restored,
+			'route-dispatched object write harness restores caps, server, actions, and current user',
+			array(
+				'writeFilterRestored' => $write_filter_restored,
+				'serverRestored'      => $server_restored,
+				'actionsRestored'     => $actions_restored,
+				'currentUserRestored' => $current_user_restored,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'rest-object-controllers.route-dispatched-write-validation-projection-cleanup',
+			array() === $failures,
+			array(
+				'case'     => self::case_summary( $case ),
+				'failures' => array_slice( $failures, 0, 8 ),
+				'observed' => $observed,
 			)
 		);
 	}
