@@ -3257,7 +3257,7 @@ final class ContentLifecycleSurface {
 			$value = $property->getValue( $query );
 			return is_string( $value ) ? $value : '';
 		};
-		$query_parent_status_bucket = static function ( string $post_type, int $parent_id, $post_status, string $fields = 'ids' ) use ( $wp_query_cache_key ): array {
+		$query_parent_status_bucket = static function ( string $post_type, int $parent_id, $post_status, string $fields = 'ids', array $overrides = array() ) use ( $wp_query_cache_key ): array {
 			$args  = array(
 				'cache_results'          => true,
 				'fields'                 => $fields,
@@ -3273,6 +3273,12 @@ final class ContentLifecycleSurface {
 				'update_post_meta_cache' => false,
 				'update_post_term_cache' => false,
 			);
+			$args  = array_merge( $args, $overrides );
+			foreach ( $overrides as $key => $value ) {
+				if ( null === $value ) {
+					unset( $args[ $key ] );
+				}
+			}
 			$query = new \WP_Query();
 			$result = $query->query( $args );
 			$key   = $wp_query_cache_key( $query );
@@ -3337,6 +3343,31 @@ final class ContentLifecycleSurface {
 			return is_array( $bucket['cache'] ?? null )
 				&& isset( $bucket['cache']['posts'] )
 				&& $expected_ids === array_values( array_map( 'intval', (array) $bucket['cache']['posts'] ) );
+		};
+		$query_bucket_has_payload = static function ( array $bucket, array $expected_ids ): bool {
+			return is_array( $bucket['cache'] ?? null )
+				&& isset( $bucket['cache']['posts'], $bucket['cache']['found_posts'], $bucket['cache']['max_num_pages'] )
+				&& $expected_ids === array_values( array_map( 'intval', (array) $bucket['cache']['posts'] ) )
+				&& 0 === (int) $bucket['cache']['found_posts']
+				&& 0 === (int) $bucket['cache']['max_num_pages'];
+		};
+		$query_ordering_family_is_valid = static function ( array $ids_bucket, array $id_parent_bucket, array $object_bucket, array $expected_ids, array $expected_parents, array $expected_statuses ) use ( $query_bucket_has_payload ): bool {
+			$expected_classes = array_fill_keys( $expected_ids, 'WP_Post' );
+			ksort( $expected_classes );
+
+			return '' !== $ids_bucket['cacheKey']
+				&& '' !== $id_parent_bucket['cacheKey']
+				&& '' !== $object_bucket['cacheKey']
+				&& $expected_ids === $ids_bucket['ids']
+				&& $expected_ids === $id_parent_bucket['ids']
+				&& $expected_ids === $object_bucket['ids']
+				&& $expected_parents === $id_parent_bucket['parents']
+				&& $expected_parents === $object_bucket['parents']
+				&& $expected_statuses === $object_bucket['statuses']
+				&& $expected_classes === $object_bucket['classes']
+				&& $query_bucket_has_payload( $ids_bucket, $expected_ids )
+				&& $query_bucket_has_payload( $id_parent_bucket, $expected_ids )
+				&& $query_bucket_has_payload( $object_bucket, $expected_ids );
 		};
 
 		try {
@@ -4025,6 +4056,53 @@ final class ContentLifecycleSurface {
 			ksort( $mutation_combined_status_expected );
 			$mutation_combined_id_parent_bucket_after = $query_parent_status_bucket( $pretty_type, $mutation_parent_b_id, array( 'private', 'pending' ), 'id=>parent' );
 			$mutation_combined_object_bucket_after = $query_parent_status_bucket( $pretty_type, $mutation_parent_b_id, array( 'private', 'pending' ), 'all' );
+			$ordering_parent_args = array(
+				'post_parent'     => null,
+				'post_parent__in' => array( $query_parent_id, $pretty_parent_id ),
+			);
+			$ordering_id_expected = array( $pretty_child_id, $pretty_cross_type_child_id );
+			sort( $ordering_id_expected );
+			$ordering_parent_in_expected = array( $pretty_cross_type_child_id, $pretty_child_id );
+			$ordering_parent_expected = array(
+				$pretty_child_id            => $pretty_parent_id,
+				$pretty_cross_type_child_id => $query_parent_id,
+			);
+			$ordering_status_expected = array_fill_keys( array_keys( $ordering_parent_expected ), 'publish' );
+			ksort( $ordering_parent_expected );
+			ksort( $ordering_status_expected );
+			$ordering_id_args = array_merge(
+				$ordering_parent_args,
+				array(
+					'order'   => 'ASC',
+					'orderby' => 'ID',
+				)
+			);
+			$ordering_parent_in_args = array_merge(
+				$ordering_parent_args,
+				array(
+					'order'   => 'ASC',
+					'orderby' => 'post_parent__in',
+				)
+			);
+			$ordering_id_ids_bucket = $query_parent_status_bucket( $pretty_type, 0, 'publish', 'ids', $ordering_id_args );
+			$ordering_id_id_parent_bucket = $query_parent_status_bucket( $pretty_type, 0, 'publish', 'id=>parent', $ordering_id_args );
+			$ordering_id_object_bucket = $query_parent_status_bucket( $pretty_type, 0, 'publish', 'all', $ordering_id_args );
+			$ordering_parent_in_ids_bucket = $query_parent_status_bucket( $pretty_type, 0, 'publish', 'ids', $ordering_parent_in_args );
+			$ordering_parent_in_id_parent_bucket = $query_parent_status_bucket( $pretty_type, 0, 'publish', 'id=>parent', $ordering_parent_in_args );
+			$ordering_parent_in_object_bucket = $query_parent_status_bucket( $pretty_type, 0, 'publish', 'all', $ordering_parent_in_args );
+			$ordering_id_keys = array(
+				$ordering_id_ids_bucket['cacheKey'],
+				$ordering_id_id_parent_bucket['cacheKey'],
+				$ordering_id_object_bucket['cacheKey'],
+			);
+			$ordering_parent_in_keys = array(
+				$ordering_parent_in_ids_bucket['cacheKey'],
+				$ordering_parent_in_id_parent_bucket['cacheKey'],
+				$ordering_parent_in_object_bucket['cacheKey'],
+			);
+			$ordering_id_family_valid = $query_ordering_family_is_valid( $ordering_id_ids_bucket, $ordering_id_id_parent_bucket, $ordering_id_object_bucket, $ordering_id_expected, $ordering_parent_expected, $ordering_status_expected );
+			$ordering_parent_in_family_valid = $query_ordering_family_is_valid( $ordering_parent_in_ids_bucket, $ordering_parent_in_id_parent_bucket, $ordering_parent_in_object_bucket, $ordering_parent_in_expected, $ordering_parent_expected, $ordering_status_expected );
+			$ordering_keys_disjoint = array() === array_intersect( $ordering_id_keys, $ordering_parent_in_keys );
 			$mutation_initial_after = \get_page_by_path( $mutation_initial_path, OBJECT, $mutation_lookup_types );
 			$mutation_reparented_after = \get_page_by_path( $mutation_reparented_path, ARRAY_A, $mutation_lookup_types );
 			$mutation_initial_cached_after_lookup = \wp_cache_get_salted( 'get_page_by_path:' . $mutation_initial_hash, 'post-queries', $mutation_last_changed_after );
@@ -4073,6 +4151,65 @@ final class ContentLifecycleSurface {
 					'expectedStatus' => $mutation_combined_status_expected,
 					'objectStatuses' => $mutation_combined_object_bucket_after['statuses'],
 					'objectClasses'  => $mutation_combined_object_bucket_after['classes'],
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$ordering_id_family_valid
+					&& $ordering_parent_in_family_valid
+					&& $ordering_keys_disjoint,
+				'WP_Query preserves generated custom hierarchical parent/status cache payloads when selected-field ordering changes ID order',
+				array(
+					'checks'      => array(
+						'idFamily'     => $ordering_id_family_valid,
+						'parentFamily' => $ordering_parent_in_family_valid,
+						'keysDisjoint' => $ordering_keys_disjoint,
+					),
+					'keysOverlap' => array_values( array_intersect( $ordering_id_keys, $ordering_parent_in_keys ) ),
+					'idOrdered'   => array(
+						'expectedIds' => $ordering_id_expected,
+						'keys'        => array_map( static fn ( string $key ): string => substr( md5( $key ), 0, 8 ), $ordering_id_keys ),
+						'requests'    => array(
+							'ids'      => substr( md5( $ordering_id_ids_bucket['request'] ), 0, 8 ),
+							'idParent' => substr( md5( $ordering_id_id_parent_bucket['request'] ), 0, 8 ),
+							'object'   => substr( md5( $ordering_id_object_bucket['request'] ), 0, 8 ),
+						),
+						'ids'         => array(
+							'ids'      => $ordering_id_ids_bucket['ids'],
+							'idParent' => $ordering_id_id_parent_bucket['ids'],
+							'object'   => $ordering_id_object_bucket['ids'],
+						),
+						'parents'     => array(
+							'expected' => $ordering_parent_expected,
+							'idParent' => $ordering_id_id_parent_bucket['parents'],
+							'object'   => $ordering_id_object_bucket['parents'],
+						),
+					),
+					'parentOrdered' => array(
+						'expectedIds' => $ordering_parent_in_expected,
+						'keys'        => array_map( static fn ( string $key ): string => substr( md5( $key ), 0, 8 ), $ordering_parent_in_keys ),
+						'requests'    => array(
+							'ids'      => substr( md5( $ordering_parent_in_ids_bucket['request'] ), 0, 8 ),
+							'idParent' => substr( md5( $ordering_parent_in_id_parent_bucket['request'] ), 0, 8 ),
+							'object'   => substr( md5( $ordering_parent_in_object_bucket['request'] ), 0, 8 ),
+						),
+						'ids'         => array(
+							'ids'      => $ordering_parent_in_ids_bucket['ids'],
+							'idParent' => $ordering_parent_in_id_parent_bucket['ids'],
+							'object'   => $ordering_parent_in_object_bucket['ids'],
+						),
+						'parents'     => array(
+							'expected' => $ordering_parent_expected,
+							'idParent' => $ordering_parent_in_id_parent_bucket['parents'],
+							'object'   => $ordering_parent_in_object_bucket['parents'],
+						),
+					),
+					'expectedStatuses' => $ordering_status_expected,
+					'statuses'         => array(
+						'idOrdered'     => $ordering_id_object_bucket['statuses'],
+						'parentOrdered' => $ordering_parent_in_object_bucket['statuses'],
+					),
 				)
 			);
 
