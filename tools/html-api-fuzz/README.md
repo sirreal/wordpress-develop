@@ -76,10 +76,11 @@ coordinator never fetches or substitutes documents:
 ```sh
 PHAR=/absolute/path/to/cc-analyzer.phar
 WORKSPACE=/absolute/path/to/cc-workspace
-BATCH=wp-html-api-canary-2026-30
+BATCH=wp-html-api-canary-2026-25
 
 php "$PHAR" --workspace "$WORKSPACE" batch fetch "$BATCH" \
-  --crawl CC-MAIN-2026-30 --limit 20 --progress text --output json
+  --crawl CC-MAIN-2026-25 --limit 20 --duration 5m \
+  --cache-max-bytes 134217728 --progress text --output json
 
 php tools/html-api-fuzz/commoncrawl-batch.php \
   --cc-analyzer "$PHAR" --workspace "$WORKSPACE" --batch "$BATCH" \
@@ -89,8 +90,15 @@ php tools/html-api-fuzz/commoncrawl-batch.php \
   --html5ever-oracle-bin tools/html-api-fuzz/oracles/html5ever/build/html5ever-tree-oracle \
   --chrome-oracle-script tools/html-api-fuzz/oracles/chrome/chrome-tree-oracle.js \
   --chrome-executable /absolute/path/to/pinned/chrome \
-  --node-bin /absolute/path/to/node --retain-all
+  --node-bin /absolute/path/to/non-symlink/node --retain-all
 ```
+
+Every executable passed to the coordinator must be a direct regular file. In
+particular, a version-manager shim such as Volta's `~/.volta/bin/node` may be a
+symlink and is rejected. Pass the resolved, non-symlink Node executable itself;
+`node -p 'process.execPath'` reports the executable running Node. Verify that
+reported path with `test -f`, `test -x`, and `test ! -L` before starting the
+write-once coordinator output.
 
 The output path must not exist. It is claimed once and contains separate
 `lexbor-source/`, `html5ever-source/`, and `chrome-cdp/` directories. Each gets
@@ -127,7 +135,41 @@ returns a `static function (HtmlAnalysisInput $document): void` closure. Use
 `php /path/to/cc-analyzer.phar --help` for the binary's crawl-specific command
 and argument names. The committed coordinator smoke exercises the same batch
 schemas and callback contract with an isolated fake analyzer. Real-PHAR runs
-are a separate external gate and are not claimed by that code-only smoke.
+remain a separate external gate and are not claimed by that code-only smoke.
+
+On 2026-07-16, a bounded real-PHAR canary was also completed against
+`CC-MAIN-2026-25`. The PHAR SHA-256 was
+`898d17d53674b70cd573f598f31d46d92df4f237d3292a9b6ff8c2e5c0c50cde`.
+One fetch produced 5 documents and 247070 bytes; its sealed batch-manifest
+SHA-256 was
+`a37aa5a1a16d7865e1ad5968db30634125dee1514ddae2e5b6e470eef375638e`
+and its corpus fingerprint was
+`82e37f25a00daca8782f6f7062d8329f04bae1303c8f3a7e0d26691996fd6fa2`.
+Lexbor, html5ever, and Chrome each consumed the same ordered five-document
+vector and each reported 3 `passed` and 2 `unsupported` results. One retained
+artifact per oracle was then replayed exactly once; all three replays reproduced
+`unsupported` for the identical 17129-byte input with SHA-256
+`baa6de008c6530fd7828e9c18e274a9fb60f2fe96e17bf0899c8bb9f16626306`,
+without a timeout, oracle mismatch, or process-group cleanup failure. The
+ignored local evidence is under
+`artifacts/html-api-fuzz/external-gates/20260716-ccb5be5be1-real-phar/`.
+This was a five-document canary, not a complete-crawl or full-corpus claim.
+
+The observed post-gate disk footprint was 180964 KiB for `.cache/lexbor`,
+653164 KiB for `.cache/html5ever`, 529780 KiB for the pinned Chrome directory,
+and 5512 KiB for the canary evidence. Budget at least 1.4 GiB for those local
+build/install caches before allowing for fetched bodies and three runs of
+output. A larger run needs a fresh batch name and output path plus deliberately
+larger fetch limit, duration, cache ceiling, coordinator timeout, and disk
+budget. Use the PHAR's help for its unbounded-fetch semantics, and do not use
+`--retain-all` at large scale unless retaining every input three times is
+intentional.
+
+The downloads and generated evidence are intentionally uncommitted:
+`.cache/lexbor`, `.cache/html5ever`, both source-oracle `build/` directories,
+the Chrome `.chrome-for-testing/` installation, and `artifacts/` are ignored.
+Preserve or archive an external-gate workspace separately when its audit trail
+is needed; do not force-add it to Git.
 
 Each accepted document runs in a separate PHP child with its own memory and
 wall-clock limit. The callback writes `input.bin` and an initial replay before
@@ -236,6 +278,16 @@ oracle configuration, limits, and provenance:
 ```sh
 php tools/html-api-fuzz/replay.php \
   --replay artifacts/html-api-commoncrawl/findings/SIGNATURE/DOCUMENT/replay.json
+```
+
+A coordinator-retained artifact uses the same replay command and lives below
+the selected oracle's sealed run directory. Always write the replay to a new
+output directory:
+
+```sh
+php tools/html-api-fuzz/replay.php \
+  --replay /absolute/path/shared-corpus/ORACLE/findings/SIGNATURE/DOCUMENT/replay.json \
+  --output-dir /absolute/new/path/replay-ORACLE
 ```
 
 Replay uses the finding's recorded Worker script, PHP memory limit, whole-worker
