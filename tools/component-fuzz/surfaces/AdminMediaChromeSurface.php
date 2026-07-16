@@ -43,6 +43,7 @@ final class AdminMediaChromeSurface {
 			$rows[] = self::check_media_upload_entry_dispatch( $ctx->fork( 'legacy-entry-dispatch' ) );
 			$rows[] = self::check_media_library_gallery_iframe_rendering( $ctx->fork( 'legacy-library-gallery' ) );
 			$rows[] = self::check_media_library_query_date_filters( $ctx->fork( 'legacy-library-query-filters' ) );
+			$rows[] = self::check_media_library_query_date_stub_edges( $ctx->fork( 'legacy-library-date-stub-edges' ) );
 			$rows[] = self::check_media_library_query_alias_defaults( $ctx->fork( 'legacy-library-query-aliases' ) );
 			$rows[] = self::check_media_attach_action_redirect_exit( $ctx->fork( 'media-attach-action' ) );
 			$rows[] = self::check_media_enqueue_and_iframe_shell( $ctx->fork( 'modal-enqueue-shell' ) );
@@ -5570,7 +5571,7 @@ PHP;
 	}
 
 	private static function media_library_gallery_query_summary( array $query_vars ): array {
-		$keys = array( 'post_type', 'post_status', 'post_mime_type', 'posts_per_page', 'paged', 'offset', 's', 'm', 'post_parent', 'author' );
+		$keys = array( 'post_type', 'post_status', 'post_mime_type', 'posts_per_page', 'paged', 'offset', 's', 'm', 'post_parent', 'author', 'date_query' );
 		$out  = array();
 		foreach ( $keys as $key ) {
 			if ( array_key_exists( $key, $query_vars ) ) {
@@ -6466,6 +6467,577 @@ PHP;
 			$failures,
 			( $result['contentBefore'] ?? array() ) === ( $result['contentAfter'] ?? array() ),
 			'query/date filter probes and library form rendering do not mutate content rows',
+			array(
+				'contentBefore' => $result['contentBefore'] ?? array(),
+				'contentAfter'  => $result['contentAfter'] ?? array(),
+			)
+		);
+	}
+
+	private static function check_media_library_query_date_stub_edges( \ComponentFuzz\FuzzContext $ctx ): array {
+		$missing = self::media_attach_action_child_missing_requirements();
+		if ( array() !== $missing ) {
+			return self::row(
+				$ctx,
+				'admin-media-chrome.legacy-library-date-stub-edges',
+				true,
+				array(
+					'missing' => $missing,
+					'reason'  => 'Required local subprocess APIs are unavailable.',
+				),
+				'skipped'
+			);
+		}
+
+		$case     = self::media_library_query_date_stub_edge_case( $ctx );
+		$run      = self::run_media_library_query_date_stub_edge_child_process( $case );
+		$result   = is_array( $run['result'] ?? null ) ? $run['result'] : array();
+		$failures = array();
+
+		self::collect_failure(
+			$failures,
+			true === ( $run['ok'] ?? false ) && self::media_library_query_date_stub_edge_child_result_has_expected_shape( $result ),
+			'media query date/stub edge child reports structured JSON',
+			array(
+				'run'    => $run,
+				'result' => $result,
+			)
+		);
+
+		if ( self::media_library_query_date_stub_edge_child_result_has_expected_shape( $result ) ) {
+			self::collect_failure(
+				$failures,
+				true === (bool) ( $result['returned'] ?? false )
+					&& 'NULL' === (string) ( $result['returnType'] ?? '' )
+					&& null === ( $result['throwable'] ?? null ),
+				'media query date/stub edge child reaches list-table and query probes without exceptions',
+				array(
+					'returned'  => $result['returned'] ?? null,
+					'returnType' => $result['returnType'] ?? null,
+					'throwable' => $result['throwable'] ?? null,
+				)
+			);
+
+			self::collect_media_library_query_date_stub_edge_failures( $failures, $case, $result );
+		}
+
+		return self::row(
+			$ctx,
+			'admin-media-chrome.legacy-library-date-stub-edges',
+			array() === $failures,
+			array(
+				'failures' => $failures,
+				'run'      => array(
+					'ok'       => $run['ok'] ?? false,
+					'exitCode' => $run['exitCode'] ?? null,
+					'stderr'   => self::describe_string( (string) ( $run['stderr'] ?? '' ) ),
+					'stdout'   => self::describe_string( (string) ( $run['stdout'] ?? '' ) ),
+					'result'   => array(
+						'returned'              => $result['returned'] ?? null,
+						'returnType'            => $result['returnType'] ?? null,
+						'throwable'             => $result['throwable'] ?? null,
+						'monthRows'             => $result['monthRows'] ?? array(),
+						'listTable'             => $result['listTable'] ?? array(),
+						'queries'               => $result['queries'] ?? array(),
+						'exactTimestampIds'     => $result['exactTimestampIds'] ?? array(),
+						'dateQueryWindowIds'    => $result['dateQueryWindowIds'] ?? array(),
+						'dateQueryControlIds'   => $result['dateQueryControlIds'] ?? array(),
+						'excludedMonthStatuses' => $result['excludedMonthStatuses'] ?? array(),
+						'contentBefore'         => $result['contentBefore'] ?? array(),
+						'contentAfter'          => $result['contentAfter'] ?? array(),
+						'output'                => self::describe_string( (string) ( $result['output'] ?? '' ) ),
+					),
+				),
+			)
+		);
+	}
+
+	private static function media_library_query_date_stub_edge_case( \ComponentFuzz\FuzzContext $ctx ): array {
+		return array(
+			'label'     => 'month-status-exclusions-date-units',
+			'seed'      => $ctx->seed(),
+			'iteration' => $ctx->iteration(),
+			'token'     => self::media_upload_dispatch_token( 'mqdse_' . $ctx->identifier( 4, 9 ) ),
+		);
+	}
+
+	private static function run_media_library_query_date_stub_edge_child_process( array $case ): array {
+		$payload = json_encode(
+			array( 'case' => $case ),
+			JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE
+		);
+
+		if ( false === $payload ) {
+			return array(
+				'ok'       => false,
+				'exitCode' => -1,
+				'stdout'   => '',
+				'stderr'   => 'json_encode failed',
+				'result'   => null,
+			);
+		}
+
+		$descriptors = array(
+			0 => array( 'pipe', 'r' ),
+			1 => array( 'pipe', 'w' ),
+			2 => array( 'pipe', 'w' ),
+		);
+
+		// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.system_calls_proc_open -- Isolates media date-query/list-table globals in a local PHP subprocess.
+		$process = proc_open( array( PHP_BINARY, '-r', self::media_library_query_date_stub_edge_child_program() ), $descriptors, $pipes, \ComponentFuzz\repo_root() );
+		if ( ! is_resource( $process ) ) {
+			return array(
+				'ok'       => false,
+				'exitCode' => -1,
+				'stdout'   => '',
+				'stderr'   => 'proc_open failed',
+				'result'   => null,
+			);
+		}
+
+		fwrite( $pipes[0], $payload );
+		fclose( $pipes[0] );
+
+		$stdout = stream_get_contents( $pipes[1] );
+		$stderr = stream_get_contents( $pipes[2] );
+		fclose( $pipes[1] );
+		fclose( $pipes[2] );
+
+		$exit_code = proc_close( $process );
+		$result    = json_decode( (string) $stdout, true );
+
+		return array(
+			'ok'       => 0 === $exit_code && is_array( $result ) && true === ( $result['ok'] ?? null ),
+			'exitCode' => $exit_code,
+			'stdout'   => (string) $stdout,
+			'stderr'   => (string) $stderr,
+			'result'   => is_array( $result ) ? $result : null,
+		);
+	}
+
+	private static function media_library_query_date_stub_edge_child_program(): string {
+		return <<<'PHP'
+$component_fuzz_admin_media_raw = stream_get_contents( STDIN );
+$component_fuzz_admin_media_payload = json_decode( $component_fuzz_admin_media_raw, true );
+$case = is_array( $component_fuzz_admin_media_payload['case'] ?? null ) ? $component_fuzz_admin_media_payload['case'] : array();
+
+require_once getcwd() . '/tools/component-fuzz/lib/autoload.php';
+\ComponentFuzz\WpBootstrap::load();
+
+\ComponentFuzz\Surfaces\AdminMediaChromeSurface::run_media_library_query_date_stub_edge_child( $case );
+PHP;
+	}
+
+	public static function run_media_library_query_date_stub_edge_child( array $case ): void {
+		ini_set( 'display_errors', '0' );
+		self::prepare_runtime();
+
+		$ctx   = new \ComponentFuzz\FuzzContext( (int) ( $case['seed'] ?? 1 ), self::NAME, (int) ( $case['iteration'] ?? 0 ) );
+		$token = self::media_upload_dispatch_token( (string) ( $case['token'] ?? $ctx->identifier( 4, 9 ) ) );
+		$state = array(
+			'ok'                    => false,
+			'label'                 => (string) ( $case['label'] ?? 'media-library-query-date-stub-edges' ),
+			'token'                 => $token,
+			'parentId'              => 0,
+			'exactTimestampIds'     => array(),
+			'dateQueryWindowIds'    => array(),
+			'dateQueryControlIds'   => array(),
+			'excludedMonthStatuses' => array(
+				'autoDraftIds' => array(),
+				'trashIds'     => array(),
+			),
+			'monthRows'             => array(),
+			'listTable'             => array(),
+			'queries'               => array(),
+			'contentBefore'         => array(),
+			'contentAfter'          => array(),
+			'returned'              => false,
+			'returnType'            => null,
+			'throwable'             => null,
+			'output'                => '',
+		);
+
+		$buffer_level = ob_get_level();
+		ob_start();
+
+		register_shutdown_function(
+			static function () use ( &$state, $buffer_level ): void {
+				$output = '';
+				while ( ob_get_level() > $buffer_level ) {
+					$chunk = ob_get_clean();
+					if ( is_string( $chunk ) ) {
+						$output = $chunk . $output;
+					}
+				}
+
+				$state['output']       = $output;
+				$state['contentAfter'] = self::media_url_insert_content_counts();
+				$state['ok']           = null === $state['throwable'];
+				echo json_encode( $state, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE ) . "\n";
+			}
+		);
+
+		try {
+			if ( defined( 'ABSPATH' ) ) {
+				require_once ABSPATH . 'wp-admin/includes/class-wp-list-table.php';
+				require_once ABSPATH . 'wp-admin/includes/class-wp-media-list-table.php';
+			}
+
+			$parent_id = self::seed_parent_post( $ctx->fork( 'parent' ) );
+			$state['parentId'] = $parent_id;
+
+			\wp_set_current_user( 1 );
+			if ( isset( $GLOBALS['current_user'] ) && $GLOBALS['current_user'] instanceof \WP_User ) {
+				$GLOBALS['current_user']->allcaps = array( 'exist' => true );
+			}
+
+			$user_has_cap_filter = static function ( array $allcaps, array $caps, array $args, $user = null ): array {
+				unset( $args, $user );
+				foreach ( $caps as $cap ) {
+					$allcaps[ $cap ] = 'do_not_allow' !== $cap;
+				}
+				return $allcaps;
+			};
+			$upload_per_page_filter = static function (): int {
+				return 50;
+			};
+
+			\add_filter( 'user_has_cap', $user_has_cap_filter, 10, 4 );
+			\add_filter( 'upload_per_page', $upload_per_page_filter, 10, 0 );
+
+			try {
+				$exact = self::seed_attachment(
+					$ctx->fork( 'exact-timestamp' ),
+					'image/jpeg',
+					array(
+						'parent_id'     => $parent_id,
+						'post_author'   => 2,
+						'post_date'     => '2026-12-14 06:07:08',
+						'post_date_gmt' => '2026-12-14 06:07:08',
+						'post_title'    => 'Exact timestamp ' . $token,
+						'relative_file' => '2026/12/exact-timestamp-' . $token . '.jpg',
+					)
+				);
+				$state['exactTimestampIds'][]  = (int) $exact->ID;
+				$state['dateQueryWindowIds'][] = (int) $exact->ID;
+
+				$hour_window = self::seed_attachment(
+					$ctx->fork( 'hour-window' ),
+					'image/jpeg',
+					array(
+						'parent_id'     => $parent_id,
+						'post_author'   => 2,
+						'post_date'     => '2026-12-14 07:07:08',
+						'post_date_gmt' => '2026-12-14 07:07:08',
+						'post_title'    => 'Hour window ' . $token,
+						'relative_file' => '2026/12/hour-window-' . $token . '.jpg',
+					)
+				);
+				$state['dateQueryWindowIds'][] = (int) $hour_window->ID;
+
+				foreach (
+					array(
+						'wrong-hour'   => '2026-12-14 08:07:08',
+						'wrong-minute' => '2026-12-14 06:08:08',
+						'wrong-second' => '2026-12-14 06:07:09',
+						'wrong-day'    => '2026-12-15 06:07:08',
+						'wrong-month'  => '2026-11-14 06:07:08',
+					) as $label => $date
+				) {
+					$control = self::seed_attachment(
+						$ctx->fork( $label ),
+						'image/jpeg',
+						array(
+							'parent_id'     => $parent_id,
+							'post_author'   => 2,
+							'post_date'     => $date,
+							'post_date_gmt' => $date,
+							'post_title'    => $label . ' ' . $token,
+							'relative_file' => '2026/12/' . $label . '-' . $token . '.jpg',
+						)
+					);
+					$state['dateQueryControlIds'][] = (int) $control->ID;
+				}
+
+				$auto_draft = self::seed_attachment(
+					$ctx->fork( 'auto-draft-month' ),
+					'image/jpeg',
+					array(
+						'parent_id'     => $parent_id,
+						'post_author'   => 2,
+						'post_status'   => 'auto-draft',
+						'post_date'     => '2027-01-05 10:00:00',
+						'post_date_gmt' => '2027-01-05 10:00:00',
+						'post_title'    => 'Auto draft excluded month ' . $token,
+						'relative_file' => '2027/01/auto-draft-month-' . $token . '.jpg',
+					)
+				);
+				$state['excludedMonthStatuses']['autoDraftIds'][] = (int) $auto_draft->ID;
+
+				$trash = self::seed_attachment(
+					$ctx->fork( 'trash-month' ),
+					'image/jpeg',
+					array(
+						'parent_id'     => $parent_id,
+						'post_author'   => 2,
+						'post_status'   => 'trash',
+						'post_date'     => '2027-02-05 10:00:00',
+						'post_date_gmt' => '2027-02-05 10:00:00',
+						'post_title'    => 'Trash excluded month ' . $token,
+						'relative_file' => '2027/02/trash-month-' . $token . '.jpg',
+					)
+				);
+				$state['excludedMonthStatuses']['trashIds'][] = (int) $trash->ID;
+
+				$state['contentBefore'] = self::media_url_insert_content_counts();
+
+				$wpdb = $GLOBALS['wpdb'] ?? null;
+				if ( is_object( $wpdb ) && method_exists( $wpdb, 'get_results' ) ) {
+					$month_rows = $wpdb->get_results(
+						"SELECT DISTINCT YEAR( post_date ) AS year, MONTH( post_date ) AS month
+						FROM {$wpdb->posts}
+						WHERE post_type = 'attachment'
+						AND post_status != 'auto-draft'
+						AND post_status != 'trash'
+						ORDER BY post_date DESC"
+					);
+					foreach ( $month_rows as $row ) {
+						$state['monthRows'][] = array(
+							'year'  => (int) ( $row->year ?? 0 ),
+							'month' => (int) ( $row->month ?? 0 ),
+						);
+					}
+				}
+
+				$state['queries']['fullTimestampM'] = self::media_library_query_date_capture_query(
+					array(
+						'post_mime_type' => 'image',
+						'm'              => '20261214060708',
+					)
+				);
+				$state['queries']['dateQueryIn'] = self::media_library_date_stub_edge_capture_wp_query(
+					array(
+						'post_mime_type' => 'image',
+						'date_query'     => array(
+							array(
+								'compare' => 'IN',
+								'year'    => array( 2026 ),
+								'month'   => array( 12 ),
+								'day'     => array( 14 ),
+								'hour'    => array( 6, 7 ),
+								'minute'  => array( 7 ),
+								'second'  => array( 8 ),
+							),
+						),
+					)
+				);
+				$state['queries']['dateQueryBetween'] = self::media_library_date_stub_edge_capture_wp_query(
+					array(
+						'post_mime_type' => 'image',
+						'date_query'     => array(
+							array(
+								'compare' => 'BETWEEN',
+								'year'    => array( 2026, 2026 ),
+								'month'   => array( 12, 12 ),
+								'day'     => array( 14, 14 ),
+								'hour'    => array( 6, 7 ),
+								'minute'  => array( 7, 7 ),
+								'second'  => array( 8, 8 ),
+							),
+						),
+					)
+				);
+
+				$state['listTable'] = self::media_library_date_stub_edge_list_table_probe();
+				$state['returnType'] = 'NULL';
+				$state['returned']   = true;
+			} finally {
+				\remove_filter( 'upload_per_page', $upload_per_page_filter, 10 );
+				\remove_filter( 'user_has_cap', $user_has_cap_filter, 10 );
+			}
+		} catch ( \Throwable $e ) {
+			$state['throwable'] = self::describe_throwable( $e );
+		}
+	}
+
+	private static function media_library_date_stub_edge_capture_wp_query( array $args ): array {
+		$query = new \WP_Query(
+			array_merge(
+				array(
+					'post_type'           => 'attachment',
+					'post_status'         => array( 'inherit', 'private' ),
+					'posts_per_page'      => 50,
+					'ignore_sticky_posts' => true,
+				),
+				$args
+			)
+		);
+
+		$posts = is_array( $query->posts ?? null ) ? $query->posts : array();
+
+		return array(
+			'ids'         => array_map(
+				static function ( $post ): int {
+					return (int) ( $post->ID ?? 0 );
+				},
+				$posts
+			),
+			'queryVars'   => is_array( $query->query_vars ?? null ) ? self::media_library_gallery_query_summary( $query->query_vars ) : array(),
+			'foundPosts'  => isset( $query->found_posts ) ? (int) $query->found_posts : null,
+			'maxNumPages' => isset( $query->max_num_pages ) ? (int) $query->max_num_pages : null,
+		);
+	}
+
+	private static function media_library_date_stub_edge_list_table_probe(): array {
+		$GLOBALS['pagenow']      = 'upload.php';
+		$GLOBALS['wp']           = new \WP();
+		$GLOBALS['wp_query']     = new \WP_Query();
+		$GLOBALS['wp_the_query'] = $GLOBALS['wp_query'];
+		$GLOBALS['body_id']      = 'component-fuzz-date-stub-list-table';
+
+		$_SERVER['HTTP_HOST']       = 'example.test';
+		$_SERVER['HTTPS']           = 'off';
+		$_SERVER['PHP_SELF']        = '/wp-admin/upload.php';
+		$_SERVER['REQUEST_METHOD']  = 'GET';
+		$_SERVER['REQUEST_URI']     = '/wp-admin/upload.php?post_mime_type=image';
+		$_SERVER['HTTP_REFERER']    = 'http://example.test/wp-admin/upload.php';
+		$_SERVER['HTTP_USER_AGENT'] = 'component-fuzz/admin-media-date-stub-edge';
+		$_SERVER['REMOTE_ADDR']     = '198.51.100.53';
+		$_SERVER['SERVER_PORT']     = '80';
+
+		$_GET     = array( 'post_mime_type' => 'image' );
+		$_POST    = array();
+		$_REQUEST = $_GET;
+		$_FILES   = array();
+		$_COOKIE  = array();
+
+		$screen = \convert_to_screen( 'upload' );
+		$table  = \_get_list_table( 'WP_Media_List_Table', array( 'screen' => $screen ) );
+		if ( ! $table instanceof \WP_List_Table ) {
+			throw new \RuntimeException( 'Could not load WP_Media_List_Table for date stub edge probe.' );
+		}
+
+		$table->prepare_items();
+		ob_start();
+		self::invoke_object_method( $table, 'extra_tablenav', array( 'bar' ) );
+		$month_output = ob_get_clean();
+
+		$query = $GLOBALS['wp_the_query'] ?? null;
+		$posts = is_object( $query ) && is_array( $query->posts ?? null ) ? $query->posts : array();
+
+		return array(
+			'ids'         => array_map(
+				static function ( $post ): int {
+					return (int) ( $post->ID ?? 0 );
+				},
+				$posts
+			),
+			'queryVars'   => is_object( $query ) && is_array( $query->query_vars ?? null ) ? self::media_library_gallery_query_summary( $query->query_vars ) : array(),
+			'foundPosts'  => is_object( $query ) && isset( $query->found_posts ) ? (int) $query->found_posts : null,
+			'maxNumPages' => is_object( $query ) && isset( $query->max_num_pages ) ? (int) $query->max_num_pages : null,
+			'monthOutput' => is_string( $month_output ) ? $month_output : '',
+		);
+	}
+
+	private static function media_library_query_date_stub_edge_child_result_has_expected_shape( array $result ): bool {
+		return array_key_exists( 'ok', $result )
+			&& array_key_exists( 'returned', $result )
+			&& is_string( $result['output'] ?? null )
+			&& is_array( $result['exactTimestampIds'] ?? null )
+			&& is_array( $result['dateQueryWindowIds'] ?? null )
+			&& is_array( $result['dateQueryControlIds'] ?? null )
+			&& is_array( $result['excludedMonthStatuses'] ?? null )
+			&& is_array( $result['monthRows'] ?? null )
+			&& is_array( $result['listTable'] ?? null )
+			&& is_array( $result['queries'] ?? null )
+			&& is_array( $result['contentBefore'] ?? null )
+			&& is_array( $result['contentAfter'] ?? null );
+	}
+
+	private static function collect_media_library_query_date_stub_edge_failures( array &$failures, array $case, array $result ): void {
+		unset( $case );
+
+		$month_keys = array_map(
+			static function ( array $row ): string {
+				return sprintf( '%04d%02d', (int) ( $row['year'] ?? 0 ), (int) ( $row['month'] ?? 0 ) );
+			},
+			$result['monthRows'] ?? array()
+		);
+		$list_table       = is_array( $result['listTable'] ?? null ) ? $result['listTable'] : array();
+		$list_month_html  = (string) ( $list_table['monthOutput'] ?? '' );
+		$excluded_status  = is_array( $result['excludedMonthStatuses'] ?? null ) ? $result['excludedMonthStatuses'] : array();
+
+		self::collect_failure(
+			$failures,
+			in_array( '202612', $month_keys, true )
+				&& ! in_array( '202701', $month_keys, true )
+				&& ! in_array( '202702', $month_keys, true )
+				&& str_contains( $list_month_html, "value='202612'" )
+				&& ! str_contains( $list_month_html, "value='202701'" )
+				&& ! str_contains( $list_month_html, "value='202702'" ),
+			'media list-table month dropdown SQL applies every post_status != predicate before projecting distinct months',
+			array(
+				'monthRows'             => $result['monthRows'] ?? array(),
+				'listTable'             => array(
+					'queryVars'   => $list_table['queryVars'] ?? array(),
+					'foundPosts'  => $list_table['foundPosts'] ?? null,
+					'monthOutput' => self::describe_string( $list_month_html ),
+				),
+				'excludedMonthStatuses' => $excluded_status,
+			)
+		);
+
+		$full_timestamp_query = is_array( $result['queries']['fullTimestampM'] ?? null ) ? $result['queries']['fullTimestampM'] : array();
+		$full_timestamp_ids   = array_values( array_map( 'intval', $full_timestamp_query['ids'] ?? array() ) );
+		$exact_ids            = array_values( array_map( 'intval', $result['exactTimestampIds'] ?? array() ) );
+
+		self::collect_failure(
+			$failures,
+			self::same_int_set( $full_timestamp_ids, $exact_ids )
+				&& '20261214060708' === (string) ( $full_timestamp_query['queryVars']['m'] ?? '' ),
+			'full m=YYYYMMDDHHIISS media queries constrain year/month/day/hour/minute/second together',
+			array(
+				'query'    => $full_timestamp_query,
+				'expected' => $exact_ids,
+				'controls' => $result['dateQueryControlIds'] ?? array(),
+			)
+		);
+
+		$in_query      = is_array( $result['queries']['dateQueryIn'] ?? null ) ? $result['queries']['dateQueryIn'] : array();
+		$between_query = is_array( $result['queries']['dateQueryBetween'] ?? null ) ? $result['queries']['dateQueryBetween'] : array();
+		$window_ids    = array_values( array_map( 'intval', $result['dateQueryWindowIds'] ?? array() ) );
+		$control_ids   = array_values( array_map( 'intval', $result['dateQueryControlIds'] ?? array() ) );
+		$in_ids        = array_values( array_map( 'intval', $in_query['ids'] ?? array() ) );
+		$between_ids   = array_values( array_map( 'intval', $between_query['ids'] ?? array() ) );
+
+		self::collect_failure(
+			$failures,
+			self::same_int_set( $in_ids, $window_ids )
+				&& array() === array_intersect( $in_ids, $control_ids ),
+			'WP_Date_Query IN projections filter generated year/month/day/hour/minute/second media rows',
+			array(
+				'query'    => $in_query,
+				'expected' => $window_ids,
+				'controls' => $control_ids,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::same_int_set( $between_ids, $window_ids )
+				&& array() === array_intersect( $between_ids, $control_ids ),
+			'WP_Date_Query BETWEEN projections filter generated year/month/day/hour/minute/second media rows',
+			array(
+				'query'    => $between_query,
+				'expected' => $window_ids,
+				'controls' => $control_ids,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			( $result['contentBefore'] ?? array() ) === ( $result['contentAfter'] ?? array() ),
+			'date stub edge probes do not mutate content rows',
 			array(
 				'contentBefore' => $result['contentBefore'] ?? array(),
 				'contentAfter'  => $result['contentAfter'] ?? array(),

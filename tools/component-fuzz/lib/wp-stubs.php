@@ -1032,17 +1032,19 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 			}
 
 			foreach ( array( 'post_status', 'post_mime_type' ) as $column ) {
-				$value = $this->component_fuzz_not_compare_value( $query, $column );
-				if ( null === $value ) {
+				$values = $this->component_fuzz_not_compare_values( $query, $column );
+				if ( array() === $values ) {
 					continue;
 				}
 
-				$rows = array_filter(
-					$rows,
-					static function ( $row ) use ( $column, $value ) {
-						return (string) $row[ $column ] !== (string) $value;
-					}
-				);
+				foreach ( $values as $value ) {
+					$rows = array_filter(
+						$rows,
+						static function ( $row ) use ( $column, $value ) {
+							return (string) $row[ $column ] !== (string) $value;
+						}
+					);
+				}
 			}
 
 			foreach ( array( 'post_name', 'post_parent', 'post_status' ) as $column ) {
@@ -1322,14 +1324,12 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 					'YEAR'       => array( 0, 4 ),
 					'MONTH'      => array( 5, 2 ),
 					'DAYOFMONTH' => array( 8, 2 ),
+					'HOUR'       => array( 11, 2 ),
+					'MINUTE'     => array( 14, 2 ),
+					'SECOND'     => array( 17, 2 ),
 				) as $function => $slice
 			) {
-				$expected = $this->component_fuzz_sql_date_part_value( $query, $function, $column );
-				if ( null === $expected ) {
-					continue;
-				}
-
-				if ( (int) $expected !== (int) substr( (string) $datetime, $slice[0], $slice[1] ) ) {
+				if ( ! $this->component_fuzz_sql_date_part_matches( $query, $function, $column, (int) substr( (string) $datetime, $slice[0], $slice[1] ) ) ) {
 					return false;
 				}
 			}
@@ -1337,18 +1337,38 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 			return true;
 		}
 
-		private function component_fuzz_sql_date_part_value( $query, $function, $column ) {
-			if (
-				! preg_match(
-					'/\b' . preg_quote( $function, '/' ) . '\s*\(\s*(?:`?[a-z_][a-z0-9_]*`?\.)?`?' . preg_quote( $column, '/' ) . '`?\s*\)\s*=\s*(\'(?:\\\\.|[^\'\\\\])*\'|"[^"]*"|-?\d+)/i',
-					(string) $query,
-					$matches
-				)
-			) {
-				return null;
+		private function component_fuzz_sql_date_part_matches( $query, $function, $column, $actual ) {
+			$expression = '\b' . preg_quote( $function, '/' ) . '\s*\(\s*(?:`?[a-z_][a-z0-9_]*`?\.)?`?' . preg_quote( $column, '/' ) . '`?\s*\)';
+			$value      = '(\'(?:\\\\.|[^\'\\\\])*\'|"[^"]*"|-?\d+)';
+
+			if ( preg_match_all( '/' . $expression . '\s*=\s*' . $value . '/i', (string) $query, $matches, PREG_SET_ORDER ) ) {
+				foreach ( $matches as $match ) {
+					if ( (int) $actual !== (int) $this->component_fuzz_unquote_sql_value( $match[1] ) ) {
+						return false;
+					}
+				}
 			}
 
-			return $this->component_fuzz_unquote_sql_value( $matches[1] );
+			if ( preg_match_all( '/' . $expression . '\s+IN\s*\(([^)]*)\)/i', (string) $query, $matches, PREG_SET_ORDER ) ) {
+				foreach ( $matches as $match ) {
+					$value_map = array_fill_keys( array_map( 'intval', $this->component_fuzz_csv_values( $match[1] ) ), true );
+					if ( ! isset( $value_map[ (int) $actual ] ) ) {
+						return false;
+					}
+				}
+			}
+
+			if ( preg_match_all( '/' . $expression . '\s+BETWEEN\s+' . $value . '\s+AND\s+' . $value . '/i', (string) $query, $matches, PREG_SET_ORDER ) ) {
+				foreach ( $matches as $match ) {
+					$lower = (int) $this->component_fuzz_unquote_sql_value( $match[1] );
+					$upper = (int) $this->component_fuzz_unquote_sql_value( $match[2] );
+					if ( (int) $actual < min( $lower, $upper ) || (int) $actual > max( $lower, $upper ) ) {
+						return false;
+					}
+				}
+			}
+
+			return true;
 		}
 
 		private function component_fuzz_filter_posts_by_datetime_bounds( $query, array $rows ) {
@@ -1387,7 +1407,7 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 					);
 				}
 
-				if ( preg_match( '/\b(?:YEAR|MONTH|DAYOFMONTH)\s*\(\s*(?:`?wp_posts`?\.)?`?' . preg_quote( $column, '/' ) . '`?\s*\)/i', $where ) ) {
+				if ( preg_match( '/\b(?:YEAR|MONTH|DAYOFMONTH|HOUR|MINUTE|SECOND)\s*\(\s*(?:`?wp_posts`?\.)?`?' . preg_quote( $column, '/' ) . '`?\s*\)/i', $where ) ) {
 					$rows = array_filter(
 						$rows,
 						function ( $row ) use ( $where, $column ) {
@@ -2900,12 +2920,15 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 		}
 
 		private function component_fuzz_not_compare_value( $query, $column ) {
-			$column = preg_quote( $column, '/' );
-			if ( preg_match( '/(?<![A-Za-z0-9_])(?:`?[a-z_][a-z0-9_]*`?\.)?`?' . $column . '`?(?![A-Za-z0-9_])\s*!=\s*(\'(?:\\\\.|[^\'\\\\])*\'|"[^"]*"|-?\d+)/i', (string) $query, $matches ) ) {
-				return $this->component_fuzz_unquote_sql_value( $matches[1] );
-			}
+			$values = $this->component_fuzz_not_compare_values( $query, $column );
+			return $values[0] ?? null;
+		}
 
-			return null;
+		private function component_fuzz_not_compare_values( $query, $column ) {
+			return array_merge(
+				$this->component_fuzz_all_compare_values( $query, $column, '!=' ),
+				$this->component_fuzz_all_compare_values( $query, $column, '<>' )
+			);
 		}
 
 		private function component_fuzz_less_than_value( $query, $column ) {
