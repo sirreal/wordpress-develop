@@ -49,6 +49,7 @@ final class RestObjectControllersSurface {
 			$rows[] = self::check_route_dispatched_collection_get_edges( $ctx->fork( 'collection-get-dispatch' ), $case, $fixtures, $additional_field_calls );
 			$rows[] = self::check_route_dispatched_object_write_edges( $ctx->fork( 'object-write-dispatch' ), $case, $fixtures );
 			$rows[] = self::check_route_dispatched_object_create_delete_edges( $ctx->fork( 'object-create-delete-dispatch' ), $case, $fixtures );
+			$rows[] = self::check_route_dispatched_page_parent_slug_edges( $ctx->fork( 'page-parent-slug-dispatch' ), $case, $fixtures );
 			$rows[] = self::check_route_dispatched_object_force_delete_edges( $ctx->fork( 'object-force-delete-dispatch' ), $case, $fixtures );
 			$rows[] = self::check_route_dispatched_term_mutation_edges( $ctx->fork( 'term-mutation-dispatch' ), $case, $fixtures );
 		} catch ( \Throwable $e ) {
@@ -4896,6 +4897,748 @@ final class RestObjectControllersSurface {
 		return self::row(
 			$ctx,
 			'rest-object-controllers.route-dispatched-create-delete-validation-cleanup',
+			array() === $failures,
+			array(
+				'case'     => self::case_summary( $case ),
+				'failures' => array_slice( $failures, 0, 8 ),
+				'observed' => $observed,
+			)
+		);
+	}
+
+	private static function check_route_dispatched_page_parent_slug_edges( \ComponentFuzz\FuzzContext $ctx, array $case, array $fixtures ): array {
+		$failures = array();
+		$observed = array();
+		$post_ids = array();
+
+		$previous_server          = $GLOBALS['wp_rest_server'] ?? null;
+		$had_wp_actions           = array_key_exists( 'wp_actions', $GLOBALS );
+		$previous_actions         = $GLOBALS['wp_actions'] ?? null;
+		$previous_current_user_id = isset( $GLOBALS['current_user'] ) && $GLOBALS['current_user'] instanceof \WP_User
+			? (int) $GLOBALS['current_user']->ID
+			: 0;
+		$previous_rewrite_set     = array_key_exists( 'wp_rewrite', $GLOBALS );
+		$previous_rewrite         = $GLOBALS['wp_rewrite'] ?? null;
+
+		$server                    = new \WP_REST_Server();
+		$GLOBALS['wp_rest_server'] = $server;
+
+		if ( ! isset( $GLOBALS['wp_actions'] ) || ! is_array( $GLOBALS['wp_actions'] ) ) {
+			$GLOBALS['wp_actions'] = array();
+		}
+		$GLOBALS['wp_actions']['rest_api_init'] = max( 1, (int) ( $GLOBALS['wp_actions']['rest_api_init'] ?? 0 ) );
+
+		$permalink_structure      = '/%postname%/';
+		$permalink_filter         = static function () use ( $permalink_structure ): string {
+			return $permalink_structure;
+		};
+		$cap_filter               = null;
+		$active_unique_label      = null;
+		$unique_slug_events       = array();
+		$write_filter_restored    = false;
+		$permalink_filter_restored = false;
+		$unique_slug_restored     = false;
+		$rewrite_restored         = false;
+		$server_restored          = false;
+		$actions_restored         = false;
+		$current_user_restored    = false;
+		$counts_before            = self::content_counts();
+		$counts_after_cleanup     = array();
+
+		$remember_post = static function ( $post_id ) use ( &$post_ids ): int {
+			if ( is_int( $post_id ) && $post_id > 0 ) {
+				$post_ids[] = $post_id;
+				return $post_id;
+			}
+
+			return 0;
+		};
+		$delete_posts = static function () use ( &$post_ids ): void {
+			foreach ( array_reverse( array_unique( array_map( 'intval', $post_ids ) ) ) as $post_id ) {
+				if ( $post_id > 0 ) {
+					\wp_delete_post( $post_id, true );
+				}
+			}
+
+			$post_ids = array();
+		};
+		$post_summary = static function ( $post ): ?array {
+			if ( ! $post instanceof \WP_Post ) {
+				return null;
+			}
+
+			return array(
+				'id'     => (int) $post->ID,
+				'parent' => (int) $post->post_parent,
+				'slug'   => $post->post_name,
+				'status' => $post->post_status,
+				'title'  => $post->post_title,
+			);
+		};
+		$events_for_label = static function ( string $label ) use ( &$unique_slug_events ): array {
+			return array_values(
+				array_filter(
+					$unique_slug_events,
+					static function ( array $event ) use ( $label ): bool {
+						return $label === ( $event['label'] ?? null );
+					}
+				)
+			);
+		};
+		$event_matches = static function ( array $events, string $slug, int $post_id, int $parent ): bool {
+			if ( 1 !== count( $events ) ) {
+				return false;
+			}
+
+			$event = $events[0];
+			return $slug === ( $event['slug'] ?? null )
+				&& $post_id === (int) ( $event['postId'] ?? -1 )
+				&& 'publish' === ( $event['status'] ?? null )
+				&& 'page' === ( $event['type'] ?? null )
+				&& $parent === (int) ( $event['parent'] ?? -1 )
+				&& null === ( $event['override'] ?? null );
+		};
+		$unique_slug_filter = static function ( $override_slug, string $slug, int $post_id, string $post_status, string $post_type, int $post_parent ) use ( &$active_unique_label, &$unique_slug_events ) {
+			if ( null !== $active_unique_label ) {
+				$unique_slug_events[] = array(
+					'label'    => $active_unique_label,
+					'slug'     => $slug,
+					'postId'   => $post_id,
+					'status'   => $post_status,
+					'type'     => $post_type,
+					'parent'   => $post_parent,
+					'override' => $override_slug,
+				);
+			}
+
+			return $override_slug;
+		};
+
+		try {
+			$controller = new \WP_REST_Posts_Controller( 'page' );
+			$controller->register_routes();
+
+			$GLOBALS['wp_rewrite'] = new \WP_Rewrite();
+			$GLOBALS['wp_rewrite']->permalink_structure = $permalink_structure;
+			\add_filter( 'pre_option_permalink_structure', $permalink_filter );
+
+			$parent_a_slug     = 'rest-page-parent-a-' . $case['token'];
+			$parent_b_slug     = 'rest-page-parent-b-' . $case['token'];
+			$base_slug         = 'rest-page-child-' . $case['token'];
+			$base_title        = 'Rest Page Child ' . $case['token'];
+			$base_generated_slug = \sanitize_title( $base_title );
+			$root_slug         = 'rest-page-root-' . $case['token'];
+			$expected_template = \home_url( '/' . $parent_a_slug . '/%pagename%' );
+
+			$parent_a_id = $remember_post(
+				\wp_insert_post(
+					\wp_slash(
+						array(
+							'post_type'    => 'page',
+							'post_title'   => 'REST Page Parent A ' . $case['token'],
+							'post_content' => 'REST page parent A ' . $case['token'],
+							'post_status'  => 'publish',
+							'post_name'    => $parent_a_slug,
+							'post_author'  => $fixtures['author'],
+							'post_parent'  => 0,
+						)
+					),
+					true,
+					false
+				)
+			);
+			$parent_b_id = $remember_post(
+				\wp_insert_post(
+					\wp_slash(
+						array(
+							'post_type'    => 'page',
+							'post_title'   => 'REST Page Parent B ' . $case['token'],
+							'post_content' => 'REST page parent B ' . $case['token'],
+							'post_status'  => 'publish',
+							'post_name'    => $parent_b_slug,
+							'post_author'  => $fixtures['author'],
+							'post_parent'  => 0,
+						)
+					),
+					true,
+					false
+				)
+			);
+			$parent_a_holder_id = $remember_post(
+				\wp_insert_post(
+					\wp_slash(
+						array(
+							'post_type'    => 'page',
+							'post_title'   => 'REST Page Parent A Holder ' . $case['token'],
+							'post_content' => 'REST page parent A holder ' . $case['token'],
+							'post_status'  => 'publish',
+							'post_name'    => $base_slug,
+							'post_author'  => $fixtures['author'],
+							'post_parent'  => $parent_a_id,
+						)
+					),
+					true,
+					false
+				)
+			);
+			$parent_a_suffix_holder_id = $remember_post(
+				\wp_insert_post(
+					\wp_slash(
+						array(
+							'post_type'    => 'page',
+							'post_title'   => 'REST Page Parent A Suffix Holder ' . $case['token'],
+							'post_content' => 'REST page parent A suffix holder ' . $case['token'],
+							'post_status'  => 'publish',
+							'post_name'    => $base_slug . '-2',
+							'post_author'  => $fixtures['author'],
+							'post_parent'  => $parent_a_id,
+						)
+					),
+					true,
+					false
+				)
+			);
+			$parent_b_holder_id = $remember_post(
+				\wp_insert_post(
+					\wp_slash(
+						array(
+							'post_type'    => 'page',
+							'post_title'   => 'REST Page Parent B Holder ' . $case['token'],
+							'post_content' => 'REST page parent B holder ' . $case['token'],
+							'post_status'  => 'publish',
+							'post_name'    => $base_slug,
+							'post_author'  => $fixtures['author'],
+							'post_parent'  => $parent_b_id,
+						)
+					),
+					true,
+					false
+				)
+			);
+			$root_holder_id = $remember_post(
+				\wp_insert_post(
+					\wp_slash(
+						array(
+							'post_type'    => 'page',
+							'post_title'   => 'REST Page Root Holder ' . $case['token'],
+							'post_content' => 'REST page root holder ' . $case['token'],
+							'post_status'  => 'publish',
+							'post_name'    => $root_slug,
+							'post_author'  => $fixtures['author'],
+							'post_parent'  => 0,
+						)
+					),
+					true,
+					false
+				)
+			);
+			$draft_update_id = $remember_post(
+				\wp_insert_post(
+					\wp_slash(
+						array(
+							'post_type'    => 'page',
+							'post_title'   => 'REST Page Omitted Parent Target ' . $case['token'],
+							'post_content' => 'REST page omitted parent target ' . $case['token'],
+							'post_status'  => 'draft',
+							'post_name'    => 'rest-page-omitted-parent-target-' . $case['token'],
+							'post_author'  => $fixtures['author'],
+							'post_parent'  => $parent_a_id,
+						)
+					),
+					true,
+					false
+				)
+			);
+			$pending_update_id = $remember_post(
+				\wp_insert_post(
+					\wp_slash(
+						array(
+							'post_type'    => 'page',
+							'post_title'   => 'REST Page Explicit Parent Target ' . $case['token'],
+							'post_content' => 'REST page explicit parent target ' . $case['token'],
+							'post_status'  => 'pending',
+							'post_name'    => 'rest-page-explicit-parent-target-' . $case['token'],
+							'post_author'  => $fixtures['author'],
+							'post_parent'  => $parent_b_id,
+						)
+					),
+					true,
+					false
+				)
+			);
+			$root_update_id = $remember_post(
+				\wp_insert_post(
+					\wp_slash(
+						array(
+							'post_type'    => 'page',
+							'post_title'   => 'REST Page Explicit Root Target ' . $case['token'],
+							'post_content' => 'REST page explicit root target ' . $case['token'],
+							'post_status'  => 'draft',
+							'post_name'    => 'rest-page-explicit-root-target-' . $case['token'],
+							'post_author'  => $fixtures['author'],
+							'post_parent'  => $parent_a_id,
+						)
+					),
+					true,
+					false
+				)
+			);
+
+			\wp_set_current_user( $fixtures['author'] );
+			$cap_filter = self::install_cap_filter(
+				array(
+					'delete_others_pages',
+					'delete_pages',
+					'delete_post',
+					'edit_others_pages',
+					'edit_page',
+					'edit_pages',
+					'edit_post',
+					'edit_posts',
+					'edit_private_pages',
+					'edit_published_pages',
+					'publish_pages',
+					'read',
+					'read_page',
+					'read_post',
+				)
+			);
+			\add_filter( 'pre_wp_unique_post_slug', $unique_slug_filter, 10, 6 );
+
+			$active_unique_label = 'draft-create-parent-a';
+			try {
+				$draft_create_response = $server->dispatch(
+					self::request(
+						'POST',
+						'/wp/v2/pages',
+						array(
+							'_fields' => 'id,parent,slug,status,title',
+							'context' => 'edit',
+						),
+						array(),
+						array(
+							'content' => '<p>REST draft page parent slug content ' . $case['token'] . '</p>',
+							'parent'  => $parent_a_id,
+							'slug'    => $base_slug,
+							'status'  => 'draft',
+							'title'   => $base_title,
+						)
+					)
+				);
+			} finally {
+				$active_unique_label = null;
+			}
+			$draft_create_data = $draft_create_response instanceof \WP_REST_Response ? $draft_create_response->get_data() : array();
+			$draft_create_id   = (int) ( $draft_create_data['id'] ?? 0 );
+			if ( $draft_create_id > 0 ) {
+				$post_ids[] = $draft_create_id;
+			}
+			$draft_create_post = $draft_create_id > 0 ? \get_post( $draft_create_id ) : null;
+
+			$active_unique_label = 'pending-create-parent-b';
+			try {
+				$pending_create_response = $server->dispatch(
+					self::request(
+						'POST',
+						'/wp/v2/pages',
+						array(
+							'_fields' => 'id,parent,slug,status,title',
+							'context' => 'edit',
+						),
+						array(),
+						array(
+							'content' => '<p>REST pending page parent slug content ' . $case['token'] . '</p>',
+							'parent'  => $parent_b_id,
+							'slug'    => $base_slug,
+							'status'  => 'pending',
+							'title'   => $base_title,
+						)
+					)
+				);
+			} finally {
+				$active_unique_label = null;
+			}
+			$pending_create_data = $pending_create_response instanceof \WP_REST_Response ? $pending_create_response->get_data() : array();
+			$pending_create_id   = (int) ( $pending_create_data['id'] ?? 0 );
+			if ( $pending_create_id > 0 ) {
+				$post_ids[] = $pending_create_id;
+			}
+			$pending_create_post = $pending_create_id > 0 ? \get_post( $pending_create_id ) : null;
+
+			$active_unique_label = 'draft-update-omitted-parent';
+			try {
+				$draft_update_response = $server->dispatch(
+					self::request(
+						'PUT',
+						'/wp/v2/pages/' . $draft_update_id,
+						array(
+							'_fields' => 'id,parent,slug,status,title',
+							'context' => 'edit',
+						),
+						array(),
+						array(
+							'slug'   => $base_slug,
+							'status' => 'draft',
+							'title'  => $base_title,
+						)
+					)
+				);
+			} finally {
+				$active_unique_label = null;
+			}
+			$draft_update_data = $draft_update_response instanceof \WP_REST_Response ? $draft_update_response->get_data() : array();
+			$draft_update_post = $draft_update_id > 0 ? \get_post( $draft_update_id ) : null;
+
+			$active_unique_label = 'pending-update-explicit-parent';
+			try {
+				$pending_update_response = $server->dispatch(
+					self::request(
+						'PUT',
+						'/wp/v2/pages/' . $pending_update_id,
+						array(
+							'_fields' => 'id,parent,slug,status,title',
+							'context' => 'edit',
+						),
+						array(),
+						array(
+							'parent' => $parent_b_id,
+							'slug'   => $base_slug,
+							'status' => 'pending',
+							'title'  => $base_title,
+						)
+					)
+				);
+			} finally {
+				$active_unique_label = null;
+			}
+			$pending_update_data = $pending_update_response instanceof \WP_REST_Response ? $pending_update_response->get_data() : array();
+			$pending_update_post = $pending_update_id > 0 ? \get_post( $pending_update_id ) : null;
+
+			$active_unique_label = 'draft-update-explicit-root';
+			try {
+				$root_update_response = $server->dispatch(
+					self::request(
+						'PUT',
+						'/wp/v2/pages/' . $root_update_id,
+						array(
+							'_fields' => 'id,parent,slug,status,title',
+							'context' => 'edit',
+						),
+						array(),
+						array(
+							'parent' => 0,
+							'slug'   => $root_slug,
+							'status' => 'draft',
+							'title'  => 'Rest Page Root ' . $case['token'],
+						)
+					)
+				);
+			} finally {
+				$active_unique_label = null;
+			}
+			$root_update_data = $root_update_response instanceof \WP_REST_Response ? $root_update_response->get_data() : array();
+			$root_update_post = $root_update_id > 0 ? \get_post( $root_update_id ) : null;
+
+			\remove_filter( 'pre_wp_unique_post_slug', $unique_slug_filter, 10 );
+			$unique_slug_restored = false === \has_filter( 'pre_wp_unique_post_slug', $unique_slug_filter );
+
+			$edit_get_response = $server->dispatch(
+				self::request(
+					'GET',
+					'/wp/v2/pages/' . $draft_update_id,
+					array(
+						'_fields' => 'generated_slug,permalink_template,parent,slug,status',
+						'context' => 'edit',
+					)
+				)
+			);
+			$edit_get_data = $edit_get_response instanceof \WP_REST_Response ? $edit_get_response->get_data() : array();
+
+			$draft_create_events          = $events_for_label( 'draft-create-parent-a' );
+			$pending_create_events        = $events_for_label( 'pending-create-parent-b' );
+			$draft_update_events          = $events_for_label( 'draft-update-omitted-parent' );
+			$pending_update_events        = $events_for_label( 'pending-update-explicit-parent' );
+			$root_update_events           = $events_for_label( 'draft-update-explicit-root' );
+			$parent_a_holder_after        = $parent_a_holder_id > 0 ? \get_post( $parent_a_holder_id ) : null;
+			$parent_a_suffix_holder_after = $parent_a_suffix_holder_id > 0 ? \get_post( $parent_a_suffix_holder_id ) : null;
+			$parent_b_holder_after        = $parent_b_holder_id > 0 ? \get_post( $parent_b_holder_id ) : null;
+			$root_holder_after            = $root_holder_id > 0 ? \get_post( $root_holder_id ) : null;
+
+			$observed = array(
+				'fixtures' => array(
+					'parentA'             => $post_summary( $parent_a_id > 0 ? \get_post( $parent_a_id ) : null ),
+					'parentB'             => $post_summary( $parent_b_id > 0 ? \get_post( $parent_b_id ) : null ),
+					'parentAHolder'       => $post_summary( $parent_a_holder_after ),
+					'parentASuffixHolder' => $post_summary( $parent_a_suffix_holder_after ),
+					'parentBHolder'       => $post_summary( $parent_b_holder_after ),
+					'rootHolder'          => $post_summary( $root_holder_after ),
+				),
+				'responses' => array(
+					'draftCreate'   => array(
+						'status' => $draft_create_response instanceof \WP_REST_Response ? $draft_create_response->get_status() : null,
+						'data'   => $draft_create_data,
+						'stored' => $post_summary( $draft_create_post ),
+					),
+					'pendingCreate' => array(
+						'status' => $pending_create_response instanceof \WP_REST_Response ? $pending_create_response->get_status() : null,
+						'data'   => $pending_create_data,
+						'stored' => $post_summary( $pending_create_post ),
+					),
+					'draftUpdate'   => array(
+						'status' => $draft_update_response instanceof \WP_REST_Response ? $draft_update_response->get_status() : null,
+						'data'   => $draft_update_data,
+						'stored' => $post_summary( $draft_update_post ),
+					),
+					'pendingUpdate' => array(
+						'status' => $pending_update_response instanceof \WP_REST_Response ? $pending_update_response->get_status() : null,
+						'data'   => $pending_update_data,
+						'stored' => $post_summary( $pending_update_post ),
+					),
+					'rootUpdate'    => array(
+						'status' => $root_update_response instanceof \WP_REST_Response ? $root_update_response->get_status() : null,
+						'data'   => $root_update_data,
+						'stored' => $post_summary( $root_update_post ),
+					),
+					'editGet'       => array(
+						'status' => $edit_get_response instanceof \WP_REST_Response ? $edit_get_response->get_status() : null,
+						'data'   => $edit_get_data,
+					),
+				),
+				'unique'   => array(
+					'all'                   => $unique_slug_events,
+					'draftCreate'           => $draft_create_events,
+					'pendingCreate'         => $pending_create_events,
+					'draftUpdateOmitted'    => $draft_update_events,
+					'pendingUpdateExplicit' => $pending_update_events,
+					'rootUpdateExplicit'    => $root_update_events,
+				),
+				'expected' => array(
+					'baseSlug'          => $base_slug,
+					'rootSlug'          => $root_slug,
+					'parentTemplate'    => $expected_template,
+					'editGeneratedSlug' => $base_generated_slug,
+					'draftCreateSlug'   => $base_slug . '-3',
+					'pendingCreateSlug' => $base_slug . '-2',
+					'draftUpdateSlug'   => $base_slug . '-4',
+					'pendingUpdateSlug' => $base_slug . '-3',
+					'rootUpdateSlug'    => $root_slug . '-2',
+				),
+			);
+
+			self::collect_failure(
+				$failures,
+				$parent_a_id > 0
+					&& $parent_b_id > 0
+					&& $parent_a_holder_id > 0
+					&& $parent_a_suffix_holder_id > 0
+					&& $parent_b_holder_id > 0
+					&& $root_holder_id > 0
+					&& $draft_update_id > 0
+					&& $pending_update_id > 0
+					&& $root_update_id > 0
+					&& $parent_a_holder_after instanceof \WP_Post
+					&& $base_slug === $parent_a_holder_after->post_name
+					&& $parent_a_id === (int) $parent_a_holder_after->post_parent
+					&& $parent_a_suffix_holder_after instanceof \WP_Post
+					&& $base_slug . '-2' === $parent_a_suffix_holder_after->post_name
+					&& $parent_a_id === (int) $parent_a_suffix_holder_after->post_parent
+					&& $parent_b_holder_after instanceof \WP_Post
+					&& $base_slug === $parent_b_holder_after->post_name
+					&& $parent_b_id === (int) $parent_b_holder_after->post_parent
+					&& $root_holder_after instanceof \WP_Post
+					&& $root_slug === $root_holder_after->post_name
+					&& 0 === (int) $root_holder_after->post_parent,
+				'page parent slug fixtures create separate parent and root collision scopes',
+				$observed['fixtures']
+			);
+
+			self::collect_failure(
+				$failures,
+				$unique_slug_restored
+					&& 5 === count( $unique_slug_events )
+					&& $event_matches( $draft_create_events, $base_slug, 0, $parent_a_id )
+					&& $event_matches( $pending_create_events, $base_slug, 0, $parent_b_id )
+					&& $event_matches( $draft_update_events, $base_slug, $draft_update_id, $parent_a_id )
+					&& $event_matches( $pending_update_events, $base_slug, $pending_update_id, $parent_b_id )
+					&& $event_matches( $root_update_events, $root_slug, $root_update_id, 0 ),
+				'page draft/pending create and update route dispatch passes publish-status uniqueness the correct parent scope',
+				$observed['unique']
+			);
+
+			self::collect_failure(
+				$failures,
+				$draft_create_response instanceof \WP_REST_Response
+					&& 201 === $draft_create_response->get_status()
+					&& self::projected_keys_match( $draft_create_data, array( 'id', 'parent', 'slug', 'status', 'title' ) )
+					&& $base_slug . '-3' === ( $draft_create_data['slug'] ?? null )
+					&& 'draft' === ( $draft_create_data['status'] ?? null )
+					&& $parent_a_id === (int) ( $draft_create_data['parent'] ?? 0 )
+					&& $draft_create_post instanceof \WP_Post
+					&& $base_slug . '-3' === $draft_create_post->post_name
+					&& 'draft' === $draft_create_post->post_status
+					&& $parent_a_id === (int) $draft_create_post->post_parent
+					&& $pending_create_response instanceof \WP_REST_Response
+					&& 201 === $pending_create_response->get_status()
+					&& self::projected_keys_match( $pending_create_data, array( 'id', 'parent', 'slug', 'status', 'title' ) )
+					&& $base_slug . '-2' === ( $pending_create_data['slug'] ?? null )
+					&& 'pending' === ( $pending_create_data['status'] ?? null )
+					&& $parent_b_id === (int) ( $pending_create_data['parent'] ?? 0 )
+					&& $pending_create_post instanceof \WP_Post
+					&& $base_slug . '-2' === $pending_create_post->post_name
+					&& 'pending' === $pending_create_post->post_status
+					&& $parent_b_id === (int) $pending_create_post->post_parent,
+				'route-dispatched page draft and pending creates use parent-scoped slug collisions before insert',
+				array(
+					'draftCreate'   => $observed['responses']['draftCreate'],
+					'pendingCreate' => $observed['responses']['pendingCreate'],
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$draft_update_response instanceof \WP_REST_Response
+					&& 200 === $draft_update_response->get_status()
+					&& self::projected_keys_match( $draft_update_data, array( 'id', 'parent', 'slug', 'status', 'title' ) )
+					&& $base_slug . '-4' === ( $draft_update_data['slug'] ?? null )
+					&& 'draft' === ( $draft_update_data['status'] ?? null )
+					&& $parent_a_id === (int) ( $draft_update_data['parent'] ?? 0 )
+					&& $draft_update_post instanceof \WP_Post
+					&& $base_slug . '-4' === $draft_update_post->post_name
+					&& 'draft' === $draft_update_post->post_status
+					&& $parent_a_id === (int) $draft_update_post->post_parent
+					&& $pending_update_response instanceof \WP_REST_Response
+					&& 200 === $pending_update_response->get_status()
+					&& self::projected_keys_match( $pending_update_data, array( 'id', 'parent', 'slug', 'status', 'title' ) )
+					&& $base_slug . '-3' === ( $pending_update_data['slug'] ?? null )
+					&& 'pending' === ( $pending_update_data['status'] ?? null )
+					&& $parent_b_id === (int) ( $pending_update_data['parent'] ?? 0 )
+					&& $pending_update_post instanceof \WP_Post
+					&& $base_slug . '-3' === $pending_update_post->post_name
+					&& 'pending' === $pending_update_post->post_status
+					&& $parent_b_id === (int) $pending_update_post->post_parent
+					&& $root_update_response instanceof \WP_REST_Response
+					&& 200 === $root_update_response->get_status()
+					&& self::projected_keys_match( $root_update_data, array( 'id', 'parent', 'slug', 'status', 'title' ) )
+					&& $root_slug . '-2' === ( $root_update_data['slug'] ?? null )
+					&& 'draft' === ( $root_update_data['status'] ?? null )
+					&& 0 === (int) ( $root_update_data['parent'] ?? -1 )
+					&& $root_update_post instanceof \WP_Post
+					&& $root_slug . '-2' === $root_update_post->post_name
+					&& 'draft' === $root_update_post->post_status
+					&& 0 === (int) $root_update_post->post_parent,
+				'route-dispatched page draft and pending updates distinguish omitted parent, explicit parent, and explicit root slug scopes',
+				array(
+					'draftUpdate'   => $observed['responses']['draftUpdate'],
+					'pendingUpdate' => $observed['responses']['pendingUpdate'],
+					'rootUpdate'    => $observed['responses']['rootUpdate'],
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$edit_get_response instanceof \WP_REST_Response
+					&& 200 === $edit_get_response->get_status()
+					&& self::projected_keys_match( $edit_get_data, array( 'generated_slug', 'id', 'parent', 'permalink_template', 'slug', 'status' ) )
+					&& $draft_update_id === (int) ( $edit_get_data['id'] ?? 0 )
+					&& $base_slug . '-4' === ( $edit_get_data['slug'] ?? null )
+					&& $base_generated_slug === ( $edit_get_data['generated_slug'] ?? null )
+					&& $parent_a_id === (int) ( $edit_get_data['parent'] ?? 0 )
+					&& 'draft' === ( $edit_get_data['status'] ?? null )
+					&& $expected_template === ( $edit_get_data['permalink_template'] ?? null ),
+				'route-dispatched page edit response exposes parent-aware generated_slug and permalink_template',
+				$observed['responses']['editGet']
+			);
+
+			$delete_posts();
+			$counts_after_cleanup = self::content_counts();
+			$observed['counts']   = array(
+				'before' => $counts_before,
+				'after'  => $counts_after_cleanup,
+			);
+
+			self::collect_failure(
+				$failures,
+				self::content_count_delta_matches( $counts_before, $counts_after_cleanup, array(), array() ),
+				'page parent slug route dispatch cleans up all generated page fixtures',
+				$observed['counts']
+			);
+		} finally {
+			if ( false !== \has_filter( 'pre_wp_unique_post_slug', $unique_slug_filter ) ) {
+				\remove_filter( 'pre_wp_unique_post_slug', $unique_slug_filter, 10 );
+			}
+			$unique_slug_restored = false === \has_filter( 'pre_wp_unique_post_slug', $unique_slug_filter );
+
+			$delete_posts();
+
+			if ( null !== $cap_filter ) {
+				$write_filter_restored = self::remove_cap_filter( $cap_filter );
+				$cap_filter            = null;
+			} else {
+				$write_filter_restored = true;
+			}
+
+			\remove_filter( 'pre_option_permalink_structure', $permalink_filter );
+			$permalink_filter_restored = false === \has_filter( 'pre_option_permalink_structure', $permalink_filter );
+
+			if ( $previous_rewrite_set ) {
+				$GLOBALS['wp_rewrite'] = $previous_rewrite;
+			} else {
+				unset( $GLOBALS['wp_rewrite'] );
+			}
+
+			\wp_set_current_user( $previous_current_user_id );
+
+			if ( $had_wp_actions ) {
+				$GLOBALS['wp_actions'] = $previous_actions;
+			} else {
+				unset( $GLOBALS['wp_actions'] );
+			}
+
+			if ( null !== $previous_server ) {
+				$GLOBALS['wp_rest_server'] = $previous_server;
+			} else {
+				unset( $GLOBALS['wp_rest_server'] );
+			}
+
+			$rewrite_restored = $previous_rewrite_set === array_key_exists( 'wp_rewrite', $GLOBALS )
+				&& ( ! $previous_rewrite_set || $previous_rewrite === $GLOBALS['wp_rewrite'] );
+			$actions_restored = $had_wp_actions
+				? $previous_actions === ( $GLOBALS['wp_actions'] ?? null )
+				: ! array_key_exists( 'wp_actions', $GLOBALS );
+			$server_restored = null !== $previous_server
+				? $previous_server === ( $GLOBALS['wp_rest_server'] ?? null )
+				: ! array_key_exists( 'wp_rest_server', $GLOBALS );
+			$current_user_restored = $previous_current_user_id === (
+				isset( $GLOBALS['current_user'] ) && $GLOBALS['current_user'] instanceof \WP_User
+					? (int) $GLOBALS['current_user']->ID
+					: 0
+			);
+		}
+
+		self::collect_failure(
+			$failures,
+			$write_filter_restored
+				&& $permalink_filter_restored
+				&& $unique_slug_restored
+				&& $rewrite_restored
+				&& $server_restored
+				&& $actions_restored
+				&& $current_user_restored,
+			'page parent slug route dispatch restores caps, permalink, uniqueness, rewrite, server, actions, and current user',
+			array(
+				'writeFilterRestored'     => $write_filter_restored,
+				'permalinkFilterRestored' => $permalink_filter_restored,
+				'uniqueSlugRestored'      => $unique_slug_restored,
+				'rewriteRestored'         => $rewrite_restored,
+				'serverRestored'          => $server_restored,
+				'actionsRestored'         => $actions_restored,
+				'currentUserRestored'     => $current_user_restored,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'rest-object-controllers.route-dispatched-page-parent-slug-cleanup',
 			array() === $failures,
 			array(
 				'case'     => self::case_summary( $case ),

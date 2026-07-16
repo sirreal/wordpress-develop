@@ -52,6 +52,9 @@ final class ContentLifecycleSurface {
 			$rows[] = self::check_sample_permalink_numeric_archive_and_plain_html( $ctx->fork( 'sample-permalink-numeric-plain' ), $case );
 
 			self::prepare_runtime();
+			$rows[] = self::check_sample_permalink_hierarchical_page_matrix( $ctx->fork( 'sample-permalink-hierarchical-pages' ), $case );
+
+			self::prepare_runtime();
 			$rows[] = self::check_admin_post_save_orchestration( $ctx->fork( 'admin-post-save' ), $case );
 
 			self::prepare_runtime();
@@ -2056,6 +2059,517 @@ final class ContentLifecycleSurface {
 				'postIds'  => $post_ids,
 				'numeric'  => $numeric_observed,
 				'plain'    => $plain_observed,
+				'failures' => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
+	private static function check_sample_permalink_hierarchical_page_matrix( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures             = array();
+		$post_ids             = array();
+		$unique_slug_events   = array();
+		$editable_events      = array();
+		$matrix_observed      = array();
+		$html_observed        = array();
+		$active_label         = null;
+		$permalink_structure  = '/%postname%/';
+		$previous_rewrite_set = array_key_exists( 'wp_rewrite', $GLOBALS );
+		$previous_rewrite     = $GLOBALS['wp_rewrite'] ?? null;
+		$previous_user_id     = isset( $GLOBALS['current_user'] ) && $GLOBALS['current_user'] instanceof \WP_User ? (int) $GLOBALS['current_user']->ID : 0;
+		$cap_filter           = null;
+
+		$permalink_filter = static function () use ( $permalink_structure ): string {
+			return $permalink_structure;
+		};
+		$remember_post = static function ( $post_id ) use ( &$post_ids ): int {
+			if ( is_int( $post_id ) && $post_id > 0 ) {
+				$post_ids[] = $post_id;
+				return $post_id;
+			}
+
+			return 0;
+		};
+		$unique_slug_filter = static function ( $override_slug, string $slug, int $post_id, string $post_status, string $post_type, int $post_parent ) use ( &$active_label, &$unique_slug_events ) {
+			if ( null !== $active_label ) {
+				$unique_slug_events[] = array(
+					'label'    => $active_label,
+					'slug'     => $slug,
+					'postId'   => $post_id,
+					'status'   => $post_status,
+					'type'     => $post_type,
+					'parent'   => $post_parent,
+					'override' => $override_slug,
+				);
+			}
+
+			return $override_slug;
+		};
+		$editable_filter = static function ( string $slug, \WP_Post $post ) use ( &$active_label, &$editable_events ): string {
+			if ( null !== $active_label ) {
+				$editable_events[] = array(
+					'label'  => $active_label,
+					'slug'   => $slug,
+					'postId' => (int) $post->ID,
+					'status' => $post->post_status,
+					'name'   => $post->post_name,
+					'parent' => (int) $post->post_parent,
+					'filter' => $post->filter ?? null,
+				);
+			}
+
+			return $slug;
+		};
+
+		try {
+			if ( ( ! function_exists( 'get_sample_permalink' ) || ! function_exists( 'get_sample_permalink_html' ) ) && defined( 'ABSPATH' ) ) {
+				require_once ABSPATH . 'wp-admin/includes/post.php';
+			}
+
+			$GLOBALS['wp_rewrite'] = new \WP_Rewrite();
+			$GLOBALS['wp_rewrite']->permalink_structure = $permalink_structure;
+			\add_filter( 'pre_option_permalink_structure', $permalink_filter );
+			\add_filter( 'pre_wp_unique_post_slug', $unique_slug_filter, 10, 6 );
+			\add_filter( 'editable_slug', $editable_filter, 10, 2 );
+
+			$functions_available = function_exists( 'get_sample_permalink' ) && function_exists( 'get_sample_permalink_html' );
+			self::collect_failure(
+				$failures,
+				$functions_available,
+				'hierarchical sample permalink admin helpers are available',
+				array(
+					'getSamplePermalink'     => function_exists( 'get_sample_permalink' ),
+					'getSamplePermalinkHtml' => function_exists( 'get_sample_permalink_html' ),
+				)
+			);
+
+			if ( $functions_available ) {
+				$parent_slug        = 'sample-page-parent-' . $case['token'];
+				$other_parent_slug  = 'sample-page-other-parent-' . $case['token'];
+				$collision_slug     = 'sample-page-child-' . $case['token'];
+				$other_parent_slug_collision = 'sample-page-other-child-' . $case['token'];
+				$attachment_slug    = 'sample-page-attachment-' . $case['token'];
+				$child_title        = 'Hierarchical Child ' . $case['token'];
+				$child_title_slug   = \sanitize_title( $child_title );
+				$expected_template  = \home_url( '/' . $parent_slug . '/%pagename%' );
+
+				$parent_id = $remember_post(
+					\wp_insert_post(
+						\wp_slash(
+							array(
+								'post_type'    => 'page',
+								'post_title'   => 'Sample Parent ' . $case['token'],
+								'post_content' => 'Sample parent content ' . $case['token'],
+								'post_status'  => 'publish',
+								'post_name'    => $parent_slug,
+								'post_parent'  => 0,
+							)
+						),
+						true,
+						false
+					)
+				);
+				$other_parent_id = $remember_post(
+					\wp_insert_post(
+						\wp_slash(
+							array(
+								'post_type'    => 'page',
+								'post_title'   => 'Sample Other Parent ' . $case['token'],
+								'post_content' => 'Sample other parent content ' . $case['token'],
+								'post_status'  => 'publish',
+								'post_name'    => $other_parent_slug,
+								'post_parent'  => 0,
+							)
+						),
+						true,
+						false
+					)
+				);
+				$same_parent_holder_id = $remember_post(
+					\wp_insert_post(
+						\wp_slash(
+							array(
+								'post_type'    => 'page',
+								'post_title'   => 'Same Parent Holder ' . $case['token'],
+								'post_content' => 'Same parent holder content ' . $case['token'],
+								'post_status'  => 'publish',
+								'post_name'    => $collision_slug,
+								'post_parent'  => $parent_id,
+							)
+						),
+						true,
+						false
+					)
+				);
+				$same_parent_suffix_holder_id = $remember_post(
+					\wp_insert_post(
+						\wp_slash(
+							array(
+								'post_type'    => 'page',
+								'post_title'   => 'Same Parent Suffix Holder ' . $case['token'],
+								'post_content' => 'Same parent suffix holder content ' . $case['token'],
+								'post_status'  => 'publish',
+								'post_name'    => $collision_slug . '-2',
+								'post_parent'  => $parent_id,
+							)
+						),
+						true,
+						false
+					)
+				);
+				$other_parent_holder_id = $remember_post(
+					\wp_insert_post(
+						\wp_slash(
+							array(
+								'post_type'    => 'page',
+								'post_title'   => 'Other Parent Holder ' . $case['token'],
+								'post_content' => 'Other parent holder content ' . $case['token'],
+								'post_status'  => 'publish',
+								'post_name'    => $other_parent_slug_collision,
+								'post_parent'  => $other_parent_id,
+							)
+						),
+						true,
+						false
+					)
+				);
+				$attachment_holder_id = $remember_post(
+					\wp_insert_post(
+						\wp_slash(
+							array(
+								'post_type'      => 'attachment',
+								'post_title'     => 'Attachment Holder ' . $case['token'],
+								'post_mime_type' => 'image/jpeg',
+								'post_status'    => 'inherit',
+								'post_name'      => $attachment_slug,
+								'post_parent'    => $parent_id,
+								'guid'           => 'http://example.test/' . $attachment_slug . '.jpg',
+							)
+						),
+						true,
+						false
+					)
+				);
+				$title_child_id = $remember_post(
+					\wp_insert_post(
+						\wp_slash(
+							array(
+								'post_type'    => 'page',
+								'post_title'   => $child_title,
+								'post_content' => 'Title child content ' . $case['token'],
+								'post_status'  => 'draft',
+								'post_name'    => '',
+								'post_parent'  => $parent_id,
+							)
+						),
+						true,
+						false
+					)
+				);
+				$collision_child_id = $remember_post(
+					\wp_insert_post(
+						\wp_slash(
+							array(
+								'post_type'    => 'page',
+								'post_title'   => 'Collision Child ' . $case['token'],
+								'post_content' => 'Collision child content ' . $case['token'],
+								'post_status'  => 'draft',
+								'post_name'    => 'stored-collision-' . $case['token'],
+								'post_parent'  => $parent_id,
+							)
+						),
+						true,
+						false
+					)
+				);
+				$other_parent_child_id = $remember_post(
+					\wp_insert_post(
+						\wp_slash(
+							array(
+								'post_type'    => 'page',
+								'post_title'   => 'Other Parent Name Child ' . $case['token'],
+								'post_content' => 'Other parent name child content ' . $case['token'],
+								'post_status'  => 'draft',
+								'post_name'    => 'stored-other-parent-' . $case['token'],
+								'post_parent'  => $parent_id,
+							)
+						),
+						true,
+						false
+					)
+				);
+				$numeric_child_id = $remember_post(
+					\wp_insert_post(
+						\wp_slash(
+							array(
+								'post_type'    => 'page',
+								'post_title'   => 'Numeric Child ' . $case['token'],
+								'post_content' => 'Numeric child content ' . $case['token'],
+								'post_status'  => 'draft',
+								'post_name'    => 'stored-numeric-' . $case['token'],
+								'post_parent'  => $parent_id,
+							)
+						),
+						true,
+						false
+					)
+				);
+				$attachment_child_id = $remember_post(
+					\wp_insert_post(
+						\wp_slash(
+							array(
+								'post_type'    => 'page',
+								'post_title'   => 'Attachment Name Child ' . $case['token'],
+								'post_content' => 'Attachment name child content ' . $case['token'],
+								'post_status'  => 'draft',
+								'post_name'    => 'stored-attachment-' . $case['token'],
+								'post_parent'  => $parent_id,
+							)
+						),
+						true,
+						false
+					)
+				);
+
+				$matrix = array(
+					array(
+						'label'    => 'title-child',
+						'postId'   => $title_child_id,
+						'title'    => null,
+						'name'     => null,
+						'requestedSlug' => $child_title_slug,
+						'expected' => $child_title_slug,
+					),
+					array(
+						'label'    => 'same-parent-collision',
+						'postId'   => $collision_child_id,
+						'title'    => 'Collision Override ' . $case['token'],
+						'name'     => $collision_slug,
+						'requestedSlug' => $collision_slug,
+						'expected' => $collision_slug . '-3',
+					),
+					array(
+						'label'    => 'other-parent-allowed',
+						'postId'   => $other_parent_child_id,
+						'title'    => 'Other Parent Override ' . $case['token'],
+						'name'     => $other_parent_slug_collision,
+						'requestedSlug' => $other_parent_slug_collision,
+						'expected' => $other_parent_slug_collision,
+					),
+					array(
+						'label'    => 'numeric-page-slug',
+						'postId'   => $numeric_child_id,
+						'title'    => 'Numeric Override ' . $case['token'],
+						'name'     => '123',
+						'requestedSlug' => '123',
+						'expected' => '123-2',
+					),
+					array(
+						'label'    => 'attachment-same-parent-collision',
+						'postId'   => $attachment_child_id,
+						'title'    => 'Attachment Override ' . $case['token'],
+						'name'     => $attachment_slug,
+						'requestedSlug' => $attachment_slug,
+						'expected' => $attachment_slug . '-2',
+					),
+				);
+				$matrix_ok = $parent_id > 0
+					&& $other_parent_id > 0
+					&& $same_parent_holder_id > 0
+					&& $same_parent_suffix_holder_id > 0
+					&& $other_parent_holder_id > 0
+					&& $attachment_holder_id > 0;
+
+				foreach ( $matrix as $entry ) {
+					$before = $entry['postId'] > 0 ? \get_post( $entry['postId'] ) : null;
+					$sample = array();
+					$active_label = $entry['label'];
+					try {
+						$sample = null === $entry['name']
+							? ( $entry['postId'] > 0 ? \get_sample_permalink( $entry['postId'] ) : array() )
+							: ( $entry['postId'] > 0 ? \get_sample_permalink( $entry['postId'], $entry['title'], $entry['name'] ) : array() );
+					} finally {
+						$active_label = null;
+					}
+					$after = $entry['postId'] > 0 ? \get_post( $entry['postId'] ) : null;
+					$label_unique_events = array_values(
+						array_filter(
+							$unique_slug_events,
+							static function ( array $event ) use ( $entry ): bool {
+								return $entry['label'] === ( $event['label'] ?? null );
+							}
+						)
+					);
+					$label_editable_events = array_values(
+						array_filter(
+							$editable_events,
+							static function ( array $event ) use ( $entry ): bool {
+								return $entry['label'] === ( $event['label'] ?? null );
+							}
+						)
+					);
+					$unique_event  = $label_unique_events[0] ?? null;
+					$uri_event     = $label_editable_events[0] ?? null;
+					$slug_event    = $label_editable_events[1] ?? null;
+					$entry_ok      = is_array( $sample )
+						&& $expected_template === ( $sample[0] ?? null )
+						&& $entry['expected'] === ( $sample[1] ?? null )
+						&& $before instanceof \WP_Post
+						&& $after instanceof \WP_Post
+						&& 'draft' === $after->post_status
+						&& $before->post_name === $after->post_name
+						&& (int) $parent_id === (int) $after->post_parent
+						&& 1 === count( $label_unique_events )
+						&& is_array( $unique_event )
+						&& $entry['requestedSlug'] === ( $unique_event['slug'] ?? null )
+						&& $entry['postId'] === (int) ( $unique_event['postId'] ?? 0 )
+						&& 'publish' === ( $unique_event['status'] ?? null )
+						&& 'page' === ( $unique_event['type'] ?? null )
+						&& $parent_id === (int) ( $unique_event['parent'] ?? 0 )
+						&& 2 === count( $label_editable_events )
+						&& is_array( $uri_event )
+						&& $parent_slug === ( $uri_event['slug'] ?? null )
+						&& 'publish' === ( $uri_event['status'] ?? null )
+						&& 'sample' === ( $uri_event['filter'] ?? null )
+						&& is_array( $slug_event )
+						&& $entry['expected'] === ( $slug_event['slug'] ?? null )
+						&& 'publish' === ( $slug_event['status'] ?? null )
+						&& 'sample' === ( $slug_event['filter'] ?? null );
+					$matrix_ok = $matrix_ok && $entry_ok;
+					$matrix_observed[] = array(
+						'label'    => $entry['label'],
+						'sample'   => $sample,
+						'before'   => self::post_summary( $before ),
+						'after'    => self::post_summary( $after ),
+						'unique'   => $label_unique_events,
+						'editable' => $label_editable_events,
+						'ok'       => $entry_ok,
+					);
+				}
+
+				self::collect_failure(
+					$failures,
+					$matrix_ok,
+					'get_sample_permalink preserves page parent paths and parent-scoped slug uniqueness for title, collision, numeric, and attachment cases',
+					array(
+						'parent'   => $parent_id > 0 ? self::post_summary( \get_post( $parent_id ) ) : null,
+						'holders'  => array(
+							self::post_summary( \get_post( $same_parent_holder_id ) ),
+							self::post_summary( \get_post( $same_parent_suffix_holder_id ) ),
+							self::post_summary( \get_post( $other_parent_holder_id ) ),
+							self::post_summary( \get_post( $attachment_holder_id ) ),
+						),
+						'matrix'   => $matrix_observed,
+						'expected' => $expected_template,
+					)
+				);
+
+				$html_user_id = self::insert_support_user( 'page-sample-html-' . $case['token'], 'page-sample-html-' . $case['token'] . '@example.test' );
+				if ( $html_user_id > 0 ) {
+					$cap_filter = self::grant_all_caps_filter( (int) $html_user_id );
+					\wp_set_current_user( (int) $html_user_id );
+					\add_filter( 'user_has_cap', $cap_filter, 10, 4 );
+				}
+
+				$active_label = 'html-same-parent-collision';
+				try {
+					$html = $collision_child_id > 0 ? \get_sample_permalink_html( $collision_child_id, null, $collision_slug ) : '';
+				} finally {
+					$active_label = null;
+				}
+				$html_after     = $collision_child_id > 0 ? \get_post( $collision_child_id ) : null;
+				$preview_link   = $html_after instanceof \WP_Post ? \get_preview_post_link( $html_after ) : null;
+				$html_unique    = array_values(
+					array_filter(
+						$unique_slug_events,
+						static function ( array $event ): bool {
+							return 'html-same-parent-collision' === ( $event['label'] ?? null );
+						}
+					)
+				);
+				$html_editable  = array_values(
+					array_filter(
+						$editable_events,
+						static function ( array $event ): bool {
+							return 'html-same-parent-collision' === ( $event['label'] ?? null );
+						}
+					)
+				);
+				$html_observed = array(
+					'html'      => $html,
+					'preview'   => $preview_link,
+					'postAfter' => self::post_summary( $html_after ),
+					'unique'    => $html_unique,
+					'editable'  => $html_editable,
+				);
+
+				self::collect_failure(
+					$failures,
+					$html_user_id > 0
+						&& is_string( $html )
+						&& str_contains( $html, 'id="sample-permalink"' )
+						&& str_contains( $html, 'id="editable-post-name-full">' . $collision_slug . '-3</span>' )
+						&& str_contains( $html, $parent_slug . '/<span id="editable-post-name">' )
+						&& str_contains( $html, "target='wp-preview-{$collision_child_id}'" )
+						&& str_contains( $html, 'preview=true' )
+						&& $html_after instanceof \WP_Post
+						&& 'draft' === $html_after->post_status
+						&& 'stored-collision-' . $case['token'] === $html_after->post_name
+						&& 1 === count( $html_unique )
+						&& 2 === count( $html_editable ),
+					'get_sample_permalink_html renders hierarchical draft preview links with parent path display without mutating the stored page',
+					$html_observed
+				);
+			}
+		} finally {
+			if ( null !== $cap_filter ) {
+				\remove_filter( 'user_has_cap', $cap_filter, 10 );
+			}
+			\remove_filter( 'editable_slug', $editable_filter, 10 );
+			\remove_filter( 'pre_wp_unique_post_slug', $unique_slug_filter, 10 );
+			\remove_filter( 'pre_option_permalink_structure', $permalink_filter );
+			\wp_set_current_user( $previous_user_id );
+
+			if ( $previous_rewrite_set ) {
+				$GLOBALS['wp_rewrite'] = $previous_rewrite;
+			} else {
+				unset( $GLOBALS['wp_rewrite'] );
+			}
+
+			foreach ( array_reverse( array_unique( array_map( 'intval', $post_ids ) ) ) as $post_id ) {
+				if ( $post_id > 0 ) {
+					\wp_delete_post( $post_id, true );
+				}
+			}
+		}
+
+		$rewrite_restored = $previous_rewrite_set === array_key_exists( 'wp_rewrite', $GLOBALS )
+			&& ( ! $previous_rewrite_set || $previous_rewrite === $GLOBALS['wp_rewrite'] );
+		$current_user_restored = $previous_user_id === ( isset( $GLOBALS['current_user'] ) && $GLOBALS['current_user'] instanceof \WP_User ? (int) $GLOBALS['current_user']->ID : 0 );
+		$filters_restored = false === \has_filter( 'pre_option_permalink_structure', $permalink_filter )
+			&& false === \has_filter( 'pre_wp_unique_post_slug', $unique_slug_filter )
+			&& false === \has_filter( 'editable_slug', $editable_filter )
+			&& ( null === $cap_filter || false === \has_filter( 'user_has_cap', $cap_filter ) );
+
+		self::collect_failure(
+			$failures,
+			$rewrite_restored && $current_user_restored && $filters_restored,
+			'hierarchical sample permalink row restores rewrite, current user, permalink, uniqueness, editable slug, and capability filters',
+			array(
+				'rewriteRestored'     => $rewrite_restored,
+				'currentUserRestored' => $current_user_restored,
+				'filtersRestored'     => $filters_restored,
+				'postIds'             => $post_ids,
+			)
+		);
+
+		return $ctx->result(
+			'content-lifecycle.posts.sample-permalink-hierarchical-pages',
+			array() === $failures,
+			array(
+				'case'     => self::case_summary( $case ),
+				'postIds'  => $post_ids,
+				'matrix'   => $matrix_observed,
+				'html'     => $html_observed,
 				'failures' => array_slice( $failures, 0, 8 ),
 			)
 		);
