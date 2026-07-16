@@ -46,6 +46,7 @@ final class MediaMetadataSurface {
 				$rows[] = self::check_gallery_playlist_shortcode_rendering( $ctx->fork( 'gallery-playlist' ) );
 				$rows[] = self::check_attachment_metadata_get_update_helpers( $ctx->fork( 'metadata' ), $temp_root );
 				$rows[] = self::check_generated_metadata_replacement_oracles( $ctx->fork( 'metadata-shapes' ), $temp_root );
+				$rows[] = self::check_generated_metadata_shortcode_cache_coherence( $ctx->fork( 'shortcode-cache' ), $temp_root );
 				$rows[] = self::check_original_image_metadata_helpers( $ctx->fork( 'original-image' ), $temp_root );
 				$rows[] = self::check_generate_attachment_metadata_branches( $ctx->fork( 'generate' ), $temp_root );
 				$rows[] = self::check_generate_attachment_cover_creation_reuse( $ctx->fork( 'cover-art' ), $temp_root );
@@ -2016,6 +2017,417 @@ final class MediaMetadataSurface {
 		);
 	}
 
+	private static function check_generated_metadata_shortcode_cache_coherence( \ComponentFuzz\FuzzContext $ctx, string $temp_root ): array {
+		$failures               = array();
+		$runtime_snapshot       = self::snapshot_media_shortcode_runtime();
+		$previous_post_set      = array_key_exists( 'post', $GLOBALS );
+		$previous_post          = $GLOBALS['post'] ?? null;
+		$previous_wp_query_set  = array_key_exists( 'wp_query', $GLOBALS );
+		$previous_wp_query      = $GLOBALS['wp_query'] ?? null;
+		$footer_template_before = \has_action( 'wp_footer', 'wp_underscore_playlist_templates' );
+		$admin_template_before  = \has_action( 'admin_footer', 'wp_underscore_playlist_templates' );
+		$upload_root            = $temp_root . DIRECTORY_SEPARATOR . 'shortcode-cache-uploads';
+		$upload_url             = 'http://example.test/component-fuzz-media-shortcode-cache-' . $ctx->int( 1000, 9999 );
+		$base_id                = 876000 + ( $ctx->iteration() * 100 );
+		$parent_id              = $base_id + 1;
+		$ids                    = array(
+			'image' => $base_id + 11,
+			'audio' => $base_id + 21,
+			'video' => $base_id + 31,
+		);
+		$metadata               = array();
+		$events                 = array(
+			'get'     => array(),
+			'queries' => array(),
+			'scripts' => array(),
+		);
+		$attached_file_updated  = array();
+		$first_updated          = array();
+		$first_prime            = array();
+		$second_updated         = array();
+		$second_prime           = array();
+		$gallery                = '';
+		$audio_playlist         = '';
+		$video_playlist         = '';
+		$audio_data             = array();
+		$video_data             = array();
+		$state_before_render    = array();
+		$state_after_render     = array();
+
+		\ComponentFuzz\ensure_dir( $upload_root );
+		self::seed_post_cache(
+			$parent_id,
+			array(
+				'post_title' => 'Metadata shortcode cache host ' . $ctx->identifier( 4, 8 ),
+				'post_name'  => 'metadata-shortcode-cache-' . $ctx->iteration(),
+			)
+		);
+
+		$cases = array();
+		foreach ( self::generated_metadata_cases( $ctx->fork( 'shortcode-cache-cases' ), $temp_root, $upload_root, $upload_url ) as $case ) {
+			$cases[ $case['kind'] ] = $case;
+		}
+
+		foreach ( $ids as $kind => $attachment_id ) {
+			$case     = $cases[ $kind ];
+			$case_ctx = $ctx->fork( 'shortcode-cache-' . $kind );
+			$path     = self::write_fixture( $case['fixtureDir'], $case['filename'], self::media_fixture_bytes( $case_ctx, $kind ) );
+
+			if ( null === $path ) {
+				self::collect_failure( $failures, false, 'shortcode cache fixture is writable', $case );
+				continue;
+			}
+
+			self::seed_attachment_post(
+				$attachment_id,
+				$case['mime'],
+				$case['attachedFile'],
+				array(
+					'post_parent'  => $parent_id,
+					'post_title'   => ucfirst( $kind ) . ' shortcode cache ' . $case_ctx->identifier( 3, 6 ),
+					'post_excerpt' => ucfirst( $kind ) . ' caption ' . $case_ctx->identifier( 3, 6 ),
+					'post_content' => ucfirst( $kind ) . ' description <tag> ' . $case_ctx->identifier( 3, 6 ),
+					'menu_order'   => array_search( $kind, array_keys( $ids ), true ) + 1,
+				)
+			);
+
+			$first  = self::generated_attachment_metadata( $case_ctx->fork( 'first' ), $kind, $case['relativeFile'], $case['mime'], filesize( $path ), 'first' );
+			$second = self::generated_attachment_metadata( $case_ctx->fork( 'second' ), $kind, $case['relativeFile'], $case['mime'], filesize( $path ), 'second' );
+
+			if ( 'image' === $kind ) {
+				$first_size  = reset( $first['sizes'] );
+				$second_size = reset( $second['sizes'] );
+				$first_size  = is_array( $first_size ) ? $first_size : array();
+				$second_size = is_array( $second_size ) ? $second_size : array();
+
+				$first_size['file']  = 'first-' . ( $first_size['file'] ?? basename( $case['relativeFile'] ) );
+				$second_size['file'] = 'second-' . ( $second_size['file'] ?? basename( $case['relativeFile'] ) );
+				$first['sizes']      = array( 'thumbnail' => $first_size );
+				$second['sizes']     = array( 'thumbnail' => $second_size );
+
+				$metadata['imageSizeKey']        = 'thumbnail';
+				$metadata['firstImageSizeFile']  = $first_size['file'];
+				$metadata['secondImageSizeFile'] = $second_size['file'];
+			} elseif ( 'audio' === $kind ) {
+				$first['artist']            = 'Component Artist first cache ' . $case_ctx->identifier( 3, 6 );
+				$first['album']             = 'Component Album first cache ' . $case_ctx->identifier( 3, 6 );
+				$first['length_formatted']  = '01:11';
+				$second['artist']           = 'Component Artist second cache ' . $case_ctx->identifier( 3, 6 );
+				$second['album']            = 'Component Album second cache ' . $case_ctx->identifier( 3, 6 );
+				$second['length_formatted'] = '09:08';
+			} elseif ( 'video' === $kind ) {
+				$first['width']             = 640;
+				$first['height']            = 360;
+				$first['length_formatted']  = '02:20';
+				$second['width']            = 1280;
+				$second['height']           = 720;
+				$second['length_formatted'] = '04:40';
+			}
+
+			$metadata[ $kind ] = array(
+				'case'   => $case,
+				'first'  => $first,
+				'second' => $second,
+			);
+		}
+
+		$upload_filter = static function ( array $uploads ) use ( $upload_root, $upload_url ): array {
+			$uploads['basedir'] = $upload_root;
+			$uploads['baseurl'] = $upload_url;
+			$uploads['path']    = $upload_root;
+			$uploads['url']     = $upload_url;
+			$uploads['subdir']  = '';
+			$uploads['error']   = false;
+			return $uploads;
+		};
+		$query_filter  = static function ( $posts, \WP_Query $query ) use ( &$events, $ids ) {
+			$vars = $query->query_vars;
+			if ( 'attachment' !== ( $vars['post_type'] ?? null ) ) {
+				return $posts;
+			}
+
+			$mime_group = $vars['post_mime_type'] ?? '';
+			if ( ! in_array( $mime_group, array( 'image', 'audio', 'video' ), true ) ) {
+				return $posts;
+			}
+
+			$post__in    = array_map( 'intval', (array) ( $vars['post__in'] ?? array() ) );
+			$selected    = array();
+			$selected_id = $ids[ $mime_group ] ?? 0;
+			if ( $selected_id && ( array() === $post__in || in_array( $selected_id, $post__in, true ) ) ) {
+				$post = \get_post( $selected_id );
+				if ( $post instanceof \WP_Post ) {
+					$selected[] = $post;
+				}
+			}
+
+			$events['queries'][] = array(
+				'mime'        => $mime_group,
+				'postIn'      => $post__in,
+				'selectedIds' => array_map( 'intval', \wp_list_pluck( $selected, 'ID' ) ),
+				'orderby'     => $vars['orderby'] ?? null,
+			);
+
+			$query->found_posts   = count( $selected );
+			$query->max_num_pages = $selected ? 1 : 0;
+			return $selected;
+		};
+		$get_filter    = static function ( $data, int $post_id ) use ( &$events, $ids ) {
+			if ( in_array( $post_id, $ids, true ) ) {
+				$events['get'][] = array(
+					'id'    => $post_id,
+					'type'  => gettype( $data ),
+					'label' => is_array( $data ) ? ( $data['component_fuzz_generation'] ?? null ) : null,
+				);
+			}
+
+			return $data;
+		};
+		$playlist_scripts_action = static function ( string $type, string $style ) use ( &$events ): void {
+			$events['scripts'][] = array(
+				'type'  => $type,
+				'style' => $style,
+			);
+		};
+		$auto_sizes_filter       = static function (): bool {
+			return false;
+		};
+		$loading_filter          = static function (): array {
+			return array();
+		};
+
+		\add_filter( 'upload_dir', $upload_filter );
+		\add_filter( 'posts_pre_query', $query_filter, 10, 2 );
+		\add_filter( 'wp_get_attachment_metadata', $get_filter, 10, 2 );
+		\add_action( 'wp_playlist_scripts', $playlist_scripts_action, 1, 2 );
+		\add_filter( 'wp_img_tag_add_auto_sizes', $auto_sizes_filter );
+		\add_filter( 'pre_wp_get_loading_optimization_attributes', $loading_filter, 10, 4 );
+
+		try {
+			$GLOBALS['post']          = \get_post( $parent_id );
+			$GLOBALS['wp_query']      = new \WP_Query();
+			$GLOBALS['content_width'] = 422;
+
+			foreach ( $ids as $kind => $attachment_id ) {
+				if ( ! isset( $metadata[ $kind ] ) ) {
+					continue;
+				}
+
+				// The seeded attachment meta starts cache-only; persist the file path before metadata updates flush the cache.
+				\wp_cache_delete( $attachment_id, 'post_meta' );
+				$attached_file_updated[ $kind ] = \update_post_meta( $attachment_id, '_wp_attached_file', $metadata[ $kind ]['case']['attachedFile'] );
+				$first_updated[ $kind ]  = \wp_update_attachment_metadata( $attachment_id, $metadata[ $kind ]['first'] );
+				$first_prime[ $kind ]    = \wp_get_attachment_metadata( $attachment_id, true );
+				$second_updated[ $kind ] = \wp_update_attachment_metadata( $attachment_id, $metadata[ $kind ]['second'] );
+				$second_prime[ $kind ]   = \wp_get_attachment_metadata( $attachment_id, true );
+			}
+
+			$state_before_render = self::shortcode_metadata_state( $ids );
+			$gallery             = \gallery_shortcode(
+				array(
+					'ids'     => (string) $ids['image'],
+					'link'    => 'file',
+					'size'    => (string) ( $metadata['imageSizeKey'] ?? 'thumbnail' ),
+					'columns' => 1,
+				)
+			);
+			$audio_playlist      = \wp_playlist_shortcode(
+				array(
+					'ids'          => (string) $ids['audio'],
+					'type'         => 'audio',
+					'images'       => '0',
+					'artists'      => '1',
+					'tracklist'    => '1',
+					'tracknumbers' => '0',
+				)
+			);
+			$video_playlist      = \wp_playlist_shortcode(
+				array(
+					'ids'     => (string) $ids['video'],
+					'type'    => 'video',
+					'images'  => '0',
+					'artists' => '1',
+				)
+			);
+			$audio_data          = self::media_playlist_json_data( is_string( $audio_playlist ) ? $audio_playlist : '' );
+			$video_data          = self::media_playlist_json_data( is_string( $video_playlist ) ? $video_playlist : '' );
+			$state_after_render  = self::shortcode_metadata_state( $ids );
+		} finally {
+			\remove_filter( 'pre_wp_get_loading_optimization_attributes', $loading_filter, 10 );
+			\remove_filter( 'wp_img_tag_add_auto_sizes', $auto_sizes_filter, 10 );
+			\remove_action( 'wp_playlist_scripts', $playlist_scripts_action, 1 );
+			\remove_filter( 'wp_get_attachment_metadata', $get_filter, 10 );
+			\remove_filter( 'posts_pre_query', $query_filter, 10 );
+			\remove_filter( 'upload_dir', $upload_filter );
+
+			if ( false === $footer_template_before && false !== \has_action( 'wp_footer', 'wp_underscore_playlist_templates' ) ) {
+				\remove_action( 'wp_footer', 'wp_underscore_playlist_templates', 0 );
+			}
+			if ( false === $admin_template_before && false !== \has_action( 'admin_footer', 'wp_underscore_playlist_templates' ) ) {
+				\remove_action( 'admin_footer', 'wp_underscore_playlist_templates', 0 );
+			}
+
+			if ( $previous_post_set ) {
+				$GLOBALS['post'] = $previous_post;
+			} else {
+				unset( $GLOBALS['post'] );
+			}
+			if ( $previous_wp_query_set ) {
+				$GLOBALS['wp_query'] = $previous_wp_query;
+			} else {
+				unset( $GLOBALS['wp_query'] );
+			}
+			self::restore_media_shortcode_runtime( $runtime_snapshot );
+		}
+
+		$footer_template_after = \has_action( 'wp_footer', 'wp_underscore_playlist_templates' );
+		$admin_template_after  = \has_action( 'admin_footer', 'wp_underscore_playlist_templates' );
+		$second_image_file     = (string) ( $metadata['secondImageSizeFile'] ?? '' );
+		$first_image_file      = (string) ( $metadata['firstImageSizeFile'] ?? '' );
+		$audio_json            = \wp_json_encode( $audio_data );
+		$video_json            = \wp_json_encode( $video_data );
+		$theme_width           = 400;
+		$expected_video_height = isset( $metadata['video']['second']['height'], $metadata['video']['second']['width'] )
+			? (int) round( ( $metadata['video']['second']['height'] * $theme_width ) / $metadata['video']['second']['width'] )
+			: null;
+
+		self::collect_failure(
+			$failures,
+			array_keys( $ids ) === array_keys( $first_updated )
+				&& array_keys( $ids ) === array_keys( $second_updated )
+				&& ! in_array( false, $first_updated, true )
+				&& ! in_array( false, $second_updated, true )
+				&& 'first' === ( $first_prime['image']['component_fuzz_generation'] ?? null )
+				&& 'first' === ( $first_prime['audio']['component_fuzz_generation'] ?? null )
+				&& 'first' === ( $first_prime['video']['component_fuzz_generation'] ?? null )
+				&& 'second' === ( $second_prime['image']['component_fuzz_generation'] ?? null )
+				&& 'second' === ( $second_prime['audio']['component_fuzz_generation'] ?? null )
+				&& 'second' === ( $second_prime['video']['component_fuzz_generation'] ?? null )
+				&& ! array_key_exists( 'component_fuzz_stale_top', $second_prime['image'] ?? array() )
+				&& ! array_key_exists( 'component_fuzz_stale_top', $second_prime['audio'] ?? array() )
+				&& ! array_key_exists( 'component_fuzz_stale_top', $second_prime['video'] ?? array() ),
+			'second generated metadata updates replace primed first-generation cache entries',
+			array(
+				'attachedFileUpdated' => $attached_file_updated,
+				'firstUpdated'        => $first_updated,
+				'secondUpdated'       => $second_updated,
+				'firstPrime'          => $first_prime,
+				'secondPrime'         => $second_prime,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			is_string( $gallery )
+				&& '' !== $second_image_file
+				&& str_contains( $gallery, $second_image_file )
+				&& ( '' === $first_image_file || ! str_contains( $gallery, $first_image_file ) )
+				&& str_contains( $gallery, 'gallery-icon' )
+				&& self::media_shortcode_markup_has_no_raw_payload( $gallery ),
+			'gallery shortcode consumes the second generated image sub-size after metadata cache replacement',
+			array(
+				'gallery'         => self::describe_string( is_string( $gallery ) ? $gallery : '' ),
+				'firstSizeFile'   => $first_image_file,
+				'secondSizeFile'  => $second_image_file,
+				'secondImageMeta' => $second_prime['image'] ?? null,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			is_string( $audio_playlist )
+				&& is_string( $audio_json )
+				&& 1 === count( $audio_data['tracks'] ?? array() )
+				&& ( $metadata['audio']['second']['artist'] ?? null ) === ( $audio_data['tracks'][0]['meta']['artist'] ?? null )
+				&& ( $metadata['audio']['second']['album'] ?? null ) === ( $audio_data['tracks'][0]['meta']['album'] ?? null )
+				&& ( $metadata['audio']['second']['length_formatted'] ?? null ) === ( $audio_data['tracks'][0]['meta']['length_formatted'] ?? null )
+				&& ! str_contains( $audio_json, (string) ( $metadata['audio']['first']['artist'] ?? 'Component Artist first' ) )
+				&& ! str_contains( $audio_json, (string) ( $metadata['audio']['first']['album'] ?? 'Component Album first' ) )
+				&& self::media_playlist_markup_has_no_raw_payload( $audio_playlist ),
+			'audio playlist JSON consumes second generated ID3 metadata and drops stale first-generation fields',
+			array(
+				'playlist' => self::describe_string( is_string( $audio_playlist ) ? $audio_playlist : '' ),
+				'data'     => $audio_data,
+				'first'    => $metadata['audio']['first'] ?? null,
+				'second'   => $metadata['audio']['second'] ?? null,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			is_string( $video_playlist )
+				&& is_string( $video_json )
+				&& 1 === count( $video_data['tracks'] ?? array() )
+				&& ( $metadata['video']['second']['width'] ?? null ) === ( $video_data['tracks'][0]['dimensions']['original']['width'] ?? null )
+				&& ( $metadata['video']['second']['height'] ?? null ) === ( $video_data['tracks'][0]['dimensions']['original']['height'] ?? null )
+				&& $theme_width === ( $video_data['tracks'][0]['dimensions']['resized']['width'] ?? null )
+				&& $expected_video_height === ( $video_data['tracks'][0]['dimensions']['resized']['height'] ?? null )
+				&& ! str_contains( $video_json, '"width":640' )
+				&& ! str_contains( $video_json, '"height":360' )
+				&& self::media_playlist_markup_has_no_raw_payload( $video_playlist ),
+			'video playlist JSON consumes second generated dimensions and constrains resized dimensions to content width',
+			array(
+				'playlist'            => self::describe_string( is_string( $video_playlist ) ? $video_playlist : '' ),
+				'data'                => $video_data,
+				'expectedVideoHeight' => $expected_video_height,
+				'second'              => $metadata['video']['second'] ?? null,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$state_before_render === $state_after_render,
+			'gallery and playlist shortcode reads do not mutate attachment metadata or content rows',
+			array(
+				'before' => $state_before_render,
+				'after'  => $state_after_render,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			false === \has_filter( 'upload_dir', $upload_filter )
+				&& false === \has_filter( 'posts_pre_query', $query_filter )
+				&& false === \has_filter( 'wp_get_attachment_metadata', $get_filter )
+				&& false === \has_action( 'wp_playlist_scripts', $playlist_scripts_action )
+				&& false === \has_filter( 'wp_img_tag_add_auto_sizes', $auto_sizes_filter )
+				&& false === \has_filter( 'pre_wp_get_loading_optimization_attributes', $loading_filter )
+				&& $footer_template_before === $footer_template_after
+				&& $admin_template_before === $admin_template_after
+				&& self::media_shortcode_runtime_matches( $runtime_snapshot )
+				&& in_array( 'image', array_column( $events['queries'], 'mime' ), true )
+				&& in_array( 'audio', array_column( $events['queries'], 'mime' ), true )
+				&& in_array( 'video', array_column( $events['queries'], 'mime' ), true ),
+			'shortcode cache-coherence filters, media globals, and playlist template actions are restored',
+			array(
+				'events'       => $events,
+				'footerBefore' => $footer_template_before,
+				'footerAfter'  => $footer_template_after,
+				'adminBefore'  => $admin_template_before,
+				'adminAfter'   => $admin_template_after,
+				'filters'      => array(
+					'uploadDir' => \has_filter( 'upload_dir', $upload_filter ),
+					'query'     => \has_filter( 'posts_pre_query', $query_filter ),
+					'metadata'  => \has_filter( 'wp_get_attachment_metadata', $get_filter ),
+					'scripts'   => \has_action( 'wp_playlist_scripts', $playlist_scripts_action ),
+					'autoSizes' => \has_filter( 'wp_img_tag_add_auto_sizes', $auto_sizes_filter ),
+					'loading'   => \has_filter( 'pre_wp_get_loading_optimization_attributes', $loading_filter ),
+				),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'media-metadata.generated-metadata-shortcode-cache-coherence',
+			array() === $failures,
+			array(
+				'ids'      => $ids,
+				'events'   => $events,
+				'failures' => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
 	private static function check_original_image_metadata_helpers( \ComponentFuzz\FuzzContext $ctx, string $temp_root ): array {
 		$failures        = array();
 		$events          = array(
@@ -3219,6 +3631,22 @@ final class MediaMetadataSurface {
 		}
 
 		return array();
+	}
+
+	private static function shortcode_metadata_state( array $attachment_ids ): array {
+		$metadata = array();
+		$attached = array();
+
+		foreach ( $attachment_ids as $kind => $attachment_id ) {
+			$metadata[ $kind ] = \wp_get_attachment_metadata( (int) $attachment_id, true );
+			$attached[ $kind ] = \get_attached_file( (int) $attachment_id, true );
+		}
+
+		return array(
+			'content'  => self::content_counts(),
+			'metadata' => $metadata,
+			'attached' => $attached,
+		);
 	}
 
 	private static function write_fixture( string $dir, string $filename, string $bytes ): ?string {

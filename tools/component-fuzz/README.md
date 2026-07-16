@@ -564,9 +564,11 @@ database, network requests, or a configured site.
   script hooks, protected-parent fail-closed behavior, `wp_attachment_is()`
   MIME/extension branches, image/document classification, MIME/extension
   disagreement, wrapper behavior, attachment metadata get/update/delete filter
-  contracts, original-image path/URL and image-meta matching normalization
-  across seeded upload storage styles, and `wp_generate_attachment_metadata()`
-  audio/video cover attachment creation/reuse and no-cover skip behavior.
+  contracts, generated metadata replacement and gallery/playlist shortcode cache
+  coherence/no-mutation checks, original-image path/URL and image-meta matching
+  normalization across seeded upload storage styles, and
+  `wp_generate_attachment_metadata()` audio/video cover attachment
+  creation/reuse and no-cover skip behavior.
 - `media-remote`: no-live-network remote media helper coverage for
   `download_url()`, `media_sideload_image()`, and selected
   `media_handle_sideload()` branches, including HTTP short-circuit fixtures,
@@ -1126,10 +1128,13 @@ in-memory stub attachments only; it does not download remote media, invoke
 codecs or external binaries, or persist attachments outside the stub/temp upload
 harness. Its `wp_generate_attachment_metadata()` coverage enables audio/video
 thumbnail support only inside a scoped row to exercise cover attachment
-creation/reuse and cleanup. Its shortcode rendering coverage stays on direct
-shortcode helper calls with generated local-looking URLs, cache-seeded
-gallery/playlist attachments, `posts_pre_query` short-circuits, and scoped
-filter/script/style cleanup, not browser playback. The
+creation/reuse and cleanup. Generated metadata replacement coverage also
+asserts gallery/playlist shortcode cache coherence, stale-field removal, and
+read-only shortcode no-mutation behavior through in-memory image/audio/video
+attachments. Its shortcode rendering coverage stays on direct shortcode helper
+calls with generated local-looking URLs, cache-seeded gallery/playlist
+attachments, `posts_pre_query` short-circuits, and scoped filter/script/style
+cleanup, not browser playback. The
 `image-metadata` surface complements that audio/video coverage with generated
 local image byte fixtures and repo-local Core image fixture replays. It does not
 invoke image codecs, live uploads, remote media, or attachment persistence;
