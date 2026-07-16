@@ -6796,6 +6796,23 @@ final class RestObjectControllersSurface {
 						false
 					)
 				);
+				$denied_update_id = $remember_post(
+					\wp_insert_post(
+						\wp_slash(
+							array(
+								'post_type'    => $post_type,
+								'post_title'   => 'REST Parent Denied Update ' . $token,
+								'post_content' => 'REST parent denied update ' . $token,
+								'post_status'  => 'publish',
+								'post_name'    => 'rest-parent-denied-update-' . $token,
+								'post_author'  => $fixtures['author'],
+								'post_parent'  => $same_parent_id,
+							)
+						),
+						true,
+						false
+					)
+				);
 				$force_parent( $unrelated_loop_a_id, $unrelated_loop_b_id );
 				$force_parent( $unrelated_loop_b_id, $unrelated_loop_a_id );
 
@@ -7026,6 +7043,41 @@ final class RestObjectControllersSurface {
 				$after_unrelated_loop_b           = $unrelated_loop_b_id > 0 ? \get_post( $unrelated_loop_b_id ) : null;
 				$after_unrelated_update           = $unrelated_update_id > 0 ? \get_post( $unrelated_update_id ) : null;
 
+				$denial_cap_filter_removed = false;
+				if ( null !== $cap_filter ) {
+					$denial_cap_filter_removed = self::remove_cap_filter( $cap_filter );
+					$cap_filter                = null;
+				}
+				$before_denied_update  = $denied_update_id > 0 ? \get_post( $denied_update_id ) : null;
+				$denied_update_response = self::dispatch_with_rest_post_dispatch(
+					$server,
+					self::request(
+						'PUT',
+						'/wp/v2/' . $rest_base . '/' . $denied_update_id,
+						array(
+							'_fields' => 'id,parent,slug,status,link,_links',
+							'context' => 'edit',
+						),
+						array(),
+						array(
+							'parent' => $page_parent_id,
+						)
+					)
+				);
+				$after_denied_update = $denied_update_id > 0 ? \get_post( $denied_update_id ) : null;
+				$denied_update_prepare_events = array_values(
+					array_filter(
+						$prepare_events,
+						static fn ( array $event ): bool => $denied_update_id === (int) ( $event['id'] ?? 0 )
+					)
+				);
+				$denied_update_hierarchy_events = array_values(
+					array_filter(
+						$hierarchy_events,
+						static fn ( array $event ): bool => $denied_update_id === (int) ( $event['postId'] ?? 0 )
+					)
+				);
+
 				$response_keys              = array( 'id', 'link', 'parent', 'slug', 'status' );
 				$query_link                 = static function ( string $path ) use ( $query_var ): string {
 					return \home_url( '?' . $query_var . '=' . $path );
@@ -7061,6 +7113,7 @@ final class RestObjectControllersSurface {
 						'unrelatedLoopA' => $post_summary( \get_post( $unrelated_loop_a_id ) ),
 						'unrelatedLoopB' => $post_summary( \get_post( $unrelated_loop_b_id ) ),
 						'unrelatedUpdate' => $post_summary( \get_post( $unrelated_update_id ) ),
+						'deniedUpdate'   => $post_summary( \get_post( $denied_update_id ) ),
 					),
 					'responses' => array(
 						'invalidCreate' => $invalid_create_response,
@@ -7105,6 +7158,15 @@ final class RestObjectControllersSurface {
 						),
 						'invalidUpdate' => $invalid_update_response,
 						'afterInvalid'  => $post_summary( $after_invalid_update ),
+						'deniedUpdate'  => array(
+							'status'            => $denied_update_response instanceof \WP_REST_Response ? $denied_update_response->get_status() : null,
+							'data'              => $denied_update_response instanceof \WP_REST_Response ? $denied_update_response->get_data() : null,
+							'before'            => $post_summary( $before_denied_update ),
+							'after'             => $post_summary( $after_denied_update ),
+							'capFilterRemoved'  => $denial_cap_filter_removed,
+							'prepareEvents'     => $denied_update_prepare_events,
+							'hierarchyEvents'   => $denied_update_hierarchy_events,
+						),
 					),
 					'prepareEvents' => $prepare_events,
 					'hierarchyEvents' => $hierarchy_events,
@@ -7137,6 +7199,7 @@ final class RestObjectControllersSurface {
 						&& $unrelated_loop_a_id > 0
 						&& $unrelated_loop_b_id > 0
 						&& $unrelated_update_id > 0
+						&& $denied_update_id > 0
 						&& self::response_error_ok( $invalid_create_response, 'rest_post_invalid_id', 400 )
 						&& self::content_count_delta_matches( $counts_before_invalid_create, $counts_after_invalid_create, array(), array() ),
 					'custom hierarchical parent assignment rejects missing parent IDs before insertion',
@@ -7343,6 +7406,22 @@ final class RestObjectControllersSurface {
 						'unrelatedLoopBreakUpdate' => $observed['responses']['unrelatedLoopBreakUpdate'],
 						'hierarchyEvents'          => $hierarchy_events,
 						'expected'                 => $observed['expected'],
+					)
+				);
+
+				self::collect_failure(
+					$failures,
+					$denial_cap_filter_removed
+						&& self::response_error_ok( $denied_update_response, 'rest_cannot_edit', 403 )
+						&& $before_denied_update instanceof \WP_Post
+						&& $after_denied_update instanceof \WP_Post
+						&& $same_parent_id === (int) $before_denied_update->post_parent
+						&& $same_parent_id === (int) $after_denied_update->post_parent
+						&& array() === $denied_update_prepare_events
+						&& array() === $denied_update_hierarchy_events,
+					'custom hierarchical route-dispatched capability-denied parent update preserves storage and skips mutation hooks',
+					array(
+						'deniedUpdate' => $observed['responses']['deniedUpdate'],
 					)
 				);
 
