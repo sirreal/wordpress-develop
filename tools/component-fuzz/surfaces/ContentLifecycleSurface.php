@@ -43,6 +43,9 @@ final class ContentLifecycleSurface {
 			$rows[] = self::check_admin_post_save_orchestration( $ctx->fork( 'admin-post-save' ), $case );
 
 			self::prepare_runtime();
+			$rows[] = self::check_admin_bulk_post_edit_lifecycle( $ctx->fork( 'admin-bulk-post-edit' ), $case );
+
+			self::prepare_runtime();
 			$rows[] = self::check_page_lookup_helpers( $ctx->fork( 'page-lookups' ), $case );
 
 			self::prepare_runtime();
@@ -83,13 +86,17 @@ final class ContentLifecycleSurface {
 
 		foreach (
 			array(
+				'_x',
+				'absint',
 				'add_action',
 				'add_filter',
 				'add_meta',
 				'add_post_meta',
+				'bulk_edit_posts',
 				'clean_bookmark_cache',
 				'clean_post_cache',
 				'clean_user_cache',
+				'current_time',
 				'current_user_can',
 				'create_initial_post_types',
 				'create_initial_taxonomies',
@@ -110,11 +117,14 @@ final class ContentLifecycleSurface {
 				'get_post_meta_by_id',
 				'get_post_mime_types',
 				'get_post_thumbnail_id',
+				'get_post_format',
 				'get_post_stati',
 				'get_post_status_object',
 				'get_post',
+				'get_post_type',
 				'get_post_type_object',
 				'get_posts',
+				'get_object_taxonomies',
 				'get_children',
 				'get_page_by_path',
 				'get_page_children',
@@ -131,12 +141,14 @@ final class ContentLifecycleSurface {
 				'has_post_thumbnail',
 				'has_term',
 				'is_object_in_term',
+				'is_taxonomy_hierarchical',
 				'is_user_logged_in',
 				'is_wp_error',
 				'metadata_exists',
 				'post_type_exists',
 				'post_type_supports',
 				'get_permalink',
+				'get_option',
 				'get_current_user_id',
 				'wp_get_ext_types',
 				'wp_get_mime_types',
@@ -153,6 +165,8 @@ final class ContentLifecycleSurface {
 				'sanitize_user',
 				'set_post_type',
 				'set_post_thumbnail',
+				'set_post_format',
+				'stick_post',
 				'term_exists',
 				'the_post_thumbnail',
 				'the_post_thumbnail_caption',
@@ -167,9 +181,11 @@ final class ContentLifecycleSurface {
 				'wp_delete_link',
 				'wp_delete_comment',
 				'wp_delete_term',
+				'wp_die',
 				'wp_delete_user',
 				'wp_delete_object_term_relationships',
 				'wp_delete_post',
+				'wp_get_post_categories',
 				'wp_get_object_terms',
 				'wp_get_attachment_caption',
 				'wp_get_attachment_image',
@@ -193,6 +209,8 @@ final class ContentLifecycleSurface {
 				'wp_clear_scheduled_hook',
 				'wp_next_scheduled',
 				'wp_update_term',
+				'unstick_post',
+				'update_option',
 				'username_exists',
 				'update_post_meta',
 				'update_meta',
@@ -768,6 +786,334 @@ final class ContentLifecycleSurface {
 				'failures'       => array_slice( $failures, 0, 8 ),
 				'events'         => array_slice( $events, 0, 18 ),
 				'taxonomyEvents' => $taxonomy_events,
+			)
+		);
+	}
+
+	private static function check_admin_bulk_post_edit_lifecycle( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures         = array();
+		$post_events      = array();
+		$bulk_events      = array();
+		$hooks            = array();
+		$bulk_hooks       = array();
+		$cap_filter       = null;
+		$post_snapshot    = $_POST;
+		$get_snapshot     = $_GET;
+		$request_snapshot = $_REQUEST;
+		$token            = $case['token'];
+		$missing_id       = 987654321;
+		$original_date    = '2020-01-02 03:04:05';
+		$bulk_title       = self::usable_name( $case['updatedTitle'], 'Bulk Edited ' . $token );
+		$bulk_content     = self::usable_content( $case['updatedContent'], 'Bulk content ' . $token );
+		$bulk_excerpt     = self::usable_content( $case['excerpt'], 'Bulk excerpt ' . $token );
+		$hooks_removed    = false;
+
+		try {
+			$editor_id = self::insert_support_user( 'bulk-editor-' . $token, 'bulk-editor-' . $token . '@example.test' );
+			$author_id = self::insert_support_user( 'bulk-author-' . $token, 'bulk-author-' . $token . '@example.test' );
+			$locker_id = self::insert_support_user( 'bulk-locker-' . $token, 'bulk-locker-' . $token . '@example.test' );
+
+			\wp_set_current_user( $editor_id );
+			$cap_filter = self::grant_all_caps_filter( $editor_id );
+			\add_filter( 'user_has_cap', $cap_filter, 10, 4 );
+
+			$original_cat      = \wp_insert_term( 'Bulk Original ' . $token, 'category', array( 'slug' => 'bulk-original-' . $token ) );
+			$bulk_cat          = \wp_insert_term( 'Bulk Category ' . $token, 'category', array( 'slug' => 'bulk-category-' . $token ) );
+			$original_tag_name = 'Bulk Original Tag ' . $token;
+			$bulk_tag_name     = 'Bulk Tag ' . $token;
+			$added_tag         = 'Bulk Added Tag ' . $token;
+			$original_tag      = \wp_insert_term( $original_tag_name, 'post_tag', array( 'slug' => 'bulk-original-tag-' . $token ) );
+			$bulk_tag          = \wp_insert_term( $bulk_tag_name, 'post_tag', array( 'slug' => 'bulk-tag-' . $token ) );
+			$post_ids          = array();
+
+			$insert_post = static function ( string $title, string $status ) use ( $editor_id, $original_date, &$post_ids ) {
+				$post_id = \wp_insert_post(
+					\wp_slash(
+						array(
+							'post_type'      => 'post',
+							'post_title'     => $title,
+							'post_content'   => $title . ' content',
+							'post_excerpt'   => $title . ' excerpt',
+							'post_status'    => $status,
+							'post_author'    => $editor_id,
+							'post_date'      => $original_date,
+							'post_date_gmt'  => $original_date,
+							'comment_status' => 'open',
+							'ping_status'    => 'closed',
+						)
+					),
+					true,
+					false
+				);
+
+				if ( is_int( $post_id ) ) {
+					$post_ids[] = $post_id;
+				}
+
+				return $post_id;
+			};
+
+			$first_id  = $insert_post( 'Bulk First ' . $token, 'draft' );
+			$second_id = $insert_post( 'Bulk Second ' . $token, 'draft' );
+			$locked_id = $insert_post( 'Bulk Locked ' . $token, 'draft' );
+
+			if ( is_array( $original_cat ) && isset( $original_cat['term_id'] ) ) {
+				foreach ( array( $first_id, $second_id, $locked_id ) as $post_id ) {
+					if ( is_int( $post_id ) ) {
+						\wp_set_object_terms( $post_id, array( (int) $original_cat['term_id'] ), 'category' );
+					}
+				}
+			}
+			if ( is_array( $original_tag ) && isset( $original_tag['term_id'] ) ) {
+				foreach ( array( $first_id, $second_id, $locked_id ) as $post_id ) {
+					if ( is_int( $post_id ) ) {
+						\wp_set_object_terms( $post_id, array( (int) $original_tag['term_id'] ), 'post_tag' );
+					}
+				}
+			}
+			if ( is_int( $locked_id ) ) {
+				\update_post_meta( $locked_id, '_edit_lock', time() . ':' . $locker_id );
+			}
+
+			self::collect_failure(
+				$failures,
+				$editor_id > 0
+					&& $author_id > 0
+					&& $locker_id > 0
+					&& is_array( $original_cat )
+					&& is_array( $bulk_cat )
+					&& is_array( $original_tag )
+					&& is_array( $bulk_tag )
+					&& is_int( $first_id )
+					&& is_int( $second_id )
+					&& is_int( $locked_id ),
+				'bulk edit fixtures insert before classic admin helper runs',
+				array(
+					'editorId'    => $editor_id,
+					'authorId'    => $author_id,
+					'lockerId'    => $locker_id,
+					'originalCat' => $original_cat,
+					'bulkCat'     => $bulk_cat,
+					'originalTag' => $original_tag,
+					'bulkTag'     => $bulk_tag,
+					'postIds'     => $post_ids,
+				)
+			);
+
+			if (
+				$editor_id <= 0
+				|| $author_id <= 0
+				|| $locker_id <= 0
+				|| ! is_array( $original_cat )
+				|| ! is_array( $bulk_cat )
+				|| ! is_array( $original_tag )
+				|| ! is_array( $bulk_tag )
+				|| ! is_int( $first_id )
+				|| ! is_int( $second_id )
+				|| ! is_int( $locked_id )
+			) {
+				return $ctx->result(
+					'content-lifecycle.posts.admin-bulk-edit-lifecycle',
+					false,
+					array(
+						'case'     => self::case_summary( $case ),
+						'failures' => array_slice( $failures, 0, 6 ),
+					)
+				);
+			}
+
+			$hooks      = self::install_post_hooks( 'post', $post_events );
+			$bulk_hooks = self::install_admin_bulk_edit_hooks( $bulk_events );
+
+			$bulk_data = \wp_slash(
+				array(
+					'post_type'                   => 'post',
+					'post'                        => array( $first_id, $second_id, $locked_id, $missing_id ),
+					'_status'                     => 'publish',
+					'post_author'                 => $author_id,
+					'post_title'                  => $bulk_title,
+					'content'                     => $bulk_content,
+					'excerpt'                     => $bulk_excerpt,
+					'comment_status'              => 'closed',
+					'ping_status'                 => 'open',
+					'post_category'               => array( (int) $original_cat['term_id'], (int) $bulk_cat['term_id'] ),
+					'indeterminate_post_category' => array( (int) $original_cat['term_id'] ),
+					'tax_input'                   => array(
+						'post_tag' => $bulk_tag_name . ',' . $added_tag,
+					),
+					'post_format'                 => 'aside',
+					'sticky'                      => 'sticky',
+				)
+			);
+
+			$result         = \bulk_edit_posts( $bulk_data );
+			$first          = \get_post( $first_id );
+			$second         = \get_post( $second_id );
+			$locked         = \get_post( $locked_id );
+			$first_cats     = \wp_get_object_terms( $first_id, 'category', array( 'fields' => 'ids' ) );
+			$second_cats    = \wp_get_object_terms( $second_id, 'category', array( 'fields' => 'ids' ) );
+			$locked_cats    = \wp_get_object_terms( $locked_id, 'category', array( 'fields' => 'ids' ) );
+			$first_tags     = \wp_get_object_terms( $first_id, 'post_tag', array( 'fields' => 'names' ) );
+			$second_tags    = \wp_get_object_terms( $second_id, 'post_tag', array( 'fields' => 'names' ) );
+			$locked_tags    = \wp_get_object_terms( $locked_id, 'post_tag', array( 'fields' => 'names' ) );
+			$sticky_posts   = \get_option( 'sticky_posts' );
+			$post_counts    = array_count_values( array_filter( $post_events, 'is_string' ) );
+			$expected_cats  = array( (int) $original_cat['term_id'], (int) $bulk_cat['term_id'] );
+			$expected_tags  = self::sorted_string_values( array( $original_tag_name, $bulk_tag_name, $added_tag ) );
+			$updated_ids    = isset( $result['updated'] ) ? self::normalize_int_list( (array) $result['updated'] ) : array();
+			$locked_ids     = isset( $result['locked'] ) ? self::normalize_int_list( (array) $result['locked'] ) : array();
+			$skipped_ids    = isset( $result['skipped'] ) ? self::normalize_int_list( (array) $result['skipped'] ) : array();
+
+			self::collect_failure(
+				$failures,
+				is_array( $result )
+					&& self::normalize_int_list( array( $first_id, $second_id ) ) === $updated_ids
+					&& array( $locked_id ) === $locked_ids
+					&& array( $missing_id ) === $skipped_ids,
+				'bulk_edit_posts returns updated, locked, and skipped IDs by branch',
+				array(
+					'result'      => $result,
+					'expected'    => array(
+						'updated' => self::normalize_int_list( array( $first_id, $second_id ) ),
+						'locked'  => array( $locked_id ),
+						'skipped' => array( $missing_id ),
+					),
+					'updatedIds'  => $updated_ids,
+					'lockedIds'   => $locked_ids,
+					'skippedIds'  => $skipped_ids,
+				)
+			);
+
+			foreach ( array( $first_id => $first, $second_id => $second ) as $post_id => $post ) {
+				self::collect_failure(
+					$failures,
+					$post instanceof \WP_Post
+						&& 'publish' === $post->post_status
+						&& $author_id === (int) $post->post_author
+						&& $bulk_title === $post->post_title
+						&& $bulk_content === $post->post_content
+						&& $bulk_excerpt === $post->post_excerpt
+						&& 'closed' === $post->comment_status
+						&& 'open' === $post->ping_status
+						&& $original_date !== $post->post_date
+						&& 'aside' === \get_post_format( $post_id )
+						&& (string) $editor_id === (string) \get_post_meta( $post_id, '_edit_last', true ),
+					'bulk_edit_posts applies classic fields to each editable post',
+					array(
+						'postId'        => $post_id,
+						'post'          => self::post_summary( $post ),
+						'author'        => $post instanceof \WP_Post ? $post->post_author : null,
+						'title'         => $post instanceof \WP_Post ? self::describe_string( $post->post_title ) : null,
+						'content'       => $post instanceof \WP_Post ? self::describe_string( $post->post_content ) : null,
+						'excerpt'       => $post instanceof \WP_Post ? self::describe_string( $post->post_excerpt ) : null,
+						'commentStatus' => $post instanceof \WP_Post ? $post->comment_status : null,
+						'pingStatus'    => $post instanceof \WP_Post ? $post->ping_status : null,
+						'postDate'      => $post instanceof \WP_Post ? $post->post_date : null,
+						'format'        => \get_post_format( $post_id ),
+						'editLast'      => \get_post_meta( $post_id, '_edit_last', true ),
+					)
+				);
+			}
+
+			self::collect_failure(
+				$failures,
+				self::same_id_set( (array) $first_cats, $expected_cats )
+					&& self::same_id_set( (array) $second_cats, $expected_cats )
+					&& self::same_id_set( (array) $locked_cats, array( (int) $original_cat['term_id'] ) )
+					&& self::sorted_string_values( (array) $first_tags ) === $expected_tags
+					&& self::sorted_string_values( (array) $second_tags ) === $expected_tags
+					&& self::sorted_string_values( (array) $locked_tags ) === self::sorted_string_values( array( $original_tag_name ) ),
+				'bulk_edit_posts merges category and tag edits only into editable posts',
+				array(
+					'firstCats'    => $first_cats,
+					'secondCats'   => $second_cats,
+					'lockedCats'   => $locked_cats,
+					'expectedCats' => $expected_cats,
+					'firstTags'    => $first_tags,
+					'secondTags'   => $second_tags,
+					'lockedTags'   => $locked_tags,
+					'expectedTags' => $expected_tags,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$locked instanceof \WP_Post
+					&& 'draft' === $locked->post_status
+					&& $editor_id === (int) $locked->post_author
+					&& 'Bulk Locked ' . $token === $locked->post_title
+					&& 'open' === $locked->comment_status
+					&& 'closed' === $locked->ping_status
+					&& false === \get_post_format( $locked_id ),
+				'bulk_edit_posts leaves locked posts unchanged',
+				array(
+					'lockedPost' => self::post_summary( $locked ),
+					'author'     => $locked instanceof \WP_Post ? $locked->post_author : null,
+					'format'     => \get_post_format( $locked_id ),
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				is_array( $sticky_posts )
+					&& self::same_id_set( $sticky_posts, array( $first_id, $second_id ) )
+					&& self::admin_bulk_event_present( $bulk_events, 'post_stuck', array( 'postId' => $first_id ) )
+					&& self::admin_bulk_event_present( $bulk_events, 'post_stuck', array( 'postId' => $second_id ) )
+					&& ! self::admin_bulk_event_present( $bulk_events, 'post_stuck', array( 'postId' => $locked_id ) ),
+				'bulk_edit_posts sticks only updated posts when the current user can edit others posts',
+				array(
+					'stickyPosts' => $sticky_posts,
+					'bulkEvents'  => $bulk_events,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				self::admin_bulk_event_present(
+					$bulk_events,
+					'bulk_edit_posts',
+					array(
+						'updated'    => self::normalize_int_list( array( $first_id, $second_id ) ),
+						'postStatus' => 'publish',
+						'postIds'    => self::normalize_int_list( array( $first_id, $second_id, $locked_id, $missing_id ) ),
+					)
+				)
+					&& ( $post_counts['pre_post_update'] ?? 0 ) >= 2
+					&& ( $post_counts['save_post_post'] ?? 0 ) >= 2
+					&& ( $post_counts['wp_after_insert_post'] ?? 0 ) >= 2,
+				'bulk edit post hooks and final action fire for updated posts',
+				array(
+					'postEvents' => $post_events,
+					'postCounts' => $post_counts,
+					'bulkEvents' => $bulk_events,
+				)
+			);
+		} finally {
+			if ( null !== $cap_filter ) {
+				\remove_filter( 'user_has_cap', $cap_filter, 10 );
+			}
+			self::remove_hooks( array_merge( $hooks, $bulk_hooks ) );
+			$hooks_removed = self::hooks_are_removed( array_merge( $hooks, $bulk_hooks ) );
+			$_POST         = $post_snapshot;
+			$_GET          = $get_snapshot;
+			$_REQUEST      = $request_snapshot;
+		}
+
+		self::collect_failure(
+			$failures,
+			$hooks_removed,
+			'admin bulk edit hooks are removed after lifecycle check',
+			array( 'hooks' => array_map( static fn( array $hook ): string => $hook[0], array_merge( $hooks, $bulk_hooks ) ) )
+		);
+
+		return $ctx->result(
+			'content-lifecycle.posts.admin-bulk-edit-lifecycle',
+			array() === $failures,
+			array(
+				'case'       => self::case_summary( $case ),
+				'failures'   => array_slice( $failures, 0, 8 ),
+				'postEvents' => array_slice( $post_events, 0, 24 ),
+				'bulkEvents' => array_slice( $bulk_events, 0, 12 ),
 			)
 		);
 	}
@@ -5138,6 +5484,52 @@ final class ContentLifecycleSurface {
 		return $hooks;
 	}
 
+	private static function install_admin_bulk_edit_hooks( array &$events ): array {
+		$hooks = array();
+		$add   = static function ( string $hook, callable $callback, int $accepted_args ) use ( &$hooks ): void {
+			\add_action( $hook, $callback, 10, $accepted_args );
+			$hooks[] = array( $hook, $callback, 10 );
+		};
+
+		$add(
+			'bulk_edit_posts',
+			static function ( array $updated, array $shared_post_data ) use ( &$events ): void {
+				$events[] = array(
+					'hook'         => 'bulk_edit_posts',
+					'updated'      => self::normalize_int_list( $updated ),
+					'postIds'      => self::normalize_int_list( (array) ( $shared_post_data['post'] ?? array() ) ),
+					'postStatus'   => $shared_post_data['post_status'] ?? null,
+					'hasStatus'    => array_key_exists( 'post_status', $shared_post_data ),
+					'hasRawStatus' => array_key_exists( '_status', $shared_post_data ),
+					'sticky'       => $shared_post_data['sticky'] ?? null,
+				);
+			},
+			2
+		);
+		$add(
+			'post_stuck',
+			static function ( $post_id ) use ( &$events ): void {
+				$events[] = array(
+					'hook'   => 'post_stuck',
+					'postId' => (int) $post_id,
+				);
+			},
+			1
+		);
+		$add(
+			'post_unstuck',
+			static function ( $post_id ) use ( &$events ): void {
+				$events[] = array(
+					'hook'   => 'post_unstuck',
+					'postId' => (int) $post_id,
+				);
+			},
+			1
+		);
+
+		return $hooks;
+	}
+
 	private static function install_post_status_transition_hooks( string $post_type, array $transitions, array &$events ): array {
 		$hooks = array();
 		$add   = static function ( string $hook, callable $callback, int $accepted_args ) use ( &$hooks ): void {
@@ -5769,6 +6161,41 @@ final class ContentLifecycleSurface {
 			}
 
 			return true;
+		}
+
+		return false;
+	}
+
+	private static function admin_bulk_event_present( array $events, string $hook, array $expected ): bool {
+		foreach ( $events as $event ) {
+			if ( ! is_array( $event ) || ( $event['hook'] ?? null ) !== $hook ) {
+				continue;
+			}
+
+			$matched = true;
+			foreach ( $expected as $key => $value ) {
+				if ( ! array_key_exists( $key, $event ) ) {
+					$matched = false;
+					break;
+				}
+
+				if ( in_array( $key, array( 'updated', 'postIds' ), true ) ) {
+					if ( self::normalize_int_list( (array) $event[ $key ] ) !== self::normalize_int_list( (array) $value ) ) {
+						$matched = false;
+						break;
+					}
+					continue;
+				}
+
+				if ( $event[ $key ] !== $value ) {
+					$matched = false;
+					break;
+				}
+			}
+
+			if ( $matched ) {
+				return true;
+			}
 		}
 
 		return false;
