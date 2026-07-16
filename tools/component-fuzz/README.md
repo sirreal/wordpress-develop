@@ -535,10 +535,11 @@ database, network requests, or a configured site.
   editor.
 - `media-ingest`: no-network media upload and sideload ingest coverage over
   generated temp fixtures, including upload directory filters, MIME/filetype
-  boundaries, sanitized unique filenames, direct handle prefilter/move hooks,
-  upload override/error semantics, attachment row/post field/postmeta creation
-  in the in-memory wpdb stub, download short-circuit cleanup, metadata update
-  failure paths, and cleanup restoration.
+  boundaries, sanitized unique filenames, parent-date upload subdirectory
+  routing for `media_handle_upload()`, direct handle prefilter/move hooks, upload
+  override/error semantics, attachment row/post field/postmeta creation in the
+  in-memory wpdb stub, download short-circuit cleanup, metadata update failure
+  paths, and cleanup restoration.
 - `media-metadata`: local audio/video metadata parser coverage over generated
   bounded byte fixtures, including `wp_read_audio_metadata()` and
   `wp_read_video_metadata()` malformed-file behavior, ID3 tag helper
@@ -1054,10 +1055,10 @@ files. Dependency-warning coverage asserts both widget-editor handles, script
 and style conflict classes, dependency-chain enqueued semantics, scoped
 `_doing_it_wrong()` capture, version/message payloads, and asset/hook/global
 restoration. The
-Admin Media Chrome surface intentionally avoids upload dispatch, real
-attachments created by browser flows, media modal runtime behavior, and
-browser-side image editor UI; it covers `wp_media_attach_action()` attach and
-detach redirect exits through isolated child processes. Server-side
+Admin Media Chrome surface intentionally avoids SAPI-marked browser upload
+success, real attachments created by browser flows, media modal runtime
+behavior, and browser-side image editor UI; it covers `wp_media_attach_action()`
+attach and detach redirect exits through isolated child processes. Server-side
 image-edit AJAX save, preview, crop, restore, and sub-size request branches are
 covered by `media-image-edit-requests`. The surface covers direct server-side
 helpers with synthetic attachment rows and cache/filter-backed metadata only. The
@@ -1262,10 +1263,12 @@ as explicit skips while the filename filter invocation remains captured.
 The `media-ingest` surface uses local temp files only, routes uploads through a
 filtered temp upload root, and passes a custom upload action for
 `media_handle_upload()` so CLI fixtures use core's readable-file branch instead
-of PHP SAPI uploaded-file state. It exercises direct `wp_handle_*()` hooks and
-`download_url()` only through local files or `pre_http_request` short-circuits.
-It avoids browser media UI flows, audio/video cover-art generation, and writes
-outside the component-fuzz temp root.
+of PHP SAPI uploaded-file state. It verifies that upload destinations and GUIDs
+use the non-page parent post date subdirectory. It exercises direct
+`wp_handle_*()` hooks and `download_url()` only through local files or
+`pre_http_request` short-circuits. It avoids browser media UI flows,
+audio/video cover-art generation, and writes outside the component-fuzz temp
+root.
 The `media-remote` surface complements that local ingest coverage by exercising
 remote download and sideload helpers with `pre_http_request` fixtures only. It
 records every streamed temp filename observed by the HTTP short-circuit,

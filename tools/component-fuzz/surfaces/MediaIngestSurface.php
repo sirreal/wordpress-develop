@@ -1614,6 +1614,7 @@ final class MediaIngestSurface {
 		$extension     = strtolower( pathinfo( $basename, PATHINFO_EXTENSION ) );
 		$is_image      = str_starts_with( (string) $case['mime'], 'image/' );
 		$is_text       = 'text/plain' === $case['mime'];
+		$upload_subdir = self::expected_upload_subdir_for_parent( $case, $parent_id );
 
 		self::collect_failure(
 			$failures,
@@ -1692,6 +1693,25 @@ final class MediaIngestSurface {
 			)
 		);
 
+		if ( null !== $upload_subdir ) {
+			self::collect_failure(
+				$failures,
+				is_string( $attached_file )
+					&& self::path_contains_upload_subdir( $attached_file, $upload_subdir )
+					&& $post instanceof \WP_Post
+					&& str_contains( (string) $post->guid, '/' . $upload_subdir . '/' ),
+				'media_handle_upload routes upload files and GUIDs through the non-page parent post date subdirectory',
+				array(
+					'case'          => self::case_summary( $case ),
+					'parentId'      => $parent_id,
+					'parentDate'    => ( \get_post( $parent_id ) instanceof \WP_Post ) ? \get_post( $parent_id )->post_date : null,
+					'expectedSubdir' => $upload_subdir,
+					'attachedFile'   => $attached_file,
+					'guid'           => $post instanceof \WP_Post ? $post->guid : null,
+				)
+			);
+		}
+
 		if ( isset( $case['forbiddenPostId'] ) ) {
 			self::collect_failure(
 				$failures,
@@ -1737,6 +1757,7 @@ final class MediaIngestSurface {
 			'case'                     => self::case_summary( $case ),
 			'expectedBasenameContains' => $case['expectedBasenameContains'] ?? null,
 			'expectedExtension'        => $case['expectedExtension'] ?? null,
+			'expectedUploadSubdir'     => $upload_subdir,
 			'extension'                => $extension,
 			'fileExists'               => is_string( $attached_file ) && file_exists( $attached_file ),
 			'metadataKeys'             => is_array( $metadata ) ? array_keys( $metadata ) : array(),
@@ -2515,6 +2536,26 @@ final class MediaIngestSurface {
 		$normalized_path = wp_normalize_path( $real_path );
 		$normalized_root = wp_normalize_path( $real_root );
 		return $normalized_path === $normalized_root || str_starts_with( $normalized_path, trailingslashit( $normalized_root ) );
+	}
+
+	private static function expected_upload_subdir_for_parent( array $case, int $parent_id ): ?string {
+		if ( 'upload' !== ( $case['mode'] ?? null ) ) {
+			return null;
+		}
+
+		$parent = \get_post( $parent_id );
+		if ( ! $parent instanceof \WP_Post || 'page' === $parent->post_type || substr( (string) $parent->post_date, 0, 4 ) <= 0 ) {
+			return null;
+		}
+
+		return substr( (string) $parent->post_date, 0, 4 ) . '/' . substr( (string) $parent->post_date, 5, 2 );
+	}
+
+	private static function path_contains_upload_subdir( string $path, string $subdir ): bool {
+		$normalized_path = wp_normalize_path( $path );
+		$needle          = '/' . trim( wp_normalize_path( $subdir ), '/' ) . '/';
+
+		return str_contains( trailingslashit( $normalized_path ), $needle );
 	}
 
 	private static function png_bytes(): string {

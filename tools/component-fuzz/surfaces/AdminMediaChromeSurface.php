@@ -1576,7 +1576,7 @@ final class AdminMediaChromeSurface {
 			array(
 				'failures'   => $failures,
 				'notClaimed' => array(
-					'media_handle_upload() and media_handle_sideload() real ingest paths',
+					'SAPI-marked successful browser uploads through wp_media_upload_handler(); direct no-network media_handle_upload()/media_handle_sideload() ingest is owned by media-ingest.',
 				),
 			)
 		);
