@@ -38,6 +38,7 @@ final class AdminMediaChromeSurface {
 			$rows[] = self::check_legacy_upload_shell_helpers( $ctx->fork( 'legacy-upload-shell' ) );
 			$rows[] = self::check_media_upload_dispatch_exits( $ctx->fork( 'legacy-upload-dispatch' ) );
 			$rows[] = self::check_media_url_insert_dispatch_exits( $ctx->fork( 'legacy-url-insert' ) );
+			$rows[] = self::check_media_gallery_save_iframe_dispatch( $ctx->fork( 'legacy-gallery-save' ) );
 			$rows[] = self::check_media_attach_action_redirect_exit( $ctx->fork( 'media-attach-action' ) );
 			$rows[] = self::check_media_enqueue_and_iframe_shell( $ctx->fork( 'modal-enqueue-shell' ) );
 			$rows[] = self::check_media_button_and_bypass_output( $ctx->fork( 'media-buttons' ) );
@@ -84,6 +85,7 @@ final class AdminMediaChromeSurface {
 				'get_image_send_to_editor',
 				'get_image_tag',
 				'get_media_item',
+				'get_media_items',
 				'image_align_input_fields',
 				'image_add_caption',
 				'image_edit_apply_changes',
@@ -95,6 +97,7 @@ final class AdminMediaChromeSurface {
 				'media_upload_form',
 				'media_upload_flash_bypass',
 				'media_upload_form_handler',
+				'media_upload_gallery_form',
 				'media_upload_header',
 				'media_upload_html_bypass',
 				'media_upload_tabs',
@@ -109,6 +112,7 @@ final class AdminMediaChromeSurface {
 				'wp_create_nonce',
 				'wp_die',
 				'wp_enqueue_media',
+				'wp_enqueue_script',
 				'wp_image_editor',
 				'wp_iframe',
 				'wp_insert_post',
@@ -117,6 +121,7 @@ final class AdminMediaChromeSurface {
 				'wp_mime_type_icon',
 				'wp_editor',
 				'wp_ext2type',
+				'wp_register_script',
 				'wp_redirect',
 				'wp_script_is',
 				'wp_scripts',
@@ -2901,6 +2906,552 @@ PHP;
 				)
 			);
 		}
+	}
+
+	private static function check_media_gallery_save_iframe_dispatch( \ComponentFuzz\FuzzContext $ctx ): array {
+		$missing = self::media_attach_action_child_missing_requirements();
+		if ( array() !== $missing ) {
+			return self::row(
+				$ctx,
+				'admin-media-chrome.legacy-gallery-save-iframe-dispatch',
+				true,
+				array(
+					'missing' => $missing,
+					'reason'  => 'Required local subprocess APIs are unavailable.',
+				),
+				'skipped'
+			);
+		}
+
+		$failures = array();
+		$runs     = array();
+
+		foreach ( self::media_gallery_save_cases( $ctx ) as $case ) {
+			$run    = self::run_media_gallery_save_child_process( $case );
+			$result = is_array( $run['result'] ?? null ) ? $run['result'] : array();
+
+			$runs[ $case['label'] ] = array(
+				'ok'       => $run['ok'] ?? false,
+				'exitCode' => $run['exitCode'] ?? null,
+				'stderr'   => self::describe_string( (string) ( $run['stderr'] ?? '' ) ),
+				'stdout'   => self::describe_string( (string) ( $run['stdout'] ?? '' ) ),
+				'result'   => array(
+					'returned'       => $result['returned'] ?? null,
+					'output'         => self::describe_string( (string) ( $result['output'] ?? '' ) ),
+					'expectedIds'    => $result['expectedIds'] ?? array(),
+					'fieldEventIds'  => array_map(
+						static function ( array $event ): int {
+							return (int) ( $event['id'] ?? 0 );
+						},
+						is_array( $result['fieldEvents'] ?? null ) ? $result['fieldEvents'] : array()
+					),
+					'formUrlEvents'  => $result['formUrlEvents'] ?? array(),
+					'scriptStatus'   => $result['scriptStatus'] ?? array(),
+					'saveEventCount' => is_array( $result['saveEvents'] ?? null ) ? count( $result['saveEvents'] ) : null,
+					'sendEventCount' => is_array( $result['sendEvents'] ?? null ) ? count( $result['sendEvents'] ) : null,
+					'dieCalls'       => $result['dieCalls'] ?? array(),
+				),
+			);
+
+			self::collect_failure(
+				$failures,
+				true === ( $run['ok'] ?? false ) && self::media_gallery_save_child_result_has_expected_shape( $result ),
+				"{$case['label']} child renders gallery save iframe and reports structured JSON",
+				array(
+					'run'    => $run,
+					'result' => $result,
+				)
+			);
+
+			if ( ! self::media_gallery_save_child_result_has_expected_shape( $result ) ) {
+				continue;
+			}
+
+			self::collect_failure(
+				$failures,
+				true === (bool) ( $result['returned'] ?? false )
+					&& null === ( $result['throwable'] ?? null )
+					&& array() === ( $result['dieCalls'] ?? array() ),
+				"{$case['label']} returns normally after wp_iframe() without wp_die or unexpected exceptions",
+				array(
+					'returned'  => $result['returned'] ?? null,
+					'throwable' => $result['throwable'] ?? null,
+					'dieCalls'  => $result['dieCalls'] ?? array(),
+				)
+			);
+
+			self::collect_media_gallery_save_failures( $failures, $case, $result );
+		}
+
+		return self::row(
+			$ctx,
+			'admin-media-chrome.legacy-gallery-save-iframe-dispatch',
+			array() === $failures,
+			array(
+				'failures' => $failures,
+				'runs'     => $runs,
+			)
+		);
+	}
+
+	private static function media_gallery_save_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$build = static function ( string $label, string $scenario, bool $chromeless, \ComponentFuzz\FuzzContext $case_ctx ): array {
+			$token = self::media_upload_dispatch_token( 'gallery_' . $case_ctx->identifier( 4, 9 ) );
+
+			return array(
+				'label'      => $label,
+				'scenario'   => $scenario,
+				'chromeless' => $chromeless,
+				'seed'       => $case_ctx->seed(),
+				'iteration'  => $case_ctx->iteration(),
+				'token'      => $token,
+			);
+		};
+
+		return array(
+			$build( 'parent-gallery-save', 'parent', false, $ctx->fork( 'parent-gallery' ) ),
+			$build( 'attachment-gallery-save-chromeless', 'attachment', true, $ctx->fork( 'attachment-gallery' ) ),
+		);
+	}
+
+	private static function run_media_gallery_save_child_process( array $case ): array {
+		$payload = json_encode(
+			array( 'case' => $case ),
+			JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE
+		);
+
+		if ( false === $payload ) {
+			return array(
+				'ok'       => false,
+				'exitCode' => -1,
+				'stdout'   => '',
+				'stderr'   => 'json_encode failed',
+				'result'   => null,
+			);
+		}
+
+		$descriptors = array(
+			0 => array( 'pipe', 'r' ),
+			1 => array( 'pipe', 'w' ),
+			2 => array( 'pipe', 'w' ),
+		);
+
+		// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.system_calls_proc_open -- Isolates wp_media_upload_handler() gallery save iframe output in a local PHP subprocess.
+		$process = proc_open( array( PHP_BINARY, '-r', self::media_gallery_save_child_program() ), $descriptors, $pipes, \ComponentFuzz\repo_root() );
+		if ( ! is_resource( $process ) ) {
+			return array(
+				'ok'       => false,
+				'exitCode' => -1,
+				'stdout'   => '',
+				'stderr'   => 'proc_open failed',
+				'result'   => null,
+			);
+		}
+
+		fwrite( $pipes[0], $payload );
+		fclose( $pipes[0] );
+
+		$stdout = stream_get_contents( $pipes[1] );
+		$stderr = stream_get_contents( $pipes[2] );
+		fclose( $pipes[1] );
+		fclose( $pipes[2] );
+
+		$exit_code = proc_close( $process );
+		$result    = json_decode( (string) $stdout, true );
+
+		return array(
+			'ok'       => 0 === $exit_code && is_array( $result ) && true === ( $result['ok'] ?? null ),
+			'exitCode' => $exit_code,
+			'stdout'   => (string) $stdout,
+			'stderr'   => (string) $stderr,
+			'result'   => is_array( $result ) ? $result : null,
+		);
+	}
+
+	private static function media_gallery_save_child_program(): string {
+		return <<<'PHP'
+$component_fuzz_admin_media_raw = stream_get_contents( STDIN );
+$component_fuzz_admin_media_payload = json_decode( $component_fuzz_admin_media_raw, true );
+$case = is_array( $component_fuzz_admin_media_payload['case'] ?? null ) ? $component_fuzz_admin_media_payload['case'] : array();
+
+require_once getcwd() . '/tools/component-fuzz/lib/autoload.php';
+\ComponentFuzz\WpBootstrap::load();
+
+\ComponentFuzz\Surfaces\AdminMediaChromeSurface::run_media_gallery_save_child( $case );
+PHP;
+	}
+
+	public static function run_media_gallery_save_child( array $case ): void {
+		ini_set( 'display_errors', '0' );
+		self::prepare_runtime();
+
+		$ctx       = new \ComponentFuzz\FuzzContext( (int) ( $case['seed'] ?? 1 ), self::NAME, (int) ( $case['iteration'] ?? 0 ) );
+		$scenario  = (string) ( $case['scenario'] ?? 'parent' );
+		$token     = self::media_upload_dispatch_token( (string) ( $case['token'] ?? $ctx->identifier( 4, 9 ) ) );
+		$state     = array(
+			'ok'            => false,
+			'label'         => (string) ( $case['label'] ?? 'gallery-save' ),
+			'scenario'      => $scenario,
+			'token'         => $token,
+			'postId'        => 0,
+			'parentId'      => 0,
+			'expectedIds'   => array(),
+			'absentIds'     => array(),
+			'allTrackedIds' => array(),
+			'postsBefore'   => array(),
+			'postsAfter'    => array(),
+			'metaBefore'    => array(),
+			'metaAfter'     => array(),
+			'fieldEvents'   => array(),
+			'formUrlEvents' => array(),
+			'saveEvents'    => array(),
+			'sendEvents'    => array(),
+			'dieCalls'      => array(),
+			'scriptStatus'  => array(),
+			'returned'      => false,
+			'returnType'    => null,
+			'throwable'     => null,
+			'output'        => '',
+		);
+
+		$buffer_level = ob_get_level();
+		ob_start();
+
+		register_shutdown_function(
+			static function () use ( &$state, $buffer_level ): void {
+				$output = '';
+				while ( ob_get_level() > $buffer_level ) {
+					$chunk = ob_get_clean();
+					if ( is_string( $chunk ) ) {
+						$output = $chunk . $output;
+					}
+				}
+
+				$tracked_ids             = array_map( 'intval', $state['allTrackedIds'] );
+				$state['output']         = $output;
+				$state['postsAfter']     = self::media_upload_dispatch_post_state( $tracked_ids );
+				$state['metaAfter']      = self::media_upload_dispatch_alt_state( $tracked_ids );
+				$state['scriptStatus']   = self::media_gallery_save_script_status( 'admin-gallery' );
+				$state['ok']             = null === $state['throwable'];
+				echo json_encode( $state, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE ) . "\n";
+			}
+		);
+
+		try {
+			$parent_id = self::seed_parent_post( $ctx->fork( 'parent' ) );
+			$image_one = self::seed_attachment(
+				$ctx->fork( 'image-one' ),
+				'image/jpeg',
+				array(
+					'parent_id'  => $parent_id,
+					'post_title' => 'Gallery one <script>alert(1)</script> ' . $token,
+					'alt'        => 'Gallery alt one <script>alert(1)</script> ' . $token,
+				)
+			);
+			$image_two = self::seed_attachment(
+				$ctx->fork( 'image-two' ),
+				'image/png',
+				array(
+					'parent_id'  => $parent_id,
+					'post_title' => 'Gallery two <script>alert(1)</script> ' . $token,
+					'alt'        => 'Gallery alt two <script>alert(1)</script> ' . $token,
+				)
+			);
+			$outside = self::seed_attachment(
+				$ctx->fork( 'outside' ),
+				'application/pdf',
+				array(
+					'post_title' => 'Outside gallery <script>alert(1)</script> ' . $token,
+				)
+			);
+
+			$image_one_id = (int) $image_one->ID;
+			$image_two_id = (int) $image_two->ID;
+			$outside_id   = (int) $outside->ID;
+			$post_id      = 'attachment' === $scenario ? $image_one_id : $parent_id;
+			$expected_ids = 'attachment' === $scenario ? array( $image_one_id ) : array( $image_one_id, $image_two_id );
+			$absent_ids   = 'attachment' === $scenario ? array( $image_two_id, $outside_id ) : array( $outside_id );
+			$tracked_ids  = array( $parent_id, $image_one_id, $image_two_id, $outside_id );
+
+			$state['postId']        = $post_id;
+			$state['parentId']      = $parent_id;
+			$state['expectedIds']   = $expected_ids;
+			$state['absentIds']     = $absent_ids;
+			$state['allTrackedIds'] = $tracked_ids;
+			$state['postsBefore']   = self::media_upload_dispatch_post_state( $tracked_ids );
+			$state['metaBefore']    = self::media_upload_dispatch_alt_state( $tracked_ids );
+
+			$GLOBALS['pagenow'] = 'media-upload.php';
+			$GLOBALS['type']    = 'image';
+			$GLOBALS['tab']     = 'gallery';
+			$GLOBALS['body_id'] = 'component-fuzz-gallery-save';
+
+			$_SERVER['HTTP_HOST']       = 'example.test';
+			$_SERVER['HTTPS']           = 'off';
+			$_SERVER['PHP_SELF']        = '/wp-admin/media-upload.php';
+			$_SERVER['REQUEST_METHOD']  = 'POST';
+			$_SERVER['REQUEST_URI']     = '/wp-admin/media-upload.php?type=image&tab=gallery&post_id=' . rawurlencode( (string) $post_id );
+			$_SERVER['HTTP_REFERER']    = 'http://example.test/wp-admin/media-upload.php?type=image&tab=gallery&post_id=' . rawurlencode( (string) $post_id );
+			$_SERVER['HTTP_USER_AGENT'] = 'component-fuzz/admin-media-gallery-save';
+			$_SERVER['REMOTE_ADDR']     = '198.51.100.46';
+			$_SERVER['SERVER_PORT']     = '80';
+
+			$_GET = array(
+				'type'    => 'image',
+				'tab'     => 'gallery',
+				'post_id' => (string) $post_id,
+			);
+			if ( ! empty( $case['chromeless'] ) ) {
+				$_GET['chromeless'] = '1';
+			}
+			$_POST = array(
+				'_wpnonce'    => \wp_create_nonce( 'media-form' ),
+				'save'        => 'Save all changes',
+				'post_id'     => (string) $post_id,
+				'type'        => 'image',
+				'tab'         => 'gallery',
+				'attachments' => array(
+					$image_one_id => array(
+						'post_title'   => 'Submitted title <script>alert(1)</script> ' . $token,
+						'post_content' => 'Submitted content ' . $token,
+						'post_excerpt' => 'Submitted excerpt ' . $token,
+						'menu_order'   => '99',
+						'image_alt'    => 'Submitted alt <script>alert(1)</script> ' . $token,
+					),
+					$image_two_id => array(
+						'post_title'   => 'Submitted sibling title ' . $token,
+						'post_content' => 'Submitted sibling content ' . $token,
+						'post_excerpt' => 'Submitted sibling excerpt ' . $token,
+						'menu_order'   => '88',
+						'image_alt'    => 'Submitted sibling alt ' . $token,
+					),
+				),
+			);
+			$_REQUEST = $_GET + $_POST;
+			$_FILES   = array();
+			$_COOKIE  = array();
+
+			\wp_register_script( 'admin-gallery', '/wp-admin/js/gallery.js', array(), false );
+
+			$form_url_filter = static function ( string $url, string $type ) use ( &$state, $token ): string {
+				$state['formUrlEvents'][] = array(
+					'url'  => $url,
+					'type' => $type,
+				);
+				return \add_query_arg( 'cfz_gallery', $token, $url );
+			};
+			$fields_filter   = static function ( array $fields, \WP_Post $post ) use ( &$state, $token ): array {
+				$state['fieldEvents'][] = array(
+					'id'    => (int) $post->ID,
+					'title' => (string) $post->post_title,
+				);
+				$fields['component_fuzz_gallery'] = array(
+					'label' => 'Component Fuzz Gallery',
+					'value' => 'Gallery custom field <script>alert(1)</script> ' . $token,
+				);
+				return $fields;
+			};
+			$save_filter     = static function ( array $post, array $attachment ) use ( &$state ): array {
+				$state['saveEvents'][] = array(
+					'id'    => (int) ( $post['ID'] ?? 0 ),
+					'title' => (string) ( $attachment['post_title'] ?? '' ),
+				);
+				return $post;
+			};
+			$send_filter     = static function ( string $html, int $send_id, array $attachment ) use ( &$state ): string {
+				$state['sendEvents'][] = array(
+					'id'    => $send_id,
+					'html'  => $html,
+					'title' => (string) ( $attachment['post_title'] ?? '' ),
+				);
+				return $html;
+			};
+			$user_has_cap_filter = static function ( array $allcaps, array $caps, array $args, $user = null ): array {
+				unset( $args, $user );
+				foreach ( $caps as $cap ) {
+					$allcaps[ $cap ] = 'do_not_allow' !== $cap;
+				}
+				return $allcaps;
+			};
+			$die_handler_filter = static function () use ( &$state ): callable {
+				return static function ( $message = '', $title = '', $args = array() ) use ( &$state ): void {
+					$state['dieCalls'][] = array(
+						'message' => self::media_attach_action_die_message( $message ),
+						'title'   => self::media_attach_action_die_message( $title ),
+						'args'    => is_array( $args ) ? $args : array(),
+					);
+					exit;
+				};
+			};
+
+			\add_filter( 'media_upload_form_url', $form_url_filter, 10, 2 );
+			\add_filter( 'attachment_fields_to_edit', $fields_filter, 11, 2 );
+			\add_filter( 'attachment_fields_to_save', $save_filter, 10, 2 );
+			\add_filter( 'media_send_to_editor', $send_filter, 10, 3 );
+			\add_filter( 'user_has_cap', $user_has_cap_filter, 10, 4 );
+			\add_filter( 'wp_die_handler', $die_handler_filter, PHP_INT_MAX );
+
+			\wp_set_current_user( 1 );
+			if ( isset( $GLOBALS['current_user'] ) && $GLOBALS['current_user'] instanceof \WP_User ) {
+				$GLOBALS['current_user']->allcaps = array( 'exist' => true );
+			}
+
+			try {
+				$return_value        = \wp_media_upload_handler();
+				$state['returnType'] = gettype( $return_value );
+				$state['returned']   = true;
+			} finally {
+				\remove_filter( 'wp_die_handler', $die_handler_filter, PHP_INT_MAX );
+				\remove_filter( 'user_has_cap', $user_has_cap_filter, 10 );
+				\remove_filter( 'media_send_to_editor', $send_filter, 10 );
+				\remove_filter( 'attachment_fields_to_save', $save_filter, 10 );
+				\remove_filter( 'attachment_fields_to_edit', $fields_filter, 11 );
+				\remove_filter( 'media_upload_form_url', $form_url_filter, 10 );
+			}
+		} catch ( \Throwable $e ) {
+			$state['throwable'] = self::describe_throwable( $e );
+		}
+	}
+
+	private static function media_gallery_save_child_result_has_expected_shape( array $result ): bool {
+		return array_key_exists( 'ok', $result )
+			&& array_key_exists( 'returned', $result )
+			&& is_string( $result['output'] ?? null )
+			&& is_array( $result['expectedIds'] ?? null )
+			&& is_array( $result['absentIds'] ?? null )
+			&& is_array( $result['postsBefore'] ?? null )
+			&& is_array( $result['postsAfter'] ?? null )
+			&& is_array( $result['metaBefore'] ?? null )
+			&& is_array( $result['metaAfter'] ?? null )
+			&& is_array( $result['fieldEvents'] ?? null )
+			&& is_array( $result['formUrlEvents'] ?? null )
+			&& is_array( $result['saveEvents'] ?? null )
+			&& is_array( $result['sendEvents'] ?? null )
+			&& is_array( $result['dieCalls'] ?? null )
+			&& is_array( $result['scriptStatus'] ?? null );
+	}
+
+	private static function media_gallery_save_script_status( string $handle ): array {
+		$status = array();
+		foreach ( array( 'registered', 'enqueued', 'queue', 'to_do', 'done' ) as $state ) {
+			$status[ $state ] = \wp_script_is( $handle, $state );
+		}
+		return $status;
+	}
+
+	private static function collect_media_gallery_save_failures( array &$failures, array $case, array $result ): void {
+		$output       = (string) ( $result['output'] ?? '' );
+		$token        = self::media_upload_dispatch_token( (string) ( $result['token'] ?? $case['token'] ?? '' ) );
+		$expected_ids = array_values( array_map( 'intval', $result['expectedIds'] ?? array() ) );
+		$absent_ids   = array_values( array_map( 'intval', $result['absentIds'] ?? array() ) );
+		$field_ids    = array_map(
+			static function ( array $event ): int {
+				return (int) ( $event['id'] ?? 0 );
+			},
+			$result['fieldEvents'] ?? array()
+		);
+		sort( $expected_ids );
+		sort( $field_ids );
+
+		$expected_media_markup = true;
+		foreach ( $expected_ids as $id ) {
+			$expected_media_markup = $expected_media_markup
+				&& str_contains( $output, "id='media-item-$id'" )
+				&& str_contains( $output, "attachments[$id][menu_order]" )
+				&& str_contains( $output, "attachments[$id][component_fuzz_gallery]" );
+		}
+
+		$absent_media_markup = true;
+		foreach ( $absent_ids as $id ) {
+			$absent_media_markup = $absent_media_markup && ! str_contains( $output, "id='media-item-$id'" );
+		}
+
+		self::collect_failure(
+			$failures,
+			str_contains( $output, 'pagenow = \'media-upload-popup\'' )
+				&& str_contains( $output, '<body id="component-fuzz-gallery-save" class="wp-core-ui no-js ' )
+				&& ! str_contains( $output, 'id="media-upload-notice"' )
+				&& ! str_contains( $output, 'Saved.' )
+				&& str_contains( $output, 'id="gallery-form"' )
+				&& str_contains( $output, 'id="save-all"' )
+				&& str_contains( $output, 'id="insert-gallery"' )
+				&& str_contains( $output, 'id="gallery-settings"' )
+				&& str_contains( $output, 'cfz_gallery=' . rawurlencode( $token ) )
+				&& $expected_media_markup
+				&& $absent_media_markup
+				&& ! str_contains( $output, 'win.tb_remove();' )
+				&& ! str_contains( $output, 'win.send_to_editor(' ),
+			'wp_media_upload_handler() save branch renders the gallery iframe form without leaking generic upload notices or triggering close/send exits',
+			array(
+				'output'      => self::describe_string( $output ),
+				'expectedIds' => $expected_ids,
+				'absentIds'   => $absent_ids,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			! str_contains( $output, 'Submitted title <script>alert(1)</script> ' . $token )
+				&& ! str_contains( $output, 'Gallery one <script>alert(1)</script> ' . $token )
+				&& ! str_contains( $output, 'Gallery custom field <script>alert(1)</script> ' . $token )
+				&& str_contains( $output, 'Gallery custom field &lt;script&gt;alert(1)&lt;/script&gt; ' . $token ),
+			'gallery save iframe escapes generated attachment titles and custom field values',
+			array( 'output' => self::describe_string( $output ) )
+		);
+
+		self::collect_failure(
+			$failures,
+			$expected_ids === $field_ids
+				&& 1 === count( $result['formUrlEvents'] ?? array() )
+				&& 'image' === (string) ( $result['formUrlEvents'][0]['type'] ?? '' )
+				&& str_contains( (string) ( $result['formUrlEvents'][0]['url'] ?? '' ), 'tab=gallery' )
+				&& str_contains( (string) ( $result['formUrlEvents'][0]['url'] ?? '' ), 'post_id=' . (string) ( $result['postId'] ?? 0 ) ),
+			'gallery save iframe routes the gallery form URL and edit fields through the expected filters for rendered attachments only',
+			array(
+				'fieldEvents'   => $result['fieldEvents'] ?? array(),
+				'formUrlEvents' => $result['formUrlEvents'] ?? array(),
+				'expectedIds'   => $expected_ids,
+			)
+		);
+
+		$script_status = $result['scriptStatus'] ?? array();
+		self::collect_failure(
+			$failures,
+			true === ( $script_status['enqueued'] ?? false )
+				|| true === ( $script_status['to_do'] ?? false )
+				|| true === ( $script_status['done'] ?? false ),
+			'save branch enqueues the legacy admin-gallery script handle before rendering the iframe',
+			array( 'scriptStatus' => $script_status )
+		);
+
+		self::collect_failure(
+			$failures,
+			empty( $case['chromeless'] )
+				? str_contains( $output, 'id="media-upload-header"' )
+				: ! str_contains( $output, 'id="media-upload-header"' ),
+			'media_upload_header() honors the chromeless request flag inside the gallery iframe',
+			array(
+				'chromeless' => $case['chromeless'] ?? false,
+				'output'    => self::describe_string( $output ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			( $result['postsBefore'] ?? array() ) === ( $result['postsAfter'] ?? array() )
+				&& ( $result['metaBefore'] ?? array() ) === ( $result['metaAfter'] ?? array() )
+				&& array() === ( $result['saveEvents'] ?? array() )
+				&& array() === ( $result['sendEvents'] ?? array() ),
+			'save branch does not fall through to attachment field persistence or send-to-editor handling',
+			array(
+				'postsBefore' => $result['postsBefore'] ?? array(),
+				'postsAfter'  => $result['postsAfter'] ?? array(),
+				'metaBefore'  => $result['metaBefore'] ?? array(),
+				'metaAfter'   => $result['metaAfter'] ?? array(),
+				'saveEvents'  => $result['saveEvents'] ?? array(),
+				'sendEvents'  => $result['sendEvents'] ?? array(),
+			)
+		);
 	}
 
 	private static function check_media_attach_action_redirect_exit( \ComponentFuzz\FuzzContext $ctx ): array {
