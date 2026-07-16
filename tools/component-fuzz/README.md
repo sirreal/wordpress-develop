@@ -753,12 +753,15 @@ database, network requests, or a configured site.
   application password controller coverage, including collection/item/
   introspection route and schema contracts, create/update/delete dispatch,
   one-time password response and stored hash agreement, response context
-  filtering for edit/view/embed, created/last-used/last-IP formatting, usage
+  filtering for edit/view/embed, logged-out and invalid-payload failure paths
+  before storage mutation, PUT name mutation with `app_id` immutability, item
+  and bulk delete accounting, created/last-used/last-IP formatting, usage
   recording and same-day throttle behavior, `_fields` projection and links,
-  password non-exposure outside edit context, REST pre/after/prepare hooks,
-  capability-denied and availability error matrices, current-user introspection,
-  stale UUID failures, REST application-password auth status globals, REST
-  index authentication metadata, and global/filter restoration.
+  password non-exposure outside edit context, exact REST pre/after/prepare hook
+  payloads, capability-denied and availability error matrices, current-user
+  introspection, stale UUID failures, REST application-password auth status
+  globals, REST index authentication metadata, default-filter idempotence, and
+  cloned global/filter restoration.
 - `rest-directory-services`: no-network REST coverage for WordPress.org-backed
   directory service controllers, including block-directory, pattern-directory,
   and URL-details route/schema contracts, direct `plugins_api()` and
@@ -1097,7 +1100,11 @@ against the in-memory `wpdb` stub. The
 `rest-application-passwords` surface complements lower-level account-security
 coverage by dispatching the REST controller with synthetic users and scoped
 application-password metadata, while directly asserting the REST auth-status and
-index-advertisement plumbing that sits outside controller CRUD methods.
+index-advertisement plumbing that sits outside controller CRUD methods. Its
+route-dispatched mutation matrix also covers logged-out and invalid create
+failures, valid one-time password creation, PUT `app_id` immutability,
+introspection, delete denial/removal, bulk deletion, hook payload timing, and
+REST default-filter isolation.
 `rest-media-attachments` covers the bounded REST attachment upload and
 client-side media-processing write paths using raw request bodies, temp upload
 roots, attachment postmeta, response projection, metadata finalization,

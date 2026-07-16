@@ -42,6 +42,7 @@ final class RestApplicationPasswordsSurface {
 
 			$rows[] = self::check_route_and_schema_contracts( $ctx->fork( 'routes' ) );
 			$rows[] = self::check_crud_hooks_and_projection( $ctx->fork( 'crud' ) );
+			$rows[] = self::check_route_dispatched_mutation_matrix( $ctx->fork( 'dispatch-mutations' ) );
 			$rows[] = self::check_response_contexts_and_usage_metadata( $ctx->fork( 'response-usage' ) );
 			$rows[] = self::check_permission_and_availability_errors( $ctx->fork( 'errors' ) );
 			$rows[] = self::check_introspection_paths( $ctx->fork( 'introspection' ) );
@@ -503,6 +504,416 @@ final class RestApplicationPasswordsSurface {
 			array(
 				'case'     => self::case_summary( $case ),
 				'failures' => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
+	private static function check_route_dispatched_mutation_matrix( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$case     = self::case_for_context( $ctx );
+
+		self::reset_runtime_state();
+		self::reset_static_state();
+		$users  = self::seed_users( $case );
+		$server = self::fresh_server();
+		( new \WP_REST_Application_Passwords_Controller() )->register_routes();
+
+		$pre_insert_calls = array();
+		$after_calls      = array();
+		$prepare_calls    = array();
+		$pre_filter       = static function ( $prepared, \WP_REST_Request $request ) use ( &$pre_insert_calls ) {
+			$pre_insert_calls[] = array(
+				'method' => $request->get_method(),
+				'name'   => isset( $prepared->name ) ? (string) $prepared->name : null,
+				'appId'  => isset( $prepared->app_id ) ? (string) $prepared->app_id : null,
+				'uuid'   => $request['uuid'],
+			);
+			return $prepared;
+		};
+		$after_action     = static function ( array $item, \WP_REST_Request $request, bool $creating ) use ( &$after_calls ): void {
+			$after_calls[] = array(
+				'creating' => $creating,
+				'method'   => $request->get_method(),
+				'uuid'     => $item['uuid'] ?? null,
+				'name'     => $item['name'] ?? null,
+				'appId'    => $item['app_id'] ?? null,
+			);
+		};
+		$prepare_filter   = static function ( \WP_REST_Response $response, array $item, \WP_REST_Request $request ) use ( &$prepare_calls ): \WP_REST_Response {
+			$prepare_calls[] = array(
+				'context' => $request['context'],
+				'method'  => $request->get_method(),
+				'uuid'    => $item['uuid'] ?? null,
+				'fields'  => $request['_fields'],
+			);
+			return $response;
+		};
+
+		$auth_uuid_existed = array_key_exists( 'wp_rest_application_password_uuid', $GLOBALS );
+		$auth_uuid_before = $GLOBALS['wp_rest_application_password_uuid'] ?? null;
+
+		\add_filter( 'rest_pre_insert_application_password', $pre_filter, 10, 2 );
+		\add_action( 'rest_after_insert_application_password', $after_action, 10, 3 );
+		\add_filter( 'rest_prepare_application_password', $prepare_filter, 10, 3 );
+
+		try {
+			$empty_initial = \WP_Application_Passwords::get_user_application_passwords( $users['primary'] );
+
+			\wp_set_current_user( 0 );
+			$logged_out_create = self::dispatch(
+				$server,
+				self::request(
+					'POST',
+					'/wp/v2/users/me/application-passwords',
+					array(),
+					array(),
+					array(
+						'app_id' => $case['appId'],
+						'name'   => $case['nameRaw'],
+					)
+				)
+			);
+			$after_logged_out_create = \WP_Application_Passwords::get_user_application_passwords( $users['primary'] );
+			\wp_set_current_user( $users['primary'] );
+
+			$missing_name = self::dispatch(
+				$server,
+				self::request(
+					'POST',
+					'/wp/v2/users/' . $users['primary'] . '/application-passwords',
+					array(),
+					array(),
+					array( 'app_id' => $case['appId'] )
+				)
+			);
+			$after_missing_name = \WP_Application_Passwords::get_user_application_passwords( $users['primary'] );
+
+			$blank_name = self::dispatch(
+				$server,
+				self::request(
+					'POST',
+					'/wp/v2/users/' . $users['primary'] . '/application-passwords',
+					array(),
+					array(),
+					array(
+						'app_id' => $case['appId'],
+						'name'   => " \t\n",
+					)
+				)
+			);
+			$after_blank_name = \WP_Application_Passwords::get_user_application_passwords( $users['primary'] );
+
+			$invalid_app_id = self::dispatch(
+				$server,
+				self::request(
+					'POST',
+					'/wp/v2/users/' . $users['primary'] . '/application-passwords',
+					array(),
+					array(),
+					array(
+						'app_id' => 'not-a-valid-uuid-' . $case['token'],
+						'name'   => $case['nameRaw'],
+					)
+				)
+			);
+			$after_invalid_app_id = \WP_Application_Passwords::get_user_application_passwords( $users['primary'] );
+
+			$create_response = self::dispatch(
+				$server,
+				self::request(
+					'POST',
+					'/wp/v2/users/' . $users['primary'] . '/application-passwords',
+					array(
+						'context' => 'edit',
+						'_fields' => 'uuid,name,app_id,password,_links',
+					),
+					array(),
+					array(
+						'app_id' => $case['appId'],
+						'name'   => $case['nameRaw'],
+					)
+				)
+			);
+			$create_data     = $create_response instanceof \WP_REST_Response ? $create_response->get_data() : array();
+			$create_links    = $create_response instanceof \WP_REST_Response ? $create_response->get_links() : array();
+			$create_headers  = $create_response instanceof \WP_REST_Response ? $create_response->get_headers() : array();
+			$created_uuid    = is_array( $create_data ) ? (string) ( $create_data['uuid'] ?? '' ) : '';
+			$created_plain   = is_array( $create_data ) ? str_replace( ' ', '', (string) ( $create_data['password'] ?? '' ) ) : '';
+			$created_stored  = '' !== $created_uuid ? \WP_Application_Passwords::get_user_application_password( $users['primary'], $created_uuid ) : null;
+			$after_create    = \WP_Application_Passwords::get_user_application_passwords( $users['primary'] );
+
+			$before_invalid_update = \WP_Application_Passwords::get_user_application_password( $users['primary'], $created_uuid );
+			$invalid_update        = self::dispatch(
+				$server,
+				self::request(
+					'PUT',
+					'/wp/v2/users/' . $users['primary'] . '/application-passwords/' . $created_uuid,
+					array(),
+					array(),
+					array( 'name' => "\n\t " )
+				)
+			);
+			$after_invalid_update = \WP_Application_Passwords::get_user_application_password( $users['primary'], $created_uuid );
+
+			$update_response = self::dispatch(
+				$server,
+				self::request(
+					'PUT',
+					'/wp/v2/users/' . $users['primary'] . '/application-passwords/' . $created_uuid,
+					array(
+						'context' => 'edit',
+						'_fields' => 'uuid,name,app_id,created,_links',
+					),
+					array(),
+					array(
+						'app_id' => $case['updatedAppId'],
+						'name'   => $case['updatedNameRaw'],
+					)
+				)
+			);
+			$update_data    = $update_response instanceof \WP_REST_Response ? $update_response->get_data() : array();
+			$update_links   = $update_response instanceof \WP_REST_Response ? $update_response->get_links() : array();
+			$updated_stored = \WP_Application_Passwords::get_user_application_password( $users['primary'], $created_uuid );
+
+			$GLOBALS['wp_rest_application_password_uuid'] = $created_uuid;
+			$introspection = self::dispatch(
+				$server,
+				self::request(
+					'GET',
+					'/wp/v2/users/me/application-passwords/introspect',
+					array(
+						'context' => 'view',
+						'_fields' => 'uuid,name,app_id',
+					)
+				)
+			);
+			$introspection_data = $introspection instanceof \WP_REST_Response ? $introspection->get_data() : array();
+
+			self::$denied_caps = array( 'delete_app_password' => true );
+			$denied_delete     = self::dispatch( $server, self::request( 'DELETE', '/wp/v2/users/' . $users['primary'] . '/application-passwords/' . $created_uuid ) );
+			self::$denied_caps = array();
+			$after_denied_delete = \WP_Application_Passwords::get_user_application_password( $users['primary'], $created_uuid );
+
+			$delete_response = self::dispatch( $server, self::request( 'DELETE', '/wp/v2/users/' . $users['primary'] . '/application-passwords/' . $created_uuid ) );
+			$delete_data     = $delete_response instanceof \WP_REST_Response ? $delete_response->get_data() : array();
+			$after_delete    = \WP_Application_Passwords::get_user_application_password( $users['primary'], $created_uuid );
+			$missing_after_delete = self::dispatch( $server, self::request( 'GET', '/wp/v2/users/' . $users['primary'] . '/application-passwords/' . $created_uuid ) );
+
+			$first_bulk  = self::create_password_fixture( $users['primary'], $case['bulkNameA'], self::uuid_from_token( $case['token'] . '-matrix-a' ) );
+			$second_bulk = self::create_password_fixture( $users['primary'], $case['bulkNameB'], self::uuid_from_token( $case['token'] . '-matrix-b' ) );
+			$bulk_delete = self::dispatch( $server, self::request( 'DELETE', '/wp/v2/users/' . $users['primary'] . '/application-passwords' ) );
+			$bulk_data   = $bulk_delete instanceof \WP_REST_Response ? $bulk_delete->get_data() : array();
+			$after_bulk_delete = \WP_Application_Passwords::get_user_application_passwords( $users['primary'] );
+		} finally {
+			self::$denied_caps = array();
+			if ( $auth_uuid_existed ) {
+				$GLOBALS['wp_rest_application_password_uuid'] = $auth_uuid_before;
+			} else {
+				unset( $GLOBALS['wp_rest_application_password_uuid'] );
+			}
+
+			\remove_filter( 'rest_prepare_application_password', $prepare_filter, 10 );
+			\remove_action( 'rest_after_insert_application_password', $after_action, 10 );
+			\remove_filter( 'rest_pre_insert_application_password', $pre_filter, 10 );
+		}
+
+		self::collect_failure(
+			$failures,
+			self::response_error_ok( $logged_out_create, 'rest_not_logged_in', 401 )
+				&& $empty_initial === $after_logged_out_create,
+			'route-dispatched create for me denies logged-out users before storage mutation',
+			array(
+				'response' => $logged_out_create,
+				'before'   => $empty_initial,
+				'after'    => $after_logged_out_create,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::response_error_ok( $missing_name, 'rest_missing_callback_param', 400 )
+				&& self::response_error_ok( $blank_name, 'rest_invalid_param', 400 )
+				&& self::response_error_ok( $invalid_app_id, 'rest_invalid_param', 400 )
+				&& $empty_initial === $after_missing_name
+				&& $empty_initial === $after_blank_name
+				&& $empty_initial === $after_invalid_app_id,
+			'route schema rejects missing name, blank name, and malformed app_id before storage mutation',
+			array(
+				'missingName'     => $missing_name,
+				'blankName'       => $blank_name,
+				'invalidAppId'    => $invalid_app_id,
+				'afterMissing'    => $after_missing_name,
+				'afterBlank'      => $after_blank_name,
+				'afterInvalidApp' => $after_invalid_app_id,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$create_response instanceof \WP_REST_Response
+				&& 201 === $create_response->get_status()
+				&& '' !== $created_uuid
+				&& $case['nameSanitized'] === ( $create_data['name'] ?? null )
+				&& $case['appId'] === ( $create_data['app_id'] ?? null )
+				&& \WP_Application_Passwords::PW_LENGTH === strlen( $created_plain )
+				&& is_array( $created_stored )
+				&& \WP_Application_Passwords::check_password( $created_plain, (string) ( $created_stored['password'] ?? '' ) )
+				&& isset( $create_links['self'][0]['href'], $create_headers['Location'] )
+				&& str_contains( (string) $create_headers['Location'], $created_uuid )
+				&& 1 === count( $after_create ),
+			'route-dispatched numeric-user create returns one-time password, self link, Location header, and stored hash',
+			array(
+				'createStatus' => $create_response instanceof \WP_REST_Response ? $create_response->get_status() : null,
+				'createData'   => $create_data,
+				'createLinks'  => $create_links,
+				'headers'      => $create_headers,
+				'stored'       => $created_stored,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::response_error_ok( $invalid_update, 'rest_invalid_param', 400 )
+				&& $before_invalid_update === $after_invalid_update,
+			'route-dispatched PUT rejects invalid names before updating the stored password item',
+			array(
+				'response' => $invalid_update,
+				'before'   => $before_invalid_update,
+				'after'    => $after_invalid_update,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$update_response instanceof \WP_REST_Response
+				&& 200 === $update_response->get_status()
+				&& array( 'app_id', 'created', 'name', 'uuid' ) === self::sorted_keys( $update_data )
+				&& $created_uuid === ( $update_data['uuid'] ?? null )
+				&& $case['updatedNameSanitized'] === ( $update_data['name'] ?? null )
+				&& $case['appId'] === ( $update_data['app_id'] ?? null )
+				&& is_array( $updated_stored )
+				&& $case['updatedNameSanitized'] === ( $updated_stored['name'] ?? null )
+				&& $case['appId'] === ( $updated_stored['app_id'] ?? null )
+				&& isset( $update_links['self'][0]['href'] )
+				&& str_contains( (string) $update_links['self'][0]['href'], $created_uuid ),
+			'route-dispatched PUT updates mutable fields, ignores app_id changes, and projects response fields',
+			array(
+				'updateStatus' => $update_response instanceof \WP_REST_Response ? $update_response->get_status() : null,
+				'updateData'   => $update_data,
+				'updateLinks'  => $update_links,
+				'stored'       => $updated_stored,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$introspection instanceof \WP_REST_Response
+				&& 200 === $introspection->get_status()
+				&& array( 'app_id', 'name', 'uuid' ) === self::sorted_keys( $introspection_data )
+				&& $created_uuid === ( $introspection_data['uuid'] ?? null )
+				&& $case['updatedNameSanitized'] === ( $introspection_data['name'] ?? null )
+				&& $case['appId'] === ( $introspection_data['app_id'] ?? null ),
+			'route-dispatched introspection returns the authenticated updated item with requested fields',
+			array(
+				'introspectionStatus' => $introspection instanceof \WP_REST_Response ? $introspection->get_status() : null,
+				'introspectionData'   => $introspection_data,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::response_error_ok( $denied_delete, 'rest_cannot_delete_application_password', 403 )
+				&& $updated_stored === $after_denied_delete,
+			'route-dispatched delete permission denial preserves the stored password item',
+			array(
+				'response' => $denied_delete,
+				'before'   => $updated_stored,
+				'after'    => $after_denied_delete,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$delete_response instanceof \WP_REST_Response
+				&& 200 === $delete_response->get_status()
+				&& true === ( $delete_data['deleted'] ?? null )
+				&& $created_uuid === ( $delete_data['previous']['uuid'] ?? null )
+				&& $case['updatedNameSanitized'] === ( $delete_data['previous']['name'] ?? null )
+				&& null === $after_delete
+				&& self::response_error_ok( $missing_after_delete, 'rest_application_password_not_found', 404 ),
+			'route-dispatched delete returns previous data, removes the item, and makes subsequent reads fail',
+			array(
+				'deleteStatus' => $delete_response instanceof \WP_REST_Response ? $delete_response->get_status() : null,
+				'deleteData'   => $delete_data,
+				'afterDelete'  => $after_delete,
+				'missingAfter' => $missing_after_delete,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			is_array( $first_bulk )
+				&& is_array( $second_bulk )
+				&& $bulk_delete instanceof \WP_REST_Response
+				&& 200 === $bulk_delete->get_status()
+				&& true === ( $bulk_data['deleted'] ?? null )
+				&& 2 === (int) ( $bulk_data['count'] ?? -1 )
+				&& array() === $after_bulk_delete,
+			'route-dispatched collection delete removes all selected-user passwords and reports the exact count',
+			array(
+				'firstBulk' => $first_bulk,
+				'secondBulk' => $second_bulk,
+				'bulkData'   => $bulk_data,
+				'afterBulk'  => $after_bulk_delete,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			array(
+				array(
+					'method' => 'POST',
+					'name'   => $case['nameRaw'],
+					'appId'  => $case['appId'],
+					'uuid'   => null,
+				),
+				array(
+					'method' => 'PUT',
+					'name'   => $case['updatedNameRaw'],
+					'appId'  => null,
+					'uuid'   => $created_uuid,
+				),
+			) === $pre_insert_calls
+				&& 2 === count( $after_calls )
+				&& true === ( $after_calls[0]['creating'] ?? null )
+				&& false === ( $after_calls[1]['creating'] ?? null )
+				&& $created_uuid === ( $after_calls[0]['uuid'] ?? null )
+				&& $created_uuid === ( $after_calls[1]['uuid'] ?? null )
+				&& count( $prepare_calls ) >= 4
+				&& false === \has_filter( 'rest_pre_insert_application_password', $pre_filter )
+				&& false === \has_filter( 'rest_after_insert_application_password', $after_action )
+				&& false === \has_filter( 'rest_prepare_application_password', $prepare_filter ),
+			'route-dispatched mutation hooks fire only for successful create/update paths and are removed',
+			array(
+				'preInsertCalls' => $pre_insert_calls,
+				'afterCalls'    => $after_calls,
+				'prepareCalls'  => array_slice( $prepare_calls, 0, 12 ),
+				'filters'       => array(
+					'preInsert' => \has_filter( 'rest_pre_insert_application_password', $pre_filter ),
+					'after'     => \has_filter( 'rest_after_insert_application_password', $after_action ),
+					'prepare'   => \has_filter( 'rest_prepare_application_password', $prepare_filter ),
+				),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'rest-application-passwords.route-dispatched-mutation-matrix',
+			array() === $failures,
+			array(
+				'case'        => self::case_summary( $case ),
+				'createdUuid' => $created_uuid,
+				'failures'    => array_slice( $failures, 0, 8 ),
 			)
 		);
 	}
@@ -1171,10 +1582,25 @@ final class RestApplicationPasswordsSurface {
 	private static function fresh_server(): \WP_REST_Server {
 		$server                    = new \WP_REST_Server();
 		$GLOBALS['wp_rest_server'] = $server;
-		if ( function_exists( 'rest_api_default_filters' ) ) {
-			\rest_api_default_filters();
-		}
+		self::ensure_rest_default_filters();
 		return $server;
+	}
+
+	private static function ensure_rest_default_filters(): void {
+		$filters = array(
+			array( 'rest_pre_serve_request', 'rest_send_cors_headers', 10, 1 ),
+			array( 'rest_post_dispatch', 'rest_send_allow_header', 10, 3 ),
+			array( 'rest_post_dispatch', 'rest_filter_response_fields', 10, 3 ),
+			array( 'rest_pre_dispatch', 'rest_handle_options_request', 10, 3 ),
+			array( 'rest_index', 'rest_add_application_passwords_to_index', 10, 1 ),
+		);
+
+		foreach ( $filters as $filter ) {
+			list( $hook, $callback, $priority, $accepted_args ) = $filter;
+			if ( function_exists( $callback ) && false === \has_filter( $hook, $callback ) ) {
+				\add_filter( $hook, $callback, $priority, $accepted_args );
+			}
+		}
 	}
 
 	private static function dispatch( \WP_REST_Server $server, \WP_REST_Request $request ): \WP_REST_Response {
@@ -1521,7 +1947,7 @@ final class RestApplicationPasswordsSurface {
 		foreach ( $names as $name ) {
 			$snapshot[ $name ] = array(
 				'exists' => array_key_exists( $name, $GLOBALS ),
-				'value'  => array_key_exists( $name, $GLOBALS ) ? $GLOBALS[ $name ] : null,
+				'value'  => array_key_exists( $name, $GLOBALS ) ? self::clone_value( $GLOBALS[ $name ] ) : null,
 			);
 		}
 		return $snapshot;
@@ -1530,11 +1956,27 @@ final class RestApplicationPasswordsSurface {
 	private static function restore_globals( array $snapshot ): void {
 		foreach ( $snapshot as $name => $entry ) {
 			if ( $entry['exists'] ) {
-				$GLOBALS[ $name ] = $entry['value'];
+				$GLOBALS[ $name ] = self::clone_value( $entry['value'] );
 			} else {
 				unset( $GLOBALS[ $name ] );
 			}
 		}
+	}
+
+	private static function clone_value( $value ) {
+		if ( is_object( $value ) ) {
+			return clone $value;
+		}
+
+		if ( is_array( $value ) ) {
+			$copy = array();
+			foreach ( $value as $key => $item ) {
+				$copy[ $key ] = self::clone_value( $item );
+			}
+			return $copy;
+		}
+
+		return $value;
 	}
 
 	private static function snapshot_wpdb(): ?array {
