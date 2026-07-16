@@ -34,6 +34,7 @@ final class RevisionsAutosavesSurface {
 			$rows[] = self::check_revision_ui_payloads( $ctx->fork( 'ui' ), $case );
 			$rows[] = self::check_preview_helper( $ctx->fork( 'preview' ), $case );
 			$rows[] = self::check_preview_request_dispatch( $ctx->fork( 'preview-dispatch' ), $case );
+			$rows[] = self::check_rest_revision_autosave_route_dispatch( $ctx->fork( 'rest-dispatch' ), $case );
 			$rows[] = self::check_latest_revision_count_and_url_helpers( $ctx->fork( 'latest-count-url' ), $case );
 			$rows[] = self::check_user_filtered_autosave_lookup( $ctx->fork( 'user-filtered-autosave' ), $case );
 			$rows[] = self::check_revision_template_output( $ctx->fork( 'templates' ), $case );
@@ -55,9 +56,16 @@ final class RevisionsAutosavesSurface {
 	}
 
 	private static function missing_requirements(): array {
+		self::load_rest_endpoint_classes();
+
 		$missing = array();
 
 		foreach ( array( 'Component_Fuzz_WPDB_Stub', 'WP_Error', 'WP_Post', 'WP_Query', 'WP_Rewrite' ) as $class ) {
+			if ( ! class_exists( $class, false ) ) {
+				$missing[] = "class {$class}";
+			}
+		}
+		foreach ( array( 'WP_REST_Autosaves_Controller', 'WP_REST_Post_Meta_Fields', 'WP_REST_Posts_Controller', 'WP_REST_Request', 'WP_REST_Response', 'WP_REST_Revisions_Controller', 'WP_REST_Server' ) as $class ) {
 			if ( ! class_exists( $class, false ) ) {
 				$missing[] = "class {$class}";
 			}
@@ -95,8 +103,13 @@ final class RevisionsAutosavesSurface {
 				'post_type_exists',
 				'register_post_meta',
 				'register_post_type',
+				'register_rest_route',
 				'remove_action',
 				'remove_filter',
+				'rest_authorization_required_code',
+				'rest_ensure_response',
+				'rest_get_route_for_post',
+				'rest_url',
 				'sanitize_key',
 				'sanitize_title',
 				'unregister_meta_key',
@@ -152,6 +165,27 @@ final class RevisionsAutosavesSurface {
 		}
 
 		return $missing;
+	}
+
+	private static function load_rest_endpoint_classes(): void {
+		if ( ! defined( 'ABSPATH' ) ) {
+			return;
+		}
+
+		foreach (
+			array(
+				'wp-includes/rest-api/fields/class-wp-rest-meta-fields.php',
+				'wp-includes/rest-api/fields/class-wp-rest-post-meta-fields.php',
+				'wp-includes/rest-api/endpoints/class-wp-rest-posts-controller.php',
+				'wp-includes/rest-api/endpoints/class-wp-rest-revisions-controller.php',
+				'wp-includes/rest-api/endpoints/class-wp-rest-autosaves-controller.php',
+			) as $file
+		) {
+			$path = ABSPATH . $file;
+			if ( file_exists( $path ) ) {
+				require_once $path;
+			}
+		}
 	}
 
 	private static function check_revision_field_data_contracts( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
@@ -1826,6 +1860,418 @@ final class RevisionsAutosavesSurface {
 		);
 	}
 
+	private static function check_rest_revision_autosave_route_dispatch( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		self::prepare_runtime();
+		$rest_base = self::register_rest_case_post_type( $case );
+		$server    = self::fresh_rest_server();
+
+		$post_type = \get_post_type_object( $case['postType'] );
+		if ( ! $post_type ) {
+			return self::result(
+				$ctx,
+				'revisions-autosaves.rest-revision-autosave-route-dispatch',
+				array(
+					array(
+						'label'   => 'REST case post type is registered',
+						'details' => array( 'postType' => $case['postType'] ),
+					),
+				),
+				array( 'case' => self::case_summary( $case ) )
+			);
+		}
+
+		$parent_controller   = $post_type->get_rest_controller();
+		$revision_controller = $post_type->get_revisions_rest_controller();
+		$autosave_controller = $post_type->get_autosave_rest_controller();
+		if ( $parent_controller ) {
+			$parent_controller->register_routes();
+		}
+		if ( $revision_controller ) {
+			$revision_controller->register_routes();
+		}
+		if ( $autosave_controller ) {
+			$autosave_controller->register_routes();
+		}
+
+		$failures        = array();
+		$author_id       = self::insert_author( $case, 'rest-dispatch-author' );
+		$editor_id       = self::insert_author( $case, 'rest-dispatch-editor' );
+		$post_id         = self::insert_parent_post( $case, $author_id, 'rest-dispatch-parent' );
+		$other_parent_id = self::insert_parent_post( $case, $author_id, 'rest-dispatch-other-parent' );
+		$old_revision_id = self::insert_revision_row(
+			$post_id,
+			$author_id,
+			array(
+				'post_title'        => $case['titleFrom'] . ' REST old revision',
+				'post_content'      => $case['contentFrom'] . "\nREST old revision",
+				'post_excerpt'      => $case['excerptFrom'],
+				'post_date'         => $case['dateFrom'],
+				'post_date_gmt'     => $case['dateFromGmt'],
+				'post_modified'     => $case['dateFrom'],
+				'post_modified_gmt' => $case['dateFromGmt'],
+			),
+			false
+		);
+		$new_revision_id = self::insert_revision_row(
+			$post_id,
+			$author_id,
+			array(
+				'post_title'        => $case['titleTo'] . ' REST latest revision',
+				'post_content'      => $case['contentTo'] . "\nREST latest revision",
+				'post_excerpt'      => $case['excerptTo'],
+				'post_date'         => $case['dateTo'],
+				'post_date_gmt'     => $case['dateToGmt'],
+				'post_modified'     => $case['dateTo'],
+				'post_modified_gmt' => $case['dateToGmt'],
+			),
+			false
+		);
+		$wrong_parent_revision_id = self::insert_revision_row(
+			$other_parent_id,
+			$author_id,
+			array(
+				'post_title'        => $case['titleTo'] . ' REST other parent revision',
+				'post_content'      => $case['contentTo'] . "\nREST other parent revision",
+				'post_excerpt'      => $case['excerptTo'],
+				'post_date'         => $case['dateLater'],
+				'post_date_gmt'     => $case['dateLaterGmt'],
+				'post_modified'     => $case['dateLater'],
+				'post_modified_gmt' => $case['dateLaterGmt'],
+			),
+			false
+		);
+
+		$revision_route = '/wp/v2/' . $rest_base . '/' . $post_id . '/revisions';
+		$autosave_route = '/wp/v2/' . $rest_base . '/' . $post_id . '/autosaves';
+		$grant_caps     = self::grant_all_caps_filter( $editor_id );
+		$query_calls    = array();
+		$prepare_revision_calls = array();
+		$prepare_autosave_calls = array();
+		$delete_calls   = array();
+		$delete_revision_cap_filter = static function ( array $caps, string $cap, int $user_id, array $args ) use ( $editor_id ): array {
+			if ( 'delete_post' !== $cap || (int) $editor_id !== (int) $user_id || empty( $args[0] ) ) {
+				return $caps;
+			}
+
+			$post = \get_post( (int) $args[0] );
+			if ( $post instanceof \WP_Post && 'revision' === $post->post_type ) {
+				return array( 'delete_posts' );
+			}
+
+			return $caps;
+		};
+		$query_filter   = static function ( array $args, \WP_REST_Request $request ) use ( &$query_calls ): array {
+			$query_calls[] = array(
+				'route'       => $request->get_route(),
+				'method'      => $request->get_method(),
+				'postParent'  => $args['post_parent'] ?? null,
+				'perPage'     => $args['posts_per_page'] ?? null,
+				'order'       => $args['order'] ?? null,
+				'orderBy'     => $args['orderby'] ?? null,
+				'suppress'    => $args['suppress_filters'] ?? null,
+			);
+			return $args;
+		};
+		$revision_filter = static function ( \WP_REST_Response $response, \WP_Post $post, \WP_REST_Request $request ) use ( &$prepare_revision_calls ): \WP_REST_Response {
+			$prepare_revision_calls[] = array(
+				'id'      => (int) $post->ID,
+				'parent'  => (int) $post->post_parent,
+				'route'   => $request->get_route(),
+				'method'  => $request->get_method(),
+				'context' => $request['context'],
+				'fields'  => $request['_fields'],
+			);
+			return $response;
+		};
+		$autosave_filter = static function ( \WP_REST_Response $response, \WP_Post $post, \WP_REST_Request $request ) use ( &$prepare_autosave_calls ): \WP_REST_Response {
+			$prepare_autosave_calls[] = array(
+				'id'      => (int) $post->ID,
+				'parent'  => (int) $post->post_parent,
+				'route'   => $request->get_route(),
+				'method'  => $request->get_method(),
+				'context' => $request['context'],
+				'fields'  => $request['_fields'],
+			);
+			return $response;
+		};
+		$delete_action   = static function ( $result, \WP_REST_Request $request ) use ( &$delete_calls ): void {
+			$delete_calls[] = array(
+				'id'       => (int) $request['id'],
+				'parent'   => (int) $request['parent'],
+				'force'    => (bool) $request['force'],
+				'deleted'  => $result instanceof \WP_Post ? (int) $result->ID : null,
+				'postType' => $result instanceof \WP_Post ? $result->post_type : null,
+			);
+		};
+
+		\add_filter( 'rest_revision_query', $query_filter, 10, 2 );
+		\add_filter( 'rest_prepare_revision', $revision_filter, 10, 3 );
+		\add_filter( 'rest_prepare_autosave', $autosave_filter, 10, 3 );
+		\add_action( 'rest_delete_revision', $delete_action, 10, 2 );
+
+		try {
+			\wp_set_current_user( 0 );
+			$denied_collection = self::dispatch( $server, self::request( 'GET', $revision_route ) );
+
+			\wp_set_current_user( $editor_id );
+			\add_filter( 'user_has_cap', $grant_caps, 10, 4 );
+			\add_filter( 'map_meta_cap', $delete_revision_cap_filter, 10, 4 );
+
+			$invalid_parent = self::dispatch( $server, self::request( 'GET', '/wp/v2/' . $rest_base . '/0/revisions' ) );
+			$invalid_order  = self::dispatch(
+				$server,
+				self::request(
+					'GET',
+					$revision_route,
+					array(
+						'orderby' => 'relevance',
+					)
+				)
+			);
+			$collection     = self::dispatch(
+				$server,
+				self::request(
+					'GET',
+					$revision_route,
+					array(
+						'context'  => 'edit',
+						'_fields'  => 'id,parent,slug,title.raw,content.raw,_links',
+						'orderby'  => 'date',
+						'order'    => 'desc',
+						'per_page' => 2,
+					)
+				)
+			);
+			$collection_data    = $collection instanceof \WP_REST_Response ? $collection->get_data() : array();
+			$collection_headers = $collection instanceof \WP_REST_Response ? $collection->get_headers() : array();
+
+			$mismatch_item = self::dispatch( $server, self::request( 'GET', $revision_route . '/' . $wrong_parent_revision_id ) );
+			$valid_item    = self::dispatch(
+				$server,
+				self::request(
+					'GET',
+					$revision_route . '/' . $new_revision_id,
+					array(
+						'context' => 'edit',
+						'_fields' => 'id,parent,title.raw,content.raw,_links',
+					)
+				)
+			);
+			$valid_item_data  = $valid_item instanceof \WP_REST_Response ? $valid_item->get_data() : array();
+			$valid_item_links = $valid_item instanceof \WP_REST_Response ? $valid_item->get_links() : array();
+
+			$delete_without_force = self::dispatch( $server, self::request( 'DELETE', $revision_route . '/' . $old_revision_id ) );
+			$after_soft_delete    = \get_post( $old_revision_id );
+			$delete_with_force    = self::dispatch(
+				$server,
+				self::request(
+					'DELETE',
+					$revision_route . '/' . $old_revision_id,
+					array(
+						'force'   => true,
+						'context' => 'edit',
+					)
+				)
+			);
+			$delete_data          = $delete_with_force instanceof \WP_REST_Response ? $delete_with_force->get_data() : array();
+			$after_force_delete   = \get_post( $old_revision_id );
+			$missing_deleted      = self::dispatch( $server, self::request( 'GET', $revision_route . '/' . $old_revision_id ) );
+
+			$invalid_autosave_parent = self::dispatch( $server, self::request( 'GET', '/wp/v2/' . $rest_base . '/0/autosaves' ) );
+			$autosave_id             = self::insert_revision_row(
+				$post_id,
+				$editor_id,
+				array(
+					'post_title'        => $case['titleTo'] . ' REST autosave',
+					'post_content'      => $case['contentTo'] . "\nREST autosave body",
+					'post_excerpt'      => $case['excerptTo'] . ' REST autosave',
+					'post_date'         => $case['dateLater'],
+					'post_date_gmt'     => $case['dateLaterGmt'],
+					'post_modified'     => $case['dateLater'],
+					'post_modified_gmt' => $case['dateLaterGmt'],
+				),
+				true
+			);
+			$autosave_post           = \get_post( $autosave_id );
+
+			$autosave_collection = self::dispatch(
+				$server,
+				self::request(
+					'GET',
+					$autosave_route,
+					array(
+						'context' => 'edit',
+						'_fields' => 'id,parent,title.raw,preview_link',
+					)
+				)
+			);
+			$autosave_collection_data = $autosave_collection instanceof \WP_REST_Response ? $autosave_collection->get_data() : array();
+			$autosave_item            = self::dispatch(
+				$server,
+				self::request(
+					'GET',
+					$autosave_route . '/' . $autosave_id,
+					array(
+						'context' => 'edit',
+						'_fields' => 'id,parent,title.raw,preview_link',
+					)
+				)
+			);
+			$autosave_item_data = $autosave_item instanceof \WP_REST_Response ? $autosave_item->get_data() : array();
+		} finally {
+			\remove_action( 'rest_delete_revision', $delete_action, 10 );
+			\remove_filter( 'rest_prepare_autosave', $autosave_filter, 10 );
+			\remove_filter( 'rest_prepare_revision', $revision_filter, 10 );
+			\remove_filter( 'rest_revision_query', $query_filter, 10 );
+			\remove_filter( 'map_meta_cap', $delete_revision_cap_filter, 10 );
+			\remove_filter( 'user_has_cap', $grant_caps, 10 );
+			\wp_set_current_user( 0 );
+		}
+
+		self::collect_failure(
+			$failures,
+			self::response_error_ok( $denied_collection, 'rest_cannot_read', \rest_authorization_required_code() ),
+			'REST revisions collection denies anonymous users before returning revision rows',
+			array( 'response' => self::response_summary( $denied_collection ) )
+		);
+		self::collect_failure(
+			$failures,
+			self::response_error_ok( $invalid_parent, 'rest_post_invalid_parent', 404 )
+				&& self::response_error_ok( $invalid_order, 'rest_no_search_term_defined', 400 ),
+			'REST revisions route fails closed for invalid parents and relevance ordering without a search term',
+			array(
+				'invalidParent' => self::response_summary( $invalid_parent ),
+				'invalidOrder'  => self::response_summary( $invalid_order ),
+			)
+		);
+		self::collect_failure(
+			$failures,
+			$collection instanceof \WP_REST_Response
+				&& 200 === $collection->get_status()
+				&& is_array( $collection_data )
+				&& 2 === count( $collection_data )
+				&& array( $new_revision_id, $old_revision_id ) === array_map( 'intval', array_column( $collection_data, 'id' ) )
+				&& (int) $post_id === (int) ( $collection_data[0]['parent'] ?? 0 )
+				&& $case['titleTo'] . ' REST latest revision' === ( $collection_data[0]['title']['raw'] ?? null )
+				&& $case['contentTo'] . "\nREST latest revision" === ( $collection_data[0]['content']['raw'] ?? null )
+				&& 2 === (int) ( $collection_headers['X-WP-Total'] ?? 0 )
+				&& 1 === (int) ( $collection_headers['X-WP-TotalPages'] ?? 0 )
+				&& 1 === count( $query_calls )
+				&& (int) $post_id === (int) ( $query_calls[0]['postParent'] ?? 0 )
+				&& true === (bool) ( $query_calls[0]['suppress'] ?? false ),
+			'REST revisions collection dispatch returns only the parent revisions in date order with pagination headers and query filter payloads',
+			array(
+				'collection' => self::response_summary( $collection ),
+				'headers'    => $collection_headers,
+				'queryCalls' => $query_calls,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			self::response_error_ok( $mismatch_item, 'rest_revision_parent_id_mismatch', 404 )
+				&& $valid_item instanceof \WP_REST_Response
+				&& 200 === $valid_item->get_status()
+				&& $new_revision_id === (int) ( $valid_item_data['id'] ?? 0 )
+				&& (int) $post_id === (int) ( $valid_item_data['parent'] ?? 0 )
+				&& $case['titleTo'] . ' REST latest revision' === ( $valid_item_data['title']['raw'] ?? null )
+				&& isset( $valid_item_links['parent'][0]['href'] )
+				&& str_contains( (string) $valid_item_links['parent'][0]['href'], '/' . $rest_base . '/' . $post_id ),
+			'REST revision item dispatch enforces parent matching and projects requested raw fields and parent link',
+			array(
+				'mismatch' => self::response_summary( $mismatch_item ),
+				'item'     => self::response_summary( $valid_item ),
+				'links'    => $valid_item_links,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			self::response_error_ok( $delete_without_force, 'rest_trash_not_supported', 501 )
+				&& $after_soft_delete instanceof \WP_Post
+				&& $delete_with_force instanceof \WP_REST_Response
+				&& 200 === $delete_with_force->get_status()
+				&& true === ( $delete_data['deleted'] ?? null )
+				&& $old_revision_id === (int) ( $delete_data['previous']['id'] ?? 0 )
+				&& null === $after_force_delete
+				&& self::response_error_ok( $missing_deleted, 'rest_post_invalid_id', 404 )
+				&& 1 === count( $delete_calls )
+				&& $old_revision_id === (int) ( $delete_calls[0]['id'] ?? 0 )
+				&& true === ( $delete_calls[0]['force'] ?? false ),
+			'REST revision delete refuses trashing, force-deletes the revision, returns previous data, and fires delete hooks',
+			array(
+				'withoutForce' => self::response_summary( $delete_without_force ),
+				'withForce'    => self::response_summary( $delete_with_force ),
+				'deleteCalls'  => $delete_calls,
+				'missing'      => self::response_summary( $missing_deleted ),
+			)
+		);
+		self::collect_failure(
+			$failures,
+			self::response_error_ok( $invalid_autosave_parent, 'rest_post_invalid_parent', 404 )
+				&& $autosave_post instanceof \WP_Post
+				&& $post_id === (int) $autosave_post->post_parent
+				&& "{$post_id}-autosave-v1" === $autosave_post->post_name,
+			'REST autosave routes validate parent IDs and use seeded autosave revision rows for read projection',
+			array(
+				'invalidParent' => self::response_summary( $invalid_autosave_parent ),
+				'autosavePost'  => self::post_summary( $autosave_post ),
+			)
+		);
+		self::collect_failure(
+			$failures,
+			$autosave_collection instanceof \WP_REST_Response
+				&& 200 === $autosave_collection->get_status()
+				&& is_array( $autosave_collection_data )
+				&& 1 === count( $autosave_collection_data )
+				&& $autosave_id === (int) ( $autosave_collection_data[0]['id'] ?? 0 )
+				&& $autosave_id === (int) ( $autosave_item_data['id'] ?? 0 )
+				&& ( $autosave_collection_data[0]['preview_link'] ?? null ) === ( $autosave_item_data['preview_link'] ?? null )
+				&& $case['titleTo'] . ' REST autosave' === ( $autosave_item_data['title']['raw'] ?? null )
+				&& count( $prepare_autosave_calls ) >= 2,
+			'REST autosave collection and item dispatch expose the current autosave with stable preview links',
+			array(
+				'collection'     => self::response_summary( $autosave_collection ),
+				'item'           => self::response_summary( $autosave_item ),
+				'prepareAutosave' => $prepare_autosave_calls,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			in_array( $new_revision_id, array_map( 'intval', array_column( $prepare_revision_calls, 'id' ) ), true )
+				&& false === \has_filter( 'rest_revision_query', $query_filter )
+				&& false === \has_filter( 'rest_prepare_revision', $revision_filter )
+				&& false === \has_filter( 'rest_prepare_autosave', $autosave_filter )
+				&& false === \has_filter( 'rest_delete_revision', $delete_action )
+				&& false === \has_filter( 'map_meta_cap', $delete_revision_cap_filter )
+				&& false === \has_filter( 'user_has_cap', $grant_caps ),
+			'REST revision/autosave dispatch hooks observe successful paths and are removed after the matrix',
+			array(
+				'prepareRevision' => $prepare_revision_calls,
+				'prepareAutosave' => $prepare_autosave_calls,
+				'filters'         => array(
+					'query'    => \has_filter( 'rest_revision_query', $query_filter ),
+					'revision' => \has_filter( 'rest_prepare_revision', $revision_filter ),
+					'autosave' => \has_filter( 'rest_prepare_autosave', $autosave_filter ),
+					'delete'   => \has_filter( 'rest_delete_revision', $delete_action ),
+					'mapCaps'  => \has_filter( 'map_meta_cap', $delete_revision_cap_filter ),
+					'caps'     => \has_filter( 'user_has_cap', $grant_caps ),
+				),
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'revisions-autosaves.rest-revision-autosave-route-dispatch',
+			$failures,
+			array(
+				'case'              => self::case_summary( $case ),
+				'postId'            => $post_id,
+				'restBase'          => $rest_base,
+				'revisionIds'       => array( $old_revision_id, $new_revision_id ),
+				'autosaveId'        => $autosave_id,
+			)
+		);
+	}
+
 	private static function check_latest_revision_count_and_url_helpers( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
 		self::prepare_runtime();
 		self::register_case_post_type( $case, true );
@@ -2292,6 +2738,66 @@ final class RevisionsAutosavesSurface {
 		);
 	}
 
+	private static function register_rest_case_post_type( array $case ): string {
+		$rest_base = 'cf-revisions-' . $case['token'];
+		\register_post_type(
+			$case['postType'],
+			array(
+				'public'         => true,
+				'query_var'      => false,
+				'rest_base'      => $rest_base,
+				'rest_namespace' => 'wp/v2',
+				'rewrite'        => false,
+				'show_in_rest'   => true,
+				'show_ui'        => true,
+				'supports'       => array( 'title', 'editor', 'excerpt', 'author', 'revisions', 'custom-fields' ),
+			)
+		);
+
+		return $rest_base;
+	}
+
+	private static function fresh_rest_server(): \WP_REST_Server {
+		$server                    = new \WP_REST_Server();
+		$GLOBALS['wp_rest_server'] = $server;
+		self::ensure_rest_default_filters();
+		return $server;
+	}
+
+	private static function ensure_rest_default_filters(): void {
+		$filters = array(
+			array( 'rest_pre_serve_request', 'rest_send_cors_headers', 10, 1 ),
+			array( 'rest_post_dispatch', 'rest_send_allow_header', 10, 3 ),
+			array( 'rest_post_dispatch', 'rest_filter_response_fields', 10, 3 ),
+			array( 'rest_pre_dispatch', 'rest_handle_options_request', 10, 3 ),
+		);
+
+		foreach ( $filters as $filter ) {
+			list( $hook, $callback, $priority, $accepted_args ) = $filter;
+			if ( function_exists( $callback ) && false === \has_filter( $hook, $callback ) ) {
+				\add_filter( $hook, $callback, $priority, $accepted_args );
+			}
+		}
+	}
+
+	private static function dispatch( \WP_REST_Server $server, \WP_REST_Request $request ): \WP_REST_Response {
+		return \rest_ensure_response( $server->dispatch( $request ) );
+	}
+
+	private static function request( string $method, string $route, array $query_params = array(), array $url_params = array(), array $body_params = array() ): \WP_REST_Request {
+		$request = new \WP_REST_Request( $method, $route );
+		if ( array() !== $query_params ) {
+			$request->set_query_params( $query_params );
+		}
+		if ( array() !== $url_params ) {
+			$request->set_url_params( $url_params );
+		}
+		if ( array() !== $body_params ) {
+			$request->set_body_params( $body_params );
+		}
+		return $request;
+	}
+
 	private static function insert_author( array $case, string $suffix ): int {
 		$user_id = \wp_insert_user(
 			array(
@@ -2357,10 +2863,10 @@ final class RevisionsAutosavesSurface {
 
 	private static function snapshot_state(): array {
 		$globals = array();
-		foreach ( array( 'wp_filter', 'wp_actions', 'wp_filters', 'wp_current_filter', 'wp_post_types', 'wp_post_statuses', 'wp_taxonomies', 'wp_rewrite', 'wp_meta_keys', 'current_user', 'user_ID', 'post', 'wp_query', 'wp_the_query' ) as $name ) {
+		foreach ( array( 'wp_filter', 'wp_actions', 'wp_filters', 'wp_current_filter', 'wp_post_types', 'wp_post_statuses', 'wp_taxonomies', 'wp_rewrite', 'wp_meta_keys', 'wp_rest_additional_fields', 'wp_rest_server', 'current_user', 'user_ID', 'post', 'wp_query', 'wp_the_query' ) as $name ) {
 			$globals[ $name ] = array(
 				'exists' => array_key_exists( $name, $GLOBALS ),
-				'value'  => $GLOBALS[ $name ] ?? null,
+				'value'  => array_key_exists( $name, $GLOBALS ) ? self::clone_value( $GLOBALS[ $name ] ) : null,
 			);
 		}
 
@@ -2396,7 +2902,7 @@ final class RevisionsAutosavesSurface {
 
 		foreach ( $snapshot['globals'] as $name => $entry ) {
 			if ( $entry['exists'] ) {
-				$GLOBALS[ $name ] = $entry['value'];
+				$GLOBALS[ $name ] = self::clone_value( $entry['value'] );
 			} else {
 				unset( $GLOBALS[ $name ] );
 			}
@@ -2430,6 +2936,10 @@ final class RevisionsAutosavesSurface {
 			&& false === \has_filter( 'wp_revisions_to_keep' )
 			&& false === \has_filter( 'wp_save_post_revision_revisions_before_deletion' )
 			&& false === \has_filter( 'wp_delete_post_revision' )
+			&& false === \has_filter( 'rest_revision_query' )
+			&& false === \has_filter( 'rest_prepare_revision' )
+			&& false === \has_filter( 'rest_prepare_autosave' )
+			&& false === \has_filter( 'rest_delete_revision' )
 			&& false === \has_filter( "wp_{$case['postType']}_revisions_to_keep" )
 			&& false === \has_filter( 'the_preview', '_set_preview' )
 			&& false === \has_filter( 'get_the_terms', '_wp_preview_terms_filter' )
@@ -2449,6 +2959,22 @@ final class RevisionsAutosavesSurface {
 				'postTypeGone'  => ! \post_type_exists( $case['postType'] ),
 			)
 		);
+	}
+
+	private static function clone_value( $value ) {
+		if ( is_object( $value ) ) {
+			return clone $value;
+		}
+
+		if ( is_array( $value ) ) {
+			$copy = array();
+			foreach ( $value as $key => $item ) {
+				$copy[ $key ] = self::clone_value( $item );
+			}
+			return $copy;
+		}
+
+		return $value;
 	}
 
 	private static function case_for_context( \ComponentFuzz\FuzzContext $ctx ): array {
@@ -2696,6 +3222,31 @@ final class RevisionsAutosavesSurface {
 			'post_status'       => $post->post_status,
 			'post_title'        => $post->post_title,
 			'post_modified_gmt' => $post->post_modified_gmt,
+		);
+	}
+
+	private static function response_error_ok( $response, string $code, int $status ): bool {
+		if ( ! $response instanceof \WP_REST_Response || $status !== $response->get_status() ) {
+			return false;
+		}
+
+		$data = $response->get_data();
+		return is_array( $data )
+			&& $code === ( $data['code'] ?? null )
+			&& isset( $data['data'] )
+			&& is_array( $data['data'] )
+			&& $status === (int) ( $data['data']['status'] ?? 0 );
+	}
+
+	private static function response_summary( $response ) {
+		if ( ! $response instanceof \WP_REST_Response ) {
+			return $response;
+		}
+
+		return array(
+			'status'  => $response->get_status(),
+			'data'    => $response->get_data(),
+			'headers' => $response->get_headers(),
 		);
 	}
 

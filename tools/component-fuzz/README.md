@@ -828,8 +828,10 @@ database, network requests, or a configured site.
   revision insert/save/restore/delete helpers, revisioned meta copy and
   restore behavior, post type support gates, revision title/list helpers,
   revision UI diffs, JS payload preparation, direct revision template output,
-  preview overlay behavior, bounded preview request dispatch, and
-  global/filter restoration.
+  preview overlay behavior, bounded preview request dispatch, route-dispatched
+  REST revision collection/item/delete and autosave collection/item reads,
+  parent and schema failures, raw-field/link/preview projection, scoped delete
+  capability mapping, REST hook payloads, and global/filter restoration.
 - `rewrite`: rewrite tags, permastruct/rule generation, collision ordering,
   endpoint expansion and mask propagation, match substitution, query arg and
   build/parse helpers, rewrite-tag removal/query-var retention boundaries, URL
@@ -1256,6 +1258,11 @@ browser dispatch. The in-memory `wpdb` post query stub supports the bounded
 including author intersections across status-`OR` branches. The surface avoids
 browser/admin page dispatch, while covering `_show_post_preview()` and
 `wp_print_revision_templates()` through direct bounded helper calls with
+captured output, and dispatches REST revision/autosave read and force-delete
+routes through an isolated `WP_REST_Server` to cover permission failures,
+query/schema failures, parent/revision matching, response projection, preview
+links, REST default-filter cleanup, and hook payloads without leaking
+`DOING_AUTOSAVE` across iterations.
 synthetic superglobals, captured `wp_die()` responses, and output buffers.
 The `feed-rendering` surface renders core feed templates through synthetic
 `WP_Query` loops backed by the in-memory `wpdb` stub. It avoids live HTTP
