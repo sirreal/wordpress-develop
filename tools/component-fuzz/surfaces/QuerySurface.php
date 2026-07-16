@@ -1156,7 +1156,7 @@ final class QuerySurface {
 
 	private static function check_user_query_date_execution( \ComponentFuzz\FuzzContext $ctx ): array {
 		$rows  = array();
-		$cases = self::user_query_date_execution_cases();
+		$cases = self::user_query_date_execution_cases( $ctx );
 
 		foreach ( $cases as $case_index => $case ) {
 			$call = self::call_guarded(
@@ -1263,7 +1263,7 @@ final class QuerySurface {
 
 	private static function check_comment_query_date_execution( \ComponentFuzz\FuzzContext $ctx ): array {
 		$rows  = array();
-		$cases = self::comment_query_date_execution_cases();
+		$cases = self::comment_query_date_execution_cases( $ctx );
 
 		foreach ( $cases as $case_index => $case ) {
 			$call = self::call_guarded(
@@ -2930,8 +2930,8 @@ final class QuerySurface {
 		);
 	}
 
-	private static function user_query_date_execution_cases(): array {
-		return array(
+	private static function user_query_date_execution_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$cases = array(
 			array(
 				'label'     => 'user-registered-negated-date-projections',
 				'queryVars' => array(
@@ -2966,6 +2966,12 @@ final class QuerySurface {
 				),
 			),
 		);
+
+		for ( $i = 0; $i < self::GENERATED_CASES; $i++ ) {
+			$cases[] = self::generated_user_query_date_execution_case( $ctx->fork( 'user-date-execution-' . $i ), $i );
+		}
+
+		return $cases;
 	}
 
 	private static function comment_query_cases( \ComponentFuzz\FuzzContext $ctx ): array {
@@ -3007,8 +3013,8 @@ final class QuerySurface {
 		return $cases;
 	}
 
-	private static function comment_query_date_execution_cases(): array {
-		return array(
+	private static function comment_query_date_execution_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$cases = array(
 			array(
 				'label'     => 'comment-date-negated-date-projections',
 				'queryVars' => array(
@@ -3045,6 +3051,450 @@ final class QuerySurface {
 				),
 			),
 		);
+
+		for ( $i = 0; $i < self::GENERATED_CASES; $i++ ) {
+			$cases[] = self::generated_comment_query_date_execution_case( $ctx->fork( 'comment-date-execution-' . $i ), $i );
+		}
+
+		return $cases;
+	}
+
+	private static function generated_user_query_date_execution_case( \ComponentFuzz\FuzzContext $ctx, int $index ): array {
+		$template      = self::generated_seeded_date_execution_template( $ctx, 'user', $index );
+		$date_query    = $template['dateQuery'];
+		$start_of_week = (int) ( $template['startOfWeek'] ?? 0 );
+		$case          = array(
+			'label'     => 'generated-user-date-execution-' . $index . '-' . $template['label'],
+			'queryVars' => array(
+				'blog_id'       => 0,
+				'cache_results' => false,
+				'count_total'   => false,
+				'date_query'    => $date_query,
+				'fields'        => 'ID',
+				'orderby'       => 'ID',
+				'order'         => 'ASC',
+			),
+			'expect'    => array(
+				'contains' => self::date_execution_sql_contains( 'user', $date_query, $start_of_week ),
+				'userIds'  => self::date_execution_expected_ids( 'user', $date_query, $start_of_week ),
+			),
+		);
+
+		if ( array_key_exists( 'startOfWeek', $template ) ) {
+			$case['startOfWeek'] = $start_of_week;
+		}
+
+		return $case;
+	}
+
+	private static function generated_comment_query_date_execution_case( \ComponentFuzz\FuzzContext $ctx, int $index ): array {
+		$template      = self::generated_seeded_date_execution_template( $ctx, 'comment', $index );
+		$date_query    = $template['dateQuery'];
+		$start_of_week = (int) ( $template['startOfWeek'] ?? 0 );
+		$case          = array(
+			'label'     => 'generated-comment-date-execution-' . $index . '-' . $template['label'],
+			'queryVars' => array(
+				'cache_results'             => false,
+				'date_query'                => $date_query,
+				'fields'                    => 'ids',
+				'no_found_rows'             => true,
+				'orderby'                   => 'comment_ID',
+				'order'                     => 'ASC',
+				'status'                    => 'approve',
+				'update_comment_meta_cache' => false,
+				'update_comment_post_cache' => false,
+			),
+			'expect'    => array(
+				'contains'   => self::date_execution_sql_contains( 'comment', $date_query, $start_of_week ),
+				'commentIds' => self::date_execution_expected_ids( 'comment', $date_query, $start_of_week ),
+			),
+		);
+
+		if ( array_key_exists( 'startOfWeek', $template ) ) {
+			$case['startOfWeek'] = $start_of_week;
+		}
+
+		return $case;
+	}
+
+	private static function generated_seeded_date_execution_template( \ComponentFuzz\FuzzContext $ctx, string $kind, int $index ): array {
+		$templates = array(
+			array(
+				'label'     => 'late-projection-window',
+				'dateQuery' => array(
+					array(
+						'compare'   => 'BETWEEN',
+						'dayofyear' => array( 126, 153 ),
+					),
+					array(
+						'compare'       => 'IN',
+						'dayofweek_iso' => array( 1, 2 ),
+					),
+					array(
+						'compare' => 'IN',
+						'week'    => array( 18, 22 ),
+					),
+				),
+			),
+			array(
+				'label'       => 'monday-week-window',
+				'startOfWeek' => 1,
+				'dateQuery'   => array(
+					array(
+						'compare' => 'IN',
+						'week'    => array( 19, 23 ),
+					),
+				),
+			),
+			array(
+				'label'       => 'shifted-week-window',
+				'startOfWeek' => 3,
+				'dateQuery'   => array(
+					array(
+						'compare' => 'IN',
+						'week'    => array( 17, 21 ),
+					),
+				),
+			),
+			array(
+				'label'     => 'negated-late-window',
+				'dateQuery' => array(
+					array(
+						'compare'   => 'NOT BETWEEN',
+						'dayofyear' => array( 1, 125 ),
+					),
+					array(
+						'compare'       => 'NOT IN',
+						'dayofweek_iso' => array( 1 ),
+					),
+					array(
+						'compare' => 'NOT IN',
+						'week'    => array( 22 ),
+					),
+				),
+			),
+			array(
+				'label'     => 'scalar-projection-window',
+				'dateQuery' => array(
+					array(
+						'compare'   => '>=',
+						'dayofyear' => 126,
+					),
+					array(
+						'compare' => '<',
+						'week'    => 22,
+					),
+				),
+			),
+			array(
+				'label'     => 'weekday-time-window',
+				'dateQuery' => array(
+					array(
+						'compare'   => 'NOT IN',
+						'dayofweek' => array( 4, 7 ),
+					),
+					array(
+						'compare' => '>=',
+						'hour'    => 13,
+					),
+				),
+			),
+		);
+
+		$template = $templates[ $index % count( $templates ) ];
+
+		if ( $ctx->bool( 45 ) ) {
+			$template['dateQuery'][] = array(
+				'compare' => '=',
+				'year'    => 2020,
+			);
+			$template['label']      .= '-year';
+		}
+
+		if ( 'comment' === $kind && $ctx->bool( 35 ) ) {
+			$template['dateQuery'] = self::date_execution_query_with_column( $template['dateQuery'], 'comment_date_gmt' );
+			$template['label']    .= '-gmt';
+		}
+
+		return $template;
+	}
+
+	private static function date_execution_query_with_column( array $date_query, string $column ): array {
+		foreach ( $date_query as $key => $clause ) {
+			if ( ! is_int( $key ) || ! is_array( $clause ) ) {
+				continue;
+			}
+
+			$clause['column']   = $column;
+			$date_query[ $key ] = $clause;
+		}
+
+		return $date_query;
+	}
+
+	private static function date_execution_sql_contains( string $kind, array $date_query, int $start_of_week ): array {
+		$contains = array();
+
+		foreach ( $date_query as $key => $clause ) {
+			if ( ! is_int( $key ) || ! is_array( $clause ) ) {
+				continue;
+			}
+
+			foreach ( self::date_execution_units() as $unit ) {
+				if ( ! array_key_exists( $unit, $clause ) ) {
+					continue;
+				}
+
+				$contains[] = self::date_execution_sql_condition(
+					self::date_execution_sql_expression( $kind, $clause, $unit, $start_of_week ),
+					(string) ( $clause['compare'] ?? '=' ),
+					$clause[ $unit ]
+				);
+			}
+		}
+
+		return $contains;
+	}
+
+	private static function date_execution_sql_expression( string $kind, array $clause, string $unit, int $start_of_week ): string {
+		$column = self::date_execution_sql_column( $kind, $clause );
+
+		switch ( $unit ) {
+			case 'year':
+				return 'YEAR( ' . $column . ' )';
+			case 'month':
+				return 'MONTH( ' . $column . ' )';
+			case 'day':
+				return 'DAYOFMONTH( ' . $column . ' )';
+			case 'dayofyear':
+				return 'DAYOFYEAR( ' . $column . ' )';
+			case 'dayofweek':
+				return 'DAYOFWEEK( ' . $column . ' )';
+			case 'dayofweek_iso':
+				return 'WEEKDAY( ' . $column . ' ) + 1';
+			case 'week':
+				if ( 1 === $start_of_week ) {
+					return 'WEEK( ' . $column . ', 1 )';
+				}
+
+				if ( $start_of_week > 1 ) {
+					return 'WEEK( DATE_SUB( ' . $column . ', INTERVAL ' . $start_of_week . ' DAY ), 0 )';
+				}
+
+				return 'WEEK( ' . $column . ', 0 )';
+			case 'hour':
+				return 'HOUR( ' . $column . ' )';
+			case 'minute':
+				return 'MINUTE( ' . $column . ' )';
+			case 'second':
+				return 'SECOND( ' . $column . ' )';
+		}
+
+		return $column;
+	}
+
+	private static function date_execution_sql_column( string $kind, array $clause ): string {
+		if ( 'user' === $kind ) {
+			return 'wp_users.user_registered';
+		}
+
+		$column = (string) ( $clause['column'] ?? 'comment_date' );
+		if ( 'comment_date_gmt' === $column ) {
+			return 'wp_comments.comment_date_gmt';
+		}
+
+		return 'wp_comments.comment_date';
+	}
+
+	private static function date_execution_sql_condition( string $expression, string $compare, $value ): string {
+		$compare = strtoupper( $compare );
+		$values  = array_map( 'intval', is_array( $value ) ? array_values( $value ) : array( $value ) );
+
+		switch ( $compare ) {
+			case 'IN':
+			case 'NOT IN':
+				return $expression . ' ' . $compare . ' (' . implode( ',', $values ) . ')';
+			case 'BETWEEN':
+			case 'NOT BETWEEN':
+				return $expression . ' ' . $compare . ' ' . (int) ( $values[0] ?? 0 ) . ' AND ' . (int) ( $values[1] ?? 0 );
+		}
+
+		return $expression . ' ' . $compare . ' ' . (int) ( $values[0] ?? 0 );
+	}
+
+	private static function date_execution_expected_ids( string $kind, array $date_query, int $start_of_week ): array {
+		$ids = array();
+
+		foreach ( self::date_execution_fixture_rows( $kind ) as $row ) {
+			if ( 'comment' === $kind && '1' !== (string) ( $row['approved'] ?? '' ) ) {
+				continue;
+			}
+
+			if ( self::date_execution_query_matches_datetime( $date_query, $row['datetime'], $start_of_week ) ) {
+				$ids[] = (int) $row['id'];
+			}
+		}
+
+		return $ids;
+	}
+
+	private static function date_execution_fixture_rows( string $kind ): array {
+		if ( 'user' === $kind ) {
+			return array(
+				array( 'id' => 41, 'datetime' => '2020-01-01 00:00:00' ),
+				array( 'id' => 43, 'datetime' => '2020-02-01 00:00:00' ),
+				array( 'id' => 47, 'datetime' => '2020-05-05 13:00:00' ),
+				array( 'id' => 53, 'datetime' => '2020-06-01 14:00:00' ),
+			);
+		}
+
+		return array(
+			array( 'id' => 301, 'datetime' => '2020-01-15 10:00:00', 'approved' => '1' ),
+			array( 'id' => 303, 'datetime' => '2020-02-20 11:30:00', 'approved' => '0' ),
+			array( 'id' => 307, 'datetime' => '2020-05-05 13:00:00', 'approved' => '1' ),
+			array( 'id' => 311, 'datetime' => '2020-06-01 14:00:00', 'approved' => '1' ),
+		);
+	}
+
+	private static function date_execution_query_matches_datetime( array $query, string $datetime, int $start_of_week ): bool {
+		$relation = 'OR' === strtoupper( (string) ( $query['relation'] ?? 'AND' ) ) ? 'OR' : 'AND';
+		$matches  = array();
+
+		foreach ( $query as $key => $clause ) {
+			if ( ! is_int( $key ) || ! is_array( $clause ) ) {
+				continue;
+			}
+
+			$matches[] = self::date_execution_query_matches_datetime( $clause, $datetime, $start_of_week );
+		}
+
+		if ( array() === $matches && self::date_execution_clause_has_unit( $query ) ) {
+			return self::date_execution_clause_matches_datetime( $query, $datetime, $start_of_week );
+		}
+
+		if ( array() === $matches ) {
+			return true;
+		}
+
+		return 'OR' === $relation ? in_array( true, $matches, true ) : ! in_array( false, $matches, true );
+	}
+
+	private static function date_execution_clause_has_unit( array $clause ): bool {
+		return array() !== array_intersect( self::date_execution_units(), array_keys( $clause ) );
+	}
+
+	private static function date_execution_clause_matches_datetime( array $clause, string $datetime, int $start_of_week ): bool {
+		$compare = strtoupper( (string) ( $clause['compare'] ?? '=' ) );
+
+		foreach ( self::date_execution_units() as $unit ) {
+			if ( ! array_key_exists( $unit, $clause ) ) {
+				continue;
+			}
+
+			if ( ! self::date_execution_value_matches( self::date_execution_part( $datetime, $unit, $start_of_week ), $compare, $clause[ $unit ] ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function date_execution_units(): array {
+		return array( 'year', 'month', 'day', 'dayofyear', 'dayofweek', 'dayofweek_iso', 'week', 'hour', 'minute', 'second' );
+	}
+
+	private static function date_execution_part( string $datetime, string $unit, int $start_of_week ): int {
+		$timestamp = strtotime( $datetime . ' UTC' );
+		if ( false === $timestamp ) {
+			return 0;
+		}
+
+		switch ( $unit ) {
+			case 'year':
+				return (int) gmdate( 'Y', $timestamp );
+			case 'month':
+				return (int) gmdate( 'n', $timestamp );
+			case 'day':
+				return (int) gmdate( 'j', $timestamp );
+			case 'dayofyear':
+				return (int) gmdate( 'z', $timestamp ) + 1;
+			case 'dayofweek':
+				return (int) gmdate( 'w', $timestamp ) + 1;
+			case 'dayofweek_iso':
+				return (int) gmdate( 'N', $timestamp );
+			case 'week':
+				if ( 1 === $start_of_week ) {
+					return self::date_execution_mysql_week_one( $timestamp );
+				}
+
+				if ( $start_of_week > 1 ) {
+					$timestamp -= $start_of_week * 86400;
+				}
+
+				return self::date_execution_mysql_week_zero( $timestamp );
+			case 'hour':
+				return (int) gmdate( 'G', $timestamp );
+			case 'minute':
+				return (int) gmdate( 'i', $timestamp );
+			case 'second':
+				return (int) gmdate( 's', $timestamp );
+		}
+
+		return 0;
+	}
+
+	private static function date_execution_mysql_week_zero( int $timestamp ): int {
+		$day_of_year = (int) gmdate( 'z', $timestamp );
+		$weekday     = (int) gmdate( 'w', $timestamp );
+
+		return (int) floor( ( $day_of_year + 7 - $weekday ) / 7 );
+	}
+
+	private static function date_execution_mysql_week_one( int $timestamp ): int {
+		$year              = (int) gmdate( 'Y', $timestamp );
+		$jan_1             = strtotime( $year . '-01-01 00:00:00 UTC' );
+		$jan_1_weekday     = (int) gmdate( 'N', $jan_1 ) - 1;
+		$first_week_monday = $jan_1 - $jan_1_weekday * 86400;
+
+		if ( $jan_1_weekday >= 4 ) {
+			$first_week_monday += 7 * 86400;
+		}
+
+		if ( $timestamp < $first_week_monday ) {
+			return 0;
+		}
+
+		return (int) floor( ( $timestamp - $first_week_monday ) / ( 7 * 86400 ) ) + 1;
+	}
+
+	private static function date_execution_value_matches( int $actual, string $compare, $expected ): bool {
+		$compare = '<>' === $compare ? '!=' : strtoupper( $compare );
+		$values  = array_map( 'intval', is_array( $expected ) ? array_values( $expected ) : array( $expected ) );
+		$first   = (int) ( $values[0] ?? 0 );
+		$second  = (int) ( $values[1] ?? 0 );
+
+		switch ( $compare ) {
+			case '!=':
+				return $actual !== $first;
+			case '>':
+				return $actual > $first;
+			case '>=':
+				return $actual >= $first;
+			case '<':
+				return $actual < $first;
+			case '<=':
+				return $actual <= $first;
+			case 'IN':
+				return in_array( $actual, $values, true );
+			case 'NOT IN':
+				return ! in_array( $actual, $values, true );
+			case 'BETWEEN':
+				return count( $values ) >= 2 && $actual >= $first && $actual <= $second;
+			case 'NOT BETWEEN':
+				return count( $values ) >= 2 && ( $actual < $first || $actual > $second );
+		}
+
+		return $actual === $first;
 	}
 
 	private static function meta_query_var_cases( \ComponentFuzz\FuzzContext $ctx ): array {
@@ -3657,12 +4107,30 @@ final class QuerySurface {
 	}
 
 	private static function user_query_execution_observation( array $case ): array {
-		$queries_before = self::wpdb_recorded_queries();
-		$query          = new \WP_User_Query( $case['queryVars'] );
-		$results        = $query->get_results();
-		$queries_after  = self::wpdb_recorded_queries();
-		$new_queries    = array_slice( $queries_after, count( $queries_before ) );
-		$sql            = implode(
+		$query_vars           = $case['queryVars'];
+		$queries_before       = self::wpdb_recorded_queries();
+		$start_of_week_filter = null;
+
+		if ( array_key_exists( 'startOfWeek', $case ) ) {
+			$start_of_week        = (int) $case['startOfWeek'];
+			$start_of_week_filter = static function () use ( $start_of_week ): int {
+				return $start_of_week;
+			};
+			\add_filter( 'pre_option_start_of_week', $start_of_week_filter, 10, 0 );
+		}
+
+		try {
+			$query   = new \WP_User_Query( $query_vars );
+			$results = $query->get_results();
+		} finally {
+			if ( null !== $start_of_week_filter ) {
+				\remove_filter( 'pre_option_start_of_week', $start_of_week_filter, 10 );
+			}
+		}
+
+		$queries_after = self::wpdb_recorded_queries();
+		$new_queries   = array_slice( $queries_after, count( $queries_before ) );
+		$sql           = implode(
 			' ',
 			array_filter(
 				array(
@@ -3818,13 +4286,30 @@ final class QuerySurface {
 	private static function comment_query_execution_observation( array $case ): array {
 		static $comment_date_execution_cache_counter = 0;
 
-		$query_vars                 = $case['queryVars'];
-		$query_vars['cache_domain'] = 'component_fuzz_comment_date_execution_' . ++$comment_date_execution_cache_counter;
-		$queries_before            = self::wpdb_recorded_queries();
-		$query                     = new \WP_Comment_Query();
-		$comments                  = $query->query( $query_vars );
-		$queries_after             = self::wpdb_recorded_queries();
-		$new_queries               = array_slice( $queries_after, count( $queries_before ) );
+		$query_vars                  = $case['queryVars'];
+		$query_vars['cache_domain']  = 'component_fuzz_comment_date_execution_' . ++$comment_date_execution_cache_counter;
+		$queries_before             = self::wpdb_recorded_queries();
+		$query                      = new \WP_Comment_Query();
+		$start_of_week_filter       = null;
+
+		if ( array_key_exists( 'startOfWeek', $case ) ) {
+			$start_of_week        = (int) $case['startOfWeek'];
+			$start_of_week_filter = static function () use ( $start_of_week ): int {
+				return $start_of_week;
+			};
+			\add_filter( 'pre_option_start_of_week', $start_of_week_filter, 10, 0 );
+		}
+
+		try {
+			$comments = $query->query( $query_vars );
+		} finally {
+			if ( null !== $start_of_week_filter ) {
+				\remove_filter( 'pre_option_start_of_week', $start_of_week_filter, 10 );
+			}
+		}
+
+		$queries_after = self::wpdb_recorded_queries();
+		$new_queries   = array_slice( $queries_after, count( $queries_before ) );
 
 		return array(
 			'queryVars'      => $query->query_vars,
