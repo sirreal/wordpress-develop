@@ -115,6 +115,13 @@ final class RestSurface {
 				}
 			);
 			$checks[] = self::run_check(
+				'batch-v1-request-schema-boundaries',
+				'REST batch/v1 validates top-level validation mode and generated child request object shapes before serving children; omitted method and validation defaults remain executable.',
+				function () use ( &$rng ) {
+					return self::check_batch_v1_request_schema_boundaries( $rng );
+				}
+			);
+			$checks[] = self::run_check(
 				'batch-v1-malformed-child-path-parsing',
 				'REST batch/v1 child path parsing represents wp_parse_url() failures as aligned error envelopes without dispatching malformed children.',
 				function () use ( &$rng ) {
@@ -2064,6 +2071,216 @@ final class RestSurface {
 				'childPreDispatch'   => $child_pre_dispatch,
 				'childPostDispatch'  => $child_post_dispatch,
 				'seenRequests'       => $seen_requests,
+			),
+		);
+	}
+
+	private static function check_batch_v1_request_schema_boundaries( array &$rng ): array {
+		$namespace = self::namespace_token( $rng );
+		$token     = self::slug_token( $rng, 'schema' );
+		$server    = new \WP_REST_Server();
+
+		$callback_hits       = 0;
+		$seen_child_requests = array();
+		$route               = '/' . $namespace . '/batch-schema/(?P<id>[0-9]+)';
+		$path                = '/' . $namespace . '/batch-schema/';
+
+		$server->register_route(
+			$namespace,
+			$route,
+			array(
+				'allow_batch' => array( 'v1' => true ),
+				array(
+					'methods'             => 'POST',
+					'permission_callback' => static function (): bool {
+						return true;
+					},
+					'callback'            => static function ( \WP_REST_Request $request ) use ( &$callback_hits, &$seen_child_requests ): array {
+						++$callback_hits;
+						$seen_child_requests[] = array(
+							'route'   => $request->get_route(),
+							'method'  => $request->get_method(),
+							'query'   => $request->get_query_params(),
+							'body'    => $request->get_body_params(),
+							'headers' => array(
+								'x_schema_default' => $request->get_header_as_array( 'X-Schema-Default' ),
+							),
+						);
+
+						return array(
+							'id'      => (int) $request['id'],
+							'route'   => $request->get_route(),
+							'method'  => $request->get_method(),
+							'query'   => $request->get_query_params(),
+							'body'    => $request->get_body_params(),
+							'headers' => array(
+								'x_schema_default' => $request->get_header_as_array( 'X-Schema-Default' ),
+							),
+						);
+					},
+				),
+			)
+		);
+
+		$valid_request = new \WP_REST_Request( 'POST', '/batch/v1' );
+		$valid_request->set_body_params(
+			array(
+				'requests' => array(
+					array(
+						'path'    => $path . '101?token=' . rawurlencode( $token ) . '&mode=defaulted',
+						'body'    => array(
+							'payload' => 'body-' . $token,
+						),
+						'headers' => array(
+							'X-Schema-Default' => array( 'alpha', $token ),
+						),
+					),
+				),
+			)
+		);
+		$valid_response = $server->dispatch( $valid_request );
+		$valid_data     = $valid_response->get_data();
+
+		$invalid_cases = array(
+			array(
+				'label'       => 'invalid validation enum',
+				'body'        => array(
+					'validation' => 'invalid-' . $token,
+					'requests'   => array(),
+				),
+				'code'        => 'rest_invalid_param',
+				'param'       => 'validation',
+			),
+			array(
+				'label'       => 'missing requests array',
+				'body'        => array(
+					'validation' => 'normal',
+				),
+				'code'        => 'rest_missing_callback_param',
+				'param'       => 'requests',
+			),
+			array(
+				'label'       => 'child missing path',
+				'body'        => array(
+					'validation' => 'normal',
+					'requests'   => array(
+						array( 'method' => 'POST' ),
+					),
+				),
+				'code'        => 'rest_invalid_param',
+				'param'       => 'requests',
+			),
+			array(
+				'label'       => 'child disallowed method',
+				'body'        => array(
+					'validation' => 'normal',
+					'requests'   => array(
+						array(
+							'method' => 'GET',
+							'path'   => $path . '102',
+						),
+					),
+				),
+				'code'        => 'rest_invalid_param',
+				'param'       => 'requests',
+			),
+			array(
+				'label'       => 'child scalar body',
+				'body'        => array(
+					'validation' => 'normal',
+					'requests'   => array(
+						array(
+							'method' => 'POST',
+							'path'   => $path . '103',
+							'body'   => 'scalar-body',
+						),
+					),
+				),
+				'code'        => 'rest_invalid_param',
+				'param'       => 'requests',
+			),
+			array(
+				'label'       => 'child header array rejects non-string item',
+				'body'        => array(
+					'validation' => 'normal',
+					'requests'   => array(
+						array(
+							'method'  => 'POST',
+							'path'    => $path . '104',
+							'headers' => array(
+								'X-Schema-Invalid' => array( 'ok', 123 ),
+							),
+						),
+					),
+				),
+				'code'        => 'rest_invalid_param',
+				'param'       => 'requests',
+			),
+		);
+
+		$invalid_results       = array();
+		$invalid_ok            = true;
+		$callbacks_after_valid = $callback_hits;
+		foreach ( $invalid_cases as $case ) {
+			$before_callbacks = $callback_hits;
+			$request          = new \WP_REST_Request( 'POST', '/batch/v1' );
+			$request->set_body_params( $case['body'] );
+			$response         = $server->dispatch( $request );
+			$data             = $response->get_data();
+			$params_raw       = is_array( $data['data']['params'] ?? null ) ? $data['data']['params'] : array();
+			$params           = \wp_is_numeric_array( $params_raw ) ? array_values( $params_raw ) : array_keys( $params_raw );
+			sort( $params, SORT_STRING );
+			$case_ok          = 400 === $response->get_status()
+				&& $case['code'] === ( $data['code'] ?? null )
+				&& in_array( $case['param'], $params, true )
+				&& $before_callbacks === $callback_hits;
+			$invalid_ok       = $invalid_ok && $case_ok;
+			$invalid_results[] = array(
+				'ok'              => $case_ok,
+				'label'           => $case['label'],
+				'status'          => $response->get_status(),
+				'code'            => $data['code'] ?? null,
+				'params'          => $params,
+				'callbackDelta'   => $callback_hits - $before_callbacks,
+				'responseSummary' => self::response_summary( $response ),
+			);
+		}
+
+		$valid_responses = is_array( $valid_data['responses'] ?? null ) ? $valid_data['responses'] : array();
+		$valid_envelope  = $valid_responses[0] ?? array();
+		$valid_body      = is_array( $valid_envelope['body'] ?? null ) ? $valid_envelope['body'] : array();
+		$valid_ok        = 207 === $valid_response->get_status()
+			&& 1 === count( $valid_responses )
+			&& 200 === ( $valid_envelope['status'] ?? null )
+			&& 1 === $callbacks_after_valid
+			&& 1 === count( $seen_child_requests )
+			&& 101 === (int) ( $valid_body['id'] ?? 0 )
+			&& $path . '101' === ( $valid_body['route'] ?? null )
+			&& 'POST' === ( $valid_body['method'] ?? null )
+			&& $token === ( $valid_body['query']['token'] ?? null )
+			&& 'defaulted' === ( $valid_body['query']['mode'] ?? null )
+			&& 'body-' . $token === ( $valid_body['body']['payload'] ?? null )
+			&& array( 'alpha', $token ) === ( $valid_body['headers']['x_schema_default'] ?? null );
+
+		$callback_ok = $callbacks_after_valid === $callback_hits
+			&& 1 === $callbacks_after_valid;
+
+		$ok = $valid_ok && $invalid_ok && $callback_ok;
+
+		return array(
+			'ok'       => $ok,
+			'message'  => $ok ? 'REST batch/v1 request schema boundary invariants held.' : 'REST batch/v1 request schema boundary invariant failed.',
+			'features' => array( 'batch-v1', 'batch-route-schema', 'batch-default-method', 'batch-validation-mode', 'batch-child-shape-validation' ),
+			'details'  => array(
+				'namespace'      => $namespace,
+				'token'          => $token,
+				'validOk'        => $valid_ok,
+				'invalidOk'      => $invalid_ok,
+				'callbackOk'     => $callback_ok,
+				'callbackHits'   => $callback_hits,
+				'seenChildren'   => $seen_child_requests,
+				'validResponse'  => self::response_summary( $valid_response ),
+				'invalidResults' => $invalid_results,
 			),
 		);
 	}
