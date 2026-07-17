@@ -84,6 +84,7 @@ final class KsesSurface {
 			$results[] = self::check_generated_helper_contract_matrix( $seed );
 			$results[] = self::check_no_null_control_matrix( $seed );
 			$results[] = self::check_kses_filter_lifecycle_invariants( $seed );
+			$results[] = self::check_pre_kses_hook_lifecycle_matrix( $seed );
 			$results[] = self::check_wp_kses_post_deep_invariants( $seed );
 			$results[] = self::check_pre_kses_hook_state(
 				$seed,
@@ -2954,6 +2955,416 @@ final class KsesSurface {
 			'kses.filter-lifecycle.hook-registration-capability-gates',
 			implode( ',', $hooks ),
 			'KSES save/comment filters are registered, removed, and capability-gated with unrelated callbacks preserved',
+			$failures,
+			$details
+		);
+	}
+
+	private static function check_pre_kses_hook_lifecycle_matrix( int $seed ): array {
+		$required = array(
+			'add_filter',
+			'current_filter',
+			'has_filter',
+			'remove_filter',
+			'wp_kses',
+			'wp_kses_no_null',
+			'wp_kses_normalize_entities',
+		);
+		foreach ( $required as $function_name ) {
+			if ( ! function_exists( $function_name ) ) {
+				return self::skip(
+					$seed,
+					null,
+					'kses.pre_kses-hook-lifecycle-matrix.available',
+					$function_name . '() is not loaded',
+					''
+				);
+			}
+		}
+
+		$rng             = self::rng( self::normalize_seed( 'kses-pre-hook-lifecycle:' . $seed ) );
+		$context_prefix  = 'component_fuzz_pre_kses_' . substr( sha1( 'context:' . $seed ), 0, 10 );
+		$hook_names      = array( 'pre_kses', 'wp_kses_allowed_html' );
+		$hook_snapshot   = self::snapshot_hooks( $hook_names );
+		$global_snapshot = self::snapshot_globals( self::kses_global_names() );
+		$hook_before     = array();
+		foreach ( $hook_names as $hook_name ) {
+			$hook_before[ $hook_name ] = self::hook_signature( $hook_name );
+		}
+
+		$policies = array();
+		$cases    = array();
+		for ( $case_index = 0; $case_index < 8; ++$case_index ) {
+			$token       = substr( sha1( $seed . ':pre-kses-hook:' . $case_index . ':' . self::rng_uint32( $rng ) ), 0, 8 );
+			$allow_mark  = self::rng_chance( $rng, 75 );
+			$allow_span  = self::rng_chance( $rng, 75 );
+			$allow_mail  = self::rng_chance( $rng, 45 );
+			$policy      = self::pre_kses_hook_lifecycle_policy( $allow_mark, $allow_span );
+			$context     = ( 0 === $case_index % 2 ) ? $context_prefix . '_' . $case_index : $policy;
+			$protocols   = $allow_mail ? array( 'https', 'mailto' ) : array( 'https' );
+			$safe_href   = $allow_mail && self::rng_chance( $rng, 50 )
+				? 'mailto:reader-' . $token . '@example.test'
+				: 'https://example.test/kses-pre/' . $token;
+			$unsafe_href = self::rng_choice(
+				$rng,
+				array(
+					'javascript:alert(1)',
+					'java&#x0a;script:alert(1)',
+					'data:text/html,<svg/onload=alert(1)>',
+					'vbscript:msgbox(1)',
+				)
+			);
+			$html        = '<p data-case="cf-prehook-' . $token . '">Lead ' . $token . ' &#x3c;strong&#x3e;'
+				. '<a href="' . $safe_href . '" data-case="cf-prehook-' . $token . '">safe</a>'
+				. '<a href="' . $unsafe_href . '" onclick="evil()" data-case="cf-prehook-' . $token . '">bad</a>'
+				. '<script>drop-' . $token . '</script>'
+				. "\\0tail</p>";
+
+			if ( is_string( $context ) ) {
+				$policies[ $context ] = $policy;
+			}
+
+			$cases[] = array(
+				'caseIndex' => $case_index,
+				'token'     => $token,
+				'context'   => $context,
+				'contextId' => is_string( $context ) ? $context : 'explicit-' . $case_index,
+				'protocols' => $protocols,
+				'html'      => $html,
+				'policy'    => $policy,
+				'allowMark' => $allow_mark,
+				'allowSpan' => $allow_span,
+			);
+		}
+
+		$events          = array(
+			'allowedHtml' => array(),
+			'preKses'     => array(),
+		);
+		$record_events   = true;
+		$pre_kses_active = true;
+		$failures        = array();
+		$outputs         = array();
+		$exception       = null;
+
+		$early_model = static function ( string $content ): string {
+			$digest = substr( sha1( 'early|' . $content ), 0, 10 );
+			return $content
+				. '<mark data-pre-hook="early" data-digest="' . $digest . '">early-' . $digest . '</mark>'
+				. '<script>pre-kses-early-drop</script>'
+				. '<a href="javascript:alert(1)" data-pre-hook="bad">pre-bad</a>';
+		};
+		$late_model  = static function ( string $content ): string {
+			$digest = substr( sha1( 'late|' . $content ), 0, 10 );
+			return '<span data-pre-hook="late" data-digest="' . $digest . '">late-' . $digest . '</span>'
+				. $content
+				. '<em data-stage="late">tail-' . $digest . '</em>';
+		};
+
+		$allowed_filter = static function ( $allowed_html, $context ) use ( &$events, &$policies, &$record_events, $context_prefix ) {
+			if ( $record_events && is_string( $context ) && str_starts_with( $context, $context_prefix ) ) {
+				$events['allowedHtml'][] = array(
+					'context'       => $context,
+					'currentFilter' => \current_filter(),
+					'stack'         => array_values( $GLOBALS['wp_current_filter'] ?? array() ),
+				);
+			}
+
+			if ( is_string( $context ) && isset( $policies[ $context ] ) ) {
+				return $policies[ $context ];
+			}
+
+			return $allowed_html;
+		};
+		$early_filter   = static function ( $content, $allowed_html, $allowed_protocols ) use ( &$events, &$pre_kses_active, &$record_events, $early_model ) {
+			if ( ! $pre_kses_active || ! is_string( $content ) || false === strpos( $content, 'cf-prehook-' ) ) {
+				return $content;
+			}
+
+			if ( $record_events ) {
+				$events['preKses'][] = array(
+					'stage'        => 'early',
+					'contentSha1'  => sha1( $content ),
+					'allowedType'  => is_array( $allowed_html ) ? 'array' : gettype( $allowed_html ),
+					'allowedKey'   => is_string( $allowed_html ) ? $allowed_html : '',
+					'protocols'    => array_values( (array) $allowed_protocols ),
+					'currentFilter' => \current_filter(),
+					'stack'        => array_values( $GLOBALS['wp_current_filter'] ?? array() ),
+				);
+			}
+
+			return $early_model( $content );
+		};
+		$late_filter    = static function ( $content, $allowed_html, $allowed_protocols ) use ( &$events, &$pre_kses_active, &$record_events, $late_model ) {
+			if ( ! $pre_kses_active || ! is_string( $content ) || false === strpos( $content, 'cf-prehook-' ) ) {
+				return $content;
+			}
+
+			if ( $record_events ) {
+				$events['preKses'][] = array(
+					'stage'        => 'late',
+					'contentSha1'  => sha1( $content ),
+					'allowedType'  => is_array( $allowed_html ) ? 'array' : gettype( $allowed_html ),
+					'allowedKey'   => is_string( $allowed_html ) ? $allowed_html : '',
+					'protocols'    => array_values( (array) $allowed_protocols ),
+					'currentFilter' => \current_filter(),
+					'stack'        => array_values( $GLOBALS['wp_current_filter'] ?? array() ),
+				);
+			}
+
+			return $late_model( $content );
+		};
+
+		\add_filter( 'wp_kses_allowed_html', $allowed_filter, 10, 2 );
+		\add_filter( 'pre_kses', $early_filter, 8, 3 );
+		\add_filter( 'pre_kses', $late_filter, 12, 3 );
+
+		$filters_removed = false;
+		try {
+			foreach ( $cases as $case ) {
+				$record_events   = true;
+				$pre_kses_active = true;
+				$current_before  = $GLOBALS['wp_current_filter'] ?? null;
+				$actual          = \wp_kses( $case['html'], $case['context'], $case['protocols'] );
+				$current_after   = $GLOBALS['wp_current_filter'] ?? null;
+
+				$normalized = \wp_kses_normalize_entities(
+					\wp_kses_no_null( $case['html'], array( 'slash_zero' => 'keep' ) )
+				);
+				$modeled_pre = $late_model( $early_model( $normalized ) );
+
+				$record_events   = false;
+				$pre_kses_active = false;
+				$expected        = \wp_kses( $modeled_pre, $case['context'], $case['protocols'] );
+				$fixed_point     = \wp_kses( $actual, $case['context'], $case['protocols'] );
+
+				$case_failures = array();
+				if ( $expected !== $actual ) {
+					$case_failures[] = array(
+						'label'        => 'pre_kses priority chain output matches disabled-hook model',
+						'expectedSha1' => sha1( $expected ),
+						'actualSha1'   => sha1( $actual ),
+						'expected'     => self::preview( $expected ),
+						'actual'       => self::preview( $actual ),
+					);
+				}
+
+				if ( $fixed_point !== $actual ) {
+					$case_failures[] = array(
+						'label'      => 'post-hook sanitized output is fixed point when pre_kses mutations are disabled',
+						'actual'     => self::preview( $actual ),
+						'fixedPoint' => self::preview( $fixed_point ),
+					);
+				}
+
+				if ( $case['allowMark'] && false === strpos( $actual, 'data-pre-hook="early"' ) ) {
+					$case_failures[] = array(
+						'label'  => 'early pre_kses marker survives when policy allows mark',
+						'output' => self::preview( $actual ),
+					);
+				}
+				if ( $case['allowSpan'] && false === strpos( $actual, 'data-pre-hook="late"' ) ) {
+					$case_failures[] = array(
+						'label'  => 'late pre_kses marker survives when policy allows span',
+						'output' => self::preview( $actual ),
+					);
+				}
+				foreach ( array( '<script', 'javascript:', 'vbscript:', 'data:text/html' ) as $unsafe_token ) {
+					if ( false !== stripos( $actual, $unsafe_token ) ) {
+						$case_failures[] = array(
+							'label'  => 'sanitized output strips unsafe content introduced before and during pre_kses',
+							'token'  => $unsafe_token,
+							'output' => self::preview( $actual ),
+						);
+					}
+				}
+				if ( 1 === preg_match( '/<[^>]*\son[a-z0-9_-]+\s*=/i', $actual, $event_match ) ) {
+					$case_failures[] = array(
+						'label'  => 'sanitized output strips active event-handler attributes introduced before and during pre_kses',
+						'token'  => $event_match[0],
+						'output' => self::preview( $actual ),
+					);
+				}
+				$control = self::raw_control_violation( $actual );
+				if ( null !== $control ) {
+					$case_failures[] = array(
+						'label'   => 'sanitized output has no raw disallowed C0 control bytes',
+						'control' => $control,
+					);
+				}
+				if ( $current_before !== $current_after ) {
+					$case_failures[] = array(
+						'label'  => 'wp_current_filter stack restored after each generated wp_kses call',
+						'before' => $current_before,
+						'after'  => $current_after,
+					);
+				}
+
+				if ( ! empty( $case_failures ) ) {
+					$case_failures['caseIndex'] = $case['caseIndex'];
+					$case_failures['contextId'] = $case['contextId'];
+					$failures[]                 = $case_failures;
+				}
+				$outputs[] = array(
+					'caseIndex'    => $case['caseIndex'],
+					'contextId'    => $case['contextId'],
+					'outputSha1'   => sha1( $actual ),
+					'outputLength' => strlen( $actual ),
+					'preview'      => self::preview( $actual, 120 ),
+				);
+			}
+
+			$pre_events = $events['preKses'];
+			if ( 2 * count( $cases ) !== count( $pre_events ) ) {
+				$failures[] = array(
+					'label'    => 'pre_kses early and late filters fire once per generated top-level call',
+					'expected' => 2 * count( $cases ),
+					'actual'   => count( $pre_events ),
+					'events'   => array_slice( $pre_events, 0, 12 ),
+				);
+			}
+
+			foreach ( $cases as $case_index => $case ) {
+				$early_event = $pre_events[ 2 * $case_index ] ?? null;
+				$late_event  = $pre_events[ 2 * $case_index + 1 ] ?? null;
+				$normalized  = \wp_kses_normalize_entities(
+					\wp_kses_no_null( $case['html'], array( 'slash_zero' => 'keep' ) )
+				);
+				if (
+					! is_array( $early_event )
+					|| ! is_array( $late_event )
+					|| 'early' !== ( $early_event['stage'] ?? null )
+					|| 'late' !== ( $late_event['stage'] ?? null )
+					|| sha1( $normalized ) !== ( $early_event['contentSha1'] ?? null )
+					|| sha1( $early_model( $normalized ) ) !== ( $late_event['contentSha1'] ?? null )
+					|| $case['protocols'] !== ( $early_event['protocols'] ?? null )
+					|| $case['protocols'] !== ( $late_event['protocols'] ?? null )
+					|| 'pre_kses' !== ( $early_event['currentFilter'] ?? null )
+					|| 'pre_kses' !== ( $late_event['currentFilter'] ?? null )
+					|| array( 'pre_kses' ) !== array_slice( (array) ( $early_event['stack'] ?? array() ), -1 )
+					|| array( 'pre_kses' ) !== array_slice( (array) ( $late_event['stack'] ?? array() ), -1 )
+				) {
+					$failures[] = array(
+						'label'      => 'pre_kses filters receive normalized content, exact protocol args, and hook stack locality in priority order',
+						'caseIndex'  => $case['caseIndex'],
+						'contextId'  => $case['contextId'],
+						'earlyEvent' => $early_event,
+						'lateEvent'  => $late_event,
+					);
+				}
+
+				$expected_type = is_array( $case['context'] ) ? 'array' : 'string';
+				if (
+					is_array( $early_event )
+					&& ( $expected_type !== ( $early_event['allowedType'] ?? null )
+						|| $expected_type !== ( $late_event['allowedType'] ?? null ) )
+				) {
+					$failures[] = array(
+						'label'      => 'pre_kses receives the original allowed_html argument type',
+						'caseIndex'  => $case['caseIndex'],
+						'contextId'  => $case['contextId'],
+						'expected'   => $expected_type,
+						'earlyEvent' => $early_event,
+						'lateEvent'  => $late_event,
+					);
+				}
+			}
+
+			$string_contexts = array();
+			foreach ( $cases as $case ) {
+				if ( is_string( $case['context'] ) ) {
+					$string_contexts[] = $case['context'];
+				}
+			}
+			$allowed_contexts = array_values( array_unique( array_column( $events['allowedHtml'], 'context' ) ) );
+			sort( $string_contexts );
+			sort( $allowed_contexts );
+			if ( $string_contexts !== $allowed_contexts ) {
+				$failures[] = array(
+					'label'    => 'wp_kses_allowed_html filter is scoped to generated string contexts',
+					'expected' => $string_contexts,
+					'actual'   => $allowed_contexts,
+				);
+			}
+			foreach ( $events['allowedHtml'] as $event ) {
+				if (
+					'wp_kses_allowed_html' !== ( $event['currentFilter'] ?? null )
+					|| array( 'wp_kses_allowed_html' ) !== array_slice( (array) ( $event['stack'] ?? array() ), -1 )
+				) {
+					$failures[] = array(
+						'label' => 'wp_kses_allowed_html filter observes its own hook stack locality',
+						'event' => $event,
+					);
+					break;
+				}
+			}
+		} catch ( \Throwable $e ) {
+			$exception = $e;
+		} finally {
+			\remove_filter( 'wp_kses_allowed_html', $allowed_filter, 10 );
+			\remove_filter( 'pre_kses', $early_filter, 8 );
+			\remove_filter( 'pre_kses', $late_filter, 12 );
+			$filters_removed = false === \has_filter( 'wp_kses_allowed_html', $allowed_filter )
+				&& false === \has_filter( 'pre_kses', $early_filter )
+				&& false === \has_filter( 'pre_kses', $late_filter );
+			self::restore_hooks( $hook_snapshot );
+			self::restore_globals( $global_snapshot );
+		}
+
+		if ( null !== $exception ) {
+			return self::throwable_result(
+				$seed,
+				null,
+				'kses.pre_kses-hook-lifecycle-matrix.no-throw',
+				$context_prefix,
+				$exception
+			);
+		}
+
+		$hook_after_restore = array();
+		foreach ( $hook_names as $hook_name ) {
+			$hook_after_restore[ $hook_name ] = self::hook_signature( $hook_name );
+		}
+		if ( ! $filters_removed ) {
+			$failures[] = array(
+				'label' => 'scoped pre_kses and allowed-html filters are removed before hook snapshot restoration',
+			);
+		}
+		if ( $hook_before !== $hook_after_restore ) {
+			$failures[] = array(
+				'label'    => 'pre_kses and wp_kses_allowed_html hook signatures restored exactly',
+				'expected' => $hook_before,
+				'actual'   => $hook_after_restore,
+			);
+		}
+		if ( ! self::globals_match( $global_snapshot ) ) {
+			$failures[] = array(
+				'label'    => 'KSES globals restored after generated pre_kses hook matrix',
+				'expected' => self::describe_global_snapshot( $global_snapshot ),
+				'actual'   => self::describe_global_snapshot( self::snapshot_globals( array_keys( $global_snapshot ) ) ),
+			);
+		}
+
+		$details = array(
+			'caseCount'         => count( $cases ),
+			'stringContexts'    => count( $policies ),
+			'preKsesEvents'     => count( $events['preKses'] ),
+			'allowedHtmlEvents' => count( $events['allowedHtml'] ),
+			'outputs'           => $outputs,
+			'failureCount'      => count( $failures ),
+			'failures'          => array_slice( $failures, 0, 8 ),
+		);
+
+		if ( empty( $failures ) ) {
+			return self::pass( $seed, null, 'kses.pre_kses-hook-lifecycle-matrix', $context_prefix, $details );
+		}
+
+		return self::fail(
+			$seed,
+			null,
+			'kses.pre_kses-hook-lifecycle-matrix',
+			$context_prefix,
+			'generated pre_kses filters receive normalized args in priority order, compose with allowed-html contexts, sanitize mutations, and restore hooks/globals',
 			$failures,
 			$details
 		);
@@ -6708,6 +7119,37 @@ final class KsesSurface {
 		}
 
 		return array_values( array_unique( $out ) );
+	}
+
+	private static function pre_kses_hook_lifecycle_policy( bool $allow_mark, bool $allow_span ): array {
+		$policy = array(
+			'a'      => array(
+				'href'      => true,
+				'data-case' => true,
+			),
+			'em'     => array(
+				'data-stage' => true,
+			),
+			'p'      => array(
+				'data-case' => true,
+			),
+			'strong' => array(),
+		);
+
+		if ( $allow_mark ) {
+			$policy['mark'] = array(
+				'data-pre-hook' => true,
+				'data-digest'   => true,
+			);
+		}
+		if ( $allow_span ) {
+			$policy['span'] = array(
+				'data-pre-hook' => true,
+				'data-digest'   => true,
+			);
+		}
+
+		return $policy;
 	}
 
 	private static function kses_filter_lifecycle_hooks(): array {
