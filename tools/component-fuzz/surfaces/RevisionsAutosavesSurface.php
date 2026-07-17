@@ -35,6 +35,7 @@ final class RevisionsAutosavesSurface {
 			$rows[] = self::check_preview_helper( $ctx->fork( 'preview' ), $case );
 			$rows[] = self::check_preview_request_dispatch( $ctx->fork( 'preview-dispatch' ), $case );
 			$rows[] = self::check_rest_revision_autosave_route_dispatch( $ctx->fork( 'rest-dispatch' ), $case );
+			$rows[] = self::check_rest_builtin_post_page_revision_autosave_parity( $ctx->fork( 'rest-builtin-post-page' ), $case );
 			$rows[] = self::check_rest_revision_autosave_batch_gates( $ctx->fork( 'rest-batch-gates' ), $case );
 			$rows[] = self::check_latest_revision_count_and_url_helpers( $ctx->fork( 'latest-count-url' ), $case );
 			$rows[] = self::check_user_filtered_autosave_lookup( $ctx->fork( 'user-filtered-autosave' ), $case );
@@ -2269,6 +2270,553 @@ final class RevisionsAutosavesSurface {
 				'restBase'          => $rest_base,
 				'revisionIds'       => array( $old_revision_id, $new_revision_id ),
 				'autosaveId'        => $autosave_id,
+			)
+		);
+	}
+
+	private static function check_rest_builtin_post_page_revision_autosave_parity( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		self::prepare_runtime();
+		$server = self::fresh_rest_server();
+
+		$failures               = array();
+		$query_calls            = array();
+		$prepare_revision_calls = array();
+		$prepare_autosave_calls = array();
+		$matrix                 = array();
+
+		$query_filter = static function ( array $args, \WP_REST_Request $request ) use ( &$query_calls ): array {
+			$query_calls[] = array(
+				'route'               => $request->get_route(),
+				'method'              => $request->get_method(),
+				'postParent'          => $args['post_parent'] ?? null,
+				'postIn'              => isset( $args['post__in'] ) ? array_values( array_map( 'intval', (array) $args['post__in'] ) ) : null,
+				'postNotIn'           => isset( $args['post__not_in'] ) ? array_values( array_map( 'intval', (array) $args['post__not_in'] ) ) : null,
+				'postsPerPage'        => $args['posts_per_page'] ?? null,
+				'order'               => $args['order'] ?? null,
+				'orderBy'             => $args['orderby'] ?? null,
+				'fields'              => $args['fields'] ?? null,
+				'paged'               => $args['paged'] ?? null,
+				'offset'              => $args['offset'] ?? null,
+				'search'              => $args['s'] ?? null,
+				'updatePostMetaCache' => $args['update_post_meta_cache'] ?? null,
+				'updatePostTermCache' => $args['update_post_term_cache'] ?? null,
+			);
+			return $args;
+		};
+		$revision_filter = static function ( \WP_REST_Response $response, \WP_Post $post, \WP_REST_Request $request ) use ( &$prepare_revision_calls ): \WP_REST_Response {
+			$prepare_revision_calls[] = array(
+				'id'      => (int) $post->ID,
+				'parent'  => (int) $post->post_parent,
+				'type'    => $post->post_type,
+				'route'   => $request->get_route(),
+				'method'  => $request->get_method(),
+				'context' => $request['context'],
+				'fields'  => $request['_fields'],
+			);
+			return $response;
+		};
+		$autosave_filter = static function ( \WP_REST_Response $response, \WP_Post $post, \WP_REST_Request $request ) use ( &$prepare_autosave_calls ): \WP_REST_Response {
+			$prepare_autosave_calls[] = array(
+				'id'      => (int) $post->ID,
+				'parent'  => (int) $post->post_parent,
+				'author'  => (int) $post->post_author,
+				'route'   => $request->get_route(),
+				'method'  => $request->get_method(),
+				'context' => $request['context'],
+				'fields'  => $request['_fields'],
+			);
+			return $response;
+		};
+
+		\add_filter( 'rest_revision_query', $query_filter, 10, 2 );
+		\add_filter( 'rest_prepare_revision', $revision_filter, 10, 3 );
+		\add_filter( 'rest_prepare_autosave', $autosave_filter, 10, 3 );
+
+		try {
+			foreach ( array( 'post' => 'posts', 'page' => 'pages' ) as $post_type => $rest_base ) {
+				$target_case = array_merge(
+					$case,
+					array(
+						'postType' => $post_type,
+						'slug'     => $case['slug'] . '-' . $post_type,
+					)
+				);
+				$post_type_object = \get_post_type_object( $post_type );
+				if ( ! $post_type_object ) {
+					self::collect_failure(
+						$failures,
+						false,
+						"built-in {$post_type} post type is registered for REST revision/autosave parity",
+						array( 'postType' => $post_type )
+					);
+					continue;
+				}
+
+				$parent_controller   = $post_type_object->get_rest_controller();
+				$revision_controller = $post_type_object->get_revisions_rest_controller();
+				$autosave_controller = $post_type_object->get_autosave_rest_controller();
+				if ( $parent_controller ) {
+					$parent_controller->register_routes();
+				}
+				if ( $revision_controller ) {
+					$revision_controller->register_routes();
+				}
+				if ( $autosave_controller ) {
+					$autosave_controller->register_routes();
+				}
+
+				$author_id      = self::insert_author( $target_case, "builtin-{$post_type}-author" );
+				$editor_id      = self::insert_author( $target_case, "builtin-{$post_type}-editor" );
+				$other_user_id  = self::insert_author( $target_case, "builtin-{$post_type}-other" );
+				$post_id        = self::insert_parent_post( $target_case, $author_id, "builtin-{$post_type}-parent" );
+				$old_revision   = self::insert_revision_row(
+					$post_id,
+					$author_id,
+					array(
+						'post_title'        => $case['titleFrom'] . " {$post_type} built-in old revision",
+						'post_content'      => $case['contentFrom'] . "\n{$post_type} built-in old revision",
+						'post_excerpt'      => $case['excerptFrom'],
+						'post_date'         => $case['dateFrom'],
+						'post_date_gmt'     => $case['dateFromGmt'],
+						'post_modified'     => $case['dateFrom'],
+						'post_modified_gmt' => $case['dateFromGmt'],
+					),
+					false
+				);
+				$middle_revision = self::insert_revision_row(
+					$post_id,
+					$author_id,
+					array(
+						'post_title'        => $case['titleTo'] . " {$post_type} built-in middle revision",
+						'post_content'      => $case['contentTo'] . "\n{$post_type} built-in middle revision",
+						'post_excerpt'      => $case['excerptTo'],
+						'post_date'         => $case['dateTo'],
+						'post_date_gmt'     => $case['dateToGmt'],
+						'post_modified'     => $case['dateTo'],
+						'post_modified_gmt' => $case['dateToGmt'],
+					),
+					false
+				);
+				$new_revision   = self::insert_revision_row(
+					$post_id,
+					$author_id,
+					array(
+						'post_title'        => $case['titleTo'] . " {$post_type} built-in newest revision",
+						'post_content'      => $case['contentTo'] . "\n{$post_type} built-in newest revision",
+						'post_excerpt'      => $case['excerptTo'],
+						'post_date'         => $case['dateLater'],
+						'post_date_gmt'     => $case['dateLaterGmt'],
+						'post_modified'     => $case['dateLater'],
+						'post_modified_gmt' => $case['dateLaterGmt'],
+					),
+					false
+				);
+				$other_autosave = self::insert_revision_row(
+					$post_id,
+					$other_user_id,
+					array(
+						'post_title'        => $case['titleFrom'] . " {$post_type} other autosave",
+						'post_content'      => $case['contentFrom'] . "\n{$post_type} other autosave",
+						'post_excerpt'      => $case['excerptFrom'],
+						'post_date'         => self::offset_mysql_date( $case['dateTo'], 7 ),
+						'post_date_gmt'     => self::offset_mysql_date( $case['dateToGmt'], 7 ),
+						'post_modified'     => self::offset_mysql_date( $case['dateTo'], 7 ),
+						'post_modified_gmt' => self::offset_mysql_date( $case['dateToGmt'], 7 ),
+					),
+					true
+				);
+				$current_autosave = self::insert_revision_row(
+					$post_id,
+					$editor_id,
+					array(
+						'post_title'        => $case['titleTo'] . " {$post_type} current autosave",
+						'post_content'      => $case['contentTo'] . "\n{$post_type} current autosave",
+						'post_excerpt'      => $case['excerptTo'],
+						'post_date'         => self::offset_mysql_date( $case['dateLater'], 11 ),
+						'post_date_gmt'     => self::offset_mysql_date( $case['dateLaterGmt'], 11 ),
+						'post_modified'     => self::offset_mysql_date( $case['dateLater'], 11 ),
+						'post_modified_gmt' => self::offset_mysql_date( $case['dateLaterGmt'], 11 ),
+					),
+					true
+				);
+
+				$revision_route = '/wp/v2/' . $rest_base . '/' . $post_id . '/revisions';
+				$autosave_route = '/wp/v2/' . $rest_base . '/' . $post_id . '/autosaves';
+				$parent_route   = '/wp/v2/' . $rest_base . '/' . $post_id;
+				$total_children = 5;
+				$grant_caps     = self::grant_all_caps_filter( $editor_id );
+
+				try {
+					\wp_set_current_user( $editor_id );
+					\add_filter( 'user_has_cap', $grant_caps, 10, 4 );
+
+					$parent_item = self::dispatch(
+						$server,
+						self::request(
+							'GET',
+							$parent_route,
+							array(
+								'context' => 'edit',
+								'_fields' => 'id,type,status,slug',
+							)
+						)
+					);
+
+					$query_calls            = array();
+					$prepare_revision_calls = array();
+					$include_missing        = self::dispatch(
+						$server,
+						self::request(
+							'GET',
+							$revision_route,
+							array(
+								'context' => 'edit',
+								'orderby' => 'include',
+							)
+						)
+					);
+					$include_missing_query_calls = $query_calls;
+
+					$query_calls            = array();
+					$prepare_revision_calls = array();
+					$include_collection     = self::dispatch(
+						$server,
+						self::request(
+							'GET',
+							$revision_route,
+							array(
+								'context'  => 'edit',
+								'_fields'  => 'id,parent,slug,title.raw,_links',
+								'include'  => array( $middle_revision, $old_revision ),
+								'orderby'  => 'include',
+								'per_page' => 2,
+							)
+						)
+					);
+					$include_query_calls    = $query_calls;
+					$include_prepare_calls  = $prepare_revision_calls;
+					$include_data           = $include_collection instanceof \WP_REST_Response ? $include_collection->get_data() : array();
+					$include_headers        = $include_collection instanceof \WP_REST_Response ? $include_collection->get_headers() : array();
+
+					$query_calls            = array();
+					$prepare_revision_calls = array();
+					$head_collection        = self::dispatch(
+						$server,
+						self::request(
+							'HEAD',
+							$revision_route,
+							array(
+								'context'  => 'edit',
+								'orderby'  => 'date',
+								'order'    => 'desc',
+								'per_page' => 1,
+								'page'     => 2,
+							)
+						)
+					);
+					$head_query_calls       = $query_calls;
+					$head_prepare_calls     = $prepare_revision_calls;
+					$head_headers           = $head_collection instanceof \WP_REST_Response ? $head_collection->get_headers() : array();
+
+					$query_calls            = array();
+					$prepare_revision_calls = array();
+					$invalid_page           = self::dispatch(
+						$server,
+						self::request(
+							'GET',
+							$revision_route,
+							array(
+								'context'  => 'edit',
+								'per_page' => 1,
+								'page'     => $total_children + 1,
+							)
+						)
+					);
+					$invalid_page_query_calls   = $query_calls;
+					$invalid_page_prepare_calls = $prepare_revision_calls;
+
+					$query_calls            = array();
+					$prepare_revision_calls = array();
+					$invalid_offset         = self::dispatch(
+						$server,
+						self::request(
+							'GET',
+							$revision_route,
+							array(
+								'context'  => 'edit',
+								'per_page' => 1,
+								'offset'   => $total_children,
+							)
+						)
+					);
+					$invalid_offset_query_calls   = $query_calls;
+					$invalid_offset_prepare_calls = $prepare_revision_calls;
+
+					$query_calls            = array();
+					$prepare_revision_calls = array();
+					$offset_page_precedence = self::dispatch(
+						$server,
+						self::request(
+							'GET',
+							$revision_route,
+							array(
+								'context'  => 'edit',
+								'_fields'  => 'id,parent',
+								'per_page' => 1,
+								'offset'   => 1,
+								'page'     => 999,
+							)
+						)
+					);
+					$offset_page_query_calls   = $query_calls;
+					$offset_page_prepare_calls = $prepare_revision_calls;
+					$offset_page_data          = $offset_page_precedence instanceof \WP_REST_Response ? $offset_page_precedence->get_data() : array();
+					$offset_page_headers       = $offset_page_precedence instanceof \WP_REST_Response ? $offset_page_precedence->get_headers() : array();
+
+					$prepare_revision_calls = array();
+					$prepare_autosave_calls = array();
+					$autosave_collection    = self::dispatch(
+						$server,
+						self::request(
+							'GET',
+							$autosave_route,
+							array(
+								'context' => 'edit',
+								'_fields' => 'id,parent,title.raw,preview_link',
+							)
+						)
+					);
+					$autosave_collection_data = $autosave_collection instanceof \WP_REST_Response ? $autosave_collection->get_data() : array();
+					$autosave_item            = self::dispatch(
+						$server,
+						self::request(
+							'GET',
+							$autosave_route . '/' . $other_autosave,
+							array(
+								'context' => 'edit',
+								'_fields' => 'id,parent,title.raw,preview_link',
+							)
+						)
+					);
+					$autosave_item_data       = $autosave_item instanceof \WP_REST_Response ? $autosave_item->get_data() : array();
+					$autosave_prepare_before_head = $prepare_autosave_calls;
+					$revision_prepare_before_head = $prepare_revision_calls;
+					$autosave_head            = self::dispatch(
+						$server,
+						self::request(
+							'HEAD',
+							$autosave_route,
+							array( 'context' => 'edit' )
+						)
+					);
+					$autosave_prepare_after_head = $prepare_autosave_calls;
+					$revision_prepare_after_head = $prepare_revision_calls;
+				} finally {
+					\remove_filter( 'user_has_cap', $grant_caps, 10 );
+					\wp_set_current_user( 0 );
+				}
+
+				$parent_data = $parent_item instanceof \WP_REST_Response ? $parent_item->get_data() : array();
+				self::collect_failure(
+					$failures,
+					$parent_item instanceof \WP_REST_Response
+						&& 200 === $parent_item->get_status()
+						&& $post_id === (int) ( $parent_data['id'] ?? 0 )
+						&& $post_type === ( $parent_data['type'] ?? null )
+						&& 'draft' === ( $parent_data['status'] ?? null ),
+					"built-in {$post_type} parent route dispatches before revision/autosave parity checks",
+					array(
+						'postType' => $post_type,
+						'parent'   => self::response_summary( $parent_item ),
+					)
+				);
+
+				$include_ids       = is_array( $include_data ) ? array_values( array_map( 'intval', array_column( $include_data, 'id' ) ) ) : array();
+				$include_parent_ids = is_array( $include_data ) ? array_values( array_map( 'intval', array_column( $include_data, 'parent' ) ) ) : array();
+				self::collect_failure(
+					$failures,
+					self::response_error_ok( $include_missing, 'rest_orderby_include_missing_include', 400 )
+						&& array() === $include_missing_query_calls
+						&& $include_collection instanceof \WP_REST_Response
+						&& 200 === $include_collection->get_status()
+						&& array( $middle_revision, $old_revision ) === $include_ids
+						&& array( $post_id, $post_id ) === $include_parent_ids
+						&& 2 === (int) ( $include_headers['X-WP-Total'] ?? 0 )
+						&& 1 === (int) ( $include_headers['X-WP-TotalPages'] ?? 0 )
+						&& 1 === count( $include_query_calls )
+						&& $post_id === (int) ( $include_query_calls[0]['postParent'] ?? 0 )
+						&& array( $middle_revision, $old_revision ) === ( $include_query_calls[0]['postIn'] ?? array() )
+						&& 'include' === ( $include_query_calls[0]['orderBy'] ?? null )
+						&& 2 === count( $include_prepare_calls ),
+					"built-in {$post_type} revisions collection validates include-order preconditions and preserves include ordering",
+					array(
+						'postType'      => $post_type,
+						'missing'       => self::response_summary( $include_missing ),
+						'collection'    => self::response_summary( $include_collection ),
+						'queryCalls'    => $include_query_calls,
+						'prepareCalls'  => $include_prepare_calls,
+					)
+				);
+
+				self::collect_failure(
+					$failures,
+					$head_collection instanceof \WP_REST_Response
+						&& 200 === $head_collection->get_status()
+						&& array() === $head_collection->get_data()
+						&& $total_children === (int) ( $head_headers['X-WP-Total'] ?? 0 )
+						&& $total_children === (int) ( $head_headers['X-WP-TotalPages'] ?? 0 )
+						&& 1 === count( $head_query_calls )
+						&& 'ids' === ( $head_query_calls[0]['fields'] ?? null )
+						&& false === ( $head_query_calls[0]['updatePostMetaCache'] ?? null )
+						&& false === ( $head_query_calls[0]['updatePostTermCache'] ?? null )
+						&& 'date ID' === ( $head_query_calls[0]['orderBy'] ?? null )
+						&& 1 === (int) ( $head_query_calls[0]['postsPerPage'] ?? 0 )
+						&& 2 === (int) ( $head_query_calls[0]['paged'] ?? 0 )
+						&& array() === $head_prepare_calls,
+					"built-in {$post_type} revisions HEAD collection uses ID-only pagination without preparing bodies",
+					array(
+						'postType'     => $post_type,
+						'head'         => self::response_summary( $head_collection ),
+						'queryCalls'   => $head_query_calls,
+						'prepareCalls' => $head_prepare_calls,
+					)
+				);
+
+				self::collect_failure(
+					$failures,
+					self::response_error_ok( $invalid_page, 'rest_revision_invalid_page_number', 400 )
+						&& array() === $invalid_page_prepare_calls
+						&& 1 <= count( $invalid_page_query_calls ),
+					"built-in {$post_type} revisions collection fails closed for out-of-bounds page requests before response preparation",
+					array(
+						'postType'     => $post_type,
+						'invalidPage'  => self::response_summary( $invalid_page ),
+						'queryCalls'   => $invalid_page_query_calls,
+						'prepareCalls' => $invalid_page_prepare_calls,
+					)
+				);
+
+				self::collect_failure(
+					$failures,
+					self::response_error_ok( $invalid_offset, 'rest_revision_invalid_offset_number', 400 )
+						&& array() === $invalid_offset_prepare_calls
+						&& 1 <= count( $invalid_offset_query_calls )
+						&& $offset_page_precedence instanceof \WP_REST_Response
+						&& 200 === $offset_page_precedence->get_status()
+						&& is_array( $offset_page_data )
+						&& 1 === count( $offset_page_data )
+						&& $post_id === (int) ( $offset_page_data[0]['parent'] ?? 0 )
+						&& $total_children === (int) ( $offset_page_headers['X-WP-Total'] ?? 0 )
+						&& $total_children === (int) ( $offset_page_headers['X-WP-TotalPages'] ?? 0 )
+						&& 1 === count( $offset_page_query_calls )
+						&& 1 === (int) ( $offset_page_query_calls[0]['offset'] ?? -1 )
+						&& 999 === (int) ( $offset_page_query_calls[0]['paged'] ?? 0 )
+						&& 1 === count( $offset_page_prepare_calls ),
+					"built-in {$post_type} revisions collection rejects out-of-bounds offsets while nonzero offset takes precedence over out-of-bounds page",
+					array(
+						'postType'          => $post_type,
+						'invalidOffset'     => self::response_summary( $invalid_offset ),
+						'invalidOffsetQuery' => $invalid_offset_query_calls,
+						'offsetPrecedence'  => self::response_summary( $offset_page_precedence ),
+						'offsetQuery'       => $offset_page_query_calls,
+						'offsetPrepare'     => $offset_page_prepare_calls,
+					)
+				);
+
+				$autosave_ids          = is_array( $autosave_collection_data ) ? array_values( array_map( 'intval', array_column( $autosave_collection_data, 'id' ) ) ) : array();
+				$expected_autosave_ids = array( $current_autosave, $other_autosave );
+				sort( $autosave_ids );
+				sort( $expected_autosave_ids );
+				self::collect_failure(
+					$failures,
+					$autosave_collection instanceof \WP_REST_Response
+						&& 200 === $autosave_collection->get_status()
+						&& $expected_autosave_ids === $autosave_ids
+						&& $autosave_item instanceof \WP_REST_Response
+						&& 200 === $autosave_item->get_status()
+						&& $current_autosave === (int) ( $autosave_item_data['id'] ?? 0 )
+						&& $post_id === (int) ( $autosave_item_data['parent'] ?? 0 )
+						&& $case['titleTo'] . " {$post_type} current autosave" === ( $autosave_item_data['title']['raw'] ?? null )
+						&& $autosave_head instanceof \WP_REST_Response
+						&& 200 === $autosave_head->get_status()
+						&& array() === $autosave_head->get_data()
+						&& $autosave_prepare_before_head === $autosave_prepare_after_head
+						&& $revision_prepare_before_head === $revision_prepare_after_head,
+					"built-in {$post_type} autosave collection lists seeded autosaves while item routes return the current user's autosave and HEAD stays body-free",
+					array(
+						'postType'              => $post_type,
+						'collection'            => self::response_summary( $autosave_collection ),
+						'item'                  => self::response_summary( $autosave_item ),
+						'head'                  => self::response_summary( $autosave_head ),
+						'prepareAutosaveBefore' => $autosave_prepare_before_head,
+						'prepareAutosaveAfter'  => $autosave_prepare_after_head,
+						'prepareRevisionBefore' => $revision_prepare_before_head,
+						'prepareRevisionAfter'  => $revision_prepare_after_head,
+					)
+				);
+
+				$matrix[] = array(
+					'postType'        => $post_type,
+					'restBase'        => $rest_base,
+					'postId'          => $post_id,
+					'revisions'       => array( $old_revision, $middle_revision, $new_revision ),
+					'autosaves'       => array( $current_autosave, $other_autosave ),
+					'totalChildren'   => $total_children,
+				);
+			}
+
+			$matrix_by_type = array();
+			foreach ( $matrix as $entry ) {
+				$matrix_by_type[ $entry['postType'] ] = $entry;
+			}
+			if ( isset( $matrix_by_type['post'], $matrix_by_type['page'] ) ) {
+				$post_id = (int) $matrix_by_type['post']['postId'];
+				$page_id = (int) $matrix_by_type['page']['postId'];
+				$cross_post_revision = self::dispatch( $server, self::request( 'GET', '/wp/v2/posts/' . $page_id . '/revisions' ) );
+				$cross_page_autosave = self::dispatch( $server, self::request( 'GET', '/wp/v2/pages/' . $post_id . '/autosaves' ) );
+
+				self::collect_failure(
+					$failures,
+					self::response_error_ok( $cross_post_revision, 'rest_post_invalid_parent', 404 )
+						&& self::response_error_ok( $cross_page_autosave, 'rest_post_invalid_parent', 404 ),
+					'built-in post/page revision and autosave routes reject cross-type parent IDs before querying',
+					array(
+						'postId'            => $post_id,
+						'pageId'            => $page_id,
+						'crossPostRevision' => self::response_summary( $cross_post_revision ),
+						'crossPageAutosave' => self::response_summary( $cross_page_autosave ),
+					)
+				);
+			}
+		} finally {
+			\remove_filter( 'rest_prepare_autosave', $autosave_filter, 10 );
+			\remove_filter( 'rest_prepare_revision', $revision_filter, 10 );
+			\remove_filter( 'rest_revision_query', $query_filter, 10 );
+			\wp_set_current_user( 0 );
+		}
+
+		self::collect_failure(
+			$failures,
+			false === \has_filter( 'rest_revision_query', $query_filter )
+				&& false === \has_filter( 'rest_prepare_revision', $revision_filter )
+				&& false === \has_filter( 'rest_prepare_autosave', $autosave_filter ),
+			'built-in post/page REST revision/autosave parity harness removes local filters',
+			array(
+				'filters' => array(
+					'query'    => \has_filter( 'rest_revision_query', $query_filter ),
+					'revision' => \has_filter( 'rest_prepare_revision', $revision_filter ),
+					'autosave' => \has_filter( 'rest_prepare_autosave', $autosave_filter ),
+				),
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'revisions-autosaves.rest-builtin-post-page-parity',
+			$failures,
+			array(
+				'case'   => self::case_summary( $case ),
+				'matrix' => $matrix,
 			)
 		);
 	}
