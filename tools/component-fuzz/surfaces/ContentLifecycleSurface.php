@@ -5313,6 +5313,125 @@ final class ContentLifecycleSurface {
 				$included_excluded_author_keys_distinct_by_field[ $field ] = count( $keys ) === count( array_unique( $keys ) );
 			}
 			$included_excluded_author_key_boundaries_hold = ! in_array( false, $included_excluded_author_keys_distinct_by_field, true );
+			$author_name_user = \get_userdata( $author_excluded_a_id );
+			$author_name_slug = $author_name_user instanceof \WP_User ? (string) $author_name_user->user_nicename : '';
+			$author_name_expected = array( $pretty_child_id );
+			$author_name_parent_expected = array(
+				$pretty_child_id => $pretty_parent_id,
+			);
+			$author_name_status_expected = array_fill_keys( $author_name_expected, 'publish' );
+			ksort( $author_name_parent_expected );
+			ksort( $author_name_status_expected );
+			$author_name_variants = array(
+				'canonical'     => array(
+					'authorName' => $author_name_slug,
+				),
+				'nestedPath'    => array(
+					'authorName' => 'archive/' . $author_name_slug,
+				),
+				'trailingSlash' => array(
+					'authorName' => 'archive/' . $author_name_slug . '/',
+				),
+			);
+			$author_name_keys = array(
+				'ids'      => array(),
+				'idParent' => array(),
+				'object'   => array(),
+			);
+			$author_name_requests = array(
+				'ids'      => array(),
+				'idParent' => array(),
+				'object'   => array(),
+			);
+			$author_name_checks = array();
+			$author_name_query_var_checks = array();
+			$author_name_sql_checks = array();
+			$author_name_actual = array();
+			foreach ( $author_name_variants as $variant => $config ) {
+				$variant_args = array_merge(
+					$ordering_id_args,
+					array(
+						'author'         => null,
+						'author_name'    => $config['authorName'],
+						'author__in'     => null,
+						'author__not_in' => null,
+						'post__not_in'   => null,
+					)
+				);
+				$buckets = array(
+					'ids'      => $query_parent_status_bucket( $pretty_type, 0, 'publish', 'ids', $variant_args ),
+					'idParent' => $query_parent_status_bucket( $pretty_type, 0, 'publish', 'id=>parent', $variant_args ),
+					'object'   => $query_parent_status_bucket( $pretty_type, 0, 'publish', 'all', $variant_args ),
+				);
+				$expected_author_name = sanitize_title_for_query( $author_name_slug );
+
+				$author_name_checks[ $variant ] = $query_ordering_family_is_valid( $buckets['ids'], $buckets['idParent'], $buckets['object'], $author_name_expected, $author_name_parent_expected, $author_name_status_expected );
+				$author_name_query_var_checks[ $variant ] = $expected_author_name === (string) ( $buckets['ids']['queryVars']['author_name'] ?? '' )
+					&& $expected_author_name === (string) ( $buckets['idParent']['queryVars']['author_name'] ?? '' )
+					&& $expected_author_name === (string) ( $buckets['object']['queryVars']['author_name'] ?? '' )
+					&& $author_excluded_a_id === (int) ( $buckets['ids']['queryVars']['author'] ?? 0 )
+					&& $author_excluded_a_id === (int) ( $buckets['idParent']['queryVars']['author'] ?? 0 )
+					&& $author_excluded_a_id === (int) ( $buckets['object']['queryVars']['author'] ?? 0 );
+				$author_name_sql_checks[ $variant ] = false !== strpos( $buckets['ids']['request'], 'post_author = ' . (string) $author_excluded_a_id )
+					&& false !== strpos( $buckets['idParent']['request'], 'post_author = ' . (string) $author_excluded_a_id )
+					&& false !== strpos( $buckets['object']['request'], 'post_author = ' . (string) $author_excluded_a_id );
+				$author_name_keys['ids'][] = $buckets['ids']['cacheKey'];
+				$author_name_keys['idParent'][] = $buckets['idParent']['cacheKey'];
+				$author_name_keys['object'][] = $buckets['object']['cacheKey'];
+				$author_name_requests['ids'][] = $buckets['ids']['request'];
+				$author_name_requests['idParent'][] = $buckets['idParent']['request'];
+				$author_name_requests['object'][] = $buckets['object']['request'];
+				$author_name_actual[ $variant ] = array(
+					'authorNameArg' => $config['authorName'],
+					'queryVar'      => array(
+						'ids'      => array(
+							'author_name' => (string) ( $buckets['ids']['queryVars']['author_name'] ?? '' ),
+							'author'      => (int) ( $buckets['ids']['queryVars']['author'] ?? 0 ),
+						),
+						'idParent' => array(
+							'author_name' => (string) ( $buckets['idParent']['queryVars']['author_name'] ?? '' ),
+							'author'      => (int) ( $buckets['idParent']['queryVars']['author'] ?? 0 ),
+						),
+						'object'   => array(
+							'author_name' => (string) ( $buckets['object']['queryVars']['author_name'] ?? '' ),
+							'author'      => (int) ( $buckets['object']['queryVars']['author'] ?? 0 ),
+						),
+					),
+					'keys'          => array(
+						'ids'      => substr( md5( $buckets['ids']['cacheKey'] ), 0, 8 ),
+						'idParent' => substr( md5( $buckets['idParent']['cacheKey'] ), 0, 8 ),
+						'object'   => substr( md5( $buckets['object']['cacheKey'] ), 0, 8 ),
+					),
+					'requests'      => array(
+						'ids'      => substr( md5( $buckets['ids']['request'] ), 0, 8 ),
+						'idParent' => substr( md5( $buckets['idParent']['request'] ), 0, 8 ),
+						'object'   => substr( md5( $buckets['object']['request'] ), 0, 8 ),
+					),
+					'ids'           => array(
+						'ids'      => $buckets['ids']['ids'],
+						'idParent' => $buckets['idParent']['ids'],
+						'object'   => $buckets['object']['ids'],
+					),
+					'parents'       => array(
+						'idParent' => $buckets['idParent']['parents'],
+						'object'   => $buckets['object']['parents'],
+					),
+					'statuses'      => $buckets['object']['statuses'],
+				);
+			}
+			$author_name_valid = ! in_array( false, $author_name_checks, true )
+				&& ! in_array( false, $author_name_query_var_checks, true )
+				&& ! in_array( false, $author_name_sql_checks, true );
+			$author_name_requests_shared_by_field = array();
+			foreach ( $author_name_requests as $field => $requests ) {
+				$author_name_requests_shared_by_field[ $field ] = 1 === count( array_unique( $requests ) );
+			}
+			$author_name_requests_shared = ! in_array( false, $author_name_requests_shared_by_field, true );
+			$author_name_keys_shared_by_field = array();
+			foreach ( $author_name_keys as $field => $keys ) {
+				$author_name_keys_shared_by_field[ $field ] = 1 === count( array_unique( $keys ) );
+			}
+			$author_name_keys_shared = ! in_array( false, $author_name_keys_shared_by_field, true );
 			$legacy_author_variants = array(
 				'canonical'  => array(
 					'author' => $author_excluded_a_id . ',-' . $author_excluded_b_id,
@@ -6066,6 +6185,38 @@ final class ContentLifecycleSurface {
 						$included_excluded_author_keys
 					),
 					'variants'            => $included_excluded_author_actual,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$author_name_valid
+					&& $author_name_requests_shared
+					&& $author_name_keys_shared,
+				'WP_Query normalizes generated custom hierarchical author_name slug paths across selected fields',
+				array(
+					'checks'              => array(
+						'variantsValid'                => $author_name_checks,
+						'queryVarsNormalizeAuthorName' => $author_name_query_var_checks,
+						'sqlUsesResolvedAuthor'        => $author_name_sql_checks,
+						'requestsSharedByField'        => $author_name_requests_shared_by_field,
+						'keysSharedByField'            => $author_name_keys_shared_by_field,
+					),
+					'authorNameSlug'      => $author_name_slug,
+					'expectedAuthorName'  => sanitize_title_for_query( $author_name_slug ),
+					'authorId'            => $author_excluded_a_id,
+					'expectedIds'         => $author_name_expected,
+					'expectedParents'     => $author_name_parent_expected,
+					'expectedStatuses'    => $author_name_status_expected,
+					'uniqueRequestHashes' => array_map(
+						static fn ( array $requests ): array => array_values( array_unique( array_map( static fn ( string $request ): string => substr( md5( $request ), 0, 8 ), $requests ) ) ),
+						$author_name_requests
+					),
+					'uniqueKeyHashes'     => array_map(
+						static fn ( array $keys ): array => array_values( array_unique( array_map( static fn ( string $key ): string => substr( md5( $key ), 0, 8 ), $keys ) ) ),
+						$author_name_keys
+					),
+					'variants'            => $author_name_actual,
 				)
 			);
 
