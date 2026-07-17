@@ -114,6 +114,16 @@ Run parallel lanes and triage failures after completion:
 php tools/html-api-fuzz/launcher.php --lanes 4 --max-seeds 1000 --watcher
 ```
 
+`launcher-state.json` records lane completion separately from the requested
+workflow. `campaignFinished`/`campaignOk` describe the lane processes;
+`finished` means the launcher has reached a terminal state, while
+`workflowCompleted` is true only when every lane and a requested watcher
+succeeded. Watcher intent and its final exit code, timeout, duration, and log
+path are durable in `watcherResult` and in lifecycle events. A requested
+watcher timeout or nonzero exit makes launcher output report `ok: false` and
+the launcher exits nonzero, while the completed campaign evidence remains
+available for later triage.
+
 For continuous fuzzing, run the launcher with `--duration-seconds 0 --max-seeds 0`
 and run `watcher.php` in a second shell against the same output directory.
 

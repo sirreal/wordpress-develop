@@ -138,6 +138,7 @@ if ( is_file( $output_dir . '/STOP' ) ) {
 \HtmlApiFuzz\ensure_dir( $output_dir );
 $events_path = $output_dir . '/events.ndjson';
 $state_path  = $output_dir . '/launcher-state.json';
+$watcher_log_path = $output_dir . '/triage/watcher.log';
 $git_metadata = null === \HtmlApiFuzz\option_string( $options, 'git-metadata-base64', null )
 	? \HtmlApiFuzz\git_metadata()
 	: \HtmlApiFuzz\git_metadata_from_base64( \HtmlApiFuzz\option_string( $options, 'git-metadata-base64' ) );
@@ -148,6 +149,17 @@ if ( true !== ( $oracle_metadata['available'] ?? false ) ) {
 	throw new RuntimeException( 'Selected oracle is unavailable: ' . ( $oracle_metadata['error'] ?? $oracle_metadata['versionError'] ?? 'unknown error' ) );
 }
 $oracle_worker_args   = $oracle_renderer->worker_args();
+$watcher_result       = $run_watcher
+	? array(
+		'status'     => 'pending',
+		'code'       => null,
+		'timedOut'   => null,
+		'durationMs' => null,
+		'logPath'    => $watcher_log_path,
+		'startedAt'  => null,
+		'finishedAt' => null,
+	)
+	: null;
 
 $state = array(
 	'schemaVersion' => 1,
@@ -164,7 +176,13 @@ $state = array(
 	'maxInputBytes' => $max_input_bytes > 0 ? $max_input_bytes : null,
 	'git'           => $git_metadata,
 	'oracle'        => $oracle_metadata,
+	'status'        => 'lanes-running',
 	'finished'      => false,
+	'campaignFinished' => false,
+	'campaignOk'       => false,
+	'workflowCompleted'=> false,
+	'watcherRequested' => $run_watcher,
+	'watcherResult'    => $watcher_result,
 	'laneResults'   => array(),
 );
 \HtmlApiFuzz\write_json_file( $state_path, $state );
@@ -298,17 +316,46 @@ foreach ( $state['laneResults'] as $lane ) {
 	}
 }
 
-$state['finished']  = true;
-$state['updatedAt'] = gmdate( 'c' );
-$state['aggregate'] = $aggregate;
-\HtmlApiFuzz\write_json_file( $state_path, $state );
-\HtmlApiFuzz\append_ndjson( $events_path, array( 'at' => gmdate( 'c' ), 'kind' => 'launcher-stop', 'aggregate' => $aggregate ) );
+$campaign_ok = true;
+foreach ( $state['laneResults'] as $lane ) {
+	if ( 'skipped' === ( $lane['status'] ?? null ) ) {
+		continue;
+	}
+	if ( 'completed' !== ( $lane['status'] ?? null ) || 0 !== ( $lane['code'] ?? null ) ) {
+		$campaign_ok = false;
+		break;
+	}
+}
 
-$watcher_result = null;
+$state['campaignFinished'] = true;
+$state['campaignOk']       = $campaign_ok;
+$state['aggregate']        = $aggregate;
+$state['status']           = $run_watcher ? 'watcher-pending' : ( $campaign_ok ? 'completed' : 'lane-failed' );
+$state['finished']         = ! $run_watcher;
+$state['workflowCompleted']= ! $run_watcher && $campaign_ok;
+$state['updatedAt']        = gmdate( 'c' );
+\HtmlApiFuzz\write_json_file( $state_path, $state );
+\HtmlApiFuzz\append_ndjson( $events_path, array( 'at' => gmdate( 'c' ), 'kind' => 'campaign-stop', 'ok' => $campaign_ok, 'aggregate' => $aggregate ) );
+
 if ( $run_watcher ) {
 	$triage_dir = $output_dir . '/triage';
 	$minimize_timeout_ms = \HtmlApiFuzz\option_int( $options, 'minimize-timeout-ms', 300000 );
 	$watcher_timeout_ms  = \HtmlApiFuzz\option_int( $options, 'watcher-timeout-ms', max( 600000, $minimize_timeout_ms + 60000 ) );
+	$watcher_result['status']    = 'running';
+	$watcher_result['startedAt'] = gmdate( 'c' );
+	$state['status']             = 'watcher-running';
+	$state['watcherResult']      = $watcher_result;
+	$state['updatedAt']          = gmdate( 'c' );
+	\HtmlApiFuzz\write_json_file( $state_path, $state );
+	\HtmlApiFuzz\append_ndjson(
+		$events_path,
+		array(
+			'at'       => gmdate( 'c' ),
+			'kind'     => 'watcher-start',
+			'logPath'  => $watcher_log_path,
+			'timeoutMs'=> $watcher_timeout_ms,
+		)
+	);
 	$proc = \HtmlApiFuzz\run_php_process(
 		array_values(
 			array_filter(
@@ -341,22 +388,65 @@ if ( $run_watcher ) {
 		),
 		$repo_root,
 		$watcher_timeout_ms,
-		$triage_dir . '/watcher.log'
+		$watcher_log_path
 	);
 	$watcher_result = array(
+		'status'     => $proc['timedOut'] ? 'timed-out' : ( 0 === $proc['code'] ? 'completed' : 'failed' ),
 		'code'       => $proc['code'],
 		'timedOut'   => $proc['timedOut'],
 		'durationMs' => $proc['durationMs'],
 		'logPath'    => $proc['logPath'],
+		'startedAt'  => $watcher_result['startedAt'],
+		'finishedAt' => gmdate( 'c' ),
 	);
 }
 
+$watcher_ok = ! $run_watcher || ( false === $watcher_result['timedOut'] && 0 === $watcher_result['code'] );
+$ok         = $campaign_ok && $watcher_ok;
+$status     = $campaign_ok ? 'completed' : 'lane-failed';
+if ( $run_watcher && true === $watcher_result['timedOut'] ) {
+	$status = 'watcher-timed-out';
+} elseif ( $run_watcher && 0 !== $watcher_result['code'] ) {
+	$status = 'watcher-failed';
+}
+
+$state['status']            = $status;
+$state['finished']          = true;
+$state['workflowCompleted'] = $ok;
+$state['watcherResult']     = $watcher_result;
+$state['updatedAt']         = gmdate( 'c' );
+\HtmlApiFuzz\write_json_file( $state_path, $state );
+if ( $run_watcher ) {
+	\HtmlApiFuzz\append_ndjson(
+		$events_path,
+		array_merge(
+			array(
+				'at'   => gmdate( 'c' ),
+				'kind' => $watcher_result['timedOut'] ? 'watcher-timeout' : 'watcher-stop',
+			),
+			$watcher_result
+		)
+	);
+}
+\HtmlApiFuzz\append_ndjson(
+	$events_path,
+	array(
+		'at'            => gmdate( 'c' ),
+		'kind'          => 'launcher-stop',
+		'ok'            => $ok,
+		'status'        => $status,
+		'aggregate'     => $aggregate,
+		'watcherResult' => $watcher_result,
+	)
+);
+
 echo \HtmlApiFuzz\json_encode_safe(
 	array(
-		'ok'            => true,
+		'ok'            => $ok,
 		'outputDir'     => $output_dir,
 		'statePath'     => $state_path,
 		'aggregate'     => $aggregate,
 		'watcherResult' => $watcher_result,
 	)
 ) . "\n";
+exit( $ok ? 0 : 1 );

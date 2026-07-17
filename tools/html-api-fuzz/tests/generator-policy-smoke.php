@@ -118,6 +118,36 @@ function html_api_fuzz_smoke_rm_tree( string $path ): void {
 	@rmdir( $path );
 }
 
+function html_api_fuzz_smoke_snapshot_tree( string $path ): array {
+	if ( ! is_dir( $path ) ) {
+		return array();
+	}
+
+	$root     = rtrim( $path, DIRECTORY_SEPARATOR );
+	$snapshot = array();
+	$walk     = static function ( string $directory ) use ( &$walk, &$snapshot, $root ): void {
+		foreach ( scandir( $directory ) ?: array() as $item ) {
+			if ( '.' === $item || '..' === $item ) {
+				continue;
+			}
+			$full     = $directory . DIRECTORY_SEPARATOR . $item;
+			$relative = substr( $full, strlen( $root ) + 1 );
+			if ( is_dir( $full ) && ! is_link( $full ) ) {
+				$snapshot[ 'dir:' . $relative ] = null;
+				$walk( $full );
+				continue;
+			}
+			$snapshot[ 'file:' . $relative ] = array(
+				'size' => filesize( $full ),
+				'sha1' => sha1_file( $full ),
+			);
+		}
+	};
+	$walk( $root );
+	ksort( $snapshot );
+	return $snapshot;
+}
+
 $valid = null;
 for ( $truncation_seed = 1; $truncation_seed <= 64; $truncation_seed++ ) {
 	$candidate = \HtmlApiFuzz\Generator::generate(
@@ -983,8 +1013,19 @@ html_api_fuzz_smoke_assert( ! $metadata_launcher_proc['timedOut'] && 0 === $meta
 $metadata_launcher_state = \HtmlApiFuzz\read_json_file( $metadata_launcher_dir . '/launcher-state.json' );
 html_api_fuzz_smoke_assert( 'html-api-fuzz-launcher-state' === ( $metadata_launcher_state['kind'] ?? null ), 'launcher state should be written.' );
 html_api_fuzz_smoke_assert( is_array( $metadata_launcher_state['git'] ?? null ), 'launcher state should include compact git metadata.' );
+html_api_fuzz_smoke_assert( true === ( $metadata_launcher_state['finished'] ?? null ), 'no-watcher launcher should be terminal.' );
+html_api_fuzz_smoke_assert( true === ( $metadata_launcher_state['campaignFinished'] ?? null ), 'no-watcher launcher should record campaign completion.' );
+html_api_fuzz_smoke_assert( true === ( $metadata_launcher_state['campaignOk'] ?? null ), 'no-watcher launcher should record successful lane processes.' );
+html_api_fuzz_smoke_assert( true === ( $metadata_launcher_state['workflowCompleted'] ?? null ), 'no-watcher launcher should complete its requested workflow.' );
+html_api_fuzz_smoke_assert( false === ( $metadata_launcher_state['watcherRequested'] ?? null ), 'no-watcher launcher should record watcher intent.' );
+html_api_fuzz_smoke_assert( null === ( $metadata_launcher_state['watcherResult'] ?? null ), 'no-watcher launcher should not invent a watcher result.' );
+html_api_fuzz_smoke_assert( 'completed' === ( $metadata_launcher_state['status'] ?? null ), 'no-watcher launcher should report completed status.' );
 $metadata_launcher_events = \HtmlApiFuzz\read_ndjson_records( $metadata_launcher_dir . '/events.ndjson' );
 html_api_fuzz_smoke_assert( is_array( $metadata_launcher_events[0]['git'] ?? null ), 'launcher start event should include compact git metadata.' );
+$metadata_launcher_event_kinds = array_column( $metadata_launcher_events, 'kind' );
+html_api_fuzz_smoke_assert( 'launcher-stop' === end( $metadata_launcher_event_kinds ), 'no-watcher launcher should finish with launcher-stop.' );
+html_api_fuzz_smoke_assert( false !== array_search( 'campaign-stop', $metadata_launcher_event_kinds, true ), 'no-watcher launcher should record campaign-stop.' );
+html_api_fuzz_smoke_assert( false === array_search( 'watcher-start', $metadata_launcher_event_kinds, true ), 'no-watcher launcher should not record watcher-start.' );
 $metadata_launcher_lane_state = \HtmlApiFuzz\read_json_file( $metadata_launcher_dir . '/lane-00/state.json' );
 html_api_fuzz_smoke_assert( 3 === ( $metadata_launcher_lane_state['maxKeepPerSignature'] ?? null ), 'launcher should pass --max-keep-per-signature through to lanes.' );
 $metadata_launcher_replay = \HtmlApiFuzz\read_json_file( $metadata_launcher_dir . '/lane-00/seed-1/primary/replay.json' );
@@ -1021,6 +1062,73 @@ html_api_fuzz_smoke_assert( 0 === ( $launcher_oracle_watcher['watcherResult']['c
 $launcher_oracle_watcher_log = trim( (string) file_get_contents( $launcher_oracle_watcher['watcherResult']['logPath'] ?? '' ) );
 $launcher_oracle_watcher_scan = json_decode( $launcher_oracle_watcher_log, true );
 html_api_fuzz_smoke_assert( true === ( $launcher_oracle_watcher_scan['triageOracleFindings'] ?? null ), 'launcher should pass --triage-oracle-findings through to watcher.' );
+$launcher_oracle_watcher_state = \HtmlApiFuzz\read_json_file( $launcher_oracle_watcher_dir . '/launcher-state.json' );
+html_api_fuzz_smoke_assert( true === ( $launcher_oracle_watcher_state['finished'] ?? null ), 'successful watcher launcher should be terminal.' );
+html_api_fuzz_smoke_assert( true === ( $launcher_oracle_watcher_state['campaignFinished'] ?? null ), 'successful watcher launcher should record campaign completion.' );
+html_api_fuzz_smoke_assert( true === ( $launcher_oracle_watcher_state['campaignOk'] ?? null ), 'successful watcher launcher should record successful lane processes.' );
+html_api_fuzz_smoke_assert( true === ( $launcher_oracle_watcher_state['workflowCompleted'] ?? null ), 'successful watcher launcher should complete its requested workflow.' );
+html_api_fuzz_smoke_assert( true === ( $launcher_oracle_watcher_state['watcherRequested'] ?? null ), 'successful watcher launcher should record watcher intent.' );
+html_api_fuzz_smoke_assert( 'completed' === ( $launcher_oracle_watcher_state['status'] ?? null ), 'successful watcher launcher should report completed status.' );
+html_api_fuzz_smoke_assert( $launcher_oracle_watcher['watcherResult'] === ( $launcher_oracle_watcher_state['watcherResult'] ?? null ), 'stdout and durable watcher results should match.' );
+$launcher_oracle_watcher_events = \HtmlApiFuzz\read_ndjson_records( $launcher_oracle_watcher_dir . '/events.ndjson' );
+$launcher_oracle_watcher_kinds  = array_column( $launcher_oracle_watcher_events, 'kind' );
+$campaign_stop_index = array_search( 'campaign-stop', $launcher_oracle_watcher_kinds, true );
+$watcher_start_index = array_search( 'watcher-start', $launcher_oracle_watcher_kinds, true );
+$watcher_stop_index  = array_search( 'watcher-stop', $launcher_oracle_watcher_kinds, true );
+$launcher_stop_index = array_search( 'launcher-stop', $launcher_oracle_watcher_kinds, true );
+html_api_fuzz_smoke_assert( false !== $campaign_stop_index && false !== $watcher_start_index && false !== $watcher_stop_index && false !== $launcher_stop_index, 'successful watcher lifecycle events should be durable.' );
+html_api_fuzz_smoke_assert( $campaign_stop_index < $watcher_start_index && $watcher_start_index < $watcher_stop_index && $watcher_stop_index < $launcher_stop_index, 'successful watcher lifecycle events should be ordered.' );
+html_api_fuzz_smoke_assert( $launcher_stop_index === count( $launcher_oracle_watcher_kinds ) - 1, 'successful watcher launcher-stop should be final.' );
+
+$launcher_watcher_timeout_dir = $tmp . '/launcher-watcher-timeout';
+$launcher_watcher_timeout_proc = \HtmlApiFuzz\run_php_process(
+	array(
+		dirname( __DIR__ ) . '/launcher.php',
+		'--lanes',
+		'1',
+		'--max-seeds',
+		'1',
+		'--duration-seconds',
+		'0',
+		'--watcher',
+		'--no-minimize',
+		'--watcher-timeout-ms',
+		'0',
+		'--output-dir',
+		$launcher_watcher_timeout_dir,
+	),
+	\HtmlApiFuzz\repo_root(),
+	30000,
+	$tmp . '/launcher-watcher-timeout.log'
+);
+html_api_fuzz_smoke_assert( ! $launcher_watcher_timeout_proc['timedOut'], 'forced watcher-timeout launcher should terminate itself.' );
+html_api_fuzz_smoke_assert( 0 !== $launcher_watcher_timeout_proc['code'], 'forced watcher timeout should make the launcher fail.' );
+$launcher_watcher_timeout = json_decode( $launcher_watcher_timeout_proc['stdout'], true );
+html_api_fuzz_smoke_assert( false === ( $launcher_watcher_timeout['ok'] ?? null ), 'forced watcher timeout should report ok=false.' );
+html_api_fuzz_smoke_assert( true === ( $launcher_watcher_timeout['watcherResult']['timedOut'] ?? null ), 'forced timeout smoke must actually time out a started watcher process.' );
+html_api_fuzz_smoke_assert( null === ( $launcher_watcher_timeout['watcherResult']['code'] ?? null ), 'timed-out watcher should have no exit code.' );
+html_api_fuzz_smoke_assert( 'timed-out' === ( $launcher_watcher_timeout['watcherResult']['status'] ?? null ), 'timed-out watcher should report timed-out status.' );
+html_api_fuzz_smoke_assert( 0 < ( $launcher_watcher_timeout['watcherResult']['durationMs'] ?? 0 ), 'timed-out watcher should record a positive lifetime.' );
+html_api_fuzz_smoke_assert( is_string( $launcher_watcher_timeout['watcherResult']['startedAt'] ?? null ), 'timed-out watcher should record that it started.' );
+$launcher_watcher_timeout_state = \HtmlApiFuzz\read_json_file( $launcher_watcher_timeout_dir . '/launcher-state.json' );
+html_api_fuzz_smoke_assert( true === ( $launcher_watcher_timeout_state['finished'] ?? null ), 'timed-out watcher launcher should be terminal.' );
+html_api_fuzz_smoke_assert( true === ( $launcher_watcher_timeout_state['campaignFinished'] ?? null ), 'timed-out watcher launcher should preserve campaign completion.' );
+html_api_fuzz_smoke_assert( true === ( $launcher_watcher_timeout_state['campaignOk'] ?? null ), 'timed-out watcher launcher should preserve successful lane status.' );
+html_api_fuzz_smoke_assert( false === ( $launcher_watcher_timeout_state['workflowCompleted'] ?? null ), 'timed-out watcher should leave the requested workflow incomplete.' );
+html_api_fuzz_smoke_assert( 'watcher-timed-out' === ( $launcher_watcher_timeout_state['status'] ?? null ), 'timed-out watcher launcher should report watcher-timed-out.' );
+html_api_fuzz_smoke_assert( $launcher_watcher_timeout['watcherResult'] === ( $launcher_watcher_timeout_state['watcherResult'] ?? null ), 'timed-out stdout and durable watcher results should match.' );
+$launcher_watcher_timeout_events = \HtmlApiFuzz\read_ndjson_records( $launcher_watcher_timeout_dir . '/events.ndjson' );
+$launcher_watcher_timeout_kinds  = array_column( $launcher_watcher_timeout_events, 'kind' );
+$campaign_stop_index = array_search( 'campaign-stop', $launcher_watcher_timeout_kinds, true );
+$watcher_start_index = array_search( 'watcher-start', $launcher_watcher_timeout_kinds, true );
+$watcher_timeout_index = array_search( 'watcher-timeout', $launcher_watcher_timeout_kinds, true );
+$launcher_stop_index = array_search( 'launcher-stop', $launcher_watcher_timeout_kinds, true );
+html_api_fuzz_smoke_assert( false !== $campaign_stop_index && false !== $watcher_start_index && false !== $watcher_timeout_index && false !== $launcher_stop_index, 'timed-out watcher lifecycle events should be durable.' );
+html_api_fuzz_smoke_assert( $campaign_stop_index < $watcher_start_index && $watcher_start_index < $watcher_timeout_index && $watcher_timeout_index < $launcher_stop_index, 'timed-out watcher lifecycle events should be ordered.' );
+html_api_fuzz_smoke_assert( false === ( $launcher_watcher_timeout_events[ $launcher_stop_index ]['ok'] ?? null ), 'timed-out final launcher-stop should report failure.' );
+$timeout_snapshot = html_api_fuzz_smoke_snapshot_tree( $launcher_watcher_timeout_dir );
+usleep( 500000 );
+html_api_fuzz_smoke_assert( $timeout_snapshot === html_api_fuzz_smoke_snapshot_tree( $launcher_watcher_timeout_dir ), 'timed-out watcher must not survive the launcher and mutate artifacts later.' );
 
 $bad_stride_proc = \HtmlApiFuzz\run_php_process(
 	array(
