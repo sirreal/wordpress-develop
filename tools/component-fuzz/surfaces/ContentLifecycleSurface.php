@@ -4386,6 +4386,84 @@ final class ContentLifecycleSurface {
 				$normalized_parent_filter_keys_shared_by_field[ $field ] = 1 === count( array_unique( $keys ) );
 			}
 			$normalized_parent_filter_keys_shared = ! in_array( false, $normalized_parent_filter_keys_shared_by_field, true );
+			$parent_order_keys = array(
+				'ids'      => array(),
+				'idParent' => array(),
+				'object'   => array(),
+			);
+			$parent_order_checks = array();
+			$parent_order_query_var_checks = array();
+			$parent_order_expected = array();
+			$parent_order_actual = array();
+			$parent_to_child = array(
+				$pretty_parent_id => $pretty_child_id,
+				$query_parent_id  => $pretty_cross_type_child_id,
+			);
+			foreach ( $normalized_parent_variants as $variant => $config ) {
+				$variant_args = array_merge(
+					$ordering_parent_in_args,
+					array(
+						'post_parent__in' => $config['parents'],
+					)
+				);
+				$buckets = array(
+					'ids'      => $query_parent_status_bucket( $pretty_type, 0, 'publish', 'ids', $variant_args ),
+					'idParent' => $query_parent_status_bucket( $pretty_type, 0, 'publish', 'id=>parent', $variant_args ),
+					'object'   => $query_parent_status_bucket( $pretty_type, 0, 'publish', 'all', $variant_args ),
+				);
+				$expected_query_var = array_values( array_map( 'intval', $config['parents'] ) );
+				$expected_ids       = array();
+				foreach ( array_values( array_unique( $expected_query_var ) ) as $parent_id ) {
+					if ( isset( $parent_to_child[ $parent_id ] ) ) {
+						$expected_ids[] = $parent_to_child[ $parent_id ];
+					}
+				}
+
+				$parent_order_expected[ $variant ] = $expected_ids;
+				$parent_order_checks[ $variant ] = $query_ordering_family_is_valid( $buckets['ids'], $buckets['idParent'], $buckets['object'], $expected_ids, $ordering_parent_expected, $ordering_status_expected );
+				$parent_order_query_var_checks[ $variant ] = $expected_query_var === array_values( array_map( 'intval', (array) ( $buckets['ids']['queryVars']['post_parent__in'] ?? array() ) ) )
+					&& $expected_query_var === array_values( array_map( 'intval', (array) ( $buckets['idParent']['queryVars']['post_parent__in'] ?? array() ) ) )
+					&& $expected_query_var === array_values( array_map( 'intval', (array) ( $buckets['object']['queryVars']['post_parent__in'] ?? array() ) ) );
+				$parent_order_keys['ids'][] = $buckets['ids']['cacheKey'];
+				$parent_order_keys['idParent'][] = $buckets['idParent']['cacheKey'];
+				$parent_order_keys['object'][] = $buckets['object']['cacheKey'];
+				$parent_order_actual[ $variant ] = array(
+					'parentsArg' => $config['parents'],
+					'expected'   => $expected_ids,
+					'queryVar'   => array(
+						'ids'      => array_values( array_map( 'intval', (array) ( $buckets['ids']['queryVars']['post_parent__in'] ?? array() ) ) ),
+						'idParent' => array_values( array_map( 'intval', (array) ( $buckets['idParent']['queryVars']['post_parent__in'] ?? array() ) ) ),
+						'object'   => array_values( array_map( 'intval', (array) ( $buckets['object']['queryVars']['post_parent__in'] ?? array() ) ) ),
+					),
+					'keys'       => array(
+						'ids'      => substr( md5( $buckets['ids']['cacheKey'] ), 0, 8 ),
+						'idParent' => substr( md5( $buckets['idParent']['cacheKey'] ), 0, 8 ),
+						'object'   => substr( md5( $buckets['object']['cacheKey'] ), 0, 8 ),
+					),
+					'requests'   => array(
+						'ids'      => substr( md5( $buckets['ids']['request'] ), 0, 8 ),
+						'idParent' => substr( md5( $buckets['idParent']['request'] ), 0, 8 ),
+						'object'   => substr( md5( $buckets['object']['request'] ), 0, 8 ),
+					),
+					'ids'        => array(
+						'ids'      => $buckets['ids']['ids'],
+						'idParent' => $buckets['idParent']['ids'],
+						'object'   => $buckets['object']['ids'],
+					),
+					'parents'    => array(
+						'idParent' => $buckets['idParent']['parents'],
+						'object'   => $buckets['object']['parents'],
+					),
+					'statuses'   => $buckets['object']['statuses'],
+				);
+			}
+			$parent_order_valid = ! in_array( false, $parent_order_checks, true )
+				&& ! in_array( false, $parent_order_query_var_checks, true );
+			$parent_order_keys_distinct_by_field = array();
+			foreach ( $parent_order_keys as $field => $keys ) {
+				$parent_order_keys_distinct_by_field[ $field ] = count( $keys ) === count( array_unique( $keys ) );
+			}
+			$parent_order_key_boundaries_hold = ! in_array( false, $parent_order_keys_distinct_by_field, true );
 			$excluded_parent_variants = array(
 				'canonical'  => array(
 					'parents' => array( $query_parent_id, $pretty_parent_id ),
@@ -5368,6 +5446,28 @@ final class ContentLifecycleSurface {
 						$normalized_parent_filter_keys
 					),
 					'variants'         => $normalized_parent_filter_actual,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$parent_order_valid
+					&& $parent_order_key_boundaries_hold,
+				'WP_Query preserves generated custom hierarchical parent inclusion ordering cache-key boundaries across duplicate and reversed parent arrays',
+				array(
+					'checks'            => array(
+						'variantsValid'               => $parent_order_checks,
+						'queryVarsPreserveRawParents' => $parent_order_query_var_checks,
+						'rawOrderKeysDistinctByField' => $parent_order_keys_distinct_by_field,
+					),
+					'expectedByVariant' => $parent_order_expected,
+					'expectedParents'   => $ordering_parent_expected,
+					'expectedStatuses'  => $ordering_status_expected,
+					'uniqueKeyHashes'   => array_map(
+						static fn ( array $keys ): array => array_values( array_unique( array_map( static fn ( string $key ): string => substr( md5( $key ), 0, 8 ), $keys ) ) ),
+						$parent_order_keys
+					),
+					'variants'          => $parent_order_actual,
 				)
 			);
 
