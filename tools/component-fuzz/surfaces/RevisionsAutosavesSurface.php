@@ -36,6 +36,7 @@ final class RevisionsAutosavesSurface {
 			$rows[] = self::check_preview_request_dispatch( $ctx->fork( 'preview-dispatch' ), $case );
 			$rows[] = self::check_rest_revision_autosave_route_dispatch( $ctx->fork( 'rest-dispatch' ), $case );
 			$rows[] = self::check_rest_builtin_post_page_revision_autosave_parity( $ctx->fork( 'rest-builtin-post-page' ), $case );
+			$rows[] = self::check_rest_autosave_mutation_and_revision_meta_projection( $ctx->fork( 'rest-autosave-meta' ), $case );
 			$rows[] = self::check_rest_revision_autosave_batch_gates( $ctx->fork( 'rest-batch-gates' ), $case );
 			$rows[] = self::check_latest_revision_count_and_url_helpers( $ctx->fork( 'latest-count-url' ), $case );
 			$rows[] = self::check_user_filtered_autosave_lookup( $ctx->fork( 'user-filtered-autosave' ), $case );
@@ -2819,6 +2820,780 @@ final class RevisionsAutosavesSurface {
 				'matrix' => $matrix,
 			)
 		);
+	}
+
+	private static function check_rest_autosave_mutation_and_revision_meta_projection( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$missing = self::rest_autosave_meta_child_missing_requirements();
+		if ( array() !== $missing ) {
+			return $ctx->skip(
+				'revisions-autosaves.rest-autosave-mutation-subprocess-requirements',
+				'Local PHP subprocess support is unavailable for isolated REST autosave mutation coverage.',
+				array( 'missing' => $missing )
+			);
+		}
+
+		$parent_doing_autosave_before = array(
+			'defined' => defined( 'DOING_AUTOSAVE' ),
+			'value'   => defined( 'DOING_AUTOSAVE' ) ? (bool) DOING_AUTOSAVE : null,
+		);
+		$run = self::run_rest_autosave_meta_child( $case );
+		$parent_doing_autosave_after = array(
+			'defined' => defined( 'DOING_AUTOSAVE' ),
+			'value'   => defined( 'DOING_AUTOSAVE' ) ? (bool) DOING_AUTOSAVE : null,
+		);
+
+		$result   = is_array( $run['result'] ?? null ) ? $run['result'] : array();
+		$matrix   = is_array( $result['matrix'] ?? null ) ? $result['matrix'] : array();
+		$failures = array();
+
+		self::collect_failure(
+			$failures,
+			0 === (int) ( $run['exitCode'] ?? -1 )
+				&& '' === (string) ( $run['stderr'] ?? '' )
+				&& is_array( $run['result'] ?? null )
+				&& true === ( $run['ok'] ?? null ),
+			'REST autosave mutation child returns structured JSON without stderr or invariant failures',
+			array(
+				'exitCode'      => $run['exitCode'] ?? null,
+				'stdout'        => self::describe_output( (string) ( $run['stdout'] ?? '' ) ),
+				'stderr'        => self::describe_output( (string) ( $run['stderr'] ?? '' ) ),
+				'childFailures' => $result['failures'] ?? null,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			true === ( $result['wpRunCoreTests'] ?? null )
+				&& false === ( $result['doingAutosaveDefined'] ?? true ),
+			'REST autosave mutation child defines WP_RUN_CORE_TESTS before bootstrap and does not define DOING_AUTOSAVE',
+			array(
+				'wpRunCoreTests'        => $result['wpRunCoreTests'] ?? null,
+				'doingAutosaveDefined'  => $result['doingAutosaveDefined'] ?? null,
+				'doingAutosaveValue'    => $result['doingAutosaveValue'] ?? null,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			$parent_doing_autosave_before === $parent_doing_autosave_after,
+			'REST autosave mutation child leaves parent DOING_AUTOSAVE constant state unchanged',
+			array(
+				'before' => $parent_doing_autosave_before,
+				'after'  => $parent_doing_autosave_after,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			array( 'page', 'post' ) === array_values(
+				array_intersect(
+					array( 'page', 'post' ),
+					array_map(
+						static fn( array $entry ): string => (string) ( $entry['postType'] ?? '' ),
+						$matrix
+					)
+				)
+			),
+			'REST autosave mutation child covers built-in post and page autosave/meta routes',
+			array( 'matrix' => $matrix )
+		);
+
+		return self::result(
+			$ctx,
+			'revisions-autosaves.rest-autosave-mutations-and-revision-meta-projection',
+			$failures,
+			array(
+				'case'     => self::case_summary( $case ),
+				'exitCode' => $run['exitCode'] ?? null,
+				'matrix'   => $matrix,
+			)
+		);
+	}
+
+	private static function rest_autosave_meta_child_missing_requirements(): array {
+		$missing = array();
+
+		foreach ( array( 'json_decode', 'json_encode', 'proc_close', 'proc_open', 'stream_get_contents' ) as $function ) {
+			if ( ! function_exists( $function ) ) {
+				$missing[] = "function {$function}";
+			}
+		}
+
+		if ( ! defined( 'PHP_BINARY' ) || '' === PHP_BINARY ) {
+			$missing[] = 'PHP_BINARY';
+		}
+
+		return $missing;
+	}
+
+	private static function run_rest_autosave_meta_child( array $case ): array {
+		$payload = json_encode(
+			array( 'case' => $case ),
+			JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE
+		);
+
+		if ( false === $payload ) {
+			return array(
+				'ok'       => false,
+				'exitCode' => -1,
+				'stdout'   => '',
+				'stderr'   => 'json_encode failed',
+				'result'   => null,
+			);
+		}
+
+		$descriptors = array(
+			0 => array( 'pipe', 'r' ),
+			1 => array( 'pipe', 'w' ),
+			2 => array( 'pipe', 'w' ),
+		);
+
+		// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.system_calls_proc_open -- Isolates REST autosave mutation paths that would otherwise define process-wide constants.
+		$process = proc_open( array( PHP_BINARY, '-r', self::rest_autosave_meta_child_program() ), $descriptors, $pipes, \ComponentFuzz\repo_root() );
+		if ( ! is_resource( $process ) ) {
+			return array(
+				'ok'       => false,
+				'exitCode' => -1,
+				'stdout'   => '',
+				'stderr'   => 'proc_open failed',
+				'result'   => null,
+			);
+		}
+
+		fwrite( $pipes[0], $payload );
+		fclose( $pipes[0] );
+
+		$stdout = stream_get_contents( $pipes[1] );
+		$stderr = stream_get_contents( $pipes[2] );
+		fclose( $pipes[1] );
+		fclose( $pipes[2] );
+
+		$exit_code = proc_close( $process );
+		$result    = json_decode( (string) $stdout, true );
+
+		return array(
+			'ok'       => 0 === $exit_code && is_array( $result ) && true === ( $result['ok'] ?? null ),
+			'exitCode' => $exit_code,
+			'stdout'   => (string) $stdout,
+			'stderr'   => (string) $stderr,
+			'result'   => is_array( $result ) ? $result : null,
+		);
+	}
+
+	private static function rest_autosave_meta_child_program(): string {
+		return <<<'PHP'
+if ( ! defined( 'WP_RUN_CORE_TESTS' ) ) {
+	define( 'WP_RUN_CORE_TESTS', true );
+}
+
+ini_set( 'display_errors', '0' );
+ob_start();
+
+$result = array(
+	'ok'       => false,
+	'failures' => array(),
+);
+
+try {
+	$raw     = stream_get_contents( STDIN );
+	$payload = json_decode( $raw, true );
+	$case    = is_array( $payload['case'] ?? null ) ? $payload['case'] : array();
+
+	require_once getcwd() . '/tools/component-fuzz/lib/autoload.php';
+	\ComponentFuzz\WpBootstrap::load();
+
+	$result = \ComponentFuzz\Surfaces\RevisionsAutosavesSurface::rest_autosave_meta_child_entry( $case );
+} catch ( Throwable $e ) {
+	$result = array(
+		'ok'       => false,
+		'failures' => array(
+			array(
+				'label'   => 'REST autosave mutation child catches top-level throwables',
+				'details' => array(
+					'class'   => get_class( $e ),
+					'message' => $e->getMessage(),
+					'file'    => $e->getFile(),
+					'line'    => $e->getLine(),
+				),
+			),
+		),
+	);
+}
+
+$output = ob_get_clean();
+if ( '' !== $output ) {
+	$result['ok']         = false;
+	$result['failures'][] = array(
+		'label'   => 'REST autosave mutation child produces no incidental output before JSON',
+		'details' => array(
+			'bytes'   => strlen( $output ),
+			'sha1'    => sha1( $output ),
+			'preview' => substr( $output, 0, 220 ),
+		),
+	);
+}
+
+$json = json_encode( $result, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE );
+echo false === $json ? '{"ok":false,"failures":[{"label":"REST autosave mutation child JSON encoding failed","details":[]}]}' : $json;
+PHP;
+	}
+
+	public static function rest_autosave_meta_child_entry( array $case ): array {
+		self::load_rest_endpoint_classes();
+
+		$failures = array();
+		$missing  = self::missing_requirements();
+		foreach ( array( 'add_metadata', 'get_current_user_id', 'get_metadata_raw', 'unregister_meta_key', 'update_metadata', 'wp_autosave_post_revisioned_meta_fields' ) as $function ) {
+			if ( ! function_exists( $function ) ) {
+				$missing[] = "function {$function}";
+			}
+		}
+
+		if ( array() !== $missing ) {
+			return array(
+				'ok'                   => false,
+				'failures'             => array(
+					array(
+						'label'   => 'REST autosave mutation child has required WordPress APIs',
+						'details' => array( 'missing' => $missing ),
+					),
+				),
+				'wpRunCoreTests'       => defined( 'WP_RUN_CORE_TESTS' ) && WP_RUN_CORE_TESTS,
+				'doingAutosaveDefined' => defined( 'DOING_AUTOSAVE' ),
+				'doingAutosaveValue'   => defined( 'DOING_AUTOSAVE' ) ? (bool) DOING_AUTOSAVE : null,
+				'matrix'               => array(),
+			);
+		}
+
+		self::prepare_runtime();
+		$server = self::fresh_rest_server();
+
+		$matrix                 = array();
+		$creating_autosaves     = array();
+		$prepare_autosave_calls = array();
+		$prepare_revision_calls = array();
+
+		$creating_action = static function ( array $new_autosave ) use ( &$creating_autosaves ): void {
+			$creating_autosaves[] = array(
+				'id'     => (int) ( $new_autosave['ID'] ?? 0 ),
+				'parent' => (int) ( $new_autosave['post_parent'] ?? 0 ),
+				'author' => (int) ( $new_autosave['post_author'] ?? 0 ),
+				'title'  => (string) ( $new_autosave['post_title'] ?? '' ),
+			);
+		};
+		$autosave_filter = static function ( \WP_REST_Response $response, \WP_Post $post, \WP_REST_Request $request ) use ( &$prepare_autosave_calls ): \WP_REST_Response {
+			$prepare_autosave_calls[] = array(
+				'id'      => (int) $post->ID,
+				'parent'  => (int) $post->post_parent,
+				'author'  => (int) $post->post_author,
+				'route'   => $request->get_route(),
+				'method'  => $request->get_method(),
+				'fields'  => $request['_fields'],
+			);
+			return $response;
+		};
+		$revision_filter = static function ( \WP_REST_Response $response, \WP_Post $post, \WP_REST_Request $request ) use ( &$prepare_revision_calls ): \WP_REST_Response {
+			$prepare_revision_calls[] = array(
+				'id'     => (int) $post->ID,
+				'parent' => (int) $post->post_parent,
+				'route'  => $request->get_route(),
+				'method' => $request->get_method(),
+				'fields' => $request['_fields'],
+			);
+			return $response;
+		};
+
+		\add_action( 'wp_creating_autosave', $creating_action, 9, 1 );
+		\add_filter( 'rest_prepare_autosave', $autosave_filter, 10, 3 );
+		\add_filter( 'rest_prepare_revision', $revision_filter, 10, 3 );
+
+		try {
+			foreach ( array( 'post' => 'posts', 'page' => 'pages' ) as $post_type => $rest_base ) {
+				$matrix[] = self::rest_autosave_meta_child_post_type(
+					$server,
+					$case,
+					$post_type,
+					$rest_base,
+					$creating_autosaves,
+					$failures
+				);
+			}
+		} catch ( \Throwable $e ) {
+			self::collect_failure(
+				$failures,
+				false,
+				'REST autosave mutation child keeps built-in route matrix throwable-free',
+				array( 'throwable' => self::describe_throwable( $e ) )
+			);
+		} finally {
+			\remove_filter( 'rest_prepare_revision', $revision_filter, 10 );
+			\remove_filter( 'rest_prepare_autosave', $autosave_filter, 10 );
+			\remove_action( 'wp_creating_autosave', $creating_action, 9 );
+			\wp_set_current_user( 0 );
+		}
+
+		self::collect_failure(
+			$failures,
+			false === \has_filter( 'wp_creating_autosave', $creating_action )
+				&& false === \has_filter( 'rest_prepare_autosave', $autosave_filter )
+				&& false === \has_filter( 'rest_prepare_revision', $revision_filter ),
+			'REST autosave mutation child removes local observers before reporting',
+			array(
+				'filters' => array(
+					'creatingAutosave' => \has_filter( 'wp_creating_autosave', $creating_action ),
+					'autosave'         => \has_filter( 'rest_prepare_autosave', $autosave_filter ),
+					'revision'         => \has_filter( 'rest_prepare_revision', $revision_filter ),
+				),
+			)
+		);
+
+		return array(
+			'ok'                   => array() === $failures,
+			'failures'             => array_slice( $failures, 0, 8 ),
+			'wpRunCoreTests'       => defined( 'WP_RUN_CORE_TESTS' ) && WP_RUN_CORE_TESTS,
+			'doingAutosaveDefined' => defined( 'DOING_AUTOSAVE' ),
+			'doingAutosaveValue'   => defined( 'DOING_AUTOSAVE' ) ? (bool) DOING_AUTOSAVE : null,
+			'matrix'               => $matrix,
+			'creatingAutosaves'    => $creating_autosaves,
+			'prepareAutosave'      => $prepare_autosave_calls,
+			'prepareRevision'      => $prepare_revision_calls,
+		);
+	}
+
+	private static function rest_autosave_meta_child_post_type( \WP_REST_Server $server, array $case, string $post_type, string $rest_base, array &$creating_autosaves, array &$failures ): array {
+		$target_case = array_merge(
+			$case,
+			array(
+				'postType' => $post_type,
+				'slug'     => $case['slug'] . '-autosave-meta-' . $post_type,
+			)
+		);
+		$entry       = array(
+			'postType' => $post_type,
+			'restBase' => $rest_base,
+		);
+		$meta_key    = 'cf_rest_autosave_' . $post_type . '_' . $case['token'];
+		$registered  = false;
+		$author_caps = null;
+		$editor_caps = null;
+
+		try {
+			$post_type_object = \get_post_type_object( $post_type );
+			if ( ! $post_type_object ) {
+				self::collect_failure(
+					$failures,
+					false,
+					"built-in {$post_type} post type exists for REST autosave mutation checks",
+					array( 'postType' => $post_type )
+				);
+				return $entry;
+			}
+
+			$registered = \register_post_meta(
+				$post_type,
+				$meta_key,
+				array(
+					'auth_callback'     => '__return_true',
+					'revisions_enabled' => true,
+					'show_in_rest'      => true,
+					'single'            => true,
+					'type'              => 'string',
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				true === $registered && in_array( $meta_key, \wp_post_revision_meta_keys( $post_type ), true ),
+				"built-in {$post_type} revisioned REST meta key registers before route schemas are cached",
+				array(
+					'registered'       => $registered,
+					'metaKey'          => $meta_key,
+					'revisionMetaKeys' => \wp_post_revision_meta_keys( $post_type ),
+				)
+			);
+
+			$parent_controller   = $post_type_object->get_rest_controller();
+			$revision_controller = $post_type_object->get_revisions_rest_controller();
+			$autosave_controller = $post_type_object->get_autosave_rest_controller();
+			if ( $parent_controller ) {
+				$parent_controller->register_routes();
+			}
+			if ( $revision_controller ) {
+				$revision_controller->register_routes();
+			}
+			if ( $autosave_controller ) {
+				$autosave_controller->register_routes();
+			}
+
+			$author_id     = self::insert_author( $target_case, "rest-autosave-meta-{$post_type}-author" );
+			$editor_id     = self::insert_author( $target_case, "rest-autosave-meta-{$post_type}-editor" );
+			$other_user_id = self::insert_author( $target_case, "rest-autosave-meta-{$post_type}-other" );
+			$draft_id      = self::insert_parent_post( $target_case, $author_id, "same-author-{$post_type}" );
+			$parent_id     = self::insert_parent_post( $target_case, $author_id, "per-user-{$post_type}" );
+
+			$author_caps = self::grant_all_caps_filter( $author_id );
+			$editor_caps = self::grant_all_caps_filter( $editor_id );
+			\add_filter( 'user_has_cap', $author_caps, 10, 4 );
+			\add_filter( 'user_has_cap', $editor_caps, 10, 4 );
+
+			$parent_meta = 'parent-meta-' . $post_type . '-' . $case['token'];
+			\update_post_meta( $parent_id, $meta_key, $parent_meta );
+
+			$same_title   = $case['titleTo'] . " {$post_type} same-author REST autosave";
+			$same_content = $case['contentTo'] . "\n{$post_type} same-author REST autosave";
+			$same_excerpt = $case['excerptTo'] . " {$post_type} same-author";
+			\wp_set_current_user( $author_id );
+			$same_response = self::dispatch(
+				$server,
+				self::request(
+					'POST',
+					'/wp/v2/' . $rest_base . '/' . $draft_id . '/autosaves',
+					array(
+						'context' => 'edit',
+						'_fields' => 'id,parent,title.raw,content.raw',
+					),
+					array(),
+					array(
+						'title'   => $same_title,
+						'content' => $same_content,
+						'excerpt' => $same_excerpt,
+					)
+				)
+			);
+			$same_data     = $same_response instanceof \WP_REST_Response ? $same_response->get_data() : array();
+			$same_post     = \get_post( $draft_id );
+			$same_autosave = \wp_get_post_autosave( $draft_id, $author_id );
+
+			self::collect_failure(
+				$failures,
+				$same_response instanceof \WP_REST_Response
+					&& 200 === $same_response->get_status()
+					&& $draft_id === (int) ( $same_data['id'] ?? 0 )
+					&& $same_post instanceof \WP_Post
+					&& $same_title === $same_post->post_title
+					&& $same_content === $same_post->post_content
+					&& false === $same_autosave,
+				"built-in {$post_type} same-author draft autosave updates the parent draft instead of creating a per-user autosave",
+				array(
+					'response' => self::response_summary( $same_response ),
+					'post'     => self::post_summary( $same_post ),
+					'autosave' => self::post_summary( $same_autosave ),
+				)
+			);
+
+			$autosave_route       = '/wp/v2/' . $rest_base . '/' . $parent_id . '/autosaves';
+			$revision_route       = '/wp/v2/' . $rest_base . '/' . $parent_id . '/revisions';
+			$create_meta          = 'created-meta-' . $post_type . '-' . $case['token'];
+			$create_title         = $case['titleTo'] . " {$post_type} created REST autosave";
+			$create_content       = $case['contentTo'] . "\n{$post_type} created REST autosave";
+			$create_excerpt       = $case['excerptTo'] . " {$post_type} created autosave";
+			$events_before_create = count( $creating_autosaves );
+
+			\wp_set_current_user( $editor_id );
+			$create_response = self::dispatch(
+				$server,
+				self::request(
+					'POST',
+					$autosave_route,
+					array(
+						'context' => 'edit',
+						'_fields' => 'id,parent,title.raw,content.raw,meta,preview_link',
+					),
+					array(),
+					array(
+						'title'   => $create_title,
+						'content' => $create_content,
+						'excerpt' => $create_excerpt,
+						'meta'    => array(
+							$meta_key => $create_meta,
+						),
+					)
+				)
+			);
+			$events_after_create = count( $creating_autosaves );
+			$create_data         = $create_response instanceof \WP_REST_Response ? $create_response->get_data() : array();
+			$autosave_id         = (int) ( $create_data['id'] ?? 0 );
+			$created_autosave    = \get_post( $autosave_id );
+			$lookup_autosave     = \wp_get_post_autosave( $parent_id, $editor_id );
+			$parent_after_create = \get_post( $parent_id );
+			$stored_create_meta  = \get_metadata_raw( 'post', $autosave_id, $meta_key, true );
+			$parent_after_create_meta = \get_metadata_raw( 'post', $parent_id, $meta_key, true );
+
+			self::collect_failure(
+				$failures,
+				$create_response instanceof \WP_REST_Response
+					&& 200 === $create_response->get_status()
+					&& 0 < $autosave_id
+					&& $parent_id !== $autosave_id
+					&& $parent_id === (int) ( $create_data['parent'] ?? 0 )
+					&& $created_autosave instanceof \WP_Post
+					&& $lookup_autosave instanceof \WP_Post
+					&& $autosave_id === (int) $lookup_autosave->ID
+					&& $create_title === ( $create_data['title']['raw'] ?? null )
+					&& $create_content === ( $create_data['content']['raw'] ?? null )
+					&& $create_meta === ( $create_data['meta'][ $meta_key ] ?? null )
+					&& $create_meta === $stored_create_meta
+					&& $parent_after_create instanceof \WP_Post
+					&& $case['titleFrom'] === $parent_after_create->post_title
+					&& $case['contentFrom'] === $parent_after_create->post_content
+					&& $parent_meta === $parent_after_create_meta
+					&& $events_before_create === $events_after_create,
+				"built-in {$post_type} REST autosave creation writes per-user revision fields and revisioned meta without mutating the parent",
+				array(
+					'response'       => self::response_summary( $create_response ),
+					'autosave'       => self::post_summary( $created_autosave ),
+					'lookup'         => self::post_summary( $lookup_autosave ),
+					'parent'         => self::post_summary( $parent_after_create ),
+					'storedMeta'     => $stored_create_meta,
+					'parentMeta'     => $parent_after_create_meta,
+					'eventDelta'     => $events_after_create - $events_before_create,
+				)
+			);
+
+			$update_meta          = 'updated-meta-' . $post_type . '-' . $case['token'];
+			$update_title         = $case['titleTo'] . " {$post_type} updated REST autosave";
+			$update_content       = $case['contentTo'] . "\n{$post_type} updated REST autosave";
+			$update_excerpt       = $case['excerptTo'] . " {$post_type} updated autosave";
+			$events_before_update = count( $creating_autosaves );
+			$update_response      = self::dispatch(
+				$server,
+				self::request(
+					'POST',
+					$autosave_route,
+					array(
+						'context' => 'edit',
+						'_fields' => 'id,parent,title.raw,content.raw,meta,preview_link',
+					),
+					array(),
+					array(
+						'title'   => $update_title,
+						'content' => $update_content,
+						'excerpt' => $update_excerpt,
+						'meta'    => array(
+							$meta_key => $update_meta,
+						),
+					)
+				)
+			);
+			$events_after_update = count( $creating_autosaves );
+			$update_data         = $update_response instanceof \WP_REST_Response ? $update_response->get_data() : array();
+			$updated_autosave    = \get_post( $autosave_id );
+			$stored_update_meta  = \get_metadata_raw( 'post', $autosave_id, $meta_key, true );
+			$update_event        = $creating_autosaves[ $events_before_update ] ?? array();
+
+			self::collect_failure(
+				$failures,
+				$update_response instanceof \WP_REST_Response
+					&& 200 === $update_response->get_status()
+					&& $autosave_id === (int) ( $update_data['id'] ?? 0 )
+					&& $updated_autosave instanceof \WP_Post
+					&& $update_title === $updated_autosave->post_title
+					&& $update_content === $updated_autosave->post_content
+					&& $update_meta === ( $update_data['meta'][ $meta_key ] ?? null )
+					&& $update_meta === $stored_update_meta
+					&& $events_after_update === $events_before_update + 1
+					&& $autosave_id === (int) ( $update_event['id'] ?? 0 )
+					&& $parent_id === (int) ( $update_event['parent'] ?? 0 )
+					&& $editor_id === (int) ( $update_event['author'] ?? 0 )
+					&& $update_title === ( $update_event['title'] ?? null ),
+				"built-in {$post_type} REST autosave update reuses the per-user autosave and fires wp_creating_autosave once",
+				array(
+					'response'   => self::response_summary( $update_response ),
+					'autosave'   => self::post_summary( $updated_autosave ),
+					'storedMeta' => $stored_update_meta,
+					'event'      => $update_event,
+					'eventDelta' => $events_after_update - $events_before_update,
+				)
+			);
+
+			$events_before_noop = count( $creating_autosaves );
+			$noop_response      = self::dispatch(
+				$server,
+				self::request(
+					'POST',
+					$autosave_route,
+					array(
+						'context' => 'edit',
+						'_fields' => 'id,parent,title.raw,content.raw,meta',
+					),
+					array(),
+					array(
+						'title'   => $case['titleFrom'],
+						'content' => $case['contentFrom'],
+						'excerpt' => $case['excerptFrom'],
+						'meta'    => array(
+							$meta_key => $parent_meta,
+						),
+					)
+				)
+			);
+			$events_after_noop = count( $creating_autosaves );
+			$noop_data         = $noop_response instanceof \WP_REST_Response ? $noop_response->get_data() : array();
+			$stored_noop_meta  = \get_metadata_raw( 'post', $autosave_id, $meta_key, true );
+
+			self::collect_failure(
+				$failures,
+				$noop_response instanceof \WP_REST_Response
+					&& 200 === $noop_response->get_status()
+					&& $autosave_id === (int) ( $noop_data['id'] ?? 0 )
+					&& $update_title === ( $noop_data['title']['raw'] ?? null )
+					&& $update_meta === ( $noop_data['meta'][ $meta_key ] ?? null )
+					&& $update_meta === $stored_noop_meta
+					&& $events_before_noop === $events_after_noop,
+				"built-in {$post_type} REST autosave no-op returns the existing autosave without firing update hooks",
+				array(
+					'response'   => self::response_summary( $noop_response ),
+					'storedMeta' => $stored_noop_meta,
+					'eventDelta' => $events_after_noop - $events_before_noop,
+				)
+			);
+
+			$other_meta        = 'other-autosave-meta-' . $post_type . '-' . $case['token'];
+			$other_autosave_id = self::insert_revision_row(
+				$parent_id,
+				$other_user_id,
+				array(
+					'post_title'        => $case['titleFrom'] . " {$post_type} other REST autosave",
+					'post_content'      => $case['contentFrom'] . "\n{$post_type} other REST autosave",
+					'post_excerpt'      => $case['excerptFrom'],
+					'post_date'         => self::offset_mysql_date( $case['dateLater'], 13 ),
+					'post_date_gmt'     => self::offset_mysql_date( $case['dateLaterGmt'], 13 ),
+					'post_modified'     => self::offset_mysql_date( $case['dateLater'], 13 ),
+					'post_modified_gmt' => self::offset_mysql_date( $case['dateLaterGmt'], 13 ),
+				),
+				true
+			);
+			\update_metadata( 'post', $other_autosave_id, $meta_key, $other_meta );
+			$advisory_response = self::dispatch(
+				$server,
+				self::request(
+					'GET',
+					$autosave_route . '/' . $other_autosave_id,
+					array(
+						'context' => 'edit',
+						'_fields' => 'id,parent,meta,preview_link',
+					)
+				)
+			);
+			$advisory_data     = $advisory_response instanceof \WP_REST_Response ? $advisory_response->get_data() : array();
+
+			self::collect_failure(
+				$failures,
+				$advisory_response instanceof \WP_REST_Response
+					&& 200 === $advisory_response->get_status()
+					&& $autosave_id === (int) ( $advisory_data['id'] ?? 0 )
+					&& $other_autosave_id !== (int) ( $advisory_data['id'] ?? 0 )
+					&& $parent_id === (int) ( $advisory_data['parent'] ?? 0 )
+					&& $update_meta === ( $advisory_data['meta'][ $meta_key ] ?? null )
+					&& is_string( $advisory_data['preview_link'] ?? null )
+					&& '' !== ( $advisory_data['preview_link'] ?? '' ),
+				"built-in {$post_type} REST autosave item route returns the current user's autosave even when another autosave ID is passed",
+				array(
+					'otherAutosaveId' => $other_autosave_id,
+					'response'        => self::response_summary( $advisory_response ),
+				)
+			);
+
+			$projection_meta = 'projected-revision-meta-' . $post_type . '-' . $case['token'];
+			$parent_later_meta = 'parent-current-meta-' . $post_type . '-' . $case['token'];
+			\update_post_meta( $parent_id, $meta_key, $projection_meta );
+			$revision_id = self::insert_revision_row(
+				$parent_id,
+				$author_id,
+				array(
+					'post_title'        => $case['titleTo'] . " {$post_type} projected REST revision",
+					'post_content'      => $case['contentTo'] . "\n{$post_type} projected REST revision",
+					'post_excerpt'      => $case['excerptTo'],
+					'post_date'         => self::offset_mysql_date( $case['dateLater'], 17 ),
+					'post_date_gmt'     => self::offset_mysql_date( $case['dateLaterGmt'], 17 ),
+					'post_modified'     => self::offset_mysql_date( $case['dateLater'], 17 ),
+					'post_modified_gmt' => self::offset_mysql_date( $case['dateLaterGmt'], 17 ),
+				),
+				false
+			);
+			\wp_save_revisioned_meta_fields( $revision_id, $parent_id );
+			$stored_revision_meta = \get_metadata_raw( 'post', $revision_id, $meta_key, true );
+			\update_post_meta( $parent_id, $meta_key, $parent_later_meta );
+			$revision_response = self::dispatch(
+				$server,
+				self::request(
+					'GET',
+					$revision_route . '/' . $revision_id,
+					array(
+						'context' => 'edit',
+						'_fields' => 'id,parent,title.raw,meta',
+					)
+				)
+			);
+			$revision_data       = $revision_response instanceof \WP_REST_Response ? $revision_response->get_data() : array();
+			$parent_current_meta = \get_metadata_raw( 'post', $parent_id, $meta_key, true );
+
+			self::collect_failure(
+				$failures,
+				$revision_response instanceof \WP_REST_Response
+					&& 200 === $revision_response->get_status()
+					&& $revision_id === (int) ( $revision_data['id'] ?? 0 )
+					&& $parent_id === (int) ( $revision_data['parent'] ?? 0 )
+					&& $projection_meta === ( $revision_data['meta'][ $meta_key ] ?? null )
+					&& $projection_meta === $stored_revision_meta
+					&& $parent_later_meta === $parent_current_meta,
+				"built-in {$post_type} REST revision item projects revisioned meta from the revision row instead of current parent meta",
+				array(
+					'response'            => self::response_summary( $revision_response ),
+					'storedRevisionMeta'  => $stored_revision_meta,
+					'parentCurrentMeta'   => $parent_current_meta,
+				)
+			);
+
+			$autosave_revision_response = self::dispatch(
+				$server,
+				self::request(
+					'GET',
+					$revision_route . '/' . $autosave_id,
+					array(
+						'context' => 'edit',
+						'_fields' => 'id,parent,meta',
+					)
+				)
+			);
+			$autosave_revision_data = $autosave_revision_response instanceof \WP_REST_Response ? $autosave_revision_response->get_data() : array();
+			self::collect_failure(
+				$failures,
+				$autosave_revision_response instanceof \WP_REST_Response
+					&& 200 === $autosave_revision_response->get_status()
+					&& $autosave_id === (int) ( $autosave_revision_data['id'] ?? 0 )
+					&& $parent_id === (int) ( $autosave_revision_data['parent'] ?? 0 )
+					&& $update_meta === ( $autosave_revision_data['meta'][ $meta_key ] ?? null ),
+				"built-in {$post_type} REST revision item projection also exposes revisioned meta for autosave revisions",
+				array( 'response' => self::response_summary( $autosave_revision_response ) )
+			);
+
+			$entry += array(
+				'draftId'         => $draft_id,
+				'parentId'        => $parent_id,
+				'autosaveId'      => $autosave_id,
+				'otherAutosaveId' => $other_autosave_id,
+				'revisionId'      => $revision_id,
+				'metaKey'         => $meta_key,
+			);
+		} catch ( \Throwable $e ) {
+			self::collect_failure(
+				$failures,
+				false,
+				"built-in {$post_type} REST autosave/meta mutation branch stays throwable-free",
+				array( 'throwable' => self::describe_throwable( $e ) )
+			);
+		} finally {
+			if ( $author_caps instanceof \Closure ) {
+				\remove_filter( 'user_has_cap', $author_caps, 10 );
+			}
+			if ( $editor_caps instanceof \Closure ) {
+				\remove_filter( 'user_has_cap', $editor_caps, 10 );
+			}
+			if ( true === $registered ) {
+				\unregister_meta_key( 'post', $meta_key, $post_type );
+			}
+			\wp_set_current_user( 0 );
+		}
+
+		return $entry;
 	}
 
 	private static function check_rest_revision_autosave_batch_gates( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
