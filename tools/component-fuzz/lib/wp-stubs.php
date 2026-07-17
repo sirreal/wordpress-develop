@@ -2010,6 +2010,17 @@ if ( ! class_exists( 'Component_Fuzz_WPDB_Stub', false ) ) {
 						}
 					}
 
+					if ( preg_match( '/ORDER\s+BY\s+FIELD\s*\(\s*(?:`?wp_posts`?\.)?`?post_name`?\s*,\s*([^)]+)\)/i', $query, $matches ) ) {
+						$ordered_slugs = array_values( array_unique( array_map( 'strval', $this->component_fuzz_csv_values( $matches[1] ) ) ) );
+						$positions     = array_flip( $ordered_slugs );
+						$a_position    = $positions[ (string) $a['post_name'] ] ?? PHP_INT_MAX;
+						$b_position    = $positions[ (string) $b['post_name'] ] ?? PHP_INT_MAX;
+
+						if ( $a_position !== $b_position ) {
+							return $a_position <=> $b_position;
+						}
+					}
+
 					if ( preg_match( '/ORDER\s+BY\s+(?:`?wp_posts`?\.)?`?post_date`?\s+DESC/i', $query ) ) {
 						$comparison = strcmp( (string) $b['post_date'], (string) $a['post_date'] );
 						if ( 0 !== $comparison ) {
