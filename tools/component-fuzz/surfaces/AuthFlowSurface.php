@@ -49,6 +49,7 @@ final class AuthFlowSurface {
 			$rows[] = self::check_synthetic_user_rows( $ctx->fork( 'user-rows' ) );
 			$rows[] = self::check_authenticate_filter_and_password_paths( $ctx->fork( 'authenticate' ) );
 			$rows[] = self::check_login_form_rendering_contracts( $ctx->fork( 'login-form' ) );
+			$rows[] = self::check_auth_redirect_boundaries( $ctx->fork( 'auth-redirect' ) );
 			$rows[] = self::check_signon_cookie_actions_without_headers( $ctx->fork( 'signon' ) );
 			$rows[] = self::check_clear_auth_cookie_without_headers( $ctx->fork( 'clear-cookie' ) );
 			$rows[] = self::check_logout_lifecycle( $ctx->fork( 'logout' ) );
@@ -302,13 +303,20 @@ final class AuthFlowSurface {
 				'get_current_user_id',
 				'get_user_by',
 				'get_user_meta',
+				'get_user_option',
 				'get_userdata',
 				'has_filter',
 				'is_user_logged_in',
+				'is_ssl',
 				'is_wp_error',
+				'auth_redirect',
+				'clean_user_cache',
+				'force_ssl_admin',
+				'nocache_headers',
 				'remove_action',
 				'remove_filter',
 				'sanitize_user',
+				'set_url_scheme',
 				'site_url',
 				'update_user_meta',
 				'wp_authenticate',
@@ -328,7 +336,10 @@ final class AuthFlowSurface {
 				'wp_hash_password',
 				'wp_is_unicode_email',
 				'wp_login_form',
+				'wp_login_url',
 				'wp_parse_auth_cookie',
+				'wp_redirect',
+				'wp_get_referer',
 				'wp_sanitize_unicode_email',
 				'wp_set_auth_cookie',
 				'wp_set_current_user',
@@ -600,6 +611,391 @@ final class AuthFlowSurface {
 			'auth-flow.login-form-rendering-filters-and-escaping',
 			array() === $failures,
 			array( 'failures' => array_slice( $failures, 0, 5 ) )
+		);
+	}
+
+	private static function check_auth_redirect_boundaries( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_case_state();
+		self::clear_events();
+
+		$failures             = array();
+		$user_spec            = self::user_spec( $ctx, 'auth-redirect' );
+		$user                 = self::insert_synthetic_user( $user_spec );
+		$manager              = \WP_Session_Tokens::get_instance( $user_spec['ID'] );
+		$expires              = time() + DAY_IN_SECONDS + $ctx->int( 60, 3600 );
+		$token                = $manager->create( $expires );
+		$logged_cookie        = \wp_generate_auth_cookie( $user_spec['ID'], $expires, 'logged_in', $token );
+		$server_before        = $_SERVER;
+		$cookie_before        = $_COOKIE;
+		$get_before           = $_GET;
+		$post_before          = $_POST;
+		$request_before       = $_REQUEST;
+		$old_force_ssl_admin  = \force_ssl_admin( false );
+		$redirect_marker      = 'cfz-auth-redirect-' . $ctx->identifier( 4, 10 );
+		$redirect_exception   = 'component-fuzz-auth-redirect-captured';
+		$secure_decision      = null;
+		$scheme_decision      = '';
+		$secure_events        = array();
+		$scheme_events        = array();
+		$auth_events          = array();
+		$login_events         = array();
+		$nocache_events       = array();
+		$redirect_events      = array();
+		$redirect_status_hits = array();
+		$hooks_restored       = false;
+		$content_cleared      = false;
+
+		$secure_filter = static function ( bool $secure ) use ( &$secure_events, &$secure_decision ): bool {
+			$returned        = null === $secure_decision ? $secure : (bool) $secure_decision;
+			$secure_events[] = array(
+				'incoming' => $secure,
+				'returned' => $returned,
+				'isSsl'    => \is_ssl(),
+				'uri'      => $_SERVER['REQUEST_URI'] ?? null,
+			);
+			return $returned;
+		};
+		$scheme_filter = static function ( string $scheme ) use ( &$scheme_events, &$scheme_decision ): string {
+			$scheme_events[] = array(
+				'incoming' => $scheme,
+				'returned' => $scheme_decision,
+				'cookies'  => array_keys( $_COOKIE ),
+			);
+			return $scheme_decision;
+		};
+		$auth_action = static function ( int $user_id ) use ( &$auth_events ): void {
+			$auth_events[] = array(
+				'userId'        => $user_id,
+				'currentUserId' => \get_current_user_id(),
+				'isSsl'         => \is_ssl(),
+				'uri'           => $_SERVER['REQUEST_URI'] ?? null,
+			);
+		};
+		$login_filter = static function ( string $login_url, string $redirect, bool $force_reauth ) use ( &$login_events, $redirect_marker ): string {
+			$returned       = $login_url . ( str_contains( $login_url, '?' ) ? '&' : '?' ) . 'cfz_auth_redirect=' . rawurlencode( $redirect_marker );
+			$login_events[] = array(
+				'loginUrl'    => $login_url,
+				'redirect'    => $redirect,
+				'forceReauth' => $force_reauth,
+				'returned'    => $returned,
+			);
+			return $returned;
+		};
+		$nocache_filter = static function ( array $headers ) use ( &$nocache_events, $redirect_marker ): array {
+			$headers['X-Component-Fuzz-Auth-Redirect'] = $redirect_marker;
+			$nocache_events[] = $headers;
+			return $headers;
+		};
+		$redirect_filter = static function ( $location, int $status ) use ( &$redirect_events ) {
+			$redirect_events[] = array(
+				'location' => $location,
+				'status'   => $status,
+				'uri'      => $_SERVER['REQUEST_URI'] ?? null,
+			);
+			return $location;
+		};
+		$redirect_status_filter = static function ( int $status, $location ) use ( &$redirect_status_hits, $redirect_exception ): int {
+			$redirect_status_hits[] = array(
+				'location' => $location,
+				'status'   => $status,
+			);
+			throw new \RuntimeException( $redirect_exception );
+		};
+		$reset_observed = static function () use ( &$secure_events, &$scheme_events, &$auth_events, &$login_events, &$nocache_events, &$redirect_events, &$redirect_status_hits ): void {
+			$secure_events        = array();
+			$scheme_events        = array();
+			$auth_events          = array();
+			$login_events         = array();
+			$nocache_events       = array();
+			$redirect_events      = array();
+			$redirect_status_hits = array();
+		};
+		$redirect_status_matches = static function () use ( &$redirect_events, &$redirect_status_hits ): bool {
+			return 1 === count( $redirect_events )
+				&& 1 === count( $redirect_status_hits )
+				&& ( $redirect_events[0]['location'] ?? null ) === ( $redirect_status_hits[0]['location'] ?? null )
+				&& ( $redirect_events[0]['status'] ?? null ) === ( $redirect_status_hits[0]['status'] ?? null );
+		};
+		$run_auth_redirect = static function () use ( $redirect_exception ): array {
+			try {
+				\auth_redirect();
+				return array(
+					'returned'   => true,
+					'redirected' => false,
+				);
+			} catch ( \RuntimeException $e ) {
+				if ( $redirect_exception !== $e->getMessage() ) {
+					throw $e;
+				}
+
+				return array(
+					'returned'   => false,
+					'redirected' => true,
+				);
+			}
+		};
+
+		\add_filter( 'secure_auth_redirect', $secure_filter );
+		\add_filter( 'auth_redirect_scheme', $scheme_filter );
+		\add_action( 'auth_redirect', $auth_action );
+		\add_filter( 'login_url', $login_filter, 10, 3 );
+		\add_filter( 'nocache_headers', $nocache_filter );
+		\add_filter( 'wp_redirect', $redirect_filter, 10, 2 );
+		\add_filter( 'wp_redirect_status', $redirect_status_filter, 10, 2 );
+
+		try {
+			$_SERVER['HTTP_HOST']   = 'example.test';
+			$_SERVER['HTTPS']       = 'off';
+			$_SERVER['SERVER_PORT'] = '80';
+
+			$reset_observed();
+			$secure_decision        = true;
+			$scheme_decision        = 'logged_in';
+			$_SERVER['REQUEST_URI'] = '/wp-admin/edit.php?post_type=page&token=' . rawurlencode( $ctx->identifier( 4, 10 ) );
+			$_COOKIE                = array();
+			$forced_secure_result   = $run_auth_redirect();
+			$forced_secure_target   = 'https://example.test' . $_SERVER['REQUEST_URI'];
+
+			self::collect_failure(
+				$failures,
+				true === $forced_secure_result['redirected']
+					&& array() === $scheme_events
+					&& array() === $auth_events
+					&& array() === $login_events
+					&& array() === $nocache_events
+					&& 1 === count( $secure_events )
+					&& true === ( $secure_events[0]['returned'] ?? null )
+					&& 1 === count( $redirect_events )
+					&& $forced_secure_target === ( $redirect_events[0]['location'] ?? null )
+					&& 302 === ( $redirect_events[0]['status'] ?? null )
+					&& $redirect_status_matches(),
+				'auth_redirect secure_auth_redirect can force HTTPS before cookie validation, login URL, or nocache work',
+				array(
+					'result'       => $forced_secure_result,
+					'secureEvents' => $secure_events,
+					'schemeEvents' => $scheme_events,
+					'authEvents'   => $auth_events,
+					'loginEvents'  => $login_events,
+					'nocache'      => $nocache_events,
+					'redirects'    => $redirect_events,
+					'target'       => $forced_secure_target,
+				)
+			);
+
+			$reset_observed();
+			$secure_decision        = false;
+			$scheme_decision        = 'logged_in';
+			$_SERVER['REQUEST_URI'] = '/wp-admin/index.php?page=' . rawurlencode( $ctx->identifier( 4, 10 ) );
+			$_COOKIE                = array( LOGGED_IN_COOKIE => $logged_cookie );
+			\update_user_meta( $user_spec['ID'], 'use_ssl', '0' );
+			\clean_user_cache( $user_spec['ID'] );
+			$valid_result = $run_auth_redirect();
+
+			self::collect_failure(
+				$failures,
+				true === $valid_result['returned']
+					&& false === $valid_result['redirected']
+					&& 1 === count( $secure_events )
+					&& false === ( $secure_events[0]['returned'] ?? null )
+					&& 1 === count( $scheme_events )
+					&& 'logged_in' === ( $scheme_events[0]['returned'] ?? null )
+					&& 1 === count( $auth_events )
+					&& $user_spec['ID'] === ( $auth_events[0]['userId'] ?? null )
+					&& array() === $login_events
+					&& array() === $nocache_events
+					&& array() === $redirect_events,
+				'auth_redirect with a valid scoped logged-in cookie fires auth_redirect and returns without login redirects',
+				array(
+					'result'       => $valid_result,
+					'secureEvents' => $secure_events,
+					'schemeEvents' => $scheme_events,
+					'authEvents'   => $auth_events,
+					'loginEvents'  => $login_events,
+					'nocache'      => $nocache_events,
+					'redirects'    => $redirect_events,
+				)
+			);
+
+			$reset_observed();
+			$secure_decision        = false;
+			$scheme_decision        = 'logged_in';
+			$_SERVER['REQUEST_URI'] = 'http://example.test/wp-admin/profile.php?profile=' . rawurlencode( $ctx->identifier( 4, 10 ) );
+			$_COOKIE                = array( LOGGED_IN_COOKIE => $logged_cookie );
+			\update_user_meta( $user_spec['ID'], 'use_ssl', '1' );
+			\clean_user_cache( $user_spec['ID'] );
+			$user_ssl_result = $run_auth_redirect();
+			$user_ssl_target = \set_url_scheme( $_SERVER['REQUEST_URI'], 'https' );
+
+			self::collect_failure(
+				$failures,
+				true === $user_ssl_result['redirected']
+					&& 1 === count( $auth_events )
+					&& $user_spec['ID'] === ( $auth_events[0]['userId'] ?? null )
+					&& array() === $login_events
+					&& array() === $nocache_events
+					&& 1 === count( $redirect_events )
+					&& $user_ssl_target === ( $redirect_events[0]['location'] ?? null )
+					&& 302 === ( $redirect_events[0]['status'] ?? null )
+					&& $redirect_status_matches(),
+				'auth_redirect honors a valid user use_ssl preference after auth_redirect action and before login fallback',
+				array(
+					'result'       => $user_ssl_result,
+					'secureEvents' => $secure_events,
+					'schemeEvents' => $scheme_events,
+					'authEvents'   => $auth_events,
+					'loginEvents'  => $login_events,
+					'nocache'      => $nocache_events,
+					'redirects'    => $redirect_events,
+					'target'       => $user_ssl_target,
+				)
+			);
+
+			$reset_observed();
+			$secure_decision         = false;
+			$scheme_decision         = 'logged_in';
+			$referer                 = 'http://example.test/wp-admin/options-general.php?page=' . rawurlencode( $ctx->identifier( 4, 10 ) );
+			$_SERVER['REQUEST_URI']  = '/wp-admin/options.php?settings-updated=true';
+			$_SERVER['HTTP_REFERER'] = $referer;
+			$_COOKIE                 = array();
+			$_GET                    = array();
+			$_POST                   = array();
+			$_REQUEST                = array();
+			$options_result          = $run_auth_redirect();
+			$options_redirect        = $login_events[0]['redirect'] ?? null;
+			$options_login_url       = $login_events[0]['returned'] ?? null;
+
+			self::collect_failure(
+				$failures,
+				true === $options_result['redirected']
+					&& array() === $auth_events
+					&& 1 === count( $scheme_events )
+					&& 1 === count( $nocache_events )
+					&& isset( $nocache_events[0]['Cache-Control'], $nocache_events[0]['X-Component-Fuzz-Auth-Redirect'] )
+					&& $redirect_marker === $nocache_events[0]['X-Component-Fuzz-Auth-Redirect']
+					&& 1 === count( $login_events )
+					&& $referer === $options_redirect
+					&& true === ( $login_events[0]['forceReauth'] ?? null )
+					&& is_string( $options_login_url )
+					&& str_contains( $options_login_url, 'reauth=1' )
+					&& str_contains( $options_login_url, rawurlencode( $referer ) )
+					&& str_contains( $options_login_url, rawurlencode( $redirect_marker ) )
+					&& 1 === count( $redirect_events )
+					&& $options_login_url === ( $redirect_events[0]['location'] ?? null )
+					&& 302 === ( $redirect_events[0]['status'] ?? null )
+					&& $redirect_status_matches(),
+				'auth_redirect invalid-cookie options.php requests use validated referer login redirects with nocache headers',
+				array(
+					'result'       => $options_result,
+					'secureEvents' => $secure_events,
+					'schemeEvents' => $scheme_events,
+					'authEvents'   => $auth_events,
+					'loginEvents'  => $login_events,
+					'nocache'      => $nocache_events,
+					'redirects'    => $redirect_events,
+					'referer'      => $referer,
+				)
+			);
+
+			$reset_observed();
+			$secure_decision        = false;
+			$scheme_decision        = 'logged_in';
+			$current_uri            = '/wp-admin/post-new.php?post_type=' . rawurlencode( $ctx->identifier( 4, 10 ) );
+			$_SERVER['REQUEST_URI'] = $current_uri;
+			unset( $_SERVER['HTTP_REFERER'] );
+			$_COOKIE                = array();
+			$_GET                   = array();
+			$_POST                  = array();
+			$_REQUEST               = array();
+			$current_result         = $run_auth_redirect();
+			$current_redirect       = \set_url_scheme( 'http://example.test' . $current_uri );
+			$current_login_url      = $login_events[0]['returned'] ?? null;
+
+			self::collect_failure(
+				$failures,
+				true === $current_result['redirected']
+					&& array() === $auth_events
+					&& 1 === count( $nocache_events )
+					&& 1 === count( $login_events )
+					&& $current_redirect === ( $login_events[0]['redirect'] ?? null )
+					&& true === ( $login_events[0]['forceReauth'] ?? null )
+					&& is_string( $current_login_url )
+					&& str_contains( $current_login_url, rawurlencode( $current_redirect ) )
+					&& 1 === count( $redirect_events )
+					&& $current_login_url === ( $redirect_events[0]['location'] ?? null )
+					&& $redirect_status_matches(),
+				'auth_redirect invalid-cookie non-options requests build login redirects from the current request URL',
+				array(
+					'result'          => $current_result,
+					'loginEvents'     => $login_events,
+					'nocache'         => $nocache_events,
+					'redirects'       => $redirect_events,
+					'expectedCurrent' => $current_redirect,
+				)
+			);
+		} finally {
+			\remove_filter( 'secure_auth_redirect', $secure_filter );
+			\remove_filter( 'auth_redirect_scheme', $scheme_filter );
+			\remove_action( 'auth_redirect', $auth_action );
+			\remove_filter( 'login_url', $login_filter, 10 );
+			\remove_filter( 'nocache_headers', $nocache_filter );
+			\remove_filter( 'wp_redirect', $redirect_filter, 10 );
+			\remove_filter( 'wp_redirect_status', $redirect_status_filter, 10 );
+			\force_ssl_admin( $old_force_ssl_admin );
+
+			$_SERVER  = $server_before;
+			$_COOKIE  = $cookie_before;
+			$_GET     = $get_before;
+			$_POST    = $post_before;
+			$_REQUEST = $request_before;
+			$GLOBALS['current_user'] = new \WP_User( 0 );
+
+			if ( function_exists( 'header_remove' ) && ! headers_sent() ) {
+				foreach ( array( 'Expires', 'Cache-Control', 'X-Component-Fuzz-Auth-Redirect' ) as $header ) {
+					header_remove( $header );
+				}
+			}
+
+			$hooks_restored = false === \has_filter( 'secure_auth_redirect', $secure_filter )
+				&& false === \has_filter( 'auth_redirect_scheme', $scheme_filter )
+				&& false === \has_filter( 'auth_redirect', $auth_action )
+				&& false === \has_filter( 'login_url', $login_filter )
+				&& false === \has_filter( 'nocache_headers', $nocache_filter )
+				&& false === \has_filter( 'wp_redirect', $redirect_filter )
+				&& false === \has_filter( 'wp_redirect_status', $redirect_status_filter );
+
+			self::reset_content();
+			$content_cleared = null === self::raw_user_row( $user_spec['ID'] );
+		}
+
+		self::collect_failure(
+			$failures,
+			$hooks_restored
+				&& $content_cleared
+				&& $_SERVER === $server_before
+				&& $_COOKIE === $cookie_before
+				&& $_GET === $get_before
+				&& $_POST === $post_before
+				&& $_REQUEST === $request_before
+				&& $old_force_ssl_admin === \force_ssl_admin(),
+			'auth_redirect boundary coverage restores scoped hooks, request globals, force-SSL state, and in-memory rows',
+			array(
+				'hooksRestored'    => $hooks_restored,
+				'contentCleared'   => $content_cleared,
+				'serverRestored'   => $_SERVER === $server_before,
+				'cookieRestored'   => $_COOKIE === $cookie_before,
+				'requestRestored'  => $_REQUEST === $request_before,
+				'forceSslRestored' => $old_force_ssl_admin === \force_ssl_admin(),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'auth-flow.auth-redirect-scheme-cookie-login-boundaries',
+			array() === $failures,
+			array(
+				'userId'   => $user_spec['ID'],
+				'failures' => array_slice( $failures, 0, 5 ),
+			)
 		);
 	}
 
