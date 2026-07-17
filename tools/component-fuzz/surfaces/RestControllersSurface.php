@@ -44,6 +44,7 @@ final class RestControllersSurface {
 			$rows[] = self::check_block_pattern_remote_loaders( $ctx );
 			$rows[] = self::check_block_pattern_theme_file_loader( $ctx );
 			$rows[] = self::check_search_controller( $ctx );
+			$rows[] = self::check_search_include_exclude_coercion( $ctx->fork( 'search-include-exclude' ) );
 			$rows[] = self::check_search_settings_default_filtered_dispatch_matrix( $ctx->fork( 'search-settings-default-filters' ) );
 			$rows[] = self::check_controller_argument_error_envelopes( $ctx->fork( 'controller-argument-errors' ) );
 			$rows[] = self::check_menu_locations_controller( $ctx->fork( 'menu-locations' ) );
@@ -5274,6 +5275,325 @@ final class RestControllersSurface {
 			array() === $failures,
 			array(
 				'case'     => $case,
+				'failures' => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
+	private static function check_search_include_exclude_coercion( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime_state();
+
+		$case       = self::search_case( $ctx->fork( 'search' ) );
+		$handler    = self::make_search_handler( $case['type'], $case['subtypes'], $case['items'], $case['handlerIds'], $case['handlerTotal'] );
+		$controller = new \WP_REST_Search_Controller( array( $handler ) );
+		$failures   = array();
+		$selected_subtypes = array_slice( $case['subtypes'], 0, 2 );
+
+		$previous_server  = $GLOBALS['wp_rest_server'] ?? null;
+		$had_wp_actions   = array_key_exists( 'wp_actions', $GLOBALS );
+		$previous_actions = $GLOBALS['wp_actions'] ?? null;
+		$filter_snapshot  = self::rest_default_filter_state();
+		$filters_installed = array();
+
+		$server                    = new \WP_REST_Server();
+		$GLOBALS['wp_rest_server'] = $server;
+
+		if ( ! isset( $GLOBALS['wp_actions'] ) || ! is_array( $GLOBALS['wp_actions'] ) ) {
+			$GLOBALS['wp_actions'] = array();
+		}
+		$GLOBALS['wp_actions']['rest_api_init'] = max( 1, (int) ( $GLOBALS['wp_actions']['rest_api_init'] ?? 0 ) );
+
+		$comma_request = self::request(
+			'GET',
+			'/wp/v2/search',
+			array(
+				'context'  => 'view',
+				'page'     => 2,
+				'per_page' => 2,
+				'include'  => '101,102,-7,0,+5,101',
+				'exclude'  => '107,-13',
+			)
+		);
+		$array_request = self::request(
+			'GET',
+			'/wp/v2/search',
+			array(
+				'context'                                => 'view',
+				'_fields'                                => 'id,title,_links',
+				\WP_REST_Search_Controller::PROP_TYPE    => $case['type'],
+				\WP_REST_Search_Controller::PROP_SUBTYPE => $selected_subtypes,
+				'include'                                => array( '000103', 104, '+105', '-0', 104 ),
+				'exclude'                                => array( '-10', 0, '107' ),
+			)
+		);
+		$head_request = self::request(
+			'HEAD',
+			'/wp/v2/search',
+			array(
+				\WP_REST_Search_Controller::PROP_TYPE    => $case['type'],
+				\WP_REST_Search_Controller::PROP_SUBTYPE => implode( ',', $selected_subtypes ),
+				'include'                                => '103,104',
+				'exclude'                                => array( '107' ),
+			)
+		);
+		$invalid_include_request = self::request(
+			'GET',
+			'/wp/v2/search',
+			array(
+				\WP_REST_Search_Controller::PROP_TYPE => $case['type'],
+				'include'                             => array( 'not-an-int' ),
+			)
+		);
+		$invalid_exclude_request = self::request(
+			'GET',
+			'/wp/v2/search',
+			array(
+				\WP_REST_Search_Controller::PROP_TYPE => $case['type'],
+				'exclude'                             => '100,1.5',
+			)
+		);
+		$invalid_nested_include_request = self::request(
+			'GET',
+			'/wp/v2/search',
+			array(
+				\WP_REST_Search_Controller::PROP_TYPE => $case['type'],
+				'include'                             => array( array( 1 ) ),
+			)
+		);
+		$invalid_assoc_exclude_request = self::request(
+			'GET',
+			'/wp/v2/search',
+			array(
+				\WP_REST_Search_Controller::PROP_TYPE => $case['type'],
+				'exclude'                             => array( 'not-numeric-list' => 1 ),
+			)
+		);
+
+		$comma_response          = null;
+		$array_response          = null;
+		$head_response           = null;
+		$invalid_include_response = null;
+		$invalid_exclude_response = null;
+		$invalid_nested_include_response = null;
+		$invalid_assoc_exclude_response = null;
+		$prepare_before_head     = 0;
+
+		try {
+			$controller->register_routes();
+			\rest_api_default_filters();
+			$filters_installed = self::rest_default_filter_state();
+
+			$comma_response           = self::dispatch_with_rest_post_dispatch( $server, $comma_request );
+			$array_response           = self::dispatch_with_rest_post_dispatch( $server, $array_request );
+			$prepare_before_head      = count( $handler->prepare_calls );
+			$head_response            = self::dispatch_with_rest_post_dispatch( $server, $head_request );
+			$invalid_include_response = self::dispatch_with_rest_post_dispatch( $server, $invalid_include_request );
+			$invalid_exclude_response = self::dispatch_with_rest_post_dispatch( $server, $invalid_exclude_request );
+			$invalid_nested_include_response = self::dispatch_with_rest_post_dispatch( $server, $invalid_nested_include_request );
+			$invalid_assoc_exclude_response = self::dispatch_with_rest_post_dispatch( $server, $invalid_assoc_exclude_request );
+		} finally {
+			self::restore_rest_default_filters( $filter_snapshot );
+
+			if ( $had_wp_actions ) {
+				$GLOBALS['wp_actions'] = $previous_actions;
+			} else {
+				unset( $GLOBALS['wp_actions'] );
+			}
+
+			if ( null !== $previous_server ) {
+				$GLOBALS['wp_rest_server'] = $previous_server;
+			} else {
+				unset( $GLOBALS['wp_rest_server'] );
+			}
+		}
+
+		$comma_headers = $comma_response instanceof \WP_REST_Response ? $comma_response->get_headers() : array();
+		$array_headers = $array_response instanceof \WP_REST_Response ? $array_response->get_headers() : array();
+		$head_headers  = $head_response instanceof \WP_REST_Response ? $head_response->get_headers() : array();
+		$comma_link    = (string) ( $comma_headers['Link'] ?? '' );
+		$comma_base    = \add_query_arg( \urlencode_deep( $comma_request->get_query_params() ), \rest_url( 'wp/v2/search' ) );
+		$comma_prev    = \add_query_arg( 'page', 1, $comma_base );
+		$comma_next    = \add_query_arg( 'page', 3, $comma_base );
+		$array_data    = $array_response instanceof \WP_REST_Response ? $array_response->get_data() : array();
+		$array_first   = is_array( $array_data[0] ?? null ) ? $array_data[0] : array();
+		$search_calls  = $handler->search_calls;
+		$prepare_after_head = count( $handler->prepare_calls );
+		$filter_restored = $filter_snapshot === self::rest_default_filter_state();
+		$server_restored = null !== $previous_server ? ( $GLOBALS['wp_rest_server'] ?? null ) === $previous_server : ! array_key_exists( 'wp_rest_server', $GLOBALS );
+		$actions_restored = $had_wp_actions ? ( $GLOBALS['wp_actions'] ?? null ) === $previous_actions : ! array_key_exists( 'wp_actions', $GLOBALS );
+		$default_filters_ok = array(
+			'rest_pre_serve_request:rest_send_cors_headers'      => 10,
+			'rest_post_dispatch:rest_send_allow_header'          => 10,
+			'rest_post_dispatch:rest_filter_response_fields'     => 10,
+			'rest_pre_dispatch:rest_handle_options_request'      => 10,
+			'rest_index:rest_add_application_passwords_to_index' => 10,
+		) === $filters_installed;
+		$normalize_params = static function ( array $params ): array {
+			ksort( $params );
+			return $params;
+		};
+
+		self::collect_failure(
+			$failures,
+			$comma_response instanceof \WP_REST_Response
+				&& 200 === $comma_response->get_status()
+				&& $case['handlerIds'] === self::search_response_ids( $comma_response )
+				&& $case['handlerTotal'] === (int) ( $comma_headers['X-WP-Total'] ?? 0 )
+				&& 3 === (int) ( $comma_headers['X-WP-TotalPages'] ?? 0 )
+				&& str_contains( $comma_link, '<' . $comma_prev . '>; rel="prev"' )
+				&& str_contains( $comma_link, '<' . $comma_next . '>; rel="next"' )
+				&& str_contains( (string) ( $comma_headers['Allow'] ?? '' ), 'GET' )
+				&& array(
+					'method'   => 'GET',
+					'type'     => $case['type'],
+					'subtype'  => array( \WP_REST_Search_Controller::TYPE_ANY ),
+					'include'  => array( 101, 102, -7, 0, 5, 101 ),
+					'exclude'  => array( 107, -13 ),
+					'page'     => 2,
+					'per_page' => 2,
+					'search'   => '',
+				) === ( $search_calls[0] ?? null )
+				&& $normalize_params( array(
+					'context'  => 'view',
+					'page'     => 2,
+					'per_page' => 2,
+					'include'  => array( 101, 102, -7, 0, 5, 101 ),
+					'exclude'  => array( 107, -13 ),
+					\WP_REST_Search_Controller::PROP_TYPE    => $case['type'],
+					\WP_REST_Search_Controller::PROP_SUBTYPE => array( \WP_REST_Search_Controller::TYPE_ANY ),
+				) ) === $normalize_params( $comma_request->get_params() )
+				&& self::response_envelope_ok( $server, $comma_response ),
+			'search route coerces comma scalar include/exclude values before handler dispatch and link generation',
+			array(
+				'requestParams' => $comma_request->get_params(),
+				'headers'       => $comma_headers,
+				'linkHeader'    => $comma_link,
+				'searchCall'    => $search_calls[0] ?? null,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$array_response instanceof \WP_REST_Response
+				&& 200 === $array_response->get_status()
+				&& array( '_links', 'id', 'title' ) === self::sorted_keys( $array_first )
+				&& str_contains( (string) ( $array_headers['Allow'] ?? '' ), 'GET' )
+				&& array(
+					'method'   => 'GET',
+					'type'     => $case['type'],
+					'subtype'  => $selected_subtypes,
+					'include'  => array( 103, 104, 105, 0, 104 ),
+					'exclude'  => array( -10, 0, 107 ),
+					'page'     => 1,
+					'per_page' => 10,
+					'search'   => '',
+				) === ( $search_calls[1] ?? null )
+				&& $normalize_params( array(
+					'context'                                => 'view',
+					'page'                                   => 1,
+					'per_page'                               => 10,
+					'_fields'                                => 'id,title,_links',
+					\WP_REST_Search_Controller::PROP_TYPE    => $case['type'],
+					\WP_REST_Search_Controller::PROP_SUBTYPE => $selected_subtypes,
+					'include'                                => array( 103, 104, 105, 0, 104 ),
+					'exclude'                                => array( -10, 0, 107 ),
+				) ) === $normalize_params( $array_request->get_params() )
+				&& self::response_envelope_ok( $server, $array_response ),
+			'search route coerces numeric-string arrays, preserves duplicate IDs, and applies response field filtering',
+			array(
+				'requestParams' => $array_request->get_params(),
+				'responseData'  => $array_data,
+				'headers'       => $array_headers,
+				'searchCall'    => $search_calls[1] ?? null,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$head_response instanceof \WP_REST_Response
+				&& 200 === $head_response->get_status()
+				&& array() === $head_response->get_data()
+				&& $case['handlerTotal'] === (int) ( $head_headers['X-WP-Total'] ?? 0 )
+				&& 1 === (int) ( $head_headers['X-WP-TotalPages'] ?? 0 )
+				&& array(
+					'method'   => 'HEAD',
+					'type'     => $case['type'],
+					'subtype'  => $selected_subtypes,
+					'include'  => array( 103, 104 ),
+					'exclude'  => array( 107 ),
+					'page'     => 1,
+					'per_page' => 10,
+					'search'   => '',
+				) === ( $search_calls[2] ?? null )
+				&& $prepare_before_head === $prepare_after_head
+				&& $normalize_params( array(
+					'context'                                => 'view',
+					'page'                                   => 1,
+					'per_page'                               => 10,
+					\WP_REST_Search_Controller::PROP_TYPE    => $case['type'],
+					\WP_REST_Search_Controller::PROP_SUBTYPE => $selected_subtypes,
+					'include'                                => array( 103, 104 ),
+					'exclude'                                => array( 107 ),
+				) ) === $normalize_params( $head_request->get_params() )
+				&& self::response_envelope_ok( $server, $head_response ),
+			'search HEAD coerces subtype/include/exclude scalars but does not prepare item bodies',
+			array(
+				'requestParams' => $head_request->get_params(),
+				'headHeaders'   => $head_headers,
+				'headData'      => $head_response instanceof \WP_REST_Response ? $head_response->get_data() : $head_response,
+				'searchCall'    => $search_calls[2] ?? null,
+				'prepareBefore' => $prepare_before_head,
+				'prepareAfter'  => $prepare_after_head,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::response_invalid_param_details_ok( $invalid_include_response, array( 'include' => 'rest_invalid_type' ) )
+				&& self::response_invalid_param_details_ok( $invalid_exclude_response, array( 'exclude' => 'rest_invalid_type' ) )
+				&& self::response_invalid_param_details_ok( $invalid_nested_include_response, array( 'include' => 'rest_invalid_type' ) )
+				&& self::response_invalid_param_details_ok( $invalid_assoc_exclude_response, array( 'exclude' => 'rest_invalid_type' ) )
+				&& self::response_envelope_ok( $server, $invalid_include_response )
+				&& self::response_envelope_ok( $server, $invalid_exclude_response )
+				&& self::response_envelope_ok( $server, $invalid_nested_include_response )
+				&& self::response_envelope_ok( $server, $invalid_assoc_exclude_response )
+				&& 3 === count( $handler->search_calls ),
+			'search invalid include/exclude values fail schema sanitization before reaching handlers',
+			array(
+				'invalidInclude'       => $invalid_include_response,
+				'invalidExclude'       => $invalid_exclude_response,
+				'invalidNestedInclude' => $invalid_nested_include_response,
+				'invalidAssocExclude'  => $invalid_assoc_exclude_response,
+				'searchCalls'          => $handler->search_calls,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$default_filters_ok
+				&& $filter_restored
+				&& $server_restored
+				&& $actions_restored,
+			'search include/exclude coercion restores default REST filters and globals',
+			array(
+				'filtersInstalled' => $filters_installed,
+				'filterSnapshot'   => $filter_snapshot,
+				'filterRestored'   => $filter_restored,
+				'serverRestored'   => $server_restored,
+				'actionsRestored'  => $actions_restored,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'rest-controllers.search.include-exclude-coercion',
+			array() === $failures,
+			array(
+				'case'     => array(
+					'type'     => $case['type'],
+					'subtypes' => $case['subtypes'],
+					'ids'      => $case['handlerIds'],
+				),
 				'failures' => array_slice( $failures, 0, 8 ),
 			)
 		);
