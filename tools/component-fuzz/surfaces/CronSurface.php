@@ -29,6 +29,7 @@ final class CronSurface {
 			$rows = array_merge( $rows, self::check_rejection_contracts( $ctx ) );
 			$rows = array_merge( $rows, self::check_cron_array_persistence( $ctx, $store ) );
 			$rows = array_merge( $rows, self::check_schedule_filters( $ctx, $store ) );
+			$rows = array_merge( $rows, self::check_pre_filter_failure_contracts( $ctx, $store ) );
 			$rows = array_merge( $rows, self::check_next_scheduled_filter( $ctx, $store ) );
 			$rows = array_merge( $rows, self::check_duplicate_single_event_windows( $ctx, $store ) );
 			$rows = array_merge( $rows, self::check_clear_and_reschedule_filters( $ctx, $store ) );
@@ -473,6 +474,273 @@ final class CronSurface {
 				'unschedule' => self::describe_call( $unschedule ),
 				'kept'       => self::describe_call( $kept ),
 				'events'     => self::describe_value( $unschedule_seen ),
+				'store'      => self::describe_cron_store( $store ),
+			)
+		);
+
+		return $rows;
+	}
+
+	private static function check_pre_filter_failure_contracts( \ComponentFuzz\FuzzContext $ctx, array &$store ): array {
+		$rows = array();
+		$now  = time();
+
+		$store                 = array( 'version' => 2 );
+		$single_hook           = 'component_fuzz_pre_schedule_false_' . self::safe_hook_fragment( $ctx->text( 0, 12 ) );
+		$single_plain_hook     = $single_hook . '_plain';
+		$recurring_hook        = $single_hook . '_recurring';
+		$single_args           = array( 'group' => 'pre-schedule-false', 'slot' => 'single' );
+		$single_plain_args     = array( 'group' => 'pre-schedule-false', 'slot' => 'single-plain' );
+		$recurring_args        = array( 'group' => 'pre-schedule-false', 'slot' => 'recurring' );
+		$pre_schedule_seen     = array();
+		$pre_schedule_filter   = static function ( $pre, object $event, bool $wp_error ) use ( &$pre_schedule_seen, $single_hook, $single_plain_hook, $recurring_hook ) {
+			$pre_schedule_seen[] = array(
+				'pre'       => $pre,
+				'hook'      => $event->hook,
+				'timestamp' => $event->timestamp,
+				'schedule'  => $event->schedule,
+				'interval'  => $event->interval ?? null,
+				'error'     => $wp_error,
+			);
+
+			return in_array( $event->hook, array( $single_hook, $single_plain_hook, $recurring_hook ), true ) ? false : $pre;
+		};
+
+		\add_filter( 'pre_schedule_event', $pre_schedule_filter, 10, 3 );
+		try {
+			$single_error    = self::call( static fn() => \wp_schedule_single_event( $now + 300, $single_hook, $single_args, true ) );
+			$single_plain    = self::call( static fn() => \wp_schedule_single_event( $now + 360, $single_plain_hook, $single_plain_args, false ) );
+			$recurring_error = self::call( static fn() => \wp_schedule_event( $now + 420, 'hourly', $recurring_hook, $recurring_args, true ) );
+			$pre_cron        = self::call( static fn() => \_get_cron_array() );
+		} finally {
+			\remove_filter( 'pre_schedule_event', $pre_schedule_filter, 10 );
+		}
+
+		$pre_cron_value = is_array( $pre_cron['value'] ?? null ) ? $pre_cron['value'] : array();
+		$rows[] = $ctx->result(
+			'cron.filters.pre-schedule-false-fails-closed-without-storage',
+			! $single_error['threw']
+				&& 'pre_schedule_event_false' === self::error_code( $single_error['value'] ?? null )
+				&& ! $single_plain['threw']
+				&& false === $single_plain['value']
+				&& ! $recurring_error['threw']
+				&& 'pre_schedule_event_false' === self::error_code( $recurring_error['value'] ?? null )
+				&& ! $pre_cron['threw']
+				&& array() === self::event_timestamps( $pre_cron_value, $single_hook, $single_args )
+				&& array() === self::event_timestamps( $pre_cron_value, $single_plain_hook, $single_plain_args )
+				&& array() === self::event_timestamps( $pre_cron_value, $recurring_hook, $recurring_args )
+				&& array( true, false, true ) === array_column( $pre_schedule_seen, 'error' )
+				&& false === ( $pre_schedule_seen[0]['schedule'] ?? null )
+				&& false === ( $pre_schedule_seen[1]['schedule'] ?? null )
+				&& 'hourly' === ( $pre_schedule_seen[2]['schedule'] ?? null )
+				&& \HOUR_IN_SECONDS === ( $pre_schedule_seen[2]['interval'] ?? null )
+				&& false === \has_filter( 'pre_schedule_event', $pre_schedule_filter ),
+			array(
+				'singleError'    => self::describe_call( $single_error ),
+				'singlePlain'    => self::describe_call( $single_plain ),
+				'recurringError' => self::describe_call( $recurring_error ),
+				'seen'           => self::describe_value( $pre_schedule_seen ),
+				'store'          => self::describe_cron_store( $store ),
+			)
+		);
+
+		$store                 = array( 'version' => 2 );
+		$disallowed_hook       = 'component_fuzz_schedule_false_' . self::safe_hook_fragment( $ctx->text( 0, 12 ) );
+		$disallowed_plain_hook = $disallowed_hook . '_plain';
+		$disallowed_args       = array( 'group' => 'schedule-event-false', 'slot' => 'error' );
+		$disallowed_plain_args = array( 'group' => 'schedule-event-false', 'slot' => 'plain' );
+		$schedule_seen         = array();
+		$schedule_filter       = static function ( $event ) use ( &$schedule_seen, $disallowed_hook, $disallowed_plain_hook ) {
+			$schedule_seen[] = array(
+				'hook'      => is_object( $event ) ? $event->hook : null,
+				'timestamp' => is_object( $event ) ? $event->timestamp : null,
+				'schedule'  => is_object( $event ) ? $event->schedule : null,
+				'interval'  => is_object( $event ) ? ( $event->interval ?? null ) : null,
+			);
+
+			return is_object( $event ) && in_array( $event->hook, array( $disallowed_hook, $disallowed_plain_hook ), true ) ? false : $event;
+		};
+
+		\add_filter( 'schedule_event', $schedule_filter );
+		try {
+			$disallowed_error = self::call( static fn() => \wp_schedule_event( $now + 540, 'daily', $disallowed_hook, $disallowed_args, true ) );
+			$disallowed_plain = self::call( static fn() => \wp_schedule_event( $now + 600, 'twicedaily', $disallowed_plain_hook, $disallowed_plain_args, false ) );
+			$disallowed_cron  = self::call( static fn() => \_get_cron_array() );
+		} finally {
+			\remove_filter( 'schedule_event', $schedule_filter );
+		}
+
+		$disallowed_cron_value = is_array( $disallowed_cron['value'] ?? null ) ? $disallowed_cron['value'] : array();
+		$rows[] = $ctx->result(
+			'cron.filters.schedule-event-false-fails-closed-without-storage',
+			! $disallowed_error['threw']
+				&& 'schedule_event_false' === self::error_code( $disallowed_error['value'] ?? null )
+				&& ! $disallowed_plain['threw']
+				&& false === $disallowed_plain['value']
+				&& ! $disallowed_cron['threw']
+				&& array() === self::event_timestamps( $disallowed_cron_value, $disallowed_hook, $disallowed_args )
+				&& array() === self::event_timestamps( $disallowed_cron_value, $disallowed_plain_hook, $disallowed_plain_args )
+				&& array( 'daily', 'twicedaily' ) === array_column( $schedule_seen, 'schedule' )
+				&& false === \has_filter( 'schedule_event', $schedule_filter ),
+			array(
+				'disallowedError' => self::describe_call( $disallowed_error ),
+				'disallowedPlain' => self::describe_call( $disallowed_plain ),
+				'seen'            => self::describe_value( $schedule_seen ),
+				'store'           => self::describe_cron_store( $store ),
+			)
+		);
+
+		$store              = array( 'version' => 2 );
+		$reschedule_hook    = 'component_fuzz_pre_reschedule_false_' . self::safe_hook_fragment( $ctx->text( 0, 12 ) );
+		$reschedule_args    = array( 'group' => 'pre-reschedule-false' );
+		$reschedule_time    = $now - 2 * \HOUR_IN_SECONDS;
+		$reschedule_seen    = array();
+		$reschedule_filter  = static function ( $pre, object $event, bool $wp_error ) use ( &$reschedule_seen, $reschedule_hook ) {
+			$reschedule_seen[] = array(
+				'pre'       => $pre,
+				'hook'      => $event->hook,
+				'timestamp' => $event->timestamp,
+				'schedule'  => $event->schedule,
+				'interval'  => $event->interval,
+				'error'     => $wp_error,
+			);
+
+			return $reschedule_hook === $event->hook ? false : $pre;
+		};
+
+		$reschedule_seed = self::call( static fn() => \wp_schedule_event( $reschedule_time, 'hourly', $reschedule_hook, $reschedule_args, true ) );
+		\add_filter( 'pre_reschedule_event', $reschedule_filter, 10, 3 );
+		try {
+			$reschedule_error = self::call( static fn() => \wp_reschedule_event( $reschedule_time, 'hourly', $reschedule_hook, $reschedule_args, true ) );
+			$reschedule_plain = self::call( static fn() => \wp_reschedule_event( $reschedule_time, 'hourly', $reschedule_hook, $reschedule_args, false ) );
+			$reschedule_cron  = self::call( static fn() => \_get_cron_array() );
+		} finally {
+			\remove_filter( 'pre_reschedule_event', $reschedule_filter, 10 );
+		}
+
+		$reschedule_cron_value = is_array( $reschedule_cron['value'] ?? null ) ? $reschedule_cron['value'] : array();
+		$rows[] = $ctx->result(
+			'cron.filters.pre-reschedule-false-preserves-existing-event',
+			! $reschedule_seed['threw']
+				&& true === $reschedule_seed['value']
+				&& ! $reschedule_error['threw']
+				&& 'pre_reschedule_event_false' === self::error_code( $reschedule_error['value'] ?? null )
+				&& ! $reschedule_plain['threw']
+				&& false === $reschedule_plain['value']
+				&& ! $reschedule_cron['threw']
+				&& array( $reschedule_time ) === self::event_timestamps( $reschedule_cron_value, $reschedule_hook, $reschedule_args )
+				&& array( true, false ) === array_column( $reschedule_seen, 'error' )
+				&& false === \has_filter( 'pre_reschedule_event', $reschedule_filter ),
+			array(
+				'seed'            => self::describe_call( $reschedule_seed ),
+				'rescheduleError' => self::describe_call( $reschedule_error ),
+				'reschedulePlain' => self::describe_call( $reschedule_plain ),
+				'seen'            => self::describe_value( $reschedule_seen ),
+				'store'           => self::describe_cron_store( $store ),
+			)
+		);
+
+		$store             = array( 'version' => 2 );
+		$unschedule_hook   = 'component_fuzz_pre_unschedule_false_' . self::safe_hook_fragment( $ctx->text( 0, 12 ) );
+		$unschedule_args   = array( 'group' => 'pre-unschedule-false' );
+		$unschedule_time   = $now + 2 * \HOUR_IN_SECONDS;
+		$unschedule_seen   = array();
+		$unschedule_filter = static function ( $pre, int $timestamp, string $hook, array $args, bool $wp_error ) use ( &$unschedule_seen, $unschedule_hook ) {
+			$unschedule_seen[] = array(
+				'pre'       => $pre,
+				'timestamp' => $timestamp,
+				'hook'      => $hook,
+				'args'      => $args,
+				'error'     => $wp_error,
+			);
+
+			return $unschedule_hook === $hook ? false : $pre;
+		};
+
+		$unschedule_seed = self::call( static fn() => \wp_schedule_single_event( $unschedule_time, $unschedule_hook, $unschedule_args, true ) );
+		\add_filter( 'pre_unschedule_event', $unschedule_filter, 10, 5 );
+		try {
+			$unschedule_error = self::call( static fn() => \wp_unschedule_event( $unschedule_time, $unschedule_hook, $unschedule_args, true ) );
+			$unschedule_plain = self::call( static fn() => \wp_unschedule_event( $unschedule_time, $unschedule_hook, $unschedule_args, false ) );
+			$unschedule_after = self::call( static fn() => \wp_get_scheduled_event( $unschedule_hook, $unschedule_args, $unschedule_time ) );
+		} finally {
+			\remove_filter( 'pre_unschedule_event', $unschedule_filter, 10 );
+		}
+
+		$unschedule_event = $unschedule_after['value'] ?? null;
+		$rows[] = $ctx->result(
+			'cron.filters.pre-unschedule-false-preserves-existing-event',
+			! $unschedule_seed['threw']
+				&& true === $unschedule_seed['value']
+				&& ! $unschedule_error['threw']
+				&& 'pre_unschedule_event_false' === self::error_code( $unschedule_error['value'] ?? null )
+				&& ! $unschedule_plain['threw']
+				&& false === $unschedule_plain['value']
+				&& ! $unschedule_after['threw']
+				&& $unschedule_event instanceof \stdClass
+				&& $unschedule_time === $unschedule_event->timestamp
+				&& $unschedule_args === $unschedule_event->args
+				&& array( true, false ) === array_column( $unschedule_seen, 'error' )
+				&& false === \has_filter( 'pre_unschedule_event', $unschedule_filter ),
+			array(
+				'seed'              => self::describe_call( $unschedule_seed ),
+				'unscheduleError'   => self::describe_call( $unschedule_error ),
+				'unschedulePlain'   => self::describe_call( $unschedule_plain ),
+				'after'             => self::describe_call( $unschedule_after ),
+				'seen'              => self::describe_value( $unschedule_seen ),
+				'store'             => self::describe_cron_store( $store ),
+			)
+		);
+
+		$store        = array( 'version' => 2 );
+		$clear_hook   = 'component_fuzz_pre_clear_false_' . self::safe_hook_fragment( $ctx->text( 0, 12 ) );
+		$clear_args   = array( 'group' => 'pre-clear-false' );
+		$clear_seen   = array();
+		$clear_filter = static function ( $pre, string $hook, array $args, bool $wp_error ) use ( &$clear_seen, $clear_hook ) {
+			$clear_seen[] = array(
+				'pre'   => $pre,
+				'hook'  => $hook,
+				'args'  => $args,
+				'error' => $wp_error,
+			);
+
+			return $clear_hook === $hook ? false : $pre;
+		};
+
+		$clear_time_one  = $now + 3 * \HOUR_IN_SECONDS;
+		$clear_time_two  = $now + 4 * \HOUR_IN_SECONDS;
+		$clear_seed_one  = self::call( static fn() => \wp_schedule_single_event( $clear_time_one, $clear_hook, $clear_args, true ) );
+		$clear_seed_two  = self::call( static fn() => \wp_schedule_single_event( $clear_time_two, $clear_hook, $clear_args, true ) );
+		\add_filter( 'pre_clear_scheduled_hook', $clear_filter, 10, 4 );
+		try {
+			$clear_error = self::call( static fn() => \wp_clear_scheduled_hook( $clear_hook, $clear_args, true ) );
+			$clear_plain = self::call( static fn() => \wp_clear_scheduled_hook( $clear_hook, $clear_args, false ) );
+			$clear_cron  = self::call( static fn() => \_get_cron_array() );
+		} finally {
+			\remove_filter( 'pre_clear_scheduled_hook', $clear_filter, 10 );
+		}
+
+		$clear_cron_value = is_array( $clear_cron['value'] ?? null ) ? $clear_cron['value'] : array();
+		$rows[] = $ctx->result(
+			'cron.filters.pre-clear-false-preserves-matching-events',
+			! $clear_seed_one['threw']
+				&& true === $clear_seed_one['value']
+				&& ! $clear_seed_two['threw']
+				&& true === $clear_seed_two['value']
+				&& ! $clear_error['threw']
+				&& 'pre_clear_scheduled_hook_false' === self::error_code( $clear_error['value'] ?? null )
+				&& ! $clear_plain['threw']
+				&& false === $clear_plain['value']
+				&& ! $clear_cron['threw']
+				&& array( $clear_time_one, $clear_time_two ) === self::event_timestamps( $clear_cron_value, $clear_hook, $clear_args )
+				&& array( true, false ) === array_column( $clear_seen, 'error' )
+				&& false === \has_filter( 'pre_clear_scheduled_hook', $clear_filter ),
+			array(
+				'seedOne'    => self::describe_call( $clear_seed_one ),
+				'seedTwo'    => self::describe_call( $clear_seed_two ),
+				'clearError' => self::describe_call( $clear_error ),
+				'clearPlain' => self::describe_call( $clear_plain ),
+				'seen'       => self::describe_value( $clear_seen ),
 				'store'      => self::describe_cron_store( $store ),
 			)
 		);
