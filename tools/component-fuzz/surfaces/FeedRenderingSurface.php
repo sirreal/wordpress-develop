@@ -36,6 +36,7 @@ final class FeedRenderingSurface {
 			$rows[] = self::check_legacy_feed_templates_and_dispatch( $ctx->fork( 'legacy-dispatch' ), $case );
 			$rows[] = self::check_content_mode_switches( $ctx->fork( 'content-modes' ), $case );
 			$rows[] = self::check_feed_link_helpers( $ctx->fork( 'feed-links' ), $case );
+			$rows[] = self::check_direct_feed_anchor_helpers( $ctx->fork( 'feed-anchors' ), $case );
 			$rows[] = self::check_self_link_request_uri_oracles( $ctx->fork( 'self-link' ), $case );
 			$rows[] = self::check_feed_loop_helpers( $ctx->fork( 'helpers' ), $case );
 			$rows[] = self::check_rss_enclosure_fixture_matrix( $ctx->fork( 'rss-enclosure-fixtures' ), $case );
@@ -130,6 +131,7 @@ final class FeedRenderingSurface {
 				'the_author',
 				'the_content_feed',
 				'the_excerpt_rss',
+				'the_feed_link',
 				'the_guid',
 				'the_permalink_rss',
 				'the_post',
@@ -1050,6 +1052,102 @@ final class FeedRenderingSurface {
 		);
 
 		return self::result( $ctx, 'feed-rendering.feed-link-helpers.alternate-links', $failures, $feed_links . $extra_links );
+	}
+
+	private static function check_direct_feed_anchor_helpers( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$failures = array();
+		self::set_posts_query( $case, 'atom', false );
+
+		$default_anchor   = 'Default feed ' . $case['token'];
+		$default_expected = '<a href="' . self::url_attr( \get_feed_link() ) . '">' . $default_anchor . '</a>';
+		$default_output   = self::capture_output(
+			static function () use ( $default_anchor ): void {
+				\the_feed_link( $default_anchor );
+			}
+		);
+
+		self::collect_failure(
+			$failures,
+			$default_expected === $default_output,
+			'the_feed_link renders the default feed anchor with an escaped feed URL and caller-provided anchor text',
+			array(
+				'expected' => self::preview( $default_expected ),
+				'actual'   => self::preview( $default_output ),
+			)
+		);
+
+		$atom_anchor   = '<span data-cfz-feed="' . $case['token'] . '">Atom & updates</span>';
+		$marker        = 'feed-anchor-' . $ctx->identifier( 4, 10 );
+		$unsafe        = 'A&B "<feed>" ' . $case['token'];
+		$base_atom_url = \get_feed_link( 'atom' );
+		$filtered_url  = $base_atom_url . ( str_contains( $base_atom_url, '?' ) ? '&' : '?' ) . 'cfz=' . rawurlencode( $marker ) . '&unsafe=' . rawurlencode( $unsafe );
+		$base_link     = '<a href="' . self::url_attr( $filtered_url ) . '">' . $atom_anchor . '</a>';
+		$expected_atom = str_replace( '</a>', '<span class="cfz-feed-marker">' . \esc_html( $marker ) . '</span></a>', $base_link );
+		$feed_events   = array();
+		$anchor_events = array();
+
+		$feed_link_filter = static function ( string $url, string $feed ) use ( &$feed_events, $marker, $unsafe ): string {
+			$feed_events[] = array(
+				'url'  => $url,
+				'feed' => $feed,
+			);
+
+			return $url . ( str_contains( $url, '?' ) ? '&' : '?' ) . 'cfz=' . rawurlencode( $marker ) . '&unsafe=' . rawurlencode( $unsafe );
+		};
+		$anchor_filter    = static function ( string $link, string $feed ) use ( &$anchor_events, $marker ): string {
+			$anchor_events[] = array(
+				'link' => $link,
+				'feed' => $feed,
+			);
+
+			return str_replace( '</a>', '<span class="cfz-feed-marker">' . \esc_html( $marker ) . '</span></a>', $link );
+		};
+
+		\add_filter( 'feed_link', $feed_link_filter, 10, 2 );
+		\add_filter( 'the_feed_link', $anchor_filter, 10, 2 );
+		try {
+			$atom_output = self::capture_output(
+				static function () use ( $atom_anchor ): void {
+					\the_feed_link( $atom_anchor, 'atom' );
+				}
+			);
+		} finally {
+			\remove_filter( 'the_feed_link', $anchor_filter, 10 );
+			\remove_filter( 'feed_link', $feed_link_filter, 10 );
+		}
+
+		self::collect_failure(
+			$failures,
+			$expected_atom === $atom_output
+				&& 1 === count( $feed_events )
+				&& $base_atom_url === ( $feed_events[0]['url'] ?? null )
+				&& 'atom' === ( $feed_events[0]['feed'] ?? null )
+				&& 1 === count( $anchor_events )
+				&& $base_link === ( $anchor_events[0]['link'] ?? null )
+				&& 'atom' === ( $anchor_events[0]['feed'] ?? null )
+				&& false === \has_filter( 'feed_link', $feed_link_filter, 10 )
+				&& false === \has_filter( 'the_feed_link', $anchor_filter, 10 ),
+			'the_feed_link applies feed_link before href escaping, applies the complete-anchor filter, and removes scoped filters',
+			array(
+				'expected'      => self::preview( $expected_atom ),
+				'actual'        => self::preview( $atom_output ),
+				'feedEvents'    => $feed_events,
+				'anchorEvents'  => array_map(
+					static function ( array $event ): array {
+						return array(
+							'link' => self::preview( (string) ( $event['link'] ?? '' ) ),
+							'feed' => $event['feed'] ?? null,
+						);
+					},
+					$anchor_events
+				),
+				'feedFilter'    => \has_filter( 'feed_link', $feed_link_filter, 10 ),
+				'anchorFilter'  => \has_filter( 'the_feed_link', $anchor_filter, 10 ),
+				'filteredUrl'   => $filtered_url,
+			)
+		);
+
+		return self::result( $ctx, 'feed-rendering.direct-feed-anchor-helpers.filters-and-escaping', $failures, $default_output . $atom_output );
 	}
 
 	private static function check_self_link_request_uri_oracles( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
