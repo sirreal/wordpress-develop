@@ -40,6 +40,7 @@ final class RestControllersSurface {
 			$rows[] = self::check_settings_controller_dispatch_edges( $ctx->fork( 'settings-dispatch' ) );
 			$rows[] = self::check_block_types_controller( $ctx );
 			$rows[] = self::check_block_renderer_controller( $ctx->fork( 'block-renderer' ) );
+			$rows[] = self::check_block_renderer_default_filtered_fields( $ctx->fork( 'block-renderer-fields' ) );
 			$rows[] = self::check_block_patterns_controller( $ctx );
 			$rows[] = self::check_block_pattern_remote_loaders( $ctx );
 			$rows[] = self::check_block_pattern_theme_file_loader( $ctx );
@@ -2330,6 +2331,408 @@ final class RestControllersSurface {
 			array() === $failures,
 			array(
 				'case'     => $case,
+				'failures' => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
+	private static function check_block_renderer_default_filtered_fields( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime_state();
+		self::load_block_renderer_controller();
+
+		$case       = self::block_renderer_case( $ctx );
+		$controller = new \WP_REST_Block_Renderer_Controller();
+		$failures   = array();
+		$post       = self::block_renderer_post( $ctx->fork( 'post' ), $case );
+
+		$previous_server  = $GLOBALS['wp_rest_server'] ?? null;
+		$previous_post    = $GLOBALS['post'] ?? null;
+		$had_wp_actions   = array_key_exists( 'wp_actions', $GLOBALS );
+		$previous_actions = $GLOBALS['wp_actions'] ?? null;
+		$filter_snapshot  = self::rest_default_filter_state();
+		$filters_installed = array();
+		$cap_filter       = null;
+		$render_calls     = array();
+		$pre_render_calls = array();
+		$render_data_calls = array();
+		$hook_events      = array();
+
+		$server                    = new \WP_REST_Server();
+		$GLOBALS['wp_rest_server'] = $server;
+
+		if ( ! isset( $GLOBALS['wp_actions'] ) || ! is_array( $GLOBALS['wp_actions'] ) ) {
+			$GLOBALS['wp_actions'] = array();
+		}
+		$GLOBALS['wp_actions']['rest_api_init'] = max( 1, (int) ( $GLOBALS['wp_actions']['rest_api_init'] ?? 0 ) );
+
+		self::seed_post_storage( $post );
+		\register_post_status( 'publish', array( 'public' => true ) );
+		\register_post_type(
+			'post',
+			array(
+				'public'       => true,
+				'show_in_rest' => true,
+			)
+		);
+
+		$map_meta_cap_filter = static function ( array $caps, string $cap, int $user_id, array $args ) use ( $post ): array {
+			unset( $user_id );
+
+			if ( 'edit_post' === $cap && isset( $args[0] ) && (int) $post->ID === (int) $args[0] ) {
+				return array( 'edit_posts' );
+			}
+
+			return $caps;
+		};
+		$pre_render_filter = static function ( $output, array $parsed_block ) use ( &$pre_render_calls, &$hook_events ) {
+			$pre_render_calls[] = array(
+				'blockName' => $parsed_block['blockName'] ?? null,
+				'attrs'     => $parsed_block['attrs'] ?? array(),
+				'output'    => $output,
+			);
+			$hook_events[]      = 'pre:' . (string) ( $parsed_block['blockName'] ?? '' );
+
+			return $output;
+		};
+		$render_data_filter = static function ( array $parsed_block, array $source_block ) use ( &$render_data_calls, &$hook_events ): array {
+			$render_data_calls[] = array(
+				'blockName'       => $parsed_block['blockName'] ?? null,
+				'attrs'           => $parsed_block['attrs'] ?? array(),
+				'sourceBlockName' => $source_block['blockName'] ?? null,
+				'sourceAttrs'     => $source_block['attrs'] ?? array(),
+			);
+			$hook_events[]       = 'data:' . (string) ( $parsed_block['blockName'] ?? '' );
+
+			return $parsed_block;
+		};
+
+		$get_response          = null;
+		$post_response         = null;
+		$empty_fields_response = null;
+		$head_response         = null;
+
+		try {
+			\register_block_type(
+				$case['blockName'],
+				array(
+					'attributes'      => array(
+						'message' => array(
+							'type'    => 'string',
+							'default' => $case['defaultMessage'],
+						),
+						'count'   => array(
+							'type'    => 'integer',
+							'default' => $case['defaultCount'],
+						),
+						'items'   => array(
+							'type'    => 'array',
+							'items'   => array( 'type' => 'integer' ),
+							'default' => array( 1, 2 ),
+						),
+						'enabled' => array(
+							'type'    => 'boolean',
+							'default' => true,
+						),
+					),
+					'render_callback' => static function ( array $attributes ) use ( &$render_calls ): string {
+						$payload = array(
+							'attributes' => $attributes,
+							'postTitle'  => \get_the_title(),
+						);
+						$render_calls[] = $payload;
+
+						return \wp_json_encode( $payload );
+					},
+				)
+			);
+
+			$controller->register_routes();
+			\rest_api_default_filters();
+			$filters_installed = self::rest_default_filter_state();
+			$cap_filter        = self::install_cap_filter( array( 'edit_posts', 'edit_published_posts', 'read' ) );
+			\add_filter( 'map_meta_cap', $map_meta_cap_filter, 10, 4 );
+			\add_filter( 'pre_render_block', $pre_render_filter, 10, 2 );
+			\add_filter( 'render_block_data', $render_data_filter, 10, 2 );
+
+			$get_response = self::dispatch_with_rest_post_dispatch(
+				$server,
+				self::request(
+					'GET',
+					'/wp/v2/block-renderer/' . $case['blockName'],
+					array(
+						'context'    => 'edit',
+						'_fields'    => 'rendered',
+						'attributes' => array(
+							'message' => $case['message'],
+							'count'   => (string) $case['count'],
+							'items'   => array_map( 'strval', $case['items'] ),
+							'enabled' => 'false',
+						),
+					)
+				)
+			);
+
+			$post_request = self::request(
+				'POST',
+				'/wp/v2/block-renderer/' . $case['blockName'],
+				array(
+					'context' => 'edit',
+					'_fields' => 'rendered',
+				)
+			);
+			$post_request->set_header( 'Content-Type', 'application/json' );
+			$post_request->set_body(
+				\wp_json_encode(
+					array(
+						'attributes' => array(
+							'message' => $case['postMessage'],
+							'count'   => (string) $case['postCount'],
+							'items'   => array_map( 'strval', $case['postItems'] ),
+							'enabled' => true,
+						),
+						'post_id'    => $post->ID,
+					)
+				)
+			);
+			$post_response = self::dispatch_with_rest_post_dispatch( $server, $post_request );
+
+			$empty_fields_response = self::dispatch_with_rest_post_dispatch(
+				$server,
+				self::request(
+					'GET',
+					'/wp/v2/block-renderer/' . $case['blockName'],
+					array(
+						'context'    => 'edit',
+						'_fields'    => 'missing',
+						'attributes' => array(
+							'message' => $case['filterMessage'],
+							'count'   => (string) $case['count'],
+							'items'   => array_map( 'strval', $case['items'] ),
+							'enabled' => true,
+						),
+					)
+				)
+			);
+
+			$head_response = self::dispatch_with_rest_post_dispatch(
+				$server,
+				self::request(
+					'HEAD',
+					'/wp/v2/block-renderer/' . $case['blockName'],
+					array(
+						'context'    => 'edit',
+						'_fields'    => 'rendered',
+						'attributes' => array(
+							'message' => $case['defaultMessage'],
+							'count'   => (string) $case['defaultCount'],
+							'items'   => array_map( 'strval', $case['items'] ),
+							'enabled' => true,
+						),
+					)
+				)
+			);
+		} finally {
+			\remove_filter( 'render_block_data', $render_data_filter, 10 );
+			\remove_filter( 'pre_render_block', $pre_render_filter, 10 );
+			\remove_filter( 'map_meta_cap', $map_meta_cap_filter, 10 );
+			if ( null !== $cap_filter ) {
+				\remove_filter( 'user_has_cap', $cap_filter, 10 );
+			}
+			\unregister_block_type( $case['blockName'] );
+			self::delete_post_storage( $post->ID );
+			self::restore_rest_default_filters( $filter_snapshot );
+
+			if ( $had_wp_actions ) {
+				$GLOBALS['wp_actions'] = $previous_actions;
+			} else {
+				unset( $GLOBALS['wp_actions'] );
+			}
+
+			if ( null !== $previous_server ) {
+				$GLOBALS['wp_rest_server'] = $previous_server;
+			} else {
+				unset( $GLOBALS['wp_rest_server'] );
+			}
+
+			if ( null !== $previous_post ) {
+				$GLOBALS['post'] = $previous_post;
+			} else {
+				unset( $GLOBALS['post'] );
+			}
+		}
+
+		$get_data          = $get_response instanceof \WP_REST_Response ? $get_response->get_data() : array();
+		$post_data         = $post_response instanceof \WP_REST_Response ? $post_response->get_data() : array();
+		$empty_fields_data = $empty_fields_response instanceof \WP_REST_Response ? $empty_fields_response->get_data() : array();
+		$head_data         = $head_response instanceof \WP_REST_Response ? $head_response->get_data() : array();
+		$get_rendered      = isset( $get_data['rendered'] ) && is_string( $get_data['rendered'] )
+			? json_decode( $get_data['rendered'], true )
+			: null;
+		$post_rendered     = isset( $post_data['rendered'] ) && is_string( $post_data['rendered'] )
+			? json_decode( $post_data['rendered'], true )
+			: null;
+		$head_rendered     = isset( $head_data['rendered'] ) && is_string( $head_data['rendered'] )
+			? json_decode( $head_data['rendered'], true )
+			: null;
+		$get_headers       = $get_response instanceof \WP_REST_Response ? $get_response->get_headers() : array();
+		$post_headers      = $post_response instanceof \WP_REST_Response ? $post_response->get_headers() : array();
+		$empty_headers     = $empty_fields_response instanceof \WP_REST_Response ? $empty_fields_response->get_headers() : array();
+		$head_headers      = $head_response instanceof \WP_REST_Response ? $head_response->get_headers() : array();
+		$expected_hooks    = array();
+		for ( $i = 0; $i < 4; ++$i ) {
+			$expected_hooks[] = 'pre:' . $case['blockName'];
+			$expected_hooks[] = 'data:' . $case['blockName'];
+		}
+		$filter_restored   = $filter_snapshot === self::rest_default_filter_state();
+		$server_restored   = null !== $previous_server ? ( $GLOBALS['wp_rest_server'] ?? null ) === $previous_server : ! array_key_exists( 'wp_rest_server', $GLOBALS );
+		$post_restored     = null !== $previous_post ? ( $GLOBALS['post'] ?? null ) === $previous_post : ! array_key_exists( 'post', $GLOBALS );
+		$actions_restored  = $had_wp_actions ? ( $GLOBALS['wp_actions'] ?? null ) === $previous_actions : ! array_key_exists( 'wp_actions', $GLOBALS );
+		$default_filters_ok = array(
+			'rest_pre_serve_request:rest_send_cors_headers'      => 10,
+			'rest_post_dispatch:rest_send_allow_header'          => 10,
+			'rest_post_dispatch:rest_filter_response_fields'     => 10,
+			'rest_pre_dispatch:rest_handle_options_request'      => 10,
+			'rest_index:rest_add_application_passwords_to_index' => 10,
+		) === $filters_installed;
+
+		self::collect_failure(
+			$failures,
+			$get_response instanceof \WP_REST_Response
+				&& 200 === $get_response->get_status()
+				&& array( 'rendered' ) === self::sorted_keys( $get_data )
+				&& is_array( $get_rendered )
+				&& array(
+					'message' => $case['message'],
+					'count'   => $case['count'],
+					'items'   => $case['items'],
+					'enabled' => false,
+				) === ( $get_rendered['attributes'] ?? null )
+				&& '' === ( $get_rendered['postTitle'] ?? null )
+				&& str_contains( (string) ( $get_headers['Allow'] ?? '' ), 'GET' )
+				&& str_contains( (string) ( $get_headers['Allow'] ?? '' ), 'POST' )
+				&& self::response_envelope_ok( $server, $get_response ),
+			'block renderer default-filtered GET applies _fields and sanitizes typed attributes',
+			array(
+				'data'     => $get_data,
+				'rendered' => $get_rendered,
+				'headers'  => $get_headers,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$post_response instanceof \WP_REST_Response
+				&& 200 === $post_response->get_status()
+				&& array( 'rendered' ) === self::sorted_keys( $post_data )
+				&& is_array( $post_rendered )
+				&& array(
+					'message' => $case['postMessage'],
+					'count'   => $case['postCount'],
+					'items'   => $case['postItems'],
+					'enabled' => true,
+				) === ( $post_rendered['attributes'] ?? null )
+				&& $case['postTitle'] === ( $post_rendered['postTitle'] ?? null )
+				&& str_contains( (string) ( $post_headers['Allow'] ?? '' ), 'GET' )
+				&& str_contains( (string) ( $post_headers['Allow'] ?? '' ), 'POST' )
+				&& self::response_envelope_ok( $server, $post_response ),
+			'block renderer default-filtered POST parses JSON bodies, exposes post context, and keeps _fields projection',
+			array(
+				'data'     => $post_data,
+				'rendered' => $post_rendered,
+				'headers'  => $post_headers,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$empty_fields_response instanceof \WP_REST_Response
+				&& 200 === $empty_fields_response->get_status()
+				&& array() === $empty_fields_data
+				&& str_contains( (string) ( $empty_headers['Allow'] ?? '' ), 'GET' )
+				&& str_contains( (string) ( $empty_headers['Allow'] ?? '' ), 'POST' )
+				&& self::response_envelope_ok( $server, $empty_fields_response ),
+			'block renderer renders before rest_filter_response_fields can prune every body field',
+			array(
+				'data'    => $empty_fields_data,
+				'headers' => $empty_headers,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$head_response instanceof \WP_REST_Response
+				&& 200 === $head_response->get_status()
+				&& array( 'rendered' ) === self::sorted_keys( $head_data )
+				&& is_array( $head_rendered )
+				&& array(
+					'message' => $case['defaultMessage'],
+					'count'   => $case['defaultCount'],
+					'items'   => $case['items'],
+					'enabled' => true,
+				) === ( $head_rendered['attributes'] ?? null )
+				&& str_contains( (string) ( $head_headers['Allow'] ?? '' ), 'GET' )
+				&& str_contains( (string) ( $head_headers['Allow'] ?? '' ), 'POST' )
+				&& self::response_envelope_ok( $server, $head_response ),
+			'block renderer HEAD follows the render callback path and receives default REST headers',
+			array(
+				'data'     => $head_data,
+				'rendered' => $head_rendered,
+				'headers'  => $head_headers,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			4 === count( $render_calls )
+				&& 4 === count( $pre_render_calls )
+				&& 4 === count( $render_data_calls )
+				&& $expected_hooks === $hook_events
+				&& $case['message'] === ( $render_data_calls[0]['attrs']['message'] ?? null )
+				&& $case['postMessage'] === ( $render_data_calls[1]['attrs']['message'] ?? null )
+				&& $case['filterMessage'] === ( $render_data_calls[2]['attrs']['message'] ?? null )
+				&& $case['defaultMessage'] === ( $render_data_calls[3]['attrs']['message'] ?? null )
+				&& false === \has_filter( 'render_block_data', $render_data_filter, 10 )
+				&& false === \has_filter( 'pre_render_block', $pre_render_filter, 10 )
+				&& false === \has_filter( 'map_meta_cap', $map_meta_cap_filter, 10 )
+				&& ( null === $cap_filter || false === \has_filter( 'user_has_cap', $cap_filter, 10 ) ),
+			'block renderer default-filtered dispatch keeps render_block filter order local and cleans temporary filters',
+			array(
+				'renderCalls'     => $render_calls,
+				'preRenderCalls'  => $pre_render_calls,
+				'renderDataCalls' => $render_data_calls,
+				'hookEvents'      => $hook_events,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$default_filters_ok
+				&& $filter_restored
+				&& $server_restored
+				&& $post_restored
+				&& $actions_restored
+				&& ! \WP_Block_Type_Registry::get_instance()->is_registered( $case['blockName'] ),
+			'block renderer default-filtered dispatch restores default REST filters, globals, post context, and block registration',
+			array(
+				'filtersInstalled' => $filters_installed,
+				'filterSnapshot'   => $filter_snapshot,
+				'filterRestored'   => $filter_restored,
+				'serverRestored'   => $server_restored,
+				'postRestored'     => $post_restored,
+				'actionsRestored'  => $actions_restored,
+				'blockRegistered'  => \WP_Block_Type_Registry::get_instance()->is_registered( $case['blockName'] ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'rest-controllers.block-renderer.default-filtered-fields',
+			array() === $failures,
+			array(
+				'case'     => array(
+					'blockName' => $case['blockName'],
+					'postId'    => $post->ID,
+				),
 				'failures' => array_slice( $failures, 0, 8 ),
 			)
 		);
