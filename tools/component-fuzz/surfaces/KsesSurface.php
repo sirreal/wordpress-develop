@@ -85,6 +85,7 @@ final class KsesSurface {
 			$results[] = self::check_no_null_control_matrix( $seed );
 			$results[] = self::check_kses_filter_lifecycle_invariants( $seed );
 			$results[] = self::check_pre_kses_hook_lifecycle_matrix( $seed );
+			$results[] = self::check_reentrant_allowed_html_leakage_diagnostic( $seed );
 			$results[] = self::check_wp_kses_post_deep_invariants( $seed );
 			$results[] = self::check_pre_kses_hook_state(
 				$seed,
@@ -3365,6 +3366,371 @@ final class KsesSurface {
 			'kses.pre_kses-hook-lifecycle-matrix',
 			$context_prefix,
 			'generated pre_kses filters receive normalized args in priority order, compose with allowed-html contexts, sanitize mutations, and restore hooks/globals',
+			$failures,
+			$details
+		);
+	}
+
+	private static function check_reentrant_allowed_html_leakage_diagnostic( int $seed ): array {
+		$required = array(
+			'add_filter',
+			'has_filter',
+			'remove_filter',
+			'wp_kses',
+			'wp_kses_no_null',
+			'wp_kses_normalize_entities',
+			'wp_kses_split2',
+		);
+		foreach ( $required as $function_name ) {
+			if ( ! function_exists( $function_name ) ) {
+				return self::skip(
+					$seed,
+					null,
+					'kses.reentrant-allowed-html-leakage-diagnostic.available',
+					$function_name . '() is not loaded',
+					''
+				);
+			}
+		}
+
+		$rng             = self::rng( self::normalize_seed( 'kses-reentrant-allowed-html:' . $seed ) );
+		$context_prefix  = 'component_fuzz_kses_reentrant_' . substr( sha1( 'reentrant:' . $seed ), 0, 10 );
+		$hook_names      = array( 'wp_kses_allowed_html', 'pre_kses' );
+		$hook_snapshot   = self::snapshot_hooks( $hook_names );
+		$global_snapshot = self::snapshot_globals( self::kses_global_names() );
+		$hook_before     = array();
+		foreach ( $hook_names as $hook_name ) {
+			$hook_before[ $hook_name ] = self::hook_signature( $hook_name );
+		}
+
+		$profiles = array(
+			array(
+				'label'          => 'inner-disallows-anchor',
+				'innerPolicy'    => array(
+					'em' => array( 'data-inner' => true ),
+				),
+				'innerProtocols' => array( 'mailto' ),
+			),
+			array(
+				'label'          => 'inner-allows-anchor-mailto-only',
+				'innerPolicy'    => array(
+					'a'  => array( 'href' => true ),
+					'em' => array( 'data-inner' => true ),
+				),
+				'innerProtocols' => array( 'mailto' ),
+			),
+			array(
+				'label'          => 'inner-allows-anchor-without-data',
+				'innerPolicy'    => array(
+					'a'    => array( 'href' => true ),
+					'span' => array(),
+				),
+				'innerProtocols' => array( 'https' ),
+			),
+		);
+
+		$cases = array();
+		for ( $case_index = 0; $case_index < 8; ++$case_index ) {
+			$token     = substr( sha1( $seed . ':kses-reentrant:' . $case_index . ':' . self::rng_uint32( $rng ) ), 0, 8 );
+			$profile   = self::rng_choice( $rng, $profiles );
+			$context   = $context_prefix . '_' . $case_index;
+			$outer_url = self::rng_chance( $rng, 35 )
+				? 'mailto:outer-' . $token . '@example.test'
+				: 'https://example.test/kses-reentrant/' . $token;
+			$second_url = 'https://example.test/kses-reentrant/' . $token . '/second';
+			$bad_url    = self::rng_choice(
+				$rng,
+				array(
+					'javascript:alert(1)',
+					'java&#x0a;script:alert(1)',
+					'data:text/html,<svg/onload=alert(1)>',
+					'vbscript:msgbox(1)',
+				)
+			);
+
+			$outer_policy = array(
+				'a'      => array(
+					'href'       => true,
+					'data-token' => true,
+					'data-slot'  => true,
+				),
+				'em'     => array(
+					'data-token' => true,
+				),
+				'mark'   => array(
+					'data-token' => true,
+				),
+				'span'   => array(
+					'data-token' => true,
+					'data-slot'  => true,
+				),
+				'strong' => array(),
+			);
+			$html         = '<a href="' . $outer_url . '" data-token="' . $token . '" data-slot="first">first-' . $token . '</a>'
+				. '<a href="' . $second_url . '" data-token="' . $token . '" data-slot="second">second-' . $token . '</a>'
+				. '<span data-token="' . $token . '" data-slot="third">third-' . $token . '</span>'
+				. '<mark data-token="' . $token . '">mark-' . $token . '</mark>'
+				. '<a href="' . $bad_url . '" onclick="evil()" data-token="' . $token . '" data-slot="bad">bad-' . $token . '</a>';
+
+			$cases[] = array(
+				'caseIndex'      => $case_index,
+				'token'          => $token,
+				'context'        => $context,
+				'html'           => $html,
+				'outerPolicy'    => $outer_policy,
+				'outerProtocols' => array( 'https', 'mailto' ),
+				'innerPolicy'    => $profile['innerPolicy'],
+				'innerProtocols' => $profile['innerProtocols'],
+				'profile'        => $profile['label'],
+			);
+		}
+
+		$events         = array();
+		$nested_outputs = array();
+		$policies       = array();
+		foreach ( $cases as $case ) {
+			$policies[ $case['context'] ] = $case;
+		}
+
+		$allowed_filter = static function ( $allowed_html, $context ) use ( &$events, &$nested_outputs, $policies ) {
+			if ( ! is_string( $context ) || ! isset( $policies[ $context ] ) ) {
+				return $allowed_html;
+			}
+
+			$case       = $policies[ $context ];
+			$inner_html = '<a href="https://example.test/nested/' . $case['token'] . '" data-token="' . $case['token'] . '">nested-link</a>'
+				. '<em data-inner="' . $case['token'] . '">nested-em</em>';
+			$nested     = \wp_kses( $inner_html, $case['innerPolicy'], $case['innerProtocols'] );
+
+			$events[] = array(
+				'context'       => $context,
+				'token'         => $case['token'],
+				'profile'       => $case['profile'],
+				'currentFilter' => \current_filter(),
+				'stack'         => array_values( $GLOBALS['wp_current_filter'] ?? array() ),
+				'nestedSha1'    => sha1( $nested ),
+			);
+			$nested_outputs[ $context ] = $nested;
+
+			return $case['outerPolicy'];
+		};
+
+		$failures        = array();
+		$outputs         = array();
+		$exception       = null;
+		$filters_removed = false;
+
+		\add_filter( 'wp_kses_allowed_html', $allowed_filter, 10, 2 );
+		try {
+			foreach ( $cases as $case ) {
+				$fixed_control = \wp_kses( $case['html'], $case['outerPolicy'], $case['outerProtocols'] );
+				$current_model = self::kses_reentrant_current_leakage_model(
+					$case['html'],
+					$case['outerPolicy'],
+					$case['innerPolicy'],
+					$case['outerProtocols'],
+					$case['innerProtocols']
+				);
+
+				$current_before   = $GLOBALS['wp_current_filter'] ?? null;
+				$actual           = \wp_kses( $case['html'], $case['context'], $case['outerProtocols'] );
+				$leaked_html      = $GLOBALS['pass_allowed_html'] ?? null;
+				$leaked_protocols = $GLOBALS['pass_allowed_protocols'] ?? null;
+				$current_after    = $GLOBALS['wp_current_filter'] ?? null;
+
+				$case_failures = array();
+				if ( $current_model !== $actual ) {
+					$case_failures[] = array(
+						'label'        => 'current output matches the modeled reentrant global leakage path',
+						'expectedSha1' => sha1( $current_model ),
+						'actualSha1'   => sha1( $actual ),
+						'expected'     => self::preview( $current_model ),
+						'actual'       => self::preview( $actual ),
+					);
+				}
+				if ( $fixed_control === $actual ) {
+					$case_failures[] = array(
+						'label' => 'diagnostic still observes divergence from the fixed outer-policy control',
+						'fixed' => self::preview( $fixed_control ),
+					);
+				}
+				if ( $case['innerPolicy'] !== $leaked_html || $case['innerProtocols'] !== $leaked_protocols ) {
+					$case_failures[] = array(
+						'label'           => 'reentrant nested wp_kses call leaves inner policy/protocol globals after the outer call',
+						'expectedPolicy'  => $case['innerPolicy'],
+						'actualPolicy'    => $leaked_html,
+						'expectedProtocols' => $case['innerProtocols'],
+						'actualProtocols' => $leaked_protocols,
+					);
+				}
+				if ( false === strpos( $actual, 'data-slot="first"' ) ) {
+					$case_failures[] = array(
+						'label'  => 'first token is still filtered with the resolved outer policy before leakage takes over',
+						'actual' => self::preview( $actual ),
+					);
+				}
+				if ( false !== strpos( $actual, 'data-slot="second"' ) || false !== strpos( $actual, 'data-slot="third"' ) ) {
+					$case_failures[] = array(
+						'label'  => 'later outer-only marker attributes are removed by the leaked inner policy',
+						'actual' => self::preview( $actual ),
+					);
+				}
+				foreach ( array( '<script', 'javascript:', 'vbscript:', 'data:text/html' ) as $unsafe_token ) {
+					if ( false !== stripos( $actual, $unsafe_token ) ) {
+						$case_failures[] = array(
+							'label'  => 'diagnostic output remains sanitized despite the current leakage',
+							'token'  => $unsafe_token,
+							'actual' => self::preview( $actual ),
+						);
+					}
+				}
+				if ( 1 === preg_match( '/<[^>]*\son[a-z0-9_-]+\s*=/i', $actual, $event_match ) ) {
+					$case_failures[] = array(
+						'label'  => 'diagnostic output has no active event-handler attributes',
+						'token'  => $event_match[0],
+						'actual' => self::preview( $actual ),
+					);
+				}
+				$control = self::raw_control_violation( $actual );
+				if ( null !== $control ) {
+					$case_failures[] = array(
+						'label'   => 'diagnostic output has no raw disallowed C0 control bytes',
+						'control' => $control,
+					);
+				}
+				if ( $current_before !== $current_after ) {
+					$case_failures[] = array(
+						'label'  => 'current filter stack is restored after reentrant diagnostic call',
+						'before' => $current_before,
+						'after'  => $current_after,
+					);
+				}
+
+				if ( ! empty( $case_failures ) ) {
+					$case_failures['caseIndex'] = $case['caseIndex'];
+					$case_failures['context']   = $case['context'];
+					$case_failures['profile']   = $case['profile'];
+					$failures[]                 = $case_failures;
+				}
+
+				$outputs[] = array(
+					'caseIndex'        => $case['caseIndex'],
+					'profile'          => $case['profile'],
+					'actualSha1'       => sha1( $actual ),
+					'fixedControlSha1' => sha1( $fixed_control ),
+					'modelSha1'        => sha1( $current_model ),
+					'actualPreview'    => self::preview( $actual, 120 ),
+				);
+			}
+
+			if ( count( $cases ) !== count( $events ) ) {
+				$failures[] = array(
+					'label'    => 'current leakage path calls the allowed-html filter once per generated outer wp_kses call',
+					'expected' => count( $cases ),
+					'actual'   => count( $events ),
+					'events'   => array_slice( $events, 0, 12 ),
+				);
+			}
+			foreach ( $events as $event ) {
+				if (
+					'wp_kses_allowed_html' !== ( $event['currentFilter'] ?? null )
+					|| array( 'wp_kses_allowed_html' ) !== array_slice( (array) ( $event['stack'] ?? array() ), -1 )
+				) {
+					$failures[] = array(
+						'label' => 'allowed-html diagnostic filter observes its hook stack locality',
+						'event' => $event,
+					);
+					break;
+				}
+			}
+			foreach ( $nested_outputs as $context => $nested_output ) {
+				$case            = $policies[ $context ] ?? null;
+				$nested_failures = array();
+				if ( null === $case ) {
+					$nested_failures[] = 'nested output was recorded for an unknown context';
+				} else {
+					if ( false === strpos( $nested_output, 'nested-em' ) || false !== strpos( $nested_output, 'data-token=' ) ) {
+						$nested_failures[] = 'nested output did not reflect the inner attribute policy';
+					}
+					if ( 'inner-disallows-anchor' === $case['profile'] && false !== strpos( $nested_output, '<a ' ) ) {
+						$nested_failures[] = 'inner policy that disallows anchors preserved the nested anchor';
+					}
+					if ( 'inner-disallows-anchor' !== $case['profile'] && false === strpos( $nested_output, '<a ' ) ) {
+						$nested_failures[] = 'inner policy that allows anchors stripped the nested anchor';
+					}
+				}
+				if ( ! empty( $nested_failures ) ) {
+					$failures[] = array(
+						'label'   => 'nested wp_kses call used the generated inner policy before leaking globals',
+						'context' => $context,
+						'profile' => $case['profile'] ?? null,
+						'nested'  => self::preview( $nested_output ),
+						'issues'  => $nested_failures,
+					);
+				}
+			}
+		} catch ( \Throwable $e ) {
+			$exception = $e;
+		} finally {
+			\remove_filter( 'wp_kses_allowed_html', $allowed_filter, 10 );
+			$filters_removed = false === \has_filter( 'wp_kses_allowed_html', $allowed_filter );
+			self::restore_hooks( $hook_snapshot );
+			self::restore_globals( $global_snapshot );
+		}
+
+		if ( null !== $exception ) {
+			return self::throwable_result(
+				$seed,
+				null,
+				'kses.reentrant-allowed-html-leakage-diagnostic.no-throw',
+				$context_prefix,
+				$exception
+			);
+		}
+
+		$hook_after_restore = array();
+		foreach ( $hook_names as $hook_name ) {
+			$hook_after_restore[ $hook_name ] = self::hook_signature( $hook_name );
+		}
+		if ( ! $filters_removed ) {
+			$failures[] = array(
+				'label' => 'scoped allowed-html diagnostic filter is removed before hook snapshot restoration',
+			);
+		}
+		if ( $hook_before !== $hook_after_restore ) {
+			$failures[] = array(
+				'label'    => 'allowed-html diagnostic restores hook signatures exactly',
+				'expected' => $hook_before,
+				'actual'   => $hook_after_restore,
+			);
+		}
+		if ( ! self::globals_match( $global_snapshot ) ) {
+			$failures[] = array(
+				'label'    => 'KSES globals restored after reentrant allowed-html diagnostic',
+				'expected' => self::describe_global_snapshot( $global_snapshot ),
+				'actual'   => self::describe_global_snapshot( self::snapshot_globals( array_keys( $global_snapshot ) ) ),
+			);
+		}
+
+		$details = array(
+			'caseCount'    => count( $cases ),
+			'eventCount'   => count( $events ),
+			'outputs'      => $outputs,
+			'failureCount' => count( $failures ),
+			'failures'     => array_slice( $failures, 0, 8 ),
+			'futureOracle' => 'When core restores $pass_allowed_html/$pass_allowed_protocols across nested wp_kses() calls, this diagnostic should be inverted so actual output matches the fixed outer-policy control.',
+		);
+
+		if ( empty( $failures ) ) {
+			return self::pass( $seed, null, 'kses.reentrant-allowed-html-leakage-diagnostic', $context_prefix, $details );
+		}
+
+		return self::fail(
+			$seed,
+			null,
+			'kses.reentrant-allowed-html-leakage-diagnostic',
+			$context_prefix,
+			'current core reentrant wp_kses_allowed_html calls leak inner pass_allowed_html/pass_allowed_protocols globals in a sanitized, restorable diagnostic shape',
 			$failures,
 			$details
 		);
@@ -7150,6 +7516,37 @@ final class KsesSurface {
 		}
 
 		return $policy;
+	}
+
+	private static function kses_reentrant_current_leakage_model( string $content, array $first_policy, array $leaked_policy, array $first_protocols, array $leaked_protocols ): string {
+		$content = \wp_kses_normalize_entities(
+			\wp_kses_no_null( $content, array( 'slash_zero' => 'keep' ) )
+		);
+		$seen_first_token = false;
+		$token_pattern    = <<<'REGEX'
+~
+	(                      # Detect comments of various flavors before attempting to find tags.
+		(<!--.*?(-->|$))   #  - Normative HTML comments.
+		|
+		</[^a-zA-Z][^>]*>  #  - Closing tags with invalid tag names.
+		|
+		<![^>]*>           #  - Invalid markup declaration nodes.
+	)
+	|
+	(<[^>]*(>|$)|>)        # Tag-like spans of text.
+~x
+REGEX;
+
+		return (string) preg_replace_callback(
+			$token_pattern,
+			static function ( array $matches ) use ( &$seen_first_token, $first_policy, $leaked_policy, $first_protocols, $leaked_protocols ): string {
+				$policy    = $seen_first_token ? $leaked_policy : $first_policy;
+				$protocols = $seen_first_token ? $leaked_protocols : $first_protocols;
+				$seen_first_token = true;
+				return \wp_kses_split2( $matches[0], $policy, $protocols );
+			},
+			$content
+		);
 	}
 
 	private static function kses_filter_lifecycle_hooks(): array {
