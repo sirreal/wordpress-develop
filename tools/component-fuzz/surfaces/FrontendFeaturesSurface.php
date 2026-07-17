@@ -842,47 +842,113 @@ final class FrontendFeaturesSurface {
 		$failures = array();
 		$slug     = self::slug( $ctx, 'prefix' );
 
-		$home_path = '/front-' . $slug;
-		$site_path = '/core-' . $slug;
-		$prefixer  = new \WP_URL_Pattern_Prefixer(
-			array(
-				'home' => $home_path,
-				'site' => $site_path,
-			)
+		$contexts = array(
+			'home'    => '/front-' . $slug,
+			'site'    => '/core-' . $slug,
+			'uploads' => '/files+' . $slug . '*drafts',
+		);
+		$prefixer = new \WP_URL_Pattern_Prefixer( $contexts );
+
+		$matrix = array(
+			'home-relative'           => array( 'context' => 'home', 'path' => 'products/' . $slug . '/*' ),
+			'home-leading-slash'      => array( 'context' => 'home', 'path' => '/products/' . $slug . '/*' ),
+			'home-double-slash'       => array( 'context' => 'home', 'path' => '//deals/' . $slug . '/*' ),
+			'home-already-prefixed'   => array(
+				'context' => 'home',
+				'path'    => self::escaped_context_path( $contexts['home'] ) . 'products/' . $slug . '/*',
+			),
+			'site-admin'              => array( 'context' => 'site', 'path' => '/wp-admin/*' ),
+			'site-php-pattern'        => array( 'context' => 'site', 'path' => '/wp-*.php' ),
+			'uploads-pattern-chars'   => array( 'context' => 'uploads', 'path' => '/cache/{draft}/asset?.css' ),
+			'uploads-already-escaped' => array(
+				'context' => 'uploads',
+				'path'    => self::escaped_context_path( $contexts['uploads'] ) . 'cache/{draft}/asset?.css',
+			),
 		);
 
-		$home_pattern      = '/products/' . $slug . '/*';
-		$prefixed_home     = $prefixer->prefix_path_pattern( $home_pattern );
-		$prefixed_home_two = $prefixer->prefix_path_pattern( $prefixed_home );
-		$prefixed_site     = $prefixer->prefix_path_pattern( '/wp-admin/*', 'site' );
+		$matrix_results = array();
+		foreach ( $matrix as $label => $case ) {
+			$first  = $prefixer->prefix_path_pattern( $case['path'], $case['context'] );
+			$second = $prefixer->prefix_path_pattern( $first, $case['context'] );
+			$expect = self::expected_prefixed_path_pattern( $contexts[ $case['context'] ], $case['path'] );
 
-		$special_context  = '/front:' . $slug . '?draft';
+			$matrix_results[ $label ] = array(
+				'first'      => $first,
+				'second'     => $second,
+				'expected'   => $expect,
+				'idempotent' => $first === $second,
+			);
+		}
+
+		$special_context  = '/front:' . $slug . '?draft#hash';
 		$special_prefixer = new \WP_URL_Pattern_Prefixer( array( 'home' => $special_context ) );
 		$special          = $special_prefixer->prefix_path_pattern( '/next/*' );
+		$special_expected = self::expected_prefixed_path_pattern( $special_context, '/next/*' );
+
+		$diagnostics               = array();
+		$invalid_context           = 'bad:' . $slug;
+		$invalid_pattern           = '/kept/' . $slug . '/*';
+		$diag_action               = static function ( string $function_name, string $message, string $version ) use ( &$diagnostics ): void {
+			$diagnostics[] = array(
+				'function' => $function_name,
+				'message'  => $message,
+				'version'  => $version,
+			);
+		};
+		$suppress_doing_it_wrong   = static function (): bool {
+			return false;
+		};
+		$invalid_context_result    = null;
+
+		\add_action( 'doing_it_wrong_run', $diag_action, 10, 3 );
+		\add_filter( 'doing_it_wrong_trigger_error', $suppress_doing_it_wrong, 10, 4 );
+		try {
+			$invalid_context_result = $prefixer->prefix_path_pattern( $invalid_pattern, $invalid_context );
+		} finally {
+			\remove_filter( 'doing_it_wrong_trigger_error', $suppress_doing_it_wrong, 10 );
+			\remove_action( 'doing_it_wrong_run', $diag_action, 10 );
+		}
+
+		$matrix_ok = true;
+		foreach ( $matrix_results as $result ) {
+			if ( $result['first'] !== $result['expected'] || ! $result['idempotent'] || str_contains( $result['first'], '//' ) ) {
+				$matrix_ok = false;
+				break;
+			}
+		}
+
+		$diagnostic = $diagnostics[0] ?? array();
 
 		self::collect_failure(
 			$failures,
-			self::prefix_path( $home_path, $home_pattern ) === $prefixed_home
-				&& $prefixed_home === $prefixed_home_two
-				&& self::prefix_path( $site_path, '/wp-admin/*' ) === $prefixed_site
-				&& ! str_contains( $prefixed_home, '//' )
+			$matrix_ok
+				&& $special_expected === $special
 				&& str_starts_with( $special, '{/front\\:' )
-				&& str_contains( $special, '\\?draft}/next/*' ),
-			'URL pattern prefixing is deterministic, does not double-prefix, and escapes grouping-sensitive context paths',
+				&& str_contains( $special, '\\?draft#hash}/next/*' )
+				&& $invalid_pattern === $invalid_context_result
+				&& 1 === count( $diagnostics )
+				&& 'prefix_path_pattern' === ( $diagnostic['function'] ?? null )
+				&& str_contains( (string) ( $diagnostic['message'] ?? '' ), $invalid_context )
+				&& '6.8.0' === ( $diagnostic['version'] ?? null )
+				&& false === \has_action( 'doing_it_wrong_run', $diag_action )
+				&& false === \has_filter( 'doing_it_wrong_trigger_error', $suppress_doing_it_wrong ),
+			'URL pattern prefixing covers generated contexts, idempotence, escaping, grouping-sensitive paths, and invalid context diagnostics',
 			array(
-				'homePath'        => $home_path,
-				'sitePath'        => $site_path,
-				'homePattern'     => $home_pattern,
-				'prefixedHome'    => $prefixed_home,
-				'prefixedHomeTwo' => $prefixed_home_two,
-				'prefixedSite'    => $prefixed_site,
-				'specialContext'  => $special_context,
-				'special'         => $special,
+				'contexts'             => $contexts,
+				'matrix'               => $matrix_results,
+				'specialContext'       => $special_context,
+				'special'              => $special,
+				'specialExpected'      => $special_expected,
+				'invalidContext'       => $invalid_context,
+				'invalidContextResult' => $invalid_context_result,
+				'diagnostics'          => $diagnostics,
+				'hasAction'            => \has_action( 'doing_it_wrong_run', $diag_action ),
+				'hasFilter'            => \has_filter( 'doing_it_wrong_trigger_error', $suppress_doing_it_wrong ),
 			)
 		);
 
 		return $ctx->result(
-			'frontend-features.url-pattern-prefixer.idempotence-and-escaping',
+			'frontend-features.url-pattern-prefixer.generated-context-matrix',
 			array() === $failures,
 			array( 'failures' => array_slice( $failures, 0, 4 ) )
 		);
@@ -1185,6 +1251,25 @@ final class FrontendFeaturesSurface {
 
 	private static function prefix_path( string $base_path, string $path_pattern ): string {
 		return rtrim( $base_path, '/' ) . '/' . ltrim( $path_pattern, '/' );
+	}
+
+	private static function escaped_context_path( string $base_path ): string {
+		return addcslashes( \trailingslashit( $base_path ), '+*?:{}()\\' );
+	}
+
+	private static function expected_prefixed_path_pattern( string $base_path, string $path_pattern ): string {
+		$context_path = self::escaped_context_path( $base_path );
+		$prefix       = $context_path;
+
+		if ( strcspn( $context_path, ':?#' ) !== strlen( $context_path ) ) {
+			$prefix = '{' . substr( $context_path, 0, -1 ) . '}/';
+		}
+
+		if ( str_starts_with( $path_pattern, $context_path ) ) {
+			$path_pattern = substr( $path_pattern, strlen( $context_path ) );
+		}
+
+		return $prefix . ltrim( $path_pattern, '/' );
 	}
 
 	private static function case_slug( array $case ): string {

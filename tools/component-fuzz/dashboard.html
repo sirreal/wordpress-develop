@@ -226,12 +226,13 @@
 			<div class="card">
 				<div class="label">Latest Broad Run</div>
 				<div class="metric good">100%</div>
-				<div class="note">Non-skipped pass rate: 5094 passed, 0 failed, 0 errored, 1 skipped at 112 surfaces over 1 iteration after adding cron pre-filter failure-contract coverage.</div>
+				<div class="note">Non-skipped pass rate: 5094 passed, 0 failed, 0 errored, 1 skipped at 112 surfaces over 1 iteration after adding frontend URL pattern prefixer generated-context coverage.</div>
 			</div>
 			<div class="card">
 				<div class="label">Latest Focused Wave</div>
 				<div class="metric good">100%</div>
-				<div class="note">Latest focused addition: <code>cron</code> pre-filter failure-contract coverage exercises generated <code>pre_schedule_event</code>, <code>schedule_event</code>, <code>pre_reschedule_event</code>, <code>pre_unschedule_event</code>, and <code>pre_clear_scheduled_hook</code> false-return branches; asserts <code>WP_Error</code> codes when <code>$wp_error</code> is true, plain <code>false</code> returns when it is false, no storage for rejected schedules, preserved existing events for rejected reschedule/unschedule/clear operations, exact filter payloads for single and recurring events, interval preservation, and hook cleanup. Focused seed 224 passed 101 checks, seed 224 over 25 iterations passed 2525 checks, seeds 1 and 57123 over 10 iterations passed 1010 checks each, adjacent cron/lifecycle/options stack passed 176 checks, broad smoke passed 5094 checks with 1 skip, and syntax/diff checks passed.</div>
+				<div class="note">Latest focused addition: <code>frontend-features</code> URL pattern prefixer generated-context coverage exercises home/site/uploads contexts with relative, leading-slash, already-prefixed, wildcard, and escaped <code>+/*</code> path patterns, grouping-sensitive <code>:?#</code> base paths, invalid-context <code>_doing_it_wrong()</code> diagnostics, idempotence, no double-slash output, and hook cleanup. Focused seed 224 passed 8 checks, seed 224 over 25 iterations passed 200 checks, seeds 1 and 57123 over 10 iterations passed 80 checks each, adjacent frontend/script/style stack passed 83 checks, broad smoke passed 5094 checks with 1 skip, and syntax/diff checks passed.</div>
+				<div class="note">Previous focused addition: <code>cron</code> pre-filter failure-contract coverage exercises generated <code>pre_schedule_event</code>, <code>schedule_event</code>, <code>pre_reschedule_event</code>, <code>pre_unschedule_event</code>, and <code>pre_clear_scheduled_hook</code> false-return branches; asserts <code>WP_Error</code> codes when <code>$wp_error</code> is true, plain <code>false</code> returns when it is false, no storage for rejected schedules, preserved existing events for rejected reschedule/unschedule/clear operations, exact filter payloads for single and recurring events, interval preservation, and hook cleanup. Focused seed 224 passed 101 checks, seed 224 over 25 iterations passed 2525 checks, seeds 1 and 57123 over 10 iterations passed 1010 checks each, adjacent cron/lifecycle/options stack passed 176 checks, broad smoke passed 5094 checks with 1 skip, and syntax/diff checks passed.</div>
 				<div class="note">Previous focused addition: <code>auth-flow</code> <code>auth_redirect()</code> boundary coverage installs scoped secure/scheme/login/nocache/redirect hooks and exercises forced HTTPS redirects before cookie validation, valid logged-in cookie return paths, per-user <code>use_ssl</code> admin redirects after <code>auth_redirect</code>, invalid-cookie <code>options.php</code> referer login redirects, and invalid-cookie current-request login redirects; asserts redirect targets/statuses without reaching <code>exit</code>, login URL <code>reauth=1</code> payloads, nocache headers, hook locality, force-SSL restoration, request globals, and in-memory row cleanup. Focused seed 224 passed 13 checks, seed 224 over 25 iterations passed 325 checks, seeds 1 and 57123 over 5 iterations passed 65 checks each, adjacent auth/security/request stack passed 68 checks, broad smoke passed 5089 checks with 1 skip, and syntax/diff checks passed.</div>
 				<div class="note">Previous focused addition: <code>account-security</code> retrieve-password request-path coverage exercises generated empty, unknown email, policy-blocked, send-gated, and successful password-reset requests through <code>retrieve_password()</code>; asserts invalid paths fail before key/mail side effects, <code>lostpassword_errors</code> and <code>send_retrieve_password_email</code> stay pre-mutation boundaries, successful POST email lookup stores a checkable timestamped fast-hash key, mail composition exposes canonical login/key data through title/message/notification filters, <code>pre_wp_mail</code> intercepts delivery, and scoped hooks, globals, and in-memory rows restore. Focused seed 224 passed 9 checks, seed 224 over 25 iterations passed 225 checks, seeds 1 and 57123 over 5 iterations passed 45 checks each, adjacent auth/security/mail stack passed 53 checks, broad smoke passed 5088 checks with 1 skip, and syntax/diff checks passed.</div>
 				<div class="note">Previous focused addition: <code>rest-widgets-sidebars</code> sidebar default-filtered route-envelope coverage dispatches generated <code>/wp/v2/sidebars</code> and <code>/wp/v2/sidebars/{id}</code> requests through the real routes and default REST filters; asserts public and hidden item <code>GET</code> projection, collection projection for public, inactive, and hidden rows, widget links and target hints, <code>Allow</code> headers, item and collection <code>HEAD</code> empty bodies, prepare-filter locality, response envelopes, scoped caps, and default-filter cleanup. Focused seed 224 passed 13 checks, seed 224 over 25 iterations passed 325 checks, seeds 1 and 57123 over 5 iterations passed 65 checks each, adjacent widget/REST stack passed 112 checks, broad smoke passed 5087 checks with 1 skip, and syntax/diff checks passed.</div>
@@ -553,7 +554,7 @@
 			<div class="card">
 				<div class="label">Active Workers</div>
 				<div class="metric">0</div>
-				<div class="note">No active worker-owned files; latest completed slice expanded <code>cron</code> pre-filter false-return failure contracts across schedule, reschedule, unschedule, and clear paths, with focused and broad validation passing locally. Next gap target: convert the missing-sidebar update diagnostic to a fail-closed oracle after the controller fix, flip the KSES diagnostic after core isolates those globals, continue REST batch/controller boundaries, or add another security/auth hook boundary.</div>
+				<div class="note">No active worker-owned files; latest validated slice expanded <code>frontend-features</code> URL pattern prefixer generated-context coverage, with focused, adjacent, and broad validation passing locally. Next gap target: add the mail emoji email-wrapper matrix Maxwell identified, convert the missing-sidebar update diagnostic after the controller fix, flip the KSES diagnostic after core isolates those globals, or continue REST batch/controller boundaries.</div>
 			</div>
 	</div>
 
@@ -701,10 +702,10 @@
 				</tr>
 				<tr>
 					<td><code>frontend-features</code></td>
-					<td><span class="status good">review fixes passed</span></td>
-					<td>Main worktree; Dewey implementation and Kierkegaard review finding fixed through <code>ec0fed6a9d</code></td>
-					<td>Main focused run: 800 passed, 0 skipped, 0 failed after lifecycle review fixes; contamination probe confirmed unrelated list URLs fail the invariant; reviewer verification: 160 passed, 0 skipped, 0 failed; latest broad run: 8635 passed, 66 skipped, 0 failed.</td>
-					<td>Speculation rules configuration, direct <code>WP_Speculation_Rules</code> validation diagnostics and serialization oracles, printed rule tags, disabled lifecycle/load-action isolation, exact generated list-rule URL leakage guards, URL pattern prefixing, view-transition registration timing/enqueue helpers, and state restoration.</td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Scoped worktree <code>component-fuzz-frontend-url-prefixer</code>; builds on disabled speculation lifecycle/load-action isolation and view-transition timing coverage.</td>
+					<td>Latest focused runs: seed 224 passed 8 checks, seed 224 over 25 iterations passed 200 checks, seeds 1 and 57123 over 10 iterations each passed 80 checks, adjacent <code>frontend-features,script-loader-runtime,assets,blocks,block-supports,style,fonts</code> smoke passed 83 checks, syntax/diff checks passed, and broad seed 224 smoke passed 5094 checks with 1 skip.</td>
+					<td>Speculation rules configuration, direct <code>WP_Speculation_Rules</code> validation diagnostics and serialization oracles, printed rule tags, disabled lifecycle/load-action isolation, exact generated list-rule URL leakage guards, URL pattern prefixing with generated context/path matrices, idempotence, escaped wildcard/literal characters, grouping-sensitive <code>:?#</code> base paths, invalid-context diagnostics, view-transition registration timing/enqueue helpers, and state restoration.</td>
 				</tr>
 				<tr>
 					<td><code>admin-screen</code></td>
@@ -1606,6 +1607,12 @@
 						<td><code>date-time</code></td>
 						<td><code>date-time</code> seeds 1, 224, and 57123 over 25 iterations each passed 375 checks; adjacent <code>date-time,l10n,translations,admin-options-submission,customizer,admin-screen</code> smoke passed 310 checks; bootstrap smoke passed after adding direct <code>wp_timezone_choice()</code> markup, selected-state, offset-label, hostile-input, locale-invariance, and l10n cleanup coverage.</td>
 						<td>4780 passed, 1 skipped, 0 failed at 1 iteration after direct <code>wp_timezone_choice()</code> markup coverage.</td>
+					</tr>
+					<tr>
+						<td><code>component-fuzz-frontend-url-prefixer</code></td>
+						<td><code>frontend-features</code></td>
+						<td><code>frontend-features</code> seed 224 passed 8 checks and seed 224 over 25 iterations passed 200 checks; seeds 1 and 57123 over 10 iterations each passed 80 checks; adjacent <code>frontend-features,script-loader-runtime,assets,blocks,block-supports,style,fonts</code> smoke passed 83 checks; syntax/diff checks passed after adding URL pattern prefixer generated-context, idempotence, grouping-sensitive base-path, invalid-context diagnostic, and cleanup coverage.</td>
+						<td>5094 passed, 1 skipped, 0 failed at 1 iteration after frontend URL pattern prefixer generated-context coverage.</td>
 					</tr>
 					<tr>
 						<td><code>component-fuzz-cron-pre-filter-errors</code></td>
@@ -2818,6 +2825,12 @@
 					<td><code>multisite</code></td>
 					<td>17 passed, 1 skipped at seed 224; 425 passed, 25 skipped at seed 1 over 25 iterations; adjacent multisite/options-autoload/state passed 245 checks with 5 skips after true multisite lifecycle child coverage.</td>
 					<td>4663 passed, 28 skipped, 0 failed at 1 iteration after true multisite lifecycle child fuzzing.</td>
+				</tr>
+				<tr>
+					<td><code>component-fuzz-frontend-url-prefixer</code></td>
+					<td><code>frontend-features</code></td>
+					<td>8 passed, 0 skipped, 0 failed at seed 224; 200 passed, 0 skipped, 0 failed at seed 224 over 25 iterations; seeds 1 and 57123 over 10 iterations each passed 80 checks; adjacent frontend/script/style smoke passed 83 checks after URL pattern prefixer generated-context coverage.</td>
+					<td>5094 passed, 1 skipped, 0 failed at 1 iteration after frontend URL pattern prefixer generated-context fuzzing.</td>
 				</tr>
 				<tr>
 					<td><code>9f24b46262</code> / <code>ec0fed6a9d</code></td>
