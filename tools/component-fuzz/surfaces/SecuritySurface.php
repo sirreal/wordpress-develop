@@ -65,6 +65,7 @@ final class SecuritySurface {
 			$rows[] = self::check_ajax_referer_lookup_order( $ctx );
 			$rows[] = self::check_ajax_referer_action_and_stop_edges( $ctx->fork( 'ajax-referer-action-stop' ) );
 			$rows[] = self::check_admin_referer_valid_paths( $ctx );
+			$rows[] = self::check_admin_referer_action_hook_edges( $ctx->fork( 'admin-referer-hook-edges' ) );
 			$rows[] = self::check_admin_referer_failure_paths( $ctx->fork( 'admin-referer-failures' ) );
 			$rows[] = self::check_auth_cookie_structure_and_validation( $ctx );
 			$rows[] = self::check_auth_cookie_grace_period_and_session_edges( $ctx );
@@ -1649,6 +1650,286 @@ final class SecuritySurface {
 			array(
 				'cases'    => count( $cases ),
 				'failures' => array_slice( $failures, 0, 5 ),
+			)
+		);
+	}
+
+	private static function check_admin_referer_action_hook_edges( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures      = array();
+		$events        = array();
+		$verify_events = array();
+		$hook_events   = array();
+		$snapshot      = self::snapshot_globals();
+		$action        = 'admin-hook-' . self::token( $ctx->fork( 'admin-hook-action' ), 8 ) . '|'
+			. self::random_string( $ctx->fork( 'admin-hook-tail' ), $ctx->int( 0, 48 ) );
+		$custom        = 'admin_hook_' . self::token( $ctx->fork( 'admin-hook-custom' ), 6 );
+		$weird         = 'admin|hook|' . self::token( $ctx->fork( 'admin-hook-weird' ), 5 );
+		$current       = \wp_create_nonce( $action );
+		$old           = self::nonce_for_tick( \wp_nonce_tick( $action ) - 1, $action );
+		$invalid       = self::invalid_nonce( $current );
+		$referer       = 'http://example.test/wp/wp-admin/edit.php?updated=1&token=' . rawurlencode( self::token( $ctx->fork( 'admin-hook-referer' ), 6 ) );
+		$expected_user = \wp_get_current_user();
+		$expected_token = \wp_get_session_token();
+		$listener      = static function ( $seen_action, $result ) use ( &$events, &$hook_events ): void {
+			$events[] = array(
+				'action' => $seen_action,
+				'result' => $result,
+				'stack'  => array_values( $GLOBALS['wp_current_filter'] ?? array() ),
+			);
+			$hook_events[] = array(
+				'hook'   => 'check_admin_referer',
+				'action' => $seen_action,
+				'result' => $result,
+			);
+		};
+		$verify_listener = static function ( string $nonce, $seen_action, \WP_User $user, string $token ) use ( &$verify_events, &$hook_events ): void {
+			$verify_events[] = array(
+				'nonce'  => $nonce,
+				'action' => $seen_action,
+				'userId' => (int) $user->ID,
+				'token'  => $token,
+				'stack'  => array_values( $GLOBALS['wp_current_filter'] ?? array() ),
+			);
+			$hook_events[]   = array(
+				'hook'   => 'wp_verify_nonce_failed',
+				'nonce'  => $nonce,
+				'action' => $seen_action,
+				'userId' => (int) $user->ID,
+				'token'  => $token,
+			);
+		};
+		$cases          = array(
+			array(
+				'label'         => 'default current nonce dispatches action result 1',
+				'request'       => array(
+					'_wpnonce' => $current,
+				),
+				'queryArg'      => '_wpnonce',
+				'expected'      => 1,
+				'expectDie'     => false,
+				'expectedNonce' => $current,
+				'expectFailure' => false,
+			),
+			array(
+				'label'         => 'default previous-tick nonce dispatches action result 2',
+				'request'       => array(
+					'_wpnonce' => $old,
+				),
+				'queryArg'      => '_wpnonce',
+				'expected'      => 2,
+				'expectDie'     => false,
+				'expectedNonce' => $old,
+				'expectFailure' => false,
+			),
+			array(
+				'label'         => 'custom query arg wins over invalid default',
+				'request'       => array(
+					$custom    => $current,
+					'_wpnonce' => $invalid,
+				),
+				'queryArg'      => $custom,
+				'expected'      => 1,
+				'expectDie'     => false,
+				'expectedNonce' => $current,
+				'expectFailure' => false,
+			),
+			array(
+				'label'         => 'invalid custom query arg wins over valid default',
+				'request'       => array(
+					$custom    => $invalid,
+					'_wpnonce' => $current,
+				),
+				'queryArg'      => $custom,
+				'expected'      => false,
+				'expectDie'     => true,
+				'expectedNonce' => $invalid,
+				'expectFailure' => true,
+			),
+			array(
+				'label'         => 'reserved custom query arg invalid nonce triggers failure hook',
+				'request'       => array(
+					$weird     => $invalid,
+					'_wpnonce' => $current,
+				),
+				'queryArg'      => $weird,
+				'expected'      => false,
+				'expectDie'     => true,
+				'expectedNonce' => $invalid,
+				'expectFailure' => true,
+			),
+			array(
+				'label'         => 'empty custom nonce dies without nonce-failed hook',
+				'request'       => array(
+					$custom    => '',
+					'_wpnonce' => $current,
+				),
+				'queryArg'      => $custom,
+				'expected'      => false,
+				'expectDie'     => true,
+				'expectedNonce' => '',
+				'expectFailure' => false,
+			),
+			array(
+				'label'         => 'missing custom nonce dies without nonce-failed hook',
+				'request'       => array(
+					'_wpnonce' => $current,
+				),
+				'queryArg'      => $custom,
+				'expected'      => false,
+				'expectDie'     => true,
+				'expectedNonce' => null,
+				'expectFailure' => false,
+			),
+		);
+
+		\add_action( 'check_admin_referer', $listener, 10, 2 );
+		\add_action( 'wp_verify_nonce_failed', $verify_listener, 10, 4 );
+		try {
+			foreach ( $cases as $index => $case ) {
+				$_SERVER['REQUEST_URI']  = '/wp-admin/edit.php?post_type=post&updated=1';
+				$_SERVER['HTTP_REFERER'] = $referer;
+				$_REQUEST                = $case['request'];
+				$_GET                    = $case['request'];
+				$_POST                   = array();
+
+				$before_event_count  = count( $events );
+				$before_verify_count = count( $verify_events );
+				$before_hook_count   = count( $hook_events );
+				$capture             = self::capture_wp_die_call(
+					static function () use ( $action, $case ) {
+						return \check_admin_referer( $action, $case['queryArg'] );
+					}
+				);
+				$actual              = $capture['value'];
+				$event               = $events[ $before_event_count ] ?? null;
+				$verify_event        = $verify_events[ $before_verify_count ] ?? null;
+				$hook_slice          = array_slice( $hook_events, $before_hook_count );
+
+				self::collect_failure(
+					$failures,
+					1 === count( $events ) - $before_event_count
+						&& is_array( $event )
+						&& $action === $event['action']
+						&& $case['expected'] === $event['result']
+						&& array( 'check_admin_referer' ) === array_slice( (array) $event['stack'], -1 ),
+					"check_admin_referer action payload case {$index}: {$case['label']}",
+					array(
+						'event'    => $event,
+						'expected' => array(
+							'action' => self::describe_value( $action ),
+							'result' => $case['expected'],
+						),
+					)
+				);
+				self::collect_failure(
+					$failures,
+					array_column( $hook_slice, 'hook' ) === ( $case['expectFailure'] ? array( 'wp_verify_nonce_failed', 'check_admin_referer' ) : array( 'check_admin_referer' ) ),
+					"check_admin_referer hook order case {$index}: {$case['label']}",
+					array(
+						'hooks'          => $hook_slice,
+						'expectFailure'  => $case['expectFailure'],
+						'expectedNonce'  => self::describe_value( $case['expectedNonce'] ),
+						'expectedAction' => self::describe_value( $action ),
+					)
+				);
+				if ( $case['expectFailure'] ) {
+					self::collect_failure(
+						$failures,
+						1 === count( $verify_events ) - $before_verify_count
+							&& is_array( $verify_event )
+							&& $case['expectedNonce'] === $verify_event['nonce']
+							&& $action === $verify_event['action']
+							&& (int) $expected_user->ID === $verify_event['userId']
+							&& $expected_token === $verify_event['token']
+							&& array( 'wp_verify_nonce_failed' ) === array_slice( (array) $verify_event['stack'], -1 ),
+						"wp_verify_nonce_failed payload case {$index}: {$case['label']}",
+						array(
+							'event'    => $verify_event,
+							'expected' => array(
+								'nonce'  => self::describe_value( $case['expectedNonce'] ),
+								'action' => self::describe_value( $action ),
+								'userId' => (int) $expected_user->ID,
+								'token'  => self::describe_value( $expected_token ),
+							),
+						)
+					);
+				} else {
+					self::collect_failure(
+						$failures,
+						0 === count( $verify_events ) - $before_verify_count,
+						"wp_verify_nonce_failed stays quiet case {$index}: {$case['label']}",
+						array(
+							'verifyEvents'  => array_slice( $verify_events, $before_verify_count ),
+							'expectedNonce' => self::describe_value( $case['expectedNonce'] ),
+						)
+					);
+				}
+
+				if ( $case['expectDie'] ) {
+					$die     = $capture['dieCalls'][0] ?? array();
+					$message = (string) ( $die['message'] ?? '' );
+					self::collect_failure(
+						$failures,
+						$capture['captured']
+							&& ! $capture['threwUnexpected']
+							&& 403 === ( $die['processed']['args']['response'] ?? null )
+							&& str_contains( $message, 'The link you followed has expired.' )
+							&& $capture['filtersRestored']
+							&& $capture['bufferBalanced'],
+						"check_admin_referer invalid nonce dies through wp_nonce_ays case {$index}: {$case['label']}",
+						array( 'capture' => $capture )
+					);
+				} else {
+					self::collect_failure(
+						$failures,
+						! $capture['captured']
+							&& ! $capture['threwUnexpected']
+							&& $case['expected'] === $actual
+							&& array() === $capture['dieCalls']
+							&& $capture['filtersRestored']
+							&& $capture['bufferBalanced'],
+						"check_admin_referer valid return case {$index}: {$case['label']}",
+						array(
+							'actual'  => $actual,
+							'capture' => $capture,
+						)
+					);
+				}
+			}
+		} finally {
+			\remove_action( 'check_admin_referer', $listener, 10 );
+			\remove_action( 'wp_verify_nonce_failed', $verify_listener, 10 );
+			self::restore_globals( $snapshot );
+		}
+
+		self::collect_failure(
+			$failures,
+			false === \has_action( 'check_admin_referer', $listener )
+				&& false === \has_action( 'wp_verify_nonce_failed', $verify_listener )
+				&& $_GET === $snapshot['_GET']
+				&& $_POST === $snapshot['_POST']
+				&& $_REQUEST === $snapshot['_REQUEST']
+				&& $_SERVER === $snapshot['_SERVER'],
+			'check_admin_referer hook-edge matrix restores hooks and superglobals',
+			array(
+				'actionStillActive' => \has_action( 'check_admin_referer', $listener ),
+				'verifyStillActive' => \has_action( 'wp_verify_nonce_failed', $verify_listener ),
+				'getRestored'       => $_GET === $snapshot['_GET'],
+				'postRestored'      => $_POST === $snapshot['_POST'],
+				'requestRestored'   => $_REQUEST === $snapshot['_REQUEST'],
+				'serverRestored'    => $_SERVER === $snapshot['_SERVER'],
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'security.check-admin-referer.action-hook-edges',
+			array() === $failures,
+			array(
+				'cases'        => count( $cases ),
+				'events'       => $events,
+				'verifyEvents' => $verify_events,
+				'failures'     => array_slice( $failures, 0, 5 ),
 			)
 		);
 	}
