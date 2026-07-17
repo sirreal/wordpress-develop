@@ -6895,6 +6895,56 @@ final class RestObjectControllersSurface {
 			$term_after_success   = \get_term( $fixtures['term'], 'category' );
 			$user_after_success   = \get_user_by( 'id', $fixtures['author'] );
 
+			$mixed_specs = array(
+				'post'         => array(
+					'method' => 'PUT',
+					'route'  => '/wp/v2/posts/' . $fixtures['post'],
+					'query'  => array(
+						'_fields' => 'content,id,status,title',
+						'context' => 'edit',
+					),
+					'body'   => array(
+						'content' => '<p>Batch mixed updated content ' . $case['token'] . '</p>',
+						'title'   => 'Batch Mixed Updated REST Post ' . $case['token'],
+					),
+				),
+				'invalid_term' => array(
+					'method' => 'PUT',
+					'route'  => '/wp/v2/categories/' . $fixtures['term'],
+					'query'  => array( '_fields' => 'id,name,parent,slug,taxonomy' ),
+					'body'   => array(
+						'parent' => 'not-a-parent-' . $case['token'],
+					),
+				),
+				'user'         => array(
+					'method' => 'PUT',
+					'route'  => '/wp/v2/users/' . $fixtures['author'],
+					'query'  => array(
+						'_fields' => 'email,id,name,slug',
+						'context' => 'edit',
+					),
+					'body'   => array( 'name' => 'Batch Mixed Updated User ' . $case['token'] ),
+				),
+			);
+
+			$mixed_requests = array_map(
+				static fn ( array $spec ): array => self::batch_child_from_spec( $spec ),
+				array_values( $mixed_specs )
+			);
+
+			$counts_before_mixed = self::content_counts();
+			$term_before_mixed   = \get_term( $fixtures['term'], 'category' );
+			$record_child_post_dispatch = true;
+			$mixed_response = $server->dispatch( self::batch_request( $mixed_requests, 'normal' ) );
+			$record_child_post_dispatch = false;
+			$mixed_data      = $mixed_response instanceof \WP_REST_Response ? $mixed_response->get_data() : array();
+			$mixed_envelopes = is_array( $mixed_data['responses'] ?? null ) ? $mixed_data['responses'] : array();
+
+			$counts_after_mixed = self::content_counts();
+			$post_after_mixed   = \get_post( $fixtures['post'] );
+			$term_after_mixed   = \get_term( $fixtures['term'], 'category' );
+			$user_after_mixed   = \get_user_by( 'id', $fixtures['author'] );
+
 			$require_all_specs = array(
 				'post' => array(
 					'method' => 'PUT',
@@ -6961,6 +7011,10 @@ final class RestObjectControllersSurface {
 					'responses' => $success_envelopes,
 					'direct'    => $direct_success_summary,
 				),
+				'mixed' => array(
+					'data'      => $mixed_data,
+					'responses' => $mixed_envelopes,
+				),
 				'requireAll' => array(
 					'data'      => $require_all_data,
 					'responses' => $require_all_envelopes,
@@ -6977,6 +7031,12 @@ final class RestObjectControllersSurface {
 						'termName'    => $term_after_success instanceof \WP_Term ? $term_after_success->name : null,
 						'userName'    => $user_after_success instanceof \WP_User ? $user_after_success->display_name : null,
 					),
+					'mixed'      => array(
+						'postTitle'   => $post_after_mixed instanceof \WP_Post ? $post_after_mixed->post_title : null,
+						'postContent' => $post_after_mixed instanceof \WP_Post ? $post_after_mixed->post_content : null,
+						'termName'    => $term_after_mixed instanceof \WP_Term ? $term_after_mixed->name : null,
+						'userName'    => $user_after_mixed instanceof \WP_User ? $user_after_mixed->display_name : null,
+					),
 					'requireAll' => array(
 						'postTitle'   => $post_after_require_all instanceof \WP_Post ? $post_after_require_all->post_title : null,
 						'postContent' => $post_after_require_all instanceof \WP_Post ? $post_after_require_all->post_content : null,
@@ -6989,6 +7049,8 @@ final class RestObjectControllersSurface {
 					'before'          => $counts_before,
 					'afterDenial'     => $counts_after_denial,
 					'afterSuccess'    => $counts_after_success,
+					'beforeMixed'     => $counts_before_mixed,
+					'afterMixed'      => $counts_after_mixed,
 					'afterRequireAll' => $counts_after_require_all,
 				),
 				'wpdbRestoredAfterDirect' => $wpdb_restored_after_direct,
@@ -7081,6 +7143,48 @@ final class RestObjectControllersSurface {
 				&& $case['authorEmail'] === $user_after_success->user_email
 				&& self::content_count_delta_matches( $counts_before, $counts_after_success, array(), array() );
 
+			$mixed_ok = $mixed_response instanceof \WP_REST_Response
+				&& 207 === $mixed_response->get_status()
+				&& ! array_key_exists( 'failed', $mixed_data )
+				&& count( $mixed_specs ) === count( $mixed_envelopes );
+			foreach ( array_keys( $mixed_specs ) as $offset => $name ) {
+				$envelope = is_array( $mixed_envelopes[ $offset ] ?? null ) ? $mixed_envelopes[ $offset ] : array();
+				$headers  = is_array( $envelope['headers'] ?? null ) ? $envelope['headers'] : array();
+				$body     = is_array( $envelope['body'] ?? null ) ? $envelope['body'] : array();
+
+				$mixed_ok = $mixed_ok
+					&& $batch_token === ( $headers['X-Component-Fuzz-Batch-Update'] ?? null )
+					&& match ( $name ) {
+						'post' => 200 === (int) ( $envelope['status'] ?? 0 )
+							&& self::projected_keys_match( $body, array( 'content', 'id', 'status', 'title' ) )
+							&& $fixtures['post'] === (int) ( $body['id'] ?? 0 )
+							&& ( $mixed_specs['post']['body']['title'] ?? null ) === ( $body['title']['raw'] ?? null )
+							&& ( $mixed_specs['post']['body']['content'] ?? null ) === ( $body['content']['raw'] ?? null ),
+						'invalid_term' => 400 === (int) ( $envelope['status'] ?? 0 )
+							&& 'rest_invalid_param' === ( $body['code'] ?? null )
+							&& isset( $body['data']['params']['parent'] ),
+						'user' => 200 === (int) ( $envelope['status'] ?? 0 )
+							&& self::projected_keys_match( $body, array( 'email', 'id', 'name', 'slug' ) )
+							&& $fixtures['author'] === (int) ( $body['id'] ?? 0 )
+							&& ( $mixed_specs['user']['body']['name'] ?? null ) === ( $body['name'] ?? null )
+							&& $case['authorEmail'] === ( $body['email'] ?? null ),
+						default => false,
+					};
+			}
+
+			$mixed_stored_ok = $post_after_mixed instanceof \WP_Post
+				&& $term_before_mixed instanceof \WP_Term
+				&& $term_after_mixed instanceof \WP_Term
+				&& $user_after_mixed instanceof \WP_User
+				&& ( $mixed_specs['post']['body']['title'] ?? null ) === $post_after_mixed->post_title
+				&& ( $mixed_specs['post']['body']['content'] ?? null ) === $post_after_mixed->post_content
+				&& $term_before_mixed->name === $term_after_mixed->name
+				&& $term_before_mixed->slug === $term_after_mixed->slug
+				&& (int) $term_before_mixed->parent === (int) $term_after_mixed->parent
+				&& ( $mixed_specs['user']['body']['name'] ?? null ) === $user_after_mixed->display_name
+				&& $case['authorEmail'] === $user_after_mixed->user_email
+				&& self::content_count_delta_matches( $counts_before_mixed, $counts_after_mixed, array(), array() );
+
 			$require_all_ok = $require_all_response instanceof \WP_REST_Response
 				&& 207 === $require_all_response->get_status()
 				&& ! array_key_exists( 'failed', $require_all_data )
@@ -7140,6 +7244,9 @@ final class RestObjectControllersSurface {
 				array( 'route' => '/wp/v2/categories/' . $fixtures['term'], 'method' => 'PUT', 'status' => 200 ),
 				array( 'route' => '/wp/v2/users/' . $fixtures['author'], 'method' => 'PUT', 'status' => 200 ),
 				array( 'route' => '/wp/v2/posts/' . $fixtures['post'], 'method' => 'PUT', 'status' => 200 ),
+				array( 'route' => '/wp/v2/categories/' . $fixtures['term'], 'method' => 'PUT', 'status' => 400 ),
+				array( 'route' => '/wp/v2/users/' . $fixtures['author'], 'method' => 'PUT', 'status' => 200 ),
+				array( 'route' => '/wp/v2/posts/' . $fixtures['post'], 'method' => 'PUT', 'status' => 200 ),
 				array( 'route' => '/wp/v2/categories/' . $fixtures['term'], 'method' => 'PUT', 'status' => 200 ),
 				array( 'route' => '/wp/v2/users/' . $fixtures['author'], 'method' => 'PUT', 'status' => 200 ),
 			);
@@ -7167,6 +7274,18 @@ final class RestObjectControllersSurface {
 					'storedRows'   => $observed['storedRows']['success'],
 					'countsBefore' => $counts_before,
 					'countsAfter'  => $counts_after_success,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$mixed_ok && $mixed_stored_ok,
+				'batch/v1 normal mixed object item updates preserve child order, keep invalid-child errors in place, and still persist valid siblings',
+				array(
+					'mixed'        => $observed['mixed'],
+					'storedRows'   => $observed['storedRows']['mixed'],
+					'countsBefore' => $counts_before_mixed,
+					'countsAfter'  => $counts_after_mixed,
 				)
 			);
 
