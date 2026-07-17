@@ -115,6 +115,13 @@ final class RestSurface {
 				}
 			);
 			$checks[] = self::run_check(
+				'batch-v1-pre-dispatch-short-circuit',
+				'REST batch/v1 child pre-dispatch filters can short-circuit valid children before permission callbacks, normal validation errors remain enveloped, and require-all validation prevents child execution.',
+				function () use ( &$rng ) {
+					return self::check_batch_v1_pre_dispatch_short_circuit( $rng );
+				}
+			);
+			$checks[] = self::run_check(
 				'response-links-envelope',
 				'WP_REST_Response links, headers, CURIE compaction, embedding, envelopes, and response conversion preserve response metadata without leaking filters.',
 				function () use ( &$rng ) {
@@ -2043,6 +2050,271 @@ final class RestSurface {
 				'childPreDispatch'   => $child_pre_dispatch,
 				'childPostDispatch'  => $child_post_dispatch,
 				'seenRequests'       => $seen_requests,
+			),
+		);
+	}
+
+	private static function check_batch_v1_pre_dispatch_short_circuit( array &$rng ): array {
+		$namespace = self::namespace_token( $rng );
+		$token     = self::slug_token( $rng, 'pre' );
+		$server    = new \WP_REST_Server();
+
+		$had_rest_server      = array_key_exists( 'wp_rest_server', $GLOBALS );
+		$previous_rest_server = $had_rest_server ? $GLOBALS['wp_rest_server'] : null;
+		$permission_hits      = 0;
+		$callback_hits        = 0;
+		$parent_pre_hits      = 0;
+		$child_pre_dispatch   = array();
+		$child_post_dispatch  = array();
+
+		$route = '/' . $namespace . '/short/(?P<id>[0-9]+)';
+		$path  = '/' . $namespace . '/short/';
+		$server->register_route(
+			$namespace,
+			$route,
+			array(
+				'allow_batch' => array( 'v1' => true ),
+				array(
+					'methods'             => 'POST',
+					'permission_callback' => static function () use ( &$permission_hits ) {
+						++$permission_hits;
+						return true;
+					},
+					'callback'            => static function ( \WP_REST_Request $request ) use ( &$callback_hits ) {
+						++$callback_hits;
+						return new \WP_REST_Response(
+							array(
+								'callback' => true,
+								'id'       => $request['id'],
+							),
+							208,
+							array( 'X-Callback' => 'hit' )
+						);
+					},
+					'args'                => array(
+						'id'        => array(
+							'type' => 'integer',
+						),
+						'token'     => array(
+							'type'     => 'string',
+							'required' => true,
+							'pattern'  => '^pre-[a-z0-9]{6}$',
+						),
+						'bodyValue' => array(
+							'type'     => 'string',
+							'required' => true,
+						),
+					),
+				),
+			)
+		);
+
+		$pre_filter = static function ( $result, \WP_REST_Server $filter_server, \WP_REST_Request $request ) use ( $server, $path, $token, &$parent_pre_hits, &$child_pre_dispatch ) {
+			if ( $filter_server !== $server ) {
+				return $result;
+			}
+			if ( '/batch/v1' === $request->get_route() ) {
+				++$parent_pre_hits;
+				return $result;
+			}
+
+			$child_pre_dispatch[] = array(
+				'route'      => $request->get_route(),
+				'method'     => $request->get_method(),
+				'urlParams'  => $request->get_url_params(),
+				'attrsEmpty' => array() === $request->get_attributes(),
+				'defaults'   => $request->get_default_params(),
+				'query'      => $request->get_query_params(),
+				'body'       => $request->get_body_params(),
+			);
+
+			if ( $path . '101' !== $request->get_route() || $token !== $request['token'] ) {
+				return $result;
+			}
+
+			return new \WP_REST_Response(
+				array(
+					'shortCircuited' => true,
+					'route'          => $request->get_route(),
+					'method'         => $request->get_method(),
+					'idParam'        => $request['id'],
+					'token'          => $request['token'],
+					'bodyValue'      => $request['bodyValue'],
+					'query'          => $request->get_query_params(),
+					'body'           => $request->get_body_params(),
+					'headers'        => array(
+						'x_short' => $request->get_header_as_array( 'X-Short' ),
+					),
+				),
+				206,
+				array( 'X-Pre-Dispatch' => 'short' )
+			);
+		};
+		$post_filter = static function ( \WP_REST_Response $response, \WP_REST_Server $filter_server, \WP_REST_Request $request ) use ( $server, &$child_post_dispatch ) {
+			if ( $filter_server !== $server || '/batch/v1' === $request->get_route() ) {
+				return $response;
+			}
+
+			$child_post_dispatch[] = array(
+				'route'  => $request->get_route(),
+				'method' => $request->get_method(),
+				'status' => $response->get_status(),
+			);
+			$response->header( 'X-Post-Dispatch', 'pre-short' );
+			return $response;
+		};
+
+		add_filter( 'rest_pre_dispatch', $pre_filter, 10, 3 );
+		add_filter( 'rest_post_dispatch', $post_filter, 10, 3 );
+		try {
+			$normal_response = $server->dispatch(
+				self::batch_request(
+					array(
+						array(
+							'method'  => 'POST',
+							'path'    => $path . '101?token=' . rawurlencode( $token ) . '&queryOnly=short',
+							'body'    => array( 'bodyValue' => 'short-body' ),
+							'headers' => array( 'X-Short' => array( 'first', $token ) ),
+						),
+						array(
+							'method' => 'POST',
+							'path'   => $path . '102?token=bad%20token',
+							'body'   => array( 'bodyValue' => 'invalid-body' ),
+						),
+					),
+					'normal'
+				)
+			);
+			$normal_data = $normal_response->get_data();
+
+			$pre_after_normal      = count( $child_pre_dispatch );
+			$post_after_normal     = count( $child_post_dispatch );
+			$permission_after_norm = $permission_hits;
+			$callback_after_norm   = $callback_hits;
+
+			$require_all_response = $server->dispatch(
+				self::batch_request(
+					array(
+						array(
+							'method' => 'POST',
+							'path'   => $path . '103?token=' . rawurlencode( $token ),
+							'body'   => array( 'bodyValue' => 'require-all-valid' ),
+						),
+						array(
+							'method' => 'POST',
+							'path'   => $path . '104?token=bad%20token',
+							'body'   => array( 'bodyValue' => 'require-all-invalid' ),
+						),
+					),
+					'require-all-validate'
+				)
+			);
+			$require_all_data = $require_all_response->get_data();
+		} finally {
+			remove_filter( 'rest_pre_dispatch', $pre_filter, 10 );
+			remove_filter( 'rest_post_dispatch', $post_filter, 10 );
+		}
+
+		$filter_removed = false === has_filter( 'rest_pre_dispatch', $pre_filter )
+			&& false === has_filter( 'rest_post_dispatch', $post_filter );
+		$rest_server_restored = $had_rest_server
+			? array_key_exists( 'wp_rest_server', $GLOBALS ) && $previous_rest_server === $GLOBALS['wp_rest_server']
+			: ! array_key_exists( 'wp_rest_server', $GLOBALS );
+
+		$normal_responses = is_array( $normal_data['responses'] ?? null ) ? $normal_data['responses'] : array();
+		$short_envelope   = $normal_responses[0] ?? array();
+		$short_body       = is_array( $short_envelope['body'] ?? null ) ? $short_envelope['body'] : array();
+		$short_headers    = is_array( $short_envelope['headers'] ?? null ) ? $short_envelope['headers'] : array();
+		$error_envelope   = $normal_responses[1] ?? array();
+		$error_headers    = is_array( $error_envelope['headers'] ?? null ) ? $error_envelope['headers'] : array();
+
+		$short_circuit_ok = 207 === $normal_response->get_status()
+			&& 2 === count( $normal_responses )
+			&& 206 === ( $short_envelope['status'] ?? null )
+			&& true === ( $short_body['shortCircuited'] ?? null )
+			&& $path . '101' === ( $short_body['route'] ?? null )
+			&& 'POST' === ( $short_body['method'] ?? null )
+			&& null === ( $short_body['idParam'] ?? null )
+			&& $token === ( $short_body['token'] ?? null )
+			&& 'short-body' === ( $short_body['bodyValue'] ?? null )
+			&& $token === ( $short_body['query']['token'] ?? null )
+			&& 'short' === ( $short_body['query']['queryOnly'] ?? null )
+			&& 'short-body' === ( $short_body['body']['bodyValue'] ?? null )
+			&& array( 'first', $token ) === ( $short_body['headers']['x_short'] ?? null )
+			&& 'short' === ( $short_headers['X-Pre-Dispatch'] ?? null )
+			&& 'pre-short' === ( $short_headers['X-Post-Dispatch'] ?? null );
+
+		$normal_error_ok = 400 === ( $error_envelope['status'] ?? null )
+			&& 'rest_invalid_param' === ( $error_envelope['body']['code'] ?? null )
+			&& 'pre-short' === ( $error_headers['X-Post-Dispatch'] ?? null );
+
+		$pre_dispatch_ok = 2 === $pre_after_normal
+			&& $path . '101' === ( $child_pre_dispatch[0]['route'] ?? null )
+			&& $path . '102' === ( $child_pre_dispatch[1]['route'] ?? null )
+			&& 'POST' === ( $child_pre_dispatch[0]['method'] ?? null )
+			&& 'POST' === ( $child_pre_dispatch[1]['method'] ?? null )
+			&& array() === ( $child_pre_dispatch[0]['urlParams'] ?? null )
+			&& array() === ( $child_pre_dispatch[1]['urlParams'] ?? null )
+			&& true === ( $child_pre_dispatch[0]['attrsEmpty'] ?? null )
+			&& true === ( $child_pre_dispatch[1]['attrsEmpty'] ?? null )
+			&& array() === ( $child_pre_dispatch[0]['defaults'] ?? null )
+			&& array() === ( $child_pre_dispatch[1]['defaults'] ?? null )
+			&& $token === ( $child_pre_dispatch[0]['query']['token'] ?? null )
+			&& 'bad token' === ( $child_pre_dispatch[1]['query']['token'] ?? null );
+
+		$post_dispatch_ok = 2 === $post_after_normal
+			&& $path . '101' === ( $child_post_dispatch[0]['route'] ?? null )
+			&& 206 === ( $child_post_dispatch[0]['status'] ?? null )
+			&& $path . '102' === ( $child_post_dispatch[1]['route'] ?? null )
+			&& 400 === ( $child_post_dispatch[1]['status'] ?? null );
+
+		$require_all_responses = is_array( $require_all_data['responses'] ?? null ) ? $require_all_data['responses'] : array();
+		$require_all_ok        = 207 === $require_all_response->get_status()
+			&& 'validation' === ( $require_all_data['failed'] ?? null )
+			&& array_key_exists( 0, $require_all_responses )
+			&& null === $require_all_responses[0]
+			&& 400 === ( $require_all_responses[1]['status'] ?? null )
+			&& 'rest_invalid_param' === ( $require_all_responses[1]['body']['code'] ?? null )
+			&& $pre_after_normal === count( $child_pre_dispatch )
+			&& $post_after_normal === count( $child_post_dispatch );
+
+		$callback_ok = 0 === $permission_after_norm
+			&& 0 === $callback_after_norm
+			&& 0 === $permission_hits
+			&& 0 === $callback_hits;
+
+		$ok = $short_circuit_ok
+			&& $normal_error_ok
+			&& $pre_dispatch_ok
+			&& $post_dispatch_ok
+			&& $require_all_ok
+			&& $callback_ok
+			&& 2 === $parent_pre_hits
+			&& $filter_removed
+			&& $rest_server_restored;
+
+		return array(
+			'ok'       => $ok,
+			'message'  => $ok ? 'REST batch/v1 pre-dispatch short-circuit invariants held.' : 'REST batch/v1 pre-dispatch short-circuit invariant failed.',
+			'features' => array( 'batch-v1', 'rest-pre-dispatch', 'rest-post-dispatch', 'batch-validation', 'batch-envelopes', 'filter-cleanup' ),
+			'details'  => array(
+				'namespace'          => $namespace,
+				'token'              => $token,
+				'shortCircuitOk'     => $short_circuit_ok,
+				'normalErrorOk'      => $normal_error_ok,
+				'preDispatchOk'      => $pre_dispatch_ok,
+				'postDispatchOk'     => $post_dispatch_ok,
+				'requireAllOk'       => $require_all_ok,
+				'callbackOk'         => $callback_ok,
+				'parentPreHits'      => $parent_pre_hits,
+				'filterRemoved'      => $filter_removed,
+				'restServerRestored' => $rest_server_restored,
+				'normalResponse'     => self::response_summary( $normal_response ),
+				'requireAllResponse' => self::response_summary( $require_all_response ),
+				'permissionHits'     => $permission_hits,
+				'callbackHits'       => $callback_hits,
+				'childPreDispatch'   => $child_pre_dispatch,
+				'childPostDispatch'  => $child_post_dispatch,
 			),
 		);
 	}
