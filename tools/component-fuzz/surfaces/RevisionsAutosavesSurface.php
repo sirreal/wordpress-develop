@@ -38,6 +38,7 @@ final class RevisionsAutosavesSurface {
 			$rows[] = self::check_rest_builtin_post_page_revision_autosave_parity( $ctx->fork( 'rest-builtin-post-page' ), $case );
 			$rows[] = self::check_rest_autosave_mutation_and_revision_meta_projection( $ctx->fork( 'rest-autosave-meta' ), $case );
 			$rows[] = self::check_rest_autosave_negative_write_and_malformed_meta_boundaries( $ctx->fork( 'rest-autosave-negative' ), $case );
+			$rows[] = self::check_rest_parent_meta_validation_contrast( $ctx->fork( 'rest-parent-meta-contrast' ), $case );
 			$rows[] = self::check_rest_revision_autosave_batch_gates( $ctx->fork( 'rest-batch-gates' ), $case );
 			$rows[] = self::check_latest_revision_count_and_url_helpers( $ctx->fork( 'latest-count-url' ), $case );
 			$rows[] = self::check_user_filtered_autosave_lookup( $ctx->fork( 'user-filtered-autosave' ), $case );
@@ -98,6 +99,7 @@ final class RevisionsAutosavesSurface {
 				'esc_attr_x',
 				'esc_html_e',
 				'get_post',
+				'get_metadata_raw',
 				'get_post_meta',
 				'get_edit_post_link',
 				'get_userdata',
@@ -4338,6 +4340,451 @@ PHP;
 		return $entry;
 	}
 
+	private static function check_rest_parent_meta_validation_contrast( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		self::prepare_runtime();
+		$server = self::fresh_rest_server();
+
+		$failures = array();
+		$matrix   = array();
+
+		foreach ( array( 'post' => 'posts', 'page' => 'pages' ) as $post_type => $rest_base ) {
+			$matrix[] = self::rest_parent_meta_validation_contrast_post_type( $server, $case, $post_type, $rest_base, $failures );
+		}
+
+		return self::result(
+			$ctx,
+			'revisions-autosaves.rest-parent-meta-validation-contrast',
+			$failures,
+			array(
+				'case'   => self::case_summary( $case ),
+				'matrix' => $matrix,
+			)
+		);
+	}
+
+	private static function rest_parent_meta_validation_contrast_post_type( \WP_REST_Server $server, array $case, string $post_type, string $rest_base, array &$failures ): array {
+		$target_case = array_merge(
+			$case,
+			array(
+				'postType' => $post_type,
+				'slug'     => $case['slug'] . '-parent-meta-contrast-' . $post_type,
+			)
+		);
+		$entry       = array(
+			'postType' => $post_type,
+			'restBase' => $rest_base,
+		);
+		$string_key  = 'cf_rest_parent_string_' . $post_type . '_' . $case['token'];
+		$object_key  = 'cf_rest_parent_object_' . $post_type . '_' . $case['token'];
+		$denied_key  = 'cf_rest_parent_denied_' . $post_type . '_' . $case['token'];
+		$registered  = array();
+		$editor_caps = null;
+
+		try {
+			$post_type_object = \get_post_type_object( $post_type );
+			if ( ! $post_type_object ) {
+				self::collect_failure(
+					$failures,
+					false,
+					"built-in {$post_type} post type exists for REST parent meta validation contrast",
+					array( 'postType' => $post_type )
+				);
+				return $entry;
+			}
+
+			$registered[ $string_key ] = \register_post_meta(
+				$post_type,
+				$string_key,
+				array(
+					'auth_callback'     => '__return_true',
+					'revisions_enabled' => true,
+					'show_in_rest'      => true,
+					'single'            => true,
+					'type'              => 'string',
+				)
+			);
+			$registered[ $object_key ] = \register_post_meta(
+				$post_type,
+				$object_key,
+				array(
+					'auth_callback' => '__return_true',
+					'show_in_rest'  => array(
+						'schema' => array(
+							'additionalProperties' => false,
+							'properties'           => array(
+								'name' => array( 'type' => 'string' ),
+							),
+							'required'             => array( 'name' ),
+							'type'                 => 'object',
+						),
+					),
+					'single'        => true,
+					'type'          => 'object',
+				)
+			);
+			$registered[ $denied_key ] = \register_post_meta(
+				$post_type,
+				$denied_key,
+				array(
+					'auth_callback'     => '__return_false',
+					'revisions_enabled' => true,
+					'show_in_rest'      => true,
+					'single'            => true,
+					'type'              => 'string',
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				true === $registered[ $string_key ]
+					&& true === $registered[ $object_key ]
+					&& true === $registered[ $denied_key ]
+					&& in_array( $string_key, \wp_post_revision_meta_keys( $post_type ), true )
+					&& in_array( $denied_key, \wp_post_revision_meta_keys( $post_type ), true ),
+				"built-in {$post_type} parent REST meta keys register before route schemas are cached",
+				array(
+					'registered'       => $registered,
+					'stringKey'        => $string_key,
+					'objectKey'        => $object_key,
+					'deniedKey'        => $denied_key,
+					'revisionMetaKeys' => \wp_post_revision_meta_keys( $post_type ),
+				)
+			);
+
+			$parent_controller   = $post_type_object->get_rest_controller();
+			$revision_controller = $post_type_object->get_revisions_rest_controller();
+			$autosave_controller = $post_type_object->get_autosave_rest_controller();
+			if ( $parent_controller ) {
+				$parent_controller->register_routes();
+			}
+			if ( $revision_controller ) {
+				$revision_controller->register_routes();
+			}
+			if ( $autosave_controller ) {
+				$autosave_controller->register_routes();
+			}
+
+			$author_id  = self::insert_author( $target_case, "rest-parent-meta-contrast-{$post_type}-author" );
+			$editor_id  = self::insert_author( $target_case, "rest-parent-meta-contrast-{$post_type}-editor" );
+			$parent_id  = self::insert_parent_post( $target_case, $author_id, "parent-meta-contrast-{$post_type}" );
+			$parent_route = '/wp/v2/' . $rest_base . '/' . $parent_id;
+			$editor_caps  = self::grant_content_edit_caps_filter( $editor_id );
+
+			\wp_set_current_user( $editor_id );
+			\add_filter( 'user_has_cap', $editor_caps, 10, 4 );
+
+			$valid_string = 'parent-string-' . $post_type . '-' . $case['token'];
+			$valid_object = array( 'name' => 'parent-object-' . $post_type . '-' . $case['token'] );
+			$valid_parent = self::dispatch(
+				$server,
+				self::request(
+					'PUT',
+					$parent_route,
+					array(
+						'context' => 'edit',
+						'_fields' => 'id,meta',
+					),
+					array(),
+					array(
+						'meta' => array(
+							$string_key => $valid_string,
+							$object_key => $valid_object,
+						),
+					)
+				)
+			);
+			$valid_data = $valid_parent instanceof \WP_REST_Response ? $valid_parent->get_data() : array();
+
+			self::collect_failure(
+				$failures,
+				$valid_parent instanceof \WP_REST_Response
+					&& 200 === $valid_parent->get_status()
+					&& $parent_id === (int) ( $valid_data['id'] ?? 0 )
+					&& $valid_string === ( $valid_data['meta'][ $string_key ] ?? null )
+					&& $valid_object === ( $valid_data['meta'][ $object_key ] ?? null )
+					&& $valid_string === \get_metadata_raw( 'post', $parent_id, $string_key, true )
+					&& $valid_object === \get_metadata_raw( 'post', $parent_id, $object_key, true ),
+				"built-in {$post_type} parent REST update stores valid scalar and object meta",
+				array(
+					'response'     => self::response_summary( $valid_parent ),
+					'storedString' => \get_metadata_raw( 'post', $parent_id, $string_key, true ),
+					'storedObject' => \get_metadata_raw( 'post', $parent_id, $object_key, true ),
+				)
+			);
+
+			$string_before_wrong_type = \get_metadata_raw( 'post', $parent_id, $string_key, true );
+			$wrong_type_parent       = self::dispatch(
+				$server,
+				self::request(
+					'PUT',
+					$parent_route,
+					array( 'context' => 'edit' ),
+					array(),
+					array(
+						'meta' => array(
+							$string_key => array( 'array-value-' . $case['token'] ),
+						),
+					)
+				)
+			);
+			$string_after_wrong_type = \get_metadata_raw( 'post', $parent_id, $string_key, true );
+
+			self::collect_failure(
+				$failures,
+				self::response_error_ok( $wrong_type_parent, 'rest_invalid_type', 400 )
+					&& $string_before_wrong_type === $string_after_wrong_type
+					&& false === \wp_get_post_autosave( $parent_id, $editor_id ),
+				"built-in {$post_type} parent REST update rejects wrong-typed scalar meta without creating autosaves or mutating stored meta",
+				array(
+					'response'   => self::response_summary( $wrong_type_parent ),
+					'beforeMeta' => $string_before_wrong_type,
+					'afterMeta'  => $string_after_wrong_type,
+					'autosave'   => self::post_summary( \wp_get_post_autosave( $parent_id, $editor_id ) ),
+				)
+			);
+
+			$object_before_extra = \get_metadata_raw( 'post', $parent_id, $object_key, true );
+			$object_extra_parent = self::dispatch(
+				$server,
+				self::request(
+					'PUT',
+					$parent_route,
+					array( 'context' => 'edit' ),
+					array(),
+					array(
+						'meta' => array(
+							$object_key => array(
+								'extra' => 'blocked-' . $case['token'],
+								'name'  => 'object-extra-' . $case['token'],
+							),
+						),
+					)
+				)
+			);
+			$object_after_extra = \get_metadata_raw( 'post', $parent_id, $object_key, true );
+
+			self::collect_failure(
+				$failures,
+				self::response_error_ok( $object_extra_parent, 'rest_additional_properties_forbidden', 400 )
+					&& $object_before_extra === $object_after_extra,
+				"built-in {$post_type} parent REST update rejects object meta properties outside the registered schema",
+				array(
+					'response'   => self::response_summary( $object_extra_parent ),
+					'beforeMeta' => $object_before_extra,
+					'afterMeta'  => $object_after_extra,
+				)
+			);
+
+			$meta_not_array = self::dispatch(
+				$server,
+				self::request(
+					'PUT',
+					$parent_route,
+					array( 'context' => 'edit' ),
+					array(),
+					array( 'meta' => 'not-an-array-' . $case['token'] )
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				self::response_error_ok( $meta_not_array, 'rest_invalid_param', 400 )
+					&& $valid_string === \get_metadata_raw( 'post', $parent_id, $string_key, true )
+					&& $valid_object === \get_metadata_raw( 'post', $parent_id, $object_key, true ),
+				"built-in {$post_type} parent REST update rejects non-object meta payloads before changing registered meta",
+				array(
+					'response'     => self::response_summary( $meta_not_array ),
+					'storedString' => \get_metadata_raw( 'post', $parent_id, $string_key, true ),
+					'storedObject' => \get_metadata_raw( 'post', $parent_id, $object_key, true ),
+				)
+			);
+
+			$denied_update = self::dispatch(
+				$server,
+				self::request(
+					'PUT',
+					$parent_route,
+					array( 'context' => 'edit' ),
+					array(),
+					array(
+						'meta' => array(
+							$denied_key => 'blocked-update-' . $case['token'],
+						),
+					)
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				self::response_error_ok( $denied_update, 'rest_cannot_update', 403 )
+					&& null === \get_metadata_raw( 'post', $parent_id, $denied_key, true ),
+				"built-in {$post_type} parent REST update enforces meta auth_callback false for writes",
+				array(
+					'response'   => self::response_summary( $denied_update ),
+					'deniedMeta' => \get_metadata_raw( 'post', $parent_id, $denied_key, true ),
+				)
+			);
+
+			$denied_seed = 'seed-denied-' . $post_type . '-' . $case['token'];
+			\update_post_meta( $parent_id, $denied_key, $denied_seed );
+			$denied_delete = self::dispatch(
+				$server,
+				self::request(
+					'PUT',
+					$parent_route,
+					array( 'context' => 'edit' ),
+					array(),
+					array(
+						'meta' => array(
+							$denied_key => null,
+						),
+					)
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				self::response_error_ok( $denied_delete, 'rest_cannot_delete', 403 )
+					&& $denied_seed === \get_metadata_raw( 'post', $parent_id, $denied_key, true ),
+				"built-in {$post_type} parent REST null delete enforces meta auth_callback false",
+				array(
+					'response'   => self::response_summary( $denied_delete ),
+					'deniedMeta' => \get_metadata_raw( 'post', $parent_id, $denied_key, true ),
+				)
+			);
+
+			$allowed_delete = self::dispatch(
+				$server,
+				self::request(
+					'PUT',
+					$parent_route,
+					array(
+						'context' => 'edit',
+						'_fields' => 'id,meta',
+					),
+					array(),
+					array(
+						'meta' => array(
+							$string_key => null,
+						),
+					)
+				)
+			);
+			$allowed_delete_data = $allowed_delete instanceof \WP_REST_Response ? $allowed_delete->get_data() : array();
+
+			self::collect_failure(
+				$failures,
+				$allowed_delete instanceof \WP_REST_Response
+					&& 200 === $allowed_delete->get_status()
+					&& null === \get_metadata_raw( 'post', $parent_id, $string_key, true )
+					&& '' === ( $allowed_delete_data['meta'][ $string_key ] ?? null ),
+				"built-in {$post_type} parent REST null delete removes allowed scalar meta and projects the registered empty value",
+				array(
+					'response'   => self::response_summary( $allowed_delete ),
+					'storedMeta' => \get_metadata_raw( 'post', $parent_id, $string_key, true ),
+				)
+			);
+
+			if ( ! $autosave_controller instanceof \WP_REST_Autosaves_Controller ) {
+				self::collect_failure(
+					$failures,
+					false,
+					"built-in {$post_type} autosave controller is available for direct raw meta contrast",
+					array( 'controller' => is_object( $autosave_controller ) ? get_class( $autosave_controller ) : $autosave_controller )
+				);
+				return $entry;
+			}
+
+			$raw_autosave_meta = array( 'raw' => 'autosave-raw-' . $post_type . '-' . $case['token'] );
+			$raw_denied_meta   = 'autosave-denied-' . $post_type . '-' . $case['token'];
+			$raw_autosave_id   = $autosave_controller->create_post_autosave(
+				array(
+					'ID'             => $parent_id,
+					'post_author'    => $editor_id,
+					'post_content'   => $case['contentTo'] . "\n{$post_type} raw meta contrast",
+					'post_excerpt'   => $case['excerptTo'],
+					'post_title'     => $case['titleTo'] . " {$post_type} raw meta contrast",
+					'post_type'      => $post_type,
+				),
+				array(
+					$string_key => $raw_autosave_meta,
+					$denied_key => $raw_denied_meta,
+				)
+			);
+			$raw_autosave      = is_int( $raw_autosave_id ) ? \get_post( $raw_autosave_id ) : null;
+			$raw_stored_meta   = is_int( $raw_autosave_id ) ? \get_metadata_raw( 'post', $raw_autosave_id, $string_key, true ) : null;
+			$raw_denied_stored = is_int( $raw_autosave_id ) ? \get_metadata_raw( 'post', $raw_autosave_id, $denied_key, true ) : null;
+			$revision_response = is_int( $raw_autosave_id )
+				? self::dispatch(
+					$server,
+					self::request(
+						'GET',
+						'/wp/v2/' . $rest_base . '/' . $parent_id . '/revisions/' . $raw_autosave_id,
+						array(
+							'context' => 'edit',
+							'_fields' => 'id,parent,meta',
+						)
+					)
+				)
+				: null;
+			$revision_data     = $revision_response instanceof \WP_REST_Response ? $revision_response->get_data() : array();
+
+			self::collect_failure(
+				$failures,
+				is_int( $raw_autosave_id )
+					&& $raw_autosave instanceof \WP_Post
+					&& $parent_id === (int) $raw_autosave->post_parent
+					&& $raw_autosave_meta === $raw_stored_meta
+					&& $raw_denied_meta === $raw_denied_stored
+					&& null === \get_metadata_raw( 'post', $parent_id, $string_key, true )
+					&& $denied_seed === \get_metadata_raw( 'post', $parent_id, $denied_key, true )
+					&& $revision_response instanceof \WP_REST_Response
+					&& 200 === $revision_response->get_status()
+					&& $raw_autosave_id === (int) ( $revision_data['id'] ?? 0 )
+					&& $parent_id === (int) ( $revision_data['parent'] ?? 0 )
+					&& null === ( $revision_data['meta'][ $string_key ] ?? null )
+					&& $raw_denied_meta === ( $revision_data['meta'][ $denied_key ] ?? null ),
+				"built-in {$post_type} direct autosave storage keeps raw wrong-typed revisioned meta and bypasses parent meta update auth",
+				array(
+					'autosaveId'       => $raw_autosave_id,
+					'autosave'         => self::post_summary( $raw_autosave ),
+					'storedMeta'       => $raw_stored_meta,
+					'storedDeniedMeta' => $raw_denied_stored,
+					'parentMeta'       => \get_metadata_raw( 'post', $parent_id, $string_key, true ),
+					'parentDeniedMeta' => \get_metadata_raw( 'post', $parent_id, $denied_key, true ),
+					'revisionResponse' => self::response_summary( $revision_response ),
+				)
+			);
+
+			$entry += array(
+				'parentId'    => $parent_id,
+				'autosaveId'  => is_int( $raw_autosave_id ) ? $raw_autosave_id : null,
+				'stringKey'   => $string_key,
+				'objectKey'   => $object_key,
+				'deniedKey'   => $denied_key,
+			);
+		} catch ( \Throwable $e ) {
+			self::collect_failure(
+				$failures,
+				false,
+				"built-in {$post_type} REST parent meta validation contrast branch stays throwable-free",
+				array( 'throwable' => self::describe_throwable( $e ) )
+			);
+		} finally {
+			if ( $editor_caps instanceof \Closure ) {
+				\remove_filter( 'user_has_cap', $editor_caps, 10 );
+			}
+			foreach ( $registered as $meta_key => $did_register ) {
+				if ( true === $did_register ) {
+					\unregister_meta_key( 'post', $meta_key, $post_type );
+				}
+			}
+			\wp_set_current_user( 0 );
+		}
+
+		return $entry;
+	}
+
 	private static function check_rest_revision_autosave_batch_gates( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
 		self::prepare_runtime();
 		$rest_base = self::register_rest_case_post_type( $case );
@@ -5198,6 +5645,28 @@ PHP;
 
 			foreach ( $caps as $cap ) {
 				if ( 'do_not_allow' !== $cap ) {
+					$allcaps[ $cap ] = true;
+				}
+			}
+
+			return $allcaps;
+		};
+	}
+
+	private static function grant_content_edit_caps_filter( int $user_id ): \Closure {
+		return static function ( array $allcaps, array $caps, array $args, \WP_User $user ) use ( $user_id ): array {
+			unset( $args );
+
+			if ( (int) $user->ID !== (int) $user_id ) {
+				return $allcaps;
+			}
+
+			foreach ( array( 'read', 'edit_posts', 'edit_others_posts', 'publish_posts', 'read_private_posts', 'edit_published_posts', 'edit_private_posts' ) as $cap ) {
+				$allcaps[ $cap ] = true;
+			}
+
+			foreach ( $caps as $cap ) {
+				if ( ! in_array( $cap, array( 'do_not_allow', 'add_post_meta', 'delete_post_meta', 'edit_post_meta' ), true ) ) {
 					$allcaps[ $cap ] = true;
 				}
 			}
