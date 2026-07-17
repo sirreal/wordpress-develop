@@ -83,6 +83,7 @@ final class KsesSurface {
 			$results[] = self::check_helper_contract_matrix( $seed );
 			$results[] = self::check_no_null_control_matrix( $seed );
 			$results[] = self::check_kses_filter_lifecycle_invariants( $seed );
+			$results[] = self::check_wp_kses_post_deep_invariants( $seed );
 			$results[] = self::check_pre_kses_hook_state(
 				$seed,
 				'kses.pre_kses-hook-state-before-block-attribute-check',
@@ -2555,6 +2556,486 @@ final class KsesSurface {
 			$failures,
 			$details
 		);
+	}
+
+	private static function check_wp_kses_post_deep_invariants( int $seed ): array {
+		foreach ( array( 'map_deep', 'wp_kses_post', 'wp_kses_post_deep' ) as $function_name ) {
+			if ( ! function_exists( $function_name ) ) {
+				return self::skip(
+					$seed,
+					null,
+					'wp_kses_post_deep.nested-structure-equivalence.available',
+					$function_name . '() is not loaded',
+					''
+				);
+			}
+		}
+
+		$rng                    = self::rng( self::normalize_seed( 'wp-kses-post-deep:' . $seed ) );
+		$unsafe_key             = '<script>array-key</script>';
+		$cases                  = self::wp_kses_post_deep_cases( $rng, $unsafe_key );
+		$input                  = 'wp_kses_post_deep cases: ' . implode( ',', array_keys( $cases ) );
+		$global_snapshot        = self::snapshot_globals( self::kses_global_names() );
+		$pre_kses_hook_snapshot = self::snapshot_hook( 'pre_kses' );
+		$pre_kses_signature     = self::hook_signature( 'pre_kses' );
+		$failures               = array();
+		$leaf_count             = 0;
+		$string_leaf_count      = 0;
+		$unsafe_key_cases       = 0;
+		$unsafe_token_count     = 0;
+		$safe_marker_seen       = false;
+
+		try {
+			foreach ( $cases as $label => $payload ) {
+				$leaf_count        += self::deep_leaf_count( $payload );
+				$string_leaf_count += self::deep_string_leaf_count( $payload );
+				$input_shape        = self::deep_container_signature( $payload );
+				$expected           = \map_deep( self::deep_clone_value( $payload ), 'wp_kses_post' );
+				$actual             = \wp_kses_post_deep( self::deep_clone_value( $payload ) );
+
+				if ( ! self::deep_values_match( $expected, $actual ) ) {
+					$failures[] = array(
+						'label'        => 'wp_kses_post_deep is equivalent to map_deep(..., wp_kses_post)',
+						'case'         => $label,
+						'expectedSha1' => self::deep_value_sha1( $expected ),
+						'actualSha1'   => self::deep_value_sha1( $actual ),
+					);
+				}
+
+				$actual_shape = self::deep_container_signature( $actual );
+				if ( $input_shape !== $actual_shape ) {
+					$failures[] = array(
+						'label'    => 'arrays, public objects, keys, and property names keep their shape',
+						'case'     => $label,
+						'expected' => $input_shape,
+						'actual'   => $actual_shape,
+					);
+				}
+
+				$leaf_failures = self::wp_kses_post_deep_leaf_failures( $payload, $actual );
+				foreach ( array_slice( $leaf_failures, 0, 4 ) as $leaf_failure ) {
+					$leaf_failure['case'] = $label;
+					$failures[]           = $leaf_failure;
+				}
+
+				$idempotent = \wp_kses_post_deep( self::deep_clone_value( $actual ) );
+				if ( ! self::deep_values_match( $actual, $idempotent ) ) {
+					$failures[] = array(
+						'label'      => 'sanitized nested post content is idempotent',
+						'case'       => $label,
+						'actualSha1' => self::deep_value_sha1( $actual ),
+						'againSha1'  => self::deep_value_sha1( $idempotent ),
+					);
+				}
+
+				$unsafe_tokens       = self::wp_kses_post_deep_unsafe_leaf_tokens( $actual );
+				$unsafe_token_count += count( $unsafe_tokens );
+				foreach ( array_slice( $unsafe_tokens, 0, 4 ) as $unsafe_token ) {
+					$unsafe_token['case'] = $label;
+					$failures[]           = $unsafe_token;
+				}
+
+				if ( self::deep_string_leaf_contains( $actual, 'https://example.test/' ) ) {
+					$safe_marker_seen = true;
+				}
+
+				if ( self::deep_contains_array_key( $payload, $unsafe_key ) ) {
+					++$unsafe_key_cases;
+					if ( ! self::deep_contains_array_key( $actual, $unsafe_key ) ) {
+						$failures[] = array(
+							'label' => 'map_deep leaves array keys untouched even when values are sanitized',
+							'case'  => $label,
+							'key'   => $unsafe_key,
+						);
+					}
+				}
+			}
+
+			if ( ! $safe_marker_seen ) {
+				$failures[] = array(
+					'label' => 'safe post-content markers survive nested deep filtering',
+				);
+			}
+
+			$pre_kses_after = self::hook_signature( 'pre_kses' );
+			if ( $pre_kses_signature !== $pre_kses_after ) {
+				$failures[] = array(
+					'label'    => 'wp_kses_post_deep leaves the pre_kses hook registration stable',
+					'expected' => $pre_kses_signature,
+					'actual'   => $pre_kses_after,
+				);
+			}
+
+			if ( ! self::globals_match( array( 'wp_current_filter' => $global_snapshot['wp_current_filter'] ) ) ) {
+				$failures[] = array(
+					'label'    => 'wp_kses_post_deep leaves the current filter stack stable',
+					'expected' => self::describe_global_snapshot( array( 'wp_current_filter' => $global_snapshot['wp_current_filter'] ) ),
+					'actual'   => self::describe_global_snapshot( self::snapshot_globals( array( 'wp_current_filter' ) ) ),
+				);
+			}
+		} catch ( \Throwable $e ) {
+			return self::throwable_result( $seed, null, 'wp_kses_post_deep.nested-structure-equivalence-no-throw', $input, $e );
+		} finally {
+			self::restore_hook( 'pre_kses', $pre_kses_hook_snapshot );
+			self::restore_globals( $global_snapshot );
+		}
+
+		$details = array(
+			'caseCount'        => count( $cases ),
+			'leafCount'        => $leaf_count,
+			'stringLeafCount'  => $string_leaf_count,
+			'unsafeKeyCases'   => $unsafe_key_cases,
+			'unsafeTokenCount' => $unsafe_token_count,
+			'failureCount'     => count( $failures ),
+			'failures'         => array_slice( $failures, 0, 8 ),
+		);
+
+		if ( empty( $failures ) ) {
+			return self::pass( $seed, null, 'wp_kses_post_deep.nested-structure-equivalence', $input, $details );
+		}
+
+		return self::fail(
+			$seed,
+			null,
+			'wp_kses_post_deep.nested-structure-equivalence',
+			$input,
+			'nested arrays and public objects map exactly through wp_kses_post(), preserving structure and sanitized post content',
+			$failures,
+			$details
+		);
+	}
+
+	private static function wp_kses_post_deep_cases( array &$rng, string $unsafe_key ): array {
+		$token        = substr( sha1( 'post-deep:' . self::rng_uint32( $rng ) ), 0, 10 );
+		$primary_url  = 'https://example.test/kses/' . $token;
+		$nested_object = self::std_object(
+			array(
+				'body'    => '<p onclick="evil()">Safe <strong>strong</strong><script>alert(1)</script></p>',
+				'link'    => '<a href="javascript:alert(1)" onclick="evil()">bad</a><a href="' . $primary_url . '">good</a>',
+				'counter' => self::rng_int( $rng, 2, 97 ),
+			)
+		);
+		$nested_object->child = self::std_object(
+			array(
+				'style' => '<span style="color:red;background-image:url(javascript:alert(1))" data-token="' . $token . '">styled</span>',
+				'flag'  => true,
+			)
+		);
+
+		$cases = array(
+			'top-level-string'       => '<p>Safe <strong>bold</strong></p><script>alert(1)</script>',
+			'top-level-int'          => self::rng_int( $rng, 100, 999 ),
+			'array-key-contract'     => array(
+				$unsafe_key => '<img src="' . $primary_url . '.png" onerror="evil()" alt="bad">',
+				'safe'      => '<a href="' . $primary_url . '?ok=1">safe link</a>',
+				'nested'    => array(
+					$unsafe_key . ':nested' => '<a href="vbscript:msgbox(1)" onclick="evil()">nested</a>',
+					'scalars'               => array(
+						'true'  => true,
+						'false' => false,
+						'int'   => self::rng_int( $rng, 1, 500 ),
+						'float' => self::rng_int( $rng, 10, 99 ) / 10,
+					),
+					'object'                => $nested_object,
+				),
+			),
+			'public-object-contract' => self::std_object(
+				array(
+					'title'    => '<h2>Title ' . $token . '</h2>',
+					'embed'    => '<iframe src="' . $primary_url . '"></iframe><blockquote cite="' . $primary_url . '">quote</blockquote>',
+					'children' => array(
+						self::wp_kses_post_deep_fragment( $rng ),
+						self::std_object(
+							array(
+								'html' => self::wp_kses_post_deep_fragment( $rng ),
+								'bool' => false,
+							)
+						),
+					),
+				)
+			),
+		);
+
+		for ( $i = 0; $i < 6; ++$i ) {
+			$case_token = substr( sha1( 'post-deep-generated:' . $i . ':' . self::rng_uint32( $rng ) ), 0, 8 );
+			$cases[ 'generated-' . $i ] = array(
+				'html'                  => self::wp_kses_post_deep_fragment( $rng ),
+				$unsafe_key . '-' . $i => self::wp_kses_post_deep_fragment( $rng ),
+				'scalars'               => array(
+					'int'   => self::rng_int( $rng, -200, 200 ),
+					'float' => self::rng_int( $rng, 5, 90 ) / 7,
+					'bool'  => self::rng_chance( $rng, 50 ),
+				),
+				'object'                => self::std_object(
+					array(
+						'caption' => '<figcaption data-token="' . $case_token . '">Caption <em>ok</em><script>alert(1)</script></figcaption>',
+						'url'     => '<a href="https://example.test/generated/' . $case_token . '">generated</a>',
+						'bad'     => '<a href="data:text/html,<script>alert(1)</script>" onclick="evil()">data</a>',
+					)
+				),
+			);
+		}
+
+		return $cases;
+	}
+
+	private static function wp_kses_post_deep_fragment( array &$rng ): string {
+		$token = substr( sha1( 'post-deep-fragment:' . self::rng_uint32( $rng ) ), 0, 8 );
+		$url   = 'https://example.test/fragment/' . $token;
+
+		return self::rng_choice(
+			$rng,
+			array(
+				'<p>Text ' . $token . ' <strong>strong</strong> <em>em</em></p>',
+				'<script>alert("' . $token . '")</script><a href="' . $url . '">safe</a>',
+				'<a href="javascript:alert(1)" onclick="evil()">bad</a><a href="' . $url . '?ok=1">good</a>',
+				'<img src="' . $url . '.png" onerror="evil()" alt="image ' . $token . '">',
+				'<span style="color: red; background-image: url(javascript:alert(1));" data-token="' . $token . '">styled</span>',
+				'<iframe src="' . $url . '"></iframe><blockquote cite="' . $url . '">quote</blockquote>',
+				'<p data-token="' . $token . '"><code>&lt;safe&gt;</code><svg onload="evil()"></svg></p>',
+			)
+		);
+	}
+
+	private static function wp_kses_post_deep_leaf_failures( $input, $actual, string $path = '$' ): array {
+		$failures = array();
+		if ( is_array( $input ) ) {
+			if ( ! is_array( $actual ) ) {
+				return array(
+					array(
+						'label' => 'container changed while checking leaf equivalence',
+						'path'  => $path,
+						'type'  => gettype( $actual ),
+					),
+				);
+			}
+
+			foreach ( $input as $key => $value ) {
+				$failures = array_merge(
+					$failures,
+					self::wp_kses_post_deep_leaf_failures( $value, $actual[ $key ] ?? null, $path . self::deep_path_segment( $key ) )
+				);
+			}
+			return $failures;
+		}
+
+		if ( is_object( $input ) ) {
+			if ( ! is_object( $actual ) ) {
+				return array(
+					array(
+						'label' => 'object changed while checking leaf equivalence',
+						'path'  => $path,
+						'type'  => gettype( $actual ),
+					),
+				);
+			}
+
+			foreach ( get_object_vars( $input ) as $property => $value ) {
+				$actual_vars = get_object_vars( $actual );
+				$failures    = array_merge(
+					$failures,
+					self::wp_kses_post_deep_leaf_failures( $value, $actual_vars[ $property ] ?? null, $path . '->' . $property )
+				);
+			}
+			return $failures;
+		}
+
+		$expected = \wp_kses_post( $input );
+		if ( $expected !== $actual ) {
+			$failures[] = array(
+				'label'    => 'each scalar leaf maps through wp_kses_post',
+				'path'     => $path,
+				'input'    => self::preview( (string) $input ),
+				'expected' => self::preview( (string) $expected ),
+				'actual'   => is_scalar( $actual ) ? self::preview( (string) $actual ) : gettype( $actual ),
+			);
+		}
+
+		return $failures;
+	}
+
+	private static function wp_kses_post_deep_unsafe_leaf_tokens( $value, string $path = '$' ): array {
+		$failures = array();
+		if ( is_array( $value ) ) {
+			foreach ( $value as $key => $item ) {
+				$failures = array_merge( $failures, self::wp_kses_post_deep_unsafe_leaf_tokens( $item, $path . self::deep_path_segment( $key ) ) );
+			}
+			return $failures;
+		}
+
+		if ( is_object( $value ) ) {
+			foreach ( get_object_vars( $value ) as $property => $item ) {
+				$failures = array_merge( $failures, self::wp_kses_post_deep_unsafe_leaf_tokens( $item, $path . '->' . $property ) );
+			}
+			return $failures;
+		}
+
+		if ( ! is_string( $value ) ) {
+			return $failures;
+		}
+
+		foreach ( array( '<script', 'javascript:', 'vbscript:', 'data:text/html', '<iframe', '<svg' ) as $token ) {
+			if ( false !== stripos( $value, $token ) ) {
+				$failures[] = array(
+					'label'   => 'sanitized leaf still contains an unsafe post-content token',
+					'path'    => $path,
+					'token'   => $token,
+					'preview' => self::preview( $value ),
+				);
+			}
+		}
+
+		if ( preg_match( '/<[^>]*\son[a-z0-9_-]+\s*=/i', $value, $match ) ) {
+			$failures[] = array(
+				'label'   => 'sanitized leaf still contains an event-handler attribute',
+				'path'    => $path,
+				'token'   => $match[0],
+				'preview' => self::preview( $value ),
+			);
+		}
+
+		return $failures;
+	}
+
+	private static function std_object( array $properties ): \stdClass {
+		$object = new \stdClass();
+		foreach ( $properties as $name => $value ) {
+			$object->$name = $value;
+		}
+		return $object;
+	}
+
+	private static function deep_clone_value( $value ) {
+		return unserialize( serialize( $value ) );
+	}
+
+	private static function deep_values_match( $expected, $actual ): bool {
+		return serialize( $expected ) === serialize( $actual );
+	}
+
+	private static function deep_value_sha1( $value ): string {
+		return sha1( serialize( $value ) );
+	}
+
+	private static function deep_leaf_count( $value ): int {
+		if ( is_array( $value ) ) {
+			$count = 0;
+			foreach ( $value as $item ) {
+				$count += self::deep_leaf_count( $item );
+			}
+			return $count;
+		}
+
+		if ( is_object( $value ) ) {
+			$count = 0;
+			foreach ( get_object_vars( $value ) as $item ) {
+				$count += self::deep_leaf_count( $item );
+			}
+			return $count;
+		}
+
+		return 1;
+	}
+
+	private static function deep_string_leaf_count( $value ): int {
+		if ( is_array( $value ) ) {
+			$count = 0;
+			foreach ( $value as $item ) {
+				$count += self::deep_string_leaf_count( $item );
+			}
+			return $count;
+		}
+
+		if ( is_object( $value ) ) {
+			$count = 0;
+			foreach ( get_object_vars( $value ) as $item ) {
+				$count += self::deep_string_leaf_count( $item );
+			}
+			return $count;
+		}
+
+		return is_string( $value ) ? 1 : 0;
+	}
+
+	private static function deep_container_signature( $value ): array {
+		if ( is_array( $value ) ) {
+			$children = array();
+			foreach ( $value as $key => $item ) {
+				$children[] = array(
+					'keyType' => gettype( $key ),
+					'key'     => (string) $key,
+					'shape'   => self::deep_container_signature( $item ),
+				);
+			}
+			return array(
+				'type'     => 'array',
+				'children' => $children,
+			);
+		}
+
+		if ( is_object( $value ) ) {
+			$properties = array();
+			foreach ( get_object_vars( $value ) as $property => $item ) {
+				$properties[] = array(
+					'name'  => $property,
+					'shape' => self::deep_container_signature( $item ),
+				);
+			}
+			return array(
+				'type'       => 'object',
+				'class'      => get_class( $value ),
+				'properties' => $properties,
+			);
+		}
+
+		return array( 'type' => 'leaf' );
+	}
+
+	private static function deep_contains_array_key( $value, string $needle ): bool {
+		if ( is_array( $value ) ) {
+			foreach ( $value as $key => $item ) {
+				if ( $needle === $key || self::deep_contains_array_key( $item, $needle ) ) {
+					return true;
+				}
+			}
+			return false;
+		}
+
+		if ( is_object( $value ) ) {
+			foreach ( get_object_vars( $value ) as $item ) {
+				if ( self::deep_contains_array_key( $item, $needle ) ) {
+					return true;
+				}
+			}
+		}
+
+		return false;
+	}
+
+	private static function deep_string_leaf_contains( $value, string $needle ): bool {
+		if ( is_array( $value ) ) {
+			foreach ( $value as $item ) {
+				if ( self::deep_string_leaf_contains( $item, $needle ) ) {
+					return true;
+				}
+			}
+			return false;
+		}
+
+		if ( is_object( $value ) ) {
+			foreach ( get_object_vars( $value ) as $item ) {
+				if ( self::deep_string_leaf_contains( $item, $needle ) ) {
+					return true;
+				}
+			}
+			return false;
+		}
+
+		return is_string( $value ) && false !== strpos( $value, $needle );
+	}
+
+	private static function deep_path_segment( $key ): string {
+		return '[' . gettype( $key ) . ':' . self::preview( (string) $key, 80 ) . ']';
 	}
 
 	private static function check_block_attribute_kses_invariants( int $seed ): array {

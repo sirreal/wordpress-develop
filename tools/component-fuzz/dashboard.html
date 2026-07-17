@@ -223,16 +223,16 @@
 			<div class="metric">112</div>
 			<div class="good">README parity confirmed: 112 documented</div>
 		</div>
-		<div class="card">
-			<div class="label">Latest Broad Run</div>
-			<div class="metric good">100%</div>
-			<div class="note">Non-skipped pass rate: 5067 passed, 0 failed, 0 errored, 1 skipped at 112 surfaces over 1 iteration after adding REST object-controller normal mixed batch update coverage.</div>
-		</div>
-		<div class="card">
-			<div class="label">Latest Focused Wave</div>
-			<div class="metric good">100%</div>
-			<div class="note">Latest focused addition: <code>rest-object-controllers</code> normal mixed batch item update coverage extends the route-dispatched object batch update row with a three-child <code>/batch/v1</code> request ordered as valid post update, invalid category parent update, and valid user update; asserts the top-level response stays <code>207</code> without <code>failed</code>, child envelopes remain in request order with <code>200</code>, <code>400 rest_invalid_param</code>, and <code>200</code> statuses, valid post/user rows mutate, the invalid category child preserves the pre-mixed term name/slug/parent, child <code>rest_post_dispatch</code> events remain local, and counts/filters/globals are restored. Focused seed 224 passed 27 checks, seed 224 over 25 iterations passed 675 checks, adjacent <code>rest,rest-controllers,rest-object-controllers,content-lifecycle,query,capabilities</code> smoke passed 2682 checks, broad smoke passed 5067 checks with 1 skip, and syntax/diff checks passed.</div>
-			<div class="note">Previous focused addition: <code>rest</code> batch/v1 pre-dispatch short-circuit coverage exercises isolated <code>WP_REST_Server</code> child requests where a valid batch child is short-circuited by <code>rest_pre_dispatch</code> before permission and callback execution; asserts clean child request clones drop URL/default/attribute state while preserving query/body/header params, <code>rest_post_dispatch</code> still envelopes both the short-circuit response and a sibling validation error, <code>require-all-validate</code> nulls valid siblings and prevents child execution when any sibling is invalid, and filters/global REST server state are restored. Focused seed 224 passed 13 checks, seed 224 over 25 iterations passed 325 checks, adjacent <code>rest,rest-controllers,rest-object-controllers</code> smoke passed 295 checks, broad smoke passed 5067 checks with 1 skip, and syntax/diff checks passed.</div>
+			<div class="card">
+				<div class="label">Latest Broad Run</div>
+				<div class="metric good">100%</div>
+				<div class="note">Non-skipped pass rate: 5068 passed, 0 failed, 0 errored, 1 skipped at 112 surfaces over 1 iteration after adding KSES <code>wp_kses_post_deep()</code> nested structure coverage.</div>
+			</div>
+			<div class="card">
+				<div class="label">Latest Focused Wave</div>
+				<div class="metric good">100%</div>
+				<div class="note">Latest focused addition: <code>kses</code> <code>wp_kses_post_deep()</code> nested structure coverage exercises generated strings, scalars, arrays, and public <code>stdClass</code> payloads with unsafe HTML values and dangerous-looking array keys; asserts exact recursive equivalence to <code>map_deep( ..., 'wp_kses_post' )</code>, container/key/property shape preservation, scalar leaf conversion through <code>wp_kses_post()</code>, idempotence, unsafe post-content token stripping, safe URL preservation, <code>pre_kses</code> hook stability, and KSES global restoration. Focused seed 224 passed 1106 checks, seed 224 over 25 iterations passed 27737 checks, adjacent <code>kses,security,markup,shortcodes,formatting,blocks,block-supports</code> smoke passed 1203 checks, broad smoke passed 5068 checks with 1 skip, and syntax/diff checks passed.</div>
+				<div class="note">Previous focused addition: <code>rest-object-controllers</code> normal mixed batch item update coverage extends the route-dispatched object batch update row with a three-child <code>/batch/v1</code> request ordered as valid post update, invalid category parent update, and valid user update; asserts the top-level response stays <code>207</code> without <code>failed</code>, child envelopes remain in request order with <code>200</code>, <code>400 rest_invalid_param</code>, and <code>200</code> statuses, valid post/user rows mutate, the invalid category child preserves the pre-mixed term name/slug/parent, child <code>rest_post_dispatch</code> events remain local, and counts/filters/globals are restored. Focused seed 224 passed 27 checks, seed 224 over 25 iterations passed 675 checks, adjacent <code>rest,rest-controllers,rest-object-controllers,content-lifecycle,query,capabilities</code> smoke passed 2682 checks, broad smoke passed 5067 checks with 1 skip, and syntax/diff checks passed.</div>
 			<div class="note">Previous focused addition: <code>rest-widgets-sidebars</code> missing-sidebar update diagnostics exercise route-dispatched <code>PATCH /wp/v2/sidebars/{missing_id}</code> with a schema-valid <code>widgets</code> array; captures the current non-fail-closed behavior where the route returns a <code>200</code> inactive-sidebar-shaped response, emits null-sidebar warnings, creates a raw unregistered sidebar entry, steals the requested widget from the registered public sidebar, fires <code>rest_save_sidebar</code> with a <code>null</code> sidebar payload, and still returns <code>rest_sidebar_not_found</code> for a follow-up <code>GET</code>. Focused seed 224 passed 12 checks, seed 224 over 25 iterations passed 300 checks, adjacent widget surfaces passed 250 checks, broad smoke passed 5066 checks with 1 skip, and syntax/diff checks passed.</div>
 			<div class="note">Previous focused addition: <code>rest-widgets-sidebars</code> raw sidebar widget projection coverage exercises <code>WP_REST_Sidebars_Controller::update_item()</code> with <code>_fields=id,status,widgets</code> and a generated widget list containing a stolen registered widget, an unregistered stale widget id, the existing public text widget, and a duplicate valid widget id; asserts clean fixture seeding, REST response projection filters the stale id while preserving duplicate valid ids, raw <code>sidebars_widgets</code> stores the exact requested list, hidden sidebar state and inactive widget movement remain correct, <code>rest_save_sidebar</code> observes the raw request payload, and caps/hooks/state are restored. Focused seed 224 passed 11 checks, seed 224 over 25 iterations passed 275 checks, adjacent widget surfaces passed 245 checks, broad smoke passed 5065 checks with 1 skip, and syntax/diff checks passed.</div>
 			<div class="note">Previous focused addition: <code>revisions-autosaves</code> built-in post/page parent REST meta validation contrast exercises <code>PUT /wp/v2/posts/{id}</code> and <code>PUT /wp/v2/pages/{id}</code> with registered string, object, and auth-denied revisioned meta keys, then contrasts direct autosave raw revisioned-meta storage; asserts valid scalar/object parent meta storage, wrong-typed string meta fails with <code>rest_invalid_type</code>, object extra properties fail with <code>rest_additional_properties_forbidden</code>, scalar top-level <code>meta</code> fails with <code>rest_invalid_param</code>, <code>auth_callback =&gt; false</code> blocks parent update and null-delete with <code>rest_cannot_update</code> and <code>rest_cannot_delete</code>, allowed null delete removes parent raw meta while projecting the registered empty string, direct autosave storage keeps wrong-typed revisioned meta raw while REST revision projection returns <code>null</code>, auth-denied revisioned meta still stores on the autosave revision, and filters/current user/meta keys are restored. Revisions/autosaves seed 224 passed 20 checks, seeds 1, 224, and 57123 over 25 iterations each passed 500 checks, seed 100 over 20 iterations passed 400 checks, adjacent REST/content smoke passed 958 checks, broad smoke passed 5064 checks with 1 skip, and syntax/diff checks passed.</div>
@@ -529,11 +529,11 @@
 			<div class="note">Continuation: <code>content</code> post-template helper coverage landed through <code>c93166b0ec</code> and review fixes through <code>50ef617a22</code>; focused runs passed seed 1 and seed 224 at 1400 checks each, syntax/PHPCS/diff checks passed, the broad smoke passed 4329 checks with 33 skips, and Leibniz follow-up review found no actionable findings.</div>
 			<div class="note">Continuation: <code>blocks</code> block bindings render-pipeline coverage landed through <code>f53cfd1bfc</code> and review fixes through <code>d83d02f5e0</code> and <code>9e4c4ee83c</code>; focused runs passed seed 1 and seed 224 at 800 checks each, syntax/PHPCS/diff checks passed, the broad smoke passed 4330 checks with 33 skips, and Curie follow-up review found no actionable findings.</div>
 		</div>
-		<div class="card">
-			<div class="label">Active Workers</div>
-			<div class="metric">0</div>
-			<div class="note">No active worker-owned files; latest completed slice expanded REST batch/v1 pre-dispatch short-circuit coverage across permission/callback bypass, clean child request clones, validation-error envelope preservation, require-all no-execution behavior, and filter/global cleanup. Next gap target: convert the missing-sidebar update diagnostic to a fail-closed oracle after the controller fix, or add REST object-controller normal batch mutation/order coverage.</div>
-		</div>
+			<div class="card">
+				<div class="label">Active Workers</div>
+				<div class="metric">0</div>
+				<div class="note">No active worker-owned files; latest completed slice expanded KSES deep post-content filtering across recursive <code>wp_kses_post_deep()</code> wrapper equivalence, nested structure preservation, unsafe-leaf sanitization, idempotence, and hook/global cleanup. Next gap target: convert the missing-sidebar update diagnostic to a fail-closed oracle after the controller fix, continue high-yield KSES/security helper gaps, or add REST collection mixed-batch parity.</div>
+			</div>
 	</div>
 
 	<section>
@@ -1182,12 +1182,12 @@
 					<td>Latest focused runs: seeds 1, 224, and 57123 over 25 iterations each passed 11575 checks; adjacent <code>comments,template-links,core-block-render</code> smoke passed 2445 checks; adjacent <code>comments,comment-workflow,content,identity,template-hierarchy,classic-walkers</code> smoke passed 2565 checks; query-oriented adjacent <code>comments,classic-walkers,template-hierarchy,content,comment-workflow,query,query-loop,template-links</code> smoke passed 2500 checks; bootstrap smoke passed; latest broad seed 224 run passed 4813 checks with 1 skip.</td>
 					<td>Filtering, max lengths, partitioning, cookies, classes, author links and fallback author-name contract, excerpts, direct <code>wp_list_comments()</code> rendering orchestration, explicit type routing, echo/getter parity, list-argument filter payloads, global comment-query fallback, option-driven pagination/depth/order defaults, requery and overridden-<code>cpage</code> paths, public comment count/text/link/popup helpers, comment page number links, next/previous comments links, comment pagination and navigation wrappers, singular fail-closed behavior, reply/cancel link rendering gates, full <code>comment_form()</code> rendering branches, field/action/submit filters, comment ID fields, page-of-comment counting, permalink anchors, exact <code>cpage</code> matching, threaded parent resolution, and post/parent query constraints.</td>
 				</tr>
-				<tr>
-					<td><code>kses</code></td>
-					<td><span class="status good">validation passed</span></td>
-					<td>Scoped worktree <code>component-fuzz-kses-css-protocol-fragments</code>; builds on semicolon-bearing data URL diagnostics through <code>component-fuzz-kses-css-data-url</code>, style/protocol cross-hook coverage through <code>component-fuzz-kses-style-protocol</code>, generated policy mutation coverage through <code>component-fuzz-kses-policy-mutations</code>, exact hair fixtures through <code>component-fuzz-kses-hair-fixtures</code>, helper/block attribute fixes through <code>50de103325</code>, PDF/URI coverage through <code>e3d43f715a</code>, and attribute constraint coverage through <code>8fc00de203</code>.</td>
-					<td>Latest focused runs: seed 224 passed 1105 checks, seeds 1, 224, and 57123 over 25 iterations passed 27703, 27712, and 27707 checks after semicolon-free data URL and bad-protocol fragment diagnostics; seed 100 over 20 iterations passed 22150 checks; adjacent <code>kses,security,markup,shortcodes,formatting,blocks,block-supports</code> smoke passed 1202 checks; bootstrap smoke passed; latest broad run: 5039 passed, 1 skipped, 0 failed. Optional KSES PHPUnit filter remains unavailable because this checkout lacks <code>wp-tests-config.php</code>.</td>
-					<td>KSES policies, protocol filtering/helper contracts, exact low-level helper contract matrix, exact <code>wp_kses_hair()</code> parser fixtures for entity recoding, duplicate attributes, malformed quote/equal recovery, special attribute names, slash-separated attributes, URI protocol filtering, and custom protocols, generated policy/protocol/style mutation matrices, scoped custom safe-CSS properties, filter-aware safe CSS, cross-hook CSS URL protocol checks combining <code>safe_style_css</code>, permissive <code>safecss_filter_attr_allow_css</code>, dynamic <code>wp_kses_uri_attributes</code>, <code>wp_kses()</code>, <code>wp_kses_hair()</code>, and <code>wp_kses_attr()</code>, semicolon-bearing <code>data:</code> CSS URL parser diagnostics under default, all-true permissive, and guarded <code>safecss_filter_attr_allow_css</code> hooks, semicolon-free <code>data:,</code> CSS URL rejection and semicolon-fragmented non-data bad-protocol diagnostics across default/permissive/guarded allow-CSS filters, deterministic attribute constraint matrices, serialized block attribute filtering and hook-path agreement, built-in PDF object URL/type policy, dynamic URI attribute filtering, by-reference attribute mutation behavior, required attribute fallback stripping, entity-decoded style filtering, full-tag attribute parsing, malformed HTML, block/comment boundary inputs, no-HTML filtering, scoped filter cleanup, callback-order preservation, run-level <code>pre_kses</code> hook-state restoration, and global restoration.</td>
+					<tr>
+						<td><code>kses</code></td>
+						<td><span class="status good">validation passed</span></td>
+						<td>Scoped worktree <code>component-fuzz-kses-post-deep</code>; builds on semicolon-free data URL diagnostics through <code>component-fuzz-kses-css-protocol-fragments</code>, semicolon-bearing data URL diagnostics through <code>component-fuzz-kses-css-data-url</code>, style/protocol cross-hook coverage through <code>component-fuzz-kses-style-protocol</code>, generated policy mutation coverage through <code>component-fuzz-kses-policy-mutations</code>, exact hair fixtures through <code>component-fuzz-kses-hair-fixtures</code>, helper/block attribute fixes through <code>50de103325</code>, PDF/URI coverage through <code>e3d43f715a</code>, and attribute constraint coverage through <code>8fc00de203</code>.</td>
+						<td>Latest focused runs: seed 224 passed 1106 checks and seed 224 over 25 iterations passed 27737 checks after <code>wp_kses_post_deep()</code> nested structure coverage; adjacent <code>kses,security,markup,shortcodes,formatting,blocks,block-supports</code> smoke passed 1203 checks; latest broad run: 5068 passed, 1 skipped, 0 failed. Optional KSES PHPUnit filter remains unavailable because this checkout lacks <code>wp-tests-config.php</code>.</td>
+						<td>KSES policies, protocol filtering/helper contracts, exact low-level helper contract matrix, exact <code>wp_kses_hair()</code> parser fixtures for entity recoding, duplicate attributes, malformed quote/equal recovery, special attribute names, slash-separated attributes, URI protocol filtering, and custom protocols, generated policy/protocol/style mutation matrices, scoped custom safe-CSS properties, filter-aware safe CSS, cross-hook CSS URL protocol checks combining <code>safe_style_css</code>, permissive <code>safecss_filter_attr_allow_css</code>, dynamic <code>wp_kses_uri_attributes</code>, <code>wp_kses()</code>, <code>wp_kses_hair()</code>, and <code>wp_kses_attr()</code>, semicolon-bearing <code>data:</code> CSS URL parser diagnostics under default, all-true permissive, and guarded <code>safecss_filter_attr_allow_css</code> hooks, semicolon-free <code>data:,</code> CSS URL rejection and semicolon-fragmented non-data bad-protocol diagnostics across default/permissive/guarded allow-CSS filters, recursive <code>wp_kses_post_deep()</code> equivalence to <code>map_deep()</code>/<code>wp_kses_post()</code> across nested arrays, public objects, scalars, unsafe leaves, dangerous-looking array keys, idempotence, and structure preservation, deterministic attribute constraint matrices, serialized block attribute filtering and hook-path agreement, built-in PDF object URL/type policy, dynamic URI attribute filtering, by-reference attribute mutation behavior, required attribute fallback stripping, entity-decoded style filtering, full-tag attribute parsing, malformed HTML, block/comment boundary inputs, no-HTML filtering, scoped filter cleanup, callback-order preservation, run-level <code>pre_kses</code> hook-state restoration, and global restoration.</td>
 				</tr>
 				<tr>
 					<td><code>formatting</code></td>
@@ -1366,7 +1366,7 @@
 			<h2>Recent Committed Additions</h2>
 			<span class="note">Latest main-branch commits from this pass.</span>
 		</div>
-		<table>
+			<table>
 				<thead>
 				<tr>
 					<th>Commit</th>
@@ -1378,6 +1378,12 @@
 				<tbody>
 					<tr>
 						<td><code>current branch</code></td>
+						<td><code>kses</code></td>
+						<td><code>kses</code> seed 224 passed 1106 checks and seed 224 over 25 iterations passed 27737 checks; adjacent <code>kses,security,markup,shortcodes,formatting,blocks,block-supports</code> smoke passed 1203 checks; syntax/diff checks passed after adding <code>wp_kses_post_deep()</code> nested structure coverage for exact <code>map_deep()</code>/<code>wp_kses_post()</code> equivalence, key/property/shape preservation, scalar leaf conversion, unsafe-leaf sanitization, safe URL preservation, idempotence, and hook/global cleanup.</td>
+						<td>5068 passed, 1 skipped, 0 failed at 1 iteration after KSES <code>wp_kses_post_deep()</code> nested structure coverage.</td>
+					</tr>
+					<tr>
+						<td><code>11d7a878b4</code></td>
 						<td><code>rest-object-controllers</code></td>
 						<td><code>rest-object-controllers</code> seed 224 passed 27 checks and seed 224 over 25 iterations passed 675 checks; adjacent <code>rest,rest-controllers,rest-object-controllers,content-lifecycle,query,capabilities</code> smoke passed 2682 checks; syntax/diff checks passed after adding normal mixed batch item update coverage for ordered valid/invalid/valid child envelopes, valid post/user persistence, invalid category no-mutation, post-dispatch locality, count stability, and cleanup.</td>
 						<td>5067 passed, 1 skipped, 0 failed at 1 iteration after REST object-controller normal mixed batch update coverage.</td>
@@ -3438,13 +3444,19 @@
 					<td><code>component-fuzz-rest-batch-order</code></td>
 					<td><code>rest-directory-services</code> / <code>rest</code></td>
 					<td>Latest focused runs: <code>rest-directory-services</code> seeds 1, 224, and 57123 over 25 iterations each passed 225 checks after cloned <code>WP_Hook</code> snapshot restoration and hook-callback fingerprinting; ordered <code>rest-directory-services,rest</code> seeds 1, 224, and 57123 over 3 iterations each passed 60 checks; adjacent REST stack passed 118 checks.</td>
-					<td>5036 passed, 1 skipped, 0 failed at 1 iteration after REST directory-service hook isolation.</td>
-				</tr>
-				<tr>
-					<td><code>component-fuzz-kses-css-protocol-fragments</code></td>
-					<td><code>kses</code></td>
-					<td>Latest focused runs: seeds 1, 224, and 57123 over 25 iterations passed 27703, 27712, and 27707 checks after semicolon-free <code>data:,</code> URL rejection and semicolon-fragmented <code>javascript</code>/<code>vbscript</code>/<code>livescript</code>/<code>mocha</code> diagnostics across default, all-true permissive, and guarded <code>safecss_filter_attr_allow_css</code> filters; seed 100 over 20 iterations passed 22150 checks and adjacent KSES/security/markup stack passed 1202 checks.</td>
-					<td>5039 passed, 1 skipped, 0 failed at 1 iteration after KSES semicolon-free data URL and bad-protocol fragment diagnostics.</td>
+						<td>5036 passed, 1 skipped, 0 failed at 1 iteration after REST directory-service hook isolation.</td>
+					</tr>
+					<tr>
+						<td><code>component-fuzz-kses-post-deep</code></td>
+						<td><code>kses</code></td>
+						<td>Latest focused runs: seed 224 passed 1106 checks and seed 224 over 25 iterations passed 27737 checks after recursive <code>wp_kses_post_deep()</code> wrapper-equivalence coverage for nested arrays, public objects, scalar leaves, dangerous-looking array keys, unsafe post-content leaves, safe URL preservation, idempotence, hook stability, and global restoration; adjacent KSES/security/markup stack passed 1203 checks.</td>
+						<td>5068 passed, 1 skipped, 0 failed at 1 iteration after KSES <code>wp_kses_post_deep()</code> nested structure coverage.</td>
+					</tr>
+					<tr>
+						<td><code>component-fuzz-kses-css-protocol-fragments</code></td>
+						<td><code>kses</code></td>
+						<td>Latest focused runs: seeds 1, 224, and 57123 over 25 iterations passed 27703, 27712, and 27707 checks after semicolon-free <code>data:,</code> URL rejection and semicolon-fragmented <code>javascript</code>/<code>vbscript</code>/<code>livescript</code>/<code>mocha</code> diagnostics across default, all-true permissive, and guarded <code>safecss_filter_attr_allow_css</code> filters; seed 100 over 20 iterations passed 22150 checks and adjacent KSES/security/markup stack passed 1202 checks.</td>
+						<td>5039 passed, 1 skipped, 0 failed at 1 iteration after KSES semicolon-free data URL and bad-protocol fragment diagnostics.</td>
 				</tr>
 				<tr>
 					<td><code>component-fuzz-kses-css-data-url</code></td>
@@ -3964,14 +3976,14 @@
 				<strong>Bootstrap Core</strong>
 				<code>WpBootstrap</code>, hooks, options, cache, roles, post types, taxonomies, content parsers, connector/icon registries.
 			</div>
-			<div class="dep">
-				<strong>In-memory DB Stub</strong>
-				Content lifecycle, taxonomy relationships, bookmarks, WXR, REST object controllers.
-			</div>
-			<div class="dep">
-				<strong>Next Component Slice</strong>
-				REST stack follow-up: turn the missing-sidebar update diagnostic into a fail-closed oracle after the controller checks sidebar existence before mutating <code>sidebars_widgets</code> or firing <code>rest_save_sidebar</code>; otherwise shift to the next high-yield non-REST dashboard gap or REST collection mixed-batch parity.
-			</div>
+				<div class="dep">
+					<strong>In-memory DB Stub</strong>
+					Content lifecycle, taxonomy relationships, bookmarks, WXR, REST object controllers.
+				</div>
+				<div class="dep">
+					<strong>Next Component Slice</strong>
+					REST stack follow-up: turn the missing-sidebar update diagnostic into a fail-closed oracle after the controller checks sidebar existence before mutating <code>sidebars_widgets</code> or firing <code>rest_save_sidebar</code>; otherwise continue high-yield KSES/security helper gaps or REST collection mixed-batch parity.
+				</div>
 			<div class="dep">
 				<strong>REST Stack</strong>
 				REST request/response/server, capabilities, schema validation, controller registries, widget/sidebar controllers, Abilities API registries.
