@@ -35,6 +35,7 @@ final class ImportDiffSurface {
 			$rows[] = self::check_error_lifecycle_ordering( $ctx->fork( 'error-lifecycle' ) );
 			$rows[] = self::check_imported_post_lookup( $ctx->fork( 'post-lookup' ) );
 			$rows[] = self::check_imported_comment_lookup( $ctx->fork( 'comment-lookup' ) );
+			$rows[] = self::check_importer_get_page_http_wrapper( $ctx->fork( 'importer-get-page' ) );
 			$rows[] = self::check_importer_base_helpers( $ctx->fork( 'importer-base-helpers' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = $ctx->fail(
@@ -73,6 +74,7 @@ final class ImportDiffSurface {
 				'has_filter',
 				'remove_filter',
 				'register_importer',
+				'wp_safe_remote_request',
 				'wp_delete_attachment',
 				'wp_import_cleanup',
 				'wp_import_handle_upload',
@@ -697,6 +699,116 @@ final class ImportDiffSurface {
 		}
 
 		return self::result( $ctx, 'import-diff.importer.imported-comment-lookup', $failures );
+	}
+
+	private static function check_importer_get_page_http_wrapper( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures = array();
+		$importer = new \WP_Importer();
+		$username = 'user-' . $ctx->identifier( 3, 8 );
+		$password = 'pass:' . $ctx->identifier( 4, 10 );
+		$token    = $ctx->identifier( 4, 10 );
+		$calls    = array();
+
+		$fake_response = static function ( string $label ) use ( $token ): array {
+			return array(
+				'headers'  => array( 'x-component-fuzz' => $label ),
+				'body'     => 'component-fuzz-importer-' . $label . '-' . $token,
+				'response' => array(
+					'code'    => 200,
+					'message' => 'OK ' . $label,
+				),
+				'cookies'  => array(),
+				'filename' => null,
+			);
+		};
+		$http_filter   = static function ( $preempt, array $parsed_args, string $url ) use ( &$calls, $fake_response ) {
+			$label   = 'call-' . count( $calls );
+			$calls[] = array(
+				'url'  => $url,
+				'args' => $parsed_args,
+			);
+
+			return $fake_response( $label );
+		};
+
+		\add_filter( 'pre_http_request', $http_filter, 10, 3 );
+		try {
+			$default_url       = 'https://imports.example.test/' . rawurlencode( $token ) . '/data.xml?view=' . rawurlencode( 'full & safe' );
+			$head_url          = 'https://imports.example.test/' . rawurlencode( $token ) . '/head.xml';
+			$auth_url          = 'https://imports.example.test/' . rawurlencode( $token ) . '/auth.xml';
+			$username_only_url = 'https://imports.example.test/' . rawurlencode( $token ) . '/username-only.xml';
+			$password_only_url = 'https://imports.example.test/' . rawurlencode( $token ) . '/password-only.xml';
+
+			$default_response       = $importer->get_page( $default_url );
+			$head_response          = $importer->get_page( $head_url, '', '', true );
+			$auth_response          = $importer->get_page( $auth_url, $username, $password );
+			$username_only_response = $importer->get_page( $username_only_url, $username, '' );
+			$password_only_response = $importer->get_page( $password_only_url, '', $password );
+		} finally {
+			\remove_filter( 'pre_http_request', $http_filter, 10 );
+			\remove_filter( 'http_request_timeout', array( $importer, 'bump_request_timeout' ) );
+		}
+
+		$expected_responses = array(
+			$fake_response( 'call-0' ),
+			$fake_response( 'call-1' ),
+			$fake_response( 'call-2' ),
+			$fake_response( 'call-3' ),
+			$fake_response( 'call-4' ),
+		);
+		$responses          = array(
+			$default_response,
+			$head_response,
+			$auth_response,
+			$username_only_response,
+			$password_only_response,
+		);
+		$auth_header        = 'Basic ' . base64_encode( "{$username}:{$password}" );
+
+		self::collect_failure(
+			$failures,
+			$expected_responses === $responses
+				&& 5 === count( $calls ),
+			'WP_Importer::get_page returns exact pre_http_request responses without falling through to live HTTP',
+			array(
+				'responses' => $responses,
+				'calls'     => $calls,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			isset( $calls[0]['args'], $calls[1]['args'], $calls[2]['args'], $calls[3]['args'], $calls[4]['args'] )
+				&& 'GET' === ( $calls[0]['args']['method'] ?? null )
+				&& 'HEAD' === ( $calls[1]['args']['method'] ?? null )
+				&& 60 === ( $calls[0]['args']['timeout'] ?? null )
+				&& 60 === ( $calls[1]['args']['timeout'] ?? null )
+				&& true === ( $calls[0]['args']['reject_unsafe_urls'] ?? null )
+				&& true === ( $calls[1]['args']['reject_unsafe_urls'] ?? null )
+				&& 0 === ( $calls[1]['args']['redirection'] ?? null )
+				&& array() === ( $calls[0]['args']['headers'] ?? null )
+				&& $auth_header === ( $calls[2]['args']['headers']['Authorization'] ?? null )
+				&& ! isset( $calls[3]['args']['headers']['Authorization'] )
+				&& ! isset( $calls[4]['args']['headers']['Authorization'] ),
+			'WP_Importer::get_page composes method, timeout, safe URL, HEAD redirection, and Basic Auth wrapper args',
+			array(
+				'calls'      => $calls,
+				'authHeader' => $auth_header,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			false === \has_filter( 'pre_http_request', $http_filter, 10 )
+				&& false === \has_filter( 'http_request_timeout', array( $importer, 'bump_request_timeout' ) ),
+			'WP_Importer::get_page HTTP wrapper test removes pre_http_request and importer timeout filters',
+			array(
+				'preHttp' => \has_filter( 'pre_http_request', $http_filter, 10 ),
+				'timeout' => \has_filter( 'http_request_timeout', array( $importer, 'bump_request_timeout' ) ),
+			)
+		);
+
+		return self::result( $ctx, 'import-diff.importer.get-page-http-wrapper', $failures );
 	}
 
 	private static function check_importer_base_helpers( \ComponentFuzz\FuzzContext $ctx ): array {

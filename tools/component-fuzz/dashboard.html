@@ -226,12 +226,13 @@
 			<div class="card">
 				<div class="label">Latest Broad Run</div>
 				<div class="metric good">100%</div>
-				<div class="note">Non-skipped pass rate: 5095 passed, 0 failed, 0 errored, 1 skipped at 112 surfaces over 1 iteration after adding direct feed anchor helper coverage.</div>
+				<div class="note">Non-skipped pass rate: 5096 passed, 0 failed, 0 errored, 1 skipped at 112 surfaces over 1 iteration after adding importer <code>get_page()</code> HTTP wrapper coverage.</div>
 			</div>
 			<div class="card">
 				<div class="label">Latest Focused Wave</div>
 				<div class="metric good">100%</div>
-				<div class="note">Latest focused addition: <code>feed-rendering</code> direct feed anchor coverage exercises <code>the_feed_link()</code> for default and Atom feeds, exact escaped feed hrefs, raw caller anchor preservation, <code>feed_link</code> URL filtering before href escaping, <code>the_feed_link</code> complete-anchor filtering, generated marker/query escaping, and scoped filter cleanup. Focused seed 224 passed 13 checks, seed 224 over 25 iterations passed 325 checks, seeds 1 and 57123 over 10 iterations passed 130 checks each, adjacent feed/parser/syndication/http/widget stack passed 56 checks, broad smoke passed 5095 checks with 1 skip, and syntax/diff checks passed.</div>
+				<div class="note">Latest focused addition: <code>import-diff</code> importer <code>get_page()</code> HTTP wrapper coverage exercises no-network <code>pre_http_request</code> interception, default GET requests, HEAD method mapping, safe-URL request args, 60-second timeout injection via <code>http_request_timeout</code>, Basic Auth only when both username and password are present, exact fake response propagation, and explicit cleanup of pre-HTTP and importer timeout filters. Focused seed 224 passed 11 checks, seeds 1 and 224 over 25 iterations passed 275 checks each, seed 57123 over 10 iterations passed 110 checks, adjacent import/http stack passed 120 checks, broad smoke passed 5096 checks with 1 skip, and syntax/diff checks passed.</div>
+				<div class="note">Previous focused addition: <code>feed-rendering</code> direct feed anchor coverage exercises <code>the_feed_link()</code> for default and Atom feeds, exact escaped feed hrefs, raw caller anchor preservation, <code>feed_link</code> URL filtering before href escaping, <code>the_feed_link</code> complete-anchor filtering, generated marker/query escaping, and scoped filter cleanup. Focused seed 224 passed 13 checks, seed 224 over 25 iterations passed 325 checks, seeds 1 and 57123 over 10 iterations passed 130 checks each, adjacent feed/parser/syndication/http/widget stack passed 56 checks, broad smoke passed 5095 checks with 1 skip, and syntax/diff checks passed.</div>
 				<div class="note">Previous focused addition: <code>mail</code> emoji email-wrapper coverage exercises <code>wp_staticize_emoji_for_email()</code> across array headers, CRLF/LF string headers, text/html, text/plain, missing headers, missing message, mixed-case content type, and <code>wp_mail_content_type</code> force-on/force-off filters; asserts exact runtime <code>wp_staticize_emoji()</code> output only for HTML cases, byte-stable non-HTML branches, exact preservation of recipients, subject, headers, attachments, and embeds, and scoped filter cleanup. Focused seed 224 passed 12 checks, seed 224 over 25 iterations passed 300 checks, seeds 1 and 57123 over 10 iterations passed 120 checks each, adjacent mail/email/privacy stack passed 3840 checks, broad smoke passed 5094 checks with 1 skip, and syntax/diff checks passed.</div>
 				<div class="note">Previous focused addition: <code>frontend-features</code> URL pattern prefixer generated-context coverage exercises home/site/uploads contexts with relative, leading-slash, already-prefixed, wildcard, and escaped <code>+/*</code> path patterns, grouping-sensitive <code>:?#</code> base paths, invalid-context <code>_doing_it_wrong()</code> diagnostics, idempotence, no double-slash output, and hook cleanup. Focused seed 224 passed 8 checks, seed 224 over 25 iterations passed 200 checks, seeds 1 and 57123 over 10 iterations passed 80 checks each, adjacent frontend/script/style stack passed 83 checks, broad smoke passed 5094 checks with 1 skip, and syntax/diff checks passed.</div>
 				<div class="note">Previous focused addition: <code>cron</code> pre-filter failure-contract coverage exercises generated <code>pre_schedule_event</code>, <code>schedule_event</code>, <code>pre_reschedule_event</code>, <code>pre_unschedule_event</code>, and <code>pre_clear_scheduled_hook</code> false-return branches; asserts <code>WP_Error</code> codes when <code>$wp_error</code> is true, plain <code>false</code> returns when it is false, no storage for rejected schedules, preserved existing events for rejected reschedule/unschedule/clear operations, exact filter payloads for single and recurring events, interval preservation, and hook cleanup. Focused seed 224 passed 101 checks, seed 224 over 25 iterations passed 2525 checks, seeds 1 and 57123 over 10 iterations passed 1010 checks each, adjacent cron/lifecycle/options stack passed 176 checks, broad smoke passed 5094 checks with 1 skip, and syntax/diff checks passed.</div>
@@ -556,7 +557,7 @@
 			<div class="card">
 				<div class="label">Active Workers</div>
 				<div class="metric">0</div>
-				<div class="note">No active worker-owned files; latest validated slice expanded <code>feed-rendering</code> direct feed anchor helper coverage, with focused, adjacent, and broad validation passing locally. Next gap target: add Nash's importer <code>get_page()</code> wrapper matrix, convert the missing-sidebar update diagnostic after the controller fix, flip the KSES diagnostic after core isolates those globals, or continue REST batch/controller boundaries.</div>
+				<div class="note">No active worker-owned files; latest validated slice expanded <code>import-diff</code> importer <code>get_page()</code> HTTP wrapper coverage, with focused, adjacent, and broad validation passing locally. Next gap target: convert the missing-sidebar update diagnostic after the controller fix, flip the KSES diagnostic after core isolates those globals, continue REST batch/controller boundaries, or pick another pure helper wrapper gap.</div>
 			</div>
 	</div>
 
@@ -894,9 +895,9 @@
 				<tr>
 					<td><code>import-diff</code></td>
 					<td><span class="status good">local validation passed</span></td>
-					<td>Scoped component worktree <code>component-fuzz-import-upload-lifecycle</code>; import upload handler fail-closed and cleanup coverage validated before merge.</td>
-					<td>Latest focused runs: seed 224 passed 10 checks, seeds 1 and 224 over 25 iterations each passed 250 checks, adjacent <code>import-diff,media-ingest,media-remote,filesystem,cron,mail,email</code> smoke passed 1387 checks with 1 skip, and broad seed 224 smoke passed 4698 checks with 5 skips.</td>
-					<td>Importer registry/form helpers, import upload missing-file and prefiltered-error paths, upload override and filter cleanup, import attachment cleanup, text diff rendering, post/comment imported lookup through in-memory postmeta/comment fixtures, importer chunking, duplicate permalink behavior, base importer byte-length sorting, whitespace compaction, timeout/quota true and false branches, stop-the-insanity cleanup and WPDB restoration, WP_Error transfer and lifecycle ordering, and stub meta-query limit projection.</td>
+					<td>Scoped component worktree <code>component-fuzz-importer-get-page</code>; Nash identified the wrapper gap after upload/base helper coverage.</td>
+					<td>Latest focused runs: seed 224 passed 11 checks, seeds 1 and 224 over 25 iterations each passed 275 checks, seed 57123 over 10 iterations passed 110 checks, adjacent <code>import-diff,http</code> smoke passed 120 checks, syntax/diff checks passed, and broad seed 224 smoke passed 5096 checks with 1 skip.</td>
+					<td>Importer registry/form helpers, import upload missing-file and prefiltered-error paths, upload override and filter cleanup, import attachment cleanup, text diff rendering, post/comment imported lookup through in-memory postmeta/comment fixtures, importer chunking, duplicate permalink behavior, <code>WP_Importer::get_page()</code> HTTP wrapper semantics for method, timeout, safe-url args, Basic Auth, pre-HTTP response propagation, and timeout filter cleanup, base importer byte-length sorting, whitespace compaction, timeout/quota true and false branches, stop-the-insanity cleanup and WPDB restoration, WP_Error transfer and lifecycle ordering, and stub meta-query limit projection.</td>
 				</tr>
 				<tr>
 					<td><code>navigation</code></td>
@@ -1609,6 +1610,12 @@
 						<td><code>date-time</code></td>
 						<td><code>date-time</code> seeds 1, 224, and 57123 over 25 iterations each passed 375 checks; adjacent <code>date-time,l10n,translations,admin-options-submission,customizer,admin-screen</code> smoke passed 310 checks; bootstrap smoke passed after adding direct <code>wp_timezone_choice()</code> markup, selected-state, offset-label, hostile-input, locale-invariance, and l10n cleanup coverage.</td>
 						<td>4780 passed, 1 skipped, 0 failed at 1 iteration after direct <code>wp_timezone_choice()</code> markup coverage.</td>
+					</tr>
+					<tr>
+						<td><code>component-fuzz-importer-get-page</code></td>
+						<td><code>import-diff</code></td>
+						<td><code>import-diff</code> seed 224 passed 11 checks, seeds 1 and 224 over 25 iterations each passed 275 checks, and seed 57123 over 10 iterations passed 110 checks; adjacent <code>import-diff,http</code> smoke passed 120 checks; syntax/diff checks passed after adding <code>WP_Importer::get_page()</code> wrapper coverage for no-network pre-HTTP interception, GET/HEAD method args, safe URL handling, timeout injection, Basic Auth boundaries, exact response propagation, and importer timeout filter cleanup.</td>
+						<td>5096 passed, 1 skipped, 0 failed at 1 iteration after importer <code>get_page()</code> HTTP wrapper coverage.</td>
 					</tr>
 					<tr>
 						<td><code>component-fuzz-feed-anchor-links</code></td>
@@ -3967,6 +3974,12 @@
 					<td><code>filesystem</code>, <code>formatting</code></td>
 					<td>Filesystem focused: 900 passed, 0 skipped, 0 failed; sanitizeFileName PHPUnit: 21 tests, 29 assertions.</td>
 					<td>7622 passed, 63 skipped, 0 failed at 2 iterations after fixing stream/newline path normalization oracle and malformed UTF-8 filename handling.</td>
+				</tr>
+				<tr>
+					<td><code>component-fuzz-importer-get-page</code></td>
+					<td><code>import-diff</code></td>
+					<td>11 passed, 0 skipped, 0 failed at seed 224; 275 passed, 0 skipped, 0 failed at seeds 1 and 224 over 25 iterations; seed 57123 over 10 iterations passed 110 checks; adjacent import/http smoke passed 120 checks after importer <code>get_page()</code> HTTP wrapper coverage.</td>
+					<td>5096 passed, 1 skipped, 0 failed at 1 iteration after importer <code>get_page()</code> wrapper fuzzing.</td>
 				</tr>
 				<tr>
 					<td><code>46237be00d</code></td>
