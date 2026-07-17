@@ -81,6 +81,7 @@ final class KsesSurface {
 			$results = array_merge( $results, self::check_attribute_constraint_invariants( $seed ) );
 			$results = array_merge( $results, self::check_pdf_object_and_uri_attribute_invariants( $seed ) );
 			$results[] = self::check_helper_contract_matrix( $seed );
+			$results[] = self::check_generated_helper_contract_matrix( $seed );
 			$results[] = self::check_no_null_control_matrix( $seed );
 			$results[] = self::check_kses_filter_lifecycle_invariants( $seed );
 			$results[] = self::check_wp_kses_post_deep_invariants( $seed );
@@ -2233,6 +2234,406 @@ final class KsesSurface {
 			'low-level KSES helper contracts match exact bounded expectations',
 			$failures,
 			$details
+		);
+	}
+
+	private static function check_generated_helper_contract_matrix( int $seed ): array {
+		$required = array(
+			'wp_kses_array_lc',
+			'wp_kses_decode_entities',
+			'wp_kses_html_error',
+			'wp_kses_named_entities',
+			'wp_kses_normalize_entities',
+			'wp_kses_normalize_entities2',
+			'wp_kses_normalize_entities3',
+			'wp_kses_stripslashes',
+			'wp_kses_xml_named_entities',
+		);
+		foreach ( $required as $function_name ) {
+			if ( ! function_exists( $function_name ) ) {
+				return self::skip(
+					$seed,
+					null,
+					'kses.generated-helper-contract-matrix.available',
+					$function_name . '() is not loaded',
+					''
+				);
+			}
+		}
+
+		$rng      = self::rng( self::normalize_seed( 'kses-generated-helper-contracts:' . $seed ) );
+		$cases    = array();
+		$failures = array();
+
+		try {
+			for ( $case_index = 0; $case_index < 36; ++$case_index ) {
+				$slash_input    = self::generated_kses_helper_string( $rng );
+				$slash_expected = str_replace( chr( 92 ) . '"', '"', $slash_input );
+				$slash_actual   = \wp_kses_stripslashes( $slash_input );
+				if ( $slash_expected !== $slash_actual || $slash_actual !== \wp_kses_stripslashes( $slash_actual ) ) {
+					$failures[] = array(
+						'case'     => $case_index,
+						'type'     => 'stripslashes-contract',
+						'input'    => self::preview( $slash_input ),
+						'expected' => self::preview( $slash_expected ),
+						'actual'   => self::preview( $slash_actual ),
+					);
+				}
+
+				$array_input    = self::generated_kses_policy_array( $rng, $case_index );
+				$array_expected = self::expected_kses_array_lc( $array_input );
+				$array_actual   = \wp_kses_array_lc( $array_input );
+				if ( $array_expected !== $array_actual || $array_actual !== \wp_kses_array_lc( $array_actual ) ) {
+					$failures[] = array(
+						'case'     => $case_index,
+						'type'     => 'array-lc-contract',
+						'input'    => $array_input,
+						'expected' => $array_expected,
+						'actual'   => $array_actual,
+					);
+				}
+
+				$html_error_input    = self::generated_kses_html_error_input( $rng );
+				$html_error_expected = preg_replace( '/^("[^"]*("|$)|\'[^\']*(\'|$)|\S)*\s*/', '', $html_error_input );
+				$html_error_actual   = \wp_kses_html_error( $html_error_input );
+				if ( $html_error_expected !== $html_error_actual ) {
+					$failures[] = array(
+						'case'     => $case_index,
+						'type'     => 'html-error-contract',
+						'input'    => self::preview( $html_error_input ),
+						'expected' => self::preview( $html_error_expected ),
+						'actual'   => self::preview( $html_error_actual ),
+					);
+				}
+
+				$entity_case = self::generated_kses_entity_case( $rng );
+
+				$decode_expected = self::expected_kses_decode_entities( $entity_case['decodeInput'] );
+				$decode_actual   = \wp_kses_decode_entities( $entity_case['decodeInput'] );
+				if ( $decode_expected !== $decode_actual ) {
+					$failures[] = array(
+						'case'     => $case_index,
+						'type'     => 'decode-entities-contract',
+						'input'    => self::preview( $entity_case['decodeInput'] ),
+						'expected' => self::preview( $decode_expected ),
+						'actual'   => self::preview( $decode_actual ),
+					);
+				}
+
+				$html_expected = self::expected_kses_normalize_entities( $entity_case['normalizeInput'], 'html' );
+				$html_actual   = \wp_kses_normalize_entities( $entity_case['normalizeInput'], 'html' );
+				$xml_expected  = self::expected_kses_normalize_entities( $entity_case['normalizeInput'], 'xml' );
+				$xml_actual    = \wp_kses_normalize_entities( $entity_case['normalizeInput'], 'xml' );
+				if (
+					$html_expected !== $html_actual
+					|| $xml_expected !== $xml_actual
+					|| $html_actual !== \wp_kses_normalize_entities( $html_actual, 'html' )
+					|| $xml_actual !== \wp_kses_normalize_entities( $xml_actual, 'xml' )
+				) {
+					$failures[] = array(
+						'case'     => $case_index,
+						'type'     => 'normalize-entities-contract',
+						'input'    => self::preview( $entity_case['normalizeInput'] ),
+						'expected' => array(
+							'html' => self::preview( $html_expected ),
+							'xml'  => self::preview( $xml_expected ),
+						),
+						'actual'   => array(
+							'html' => self::preview( $html_actual ),
+							'xml'  => self::preview( $xml_actual ),
+						),
+					);
+				}
+
+				$named      = $entity_case['named'];
+				$html_named = \wp_kses_named_entities( array( '&amp;' . $named . ';', $named ) );
+				$xml_named  = \wp_kses_xml_named_entities( array( '&amp;' . $named . ';', $named ) );
+				if (
+					self::expected_kses_named_entity( $named, 'html' ) !== $html_named
+					|| self::expected_kses_named_entity( $named, 'xml' ) !== $xml_named
+				) {
+					$failures[] = array(
+						'case'   => $case_index,
+						'type'   => 'named-entity-callback-contract',
+						'name'   => $named,
+						'actual' => array(
+							'html' => self::preview( $html_named ),
+							'xml'  => self::preview( $xml_named ),
+						),
+					);
+				}
+
+				$decimal = $entity_case['decimal'];
+				$hex     = $entity_case['hex'];
+				if (
+					self::expected_kses_decimal_entity( $decimal ) !== \wp_kses_normalize_entities2( array( '&amp;#' . $decimal . ';', $decimal ) )
+					|| self::expected_kses_hex_entity( $hex ) !== \wp_kses_normalize_entities3( array( '&amp;#x' . $hex . ';', $hex ) )
+				) {
+					$failures[] = array(
+						'case'    => $case_index,
+						'type'    => 'numeric-entity-callback-contract',
+						'decimal' => $decimal,
+						'hex'     => $hex,
+					);
+				}
+
+				$cases[] = array(
+					'case'          => $case_index,
+					'slashInput'    => self::preview( $slash_input, 80 ),
+					'policyTags'    => array_keys( $array_input ),
+					'entityInput'   => self::preview( $entity_case['normalizeInput'], 120 ),
+					'decodeInput'   => self::preview( $entity_case['decodeInput'], 80 ),
+					'namedEntity'   => $named,
+					'decimalEntity' => $decimal,
+					'hexEntity'     => $hex,
+				);
+			}
+		} catch ( \Throwable $e ) {
+			return self::throwable_result( $seed, null, 'kses.generated-helper-contract-matrix.no-throw', '', $e );
+		}
+
+		$details = array(
+			'helpers'      => $required,
+			'caseCount'    => count( $cases ),
+			'cases'        => array_slice( $cases, 0, 8 ),
+			'failureCount' => count( $failures ),
+			'failures'     => array_slice( $failures, 0, 8 ),
+		);
+
+		if ( empty( $failures ) ) {
+			return self::pass( $seed, null, 'kses.generated-helper-contract-matrix', 'low-level helper inputs', $details );
+		}
+
+		return self::fail(
+			$seed,
+			null,
+			'kses.generated-helper-contract-matrix',
+			'low-level helper inputs',
+			'generated KSES helper inputs match deterministic low-level contracts and remain idempotent where expected',
+			$failures,
+			$details
+		);
+	}
+
+	private static function generated_kses_helper_string( array &$rng ): string {
+		$segments = array(
+			'plain',
+			'alpha',
+			chr( 92 ) . '"quote',
+			chr( 92 ) . "'single",
+			'path' . chr( 92 ) . 'tail',
+			'double' . chr( 92 ) . chr( 92 ) . 'slash',
+			'entity&amp;tail',
+			'data-' . self::rng_int( $rng, 10, 99 ),
+		);
+
+		$out   = array();
+		$count = self::rng_int( $rng, 4, 9 );
+		for ( $i = 0; $i < $count; ++$i ) {
+			$out[] = self::rng_choice( $rng, $segments );
+		}
+
+		return implode( ' ', $out );
+	}
+
+	private static function generated_kses_policy_array( array &$rng, int $case_index ): array {
+		$tag_names  = array( 'A', 'DIV', 'SPAN', 'CUSTOM-ELEMENT', 'SVG', 'MATH' );
+		$attr_names = array( 'HREF', 'TITLE', 'DATA-CF', 'ARIA-LABEL', 'CLASS', 'STYLE', 'DATA-ID' );
+		$values     = array( true, false, 'value-' . $case_index, 1, array( 'nested' => $case_index ) );
+		$out        = array();
+		$count      = self::rng_int( $rng, 2, 5 );
+
+		for ( $i = 0; $i < $count; ++$i ) {
+			$tag        = self::random_case_variant( $rng, self::rng_choice( $rng, $tag_names ) );
+			$attr_count = self::rng_int( $rng, 2, 5 );
+			$attrs      = array();
+			for ( $j = 0; $j < $attr_count; ++$j ) {
+				$attr           = self::random_case_variant( $rng, self::rng_choice( $rng, $attr_names ) );
+				$attrs[ $attr ] = self::rng_choice( $rng, $values );
+			}
+			$out[ $tag ] = $attrs;
+		}
+
+		return $out;
+	}
+
+	private static function generated_kses_html_error_input( array &$rng ): string {
+		$tokens = array(
+			'"bad value"',
+			"'bad value'",
+			'unquoted=value',
+			'next=safe',
+			'tail',
+		);
+		$count  = self::rng_int( $rng, 2, 5 );
+		$parts  = array();
+		for ( $i = 0; $i < $count; ++$i ) {
+			$parts[] = self::rng_choice( $rng, $tokens );
+		}
+
+		return implode( ' ', $parts );
+	}
+
+	private static function generated_kses_entity_case( array &$rng ): array {
+		$named_entities = array( 'amp', 'lt', 'gt', 'copy', 'nbsp', 'hellip', 'apos', 'bogus', 'bogus7', 'notanent' );
+		$decimals       = array( '0009', '010', '013', '032', '065', '160', '55295', '55296', '65533', '65534', '1114111', '1114112', '0000000' );
+		$hexes          = array( '09', '0A', '0D', '20', '041', 'A0', 'D7FF', 'D800', 'FFFD', 'FFFE', '10FFFF', '110000', '000000' );
+		$decode_bytes   = array( 34, 38, 47, 58, 65, 90, 97, 122 );
+
+		$tokens = array();
+		$count  = self::rng_int( $rng, 7, 13 );
+		for ( $i = 0; $i < $count; ++$i ) {
+			$choice = self::rng_int( $rng, 0, 6 );
+			if ( 0 === $choice ) {
+				$tokens[] = 'AT&T';
+			} elseif ( 1 === $choice ) {
+				$tokens[] = '&' . self::rng_choice( $rng, $named_entities ) . ';';
+			} elseif ( 2 === $choice ) {
+				$tokens[] = '&#' . self::rng_choice( $rng, $decimals ) . ';';
+			} elseif ( 3 === $choice ) {
+				$tokens[] = '&#x' . self::rng_choice( $rng, $hexes ) . ';';
+			} elseif ( 4 === $choice ) {
+				$tokens[] = '&amp;#' . self::rng_choice( $rng, $decimals ) . ';';
+			} elseif ( 5 === $choice ) {
+				$tokens[] = '&amp;' . self::rng_choice( $rng, $named_entities ) . ';';
+			} else {
+				$tokens[] = '&#xZZ;';
+			}
+		}
+
+		$byte_one = self::rng_choice( $rng, $decode_bytes );
+		$byte_two = self::rng_choice( $rng, $decode_bytes );
+
+		return array(
+			'normalizeInput' => implode( ' ', $tokens ),
+			'decodeInput'   => 'pre &#' . str_pad( (string) $byte_one, 3, '0', STR_PAD_LEFT ) . '; mid &#x' . strtoupper( dechex( $byte_two ) ) . '; &amp;copy; &#xZZ;',
+			'named'         => self::rng_choice( $rng, $named_entities ),
+			'decimal'       => self::rng_choice( $rng, $decimals ),
+			'hex'           => self::rng_choice( $rng, $hexes ),
+		);
+	}
+
+	private static function random_case_variant( array &$rng, string $token ): string {
+		$out = '';
+		for ( $i = 0; $i < strlen( $token ); ++$i ) {
+			$char = $token[ $i ];
+			if ( ctype_alpha( $char ) ) {
+				$out .= self::rng_chance( $rng, 50 ) ? strtolower( $char ) : strtoupper( $char );
+			} else {
+				$out .= $char;
+			}
+		}
+
+		return $out;
+	}
+
+	private static function expected_kses_array_lc( array $inarray ): array {
+		$outarray = array();
+
+		foreach ( (array) $inarray as $inkey => $inval ) {
+			$outkey              = strtolower( $inkey );
+			$outarray[ $outkey ] = array();
+
+			foreach ( (array) $inval as $inkey2 => $inval2 ) {
+				$outkey2                         = strtolower( $inkey2 );
+				$outarray[ $outkey ][ $outkey2 ] = $inval2;
+			}
+		}
+
+		return $outarray;
+	}
+
+	private static function expected_kses_decode_entities( string $content ): string {
+		$content = preg_replace_callback(
+			'/&#([0-9]+);/',
+			static function ( array $matches ): string {
+				return chr( (int) $matches[1] );
+			},
+			$content
+		);
+		$content = preg_replace_callback(
+			'/&#[Xx]([0-9A-Fa-f]+);/',
+			static function ( array $matches ): string {
+				return chr( hexdec( $matches[1] ) );
+			},
+			$content
+		);
+
+		return $content;
+	}
+
+	private static function expected_kses_normalize_entities( string $content, string $context ): string {
+		$content = str_replace( '&', '&amp;', $content );
+		$content = preg_replace_callback(
+			'/&amp;#(0*[1-9][0-9]{0,6});/',
+			static function ( array $matches ): string {
+				return self::expected_kses_decimal_entity( $matches[1] );
+			},
+			$content
+		);
+		$content = preg_replace_callback(
+			'/&amp;#[Xx](0*[1-9A-Fa-f][0-9A-Fa-f]{0,5});/',
+			static function ( array $matches ): string {
+				return self::expected_kses_hex_entity( $matches[1] );
+			},
+			$content
+		);
+		$content = preg_replace_callback(
+			'/&amp;([A-Za-z]{2,8}[0-9]{0,2});/',
+			static function ( array $matches ) use ( $context ): string {
+				return self::expected_kses_named_entity( $matches[1], $context );
+			},
+			$content
+		);
+
+		return $content;
+	}
+
+	private static function expected_kses_named_entity( string $entity_name, string $context ): string {
+		global $allowedentitynames, $allowedxmlentitynames;
+
+		if ( '' === $entity_name ) {
+			return '';
+		}
+
+		if ( 'xml' === $context ) {
+			if ( in_array( $entity_name, (array) $allowedxmlentitynames, true ) ) {
+				return '&' . $entity_name . ';';
+			}
+			if ( in_array( $entity_name, (array) $allowedentitynames, true ) ) {
+				return html_entity_decode( '&' . $entity_name . ';', ENT_HTML5 );
+			}
+
+			return '&amp;' . $entity_name . ';';
+		}
+
+		return in_array( $entity_name, (array) $allowedentitynames, true ) ? '&' . $entity_name . ';' : '&amp;' . $entity_name . ';';
+	}
+
+	private static function expected_kses_decimal_entity( string $digits ): string {
+		if ( self::is_valid_xml_unicode_codepoint( (int) $digits ) ) {
+			return '&#' . str_pad( ltrim( $digits, '0' ), 3, '0', STR_PAD_LEFT ) . ';';
+		}
+
+		return '&amp;#' . $digits . ';';
+	}
+
+	private static function expected_kses_hex_entity( string $hexchars ): string {
+		if ( ! self::is_valid_xml_unicode_codepoint( hexdec( $hexchars ) ) ) {
+			return '&amp;#x' . $hexchars . ';';
+		}
+
+		return '&#x' . ltrim( $hexchars, '0' ) . ';';
+	}
+
+	private static function is_valid_xml_unicode_codepoint( int $codepoint ): bool {
+		return (
+			0x9 === $codepoint
+			|| 0xA === $codepoint
+			|| 0xD === $codepoint
+			|| ( 0x20 <= $codepoint && $codepoint <= 0xD7FF )
+			|| ( 0xE000 <= $codepoint && $codepoint <= 0xFFFD )
+			|| ( 0x10000 <= $codepoint && $codepoint <= 0x10FFFF )
 		);
 	}
 
