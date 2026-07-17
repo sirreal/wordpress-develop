@@ -6773,6 +6773,365 @@ final class ContentLifecycleSurface {
 				&& ! in_array( false, $author_name_legacy_spacing_plain_zero_matches_plain_keys_by_field, true );
 			$author_name_legacy_spacing_zero_only_distinct_from_plain = ! in_array( false, $author_name_legacy_spacing_zero_only_distinct_from_plain_requests_by_field, true )
 				&& ! in_array( false, $author_name_legacy_spacing_zero_only_distinct_from_plain_keys_by_field, true );
+			$author_name_legacy_noisy_variants = array(
+				'noisyCanonicalStripped' => array(
+					'author'       => 'user[' . $author_excluded_a_id . ']noise,-user[' . $author_excluded_b_id . ']noise',
+					'expectedIds'  => $author_name_expected,
+					'expectedMap'  => $author_name_parent_expected,
+					'expectedStat' => $author_name_status_expected,
+					'requestGroups' => array( 'noisyCanonical' ),
+					'keySharedGroups' => array( 'noisyCanonical' ),
+				),
+				'noisyCanonicalSymbols' => array(
+					'author'       => '#(' . $author_excluded_a_id . ')?,-#(' . $author_excluded_b_id . ')?',
+					'expectedIds'  => $author_name_expected,
+					'expectedMap'  => $author_name_parent_expected,
+					'expectedStat' => $author_name_status_expected,
+					'requestGroups' => array( 'noisyCanonical' ),
+					'keySharedGroups' => array( 'noisyCanonical' ),
+				),
+				'percentMalformedCanonical' => array(
+					'author'       => $author_excluded_a_id . '%zz,-' . $author_excluded_b_id,
+					'expectedIds'  => $author_name_expected,
+					'expectedMap'  => $author_name_parent_expected,
+					'expectedStat' => $author_name_status_expected,
+					'requestGroups' => array( 'noisyCanonical' ),
+					'keySharedGroups' => array( 'noisyCanonical' ),
+				),
+				'noisyExcludeSlugStripped' => array(
+					'author'       => 'user[' . $author_excluded_b_id . ']noise,-user[' . $author_excluded_a_id . ']noise',
+					'expectedIds'  => $author_name_collision_empty_expected,
+					'expectedMap'  => array(),
+					'expectedStat' => array(),
+					'requestGroups' => array( 'noisyExcludeSlug' ),
+					'keySharedGroups' => array( 'noisyExcludeSlug' ),
+				),
+				'percentCommaSlugRetainedDigits' => array(
+					'author'       => $author_excluded_a_id . '%2C-' . $author_excluded_b_id,
+					'expectedIds'  => $author_name_collision_empty_expected,
+					'expectedMap'  => array(),
+					'expectedStat' => array(),
+				),
+				'percentCommaOtherRetainedDigits' => array(
+					'author'       => $author_excluded_b_id . '%2C-' . $author_excluded_b_id,
+					'expectedIds'  => $author_name_collision_empty_expected,
+					'expectedMap'  => array(),
+					'expectedStat' => array(),
+				),
+				'percentCommaZeroRetainedDigits' => array(
+					'author'       => '0%2C-' . $author_excluded_b_id,
+					'expectedIds'  => 2 === $author_excluded_a_id ? $author_name_expected : $author_name_collision_empty_expected,
+					'expectedMap'  => 2 === $author_excluded_a_id ? $author_name_parent_expected : array(),
+					'expectedStat' => 2 === $author_excluded_a_id ? $author_name_status_expected : array(),
+				),
+				'percentDoubleCommaSlugRetainedDigits' => array(
+					'author'       => $author_excluded_a_id . '%252C-' . $author_excluded_b_id,
+					'expectedIds'  => $author_name_collision_empty_expected,
+					'expectedMap'  => array(),
+					'expectedStat' => array(),
+				),
+				'percentLiteralCommaEncodedNoiseExcludeOther' => array(
+					'author'       => $author_excluded_a_id . ',%2C0,-' . $author_excluded_b_id,
+					'expectedIds'  => $author_name_expected,
+					'expectedMap'  => $author_name_parent_expected,
+					'expectedStat' => $author_name_status_expected,
+					'requestGroups' => array( 'percentExcludeOther' ),
+				),
+				'percentEncodedCommaZeroUpper' => array(
+					'author'       => $author_excluded_a_id . '%2C0%2C-' . $author_excluded_b_id,
+					'expectedIds'  => $author_name_collision_empty_expected,
+					'expectedMap'  => array(),
+					'expectedStat' => array(),
+					'requestGroups' => array( 'percentEncodedCommaNoSeparator' ),
+					'keySharedGroups' => array( 'percentEncodedCommaNoSeparator' ),
+				),
+				'percentEncodedCommaZeroLower' => array(
+					'author'       => $author_excluded_a_id . '%2c0%2c-' . $author_excluded_b_id,
+					'expectedIds'  => $author_name_collision_empty_expected,
+					'expectedMap'  => array(),
+					'expectedStat' => array(),
+					'requestGroups' => array( 'percentEncodedCommaNoSeparator' ),
+					'keySharedGroups' => array( 'percentEncodedCommaNoSeparator' ),
+				),
+				'percentHyphenUpper' => array(
+					'author'       => $author_excluded_a_id . '%2D-' . $author_excluded_b_id,
+					'expectedIds'  => $author_name_collision_empty_expected,
+					'expectedMap'  => array(),
+					'expectedStat' => array(),
+					'requestGroups' => array( 'percentHyphenCase' ),
+					'keySharedGroups' => array( 'percentHyphenCase' ),
+				),
+				'percentHyphenLower' => array(
+					'author'       => $author_excluded_a_id . '%2d-' . $author_excluded_b_id,
+					'expectedIds'  => $author_name_collision_empty_expected,
+					'expectedMap'  => array(),
+					'expectedStat' => array(),
+					'requestGroups' => array( 'percentHyphenCase' ),
+					'keySharedGroups' => array( 'percentHyphenCase' ),
+				),
+				'percentDoubleHyphen' => array(
+					'author'       => $author_excluded_a_id . '%252D-' . $author_excluded_b_id,
+					'expectedIds'  => $author_name_collision_empty_expected,
+					'expectedMap'  => array(),
+					'expectedStat' => array(),
+					'requestGroups' => array( 'percentHyphenDouble' ),
+				),
+			);
+			$author_name_legacy_noisy_keys = array(
+				'ids'      => array(),
+				'idParent' => array(),
+				'object'   => array(),
+			);
+			$author_name_legacy_noisy_requests = array(
+				'ids'      => array(),
+				'idParent' => array(),
+				'object'   => array(),
+			);
+			$author_name_legacy_noisy_keys_by_variant = array();
+			$author_name_legacy_noisy_request_groups = array();
+			$author_name_legacy_noisy_key_shared_groups = array();
+			$author_name_legacy_noisy_checks = array();
+			$author_name_legacy_noisy_query_var_checks = array();
+			$author_name_legacy_noisy_sql_checks = array();
+			$author_name_legacy_noisy_author_checks = array();
+			$author_name_legacy_noisy_actual = array();
+			foreach ( $author_name_legacy_noisy_variants as $variant => $config ) {
+				$variant_args = array_merge(
+					$ordering_id_args,
+					array(
+						'author'              => $config['author'],
+						'author_name'         => $author_name_slug,
+						'author__in'          => null,
+						'author__not_in'      => null,
+						'post__not_in'        => null,
+						'post_parent__not_in' => null,
+					)
+				);
+				$buckets = array(
+					'ids'      => $query_parent_status_bucket( $pretty_type, 0, 'publish', 'ids', $variant_args ),
+					'idParent' => $query_parent_status_bucket( $pretty_type, 0, 'publish', 'id=>parent', $variant_args ),
+					'object'   => $query_parent_status_bucket( $pretty_type, 0, 'publish', 'all', $variant_args ),
+				);
+				$expected_author_name = sanitize_title_for_query( $author_name_slug );
+				$expected_query_vars = $normalize_author_name_legacy_collision_arg( $config['author'] );
+				$expected_in = array_values( array_map( 'intval', $expected_query_vars['author__in'] ) );
+				$expected_not_in = array_values( array_map( 'intval', $expected_query_vars['author__not_in'] ) );
+				$expected_authors = array_fill_keys( $config['expectedIds'], $author_excluded_a_id );
+				$actual_authors = array();
+				foreach ( $buckets['object']['ids'] as $post_id ) {
+					$post = \get_post( $post_id );
+					$actual_authors[ $post_id ] = $post instanceof \WP_Post ? (int) $post->post_author : null;
+				}
+				ksort( $expected_authors );
+				ksort( $actual_authors );
+
+				$author_name_legacy_noisy_checks[ $variant ] = $query_ordering_family_is_valid( $buckets['ids'], $buckets['idParent'], $buckets['object'], $config['expectedIds'], $config['expectedMap'], $config['expectedStat'] );
+				$author_name_legacy_noisy_query_var_checks[ $variant ] = $expected_author_name === (string) ( $buckets['ids']['queryVars']['author_name'] ?? '' )
+					&& $expected_author_name === (string) ( $buckets['idParent']['queryVars']['author_name'] ?? '' )
+					&& $expected_author_name === (string) ( $buckets['object']['queryVars']['author_name'] ?? '' )
+					&& $author_excluded_a_id === (int) ( $buckets['ids']['queryVars']['author'] ?? 0 )
+					&& $author_excluded_a_id === (int) ( $buckets['idParent']['queryVars']['author'] ?? 0 )
+					&& $author_excluded_a_id === (int) ( $buckets['object']['queryVars']['author'] ?? 0 )
+					&& $expected_in === array_values( array_map( 'intval', (array) ( $buckets['ids']['queryVars']['author__in'] ?? array() ) ) )
+					&& $expected_in === array_values( array_map( 'intval', (array) ( $buckets['idParent']['queryVars']['author__in'] ?? array() ) ) )
+					&& $expected_in === array_values( array_map( 'intval', (array) ( $buckets['object']['queryVars']['author__in'] ?? array() ) ) )
+					&& $expected_not_in === array_values( array_map( 'intval', (array) ( $buckets['ids']['queryVars']['author__not_in'] ?? array() ) ) )
+					&& $expected_not_in === array_values( array_map( 'intval', (array) ( $buckets['idParent']['queryVars']['author__not_in'] ?? array() ) ) )
+					&& $expected_not_in === array_values( array_map( 'intval', (array) ( $buckets['object']['queryVars']['author__not_in'] ?? array() ) ) );
+				$expected_in_sql = empty( $expected_in ) ? '' : 'post_author IN (' . implode( ',', $expected_in ) . ')';
+				$expected_not_in_sql = empty( $expected_not_in ) ? '' : 'post_author NOT IN (' . implode( ',', $expected_not_in ) . ')';
+				$author_name_legacy_noisy_sql_checks[ $variant ] = true;
+				foreach ( array( 'ids', 'idParent', 'object' ) as $field ) {
+					$request = $buckets[ $field ]['request'];
+					$field_sql_valid = false !== strpos( $request, 'post_author = ' . (string) $author_excluded_a_id );
+					if ( '' !== $expected_not_in_sql ) {
+						$field_sql_valid = $field_sql_valid
+							&& false !== strpos( $request, $expected_not_in_sql )
+							&& false === strpos( $request, 'post_author IN' );
+					} elseif ( '' !== $expected_in_sql ) {
+						$field_sql_valid = $field_sql_valid
+							&& false !== strpos( $request, $expected_in_sql )
+							&& false === strpos( $request, 'post_author NOT IN' );
+					} else {
+						$field_sql_valid = $field_sql_valid
+							&& false === strpos( $request, 'post_author IN' )
+							&& false === strpos( $request, 'post_author NOT IN' );
+					}
+					$author_name_legacy_noisy_sql_checks[ $variant ] = $author_name_legacy_noisy_sql_checks[ $variant ] && $field_sql_valid;
+				}
+				$author_name_legacy_noisy_author_checks[ $variant ] = $expected_authors === $actual_authors;
+				$author_name_legacy_noisy_keys['ids'][] = $buckets['ids']['cacheKey'];
+				$author_name_legacy_noisy_keys['idParent'][] = $buckets['idParent']['cacheKey'];
+				$author_name_legacy_noisy_keys['object'][] = $buckets['object']['cacheKey'];
+				$author_name_legacy_noisy_requests['ids'][] = $buckets['ids']['request'];
+				$author_name_legacy_noisy_requests['idParent'][] = $buckets['idParent']['request'];
+				$author_name_legacy_noisy_requests['object'][] = $buckets['object']['request'];
+				$author_name_legacy_noisy_keys_by_variant[ $variant ] = array(
+					'ids'      => $buckets['ids']['cacheKey'],
+					'idParent' => $buckets['idParent']['cacheKey'],
+					'object'   => $buckets['object']['cacheKey'],
+				);
+				foreach ( (array) ( $config['requestGroups'] ?? array() ) as $group ) {
+					if ( ! isset( $author_name_legacy_noisy_request_groups[ $group ] ) ) {
+						$author_name_legacy_noisy_request_groups[ $group ] = array(
+							'ids'      => array(),
+							'idParent' => array(),
+							'object'   => array(),
+						);
+					}
+					$author_name_legacy_noisy_request_groups[ $group ]['ids'][] = $buckets['ids']['request'];
+					$author_name_legacy_noisy_request_groups[ $group ]['idParent'][] = $buckets['idParent']['request'];
+					$author_name_legacy_noisy_request_groups[ $group ]['object'][] = $buckets['object']['request'];
+				}
+				foreach ( (array) ( $config['keySharedGroups'] ?? array() ) as $group ) {
+					if ( ! isset( $author_name_legacy_noisy_key_shared_groups[ $group ] ) ) {
+						$author_name_legacy_noisy_key_shared_groups[ $group ] = array(
+							'ids'      => array(),
+							'idParent' => array(),
+							'object'   => array(),
+						);
+					}
+					$author_name_legacy_noisy_key_shared_groups[ $group ]['ids'][] = $buckets['ids']['cacheKey'];
+					$author_name_legacy_noisy_key_shared_groups[ $group ]['idParent'][] = $buckets['idParent']['cacheKey'];
+					$author_name_legacy_noisy_key_shared_groups[ $group ]['object'][] = $buckets['object']['cacheKey'];
+				}
+				$author_name_legacy_noisy_actual[ $variant ] = array(
+					'authorArg' => $config['author'],
+					'expectedLegacy' => $expected_query_vars,
+					'expected'  => array(
+						'ids'      => $config['expectedIds'],
+						'parents'  => $config['expectedMap'],
+						'statuses' => $config['expectedStat'],
+						'authors'  => $expected_authors,
+					),
+					'queryVar'  => array(
+						'ids'      => array(
+							'author_name'    => (string) ( $buckets['ids']['queryVars']['author_name'] ?? '' ),
+							'author'         => $buckets['ids']['queryVars']['author'] ?? null,
+							'author__in'     => array_values( array_map( 'intval', (array) ( $buckets['ids']['queryVars']['author__in'] ?? array() ) ) ),
+							'author__not_in' => array_values( array_map( 'intval', (array) ( $buckets['ids']['queryVars']['author__not_in'] ?? array() ) ) ),
+						),
+						'idParent' => array(
+							'author_name'    => (string) ( $buckets['idParent']['queryVars']['author_name'] ?? '' ),
+							'author'         => $buckets['idParent']['queryVars']['author'] ?? null,
+							'author__in'     => array_values( array_map( 'intval', (array) ( $buckets['idParent']['queryVars']['author__in'] ?? array() ) ) ),
+							'author__not_in' => array_values( array_map( 'intval', (array) ( $buckets['idParent']['queryVars']['author__not_in'] ?? array() ) ) ),
+						),
+						'object'   => array(
+							'author_name'    => (string) ( $buckets['object']['queryVars']['author_name'] ?? '' ),
+							'author'         => $buckets['object']['queryVars']['author'] ?? null,
+							'author__in'     => array_values( array_map( 'intval', (array) ( $buckets['object']['queryVars']['author__in'] ?? array() ) ) ),
+							'author__not_in' => array_values( array_map( 'intval', (array) ( $buckets['object']['queryVars']['author__not_in'] ?? array() ) ) ),
+						),
+					),
+					'authors'   => $actual_authors,
+					'keys'      => array(
+						'ids'      => substr( md5( $buckets['ids']['cacheKey'] ), 0, 8 ),
+						'idParent' => substr( md5( $buckets['idParent']['cacheKey'] ), 0, 8 ),
+						'object'   => substr( md5( $buckets['object']['cacheKey'] ), 0, 8 ),
+					),
+					'requests'  => array(
+						'ids'      => substr( md5( $buckets['ids']['request'] ), 0, 8 ),
+						'idParent' => substr( md5( $buckets['idParent']['request'] ), 0, 8 ),
+						'object'   => substr( md5( $buckets['object']['request'] ), 0, 8 ),
+					),
+					'ids'       => array(
+						'ids'      => $buckets['ids']['ids'],
+						'idParent' => $buckets['idParent']['ids'],
+						'object'   => $buckets['object']['ids'],
+					),
+					'parents'   => array(
+						'idParent' => $buckets['idParent']['parents'],
+						'object'   => $buckets['object']['parents'],
+					),
+					'statuses'  => $buckets['object']['statuses'],
+				);
+			}
+			$author_name_legacy_noisy_valid = ! in_array( false, $author_name_legacy_noisy_checks, true )
+				&& ! in_array( false, $author_name_legacy_noisy_query_var_checks, true )
+				&& ! in_array( false, $author_name_legacy_noisy_sql_checks, true )
+				&& ! in_array( false, $author_name_legacy_noisy_author_checks, true );
+			$author_name_legacy_noisy_request_groups_shared = array();
+			foreach ( $author_name_legacy_noisy_request_groups as $group => $requests_by_field ) {
+				foreach ( $requests_by_field as $field => $requests ) {
+					$author_name_legacy_noisy_request_groups_shared[ $group ][ $field ] = 1 === count( array_unique( $requests ) );
+				}
+			}
+			$author_name_legacy_noisy_key_groups_shared = array();
+			foreach ( $author_name_legacy_noisy_key_shared_groups as $group => $keys_by_field ) {
+				foreach ( $keys_by_field as $field => $keys ) {
+					$author_name_legacy_noisy_key_groups_shared[ $group ][ $field ] = 1 === count( array_unique( $keys ) );
+				}
+			}
+			$author_name_legacy_noisy_percent_exclude_key_boundaries = array(
+				'percentCommaSlugRetainedDigits',
+				'percentCommaOtherRetainedDigits',
+				'percentCommaZeroRetainedDigits',
+				'percentDoubleCommaSlugRetainedDigits',
+				'percentLiteralCommaEncodedNoiseExcludeOther',
+			);
+			$author_name_legacy_noisy_percent_exclude_canonical_distinct_boundaries = array(
+				'percentCommaSlugRetainedDigits',
+				'percentCommaOtherRetainedDigits',
+				'percentDoubleCommaSlugRetainedDigits',
+				'percentLiteralCommaEncodedNoiseExcludeOther',
+			);
+			$author_name_legacy_noisy_percent_exclude_keys_distinct_by_field = array();
+			$author_name_legacy_noisy_noisy_matches_canonical_requests_by_field = array();
+			$author_name_legacy_noisy_noisy_matches_canonical_keys_by_field = array();
+			$author_name_legacy_noisy_percent_exclude_keys_distinct_from_canonical_by_field = array();
+			$author_name_legacy_noisy_encoded_comma_distinct_from_plain_by_field = array();
+			$author_name_legacy_noisy_percent_hyphen_distinct_from_plain_by_field = array();
+			foreach ( array( 'ids', 'idParent', 'object' ) as $field ) {
+				$percent_exclude_keys = array();
+				foreach ( $author_name_legacy_noisy_percent_exclude_key_boundaries as $variant ) {
+					$percent_exclude_keys[] = $author_name_legacy_noisy_keys_by_variant[ $variant ][ $field ];
+				}
+				$percent_exclude_keys_distinct_from_canonical = array();
+				foreach ( $author_name_legacy_noisy_percent_exclude_canonical_distinct_boundaries as $variant ) {
+					$percent_exclude_keys_distinct_from_canonical[] = $author_name_legacy_noisy_keys_by_variant[ $variant ][ $field ];
+				}
+				$author_name_legacy_noisy_percent_exclude_keys_distinct_by_field[ $field ] = count( $percent_exclude_keys ) === count( array_unique( $percent_exclude_keys ) );
+				$author_name_legacy_noisy_noisy_matches_canonical_requests_by_field[ $field ] = 1 === count(
+					array_unique(
+						array_merge(
+							$author_name_legacy_noisy_request_groups['noisyCanonical'][ $field ],
+							$author_name_legacy_collision_request_groups['excludeOther'][ $field ]
+						)
+					)
+				);
+				$author_name_legacy_noisy_noisy_matches_canonical_keys_by_field[ $field ] = 1 === count(
+					array_unique(
+						array_merge(
+							$author_name_legacy_noisy_key_shared_groups['noisyCanonical'][ $field ],
+							$author_name_legacy_collision_key_shared_groups['includeSlugExcludeOther'][ $field ]
+						)
+					)
+				);
+				$author_name_legacy_noisy_percent_exclude_keys_distinct_from_canonical_by_field[ $field ] = array() === array_intersect(
+					$percent_exclude_keys_distinct_from_canonical,
+					$author_name_legacy_collision_key_shared_groups['includeSlugExcludeOther'][ $field ]
+				);
+				$author_name_legacy_noisy_encoded_comma_distinct_from_plain_by_field[ $field ] = array() === array_intersect(
+					$author_name_legacy_noisy_key_shared_groups['percentEncodedCommaNoSeparator'][ $field ],
+					$author_name_keys[ $field ]
+				);
+				$author_name_legacy_noisy_percent_hyphen_distinct_from_plain_by_field[ $field ] = array() === array_intersect(
+					array(
+						$author_name_legacy_noisy_keys_by_variant['percentHyphenUpper'][ $field ],
+						$author_name_legacy_noisy_keys_by_variant['percentDoubleHyphen'][ $field ],
+					),
+					$author_name_keys[ $field ]
+				);
+			}
+			$author_name_legacy_noisy_requests_shared = ! in_array( false, array_merge( ...array_values( $author_name_legacy_noisy_request_groups_shared ) ), true );
+			$author_name_legacy_noisy_keys_shared = ! in_array( false, array_merge( ...array_values( $author_name_legacy_noisy_key_groups_shared ) ), true );
+			$author_name_legacy_noisy_percent_exclude_keys_distinct = ! in_array( false, $author_name_legacy_noisy_percent_exclude_keys_distinct_by_field, true );
+			$author_name_legacy_noisy_noisy_matches_canonical = ! in_array( false, $author_name_legacy_noisy_noisy_matches_canonical_requests_by_field, true )
+				&& ! in_array( false, $author_name_legacy_noisy_noisy_matches_canonical_keys_by_field, true );
+			$author_name_legacy_noisy_percent_exclude_keys_distinct_from_canonical = ! in_array( false, $author_name_legacy_noisy_percent_exclude_keys_distinct_from_canonical_by_field, true );
+			$author_name_legacy_noisy_encoded_comma_distinct_from_plain = ! in_array( false, $author_name_legacy_noisy_encoded_comma_distinct_from_plain_by_field, true );
+			$author_name_legacy_noisy_percent_hyphen_distinct_from_plain = ! in_array( false, $author_name_legacy_noisy_percent_hyphen_distinct_from_plain_by_field, true );
 			$author_name_miss_slug = 'missing-author-' . $token;
 			$author_name_miss_expected = array( $pretty_mixed_leaf_id );
 			$author_name_miss_parent_expected = array(
@@ -8083,6 +8442,72 @@ final class ContentLifecycleSurface {
 						$author_name_legacy_collision_keys
 					),
 					'variants'            => $author_name_legacy_spacing_actual,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$author_name_legacy_noisy_valid
+					&& $author_name_legacy_noisy_requests_shared
+					&& $author_name_legacy_noisy_keys_shared
+					&& $author_name_legacy_noisy_percent_exclude_keys_distinct
+					&& $author_name_legacy_noisy_noisy_matches_canonical
+					&& $author_name_legacy_noisy_percent_exclude_keys_distinct_from_canonical
+					&& $author_name_legacy_noisy_encoded_comma_distinct_from_plain
+					&& $author_name_legacy_noisy_percent_hyphen_distinct_from_plain,
+				'WP_Query normalizes generated custom hierarchical author_name percent-encoded and noisy legacy author strings across selected fields',
+				array(
+					'checks'              => array(
+						'variantsValid'                 => $author_name_legacy_noisy_checks,
+						'queryVarsPreservePreStrippedLegacyArrays' => $author_name_legacy_noisy_query_var_checks,
+						'sqlUsesAuthorNameAndPreStrippedAuthorFilter' => $author_name_legacy_noisy_sql_checks,
+						'payloadAuthorsMatchSlug'       => $author_name_legacy_noisy_author_checks,
+						'groupRequestsShared'           => $author_name_legacy_noisy_request_groups_shared,
+						'groupKeysShared'               => $author_name_legacy_noisy_key_groups_shared,
+						'percentExcludeKeysDistinct'    => $author_name_legacy_noisy_percent_exclude_keys_distinct_by_field,
+						'noisyRequestsMatchCanonical'   => $author_name_legacy_noisy_noisy_matches_canonical_requests_by_field,
+						'noisyKeysMatchCanonical'       => $author_name_legacy_noisy_noisy_matches_canonical_keys_by_field,
+						'percentExcludeKeysDistinctFromCanonical' => $author_name_legacy_noisy_percent_exclude_keys_distinct_from_canonical_by_field,
+						'encodedCommaKeysDistinctFromPlain' => $author_name_legacy_noisy_encoded_comma_distinct_from_plain_by_field,
+						'percentHyphenKeysDistinctFromPlain' => $author_name_legacy_noisy_percent_hyphen_distinct_from_plain_by_field,
+					),
+					'authorNameSlug'      => $author_name_slug,
+					'expectedAuthorName'  => sanitize_title_for_query( $author_name_slug ),
+					'resolvedAuthorId'    => $author_excluded_a_id,
+					'otherAuthorId'       => $author_excluded_b_id,
+					'expectedMatchIds'    => $author_name_expected,
+					'expectedEmptyIds'    => $author_name_collision_empty_expected,
+					'uniqueRequestHashes' => array_map(
+						static fn ( array $requests ): array => array_values( array_unique( array_map( static fn ( string $request ): string => substr( md5( $request ), 0, 8 ), $requests ) ) ),
+						$author_name_legacy_noisy_requests
+					),
+					'uniqueKeyHashes'     => array_map(
+						static fn ( array $keys ): array => array_values( array_unique( array_map( static fn ( string $key ): string => substr( md5( $key ), 0, 8 ), $keys ) ) ),
+						$author_name_legacy_noisy_keys
+					),
+					'groupRequestHashes'  => array_map(
+						static fn ( array $group ): array => array_map(
+							static fn ( array $requests ): array => array_values( array_unique( array_map( static fn ( string $request ): string => substr( md5( $request ), 0, 8 ), $requests ) ) ),
+							$group
+						),
+						$author_name_legacy_noisy_request_groups
+					),
+					'groupKeyHashes'      => array_map(
+						static fn ( array $group ): array => array_map(
+							static fn ( array $keys ): array => array_values( array_unique( array_map( static fn ( string $key ): string => substr( md5( $key ), 0, 8 ), $keys ) ) ),
+							$group
+						),
+						$author_name_legacy_noisy_key_shared_groups
+					),
+					'canonicalMixedSignedKeys' => array_map(
+						static fn ( array $keys ): array => array_values( array_unique( array_map( static fn ( string $key ): string => substr( md5( $key ), 0, 8 ), $keys ) ) ),
+						$author_name_legacy_collision_key_shared_groups['includeSlugExcludeOther']
+					),
+					'plainAuthorNameKeys' => array_map(
+						static fn ( array $keys ): array => array_values( array_unique( array_map( static fn ( string $key ): string => substr( md5( $key ), 0, 8 ), $keys ) ) ),
+						$author_name_keys
+					),
+					'variants'            => $author_name_legacy_noisy_actual,
 				)
 			);
 
