@@ -47,6 +47,7 @@ final class RestControllersSurface {
 			$rows[] = self::check_search_settings_default_filtered_dispatch_matrix( $ctx->fork( 'search-settings-default-filters' ) );
 			$rows[] = self::check_controller_argument_error_envelopes( $ctx->fork( 'controller-argument-errors' ) );
 			$rows[] = self::check_menu_locations_controller( $ctx->fork( 'menu-locations' ) );
+			$rows[] = self::check_menu_locations_argument_permission_boundaries( $ctx->fork( 'menu-location-args' ) );
 			$rows[] = self::check_route_registry_behavior( $ctx );
 			$rows[] = self::check_plugin_theme_controller_contracts( $ctx->fork( 'plugin-theme-controllers' ) );
 		} catch ( \Throwable $e ) {
@@ -4387,6 +4388,286 @@ final class RestControllersSurface {
 		);
 	}
 
+	private static function check_menu_locations_argument_permission_boundaries( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime_state();
+
+		$case             = self::menu_locations_case( $ctx );
+		$controller       = new \WP_REST_Menu_Locations_Controller();
+		$server           = new \WP_REST_Server();
+		$collection_route = '/wp/v2/menu-locations';
+		$item_route       = $collection_route . '/' . $case['assignedLocation'];
+		$menu_term        = self::nav_menu_term( $case );
+		$failures         = array();
+
+		$previous_server       = $GLOBALS['wp_rest_server'] ?? null;
+		$had_registered_menus  = array_key_exists( '_wp_registered_nav_menus', $GLOBALS );
+		$registered_menus      = $GLOBALS['_wp_registered_nav_menus'] ?? null;
+		$had_taxonomies        = array_key_exists( 'wp_taxonomies', $GLOBALS );
+		$previous_taxonomies   = $GLOBALS['wp_taxonomies'] ?? null;
+		$had_current_user      = array_key_exists( 'current_user', $GLOBALS );
+		$previous_current_user = $GLOBALS['current_user'] ?? null;
+		$filter_snapshot       = self::rest_default_filter_state();
+		$filters_installed     = array();
+		$wp_sprintf_l_priority = \has_filter( 'wp_sprintf', 'wp_sprintf_l' );
+		$read_access_events    = array();
+		$prepare_events        = array();
+
+		$read_access_filter = static function ( $read_only_access, \WP_REST_Request $request, $filtered_controller ) use ( &$read_access_events ): bool {
+			$read_access_events[] = array(
+				'route'      => $request->get_route(),
+				'method'     => $request->get_method(),
+				'context'    => $request->get_param( 'context' ),
+				'controller' => is_object( $filtered_controller ) ? get_class( $filtered_controller ) : gettype( $filtered_controller ),
+				'incoming'   => (bool) $read_only_access,
+				'override'   => (bool) $request->get_param( 'cfz_read_access' ),
+			);
+
+			return $request->get_param( 'cfz_read_access' ) ? true : (bool) $read_only_access;
+		};
+		$theme_mod_filter = static function () use ( $case ): array {
+			return array(
+				$case['assignedLocation'] => $case['menuId'],
+			);
+		};
+		$prepare_filter = static function ( \WP_REST_Response $response, object $location, \WP_REST_Request $request ) use ( &$prepare_events ): \WP_REST_Response {
+			$prepare_events[] = array(
+				'name'    => $location->name ?? null,
+				'route'   => $request->get_route(),
+				'context' => $request->get_param( 'context' ),
+				'fields'  => $request->get_param( '_fields' ),
+			);
+
+			return $response;
+		};
+
+		$GLOBALS['wp_rest_server']            = $server;
+		$GLOBALS['_wp_registered_nav_menus'] = array();
+		$GLOBALS['current_user']             = new \WP_User( 0 );
+
+		$denied_invalid_context            = null;
+		$allowed_invalid_context           = null;
+		$item_invalid_context              = null;
+		$denied_valid_context              = null;
+		$allowed_valid_collection          = null;
+		$prepare_events_after_invalid      = array();
+		$read_access_events_after_invalid = array();
+
+		\register_taxonomy(
+			'nav_menu',
+			'nav_menu_item',
+			array(
+				'public'       => false,
+				'show_in_rest' => true,
+				'rest_base'    => 'menus',
+			)
+		);
+		\register_nav_menu( $case['assignedLocation'], $case['assignedDescription'] );
+		\register_nav_menu( $case['emptyLocation'], $case['emptyDescription'] );
+		\wp_cache_set( $case['menuId'], $menu_term, 'terms' );
+		\add_filter( 'rest_menu_read_access', $read_access_filter, 10, 3 );
+		\add_filter( 'theme_mod_nav_menu_locations', $theme_mod_filter, 10, 1 );
+		\add_filter( 'rest_prepare_menu_location', $prepare_filter, 10, 3 );
+		if ( false === $wp_sprintf_l_priority ) {
+			\add_filter( 'wp_sprintf', 'wp_sprintf_l', 10, 2 );
+		}
+
+		try {
+			$controller->register_routes();
+			\rest_api_default_filters();
+			$filters_installed = self::rest_default_filter_state();
+
+			$denied_invalid_context = self::dispatch_with_rest_post_dispatch(
+				$server,
+				self::request(
+					'GET',
+					$collection_route,
+					array( 'context' => $case['invalidContext'] )
+				)
+			);
+			$allowed_invalid_context = self::dispatch_with_rest_post_dispatch(
+				$server,
+				self::request(
+					'GET',
+					$collection_route,
+					array(
+						'context'         => $case['invalidContext'],
+						'cfz_read_access' => '1',
+					)
+				)
+			);
+			$item_invalid_context = self::dispatch_with_rest_post_dispatch(
+				$server,
+				self::request(
+					'GET',
+					$item_route,
+					array(
+						'context'         => $case['invalidContext'],
+						'cfz_read_access' => '1',
+					)
+				)
+			);
+			$prepare_events_after_invalid     = $prepare_events;
+			$read_access_events_after_invalid = $read_access_events;
+			$denied_valid_context             = self::dispatch_with_rest_post_dispatch(
+				$server,
+				self::request(
+					'GET',
+					$collection_route,
+					array( 'context' => 'view' )
+				)
+			);
+			$allowed_valid_collection         = self::dispatch_with_rest_post_dispatch(
+				$server,
+				self::request(
+					'GET',
+					$collection_route,
+					array(
+						'context'         => 'embed',
+						'cfz_read_access' => '1',
+					)
+				)
+			);
+		} finally {
+			if ( false === $wp_sprintf_l_priority ) {
+				\remove_filter( 'wp_sprintf', 'wp_sprintf_l', 10 );
+			}
+			self::restore_rest_default_filters( $filter_snapshot );
+
+			\remove_filter( 'rest_menu_read_access', $read_access_filter, 10 );
+			\remove_filter( 'theme_mod_nav_menu_locations', $theme_mod_filter, 10 );
+			\remove_filter( 'rest_prepare_menu_location', $prepare_filter, 10 );
+			\unregister_nav_menu( $case['assignedLocation'] );
+			\unregister_nav_menu( $case['emptyLocation'] );
+			\wp_cache_delete( $case['menuId'], 'terms' );
+
+			if ( $had_registered_menus ) {
+				$GLOBALS['_wp_registered_nav_menus'] = $registered_menus;
+			} else {
+				unset( $GLOBALS['_wp_registered_nav_menus'] );
+			}
+
+			if ( $had_taxonomies ) {
+				$GLOBALS['wp_taxonomies'] = $previous_taxonomies;
+			} else {
+				unset( $GLOBALS['wp_taxonomies'] );
+			}
+
+			if ( $had_current_user ) {
+				$GLOBALS['current_user'] = $previous_current_user;
+			} else {
+				unset( $GLOBALS['current_user'] );
+			}
+
+			if ( null !== $previous_server ) {
+				$GLOBALS['wp_rest_server'] = $previous_server;
+			} else {
+				unset( $GLOBALS['wp_rest_server'] );
+			}
+		}
+
+		$valid_data            = $allowed_valid_collection instanceof \WP_REST_Response ? $allowed_valid_collection->get_data() : array();
+		$valid_assigned        = is_array( $valid_data[ $case['assignedLocation'] ] ?? null ) ? $valid_data[ $case['assignedLocation'] ] : array();
+		$denied_headers        = $denied_invalid_context instanceof \WP_REST_Response ? $denied_invalid_context->get_headers() : array();
+		$invalid_headers       = $allowed_invalid_context instanceof \WP_REST_Response ? $allowed_invalid_context->get_headers() : array();
+		$invalid_allow         = array_map( 'trim', explode( ',', (string) ( $invalid_headers['Allow'] ?? '' ) ) );
+		$filter_restored       = $filter_snapshot === self::rest_default_filter_state();
+		$server_restored       = null !== $previous_server ? ( $GLOBALS['wp_rest_server'] ?? null ) === $previous_server : ! array_key_exists( 'wp_rest_server', $GLOBALS );
+		$wp_sprintf_l_restored = $wp_sprintf_l_priority === \has_filter( 'wp_sprintf', 'wp_sprintf_l' );
+		$default_filters_ok    = array(
+			'rest_pre_serve_request:rest_send_cors_headers'      => 10,
+			'rest_post_dispatch:rest_send_allow_header'          => 10,
+			'rest_post_dispatch:rest_filter_response_fields'     => 10,
+			'rest_pre_dispatch:rest_handle_options_request'      => 10,
+			'rest_index:rest_add_application_passwords_to_index' => 10,
+		) === $filters_installed;
+
+		self::collect_failure(
+			$failures,
+			self::response_invalid_param_details_ok( $denied_invalid_context, array( 'context' => 'rest_not_in_enum' ) )
+				&& self::response_invalid_param_details_ok( $allowed_invalid_context, array( 'context' => 'rest_not_in_enum' ) )
+				&& self::response_invalid_param_details_ok( $item_invalid_context, array( 'context' => 'rest_not_in_enum' ) )
+				&& self::response_envelope_ok( $server, $denied_invalid_context )
+				&& self::response_envelope_ok( $server, $allowed_invalid_context )
+				&& self::response_envelope_ok( $server, $item_invalid_context )
+				&& in_array( 'GET', $invalid_allow, true )
+				&& array() === $prepare_events_after_invalid
+				&& 3 === count( $read_access_events_after_invalid )
+				&& array() === array_filter(
+					$read_access_events_after_invalid,
+					static fn( array $event ): bool => $event['context'] !== ( $case['invalidContext'] ?? null )
+				),
+			'menu location invalid context reaches permission filters but is schema-rejected before response preparation',
+			array(
+				'deniedInvalidContext'       => $denied_invalid_context,
+				'allowedInvalidContext'      => $allowed_invalid_context,
+				'itemInvalidContext'         => $item_invalid_context,
+				'deniedHeaders'              => $denied_headers,
+				'allowedHeaders'             => $invalid_headers,
+				'prepareEventsAfterInvalid'     => $prepare_events_after_invalid,
+				'readAccessEventsAfterInvalid' => $read_access_events_after_invalid,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::response_error_ok( $denied_valid_context, 'rest_cannot_view', \rest_authorization_required_code() )
+				&& 0 < count( array_filter( $read_access_events, static fn( array $event ): bool => false === $event['override'] ) ),
+			'menu location valid anonymous requests remain permission-gated after args validate',
+			array(
+				'deniedValidContext' => $denied_valid_context,
+				'readAccessEvents'   => $read_access_events,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$allowed_valid_collection instanceof \WP_REST_Response
+				&& 200 === $allowed_valid_collection->get_status()
+				&& array( $case['assignedLocation'], $case['emptyLocation'] ) === array_keys( $valid_data )
+				&& $case['assignedLocation'] === ( $valid_assigned['name'] ?? null )
+				&& $case['menuId'] === ( $valid_assigned['menu'] ?? null )
+				&& 0 < count( $prepare_events ),
+			'menu location controller recovers after invalid requests and still honors read-access override responses',
+			array(
+				'validData'     => $valid_data,
+				'prepareEvents' => $prepare_events,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$default_filters_ok
+				&& $filter_restored
+				&& $wp_sprintf_l_restored
+				&& $server_restored
+				&& false === \has_filter( 'rest_menu_read_access', $read_access_filter, 10 )
+				&& false === \has_filter( 'theme_mod_nav_menu_locations', $theme_mod_filter, 10 )
+				&& false === \has_filter( 'rest_prepare_menu_location', $prepare_filter, 10 )
+				&& ! isset( \get_registered_nav_menus()[ $case['assignedLocation'] ] )
+				&& ! isset( \get_registered_nav_menus()[ $case['emptyLocation'] ] ),
+			'menu location argument boundary filters, default REST filters, routes, and globals are restored',
+			array(
+				'filtersInstalled' => $filters_installed,
+				'filterSnapshot'   => $filter_snapshot,
+				'filterRestored'   => $filter_restored,
+				'wpSprintfLBefore' => $wp_sprintf_l_priority,
+				'wpSprintfLAfter'  => \has_filter( 'wp_sprintf', 'wp_sprintf_l' ),
+				'serverRestored'   => $server_restored,
+				'registeredMenus'  => \get_registered_nav_menus(),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'rest-controllers.menu-locations.argument-permission-boundaries',
+			array() === $failures,
+			array(
+				'case'     => $case,
+				'failures' => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
 	private static function check_search_settings_default_filtered_dispatch_matrix( \ComponentFuzz\FuzzContext $ctx ): array {
 		self::reset_runtime_state();
 
@@ -6799,6 +7080,7 @@ final class RestControllersSurface {
 			'assignedLocation'    => $assigned,
 			'emptyLocation'       => $empty,
 			'invalidLocation'     => self::route_token( $ctx->fork( 'invalid-location' ), 'cfz-missing' ),
+			'invalidContext'      => self::route_token( $ctx->fork( 'invalid-context' ), 'cfz-context' ),
 			'assignedDescription' => 'Primary menu ' . $ctx->fork( 'assigned-description' )->int( 1, 999 ),
 			'emptyDescription'    => 'Secondary menu ' . $ctx->fork( 'empty-description' )->int( 1, 999 ),
 			'menuId'              => 62000 + ( $ctx->fork( 'menu-id' )->seed() % 1000 ),
