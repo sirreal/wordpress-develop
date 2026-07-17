@@ -46,6 +46,7 @@ final class RestWidgetsSidebarsSurface {
 			$rows[] = self::check_legacy_widget_form_data_and_delete_hooks( $ctx->fork( 'legacy' ), $case );
 			$rows[] = self::check_head_short_circuit_and_field_projection( $ctx->fork( 'head-fields' ), $case );
 			$rows[] = self::check_route_dispatched_widget_sidebar_mutations( $ctx->fork( 'dispatch-mutations' ), $case );
+			$rows[] = self::check_route_dispatched_missing_sidebar_update_diagnostic( $ctx->fork( 'missing-sidebar-update' ), $case );
 		} catch ( \Throwable $e ) {
 			$rows[] = self::row(
 				$ctx,
@@ -2259,6 +2260,149 @@ PHP;
 		);
 	}
 
+	private static function check_route_dispatched_missing_sidebar_update_diagnostic( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$snapshot = self::snapshot_state();
+
+		$failures           = array();
+		$missing_sidebar_id = 'cfz-missing-' . $case['token'];
+		$requested_widgets  = array( $case['publicTextId'] );
+		$initial_sidebars   = array();
+		$after_update       = array();
+		$save_calls         = array();
+		$update_capture     = array( 'value' => null, 'warnings' => array(), 'threw' => false );
+		$get_response       = null;
+		$cap_filter_removed = false;
+		$save_action_removed = false;
+
+		$save_action = static function ( $sidebar, \WP_REST_Request $request ) use ( &$save_calls ): void {
+			$save_calls[] = array(
+				'id'             => is_array( $sidebar ) ? ( $sidebar['id'] ?? null ) : null,
+				'sidebarType'    => gettype( $sidebar ),
+				'widgets'        => is_array( $sidebar ) ? ( $sidebar['widgets'] ?? null ) : null,
+				'method'         => $request->get_method(),
+				'requestWidgets' => is_array( $request['widgets'] ) ? array_values( $request['widgets'] ) : $request['widgets'],
+			);
+		};
+
+		try {
+			self::reset_runtime();
+			self::seed_widgets( $case );
+
+			$server = self::fresh_rest_server();
+			( new \WP_REST_Sidebars_Controller() )->register_routes();
+
+			$initial_sidebars = self::sidebar_map();
+
+			\add_action( 'rest_save_sidebar', $save_action, 10, 2 );
+			$cap_filter = self::install_cap_filter( array( 'edit_theme_options' ) );
+			try {
+				$request = self::request(
+					'PATCH',
+					'/wp/v2/sidebars/' . $missing_sidebar_id,
+					array(
+						'_fields' => 'id,status,widgets',
+						'widgets' => $requested_widgets,
+					)
+				);
+
+				$update_capture = self::capture_warnings(
+					static function () use ( $server, $request ) {
+						return self::apply_response_fields( $server->dispatch( $request ), $request );
+					}
+				);
+				$after_update   = self::sidebar_map();
+				$get_response   = $server->dispatch(
+					self::request( 'GET', '/wp/v2/sidebars/' . $missing_sidebar_id )
+				);
+			} finally {
+				$cap_filter_removed  = self::remove_cap_filter( $cap_filter );
+				\remove_action( 'rest_save_sidebar', $save_action, 10 );
+				$save_action_removed = false === \has_filter( 'rest_save_sidebar', $save_action );
+			}
+		} finally {
+			self::restore_state( $snapshot );
+		}
+
+		$update_response = $update_capture['value'] ?? null;
+		$update_data     = $update_response instanceof \WP_REST_Response ? $update_response->get_data() : array();
+		$warnings        = $update_capture['warnings'] ?? array();
+
+		self::collect_failure(
+			$failures,
+			array( $case['publicTextId'], $case['legacyId'] ) === ( $initial_sidebars[ $case['publicSidebar'] ] ?? null )
+				&& array( $case['hiddenTextId'], $case['searchSeedId'] ) === ( $initial_sidebars[ $case['hiddenSidebar'] ] ?? null )
+				&& ! isset( $initial_sidebars[ $missing_sidebar_id ] ),
+			'missing-sidebar diagnostic fixture starts with no raw missing-sidebar entry',
+			array(
+				'missingSidebarId' => $missing_sidebar_id,
+				'initialSidebars'  => $initial_sidebars,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			false === ( $update_capture['threw'] ?? true )
+				&& $update_response instanceof \WP_REST_Response
+				&& 200 === $update_response->get_status()
+				&& self::projected_keys_match( $update_data, array( 'status', 'widgets' ) )
+				&& 'inactive' === ( $update_data['status'] ?? null )
+				&& array() === ( $update_data['widgets'] ?? null )
+				&& count( $warnings ) >= 1
+				&& self::warnings_contain( $warnings, 'Trying to access array offset on null' ),
+			'route-dispatched missing-sidebar update currently returns an inactive response and emits null-sidebar warnings',
+			array(
+				'response' => self::describe_response( $update_response ),
+				'warnings' => array_slice( $warnings, 0, 8 ),
+				'threw'    => $update_capture['threw'] ?? null,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			array( $case['legacyId'] ) === ( $after_update[ $case['publicSidebar'] ] ?? null )
+				&& $requested_widgets === ( $after_update[ $missing_sidebar_id ] ?? null )
+				&& array( $case['hiddenTextId'], $case['searchSeedId'] ) === ( $after_update[ $case['hiddenSidebar'] ] ?? null )
+				&& self::response_error_matches( $get_response, 'rest_sidebar_not_found', 404 ),
+			'route-dispatched missing-sidebar update currently steals widgets into a raw unregistered sidebar that GET still cannot resolve',
+			array(
+				'requestedWidgets' => $requested_widgets,
+				'afterUpdate'      => $after_update,
+				'getResponse'      => self::describe_response( $get_response ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$cap_filter_removed
+				&& $save_action_removed
+				&& array(
+					array(
+						'id'             => null,
+						'sidebarType'    => 'NULL',
+						'widgets'        => null,
+						'method'         => 'PATCH',
+						'requestWidgets' => $requested_widgets,
+					),
+				) === $save_calls,
+			'missing-sidebar update diagnostic records the null sidebar save hook payload and cleans temporary hooks',
+			array(
+				'capFilterRemoved'  => $cap_filter_removed,
+				'saveActionRemoved' => $save_action_removed,
+				'saveCalls'         => $save_calls,
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'rest-widgets-sidebars.sidebars.missing-update-current-behavior',
+			$failures,
+			array(
+				'case'             => self::case_summary( $case ),
+				'missingSidebarId' => $missing_sidebar_id,
+			)
+		);
+	}
+
 	private static function reset_runtime(): void {
 		self::$legacy_widget_events = array();
 
@@ -2620,6 +2764,50 @@ PHP;
 		}
 
 		return \rest_filter_response_fields( $response, \rest_get_server(), $request );
+	}
+
+	private static function capture_warnings( callable $callback ): array {
+		$warnings = array();
+
+		set_error_handler(
+			static function ( int $severity, string $message, string $file, int $line ) use ( &$warnings ): bool {
+				$warnings[] = array(
+					'severity' => $severity,
+					'message'  => $message,
+					'fileBase' => basename( $file ),
+					'line'     => $line,
+				);
+
+				return true;
+			}
+		);
+
+		try {
+			return array(
+				'value'    => $callback(),
+				'warnings' => $warnings,
+				'threw'    => false,
+			);
+		} catch ( \Throwable $e ) {
+			return array(
+				'value'     => null,
+				'warnings'  => $warnings,
+				'threw'     => true,
+				'throwable' => self::describe_throwable( $e ),
+			);
+		} finally {
+			restore_error_handler();
+		}
+	}
+
+	private static function warnings_contain( array $warnings, string $needle ): bool {
+		foreach ( $warnings as $warning ) {
+			if ( str_contains( (string) ( $warning['message'] ?? '' ), $needle ) ) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	private static function decode_instance_payload( $payload ) {
