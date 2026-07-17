@@ -80,6 +80,7 @@ final class MailSurface {
 				'remove_filter',
 				'wp_mail',
 				'wp_specialchars_decode',
+				'wp_staticize_emoji',
 				'wp_staticize_emoji_for_email',
 			) as $function
 		) {
@@ -1158,29 +1159,123 @@ final class MailSurface {
 	}
 
 	private static function check_staticize_emoji_for_email( \ComponentFuzz\FuzzContext $ctx ): array {
-		$mail = array(
-			'to'          => 'emoji@example.test',
+		$failures    = array();
+		$message     = '<p>Emoji ' . $ctx->identifier( 4, 8 ) . " \u{1F600} \u{2764}\u{FE0F}</p>";
+		$staticized  = \wp_staticize_emoji( $message );
+		$base_mail   = array(
+			'to'          => array( 'emoji+' . $ctx->identifier( 3, 6 ) . '@example.test' ),
 			'subject'     => 'Subject ' . $ctx->identifier( 4, 8 ),
-			'message'     => "Emoji \u{1F600} body",
-			'headers'     => array( 'Content-Type: text/html; charset=UTF-8' ),
-			'attachments' => array(),
-			'embeds'      => array(),
+			'message'     => $message,
+			'headers'     => array(),
+			'attachments' => array( '/tmp/component-fuzz-' . $ctx->identifier( 3, 6 ) . '.txt' ),
+			'embeds'      => array( 'cid-' . $ctx->identifier( 3, 6 ) ),
 		);
-		$result = \wp_staticize_emoji_for_email( $mail );
 
-		$ok = is_array( $result )
-			&& $mail['to'] === $result['to']
-			&& $mail['subject'] === $result['subject']
-			&& is_string( $result['message'] )
-			&& '' !== $result['message'];
-
-		return $ctx->result(
-			'mail.emoji-staticization.shape-preserving',
-			$ok,
-			array(
-				'message' => self::describe_string( is_array( $result ) ? (string) ( $result['message'] ?? '' ) : '' ),
-			)
+		$cases = array(
+			'array-html'          => array(
+				'headers'   => array( 'Content-Type: text/html; charset=UTF-8', 'X-Trace: array' ),
+				'expected'  => 'staticized',
+			),
+			'string-html-crlf'    => array(
+				'headers'   => "X-Trace: crlf\r\nContent-Type: text/html; charset=UTF-8\r\n",
+				'expected'  => 'staticized',
+			),
+			'string-html-lf'      => array(
+				'headers'   => "X-Trace: lf\nContent-Type: text/html\n",
+				'expected'  => 'staticized',
+			),
+			'text-plain'          => array(
+				'headers'   => array( 'Content-Type: text/plain; charset=UTF-8' ),
+				'expected'  => 'unchanged',
+			),
+			'mixed-case-html'     => array(
+				'headers'   => array( 'Content-Type: Text/Html; charset=UTF-8' ),
+				'expected'  => 'unchanged',
+			),
+			'missing-headers'     => array(
+				'headers'   => null,
+				'expected'  => 'unchanged',
+			),
+			'filter-forces-html'  => array(
+				'headers'   => array( 'Content-Type: text/plain; charset=UTF-8' ),
+				'filter'    => 'text/html',
+				'expected'  => 'staticized',
+			),
+			'filter-forces-plain' => array(
+				'headers'   => array( 'Content-Type: text/html; charset=UTF-8' ),
+				'filter'    => 'text/plain',
+				'expected'  => 'unchanged',
+			),
+			'no-message'          => array(
+				'headers'   => array( 'Content-Type: text/html; charset=UTF-8' ),
+				'noMessage' => true,
+				'expected'  => 'no-message',
+			),
 		);
+
+		foreach ( $cases as $label => $case ) {
+			$mail = $base_mail;
+			if ( null === $case['headers'] ) {
+				unset( $mail['headers'] );
+			} else {
+				$mail['headers'] = $case['headers'];
+			}
+			if ( ! empty( $case['noMessage'] ) ) {
+				unset( $mail['message'] );
+			}
+
+			$content_type_filter = null;
+			if ( isset( $case['filter'] ) ) {
+				$content_type_filter = static function () use ( $case ): string {
+					return $case['filter'];
+				};
+				\add_filter( 'wp_mail_content_type', $content_type_filter );
+			}
+
+			try {
+				$result = \wp_staticize_emoji_for_email( $mail );
+			} finally {
+				if ( null !== $content_type_filter ) {
+					\remove_filter( 'wp_mail_content_type', $content_type_filter );
+				}
+			}
+
+			$expected_message = 'staticized' === $case['expected'] ? $staticized : $message;
+			$non_message_ok   = is_array( $result );
+			if ( $non_message_ok ) {
+				foreach ( array( 'to', 'subject', 'headers', 'attachments', 'embeds' ) as $key ) {
+					if ( array_key_exists( $key, $mail ) && ( ! array_key_exists( $key, $result ) || $mail[ $key ] !== $result[ $key ] ) ) {
+						$non_message_ok = false;
+						break;
+					}
+					if ( ! array_key_exists( $key, $mail ) && array_key_exists( $key, $result ) ) {
+						$non_message_ok = false;
+						break;
+					}
+				}
+			}
+
+			$has_message        = is_array( $result ) && array_key_exists( 'message', $result );
+			$message_ok         = 'no-message' === $case['expected']
+				? ! $has_message && $mail === $result
+				: $has_message && $expected_message === $result['message'];
+			$filter_removed     = null === $content_type_filter || false === \has_filter( 'wp_mail_content_type', $content_type_filter );
+			$staticized_changed = 'staticized' !== $case['expected'] || $staticized !== $message;
+
+			self::collect_failure(
+				$failures,
+				$non_message_ok && $message_ok && $filter_removed && $staticized_changed,
+				'wp_staticize_emoji_for_email honors parsed and filtered content type while preserving non-message mail fields',
+				array(
+					'label'           => $label,
+					'case'            => $case,
+					'result'          => self::describe_value( $result ),
+					'expectedMessage' => self::describe_string( 'no-message' === $case['expected'] ? '' : $expected_message ),
+				)
+			);
+		}
+
+		return self::row( $ctx, 'mail.emoji-staticization.content-type-matrix', $failures );
 	}
 
 	private static function addresses_include( array $addresses, string $email, string $name ): bool {
