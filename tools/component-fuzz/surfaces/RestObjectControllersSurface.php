@@ -47,6 +47,7 @@ final class RestObjectControllersSurface {
 			$rows[] = self::check_route_dispatched_collection_envelope_options_edges( $ctx->fork( 'collection-envelope-options' ), $case, $fixtures );
 			$rows[] = self::check_route_dispatched_collection_batch_error_edges( $ctx->fork( 'collection-batch-errors' ), $case, $fixtures );
 			$rows[] = self::check_route_dispatched_collection_batch_success_cleanup_edges( $ctx->fork( 'collection-batch-success' ), $case, $fixtures );
+			$rows[] = self::check_route_dispatched_collection_batch_mixed_create_edges( $ctx->fork( 'collection-batch-mixed-create' ), $case, $fixtures );
 			$rows[] = self::check_templates_controller( $ctx, $case );
 			$rows[] = self::check_short_circuited_collection_queries( $ctx->fork( 'collection-queries' ), $case, $fixtures );
 			$rows[] = self::check_route_dispatched_collection_get_edges( $ctx->fork( 'collection-get-dispatch' ), $case, $fixtures, $additional_field_calls );
@@ -6253,6 +6254,597 @@ final class RestObjectControllersSurface {
 		return self::row(
 			$ctx,
 			'rest-object-controllers.collections.batch-v1-success-cleanup-parity',
+			array() === $failures,
+			array(
+				'case'       => self::case_summary( $case ),
+				'controllers' => array( 'posts', 'terms', 'users' ),
+				'failures'   => array_slice( $failures, 0, 8 ),
+				'observed'   => $observed,
+			)
+		);
+	}
+
+	private static function check_route_dispatched_collection_batch_mixed_create_edges( \ComponentFuzz\FuzzContext $ctx, array $case, array $fixtures ): array {
+		$failures = array();
+		$observed = array();
+
+		$previous_server          = $GLOBALS['wp_rest_server'] ?? null;
+		$had_wp_actions           = array_key_exists( 'wp_actions', $GLOBALS );
+		$previous_actions         = $GLOBALS['wp_actions'] ?? null;
+		$previous_current_user_id = isset( $GLOBALS['current_user'] ) && $GLOBALS['current_user'] instanceof \WP_User
+			? (int) $GLOBALS['current_user']->ID
+			: 0;
+		$had_wpdb                 = array_key_exists( 'wpdb', $GLOBALS );
+		$previous_wpdb            = $GLOBALS['wpdb'] ?? null;
+
+		$server                    = new \WP_REST_Server();
+		$GLOBALS['wp_rest_server'] = $server;
+
+		if ( ! isset( $GLOBALS['wp_actions'] ) || ! is_array( $GLOBALS['wp_actions'] ) ) {
+			$GLOBALS['wp_actions'] = array();
+		}
+		$GLOBALS['wp_actions']['rest_api_init'] = max( 1, (int) ( $GLOBALS['wp_actions']['rest_api_init'] ?? 0 ) );
+
+		$filter_snapshot = self::rest_default_filter_state();
+		$cap_filter      = null;
+		$batch_token     = 'component-fuzz-batch-mixed-create-' . $ctx->seed() . '-' . $ctx->iteration();
+
+		$mixed_ids = array(
+			'post' => 0,
+			'term' => 0,
+			'user' => 0,
+		);
+		$direct_ids = $mixed_ids;
+
+		$mixed_user_email = 'batch-mixed-user-' . $case['token'] . '@example.com';
+		$accepted_emails  = array_fill_keys( array( $mixed_user_email ), true );
+		$email_filter     = static function ( $is_email, string $email ) use ( $accepted_emails ) {
+			return isset( $accepted_emails[ $email ] ) ? $email : $is_email;
+		};
+		$sanitize_email_filter = static function ( string $sanitized, string $email ) use ( $accepted_emails ): string {
+			return isset( $accepted_emails[ $email ] ) ? $email : $sanitized;
+		};
+
+		$child_post_dispatch        = array();
+		$record_child_post_dispatch = false;
+		$post_dispatch_filter       = static function ( \WP_REST_Response $response, \WP_REST_Server $filter_server, \WP_REST_Request $request ) use ( $server, $batch_token, &$child_post_dispatch, &$record_child_post_dispatch ): \WP_REST_Response {
+			if ( $filter_server !== $server || '/batch/v1' === $request->get_route() ) {
+				return $response;
+			}
+
+			if ( $record_child_post_dispatch ) {
+				$child_post_dispatch[] = array(
+					'route'  => $request->get_route(),
+					'method' => $request->get_method(),
+					'status' => $response->get_status(),
+				);
+			}
+
+			$response->header( 'X-Component-Fuzz-Batch-Mixed-Create', $batch_token );
+			return $response;
+		};
+
+		$response_summary = static function ( $response ): array {
+			if ( ! $response instanceof \WP_REST_Response ) {
+				return array( 'type' => is_object( $response ) ? get_class( $response ) : gettype( $response ) );
+			}
+
+			return array(
+				'status'  => $response->get_status(),
+				'headers' => $response->get_headers(),
+				'data'    => $response->get_data(),
+			);
+		};
+
+		$custom_filters_restored  = false;
+		$email_filter_restored    = false;
+		$sanitize_filter_restored = false;
+		$cap_filter_restored      = false;
+		$default_filters_restored = false;
+		$server_restored          = false;
+		$actions_restored         = false;
+		$current_user_restored    = false;
+		$wpdb_restored            = false;
+		$counts_before            = array();
+
+		try {
+			$controllers = array(
+				new \WP_REST_Posts_Controller( 'post' ),
+				new \WP_REST_Terms_Controller( 'category' ),
+				new \WP_REST_Users_Controller(),
+			);
+
+			foreach ( $controllers as $controller ) {
+				$controller->register_routes();
+			}
+
+			\rest_api_default_filters();
+			\add_filter( 'rest_post_dispatch', $post_dispatch_filter, 11, 3 );
+			\add_filter( 'is_email', $email_filter, 10, 2 );
+			\add_filter( 'sanitize_email', $sanitize_email_filter, 10, 2 );
+
+			\wp_set_current_user( $fixtures['author'] );
+			$cap_filter = self::install_cap_filter(
+				array(
+					'create_users',
+					'delete_post',
+					'delete_posts',
+					'delete_user',
+					'delete_users',
+					'edit_categories',
+					'edit_others_posts',
+					'edit_post',
+					'edit_posts',
+					'edit_published_posts',
+					'edit_term',
+					'edit_terms',
+					'edit_user',
+					'edit_users',
+					'list_users',
+					'manage_categories',
+					'publish_posts',
+					'read',
+				)
+			);
+
+			$invalid_term_slug = 'batch-mixed-invalid-term-' . $case['token'];
+			$mixed_specs       = array(
+				'post'         => array(
+					'method' => 'POST',
+					'route'  => '/wp/v2/posts',
+					'query'  => array(
+						'_fields' => 'author,content,id,slug,status,title',
+						'context' => 'edit',
+					),
+					'body'   => array(
+						'author'  => $fixtures['author'],
+						'content' => '<p>Batch mixed create post ' . $case['token'] . '</p>',
+						'slug'    => 'batch-mixed-create-post-' . $case['token'],
+						'status'  => 'draft',
+						'title'   => 'Batch Mixed Create Post ' . $case['token'],
+					),
+				),
+				'invalid_term' => array(
+					'method' => 'POST',
+					'route'  => '/wp/v2/categories',
+					'query'  => array( '_fields' => 'id,name,parent,slug,taxonomy' ),
+					'body'   => array(
+						'description' => 'Batch mixed invalid term ' . $case['token'],
+						'name'        => 'Batch Mixed Invalid Term ' . $case['token'],
+						'parent'      => 'not-a-parent-' . $case['token'],
+						'slug'        => $invalid_term_slug,
+					),
+				),
+				'user'         => array(
+					'method' => 'POST',
+					'route'  => '/wp/v2/users',
+					'query'  => array( '_fields' => 'email,id,name,slug,username' ),
+					'body'   => array(
+						'email'    => $mixed_user_email,
+						'name'     => 'Batch Mixed Create User ' . $case['token'],
+						'password' => 'batch-mixed-pass-' . $case['token'] . '-A1',
+						'slug'     => 'Batch Mixed Create User ' . $case['token'],
+						'username' => 'cfz_batch_mixed_user_' . $case['token'],
+					),
+				),
+			);
+
+			$counts_before             = self::content_counts();
+			$invalid_term_before       = \get_term_by( 'slug', \sanitize_title( $invalid_term_slug ), 'category' );
+			$direct_mixed_responses    = array();
+			$direct_mixed_summary      = array();
+			$direct_counts_before      = null;
+			$direct_counts_after       = null;
+			if ( is_object( $previous_wpdb ) ) {
+				$GLOBALS['wpdb'] = clone $previous_wpdb;
+
+				try {
+					$direct_counts_before = self::content_counts();
+					foreach ( $mixed_specs as $name => $spec ) {
+						$direct_response                 = self::dispatch_with_rest_post_dispatch( $server, self::request_from_batch_spec( $spec ) );
+						$direct_mixed_responses[ $name ] = $direct_response;
+						$direct_data                     = $direct_response instanceof \WP_REST_Response ? $direct_response->get_data() : array();
+						if ( in_array( $name, array( 'post', 'user' ), true ) ) {
+							$direct_ids[ $name ] = (int) ( $direct_data['id'] ?? 0 );
+						}
+					}
+
+					$direct_cleanup_specs = array(
+						'post' => array(
+							'method' => 'DELETE',
+							'route'  => '/wp/v2/posts/' . $direct_ids['post'],
+							'query'  => array( '_fields' => 'deleted,previous' ),
+							'body'   => array( 'force' => true ),
+						),
+						'user' => array(
+							'method' => 'DELETE',
+							'route'  => '/wp/v2/users/' . $direct_ids['user'],
+							'query'  => array( '_fields' => 'deleted,previous' ),
+							'body'   => array(
+								'force'    => true,
+								'reassign' => false,
+							),
+						),
+					);
+					foreach ( $direct_cleanup_specs as $spec ) {
+						self::dispatch_with_rest_post_dispatch( $server, self::request_from_batch_spec( $spec ) );
+					}
+					$direct_counts_after = self::content_counts();
+				} finally {
+					if ( $had_wpdb ) {
+						$GLOBALS['wpdb'] = $previous_wpdb;
+					} else {
+						unset( $GLOBALS['wpdb'] );
+					}
+				}
+			}
+
+			foreach ( $direct_mixed_responses as $name => $response ) {
+				$direct_mixed_summary[ $name ] = $response_summary( $response );
+			}
+
+			$wpdb_restored_after_direct = $had_wpdb
+				? $previous_wpdb === ( $GLOBALS['wpdb'] ?? null )
+				: ! array_key_exists( 'wpdb', $GLOBALS );
+			$counts_before_mixed        = self::content_counts();
+
+			$record_child_post_dispatch = true;
+			$mixed_response = $server->dispatch(
+				self::batch_request(
+					array_map(
+						static fn ( array $spec ): array => self::batch_child_from_spec( $spec ),
+						array_values( $mixed_specs )
+					),
+					'normal'
+				)
+			);
+			$record_child_post_dispatch = false;
+			$mixed_data      = $mixed_response instanceof \WP_REST_Response ? $mixed_response->get_data() : array();
+			$mixed_envelopes = is_array( $mixed_data['responses'] ?? null ) ? $mixed_data['responses'] : array();
+
+			foreach ( array_keys( $mixed_specs ) as $offset => $name ) {
+				$body = is_array( $mixed_envelopes[ $offset ]['body'] ?? null ) ? $mixed_envelopes[ $offset ]['body'] : array();
+				if ( in_array( $name, array( 'post', 'user' ), true ) ) {
+					$mixed_ids[ $name ] = (int) ( $body['id'] ?? 0 );
+				}
+			}
+
+			$counts_after_mixed = self::content_counts();
+			$created_post       = $mixed_ids['post'] > 0 ? \get_post( $mixed_ids['post'] ) : null;
+			$created_user       = $mixed_ids['user'] > 0 ? \get_user_by( 'id', $mixed_ids['user'] ) : null;
+			$invalid_term_after = \get_term_by( 'slug', \sanitize_title( $invalid_term_slug ), 'category' );
+
+			$cleanup_specs = array(
+				'post' => array(
+					'method' => 'DELETE',
+					'route'  => '/wp/v2/posts/' . $mixed_ids['post'],
+					'query'  => array( '_fields' => 'deleted,previous' ),
+					'body'   => array( 'force' => true ),
+				),
+				'user' => array(
+					'method' => 'DELETE',
+					'route'  => '/wp/v2/users/' . $mixed_ids['user'],
+					'query'  => array( '_fields' => 'deleted,previous' ),
+					'body'   => array(
+						'force'    => true,
+						'reassign' => false,
+					),
+				),
+			);
+
+			$record_child_post_dispatch = true;
+			$cleanup_response = $server->dispatch(
+				self::batch_request(
+					array_map(
+						static fn ( array $spec ): array => self::batch_child_from_spec( $spec ),
+						array_values( $cleanup_specs )
+					),
+					'normal'
+				)
+			);
+			$record_child_post_dispatch = false;
+			$cleanup_data      = $cleanup_response instanceof \WP_REST_Response ? $cleanup_response->get_data() : array();
+			$cleanup_envelopes = is_array( $cleanup_data['responses'] ?? null ) ? $cleanup_data['responses'] : array();
+			$counts_after_cleanup = self::content_counts();
+			$post_after_cleanup   = $mixed_ids['post'] > 0 ? \get_post( $mixed_ids['post'] ) : null;
+			$user_after_cleanup   = $mixed_ids['user'] > 0 ? \get_user_by( 'id', $mixed_ids['user'] ) : null;
+			$term_after_cleanup   = \get_term_by( 'slug', \sanitize_title( $invalid_term_slug ), 'category' );
+
+			$observed = array(
+				'mixed' => array(
+					'data'      => $mixed_data,
+					'responses' => $mixed_envelopes,
+				),
+				'cleanup' => array(
+					'data'      => $cleanup_data,
+					'responses' => $cleanup_envelopes,
+				),
+				'direct' => array(
+					'ids'          => $direct_ids,
+					'mixed'        => $direct_mixed_summary,
+					'countsBefore' => $direct_counts_before,
+					'countsAfter'  => $direct_counts_after,
+				),
+				'storedRows' => array(
+					'post' => $created_post instanceof \WP_Post
+						? array(
+							'id'      => (int) $created_post->ID,
+							'author'  => (int) $created_post->post_author,
+							'content' => $created_post->post_content,
+							'slug'    => $created_post->post_name,
+							'status'  => $created_post->post_status,
+							'title'   => $created_post->post_title,
+						)
+						: null,
+					'invalidTermBefore' => $invalid_term_before instanceof \WP_Term ? (int) $invalid_term_before->term_id : null,
+					'invalidTermAfter'  => $invalid_term_after instanceof \WP_Term ? (int) $invalid_term_after->term_id : null,
+					'user' => $created_user instanceof \WP_User
+						? array(
+							'id'       => (int) $created_user->ID,
+							'email'    => $created_user->user_email,
+							'login'    => $created_user->user_login,
+							'nicename' => $created_user->user_nicename,
+							'name'     => $created_user->display_name,
+						)
+						: null,
+				),
+				'afterCleanup' => array(
+					'post' => $post_after_cleanup instanceof \WP_Post ? (int) $post_after_cleanup->ID : null,
+					'term' => $term_after_cleanup instanceof \WP_Term ? (int) $term_after_cleanup->term_id : null,
+					'user' => $user_after_cleanup instanceof \WP_User ? (int) $user_after_cleanup->ID : null,
+				),
+				'childPostDispatch' => $child_post_dispatch,
+				'counts'            => array(
+					'before'        => $counts_before,
+					'beforeMixed'   => $counts_before_mixed,
+					'afterMixed'    => $counts_after_mixed,
+					'afterCleanup'  => $counts_after_cleanup,
+				),
+				'wpdbRestoredAfterDirect' => $wpdb_restored_after_direct,
+			);
+
+			$mixed_ok = $mixed_response instanceof \WP_REST_Response
+				&& 207 === $mixed_response->get_status()
+				&& ! array_key_exists( 'failed', $mixed_data )
+				&& count( $mixed_specs ) === count( $mixed_envelopes );
+			foreach ( array_keys( $mixed_specs ) as $offset => $name ) {
+				$envelope = is_array( $mixed_envelopes[ $offset ] ?? null ) ? $mixed_envelopes[ $offset ] : array();
+				$headers  = is_array( $envelope['headers'] ?? null ) ? $envelope['headers'] : array();
+				$body     = is_array( $envelope['body'] ?? null ) ? $envelope['body'] : array();
+
+				$mixed_ok = $mixed_ok
+					&& $batch_token === ( $headers['X-Component-Fuzz-Batch-Mixed-Create'] ?? null )
+					&& match ( $name ) {
+						'post' => 201 === (int) ( $envelope['status'] ?? 0 )
+							&& self::projected_keys_match( $body, array( 'author', 'content', 'id', 'slug', 'status', 'title' ) )
+							&& $mixed_ids['post'] > 0
+							&& $fixtures['author'] === (int) ( $body['author'] ?? 0 )
+							&& 'draft' === ( $body['status'] ?? null )
+							&& ( $mixed_specs['post']['body']['title'] ?? null ) === ( $body['title']['raw'] ?? null )
+							&& ( $mixed_specs['post']['body']['content'] ?? null ) === ( $body['content']['raw'] ?? null )
+							&& \sanitize_title( (string) ( $mixed_specs['post']['body']['slug'] ?? '' ) ) === ( $body['slug'] ?? null ),
+						'invalid_term' => 400 === (int) ( $envelope['status'] ?? 0 )
+							&& 'rest_invalid_param' === ( $body['code'] ?? null )
+							&& isset( $body['data']['params']['parent'] ),
+						'user' => 201 === (int) ( $envelope['status'] ?? 0 )
+							&& self::projected_keys_match( $body, array( 'email', 'id', 'name', 'slug', 'username' ) )
+							&& $mixed_ids['user'] > 0
+							&& ( $mixed_specs['user']['body']['email'] ?? null ) === ( $body['email'] ?? null )
+							&& ( $mixed_specs['user']['body']['name'] ?? null ) === ( $body['name'] ?? null )
+							&& ( $mixed_specs['user']['body']['username'] ?? null ) === ( $body['username'] ?? null ),
+						default => false,
+					};
+			}
+
+			$direct_parity_ok = array_keys( $mixed_specs ) === array_keys( $direct_mixed_responses )
+				&& $wpdb_restored_after_direct
+				&& self::content_count_delta_matches( $counts_before, $counts_before_mixed, array(), array() )
+				&& $direct_ids['post'] === $mixed_ids['post']
+				&& $direct_ids['user'] === $mixed_ids['user'];
+			foreach ( array_keys( $mixed_specs ) as $offset => $name ) {
+				$direct_response = $direct_mixed_responses[ $name ] ?? null;
+				$envelope        = is_array( $mixed_envelopes[ $offset ] ?? null ) ? $mixed_envelopes[ $offset ] : array();
+
+				$direct_parity_ok = $direct_parity_ok
+					&& $direct_response instanceof \WP_REST_Response
+					&& $server->response_to_data( $direct_response, false ) === ( $envelope['body'] ?? null )
+					&& $direct_response->get_status() === (int) ( $envelope['status'] ?? 0 )
+					&& $direct_response->get_headers() === ( $envelope['headers'] ?? null );
+			}
+
+			$stored_mixed_ok = $created_post instanceof \WP_Post
+				&& $created_user instanceof \WP_User
+				&& ( $mixed_specs['post']['body']['title'] ?? null ) === $created_post->post_title
+				&& ( $mixed_specs['post']['body']['content'] ?? null ) === $created_post->post_content
+				&& 'draft' === $created_post->post_status
+				&& $fixtures['author'] === (int) $created_post->post_author
+				&& \sanitize_title( (string) ( $mixed_specs['post']['body']['slug'] ?? '' ) ) === $created_post->post_name
+				&& ( $mixed_specs['user']['body']['username'] ?? null ) === $created_user->user_login
+				&& ( $mixed_specs['user']['body']['email'] ?? null ) === $created_user->user_email
+				&& ( $mixed_specs['user']['body']['name'] ?? null ) === $created_user->display_name
+				&& ( $invalid_term_before instanceof \WP_Term ? (int) $invalid_term_before->term_id : null ) === ( $invalid_term_after instanceof \WP_Term ? (int) $invalid_term_after->term_id : null )
+				&& self::content_count_delta_matches(
+					$counts_before_mixed,
+					$counts_after_mixed,
+					array(
+						'posts' => 1,
+						'users' => 1,
+					),
+					array( 'post_meta', 'user_meta' )
+				);
+
+			$cleanup_ok = $cleanup_response instanceof \WP_REST_Response
+				&& 207 === $cleanup_response->get_status()
+				&& count( $cleanup_specs ) === count( $cleanup_envelopes );
+			foreach ( array_keys( $cleanup_specs ) as $offset => $name ) {
+				$envelope = is_array( $cleanup_envelopes[ $offset ] ?? null ) ? $cleanup_envelopes[ $offset ] : array();
+				$headers  = is_array( $envelope['headers'] ?? null ) ? $envelope['headers'] : array();
+				$body     = is_array( $envelope['body'] ?? null ) ? $envelope['body'] : array();
+				$previous = is_array( $body['previous'] ?? null ) ? $body['previous'] : array();
+
+				$cleanup_ok = $cleanup_ok
+					&& 200 === (int) ( $envelope['status'] ?? 0 )
+					&& $batch_token === ( $headers['X-Component-Fuzz-Batch-Mixed-Create'] ?? null )
+					&& true === ( $body['deleted'] ?? null )
+					&& $mixed_ids[ $name ] === (int) ( $previous['id'] ?? 0 );
+			}
+
+			$expected_child_events = array(
+				array( 'route' => '/wp/v2/posts', 'method' => 'POST', 'status' => 201 ),
+				array( 'route' => '/wp/v2/categories', 'method' => 'POST', 'status' => 400 ),
+				array( 'route' => '/wp/v2/users', 'method' => 'POST', 'status' => 201 ),
+				array( 'route' => '/wp/v2/posts/' . $mixed_ids['post'], 'method' => 'DELETE', 'status' => 200 ),
+				array( 'route' => '/wp/v2/users/' . $mixed_ids['user'], 'method' => 'DELETE', 'status' => 200 ),
+			);
+			$child_dispatch_ok = $expected_child_events === $child_post_dispatch
+				&& ! in_array( '/batch/v1', array_column( $child_post_dispatch, 'route' ), true );
+
+			self::collect_failure(
+				$failures,
+				$mixed_ok,
+				'batch/v1 normal mixed collection creates preserve child order and keep invalid create errors in place',
+				array( 'mixed' => $observed['mixed'] )
+			);
+
+			self::collect_failure(
+				$failures,
+				$direct_parity_ok,
+				'batch/v1 normal mixed collection create child envelopes match direct dispatch bodies, status, and headers',
+				array(
+					'direct' => $observed['direct'],
+					'mixed'  => $observed['mixed'],
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$stored_mixed_ok,
+				'batch/v1 normal mixed collection creates persist valid siblings without creating invalid term children',
+				array(
+					'storedRows'  => $observed['storedRows'],
+					'countsBefore' => $counts_before_mixed,
+					'countsAfter' => $counts_after_mixed,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$cleanup_ok
+					&& null === $post_after_cleanup
+					&& ! $user_after_cleanup instanceof \WP_User
+					&& ( $invalid_term_before instanceof \WP_Term ? (int) $invalid_term_before->term_id : null ) === ( $term_after_cleanup instanceof \WP_Term ? (int) $term_after_cleanup->term_id : null )
+					&& self::content_count_delta_matches( $counts_before_mixed, $counts_after_cleanup, array(), array() ),
+				'batch/v1 normal mixed collection create cleanup removes valid siblings and restores content counts',
+				array(
+					'cleanup'      => $observed['cleanup'],
+					'afterCleanup' => $observed['afterCleanup'],
+					'countsBefore' => $counts_before_mixed,
+					'countsAfter'  => $counts_after_cleanup,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$child_dispatch_ok,
+				'batch/v1 normal mixed collection create children run post-dispatch once per executable child without enveloping the batch route',
+				array( 'childPostDispatch' => $child_post_dispatch )
+			);
+		} finally {
+			$record_child_post_dispatch = false;
+
+			if ( isset( $mixed_ids['post'] ) && $mixed_ids['post'] > 0 && \get_post( $mixed_ids['post'] ) instanceof \WP_Post ) {
+				\wp_delete_post( $mixed_ids['post'], true );
+			}
+			if ( isset( $mixed_ids['term'] ) && $mixed_ids['term'] > 0 && \get_term( $mixed_ids['term'], 'category' ) instanceof \WP_Term ) {
+				\wp_delete_term( $mixed_ids['term'], 'category' );
+			}
+			if ( isset( $mixed_ids['user'] ) && $mixed_ids['user'] > 0 && \get_user_by( 'id', $mixed_ids['user'] ) instanceof \WP_User ) {
+				if ( defined( 'ABSPATH' ) && file_exists( ABSPATH . 'wp-admin/includes/user.php' ) ) {
+					require_once ABSPATH . 'wp-admin/includes/user.php';
+				}
+				if ( function_exists( 'wp_delete_user' ) ) {
+					\wp_delete_user( $mixed_ids['user'] );
+				}
+			}
+
+			\remove_filter( 'rest_post_dispatch', $post_dispatch_filter, 11 );
+			$custom_filters_restored = false === \has_filter( 'rest_post_dispatch', $post_dispatch_filter );
+			\remove_filter( 'sanitize_email', $sanitize_email_filter, 10 );
+			$sanitize_filter_restored = false === \has_filter( 'sanitize_email', $sanitize_email_filter );
+			\remove_filter( 'is_email', $email_filter, 10 );
+			$email_filter_restored = false === \has_filter( 'is_email', $email_filter );
+
+			if ( null !== $cap_filter ) {
+				$cap_filter_restored = self::remove_cap_filter( $cap_filter );
+				$cap_filter          = null;
+			} else {
+				$cap_filter_restored = true;
+			}
+
+			self::restore_rest_default_filters( $filter_snapshot );
+			$default_filters_restored = $filter_snapshot === self::rest_default_filter_state();
+
+			\wp_set_current_user( $previous_current_user_id );
+			$current_user_restored = $previous_current_user_id === ( isset( $GLOBALS['current_user'] ) && $GLOBALS['current_user'] instanceof \WP_User ? (int) $GLOBALS['current_user']->ID : 0 );
+
+			if ( $had_wp_actions ) {
+				$GLOBALS['wp_actions'] = $previous_actions;
+			} else {
+				unset( $GLOBALS['wp_actions'] );
+			}
+			$actions_restored = $had_wp_actions === array_key_exists( 'wp_actions', $GLOBALS )
+				&& ( ! $had_wp_actions || $previous_actions === $GLOBALS['wp_actions'] );
+
+			if ( null !== $previous_server ) {
+				$GLOBALS['wp_rest_server'] = $previous_server;
+			} else {
+				unset( $GLOBALS['wp_rest_server'] );
+			}
+			$server_restored = ( null !== $previous_server && $previous_server === ( $GLOBALS['wp_rest_server'] ?? null ) )
+				|| ( null === $previous_server && ! isset( $GLOBALS['wp_rest_server'] ) );
+
+			if ( $had_wpdb ) {
+				$GLOBALS['wpdb'] = $previous_wpdb;
+			} else {
+				unset( $GLOBALS['wpdb'] );
+			}
+			$wpdb_restored = $had_wpdb
+				? $previous_wpdb === ( $GLOBALS['wpdb'] ?? null )
+				: ! array_key_exists( 'wpdb', $GLOBALS );
+		}
+
+		$counts_after_manual_cleanup = self::content_counts();
+		self::collect_failure(
+			$failures,
+			$custom_filters_restored
+				&& $email_filter_restored
+				&& $sanitize_filter_restored
+				&& $cap_filter_restored
+				&& $default_filters_restored
+				&& $server_restored
+				&& $actions_restored
+				&& $current_user_restored
+				&& $wpdb_restored
+				&& self::content_count_delta_matches( $counts_before, $counts_after_manual_cleanup, array(), array() ),
+			'batch/v1 normal mixed collection create harness restores filters, caps, default REST filters, server, actions, current user, wpdb, and rows',
+			array(
+				'customFiltersRestored'  => $custom_filters_restored,
+				'emailFilterRestored'    => $email_filter_restored,
+				'sanitizeFilterRestored' => $sanitize_filter_restored,
+				'capFilterRestored'      => $cap_filter_restored,
+				'defaultFiltersRestored' => $default_filters_restored,
+				'serverRestored'         => $server_restored,
+				'actionsRestored'        => $actions_restored,
+				'currentUserRestored'    => $current_user_restored,
+				'wpdbRestored'           => $wpdb_restored,
+				'countsAfterManualCleanup' => $counts_after_manual_cleanup,
+				'observed'               => $observed,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'rest-object-controllers.collections.batch-v1-mixed-create-parity-cleanup',
 			array() === $failures,
 			array(
 				'case'       => self::case_summary( $case ),
