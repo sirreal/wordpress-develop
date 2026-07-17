@@ -5432,6 +5432,138 @@ final class ContentLifecycleSurface {
 				$author_name_keys_shared_by_field[ $field ] = 1 === count( array_unique( $keys ) );
 			}
 			$author_name_keys_shared = ! in_array( false, $author_name_keys_shared_by_field, true );
+			$author_name_miss_slug = 'missing-author-' . $token;
+			$author_name_miss_expected = array( $pretty_mixed_leaf_id );
+			$author_name_miss_parent_expected = array(
+				$pretty_mixed_leaf_id => $query_mixed_middle_id,
+			);
+			$author_name_miss_status_expected = array_fill_keys( $author_name_miss_expected, 'publish' );
+			$author_name_miss_author_expected = array_fill_keys( $author_name_miss_expected, 0 );
+			ksort( $author_name_miss_parent_expected );
+			ksort( $author_name_miss_status_expected );
+			ksort( $author_name_miss_author_expected );
+			$author_name_miss_variants = array(
+				'canonicalUnknown' => array(
+					'authorName' => $author_name_miss_slug,
+				),
+				'knownPrefixUnknown' => array(
+					'authorName' => $author_name_slug . '/' . $author_name_miss_slug,
+				),
+				'knownPrefixTrailingUnknown' => array(
+					'authorName' => $author_name_slug . '/' . $author_name_miss_slug . '/',
+				),
+			);
+			$author_name_miss_keys = array(
+				'ids'      => array(),
+				'idParent' => array(),
+				'object'   => array(),
+			);
+			$author_name_miss_requests = array(
+				'ids'      => array(),
+				'idParent' => array(),
+				'object'   => array(),
+			);
+			$author_name_miss_checks = array();
+			$author_name_miss_query_var_checks = array();
+			$author_name_miss_sql_checks = array();
+			$author_name_miss_author_checks = array();
+			$author_name_miss_actual = array();
+			foreach ( $author_name_miss_variants as $variant => $config ) {
+				$variant_args = array_merge(
+					$ordering_id_args,
+					array(
+						'post_parent'    => $query_mixed_middle_id,
+						'post_parent__in' => null,
+						'author'         => null,
+						'author_name'    => $config['authorName'],
+						'author__in'     => null,
+						'author__not_in' => null,
+						'post__not_in'   => null,
+					)
+				);
+				$buckets = array(
+					'ids'      => $query_parent_status_bucket( $pretty_type, $query_mixed_middle_id, 'publish', 'ids', $variant_args ),
+					'idParent' => $query_parent_status_bucket( $pretty_type, $query_mixed_middle_id, 'publish', 'id=>parent', $variant_args ),
+					'object'   => $query_parent_status_bucket( $pretty_type, $query_mixed_middle_id, 'publish', 'all', $variant_args ),
+				);
+				$expected_author_name = sanitize_title_for_query( $author_name_miss_slug );
+				$actual_authors = array();
+				foreach ( $buckets['object']['ids'] as $post_id ) {
+					$post = \get_post( $post_id );
+					$actual_authors[ $post_id ] = $post instanceof \WP_Post ? (int) $post->post_author : null;
+				}
+				ksort( $actual_authors );
+
+				$author_name_miss_checks[ $variant ] = $query_ordering_family_is_valid( $buckets['ids'], $buckets['idParent'], $buckets['object'], $author_name_miss_expected, $author_name_miss_parent_expected, $author_name_miss_status_expected );
+				$author_name_miss_query_var_checks[ $variant ] = $expected_author_name === (string) ( $buckets['ids']['queryVars']['author_name'] ?? '' )
+					&& $expected_author_name === (string) ( $buckets['idParent']['queryVars']['author_name'] ?? '' )
+					&& $expected_author_name === (string) ( $buckets['object']['queryVars']['author_name'] ?? '' )
+					&& false === ( $buckets['ids']['queryVars']['author'] ?? null )
+					&& false === ( $buckets['idParent']['queryVars']['author'] ?? null )
+					&& false === ( $buckets['object']['queryVars']['author'] ?? null );
+				$author_name_miss_sql_checks[ $variant ] = false !== strpos( $buckets['ids']['request'], 'post_author = 0' )
+					&& false !== strpos( $buckets['idParent']['request'], 'post_author = 0' )
+					&& false !== strpos( $buckets['object']['request'], 'post_author = 0' );
+				$author_name_miss_author_checks[ $variant ] = $author_name_miss_author_expected === $actual_authors;
+				$author_name_miss_keys['ids'][] = $buckets['ids']['cacheKey'];
+				$author_name_miss_keys['idParent'][] = $buckets['idParent']['cacheKey'];
+				$author_name_miss_keys['object'][] = $buckets['object']['cacheKey'];
+				$author_name_miss_requests['ids'][] = $buckets['ids']['request'];
+				$author_name_miss_requests['idParent'][] = $buckets['idParent']['request'];
+				$author_name_miss_requests['object'][] = $buckets['object']['request'];
+				$author_name_miss_actual[ $variant ] = array(
+					'authorNameArg' => $config['authorName'],
+					'queryVar'      => array(
+						'ids'      => array(
+							'author_name' => (string) ( $buckets['ids']['queryVars']['author_name'] ?? '' ),
+							'author'      => $buckets['ids']['queryVars']['author'] ?? null,
+						),
+						'idParent' => array(
+							'author_name' => (string) ( $buckets['idParent']['queryVars']['author_name'] ?? '' ),
+							'author'      => $buckets['idParent']['queryVars']['author'] ?? null,
+						),
+						'object'   => array(
+							'author_name' => (string) ( $buckets['object']['queryVars']['author_name'] ?? '' ),
+							'author'      => $buckets['object']['queryVars']['author'] ?? null,
+						),
+					),
+					'authors'       => $actual_authors,
+					'keys'          => array(
+						'ids'      => substr( md5( $buckets['ids']['cacheKey'] ), 0, 8 ),
+						'idParent' => substr( md5( $buckets['idParent']['cacheKey'] ), 0, 8 ),
+						'object'   => substr( md5( $buckets['object']['cacheKey'] ), 0, 8 ),
+					),
+					'requests'      => array(
+						'ids'      => substr( md5( $buckets['ids']['request'] ), 0, 8 ),
+						'idParent' => substr( md5( $buckets['idParent']['request'] ), 0, 8 ),
+						'object'   => substr( md5( $buckets['object']['request'] ), 0, 8 ),
+					),
+					'ids'           => array(
+						'ids'      => $buckets['ids']['ids'],
+						'idParent' => $buckets['idParent']['ids'],
+						'object'   => $buckets['object']['ids'],
+					),
+					'parents'       => array(
+						'idParent' => $buckets['idParent']['parents'],
+						'object'   => $buckets['object']['parents'],
+					),
+					'statuses'      => $buckets['object']['statuses'],
+				);
+			}
+			$author_name_miss_valid = ! in_array( false, $author_name_miss_checks, true )
+				&& ! in_array( false, $author_name_miss_query_var_checks, true )
+				&& ! in_array( false, $author_name_miss_sql_checks, true )
+				&& ! in_array( false, $author_name_miss_author_checks, true );
+			$author_name_miss_requests_shared_by_field = array();
+			foreach ( $author_name_miss_requests as $field => $requests ) {
+				$author_name_miss_requests_shared_by_field[ $field ] = 1 === count( array_unique( $requests ) );
+			}
+			$author_name_miss_requests_shared = ! in_array( false, $author_name_miss_requests_shared_by_field, true );
+			$author_name_miss_keys_shared_by_field = array();
+			foreach ( $author_name_miss_keys as $field => $keys ) {
+				$author_name_miss_keys_shared_by_field[ $field ] = 1 === count( array_unique( $keys ) );
+			}
+			$author_name_miss_keys_shared = ! in_array( false, $author_name_miss_keys_shared_by_field, true );
 			$legacy_author_variants = array(
 				'canonical'  => array(
 					'author' => $author_excluded_a_id . ',-' . $author_excluded_b_id,
@@ -6217,6 +6349,40 @@ final class ContentLifecycleSurface {
 						$author_name_keys
 					),
 					'variants'            => $author_name_actual,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$author_name_miss_valid
+					&& $author_name_miss_requests_shared
+					&& $author_name_miss_keys_shared,
+				'WP_Query keeps generated custom hierarchical author_name misses on the zero-author fallback across selected fields',
+				array(
+					'checks'              => array(
+						'variantsValid'                  => $author_name_miss_checks,
+						'queryVarsPreserveUnknownAuthor' => $author_name_miss_query_var_checks,
+						'sqlUsesZeroAuthorFallback'      => $author_name_miss_sql_checks,
+						'payloadAuthorsAreZero'          => $author_name_miss_author_checks,
+						'requestsSharedByField'          => $author_name_miss_requests_shared_by_field,
+						'keysSharedByField'              => $author_name_miss_keys_shared_by_field,
+					),
+					'knownAuthorNameSlug' => $author_name_slug,
+					'missingAuthorName'   => sanitize_title_for_query( $author_name_miss_slug ),
+					'zeroAuthorParent'    => $query_mixed_middle_id,
+					'expectedIds'         => $author_name_miss_expected,
+					'expectedParents'     => $author_name_miss_parent_expected,
+					'expectedStatuses'    => $author_name_miss_status_expected,
+					'expectedAuthors'     => $author_name_miss_author_expected,
+					'uniqueRequestHashes' => array_map(
+						static fn ( array $requests ): array => array_values( array_unique( array_map( static fn ( string $request ): string => substr( md5( $request ), 0, 8 ), $requests ) ) ),
+						$author_name_miss_requests
+					),
+					'uniqueKeyHashes'     => array_map(
+						static fn ( array $keys ): array => array_values( array_unique( array_map( static fn ( string $key ): string => substr( md5( $key ), 0, 8 ), $keys ) ) ),
+						$author_name_miss_keys
+					),
+					'variants'            => $author_name_miss_actual,
 				)
 			);
 
