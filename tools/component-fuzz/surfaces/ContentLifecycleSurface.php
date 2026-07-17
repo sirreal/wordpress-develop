@@ -4464,6 +4464,121 @@ final class ContentLifecycleSurface {
 				$parent_order_keys_distinct_by_field[ $field ] = count( $keys ) === count( array_unique( $keys ) );
 			}
 			$parent_order_key_boundaries_hold = ! in_array( false, $parent_order_keys_distinct_by_field, true );
+			$included_excluded_parent_variants = array(
+				'overlapCanonical'  => array(
+					'included' => array( $query_parent_id, $pretty_parent_id ),
+					'excluded' => array( $query_parent_id, $pretty_parent_id ),
+				),
+				'overlapReversed'   => array(
+					'included' => array( $query_parent_id, $pretty_parent_id ),
+					'excluded' => array( $pretty_parent_id, $query_parent_id ),
+				),
+				'overlapDuplicated' => array(
+					'included' => array( $query_parent_id, $pretty_parent_id ),
+					'excluded' => array( $query_parent_id, $pretty_parent_id, $pretty_parent_id, $query_parent_id ),
+				),
+			);
+			$included_excluded_parent_keys = array(
+				'ids'      => array(),
+				'idParent' => array(),
+				'object'   => array(),
+			);
+			$included_excluded_parent_requests = array(
+				'ids'      => array(),
+				'idParent' => array(),
+				'object'   => array(),
+			);
+			$included_excluded_parent_checks = array();
+			$included_excluded_parent_query_var_checks = array();
+			$included_excluded_parent_sql_checks = array();
+			$included_excluded_parent_actual = array();
+			foreach ( $included_excluded_parent_variants as $variant => $config ) {
+				$variant_args = array_merge(
+					$ordering_id_args,
+					array(
+						'post_parent__in'     => $config['included'],
+						'post_parent__not_in' => $config['excluded'],
+					)
+				);
+				$buckets = array(
+					'ids'      => $query_parent_status_bucket( $pretty_type, 0, 'publish', 'ids', $variant_args ),
+					'idParent' => $query_parent_status_bucket( $pretty_type, 0, 'publish', 'id=>parent', $variant_args ),
+					'object'   => $query_parent_status_bucket( $pretty_type, 0, 'publish', 'all', $variant_args ),
+				);
+				$expected_in_query_var = array_values( array_map( 'intval', $config['included'] ) );
+				$expected_not_in_query_var = array_values( array_map( 'intval', $config['excluded'] ) );
+
+				$included_excluded_parent_checks[ $variant ] = $query_ordering_family_is_valid( $buckets['ids'], $buckets['idParent'], $buckets['object'], $ordering_id_expected, $ordering_parent_expected, $ordering_status_expected );
+				$included_excluded_parent_query_var_checks[ $variant ] = $expected_in_query_var === array_values( array_map( 'intval', (array) ( $buckets['ids']['queryVars']['post_parent__in'] ?? array() ) ) )
+					&& $expected_in_query_var === array_values( array_map( 'intval', (array) ( $buckets['idParent']['queryVars']['post_parent__in'] ?? array() ) ) )
+					&& $expected_in_query_var === array_values( array_map( 'intval', (array) ( $buckets['object']['queryVars']['post_parent__in'] ?? array() ) ) )
+					&& $expected_not_in_query_var === array_values( array_map( 'intval', (array) ( $buckets['ids']['queryVars']['post_parent__not_in'] ?? array() ) ) )
+					&& $expected_not_in_query_var === array_values( array_map( 'intval', (array) ( $buckets['idParent']['queryVars']['post_parent__not_in'] ?? array() ) ) )
+					&& $expected_not_in_query_var === array_values( array_map( 'intval', (array) ( $buckets['object']['queryVars']['post_parent__not_in'] ?? array() ) ) );
+				$included_excluded_parent_sql_checks[ $variant ] = false !== strpos( $buckets['ids']['request'], 'post_parent IN' )
+					&& false !== strpos( $buckets['idParent']['request'], 'post_parent IN' )
+					&& false !== strpos( $buckets['object']['request'], 'post_parent IN' )
+					&& false === strpos( $buckets['ids']['request'], 'post_parent NOT IN' )
+					&& false === strpos( $buckets['idParent']['request'], 'post_parent NOT IN' )
+					&& false === strpos( $buckets['object']['request'], 'post_parent NOT IN' );
+				$included_excluded_parent_keys['ids'][] = $buckets['ids']['cacheKey'];
+				$included_excluded_parent_keys['idParent'][] = $buckets['idParent']['cacheKey'];
+				$included_excluded_parent_keys['object'][] = $buckets['object']['cacheKey'];
+				$included_excluded_parent_requests['ids'][] = $buckets['ids']['request'];
+				$included_excluded_parent_requests['idParent'][] = $buckets['idParent']['request'];
+				$included_excluded_parent_requests['object'][] = $buckets['object']['request'];
+				$included_excluded_parent_actual[ $variant ] = array(
+					'includedArg' => $config['included'],
+					'excludedArg' => $config['excluded'],
+					'queryVar'    => array(
+						'ids'      => array(
+							'post_parent__in'     => array_values( array_map( 'intval', (array) ( $buckets['ids']['queryVars']['post_parent__in'] ?? array() ) ) ),
+							'post_parent__not_in' => array_values( array_map( 'intval', (array) ( $buckets['ids']['queryVars']['post_parent__not_in'] ?? array() ) ) ),
+						),
+						'idParent' => array(
+							'post_parent__in'     => array_values( array_map( 'intval', (array) ( $buckets['idParent']['queryVars']['post_parent__in'] ?? array() ) ) ),
+							'post_parent__not_in' => array_values( array_map( 'intval', (array) ( $buckets['idParent']['queryVars']['post_parent__not_in'] ?? array() ) ) ),
+						),
+						'object'   => array(
+							'post_parent__in'     => array_values( array_map( 'intval', (array) ( $buckets['object']['queryVars']['post_parent__in'] ?? array() ) ) ),
+							'post_parent__not_in' => array_values( array_map( 'intval', (array) ( $buckets['object']['queryVars']['post_parent__not_in'] ?? array() ) ) ),
+						),
+					),
+					'keys'        => array(
+						'ids'      => substr( md5( $buckets['ids']['cacheKey'] ), 0, 8 ),
+						'idParent' => substr( md5( $buckets['idParent']['cacheKey'] ), 0, 8 ),
+						'object'   => substr( md5( $buckets['object']['cacheKey'] ), 0, 8 ),
+					),
+					'requests'    => array(
+						'ids'      => substr( md5( $buckets['ids']['request'] ), 0, 8 ),
+						'idParent' => substr( md5( $buckets['idParent']['request'] ), 0, 8 ),
+						'object'   => substr( md5( $buckets['object']['request'] ), 0, 8 ),
+					),
+					'ids'         => array(
+						'ids'      => $buckets['ids']['ids'],
+						'idParent' => $buckets['idParent']['ids'],
+						'object'   => $buckets['object']['ids'],
+					),
+					'parents'     => array(
+						'idParent' => $buckets['idParent']['parents'],
+						'object'   => $buckets['object']['parents'],
+					),
+					'statuses'    => $buckets['object']['statuses'],
+				);
+			}
+			$included_excluded_parent_valid = ! in_array( false, $included_excluded_parent_checks, true )
+				&& ! in_array( false, $included_excluded_parent_query_var_checks, true )
+				&& ! in_array( false, $included_excluded_parent_sql_checks, true );
+			$included_excluded_parent_requests_shared_by_field = array();
+			foreach ( $included_excluded_parent_requests as $field => $requests ) {
+				$included_excluded_parent_requests_shared_by_field[ $field ] = 1 === count( array_unique( $requests ) );
+			}
+			$included_excluded_parent_requests_shared = ! in_array( false, $included_excluded_parent_requests_shared_by_field, true );
+			$included_excluded_parent_keys_distinct_by_field = array();
+			foreach ( $included_excluded_parent_keys as $field => $keys ) {
+				$included_excluded_parent_keys_distinct_by_field[ $field ] = count( $keys ) === count( array_unique( $keys ) );
+			}
+			$included_excluded_parent_key_boundaries_hold = ! in_array( false, $included_excluded_parent_keys_distinct_by_field, true );
 			$excluded_parent_variants = array(
 				'canonical'  => array(
 					'parents' => array( $query_parent_id, $pretty_parent_id ),
@@ -5576,6 +5691,39 @@ final class ContentLifecycleSurface {
 						$parent_order_keys
 					),
 					'variants'          => $parent_order_actual,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$included_excluded_parent_valid
+					&& $included_excluded_parent_requests_shared
+					&& $included_excluded_parent_key_boundaries_hold,
+				'WP_Query lets generated custom hierarchical parent inclusion take precedence over overlapping parent exclusions across selected fields',
+				array(
+					'checks'              => array(
+						'variantsValid'             => $included_excluded_parent_checks,
+						'queryVarsPreserveRawArrays' => $included_excluded_parent_query_var_checks,
+						'sqlUsesOnlyParentInclude'   => $included_excluded_parent_sql_checks,
+						'requestsSharedByField'      => $included_excluded_parent_requests_shared_by_field,
+						'ignoredExcludeKeysDistinct' => $included_excluded_parent_keys_distinct_by_field,
+					),
+					'includedParents'     => array(
+						$query_parent_id,
+						$pretty_parent_id,
+					),
+					'expectedIds'         => $ordering_id_expected,
+					'expectedParents'     => $ordering_parent_expected,
+					'expectedStatuses'    => $ordering_status_expected,
+					'uniqueRequestHashes' => array_map(
+						static fn ( array $requests ): array => array_values( array_unique( array_map( static fn ( string $request ): string => substr( md5( $request ), 0, 8 ), $requests ) ) ),
+						$included_excluded_parent_requests
+					),
+					'uniqueKeyHashes'     => array_map(
+						static fn ( array $keys ): array => array_values( array_unique( array_map( static fn ( string $key ): string => substr( md5( $key ), 0, 8 ), $keys ) ) ),
+						$included_excluded_parent_keys
+					),
+					'variants'            => $included_excluded_parent_actual,
 				)
 			);
 
