@@ -35,6 +35,7 @@ final class RevisionsAutosavesSurface {
 			$rows[] = self::check_preview_helper( $ctx->fork( 'preview' ), $case );
 			$rows[] = self::check_preview_request_dispatch( $ctx->fork( 'preview-dispatch' ), $case );
 			$rows[] = self::check_rest_revision_autosave_route_dispatch( $ctx->fork( 'rest-dispatch' ), $case );
+			$rows[] = self::check_rest_revision_autosave_batch_gates( $ctx->fork( 'rest-batch-gates' ), $case );
 			$rows[] = self::check_latest_revision_count_and_url_helpers( $ctx->fork( 'latest-count-url' ), $case );
 			$rows[] = self::check_user_filtered_autosave_lookup( $ctx->fork( 'user-filtered-autosave' ), $case );
 			$rows[] = self::check_revision_template_output( $ctx->fork( 'templates' ), $case );
@@ -2272,6 +2273,466 @@ final class RevisionsAutosavesSurface {
 		);
 	}
 
+	private static function check_rest_revision_autosave_batch_gates( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		self::prepare_runtime();
+		$rest_base = self::register_rest_case_post_type( $case );
+		$server    = self::fresh_rest_server();
+
+		$post_type = \get_post_type_object( $case['postType'] );
+		if ( ! $post_type ) {
+			return self::result(
+				$ctx,
+				'revisions-autosaves.rest-revision-autosave-batch-gates',
+				array(
+					array(
+						'label'   => 'REST case post type is registered',
+						'details' => array( 'postType' => $case['postType'] ),
+					),
+				),
+				array( 'case' => self::case_summary( $case ) )
+			);
+		}
+
+		$parent_controller   = $post_type->get_rest_controller();
+		$revision_controller = $post_type->get_revisions_rest_controller();
+		$autosave_controller = $post_type->get_autosave_rest_controller();
+		if ( $parent_controller ) {
+			$parent_controller->register_routes();
+		}
+		if ( $revision_controller ) {
+			$revision_controller->register_routes();
+		}
+		if ( $autosave_controller ) {
+			$autosave_controller->register_routes();
+		}
+
+		$failures               = array();
+		$author_id              = self::insert_author( $case, 'rest-batch-author' );
+		$editor_id              = self::insert_author( $case, 'rest-batch-editor' );
+		$post_id                = self::insert_parent_post( $case, $author_id, 'rest-batch-parent' );
+		$old_revision_id        = self::insert_revision_row(
+			$post_id,
+			$author_id,
+			array(
+				'post_title'        => $case['titleFrom'] . ' batch old revision',
+				'post_content'      => $case['contentFrom'] . "\nREST batch old revision",
+				'post_excerpt'      => $case['excerptFrom'],
+				'post_date'         => $case['dateFrom'],
+				'post_date_gmt'     => $case['dateFromGmt'],
+				'post_modified'     => $case['dateFrom'],
+				'post_modified_gmt' => $case['dateFromGmt'],
+			),
+			false
+		);
+		$new_revision_id        = self::insert_revision_row(
+			$post_id,
+			$author_id,
+			array(
+				'post_title'        => $case['titleTo'] . ' batch latest revision',
+				'post_content'      => $case['contentTo'] . "\nREST batch latest revision",
+				'post_excerpt'      => $case['excerptTo'],
+				'post_date'         => $case['dateTo'],
+				'post_date_gmt'     => $case['dateToGmt'],
+				'post_modified'     => $case['dateTo'],
+				'post_modified_gmt' => $case['dateToGmt'],
+			),
+			false
+		);
+		$autosave_id            = self::insert_revision_row(
+			$post_id,
+			$editor_id,
+			array(
+				'post_title'        => $case['titleTo'] . ' batch autosave',
+				'post_content'      => $case['contentTo'] . "\nREST batch autosave",
+				'post_excerpt'      => $case['excerptTo'] . ' REST batch autosave',
+				'post_date'         => $case['dateLater'],
+				'post_date_gmt'     => $case['dateLaterGmt'],
+				'post_modified'     => $case['dateLater'],
+				'post_modified_gmt' => $case['dateLaterGmt'],
+			),
+			true
+		);
+		$revision_route         = '/wp/v2/' . $rest_base . '/' . $post_id . '/revisions';
+		$revision_item_route    = $revision_route . '/' . $new_revision_id;
+		$revision_delete_route  = $revision_route . '/' . $old_revision_id;
+		$autosave_route         = '/wp/v2/' . $rest_base . '/' . $post_id . '/autosaves';
+		$autosave_item_route    = $autosave_route . '/' . $autosave_id;
+		$parent_item_route      = '/wp/v2/' . $rest_base . '/' . $post_id;
+		$grant_caps             = self::grant_all_caps_filter( $editor_id );
+		$batch_token            = 'component-fuzz-revisions-batch-' . $ctx->seed() . '-' . $ctx->iteration();
+		$query_calls            = array();
+		$prepare_revision_calls = array();
+		$prepare_autosave_calls = array();
+		$delete_calls           = array();
+		$child_post_dispatch    = array();
+		$record_child_dispatch  = false;
+
+		$query_filter = static function ( array $args, \WP_REST_Request $request ) use ( &$query_calls ): array {
+			$query_calls[] = array(
+				'route'      => $request->get_route(),
+				'method'     => $request->get_method(),
+				'postParent' => $args['post_parent'] ?? null,
+				'orderBy'    => $args['orderby'] ?? null,
+			);
+			return $args;
+		};
+		$revision_filter = static function ( \WP_REST_Response $response, \WP_Post $post, \WP_REST_Request $request ) use ( &$prepare_revision_calls ): \WP_REST_Response {
+			$prepare_revision_calls[] = array(
+				'id'     => (int) $post->ID,
+				'parent' => (int) $post->post_parent,
+				'route'  => $request->get_route(),
+				'method' => $request->get_method(),
+			);
+			return $response;
+		};
+		$autosave_filter = static function ( \WP_REST_Response $response, \WP_Post $post, \WP_REST_Request $request ) use ( &$prepare_autosave_calls ): \WP_REST_Response {
+			$prepare_autosave_calls[] = array(
+				'id'     => (int) $post->ID,
+				'parent' => (int) $post->post_parent,
+				'route'  => $request->get_route(),
+				'method' => $request->get_method(),
+			);
+			return $response;
+		};
+		$delete_action = static function ( $result, \WP_REST_Request $request ) use ( &$delete_calls ): void {
+			$delete_calls[] = array(
+				'id'      => (int) $request['id'],
+				'parent'  => (int) $request['parent'],
+				'force'   => (bool) $request['force'],
+				'deleted' => $result instanceof \WP_Post ? (int) $result->ID : null,
+			);
+		};
+		$post_dispatch_filter = static function ( \WP_REST_Response $response, \WP_REST_Server $filter_server, \WP_REST_Request $request ) use ( $server, $batch_token, &$child_post_dispatch, &$record_child_dispatch ): \WP_REST_Response {
+			if ( $filter_server !== $server || '/batch/v1' === $request->get_route() ) {
+				return $response;
+			}
+
+			if ( $record_child_dispatch ) {
+				$child_post_dispatch[] = array(
+					'route'  => $request->get_route(),
+					'method' => $request->get_method(),
+					'status' => $response->get_status(),
+				);
+			}
+
+			$response->header( 'X-Component-Fuzz-Revisions-Batch', $batch_token );
+			return $response;
+		};
+
+		\add_filter( 'rest_revision_query', $query_filter, 10, 2 );
+		\add_filter( 'rest_prepare_revision', $revision_filter, 10, 3 );
+		\add_filter( 'rest_prepare_autosave', $autosave_filter, 10, 3 );
+		\add_filter( 'rest_post_dispatch', $post_dispatch_filter, 11, 3 );
+		\add_action( 'rest_delete_revision', $delete_action, 10, 2 );
+
+		$custom_filters_removed = false;
+		try {
+			\wp_set_current_user( $editor_id );
+			\add_filter( 'user_has_cap', $grant_caps, 10, 4 );
+
+			$direct_revision_collection = self::dispatch(
+				$server,
+				self::request(
+					'GET',
+					$revision_route,
+					array(
+						'context'  => 'edit',
+						'_fields'  => 'id,parent,title.raw',
+						'orderby'  => 'date',
+						'order'    => 'desc',
+						'per_page' => 3,
+					)
+				)
+			);
+			$direct_revision_item = self::dispatch(
+				$server,
+				self::request(
+					'GET',
+					$revision_item_route,
+					array(
+						'context' => 'edit',
+						'_fields' => 'id,parent,title.raw',
+					)
+				)
+			);
+			$direct_autosave_item = self::dispatch(
+				$server,
+				self::request(
+					'GET',
+					$autosave_item_route,
+					array(
+						'context' => 'edit',
+						'_fields' => 'id,parent,title.raw,preview_link',
+					)
+				)
+			);
+			$direct_invalid_order = self::dispatch(
+				$server,
+				self::request(
+					'GET',
+					$revision_route,
+					array( 'orderby' => 'relevance' )
+				)
+			);
+			$direct_parent_item = self::dispatch(
+				$server,
+				self::request(
+					'GET',
+					$parent_item_route,
+					array(
+						'context' => 'edit',
+						'_fields' => 'id,type,status',
+					)
+				)
+			);
+
+			$direct_revision_data = $direct_revision_collection instanceof \WP_REST_Response ? $direct_revision_collection->get_data() : array();
+			$direct_item_data     = $direct_revision_item instanceof \WP_REST_Response ? $direct_revision_item->get_data() : array();
+			$direct_autosave_data = $direct_autosave_item instanceof \WP_REST_Response ? $direct_autosave_item->get_data() : array();
+			$direct_parent_data   = $direct_parent_item instanceof \WP_REST_Response ? $direct_parent_item->get_data() : array();
+			$direct_query_count   = count( $query_calls );
+			$direct_revision_prepare_count = count( $prepare_revision_calls );
+			$direct_autosave_prepare_count = count( $prepare_autosave_calls );
+
+			$query_calls            = array();
+			$prepare_revision_calls = array();
+			$prepare_autosave_calls = array();
+			$delete_calls           = array();
+			$counts_before_batch    = isset( $GLOBALS['wpdb'] ) && $GLOBALS['wpdb'] instanceof \Component_Fuzz_WPDB_Stub
+				? $GLOBALS['wpdb']->component_fuzz_content_counts()
+				: array();
+
+			$normal_specs = array(
+				array(
+					'method' => 'DELETE',
+					'route'  => $revision_delete_route,
+					'body'   => array( 'force' => false ),
+				),
+				array(
+					'method' => 'DELETE',
+					'route'  => $revision_item_route,
+					'body'   => array( 'force' => true ),
+				),
+				array(
+					'method' => 'POST',
+					'route'  => $autosave_route,
+					'body'   => array(
+						'title'   => $case['titleTo'] . ' blocked batch autosave',
+						'content' => $case['contentTo'] . "\nblocked batch autosave",
+					),
+				),
+			);
+
+			$record_child_dispatch = true;
+			$normal_batch = self::dispatch(
+				$server,
+				self::batch_request(
+					array_map(
+						static fn ( array $spec ): array => self::batch_child_from_spec( $spec ),
+						$normal_specs
+					),
+					'normal'
+				)
+			);
+			$record_child_dispatch = false;
+			$normal_data      = $normal_batch instanceof \WP_REST_Response ? $normal_batch->get_data() : array();
+			$normal_responses = is_array( $normal_data['responses'] ?? null ) ? $normal_data['responses'] : array();
+			$counts_after_normal = isset( $GLOBALS['wpdb'] ) && $GLOBALS['wpdb'] instanceof \Component_Fuzz_WPDB_Stub
+				? $GLOBALS['wpdb']->component_fuzz_content_counts()
+				: array();
+
+			$require_all_specs = array(
+				array(
+					'method' => 'PUT',
+					'route'  => $parent_item_route,
+					'query'  => array(
+						'context' => 'edit',
+						'_fields' => 'id,type,status',
+					),
+					'body'   => array(
+						'title' => $case['titleTo'] . ' require-all parent update',
+					),
+				),
+				array(
+					'method' => 'DELETE',
+					'route'  => $revision_item_route,
+					'body'   => array( 'force' => true ),
+				),
+				array(
+					'method' => 'POST',
+					'route'  => $autosave_route,
+					'body'   => array(
+						'title' => $case['titleTo'] . ' require-all autosave',
+					),
+				),
+			);
+			$child_events_after_normal = $child_post_dispatch;
+
+			$record_child_dispatch = true;
+			$require_all_batch = self::dispatch(
+				$server,
+				self::batch_request(
+					array_map(
+						static fn ( array $spec ): array => self::batch_child_from_spec( $spec ),
+						$require_all_specs
+					),
+					'require-all-validate'
+				)
+			);
+			$record_child_dispatch = false;
+			$require_all_data      = $require_all_batch instanceof \WP_REST_Response ? $require_all_batch->get_data() : array();
+			$require_all_responses = is_array( $require_all_data['responses'] ?? null ) ? $require_all_data['responses'] : array();
+			$counts_after_require_all = isset( $GLOBALS['wpdb'] ) && $GLOBALS['wpdb'] instanceof \Component_Fuzz_WPDB_Stub
+				? $GLOBALS['wpdb']->component_fuzz_content_counts()
+				: array();
+
+			$old_revision_after_batch = \get_post( $old_revision_id );
+			$autosaves_after_batch    = \wp_get_post_revisions( $post_id, array( 'check_enabled' => false ) );
+		} finally {
+			$record_child_dispatch = false;
+			\remove_action( 'rest_delete_revision', $delete_action, 10 );
+			\remove_filter( 'rest_post_dispatch', $post_dispatch_filter, 11 );
+			\remove_filter( 'rest_prepare_autosave', $autosave_filter, 10 );
+			\remove_filter( 'rest_prepare_revision', $revision_filter, 10 );
+			\remove_filter( 'rest_revision_query', $query_filter, 10 );
+			\remove_filter( 'user_has_cap', $grant_caps, 10 );
+			\wp_set_current_user( 0 );
+			$custom_filters_removed = false === \has_filter( 'rest_delete_revision', $delete_action )
+				&& false === \has_filter( 'rest_post_dispatch', $post_dispatch_filter )
+				&& false === \has_filter( 'rest_prepare_autosave', $autosave_filter )
+				&& false === \has_filter( 'rest_prepare_revision', $revision_filter )
+				&& false === \has_filter( 'rest_revision_query', $query_filter )
+				&& false === \has_filter( 'user_has_cap', $grant_caps );
+		}
+
+		$direct_ok = $direct_revision_collection instanceof \WP_REST_Response
+			&& 200 === $direct_revision_collection->get_status()
+			&& is_array( $direct_revision_data )
+			&& array( $autosave_id, $new_revision_id, $old_revision_id ) === array_map( 'intval', array_column( $direct_revision_data, 'id' ) )
+			&& $direct_revision_item instanceof \WP_REST_Response
+			&& 200 === $direct_revision_item->get_status()
+			&& $new_revision_id === (int) ( $direct_item_data['id'] ?? 0 )
+			&& $direct_autosave_item instanceof \WP_REST_Response
+			&& 200 === $direct_autosave_item->get_status()
+			&& $autosave_id === (int) ( $direct_autosave_data['id'] ?? 0 )
+			&& $direct_parent_item instanceof \WP_REST_Response
+			&& 200 === $direct_parent_item->get_status()
+			&& $post_id === (int) ( $direct_parent_data['id'] ?? 0 )
+			&& self::response_error_ok( $direct_invalid_order, 'rest_no_search_term_defined', 400 )
+			&& $direct_query_count >= 1
+			&& $direct_revision_prepare_count >= 1
+			&& $direct_autosave_prepare_count >= 1;
+
+		$normal_ok = $normal_batch instanceof \WP_REST_Response
+			&& 207 === $normal_batch->get_status()
+			&& count( $normal_specs ) === count( $normal_responses );
+		foreach ( $normal_responses as $offset => $envelope ) {
+			$body    = is_array( $envelope['body'] ?? null ) ? $envelope['body'] : array();
+			$headers = is_array( $envelope['headers'] ?? null ) ? $envelope['headers'] : array();
+			$normal_ok = $normal_ok
+				&& 400 === (int) ( $envelope['status'] ?? 0 )
+				&& 'rest_batch_not_allowed' === ( $body['code'] ?? null )
+				&& $batch_token === ( $headers['X-Component-Fuzz-Revisions-Batch'] ?? null )
+				&& ( $normal_specs[ $offset ]['route'] ?? null ) === ( $child_events_after_normal[ $offset ]['route'] ?? null )
+				&& ( $normal_specs[ $offset ]['method'] ?? null ) === ( $child_events_after_normal[ $offset ]['method'] ?? null )
+				&& 400 === (int) ( $child_events_after_normal[ $offset ]['status'] ?? 0 );
+		}
+		$normal_no_side_effects = $counts_before_batch === $counts_after_normal
+			&& array() === $query_calls
+			&& array() === $prepare_revision_calls
+			&& array() === $prepare_autosave_calls
+			&& array() === $delete_calls
+			&& $old_revision_after_batch instanceof \WP_Post
+			&& isset( $autosaves_after_batch[ $autosave_id ] );
+
+		$require_all_revision_error = is_array( $require_all_responses[1] ?? null ) ? $require_all_responses[1] : array();
+		$require_all_revision_body  = is_array( $require_all_revision_error['body'] ?? null ) ? $require_all_revision_error['body'] : array();
+		$require_all_autosave_error = is_array( $require_all_responses[2] ?? null ) ? $require_all_responses[2] : array();
+		$require_all_autosave_body  = is_array( $require_all_autosave_error['body'] ?? null ) ? $require_all_autosave_error['body'] : array();
+		$require_all_ok    = $require_all_batch instanceof \WP_REST_Response
+			&& 207 === $require_all_batch->get_status()
+			&& 'validation' === ( $require_all_data['failed'] ?? null )
+			&& 3 === count( $require_all_responses )
+			&& array_key_exists( 0, $require_all_responses )
+			&& null === $require_all_responses[0]
+			&& 400 === (int) ( $require_all_revision_error['status'] ?? 0 )
+			&& 'rest_batch_not_allowed' === ( $require_all_revision_body['code'] ?? null )
+			&& 400 === (int) ( $require_all_autosave_error['status'] ?? 0 )
+			&& 'rest_batch_not_allowed' === ( $require_all_autosave_body['code'] ?? null )
+			&& $counts_before_batch === $counts_after_require_all
+			&& $child_events_after_normal === $child_post_dispatch;
+
+		self::collect_failure(
+			$failures,
+			$direct_ok,
+			'REST revision/autosave subroutes dispatch directly before batch gate checks are exercised',
+			array(
+				'revisionCollection' => self::response_summary( $direct_revision_collection ),
+				'revisionItem'       => self::response_summary( $direct_revision_item ),
+				'autosaveItem'       => self::response_summary( $direct_autosave_item ),
+				'invalidOrder'       => self::response_summary( $direct_invalid_order ),
+				'parentItem'         => self::response_summary( $direct_parent_item ),
+				'queryCount'         => $direct_query_count,
+				'revisionPrepare'    => $direct_revision_prepare_count,
+				'autosavePrepare'    => $direct_autosave_prepare_count,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			$normal_ok && $normal_no_side_effects,
+			'batch/v1 normal mode rejects revision and autosave subroutes before validation, callbacks, queries, deletes, or autosave writes',
+			array(
+				'normal'       => self::response_summary( $normal_batch ),
+				'childEvents'  => $child_events_after_normal,
+				'countsBefore' => $counts_before_batch,
+				'countsAfter'  => $counts_after_normal,
+				'queryCalls'   => $query_calls,
+				'revisionPrepare' => $prepare_revision_calls,
+				'autosavePrepare' => $prepare_autosave_calls,
+				'deleteCalls'  => $delete_calls,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			$require_all_ok,
+			'batch/v1 require-all validation nulls allowed parent siblings and reports revision subroute batch gates without child post-dispatch',
+			array(
+				'requireAll'  => self::response_summary( $require_all_batch ),
+				'childEvents' => $child_post_dispatch,
+				'countsAfter' => $counts_after_require_all,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			$custom_filters_removed,
+			'REST revision/autosave batch gate harness removes local filters and restores current user',
+			array(
+				'filters' => array(
+					'delete'       => \has_filter( 'rest_delete_revision', $delete_action ),
+					'postDispatch' => \has_filter( 'rest_post_dispatch', $post_dispatch_filter ),
+					'autosave'     => \has_filter( 'rest_prepare_autosave', $autosave_filter ),
+					'revision'     => \has_filter( 'rest_prepare_revision', $revision_filter ),
+					'query'        => \has_filter( 'rest_revision_query', $query_filter ),
+					'caps'         => \has_filter( 'user_has_cap', $grant_caps ),
+				),
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'revisions-autosaves.rest-revision-autosave-batch-gates',
+			$failures,
+			array(
+				'case'        => self::case_summary( $case ),
+				'postId'      => $post_id,
+				'restBase'    => $rest_base,
+				'revisions'   => array( $old_revision_id, $new_revision_id ),
+				'autosaveId'  => $autosave_id,
+				'batchRoutes' => array_column( $normal_specs, 'route' ),
+			)
+		);
+	}
+
 	private static function check_latest_revision_count_and_url_helpers( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
 		self::prepare_runtime();
 		self::register_case_post_type( $case, true );
@@ -2796,6 +3257,39 @@ final class RevisionsAutosavesSurface {
 			$request->set_body_params( $body_params );
 		}
 		return $request;
+	}
+
+	private static function batch_request( array $requests, string $validation ): \WP_REST_Request {
+		$request = new \WP_REST_Request( 'POST', '/batch/v1' );
+		$request->set_body_params(
+			array(
+				'validation' => $validation,
+				'requests'   => $requests,
+			)
+		);
+
+		return $request;
+	}
+
+	private static function batch_child_from_spec( array $spec ): array {
+		$path  = (string) ( $spec['route'] ?? '' );
+		$query = is_array( $spec['query'] ?? null ) ? $spec['query'] : array();
+		if ( array() !== $query ) {
+			$path .= '?' . http_build_query( $query, '', '&', PHP_QUERY_RFC3986 );
+		}
+
+		$child = array(
+			'method' => (string) ( $spec['method'] ?? 'GET' ),
+			'path'   => $path,
+		);
+		if ( isset( $spec['body'] ) && is_array( $spec['body'] ) ) {
+			$child['body'] = $spec['body'];
+		}
+		if ( isset( $spec['headers'] ) && is_array( $spec['headers'] ) ) {
+			$child['headers'] = $spec['headers'];
+		}
+
+		return $child;
 	}
 
 	private static function insert_author( array $case, string $suffix ): int {
