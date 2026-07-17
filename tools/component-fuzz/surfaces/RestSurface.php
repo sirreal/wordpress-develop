@@ -122,6 +122,13 @@ final class RestSurface {
 				}
 			);
 			$checks[] = self::run_check(
+				'batch-v1-no-route-child-alignment',
+				'REST batch/v1 parsed child paths that match no route remain aligned as rest_no_route envelopes, dispatch child filters in normal mode, and abort without child execution in require-all validation.',
+				function () use ( &$rng ) {
+					return self::check_batch_v1_no_route_child_alignment( $rng );
+				}
+			);
+			$checks[] = self::run_check(
 				'batch-v1-pre-dispatch-short-circuit',
 				'REST batch/v1 child pre-dispatch filters can short-circuit valid children before permission callbacks, normal validation errors remain enveloped, and require-all validation prevents child execution.',
 				function () use ( &$rng ) {
@@ -2335,6 +2342,366 @@ final class RestSurface {
 				'filterRemoved'      => $filter_removed,
 				'restServerRestored' => $rest_server_restored,
 				'malformedPaths'     => $malformed_paths,
+				'normalResponse'     => self::response_summary( $normal_response ),
+				'requireAllResponse' => self::response_summary( $require_all_response ),
+				'childPreDispatch'   => $child_pre_dispatch,
+				'childPostDispatch'  => $child_post_dispatch,
+				'seenRequests'       => $seen_requests,
+			),
+		);
+	}
+
+	private static function check_batch_v1_no_route_child_alignment( array &$rng ): array {
+		$namespace = self::namespace_token( $rng );
+		$token     = self::slug_token( $rng, 'noroute' );
+		$server    = new \WP_REST_Server();
+
+		$had_rest_server      = array_key_exists( 'wp_rest_server', $GLOBALS );
+		$previous_rest_server = $had_rest_server ? $GLOBALS['wp_rest_server'] : null;
+		$permission_hits      = array();
+		$callback_hits        = array();
+		$seen_requests        = array();
+		$child_pre_dispatch   = array();
+		$child_post_dispatch  = array();
+		$parent_pre_hits      = 0;
+
+		$route = '/' . $namespace . '/batch-no-route/(?P<id>[0-9]+)';
+		$path  = '/' . $namespace . '/batch-no-route/';
+
+		$server->register_route(
+			$namespace,
+			$route,
+			array(
+				'allow_batch' => array( 'v1' => true ),
+				array(
+					'methods'             => 'POST',
+					'permission_callback' => static function ( \WP_REST_Request $request ) use ( &$permission_hits ): bool {
+						$route                    = $request->get_route();
+						$permission_hits[ $route ] = ( $permission_hits[ $route ] ?? 0 ) + 1;
+						return true;
+					},
+					'callback'            => static function ( \WP_REST_Request $request ) use ( &$callback_hits, &$seen_requests ) {
+						$route                 = $request->get_route();
+						$method                = $request->get_method();
+						$callback_hits[ $route ] = ( $callback_hits[ $route ] ?? 0 ) + 1;
+						$seen_requests[]       = array(
+							'route'     => $route,
+							'method'    => $method,
+							'urlParams' => $request->get_url_params(),
+							'query'     => $request->get_query_params(),
+							'body'      => $request->get_body_params(),
+							'headers'   => array(
+								'x_no_route' => $request->get_header( 'X-No-Route' ),
+							),
+						);
+
+						return new \WP_REST_Response(
+							array(
+								'id'        => $request['id'],
+								'route'     => $route,
+								'method'    => $method,
+								'urlParams' => $request->get_url_params(),
+								'query'     => $request->get_query_params(),
+								'body'      => $request->get_body_params(),
+								'headers'   => array(
+									'x_no_route' => $request->get_header( 'X-No-Route' ),
+								),
+							),
+							209,
+							array( 'X-No-Route-Valid' => (string) $request['id'] )
+						);
+					},
+					'args'                => array(
+						'id'     => array(
+							'type' => 'integer',
+						),
+						'token'  => array(
+							'type'     => 'string',
+							'required' => true,
+							'pattern'  => '^noroute-[a-z0-9]{6}$',
+						),
+						'marker' => array(
+							'type'     => 'string',
+							'required' => true,
+						),
+					),
+				),
+			)
+		);
+
+		$server->register_route(
+			$namespace,
+			'/' . $namespace . '/method-only/(?P<id>[0-9]+)',
+			array(
+				'allow_batch' => array( 'v1' => true ),
+				array(
+					'methods'             => 'GET',
+					'permission_callback' => '__return_true',
+					'callback'            => static function () {
+						return array( 'methodOnly' => true );
+					},
+				),
+			)
+		);
+
+		$valid_request = array(
+			'method'  => 'POST',
+			'path'    => $path . '101?token=' . rawurlencode( $token ) . '&marker=valid&queryOnly=' . rawurlencode( self::slug_token( $rng, 'query' ) ),
+			'body'    => array( 'bodyValue' => 'body-valid' ),
+			'headers' => array( 'X-No-Route' => 'valid-' . $token ),
+		);
+		$tail_valid_request = array(
+			'method'  => 'POST',
+			'path'    => $path . '102?token=' . rawurlencode( $token ) . '&marker=valid-tail',
+			'body'    => array( 'bodyValue' => 'body-tail' ),
+			'headers' => array( 'X-No-Route' => 'valid-tail-' . $token ),
+		);
+		$no_route_specs = array(
+			array(
+				'label'  => 'unknown-namespace',
+				'method' => 'POST',
+				'path'   => '/' . $namespace . '-missing/nowhere?token=' . rawurlencode( $token ) . '&case=unknown',
+			),
+			array(
+				'label'  => 'nonmatching-regex',
+				'method' => 'POST',
+				'path'   => $path . 'not-a-number?token=' . rawurlencode( $token ) . '&case=regex',
+			),
+			array(
+				'label'  => 'unsupported-method',
+				'method' => 'DELETE',
+				'path'   => '/' . $namespace . '/method-only/202?case=method',
+			),
+			array(
+				'label'  => 'absolute-same-host-unknown',
+				'method' => 'PATCH',
+				'path'   => 'https://example.test/' . $namespace . '/absolute-missing?token=' . rawurlencode( $token ) . '&case=absolute',
+			),
+			array(
+				'label'  => 'encoded-space-path',
+				'method' => 'PUT',
+				'path'   => '/' . $namespace . '/space%20path/' . self::slug_token( $rng, 'missing' ) . '?case=encoded-space',
+			),
+			array(
+				'label'  => 'protocol-relative-unknown',
+				'method' => 'POST',
+				'path'   => '//example.test/' . $namespace . '/protocol-relative-missing?case=protocol',
+			),
+		);
+
+		$normal_requests = array( $valid_request );
+		foreach ( $no_route_specs as $spec ) {
+			$normal_requests[] = array(
+				'method'  => $spec['method'],
+				'path'    => $spec['path'],
+				'body'    => array( 'bodyValue' => 'body-' . $spec['label'] ),
+				'headers' => array( 'X-No-Route' => $spec['label'] ),
+			);
+		}
+		$normal_requests[] = $tail_valid_request;
+
+		$pre_filter = static function ( $result, \WP_REST_Server $filter_server, \WP_REST_Request $request ) use ( $server, &$parent_pre_hits, &$child_pre_dispatch ) {
+			if ( $filter_server !== $server ) {
+				return $result;
+			}
+			if ( '/batch/v1' === $request->get_route() ) {
+				++$parent_pre_hits;
+				return $result;
+			}
+
+			$child_pre_dispatch[] = array(
+				'route'      => $request->get_route(),
+				'method'     => $request->get_method(),
+				'urlParams'  => $request->get_url_params(),
+				'attrsEmpty' => array() === $request->get_attributes(),
+				'defaults'   => $request->get_default_params(),
+				'query'      => $request->get_query_params(),
+				'body'       => $request->get_body_params(),
+				'headers'    => array(
+					'x_no_route' => $request->get_header( 'X-No-Route' ),
+				),
+			);
+			return $result;
+		};
+		$post_filter = static function ( \WP_REST_Response $response, \WP_REST_Server $filter_server, \WP_REST_Request $request ) use ( $server, &$child_post_dispatch ): \WP_REST_Response {
+			if ( $filter_server !== $server || '/batch/v1' === $request->get_route() ) {
+				return $response;
+			}
+
+			$child_post_dispatch[] = array(
+				'route'  => $request->get_route(),
+				'method' => $request->get_method(),
+				'status' => $response->get_status(),
+			);
+			$response->header( 'X-No-Route-Post', 'seen-' . count( $child_post_dispatch ) );
+			return $response;
+		};
+
+		add_filter( 'rest_pre_dispatch', $pre_filter, 10, 3 );
+		add_filter( 'rest_post_dispatch', $post_filter, 10, 3 );
+		try {
+			$normal_response = $server->dispatch( self::batch_request( $normal_requests, 'normal' ) );
+			$normal_data     = $normal_response->get_data();
+			$callbacks_after_normal = array_sum( $callback_hits );
+			$permissions_after_normal = array_sum( $permission_hits );
+			$pre_after_normal      = count( $child_pre_dispatch );
+			$post_after_normal     = count( $child_post_dispatch );
+
+			$require_all_requests = array(
+				array(
+					'method'  => 'POST',
+					'path'    => $path . '301?token=' . rawurlencode( $token ) . '&marker=require-valid',
+					'body'    => array( 'bodyValue' => 'require-valid' ),
+					'headers' => array( 'X-No-Route' => 'require-valid' ),
+				),
+			);
+			foreach ( $no_route_specs as $spec ) {
+				$require_all_requests[] = array(
+					'method'  => $spec['method'],
+					'path'    => $spec['path'] . ( false === strpos( $spec['path'], '?' ) ? '?' : '&' ) . 'require=1',
+					'body'    => array( 'bodyValue' => 'require-' . $spec['label'] ),
+					'headers' => array( 'X-No-Route' => 'require-' . $spec['label'] ),
+				);
+			}
+			$require_all_requests[] = array(
+				'method'  => 'POST',
+				'path'    => $path . '302?token=' . rawurlencode( $token ) . '&marker=require-tail',
+				'body'    => array( 'bodyValue' => 'require-tail' ),
+				'headers' => array( 'X-No-Route' => 'require-tail' ),
+			);
+			$require_all_response = $server->dispatch( self::batch_request( $require_all_requests, 'require-all-validate' ) );
+			$require_all_data     = $require_all_response->get_data();
+		} finally {
+			remove_filter( 'rest_pre_dispatch', $pre_filter, 10 );
+			remove_filter( 'rest_post_dispatch', $post_filter, 10 );
+		}
+
+		$filter_removed = false === has_filter( 'rest_pre_dispatch', $pre_filter )
+			&& false === has_filter( 'rest_post_dispatch', $post_filter );
+		$rest_server_restored = $had_rest_server
+			? array_key_exists( 'wp_rest_server', $GLOBALS ) && $previous_rest_server === $GLOBALS['wp_rest_server']
+			: ! array_key_exists( 'wp_rest_server', $GLOBALS );
+
+		$normal_responses = is_array( $normal_data['responses'] ?? null ) ? $normal_data['responses'] : array();
+		$valid_envelope   = is_array( $normal_responses[0] ?? null ) ? $normal_responses[0] : array();
+		$valid_body       = is_array( $valid_envelope['body'] ?? null ) ? $valid_envelope['body'] : array();
+		$valid_headers    = is_array( $valid_envelope['headers'] ?? null ) ? $valid_envelope['headers'] : array();
+		$valid_ok         = 207 === $normal_response->get_status()
+			&& count( $normal_requests ) === count( $normal_responses )
+			&& 209 === ( $valid_envelope['status'] ?? null )
+			&& '101' === (string) ( $valid_headers['X-No-Route-Valid'] ?? null )
+			&& 'seen-1' === ( $valid_headers['X-No-Route-Post'] ?? null )
+			&& 101 === (int) ( $valid_body['id'] ?? 0 )
+			&& $path . '101' === ( $valid_body['route'] ?? null )
+			&& 'POST' === ( $valid_body['method'] ?? null )
+			&& array( 'id' => 101 ) === ( $valid_body['urlParams'] ?? null )
+			&& $token === ( $valid_body['query']['token'] ?? null )
+			&& 'valid' === ( $valid_body['query']['marker'] ?? null )
+			&& 'body-valid' === ( $valid_body['body']['bodyValue'] ?? null )
+			&& 'valid-' . $token === ( $valid_body['headers']['x_no_route'] ?? null );
+		$tail_index    = count( $normal_requests ) - 1;
+		$tail_envelope = is_array( $normal_responses[ $tail_index ] ?? null ) ? $normal_responses[ $tail_index ] : array();
+		$tail_body     = is_array( $tail_envelope['body'] ?? null ) ? $tail_envelope['body'] : array();
+		$tail_headers  = is_array( $tail_envelope['headers'] ?? null ) ? $tail_envelope['headers'] : array();
+		$valid_ok      = $valid_ok
+			&& 209 === ( $tail_envelope['status'] ?? null )
+			&& '102' === (string) ( $tail_headers['X-No-Route-Valid'] ?? null )
+			&& 'seen-' . count( $normal_requests ) === ( $tail_headers['X-No-Route-Post'] ?? null )
+			&& 102 === (int) ( $tail_body['id'] ?? 0 )
+			&& $path . '102' === ( $tail_body['route'] ?? null )
+			&& 'POST' === ( $tail_body['method'] ?? null )
+			&& array( 'id' => 102 ) === ( $tail_body['urlParams'] ?? null )
+			&& $token === ( $tail_body['query']['token'] ?? null )
+			&& 'valid-tail' === ( $tail_body['query']['marker'] ?? null )
+			&& 'body-tail' === ( $tail_body['body']['bodyValue'] ?? null )
+			&& 'valid-tail-' . $token === ( $tail_body['headers']['x_no_route'] ?? null );
+
+		$no_route_ok = true;
+		foreach ( $no_route_specs as $offset => $spec ) {
+			$index    = 1 + $offset;
+			$envelope = is_array( $normal_responses[ $index ] ?? null ) ? $normal_responses[ $index ] : array();
+			$headers  = is_array( $envelope['headers'] ?? null ) ? $envelope['headers'] : array();
+			$body     = is_array( $envelope['body'] ?? null ) ? $envelope['body'] : array();
+			$no_route_ok = $no_route_ok
+				&& 404 === ( $envelope['status'] ?? null )
+				&& 'rest_no_route' === ( $body['code'] ?? null )
+				&& 404 === ( $body['data']['status'] ?? null )
+				&& 'seen-' . ( $index + 1 ) === ( $headers['X-No-Route-Post'] ?? null );
+		}
+
+		$pre_routes     = array_column( $child_pre_dispatch, 'route' );
+		$post_routes    = array_column( $child_post_dispatch, 'route' );
+		$expected_routes = array_map(
+			static function ( array $request ): string {
+				$parsed = \wp_parse_url( $request['path'] );
+				return is_array( $parsed ) ? (string) ( $parsed['path'] ?? '' ) : '';
+			},
+			$normal_requests
+		);
+		$filter_locality_ok = 2 === $parent_pre_hits
+			&& count( $normal_requests ) === $pre_after_normal
+			&& count( $normal_requests ) === $post_after_normal
+			&& $expected_routes === $pre_routes
+			&& $expected_routes === $post_routes;
+		foreach ( $child_pre_dispatch as $index => $seen ) {
+			$filter_locality_ok = $filter_locality_ok
+				&& true === ( $seen['attrsEmpty'] ?? null )
+				&& array() === ( $seen['defaults'] ?? null )
+				&& array() === ( $seen['urlParams'] ?? null )
+				&& ( $normal_requests[ $index ]['method'] ?? null ) === ( $seen['method'] ?? null )
+				&& ( $normal_requests[ $index ]['body']['bodyValue'] ?? null ) === ( $seen['body']['bodyValue'] ?? null )
+				&& ( $normal_requests[ $index ]['headers']['X-No-Route'] ?? null ) === ( $seen['headers']['x_no_route'] ?? null );
+		}
+
+		$require_all_responses = is_array( $require_all_data['responses'] ?? null ) ? $require_all_data['responses'] : array();
+		$require_all_ok        = 207 === $require_all_response->get_status()
+			&& 'validation' === ( $require_all_data['failed'] ?? null )
+			&& count( $require_all_requests ) === count( $require_all_responses )
+			&& array_key_exists( 0, $require_all_responses )
+			&& null === $require_all_responses[0]
+			&& $callbacks_after_normal === array_sum( $callback_hits )
+			&& $permissions_after_normal === array_sum( $permission_hits )
+			&& $pre_after_normal === count( $child_pre_dispatch )
+			&& $post_after_normal === count( $child_post_dispatch );
+		for ( $i = 1; $i < count( $require_all_requests ) - 1; ++$i ) {
+			$require_all_ok = $require_all_ok
+				&& 404 === ( $require_all_responses[ $i ]['status'] ?? null )
+				&& 'rest_no_route' === ( $require_all_responses[ $i ]['body']['code'] ?? null )
+				&& 404 === ( $require_all_responses[ $i ]['body']['data']['status'] ?? null )
+				&& array() === ( $require_all_responses[ $i ]['headers'] ?? null );
+		}
+		$require_all_ok = $require_all_ok
+			&& array_key_exists( count( $require_all_requests ) - 1, $require_all_responses )
+			&& null === $require_all_responses[ count( $require_all_requests ) - 1 ];
+
+		$callback_ok = 2 === $callbacks_after_normal
+			&& 2 === $permissions_after_normal
+			&& 2 === count( $seen_requests );
+
+		$ok = $valid_ok
+			&& $no_route_ok
+			&& $filter_locality_ok
+			&& $require_all_ok
+			&& $callback_ok
+			&& $filter_removed
+			&& $rest_server_restored;
+
+		return array(
+			'ok'       => $ok,
+			'message'  => $ok ? 'REST batch/v1 no-route child alignment invariants held.' : 'REST batch/v1 no-route child alignment invariant failed.',
+			'features' => array( 'batch-v1', 'rest-no-route', 'normal-child-filter-dispatch', 'require-all-validation', 'filter-cleanup' ),
+			'details'  => array(
+				'namespace'          => $namespace,
+				'token'              => $token,
+				'validOk'            => $valid_ok,
+				'noRouteOk'          => $no_route_ok,
+				'filterLocalityOk'   => $filter_locality_ok,
+				'requireAllOk'       => $require_all_ok,
+				'callbackOk'         => $callback_ok,
+				'filterRemoved'      => $filter_removed,
+				'restServerRestored' => $rest_server_restored,
+				'noRouteSpecs'       => $no_route_specs,
+				'expectedRoutes'     => $expected_routes,
 				'normalResponse'     => self::response_summary( $normal_response ),
 				'requireAllResponse' => self::response_summary( $require_all_response ),
 				'childPreDispatch'   => $child_pre_dispatch,
