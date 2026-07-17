@@ -35,6 +35,7 @@ final class AccountSecuritySurface {
 			$rows[] = self::check_application_password_chunking_and_hashes( $ctx->fork( 'application-password-hashes' ) );
 			$rows[] = self::check_application_password_authentication( $ctx->fork( 'application-password-authentication' ) );
 			$rows[] = self::check_password_reset_key_lifecycle( $ctx->fork( 'password-reset-key-lifecycle' ) );
+			$rows[] = self::check_retrieve_password_request_path( $ctx->fork( 'retrieve-password-request' ) );
 			$rows[] = self::check_reset_password_composition( $ctx->fork( 'reset-password-composition' ) );
 			$rows[] = self::check_recovery_key_service( $ctx->fork( 'recovery-key-service' ) );
 			$rows[] = self::check_recovery_cookie_service( $ctx->fork( 'recovery-cookie-service' ) );
@@ -113,6 +114,7 @@ final class AccountSecuritySurface {
 				'is_wp_error',
 				'remove_action',
 				'remove_filter',
+				'retrieve_password',
 				'reset_password',
 				'sanitize_text_field',
 				'update_network_option',
@@ -129,6 +131,7 @@ final class AccountSecuritySurface {
 				'wp_is_application_passwords_available',
 				'wp_is_application_passwords_available_for_user',
 				'wp_is_password_reset_allowed_for_user',
+				'wp_mail',
 				'wp_recovery_mode',
 				'wp_set_password',
 				'wp_update_user',
@@ -1115,6 +1118,414 @@ final class AccountSecuritySurface {
 				'expirationEvents' => count( $expiration_events ),
 				'expiredEvents'    => count( $expired_key_events ),
 				'failures'         => array_slice( $failures, 0, 5 ),
+			)
+		);
+	}
+
+	private static function check_retrieve_password_request_path( \ComponentFuzz\FuzzContext $ctx ): array {
+		if ( ! self::can_reset_stub_content() ) {
+			return self::skip(
+				$ctx,
+				'account-security.retrieve-password.request-hooks-and-mail-boundary',
+				'The in-memory wpdb content reset hook is unavailable.'
+			);
+		}
+
+		$failures             = array();
+		$user_id              = 0;
+		$login                = self::login_case( $ctx->fork( 'login' ) );
+		$email                = $login . '+reset@example.test';
+		$password             = 'component-fuzz-retrieve-' . self::token( $ctx->fork( 'password' ), 18 );
+		$activation_key       = 'component-fuzz-existing-' . self::token( $ctx->fork( 'activation-key' ), 20 );
+		$subject_marker       = 'subject-' . self::token( $ctx->fork( 'subject-marker' ), 8 );
+		$message_marker       = 'message-' . self::token( $ctx->fork( 'message-marker' ), 8 );
+		$header_marker        = 'header-' . self::token( $ctx->fork( 'header-marker' ), 8 );
+		$block_existing       = false;
+		$send_mail            = true;
+		$lost_user_events     = array();
+		$lost_post_events     = array();
+		$lost_errors_events   = array();
+		$send_events          = array();
+		$title_events         = array();
+		$message_events       = array();
+		$notification_events  = array();
+		$mail_events          = array();
+		$retrieve_events      = array();
+		$key_events           = array();
+		$hooks_restored       = false;
+		$content_counts_after = null;
+		$post_snapshot        = $_POST;
+		$request_snapshot     = $_REQUEST;
+		$server_remote_addr   = array_key_exists( 'REMOTE_ADDR', $_SERVER )
+			? array( 'exists' => true, 'value' => $_SERVER['REMOTE_ADDR'] )
+			: array( 'exists' => false, 'value' => null );
+
+		$lost_user_filter = static function ( $user_data, \WP_Error $errors ) use ( &$lost_user_events ) {
+			$lost_user_events[] = array(
+				'userId' => $user_data instanceof \WP_User ? $user_data->ID : null,
+				'codes'  => $errors->get_error_codes(),
+			);
+
+			return $user_data;
+		};
+		$lost_post_action = static function ( \WP_Error $errors, $user_data ) use ( &$lost_post_events ): void {
+			$lost_post_events[] = array(
+				'userId' => $user_data instanceof \WP_User ? $user_data->ID : null,
+				'codes'  => $errors->get_error_codes(),
+			);
+		};
+		$lost_errors_filter = static function ( \WP_Error $errors, $user_data ) use ( &$lost_errors_events, &$block_existing, &$user_id ) {
+			$lost_errors_events[] = array(
+				'userId' => $user_data instanceof \WP_User ? $user_data->ID : null,
+				'codes'  => $errors->get_error_codes(),
+				'blocked' => $block_existing,
+			);
+
+			if ( $block_existing && $user_data instanceof \WP_User && $user_data->ID === $user_id ) {
+				$errors->add( 'component_fuzz_lostpassword_blocked', 'Synthetic lost-password policy rejected the account.' );
+			}
+
+			return $errors;
+		};
+		$send_filter = static function ( bool $send, string $user_login, \WP_User $user_data ) use ( &$send_events, &$send_mail ): bool {
+			$send_events[] = array(
+				'incoming'  => $send,
+				'userLogin' => $user_login,
+				'userId'    => $user_data->ID,
+				'decision'  => $send_mail,
+			);
+
+			return $send_mail;
+		};
+		$title_filter = static function ( string $title, string $user_login, \WP_User $user_data ) use ( &$title_events, $subject_marker ): string {
+			$title_events[] = array(
+				'title'     => $title,
+				'userLogin' => $user_login,
+				'userId'    => $user_data->ID,
+			);
+
+			return $title . ' | ' . $subject_marker;
+		};
+		$message_filter = static function ( string $message, string $key, string $user_login, \WP_User $user_data ) use ( &$message_events, $message_marker ): string {
+			$message_events[] = array(
+				'message'   => $message,
+				'key'       => $key,
+				'userLogin' => $user_login,
+				'userId'    => $user_data->ID,
+			);
+
+			return $message . "\r\nComponent-Fuzz: {$message_marker}\r\n";
+		};
+		$notification_filter = static function ( $defaults, string $key, string $user_login, \WP_User $user_data ) use ( &$notification_events, $header_marker ) {
+			$notification_events[] = array(
+				'defaults'  => $defaults,
+				'key'       => $key,
+				'userLogin' => $user_login,
+				'userId'    => $user_data->ID,
+			);
+
+			if ( is_array( $defaults ) ) {
+				$defaults['headers'] = array( 'X-Component-Fuzz: ' . $header_marker );
+			}
+
+			return $defaults;
+		};
+		$pre_mail_filter = static function ( $return, array $atts ) use ( &$mail_events ): bool {
+			$mail_events[] = array(
+				'return' => $return,
+				'atts'   => $atts,
+			);
+
+			return true;
+		};
+		$retrieve_action = static function ( string $user_login ) use ( &$retrieve_events ): void {
+			$retrieve_events[] = $user_login;
+		};
+		$key_action      = static function ( string $user_login, string $key ) use ( &$key_events ): void {
+			$key_events[] = array(
+				'login' => $user_login,
+				'key'   => $key,
+			);
+		};
+
+		self::reset_stub_content();
+
+		try {
+			$inserted = \wp_insert_user(
+				array(
+					'user_login' => $login,
+					'user_pass'  => $password,
+					'user_email' => $email,
+					'role'       => 'subscriber',
+				)
+			);
+
+			if ( is_int( $inserted ) ) {
+				$user_id = $inserted;
+				\wp_update_user(
+					array(
+						'ID'                  => $user_id,
+						'user_activation_key' => $activation_key,
+					)
+				);
+			}
+
+			$user = is_int( $inserted ) ? \get_user_by( 'id', $inserted ) : false;
+			self::collect_failure(
+				$failures,
+				is_int( $inserted )
+					&& $user instanceof \WP_User
+					&& $login === $user->user_login
+					&& $email === $user->user_email
+					&& $activation_key === $user->user_activation_key,
+				'retrieve_password synthetic user starts with a known activation key',
+				array(
+					'inserted'      => self::describe_value( $inserted ),
+					'user'          => self::describe_value( $user ),
+					'login'         => self::describe_string( $login ),
+					'email'         => self::describe_string( $email ),
+					'activationKey' => self::describe_string( $activation_key ),
+				)
+			);
+
+			\add_filter( 'lostpassword_user_data', $lost_user_filter, 10, 2 );
+			\add_action( 'lostpassword_post', $lost_post_action, 10, 2 );
+			\add_filter( 'lostpassword_errors', $lost_errors_filter, 10, 2 );
+			\add_filter( 'send_retrieve_password_email', $send_filter, 10, 3 );
+			\add_filter( 'retrieve_password_title', $title_filter, 10, 3 );
+			\add_filter( 'retrieve_password_message', $message_filter, 10, 4 );
+			\add_filter( 'retrieve_password_notification_email', $notification_filter, 10, 4 );
+			\add_filter( 'pre_wp_mail', $pre_mail_filter, 10, 2 );
+			\add_action( 'retrieve_password', $retrieve_action );
+			\add_action( 'retrieve_password_key', $key_action, 10, 2 );
+
+			$_POST = array();
+			$empty_result = \retrieve_password();
+
+			$unknown = 'missing-' . self::token( $ctx->fork( 'missing' ), 10 ) . '@example.test';
+			$unknown_result = \retrieve_password( $unknown );
+
+			$after_invalid = $user instanceof \WP_User ? \get_user_by( 'id', $user_id ) : false;
+			self::collect_failure(
+				$failures,
+				self::is_error_code( $empty_result, 'empty_username' )
+					&& self::is_error_code( $unknown_result, 'invalid_email' )
+					&& $after_invalid instanceof \WP_User
+					&& $activation_key === $after_invalid->user_activation_key
+					&& array() === $send_events
+					&& array() === $key_events
+					&& array() === $mail_events,
+				'invalid retrieve_password requests fail before send/key/mail side effects',
+				array(
+					'emptyResult'   => self::describe_value( $empty_result ),
+					'unknownResult' => self::describe_value( $unknown_result ),
+					'afterInvalid'  => self::describe_value( $after_invalid ),
+					'sendEvents'    => self::describe_value( $send_events ),
+					'keyEvents'     => self::describe_value( $key_events ),
+					'mailEvents'    => self::describe_value( $mail_events ),
+				)
+			);
+
+			if ( $user instanceof \WP_User ) {
+				$block_existing = true;
+				$blocked_result = \retrieve_password( $login );
+				$block_existing = false;
+				$after_blocked  = \get_user_by( 'id', $user_id );
+
+				self::collect_failure(
+					$failures,
+					self::is_error_code( $blocked_result, 'component_fuzz_lostpassword_blocked' )
+						&& $after_blocked instanceof \WP_User
+						&& $activation_key === $after_blocked->user_activation_key
+						&& array() === $send_events
+						&& array() === $key_events
+						&& array() === $mail_events,
+					'lostpassword_errors can reject an existing account before send/key/mail side effects',
+					array(
+						'blockedResult' => self::describe_value( $blocked_result ),
+						'afterBlocked'  => self::describe_value( $after_blocked ),
+						'lostErrors'    => self::describe_value( $lost_errors_events ),
+						'sendEvents'    => self::describe_value( $send_events ),
+						'keyEvents'     => self::describe_value( $key_events ),
+						'mailEvents'    => self::describe_value( $mail_events ),
+					)
+				);
+
+				$send_mail   = false;
+				$gated_result = \retrieve_password( $login );
+				$send_mail   = true;
+				$after_gated = \get_user_by( 'id', $user_id );
+
+				self::collect_failure(
+					$failures,
+					true === $gated_result
+						&& $after_gated instanceof \WP_User
+						&& $activation_key === $after_gated->user_activation_key
+						&& 1 === count( $send_events )
+						&& $login === ( $send_events[0]['userLogin'] ?? null )
+						&& $user_id === ( $send_events[0]['userId'] ?? null )
+						&& false === ( $send_events[0]['decision'] ?? null )
+						&& array() === $key_events
+						&& array() === $mail_events,
+					'send_retrieve_password_email can acknowledge an account without generating a key or mail',
+					array(
+						'gatedResult' => self::describe_value( $gated_result ),
+						'afterGated'  => self::describe_value( $after_gated ),
+						'sendEvents'  => self::describe_value( $send_events ),
+						'keyEvents'   => self::describe_value( $key_events ),
+						'mailEvents'  => self::describe_value( $mail_events ),
+					)
+				);
+
+				$_POST['user_login'] = " \t{$email}\n";
+				$_REQUEST['user_login'] = $_POST['user_login'];
+
+				$successful_result = \retrieve_password();
+				$after_success     = \get_user_by( 'id', $user_id );
+				$generated_key     = (string) ( $key_events[0]['key'] ?? '' );
+				$stored_key        = $after_success instanceof \WP_User ? (string) $after_success->user_activation_key : '';
+				$key_parts         = explode( ':', $stored_key, 2 );
+				$key_hash          = (string) ( $key_parts[1] ?? '' );
+				$checked_key       = '' !== $generated_key ? \check_password_reset_key( $generated_key, $login ) : null;
+				$mail_atts         = $mail_events[0]['atts'] ?? array();
+				$mail_to           = is_array( $mail_atts ) ? ( $mail_atts['to'] ?? null ) : null;
+				$mail_subject      = is_array( $mail_atts ) ? ( $mail_atts['subject'] ?? '' ) : '';
+				$mail_message      = is_array( $mail_atts ) ? ( $mail_atts['message'] ?? '' ) : '';
+				$mail_headers      = is_array( $mail_atts ) ? ( $mail_atts['headers'] ?? null ) : null;
+				$message_event     = $message_events[0] ?? array();
+				$notification      = $notification_events[0] ?? array();
+
+				self::collect_failure(
+					$failures,
+					true === $successful_result
+						&& $after_success instanceof \WP_User
+						&& $stored_key !== $activation_key
+						&& $stored_key !== $generated_key
+						&& 2 === count( $key_parts )
+						&& str_starts_with( $key_hash, '$generic$' )
+						&& \wp_verify_fast_hash( $generated_key, $key_hash )
+						&& $checked_key instanceof \WP_User
+						&& $checked_key->ID === $user_id
+						&& 1 === count( $key_events )
+						&& $login === ( $key_events[0]['login'] ?? null )
+						&& 2 === count( $send_events )
+						&& $email === ( $send_events[1]['userLogin'] ?? null )
+						&& $user_id === ( $send_events[1]['userId'] ?? null ),
+					'successful retrieve_password POST lookup stores a checkable hashed reset key for the matched account',
+					array(
+						'successfulResult' => self::describe_value( $successful_result ),
+						'afterSuccess'     => self::describe_value( $after_success ),
+						'generatedKey'     => self::describe_string( $generated_key ),
+						'storedKey'        => self::describe_string( $stored_key ),
+						'checkedKey'       => self::describe_value( $checked_key ),
+						'sendEvents'       => self::describe_value( $send_events ),
+						'keyEvents'        => self::describe_value( $key_events ),
+					)
+				);
+
+				self::collect_failure(
+					$failures,
+					1 === count( $title_events )
+						&& 1 === count( $message_events )
+						&& 1 === count( $notification_events )
+						&& 1 === count( $mail_events )
+						&& $login === ( $title_events[0]['userLogin'] ?? null )
+						&& $login === ( $message_event['userLogin'] ?? null )
+						&& $login === ( $notification['userLogin'] ?? null )
+						&& $generated_key === ( $message_event['key'] ?? null )
+						&& $generated_key === ( $notification['key'] ?? null )
+						&& $email === $mail_to
+						&& is_string( $mail_subject )
+						&& str_contains( $mail_subject, $subject_marker )
+						&& is_string( $mail_message )
+						&& str_contains( $mail_message, $login )
+						&& str_contains( $mail_message, $generated_key )
+						&& str_contains( $mail_message, rawurlencode( $login ) )
+						&& str_contains( $mail_message, $message_marker )
+						&& is_array( $mail_headers )
+						&& in_array( 'X-Component-Fuzz: ' . $header_marker, $mail_headers, true ),
+					'successful retrieve_password mail composition exposes canonical login/key data and filtered mail arguments',
+					array(
+						'titleEvents'        => self::describe_value( $title_events ),
+						'messageEvents'      => self::describe_value( $message_events ),
+						'notificationEvents' => self::describe_value( $notification_events ),
+						'mailEvents'         => self::describe_value( $mail_events ),
+						'mailTo'             => self::describe_value( $mail_to ),
+						'mailSubject'        => self::describe_value( $mail_subject ),
+						'mailHeaders'        => self::describe_value( $mail_headers ),
+					)
+				);
+			}
+		} finally {
+			\remove_filter( 'lostpassword_user_data', $lost_user_filter, 10 );
+			\remove_action( 'lostpassword_post', $lost_post_action, 10 );
+			\remove_filter( 'lostpassword_errors', $lost_errors_filter, 10 );
+			\remove_filter( 'send_retrieve_password_email', $send_filter, 10 );
+			\remove_filter( 'retrieve_password_title', $title_filter, 10 );
+			\remove_filter( 'retrieve_password_message', $message_filter, 10 );
+			\remove_filter( 'retrieve_password_notification_email', $notification_filter, 10 );
+			\remove_filter( 'pre_wp_mail', $pre_mail_filter, 10 );
+			\remove_action( 'retrieve_password', $retrieve_action );
+			\remove_action( 'retrieve_password_key', $key_action, 10 );
+
+			$hooks_restored = false === \has_filter( 'lostpassword_user_data', $lost_user_filter )
+				&& false === \has_filter( 'lostpassword_post', $lost_post_action )
+				&& false === \has_filter( 'lostpassword_errors', $lost_errors_filter )
+				&& false === \has_filter( 'send_retrieve_password_email', $send_filter )
+				&& false === \has_filter( 'retrieve_password_title', $title_filter )
+				&& false === \has_filter( 'retrieve_password_message', $message_filter )
+				&& false === \has_filter( 'retrieve_password_notification_email', $notification_filter )
+				&& false === \has_filter( 'pre_wp_mail', $pre_mail_filter )
+				&& false === \has_filter( 'retrieve_password', $retrieve_action )
+				&& false === \has_filter( 'retrieve_password_key', $key_action );
+
+			$_POST    = $post_snapshot;
+			$_REQUEST = $request_snapshot;
+			if ( $server_remote_addr['exists'] ) {
+				$_SERVER['REMOTE_ADDR'] = $server_remote_addr['value'];
+			} else {
+				unset( $_SERVER['REMOTE_ADDR'] );
+			}
+
+			self::reset_stub_content();
+			$content_counts_after = self::stub_content_counts();
+		}
+
+		self::collect_failure(
+			$failures,
+			$hooks_restored
+				&& $_POST === $post_snapshot
+				&& $_REQUEST === $request_snapshot
+				&& is_array( $content_counts_after )
+				&& 0 === array_sum( array_map( 'intval', $content_counts_after ) ),
+			'retrieve_password request path restores scoped hooks, globals, and in-memory content state',
+			array(
+				'hooksRestored'      => $hooks_restored,
+				'postRestored'       => $_POST === $post_snapshot,
+				'requestRestored'    => $_REQUEST === $request_snapshot,
+				'contentCountsAfter' => self::describe_value( $content_counts_after ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'account-security.retrieve-password.request-hooks-and-mail-boundary',
+			array() === $failures,
+			array(
+				'userId'             => $user_id,
+				'login'              => $login,
+				'email'              => $email,
+				'lostUserEvents'     => count( $lost_user_events ),
+				'lostPostEvents'     => count( $lost_post_events ),
+				'lostErrorsEvents'   => count( $lost_errors_events ),
+				'sendEvents'         => count( $send_events ),
+				'titleEvents'        => count( $title_events ),
+				'messageEvents'      => count( $message_events ),
+				'notificationEvents' => count( $notification_events ),
+				'mailEvents'         => count( $mail_events ),
+				'retrieveEvents'     => count( $retrieve_events ),
+				'keyEvents'          => count( $key_events ),
+				'failures'           => array_slice( $failures, 0, 5 ),
 			)
 		);
 	}
