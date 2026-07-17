@@ -115,6 +115,13 @@ final class RestSurface {
 				}
 			);
 			$checks[] = self::run_check(
+				'batch-v1-malformed-child-path-parsing',
+				'REST batch/v1 child path parsing represents wp_parse_url() failures as aligned error envelopes without dispatching malformed children.',
+				function () use ( &$rng ) {
+					return self::check_batch_v1_malformed_child_path_parsing( $rng );
+				}
+			);
+			$checks[] = self::run_check(
 				'batch-v1-pre-dispatch-short-circuit',
 				'REST batch/v1 child pre-dispatch filters can short-circuit valid children before permission callbacks, normal validation errors remain enveloped, and require-all validation prevents child execution.',
 				function () use ( &$rng ) {
@@ -2047,6 +2054,289 @@ final class RestSurface {
 				'permissionHits'     => $permission_hits,
 				'gateHits'           => $gate_hits,
 				'parentPreHits'      => $parent_pre_hits,
+				'childPreDispatch'   => $child_pre_dispatch,
+				'childPostDispatch'  => $child_post_dispatch,
+				'seenRequests'       => $seen_requests,
+			),
+		);
+	}
+
+	private static function check_batch_v1_malformed_child_path_parsing( array &$rng ): array {
+		$namespace = self::namespace_token( $rng );
+		$token     = self::slug_token( $rng, 'path' );
+		$server    = new \WP_REST_Server();
+
+		$had_rest_server      = array_key_exists( 'wp_rest_server', $GLOBALS );
+		$previous_rest_server = $had_rest_server ? $GLOBALS['wp_rest_server'] : null;
+		$permission_hits      = array();
+		$callback_hits        = array();
+		$seen_requests        = array();
+		$child_pre_dispatch   = array();
+		$child_post_dispatch  = array();
+		$parent_pre_hits      = 0;
+
+		$route = '/' . $namespace . '/batch-path/(?P<id>[0-9]+)';
+		$path  = '/' . $namespace . '/batch-path/';
+
+		$server->register_route(
+			$namespace,
+			$route,
+			array(
+				'allow_batch' => array( 'v1' => true ),
+				array(
+					'methods'             => 'POST',
+					'permission_callback' => static function ( \WP_REST_Request $request ) use ( &$permission_hits ): bool {
+						$route                    = $request->get_route();
+						$permission_hits[ $route ] = ( $permission_hits[ $route ] ?? 0 ) + 1;
+						return true;
+					},
+					'callback'            => static function ( \WP_REST_Request $request ) use ( &$callback_hits, &$seen_requests ) {
+						$route                 = $request->get_route();
+						$method                = $request->get_method();
+						$callback_hits[ $route ] = ( $callback_hits[ $route ] ?? 0 ) + 1;
+						$seen_requests[]       = array(
+							'route'     => $route,
+							'method'    => $method,
+							'urlParams' => $request->get_url_params(),
+							'query'     => $request->get_query_params(),
+							'body'      => $request->get_body_params(),
+							'headers'   => array(
+								'x_batch_path' => $request->get_header( 'X-Batch-Path' ),
+							),
+						);
+
+						return new \WP_REST_Response(
+							array(
+								'id'        => $request['id'],
+								'route'     => $route,
+								'method'    => $method,
+								'urlParams' => $request->get_url_params(),
+								'query'     => $request->get_query_params(),
+								'body'      => $request->get_body_params(),
+								'headers'   => array(
+									'x_batch_path' => $request->get_header( 'X-Batch-Path' ),
+								),
+							),
+							201,
+							array( 'X-Batch-Path-Id' => (string) $request['id'] )
+						);
+					},
+					'args'                => array(
+						'id'     => array(
+							'type' => 'integer',
+						),
+						'token'  => array(
+							'type'     => 'string',
+							'required' => true,
+							'pattern'  => '^path-[a-z0-9]{6}$',
+						),
+						'marker' => array(
+							'type'     => 'string',
+							'required' => true,
+						),
+					),
+				),
+			)
+		);
+
+		$valid_request = array(
+			'method'  => 'POST',
+			'path'    => $path . '101?token=' . rawurlencode( $token ) . '&marker=valid',
+			'body'    => array( 'bodyValue' => 'body-valid' ),
+			'headers' => array( 'X-Batch-Path' => 'valid' ),
+		);
+		$malformed_paths = array(
+			array(
+				'label' => 'empty-http-authority',
+				'path'  => 'http://',
+			),
+			array(
+				'label' => 'bad-userinfo',
+				'path'  => 'http://user@:80',
+			),
+			array(
+				'label' => 'empty-protocol-relative',
+				'path'  => '//',
+			),
+			array(
+				'label' => 'alpha-port',
+				'path'  => 'http://example.test:' . self::slug_token( $rng, 'port' ) . '/batch',
+			),
+			array(
+				'label' => 'negative-port',
+				'path'  => 'http://example.test:-' . self::rng_int( $rng, 1, 99 ) . '/batch',
+			),
+		);
+
+		$normal_requests = array( $valid_request );
+		foreach ( $malformed_paths as $spec ) {
+			$normal_requests[] = array(
+				'method'  => 'POST',
+				'path'    => $spec['path'],
+				'body'    => array( 'bodyValue' => 'body-' . $spec['label'] ),
+				'headers' => array( 'X-Batch-Path' => $spec['label'] ),
+			);
+		}
+
+		$pre_filter = static function ( $result, \WP_REST_Server $filter_server, \WP_REST_Request $request ) use ( $server, &$parent_pre_hits, &$child_pre_dispatch ) {
+			if ( $filter_server !== $server ) {
+				return $result;
+			}
+			if ( '/batch/v1' === $request->get_route() ) {
+				++$parent_pre_hits;
+				return $result;
+			}
+
+			$child_pre_dispatch[] = array(
+				'route'      => $request->get_route(),
+				'method'     => $request->get_method(),
+				'urlParams'  => $request->get_url_params(),
+				'attrsEmpty' => array() === $request->get_attributes(),
+				'defaults'   => $request->get_default_params(),
+				'query'      => $request->get_query_params(),
+			);
+			return $result;
+		};
+		$post_filter = static function ( \WP_REST_Response $response, \WP_REST_Server $filter_server, \WP_REST_Request $request ) use ( $server, &$child_post_dispatch ): \WP_REST_Response {
+			if ( $filter_server !== $server || '/batch/v1' === $request->get_route() ) {
+				return $response;
+			}
+
+			$child_post_dispatch[] = array(
+				'route'  => $request->get_route(),
+				'method' => $request->get_method(),
+				'status' => $response->get_status(),
+			);
+			$response->header( 'X-Path-Post-Dispatch', 'seen' );
+			return $response;
+		};
+
+		add_filter( 'rest_pre_dispatch', $pre_filter, 10, 3 );
+		add_filter( 'rest_post_dispatch', $post_filter, 10, 3 );
+		try {
+			$normal_response = $server->dispatch( self::batch_request( $normal_requests, 'normal' ) );
+			$normal_data     = $normal_response->get_data();
+			$callbacks_after_normal = array_sum( $callback_hits );
+			$permissions_after_normal = array_sum( $permission_hits );
+			$pre_after_normal      = count( $child_pre_dispatch );
+			$post_after_normal     = count( $child_post_dispatch );
+
+			$require_all_requests = array(
+				array(
+					'method'  => 'POST',
+					'path'    => $path . '201?token=' . rawurlencode( $token ) . '&marker=require-valid',
+					'body'    => array( 'bodyValue' => 'require-valid' ),
+					'headers' => array( 'X-Batch-Path' => 'require-valid' ),
+				),
+			);
+			foreach ( $malformed_paths as $spec ) {
+				$require_all_requests[] = array(
+					'method'  => 'POST',
+					'path'    => $spec['path'],
+					'body'    => array( 'bodyValue' => 'require-' . $spec['label'] ),
+					'headers' => array( 'X-Batch-Path' => 'require-' . $spec['label'] ),
+				);
+			}
+			$require_all_response = $server->dispatch( self::batch_request( $require_all_requests, 'require-all-validate' ) );
+			$require_all_data     = $require_all_response->get_data();
+		} finally {
+			remove_filter( 'rest_pre_dispatch', $pre_filter, 10 );
+			remove_filter( 'rest_post_dispatch', $post_filter, 10 );
+		}
+
+		$filter_removed = false === has_filter( 'rest_pre_dispatch', $pre_filter )
+			&& false === has_filter( 'rest_post_dispatch', $post_filter );
+		$rest_server_restored = $had_rest_server
+			? array_key_exists( 'wp_rest_server', $GLOBALS ) && $previous_rest_server === $GLOBALS['wp_rest_server']
+			: ! array_key_exists( 'wp_rest_server', $GLOBALS );
+
+		$normal_responses = is_array( $normal_data['responses'] ?? null ) ? $normal_data['responses'] : array();
+		$valid_ok         = 207 === $normal_response->get_status()
+			&& count( $normal_requests ) === count( $normal_responses );
+		$valid_envelope = is_array( $normal_responses[0] ?? null ) ? $normal_responses[0] : array();
+		$valid_body     = is_array( $valid_envelope['body'] ?? null ) ? $valid_envelope['body'] : array();
+		$valid_headers  = is_array( $valid_envelope['headers'] ?? null ) ? $valid_envelope['headers'] : array();
+		$valid_ok       = $valid_ok
+			&& 201 === ( $valid_envelope['status'] ?? null )
+			&& '101' === (string) ( $valid_headers['X-Batch-Path-Id'] ?? null )
+			&& 'seen' === ( $valid_headers['X-Path-Post-Dispatch'] ?? null )
+			&& 101 === (int) ( $valid_body['id'] ?? 0 )
+			&& $path . '101' === ( $valid_body['route'] ?? null )
+			&& 'POST' === ( $valid_body['method'] ?? null )
+			&& array( 'id' => 101 ) === ( $valid_body['urlParams'] ?? null )
+			&& $token === ( $valid_body['query']['token'] ?? null )
+			&& 'valid' === ( $valid_body['query']['marker'] ?? null )
+			&& 'body-valid' === ( $valid_body['body']['bodyValue'] ?? null )
+			&& 'valid' === ( $valid_body['headers']['x_batch_path'] ?? null );
+
+		$malformed_ok = true;
+		foreach ( $malformed_paths as $offset => $spec ) {
+			$index    = 1 + $offset;
+			$envelope = is_array( $normal_responses[ $index ] ?? null ) ? $normal_responses[ $index ] : array();
+			$headers  = is_array( $envelope['headers'] ?? null ) ? $envelope['headers'] : array();
+			$malformed_ok = $malformed_ok
+				&& 400 === ( $envelope['status'] ?? null )
+				&& 'parse_path_failed' === ( $envelope['body']['code'] ?? null )
+				&& ! isset( $headers['X-Path-Post-Dispatch'] );
+		}
+
+		$pre_routes        = array_column( $child_pre_dispatch, 'route' );
+		$post_routes       = array_column( $child_post_dispatch, 'route' );
+		$expected_child_routes = array( $path . '101' );
+		$filter_locality_ok   = 2 === $parent_pre_hits
+			&& count( $expected_child_routes ) === $pre_after_normal
+			&& count( $expected_child_routes ) === $post_after_normal
+			&& $pre_after_normal === count( $pre_routes )
+			&& $post_after_normal === count( $post_routes )
+			&& $expected_child_routes === array_slice( $pre_routes, 0, count( $expected_child_routes ) )
+			&& $expected_child_routes === array_slice( $post_routes, 0, count( $expected_child_routes ) );
+
+		$require_all_responses = is_array( $require_all_data['responses'] ?? null ) ? $require_all_data['responses'] : array();
+		$require_all_ok        = 207 === $require_all_response->get_status()
+			&& 'validation' === ( $require_all_data['failed'] ?? null )
+			&& count( $require_all_requests ) === count( $require_all_responses )
+			&& array_key_exists( 0, $require_all_responses )
+			&& null === $require_all_responses[0]
+			&& $callbacks_after_normal === array_sum( $callback_hits )
+			&& $permissions_after_normal === array_sum( $permission_hits )
+			&& $pre_after_normal === count( $child_pre_dispatch )
+			&& $post_after_normal === count( $child_post_dispatch );
+		for ( $i = 1; $i < count( $require_all_requests ); ++$i ) {
+			$require_all_ok = $require_all_ok
+				&& 400 === ( $require_all_responses[ $i ]['status'] ?? null )
+				&& 'parse_path_failed' === ( $require_all_responses[ $i ]['body']['code'] ?? null )
+				&& array() === ( $require_all_responses[ $i ]['headers'] ?? null );
+		}
+
+		$callback_ok = 1 === $callbacks_after_normal
+			&& 1 === $permissions_after_normal
+			&& 1 === count( $seen_requests );
+
+		$ok = $valid_ok
+			&& $malformed_ok
+			&& $filter_locality_ok
+			&& $require_all_ok
+			&& $callback_ok
+			&& $filter_removed
+			&& $rest_server_restored;
+
+		return array(
+			'ok'       => $ok,
+			'message'  => $ok ? 'REST batch/v1 malformed path invariants held.' : 'REST batch/v1 malformed path invariant failed.',
+			'features' => array( 'batch-v1', 'path-parsing', 'parse-path-failed', 'require-all-validation', 'filter-cleanup' ),
+			'details'  => array(
+				'namespace'          => $namespace,
+				'token'              => $token,
+				'validOk'            => $valid_ok,
+				'malformedOk'        => $malformed_ok,
+				'filterLocalityOk'   => $filter_locality_ok,
+				'requireAllOk'       => $require_all_ok,
+				'callbackOk'         => $callback_ok,
+				'filterRemoved'      => $filter_removed,
+				'restServerRestored' => $rest_server_restored,
+				'malformedPaths'     => $malformed_paths,
+				'normalResponse'     => self::response_summary( $normal_response ),
+				'requireAllResponse' => self::response_summary( $require_all_response ),
 				'childPreDispatch'   => $child_pre_dispatch,
 				'childPostDispatch'  => $child_post_dispatch,
 				'seenRequests'       => $seen_requests,
