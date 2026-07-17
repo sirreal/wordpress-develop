@@ -42,6 +42,7 @@ final class RestWidgetsSidebarsSurface {
 			$rows[] = self::check_widget_type_render_endpoint_subprocess( $ctx->fork( 'widget-render' ), $case );
 			$rows[] = self::check_widget_crud_instance_roundtrip( $ctx->fork( 'widget-crud' ), $case );
 			$rows[] = self::check_sidebar_reorder_and_visibility( $ctx->fork( 'sidebars' ), $case );
+			$rows[] = self::check_sidebar_raw_widget_projection_boundaries( $ctx->fork( 'sidebar-raw-widgets' ), $case );
 			$rows[] = self::check_legacy_widget_form_data_and_delete_hooks( $ctx->fork( 'legacy' ), $case );
 			$rows[] = self::check_head_short_circuit_and_field_projection( $ctx->fork( 'head-fields' ), $case );
 			$rows[] = self::check_route_dispatched_widget_sidebar_mutations( $ctx->fork( 'dispatch-mutations' ), $case );
@@ -1528,6 +1529,132 @@ PHP;
 		);
 
 		return self::result( $ctx, 'rest-widgets-sidebars.sidebars.reorder', $failures );
+	}
+
+	private static function check_sidebar_raw_widget_projection_boundaries( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$snapshot = self::snapshot_state();
+
+		$failures            = array();
+		$stale_widget_id     = 'cfz-stale-widget-' . $case['token'];
+		$requested_widgets   = array( $case['hiddenTextId'], $stale_widget_id, $case['publicTextId'], $case['hiddenTextId'] );
+		$projected_widgets   = array( $case['hiddenTextId'], $case['publicTextId'], $case['hiddenTextId'] );
+		$sidebars_before     = array();
+		$sidebars_after      = array();
+		$updated             = null;
+		$updated_data        = array();
+		$save_calls          = array();
+		$cap_filter_removed  = false;
+		$save_action_removed = false;
+		$stale_registered    = null;
+
+		$save_action = static function ( $sidebar, \WP_REST_Request $request ) use ( &$save_calls ): void {
+			$save_calls[] = array(
+				'id'      => is_array( $sidebar ) ? ( $sidebar['id'] ?? null ) : null,
+				'widgets' => is_array( $request['widgets'] ) ? array_values( $request['widgets'] ) : $request['widgets'],
+				'method'  => $request->get_method(),
+			);
+		};
+
+		try {
+			self::reset_runtime();
+			self::seed_widgets( $case );
+
+			$sidebars_before  = self::sidebar_map();
+			$stale_registered = isset( $GLOBALS['wp_registered_widgets'][ $stale_widget_id ] );
+			$controller       = new \WP_REST_Sidebars_Controller();
+
+			\add_action( 'rest_save_sidebar', $save_action, 10, 2 );
+			$cap_filter = self::install_cap_filter( array( 'edit_theme_options' ) );
+			try {
+				$request = self::request(
+					'POST',
+					'/wp/v2/sidebars/' . $case['publicSidebar'],
+					array(
+						'_fields' => 'id,status,widgets',
+						'widgets' => $requested_widgets,
+					),
+					array( 'id' => $case['publicSidebar'] )
+				);
+				$updated = self::apply_response_fields( $controller->update_item( $request ), $request );
+
+				$updated_data   = $updated instanceof \WP_REST_Response ? $updated->get_data() : array();
+				$sidebars_after = self::sidebar_map();
+			} finally {
+				$cap_filter_removed  = self::remove_cap_filter( $cap_filter );
+				\remove_action( 'rest_save_sidebar', $save_action, 10 );
+				$save_action_removed = false === \has_filter( 'rest_save_sidebar', $save_action );
+			}
+		} finally {
+			self::restore_state( $snapshot );
+		}
+
+		self::collect_failure(
+			$failures,
+			array( $case['publicTextId'], $case['legacyId'] ) === ( $sidebars_before[ $case['publicSidebar'] ] ?? null )
+				&& array( $case['hiddenTextId'], $case['searchSeedId'] ) === ( $sidebars_before[ $case['hiddenSidebar'] ] ?? null )
+				&& false === $stale_registered,
+			'raw widget projection fixture starts with registered public and hidden sidebars plus one unregistered widget id',
+			array(
+				'staleWidgetId' => $stale_widget_id,
+				'before'        => $sidebars_before,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$updated instanceof \WP_REST_Response
+				&& 200 === $updated->get_status()
+				&& self::projected_keys_match( $updated_data, array( 'id', 'status', 'widgets' ) )
+				&& $case['publicSidebar'] === ( $updated_data['id'] ?? null )
+				&& $projected_widgets === ( $updated_data['widgets'] ?? null ),
+			'sidebar update response projects only registered widgets while preserving duplicate valid widget ids',
+			array(
+				'response'         => $updated_data,
+				'requestedWidgets' => $requested_widgets,
+				'projectedWidgets' => $projected_widgets,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$requested_widgets === ( $sidebars_after[ $case['publicSidebar'] ] ?? null )
+				&& array( $case['searchSeedId'] ) === ( $sidebars_after[ $case['hiddenSidebar'] ] ?? null )
+				&& in_array( $case['legacyId'], $sidebars_after['wp_inactive_widgets'] ?? array(), true ),
+			'sidebar update stores the raw requested widget ids, steals valid widgets from other sidebars, and inactivates omitted target widgets',
+			array(
+				'requestedWidgets' => $requested_widgets,
+				'sidebars'         => $sidebars_after,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$cap_filter_removed
+				&& $save_action_removed
+				&& array(
+					array(
+						'id'      => $case['publicSidebar'],
+						'widgets' => $requested_widgets,
+						'method'  => 'POST',
+					),
+				) === $save_calls,
+			'sidebar save hook observes the raw request payload and cleanup removes temporary filters',
+			array(
+				'capFilterRemoved' => $cap_filter_removed,
+				'saveActionRemoved' => $save_action_removed,
+				'saveCalls'        => $save_calls,
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'rest-widgets-sidebars.sidebars.raw-widget-projection-boundaries',
+			$failures,
+			array(
+				'case'          => self::case_summary( $case ),
+				'staleWidgetId' => $stale_widget_id,
+			)
+		);
 	}
 
 	private static function check_legacy_widget_form_data_and_delete_hooks( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
