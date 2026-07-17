@@ -226,12 +226,13 @@
 			<div class="card">
 				<div class="label">Latest Broad Run</div>
 				<div class="metric good">100%</div>
-				<div class="note">Non-skipped pass rate: 5094 passed, 0 failed, 0 errored, 1 skipped at 112 surfaces over 1 iteration after adding mail emoji wrapper content-type matrix coverage.</div>
+				<div class="note">Non-skipped pass rate: 5095 passed, 0 failed, 0 errored, 1 skipped at 112 surfaces over 1 iteration after adding direct feed anchor helper coverage.</div>
 			</div>
 			<div class="card">
 				<div class="label">Latest Focused Wave</div>
 				<div class="metric good">100%</div>
-				<div class="note">Latest focused addition: <code>mail</code> emoji email-wrapper coverage exercises <code>wp_staticize_emoji_for_email()</code> across array headers, CRLF/LF string headers, text/html, text/plain, missing headers, missing message, mixed-case content type, and <code>wp_mail_content_type</code> force-on/force-off filters; asserts exact runtime <code>wp_staticize_emoji()</code> output only for HTML cases, byte-stable non-HTML branches, exact preservation of recipients, subject, headers, attachments, and embeds, and scoped filter cleanup. Focused seed 224 passed 12 checks, seed 224 over 25 iterations passed 300 checks, seeds 1 and 57123 over 10 iterations passed 120 checks each, adjacent mail/email/privacy stack passed 3840 checks, broad smoke passed 5094 checks with 1 skip, and syntax/diff checks passed.</div>
+				<div class="note">Latest focused addition: <code>feed-rendering</code> direct feed anchor coverage exercises <code>the_feed_link()</code> for default and Atom feeds, exact escaped feed hrefs, raw caller anchor preservation, <code>feed_link</code> URL filtering before href escaping, <code>the_feed_link</code> complete-anchor filtering, generated marker/query escaping, and scoped filter cleanup. Focused seed 224 passed 13 checks, seed 224 over 25 iterations passed 325 checks, seeds 1 and 57123 over 10 iterations passed 130 checks each, adjacent feed/parser/syndication/http/widget stack passed 56 checks, broad smoke passed 5095 checks with 1 skip, and syntax/diff checks passed.</div>
+				<div class="note">Previous focused addition: <code>mail</code> emoji email-wrapper coverage exercises <code>wp_staticize_emoji_for_email()</code> across array headers, CRLF/LF string headers, text/html, text/plain, missing headers, missing message, mixed-case content type, and <code>wp_mail_content_type</code> force-on/force-off filters; asserts exact runtime <code>wp_staticize_emoji()</code> output only for HTML cases, byte-stable non-HTML branches, exact preservation of recipients, subject, headers, attachments, and embeds, and scoped filter cleanup. Focused seed 224 passed 12 checks, seed 224 over 25 iterations passed 300 checks, seeds 1 and 57123 over 10 iterations passed 120 checks each, adjacent mail/email/privacy stack passed 3840 checks, broad smoke passed 5094 checks with 1 skip, and syntax/diff checks passed.</div>
 				<div class="note">Previous focused addition: <code>frontend-features</code> URL pattern prefixer generated-context coverage exercises home/site/uploads contexts with relative, leading-slash, already-prefixed, wildcard, and escaped <code>+/*</code> path patterns, grouping-sensitive <code>:?#</code> base paths, invalid-context <code>_doing_it_wrong()</code> diagnostics, idempotence, no double-slash output, and hook cleanup. Focused seed 224 passed 8 checks, seed 224 over 25 iterations passed 200 checks, seeds 1 and 57123 over 10 iterations passed 80 checks each, adjacent frontend/script/style stack passed 83 checks, broad smoke passed 5094 checks with 1 skip, and syntax/diff checks passed.</div>
 				<div class="note">Previous focused addition: <code>cron</code> pre-filter failure-contract coverage exercises generated <code>pre_schedule_event</code>, <code>schedule_event</code>, <code>pre_reschedule_event</code>, <code>pre_unschedule_event</code>, and <code>pre_clear_scheduled_hook</code> false-return branches; asserts <code>WP_Error</code> codes when <code>$wp_error</code> is true, plain <code>false</code> returns when it is false, no storage for rejected schedules, preserved existing events for rejected reschedule/unschedule/clear operations, exact filter payloads for single and recurring events, interval preservation, and hook cleanup. Focused seed 224 passed 101 checks, seed 224 over 25 iterations passed 2525 checks, seeds 1 and 57123 over 10 iterations passed 1010 checks each, adjacent cron/lifecycle/options stack passed 176 checks, broad smoke passed 5094 checks with 1 skip, and syntax/diff checks passed.</div>
 				<div class="note">Previous focused addition: <code>auth-flow</code> <code>auth_redirect()</code> boundary coverage installs scoped secure/scheme/login/nocache/redirect hooks and exercises forced HTTPS redirects before cookie validation, valid logged-in cookie return paths, per-user <code>use_ssl</code> admin redirects after <code>auth_redirect</code>, invalid-cookie <code>options.php</code> referer login redirects, and invalid-cookie current-request login redirects; asserts redirect targets/statuses without reaching <code>exit</code>, login URL <code>reauth=1</code> payloads, nocache headers, hook locality, force-SSL restoration, request globals, and in-memory row cleanup. Focused seed 224 passed 13 checks, seed 224 over 25 iterations passed 325 checks, seeds 1 and 57123 over 5 iterations passed 65 checks each, adjacent auth/security/request stack passed 68 checks, broad smoke passed 5089 checks with 1 skip, and syntax/diff checks passed.</div>
@@ -555,7 +556,7 @@
 			<div class="card">
 				<div class="label">Active Workers</div>
 				<div class="metric">0</div>
-				<div class="note">No active worker-owned files; latest validated slice expanded <code>mail</code> emoji email-wrapper content-type matrix coverage, with focused, adjacent, and broad validation passing locally. Next gap target: convert the missing-sidebar update diagnostic after the controller fix, flip the KSES diagnostic after core isolates those globals, continue REST batch/controller boundaries, or pick another pure helper gap.</div>
+				<div class="note">No active worker-owned files; latest validated slice expanded <code>feed-rendering</code> direct feed anchor helper coverage, with focused, adjacent, and broad validation passing locally. Next gap target: add Nash's importer <code>get_page()</code> wrapper matrix, convert the missing-sidebar update diagnostic after the controller fix, flip the KSES diagnostic after core isolates those globals, or continue REST batch/controller boundaries.</div>
 			</div>
 	</div>
 
@@ -843,10 +844,10 @@
 				</tr>
 				<tr>
 					<td><code>feed-rendering</code></td>
-					<td><span class="status good">expanded validation passed</span></td>
-					<td>Pasteur the 3rd / main worktree through <code>df556c4fff</code>; legacy feed template/dispatch follow-up in <code>5136734b9b</code>; exact <code>rss_enclosure()</code> fixture follow-up in this branch.</td>
-					<td>Latest focused runs: seeds 1 and 224 over 25 iterations each passed 300 checks with no skips after <code>rss_enclosure()</code> fixture coverage; adjacent <code>feed-rendering,feed-parsers,syndication,http,widgets</code> smoke passed 265 checks; latest broad seed 224 run passed 4741 checks with 1 skip.</td>
-					<td>RSS2, Atom, RDF, RSS 0.92, and comments feed templates, namespace/header/item hook payloads, context and loop-ID oracles, legacy <code>do_feed()</code> normalization/default-feed/comment-feed dispatch, self-link request URI host/filter escaping, escaping, CDATA boundaries, content/excerpt switches, exact <code>rss_enclosure()</code> newline/filter fixture behavior, enclosure/build-date behavior.</td>
+					<td><span class="status good">local validation passed</span></td>
+					<td>Scoped worktree <code>component-fuzz-feed-anchor-links</code>; builds on legacy feed template/dispatch and exact <code>rss_enclosure()</code> fixture coverage.</td>
+					<td>Latest focused runs: seed 224 passed 13 checks, seed 224 over 25 iterations passed 325 checks, seeds 1 and 57123 over 10 iterations each passed 130 checks, adjacent <code>feed-rendering,feed-parsers,syndication,http,widgets</code> smoke passed 56 checks, syntax/diff checks passed, and broad seed 224 smoke passed 5095 checks with 1 skip.</td>
+					<td>RSS2, Atom, RDF, RSS 0.92, and comments feed templates, namespace/header/item hook payloads, context and loop-ID oracles, legacy <code>do_feed()</code> normalization/default-feed/comment-feed dispatch, direct <code>the_feed_link()</code> anchor rendering, <code>feed_link</code>/<code>the_feed_link</code> filter ordering and escaping, self-link request URI host/filter escaping, escaping, CDATA boundaries, content/excerpt switches, exact <code>rss_enclosure()</code> newline/filter fixture behavior, enclosure/build-date behavior.</td>
 				</tr>
 				<tr>
 					<td><code>http</code></td>
@@ -1608,6 +1609,12 @@
 						<td><code>date-time</code></td>
 						<td><code>date-time</code> seeds 1, 224, and 57123 over 25 iterations each passed 375 checks; adjacent <code>date-time,l10n,translations,admin-options-submission,customizer,admin-screen</code> smoke passed 310 checks; bootstrap smoke passed after adding direct <code>wp_timezone_choice()</code> markup, selected-state, offset-label, hostile-input, locale-invariance, and l10n cleanup coverage.</td>
 						<td>4780 passed, 1 skipped, 0 failed at 1 iteration after direct <code>wp_timezone_choice()</code> markup coverage.</td>
+					</tr>
+					<tr>
+						<td><code>component-fuzz-feed-anchor-links</code></td>
+						<td><code>feed-rendering</code></td>
+						<td><code>feed-rendering</code> seed 224 passed 13 checks and seed 224 over 25 iterations passed 325 checks; seeds 1 and 57123 over 10 iterations each passed 130 checks; adjacent <code>feed-rendering,feed-parsers,syndication,http,widgets</code> smoke passed 56 checks; syntax/diff checks passed after adding direct <code>the_feed_link()</code> anchor coverage for default/Atom feeds, <code>feed_link</code> URL filtering, complete-anchor filtering, href escaping, raw anchor preservation, and filter cleanup.</td>
+						<td>5095 passed, 1 skipped, 0 failed at 1 iteration after direct feed anchor helper coverage.</td>
 					</tr>
 					<tr>
 						<td><code>component-fuzz-mail-emoji-wrapper</code></td>
@@ -2580,6 +2587,12 @@
 					<td><code>network-media</code></td>
 					<td>100 passed, 0 skipped, 0 failed after network upload MIME allowlist and direct file-too-large policy coverage; smoke: 5 passed, 0 skipped, 0 failed.</td>
 					<td>Latest broad rerun: 8615 passed, 66 skipped, 0 failed at 2 iterations after the latest email follow-up.</td>
+				</tr>
+				<tr>
+					<td><code>component-fuzz-feed-anchor-links</code></td>
+					<td><code>feed-rendering</code></td>
+					<td>13 passed, 0 skipped, 0 failed at seed 224; 325 passed, 0 skipped, 0 failed at seed 224 over 25 iterations; seeds 1 and 57123 over 10 iterations each passed 130 checks; adjacent feed/parser/syndication/http/widget smoke passed 56 checks after direct feed anchor helper coverage.</td>
+					<td>5095 passed, 1 skipped, 0 failed at 1 iteration after direct feed anchor helper fuzzing.</td>
 				</tr>
 				<tr>
 					<td><code>df556c4fff</code> / <code>5136734b9b</code></td>
