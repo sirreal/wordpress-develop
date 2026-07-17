@@ -37,6 +37,7 @@ final class RevisionsAutosavesSurface {
 			$rows[] = self::check_rest_revision_autosave_route_dispatch( $ctx->fork( 'rest-dispatch' ), $case );
 			$rows[] = self::check_rest_builtin_post_page_revision_autosave_parity( $ctx->fork( 'rest-builtin-post-page' ), $case );
 			$rows[] = self::check_rest_autosave_mutation_and_revision_meta_projection( $ctx->fork( 'rest-autosave-meta' ), $case );
+			$rows[] = self::check_rest_autosave_negative_write_and_malformed_meta_boundaries( $ctx->fork( 'rest-autosave-negative' ), $case );
 			$rows[] = self::check_rest_revision_autosave_batch_gates( $ctx->fork( 'rest-batch-gates' ), $case );
 			$rows[] = self::check_latest_revision_count_and_url_helpers( $ctx->fork( 'latest-count-url' ), $case );
 			$rows[] = self::check_user_filtered_autosave_lookup( $ctx->fork( 'user-filtered-autosave' ), $case );
@@ -3589,6 +3590,747 @@ PHP;
 			}
 			if ( true === $registered ) {
 				\unregister_meta_key( 'post', $meta_key, $post_type );
+			}
+			\wp_set_current_user( 0 );
+		}
+
+		return $entry;
+	}
+
+	private static function check_rest_autosave_negative_write_and_malformed_meta_boundaries( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$missing = self::rest_autosave_meta_child_missing_requirements();
+		if ( array() !== $missing ) {
+			return $ctx->skip(
+				'revisions-autosaves.rest-autosave-negative-subprocess-requirements',
+				'Local PHP subprocess support is unavailable for isolated REST autosave negative write coverage.',
+				array( 'missing' => $missing )
+			);
+		}
+
+		$parent_doing_autosave_before = array(
+			'defined' => defined( 'DOING_AUTOSAVE' ),
+			'value'   => defined( 'DOING_AUTOSAVE' ) ? (bool) DOING_AUTOSAVE : null,
+		);
+		$run = self::run_rest_autosave_negative_child( $case );
+		$parent_doing_autosave_after = array(
+			'defined' => defined( 'DOING_AUTOSAVE' ),
+			'value'   => defined( 'DOING_AUTOSAVE' ) ? (bool) DOING_AUTOSAVE : null,
+		);
+
+		$result   = is_array( $run['result'] ?? null ) ? $run['result'] : array();
+		$matrix   = is_array( $result['matrix'] ?? null ) ? $result['matrix'] : array();
+		$failures = array();
+
+		self::collect_failure(
+			$failures,
+			0 === (int) ( $run['exitCode'] ?? -1 )
+				&& '' === (string) ( $run['stderr'] ?? '' )
+				&& is_array( $run['result'] ?? null )
+				&& true === ( $run['ok'] ?? null ),
+			'REST autosave negative child returns structured JSON without stderr or invariant failures',
+			array(
+				'exitCode'      => $run['exitCode'] ?? null,
+				'stdout'        => self::describe_output( (string) ( $run['stdout'] ?? '' ) ),
+				'stderr'        => self::describe_output( (string) ( $run['stderr'] ?? '' ) ),
+				'childFailures' => $result['failures'] ?? null,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			true === ( $result['wpRunCoreTests'] ?? null )
+				&& false === ( $result['doingAutosaveDefined'] ?? true ),
+			'REST autosave negative child defines WP_RUN_CORE_TESTS before bootstrap and does not define DOING_AUTOSAVE',
+			array(
+				'wpRunCoreTests'       => $result['wpRunCoreTests'] ?? null,
+				'doingAutosaveDefined' => $result['doingAutosaveDefined'] ?? null,
+				'doingAutosaveValue'   => $result['doingAutosaveValue'] ?? null,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			$parent_doing_autosave_before === $parent_doing_autosave_after,
+			'REST autosave negative child leaves parent DOING_AUTOSAVE constant state unchanged',
+			array(
+				'before' => $parent_doing_autosave_before,
+				'after'  => $parent_doing_autosave_after,
+			)
+		);
+		self::collect_failure(
+			$failures,
+			array( 'page', 'post' ) === array_values(
+				array_intersect(
+					array( 'page', 'post' ),
+					array_map(
+						static fn( array $entry ): string => (string) ( $entry['postType'] ?? '' ),
+						$matrix
+					)
+				)
+			),
+			'REST autosave negative child covers built-in post and page write/meta boundaries',
+			array( 'matrix' => $matrix )
+		);
+
+		return self::result(
+			$ctx,
+			'revisions-autosaves.rest-autosave-negative-write-and-malformed-meta-boundaries',
+			$failures,
+			array(
+				'case'     => self::case_summary( $case ),
+				'exitCode' => $run['exitCode'] ?? null,
+				'matrix'   => $matrix,
+			)
+		);
+	}
+
+	private static function run_rest_autosave_negative_child( array $case ): array {
+		$payload = json_encode(
+			array( 'case' => $case ),
+			JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE
+		);
+
+		if ( false === $payload ) {
+			return array(
+				'ok'       => false,
+				'exitCode' => -1,
+				'stdout'   => '',
+				'stderr'   => 'json_encode failed',
+				'result'   => null,
+			);
+		}
+
+		$descriptors = array(
+			0 => array( 'pipe', 'r' ),
+			1 => array( 'pipe', 'w' ),
+			2 => array( 'pipe', 'w' ),
+		);
+
+		// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.system_calls_proc_open -- Isolates REST autosave write requests that would otherwise define process-wide constants.
+		$process = proc_open( array( PHP_BINARY, '-r', self::rest_autosave_negative_child_program() ), $descriptors, $pipes, \ComponentFuzz\repo_root() );
+		if ( ! is_resource( $process ) ) {
+			return array(
+				'ok'       => false,
+				'exitCode' => -1,
+				'stdout'   => '',
+				'stderr'   => 'proc_open failed',
+				'result'   => null,
+			);
+		}
+
+		fwrite( $pipes[0], $payload );
+		fclose( $pipes[0] );
+
+		$stdout = stream_get_contents( $pipes[1] );
+		$stderr = stream_get_contents( $pipes[2] );
+		fclose( $pipes[1] );
+		fclose( $pipes[2] );
+
+		$exit_code = proc_close( $process );
+		$result    = json_decode( (string) $stdout, true );
+
+		return array(
+			'ok'       => 0 === $exit_code && is_array( $result ) && true === ( $result['ok'] ?? null ),
+			'exitCode' => $exit_code,
+			'stdout'   => (string) $stdout,
+			'stderr'   => (string) $stderr,
+			'result'   => is_array( $result ) ? $result : null,
+		);
+	}
+
+	private static function rest_autosave_negative_child_program(): string {
+		return <<<'PHP'
+if ( ! defined( 'WP_RUN_CORE_TESTS' ) ) {
+	define( 'WP_RUN_CORE_TESTS', true );
+}
+
+ini_set( 'display_errors', '0' );
+ob_start();
+
+$result = array(
+	'ok'       => false,
+	'failures' => array(),
+);
+
+try {
+	$raw     = stream_get_contents( STDIN );
+	$payload = json_decode( $raw, true );
+	$case    = is_array( $payload['case'] ?? null ) ? $payload['case'] : array();
+
+	require_once getcwd() . '/tools/component-fuzz/lib/autoload.php';
+	\ComponentFuzz\WpBootstrap::load();
+
+	$result = \ComponentFuzz\Surfaces\RevisionsAutosavesSurface::rest_autosave_negative_child_entry( $case );
+} catch ( Throwable $e ) {
+	$result = array(
+		'ok'       => false,
+		'failures' => array(
+			array(
+				'label'   => 'REST autosave negative child catches top-level throwables',
+				'details' => array(
+					'class'   => get_class( $e ),
+					'message' => $e->getMessage(),
+					'file'    => $e->getFile(),
+					'line'    => $e->getLine(),
+				),
+			),
+		),
+	);
+}
+
+$output = ob_get_clean();
+if ( '' !== $output ) {
+	$result['ok']         = false;
+	$result['failures'][] = array(
+		'label'   => 'REST autosave negative child produces no incidental output before JSON',
+		'details' => array(
+			'bytes'   => strlen( $output ),
+			'sha1'    => sha1( $output ),
+			'preview' => substr( $output, 0, 220 ),
+		),
+	);
+}
+
+$json = json_encode( $result, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE );
+echo false === $json ? '{"ok":false,"failures":[{"label":"REST autosave negative child JSON encoding failed","details":[]}]}' : $json;
+PHP;
+	}
+
+	public static function rest_autosave_negative_child_entry( array $case ): array {
+		self::load_rest_endpoint_classes();
+
+		$failures = array();
+		$missing  = self::missing_requirements();
+		foreach ( array( 'get_current_user_id', 'get_metadata_raw', 'unregister_meta_key' ) as $function ) {
+			if ( ! function_exists( $function ) ) {
+				$missing[] = "function {$function}";
+			}
+		}
+
+		if ( array() !== $missing ) {
+			return array(
+				'ok'                   => false,
+				'failures'             => array(
+					array(
+						'label'   => 'REST autosave negative child has required WordPress APIs',
+						'details' => array( 'missing' => $missing ),
+					),
+				),
+				'wpRunCoreTests'       => defined( 'WP_RUN_CORE_TESTS' ) && WP_RUN_CORE_TESTS,
+				'doingAutosaveDefined' => defined( 'DOING_AUTOSAVE' ),
+				'doingAutosaveValue'   => defined( 'DOING_AUTOSAVE' ) ? (bool) DOING_AUTOSAVE : null,
+				'matrix'               => array(),
+			);
+		}
+
+		self::prepare_runtime();
+		$server = self::fresh_rest_server();
+		$matrix = array();
+
+		try {
+			foreach ( array( 'post' => 'posts', 'page' => 'pages' ) as $post_type => $rest_base ) {
+				$matrix[] = self::rest_autosave_negative_child_post_type( $server, $case, $post_type, $rest_base, $failures );
+			}
+		} catch ( \Throwable $e ) {
+			self::collect_failure(
+				$failures,
+				false,
+				'REST autosave negative child keeps built-in route matrix throwable-free',
+				array( 'throwable' => self::describe_throwable( $e ) )
+			);
+		} finally {
+			\wp_set_current_user( 0 );
+		}
+
+		return array(
+			'ok'                   => array() === $failures,
+			'failures'             => array_slice( $failures, 0, 8 ),
+			'wpRunCoreTests'       => defined( 'WP_RUN_CORE_TESTS' ) && WP_RUN_CORE_TESTS,
+			'doingAutosaveDefined' => defined( 'DOING_AUTOSAVE' ),
+			'doingAutosaveValue'   => defined( 'DOING_AUTOSAVE' ) ? (bool) DOING_AUTOSAVE : null,
+			'matrix'               => $matrix,
+		);
+	}
+
+	private static function rest_autosave_negative_child_post_type( \WP_REST_Server $server, array $case, string $post_type, string $rest_base, array &$failures ): array {
+		$target_case = array_merge(
+			$case,
+			array(
+				'postType' => $post_type,
+				'slug'     => $case['slug'] . '-autosave-negative-' . $post_type,
+			)
+		);
+		$entry       = array(
+			'postType' => $post_type,
+			'restBase' => $rest_base,
+		);
+		$revisioned_meta_key    = 'cf_rest_autosave_neg_' . $post_type . '_' . $case['token'];
+		$non_revisioned_meta_key = 'cf_rest_nonrev_' . $post_type . '_' . $case['token'];
+		$registered_revisioned  = false;
+		$registered_non_revisioned = false;
+		$editor_caps            = null;
+
+		try {
+			$post_type_object = \get_post_type_object( $post_type );
+			if ( ! $post_type_object ) {
+				self::collect_failure(
+					$failures,
+					false,
+					"built-in {$post_type} post type exists for REST autosave negative checks",
+					array( 'postType' => $post_type )
+				);
+				return $entry;
+			}
+
+			$registered_revisioned = \register_post_meta(
+				$post_type,
+				$revisioned_meta_key,
+				array(
+					'auth_callback'     => '__return_true',
+					'revisions_enabled' => true,
+					'show_in_rest'      => true,
+					'single'            => true,
+					'type'              => 'string',
+				)
+			);
+			$registered_non_revisioned = \register_post_meta(
+				$post_type,
+				$non_revisioned_meta_key,
+				array(
+					'auth_callback'     => '__return_true',
+					'revisions_enabled' => false,
+					'show_in_rest'      => true,
+					'single'            => true,
+					'type'              => 'string',
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				true === $registered_revisioned
+					&& true === $registered_non_revisioned
+					&& in_array( $revisioned_meta_key, \wp_post_revision_meta_keys( $post_type ), true )
+					&& ! in_array( $non_revisioned_meta_key, \wp_post_revision_meta_keys( $post_type ), true ),
+				"built-in {$post_type} REST meta schema distinguishes revisioned and non-revisioned keys",
+				array(
+					'revisionedRegistered'    => $registered_revisioned,
+					'nonRevisionedRegistered' => $registered_non_revisioned,
+					'revisionedMetaKey'       => $revisioned_meta_key,
+					'nonRevisionedMetaKey'    => $non_revisioned_meta_key,
+					'revisionMetaKeys'        => \wp_post_revision_meta_keys( $post_type ),
+				)
+			);
+
+			$parent_controller   = $post_type_object->get_rest_controller();
+			$revision_controller = $post_type_object->get_revisions_rest_controller();
+			$autosave_controller = $post_type_object->get_autosave_rest_controller();
+			if ( $parent_controller ) {
+				$parent_controller->register_routes();
+			}
+			if ( $revision_controller ) {
+				$revision_controller->register_routes();
+			}
+			if ( $autosave_controller ) {
+				$autosave_controller->register_routes();
+			}
+
+			$author_id     = self::insert_author( $target_case, "rest-autosave-negative-{$post_type}-author" );
+			$editor_id     = self::insert_author( $target_case, "rest-autosave-negative-{$post_type}-editor" );
+			$subscriber_id = self::insert_author( $target_case, "rest-autosave-negative-{$post_type}-subscriber" );
+			$parent_id     = self::insert_parent_post( $target_case, $author_id, "negative-parent-{$post_type}" );
+			$other_case    = array_merge(
+				$target_case,
+				array(
+					'postType' => 'post' === $post_type ? 'page' : 'post',
+					'slug'     => $target_case['slug'] . '-cross',
+				)
+			);
+			$other_parent_id = self::insert_parent_post( $other_case, $author_id, "negative-cross-{$post_type}" );
+			$revision_id = self::insert_revision_row(
+				$parent_id,
+				$author_id,
+				array(
+					'post_title'        => $case['titleTo'] . " {$post_type} negative revision",
+					'post_content'      => $case['contentTo'] . "\n{$post_type} negative revision",
+					'post_excerpt'      => $case['excerptTo'],
+					'post_date'         => $case['dateTo'],
+					'post_date_gmt'     => $case['dateToGmt'],
+					'post_modified'     => $case['dateTo'],
+					'post_modified_gmt' => $case['dateToGmt'],
+				),
+				false
+			);
+
+			$autosave_route = '/wp/v2/' . $rest_base . '/' . $parent_id . '/autosaves';
+			$revision_route = '/wp/v2/' . $rest_base . '/' . $parent_id . '/revisions';
+			$editor_caps    = self::grant_all_caps_filter( $editor_id );
+
+			\wp_set_current_user( 0 );
+			$counts_before_denied = isset( $GLOBALS['wpdb'] ) && $GLOBALS['wpdb'] instanceof \Component_Fuzz_WPDB_Stub
+				? $GLOBALS['wpdb']->component_fuzz_content_counts()
+				: array();
+			$anonymous_post = self::dispatch(
+				$server,
+				self::request(
+					'POST',
+					$autosave_route,
+					array( 'context' => 'edit' ),
+					array(),
+					array(
+						'title'   => $case['titleTo'] . " {$post_type} anonymous autosave",
+						'content' => $case['contentTo'],
+					)
+				)
+			);
+			$anonymous_revisions = self::dispatch( $server, self::request( 'GET', $revision_route, array( 'context' => 'edit' ) ) );
+			$anonymous_delete    = self::dispatch(
+				$server,
+				self::request(
+					'DELETE',
+					$revision_route . '/' . $revision_id,
+					array(
+						'context' => 'edit',
+						'force'   => true,
+					)
+				)
+			);
+			$counts_after_anonymous = isset( $GLOBALS['wpdb'] ) && $GLOBALS['wpdb'] instanceof \Component_Fuzz_WPDB_Stub
+				? $GLOBALS['wpdb']->component_fuzz_content_counts()
+				: array();
+
+			\wp_set_current_user( $subscriber_id );
+			$subscriber_post = self::dispatch(
+				$server,
+				self::request(
+					'POST',
+					$autosave_route,
+					array( 'context' => 'edit' ),
+					array(),
+					array(
+						'title'   => $case['titleTo'] . " {$post_type} subscriber autosave",
+						'content' => $case['contentTo'],
+					)
+				)
+			);
+			$subscriber_autosaves = self::dispatch( $server, self::request( 'GET', $autosave_route, array( 'context' => 'edit' ) ) );
+			$subscriber_delete    = self::dispatch(
+				$server,
+				self::request(
+					'DELETE',
+					$revision_route . '/' . $revision_id,
+					array(
+						'context' => 'edit',
+						'force'   => true,
+					)
+				)
+			);
+			$counts_after_subscriber = isset( $GLOBALS['wpdb'] ) && $GLOBALS['wpdb'] instanceof \Component_Fuzz_WPDB_Stub
+				? $GLOBALS['wpdb']->component_fuzz_content_counts()
+				: array();
+
+			self::collect_failure(
+				$failures,
+				self::response_error_ok( $anonymous_post, 'rest_cannot_edit', 401 )
+					&& self::response_error_ok( $anonymous_revisions, 'rest_cannot_read', 401 )
+					&& self::response_error_ok( $anonymous_delete, 'rest_cannot_delete', 401 )
+					&& $counts_before_denied === $counts_after_anonymous
+					&& $counts_after_anonymous === $counts_after_subscriber
+					&& self::response_error_ok( $subscriber_post, 'rest_cannot_edit', 403 )
+					&& self::response_error_ok( $subscriber_autosaves, 'rest_cannot_read', 403 )
+					&& self::response_error_ok( $subscriber_delete, 'rest_cannot_delete', 403 ),
+				"built-in {$post_type} revision/autosave write and read routes fail closed for anonymous and logged-in users without edit/delete caps",
+				array(
+					'anonymousPost'       => self::response_summary( $anonymous_post ),
+					'anonymousRevisions'  => self::response_summary( $anonymous_revisions ),
+					'anonymousDelete'     => self::response_summary( $anonymous_delete ),
+					'subscriberPost'      => self::response_summary( $subscriber_post ),
+					'subscriberAutosaves' => self::response_summary( $subscriber_autosaves ),
+					'subscriberDelete'    => self::response_summary( $subscriber_delete ),
+					'countsBefore'        => $counts_before_denied,
+					'countsAfterAnonymous' => $counts_after_anonymous,
+					'countsAfterSubscriber' => $counts_after_subscriber,
+				)
+			);
+
+			\wp_set_current_user( $editor_id );
+			\add_filter( 'user_has_cap', $editor_caps, 10, 4 );
+
+			$invalid_autosave_id = self::dispatch(
+				$server,
+				self::request(
+					'POST',
+					'/wp/v2/' . $rest_base . '/0/autosaves',
+					array( 'context' => 'edit' ),
+					array(),
+					array( 'title' => $case['titleTo'] )
+				)
+			);
+			$cross_type_post = self::dispatch(
+				$server,
+				self::request(
+					'POST',
+					'/wp/v2/' . $rest_base . '/' . $other_parent_id . '/autosaves',
+					array( 'context' => 'edit' ),
+					array(),
+					array( 'title' => $case['titleTo'] )
+				)
+			);
+			$cross_type_get = self::dispatch( $server, self::request( 'GET', '/wp/v2/' . $rest_base . '/' . $other_parent_id . '/autosaves', array( 'context' => 'edit' ) ) );
+			$missing_autosave = self::dispatch(
+				$server,
+				self::request(
+					'GET',
+					$autosave_route . '/999999',
+					array(
+						'context' => 'edit',
+						'_fields' => 'id,parent,meta',
+					)
+				)
+			);
+			$mismatched_revision = self::dispatch( $server, self::request( 'GET', $revision_route . '/999999', array( 'context' => 'edit' ) ) );
+
+			self::collect_failure(
+				$failures,
+				self::response_error_ok( $invalid_autosave_id, 'rest_post_invalid_id', 404 )
+					&& self::response_error_ok( $cross_type_post, 'rest_post_invalid_id', 404 )
+					&& self::response_error_ok( $cross_type_get, 'rest_post_invalid_parent', 404 )
+					&& self::response_error_ok( $missing_autosave, 'rest_post_no_autosave', 404 )
+					&& self::response_error_ok( $mismatched_revision, 'rest_post_invalid_id', 404 ),
+				"built-in {$post_type} revision/autosave routes distinguish invalid item IDs, cross-type parents, and missing autosaves",
+				array(
+					'invalidAutosaveId' => self::response_summary( $invalid_autosave_id ),
+					'crossTypePost'     => self::response_summary( $cross_type_post ),
+					'crossTypeGet'      => self::response_summary( $cross_type_get ),
+					'missingAutosave'   => self::response_summary( $missing_autosave ),
+					'missingRevision'   => self::response_summary( $mismatched_revision ),
+				)
+			);
+
+			$counts_before_invalid_meta = isset( $GLOBALS['wpdb'] ) && $GLOBALS['wpdb'] instanceof \Component_Fuzz_WPDB_Stub
+				? $GLOBALS['wpdb']->component_fuzz_content_counts()
+				: array();
+			$meta_not_array = self::dispatch(
+				$server,
+				self::request(
+					'POST',
+					$autosave_route,
+					array( 'context' => 'edit' ),
+					array(),
+					array(
+						'title'   => $case['titleTo'] . " {$post_type} scalar meta",
+						'content' => $case['contentTo'],
+						'meta'    => 'not-an-array-' . $case['token'],
+					)
+				)
+			);
+			$counts_after_meta_not_array = isset( $GLOBALS['wpdb'] ) && $GLOBALS['wpdb'] instanceof \Component_Fuzz_WPDB_Stub
+				? $GLOBALS['wpdb']->component_fuzz_content_counts()
+				: array();
+
+			self::collect_failure(
+				$failures,
+				self::response_error_ok( $meta_not_array, 'rest_invalid_param', 400 )
+					&& $counts_before_invalid_meta === $counts_after_meta_not_array
+					&& false === \wp_get_post_autosave( $parent_id, $editor_id ),
+				"built-in {$post_type} autosave POST rejects non-object meta payloads before creating autosave rows",
+				array(
+					'metaNotArray' => self::response_summary( $meta_not_array ),
+					'countsBefore' => $counts_before_invalid_meta,
+					'countsAfter'  => $counts_after_meta_not_array,
+					'autosave'     => self::post_summary( \wp_get_post_autosave( $parent_id, $editor_id ) ),
+				)
+			);
+
+			$meta_wrong_list_type = self::dispatch(
+				$server,
+				self::request(
+					'POST',
+					$autosave_route,
+					array( 'context' => 'edit' ),
+					array(),
+					array(
+						'title'   => $case['titleTo'] . " {$post_type} array meta",
+						'content' => $case['contentTo'],
+						'meta'    => array(
+							$revisioned_meta_key => array( 'array-value-' . $case['token'] ),
+						),
+					)
+				)
+			);
+			$wrong_list_data        = $meta_wrong_list_type instanceof \WP_REST_Response ? $meta_wrong_list_type->get_data() : array();
+			$wrong_list_autosave_id = (int) ( $wrong_list_data['id'] ?? 0 );
+			$stored_wrong_list_meta = \get_metadata_raw( 'post', $wrong_list_autosave_id, $revisioned_meta_key, true );
+			$meta_wrong_object_type = self::dispatch(
+				$server,
+				self::request(
+					'POST',
+					$autosave_route,
+					array( 'context' => 'edit' ),
+					array(),
+					array(
+						'title'   => $case['titleTo'] . " {$post_type} object meta",
+						'content' => $case['contentTo'],
+						'meta'    => array(
+							$revisioned_meta_key => array( 'nested' => 'object-value-' . $case['token'] ),
+						),
+					)
+				)
+			);
+			$wrong_object_data        = $meta_wrong_object_type instanceof \WP_REST_Response ? $meta_wrong_object_type->get_data() : array();
+			$wrong_object_autosave_id = (int) ( $wrong_object_data['id'] ?? 0 );
+			$stored_wrong_object_meta = \get_metadata_raw( 'post', $wrong_object_autosave_id, $revisioned_meta_key, true );
+			$parent_wrong_type_meta   = \get_metadata_raw( 'post', $parent_id, $revisioned_meta_key, true );
+			$counts_after_type_boundary = isset( $GLOBALS['wpdb'] ) && $GLOBALS['wpdb'] instanceof \Component_Fuzz_WPDB_Stub
+				? $GLOBALS['wpdb']->component_fuzz_content_counts()
+				: array();
+
+			self::collect_failure(
+				$failures,
+				$meta_wrong_list_type instanceof \WP_REST_Response
+					&& 200 === $meta_wrong_list_type->get_status()
+					&& $meta_wrong_object_type instanceof \WP_REST_Response
+					&& 200 === $meta_wrong_object_type->get_status()
+					&& 0 < $wrong_list_autosave_id
+					&& $wrong_list_autosave_id === $wrong_object_autosave_id
+					&& array( 'array-value-' . $case['token'] ) === $stored_wrong_list_meta
+					&& array( 'nested' => 'object-value-' . $case['token'] ) === $stored_wrong_object_meta
+					&& null === ( $wrong_list_data['meta'][ $revisioned_meta_key ] ?? null )
+					&& null === ( $wrong_object_data['meta'][ $revisioned_meta_key ] ?? null )
+					&& null === $parent_wrong_type_meta
+					&& $counts_after_type_boundary['posts'] === $counts_after_meta_not_array['posts'] + 1,
+				"built-in {$post_type} autosave POST accepts wrong-typed revisioned meta values as raw revision meta while REST projection nulls invalid stored values",
+				array(
+					'metaWrongListType'   => self::response_summary( $meta_wrong_list_type ),
+					'metaWrongObjectType' => self::response_summary( $meta_wrong_object_type ),
+					'storedListMeta'      => $stored_wrong_list_meta,
+					'storedObjectMeta'    => $stored_wrong_object_meta,
+					'parentMeta'          => $parent_wrong_type_meta,
+					'countsAfterScalar'   => $counts_after_meta_not_array,
+					'countsAfterTypeBoundary' => $counts_after_type_boundary,
+				)
+			);
+
+			$unknown_meta_key = 'cf_rest_unknown_' . $post_type . '_' . $case['token'];
+			$ignored_title    = $case['titleTo'] . " {$post_type} ignored meta autosave";
+			$ignored_content  = $case['contentTo'] . "\n{$post_type} ignored meta autosave";
+			$ignored_response = self::dispatch(
+				$server,
+				self::request(
+					'POST',
+					$autosave_route,
+					array(
+						'context' => 'edit',
+						'_fields' => 'id,parent,title.raw,content.raw,meta',
+					),
+					array(),
+					array(
+						'title'   => $ignored_title,
+						'content' => $ignored_content,
+						'meta'    => array(
+							$unknown_meta_key         => 'unknown-meta-' . $case['token'],
+							$non_revisioned_meta_key  => 'non-revisioned-meta-' . $case['token'],
+							$revisioned_meta_key      => 'revisioned-meta-' . $case['token'],
+						),
+					)
+				)
+			);
+			$ignored_data = $ignored_response instanceof \WP_REST_Response ? $ignored_response->get_data() : array();
+			$autosave_id  = (int) ( $ignored_data['id'] ?? 0 );
+			$stored_revisioned_meta = \get_metadata_raw( 'post', $autosave_id, $revisioned_meta_key, true );
+			$stored_non_revisioned_meta = \get_metadata_raw( 'post', $autosave_id, $non_revisioned_meta_key, true );
+			$stored_unknown_meta = \get_metadata_raw( 'post', $autosave_id, $unknown_meta_key, true );
+			$parent_revisioned_meta = \get_metadata_raw( 'post', $parent_id, $revisioned_meta_key, true );
+			$parent_non_revisioned_meta = \get_metadata_raw( 'post', $parent_id, $non_revisioned_meta_key, true );
+
+			self::collect_failure(
+				$failures,
+				$ignored_response instanceof \WP_REST_Response
+					&& 200 === $ignored_response->get_status()
+					&& 0 < $autosave_id
+					&& $parent_id === (int) ( $ignored_data['parent'] ?? 0 )
+					&& $ignored_title === ( $ignored_data['title']['raw'] ?? null )
+					&& $ignored_content === ( $ignored_data['content']['raw'] ?? null )
+					&& 'revisioned-meta-' . $case['token'] === ( $ignored_data['meta'][ $revisioned_meta_key ] ?? null )
+					&& 'revisioned-meta-' . $case['token'] === $stored_revisioned_meta
+					&& null === $stored_non_revisioned_meta
+					&& null === $stored_unknown_meta
+					&& null === $parent_revisioned_meta
+					&& null === $parent_non_revisioned_meta,
+				"built-in {$post_type} autosave POST ignores unregistered and non-revisioned REST meta while persisting only revisioned meta on the autosave revision",
+				array(
+					'response'              => self::response_summary( $ignored_response ),
+					'autosaveId'            => $autosave_id,
+					'storedRevisionedMeta'  => $stored_revisioned_meta,
+					'storedNonRevisionedMeta' => $stored_non_revisioned_meta,
+					'storedUnknownMeta'     => $stored_unknown_meta,
+					'parentRevisionedMeta'  => $parent_revisioned_meta,
+					'parentNonRevisionedMeta' => $parent_non_revisioned_meta,
+				)
+			);
+
+			$stored_before_invalid_update = \get_metadata_raw( 'post', $autosave_id, $revisioned_meta_key, true );
+			$content_before_invalid_update = \get_post( $autosave_id );
+			$invalid_update_response = self::dispatch(
+				$server,
+				self::request(
+					'POST',
+					$autosave_route,
+					array( 'context' => 'edit' ),
+					array(),
+					array(
+						'title'   => $case['titleTo'] . " {$post_type} invalid update",
+						'content' => $case['contentTo'] . "\n{$post_type} invalid update",
+						'meta'    => array(
+							$revisioned_meta_key => array( 'still' => 'wrong' ),
+						),
+					)
+				)
+			);
+			$stored_after_invalid_update = \get_metadata_raw( 'post', $autosave_id, $revisioned_meta_key, true );
+			$content_after_invalid_update = \get_post( $autosave_id );
+
+			self::collect_failure(
+				$failures,
+				$invalid_update_response instanceof \WP_REST_Response
+					&& 200 === $invalid_update_response->get_status()
+					&& array( 'still' => 'wrong' ) === $stored_after_invalid_update
+					&& $content_before_invalid_update instanceof \WP_Post
+					&& $content_after_invalid_update instanceof \WP_Post
+					&& $case['titleTo'] . " {$post_type} invalid update" === $content_after_invalid_update->post_title
+					&& $case['contentTo'] . "\n{$post_type} invalid update" === $content_after_invalid_update->post_content
+					&& null === ( $invalid_update_response->get_data()['meta'][ $revisioned_meta_key ] ?? null ),
+				"built-in {$post_type} malformed revisioned meta update overwrites the autosave raw meta while REST projection exposes null for the invalid stored value",
+				array(
+					'response'    => self::response_summary( $invalid_update_response ),
+					'metaBefore'  => $stored_before_invalid_update,
+					'metaAfter'   => $stored_after_invalid_update,
+					'beforePost'  => self::post_summary( $content_before_invalid_update ),
+					'afterPost'   => self::post_summary( $content_after_invalid_update ),
+				)
+			);
+
+			$entry += array(
+				'parentId'              => $parent_id,
+				'crossTypeParentId'     => $other_parent_id,
+				'revisionId'            => $revision_id,
+				'autosaveId'            => $autosave_id,
+				'revisionedMetaKey'     => $revisioned_meta_key,
+				'nonRevisionedMetaKey'  => $non_revisioned_meta_key,
+			);
+		} catch ( \Throwable $e ) {
+			self::collect_failure(
+				$failures,
+				false,
+				"built-in {$post_type} REST autosave negative/meta boundary branch stays throwable-free",
+				array( 'throwable' => self::describe_throwable( $e ) )
+			);
+		} finally {
+			if ( $editor_caps instanceof \Closure ) {
+				\remove_filter( 'user_has_cap', $editor_caps, 10 );
+			}
+			if ( true === $registered_revisioned ) {
+				\unregister_meta_key( 'post', $revisioned_meta_key, $post_type );
+			}
+			if ( true === $registered_non_revisioned ) {
+				\unregister_meta_key( 'post', $non_revisioned_meta_key, $post_type );
 			}
 			\wp_set_current_user( 0 );
 		}
