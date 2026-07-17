@@ -6078,8 +6078,8 @@ final class ContentLifecycleSurface {
 				$author_name_in_ex_collision_keys_distinct_from_single_by_field[ $field ] = array() === array_intersect( $keys, $author_name_collision_keys[ $field ] );
 			}
 			$author_name_in_ex_collision_keys_distinct_from_single = ! in_array( false, $author_name_in_ex_collision_keys_distinct_from_single_by_field, true );
-			$normalize_author_name_legacy_collision_arg = static function ( string $author_arg ): array {
-				$author_arg = preg_replace( '|[^0-9,-]|', '', $author_arg );
+			$normalize_author_name_legacy_collision_arg = static function ( $author_arg ): array {
+				$author_arg = is_scalar( $author_arg ) ? preg_replace( '|[^0-9,-]|', '', $author_arg ) : '';
 				if ( empty( $author_arg ) || '0' == $author_arg ) {
 					return array(
 						'legacyAuthor'  => $author_arg,
@@ -7414,6 +7414,374 @@ final class ContentLifecycleSurface {
 				&& ! in_array( false, $author_name_legacy_empty_parsed_zero_keys_match_spacing_by_field, true );
 			$author_name_legacy_empty_parsed_zero_distinct_from_plain = ! in_array( false, $author_name_legacy_empty_parsed_zero_requests_distinct_from_plain_by_field, true )
 				&& ! in_array( false, $author_name_legacy_empty_parsed_zero_keys_distinct_from_plain_by_field, true );
+			$author_name_legacy_scalar_expected_ids = static function ( array $expected_in, array $expected_not ) use ( $author_excluded_a_id, $author_name_expected ): array {
+				if ( ! empty( $expected_not ) ) {
+					return in_array( $author_excluded_a_id, $expected_not, true ) ? array() : $author_name_expected;
+				}
+
+				if ( ! empty( $expected_in ) ) {
+					return in_array( $author_excluded_a_id, $expected_in, true ) ? $author_name_expected : array();
+				}
+
+				return $author_name_expected;
+			};
+			$author_name_legacy_scalar_filter_map = static function ( array $source, array $ids ): array {
+				$map = array_intersect_key( $source, array_flip( $ids ) );
+				ksort( $map );
+				return $map;
+			};
+			$author_name_legacy_scalar_variants = array(
+				'trueScalar'       => array(
+					'author' => true,
+					'group'  => 'scalarOneInclude',
+				),
+				'oneInteger'       => array(
+					'author' => 1,
+					'group'  => 'scalarOneInclude',
+				),
+				'oneString'        => array(
+					'author' => '1',
+					'group'  => 'scalarOneInclude',
+				),
+				'slugInteger'      => array(
+					'author' => $author_excluded_a_id,
+					'group'  => 'scalarSlugInclude',
+				),
+				'slugWholeFloat'   => array(
+					'author' => (float) $author_excluded_a_id,
+					'group'  => 'scalarSlugInclude',
+				),
+				'slugPlusString'   => array(
+					'author' => '+' . (string) $author_excluded_a_id,
+					'group'  => 'scalarSlugInclude',
+				),
+				'slugLeadingZeroString' => array(
+					'author' => '00' . (string) $author_excluded_a_id,
+					'group'  => 'scalarSlugInclude',
+				),
+				'otherInteger'     => array(
+					'author' => $author_excluded_b_id,
+					'group'  => 'scalarOtherInclude',
+				),
+				'otherWholeFloat'  => array(
+					'author' => (float) $author_excluded_b_id,
+					'group'  => 'scalarOtherInclude',
+				),
+				'otherLeadingZeroString' => array(
+					'author' => '00' . (string) $author_excluded_b_id,
+					'group'  => 'scalarOtherInclude',
+				),
+				'slugDecimalFloat' => array(
+					'author' => $author_excluded_a_id + 0.5,
+					'group'  => 'scalarSlugDigitConcatInclude',
+				),
+				'slugDecimalString' => array(
+					'author' => (string) $author_excluded_a_id . '.5',
+					'group'  => 'scalarSlugDigitConcatInclude',
+				),
+				'slugExponentString' => array(
+					'author' => (string) $author_excluded_a_id . 'e5',
+					'group'  => 'scalarSlugDigitConcatInclude',
+				),
+				'otherDecimalFloat' => array(
+					'author' => $author_excluded_b_id + 0.5,
+					'group'  => 'scalarOtherDigitConcatInclude',
+				),
+				'otherDecimalString' => array(
+					'author' => (string) $author_excluded_b_id . '.5',
+					'group'  => 'scalarOtherDigitConcatInclude',
+				),
+				'otherExponentString' => array(
+					'author' => (string) $author_excluded_b_id . 'e5',
+					'group'  => 'scalarOtherDigitConcatInclude',
+				),
+				'negativeSlugInteger' => array(
+					'author' => -$author_excluded_a_id,
+					'group'  => 'scalarSlugExclude',
+				),
+				'negativeSlugWholeFloat' => array(
+					'author' => (float) -$author_excluded_a_id,
+					'group'  => 'scalarSlugExclude',
+				),
+				'negativeOtherInteger' => array(
+					'author' => -$author_excluded_b_id,
+					'group'  => 'scalarOtherExclude',
+				),
+				'negativeOtherWholeFloat' => array(
+					'author' => (float) -$author_excluded_b_id,
+					'group'  => 'scalarOtherExclude',
+				),
+				'negativeOtherDecimalFloat' => array(
+					'author' => -( $author_excluded_b_id + 0.5 ),
+					'group'  => 'scalarOtherDigitConcatExclude',
+				),
+				'negativeOtherDecimalString' => array(
+					'author' => '-' . (string) $author_excluded_b_id . '.5',
+					'group'  => 'scalarOtherDigitConcatExclude',
+				),
+				'negativeOtherExponentString' => array(
+					'author' => '-' . (string) $author_excluded_b_id . 'e5',
+					'group'  => 'scalarOtherDigitConcatExclude',
+				),
+			);
+			$author_name_legacy_scalar_keys = array(
+				'ids'      => array(),
+				'idParent' => array(),
+				'object'   => array(),
+			);
+			$author_name_legacy_scalar_requests = array(
+				'ids'      => array(),
+				'idParent' => array(),
+				'object'   => array(),
+			);
+			$author_name_legacy_scalar_keys_by_variant = array();
+			$author_name_legacy_scalar_group_keys = array();
+			$author_name_legacy_scalar_group_requests = array();
+			$author_name_legacy_scalar_checks = array();
+			$author_name_legacy_scalar_query_var_checks = array();
+			$author_name_legacy_scalar_sql_checks = array();
+			$author_name_legacy_scalar_author_checks = array();
+			$author_name_legacy_scalar_actual = array();
+			foreach ( $author_name_legacy_scalar_variants as $variant => $config ) {
+				$variant_args = array_merge(
+					$ordering_id_args,
+					array(
+						'author'              => $config['author'],
+						'author_name'         => $author_name_slug,
+						'author__in'          => null,
+						'author__not_in'      => null,
+						'post__not_in'        => null,
+						'post_parent__not_in' => null,
+					)
+				);
+				$buckets = array(
+					'ids'      => $query_parent_status_bucket( $pretty_type, 0, 'publish', 'ids', $variant_args ),
+					'idParent' => $query_parent_status_bucket( $pretty_type, 0, 'publish', 'id=>parent', $variant_args ),
+					'object'   => $query_parent_status_bucket( $pretty_type, 0, 'publish', 'all', $variant_args ),
+				);
+				$expected_query_vars = $normalize_author_name_legacy_collision_arg( $config['author'] );
+				$expected_in = array_values( array_map( 'intval', $expected_query_vars['author__in'] ) );
+				$expected_not_in = array_values( array_map( 'intval', $expected_query_vars['author__not_in'] ) );
+				$expected_ids = $author_name_legacy_scalar_expected_ids( $expected_in, $expected_not_in );
+				$expected_parent_map = $author_name_legacy_scalar_filter_map( $author_name_parent_expected, $expected_ids );
+				$expected_statuses = $author_name_legacy_scalar_filter_map( $author_name_status_expected, $expected_ids );
+				$expected_author_name = sanitize_title_for_query( $author_name_slug );
+				$expected_authors = array_fill_keys( $expected_ids, $author_excluded_a_id );
+				$actual_authors = array();
+				foreach ( $buckets['object']['ids'] as $post_id ) {
+					$post = \get_post( $post_id );
+					$actual_authors[ $post_id ] = $post instanceof \WP_Post ? (int) $post->post_author : null;
+				}
+				ksort( $expected_authors );
+				ksort( $actual_authors );
+
+				$author_name_legacy_scalar_checks[ $variant ] = $query_ordering_family_is_valid( $buckets['ids'], $buckets['idParent'], $buckets['object'], $expected_ids, $expected_parent_map, $expected_statuses );
+				$author_name_legacy_scalar_query_var_checks[ $variant ] = $expected_author_name === (string) ( $buckets['ids']['queryVars']['author_name'] ?? '' )
+					&& $expected_author_name === (string) ( $buckets['idParent']['queryVars']['author_name'] ?? '' )
+					&& $expected_author_name === (string) ( $buckets['object']['queryVars']['author_name'] ?? '' )
+					&& $author_excluded_a_id === (int) ( $buckets['ids']['queryVars']['author'] ?? 0 )
+					&& $author_excluded_a_id === (int) ( $buckets['idParent']['queryVars']['author'] ?? 0 )
+					&& $author_excluded_a_id === (int) ( $buckets['object']['queryVars']['author'] ?? 0 )
+					&& $expected_in === array_values( array_map( 'intval', (array) ( $buckets['ids']['queryVars']['author__in'] ?? array() ) ) )
+					&& $expected_in === array_values( array_map( 'intval', (array) ( $buckets['idParent']['queryVars']['author__in'] ?? array() ) ) )
+					&& $expected_in === array_values( array_map( 'intval', (array) ( $buckets['object']['queryVars']['author__in'] ?? array() ) ) )
+					&& $expected_not_in === array_values( array_map( 'intval', (array) ( $buckets['ids']['queryVars']['author__not_in'] ?? array() ) ) )
+					&& $expected_not_in === array_values( array_map( 'intval', (array) ( $buckets['idParent']['queryVars']['author__not_in'] ?? array() ) ) )
+					&& $expected_not_in === array_values( array_map( 'intval', (array) ( $buckets['object']['queryVars']['author__not_in'] ?? array() ) ) );
+				$expected_in_sql = empty( $expected_in ) ? '' : 'post_author IN (' . implode( ',', $expected_in ) . ')';
+				$expected_not_in_sql = empty( $expected_not_in ) ? '' : 'post_author NOT IN (' . implode( ',', $expected_not_in ) . ')';
+				$author_name_legacy_scalar_sql_checks[ $variant ] = true;
+				foreach ( array( 'ids', 'idParent', 'object' ) as $field ) {
+					$request = $buckets[ $field ]['request'];
+					$author_name_legacy_scalar_sql_checks[ $variant ] = $author_name_legacy_scalar_sql_checks[ $variant ]
+						&& false !== strpos( $request, 'post_author = ' . (string) $author_excluded_a_id )
+						&& ( '' === $expected_in_sql || false !== strpos( $request, $expected_in_sql ) )
+						&& ( '' !== $expected_in_sql || false === strpos( $request, 'post_author IN' ) )
+						&& ( '' === $expected_not_in_sql || false !== strpos( $request, $expected_not_in_sql ) )
+						&& ( '' !== $expected_not_in_sql || false === strpos( $request, 'post_author NOT IN' ) );
+				}
+				$author_name_legacy_scalar_author_checks[ $variant ] = $expected_authors === $actual_authors;
+				$author_name_legacy_scalar_keys['ids'][] = $buckets['ids']['cacheKey'];
+				$author_name_legacy_scalar_keys['idParent'][] = $buckets['idParent']['cacheKey'];
+				$author_name_legacy_scalar_keys['object'][] = $buckets['object']['cacheKey'];
+				$author_name_legacy_scalar_requests['ids'][] = $buckets['ids']['request'];
+				$author_name_legacy_scalar_requests['idParent'][] = $buckets['idParent']['request'];
+				$author_name_legacy_scalar_requests['object'][] = $buckets['object']['request'];
+				$author_name_legacy_scalar_keys_by_variant[ $variant ] = array(
+					'ids'      => $buckets['ids']['cacheKey'],
+					'idParent' => $buckets['idParent']['cacheKey'],
+					'object'   => $buckets['object']['cacheKey'],
+				);
+				$group = (string) $config['group'];
+				if ( ! isset( $author_name_legacy_scalar_group_keys[ $group ] ) ) {
+					$author_name_legacy_scalar_group_keys[ $group ] = array(
+						'ids'      => array(),
+						'idParent' => array(),
+						'object'   => array(),
+					);
+					$author_name_legacy_scalar_group_requests[ $group ] = array(
+						'ids'      => array(),
+						'idParent' => array(),
+						'object'   => array(),
+					);
+				}
+				$author_name_legacy_scalar_group_keys[ $group ]['ids'][] = $buckets['ids']['cacheKey'];
+				$author_name_legacy_scalar_group_keys[ $group ]['idParent'][] = $buckets['idParent']['cacheKey'];
+				$author_name_legacy_scalar_group_keys[ $group ]['object'][] = $buckets['object']['cacheKey'];
+				$author_name_legacy_scalar_group_requests[ $group ]['ids'][] = $buckets['ids']['request'];
+				$author_name_legacy_scalar_group_requests[ $group ]['idParent'][] = $buckets['idParent']['request'];
+				$author_name_legacy_scalar_group_requests[ $group ]['object'][] = $buckets['object']['request'];
+				$author_name_legacy_scalar_actual[ $variant ] = array(
+					'authorArg'         => $config['author'],
+					'authorArgType'     => get_debug_type( $config['author'] ),
+					'expectedLegacy'    => $expected_query_vars,
+					'expected'          => array(
+						'ids'      => $expected_ids,
+						'parents'  => $expected_parent_map,
+						'statuses' => $expected_statuses,
+						'authors'  => $expected_authors,
+					),
+					'queryVar'          => array(
+						'ids'      => array(
+							'author_name'    => (string) ( $buckets['ids']['queryVars']['author_name'] ?? '' ),
+							'author'         => $buckets['ids']['queryVars']['author'] ?? null,
+							'author__in'     => array_values( array_map( 'intval', (array) ( $buckets['ids']['queryVars']['author__in'] ?? array() ) ) ),
+							'author__not_in' => array_values( array_map( 'intval', (array) ( $buckets['ids']['queryVars']['author__not_in'] ?? array() ) ) ),
+						),
+						'idParent' => array(
+							'author_name'    => (string) ( $buckets['idParent']['queryVars']['author_name'] ?? '' ),
+							'author'         => $buckets['idParent']['queryVars']['author'] ?? null,
+							'author__in'     => array_values( array_map( 'intval', (array) ( $buckets['idParent']['queryVars']['author__in'] ?? array() ) ) ),
+							'author__not_in' => array_values( array_map( 'intval', (array) ( $buckets['idParent']['queryVars']['author__not_in'] ?? array() ) ) ),
+						),
+						'object'   => array(
+							'author_name'    => (string) ( $buckets['object']['queryVars']['author_name'] ?? '' ),
+							'author'         => $buckets['object']['queryVars']['author'] ?? null,
+							'author__in'     => array_values( array_map( 'intval', (array) ( $buckets['object']['queryVars']['author__in'] ?? array() ) ) ),
+							'author__not_in' => array_values( array_map( 'intval', (array) ( $buckets['object']['queryVars']['author__not_in'] ?? array() ) ) ),
+						),
+					),
+					'authors'           => $actual_authors,
+					'keys'              => array(
+						'ids'      => substr( md5( $buckets['ids']['cacheKey'] ), 0, 8 ),
+						'idParent' => substr( md5( $buckets['idParent']['cacheKey'] ), 0, 8 ),
+						'object'   => substr( md5( $buckets['object']['cacheKey'] ), 0, 8 ),
+					),
+					'requests'          => array(
+						'ids'      => substr( md5( $buckets['ids']['request'] ), 0, 8 ),
+						'idParent' => substr( md5( $buckets['idParent']['request'] ), 0, 8 ),
+						'object'   => substr( md5( $buckets['object']['request'] ), 0, 8 ),
+					),
+					'ids'               => array(
+						'ids'      => $buckets['ids']['ids'],
+						'idParent' => $buckets['idParent']['ids'],
+						'object'   => $buckets['object']['ids'],
+					),
+					'parents'           => array(
+						'idParent' => $buckets['idParent']['parents'],
+						'object'   => $buckets['object']['parents'],
+					),
+					'statuses'          => $buckets['object']['statuses'],
+				);
+			}
+			$author_name_legacy_scalar_valid = ! in_array( false, $author_name_legacy_scalar_checks, true )
+				&& ! in_array( false, $author_name_legacy_scalar_query_var_checks, true )
+				&& ! in_array( false, $author_name_legacy_scalar_sql_checks, true )
+				&& ! in_array( false, $author_name_legacy_scalar_author_checks, true );
+			$author_name_legacy_scalar_group_requests_shared = array();
+			foreach ( $author_name_legacy_scalar_group_requests as $group => $requests_by_field ) {
+				foreach ( $requests_by_field as $field => $requests ) {
+					$author_name_legacy_scalar_group_requests_shared[ $group ][ $field ] = 1 === count( array_unique( $requests ) );
+				}
+			}
+			$author_name_legacy_scalar_group_keys_shared = array();
+			foreach ( $author_name_legacy_scalar_group_keys as $group => $keys_by_field ) {
+				foreach ( $keys_by_field as $field => $keys ) {
+					$author_name_legacy_scalar_group_keys_shared[ $group ][ $field ] = 1 === count( array_unique( $keys ) );
+				}
+			}
+			$author_name_legacy_scalar_groups_share_requests = ! in_array( false, array_merge( ...array_values( $author_name_legacy_scalar_group_requests_shared ) ), true );
+			$author_name_legacy_scalar_groups_share_keys = ! in_array( false, array_merge( ...array_values( $author_name_legacy_scalar_group_keys_shared ) ), true );
+			$author_name_legacy_scalar_existing_group_matches = array(
+				'slugIncludeMatchesExplicitAuthorIn' => array(
+					'scalarGroup'   => 'scalarSlugInclude',
+					'existingGroup' => 'authorInSlugOnly',
+				),
+				'otherIncludeMatchesExplicitAuthorIn' => array(
+					'scalarGroup'   => 'scalarOtherInclude',
+					'existingGroup' => 'authorInOtherOnly',
+				),
+				'slugExcludeMatchesExplicitAuthorNotIn' => array(
+					'scalarGroup'   => 'scalarSlugExclude',
+					'existingGroup' => 'authorNotInSlugOnly',
+				),
+				'otherExcludeMatchesExplicitAuthorNotIn' => array(
+					'scalarGroup'   => 'scalarOtherExclude',
+					'existingGroup' => 'authorNotInOtherOnly',
+				),
+			);
+			$author_name_legacy_scalar_existing_request_matches_by_field = array();
+			$author_name_legacy_scalar_existing_key_matches_by_field = array();
+			foreach ( $author_name_legacy_scalar_existing_group_matches as $comparison => $groups ) {
+				foreach ( array( 'ids', 'idParent', 'object' ) as $field ) {
+					$author_name_legacy_scalar_existing_request_matches_by_field[ $comparison ][ $field ] = 1 === count(
+						array_unique(
+							array_merge(
+								$author_name_legacy_scalar_group_requests[ $groups['scalarGroup'] ][ $field ],
+								$author_name_collision_group_requests[ $groups['existingGroup'] ][ $field ]
+							)
+						)
+					);
+					$author_name_legacy_scalar_existing_key_matches_by_field[ $comparison ][ $field ] = 1 === count(
+						array_unique(
+							array_merge(
+								$author_name_legacy_scalar_group_keys[ $groups['scalarGroup'] ][ $field ],
+								$author_name_collision_group_keys[ $groups['existingGroup'] ][ $field ]
+							)
+						)
+					);
+				}
+			}
+			$author_name_legacy_scalar_matches_existing_requests = ! in_array( false, array_merge( ...array_values( $author_name_legacy_scalar_existing_request_matches_by_field ) ), true );
+			$author_name_legacy_scalar_matches_existing_keys = ! in_array( false, array_merge( ...array_values( $author_name_legacy_scalar_existing_key_matches_by_field ) ), true );
+			$author_name_legacy_scalar_requests_distinct_from_plain_by_field = array();
+			$author_name_legacy_scalar_keys_distinct_from_plain_by_field = array();
+			foreach ( array( 'ids', 'idParent', 'object' ) as $field ) {
+				$author_name_legacy_scalar_requests_distinct_from_plain_by_field[ $field ] = array() === array_intersect(
+					$author_name_legacy_scalar_requests[ $field ],
+					$author_name_requests[ $field ]
+				);
+				$author_name_legacy_scalar_keys_distinct_from_plain_by_field[ $field ] = array() === array_intersect(
+					$author_name_legacy_scalar_keys[ $field ],
+					$author_name_keys[ $field ]
+				);
+			}
+			$author_name_legacy_scalar_distinct_from_plain = ! in_array( false, $author_name_legacy_scalar_requests_distinct_from_plain_by_field, true )
+				&& ! in_array( false, $author_name_legacy_scalar_keys_distinct_from_plain_by_field, true );
+			$author_name_legacy_scalar_digit_concat_boundaries = array(
+				'slugDigitConcatDistinctFromSlugInclude' => array(
+					'scalarGroup'   => 'scalarSlugDigitConcatInclude',
+					'existingGroup' => 'authorInSlugOnly',
+				),
+				'otherDigitConcatDistinctFromOtherInclude' => array(
+					'scalarGroup'   => 'scalarOtherDigitConcatInclude',
+					'existingGroup' => 'authorInOtherOnly',
+				),
+				'otherNegativeDigitConcatDistinctFromOtherExclude' => array(
+					'scalarGroup'   => 'scalarOtherDigitConcatExclude',
+					'existingGroup' => 'authorNotInOtherOnly',
+				),
+			);
+			$author_name_legacy_scalar_digit_concat_keys_distinct_by_field = array();
+			foreach ( $author_name_legacy_scalar_digit_concat_boundaries as $comparison => $groups ) {
+				foreach ( array( 'ids', 'idParent', 'object' ) as $field ) {
+					$author_name_legacy_scalar_digit_concat_keys_distinct_by_field[ $comparison ][ $field ] = array() === array_intersect(
+						$author_name_legacy_scalar_group_keys[ $groups['scalarGroup'] ][ $field ],
+						$author_name_collision_group_keys[ $groups['existingGroup'] ][ $field ]
+					);
+				}
+			}
+			$author_name_legacy_scalar_digit_concat_keys_distinct = ! in_array( false, array_merge( ...array_values( $author_name_legacy_scalar_digit_concat_keys_distinct_by_field ) ), true );
 			$author_name_miss_slug = 'missing-author-' . $token;
 			$author_name_miss_expected = array( $pretty_mixed_leaf_id );
 			$author_name_miss_parent_expected = array(
@@ -8848,6 +9216,78 @@ final class ContentLifecycleSurface {
 						$author_name_legacy_empty_group_keys
 					),
 					'variants'            => $author_name_legacy_empty_actual,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$author_name_legacy_scalar_valid
+					&& $author_name_legacy_scalar_groups_share_requests
+					&& $author_name_legacy_scalar_groups_share_keys
+					&& $author_name_legacy_scalar_matches_existing_requests
+					&& $author_name_legacy_scalar_matches_existing_keys
+					&& $author_name_legacy_scalar_distinct_from_plain
+					&& $author_name_legacy_scalar_digit_concat_keys_distinct,
+				'WP_Query normalizes generated custom hierarchical author_name boolean and non-zero scalar legacy author inputs across selected fields',
+				array(
+					'checks'              => array(
+						'variantsValid'             => $author_name_legacy_scalar_checks,
+						'queryVarsMatchExpectedLegacyArrays' => $author_name_legacy_scalar_query_var_checks,
+						'sqlUsesExpectedAuthorFilters' => $author_name_legacy_scalar_sql_checks,
+						'payloadAuthorsMatchSlug'   => $author_name_legacy_scalar_author_checks,
+						'groupRequestsShared'       => $author_name_legacy_scalar_group_requests_shared,
+						'groupKeysShared'           => $author_name_legacy_scalar_group_keys_shared,
+						'existingGroupRequestsMatch' => $author_name_legacy_scalar_existing_request_matches_by_field,
+						'existingGroupKeysMatch'    => $author_name_legacy_scalar_existing_key_matches_by_field,
+						'requestsDistinctFromPlain' => $author_name_legacy_scalar_requests_distinct_from_plain_by_field,
+						'keysDistinctFromPlain'     => $author_name_legacy_scalar_keys_distinct_from_plain_by_field,
+						'digitConcatKeysDistinctFromCanonical' => $author_name_legacy_scalar_digit_concat_keys_distinct_by_field,
+					),
+					'authorNameSlug'      => $author_name_slug,
+					'expectedAuthorName'  => sanitize_title_for_query( $author_name_slug ),
+					'resolvedAuthorId'    => $author_excluded_a_id,
+					'otherAuthorId'       => $author_excluded_b_id,
+					'expectedMatchIds'    => $author_name_expected,
+					'uniqueRequestHashes' => array_map(
+						static fn ( array $requests ): array => array_values( array_unique( array_map( static fn ( string $request ): string => substr( md5( $request ), 0, 8 ), $requests ) ) ),
+						$author_name_legacy_scalar_requests
+					),
+					'uniqueKeyHashes'     => array_map(
+						static fn ( array $keys ): array => array_values( array_unique( array_map( static fn ( string $key ): string => substr( md5( $key ), 0, 8 ), $keys ) ) ),
+						$author_name_legacy_scalar_keys
+					),
+					'plainAuthorNameRequestHashes' => array_map(
+						static fn ( array $requests ): array => array_values( array_unique( array_map( static fn ( string $request ): string => substr( md5( $request ), 0, 8 ), $requests ) ) ),
+						$author_name_requests
+					),
+					'plainAuthorNameKeyHashes' => array_map(
+						static fn ( array $keys ): array => array_values( array_unique( array_map( static fn ( string $key ): string => substr( md5( $key ), 0, 8 ), $keys ) ) ),
+						$author_name_keys
+					),
+					'groupRequestHashes'  => array_map(
+						static fn ( array $group ): array => array_map(
+							static fn ( array $requests ): array => array_values( array_unique( array_map( static fn ( string $request ): string => substr( md5( $request ), 0, 8 ), $requests ) ) ),
+							$group
+						),
+						$author_name_legacy_scalar_group_requests
+					),
+					'groupKeyHashes'      => array_map(
+						static fn ( array $group ): array => array_map(
+							static fn ( array $keys ): array => array_values( array_unique( array_map( static fn ( string $key ): string => substr( md5( $key ), 0, 8 ), $keys ) ) ),
+							$group
+						),
+						$author_name_legacy_scalar_group_keys
+					),
+					'matchedExistingGroups' => $author_name_legacy_scalar_existing_group_matches,
+					'digitConcatBoundaries' => $author_name_legacy_scalar_digit_concat_boundaries,
+					'explicitCollisionGroupKeyHashes' => array_map(
+						static fn ( array $group ): array => array_map(
+							static fn ( array $keys ): array => array_values( array_unique( array_map( static fn ( string $key ): string => substr( md5( $key ), 0, 8 ), $keys ) ) ),
+							$group
+						),
+						$author_name_collision_group_keys
+					),
+					'variants'            => $author_name_legacy_scalar_actual,
 				)
 			);
 
