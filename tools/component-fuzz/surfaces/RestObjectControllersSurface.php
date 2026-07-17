@@ -53,6 +53,7 @@ final class RestObjectControllersSurface {
 			$rows[] = self::check_route_dispatched_collection_projection_head_embed_edges( $ctx->fork( 'collection-projection-head-embed' ), $case, $fixtures );
 			$rows[] = self::check_route_dispatched_object_write_edges( $ctx->fork( 'object-write-dispatch' ), $case, $fixtures );
 			$rows[] = self::check_route_dispatched_object_batch_update_edges( $ctx->fork( 'object-batch-update-dispatch' ), $case, $fixtures );
+			$rows[] = self::check_route_dispatched_object_batch_delete_edges( $ctx->fork( 'object-batch-delete-dispatch' ), $case, $fixtures );
 			$rows[] = self::check_route_dispatched_object_create_delete_edges( $ctx->fork( 'object-create-delete-dispatch' ), $case, $fixtures );
 			$rows[] = self::check_route_dispatched_page_parent_slug_edges( $ctx->fork( 'page-parent-slug-dispatch' ), $case, $fixtures );
 			$rows[] = self::check_route_dispatched_custom_hierarchical_post_type_permalink_edges( $ctx->fork( 'custom-hierarchical-permalink-dispatch' ), $case, $fixtures );
@@ -6357,6 +6358,7 @@ final class RestObjectControllersSurface {
 					'moderate_comments',
 					'publish_posts',
 					'read',
+					'upload_files',
 				)
 			);
 			try {
@@ -6847,6 +6849,10 @@ final class RestObjectControllersSurface {
 
 			$direct_success_responses = array();
 			if ( is_object( $previous_wpdb ) ) {
+				if ( function_exists( 'wp_cache_flush' ) ) {
+					\wp_cache_flush();
+				}
+
 				$GLOBALS['wpdb'] = clone $previous_wpdb;
 
 				try {
@@ -6861,6 +6867,10 @@ final class RestObjectControllersSurface {
 						$GLOBALS['wpdb'] = $previous_wpdb;
 					} else {
 						unset( $GLOBALS['wpdb'] );
+					}
+
+					if ( function_exists( 'wp_cache_flush' ) ) {
+						\wp_cache_flush();
 					}
 				}
 			}
@@ -7317,6 +7327,887 @@ final class RestObjectControllersSurface {
 			array(
 				'case'       => self::case_summary( $case ),
 				'controllers' => array( 'posts', 'terms', 'comments', 'users' ),
+				'failures'   => array_slice( $failures, 0, 8 ),
+				'observed'   => $observed,
+			)
+		);
+	}
+
+	private static function check_route_dispatched_object_batch_delete_edges( \ComponentFuzz\FuzzContext $ctx, array $case, array $fixtures ): array {
+		$failures = array();
+		$observed = array();
+
+		$previous_server          = $GLOBALS['wp_rest_server'] ?? null;
+		$had_wp_actions           = array_key_exists( 'wp_actions', $GLOBALS );
+		$previous_actions         = $GLOBALS['wp_actions'] ?? null;
+		$previous_current_user_id = isset( $GLOBALS['current_user'] ) && $GLOBALS['current_user'] instanceof \WP_User
+			? (int) $GLOBALS['current_user']->ID
+			: 0;
+		$had_wpdb                 = array_key_exists( 'wpdb', $GLOBALS );
+		$previous_wpdb            = $GLOBALS['wpdb'] ?? null;
+
+		$server                    = new \WP_REST_Server();
+		$GLOBALS['wp_rest_server'] = $server;
+
+		if ( ! isset( $GLOBALS['wp_actions'] ) || ! is_array( $GLOBALS['wp_actions'] ) ) {
+			$GLOBALS['wp_actions'] = array();
+		}
+		$GLOBALS['wp_actions']['rest_api_init'] = max( 1, (int) ( $GLOBALS['wp_actions']['rest_api_init'] ?? 0 ) );
+
+		$filter_snapshot = self::rest_default_filter_state();
+		$cap_filter      = null;
+		$batch_token     = 'component-fuzz-batch-delete-' . $ctx->seed() . '-' . $ctx->iteration();
+
+		$delete_post_id      = 0;
+		$delete_term_id      = 0;
+		$delete_user_id      = 0;
+		$reassigned_post_id  = 0;
+		$delete_post_title   = 'Batch Delete REST Post ' . $case['token'];
+		$delete_post_content = '<p>Batch delete content ' . $case['token'] . '</p>';
+		$delete_post_slug    = 'batch-delete-post-' . $case['token'];
+		$delete_term_name    = 'Batch Delete Term ' . $case['token'];
+		$delete_term_slug    = 'batch-delete-term-' . $case['token'];
+		$delete_user_login   = 'cfz_batch_delete_user_' . $case['token'];
+		$delete_user_email   = 'batch-delete-user-' . $case['token'] . '@example.com';
+		$delete_user_name    = 'Batch Delete User ' . $case['token'];
+		$delete_user_pass    = 'batch-delete-pass-' . $case['token'] . '-A1';
+		$reassigned_title    = 'Batch Delete Reassigned Post ' . $case['token'];
+
+		$accepted_emails = array_fill_keys( array( $delete_user_email ), true );
+		$email_filter    = static function ( $is_email, string $email ) use ( $accepted_emails ) {
+			return isset( $accepted_emails[ $email ] ) ? $email : $is_email;
+		};
+		$sanitize_email_filter = static function ( string $sanitized, string $email ) use ( $accepted_emails ): string {
+			return isset( $accepted_emails[ $email ] ) ? $email : $sanitized;
+		};
+		$post_trash_filter = static function (): bool {
+			return false;
+		};
+
+		$child_post_dispatch        = array();
+		$record_child_post_dispatch = false;
+		$post_dispatch_filter       = static function ( \WP_REST_Response $response, \WP_REST_Server $filter_server, \WP_REST_Request $request ) use ( $server, $batch_token, &$child_post_dispatch, &$record_child_post_dispatch ): \WP_REST_Response {
+			if ( $filter_server !== $server || '/batch/v1' === $request->get_route() ) {
+				return $response;
+			}
+
+			if ( $record_child_post_dispatch ) {
+				$child_post_dispatch[] = array(
+					'route'  => $request->get_route(),
+					'method' => $request->get_method(),
+					'status' => $response->get_status(),
+				);
+			}
+
+			$response->header( 'X-Component-Fuzz-Batch-Delete', $batch_token );
+			return $response;
+		};
+
+		$response_summary = static function ( $response ): array {
+			if ( ! $response instanceof \WP_REST_Response ) {
+				return array( 'type' => is_object( $response ) ? get_class( $response ) : gettype( $response ) );
+			}
+
+			return array(
+				'status'  => $response->get_status(),
+				'headers' => $response->get_headers(),
+				'data'    => $response->get_data(),
+			);
+		};
+
+		$custom_filters_restored  = false;
+		$post_trash_restored      = false;
+		$email_filter_restored    = false;
+		$sanitize_filter_restored = false;
+		$cap_filter_restored      = false;
+		$default_filters_restored = false;
+		$server_restored          = false;
+		$actions_restored         = false;
+		$current_user_restored    = false;
+		$wpdb_restored            = false;
+		$setup_rows_cleaned       = false;
+		$counts_before            = array();
+
+		try {
+			$controllers = array(
+				new \WP_REST_Posts_Controller( 'post' ),
+				new \WP_REST_Terms_Controller( 'category' ),
+				new \WP_REST_Comments_Controller(),
+				new \WP_REST_Users_Controller(),
+				new \WP_REST_Attachments_Controller( 'attachment' ),
+			);
+
+			foreach ( $controllers as $controller ) {
+				$controller->register_routes();
+			}
+
+			\rest_api_default_filters();
+			\add_filter( 'rest_post_dispatch', $post_dispatch_filter, 11, 3 );
+			\add_filter( 'rest_post_trashable', $post_trash_filter, 10, 2 );
+			\add_filter( 'is_email', $email_filter, 10, 2 );
+			\add_filter( 'sanitize_email', $sanitize_email_filter, 10, 2 );
+
+			$counts_before = self::content_counts();
+
+			$delete_post_id = \wp_insert_post(
+				\wp_slash(
+					array(
+						'post_type'    => 'post',
+						'post_title'   => $delete_post_title,
+						'post_content' => $delete_post_content,
+						'post_status'  => 'publish',
+						'post_name'    => $delete_post_slug,
+						'post_author'  => $fixtures['author'],
+					)
+				),
+				true,
+				false
+			);
+			$delete_post_id = is_int( $delete_post_id ) ? $delete_post_id : 0;
+
+			$term_insert = \wp_insert_term(
+				$delete_term_name,
+				'category',
+				\wp_slash(
+					array(
+						'description' => 'Batch delete term ' . $case['token'],
+						'parent'      => $fixtures['term'],
+						'slug'        => $delete_term_slug,
+					)
+				)
+			);
+			$delete_term_id = is_array( $term_insert ) ? (int) ( $term_insert['term_id'] ?? 0 ) : 0;
+
+			$delete_user_id = \wp_insert_user(
+				\wp_slash(
+					array(
+						'user_login'   => $delete_user_login,
+						'user_email'   => $delete_user_email,
+						'display_name' => $delete_user_name,
+						'user_pass'    => $delete_user_pass,
+						'user_nicename' => \sanitize_title( $delete_user_name ),
+					)
+				)
+			);
+			$delete_user_id = is_int( $delete_user_id ) ? $delete_user_id : 0;
+
+			if ( $delete_user_id > 0 ) {
+				$reassigned_post_id = \wp_insert_post(
+					\wp_slash(
+						array(
+							'post_type'    => 'post',
+							'post_title'   => $reassigned_title,
+							'post_content' => '<p>Batch delete reassignment content ' . $case['token'] . '</p>',
+							'post_status'  => 'publish',
+							'post_author'  => $delete_user_id,
+						)
+					),
+					true,
+					false
+				);
+				$reassigned_post_id = is_int( $reassigned_post_id ) ? $reassigned_post_id : 0;
+			}
+
+			$counts_after_setup = self::content_counts();
+			$setup_post         = $delete_post_id > 0 ? \get_post( $delete_post_id ) : null;
+			$setup_term         = $delete_term_id > 0 ? \get_term( $delete_term_id, 'category' ) : null;
+			$setup_user         = $delete_user_id > 0 ? \get_user_by( 'id', $delete_user_id ) : null;
+			$setup_reassigned   = $reassigned_post_id > 0 ? \get_post( $reassigned_post_id ) : null;
+
+			self::collect_failure(
+				$failures,
+				$setup_post instanceof \WP_Post
+					&& $delete_post_title === $setup_post->post_title
+					&& $setup_term instanceof \WP_Term
+					&& $delete_term_name === $setup_term->name
+					&& $setup_user instanceof \WP_User
+					&& $delete_user_email === $setup_user->user_email
+					&& $setup_reassigned instanceof \WP_Post
+					&& $delete_user_id === (int) $setup_reassigned->post_author
+					&& self::content_count_delta_matches(
+						$counts_before,
+						$counts_after_setup,
+						array(
+							'posts'         => 2,
+							'term_taxonomy' => 1,
+							'terms'         => 1,
+							'users'         => 1,
+						),
+						array( 'user_meta' )
+					),
+				'batch/v1 delete setup creates isolated post, term, user, and user-owned post targets',
+				array(
+					'post'       => $setup_post instanceof \WP_Post ? array( 'id' => (int) $setup_post->ID, 'title' => $setup_post->post_title ) : $setup_post,
+					'term'       => $setup_term instanceof \WP_Term ? array( 'id' => (int) $setup_term->term_id, 'name' => $setup_term->name ) : $setup_term,
+					'user'       => $setup_user instanceof \WP_User ? array( 'id' => (int) $setup_user->ID, 'email' => $setup_user->user_email ) : $setup_user,
+					'reassigned' => $setup_reassigned instanceof \WP_Post ? array( 'id' => (int) $setup_reassigned->ID, 'author' => (int) $setup_reassigned->post_author ) : $setup_reassigned,
+					'countsBefore' => $counts_before,
+					'countsAfter'  => $counts_after_setup,
+				)
+			);
+
+			$denied_specs = array(
+				'post' => array(
+					'method' => 'DELETE',
+					'route'  => '/wp/v2/posts/' . $delete_post_id,
+					'body'   => array( 'force' => true ),
+				),
+				'term' => array(
+					'method' => 'DELETE',
+					'route'  => '/wp/v2/categories/' . $delete_term_id,
+					'body'   => array( 'force' => true ),
+				),
+				'user' => array(
+					'method' => 'DELETE',
+					'route'  => '/wp/v2/users/' . $delete_user_id,
+					'body'   => array(
+						'force'    => true,
+						'reassign' => $fixtures['author'],
+					),
+				),
+			);
+
+			\wp_set_current_user( 0 );
+
+			$direct_denied_responses = array();
+			foreach ( $denied_specs as $name => $spec ) {
+				$direct_denied_responses[ $name ] = self::dispatch_with_rest_post_dispatch(
+					$server,
+					self::request_from_batch_spec( $spec )
+				);
+			}
+
+			$record_child_post_dispatch = true;
+			$denied_response = $server->dispatch(
+				self::batch_request(
+					array_map(
+						static fn ( array $spec ): array => self::batch_child_from_spec( $spec ),
+						array_values( $denied_specs )
+					),
+					'normal'
+				)
+			);
+			$record_child_post_dispatch = false;
+			$denied_data      = $denied_response instanceof \WP_REST_Response ? $denied_response->get_data() : array();
+			$denied_envelopes = is_array( $denied_data['responses'] ?? null ) ? $denied_data['responses'] : array();
+			$counts_after_denied = self::content_counts();
+			$post_after_denied       = $delete_post_id > 0 ? \get_post( $delete_post_id ) : null;
+			$term_after_denied       = $delete_term_id > 0 ? \get_term( $delete_term_id, 'category' ) : null;
+			$user_after_denied       = $delete_user_id > 0 ? \get_user_by( 'id', $delete_user_id ) : null;
+			$reassigned_after_denied = $reassigned_post_id > 0 ? \get_post( $reassigned_post_id ) : null;
+
+			\wp_set_current_user( $fixtures['author'] );
+			$cap_filter = self::install_cap_filter(
+				array(
+					'create_users',
+					'delete_categories',
+					'delete_comment',
+					'delete_comments',
+					'delete_post',
+					'delete_posts',
+					'delete_user',
+					'delete_users',
+					'edit_categories',
+					'edit_comment',
+					'edit_comments',
+					'edit_others_posts',
+					'edit_post',
+					'edit_posts',
+					'edit_published_posts',
+					'edit_term',
+					'edit_terms',
+					'edit_user',
+					'edit_users',
+					'list_users',
+					'manage_categories',
+					'moderate_comments',
+					'publish_posts',
+					'read',
+				)
+			);
+
+			$failure_specs = array(
+				'post'       => array(
+					'method' => 'DELETE',
+					'route'  => '/wp/v2/posts/' . $delete_post_id,
+					'body'   => array( 'force' => false ),
+				),
+				'term'       => array(
+					'method' => 'DELETE',
+					'route'  => '/wp/v2/categories/' . $delete_term_id,
+					'body'   => array( 'force' => false ),
+				),
+				'user'       => array(
+					'method' => 'DELETE',
+					'route'  => '/wp/v2/users/' . $delete_user_id,
+					'body'   => array(
+						'force'    => false,
+						'reassign' => false,
+					),
+				),
+				'commentGate' => array(
+					'method' => 'DELETE',
+					'route'  => '/wp/v2/comments/' . $fixtures['comment'],
+					'body'   => array( 'force' => true ),
+				),
+				'mediaGate'   => array(
+					'method' => 'DELETE',
+					'route'  => '/wp/v2/media/' . $fixtures['attachment'],
+					'body'   => array( 'force' => true ),
+				),
+			);
+
+			$direct_failure_responses = array();
+			foreach ( array( 'post', 'term', 'user' ) as $name ) {
+				$direct_failure_responses[ $name ] = self::dispatch_with_rest_post_dispatch(
+					$server,
+					self::request_from_batch_spec( $failure_specs[ $name ] )
+				);
+			}
+
+			$record_child_post_dispatch = true;
+			$failure_response = $server->dispatch(
+				self::batch_request(
+					array_map(
+						static fn ( array $spec ): array => self::batch_child_from_spec( $spec ),
+						array_values( $failure_specs )
+					),
+					'normal'
+				)
+			);
+			$record_child_post_dispatch = false;
+			$failure_data      = $failure_response instanceof \WP_REST_Response ? $failure_response->get_data() : array();
+			$failure_envelopes = is_array( $failure_data['responses'] ?? null ) ? $failure_data['responses'] : array();
+			$counts_after_failure = self::content_counts();
+			$post_after_failure       = $delete_post_id > 0 ? \get_post( $delete_post_id ) : null;
+			$term_after_failure       = $delete_term_id > 0 ? \get_term( $delete_term_id, 'category' ) : null;
+			$user_after_failure       = $delete_user_id > 0 ? \get_user_by( 'id', $delete_user_id ) : null;
+			$reassigned_after_failure = $reassigned_post_id > 0 ? \get_post( $reassigned_post_id ) : null;
+
+			$require_all_specs = array(
+				'post'        => array(
+					'method' => 'DELETE',
+					'route'  => '/wp/v2/posts/' . $delete_post_id,
+					'body'   => array( 'force' => true ),
+				),
+				'term'        => array(
+					'method' => 'DELETE',
+					'route'  => '/wp/v2/categories/' . $delete_term_id,
+					'body'   => array( 'force' => true ),
+				),
+				'invalidUser' => array(
+					'method' => 'DELETE',
+					'route'  => '/wp/v2/users/' . $delete_user_id,
+					'body'   => array(
+						'force'    => true,
+						'reassign' => 'not-a-user-' . $case['token'],
+					),
+				),
+			);
+			$require_all_response = $server->dispatch(
+				self::batch_request(
+					array_map(
+						static fn ( array $spec ): array => self::batch_child_from_spec( $spec ),
+						array_values( $require_all_specs )
+					),
+					'require-all-validate'
+				)
+			);
+			$require_all_data      = $require_all_response instanceof \WP_REST_Response ? $require_all_response->get_data() : array();
+			$require_all_envelopes = is_array( $require_all_data['responses'] ?? null ) ? $require_all_data['responses'] : array();
+			$counts_after_require_all = self::content_counts();
+			$post_after_require_all       = $delete_post_id > 0 ? \get_post( $delete_post_id ) : null;
+			$term_after_require_all       = $delete_term_id > 0 ? \get_term( $delete_term_id, 'category' ) : null;
+			$user_after_require_all       = $delete_user_id > 0 ? \get_user_by( 'id', $delete_user_id ) : null;
+			$reassigned_after_require_all = $reassigned_post_id > 0 ? \get_post( $reassigned_post_id ) : null;
+
+			$success_specs = array(
+				'post' => array(
+					'method' => 'DELETE',
+					'route'  => '/wp/v2/posts/' . $delete_post_id,
+					'query'  => array( '_fields' => 'deleted,previous,title' ),
+					'body'   => array( 'force' => true ),
+				),
+				'term' => array(
+					'method' => 'DELETE',
+					'route'  => '/wp/v2/categories/' . $delete_term_id,
+					'query'  => array( '_fields' => 'deleted,previous,name' ),
+					'body'   => array( 'force' => true ),
+				),
+				'user' => array(
+					'method' => 'DELETE',
+					'route'  => '/wp/v2/users/' . $delete_user_id,
+					'query'  => array( '_fields' => 'deleted,previous,email' ),
+					'body'   => array(
+						'force'    => true,
+						'reassign' => $fixtures['author'],
+					),
+				),
+			);
+
+			$direct_success_responses = array();
+			if ( is_object( $previous_wpdb ) ) {
+				$GLOBALS['wpdb'] = clone $previous_wpdb;
+
+				try {
+					foreach ( $success_specs as $name => $spec ) {
+						$direct_success_responses[ $name ] = self::dispatch_with_rest_post_dispatch(
+							$server,
+							self::request_from_batch_spec( $spec )
+						);
+					}
+				} finally {
+					if ( $had_wpdb ) {
+						$GLOBALS['wpdb'] = $previous_wpdb;
+					} else {
+						unset( $GLOBALS['wpdb'] );
+					}
+				}
+			}
+			$wpdb_restored_after_direct = $had_wpdb
+				? $previous_wpdb === ( $GLOBALS['wpdb'] ?? null )
+				: ! array_key_exists( 'wpdb', $GLOBALS );
+
+			$record_child_post_dispatch = true;
+			$success_response = $server->dispatch(
+				self::batch_request(
+					array_map(
+						static fn ( array $spec ): array => self::batch_child_from_spec( $spec ),
+						array_values( $success_specs )
+					),
+					'normal'
+				)
+			);
+			$record_child_post_dispatch = false;
+			$success_data      = $success_response instanceof \WP_REST_Response ? $success_response->get_data() : array();
+			$success_envelopes = is_array( $success_data['responses'] ?? null ) ? $success_data['responses'] : array();
+			$counts_after_success = self::content_counts();
+
+			$post_after_success       = $delete_post_id > 0 ? \get_post( $delete_post_id ) : null;
+			$term_after_success       = $delete_term_id > 0 ? \get_term( $delete_term_id, 'category' ) : null;
+			$user_after_success       = $delete_user_id > 0 ? \get_user_by( 'id', $delete_user_id ) : null;
+			$reassigned_after_success = $reassigned_post_id > 0 ? \get_post( $reassigned_post_id ) : null;
+
+			$direct_denied_summary = array();
+			foreach ( $direct_denied_responses as $name => $response ) {
+				$direct_denied_summary[ $name ] = $response_summary( $response );
+			}
+			$direct_failure_summary = array();
+			foreach ( $direct_failure_responses as $name => $response ) {
+				$direct_failure_summary[ $name ] = $response_summary( $response );
+			}
+			$direct_success_summary = array();
+			foreach ( $direct_success_responses as $name => $response ) {
+				$direct_success_summary[ $name ] = $response_summary( $response );
+			}
+
+			$observed = array(
+				'denied' => array(
+					'data'      => $denied_data,
+					'responses' => $denied_envelopes,
+					'direct'    => $direct_denied_summary,
+				),
+				'failure' => array(
+					'data'      => $failure_data,
+					'responses' => $failure_envelopes,
+					'direct'    => $direct_failure_summary,
+				),
+				'requireAll' => array(
+					'data'      => $require_all_data,
+					'responses' => $require_all_envelopes,
+				),
+				'success' => array(
+					'data'      => $success_data,
+					'responses' => $success_envelopes,
+					'direct'    => $direct_success_summary,
+				),
+				'storedAfterSuccess' => array(
+					'postExists'       => $post_after_success instanceof \WP_Post,
+					'termExists'       => $term_after_success instanceof \WP_Term,
+					'userExists'       => $user_after_success instanceof \WP_User,
+					'reassignedAuthor' => $reassigned_after_success instanceof \WP_Post ? (int) $reassigned_after_success->post_author : null,
+				),
+				'childPostDispatch' => $child_post_dispatch,
+				'counts'            => array(
+					'before'          => $counts_before,
+					'afterSetup'      => $counts_after_setup,
+					'afterDenied'     => $counts_after_denied,
+					'afterFailure'    => $counts_after_failure,
+					'afterRequireAll' => $counts_after_require_all,
+					'afterSuccess'    => $counts_after_success,
+				),
+				'wpdbRestoredAfterDirect' => $wpdb_restored_after_direct,
+			);
+
+			$denied_ok = $denied_response instanceof \WP_REST_Response
+				&& 207 === $denied_response->get_status()
+				&& count( $denied_specs ) === count( $denied_envelopes );
+			foreach ( array_keys( $denied_specs ) as $offset => $name ) {
+				$envelope        = is_array( $denied_envelopes[ $offset ] ?? null ) ? $denied_envelopes[ $offset ] : array();
+				$headers         = is_array( $envelope['headers'] ?? null ) ? $envelope['headers'] : array();
+				$body            = is_array( $envelope['body'] ?? null ) ? $envelope['body'] : array();
+				$direct_response = $direct_denied_responses[ $name ] ?? null;
+				$expected_code   = 'user' === $name ? 'rest_user_cannot_delete' : 'rest_cannot_delete';
+
+				$denied_ok = $denied_ok
+					&& $direct_response instanceof \WP_REST_Response
+					&& $server->response_to_data( $direct_response, false ) === ( $envelope['body'] ?? null )
+					&& $direct_response->get_status() === (int) ( $envelope['status'] ?? 0 )
+					&& $direct_response->get_headers() === ( $envelope['headers'] ?? null )
+					&& $expected_code === ( $body['code'] ?? null )
+					&& in_array( (int) ( $envelope['status'] ?? 0 ), array( 401, 403 ), true )
+					&& $batch_token === ( $headers['X-Component-Fuzz-Batch-Delete'] ?? null );
+			}
+			$denied_no_mutation_ok = self::content_count_delta_matches( $counts_after_setup, $counts_after_denied, array(), array() )
+				&& $post_after_denied instanceof \WP_Post
+				&& $term_after_denied instanceof \WP_Term
+				&& $user_after_denied instanceof \WP_User
+				&& $reassigned_after_denied instanceof \WP_Post
+				&& $delete_user_id === (int) $reassigned_after_denied->post_author;
+
+			$failure_ok = $failure_response instanceof \WP_REST_Response
+				&& 207 === $failure_response->get_status()
+				&& count( $failure_specs ) === count( $failure_envelopes );
+			foreach ( array_keys( $failure_specs ) as $offset => $name ) {
+				$envelope = is_array( $failure_envelopes[ $offset ] ?? null ) ? $failure_envelopes[ $offset ] : array();
+				$headers  = is_array( $envelope['headers'] ?? null ) ? $envelope['headers'] : array();
+				$body     = is_array( $envelope['body'] ?? null ) ? $envelope['body'] : array();
+
+				if ( in_array( $name, array( 'commentGate', 'mediaGate' ), true ) ) {
+					$failure_ok = $failure_ok
+						&& 400 === (int) ( $envelope['status'] ?? 0 )
+						&& 'rest_batch_not_allowed' === ( $body['code'] ?? null )
+						&& $batch_token === ( $headers['X-Component-Fuzz-Batch-Delete'] ?? null );
+					continue;
+				}
+
+				$direct_response = $direct_failure_responses[ $name ] ?? null;
+				$failure_ok = $failure_ok
+					&& $direct_response instanceof \WP_REST_Response
+					&& $server->response_to_data( $direct_response, false ) === ( $envelope['body'] ?? null )
+					&& $direct_response->get_status() === (int) ( $envelope['status'] ?? 0 )
+					&& $direct_response->get_headers() === ( $envelope['headers'] ?? null )
+					&& 501 === (int) ( $envelope['status'] ?? 0 )
+					&& 'rest_trash_not_supported' === ( $body['code'] ?? null )
+					&& $batch_token === ( $headers['X-Component-Fuzz-Batch-Delete'] ?? null );
+			}
+			$failure_no_mutation_ok = self::content_count_delta_matches( $counts_after_setup, $counts_after_failure, array(), array() )
+				&& $post_after_failure instanceof \WP_Post
+				&& $term_after_failure instanceof \WP_Term
+				&& $user_after_failure instanceof \WP_User
+				&& $reassigned_after_failure instanceof \WP_Post
+				&& $delete_user_id === (int) $reassigned_after_failure->post_author;
+
+			$require_all_error = is_array( $require_all_envelopes[2] ?? null ) ? $require_all_envelopes[2] : array();
+			$require_all_body  = is_array( $require_all_error['body'] ?? null ) ? $require_all_error['body'] : array();
+			$require_all_ok    = $require_all_response instanceof \WP_REST_Response
+				&& 207 === $require_all_response->get_status()
+				&& 'validation' === ( $require_all_data['failed'] ?? null )
+				&& 3 === count( $require_all_envelopes )
+				&& array_key_exists( 0, $require_all_envelopes )
+				&& null === $require_all_envelopes[0]
+				&& array_key_exists( 1, $require_all_envelopes )
+				&& null === $require_all_envelopes[1]
+				&& 400 === (int) ( $require_all_error['status'] ?? 0 )
+				&& 'rest_invalid_param' === ( $require_all_body['code'] ?? null )
+				&& self::content_count_delta_matches( $counts_after_setup, $counts_after_require_all, array(), array() )
+				&& $post_after_require_all instanceof \WP_Post
+				&& $term_after_require_all instanceof \WP_Term
+				&& $user_after_require_all instanceof \WP_User
+				&& $reassigned_after_require_all instanceof \WP_Post
+				&& $delete_user_id === (int) $reassigned_after_require_all->post_author;
+
+			$success_ok = $success_response instanceof \WP_REST_Response
+				&& 207 === $success_response->get_status()
+				&& count( $success_specs ) === count( $success_envelopes )
+				&& array_keys( $success_specs ) === array_keys( $direct_success_responses )
+				&& $wpdb_restored_after_direct;
+			$success_item_checks = array();
+			foreach ( array_keys( $success_specs ) as $offset => $name ) {
+				$envelope        = is_array( $success_envelopes[ $offset ] ?? null ) ? $success_envelopes[ $offset ] : array();
+				$headers         = is_array( $envelope['headers'] ?? null ) ? $envelope['headers'] : array();
+				$body            = is_array( $envelope['body'] ?? null ) ? $envelope['body'] : array();
+				$previous        = is_array( $body['previous'] ?? null ) ? $body['previous'] : array();
+				$direct_response = $direct_success_responses[ $name ] ?? null;
+				$expected_id     = match ( $name ) {
+					'post' => $delete_post_id,
+					'term' => $delete_term_id,
+					'user' => $delete_user_id,
+					default => 0,
+				};
+				$previous_value_ok = match ( $name ) {
+					'post' => $delete_post_title === ( $previous['title']['raw'] ?? null ),
+					'term' => $delete_term_name === ( $previous['name'] ?? null ),
+					'user' => $delete_user_email === ( $previous['email'] ?? null ),
+					default => false,
+				};
+				$body_parity_ok    = $direct_response instanceof \WP_REST_Response
+					&& $server->response_to_data( $direct_response, false ) === ( $envelope['body'] ?? null );
+				$status_parity_ok  = $direct_response instanceof \WP_REST_Response
+					&& $direct_response->get_status() === (int) ( $envelope['status'] ?? 0 );
+				$headers_parity_ok = $direct_response instanceof \WP_REST_Response
+					&& $direct_response->get_headers() === ( $envelope['headers'] ?? null );
+				$success_item_checks[ $name ] = array(
+					'directResponseOk' => $direct_response instanceof \WP_REST_Response,
+					'bodyParityOk'     => $body_parity_ok,
+					'statusParityOk'   => $status_parity_ok,
+					'headersParityOk'  => $headers_parity_ok,
+					'statusOk'         => 200 === (int) ( $envelope['status'] ?? 0 ),
+					'tokenOk'          => $batch_token === ( $headers['X-Component-Fuzz-Batch-Delete'] ?? null ),
+					'deletedOk'        => true === ( $body['deleted'] ?? null ),
+					'previousIdOk'     => $expected_id === (int) ( $previous['id'] ?? 0 ),
+					'previousValueOk'  => $previous_value_ok,
+				);
+
+				$success_ok = $success_ok
+					&& $direct_response instanceof \WP_REST_Response
+					&& $body_parity_ok
+					&& $status_parity_ok
+					&& $headers_parity_ok
+					&& 200 === (int) ( $envelope['status'] ?? 0 )
+					&& $batch_token === ( $headers['X-Component-Fuzz-Batch-Delete'] ?? null )
+					&& true === ( $body['deleted'] ?? null )
+					&& $expected_id === (int) ( $previous['id'] ?? 0 )
+					&& $previous_value_ok;
+			}
+			$stored_success_ok = null === $post_after_success
+				&& ! ( $term_after_success instanceof \WP_Term )
+				&& ! ( $user_after_success instanceof \WP_User )
+				&& $reassigned_after_success instanceof \WP_Post
+				&& $fixtures['author'] === (int) $reassigned_after_success->post_author
+				&& self::content_count_delta_matches(
+					$counts_before,
+					$counts_after_success,
+					array( 'posts' => 1 ),
+					array()
+				);
+
+			$expected_child_events = array(
+				array(
+					'route'  => '/wp/v2/posts/' . $delete_post_id,
+					'method' => 'DELETE',
+					'status' => $direct_denied_responses['post'] instanceof \WP_REST_Response ? $direct_denied_responses['post']->get_status() : 0,
+				),
+				array(
+					'route'  => '/wp/v2/categories/' . $delete_term_id,
+					'method' => 'DELETE',
+					'status' => $direct_denied_responses['term'] instanceof \WP_REST_Response ? $direct_denied_responses['term']->get_status() : 0,
+				),
+				array(
+					'route'  => '/wp/v2/users/' . $delete_user_id,
+					'method' => 'DELETE',
+					'status' => $direct_denied_responses['user'] instanceof \WP_REST_Response ? $direct_denied_responses['user']->get_status() : 0,
+				),
+				array( 'route' => '/wp/v2/posts/' . $delete_post_id, 'method' => 'DELETE', 'status' => 501 ),
+				array( 'route' => '/wp/v2/categories/' . $delete_term_id, 'method' => 'DELETE', 'status' => 501 ),
+				array( 'route' => '/wp/v2/users/' . $delete_user_id, 'method' => 'DELETE', 'status' => 501 ),
+				array( 'route' => '/wp/v2/comments/' . $fixtures['comment'], 'method' => 'DELETE', 'status' => 400 ),
+				array( 'route' => '/wp/v2/media/' . $fixtures['attachment'], 'method' => 'DELETE', 'status' => 400 ),
+				array( 'route' => '/wp/v2/posts/' . $delete_post_id, 'method' => 'DELETE', 'status' => 200 ),
+				array( 'route' => '/wp/v2/categories/' . $delete_term_id, 'method' => 'DELETE', 'status' => 200 ),
+				array( 'route' => '/wp/v2/users/' . $delete_user_id, 'method' => 'DELETE', 'status' => 200 ),
+			);
+			$child_dispatch_ok = $expected_child_events === $child_post_dispatch
+				&& ! in_array( '/batch/v1', array_column( $child_post_dispatch, 'route' ), true );
+			$success_check_values = array(
+				'successResponseOk'     => $success_response instanceof \WP_REST_Response,
+				'successStatusOk'       => $success_response instanceof \WP_REST_Response && 207 === $success_response->get_status(),
+				'successCountOk'        => count( $success_specs ) === count( $success_envelopes ),
+				'successDirectKeysOk'   => array_keys( $success_specs ) === array_keys( $direct_success_responses ),
+				'successWpdbRestoredOk' => $wpdb_restored_after_direct,
+			);
+			foreach ( $success_item_checks as $name => $item_checks ) {
+				foreach ( $item_checks as $check_name => $check_value ) {
+					$success_check_values[ 'success' . ucfirst( $name ) . ucfirst( $check_name ) ] = $check_value;
+				}
+			}
+			$failed_success_checks = array_keys(
+				array_filter(
+					$success_check_values,
+					static fn ( $check_value ): bool => true !== $check_value
+				)
+			);
+			$observed['checks'] = array(
+				'deniedOk'            => $denied_ok,
+				'deniedNoMutationOk'  => $denied_no_mutation_ok,
+				'failureOk'           => $failure_ok,
+				'failureNoMutationOk' => $failure_no_mutation_ok,
+				'requireAllOk'        => $require_all_ok,
+				'successOk'           => $success_ok,
+				'successFailedChecks' => implode( ',', $failed_success_checks ),
+				'storedSuccessOk'     => $stored_success_ok,
+				'childDispatchOk'     => $child_dispatch_ok,
+			);
+
+			self::collect_failure(
+				$failures,
+				$denied_ok && $denied_no_mutation_ok,
+				'batch/v1 force delete denies unauthenticated post, term, and user children with direct envelope parity',
+				array(
+					'denied'      => $observed['denied'],
+					'checks'      => $observed['checks'],
+					'countsSetup' => $counts_after_setup,
+					'countsAfter' => $counts_after_denied,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$failure_ok && $failure_no_mutation_ok,
+				'batch/v1 delete failures preserve rows and gate non-batch comment and media item routes',
+				array(
+					'failure'     => $observed['failure'],
+					'checks'      => $observed['checks'],
+					'countsSetup' => $counts_after_setup,
+					'countsAfter' => $counts_after_failure,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$require_all_ok,
+				'batch/v1 require-all-validate aborts valid deletes when user reassign validation fails',
+				array(
+					'requireAll'  => $observed['requireAll'],
+					'checks'      => $observed['checks'],
+					'countsSetup' => $counts_after_setup,
+					'countsAfter' => $counts_after_require_all,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$success_ok && $stored_success_ok,
+				'batch/v1 force deletes match direct dispatch envelopes and reassign user-owned posts',
+				array(
+					'success'            => $observed['success'],
+					'storedAfterSuccess' => $observed['storedAfterSuccess'],
+					'checks'             => $observed['checks'],
+					'countsBefore'       => $counts_before,
+					'countsAfterSuccess' => $counts_after_success,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$child_dispatch_ok,
+				'batch/v1 delete children run post-dispatch once per executable child without dispatching require-all null siblings or the batch route',
+				array( 'childPostDispatch' => $child_post_dispatch )
+			);
+		} finally {
+			$record_child_post_dispatch = false;
+
+			if ( $delete_post_id > 0 && \get_post( $delete_post_id ) instanceof \WP_Post ) {
+				\wp_delete_post( $delete_post_id, true );
+			}
+			if ( $delete_term_id > 0 && \get_term( $delete_term_id, 'category' ) instanceof \WP_Term ) {
+				\wp_delete_term( $delete_term_id, 'category' );
+			}
+			if ( $delete_user_id > 0 && \get_user_by( 'id', $delete_user_id ) instanceof \WP_User ) {
+				if ( defined( 'ABSPATH' ) && file_exists( ABSPATH . 'wp-admin/includes/user.php' ) ) {
+					require_once ABSPATH . 'wp-admin/includes/user.php';
+				}
+				if ( function_exists( 'wp_delete_user' ) ) {
+					\wp_delete_user( $delete_user_id, $fixtures['author'] );
+				}
+			}
+			if ( $reassigned_post_id > 0 && \get_post( $reassigned_post_id ) instanceof \WP_Post ) {
+				\wp_delete_post( $reassigned_post_id, true );
+			}
+
+			$setup_rows_cleaned = ! ( $delete_post_id > 0 && \get_post( $delete_post_id ) instanceof \WP_Post )
+				&& ! ( $delete_term_id > 0 && \get_term( $delete_term_id, 'category' ) instanceof \WP_Term )
+				&& ! ( $delete_user_id > 0 && \get_user_by( 'id', $delete_user_id ) instanceof \WP_User )
+				&& ! ( $reassigned_post_id > 0 && \get_post( $reassigned_post_id ) instanceof \WP_Post );
+
+			\remove_filter( 'rest_post_dispatch', $post_dispatch_filter, 11 );
+			$custom_filters_restored = false === \has_filter( 'rest_post_dispatch', $post_dispatch_filter );
+			\remove_filter( 'rest_post_trashable', $post_trash_filter, 10 );
+			$post_trash_restored = false === \has_filter( 'rest_post_trashable', $post_trash_filter );
+			\remove_filter( 'sanitize_email', $sanitize_email_filter, 10 );
+			$sanitize_filter_restored = false === \has_filter( 'sanitize_email', $sanitize_email_filter );
+			\remove_filter( 'is_email', $email_filter, 10 );
+			$email_filter_restored = false === \has_filter( 'is_email', $email_filter );
+
+			if ( null !== $cap_filter ) {
+				$cap_filter_restored = self::remove_cap_filter( $cap_filter );
+				$cap_filter          = null;
+			} else {
+				$cap_filter_restored = true;
+			}
+
+			self::restore_rest_default_filters( $filter_snapshot );
+			$default_filters_restored = $filter_snapshot === self::rest_default_filter_state();
+
+			\wp_set_current_user( $previous_current_user_id );
+			$current_user_restored = $previous_current_user_id === ( isset( $GLOBALS['current_user'] ) && $GLOBALS['current_user'] instanceof \WP_User ? (int) $GLOBALS['current_user']->ID : 0 );
+
+			if ( $had_wp_actions ) {
+				$GLOBALS['wp_actions'] = $previous_actions;
+			} else {
+				unset( $GLOBALS['wp_actions'] );
+			}
+			$actions_restored = $had_wp_actions === array_key_exists( 'wp_actions', $GLOBALS )
+				&& ( ! $had_wp_actions || $previous_actions === $GLOBALS['wp_actions'] );
+
+			if ( null !== $previous_server ) {
+				$GLOBALS['wp_rest_server'] = $previous_server;
+			} else {
+				unset( $GLOBALS['wp_rest_server'] );
+			}
+			$server_restored = ( null !== $previous_server && $previous_server === ( $GLOBALS['wp_rest_server'] ?? null ) )
+				|| ( null === $previous_server && ! isset( $GLOBALS['wp_rest_server'] ) );
+
+			if ( $had_wpdb ) {
+				$GLOBALS['wpdb'] = $previous_wpdb;
+			} else {
+				unset( $GLOBALS['wpdb'] );
+			}
+			$wpdb_restored = $had_wpdb
+				? $previous_wpdb === ( $GLOBALS['wpdb'] ?? null )
+				: ! array_key_exists( 'wpdb', $GLOBALS );
+		}
+
+		$counts_after_manual_cleanup = self::content_counts();
+		self::collect_failure(
+			$failures,
+			$custom_filters_restored
+				&& $post_trash_restored
+				&& $email_filter_restored
+				&& $sanitize_filter_restored
+				&& $cap_filter_restored
+				&& $default_filters_restored
+				&& $server_restored
+				&& $actions_restored
+				&& $current_user_restored
+				&& $wpdb_restored
+				&& $setup_rows_cleaned
+				&& self::content_count_delta_matches( $counts_before, $counts_after_manual_cleanup, array(), array() ),
+			'batch/v1 delete harness restores filters, caps, default REST filters, server, actions, current user, wpdb, and setup rows',
+			array(
+				'customFiltersRestored'  => $custom_filters_restored,
+				'postTrashRestored'      => $post_trash_restored,
+				'emailFilterRestored'    => $email_filter_restored,
+				'sanitizeFilterRestored' => $sanitize_filter_restored,
+				'capFilterRestored'      => $cap_filter_restored,
+				'defaultFiltersRestored' => $default_filters_restored,
+				'serverRestored'         => $server_restored,
+				'actionsRestored'        => $actions_restored,
+				'currentUserRestored'    => $current_user_restored,
+				'wpdbRestored'           => $wpdb_restored,
+				'setupRowsCleaned'       => $setup_rows_cleaned,
+				'countsAfterManualCleanup' => $counts_after_manual_cleanup,
+				'observed'               => $observed,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'rest-object-controllers.objects.batch-v1-delete-failure-reassign-parity',
+			array() === $failures,
+			array(
+				'case'       => self::case_summary( $case ),
+				'controllers' => array( 'posts', 'terms', 'comments', 'media', 'users' ),
 				'failures'   => array_slice( $failures, 0, 8 ),
 				'observed'   => $observed,
 			)
