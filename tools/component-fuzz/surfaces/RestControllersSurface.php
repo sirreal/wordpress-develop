@@ -51,6 +51,7 @@ final class RestControllersSurface {
 			$rows[] = self::check_route_registry_behavior( $ctx );
 			$rows[] = self::check_plugin_theme_controller_contracts( $ctx->fork( 'plugin-theme-controllers' ) );
 			$rows[] = self::check_plugin_theme_argument_error_envelopes( $ctx->fork( 'plugin-theme-args' ) );
+			$rows[] = self::check_plugin_theme_allowed_dispatch_boundaries( $ctx->fork( 'plugin-theme-dispatch' ) );
 		} catch ( \Throwable $e ) {
 			$rows[] = self::row(
 				$ctx,
@@ -4015,6 +4016,458 @@ final class RestControllersSurface {
 					'invalidContext'      => $invalid_context,
 					'invalidPluginStatus' => $invalid_plugin_status,
 					'invalidThemeStatus'  => $invalid_theme_status,
+				),
+				'failures' => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
+	private static function check_plugin_theme_allowed_dispatch_boundaries( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime_state();
+
+		$plugin_slug       = self::route_token( $ctx->fork( 'plugin' ), 'cfz-plugin' );
+		$plugin_search     = self::route_token( $ctx->fork( 'search' ), 'cfz-search' );
+		$failures          = array();
+
+		$previous_server       = $GLOBALS['wp_rest_server'] ?? null;
+		$had_wp_actions        = array_key_exists( 'wp_actions', $GLOBALS );
+		$previous_actions      = $GLOBALS['wp_actions'] ?? null;
+		$had_current_user      = array_key_exists( 'current_user', $GLOBALS );
+		$previous_current_user = $GLOBALS['current_user'] ?? null;
+		$filter_snapshot       = self::rest_default_filter_state();
+		$filters_installed     = array();
+		$before_events         = array();
+		$after_events          = array();
+		$dispatch_events       = array();
+		$cap_events            = array();
+		$prepare_plugin_events = array();
+		$prepare_theme_events  = array();
+		$granted_caps          = array();
+		$current_case          = null;
+
+		$response_code = static function ( $response ) {
+			if ( $response instanceof \WP_Error ) {
+				return $response->get_error_code();
+			}
+
+			if ( $response instanceof \WP_REST_Response ) {
+				$data = $response->get_data();
+				return is_array( $data ) ? ( $data['code'] ?? null ) : null;
+			}
+
+			return null === $response ? null : gettype( $response );
+		};
+		$before_filter = static function ( $response, array $handler, \WP_REST_Request $request ) use ( &$before_events, &$current_case, $response_code ) {
+			$before_events[] = array(
+				'case'   => $current_case,
+				'route'  => $request->get_route(),
+				'method' => $request->get_method(),
+				'code'   => $response_code( $response ),
+				'params' => $request->get_params(),
+			);
+
+			return $response;
+		};
+		$after_filter  = static function ( $response, array $handler, \WP_REST_Request $request ) use ( &$after_events, &$current_case, $response_code ) {
+			$after_events[] = array(
+				'case'   => $current_case,
+				'route'  => $request->get_route(),
+				'method' => $request->get_method(),
+				'code'   => $response_code( $response ),
+			);
+
+			return $response;
+		};
+		$dispatch_filter = static function ( $dispatch_result, \WP_REST_Request $request, string $route ) use ( &$dispatch_events, &$current_case ) {
+			$params            = $request->get_params();
+			$dispatch_events[] = array(
+				'case'   => $current_case,
+				'route'  => $route,
+				'method' => $request->get_method(),
+				'params' => $params,
+			);
+
+			return new \WP_REST_Response(
+				array(
+					'code'   => 'cfz_rest_dispatch_short_circuit',
+					'case'   => $current_case,
+					'route'  => $route,
+					'method' => $request->get_method(),
+					'params' => $params,
+				),
+				200
+			);
+		};
+		$cap_filter      = static function ( array $allcaps, array $caps, array $args ) use ( &$cap_events, &$granted_caps, &$current_case ): array {
+			$cap_events[] = array(
+				'case' => $current_case,
+				'caps' => $caps,
+				'args' => $args,
+			);
+
+			foreach ( $granted_caps as $cap ) {
+				$allcaps[ $cap ] = true;
+			}
+
+			return $allcaps;
+		};
+		$prepare_plugin_filter = static function ( \WP_REST_Response $response, array $item, \WP_REST_Request $request ) use ( &$prepare_plugin_events, &$current_case ): \WP_REST_Response {
+			$prepare_plugin_events[] = array(
+				'case'   => $current_case,
+				'plugin' => $item['_file'] ?? null,
+				'route'  => $request->get_route(),
+			);
+
+			return $response;
+		};
+		$prepare_theme_filter  = static function ( \WP_REST_Response $response, $item, \WP_REST_Request $request ) use ( &$prepare_theme_events, &$current_case ): \WP_REST_Response {
+			$prepare_theme_events[] = array(
+				'case'  => $current_case,
+				'route' => $request->get_route(),
+			);
+
+			return $response;
+		};
+
+		$server                    = new \WP_REST_Server();
+		$GLOBALS['wp_rest_server'] = $server;
+
+		if ( ! isset( $GLOBALS['wp_actions'] ) || ! is_array( $GLOBALS['wp_actions'] ) ) {
+			$GLOBALS['wp_actions'] = array();
+		}
+		$GLOBALS['wp_actions']['rest_api_init'] = max( 1, (int) ( $GLOBALS['wp_actions']['rest_api_init'] ?? 0 ) );
+
+		$plugin_collection_route = '/wp/v2/plugins';
+		$theme_collection_route  = '/wp/v2/themes';
+		$option_snapshot         = array(
+			'activePlugins'         => \get_option( 'active_plugins' ),
+			'activeSitewidePlugins' => \get_site_option( 'active_sitewide_plugins' ),
+			'stylesheet'            => \get_option( 'stylesheet' ),
+			'template'              => \get_option( 'template' ),
+			'currentTheme'          => \get_option( 'current_theme' ),
+		);
+		$responses               = array();
+		$requests                = array();
+
+		\add_filter( 'rest_request_before_callbacks', $before_filter, 10, 3 );
+		\add_filter( 'rest_request_after_callbacks', $after_filter, 10, 3 );
+		\add_filter( 'rest_dispatch_request', $dispatch_filter, 10, 4 );
+		\add_filter( 'user_has_cap', $cap_filter, 10, 4 );
+		\add_filter( 'rest_prepare_plugin', $prepare_plugin_filter, 10, 3 );
+		\add_filter( 'rest_prepare_theme', $prepare_theme_filter, 10, 3 );
+
+		$dispatch_case = static function ( string $case, array $caps, \WP_REST_Request $request ) use ( $server, &$current_case, &$granted_caps, &$responses, &$requests ): void {
+			$current_case       = $case;
+			$granted_caps       = $caps;
+			$requests[ $case ]  = $request;
+			$responses[ $case ] = $server->dispatch( $request );
+			$current_case       = null;
+			$granted_caps       = array();
+		};
+
+		try {
+			$plugins = new \WP_REST_Plugins_Controller();
+			$themes  = new \WP_REST_Themes_Controller();
+
+			$plugins->register_routes();
+			$themes->register_routes();
+			\rest_api_default_filters();
+			$filters_installed = self::rest_default_filter_state();
+
+			$dispatch_case(
+				'plugin-list-active',
+				array( 'activate_plugins' ),
+				self::request(
+					'GET',
+					$plugin_collection_route,
+					array(
+						'status' => 'active',
+						'search' => $plugin_search,
+					)
+				)
+			);
+			$dispatch_case(
+				'plugin-list-denied',
+				array(),
+				self::request(
+					'GET',
+					$plugin_collection_route,
+					array(
+						'status' => 'active',
+						'search' => $plugin_search,
+					)
+				)
+			);
+			$dispatch_case(
+				'plugin-create-inactive',
+				array( 'install_plugins' ),
+				self::request(
+					'POST',
+					$plugin_collection_route,
+					array( 'slug' => $plugin_slug )
+				)
+			);
+			$dispatch_case(
+				'plugin-create-inactive-denied',
+				array(),
+				self::request(
+					'POST',
+					$plugin_collection_route,
+					array( 'slug' => $plugin_slug )
+				)
+			);
+			$dispatch_case(
+				'plugin-create-active-denied',
+				array( 'install_plugins' ),
+				self::request(
+					'POST',
+					$plugin_collection_route,
+					array(
+						'slug'   => $plugin_slug,
+						'status' => 'active',
+					)
+				)
+			);
+			$dispatch_case(
+				'plugin-create-active',
+				array( 'install_plugins', 'activate_plugins' ),
+				self::request(
+					'POST',
+					$plugin_collection_route,
+					array(
+						'slug'   => $plugin_slug,
+						'status' => 'active',
+					)
+				)
+			);
+			$dispatch_case(
+				'theme-list-active',
+				array( 'edit_posts' ),
+				self::request(
+					'GET',
+					$theme_collection_route,
+					array( 'status' => 'active' )
+				)
+			);
+			$dispatch_case(
+				'theme-list-active-denied',
+				array(),
+				self::request(
+					'GET',
+					$theme_collection_route,
+					array( 'status' => 'active' )
+				)
+			);
+			$dispatch_case(
+				'theme-list-inactive-denied',
+				array( 'edit_posts' ),
+				self::request(
+					'GET',
+					$theme_collection_route,
+					array( 'status' => 'inactive' )
+				)
+			);
+			$dispatch_case(
+				'theme-list-switch',
+				array( 'switch_themes' ),
+				self::request(
+					'GET',
+					$theme_collection_route,
+					array( 'status' => array( 'active', 'inactive' ) )
+				)
+			);
+		} finally {
+			self::restore_rest_default_filters( $filter_snapshot );
+
+			\remove_filter( 'rest_request_before_callbacks', $before_filter, 10 );
+			\remove_filter( 'rest_request_after_callbacks', $after_filter, 10 );
+			\remove_filter( 'rest_dispatch_request', $dispatch_filter, 10 );
+			\remove_filter( 'user_has_cap', $cap_filter, 10 );
+			\remove_filter( 'rest_prepare_plugin', $prepare_plugin_filter, 10 );
+			\remove_filter( 'rest_prepare_theme', $prepare_theme_filter, 10 );
+
+			if ( $had_current_user ) {
+				$GLOBALS['current_user'] = $previous_current_user;
+			} else {
+				unset( $GLOBALS['current_user'] );
+			}
+
+			if ( $had_wp_actions ) {
+				$GLOBALS['wp_actions'] = $previous_actions;
+			} else {
+				unset( $GLOBALS['wp_actions'] );
+			}
+
+			if ( null !== $previous_server ) {
+				$GLOBALS['wp_rest_server'] = $previous_server;
+			} else {
+				unset( $GLOBALS['wp_rest_server'] );
+			}
+		}
+
+		$allowed_cases = array(
+			'plugin-list-active',
+			'plugin-create-inactive',
+			'plugin-create-active',
+			'theme-list-active',
+			'theme-list-switch',
+		);
+		$expected_params = array(
+			'plugin-list-active' => array(
+				'context' => 'view',
+				'status'  => array( 'active' ),
+				'search'  => $plugin_search,
+			),
+			'plugin-create-inactive' => array(
+				'status' => 'inactive',
+				'slug'   => $plugin_slug,
+			),
+			'plugin-create-active' => array(
+				'status' => 'active',
+				'slug'   => $plugin_slug,
+			),
+			'theme-list-active' => array(
+				'status' => array( 'active' ),
+			),
+			'theme-list-switch' => array(
+				'status' => array( 'active', 'inactive' ),
+			),
+		);
+
+		$short_circuit_ok = true;
+		foreach ( $allowed_cases as $case ) {
+			$response = $responses[ $case ] ?? null;
+			$data     = $response instanceof \WP_REST_Response ? $response->get_data() : array();
+			$short_circuit_ok = $short_circuit_ok
+				&& $response instanceof \WP_REST_Response
+				&& 200 === $response->get_status()
+				&& 'cfz_rest_dispatch_short_circuit' === ( $data['code'] ?? null )
+				&& $case === ( $data['case'] ?? null )
+				&& ( $expected_params[ $case ] ?? null ) === ( $data['params'] ?? null )
+				&& self::response_envelope_ok( $server, $response );
+		}
+
+		$before_codes  = array_column( $before_events, 'code', 'case' );
+		$after_codes   = array_column( $after_events, 'code', 'case' );
+		$dispatch_cases = array_column( $dispatch_events, 'case' );
+		sort( $dispatch_cases );
+		$expected_dispatch_cases = $allowed_cases;
+		sort( $expected_dispatch_cases );
+		$option_restored = $option_snapshot === array(
+			'activePlugins'         => \get_option( 'active_plugins' ),
+			'activeSitewidePlugins' => \get_site_option( 'active_sitewide_plugins' ),
+			'stylesheet'            => \get_option( 'stylesheet' ),
+			'template'              => \get_option( 'template' ),
+			'currentTheme'          => \get_option( 'current_theme' ),
+		);
+		$filter_restored       = $filter_snapshot === self::rest_default_filter_state();
+		$server_restored       = null !== $previous_server ? ( $GLOBALS['wp_rest_server'] ?? null ) === $previous_server : ! array_key_exists( 'wp_rest_server', $GLOBALS );
+		$wp_actions_restored   = $had_wp_actions ? ( $GLOBALS['wp_actions'] ?? null ) === $previous_actions : ! array_key_exists( 'wp_actions', $GLOBALS );
+		$current_user_restored = $had_current_user ? ( $GLOBALS['current_user'] ?? null ) === $previous_current_user : ! array_key_exists( 'current_user', $GLOBALS );
+		$default_filters_ok    = array(
+			'rest_pre_serve_request:rest_send_cors_headers'      => 10,
+			'rest_post_dispatch:rest_send_allow_header'          => 10,
+			'rest_post_dispatch:rest_filter_response_fields'     => 10,
+			'rest_pre_dispatch:rest_handle_options_request'      => 10,
+			'rest_index:rest_add_application_passwords_to_index' => 10,
+		) === $filters_installed;
+
+		self::collect_failure(
+			$failures,
+			$short_circuit_ok
+				&& self::response_error_ok( $responses['plugin-list-denied'] ?? null, 'rest_cannot_view_plugins', \rest_authorization_required_code() )
+				&& self::response_error_ok( $responses['plugin-create-inactive-denied'] ?? null, 'rest_cannot_install_plugin', \rest_authorization_required_code() )
+				&& self::response_error_ok( $responses['plugin-create-active-denied'] ?? null, 'rest_cannot_activate_plugin', \rest_authorization_required_code() )
+				&& self::response_error_ok( $responses['theme-list-active-denied'] ?? null, 'rest_cannot_view_active_theme', \rest_authorization_required_code() )
+				&& self::response_error_ok( $responses['theme-list-inactive-denied'] ?? null, 'rest_cannot_view_themes', \rest_authorization_required_code() )
+				&& self::response_envelope_ok( $server, $responses['plugin-list-denied'] ?? null )
+				&& self::response_envelope_ok( $server, $responses['plugin-create-inactive-denied'] ?? null )
+				&& self::response_envelope_ok( $server, $responses['plugin-create-active-denied'] ?? null )
+				&& self::response_envelope_ok( $server, $responses['theme-list-active-denied'] ?? null )
+				&& self::response_envelope_ok( $server, $responses['theme-list-inactive-denied'] ?? null ),
+			'plugin and theme allowed routes short-circuit after validation and permission while denied contrasts stop before dispatch',
+			array(
+				'responses'      => $responses,
+				'expectedParams' => $expected_params,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			array() === array_filter( $before_codes, static fn( $code ): bool => null !== $code )
+				&& $expected_dispatch_cases === $dispatch_cases
+					&& array(
+						'plugin-list-active'            => 'cfz_rest_dispatch_short_circuit',
+						'plugin-list-denied'            => 'rest_cannot_view_plugins',
+						'plugin-create-inactive'        => 'cfz_rest_dispatch_short_circuit',
+						'plugin-create-inactive-denied' => 'rest_cannot_install_plugin',
+						'plugin-create-active-denied'   => 'rest_cannot_activate_plugin',
+						'plugin-create-active'          => 'cfz_rest_dispatch_short_circuit',
+						'theme-list-active'             => 'cfz_rest_dispatch_short_circuit',
+						'theme-list-active-denied'      => 'rest_cannot_view_active_theme',
+						'theme-list-inactive-denied'    => 'rest_cannot_view_themes',
+						'theme-list-switch'             => 'cfz_rest_dispatch_short_circuit',
+					) === $after_codes,
+			'plugin and theme allowed-route event ordering reaches rest_dispatch_request only after permissions pass',
+			array(
+				'beforeEvents'   => $before_events,
+				'dispatchEvents' => $dispatch_events,
+				'afterEvents'    => $after_events,
+				'capEvents'      => $cap_events,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$expected_params['plugin-list-active'] === ( $requests['plugin-list-active'] instanceof \WP_REST_Request ? $requests['plugin-list-active']->get_params() : null )
+				&& $expected_params['theme-list-active'] === ( $requests['theme-list-active'] instanceof \WP_REST_Request ? $requests['theme-list-active']->get_params() : null )
+				&& array( 'status' => array( 'inactive' ) ) === ( $requests['theme-list-inactive-denied'] instanceof \WP_REST_Request ? $requests['theme-list-inactive-denied']->get_params() : null ),
+			'plugin and theme valid route parameters are sanitized before permission and dispatch boundaries',
+			array(
+					'pluginListParams'          => $requests['plugin-list-active'] instanceof \WP_REST_Request ? $requests['plugin-list-active']->get_params() : null,
+					'themeActiveParams'         => $requests['theme-list-active'] instanceof \WP_REST_Request ? $requests['theme-list-active']->get_params() : null,
+					'themeInactiveDeniedParams' => $requests['theme-list-inactive-denied'] instanceof \WP_REST_Request ? $requests['theme-list-inactive-denied']->get_params() : null,
+				)
+		);
+
+		self::collect_failure(
+			$failures,
+			array() === $prepare_plugin_events
+				&& array() === $prepare_theme_events
+				&& $option_restored
+				&& $default_filters_ok
+				&& $filter_restored
+				&& $wp_actions_restored
+				&& $current_user_restored
+				&& $server_restored
+				&& false === \has_filter( 'rest_request_before_callbacks', $before_filter, 10 )
+				&& false === \has_filter( 'rest_request_after_callbacks', $after_filter, 10 )
+				&& false === \has_filter( 'rest_dispatch_request', $dispatch_filter, 10 )
+				&& false === \has_filter( 'user_has_cap', $cap_filter, 10 )
+				&& false === \has_filter( 'rest_prepare_plugin', $prepare_plugin_filter, 10 )
+				&& false === \has_filter( 'rest_prepare_theme', $prepare_theme_filter, 10 ),
+			'plugin and theme allowed dispatch filters, options, default REST filters, and globals are restored',
+			array(
+				'preparePluginEvents' => $prepare_plugin_events,
+				'prepareThemeEvents'  => $prepare_theme_events,
+				'optionSnapshot'      => $option_snapshot,
+				'optionRestored'      => $option_restored,
+				'filtersInstalled'    => $filters_installed,
+				'filterRestored'      => $filter_restored,
+				'wpActionsRestored'   => $wp_actions_restored,
+				'currentUserRestored' => $current_user_restored,
+				'serverRestored'      => $server_restored,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'rest-controllers.plugin-theme.allowed-dispatch-boundaries',
+			array() === $failures,
+			array(
+				'cases'    => array(
+					'pluginSlug'   => $plugin_slug,
+					'pluginSearch' => $plugin_search,
 				),
 				'failures' => array_slice( $failures, 0, 8 ),
 			)
