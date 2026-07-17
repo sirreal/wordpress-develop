@@ -44,6 +44,7 @@ final class RestObjectControllersSurface {
 			$rows[] = self::check_collection_parameter_matrix( $ctx, $case );
 			$rows[] = self::check_additional_field_registry( $ctx, $case, $additional_field_calls );
 			$rows[] = self::check_route_registry_behavior( $ctx, $case, $fixtures );
+			$rows[] = self::check_route_dispatched_collection_envelope_options_edges( $ctx->fork( 'collection-envelope-options' ), $case, $fixtures );
 			$rows[] = self::check_templates_controller( $ctx, $case );
 			$rows[] = self::check_short_circuited_collection_queries( $ctx->fork( 'collection-queries' ), $case, $fixtures );
 			$rows[] = self::check_route_dispatched_collection_get_edges( $ctx->fork( 'collection-get-dispatch' ), $case, $fixtures, $additional_field_calls );
@@ -4483,6 +4484,525 @@ final class RestObjectControllersSurface {
 			array(
 				'case'     => self::case_summary( $case ),
 				'failures' => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
+	private static function check_route_dispatched_collection_envelope_options_edges( \ComponentFuzz\FuzzContext $ctx, array $case, array $fixtures ): array {
+		$failures = array();
+		$observed = array();
+
+		$previous_server          = $GLOBALS['wp_rest_server'] ?? null;
+		$had_wp_actions           = array_key_exists( 'wp_actions', $GLOBALS );
+		$previous_actions         = $GLOBALS['wp_actions'] ?? null;
+		$previous_current_user_id = isset( $GLOBALS['current_user'] ) && $GLOBALS['current_user'] instanceof \WP_User
+			? (int) $GLOBALS['current_user']->ID
+			: 0;
+
+		$server                    = new \WP_REST_Server();
+		$GLOBALS['wp_rest_server'] = $server;
+
+		if ( ! isset( $GLOBALS['wp_actions'] ) || ! is_array( $GLOBALS['wp_actions'] ) ) {
+			$GLOBALS['wp_actions'] = array();
+		}
+		$GLOBALS['wp_actions']['rest_api_init'] = max( 1, (int) ( $GLOBALS['wp_actions']['rest_api_init'] ?? 0 ) );
+
+		$filter_snapshot = self::rest_default_filter_state();
+		$cap_filter      = null;
+		$counts_before   = self::content_counts();
+		$envelope_hits   = 0;
+		$envelope_token  = 'component-fuzz-envelope-options-' . $ctx->seed() . '-' . $ctx->iteration();
+		$envelope_filter = static function ( array $envelope, \WP_REST_Response $response ) use ( &$envelope_hits, $envelope_token ): array {
+			++$envelope_hits;
+			if ( 200 === $response->get_status() ) {
+				$envelope['headers']['X-Component-Fuzz-Envelope'] = $envelope_token;
+			}
+			return $envelope;
+		};
+
+		$post_rest_args    = array();
+		$post_query_vars   = array();
+		$term_rest_args    = array();
+		$term_query_vars   = array();
+		$comment_rest_args = array();
+		$comment_query_vars = array();
+		$user_rest_args    = array();
+		$user_query_vars   = array();
+
+		$post_total    = 5;
+		$post_per_page = 2;
+		$term_total    = 6;
+		$term_per_page = 2;
+		$comment_total = 4;
+		$comment_per_page = 2;
+		$user_total    = 3;
+		$user_per_page = 1;
+
+		$post_objects = array_values(
+			array_filter(
+				array( \get_post( $fixtures['post'] ), \get_post( $fixtures['other_post'] ) ),
+				static fn ( $post ): bool => $post instanceof \WP_Post
+			)
+		);
+		$term_objects = array_values(
+			array_filter(
+				array( \get_term( $fixtures['term'], 'category' ), \get_term( $fixtures['child_term'], 'category' ) ),
+				static fn ( $term ): bool => $term instanceof \WP_Term
+			)
+		);
+		$comment_objects = array_values(
+			array_filter(
+				array( \get_comment( $fixtures['comment'] ), \get_comment( $fixtures['second_comment'] ) ),
+				static fn ( $comment ): bool => $comment instanceof \WP_Comment
+			)
+		);
+		$user_ids = array( $fixtures['author'] );
+
+		$post_rest_filter = static function ( array $args, \WP_REST_Request $request ) use ( &$post_rest_args ): array {
+			$args['component_fuzz_envelope_options'] = 'posts';
+			$post_rest_args[] = array(
+				'args'   => $args,
+				'method' => $request->get_method(),
+				'route'  => $request->get_route(),
+			);
+			return $args;
+		};
+		$post_pre_filter  = static function ( $posts, \WP_Query $query ) use ( &$post_query_vars, $post_objects, $post_total, $post_per_page ): array {
+			if ( 'posts' !== ( $query->query_vars['component_fuzz_envelope_options'] ?? null ) ) {
+				return $posts;
+			}
+
+			$post_query_vars[]    = $query->query_vars;
+			$query->found_posts   = $post_total;
+			$query->max_num_pages = (int) ceil( $post_total / $post_per_page );
+			return $post_objects;
+		};
+
+		$term_rest_filter = static function ( array $args, \WP_REST_Request $request ) use ( &$term_rest_args ): array {
+			$args['component_fuzz_envelope_options'] = 'terms';
+			$term_rest_args[] = array(
+				'args'   => $args,
+				'method' => $request->get_method(),
+				'route'  => $request->get_route(),
+			);
+			return $args;
+		};
+		$term_pre_filter  = static function ( $terms, \WP_Term_Query $query ) use ( &$term_query_vars, $term_objects, $term_total ) {
+			if ( 'terms' !== ( $query->query_vars['component_fuzz_envelope_options'] ?? null ) ) {
+				return $terms;
+			}
+
+			$term_query_vars[] = $query->query_vars;
+			if ( 'count' === ( $query->query_vars['fields'] ?? null ) ) {
+				return (string) $term_total;
+			}
+			return $term_objects;
+		};
+
+		$comment_rest_filter = static function ( array $args, \WP_REST_Request $request ) use ( &$comment_rest_args ): array {
+			$args['component_fuzz_envelope_options'] = 'comments';
+			$comment_rest_args[] = array(
+				'args'   => $args,
+				'method' => $request->get_method(),
+				'route'  => $request->get_route(),
+			);
+			return $args;
+		};
+		$comment_pre_filter  = static function ( $comments, \WP_Comment_Query $query ) use ( &$comment_query_vars, $comment_objects, $comment_total, $comment_per_page ): array {
+			if ( 'comments' !== ( $query->query_vars['component_fuzz_envelope_options'] ?? null ) ) {
+				return $comments;
+			}
+
+			$comment_query_vars[]   = $query->query_vars;
+			$query->found_comments  = $comment_total;
+			$query->max_num_pages   = (int) ceil( $comment_total / $comment_per_page );
+			return $comment_objects;
+		};
+
+		$user_rest_filter = static function ( array $args, \WP_REST_Request $request ) use ( &$user_rest_args ): array {
+			$args['component_fuzz_envelope_options'] = 'users';
+			$user_rest_args[] = array(
+				'args'   => $args,
+				'method' => $request->get_method(),
+				'route'  => $request->get_route(),
+			);
+			return $args;
+		};
+		$user_pre_filter  = static function ( $results, \WP_User_Query $query ) use ( &$user_query_vars, $user_ids, $user_total ): array {
+			if ( 'users' !== ( $query->query_vars['component_fuzz_envelope_options'] ?? null ) ) {
+				return $results;
+			}
+
+			$user_query_vars[]  = $query->query_vars;
+			$query->total_users = $user_total;
+			return $user_ids;
+		};
+
+		$custom_filters_restored  = false;
+		$cap_filter_restored      = false;
+		$default_filters_restored = false;
+		$server_restored          = false;
+		$actions_restored         = false;
+		$current_user_restored    = false;
+
+		try {
+			$controllers = array(
+				new \WP_REST_Posts_Controller( 'post' ),
+				new \WP_REST_Terms_Controller( 'category' ),
+				new \WP_REST_Comments_Controller(),
+				new \WP_REST_Users_Controller(),
+			);
+
+			foreach ( $controllers as $controller ) {
+				$controller->register_routes();
+			}
+
+			\rest_api_default_filters();
+			\add_filter( 'rest_envelope_response', $envelope_filter, 10, 2 );
+			\add_filter( 'rest_post_query', $post_rest_filter, 10, 2 );
+			\add_filter( 'posts_pre_query', $post_pre_filter, 10, 2 );
+			\add_filter( 'rest_category_query', $term_rest_filter, 10, 2 );
+			\add_filter( 'terms_pre_query', $term_pre_filter, 10, 2 );
+			\add_filter( 'rest_comment_query', $comment_rest_filter, 10, 2 );
+			\add_filter( 'comments_pre_query', $comment_pre_filter, 10, 2 );
+			\add_filter( 'rest_user_query', $user_rest_filter, 10, 2 );
+			\add_filter( 'users_pre_query', $user_pre_filter, 10, 2 );
+			\wp_set_current_user( $fixtures['author'] );
+			$cap_filter = self::install_cap_filter(
+				array(
+					'create_users',
+					'edit_categories',
+					'edit_others_posts',
+					'edit_posts',
+					'edit_published_posts',
+					'edit_user',
+					'edit_users',
+					'list_users',
+					'manage_categories',
+					'moderate_comments',
+					'read',
+				)
+			);
+
+			$routes = $server->get_routes();
+			$route_specs = array(
+				'posts'    => array(
+					'route'           => '/wp/v2/posts',
+					'pattern'         => '/wp/v2/posts',
+					'query'           => array(
+						'_fields'  => 'id,slug,title',
+						'context'  => 'view',
+						'include'  => array( $fixtures['post'], $fixtures['other_post'] ),
+						'order'    => 'asc',
+						'orderby'  => 'include',
+						'page'     => 1,
+						'per_page' => $post_per_page,
+					),
+					'controller'      => new \WP_REST_Posts_Controller( 'post' ),
+					'expectedIds'     => array( $fixtures['post'], $fixtures['other_post'] ),
+					'expectedKeys'    => array( 'id', 'slug', 'title' ),
+					'context'         => 'view',
+					'total'           => $post_total,
+					'perPage'         => $post_per_page,
+					'methods'         => array( 'GET', 'POST' ),
+					'getArgs'         => array( 'context', 'page', 'per_page', 'status' ),
+					'postArgs'        => array( 'content', 'status', 'title' ),
+					'schemaProps'     => array( 'id', 'slug', 'title', $case['postAdditionalField'] ),
+					'contextProperty' => $case['postAdditionalField'],
+					'contexts'        => array( 'edit' ),
+				),
+				'terms'    => array(
+					'route'           => '/wp/v2/categories',
+					'pattern'         => '/wp/v2/categories',
+					'query'           => array(
+						'_fields'    => 'id,name,parent,slug',
+						'context'    => 'view',
+						'hide_empty' => '0',
+						'include'    => array( $fixtures['term'], $fixtures['child_term'] ),
+						'order'      => 'asc',
+						'orderby'    => 'include',
+						'page'       => 1,
+						'per_page'   => $term_per_page,
+					),
+					'controller'      => new \WP_REST_Terms_Controller( 'category' ),
+					'expectedIds'     => array( $fixtures['term'], $fixtures['child_term'] ),
+					'expectedKeys'    => array( 'id', 'name', 'parent', 'slug' ),
+					'context'         => 'view',
+					'total'           => $term_total,
+					'perPage'         => $term_per_page,
+					'methods'         => array( 'GET', 'POST' ),
+					'getArgs'         => array( 'context', 'hide_empty', 'page', 'per_page' ),
+					'postArgs'        => array( 'description', 'meta', 'name', 'parent', 'slug' ),
+					'schemaProps'     => array( 'id', 'name', 'parent', 'slug', 'taxonomy', $case['termAdditionalField'] ),
+					'contextProperty' => $case['termAdditionalField'],
+					'contexts'        => array( 'edit', 'view' ),
+				),
+				'comments' => array(
+					'route'        => '/wp/v2/comments',
+					'pattern'      => '/wp/v2/comments',
+					'query'        => array(
+						'_fields'  => 'id,parent,post,status,type',
+						'context'  => 'view',
+						'include'  => array( $fixtures['comment'], $fixtures['second_comment'] ),
+						'order'    => 'asc',
+						'orderby'  => 'include',
+						'page'     => 1,
+						'per_page' => $comment_per_page,
+						'post'     => array( $fixtures['post'] ),
+						'status'   => 'approve',
+						'type'     => 'comment',
+					),
+					'controller'   => new \WP_REST_Comments_Controller(),
+					'expectedIds'  => array( $fixtures['comment'], $fixtures['second_comment'] ),
+					'expectedKeys' => array( 'id', 'parent', 'post', 'status', 'type' ),
+					'context'      => 'view',
+					'total'        => $comment_total,
+					'perPage'      => $comment_per_page,
+					'methods'      => array( 'GET', 'POST' ),
+					'getArgs'      => array( 'context', 'page', 'per_page', 'post', 'status' ),
+					'postArgs'     => array( 'author', 'content', 'post', 'status' ),
+					'schemaProps'  => array( 'author', 'content', 'id', 'post', 'status', $case['commentAdditionalField'] ),
+				),
+				'users'    => array(
+					'route'           => '/wp/v2/users',
+					'pattern'         => '/wp/v2/users',
+					'query'           => array(
+						'_fields'  => 'id,name,slug',
+						'context'  => 'view',
+						'include'  => array( $fixtures['author'] ),
+						'order'    => 'desc',
+						'orderby'  => 'include',
+						'page'     => 1,
+						'per_page' => $user_per_page,
+					),
+					'controller'      => new \WP_REST_Users_Controller(),
+					'expectedIds'     => array( $fixtures['author'] ),
+					'expectedKeys'    => array( 'id', 'name', 'slug' ),
+					'context'         => 'view',
+					'total'           => $user_total,
+					'perPage'         => $user_per_page,
+					'methods'         => array( 'GET', 'POST' ),
+					'getArgs'         => array( 'context', 'include', 'page', 'per_page' ),
+					'postArgs'        => array( 'email', 'name', 'password', 'username' ),
+					'schemaProps'     => array( 'email', 'id', 'name', 'slug', 'username', $case['userAdditionalField'] ),
+					'contextProperty' => $case['userAdditionalField'],
+					'contexts'        => array( 'edit', 'embed', 'view' ),
+				),
+			);
+
+			$get_observed = array();
+			foreach ( $route_specs as $name => $spec ) {
+				$request  = self::request( 'GET', $spec['route'], $spec['query'] );
+				$response = self::dispatch_with_rest_post_dispatch( $server, $request );
+				$data     = $response instanceof \WP_REST_Response ? $response->get_data() : array();
+				$headers  = $response instanceof \WP_REST_Response ? $response->get_headers() : array();
+				$envelope = $response instanceof \WP_REST_Response ? $server->envelope_response( $response, false ) : null;
+				$get_observed[ $name ] = array(
+					'data'     => $data,
+					'headers'  => $headers,
+					'envelope' => $envelope instanceof \WP_REST_Response ? $envelope->get_data() : $envelope,
+				);
+
+				self::collect_failure(
+					$failures,
+					$response instanceof \WP_REST_Response
+						&& 200 === $response->get_status()
+						&& self::collection_projected_rows_ok( $spec['controller'], $data, $spec['expectedIds'], $spec['expectedKeys'], $spec['context'] )
+						&& (string) $spec['total'] === (string) ( $headers['X-WP-Total'] ?? '' )
+						&& (string) ceil( $spec['total'] / $spec['perPage'] ) === (string) ( $headers['X-WP-TotalPages'] ?? '' )
+						&& self::header_has_link_rel( $headers, 'next' )
+						&& $envelope instanceof \WP_REST_Response
+						&& 200 === $envelope->get_status()
+						&& self::envelope_matches_response( $server, $envelope->get_data(), $response, $envelope_token ),
+					'route-dispatched collection GET envelope mirrors serialized body, status, and pagination headers',
+					array(
+						'name'     => $name,
+						'observed' => $get_observed[ $name ],
+					)
+				);
+			}
+
+			$options_observed = array();
+			foreach ( $route_specs as $name => $spec ) {
+				$request  = self::request( 'OPTIONS', $spec['route'] );
+				$response = self::dispatch_with_rest_post_dispatch( $server, $request );
+				$data     = $response instanceof \WP_REST_Response ? $response->get_data() : array();
+				$headers  = $response instanceof \WP_REST_Response ? $response->get_headers() : array();
+				$expected = $server->get_data_for_route( $spec['pattern'], $routes[ $spec['pattern'] ] ?? array(), 'help' );
+				$options_observed[ $name ] = array(
+					'data'         => $data,
+					'expected'     => $expected,
+					'headers'      => $headers,
+					'matchedRoute' => $response instanceof \WP_REST_Response ? $response->get_matched_route() : null,
+				);
+
+				self::collect_failure(
+					$failures,
+					$response instanceof \WP_REST_Response
+						&& 200 === $response->get_status()
+						&& $spec['pattern'] === $response->get_matched_route()
+						&& $expected === $data
+						&& self::route_data_has_methods( $data, $spec['methods'] )
+						&& self::route_data_has_endpoint_args( $data, array( 'GET' ), $spec['getArgs'] )
+						&& self::route_data_schema_has_properties( $data, $spec['schemaProps'] )
+						&& ( empty( $spec['postArgs'] ) || self::route_data_method_has_args( $data, 'POST', $spec['postArgs'] ) )
+						&& is_string( $headers['Allow'] ?? null )
+						&& false !== strpos( $headers['Allow'], 'GET' )
+						&& (
+							! isset( $spec['contextProperty'], $spec['contexts'] )
+							|| self::route_data_schema_contexts_match( $data, $spec['contextProperty'], $spec['contexts'] )
+						),
+					'route-dispatched OPTIONS response mirrors route index help data, method metadata, schema, and permission-gated Allow headers',
+					array(
+						'name'     => $name,
+						'observed' => $options_observed[ $name ],
+					)
+				);
+			}
+
+			$index_request = self::request(
+				'GET',
+				'/wp/v2',
+				array( 'context' => 'help' )
+			);
+			$index_response = self::dispatch_with_rest_post_dispatch( $server, $index_request );
+			$index_data     = $index_response instanceof \WP_REST_Response ? $index_response->get_data() : array();
+			$index_routes   = is_array( $index_data['routes'] ?? null ) ? $index_data['routes'] : array();
+			$counts_after   = self::content_counts();
+
+			$index_routes_match = $index_response instanceof \WP_REST_Response && 200 === $index_response->get_status();
+			foreach ( $route_specs as $name => $spec ) {
+				$index_route = $index_routes[ $spec['pattern'] ] ?? null;
+				$expected    = $server->get_data_for_route( $spec['pattern'], $routes[ $spec['pattern'] ] ?? array(), 'help' );
+				$index_routes_match = $index_routes_match
+					&& is_array( $index_route )
+					&& $expected === $index_route
+					&& $index_route === ( $options_observed[ $name ]['data'] ?? null )
+					&& self::route_data_has_methods( $index_route, $spec['methods'] )
+					&& self::route_data_schema_has_properties( $index_route, $spec['schemaProps'] )
+					&& \rest_url( ltrim( $spec['route'], '/' ) ) === self::route_data_self_href( $index_route );
+			}
+
+			$observed = array(
+				'gets'          => $get_observed,
+				'options'       => $options_observed,
+				'index'         => array(
+					'data'     => $index_data,
+					'headers'  => $index_response instanceof \WP_REST_Response ? $index_response->get_headers() : array(),
+				),
+				'queries'       => array(
+					'posts'    => array( 'restArgs' => $post_rest_args, 'queryVars' => $post_query_vars ),
+					'terms'    => array( 'restArgs' => $term_rest_args, 'queryVars' => $term_query_vars ),
+					'comments' => array( 'restArgs' => $comment_rest_args, 'queryVars' => $comment_query_vars ),
+					'users'    => array( 'restArgs' => $user_rest_args, 'queryVars' => $user_query_vars ),
+				),
+				'envelopeHits'  => $envelope_hits,
+				'countsBefore'  => $counts_before,
+				'countsAfter'   => $counts_after,
+			);
+
+			self::collect_failure(
+				$failures,
+				$index_routes_match,
+				'namespace index help data matches collection OPTIONS route metadata, schemas, and self links',
+				array( 'index' => $observed['index'] )
+			);
+
+			self::collect_failure(
+				$failures,
+				self::content_count_delta_matches( $counts_before, $counts_after, array(), array() )
+					&& 1 === count( $post_query_vars )
+					&& 2 <= count( $term_query_vars )
+					&& 1 === count( $comment_query_vars )
+					&& 1 === count( $user_query_vars )
+					&& 4 === $envelope_hits,
+				'collection GET envelopes, route OPTIONS, and namespace index checks do not mutate content tables or bypass query short-circuits',
+				array(
+					'countsBefore' => $counts_before,
+					'countsAfter'  => $counts_after,
+					'envelopeHits' => $envelope_hits,
+				)
+			);
+		} finally {
+			\remove_filter( 'rest_envelope_response', $envelope_filter, 10 );
+			\remove_filter( 'rest_post_query', $post_rest_filter, 10 );
+			\remove_filter( 'posts_pre_query', $post_pre_filter, 10 );
+			\remove_filter( 'rest_category_query', $term_rest_filter, 10 );
+			\remove_filter( 'terms_pre_query', $term_pre_filter, 10 );
+			\remove_filter( 'rest_comment_query', $comment_rest_filter, 10 );
+			\remove_filter( 'comments_pre_query', $comment_pre_filter, 10 );
+			\remove_filter( 'rest_user_query', $user_rest_filter, 10 );
+			\remove_filter( 'users_pre_query', $user_pre_filter, 10 );
+
+			$custom_filters_restored = false === \has_filter( 'rest_envelope_response', $envelope_filter )
+				&& false === \has_filter( 'rest_post_query', $post_rest_filter )
+				&& false === \has_filter( 'posts_pre_query', $post_pre_filter )
+				&& false === \has_filter( 'rest_category_query', $term_rest_filter )
+				&& false === \has_filter( 'terms_pre_query', $term_pre_filter )
+				&& false === \has_filter( 'rest_comment_query', $comment_rest_filter )
+				&& false === \has_filter( 'comments_pre_query', $comment_pre_filter )
+				&& false === \has_filter( 'rest_user_query', $user_rest_filter )
+				&& false === \has_filter( 'users_pre_query', $user_pre_filter );
+
+			if ( null !== $cap_filter ) {
+				$cap_filter_restored = self::remove_cap_filter( $cap_filter );
+				$cap_filter          = null;
+			} else {
+				$cap_filter_restored = true;
+			}
+
+			self::restore_rest_default_filters( $filter_snapshot );
+			$default_filters_restored = $filter_snapshot === self::rest_default_filter_state();
+
+			\wp_set_current_user( $previous_current_user_id );
+			$current_user_restored = $previous_current_user_id === ( isset( $GLOBALS['current_user'] ) && $GLOBALS['current_user'] instanceof \WP_User ? (int) $GLOBALS['current_user']->ID : 0 );
+
+			if ( $had_wp_actions ) {
+				$GLOBALS['wp_actions'] = $previous_actions;
+			} else {
+				unset( $GLOBALS['wp_actions'] );
+			}
+			$actions_restored = $had_wp_actions === array_key_exists( 'wp_actions', $GLOBALS )
+				&& ( ! $had_wp_actions || $previous_actions === $GLOBALS['wp_actions'] );
+
+			if ( null !== $previous_server ) {
+				$GLOBALS['wp_rest_server'] = $previous_server;
+			} else {
+				unset( $GLOBALS['wp_rest_server'] );
+			}
+			$server_restored = ( null !== $previous_server && $previous_server === ( $GLOBALS['wp_rest_server'] ?? null ) )
+				|| ( null === $previous_server && ! isset( $GLOBALS['wp_rest_server'] ) );
+		}
+
+		self::collect_failure(
+			$failures,
+			$custom_filters_restored
+				&& $cap_filter_restored
+				&& $default_filters_restored
+				&& $server_restored
+				&& $actions_restored
+				&& $current_user_restored,
+			'collection OPTIONS/envelope route dispatch restores envelope, capability, default REST filter, server, action, and current-user state',
+			array(
+				'customFiltersRestored'  => $custom_filters_restored,
+				'capFilterRestored'      => $cap_filter_restored,
+				'defaultFiltersRestored' => $default_filters_restored,
+				'serverRestored'         => $server_restored,
+				'actionsRestored'        => $actions_restored,
+				'currentUserRestored'    => $current_user_restored,
+				'observed'               => $observed,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'rest-object-controllers.collections.route-dispatched-envelope-options-index',
+			array() === $failures,
+			array(
+				'case'       => self::case_summary( $case ),
+				'controllers' => array( 'posts', 'terms', 'comments', 'users' ),
+				'failures'   => array_slice( $failures, 0, 8 ),
+				'observed'   => $observed,
 			)
 		);
 	}
@@ -12710,6 +13230,34 @@ final class RestObjectControllersSurface {
 		return true;
 	}
 
+	private static function route_data_method_has_args( ?array $data, string $method, array $args ): bool {
+		if ( null === $data || ! isset( $data['endpoints'] ) || ! is_array( $data['endpoints'] ) ) {
+			return false;
+		}
+
+		foreach ( $data['endpoints'] as $endpoint ) {
+			if (
+				empty( $endpoint['methods'] )
+				|| ! is_array( $endpoint['methods'] )
+				|| ! in_array( $method, $endpoint['methods'], true )
+				|| ! isset( $endpoint['args'] )
+				|| ! is_array( $endpoint['args'] )
+			) {
+				continue;
+			}
+
+			foreach ( $args as $arg ) {
+				if ( ! array_key_exists( $arg, $endpoint['args'] ) ) {
+					continue 2;
+				}
+			}
+
+			return true;
+		}
+
+		return false;
+	}
+
 	private static function route_data_endpoint_allows_batch( ?array $data, array $methods ): bool {
 		$endpoint = self::route_data_endpoint_for_methods( $data, $methods );
 		if ( null === $endpoint || ! isset( $endpoint['allow_batch'] ) || ! is_array( $endpoint['allow_batch'] ) ) {
@@ -12772,6 +13320,16 @@ final class RestObjectControllersSurface {
 		}
 
 		return null;
+	}
+
+	private static function envelope_matches_response( \WP_REST_Server $server, array $envelope, \WP_REST_Response $response, string $token ): bool {
+		$headers = is_array( $envelope['headers'] ?? null ) ? $envelope['headers'] : array();
+		unset( $headers['X-Component-Fuzz-Envelope'] );
+
+		return 200 === (int) ( $envelope['status'] ?? 0 )
+			&& $server->response_to_data( $response, false ) === ( $envelope['body'] ?? null )
+			&& $response->get_headers() === $headers
+			&& $token === ( $envelope['headers']['X-Component-Fuzz-Envelope'] ?? null );
 	}
 
 	private static function content_counts(): array {
