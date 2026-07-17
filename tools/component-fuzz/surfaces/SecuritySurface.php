@@ -67,6 +67,7 @@ final class SecuritySurface {
 			$rows[] = self::check_admin_referer_failure_paths( $ctx->fork( 'admin-referer-failures' ) );
 			$rows[] = self::check_auth_cookie_structure_and_validation( $ctx );
 			$rows[] = self::check_auth_cookie_grace_period_and_session_edges( $ctx );
+			$rows[] = self::check_generated_redirect_dispatch_boundaries( $ctx->fork( 'redirect-dispatch' ) );
 			$rows[] = self::check_redirect_filters_without_headers( $ctx );
 			$rows[] = self::check_validate_redirect_matrix( $ctx );
 			$rows[] = self::check_redirect_sanitize_validate_metamorphic_behavior( $ctx );
@@ -1834,6 +1835,237 @@ final class SecuritySurface {
 		);
 	}
 
+	private static function check_generated_redirect_dispatch_boundaries( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures       = array();
+		$cases          = array();
+		$token          = self::token( $ctx->fork( 'dispatch-token' ), 8 );
+		$fallback       = 'http://example.test/wp/wp-admin/redirect-fallback.php?token=' . rawurlencode( $token );
+		$headers_before = function_exists( 'headers_list' ) ? headers_list() : array();
+
+		$original_location = 'https://example.test/wp-admin/original?token=' . rawurlencode( $token );
+		$rewritten_raw     = "https://example.test/wp-admin/rewritten path?token={$token}%0d%0aInjected:bad";
+		$invalid_status    = 200 + $ctx->int( 0, 49 );
+		$redirect_events   = array();
+		$status_events     = array();
+		$x_events          = array();
+		$rewrite_filter    = static function ( $location, int $status ) use ( &$redirect_events, $rewritten_raw ) {
+			$redirect_events[] = array(
+				'location' => $location,
+				'status'   => $status,
+			);
+			return $rewritten_raw;
+		};
+		$status_filter     = static function ( int $status, $location ) use ( &$status_events, $invalid_status ): int {
+			$status_events[] = array(
+				'location' => $location,
+				'status'   => $status,
+				'returned' => $invalid_status,
+			);
+			return $invalid_status;
+		};
+		$x_filter          = static function ( $x_redirect_by, int $status, string $location ) use ( &$x_events ) {
+			$x_events[] = array(
+				'xRedirectBy' => $x_redirect_by,
+				'status'      => $status,
+				'location'    => $location,
+			);
+			return false;
+		};
+
+		\add_filter( 'wp_redirect', $rewrite_filter, 10, 2 );
+		\add_filter( 'wp_redirect_status', $status_filter, 10, 2 );
+		\add_filter( 'x_redirect_by', $x_filter, 10, 3 );
+		try {
+			$invalid_capture = self::capture_wp_die_call(
+				static function () use ( $original_location ) {
+					return \wp_redirect( $original_location, 302, 'ComponentFuzz' );
+				}
+			);
+		} finally {
+			\remove_filter( 'wp_redirect', $rewrite_filter, 10 );
+			\remove_filter( 'wp_redirect_status', $status_filter, 10 );
+			\remove_filter( 'x_redirect_by', $x_filter, 10 );
+		}
+
+		self::collect_failure(
+			$failures,
+			$invalid_capture['captured']
+				&& ! $invalid_capture['threwUnexpected']
+				&& isset( $redirect_events[0]['location'], $status_events[0]['location'] )
+				&& $original_location === $redirect_events[0]['location']
+				&& $rewritten_raw === $status_events[0]['location']
+				&& $invalid_status === $status_events[0]['returned']
+				&& array() === $x_events
+				&& $invalid_capture['filtersRestored']
+				&& $invalid_capture['bufferBalanced']
+				&& false === \has_filter( 'wp_redirect', $rewrite_filter )
+				&& false === \has_filter( 'wp_redirect_status', $status_filter )
+				&& false === \has_filter( 'x_redirect_by', $x_filter ),
+			'wp_redirect validates status after redirect/status filters and before x_redirect_by',
+			array(
+				'capture'        => $invalid_capture,
+				'redirectEvents' => $redirect_events,
+				'statusEvents'   => $status_events,
+				'xEvents'        => $x_events,
+				'invalidStatus'  => $invalid_status,
+			)
+		);
+
+		$cancel_events        = array();
+		$cancel_status_events = array();
+		$cancel_x_events      = array();
+		$cancel_filter        = static function ( $location, int $status ) use ( &$cancel_events ) {
+			$cancel_events[] = array(
+				'location' => $location,
+				'status'   => $status,
+			);
+			return false;
+		};
+		$bad_status_filter    = static function ( int $status, $location ) use ( &$cancel_status_events ): int {
+			$cancel_status_events[] = array(
+				'location' => $location,
+				'status'   => $status,
+			);
+			return 500;
+		};
+		$cancel_x_filter      = static function ( $x_redirect_by, int $status, string $location ) use ( &$cancel_x_events ) {
+			$cancel_x_events[] = compact( 'x_redirect_by', 'status', 'location' );
+			return false;
+		};
+
+		\add_filter( 'wp_redirect', $cancel_filter, 10, 2 );
+		\add_filter( 'wp_redirect_status', $bad_status_filter, 10, 2 );
+		\add_filter( 'x_redirect_by', $cancel_x_filter, 10, 3 );
+		try {
+			$cancel_capture = self::capture_wp_die_call(
+				static function () use ( $original_location ) {
+					return \wp_redirect( $original_location, 302, 'ComponentFuzz' );
+				}
+			);
+		} finally {
+			\remove_filter( 'wp_redirect', $cancel_filter, 10 );
+			\remove_filter( 'wp_redirect_status', $bad_status_filter, 10 );
+			\remove_filter( 'x_redirect_by', $cancel_x_filter, 10 );
+		}
+
+		self::collect_failure(
+			$failures,
+			! $cancel_capture['captured']
+				&& false === $cancel_capture['value']
+				&& ! $cancel_capture['threwUnexpected']
+				&& isset( $cancel_events[0]['location'], $cancel_status_events[0]['location'] )
+				&& false === $cancel_status_events[0]['location']
+				&& array() === $cancel_x_events
+				&& $cancel_capture['filtersRestored']
+				&& $cancel_capture['bufferBalanced']
+				&& false === \has_filter( 'wp_redirect', $cancel_filter )
+				&& false === \has_filter( 'wp_redirect_status', $bad_status_filter )
+				&& false === \has_filter( 'x_redirect_by', $cancel_x_filter ),
+			'wp_redirect cancellation wins before invalid filtered status enforcement',
+			array(
+				'capture'      => $cancel_capture,
+				'events'       => $cancel_events,
+				'statusEvents' => $cancel_status_events,
+				'xEvents'      => $cancel_x_events,
+			)
+		);
+
+		foreach ( self::generated_redirect_dispatch_cases( $ctx, $token, $fallback ) as $index => $case ) {
+			$case_headers_before                    = function_exists( 'headers_list' ) ? headers_list() : array();
+			self::$safe_redirect_fallback           = $case['fallback'];
+			self::$allowed_redirect_hosts           = $case['allowedHosts'];
+			self::$allowed_redirect_host_events     = array();
+			$expected_location                      = $case['expectedLocation'];
+			$allowed_redirect_host_events_before    = self::$allowed_redirect_host_events;
+			$filters_before                        = array(
+				'fallback' => \has_filter( 'wp_safe_redirect_fallback', array( __CLASS__, 'filter_safe_redirect_fallback' ) ),
+				'allowed'  => \has_filter( 'allowed_redirect_hosts', array( __CLASS__, 'filter_allowed_redirect_hosts' ) ),
+			);
+
+			\add_filter( 'wp_safe_redirect_fallback', array( __CLASS__, 'filter_safe_redirect_fallback' ), 10, 2 );
+			if ( array() !== $case['allowedHosts'] ) {
+				\add_filter( 'allowed_redirect_hosts', array( __CLASS__, 'filter_allowed_redirect_hosts' ), 10, 2 );
+			}
+			try {
+				$capture = self::capture_redirect_before_headers(
+					static function () use ( $case ) {
+						if ( 'safe' === $case['mode'] ) {
+							return \wp_safe_redirect( $case['location'], $case['status'], $case['xRedirectBy'] );
+						}
+
+						return \wp_redirect( $case['location'], $case['status'], $case['xRedirectBy'] );
+					}
+				);
+				$allowed_redirect_host_events_after = self::$allowed_redirect_host_events;
+			} finally {
+				\remove_filter( 'wp_safe_redirect_fallback', array( __CLASS__, 'filter_safe_redirect_fallback' ), 10 );
+				if ( array() !== $case['allowedHosts'] ) {
+					\remove_filter( 'allowed_redirect_hosts', array( __CLASS__, 'filter_allowed_redirect_hosts' ), 10 );
+				}
+				self::$safe_redirect_fallback       = null;
+				self::$allowed_redirect_hosts       = array();
+				self::$allowed_redirect_host_events = array();
+			}
+
+			$event = $capture['events'][0] ?? array();
+			self::collect_failure(
+				$failures,
+				$capture['captured']
+					&& ! $capture['threwUnexpected']
+					&& isset( $event['xRedirectBy'], $event['status'], $event['location'] )
+					&& $case['xRedirectBy'] === $event['xRedirectBy']
+					&& $case['status'] === $event['status']
+					&& $expected_location === $event['location']
+					&& self::redirect_value_is_clean( $event['location'] )
+					&& '' === $capture['output']
+					&& $capture['bufferBalanced']
+					&& $case_headers_before === $capture['headersBefore']
+					&& $case_headers_before === $capture['headersAfter']
+					&& false === \has_filter( 'x_redirect_by', $capture['filter'] )
+					&& $filters_before['fallback'] === \has_filter( 'wp_safe_redirect_fallback', array( __CLASS__, 'filter_safe_redirect_fallback' ) )
+					&& $filters_before['allowed'] === \has_filter( 'allowed_redirect_hosts', array( __CLASS__, 'filter_allowed_redirect_hosts' ) ),
+				"redirect dispatch x_redirect_by boundary case {$index}: {$case['label']}",
+				array(
+					'case'                         => $case,
+					'capture'                      => $capture,
+					'event'                        => $event,
+					'allowedRedirectEventsBefore'  => $allowed_redirect_host_events_before,
+					'allowedRedirectEventsAfter'   => $allowed_redirect_host_events_after ?? array(),
+				)
+			);
+
+			$cases[] = array(
+				'label'            => $case['label'],
+				'mode'             => $case['mode'],
+				'status'           => $case['status'],
+				'location'         => self::describe_string( $case['location'] ),
+				'expectedLocation' => self::describe_string( $expected_location ),
+				'eventCount'       => count( $capture['events'] ),
+			);
+		}
+
+		$headers_after = function_exists( 'headers_list' ) ? headers_list() : array();
+		self::collect_failure(
+			$failures,
+			$headers_before === $headers_after,
+			'generated redirect dispatch checks do not leave headers behind',
+			array(
+				'before' => $headers_before,
+				'after'  => $headers_after,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'security.redirect.generated-dispatch-boundaries',
+			array() === $failures,
+			array(
+				'cases'    => $cases,
+				'failures' => array_slice( $failures, 0, 6 ),
+			)
+		);
+	}
+
 	private static function check_validate_redirect_matrix( \ComponentFuzz\FuzzContext $ctx ): array {
 		$failures = array();
 		$fallback = 'http://example.test/wp/wp-admin/fallback.php?from=validate';
@@ -2193,6 +2425,80 @@ final class SecuritySurface {
 			&& false === strpbrk( $value, "\r\n\0" );
 	}
 
+	private static function generated_redirect_dispatch_cases( \ComponentFuzz\FuzzContext $ctx, string $token, string $fallback ): array {
+		$statuses        = array( 301, 302, 303, 307, 308 );
+		$status_index    = $ctx->int( 0, count( $statuses ) - 1 );
+		$generated_token = rawurlencode( self::random_string( $ctx->fork( 'dispatch-generated-token' ), $ctx->int( 8, 32 ) ) );
+		$same_host_raw   = "https://example.test/wp-admin/direct path?token={$token}%0d%0aInjected:bad&generated={$generated_token}";
+		$allowed_raw     = "https://allowed.example/wp-admin/allowed path?pipe=|&token={$token}%0A";
+		$evil_raw        = "https://evil.test/wp-admin/evil path?token={$token}%0d%0aInjected:bad";
+		$relative_raw    = "/wp-admin/relative path?token={$token}%0D%0A";
+		$protocol_raw    = "//example.test/wp-admin/protocol path?token={$token}%0d";
+
+		return array(
+			array(
+				'label'            => 'direct wp_redirect sanitizes same-host location before x_redirect_by',
+				'mode'             => 'direct',
+				'location'         => $same_host_raw,
+				'status'           => $statuses[ $status_index ],
+				'xRedirectBy'      => 'ComponentFuzz-' . $token,
+				'fallback'         => $fallback,
+				'allowedHosts'     => array(),
+				'expectedLocation' => \wp_sanitize_redirect( $same_host_raw ),
+			),
+			array(
+				'label'            => 'direct wp_redirect still reaches x_redirect_by when header value is false',
+				'mode'             => 'direct',
+				'location'         => '/wp-admin/no-x-redirect-by.php?token=' . rawurlencode( $token ),
+				'status'           => $statuses[ ( $status_index + 1 ) % count( $statuses ) ],
+				'xRedirectBy'      => false,
+				'fallback'         => $fallback,
+				'allowedHosts'     => array(),
+				'expectedLocation' => '/wp-admin/no-x-redirect-by.php?token=' . rawurlencode( $token ),
+			),
+			array(
+				'label'            => 'wp_safe_redirect replaces disallowed host with filtered fallback',
+				'mode'             => 'safe',
+				'location'         => $evil_raw,
+				'status'           => $statuses[ ( $status_index + 2 ) % count( $statuses ) ],
+				'xRedirectBy'      => 'ComponentFuzzSafe-' . $token,
+				'fallback'         => $fallback,
+				'allowedHosts'     => array(),
+				'expectedLocation' => \wp_sanitize_redirect( $fallback ),
+			),
+			array(
+				'label'            => 'wp_safe_redirect honors generated allowed_redirect_hosts host',
+				'mode'             => 'safe',
+				'location'         => $allowed_raw,
+				'status'           => $statuses[ ( $status_index + 3 ) % count( $statuses ) ],
+				'xRedirectBy'      => 'ComponentFuzzAllowed-' . $token,
+				'fallback'         => $fallback,
+				'allowedHosts'     => array( 'allowed.example' ),
+				'expectedLocation' => \wp_sanitize_redirect( $allowed_raw ),
+			),
+			array(
+				'label'            => 'wp_safe_redirect preserves sanitized root-relative paths',
+				'mode'             => 'safe',
+				'location'         => $relative_raw,
+				'status'           => $statuses[ ( $status_index + 4 ) % count( $statuses ) ],
+				'xRedirectBy'      => 'ComponentFuzzRelative-' . $token,
+				'fallback'         => $fallback,
+				'allowedHosts'     => array(),
+				'expectedLocation' => \wp_validate_redirect( \wp_sanitize_redirect( $relative_raw ), $fallback ),
+			),
+			array(
+				'label'            => 'wp_safe_redirect normalizes protocol-relative same-host URLs before dispatch',
+				'mode'             => 'safe',
+				'location'         => $protocol_raw,
+				'status'           => $statuses[ $status_index ],
+				'xRedirectBy'      => 'ComponentFuzzProtocol-' . $token,
+				'fallback'         => $fallback,
+				'allowedHosts'     => array(),
+				'expectedLocation' => \wp_validate_redirect( \wp_sanitize_redirect( $protocol_raw ), $fallback ),
+			),
+		);
+	}
+
 	private static function hidden_inputs( string $html ): array {
 		$inputs = array();
 		if ( ! preg_match_all( '/<input\s+([^>]+?)\s*\/?>/i', $html, $matches ) ) {
@@ -2383,6 +2689,65 @@ final class SecuritySurface {
 			'output'          => $output,
 			'dieCalls'        => $die_calls,
 			'filtersRestored' => false === \has_filter( 'wp_die_handler', $die_filter ),
+			'bufferBalanced'  => $ob_level === ob_get_level(),
+		);
+	}
+
+	private static function capture_redirect_before_headers( callable $callback ): array {
+		$events     = array();
+		$ob_level   = ob_get_level();
+		$value      = null;
+		$captured   = false;
+		$unexpected = null;
+		$filter     = static function ( $x_redirect_by, int $status, string $location ) use ( &$events ): void {
+			$events[] = array(
+				'xRedirectBy' => $x_redirect_by,
+				'status'      => $status,
+				'location'    => $location,
+			);
+
+			throw new SecuritySurface_RedirectCaptured( 'Captured redirect before header emission.' );
+		};
+
+		$headers_before      = function_exists( 'headers_list' ) ? headers_list() : array();
+		$previous_iis_exists = array_key_exists( 'is_IIS', $GLOBALS );
+		$previous_iis        = $GLOBALS['is_IIS'] ?? null;
+
+		\add_filter( 'x_redirect_by', $filter, PHP_INT_MAX, 3 );
+		$GLOBALS['is_IIS'] = true;
+		ob_start();
+
+		try {
+			$value = $callback();
+		} catch ( SecuritySurface_RedirectCaptured $e ) {
+			$captured = true;
+		} catch ( \Throwable $e ) {
+			$unexpected = self::describe_throwable( $e );
+		} finally {
+			$output = '';
+			while ( ob_get_level() > $ob_level ) {
+				$output .= (string) ob_get_clean();
+			}
+
+			\remove_filter( 'x_redirect_by', $filter, PHP_INT_MAX );
+			if ( $previous_iis_exists ) {
+				$GLOBALS['is_IIS'] = $previous_iis;
+			} else {
+				unset( $GLOBALS['is_IIS'] );
+			}
+		}
+
+		return array(
+			'captured'        => $captured,
+			'threwUnexpected' => null !== $unexpected,
+			'unexpected'      => $unexpected,
+			'value'           => $value,
+			'output'          => $output,
+			'events'          => $events,
+			'filter'          => $filter,
+			'headersBefore'   => $headers_before,
+			'headersAfter'    => function_exists( 'headers_list' ) ? headers_list() : array(),
+			'filtersRestored' => false === \has_filter( 'x_redirect_by', $filter ),
 			'bufferBalanced'  => $ob_level === ob_get_level(),
 		);
 	}
@@ -2611,3 +2976,4 @@ final class SecuritySurface_SessionTokenManager {
 }
 
 final class SecuritySurface_DieCaptured extends \RuntimeException {}
+final class SecuritySurface_RedirectCaptured extends \RuntimeException {}
