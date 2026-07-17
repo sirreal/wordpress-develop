@@ -63,6 +63,7 @@ final class SecuritySurface {
 			$rows[] = self::check_nonce_url_and_fields( $ctx );
 			$rows[] = self::check_referer_retrieval_contracts( $ctx );
 			$rows[] = self::check_ajax_referer_lookup_order( $ctx );
+			$rows[] = self::check_ajax_referer_action_and_stop_edges( $ctx->fork( 'ajax-referer-action-stop' ) );
 			$rows[] = self::check_admin_referer_valid_paths( $ctx );
 			$rows[] = self::check_admin_referer_failure_paths( $ctx->fork( 'admin-referer-failures' ) );
 			$rows[] = self::check_auth_cookie_structure_and_validation( $ctx );
@@ -1282,6 +1283,317 @@ final class SecuritySurface {
 			array(
 				'cases'    => count( $cases ),
 				'failures' => array_slice( $failures, 0, 5 ),
+			)
+		);
+	}
+
+	private static function check_ajax_referer_action_and_stop_edges( \ComponentFuzz\FuzzContext $ctx ): array {
+		$failures      = array();
+		$events        = array();
+		$verify_events = array();
+		$hook_events   = array();
+		$snapshot      = self::snapshot_globals();
+		$action        = 'ajax-hook-' . self::token( $ctx->fork( 'ajax-hook-action' ), 8 ) . '|'
+			. self::random_string( $ctx->fork( 'ajax-hook-action-tail' ), $ctx->int( 0, 48 ) );
+		$custom        = 'ajax_hook_' . self::token( $ctx->fork( 'ajax-hook-custom' ), 6 );
+		$weird         = 'ajax|hook|' . self::token( $ctx->fork( 'ajax-hook-weird' ), 5 );
+		$current       = \wp_create_nonce( $action );
+		$old           = self::nonce_for_tick( \wp_nonce_tick( $action ) - 1, $action );
+		$invalid       = self::invalid_nonce( $current );
+		$expected_user  = \wp_get_current_user();
+		$expected_token = \wp_get_session_token();
+		$listener       = static function ( $seen_action, $result ) use ( &$events, &$hook_events ): void {
+			$events[] = array(
+				'action' => $seen_action,
+				'result' => $result,
+				'stack'  => array_values( $GLOBALS['wp_current_filter'] ?? array() ),
+			);
+			$hook_events[] = array(
+				'hook'   => 'check_ajax_referer',
+				'action' => $seen_action,
+				'result' => $result,
+			);
+		};
+		$verify_listener = static function ( string $nonce, $seen_action, \WP_User $user, string $token ) use ( &$verify_events, &$hook_events ): void {
+			$verify_events[] = array(
+				'nonce'  => $nonce,
+				'action' => $seen_action,
+				'userId' => (int) $user->ID,
+				'token'  => $token,
+				'stack'  => array_values( $GLOBALS['wp_current_filter'] ?? array() ),
+			);
+			$hook_events[]   = array(
+				'hook'   => 'wp_verify_nonce_failed',
+				'nonce'  => $nonce,
+				'action' => $seen_action,
+				'userId' => (int) $user->ID,
+				'token'  => $token,
+			);
+		};
+		$cases          = array(
+			array(
+				'label'         => '_ajax_nonce current nonce dispatches action result 1',
+				'request'       => array(
+					'_ajax_nonce' => $current,
+					'_wpnonce'    => $invalid,
+				),
+				'queryArg'      => false,
+				'stop'          => false,
+				'captureAjax'   => false,
+				'expected'      => 1,
+				'expectDie'     => false,
+				'expectedNonce' => $current,
+				'expectFailure' => false,
+			),
+			array(
+				'label'         => '_wpnonce previous-tick nonce dispatches action result 2',
+				'request'       => array(
+					'_wpnonce' => $old,
+				),
+				'queryArg'      => false,
+				'stop'          => false,
+				'captureAjax'   => false,
+				'expected'      => 2,
+				'expectDie'     => false,
+				'expectedNonce' => $old,
+				'expectFailure' => false,
+			),
+			array(
+				'label'         => 'custom query arg wins over invalid defaults',
+				'request'       => array(
+					$custom       => $current,
+					'_ajax_nonce' => $invalid,
+					'_wpnonce'    => $invalid,
+				),
+				'queryArg'      => $custom,
+				'stop'          => true,
+				'captureAjax'   => true,
+				'expected'      => 1,
+				'expectDie'     => false,
+				'expectedNonce' => $current,
+				'expectFailure' => false,
+			),
+			array(
+				'label'         => 'custom query arg with reserved key reports false when stop is disabled',
+				'request'       => array(
+					$weird        => $invalid,
+					'_ajax_nonce' => $current,
+					'_wpnonce'    => $current,
+				),
+				'queryArg'      => $weird,
+				'stop'          => false,
+				'captureAjax'   => false,
+				'expected'      => false,
+				'expectDie'     => false,
+				'expectedNonce' => $invalid,
+				'expectFailure' => true,
+			),
+			array(
+				'label'         => 'invalid default nonce reports false when stop is disabled',
+				'request'       => array(
+					'_ajax_nonce' => $invalid,
+				),
+				'queryArg'      => false,
+				'stop'          => false,
+				'captureAjax'   => false,
+				'expected'      => false,
+				'expectDie'     => false,
+				'expectedNonce' => $invalid,
+				'expectFailure' => true,
+			),
+			array(
+				'label'         => 'empty default nonce reports false without firing nonce-failed hook',
+				'request'       => array(
+					'_ajax_nonce' => '',
+				),
+				'queryArg'      => false,
+				'stop'          => false,
+				'captureAjax'   => false,
+				'expected'      => false,
+				'expectDie'     => false,
+				'expectedNonce' => '',
+				'expectFailure' => false,
+			),
+			array(
+				'label'         => 'invalid custom nonce dies through ajax wp_die when stop is enabled',
+				'request'       => array(
+					$custom       => $invalid,
+					'_ajax_nonce' => $current,
+					'_wpnonce'    => $current,
+				),
+				'queryArg'      => $custom,
+				'stop'          => true,
+				'captureAjax'   => true,
+				'expected'      => false,
+				'expectDie'     => true,
+				'expectedNonce' => $invalid,
+				'expectFailure' => true,
+			),
+		);
+
+		\add_action( 'check_ajax_referer', $listener, 10, 2 );
+		\add_action( 'wp_verify_nonce_failed', $verify_listener, 10, 4 );
+		try {
+			foreach ( $cases as $index => $case ) {
+				$_REQUEST = $case['request'];
+				$_GET     = $case['request'];
+				$_POST    = array();
+
+				$before_event_count  = count( $events );
+				$before_verify_count = count( $verify_events );
+				$before_hook_count   = count( $hook_events );
+				if ( $case['captureAjax'] ) {
+					$capture = self::capture_ajax_wp_die_call(
+						static function () use ( $action, $case ) {
+							return \check_ajax_referer( $action, $case['queryArg'], $case['stop'] );
+						}
+					);
+					$actual  = $capture['value'];
+				} else {
+					$capture = null;
+					$actual  = \check_ajax_referer( $action, $case['queryArg'], $case['stop'] );
+				}
+
+				$event        = $events[ $before_event_count ] ?? null;
+				$verify_event = $verify_events[ $before_verify_count ] ?? null;
+				$hook_slice   = array_slice( $hook_events, $before_hook_count );
+				self::collect_failure(
+					$failures,
+					1 === count( $events ) - $before_event_count
+						&& is_array( $event )
+						&& $action === $event['action']
+						&& $case['expected'] === $event['result']
+						&& array( 'check_ajax_referer' ) === array_slice( (array) $event['stack'], -1 ),
+					"check_ajax_referer action payload case {$index}: {$case['label']}",
+					array(
+						'event'    => $event,
+						'expected' => array(
+							'action' => $action,
+							'result' => $case['expected'],
+						),
+					)
+				);
+				self::collect_failure(
+					$failures,
+					array_column( $hook_slice, 'hook' ) === ( $case['expectFailure'] ? array( 'wp_verify_nonce_failed', 'check_ajax_referer' ) : array( 'check_ajax_referer' ) ),
+					"check_ajax_referer hook order case {$index}: {$case['label']}",
+					array(
+						'hooks'          => $hook_slice,
+						'expectFailure'  => $case['expectFailure'],
+						'expectedNonce'  => self::describe_value( $case['expectedNonce'] ),
+						'expectedAction' => self::describe_value( $action ),
+					)
+				);
+				if ( $case['expectFailure'] ) {
+					self::collect_failure(
+						$failures,
+						1 === count( $verify_events ) - $before_verify_count
+							&& is_array( $verify_event )
+							&& $case['expectedNonce'] === $verify_event['nonce']
+							&& $action === $verify_event['action']
+							&& (int) $expected_user->ID === $verify_event['userId']
+							&& $expected_token === $verify_event['token']
+							&& array( 'wp_verify_nonce_failed' ) === array_slice( (array) $verify_event['stack'], -1 ),
+						"wp_verify_nonce_failed payload case {$index}: {$case['label']}",
+						array(
+							'event'    => $verify_event,
+							'expected' => array(
+								'nonce'  => self::describe_value( $case['expectedNonce'] ),
+								'action' => self::describe_value( $action ),
+								'userId' => (int) $expected_user->ID,
+								'token'  => self::describe_value( $expected_token ),
+							),
+						)
+					);
+				} else {
+					self::collect_failure(
+						$failures,
+						0 === count( $verify_events ) - $before_verify_count,
+						"wp_verify_nonce_failed stays quiet case {$index}: {$case['label']}",
+						array(
+							'verifyEvents'  => array_slice( $verify_events, $before_verify_count ),
+							'expectedNonce' => self::describe_value( $case['expectedNonce'] ),
+						)
+					);
+				}
+
+				if ( $case['expectDie'] ) {
+					$die = $capture['dieCalls'][0] ?? array();
+					self::collect_failure(
+						$failures,
+						is_array( $capture )
+							&& $capture['captured']
+							&& ! $capture['returned']
+							&& 'ajax' === ( $die['handler'] ?? null )
+							&& -1 === ( $die['message'] ?? null )
+							&& 403 === ( $die['processed']['args']['response'] ?? null )
+							&& $capture['filtersRestored']
+							&& $capture['bufferBalanced'],
+						"check_ajax_referer ajax stop=true die case {$index}: {$case['label']}",
+						array( 'capture' => $capture )
+					);
+				} elseif ( $case['captureAjax'] ) {
+					self::collect_failure(
+						$failures,
+						is_array( $capture )
+							&& ! $capture['captured']
+							&& $capture['returned']
+							&& $case['expected'] === $actual
+							&& array() === $capture['dieCalls']
+							&& $capture['filtersRestored']
+							&& $capture['bufferBalanced'],
+						"check_ajax_referer ajax stop=true valid case {$index}: {$case['label']}",
+						array(
+							'actual'  => $actual,
+							'capture' => $capture,
+						)
+					);
+				} else {
+					self::collect_failure(
+						$failures,
+						$case['expected'] === $actual,
+						"check_ajax_referer stop=false return case {$index}: {$case['label']}",
+						array(
+							'actual'   => $actual,
+							'expected' => $case['expected'],
+						)
+					);
+				}
+			}
+		} finally {
+			\remove_action( 'check_ajax_referer', $listener, 10 );
+			\remove_action( 'wp_verify_nonce_failed', $verify_listener, 10 );
+			self::restore_globals( $snapshot );
+		}
+
+		self::collect_failure(
+			$failures,
+			false === \has_action( 'check_ajax_referer', $listener )
+				&& false === \has_action( 'wp_verify_nonce_failed', $verify_listener )
+				&& $_GET === $snapshot['_GET']
+				&& $_POST === $snapshot['_POST']
+				&& $_REQUEST === $snapshot['_REQUEST']
+				&& $_SERVER === $snapshot['_SERVER'],
+			'check_ajax_referer action/stop matrix restores hooks and superglobals',
+			array(
+				'actionStillActive' => \has_action( 'check_ajax_referer', $listener ),
+				'verifyStillActive' => \has_action( 'wp_verify_nonce_failed', $verify_listener ),
+				'getRestored'       => $_GET === $snapshot['_GET'],
+				'postRestored'      => $_POST === $snapshot['_POST'],
+				'requestRestored'   => $_REQUEST === $snapshot['_REQUEST'],
+				'serverRestored'    => $_SERVER === $snapshot['_SERVER'],
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'security.check-ajax-referer.action-and-stop-hook-edges',
+			array() === $failures,
+			array(
+				'cases'        => count( $cases ),
+				'events'       => $events,
+				'verifyEvents' => $verify_events,
+				'failures'     => array_slice( $failures, 0, 5 ),
 			)
 		);
 	}
@@ -2640,6 +2952,85 @@ final class SecuritySurface {
 		$failures[] = array(
 			'label'   => $label,
 			'details' => self::describe_value( $details ),
+		);
+	}
+
+	private static function capture_ajax_wp_die_call( callable $callback ): array {
+		$die_calls  = array();
+		$ob_level   = ob_get_level();
+		$value      = null;
+		$captured   = false;
+		$returned   = false;
+		$unexpected = null;
+
+		$doing_ajax_filter = static function ( bool $doing_ajax ): bool {
+			unset( $doing_ajax );
+			return true;
+		};
+		$ajax_die_filter   = static function ( $handler ) use ( &$die_calls ) {
+			unset( $handler );
+			return static function ( $message = '', $title = '', $args = array() ) use ( &$die_calls ): void {
+				$die_calls[] = array(
+					'handler'   => 'ajax',
+					'message'   => $message,
+					'title'     => $title,
+					'args'      => $args,
+					'processed' => self::process_wp_die_input( $message, $title, $args ),
+				);
+
+				throw new SecuritySurface_DieCaptured( 'Captured security ajax wp_die.' );
+			};
+		};
+		$default_die_filter = static function ( $handler ) use ( &$die_calls ) {
+			unset( $handler );
+			return static function ( $message = '', $title = '', $args = array() ) use ( &$die_calls ): void {
+				$die_calls[] = array(
+					'handler'   => 'default',
+					'message'   => $message,
+					'title'     => $title,
+					'args'      => $args,
+					'processed' => self::process_wp_die_input( $message, $title, $args ),
+				);
+
+				throw new SecuritySurface_DieCaptured( 'Captured security default wp_die.' );
+			};
+		};
+
+		\add_filter( 'wp_doing_ajax', $doing_ajax_filter, PHP_INT_MAX );
+		\add_filter( 'wp_die_ajax_handler', $ajax_die_filter, PHP_INT_MAX );
+		\add_filter( 'wp_die_handler', $default_die_filter, PHP_INT_MAX );
+		ob_start();
+
+		try {
+			$value    = $callback();
+			$returned = true;
+		} catch ( SecuritySurface_DieCaptured $e ) {
+			$captured = true;
+		} catch ( \Throwable $e ) {
+			$unexpected = self::describe_throwable( $e );
+		} finally {
+			$output = '';
+			while ( ob_get_level() > $ob_level ) {
+				$output .= (string) ob_get_clean();
+			}
+
+			\remove_filter( 'wp_doing_ajax', $doing_ajax_filter, PHP_INT_MAX );
+			\remove_filter( 'wp_die_ajax_handler', $ajax_die_filter, PHP_INT_MAX );
+			\remove_filter( 'wp_die_handler', $default_die_filter, PHP_INT_MAX );
+		}
+
+		return array(
+			'captured'        => $captured,
+			'returned'        => $returned,
+			'threwUnexpected' => null !== $unexpected,
+			'unexpected'      => $unexpected,
+			'value'           => $value,
+			'output'          => $output,
+			'dieCalls'        => $die_calls,
+			'filtersRestored' => false === \has_filter( 'wp_doing_ajax', $doing_ajax_filter )
+				&& false === \has_filter( 'wp_die_ajax_handler', $ajax_die_filter )
+				&& false === \has_filter( 'wp_die_handler', $default_die_filter ),
+			'bufferBalanced'  => $ob_level === ob_get_level(),
 		);
 	}
 
