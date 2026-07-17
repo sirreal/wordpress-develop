@@ -45,6 +45,7 @@ final class RestWidgetsSidebarsSurface {
 			$rows[] = self::check_sidebar_raw_widget_projection_boundaries( $ctx->fork( 'sidebar-raw-widgets' ), $case );
 			$rows[] = self::check_legacy_widget_form_data_and_delete_hooks( $ctx->fork( 'legacy' ), $case );
 			$rows[] = self::check_head_short_circuit_and_field_projection( $ctx->fork( 'head-fields' ), $case );
+			$rows[] = self::check_sidebar_default_filtered_route_envelopes( $ctx->fork( 'sidebar-route-fields' ), $case );
 			$rows[] = self::check_route_dispatched_widget_sidebar_mutations( $ctx->fork( 'dispatch-mutations' ), $case );
 			$rows[] = self::check_route_dispatched_missing_sidebar_update_diagnostic( $ctx->fork( 'missing-sidebar-update' ), $case );
 		} catch ( \Throwable $e ) {
@@ -155,6 +156,8 @@ final class RestWidgetsSidebarsSurface {
 				'remove_action',
 				'remove_filter',
 				'rest_authorization_required_code',
+				'rest_api_default_filters',
+				'rest_ensure_response',
 				'rest_filter_response_fields',
 				'rest_get_server',
 				'rest_is_field_included',
@@ -1846,6 +1849,249 @@ PHP;
 		return self::result( $ctx, 'rest-widgets-sidebars.head.short-circuit', $failures );
 	}
 
+	private static function check_sidebar_default_filtered_route_envelopes( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
+		$snapshot        = self::snapshot_state();
+		$filter_snapshot = self::rest_default_filter_state();
+
+		$failures                 = array();
+		$prepare_calls            = array();
+		$filters_installed        = array();
+		$default_filters_restored = false;
+		$cap_filter_removed       = false;
+		$prepare_filter_removed   = false;
+		$server                   = null;
+		$public_response          = null;
+		$hidden_response          = null;
+		$collection_response      = null;
+		$head_item_response       = null;
+		$head_collection_response = null;
+
+		$prepare_filter = static function ( $response, array $sidebar, \WP_REST_Request $request ) use ( &$prepare_calls ) {
+			$prepare_calls[] = array(
+				'id'       => $sidebar['id'] ?? null,
+				'method'   => $request->get_method(),
+				'fields'   => $request->get_param( '_fields' ),
+				'dataKeys' => $response instanceof \WP_REST_Response ? array_keys( (array) $response->get_data() ) : array(),
+			);
+
+			return $response;
+		};
+
+		try {
+			self::reset_runtime();
+			self::seed_widgets( $case );
+
+			$server = self::fresh_rest_server();
+			( new \WP_REST_Sidebars_Controller() )->register_routes();
+			\rest_api_default_filters();
+			$filters_installed = self::rest_default_filter_state();
+			$cap_filter        = self::install_cap_filter( array( 'edit_theme_options' ) );
+
+			\add_filter( 'rest_prepare_sidebar', $prepare_filter, 10, 3 );
+
+			$public_request = self::request(
+				'GET',
+				'/wp/v2/sidebars/' . $case['publicSidebar'],
+				array(
+					'context' => 'edit',
+					'_fields' => 'id,status,widgets,_links',
+				),
+				array( 'id' => $case['publicSidebar'] )
+			);
+			$public_response = self::dispatch_with_rest_post_dispatch( $server, $public_request );
+
+			$hidden_request = self::request(
+				'GET',
+				'/wp/v2/sidebars/' . $case['hiddenSidebar'],
+				array(
+					'context' => 'edit',
+					'_fields' => 'id,status,widgets',
+				),
+				array( 'id' => $case['hiddenSidebar'] )
+			);
+			$hidden_response = self::dispatch_with_rest_post_dispatch( $server, $hidden_request );
+
+			$collection_request = self::request(
+				'GET',
+				'/wp/v2/sidebars',
+				array(
+					'context' => 'edit',
+					'_fields' => 'id,status,widgets,_links',
+				)
+			);
+			$collection_response = self::dispatch_with_rest_post_dispatch( $server, $collection_request );
+
+			$head_item_response = self::dispatch_with_rest_post_dispatch(
+				$server,
+				self::request(
+					'HEAD',
+					'/wp/v2/sidebars/' . $case['publicSidebar'],
+					array( '_fields' => 'id' ),
+					array( 'id' => $case['publicSidebar'] )
+				)
+			);
+			$head_collection_response = self::dispatch_with_rest_post_dispatch(
+				$server,
+				self::request(
+					'HEAD',
+					'/wp/v2/sidebars',
+					array( '_fields' => 'id' )
+				)
+			);
+		} finally {
+			\remove_filter( 'rest_prepare_sidebar', $prepare_filter, 10 );
+			$prepare_filter_removed = false === \has_filter( 'rest_prepare_sidebar', $prepare_filter );
+
+			if ( isset( $cap_filter ) ) {
+				$cap_filter_removed = self::remove_cap_filter( $cap_filter );
+			}
+
+			self::restore_rest_default_filters( $filter_snapshot );
+			$default_filters_restored = $filter_snapshot === self::rest_default_filter_state();
+			self::restore_state( $snapshot );
+		}
+
+		$public_data              = $public_response instanceof \WP_REST_Response ? $public_response->get_data() : array();
+		$public_headers           = $public_response instanceof \WP_REST_Response ? $public_response->get_headers() : array();
+		$public_links             = $public_response instanceof \WP_REST_Response ? $public_response->get_links() : array();
+		$hidden_data              = $hidden_response instanceof \WP_REST_Response ? $hidden_response->get_data() : array();
+		$hidden_headers           = $hidden_response instanceof \WP_REST_Response ? $hidden_response->get_headers() : array();
+		$collection_data          = $collection_response instanceof \WP_REST_Response ? $collection_response->get_data() : array();
+		$collection_headers       = $collection_response instanceof \WP_REST_Response ? $collection_response->get_headers() : array();
+		$head_item_headers        = $head_item_response instanceof \WP_REST_Response ? $head_item_response->get_headers() : array();
+		$head_collection_headers  = $head_collection_response instanceof \WP_REST_Response ? $head_collection_response->get_headers() : array();
+		$collection_by_id         = self::sidebar_rows_by_id( is_array( $collection_data ) ? $collection_data : array() );
+
+		self::collect_failure(
+			$failures,
+			$public_response instanceof \WP_REST_Response
+				&& 200 === $public_response->get_status()
+				&& self::projected_keys_match( $public_data, array( 'id', 'status', 'widgets' ) )
+				&& $case['publicSidebar'] === ( $public_data['id'] ?? null )
+				&& 'active' === ( $public_data['status'] ?? null )
+				&& array( $case['publicTextId'], $case['legacyId'] ) === ( $public_data['widgets'] ?? null )
+				&& self::allow_header_has( $public_headers, array( 'GET', 'POST', 'PUT', 'PATCH' ) )
+				&& isset( $public_links['collection'][0]['href'], $public_links['self'][0]['href'], $public_links['https://api.w.org/widget'][0]['href'] )
+				&& $server instanceof \WP_REST_Server
+				&& self::response_envelope_ok( $server, $public_response ),
+			'route-dispatched public sidebar item applies default _fields, links, Allow, and envelope filters',
+			array(
+				'response' => self::describe_response( $public_response ),
+				'links'    => array_keys( $public_links ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$hidden_response instanceof \WP_REST_Response
+				&& 200 === $hidden_response->get_status()
+				&& self::projected_keys_match( $hidden_data, array( 'id', 'status', 'widgets' ) )
+				&& $case['hiddenSidebar'] === ( $hidden_data['id'] ?? null )
+				&& 'active' === ( $hidden_data['status'] ?? null )
+				&& array( $case['hiddenTextId'], $case['searchSeedId'] ) === ( $hidden_data['widgets'] ?? null )
+				&& self::allow_header_has( $hidden_headers, array( 'GET', 'POST', 'PUT', 'PATCH' ) )
+				&& $server instanceof \WP_REST_Server
+				&& self::response_envelope_ok( $server, $hidden_response ),
+			'route-dispatched hidden sidebar item is readable with scoped manage capability and projected fields',
+			array( 'response' => self::describe_response( $hidden_response ) )
+		);
+
+		self::collect_failure(
+			$failures,
+			$collection_response instanceof \WP_REST_Response
+				&& 200 === $collection_response->get_status()
+				&& self::allow_header_has( $collection_headers, array( 'GET' ) )
+				&& isset(
+					$collection_by_id[ $case['publicSidebar'] ],
+					$collection_by_id['wp_inactive_widgets'],
+					$collection_by_id[ $case['hiddenSidebar'] ]
+				)
+				&& self::projected_keys_match( $collection_by_id[ $case['publicSidebar'] ], array( '_links', 'id', 'status', 'widgets' ) )
+				&& self::projected_keys_match( $collection_by_id['wp_inactive_widgets'], array( '_links', 'id', 'status', 'widgets' ) )
+				&& self::projected_keys_match( $collection_by_id[ $case['hiddenSidebar'] ], array( '_links', 'id', 'status', 'widgets' ) )
+				&& array( $case['publicTextId'], $case['legacyId'] ) === ( $collection_by_id[ $case['publicSidebar'] ]['widgets'] ?? null )
+				&& array() === ( $collection_by_id['wp_inactive_widgets']['widgets'] ?? null )
+				&& array( $case['hiddenTextId'], $case['searchSeedId'] ) === ( $collection_by_id[ $case['hiddenSidebar'] ]['widgets'] ?? null )
+				&& self::collection_row_links_ok( $collection_by_id[ $case['publicSidebar'] ] ?? array(), $case['publicSidebar'] )
+				&& self::collection_row_links_ok( $collection_by_id['wp_inactive_widgets'] ?? array(), 'wp_inactive_widgets' )
+				&& self::collection_row_links_ok( $collection_by_id[ $case['hiddenSidebar'] ] ?? array(), $case['hiddenSidebar'] )
+				&& $server instanceof \WP_REST_Server
+				&& self::response_envelope_ok( $server, $collection_response ),
+			'route-dispatched sidebar collection embeds projected rows, widget links, target hints, Allow, and envelope data',
+			array(
+				'ids'      => array_keys( $collection_by_id ),
+				'headers'  => $collection_headers,
+				'response' => self::describe_response( $collection_response ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$head_item_response instanceof \WP_REST_Response
+				&& 200 === $head_item_response->get_status()
+				&& array() === $head_item_response->get_data()
+				&& self::allow_header_has( $head_item_headers, array( 'GET', 'POST', 'PUT', 'PATCH' ) )
+				&& $head_collection_response instanceof \WP_REST_Response
+				&& 200 === $head_collection_response->get_status()
+				&& array() === $head_collection_response->get_data()
+				&& self::allow_header_has( $head_collection_headers, array( 'GET' ) )
+				&& $server instanceof \WP_REST_Server
+				&& self::response_envelope_ok( $server, $head_item_response )
+				&& self::response_envelope_ok( $server, $head_collection_response ),
+			'route-dispatched sidebar HEAD item and collection responses keep empty bodies with Allow headers and envelopes',
+			array(
+				'item'       => self::describe_response( $head_item_response ),
+				'collection' => self::describe_response( $head_collection_response ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			6 === count( $prepare_calls )
+				&& array(
+					$case['publicSidebar'],
+					$case['hiddenSidebar'],
+					$case['publicSidebar'],
+					'wp_inactive_widgets',
+					$case['hiddenSidebar'],
+					$case['publicSidebar'],
+				) === array_column( $prepare_calls, 'id' )
+				&& array( 'GET', 'GET', 'GET', 'GET', 'GET', 'HEAD' ) === array_column( $prepare_calls, 'method' )
+				&& array() === ( $prepare_calls[5]['dataKeys'] ?? null ),
+			'route-dispatched sidebar prepare filter fires for item GETs, collection GET rows, and HEAD item but not HEAD collection',
+			array( 'prepareCalls' => $prepare_calls )
+		);
+
+		self::collect_failure(
+			$failures,
+			$cap_filter_removed
+				&& $prepare_filter_removed
+				&& $default_filters_restored
+				&& isset(
+					$filters_installed['rest_post_dispatch:rest_send_allow_header'],
+					$filters_installed['rest_post_dispatch:rest_filter_response_fields']
+				),
+			'route-dispatched sidebar default filters, cap filter, and prepare filter are scoped and restored',
+			array(
+				'filtersBefore'          => $filter_snapshot,
+				'filtersInstalled'       => $filters_installed,
+				'defaultFiltersRestored' => $default_filters_restored,
+				'capFilterRemoved'       => $cap_filter_removed,
+				'prepareFilterRemoved'   => $prepare_filter_removed,
+			)
+		);
+
+		return self::result(
+			$ctx,
+			'rest-widgets-sidebars.sidebars.default-filtered-route-envelopes',
+			$failures,
+			array(
+				'case'       => self::case_summary( $case ),
+				'collection' => array_keys( $collection_by_id ),
+			)
+		);
+	}
+
 	private static function check_route_dispatched_widget_sidebar_mutations( \ComponentFuzz\FuzzContext $ctx, array $case ): array {
 		self::reset_runtime();
 		self::seed_widgets( $case );
@@ -2764,6 +3010,114 @@ PHP;
 		}
 
 		return \rest_filter_response_fields( $response, \rest_get_server(), $request );
+	}
+
+	private static function dispatch_with_rest_post_dispatch( \WP_REST_Server $server, \WP_REST_Request $request ): \WP_REST_Response {
+		return \apply_filters(
+			'rest_post_dispatch',
+			\rest_ensure_response( $server->dispatch( $request ) ),
+			$server,
+			$request
+		);
+	}
+
+	private static function rest_default_filter_callbacks(): array {
+		return array(
+			'rest_pre_serve_request:rest_send_cors_headers'      => array( 'rest_pre_serve_request', 'rest_send_cors_headers', 10 ),
+			'rest_post_dispatch:rest_send_allow_header'          => array( 'rest_post_dispatch', 'rest_send_allow_header', 10 ),
+			'rest_post_dispatch:rest_filter_response_fields'     => array( 'rest_post_dispatch', 'rest_filter_response_fields', 10 ),
+			'rest_pre_dispatch:rest_handle_options_request'      => array( 'rest_pre_dispatch', 'rest_handle_options_request', 10 ),
+			'rest_index:rest_add_application_passwords_to_index' => array( 'rest_index', 'rest_add_application_passwords_to_index', 10 ),
+		);
+	}
+
+	private static function rest_default_filter_state(): array {
+		$state = array();
+
+		foreach ( self::rest_default_filter_callbacks() as $key => $callback ) {
+			list( $hook, $function ) = $callback;
+			$priority = \has_filter( $hook, $function );
+			if ( false !== $priority ) {
+				$state[ $key ] = (int) $priority;
+			}
+		}
+
+		return $state;
+	}
+
+	private static function restore_rest_default_filters( array $snapshot ): void {
+		foreach ( self::rest_default_filter_callbacks() as $key => $callback ) {
+			list( $hook, $function, $priority ) = $callback;
+			if ( ! array_key_exists( $key, $snapshot ) ) {
+				\remove_filter( $hook, $function, $priority );
+			}
+		}
+	}
+
+	private static function response_envelope_ok( \WP_REST_Server $server, $response ): bool {
+		if ( ! $response instanceof \WP_REST_Response ) {
+			return false;
+		}
+
+		$envelope = $server->envelope_response( $response, false );
+		if ( ! $envelope instanceof \WP_REST_Response || 200 !== $envelope->get_status() ) {
+			return false;
+		}
+
+		$envelope_data = $envelope->get_data();
+		if (
+			! is_array( $envelope_data )
+			|| $response->get_status() !== ( $envelope_data['status'] ?? null )
+			|| $response->get_headers() !== ( $envelope_data['headers'] ?? null )
+			|| ! array_key_exists( 'body', $envelope_data )
+		) {
+			return false;
+		}
+
+		$body = $envelope_data['body'];
+		if ( is_array( $body ) && isset( $body['_links'] ) && ! isset( $response->get_data()['_links'] ) ) {
+			unset( $body['_links'] );
+		}
+
+		return $response->get_data() === $body;
+	}
+
+	private static function allow_header_has( array $headers, array $expected_methods ): bool {
+		$allow = array_map( 'trim', explode( ',', (string) ( $headers['Allow'] ?? '' ) ) );
+		foreach ( $expected_methods as $method ) {
+			if ( ! in_array( $method, $allow, true ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function sidebar_rows_by_id( array $rows ): array {
+		$by_id = array();
+		foreach ( $rows as $row ) {
+			if ( is_array( $row ) && isset( $row['id'] ) ) {
+				$by_id[ (string) $row['id'] ] = $row;
+			}
+		}
+
+		return $by_id;
+	}
+
+	private static function collection_row_links_ok( array $row, string $id ): bool {
+		$links = $row['_links'] ?? null;
+		if ( ! is_array( $links ) ) {
+			return false;
+		}
+
+		$self_href   = (string) ( $links['self'][0]['href'] ?? '' );
+		$widget_href = (string) ( $links['wp:widget'][0]['href'] ?? '' );
+		$allow       = $links['self'][0]['targetHints']['allow'] ?? array();
+
+		return isset( $links['collection'][0]['href'], $links['curies'][0]['href'] )
+			&& str_contains( $self_href, '/wp/v2/sidebars/' . $id )
+			&& str_contains( $widget_href, 'sidebar=' . rawurlencode( $id ) )
+			&& array( 'GET', 'POST', 'PUT', 'PATCH' ) === array_values( (array) $allow );
 	}
 
 	private static function capture_warnings( callable $callback ): array {
