@@ -45,6 +45,7 @@ final class RestObjectControllersSurface {
 			$rows[] = self::check_additional_field_registry( $ctx, $case, $additional_field_calls );
 			$rows[] = self::check_route_registry_behavior( $ctx, $case, $fixtures );
 			$rows[] = self::check_route_dispatched_collection_envelope_options_edges( $ctx->fork( 'collection-envelope-options' ), $case, $fixtures );
+			$rows[] = self::check_route_dispatched_collection_batch_error_edges( $ctx->fork( 'collection-batch-errors' ), $case, $fixtures );
 			$rows[] = self::check_templates_controller( $ctx, $case );
 			$rows[] = self::check_short_circuited_collection_queries( $ctx->fork( 'collection-queries' ), $case, $fixtures );
 			$rows[] = self::check_route_dispatched_collection_get_edges( $ctx->fork( 'collection-get-dispatch' ), $case, $fixtures, $additional_field_calls );
@@ -4997,6 +4998,504 @@ final class RestObjectControllersSurface {
 		return self::row(
 			$ctx,
 			'rest-object-controllers.collections.route-dispatched-envelope-options-index',
+			array() === $failures,
+			array(
+				'case'       => self::case_summary( $case ),
+				'controllers' => array( 'posts', 'terms', 'comments', 'users' ),
+				'failures'   => array_slice( $failures, 0, 8 ),
+				'observed'   => $observed,
+			)
+		);
+	}
+
+	private static function check_route_dispatched_collection_batch_error_edges( \ComponentFuzz\FuzzContext $ctx, array $case, array $fixtures ): array {
+		$failures = array();
+		$observed = array();
+
+		$previous_server          = $GLOBALS['wp_rest_server'] ?? null;
+		$had_wp_actions           = array_key_exists( 'wp_actions', $GLOBALS );
+		$previous_actions         = $GLOBALS['wp_actions'] ?? null;
+		$previous_current_user_id = isset( $GLOBALS['current_user'] ) && $GLOBALS['current_user'] instanceof \WP_User
+			? (int) $GLOBALS['current_user']->ID
+			: 0;
+
+		$server                    = new \WP_REST_Server();
+		$GLOBALS['wp_rest_server'] = $server;
+
+		if ( ! isset( $GLOBALS['wp_actions'] ) || ! is_array( $GLOBALS['wp_actions'] ) ) {
+			$GLOBALS['wp_actions'] = array();
+		}
+		$GLOBALS['wp_actions']['rest_api_init'] = max( 1, (int) ( $GLOBALS['wp_actions']['rest_api_init'] ?? 0 ) );
+
+		$filter_snapshot = self::rest_default_filter_state();
+		$cap_filter      = null;
+		$counts_before   = self::content_counts();
+		$batch_token     = 'component-fuzz-batch-errors-' . $ctx->seed() . '-' . $ctx->iteration();
+
+		$post_rest_args    = array();
+		$post_query_vars   = array();
+		$term_rest_args    = array();
+		$term_query_vars   = array();
+		$comment_rest_args = array();
+		$comment_query_vars = array();
+		$user_rest_args    = array();
+		$user_query_vars   = array();
+		$child_post_dispatch = array();
+		$record_child_post_dispatch = false;
+
+		$post_total    = 5;
+		$post_per_page = 2;
+		$term_total    = 6;
+		$term_per_page = 2;
+		$comment_total = 4;
+		$comment_per_page = 2;
+		$user_total    = 3;
+		$user_per_page = 1;
+
+		$post_objects = array_values(
+			array_filter(
+				array( \get_post( $fixtures['post'] ), \get_post( $fixtures['other_post'] ) ),
+				static fn ( $post ): bool => $post instanceof \WP_Post
+			)
+		);
+		$term_objects = array_values(
+			array_filter(
+				array( \get_term( $fixtures['term'], 'category' ), \get_term( $fixtures['child_term'], 'category' ) ),
+				static fn ( $term ): bool => $term instanceof \WP_Term
+			)
+		);
+		$comment_objects = array_values(
+			array_filter(
+				array( \get_comment( $fixtures['comment'] ), \get_comment( $fixtures['second_comment'] ) ),
+				static fn ( $comment ): bool => $comment instanceof \WP_Comment
+			)
+		);
+		$user_ids = array( $fixtures['author'] );
+
+		$post_rest_filter = static function ( array $args, \WP_REST_Request $request ) use ( &$post_rest_args ): array {
+			$args['component_fuzz_batch_errors'] = 'posts';
+			$post_rest_args[] = array(
+				'args'   => $args,
+				'method' => $request->get_method(),
+				'route'  => $request->get_route(),
+			);
+			return $args;
+		};
+		$post_pre_filter  = static function ( $posts, \WP_Query $query ) use ( &$post_query_vars, $post_objects, $post_total, $post_per_page ): array {
+			if ( 'posts' !== ( $query->query_vars['component_fuzz_batch_errors'] ?? null ) ) {
+				return $posts;
+			}
+
+			$post_query_vars[]    = $query->query_vars;
+			$query->found_posts   = $post_total;
+			$query->max_num_pages = (int) ceil( $post_total / $post_per_page );
+			return $post_objects;
+		};
+
+		$term_rest_filter = static function ( array $args, \WP_REST_Request $request ) use ( &$term_rest_args ): array {
+			$args['component_fuzz_batch_errors'] = 'terms';
+			$term_rest_args[] = array(
+				'args'   => $args,
+				'method' => $request->get_method(),
+				'route'  => $request->get_route(),
+			);
+			return $args;
+		};
+		$term_pre_filter  = static function ( $terms, \WP_Term_Query $query ) use ( &$term_query_vars, $term_objects, $term_total ) {
+			if ( 'terms' !== ( $query->query_vars['component_fuzz_batch_errors'] ?? null ) ) {
+				return $terms;
+			}
+
+			$term_query_vars[] = $query->query_vars;
+			if ( 'count' === ( $query->query_vars['fields'] ?? null ) ) {
+				return (string) $term_total;
+			}
+			return $term_objects;
+		};
+
+		$comment_rest_filter = static function ( array $args, \WP_REST_Request $request ) use ( &$comment_rest_args ): array {
+			$args['component_fuzz_batch_errors'] = 'comments';
+			$comment_rest_args[] = array(
+				'args'   => $args,
+				'method' => $request->get_method(),
+				'route'  => $request->get_route(),
+			);
+			return $args;
+		};
+		$comment_pre_filter  = static function ( $comments, \WP_Comment_Query $query ) use ( &$comment_query_vars, $comment_objects, $comment_total, $comment_per_page ): array {
+			if ( 'comments' !== ( $query->query_vars['component_fuzz_batch_errors'] ?? null ) ) {
+				return $comments;
+			}
+
+			$comment_query_vars[]   = $query->query_vars;
+			$query->found_comments  = $comment_total;
+			$query->max_num_pages   = (int) ceil( $comment_total / $comment_per_page );
+			return $comment_objects;
+		};
+
+		$user_rest_filter = static function ( array $args, \WP_REST_Request $request ) use ( &$user_rest_args ): array {
+			$args['component_fuzz_batch_errors'] = 'users';
+			$user_rest_args[] = array(
+				'args'   => $args,
+				'method' => $request->get_method(),
+				'route'  => $request->get_route(),
+			);
+			return $args;
+		};
+		$user_pre_filter  = static function ( $results, \WP_User_Query $query ) use ( &$user_query_vars, $user_ids, $user_total ): array {
+			if ( 'users' !== ( $query->query_vars['component_fuzz_batch_errors'] ?? null ) ) {
+				return $results;
+			}
+
+			$user_query_vars[]  = $query->query_vars;
+			$query->total_users = $user_total;
+			return $user_ids;
+		};
+
+		$post_dispatch_filter = static function ( \WP_REST_Response $response, \WP_REST_Server $filter_server, \WP_REST_Request $request ) use ( $server, $batch_token, &$child_post_dispatch, &$record_child_post_dispatch ): \WP_REST_Response {
+			if ( $filter_server !== $server || '/batch/v1' === $request->get_route() ) {
+				return $response;
+			}
+
+			if ( $record_child_post_dispatch ) {
+				$child_post_dispatch[] = array(
+					'route'  => $request->get_route(),
+					'method' => $request->get_method(),
+					'status' => $response->get_status(),
+				);
+			}
+			$response->header( 'X-Component-Fuzz-Batch-Child', $batch_token );
+			return $response;
+		};
+
+		$custom_filters_restored  = false;
+		$cap_filter_restored      = false;
+		$default_filters_restored = false;
+		$server_restored          = false;
+		$actions_restored         = false;
+		$current_user_restored    = false;
+
+		try {
+			$controllers = array(
+				new \WP_REST_Posts_Controller( 'post' ),
+				new \WP_REST_Terms_Controller( 'category' ),
+				new \WP_REST_Comments_Controller(),
+				new \WP_REST_Users_Controller(),
+			);
+
+			foreach ( $controllers as $controller ) {
+				$controller->register_routes();
+			}
+
+			\rest_api_default_filters();
+			\add_filter( 'rest_post_query', $post_rest_filter, 10, 2 );
+			\add_filter( 'posts_pre_query', $post_pre_filter, 10, 2 );
+			\add_filter( 'rest_category_query', $term_rest_filter, 10, 2 );
+			\add_filter( 'terms_pre_query', $term_pre_filter, 10, 2 );
+			\add_filter( 'rest_comment_query', $comment_rest_filter, 10, 2 );
+			\add_filter( 'comments_pre_query', $comment_pre_filter, 10, 2 );
+			\add_filter( 'rest_user_query', $user_rest_filter, 10, 2 );
+			\add_filter( 'users_pre_query', $user_pre_filter, 10, 2 );
+			\add_filter( 'rest_post_dispatch', $post_dispatch_filter, 11, 3 );
+
+			\wp_set_current_user( $fixtures['author'] );
+			$cap_filter = self::install_cap_filter(
+				array(
+					'edit_user',
+					'edit_users',
+					'list_users',
+					'moderate_comments',
+					'read',
+				)
+			);
+
+			$valid_require_all_post = array(
+				'method' => 'POST',
+				'path'   => '/wp/v2/posts',
+				'body'   => array(
+					'content' => '<p>Batch valid sibling ' . $case['token'] . '</p>',
+					'status'  => 'draft',
+					'title'   => 'Batch Valid Sibling ' . $case['token'],
+				),
+			);
+			$invalid_specs = array(
+				'posts'    => array(
+					'route' => '/wp/v2/posts',
+					'body'  => array(
+						'author' => 'not-an-author-' . $case['token'],
+						'status' => 'draft',
+						'title'  => 'Invalid Batch Post ' . $case['token'],
+					),
+					'param' => 'author',
+					'code'  => 'rest_invalid_param',
+				),
+				'terms'    => array(
+					'route' => '/wp/v2/categories',
+					'body'  => array(
+						'name'   => 'Invalid Batch Term ' . $case['token'],
+						'parent' => 'not-a-parent-' . $case['token'],
+					),
+					'param' => 'parent',
+					'code'  => 'rest_invalid_param',
+				),
+				'comments' => array(
+					'route' => '/wp/v2/comments',
+					'body'  => array(
+						'author_email' => 'not-an-email-' . $case['token'],
+						'content'      => 'Invalid batch comment ' . $case['token'],
+						'post'         => $fixtures['post'],
+					),
+					'param' => null,
+					'code'  => 'rest_batch_not_allowed',
+				),
+				'users'    => array(
+					'route' => '/wp/v2/users',
+					'body'  => array(
+						'email'    => 'not-an-email-' . $case['token'],
+						'password' => $case['createdUserPassword'],
+						'username' => $case['createdUserLogin'],
+					),
+					'param' => 'email',
+					'code'  => 'rest_invalid_param',
+				),
+			);
+
+			$normal_requests = array();
+			foreach ( $invalid_specs as $spec ) {
+				$normal_requests[] = array(
+					'method' => 'POST',
+					'path'   => $spec['route'],
+					'body'   => $spec['body'],
+				);
+			}
+
+			$direct_invalid_responses = array();
+			foreach ( $invalid_specs as $name => $spec ) {
+				if ( 'rest_invalid_param' !== $spec['code'] ) {
+					continue;
+				}
+
+				$direct_invalid_responses[ $name ] = self::dispatch_with_rest_post_dispatch(
+					$server,
+					self::request( 'POST', $spec['route'], array(), array(), $spec['body'] )
+				);
+			}
+
+			$record_child_post_dispatch = true;
+			$normal_response = $server->dispatch( self::batch_request( $normal_requests, 'normal' ) );
+			$record_child_post_dispatch = false;
+			$normal_data     = $normal_response instanceof \WP_REST_Response ? $normal_response->get_data() : array();
+
+			$require_all_requests = array(
+				$valid_require_all_post,
+				array(
+					'method' => 'POST',
+					'path'   => $invalid_specs['users']['route'],
+					'body'   => $invalid_specs['users']['body'],
+				),
+			);
+			$require_all_response = $server->dispatch( self::batch_request( $require_all_requests, 'require-all-validate' ) );
+			$require_all_data     = $require_all_response instanceof \WP_REST_Response ? $require_all_response->get_data() : array();
+			$counts_after         = self::content_counts();
+
+			$normal_responses = is_array( $normal_data['responses'] ?? null ) ? $normal_data['responses'] : array();
+			$normal_ok        = $normal_response instanceof \WP_REST_Response
+				&& 207 === $normal_response->get_status()
+				&& count( $normal_requests ) === count( $normal_responses );
+			$invalid_ok  = true;
+			$direct_parity_ok = true;
+			foreach ( array_keys( $invalid_specs ) as $offset => $name ) {
+				$spec     = $invalid_specs[ $name ];
+				$envelope = $normal_responses[ $offset ] ?? array();
+				$headers  = is_array( $envelope['headers'] ?? null ) ? $envelope['headers'] : array();
+				$body     = is_array( $envelope['body'] ?? null ) ? $envelope['body'] : array();
+
+				$invalid_ok = $invalid_ok
+					&& 400 === (int) ( $envelope['status'] ?? 0 )
+					&& $batch_token === ( $headers['X-Component-Fuzz-Batch-Child'] ?? null )
+					&& $spec['code'] === ( $body['code'] ?? null )
+					&& (
+						null === $spec['param']
+						|| isset( $body['data']['params'][ $spec['param'] ] )
+					);
+
+				if ( 'rest_invalid_param' === $spec['code'] ) {
+					$direct_response  = $direct_invalid_responses[ $name ] ?? null;
+					$direct_parity_ok = $direct_parity_ok
+						&& $direct_response instanceof \WP_REST_Response
+						&& $direct_response->get_data() === $body
+						&& $direct_response->get_status() === (int) ( $envelope['status'] ?? 0 )
+						&& $direct_response->get_headers() === $headers;
+				}
+			}
+
+			$require_all_responses = is_array( $require_all_data['responses'] ?? null ) ? $require_all_data['responses'] : array();
+			$require_all_error     = is_array( $require_all_responses[1] ?? null ) ? $require_all_responses[1] : array();
+			$require_all_ok        = $require_all_response instanceof \WP_REST_Response
+				&& 207 === $require_all_response->get_status()
+				&& 'validation' === ( $require_all_data['failed'] ?? null )
+				&& array_key_exists( 0, $require_all_responses )
+				&& null === $require_all_responses[0]
+				&& 400 === (int) ( $require_all_error['status'] ?? 0 )
+				&& 'rest_invalid_param' === ( $require_all_error['body']['code'] ?? null )
+				&& isset( $require_all_error['body']['data']['params']['email'] );
+
+			$expected_child_statuses = array_merge(
+				array_fill( 0, count( $invalid_specs ), 400 )
+			);
+			$actual_child_statuses   = array_map( static fn ( array $event ): int => (int) ( $event['status'] ?? 0 ), $child_post_dispatch );
+			$child_dispatch_ok       = count( $normal_requests ) === count( $child_post_dispatch )
+				&& array_values( $expected_child_statuses ) === $actual_child_statuses
+				&& ! in_array( '/batch/v1', array_column( $child_post_dispatch, 'route' ), true );
+
+			$query_ok = array() === $post_query_vars
+				&& array() === $term_query_vars
+				&& array() === $comment_query_vars
+				&& array() === $user_query_vars
+				&& array() === $post_rest_args
+				&& array() === $term_rest_args
+				&& array() === $comment_rest_args
+				&& array() === $user_rest_args;
+
+			$observed = array(
+				'normal'        => array(
+					'data'      => $normal_data,
+					'responses' => $normal_responses,
+				),
+				'directInvalid' => $direct_invalid_responses,
+				'requireAll'    => array(
+					'data'      => $require_all_data,
+					'responses' => $require_all_responses,
+				),
+				'childPostDispatch' => $child_post_dispatch,
+				'queryShortCircuits' => array(
+					'posts'    => array( 'restArgs' => $post_rest_args, 'queryVars' => $post_query_vars ),
+					'terms'    => array( 'restArgs' => $term_rest_args, 'queryVars' => $term_query_vars ),
+					'comments' => array( 'restArgs' => $comment_rest_args, 'queryVars' => $comment_query_vars ),
+					'users'    => array( 'restArgs' => $user_rest_args, 'queryVars' => $user_query_vars ),
+				),
+				'countsBefore'  => $counts_before,
+				'countsAfter'   => $counts_after,
+			);
+
+			self::collect_failure(
+				$failures,
+				$normal_ok,
+				'batch/v1 normal validation returns one child envelope for each object-controller collection request',
+				array( 'normal' => $observed['normal'] )
+			);
+
+			self::collect_failure(
+				$failures,
+				$invalid_ok,
+				'batch/v1 normal validation envelopes invalid object-controller collection params and collection batch gates without running callbacks',
+				array( 'normal' => $observed['normal'] )
+			);
+
+			self::collect_failure(
+				$failures,
+				$direct_parity_ok,
+				'batch/v1 invalid-param child envelopes match direct object-controller route-dispatch error bodies, status, and headers',
+				array(
+					'normal'        => $observed['normal'],
+					'directInvalid' => $observed['directInvalid'],
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				$require_all_ok,
+				'batch/v1 require-all-validate returns null for valid siblings and error envelopes for invalid collection children',
+				array( 'requireAll' => $observed['requireAll'] )
+			);
+
+			self::collect_failure(
+				$failures,
+				$child_dispatch_ok
+					&& $query_ok
+					&& self::content_count_delta_matches( $counts_before, $counts_after, array(), array() ),
+				'batch/v1 invalid object-controller collection children run post-dispatch once in normal mode, avoid callbacks, and do not mutate content tables',
+				array(
+					'childPostDispatch' => $child_post_dispatch,
+					'queryShortCircuits' => $observed['queryShortCircuits'],
+					'countsBefore'      => $counts_before,
+					'countsAfter'       => $counts_after,
+				)
+			);
+		} finally {
+			\remove_filter( 'rest_post_query', $post_rest_filter, 10 );
+			\remove_filter( 'posts_pre_query', $post_pre_filter, 10 );
+			\remove_filter( 'rest_category_query', $term_rest_filter, 10 );
+			\remove_filter( 'terms_pre_query', $term_pre_filter, 10 );
+			\remove_filter( 'rest_comment_query', $comment_rest_filter, 10 );
+			\remove_filter( 'comments_pre_query', $comment_pre_filter, 10 );
+			\remove_filter( 'rest_user_query', $user_rest_filter, 10 );
+			\remove_filter( 'users_pre_query', $user_pre_filter, 10 );
+			\remove_filter( 'rest_post_dispatch', $post_dispatch_filter, 11 );
+
+			$custom_filters_restored = false === \has_filter( 'rest_post_query', $post_rest_filter )
+				&& false === \has_filter( 'posts_pre_query', $post_pre_filter )
+				&& false === \has_filter( 'rest_category_query', $term_rest_filter )
+				&& false === \has_filter( 'terms_pre_query', $term_pre_filter )
+				&& false === \has_filter( 'rest_comment_query', $comment_rest_filter )
+				&& false === \has_filter( 'comments_pre_query', $comment_pre_filter )
+				&& false === \has_filter( 'rest_user_query', $user_rest_filter )
+				&& false === \has_filter( 'users_pre_query', $user_pre_filter )
+				&& false === \has_filter( 'rest_post_dispatch', $post_dispatch_filter );
+
+			if ( null !== $cap_filter ) {
+				$cap_filter_restored = self::remove_cap_filter( $cap_filter );
+				$cap_filter          = null;
+			} else {
+				$cap_filter_restored = true;
+			}
+
+			self::restore_rest_default_filters( $filter_snapshot );
+			$default_filters_restored = $filter_snapshot === self::rest_default_filter_state();
+
+			\wp_set_current_user( $previous_current_user_id );
+			$current_user_restored = $previous_current_user_id === ( isset( $GLOBALS['current_user'] ) && $GLOBALS['current_user'] instanceof \WP_User ? (int) $GLOBALS['current_user']->ID : 0 );
+
+			if ( $had_wp_actions ) {
+				$GLOBALS['wp_actions'] = $previous_actions;
+			} else {
+				unset( $GLOBALS['wp_actions'] );
+			}
+			$actions_restored = $had_wp_actions === array_key_exists( 'wp_actions', $GLOBALS )
+				&& ( ! $had_wp_actions || $previous_actions === $GLOBALS['wp_actions'] );
+
+			if ( null !== $previous_server ) {
+				$GLOBALS['wp_rest_server'] = $previous_server;
+			} else {
+				unset( $GLOBALS['wp_rest_server'] );
+			}
+			$server_restored = ( null !== $previous_server && $previous_server === ( $GLOBALS['wp_rest_server'] ?? null ) )
+				|| ( null === $previous_server && ! isset( $GLOBALS['wp_rest_server'] ) );
+		}
+
+		self::collect_failure(
+			$failures,
+			$custom_filters_restored
+				&& $cap_filter_restored
+				&& $default_filters_restored
+				&& $server_restored
+				&& $actions_restored
+				&& $current_user_restored,
+			'batch/v1 object-controller collection checks restore custom filters, capability filters, default REST filters, server, actions, and current user',
+			array(
+				'customFiltersRestored'  => $custom_filters_restored,
+				'capFilterRestored'      => $cap_filter_restored,
+				'defaultFiltersRestored' => $default_filters_restored,
+				'serverRestored'         => $server_restored,
+				'actionsRestored'        => $actions_restored,
+				'currentUserRestored'    => $current_user_restored,
+				'observed'               => $observed,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'rest-object-controllers.collections.batch-v1-error-envelope-parity',
 			array() === $failures,
 			array(
 				'case'       => self::case_summary( $case ),
@@ -12724,6 +13223,18 @@ final class RestObjectControllersSurface {
 		if ( array() !== $body_params ) {
 			$request->set_body_params( $body_params );
 		}
+		return $request;
+	}
+
+	private static function batch_request( array $requests, string $validation ): \WP_REST_Request {
+		$request = new \WP_REST_Request( 'POST', '/batch/v1' );
+		$request->set_body_params(
+			array(
+				'validation' => $validation,
+				'requests'   => $requests,
+			)
+		);
+
 		return $request;
 	}
 
