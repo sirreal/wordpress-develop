@@ -45,6 +45,7 @@ final class RestControllersSurface {
 			$rows[] = self::check_block_pattern_theme_file_loader( $ctx );
 			$rows[] = self::check_search_controller( $ctx );
 			$rows[] = self::check_search_include_exclude_coercion( $ctx->fork( 'search-include-exclude' ) );
+			$rows[] = self::check_search_fields_links_error_envelopes( $ctx->fork( 'search-fields-links' ) );
 			$rows[] = self::check_search_settings_default_filtered_dispatch_matrix( $ctx->fork( 'search-settings-default-filters' ) );
 			$rows[] = self::check_controller_argument_error_envelopes( $ctx->fork( 'controller-argument-errors' ) );
 			$rows[] = self::check_menu_locations_controller( $ctx->fork( 'menu-locations' ) );
@@ -5593,6 +5594,317 @@ final class RestControllersSurface {
 					'type'     => $case['type'],
 					'subtypes' => $case['subtypes'],
 					'ids'      => $case['handlerIds'],
+				),
+				'failures' => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
+	private static function check_search_fields_links_error_envelopes( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime_state();
+
+		$case              = self::search_case( $ctx->fork( 'search' ) );
+		$handler           = self::make_search_handler( $case['type'], $case['subtypes'], $case['items'], $case['handlerIds'], $case['handlerTotal'] );
+		$malformed_handler = self::make_search_handler( $case['malformedType'], $case['subtypes'], $case['items'], $case['handlerIds'], $case['handlerTotal'], true );
+		$controller        = new \WP_REST_Search_Controller( array( $handler, $malformed_handler ) );
+		$failures          = array();
+		$selected_subtypes = array_slice( $case['subtypes'], 0, 2 );
+
+		$previous_server  = $GLOBALS['wp_rest_server'] ?? null;
+		$had_wp_actions   = array_key_exists( 'wp_actions', $GLOBALS );
+		$previous_actions = $GLOBALS['wp_actions'] ?? null;
+		$filter_snapshot  = self::rest_default_filter_state();
+		$filters_installed = array();
+
+		$server                    = new \WP_REST_Server();
+		$GLOBALS['wp_rest_server'] = $server;
+
+		if ( ! isset( $GLOBALS['wp_actions'] ) || ! is_array( $GLOBALS['wp_actions'] ) ) {
+			$GLOBALS['wp_actions'] = array();
+		}
+		$GLOBALS['wp_actions']['rest_api_init'] = max( 1, (int) ( $GLOBALS['wp_actions']['rest_api_init'] ?? 0 ) );
+
+		$links_request = self::request(
+			'GET',
+			'/wp/v2/search',
+			array(
+				'context'                                => 'view',
+				'_fields'                                => '_links',
+				'page'                                   => 1,
+				'per_page'                               => 2,
+				\WP_REST_Search_Controller::PROP_TYPE    => $case['type'],
+				\WP_REST_Search_Controller::PROP_SUBTYPE => $selected_subtypes,
+			)
+		);
+		$nested_links_request = self::request(
+			'GET',
+			'/wp/v2/search',
+			array(
+				'context'                                => 'view',
+				'_fields'                                => '_links.self,_links.collection',
+				'page'                                   => 1,
+				'per_page'                               => 2,
+				\WP_REST_Search_Controller::PROP_TYPE    => $case['type'],
+				\WP_REST_Search_Controller::PROP_SUBTYPE => $selected_subtypes,
+			)
+		);
+		$typed_request = self::request(
+			'GET',
+			'/wp/v2/search',
+			array(
+				'context'                                => 'view',
+				'_fields'                                => 'type,subtype',
+				'page'                                   => 1,
+				'per_page'                               => 2,
+				\WP_REST_Search_Controller::PROP_TYPE    => $case['type'],
+				\WP_REST_Search_Controller::PROP_SUBTYPE => $selected_subtypes,
+			)
+		);
+		$malformed_request = self::request(
+			'GET',
+			'/wp/v2/search',
+			array(
+				'context'                                => 'view',
+				'_fields'                                => '_links',
+				\WP_REST_Search_Controller::PROP_TYPE    => $case['malformedType'],
+				\WP_REST_Search_Controller::PROP_SUBTYPE => array( \WP_REST_Search_Controller::TYPE_ANY ),
+			)
+		);
+		$malformed_head_request = self::request(
+			'HEAD',
+			'/wp/v2/search',
+			array(
+				'context'                                => 'view',
+				'_fields'                                => '_links',
+				\WP_REST_Search_Controller::PROP_TYPE    => $case['malformedType'],
+				\WP_REST_Search_Controller::PROP_SUBTYPE => array( \WP_REST_Search_Controller::TYPE_ANY ),
+			)
+		);
+
+		$links_response          = null;
+		$nested_links_response   = null;
+		$typed_response          = null;
+		$malformed_response      = null;
+		$malformed_head_response = null;
+
+		try {
+			$controller->register_routes();
+			\rest_api_default_filters();
+			$filters_installed      = self::rest_default_filter_state();
+			$links_response         = self::dispatch_with_rest_post_dispatch( $server, $links_request );
+			$nested_links_response  = self::dispatch_with_rest_post_dispatch( $server, $nested_links_request );
+			$typed_response         = self::dispatch_with_rest_post_dispatch( $server, $typed_request );
+			$malformed_response     = self::dispatch_with_rest_post_dispatch( $server, $malformed_request );
+			$malformed_head_response = self::dispatch_with_rest_post_dispatch( $server, $malformed_head_request );
+		} finally {
+			self::restore_rest_default_filters( $filter_snapshot );
+
+			if ( $had_wp_actions ) {
+				$GLOBALS['wp_actions'] = $previous_actions;
+			} else {
+				unset( $GLOBALS['wp_actions'] );
+			}
+
+			if ( null !== $previous_server ) {
+				$GLOBALS['wp_rest_server'] = $previous_server;
+			} else {
+				unset( $GLOBALS['wp_rest_server'] );
+			}
+		}
+
+		$links_data        = $links_response instanceof \WP_REST_Response ? $links_response->get_data() : array();
+		$nested_links_data = $nested_links_response instanceof \WP_REST_Response ? $nested_links_response->get_data() : array();
+		$typed_data        = $typed_response instanceof \WP_REST_Response ? $typed_response->get_data() : array();
+		$links_first       = is_array( $links_data[0] ?? null ) ? $links_data[0] : array();
+		$nested_first      = is_array( $nested_links_data[0] ?? null ) ? $nested_links_data[0] : array();
+		$typed_first       = is_array( $typed_data[0] ?? null ) ? $typed_data[0] : array();
+		$links_headers     = $links_response instanceof \WP_REST_Response ? $links_response->get_headers() : array();
+		$nested_headers    = $nested_links_response instanceof \WP_REST_Response ? $nested_links_response->get_headers() : array();
+		$typed_headers     = $typed_response instanceof \WP_REST_Response ? $typed_response->get_headers() : array();
+		$malformed_headers = $malformed_response instanceof \WP_REST_Response ? $malformed_response->get_headers() : array();
+		$malformed_head_headers = $malformed_head_response instanceof \WP_REST_Response ? $malformed_head_response->get_headers() : array();
+		$prepare_fields    = static function ( $call ): array {
+			$fields = is_array( $call ) ? (array) ( $call['fields'] ?? array() ) : array();
+			sort( $fields );
+			return $fields;
+		};
+		$filter_restored   = $filter_snapshot === self::rest_default_filter_state();
+		$server_restored   = null !== $previous_server ? ( $GLOBALS['wp_rest_server'] ?? null ) === $previous_server : ! array_key_exists( 'wp_rest_server', $GLOBALS );
+		$actions_restored  = $had_wp_actions ? ( $GLOBALS['wp_actions'] ?? null ) === $previous_actions : ! array_key_exists( 'wp_actions', $GLOBALS );
+		$default_filters_ok = array(
+			'rest_pre_serve_request:rest_send_cors_headers'      => 10,
+			'rest_post_dispatch:rest_send_allow_header'          => 10,
+			'rest_post_dispatch:rest_filter_response_fields'     => 10,
+			'rest_pre_dispatch:rest_handle_options_request'      => 10,
+			'rest_index:rest_add_application_passwords_to_index' => 10,
+		) === $filters_installed;
+
+		self::collect_failure(
+			$failures,
+			$links_response instanceof \WP_REST_Response
+				&& 200 === $links_response->get_status()
+				&& 2 === count( $links_data )
+				&& array( '_links' ) === self::sorted_keys( $links_first )
+				&& 'http://example.test/component-fuzz/search/' . $case['handlerIds'][0] === self::search_collection_link_href( $links_first, 'self' )
+				&& 'http://example.test/component-fuzz/search/about/' . $case['type'] === self::search_collection_link_href( $links_first, 'about' )
+				&& \rest_url( 'wp/v2/search' ) === self::search_collection_link_href( $links_first, 'collection' )
+				&& $case['handlerTotal'] === (int) ( $links_headers['X-WP-Total'] ?? 0 )
+				&& 3 === (int) ( $links_headers['X-WP-TotalPages'] ?? 0 )
+				&& str_contains( (string) ( $links_headers['Allow'] ?? '' ), 'GET' )
+				&& array( '_links', 'id' ) === $prepare_fields( $handler->prepare_calls[0] ?? null )
+				&& array( '_links', 'id' ) === $prepare_fields( $handler->prepare_calls[1] ?? null )
+				&& self::response_envelope_ok( $server, $links_response ),
+			'search route _fields=_links returns only prepared links, keeps handler rels, and adds collection link',
+			array(
+				'data'          => $links_data,
+				'headers'       => $links_headers,
+				'prepareCalls'  => array_slice( $handler->prepare_calls, 0, 2 ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$nested_links_response instanceof \WP_REST_Response
+				&& 200 === $nested_links_response->get_status()
+				&& array( '_links' ) === self::sorted_keys( $nested_first )
+				&& 'http://example.test/component-fuzz/search/' . $case['handlerIds'][0] === self::search_collection_link_href( $nested_first, 'self' )
+				&& null === self::search_collection_link_href( $nested_first, 'about' )
+				&& \rest_url( 'wp/v2/search' ) === self::search_collection_link_href( $nested_first, 'collection' )
+				&& str_contains( (string) ( $nested_headers['Allow'] ?? '' ), 'GET' )
+				&& array( '_links.collection', '_links.self', 'id' ) === $prepare_fields( $handler->prepare_calls[2] ?? null )
+				&& array( '_links.collection', '_links.self', 'id' ) === $prepare_fields( $handler->prepare_calls[3] ?? null )
+				&& self::response_envelope_ok( $server, $nested_links_response ),
+			'search route nested _links fields preserve selected rels and prune unrequested handler rels',
+			array(
+				'data'          => $nested_links_data,
+				'headers'       => $nested_headers,
+				'prepareCalls'  => array_slice( $handler->prepare_calls, 2, 2 ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			$typed_response instanceof \WP_REST_Response
+				&& 200 === $typed_response->get_status()
+				&& array( 'subtype', 'type' ) === self::sorted_keys( $typed_first )
+				&& $case['type'] === ( $typed_first['type'] ?? null )
+				&& $case['items'][2]['subtype'] === ( $typed_first['subtype'] ?? null )
+				&& ! isset( $typed_first['_links'], $typed_first['id'] )
+				&& str_contains( (string) ( $typed_headers['Allow'] ?? '' ), 'GET' )
+				&& array( 'id', 'subtype', 'type' ) === $prepare_fields( $handler->prepare_calls[4] ?? null )
+				&& array( 'id', 'subtype', 'type' ) === $prepare_fields( $handler->prepare_calls[5] ?? null )
+				&& self::response_envelope_ok( $server, $typed_response ),
+			'search route _fields=type,subtype prepares with id internally but strips ids and links from final bodies',
+			array(
+				'data'          => $typed_data,
+				'headers'       => $typed_headers,
+				'prepareCalls'  => array_slice( $handler->prepare_calls, 4, 2 ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::response_error_ok( $malformed_response, 'rest_search_handler_error', 500 )
+				&& self::response_error_ok( $malformed_head_response, 'rest_search_handler_error', 500 )
+				&& str_contains( (string) ( $malformed_headers['Allow'] ?? '' ), 'GET' )
+				&& str_contains( (string) ( $malformed_head_headers['Allow'] ?? '' ), 'GET' )
+				&& array(
+					array(
+						'method'   => 'GET',
+						'type'     => $case['malformedType'],
+						'subtype'  => array( \WP_REST_Search_Controller::TYPE_ANY ),
+						'include'  => array(),
+						'exclude'  => array(),
+						'page'     => 1,
+						'per_page' => 10,
+						'search'   => '',
+					),
+					array(
+						'method'   => 'HEAD',
+						'type'     => $case['malformedType'],
+						'subtype'  => array( \WP_REST_Search_Controller::TYPE_ANY ),
+						'include'  => array(),
+						'exclude'  => array(),
+						'page'     => 1,
+						'per_page' => 10,
+						'search'   => '',
+					),
+				) === $malformed_handler->search_calls
+				&& array() === $malformed_handler->prepare_calls
+				&& self::response_envelope_ok( $server, $malformed_response )
+				&& self::response_envelope_ok( $server, $malformed_head_response ),
+			'search route malformed handler results fail as 500 envelopes before item preparation for GET and HEAD',
+			array(
+				'getResponse'   => $malformed_response,
+				'headResponse'  => $malformed_head_response,
+				'getHeaders'    => $malformed_headers,
+				'headHeaders'   => $malformed_head_headers,
+				'searchCalls'   => $malformed_handler->search_calls,
+				'prepareCalls'  => $malformed_handler->prepare_calls,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			array(
+				array(
+					'method'   => 'GET',
+					'type'     => $case['type'],
+					'subtype'  => $selected_subtypes,
+					'include'  => array(),
+					'exclude'  => array(),
+					'page'     => 1,
+					'per_page' => 2,
+					'search'   => '',
+				),
+				array(
+					'method'   => 'GET',
+					'type'     => $case['type'],
+					'subtype'  => $selected_subtypes,
+					'include'  => array(),
+					'exclude'  => array(),
+					'page'     => 1,
+					'per_page' => 2,
+					'search'   => '',
+				),
+				array(
+					'method'   => 'GET',
+					'type'     => $case['type'],
+					'subtype'  => $selected_subtypes,
+					'include'  => array(),
+					'exclude'  => array(),
+					'page'     => 1,
+					'per_page' => 2,
+					'search'   => '',
+				),
+			) === $handler->search_calls
+				&& 6 === count( $handler->prepare_calls )
+				&& $default_filters_ok
+				&& $filter_restored
+				&& $server_restored
+				&& $actions_restored,
+			'search field/link route dispatch restores default REST filters and globals after exact handler calls',
+			array(
+				'searchCalls'      => $handler->search_calls,
+				'prepareCalls'     => $handler->prepare_calls,
+				'filtersInstalled' => $filters_installed,
+				'filterSnapshot'   => $filter_snapshot,
+				'filterRestored'   => $filter_restored,
+				'serverRestored'   => $server_restored,
+				'actionsRestored'  => $actions_restored,
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'rest-controllers.search.fields-links-error-envelopes',
+			array() === $failures,
+			array(
+				'case'     => array(
+					'type'          => $case['type'],
+					'malformedType' => $case['malformedType'],
+					'subtypes'      => $selected_subtypes,
+					'ids'           => $case['handlerIds'],
 				),
 				'failures' => array_slice( $failures, 0, 8 ),
 			)
