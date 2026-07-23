@@ -67,108 +67,74 @@ class Tests_HtmlApi_WebPlatformTests extends WP_UnitTestCase {
 	 * Skip specific tests that may not be supported or have known issues.
 	 */
 	const SKIP_TESTS = array(
-		'adoption01/line0001'       => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
-		'adoption01/line0014'       => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
-		'adoption01/line0083'       => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
-		'adoption01/line0030'       => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
-		'adoption01/line0062'       => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
-		'adoption01/line0108'       => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
-		'adoption01/line0124'       => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
-		'adoption01/line0141'       => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
-		'adoption01/line0241'       => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
-		'adoption01/line0281'       => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
-		'adoption02/line0001'       => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
-		'adoption02/line0021'       => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
-		'html5test-com/line0129'    => 'Unimplemented: This parser treats processing instructions as comments.',
-		'html5test-com/line0252'    => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
-		'menuitem-element/line0161' => 'Unimplemented: This parser does not support customizable SELECT element content.',
-		'noscript01/line0014'       => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
-		'template/line1091'         => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
-		'template/line1595'         => self::SKIP_HTML_PARSER_CANNOT_HOLD_REMOVED_A_OPEN,
-		'tests1/line0237'           => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
-		'tests1/line0256'           => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
-		'tests1/line0355'           => 'Unimplemented: This parser does not support customizable SELECT element content.',
-		'tests1/line0373'           => self::SKIP_HTML_PARSER_CANNOT_HOLD_REMOVED_A_OPEN,
-		'tests1/line0601'           => 'Unimplemented: This parser treats processing instructions as comments.',
-		'tests1/line0602'           => 'Unimplemented: Updated Processing Instruction parsing.',
-		'tests1/line0640'           => 'Unimplemented: This parser treats processing instructions as comments.',
-		'tests1/line0641'           => 'Unimplemented: Updated Processing Instruction parsing.',
-		'tests1/line0706'           => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
-		'tests1/line0784'           => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
-		'tests1/line0850'           => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
-		'tests1/line0994'           => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
-		'tests1/line1015'           => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
-		'tests1/line1037'           => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
-		'tests1/line1061'           => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
-		'tests1/line1086'           => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
-		'tests1/line1111'           => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
-		'tests1/line1149'           => self::SKIP_HTML_PARSER_CANNOT_HOLD_REMOVED_A_OPEN,
-		'tests1/line1387'           => self::SKIP_HTML_PARSER_CANNOT_HOLD_REMOVED_A_OPEN,
-		'tests1/line1468'           => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
-		'tests1/line1484'           => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
-		'tests1/line1532'           => 'Unimplemented: This parser does not support customizable SELECT element content.',
-		'tests1/line1559'           => self::SKIP_HTML_PARSER_CANNOT_HOLD_REMOVED_A_OPEN,
-		'tests10/line0035'          => 'Unimplemented: This parser does not support customizable SELECT element content.',
-		'tests10/line0046'          => 'Unimplemented: This parser does not support customizable SELECT element content.',
-		'tests10/line0259'          => 'Unimplemented: This parser does not support customizable SELECT element content.',
-		'tests10/line0284'          => 'Unimplemented: This parser does not support customizable SELECT element content.',
-		'tests14/line0022'          => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
-		'tests14/line0055'          => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
-		'tests18/line0227'          => 'Unimplemented: This parser does not support customizable SELECT element content.',
-		'tests18/line0240'          => 'Unimplemented: This parser does not support customizable SELECT element content.',
-		'tests19/line0488'          => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
-		'tests19/line0500'          => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
-		'tests19/line1079'          => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
-		'tests19/line1127'          => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
-		'tests19/line1169'          => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
-		'tests19/line1198'          => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
-		'tests19/line1258'          => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
-		'tests2/line0118'           => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
-		'tests2/line0207'           => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
-		'tests2/line0686'           => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
-		'tests2/line0697'           => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
-		'tests2/line0709'           => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
-		'tests22/line0001'          => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
-		'tests22/line0023'          => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
-		'tests22/line0069'          => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
-		'tests22/line0117'          => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
-		'tests26/line0136'          => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
-		'tests6/line0012'           => self::SKIP_HTML_PARSER_CANNOT_HOLD_FORM_OPEN,
-		'tests8/line0133'           => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
-		'tests9/line0048'           => 'Unimplemented: This parser does not support customizable SELECT element content.',
-		'tests9/line0059'           => 'Unimplemented: This parser does not support customizable SELECT element content.',
-		'tests9/line0299'           => 'Unimplemented: This parser does not support customizable SELECT element content.',
-		'tests9/line0324'           => 'Unimplemented: This parser does not support customizable SELECT element content.',
-		'tricky01/line0001'         => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
-		'tricky01/line0019'         => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
-		'tricky01/line0078'         => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
-		'tricky01/line0146'         => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
-		'webkit01/line0231'         => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
-		'webkit01/line0569'         => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
-		'webkit01/line0584'         => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
-		'webkit01/line0601'         => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
-		'webkit02/line0186'         => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
-		'webkit02/line0204'         => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
-		'webkit02/line0224'         => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
-		'webkit02/line0242'         => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
-		'webkit02/line0557'         => 'Unimplemented: This parser does not support customizable SELECT element content.',
-		'webkit02/line0590'         => 'Unimplemented: This parser does not support customizable SELECT element content.',
-		'webkit02/line0611'         => 'Unimplemented: This parser does not support customizable SELECT element content.',
-		'webkit02/line0624'         => 'Unimplemented: This parser does not support customizable SELECT element content.',
-		'webkit02/line0637'         => 'Unimplemented: This parser does not support customizable SELECT element content.',
-		'webkit02/line0652'         => 'Unimplemented: This parser does not support customizable SELECT element content.',
-		'webkit02/line0666'         => 'Unimplemented: This parser does not support customizable SELECT element content.',
-		'webkit02/line0692'         => 'Unimplemented: This parser does not support customizable SELECT element content.',
-		'webkit02/line0706'         => 'Unimplemented: This parser does not support customizable SELECT element content.',
-		'webkit02/line0732'         => 'Unimplemented: This parser does not support customizable SELECT element content.',
-		'webkit02/line0748'         => 'Unimplemented: This parser does not support customizable SELECT element content.',
-	);
-
-	/**
-	 * Skip test files that exercise parser behavior unsupported by the HTML API.
-	 */
-	const SKIP_TEST_PREFIXES = array(
-		'processing-instructions/' => 'Unimplemented: Updated Processing Instruction parsing.',
+		'adoption01/line0001'    => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'adoption01/line0014'    => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'adoption01/line0083'    => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'adoption01/line0030'    => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'adoption01/line0062'    => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'adoption01/line0108'    => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'adoption01/line0124'    => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'adoption01/line0141'    => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'adoption01/line0241'    => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'adoption01/line0281'    => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'adoption02/line0001'    => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'adoption02/line0021'    => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'html5test-com/line0252' => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'noscript01/line0014'    => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
+		'template/line1091'      => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'template/line1595'      => self::SKIP_HTML_PARSER_CANNOT_HOLD_REMOVED_A_OPEN,
+		'tests1/line0237'        => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests1/line0256'        => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests1/line0373'        => self::SKIP_HTML_PARSER_CANNOT_HOLD_REMOVED_A_OPEN,
+		'tests1/line0706'        => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests1/line0784'        => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests1/line0850'        => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests1/line0994'        => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests1/line1015'        => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests1/line1037'        => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests1/line1061'        => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests1/line1086'        => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests1/line1111'        => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests1/line1149'        => self::SKIP_HTML_PARSER_CANNOT_HOLD_REMOVED_A_OPEN,
+		'tests1/line1387'        => self::SKIP_HTML_PARSER_CANNOT_HOLD_REMOVED_A_OPEN,
+		'tests1/line1468'        => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests1/line1484'        => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests1/line1559'        => self::SKIP_HTML_PARSER_CANNOT_HOLD_REMOVED_A_OPEN,
+		'tests14/line0022'       => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
+		'tests14/line0055'       => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
+		'tests19/line0488'       => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
+		'tests19/line0500'       => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
+		'tests19/line1079'       => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
+		'tests19/line1127'       => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests19/line1169'       => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests19/line1198'       => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests19/line1258'       => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests2/line0118'        => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests2/line0207'        => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
+		'tests2/line0686'        => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
+		'tests2/line0697'        => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
+		'tests2/line0709'        => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
+		'tests22/line0001'       => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests22/line0023'       => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests22/line0069'       => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests22/line0117'       => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests26/line0136'       => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests6/line0012'        => self::SKIP_HTML_PARSER_CANNOT_HOLD_FORM_OPEN,
+		'tests8/line0133'        => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tricky01/line0001'      => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tricky01/line0019'      => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tricky01/line0078'      => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tricky01/line0146'      => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'webkit01/line0231'      => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
+		'webkit01/line0569'      => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'webkit01/line0584'      => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'webkit01/line0601'      => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'webkit02/line0186'      => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'webkit02/line0204'      => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'webkit02/line0224'      => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'webkit02/line0242'      => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'webkit02/line0706'      => 'Unsupported: Selectedcontent elements are not populated.',
+		'webkit02/line0748'      => 'Unsupported: Selectedcontent elements are not populated.',
 	);
 
 	/**
@@ -284,12 +250,6 @@ class Tests_HtmlApi_WebPlatformTests extends WP_UnitTestCase {
 
 		if ( array_key_exists( $test_name, self::SKIP_TESTS ) ) {
 			return true;
-		}
-
-		foreach ( array_keys( self::SKIP_TEST_PREFIXES ) as $test_prefix ) {
-			if ( str_starts_with( $test_name, $test_prefix ) ) {
-				return true;
-			}
 		}
 
 		return false;
@@ -522,6 +482,15 @@ class Tests_HtmlApi_WebPlatformTests extends WP_UnitTestCase {
 					$attach( $make_node( "<!-- {$processor->get_modifiable_text()} -->" ) );
 					break;
 
+				case '#processing-instruction':
+					/*
+					 * Processing instructions must be "<?" then the target then,
+					 * unless the data is empty, a space and the data, and finally "?>".
+					 */
+					$pi_data = $processor->get_modifiable_text();
+					$output .= str_repeat( self::TREE_INDENT, $indent_level ) . "<?{$processor->get_tag()} {$pi_data}?>\n";
+					break;
+
 				case '#comment':
 					// Comments must be "<" then "!-- " then the data then " -->".
 					$attach( $make_node( "<!-- {$processor->get_full_comment_text()} -->" ) );
@@ -676,14 +645,6 @@ class Tests_HtmlApi_WebPlatformTests extends WP_UnitTestCase {
 				 * the tree of the parsed DOM. Each node must be represented by a single line. Each line
 				 * must start with "| ", followed by two spaces per parent node that the node has before
 				 * the root document node.
-				 *
-				 * - Element nodes must be represented by a "<" then the tag name string ">", and all the attributes must be given, sorted lexicographically by UTF-16 code unit according to their attribute name string, on subsequent lines, as if they were children of the element node.
-				 * - Attribute nodes must have the attribute name string, then an "=" sign, then the attribute value in double quotes (").
-				 * - Text nodes must be the string, in double quotes. Newlines aren't escaped.
-				 * - Comments must be "<" then "!-- " then the data then " -->".
-				 * - DOCTYPEs must be "<!DOCTYPE " then the name then if either of the system id or public id is non-empty a space, public id in double-quotes, another space an the system id in double-quotes, and then in any case ">".
-				 * - Processing instructions must be "<?", then the target, then a space, then the data and then ">". (The HTML parser cannot emit processing instructions, but scripts can, and the WebVTT to DOM rules can emit them.)
-				 * - Template contents are represented by the string "content" with the children below it.
 				 */
 				case 'document':
 					if ( '|' === $line[0] ) {
@@ -699,13 +660,20 @@ class Tests_HtmlApi_WebPlatformTests extends WP_UnitTestCase {
 
 		fclose( $handle );
 
-		// Return the last result when reaching the end of the file.
-		return array(
-			$test_line_number,
-			$test_context_element,
-			// Remove the trailing newline
-			substr( $test_html, 0, -1 ),
-			$test_dom,
-		);
+		// Yield the last result when reaching the end of the file.
+		if ( $state && ! $test_script_flag ) {
+			// Other tests include the blank line separating them from the next test.
+			if ( ! str_ends_with( $test_dom, "\n\n" ) ) {
+				$test_dom .= "\n";
+			}
+
+			yield array(
+				$test_line_number,
+				$test_context_element,
+				// Remove the trailing newline
+				substr( $test_html, 0, -1 ),
+				$test_dom,
+			);
+		}
 	}
 }
