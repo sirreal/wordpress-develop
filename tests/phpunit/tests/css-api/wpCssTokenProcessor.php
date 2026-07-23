@@ -53,6 +53,12 @@ class Tests_CssApi_WpCssTokenProcessor extends WP_UnitTestCase {
 			if ( null !== $processor->get_token_unit() ) {
 				$token['unit'] = $processor->get_token_unit();
 			}
+			if (
+				WP_CSS_Token_Processor::TOKEN_NUMBER === $type ||
+				WP_CSS_Token_Processor::TOKEN_DIMENSION === $type
+			) {
+				$token['numberType'] = $processor->get_token_type_flag();
+			}
 
 			if ( null !== $keys ) {
 				$token = array_intersect_key( $token, array_flip( $keys ) );
@@ -62,6 +68,291 @@ class Tests_CssApi_WpCssTokenProcessor extends WP_UnitTestCase {
 		}
 
 		return $tokens;
+	}
+
+	/**
+	 * Tests that backslash-newline in a string token contributes nothing to the value.
+	 *
+	 * @ticket 62653
+	 * @dataProvider data_string_backslash_newline
+	 */
+	public function test_string_backslash_newline( string $css, string $expected_value ): void {
+		$processor = WP_CSS_Token_Processor::create( $css );
+
+		$this->assertTrue( $processor->next_token() );
+		$this->assertSame( WP_CSS_Token_Processor::TOKEN_STRING, $processor->get_token_type() );
+		$this->assertSame( $expected_value, $processor->get_token_value() );
+	}
+
+	/**
+	 * Data provider for test_string_backslash_newline().
+	 *
+	 * @return array[]
+	 */
+	public static function data_string_backslash_newline(): array {
+		return array(
+			'backslash-LF'   => array( "'str\\\ning'", 'string' ),
+			'backslash-FF'   => array( "'str\\\fing'", 'string' ),
+			'backslash-CR'   => array( "'str\\\ring'", 'string' ),
+			'backslash-CRLF' => array( "'str\\\r\ning'", 'string' ),
+		);
+	}
+
+	/**
+	 * Tests that backslash-EOF in a string token contributes nothing to the value.
+	 *
+	 * @ticket 62653
+	 */
+	public function test_string_backslash_eof(): void {
+		$processor = WP_CSS_Token_Processor::create( "'string\\" );
+
+		$this->assertTrue( $processor->next_token() );
+		$this->assertSame( WP_CSS_Token_Processor::TOKEN_STRING, $processor->get_token_type() );
+		$this->assertSame( 'string', $processor->get_token_value() );
+	}
+
+	/**
+	 * Tests that backslash-newline in an unquoted URL produces a bad-url token.
+	 *
+	 * @ticket 62653
+	 * @dataProvider data_url_backslash_newline
+	 */
+	public function test_url_backslash_newline( string $css ): void {
+		$processor = WP_CSS_Token_Processor::create( $css );
+
+		$this->assertTrue( $processor->next_token() );
+		$this->assertSame( WP_CSS_Token_Processor::TOKEN_BAD_URL, $processor->get_token_type() );
+	}
+
+	/**
+	 * Data provider for test_url_backslash_newline().
+	 *
+	 * @return array[]
+	 */
+	public static function data_url_backslash_newline(): array {
+		return array(
+			'backslash-LF'   => array( "url(ab\\\ncd)" ),
+			'backslash-FF'   => array( "url(ab\\\fcd)" ),
+			'backslash-CR'   => array( "url(ab\\\rcd)" ),
+			'backslash-CRLF' => array( "url(ab\\\r\ncd)" ),
+		);
+	}
+
+	/**
+	 * Tests that backslash-EOF in an unquoted URL produces U+FFFD in the value.
+	 *
+	 * @ticket 62653
+	 */
+	public function test_url_backslash_eof(): void {
+		$processor = WP_CSS_Token_Processor::create( 'url(string\\' );
+
+		$this->assertTrue( $processor->next_token() );
+		$this->assertSame( WP_CSS_Token_Processor::TOKEN_URL, $processor->get_token_type() );
+		$this->assertSame( "string\u{FFFD}", $processor->get_token_value() );
+	}
+
+	/**
+	 * Tests that backslash-newline stops an ident sequence.
+	 *
+	 * @ticket 62653
+	 * @dataProvider data_ident_backslash_newline
+	 */
+	public function test_ident_backslash_newline( string $css ): void {
+		$processor = WP_CSS_Token_Processor::create( $css );
+
+		$this->assertTrue( $processor->next_token() );
+		$this->assertSame( WP_CSS_Token_Processor::TOKEN_IDENT, $processor->get_token_type() );
+		$this->assertSame( 'abc', $processor->get_token_value() );
+	}
+
+	/**
+	 * Data provider for test_ident_backslash_newline().
+	 *
+	 * @return array[]
+	 */
+	public static function data_ident_backslash_newline(): array {
+		return array(
+			'backslash-LF'   => array( "abc\\\n" ),
+			'backslash-FF'   => array( "abc\\\f" ),
+			'backslash-CR'   => array( "abc\\\r" ),
+			'backslash-CRLF' => array( "abc\\\r\n" ),
+		);
+	}
+
+	/**
+	 * Tests that backslash-EOF in an ident produces U+FFFD in the value.
+	 *
+	 * @ticket 62653
+	 */
+	public function test_ident_backslash_eof(): void {
+		$processor = WP_CSS_Token_Processor::create( 'abc\\' );
+
+		$this->assertTrue( $processor->next_token() );
+		$this->assertSame( WP_CSS_Token_Processor::TOKEN_IDENT, $processor->get_token_type() );
+		$this->assertSame( "abc\u{FFFD}", $processor->get_token_value() );
+	}
+
+	/**
+	 * Bad string tokens have no associated value.
+	 *
+	 * @ticket 62653
+	 */
+	public function test_bad_string_token_value_is_null(): void {
+		$processor = WP_CSS_Token_Processor::create( "'str\ning'" );
+
+		$this->assertTrue( $processor->next_token() );
+		$this->assertSame( WP_CSS_Token_Processor::TOKEN_BAD_STRING, $processor->get_token_type() );
+		$this->assertNull( $processor->get_token_value() );
+	}
+
+	/**
+	 * Tests that hash tokens expose the proper type flag.
+	 *
+	 * @ticket 62653
+	 * @dataProvider data_hash_tokens_expose_type_flags
+	 */
+	public function test_hash_tokens_expose_type_flags( string $css, array $expected_tokens ): void {
+		$processor = WP_CSS_Token_Processor::create( $css );
+
+		foreach ( $expected_tokens as $expected_token ) {
+			$this->assertTrue( $processor->next_token() );
+			$this->assertSame( $expected_token['type'], $processor->get_token_type() );
+			$this->assertSame( $expected_token['raw'], $processor->get_unnormalized_token() );
+			$this->assertSame( $expected_token['type_flag'], $processor->get_token_type_flag() );
+		}
+
+		$this->assertFalse( $processor->next_token() );
+		$this->assertNull( $processor->get_token_type_flag() );
+	}
+
+	/**
+	 * Data provider for test_hash_tokens_expose_type_flags().
+	 *
+	 * @return array[]
+	 */
+	public static function data_hash_tokens_expose_type_flags(): array {
+		return array(
+			'id hash'                           => array(
+				'#id',
+				array(
+					array(
+						'type'      => WP_CSS_Token_Processor::TOKEN_HASH,
+						'raw'       => '#id',
+						'type_flag' => WP_CSS_Token_Processor::HASH_TOKEN_ID,
+					),
+				),
+			),
+			'unrestricted hash starting digit'  => array(
+				'#1id',
+				array(
+					array(
+						'type'      => WP_CSS_Token_Processor::TOKEN_HASH,
+						'raw'       => '#1id',
+						'type_flag' => WP_CSS_Token_Processor::HASH_TOKEN_UNRESTRICTED,
+					),
+				),
+			),
+			'id hash starting hyphen ident'     => array(
+				'#-id',
+				array(
+					array(
+						'type'      => WP_CSS_Token_Processor::TOKEN_HASH,
+						'raw'       => '#-id',
+						'type_flag' => WP_CSS_Token_Processor::HASH_TOKEN_ID,
+					),
+				),
+			),
+			'unrestricted hash starting hyphen' => array(
+				'#-1id',
+				array(
+					array(
+						'type'      => WP_CSS_Token_Processor::TOKEN_HASH,
+						'raw'       => '#-1id',
+						'type_flag' => WP_CSS_Token_Processor::HASH_TOKEN_UNRESTRICTED,
+					),
+				),
+			),
+			'id hash starting escape'           => array(
+				'#\\@special',
+				array(
+					array(
+						'type'      => WP_CSS_Token_Processor::TOKEN_HASH,
+						'raw'       => '#\\@special',
+						'type_flag' => WP_CSS_Token_Processor::HASH_TOKEN_ID,
+					),
+				),
+			),
+			'hash delimiter has no type flag'   => array(
+				'#',
+				array(
+					array(
+						'type'      => WP_CSS_Token_Processor::TOKEN_DELIM,
+						'raw'       => '#',
+						'type_flag' => null,
+					),
+				),
+			),
+			'following token clears type flag'  => array(
+				'#id .',
+				array(
+					array(
+						'type'      => WP_CSS_Token_Processor::TOKEN_HASH,
+						'raw'       => '#id',
+						'type_flag' => WP_CSS_Token_Processor::HASH_TOKEN_ID,
+					),
+					array(
+						'type'      => WP_CSS_Token_Processor::TOKEN_WHITESPACE,
+						'raw'       => ' ',
+						'type_flag' => null,
+					),
+					array(
+						'type'      => WP_CSS_Token_Processor::TOKEN_DELIM,
+						'raw'       => '.',
+						'type_flag' => null,
+					),
+				),
+			),
+		);
+	}
+
+	/**
+	 * Tests token type flags for numeric and non-numeric tokens.
+	 *
+	 * @dataProvider data_token_type_flag
+	 */
+	public function test_token_type_flag( string $css, ?string $expected_type ): void {
+		$processor = WP_CSS_Token_Processor::create( $css );
+
+		$this->assertTrue( $processor->next_token() );
+		$this->assertSame( $expected_type, $processor->get_token_type_flag() );
+	}
+
+	/**
+	 * Data provider for test_token_type_flag().
+	 *
+	 * @return array[]
+	 */
+	public static function data_token_type_flag(): array {
+		return array(
+			'integer'               => array( '42', 'integer' ),
+			'positive integer'      => array( '+42', 'integer' ),
+			'negative integer'      => array( '-42', 'integer' ),
+			'zero'                  => array( '0', 'integer' ),
+			'decimal'               => array( '42.0', 'number' ),
+			'decimal with fraction' => array( '42.5', 'number' ),
+			'leading decimal point' => array( '.5', 'number' ),
+			'exponent lowercase'    => array( '1e2', 'number' ),
+			'exponent uppercase'    => array( '1E2', 'number' ),
+			'exponent with plus'    => array( '1E+2', 'number' ),
+			'exponent with minus'   => array( '1e-2', 'number' ),
+			'dimension integer'     => array( '10px', 'integer' ),
+			'dimension decimal'     => array( '10.5px', 'number' ),
+			'dimension exponent'    => array( '1e2px', 'number' ),
+			'percentage integer'    => array( '20%', null ),
+			'percentage decimal'    => array( '20.0%', null ),
+			'ident token'           => array( 'red', null ),
+			'string token'          => array( '"hello"', null ),
+		);
 	}
 
 	/**
@@ -92,6 +383,48 @@ class Tests_CssApi_WpCssTokenProcessor extends WP_UnitTestCase {
 
 		$processor     = WP_CSS_Token_Processor::create( $css );
 		$actual_tokens = $this->collect_tokens( $processor, array( 'type', 'raw', 'normalized', 'value', 'unit' ) );
+		$this->assertSame( $expected, $actual_tokens );
+	}
+
+	public function test_invalid_utf8_in_normal_segment_combined_with_escape(): void {
+		$css = ".test\xF1\\41name";
+
+		$expected = array(
+			array(
+				'type'  => WP_CSS_Token_Processor::TOKEN_DELIM,
+				'raw'   => '.',
+				'value' => '.',
+			),
+			array(
+				'type'  => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'   => "test\xF1\\41name",
+				'value' => "test\u{FFFD}Aname",
+			),
+		);
+
+		$processor     = WP_CSS_Token_Processor::create( $css );
+		$actual_tokens = $this->collect_tokens( $processor, array( 'type', 'raw', 'value' ) );
+		$this->assertSame( $expected, $actual_tokens );
+	}
+
+	public function test_invalid_utf8_as_escaped_character(): void {
+		$css = ".a\\\xF1b";
+
+		$expected = array(
+			array(
+				'type'  => WP_CSS_Token_Processor::TOKEN_DELIM,
+				'raw'   => '.',
+				'value' => '.',
+			),
+			array(
+				'type'  => WP_CSS_Token_Processor::TOKEN_IDENT,
+				'raw'   => "a\\\xF1b",
+				'value' => "a\u{FFFD}b",
+			),
+		);
+
+		$processor     = WP_CSS_Token_Processor::create( $css );
+		$actual_tokens = $this->collect_tokens( $processor, array( 'type', 'raw', 'value' ) );
 		$this->assertSame( $expected, $actual_tokens );
 	}
 
@@ -2236,6 +2569,8 @@ CSS;
 		$css       = 'color: red; background: url(old.jpg);';
 		$processor = WP_CSS_Token_Processor::create( $css );
 
+		$this->setExpectedIncorrectUsage( 'WP_CSS_Token_Processor::set_token_value' );
+
 		while ( $processor->next_token() ) {
 			$token_type = $processor->get_token_type();
 
@@ -2412,7 +2747,7 @@ CSS;
 	}
 
 	/**
-	 * Tests that safe ASCII characters are preserved in quoted URLs.
+	 * Tests that invalid UTF-8 sequences are replaced in quoted URLs.
 	 */
 	public function test_set_token_with_invalid_utf8_sequence(): void {
 		$css       = 'background: url(old.jpg);';
@@ -2420,15 +2755,41 @@ CSS;
 
 		while ( $processor->next_token() ) {
 			if ( WP_CSS_Token_Processor::TOKEN_URL === $processor->get_token_type() ) {
-				// URL with safe characters: letters, digits, hyphens, underscores, dots, slashes.
 				$processor->set_token_value( "\xC0.jpg" );
 			}
 		}
 
 		$updated = $processor->get_updated_css();
 
-		// Invalid UTF-8 sequence is preserved as-is – garbage in, garbage out.
-		$this->assertSame( "background: url(\"\xC0.jpg\");", $updated );
+		$this->assertSame( 'background: url("�.jpg");', $updated );
+	}
+
+	/**
+	 * Tests that decode_range() respects the token's length boundary.
+	 *
+	 * The escape sequence \41 (= "A") triggers the slow path. The CSS after
+	 * the closing quote must not appear in the token value.
+	 */
+	public function test_decode_range_respects_length_boundary(): void {
+		$processor = WP_CSS_Token_Processor::create( '"hello\\41 world"; color: red;' );
+
+		$this->assertTrue( $processor->next_token() );
+		$this->assertSame( WP_CSS_Token_Processor::TOKEN_STRING, $processor->get_token_type() );
+		$this->assertSame( 'helloAworld', $processor->get_token_value() );
+		$this->assertSame( '"helloAworld"', $processor->get_normalized_token() );
+	}
+
+	/**
+	 * Tests that decode_escape_at() consumes at most six hex digits.
+	 *
+	 * @see https://www.w3.org/TR/css-syntax-3/#consume-escaped-code-point
+	 */
+	public function test_decode_escape_at_hex_limit_is_six_digits(): void {
+		$processor = WP_CSS_Token_Processor::create( '"\\0000411rest"' );
+
+		$this->assertTrue( $processor->next_token() );
+		$this->assertSame( WP_CSS_Token_Processor::TOKEN_STRING, $processor->get_token_type() );
+		$this->assertSame( 'A1rest', $processor->get_token_value() );
 	}
 
 	/**

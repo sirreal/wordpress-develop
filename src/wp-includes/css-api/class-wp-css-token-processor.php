@@ -99,23 +99,25 @@ class WP_CSS_Token_Processor {
 	 *
 	 * @see https://www.w3.org/TR/css-syntax-3/#typedef-bad-string-token
 	 */
-	public const TOKEN_BAD_STRING    = 'bad-string-token';
-	public const TOKEN_HASH          = 'hash-token';
-	public const TOKEN_DELIM         = 'delim-token';
-	public const TOKEN_NUMBER        = 'number-token';
-	public const TOKEN_PERCENTAGE    = 'percentage-token';
-	public const TOKEN_DIMENSION     = 'dimension-token';
-	public const TOKEN_AT_KEYWORD    = 'at-keyword-token';
-	public const TOKEN_COLON         = 'colon-token';
-	public const TOKEN_SEMICOLON     = 'semicolon-token';
-	public const TOKEN_COMMA         = 'comma-token';
-	public const TOKEN_LEFT_PAREN    = '(-token';
-	public const TOKEN_RIGHT_PAREN   = ')-token';
-	public const TOKEN_LEFT_BRACKET  = '[-token';
-	public const TOKEN_RIGHT_BRACKET = ']-token';
-	public const TOKEN_LEFT_BRACE    = '{-token';
-	public const TOKEN_RIGHT_BRACE   = '}-token';
-	public const TOKEN_FUNCTION      = 'function-token';
+	public const TOKEN_BAD_STRING        = 'bad-string-token';
+	public const TOKEN_HASH              = 'hash-token';
+	public const HASH_TOKEN_ID           = 'id';
+	public const HASH_TOKEN_UNRESTRICTED = 'unrestricted';
+	public const TOKEN_DELIM             = 'delim-token';
+	public const TOKEN_NUMBER            = 'number-token';
+	public const TOKEN_PERCENTAGE        = 'percentage-token';
+	public const TOKEN_DIMENSION         = 'dimension-token';
+	public const TOKEN_AT_KEYWORD        = 'at-keyword-token';
+	public const TOKEN_COLON             = 'colon-token';
+	public const TOKEN_SEMICOLON         = 'semicolon-token';
+	public const TOKEN_COMMA             = 'comma-token';
+	public const TOKEN_LEFT_PAREN        = '(-token';
+	public const TOKEN_RIGHT_PAREN       = ')-token';
+	public const TOKEN_LEFT_BRACKET      = '[-token';
+	public const TOKEN_RIGHT_BRACKET     = ']-token';
+	public const TOKEN_LEFT_BRACE        = '{-token';
+	public const TOKEN_RIGHT_BRACE       = '}-token';
+	public const TOKEN_FUNCTION          = 'function-token';
 
 	/**
 	 * URL tokens represent unquoted URLs in url() notation.
@@ -209,6 +211,21 @@ class WP_CSS_Token_Processor {
 	private $token_type = null;
 
 	/**
+	 * The type flag for the current token, if any.
+	 *
+	 * Hash tokens carry an "id" or "unrestricted" flag. Per CSS Syntax Level 3,
+	 * <number-token> and <dimension-token> have a type flag indicating whether
+	 * the number was written as an integer or a number (with decimal point or
+	 * exponent). <percentage-token> does not have a type flag.
+	 *
+	 * @see https://www.w3.org/TR/css-syntax-3/#consume-number
+	 *
+	 * @var string|null
+	 * @phpstan-var 'id'|'unrestricted'|'integer'|'number'|null
+	 */
+	private $token_type_flag = null;
+
+	/**
 	 * The byte offset at which the current token starts.
 	 *
 	 * Example:
@@ -259,15 +276,17 @@ class WP_CSS_Token_Processor {
 	private $token_value_length = null;
 
 	/**
-	 * The string value of the current token.
+	 * A cache for the decoded and normalized token value.
 	 *
-	 * For numbers, this is a float.
-	 * For identifiers/functions/strings/URLs with escapes, this is a decoded string.
-	 * Otherwise, it's null and the value is computed from token indices.
+	 * - `false` indicates that the value has not been computed.
+	 * - `null` is used for token types without an associated value: whitespace,
+	 *   bad-url, comment, punctuation, etc.
+	 * - `string` is used for token types with an associated value: ident, string,
+	 *   function, url, etc.
 	 *
-	 * @var string|float|null
+	 * @var string|null|false
 	 */
-	private $token_value = null;
+	private $token_value = false;
 
 	/**
 	 * The unit of the current token, e.g. "px", "em", "deg", etc.
@@ -407,9 +426,11 @@ class WP_CSS_Token_Processor {
 					// Create a <hash-token>.
 					++$this->at;
 
-					// We skip this check as we don't track the type flag:
 					// > If the next 3 input code points would start an ident sequence,
 					// > set the <hash-token>'s type flag to "id".
+					$this->token_type_flag = $this->check_if_3_code_points_start_an_ident_sequence( $this->at )
+						? self::HASH_TOKEN_ID
+						: self::HASH_TOKEN_UNRESTRICTED;
 
 					// Consume an ident sequence, and set the <hash-token>'s value to the returned string.
 					$this->consume_ident_sequence();
@@ -609,6 +630,24 @@ class WP_CSS_Token_Processor {
 	}
 
 	/**
+	 * Gets the current token's type flag, if it has one.
+	 *
+	 * Some token types have an additional flag:
+	 * - Hash tokens have an "id" or "unrestricted" flag.
+	 * - Number and dimension tokens have an "integer" flag when the number was
+	 *   written without a decimal point or exponent, and a "number" flag otherwise.
+	 * - Percentage tokens do not have a type flag.
+	 *
+	 * @see https://www.w3.org/TR/css-syntax-3/#consume-number
+	 *
+	 * @return string|null
+	 * @phpstan-return 'id'|'unrestricted'|'integer'|'number'|null
+	 */
+	public function get_token_type_flag(): ?string {
+		return $this->token_type_flag;
+	}
+
+	/**
 	 * Gets the normalized token text from the CSS source.
 	 *
 	 * Returns the token with CSS normalization and escape decoding applied:
@@ -626,9 +665,10 @@ class WP_CSS_Token_Processor {
 			return null;
 		}
 
-		return $this->decode_string_or_url(
+		return $this->decode_range(
 			$this->token_starts_at,
-			$this->token_length
+			$this->token_length,
+			self::TOKEN_STRING === $this->token_type
 		);
 	}
 
@@ -665,8 +705,8 @@ class WP_CSS_Token_Processor {
 	 * @see https://www.w3.org/TR/css-syntax-3/#token-value
 	 * @return string|null
 	 */
-	public function get_token_value() {
-		if ( null === $this->token_value ) {
+	public function get_token_value(): ?string {
+		if ( false === $this->token_value ) {
 			if ( null === $this->token_starts_at || null === $this->token_length ) {
 				return null;
 			}
@@ -674,34 +714,47 @@ class WP_CSS_Token_Processor {
 			switch ( $this->token_type ) {
 				case self::TOKEN_HASH:
 					// Hash value starts after the # character.
-					$this->token_value = $this->decode_string_or_url( $this->token_starts_at + 1, $this->token_length - 1 );
+					$this->token_value = $this->decode_range( $this->token_starts_at + 1, $this->token_length - 1 );
 					break;
 
 				case self::TOKEN_AT_KEYWORD:
 					// At-keyword value starts after the @ character.
-					$this->token_value = $this->decode_string_or_url( $this->token_starts_at + 1, $this->token_length - 1 );
+					$this->token_value = $this->decode_range( $this->token_starts_at + 1, $this->token_length - 1 );
 					break;
 
 				case self::TOKEN_FUNCTION:
 					// Function name is everything except the final (.
-					$this->token_value = $this->decode_string_or_url( $this->token_starts_at, $this->token_length - 1 );
+					$this->token_value = $this->decode_range( $this->token_starts_at, $this->token_length - 1 );
 					break;
 
 				case self::TOKEN_IDENT:
 					// Identifier is the entire token.
-					$this->token_value = $this->decode_string_or_url( $this->token_starts_at, $this->token_length );
+					$this->token_value = $this->decode_range( $this->token_starts_at, $this->token_length );
+					break;
+
+				case self::TOKEN_BAD_STRING:
+					$this->token_value = null;
 					break;
 
 				case self::TOKEN_STRING:
-				case self::TOKEN_BAD_STRING:
-				case self::TOKEN_URL:
-					// Decode and cache the string/URL value.
 					if ( null !== $this->token_value_starts_at && null !== $this->token_value_length ) {
-						$this->token_value = $this->decode_string_or_url(
+						$this->token_value = $this->decode_range(
+							$this->token_value_starts_at,
+							$this->token_value_length,
+							true
+						);
+					} else {
+						$this->token_value = null;
+					}
+					break;
+
+				case self::TOKEN_URL:
+					// Decode and cache the URL value.
+					if ( null !== $this->token_value_starts_at && null !== $this->token_value_length ) {
+						$this->token_value = $this->decode_range(
 							$this->token_value_starts_at,
 							$this->token_value_length
 						);
-						$this->token_value = $this->token_value;
 					} else {
 						$this->token_value = null;
 					}
@@ -709,7 +762,7 @@ class WP_CSS_Token_Processor {
 
 				case self::TOKEN_DELIM:
 					// Delim value is the single code point.
-					$this->token_value = $this->decode_string_or_url( $this->token_starts_at, $this->token_length );
+					$this->token_value = $this->decode_range( $this->token_starts_at, $this->token_length );
 					break;
 
 				case self::TOKEN_NUMBER:
@@ -908,9 +961,10 @@ class WP_CSS_Token_Processor {
 	 */
 	private function after_token(): void {
 		$this->token_type            = null;
+		$this->token_type_flag       = null;
 		$this->token_starts_at       = null;
 		$this->token_length          = null;
-		$this->token_value           = null;
+		$this->token_value           = false;
 		$this->token_unit            = null;
 		$this->token_value_starts_at = null;
 		$this->token_value_length    = null;
@@ -1031,8 +1085,6 @@ class WP_CSS_Token_Processor {
 	 * Numbers can be integers or decimals, with optional sign and exponent.
 	 * They can be followed by % (percentage) or an identifier (dimension).
 	 *
-	 * @TODO: Keep track of the "type" flag ("integer" or "number").
-	 *
 	 * @see https://www.w3.org/TR/css-syntax-3/#consume-numeric-token
 	 * @see https://www.w3.org/TR/css-syntax-3/#consume-number
 	 *
@@ -1040,6 +1092,8 @@ class WP_CSS_Token_Processor {
 	 */
 	private function consume_numeric(): bool {
 		// Consume a number and let number be the result.
+		// The type flag defaults to "integer".
+		$number_type = 'integer';
 
 		// If the next input code point is U+002B PLUS SIGN (+) or U+002D HYPHEN-MINUS (-),
 		// consume it and append it to repr.
@@ -1062,6 +1116,8 @@ class WP_CSS_Token_Processor {
 		) {
 			// Consume them.
 			++$this->at;
+			// Set type to "number".
+			$number_type = 'number';
 			// While the next input code point is a digit, consume it and append it to repr.
 			$digits = strspn( $this->css, '0123456789', $this->at );
 			if ( $digits > 0 ) {
@@ -1092,6 +1148,8 @@ class WP_CSS_Token_Processor {
 				}
 
 				if ( $has_exp ) {
+					// Set type to "number".
+					$number_type = 'number';
 					// While the next input code point is a digit, consume it and append it to repr.
 					$digits = strspn( $this->css, '0123456789', $this->at );
 					if ( $digits > 0 ) {
@@ -1116,14 +1174,16 @@ class WP_CSS_Token_Processor {
 			// Consume an ident sequence. Set the <dimension-token>'s unit to the returned value.
 			$unit_starts_at = $this->at;
 			$this->consume_ident_sequence();
-			$this->token_unit   = $this->decode_string_or_url( $unit_starts_at, $this->at - $unit_starts_at );
-			$this->token_type   = self::TOKEN_DIMENSION;
-			$this->token_length = $this->at - $this->token_starts_at;
+			$this->token_unit      = $this->decode_range( $unit_starts_at, $this->at - $unit_starts_at );
+			$this->token_type      = self::TOKEN_DIMENSION;
+			$this->token_type_flag = $number_type;
+			$this->token_length    = $this->at - $this->token_starts_at;
 			return true;
 		}
 
 		// Otherwise, if the next input code point is U+0025 PERCENTAGE SIGN (%), consume it.
 		// Create a <percentage-token> with the same value as number, and return it.
+		// Note: percentage tokens do not have a type flag per spec.
 		if ( $this->at < $this->length && '%' === $this->css[ $this->at ] ) {
 			++$this->at;
 			$this->token_type   = self::TOKEN_PERCENTAGE;
@@ -1132,8 +1192,9 @@ class WP_CSS_Token_Processor {
 		}
 
 		// Otherwise, create a <number-token> with the same value and type flag as number, and return it.
-		$this->token_type   = self::TOKEN_NUMBER;
-		$this->token_length = $this->at - $this->token_starts_at;
+		$this->token_type      = self::TOKEN_NUMBER;
+		$this->token_type_flag = $number_type;
+		$this->token_length    = $this->at - $this->token_starts_at;
 		return true;
 	}
 
@@ -1151,7 +1212,7 @@ class WP_CSS_Token_Processor {
 		// Consume an ident sequence, and let string be the result.
 		$ident_start = $this->at;
 		$decoded     = $this->consume_ident_sequence();
-		$string      = $decoded ?? $this->decode_string_or_url( $ident_start, $this->at - $ident_start );
+		$string      = $decoded ?? $this->decode_range( $ident_start, $this->at - $ident_start );
 
 		// If string's value is an ASCII case-insensitive match for "url",
 		// and the next input code point is U+0028 LEFT PARENTHESIS (().
@@ -1470,19 +1531,15 @@ class WP_CSS_Token_Processor {
 	}
 
 	/**
-	 * Decodes a string or URL value with escape sequences and normalization.
+	 * Decodes and normalizes ident-like or string CSS values from a byte range.
 	 *
-	 * Fast path: If the slice contains no special characters, returns the raw
-	 * substring with almost zero allocations.
-	 *
-	 * Slow path: Builds the decoded string by optionally processing escapes and
-	 * normalizing line endings and null bytes.
-	 *
-	 * @param int $start           Start byte offset.
-	 * @param int $length          Length of the substring to decode.
-	 * @return string Decoded/normalized string.
+	 * @param int  $start          Start byte offset.
+	 * @param int  $length         Length of the substring to decode.
+	 * @param bool $string_escapes Optional, default false. When true, apply additional escape
+	 *                             rules that apply only to string tokens.
+	 * @return string Decoded and normalized string.
 	 */
-	private function decode_string_or_url( int $start, int $length ): string {
+	private function decode_range( int $start, int $length, bool $string_escapes = false ): string {
 		// Fast path: check if any processing is needed.
 		$slice         = wp_scrub_utf8( substr( $this->css, $start, $length ) );
 		$special_chars = "\\\r\f\x00";
@@ -1497,13 +1554,11 @@ class WP_CSS_Token_Processor {
 		$end     = $start + $length;
 
 		while ( $at < $end ) {
-			// Find next special character.
-			$normal_len = strcspn( $this->css, $special_chars, $at );
+			// Find next special character within the token boundary.
+			$normal_len = strcspn( $this->css, $special_chars, $at, $end - $at );
 			if ( $normal_len > 0 ) {
-				// Clamp to not exceed the end boundary.
-				$normal_len = min( $normal_len, $end - $at );
-				$decoded   .= substr( $this->css, $at, $normal_len );
-				$at        += $normal_len;
+				$decoded .= wp_scrub_utf8( substr( $this->css, $at, $normal_len ) );
+				$at      += $normal_len;
 			}
 
 			if ( $at >= $end ) {
@@ -1514,6 +1569,30 @@ class WP_CSS_Token_Processor {
 
 			// Handle escapes (if enabled).
 			if ( '\\' === $char ) {
+				if ( $string_escapes ) {
+					if ( $at + 1 >= $end ) {
+						// Backslash-EOF: consume the backslash and stop.
+						++$at;
+						continue;
+					}
+
+					$next = $this->css[ $at + 1 ];
+					if ( "\n" === $next || "\f" === $next ) {
+						// Backslash followed by LF or FF is a string line continuation.
+						$at += 2;
+						continue;
+					}
+
+					if ( "\r" === $next ) {
+						// Backslash followed by CR or CRLF is a string line continuation.
+						$at += 2;
+						if ( $at < $end && "\n" === $this->css[ $at ] ) {
+							++$at;
+						}
+						continue;
+					}
+				}
+
 				if ( $this->is_valid_escape( $at ) ) {
 					++$at;
 					$decoded .= $this->decode_escape_at( $at, $bytes_consumed );
@@ -1581,13 +1660,11 @@ class WP_CSS_Token_Processor {
 			return "\u{FFFD}";
 		}
 
-		// Hex digits.
-		$hex_len = strspn( $this->css, '0123456789ABCDEFabcdef', $at );
+		// Hex digits (CSS spec allows at most 6).
+		$hex_len = strspn( $this->css, '0123456789ABCDEFabcdef', $at, 6 );
 		if ( $hex_len > 0 ) {
-			// Consume up to 6 hex digits.
-			$hex_len = min( $hex_len, 6 );
-			$hex     = substr( $this->css, $at, $hex_len );
-			$at     += $hex_len;
+			$hex = substr( $this->css, $at, $hex_len );
+			$at += $hex_len;
 
 			// If the next input code point is whitespace, consume it as well.
 			if ( $at < $this->length ) {
@@ -1604,8 +1681,17 @@ class WP_CSS_Token_Processor {
 			}
 
 			$bytes_consumed = $at - $offset;
+			$code_point     = hexdec( $hex );
+			if (
+				$code_point <= 0 ||
+				( $code_point >= 0xD800 && $code_point <= 0xDFFF ) ||
+				$code_point > 0x10FFFF
+			) {
+				return "\u{FFFD}";
+			}
+
 			// Convert the hex digits to a UTF-8 string.
-			return WP_HTML_Decoder::code_point_to_utf8_bytes( hexdec( $hex ) );
+			return WP_HTML_Decoder::code_point_to_utf8_bytes( $code_point );
 		}
 
 		// Anything else.
@@ -1619,21 +1705,13 @@ class WP_CSS_Token_Processor {
 		$new_at         = $at;
 		$invalid_length = 0;
 		if ( 1 !== _wp_scan_utf8( $this->css, $new_at, $invalid_length, null, 1 ) ) {
-			/**
-			 * Trouble ahead!
-			 * Bytes at $at are not a valid UTF-8 sequence.
-			 *
-			 * We'll move forward by $invalid_length bytes and continue processing.
-			 * Later on, during the string decoding, we'll replace the invalid bytes with U+FFFD
-			 * via maximal subpart”replacement.
-			 */
-			$matched_bytes = $invalid_length;
-		} else {
-			$matched_bytes = $new_at - $at;
+			// Consume the invalid subpart and return U+FFFD.
+			$bytes_consumed = $invalid_length;
+			return "\u{FFFD}";
 		}
 
-		$bytes_consumed = $matched_bytes;
-		return substr( $this->css, $at, $matched_bytes );
+		$bytes_consumed = $new_at - $at;
+		return substr( $this->css, $at, $bytes_consumed );
 	}
 
 	/**
