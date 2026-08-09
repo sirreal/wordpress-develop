@@ -1,0 +1,27 @@
+{
+  "$schema": "https://playground.wordpress.net/blueprint-schema.json",
+  "meta": {
+    "title": "WordPress Core Code Reference preview",
+    "author": "WordPress",
+    "description": "Latest successful Core Code Reference from sirreal/wordpress-develop@37384b8de76ec1824bb0b1dafe62fb1c46fd9df5. Generated 2026-08-09T19:00:47.509Z. https://github.com/sirreal/wordpress-develop/actions/runs/31330503758"
+  },
+  "preferredVersions": {
+    "php": "8.4",
+    "wp": "7.1-RC2"
+  },
+  "landingPage": "/reference/",
+  "login": false,
+  "features": {
+    "networking": false
+  },
+  "steps": [
+    {
+      "step": "unzip",
+      "zipFile": {
+        "resource": "url",
+        "url": "https://wordpress-playground-cors-proxy.net/https://github.com/sirreal/wordpress-develop/releases/download/code-reference-playground-preview/code-reference-trunk-37384b8de76ec1824bb0b1dafe62fb1c46fd9df5-31330503758-1.zip"
+      },
+      "extractToPath": "/"
+    }
+  ]
+}
