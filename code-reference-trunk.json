@@ -3,7 +3,7 @@
   "meta": {
     "title": "WordPress Core Code Reference preview",
     "author": "WordPress",
-    "description": "Latest successful Core Code Reference from sirreal/wordpress-develop@7670d3b481d8fdd403cf6bd5d2d7449ca9d17fd1. Generated 2026-08-10T03:45:04.613Z. https://github.com/sirreal/wordpress-develop/actions/runs/31353437218"
+    "description": "Latest successful Core Code Reference from sirreal/wordpress-develop@65ef19f3dec3c40a994ff4bf175ab7184fa77364. Generated 2026-08-10T04:56:29.511Z. https://github.com/sirreal/wordpress-develop/actions/runs/31357023744"
   },
   "preferredVersions": {
     "php": "8.4",
@@ -19,7 +19,7 @@
       "step": "unzip",
       "zipFile": {
         "resource": "url",
-        "url": "https://wordpress-playground-cors-proxy.net/https://github.com/sirreal/wordpress-develop/releases/download/code-reference-playground-preview/code-reference-trunk-7670d3b481d8fdd403cf6bd5d2d7449ca9d17fd1-31353437218-1.zip"
+        "url": "https://wordpress-playground-cors-proxy.net/https://github.com/sirreal/wordpress-develop/releases/download/code-reference-playground-preview/code-reference-trunk-65ef19f3dec3c40a994ff4bf175ab7184fa77364-31357023744-1.zip"
       },
       "extractToPath": "/"
     }
