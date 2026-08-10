@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 export const RELEASE_TAG = 'code-reference-playground-preview';
 export const COMMENT_MARKER = '<!-- code-reference-docs-preview -->';
 export const PLAYGROUND_ORIGIN = 'https://playground.wordpress.net';
-export const CORS_PROXY = 'https://wordpress-playground-cors-proxy.net/';
+export const CORS_PROXY = 'https://example.invalid/';
 export const SNAPSHOT_BYTES_LIMIT = 104857600;
 
 const FULL_COMMIT = /^[0-9a-f]{40}$/;
