@@ -75,6 +75,20 @@ abstract class WP_UnitTestCase_Base extends PHPUnit_Adapter_TestCase {
 
 		$class = get_called_class();
 
+		/*
+		 * Record the contents of the uploads directory before any class fixtures
+		 * are created, so that `remove_added_uploads()` can tell pre-existing
+		 * files apart from files added by the tests.
+		 *
+		 * This must happen before `wpSetUpBeforeClass()` runs. Capturing it later
+		 * would treat files uploaded by the first class's fixtures as
+		 * pre-existing, permanently exempting them from cleanup and leaving them
+		 * on disk for the rest of the run.
+		 */
+		if ( null === self::$ignore_files ) {
+			self::$ignore_files = self::scan_user_uploads();
+		}
+
 		if ( method_exists( $class, 'wpSetUpBeforeClass' ) ) {
 			call_user_func( array( $class, 'wpSetUpBeforeClass' ), static::factory() );
 		}
@@ -111,10 +125,6 @@ abstract class WP_UnitTestCase_Base extends PHPUnit_Adapter_TestCase {
 		set_time_limit( 0 );
 
 		$this->factory = static::factory();
-
-		if ( ! self::$ignore_files ) {
-			self::$ignore_files = $this->scan_user_uploads();
-		}
 
 		if ( ! self::$hooks_saved ) {
 			$this->_backup_hooks();
@@ -1552,9 +1562,10 @@ abstract class WP_UnitTestCase_Base extends PHPUnit_Adapter_TestCase {
 	/**
 	 * Deletes files added to the `uploads` directory during tests.
 	 *
-	 * This method works in tandem with the `set_up()` and `rmdir()` methods:
-	 * - `set_up()` scans the `uploads` directory before every test, and stores
-	 *   its contents inside of the `$ignore_files` property.
+	 * This method works in tandem with the `set_up_before_class()` and `rmdir()` methods:
+	 * - `set_up_before_class()` scans the `uploads` directory once, before any
+	 *   test or class fixture has run, and stores its contents inside of the
+	 *   `$ignore_files` property.
 	 * - `rmdir()` and its helper methods only delete files that are not listed
 	 *   in the `$ignore_files` property. If called during `tear_down()` in tests,
 	 *   this will only delete files added during the previously run test.
@@ -1572,7 +1583,7 @@ abstract class WP_UnitTestCase_Base extends PHPUnit_Adapter_TestCase {
 	 * @param string $dir Path to the directory to scan.
 	 * @return string[] List of file paths.
 	 */
-	public function files_in_dir( $dir ) {
+	public static function files_in_dir( $dir ) {
 		$files = array();
 
 		$iterator = new RecursiveDirectoryIterator( $dir );
@@ -1593,14 +1604,14 @@ abstract class WP_UnitTestCase_Base extends PHPUnit_Adapter_TestCase {
 	 *
 	 * @return string[] List of file paths.
 	 */
-	public function scan_user_uploads() {
+	public static function scan_user_uploads() {
 		static $files = array();
 		if ( ! empty( $files ) ) {
 			return $files;
 		}
 
 		$uploads = wp_upload_dir();
-		$files   = $this->files_in_dir( $uploads['basedir'] );
+		$files   = self::files_in_dir( $uploads['basedir'] );
 		return $files;
 	}
 
