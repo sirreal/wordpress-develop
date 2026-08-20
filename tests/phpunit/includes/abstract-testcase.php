@@ -217,7 +217,7 @@ abstract class WP_UnitTestCase_Base extends PHPUnit_Adapter_TestCase {
 		}
 
 		// Reset comment globals.
-		$comment_globals = array( 'comment_alt', 'comment_depth', 'comment_thread_alt' );
+		$comment_globals = array( 'comment', 'comment_alt', 'comment_depth', 'comment_thread_alt' );
 		foreach ( $comment_globals as $global ) {
 			$GLOBALS[ $global ] = null;
 		}
