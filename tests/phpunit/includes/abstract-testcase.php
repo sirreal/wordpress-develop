@@ -240,6 +240,18 @@ abstract class WP_UnitTestCase_Base extends PHPUnit_Adapter_TestCase {
 		$this->_restore_hooks();
 		wp_set_current_user( 0 );
 
+		/*
+		 * When running core tests, reset `$_SERVER` after each test.
+		 *
+		 * `set_up()` performs the same reset before each test, but class fixtures
+		 * created in `wpSetUpBeforeClass()` run before the first `set_up()` of a
+		 * class. Without this reset, `$_SERVER` values left behind by a previous
+		 * class are still in place while those fixtures are created.
+		 */
+		if ( defined( 'WP_RUN_CORE_TESTS' ) && WP_RUN_CORE_TESTS ) {
+			$this->reset__SERVER();
+		}
+
 		$this->reset_lazyload_queue();
 
 		WP_Style_Engine_CSS_Rules_Store::remove_all_stores();
