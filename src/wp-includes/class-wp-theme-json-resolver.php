@@ -19,6 +19,13 @@
  */
 #[AllowDynamicProperties]
 class WP_Theme_JSON_Resolver {
+	/**
+	 * Generation of the currently cached theme JSON data.
+	 *
+	 * @since 7.0.0
+	 * @var int
+	 */
+	protected static $cache_generation = 0;
 
 	/**
 	 * Container for keep track of registered blocks.
@@ -745,6 +752,18 @@ class WP_Theme_JSON_Resolver {
 		static::$user                     = null;
 		static::$user_custom_post_type_id = null;
 		static::$i18n_schema              = null;
+		++static::$cache_generation;
+	}
+
+	/**
+	 * Returns the generation of the currently cached theme JSON data.
+	 *
+	 * @since 7.0.0
+	 *
+	 * @return int Cache generation.
+	 */
+	public static function get_cache_generation() {
+		return static::$cache_generation;
 	}
 
 	/**

@@ -46,6 +46,14 @@ class Tests_Block_Supports_Layout extends WP_UnitTestCase {
 		/*
 		 * Register a style variation with a custom blockGap value for testing.
 		 */
+		$this->register_custom_gap_style();
+		WP_Theme_JSON_Resolver::clean_cached_data();
+	}
+
+	/**
+	 * Registers the custom blockGap style variation used by the tests.
+	 */
+	private function register_custom_gap_style() {
 		register_block_style(
 			'core/group',
 			array(
@@ -978,8 +986,6 @@ class Tests_Block_Supports_Layout extends WP_UnitTestCase {
 	 *
 	 * @ticket 64624
 	 * @covers ::wp_render_layout_support_flag
-	 * @runInSeparateProcess
-	 * @preserveGlobalState disabled
 	 */
 	public function test_layout_support_flag_uses_variation_block_gap_value() {
 		switch_theme( 'block-theme' );
@@ -1001,6 +1007,21 @@ class Tests_Block_Supports_Layout extends WP_UnitTestCase {
 				'<div class="wp-block-group is-style-custom-gap"></div>',
 			),
 		);
+
+		// Prime global styles without the custom variation.
+		unregister_block_style( 'core/group', 'custom-gap' );
+		WP_Theme_JSON_Resolver::clean_cached_data();
+		wp_render_layout_support_flag( $block_content, $block );
+
+		$initial_stylesheet = wp_style_engine_get_stylesheet_from_context( 'block-supports', array( 'prettify' => false ) );
+		$this->assertStringContainsString(
+			'grid-template-columns:repeat(auto-fill, minmax(max(min(12rem, 100%), (100% - (24px * (3 - 1))) /3), 1fr))',
+			$initial_stylesheet
+		);
+
+		WP_Style_Engine_CSS_Rules_Store::remove_all_stores();
+		$this->register_custom_gap_style();
+		WP_Theme_JSON_Resolver::clean_cached_data();
 
 		wp_render_layout_support_flag( $block_content, $block );
 
