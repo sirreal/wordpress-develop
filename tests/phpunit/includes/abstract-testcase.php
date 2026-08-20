@@ -123,6 +123,16 @@ abstract class WP_UnitTestCase_Base extends PHPUnit_Adapter_TestCase {
 		$this->clean_up_global_scope();
 
 		/*
+		 * Reset the metadata lazyload queue before each test.
+		 *
+		 * `tear_down()` resets the queue after every test, but fixtures created
+		 * in `wpSetUpBeforeClass()` run outside of any test's `tear_down()`.
+		 * Without this reset, anything queued while building class fixtures
+		 * leaks into the first test of the class.
+		 */
+		$this->reset_lazyload_queue();
+
+		/*
 		 * When running core tests, ensure that post types and taxonomies
 		 * are reset for each test. We skip this step for non-core tests,
 		 * given the large number of plugins that register post types and
