@@ -1,5 +1,17 @@
 <?php
+/**
+ * CSS API: WP_CSS_Builder class
+ *
+ * @package WordPress
+ * @subpackage CSS-API
+ * @since {WP_VERSION}
+ */
 
+/**
+ * Serializes decoded values for safe interpolation into CSS source.
+ *
+ * @since {WP_VERSION}
+ */
 abstract class WP_CSS_Builder {
 	/**
 	 * Serialize a plain PHP string as CSS identifier text.
@@ -11,6 +23,8 @@ abstract class WP_CSS_Builder {
 	 *
 	 * @see https://www.w3.org/TR/css-syntax-3/#escaping
 	 * @see https://www.w3.org/TR/css-syntax-3/#would-start-an-identifier
+	 *
+	 * @since {WP_VERSION}
 	 *
 	 * An empty string serializes to an empty string. Callers that require an
 	 * ident token must reject an empty value.
@@ -97,6 +111,11 @@ abstract class WP_CSS_Builder {
 	 * are encoded using Unicode escape sequences.
 	 *
 	 * @see https://www.w3.org/TR/css-syntax-3/#escaping
+	 *
+	 * @since {WP_VERSION}
+	 *
+	 * @param string $value Decoded string value to encode as a quoted CSS string.
+	 * @return string Serialized quoted CSS string text.
 	 */
 	public static function string( string $value ): string {
 		$value   = wp_scrub_utf8( $value );
