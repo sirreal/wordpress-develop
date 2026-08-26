@@ -47,11 +47,14 @@ The worker checks:
 - raw token slices agree with reported byte offsets;
 - tokenization and declaration traversal terminate and are deterministic;
 - no-op tokenization and traversal preserve the exact source;
+- repeated updates to one URL or string token supersede the earlier update;
 - structured declarations match the generated property/priority model;
 - filtered traversal agrees with unfiltered traversal, including custom-property
   case sensitivity;
 - successful value and priority changes preserve declaration-list structure
   after reparsing and are idempotent;
+- mixed set, priority, append, replace, remove, and advance sequences preserve
+  the logical cursor and declaration order;
 - failed mutations are atomic and leave the cursor in place;
 - removal deletes exactly one logical declaration;
 - append creates exactly one declaration and performs precise EOF repair;
