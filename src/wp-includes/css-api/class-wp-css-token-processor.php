@@ -1,4 +1,11 @@
 <?php
+/**
+ * CSS API: WP_CSS_Token_Processor class
+ *
+ * @package WordPress
+ * @subpackage CSS-API
+ * @since {WP_VERSION}
+ */
 
 /**
  * Tokenizes CSS according to the CSS Syntax Level 3 specification.
@@ -59,7 +66,7 @@
  *         }
  *     }
  *     $result = $processor->get_updated_css();
- *     // background: url(uploads/new.jpg) center / cover;
+ *     // background: url("uploads/new.jpg") center / cover;
  *
  * Gathering diagnostics with byte offsets:
  *
@@ -75,6 +82,8 @@
  *             );
  *         }
  *     }
+ *
+ * @since {WP_VERSION}
  *
  * @see https://www.w3.org/TR/css-syntax-3/#tokenization
  */
@@ -310,6 +319,8 @@ class WP_CSS_Token_Processor {
 	 *
 	 * Do not instantiate directly. Use WP_CSS_Token_Processor::create() instead.
 	 *
+	 * @since {WP_VERSION}
+	 *
 	 * @param string $css         CSS source to tokenize.
 	 */
 	private function __construct( string $css ) {
@@ -325,6 +336,8 @@ class WP_CSS_Token_Processor {
 	 * ## Current Support
 	 *
 	 * - The only supported document encoding is `UTF-8`, which is the default value.
+	 *
+	 * @since {WP_VERSION}
 	 *
 	 * @param string $css      CSS source to tokenize.
 	 * @param string $encoding Text encoding of the document; must be default of 'UTF-8'.
@@ -344,6 +357,8 @@ class WP_CSS_Token_Processor {
 	 * Implements the main tokenization loop, consuming the next token from the input stream.
 	 *
 	 * @see https://www.w3.org/TR/css-syntax-3/#consume-token
+	 *
+	 * @since {WP_VERSION}
 	 *
 	 * @return bool Whether a token was found.
 	 */
@@ -622,6 +637,8 @@ class WP_CSS_Token_Processor {
 	/**
 	 * Gets the current token type.
 	 *
+	 * @since {WP_VERSION}
+	 *
 	 * @return string|null
 	 * @phpstan-return self::TOKEN_*|null
 	 */
@@ -640,6 +657,8 @@ class WP_CSS_Token_Processor {
 	 *
 	 * @see https://www.w3.org/TR/css-syntax-3/#consume-number
 	 *
+	 * @since {WP_VERSION}
+	 *
 	 * @return string|null
 	 * @phpstan-return 'id'|'unrestricted'|'integer'|'number'|null
 	 */
@@ -657,6 +676,8 @@ class WP_CSS_Token_Processor {
 	 *
 	 * This is different from get_token_value() which returns the semantic value
 	 * (e.g., for strings: content without quotes; for numbers: numeric value).
+	 *
+	 * @since {WP_VERSION}
 	 *
 	 * @return string|null
 	 */
@@ -677,6 +698,8 @@ class WP_CSS_Token_Processor {
 	 *
 	 * Returns the exact bytes from the source without any normalization.
 	 * This preserves original line endings (\r\n, \r, \f) and null bytes.
+	 *
+	 * @since {WP_VERSION}
 	 *
 	 * @return string|null
 	 */
@@ -701,6 +724,8 @@ class WP_CSS_Token_Processor {
 	 * - For identifiers/functions/hash/at-keywords: the decoded identifier string
 	 * - For strings/URLs: the decoded string value
 	 * - For other tokens: null
+	 *
+	 * @since {WP_VERSION}
 	 *
 	 * @see https://www.w3.org/TR/css-syntax-3/#token-value
 	 * @return string|null
@@ -794,6 +819,8 @@ class WP_CSS_Token_Processor {
 	 *
 	 * Only meaningful for URL and STRING tokens. Returns false for all other token types.
 	 *
+	 * @since {WP_VERSION}
+	 *
 	 * @return bool Whether the current token value starts with "data:" (case-insensitive).
 	 */
 	public function is_data_uri(): bool {
@@ -818,6 +845,8 @@ class WP_CSS_Token_Processor {
 	/**
 	 * Gets the token start at.
 	 *
+	 * @since {WP_VERSION}
+	 *
 	 * @return int|null
 	 */
 	public function get_token_start(): ?int {
@@ -826,6 +855,8 @@ class WP_CSS_Token_Processor {
 
 	/**
 	 * Gets the token length.
+	 *
+	 * @since {WP_VERSION}
 	 *
 	 * @return int|null
 	 */
@@ -836,6 +867,8 @@ class WP_CSS_Token_Processor {
 	/**
 	 * Gets the unit for dimension tokens.
 	 *
+	 * @since {WP_VERSION}
+	 *
 	 * @return string|null
 	 */
 	public function get_token_unit(): ?string {
@@ -844,6 +877,8 @@ class WP_CSS_Token_Processor {
 
 	/**
 	 * Gets the byte at where the token value starts (for STRING and URL tokens).
+	 *
+	 * @since {WP_VERSION}
 	 *
 	 * @return int|null
 	 */
@@ -854,6 +889,8 @@ class WP_CSS_Token_Processor {
 	/**
 	 * Gets the byte length of the token value (for STRING and URL tokens).
 	 *
+	 * @since {WP_VERSION}
+	 *
 	 * @return int|null
 	 */
 	public function get_token_value_length(): ?int {
@@ -861,13 +898,14 @@ class WP_CSS_Token_Processor {
 	}
 
 	/**
-	 * Sets the value of the current URL token.
+	 * Sets the value of the current URL or string token.
 	 *
-	 * This method allows modifying the URL value in url() tokens. The new value
-	 * will be properly escaped according to CSS URL syntax rules.
+	 * The new decoded value is serialized as a quoted CSS string. For a URL
+	 * token, only the value inside `url()` is replaced, converting an unquoted
+	 * URL such as `url(old.jpg)` to `url("new.jpg")`.
 	 *
-	 * Currently only URL tokens are supported. Attempting to set the value on
-	 * other token types will return false.
+	 * Repeated calls for the same current token supersede the previous update.
+	 * Attempting to set the value on another token type returns false.
 	 *
 	 * Example:
 	 *
@@ -879,32 +917,57 @@ class WP_CSS_Token_Processor {
 	 *         }
 	 *     }
 	 *     echo $processor->get_updated_css();
-	 *     // Outputs: background: url(new.jpg);
+	 *     // Outputs: background: url("new.jpg");
 	 *
-	 * @param string $new_value The new URL value (should not include url() wrapper).
+	 * @since {WP_VERSION}
+	 *
+	 * @param string $new_value New decoded URL or string value.
 	 * @return bool Whether the value was successfully updated.
 	 */
 	public function set_token_value( string $new_value ): bool {
 		// Only URL and string tokens are currently supported.
 		switch ( $this->token_type ) {
 			case self::TOKEN_URL:
-				$this->lexical_updates[] = array(
-					'start'  => $this->token_value_starts_at,
-					'length' => $this->token_value_length,
-					'text'   => WP_CSS_Builder::string( $new_value ),
+				$this->queue_lexical_update(
+					$this->token_value_starts_at,
+					$this->token_value_length,
+					WP_CSS_Builder::string( $new_value )
 				);
 				return true;
 			case self::TOKEN_STRING:
-				$this->lexical_updates[] = array(
-					'start'  => $this->token_starts_at,
-					'length' => $this->token_length,
-					'text'   => WP_CSS_Builder::string( $new_value ),
+				$this->queue_lexical_update(
+					$this->token_starts_at,
+					$this->token_length,
+					WP_CSS_Builder::string( $new_value )
 				);
 				return true;
 			default:
 				_doing_it_wrong( __METHOD__, 'set_token_value() only supports URL and string tokens. Got token type: ' . $this->token_type, '1.0.0' );
 				return false;
 		}
+	}
+
+	/**
+	 * Queues a lexical update, replacing an earlier update for the same range.
+	 *
+	 * @since {WP_VERSION}
+	 *
+	 * @param int    $start  Byte offset at which to start the replacement.
+	 * @param int    $length Number of bytes to replace.
+	 * @param string $text   Replacement text.
+	 */
+	private function queue_lexical_update( int $start, int $length, string $text ): void {
+		foreach ( $this->lexical_updates as $index => $update ) {
+			if ( $update['start'] === $start && $update['length'] === $length ) {
+				unset( $this->lexical_updates[ $index ] );
+			}
+		}
+
+		$this->lexical_updates[] = array(
+			'start'  => $start,
+			'length' => $length,
+			'text'   => $text,
+		);
 	}
 
 	/**
@@ -923,7 +986,9 @@ class WP_CSS_Token_Processor {
 	 *         }
 	 *     }
 	 *     echo $processor->get_updated_css();
-	 *     // Outputs: background: url(new.jpg);
+	 *     // Outputs: background: url("new.jpg");
+	 *
+	 * @since {WP_VERSION}
 	 *
 	 * @return string The modified CSS.
 	 */

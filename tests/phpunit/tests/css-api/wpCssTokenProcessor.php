@@ -2563,10 +2563,10 @@ CSS;
 	}
 
 	/**
-	 * Tests that set_token_value() only works on URL tokens.
+	 * Tests that set_token_value() only works on URL and string tokens.
 	 */
-	public function test_set_token_value_only_works_on_url_tokens(): void {
-		$css       = 'color: red; background: url(old.jpg);';
+	public function test_set_token_value_only_works_on_url_and_string_tokens(): void {
+		$css       = 'content: "old"; color: red; background: url(old.jpg);';
 		$processor = WP_CSS_Token_Processor::create( $css );
 
 		$this->setExpectedIncorrectUsage( 'WP_CSS_Token_Processor::set_token_value' );
@@ -2574,18 +2574,53 @@ CSS;
 		while ( $processor->next_token() ) {
 			$token_type = $processor->get_token_type();
 
-			if ( WP_CSS_Token_Processor::TOKEN_URL === $token_type ) {
-				// Should succeed on URL tokens.
+			if ( WP_CSS_Token_Processor::TOKEN_URL === $token_type || WP_CSS_Token_Processor::TOKEN_STRING === $token_type ) {
+				// Should succeed on URL and string tokens.
 				$this->assertTrue( $processor->set_token_value( 'new.jpg' ) );
 			} else {
-				// Should fail on non-URL tokens.
+				// Should fail on other token types.
 				$this->assertFalse( $processor->set_token_value( 'test' ) );
 			}
 		}
 
 		// Verify the update was applied.
 		$updated = $processor->get_updated_css();
-		$this->assertSame( 'color: red; background: url("new.jpg");', $updated );
+		$this->assertSame( 'content: "new.jpg"; color: red; background: url("new.jpg");', $updated );
+	}
+
+	/**
+	 * Tests that repeated updates to one token keep only the latest value.
+	 *
+	 * @ticket 62653
+	 *
+	 * @dataProvider data_repeated_token_value_updates
+	 */
+	public function test_set_token_value_supersedes_an_earlier_update_to_the_same_token( string $css, string $expected ): void {
+		$processor = WP_CSS_Token_Processor::create( $css );
+
+		while ( $processor->next_token() ) {
+			if (
+				WP_CSS_Token_Processor::TOKEN_URL === $processor->get_token_type() ||
+				WP_CSS_Token_Processor::TOKEN_STRING === $processor->get_token_type()
+			) {
+				$this->assertTrue( $processor->set_token_value( 'first value' ) );
+				$this->assertTrue( $processor->set_token_value( 'final value' ) );
+			}
+		}
+
+		$this->assertSame( $expected, $processor->get_updated_css() );
+	}
+
+	/**
+	 * Data provider for repeated token value updates.
+	 *
+	 * @return array<string,array{string,string}>
+	 */
+	public static function data_repeated_token_value_updates(): array {
+		return array(
+			'URL token'    => array( 'background: url(old.jpg);', 'background: url("final value");' ),
+			'string token' => array( 'content: "old";', 'content: "final value";' ),
+		);
 	}
 
 	/**
