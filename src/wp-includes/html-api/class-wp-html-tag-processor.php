@@ -792,6 +792,12 @@ class WP_HTML_Tag_Processor {
 	 * boundaries, however, so these should never be exposed outside of this
 	 * class or any classes which intentionally expand its functionality.
 	 *
+	 * Any code which creates these lexical updates must also ensure that no
+	 * two updates replace overlapping spans of the document: the cursor and
+	 * bookmark position accounting when applying the updates assumes that
+	 * every update replaces a distinct span. Only zero-length insertions may
+	 * share their offset with another update's span.
+	 *
 	 * These are enqueued while editing the document instead of being immediately
 	 * applied to avoid processing overhead, string allocations, and string
 	 * copies when applying many updates to a single document.
@@ -2638,9 +2644,26 @@ class WP_HTML_Tag_Processor {
 				$accumulated_shift_for_given_point += $shift;
 			}
 
-			$output_buffer       .= substr( $this->html, $bytes_already_copied, $diff->start - $bytes_already_copied );
+			/*
+			 * Updates may share a document offset, e.g. a new attribute inserted
+			 * at the end of the tag name and a removed attribute whose span starts
+			 * there because it was separated from the tag name by only solidus
+			 * characters. The copied-bytes cursor must never move backward, or
+			 * already-replaced spans of the document would be copied again.
+			 *
+			 * Only zero-length insertions may share their offset with another
+			 * update's span; the sort places them after a removal of that span,
+			 * so the inserted text lands where the removed span was. Updates
+			 * with positive length must never overlap each other: the cursor
+			 * and bookmark position accounting below assume that every update
+			 * replaces a distinct span of the document.
+			 */
+			if ( $diff->start > $bytes_already_copied ) {
+				$output_buffer .= substr( $this->html, $bytes_already_copied, $diff->start - $bytes_already_copied );
+			}
+
 			$output_buffer       .= $diff->text;
-			$bytes_already_copied = $diff->start + $diff->length;
+			$bytes_already_copied = max( $bytes_already_copied, $diff->start + $diff->length );
 		}
 
 		$this->html = $output_buffer . substr( $this->html, $bytes_already_copied );
@@ -4786,22 +4809,124 @@ class WP_HTML_Tag_Processor {
 		 *
 		 *    Result: <div />
 		 */
-		$this->lexical_updates[ $name ] = new WP_HTML_Text_Replacement(
+		$removal_spans   = array();
+		$removal_spans[] = $this->get_attribute_removal_span(
 			$this->attributes[ $name ]->start,
-			$this->attributes[ $name ]->length,
+			$this->attributes[ $name ]->length
+		);
+		foreach ( $this->duplicate_attributes[ $name ] ?? array() as $attribute_token ) {
+			$removal_spans[] = $this->get_attribute_removal_span(
+				$attribute_token->start,
+				$attribute_token->length
+			);
+		}
+
+		$this->supersede_updates_in_removal_spans( $removal_spans );
+
+		$this->lexical_updates[ $name ] = new WP_HTML_Text_Replacement(
+			$removal_spans[0]->start,
+			$removal_spans[0]->length,
 			''
 		);
 
 		// Removes any duplicated attributes if they were also present.
-		foreach ( $this->duplicate_attributes[ $name ] ?? array() as $attribute_token ) {
+		$removal_span_count = count( $removal_spans );
+		for ( $i = 1; $i < $removal_span_count; $i++ ) {
 			$this->lexical_updates[] = new WP_HTML_Text_Replacement(
-				$attribute_token->start,
-				$attribute_token->length,
+				$removal_spans[ $i ]->start,
+				$removal_spans[ $i ]->length,
 				''
 			);
 		}
 
 		return true;
+	}
+
+	/**
+	 * Removes enqueued lexical updates replacing spans within removed spans.
+	 *
+	 * Removing spans of the document supersedes updates already enqueued
+	 * over intersecting spans: removal replaces the entire span, and no two
+	 * updates may replace overlapping spans of the document, since bookmark
+	 * and cursor position accounting assumes that every update replaces a
+	 * distinct span. This also ensures that each removal is enqueued exactly
+	 * once, no matter how many times an attribute is removed.
+	 *
+	 * Zero-length insertions replace no spans of the document and are
+	 * unaffected; they may share their offset with a removed span.
+	 *
+	 * The given spans must be sorted by starting position and must not
+	 * overlap each other, as is the case for attribute spans, which appear
+	 * in document order. Each enqueued update is then checked against the
+	 * spans with a single binary search: an update can only intersect the
+	 * last span starting before the update's end.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @param WP_HTML_Span[] $removal_spans Non-overlapping spans of the document being
+	 *                                      removed, sorted by starting position.
+	 */
+	private function supersede_updates_in_removal_spans( array $removal_spans ): void {
+		$span_count = count( $removal_spans );
+
+		foreach ( $this->lexical_updates as $key => $update ) {
+			if ( 0 === $update->length ) {
+				continue;
+			}
+
+			$update_end = $update->start + $update->length;
+
+			// Find the last removal span starting before the end of the update.
+			$candidate = null;
+			$low       = 0;
+			$high      = $span_count - 1;
+			while ( $low <= $high ) {
+				$probe = intdiv( $low + $high, 2 );
+				if ( $removal_spans[ $probe ]->start < $update_end ) {
+					$candidate = $removal_spans[ $probe ];
+					$low       = $probe + 1;
+				} else {
+					$high = $probe - 1;
+				}
+			}
+
+			if ( null !== $candidate && $update->start < $candidate->start + $candidate->length ) {
+				unset( $this->lexical_updates[ $key ] );
+			}
+		}
+	}
+
+	/**
+	 * Returns the full span of the document to remove for an attribute.
+	 *
+	 * Solidus characters ("/") may precede an attribute name, where they act
+	 * like attribute separators and are not part of any syntax token. Such
+	 * solidus characters must be removed with the attribute; otherwise a
+	 * remaining solidus directly before the tag-closing ">" would become a
+	 * self-closing flag and change the meaning of the surrounding HTML.
+	 *
+	 * Example:
+	 *
+	 *     <svg><g /attr>inside g</svg>
+	 *
+	 * Removing only `attr` would produce `<svg><g />inside g</svg>`, where
+	 * the self-closing G element no longer contains the text that follows.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @param int $start  Byte offset into the document where the attribute starts.
+	 * @param int $length Byte length of the attribute.
+	 * @return WP_HTML_Span Span of the document to remove for the attribute.
+	 */
+	private function get_attribute_removal_span( int $start, int $length ): WP_HTML_Span {
+		$tag_name_ends_at = $this->tag_name_starts_at + $this->tag_name_length;
+
+		while ( $start > $tag_name_ends_at && '/' === $this->html[ $start - 1 ] ) {
+			--$start;
+			++$length;
+		}
+
+		return new WP_HTML_Span( $start, $length );
 	}
 
 	/**

@@ -1541,6 +1541,237 @@ class Tests_HtmlApi_WpHtmlTagProcessor extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Ensures that removing an attribute does not change how the rest of the tag is parsed.
+	 *
+	 * Solidus characters ("/") may appear before attribute names, where they
+	 * act like attribute separators and are not part of any syntax token. If
+	 * removing an attribute leaves a solidus directly before the tag-closing
+	 * ">", the tag would gain a self-closing flag, changing the meaning of
+	 * the surrounding HTML.
+	 *
+	 * @ticket 65372
+	 *
+	 * @covers WP_HTML_Tag_Processor::remove_attribute
+	 *
+	 * @dataProvider data_remove_attribute_preserves_self_closing_flag
+	 *
+	 * @param string $html          HTML containing an "attr" attribute to remove.
+	 * @param string $expected_html Expected HTML after removing the attribute.
+	 */
+	public function test_remove_attribute_preserves_self_closing_flag( $html, $expected_html ) {
+		$processor = new WP_HTML_Tag_Processor( $html );
+		$this->assertTrue( $processor->next_tag(), 'Failed to find the tag: check test setup.' );
+		$had_self_closing_flag = $processor->has_self_closing_flag();
+
+		$this->assertTrue( $processor->remove_attribute( 'attr' ), 'Failed to remove the attribute.' );
+
+		$updated_html = $processor->get_updated_html();
+		$this->assertSame( $expected_html, $updated_html, 'Attribute removal produced unexpected HTML.' );
+
+		$processor = new WP_HTML_Tag_Processor( $updated_html );
+		$this->assertTrue( $processor->next_tag(), 'Failed to find the tag in the updated HTML.' );
+		$this->assertSame(
+			$had_self_closing_flag,
+			$processor->has_self_closing_flag(),
+			'Attribute removal changed the self-closing flag of the tag.'
+		);
+	}
+
+	/**
+	 * Data provider.
+	 *
+	 * @return array[]
+	 */
+	public static function data_remove_attribute_preserves_self_closing_flag() {
+		return array(
+			'Solidus before the attribute'         => array( '<g /attr>ok', '<g >ok' ),
+			'Multiple solidi before the attribute' => array( '<g //attr>ok', '<g >ok' ),
+			'Solidus after the tag name'           => array( '<g/attr>ok', '<g>ok' ),
+			'Solidus before attribute with value'  => array( '<g /attr=value>ok', '<g >ok' ),
+			'Solidus after another attribute'      => array( '<g id="test"/attr>ok', '<g id="test">ok' ),
+			'Solidus before duplicate attribute'   => array( '<g attr /attr>ok', '<g  >ok' ),
+			'Solidus separated from the attribute' => array( '<g / attr>ok', '<g / >ok' ),
+			'Self-closing tag'                     => array( '<g attr/>ok', '<g />ok' ),
+			'Self-closing tag after solidus'       => array( '<g /attr/>ok', '<g />ok' ),
+		);
+	}
+
+	/**
+	 * Ensures that removing an attribute with its preceding solidus does not
+	 * conflict with new attributes inserted at the end of the tag name.
+	 *
+	 * When a removed attribute is separated from the tag name by only solidus
+	 * characters, the removed span starts at the end of the tag name, the same
+	 * place where new attributes are inserted. The updates must apply
+	 * correctly in either order of operations, and bookmark positions must
+	 * reflect the applied updates.
+	 *
+	 * @ticket 65372
+	 *
+	 * @covers WP_HTML_Tag_Processor::remove_attribute
+	 * @covers WP_HTML_Tag_Processor::set_attribute
+	 * @covers WP_HTML_Tag_Processor::add_class
+	 * @covers WP_HTML_Tag_Processor::seek
+	 *
+	 * @dataProvider data_set_attribute_or_add_class_while_removing_solidus_separated_attribute
+	 *
+	 * @param string $method        Method used to add an attribute: "set_attribute" or "add_class".
+	 * @param string $order         Order of operations: "add first" or "remove first".
+	 * @param string $expected_html Expected HTML after the updates are applied.
+	 */
+	public function test_can_set_attribute_while_removing_solidus_separated_attribute( $method, $order, $expected_html ) {
+		$processor = new WP_HTML_Tag_Processor( '<g/attr>ok<path id="x">' );
+		$this->assertTrue( $processor->next_tag(), 'Failed to find the tag: check test setup.' );
+
+		if ( 'remove first' === $order ) {
+			$this->assertTrue( $processor->remove_attribute( 'attr' ), 'Failed to remove the attribute.' );
+		}
+
+		if ( 'set_attribute' === $method ) {
+			$processor->set_attribute( 'id', 'test' );
+		} else {
+			$processor->add_class( 'test' );
+		}
+
+		if ( 'add first' === $order ) {
+			$this->assertTrue( $processor->remove_attribute( 'attr' ), 'Failed to remove the attribute.' );
+		}
+
+		$this->assertTrue( $processor->next_tag( 'path' ), 'Failed to find the PATH tag: check test setup.' );
+		$this->assertTrue( $processor->set_bookmark( 'path' ), 'Failed to set a bookmark on the PATH tag.' );
+
+		$this->assertSame( $expected_html, $processor->get_updated_html(), 'Applying the updates produced unexpected HTML.' );
+
+		$this->assertTrue( $processor->seek( 'path' ), 'Failed to seek to the bookmark.' );
+		$this->assertSame( 'PATH', $processor->get_tag(), 'Seeking to the bookmark landed on the wrong location in the document.' );
+		$this->assertSame( 'x', $processor->get_attribute( 'id' ), 'Failed to find the attribute of the tag at the bookmark.' );
+	}
+
+	/**
+	 * Data provider.
+	 *
+	 * @return array[]
+	 */
+	public static function data_set_attribute_or_add_class_while_removing_solidus_separated_attribute() {
+		return array(
+			'set_attribute, then remove' => array( 'set_attribute', 'add first', '<g id="test">ok<path id="x">' ),
+			'remove, then set_attribute' => array( 'set_attribute', 'remove first', '<g id="test">ok<path id="x">' ),
+			'add_class, then remove'     => array( 'add_class', 'add first', '<g class="test">ok<path id="x">' ),
+			'remove, then add_class'     => array( 'add_class', 'remove first', '<g class="test">ok<path id="x">' ),
+		);
+	}
+
+	/**
+	 * Ensures that repeating an attribute removal does not corrupt bookmarks.
+	 *
+	 * Removing an attribute also enqueues removals for its duplicates.
+	 * Repeating the removal must not enqueue those removals again: every
+	 * enqueued update shifts bookmark positions and the internal cursor
+	 * when updates are applied, so repeated updates for the same span
+	 * would shift them more than the document actually changed.
+	 *
+	 * @ticket 65372
+	 *
+	 * @covers WP_HTML_Tag_Processor::remove_attribute
+	 * @covers WP_HTML_Tag_Processor::seek
+	 *
+	 * @dataProvider data_repeated_attribute_removal_preserves_bookmarks
+	 *
+	 * @param string $html          HTML containing duplicate "a" attributes and a PATH tag.
+	 * @param string $expected_html Expected HTML after removing the attribute.
+	 */
+	public function test_repeated_attribute_removal_preserves_bookmarks( $html, $expected_html ) {
+		$processor = new WP_HTML_Tag_Processor( $html );
+		$this->assertTrue( $processor->next_tag(), 'Failed to find the first tag: check test setup.' );
+		$this->assertTrue( $processor->remove_attribute( 'a' ), 'Failed to remove the attribute.' );
+		$this->assertTrue( $processor->remove_attribute( 'a' ), 'Failed to remove the attribute again.' );
+
+		$this->assertTrue( $processor->next_tag( 'path' ), 'Failed to find the PATH tag: check test setup.' );
+		$this->assertTrue( $processor->set_bookmark( 'path' ), 'Failed to set a bookmark on the PATH tag.' );
+
+		$this->assertSame( $expected_html, $processor->get_updated_html(), 'Removing the attribute twice produced unexpected HTML.' );
+
+		$this->assertTrue( $processor->seek( 'path' ), 'Failed to seek to the bookmark.' );
+		$this->assertSame( 'PATH', $processor->get_tag(), 'Seeking to the bookmark landed on the wrong location in the document.' );
+		$this->assertSame( 'x', $processor->get_attribute( 'id' ), 'Failed to find the attribute of the tag at the bookmark.' );
+	}
+
+	/**
+	 * Data provider.
+	 *
+	 * @return array[]
+	 */
+	public static function data_repeated_attribute_removal_preserves_bookmarks() {
+		return array(
+			'Duplicate attributes'                => array( '<div a a>ok<path id="x">', '<div  >ok<path id="x">' ),
+			'Duplicate attribute after a solidus' => array( '<g a /a>ok<path id="x">', '<g  >ok<path id="x">' ),
+		);
+	}
+
+	/**
+	 * Ensures that removing an attribute removes the entire spans of the
+	 * attribute and its duplicates even when other lexical updates target
+	 * spans within them.
+	 *
+	 * Exactly one update must replace each removed span. Bookmark positions
+	 * and the internal cursor are shifted by every enqueued update when
+	 * updates are applied: a missing removal leaves a duplicate in the
+	 * document, and updates over intersecting spans shift positions more
+	 * than the document actually changed. An update enqueued within a
+	 * removed span by other means is superseded by the removal.
+	 *
+	 * @ticket 65372
+	 *
+	 * @covers WP_HTML_Tag_Processor::remove_attribute
+	 * @covers WP_HTML_Tag_Processor::seek
+	 *
+	 * @dataProvider data_updates_targeting_removed_attribute_spans
+	 *
+	 * @param string $html          HTML containing "a" attributes and a PATH tag.
+	 * @param int    $update_start  Byte offset of the enqueued update.
+	 * @param int    $update_length Byte length of the enqueued update.
+	 * @param string $update_text   Replacement text of the enqueued update.
+	 * @param string $expected_html Expected HTML after removing the attribute.
+	 */
+	public function test_remove_attribute_removes_attribute_spans_when_other_updates_target_them( $html, $update_start, $update_length, $update_text, $expected_html ) {
+		$processor = new class($html) extends WP_HTML_Tag_Processor {
+			public function enqueue_replacement( int $start, int $length, string $text ): void {
+				$this->lexical_updates[] = new WP_HTML_Text_Replacement( $start, $length, $text );
+			}
+		};
+
+		$this->assertTrue( $processor->next_tag(), 'Failed to find the tag: check test setup.' );
+
+		$processor->enqueue_replacement( $update_start, $update_length, $update_text );
+
+		$this->assertTrue( $processor->remove_attribute( 'a' ), 'Failed to remove the attribute.' );
+
+		$this->assertTrue( $processor->next_tag( 'path' ), 'Failed to find the PATH tag: check test setup.' );
+		$this->assertTrue( $processor->set_bookmark( 'path' ), 'Failed to set a bookmark on the PATH tag.' );
+
+		$this->assertSame( $expected_html, $processor->get_updated_html(), 'Removing the attribute produced unexpected HTML.' );
+
+		$this->assertTrue( $processor->seek( 'path' ), 'Failed to seek to the bookmark.' );
+		$this->assertSame( 'PATH', $processor->get_tag(), 'Seeking to the bookmark landed on the wrong location in the document.' );
+		$this->assertSame( 'x', $processor->get_attribute( 'id' ), 'Failed to find the attribute of the tag at the bookmark.' );
+	}
+
+	/**
+	 * Data provider.
+	 *
+	 * @return array[]
+	 */
+	public static function data_updates_targeting_removed_attribute_spans() {
+		return array(
+			'Removal of a duplicate, exact span'         => array( '<g a a a>ok<path id="x">', 5, 1, '', '<g   >ok<path id="x">' ),
+			'Replacement of a duplicate, exact span'     => array( '<g a a a>ok<path id="x">', 5, 1, 'b', '<g   >ok<path id="x">' ),
+			'Removal within extended duplicate span'     => array( '<g a /a>ok<path id="x">', 6, 1, '', '<g  >ok<path id="x">' ),
+			'Replacement within extended duplicate span' => array( '<g a /a>ok<path id="x">', 6, 1, 'b', '<g  >ok<path id="x">' ),
+			'Replacement within extended attribute span' => array( '<g/a>ok<path id="x">', 3, 1, 'b', '<g>ok<path id="x">' ),
+		);
+	}
+
+	/**
 	 * @ticket 58119
 	 *
 	 * @since 6.3.2 Removes all duplicated attributes as expected.
