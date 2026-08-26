@@ -83,6 +83,38 @@ class Worker {
 			}
 		);
 
+		$guard(
+			'repeated-token-update',
+			static function () use ( $style, $seed, $check, &$operations ): void {
+				$processor = \WP_CSS_Token_Processor::create( $style );
+				while ( $processor->next_token() ) {
+					$type = $processor->get_token_type();
+					if ( \WP_CSS_Token_Processor::TOKEN_URL !== $type && \WP_CSS_Token_Processor::TOKEN_STRING !== $type ) {
+						continue;
+					}
+
+					$start  = \WP_CSS_Token_Processor::TOKEN_URL === $type
+						? $processor->get_token_value_start()
+						: $processor->get_token_start();
+					$length = \WP_CSS_Token_Processor::TOKEN_URL === $type
+						? $processor->get_token_value_length()
+						: $processor->get_token_length();
+					$final  = 'final-' . $seed . ' & value';
+					$check( is_int( $start ) && is_int( $length ), 'repeated-token-update-range-missing' );
+					if ( ! is_int( $start ) || ! is_int( $length ) ) {
+						return;
+					}
+
+					$check( $processor->set_token_value( 'superseded-' . $seed ), 'repeated-token-first-update-refused' );
+					$check( $processor->set_token_value( $final ), 'repeated-token-final-update-refused' );
+					$expected = substr( $style, 0, $start ) . \WP_CSS_Builder::string( $final ) . substr( $style, $start + $length );
+					$check( $expected === $processor->get_updated_css(), 'repeated-token-update-not-superseded' );
+					$operations['repeatedToken.' . $type] = 1;
+					break;
+				}
+			}
+		);
+
 		$snapshot = array();
 		$guard(
 			'traversal',
@@ -256,6 +288,62 @@ class Worker {
 					$expected = $snapshot;
 					array_splice( $expected, $ordinal, 1 );
 					$check( $expected === self::capture_style( $processor->get_updated_style() ), 'empty-set-value-reparse-mismatch' );
+				}
+			);
+		}
+
+		if ( 'structured' === $case['bucket'] && ! empty( $snapshot ) ) {
+			$ordinal = $seed % count( $snapshot );
+			$guard(
+				'mutation-sequence',
+				static function () use ( $style, $snapshot, $ordinal, $seed, $check, &$operations ): void {
+					$processor = \WP_HTML_Style_Attribute_Processor::create( $style );
+					if ( ! self::position( $processor, $ordinal ) ) {
+						$check( false, 'mutation-sequence-position-failed', array( 'ordinal' => $ordinal ) );
+						return;
+					}
+
+					$original_name = $processor->get_property_name();
+					$important     = 0 === $seed % 2;
+					if ( ! $processor->set_value( CaseGenerator::mutation_value( $seed ), $important ) ) {
+						$check( false, 'mutation-sequence-set-value-refused' );
+						return;
+					}
+
+					$important = ! $important;
+					if ( ! $processor->set_important( $important ) ) {
+						$check( false, 'mutation-sequence-set-important-refused' );
+						return;
+					}
+
+					$appended_name = 'sequence-prop-' . ( $seed % 37 );
+					if ( ! $processor->append_declaration( $appended_name, 'calc(1px + 2px)', true ) ) {
+						$check( false, 'mutation-sequence-append-refused' );
+						return;
+					}
+
+					$check( $original_name === $processor->get_property_name(), 'mutation-sequence-append-moved-cursor' );
+					$check( $important === $processor->is_important(), 'mutation-sequence-append-changed-priority' );
+					if ( ! $processor->set_value( 'var(--sequence, 2px)' ) ) {
+						$check( false, 'mutation-sequence-second-set-value-refused' );
+						return;
+					}
+
+					$expected                           = $snapshot;
+					$expected[ $ordinal ]['important'] = $important;
+					$expected[]                         = array( 'name' => $appended_name, 'important' => true );
+					$check( $expected === self::capture_style( $processor->get_updated_style() ), 'mutation-sequence-reparse-mismatch' );
+
+					if ( ! $processor->remove_declaration() ) {
+						$check( false, 'mutation-sequence-remove-refused' );
+						return;
+					}
+					array_splice( $expected, $ordinal, 1 );
+					$check( $expected === self::capture_style( $processor->get_updated_style() ), 'mutation-sequence-remove-reparse-mismatch' );
+					$check( null === $processor->get_property_name(), 'mutation-sequence-remove-left-valid-cursor' );
+					$check( $processor->next_declaration(), 'mutation-sequence-next-after-remove-failed' );
+					$check( $expected[ $ordinal ]['name'] === $processor->get_property_name(), 'mutation-sequence-next-after-remove-mismatch' );
+					$operations['mutationSequence.completed'] = 1;
 				}
 			);
 		}
