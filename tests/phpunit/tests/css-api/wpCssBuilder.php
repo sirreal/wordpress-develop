@@ -105,28 +105,54 @@ class Tests_CssApi_WpCssBuilder extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Tests WP_CSS_Builder::ident() produces valid CSS ident tokens.
+	 * Tests WP_CSS_Builder::ident() serializes CSS identifiers.
 	 *
-	 * @ticket TBD
+	 * @ticket 62653
 	 *
 	 * @dataProvider data_ident
 	 *
 	 * @covers ::ident
 	 */
 	public function test_ident( string $input, string $expected ): void {
-		$this->assertSame( $expected, WP_CSS_Builder::ident( $input ) );
+		$serialized = WP_CSS_Builder::ident( $input );
+		$this->assertSame( $expected, $serialized );
+
+		$processor = WP_CSS_Token_Processor::create( $serialized );
+		if ( '' === $input ) {
+			$this->assertFalse( $processor->next_token() );
+			return;
+		}
+
+		$this->assertTrue( $processor->next_token() );
+		$this->assertSame( WP_CSS_Token_Processor::TOKEN_IDENT, $processor->get_token_type() );
+
+		$expected_decoded_value = strtr(
+			$input,
+			array(
+				"\r\n" => "\n",
+				"\r"   => "\n",
+				"\f"   => "\n",
+				"\0"   => '�',
+			)
+		);
+		$this->assertSame( $expected_decoded_value, $processor->get_token_value() );
+		$this->assertFalse( $processor->next_token() );
 	}
 
 	/**
 	 * Data provider for ident() tests.
 	 */
 	public static function data_ident(): Generator {
+		yield 'Empty identifier' => array( '', '' );
+
 		// Simple idents — no escaping needed.
 		yield 'Simple alpha ident' => array( 'serif', 'serif' );
 		yield 'Hyphenated ident' => array( 'sans-serif', 'sans-serif' );
 		yield 'Underscore prefix' => array( '_foo', '_foo' );
 		yield 'Single char' => array( 'a', 'a' );
+		yield 'Single hyphen' => array( '-', '\\2D ' );
 		yield 'Custom property prefix' => array( '--custom', '--custom' );
+		yield 'Non-ASCII' => array( 'café', 'café' );
 
 		// Invalid ident starts — must be escaped.
 		yield 'Leading digits' => array( '123', '\\31 23' );
@@ -134,17 +160,21 @@ class Tests_CssApi_WpCssBuilder extends WP_UnitTestCase {
 		yield 'Hyphen then digit' => array( '-5px', '-\\35 px' );
 		yield 'Leading space' => array( ' leading-space', '\\20 leading-space' );
 		yield 'Leading tab' => array( "\tleading-tab", '\\9 leading-tab' );
+		yield 'Leading control character' => array( "\x01foo", '\\1 foo' );
 
 		// Whitespace within ident.
 		yield 'Space within' => array( 'My Font', 'My\\20 Font' );
 		yield 'Multiple spaces within' => array( 'a b c', 'a\\20 b\\20 c' );
 		yield 'Tab within' => array( "has\ttab", 'has\\9 tab' );
 		yield 'Newline within' => array( "has\nnewline", 'has\\A newline' );
+		yield 'NULL byte within' => array( "has\0null", 'has�null' );
+		yield 'DEL within' => array( "has\x7Fdelete", 'has\\7F delete' );
 
 		// Special characters.
 		yield 'Apostrophe' => array( "Font's", 'Font\\27 s' );
 		yield 'Angle brackets' => array( '<html>', '\\3C html\\3E ' );
 		yield 'Comma' => array( 'a,b', 'a\\2C b' );
 		yield 'Semicolon' => array( 'a;b', 'a\\3B b' );
+		yield 'Backslash' => array( 'a\\b', 'a\\5C b' );
 	}
 }
