@@ -255,6 +255,29 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	private $current_element = null;
 
 	/**
+	 * Whether to record relevant tokens consumed without visitable stack events.
+	 *
+	 * Some semantic end tags, such as BODY and HTML closers, update parser
+	 * state without popping their element from the stack of open elements. This
+	 * flag enables targeted bookkeeping while set_inner_html() searches for a
+	 * target's inner span.
+	 *
+	 * @since 7.0.0
+	 *
+	 * @var bool
+	 */
+	private $record_nonvisitable_token_events = false;
+
+	/**
+	 * Non-visitable token events consumed while recording is enabled.
+	 *
+	 * @since 7.0.0
+	 *
+	 * @var array<int, array{has_attributes: bool, node_name: string, operation: string, start: int}>
+	 */
+	private $nonvisitable_token_events = array();
+
+	/**
 	 * Context node if created as a fragment parser.
 	 *
 	 * @var WP_HTML_Token|null
@@ -2378,6 +2401,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 					 *
 					 * This parser does not currently support this behavior: ignore the token.
 					 */
+					$this->record_nonvisitable_token_event( 'html-or-body-start-tag' );
 				}
 
 				// Ignore the token.
@@ -2413,6 +2437,9 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 					'BODY' !== ( $this->state->stack_of_open_elements->at( 2 )->node_name ?? null ) ||
 					$this->state->stack_of_open_elements->contains( 'TEMPLATE' )
 				) {
+					if ( ! $this->state->stack_of_open_elements->contains( 'TEMPLATE' ) ) {
+						$this->record_nonvisitable_token_event( 'html-or-body-start-tag' );
+					}
 					// Ignore the token.
 					return $this->step();
 				}
@@ -2425,6 +2452,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 				 *
 				 * This parser does not currently support this behavior: ignore the token.
 				 */
+				$this->record_nonvisitable_token_event( 'html-or-body-start-tag' );
 				$this->state->frameset_ok = false;
 				return $this->step();
 
@@ -2469,6 +2497,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 				 */
 
 				$this->state->insertion_mode = WP_HTML_Processor_State::INSERTION_MODE_AFTER_BODY;
+				$this->record_nonvisitable_token_event( 'html-or-body-end-tag' );
 				/*
 				 * The BODY element is not removed from the stack of open elements.
 				 * Only internal state has changed, this does not qualify as a "step"
@@ -4421,6 +4450,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 				}
 
 				$this->state->insertion_mode = WP_HTML_Processor_State::INSERTION_MODE_AFTER_AFTER_BODY;
+				$this->record_nonvisitable_token_event( 'html-or-body-end-tag' );
 				/*
 				 * The HTML element is not removed from the stack of open elements.
 				 * Only internal state has changed, this does not qualify as a "step"
@@ -5107,6 +5137,344 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 */
 
 	/**
+	 * Finds the byte offset where the currently matched element's inner HTML ends.
+	 *
+	 * @since 7.0.0
+	 *
+	 * @param WP_HTML_Span $target_bookmark Bookmark span of the target opener.
+	 * @return int|null Byte offset where inner HTML ends, or null if it cannot be found.
+	 */
+	private function find_current_element_inner_html_end( WP_HTML_Span $target_bookmark ): ?int {
+		$processor = $this->create_processor_for_current_parsing_mode( $this->html );
+		if ( null === $processor ) {
+			return null;
+		}
+
+		$processor->record_nonvisitable_token_events = true;
+		$target_token                                = null;
+
+		do {
+			$has_token = $processor->next_token();
+			foreach ( $processor->consume_nonvisitable_token_events() as $event ) {
+				if (
+					isset( $target_token ) &&
+					'html-or-body-end-tag' === $event['operation'] &&
+					$target_token->node_name === $event['node_name']
+				) {
+					return $event['start'];
+				}
+			}
+
+			if ( ! $has_token ) {
+				break;
+			}
+
+			if ( ! isset( $target_token ) ) {
+				if ( $processor->is_at_source_span( $target_bookmark ) ) {
+					$target_token = $processor->current_element->token;
+				}
+				continue;
+			}
+
+			if (
+				isset( $processor->current_element ) &&
+				WP_HTML_Stack_Event::POP === $processor->current_element->operation &&
+				$target_token === $processor->current_element->token
+			) {
+				return $processor->get_current_source_token_start();
+			}
+		} while ( true );
+
+		return null;
+	}
+
+	/**
+	 * Returns the source offset for the token currently being processed.
+	 *
+	 * For virtual stack pops at the end of the document, there is no source
+	 * token, so the offset is the end of the HTML string.
+	 *
+	 * @since 7.0.0
+	 *
+	 * @return int Source offset for the current token.
+	 */
+	private function get_current_source_token_start(): int {
+		if (
+			WP_HTML_Tag_Processor::STATE_COMPLETE === $this->parser_state ||
+			WP_HTML_Tag_Processor::STATE_INCOMPLETE_INPUT === $this->parser_state ||
+			! isset( $this->state->current_token->bookmark_name ) ||
+			! isset( $this->bookmarks[ $this->state->current_token->bookmark_name ] )
+		) {
+			return strlen( $this->html );
+		}
+
+		return $this->bookmarks[ $this->state->current_token->bookmark_name ]->start;
+	}
+
+	/**
+	 * Records a relevant token that is consumed without a visitable stack event.
+	 *
+	 * @since 7.0.0
+	 *
+	 * @param string $operation Non-visitable operation name.
+	 */
+	private function record_nonvisitable_token_event( string $operation ): void {
+		if ( ! $this->record_nonvisitable_token_events ) {
+			return;
+		}
+
+		$attribute_names = 'html-or-body-start-tag' === $operation
+			? $this->get_attribute_names_with_prefix( '' )
+			: null;
+
+		$this->nonvisitable_token_events[] = array(
+			'has_attributes' => isset( $attribute_names ) && count( $attribute_names ) > 0,
+			'node_name'      => $this->get_token_name(),
+			'operation'      => $operation,
+			'start'          => $this->get_current_source_token_start(),
+		);
+	}
+
+	/**
+	 * Returns and clears recorded non-visitable token events.
+	 *
+	 * @since 7.0.0
+	 *
+	 * @return array<int, array{has_attributes: bool, node_name: string, operation: string, start: int}>
+	 */
+	private function consume_nonvisitable_token_events(): array {
+		$events                          = $this->nonvisitable_token_events;
+		$this->nonvisitable_token_events = array();
+
+		return $events;
+	}
+
+	/**
+	 * Checks whether a proposed inner HTML replacement preserves the outside tree.
+	 *
+	 * @since 7.0.0
+	 *
+	 * @param string       $replacement     Proposed raw inner HTML.
+	 * @param WP_HTML_Span $target_bookmark Bookmark span of the target opener.
+	 * @param int          $inner_start     Byte offset where the original inner HTML starts.
+	 * @param int          $inner_end       Byte offset where the original inner HTML ends.
+	 * @return bool Whether the replacement can be safely applied.
+	 */
+	private function is_safe_inner_html_replacement( string $replacement, WP_HTML_Span $target_bookmark, int $inner_start, int $inner_end ): bool {
+		$candidate_html = substr( $this->html, 0, $inner_start ) . $replacement . substr( $this->html, $inner_end );
+
+		$original_signature  = $this->get_outer_html_signature(
+			$this->html,
+			$target_bookmark,
+			true,
+			$inner_start,
+			$inner_end
+		);
+		$candidate_signature = $this->get_outer_html_signature(
+			$candidate_html,
+			$target_bookmark,
+			true,
+			$inner_start,
+			$inner_start + strlen( $replacement )
+		);
+
+		return null !== $original_signature && $original_signature === $candidate_signature;
+	}
+
+	/**
+	 * Returns a signature of all parsed tokens outside a target element.
+	 *
+	 * @since 7.0.0
+	 *
+	 * @param string       $html                          HTML to parse.
+	 * @param WP_HTML_Span $target_bookmark               Bookmark span of the target opener.
+	 * @param bool         $reject_html_body_attr_hoisting Whether to reject ignored HTML/BODY start tags with attributes.
+	 * @param int|null     $replacement_start             Start offset of replacement bytes in candidate HTML.
+	 * @param int|null     $replacement_end               End offset of replacement bytes in candidate HTML.
+	 * @return array<int, array<string, mixed>>|null Outside token signature, or null on parse failure.
+	 */
+	private function get_outer_html_signature(
+		string $html,
+		WP_HTML_Span $target_bookmark,
+		bool $reject_html_body_attr_hoisting = false,
+		?int $replacement_start = null,
+		?int $replacement_end = null
+	): ?array {
+		$processor = $this->create_processor_for_current_parsing_mode( $html );
+		if ( null === $processor ) {
+			return null;
+		}
+
+		$processor->record_nonvisitable_token_events = $reject_html_body_attr_hoisting;
+
+		$signature                         = array();
+		$target_token                      = null;
+		$target_active_formatting_elements = null;
+		$inside                            = false;
+		$found_target                      = false;
+
+		while ( true ) {
+			$has_token = $processor->next_token();
+			foreach ( $processor->consume_nonvisitable_token_events() as $event ) {
+				if (
+					'html-or-body-start-tag' === $event['operation'] &&
+					$event['has_attributes'] &&
+					(
+						$inside ||
+						(
+							isset( $replacement_start, $replacement_end ) &&
+							$event['start'] >= $replacement_start &&
+							$event['start'] < $replacement_end
+						)
+					)
+				) {
+					return null;
+				}
+			}
+
+			if ( ! $has_token ) {
+				break;
+			}
+
+			if ( ! $inside && $processor->is_at_source_span( $target_bookmark ) ) {
+				$target_token                      = $processor->current_element->token;
+				$target_active_formatting_elements = $processor->get_active_formatting_elements_signature(
+					$target_token,
+					in_array(
+						$target_token->node_name,
+						array( 'APPLET', 'CAPTION', 'MARQUEE', 'OBJECT', 'TD', 'TEMPLATE', 'TH' ),
+						true
+					)
+				);
+				$inside                            = true;
+				$found_target                      = true;
+				$signature[]                       = $processor->get_current_token_signature();
+				continue;
+			}
+
+			if ( $inside ) {
+				if (
+					isset( $processor->current_element ) &&
+					WP_HTML_Stack_Event::POP === $processor->current_element->operation &&
+					$target_token === $processor->current_element->token
+				) {
+					if ( $target_active_formatting_elements !== $processor->get_active_formatting_elements_signature() ) {
+						return null;
+					}
+					$inside      = false;
+					$signature[] = $processor->get_current_token_signature();
+				}
+
+				continue;
+			}
+
+			$signature[] = $processor->get_current_token_signature();
+		}
+
+		if ( null !== $processor->get_last_error() || ! $found_target || $inside ) {
+			return null;
+		}
+
+		return $signature;
+	}
+
+	/**
+	 * Creates a fresh processor in the same public parsing mode as this one.
+	 *
+	 * @since 7.0.0
+	 *
+	 * @param string $html HTML to parse.
+	 * @return static|null Processor in the same parsing mode, or null if unsupported.
+	 */
+	private function create_processor_for_current_parsing_mode( string $html ) {
+		if ( null === $this->context_node ) {
+			return static::create_full_parser( $html, $this->state->encoding ?? 'UTF-8' );
+		}
+
+		if ( 'html' !== $this->context_node->namespace || 'BODY' !== $this->context_node->node_name ) {
+			return null;
+		}
+
+		return static::create_fragment( $html, '<body>', $this->state->encoding ?? 'UTF-8' );
+	}
+
+	/**
+	 * Checks whether the current token starts at a given source span.
+	 *
+	 * @since 7.0.0
+	 *
+	 * @param WP_HTML_Span $span Source span to match.
+	 * @return bool Whether the current token starts at the given source span.
+	 */
+	private function is_at_source_span( WP_HTML_Span $span ): bool {
+		if (
+			$this->is_virtual() ||
+			! isset( $this->state->current_token->bookmark_name ) ||
+			! isset( $this->bookmarks[ $this->state->current_token->bookmark_name ] )
+		) {
+			return false;
+		}
+
+		$current_span = $this->bookmarks[ $this->state->current_token->bookmark_name ];
+
+		return $current_span->start === $span->start && $current_span->length === $span->length;
+	}
+
+	/**
+	 * Returns a parsed token signature for outside-tree comparison.
+	 *
+	 * @since 7.0.0
+	 *
+	 * @return array<string, mixed> Token signature.
+	 */
+	private function get_current_token_signature(): array {
+		return array(
+			'type'        => $this->get_token_type(),
+			'name'        => $this->get_token_name(),
+			'namespace'   => $this->get_namespace(),
+			'is_closer'   => $this->is_tag_closer(),
+			'breadcrumbs' => $this->get_breadcrumbs(),
+			'html'        => $this->serialize_token(),
+		);
+	}
+
+	/**
+	 * Returns a parser-state signature for active formatting elements.
+	 *
+	 * @since 7.0.0
+	 *
+	 * @param WP_HTML_Token|null $target_token       Optional target token to omit from the signature.
+	 * @param bool               $omit_target_marker Whether to omit a parser marker introduced by the target.
+	 * @return array<int, array<string, string|null>> Active formatting elements signature.
+	 */
+	private function get_active_formatting_elements_signature(
+		?WP_HTML_Token $target_token = null,
+		bool $omit_target_marker = false
+	): array {
+		$signature = array();
+
+		foreach ( $this->state->active_formatting_elements->walk_down() as $item ) {
+			if ( null !== $target_token && $item->bookmark_name === $target_token->bookmark_name ) {
+				continue;
+			}
+
+			$signature[] = array(
+				'bookmark_name'         => $item->bookmark_name,
+				'node_name'             => $item->node_name,
+				'namespace'             => $item->namespace,
+				'integration_node_type' => $item->integration_node_type,
+			);
+		}
+
+		$last_index = count( $signature ) - 1;
+		if ( $omit_target_marker && $last_index >= 0 && 'marker' === $signature[ $last_index ]['node_name'] ) {
+			array_pop( $signature );
+		}
+
+		return $signature;
+	}
+
+	/**
 	 * Creates a new bookmark for the currently-matched token and returns the generated name.
 	 *
 	 * @since 6.4.0
@@ -5353,6 +5721,64 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 */
 	public function remove_attribute( $name ): bool {
 		return $this->is_virtual() ? false : parent::remove_attribute( $name );
+	}
+
+	/**
+	 * Replaces the inner HTML for the currently matched tag, if matched.
+	 *
+	 * The inner HTML is replaced as raw HTML markup. This method refuses to
+	 * apply a replacement if the updated markup would change the parsed tree
+	 * outside of the currently matched element.
+	 *
+	 * @since 7.0.0
+	 *
+	 * @param string $html New raw inner HTML.
+	 * @return bool Whether the inner HTML was able to update.
+	 */
+	public function set_inner_html( string $html ): bool {
+		if (
+			$this->is_virtual() ||
+			WP_HTML_Tag_Processor::STATE_MATCHED_TAG !== $this->parser_state ||
+			$this->is_tag_closer() ||
+			! $this->expects_closer()
+		) {
+			return false;
+		}
+
+		/*
+		 * Flush pending updates so that the candidate tree is validated against
+		 * the same HTML source that will receive the inner HTML replacement.
+		 */
+		$this->get_updated_html();
+
+		$target_token = $this->current_element->token;
+		if ( null !== $target_token->integration_node_type ) {
+			return false;
+		}
+
+		if ( ! isset( $target_token->bookmark_name, $this->bookmarks[ $target_token->bookmark_name ] ) ) {
+			return false;
+		}
+
+		$target_bookmark = $this->bookmarks[ $target_token->bookmark_name ];
+		$inner_start     = $target_bookmark->start + $target_bookmark->length;
+		$inner_end       = $this->find_current_element_inner_html_end( $target_bookmark );
+
+		if ( null === $inner_end || $inner_end < $inner_start ) {
+			return false;
+		}
+
+		if ( ! $this->is_safe_inner_html_replacement( $html, $target_bookmark, $inner_start, $inner_end ) ) {
+			return false;
+		}
+
+		$this->lexical_updates['inner_html'] = new WP_HTML_Text_Replacement(
+			$inner_start,
+			$inner_end - $inner_start,
+			$html
+		);
+
+		return true;
 	}
 
 	/**
