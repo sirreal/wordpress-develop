@@ -86,6 +86,22 @@ class WP_HTML_Token {
 	public $on_destroy = null;
 
 	/**
+	 * Attributes associated with this token.
+	 *
+	 * For formatting elements in the active formatting elements list,
+	 * this stores the attributes as they were when the element was created.
+	 * Used for reconstruction and Noah's Ark duplicate detection.
+	 *
+	 * Keys are lowercase attribute names, values are decoded strings
+	 * or `true` for boolean attributes.
+	 *
+	 * @since 6.8.0
+	 *
+	 * @var array<string, string|true>|null
+	 */
+	public $attributes = null;
+
+	/**
 	 * Constructor - creates a reference to a token in some external HTML string.
 	 *
 	 * @since 6.4.0

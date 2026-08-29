@@ -904,6 +904,32 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	}
 
 	/**
+	 * Captures all attributes from the current token as an array.
+	 *
+	 * Returns an associative array with lowercase attribute names as keys
+	 * and decoded attribute values as values. Boolean attributes have
+	 * the value `true`.
+	 *
+	 * @since 6.8.0
+	 *
+	 * @return array<string, string|true> Attribute name-value pairs.
+	 */
+	private function get_current_token_attributes(): array {
+		$attributes = array();
+		$names      = $this->get_attribute_names_with_prefix( '' );
+
+		if ( null === $names ) {
+			return $attributes;
+		}
+
+		foreach ( $names as $name ) {
+			$attributes[ $name ] = $this->get_attribute( $name );
+		}
+
+		return $attributes;
+	}
+
+	/**
 	 * Indicates if the currently-matched tag matches the given breadcrumbs.
 	 *
 	 * A "*" represents a single tag wildcard, where any tag matches, but not no tags.
@@ -2907,6 +2933,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 
 				$this->reconstruct_active_formatting_elements();
 				$this->insert_html_element( $this->state->current_token );
+				$this->state->current_token->attributes = $this->get_current_token_attributes();
 				$this->state->active_formatting_elements->push( $this->state->current_token );
 				return true;
 
@@ -2928,6 +2955,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			case '+U':
 				$this->reconstruct_active_formatting_elements();
 				$this->insert_html_element( $this->state->current_token );
+				$this->state->current_token->attributes = $this->get_current_token_attributes();
 				$this->state->active_formatting_elements->push( $this->state->current_token );
 				return true;
 
@@ -2944,6 +2972,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 				}
 
 				$this->insert_html_element( $this->state->current_token );
+				$this->state->current_token->attributes = $this->get_current_token_attributes();
 				$this->state->active_formatting_elements->push( $this->state->current_token );
 				return true;
 
@@ -5304,6 +5333,22 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @return string|true|null Value of attribute or `null` if not available. Boolean attributes return `true`.
 	 */
 	public function get_attribute( $name ) {
+		/*
+		 * For reconstructed elements with virtual attributes,
+		 * return the stored attribute value.
+		 */
+		if (
+			isset( $this->current_element ) &&
+			null !== $this->current_element->token->attributes
+		) {
+			$comparable = strtolower( $name );
+			if ( array_key_exists( $comparable, $this->current_element->token->attributes ) ) {
+				return $this->current_element->token->attributes[ $comparable ];
+			}
+			// Virtual element has no other attributes beyond what's stored.
+			return null;
+		}
+
 		return $this->is_virtual() ? null : parent::get_attribute( $name );
 	}
 
@@ -5382,7 +5427,140 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @return array|null List of attribute names, or `null` when no tag opener is matched.
 	 */
 	public function get_attribute_names_with_prefix( $prefix ): ?array {
+		/*
+		 * For reconstructed elements with virtual attributes,
+		 * return matching attribute names from stored attributes.
+		 */
+		if (
+			isset( $this->current_element ) &&
+			null !== $this->current_element->token->attributes
+		) {
+			if ( $this->is_tag_closer() ) {
+				return null;
+			}
+
+			$comparable = strtolower( $prefix );
+			$matches    = array();
+
+			foreach ( array_keys( $this->current_element->token->attributes ) as $name ) {
+				if ( str_starts_with( $name, $comparable ) ) {
+					$matches[] = $name;
+				}
+			}
+
+			return $matches;
+		}
+
 		return $this->is_virtual() ? null : parent::get_attribute_names_with_prefix( $prefix );
+	}
+
+	/**
+	 * Returns the adjusted attribute name for the currently matched tag.
+	 *
+	 * For virtual/reconstructed elements with stored attributes, returns the
+	 * stored attribute name (already lowercase). Applies foreign attribute
+	 * adjustments for SVG and MathML namespaces as needed.
+	 *
+	 * @since 6.8.0 Subclassed for the HTML Processor.
+	 *
+	 * @param string $attribute_name Attribute name to adjust.
+	 * @return string|null Adjusted attribute name, or `null` if not available.
+	 */
+	public function get_qualified_attribute_name( $attribute_name ): ?string {
+		/*
+		 * For reconstructed elements with virtual attributes,
+		 * the attribute name is already lowercase. Apply foreign
+		 * attribute adjustments if needed.
+		 */
+		if (
+			isset( $this->current_element ) &&
+			null !== $this->current_element->token->attributes
+		) {
+			$comparable = strtolower( $attribute_name );
+			if ( ! array_key_exists( $comparable, $this->current_element->token->attributes ) ) {
+				return null;
+			}
+
+			$namespace = $this->get_namespace();
+
+			// Apply foreign attribute adjustments for MathML.
+			if ( 'math' === $namespace && 'definitionurl' === $comparable ) {
+				return 'definitionURL';
+			}
+
+			// Apply foreign attribute adjustments for SVG.
+			if ( 'svg' === $namespace ) {
+				$svg_adjusted = array(
+					'attributename'       => 'attributeName',
+					'attributetype'       => 'attributeType',
+					'basefrequency'       => 'baseFrequency',
+					'baseprofile'         => 'baseProfile',
+					'calcmode'            => 'calcMode',
+					'clippathunits'       => 'clipPathUnits',
+					'diffuseconstant'     => 'diffuseConstant',
+					'edgemode'            => 'edgeMode',
+					'filterunits'         => 'filterUnits',
+					'glyphref'            => 'glyphRef',
+					'gradienttransform'   => 'gradientTransform',
+					'gradientunits'       => 'gradientUnits',
+					'kernelmatrix'        => 'kernelMatrix',
+					'kernelunitlength'    => 'kernelUnitLength',
+					'keypoints'           => 'keyPoints',
+					'keysplines'          => 'keySplines',
+					'keytimes'            => 'keyTimes',
+					'lengthadjust'        => 'lengthAdjust',
+					'limitingconeangle'   => 'limitingConeAngle',
+					'markerheight'        => 'markerHeight',
+					'markerunits'         => 'markerUnits',
+					'markerwidth'         => 'markerWidth',
+					'maskcontentunits'    => 'maskContentUnits',
+					'maskunits'           => 'maskUnits',
+					'numoctaves'          => 'numOctaves',
+					'pathlength'          => 'pathLength',
+					'patterncontentunits' => 'patternContentUnits',
+					'patterntransform'    => 'patternTransform',
+					'patternunits'        => 'patternUnits',
+					'pointsatx'           => 'pointsAtX',
+					'pointsaty'           => 'pointsAtY',
+					'pointsatz'           => 'pointsAtZ',
+					'preservealpha'       => 'preserveAlpha',
+					'preserveaspectratio' => 'preserveAspectRatio',
+					'primitiveunits'      => 'primitiveUnits',
+					'refx'                => 'refX',
+					'refy'                => 'refY',
+					'repeatcount'         => 'repeatCount',
+					'repeatdur'           => 'repeatDur',
+					'requiredextensions'  => 'requiredExtensions',
+					'requiredfeatures'    => 'requiredFeatures',
+					'specularconstant'    => 'specularConstant',
+					'specularexponent'    => 'specularExponent',
+					'spreadmethod'        => 'spreadMethod',
+					'startoffset'         => 'startOffset',
+					'stddeviation'        => 'stdDeviation',
+					'stitchtiles'         => 'stitchTiles',
+					'surfacescale'        => 'surfaceScale',
+					'systemlanguage'      => 'systemLanguage',
+					'tablevalues'         => 'tableValues',
+					'targetx'             => 'targetX',
+					'targety'             => 'targetY',
+					'textlength'          => 'textLength',
+					'viewbox'             => 'viewBox',
+					'viewtarget'          => 'viewTarget',
+					'xchannelselector'    => 'xChannelSelector',
+					'ychannelselector'    => 'yChannelSelector',
+					'zoomandpan'          => 'zoomAndPan',
+				);
+
+				if ( isset( $svg_adjusted[ $comparable ] ) ) {
+					return $svg_adjusted[ $comparable ];
+				}
+			}
+
+			// Return the lowercase attribute name for HTML namespace.
+			return $comparable;
+		}
+
+		return $this->is_virtual() ? null : parent::get_qualified_attribute_name( $attribute_name );
 	}
 
 	/**
@@ -5904,15 +6082,18 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @return bool Whether any formatting elements needed to be reconstructed.
 	 */
 	private function reconstruct_active_formatting_elements(): bool {
+		$active_formatting_elements = $this->state->active_formatting_elements;
+		$stack_of_open_elements     = $this->state->stack_of_open_elements;
+
 		/*
 		 * > If there are no entries in the list of active formatting elements, then there is nothing
 		 * > to reconstruct; stop this algorithm.
 		 */
-		if ( 0 === $this->state->active_formatting_elements->count() ) {
+		if ( 0 === $active_formatting_elements->count() ) {
 			return false;
 		}
 
-		$last_entry = $this->state->active_formatting_elements->current_node();
+		$last_entry = $active_formatting_elements->current_node();
 		if (
 
 			/*
@@ -5926,12 +6107,120 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			 * > element that is in the stack of open elements, then there is nothing to reconstruct;
 			 * > stop this algorithm.
 			 */
-			$this->state->stack_of_open_elements->contains_node( $last_entry )
+			$stack_of_open_elements->contains_node( $last_entry )
 		) {
 			return false;
 		}
 
-		$this->bail( 'Cannot reconstruct active formatting elements when advancing and rewinding is required.' );
+		/*
+		 * > Let entry be the last (most recently added) element in the list of active formatting elements.
+		 */
+		$entry_index = $active_formatting_elements->count() - 1;
+
+		/*
+		 * REWIND: Walk backwards to find where reconstruction should start.
+		 *
+		 * > Rewind: If there are no entries before entry in the list of active formatting elements,
+		 * > then jump to the step labeled create.
+		 * > Let entry be the entry one earlier than entry in the list of active formatting elements.
+		 * > If entry is neither a marker nor an element that is also in the stack of open elements,
+		 * > go to the step labeled rewind.
+		 */
+		while ( $entry_index > 0 ) {
+			--$entry_index;
+			$entry = $active_formatting_elements->get_at( $entry_index );
+
+			/*
+			 * Stop rewinding if a marker or an element in the stack is found.
+			 */
+			if (
+				'marker' === $entry->node_name ||
+				$stack_of_open_elements->contains_node( $entry )
+			) {
+				/*
+				 * > Advance: Let entry be the element one later than entry in the list of
+				 * > active formatting elements.
+				 */
+				++$entry_index;
+				break;
+			}
+		}
+
+		/*
+		 * ADVANCE and CREATE: Walk forwards, creating and inserting elements.
+		 *
+		 * > Create: Insert an HTML element for the token for which the element entry was created,
+		 * > to obtain new element.
+		 * > Replace the entry for entry in the list with an entry for new element.
+		 * > If the entry for new element in the list of active formatting elements is not the
+		 * > last entry in the list, return to the step labeled advance.
+		 */
+		$last_index = $active_formatting_elements->count() - 1;
+		while ( $entry_index <= $last_index ) {
+			$entry = $active_formatting_elements->get_at( $entry_index );
+
+			/*
+			 * Create an element for the token and insert it.
+			 */
+			$new_element = $this->create_element_for_formatting_token( $entry );
+			$this->insert_html_element( $new_element );
+
+			/*
+			 * Replace the entry in the list with the newly created element.
+			 */
+			$active_formatting_elements->replace_at( $entry_index, $new_element );
+
+			++$entry_index;
+		}
+
+		return true;
+	}
+
+	/**
+	 * Creates a new element token for reconstructing a formatting element.
+	 *
+	 * This creates a "virtual" element that represents a reconstructed
+	 * formatting element. It uses the same tag name as the original
+	 * but gets a new bookmark pointing to the current position.
+	 *
+	 * @since 6.8.0
+	 *
+	 * @throws WP_HTML_Unsupported_Exception When the entry has attributes that cannot be cloned.
+	 *
+	 * @param WP_HTML_Token $entry The active formatting element entry.
+	 * @return WP_HTML_Token The newly created element token.
+	 */
+	private function create_element_for_formatting_token( WP_HTML_Token $entry ): WP_HTML_Token {
+		/*
+		 * Create a virtual bookmark for this reconstructed element.
+		 * This follows the same pattern as insert_virtual_node().
+		 */
+		$bookmark_name = $this->bookmark_token();
+
+		/*
+		 * The bookmark points to the current token's position with zero length,
+		 * indicating this is a virtual element without source HTML.
+		 */
+		$here                             = $this->bookmarks[ $this->state->current_token->bookmark_name ];
+		$this->bookmarks[ $bookmark_name ] = new WP_HTML_Span( $here->start, 0 );
+
+		/*
+		 * Create new token with same tag name as the original.
+		 * Formatting elements are always in the HTML namespace.
+		 */
+		$new_token            = new WP_HTML_Token( $bookmark_name, $entry->node_name, false );
+		$new_token->namespace = 'html';
+
+		/*
+		 * Clone attributes from the original entry.
+		 * This ensures reconstructed elements have the same attributes
+		 * as the token for which they were created.
+		 */
+		if ( null !== $entry->attributes ) {
+			$new_token->attributes = $entry->attributes;
+		}
+
+		return $new_token;
 	}
 
 	/**

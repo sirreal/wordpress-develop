@@ -114,6 +114,8 @@ class WP_HTML_Active_Formatting_Elements {
 	 */
 	public function push( WP_HTML_Token $token ) {
 		/*
+		 * Noah's Ark clause: Limit to 3 identical formatting elements.
+		 *
 		 * > If there are already three elements in the list of active formatting elements after the last marker,
 		 * > if any, or anywhere in the list if there are no markers, that have the same tag name, namespace, and
 		 * > attributes as element, then remove the earliest such element from the list of active formatting
@@ -122,8 +124,32 @@ class WP_HTML_Active_Formatting_Elements {
 		 * > paired such that the two attributes in each pair have identical names, namespaces, and values
 		 * > (the order of the attributes does not matter).
 		 *
-		 * @todo Implement the "Noah's Ark clause" to only add up to three of any given kind of formatting elements to the stack.
+		 * @see https://html.spec.whatwg.org/#push-onto-the-list-of-active-formatting-elements
 		 */
+		$dominated_count      = 0;
+		$earliest_match_index = null;
+
+		// Walk backwards, counting matches until we hit a marker.
+		for ( $i = count( $this->stack ) - 1; $i >= 0; $i-- ) {
+			$entry = $this->stack[ $i ];
+
+			// Markers stop the search.
+			if ( 'marker' === $entry->node_name ) {
+				break;
+			}
+
+			// Check if this entry matches the token being pushed.
+			if ( self::elements_have_same_identity( $token, $entry ) ) {
+				++$dominated_count;
+				$earliest_match_index = $i;
+			}
+		}
+
+		// If 3 identical elements exist, remove the earliest.
+		if ( $dominated_count >= 3 && null !== $earliest_match_index ) {
+			array_splice( $this->stack, $earliest_match_index, 1 );
+		}
+
 		// > Add element to the list of active formatting elements.
 		$this->stack[] = $token;
 	}
@@ -226,5 +252,119 @@ class WP_HTML_Active_Formatting_Elements {
 				break;
 			}
 		}
+	}
+
+	/**
+	 * Gets the entry at a specific index in the list.
+	 *
+	 * @since 6.8.0
+	 *
+	 * @param int $index Zero-based index from the start of the list.
+	 * @return WP_HTML_Token|null The token at that index, or null if out of bounds.
+	 */
+	public function get_at( int $index ): ?WP_HTML_Token {
+		return $this->stack[ $index ] ?? null;
+	}
+
+	/**
+	 * Replaces the entry at a specific index with a new token.
+	 *
+	 * @since 6.8.0
+	 *
+	 * @param int           $index Zero-based index from the start of the list.
+	 * @param WP_HTML_Token $token The new token to place at that index.
+	 * @return bool Whether the replacement was successful.
+	 */
+	public function replace_at( int $index, WP_HTML_Token $token ): bool {
+		if ( $index < 0 || $index >= count( $this->stack ) ) {
+			return false;
+		}
+		$this->stack[ $index ] = $token;
+		return true;
+	}
+
+	/**
+	 * Finds the index of a token in the list.
+	 *
+	 * @since 6.8.0
+	 *
+	 * @param WP_HTML_Token $token The token to find.
+	 * @return int|null The index, or null if not found.
+	 */
+	public function index_of( WP_HTML_Token $token ): ?int {
+		foreach ( $this->stack as $index => $item ) {
+			if ( $token->bookmark_name === $item->bookmark_name ) {
+				return $index;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Determines if two tokens represent the same formatting element.
+	 *
+	 * Two elements are considered identical if they have the same:
+	 * - Tag name
+	 * - Namespace
+	 * - Attributes (names, namespaces, and values)
+	 *
+	 * @since 6.8.0
+	 *
+	 * @param WP_HTML_Token $a First token.
+	 * @param WP_HTML_Token $b Second token.
+	 * @return bool Whether the tokens represent identical formatting elements.
+	 */
+	private static function elements_have_same_identity( WP_HTML_Token $a, WP_HTML_Token $b ): bool {
+		// Tag name must match.
+		if ( $a->node_name !== $b->node_name ) {
+			return false;
+		}
+
+		// Namespace must match.
+		if ( $a->namespace !== $b->namespace ) {
+			return false;
+		}
+
+		// Attributes must match.
+		return self::attributes_are_equal(
+			$a->attributes ?? array(),
+			$b->attributes ?? array()
+		);
+	}
+
+	/**
+	 * Determines if two attribute arrays are equal.
+	 *
+	 * Comparison is case-insensitive for names (keys are already lowercase),
+	 * exact for values, and order-independent.
+	 *
+	 * @since 6.8.0
+	 *
+	 * @param array $a First attributes array.
+	 * @param array $b Second attributes array.
+	 * @return bool Whether the attributes are equal.
+	 */
+	private static function attributes_are_equal( array $a, array $b ): bool {
+		// Different count means different attributes.
+		if ( count( $a ) !== count( $b ) ) {
+			return false;
+		}
+
+		// Empty arrays are equal.
+		if ( 0 === count( $a ) ) {
+			return true;
+		}
+
+		// Compare each attribute (keys already lowercase from capture).
+		foreach ( $a as $name => $value ) {
+			if ( ! array_key_exists( $name, $b ) ) {
+				return false;
+			}
+			if ( $value !== $b[ $name ] ) {
+				return false;
+			}
+		}
+
+		return true;
 	}
 }
