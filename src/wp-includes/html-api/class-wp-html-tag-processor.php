@@ -28,7 +28,9 @@
  *
  * Use of this class requires three steps:
  *
- *  1. Create a new class instance with your input HTML document.
+ *  1. Create a new class instance with your input HTML document:
+ *     `new WP_HTML_Tag_Processor( $html )`. This class has no static
+ *     factory methods.
  *  2. Find the tag(s) you are looking for.
  *  3. Request changes to the attributes in those tag(s).
  *
@@ -169,6 +171,35 @@
  * for a non-existing attribute has no effect on the document. Both
  * of these methods are safe to call without knowing if a given attribute
  * exists beforehand.
+ *
+ * ### Building markup from a template
+ *
+ * The Tag Processor can safely fill values into a known markup shape: write
+ * the shape as a literal template, then replace its attribute values and
+ * text through the API, which handles the necessary HTML encoding.
+ *
+ * Include attributes in the template, even with empty values, when their
+ * written order matters in the output. Updating an existing attribute
+ * replaces that attribute in place; adding a new attribute inserts it after
+ * the tag name, before existing attributes.
+ *
+ * Include placeholder text inside elements that need text content. An empty
+ * ordinary element has no `#text` token for
+ * {@see WP_HTML_Tag_Processor::set_modifiable_text} to replace.
+ *
+ * Example:
+ *
+ *     $processor = new WP_HTML_Tag_Processor( '<a href="" title="">.</a>' );
+ *     $processor->next_tag();
+ *     $processor->set_attribute( 'href', $url );
+ *     $processor->set_attribute( 'title', $title );
+ *     while ( $processor->next_token() ) {
+ *         if ( '#text' === $processor->get_token_type() ) {
+ *             $processor->set_modifiable_text( $link_text );
+ *             break;
+ *         }
+ *     }
+ *     $html = $processor->get_updated_html();
  *
  * ### Modifying CSS classes for a found tag
  *
@@ -3922,6 +3953,18 @@ class WP_HTML_Tag_Processor {
 	 * with leading whitespace, which is indistinguishable from the whitespace
 	 * separating the data from its target.
 	 *
+	 * This method operates on the currently matched token, which must carry
+	 * modifiable text: a `#text` node, a comment, or an element whose contents
+	 * are raw text or plaintext. An ordinary container element, such as P, DIV,
+	 * FIGCAPTION, or SPAN, carries no text of its own; its text lives in child
+	 * `#text` tokens. Calling this method while matched on such a tag returns
+	 * `false` and changes nothing. Always check the return value when the text
+	 * update may be rejected.
+	 *
+	 * An empty ordinary element, such as `<figcaption></figcaption>`, contains
+	 * no `#text` token for this method to update. To fill empty elements when
+	 * building markup from a template, include placeholder text and replace it.
+	 *
 	 * Example:
 	 *
 	 *     // Add a preface to all STYLE contents.
@@ -4575,6 +4618,21 @@ class WP_HTML_Tag_Processor {
 	 *  - When `true` is passed as the value, then only the attribute name is added to the tag.
 	 *  - When `false` is passed, the attribute gets removed if it existed before.
 	 *
+	 * Updating an attribute the tag already has replaces its value in place, so
+	 * the attribute keeps its position within the tag. A new attribute is
+	 * inserted after the tag name, before existing attributes. When the exact
+	 * attribute order of the output matters, start from markup in which the
+	 * attributes already exist, even with empty values, and update them in
+	 * place.
+	 *
+	 * Example:
+	 *
+	 *     $processor = new WP_HTML_Tag_Processor( '<img src="" alt="">' );
+	 *     $processor->next_tag();
+	 *     $processor->set_attribute( 'src', '/dog.jpg' );
+	 *     $processor->set_attribute( 'alt', 'A dog' );
+	 *     // <img src="/dog.jpg" alt="A dog">
+	 *
 	 * @since 6.2.0
 	 * @since 6.2.1 Fix: Only create a single update for multiple calls with case-variant attribute names.
 	 * @since 6.9.0 Escapes all character references instead of trying to avoid double-escaping.
@@ -4807,10 +4865,17 @@ class WP_HTML_Tag_Processor {
 	/**
 	 * Adds a new class name to the currently matched tag.
 	 *
+	 * If the tag has no `class` attribute, one is created. If it already has
+	 * classes, the new name is appended after them. Existing classes are not
+	 * removed or reordered. Adding a class name the tag already has is a no-op:
+	 * no duplicate is appended.
+	 *
 	 * @since 6.2.0
 	 *
 	 * @param string $class_name The class name to add.
-	 * @return bool Whether the class was set to be added.
+	 * @return bool Whether the processor is matched on a tag and the class update
+	 *              was accepted. This can be true even when the class was already
+	 *              present and no duplicate will be added.
 	 */
 	public function add_class( $class_name ): bool {
 		if (
@@ -4889,7 +4954,20 @@ class WP_HTML_Tag_Processor {
 	}
 
 	/**
-	 * Returns the string representation of the HTML Tag Processor.
+	 * Returns the input document with all queued updates applied.
+	 *
+	 * This is the way to read a document back after modifying it with
+	 * {@see WP_HTML_Tag_Processor::set_attribute},
+	 * {@see WP_HTML_Tag_Processor::remove_attribute},
+	 * {@see WP_HTML_Tag_Processor::add_class},
+	 * {@see WP_HTML_Tag_Processor::remove_class}, or
+	 * {@see WP_HTML_Tag_Processor::set_modifiable_text}. Every byte not touched
+	 * by an update is returned exactly as it appeared in the input; no
+	 * normalization or reformatting occurs.
+	 *
+	 * Only attributes the API writes are re-emitted. Other attributes on the
+	 * same tag keep their original bytes, including single-quoted or unquoted
+	 * values. It is safe to call this method mid-scan and continue processing.
 	 *
 	 * @since 6.2.0
 	 *
