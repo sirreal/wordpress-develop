@@ -411,6 +411,47 @@ HTML;
 	}
 
 	/**
+	 * Ensures that bookmarks stay attached to their original token when text is inserted at the bookmark start.
+	 *
+	 * @ticket 56299
+	 *
+	 * @covers WP_HTML_Tag_Processor::seek
+	 */
+	public function test_updates_bookmark_for_insertions_at_start() {
+		$processor = new class( '<div></div><span></span>' ) extends WP_HTML_Tag_Processor {
+			/**
+			 * Inserts HTML at the start of the given bookmark.
+			 *
+			 * @param string $bookmark_name Bookmark name.
+			 * @param string $html          HTML to insert.
+			 */
+			public function insert_html_at_bookmark_start( string $bookmark_name, string $html ): void {
+				$this->lexical_updates[] = new WP_HTML_Text_Replacement(
+					$this->bookmarks[ $bookmark_name ]->start,
+					0,
+					$html
+				);
+			}
+		};
+
+		$processor->next_tag( 'SPAN' );
+		$processor->set_bookmark( 'target' );
+		$processor->insert_html_at_bookmark_start( 'target', '<p></p>' );
+
+		$this->assertSame(
+			'<div></div><p></p><span></span>',
+			$processor->get_updated_html(),
+			'Should have inserted the HTML at the bookmark start.'
+		);
+		$this->assertTrue( $processor->seek( 'target' ), 'Should have sought back to the original bookmarked token.' );
+		$this->assertSame(
+			'SPAN',
+			$processor->get_token_name(),
+			'Should have kept the bookmark attached to the original SPAN token after insertion.'
+		);
+	}
+
+	/**
 	 * @ticket 56299
 	 *
 	 * @covers WP_HTML_Tag_Processor::set_bookmark

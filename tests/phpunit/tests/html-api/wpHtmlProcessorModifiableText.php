@@ -10,6 +10,37 @@
  */
 class Tests_HtmlApi_WpHtmlProcessorModifiableText extends WP_UnitTestCase {
 	/**
+	 * Ensures that bookmarked text remains seekable after updating the same text node.
+	 */
+	public function test_seeks_to_bookmarked_text_after_modifiable_text_update(): void {
+		$processor = WP_HTML_Processor::create_fragment( "<pre>\nabc</pre><span>" );
+
+		$this->assertTrue( $processor->next_token(), 'Should have found the PRE opener.' );
+		$this->assertSame( 'PRE', $processor->get_token_name(), 'Should have found the PRE opener: check test setup.' );
+
+		while ( $processor->next_token() && 'abc' !== $processor->get_modifiable_text() ) {
+			continue;
+		}
+
+		$this->assertSame( '#text', $processor->get_token_name(), 'Should have found the PRE text node: check test setup.' );
+		$this->assertSame( 'abc', $processor->get_modifiable_text(), 'Should have stripped the leading newline from the PRE text on first traversal.' );
+		$this->assertTrue( $processor->set_bookmark( 'text' ), 'Should have bookmarked the PRE text node.' );
+
+		$this->assertTrue( $processor->set_modifiable_text( 'xyz' ), 'Should have updated the PRE text node.' );
+		$this->assertTrue( $processor->next_token(), 'Should have advanced away from the bookmarked text node.' );
+		$this->assertSame( 'PRE', $processor->get_token_name(), 'Should have advanced to the PRE closer: check test setup.' );
+		$this->assertSame( "<pre>\nxyz</pre><span>", $processor->get_updated_html(), 'Should have updated the PRE text node.' );
+
+		$this->assertTrue( $processor->seek( 'text' ), 'Should have sought back to the updated PRE text node.' );
+		$this->assertSame( '#text', $processor->get_token_name(), 'Should have sought back to the text node.' );
+		$this->assertSame(
+			'xyz',
+			$processor->get_modifiable_text(),
+			'Should have replayed the updated PRE text node after seeking.'
+		);
+	}
+
+	/**
 	 * TEXTAREA elements ignore the first newline in their content.
 	 * Setting the modifiable text with a leading newline (or carriage return variants)
 	 * should ensure that the leading newline is present in the resulting TEXTAREA.

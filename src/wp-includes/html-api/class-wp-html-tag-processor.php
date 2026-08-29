@@ -766,6 +766,14 @@ class WP_HTML_Tag_Processor {
 	 */
 	protected $bookmarks = array();
 
+	/**
+	 * Tracks bookmarks set on text nodes whose leading linefeed is ignored.
+	 *
+	 * @since 6.9.0
+	 * @var bool[]
+	 */
+	private $bookmarks_with_skipped_newline = array();
+
 	const ADD_CLASS    = true;
 	const REMOVE_CLASS = false;
 	const SKIP_CLASS   = null;
@@ -1376,6 +1384,11 @@ class WP_HTML_Tag_Processor {
 		}
 
 		$this->bookmarks[ $name ] = new WP_HTML_Span( $this->token_starts_at, $this->token_length );
+		if ( self::STATE_TEXT_NODE === $this->parser_state && $this->skip_newline_at === $this->token_starts_at ) {
+			$this->bookmarks_with_skipped_newline[ $name ] = true;
+		} else {
+			unset( $this->bookmarks_with_skipped_newline[ $name ] );
+		}
 
 		return true;
 	}
@@ -1396,6 +1409,7 @@ class WP_HTML_Tag_Processor {
 		}
 
 		unset( $this->bookmarks[ $name ] );
+		unset( $this->bookmarks_with_skipped_newline[ $name ] );
 
 		return true;
 	}
@@ -2609,7 +2623,9 @@ class WP_HTML_Tag_Processor {
 			return 0;
 		}
 
-		$accumulated_shift_for_given_point = 0;
+		$accumulated_shift_for_given_point  = 0;
+		$accumulated_shift_for_skip_newline = 0;
+		$skip_newline_at                    = $this->skip_newline_at;
 
 		/*
 		 * Attribute updates can be enqueued in any order but updates
@@ -2633,6 +2649,10 @@ class WP_HTML_Tag_Processor {
 				$this->bytes_already_parsed += $shift;
 			}
 
+			if ( null !== $skip_newline_at && $diff->start < $skip_newline_at ) {
+				$accumulated_shift_for_skip_newline += $shift;
+			}
+
 			// Accumulate shift of the given pointer within this function call.
 			if ( $diff->start < $shift_this_point ) {
 				$accumulated_shift_for_given_point += $shift;
@@ -2641,6 +2661,10 @@ class WP_HTML_Tag_Processor {
 			$output_buffer       .= substr( $this->html, $bytes_already_copied, $diff->start - $bytes_already_copied );
 			$output_buffer       .= $diff->text;
 			$bytes_already_copied = $diff->start + $diff->length;
+		}
+
+		if ( null !== $skip_newline_at ) {
+			$this->skip_newline_at += $accumulated_shift_for_skip_newline;
 		}
 
 		$this->html = $output_buffer . substr( $this->html, $bytes_already_copied );
@@ -2675,8 +2699,11 @@ class WP_HTML_Tag_Processor {
 
 				$delta = strlen( $diff->text ) - $diff->length;
 
-				if ( $bookmark->start >= $diff->start ) {
+				if ( $bookmark->start > $diff->start || ( $bookmark->start === $diff->start && 0 === $diff->length ) ) {
 					$head_delta += $delta;
+					if ( $bookmark->start === $diff->start && 0 === $diff->length && '' !== $diff->text ) {
+						unset( $this->bookmarks_with_skipped_newline[ $bookmark_name ] );
+					}
 				}
 
 				if ( $bookmark_end >= $diff_end ) {
@@ -2749,6 +2776,9 @@ class WP_HTML_Tag_Processor {
 
 		// Point this tag processor before the sought tag opener and consume it.
 		$this->bytes_already_parsed = $this->bookmarks[ $bookmark_name ]->start;
+		$this->skip_newline_at      = isset( $this->bookmarks_with_skipped_newline[ $bookmark_name ] )
+			? $this->bytes_already_parsed
+			: null;
 		$this->parser_state         = self::STATE_READY;
 		return $this->next_token();
 	}
@@ -3791,13 +3821,6 @@ class WP_HTML_Tag_Processor {
 	 * avoid needless crashing or type errors. An empty string does not mean
 	 * that a token has modifiable text, and a token with modifiable text may
 	 * have an empty string (e.g. a comment with no contents).
-	 *
-	 * Limitations:
-	 *
-	 *  - This function will not strip the leading newline appropriately
-	 *    after seeking into a LISTING or PRE element. To ensure that the
-	 *    newline is treated properly, seek to the LISTING or PRE opening
-	 *    tag instead of to the first text node inside the element.
 	 *
 	 * @since 6.5.0
 	 * @since 6.7.0 Replaces NULL bytes (U+0000) and newlines appropriately.
