@@ -1869,6 +1869,15 @@ function register_post_type( $post_type, $args = array() ) {
 		return new WP_Error( 'post_type_length_invalid', __( 'Post type names must be between 1 and 20 characters in length.' ) );
 	}
 
+	// Re-registration replaces the object; clean side effects from the old object first.
+	if ( isset( $wp_post_types[ $post_type ] ) && $wp_post_types[ $post_type ] instanceof WP_Post_Type && ! $wp_post_types[ $post_type ]->_builtin ) {
+		$wp_post_types[ $post_type ]->remove_supports();
+		$wp_post_types[ $post_type ]->remove_rewrite_rules();
+		$wp_post_types[ $post_type ]->unregister_meta_boxes();
+		$wp_post_types[ $post_type ]->remove_hooks();
+		$wp_post_types[ $post_type ]->unregister_taxonomies();
+	}
+
 	$post_type_object = new WP_Post_Type( $post_type, $args );
 	$post_type_object->add_supports();
 	$post_type_object->add_rewrite_rules();

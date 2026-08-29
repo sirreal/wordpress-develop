@@ -82,7 +82,7 @@ class WP_Block_Metadata_Registry {
 	 * @return bool True if the collection was registered successfully, false otherwise.
 	 */
 	public static function register_collection( $path, $manifest ) {
-		$path = rtrim( wp_normalize_path( $path ), '/' );
+		$path = self::normalize_collection_path( $path );
 
 		$collection_roots = self::get_default_collection_roots();
 
@@ -112,7 +112,7 @@ class WP_Block_Metadata_Registry {
 		$collection_roots = array_unique(
 			array_map(
 				static function ( $allowed_root ) {
-					return rtrim( wp_normalize_path( $allowed_root ), '/' );
+					return self::normalize_collection_path( $allowed_root );
 				},
 				$collection_roots
 			)
@@ -161,7 +161,7 @@ class WP_Block_Metadata_Registry {
 	 * @return array|null The block metadata for the block, or null if not found.
 	 */
 	public static function get_metadata( $file_or_folder ) {
-		$file_or_folder = wp_normalize_path( $file_or_folder );
+		$file_or_folder = self::normalize_collection_path( $file_or_folder );
 
 		$path = self::find_collection_path( $file_or_folder );
 		if ( ! $path ) {
@@ -196,7 +196,7 @@ class WP_Block_Metadata_Registry {
 	 * @return string[] List of block metadata file paths, or an empty array if the given `$path` is invalid.
 	 */
 	public static function get_collection_block_metadata_files( $path ) {
-		$path = rtrim( wp_normalize_path( $path ), '/' );
+		$path = self::normalize_collection_path( $path );
 
 		if ( ! isset( self::$collections[ $path ] ) ) {
 			_doing_it_wrong(
@@ -224,6 +224,56 @@ class WP_Block_Metadata_Registry {
 	}
 
 	/**
+	 * Normalizes a collection path and collapses dot segments.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @param string $path File or directory path.
+	 * @return string Normalized path without trailing slashes.
+	 */
+	private static function normalize_collection_path( $path ) {
+		$path = wp_normalize_path( $path );
+
+		$prefix = '';
+		if ( preg_match( '#^([A-Za-z][A-Za-z0-9+.-]*://)(.*)$#', $path, $matches ) ) {
+			$prefix = $matches[1];
+			$path   = $matches[2];
+		} elseif ( str_starts_with( $path, '//' ) ) {
+			$prefix = '//';
+			$path   = substr( $path, 2 );
+		}
+
+		$drive = '';
+		if ( preg_match( '#^[A-Za-z]:#', $path, $matches ) ) {
+			$drive = $matches[0];
+			$path  = substr( $path, 2 );
+		}
+
+		$is_absolute = str_starts_with( $path, '/' );
+		$parts       = array();
+
+		foreach ( explode( '/', $path ) as $part ) {
+			if ( '' === $part || '.' === $part ) {
+				continue;
+			}
+			if ( '..' === $part ) {
+				if ( array() !== $parts && '..' !== end( $parts ) ) {
+					array_pop( $parts );
+					continue;
+				}
+				if ( ! $is_absolute ) {
+					$parts[] = $part;
+				}
+				continue;
+			}
+			$parts[] = $part;
+		}
+
+		$normalized = ( $is_absolute ? '/' : '' ) . implode( '/', $parts );
+		return $prefix . rtrim( $drive . $normalized, '/' );
+	}
+
+	/**
 	 * Finds the collection path for a given file or folder.
 	 *
 	 * @since 6.7.0
@@ -238,18 +288,31 @@ class WP_Block_Metadata_Registry {
 
 		// Check the last matched collection first, since block registration usually happens in batches per plugin or theme.
 		$path = rtrim( $file_or_folder, '/' );
-		if ( self::$last_matched_collection && str_starts_with( $path, self::$last_matched_collection ) ) {
+		if ( self::$last_matched_collection && self::is_same_or_child_path( $path, self::$last_matched_collection ) ) {
 			return self::$last_matched_collection;
 		}
 
 		$collection_paths = array_keys( self::$collections );
 		foreach ( $collection_paths as $collection_path ) {
-			if ( str_starts_with( $path, $collection_path ) ) {
+			if ( self::is_same_or_child_path( $path, $collection_path ) ) {
 				self::$last_matched_collection = $collection_path;
 				return $collection_path;
 			}
 		}
 		return null;
+	}
+
+	/**
+	 * Checks whether a path is equal to or inside another path.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @param string $path      Normalized path.
+	 * @param string $base_path Normalized base path.
+	 * @return bool True if the path is the base path or a child path, false otherwise.
+	 */
+	private static function is_same_or_child_path( $path, $base_path ) {
+		return $path === $base_path || str_starts_with( $path, $base_path . '/' );
 	}
 
 	/**
@@ -317,7 +380,7 @@ class WP_Block_Metadata_Registry {
 			}
 
 			// If the path is a parent path of any of the roots, it is invalid.
-			if ( str_starts_with( $allowed_root, $path ) ) {
+			if ( self::is_same_or_child_path( $allowed_root, $path ) ) {
 				return false;
 			}
 		}

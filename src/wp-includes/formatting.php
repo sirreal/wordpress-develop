@@ -2056,6 +2056,9 @@ function sanitize_file_name( $filename ) {
 		 * @see https://www.php.net/manual/en/regexp.reference.unicode.php
 		 */
 		$filename = preg_replace( '#\p{Zs}#siu', ' ', $filename );
+		if ( null === $filename ) {
+			$filename = '';
+		}
 	}
 
 	/**
@@ -3209,7 +3212,7 @@ function make_clickable( $text ) {
 			$ret = preg_replace_callback( $url_clickable, '_make_url_clickable_cb', $ret );
 
 			$ret = preg_replace_callback( '#([\s>])((www|ftp)\.[\w\\x80-\\xff\#$%&~/.\-;:=,?@\[\]+]+)#is', '_make_web_ftp_clickable_cb', $ret );
-			$ret = preg_replace_callback( '#([\s>])([.0-9a-z_+-]+)@(([0-9a-z-]+\.)+[0-9a-z]{2,})#i', '_make_email_clickable_cb', $ret );
+			$ret = preg_replace_callback( '#([\s>])([.0-9a-z_+-]+)@(([0-9a-z-]+\.)+(?:xn--[0-9a-z-]*[0-9a-z]|[0-9a-z]{2,}))(?![0-9a-z-])#i', '_make_email_clickable_cb', $ret );
 
 			$ret = substr( $ret, 1, -1 ); // Remove our whitespace padding.
 			$r  .= $ret;

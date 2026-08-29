@@ -65,6 +65,27 @@ CSS;
 		$this->assertEqualHTML( $expected_output, $output );
 	}
 
+	public function test_should_escape_css_delimiters() {
+		$fonts = array(
+			'Fuzz' => array(
+				array(
+					'src'         => array( "http://example.com/assets/fonts/a');color:red;/*.woff2" ),
+					'font-family' => 'Fuzz";color:red;/*',
+				),
+			),
+		);
+
+		$expected_output = <<<'CSS'
+<style class='wp-fonts-local'>
+@font-face{font-family:"Fuzz\";color:red;/*";font-style:normal;font-weight:400;font-display:fallback;src:url('http://example.com/assets/fonts/a\');color:red;/*.woff2') format('woff2');}
+</style>
+
+CSS;
+
+		$output = get_echo( 'wp_print_font_faces', array( $fonts ) );
+		$this->assertEqualHTML( $expected_output, $output );
+	}
+
 	public function test_should_print_fonts_in_merged_data() {
 		switch_theme( static::FONTS_THEME );
 

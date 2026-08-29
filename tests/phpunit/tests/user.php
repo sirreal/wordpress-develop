@@ -119,6 +119,47 @@ class Tests_User extends WP_UnitTestCase {
 		$this->assertSameSets( $nusers, $found );
 	}
 
+	/**
+	 * Tests that accent-distinct Unicode email addresses are not treated as duplicates.
+	 *
+	 * @ticket 31992
+	 */
+	public function test_unicode_email_addresses_with_distinct_accents_are_not_duplicates() {
+		global $wpdb;
+
+		if ( 'utf8mb4' !== $wpdb->charset ) {
+			$this->markTestSkipped( 'The test database does not use utf8mb4.' );
+		}
+
+		if ( ! function_exists( 'idn_to_ascii' ) ) {
+			$this->markTestSkipped( 'idn_to_ascii() is unavailable.' );
+		}
+
+		$emails = array(
+			"josejose@gr\u{00E5}.org",
+			"jos\u{00E9}jos\u{00E9}@gr\u{00E5}.org",
+			"jose\u{0301}jose\u{0301}@gr\u{00E5}.org",
+		);
+
+		$user_ids = array();
+		foreach ( $emails as $index => $email ) {
+			$user_id = wp_insert_user(
+				array(
+					'user_login' => 'unicode_email_' . $index . '_' . wp_generate_password( 6, false ),
+					'user_pass'  => 'password',
+					'user_email' => $email,
+				)
+			);
+
+			$this->assertNotWPError( $user_id );
+			$user_ids[ $email ] = $user_id;
+		}
+
+		foreach ( $user_ids as $email => $user_id ) {
+			$this->assertSame( $user_id, email_exists( $email ) );
+		}
+	}
+
 	// Simple get/set tests for user_option functions.
 	public function test_user_option() {
 		$key = rand_str();

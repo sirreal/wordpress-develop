@@ -254,8 +254,27 @@ class WP_User {
 			}
 		}
 
+		if ( 'email' === $field ) {
+			$users = $wpdb->get_results(
+				$wpdb->prepare(
+					"SELECT * FROM $wpdb->users WHERE user_email = %s",
+					$value
+				)
+			);
+
+			foreach ( $users as $user ) {
+				if ( 0 === strcasecmp( $user->user_email, $value ) ) {
+					update_user_caches( $user );
+					return $user;
+				}
+			}
+
+			return false;
+		}
+
 		$user = $wpdb->get_row(
 			$wpdb->prepare(
+				// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- The column name is selected by the hardcoded switch above.
 				"SELECT * FROM $wpdb->users WHERE $db_field = %s LIMIT 1",
 				$value
 			)

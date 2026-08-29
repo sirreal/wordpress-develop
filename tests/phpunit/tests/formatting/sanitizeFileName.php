@@ -95,6 +95,7 @@ class Tests_Formatting_SanitizeFileName extends WP_UnitTestCase {
 		return array(
 			array( urldecode( '%B1myfile.png' ), 'myfile.png' ),
 			array( urldecode( '%B1myfile' ), 'myfile' ),
+			array( hex2bin( '2e2e5c62797465732dfe882d07' ), '' ),
 			array( 'demo bar.png', 'demo-bar.png' ),
 			array( 'demo' . json_decode( '"\u00a0"' ) . 'bar.png', 'demo-bar.png' ),
 		);
