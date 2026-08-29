@@ -255,6 +255,15 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	private $current_element = null;
 
 	/**
+	 * Elements removed from the stack of open elements without a normal pop event.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @var array[]
+	 */
+	private $non_lifo_breadcrumb_removals = array();
+
+	/**
 	 * Context node if created as a fragment parser.
 	 *
 	 * @var WP_HTML_Token|null
@@ -819,6 +828,10 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		 *       tokens works in the meantime and isn't obviously wrong.
 		 */
 		if ( empty( $this->element_queue ) ) {
+			if ( $this->queue_virtual_closer_after_non_lifo_removal() ) {
+				return $this->next_visitable_token();
+			}
+
 			if ( $this->step() ) {
 				return $this->next_visitable_token();
 			}
@@ -826,6 +839,10 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			if ( isset( $this->last_error ) ) {
 				return false;
 			}
+		}
+
+		if ( $this->queue_virtual_closer_after_non_lifo_removal() ) {
+			return $this->next_visitable_token();
 		}
 
 		// Process the next event on the queue.
@@ -862,6 +879,68 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			return $this->next_visitable_token();
 		}
 
+		return true;
+	}
+
+	/**
+	 * Queues a virtual closer for a removed node once its subtree closes.
+	 *
+	 * Non-LIFO removals from the stack of open elements do not emit a normal
+	 * pop event because those events blindly pop the current breadcrumb. The
+	 * removed node remains an ancestor of the currently open subtree, but must
+	 * be reported as a virtual closer before visiting the next token after
+	 * that subtree closes.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @return bool Whether a virtual closer was queued.
+	 */
+	private function queue_virtual_closer_after_non_lifo_removal(): bool {
+		if ( empty( $this->non_lifo_breadcrumb_removals ) ) {
+			return false;
+		}
+
+		$removed_node     = end( $this->non_lifo_breadcrumb_removals );
+		$removed_token    = $removed_node['token'];
+		$breadcrumb_depth = $removed_node['breadcrumb_depth'];
+
+		if (
+			count( $this->breadcrumbs ) !== $breadcrumb_depth ||
+			empty( $this->breadcrumbs ) ||
+			end( $this->breadcrumbs ) !== $removed_token->node_name
+		) {
+			return false;
+		}
+
+		// At EOF, normal stack pops may be queued and processed after the stack is empty.
+		$adjusted_current_node = $this->get_adjusted_current_node();
+
+		if ( isset( $adjusted_current_node ) && end( $this->breadcrumbs ) === $adjusted_current_node->node_name ) {
+			return false;
+		}
+
+		/*
+		 * The depth and node-name checks above cannot distinguish the removed
+		 * element from a same-named element at the same depth; identity is
+		 * recovered here. If a queued POP closes a different element with the
+		 * same name, that element owns the current breadcrumb and the virtual
+		 * closer must wait for it.
+		 */
+		$next_event = reset( $this->element_queue );
+		if (
+			false !== $next_event &&
+			WP_HTML_Stack_Event::POP === $next_event->operation &&
+			$next_event->token !== $removed_token &&
+			$next_event->token->node_name === $removed_token->node_name
+		) {
+			return false;
+		}
+
+		array_pop( $this->non_lifo_breadcrumb_removals );
+		array_unshift(
+			$this->element_queue,
+			new WP_HTML_Stack_Event( $removed_token, WP_HTML_Stack_Event::POP, 'virtual' )
+		);
 		return true;
 	}
 
@@ -2900,7 +2979,28 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 						case 'A':
 							$this->run_adoption_agency_algorithm();
 							$this->state->active_formatting_elements->remove_node( $item );
-							$this->state->stack_of_open_elements->remove_node( $item );
+							$is_current_node = $item === $this->state->stack_of_open_elements->current_node();
+
+							/*
+							 * The removed node's breadcrumb sits at its position in the
+							 * stack of open elements: one crumb for each open element at
+							 * or below it. Fragment parsers carry an extra crumb for the
+							 * context node, which never appears on the stack.
+							 */
+							$stack_position = 0;
+							foreach ( $this->state->stack_of_open_elements->walk_down() as $node ) {
+								++$stack_position;
+								if ( $node === $item ) {
+									break;
+								}
+							}
+
+							if ( $this->state->stack_of_open_elements->remove_node( $item ) && ! $is_current_node ) {
+								$this->non_lifo_breadcrumb_removals[] = array(
+									'token'            => $item,
+									'breadcrumb_depth' => isset( $this->context_node ) ? $stack_position + 1 : $stack_position,
+								);
+							}
 							break 2;
 					}
 				}
@@ -5595,6 +5695,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			$this->state->current_token                     = null;
 			$this->current_element                          = null;
 			$this->element_queue                            = array();
+			$this->non_lifo_breadcrumb_removals             = array();
 
 			/*
 			 * The absence of a context node indicates a full parse.
