@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment, `next_tag( 'H1' )` to locate the first heading, and a depth-bounded `next_token()` walk with `get_current_depth()` plus `get_token_type() === '#text'` to collect only ordinary text descendants. `get_modifiable_text()` returns the decoded text for `#text` nodes, so character references like `&amp;` come back as `&` without extra decoding.",
+  "confidence": 96
+}

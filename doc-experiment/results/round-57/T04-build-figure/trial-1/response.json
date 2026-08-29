@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` with a literal template that already contains the desired tag and attribute order, then updated the pre-existing `src` and `alt` attributes in place and replaced the placeholder text inside `figcaption` via `set_modifiable_text()`. This relies on the documented behavior that `set_attribute()` and `set_modifiable_text()` handle HTML encoding safely and that placeholder text is required for empty elements.",
+  "confidence": 96
+}

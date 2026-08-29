@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment with tree awareness, then `next_tag()` to find the first `UL` or `OL`, `set_bookmark()`/`seek()` to return to that opener, and `next_token()` with `get_current_depth()`, `get_token_type()`, `get_tag()`, and `is_tag_closer()` to count only direct `LI` opener children. If the scan ends with `paused_at_incomplete_token()` or `get_last_error()` set, the function returns the original HTML unchanged; otherwise it writes `data-item-count` with `set_attribute()` and returns `get_updated_html()` .",
+  "confidence": 93
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the input as a BODY fragment, then walked the document with `next_token()` so nested markup inside headings is handled structurally. For each `H1` through `H6` opener I started a heading record, appended only `#text` token content via `get_modifiable_text()`, and finalized the record when the processor moved back above that heading\u2019s depth.",
+  "confidence": 90
+}

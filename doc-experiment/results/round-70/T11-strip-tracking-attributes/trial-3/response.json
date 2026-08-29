@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Tag_Processor to scan every tag in document order, WP_HTML_Tag_Processor::get_attribute_names_with_prefix() to find only attribute names starting with data-track-, and WP_HTML_Tag_Processor::remove_attribute() to delete them while leaving similarly named attributes untouched. The final HTML is returned with get_updated_html().",
+  "confidence": 98
+}

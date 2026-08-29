@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This implementation uses WP_HTML_Tag_Processor with a template-based approach. It creates a template HTML string with placeholders, then uses set_attribute() to safely encode the URL and alt text (which handles all HTML escaping), uses next_token() to iterate through tokens and find the text node, and set_modifiable_text() to replace the placeholder with the caption text. The get_updated_html() method returns the fully encoded result with all values safely escaped. The template includes both src and alt attributes (empty) to preserve their order in the output, and a placeholder text node (.) inside figcaption that is then replaced with the actual caption.",
+  "confidence": 38
+}

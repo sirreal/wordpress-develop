@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correct Tag Processor choice for flat attribute/text edits. All methods documented (next_tag, set_attribute, next_token, get_token_type, set_modifiable_text, get_updated_html); no hallucinations, no _doing_it_wrong records. Passed all 6 cases. Reproduces the documented 'Building markup from a template' idiom: template with empty attrs + placeholder text, set_attribute in template order, token-walk to the #text node, get_updated_html. Minor non-idiomatic redundancy: an extra next_tag('figcaption') before the token-walk loop. Harmless (probe-confirmed it still lands on the inner #text) but unnecessary — the token walk alone reaches the first #text, which is the figcaption placeholder, since figure/img carry no text. Docked 2 for the superfluous call."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Essentially the canonical solution. Tag Processor chosen correctly. Template with empty src/alt attributes preserves written order; placeholder '.' fills the otherwise-empty figcaption so a #text token exists for set_modifiable_text. Token walk dispatches on get_token_type === '#text'. All 6 cases pass; no undocumented API; explanation correctly attributes encoding to the API. Confidence 92 is well-calibrated."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Identical idiom to trial-2, using the array query form next_tag(array('tag_name'=>'img')) which is the documented canonical query shape. All methods documented, no hallucinations, no _doing_it_wrong, all 6 cases pass. Correctly relies on set_attribute ordering rule (attrs present in template keep written order) and set_modifiable_text encoding. Explanation explicitly cites the documented attribute-ordering guarantee."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed: all three trials passed all 6 cases (simple, ampersand-in-caption, quotes-in-alt, angle-brackets-in-caption, unicode, html-in-caption-not-parsed). This task is a near-perfect fit for what the round-11 docs already teach, and the subjects exploited it cleanly.\n\nWhat the docs did well:\\n- The 'Building markup from a template' section (WP_HTML_Tag_Processor overview) states the two rules this task hinges on verbatim: (1) include attributes in the template with empty values so updates preserve written order, with an explicit warning that ADDED attributes sort by name rather than call order — this is exactly why the subjects put src and alt in the template rather than calling set_attribute on a bare <img>, guaranteeing the required src-then-alt ordering; (2) include placeholder text inside elements that need text content. Its code example is structurally the answer.\\n- set_modifiable_text's docblock carries a nearly identical worked example ('<figure><figcaption>.</figcaption></figure>' with a token-walk for '#text'), plus the critical fact that a container element (it names FIGCAPTION explicitly) carries no text of its own and that an EMPTY element has no #text token at all. This pre-empts the most likely failure mode — calling set_modifiable_text while matched on the FIGCAPTION opener, or on an empty <figcaption></figcaption> with no placeholder. None of the subjects fell into it.\\n- The encoding guarantees in set_attribute and set_modifiable_text ('Provide normal, unescaped string values; the HTML API will encode them') directly answer the ampersand/quote/angle-bracket/script cases. get_attribute's 'String values are returned DECODED' note and the inverse note for set_attribute reinforce the direction. The subjects correctly trusted the API for encoding rather than hand-escaping, which the task explicitly forbade.\\n- The 'Which processor should I use?' guidance (Tag Processor for flat, position-based attribute/class/text edits with byte-exact preservation) steered all three to the lighter, correct class rather than the HTML Processor.\\n\\nNear-misses in the explanations: none material. All three explanations are accurate. Trial-1's only weakness is in the code, not the prose: a redundant next_tag('figcaption') before the token walk. The token-walk-only approach in trials 2 and 3 is cleaner and matches the documented example exactly. One latent fragility shared by all trials (not exercised by these tests): the token walk takes the FIRST '#text' token in the whole document. That is robust here only because figure and img contribute no text nodes; if the template had leading/whitespace text the loop could match the wrong node. The docs' template example has the same property, so the subjects inherited a safe-but-not-defensive pattern. Not penalized since it is correct for the documented and tested shape.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor — 'Building markup from a template' section",
+      "problem": "The template example walks to the FIRST '#text' token to fill the single placeholder, which is only correct because the surrounding elements contribute no text nodes. The example does not warn that, in a template with multiple text-bearing elements (or stray whitespace text between tags), an unguarded 'first #text' walk targets the wrong node. All three subjects copied this pattern unchecked.",
+      "suggestion": "Add a one-line caveat to the template recipe: when a template has more than one fillable text slot (or whitespace between tags that becomes a #text node), guard the token walk by first locating the containing element (e.g. next_tag on its tag name, or check get_breadcrumbs with the HTML Processor) before matching '#text', rather than taking the first text token in the document."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::set_modifiable_text()",
+      "problem": "The docblock notes set_modifiable_text returns false when matched on a container element or an empty element, and says 'Always check the return value', but the provided template example ignores the return value of set_modifiable_text inside the loop. Subjects (correctly here) also ignored it, so the guidance and the example disagree.",
+      "suggestion": "Make the canonical template example assert or check the boolean return (e.g. assign to $ok and note that a false here means the placeholder text node was not found, indicating the template lacks a #text slot). A consistent example reinforces the stated 'always check the return value' rule and would surface template mistakes (missing placeholder) at build time."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::set_attribute() and the template section's ordering note",
+      "problem": "The ordering guarantee ('attributes present in the template keep their written order; attributes ADDED sort by name') is stated in prose in the overview but the set_attribute method docblock itself was not shown to restate it. A subject reading only the method heading could miss why pre-seeding empty attributes in the template matters for required attribute order.",
+      "suggestion": "Cross-reference the ordering rule directly in the set_attribute method docblock: a short sentence stating that newly-created attributes are emitted after existing ones sorted by name (not in call order), and that to control output order one should include the attribute in the source markup. This keeps the load-bearing fact discoverable from the method, not only from the overview."
+    }
+  ]
+}

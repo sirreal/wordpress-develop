@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` with a literal template that already contains `src` and `alt` in the required order, then updated those attributes with `set_attribute()` and replaced the placeholder text inside `figcaption` with `set_modifiable_text()` on the `#text` token. That keeps the HTML API responsible for all encoding and preserves the exact fragment shape.",
+  "confidence": 92
+}

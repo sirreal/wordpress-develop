@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in BODY context, then walked tokens with `next_token()` and read `get_token_type()`, `get_tag()`, `is_tag_closer()`, `get_attribute('href')`, and `get_modifiable_text()`; only ordinary `#text` tokens are concatenated into each link\u2019s text, and only anchors with a string-valued `href` are emitted.",
+  "confidence": 86
+}

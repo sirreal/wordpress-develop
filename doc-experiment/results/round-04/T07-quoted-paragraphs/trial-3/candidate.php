@@ -1,0 +1,20 @@
+<?php
+
+function mark_quoted_paragraphs( string $html ): string {
+	$processor = WP_HTML_Processor::create_fragment( $html );
+	
+	if ( null === $processor ) {
+		return $html;
+	}
+	
+	while ( $processor->next_tag( 'P' ) ) {
+		$breadcrumbs = $processor->get_breadcrumbs();
+		
+		// Check if BLOCKQUOTE is an ancestor (appears anywhere in the breadcrumbs before P)
+		if ( in_array( 'BLOCKQUOTE', $breadcrumbs, true ) ) {
+			$processor->add_class( 'quoted' );
+		}
+	}
+	
+	return $processor->get_updated_html();
+}

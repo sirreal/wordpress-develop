@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Correctly used WP_HTML_Processor::create_fragment(), next_token(), get_token_type(), decoded get_modifiable_text(), and serialize_token(). All HTML API calls are documented and execution recorded no _doing_it_wrong. Minor deduction: error fallbacks return raw input, which is not normalized and is a weak policy if processor creation or parsing fails."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and token-by-token serialization pattern. All HTML API calls are documented, including normalize() and get_last_error(). Handles decoded text, comments/attributes by #text filtering, special text-bearing elements, and normalized output well. Minor deduction: normalize($html) after a partial rewrite is only a fallback because it discards emitted edits."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice and idiomatic token walk with serialize_token(). All HTML API calls are documented and no _doing_it_wrong occurred. Minor deduction for the same fallback ambiguity as trial 2, plus returning raw input if normalize() fails."
+    }
+  ],
+  "failure_analysis": "All trials passed all 8 hidden cases, so there are no failed hidden cases to attribute. The docs did well in the important places: the processor-choice guidance points normalized, structure-aware BODY fragments to WP_HTML_Processor::create_fragment(); next_token() explains text tokens, generated closing tokens, and special text-bearing elements; get_modifiable_text() states that ordinary #text is decoded; serialize_token() explicitly supports token-by-token rewriting and wrapper insertion. Near-misses were in failure policy, not the tested behavior: candidates improvised different responses for create_fragment() null or get_last_error(), including raw original HTML and normalize($html) after a partial rewrite. Hidden tests did not exercise unsupported markup or creation failure, but those branches reveal some uncertainty in the docs’ fallback guidance for rewriters.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::serialize_token() docblock",
+      "problem": "The doc warns to reject or fall back on get_last_error(), but does not give a concrete policy shape for token-by-token rewriters. Candidates chose incompatible fallbacks after emitting edits.",
+      "suggestion": "Add a short general error-handling pattern for rewriters: accumulate output, inspect get_last_error(), optionally inspect paused_at_incomplete_token(), and make explicit that normalize($original_html) discards all token-loop edits."
+    },
+    {
+      "location": "WP_HTML_Processor::create_fragment() docblock",
+      "problem": "The return-null contract says 'otherwise null' without enough guidance on likely causes or caller policy. Candidates returned '', raw input, or normalized input.",
+      "suggestion": "Document the supported default BODY/UTF-8 success expectations and the practical meaning of null, then state that returning raw input is not normalized; callers needing normalized output should choose an explicit null/empty/exception/fallback policy."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::get_modifiable_text() and WP_HTML_Processor::get_token_type() docblocks",
+      "problem": "The docs contain the needed facts, but the DOM-text-only rule is distributed across sections. A model could call get_modifiable_text() on comments or special element tokens and accidentally match non-DOM text.",
+      "suggestion": "Add a compact table mapping token type/name to where modifiable text lives and whether it is decoded or raw, with a general note: filters that mean ordinary parsed text nodes should first require get_token_type() === '#text'."
+    }
+  ]
+}

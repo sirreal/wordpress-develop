@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "\nThe function uses WP_HTML_Tag_Processor's next_token() method to iterate through all tokens in the HTML document, collecting only text nodes (identified by '#text' token type). For each text node, get_modifiable_text() is called to retrieve the decoded character content. PHP's mb_strlen() and mb_substr() with 'UTF-8' encoding properly handle Unicode code points, ensuring we truncate exactly at the specified limit without cutting multi-byte characters. When max_codepoints is zero or negative, an empty string is returned immediately.\n",
+  "confidence": 75
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse HTML and next_token() to walk through all tokens in the table. It tracks when entering/exiting TD and TH cells using is_tag_closer() and get_tag(), accumulating text from all #text tokens within cells. It uses get_current_depth() to know when to stop iteration (when exiting the TABLE). The function handles omitted closing tags naturally since HTML5 parsing with the HTML Processor provides proper semantic closure of elements.",
+  "confidence": 72
+}

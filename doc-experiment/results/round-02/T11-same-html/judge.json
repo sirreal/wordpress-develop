@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "Correct processor: WP_HTML_Processor (full structural parse required for implied tags/misnesting). All methods documented: create_fragment() (html-processor.md L348), serialize() (L955). Passed 9/9. Used the lower-level create_fragment()+serialize() pair rather than the one-call normalize(); docs explicitly sanction this equivalence at L912, so not a misuse, but slightly less idiomatic than normalize() for the documented BODY-context case, and the create_fragment() null-check is redundant for these inputs. Correctly null-checks serialize() output -> false. The misnesting case emits a serialize() trigger_error ('Cannot serialize HTML Processor with parsing error: unsupported.') but this is inherent to the unsupported input and also fires via normalize(); not unique to this path. Minor idiomatic deduction only."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Matches the canonical reference exactly: WP_HTML_Processor::normalize() on both inputs, null-check -> false, strict === compare. normalize() documented at html-processor.md L903 with explicit 'string|null, null if unable to normalize' return contract and the full list of normalization transforms (quoting, dup-attr removal, implied tags, case-folding, text re-encoding). Passed 9/9. Highest self-confidence (92) and an accurate explanation that maps each task requirement to a documented normalization behavior. The unavoidable trigger_error on the misnesting case is internal to normalize()->serialize() and does not reflect misuse."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Identical approach to trial-2 and the reference: WP_HTML_Processor::normalize() x2, null-guard -> false, === compare. All API documented. Passed 9/9. Explanation correctly attributes each accepted/rejected difference to documented normalize() semantics. Self-confidence 75 despite a perfect, reference-equivalent solution, indicating the docs left the subject under-assured (likely the absence of any statement that normalize() canonicalizes character-reference spellings like &AMP; -> & and preserves attribute order, both of which the test relies on)."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed: all three trials passed 9/9. The documentation was sufficient for a fully correct solution, and the canonical reference (normalize() + null-check + ===) was independently rediscovered by two of three subjects, with the third using the documented equivalent create_fragment()+serialize() pair.\n\nAnalysis of what the docs did well: The normalize()/serialize() docblocks (html-processor.md L903-1001) are the load-bearing passages. They state plainly that the operation 'normalizes an HTML fragment by serializing it,' enumerate the exact transforms that make differing inputs compare equal (attribute values double-quoted, duplicate attributes removed, omitted tags added, tag/attribute case lower-cased, text re-encoded, trailing incomplete syntax dropped), and document the 'string|null ... null if unable to normalize' return. That null contract is precisely what every subject keyed on to satisfy the 'if either input cannot be fully parsed, return false' requirement. The worked examples (L930-939) showing implied tbody/tr/td insertion and entity/text re-encoding directly model the implied-closers, tag-case, and structure cases in the test.\n\nNear-misses / what the docs did NOT explicitly guarantee, yet the tests required:\n1. Character-reference spelling equivalence (test case entity-spellings-equal: &amp; vs &AMP; -> true). The doc lists 'Text will be re-encoded' but never states that distinct source spellings of the same character reference collapse to one canonical form. All subjects assumed this and were right, but it was an inference, not a documented fact. The 'See: normalize()' section even says references are normalized only via the generic 're-encoded' bullet.\n2. Attribute-order preservation (test case attribute-order-differs -> false). The docs say duplicate attributes are removed and values double-quoted but say nothing about whether source attribute order is preserved or sorted. A subject could reasonably have feared normalize() sorts attributes (which would have broken the false expectation). It does not, but the docs are silent — this likely explains trial-3's low 75 confidence despite a perfect solution.\n3. The 'unsupported' parse-error path (test case misnesting-unsupported-false). The docs document that normalize()/serialize() return null when 'unable,' but never connect this to the HTML Processor's 'unsupported' bailout (mis-nested formatting elements per the adoption-agency algorithm) NOR warn that serialize()/normalize() emits a _doing_it_wrong / E_USER_WARNING ('Cannot serialize HTML Processor with parsing error: unsupported.') in that situation. All three trials triggered this notice (visible in every execution.json on the misnesting case) without anticipating it. It did not affect correctness because null was still returned, but a subject aiming for clean (warning-free) output had no documented way to know the warning would fire or how to avoid it.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::normalize() and ::serialize() (html-processor.md, normalization transforms bullet list, ~L914-927 / L965-977)",
+      "problem": "The transform list says 'Text will be re-encoded' but never states that semantically-equivalent character references (e.g. &amp; / &AMP; / &#38;) and case-insensitive named references collapse to a single canonical form. Subjects building an equality/normalization comparison must infer this.",
+      "suggestion": "Add an explicit bullet: 'Character references are decoded and re-encoded canonically, so different valid spellings of the same character (e.g. &amp;, &AMP;, &#38;) normalize identically.' A one-line example would remove the guesswork."
+    },
+    {
+      "location": "WP_HTML_Processor::normalize() and ::serialize() (transforms list)",
+      "problem": "The docs specify that duplicate attributes are removed and values are double-quoted, but say nothing about attribute ORDER. Code that compares normalized output cannot tell whether order is preserved or canonicalized (sorted), which is decisive for any structural-equality use.",
+      "suggestion": "State the guarantee explicitly: 'Source attribute order is preserved; attributes are not reordered.' This is the missing fact that determines whether order-only differences survive normalization."
+    },
+    {
+      "location": "WP_HTML_Processor::serialize() and ::normalize() Returns section (L953, L1001)",
+      "problem": "Both document a null return 'if unable to normalize/serialize' but never enumerate WHEN that happens, and omit that an E_USER_WARNING/_doing_it_wrong ('Cannot serialize HTML Processor with parsing error: unsupported.') is emitted for inputs the processor cannot represent (e.g. mis-nested formatting elements handled by the adoption-agency algorithm).",
+      "suggestion": "Add: 'Returns null and emits a _doing_it_wrong warning when the document contains constructs the processor does not yet support (notably certain mis-nested formatting elements). Callers expecting possibly-unsupported input should suppress or expect this warning.' Cross-link to the get_unsupported_exception / paused-on-incomplete-input concept so callers know the null is a deliberate bail-out, not a generic failure."
+    },
+    {
+      "location": "WP_HTML_Processor class overview / normalize() guidance (L911-912)",
+      "problem": "normalize() is documented as the BODY-context convenience and create_fragment()+serialize() as the general path, but the docs do not tell a reader which to prefer for the common 'fragment inside <body>' case, so subjects split between the two equivalent approaches (one adding a redundant create_fragment null-check).",
+      "suggestion": "Add a one-line steer: 'For fragments in the default <body> context, prefer the single-call normalize(); use create_fragment()+serialize() only when you need a non-default context, encoding, or to inspect the processor before serializing.'"
+    }
+  ]
+}

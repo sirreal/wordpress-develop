@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented `WP_HTML_Tag_Processor` to scan the input linearly and `add_class()` on every matched `img` tag, which is ASCII case-insensitive and preserves existing class order and spacing. The final HTML is returned with `get_updated_html()`, which the docs say preserves every untouched byte exactly.",
+  "confidence": 98
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the HTML, then next_tag() to find the first TABLE element. I walked through tokens inside the table using next_token() with depth tracking to know when exiting the table. For each TD/TH cell opening, if we were already in a cell, that cell implicitly closes. For TR closing and cell closing, I finalized the cell text and added it to the current row. Character references are automatically decoded by get_modifiable_text() as documented. The HTML Processor handles implicit tag closures according to HTML5 rules.",
+  "confidence": 58
+}

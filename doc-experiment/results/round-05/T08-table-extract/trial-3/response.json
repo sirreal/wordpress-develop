@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::create_fragment() to parse the HTML and navigate the document tree. It finds the first TABLE element and tracks the table's depth. Then it iterates through all tokens, accumulating text content from inside TD and TH cells by checking for #text token types and calling get_modifiable_text() (which returns already-decoded text). When a cell closer is encountered, the accumulated text is added to the current row; when a TR closer is encountered, the row is added to the result array. This handles omitted closing tags and tbody/thead correctly because the HTML Processor implements HTML5 parsing rules.",
+  "confidence": 75
+}

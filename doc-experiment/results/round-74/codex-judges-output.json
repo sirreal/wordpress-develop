@@ -1,0 +1,649 @@
+{
+  "result": [
+    {
+      "id": "N03-first-list-count",
+      "verdict": {
+        "trials": [
+          {
+            "trial_id": "trial-1",
+            "adherence": 100,
+            "hallucinated_methods": [],
+            "notes": "Correctly chose WP_HTML_Processor::create_fragment() for body-fragment, structure-aware traversal. Every HTML API method used is present in the rendered docs, there were no _doing_it_wrong records, and the implementation follows the documented bookmark, bounded next_token(), depth, seek, set_attribute(), and get_updated_html() pattern."
+          },
+          {
+            "trial_id": "trial-2",
+            "adherence": 99,
+            "hallucinated_methods": [],
+            "notes": "Correct processor choice and fully documented API usage. It uses the documented direct-child opener checks and clean-scan checks, and passes all cases. Minor idiom miss: the bookmark is not released before returning, although the docs recommend releasing bookmarks when no longer needed."
+          },
+          {
+            "trial_id": "trial-3",
+            "adherence": 100,
+            "hallucinated_methods": [],
+            "notes": "Correctly uses WP_HTML_Processor with documented structural APIs, bookmarks, depth-bounded token walking, get_last_error()/paused_at_incomplete_token(), set_attribute(), and get_updated_html(). No undocumented methods or misuse records."
+          }
+        ],
+        "failure_analysis": "All three trials passed all 11 hidden cases, so there were no failed hidden cases to attribute to a misconception. The docs did well in three important places: the processor-choice guidance clearly points structure-sensitive work to WP_HTML_Processor; the 'scan a region before editing its opener' recipe gives the exact bookmark/seek/update shape; and the 'test subtree membership and direct children' plus get_current_depth() text explains why direct child openers require #tag, !is_tag_closer(), and depth == container_depth + 1. Those passages prevented over-counting nested LI elements and handled omitted LI closers. The incomplete and unsupported cases were also handled because the docs tell callers to check paused_at_incomplete_token() and get_last_error() after the bounded scan before mutating. Near-misses: trial-2 omitted release_bookmark(), and the rendered next_token() method section still contains a confusing 'do not use' since-note despite the overview recipes relying on it as public guidance.",
+        "doc_gaps": [
+          {
+            "location": "WP_HTML_Processor::next_token() method docs",
+            "problem": "The method body and overview recipes present next_token() as the right public tool for subtree walks, but the Since note still says 'Added for internal support; do not use.'",
+            "suggestion": "Remove or revise the stale 'do not use' language so it matches the documented public recipes for token walking with structural awareness."
+          },
+          {
+            "location": "WP_HTML_Processor::get_last_error(), paused_at_incomplete_token(), and HTML Support wording",
+            "problem": "The docs say unsupported markup in the input aborts processing, but do not make the cursor-local timing fully explicit. A reader can infer that later unsupported or incomplete syntax invalidates an already-completed bounded subtree scan.",
+            "suggestion": "Clarify that these indicators report what the processor has encountered so far. Add a general note that a bounded subtree walk can validate the scanned region without proving the rest of the document tail is complete."
+          },
+          {
+            "location": "WP_HTML_Processor::set_bookmark() / Bookmarks section",
+            "problem": "The method-level bookmark example is inherited-style Tag Processor code, while structure-aware bookmark use requires WP_HTML_Processor patterns and explicit cleanup.",
+            "suggestion": "Add an HTML Processor-specific bookmark example that records an opener, walks descendants by depth, seeks back to mutate the opener, and releases the bookmark on success and fallback paths."
+          }
+        ]
+      }
+    },
+    {
+      "id": "N04-normalize-or-placeholder",
+      "verdict": {
+        "trials": [
+          {
+            "trial_id": "trial-1",
+            "adherence": 96,
+            "hallucinated_methods": [],
+            "notes": "Used the correct class, `WP_HTML_Processor`, and only documented methods: `create_fragment()`, `serialize()`, and `get_last_error()`. This is a valid documented normalization path and handles `null` serialization as fallback. Minor adherence loss: the task exactly matched the simpler documented `WP_HTML_Processor::normalize()` body-fragment API, but the candidate used the longer factory-plus-serialize form."
+          },
+          {
+            "trial_id": "trial-2",
+            "adherence": 95,
+            "hallucinated_methods": [],
+            "notes": "Used documented `WP_HTML_Processor::create_fragment()` and `serialize()`, plus PHP's built-in `class_exists()`. No undocumented HTML API calls and no `_doing_it_wrong` records. The extra class-existence guard is unnecessary in this environment, and the solution missed the direct `normalize()` API, but the chosen serialization path is documented and behaviorally sound."
+          },
+          {
+            "trial_id": "trial-3",
+            "adherence": 96,
+            "hallucinated_methods": [],
+            "notes": "Same valid documented pattern as trial-1: `create_fragment()`, `serialize()`, and `get_last_error()` on `WP_HTML_Processor`. Correctly chooses the structural processor and falls back on unsupported serialization. Minor loss for not using the exact static `normalize()` API intended for body-context fragments."
+          }
+        ],
+        "failure_analysis": "All trials passed all seven hidden cases. The rendered docs did well on the core decisions: the HTML Processor overview says to choose `WP_HTML_Processor` for normalizing markup; the support section says unsupported markup makes `serialize()` and `normalize()` return `null`; the `normalize()` and `serialize()` sections both document attribute quoting, omitted-tag insertion, table normalization, entity preservation/re-encoding, and omission of incomplete trailing syntax. That was enough for every candidate to avoid the Tag Processor and avoid hand-rolled serialization.\n\nThe main near-miss is discoverability rather than correctness. All three candidates implemented `create_fragment($html)->serialize()` instead of `WP_HTML_Processor::normalize($html)`, even though the task was exactly a body-fragment normalization task. This suggests the Usage section's general three-step pattern is more salient than the later static `normalize()` method section. The docs describe the direct method correctly, but they do not make it the obvious first choice for the common case: “I have a body fragment and want normalized HTML or null.”\n\nA second near-miss is failure signaling. The docs state output methods return `null` on unsupported markup, but the execution records also captured `WP_HTML_Processor::serialize` warnings for unsupported parser errors. The candidates still behaved correctly because tests measured returned strings, but callers using warning-sensitive harnesses may be surprised unless the docs distinguish return-value failure policy from emitted warnings.",
+        "doc_gaps": [
+          {
+            "location": "`WP_HTML_Processor` Usage section",
+            "problem": "The primary usage recipe emphasizes creating a processor, finding a location, and requesting changes. For pure body-fragment normalization, that flow hides the simpler static API.",
+            "suggestion": "Add a short “Normalize a BODY fragment” recipe before the general traversal/editing steps: prefer `WP_HTML_Processor::normalize( $html )` when no custom context, full-document mode, or token inspection is needed; handle `null` according to the caller's failure policy."
+          },
+          {
+            "location": "`WP_HTML_Processor::normalize()` docblock",
+            "problem": "The method documents behavior and examples, but does not explicitly position itself as the preferred convenience wrapper for default body-context fragment normalization.",
+            "suggestion": "Add one sentence to the contract: this is equivalent to creating a default BODY fragment processor and serializing it, and should be preferred for one-shot normalization of ordinary fragments."
+          },
+          {
+            "location": "`WP_HTML_Processor::serialize()` / unsupported-markup docs",
+            "problem": "Docs say `serialize()` and `normalize()` return `null` when unable to produce output, but do not mention that serialization may also emit a warning when the parser has an unsupported-markup error.",
+            "suggestion": "Document the observable failure mode: callers should treat `null` as the programmatic failure signal, and serialization of unsupported markup may emit a warning through WordPress error handling."
+          }
+        ]
+      }
+    },
+    {
+      "id": "N06-extract-toc",
+      "verdict": {
+        "trials": [
+          {
+            "trial_id": "trial-1",
+            "adherence": 100,
+            "hallucinated_methods": [],
+            "notes": "Used WP_HTML_Processor::create_fragment(), one next_token() walk, get_token_type(), get_token_name(), is_tag_closer(), get_current_depth(), and get_modifiable_text(), all documented. It follows the docs' one-cursor state-machine guidance, limits text collection to #text tokens, handles decoded entity text, null processor creation, empty headings, and virtual/implied closers."
+          },
+          {
+            "trial_id": "trial-2",
+            "adherence": 98,
+            "hallucinated_methods": [],
+            "notes": "Used only documented APIs and chose the HTML Processor correctly. The depth-bounded subtree walk with get_current_depth() >= opener depth is exactly the documented text-extraction pattern. Minor idiom deduction because the docs advise preferring a single next_token() loop for repeated regions, while this uses an outer next_tag() loop with an inner next_token() loop; it is bounded correctly and passes here. The is_tag_closer() guard after plain next_tag() is redundant because closers are skipped by default."
+          },
+          {
+            "trial_id": "trial-3",
+            "adherence": 97,
+            "hallucinated_methods": [],
+            "notes": "Used only documented APIs and the correct processor. It uses a single next_token() state machine and collects only #text via get_modifiable_text(), so decoded text and inline markup are handled correctly. Minor deduction because it relies on heading closer tokens instead of recording a subtree depth/breadcrumb boundary, and adds an unnecessary class_exists() environment guard, but the closer-driven approach is supported by the docs' statement that next_token() visits implicit and end-of-input closers."
+          }
+        ],
+        "failure_analysis": "All trials passed all 7 frozen cases, so there are no failed hidden cases to attribute to a documentation gap. The docs worked well for this task because they explicitly direct structure-sensitive text extraction to WP_HTML_Processor rather than WP_HTML_Tag_Processor, document create_fragment() for BODY fragments, and include a close recipe under \"collect DOM-style text from a subtree\": record opener depth, walk with next_token(), append only #text tokens, and read decoded text with get_modifiable_text(). The get_current_depth() section also explains the >= boundary and virtual/implied closer behavior, which likely prevented failures on nested inline markup, entity decoding, empty headings, uppercase source tags, and omitted closing tags. Near-misses were mostly stylistic: one trial used nested cursor walks despite the warning to prefer one next_token() loop for repeated regions, and another relied on closer tokens rather than depth. Both choices are defensible from the current docs, but the nested-loop warning is broad enough that a subject could be unsure whether a bounded subtree scan inside an outer search is acceptable.",
+        "doc_gaps": [
+          {
+            "location": "WP_HTML_Processor::next_token() / repeated-region guidance",
+            "problem": "The docs warn against nested next_token() loops for repeated regions, but nearby examples and the canonical pattern still use a bounded inner subtree walk after next_tag(). This leaves ambiguity about when nested scanning is actually unsafe versus merely less preferred.",
+            "suggestion": "Clarify the contract with a short rule: nested subtree walks are acceptable when the caller intentionally consumes the region boundary and resumes after it; use a single state-machine loop when the outer loop still needs to observe every boundary token or sibling opener."
+          },
+          {
+            "location": "WP_HTML_Processor::get_tag() and get_token_name() docs",
+            "problem": "Both methods can identify tag names during token walks, but the practical distinction is scattered. Trial code used both styles successfully, suggesting the docs are sufficient but could be easier to apply.",
+            "suggestion": "Add a concise comparison note: use get_tag() when matched on tags; use get_token_name() when a token-walking state machine wants DOM-like names, and guard with get_token_type() === '#tag' before interpreting dynamic names as element names."
+          },
+          {
+            "location": "WP_HTML_Processor text-extraction recipe completion policy",
+            "problem": "The docs mention paused_at_incomplete_token() and get_last_error(), but subjects did not discuss a deliberate best-effort versus all-or-nothing policy. For read-only extraction this was fine, but callers may miss that this is a caller contract decision.",
+            "suggestion": "End the subtree text recipe with two labeled policy snippets: best-effort extraction returns accumulated text after the walk, while complete-input extraction rejects or falls back when paused_at_incomplete_token() or get_last_error() indicates an incomplete or unsupported parse."
+          }
+        ]
+      }
+    },
+    {
+      "id": "T01-add-image-class",
+      "verdict": {
+        "trials": [
+          {
+            "trial_id": "trial-1",
+            "adherence": 100,
+            "hallucinated_methods": [],
+            "notes": "Used WP_HTML_Tag_Processor with documented next_tag('img'), add_class('wp-image'), and get_updated_html(). This is the intended flat, byte-preserving attribute/class edit pattern; all methods appear in the rendered Tag Processor docs and execution had no _doing_it_wrong records."
+          },
+          {
+            "trial_id": "trial-2",
+            "adherence": 100,
+            "hallucinated_methods": [],
+            "notes": "Same correct implementation as trial-1. The explanation accurately relies on documented case-insensitive tag matching, comments/raw-text skipping, add_class class preservation, and get_updated_html byte preservation."
+          },
+          {
+            "trial_id": "trial-3",
+            "adherence": 100,
+            "hallucinated_methods": [],
+            "notes": "Same correct implementation as trial-1. It chose the lighter Tag Processor instead of the structural HTML Processor and used only documented APIs in the documented order."
+          }
+        ],
+        "failure_analysis": "No hidden case failed in any trial. The docs worked well for this task: the 'Which processor should I use?' section points flat attribute/class edits to WP_HTML_Tag_Processor; the Usage/Finding tags sections document construction with new WP_HTML_Tag_Processor($html), next_tag('img'), and forward scanning; next_tag() explicitly says tag matching is ASCII case-insensitive, tag-like text in comments is not matched, and incomplete trailing tags are not modified; add_class() explicitly says it creates class when absent and appends without removing or reordering existing classes; get_updated_html() is documented as the correct way to return queued edits while preserving untouched bytes. Near-miss: the add_class() method section documents class-list semantics clearly, but the exact placement/serialization of a newly created class attribute is easier to infer from broader attribute-update docs than from add_class() itself.",
+        "doc_gaps": [
+          {
+            "location": "WP_HTML_Tag_Processor::add_class() docblock",
+            "problem": "The method explains class creation and append/no-duplicate semantics, but does not locally state how a newly created class attribute is positioned and serialized relative to existing attributes.",
+            "suggestion": "Add a short sentence that class attribute creation follows normal added-attribute ordering/serialization rules and preserves all untouched attributes byte-for-byte."
+          }
+        ]
+      }
+    },
+    {
+      "id": "T02-link-targets",
+      "verdict": {
+        "trials": [
+          {
+            "trial_id": "trial-1",
+            "adherence": 100,
+            "hallucinated_methods": [],
+            "notes": "Correctly chose WP_HTML_Tag_Processor for a flat, byte-preserving attribute edit. Used only documented methods: next_tag, get_attribute, set_attribute, and get_updated_html. The null check handles absent vs empty/valueless href exactly as documented, and get_updated_html is the documented output path for queued mutations. execution.json shows 8/8 passing and no _doing_it_wrong records."
+          },
+          {
+            "trial_id": "trial-2",
+            "adherence": 100,
+            "hallucinated_methods": [],
+            "notes": "Correctly chose WP_HTML_Tag_Processor. Lowercase next_tag('a') is documented as ASCII case-insensitive, so this is valid. Used documented attribute-presence semantics with null === get_attribute('href'), set_attribute to overwrite/add target, and get_updated_html to preserve untouched bytes. execution.json shows 8/8 passing and no _doing_it_wrong records."
+          },
+          {
+            "trial_id": "trial-3",
+            "adherence": 100,
+            "hallucinated_methods": [],
+            "notes": "Same implementation shape as trial-2. Correct processor, no undocumented API calls, idiomatic linear token walking, proper null/true/empty-string attribute handling, and correct use of get_updated_html after mutation. execution.json shows 8/8 passing and no _doing_it_wrong records."
+          }
+        ],
+        "failure_analysis": "No hidden cases failed across the three trials. The rendered docs supported the solution well: the Tag Processor overview explicitly says to use it for flat tag/name/class attribute edits and byte-precise preservation; the Usage and Finding tags sections show construction with new WP_HTML_Tag_Processor($html) and next_tag(); the get_attribute section distinguishes null for absent, empty string for present-empty, and true for valueless boolean attributes; set_attribute documents overwriting existing attributes and where newly added attributes are inserted; get_updated_html documents that untouched bytes are returned exactly. The main near-miss is that the task depends on an attribute-presence idiom, null !== get_attribute(...), rather than truthiness. The docs contain the raw semantics clearly enough, and all subjects inferred the idiom correctly.",
+        "doc_gaps": [
+          {
+            "location": "WP_HTML_Tag_Processor::get_attribute() docblock and the Custom queries section",
+            "problem": "The docs state the null, empty-string, and true return values, but do not explicitly name the common attribute-presence test. Models could easily write a truthiness check and skip href=\"\" or valueless href.",
+            "suggestion": "Add a short general note: when testing whether an attribute is present regardless of value, compare against null, e.g. null !== $processor->get_attribute( $name ); do not use a truthiness check."
+          },
+          {
+            "location": "WP_HTML_Tag_Processor::next_tag() quick usage table",
+            "problem": "ASCII case-insensitive tag-name matching is documented in the detailed method section, but not surfaced in the quick Finding tags table where simple users are likely to look first.",
+            "suggestion": "Add one sentence near the string-query examples saying tag-name queries are ASCII case-insensitive and preserve the source document's original casing in output."
+          },
+          {
+            "location": "WP_HTML_Tag_Processor::set_attribute() docblock",
+            "problem": "Attribute insertion and replacement ordering are documented, but the most relevant byte-preserving mutation contract is split across set_attribute and get_updated_html.",
+            "suggestion": "Add a compact before/after example showing that updating an existing attribute preserves its position, adding a new attribute inserts it after the tag name, and untouched attributes retain their original bytes."
+          }
+        ]
+      }
+    },
+    {
+      "id": "T03-first-h1-text",
+      "verdict": {
+        "trials": [
+          {
+            "trial_id": "trial-1",
+            "adherence": 100,
+            "hallucinated_methods": [],
+            "notes": "Chose WP_HTML_Processor, used only documented methods, and followed the documented subtree-text pattern: create_fragment(), next_tag(), record depth, next_token(), require #text, and read get_modifiable_text(). The is_tag_closer() guard is redundant because plain next_tag('H1') skips closers by default, but it is documented and harmless. Passed all 8 cases."
+          },
+          {
+            "trial_id": "trial-2",
+            "adherence": 100,
+            "hallucinated_methods": [],
+            "notes": "Same high-adherence implementation as trial-1. It uses the structurally aware processor and the depth-bounded token walk described by the docs, accumulates only ordinary text tokens, and relies on documented decoded text semantics. No API misuse or _doing_it_wrong records. Passed all 8 cases."
+          },
+          {
+            "trial_id": "trial-3",
+            "adherence": 100,
+            "hallucinated_methods": [],
+            "notes": "Matches the canonical documented pattern closely. Correct processor choice, no undocumented calls, idiomatic token walking, correct decoded-text handling, null only when no H1, empty string for no text descendants, and graceful best-effort behavior on an unclosed H1. Passed all 8 cases."
+          }
+        ],
+        "failure_analysis": "No hidden case failed in any trial: all three candidates passed all 8 frozen expectations. The docs worked well because the Tag Processor overview explicitly says to use WP_HTML_Processor for collecting element text and walking subtrees, while the HTML Processor's \"Recipe: collect DOM-style text from a subtree\" directly demonstrates the needed pattern: create a fragment parser, find a container tag, record current depth, walk with next_token(), append only #text tokens, and call get_modifiable_text(). The next_token(), get_current_depth(), and get_modifiable_text() sections also cover the key edge cases: text may be split across tokens, token walks do not stop automatically at an element boundary, get_modifiable_text() is already decoded for #text nodes, unguarded modifiable text is too broad, and read-only extraction may choose its own policy for incomplete input. The only near-miss was that trials 1 and 2 added an unnecessary is_tag_closer() check after next_tag('H1'), suggesting the default opener-only behavior of next_tag() was understood well enough to pass but not fully internalized.",
+        "doc_gaps": [
+          {
+            "location": "html-processor.md: WP_HTML_Processor::next_tag() and subtree-text examples",
+            "problem": "The docs state in the parameter table that tag closers are skipped by default, but examples elsewhere still include is_tag_closer() checks. This can leave readers unsure whether next_tag('TAG') can return a closer.",
+            "suggestion": "Add a short prose note near the simple string-query examples: plain next_tag('TAG') matches opening tags only; use tag_closers => 'visit' before is_tag_closer() matters."
+          },
+          {
+            "location": "html-processor.md: get_current_depth() / next_token() subtree-walk guidance",
+            "problem": "The depth-bounded walk contract is documented, but the related guarantees for empty elements, virtual/end-of-input closers, and read-only incomplete-input policy are spread across multiple sections.",
+            "suggestion": "Consolidate a compact contract note for subtree scans: record opener depth, continue while depth >= opener depth, append desired token types, the first shallower token is outside the subtree, empty subtrees yield no text tokens, and callers decide whether paused_at_incomplete_token() matters."
+          }
+        ]
+      }
+    },
+    {
+      "id": "T04-build-figure",
+      "verdict": {
+        "trials": [
+          {
+            "trial_id": "trial-1",
+            "adherence": 99,
+            "hallucinated_methods": [],
+            "notes": "Uses the expected WP_HTML_Tag_Processor, a literal template with pre-existing src/alt attributes, next_token() to reach the placeholder #text node, set_attribute(), set_modifiable_text(), and get_updated_html(). All called APIs are documented. Minor deduction only because set_modifiable_text() return value is not checked despite the docs saying to check it; the #text guard and fixed template make that harmless here."
+          },
+          {
+            "trial_id": "trial-2",
+            "adherence": 92,
+            "hallucinated_methods": [],
+            "notes": "All APIs used are documented and execution raised no _doing_it_wrong notices. The implementation follows the template/placeholder/get_updated_html pattern and handles processor creation failure. Main deduction: it uses WP_HTML_Processor::create_fragment() for a fixed, flat template mutation where the docs and reference point to the lighter Tag Processor. The inherited set_modifiable_text()/get_updated_html usage is valid, but less directly documented on the HTML Processor page."
+          },
+          {
+            "trial_id": "trial-3",
+            "adherence": 93,
+            "hallucinated_methods": [],
+            "notes": "Same strong documented API usage as trial 2, with slightly better fail-closed handling when the IMG tag is not found. It still chooses WP_HTML_Processor for a task better served by WP_HTML_Tag_Processor. Token walking, placeholder text replacement, automatic attribute/text encoding, and get_updated_html() are used idiomatically."
+          }
+        ],
+        "failure_analysis": "No hidden cases failed across the three trials; all passed 7/7 with no _doing_it_wrong records. The docs did well in the WP_HTML_Tag_Processor 'Building markup from a template' section: it directly teaches the successful pattern of starting from a literal template, predeclaring attributes to preserve order, including placeholder text, using set_attribute() for plain unescaped attribute values, using set_modifiable_text() for plain unescaped text, and returning get_updated_html(). The set_attribute() section also clearly explains automatic encoding and attribute placement, which prevented failures in quotes-in-alt and special-chars-in-url. The set_modifiable_text() section clearly says empty elements have no text token and includes a placeholder-text example, which prevented caption insertion failures for ampersands, angle brackets, and script-looking text. Near misses: trials 2 and 3 chose the HTML Processor, likely because the processor-choice docs say to use it when structure/text collection matters and because create_fragment() sounds natural for building fragments. Also, all trials ignored the documented instruction to check set_modifiable_text()'s return value, probably because the examples themselves do not check it.",
+        "doc_gaps": [
+          {
+            "location": "WP_HTML_Tag_Processor overview, 'Which processor should I use?' and 'Building markup from a template'",
+            "problem": "The processor-choice guidance does not explicitly say that filling a known markup template with attributes and placeholder text is still a Tag Processor use case, even when the template has nested elements.",
+            "suggestion": "Add a decision-table row: 'Known template / fill attributes / replace placeholder text -> WP_HTML_Tag_Processor; unknown document structure, subtree text extraction, implied tags, or normalized serialization -> WP_HTML_Processor.'"
+          },
+          {
+            "location": "WP_HTML_Processor overview and method index",
+            "problem": "The page says HTML Processor builds on Tag Processor, but inherited mutation methods such as set_modifiable_text() and get_updated_html() are not consistently surfaced in the method index. This makes valid inherited calls look semi-undocumented.",
+            "suggestion": "Add an 'Inherited mutation APIs from WP_HTML_Tag_Processor' subsection listing set_attribute(), set_modifiable_text(), remove_attribute(), add_class(), remove_class(), and get_updated_html(), with a short note that serialize()/serialize_token() are for normalization/rewrite, not queued edits."
+          },
+          {
+            "location": "WP_HTML_Tag_Processor::next_token() docblock",
+            "problem": "The rendered docs still contain the stale sentence 'The Tag Processor currently only supports the tag token,' while other sections and examples rely on #text tokens.",
+            "suggestion": "Replace that sentence with current behavior: next_token() can visit tags, text, comments, doctypes, and related syntax tokens; callers should use get_token_type() to select #text before reading or writing text."
+          },
+          {
+            "location": "WP_HTML_Tag_Processor::set_modifiable_text() examples",
+            "problem": "The prose says 'Always check the return value,' but the nearby examples call set_modifiable_text() without checking it. The trials copied the unchecked style.",
+            "suggestion": "Update examples to either check the boolean result or explicitly explain when a #text guard plus fixed template makes failure unexpected, while still showing a production-safe fallback."
+          },
+          {
+            "location": "WP_HTML_Tag_Processor::set_attribute() docblock",
+            "problem": "The boolean true/false behavior is documented, but the empty-string case is only implicit. Template-building tasks often depend on empty attributes preserving positions before later updates.",
+            "suggestion": "Add a compact example distinguishing set_attribute( 'alt', '' ) -> alt=\"\", set_attribute( 'alt', true ) -> alt, and set_attribute( 'alt', false ) -> removed, and cross-reference the attribute-order rule."
+          }
+        ]
+      }
+    },
+    {
+      "id": "T05-text-excerpt",
+      "verdict": {
+        "trials": [
+          {
+            "trial_id": "trial-1",
+            "adherence": 100,
+            "hallucinated_methods": [],
+            "notes": "Used WP_HTML_Processor::create_fragment(), walked with next_token(), gated ordinary text on get_token_type() === '#text', and explicitly opted into TITLE/TEXTAREA opener text with !is_tag_closer(). All HTML API calls are documented in the rendered files and execution recorded no _doing_it_wrong notices. Edge handling matches the docs: decoded get_modifiable_text(), raw SCRIPT/STYLE excluded, null processor handled, and UTF-8 truncation used."
+          },
+          {
+            "trial_id": "trial-2",
+            "adherence": 98,
+            "hallucinated_methods": [],
+            "notes": "Correct processor and documented APIs throughout. The text policy is right: #text plus explicit TITLE/TEXTAREA opener text, excluding SCRIPT/STYLE. Slightly less idiomatic than trial-1 because it calls is_tag_closer()/get_token_name() on non-text tokens without first checking get_token_type() === '#tag', but the documented return semantics make this harmless here. No _doing_it_wrong records."
+          },
+          {
+            "trial_id": "trial-3",
+            "adherence": 97,
+            "hallucinated_methods": [],
+            "notes": "Correctly uses WP_HTML_Processor::create_fragment(), next_token(), get_token_type(), get_token_name(), is_tag_closer(), and get_modifiable_text(); all are documented. The implementation is compact and follows the special-element opt-in rule. Minor idiom deduction for testing get_token_name() before confirming a tag token and for relying directly on mb_substr(), but there is no undocumented HTML API usage or runtime misuse."
+          }
+        ],
+        "failure_analysis": "All three trials passed all 10 hidden cases, so there are no failed hidden cases to attribute to documentation gaps. The docs did well on the exact hard parts of this task: the HTML Processor overview says to choose WP_HTML_Processor when structure matters and when collecting element text; create_fragment() is documented as the BODY-fragment factory; next_token() explains that text can be split across multiple #text tokens and that SCRIPT/STYLE/TITLE/TEXTAREA carry no #text children; get_modifiable_text() clearly says #text, TITLE, and TEXTAREA are decoded UTF-8, while SCRIPT/STYLE are raw; and the text-extraction recipe warns not to treat every token with modifiable text as ordinary DOM text. Near-misses were small: trials 2 and 3 leaned on get_token_name()/is_tag_closer() behavior for non-tag tokens instead of first checking #tag, and none checked paused_at_incomplete_token() or get_last_error(); however the docs explicitly leave read-only incomplete-input policy to the caller, and the task did not require rejecting partial scans.",
+        "doc_gaps": [
+          {
+            "location": "WP_HTML_Processor::is_tag_closer() and WP_HTML_Tag_Processor::is_tag_closer() docblocks",
+            "problem": "The examples show tag-only use, but the return contract for non-tag tokens is implicit. Trial code safely relied on false for non-tags, but a reader has to infer that from implementation or from broader token docs.",
+            "suggestion": "Add one sentence: when not matched on a tag token, this method returns false; callers that need an opening element should prefer get_token_type() === '#tag' && ! is_tag_closer()."
+          },
+          {
+            "location": "WP_HTML_Processor::next_token() docblock / text-extraction recipe",
+            "problem": "The docs explain ordinary subtree text and named special-element text separately. This task required a combined policy: all ordinary body text plus selected decoded special elements, excluding raw special elements. The subjects inferred it correctly, but the distinction is subtle.",
+            "suggestion": "Add a short general example or policy note showing how to combine ordinary #text collection with an explicit whitelist of decoded special-element opener text, while leaving SCRIPT/STYLE raw text out unless specifically requested."
+          }
+        ]
+      }
+    },
+    {
+      "id": "T06-collect-links",
+      "verdict": {
+        "trials": [
+          {
+            "trial_id": "trial-1",
+            "adherence": 98,
+            "hallucinated_methods": [],
+            "notes": "Used WP_HTML_Processor::create_fragment and documented token APIs only: next_token, get_token_type, get_tag, is_tag_closer, get_attribute, get_current_depth, and get_modifiable_text. It chose the right processor, filtered href with is_string(), and accumulated only #text. Minor idiom issue: the state machine has redundant depth-drop checks and is less clear than the docs' closer-driven pattern, but it did not misuse the API."
+          },
+          {
+            "trial_id": "trial-2",
+            "adherence": 99,
+            "hallucinated_methods": [],
+            "notes": "Closest to the canonical approach: create_fragment, next_tag('A') via documented array query, depth-bounded next_token walk, #text filtering, and get_modifiable_text for decoded text. Attribute semantics are handled correctly with is_string(). Only small caveat is the nested next_token loop inside a repeated next_tag scan; it is safe here, but the docs warn that repeated-region extraction often benefits from a single explicit-state token loop."
+          },
+          {
+            "trial_id": "trial-3",
+            "adherence": 99,
+            "hallucinated_methods": [],
+            "notes": "Used the correct HTML Processor and only documented methods. The single-pass next_token state machine follows the docs' guidance for repeated regions well, flushes on A closers and EOF, filters href with is_string(), and reads decoded ordinary text only from #text tokens. No hallucinated APIs or runtime misuse."
+          }
+        ],
+        "failure_analysis": "All three trials passed all 8 hidden cases, with no _doing_it_wrong or trigger_error records. The docs succeeded on the key concepts: the processor-selection guidance points structural text extraction to WP_HTML_Processor; get_attribute documents string|true|null and decoded values, which led all trials to exclude missing/valueless hrefs and avoid double-decoding; next_token/get_current_depth explain subtree walking and virtual closers, which covered the unclosed-link case; and get_modifiable_text warns to read ordinary DOM-style text only from #text tokens, which avoided including markup, comments, or img alt text. The only near-miss is that both the canonical/reference style and trial-2 use a nested depth-bounded walk under a repeated next_tag search, while the docs also warn about one shared cursor. It works for this shape, but the distinction between safe subtree scans and unsafe nested repeated-region scans could be sharper.",
+        "doc_gaps": [
+          {
+            "location": "WP_HTML_Processor::get_attribute() / inherited get_attribute() docs",
+            "problem": "The method docs show missing attributes and valueless boolean attributes, but the empty-string attribute case is less prominent than the overview text.",
+            "suggestion": "Add a compact return-value table or assertions distinguishing attribute missing => null, attribute present without value => true, and attribute present with an empty quoted value => ''. Recommend is_string() when callers require an actual string value."
+          },
+          {
+            "location": "WP_HTML_Processor::next_token() and get_current_depth() docs",
+            "problem": "The docs contain both a depth-bounded subtree pattern and a warning against nested loops for repeated regions, but the boundary between acceptable and risky uses is subtle.",
+            "suggestion": "Add a short general note explaining where the cursor is left after a bounded subtree walk, and when repeated extraction should instead use one next_token loop with explicit state."
+          },
+          {
+            "location": "WP_HTML_Processor::get_modifiable_text() text-extraction guidance",
+            "problem": "The docs explain #text filtering and special elements well, but ordinary text-content extraction could state more explicitly that descendant attributes such as img alt and comments do not contribute.",
+            "suggestion": "Add a general DOM-style textContent note: concatenate only descendant #text tokens; attributes, comments, processing instructions, and special-element opener text are excluded unless the caller explicitly opts into them."
+          }
+        ]
+      }
+    },
+    {
+      "id": "T07-nested-lists",
+      "verdict": {
+        "trials": [
+          {
+            "trial_id": "trial-1",
+            "adherence": 98,
+            "hallucinated_methods": [],
+            "notes": "Used the correct tree-aware processor via WP_HTML_Processor::create_fragment(), checked null creation, walked open tags, used get_breadcrumbs() to identify list ancestors, used add_class(), and returned get_updated_html(). All API calls are documented. Minor edge-case gap: it does not inspect get_last_error() or paused_at_incomplete_token(), though that did not affect these tests."
+          },
+          {
+            "trial_id": "trial-2",
+            "adherence": 96,
+            "hallucinated_methods": [],
+            "notes": "Used WP_HTML_Processor correctly and all called methods are documented: create_fragment(), next_token(), get_token_type(), get_tag(), is_tag_closer(), add_class(), get_last_error(), paused_at_incomplete_token(), and get_updated_html(). The manual list-depth state machine is valid and documented token-walking style, but less direct for this task than using get_breadcrumbs(); it reimplements ancestry tracking instead of using the documented ancestor API. It handled parser errors and incomplete input most explicitly."
+          },
+          {
+            "trial_id": "trial-3",
+            "adherence": 99,
+            "hallucinated_methods": [],
+            "notes": "Used the intended HTML Processor fragment flow, next_tag(), get_tag(), get_breadcrumbs(), add_class(), get_last_error(), and get_updated_html(). This closely matches the documented structural-query pattern and avoids undocumented API usage. It checks unsupported-parser aborts, but not paused_at_incomplete_token(); that is a small omission only for contracts requiring complete source proof."
+          }
+        ],
+        "failure_analysis": "All trials passed all 7 hidden cases, so there are no failed hidden cases to diagnose. The docs did well on the core decision point: the WP_HTML_Tag_Processor overview explicitly says it has no tree awareness and that get_breadcrumbs() belongs to WP_HTML_Processor, while the WP_HTML_Processor overview says to choose it for document structure, containment checks, and ancestor breadcrumbs. The next_tag() section also shows the needed multi-tag scan pattern: scan any tag, then branch on get_tag(). The Breadcrumbs section explains that get_breadcrumbs() includes the current node and implicit HTML/BODY ancestors, which is enough to implement the array_slice(..., 0, -1) ancestor check. The add_class() and get_updated_html() docs explain preserving existing classes and untouched bytes, which prevented class-loss or serialization mistakes. The main near-miss was trial-2: it chose documented token walking and explicit state instead of the simpler breadcrumb query/inspection path. That suggests the docs are usable, but the ancestry example could be more discoverable for tasks asking whether a current element has an ancestor anywhere above it.",
+        "doc_gaps": [
+          {
+            "location": "WP_HTML_Processor::get_breadcrumbs() / Breadcrumbs overview",
+            "problem": "The docs explain direct breadcrumb paths and direct child-style matching, but they do not show the common 'does the current element have any ancestor of type X anywhere above it?' pattern.",
+            "suggestion": "Add a short example showing how to exclude the current node from get_breadcrumbs() and test the remaining ancestors with in_array(), noting that HTML and BODY may be present as implicit ancestors."
+          },
+          {
+            "location": "WP_HTML_Processor::next_tag()",
+            "problem": "The docs state that tag_name is not a list of alternatives and show scanning any tag then branching, but this guidance is easy to miss for common 'A or B tag' tasks.",
+            "suggestion": "Add a compact recipe titled 'Find one of several tag names' that pairs next_tag() with get_tag() and a strict in_array() check."
+          },
+          {
+            "location": "WP_HTML_Processor usage / mutation completion policy",
+            "problem": "The docs mention get_last_error() and paused_at_incomplete_token() in several recipes, but the expected fallback policy for simple queued mutations is spread across sections.",
+            "suggestion": "Add a brief mutation checklist: after create_fragment() null-check, mutate matched tokens, return get_updated_html(); if the function requires complete input or unsupported-markup rejection, drain/scan and check get_last_error() and paused_at_incomplete_token() before returning."
+          }
+        ]
+      }
+    },
+    {
+      "id": "T08-table-extract",
+      "verdict": {
+        "trials": [
+          {
+            "trial_id": "trial-1",
+            "adherence": 98,
+            "hallucinated_methods": [],
+            "notes": "Used the correct HTML Processor via WP_HTML_Processor::create_fragment(), walked tokens with one explicit state machine, read only #text tokens with get_modifiable_text(), and relied correctly on virtual/implied closers. All called HTML API methods are present in the rendered docs. Minor idiom issue: it records table depth but bounds the first table by a TABLE closer instead of the documented depth-bounded subtree pattern; this is still valid under the no-nested-tables task assumption."
+          },
+          {
+            "trial_id": "trial-2",
+            "adherence": 99,
+            "hallucinated_methods": [],
+            "notes": "Most closely matches the documented recipe: create_fragment(), next_tag('TABLE'), record get_current_depth(), then a single next_token() loop guarded with >= depth and explicit row/cell state. It reads decoded text only from #text tokens and handles implied closers and empty cells. All API calls are documented; only minor missing polish is no explicit post-scan completion policy check, which the reference also omits for this read-only extractor."
+          },
+          {
+            "trial_id": "trial-3",
+            "adherence": 96,
+            "hallucinated_methods": [],
+            "notes": "Correct processor and documented methods throughout: create_fragment(), next_tag(), next_token(), get_current_depth(), get_token_type(), get_tag(), is_tag_closer(), and get_modifiable_text(). The token walk is broadly idiomatic and passed all hidden cases, including omitted closers and decoded entities. Slight edge-case weakness: its TR closer flush skips rows whose cell list is empty, contrary to the closer-driven repeated-region pattern the docs recommend for preserving empty regions."
+          }
+        ],
+        "failure_analysis": "No hidden case failed in this round: all three trials passed 8/8 with no _doing_it_wrong records. The docs did the important work well: the 'Which processor should I use?' guidance points structural text extraction toward WP_HTML_Processor; create_fragment() clearly fits body fragments; next_token() explains implied/virtual closers, synthesized table structure, one shared cursor, and depth-bounded walks; get_modifiable_text() clearly states decoded #text semantics and warns not to treat all modifiable text as DOM text. The near misses were not hidden-test failures: trial-1 did not use its recorded table depth to bound the table, relying instead on a TABLE closer; trial-3 skipped structurally empty rows because it guarded the row flush with empty(); and none of the trials made an explicit all-or-nothing choice using paused_at_incomplete_token() or get_last_error(), though the task and reference accepted best-effort read-only extraction.",
+        "doc_gaps": [
+          {
+            "location": "WP_HTML_Processor::next_token() / implied and virtual token discussion",
+            "problem": "The docs say table rows may be visited inside a synthesized TBODY, but they do not show a concrete token sequence for optional end tags such as omitted cell and row closers.",
+            "suggestion": "Add a compact, general token/depth example for markup with optional end tags, showing get_token_name(), is_tag_closer(), and get_current_depth() for both source and virtual tokens."
+          },
+          {
+            "location": "WP_HTML_Processor::get_tag()",
+            "problem": "The description says it returns the matched tag 'in input HTML', which is ambiguous for HTML Processor token walks that expose virtual or implied tags not literally present in the source.",
+            "suggestion": "Clarify whether get_tag() returns names for virtual/implied #tag tokens and closers, and note when get_token_name() is preferable for all-token dispatch."
+          },
+          {
+            "location": "WP_HTML_Processor::next_token() repeated-region recipe",
+            "problem": "The recipe explains that empty element regions can be preserved, but it does not explicitly warn against empty() guards when the structural region itself should be retained even with no children.",
+            "suggestion": "Add a short note: initialize records on opener and flush on the matching closer when preserving structural regions; use empty() guards only when intentionally filtering empty regions."
+          },
+          {
+            "location": "WP_HTML_Processor::next_token() and get_current_depth() completion-policy notes",
+            "problem": "The docs mention paused_at_incomplete_token() and get_last_error(), but the extraction examples make it easy to omit an explicit best-effort vs complete-source policy.",
+            "suggestion": "Add a post-loop mini-pattern contrasting best-effort read-only extraction with all-or-nothing extraction that rejects truncated or unsupported input."
+          }
+        ]
+      }
+    },
+    {
+      "id": "T09-mark-keyword",
+      "verdict": {
+        "trials": [
+          {
+            "trial_id": "trial-1",
+            "adherence": 97,
+            "hallucinated_methods": [],
+            "notes": "Correctly chose WP_HTML_Processor::create_fragment(), walked with next_token(), gated matching on get_token_type() === '#text', used get_modifiable_text() for decoded comparison, and wrapped serialize_token() output. All called HTML API methods are present in the rendered docs and execution recorded no _doing_it_wrong notices. Minor deduction: the post-loop get_last_error() fallback returns normalize($html) ?? $html, which is documented but can discard wrappers already emitted and can return raw unnormalized input if normalization fails."
+          },
+          {
+            "trial_id": "trial-2",
+            "adherence": 98,
+            "hallucinated_methods": [],
+            "notes": "Same strong documented pattern as the reference: HTML Processor fragment parsing, token walking, #text-only matching, decoded get_modifiable_text(), and serialize_token() for normalized token output. No undocumented API calls or _doing_it_wrong records. Minor deduction only for the normalize($html) fallback after a rewrite loop, which is a clear policy but risky for contracts that require preserving emitted rewrites on parser abort."
+          },
+          {
+            "trial_id": "trial-3",
+            "adherence": 98,
+            "hallucinated_methods": [],
+            "notes": "Correct processor and fully documented API usage. The implementation separates text inspection from token serialization, avoids comments/attributes/special-element opener text by requiring #text, and returns the accumulated normalized rewrite. Minor deduction for the same unsupported-markup fallback: normalize($html) after emitting output intentionally restarts from original bytes and loses any wrappers already produced."
+          }
+        ],
+        "failure_analysis": "All three trials passed all 8 hidden cases. The docs did well in the exact areas this task needed: the Tag Processor overview says to use the HTML Processor for missing closing tags and normalized output; the HTML Processor text-extraction recipe says ordinary text means #text tokens only, not every token with modifiable text; get_modifiable_text() states #text/TITLE/TEXTAREA text is decoded while comments/raw-text sections differ; and serialize_token() explicitly documents token-by-token normalized rewrites, including wrapping selected text tokens. These passages explain why the candidates avoided matching attributes/comments, matched entity-encoded keywords, preserved split text-node behavior, and produced normalized implied closers. The main near-miss is the shared fallback explanation: all candidates call normalize($html) after a rewrite loop if get_last_error() is non-null. The docs do warn that normalize($html) starts over from the original bytes and discards emitted changes, so this is not a hallucination, but it is a contract risk for unsupported markup after earlier matches. They also did not check paused_at_incomplete_token(); for this normalized-output task the accumulated serialization omits unvisited incomplete trailing syntax, which is acceptable, but tasks requiring complete source bytes would need that check.",
+        "doc_gaps": [
+          {
+            "location": "WP_HTML_Processor::serialize_token() / string-returning rewrite checklist",
+            "problem": "The docs warn that normalize($html) discards emitted rewrite output, but the candidates still treated normalize($html) ?? $html as a generic recovery path after a rewrite loop.",
+            "suggestion": "Add a short decision table for rewrite-loop failure policy: strict contract returns null/empty or throws; best-effort returns accumulated output; fallback normalization deliberately discards all emitted rewrites; raw input fallback is not normalized output."
+          },
+          {
+            "location": "WP_HTML_Processor::create_fragment() and normalize() docblocks",
+            "problem": "The relationship between processor-creation failure, unsupported-markup aborts, and normalized-output contracts is spread across multiple sections.",
+            "suggestion": "Cross-link the factory and normalization docs to the rewrite-loop policy, explicitly stating that normalize($html) is only a fresh normalization of original input, not recovery of a partially serialized transformation."
+          },
+          {
+            "location": "WP_HTML_Processor::next_token() / get_modifiable_text() special-element guidance",
+            "problem": "The docs explain that SCRIPT/STYLE/TITLE/TEXTAREA carry text on opener tokens, but this remains easy to miss when a task says ordinary text nodes only.",
+            "suggestion": "Add a small token-stream example for ordinary text versus special-element opener text, showing that callers should require get_token_type() === '#text' unless they explicitly opt into those element contents."
+          }
+        ]
+      }
+    },
+    {
+      "id": "T10-last-h2",
+      "verdict": {
+        "trials": [
+          {
+            "trial_id": "trial-1",
+            "adherence": 100,
+            "hallucinated_methods": [],
+            "notes": "Used the correct WP_HTML_Tag_Processor for a flat class edit, walked with next_tag('h2'), reused one bookmark to remember the last match, sought back, used add_class(), and returned get_updated_html(). All HTML API methods used are documented; no _doing_it_wrong records."
+          },
+          {
+            "trial_id": "trial-2",
+            "adherence": 100,
+            "hallucinated_methods": [],
+            "notes": "Essentially matches the canonical documented pattern: Tag Processor, single forward scan, repeated same-name bookmark, seek, add_class(), get_updated_html(). Not releasing the bookmark is harmless because the processor immediately goes out of scope. No undocumented HTML API usage."
+          },
+          {
+            "trial_id": "trial-3",
+            "adherence": 85,
+            "hallucinated_methods": [],
+            "notes": "All HTML API methods used are documented, and the implementation passes. The main adherence issue is processor choice: it uses WP_HTML_Processor, tries create_full_parser() before create_fragment(), and feature-probes methods, despite the docs recommending WP_HTML_Tag_Processor for flat position-based class edits. It also does not check get_last_error() after using the HTML Processor, so unsupported markup could make the 'last H2' scan untrustworthy outside the tested cases."
+          }
+        ],
+        "failure_analysis": "All trials passed all hidden cases. The docs did well on the core concepts: the Tag Processor overview explicitly says to use it for flat tag/name/class edits; next_tag() documents string tag queries, case-insensitive tag matching, opener-only default behavior, and that tag-like text inside comments is not matched; set_bookmark() explicitly teaches the 'remember the last matching tag by re-setting the same bookmark name, then seek once' idiom; add_class() explains missing and existing class behavior; get_updated_html() explains how to read back queued mutations while preserving untouched bytes. The near-miss was trial-3: it still worked because WP_HTML_Processor inherits the mutation APIs, but it treated the full parser as a generic first choice and skipped the HTML Processor's abort/error checks. That suggests the processor-selection guidance is present but not quite strong enough at the exact factory/API decision point.",
+        "doc_gaps": [
+          {
+            "location": "WP_HTML_Processor::create_full_parser() and create_fragment() docs",
+            "problem": "A reader can still treat create_full_parser() as a generic preferred constructor and create_fragment() as a fallback, as trial-3 did.",
+            "suggestion": "Add a compact factory-selection table: use create_fragment() for BODY fragments, create_full_parser() only for complete documents, and use WP_HTML_Tag_Processor directly for flat class/attribute edits that do not need tree structure."
+          },
+          {
+            "location": "WP_HTML_Processor overview / inherited mutation methods",
+            "problem": "The docs say the HTML Processor aborts on unsupported markup, but the consequence for deferred mutations after a scan is easy to miss.",
+            "suggestion": "Add guidance that if a scan result determines a later mutation, callers using WP_HTML_Processor should check get_last_error() after the scan before trusting 'none found' or 'last found'; otherwise prefer WP_HTML_Tag_Processor for lexical tag edits."
+          },
+          {
+            "location": "WP_HTML_Tag_Processor bookmarks overview",
+            "problem": "The last-match bookmark idiom is documented well in set_bookmark(), but it is buried in a long method section and illustrated with nested list logic.",
+            "suggestion": "Add a short general recipe near the Bookmarks overview for 'update the last matching tag in one pass' using a neutral example such as the last matching link or image, showing repeated set_bookmark(), seek(), mutation, and get_updated_html()."
+          }
+        ]
+      }
+    },
+    {
+      "id": "T11-strip-tracking-attributes",
+      "verdict": {
+        "trials": [
+          {
+            "trial_id": "trial-1",
+            "adherence": 100,
+            "hallucinated_methods": [],
+            "notes": "Used the right API surface: `WP_HTML_Tag_Processor`, `next_tag()`, `get_attribute_names_with_prefix()`, `remove_attribute()`, and `get_updated_html()`. All are documented in the rendered tag-processor docs. The `empty()` check correctly handles both no matches and `null`; no `_doing_it_wrong` records; passed 7/7 cases."
+          },
+          {
+            "trial_id": "trial-2",
+            "adherence": 100,
+            "hallucinated_methods": [],
+            "notes": "Used `WP_HTML_Tag_Processor` for a flat attribute edit, walked all tag openers with `next_tag()`, enumerated matching names via the documented prefix helper, removed each attribute, and returned `get_updated_html()`. No undocumented HTML API calls or misuse; passed 7/7 cases."
+          },
+          {
+            "trial_id": "trial-3",
+            "adherence": 100,
+            "hallucinated_methods": [],
+            "notes": "Canonical documented pattern: construct the tag processor, loop `next_tag()`, call `get_attribute_names_with_prefix( 'data-track-' )`, remove each returned lowercase attribute name, then call `get_updated_html()`. No hallucinated methods or misuse; passed 7/7 cases."
+          }
+        ],
+        "failure_analysis": "No hidden case failed across the three trials. The docs did well on the key decisions: the Tag Processor overview says it is the right choice for flat attribute/class edits with byte-precise preservation; the Usage section shows direct construction with `new WP_HTML_Tag_Processor( $html )` and `next_tag()` walking; `get_attribute_names_with_prefix()` documents lowercase returned names and case-insensitive matching; `next_tag()` documents that comments/raw-text are not matched as tags and incomplete trailing tags are not modified; `get_updated_html()` clearly states it is the output method after queued mutations. Near-misses: the prefix helper’s `null` contract is documented, but the matched-tag/no-matches case is not explicitly shown as `array()`, so subjects had to infer that `null` only means “not on a tag opener.” Also, exact prefix boundary behavior is semantically implied by “prefix,” but no example contrasts `data-track-` with similar names like `data-track` or `data-tracker`.",
+        "doc_gaps": [
+          {
+            "location": "`WP_HTML_Tag_Processor::get_attribute_names_with_prefix()` docblock",
+            "problem": "Return semantics are underspecified for a matched tag with no matching attributes. The docs say `array|null` and `null when no tag opener is matched`, but only demonstrate matches and the post-scan `null` case.",
+            "suggestion": "Add a short example showing three states: before/after no matched opener returns `null`, matched opener with no prefix matches returns `array()`, and matched opener with case-variant matches returns lowercase names."
+          },
+          {
+            "location": "`WP_HTML_Tag_Processor::get_attribute_names_with_prefix()` examples",
+            "problem": "The case-insensitive behavior is documented, but exact prefix boundary behavior is not illustrated. This matters when similar attribute names differ only by a hyphen or suffix.",
+            "suggestion": "Add a general example showing that prefix matching is literal after ASCII case folding: a prefix like `data-foo-` matches `DATA-FOO-ID` but not `data-foo` or `data-foobar`."
+          },
+          {
+            "location": "`WP_HTML_Tag_Processor::remove_attribute()` method section",
+            "problem": "The detailed method section is terse and only says whether an attribute was removed. The safer no-op contract for absent attributes appears earlier in the overview, so readers landing on the method may miss it.",
+            "suggestion": "Repeat the contract in the method docblock: removing an absent attribute is safe and has no effect, matching is case-insensitive for HTML attributes, and callers normally do not need to branch on the boolean before calling `get_updated_html()`."
+          }
+        ]
+      }
+    },
+    {
+      "id": "T12-unwrap-spans",
+      "verdict": {
+        "trials": [
+          {
+            "trial_id": "trial-1",
+            "adherence": 97,
+            "hallucinated_methods": [],
+            "notes": "Correctly chose WP_HTML_Processor::create_fragment(), walked tokens with next_token(), skipped only SPAN tag tokens, and used serialize_token() for normalized output. All called APIs are present in the rendered docs. Minor deduction: the get_last_error fallback to normalize($html) would discard the rewrite if unsupported markup were encountered."
+          },
+          {
+            "trial_id": "trial-2",
+            "adherence": 72,
+            "hallucinated_methods": [],
+            "notes": "Correct processor and no undocumented methods: create_fragment(), next_token(), get_tag(), is_tag_closer(), and serialize_token() are documented. The main API-pattern failure is semantic: it used a skip-depth subtree deletion pattern, so it removed SPAN contents instead of only omitting the SPAN opener/closer tokens. That contradicts the documented serialize_token() wrapper-removal example."
+          },
+          {
+            "trial_id": "trial-3",
+            "adherence": 98,
+            "hallucinated_methods": [],
+            "notes": "Correctly used the HTML Processor for fragment normalization, walked all tokens, skipped SPAN tag tokens, and appended serialize_token(). All methods are documented. Minor deduction only for weak fallback behavior on processor-creation failure / parser error, though it does not affect the tested cases."
+          }
+        ],
+        "failure_analysis": "Trial 2 failed simple, nested-spans, attributes-discarded, adjacent-spans, span-with-block-content, and unclosed-span for the same misconception: it treated \"remove the SPAN element\" as \"remove the SPAN subtree.\" The code increments $skip_depth on a SPAN opener and suppresses every descendant token until the SPAN closer, so text, child elements, adjacent span text, block/void content, and text inside an unclosed SPAN are all dropped. The responsible documentation area is WP_HTML_Processor::serialize_token(), especially the rewrite guidance and its example \"Remove every SUP element but keep its contents,\" which shows the correct general pattern: skip matching tag tokens and serialize everything else. The docs were strong enough for trials 1 and 3, but trial 2 shows that the phrase \"skip tokens to remove them\" can still be overgeneralized into a subtree-skip algorithm. For unclosed-span specifically, next_token() correctly emits a virtual SPAN closer at end of input; the docs describe that closers are visited for unclosed elements, but they do not explicitly warn that a stateful subtree skip will remain active through all trailing content until that virtual closer.",
+        "doc_gaps": [
+          {
+            "location": "WP_HTML_Processor::serialize_token() docblock and \"Recipe: rewrite while serializing tokens\"",
+            "problem": "The docs show an unwrap-style example, but they do not explicitly contrast wrapper removal with subtree deletion. A reader can infer that tracking depth and skipping while inside the element is the safer way to \"remove\" an element.",
+            "suggestion": "Add a short distinction: to unwrap/remove only an element's own tags, skip matching opener and closer tokens and serialize descendants; to delete an element and all descendants, record depth at the opener and skip until leaving that subtree. Call out that a skip-depth counter deletes contents."
+          },
+          {
+            "location": "WP_HTML_Processor::get_tag() / serialize_token() examples",
+            "problem": "It is not emphasized that during a token walk, get_tag() matches both opener and closer tag tokens, while text and descendant tokens have no matching tag name.",
+            "suggestion": "In token-rewrite examples, state that `if ( 'X' === $processor->get_tag() ) continue;` skips both wrapper tag tokens and preserves all non-X descendant tokens."
+          },
+          {
+            "location": "WP_HTML_Processor::next_token() incomplete-input discussion",
+            "problem": "The docs describe virtual closers for unclosed elements, but not their practical effect on rewrite state machines.",
+            "suggestion": "Add a note that subtree-skip state remains active until parser-reported closers, including virtual end-of-input closers; wrapper-unwrapping filters should skip only the element tag tokens when trailing content must remain."
+          },
+          {
+            "location": "WP_HTML_Processor::get_last_error() / rewrite fallback guidance",
+            "problem": "Near misses used raw input or normalize($html) as fallbacks. Those policies are documented, but it is easy to miss that they discard token-loop rewrites and may violate contracts requiring modified normalized output.",
+            "suggestion": "Clarify in fallback guidance that raw input and normalize($html) intentionally discard emitted changes; examples for string-returning rewriters should name which fallback preserves the function's contract and which does not."
+          }
+        ]
+      }
+    }
+  ]
+}

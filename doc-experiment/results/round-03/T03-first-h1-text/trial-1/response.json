@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor to parse the HTML fragment, finds the first H1 tag, records its depth, then iterates through all subsequent tokens using next_token(). For each text node (#text token type), it collects the modifiable text which is automatically decoded (character references like &amp; become &). The loop stops when exiting the H1 element by detecting when the current depth falls below the H1 depth.",
+  "confidence": 75
+}

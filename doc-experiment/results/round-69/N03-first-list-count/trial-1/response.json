@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in body context, `next_tag()` to find the first `UL` or `OL`, then `next_token()` with `get_current_depth()` to scan that list subtree and count only direct `LI` child openers before editing the original opener with `set_attribute()`. The function fails closed by returning the input unchanged if no list is found, if the scan is incomplete, or if the processor reports an error.",
+  "confidence": 89
+}

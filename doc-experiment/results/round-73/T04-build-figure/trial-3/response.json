@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to start from a literal template that already contains the required attribute order, then set the img attributes with set_attribute() and replaced the figcaption placeholder text with set_modifiable_text(). Finally, get_updated_html() returns the updated fragment with all HTML encoding handled by the documented API.",
+  "confidence": 95
+}

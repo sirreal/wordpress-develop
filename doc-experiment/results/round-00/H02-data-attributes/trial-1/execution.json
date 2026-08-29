@@ -1,0 +1,82 @@
+{
+    "candidate": "/Users/jonsurrell/a8c/wordpress-develop/html-api-docs-improvement/doc-experiment/results/round-00/H02-data-attributes/trial-1/candidate.php",
+    "function": "get_data_attributes",
+    "passed": 6,
+    "total": 6,
+    "cases": [
+        {
+            "id": "mixed",
+            "status": "pass",
+            "expected": {
+                "data-post-id": "42",
+                "data-featured": true
+            },
+            "actual": {
+                "data-post-id": "42",
+                "data-featured": true
+            },
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "uppercase-names-lowercased",
+            "status": "pass",
+            "expected": {
+                "data-type": "post",
+                "data-other": "x"
+            },
+            "actual": {
+                "data-type": "post",
+                "data-other": "x"
+            },
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "entities-in-values",
+            "status": "pass",
+            "expected": {
+                "data-title": "Fish & Chips"
+            },
+            "actual": {
+                "data-title": "Fish & Chips"
+            },
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "no-data-attributes",
+            "status": "pass",
+            "expected": [],
+            "actual": [],
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "no-div",
+            "status": "pass",
+            "expected": [],
+            "actual": [],
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "first-div-only",
+            "status": "pass",
+            "expected": {
+                "data-a": "1"
+            },
+            "actual": {
+                "data-a": "1"
+            },
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        }
+    ]
+}

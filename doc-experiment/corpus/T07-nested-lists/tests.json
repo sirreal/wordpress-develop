@@ -1,0 +1,62 @@
+{
+    "id": "T07-nested-lists",
+    "title": "Mark nested lists",
+    "difficulty": "intermediate",
+    "split": "train",
+    "role": "core",
+    "commonness": "high",
+    "concept": "traversal",
+    "processor": "html",
+    "function": "mark_nested_lists",
+    "cases": [
+        {
+            "id": "simple-ol-inside-ul",
+            "args": [
+                "<ul><li>One<ol><li>Nested</li></ol></li></ul>"
+            ],
+            "expected": "<ul><li>One<ol class=\"nested-list\"><li>Nested</li></ol></li></ul>"
+        },
+        {
+            "id": "top-level-lists-untouched",
+            "args": [
+                "<ol><li>Top</li></ol><ul><li>Also top</li></ul>"
+            ],
+            "expected": "<ol><li>Top</li></ol><ul><li>Also top</li></ul>"
+        },
+        {
+            "id": "ul-inside-ol",
+            "args": [
+                "<ol><li>One<ul><li>Nested</li></ul></li></ol>"
+            ],
+            "expected": "<ol><li>One<ul class=\"nested-list\"><li>Nested</li></ul></li></ol>"
+        },
+        {
+            "id": "deep-descendant",
+            "args": [
+                "<ul><li><div><section><ol><li>Deep</li></ol></section></div></li></ul>"
+            ],
+            "expected": "<ul><li><div><section><ol class=\"nested-list\"><li>Deep</li></ol></section></div></li></ul>"
+        },
+        {
+            "id": "existing-class-preserved",
+            "args": [
+                "<ul><li><ol class=\"steps\"><li>Nested</li></ol></li></ul>"
+            ],
+            "expected": "<ul><li><ol class=\"steps nested-list\"><li>Nested</li></ol></li></ul>"
+        },
+        {
+            "id": "multiple-nested-levels",
+            "args": [
+                "<ul><li>A<ol><li>B<ul><li>C</li></ul></li></ol></li></ul>"
+            ],
+            "expected": "<ul><li>A<ol class=\"nested-list\"><li>B<ul class=\"nested-list\"><li>C</li></ul></li></ol></li></ul>"
+        },
+        {
+            "id": "mixed-document",
+            "args": [
+                "<p>intro</p><ul><li>A<ol><li>B</li></ol></li></ul><ol><li>C</li></ol>"
+            ],
+            "expected": "<p>intro</p><ul><li>A<ol class=\"nested-list\"><li>B</li></ol></li></ul><ol><li>C</li></ol>"
+        }
+    ]
+}

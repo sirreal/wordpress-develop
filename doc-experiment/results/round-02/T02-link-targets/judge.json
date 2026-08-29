@@ -1,0 +1,35 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correct processor (WP_HTML_Tag_Processor) for an attribute-only flat edit; the Tag Processor is exactly right since no tree/breadcrumb structure is needed. All four methods called exist in html-tag-processor.md: next_tag (used with array('tag_name'=>'a') query form, documented line 50), get_attribute (signature string|true|null, line 1418), set_attribute (line 2059), get_updated_html (line 2192). Idiomatic token-walk loop `while (next_tag(...))` matching the documented pattern, and get_updated_html() for serialization. Edge cases handled exactly per docs: uses `null !== get_attribute('href')` so valueless href (`<a href>` returns true) and empty href (`href=\"\"` returns \"\") both count as present, while absent returns null and is skipped. Existing target overwrite relies on documented set_attribute overwrite semantics (line 148). Case-insensitive tag/attribute matching handled implicitly by the API. 8/8 hidden cases pass, no _doing_it_wrong. Self-reported confidence 85 was if anything understated."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Byte-for-byte equivalent to the canonical reference: uses next_tag('A') (string query form, documented line 51), get_attribute, set_attribute, get_updated_html. All documented; no hallucinated or undocumented API; no _doing_it_wrong. Same correct null-check on href covering empty/valueless/absent semantics. Idiomatic loop and serialization. 8/8 pass. Confidence 92."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Functionally identical to trials 1/2 and the reference; uses array('tag_name'=>'A') query form (uppercase value, still case-insensitive per probe). All methods documented, no hallucinations, no _doing_it_wrong. The inline comment correctly enumerates the get_attribute return contract (string / \"\" / true / null) drawn straight from the docs. Correct edge-case handling via `null !== $href`. 8/8 pass. Confidence 92."
+    }
+  ],
+  "failure_analysis": "No failures across any trial: all three passed 8/8 hidden cases with zero _doing_it_wrong records, and all are substantively identical to the canonical reference. This is a smoke/basic task and the docs supported it cleanly.\n\nWhat the docs did well (the load-bearing passages):\n1. get_attribute return contract. The single most important fact for this task is that `href` counts as present in three distinct physical forms: a normal value, an empty string (`href=\\\"\\\"`), and a valueless boolean form (`<a href>`). html-tag-processor.md nails this in two complementary places: the signature `string|true|null` with worked examples at lines 1426-1433 (`get_attribute('enabled') === true`, `get_attribute('aria-label') === null`), and the prose at line 81 (\\\"will return null if the attribute wasn't present... may return \\\"\\\" (the empty string) in cases where the attribute was present but its value was empty\\\"). All three subjects independently converged on the correct idiom `null !== get_attribute('href')` and three independently wrote accurate comments enumerating the return cases. This is direct evidence the documentation transferred the concept successfully.\n2. next_tag query forms. The docs show both the shorthand string form and the array form (lines 49-53), so the subjects' three different spellings (`'A'`, `array('tag_name'=>'a')`, `array('tag_name'=>'A')`) all worked. Probe confirms all three are case-insensitive and behave identically.\n3. set_attribute overwrite semantics. Line 148 (\\\"If set_attribute() is called for an existing attribute it will overwrite the existing value\\\") covered the existing-target-overwritten case without any subject needing a remove-then-set dance.\n4. Implicit robustness. The inside-comment-ignored and nested-markup cases passed for free because the Tag Processor only matches real tag tokens, not text inside comments. No subject had to reason about this explicitly, which is the docs/API doing the right thing by default.\n\nNear-misses in the explanations (no functional impact): Trials 1 and 2 wrote that get_attribute \\\"returns true for boolean attributes\\\" in the href context. That is correct for the `<a href>` valueless form, but slightly conflates two cases — empty `href=\\\"\\\"` returns \\\"\\\" (empty string), not true. Trial 3's comment is the most precise, distinguishing empty-string from valueless-true. None of this affected output because all three only branch on `null !==`, which is robust to the exact non-null type. The docs could tighten this distinction (see doc_gaps) but it did not cause a failure here.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::get_attribute() (html-tag-processor.md, section around lines 1415-1448 and prose at line 81)",
+      "problem": "The three return forms for a present attribute are documented in scattered spots: the boolean-true case appears only in the example block (line 1429) and the 'Returns' note (line 1448 'Boolean attributes return true'), while the empty-string case appears only in distant prose (line 81). Two of three subjects' explanations conflated empty-string (\"\") with boolean-true. The example never shows an attribute written as empty (`x=\"\"`) returning \"\", nor a valueless attribute being distinguished from an empty-valued one.",
+      "suggestion": "Add a compact return-value table or example block to the get_attribute() method section enumerating all four outcomes side by side: present with value -> the string; present but empty (`attr=\"\"`) -> \"\" (empty string); present without a value (`<tag attr>`, the boolean form) -> true; absent -> null. Explicitly contrast `attr=\"\"` (returns \"\") against `attr` alone (returns true) since these look similar but differ, and note that `null !== get_attribute($name)` is the canonical idiom for 'is this attribute present in any form'."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::next_tag() (html-tag-processor.md, lines 39-55) and a general 'case sensitivity' note",
+      "problem": "The tag_name matching examples use lowercase ('img', 'option') while several class-related methods are explicitly labeled 'ASCII case-insensitive'. There is no explicit statement that the tag_name query is itself case-insensitive, so subjects could not be sure whether 'A' vs 'a' (or matching `<A>` vs `<a>`) mattered. Subjects guessed three different spellings; all happened to work, but the docs leave this to chance.",
+      "suggestion": "State directly in next_tag()'s description (or a short shared note) that tag_name matching is ASCII case-insensitive: the query value's case is irrelevant and it matches tags regardless of their source casing. Cross-reference get_tag()'s existing note that it returns the uppercase tag name so readers understand the normalization model."
+    }
+  ]
+}

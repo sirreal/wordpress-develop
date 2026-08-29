@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor::create_fragment(), walked tokens with next_token(), matched only #text via decoded get_modifiable_text(), and used serialize_token() for normalized rewrite output. All API calls are documented. Minor deduction: the final get_last_error() fallback can discard accumulated output on unsupported markup, but it did not affect the tested behavior or incomplete trailing-token behavior."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Essentially the reference pattern. Correct processor, all called methods are documented, token walking is idiomatic, get_modifiable_text() handles decoded text, #text filtering avoids attributes/comments/special text-bearing elements, and serialize_token() preserves normalized output while adding wrappers."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 90,
+      "hallucinated_methods": [],
+      "notes": "The main token-walking implementation is correct and all API calls are documented. Deduction is for the post-loop paused_at_incomplete_token()/get_last_error() fallback: calling normalize($html) after a rewrite loop discards already-emitted wrapper edits on incomplete trailing syntax, and returning raw $html when create_fragment() returns null is not normalized output."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 8 frozen hidden cases. The docs did well at steering subjects to the HTML Processor: the processor-choice sections say to use WP_HTML_Processor for structure, implied/missing closers, and normalized output; next_token() explains #text walking, split text nodes, and special elements producing no #text children; get_modifiable_text() states that #text is already decoded; serialize_token() explicitly supports token-by-token rewriting with extra emitted markup. The main near-miss was trial 3's incomplete-input handling. A probe with '<p>world<!--' shows the reference-style token loop returns '<p><mark>world</mark></p>' while paused_at_incomplete_token() is true, but normalize($html) returns '<p>world</p>', losing the wrapper. This appears to come from overgeneralizing the docs' advice to check paused_at_incomplete_token() for scans that drive later mutations, plus the absence of an explicit warning that normalize($original) after a token rewrite discards the rewrite.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::serialize_token() docblock",
+      "problem": "The docs say token-by-token serialization can insert wrappers, but do not explicitly state that the accumulated output is the rewritten result and that re-normalizing the original input afterward will discard those emitted changes.",
+      "suggestion": "Add a short warning after the rewrite-loop paragraph: after emitting altered tokens, return or reject the accumulated output according to caller policy; do not call normalize() on the original HTML as a fallback unless intentionally dropping all token-loop edits."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token() and WP_HTML_Tag_Processor::paused_at_incomplete_token()",
+      "problem": "Incomplete-input guidance is framed around scans that drive a later mutation, which can be misread as requiring all rewrite loops to abandon their accumulated output when truncation is detected.",
+      "suggestion": "Clarify that paused_at_incomplete_token() only reports why scanning stopped. Callers that require a complete source should reject, while normalization/rewrite-as-you-walk callers may choose to keep the accumulated normalized output, which omits the incomplete trailing token."
+    },
+    {
+      "location": "WP_HTML_Processor::create_fragment()",
+      "problem": "The null-return case lacks guidance for callers whose contract requires normalized serialization, leading to raw-input fallbacks.",
+      "suggestion": "Document that if create_fragment() returns null, no normalized processor output is available; functions promising normalized HTML should use an explicit failure policy rather than returning the raw input as though it were normalized."
+    }
+  ]
+}

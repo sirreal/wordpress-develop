@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment with browser-like table handling, then walked tokens with `next_token()` and collected only `#text` content from cells while reacting to `TABLE`, `TR`, `TD`, and `TH` tag openers/closers. This keeps markup out of the result and lets the processor supply implied table structure.",
+  "confidence": 88
+}

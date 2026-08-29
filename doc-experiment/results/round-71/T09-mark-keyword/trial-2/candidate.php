@@ -1,0 +1,39 @@
+<?php
+
+if ( ! function_exists( 'mark_keyword' ) ) {
+	function mark_keyword( string $html, string $keyword ): string {
+		$processor = WP_HTML_Processor::create_fragment( $html );
+		if ( null === $processor ) {
+			return WP_HTML_Processor::normalize( $html ) ?? $html;
+		}
+
+		$output = '';
+
+		while ( $processor->next_token() ) {
+			if ( '#text' === $processor->get_token_type() ) {
+				$text = $processor->get_modifiable_text();
+				if ( '' !== $keyword && false !== strpos( $text, $keyword ) ) {
+					$output .= '<mark>' . $processor->serialize_token() . '</mark>';
+					continue;
+				}
+			}
+
+			if (
+				'#tag' === $processor->get_token_type() &&
+				! $processor->is_tag_closer() &&
+				WP_HTML_Processor::is_special( $processor->get_tag() )
+			) {
+				$output .= $processor->serialize_token();
+				continue;
+			}
+
+			$output .= $processor->serialize_token();
+		}
+
+		if ( null !== $processor->get_last_error() ) {
+			return WP_HTML_Processor::normalize( $html ) ?? $html;
+		}
+
+		return $output;
+	}
+}

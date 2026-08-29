@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This walks the fragment with `WP_HTML_Processor::create_fragment()` and `next_token()`, wraps only ordinary `#text` tokens whose decoded `get_modifiable_text()` contains the case-sensitive keyword, and otherwise appends each token\u2019s normalized form via `serialize_token()`. A `get_last_error()` check avoids returning a partial rewrite on unsupported markup, with `normalize()` used only as a fallback normalizer.",
+  "confidence": 83
+}

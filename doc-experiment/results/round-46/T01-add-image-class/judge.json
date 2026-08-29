@@ -1,0 +1,35 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Tag_Processor, next_tag('img'), add_class('wp-image'), and get_updated_html(), all documented. This is the intended byte-preserving tag-level edit path and correctly relies on documented case-insensitive tag matching, comment skipping, class appending, and incomplete-token behavior."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Identical to trial-1. Correct processor choice, no undocumented APIs, idiomatic forward token walk, class helper, and get_updated_html() return path. No _doing_it_wrong records."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Identical to trial-1. Fully documented API usage and appropriate reliance on Tag Processor semantics for real tags only, class updates, case-insensitive matching, and byte preservation."
+    }
+  ],
+  "failure_analysis": "All trials passed all hidden cases. The rendered docs did well on this task: the Tag Processor overview explicitly says to use it for flat tag/class edits and byte-precise preservation; the Usage/Finding tags section documents next_tag('img'); next_tag() documents ASCII case-insensitive tag-name matching, ignoring tag-like text inside comments/raw-text, and not matching incomplete trailing tags; add_class() documents creating a class attribute, appending to existing classes, preserving existing class order/spacing, and avoiding duplicates; get_updated_html() documents that it is the way to retrieve queued mutations while preserving untouched bytes. The main near-miss is discoverability: a subject had to combine the next_tag loop pattern, add_class behavior, and get_updated_html retrieval from separate sections. That worked here, but a less careful reader could plausibly stop after the first tag or use set_attribute/get_attribute manually.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::add_class() docblock",
+      "problem": "It explains class creation/appending, but does not explicitly state where a newly-created class attribute is inserted relative to existing attributes.",
+      "suggestion": "Add a sentence that class creation follows the same attribute-update placement rules as set_attribute: a new class attribute is inserted immediately after the tag name, while existing unrelated attributes keep their original bytes."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor Usage / class helper examples",
+      "problem": "The simplest Usage example uses if for one matching tag; the multi-match while-loop pattern appears elsewhere and is not tied directly to class mutation.",
+      "suggestion": "Add a generic example showing how to apply one class helper to every tag matching a query using while ( $processor->next_tag( $query ) ), then return get_updated_html(). Keep it generic rather than task-specific."
+    }
+  ]
+}

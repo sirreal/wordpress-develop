@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` with a literal template that already contains `src`, `alt`, and placeholder caption text so the output shape and attribute order stay exact. The function then updates `src` and `alt` with `set_attribute()` and replaces the placeholder text inside `figcaption` with `set_modifiable_text()`, relying on the HTML API to encode all special characters safely.",
+  "confidence": 93
+}

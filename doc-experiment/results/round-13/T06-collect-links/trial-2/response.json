@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML fragment. It iterates through each A tag using next_tag('A'), skips those without an href attribute, then walks through tokens within each A element using next_token() to collect all text content via get_modifiable_text() while tracking depth to know when the A element closes. Character references are automatically decoded by get_attribute() and get_modifiable_text(). The function returns an array of associative arrays with 'href' and 'text' keys in document order.",
+  "confidence": 75
+}

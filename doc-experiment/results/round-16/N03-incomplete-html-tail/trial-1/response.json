@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Creates a WP_HTML_Tag_Processor and scans all tokens using next_token() until the processor reaches the end. Then checks paused_at_incomplete_token() to detect if the input ends mid-token (incomplete tags, comments, or SCRIPT/STYLE elements), while correctly returning false for lexically-complete but structurally-unclosed markup like lone < or unclosed DIV.",
+  "confidence": 92
+}

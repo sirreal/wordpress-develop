@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function creates two WP_HTML_Processor instances in fragment parsing mode (BODY context) for both input strings. It then uses the serialize() method on each processor, which normalizes the HTML by standardizing tag case, attribute quoting, adding implied closing tags, and handling character references. If either processor creation or serialization fails (returns null), the function returns false. Finally, it compares the two normalized strings for equality. This approach handles all the requirements: differences in quoting, casing, and implied tags are normalized away, while differences in structure, attributes, or content produce different normalized outputs.",
+  "confidence": 75
+}

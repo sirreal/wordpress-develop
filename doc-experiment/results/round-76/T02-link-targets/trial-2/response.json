@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan only tag openers and preserve all untouched bytes exactly. The function loops over every `a` tag with `next_tag('a')`, checks for `href` with `get_attribute('href')` so empty and boolean hrefs count as present, and then overwrites `target` via `set_attribute('target', '_blank')` before returning `get_updated_html()`.",
+  "confidence": 98
+}

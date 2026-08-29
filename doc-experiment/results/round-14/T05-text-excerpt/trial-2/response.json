@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::create_fragment() to parse the HTML fragment and WP_HTML_Processor::next_token() to iterate through all tokens. For each token, it checks if it's a text node (#text) using get_token_type(), and if so, appends its decoded text content via get_modifiable_text(). Text accumulation stops when reaching max_codepoints, using mb_substr() with UTF-8 encoding to safely truncate at code point boundaries without splitting multi-byte characters. Returns empty string for non-positive max_codepoints.",
+  "confidence": 72
+}

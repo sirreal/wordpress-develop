@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This implementation uses WP_HTML_Processor::create_fragment() to parse the HTML with full structural awareness, handling implied closing tags like a browser would. It finds the first TABLE element, then iterates through tokens within the table using get_current_depth() to track nesting levels. For each TR (table row) found, it collects text from all TD and TH cells at the direct child level. Text is accumulated from consecutive #text tokens using get_modifiable_text(), which automatically decodes character references. The algorithm exits when the current depth drops below the table's depth, and returns an empty array if no table is found.",
+  "confidence": 72
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Tag_Processor to scan for all A tag openers via next_tag('a'). For each match, I call get_attribute('href') which returns null when the attribute is absent, true when it's a valueless boolean attribute (e.g. `<a href>`), or a string when it has a value (including empty string for `href=\"\"`). Any non-null return means href is present, so I call set_attribute('target', '_blank') which creates or overwrites the target attribute. Finally, get_updated_html() returns the modified HTML string with all other content preserved byte-for-byte.",
+  "confidence": 97
+}

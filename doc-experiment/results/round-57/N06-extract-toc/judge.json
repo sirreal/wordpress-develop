@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Used the correct `WP_HTML_Processor::create_fragment()` API and only documented methods. The single-pass state machine is idiomatic for repeated regions and relies on documented virtual/implicit closers; it also restricts text extraction to `#text` tokens and uses decoded `get_modifiable_text()`. Minor deduction only for not anchoring state to depth, making the reasoning less explicit than the strongest documented pattern."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used the correct processor and only documented methods. This is the most directly documented shape: one token walk with explicit state, a recorded opener depth, `< $depth` boundary detection, `#text` filtering, and decoded `get_modifiable_text()`. It also handles empty and implicitly closed headings cleanly."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "Used the correct processor and only documented methods, and follows the documented depth-drop subtree boundary and `#text` extraction rules. Deducted for nested `next_token()` loops while extracting repeated regions; the docs specifically warn that nested loops share one cursor and can skip region boundaries. It is harmless for these cases because heading boundaries are closer/depth-drop tokens, but the style is less idiomatic."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 7 frozen cases, with no `_doing_it_wrong` records. The docs did well on the decisive concepts: the Tag Processor docs explicitly say to use the HTML Processor for structure, collecting element text, implied/missing closing tags, and walking subtrees; the HTML Processor overview and `next_token()` docs explain tree-aware token walking, virtual closers, one shared cursor, and depth/breadcrumb boundaries; `get_current_depth()` documents the required `>=`/`<` subtree boundary rule; and `get_modifiable_text()` documents decoded `#text` extraction and warns that modifiable text is not itself a predicate for DOM text. The main near-miss is trial-3: it used a nested depth-bounded loop for every heading even though the rendered docs recommend a single stateful loop for repeated regions. Trial-1 shows another useful success mode: closer-driven flushing worked because `next_token()` documents that implicit and end-of-input closes are visited, which directly covers the implied-heading-close case.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md: `next_token()` repeated-region guidance",
+      "problem": "The docs warn against nested `next_token()` loops and separately show a one-pass DT example, but they do not provide a generalized template for extracting text from every matching subtree in a document.",
+      "suggestion": "Add a compact reusable pattern for repeated subtree extraction: detect matching openers, record level/depth or state, append only `#text`, and flush on virtual closer or depth drop. Explain when a nested bounded loop is only appropriate for a single isolated subtree."
+    },
+    {
+      "location": "html-processor.md: `next_token()` / `get_current_depth()`",
+      "problem": "Virtual closers are described, but omitted-end-tag behavior is easier to trust with concrete token sequences. Subjects had to infer why implied heading/list closes would be visited before the next sibling opener.",
+      "suggestion": "Add a small example using an omitted closer such as `<li>A<li>B` or `<h2>A<h3>B`, showing visited opener/text/virtual-closer/opener tokens and their depths."
+    },
+    {
+      "location": "html-processor.md: `get_tag()` method example",
+      "problem": "The `WP_HTML_Processor::get_tag()` section demonstrates `new WP_HTML_Tag_Processor(...)`, which is valid inherited behavior context but visually conflicts with the class being documented and with the processor-choice distinction.",
+      "suggestion": "Use a `WP_HTML_Processor::create_fragment()` example in the HTML Processor method section, or explicitly label any Tag Processor example as inherited/base-class behavior."
+    },
+    {
+      "location": "html-processor.md: read-only extraction completion policy",
+      "problem": "The overview states that read-only callers choose how to handle `paused_at_incomplete_token()` and `get_last_error()`, but this policy is not surfaced near every subtree-text pattern.",
+      "suggestion": "In text-extraction examples, add a short post-loop note distinguishing best-effort read-only extraction from mutation/rewrite flows that should reject incomplete input or parser errors."
+    }
+  ]
+}

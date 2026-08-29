@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor to parse the HTML and extract table data. It creates a fragment processor, finds the first TABLE element, then walks through all tokens using next_token(). When encountering TD or TH openers, it records the depth and starts collecting text; subsequent #text tokens are accumulated using get_modifiable_text() (which returns decoded character references); when the cell closer is hit, the text is saved to the current row. TR openers initialize a new row, and TR closers append the row to results. This approach handles missing optional closing tags since the processor emits closers for all elements implicitly.",
+  "confidence": 62
+}

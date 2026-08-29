@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function creates an HTML Processor instance in fragment mode, then uses next_tag() to find all A elements. For each A tag with an href attribute, it saves the attribute value (already decoded by get_attribute()) and collects the text content by iterating through all tokens inside the element using next_token(), accumulating the modifiable text from #text nodes (also already decoded). Links are returned in document order as an array of associative arrays.",
+  "confidence": 72
+}

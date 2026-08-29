@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Processor::create_fragment(), next_token(), get_tag(), serialize_token(), and get_last_error(), all documented. This matches the documented token-by-token serialization pattern for removing wrapper tokens while preserving contents, and execution passed all 7 hidden cases with no _doing_it_wrong records."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same API shape as trial-1. Correctly chose the HTML Processor for fragment parsing and normalized output, walked tokens instead of tags, skipped SPAN opener/closer tokens, and used serialize_token() for normalized reconstruction. Passed all 7 cases with no API misuse records."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same correct implementation with a ternary get_last_error() check at the end. All called methods are documented, and the solution follows the serialize_token() rewrite-loop example closely. Passed all 7 cases with no _doing_it_wrong records."
+    }
+  ],
+  "failure_analysis": "All trials passed every hidden case, so there were no failed-case misconceptions to diagnose. The docs did especially well in three places: the processor-choice guidance says to use WP_HTML_Processor when structure, implied/missing closing tags, or normalized output matter; next_token() explains that text and closer tokens are visited and that malformed input still produces closing tokens; serialize_token() explicitly documents the rewrite pattern of walking every token, skipping the removed element's opening and closing tokens, and concatenating normalized token serialization. The only near-miss is that candidates added an unnecessary get_last_error() check after the loop. It is documented and harmless here, but the docs do not give much guidance on what partial output from a token-by-token rewrite should mean after an unsupported-markup abort.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::serialize_token()",
+      "problem": "The example shows removing SUP elements by skipping tokens, which prevented this task's failures, but it does not explicitly state how to handle parser aborts in a token-by-token rewrite after some output has already been emitted.",
+      "suggestion": "Add a short note recommending that rewrite loops check get_last_error() after next_token() returns false if unsupported markup should invalidate partial output, and explain whether returning partial serialization is appropriate for best-effort tools."
+    },
+    {
+      "location": "WP_HTML_Processor::get_last_error()",
+      "problem": "The method documents how to distinguish a miss from parser abort for next_tag(), but not the same decision point for next_token() rewrite loops that stream output as they walk.",
+      "suggestion": "Add a next_token()-based example showing a serialization loop that either returns accumulated output on normal completion or discards it when get_last_error() is non-null."
+    },
+    {
+      "location": "Processor selection overview",
+      "problem": "The current guidance correctly says normalized output belongs to WP_HTML_Processor, but task authors relying on get_updated_html() for edits may still miss that get_updated_html() preserves untouched bytes and does not normalize the whole fragment.",
+      "suggestion": "Add a compact comparison row: use serialize()/serialize_token() for normalized serialization and structural rewrites; use get_updated_html() for byte-preserving attribute/class/text edits."
+    }
+  ]
+}

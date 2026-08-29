@@ -1,0 +1,167 @@
+{
+  "subject_isolation": {
+    "enforced": true,
+    "agent_type": "codex-cli-isolated-workdir",
+    "isolation_mode": "isolated-workdir",
+    "runner": "codex exec",
+    "input_delivery": "prompt-embedded-docs",
+    "sandbox_mode": "read-only",
+    "approval_policy": "never",
+    "project_rules_loaded": false,
+    "user_config_loaded": false,
+    "repo_available_to_subject": false,
+    "input_files": [
+      "html-processor.md",
+      "html-tag-processor.md",
+      "task.md"
+    ],
+    "work_root": "/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/html-api-docs-eval/round-67/codex-cli-trials",
+    "equivalent_boundary_notes": "Each subject process runs from a private non-repo directory containing only the two staged rendered docs, one task prompt, and the output schema. The task and rendered docs are embedded directly in the subject prompt because local codex exec does not expose the experiment's Read/Grep-only tools. Codex project rules and user config are ignored; the process uses a read-only sandbox and approval policy never."
+  },
+  "result": [
+    {
+      "id": "T01-add-image-class",
+      "trial": 1,
+      "ok": true,
+      "code": "<?php\n\nfunction add_image_class( string $html ): string {\n\t$processor = new WP_HTML_Tag_Processor( $html );\n\n\twhile ( $processor->next_tag( array( 'tag_name' => 'img' ) ) ) {\n\t\t$processor->add_class( 'wp-image' );\n\t}\n\n\treturn $processor->get_updated_html();\n}\n",
+      "explanation": "I used WP_HTML_Tag_Processor for a linear, source-preserving scan and its add_class() helper to append wp-image to each IMG opener without disturbing other bytes; get_updated_html() returns the original HTML with only queued tag-attribute changes applied.",
+      "confidence": 98
+    },
+    {
+      "id": "T01-add-image-class",
+      "trial": 2,
+      "ok": true,
+      "code": "<?php\n\nfunction add_image_class( string $html ): string {\n\t$processor = new WP_HTML_Tag_Processor( $html );\n\n\twhile ( $processor->next_tag( 'img' ) ) {\n\t\t$processor->add_class( 'wp-image' );\n\t}\n\n\treturn $processor->get_updated_html();\n}\n",
+      "explanation": "I used WP_HTML_Tag_Processor because this is a flat attribute-editing task where byte-for-byte preservation matters. The function scans for `img` tags with `next_tag( 'img' )`, adds the `wp-image` class with `add_class()`, and returns the exact updated document with `get_updated_html()`; comments and other non-tag content are left untouched because the processor only matches real tags.",
+      "confidence": 96
+    },
+    {
+      "id": "T01-add-image-class",
+      "trial": 3,
+      "ok": true,
+      "code": "<?php\n\nfunction add_image_class( string $html ): string {\n\t$processor = new WP_HTML_Tag_Processor( $html );\n\n\twhile ( $processor->next_tag( array( 'tag_name' => 'img' ) ) ) {\n\t\t$processor->add_class( 'wp-image' );\n\t}\n\n\treturn $processor->get_updated_html();\n}\n",
+      "explanation": "I used `WP_HTML_Tag_Processor` to scan the document linearly for `img` tags with case-insensitive tag-name matching, then called `add_class( 'wp-image' )` on each match and returned `get_updated_html()` so untouched bytes are preserved exactly as documented.",
+      "confidence": 98
+    },
+    {
+      "id": "T02-link-targets",
+      "trial": 1,
+      "ok": true,
+      "code": "<?php\nfunction add_link_targets( string $html ): string {\n\t$processor = new WP_HTML_Tag_Processor( $html );\n\n\twhile ( $processor->next_tag( 'a' ) ) {\n\t\tif ( null !== $processor->get_attribute( 'href' ) ) {\n\t\t\t$processor->set_attribute( 'target', '_blank' );\n\t\t}\n\t}\n\n\treturn $processor->get_updated_html();\n}\n",
+      "explanation": "I used `WP_HTML_Tag_Processor` to scan tags in source order, checked `get_attribute( 'href' )` so empty-string and boolean `href` values count as present, and overwrote `target` with `set_attribute( 'target', '_blank' )` only on matching `A` openers. `get_updated_html()` returns the original HTML with only those attribute updates applied byte-preservingly everywhere else.",
+      "confidence": 98
+    },
+    {
+      "id": "T02-link-targets",
+      "trial": 2,
+      "ok": true,
+      "code": "<?php\n\nfunction add_link_targets( string $html ): string {\n\t$processor = new WP_HTML_Tag_Processor( $html );\n\n\twhile ( $processor->next_tag( 'a' ) ) {\n\t\tif ( null === $processor->get_attribute( 'href' ) ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\t$processor->set_attribute( 'target', '_blank' );\n\t}\n\n\treturn $processor->get_updated_html();\n}\n",
+      "explanation": "This uses `WP_HTML_Tag_Processor` to scan only `A` tag openers in source order, checks `get_attribute( 'href' )` so empty-string and boolean `href` values count as present, and applies `set_attribute( 'target', '_blank' )` to overwrite or add the target attribute while preserving all untouched bytes via `get_updated_html()`.",
+      "confidence": 97
+    },
+    {
+      "id": "T02-link-targets",
+      "trial": 3,
+      "ok": true,
+      "code": "<?php\n\nfunction add_link_targets( string $html ): string {\n\t$processor = new WP_HTML_Tag_Processor( $html );\n\n\twhile ( $processor->next_tag( 'a' ) ) {\n\t\tif ( null === $processor->get_attribute( 'href' ) ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\t$processor->set_attribute( 'target', '_blank' );\n\t}\n\n\treturn $processor->get_updated_html();\n}\n",
+      "explanation": "I used `WP_HTML_Tag_Processor` to scan only `A` tags in source order, checked `href` presence with `get_attribute( 'href' )` so empty and boolean-valued `href` still count, then overwrote `target` with `set_attribute( 'target', '_blank' )`. `get_updated_html()` returns the original document with only those queued attribute edits applied, preserving untouched bytes exactly.",
+      "confidence": 99
+    },
+    {
+      "id": "T10-last-h2",
+      "trial": 1,
+      "ok": true,
+      "code": "<?php\n\nfunction mark_last_h2( string $html ): string {\n\t$processor = new WP_HTML_Tag_Processor( $html );\n\t$last_h2    = false;\n\n\twhile ( $processor->next_tag( 'h2' ) ) {\n\t\t$processor->set_bookmark( 'last-h2' );\n\t\t$last_h2 = true;\n\t}\n\n\tif ( ! $last_h2 ) {\n\t\treturn $html;\n\t}\n\n\tif ( $processor->seek( 'last-h2' ) ) {\n\t\t$processor->add_class( 'final-section' );\n\t}\n\n\treturn $processor->get_updated_html();\n}\n",
+      "explanation": "I used the documented `WP_HTML_Tag_Processor` because this is a flat, source-order edit: scan for each `h2`, remember the last one with a bookmark, then seek back and add the `final-section` class with `add_class()`. The modified markup is returned with `get_updated_html()`, and if no `h2` is found the original HTML is returned unchanged.",
+      "confidence": 97
+    },
+    {
+      "id": "T10-last-h2",
+      "trial": 2,
+      "ok": true,
+      "code": "<?php\n\nfunction mark_last_h2( string $html ): string {\n\t$tags = new WP_HTML_Tag_Processor( $html );\n\n\twhile ( $tags->next_tag( 'h2' ) ) {\n\t\t$tags->set_bookmark( 'last-h2' );\n\t}\n\n\tif ( ! $tags->has_bookmark( 'last-h2' ) ) {\n\t\treturn $html;\n\t}\n\n\tif ( $tags->seek( 'last-h2' ) ) {\n\t\t$tags->add_class( 'final-section' );\n\t\t$tags->release_bookmark( 'last-h2' );\n\t\treturn $tags->get_updated_html();\n\t}\n\n\treturn $html;\n}\n",
+      "explanation": "I used `WP_HTML_Tag_Processor` because the task is flat, source-order work: scan for each `H2`, remember the last one with a bookmark, then `seek()` back and `add_class()` on that opener. The modified HTML is returned via `get_updated_html()`, and unchanged input is returned if no `H2` is found or the bookmark cannot be revisited.",
+      "confidence": 96
+    },
+    {
+      "id": "T10-last-h2",
+      "trial": 3,
+      "ok": true,
+      "code": "<?php\n\nfunction mark_last_h2( string $html ): string {\n\t$processor = new WP_HTML_Tag_Processor( $html );\n\t$found     = false;\n\n\twhile ( $processor->next_tag( 'h2' ) ) {\n\t\t$processor->set_bookmark( 'last-h2' );\n\t\t$found = true;\n\t}\n\n\tif ( ! $found ) {\n\t\treturn $html;\n\t}\n\n\tif ( $processor->seek( 'last-h2' ) ) {\n\t\t$processor->add_class( 'final-section' );\n\t\t$processor->release_bookmark( 'last-h2' );\n\n\t\treturn $processor->get_updated_html();\n\t}\n\n\treturn $html;\n}\n",
+      "explanation": "I used the documented `WP_HTML_Tag_Processor` for flat source-order scanning, which is sufficient for finding the last `H2` without tree awareness. The function records a bookmark on each matching `h2`, seeks back to the final bookmark, adds the `final-section` class with `add_class()`, and returns `get_updated_html()`; if no `h2` is found, it returns the input unchanged.",
+      "confidence": 95
+    },
+    {
+      "id": "T11-strip-tracking-attributes",
+      "trial": 1,
+      "ok": true,
+      "code": "<?php\n\nfunction strip_tracking_attributes( string $html ): string {\n\t$processor = new WP_HTML_Tag_Processor( $html );\n\n\twhile ( $processor->next_tag() ) {\n\t\t$attribute_names = $processor->get_attribute_names_with_prefix( 'data-track-' );\n\n\t\tif ( null === $attribute_names ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\tforeach ( $attribute_names as $attribute_name ) {\n\t\t\t$processor->remove_attribute( $attribute_name );\n\t\t}\n\t}\n\n\treturn $processor->get_updated_html();\n}\n",
+      "explanation": "I used `WP_HTML_Tag_Processor` to scan each tag in source order, `get_attribute_names_with_prefix( 'data-track-' )` to identify only attributes whose names start with the required prefix, and `remove_attribute()` to delete them before returning `get_updated_html()`.",
+      "confidence": 98
+    },
+    {
+      "id": "T11-strip-tracking-attributes",
+      "trial": 2,
+      "ok": true,
+      "code": "<?php\n\nfunction strip_tracking_attributes( string $html ): string {\n\t$processor = new WP_HTML_Tag_Processor( $html );\n\n\twhile ( $processor->next_tag() ) {\n\t\t$attribute_names = $processor->get_attribute_names_with_prefix( 'data-track-' );\n\n\t\tif ( null === $attribute_names ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\tforeach ( $attribute_names as $attribute_name ) {\n\t\t\t$processor->remove_attribute( $attribute_name );\n\t\t}\n\t}\n\n\treturn $processor->get_updated_html();\n}\n",
+      "explanation": "I used `WP_HTML_Tag_Processor` to scan every tag in source order, `get_attribute_names_with_prefix( 'data-track-' )` to identify only attributes whose names start with that prefix, and `remove_attribute()` to delete them before returning `get_updated_html()`. This preserves similar attributes like `data-track` and `data-tracker` because the prefix match is exact for `data-track-` only.",
+      "confidence": 97
+    },
+    {
+      "id": "T11-strip-tracking-attributes",
+      "trial": 3,
+      "ok": true,
+      "code": "<?php\n\nfunction strip_tracking_attributes( string $html ): string {\n\t$processor = new WP_HTML_Tag_Processor( $html );\n\n\twhile ( $processor->next_tag() ) {\n\t\t$attribute_names = $processor->get_attribute_names_with_prefix( 'data-track-' );\n\n\t\tif ( null === $attribute_names ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\tforeach ( $attribute_names as $attribute_name ) {\n\t\t\t$processor->remove_attribute( $attribute_name );\n\t\t}\n\t}\n\n\treturn $processor->get_updated_html();\n}\n",
+      "explanation": "I used `WP_HTML_Tag_Processor` to scan the HTML linearly, `get_attribute_names_with_prefix( 'data-track-' )` to identify only matching tracking attributes, and `remove_attribute()` to delete them while leaving similar names like `data-track` and `data-tracker` untouched. The modified document is returned with `get_updated_html()`.",
+      "confidence": 98
+    },
+    {
+      "id": "N03-first-list-count",
+      "trial": 1,
+      "ok": true,
+      "code": "<?php\n\nfunction add_first_list_item_count( string $html ): string {\n\t$processor = WP_HTML_Processor::create_fragment( $html );\n\tif ( null === $processor ) {\n\t\treturn $html;\n\t}\n\n\t$list_depth = null;\n\t$list_tag   = null;\n\n\twhile ( $processor->next_tag() ) {\n\t\t$tag_name = $processor->get_tag();\n\t\tif ( 'UL' !== $tag_name && 'OL' !== $tag_name ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\tif ( $processor->is_tag_closer() ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\t$list_depth = $processor->get_current_depth();\n\t\t$list_tag   = $tag_name;\n\t\tif ( ! $processor->set_bookmark( 'first-list' ) ) {\n\t\t\treturn $html;\n\t\t}\n\t\tbreak;\n\t}\n\n\tif ( null === $list_depth || null === $list_tag ) {\n\t\treturn $html;\n\t}\n\n\t$item_count = 0;\n\twhile ( $processor->next_token() ) {\n\t\tif ( $processor->get_current_depth() < $list_depth ) {\n\t\t\tbreak;\n\t\t}\n\n\t\tif (\n\t\t\t'LI' === $processor->get_tag() &&\n\t\t\t! $processor->is_tag_closer() &&\n\t\t\t$processor->get_current_depth() === $list_depth + 1\n\t\t) {\n\t\t\t$item_count++;\n\t\t}\n\t}\n\n\tif ( $processor->paused_at_incomplete_token() || null !== $processor->get_last_error() ) {\n\t\t$processor->release_bookmark( 'first-list' );\n\t\treturn $html;\n\t}\n\n\tif ( ! $processor->seek( 'first-list' ) ) {\n\t\t$processor->release_bookmark( 'first-list' );\n\t\treturn $html;\n\t}\n\n\t$processor->set_attribute( 'data-item-count', (string) $item_count );\n\t$processor->release_bookmark( 'first-list' );\n\n\treturn $processor->get_updated_html();\n}\n",
+      "explanation": "I used the documented `WP_HTML_Processor::create_fragment()`, `next_tag()`, `next_token()`, `get_current_depth()`, `set_bookmark()`, `seek()`, `paused_at_incomplete_token()`, `get_last_error()`, and `set_attribute()` APIs. The function finds the first `UL` or `OL`, counts direct `LI` children by scanning that element’s subtree at one depth deeper, and only applies the attribute after confirming the scan completed cleanly.",
+      "confidence": 92
+    },
+    {
+      "id": "N03-first-list-count",
+      "trial": 2,
+      "ok": true,
+      "code": "<?php\n\nfunction add_first_list_item_count( string $html ): string {\n\tif ( ! class_exists( 'WP_HTML_Processor' ) ) {\n\t\treturn $html;\n\t}\n\n\t$processor = WP_HTML_Processor::create_fragment( $html );\n\tif ( null === $processor ) {\n\t\treturn $html;\n\t}\n\n\twhile ( $processor->next_tag() ) {\n\t\tif ( $processor->is_tag_closer() ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\t$tag = $processor->get_tag();\n\t\tif ( 'UL' !== $tag && 'OL' !== $tag ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\t$list_depth = $processor->get_current_depth();\n\t\t$bookmark   = 'first-list-opener';\n\n\t\tif ( ! $processor->set_bookmark( $bookmark ) ) {\n\t\t\treturn $html;\n\t\t}\n\n\t\t$item_count = 0;\n\n\t\twhile ( $processor->next_token() ) {\n\t\t\tif ( $processor->get_current_depth() < $list_depth ) {\n\t\t\t\tbreak;\n\t\t\t}\n\n\t\t\tif (\n\t\t\t\t'#tag' === $processor->get_token_type() &&\n\t\t\t\t! $processor->is_tag_closer() &&\n\t\t\t\t'LI' === $processor->get_tag() &&\n\t\t\t\t$processor->get_current_depth() === $list_depth + 1\n\t\t\t) {\n\t\t\t\t$item_count++;\n\t\t\t}\n\t\t}\n\n\t\tif ( $processor->paused_at_incomplete_token() || null !== $processor->get_last_error() ) {\n\t\t\t$processor->release_bookmark( $bookmark );\n\t\t\treturn $html;\n\t\t}\n\n\t\tif ( ! $processor->seek( $bookmark ) ) {\n\t\t\t$processor->release_bookmark( $bookmark );\n\t\t\treturn $html;\n\t\t}\n\n\t\t$processor->set_attribute( 'data-item-count', (string) $item_count );\n\t\t$updated_html = $processor->get_updated_html();\n\t\t$processor->release_bookmark( $bookmark );\n\n\t\treturn $updated_html;\n\t}\n\n\tif ( $processor->paused_at_incomplete_token() || null !== $processor->get_last_error() ) {\n\t\treturn $html;\n\t}\n\n\treturn $html;\n}\n",
+      "explanation": "I used `WP_HTML_Processor::create_fragment()` for fragment parsing, `next_tag()` to find the first `UL` or `OL`, `get_current_depth()` plus `next_token()` to count only direct `LI` children at one level deeper, and `set_bookmark()`/`seek()`/`set_attribute()`/`get_updated_html()` to safely return the modified opener while preserving unchanged HTML when the scan is incomplete or unsupported.",
+      "confidence": 90
+    },
+    {
+      "id": "N03-first-list-count",
+      "trial": 3,
+      "ok": true,
+      "code": "<?php\n\nfunction add_first_list_item_count( string $html ): string {\n\t$processor = WP_HTML_Processor::create_fragment( $html );\n\tif ( null === $processor ) {\n\t\treturn $html;\n\t}\n\n\tif ( ! $processor->next_tag( array( 'tag_name' => 'UL' ) ) && ! $processor->next_tag( array( 'tag_name' => 'OL' ) ) ) {\n\t\treturn $html;\n\t}\n\n\t$container_depth = $processor->get_current_depth();\n\tif ( ! $processor->set_bookmark( 'first-list' ) ) {\n\t\treturn $html;\n\t}\n\n\t$item_count = 0;\n\t$scan_finished_cleanly = true;\n\n\twhile ( $processor->next_token() ) {\n\t\tif ( $processor->get_current_depth() < $container_depth ) {\n\t\t\tbreak;\n\t\t}\n\n\t\tif (\n\t\t\t'#tag' === $processor->get_token_type() &&\n\t\t\t! $processor->is_tag_closer() &&\n\t\t\t'LI' === $processor->get_tag() &&\n\t\t\t$processor->get_current_depth() === $container_depth + 1\n\t\t) {\n\t\t\t$item_count++;\n\t\t}\n\t}\n\n\tif ( $processor->paused_at_incomplete_token() || null !== $processor->get_last_error() ) {\n\t\t$scan_finished_cleanly = false;\n\t}\n\n\tif ( ! $scan_finished_cleanly || ! $processor->seek( 'first-list' ) ) {\n\t\t$processor->release_bookmark( 'first-list' );\n\t\treturn $html;\n\t}\n\n\t$processor->set_attribute( 'data-item-count', (string) $item_count );\n\t$processor->release_bookmark( 'first-list' );\n\n\treturn $processor->get_updated_html();\n}\n",
+      "explanation": "I used WP_HTML_Processor::create_fragment() for tree-aware fragment parsing, then recorded the first UL/OL opener depth, walked tokens with next_token(), counted only direct LI opener children by checking current depth, and rejected truncated or unsupported scans with paused_at_incomplete_token() and get_last_error() before seeking back and setting data-item-count.",
+      "confidence": 88
+    },
+    {
+      "id": "T07-nested-lists",
+      "trial": 1,
+      "ok": true,
+      "code": "<?php\n\nfunction mark_nested_lists( string $html ): string {\n\t$processor = WP_HTML_Processor::create_fragment( $html );\n\n\tif ( null === $processor ) {\n\t\treturn $html;\n\t}\n\n\t$list_depth = 0;\n\n\twhile ( $processor->next_token() ) {\n\t\tif ( '#tag' !== $processor->get_token_type() ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\t$tag_name = $processor->get_tag();\n\t\tif ( 'UL' !== $tag_name && 'OL' !== $tag_name ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\tif ( $processor->is_tag_closer() ) {\n\t\t\tif ( $list_depth > 0 ) {\n\t\t\t\t$list_depth--;\n\t\t\t}\n\t\t\tcontinue;\n\t\t}\n\n\t\tif ( $list_depth > 0 ) {\n\t\t\t$processor->add_class( 'nested-list' );\n\t\t}\n\n\t\t$list_depth++;\n\t}\n\n\treturn $processor->get_updated_html();\n}\n",
+      "explanation": "I used the documented `WP_HTML_Processor::create_fragment()`, `next_token()`, `get_token_type()`, `get_tag()`, `is_tag_closer()`, `add_class()`, and `get_updated_html()` APIs. The function tracks list nesting while walking the fragment in document order, adds `nested-list` only to `UL`/`OL` openers encountered inside another list, and returns the processor’s byte-preserving updated HTML.",
+      "confidence": 93
+    },
+    {
+      "id": "T07-nested-lists",
+      "trial": 2,
+      "ok": true,
+      "code": "<?php\nfunction mark_nested_lists( string $html ): string {\n\t$processor = WP_HTML_Processor::create_fragment( $html );\n\tif ( null === $processor ) {\n\t\treturn $html;\n\t}\n\n\twhile ( $processor->next_tag( array( 'tag_closers' => 'visit' ) ) ) {\n\t\tif ( $processor->is_tag_closer() ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\t$tag = $processor->get_tag();\n\t\tif ( 'UL' !== $tag && 'OL' !== $tag ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\t$breadcrumbs = $processor->get_breadcrumbs();\n\t\t$ancestor_lists = 0;\n\n\t\tforeach ( $breadcrumbs as $index => $breadcrumb ) {\n\t\t\tif ( $index === count( $breadcrumbs ) - 1 ) {\n\t\t\t\tbreak;\n\t\t\t}\n\n\t\t\tif ( 'UL' === $breadcrumb || 'OL' === $breadcrumb ) {\n\t\t\t\t$ancestor_lists++;\n\t\t\t}\n\t\t}\n\n\t\tif ( $ancestor_lists > 0 ) {\n\t\t\t$processor->add_class( 'nested-list' );\n\t\t}\n\t}\n\n\treturn $processor->get_updated_html();\n}\n",
+      "explanation": "I used the tree-aware `WP_HTML_Processor::create_fragment()` API so ancestor relationships are available, then walked tags with `next_tag()` visiting closers to keep parser state aligned. For each opening `UL` or `OL`, I checked `get_breadcrumbs()` for any earlier `UL`/`OL` in the path and applied `add_class( 'nested-list' )`, finally returning `get_updated_html()` to preserve untouched bytes exactly.",
+      "confidence": 94
+    },
+    {
+      "id": "T07-nested-lists",
+      "trial": 3,
+      "ok": true,
+      "code": "<?php\n\nfunction mark_nested_lists( string $html ): string {\n\t$processor = WP_HTML_Processor::create_fragment( $html );\n\tif ( null === $processor ) {\n\t\treturn $html;\n\t}\n\n\twhile ( $processor->next_tag() ) {\n\t\t$tag = $processor->get_tag();\n\t\tif ( 'UL' !== $tag && 'OL' !== $tag ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\t$breadcrumbs = $processor->get_breadcrumbs();\n\t\t$found_ancestor_list = false;\n\n\t\t// Breadcrumbs include the current element, so inspect only ancestors.\n\t\tfor ( $i = 0, $n = count( $breadcrumbs ) - 1; $i < $n; $i++ ) {\n\t\t\tif ( 'UL' === $breadcrumbs[ $i ] || 'OL' === $breadcrumbs[ $i ] ) {\n\t\t\t\t$found_ancestor_list = true;\n\t\t\t\tbreak;\n\t\t\t}\n\t\t}\n\n\t\tif ( $found_ancestor_list ) {\n\t\t\t$processor->add_class( 'nested-list' );\n\t\t}\n\t}\n\n\tif ( null !== $processor->get_last_error() ) {\n\t\treturn $html;\n\t}\n\n\treturn $processor->get_updated_html();\n}\n",
+      "explanation": "I used the tree-aware `WP_HTML_Processor::create_fragment()` API so ancestry can be checked correctly, then walked tags with `next_tag()` and inspected `get_breadcrumbs()` to detect whether any `UL` or `OL` appears above the current list element. Matching nested lists get `add_class( 'nested-list' )`, and the final HTML is returned with `get_updated_html()` so untouched bytes are preserved.",
+      "confidence": 96
+    }
+  ]
+}

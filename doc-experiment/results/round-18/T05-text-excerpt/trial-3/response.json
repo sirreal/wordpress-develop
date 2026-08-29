@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This walks the fragment with `WP_HTML_Processor::create_fragment()` and `next_token()`, appending decoded text from `#text` tokens plus the special text-bearing `TITLE` and `TEXTAREA` opening-tag tokens via `get_modifiable_text()`. It ignores other token types, which excludes `SCRIPT` and `STYLE`, and truncates by Unicode code points with `mb_strlen()` and `mb_substr()` using explicit UTF-8 as documented.",
+  "confidence": 92
+}

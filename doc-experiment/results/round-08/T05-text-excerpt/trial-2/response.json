@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor to parse HTML via next_token() and iterate through all tokens. It collects text only from #text token types, which are the actual text nodes in the document. Since SCRIPT and STYLE elements don't create separate #text children (their content is stored in the element's token itself), they are automatically excluded by checking only for #text tokens. The text is accumulated and truncated to exactly max_codepoints using mb_strlen() and mb_substr() with UTF-8 encoding, ensuring no multi-byte characters are cut in half. Returns empty string for non-positive max_codepoints.",
+  "confidence": 58
+}

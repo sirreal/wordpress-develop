@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice (WP_HTML_Processor::create_fragment, the documented tool for body fragments). Every method used is documented: create_fragment, next_token, get_token_type, get_tag, serialize_token. Guard `'SPAN' === get_tag()` with `continue` is a verbatim copy of the canonical serialize_token() example (html-processor.md lines 1055-1064, which removes SUP the same way). Idiomatic token-walk-and-concatenate. Correctly relies on the documented fact that skipping a tag name skips both opener and closer (line 1050: 'Closing tokens of skipped elements must be skipped too'; example comment: 'Skips both the opener and the closer'), so no is_tag_closer handling was needed. Returns '' on null processor, matching reference and the normalization contract. Probe confirmed get_tag() is null for #text/#comment, so the lack of an explicit get_token_type()==='#tag' guard cannot misfire. Passed 7/7. Only nit: no guard is strictly more defensive, but the docs' own example omits it, so this is maximally aligned, not a flaw."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 90,
+      "hallucinated_methods": [],
+      "notes": "Same correct processor and same documented guard as trial-1 (`'SPAN' === get_tag()`, continue). All methods documented; no hallucination, no _doing_it_wrong. Passed 7/7. Deviation from reference: on create_fragment() === null it returns the raw $html instead of ''. create_fragment only returns null for unsupported context/encoding (docs lines 364-366, 383), so with the default <body>/UTF-8 this branch is unreachable and has no functional effect. Still a small semantic misread: returning un-normalized input would violate the 'output is normalized HTML' contract from the task if the branch were ever reachable. Costs a few idiomatic/edge-case points versus trial-1. Self-confidence 72 is well-calibrated to the slightly-less-careful failure handling."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "Correct processor. Uses get_token_name() === 'SPAN' instead of get_tag(); get_token_name is documented (html-processor.md lines 1788-1812, 'Uppercase tag name for tag matches', '#text' for text nodes) and probe-confirmed to return '#text'/'#comment' for non-tags, so it is exactly equivalent and safe for SPAN detection. Slightly less aligned with the documented unwrap example, which uses get_tag(), but fully correct and the explanation accurately states that one name matches both opener and closer. Returns '' on null, matching reference. All methods documented; no hallucination; no _doing_it_wrong. Passed 7/7."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed in any trial: all three passed 7/7. The documentation was highly effective for this task and the analysis is therefore about why it worked and where the near-misses lived. The decisive passage is the serialize_token() method docblock in html-processor.md (lines 1040-1066). It (a) names the exact idiom — 'walk every token with next_token() and concatenate serialize_token()' produces the normalized serialization; (b) states the transform recipe 'skip tokens to remove them'; and crucially (c) warns 'Closing tokens of skipped elements must be skipped too,' reinforced by the worked SUP-removal example whose inline comment says 'Skips both the opener and the closer.' This single passage prevented the most likely failure mode (skipping only the opener and leaving a stray </span>, or trying to special-case is_tag_closer), which would have broken nested-spans, adjacent-spans, and span-with-block-content. The normalization cases (no-spans-normalized-passthrough expecting optional tags closed and &AMP;->&amp;, unclosed-span auto-closing <p>) passed because serialize_token()'s docblock promises 'fully-normative HTML' and the task framed output as normalized; subjects trusted the processor to normalize rather than hand-rolling encoding. Near-misses in the explanations rather than the code: trial-2 invented a 'return input as-is' fallback for create_fragment failure, revealing it had not internalized that the null path is only for unsupported context/encoding (the docs do explain this at lines 358-366 and the Returns row, but the condition under which null occurs is stated obliquely, not as a crisp 'returns null only when context/encoding are unsupported'). Trials 2 and 3 self-reported 72 confidence versus trial-1's 92, suggesting the docs left subjects unsure whether get_tag() vs get_token_name() was the 'right' discriminator and whether a get_token_type()==='#tag' guard was required — the canonical example shows only get_tag(), so the safest choice was underspecified relative to alternatives.\"",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::serialize_token() (and the shared token-walk example)",
+      "problem": "The canonical unwrap example guards solely with `'TAG' === $processor->get_tag()`. This works but does not tell the reader that the same effect is achievable with get_token_name(), nor whether a get_token_type()==='#tag' guard is needed for safety. Subjects diverged (trial-1/2 used get_tag, trial-3 used get_token_name) and lower-confidence trials hedged, indicating the discriminator choice is underspecified.",
+      "suggestion": "Add one sentence to the example noting that get_tag() returns null on non-tag tokens (so comparing it to a tag name is self-guarding and no separate token-type check is required), and that get_token_name() returns the same uppercase tag name and may be used interchangeably for this purpose. State the equivalence explicitly so readers stop guessing."
+    },
+    {
+      "location": "WP_HTML_Processor::create_fragment() — Returns / Current HTML Support",
+      "problem": "The docblock says it returns null 'otherwise' without stating the concrete conditions, so a subject (trial-2) invented a fallback that returns the raw, un-normalized input on null, which would silently violate a normalization contract if that path were reachable. Readers cannot tell that null arises only from unsupported context/encoding, never from malformed HTML.",
+      "suggestion": "In the Returns description, state affirmatively: 'Returns null only when the requested context or encoding is unsupported (currently anything other than <body>/UTF-8); any string of HTML — including malformed or incomplete fragments — parses successfully.' This tells callers the null branch is about configuration, not input quality, and that they should not echo raw input there."
+    },
+    {
+      "location": "WP_HTML_Processor::get_tag() / get_token_name() / get_token_type()",
+      "problem": "These three accessors sit adjacently but the docs never give a single side-by-side statement of what each returns for the same token across tag vs text vs comment, so readers must infer that get_tag() is null on text while get_token_name() yields '#text'. This ambiguity drove the discriminator divergence across trials.",
+      "suggestion": "Add a short comparison table or three-line example showing, for one tag and one text node, the simultaneous values of get_token_type() ('#tag' vs '#text'), get_token_name() ('SPAN' vs '#text'), and get_tag() ('SPAN' vs null). A concrete contrast removes the guesswork about which accessor to filter on."
+    }
+  ]
+}

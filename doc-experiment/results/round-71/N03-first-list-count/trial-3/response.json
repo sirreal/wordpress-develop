@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the HTML Processor\u2019s fragment parser to find the first `UL` or `OL`, then walked tokens with `next_token()` while tracking `get_current_depth()` to count only direct `LI` children at one level deeper than the list opener. I also honored the documented failure conditions by returning the original HTML if parsing paused at an incomplete token or reported an error, and then wrote the count back with `set_attribute()` and `get_updated_html()`.",
+  "confidence": 72
+}

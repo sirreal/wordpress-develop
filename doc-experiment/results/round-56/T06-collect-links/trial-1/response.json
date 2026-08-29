@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the fragment in BODY context, then walked tokens with next_token() and get_current_depth() so link text is collected only from #text tokens inside each A subtree. For each A opener, get_attribute('href') supplies the decoded href value and excludes missing or boolean href attributes because only strings are accepted.",
+  "confidence": 86
+}

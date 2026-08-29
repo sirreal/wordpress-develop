@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor, which is ideal for this task as documented: flat, position-based attribute modifications that preserve byte-exact output. It creates a processor instance with the input HTML, iterates through all IMG tags using next_tag() with case-insensitive tag name matching, adds the 'wp-image' class to each using add_class(), and returns the modified HTML via get_updated_html(). The add_class() method handles both tags with existing classes and tags without classes, plus it properly ignores tags inside comments.",
+  "confidence": 92
+}

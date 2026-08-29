@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used the documented WP_HTML_Processor::create_fragment() rather than the linear Tag Processor, found H1 with next_tag(), recorded get_current_depth(), bounded a next_token() subtree walk with >= depth, filtered to #text with get_token_type(), and used get_modifiable_text() for already-decoded text. All called APIs are present in the rendered docs, and execution recorded no _doing_it_wrong notices."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same documented and idiomatic HTML Processor pattern as the reference: fragment parser, first H1 opener, depth-bounded token walk, #text-only accumulation, decoded text via get_modifiable_text(). It correctly avoids unnecessary bookmarks, serialization, or get_updated_html for this read-only extraction. No undocumented API calls or misuse records."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice and exact documented subtree text recipe. The implementation handles no-H1 as null, empty text content as an empty string, nested markup, decoded entities, and unclosed input through the documented HTML Processor token/depth behavior. No hallucinated methods or _doing_it_wrong records."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial: all three passed 8/8. The docs appear to have strongly guided the models. The Tag Processor overview explicitly says to use the HTML Processor when structure matters, including collecting an element's text content, walking a subtree, and handling implied or missing closing tags. The HTML Processor 'Recipe: collect DOM-style text from a subtree' gives the exact general pattern: create a fragment processor, match an element, record depth, walk with next_token(), keep tokens while get_current_depth() >= the opener depth, append only #text tokens, and read text with get_modifiable_text(). The next_token() and get_current_depth() sections explain the critical >= boundary and that unclosed elements still produce structural closers, which covers the nested-markup and unclosed-H1 cases. The get_modifiable_text() docs state that #text is already decoded, preventing double-decoding or raw entity output in the entities-decoded case. Near misses were only explanatory: the candidates did not explicitly discuss image-only empty H1 or incomplete input, but their copied documented pattern handled both correctly.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::get_modifiable_text() / WP_HTML_Processor inherited get_modifiable_text() docs",
+      "problem": "The docs say tokens without modifiable text return an empty string and explain special elements, but the most common wrong inference remains plausible: calling get_modifiable_text() on an ordinary container opener such as P, DIV, or H1 might be mistaken for reading that element's DOM textContent.",
+      "suggestion": "Add one explicit sentence to the get_modifiable_text() docblock: ordinary container elements do not carry their descendant text on the opener; collect descendant #text tokens with WP_HTML_Processor::next_token() when DOM-style text content is needed."
+    },
+    {
+      "location": "WP_HTML_Processor::next_tag() docs",
+      "problem": "The next_tag() method explains matching tags, but a reader who starts there may not see the required handoff from finding an element to walking its contents with next_token() and get_current_depth().",
+      "suggestion": "Add a cross-reference in next_tag(): after matching an element whose contents matter, record get_current_depth() and use a bounded next_token() walk; link to the subtree text/walk recipe."
+    },
+    {
+      "location": "WP_HTML_Processor::create_fragment() docs",
+      "problem": "The signature exposes a nullable return, and the examples often check it, but the return contract could be easier to spot for task authors and API users relying only on rendered docs.",
+      "suggestion": "State directly in the return description that callers should handle null from unsupported fragment creation before calling traversal methods, with get_last_error() as the diagnostic path when relevant."
+    }
+  ]
+}

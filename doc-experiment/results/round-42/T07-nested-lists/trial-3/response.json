@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because the task depends on ancestor structure. It scans tags with `next_tag()`, identifies `UL`/`OL` elements, checks their ancestry with `get_breadcrumbs()`, and adds the class with `add_class()`. To avoid partial edits on truncated or unsupported HTML, it first performs a validation scan and returns the original fragment unchanged if `paused_at_incomplete_token()` or `get_last_error()` indicates the structure scan was not clean; otherwise it performs the same scan again and returns the byte-preserving result via `get_updated_html()`.",
+  "confidence": 89
+}

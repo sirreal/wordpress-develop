@@ -1,0 +1,80 @@
+{
+    "candidate": "/Users/jonsurrell/a8c/wordpress-develop/html-api-docs-improvement/doc-experiment/results/round-05/T09-mark-keyword/trial-2/candidate.php",
+    "function": "mark_keyword",
+    "passed": 8,
+    "total": 8,
+    "cases": [
+        {
+            "id": "simple-unclosed",
+            "status": "pass",
+            "expected": "<p><mark>hello world</mark></p>",
+            "actual": "<p><mark>hello world</mark></p>",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "multiple-text-nodes",
+            "status": "pass",
+            "expected": "<p><mark>alpha beta</mark></p><div><mark>beta gamma</mark></div><p>delta</p>",
+            "actual": "<p><mark>alpha beta</mark></p><div><mark>beta gamma</mark></div><p>delta</p>",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "keyword-in-attribute-not-wrapped",
+            "status": "pass",
+            "expected": "<a href=\"world\" title=\"world\"><mark>somewhere world</mark></a>",
+            "actual": "<a href=\"world\" title=\"world\"><mark>somewhere world</mark></a>",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "entity-encoded-keyword-matches",
+            "status": "pass",
+            "expected": "<p><mark>world peace</mark></p>",
+            "actual": "<p><mark>world peace</mark></p>",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "split-across-elements-no-match",
+            "status": "pass",
+            "expected": "<p>wor<em>ld</em></p>",
+            "actual": "<p>wor<em>ld</em></p>",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "keyword-in-comment-not-wrapped",
+            "status": "pass",
+            "expected": "<!-- world --><p><mark>world</mark></p>",
+            "actual": "<!-- world --><p><mark>world</mark></p>",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "case-sensitive",
+            "status": "pass",
+            "expected": "<p><mark>World world</mark></p>",
+            "actual": "<p><mark>World world</mark></p>",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "normalization-side-effects",
+            "status": "pass",
+            "expected": "<div><b><mark>bold world</mark><p>unclosed &amp; markup</p></b></div>",
+            "actual": "<div><b><mark>bold world</mark><p>unclosed &amp; markup</p></b></div>",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        }
+    ]
+}

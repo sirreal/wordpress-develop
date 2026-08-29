@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body fragment structurally, `next_tag()` to find each `H1` through `H6` opener in document order, and a depth-bounded `next_token()` walk with `get_current_depth()` to gather that heading\u2019s text. It appends ordinary `#text` token content via `get_modifiable_text()`, and also includes text carried on special element opener tokens like `SCRIPT`, `STYLE`, `TEXTAREA`, and `TITLE` when they appear inside a heading.",
+  "confidence": 85
+}

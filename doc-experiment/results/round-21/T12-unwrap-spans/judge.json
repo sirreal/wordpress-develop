@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Used the correct `WP_HTML_Processor::create_fragment()` path and a documented token-walking rewrite with `next_token()`, `get_tag()`, `serialize_token()`, and `get_last_error()`. This is idiomatic for normalized output while dropping element wrappers. Minor edge-policy issue: on factory failure or unsupported-parser abort it returns the original raw HTML, which may not be normalized and may still contain spans, although the docs leave fallback policy to the caller."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Fully aligned with the documented API and reference pattern: body-fragment HTML Processor, single token walk, skip both `SPAN` openers and closers via `get_tag()`, append normalized `serialize_token()` output, and reject parser aborts with an empty string. No undocumented calls or `_doing_it_wrong` records."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Same strong documented API use as trial 1: correct processor, documented token walking, documented normalized serialization, and no hallucinated methods. Minor edge-policy issue: falling back to raw input on factory failure or parser abort is not guaranteed to satisfy a normalized-output contract."
+    }
+  ],
+  "failure_analysis": "All three trials passed all seven hidden cases, so there are no failed hidden cases to attribute to documentation gaps. The docs performed well in several decisive places: the Tag Processor overview explicitly says to use the HTML Processor when structure or normalized output matters; `create_fragment()` explains body-fragment parsing; `next_token()` says the HTML Processor visits closing tokens for every opener, including implicit and end-of-input closes; and `serialize_token()` gives the exact general pattern for token-by-token rewrites where selected element tokens are skipped and all other tokens are serialized. The near-miss is fallback/error policy: trial 2 returned an empty string on processor failure or abort, while trials 1 and 3 returned the original raw HTML. The docs say to reject or fall back when `get_last_error()` is non-null, but they do not make clear that raw input is no longer a normalized serialization. Another near-miss is that the `serialize_token()` example is very close to this task, so it strongly guided the correct solution rather than merely teaching the underlying contract.",
+  "doc_gaps": [
+    {
+      "location": "`WP_HTML_Processor::serialize_token()` docblock / rewrite-while-serializing recipe",
+      "problem": "The docs show that skipping matching tag tokens removes wrappers, but the relationship between `get_tag()` and openers/closers is implicit.",
+      "suggestion": "Add a general sentence that when the current token is a tag opener or closer, `get_tag()` returns that element name, and on non-tag tokens it returns `null`; therefore a tag-name check can intentionally apply to both ends of an element."
+    },
+    {
+      "location": "`WP_HTML_Processor::serialize_token()` docblock, error handling paragraph",
+      "problem": "`reject or fall back` is underspecified for APIs whose contract requires normalized serialization. This led to different fallback choices across otherwise correct trials.",
+      "suggestion": "Clarify that fallback is caller policy, but returning the original input is not a normalized serialization; callers requiring normalized output should return an error sentinel, `null`, empty string, or another explicitly documented failure value."
+    },
+    {
+      "location": "`WP_HTML_Processor::next_token()` or `serialize_token()` incomplete-input discussion",
+      "problem": "The docs mention incomplete trailing syntax, but the distinction between an unclosed element that receives a virtual closer and a genuinely incomplete syntax token is easy to miss.",
+      "suggestion": "Add a compact generic example contrasting an unclosed element that serializes with an implied closer against a trailing partial tag/comment that is never visited and is reported by `paused_at_incomplete_token()`."
+    }
+  ]
+}

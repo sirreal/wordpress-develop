@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because collecting an anchor\u2019s text is a tree-aware task. For each `A` opener found with `next_tag( 'A' )`, it reads `href` via `get_attribute()` and keeps only string-valued attributes, then walks that anchor\u2019s subtree with `next_token()`, `get_current_depth()`, `get_token_type()`, and `get_modifiable_text()` to concatenate only ordinary decoded `#text` descendants. It returns an empty array if the processor reports incomplete trailing syntax or unsupported markup, since a full link list can no longer be guaranteed.",
+  "confidence": 87
+}

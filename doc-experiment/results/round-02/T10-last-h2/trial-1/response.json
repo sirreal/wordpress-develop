@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor to linearly scan the HTML document for all opening H2 tags. It maintains a bookmark to the most recently found H2 tag, releasing the previous bookmark after finding a new one. Once all tags are scanned, if an H2 was found, the processor seeks back to the last one using its bookmark and adds the \"final-section\" class via the add_class() method. Comments are naturally ignored since next_tag() with 'tag_name' => 'H2' only finds actual H2 tags in the parsed output. The processor's add_class() method safely preserves all other content byte-for-byte while only modifying the target tag's attributes.",
+  "confidence": 62
+}

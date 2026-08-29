@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented `WP_HTML_Processor` fragment/full-document creators, `next_tag()` to scan only `H2` openers, a single bookmark name updated on each match to remember the last heading, then `seek()` plus `add_class()` and `get_updated_html()` to apply the final edit without rewriting unrelated markup.",
+  "confidence": 93
+}

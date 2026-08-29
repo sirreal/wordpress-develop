@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This function uses WP_HTML_Processor's token-by-token serialization. It creates a fragment processor, iterates through all tokens with next_token(), identifies text nodes (#text) using get_token_type(), checks if the decoded text contains the keyword using str_contains() (case-sensitive substring match), and wraps matching text nodes in <mark> tags. The serialize_token() method handles all normalization (double-quoted attributes, lowercase tags, proper encoding). Non-matching tokens are serialized unchanged. The loop continues until all tokens are processed, implicitly adding missing closing tags through the processor's normalization.",
+  "confidence": 45
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented `WP_HTML_Processor::normalize()` API to serialize the input fragment in BODY context, and returned the exact fallback HTML when normalization is not possible and the method returns `null`.\n",
+  "confidence": 98
+}

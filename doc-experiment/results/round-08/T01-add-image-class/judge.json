@@ -1,0 +1,24 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Canonical solution. Tag Processor is the correct choice for flat attribute/class editing with byte-preservation (docs 'Which processor should I use?' section explicitly steers here). Methods used: __construct, next_tag(array('tag_name'=>'img')), add_class('wp-image'), get_updated_html() — all documented; the next_tag array form is copied verbatim from the docs query table (line 58). Idiomatic next_tag-while loop. Edge cases handled implicitly by the API exactly as docs promise: comments not matched (next_tag 'What this matches'), incomplete trailing tag paused/unmodified, unquoted/uppercase attrs preserved. Passed 8/8, no _doing_it_wrong. Explanation correctly attributes comment-skipping and existing-class preservation to documented behavior; the 'without duplication' claim is accurate per docs add_class example though untested."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Identical implementation to trial-1 plus a docblock comment. Same fully-idiomatic, fully-documented API usage. Passed 8/8, no _doing_it_wrong. Explanation accurate and grounded in the docs (case-insensitive matching, comment-skipping, add_class preserving order)."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Byte-identical to trial-1. Passed 8/8, no _doing_it_wrong. Strongest explanation of the three: explicitly justifies processor choice citing the 'flat, position-based work ... byte-for-byte' language from the 'Which processor should I use?' section, and notes add_class safely handles tags with no existing class. No undocumented or hallucinated API."
+    }
+  ],
+  "failure_analysis": "No failures. All three trials are byte-identical to the canonical reference (trial-2 adds only a docblock) and pass all 8 hidden cases with zero _doing_it_wrong records. This is a high-commonness smoke task and the docs supported it completely.\n\nWhat the docs did well, mapped to the cases that could have tripped a subject:\n- Processor selection (no case failed on this): the 'Which processor should I use?' / Overview section (html-tag-processor.md lines 18-24) draws a sharp line — Tag Processor for 'flat, position-based work: finding tags by name ... changing attributes and classes, byte-precise edits that preserve the rest of the document.' Trial-3's explanation quotes this almost directly. No subject was tempted toward WP_HTML_Processor.\n- Query form (uppercase-tag, simple, multiple cases): the query table at line 58 gives the exact `next_tag( array( 'tag_name' => 'img' ) )` literal, and next_tag's 'What this matches' bullet states tag-name matching is ASCII case-insensitive with original casing preserved — directly covering the `<IMG SRC=...>` -> `<IMG class=... SRC=...>` expectation.\n- inside-comment-ignored case: next_tag 'What this matches' bullet 2 ('Tag-like text inside comments ... is text, not tags, and is never matched or modified') plus the Special elements discussion guaranteed the commented `<img>` is skipped. All subjects cited this.\n- existing-classes / no-existing-class (existing-classes, simple cases): the 'Modifying CSS classes' section (lines 184-217) shows add_class appending to existing classes preserving order and whitespace, and that add_class is safe when no class attribute exists. Covers both `class=\\\"photo large\\\"` -> `... wp-image` and adding to a bare `<img>`.\n- incomplete-tag-at-end case: next_tag bullet 3 and the 'When matching fails' section state a document ending mid-tag pauses the processor and the incomplete tag is never matched/modified — so the trailing `<img src=\\\"a.jpg` is left byte-for-byte. The next_tag-while loop terminates naturally on the false return; no subject needed paused_at_incomplete_token and none misused it.\n- unquoted-attributes case: 'Design and limitations' (line 328) notes only *updated* attribute values are normalized to double quotes; untouched `src=a.jpg width=10` are preserved. Adding `class` does not disturb them.\n\nNear-misses in explanations (not defects): trial-1 asserts add_class adds 'without duplication.' This is true and documented (add_class example, lines 202-204 — re-adding an existing class is a no-op) but no test exercises de-duplication, so it is an unverified-by-tests but doc-correct claim, not a misconception.\"",
+  "doc_gaps": []
+}

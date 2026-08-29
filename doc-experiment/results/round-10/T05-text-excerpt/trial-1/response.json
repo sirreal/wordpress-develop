@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Implemented `html_text_excerpt()` using WP_HTML_Processor to iterate through all tokens via `next_token()`, checking for '#text' tokens with `get_token_type()`, and extracting decoded text via `get_modifiable_text()`. The function counts Unicode codepoints using `mb_strlen()` with UTF-8 encoding and truncates to the exact codepoint limit using `mb_substr()` without cutting multi-byte characters. Returns empty string for non-positive limits.",
+  "confidence": 78
+}

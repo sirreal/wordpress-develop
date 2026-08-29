@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment, then made a single forward pass with `next_token()` while tracking the active heading. The function reads `get_token_type()`, `get_tag()`, `is_tag_closer()`, `get_current_depth()`, and `get_modifiable_text()` so it collects heading text in document order and ignores markup tags.",
+  "confidence": 88
+}

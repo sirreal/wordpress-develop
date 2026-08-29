@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() for structural HTML scanning, then next_tag() and next_token() to find the first UL/OL opener, walk its subtree, and count direct LI opener tokens at one depth below the list. Before mutating, I require the scan to finish without paused_at_incomplete_token() and without get_last_error(); the list opener is updated with set_attribute() and serialized via get_updated_html().",
+  "confidence": 74
+}

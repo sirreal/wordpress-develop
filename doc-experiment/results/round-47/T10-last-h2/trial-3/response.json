@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` for a byte-preserving linear scan: `next_tag( 'H2' )` finds each `H2`, `set_bookmark()` repeatedly moves the same bookmark so it always points at the last one seen, then `seek()` returns to that tag and `add_class( 'final-section' )` updates its class attribute before `get_updated_html()` returns the modified HTML.",
+  "confidence": 97
+}

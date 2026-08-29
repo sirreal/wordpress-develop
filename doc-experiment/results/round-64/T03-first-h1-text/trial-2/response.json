@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in BODY context, `next_tag( 'H1' )` to locate the first heading, and a depth-bounded `next_token()` walk with `get_current_depth()` to collect only `#text` tokens via `get_modifiable_text()`, which returns decoded text and excludes markup. If no `H1` is present, the function returns `null`; an empty heading yields an empty string.",
+  "confidence": 96
+}

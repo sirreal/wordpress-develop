@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the input as a body fragment, then walked tokens with next_token() and serialized each token with serialize_token() so the result is normalized. For ordinary #text tokens, I checked get_modifiable_text() for a case-sensitive substring match and wrapped the whole token in <mark>, which leaves comments and special-element contents untouched because those are not treated as ordinary text nodes.",
+  "confidence": 92
+}

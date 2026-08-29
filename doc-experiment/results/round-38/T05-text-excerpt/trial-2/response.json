@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the input as a BODY fragment, then walks tokens with `next_token()`, appending ordinary text from `#text` tokens via `get_modifiable_text()`. Because `TITLE` and `TEXTAREA` carry their decoded text on the opening tag token rather than separate text-node children, it also whitelists those opening tags and appends their `get_modifiable_text()`. The final string is truncated to the requested number of UTF-8 code points with `mb_substr()` and a regex fallback.",
+  "confidence": 87
+}

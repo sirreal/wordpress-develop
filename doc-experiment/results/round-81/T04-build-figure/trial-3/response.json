@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I built the fragment from a literal template so the `src` and `alt` attributes are already present in the required order, then used `WP_HTML_Processor::create_fragment()`, `set_attribute()`, and `set_modifiable_text()` to safely encode the unescaped inputs and replace the caption placeholder text before reading the result with `get_updated_html()`.",
+  "confidence": 93
+}

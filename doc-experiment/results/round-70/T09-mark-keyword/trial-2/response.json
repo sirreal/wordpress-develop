@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the body fragment, then walked tokens with next_token(), wrapping only ordinary #text tokens whose decoded text contains the keyword. For output, I serialized each token with serialize_token() so the result stays normalized, and I used WP_HTML_Processor::normalize() as a fallback if fragment creation or parsing failed.",
+  "confidence": 93
+}

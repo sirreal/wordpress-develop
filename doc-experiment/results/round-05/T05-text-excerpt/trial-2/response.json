@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Tag_Processor's next_token() method to iterate through all tokens in the HTML document, checking for '#text' tokens which represent text nodes. For each text node, get_modifiable_text() retrieves the already-decoded text content (character references are automatically decoded by the HTML API). The function accumulates text in document order, counting Unicode codepoints using mb_strlen with UTF-8 encoding. When reaching the max_codepoints limit, it safely truncates using mb_substr to avoid splitting multi-byte characters, then breaks. The implementation respects the requirement that script/style content and non-text-node elements contribute nothing to the result.",
+  "confidence": 82
+}

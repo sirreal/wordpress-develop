@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 92,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor::create_fragment() and used documented token APIs: next_token(), get_token_type(), get_tag(), is_tag_closer(), and get_modifiable_text(). No _doing_it_wrong records. The single-pass state machine matches the documented repeated-region pattern and handles implied heading closes in the frozen cases. Main adherence issue: it explicitly includes SCRIPT/STYLE/TEXTAREA/TITLE opener text inside headings, even though the DOM-style subtree-text recipe says ordinary text should be #text tokens unless the caller opts into special-element contents."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 93,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor::create_fragment() and all API calls are documented or inherited in the rendered docs: next_tag(), next_token(), get_current_depth(), get_token_type(), get_modifiable_text(), is_tag_closer(), get_token_name(), paused_at_incomplete_token(), and get_last_error(). The depth-bounded subtree walk is the most reference-like solution. It still over-includes special-element opener text, and its truncation policy is stricter than the task/reference: an incomplete trailing comment would discard accumulated headings instead of returning best-effort extracted text."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 91,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor::create_fragment() and used documented APIs. The one-pass token walk is broadly idiomatic and avoids unsafe regex parsing. It relies on manual heading state rather than a depth/breadcrumb boundary, but the docs do support closer-driven collection because the HTML Processor visits virtual closers. Like the others, it over-includes SCRIPT/STYLE/TEXTAREA/TITLE opener text, and its error policy is partial: get_last_error() is only checked when flushing a still-open final heading."
+    }
+  ],
+  "failure_analysis": "All three trials passed all frozen cases: basic-h1-h3, all-heading-levels, nested-text-and-entities, empty-heading, case-insensitive-source, implied-heading-close, and no-matches. The docs worked well for the central task: they made the processor choice clear by saying the HTML Processor is for tree-aware text extraction; they documented create_fragment() for body fragments; they documented uppercase get_tag() results; they documented #text token accumulation with get_modifiable_text(); and they documented virtual/implied closing tokens, which explains why malformed '<h2>One<h3>Two' can be handled structurally.\n\nNear-miss: every trial opted into special-element opener text for SCRIPT, STYLE, TEXTAREA, and TITLE inside headings. A probe shows the reference returns only ordinary #text text for '<h2>A<script>B &amp;</script><textarea>C &amp;</textarea>D</h2>' as 'AD', while all three candidates return 'AB &amp;C &D'. The overview recipe 'collect DOM-style text from a subtree' says ordinary text is only #text tokens and says not to include special-element opener text merely because it is available. However, the next_token() method section also says special elements produce no #text children and to read their text from the opener, which appears to have encouraged subjects to treat that as part of generic text extraction rather than an opt-in policy.\n\nSecond near-miss: incomplete-input policy was interpreted inconsistently. Trial 2 checks paused_at_incomplete_token() and returns an empty array for an incomplete trailing comment after a heading, while the reference and the other trials return the heading text already collected. The docs correctly mention checking paused_at_incomplete_token() when a caller must reject truncation, but they do not make the policy boundary crisp for read-only extraction tasks that can return best-effort results.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md, next_token(), paragraph beginning 'One important exception to the collect-#text-tokens recipe'",
+      "problem": "The paragraph can be read as a general instruction to include SCRIPT/STYLE/TITLE/TEXTAREA opener text whenever collecting element text, even though the overview recipe later says this is opt-in only.",
+      "suggestion": "Qualify the paragraph with 'if the caller's definition of text includes special-element contents' and point back to the ordinary subtree-text recipe. Include a short example where ordinary text excludes SCRIPT/TEXTAREA but an explicit all-modifiable-text policy includes them."
+    },
+    {
+      "location": "html-processor.md, Recipe: collect DOM-style text from a subtree",
+      "problem": "The term 'DOM-style text' is easy to confuse with broader notions like DOM textContent or 'all text-like content', especially for special elements whose contents are exposed via get_modifiable_text().",
+      "suggestion": "Define the contract more explicitly as 'ordinary parsed text descendants represented by #text tokens' and contrast it with 'special-element contents' and 'all tokens with modifiable text'."
+    },
+    {
+      "location": "html-processor.md, next_token() and get_current_depth() examples",
+      "problem": "The docs warn that nested walk loops can interfere, while also showing a next_tag() followed by a bounded next_token() subtree walk. Subjects need a sharper rule for when this pattern is safe.",
+      "suggestion": "Add a note that an immediate depth-bounded inner walk for one matched element is safe when the caller expects the cursor to advance to the element boundary, but repeated sibling extraction may be clearer as a single token loop with explicit state."
+    },
+    {
+      "location": "html-processor.md, paused_at_incomplete_token() guidance in next_token()/get_current_depth()",
+      "problem": "The docs explain how to detect truncation but do not clearly separate validation/mutation policies from best-effort read-only extraction policies.",
+      "suggestion": "Add a small policy note: mutating or validation-oriented code should reject/fallback on truncation or get_last_error(); read-only collectors may return accumulated partial results if their contract allows it, but should document that choice."
+    }
+  ]
+}

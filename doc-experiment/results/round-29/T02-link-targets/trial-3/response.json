@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` for byte-precise attribute edits. It scans only `A` tag openers with `next_tag( 'A' )`, checks `get_attribute( 'href' )` so `href=\"\"` and boolean `href` both count as present because only a missing attribute returns `null`, then overwrites or adds `target` via `set_attribute()`, and finally returns the modified document with `get_updated_html()`.",
+  "confidence": 96
+}

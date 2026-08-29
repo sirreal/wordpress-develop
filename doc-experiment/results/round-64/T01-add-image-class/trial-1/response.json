@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented `WP_HTML_Tag_Processor` to scan the input linearly and add a CSS class to each real `img` tag, which preserves untouched bytes exactly and ignores image-like text inside comments or raw-text elements. The implementation relies on `next_tag( 'img' )`, `add_class( 'wp-image' )`, and `get_updated_html()` as documented.",
+  "confidence": 98
+}

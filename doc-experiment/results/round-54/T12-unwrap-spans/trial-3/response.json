@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment with HTML-aware structure, then walked tokens with `next_token()` and concatenated `serialize_token()` for everything except `SPAN` tokens, which removes both the opener and closer while preserving their contents. I added a normalization fallback via `WP_HTML_Processor::normalize()` for cases where fragment parsing cannot proceed cleanly.",
+  "confidence": 88
+}

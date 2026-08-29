@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::create_full_parser() to properly parse complete HTML documents, then finds the TITLE tag and iterates through its content tokens. Text nodes are collected with get_modifiable_text(), which automatically returns decoded character references. The depth-based loop ensures we only collect content within the TITLE element, stopping when we encounter its closing tag.",
+  "confidence": 85
+}

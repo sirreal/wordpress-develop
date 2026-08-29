@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 88,
+      "hallucinated_methods": [],
+      "notes": "Passed 7/7. Correct processor (WP_HTML_Processor fragment, body context). Uses documented create_fragment() + serialize(), the exact pattern shown in the serialize() example, and correctly treats null from both create_fragment() and serialize() as failure. Deduction: wraps serialize() in try/catch ( WP_HTML_Unsupported_Exception ). Verified via probe that serialize() catches internally and returns null rather than throwing, so the catch block is unreachable dead code. WP_HTML_Unsupported_Exception is a real documented class (30 mentions, used as @throws on token-walking methods and in the exception-handling example near line 520), so not hallucinated, just misapplied to serialize(). The serialize() return contract (string|null) was the right signal; the candidate over-defended against an exception path that the docs never attach to serialize(). The level-512 trigger_error on the adoption-agency case is intrinsic to the API (reference normalize() emits the identical notice) and is not a candidate fault."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Passed 7/7. Minimal and idiomatic: create_fragment() then serialize(), returning false on null from either. Exactly the create_fragment + serialize pattern the docs prescribe (the normalize() docblock explicitly directs callers to create_fragment + serialize for the general case). No undocumented API, no misuse, all null edge cases handled. The reference uses the one-call static normalize() shortcut, but this two-call form is the documented equivalent and equally correct. The unavoidable trigger_error notice on unsupported input is not a candidate fault."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Identical implementation to trial-2 (create_fragment() + serialize(), null check). Passed 7/7. Correct processor choice, no hallucinated or undocumented API, idiomatic use of the documented serialize() pattern, graceful handling of both null return sources. Explanation accurately describes serialize() returning null on unsupported markup. Same non-penalized trigger_error notice as the others."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed: all three trials passed 7/7. The task maps almost directly onto the documented null-return contract of serialize()/normalize(), and all subjects discovered and used it correctly.\n\nWhat the docs did well: The serialize() and normalize() sections each state a Returns type of `string|null` with the explicit gloss \"null if unable to generate serialization\" / \"null if unable to normalize.\" That single sentence is what every subject keyed on to implement failure detection, and it is exactly right — probing confirms both serialize() and normalize() return null on the adoption-agency input \"<b>one<i>two</b>three</i>\". The normalize() docblock also helpfully tells the reader that the general-case equivalent is create_fragment() + serialize(), which is why trials 2 and 3 landed on that idiomatic form. create_fragment()'s documented `static|null` return let subjects guard the construction step too.\n\nThe one near-miss is in trial-1's reasoning, not its result: the candidate believed serialize() could throw WP_HTML_Unsupported_Exception and added a catch for it. Probing shows serialize() swallows the unsupported condition internally and returns null — it does not throw — so the catch is unreachable. The misconception is understandable: WP_HTML_Unsupported_Exception appears ~30 times in the docs as a @throws tag on token-walking methods (next_token, next_tag, etc.) and in a dedicated exception-handling example, but the serialize() section lists no Throws clause and no note explaining that serialize() converts that internal abort into a null return (and a _doing_it_wrong notice). A reader who has absorbed the pervasive \"@throws WP_HTML_Unsupported_Exception\" pattern can reasonably over-generalize it to serialize(). It cost trial-1 some adherence but not correctness.\n\nSeparately, every trial's execution.json records a level-512 trigger_error (\"Cannot serialize HTML Processor with parsing error: unsupported.\") on the adoption-agency case. This is an intrinsic side effect of the API: the reference solution (WP_HTML_Processor::normalize) emits the identical notice, confirmed by probe. It is not evidence of misuse and was not penalized. The docs do not mention this notice anywhere, which is a latent gap (see doc_gaps) — a caller who wanted silent failure detection would be surprised by the emitted notice.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::serialize() — Returns / a new Throws-or-Errors note",
+      "problem": "The section documents the string|null return but omits that serialize() emits a _doing_it_wrong notice (wp_trigger_error / E_USER_NOTICE, 'Cannot serialize HTML Processor with parsing error: unsupported.') as a side effect when it returns null on unsupported markup. All three trials produced this notice and a caller expecting silent null-based failure detection would be surprised by it.",
+      "suggestion": "Add one line to serialize() (and mirror it in normalize()): note that when serialization cannot complete, the method returns null AND triggers a notice via wp_trigger_error / _doing_it_wrong, so callers who want to detect failure silently should be aware the notice is emitted. State plainly that the null return is the supported failure signal."
+    },
+    {
+      "location": "WP_HTML_Processor::serialize() and normalize() — relationship to WP_HTML_Unsupported_Exception",
+      "problem": "WP_HTML_Unsupported_Exception is documented ~30 times as a @throws on token-walking methods, but the serialize()/normalize() sections never clarify that these methods do NOT propagate that exception — they catch the unsupported condition internally and return null instead. Trial-1 reasonably over-generalized the pervasive @throws pattern and wrapped serialize() in an unreachable try/catch.",
+      "suggestion": "In serialize() and normalize(), add an explicit sentence: 'Unlike the incremental token-walking methods, this method does not throw WP_HTML_Unsupported_Exception; unsupported markup is reported by returning null.' This prevents readers from porting the @throws expectation onto the serialize path."
+    },
+    {
+      "location": "WP_HTML_Processor::serialize() / normalize() — what 'unable to normalize' means",
+      "problem": "Both Returns lines say null is returned when 'unable to generate serialization' / 'unable to normalize' but never say which inputs trigger that. The task itself hinges on distinguishing merely-malformed-but-normalizable input (unclosed tags, implied closes, well-formed tables) from genuinely unsupported input (misnested formatting / adoption-agency). Subjects succeeded here only because the example inputs happened to be clear-cut.",
+      "suggestion": "Add a brief note that null is returned specifically when the processor hits constructs it cannot yet support (e.g. certain misnested formatting elements requiring the adoption-agency algorithm), and contrast that with malformed-but-recoverable input (unclosed tags, implied end tags, tables) which normalizes successfully. Cross-reference get_last_error()/ERROR_UNSUPPORTED for diagnosing why null came back."
+    }
+  ]
+}

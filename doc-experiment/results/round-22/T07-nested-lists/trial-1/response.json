@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because the task depends on document structure, then scans list openers with `next_tag()`, inspects each element\u2019s ancestor chain via `get_breadcrumbs()`, and calls `add_class()` only when a `UL` or `OL` appears earlier in that breadcrumb path. The final HTML is returned with `get_updated_html()`, and the function falls back to the original input if parsing ended on incomplete or unsupported markup.",
+  "confidence": 84
+}

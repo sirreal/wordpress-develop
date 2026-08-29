@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Used the right structural API: WP_HTML_Processor::create_fragment(), next_tag(), get_tag(), get_breadcrumbs(), add_class(), and get_updated_html(). Correctly excludes the current list from the breadcrumb ancestry check by popping the last breadcrumb. All called API methods are documented in the rendered files, and execution had no _doing_it_wrong records. Minor edge-case gap: it checks get_last_error() but not paused_at_incomplete_token(), so its completion policy for truncated input is implicit rather than explicit."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Same correct API path as the reference: fragment HTML Processor, open-tag walking, breadcrumb ancestor scan, add_class(), then get_updated_html(). The loop form is slightly more verbose than trial-1 but idiomatic and avoids treating the current UL/OL as its own ancestor. No undocumented API usage and no _doing_it_wrong records. Minor edge-case gap: incomplete-token handling is not explicit."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Uses the documented structural processor and inherited mutation APIs correctly, including the documented paused_at_incomplete_token() check. class_exists() is a PHP built-in, not an HTML API hallucination. The incomplete-input fallback is conservative; for a pure byte-preserving class edit it may discard otherwise valid queued changes on trailing incomplete syntax, but it is a defensible documented policy. No _doing_it_wrong records."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 7 hidden cases, with no _doing_it_wrong or trigger_error records. The docs did well in the passages that matter for this task: the Tag Processor overview explicitly says it has no tree awareness and points structural work to WP_HTML_Processor; the HTML Processor overview and Supported elements section describe create_fragment() for BODY fragments and structure-sensitive work; next_tag() documents scanning any tag and branching when more than one tag name is wanted; breadcrumbs are documented as the full path including implicit HTML/BODY and the matched node; add_class() and get_updated_html() document class preservation and byte-preserving output. The main near-miss is completion policy: trials differed on whether to reject paused_at_incomplete_token(). The docs mention this in subtree/rewrite contexts, but they do not make the policy for simple class/attribute mutation loops completely explicit.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor docs, Method Index / inherited methods",
+      "problem": "Important inherited methods used with HTML Processor, especially get_updated_html() and paused_at_incomplete_token(), are easier to discover in the Tag Processor docs than in the HTML Processor method list.",
+      "suggestion": "Add an 'Inherited mutation and scan-status methods' subsection that lists get_updated_html(), add_class(), set_attribute(), remove_attribute(), and paused_at_incomplete_token(), with links to the Tag Processor contracts."
+    },
+    {
+      "location": "WP_HTML_Processor::get_breadcrumbs() / Breadcrumbs overview",
+      "problem": "The docs say breadcrumbs include the matched node, but they do not call out the common ancestor-only pattern. A model could easily test the current element as its own ancestor.",
+      "suggestion": "Add a short general note: for ancestor checks, inspect array_slice( $processor->get_breadcrumbs(), 0, -1 ) because the final breadcrumb is the current node."
+    },
+    {
+      "location": "WP_HTML_Processor::next_tag() and WP_HTML_Tag_Processor::get_updated_html() completion guidance",
+      "problem": "The docs explain incomplete-token detection, but not how it should interact with simple byte-preserving class or attribute edits after a scan reaches false.",
+      "suggestion": "Document the contract explicitly: get_updated_html() applies queued edits and preserves untouched incomplete trailing bytes; callers should check paused_at_incomplete_token() only when their contract requires complete source input, otherwise returning the updated HTML is a valid byte-preserving policy."
+    },
+    {
+      "location": "WP_HTML_Processor::add_class() method section",
+      "problem": "The HTML Processor add_class() entry is terse while the detailed class preservation and deduplication behavior lives in the Tag Processor docs.",
+      "suggestion": "Cross-reference the detailed Tag Processor add_class() behavior from the HTML Processor method section, especially preservation of existing class order/spacing and no duplicate insertion."
+    }
+  ]
+}

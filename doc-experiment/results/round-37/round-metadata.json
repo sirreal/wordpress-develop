@@ -1,0 +1,160 @@
+{
+  "round": "round-37",
+  "mode": "shadow-doc-a/b",
+  "task_ids": [
+    "T03-first-h1-text",
+    "T05-text-excerpt",
+    "N06-extract-toc",
+    "T08-table-extract",
+    "T09-mark-keyword"
+  ],
+  "task_count": 5,
+  "splits": {
+    "train": 5
+  },
+  "concepts": {
+    "serialization": 1,
+    "text": 2,
+    "traversal": 2
+  },
+  "trials_per_task": 3,
+  "subject": {
+    "model": "gpt-5.4",
+    "reasoning_effort": "medium",
+    "service_tier": "priority"
+  },
+  "judge": {
+    "model": "gpt-5.5",
+    "reasoning_effort": "xhigh",
+    "service_tier": "priority"
+  },
+  "git_head": "8ca976b69ebff5bf0cc09893f2d83a91fdd6337c",
+  "git_status_short": "",
+  "source_file_digests": {
+    "ref": "8ca976b69ebff5bf0cc09893f2d83a91fdd6337c",
+    "algorithm": "sha256",
+    "php_behavior_fingerprint": "token_get_all with T_COMMENT, T_DOC_COMMENT, and T_WHITESPACE removed; JSON-encoded token names and text",
+    "files": {
+      "src/wp-includes/html-api/class-wp-html-tag-processor.php": {
+        "source_sha256": "9e431d345cc6d5563a65e3456b8a944fe1def8ceb8db299e89f20e8e9f560058",
+        "php_without_comments_sha256": "d073f5772a64826878e4132ed9bb30717fb1b6f3ddb5e23a014a4fa9db218ad7",
+        "php_without_comments_token_count": 9881
+      },
+      "src/wp-includes/html-api/class-wp-html-processor.php": {
+        "source_sha256": "b115e956af65f69b4e07c7e761ccc9a49464ba3caf1f66944ed8eb3794dce472",
+        "php_without_comments_sha256": "2da9aa482f295c89a7018c5b74b622b4add7e942599c97785434408cfa72c083",
+        "php_without_comments_token_count": 16806
+      }
+    }
+  },
+  "corpus_file_digests": {
+    "ref": "8ca976b69ebff5bf0cc09893f2d83a91fdd6337c",
+    "algorithm": "sha256",
+    "tasks": {
+      "T03-first-h1-text": {
+        "labels": {
+          "split": "train",
+          "role": "core",
+          "commonness": "high",
+          "concept": "text",
+          "processor": "html"
+        },
+        "files": {
+          "doc-experiment/corpus/T03-first-h1-text/task.md": "66a882aef20a6af4430fb6a7eafc54ba306adcf982980967e07eba7881fc0030",
+          "doc-experiment/corpus/T03-first-h1-text/reference.php": "a64806dcd5f7f91e254c287aad72401502aec44a7661eb691b51e56e17064f2d",
+          "doc-experiment/corpus/T03-first-h1-text/tests.json": "499c5da8b3d916a6739142c6ed164e8a6a05c43a6c517003bcb31d6929094533"
+        }
+      },
+      "T05-text-excerpt": {
+        "labels": {
+          "split": "train",
+          "role": "core",
+          "commonness": "high",
+          "concept": "text",
+          "processor": "html"
+        },
+        "files": {
+          "doc-experiment/corpus/T05-text-excerpt/task.md": "5e69766456a6343f99ee24037574ed3f9bdf7795ab8be9a61203f6254b8fa2de",
+          "doc-experiment/corpus/T05-text-excerpt/reference.php": "1081c297e36fa566e8a6a2cf8098fe8d3117da8ac49d4106691b9bb65b3739b6",
+          "doc-experiment/corpus/T05-text-excerpt/tests.json": "8b2276d754c887d6246f321b2dfad0de59718bc252c0a6bed52b65ae1bad1496"
+        }
+      },
+      "N06-extract-toc": {
+        "labels": {
+          "split": "train",
+          "role": "core",
+          "commonness": "high",
+          "concept": "traversal",
+          "processor": "html"
+        },
+        "files": {
+          "doc-experiment/corpus/N06-extract-toc/task.md": "ba341a3927bb81410b8662b29f479f23a0887d4ec6f19db95702c1346d670581",
+          "doc-experiment/corpus/N06-extract-toc/reference.php": "7e5cf569519dc0411da5659e473fc773d82eb634886b5623610b696936c0b2e2",
+          "doc-experiment/corpus/N06-extract-toc/tests.json": "22f8950aace5d22a842a8c76df372d5d09e770cf4adefb06099eb81f7410317e"
+        }
+      },
+      "T08-table-extract": {
+        "labels": {
+          "split": "train",
+          "role": "core",
+          "commonness": "medium",
+          "concept": "traversal",
+          "processor": "html"
+        },
+        "files": {
+          "doc-experiment/corpus/T08-table-extract/task.md": "d7aee8a4765781a8f7c36b976f914b495b70989817ba0612aa9fc4589bedfeee",
+          "doc-experiment/corpus/T08-table-extract/reference.php": "289b8c6d1b69d4ef4dd7810dbdcba35445c30a7f26b631a00835ef737b78709e",
+          "doc-experiment/corpus/T08-table-extract/tests.json": "cdec7559d63ee541f1b0dad34a4f9f0982ce66e58ddfea98ec482c425e1b2638"
+        }
+      },
+      "T09-mark-keyword": {
+        "labels": {
+          "split": "train",
+          "role": "core",
+          "commonness": "medium",
+          "concept": "serialization",
+          "processor": "html"
+        },
+        "files": {
+          "doc-experiment/corpus/T09-mark-keyword/task.md": "5abba63d508cb56284ce7a02e374d35e4cdd45958d664174eb3002c13f1c3bce",
+          "doc-experiment/corpus/T09-mark-keyword/reference.php": "0141ececbe459f50729e657f59dd75e8b74911cd1d70940b8fd5072d2f1efb60",
+          "doc-experiment/corpus/T09-mark-keyword/tests.json": "946bb96c922fea63cda3c31b94840b05ffded9f2e1dfa4b1547c755b99cda0c5"
+        }
+      }
+    }
+  },
+  "created_at_utc": "2026-06-13T14:35:54+00:00",
+  "isolation": {
+    "scratch_contains": [
+      "html-tag-processor.md",
+      "html-processor.md",
+      "tasks/<task-id>.md"
+    ],
+    "subjects_must_not_read": [
+      "reference.php",
+      "tests.json",
+      "source files",
+      "logs",
+      "plans",
+      "hypothesis docs"
+    ]
+  },
+  "scratch": "/tmp/html-api-docs-eval/round-37",
+  "staged_task_files": [
+    "tasks/T03-first-h1-text.md",
+    "tasks/T05-text-excerpt.md",
+    "tasks/N06-extract-toc.md",
+    "tasks/T08-table-extract.md",
+    "tasks/T09-mark-keyword.md"
+  ],
+  "scratch_isolation_check": "OK: /tmp/html-api-docs-eval/round-37 exposes 2 docs and 5 task prompt(s), with no forbidden files.",
+  "scratch_file_sha256": {
+    "html-processor.md": "4a4e64bbb3c43c248cb948ca752a01674a3dedc4eb77843d6fb7e63ea0a1f6ea",
+    "html-tag-processor.md": "8ca4ec32aa54723fe16a0a9f45386ca6ebeecde7a06575d8a782e53fb395a664",
+    "tasks/N06-extract-toc.md": "ba341a3927bb81410b8662b29f479f23a0887d4ec6f19db95702c1346d670581",
+    "tasks/T03-first-h1-text.md": "66a882aef20a6af4430fb6a7eafc54ba306adcf982980967e07eba7881fc0030",
+    "tasks/T05-text-excerpt.md": "5e69766456a6343f99ee24037574ed3f9bdf7795ab8be9a61203f6254b8fa2de",
+    "tasks/T08-table-extract.md": "d7aee8a4765781a8f7c36b976f914b495b70989817ba0612aa9fc4589bedfeee",
+    "tasks/T09-mark-keyword.md": "5abba63d508cb56284ce7a02e374d35e4cdd45958d664174eb3002c13f1c3bce"
+  }
+}

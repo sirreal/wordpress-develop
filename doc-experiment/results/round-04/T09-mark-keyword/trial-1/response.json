@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I implemented mark_keyword() using WP_HTML_Processor's token iteration and serialization API. The function creates a fragment processor, walks through all tokens with next_token(), checks each #text token's decoded content using get_modifiable_text() for the keyword via case-sensitive strpos(), and reconstructs the HTML by serializing each token while wrapping matching text nodes in <mark> tags. Non-text tokens are passed through unchanged, and the normalization happens automatically via serialize_token() which follows HTML5 serialization rules.",
+  "confidence": 75
+}

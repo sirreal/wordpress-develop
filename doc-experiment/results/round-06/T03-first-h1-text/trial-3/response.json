@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function creates an HTML Processor fragment parser to safely parse the HTML, finds the first H1 tag using next_tag('H1'), then walks through all tokens within the H1 element using next_token() and depth tracking. Text nodes are identified by get_token_type() === '#text', and their decoded content is collected using get_modifiable_text() (which automatically decodes character references like &amp; to &). The loop terminates when the current depth drops below the H1's depth, ensuring we capture all text including nested elements. Returns null only if no H1 element is found; otherwise returns the concatenated text (which will be an empty string if the H1 contains only elements and no text).",
+  "confidence": 82
+}

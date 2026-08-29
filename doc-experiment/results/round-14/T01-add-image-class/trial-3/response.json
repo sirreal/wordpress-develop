@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Tag_Processor to linearly scan the HTML document and find all IMG tags (tag name matching is case-insensitive per the documentation). For each matched IMG tag, it calls add_class('wp-image') which safely adds the class to existing classes without removing or reordering them. The processor automatically handles comment preservation (documented as \"only real HTML tags can match\") and byte-exact preservation of unmodified content. Finally, get_updated_html() returns the document with all queued class additions applied.",
+  "confidence": 95
+}

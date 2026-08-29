@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor's next_token() method to scan through all tokens in the HTML document until it reaches the end. If the processor pauses because the input ended in the middle of a syntax element (such as an incomplete tag, unterminated comment, or unclosed special element like SCRIPT), the paused_at_incomplete_token() method will return true. This correctly identifies truncated HTML while allowing structurally unclosed but lexically complete elements (like a lone < at the end) to return false, since those represent complete tokens even if the HTML structure is incomplete.",
+  "confidence": 85
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::create_full_parser() to handle complete HTML documents with full structural awareness. It finds the TITLE tag via next_tag(), verifies it's an opening tag (not a closer), and returns the decoded text via get_modifiable_text(). According to the documentation, character references are automatically decoded for TITLE elements, and get_modifiable_text() returns an empty string for tokens with no modifiable text. The function returns null if the processor creation fails or the TITLE tag is not found, and returns the decoded text content (which may be an empty string) when the TITLE element exists.",
+  "confidence": 85
+}

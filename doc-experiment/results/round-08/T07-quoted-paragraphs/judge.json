@@ -1,0 +1,35 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correct processor: WP_HTML_Processor::create_fragment() for structural/ancestor awareness (30/30). All methods documented: create_fragment, next_tag(array('tag_name'=>'p')), get_breadcrumbs, add_class, get_updated_html (30/30). Idiomatic token/tag walking with breadcrumb ancestor check via in_array(..., true), get_updated_html for output (25/25). Edge cases handled: null processor guard returns input; existing-class-preserved relies on documented add_class merge behavior; implicitly-closed paragraphs handled correctly because breadcrumbs report BLOCKQUOTE for both auto-closed P's (15/15). Passed 7/7. Minor deviation from reference: checks full breadcrumbs including self rather than slicing off the matched node, which is safe here because the matched tag is always P, never BLOCKQUOTE."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Identical approach to trial-1, using the string shorthand next_tag('P') (documented at html-tag-processor.md line 59 as the without-array form). Correct processor choice (30/30), no hallucinated API (30/30), idiomatic breadcrumb walk + get_updated_html (25/25), null guard and implicit-close/existing-class edge cases covered (15/15). Passed 7/7."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same correct implementation as trials 1 and 2 (array('tag_name'=>'p') form). Explanation correctly describes breadcrumbs as the ancestor stack from root to current and notes get_updated_html preserves untouched bytes byte-for-byte. Correct processor (30/30), all methods documented (30/30), idiomatic patterns (25/25), edge cases including null guard and the trickier implicitly-closed-paragraphs case (15/15). Passed 7/7."
+    }
+  ],
+  "failure_analysis": "No failures. All three trials passed all 7 hidden cases, including the two that distinguish a correct WP_HTML_Processor solution from a naive one: (a) deep-ancestor/mixed-document, which require an ancestor-anywhere check rather than parent-only, solved cleanly by scanning the full breadcrumbs array; and (b) implicitly-closed-paragraphs (\"<blockquote><p>first<p>second</blockquote>\"), where the second P is auto-opened after the first is implicitly closed. A probe confirmed both P's report breadcrumbs HTML>BODY>BLOCKQUOTE>P, so in_array('BLOCKQUOTE', $breadcrumbs, true) correctly tags both. The docs supported this well: the get_breadcrumbs() section (html-processor.md lines 815-831) gives a worked example showing breadcrumbs as the full root-to-node stack, and the breadcrumbs prose (lines 50-71) explicitly states the stack always includes implicit HTML/BODY in fragment/BODY context. The next_token/next_tag note (line 646) even models the exact idiom in_array('LI', $processor->get_breadcrumbs(), true) for ancestor membership, which all three subjects mirrored. The only near-miss in reasoning: all three candidates check the full breadcrumbs including the matched node itself, whereas the reference slices off the last element (array_slice(..., 0, -1)) to test strictly ancestors. This is harmless for this task because the matched tag is always P and never BLOCKQUOTE, so self-inclusion never causes a false positive — but none of the explanations noted that get_breadcrumbs() includes the current element, suggesting the subjects may not have internalized that distinction. A task where the target tag could itself be the ancestor tag would expose this. The existing-class-preserved case (class=\"lead\" -> \"lead quoted\") was handled implicitly via add_class's documented merge/whitespace-preserving behavior (html-tag-processor.md lines 328, 2223-2245); no subject had to reason about it explicitly, and it worked.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_breadcrumbs() (html-processor.md, get_breadcrumbs section ~lines 815-831)",
+      "problem": "The worked example shows breadcrumbs for IMG ending in 'IMG' (the matched node itself), but the surrounding prose never states explicitly that the returned array INCLUDES the currently-matched node, not just its ancestors. Readers doing an ancestor-membership test must infer this. All three subjects checked in_array against the full array including self; it was harmless here only because the matched tag (P) differs from the ancestor tag (BLOCKQUOTE), but the docs don't warn that for an ancestor-only test you must exclude the last element.",
+      "suggestion": "Add one sentence to get_breadcrumbs(): 'The last element of the returned array is the currently-matched node itself; to test only its ancestors, exclude the final entry (e.g. array_slice($crumbs, 0, -1)).' This generalizes the self-vs-ancestor distinction without encoding any specific task."
+    },
+    {
+      "location": "WP_HTML_Processor breadcrumbs / next_tag traversal (html-processor.md, breadcrumbs prose ~lines 50-71 and next_token example ~line 646)",
+      "problem": "The docs show breadcrumb-based ancestor checks but do not state how breadcrumbs behave for elements affected by implicit tag closing (e.g. a second <p> that auto-closes a preceding <p> inside the same parent). The implicitly-closed-paragraphs case worked, but only because the parser correctly maintains the BLOCKQUOTE ancestor; nothing in the docs assures a reader this will hold.",
+      "suggestion": "Add a short note (or one example) that the open-elements stack reflects HTML parsing rules including implicit closures, so when a <p> implicitly closes a sibling <p>, the new <p>'s breadcrumbs still correctly include the shared ancestors. This reassures readers that breadcrumb ancestor checks are robust against implicit-close reparenting."
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Tag_Processor to iterate through all tokens in the HTML fragment via next_token(). For each token with name '#text' (which are text nodes), it retrieves the already-decoded text via get_modifiable_text(). Text from SCRIPT and STYLE elements is automatically excluded since their contents are raw text, not text nodes. The function accumulates text while counting Unicode codepoints using mb_strlen() and mb_substr(), truncating gracefully to the specified max_codepoints limit without cutting multi-byte characters.",
+  "confidence": 75
+}

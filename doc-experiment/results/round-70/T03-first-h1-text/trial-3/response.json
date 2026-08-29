@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment, then `next_tag( 'H1' )` to find the first heading opener and `get_current_depth()` to bound a subtree walk. Inside that walk, I collected only `#text` tokens with `get_modifiable_text()`, which returns decoded text, so nested markup contributes text while non-text content like images contributes nothing.",
+  "confidence": 96
+}

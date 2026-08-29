@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor to find the TITLE element, then advances to the next token to read the text content inside it. The get_modifiable_text() method automatically decodes character references (like &mdash;) as documented. It returns null if no TITLE is found, and returns the empty string (not null) if TITLE exists but is empty, matching the documented requirement.",
+  "confidence": 75
+}

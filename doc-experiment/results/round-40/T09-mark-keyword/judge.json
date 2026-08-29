@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor::create_fragment(), walked tokens with next_token(), limited matching to #text tokens, used get_modifiable_text() for decoded text, and rebuilt normalized output with serialize_token(). All HTML API methods used are documented; execution recorded no _doing_it_wrong entries."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Essentially the canonical pattern: HTML Processor fragment parser, token walk, #text guard, decoded text via get_modifiable_text(), token-by-token serialization with inserted wrappers, and get_last_error() fallback. All called API methods appear in the rendered docs; no misuse records."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Uses the right processor and documented token-serialization pattern. Returning the original input on create_fragment() failure or get_last_error() is a defensible fallback but slightly less aligned with the task’s normalized-output contract than rejecting with an empty string or another explicit failure policy. No undocumented API calls or _doing_it_wrong records."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 8 hidden/frozen cases, so there are no failed cases to attribute to API misunderstanding. The docs did well in four places: the HTML Processor overview explicitly says to use WP_HTML_Processor, not WP_HTML_Tag_Processor, when structure or normalized output matters; the “collect DOM-style text from a subtree” recipe says ordinary text is only #text tokens and warns that comments and special-element opener tokens can also have modifiable text; get_modifiable_text() documents that #text, TITLE, and TEXTAREA text is already decoded; and serialize_token() documents the exact rewrite pattern the candidates needed, including wrapping selected tokens while accumulating normalized serialization. Near-misses: all candidates added get_last_error() fallback logic even though the task did not specify unsupported-markup behavior, and none checked paused_at_incomplete_token(); the serialize_token() docs say this is a caller policy decision, which likely prevented a functional issue here.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::serialize_token() / rewrite-while-serializing recipe",
+      "problem": "The docs explain token-by-token rewrites but do not give a minimal example that inserts wrapper markup around ordinary text tokens specifically.",
+      "suggestion": "Add a general example showing how to wrap or annotate selected #text tokens while serializing, emphasizing that the emitted wrapper string plus serialize_token() is the output and get_updated_html() is not involved."
+    },
+    {
+      "location": "WP_HTML_Processor::get_last_error() and serialize_token() incomplete-input notes",
+      "problem": "The docs say to reject or fall back on get_last_error() and separately decide on paused_at_incomplete_token(), but they do not define common output policies for normalizing filters versus strict validators.",
+      "suggestion": "Add a short policy table: best-effort normalizer may omit unvisited incomplete trailing syntax; strict transformations should reject when paused_at_incomplete_token() is true; unsupported-parser aborts require an explicit fallback."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::get_modifiable_text() / WP_HTML_Processor text recipes",
+      "problem": "The distinction between ordinary DOM text and other modifiable text is documented well, but it is spread across both class docs.",
+      "suggestion": "Add a compact cross-link near get_modifiable_text(): “For DOM text matching, first require get_token_type() === '#text'; otherwise comments and special elements may match too.”"
+    }
+  ]
+}

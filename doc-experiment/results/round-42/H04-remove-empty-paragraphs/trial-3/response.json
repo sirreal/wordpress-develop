@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` and a single `next_token()` rewrite loop with `serialize_token()` to produce normalized output while selectively skipping empty `<p>` elements. Each paragraph opener is buffered until a child token is seen; if no token appears before its closing `P`, both opener and closer are omitted, and if processing aborts or pauses on incomplete input via `get_last_error()` or `paused_at_incomplete_token()`, the original HTML is returned unchanged.",
+  "confidence": 84
+}

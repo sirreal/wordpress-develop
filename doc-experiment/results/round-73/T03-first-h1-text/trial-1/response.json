@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment, then `next_tag( 'H1' )` to find the first heading opener and a depth-bounded `next_token()` walk to collect only `#text` tokens inside it, using `get_modifiable_text()` so character references are already decoded. If no `H1` opener is found, the function returns `null`; an empty heading yields `''`.",
+  "confidence": 93
+}

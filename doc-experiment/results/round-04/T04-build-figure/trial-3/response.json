@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Used WP_HTML_Tag_Processor to build the figure fragment by starting with a basic HTML structure, then using set_attribute() to set the img src and alt attributes (which handles proper escaping), and set_modifiable_text() to set the figcaption content. The API automatically escapes special characters in attribute values and text content, ensuring a browser renders exactly the provided unescaped input values.",
+  "confidence": 42
+}

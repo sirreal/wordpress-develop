@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML, then iterates through all IMG tags using next_tag(). For each IMG found, it retrieves the breadcrumbs and checks if 'FIGURE' appears anywhere in the element path using in_array(). If found inside a figure, it reads the decoded 'src' attribute with get_attribute() and adds non-empty values to the result array in document order.",
+  "confidence": 92
+}

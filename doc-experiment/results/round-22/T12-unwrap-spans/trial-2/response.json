@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body fragment with full tree awareness, then rewrites the fragment token-by-token with `next_token()` and `serialize_token()`, skipping any token whose tag name is `SPAN`. Skipping both the opener and closer removes each span wrapper while leaving its contents in place, and `serialize_token()` produces the normalized HTML serialization for everything that remains.",
+  "confidence": 78
+}

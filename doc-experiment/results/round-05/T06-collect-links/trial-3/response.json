@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML, then iterates through all A tags using next_tag(). For each A tag with an href attribute, it collects text content by recording the starting depth and accumulating all #text tokens until exiting the element. This follows the exact pattern documented in the HTML Processor's next_token() example.",
+  "confidence": 85
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` because the task is a flat, position-based edit: scan forward with `next_tag( 'H2' )`, move the same bookmark name with `set_bookmark()` on each match so it ends up on the last `H2`, then `seek()` back to that bookmark, add the class with `add_class()`, and return the result with `get_updated_html()`. If no `H2` was found, it returns the original HTML unchanged.",
+  "confidence": 97
+}

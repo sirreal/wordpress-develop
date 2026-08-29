@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correctly used WP_HTML_Processor::create_fragment() and a single next_token() walk. It collected #text plus TITLE/TEXTAREA opener modifiable text, avoided SCRIPT/STYLE, used documented methods only, and had no _doing_it_wrong records."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice and clean token-type filtering before reading get_modifiable_text(). All HTML API calls are documented. The mb_substr/preg_split fallback is outside the HTML API and does not indicate hallucination."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Matches the documented text-walk pattern closely: fragment parser, next_token(), #text filtering, explicit TITLE/TEXTAREA opt-in, decoded UTF-8 truncation. No undocumented HTML API usage or misuse records."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed across the three trials. The rendered docs did the important things well: the Tag Processor overview says to use WP_HTML_Processor when collecting text or handling implied/missing closing tags; the HTML Processor text recipe says to append ordinary #text tokens and not call get_modifiable_text() on every token; the same recipe and get_modifiable_text() docs explain that TITLE/TEXTAREA carry decoded text on the opening token while SCRIPT/STYLE raw text is also modifiable but should only be included intentionally. The get_modifiable_text() docs also call out decoded UTF-8 text, which likely prevented double-decoding and byte-based truncation mistakes. Near miss: all candidates relied on the special-element distinction correctly, but the contract is spread across the text recipe and method docs; a model that only read the get_modifiable_text() opening paragraph could over-include SCRIPT/STYLE or miss TITLE.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::get_modifiable_text() / inherited WP_HTML_Processor rendered method docs",
+      "problem": "The opening definition lists SCRIPT, STYLE, TEXTAREA, and other DATA-like sections as carrying modifiable text, but TITLE is only made explicit later. That makes the first contract slightly incomplete for special text-bearing elements.",
+      "suggestion": "In the first paragraph, explicitly enumerate TITLE alongside TEXTAREA, and group categories as decoded text nodes/RCDATA (TITLE, TEXTAREA) versus verbatim raw text (SCRIPT, STYLE, etc.)."
+    },
+    {
+      "location": "WP_HTML_Processor overview, “Recipe: collect DOM-style text from a subtree”",
+      "problem": "The recipe explains ordinary #text collection and then mentions all special elements together. It does not sharply distinguish DOM/user-visible text policies from raw program/style content policies.",
+      "suggestion": "Add a short table or note saying text extractors must opt into each special element deliberately: TITLE/TEXTAREA are decoded RCDATA; SCRIPT/STYLE are raw text and commonly excluded from document text extraction."
+    },
+    {
+      "location": "WP_HTML_Processor text-walking docs around next_token() and the text extraction recipe",
+      "problem": "Incomplete-input and unsupported-markup guidance appears mainly in mutation/serialization contexts, not directly beside read-only text extraction.",
+      "suggestion": "Add a policy note for text extraction: next_token() returns only visited complete tokens; paused_at_incomplete_token() means trailing partial syntax was omitted; get_last_error() means the HTML Processor aborted on unsupported markup, so callers should choose best-effort return or rejection explicitly."
+    }
+  ]
+}

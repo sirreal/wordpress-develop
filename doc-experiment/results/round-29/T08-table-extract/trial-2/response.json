@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body fragment with HTML5 table semantics, finds the first `TABLE` via `next_tag()`, then does a single `next_token()` walk bounded by the table depth from `get_current_depth()`. It tracks `TR` and `TD`/`TH` openers and closers, and concatenates only `#text` token contents with `get_modifiable_text()`, which already returns decoded character references.",
+  "confidence": 78
+}

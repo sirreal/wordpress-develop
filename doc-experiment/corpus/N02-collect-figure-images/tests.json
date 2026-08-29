@@ -1,0 +1,96 @@
+{
+    "id": "N02-collect-figure-images",
+    "title": "Collect images inside figures",
+    "difficulty": "intermediate",
+    "split": "holdout",
+    "role": "core",
+    "commonness": "high",
+    "concept": "traversal",
+    "processor": "html",
+    "function": "collect_figure_images",
+    "cases": [
+        {
+            "id": "in-and-out",
+            "args": [
+                "<figure><img src=\"in.jpg\"></figure><p><img src=\"out.jpg\"></p>"
+            ],
+            "expected": [
+                "in.jpg"
+            ]
+        },
+        {
+            "id": "nested-depth",
+            "args": [
+                "<figure><div><a href=\"#\"><img src=\"deep.jpg\"></a></div></figure>"
+            ],
+            "expected": [
+                "deep.jpg"
+            ]
+        },
+        {
+            "id": "multiple-figures",
+            "args": [
+                "<figure><img src=\"a.jpg\"></figure><figure><img src=\"b.jpg\"><img src=\"c.jpg\"></figure>"
+            ],
+            "expected": [
+                "a.jpg",
+                "b.jpg",
+                "c.jpg"
+            ]
+        },
+        {
+            "id": "no-figures",
+            "args": [
+                "<p><img src=\"x.jpg\"></p>"
+            ],
+            "expected": []
+        },
+        {
+            "id": "no-src-skipped",
+            "args": [
+                "<figure><img alt=\"no src\"><img src=\"yes.jpg\"></figure>"
+            ],
+            "expected": [
+                "yes.jpg"
+            ]
+        },
+        {
+            "id": "empty-and-valueless-src-skipped",
+            "args": [
+                "<figure><img src><img src=\"\"><img src=\"yes.jpg\"></figure>"
+            ],
+            "expected": [
+                "yes.jpg"
+            ]
+        },
+        {
+            "id": "entity-decoded-src",
+            "args": [
+                "<figure><img src=\"/i?a=1&amp;b=2\"></figure>"
+            ],
+            "expected": [
+                "/i?a=1&b=2"
+            ]
+        },
+        {
+            "id": "figcaption-sibling",
+            "args": [
+                "<figure><img src=\"pic.jpg\"><figcaption>caption <img src=\"cap.jpg\"></figcaption></figure>"
+            ],
+            "expected": [
+                "pic.jpg",
+                "cap.jpg"
+            ]
+        },
+        {
+            "id": "unclosed-figure",
+            "args": [
+                "<figure><img src=\"open.jpg\"><p>text<img src=\"later.jpg\">"
+            ],
+            "expected": [
+                "open.jpg",
+                "later.jpg"
+            ]
+        }
+    ]
+}

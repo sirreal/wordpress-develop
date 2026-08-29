@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment and `next_token()` to walk the document in order, collecting only `#text` tokens inside heading openers. The function uses `get_token_type()`, `get_tag()`, `is_tag_closer()`, `get_current_depth()`, and `get_modifiable_text()` to detect `H1` through `H6` headings, accumulate their decoded text, and flush each entry when its subtree ends.",
+  "confidence": 92
+}

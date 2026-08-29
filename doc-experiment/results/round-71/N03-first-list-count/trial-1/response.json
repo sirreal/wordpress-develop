@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in BODY context, `next_tag()` to find the first `UL` or `OL`, and `next_token()` with `get_current_depth()`/`is_tag_closer()` to count only direct `LI` children before updating the list opener with `set_attribute()`. If the scan hits parser error state, the function falls back to the original HTML unchanged.",
+  "confidence": 86
+}

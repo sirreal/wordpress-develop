@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the HTML Processor because counting direct children requires tree-aware depth tracking, then scanned from the first `UL` or `OL` opener with `next_token()`, `get_current_depth()`, `get_tag()`, and `is_tag_closer()`. I guarded the result with `paused_at_incomplete_token()` and `get_last_error()`, and used a bookmark plus `seek()` and `set_attribute()` to update only the first list opener.",
+  "confidence": 95
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor to find and extract the TITLE element's text content. It creates a fragment parser, searches for the TITLE tag, and retrieves the text using get_modifiable_text(), which the documentation confirms automatically decodes character references like &mdash; to their proper characters. The function returns null only if the document cannot be parsed or has no TITLE element, while returning an empty string for an empty <title></title> tag.",
+  "confidence": 75
+}

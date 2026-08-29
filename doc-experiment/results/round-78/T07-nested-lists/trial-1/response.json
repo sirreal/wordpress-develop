@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented `WP_HTML_Processor::create_fragment()` factory to get structural awareness, then scanned only opening tags with `next_tag()` and inspected `get_breadcrumbs()` to detect whether a UL or OL had any UL/OL ancestor. Matching lists get `add_class('nested-list')`, and the final bytes are returned with `get_updated_html()`.",
+  "confidence": 91
+}

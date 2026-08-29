@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Processor::create_fragment(), get_breadcrumbs(), add_class(), and get_updated_html(); all HTML API calls are documented and no _doing_it_wrong records occurred. The main adherence issue is the whole-input paused_at_incomplete_token() fallback: for a completed nested list followed by a truncated trailing token, the documented processor can still preserve the trailing bytes and apply the completed edit, but this trial returns the original HTML."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor and used only documented methods: next_token(), get_token_type(), is_tag_closer(), get_tag(), get_breadcrumbs(), add_class(), and get_updated_html(). The token loop is valid though less direct than next_tag() for this task. It does not inspect get_last_error(), so it could return a partial best-effort result if the structural parser stops before later markup, but this is a policy choice not exercised by the tests."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Closest to the reference shape: create_fragment(), next_tag(), breadcrumbs with current-node removal, add_class(), and get_updated_html(). All API calls are documented and no misuse was recorded. The get_last_error() fail-closed check is conservative; otherwise the implementation follows the documented structural traversal and mutation pattern cleanly."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 7 frozen cases, so there were no failed hidden cases to attribute to a specific misconception. The rendered docs worked well on the main decision points: html-tag-processor.md under “Which processor should I use?” explicitly says the Tag Processor has no tree awareness and that get_breadcrumbs() belongs to WP_HTML_Processor; html-processor.md under “create_fragment()”, “Breadcrumbs”, and “get_breadcrumbs()” explains BODY-fragment parsing, implicit HTML/BODY breadcrumbs, and the current node being included in the breadcrumb stack; add_class() plus get_updated_html() are documented as the byte-preserving way to apply class edits. Near-misses: trial-1 over-applied the incomplete-input guidance and would skip valid earlier edits when the input ends with an incomplete trailing token; trials 1 and 3 used redundant next_tag query defaults, suggesting the query-default contract was understood but not obvious enough; trial-2 used a broader next_token() walk where next_tag() would have been simpler, but guarded token type and closers correctly.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md, Breadcrumbs / get_breadcrumbs()",
+      "problem": "The docs explain that breadcrumbs include implicit HTML/BODY and the current node, but they do not give a compact pattern for asking “does the current node have ancestor X?”",
+      "suggestion": "Add a general ancestor-check example that slices off the current node before testing ancestors, and explicitly notes that implicit fragment containers should not be mistaken for author-provided ancestors."
+    },
+    {
+      "location": "html-processor.md, next_tag() query parameter docs",
+      "problem": "Subjects used verbose queries such as tag_name => null and tag_closers => 'skip', even though those are defaults.",
+      "suggestion": "Add a short defaults note near the query table: next_tag() with no argument finds any opener; tag_name => null is equivalent to omitting tag_name; tag_closers defaults to skip."
+    },
+    {
+      "location": "html-processor.md / html-tag-processor.md, incomplete input and queued mutations",
+      "problem": "The docs discuss paused_at_incomplete_token() for scans and serialization, but the policy for get_updated_html() after queued attribute/class mutations on completed tokens before a trailing incomplete token is not centralized.",
+      "suggestion": "Add a small decision table for queued mutations: when it is reasonable to return get_updated_html(), when to fail closed on paused_at_incomplete_token(), and how this differs from parser unsupported errors."
+    },
+    {
+      "location": "html-processor.md, inherited public methods",
+      "problem": "WP_HTML_Processor relies on inherited Tag Processor methods such as get_updated_html(), add_class(), and paused_at_incomplete_token(), but the method index/cross-reference makes some inherited output methods less prominent than native processor methods.",
+      "suggestion": "Add an “Inherited mutation/output methods” subsection listing the common inherited methods and linking to their Tag Processor docs, with get_updated_html() called out as the output method after set_attribute(), add_class(), remove_class(), and set_modifiable_text()."
+    }
+  ]
+}

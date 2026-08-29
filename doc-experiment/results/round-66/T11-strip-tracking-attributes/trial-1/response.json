@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented `WP_HTML_Tag_Processor` linear scan API to visit every tag, `get_attribute_names_with_prefix( 'data-track-' )` to find all matching attributes case-insensitively, `remove_attribute()` to delete them, and `get_updated_html()` to return the modified document unchanged elsewhere.",
+  "confidence": 98
+}

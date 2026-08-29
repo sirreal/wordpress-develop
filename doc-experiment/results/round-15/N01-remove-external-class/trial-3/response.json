@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This implementation uses WP_HTML_Tag_Processor to scan through the HTML document and find all A tags containing the 'external' class. The next_tag() method with a query array matching both tag_name='A' and class_name='external' efficiently locates each matching tag. For each matched tag, remove_class('external') is called, which handles the class removal and automatically removes the entire class attribute if 'external' is the only class present. Finally, get_updated_html() returns the modified HTML with all queued updates applied, preserving all untouched content exactly as it appeared in the input.",
+  "confidence": 92
+}

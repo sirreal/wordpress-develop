@@ -1,0 +1,35 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used the correct WP_HTML_Tag_Processor for a fixed fragment template. All called APIs are documented: constructor, next_tag(), set_attribute(), next_token(), get_token_type(), set_modifiable_text(), and get_updated_html(). The solution follows the rendered docs' template-building recipe: seed attributes to preserve order, seed placeholder text, pass plain unescaped values, and read the result with get_updated_html()."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same documented API pattern as the reference. It does not guard the next_tag('img') return, but because the candidate owns the literal template this is not a meaningful adherence issue. It correctly relies on set_attribute() and set_modifiable_text() for encoding and preserves src-before-alt order by updating existing attributes."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used the documented Tag Processor construction and token-walking APIs idiomatically. The candidate matched #text before calling set_modifiable_text(), used placeholder text so replacement is possible, and returned queued edits with get_updated_html(). No undocumented methods or misuse records appeared."
+    }
+  ],
+  "failure_analysis": "All trials passed all 7 hidden cases, with no _doing_it_wrong or trigger_error records. The docs did well on the exact hazards this task tested: the Tag Processor overview's 'Which processor should I use?' section steers fixed, byte-preserving attribute edits to WP_HTML_Tag_Processor; 'Building markup from a template' explains both key construction rules, namely predeclare attributes to preserve order and include placeholder text for elements whose text will be replaced; set_attribute() documents plain unescaped input, automatic encoding, boolean attribute semantics, and new-attribute sorting; set_modifiable_text() documents that ordinary element text lives on #text tokens, that empty elements have no replaceable text token, and that writing accepts plain unescaped strings; get_updated_html() is explicitly documented as the way to retrieve queued edits. Near miss: the successful candidates did not check set_modifiable_text()'s boolean return, even though the method section says to always check it. In this fixed-template task the placeholder makes failure practically impossible, but examples could model the return check more consistently.",
+  "doc_gaps": [
+    {
+      "location": "html-tag-processor.md, Building markup from a template / set_modifiable_text() examples",
+      "problem": "The prose says set_modifiable_text() can fail and should be checked, but the template-building examples call it without checking the boolean result. Successful subjects copied that pattern.",
+      "suggestion": "Update examples to either assert/check the return value or explicitly state when a known literal template makes failure impossible. This generalizes to any template-filling code, not this figure task specifically."
+    },
+    {
+      "location": "html-tag-processor.md, Building markup from a template",
+      "problem": "The recipe covers attribute order, placeholder text, and encoding, but the final failure policy is implicit if a required token is not found or a write returns false.",
+      "suggestion": "Add a short general contract for template filling: after walking, verify every required replacement was applied; otherwise return an error/fallback rather than partially updated HTML."
+    }
+  ]
+}

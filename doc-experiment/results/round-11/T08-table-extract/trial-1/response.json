@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::create_fragment() to parse HTML, then finds the first TABLE element with next_tag(). It performs a single-pass walk through all table tokens using next_token(), tracking state with three variables: current_row, current_cell_text, and table_depth. TR tokens mark row boundaries; TD/TH tokens mark cell boundaries. Text nodes accumulate into the current cell when one is active. This single-pass pattern avoids nested loops as documented, and leverages WP_HTML_Processor's automatic implicit tag closure (TBODY, TR, TD/TH) per HTML5 parsing rules.",
+  "confidence": 58
+}

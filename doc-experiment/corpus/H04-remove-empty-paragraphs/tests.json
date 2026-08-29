@@ -1,0 +1,90 @@
+{
+    "id": "H04-remove-empty-paragraphs",
+    "title": "Remove empty paragraphs",
+    "difficulty": "hard",
+    "split": "holdout",
+    "role": "core",
+    "commonness": "high",
+    "concept": "serialization",
+    "processor": "html",
+    "function": "remove_empty_paragraphs",
+    "cases": [
+        {
+            "id": "mixed-paragraphs",
+            "args": [
+                "<p>Keep <em>me</em></p><p></p><p> </p><p><img src=\"x.jpg\"></p>"
+            ],
+            "expected": "<p>Keep <em>me</em></p><p> </p><p><img src=\"x.jpg\"></p>"
+        },
+        {
+            "id": "empty-and-whitespace",
+            "args": [
+                "<p></p><p>\n\t </p><p>Text</p>"
+            ],
+            "expected": "<p>\n\t </p><p>Text</p>"
+        },
+        {
+            "id": "entity-content",
+            "args": [
+                "<p>&nbsp;</p><p>&#x20;</p><p>A&nbsp;B</p>"
+            ],
+            "expected": "<p> </p><p> </p><p>A B</p>"
+        },
+        {
+            "id": "element-only-kept",
+            "args": [
+                "<p><br></p><p><span></span></p><p></p>"
+            ],
+            "expected": "<p><br></p><p><span></span></p>"
+        },
+        {
+            "id": "comment-and-script-kept",
+            "args": [
+                "<p><!--x--></p><p><script></script></p><p></p>"
+            ],
+            "expected": "<p><!--x--></p><p><script></script></p>"
+        },
+        {
+            "id": "self-closing-paragraph-syntax",
+            "args": [
+                "<p/><p>keep</p>"
+            ],
+            "expected": "<p>keep</p>"
+        },
+        {
+            "id": "implicit-paragraph-close",
+            "args": [
+                "<p>One<p>   <div>Block</div><p>Two"
+            ],
+            "expected": "<p>One</p><p>   </p><div>Block</div><p>Two</p>"
+        },
+        {
+            "id": "case-insensitive-source",
+            "args": [
+                "<P>Keep</P><P> </P>"
+            ],
+            "expected": "<p>Keep</p><p> </p>"
+        },
+        {
+            "id": "no-paragraphs",
+            "args": [
+                "<div>Nothing to remove</div>"
+            ],
+            "expected": "<div>Nothing to remove</div>"
+        },
+        {
+            "id": "incomplete-input-unchanged",
+            "args": [
+                "<p></p><img src=\"x"
+            ],
+            "expected": "<p></p><img src=\"x"
+        },
+        {
+            "id": "unsupported-input-unchanged",
+            "args": [
+                "<p></p><a><div><a></div></a>"
+            ],
+            "expected": "<p></p><a><div><a></div></a>"
+        }
+    ]
+}

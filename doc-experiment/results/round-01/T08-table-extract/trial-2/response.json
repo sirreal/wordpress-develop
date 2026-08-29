@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor with next_token() because WP_HTML_Processor explicitly lists \"Any element inside a TABLE\" as unsupported and will abort when encountering them. WP_HTML_Tag_Processor is purely lexical and does not abort on table content. The function: (1) finds the first TABLE opener with next_tag('TABLE'), (2) iterates all subsequent tokens with next_token(), (3) collects #text tokens via get_modifiable_text() (which already decodes character references) when inside a cell, (4) handles the table structure state machine manually \u2014 TR opens start new rows (implicitly closing any open cell/row), TD/TH openers start new cells (implicitly closing any open cell, matching browser behavior for optional closing tags), and the corresponding closers plus </TABLE> finalize rows and cells.",
+  "confidence": 58
+}

@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Processor::create_fragment(), documented token APIs, decoded get_attribute(), and #text + get_modifiable_text() correctly. The single token-walk state machine is a good documented pattern for repeated regions. Minor caveat: it tracks active links by A close tokens rather than the depth/breadcrumb subtree recipe emphasized for text extraction."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Uses the intended HTML Processor and the documented subtree text recipe almost exactly: next_tag('A'), require is_string(get_attribute('href')), record get_current_depth(), walk next_token() while in the subtree, append only #text get_modifiable_text(). No undocumented calls or misuse records."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Uses only documented HTML Processor APIs and handles decoded href/text plus valueless href correctly. It uses a depth-bounded subtree walk, but nests next_token() inside an outer next_token() loop for repeated links, which the docs caution can be fragile compared with one explicit state loop or next_tag-driven scans."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 8 frozen cases, with no _doing_it_wrong records. The docs succeeded on the main risk points: the processor-choice guidance says to use WP_HTML_Processor when structure, subtree walking, missing closing tags, or text collection matter; the 'Recipe: collect DOM-style text from a subtree' shows the exact #text/get_modifiable_text/depth pattern; get_attribute() documents null/true/string semantics, and the Tag Processor docs explicitly note decoded string attribute values; get_modifiable_text() explains decoded text and warns not to use it as an unguarded predicate. Near-misses were mostly around loop shape. Trial 3 followed the depth recipe but also used nested next_token() loops despite the repeated-region warning. Trial 1 avoided that with a single state loop, but its closer-based state is less directly shown for generic subtree extraction than the depth recipe. No hidden failure exposes these as defects here, but they indicate where the docs could make safe repeated extraction patterns more explicit.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::next_token() / Overview recipes for subtree walking",
+      "problem": "The docs warn that nested next_token() loops can skip boundaries for repeated regions, but the nearby subtree examples are single-region examples and do not give a complete repeated extraction pattern.",
+      "suggestion": "Add a general repeated-subtree extraction example showing the safe loop shapes: next_tag() plus a bounded inner subtree scan when appropriate, and a single next_token() state machine for repeated regions where boundary tokens matter."
+    },
+    {
+      "location": "WP_HTML_Processor::is_tag_closer() and get_token_name() docs",
+      "problem": "A close-token state machine can be valid, especially because the HTML Processor emits implied or virtual closers, but the contract is not as explicit as the depth/breadcrumb recipe.",
+      "suggestion": "Document how get_token_name(), is_tag_closer(), get_current_depth(), and breadcrumbs behave for virtual/implied closing tokens, with guidance on when close-token state is sufficient versus when depth or breadcrumbs should be preferred."
+    },
+    {
+      "location": "WP_HTML_Processor::get_attribute() docs",
+      "problem": "The HTML Processor method table shows string|true|null, but the clearest decoded-value explanation appears in the Tag Processor docs. Users focused on the HTML Processor page may miss that returned string attributes are already decoded and that empty string is distinct from true and null.",
+      "suggestion": "Repeat the full attribute-value contract on the HTML Processor page: missing returns null, valueless/boolean returns true, present empty value returns '', and string values are already decoded and should not be decoded again."
+    },
+    {
+      "location": "WP_HTML_Processor text extraction and incomplete-input guidance",
+      "problem": "The docs say read-only callers choose a policy for incomplete input, but they do not show a concrete extraction example where an unclosed element at EOF should still return accumulated text.",
+      "suggestion": "Add a general read-only extraction note explaining that EOF after an open element does not invalidate already visited #text tokens, while mutations or complete-source contracts should separately check paused_at_incomplete_token() and get_last_error()."
+    }
+  ]
+}

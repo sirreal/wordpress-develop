@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This implementation uses WP_HTML_Tag_Processor to scan linearly through the HTML document and find all IMG tags (matching case-insensitively via the 'tag_name' query parameter). For each matched IMG tag, it calls add_class() to append 'wp-image' to the existing classes (or create a class attribute if none exists). The processor handles all HTML encoding and preserves byte-for-byte everything that wasn't changed. Images inside comments are automatically ignored because next_tag() only matches real HTML tags, not tag-like content in comments. Finally, get_updated_html() returns the modified document with all enqueued changes applied.",
+  "confidence": 92
+}

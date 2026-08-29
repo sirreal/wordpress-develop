@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This walks the fragment with `WP_HTML_Tag_Processor::next_token()`, concatenating decoded text from `#text` tokens via `get_modifiable_text()`, and also from `TITLE` and `TEXTAREA` tag tokens, whose text is carried on the element token itself per the docs. It ignores other token types, so `SCRIPT` and `STYLE` contents are excluded, and then truncates the final UTF-8 string by Unicode code points using `mb_*` with a regex fallback.",
+  "confidence": 88
+}

@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Used the correct WP_HTML_Processor fragment parser, walked tokens with next_token(), restricted matching to #text tokens, used decoded get_modifiable_text() for matching, and built normalized output with serialize_token(). All called HTML API methods are documented and execution recorded no _doing_it_wrong. Minor adherence issue: on create failure or get_last_error() it returns the original input, which is not normalized and would discard the rewrite if that branch were reached."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Same strong API use as the reference shape: WP_HTML_Processor::create_fragment(), next_token(), #text guard, get_modifiable_text(), serialize_token(), and get_last_error(). No undocumented API calls and no _doing_it_wrong records. The only weakness is the raw-input fallback after parser error, which conflicts with a normalized-output contract outside the tested cases."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and idiomatic token-rewrite pattern. It avoids attributes, comments, and special-element opener text by checking get_token_type() === '#text', so decoded entity matching and ordinary text semantics are handled well. No hallucinated methods. As in trials 1 and 2, returning raw input on parser error is a small contract risk for normalized serialization."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 8 frozen cases, with no _doing_it_wrong records. The docs appear to have successfully guided the subjects to the key decisions: the HTML Processor rather than the Tag Processor for normalized output and implied closing tags; next_token() rather than next_tag() because text nodes matter; get_token_type() === '#text' before get_modifiable_text() so comments and special-element text are not treated as ordinary DOM text; get_modifiable_text() for decoded text matching; and serialize_token() for token-by-token normalized rewrites. The main near-miss is fallback policy: every candidate checks get_last_error() and returns the original input, despite the docs noting that original input is neither normalized nor rewritten. This did not affect the hidden cases, but it shows the fallback guidance could be made more prominent for functions promising normalized output.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md: WP_HTML_Processor::serialize_token() and Recipe: rewrite while serializing tokens",
+      "problem": "The docs say the original input is not normalized or rewritten, but candidates still used it as the parser-error fallback after a rewrite loop.",
+      "suggestion": "Move a short warning into the serialize_token() method-level contract: for APIs that promise normalized serialization, returning the raw input is not a valid normalization fallback; choose an explicit sentinel, empty result, or documented best-effort partial output."
+    },
+    {
+      "location": "html-processor.md: WP_HTML_Processor::serialize_token()",
+      "problem": "The rewrite example demonstrates skipping comments, but not the equally important pattern of inserting trusted literal markup around a serialized token.",
+      "suggestion": "Add a generic wrapper/insertion example showing accumulated output as the final result, with serialize_token() used for the current token and known-safe literal markup emitted around selected tokens."
+    },
+    {
+      "location": "html-processor.md: WP_HTML_Processor::get_modifiable_text() / next_token()",
+      "problem": "The ordinary-text versus modifiable-text distinction is documented well, but spread across multiple sections; this is a high-risk distinction for text tasks.",
+      "suggestion": "Add a compact token matrix near get_modifiable_text(): #text is decoded ordinary DOM text; comments are modifiable but not DOM text; SCRIPT/STYLE opener text is raw; TITLE/TEXTAREA opener text is decoded; attributes are not text tokens."
+    }
+  ]
+}

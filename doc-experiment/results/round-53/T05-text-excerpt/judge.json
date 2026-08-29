@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor::create_fragment(), used a single next_token() walk, collected #text with get_modifiable_text(), and explicitly whitelisted TITLE/TEXTAREA opener text while excluding SCRIPT/STYLE. All HTML API calls are documented. Minor penalty: the post-scan get_last_error()/paused_at_incomplete_token() fail-closed policy is stricter than the task/reference and would discard accumulated read-only text for some incomplete trailing syntax."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Best match to the documented recipe: HTML Processor fragment parsing, one token walk, #text-only default, explicit TITLE/TEXTAREA opt-in, decoded text via get_modifiable_text(), and no unsupported API calls. The class_exists() guard is unnecessary in the task harness but not an HTML API misuse."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and documented methods throughout, including get_tag(), which is documented and valid for matching tag openers after checking token type and closer status. The HTML API usage is sound. Minor penalty for the byte-based substr()/strlen() fallback if mbstring were unavailable, because decoded text is UTF-8 and byte slicing can violate the task's codepoint limit."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 10 hidden cases, so there are no failed hidden cases to attribute to documentation gaps. The docs worked well on the central hazards: create_fragment() is presented as the right constructor for BODY fragments; next_token() is documented as the correct walk when text matters; the text-extraction recipe says to append only #text tokens by default; get_modifiable_text() explicitly says #text, TITLE, and TEXTAREA are decoded UTF-8, while SCRIPT/STYLE are raw and should only be included by explicit policy. Those passages likely prevented common failures such as using the Tag Processor for tree-aware text, appending every token with modifiable text, double-decoding entities, missing interelement whitespace, including script/style data, or missing TITLE/TEXTAREA contents. Near-misses: trial-1 over-applied strict incomplete-input handling and would return empty for an input like <p>abc<a where the reference returns accumulated text; the docs allow caller policy here but do not strongly steer read-only extraction toward best-effort unless strict completeness is part of the contract. Trial-3 included a non-Unicode-safe byte fallback outside the HTML API surface; the docs recommend mb_substr(..., 'UTF-8') but could be more explicit that byte functions are not valid substitutes for codepoint limits.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md, read-only extraction completion policy near get_last_error()/paused_at_incomplete_token()",
+      "problem": "The docs list possible policies for incomplete input, but a reader can treat fail-closed as the default even for read-only extraction where the caller did not require complete-source validation.",
+      "suggestion": "Add a strict-vs-best-effort note: read-only extractors should normally return accumulated visited tokens unless their contract explicitly rejects incomplete or unsupported input; strict callers should document that policy before checking paused_at_incomplete_token() or get_last_error()."
+    },
+    {
+      "location": "html-processor.md, Recipe: collect DOM-style text from a subtree / next_token()",
+      "problem": "The recipe is strong for subtree extraction, but whole-fragment read-only extraction requires readers to compose the EOF walk, #text default, and special-element opt-in policy from separate passages.",
+      "suggestion": "Add a general whole-fragment text-walk example without task-specific truncation: start from create_fragment(), walk next_token() to EOF, read #text tokens, and show how callers can opt into opener-carried DATA element text while excluding raw SCRIPT/STYLE unless explicitly requested."
+    },
+    {
+      "location": "html-processor.md and html-tag-processor.md, get_modifiable_text() UTF-8 guidance",
+      "problem": "The docs say decoded text is UTF-8 and recommend mb_substr(), but they do not explicitly warn that strlen()/substr() are byte operations and unsafe for codepoint limits.",
+      "suggestion": "Add a sentence that decoded modifiable text must be measured and sliced with Unicode-aware functions; byte-based fallbacks such as strlen()/substr() can split UTF-8 characters and should not be used for codepoint-limited output."
+    }
+  ]
+}

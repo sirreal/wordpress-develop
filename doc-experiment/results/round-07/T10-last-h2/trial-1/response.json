@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This implementation uses WP_HTML_Tag_Processor to scan linearly through the HTML document, finding all H2 tags. By repeatedly setting a bookmark named 'last_h2' while iterating through matching tags, the bookmark is continuously moved forward (as documented, re-setting a bookmark moves it to the current location). After the loop completes, the bookmark points to the last H2 tag found. The processor then seeks back to that position and adds the 'final-section' class using add_class(). This approach works correctly for large documents and handles the constraint that H2 tags in comments are not matched by next_tag(). The HTML is returned via get_updated_html().",
+  "confidence": 85
+}

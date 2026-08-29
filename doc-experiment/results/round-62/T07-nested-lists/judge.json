@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 90,
+      "hallucinated_methods": [],
+      "notes": "Used the correct WP_HTML_Processor::create_fragment() path and only documented APIs. Passed 7/7 with no _doing_it_wrong records. Less idiomatic than the reference because it rebuilds list ancestry with a manual stack instead of reading get_breadcrumbs(); it also does not check get_last_error() or paused_at_incomplete_token(), so unsupported markup could leave a partial prefix edit."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 92,
+      "hallucinated_methods": [],
+      "notes": "Used the correct processor and only documented APIs. Passed 7/7 with no _doing_it_wrong records. The final get_last_error() fallback is a reasonable documented guard, but ancestry is still hand-tracked rather than using breadcrumbs, and incomplete-token handling is not explicit."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Closest to the documented structural pattern: create_fragment(), next_tag(), get_breadcrumbs(), add_class(), and get_updated_html(). All calls are documented, and execution passed 7/7 with no _doing_it_wrong records. Minor deduction only for not checking paused_at_incomplete_token() where the docs discuss complete-source policies."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial: all three passed 7/7. The docs did well at steering subjects to WP_HTML_Processor for structure, documenting create_fragment(), next_token()/next_tag(), virtual closers, add_class(), and get_updated_html() byte preservation. The main near-miss is that two successful trials still built their own list stack instead of using get_breadcrumbs(), which shows the docs explain the capability but do not make the common 'has any ancestor of these names' idiom obvious enough. Another near-miss is completion policy: trial 1 would return queued edits after an unsupported-parser abort, while trials 2 and 3 discard all edits on get_last_error(); the docs do not clearly state the recommended get_updated_html() policy after an HTML Processor scan aborts.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md > Breadcrumbs / get_breadcrumbs()",
+      "problem": "The docs explain breadcrumb paths and direct breadcrumb queries, but not the common operation 'does the current element have any ancestor matching X'.",
+      "suggestion": "Add a short idiom showing array_slice( get_breadcrumbs(), 0, -1 ) to exclude the current element, then in_array() checks for ancestor membership."
+    },
+    {
+      "location": "html-processor.md > next_token()",
+      "problem": "Manual state loops are documented, but the docs do not clearly distinguish when a caller should prefer parser-owned ancestry over maintaining a parallel stack.",
+      "suggestion": "Add guidance that get_breadcrumbs() or get_current_depth() should be preferred for current-token ancestry; manual stacks are for derived state not already represented by the parser."
+    },
+    {
+      "location": "html-processor.md > HTML Support / get_last_error() / get_updated_html()",
+      "problem": "The docs say serialize() and normalize() return null after unsupported markup, but do not define what queued attribute/class edits plus get_updated_html() mean after an abort.",
+      "suggestion": "Document that a scan abort may mean only a prefix was inspected, and give a recommended whole-document mutation policy: check get_last_error() before returning edits, or explicitly document partial-prefix behavior."
+    },
+    {
+      "location": "html-processor.md > Method Index / mutation recipes",
+      "problem": "Inherited methods needed for mutation completion, especially get_updated_html() and paused_at_incomplete_token(), are easy to miss on the HTML Processor page.",
+      "suggestion": "Add an inherited-methods subsection or mutation checklist linking get_updated_html(), get_last_error(), and paused_at_incomplete_token() together for class/attribute-edit workflows."
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor to scan linearly through the document, finding all H2 tag openers (ignoring closers and tags within comments, which the processor automatically handles). It maintains a single bookmark named \"last-h2\" that gets reset on each match, effectively tracking the position of the final H2. After scanning completes, if an H2 was found, the code seeks back to that bookmark, adds the \"final-section\" class using add_class(), and returns the modified HTML via get_updated_html().",
+  "confidence": 88
+}

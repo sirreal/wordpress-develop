@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function iterates through all tokens in the HTML document using the Tag Processor's next_token() method. When a TITLE token is found, it returns the modifiable text (which is automatically decoded by the API per the documentation). For TITLE elements, the entire sequence including contents is treated as one token, with the text content accessible via get_modifiable_text(). If no TITLE token is found, null is returned. Empty TITLE elements return empty string as required.",
+  "confidence": 92
+}

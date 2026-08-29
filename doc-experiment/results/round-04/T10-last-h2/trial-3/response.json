@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Tag_Processor to scan through all H2 tags, maintaining a bookmark for the last one found. After completing the scan, if an H2 was found, seeks back to it and adds the 'final-section' class using the add_class() method. The processor preserves byte-for-byte accuracy for all other content. Comments are properly ignored because next_tag() only matches actual HTML tags, not comment content.",
+  "confidence": 85
+}

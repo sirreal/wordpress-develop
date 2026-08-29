@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Processor to parse the HTML fragment with full structural awareness. It iterates through all IMG tags, checking if FIGURE appears anywhere in the breadcrumbs (ancestry path). For each IMG inside a FIGURE, it retrieves the decoded src attribute using get_attribute(), skips empty or missing values, and collects results in document order. The processor's create_fragment() method handles the body context automatically.",
+  "confidence": 92
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment and `next_token()` to walk the document in order. For each opening `A` tag I read `href` with `get_attribute()` and only kept string-valued hrefs, then accumulated ordinary `#text` tokens via `get_modifiable_text()` until the anchor subtree ended, using `get_current_depth()` to know when to flush each link.",
+  "confidence": 93
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented `WP_HTML_Processor::normalize()` API to normalize the fragment in BODY context, then returned the exact placeholder when normalization fails and yields `null`.",
+  "confidence": 98
+}

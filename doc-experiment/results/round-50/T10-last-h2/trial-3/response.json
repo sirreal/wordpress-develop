@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` for a byte-preserving, position-based edit: it scans forward with `next_tag( 'H2' )`, repeatedly moves a single bookmark with `set_bookmark()` to remember the last matched `H2`, seeks back to that bookmark with `seek()`, adds the class via `add_class()`, and returns the modified markup with `get_updated_html()`.",
+  "confidence": 97
+}

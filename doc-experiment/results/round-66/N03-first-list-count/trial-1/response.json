@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() for fragment parsing, next_tag() to find the first UL or OL in source order, then next_token() with get_current_depth() to scan that list subtree and count direct LI opener tokens at one level deeper than the list. I fail closed by returning the original HTML if the scan pauses on incomplete input or the processor reports an error, then write the count with set_attribute() and read the result with get_updated_html().",
+  "confidence": 92
+}

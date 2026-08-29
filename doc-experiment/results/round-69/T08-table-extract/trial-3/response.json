@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment with browser-like table structure, then walked tokens with `next_token()`, using `get_current_depth()`, `get_token_type()`, `get_tag()`, `is_tag_closer()`, and `get_modifiable_text()` to collect text from the first `TABLE` subtree into rows and cells.",
+  "confidence": 84
+}

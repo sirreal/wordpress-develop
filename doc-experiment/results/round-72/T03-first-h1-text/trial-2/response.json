@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the input as a body fragment, `next_tag( 'H1' )` to locate the first heading opener, and then a depth-bounded `next_token()` walk with `get_current_depth()`, `get_token_type()`, and `get_modifiable_text()` to collect only ordinary text nodes inside that subtree. That yields decoded text from nested markup and returns `null` only when no `H1` is present.",
+  "confidence": 96
+}

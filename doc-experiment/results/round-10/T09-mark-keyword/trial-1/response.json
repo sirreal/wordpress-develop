@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Processor::create_fragment() to parse the HTML fragment and WP_HTML_Processor::next_token() to iterate through all tokens. For each '#text' token, retrieves the decoded text with get_modifiable_text(), checks if it contains the keyword using case-sensitive strpos(), and wraps matching text nodes with <mark> tags. Uses serialize_token() to produce normalized output for both text and tag tokens, ensuring proper HTML encoding and normalization throughout.",
+  "confidence": 42
+}

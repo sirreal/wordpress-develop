@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to handle the fragment as BODY-context HTML, then scanned for the first `UL` or `OL` opener, bookmarked it, walked tokens with `next_token()` while tracking depth via `get_current_depth()`, counted direct `LI` child openers, and only edited the opener after confirming the scan finished cleanly with `paused_at_incomplete_token()` and `get_last_error()`. The attribute update is applied with `seek()` and `set_attribute()`, and the final result comes from `get_updated_html()`.",
+  "confidence": 91
+}

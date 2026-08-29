@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Passed 7/7. Correctly chose WP_HTML_Processor::create_fragment() for ancestor-aware parsing; all called methods are documented in the rendered files: create_fragment, next_tag, get_tag, get_breadcrumbs, add_class, get_last_error, get_updated_html. Idiomatic single-pass tag walk, excludes the current list from its breadcrumb ancestor check, uses add_class() to preserve existing classes, and returns get_updated_html(). Minor deduction: it adds an all-or-nothing get_last_error() fallback policy that is safe but not required by the task, and it does not distinguish incomplete trailing syntax with paused_at_incomplete_token()."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Passed 7/7. Same substantive implementation as trial-1: correct processor choice, documented API only, proper breadcrumb ancestor inspection, add_class(), and get_updated_html(). Existing classes and byte preservation are handled through the documented class mutation API. Minor deduction for the same extra get_last_error() fallback policy and no explicit incomplete-token policy."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 94,
+      "hallucinated_methods": [],
+      "notes": "Passed 7/7. Correct processor and all methods are documented, including inherited paused_at_incomplete_token(). The final mutation pass is sound. Deductions are for non-idiomatic redundancy: it performs a full validation scan, computes an unused $is_nested value, reparses the same HTML, and rejects incomplete trailing syntax wholesale. That policy is documented as caller-dependent, but for this task it could skip valid edits to complete list tags before a truncated tail."
+    }
+  ],
+  "failure_analysis": "No hidden/frozen case failed across the three trials; every execution passed 7/7 and no _doing_it_wrong records appeared. The docs did well on the central decision points: they clearly direct structural/ancestor-sensitive work to WP_HTML_Processor rather than WP_HTML_Tag_Processor, explain create_fragment() for body fragments, document that next_tag() walks openers by default, define get_breadcrumbs() as the root-to-current path including HTML/BODY/current node, and point mutation output to add_class() plus get_updated_html(). The near-misses were policy and ergonomics issues rather than failures. Trial-3 appears to have overgeneralized the incomplete-input guidance into a two-pass all-or-nothing validation flow, even though this task's decision is local to each current tag's breadcrumbs. Trials 1 and 2 also added a get_last_error() fallback after queueing edits; this is conservative, but the docs' serialization-oriented 'reject or fall back' language can be read as applying to all mutation loops, even when get_updated_html() can preserve untouched bytes and return queued edits.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md > Breadcrumbs / get_breadcrumbs()",
+      "problem": "The docs explain direct breadcrumb paths well, but do not give a compact pattern for 'has any ancestor named X' and do not explicitly remind readers to exclude the current node when checking ancestors.",
+      "suggestion": "Add a general example showing arbitrary ancestor containment with get_breadcrumbs(), e.g. slice/pop the current node before in_array() checks, and contrast it with matches_breadcrumbs()/breadcrumb queries, which match paths rather than arbitrary-depth ancestors."
+    },
+    {
+      "location": "html-processor.md > Usage recipes",
+      "problem": "The recipes emphasize scan-before-edit and bounded subtree walks. For edits whose condition is known at the current token, this can encourage unnecessary validation scans or reparsing, as in trial-3.",
+      "suggestion": "Add a 'single-pass structural class/attribute edit' recipe: create_fragment(), while next_tag(), inspect get_tag()/get_breadcrumbs()/get_current_depth(), mutate immediately with add_class()/set_attribute(), then return get_updated_html(). State that bookmarks or a pre-scan are only needed when the edit depends on information discovered later."
+    },
+    {
+      "location": "html-processor.md > unsupported/incomplete input guidance; html-tag-processor.md > get_updated_html()",
+      "problem": "The docs repeatedly say to reject or fall back on get_last_error() and optionally paused_at_incomplete_token(), but the policy boundary is not clear for get_updated_html() mutation loops versus normalization/serialization loops.",
+      "suggestion": "Clarify that get_last_error() means the HTML Processor stopped before full structural analysis; callers may choose all-or-nothing fallback, but get_updated_html() still returns the original bytes with queued edits applied. Separately document that incomplete trailing tokens are preserved by get_updated_html(), and rejecting them is a caller policy, not a universal requirement."
+    },
+    {
+      "location": "html-processor.md > inherited mutation methods such as add_class() and get_updated_html()",
+      "problem": "The WP_HTML_Processor page exposes inherited mutation methods, but some detailed semantics live mainly on the Tag Processor page: class preservation/no duplicate behavior and byte-preserving output are easy to miss when working from the Processor page.",
+      "suggestion": "On the Processor method stubs for add_class(), set_attribute(), remove_class(), and get_updated_html(), include or directly link the full inherited contract: existing class preservation, no duplicate class append, changed attributes re-emitted with double quotes, and untouched bytes preserved exactly."
+    }
+  ]
+}

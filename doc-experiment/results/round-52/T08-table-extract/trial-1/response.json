@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in BODY context, then a single depth-bounded `next_token()` walk over the first `TABLE` subtree. Within that walk I collected decoded `#text` nodes via `get_modifiable_text()`, and used the documented `TR`, `TD`, `TH`, and `is_tag_closer()` token information to flush rows and cells in browser-like table order.",
+  "confidence": 92
+}

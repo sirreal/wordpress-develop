@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in body context, then `next_tag( 'H1' )` to find the first heading and `next_token()` with `get_current_depth()` to walk that heading\u2019s subtree. I only concatenate `#text` tokens via `get_modifiable_text()`, which returns decoded text and skips markup, so nested elements contribute correctly while image-only headings yield an empty string.",
+  "confidence": 93
+}

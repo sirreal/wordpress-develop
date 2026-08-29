@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML in BODY context, then iterates through all IMG tags. For each IMG, it retrieves the breadcrumbs (the element path from root to current element) and checks if 'FIGURE' appears anywhere in the ancestry. The src attribute is retrieved using get_attribute(), which returns already-decoded values. Only non-empty string values are included in the result, maintaining document order.",
+  "confidence": 72
+}

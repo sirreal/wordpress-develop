@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Correctly used WP_HTML_Processor::create_fragment(), walked heading openers with next_tag(), bounded subtree collection by get_current_depth(), and appended only #text via get_modifiable_text(). All called methods are documented and no _doing_it_wrong records appeared. Minor edge-risk: the final paused_at_incomplete_token()/get_last_error() check discards already-collected headings on trailing incomplete syntax, which is stricter than the reference policy."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Same high-quality API use as trial-1: correct processor, documented calls only, depth-bounded token walking, decoded #text collection, and null create_fragment handling. Minor edge-risk: it globally returns an empty array after a trailing incomplete token even when valid headings were already parsed."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correctly used the HTML Processor and a single next_token() state machine, matching the documented closer-driven pattern. It relies on virtual closers, get_token_type(), is_tag_closer(), get_tag(), and get_modifiable_text() in documented ways, and naturally handles empty headings and implied heading closes. Minor edge-risk: like the others, it rejects all accumulated output if paused_at_incomplete_token() is true."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in execution for any trial. The docs appear to have worked well for the core concepts: create_fragment() was chosen over the Tag Processor for body fragments; the rendered text-extraction recipe led candidates to collect only #text tokens with get_modifiable_text(), producing decoded entity text; get_tag() returning uppercase names made source tag case harmless; and the next_token()/get_current_depth()/is_tag_closer() documentation about virtual closers allowed the implied-heading-close case to pass. The main near-miss is incomplete trailing syntax. A probe with '<h1>OK</h1><' shows the processor reports the H1 tokens and then paused_at_incomplete_token() is true; the reference returns the collected heading, while all trials return an empty array. This likely came from the repeated fail-closed examples around scan completion, despite the rendered 'collect DOM-style text from a subtree' section saying read-only callers must choose whether partial results are acceptable.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::paused_at_incomplete_token() and WP_HTML_Processor::get_last_error() docblocks; HTML Processor text-extraction completion policy",
+      "problem": "Candidates treated scan-completion diagnostics as a reason to erase read-only results already collected. That is safe for complete-source validation, but not necessarily the contract for extraction functions over already-visited tokens.",
+      "suggestion": "Add a sharper note: these methods report why scanning stopped; they do not invalidate tokens already visited. For read-only collectors, return accumulated data unless the caller contract explicitly requires complete source bytes; reserve fail-closed behavior for mutations, rewrites, or complete-source validation."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token() one-cursor warning and get_current_depth() subtree-walk examples",
+      "problem": "The docs warn against nested next_token() loops and also show bounded subtree scans, but they do not explicitly distinguish an outer next_tag() scan plus inner bounded next_token() walk from an outer next_token() loop with another next_token() loop.",
+      "suggestion": "Clarify that a next_tag() opener scan may safely perform a depth-bounded next_token() subtree walk and then resume scanning, while the one-cursor warning mainly applies to nested token loops where the outer loop expects to process the boundary token itself."
+    },
+    {
+      "location": "WP_HTML_Processor usage recipes",
+      "problem": "The docs have good single-element text extraction and closer-driven repeated-region examples, but no compact general recipe for collecting text from multiple matched elements selected by a tag predicate.",
+      "suggestion": "Add a generalized example for 'collect DOM-style text from every matching element': scan openers, branch on get_tag(), record opener depth, append only #text tokens during the bounded walk, and state the caller's completion policy separately."
+    }
+  ]
+}

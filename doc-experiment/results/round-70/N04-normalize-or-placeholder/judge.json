@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Used the correct documented API, `WP_HTML_Processor::normalize()`, with a strict null fallback, preserving empty-string normalization. Passed 7/7 with no `_doing_it_wrong`. The extra `class_exists()` guard is unnecessary and not described by the docs, but it is a PHP builtin rather than hallucinated HTML API usage."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Exact idiomatic use of `WP_HTML_Processor::normalize()` and strict `null` handling. Correct processor choice, no undocumented API calls, and edge cases such as unsupported markup and empty fragments are handled by the documented return contract. Passed 7/7 with no `_doing_it_wrong`."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Exact idiomatic use of the documented `WP_HTML_Processor::normalize()` API and strict `null` fallback. Correctly relies on BODY-fragment normalization and preserves successful empty output. Passed 7/7 with no `_doing_it_wrong`."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial. The docs worked well for this task because `html-tag-processor.md > Which processor should I use?` explicitly says to use the HTML Processor for implied or missing closing tags and normalized output, while `html-processor.md > normalize()` gives the one-call API, BODY-fragment context, normalization effects, and `string|null` return. The unsupported cases were also covered by `html-processor.md > HTML Support > Supported elements`, which says unsupported markup aborts processing and output-producing methods such as `serialize()` and `normalize()` return `null`. The only near-miss is interpretive: unsupported inputs record `WP_HTML_Processor::serialize` warnings because `normalize()` internally serializes and `serialize()` warns on parser errors. That is not candidate misuse here, but the rendered docs do not make that warning side effect explicit.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md > normalize()",
+      "problem": "The return contract says `string|null`, but it does not explicitly warn that a successful normalization can be the empty string.",
+      "suggestion": "Add a short note that callers should test failure with `null === WP_HTML_Processor::normalize( $html )`, not with a truthiness check, because empty input or omitted incomplete trailing syntax can produce `''`."
+    },
+    {
+      "location": "html-processor.md > normalize() / serialize()",
+      "problem": "Unsupported markup is documented as returning `null`, but the warning side effect from `serialize()` on parser errors is not documented near the return contract.",
+      "suggestion": "Document that normalization may emit the same serialization warning when unsupported markup is encountered, while still returning `null` as the programmatic failure signal."
+    },
+    {
+      "location": "html-processor.md > normalize()",
+      "problem": "The section says `null` means unable to normalize, but the concrete causes are only explained earlier under HTML Support.",
+      "suggestion": "Cross-reference the unsupported-markup section from the `normalize()` return description, with a general phrase such as 'for example, unsupported adoption/fostering or complex misnested formatting cases'."
+    }
+  ]
+}

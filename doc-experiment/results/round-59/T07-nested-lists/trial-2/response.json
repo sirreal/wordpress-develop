@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() for fragment parsing, then walked tags with next_tag() and inspected get_breadcrumbs() to detect whether each UL or OL had a UL/OL ancestor anywhere above it. For qualifying list openers I added the nested-list class with add_class(), and returned the byte-preserving result via get_updated_html().",
+  "confidence": 91
+}

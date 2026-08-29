@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan the document linearly, remember the last matched `H2` with a bookmark, then seek back and add the `final-section` class before reading the result with `get_updated_html()`. This stays within the documented tag and bookmark APIs and preserves the rest of the HTML byte-for-byte.",
+  "confidence": 96
+}

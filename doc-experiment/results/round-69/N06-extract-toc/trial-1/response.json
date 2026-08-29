@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the body fragment and WP_HTML_Processor::next_token() to walk the document in tree order, collecting only ordinary #text tokens inside each H1\u2013H6 subtree. The heading text is assembled with get_modifiable_text(), which returns decoded plaintext for text nodes, and the level comes from get_tag().",
+  "confidence": 92
+}

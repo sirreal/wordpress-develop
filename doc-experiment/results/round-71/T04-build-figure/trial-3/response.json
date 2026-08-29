@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented `WP_HTML_Tag_Processor` template-editing flow: start from a literal fragment with the required attribute order and a placeholder text node, update `src` and `alt` with `set_attribute()` so the values are safely encoded, then replace the figcaption placeholder with `set_modifiable_text()` and return `get_updated_html()`.",
+  "confidence": 97
+}

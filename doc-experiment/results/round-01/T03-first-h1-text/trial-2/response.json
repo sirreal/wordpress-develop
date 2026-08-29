@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the HTML body fragment, then `next_tag('H1')` to seek to the first H1 element. After finding it, I recorded the depth with `get_current_depth()` and iterated with `next_token()`, continuing while the depth remains at or above the H1's depth (which stops the loop at the H1's own closing token, whose depth is one less). For each token, I check `get_token_type() === '#text'` and accumulate via `get_modifiable_text()`, which returns decoded text content. The function returns `null` if no H1 is found, and `\"\"` (empty string, initialized from `$text = ''`) if the H1 contains no text nodes, matching the spec.",
+  "confidence": 95
+}

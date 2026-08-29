@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correct processor (Tag Processor) for a flat lexical 'is the tail incomplete' check; structural awareness is unneeded. Walks every token with a `while ( next_token() )` loop to drain the document to the end, then returns `paused_at_incomplete_token()` — exactly the reference solution. All three methods used (__construct, next_token, paused_at_incomplete_token) are documented; no hallucinated or _doing_it_wrong API. Idiomatic token-walking loop. The explanation correctly distinguishes lexically-complete-but-unclosed `<div>text` (false) from a truncated token (true), matching the task's edge-case semantics. 9/9 cases pass. Full marks."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Identical structure and correctness to trial-1: Tag Processor, `while ( next_token() )` drain loop, then `paused_at_incomplete_token()`. Same documented method set, no hallucinations, no _doing_it_wrong. Explanation explicitly names the special-element case (unclosed SCRIPT/STYLE counts as incomplete) and the lone-`<`/unclosed-element cases as complete — well-aligned with the docs' 'Special self-contained elements' and 'When matching fails' sections. 9/9 pass. Full marks."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 72,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and correct terminal method (paused_at_incomplete_token), and no hallucinated/undocumented API — every call is documented. The flaw is navigation idiom: a single `next_tag()` call instead of a loop. The comment 'this will consume the document and pause if incomplete' is a misconception: `next_tag()` stops at the FIRST matching tag and returns. For `<p>fine</p><img src=\"a.jpg` it matches `<p>` and never advances to the truncated `<img` tail, so the processor is not paused and the function returns false (verified by probe: single next_tag=false vs loop=true). It only works when no complete tag precedes the truncation, which is why 8/9 pass and only `cut-after-complete-content` fails. Deductions: token-walking idiom not followed (the documented pattern is to scan to end-of-document), and the edge case of a truncated token AFTER complete content is mishandled. Processor choice and no-hallucination dimensions are full; idiomatic-use and edge-case dimensions are docked."
+    }
+  ],
+  "failure_analysis": "One hidden case failed across all trials: `cut-after-complete-content` (`<p>fine</p><img src=\\\"a.jpg`, expected true) in trial-3 only. Trials 1 and 2 passed everything.\n\nMisconception (trial-3): the candidate believed a single `$processor->next_tag()` call scans/consumes the entire document and leaves the processor paused if the tail is incomplete (its inline comment: 'this will consume the document and pause if incomplete'). In reality `next_tag()` stops and returns true at the FIRST tag that matches. Here it matches the complete `<p>` opener and returns immediately; the cursor never reaches the truncated `<img src=\\\"a.jpg` at the end, so `paused_at_incomplete_token()` is false. Probe confirms: single next_tag → false; loop (next_tag or next_token) → true. The function therefore only detects truncation when NO complete tag precedes it — exactly why the other eight cases (where the incomplete token is at or near the start, or the document is fully complete) pass.\n\nDocumentation responsibility: the `paused_at_incomplete_token()` method heading shows its single example as `$processor = new WP_HTML_Tag_Processor( '<input type=\\\"text\\\" value=\\\"Th' ); false === $processor->next_tag();` — a document whose ONLY tag is the incomplete one, so a single `next_tag()` both returns false and leaves the processor paused. This example silently teaches the wrong mental model: it conflates 'next_tag returned false' with 'reached the incomplete tail.' Likewise, the 'When matching fails' section in the Tag Processor overview frames pausing entirely around `next_tag()` returning false and never shows a document where a complete token precedes the incomplete tail. Nothing in either the `next_tag()` docs or the `paused_at_incomplete_token()` docs states that you must drain the document to the end (loop until next_token/next_tag returns false) before the pause flag is meaningful. The two passing trials arrived at the loop independently via the token-walking examples elsewhere in the docs ('Tokens and finer-grained processing'), not because the incomplete-token docs directed them there.\n\nWhat the docs did well: the 'Special self-contained elements' / 'When matching fails' sections correctly told all three trials that an unclosed SCRIPT counts as an incomplete token (unterminated-script passed everywhere), and the 'garbage-in' / lexical framing led every trial to treat `<div>text` and a lone trailing `<` as complete (unclosed-element-is-complete and trailing-lt-is-text passed everywhere). Processor selection was unanimous and correct.\"",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::paused_at_incomplete_token() — method docblock and its example",
+      "problem": "The sole example uses a document whose only tag is the incomplete one (`<input type=\"text\" value=\"Th`), where a single `next_tag()` call both returns false AND leaves the processor paused. This teaches that one `next_tag()`/`next_token()` call suffices to detect an incomplete tail. It does not, when any complete token precedes the truncation: `next_tag()` returns true at the first complete tag and the cursor never reaches the truncated end, so the flag stays false. Trial-3 failed exactly this case.",
+      "suggestion": "State explicitly that the pause flag only reflects the cursor's current position and is meaningful only AFTER the processor has advanced to the end of the document. Add a second example where a complete tag precedes the incomplete tail (e.g. a document like `<p>x</p><img src=\"` ) showing that you must loop (`while ( $p->next_token() ) {}` or `while ( $p->next_tag() ) {}`) until it returns false before calling paused_at_incomplete_token(). Show that calling next_tag() only once returns true at the first tag and reports paused=false."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::next_tag() — Returns / 'When matching fails' section",
+      "problem": "The docs say next_tag returning false means it 'moved the cursor to the end of the file' and frame document-pausing entirely around the false return value. They never make the converse explicit: next_tag returning TRUE means the cursor stopped at a matched tag mid-document and has NOT reached the end. A reader can conclude that a single next_tag call drains the document.",
+      "suggestion": "Add one sentence to next_tag(): 'next_tag() stops at and returns true for the first matching tag; it does not scan to the end of the document. To reach the end of the input (for example to test paused_at_incomplete_token()), call it in a loop until it returns false, or walk every token with next_token().' This generalizes beyond this task to any 'process the whole document' use."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor — overview, 'Tokens and finer-grained processing' / a short 'scanning to the end' note",
+      "problem": "There is no single place that states the idiom for draining a document to completion, which is a prerequisite for end-of-document state queries like paused_at_incomplete_token(). The two correct trials inferred the `while ( next_token() )` loop from unrelated examples; the failing trial never connected the dots.",
+      "suggestion": "Add a brief 'Scanning to the end of the document' note pairing the drain loop with the end-state query: `while ( $p->next_token() ) { /* no-op */ } if ( $p->paused_at_incomplete_token() ) { ... }`. Note that next_token() (which visits all token types, not just tags) is the most reliable way to consume the entire input before inspecting terminal state."
+    }
+  ]
+}

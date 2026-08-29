@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` for fragment parsing, `next_tag()` to find the first `UL` or `OL`, then a bounded `next_token()` walk with `get_current_depth()` to count direct `LI` children. I reject truncated or unsupported input by checking `paused_at_incomplete_token()` and `get_last_error()`, then `seek()` back to the bookmarked opener and write `data-item-count` with `set_attribute()`.",
+  "confidence": 93
+}

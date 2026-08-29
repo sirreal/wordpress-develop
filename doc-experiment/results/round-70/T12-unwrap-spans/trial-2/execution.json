@@ -1,0 +1,71 @@
+{
+  "candidate": "/Users/jonsurrell/a8c/wordpress-develop/html-api-docs-improvement/doc-experiment/results/round-70/T12-unwrap-spans/trial-2/candidate.php",
+  "function": "unwrap_spans",
+  "passed": 7,
+  "total": 7,
+  "cases": [
+    {
+      "id": "simple",
+      "status": "pass",
+      "expected": "<p>a b <em>c</em> d</p>",
+      "actual": "<p>a b <em>c</em> d</p>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "nested-spans",
+      "status": "pass",
+      "expected": "<p>outer inner tail</p>",
+      "actual": "<p>outer inner tail</p>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "no-spans-normalized-passthrough",
+      "status": "pass",
+      "expected": "<div><p>plain &amp; simple</p></div>",
+      "actual": "<div><p>plain &amp; simple</p></div>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "attributes-discarded",
+      "status": "pass",
+      "expected": "styled",
+      "actual": "styled",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "adjacent-spans",
+      "status": "pass",
+      "expected": "<p>ab</p>",
+      "actual": "<p>ab</p>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "span-with-block-content",
+      "status": "pass",
+      "expected": "<div>before <img src=\"i.png\"> after</div>",
+      "actual": "<div>before <img src=\"i.png\"> after</div>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "unclosed-span",
+      "status": "pass",
+      "expected": "<p>runs to end</p>",
+      "actual": "<p>runs to end</p>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    }
+  ]
+}

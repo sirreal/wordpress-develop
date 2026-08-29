@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used the documented Tag Processor for a flat class edit, walked matches with `next_tag('img')`, used documented `add_class()`, and returned `get_updated_html()`. No `_doing_it_wrong`; all edge cases were handled by documented processor behavior."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same correct pattern as the reference, using the documented array query form `array('tag_name' => 'img')`. No undocumented APIs or misuse; all hidden cases passed."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used only documented APIs: `WP_HTML_Tag_Processor`, `next_tag()`, `add_class()`, and `get_updated_html()`. The implementation matches the documented idiom and preserved edge-case behavior."
+    }
+  ],
+  "failure_analysis": "No failed hidden cases across the three trials. The docs worked well for this task: `WP_HTML_Tag_Processor` > `Which processor should I use?` clearly points flat tag/class edits with byte-preserving output to the Tag Processor; `Finding tags` gives both `next_tag('img')` and `array('tag_name' => 'img')`; `WP_HTML_Tag_Processor::next_tag()` states tag matching is ASCII case-insensitive, comments/raw text are not matched as tags, and incomplete trailing tags are not modified; `Modifying CSS classes for a found tag` plus `WP_HTML_Tag_Processor::add_class()` explain appending without removing or reordering classes; and `WP_HTML_Tag_Processor::get_updated_html()` explains returning untouched bytes exactly. Near-miss: the candidates did not discuss duplicate-class behavior or added-attribute placement, but the API choice avoided those risks and the method docs cover most of the contract.",
+  "doc_gaps": [
+    {
+      "location": "`WP_HTML_Tag_Processor::add_class()` docblock",
+      "problem": "The method contract is strong, but the complete repeated-edit idiom is split across `next_tag()`, `add_class()`, and `get_updated_html()` sections.",
+      "suggestion": "Add a generic non-task-specific example showing a `while ( next_tag(...) ) { add_class(...) }` loop followed by `get_updated_html()` for adding a class to every matching tag."
+    },
+    {
+      "location": "`WP_HTML_Tag_Processor::add_class()` / `get_updated_html()` docblocks",
+      "problem": "When `add_class()` creates a new `class` attribute, output placement and quoting are only inferable by combining multiple sections.",
+      "suggestion": "State directly that a newly-created class attribute follows normal added-attribute serialization, while untouched attributes keep their original bytes."
+    },
+    {
+      "location": "`Finding tags` overview in `html-tag-processor.md`",
+      "problem": "The query table is useful, but the comment/raw-text/incomplete-token guarantees appear later in the method details.",
+      "suggestion": "Add a short cross-reference under the query table noting that `next_tag()` matches only real tags, skips comments/raw-text contents, and pauses before incomplete trailing syntax."
+    }
+  ]
+}

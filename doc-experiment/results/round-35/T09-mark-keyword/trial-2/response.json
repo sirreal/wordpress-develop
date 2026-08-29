@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the BODY fragment with full HTML structure awareness, then walks every token with `next_token()`. For ordinary `#text` tokens only, it reads decoded text via `get_modifiable_text()`, checks for a case-sensitive substring with `str_contains()`, and when matched emits `<mark>` around that token\u2019s normalized serialization from `serialize_token()`. All other tokens are serialized unchanged with `serialize_token()`, which preserves normalized output and naturally skips wrapping special text-bearing elements because their contents are not exposed as `#text` child tokens.",
+  "confidence": 89
+}

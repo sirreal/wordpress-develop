@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan the HTML linearly, remember the last `H2` opener with a bookmark, then `seek()` back to that bookmark and call `add_class( 'final-section' )` before \u057e\u0565\u0580\u0561\u0564\u0561\u0580\u0571ing `get_updated_html()`. If no `H2` is found, the function returns the original HTML unchanged.",
+  "confidence": 96
+}

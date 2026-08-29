@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body fragment structurally, then walks the token stream with `next_token()`. It starts a result entry on each opening `A` tag whose `get_attribute( 'href' )` returns a string, appends decoded text from `#text` tokens via `get_modifiable_text()`, also handling text carried on special element tokens, and finalizes each link when the matching `A` closer is visited with `is_tag_closer()`.",
+  "confidence": 84
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This implementation uses WP_HTML_Tag_Processor::next_token() to iterate through all tokens in the HTML document, collecting text from each #text node using get_modifiable_text() which automatically decodes character references. The resulting string is then truncated to the specified number of UTF-8 code points using mb_substr() with explicit UTF-8 encoding to avoid cutting multi-byte characters. Zero or negative max_codepoints values return an empty string as specified.",
+  "confidence": 85
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the input as a body fragment, then walked tokens with next_token() and built a rewritten normalized serialization with serialize_token(). Only ordinary #text tokens are checked via get_modifiable_text(), so text inside script, style, title, and textarea is left untouched, and a whole text token is wrapped in <mark> when it contains the keyword.",
+  "confidence": 90
+}

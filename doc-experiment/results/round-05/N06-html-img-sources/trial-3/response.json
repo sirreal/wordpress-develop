@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "\nThe implementation uses WP_HTML_Processor to properly parse the HTML fragment in BODY context, then iterates through all IMG tags while filtering by namespace to exclude SVG image elements. For each HTML IMG element found, it retrieves the decoded src attribute value using get_attribute() and collects non-empty values in document order. The processor automatically handles HTML5 parsing rules including the proper interpretation of what constitutes an IMG element versus an SVG image element.\n",
+  "confidence": 82
+}

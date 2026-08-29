@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor to properly parse HTML tables as a browser would. It creates a fragment processor, finds the first TABLE element, then walks through all tokens within the table using get_current_depth() to track nesting. For each TR (row), it iterates through TD and TH cells, collecting text content from all #text tokens within each cell using get_modifiable_text(), which automatically decodes character references. This approach handles omitted closing tags and optional TBODY/THEAD wrappers correctly, matching browser behavior.",
+  "confidence": 75
+}

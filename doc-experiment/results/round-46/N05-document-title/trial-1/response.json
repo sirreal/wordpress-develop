@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_full_parser()` because the input is a complete HTML document, then finds the first `<title>` in document structure with `next_tag()` and a `breadcrumbs` query for `HEAD > TITLE`. If found, it returns `get_modifiable_text()`, which the docs say yields decoded TITLE text and correctly returns an empty string for an empty `<title>` element.",
+  "confidence": 94
+}

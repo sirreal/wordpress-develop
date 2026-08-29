@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Passed 8/8. Correctly chose WP_HTML_Processor::create_fragment(), used only documented methods, filtered href with is_string(), and collected decoded #text via get_modifiable_text(). The single-pass closer-driven state matches the next_token() docs. Minor adherence concern: the final get_last_error() check returns an empty result after unsupported markup even if valid links were already collected, which is a policy choice not specified by the task."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Passed 8/8. This is effectively the canonical documented pattern: create_fragment(), next_tag('A'), is_string(get_attribute('href')), record get_current_depth(), then bounded next_token() walking with >= depth and #text/get_modifiable_text(). All called methods are present in the rendered docs."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Passed 8/8. Correct processor choice and only documented APIs. The stack-based single next_token() walk follows the docs' one-cursor guidance and uses closer tokens reliably. It handles null/true/string href semantics and decoded text correctly. Slight residual concern: it does not inspect get_last_error(), so unsupported markup would produce best-effort partial results, though the task did not require a rejection policy."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial: each execution.json reports 8/8 passing and no _doing_it_wrong records. The rendered docs were effective in three places: HTML Processor > HTML Support explicitly says to choose WP_HTML_Processor for structure, text collection, subtree walking, and create_fragment() for BODY fragments; get_attribute() documents string|true|null return values, which led all trials to use is_string() and exclude valueless href; and the next_token()/get_current_depth()/get_modifiable_text() sections explain subtree text collection, decoded text, #text filtering, and virtual closers for unclosed input. Near-misses: trial-1 over-applies get_last_error() as an all-or-nothing extraction failure, while trial-3 never checks it; the docs describe parser aborts but do not give a clear read-only extraction policy. Trial-2 uses the canonical nested next_tag()+bounded next_token() shape, but the next_token() docs' broad 'do not nest walk loops' warning could confuse readers about when that shape is safe for repeated region extraction.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_attribute() docblock / rendered method section",
+      "problem": "The HTML Processor method section shows string|true|null examples but does not state the full contract as clearly as the Tag Processor tutorial: decoded string values, empty string for explicitly empty values, true for valueless boolean syntax, and null for absent attributes.",
+      "suggestion": "Add a compact return-value table and example covering href=\"\", href, missing href, and href=\"/x?a=1&amp;b=2\". Explicitly recommend is_string() when callers require a present attribute with a string value."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token() and 'Recipe: collect DOM-style text from a subtree'",
+      "problem": "The docs warn against nested walk loops, but the safe and useful pattern of an outer next_tag() search plus an inner depth-bounded next_token() scan for each matched element is not explicitly distinguished from unsafe nested next_token() loops.",
+      "suggestion": "Add a 'repeated subtree extraction' example showing next_tag('X') followed by a depth-bounded inner next_token() loop, and clarify that the one-cursor hazard applies when outer token-walk state expects to see the boundary token again."
+    },
+    {
+      "location": "WP_HTML_Processor::get_last_error() / HTML Support",
+      "problem": "Unsupported-markup behavior is documented, but read-only extraction policy is left implicit. Candidates can reasonably choose all-or-nothing failure or best-effort partial results.",
+      "suggestion": "Add guidance for readers: after a read-only scan, get_last_error() means later tokens may not have been visited; callers requiring complete results should reject or fall back, while best-effort extractors may return partial results only by explicit policy."
+    },
+    {
+      "location": "WP_HTML_Processor::get_modifiable_text() / text extraction recipe",
+      "problem": "The docs explain that SCRIPT, STYLE, TITLE, and TEXTAREA carry text on the element token, but the distinction between ordinary #text-token extraction and exact DOM textContent-style extraction remains easy to miss.",
+      "suggestion": "Add a short note naming the two intended modes: collect only #text tokens for ordinary descendant text, or include special element token text deliberately when the caller wants those elements' textual contents."
+    }
+  ]
+}

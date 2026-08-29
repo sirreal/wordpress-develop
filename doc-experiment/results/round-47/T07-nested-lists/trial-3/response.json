@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because the task depends on document structure, then scans list openers with `next_tag()`, checks each matched list\u2019s ancestor path via `get_breadcrumbs()`, and calls `add_class()` when a `UL` or `OL` appears above it. The result is returned with `get_updated_html()` so only the targeted tag attributes change and the rest of the fragment stays byte-for-byte intact; if the HTML Processor reports unsupported markup with `get_last_error()`, it falls back to the original input unchanged.",
+  "confidence": 90
+}

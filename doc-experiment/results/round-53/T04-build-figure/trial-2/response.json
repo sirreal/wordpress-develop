@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the HTML Processor fragment factory to start from a literal template that already contains `src`, `alt`, and placeholder figcaption text in the required order, then updated the `IMG` opener attributes in place with `set_attribute()` and replaced the placeholder text with `set_modifiable_text()`, which handles HTML encoding for unescaped input.",
+  "confidence": 93
+}

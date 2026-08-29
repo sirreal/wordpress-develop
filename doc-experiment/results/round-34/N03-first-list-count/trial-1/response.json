@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because the task depends on document structure. It scans to the first `UL` or `OL` with `next_tag()`, bookmarks that opener, then walks forward with `next_token()` while the current depth stays inside that list. Direct child items are counted by checking for `LI` opening tags at exactly one level deeper than the list, and the function only applies `set_attribute()` after confirming the scan ended cleanly with no incomplete token and no processor error; otherwise it returns the original HTML unchanged.",
+  "confidence": 91
+}

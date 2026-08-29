@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor to parse the HTML fragment into tokens, iterates through each token, and skips SPAN opening and closing tags while preserving all other content. It tracks SPAN nesting depth to handle nested spans correctly. Finally, it normalizes the output using WP_HTML_Processor::normalize() to ensure the HTML is properly formatted with closed tags, double-quoted attributes, and canonical text encoding.",
+  "confidence": 45
+}

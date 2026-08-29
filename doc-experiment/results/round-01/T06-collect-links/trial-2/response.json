@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML fragment in BODY context. It iterates with next_tag('A') to find each A opener, retrieves the href attribute via get_attribute('href') (which returns null when absent, string when present, or true for boolean attributes), and skips any without an href. For each qualifying A, it records the current depth via get_current_depth(), then calls next_token() in a loop \u2014 accumulating get_modifiable_text() for every '#text' token type (checked via get_token_type()) \u2014 until the depth drops below the A opener's depth, exactly following the documented pattern from next_token()'s example for collecting an element's text content.",
+  "confidence": 90
+}

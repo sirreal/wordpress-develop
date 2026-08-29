@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Used the right processor (`WP_HTML_Processor::create_fragment`) for body-fragment normalization and structural token walking. All HTML API methods called are documented: `create_fragment`, `next_token`, `get_token_type`, `get_modifiable_text`, `serialize_token`, and `get_last_error`. The implementation follows the documented `#text`-guarded decoded-text pattern and token-by-token serialization. Passed 8/8 hidden cases. Minor caveat: returning an empty string on parser error is a caller-policy choice, but it is consistent with the docs' reject/fallback guidance."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Same strong adherence as trial-1, using only documented APIs and the documented HTML Processor patterns for normalized rewriting. Correctly avoids comments, attributes, split text, and special text-bearing elements by checking `#text` before `get_modifiable_text()`. Passed 8/8 hidden cases. Minor caveat: the parser-error return policy is reasonable but not dictated by the task."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Uses the correct processor and only documented APIs, and the main token-walking/serialization strategy is idiomatic. Passed 8/8 hidden cases. The main adherence weakness is the `get_last_error()` fallback returning raw `$html`; for a function promising normalized output, raw input fallback can discard wrappers and normalization if unsupported markup is encountered. The missing empty-keyword guard is not a problem because the task states the keyword is non-empty."
+    }
+  ],
+  "failure_analysis": "All trials passed all hidden cases. The rendered docs did well on the key decision points: `WP_HTML_Tag_Processor` heading `Which processor should I use?` says to use the HTML Processor when structure or normalized output matters; `WP_HTML_Processor` heading `Recipe: collect DOM-style text from a subtree` explicitly says ordinary DOM text is only `#text` tokens and warns that comments, processing instructions, and special-element opener text can also have modifiable text; `get_modifiable_text()` states that `#text` text is decoded; `next_token()` states that SCRIPT, STYLE, TITLE, and TEXTAREA do not produce `#text` child tokens; and `serialize_token()` explains token-by-token normalized rewriting and wrappers. Near-misses were around error policy rather than the main API: trials added `get_last_error()` handling, and trial-3 chose raw input fallback, likely because the `serialize_token()` docs say to reject or fall back without distinguishing normalized-output contracts from byte-preserving fallback contracts.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::serialize_token() docblock",
+      "problem": "The docs say to reject or fall back when `get_last_error()` is non-null, but do not spell out that returning the original input forfeits normalized serialization and any emitted token-loop changes.",
+      "suggestion": "Add a sentence that raw-input fallback is only appropriate for callers whose contract permits preserving original bytes; callers promising normalized or rewritten output should reject, return null/empty by policy, or otherwise avoid presenting raw input as normalized output."
+    },
+    {
+      "location": "WP_HTML_Processor::serialize_token() docblock",
+      "problem": "The docs describe emitting extra markup around selected tokens, but the contract for caller-emitted markup is implicit.",
+      "suggestion": "Clarify that `serialize_token()` normalizes only the current token; any literal markup the caller concatenates is trusted caller output and should be fixed, valid markup or produced by another safe builder."
+    },
+    {
+      "location": "WP_HTML_Processor::get_modifiable_text() docblock",
+      "problem": "The decoded-text rule is present, but the search/read versus output distinction could be easier to apply.",
+      "suggestion": "Add a concise note: use the returned decoded string for comparisons, measuring, and application logic; use `serialize_token()` or `set_modifiable_text()` for output so text is encoded according to the HTML context."
+    }
+  ]
+}

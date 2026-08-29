@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I implemented `html_text_excerpt()` by using `WP_HTML_Processor::create_fragment()` to parse the HTML, then iterating through tokens with `next_token()`. For each text node (identified by `get_token_type() === '#text'`), I collected its decoded text via `get_modifiable_text()` and truncated by Unicode codepoints using `mb_strlen()` and `mb_substr()` with explicit UTF-8 encoding. The function respects the max_codepoints limit by tracking cumulative codepoint count and stopping when reaching the limit, properly handling multi-byte characters without cutting them off.",
+  "confidence": 82
+}

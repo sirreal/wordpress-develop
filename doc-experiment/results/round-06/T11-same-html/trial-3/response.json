@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The solution uses WP_HTML_Processor::normalize() which parses each HTML fragment according to HTML5 rules and produces a normalized form. This handles optional closing tags, implied elements, case normalization, attribute value quoting, and character references. If either input cannot be fully parsed, normalize() returns null. By comparing the normalized outputs for equality, we determine if both fragments represent the same DOM structure.",
+  "confidence": 92
+}

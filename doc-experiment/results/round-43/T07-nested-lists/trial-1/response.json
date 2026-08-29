@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because the task depends on document structure. It walks list openers with `next_tag()`, checks each matched `UL` or `OL` element\u2019s `get_breadcrumbs()` path for any earlier `UL` or `OL` ancestor, and applies `add_class( 'nested-list' )` only to those nested lists. The final HTML is returned with `get_updated_html()`, and unsupported-parser failure is handled by returning the original input unchanged.",
+  "confidence": 89
+}

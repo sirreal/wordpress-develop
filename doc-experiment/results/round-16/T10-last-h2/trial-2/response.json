@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor to linearly scan the HTML document for H2 tags. Each time an H2 is found, a bookmark named 'last_h2' is set at that position (resetting the bookmark moves it, effectively tracking the last H2). After scanning completes, if a bookmark exists, the processor seeks to it and adds the 'final-section' class using the add_class() method. The get_updated_html() method returns the modified document with all changes applied while preserving the rest of the HTML byte-for-byte.",
+  "confidence": 92
+}

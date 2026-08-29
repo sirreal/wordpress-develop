@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor::next_token() to iterate through all tokens in the HTML document, collecting text only from '#text' type tokens (which excludes script/style contents that aren't text nodes). The modifiable text is already decoded by get_modifiable_text(), so no additional decoding is needed. Finally, mb_substr() with UTF-8 encoding safely truncates the accumulated text to exactly max_codepoints without cutting multi-byte characters in the middle.",
+  "confidence": 75
+}

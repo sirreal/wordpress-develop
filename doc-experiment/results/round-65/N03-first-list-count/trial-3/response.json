@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the HTML Processor fragment parser to find the first `UL` or `OL`, bookmarked that opener, then walked tokens with `next_token()` while tracking `get_current_depth()` to count only direct `LI` children. The function rejects truncated or unsupported input by checking `paused_at_incomplete_token()` and `get_last_error()`, then seeks back to the bookmarked opener and applies `set_attribute()` before returning `get_updated_html()`.",
+  "confidence": 91
+}

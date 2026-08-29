@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "\nThe implementation uses WP_HTML_Processor to properly parse HTML and distinguish between HTML IMG elements and SVG IMAGE elements by checking the namespace with get_namespace(). It iterates through all IMG tags found in the HTML namespace only, retrieves their decoded src attribute values using get_attribute(), and includes only non-empty, non-null values in the returned array. The processor handles mismatched tags and SVG foreign content automatically, ensuring correct document parsing.\n",
+  "confidence": 92
+}

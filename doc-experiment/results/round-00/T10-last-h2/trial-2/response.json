@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Tag_Processor to scan for all H2 opener tags (next_tag('H2') skips tag closers and HTML comments by default). At each H2 found, it overwrites a single named bookmark 'last-h2', so after the loop the bookmark points to the last H2. If no H2 was found, the original HTML is returned unchanged. Otherwise, seek() repositions the cursor to that bookmark, add_class('final-section') enqueues the class addition, and get_updated_html() returns the modified document. The APIs used are: next_tag(), set_bookmark(), seek(), add_class(), release_bookmark(), and get_updated_html(), all documented in html-tag-processor.md.",
+  "confidence": 97
+}

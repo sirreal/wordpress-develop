@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correctly used WP_HTML_Tag_Processor for a flat attribute edit; every called API was documented: constructor, next_tag(), get_attribute(), set_attribute(), get_updated_html(). The null check handles absent vs empty/valueless href, and get_updated_html() is the documented byte-preserving output path. Execution passed 8/8 with no _doing_it_wrong records."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same correct implementation pattern as trial-1. It used documented linear tag walking, checked href presence with null === get_attribute(), overwrote target with set_attribute(), and returned get_updated_html(). Edge cases for empty href, valueless href, uppercase HREF, comments, and existing target all passed."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice and documented API usage throughout. The implementation uses the documented get_attribute() return contract rather than truthiness, so present empty and valueless href attributes are handled. Execution passed all hidden cases without misuse warnings."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial: all three passed 8/8. The rendered docs did well on the exact concepts this task required. The Tag Processor overview explicitly says to use it for flat tag-name/class searches, attribute changes, and byte-precise edits; the HTML Processor docs reinforce that the heavier parser is for structural work. next_tag() documents string tag-name queries, ASCII case-insensitive matching, real-tag-only matching so comments are ignored, and incomplete-token behavior. get_attribute() documents null for absent attributes, true for valueless attributes, and decoded string values. set_attribute() documents overwriting existing attributes, creating new attributes, boolean handling, and deterministic placement of new attributes. get_updated_html() clearly states it is the way to retrieve queued edits while preserving every untouched byte. Near-miss: trial explanations referred to valueless href as boolean href; the API behavior is correct, but the docs' use of 'boolean attributes' for valueless syntax could be misread as applying only to spec-defined boolean attributes.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::get_attribute()",
+      "problem": "The docs describe valueless attributes as 'boolean attributes', which can be confused with HTML's spec-defined boolean attribute list. In practice, any present attribute written without a value, including non-boolean attributes such as href, returns true.",
+      "suggestion": "Use wording like 'valueless/boolean-form attributes' and explicitly state that any present attribute with no explicit value returns true, regardless of whether that attribute is a semantic HTML boolean attribute."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::get_attribute() and ::set_attribute()",
+      "problem": "The method docs do not make attribute-name case-insensitivity prominent at the point where callers test or update attributes. This matters for inputs such as HREF, DATA-ID, or mixed-case attributes.",
+      "suggestion": "Add a short contract note that attribute-name lookup and updates in HTML are ASCII case-insensitive, while untouched source spelling is preserved unless that specific attribute is rewritten."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor usage examples",
+      "problem": "The return-value contract for attribute presence is documented, but the common predicate is not named directly. Less careful readers may use truthiness and accidentally skip present empty-string attributes.",
+      "suggestion": "Add a general example or note: to test whether an attribute is present, compare get_attribute( $name ) against null; do not rely on truthiness because an empty string is still a present attribute."
+    }
+  ]
+}

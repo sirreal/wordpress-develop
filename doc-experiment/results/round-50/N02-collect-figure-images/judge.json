@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor::create_fragment(), walked IMG tags, used get_breadcrumbs() for containment, and used get_attribute() with string/non-empty checks, so null, true, empty string, and decoded attribute semantics are handled. All called methods are documented; execution recorded no _doing_it_wrong. Minor over-conservatism: it returns an empty array after an incomplete-token pause or parser error even though the read-only extraction docs describe that as caller policy rather than a universal requirement."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Best match to the documented pattern: HTML Processor for structure, next_tag('IMG') for document-order scan, get_breadcrumbs() for ancestor containment, get_attribute() for decoded src values, and string/non-empty filtering. All called methods are documented; execution recorded no _doing_it_wrong. It checks get_last_error() after the scan, which is acceptable though not required for this read-only extraction contract."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 84,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and only documented API calls, with good handling of get_attribute() return semantics. The main API misunderstanding is treating the breadcrumbs query array('FIGURE','IMG') as an arbitrary-depth ancestor-descendant selector. The docs define breadcrumb queries as a contiguous DOM sub-path, equivalent to CSS child combinators, so this only matches direct FIGURE > IMG paths and misses deeper descendants."
+    }
+  ],
+  "failure_analysis": "trial-3 failed nested-depth, figcaption-sibling, and unclosed-figure for the same reason: it interpreted next_tag(array('breadcrumbs' => array('FIGURE','IMG'))) as 'an IMG anywhere inside a FIGURE'. In actual API semantics, breadcrumbs are a contiguous path suffix. For nested-depth, the matched IMG has breadcrumbs HTML > BODY > FIGURE > DIV > A > IMG, so FIGURE > IMG is not a match. For figcaption-sibling, cap.jpg is at FIGURE > FIGCAPTION > IMG. For unclosed-figure, later.jpg is at FIGURE > P > IMG. The relevant docs are the HTML Processor 'Breadcrumbs' section, which says breadcrumbs are equivalent to tag names separated by the CSS child combinator and explicitly says array('P','IMG') matches IMG elements directly inside P, plus matches_breadcrumbs(), which says '*' matches a single tag and that '**' for arbitrary depth is intentionally not supported. The gap is that the next_tag() parameter table and initial usage example make the breadcrumbs query look convenient for containment, but they do not put a direct warning or recipe beside the query option for arbitrary-depth ancestor membership. Trials 1 and 2 show the docs did succeed at steering subjects to WP_HTML_Processor instead of WP_HTML_Tag_Processor, to get_breadcrumbs() for structure, and to get_attribute() for decoded attribute values with true/null/empty-string handling.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::next_tag() parameter docs for $query['breadcrumbs']",
+      "problem": "The description says 'DOM sub-path' and gives array('FIGURE','IMG'), but does not explicitly warn that the path must be contiguous and does not mean 'descendant at any depth'.",
+      "suggestion": "Add a sentence next to the breadcrumbs query option: 'This is an exact contiguous breadcrumb suffix, equivalent to child combinators; it has no descendant-at-any-depth operator. To find a leaf tag under an ancestor at any depth, scan for the leaf tag and inspect get_breadcrumbs().' "
+    },
+    {
+      "location": "HTML Processor 'Breadcrumbs' overview",
+      "problem": "The section explains child-combinator semantics, but the examples are all positive matches. A reader can still overgeneralize array('ANCESTOR','LEAF') into arbitrary containment.",
+      "suggestion": "Add a contrasting negative example showing that ANCESTOR > LEAF does not match ANCESTOR > DIV > LEAF, then show the general ancestor-membership pattern using in_array() on get_breadcrumbs(), excluding the current node when the distinction matters."
+    },
+    {
+      "location": "WP_HTML_Processor::matches_breadcrumbs() docs and next_tag() breadcrumbs docs",
+      "problem": "The no-'**' arbitrary-depth wildcard caveat appears under matches_breadcrumbs(), but not where many users encounter breadcrumbs first: next_tag() queries and the Breadcrumbs overview.",
+      "suggestion": "Repeat or cross-link the wildcard limitation in the next_tag() breadcrumbs parameter docs: '*' matches exactly one element and there is no multi-level wildcard; use explicit scanning plus breadcrumb inspection for arbitrary depth."
+    },
+    {
+      "location": "HTML Processor structural examples involving malformed or omitted closing tags",
+      "problem": "The docs explain virtual closers and unclosed elements mainly for next_token() subtree walks, but not how intermediate open elements still affect breadcrumb-query matching for next_tag().",
+      "suggestion": "Add a short note that implied, unclosed, or still-open intermediate elements remain part of get_breadcrumbs(), so fixed breadcrumb queries must include those levels or use an ancestor-membership check."
+    }
+  ]
+}

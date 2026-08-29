@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` for a flat scan over every tag opener with `next_tag()`, then uses the documented `get_attribute_names_with_prefix( 'data-track-' )` helper to find only matching attributes on the current tag and removes each with `remove_attribute()`. The final HTML is returned with `get_updated_html()`, preserving all untouched bytes.",
+  "confidence": 98
+}

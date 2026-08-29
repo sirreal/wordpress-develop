@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Score breakdown: 30/30 processor choice, 30/30 documented API usage, 25/25 idiomatic patterns, 15/15 edge handling. This follows the documented Tag Processor template recipe closely: existing `src` and `alt` placeholders preserve attribute order, `next_token()` finds the `#text` placeholder, `set_modifiable_text()` handles caption encoding, and `get_updated_html()` returns queued edits. All 7 hidden cases passed with no `_doing_it_wrong` records."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Score breakdown: 30/30 processor choice, 30/30 documented API usage, 24/25 idiomatic patterns, 15/15 edge handling. Same correct Tag Processor template strategy as trial 1. The only minor idiom deduction is the impossible `return ''` branch for a literal known-good template, but it is harmless and not an API misuse. All 7 hidden cases passed with no `_doing_it_wrong` records."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 94,
+      "hallucinated_methods": [],
+      "notes": "Score breakdown: 25/30 processor choice, 30/30 documented API usage, 24/25 idiomatic patterns, 15/15 edge handling. `WP_HTML_Processor::create_fragment()` is documented and the inherited mutation methods are valid, but the job is a flat fixed-template construction where the docs point more directly to `WP_HTML_Tag_Processor`. The implementation still uses the right template, token-walk, `#text`, `set_modifiable_text()`, and `get_updated_html()` pattern. All 7 hidden cases passed with no `_doing_it_wrong` records."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial. The docs did well on the core requirements: `html-tag-processor.md` has a direct `Building markup from a template` recipe explaining literal templates, pre-existing attributes for stable order, placeholder text for `set_modifiable_text()`, and `get_updated_html()` for output. The `set_attribute()` and `set_modifiable_text()` sections also clearly say callers should pass plain unescaped strings and let the API encode them, which prevented failures in the ampersand, quote, angle-bracket, URL, Unicode, and script-text cases. Near-misses: trial 3 chose the heavier HTML Processor despite the task not requiring structure; this is understandable because `html-processor.md` presents `create_fragment()` as the construction entry point for fragments and only later contrasts structural work with flat edits. Another near-miss is that all candidates rely on the `#text` placeholder succeeding without checking `set_modifiable_text()`'s boolean return, while the method prose says to always check it. That is safe for this controlled template but the docs currently send mixed signals between the recipe and the method contract.",
+  "doc_gaps": [
+    {
+      "location": "html-tag-processor.md `next_token()` method",
+      "problem": "The method documentation still says the Tag Processor currently only supports the tag token, even though the same rendered doc documents `#text`, comments, doctypes, and examples that depend on reaching `#text` tokens.",
+      "suggestion": "Replace the stale sentence with the current token support contract and explicitly mention that `next_token()` can be used to reach text placeholders for `set_modifiable_text()`."
+    },
+    {
+      "location": "html-tag-processor.md `set_modifiable_text()` and `Building markup from a template`",
+      "problem": "`set_modifiable_text()` says to always check the boolean return value, but the template-building recipe omits that check after matching `#text`. Readers can reasonably copy either pattern.",
+      "suggestion": "Make the recipe and method contract consistent: show a return-value check/fallback, or state that a known literal template with a matched `#text` placeholder makes success a controlled precondition."
+    },
+    {
+      "location": "html-processor.md Method Index / inherited mutation APIs",
+      "problem": "The HTML Processor docs mention inherited `get_updated_html()` and Tag Processor mutation APIs, but the method index does not surface inherited methods such as `set_modifiable_text()` and `get_updated_html()`.",
+      "suggestion": "Add an `Inherited from WP_HTML_Tag_Processor` subsection listing the inherited mutation/output methods with links to their canonical contracts."
+    },
+    {
+      "location": "html-processor.md `set_attribute()`",
+      "problem": "The HTML Processor `set_attribute()` section documents encoding and boolean attributes but omits the attribute placement/order rule that appears in the Tag Processor docs. A reader using HTML Processor for fragment construction could miss that newly added attributes are not ordered by call order.",
+      "suggestion": "Duplicate or cross-reference the Tag Processor attribute placement contract from the HTML Processor override docs, especially the rule to predeclare attributes in templates when exact output order matters."
+    }
+  ]
+}

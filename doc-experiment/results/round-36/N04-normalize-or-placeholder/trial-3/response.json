@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This delegates normalization to `WP_HTML_Processor::normalize()`, which is the documented HTML Processor API for turning a BODY-context fragment into normalized serialized HTML. Per the docs, that method returns `null` when the HTML Processor cannot normalize unsupported input, so the function returns the required fallback HTML in that case.",
+  "confidence": 98
+}

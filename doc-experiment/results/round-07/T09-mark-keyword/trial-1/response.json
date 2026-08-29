@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor to parse the HTML fragment and iterate through all tokens. For each text node ('#text' token type), it checks if the decoded text (via get_modifiable_text()) contains the keyword as a case-sensitive substring. If it does, the entire text node is wrapped in '<mark>' tags by concatenating '<mark>' + the serialized token + '</mark>'. All tokens are serialized to produce normalized HTML output (closed tags, double-quoted attributes, encoded text). Non-text tokens and text nodes without the keyword are appended unchanged.",
+  "confidence": 72
+}

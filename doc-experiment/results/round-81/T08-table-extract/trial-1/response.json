@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in BODY context, then walked the first TABLE subtree with `next_tag()`, `next_token()`, `get_current_depth()`, `get_token_type()`, `get_tag()`, `is_tag_closer()`, and `get_modifiable_text()` to collect row and cell text while respecting browser-style implied table structure. Text is accumulated only from `#text` tokens inside the current `TD`/`TH`, and the function returns an empty array if no table is found or the fragment cannot be parsed.",
+  "confidence": 89
+}

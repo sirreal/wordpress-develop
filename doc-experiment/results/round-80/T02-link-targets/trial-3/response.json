@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan the document linearly, matched only `a` tags, and relied on `get_attribute( 'href' )` to detect presence even for empty or boolean `href` values. For matching links I overwrote `target` with `set_attribute( 'target', '_blank' )`, then returned the byte-preserving result with `get_updated_html()`.",
+  "confidence": 98
+}

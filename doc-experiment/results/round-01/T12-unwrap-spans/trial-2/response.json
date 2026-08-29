@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the input as a body-context HTML fragment, then iterated every token (including tag closers, text nodes, etc.) with next_token(). For each token, I check if it is a SPAN element (get_tag() returns 'SPAN' for both openers and closers of span elements). If it is, I skip it with continue; otherwise I accumulate the normalized serialization of the token via serialize_token(). The HTML Processor's serialize_token() produces the canonical/normalized form of each token, so the concatenation yields the required normalized output\u2014attribute values double-quoted, optional tags closed, text re-encoded\u2014with all span wrappers (and their attributes) removed while their content is preserved.",
+  "confidence": 82
+}

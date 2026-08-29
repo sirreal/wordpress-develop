@@ -1,0 +1,13 @@
+<?php
+
+function add_link_targets( string $html ): string {
+	$tags = new WP_HTML_Tag_Processor( $html );
+
+	while ( $tags->next_tag( 'a' ) ) {
+		if ( null !== $tags->get_attribute( 'href' ) ) {
+			$tags->set_attribute( 'target', '_blank' );
+		}
+	}
+
+	return $tags->get_updated_html();
+}

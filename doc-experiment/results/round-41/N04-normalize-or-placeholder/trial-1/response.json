@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This calls the documented `WP_HTML_Processor::normalize()` helper, which normalizes a BODY-context HTML fragment and returns `null` when the HTML Processor cannot normalize unsupported input; in that failure case, the function returns the exact required fallback placeholder HTML.",
+  "confidence": 98
+}

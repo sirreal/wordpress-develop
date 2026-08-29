@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment, then walked tokens with `next_token()` so I could collect ordinary `#text` descendants in document order while tracking the current `<a>` subtree by depth. For each opening `A` tag I read `href` with `get_attribute()`, kept only string values, and concatenated decoded text via `get_modifiable_text()` until the anchor closed.",
+  "confidence": 93
+}

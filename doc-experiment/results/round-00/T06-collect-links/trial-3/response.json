@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the HTML body fragment, then iterated all tokens with next_token(). For each #tag token, I detect A openers that have an href attribute (via get_attribute('href') returning non-null) and record the current depth via get_current_depth(). While inside such a link, I accumulate text from #text tokens using get_modifiable_text(), which returns decoded text content. When I encounter a closing A tag whose depth is less than the opening depth (meaning the closer for our anchor), I finalize the entry. The depth check handles nested A elements correctly: the opener increases depth, so the matching closer will be at depth - 1 relative to the opener's reported depth.",
+  "confidence": 72
+}

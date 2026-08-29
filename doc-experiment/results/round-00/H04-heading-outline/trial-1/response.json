@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML fragment in body context. It then iterates all tokens via next_token(), using get_token_type() to distinguish #tag tokens from #text tokens. When a heading opener (H1\u2013H6) is detected via get_tag() and !is_tag_closer(), it starts accumulating text into a current-heading buffer. For each #text token encountered while inside a heading, get_modifiable_text() appends the decoded text content (character references are decoded by the processor). When the corresponding heading closer is seen, the completed entry is pushed onto the results array. This approach relies on next_token(), get_token_type(), get_tag(), is_tag_closer(), and get_modifiable_text() \u2014 all documented public methods of WP_HTML_Processor.",
+  "confidence": 82
+}

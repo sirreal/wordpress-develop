@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body fragment with structural awareness, scans `IMG` openers in document order via `next_tag( 'IMG' )`, checks subtree membership with `get_breadcrumbs()` to keep only images inside a `FIGURE` ancestor, and reads decoded `src` values with `get_attribute()`, skipping missing or empty values. It returns an empty array if the fragment parser cannot be created, pauses on incomplete input, or aborts on unsupported markup, avoiding partial results.",
+  "confidence": 89
+}

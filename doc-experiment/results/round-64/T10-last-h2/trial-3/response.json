@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` because the task only needs a flat scan for the last `H2`, not tree-aware parsing. The function makes one forward pass with `next_tag( array( 'tag_name' => 'h2' ) )`, remembers the last match with a bookmark, then `seek()`s back and applies `add_class( 'final-section' )` before returning `get_updated_html()`.",
+  "confidence": 96
+}

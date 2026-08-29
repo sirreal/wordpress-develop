@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I use WP_HTML_Processor::create_fragment() to parse the HTML in BODY context, then iterate every token with next_token(). The HTML Processor's next_token() visits all tokens including virtual closing tags for elements left open (e.g. an unclosed &lt;p&gt; gets a virtual &lt;/p&gt; token), which ensures normalized output. For each token I call serialize_token() to get the normalized serialization. When the token type is '#text', I additionally call get_modifiable_text() to get the decoded text content (character references resolved), then check with strpos() whether it contains the keyword. If it does, I wrap the serialize_token() output (which is already properly HTML-encoded) in &lt;mark&gt;...&lt;/mark&gt;. All other tokens are passed through unchanged via serialize_token(). I check get_last_error() after each step and fall back to the original input if the processor bails on unsupported markup.",
+  "confidence": 72
+}

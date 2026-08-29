@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the input as a body-context fragment, then iterated through every token with `next_token()`. For each token, I call `get_tag()` \u2014 which returns null for non-tag tokens and an uppercase tag name for tag tokens \u2014 and skip the token entirely if it is a SPAN (covering both openers and closers, since the SPAN element and its attributes should be removed while its inner content remains by virtue of the other tokens being serialized). All other tokens are appended via `serialize_token()`, which produces normalized HTML for each token. The accumulated string is then passed through `WP_HTML_Processor::normalize()` to produce the final normalized serialization required by the task.",
+  "confidence": 72
+}

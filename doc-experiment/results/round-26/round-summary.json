@@ -1,0 +1,154 @@
+{
+  "round_score": 99.17,
+  "core_score": 99.17,
+  "by_split": {
+    "train": 99.17
+  },
+  "by_concept": {
+    "text": 100.0,
+    "traversal": 97.5
+  },
+  "tasks": {
+    "T03-first-h1-text": {
+      "score": 100.0,
+      "trials": [
+        {
+          "trial": "trial-1",
+          "passed": 8,
+          "total": 8,
+          "adherence": 100,
+          "score": 100.0
+        },
+        {
+          "trial": "trial-2",
+          "passed": 8,
+          "total": 8,
+          "adherence": 100,
+          "score": 100.0
+        },
+        {
+          "trial": "trial-3",
+          "passed": 8,
+          "total": 8,
+          "adherence": 100,
+          "score": 100.0
+        }
+      ],
+      "labels": {
+        "role": "core",
+        "commonness": "high",
+        "concept": "text",
+        "processor": "html",
+        "split": "train"
+      }
+    },
+    "N06-extract-toc": {
+      "score": 97.5,
+      "trials": [
+        {
+          "trial": "trial-1",
+          "passed": 7,
+          "total": 7,
+          "adherence": 93,
+          "score": 97.9
+        },
+        {
+          "trial": "trial-2",
+          "passed": 7,
+          "total": 7,
+          "adherence": 91,
+          "score": 97.3
+        },
+        {
+          "trial": "trial-3",
+          "passed": 7,
+          "total": 7,
+          "adherence": 91,
+          "score": 97.3
+        }
+      ],
+      "labels": {
+        "role": "core",
+        "commonness": "high",
+        "concept": "traversal",
+        "processor": "html",
+        "split": "train"
+      }
+    },
+    "T05-text-excerpt": {
+      "score": 100.0,
+      "trials": [
+        {
+          "trial": "trial-1",
+          "passed": 10,
+          "total": 10,
+          "adherence": 100,
+          "score": 100.0
+        },
+        {
+          "trial": "trial-2",
+          "passed": 10,
+          "total": 10,
+          "adherence": 100,
+          "score": 100.0
+        },
+        {
+          "trial": "trial-3",
+          "passed": 10,
+          "total": 10,
+          "adherence": 100,
+          "score": 100.0
+        }
+      ],
+      "labels": {
+        "role": "core",
+        "commonness": "high",
+        "concept": "text",
+        "processor": "html",
+        "split": "train"
+      }
+    }
+  },
+  "round_metadata": {
+    "round": "round-26",
+    "mode": "shadow-doc-a/b",
+    "task_ids": [
+      "T03-first-h1-text",
+      "N06-extract-toc",
+      "T05-text-excerpt"
+    ],
+    "task_count": 3,
+    "trials_per_task": 3,
+    "subject": {
+      "model": "gpt-5.4",
+      "reasoning_effort": "medium",
+      "service_tier": "priority"
+    },
+    "judge": {
+      "model": "gpt-5.5",
+      "reasoning_effort": "xhigh",
+      "service_tier": "priority"
+    },
+    "git_head": "25f2f4fbee2c4a308d82b33e673cbb1e2033683d",
+    "git_status_short": ""
+  },
+  "subject_isolation": {
+    "enforced": true,
+    "agent_type": "codex-cli-isolated-workdir",
+    "isolation_mode": "isolated-workdir",
+    "runner": "codex exec",
+    "input_delivery": "prompt-embedded-docs",
+    "sandbox_mode": "read-only",
+    "approval_policy": "never",
+    "project_rules_loaded": false,
+    "user_config_loaded": false,
+    "repo_available_to_subject": false,
+    "input_files": [
+      "html-processor.md",
+      "html-tag-processor.md",
+      "task.md"
+    ],
+    "work_root": "/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/html-api-docs-eval/round-26/codex-cli-trials",
+    "equivalent_boundary_notes": "Each subject process runs from a private non-repo directory containing only the two staged rendered docs, one task prompt, and the output schema. The task and rendered docs are embedded directly in the subject prompt because local codex exec does not expose the experiment's Read/Grep-only tools. Codex project rules and user config are ignored; the process uses a read-only sandbox and approval policy never."
+  }
+}

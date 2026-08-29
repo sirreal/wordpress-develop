@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the body fragment, then next_tag() to find the first H1 opener and next_token() with get_current_depth() to walk its subtree. I only concatenated #text tokens via get_modifiable_text(), which already returns decoded text for ordinary text nodes, so nested markup contributes nothing and an image-only H1 correctly yields an empty string.",
+  "confidence": 96
+}

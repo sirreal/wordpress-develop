@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body fragment with structure awareness, scans tags in document order with `next_tag()`, filters for `H1` through `H6` via `get_tag()`, and for each heading walks its subtree with `next_token()` while the depth stays within the heading using `get_current_depth()`. It appends only `#text` token content via `get_token_type()` and `get_modifiable_text()`, which yields heading text without including markup tags.",
+  "confidence": 89
+}

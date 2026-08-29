@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Essentially identical to the canonical reference. Correct processor (WP_HTML_Processor, required for serialize_token and structure-aware token walking that emits virtual closers for normalization). Idiomatic walk: next_token() loop, get_token_type()=='#text', match on get_modifiable_text() (decoded), wrap serialize_token() (canonically re-encoded). Cleanly separates decoded-vs-raw text, which is the crux of the entity-encoded case. All 8 hidden cases pass. Returns '' on null create_fragment, matching the reference. Explanation correctly notes serialize_token() runs on every token including virtual ones. No deductions."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Same correct structure and APIs as trial-1; all methods documented; all 8 cases pass. Idiomatic token walk and correct decoded/raw separation. Minor: on null create_fragment it returns the raw $html instead of '' or a normalized form, which would yield un-normalized output in that branch (never triggered here since context/encoding are valid). 2-point deduction for the slightly-off fallback contract."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Same correct core. Adds defensive get_last_error() checks (documented method) and $html fallback for bail handling, showing good awareness of the HTML Processor's bail-on-unsupported semantics. All 8 cases pass. Minor deductions: the get_last_error() check immediately after a successful next_token() is redundant (next_token() already returns false when the parser bails), and the $html fallback emits un-normalized output if the processor ever bails mid-document, which contradicts the 'always normalized' contract. Idiomatic otherwise."
+    }
+  ],
+  "failure_analysis": "No failures: all three trials passed all 8 hidden cases, and all three independently reproduced the canonical reference solution. Every method called (WP_HTML_Processor::create_fragment, next_token, get_token_type, get_modifiable_text, serialize_token, and get_last_error in trial-3) is documented in the two markdown files; no hallucinated or _doing_it_wrong usage in any execution.json.\n\nWhat the docs did well (the reason this task succeeded where it could easily have failed):\n\n1. The decoded-vs-raw distinction. The entity-encoded case (`<p>w&#111;rld peace</p>` matching keyword `world`) is the trap: matching must use decoded text, output must re-encode. get_modifiable_text()'s docblock (html-processor.md, get_modifiable_text section) states inner #text contents are returned as decoded text, and the special-elements section in html-tag-processor.md ('Tokens and modifiable text', TITLE/TEXTAREA note: '1 &lt; 2 < 3 becomes 1 < 2 < 3') reinforces that character references are decoded. serialize_token()'s docblock promises a 'fully-normative HTML string'. Together these let all three subjects correctly split matching (decoded) from emission (re-encoded). I verified this with a probe: get_modifiable_text() returns 'world peace' while serialize_token() returns 'world peace' (re-encoded canonically).\n\n2. The normalization / incomplete-input behavior. The 'simple-unclosed' and 'normalization-side-effects' cases require optional tags to be closed and trailing markup normalized (`<p>hello world` -> `<p>...</p>`; unclosed `<b>`/`<p>` get virtual closers; `&AMP;` -> `&amp;`). next_token()'s html-processor.md docblock explicitly states the HTML Processor 'visits a closing token for every element it opens, including elements the HTML specification closes implicitly and elements left unclosed at the end of the input.' All three subjects cited this (trials 1 and 3 explicitly mention virtual closers) and correctly relied on per-token serialize_token() concatenation producing normalized output.\n\n3. The structure-bound text-node semantics. The 'split-across-elements-no-match' case (`<p>wor<em>ld</em></p>`) requires that 'world' NOT match because it spans two text nodes. The per-#text-token walk handles this for free, and next_token()'s note that 'An element's text content may be split across several consecutive #text tokens' signals that each #text token is independent. The 'keyword-in-comment-not-wrapped' and 'keyword-in-attribute' cases are handled because the get_token_type()=='#text' guard naturally excludes comment and attribute content.\n\nNear-misses in the explanations: trial-3 reasoned that get_last_error()/bail handling was needed and returns raw $html on bail; this is defensible defensive coding but the $html fallback would emit un-normalized output, slightly contradicting the task's 'always normalized' contract. This is a latent risk the docs invite — see doc_gaps — but it was never exercised by the test cases.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::serialize_token() (html-processor.md, serialize_token section)",
+      "problem": "The docblock says serialize_token() 'produces a fully-normative HTML string for the currently-matched token' but does not state the relationship to get_modifiable_text(): namely that for a #text token, serialize_token() emits canonically RE-ENCODED text (e.g. '&' -> '&amp;', decoded entities re-normalized) whereas get_modifiable_text() returns DECODED text. Subjects had to infer this pairing by reading two separate method docs. It happened to work here, but a subject could plausibly have matched against serialize_token() output or emitted get_modifiable_text() raw, breaking the entity-encoded and normalization cases.",
+      "suggestion": "Add a sentence and a one-line example to serialize_token() cross-referencing get_modifiable_text(): for a #text token, get_modifiable_text() gives you the decoded content for inspection/matching, while serialize_token() gives you the canonically re-encoded serialization for output. Example: input text 'w&#111;rld & co' -> get_modifiable_text() === 'world & co', serialize_token() === 'world &amp; co'."
+    },
+    {
+      "location": "WP_HTML_Processor::serialize_token() (html-processor.md, serialize_token section)",
+      "problem": "No documented end-to-end example showing the idiomatic 'walk every token, transform some, re-serialize, concatenate' pattern. All three subjects had to assemble this pattern themselves from next_token() + serialize_token(). It is the single most useful recipe for the HTML Processor's token-rewriting use case and its absence is why this task was 'advanced'.",
+      "suggestion": "Add a short example under serialize_token() (or next_token()) demonstrating the rebuild pattern: a while(next_token()) loop that concatenates serialize_token() for every token to reproduce the normalized document, and conditionally wraps/replaces selected tokens. Note explicitly that concatenating serialize_token() over all tokens yields the same normalized output as serialize()/normalize()."
+    },
+    {
+      "location": "WP_HTML_Processor::create_fragment() (html-processor.md, create_fragment section) and serialize()",
+      "problem": "create_fragment() documents returning null 'if unsupported' but gives no guidance on what a correct caller should return/do when building a token-by-token rebuild and the processor either returns null at creation or bails mid-document (get_last_error becomes non-null). Trials 2 and 3 chose to return the raw input $html as a fallback, which silently emits UN-normalized HTML, contradicting a 'normalized output' contract. The docs gave no signal that the raw input is not an acceptable normalized substitute.",
+      "suggestion": "In create_fragment()/serialize() docs, note that on failure (null at creation, or get_last_error() set mid-walk) the partially-built or raw input is NOT a valid normalized serialization, and recommend the safe fallbacks: return '' or call WP_HTML_Processor::normalize($html) as a whole-string fallback rather than emitting the raw input. State plainly that in body context with UTF-8, create_fragment() does not return null, so the null branch is for unsupported context/encoding only."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token() (html-processor.md, next_token section)",
+      "problem": "next_token()'s contract that it returns false both at normal end-of-document and on bail is not made explicit alongside get_last_error(). Trial-3 added a redundant get_last_error() check immediately after a successful next_token() iteration, indicating uncertainty about whether the loop could continue past a bail. The relationship 'next_token() returns false on bail; check get_last_error() after the loop, not inside it' is not stated.",
+      "suggestion": "Add a line to next_token() (and/or get_last_error()) clarifying that next_token() returns false when the parser bails on unsupported markup, so the idiomatic place to test get_last_error() is once after the while loop terminates, not on every iteration."
+    }
+  ]
+}

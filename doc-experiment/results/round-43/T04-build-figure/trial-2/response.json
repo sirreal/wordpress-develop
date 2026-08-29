@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This builds a fixed HTML template with the required tag structure and predeclared `src` and `alt` attributes so their order stays `src` then `alt`, then uses `WP_HTML_Tag_Processor::next_tag()` and `set_attribute()` to fill those attributes and `next_token()`, `get_token_type()`, and `set_modifiable_text()` to replace a placeholder text node inside `figcaption`, relying on the HTML API to perform all necessary escaping.",
+  "confidence": 94
+}

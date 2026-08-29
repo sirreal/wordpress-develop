@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` with a literal figure template so attribute order is preserved, then updated the existing `src` and `alt` attributes in place and replaced the placeholder figcaption text via `next_token()` and `set_modifiable_text()`, which handle all HTML encoding for unescaped input.",
+  "confidence": 95
+}

@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 92,
+      "hallucinated_methods": [],
+      "notes": "Passed 8/8. Correctly chose WP_HTML_Processor::create_fragment(), used a single depth-bounded next_token() walk, relied on virtual closers, and read decoded #text with get_modifiable_text(). All called API methods are documented. Main adherence issue: it opted in SCRIPT/STYLE/TEXTAREA/TITLE opener text inside cells, but the docs' subtree-text recipe says ordinary text extraction should append only #text tokens unless the caller explicitly asks for special-element contents; SCRIPT/STYLE would also be raw, not decoded."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Passed 8/8. This is the cleanest match to the documented pattern: HTML Processor, first TABLE, one bounded token walk, closer-driven row/cell flushing, #text-only accumulation, and get_last_error() check. All API calls appear in the rendered docs and no _doing_it_wrong records were reported. Only minor gap is that it does not make an explicit paused_at_incomplete_token() policy, though its behavior is reasonable for extraction."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Passed 8/8. Correct processor and documented APIs throughout, with idiomatic one-pass state tracking and #text-only decoded text collection. It also checks paused_at_incomplete_token(), which is documented, but applies a blanket empty-array fallback on truncated syntax. The docs frame that as a caller policy decision, so this is slightly over-strict for a browser-style extraction task that can still produce virtual closers and partial text."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial. The docs did well on the central risks for this task: the Tag Processor overview explicitly steers structural and text-content work to WP_HTML_Processor; the HTML Processor next_token() docs explain virtual closers, implied table structure such as TBODY, one-cursor state-machine walking, and depth-bounded subtree scans; get_current_depth() emphasizes the >= guard; get_modifiable_text() explains decoded #text. Near-misses: trial-1 over-read the special-element opt-in guidance and would include SCRIPT/STYLE/TEXTAREA contents even though the ordinary subtree-text recipe says not to; trial-3 treated paused_at_incomplete_token() as mandatory rejection rather than a contract-dependent policy.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::next_token() / subtree text recipe",
+      "problem": "The docs distinguish ordinary #text extraction from special-element modifiable text, but a subject still interpreted special elements as part of normal subtree text collection.",
+      "suggestion": "Add a short docblock note that 'ordinary text descendants' means visited #text tokens only, and that SCRIPT/STYLE/TEXTAREA/TITLE opener text is opt-in with different decoding/raw-text semantics."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::paused_at_incomplete_token() and WP_HTML_Processor::next_token()",
+      "problem": "The incomplete-input guidance does not fully spell out that HTML Processor may still emit virtual closers and usable parsed content before reporting a paused lexical token.",
+      "suggestion": "Clarify that paused_at_incomplete_token() is a caller policy signal: extraction APIs may accept the accumulated result, while mutations or contracts requiring complete source should reject or fall back."
+    },
+    {
+      "location": "WP_HTML_Processor::get_last_error()",
+      "problem": "Bounded scans can stop before unprocessed later markup, so get_last_error() only reflects tokens the processor actually reached.",
+      "suggestion": "Document that callers needing whole-input validation must drain the processor; callers scanning one subtree should treat get_last_error() as applying to the processed region only."
+    },
+    {
+      "location": "Rendered method index for WP_HTML_Processor",
+      "problem": "Private parser internals such as step_in_table(), close_cell(), and insertion-mode helpers are rendered beside public methods, which can distract API users or invite private API use.",
+      "suggestion": "Filter private methods from consumer docs or mark the private/internal section much more prominently as not callable by plugin/theme code."
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the BODY fragment with full tree awareness, then walks the document once with `next_token()`. On each heading opener (`H1` through `H6`) it starts a TOC entry, appends only ordinary `#text` token content via `get_modifiable_text()` while inside that heading, and stops when the matching heading closer is reached; `get_tag()`, `get_token_type()`, `is_tag_closer()`, and `get_last_error()` are the documented APIs used.",
+  "confidence": 89
+}

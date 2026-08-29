@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the fragment in BODY context, then scanned for the first non-closing H1 opener with next_tag(). After recording its depth via get_current_depth(), I walked tokens with next_token() until leaving that subtree and concatenated only #text tokens using get_modifiable_text(), which returns decoded character references and ignores markup.",
+  "confidence": 96
+}

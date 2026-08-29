@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor::create_fragment() for structural ancestor work. All calls are documented: create_fragment, next_tag, get_tag, is_tag_closer, get_breadcrumbs, add_class, get_updated_html. Uses the right breadcrumb + get_updated_html pattern. Minor issues: the is_tag_closer() guard is redundant after plain next_tag(), and the breadcrumb length guard relies on absolute depth instead of only checking ancestor names."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 93,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor and only used documented methods: create_fragment, next_token, get_token_type, get_tag, is_tag_closer, add_class, get_last_error, get_updated_html. The next_token loop is documented and valid, and the get_last_error fallback is good. Less idiomatic for this task because it manually tracks list depth instead of using the documented breadcrumb stack for ancestor containment."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Best adherence. Correct processor choice, all methods documented, and the implementation follows the documented structural pattern directly: next_tag(), get_breadcrumbs(), add_class(), get_updated_html(). It avoids the redundant closer guard and does not invent APIs. Only small edge-policy gap is that it does not check get_last_error or paused_at_incomplete_token before returning mutations on unsupported or incomplete input."
+    }
+  ],
+  "failure_analysis": "No frozen hidden cases failed in any trial. The docs did well on the core decision: the HTML Processor overview explicitly says to choose it when document structure, containment checks, nesting depth, or ancestor breadcrumbs matter, while the Tag Processor has no tree awareness. The Breadcrumbs and get_breadcrumbs() sections also explain that breadcrumbs are the full stack from HTML/BODY down to the current node, which enabled trials 1 and 3 to solve the ancestor test directly. The add_class() and get_updated_html() docs were also sufficient: all trials preserved existing classes and returned queued updates without serialization mistakes. Near-misses: trial 1 added an unnecessary is_tag_closer() check even though next_tag() defaults to opener-only matching, suggesting that detail is easy to miss inside the parameter table. Trial 1 also used an absolute breadcrumb count guard, suggesting the docs could be clearer that callers should reason from ancestor names or relative paths, not numeric depth. Trial 2 hand-rolled list-depth state with next_token(); this was valid, but it shows that the docs lack a compact, general recipe for testing whether the current element has an ancestor with a given tag name.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md / Breadcrumbs and get_breadcrumbs()",
+      "problem": "The docs describe exact paths and suffix breadcrumb queries, but not the common operation of asking whether the current element has any ancestor with a given name.",
+      "suggestion": "Add a short general example showing how to call get_breadcrumbs(), remove the current node from the end, and test ancestor tag names. Frame it as an ancestor-containment recipe, not as a task-specific list example."
+    },
+    {
+      "location": "html-processor.md / next_tag()",
+      "problem": "The fact that plain next_tag() skips closers is present in the parameter table but easy to overlook; trial 1 still guarded with is_tag_closer().",
+      "suggestion": "Promote the default closer behavior into the prose above the parameter table and include a one-line note that is_tag_closer() is only needed when tag_closers => 'visit' or when walking tokens."
+    },
+    {
+      "location": "html-processor.md / get_breadcrumbs()",
+      "problem": "Implicit HTML and BODY entries are documented, but the docs do not warn against using absolute breadcrumb length as semantic depth.",
+      "suggestion": "Add guidance that breadcrumb length depends on parser context and implied elements; examples should compare tag names or relative breadcrumb suffixes rather than hard-coded counts."
+    },
+    {
+      "location": "html-processor.md / mutation examples and get_last_error guidance",
+      "problem": "The docs discuss incomplete input and unsupported markup, but the policy for returning queued mutations via get_updated_html() after a partial or aborted scan is scattered.",
+      "suggestion": "Add a general mutation-policy note: when an edit depends on having scanned the whole relevant region, check get_last_error() and, when complete source bytes matter, paused_at_incomplete_token() before returning get_updated_html()."
+    }
+  ]
+}

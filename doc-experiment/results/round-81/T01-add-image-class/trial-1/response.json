@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` because the task requires byte-for-byte preservation outside the edited tags, and the documented `next_tag( 'img' )`, `add_class( 'wp-image' )`, and `get_updated_html()` APIs provide exactly that. Tag-name matching is ASCII case-insensitive, and comments/raw text are not matched as real tags, so this updates only actual `IMG` elements.",
+  "confidence": 98
+}

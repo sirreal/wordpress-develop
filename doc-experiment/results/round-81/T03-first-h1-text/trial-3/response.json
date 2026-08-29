@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented `WP_HTML_Processor::create_fragment()`, `next_tag()`, `next_token()`, `get_current_depth()`, `get_token_type()`, and `get_modifiable_text()` APIs. The function finds the first non-closing `H1`, then walks its subtree and concatenates only `#text` tokens, which yields decoded text from nested markup while returning an empty string for an H1 with no text nodes.",
+  "confidence": 92
+}

@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used the correct WP_HTML_Tag_Processor for a flat class edit, walked with next_tag('h2'), reused one bookmark to remember the last match, sought back, used add_class(), and returned get_updated_html(). All HTML API methods used are documented; no _doing_it_wrong records."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Essentially matches the canonical documented pattern: Tag Processor, single forward scan, repeated same-name bookmark, seek, add_class(), get_updated_html(). Not releasing the bookmark is harmless because the processor immediately goes out of scope. No undocumented HTML API usage."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 85,
+      "hallucinated_methods": [],
+      "notes": "All HTML API methods used are documented, and the implementation passes. The main adherence issue is processor choice: it uses WP_HTML_Processor, tries create_full_parser() before create_fragment(), and feature-probes methods, despite the docs recommending WP_HTML_Tag_Processor for flat position-based class edits. It also does not check get_last_error() after using the HTML Processor, so unsupported markup could make the 'last H2' scan untrustworthy outside the tested cases."
+    }
+  ],
+  "failure_analysis": "All trials passed all hidden cases. The docs did well on the core concepts: the Tag Processor overview explicitly says to use it for flat tag/name/class edits; next_tag() documents string tag queries, case-insensitive tag matching, opener-only default behavior, and that tag-like text inside comments is not matched; set_bookmark() explicitly teaches the 'remember the last matching tag by re-setting the same bookmark name, then seek once' idiom; add_class() explains missing and existing class behavior; get_updated_html() explains how to read back queued mutations while preserving untouched bytes. The near-miss was trial-3: it still worked because WP_HTML_Processor inherits the mutation APIs, but it treated the full parser as a generic first choice and skipped the HTML Processor's abort/error checks. That suggests the processor-selection guidance is present but not quite strong enough at the exact factory/API decision point.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::create_full_parser() and create_fragment() docs",
+      "problem": "A reader can still treat create_full_parser() as a generic preferred constructor and create_fragment() as a fallback, as trial-3 did.",
+      "suggestion": "Add a compact factory-selection table: use create_fragment() for BODY fragments, create_full_parser() only for complete documents, and use WP_HTML_Tag_Processor directly for flat class/attribute edits that do not need tree structure."
+    },
+    {
+      "location": "WP_HTML_Processor overview / inherited mutation methods",
+      "problem": "The docs say the HTML Processor aborts on unsupported markup, but the consequence for deferred mutations after a scan is easy to miss.",
+      "suggestion": "Add guidance that if a scan result determines a later mutation, callers using WP_HTML_Processor should check get_last_error() after the scan before trusting 'none found' or 'last found'; otherwise prefer WP_HTML_Tag_Processor for lexical tag edits."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor bookmarks overview",
+      "problem": "The last-match bookmark idiom is documented well in set_bookmark(), but it is buried in a long method section and illustrated with nested list logic.",
+      "suggestion": "Add a short general recipe near the Bookmarks overview for 'update the last matching tag in one pass' using a neutral example such as the last matching link or image, showing repeated set_bookmark(), seek(), mutation, and get_updated_html()."
+    }
+  ]
+}

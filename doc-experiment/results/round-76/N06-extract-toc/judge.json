@@ -1,0 +1,35 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 90,
+      "hallucinated_methods": [],
+      "notes": "Used the right processor (`WP_HTML_Processor::create_fragment`) and only documented methods. The token-walk shape is mostly idiomatic: single cursor, `#text` filtering, `get_modifiable_text()`, closers, and depth. The functional failure is from checking `preg_match(...) !== 2`; PHP returns `1` for a match, so no heading opener is ever accepted. This is not an HTML API hallucination."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Used the correct structural processor and all API calls are documented. The depth-bounded text walk follows the documented subtree text recipe, uses decoded `#text` via `get_modifiable_text()`, handles empty headings and virtual/implied closers, and checks `create_fragment()` for null. Minor deduction only because it uses a nested `next_token()` loop in a context where the docs warn that nested loops can be risky, though this bounded usage is valid here."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Used the correct processor and only documented APIs. The single-pass state machine matches the docs' one-cursor pattern, collects only ordinary `#text`, and relies on documented virtual closers/final flushing to handle incomplete heading markup. Slightly less explicit than the reference because it does not depth-bound the active heading subtree, but the closer-driven approach is still documented and passed all cases."
+    }
+  ],
+  "failure_analysis": "Across the failed hidden cases, only trial-1 failed: `basic-h1-h3`, `all-heading-levels`, `nested-text-and-entities`, `empty-heading`, `case-insensitive-source`, and `implied-heading-close` all returned `[]`. The misconception was not about `WP_HTML_Processor`: the docs under `get_token_name()` say tag tokens return uppercase tag names, and a probe confirmed `H1`/`H2` are reported as documented. The candidate expected `preg_match('/^H([1-6])$/', ...)` to return `2` because there is one capture group; PHP returns `1` for a successful match. Therefore the heading-detection branch was never entered. The relevant docs did well overall: `create_fragment()` explains body fragments and null creation, `next_token()` explains token walking, virtual/implied closers, and the one-cursor model, `get_current_depth()` explains subtree guards, and `get_modifiable_text()` explains decoded `#text` extraction. No `_doing_it_wrong` records appeared, and no trial called undocumented HTML API methods.",
+  "doc_gaps": [
+    {
+      "location": "`WP_HTML_Processor::next_token()` examples and `WP_HTML_Processor::get_token_name()` docs",
+      "problem": "The docs show exact tag-name comparisons, but they do not show a generic pattern for matching a family of related tag names and extracting a suffix from the token name. A candidate used the API correctly but made a common PHP `preg_match()` return-value mistake while doing that matching.",
+      "suggestion": "Add a small general example for matching related tag names during a token walk, either using `in_array( $processor->get_tag(), $allowed, true )` for finite sets or `1 === preg_match( ... , $processor->get_token_name(), $matches )` when a captured suffix is needed."
+    },
+    {
+      "location": "`WP_HTML_Processor::next_token()` one-cursor warning",
+      "problem": "The warning says to prefer one explicit-state loop for repeated regions, while nearby subtree recipes use bounded inner scans. The distinction is correct but easy to miss.",
+      "suggestion": "Clarify that bounded subtree scans are safe when consuming the boundary token is acceptable, and that a single state loop is preferred when peer regions or boundary tokens must be observed by the outer loop."
+    }
+  ]
+}

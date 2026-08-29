@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to get structural awareness and inspect breadcrumbs, then relied on the inherited Tag Processor add_class() and get_updated_html() so only the targeted list openers are changed while all other bytes are preserved. A list is marked when its breadcrumbs contain any earlier UL or OL ancestor.",
+  "confidence": 92
+}

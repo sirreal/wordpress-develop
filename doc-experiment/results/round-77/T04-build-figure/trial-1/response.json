@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` with a literal template that already contains `src`, `alt`, and a placeholder text node inside `figcaption`, so attribute order is preserved and the API handles all HTML encoding. I then set the `img` attributes with `set_attribute()` and replaced the placeholder text with `set_modifiable_text()`, returning the result via `get_updated_html()`.",
+  "confidence": 96
+}

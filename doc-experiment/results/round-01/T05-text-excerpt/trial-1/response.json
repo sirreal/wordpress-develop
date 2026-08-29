@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML fragment in BODY context, then iterates with next_token() to visit every token in document order. Only tokens with get_token_type() === '#text' are collected via get_modifiable_text(), which returns the decoded text content of text nodes. This correctly excludes SCRIPT/STYLE contents (which are raw-text elements and won't produce #text tokens for their inner content in standard HTML parsing). After accumulating all text, mb_strlen and mb_substr with UTF-8 encoding are used to count and truncate by Unicode code points rather than bytes, satisfying the requirement to never cut in the middle of a multi-byte character.",
+  "confidence": 80
+}

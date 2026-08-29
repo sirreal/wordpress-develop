@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 82,
+      "hallucinated_methods": [],
+      "notes": "Passed 6/6 hidden cases. All called API methods are documented, and the bookmark/seek/add_class/get_updated_html flow is valid. Main adherence loss is processor choice: this is a flat tag/class edit, but the candidate used WP_HTML_Processor with create_full_parser/create_fragment instead of WP_HTML_Tag_Processor. That is documented but less idiomatic and fragile on unsupported markup unless get_last_error() is checked."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Passed 6/6 hidden cases. Uses WP_HTML_Tag_Processor directly, documented next_tag(array('tag_name'=>'h2')), a single moving bookmark, seek(), add_class(), release_bookmark(), and get_updated_html(). This matches the documented pattern for remembering the last matching tag."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Passed 6/6 hidden cases. Essentially matches the reference approach: Tag Processor, next_tag('h2'), moving bookmark, has_bookmark(), seek(), add_class(), release_bookmark(), and get_updated_html()."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial. The docs did well on the core concepts needed here: Tag Processor 'Which processor should I use?' says flat tag/class edits belong there; next_tag() documents string and array queries; set_bookmark() explicitly says re-setting the same bookmark moves it and is the supported idiom for tracking the last matching token; add_class() documents appending to existing classes; get_updated_html() documents byte-preserving output after queued edits. The only near-miss was trial-1's use of WP_HTML_Processor. It passed the frozen cases, but the HTML Processor docs warn under HTML Support that unsupported markup aborts processing and get_last_error() must be inspected. A read-only probe confirmed that unsupported table foster-parenting markup before later H2 tags makes trial-1 return the input unchanged, while the Tag Processor still marks the final H2. This is not a frozen-test failure, but it explains the processor-choice penalty.",
+  "doc_gaps": [
+    {
+      "location": "html-tag-processor.md: Overview / Which processor should I use? / Usage",
+      "problem": "The docs say the Tag Processor is for flat work, but a subject still treated 'document or fragment' as a reason to use HTML Processor factories.",
+      "suggestion": "Add an explicit contract sentence that new WP_HTML_Tag_Processor($html) accepts both full documents and fragments for lexical tag scans and byte-preserving attribute/class edits; document-vs-fragment choice alone is not a reason to use WP_HTML_Processor."
+    },
+    {
+      "location": "html-processor.md: create_full_parser(), create_fragment(), and HTML Support",
+      "problem": "The docs warn that unsupported markup aborts, but the factory sections do not strongly discourage a 'try full parser, then fragment parser' dispatch for simple class edits.",
+      "suggestion": "Add a warning that successful processor creation does not guarantee a complete scan; if WP_HTML_Processor is used for traversal-dependent edits, callers should check get_last_error() after traversal, and should prefer WP_HTML_Tag_Processor for flat byte-preserving mutations."
+    },
+    {
+      "location": "html-processor.md: next_tag() return documentation",
+      "problem": "The next_tag() section emphasizes 'no later matching tag' but the same false result can also mean the HTML Processor stopped on unsupported markup, which matters when code concludes it has seen the last match.",
+      "suggestion": "Amend next_tag() return docs to state that false can mean no match or parser abort; use get_last_error() to distinguish before relying on absence-of-match conclusions."
+    }
+  ]
+}

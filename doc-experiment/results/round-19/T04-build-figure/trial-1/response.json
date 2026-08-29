@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` with a fixed HTML template so the output shape stays exactly `<figure><img ...><figcaption>...</figcaption></figure>`. I predeclared `src` and `alt` in the template to preserve their order, filled them with `set_attribute()`, then replaced the placeholder figcaption text by scanning tokens with `next_token()` until the `#text` node and updating it with `set_modifiable_text()`, letting the HTML API handle all necessary encoding.",
+  "confidence": 96
+}

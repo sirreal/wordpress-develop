@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This function uses WP_HTML_Processor to parse HTML fragments and find all A tags with href attributes. For each A tag, it retrieves the decoded href value via get_attribute(), then walks through tokens inside the element using next_token() and get_current_depth() to collect all text content while skipping markup. Text nodes are accumulated via get_modifiable_text(), which returns decoded character references. The function returns an array of associative arrays, each containing the href and text for a single link.",
+  "confidence": 78
+}

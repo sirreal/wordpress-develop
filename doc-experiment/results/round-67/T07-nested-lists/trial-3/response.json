@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the tree-aware `WP_HTML_Processor::create_fragment()` API so ancestry can be checked correctly, then walked tags with `next_tag()` and inspected `get_breadcrumbs()` to detect whether any `UL` or `OL` appears above the current list element. Matching nested lists get `add_class( 'nested-list' )`, and the final HTML is returned with `get_updated_html()` so untouched bytes are preserved.",
+  "confidence": 96
+}

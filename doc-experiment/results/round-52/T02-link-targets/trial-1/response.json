@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan only `a` tag openers, `get_attribute('href')` to detect presence even for empty-string and boolean `href` values, and `set_attribute('target', '_blank')` to overwrite or insert the target while preserving untouched bytes. The final HTML is returned with `get_updated_html()`.",
+  "confidence": 97
+}

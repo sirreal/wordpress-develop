@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because heading text extraction depends on document structure. It scans heading openers with `next_tag()`, identifies `H1` through `H6` via `get_tag()`, then walks each heading subtree with `next_token()` while the depth from `get_current_depth()` stays inside that heading, appending only `#text` token content from `get_modifiable_text()` so nested markup contributes text but not tags.",
+  "confidence": 90
+}

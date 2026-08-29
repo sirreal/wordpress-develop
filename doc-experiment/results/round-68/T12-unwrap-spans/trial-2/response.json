@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment in tree-aware mode, then walked tokens with `next_token()` and rebuilt the normalized output with `serialize_token()`, skipping any `SPAN` opener or closer so their contents remain in place. If the processor cannot be created or later reports unsupported markup, I fall back to `WP_HTML_Processor::normalize()` as the documented normalization path.",
+  "confidence": 87
+}

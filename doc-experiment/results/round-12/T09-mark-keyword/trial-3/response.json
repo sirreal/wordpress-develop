@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor to create a fragment parser from the input HTML, then walks through all tokens with next_token(). For each text node (identified by get_token_type() === '#text'), it gets the decoded text content via get_modifiable_text() and checks for a case-sensitive substring match with strpos(). Matching text nodes are wrapped with <mark> tags before serialization, while the entire document is serialized with serialize_token() to produce normalized HTML output with closed tags and double-quoted attributes.",
+  "confidence": 72
+}

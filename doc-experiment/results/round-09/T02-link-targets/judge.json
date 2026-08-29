@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Mirrors the reference exactly: Tag Processor (correct choice for a flat attribute mutation), next_tag('a') string form, null-check on get_attribute('href'), set_attribute('target','_blank'), get_updated_html(). All methods verified present in html-tag-processor.md. All 8 hidden cases pass; no _doing_it_wrong records. The inline comment claims get_attribute 'returns \"\" or true for present attributes' — accurate per docs lines 89-90 (empty string for empty value, true for valueless boolean). Idiomatic token-walking; bookmarks/breadcrumbs/serialize_token correctly unused (irrelevant for this flat task). Trivial -1: relies on documented ASCII case-insensitive tag matching (lowercase 'a') without acknowledging it, but that is the documented contract so no real defect."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Functionally identical to trial-1: string-form next_tag('a'), null !== get_attribute('href') guard, set_attribute, get_updated_html. All APIs documented, all 8 cases pass, no misuse flags. Explanation correctly cites that set_attribute 'handles encoding' (docs line 1491: accepts plain unescaped values and encodes as needed) and that unmodified bytes are preserved exactly (docs line 2297). Clean, idiomatic Tag Processor usage."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same correct logic, but uses the array query form next_tag( array( 'tag_name' => 'a' ) ) which is the more explicit documented form (html-tag-processor.md line 58). Correctly understands the null/empty-string/true return trichotomy of get_attribute for the valueless-href case (true !== null). All 8 cases pass, no _doing_it_wrong. Fully idiomatic; nothing to deduct."
+    }
+  ],
+  "failure_analysis": "No failures: all three trials passed all 8 hidden cases with zero _doing_it_wrong / trigger_error records. This is the experiment's designated smoke test (role: smoke, difficulty: basic), and the docs supported it well. The decisive passage was html-tag-processor.md around get_attribute() (lines 89-90 in the narrative and the get_attribute() reference at lines 1469-1492), which states plainly that get_attribute() returns null when the attribute is absent, the empty string \\\"\\\" when present-but-empty, and true for a valueless boolean attribute. That trichotomy is exactly what distinguishes the three tricky cases (empty-href-counts, valueless-href-counts, no-href-skipped): all three subjects correctly translated it into a `null !== get_attribute('href')` guard rather than a truthiness check, so href=\\\"\\\" and bare href both correctly counted as present while a missing href was skipped. The existing-target-overwritten case was covered by line 156 ('If set_attribute() is called for an existing attribute it will overwrite the existing value'). The uppercase-HREF and lowercase-tag cases were covered by the documented ASCII case-insensitive matching (line 952) and by set_attribute preserving the original attribute name casing in output. The inside-comment-ignored and nested-markup cases fell out naturally from token-walking semantics (next_tag only stops on real tag openers, not text inside comments) which the docs describe via the token-stream model (line 970). Near-misses in the explanations: trial-1 loosely says get_attribute 'returns \\\"\\\" or true for present attributes' as if those were the only present-values, which understates that a normal value is returned verbatim — harmless here but a slight imprecision. All three explanations correctly credited byte-for-byte preservation to get_updated_html (docs line 2297).",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::get_attribute() reference section (html-tag-processor.md ~lines 1469-1492) and the narrative at lines 89-90",
+      "problem": "The null / empty-string / true return trichotomy is split between a prose paragraph (lines 89-90) and the method reference, and the method's own example block (lines 1482-1487) demonstrates a normal value, a boolean true, and a null, but never the present-but-empty \"\" case. A reader skimming only the reference block could miss that href=\"\" returns \"\" (truthy-distinct from null) while a missing attribute returns null. This is the single most failure-prone distinction for any 'attribute is present' check.",
+      "suggestion": "Add one line to the get_attribute() example block showing the empty-value case explicitly, e.g. `$p->get_attribute( 'href' ) === ''` for `<a href=\"\">`, alongside a one-sentence note: 'To test mere presence of an attribute regardless of its value, compare strictly against null (`null !== $p->get_attribute( $name )`); do not use a truthiness/empty check, because \"\" and the boolean true are both valid present-values.'"
+    },
+    {
+      "location": "next_tag() reference and query table (html-tag-processor.md lines 57-61, 952)",
+      "problem": "The docs note tag_name matching is 'ASCII case-insensitive' only inside the dense $query @type description (line 952). The quick-reference examples (lines 57-61) all use lowercase/mixed names without stating that the query name's case is irrelevant, so a reader cannot tell from the common-case table whether next_tag('a') and next_tag('A') behave identically.",
+      "suggestion": "Add a short explicit sentence near the next_tag() examples: 'The tag_name in the query is matched ASCII case-insensitively, so next_tag(\"a\"), next_tag(\"A\"), and next_tag(\"a\") are equivalent.' This generalizes beyond this task and prevents readers from defensively normalizing case."
+    },
+    {
+      "location": "set_attribute() reference (html-tag-processor.md ~lines 2127-2151) and narrative line 156",
+      "problem": "The overwrite-existing-value behavior is stated in narrative prose (line 156) but not restated at the set_attribute() reference heading or its examples, and there is no example showing that the original written casing of an unmodified attribute name (e.g. HREF) is preserved in output while a newly-set/overwritten attribute is written in the name as passed. Subjects got both right here, but only because of the separate narrative note.",
+      "suggestion": "At the set_attribute() reference, add a one-line note that calling it on an existing attribute overwrites the value in place (preserving surrounding bytes), and that attribute names elsewhere on the tag retain their original source casing in get_updated_html() output. An example overwriting an existing attribute would make the 'overwrite' contract discoverable from the reference alone."
+    }
+  ]
+}

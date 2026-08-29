@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Correctly used WP_HTML_Processor::create_fragment(), next_tag(), next_token(), get_current_depth(), get_token_type(), get_token_name(), is_tag_closer(), and get_modifiable_text(), all documented. Strong single-pass depth-bounded token walk. Minor idiom issue: it calls get_modifiable_text() on every non-closing tag token inside a cell, not only the documented special text-bearing element openers."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and no undocumented API calls or _doing_it_wrong records. Uses a state-machine token walk and handles virtual closers well. Slightly less idiomatic because it both relies on closer tokens and adds end-of-loop flushing, and it broadly reads modifiable text from tag openers rather than guarding exact special-element cases."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correct processor, all methods documented, and the cleanest token-walking pattern. It bounds traversal by table depth, tracks rows/cells through tag openers and closers, uses decoded #text from get_modifiable_text(), and only reads opener-carried text for named special elements. It still does not explicitly inspect paused_at_incomplete_token() or get_last_error()."
+    }
+  ],
+  "failure_analysis": "All frozen hidden cases passed in all three trials: simple tables, THEAD/TBODY structure, omitted closers, markup inside cells, decoded entities, no table, first table only, and empty cells. The docs did well in the places that matter for this task: 'Which processor should I use?' points structure-sensitive work to WP_HTML_Processor; 'next_token()' explains a single cursor, virtual/implied closers, implied TBODY, split #text tokens, and depth-bounded walking; 'get_current_depth()' explains the >= boundary; and 'get_modifiable_text()' states that #text returns decoded text. The main near-miss is special-element text: trials 1 and 2 generalized the special-element note into reading modifiable text from all tag openers. That is harmless for ordinary tags, but it could diverge on SCRIPT/STYLE/TEXTAREA/TITLE depending on whether a caller means ordinary DOM #text descendants or every text-bearing HTML section. The candidates also mostly chose best-effort behavior for incomplete input instead of checking paused_at_incomplete_token() or get_last_error(), which the docs mention but do not put in the main HTML Processor method index as a prominent policy decision for read-only extraction.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md: Recipe: collect DOM-style text from a subtree / get_modifiable_text()",
+      "problem": "The docs say to append ordinary #text tokens unless special-element text is intentionally wanted, but the inclusion policy for SCRIPT, STYLE, TITLE, and TEXTAREA remains easy to overgeneralize.",
+      "suggestion": "Add a compact table distinguishing ordinary #text, comments/PIs, SCRIPT/STYLE raw text, and TITLE/TEXTAREA decoded text, with guidance on when generic text extraction should include or exclude each category."
+    },
+    {
+      "location": "html-processor.md: next_token() and get_current_depth()",
+      "problem": "The depth-bound subtree contract is present but spread across sections, while virtual closers and implied wrappers are central to browser-like traversal.",
+      "suggestion": "Add a short contract statement: after matching an opener at depth N, next_token() visits descendants until the first token with depth < N; omitted end tags still produce closer tokens; implied wrappers may add depth, so callers should anchor to recorded depth instead of absolute levels."
+    },
+    {
+      "location": "html-processor.md: Method Index / incomplete input references",
+      "problem": "paused_at_incomplete_token() is inherited and referenced, but not prominent in the HTML Processor method list; read-only extraction examples do not clearly state when to reject truncation or unsupported markup.",
+      "suggestion": "Add an 'End-of-input and unsupported-markup policy' subsection for HTML Processor that names paused_at_incomplete_token(), get_last_error(), and get_unsupported_exception(), and explains best-effort extraction versus strict complete-input requirements."
+    }
+  ]
+}

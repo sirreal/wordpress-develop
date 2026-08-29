@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` and a single `next_token()` walk starting at the first `TABLE` found by `next_tag()`. It tracks `TR`, `TD`, and `TH` openers/closers structurally, appends decoded text from `#text` tokens via `get_modifiable_text()`, and also includes text carried on raw-text/RCDATA element openers (`SCRIPT`, `STYLE`, `TITLE`, `TEXTAREA`) because those contents are not exposed as child `#text` tokens in the HTML Processor.",
+  "confidence": 86
+}

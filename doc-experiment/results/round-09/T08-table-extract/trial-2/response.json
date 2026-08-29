@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This function uses WP_HTML_Processor to properly parse HTML with full structural awareness, correctly handling omitted closing tags and tbody/thead elements like a browser would. It creates a fragment parser, finds the first TABLE element using next_tag(), then walks all tokens via next_token() while tracking depth to know when we exit the table. Text nodes are accumulated only when inside a cell (in_cell flag is true), and modifiable_text() provides decoded character references. Cells are properly delimited by TD/TH tag boundaries, and rows are delimited by TR tag boundaries. The function also handles omitted closing tags by checking for new cell/row opens which implicitly close previous ones.",
+  "confidence": 62
+}

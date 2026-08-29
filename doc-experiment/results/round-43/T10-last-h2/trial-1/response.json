@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` because the task is a flat position-based edit: it scans forward with `next_tag( 'H2' )`, reuses a single bookmark via `set_bookmark()` to remember the last matching opener, seeks back to that bookmark with `seek()`, adds the class with `add_class()`, and returns the modified markup with `get_updated_html()`.",
+  "confidence": 95
+}

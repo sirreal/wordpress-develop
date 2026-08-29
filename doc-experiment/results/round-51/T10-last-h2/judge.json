@@ -1,0 +1,24 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used the correct Tag Processor for a flat class edit; every called method is documented; followed the documented single-bookmark last-match idiom with `next_tag()`, `set_bookmark()`, `seek()`, `add_class()`, and `get_updated_html()`. Edge cases were handled through documented `next_tag()` and `add_class()` semantics."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Identical high-adherence implementation: correct processor choice, no undocumented calls, idiomatic bookmark reuse to remember the last `H2`, and documented class-update behavior for absent or existing class attributes."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correctly used the Tag Processor and documented bookmark workflow. No hallucinated APIs or `_doing_it_wrong` records; returned updated HTML through the documented output method."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial. The docs were especially effective in the Tag Processor bookmark section: it explicitly says re-setting the same bookmark name moves it and presents this as the supported idiom for remembering the last matching tag in one pass. The processor-choice guidance also steered models away from the HTML Processor by describing the Tag Processor as sufficient for flat attribute/class edits with byte-exact preservation. The `next_tag()` docs covered real-tag matching, case-insensitive tag-name queries, comments/raw text not being matched, and incomplete-token behavior. The `add_class()` docs covered both creating a missing class attribute and appending without disturbing existing classes, which explains the existing-class pass. The only near-miss is that all candidates released the bookmark before `get_updated_html()`, but this is allowed because the class update was already queued and the docs say bookmarks should be released when no longer needed.",
+  "doc_gaps": []
+}

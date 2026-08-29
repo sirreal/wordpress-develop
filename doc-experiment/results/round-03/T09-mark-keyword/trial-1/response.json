@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Processor's next_token() to iterate through all tokens in the HTML, checking each #text token's decoded content via get_modifiable_text() for the keyword (case-sensitive substring match). When a match is found, the entire text node is wrapped with <mark> tags. All tokens are serialized using serialize_token() which provides normalized HTML output with proper encoding. The approach leverages the HTML Processor's full parsing capability to understand document structure while the token-by-token serialization allows selective wrapping of text nodes.",
+  "confidence": 75
+}

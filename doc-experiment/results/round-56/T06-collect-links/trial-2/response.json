@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment structurally, then walked tokens with `next_token()`, collecting only `#text` tokens inside each `A` element and reading decoded text with `get_modifiable_text()`. I filtered links by requiring `get_attribute( 'href' )` to return a string, which excludes boolean `href` attributes and missing attributes per the documented return types.",
+  "confidence": 92
+}

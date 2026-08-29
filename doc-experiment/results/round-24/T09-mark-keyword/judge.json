@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correctly used WP_HTML_Processor::create_fragment(), next_token(), get_token_type(), get_modifiable_text(), and serialize_token(). The implementation follows the documented token-rewrite pattern and checks only ordinary #text tokens, so comments, attributes, and special text-bearing elements are skipped. Minor issue: on create_fragment() failure or parser error it returns raw input, which may not satisfy the task's normalized-output contract, but this path was not exercised."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Same high-adherence pattern as trial-1. All HTML API calls are documented, the HTML Processor is the right choice for normalized fragment output, and serialize_token() is used for wrapping complete current text tokens. The extra empty-string guard is harmless because the keyword is non-empty. Same minor raw-input fallback concern on parser failure."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 85,
+      "hallucinated_methods": [],
+      "notes": "Primary processor choice and token walking are correct, and all called methods are documented. The main adherence problem is line 17: it calls WP_HTML_Processor::normalize() on get_modifiable_text() for matched #text tokens instead of using serialize_token(). Because get_modifiable_text() returns decoded text, reparsing that string as an HTML fragment can turn escaped text into markup; e.g. a text token serialized as &lt;b&gt; world becomes <b> world</b> inside <mark>. This violates the documented serialize_token() rewriting pattern despite passing the frozen cases."
+    }
+  ],
+  "failure_analysis": "No trial failed any frozen hidden case: all three execution.json files report 8/8 passing with no _doing_it_wrong records. The docs did well on the core decision points: the “Which processor should I use?” guidance points to WP_HTML_Processor for normalized output and structural text work; the HTML Processor “collect DOM-style text from a subtree” recipe says to append only ordinary #text tokens; get_modifiable_text() explains decoded text and the special SCRIPT/STYLE/TITLE/TEXTAREA token behavior; and serialize_token() explicitly describes token-by-token rewrites and wrapper insertion. The main near-miss was trial-3’s belief that decoded text should be normalized separately before output. The docs say normalize() accepts an HTML fragment and serialize_token() serializes the current token, but they do not explicitly warn that decoded #text from get_modifiable_text() must not be reparsed with normalize(). Trials 1 and 2 also used a raw-input fallback on processor failure; the docs recommend rejecting or falling back on parser errors, but the task’s normalized string-return requirement leaves the exact fallback policy unstated.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md, serialize_token() / rewrite while serializing tokens",
+      "problem": "The docs explain that serialize_token() should be used inside rewrite loops, but do not explicitly contrast it with normalizing get_modifiable_text() for a text token.",
+      "suggestion": "Add a short warning/example: when wrapping a #text token, wrap serialize_token(); do not pass get_modifiable_text() to normalize(), because modifiable text is decoded and may contain literal '<' or '&' that must remain text."
+    },
+    {
+      "location": "html-processor.md, get_modifiable_text()",
+      "problem": "The decoded-text contract is documented for reading, but the serialization implication is easy to miss.",
+      "suggestion": "Add a sentence after the decoded-text paragraph: decoded modifiable text is an application string, not the original HTML token; use set_modifiable_text() to write it back or serialize_token() to emit the current token."
+    },
+    {
+      "location": "html-processor.md, get_last_error() / serialize_token() error handling",
+      "problem": "The docs say to reject or fall back when get_last_error() is non-null, but do not show how a string-returning normalizing filter should choose between raw input, partial output, empty string, or null-like failure.",
+      "suggestion": "Add a general policy note for rewrite helpers that must return string: define whether fallback means original unmodified input, empty output, or caller-defined failure, and note that returning original input may violate normalized-output promises."
+    }
+  ]
+}

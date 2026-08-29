@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used the correct `WP_HTML_Tag_Processor` for a flat, byte-preserving class edit. Calls only documented APIs: constructor, `next_tag()`, `add_class()`, and `get_updated_html()`. The `while ( next_tag( 'img' ) )` loop is idiomatic, and lowercase `img` is covered by documented case-insensitive tag matching. Edge cases are handled by the documented processor behavior rather than manual parsing."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same fully documented solution shape as the reference: Tag Processor, filtered forward scan, `add_class()`, and `get_updated_html()`. No undocumented calls or `_doing_it_wrong` records. Correctly relies on documented semantics for existing class preservation, comments not matching as tags, and incomplete trailing tags not being modified."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and API surface throughout. The implementation uses the documented all-matches token-walking pattern with `next_tag( 'img' )`, modifies only matched real tags with `add_class()`, and returns the queued edits with `get_updated_html()`. No attribute null/true/empty-string semantics are misused because it never reads raw attributes."
+    }
+  ],
+  "failure_analysis": "No failed hidden cases across the three trials; all passed 8/8. The docs did well on the exact decision points this task required: the Tag Processor overview says to use it for flat attribute/class edits and byte-precise preservation; `next_tag()` documents the string shorthand, ASCII case-insensitive tag-name matching, skipping tag-like text inside comments/raw-text contexts, and pausing before incomplete trailing tags; `add_class()` documents creating a missing class attribute, appending to existing classes without removing or reordering them, and avoiding duplicates; `get_updated_html()` documents that untouched bytes are preserved and that it is the output method after queued edits. Near-miss: the HTML Processor docs also show `add_class()` in examples, but the processor-choice guidance was strong enough that all subjects picked the lighter Tag Processor.",
+  "doc_gaps": [
+    {
+      "location": "`WP_HTML_Tag_Processor::add_class()` docblock",
+      "problem": "The method explains class creation and appending, but the placement of a newly-created `class` attribute is easier to infer from separate attribute-update documentation than from this method itself.",
+      "suggestion": "Add a short general note that when `add_class()` creates the `class` attribute, it follows the normal added-attribute placement rules while preserving all untouched attributes byte-for-byte."
+    },
+    {
+      "location": "`WP_HTML_Tag_Processor` Usage / `next_tag()` examples",
+      "problem": "The first usage example demonstrates a single `if` match; the all-matches `while ( next_tag(...) )` edit-and-return idiom is present indirectly but not foregrounded as the common pattern for bulk edits.",
+      "suggestion": "Add a generic bulk-edit example using `while ( $processor->next_tag( 'TAG' ) ) { ... }` followed by `get_updated_html()`."
+    },
+    {
+      "location": "`WP_HTML_Processor::add_class()` inherited method docs",
+      "problem": "The HTML Processor page lists `add_class()` but gives less detail than the Tag Processor page about append order, no-op duplicate behavior, and class-order preservation.",
+      "suggestion": "Ensure inherited class-helper docs on the HTML Processor page preserve or link directly to the fuller Tag Processor contract, so users landing there get the same guarantees."
+    }
+  ]
+}

@@ -1,0 +1,139 @@
+{
+  "round": "round-18",
+  "mode": "discoverability-probe",
+  "question_id": "incomplete-token-region-scan",
+  "question": "When using WP_HTML_Processor::next_token() and get_current_depth() to scan an element's contents before applying an earlier mutation, does visiting a virtual closer prove the source region was complete if the input may be truncated? Which documented methods should be checked, and where are they documented?",
+  "subject": {
+    "model": "gpt-5.4",
+    "reasoning_effort": "medium",
+    "service_tier": "priority"
+  },
+  "subject_isolation": {
+    "enforced": true,
+    "agent_type": "codex-cli-isolated-workdir",
+    "isolation_mode": "isolated-workdir",
+    "runner": "codex exec",
+    "input_delivery": "prompt-embedded-docs",
+    "sandbox_mode": "read-only",
+    "approval_policy": "never",
+    "project_rules_loaded": false,
+    "user_config_loaded": false,
+    "repo_available_to_subject": false,
+    "input_files": [
+      "html-processor.md",
+      "html-tag-processor.md",
+      "probe question"
+    ],
+    "work_root": "/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/html-api-docs-eval/round-18/codex-cli-probes"
+  },
+  "result": [
+    {
+      "id": "incomplete-token-region-scan",
+      "trial_id": "probe-1",
+      "response": {
+        "answer": "No. With `WP_HTML_Processor::next_token()`, reaching a closer does not prove the source region was complete, because the processor documents that it visits closing tokens for elements \"left unclosed at the end of the input\" as well as implied closes. For truncation, check the inherited `WP_HTML_Tag_Processor::paused_at_incomplete_token()` after draining the scan to the stopping point. If using `WP_HTML_Processor`, also check `get_last_error()` (and, for debugging context, `get_unsupported_exception()`) to see whether processing stopped because unsupported HTML caused an abort rather than because the subtree was completely scanned.",
+        "citations": [
+          {
+            "file": "html-processor.md",
+            "heading": "`next_token()`",
+            "support": "\"Unlike the Tag Processor's purely lexical scan, the HTML Processor visits a closing token for every element it opens, including elements the HTML specification closes implicitly and elements left unclosed at the end of the input.\""
+          },
+          {
+            "file": "html-tag-processor.md",
+            "heading": "`paused_at_incomplete_token()`",
+            "support": "\"In a longer document, drain all tokens first; this method reports the state at the point scanning stopped, so it answers 'did the input end mid-token?' only after the processor has scanned to the end of the input.\""
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "Overview",
+            "support": "\"If any unsupported markup appears in the HTML input the HTML Processor will abort early and stop all processing. When this happens, `WP_HTML_Processor::get_last_error` returns a non-null value and `WP_HTML_Processor::get_unsupported_exception` describes what was encountered.\""
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "`get_last_error()`",
+            "support": "\"Various situations lead to parsing failure but this class will return `false` in all those cases. To determine why something failed it's possible to request the last error.\""
+          }
+        ],
+        "rationale": "The docs explicitly say `next_token()` can emit closers for elements that were never closed in source, so a visited closer is not proof of completeness; the documented way to detect truncation is `paused_at_incomplete_token()`, and HTML Processor aborts are distinguished via `get_last_error()`/`get_unsupported_exception()`.",
+        "confidence": 94
+      }
+    },
+    {
+      "id": "incomplete-token-region-scan",
+      "trial_id": "probe-2",
+      "response": {
+        "answer": "No. In `WP_HTML_Processor`, seeing a closer while scanning with `next_token()`/`get_current_depth()` does not prove the source region was complete, because the processor \"visits a closing token for every element it opens,\" including elements \"left unclosed at the end of the input,\" and it also visits virtual/implied structure. To check truncation, drain the scan and then call `WP_HTML_Tag_Processor::paused_at_incomplete_token()`; if you also need to rule out an early abort on unsupported HTML, check `WP_HTML_Processor::get_last_error()` (and `get_unsupported_exception()` for context).",
+        "citations": [
+          {
+            "file": "html-processor.md",
+            "heading": "`next_token()`",
+            "support": "\"Unlike the Tag Processor's purely lexical scan, the HTML Processor visits a closing token for every element it opens, including elements the HTML specification closes implicitly and elements left unclosed at the end of the input.\""
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "`next_token()`",
+            "support": "\"The reverse also holds: a walk visits elements the parser INSERTED that never appear in the source text, because HTML defines implied structure.\""
+          },
+          {
+            "file": "html-tag-processor.md",
+            "heading": "`paused_at_incomplete_token()`",
+            "support": "\"In a longer document, drain all tokens first; this method reports the state at the point scanning stopped, so it answers 'did the input end mid-token?' only after the processor has scanned to the end of the input.\""
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "`get_last_error()`",
+            "support": "\"Various situations lead to parsing failure but this class will return `false` in all those cases. To determine why something failed it's possible to request the last error.\""
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "`get_unsupported_exception()`",
+            "support": "\"Returns context for why the parser aborted due to unsupported HTML, if it did.\""
+          }
+        ],
+        "rationale": "The cited `next_token()` contract says closers may be implied or end-of-input generated, so a visited closer is not evidence of complete source markup; the truncation and abort checks are documented separately via `paused_at_incomplete_token()` and the HTML Processor error APIs.",
+        "confidence": 95
+      }
+    },
+    {
+      "id": "incomplete-token-region-scan",
+      "trial_id": "probe-3",
+      "response": {
+        "answer": "No. In `WP_HTML_Processor`, reaching a closer during a `next_token()` walk does not prove the source region was complete, because the processor visits closing tokens for elements \"left unclosed at the end of the input\" and also visits implied/virtual structure. To detect truncation, drain the scan and check the inherited `WP_HTML_Tag_Processor::paused_at_incomplete_token()`; if you also need to distinguish truncation from an unsupported-markup abort, check `WP_HTML_Processor::get_last_error()` and `get_unsupported_exception()`.",
+        "citations": [
+          {
+            "file": "html-processor.md",
+            "heading": "`next_token()`",
+            "support": "\"Unlike the Tag Processor's purely lexical scan, the HTML Processor visits a closing token for every element it opens, including elements the HTML specification closes implicitly and elements left unclosed at the end of the input.\""
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "`next_token()`",
+            "support": "\"The reverse also holds: a walk visits elements the parser INSERTED that never appear in the source text, because HTML defines implied structure.\""
+          },
+          {
+            "file": "html-tag-processor.md",
+            "heading": "`paused_at_incomplete_token()`",
+            "support": "\"In a longer document, drain all tokens first; this method reports the state at the point scanning stopped, so it answers 'did the input end mid-token?' only after the processor has scanned to the end of the input.\""
+          },
+          {
+            "file": "html-tag-processor.md",
+            "heading": "`paused_at_incomplete_token()`",
+            "support": "\"Returns: `bool` - Whether the parse paused at the start of an incomplete token.\""
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "`get_last_error()`",
+            "support": "\"Various situations lead to parsing failure but this class will return `false` in all those cases. To determine why something failed it's possible to request the last error.\""
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "`get_unsupported_exception()`",
+            "support": "\"Returns context for why the parser aborted due to unsupported HTML, if it did.\""
+          }
+        ],
+        "rationale": "The HTML Processor docs explicitly say closers can be implied or end-of-input closes, so a visited closer is not proof of complete source; the Tag Processor docs provide the documented truncation check, and the HTML Processor docs provide the documented abort-diagnostics methods.",
+        "confidence": 95
+      }
+    }
+  ]
+}

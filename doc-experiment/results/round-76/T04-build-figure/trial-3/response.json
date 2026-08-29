@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` with a literal fragment template that already includes `src`, `alt`, and placeholder caption text so the output preserves the required attribute order. I then updated the `img` attributes with `set_attribute()` and replaced the figcaption placeholder via `next_token()` plus `set_modifiable_text()`, letting the HTML API handle all encoding.",
+  "confidence": 92
+}

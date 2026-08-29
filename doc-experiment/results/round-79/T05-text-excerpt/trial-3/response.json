@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to walk the fragment in BODY context, appending only ordinary #text tokens plus TITLE/TEXTAREA opener text via get_modifiable_text(), which the docs say is decoded for those elements. I then truncated the final UTF-8 string by Unicode code points with preg_split('//u') so no multibyte character is split.",
+  "confidence": 92
+}

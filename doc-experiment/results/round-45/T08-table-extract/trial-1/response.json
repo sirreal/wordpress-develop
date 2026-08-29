@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` so table parsing follows browser-style HTML structure, including implied table elements like `TBODY` and auto-closed rows/cells. It finds the first `TABLE` with `next_tag()`, then walks tokens inside that table with `next_token()`, collecting only `#text` token contents via `get_modifiable_text()` while a `TD` or `TH` cell is open, and flushing cells/rows on their closing tags.",
+  "confidence": 89
+}

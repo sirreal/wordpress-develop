@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor to parse the HTML fragment and find the first H1 element using next_tag(). Once found, it records the depth and iterates through all child tokens using next_token(), collecting text from #text tokens via get_modifiable_text() which automatically decodes character references. The loop terminates when the depth falls below the H1's depth, indicating we've exited the element. This approach correctly handles nested elements, character references, and returns null when no H1 is found.",
+  "confidence": 75
+}

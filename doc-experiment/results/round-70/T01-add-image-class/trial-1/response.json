@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan the input linearly with `next_tag( array( 'tag_name' => 'img' ) )`, which matches `IMG` case-insensitively and skips comments and raw-text content, then added the class with `add_class( 'wp-image' )` and returned the exact modified bytes with `get_updated_html()`.",
+  "confidence": 98
+}

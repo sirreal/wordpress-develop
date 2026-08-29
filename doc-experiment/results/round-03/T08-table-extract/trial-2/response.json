@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function creates an HTML Processor fragment, finds the first TABLE element, then iterates through tokens within the table. It uses breadcrumbs to detect when inside TD or TH cells, accumulating text from #text tokens using get_modifiable_text() which automatically decodes character references. When a cell closes, the accumulated text is added to the current row. When a row closes, the row is added to results. The function stops when exiting the table (depth drops to table level). The HTML Processor handles all HTML5 parsing semantics including implicit closing of TR/TD tags and tbody insertion.",
+  "confidence": 72
+}

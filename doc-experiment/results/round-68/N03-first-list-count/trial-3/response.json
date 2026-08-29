@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented HTML Processor fragment parser to scan the fragment structurally, bookmark the first UL/OL opener, walk tokens until that list closes, count only LI openers at one depth deeper than the list, and then seek back to add the `data-item-count` attribute. The function returns the original HTML unchanged if no list is found, if the scan is incomplete, or if the processor reports unsupported markup.",
+  "confidence": 91
+}

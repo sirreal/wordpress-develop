@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment with browser-like table handling, then walked tokens with `next_tag()`, `next_token()`, `get_current_depth()`, `get_token_type()`, `get_tag()`, `is_tag_closer()`, and `get_modifiable_text()` to collect row and cell text from the first TABLE subtree. The implementation stops when the walk leaves the table\u2019s depth and returns an empty array if no table is found.",
+  "confidence": 83
+}

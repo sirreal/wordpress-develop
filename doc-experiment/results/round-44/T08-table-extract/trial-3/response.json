@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the fragment with browser-like table handling, finds the first `TABLE` with `next_tag()`, then makes one depth-bounded `next_token()` walk through that table. It tracks `TR` and `TD`/`TH` openers and closers via `get_tag()` and `is_tag_closer()`, appends decoded text from `#text` tokens with `get_modifiable_text()`, and returns an empty array if no table is found or the processor aborts with `get_last_error()`.",
+  "confidence": 88
+}

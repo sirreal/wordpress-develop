@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 93,
+      "hallucinated_methods": [],
+      "notes": "Passed 7/7 hidden cases with no _doing_it_wrong records. Correctly chose WP_HTML_Processor::create_fragment(), used a single next_token() walk, tracked subtree boundaries with get_current_depth(), and accumulated decoded #text via get_modifiable_text(). Minor adherence issue: it also includes modifiable text from SCRIPT/STYLE/TITLE/TEXTAREA/etc. inside headings, which conflicts with the documented ordinary DOM-style text recipe unless the caller explicitly asks for those token types."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 91,
+      "hallucinated_methods": [],
+      "notes": "Passed 7/7 hidden cases with no _doing_it_wrong records. All called APIs are documented: create_fragment(), next_token(), get_token_type(), get_token_name(), is_tag_closer(), and get_modifiable_text(). The closer-driven state machine is supported by the next_token() docs because virtual/implied closers are visited. Same near-miss as trial-1: it opted into SCRIPT/STYLE/TITLE/TEXTAREA token text even though ordinary subtree text should generally read only #text tokens."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 91,
+      "hallucinated_methods": [],
+      "notes": "Passed 7/7 hidden cases with no _doing_it_wrong records. Correct processor and documented single-cursor token walking. It uses tag closers plus a final open-heading flush, so it is robust for implied/end-of-input closers. Minor deductions are for over-including raw/RCDATA element token text inside headings and for using manual tag-name character checks rather than the clearer documented query/name patterns."
+    }
+  ],
+  "failure_analysis": "All trials passed every hidden case. The docs did well in the areas that mattered most: the Tag Processor overview explicitly says to use the HTML Processor when structure matters, including collecting element text and handling implied or missing closing tags; the HTML Processor text-extraction recipe shows create_fragment(), next_token(), get_current_depth() >= opener depth, #text filtering, and get_modifiable_text(); the next_token() section explains implied/end-of-input closers and the single shared cursor; get_modifiable_text() explains decoded text, so all trials handled &amp; correctly. The main near-miss is special element text. All three candidates included SCRIPT/STYLE/TITLE/TEXTAREA text inside headings. A probe showed the reference returns text AD for <h2>A<script>B &amp; C</script>D</h2>, while all candidates return AB &amp; CD. The responsible passage is the interaction between 'Recipe: collect DOM-style text from a subtree', which says ordinary text should use only #text tokens unless intentionally including other token types, and get_modifiable_text(), which emphasizes that special element tokens carry modifiable text. The documentation contains the rule, but the opt-in nature of special element text is easy to miss when a task says 'text content'.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md, 'Recipe: collect DOM-style text from a subtree'",
+      "problem": "The recipe states that ordinary subtree text should read only #text tokens, but the nearby special-element explanation can still be read as advice to include SCRIPT/STYLE/TITLE/TEXTAREA whenever extracting text.",
+      "suggestion": "Add a small negative example showing ordinary extraction across inline markup plus SCRIPT/STYLE/TITLE/TEXTAREA, explicitly stating which text is skipped by default and that special-element token text is opt-in caller policy."
+    },
+    {
+      "location": "html-processor.md and html-tag-processor.md, get_modifiable_text()",
+      "problem": "The method docs describe where modifiable text exists, but do not strongly separate 'this token has modifiable text' from 'this text belongs in ordinary user-visible text extraction'.",
+      "suggestion": "Add a sentence such as: availability via get_modifiable_text() does not imply inclusion in ordinary subtree text; comments, raw text, and special element token text should be included only when the caller's contract asks for those node types."
+    },
+    {
+      "location": "html-processor.md, text extraction examples",
+      "problem": "The docs show extracting text from the first matched subtree and separately show closer-driven collection for repeated regions, but there is no compact example comparing the two safe boundary patterns for repeated element text extraction.",
+      "suggestion": "Add a general 'collect text for each matching element' example that contrasts depth-bounded walks and closer-driven state machines, and notes that virtual closers flush implicitly closed or end-of-input elements."
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Passed 7/7. Correctly used WP_HTML_Processor::create_fragment() and a single next_token() state machine. All called APIs are documented. The closer-driven flush is idiomatic for repeated regions and handles implied/end-of-input closers, nested text, decoded entities, empty headings, and case normalization. Only minor gap is no explicit get_last_error()/incomplete-token policy, which the task did not require."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 94,
+      "hallucinated_methods": [],
+      "notes": "Passed 7/7. Correct processor and all API calls are documented: create_fragment(), next_token(), get_token_type(), is_tag_closer(), get_tag(), get_current_depth(), get_modifiable_text(), and get_token_name(). The depth-bounded subtree walk is idiomatic, but it is nested inside an outer next_token() loop despite the docs warning that repeated-region extraction is usually safer as a single state-machine pass or an outer next_tag() search. It also over-applies the special-element note by including SCRIPT/STYLE/TITLE/TEXTAREA text, which can mix raw and decoded text outside the ordinary #text recipe."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Passed 7/7. Correctly chose WP_HTML_Processor::create_fragment(), used next_tag() to find heading openers, then used a depth-bounded next_token() walk to collect #text. All methods, including get_last_error(), are documented and no _doing_it_wrong records occurred. Minor deductions: the is_tag_closer() guard after plain next_tag() is redundant because closers are skipped by default, and the special-element handling may include raw SCRIPT/STYLE payloads where ordinary heading text extraction should usually append only #text tokens."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial. The rendered docs did well on the decisive concepts: the HTML Processor overview says to choose WP_HTML_Processor for structure, text collection, subtrees, implied and virtual closers; create_fragment() is clearly documented for BODY fragments; next_token() explains that text extraction needs token walking and that implicit/end-of-input closers are visited; get_current_depth() gives the >= bounded-subtree pattern; get_modifiable_text() states that #text returns decoded text. Those passages directly explain why all trials handled nested markup, entities, empty headings, uppercase source tags, and implied heading close. The main near miss is special text-carrying elements. Trials 2 and 3 interpreted the SCRIPT/STYLE/TITLE/TEXTAREA note as something to include in heading text. A probe with those elements inside a heading showed trial 2 and trial 3 returning raw SCRIPT/STYLE text mixed with decoded TEXTAREA/TITLE text, while the reference and trial 1, following the ordinary #text recipe, returned empty heading text for that case. The docs do say to append only ordinary #text unless another token type is intentionally wanted, but the special-element exception can still invite over-inclusion unless the caller's text contract is explicit. Trial 3's final get_last_error() fallback is documented and conservative, but for read-only extraction it also exposes a policy ambiguity: should unsupported markup discard all partial results or return what was safely traversed before abort? The hidden suite did not exercise that policy.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md: Recipe: collect DOM-style text from a subtree / next_token()",
+      "problem": "The docs correctly mention that SCRIPT, STYLE, TITLE, and TEXTAREA carry modifiable text on the element token, but readers can over-apply this when they only need ordinary DOM-style or user-visible text.",
+      "suggestion": "Add a sharper contract note: get_modifiable_text() is broader than ordinary DOM text extraction; for generic visible/subtree text, append only #text tokens unless the caller explicitly opts into raw-text/RCDATA element payloads, and be aware that SCRIPT/STYLE are returned raw while #text/TEXTAREA/TITLE are decoded."
+    },
+    {
+      "location": "html-processor.md: next_token() single-cursor warning",
+      "problem": "The warning against nested next_token() loops is useful, but the safe boundary between an outer next_tag() search plus bounded inner token walk and a risky nested token-walk pattern could be clearer.",
+      "suggestion": "Add a short clarification that an outer next_tag() search followed by a bounded next_token() subtree scan is appropriate for non-overlapping elements, while repeated regions discovered inside a token walk should normally use a single-pass state machine or bookmarks."
+    },
+    {
+      "location": "html-processor.md: get_last_error() / incomplete input notes",
+      "problem": "The docs explain unsupported-parser aborts and incomplete-token checks, but they do not give a concise policy distinction for read-only extraction tasks versus mutation/serialization tasks.",
+      "suggestion": "Add a general note that read-only extractors may choose best-effort partial results after virtual closes, but callers requiring complete input should check paused_at_incomplete_token(), and callers must define whether get_last_error() means discard partial results or return data collected before traversal aborted."
+    }
+  ]
+}

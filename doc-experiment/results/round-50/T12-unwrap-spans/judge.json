@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor::create_fragment() for BODY-fragment normalization, walked all tokens with next_token(), skipped SPAN tokens, and rebuilt with serialize_token(). All called methods are present in the rendered docs and no _doing_it_wrong records appeared. Minor issue: returning raw input on create_fragment() failure or get_last_error() preserves bytes but is not normalized output, which the docs warn about."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Same implementation shape as trial-1. It follows the documented token-rewrite pattern almost exactly, including the serialize_token() example that skips both opener and closer tokens by tag name. No undocumented API usage. Same small contract concern around raw-input fallback on processor abort."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Same implementation shape as trials 1 and 2. Processor choice, token walking, and serialize_token() use are idiomatic and documented. It handles unclosed spans through HTML Processor virtual closers. Same minor near-miss: raw fallback is not normalized and would reintroduce removed spans on unsupported markup."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 7 hidden cases. The docs did well for this task: the Tag Processor overview explicitly says to use the HTML Processor for structure, missing closing tags, and normalized output; create_fragment() is documented as the BODY-fragment constructor; next_token() explains that closers are visited even for implicit/end-of-input closes; and serialize_token() contains an almost direct general example, removing every SUP element while keeping contents by skipping tokens whose get_tag() matches. That passage also says closing tokens of skipped elements must be skipped too, which prevented the common opener-only failure. The main near-miss is the candidates' get_last_error() fallback. They returned the original input on unsupported markup, apparently following the docs' general fallback-policy guidance, but the same serialize_token() section says original input is neither normalized nor the accumulated rewrite. A hidden unsupported-markup case would therefore fail the task contract by preserving spans and non-normalized source bytes.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::serialize_token() docs, fallback guidance after rewriting loop",
+      "problem": "The docs correctly say fallback is caller policy, but the examples do not distinguish contracts that require normalized output from contracts that merely require byte preservation on abort. Models copied the raw-input fallback idea even though this function's contract is normalized serialization.",
+      "suggestion": "Add a short note: for filters whose public contract promises normalized rewritten HTML, returning the original input is not a normalized fallback; choose an explicit failure sentinel, empty output, or documented partial-output policy instead."
+    },
+    {
+      "location": "WP_HTML_Processor::get_tag() docs",
+      "problem": "The method docs state it returns the uppercase matched tag name, but the example is next_tag()-based and does not explicitly say how it behaves in next_token() loops for openers, closers, and non-tag tokens.",
+      "suggestion": "Add a next_token() example showing get_tag() returns the element name for both opener and closer tag tokens, and null for text/comment tokens, so tag-name skip filters can intentionally remove both ends of an element."
+    },
+    {
+      "location": "WP_HTML_Processor::create_fragment() docs",
+      "problem": "The null-return guidance says to check before walking, but does not give guidance for string-returning normalization helpers where raw input would violate normalization.",
+      "suggestion": "Clarify that create_fragment() failure handling should follow the caller contract, and include examples of contract-compatible fallbacks for normalized-output helpers versus byte-preserving mutation helpers."
+    }
+  ]
+}

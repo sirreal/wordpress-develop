@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment and `next_token()` to walk the document in tree order. For each opening `A` tag, I read `href` with `get_attribute()` and only collected links when it returned a string; then I concatenated only `#text` tokens inside that element using `get_modifiable_text()`, stopping when the token depth dropped below the anchor opener\u2019s depth.",
+  "confidence": 90
+}

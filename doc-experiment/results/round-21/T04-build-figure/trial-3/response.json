@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` with a literal template so the required markup shape and attribute order are preserved. It updates the existing `src` and `alt` attributes with `set_attribute()`, then scans tokens with `next_token()` until the `figcaption` placeholder text node is found and replaces it with `set_modifiable_text()`, relying on the HTML API to perform the necessary encoding for both attributes and text.",
+  "confidence": 95
+}

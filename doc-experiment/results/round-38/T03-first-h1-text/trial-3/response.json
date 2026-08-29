@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body fragment structurally, `next_tag( 'H1' )` to find the first heading, `get_current_depth()` plus a `next_token()` walk to stay inside that H1 subtree, and `get_modifiable_text()` to concatenate decoded text from `#text` tokens. Because the HTML Processor documents that `SCRIPT`, `STYLE`, `TEXTAREA`, and `TITLE` carry their text on the opening tag instead of separate `#text` children, the function explicitly includes those opener-carried texts as well.",
+  "confidence": 85
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()`-style fragment parsing via the documented `WP_HTML_Processor` constructor path, then scanned tags with `next_tag()`, inspected structural ancestry with `get_breadcrumbs()`, and applied the class with `add_class()`. The final HTML comes from `get_updated_html()`, which preserves all untouched bytes exactly.",
+  "confidence": 92
+}

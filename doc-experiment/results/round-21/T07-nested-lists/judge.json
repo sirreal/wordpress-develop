@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Processor::create_fragment(), next_tag(), get_tag(), get_breadcrumbs(), add_class(), get_last_error(), and get_updated_html(); all are documented and execution recorded no _doing_it_wrong notices. This is the intended tree-aware breadcrumb pattern and passed 7/7. Minor edge-case reservation: it does not consult paused_at_incomplete_token(), though that policy is not required by the frozen cases."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Used the correct processor and only documented methods. The breadcrumb ancestor check and add_class()/get_updated_html() flow are appropriate and passed 7/7. The is_tag_closer() guard is documented but redundant after plain next_tag(), whose docs say closers are skipped by default; otherwise this follows the intended pattern. Same minor incomplete-input reservation as the other trials."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Essentially the canonical approach: create a fragment processor, walk opening tags, inspect get_breadcrumbs() excluding the current node, add the class, and return get_updated_html(). All API calls are documented, no _doing_it_wrong notices, and execution passed 7/7. Minor edge-case reservation: no paused_at_incomplete_token() policy check."
+    }
+  ],
+  "failure_analysis": "All trials passed every hidden case, so there are no failed hidden cases to attribute to an API misconception. The docs did well on the core decision: the WP_HTML_Processor overview and HTML Support section explicitly say to choose it when document structure, containment checks, nesting depth, or ancestor breadcrumbs matter, while WP_HTML_Tag_Processor has no tree awareness. The Breadcrumbs section and get_breadcrumbs() reference made it clear that breadcrumbs include the implicit HTML/BODY path and the current matched element, enabling the candidates to ignore the last breadcrumb and search ancestors. The add_class() docs covered the existing-class case by stating that a class is appended and existing classes are preserved, and get_updated_html() covered byte preservation for untouched input. Near misses were minor: one trial added an unnecessary is_tag_closer() guard despite next_tag() defaulting to opener-only traversal, and none stated a policy for paused_at_incomplete_token(), likely because incomplete-input guidance is spread across recipes rather than attached directly to this common full-scan mutation pattern.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_breadcrumbs() docblock / Breadcrumbs guide",
+      "problem": "The docs imply, mostly through examples, that the returned breadcrumb list includes the currently matched node as its final item. Ancestor-only checks require callers to remove or ignore that final item.",
+      "suggestion": "Add an explicit sentence: \"The final breadcrumb is the currently matched token; callers checking ancestors should inspect all entries before the final one.\""
+    },
+    {
+      "location": "WP_HTML_Processor::is_tag_closer() docblock",
+      "problem": "The next_tag() parameter table says plain next_tag() skips closers, but the is_tag_closer() page itself does not reinforce that it is only meaningful when tag_closers => 'visit' or when walking tokens that can pause on closers.",
+      "suggestion": "Add a short usage note linking is_tag_closer() to tag_closers => 'visit' and saying opener-only next_tag() loops do not need this guard."
+    },
+    {
+      "location": "Mutation-after-scan guidance near WP_HTML_Processor::next_tag() / WP_HTML_Tag_Processor::get_updated_html()",
+      "problem": "Incomplete-input policy is documented in recipes, but not as a concise rule for common loops that scan to the end, enqueue attribute/class updates, then call get_updated_html().",
+      "suggestion": "Add a general note explaining that get_updated_html() preserves incomplete trailing bytes, while callers that require proof the whole input was examined should drain the processor and check paused_at_incomplete_token() and get_last_error() before returning edited output."
+    }
+  ]
+}

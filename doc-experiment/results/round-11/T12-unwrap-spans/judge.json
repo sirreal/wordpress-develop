@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Correct HTML Processor choice. All four methods (create_fragment, next_token, get_tag, serialize_token) documented in html-processor.md. No hallucination. Loop matches the documented serialize_token SUP-removal example. 7/7 pass, no doing_it_wrong. Minor: drops the reference get_token_type guard, matching SPAN via get_tag directly; safe because get_tag is null on non-tag tokens, but unexplained. Confidence 85."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Identical implementation to trial-1. Documented methods, idiomatic serialize_token loop. 7/7 pass, no doing_it_wrong. Notes skipping SPAN drops both opener and closer. Same minor unexplained guard omission. Confidence 72, low for a clean pass."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Identical implementation to trial-1. Documented methods, idiomatic. 7/7 pass, no doing_it_wrong. Best explanation: notes get_tag returns uppercase and the processor adds implied closers. Same minor unexplained guard omission. Confidence 75."
+    }
+  ],
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_tag and WP_HTML_Tag_Processor::get_tag",
+      "problem": "Docblock says get_tag returns null if none found, but examples only show null after next_tag returns false (end of scan), never on a text or comment token during a next_token walk. Subjects relied on this null-on-non-tag behavior to match a tag name without a token-type guard, but it is not documented for the token-walking path.",
+      "suggestion": "State that during a next_token walk get_tag returns a tag name only on tag openers and closers and null on all non-tag tokens (text, comment, doctype), so matching a name with get_tag is safe inside the loop without a get_token_type check."
+    },
+    {
+      "location": "WP_HTML_Processor::serialize_token, SUP-removal example",
+      "problem": "The example skips an element with a single get_tag check plus continue but does not explain why one check skips both the opener and the closer, risking a reader adding redundant is_tag_closer handling.",
+      "suggestion": "Note that get_tag returns the same name on an element opener and its closer, so one name-equals-get_tag guard with continue skips the entire element; no separate is_tag_closer handling is needed for whole-element removal."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token and serialize_token versus get_token_type",
+      "problem": "Some token-walk examples guard with get_token_type equals text, while the serialize_token removal example matches tags via get_tag with no token-type check, without explaining when the guard is needed versus redundant.",
+      "suggestion": "Contrast the two checks: use get_token_type or get_token_name to distinguish non-tag categories such as text versus comment; matching a specific tag by get_tag needs no token-type guard because get_tag is null for all non-tag tokens."
+    }
+  ],
+  "failure_analysis": "All three trials pass 7/7 with no doing_it_wrong and are equivalent to reference.php, so no failures to trace. The docs did the decisive work. The processor-choice guidance (html-tag-processor.md Which-processor section and html-processor.md Supported-elements) steered all three to the HTML Processor over the Tag Processor, which cannot pair openers with closers nor normalize. The serialize_token Remove-every-SUP-element example, including the sentence that closing tokens of skipped elements must be skipped too, was an almost-exact template; all three reproduced it, passing nested-spans, adjacent-spans, and span-with-block-content, each of which depends on dropping both opener and closer. The normalize and serialize effect lists (double-quoting, omitted tags added, text re-encoded) explained the no-spans-normalized-passthrough and unclosed-span cases. The single conceptual near-miss across all three explanations: the reference guards the skip with get_token_type tag plus get_tag, but every subject matched SPAN via get_tag alone. This is safe because get_tag returns null for text and comment tokens (probe-confirmed), so non-tag tokens are never mistakenly skipped and a comment whose text is the word span is never matched, but no subject explained why and the docs only demonstrate get_tag returning null at end-of-scan rather than during a token walk.</parameter>\n</invoke>\n"
+}

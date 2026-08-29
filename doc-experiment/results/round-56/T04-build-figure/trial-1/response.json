@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` with a literal template that already contains `src` and `alt` in the required order, then updated those attributes in place so their positions stay fixed. I also included a placeholder text node inside `figcaption` and replaced it with `set_modifiable_text()`, which safely encodes the caption and preserves the exact fragment shape.",
+  "confidence": 95
+}

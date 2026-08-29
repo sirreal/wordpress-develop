@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body fragment structurally, then walks the document once with `next_token()`. It detects `H1` through `H6` opening and closing tags with `get_tag()` and `is_tag_closer()`, accumulates descendant text from ordinary `#text` tokens via `get_token_type()` and `get_modifiable_text()`, and also appends element-carried text from special text-bearing tags by calling `get_modifiable_text()` on opening tag tokens while inside a heading.",
+  "confidence": 86
+}

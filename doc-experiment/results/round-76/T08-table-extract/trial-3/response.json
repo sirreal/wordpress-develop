@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented `WP_HTML_Processor::create_fragment()` factory to parse the fragment in BODY context, then `next_tag()`, `next_token()`, `get_current_depth()`, `get_token_type()`, `get_token_name()`, `is_tag_closer()`, and `get_modifiable_text()` to walk the first table structurally and collect decoded text from `TD`/`TH` cells in row order. The loop stops when the walk leaves the table\u2019s depth, which handles implied table structure the way the HTML Processor documents it.",
+  "confidence": 91
+}

@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Identical logic to the canonical reference. Chose WP_HTML_Tag_Processor (correct: this is pure attribute mutation, no nesting query needed). Every method called (__construct, next_tag('A'), get_attribute('href'), set_attribute('target','_blank'), get_updated_html) is documented in html-tag-processor.md; no _doing_it_wrong records. Idiomatic token walking with a while(next_tag()) loop and get_updated_html() return. The null !== get_attribute('href') guard is exactly the documented idiom for 'attribute present in any form': docs line 81-82 and the get_attribute Returns row (line 1448) state null=absent, ''=present-but-empty, true=valueless/boolean, so a non-null test captures href=\"\", href, and href=\"/x\" while skipping <a name>. Passed all 8 hidden cases including empty-href, valueless-href, uppercase-attribute, inside-comment, and nested-markup. The in-code comment accurately restates the documented get_attribute return semantics. Used uppercase 'A' query, matching the docs' get_tag() convention. Self-reported confidence 98 is well-calibrated."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same correct solution as trial-1 but queries next_tag('a') in lowercase. Functionally identical; passed all 8 cases (uppercase-attribute and the lowercase 'a' query both rely on ASCII case-insensitive tag matching, which I verified by probe: next_tag('a') matches <a> and <a HREF>). All methods documented, no hallucination, no _doing_it_wrong. Explanation correctly enumerates the three get_attribute return forms and why !== null is the right present-check. Minor note vs trial-1: leans on case-insensitive tag-name matching that the docs never state explicitly (it only surfaces implicitly via get_tag() returning uppercase). This was a correct bet, not a documented guarantee, but does not lower adherence since behavior is correct and idiomatic."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Byte-identical candidate to trial-2 (lowercase 'a' query). Passed all 8 cases. All five methods documented; no hallucinated or undocumented API; no _doing_it_wrong. Idiomatic walk + get_updated_html. Explanation is the most precise of the three: explicitly states closing tags are skipped by default (correct: next_tag visits only openers unless tag_closers=>visit), that set_attribute both creates and overwrites, and that get_attribute returns null/true/string. Confidence 97, well-calibrated. Same implicit reliance on undocumented tag-name case-insensitivity as trial-2."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed in any trial: all three passed 8/8. This is a basic-difficulty task whose entire crux is one documentation fact — that get_attribute() distinguishes 'absent' (null) from 'present but empty' ('') from 'valueless/boolean' (true) — and the docs convey that fact well in three places: the prose at html-tag-processor.md lines 81-82 ('get_attribute() will return null if the attribute wasn't present... It may return \\\"\\\" ... For boolean attributes... it will return true'), the get_attribute() runnable example (lines 1425-1434, showing ===null, ===true, and a string value side by side), and the Returns row 'string|true|null - Value of attribute or null if not available. Boolean attributes return true' (line 1448). All three subjects independently converged on the correct null !== get_attribute('href') idiom and correctly justified it, so this passage demonstrably did its job. The set_attribute() docs ('Updates or creates a new attribute', line 2062) also correctly conveyed the overwrite-existing-target behavior, covering the existing-target-overwritten case without any subject expressing doubt.\\n\\nNear-misses worth flagging in the explanations rather than the code: (1) All three subjects asserted behavior the docs only imply. The inside-comment-ignored and nested-markup cases passed because the Tag Processor scans linearly and only parses tag openers (it does not descend into comment interiors and does not pair openers with closers) — documented in the overview (lines 5-7) and 'Design and limitations' (line 288) — but none of the three explanations mentioned comments or why <!-- <a href> --> is safely skipped; they got it for free without articulating it. (2) Trials 2 and 3 relied on ASCII case-insensitive tag-name matching (next_tag('a') matching <a>) and case-insensitive attribute-name lookup (get_attribute('href') matching HREF=); I verified both behaviors hold by probe, but neither is stated in the docs. The docs document that attribute *updates* are case-insensitive (line 315) and that get_attribute_names_with_prefix matching is case-insensitive (line 1458), and that get_tag() returns uppercase — but never that the next_tag tag_name query or get_attribute name argument are themselves case-insensitive. The trials happened to be correct, but a subject could equally have wrongly concluded the query was case-sensitive and added needless lowercasing, or worse, mishandled the uppercase-HREF case. That this gap did not cause a failure here is partly luck of the hidden-test design (the uppercase case used uppercase HREF that the subjects never explicitly reasoned about).\"}",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::next_tag() — Parameters / Finding tags section",
+      "problem": "The docs never state that the tag_name query is matched ASCII case-insensitively. Subjects who pass a lowercase tag name (next_tag('a')) against uppercase or mixed-case source must guess that it matches. get_tag() is documented to return uppercase, which could mislead a reader into thinking queries must also be uppercase.",
+      "suggestion": "Add one sentence to next_tag()/the Finding tags section: tag-name matching is ASCII case-insensitive, so next_tag('a'), next_tag('A'), and source <A>/<a> all match each other. A one-line example (next_tag('a') matches <A href>) would remove the ambiguity."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::get_attribute()",
+      "problem": "The method documents that attribute *updates* (set_attribute) are case-insensitive (mentioned only in the class-level 'Since' changelog, line 315) but never states that the $name argument to get_attribute() itself is matched case-insensitively. The runnable example only uses lowercase attribute names against lowercase source, so a reader cannot tell whether get_attribute('href') would find HREF=\"...\".",
+      "suggestion": "State explicitly in get_attribute()'s description that the attribute name is matched ASCII case-insensitively, and extend the example to show get_attribute('href') === get_attribute('HREF') on a tag written as <a HREF=\"...\">."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::get_attribute() — return-value semantics",
+      "problem": "The three-way return contract (null = absent, '' = present-but-empty, true = valueless/boolean) is correct and was learned successfully, but it is split across prose (lines 81-82), the example (lines 1425-1434), and the Returns row. A reader skimming only the method heading sees 'string|true|null - ... null if not available. Boolean attributes return true' but not the present-but-empty-string distinction, which is the single most error-prone case for 'is this attribute present?' checks.",
+      "suggestion": "Consolidate the contract into the get_attribute() description with an explicit guidance line: to test whether an attribute is present in any form (valued, empty-valued, or valueless), test null !== get_attribute($name); do not test truthiness, because '' and the absent value would both be falsy yet mean opposite things. This generalizes beyond this task to every presence check."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor — overview / 'Special self-contained elements' and 'Design and limitations'",
+      "problem": "The docs explain that the processor scans linearly and only parses tag openers, and that content inside comments/rawtext is not parsed as tags, but there is no single short statement that markup written *inside an HTML comment* (e.g. <!-- <a href> -->) is never matched by next_tag(). All three subjects got this right implicitly but none could cite it; a less careful subject could assume comment interiors are scanned.",
+      "suggestion": "Add a brief explicit note to the overview that next_tag() never matches tags that appear inside comment text, CDATA, or rawtext element contents, since those are treated as text. A one-line example (next_tag() on '<!-- <a> -->' returns false) would make the guarantee concrete."
+    }
+  ]
+}

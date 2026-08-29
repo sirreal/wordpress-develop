@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because the task is BODY-fragment text extraction, finds the first `H1` with `next_tag()`, then walks that subtree with `next_token()` bounded by `get_current_depth()`. It appends decoded text from `#text` tokens via `get_modifiable_text()`, and also includes the documented special-element text carried on opening `SCRIPT`, `STYLE`, `TEXTAREA`, and `TITLE` tokens.",
+  "confidence": 82
+}

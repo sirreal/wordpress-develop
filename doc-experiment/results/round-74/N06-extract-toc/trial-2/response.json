@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented `WP_HTML_Processor::create_fragment()` factory and its `next_tag()`/`next_token()` traversal APIs to walk the fragment in document order. For each `H1`-`H6` opener, I recorded its depth with `get_current_depth()` and then collected only `#text` tokens via `get_modifiable_text()` until the walk left that heading subtree.",
+  "confidence": 95
+}

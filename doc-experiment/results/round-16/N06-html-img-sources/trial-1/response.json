@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to properly parse the HTML according to browser rules. It iterates through all IMG tags with next_tag(), skipping closers, checking the namespace to ensure they're HTML elements (not SVG), and collecting decoded src attribute values that exist and aren't empty. The get_attribute() method returns already-decoded values as documented.",
+  "confidence": 72
+}

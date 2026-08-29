@@ -1,0 +1,133 @@
+{
+  "round": "round-28",
+  "mode": "shadow-doc-a/b",
+  "task_ids": [
+    "T03-first-h1-text",
+    "N06-extract-toc",
+    "T05-text-excerpt"
+  ],
+  "task_count": 3,
+  "splits": {
+    "train": 3
+  },
+  "concepts": {
+    "text": 2,
+    "traversal": 1
+  },
+  "trials_per_task": 3,
+  "subject": {
+    "model": "gpt-5.4",
+    "reasoning_effort": "medium",
+    "service_tier": "priority"
+  },
+  "judge": {
+    "model": "gpt-5.5",
+    "reasoning_effort": "xhigh",
+    "service_tier": "priority"
+  },
+  "git_head": "3d6e1da1f606996922399d8dcd5eae3b47c9c8ad",
+  "git_status_short": "",
+  "source_file_digests": {
+    "ref": "3d6e1da1f606996922399d8dcd5eae3b47c9c8ad",
+    "algorithm": "sha256",
+    "php_behavior_fingerprint": "token_get_all with T_COMMENT, T_DOC_COMMENT, and T_WHITESPACE removed; JSON-encoded token names and text",
+    "files": {
+      "src/wp-includes/html-api/class-wp-html-tag-processor.php": {
+        "source_sha256": "9e431d345cc6d5563a65e3456b8a944fe1def8ceb8db299e89f20e8e9f560058",
+        "php_without_comments_sha256": "d073f5772a64826878e4132ed9bb30717fb1b6f3ddb5e23a014a4fa9db218ad7",
+        "php_without_comments_token_count": 9881
+      },
+      "src/wp-includes/html-api/class-wp-html-processor.php": {
+        "source_sha256": "f50dbbc343bd72dc6031ba277c1773337f5bb0762791eb8a047a691236c078d5",
+        "php_without_comments_sha256": "2da9aa482f295c89a7018c5b74b622b4add7e942599c97785434408cfa72c083",
+        "php_without_comments_token_count": 16806
+      }
+    }
+  },
+  "corpus_file_digests": {
+    "ref": "3d6e1da1f606996922399d8dcd5eae3b47c9c8ad",
+    "algorithm": "sha256",
+    "tasks": {
+      "T03-first-h1-text": {
+        "labels": {
+          "split": "train",
+          "role": "core",
+          "commonness": "high",
+          "concept": "text",
+          "processor": "html"
+        },
+        "files": {
+          "doc-experiment/corpus/T03-first-h1-text/task.md": "66a882aef20a6af4430fb6a7eafc54ba306adcf982980967e07eba7881fc0030",
+          "doc-experiment/corpus/T03-first-h1-text/reference.php": "a64806dcd5f7f91e254c287aad72401502aec44a7661eb691b51e56e17064f2d",
+          "doc-experiment/corpus/T03-first-h1-text/tests.json": "499c5da8b3d916a6739142c6ed164e8a6a05c43a6c517003bcb31d6929094533"
+        }
+      },
+      "N06-extract-toc": {
+        "labels": {
+          "split": "train",
+          "role": "core",
+          "commonness": "high",
+          "concept": "traversal",
+          "processor": "html"
+        },
+        "files": {
+          "doc-experiment/corpus/N06-extract-toc/task.md": "ba341a3927bb81410b8662b29f479f23a0887d4ec6f19db95702c1346d670581",
+          "doc-experiment/corpus/N06-extract-toc/reference.php": "7e5cf569519dc0411da5659e473fc773d82eb634886b5623610b696936c0b2e2",
+          "doc-experiment/corpus/N06-extract-toc/tests.json": "22f8950aace5d22a842a8c76df372d5d09e770cf4adefb06099eb81f7410317e"
+        }
+      },
+      "T05-text-excerpt": {
+        "labels": {
+          "split": "train",
+          "role": "core",
+          "commonness": "high",
+          "concept": "text",
+          "processor": "html"
+        },
+        "files": {
+          "doc-experiment/corpus/T05-text-excerpt/task.md": "5e69766456a6343f99ee24037574ed3f9bdf7795ab8be9a61203f6254b8fa2de",
+          "doc-experiment/corpus/T05-text-excerpt/reference.php": "1081c297e36fa566e8a6a2cf8098fe8d3117da8ac49d4106691b9bb65b3739b6",
+          "doc-experiment/corpus/T05-text-excerpt/tests.json": "8b2276d754c887d6246f321b2dfad0de59718bc252c0a6bed52b65ae1bad1496"
+        }
+      }
+    }
+  },
+  "created_at_utc": "2026-06-13T12:25:05+00:00",
+  "isolation": {
+    "scratch_contains": [
+      "html-tag-processor.md",
+      "html-processor.md",
+      "tasks/<task-id>.md"
+    ],
+    "subjects_must_not_read": [
+      "reference.php",
+      "tests.json",
+      "source files",
+      "logs",
+      "plans",
+      "hypothesis docs"
+    ]
+  },
+  "scratch": "/tmp/html-api-docs-eval/round-28",
+  "shadow_doc_variant": {
+    "name": "ordinary-text-negative-example",
+    "control_round": "round-27",
+    "edited_files": [
+      "html-processor.md"
+    ],
+    "notes": "Scratch-only rendered-doc variant. Replaces the broad special-element text cue near the HTML Processor DOM-style text recipe with default-first ordinary-text policy prose and a negative example; source docblocks are unchanged."
+  },
+  "staged_task_files": [
+    "tasks/T03-first-h1-text.md",
+    "tasks/N06-extract-toc.md",
+    "tasks/T05-text-excerpt.md"
+  ],
+  "scratch_isolation_check": "OK: /tmp/html-api-docs-eval/round-28 exposes 2 docs and 3 task prompt(s), with no forbidden files.",
+  "scratch_file_sha256": {
+    "html-processor.md": "d35fbe30fdfbcc3cae6ba83be8edc104a7630ad217a5ab08e817cbb6a14aabc8",
+    "html-tag-processor.md": "8ca4ec32aa54723fe16a0a9f45386ca6ebeecde7a06575d8a782e53fb395a664",
+    "tasks/N06-extract-toc.md": "ba341a3927bb81410b8662b29f479f23a0887d4ec6f19db95702c1346d670581",
+    "tasks/T03-first-h1-text.md": "66a882aef20a6af4430fb6a7eafc54ba306adcf982980967e07eba7881fc0030",
+    "tasks/T05-text-excerpt.md": "5e69766456a6343f99ee24037574ed3f9bdf7795ab8be9a61203f6254b8fa2de"
+  }
+}

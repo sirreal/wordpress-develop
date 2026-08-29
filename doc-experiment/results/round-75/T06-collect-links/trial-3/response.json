@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in body context, `next_tag( 'A' )` to find anchor openers in document order, `get_attribute( 'href' )` to keep only anchors with a string-valued href, and a depth-bounded `next_token()` walk with `get_token_type() === '#text'` plus `get_modifiable_text()` to concatenate only ordinary text descendants and ignore markup.",
+  "confidence": 92
+}

@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Passed 10/10. Correctly used WP_HTML_Processor::create_fragment(), walked tokens with next_token(), read decoded text with get_modifiable_text(), included TITLE/TEXTAREA opener text, and excluded SCRIPT/STYLE. All HTML API calls were documented. Minor issue: uses get_tag() rather than get_token_name() for the special-element branch, but get_tag() is documented and valid on tag tokens."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "Passed 10/10. Correct processor and fully documented API usage, including get_last_error() and paused_at_incomplete_token(). The token filtering is precise. Main adherence concern: it treats incomplete trailing syntax or later parser errors as a reason to discard already-collected read-only text, which is a policy choice not required by the task and a near-miss against the docs' note that these diagnostics do not erase visited tokens."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Passed 10/10. Correct processor, documented methods only, good token-walk pattern, decoded text handling, special-element whitelist, and early truncation. Minor issue: the special-element branch calls is_tag_closer() without first checking get_token_type() === '#tag'; this is harmless here because it then whitelists TITLE/TEXTAREA, but it is less exact than the documented opener-token pattern."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed in any trial. The docs did well in four important places: the processor-choice guidance pushed subjects to WP_HTML_Processor::create_fragment() instead of lexical Tag Processor parsing; next_token() explained that text can be split across tokens and that malformed input still produces structural closers; get_modifiable_text() explicitly warned not to treat every modifiable-text token as DOM text; and the special-element text section distinguished decoded TITLE/TEXTAREA text from raw SCRIPT/STYLE text. Those passages directly explain the passing behavior for entities-count-decoded, textarea-title-counts-script-style-excluded, script-excluded, interelement-whitespace, and malformed-nesting. Near-misses: trial-2 over-applied completeness checks and would return an empty string for inputs like '<p>abc<span' even though the processor has already visited 'abc'; trial-3 used is_tag_closer() outside an explicit tag-token guard; trial-1 used get_tag() where the docs' text-walk examples prefer get_token_name(). None affected the frozen cases.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_modifiable_text() / read-only extraction notes",
+      "problem": "The docs state that get_last_error() and paused_at_incomplete_token() do not erase visited tokens, but a subject still treated them as mandatory fail-closed checks for text extraction.",
+      "suggestion": "Make the completion-policy note more prominent in the method doc: for read-only extraction, accumulated text remains valid unless the caller's contract requires complete-source proof."
+    },
+    {
+      "location": "WP_HTML_Processor::get_tag()",
+      "problem": "The HTML Processor get_tag() section uses a WP_HTML_Tag_Processor example, which can blur the preferred distinction between token kind checks and tag-name checks in HTML Processor token walks.",
+      "suggestion": "Use a WP_HTML_Processor::create_fragment() example there and add a short note that token walks should check get_token_type() before tag-specific closer/name logic."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token() text extraction recipe",
+      "problem": "The subtree text recipe is strong, but the flat fragment case is implicit, and special-element opener text remains an easy place to over- or under-include content.",
+      "suggestion": "Add a compact general pattern for fragment text walks: append ordinary #text tokens, optionally whitelist named special-element opener text, and never use non-empty modifiable text as the predicate for text content."
+    }
+  ]
+}

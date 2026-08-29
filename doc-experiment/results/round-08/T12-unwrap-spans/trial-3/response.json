@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor to parse the HTML fragment and iterate through all tokens. For each token, if the tag name is 'SPAN', it's skipped (both opening and closing tags), effectively unwrapping the span while preserving its contents. All other tokens are serialized and concatenated to produce normalized HTML output. The approach is based directly on the documented example in the html-processor.md file that removes SUP elements.",
+  "confidence": 92
+}

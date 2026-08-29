@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` for structure-aware fragment parsing, then scanned tokens to find the first `UL` or `OL`, recorded its depth and bookmark, counted only direct `LI` child openers at `depth + 1`, and applied `set_attribute()` only after confirming the scan was complete and error-free. The result is read back with `get_updated_html()`, and incomplete or unsupported input falls back to the original HTML unchanged.",
+  "confidence": 88
+}

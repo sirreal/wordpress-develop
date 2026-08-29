@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` for structure-aware traversal, `next_tag()` to visit only real tag openers, `get_breadcrumbs()` to detect whether a `UL` or `OL` has any list ancestor, and `add_class()` plus `get_updated_html()` to make byte-preserving attribute edits on the original fragment.",
+  "confidence": 93
+}

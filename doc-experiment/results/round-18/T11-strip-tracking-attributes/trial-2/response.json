@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` because the task is a flat attribute edit on every tag. The function scans all tag openers with `next_tag()`, collects matching attribute names with `get_attribute_names_with_prefix( 'data-track-' )`, removes each one via `remove_attribute()`, and returns the edited markup with `get_updated_html()`.",
+  "confidence": 98
+}

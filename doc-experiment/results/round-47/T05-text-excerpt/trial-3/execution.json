@@ -1,0 +1,98 @@
+{
+  "candidate": "/Users/jonsurrell/a8c/wordpress-develop/html-api-docs-improvement/doc-experiment/results/round-47/T05-text-excerpt/trial-3/candidate.php",
+  "function": "html_text_excerpt",
+  "passed": 10,
+  "total": 10,
+  "cases": [
+    {
+      "id": "no-truncation-needed",
+      "status": "pass",
+      "expected": "Just a link to content.",
+      "actual": "Just a link to content.",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "truncate-mid-link",
+      "status": "pass",
+      "expected": "Just a l",
+      "actual": "Just a l",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "entities-count-decoded",
+      "status": "pass",
+      "expected": "Fish &",
+      "actual": "Fish &",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "multibyte-emoji",
+      "status": "pass",
+      "expected": "ab🌨️",
+      "actual": "ab🌨️",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "accented",
+      "status": "pass",
+      "expected": "cafés",
+      "actual": "cafés",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "script-excluded",
+      "status": "pass",
+      "expected": "beforeafter",
+      "actual": "beforeafter",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "textarea-title-counts-script-style-excluded",
+      "status": "pass",
+      "expected": "form & fieldDoc & TitleBody",
+      "actual": "form & fieldDoc & TitleBody",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "interelement-whitespace",
+      "status": "pass",
+      "expected": "a b",
+      "actual": "a b",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "zero-limit",
+      "status": "pass",
+      "expected": "",
+      "actual": "",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "malformed-nesting",
+      "status": "pass",
+      "expected": "onetwotail",
+      "actual": "onetwotail",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    }
+  ]
+}

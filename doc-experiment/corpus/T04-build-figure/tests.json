@@ -1,0 +1,76 @@
+{
+    "id": "T04-build-figure",
+    "title": "Build a figure fragment",
+    "difficulty": "basic",
+    "split": "train",
+    "role": "core",
+    "commonness": "high",
+    "concept": "attributes",
+    "processor": "tag",
+    "function": "build_figure",
+    "cases": [
+        {
+            "id": "simple",
+            "args": [
+                "https://example.com/dog.jpg",
+                "A dog",
+                "My dog"
+            ],
+            "expected": "<figure><img src=\"https://example.com/dog.jpg\" alt=\"A dog\"><figcaption>My dog</figcaption></figure>"
+        },
+        {
+            "id": "ampersand-in-caption",
+            "args": [
+                "https://example.com/a.jpg",
+                "Pair",
+                "Fish & Chips"
+            ],
+            "expected": "<figure><img src=\"https://example.com/a.jpg\" alt=\"Pair\"><figcaption>Fish &amp; Chips</figcaption></figure>"
+        },
+        {
+            "id": "quotes-in-alt",
+            "args": [
+                "https://example.com/a.jpg",
+                "The \"best\" photo",
+                "Caption"
+            ],
+            "expected": "<figure><img src=\"https://example.com/a.jpg\" alt=\"The &quot;best&quot; photo\"><figcaption>Caption</figcaption></figure>"
+        },
+        {
+            "id": "special-chars-in-url",
+            "args": [
+                "/photo?title=\"A&B\"&raw=<tag>",
+                "Alt",
+                "Caption"
+            ],
+            "expected": "<figure><img src=\"/photo?title=&quot;A&amp;B&quot;&amp;raw=&lt;tag&gt;\" alt=\"Alt\"><figcaption>Caption</figcaption></figure>"
+        },
+        {
+            "id": "angle-brackets-in-caption",
+            "args": [
+                "https://example.com/a.jpg",
+                "Code",
+                "Use <em> tags & enjoy"
+            ],
+            "expected": "<figure><img src=\"https://example.com/a.jpg\" alt=\"Code\"><figcaption>Use &lt;em&gt; tags &amp; enjoy</figcaption></figure>"
+        },
+        {
+            "id": "unicode",
+            "args": [
+                "https://example.com/a.jpg",
+                "Schnée ☃",
+                "Winter 🌨️ scene"
+            ],
+            "expected": "<figure><img src=\"https://example.com/a.jpg\" alt=\"Schnée ☃\"><figcaption>Winter 🌨️ scene</figcaption></figure>"
+        },
+        {
+            "id": "html-in-caption-not-parsed",
+            "args": [
+                "https://example.com/a.jpg",
+                "alt",
+                "<script>alert(1)</script>"
+            ],
+            "expected": "<figure><img src=\"https://example.com/a.jpg\" alt=\"alt\"><figcaption>&lt;script&gt;alert(1)&lt;/script&gt;</figcaption></figure>"
+        }
+    ]
+}

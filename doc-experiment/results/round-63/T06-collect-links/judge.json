@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Processor::create_fragment() and a single next_token() walk, with documented get_token_type(), get_tag(), is_tag_closer(), get_attribute(), and get_modifiable_text(). The stack-based state machine is a valid documented style for repeated regions, filters href with is_string() so valueless href is excluded, and reads only #text tokens so entities are decoded while markup contributes nothing."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Matches the canonical documented pattern: create_fragment(), next_tag('A'), get_attribute() with string-only filtering, record get_current_depth(), then bounded next_token() subtree walk collecting #text via get_modifiable_text(). All called methods are present in the rendered docs, and execution produced no misuse records."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Uses the correct processor and documented methods, including next_tag() with tag_closers => 'visit', is_tag_closer(), get_current_depth(), next_token(), get_token_type(), and get_modifiable_text(). Visiting A closers in the outer query is unnecessary because the inner depth-bounded walk consumes the matched closer, but it is documented and harmless here."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial: all three passed 8/8 with no _doing_it_wrong or trigger_error records. The docs did well on the key contracts this task required: they clearly direct BODY fragments to WP_HTML_Processor::create_fragment(), explain that DOM-style subtree text should be collected from #text tokens via get_modifiable_text(), document the >= depth guard, and show get_attribute() returning string, true, or null so valueless href can be excluded with is_string(). Near-misses: trial-1 relies on virtual closer behavior for an unclosed A; the depth docs mention virtual closers, but the read-only extraction story for unterminated elements could be easier to find. Trial-3 used tag_closers => 'visit' defensively even though plain next_tag() visits openers only; the docs state this, but examples could better distinguish when closers are useful.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_attribute() docblock",
+      "problem": "The HTML Processor method documents string|true|null but does not repeat the decoded-string guarantee that appears in the Tag Processor docs.",
+      "suggestion": "Duplicate the inherited contract: string attribute values are returned decoded, boolean/valueless attributes return true, missing or unavailable attributes return null, and callers should not decode strings again."
+    },
+    {
+      "location": "WP_HTML_Processor text-extraction overview / next_token() docs",
+      "problem": "The docs warn against nested next_token() loops for repeated regions, while the safe pattern for repeated independent element matches is still to use next_tag() externally and a bounded subtree walk internally.",
+      "suggestion": "Add a short clarification distinguishing unsafe nested region walkers from safe 'find one opener, consume its subtree, then continue next_tag()' extraction patterns."
+    },
+    {
+      "location": "WP_HTML_Processor::get_current_depth() and is_tag_closer() docs",
+      "problem": "Virtual closers and unclosed source elements are mentioned, but the implication for read-only extraction from unterminated elements is not prominent.",
+      "suggestion": "Add a general note that fragment parsing can emit virtual closer events/depth drops for omitted or unclosed end tags, and read-only callers may return accumulated subtree text unless their contract requires complete source verification via paused_at_incomplete_token() and get_last_error()."
+    }
+  ]
+}

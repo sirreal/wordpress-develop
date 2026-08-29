@@ -1,0 +1,109 @@
+{
+  "round": "round-61",
+  "mode": "discoverability-probe",
+  "question_id": "bounded-region-completion-scope",
+  "question": "A function scans only a bounded region or subtree of the current element before deciding whether to edit that element. After the scan leaves the region because current depth drops below the recorded opener depth, should it keep walking to the end of the document just to see whether paused_at_incomplete_token() or get_last_error() reports unrelated trailing malformed markup? What do the rendered docs say, and what is missing if they do not answer directly? Cite headings.",
+  "subject": {
+    "model": "gpt-5.4-mini",
+    "reasoning_effort": "low",
+    "service_tier": "priority"
+  },
+  "subject_isolation": {
+    "enforced": true,
+    "agent_type": "codex-cli-isolated-workdir",
+    "isolation_mode": "isolated-workdir",
+    "runner": "codex exec",
+    "input_delivery": "prompt-embedded-docs",
+    "sandbox_mode": "read-only",
+    "approval_policy": "never",
+    "project_rules_loaded": false,
+    "user_config_loaded": false,
+    "repo_available_to_subject": false,
+    "input_files": [
+      "html-processor.md",
+      "html-tag-processor.md",
+      "probe question"
+    ],
+    "work_root": "/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/html-api-docs-eval/round-61/codex-cli-probes"
+  },
+  "result": [
+    {
+      "id": "bounded-region-completion-scope",
+      "trial_id": "probe-1",
+      "response": {
+        "answer": "No. The rendered docs say a depth-bounded subtree walk is about tree location, not source completeness, and after that walk you should check `paused_at_incomplete_token()` and separately `get_last_error()` if the result will drive an edit or must reject truncated/unsupported input. They do not say to keep walking to the end of the document just to discover unrelated trailing malformed markup. What is missing is an explicit statement that trailing malformed markup outside the bounded region can be ignored for a bounded-region edit; the nearest contract is the `next_token()` / `get_current_depth()` guidance that the scan boundary is structural and completeness must be checked separately.",
+        "citations": [
+          {
+            "file": "html-processor.md",
+            "heading": "`next_token()`",
+            "support": "\"Note also that `next_token()` does not stop when the element matched by an earlier `next_tag()` call ends: left unguarded, it walks to the end of the document. Bound a walk with a depth or breadcrumb condition as shown below.\" Also: \"This reliability is structural ... It does not prove that the source bytes for that region were complete. If a scan will drive a mutation or another result that must reject truncated input, check `paused_at_incomplete_token` after the scan, and check `get_last_error` for an unsupported-parser abort.\""
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "`get_current_depth()`",
+            "support": "\"This gives a reliable way to visit every token inside an element: record the depth when matched on its opening tag and continue while the depth remains at or above that value. This boundary is about the tree location, not about source completeness... If the scan's result will drive an edit or must reject truncated input, check `paused_at_incomplete_token` after the bounded walk, and separately check `get_last_error` for unsupported markup.\""
+          },
+          {
+            "file": "html-tag-processor.md",
+            "heading": "`paused_at_incomplete_token()`",
+            "support": "\"In a longer document, drain all tokens first; this method reports the state at the point scanning stopped, so it answers 'did the input end mid-token?' only after the processor has scanned to the end of the input.\" This is the Tag Processor’s separate contract for completeness checking, not a requirement to continue scanning a bounded subtree in the HTML Processor docs."
+          }
+        ],
+        "rationale": "The HTML Processor docs explicitly separate structural subtree bounds from source-completeness checks and instruct callers to check the error/paused state after the bounded walk, but they do not mandate continuing past the region to inspect trailing malformed markup.",
+        "confidence": 91
+      }
+    },
+    {
+      "id": "bounded-region-completion-scope",
+      "trial_id": "probe-2",
+      "response": {
+        "answer": "No. The docs say the depth boundary is about tree location, not source completeness: once the walk drops below the opener depth, that means you have left the region, and if you need to reject truncated input or unsupported markup you should check `paused_at_incomplete_token()` and `get_last_error()` after the bounded walk. They do not say to keep walking to the end of the document just to inspect unrelated trailing malformed markup.",
+        "citations": [
+          {
+            "file": "html-processor.md",
+            "heading": "`get_current_depth()`",
+            "support": "\"This gives a reliable way to visit every token inside an element: record the depth when matched on its opening tag and continue while the depth remains at or above that value. This boundary is about the tree location, not about source completeness: virtual closers can appear after trailing incomplete syntax. If the scan's result will drive an edit or must reject truncated input, check `paused_at_incomplete_token` after the bounded walk, and separately check `get_last_error` for unsupported markup.\""
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "`next_token()`",
+            "support": "\"Note also that `next_token()` does not stop when the element matched by an earlier `next_tag()` call ends: left unguarded, it walks to the end of the document. Bound a walk with a depth or breadcrumb condition as shown below.\""
+          },
+          {
+            "file": "html-tag-processor.md",
+            "heading": "`paused_at_incomplete_token()`",
+            "support": "\"In a longer document, drain all tokens first; this method reports the state at the point scanning stopped, so it answers 'did the input end mid-token?' only after the processor has scanned to the end of the input\""
+          }
+        ],
+        "rationale": "The HTML Processor docs explicitly separate subtree boundary detection from completeness checks and say to test `paused_at_incomplete_token()` and `get_last_error()` after a bounded walk; they do not instruct continuing past the subtree just to look for unrelated trailing errors.",
+        "confidence": 96
+      }
+    },
+    {
+      "id": "bounded-region-completion-scope",
+      "trial_id": "probe-3",
+      "response": {
+        "answer": "No. The docs say a bounded walk ends when depth drops below the opener depth, and that boundary is about tree location, not source completeness. They explicitly say to check `paused_at_incomplete_token()` after the bounded walk and separately check `get_last_error()` for unsupported markup, rather than continuing to the end just to inspect unrelated trailing malformed input. What is missing is an explicit statement that trailing malformed markup outside the scanned subtree should be ignored for the edit decision; the docs only say to perform the two checks after the scan, not whether to keep scanning beyond the subtree boundary.",
+        "citations": [
+          {
+            "file": "html-processor.md",
+            "heading": "### `get_current_depth()`",
+            "support": "\"This gives a reliable way to visit every token inside an element: record the depth when matched on its opening tag and continue while the depth remains at or above that value. This boundary is about the tree location, not about source completeness: virtual closers can appear after trailing incomplete syntax. If the scan's result will drive a mutation or must reject truncated input, check `paused_at_incomplete_token` after the bounded walk, and separately check `get_last_error` for unsupported markup.\""
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "##### Recipe: scan a region before editing its opener",
+            "support": "\"A depth drop or virtual closer tells you that the parser has left the element in the parsed tree. It does not prove the input bytes for that region were complete. If a mutation depends on a complete scan, check `paused_at_incomplete_token()` for truncation and `get_last_error()` for unsupported markup before applying the edit.\""
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "### `next_token()`",
+            "support": "\"Note also that `next_token()` does not stop when the element matched by an earlier `next_tag()` call ends: left unguarded, it walks to the end of the document. Bound a walk with a depth or breadcrumb condition as shown below.\""
+          }
+        ],
+        "rationale": "The HTML Processor docs directly instruct a depth-bounded subtree walk and say completeness is checked afterward with `paused_at_incomplete_token()` and `get_last_error()`, but they do not explicitly discuss whether unrelated trailing malformed markup beyond the subtree should affect the edit decision.",
+        "confidence": 96
+      }
+    }
+  ]
+}

@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 90,
+      "hallucinated_methods": [],
+      "notes": "Passed 10/10. All WP_HTML_* calls are documented: constructor, next_token(), get_token_type(), get_token_name(), is_tag_closer(), and get_modifiable_text(). Main reservation: it used WP_HTML_Tag_Processor, while the canonical and processor-choice guidance point toward WP_HTML_Processor::create_fragment() for body-fragment DOM/text work. Otherwise idiomatic: one token walk, decoded modifiable text, explicit TITLE/TEXTAREA handling, SCRIPT/STYLE excluded, UTF-8 mb_* truncation, and early exit."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 88,
+      "hallucinated_methods": [],
+      "notes": "Passed 10/10 with only documented API calls. Same processor-choice reservation as trial-1: the Tag Processor is a documented lexical-token path, but less aligned with the HTML Processor guidance for fragment structure and browser-like implied/missing-closing-tag behavior. The loop is clear and safe, but it accumulates the full text before truncating rather than stopping once the limit is reached."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 89,
+      "hallucinated_methods": [],
+      "notes": "Passed 10/10 with no undocumented API usage or _doing_it_wrong records. It follows the documented token-walking/get_modifiable_text pattern and handles decoded text and UTF-8 truncation. It shares the nonpreferred Tag Processor choice. Its TITLE/TEXTAREA branch relies on get_token_name() rather than an explicit #tag check, but that is still consistent with documented token-name semantics."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial. The docs did well on the core hazards: the Tag Processor token-walking section shows collecting #text with get_modifiable_text(); both docs state that get_modifiable_text() returns decoded text for #text, TITLE, and TEXTAREA and raw text for SCRIPT/STYLE; and the HTML Processor next_token() docs explicitly warn that SCRIPT, STYLE, TITLE, and TEXTAREA do not expose separate #text children. That appears to have prevented the common mistakes of using next_tag(), double-decoding entities, counting raw SCRIPT/STYLE content, or missing TITLE/TEXTAREA content. The near-miss is processor selection: all trials chose the lexical WP_HTML_Tag_Processor even though the HTML Processor docs say to use WP_HTML_Processor when structure, body-fragment parsing, implied closers, or collecting text content matters. This ambiguity did not affect the frozen cases, but it is the main documentation-induced risk exposed by the experiment.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor overview, “Which processor should I use?” plus “Tokens and finer-grained processing”",
+      "problem": "The overview says to prefer WP_HTML_Processor when structure or text-content collection matters, but the later Tag Processor token example looks like a ready-made text extraction recipe. Models treated whole-fragment text extraction as a flat lexical scan.",
+      "suggestion": "Clarify the distinction between lexical token text and parsed DOM/body-fragment text. State when the Tag Processor token recipe is appropriate, and when callers should use WP_HTML_Processor::create_fragment() for browser-like fragment semantics."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token()",
+      "problem": "The docs explain special elements and token walking, but do not give a concise general contract for collecting document text from a parsed fragment.",
+      "suggestion": "Add a short, general example or table for parsed-text collection: accumulate #text tokens, read text-bearing special element openers, and filter out comments plus raw-text elements when the caller wants DOM/user text rather than all modifiable text."
+    },
+    {
+      "location": "get_modifiable_text() docs in both classes",
+      "problem": "“Modifiable text” includes DOM text, comments, SCRIPT/STYLE raw text, and special element text. That name can be mistaken for “text content” unless the caller notices the filtering implications.",
+      "suggestion": "Add an explicit warning that not every token with modifiable text belongs to document text content; callers must decide by token type/name, especially for SCRIPT, STYLE, comments, processing instructions, TITLE, and TEXTAREA."
+    },
+    {
+      "location": "WP_HTML_Processor::create_fragment() and next_token() edge-case notes",
+      "problem": "Fragment parsing, unsupported markup, and incomplete-token behavior are documented in separate places, making it hard to know the expected read-only traversal contract for malformed or partial fragments.",
+      "suggestion": "Add a compact guidance note for read-only traversals: create_fragment() may return null for invalid context, traversal can stop on unsupported markup, paused_at_incomplete_token() reports truncated syntax, and get_last_error() distinguishes unsupported-parser aborts."
+    }
+  ]
+}

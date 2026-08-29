@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The task requires parsing table contents (TR/TD/TH elements) which the documentation explicitly states WP_HTML_Processor does not support (\"Any element inside a TABLE\"). I therefore used WP_HTML_Tag_Processor with next_token() to linearly scan tokens. The approach: (1) find the first TABLE opener, (2) track TR/TD/TH openers and closers to build row and cell structures, handling optional closing tags by implicitly closing cells/rows when new TR/TD/TH openers are encountered, (3) accumulate text using get_modifiable_text() on #text tokens only when inside a cell, (4) stop at the TABLE closer. The get_modifiable_text() method on the Tag Processor returns decoded text (character references resolved), satisfying the requirement that text content have markup decoded. Since the Tag Processor scans linearly without semantic understanding, I manually implement the implied-closing logic: a new TR opener closes any open cell and row; a new TD/TH opener closes any open cell.",
+  "confidence": 62
+}

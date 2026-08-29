@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Tag_Processor to parse the HTML document and find the TITLE element. It creates a fragment parser with an HTML context, finds the TITLE tag using next_tag(), advances to the next token (the text content), and retrieves the modifiable text using get_modifiable_text(). Per the documentation, get_modifiable_text() returns already-decoded text for TITLE elements, so character references like &mdash; are automatically converted to their Unicode equivalents. Returns null if no TITLE tag exists, or the text content (empty string if title is empty).",
+  "confidence": 55
+}

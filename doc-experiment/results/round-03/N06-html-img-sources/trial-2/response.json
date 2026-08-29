@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Processor::create_fragment() to parse the HTML with proper HTML5 semantics that automatically tracks namespace context. Iterates through all tags with next_tag(), filtering for IMG tags in the html namespace (excluding SVG image tags in foreign content). Retrieves the src attribute value and includes only non-empty string values, preserving document order.",
+  "confidence": 75
+}

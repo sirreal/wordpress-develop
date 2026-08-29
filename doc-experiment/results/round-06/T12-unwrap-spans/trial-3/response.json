@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor to parse the HTML fragment and serialize tokens. It walks through every token in the document using next_token(), skipping both opening and closing SPAN tags while serializing all other tokens. The HTML Processor automatically handles normalization during serialization, producing double-quoted attributes, closing optional tags, and normalizing text encoding. This approach is directly from the documented example for removing SUP elements.",
+  "confidence": 92
+}

@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Processor::create_fragment(), next_token(), get_token_type(), get_token_name(), is_tag_closer(), and get_modifiable_text(), all documented in the rendered files. Correctly treated text extraction as an HTML Processor token walk, whitelisted #text plus TITLE/TEXTAREA opener tokens, excluded SCRIPT/STYLE, and decoded text via get_modifiable_text(). No _doing_it_wrong records."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used only documented APIs, including get_tag() for tag-name checks after confirming #tag tokens. Processor choice, token walking, special-element handling, decoded-text handling, and UTF-8 truncation were all aligned with documented guidance. No _doing_it_wrong records."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used only documented APIs and closely followed the documented pattern: create a BODY fragment processor, walk tokens, collect #text, opt into TITLE/TEXTAREA opener modifiable text, and truncate with mb_* using UTF-8. No _doing_it_wrong records."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed in any trial. The docs did well on the exact hazards this task exercises: html-processor.md's 'Recipe: collect DOM-style text from a subtree' says to use WP_HTML_Processor for tree-aware text extraction, append ordinary #text tokens, and not treat every token with modifiable text as text. Its opt-in policy explicitly says TITLE and TEXTAREA provide decoded text on opener tokens while SCRIPT and STYLE provide raw text and should not be included merely because available. The next_token() section explains that special elements produce no #text children and that malformed input still produces closing tokens. The get_modifiable_text() section states that #text, TITLE, and TEXTAREA are already decoded UTF-8 and should be measured/sliced with an explicit UTF-8 encoding. Near-misses: trial-2 used get_tag() while trials 1 and 3 used get_token_name(); both are documented and valid here, but the docs alternate between them in examples, which could confuse weaker users about which is preferred for token-walk code.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_modifiable_text() / text extraction recipe",
+      "problem": "The special-element guidance is correct, but implementers still have to synthesize the include/exclude policy from several paragraphs: #text is ordinary DOM text, TITLE/TEXTAREA are decoded opt-in opener text, and SCRIPT/STYLE are raw opt-in text that many text-content callers must exclude.",
+      "suggestion": "Add a compact table for token text policies: token/source, whether it appears as #text child tokens, whether get_modifiable_text() is decoded or raw, and when callers should opt in."
+    },
+    {
+      "location": "WP_HTML_Processor::get_token_name() and get_tag() docs",
+      "problem": "Examples use both get_token_name() and get_tag() for tag-name checks during token walks. Both worked in these trials, but the preferred choice is not explicit for code that first checks get_token_type() === '#tag'.",
+      "suggestion": "Add a short note: in token walks, use get_token_type() to distinguish token kinds; after confirming '#tag', either get_tag() or get_token_name() can identify the element name, with any semantic differences called out."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token() incomplete-input guidance",
+      "problem": "The docs mention paused_at_incomplete_token() and get_last_error(), but the contract for read-only extraction is spread across mutation/rewrite examples. It is not obvious when best-effort extraction may ignore incomplete trailing syntax versus when callers should reject it.",
+      "suggestion": "Add a general note for read-only token walks: next_token() only visits complete reported tokens; callers that require proof of complete input should check paused_at_incomplete_token() and get_last_error() after the walk."
+    }
+  ]
+}

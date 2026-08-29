@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 91,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice (Tag Processor for a flat class edit). All methods used (next_tag, set_bookmark, release_bookmark, seek, add_class, get_updated_html) are documented in html-tag-processor.md. Passed all 6 hidden cases. Correctly used the seek() return value to guard the no-H2 case and relied on documented behavior that comments are never matched as tags (line 939). Deduction is for one non-idiomatic detail: it calls release_bookmark on the previous bookmark inside the loop before re-setting the SAME name ('last-h2'). The set_bookmark docs (line 1161) explicitly state that re-setting a name already in use MOVES the bookmark and 'does not leak the old one or require releasing it first' — so the in-loop release is dead code reflecting a slight misread of the move-semantics guarantee. Harmless, did not affect correctness."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice. All methods documented; uses the cleaner has_bookmark() guard (documented, html-tag-processor.md line 1368) to detect whether any H2 was found, then seek + add_class + release_bookmark. This mirrors the documented single-pass 'last-X' bookmark idiom almost exactly (the 'last-li' worked example at lines 1124-1161). Passed all 6 cases. Explanation correctly attributes comment exclusion to the processor only matching real tags. Most idiomatic of the three; no meaningful deductions."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice. Functionally identical idiom to trial-2: single-pass set_bookmark on every H2, has_bookmark guard, seek, add_class, release_bookmark. Uses the array query form next_tag(array('tag_name'=>'h2')) with lowercase 'h2' — both supported and documented (array query form shown throughout; case-insensitive tag matching stated explicitly at line 937: query 'img' matches '<IMG>'). Passed all 6 cases. Fully idiomatic; no deductions beyond rounding."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed: all three trials passed all 6 cases (two-headings, single-heading, no-headings-unchanged, many-headings, comment-h2-not-counted, existing-class). This task was strongly supported by the documentation. The crux of the problem — efficiently identifying the LAST matching tag in a single forward pass without knowing the total count — is covered by a near-verbatim worked example in html-tag-processor.md under set_bookmark() (lines 1124-1161): the 'last-li' pattern that re-sets the same bookmark name on each match and seeks to it once after the scan. The clincher sentence at line 1161 ('Setting a bookmark with a name that is already in use MOVES that bookmark to the current location ... Re-setting the same name on every match is the supported idiom for remembering the last X seen so far ... without hitting the bookmark limit') told subjects both the technique AND why it scales for the large/many-H2 cases. All three subjects found and applied this idiom, which is why they all chose the Tag Processor rather than the heavier HTML Processor.\\n\\nThe other two edge cases were also explicitly documented and handled correctly: (1) comment-h2-not-counted passed because next_tag() docs state at line 939 'Only real HTML tags can match. Tag-like text inside comments ... is never matched or modified' — so the fake H2 inside the comment was correctly skipped. (2) existing-class passed because add_class() preserves existing classes and whitespace/ordering (html-tag-processor.md line 328), appending 'final-section' to the existing 'outro' rather than overwriting. The no-headings-unchanged case passed because all three guarded the seek/add_class behind a found-flag (seek() truthiness in trial-1, has_bookmark() in trials 2-3), and get_updated_html() returns untouched bytes verbatim (line 2297: 'Every byte the updates did not touch is returned exactly as it appeared in the input').\\n\\nNear-misses in the explanations: only trial-1's code had a non-idiomatic artifact (redundant in-loop release_bookmark of the same name about to be re-set), reflecting that the move-semantics guarantee at line 1161 was read but not fully internalized — the subject defensively released even though the docs say it is unnecessary. The explanations were otherwise accurate; all three correctly described the move-on-re-set semantics and the comment-exclusion reasoning. No subject reached for the HTML Processor, breadcrumbs, or serialize() where they were not needed, which is the correct restraint for a flat single-attribute edit.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::release_bookmark()",
+      "problem": "The release_bookmark() docblock describes only that it frees overhead, but does not cross-reference the move-on-re-set guarantee documented under set_bookmark() (line 1161). Trial-1 defensively called release_bookmark() on a bookmark immediately before re-setting the same name in a loop — dead, non-idiomatic code — because the relationship between the two methods is only spelled out on the set_bookmark side. A reader landing on release_bookmark first does not learn that re-setting a name makes a prior release unnecessary.",
+      "suggestion": "Add a one-line note to release_bookmark() such as: 'You do not need to release a bookmark before re-using its name; re-calling set_bookmark() with an existing name simply moves it (see set_bookmark). Release only when you are truly done with a name to free its slot.' This generalizes to any last-occurrence or windowed-scan pattern."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::has_bookmark() and seek()",
+      "problem": "The single-pass 'last-X' worked example under set_bookmark() guards its post-scan seek using a more elaborate seek/resume dance, but it does not show the simpler and more common shape: 'scan, then if (has_bookmark(name)) { seek(name); edit; }' for the case where you do NOT need to resume scanning afterward. Two of three subjects independently rediscovered has_bookmark() as the clean way to detect 'was anything found?', but the docs never present this idiom directly, so a less capable reader could instead track a separate boolean or mis-handle the no-match path.",
+      "suggestion": "Add a short, self-contained example (under set_bookmark or has_bookmark) for the terminal-edit case: set a bookmark on each match in a while loop, then after the loop `if ( $p->has_bookmark( 'last' ) ) { $p->seek( 'last' ); /* edit */ }`. Explicitly note that has_bookmark() is the idiomatic 'did the scan find at least one match?' check, complementing the existing resume-scan example."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::next_tag() — comment/non-tag matching",
+      "problem": "The fact that tag-like text inside comments is never matched (line 939) lives in the next_tag() prose but is not surfaced at the top-level overview or in the bookmark/last-occurrence example. Subjects got it right here, but a reader skimming for a 'find the last H2' recipe could miss that the processor inherently excludes commented-out tags, and might add manual comment-stripping logic.",
+      "suggestion": "Reinforce the 'only real tags match; commented/scripted tag-like text is inert' guarantee with a brief inline note or example near the overview and/or in any find-the-Nth/last-tag example, so the comment-safety property is discoverable without reading the full next_tag() body."
+    }
+  ]
+}

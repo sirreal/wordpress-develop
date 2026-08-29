@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor to safely construct the HTML fragment from a template. It creates a template with the required structure and placeholder values, then uses next_tag() to find the img element and set its src and alt attributes in the correct order. It then finds the figcaption element, locates its text node using next_token(), and sets the modifiable text to the caption parameter. All input values are properly encoded by the API, and the final HTML is retrieved via get_updated_html().",
+  "confidence": 92
+}

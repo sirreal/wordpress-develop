@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment with structural awareness, then walked tokens with `next_token()` while tracking current list nesting depth. When an opening `UL` or `OL` appeared with an existing list ancestor, I applied `add_class( 'nested-list' )`, and returned the exact original-byte-preserving result via `get_updated_html()`.",
+  "confidence": 93
+}

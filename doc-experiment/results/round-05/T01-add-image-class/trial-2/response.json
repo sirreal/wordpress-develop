@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Tag_Processor to find all IMG tags with next_tag() and adds the 'wp-image' class using add_class(), which handles both creation and appending to existing classes. The Tag Processor automatically skips tag-like content in comments and handles case-insensitive tag matching. Returns the modified HTML via get_updated_html(), preserving all other content byte-for-byte.",
+  "confidence": 95
+}

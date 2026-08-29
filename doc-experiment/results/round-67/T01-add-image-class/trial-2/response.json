@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Tag_Processor because this is a flat attribute-editing task where byte-for-byte preservation matters. The function scans for `img` tags with `next_tag( 'img' )`, adds the `wp-image` class with `add_class()`, and returns the exact updated document with `get_updated_html()`; comments and other non-tag content are left untouched because the processor only matches real tags.",
+  "confidence": 96
+}

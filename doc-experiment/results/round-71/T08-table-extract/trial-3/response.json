@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment with browser-like table structure handling, then walked tokens with `next_token()` and `get_current_depth()` to collect rows and cell text from the first `TABLE`. Text is gathered only from `#text` tokens via `get_modifiable_text()`, while `get_tag()`, `is_tag_closer()`, and the depth checks are used to detect `TR`, `TD`, and `TH` boundaries safely.",
+  "confidence": 91
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Processor::create_fragment() to parse the HTML with full structural awareness, then iterates through IMG tags using next_tag(). For each IMG found, checks if FIGURE appears in the breadcrumbs (from get_breadcrumbs()) to confirm the IMG is nested within a FIGURE at any depth. The src attribute is retrieved via get_attribute(), which returns the decoded value. Only src values that exist and are non-empty strings are included in the returned array.",
+  "confidence": 78
+}

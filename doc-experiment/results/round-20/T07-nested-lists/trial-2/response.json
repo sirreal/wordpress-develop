@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because the task depends on document structure. It scans opening tags with `next_tag()`, checks `get_tag()` for `UL`/`OL`, inspects `get_breadcrumbs()` to count how many list elements are in the ancestor path including the current node, and adds `nested-list` with `add_class()` only when that count is greater than one. The final HTML is returned with `get_updated_html()`, while `paused_at_incomplete_token()` and `get_last_error()` guard against returning partial edits if parsing did not finish cleanly.",
+  "confidence": 91
+}

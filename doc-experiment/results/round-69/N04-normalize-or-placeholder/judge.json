@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correctly used WP_HTML_Processor for structural normalization. All called methods are documented in the rendered docs: create_fragment(), serialize(), and get_last_error(). The create_fragment()+serialize() path is documented and valid, though less direct than normalize() for the default BODY-fragment case. No _doing_it_wrong records; serialize emitted warnings on unsupported markup, but still returned null and the candidate handled it."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used the canonical documented API: WP_HTML_Processor::normalize(). This exactly matches BODY-fragment normalization, handles the documented null-on-failure contract, and avoids unnecessary token walking or mutation APIs. No undocumented calls or _doing_it_wrong records."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same as trial 2: direct use of documented WP_HTML_Processor::normalize(), null fallback for unsupported markup, and no hallucinated API usage or _doing_it_wrong records."
+    }
+  ],
+  "failure_analysis": "All trials passed all hidden cases. The docs did well on the key decision points: html-processor.md states that WP_HTML_Processor should be chosen for normalizing markup, that normalize() assumes BODY-fragment context, that normalization adds omitted tags and quotes attributes, and that output-producing methods return null when unsupported markup aborts parsing. The unsupported-misnested-formatting and unsupported-anchor-misnesting cases were handled because candidates followed the null-on-failure contract instead of trying to manually repair markup. The main near-miss was trial 1 choosing the more manual create_fragment()+serialize()+get_last_error path. That path is documented and valid, but it surfaces recoverable serialize warnings on unsupported input; the rendered serialize()/normalize() docs say null is returned but do not clearly call out the warning side effect.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md / WP_HTML_Processor::normalize()",
+      "problem": "The method documents string|null but does not explicitly frame null as the caller's fallback signal for unsupported parser aborts, nor does it mention how to get diagnostics when the static helper is insufficient.",
+      "suggestion": "Add a general note: use normalize() for unchanged BODY-fragment normalization; treat null as unable-to-normalize; create a fragment processor and inspect get_last_error() only when the caller needs the reason."
+    },
+    {
+      "location": "html-processor.md / WP_HTML_Processor::serialize() and normalize()",
+      "problem": "Execution shows serialize can emit a warning when parsing aborts as unsupported, but the rendered docs only describe the null return. This can make correct fallback code look like misuse in logs.",
+      "suggestion": "Document the warning behavior for serialization failures, or state that unsupported markup may both return null and emit a diagnostic warning."
+    },
+    {
+      "location": "html-processor.md / HTML Support / Unsupported Features",
+      "problem": "The distinction between invalid-but-normalizable markup and unsupported-aborting markup is central, but currently spread across support notes and examples.",
+      "suggestion": "Add a compact contrast table showing categories such as omitted end tags/table structure repaired during normalization versus unsupported tree-construction cases that abort and make output methods return null."
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment in document order, then built the result token-by-token with `serialize_token()`, skipping every `SPAN` opener and closer so their contents stay in place while the output remains normalized. I also fall back to `WP_HTML_Processor::normalize()` if the processor cannot be created or aborts on unsupported markup.",
+  "confidence": 94
+}

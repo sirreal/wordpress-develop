@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Processor::create_fragment() to parse the HTML with proper structure awareness, then iterates through every token with next_token(). For each token, if it's a SPAN tag (either opener or closer), we skip it with continue. All other tokens\u2014text nodes, other tags, etc.\u2014are serialized with serialize_token(), which produces normalized output. The processor automatically handles attribute normalization, tag closure, encoding, etc.",
+  "confidence": 75
+}

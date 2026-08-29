@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the body fragment, then walked the document with next_tag() to find H1 through H6 openers and next_token() with get_current_depth() to collect only descendant #text content in document order. The heading text is taken from get_modifiable_text() on #text tokens, so markup inside headings contributes text but not tags.",
+  "confidence": 94
+}

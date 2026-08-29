@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the HTML Processor fragment parser to walk the fragment token-by-token, since the task needs structure-aware text collection. The function filters only opening `A` tags with a string-valued `href` via `get_attribute()`, tracks open links by depth with `get_current_depth()`, and appends decoded text from `#text` tokens using `get_modifiable_text()` until each link closes.",
+  "confidence": 91
+}

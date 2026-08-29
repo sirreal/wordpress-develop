@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function creates a WP_HTML_Tag_Processor to scan the HTML document linearly, finding each IMG tag with case-insensitive matching via the 'tag_name' => 'img' query. For each match, add_class() appends the wp-image class to existing classes (or creates the class attribute if absent). Comments and their contents are never matched as real tags by the processor. Finally, get_updated_html() returns the document with all queued updates applied, byte-preserving everything except the class additions.",
+  "confidence": 92
+}

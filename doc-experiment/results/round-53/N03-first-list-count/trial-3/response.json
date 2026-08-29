@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment, `next_tag()` to find the first `UL` or `OL`, then a depth-bounded `next_token()` walk with `get_current_depth()` and `get_token_type()` to count direct `LI` children only. After confirming the scan was complete with `paused_at_incomplete_token()` and `get_last_error()`, I `seek()` back to a bookmark on the list opener and set `data-item-count` with `set_attribute()`, returning `get_updated_html()`.",
+  "confidence": 90
+}

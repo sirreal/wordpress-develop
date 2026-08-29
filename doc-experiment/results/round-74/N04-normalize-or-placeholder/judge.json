@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Used the correct class, `WP_HTML_Processor`, and only documented methods: `create_fragment()`, `serialize()`, and `get_last_error()`. This is a valid documented normalization path and handles `null` serialization as fallback. Minor adherence loss: the task exactly matched the simpler documented `WP_HTML_Processor::normalize()` body-fragment API, but the candidate used the longer factory-plus-serialize form."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "Used documented `WP_HTML_Processor::create_fragment()` and `serialize()`, plus PHP's built-in `class_exists()`. No undocumented HTML API calls and no `_doing_it_wrong` records. The extra class-existence guard is unnecessary in this environment, and the solution missed the direct `normalize()` API, but the chosen serialization path is documented and behaviorally sound."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Same valid documented pattern as trial-1: `create_fragment()`, `serialize()`, and `get_last_error()` on `WP_HTML_Processor`. Correctly chooses the structural processor and falls back on unsupported serialization. Minor loss for not using the exact static `normalize()` API intended for body-context fragments."
+    }
+  ],
+  "failure_analysis": "All trials passed all seven hidden cases. The rendered docs did well on the core decisions: the HTML Processor overview says to choose `WP_HTML_Processor` for normalizing markup; the support section says unsupported markup makes `serialize()` and `normalize()` return `null`; the `normalize()` and `serialize()` sections both document attribute quoting, omitted-tag insertion, table normalization, entity preservation/re-encoding, and omission of incomplete trailing syntax. That was enough for every candidate to avoid the Tag Processor and avoid hand-rolled serialization.\n\nThe main near-miss is discoverability rather than correctness. All three candidates implemented `create_fragment($html)->serialize()` instead of `WP_HTML_Processor::normalize($html)`, even though the task was exactly a body-fragment normalization task. This suggests the Usage section's general three-step pattern is more salient than the later static `normalize()` method section. The docs describe the direct method correctly, but they do not make it the obvious first choice for the common case: “I have a body fragment and want normalized HTML or null.”\n\nA second near-miss is failure signaling. The docs state output methods return `null` on unsupported markup, but the execution records also captured `WP_HTML_Processor::serialize` warnings for unsupported parser errors. The candidates still behaved correctly because tests measured returned strings, but callers using warning-sensitive harnesses may be surprised unless the docs distinguish return-value failure policy from emitted warnings.",
+  "doc_gaps": [
+    {
+      "location": "`WP_HTML_Processor` Usage section",
+      "problem": "The primary usage recipe emphasizes creating a processor, finding a location, and requesting changes. For pure body-fragment normalization, that flow hides the simpler static API.",
+      "suggestion": "Add a short “Normalize a BODY fragment” recipe before the general traversal/editing steps: prefer `WP_HTML_Processor::normalize( $html )` when no custom context, full-document mode, or token inspection is needed; handle `null` according to the caller's failure policy."
+    },
+    {
+      "location": "`WP_HTML_Processor::normalize()` docblock",
+      "problem": "The method documents behavior and examples, but does not explicitly position itself as the preferred convenience wrapper for default body-context fragment normalization.",
+      "suggestion": "Add one sentence to the contract: this is equivalent to creating a default BODY fragment processor and serializing it, and should be preferred for one-shot normalization of ordinary fragments."
+    },
+    {
+      "location": "`WP_HTML_Processor::serialize()` / unsupported-markup docs",
+      "problem": "Docs say `serialize()` and `normalize()` return `null` when unable to produce output, but do not mention that serialization may also emit a warning when the parser has an unsupported-markup error.",
+      "suggestion": "Document the observable failure mode: callers should treat `null` as the programmatic failure signal, and serialization of unsupported markup may emit a warning through WordPress error handling."
+    }
+  ]
+}

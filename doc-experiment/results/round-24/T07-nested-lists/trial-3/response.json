@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because the task depends on tree structure. It scans opening tags with `next_tag()`, filters for `UL` and `OL`, checks `get_breadcrumbs()` for any list ancestor, adds the `nested-list` class with `add_class()`, and returns the byte-preserving edited fragment via `get_updated_html()`; if the HTML Processor aborts on unsupported markup, it falls back to the original input.",
+  "confidence": 88
+}

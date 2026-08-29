@@ -1,0 +1,62 @@
+{
+    "id": "T11-strip-tracking-attributes",
+    "title": "Remove tracking attributes",
+    "difficulty": "intermediate",
+    "split": "train",
+    "role": "core",
+    "commonness": "high",
+    "concept": "attributes",
+    "processor": "tag",
+    "function": "strip_tracking_attributes",
+    "cases": [
+        {
+            "id": "single-link",
+            "args": [
+                "<a href=\"/x\" data-track-id=\"7\" data-tracker=\"keep\">go</a>"
+            ],
+            "expected": "<a href=\"/x\"  data-tracker=\"keep\">go</a>"
+        },
+        {
+            "id": "multiple-tags",
+            "args": [
+                "<div data-track-source=\"hero\"><img src=\"a.jpg\" data-track-id=\"img1\"><p data-track=\"keep\">Text</p></div>"
+            ],
+            "expected": "<div ><img src=\"a.jpg\" ><p data-track=\"keep\">Text</p></div>"
+        },
+        {
+            "id": "multiple-matching-attributes",
+            "args": [
+                "<button data-track-id=\"1\" data-track-label=\"Buy\" type=\"button\">Buy</button>"
+            ],
+            "expected": "<button   type=\"button\">Buy</button>"
+        },
+        {
+            "id": "similar-prefixes-kept",
+            "args": [
+                "<span data-track=\"keep\" data-tracker=\"keep\" data-track-id=\"remove\">x</span>"
+            ],
+            "expected": "<span data-track=\"keep\" data-tracker=\"keep\" >x</span>"
+        },
+        {
+            "id": "uppercase-source-attribute",
+            "args": [
+                "<a DATA-TRACK-ID=\"7\" HREF=\"/x\">go</a>"
+            ],
+            "expected": "<a  HREF=\"/x\">go</a>"
+        },
+        {
+            "id": "comments-untouched",
+            "args": [
+                "<!-- <a data-track-id=\"7\"> --><a data-track-id=\"8\">go</a>"
+            ],
+            "expected": "<!-- <a data-track-id=\"7\"> --><a >go</a>"
+        },
+        {
+            "id": "no-matches",
+            "args": [
+                "<p class=\"x\" data-track=\"keep\">Text</p>"
+            ],
+            "expected": "<p class=\"x\" data-track=\"keep\">Text</p>"
+        }
+    ]
+}

@@ -1,0 +1,42 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correctly used WP_HTML_Tag_Processor for a fixed template, followed the documented template-building pattern, preserved attribute order by predeclaring attributes, used next_token()/get_token_type() to find the placeholder text, used set_modifiable_text() for encoded caption text, and returned get_updated_html(). No _doing_it_wrong records."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same correct API pattern as trial 1. All called methods are documented in the rendered Tag Processor docs and the implementation matches the documented guidance for safe template filling, text replacement, and get_updated_html(). No _doing_it_wrong records."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 70,
+      "hallucinated_methods": [
+        "WP_HTML_Processor::__construct direct manual construction"
+      ],
+      "notes": "Functionally passed, but chose WP_HTML_Processor for a flat template-fill job where the docs recommend WP_HTML_Tag_Processor. More importantly, it called new WP_HTML_Processor(...) directly; the HTML Processor docs say to use create_fragment()/create_full_parser(), and execution.json records _doing_it_wrong for every case. The mutation and text-handling methods used afterward are documented/inherited and were otherwise idiomatic."
+    }
+  ],
+  "failure_analysis": "All trials passed all hidden cases, so there were no output failures to diagnose. The docs did well on the core task: the Tag Processor page has a dedicated 'Building markup from a template' section that explains exactly the two easy-to-miss details: include empty attributes to preserve written order, and include placeholder text so set_modifiable_text() has a text node to replace. It also states that set_attribute() accepts plain unescaped values and that set_modifiable_text() encodes plaintext, which prevented the common manual-escaping and raw-HTML-caption failures. The near-miss is trial 3: the HTML Processor docs correctly say construction must use static factories, but the generated Method Index still exposes __construct() as a public constructor and the candidate used it despite the warning, producing _doing_it_wrong notices.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md / WP_HTML_Processor::__construct() docblock and generated Method Index",
+      "problem": "The constructor appears as an ordinary public method even though manual construction is unsupported and triggers _doing_it_wrong.",
+      "suggestion": "Make the constructor summary start with an explicit warning such as 'Do not call directly; use create_fragment() or create_full_parser().' Include that warning in the Method Index summary as well, not only in the parameter description."
+    },
+    {
+      "location": "html-processor.md / Usage",
+      "problem": "The static-factory requirement is stated, but there is no compact anti-example showing that new WP_HTML_Processor($html) is invalid even though the PHP constructor is visible.",
+      "suggestion": "Add a short 'Correct construction' note contrasting WP_HTML_Processor::create_fragment($html) with direct construction and mention the runtime _doing_it_wrong notice."
+    },
+    {
+      "location": "html-processor.md / Overview or Supported elements",
+      "problem": "Processor-choice guidance says to use HTML Processor when structure matters, but does not directly redirect fixed-template construction work to the Tag Processor recipe.",
+      "suggestion": "Add a cross-reference: for filling a known literal template with attributes and text while preserving source bytes and attribute order, prefer WP_HTML_Tag_Processor and its 'Building markup from a template' recipe unless structural parsing is required."
+    }
+  ]
+}

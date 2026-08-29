@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the body fragment, then a single next_token() walk to collect only #text tokens inside each A element. For each A opener I read href with get_attribute(), keeping only string values and excluding boolean href attributes, and I preserved document order by appending each completed link when its closing A token was reached.",
+  "confidence": 91
+}

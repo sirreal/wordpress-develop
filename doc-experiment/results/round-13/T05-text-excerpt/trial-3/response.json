@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This implementation uses WP_HTML_Processor::create_fragment() to parse the HTML fragment in BODY context, then iterates through all tokens with next_token(). For each token that is a text node (#text), it extracts the decoded text using get_modifiable_text() (which handles character reference decoding), and accumulates it while counting Unicode code points using mb_strlen(). When approaching the limit, it uses mb_substr() to truncate to exactly the specified code point count without breaking multi-byte characters. The function handles edge cases: returning empty string for non-positive limits, and returning empty string if the processor fails to initialize.",
+  "confidence": 75
+}

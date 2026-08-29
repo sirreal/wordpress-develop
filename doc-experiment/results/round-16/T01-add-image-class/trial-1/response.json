@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This implementation uses WP_HTML_Tag_Processor to linearly scan the HTML and find IMG tags by name. The tag matching is case-insensitive by default per the API documentation (\"Tag-name matching is ASCII case-insensitive\"). For each matched IMG tag, add_class() appends the 'wp-image' class without removing or reordering existing classes. The processor's get_updated_html() returns the modified HTML with all changes applied while preserving every byte of the input that wasn't modified. Comments are automatically ignored since the API states \"only real HTML tags can match\" and tag-like text inside comments \"is never matched or modified.\"",
+  "confidence": 95
+}

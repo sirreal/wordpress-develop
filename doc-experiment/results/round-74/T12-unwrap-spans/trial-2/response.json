@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the fragment in BODY context, then walked tokens with next_token() and serialize_token() to preserve normalized HTML serialization while skipping every SPAN opener/closer and all tokens inside any active SPAN depth. This keeps span contents in place and discards removed span attributes automatically because the SPAN tokens are never serialized.",
+  "confidence": 93
+}

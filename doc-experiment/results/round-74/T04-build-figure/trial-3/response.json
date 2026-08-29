@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I built a literal HTML template with the `src` and `alt` attributes already present so their order is preserved, then used `WP_HTML_Processor::create_fragment()`, `next_tag()`, `set_attribute()`, `next_token()`, and `set_modifiable_text()` to safely encode the untrusted values and replace the figcaption placeholder text.",
+  "confidence": 94
+}

@@ -1,0 +1,35 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Byte-identical to the reference apart from cosmetic differences (lowercase 'a' query, comments). Correct processor choice: Tag Processor for a flat attribute edit, no nested-structure needs (30/30). All four methods called (next_tag, get_attribute, set_attribute, get_updated_html) are documented; no hallucinations, no _doing_it_wrong records (30/30). Idiomatic: textbook next_tag loop + get_updated_html, exactly matching the docs' usage example (25/25). Edge cases: the null !== check is the right discriminator for null=absent vs ''/true=present; comment correctly enumerates the three return shapes (15/15). Passed 8/8. Explanation precisely states get_attribute 'returns null only when the attribute is absent (not when it's empty or valueless),' which is the exact insight the task hinges on."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same correct solution as the reference. Tag Processor is the right tool (30/30). No undocumented API; all methods verified present in html-tag-processor.md (30/30). Idiomatic next_tag/get_updated_html walk (25/25). Edge handling correct via null !== get_attribute; explanation notes empty href returns empty string not null (15/15). Passed 8/8. Slightly thinner explanation than trial-1/3 but no errors; correctly credits set_attribute with 'handles all necessary encoding,' matching the docblock."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Identical correct solution. Right processor (30/30), no hallucinated API (30/30), idiomatic walk (25/25), correct edge semantics (15/15). Passed 8/8. Explanation is the most thorough on attribute semantics ('returns null if absent, but returns \"\" for empty attributes and true for boolean attributes... href is not boolean'). Minor near-miss in wording: it lumps valueless <a href> implicitly under empty, whereas probing shows <a href> actually returns boolean true (not ''). The conclusion and code are still correct because both '' and true are non-null; the imprecision is in prose only, not behavior."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed: all three trials are effectively byte-identical to reference.php and pass 8/8 with zero _doing_it_wrong records. This was a smoke/basic task and the documentation served it cleanly.\n\nWhat the docs did well: (1) The exact null/''/true return contract that the whole task pivots on appears in two reinforcing places — the 'Custom queries' prose (html-tag-processor.md lines 81-82: \\\"get_attribute() will return null if the attribute wasn't present... It may return '' ... For boolean attributes ... it will return true\\\") and the get_attribute() docblock (lines 1454-1487, return line \\\"Value of attribute or null if not available. Boolean attributes return true\\\"). All three subjects independently reproduced the null !== get_attribute('href') discriminator, which is the single decision distinguishing href=\\\"\\\" / <a href> (modify) from no-href (skip). (2) The 'set_attribute' attribute-placement section (lines 2142-2148) documents that a NEW attribute is inserted immediately after the tag name and that this happens automatically — so subjects did not fight the fact that target lands before href in the 'simple' case output; none tried to force ordering. (3) The next_tag() docblock (lines 929-933) explicitly states tag-like text inside comments and rawtext is never matched, which underwrites the 'inside-comment-ignored' case; subjects didn't need special handling and didn't add any. (4) get_updated_html() is correctly presented as the read-back-after-edits method, and the serialize/serialize_token docblocks (html-processor.md lines 965, 1033-1034) actively steer readers AWAY from serialize() toward get_updated_html() for retrieving modifications — a good guardrail that likely prevented a plausible wrong turn.\n\nNear-misses in the explanations (prose only, no code impact): trial-3 grouped valueless <a href> under 'empty attributes' returning '' while asserting boolean attributes return true; probing confirms <a href> actually returns boolean true, not ''. The reasoning still reached the correct null !== conclusion, so the code is right; the slip is that the docs describe the '' vs true distinction by stating the rule (boolean = name present, no value) without giving a worked example mapping the literal token <a href> to a true return. A subject reasoning purely from the prose could miscategorize which bucket <a href> falls into. It did not matter here because both buckets are non-null, but a task that needed to distinguish '' from true (e.g. 'modify only attributes with explicit empty-string values') could have failed on this exact ambiguity.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::get_attribute() and the 'Custom queries' section (html-tag-processor.md lines 81-82, 1454-1487)",
+      "problem": "The three return shapes (null = absent, '' = present-but-empty-string value, true = boolean/valueless) are stated as rules but never shown side-by-side against concrete source markup. A reader cannot tell from the prose alone that the literal token `<a href>` returns boolean true while `<a href=\"\">` returns the empty string. Here both are non-null so it was harmless, but any task that must distinguish an explicitly-empty value from a valueless attribute is left to guess.",
+      "suggestion": "Add a compact mapping table or example to the get_attribute() docblock showing each source form against its return, e.g. `<a href=\"/x\">` -> '/x', `<a href=\"\">` -> '' (empty string), `<a href>` -> true (boolean), `<a>` -> null (absent). One line per case makes the '' vs true distinction unambiguous and gives the 'attribute is present regardless of value' idiom (null !== get_attribute(...)) a canonical anchor."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::get_attribute() (html-tag-processor.md lines 1454-1487)",
+      "problem": "There is no documented idiom for the very common 'does this attribute exist at all, regardless of value' check. Subjects had to synthesize `null !== $processor->get_attribute(...)` from the return-type description. They all got it right, but the docs never state it as the canonical presence test, and a reader could wrongly reach for a truthiness check like `if ($processor->get_attribute('href'))`, which would incorrectly skip href=\"\" (empty string is falsy) and href=\"0\".",
+      "suggestion": "Add a one-line note to get_attribute(): to test whether an attribute is present irrespective of its value, compare against null (`null !== $p->get_attribute($name)`); do not use a truthy check, because empty-string and '0' values are present but falsy. This generalizes beyond this task to any presence-gated edit."
+    }
+  ]
+}

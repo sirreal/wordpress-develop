@@ -1,0 +1,62 @@
+{
+    "candidate": "/Users/jonsurrell/a8c/wordpress-develop/html-api-docs-improvement/doc-experiment/results/round-00/H01-strip-styles/trial-1/candidate.php",
+    "function": "strip_inline_styles",
+    "passed": 6,
+    "total": 6,
+    "cases": [
+        {
+            "id": "simple",
+            "status": "pass",
+            "expected": "<p >Hi <b >there</b></p>",
+            "actual": "<p >Hi <b >there</b></p>",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "uppercase-attribute",
+            "status": "pass",
+            "expected": "<div >x</div>",
+            "actual": "<div >x</div>",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "other-attributes-preserved",
+            "status": "pass",
+            "expected": "<p id=\"a\"  class=\"b\">text</p>",
+            "actual": "<p id=\"a\"  class=\"b\">text</p>",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "no-styles-unchanged",
+            "status": "pass",
+            "expected": "<p class=\"clean\">nothing</p>",
+            "actual": "<p class=\"clean\">nothing</p>",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "comment-untouched",
+            "status": "pass",
+            "expected": "<!-- <p style=\"x\">fake</p> --><p >real</p>",
+            "actual": "<!-- <p style=\"x\">fake</p> --><p >real</p>",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "valueless-style",
+            "status": "pass",
+            "expected": "<p >odd</p>",
+            "actual": "<p >odd</p>",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        }
+    ]
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML, then iterates through all tokens with next_token(). For each text node token (type '#text'), it retrieves the decoded text with get_modifiable_text() and checks if the keyword (case-sensitive substring match) is present using strpos(). When a match is found, the entire text node is wrapped in <mark> tags by prepending '<mark>' and appending '</mark>' around serialize_token(). All other tokens are serialized unchanged. The processor's serialize_token() method handles normalization (double-quoted attributes, canonical text encoding, etc.) ensuring output matches the normalized form.",
+  "confidence": 72
+}

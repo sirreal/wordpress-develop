@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This builds the fragment from a literal template so the output shape stays exact and the `img` attributes remain in `src` then `alt` order, as documented for `WP_HTML_Tag_Processor`. It uses `next_tag()` plus `set_attribute()` to fill the `img` attributes safely, then `next_token()`, `get_token_type()`, and `set_modifiable_text()` to replace the `figcaption` placeholder text with an encoded text node before returning `get_updated_html()`.",
+  "confidence": 95
+}

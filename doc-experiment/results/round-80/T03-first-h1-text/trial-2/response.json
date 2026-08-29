@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment and `next_token()` to walk the tree in document order. While inside the first `H1`, I accumulated only `#text` tokens via `get_modifiable_text()` so nested element text is included and character references stay decoded; the walk stops when `get_current_depth()` drops below the H1 opener depth, and `null` is returned only if no H1 is found.",
+  "confidence": 95
+}

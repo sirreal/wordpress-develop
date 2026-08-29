@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the input as a body fragment, then walked tokens with `next_token()`. For each ordinary `#text` token, I checked the decoded text from `get_modifiable_text()` with `str_contains()` and wrapped the token\u2019s normalized serialization from `serialize_token()` in `<mark>`, which preserves normalization and leaves special-element opener text untouched because those are not `#text` nodes.",
+  "confidence": 89
+}

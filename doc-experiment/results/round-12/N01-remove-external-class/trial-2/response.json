@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor to scan through the HTML and find all A tags. For each A tag found via next_tag(), the remove_class() method removes the 'external' class, which automatically removes the entire class attribute if 'external' was the only class. The processor preserves all other markup and attributes exactly as-is, with get_updated_html() returning the final result with all queued updates applied.",
+  "confidence": 92
+}

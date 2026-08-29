@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This function uses WP_HTML_Tag_Processor to scan the HTML document linearly. It loops through all H2 tags using next_tag() with a tag_name query, and uses bookmarks to track the last one found by re-setting the same bookmark name on each match (as documented in the bookmark example). After the scan completes, it seeks to the last H2 tag and adds the 'final-section' class using add_class(). The API automatically ignores H2-like content in HTML comments since only real tags are matched. The get_updated_html() method returns the HTML with all modifications applied, preserving every other byte exactly as it appeared in the input.",
+  "confidence": 90
+}

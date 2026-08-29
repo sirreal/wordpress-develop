@@ -1,0 +1,66 @@
+{
+  "round": "round-39",
+  "mode": "discoverability-probe",
+  "task_ids": [],
+  "task_count": 0,
+  "splits": {},
+  "concepts": {},
+  "trials_per_task": 3,
+  "subject": {
+    "model": "gpt-5.4",
+    "reasoning_effort": "medium",
+    "service_tier": "priority"
+  },
+  "judge": {
+    "model": "gpt-5.5",
+    "reasoning_effort": "xhigh",
+    "service_tier": "priority"
+  },
+  "git_head": "aa2b580477f4bf4b3a19d6150f365e512d1fe419",
+  "git_status_short": "",
+  "source_file_digests": {
+    "ref": "aa2b580477f4bf4b3a19d6150f365e512d1fe419",
+    "algorithm": "sha256",
+    "php_behavior_fingerprint": "token_get_all with T_COMMENT, T_DOC_COMMENT, and T_WHITESPACE removed; JSON-encoded token names and text",
+    "files": {
+      "src/wp-includes/html-api/class-wp-html-tag-processor.php": {
+        "source_sha256": "9e431d345cc6d5563a65e3456b8a944fe1def8ceb8db299e89f20e8e9f560058",
+        "php_without_comments_sha256": "d073f5772a64826878e4132ed9bb30717fb1b6f3ddb5e23a014a4fa9db218ad7",
+        "php_without_comments_token_count": 9881
+      },
+      "src/wp-includes/html-api/class-wp-html-processor.php": {
+        "source_sha256": "b115e956af65f69b4e07c7e761ccc9a49464ba3caf1f66944ed8eb3794dce472",
+        "php_without_comments_sha256": "2da9aa482f295c89a7018c5b74b622b4add7e942599c97785434408cfa72c083",
+        "php_without_comments_token_count": 16806
+      }
+    }
+  },
+  "corpus_file_digests": {
+    "ref": "aa2b580477f4bf4b3a19d6150f365e512d1fe419",
+    "algorithm": "sha256",
+    "tasks": {}
+  },
+  "created_at_utc": "2026-06-13T15:05:29+00:00",
+  "isolation": {
+    "scratch_contains": [
+      "html-tag-processor.md",
+      "html-processor.md",
+      "tasks/<task-id>.md"
+    ],
+    "subjects_must_not_read": [
+      "reference.php",
+      "tests.json",
+      "source files",
+      "logs",
+      "plans",
+      "hypothesis docs"
+    ]
+  },
+  "scratch": "/tmp/html-api-docs-eval/round-39",
+  "staged_task_files": [],
+  "scratch_isolation_check": "OK: /tmp/html-api-docs-eval/round-39 exposes 2 docs and 0 task prompt(s), with no forbidden files.",
+  "scratch_file_sha256": {
+    "html-processor.md": "4a4e64bbb3c43c248cb948ca752a01674a3dedc4eb77843d6fb7e63ea0a1f6ea",
+    "html-tag-processor.md": "8ca4ec32aa54723fe16a0a9f45386ca6ebeecde7a06575d8a782e53fb395a664"
+  }
+}

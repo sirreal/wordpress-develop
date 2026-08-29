@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the BODY fragment structurally, then rewrites the normalized output token-by-token with `next_token()`, `get_tag()`, `is_tag_closer()`, `get_current_depth()`, and `serialize_token()`. A `P` opener is held back until the next token proves the paragraph has content; if the next visited token is that paragraph\u2019s closer, both tokens are skipped. If parsing aborts or pauses on incomplete input, it returns the original HTML unchanged using `get_last_error()` and `paused_at_incomplete_token()`.",
+  "confidence": 90
+}

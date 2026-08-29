@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to build a literal HTML template with placeholder attributes and caption text, then updated the existing `src` and `alt` attributes in place with `set_attribute()` so their order stays exactly `src` then `alt`, and replaced the placeholder caption via `set_modifiable_text()` on the text token. The HTML API handles all required encoding for attribute values and text.",
+  "confidence": 96
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because counting only direct `LI` children requires structural awareness. It finds the first `UL` or `OL` with `next_tag()`, bookmarks that opener, records its depth with `get_current_depth()`, then walks forward with `next_token()` and counts only `LI` opening tags exactly one level deeper. If the scan does not reach the list\u2019s closing boundary, it returns the original HTML unchanged; otherwise it seeks back to the bookmarked list opener, applies `set_attribute()`, and returns `get_updated_html()`.",
+  "confidence": 88
+}

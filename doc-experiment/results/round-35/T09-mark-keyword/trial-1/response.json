@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This walks the fragment with `WP_HTML_Processor::create_fragment()` and `next_token()`, using `get_token_type()` plus decoded `get_modifiable_text()` to detect ordinary `#text` nodes whose text contains the case-sensitive keyword. It rewrites the output during normalized serialization with `serialize_token()`, wrapping matching text tokens in literal `<mark>` tags so the result stays normalized while leaving comments, attributes, and special text-bearing elements like `script`, `style`, `title`, and `textarea` untouched.",
+  "confidence": 82
+}

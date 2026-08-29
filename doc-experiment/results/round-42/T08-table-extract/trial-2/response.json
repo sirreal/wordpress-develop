@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` so the fragment is parsed with browser-like table structure, then finds the first `TABLE` with `next_tag()`. It walks the table in one `next_token()` pass, bounded by `get_current_depth()`, opens and closes rows/cells using `get_tag()` and `is_tag_closer()`, and concatenates cell text from `#text`/`#cdata-section` tokens plus special text-carrying element openers via `get_modifiable_text()`. It also rejects unsupported or truncated parses with `get_last_error()` and `paused_at_incomplete_token()`.",
+  "confidence": 88
+}

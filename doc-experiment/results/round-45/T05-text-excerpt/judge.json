@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Processor::create_fragment(), walked with next_token(), filtered ordinary #text tokens, explicitly opted in TITLE/TEXTAREA opener-carried text, and used get_modifiable_text() only after token checks. All called methods are present in the rendered docs and execution recorded no _doing_it_wrong notices. Minor inefficiency: it accumulates all text before truncating instead of stopping once enough code points are collected."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Fully aligned with the documented text-extraction pattern: HTML Processor fragment parsing, single token walk, #text filtering, TITLE/TEXTAREA opt-in via opening tags, decoded text via get_modifiable_text(), and UTF-8 mb_* truncation. No undocumented API calls or misuse notices."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Fully aligned with the docs: correct processor, documented methods only, guarded use of get_modifiable_text(), explicit exclusion of SCRIPT/STYLE by whitelist, and Unicode-safe truncation. No _doing_it_wrong records."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 10 hidden cases, so there were no failed cases to attribute to a misconception. The docs appear to have done well in the key places: the HTML Processor overview says to choose WP_HTML_Processor for document structure and text collection; the next_token() section states that element text may be split across multiple #text tokens and that TITLE/TEXTAREA/SCRIPT/STYLE carry text on opener tokens instead of child #text nodes; the get_modifiable_text() section warns that it is not a predicate for ordinary text and explains decoded #text/TITLE/TEXTAREA versus raw SCRIPT/STYLE. The candidates’ explanations closely mirrored those passages. Near-misses were limited to robustness and performance: trial-1 did not stop after reaching the limit, and none checked incomplete-token/error state, but the task and frozen cases did not require rejecting partial parses.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md / next_token() and get_modifiable_text()",
+      "problem": "The correct text-extraction rules are documented, but spread across narrative sections. A reader has to combine token walking, ordinary #text filtering, special-element opener text, and decoded/raw semantics.",
+      "suggestion": "Add a compact reference table in the get_modifiable_text() docblock listing token category, whether it represents DOM-style text content, whether character references are decoded, and whether callers should opt in explicitly."
+    },
+    {
+      "location": "html-processor.md / next_token()",
+      "problem": "The docs mention incomplete input handling for complete-source callers, but the text-extraction examples do not show a policy decision for paused_at_incomplete_token() or get_last_error().",
+      "suggestion": "Add a general note to text-walk examples: after a read-only walk, decide whether partial text is acceptable; if not, check paused_at_incomplete_token() and get_last_error() before returning accumulated text."
+    },
+    {
+      "location": "html-processor.md / get_modifiable_text()",
+      "problem": "The docs recommend mb_strlen()/mb_substr() with UTF-8, but do not explicitly distinguish Unicode code points from grapheme clusters. This can matter for emoji plus variation selectors or combining marks.",
+      "suggestion": "Add a short note that PHP mb_* string length/substr with UTF-8 counts code points, not user-perceived grapheme clusters, and direct callers to grapheme_* when a UI-facing character limit requires grapheme clusters."
+    }
+  ]
+}

@@ -1,0 +1,62 @@
+{
+    "candidate": "/Users/jonsurrell/a8c/wordpress-develop/html-api-docs-improvement/doc-experiment/results/round-16/T10-last-h2/trial-3/candidate.php",
+    "function": "mark_last_h2",
+    "passed": 6,
+    "total": 6,
+    "cases": [
+        {
+            "id": "two-headings",
+            "status": "pass",
+            "expected": "<h2>One</h2><p>a</p><h2 class=\"final-section\">Two</h2><p>b</p>",
+            "actual": "<h2>One</h2><p>a</p><h2 class=\"final-section\">Two</h2><p>b</p>",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "single-heading",
+            "status": "pass",
+            "expected": "<h2 class=\"final-section\">Only</h2>",
+            "actual": "<h2 class=\"final-section\">Only</h2>",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "no-headings-unchanged",
+            "status": "pass",
+            "expected": "<p>nothing</p>",
+            "actual": "<p>nothing</p>",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "many-headings",
+            "status": "pass",
+            "expected": "<h2>1</h2><h2>2</h2><h2>3</h2><h2>4</h2><h2>5</h2><h2>6</h2><h2>7</h2><h2>8</h2><h2>9</h2><h2>10</h2><h2>11</h2><h2 class=\"final-section\">12</h2>",
+            "actual": "<h2>1</h2><h2>2</h2><h2>3</h2><h2>4</h2><h2>5</h2><h2>6</h2><h2>7</h2><h2>8</h2><h2>9</h2><h2>10</h2><h2>11</h2><h2 class=\"final-section\">12</h2>",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "comment-h2-not-counted",
+            "status": "pass",
+            "expected": "<h2 class=\"final-section\">Real</h2><!-- <h2>fake</h2> -->",
+            "actual": "<h2 class=\"final-section\">Real</h2><!-- <h2>fake</h2> -->",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "existing-class",
+            "status": "pass",
+            "expected": "<h2 class=\"intro\">A</h2><h2 class=\"outro final-section\">B</h2>",
+            "actual": "<h2 class=\"intro\">A</h2><h2 class=\"outro final-section\">B</h2>",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        }
+    ]
+}

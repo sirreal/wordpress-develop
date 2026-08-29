@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used the correct WP_HTML_Tag_Processor for a flat, byte-preserving attribute edit. All called APIs are documented: constructor, next_tag(), get_attribute(), set_attribute(), and get_updated_html(). The loop is idiomatic, and null-vs-empty-vs-true href semantics are handled correctly."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same fully documented, idiomatic Tag Processor pattern as the reference. next_tag('a') is documented as a case-insensitive string tag query, get_attribute('href') is tested against null for presence, set_attribute() overwrites or adds target, and get_updated_html() returns the byte-preserving rewrite."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same correct API use as trial 2. No undocumented calls, no _doing_it_wrong records, and the explanation correctly identifies get_attribute() as distinguishing absent attributes from empty-string and valueless attributes."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial; all three passed 8/8. The docs were strong for this task. The Tag Processor overview explicitly says it is for flat attribute/class edits and byte-precise preservation, which steered subjects away from WP_HTML_Processor. The Usage/Finding tags sections documented new WP_HTML_Tag_Processor($html), next_tag('img')-style string queries, and forward token walking. The next_tag() method docs covered ASCII case-insensitive tag matching and ignoring tag-like text inside comments/raw text. The get_attribute() docs and overview covered the critical contract: null means absent, empty string means present with empty value, and true means present without a value. The set_attribute() docs covered overwriting existing attributes and placement of newly added attributes after the tag name, explaining the expected output order. The get_updated_html() docs covered returning queued updates while preserving every untouched byte. Near-misses: the task depended heavily on the presence-test idiom null !== get_attribute($name), and although the return semantics were documented, the method could state that idiom more directly. Attribute placement expectations were documented under set_attribute(), while byte preservation was documented under get_updated_html(); users must connect those two passages.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::get_attribute() docblock, Returns section",
+      "problem": "The presence-test rule is inferable but not stated as a named idiom in the method contract.",
+      "suggestion": "Add a short note: use null !== $processor->get_attribute($name) to test whether an attribute is present; both '' and true are present attribute values."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::set_attribute() docblock, attribute placement notes",
+      "problem": "The new-vs-existing attribute placement rules are documented, but their interaction with byte-preserving output is split across set_attribute() and get_updated_html().",
+      "suggestion": "Cross-reference get_updated_html() and state that adding a new attribute changes only the insertion point chosen by set_attribute(), while unrelated attributes keep their original bytes and order."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::next_tag() docblock, query parameter notes",
+      "problem": "The docs contain the needed facts, but common flat-rewrite behavior is spread across examples and method details.",
+      "suggestion": "Add a compact general rewrite-pattern note: string tag queries are ASCII case-insensitive, default matching visits openers only, and comments/raw-text contents are not matched as tags."
+    }
+  ]
+}

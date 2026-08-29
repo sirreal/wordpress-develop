@@ -1,0 +1,61 @@
+{
+    "id": "H02-data-attributes",
+    "title": "Read data attributes",
+    "difficulty": "basic",
+    "split": "holdout",
+    "function": "get_data_attributes",
+    "cases": [
+        {
+            "id": "mixed",
+            "args": [
+                "<div id=\"x\" data-post-id=\"42\" data-featured>content</div>"
+            ],
+            "expected": {
+                "data-post-id": "42",
+                "data-featured": true
+            }
+        },
+        {
+            "id": "uppercase-names-lowercased",
+            "args": [
+                "<div DATA-TYPE=\"post\" data-Other=\"x\">y</div>"
+            ],
+            "expected": {
+                "data-type": "post",
+                "data-other": "x"
+            }
+        },
+        {
+            "id": "entities-in-values",
+            "args": [
+                "<div data-title=\"Fish &amp; Chips\">z</div>"
+            ],
+            "expected": {
+                "data-title": "Fish & Chips"
+            }
+        },
+        {
+            "id": "no-data-attributes",
+            "args": [
+                "<div id=\"plain\" class=\"c\">w</div>"
+            ],
+            "expected": []
+        },
+        {
+            "id": "no-div",
+            "args": [
+                "<p data-x=\"1\">not a div</p>"
+            ],
+            "expected": []
+        },
+        {
+            "id": "first-div-only",
+            "args": [
+                "<div data-a=\"1\">x</div><div data-b=\"2\">y</div>"
+            ],
+            "expected": {
+                "data-a": "1"
+            }
+        }
+    ]
+}

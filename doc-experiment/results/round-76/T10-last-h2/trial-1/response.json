@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan for `h2` openers in a single pass, updating the same bookmark each time so it always points to the last match, then `seek()` back to that bookmark and `add_class()` the requested class before returning `get_updated_html()`. If no `h2` is found, the function returns the original HTML unchanged.",
+  "confidence": 97
+}

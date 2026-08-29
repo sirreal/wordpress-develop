@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Tag_Processor to scan only A tag openers and relied on get_attribute('href') to detect presence, including empty-string and boolean href attributes. For each matched link, set_attribute('target', '_blank') overwrites any existing target while get_updated_html() preserves every untouched byte exactly as provided.",
+  "confidence": 98
+}

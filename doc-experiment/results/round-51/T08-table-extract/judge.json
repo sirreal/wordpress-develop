@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor::create_fragment(), used only documented methods, walked one token stream bounded by table depth, and collected only #text via get_modifiable_text(). Minor edge-policy gap: it checks get_last_error() but not paused_at_incomplete_token()."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Closest to the reference shape: HTML Processor, depth-bounded next_token() loop, explicit TR/TD/TH state, and decoded ordinary text extraction. It does not define an incomplete-input/get_last_error policy, but the docs leave read-only partial extraction as caller policy."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Uses the right processor and documented methods with a single structural walk. The extra cell_depth tracking and TR-close cell flush are redundant and a little less idiomatic than simple opener/closer state, but still consistent with the documented model."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial; each execution.json reports 8/8. The docs did well in the Tag Processor overview by explicitly saying structure, subtree text, and implied or missing closing tags require WP_HTML_Processor, not WP_HTML_Tag_Processor. The HTML Processor text-extraction recipe also directly supported the successful approach: walk with next_token(), bound the subtree with get_current_depth(), append only #text tokens, and use get_modifiable_text() for decoded text. The next_token() section’s warning about a single cursor and explicit state likely prevented nested-loop mistakes for repeated rows and cells. Near-misses: trials varied on completion policy, with only trials 1 and 3 checking get_last_error() and none checking paused_at_incomplete_token(); this did not affect the hidden cases but shows the incomplete-input guidance is still easy to treat as optional background rather than an explicit design choice.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::next_token() / optional end tags",
+      "problem": "The docs explain implied structure and warn against nested loops, but optional end-tag handling for repeated record-like elements is scattered across examples.",
+      "suggestion": "Add a general note that virtual closers for optional end tags should be handled the same as explicit closers when maintaining per-element state in a single token loop."
+    },
+    {
+      "location": "WP_HTML_Processor::get_current_depth() and is_tag_closer()",
+      "problem": "The depth-boundary rule is present, but the relationship between opener depth, closer depth, and why subtree loops usually use >= is still a common source of off-by-one risk.",
+      "suggestion": "Add a compact timeline example showing opener, text descendant, child closer, and container closer depths for a generic nested element."
+    },
+    {
+      "location": "Read-only extraction completion policy",
+      "problem": "Guidance for get_last_error() and paused_at_incomplete_token() appears in multiple recipe notes, but candidates did not apply it consistently.",
+      "suggestion": "Add a short checklist for read-only extractors: decide whether partial results are acceptable; if not, check both get_last_error() and paused_at_incomplete_token() after the bounded scan."
+    }
+  ]
+}

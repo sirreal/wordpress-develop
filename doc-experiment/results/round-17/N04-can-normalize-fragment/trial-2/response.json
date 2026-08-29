@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function attempts to create an HTML Processor in fragment mode (the standard context for body content) and then tries to serialize it. According to the documentation, serialize() returns null when unsupported markup is encountered (like mis-nested formatting elements). If creation fails or serialization returns null, we know normalization isn't possible; otherwise it succeeds. This approach leverages the documented behavior that the HTML Processor \"aborts early\" when encountering unsupported markup and methods like serialize() return null in those cases.",
+  "confidence": 72
+}

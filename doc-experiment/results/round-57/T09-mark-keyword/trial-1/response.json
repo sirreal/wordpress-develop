@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in body context, then walked tokens with `next_token()` and checked only ordinary `#text` tokens via `get_token_type()` and `get_modifiable_text()`. Matching text nodes are wrapped by concatenating `<mark>` around `serialize_token()`, which preserves normalized HTML serialization, while special text-bearing elements are left alone because their content is not exposed as `#text` tokens.",
+  "confidence": 90
+}

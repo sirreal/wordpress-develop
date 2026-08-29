@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Used the documented `WP_HTML_Processor::create_fragment()` path, bounded a `next_token()` walk by recorded table depth, read only `#text` tokens with `get_modifiable_text()`, and handled virtual/implied closers with explicit row/cell state. Minor deduction only for not making an explicit incomplete/unsupported-input policy visible."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and fully documented method surface: `create_fragment`, `next_tag`, `next_token`, `get_current_depth`, `get_token_type`, `get_token_name`, `is_tag_closer`, `get_modifiable_text`, and `get_last_error`. The implementation follows the single-token-walk text extraction recipe. Minor deductions for a redundant closer guard after plain `next_tag('TABLE')` and only partial explicit handling of parser-abort/truncation policy."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose `WP_HTML_Processor`, used documented methods only, and followed the documented subtree text walk pattern. It keeps row/cell state in one `next_token()` loop and reads decoded text only from `#text`. Minor deductions for less explicit parser error/incomplete-input handling and slightly more fragile end-of-scan flushing assumptions."
+    }
+  ],
+  "failure_analysis": "All trials passed all 8 hidden cases, so there are no failed cases to attribute to a misconception. The docs did well on the key decision points for this task: the “Which processor should I use?” and HTML Processor overview clearly steer structural text extraction away from `WP_HTML_Tag_Processor`; the “collect DOM-style text from a subtree” recipe shows `#text` plus `get_modifiable_text()`; the `next_token()` and `get_current_depth()` sections explain bounded subtree walks, implied structure, and the single shared cursor; and the support notes explicitly mention tables and omitted optional tags. Near misses: every candidate had to build a row/cell state machine from general traversal guidance rather than a reusable pattern for repeated structured regions, and none made a fully explicit policy for truncated input via `paused_at_incomplete_token()`.",
+  "doc_gaps": [
+    {
+      "location": "`WP_HTML_Processor::next_token()` / repeated-region traversal docs",
+      "problem": "The docs explain single-cursor traversal, but repeated sibling extraction still requires readers to infer the state-machine pattern for opener, text, closer, and virtual closer tokens.",
+      "suggestion": "Add a compact generic example for extracting repeated regions from a container, such as terms from a definition list or items from a list, showing one loop with explicit current-item state and closer handling."
+    },
+    {
+      "location": "`WP_HTML_Processor::get_current_depth()` docblock",
+      "problem": "Depth behavior on closers and implied or virtual nodes is described in prose, but it is easy to make off-by-one assumptions when bounding a subtree.",
+      "suggestion": "Add a small token-by-token table showing opener depth, descendant text depth, child closer depth, container closer depth, and the first token outside the container."
+    },
+    {
+      "location": "`WP_HTML_Tag_Processor::get_modifiable_text()` inherited-use docs",
+      "problem": "The decoded-text contract is present, but readers can still miss that ordinary DOM text extraction should not include special-element opener text and should not decode again.",
+      "suggestion": "State directly in the method docblock that for ordinary element text, callers should first require `get_token_type() === '#text'`; returned text is already character-reference decoded for normal text tokens."
+    },
+    {
+      "location": "`WP_HTML_Tag_Processor::paused_at_incomplete_token()` / read-only extraction guidance",
+      "problem": "The docs say read-only callers choose a policy for partial results, but examples mostly show mutation/rewrite rejection policies.",
+      "suggestion": "Add a read-only extraction example that demonstrates two acceptable policies: best-effort partial extraction and strict complete-input rejection using `paused_at_incomplete_token()` plus `get_last_error()`."
+    }
+  ]
+}

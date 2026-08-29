@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() for body-fragment parsing, then walked tokens with next_token(), get_tag(), and is_tag_closer() while tracking open UL/OL ancestry in a small stack depth counter. When an opening UL or OL appeared with an ancestor list already open, I added the documented nested-list class via add_class(), and returned the unchanged-bytes result with get_updated_html().",
+  "confidence": 90
+}

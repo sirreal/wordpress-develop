@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because the task depends on document structure. It walks tag openers with `next_tag()`, checks each `UL` and `OL` element\u2019s ancestors via `get_breadcrumbs()`, adds `nested-list` with `add_class()` when any earlier breadcrumb is `UL` or `OL`, and returns the byte-preserving edited fragment with `get_updated_html()`.",
+  "confidence": 86
+}

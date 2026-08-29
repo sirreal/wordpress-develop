@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation creates a template string with the exact HTML structure required, then uses WP_HTML_Tag_Processor to safely fill in the values. The img tag is found first and both src and alt attributes are set in the required order using set_attribute(). Then next_token() is used to iterate through tokens until the #text token in figcaption is found, where set_modifiable_text() replaces the placeholder with the caption. All attribute and text encoding is handled automatically by the API, and get_updated_html() returns the final result.",
+  "confidence": 92
+}

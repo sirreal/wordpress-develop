@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor to parse the HTML fragment and extract table data. It creates a processor using create_fragment(), finds the first TABLE element with next_tag(), then walks through all tokens using next_token() while tracking depth to stay within the table. It monitors opening and closing tags for TR and TD/TH elements to identify rows and cells, accumulating text node content (decoded character references) into cells, and builds a 2D array of rows. The implementation handles optional closing tags naturally because the HTML Processor synthesizes implicit closers, and it stops when the processor exits the table (depth becomes less than the table's depth).",
+  "confidence": 72
+}

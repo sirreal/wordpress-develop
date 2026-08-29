@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Processor::create_fragment(), depth-bounded next_token() walking, #text filtering, and get_modifiable_text() correctly. All called HTML API methods are present in the rendered docs, with no _doing_it_wrong records. Functional result: 8/8. Minor deduction only for not making an explicit get_last_error()/paused_at_incomplete_token policy, though the docs allow caller-defined read-only extraction policy."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice and documented APIs throughout: create_fragment(), next_tag(), next_token(), get_current_depth(), get_token_type(), get_tag(), is_tag_closer(), and get_modifiable_text(). The single-pass state machine matches the documented repeated-region pattern. Functional result: 8/8. Minor deductions for redundant class_exists()/closer checks after plain next_tag(), and no explicit incomplete/unsupported-input policy."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Best adherence: correct HTML Processor, documented next_tag query form, depth-bounded single token walk, closer-driven row/cell flushing, and decoded #text extraction. No hallucinated API usage or runtime misuse. Functional result: 8/8. Only small residual gap is that unsupported/truncated-input policy is implicit rather than explicit."
+    }
+  ],
+  "failure_analysis": "No hidden case failed across the trials. All three passed simple, thead-tbody, omitted-closers, markup-in-cells, entities-in-cells, no-table, first-table-only, and empty-cells.\n\nThe docs did well in the passages that mattered: the Tag Processor \"Which processor should I use?\" section explicitly says structure, text collection, and implied/missing closing tags require WP_HTML_Processor. The HTML Processor \"Supported elements\" section says tables and optional tags are supported, while the next_token() docs explain virtual closers, synthesized TBODY for table rows, one shared cursor, and single-loop state tracking for repeated regions. The get_current_depth() docs clearly teach the >= subtree boundary, and get_modifiable_text() explains that ordinary DOM-style extraction should read only #text tokens and that returned text is already decoded.\n\nNear-misses: candidates relied on get_tag() naming virtual closing tokens, which is true but not stated as directly as the depth/breadcrumb behavior. They also did not check get_last_error() or paused_at_incomplete_token(); for this read-only extraction task that is defensible because the docs say callers choose the policy, but the completion-policy guidance is spread across several sections.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::is_tag_closer() / get_tag() docs",
+      "problem": "The docs explain that depth and breadcrumbs report the parent context on a closer, but they do not explicitly say that get_tag() and get_token_name() still identify the element being closed, including virtual closers.",
+      "suggestion": "Add a sentence and tiny example showing that on a closing token, is_tag_closer() is true, get_tag() still returns the closed element name, and get_current_depth()/get_breadcrumbs() describe the parent context."
+    },
+    {
+      "location": "WP_HTML_Processor::create_fragment() and fragment context docs",
+      "problem": "The context discussion can make readers wonder whether table-related parsing requires a TABLE context even when the input fragment includes the TABLE element itself.",
+      "suggestion": "Clarify that default BODY context is appropriate for body fragments containing a complete element such as a TABLE; specialized context is for fragments whose top-level tokens are children of that context element."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token() repeated-region guidance",
+      "problem": "The single-loop DT example is useful, but multi-level repeated extraction patterns remain implicit.",
+      "suggestion": "Add a general example for extracting repeated parent records with repeated child fields using one token loop, state variables, and closer-driven flushes, without using a task-specific table_to_array solution."
+    },
+    {
+      "location": "Read-only extraction completion policy near next_token() / get_current_depth()",
+      "problem": "The docs state that read-only callers choose what to do with paused_at_incomplete_token() and get_last_error(), but that policy is distributed across multiple passages.",
+      "suggestion": "Add a compact checklist contrasting best-effort extraction with complete-source extraction: when returning accumulated data is acceptable, when to reject on paused_at_incomplete_token(), and when get_last_error() should force fallback."
+    }
+  ]
+}

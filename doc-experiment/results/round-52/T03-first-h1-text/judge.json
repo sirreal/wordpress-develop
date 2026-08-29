@@ -1,0 +1,35 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Processor::create_fragment(), next_tag(), get_current_depth(), next_token(), get_token_type(), and get_modifiable_text(), all documented in the rendered files. The extra class_exists() guard is a PHP built-in, not a hallucinated HTML API call. The depth-bounded #text walk is the documented subtree text pattern. No _doing_it_wrong records; passed 8/8."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Matches the documented and canonical pattern exactly: BODY fragment processor, find first H1, record depth, walk tokens while depth remains in the subtree, append only #text tokens via decoded get_modifiable_text(). No undocumented API use, no _doing_it_wrong records; passed 8/8."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same correct HTML Processor subtree walk as the reference. The lowercase next_tag( 'h1' ) relies on documented ASCII case-insensitive tag-name matching. No undocumented methods and no _doing_it_wrong records; passed 8/8."
+    }
+  ],
+  "failure_analysis": "No failed hidden cases across the three trials. The docs did well on the exact concepts this task required: the Tag Processor overview says to use WP_HTML_Processor when collecting an element's text content or walking a subtree; the HTML Processor overview includes 'Recipe: collect DOM-style text from a subtree'; next_token() explains that element text may be split across several #text tokens and that unclosed elements still produce closing tokens; get_current_depth() explicitly explains why subtree guards must use >= rather than >; get_modifiable_text() states that #text text is decoded and warns not to use it as a predicate for ordinary DOM text. The hidden cases map cleanly to those passages: nested markup, deep nesting, first-of-two, image-only empty text, decoded entities, no H1 null, and unclosed H1 were all handled by the documented pattern.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::next_tag() docblock",
+      "problem": "The HTML Processor next_tag() section documents the string query form, but the local method text does not repeat the Tag Processor's explicit statement that tag-name matching is ASCII case-insensitive. Trial 3 used lowercase 'h1' correctly, but this behavior is easier to verify from the other class's docs than from this method's own section.",
+      "suggestion": "Mirror the case-insensitive tag-name matching sentence in WP_HTML_Processor::next_tag(), including that next_tag( 'h1' ) and next_tag( 'H1' ) are equivalent for HTML tag matching."
+    },
+    {
+      "location": "WP_HTML_Processor::create_fragment() docblock",
+      "problem": "The docblock says to use fragments for chunks inside a larger document, but the important practical consequence for callers is spread across nearby sections: the default BODY context creates an HTML > BODY tree context before walking tokens.",
+      "suggestion": "Add a short sentence to create_fragment(): 'With the default <body> context, token walks start in the implicit HTML > BODY context; use this for snippets that would appear inside BODY.'"
+    }
+  ]
+}

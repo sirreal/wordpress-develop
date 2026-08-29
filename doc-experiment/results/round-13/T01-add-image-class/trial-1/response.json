@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor to scan the HTML document linearly, finding each IMG tag (case-insensitive) using next_tag() with a tag_name query. For each matched IMG tag, add_class('wp-image') appends the class to any existing classes without removing or reordering them. Finally, get_updated_html() returns the document with all queued modifications applied, preserving every byte of the input except for the attribute updates made.",
+  "confidence": 92
+}

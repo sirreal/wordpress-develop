@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Tag_Processor, which is the documented API for flat, position-based attribute work. It creates a processor with the input HTML, then loops through every IMG tag (case-insensitive matching is built-in) using next_tag() with a tag_name query. For each match, it calls add_class('wp-image') which safely adds the class without removing or reordering existing classes, or removes the class attribute if wp-image was the only class. Finally, get_updated_html() returns the modified HTML with all edits applied, preserving everything else byte-for-byte. Tag-like content in comments is never matched since next_tag() only finds real tags.",
+  "confidence": 92
+}

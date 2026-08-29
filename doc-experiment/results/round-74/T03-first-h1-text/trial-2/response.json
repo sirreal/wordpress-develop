@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in BODY context, then `next_tag( 'H1' )` to find the first heading opener. From there, I recorded the opener\u2019s depth with `get_current_depth()` and walked tokens with `next_token()`, concatenating only `#text` tokens via `get_modifiable_text()` until the walk left the heading subtree, which preserves nested-element text while ignoring markup and decodes character references as documented.",
+  "confidence": 96
+}

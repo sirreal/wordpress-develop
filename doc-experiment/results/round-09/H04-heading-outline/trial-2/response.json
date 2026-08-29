@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Processor::create_fragment() to parse the HTML, then iterates tokens with next_token(). For each heading opener (H1-H6), extracts the level from the tag name and collects text content from all #text tokens within that element by tracking depth with get_current_depth(). Character references are automatically decoded by get_modifiable_text(). Returns empty array when create_fragment() fails or no headings found.",
+  "confidence": 78
+}

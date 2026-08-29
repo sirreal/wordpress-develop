@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` for tree-aware parsing, then walks the fragment once with `next_token()`. When it sees an `H1` through `H6` opener via `get_tag()` and `is_tag_closer()`, it starts a TOC entry, appends descendant `#text` content with `get_modifiable_text()`, and also includes text carried on raw-text element tokens such as `SCRIPT`, `STYLE`, `TEXTAREA`, and `TITLE`. At the end it rejects incomplete or unsupported parses by checking `paused_at_incomplete_token()` and `get_last_error()`.",
+  "confidence": 88
+}

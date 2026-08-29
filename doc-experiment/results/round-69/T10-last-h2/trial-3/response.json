@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Tag_Processor to scan the HTML linearly, remember the last matched H2 with a bookmark, then seek back to that bookmark and add the `final-section` class before returning `get_updated_html()`. This stays within the documented attribute/class editing and bookmark APIs and leaves input unchanged when no H2 is found.",
+  "confidence": 96
+}

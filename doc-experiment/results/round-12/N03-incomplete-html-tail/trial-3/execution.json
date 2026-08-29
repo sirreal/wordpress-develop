@@ -1,0 +1,89 @@
+{
+    "candidate": "/Users/jonsurrell/a8c/wordpress-develop/html-api-docs-improvement/doc-experiment/results/round-12/N03-incomplete-html-tail/trial-3/candidate.php",
+    "function": "has_incomplete_html_tail",
+    "passed": 9,
+    "total": 9,
+    "cases": [
+        {
+            "id": "complete-document",
+            "status": "pass",
+            "expected": false,
+            "actual": false,
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "cut-inside-attribute",
+            "status": "pass",
+            "expected": true,
+            "actual": true,
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "cut-inside-comment",
+            "status": "pass",
+            "expected": true,
+            "actual": true,
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "plain-text",
+            "status": "pass",
+            "expected": false,
+            "actual": false,
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "trailing-lt-is-text",
+            "status": "pass",
+            "expected": false,
+            "actual": false,
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "unterminated-script",
+            "status": "pass",
+            "expected": true,
+            "actual": true,
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "cut-after-complete-content",
+            "status": "pass",
+            "expected": true,
+            "actual": true,
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "unclosed-element-is-complete",
+            "status": "pass",
+            "expected": false,
+            "actual": false,
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "empty-string",
+            "status": "pass",
+            "expected": false,
+            "actual": false,
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        }
+    ]
+}

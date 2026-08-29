@@ -1,0 +1,166 @@
+{
+    "candidate": "/Users/jonsurrell/a8c/wordpress-develop/html-api-docs-improvement/doc-experiment/results/round-05/T08-table-extract/trial-2/candidate.php",
+    "function": "table_to_array",
+    "passed": 1,
+    "total": 8,
+    "cases": [
+        {
+            "id": "simple",
+            "status": "fail",
+            "expected": [
+                [
+                    "Name",
+                    "Age"
+                ],
+                [
+                    "Ada",
+                    "36"
+                ]
+            ],
+            "actual": [
+                [
+                    "",
+                    ""
+                ],
+                [
+                    "",
+                    ""
+                ]
+            ],
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "thead-tbody",
+            "status": "fail",
+            "expected": [
+                [
+                    "H"
+                ],
+                [
+                    "a"
+                ],
+                [
+                    "b"
+                ]
+            ],
+            "actual": [
+                [
+                    ""
+                ]
+            ],
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "omitted-closers",
+            "status": "fail",
+            "expected": [
+                [
+                    "one",
+                    "two"
+                ],
+                [
+                    "three",
+                    "four"
+                ]
+            ],
+            "actual": [
+                [
+                    "",
+                    ""
+                ],
+                [
+                    "",
+                    ""
+                ]
+            ],
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "markup-in-cells",
+            "status": "fail",
+            "expected": [
+                [
+                    "bold text",
+                    "link"
+                ]
+            ],
+            "actual": [
+                [
+                    "",
+                    ""
+                ]
+            ],
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "entities-in-cells",
+            "status": "fail",
+            "expected": [
+                [
+                    "Fish & Chips"
+                ]
+            ],
+            "actual": [
+                [
+                    ""
+                ]
+            ],
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "no-table",
+            "status": "pass",
+            "expected": [],
+            "actual": [],
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "first-table-only",
+            "status": "fail",
+            "expected": [
+                [
+                    "first"
+                ]
+            ],
+            "actual": [
+                [
+                    ""
+                ]
+            ],
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "empty-cells",
+            "status": "fail",
+            "expected": [
+                [
+                    "",
+                    "x"
+                ]
+            ],
+            "actual": [
+                [
+                    "",
+                    ""
+                ]
+            ],
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        }
+    ]
+}

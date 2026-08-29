@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` with a literal template that already contains `src`, `alt`, and placeholder figcaption text so the output preserves the required attribute order. Then I updated the `IMG` attributes with `set_attribute()` and replaced the figcaption text by advancing to the `#text` token and calling `set_modifiable_text()`, letting the documented HTML API handle all encoding.",
+  "confidence": 91
+}

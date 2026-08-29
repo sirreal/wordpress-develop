@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This function uses WP_HTML_Processor to safely parse the HTML fragment and locate all IMG elements. For each IMG tag found, it retrieves the breadcrumbs (full ancestor stack) and checks if FIGURE appears anywhere in that stack, indicating the image is nested inside a figure at any depth. It collects src attributes that are non-empty strings, in document order.",
+  "confidence": 72
+}

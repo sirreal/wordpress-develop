@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correctly used WP_HTML_Processor::create_fragment() for a body fragment and walked with next_token(). It guarded ordinary text with get_token_type() === '#text' and explicitly whitelisted opening TITLE/TEXTAREA tokens before calling get_modifiable_text(), so it avoided SCRIPT/STYLE raw text and comments. All HTML API methods used are documented and execution.json reports no _doing_it_wrong records. Minor caveat: the non-mbstring fallback returns the full text untruncated, but that is outside the HTML API usage itself."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Best adherence. It chose WP_HTML_Processor::create_fragment(), checked the null factory result, used a single next_token() pass, distinguished #text from #tag, required non-closer TITLE/TEXTAREA before reading opener-carried text, and truncated decoded UTF-8 text safely with an mb_substr path plus a UTF-8 fallback. All HTML API calls are documented and there are no _doing_it_wrong records."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and documented API usage: create_fragment(), next_token(), get_token_type(), get_token_name(), is_tag_closer(), get_modifiable_text(), and get_last_error() all appear in the rendered docs. The text-token and special-element handling is idiomatic and all tests passed with no _doing_it_wrong records. Near miss: returning empty on any non-null get_last_error() is a fail-closed read-only extraction policy the task did not specify; the docs allow caller policy there. Its non-mbstring fallback is byte-based and could split multibyte text if mbstring were unavailable."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial: each execution.json passed 10/10. The rendered docs worked well for this task because they directly supported the key decisions: the Tag Processor overview says to use the HTML Processor for structure and collecting text; the HTML Processor overview and create_fragment() docs identify body-fragment parsing and the nullable factory result; the \"Recipe: collect DOM-style text from a subtree\" section warns that ordinary text is #text only and that get_modifiable_text() is not a predicate; next_token() explains that TITLE/TEXTAREA/SCRIPT/STYLE carry text on the opener rather than as child #text tokens; get_modifiable_text() states that #text, TITLE, and TEXTAREA are decoded UTF-8 while SCRIPT/STYLE are raw; and next_token() documents implied/virtual closers for malformed input. The only near-misses were around policy rather than missing API: trial 3 added a fail-closed get_last_error() check that would discard already-collected text on unsupported markup, and trials 1/3 had weak non-mbstring fallbacks. Those did not affect the frozen cases.",
+  "doc_gaps": [
+    {
+      "location": "/tmp/html-api-docs-eval/round-80/html-processor.md, get_last_error() method docs",
+      "problem": "The read-only extraction policy note appears in the text-extraction recipe, but the get_last_error() method page itself can still encourage callers to treat any parser abort as invalidating already visited tokens.",
+      "suggestion": "Add a method-level note: for read-only scans, a non-null last error means the walk stopped early; it does not erase or invalidate tokens already returned. Returning accumulated text, empty, null, or another sentinel is a caller contract decision."
+    },
+    {
+      "location": "/tmp/html-api-docs-eval/round-80/html-processor.md, next_token() / text extraction recipe",
+      "problem": "The subtree recipe is strong, but whole-fragment text extraction is a common enough case that readers may have to synthesize the global form and the special-element whitelist themselves.",
+      "suggestion": "Add a short general example for collecting text across an entire fragment: walk next_token(), append #text, optionally whitelist named opener-carried text such as TITLE/TEXTAREA, and explicitly leave SCRIPT/STYLE/comments out unless requested."
+    },
+    {
+      "location": "/tmp/html-api-docs-eval/round-80/html-processor.md and html-tag-processor.md, get_modifiable_text() docs",
+      "problem": "The docs say returned text is UTF-8 and show mb_substr(), but do not spell out the code-point versus grapheme-cluster distinction for sequences such as emoji plus variation selectors.",
+      "suggestion": "Clarify that mb_strlen()/mb_substr() with UTF-8 operate at the code-point level for this API guidance, while callers that need user-perceived characters should choose grapheme-aware functions."
+    }
+  ]
+}

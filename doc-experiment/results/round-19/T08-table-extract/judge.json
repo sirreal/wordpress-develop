@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor::create_fragment(), used next_tag('TABLE'), then a single depth-bounded next_token() walk with state for rows/cells. All called methods are present in the rendered docs and execution recorded no _doing_it_wrong misuse. Minor near-miss: it calls get_modifiable_text() on arbitrary non-closing tag tokens inside a cell; documented as harmless because non-text tokens return '', but conceptually broader than needed."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice and fully documented API usage: create_fragment, next_tag, next_token, get_current_depth, get_token_type, get_tag, is_tag_closer, and get_modifiable_text. The single-loop state machine follows the docs' warning against nested token walks and relies properly on virtual closers for omitted table tags. Minor near-miss: arbitrary element-token get_modifiable_text() use is only needed for special atomic elements."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Correctly used the HTML Processor for browser-like structure and a depth-bounded next_token() traversal. No undocumented methods or runtime API misuse. It handles decoded text through get_modifiable_text() and virtual closers through closer-driven flushing. Same small conceptual overreach as the others: treating any non-closing tag token as a possible text carrier rather than only #text and documented special elements."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 8 frozen cases: simple, thead-tbody, omitted-closers, markup-in-cells, entities-in-cells, no-table, first-table-only, and empty-cells. The docs appear to have succeeded on the key decisions: the Tag Processor overview explicitly says to use the HTML Processor when structure, text content, implied or missing closing tags matter; the HTML Processor support section calls out tables and implied structure; next_token() documents virtual closers, synthesized TBODY, depth-bounded walks, and the single-cursor/single-loop pattern; get_modifiable_text() states that #text is decoded. Near-misses were benign: candidates slightly overgeneralized get_modifiable_text() by probing ordinary element tokens, but the docs also say non-text tokens return an empty string, so this did not become a failure.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::next_token() / get_current_depth() docs",
+      "problem": "The docs explain implied table structure, but only as prose. Test subjects succeeded, yet table handling is a high-risk area because TBODY/TR/TD can be synthesized and closers can be virtual.",
+      "suggestion": "Add a compact token-walk trace for malformed-but-common table markup such as <table><tr><td>x<td>y, showing synthesized TBODY, virtual TD/TR closers, token names, closer status, and relative depths."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::get_modifiable_text() and WP_HTML_Processor::get_modifiable_text() docs",
+      "problem": "Subjects inferred that calling get_modifiable_text() on arbitrary opening tags might be a normal way to gather element text. It is harmless here but can blur DOM text content with modifiable token payloads such as comments, processing instructions, and raw-text elements.",
+      "suggestion": "State explicitly that ordinary element openers do not expose descendant text through get_modifiable_text(); for element text content, walk descendant #text tokens, with a separate exception for SCRIPT/STYLE/TITLE/TEXTAREA where the element token carries the text."
+    },
+    {
+      "location": "HTML Processor traversal docs around incomplete or unsupported input",
+      "problem": "The docs mention paused_at_incomplete_token() and get_last_error(), but the extraction policy is framed mostly around edits. Read-only extraction code may still silently return partial data after truncation or unsupported markup.",
+      "suggestion": "Add guidance for read-only extractors: decide whether partial results are acceptable; if not, check paused_at_incomplete_token() and get_last_error() after a bounded walk before trusting accumulated results."
+    }
+  ]
+}

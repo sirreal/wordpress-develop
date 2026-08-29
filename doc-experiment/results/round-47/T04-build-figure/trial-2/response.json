@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` with a literal template that already contains the `img` attributes in `src` then `alt` order and a placeholder text node inside `figcaption`. It updates the `img` attributes with `set_attribute()`, replaces the placeholder caption text via `next_token()`, `get_token_type()`, and `set_modifiable_text()`, then returns the final fragment with `get_updated_html()`.",
+  "confidence": 96
+}

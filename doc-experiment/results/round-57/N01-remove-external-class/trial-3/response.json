@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan the HTML linearly and match only `A` tags whose class list contains `external`, then called the documented `remove_class()` helper and returned the modified document with `get_updated_html()`. This preserves all untouched bytes exactly as documented for the Tag Processor.",
+  "confidence": 98
+}

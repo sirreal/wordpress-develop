@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function creates a WP_HTML_Tag_Processor instance and iterates through all tokens in the HTML using next_token() until it reaches the end. Then it checks paused_at_incomplete_token() which returns true if the parser halted because the input ended mid-token (e.g., inside an unfinished tag, unterminated comment, or incomplete SCRIPT element). This directly answers whether the document was cut off in the middle of an HTML token.",
+  "confidence": 72
+}

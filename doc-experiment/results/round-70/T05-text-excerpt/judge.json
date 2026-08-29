@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correctly uses WP_HTML_Processor::create_fragment(), checks null, walks tokens, reads ordinary #text plus whitelisted TITLE/TEXTAREA opening tags, excludes SCRIPT/STYLE, and uses decoded get_modifiable_text() with UTF-8-safe truncation. All called HTML API methods are documented; no _doing_it_wrong records."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and documented token-walk pattern. It handles decoded text, special TITLE/TEXTAREA opener text, null processor creation, and UTF-8 truncation. Minor style deduction because the special-element branch relies on get_token_name() rather than first checking get_token_type() === '#tag', but this did not cause misuse or failures."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Uses the right processor and documented methods, and passes all tests. Minor deductions: it calls is_tag_closer() on every non-text token instead of only after confirming a #tag token, and its substr() fallback can split UTF-8 if mb_substr() is unavailable. No hallucinated HTML API usage and no _doing_it_wrong records."
+    }
+  ],
+  "failure_analysis": "No failed hidden cases: all three execution.json files report 10/10 passing with no _doing_it_wrong records. The docs did well on the key decision points: the processor-choice guidance says to use WP_HTML_Processor for structure and text extraction from BODY fragments; create_fragment() documents the BODY-fragment factory and null return; the text-extraction recipe says ordinary DOM text is #text tokens only unless special-element content is explicitly requested; next_token() explains text can be split across tokens and that SCRIPT/STYLE/TITLE/TEXTAREA carry text on opener tokens; get_modifiable_text() states #text, TITLE, and TEXTAREA are decoded while SCRIPT/STYLE are raw. Near misses were not hidden-test failures: trial-2 and trial-3 could have been more precise by guarding special-element handling with #tag, and trial-3's byte-oriented fallback would violate codepoint truncation outside an mbstring-capable runtime.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::is_tag_closer() and WP_HTML_Tag_Processor::is_tag_closer()",
+      "problem": "The docs describe the current tag token case but do not explicitly state the behavior or recommended precondition when a next_token() loop is currently matched on text, comments, or doctypes.",
+      "suggestion": "Document that callers in token walks should normally guard with get_token_type() === '#tag' before applying tag-opener/closer logic, and state the return behavior on non-tag tokens."
+    },
+    {
+      "location": "WP_HTML_Processor::get_modifiable_text() and the DOM-style text extraction recipe",
+      "problem": "The docs explain broad modifiable text and opt-in special elements, but the decision surface is spread across prose and examples.",
+      "suggestion": "Add a compact general table mapping #text, TITLE/TEXTAREA openers, SCRIPT/STYLE openers, comments, and processing instructions to decoded/raw status and whether they are ordinary DOM text or opt-in/non-DOM text."
+    },
+    {
+      "location": "WP_HTML_Processor::get_modifiable_text() UTF-8 note",
+      "problem": "The docs recommend mb_* with explicit UTF-8, but do not explicitly warn that byte-oriented strlen()/substr() are invalid for codepoint limits.",
+      "suggestion": "Add a sentence that returned text is UTF-8 and must be measured/sliced with UTF-8-aware APIs for codepoint limits; byte functions can split characters."
+    },
+    {
+      "location": "WP_HTML_Processor::create_fragment() and read-only extraction recipes",
+      "problem": "Null creation, get_last_error(), and paused_at_incomplete_token() are documented, but there is no concise checklist for read-only extraction policy after a scan.",
+      "suggestion": "Add a short policy checklist: handle null creation, walk tokens, then deliberately choose best-effort accumulated output, empty/null, or error behavior when get_last_error() or paused_at_incomplete_token() is set."
+    }
+  ]
+}

@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used the correct `WP_HTML_Processor::normalize()` body-fragment API and checked its documented `null` failure value. No undocumented calls or `_doing_it_wrong` records. Hidden unsupported cases triggered API warnings from `serialize()` internally, but the candidate handled the documented return contract correctly."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used the correct HTML Processor path via documented `create_fragment()`, `serialize()`, and `get_last_error()`. This is a more verbose equivalent to `normalize()` for default BODY-context fragments, but still documented and idiomatic: create, serialize before scanning, and fall back on `null` or parser error."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same clean approach as trial 1: direct documented `WP_HTML_Processor::normalize()` call with exact fallback on `null`. No undocumented APIs or misuse records."
+    }
+  ],
+  "failure_analysis": "No failed hidden cases across trials. All three implementations passed unclosed tag repair, table implied `tbody`/row/cell closing, attribute quote normalization, entity preservation, unsupported mis-nesting fallback, unsupported anchor mis-nesting fallback, and empty-fragment preservation.\n\nThe docs succeeded on the main decision points: the Tag Processor overview explicitly says to use the HTML Processor for normalized output; the HTML Processor support section says unsupported markup aborts and output methods such as `serialize()` and `normalize()` return `null`; `normalize()` is documented as BODY-context fragment normalization with examples covering attribute quoting, omitted tags, table normalization, and text re-encoding; and `serialize()` documents the lower-level create-fragment path that trial 2 used.\n\nThe main near-miss is that all successful implementations produced `trigger_error` records for unsupported cases because `normalize()` delegates to `serialize()`, which warns before returning `null`. The rendered docs clearly state the `null` return contract but do not clearly state the warning side effect, so a caller expecting a quiet fallback could be surprised even while writing functionally correct code.",
+  "doc_gaps": [
+    {
+      "location": "`WP_HTML_Processor::normalize()` docblock / rendered `normalize()` section",
+      "problem": "The return text says `null` means unable to normalize, but it does not sharply distinguish unsupported-parser aborts from recoverable malformed HTML that is still normalized.",
+      "suggestion": "Add a short contract note: missing end tags, implied table structure, unquoted attributes, duplicate attributes, and trailing incomplete syntax can still produce a normalized string; `null` is for cases where the HTML Processor aborts because the markup is unsupported."
+    },
+    {
+      "location": "`WP_HTML_Processor::normalize()` and `WP_HTML_Processor::serialize()` docs",
+      "problem": "The docs omit that unsupported markup can emit a warning via the serialization path before returning `null`. Execution recorded `WP_HTML_Processor::serialize` warnings even for correct fallback implementations.",
+      "suggestion": "Document the warning side effect for parser-state and unsupported-parser failures, and state that callers should still use the `null` return value as the programmatic failure signal."
+    },
+    {
+      "location": "HTML Processor overview / Usage",
+      "problem": "The generic three-step usage flow says create, find, request changes. Normalization-only use does not require finding a token or requesting a mutation, so the shortest correct path is somewhat separated from the overview.",
+      "suggestion": "Add a normalization-only usage note that points readers directly to `WP_HTML_Processor::normalize()` for BODY-context fragments and to `create_fragment()`/`create_full_parser()` plus `serialize()` only when a specific context or full document is needed."
+    },
+    {
+      "location": "`WP_HTML_Processor::create_fragment()` docs",
+      "problem": "The docs say creation can return `null` and later unsupported markup is detected with `get_last_error()`, but the boundary between factory failure and later parse failure could be more explicit for serialization callers.",
+      "suggestion": "Clarify that `create_fragment()` failure is a setup/context/encoding failure, while unsupported input content is normally discovered during scanning or serialization and is surfaced by `serialize()` returning `null` and `get_last_error()` becoming non-null."
+    }
+  ]
+}

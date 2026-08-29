@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented `WP_HTML_Tag_Processor` for flat, source-order attribute edits: scan each tag with `next_tag()`, collect case-insensitive matches via `get_attribute_names_with_prefix( 'data-track-' )`, remove each with `remove_attribute()`, then return the rewritten markup with `get_updated_html()`.",
+  "confidence": 98
+}

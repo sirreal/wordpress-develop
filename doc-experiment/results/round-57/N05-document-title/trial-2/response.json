@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_full_parser()` to parse the complete document and walked tokens with `next_token()`. When I encountered the opening `TITLE` token, I read its decoded text with `get_modifiable_text()`, which returns `''` for an empty title and the decoded title text otherwise; if no opening title token was found, the function returns `null`.",
+  "confidence": 95
+}

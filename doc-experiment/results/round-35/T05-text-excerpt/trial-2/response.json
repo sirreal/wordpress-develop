@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the BODY-style fragment with full tree awareness, then walks all tokens via `next_token()`, appending ordinary `#text` token content with `get_modifiable_text()` and explicitly including decoded opener text for `TITLE` and `TEXTAREA` as documented. It truncates by Unicode code points with `mb_substr(..., 'UTF-8')`, as the docs recommend for decoded UTF-8 text.",
+  "confidence": 92
+}

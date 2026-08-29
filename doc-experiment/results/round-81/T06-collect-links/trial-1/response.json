@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment and `next_token()` to walk the document in tree order, reading link targets with `get_attribute('href')` and decoded text with `get_modifiable_text()` only for `#text` tokens. The function collects only `A` openers with a string `href`, then flushes each link when its closing token is reached.",
+  "confidence": 74
+}

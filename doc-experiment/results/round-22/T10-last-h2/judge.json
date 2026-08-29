@@ -1,0 +1,35 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correctly used WP_HTML_Tag_Processor for a flat tag/class edit. All called methods are documented: next_tag, set_bookmark, has_bookmark, seek, release_bookmark, add_class, get_updated_html. The implementation matches the documented last-matching-tag bookmark pattern and passed 6/6 cases with no _doing_it_wrong records."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice and fully documented API usage. It uses a forward next_tag scan, repeatedly moves one literal bookmark, seeks back, adds the class, releases the bookmark, and returns get_updated_html. Passed 6/6 cases with no _doing_it_wrong records."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Correctly used WP_HTML_Tag_Processor and only documented methods. Lowercase next_tag('h2') is supported by the docs' ASCII case-insensitive matching rule. The only tiny idiom nit is that the unlikely seek-failure path returns without releasing the bookmark; normal path is clean. Passed 6/6 cases with no _doing_it_wrong records."
+    }
+  ],
+  "failure_analysis": "All trials passed every hidden case. The docs worked well here: 'Which processor should I use?' clearly steers flat, position-based class edits to WP_HTML_Tag_Processor; next_tag() documents case-insensitive tag-name matching and that tag-like text inside comments/raw text is not matched; set_bookmark() explicitly describes the common use of re-setting one bookmark to remember the last matching tag; add_class() documents preserving existing classes and appending the new class; get_updated_html() documents returning queued edits while preserving untouched bytes. Near-misses were minor: candidates did not need incomplete-input checks because the task only mutates complete matched H2 openers, and the docs state incomplete trailing tags are never matched or modified.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::set_bookmark() docblock",
+      "problem": "The prose explains the 'last matching tag' pattern, but the example is a more complex nested-list closer scan, which can obscure the simple one-pass use case.",
+      "suggestion": "Add a compact generic example that scans all matching tags, reuses one literal bookmark name, seeks once after the scan, mutates the bookmarked opener, and releases the bookmark."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::next_tag() / Finding tags",
+      "problem": "The no-backing-up rule and the bookmark exception are split between sections, so readers must connect traversal failure-at-end behavior with bookmark-based backtracking.",
+      "suggestion": "Cross-link from the next_tag() return/EOF discussion directly to the bookmark pattern for edits that depend on the last or later-discovered match."
+    }
+  ]
+}

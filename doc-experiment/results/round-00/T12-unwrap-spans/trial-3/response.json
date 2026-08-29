@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function creates a fragment processor with `WP_HTML_Processor::create_fragment()`, then iterates over every token using `next_token()`. For each token, it checks `get_tag()` \u2014 if the tag name is `SPAN` (which covers both openers and closers since the HTML Processor visits both), the token is skipped entirely. All other tokens are serialized using `serialize_token()` and concatenated. The resulting string is then passed through `WP_HTML_Processor::normalize()` to produce the required normalized output (double-quoted attributes, optional tags added, canonical text encoding, etc.).",
+  "confidence": 72
+}

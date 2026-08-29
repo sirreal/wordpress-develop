@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Tag_Processor with a template approach. It creates a figure element with all required tags and placeholder values, then uses the processor's API to safely set the src/alt attributes (which maintain their order because they exist in the template) and replaces the figcaption text node with the provided caption. The set_attribute() and set_modifiable_text() methods handle all necessary HTML encoding automatically, ensuring that special characters like &, <, >, and quotes are properly escaped for browser rendering.",
+  "confidence": 92
+}

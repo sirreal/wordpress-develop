@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice: WP_HTML_Tag_Processor is exactly right for attribute-only edits with byte-for-byte preservation; no need for the structural WP_HTML_Processor. All three methods called (next_tag, add_class, get_updated_html) are documented and used idiomatically: the canonical while(next_tag('IMG')){add_class} token-walk loop, with the string-shorthand query form from the docs table. Passed 8/8. Edge cases the docs describe are handled correctly without extra code: comments skipped (next_tag only matches tag openers), case-insensitive tag matching, unquoted attributes (output gets double-quoted per Design section), incomplete trailing tag (processor pauses and next_tag returns false). Identical in substance to reference.php. Explanation is accurate; one minor imprecision: it claims add_class behavior is shown 'when a class attribute already exists' which the docs do demonstrate (line 164-166), so the claim is grounded. Uses lowercase 'img' in query vs reference's 'IMG'; docs explicitly show 'img' works (line 51) and matching is case-insensitive, so this is correct, not a deviation."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Byte-identical candidate to trial-1. Correct processor, all methods documented, idiomatic token-walk loop, 8/8 pass. Explanation adds the unverifiable-but-true claim that next_tag 'inherently skips HTML comments'; the docs support this indirectly (next_tag finds tags, comments are a separate token type only reachable via next_token), and the inside-comment-ignored case confirms it. No hallucinated API. Mentions only behaviors the docs back up."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same candidate (variable renamed to $tags, matching the docs' own example naming). Correct processor, documented methods, idiomatic loop, 8/8 pass. Explanation is the most thorough and makes a slightly over-reaching claim that next_tag 'correctly ignores IMG-like content inside HTML comments, SCRIPT, STYLE, and other special elements.' The SCRIPT/STYLE part is true per the docs' 'Special self-contained elements' / rawtext sections and is not exercised by any hidden test, so it is a reasonable, doc-grounded inference rather than a hallucination. No undocumented API used."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed. All three trials are functionally and substantively identical to reference.php (new WP_HTML_Tag_Processor -> while next_tag('img'/'IMG') -> add_class('wp-image') -> get_updated_html) and pass all 8 cases including the four discriminating edge cases.\n\nWhat the docs did well for this task:\n- The 'Finding tags' query table (lines 47-53) explicitly shows the string shorthand `$tags->next_tag( 'img' )` and that lowercase is acceptable, steering every subject to the concise correct form.\n- The opening Usage example (lines 30-35) models the exact three-step shape, and the 'Modifying CSS classes' section (lines 157-183) shows add_class appending to existing classes while preserving order/whitespace, which directly answers the existing-classes requirement.\n- The 'When matching fails' section (lines 84-111) documents that input ending mid-token pauses the processor and next_tag returns false, which is precisely why the incomplete-tag-at-end case is preserved untouched; subjects relied on this implicitly and got it right.\n- The Design section note that 'all attribute updates store their values as double-quoted strings, meaning that attributes on input with single-quoted or unquoted values will appear in the output with double-quotes' (line 294) explains why the unquoted-attributes case still passes (only the new class attribute is double-quoted; existing src=a.jpg width=10 are untouched because they're not modified).\n\nNear-misses in the explanations (none functional): trial-3 asserts next_tag ignores IMG-like content inside SCRIPT/STYLE/comments and trial-2 asserts comments are skipped. These are true but the docs never state plainly, in the next_tag heading, that next_tag matches only tag openers and therefore cannot match content inside comments or rawtext/RCDATA elements; subjects inferred it from scattered sections. A subject reasoning less carefully could have over-trusted next_tag to also skip TITLE/TEXTAREA text or, conversely, doubted comment-skipping and added defensive next_token logic. The docs got the right answer here by luck of strong examples rather than an explicit guarantee.\n\nSeparately, a latent doc defect exists that did not bite anyone: line 985 in the paused_at_incomplete_token example calls `$processor->get_next_tag()`, a method that does not exist (should be `next_tag()`). A subject copying that example verbatim would have produced a fatal error. It was not triggered because no subject needed that method.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::paused_at_incomplete_token() example (html-tag-processor.md, ~line 985)",
+      "problem": "The example calls a nonexistent method: `false === $processor->get_next_tag();`. The real method is `next_tag()`. A subject copying this idiom verbatim would hit a fatal 'call to undefined method' error.",
+      "suggestion": "Fix the typo to `next_tag()`. More generally, add the docs build/CI a check that every method name appearing in example code blocks resolves to a documented method on the class, so example code stays callable."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::next_tag() method heading and the 'Finding tags' section",
+      "problem": "Neither the next_tag heading nor the Finding tags prose states the load-bearing guarantee that next_tag matches ONLY tag openers (and by default skips tag closers), so it can never match tag-like text inside comments, SCRIPT/STYLE rawtext, or TITLE/TEXTAREA RCDATA. Subjects had to infer comment-skipping from the separate next_token / special-elements sections; the inference happened to be correct but is not guaranteed by the next_tag contract as written.",
+      "suggestion": "In the next_tag docblock add one sentence: 'next_tag() only matches HTML tag openers found in normal parsing; markup that appears inside comments, CDATA, or rawtext/RCDATA elements (SCRIPT, STYLE, TITLE, TEXTAREA, etc.) is never matched because it is not a tag. To visit comments or text, use next_token().' This is a general fact useful for any tag-finding task."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::get_updated_html() method heading",
+      "problem": "The Method Index and the get_updated_html entry both describe it as 'Returns the string representation of the HTML Tag Processor' (a copy of __toString's description), without stating the key point: it applies all enqueued changes (set_attribute/add_class/etc.) and returns the full modified document. Subjects guessed correctly from the Usage example, but the method's own documentation never states that it is the way to retrieve edited output.",
+      "suggestion": "Give get_updated_html() its own description: 'Applies all enqueued attribute and class changes and returns the complete, modified HTML document. Use this to retrieve output after making edits.' Distinguish it explicitly from __toString if their behavior differs."
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` for a flat position-based edit: scan forward with `next_tag( 'H2' )`, move a single bookmark named `last-h2` to each matched opener, then `seek()` back to the final bookmarked `H2`, add the `final-section` class with `add_class()`, and return the modified markup via `get_updated_html()`. If no `H2` is found, it returns the original HTML unchanged.",
+  "confidence": 96
+}

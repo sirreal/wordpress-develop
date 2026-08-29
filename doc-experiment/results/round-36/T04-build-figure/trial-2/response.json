@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` with a literal template so the output shape and attribute order stay exact: `src` and `alt` already exist on the `<img>`, so `set_attribute()` updates them in place with proper HTML encoding, and a `.` placeholder inside `<figcaption>` provides a real `#text` token that `next_token()` and `set_modifiable_text()` can safely replace with the caption text.",
+  "confidence": 94
+}

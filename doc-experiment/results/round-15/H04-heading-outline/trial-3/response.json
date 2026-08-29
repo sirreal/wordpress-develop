@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to create a processor for the HTML fragment, then iterates through all tokens with next_token(). It tracks when a heading opener is found (H1-H6) by extracting the level from the tag name, and accumulates all #text tokens until the heading closer is encountered. The text is automatically decoded by get_modifiable_text(), and the completed heading entry is added to the results array when the closer is found.",
+  "confidence": 78
+}

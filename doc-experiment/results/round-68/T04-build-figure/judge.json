@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 94,
+      "hallucinated_methods": [],
+      "notes": "Passed 7/7. All called APIs are documented: WP_HTML_Processor::create_fragment(), next_tag(), next_token(), get_token_type(), set_attribute(), set_modifiable_text(), and inherited get_updated_html(). Main deduction: HTML Processor works here, but the docs’ processor-choice guidance and the Tag Processor “Building markup from a template” section make WP_HTML_Tag_Processor the more direct fit for filling a fixed template with attributes and text."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Passed 7/7. This closely follows the documented Tag Processor template-building pattern: fixed literal template, predeclared attributes to preserve order, placeholder text for set_modifiable_text(), token walk to #text, and get_updated_html(). No _doing_it_wrong records."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 94,
+      "hallucinated_methods": [],
+      "notes": "Passed 7/7. Same API usage profile as trial-1, with correct null handling for create_fragment(). The implementation is safe and documented, but slightly less idiomatic for this task than the Tag Processor because no structural parsing, breadcrumbs, or normalized serialization is needed."
+    }
+  ],
+  "failure_analysis": "All trials passed every hidden case. The rendered docs did well on the exact concepts this task required: the Tag Processor “Building markup from a template” section explicitly says to include attributes in the template to preserve order and include placeholder text for set_modifiable_text(); set_attribute() and set_modifiable_text() both state that callers should pass plain unescaped strings and the API will encode them; get_modifiable_text()/set_modifiable_text() explain decoded text semantics; and get_updated_html() is clearly identified as the output path after queued edits. The main near-miss is processor selection: two trials used WP_HTML_Processor::create_fragment() despite the task being a flat fixed-template construction. That did not fail because HTML Processor extends the Tag Processor and supports the same mutations, but it suggests the processor-choice guidance could be more prominent in the HTML Processor docs for simple template-filling tasks. Another small near-miss is that none of the candidates checked set_modifiable_text()’s boolean return, even though the method docs say to check it; the placeholder-template example itself encourages a shape where failure is unlikely, but stronger examples would reinforce the contract.",
+  "doc_gaps": [
+    {
+      "location": "/tmp/html-api-docs-eval/round-68/html-processor.md — Overview / processor choice guidance",
+      "problem": "Subjects can infer that create_fragment() is a reasonable default for constructing any fragment, even when the job is only filling a fixed template and does not need structural parsing.",
+      "suggestion": "Add a short decision-table row or note: for trusted fixed markup templates where callers only replace attributes and existing text tokens, prefer WP_HTML_Tag_Processor; use WP_HTML_Processor when parsed tree structure, implied elements, breadcrumbs, or normalized serialization matter."
+    },
+    {
+      "location": "/tmp/html-api-docs-eval/round-68/html-processor.md — Method Index / inherited mutation output",
+      "problem": "get_updated_html() is inherited and referenced later, but not visible in the HTML Processor method index. Users mutating an HTML Processor may not easily discover the correct output method.",
+      "suggestion": "Add an “Inherited mutation methods from WP_HTML_Tag_Processor” subsection listing get_updated_html(), set_attribute(), set_modifiable_text(), and related inherited methods, or explicitly link get_updated_html() near create_fragment() mutation examples."
+    },
+    {
+      "location": "/tmp/html-api-docs-eval/round-68/html-tag-processor.md — set_modifiable_text() and Building markup from a template",
+      "problem": "The method docs say to always check the boolean return, while the template-building example omits the check. This can normalize silent no-op patterns when callers accidentally match an element token or use an empty element without a text node.",
+      "suggestion": "Update template-building examples to either assert/check the set_modifiable_text() return value or add a sentence explaining that a placeholder #text token is required and failure should be handled according to the caller’s contract."
+    },
+    {
+      "location": "/tmp/html-api-docs-eval/round-68/html-processor.md — create_fragment() / get_last_error() guidance",
+      "problem": "The docs correctly advise checking get_last_error() after scanning, but do not distinguish trusted static templates from caller-supplied HTML. This leaves uncertainty about whether simple construction helpers must include unsupported-markup fallback logic.",
+      "suggestion": "Clarify that get_last_error() checks are essential for caller-supplied or structurally meaningful input, while fixed known-good templates may rely on the template invariant; examples should state which policy they are demonstrating."
+    }
+  ]
+}

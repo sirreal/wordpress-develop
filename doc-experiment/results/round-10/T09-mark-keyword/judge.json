@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice (WP_HTML_Processor::create_fragment) for a structure-and-normalization task (30/30). Every method called is documented: create_fragment, next_token, get_token_type, get_modifiable_text, serialize_token; no hallucinations, no _doing_it_wrong records (30/30). Idiomatic: implements the exact token-walk + serialize_token wrapping recipe documented in the serialize_token() section, lines 1050-1066 (25/25). Edge cases: matches on decoded text via get_modifiable_text, filters to '#text' so attributes/comments are excluded, relies on normalization for incomplete input, and guards the null processor by returning '' as the reference does (13/15). Minor deduction only because the null branch returns '' silently rather than a normalized form, but create_fragment never returns null for body-context input so this is untested either way. Passed 8/8."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Identical core to trial-1 and the reference. Correct processor (30/30). No hallucinated API: additionally calls WP_HTML_Processor::normalize() in the null-processor fallback, which IS documented (static, returns string|null), and correctly handles its null return with '$normalized ?? $html' (30/30). Idiomatic serialize_token wrapping loop (25/25). Best edge-case handling of the three: the null-processor branch attempts a normalized fallback rather than returning '' or raw input (14/15). Slight deduction since that branch is dead code for these inputs and serialize_token already normalizes, so the extra normalize() call is harmless but unnecessary. Passed 8/8. Self-reported confidence 75, well calibrated."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Same documented recipe (create_fragment, next_token, get_token_type, get_modifiable_text, serialize_token), str_contains for the case-sensitive match exactly as the reference does. Correct processor (30/30), no hallucinations (30/30), idiomatic wrapping loop (25/25). Weakest null handling of the three: returns the raw $html unchanged on null processor, which would violate the normalization contract if ever hit (12/15) — but unreachable for body-context input, so it has no functional impact. Passed 8/8."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed. All three trials passed 8/8 on every case, and all three are near-verbatim reproductions of the canonical reference: create_fragment -> while(next_token) -> if get_token_type()==='#text' and get_modifiable_text() contains the keyword, wrap serialize_token() in <mark>, else emit serialize_token() unchanged.\n\nWhat the docs did well (the gaps that were NOT present here):\n- The serialize_token() section (html-processor.md lines 1040-1066) supplies the exact rewriting pattern this task needs: \"a rewriting loop can transform the document while serializing... emit extra markup around them to insert wrappers,\" with a runnable token-walk example. All three subjects lifted this pattern directly, which is why no one tried to use set_modifiable_text/get_updated_html (the wrong tool here, and explicitly warned against in lines 1068-1069). This single passage is the reason adherence is uniformly high.\n- The decoded-vs-raw distinction was handled correctly by every trial because get_modifiable_text() is documented as returning decoded text (the get_modifiable_text examples show 'Fish & Chips' and entity decoding), so the entity-encoded-keyword-matches case passed without anyone reaching for raw text. The task note about matching decoded text aligned cleanly with the documented behavior.\n- The '#text' token-type filter is shown in multiple examples (lines 174, 639, 656, 1883), so the keyword-in-attribute and keyword-in-comment exclusion cases passed naturally — subjects only inspected #text tokens.\n- Normalization side-effects (closing the unclosed <p>/<b>, &AMP; -> &amp;) came for free from serialize_token(), which the docs state reconstructs \"the normalized serialization of the input.\" No subject had to reason about implicit closing tags explicitly.\n\nNear-misses in the explanations / divergences worth noting:\n- The only divergence among trials is the unreachable null-processor branch: trial-1 returns '', trial-2 returns WP_HTML_Processor::normalize($html) ?? $html, trial-3 returns $html. Because create_fragment with the default <body> context never returns null for the test inputs (probed: returns a processor even for '' and unclosed tags), this branch is dead code and did not affect any result. The docs document the null return (\"The created processor if successful, otherwise null\") but do not say WHEN null occurs — only that unsupported context/encoding cause it. A subject reading only that could plausibly believe malformed HTML yields null and write a meaningful fallback; trial-3's \"return $html unchanged\" would silently violate the normalization contract if that branch were ever reached. This is a latent misconception that the tests did not expose, not an observed failure.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::create_fragment() — Returns / Current HTML Support section",
+      "problem": "The docs state create_fragment returns null 'otherwise' but only enumerate unsupported context/encoding as causes. They never clarify that malformed, incomplete, or adversarial markup does NOT cause null — the parser recovers and normalizes it. All three subjects wrote divergent null-handling branches (return '', return raw input, return normalize()); trial-3's raw-input fallback would break the normalization contract if reached. The ambiguity invites incorrect, contract-violating fallbacks.",
+      "suggestion": "State explicitly that, with the default <body> context and UTF-8 encoding, create_fragment returns a usable processor for any input string and only returns null when given an unsupported context or encoding (not for malformed/incomplete HTML, which is parsed with recovery). Add a one-line note that a null check is essentially a guard against misconfiguration, not against bad markup."
+    },
+    {
+      "location": "WP_HTML_Processor::serialize_token() — note on which tokens carry text",
+      "problem": "The token-walk wrapping recipe is excellent, but it does not flag that SCRIPT/STYLE/TITLE/TEXTAREA produce no #text child tokens (their text rides on the element token). next_token() documents this caveat (line 620), but a reader landing on serialize_token() to build a wrap-text-nodes loop could miss it and silently fail to match keywords inside those elements. No test exercised this, but it is a generalizable trap for any 'wrap/inspect every text node' task.",
+      "suggestion": "Add a cross-reference from the serialize_token() rewriting-loop example to the next_token() note about SCRIPT/STYLE/TITLE/TEXTAREA carrying their text on the element token rather than as #text children, so loops that key on '#text' know those cases need separate handling via get_modifiable_text on the opening tag."
+    },
+    {
+      "location": "get_modifiable_text() (both html-processor.md and html-tag-processor.md)",
+      "problem": "The method correctly documents that returned text is decoded, but does not state the inverse guarantee that serialize_token() / serialization re-ENCODES text canonically when emitting it. Subjects succeeded here by intuition, but the round-trip relationship (read decoded, emit canonically-encoded) is what makes the entity-encoded-keyword and &AMP;->&amp; cases work and is currently only implied across two separate sections.",
+      "suggestion": "In get_modifiable_text(), add a sentence noting that this returns decoded text suitable for content matching, while serialize_token()/serialize() emit text with canonical character-reference encoding — so matching on decoded text and serializing for output are complementary and lossless for the text itself."
+    }
+  ]
+}

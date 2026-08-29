@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML, then finds the first TABLE tag with next_tag(). It walks through all tokens within the table using next_token(), tracking TR (row) and TD/TH (cell) opening and closing tags. When inside a cell, it accumulates text from #text tokens using get_modifiable_text(). Rows are collected when their closing tag is encountered, and text stops accumulating when we exit the table by checking get_current_depth(). This approach handles missing closing tags and tbody/thead elements naturally as the HTML Processor normalizes the tree structure.",
+  "confidence": 72
+}

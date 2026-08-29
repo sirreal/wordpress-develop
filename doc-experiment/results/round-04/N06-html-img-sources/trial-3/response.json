@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This implementation uses WP_HTML_Processor::create_fragment() to parse the HTML in BODY context (the default). It iterates through all IMG tags found by next_tag() with tag_name query, and filters by namespace to exclude SVG <image> elements which appear in the 'svg' namespace. For each HTML IMG element found, it retrieves the src attribute using get_attribute() and includes non-empty string values in the returned array, maintaining document order from the linear scan.",
+  "confidence": 75
+}

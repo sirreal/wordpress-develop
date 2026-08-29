@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 90,
+      "hallucinated_methods": [],
+      "notes": "Passed 10/10. All called API methods are documented. Strong token-walk use of `next_token()`, `get_token_type()`, `get_token_name()`, and decoded `get_modifiable_text()`, with UTF-8 `mb_*` truncation. Main adherence loss: it chose `WP_HTML_Tag_Processor` instead of `WP_HTML_Processor`, despite the docs recommending HTML Processor when collecting text content or relying on implied/missing closing-tag behavior."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Passed 10/10. Correctly used `WP_HTML_Processor::create_fragment()` for body-fragment HTML, guarded null creation, walked tokens with `next_token()`, collected `#text`, and read `TITLE`/`TEXTAREA` text only from opener tokens. It relied on documented decoded UTF-8 `get_modifiable_text()` semantics and used explicit UTF-8 code-point truncation."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 89,
+      "hallucinated_methods": [],
+      "notes": "Passed 10/10. All called API methods are documented and the token-walk pattern is mostly idiomatic. It handled decoded text, special `TITLE`/`TEXTAREA` tokens, zero limits, and UTF-8 truncation. Main adherence loss is the lower-level `WP_HTML_Tag_Processor` choice for a document-text task; it also does not explicitly distinguish tag openers from closers, which is harmless here with the Tag Processor but is not the safer HTML Processor pattern."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed across the three trials. The docs did well on the core concepts this task needed: `html-processor.md` under `next_token()` says to use token walking when text and non-tag content matters, warns that text can be split across several `#text` tokens, and calls out that `SCRIPT`, `STYLE`, `TITLE`, and `TEXTAREA` carry text on the element token rather than child `#text` tokens. The `get_modifiable_text()` sections in both docs clearly state that `#text`, `TEXTAREA`, and `TITLE` text is already decoded UTF-8 and should be sliced with explicit UTF-8 `mb_*` calls. The near-miss is processor choice: trials 1 and 3 passed using the Tag Processor because the hidden cases stayed compatible with lexical token walking, but the HTML Processor docs explicitly say to choose HTML Processor for collecting text content, walking subtrees, and handling implied or missing closing tags. The Tag Processor token-walk example may have made the lower-level processor feel acceptable for whole-fragment text extraction.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor docs, `Tokens and finer-grained processing` example",
+      "problem": "The example accumulates text with the Tag Processor, which can encourage using the lexical processor for document-text tasks even though the processor-choice section says HTML Processor is preferred when structure or browser-like parsing matters.",
+      "suggestion": "Add a short warning near the example: lexical token walks are suitable for flat scans and byte-preserving edits; for DOM/document text content, subtree walks, implied closers, or malformed nesting, use `WP_HTML_Processor::create_fragment()`."
+    },
+    {
+      "location": "WP_HTML_Processor docs, `next_token()` / text-walking guidance",
+      "problem": "The docs explain the pieces, but there is no compact general recipe for identifying text-bearing tokens while excluding raw-language content such as `SCRIPT` and `STYLE`.",
+      "suggestion": "Add a general text-token contract: collect `#text`; for element-carried text inspect the opener token name; decide explicitly whether `SCRIPT`/`STYLE` raw text belongs to the application result; guard opener-only reads with `! is_tag_closer()`."
+    },
+    {
+      "location": "`get_modifiable_text()` docs in both processor docs",
+      "problem": "The method returns modifiable text for human text, comments, and raw-language elements, so 'modifiable text' can be mistaken for 'visible/document text'.",
+      "suggestion": "Clarify that callers extracting document text should not append every non-empty `get_modifiable_text()` result; they must filter by `get_token_type()` and `get_token_name()` according to the content model they want."
+    },
+    {
+      "location": "`get_modifiable_text()` empty-string semantics",
+      "problem": "The docs mention that empty string can mean either no modifiable text or empty modifiable text, but examples still commonly skip empty strings. That is safe for concatenation but not for tasks that count or preserve empty text-bearing tokens.",
+      "suggestion": "Add a note that token identity, not the returned string alone, should be used when the distinction between absent text and empty text matters."
+    }
+  ]
+}

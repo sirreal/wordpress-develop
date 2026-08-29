@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor`, which is the documented API for byte-preserving, position-based tag edits. It scans with `next_tag( 'img' )` (case-insensitive and ignoring comment text), adds `wp-image` with `add_class()` so existing classes are preserved and appended without reordering, and returns the result with `get_updated_html()`.",
+  "confidence": 98
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() for structure-aware traversal, then next_tag(), get_tag(), get_breadcrumbs(), add_class(), and get_updated_html() to add `nested-list` only when a UL or OL opener has a UL/OL ancestor in its breadcrumb path. If the fragment processor cannot be created, the function returns the original HTML unchanged.",
+  "confidence": 95
+}

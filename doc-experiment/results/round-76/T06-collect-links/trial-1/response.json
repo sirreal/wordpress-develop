@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment with structure awareness, then walked tokens with `next_token()` and `get_current_depth()` to collect each `<a>` element\u2019s subtree text in document order. For each opening `A` tag, I read `href` with `get_attribute()` and only kept string values, while text was accumulated from `#text` tokens via `get_modifiable_text()` until the anchor\u2019s closing boundary was reached.",
+  "confidence": 92
+}

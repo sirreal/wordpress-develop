@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body fragment with tree awareness, scans forward with `next_tag()` to find heading openers `H1` through `H6`, and for each heading walks its subtree with `next_token()` while the current depth stays within that heading. It appends only `#text` token content via `get_modifiable_text()`, which correctly includes nested inline markup text but not tags.",
+  "confidence": 92
+}

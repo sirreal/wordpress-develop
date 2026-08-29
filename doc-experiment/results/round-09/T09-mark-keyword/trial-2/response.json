@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This implementation uses WP_HTML_Processor to parse and walk through HTML tokens. For each text node encountered, it checks if the decoded text contains the keyword as a case-sensitive substring. Matching text nodes are wrapped in mark elements, and all tokens are serialized normally. The serialize_token() method ensures normalized HTML output with proper encoding and closing tags.",
+  "confidence": 45
+}

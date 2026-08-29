@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor to scan linearly through the HTML document, finding each IMG tag (with case-insensitive matching as documented) and calling add_class() to add 'wp-image' to its classes. The Tag Processor's add_class() method safely handles both cases where the class attribute already exists and where it needs to be created, and it preserves existing classes. Comments are automatically skipped by next_tag() as documented\u2014only real tags match. Finally, get_updated_html() returns the modified document with byte-precise preservation of everything else.",
+  "confidence": 92
+}

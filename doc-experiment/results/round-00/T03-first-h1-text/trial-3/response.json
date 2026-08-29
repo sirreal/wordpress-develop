@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the HTML fragment, then `next_tag('H1')` to locate the first H1 opener. I captured its nesting depth via `get_current_depth()`. Then I looped with `next_token()` (which visits all token types including text nodes), checked `get_token_type()` for `#text` tokens, and accumulated their `get_modifiable_text()` values. The loop exits when `get_current_depth()` drops back to the H1's depth or below, signaling we've left the H1's subtree. `get_modifiable_text()` returns decoded text (character references resolved), satisfying the `&amp;` \u2192 `&` requirement. Returning `null` when no H1 is found and an empty string when the H1 has no text nodes both match the spec.",
+  "confidence": 82
+}

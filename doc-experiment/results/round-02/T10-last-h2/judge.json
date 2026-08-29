@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 88,
+      "hallucinated_methods": [],
+      "notes": "Correct processor (WP_HTML_Tag_Processor). Every method used (next_tag, set_bookmark, release_bookmark, seek, add_class, get_updated_html, is_tag_closer) is documented; no _doing_it_wrong. Passed 6/6. Two idiomatic deductions: (1) bookmark names are generated as 'last_h2_'.uniqid() — directly contradicting the docs' explicit guidance (tag-processor lines 191 and 1107) to use string-literal names and update one frequently in a loop, never 'mark_{$index}'-style programmatic names. It releases the prior bookmark each iteration so nothing accumulates, but the pattern is the one the docs warn against. (2) The is_tag_closer() guard is harmless but rests on a misconception: its inline comment claims it 'Skip[s] H2 tags inside comments', whereas next_tag('H2') already defaults to tag_closers=>'skip' (verified: never returns closers) and comments are separate tokens entirely. So the guard does nothing and the stated rationale is wrong. Correct seek-then-add-class-then-release sequence otherwise."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "Correct processor. All methods documented; no _doing_it_wrong; passed 6/6. Uses the documented idiomatic pattern: a single string-literal bookmark name ('last-h2') reused/updated each loop iteration (matches reference and tag-processor lines 191/1107), and guards seek() with its boolean return (matches the if($p->seek(...)) idiom at line 1088). Explanation correctly notes comments are not lexical tags. One trivial non-idiomatic wrinkle: it calls release_bookmark on the literal name immediately before re-set_bookmark with the same name every iteration; overwriting is fine so the release is redundant, but it is harmless. Lowercase 'h2' query works (matching is case-insensitive, verified)."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 94,
+      "hallucinated_methods": [],
+      "notes": "Correct processor. All methods documented; no _doing_it_wrong; passed 6/6. Same idiomatic, documented approach as trial-2: single string-literal bookmark ('last_h2') updated in the loop, seek() guarded by its return value, add_class + get_updated_html used correctly. Minor: uses truthiness checks (if($last_h2_bookmark)) and the same redundant release_bookmark-before-resetting-same-name as trial-2 — both harmless. Explanation is accurate about linear scanning and comment exclusion. Lowercase 'h2' query is fine (case-insensitive)."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed in any trial: all three trials passed 6/6 (two-headings, single-heading, no-headings-unchanged, many-headings, comment-h2-not-counted, existing-class). Because there are no functional failures, the analysis focuses on what the docs enabled and the near-misses in reasoning.\n\nWhat the docs did well: The 'Bookmarks' / set_bookmark / seek sections (tag-processor lines ~189-208, 1048-1145) gave a directly transferable walk-and-seek pattern, including the exact 'scan, set a bookmark each match, then seek back to the last one' shape this task needs (the last-li example at lines 1083-1100 is almost isomorphic to mark_last_h2). All three subjects reproduced it. add_class's documented whitespace/class-order preservation (line 294) is why the existing-class case ('outro' -> 'outro final-section') passed without anyone reasoning about it explicitly. next_tag's documented case-insensitive tag_name and string-shorthand form let trials 2/3 use lowercase 'h2' safely.\n\nNear-misses in the explanations:\n1. Comment handling (comment-h2-not-counted case): All three explanations assert next_tag 'automatically' excludes/ignores tags inside comments. This is true but for an unstated reason — the processor tokenizes '<!-- ... -->' as a single comment token, so the inner '<h2>' is never a tag at all. The docs never state this plainly; subjects asserted the right outcome on intuition. The docs mention comment token types (e.g. 'Funky comment', line 466; abruptly-closed comments, line 1227) but never give the load-bearing sentence: 'markup inside a comment is not parsed as tags and next_tag() will not stop on it.' Had a comment case been adversarial, this gap could have produced a wrong but confident answer.\n2. Tag-closer vs comment conflation (trial-1): trial-1 added an is_tag_closer() guard and commented it as 'Skip H2 tags inside comments'. The docs do explain (line 442, 910, 1607) that next_tag defaults to skipping closers, so the guard is inert; but the subject clearly did not internalize that default and mislabeled closers as comments. The default-skip behavior of tag_closers is documented only obliquely in the $query @type table and the $stop_on_tag_closers property, not stated as a one-line default in the next_tag prose, which is why a subject could be unsure enough to add a defensive guard with the wrong justification.\n3. Bookmark naming idiom (trial-1): the docs warn twice (lines 191, 1107) against programmatic bookmark names, but trial-1 still used uniqid(). The warning is present and clear; this is a subject-side adherence lapse rather than a doc gap, though pairing the warning with a positive 'reuse one literal name in a loop' code snippet next to the prohibition would make the right pattern harder to miss.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::next_tag() — prose description (around lines 39-55)",
+      "problem": "The prose never states that markup appearing inside HTML comments (and other non-tag tokens) is not parsed as tags, so next_tag() will never stop on it. All three subjects relied on this behavior and asserted it correctly, but on intuition rather than documentation; an adversarial comment case could have produced confident wrong reasoning.",
+      "suggestion": "Add one sentence to next_tag()'s description: 'next_tag() only stops on real HTML tags. Text that looks like a tag but sits inside a comment, CDATA, or other non-tag token (e.g. <!-- <h2> --> ) is part of that token and is never matched.' A two-line example showing a commented-out tag being skipped would lock this in."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::next_tag() — $query / tag_closers default (description prose, complementing the @type table at line 910)",
+      "problem": "That next_tag() defaults to skipping tag closers ('skip') is documented only inside the $query @type table and the private $stop_on_tag_closers property, not in the method prose. A subject (trial-1) was unsure enough to add an is_tag_closer() guard and mislabeled closers as 'comments', revealing the default was not obvious from the prose.",
+      "suggestion": "State the default explicitly in next_tag()'s prose: 'By default next_tag() stops only on tag openers; closing tags such as </h2> are skipped. Pass tag_closers => \\'visit\\' to also stop on closers.' This removes the need for defensive is_tag_closer() guards when only openers are wanted."
+    },
+    {
+      "location": "Bookmarks section / set_bookmark() (lines 191 and 1107)",
+      "problem": "The docs correctly prohibit programmatic bookmark names ('mark_{$index}') and say it is fine to update one bookmark frequently in a loop, but the prohibition and the recommended pattern are stated abstractly with no positive code snippet. Trial-1 still generated uniqid()-based names, suggesting the right pattern is easy to overlook when the only nearby code uses two distinct literal names.",
+      "suggestion": "Next to the prohibition, add a short positive example of the exact 'track the last match' idiom: a loop that calls $p->set_bookmark( 'last-match' ) on every iteration and then seeks to it once after the loop, with a one-line note that re-setting the same literal name simply moves the bookmark (no release_bookmark needed between iterations). This both shows the sanctioned pattern and removes the redundant release_bookmark calls seen in trials 2 and 3."
+    }
+  ]
+}

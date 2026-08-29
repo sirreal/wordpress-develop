@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment with full table structure awareness, then walked tokens with `next_tag()`, `next_token()`, `get_current_depth()`, `get_token_type()`, `get_token_name()`, `is_tag_closer()`, and `get_modifiable_text()`. The function finds the first `TABLE`, collects only ordinary `#text` content inside `TD`/`TH` cells, and lets the processor\u2019s implied table structure handle omitted `TBODY`/`TR` tags.",
+  "confidence": 93
+}

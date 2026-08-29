@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` for BODY-context parsing, then walks the fragment with `next_token()`, appending decoded text from ordinary `#text` tokens via `get_modifiable_text()`. Because the docs state that `TITLE` and `TEXTAREA` carry their text on their own opening tag rather than as child `#text` tokens, it also appends `get_modifiable_text()` for those opening tags only, and finally truncates by Unicode code points with `mb_strlen()`/`mb_substr()` using UTF-8 as recommended in the docs.",
+  "confidence": 91
+}

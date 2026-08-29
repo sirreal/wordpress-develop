@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Passed 8/8. Correctly used WP_HTML_Processor::create_fragment(), walked with next_token(), restricted matching to ordinary #text tokens, used decoded get_modifiable_text() for the substring check, and emitted normalized token output with serialize_token(). All API calls are documented. Minor adherence issue: the create_fragment()/get_last_error() fallback returns raw input, which would discard normalization and any emitted wrappers if that branch were reached."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "Passed 8/8. Same correct processor and token-serialization strategy as the reference, with documented calls only: create_fragment(), next_token(), get_token_type(), get_modifiable_text(), serialize_token(), get_last_error(), and normalize(). Minor issue: after a rewrite loop it falls back to normalize($html), which the serialize_token() docs warn intentionally discards accumulated rewrite output if reached."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "Passed 8/8. Correctly chose the HTML Processor for body-fragment normalization and tree-aware token walking, avoided comments/attributes/special-element opener text by gating on #text, and used serialize_token() idiomatically. No undocumented API calls. Minor issue matches trial 2: the error fallback normalizes the original input after emitting rewritten tokens, so wrappers would be lost if get_last_error() became non-null."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed across the three trials. The rendered docs did well on the parts this task depends on: the Tag Processor 'Which processor should I use?' section explicitly points normalized output and implied/missing closing tags toward WP_HTML_Processor; create_fragment() documents body-fragment parsing and null checks; the 'collect DOM-style text from a subtree' recipe says ordinary text is only #text tokens and warns that comments and SCRIPT/STYLE/TEXTAREA/TITLE opener text can also carry modifiable text; get_modifiable_text() states that #text text is already decoded; serialize_token() explains token-by-token normalized rewriting and wrapper insertion. Near-miss: all candidates added defensive get_last_error() fallbacks, and two used normalize($html) after a rewrite loop. The serialize_token() docs do warn that normalizing or returning the original input after emitting changes discards the rewrite, but this still looks like an easy pattern for subjects to cargo-cult when the function must return a string. None checked paused_at_incomplete_token(), but the task/reference accept best-effort normalized serialization where unvisited incomplete trailing syntax is omitted, so that is not an adherence failure here.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::serialize_token() docblock and 'Recipe: rewrite while serializing tokens'",
+      "problem": "The warning about normalize($html) or raw-input fallbacks discarding an accumulated rewrite is present, but subjects still used those fallbacks as generic error handling.",
+      "suggestion": "Add a compact fallback-policy example for string-returning rewrites: return accumulated best-effort output, return a sentinel/error value, or intentionally return original/normalized input while explicitly acknowledging that all emitted inserts/removals/replacements are discarded."
+    },
+    {
+      "location": "WP_HTML_Processor::create_fragment() and get_last_error() docs",
+      "problem": "The docs say to check for null creation and later unsupported markup, but do not give much guidance for APIs whose contract requires a normalized string rather than null.",
+      "suggestion": "Clarify that when parser creation or unsupported markup prevents a complete normalized rewrite, the caller must define a policy; normalizing the original input is not recovery of a partially built rewrite."
+    },
+    {
+      "location": "WP_HTML_Processor::get_modifiable_text() decoded-text note",
+      "problem": "The decoded-read contract is documented, but the relationship between decoded comparison text and serialized output is spread across separate method docs.",
+      "suggestion": "Add a cross-reference sentence: use get_modifiable_text()'s decoded string for comparisons/measurements, and use serialize_token(), set_modifiable_text(), or other output APIs to emit HTML so escaping stays canonical."
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the HTML Processor fragment parser to preserve structure-aware scanning, then walked tokens to find the first UL or OL opener, counted direct LI child openers at one depth below the list, and only applied the attribute when the full subtree scan completed without truncation or parser error. The attribute update itself uses the documented `set_attribute()` and `get_updated_html()` APIs.",
+  "confidence": 73
+}

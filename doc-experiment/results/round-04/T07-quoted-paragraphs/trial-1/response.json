@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This implementation uses WP_HTML_Processor to properly parse the HTML and understand nesting structure. It iterates through all P tags using next_tag(), checks if BLOCKQUOTE appears anywhere in the current element's breadcrumbs using get_breadcrumbs(), and if found, adds the \"quoted\" class using add_class(). The processor returns the updated HTML via get_updated_html(), preserving all other content byte-for-byte.",
+  "confidence": 82
+}

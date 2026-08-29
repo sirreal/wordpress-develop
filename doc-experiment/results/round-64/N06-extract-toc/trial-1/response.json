@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the body fragment and WP_HTML_Processor::next_token() with get_current_depth(), get_token_type(), get_tag(), get_modifiable_text(), and is_tag_closer() to collect each H1-H6 opener and accumulate only descendant #text tokens until the heading closes. This preserves document order and includes empty headings as empty strings, while ignoring tags inside headings as required.",
+  "confidence": 93
+}

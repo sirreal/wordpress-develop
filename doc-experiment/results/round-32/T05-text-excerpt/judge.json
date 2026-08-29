@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correctly used WP_HTML_Processor::create_fragment() for a body fragment, walked tokens with documented next_token(), gated ordinary text by get_token_type() === '#text', and explicitly whitelisted TITLE/TEXTAREA opener tokens before calling get_modifiable_text(). All API calls appear in the rendered docs; execution had no _doing_it_wrong records. Accumulating the full text before truncating is less efficient than necessary but not an API-adherence problem."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same correct documented API pattern as the reference, with an efficient running mb_strlen()/mb_substr() truncation path. It follows the docs' distinction between ordinary #text tokens and opt-in special element text, and avoids raw SCRIPT/STYLE modifiable text. No undocumented methods or misuse records."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Uses only documented methods, including get_last_error(), and otherwise follows the documented fragment/token/text walk pattern. The final get_last_error() fallback is conservative and not required by the task, but it is a documented post-scan concern rather than a hallucinated API use. No _doing_it_wrong records."
+    }
+  ],
+  "failure_analysis": "No failed hidden cases across trials. All three passed 10/10 with no _doing_it_wrong or trigger_error entries. The docs did well in three places: the Tag Processor overview explicitly says to use the HTML Processor for collecting an element's text content; WP_HTML_Processor::next_token() explains that text may be split across #text tokens and that SCRIPT, STYLE, TITLE, and TEXTAREA carry text on the element token instead of child #text tokens; and get_modifiable_text() states that #text, TITLE, and TEXTAREA are decoded UTF-8 while SCRIPT/STYLE are raw. The HTML Processor recipe also warns not to append get_modifiable_text() from every token and instead to whitelist token types. The only near-miss was trial-3's empty-string fallback on get_last_error(): reasonable from the docs' scan-safety language, but the docs do not fully define the expected policy for read-only text extraction after unsupported markup or incomplete trailing syntax.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_modifiable_text()",
+      "problem": "The method accurately describes all tokens with modifiable text, but that broad contract can still tempt callers to treat it as DOM textContent.",
+      "suggestion": "Add a prominent note that get_modifiable_text() is not a text-content predicate: callers should first decide eligible token types, usually #text plus explicit special-element opener opt-ins."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token() and scan recipes",
+      "problem": "The docs mention get_last_error() and paused_at_incomplete_token(), but do not clearly separate policies for mutations/rewrites from best-effort read-only extraction.",
+      "suggestion": "Document post-scan policy choices: when partial accumulated data is valid, when callers should reject or fallback, and what is guaranteed after unsupported markup or incomplete trailing syntax."
+    },
+    {
+      "location": "Text handling examples around next_token()/get_modifiable_text()",
+      "problem": "The docs recommend mb_substr(..., 'UTF-8') but do not fully spell out length measurement and code-point versus grapheme-cluster expectations.",
+      "suggestion": "Pair truncation examples with mb_strlen(..., 'UTF-8') and clarify that mb_* slicing is suitable for Unicode code-point limits, while grapheme_* APIs are needed for user-perceived character limits."
+    }
+  ]
+}

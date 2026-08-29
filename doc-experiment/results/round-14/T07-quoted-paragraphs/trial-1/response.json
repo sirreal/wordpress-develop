@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor, which provides full structural awareness including breadcrumbs (the complete path from root to current element). I parse the fragment with create_fragment(), iterate through all P tags using next_tag(), check if BLOCKQUOTE appears anywhere in the breadcrumbs array using in_array(), and add the \"quoted\" class when found. The processor returns the modified HTML with get_updated_html(), preserving byte-for-byte output otherwise.",
+  "confidence": 92
+}

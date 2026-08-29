@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the body fragment, then walked tokens with next_token(), filtering only non-closing H1-H6 tags via get_token_type(), is_tag_closer(), and get_tag(). For each heading opener, I collected ordinary DOM text from descendant #text tokens using get_current_depth() to stay within that heading and get_modifiable_text() to read decoded text content.",
+  "confidence": 93
+}

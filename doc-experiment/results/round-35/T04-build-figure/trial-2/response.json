@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` exactly as documented for building markup from a known template: start from literal HTML with `src` and `alt` already present to preserve attribute order, update those attributes with `set_attribute()`, then walk tokens with `next_token()` until the placeholder `#text` node inside `figcaption` and replace it with `set_modifiable_text()`. Both APIs perform the required HTML encoding for plain input strings.",
+  "confidence": 96
+}

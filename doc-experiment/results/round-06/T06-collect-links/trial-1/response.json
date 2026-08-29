@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor to parse the HTML fragment. It iterates through all A tags using next_tag(), checks for the href attribute with get_attribute(), and collects text content by advancing through tokens with next_token(), accumulating all #text tokens within the element's depth range until exiting the A tag. The href value is returned as-is (decoded by the API) or true for valueless attributes, and text content is concatenated from all text nodes.",
+  "confidence": 72
+}

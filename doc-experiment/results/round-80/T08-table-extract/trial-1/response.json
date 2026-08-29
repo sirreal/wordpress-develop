@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment with browser-style table structure, then walked tokens with `next_token()` so implied rows and cells are handled structurally. I collected only `#text` token content via `get_modifiable_text()`, and used `get_token_type()`, `get_tag()`, `is_tag_closer()`, and `get_current_depth()` to delimit the first table, rows, and cells.",
+  "confidence": 84
+}

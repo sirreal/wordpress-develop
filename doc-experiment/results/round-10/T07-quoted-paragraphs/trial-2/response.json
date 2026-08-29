@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::create_fragment() to parse the HTML fragment and WP_HTML_Processor::next_tag() to iterate through every P element. For each P tag found, get_breadcrumbs() returns the full path from root to that element as an array of uppercase tag names. If 'BLOCKQUOTE' is present anywhere in this breadcrumb path (checked with in_array), it means the P element has a BLOCKQUOTE ancestor, so add_class('quoted') is called to add the class. Finally, get_updated_html() returns the modified HTML with all queued changes applied.",
+  "confidence": 92
+}

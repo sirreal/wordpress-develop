@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body fragment with full document-structure awareness, then walks tokens in document order with `next_token()`. It starts a TOC entry when it encounters an opening `H1`-`H6` tag, appends only ordinary `#text` token content via `get_modifiable_text()` while inside that heading, and finalizes the entry when the corresponding heading closer is visited with `is_tag_closer()` and `get_tag()`.",
+  "confidence": 90
+}

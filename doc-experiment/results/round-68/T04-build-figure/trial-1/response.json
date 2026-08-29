@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the HTML Processor fragment factory to start from a literal template that already contains `src` and `alt` in the required order, then filled the `img` attributes with `set_attribute()` and replaced the figcaption placeholder text with `set_modifiable_text()`. The HTML API handles all escaping and preserves the template\u2019s attribute order.",
+  "confidence": 93
+}

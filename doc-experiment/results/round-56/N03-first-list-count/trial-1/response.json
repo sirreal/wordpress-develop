@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() for fragment parsing, then scanned tokens with next_tag() to find the first UL or OL and next_token() to walk that list\u2019s subtree. I counted only LI opening tags at one depth below the list opener, and I only applied the attribute after confirming the scan was complete with paused_at_incomplete_token() and get_last_error().",
+  "confidence": 91
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor with a template approach. It starts with a template containing the exact HTML structure needed (figure with img tag having empty src and alt attributes, and a figcaption with placeholder text). The img tag is found and its src and alt attributes are set using set_attribute(), which handles all necessary encoding. Then the processor scans through tokens to find the #text token inside the figcaption and replaces it using set_modifiable_text(), which also handles encoding. Finally, get_updated_html() returns the complete processed HTML with all values properly encoded.",
+  "confidence": 85
+}

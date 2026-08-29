@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan the input linearly and `next_tag( array( 'tag_name' => 'img' ) )` to match image tags case-insensitively while ignoring tag-like text in comments and raw-text regions. For each matched `IMG`, I called `add_class( 'wp-image' )`, then returned `get_updated_html()` so unchanged bytes are preserved exactly and only the target tag openers are updated.",
+  "confidence": 99
+}

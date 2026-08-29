@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the body fragment, next_tag()/next_token() to find the first TABLE and walk its subtree, and get_modifiable_text() to collect decoded text from ordinary #text tokens only. The function tracks TR/TD/TH openers and closers so each table row becomes an array of cell strings in document order.",
+  "confidence": 93
+}

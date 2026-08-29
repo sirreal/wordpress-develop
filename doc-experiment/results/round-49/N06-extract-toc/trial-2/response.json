@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because heading text extraction is tree-aware. It scans forward with `next_tag()`, filters for `H1` through `H6` using `get_tag()`, then walks each heading\u2019s subtree with `next_token()` and a depth guard from `get_current_depth()`, appending only ordinary `#text` token content via `get_modifiable_text()` so nested markup contributes text but not tags.",
+  "confidence": 92
+}

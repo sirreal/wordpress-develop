@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment and `next_token()` to walk the document in tree order, collecting only `#text` tokens with `get_modifiable_text()` while inside an open `H1`-`H6` element. I tracked the heading depth with `get_current_depth()` so the function flushes each heading when its closing token is reached, including empty headings.",
+  "confidence": 86
+}

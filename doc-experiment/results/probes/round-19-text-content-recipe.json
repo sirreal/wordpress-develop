@@ -1,0 +1,159 @@
+{
+  "round": "round-19",
+  "mode": "discoverability-probe",
+  "question_id": "text-content-recipe",
+  "question": "Using only these docs, what is the recommended generic pattern for collecting the text content of the current element with WP_HTML_Processor? Which token types should be appended, where do SCRIPT/STYLE/TITLE/TEXTAREA contents appear, and what should code avoid appending? Cite the rendered doc headings that support the answer.",
+  "subject": {
+    "model": "gpt-5.4",
+    "reasoning_effort": "medium",
+    "service_tier": "priority"
+  },
+  "subject_isolation": {
+    "enforced": true,
+    "agent_type": "codex-cli-isolated-workdir",
+    "isolation_mode": "isolated-workdir",
+    "runner": "codex exec",
+    "input_delivery": "prompt-embedded-docs",
+    "sandbox_mode": "read-only",
+    "approval_policy": "never",
+    "project_rules_loaded": false,
+    "user_config_loaded": false,
+    "repo_available_to_subject": false,
+    "input_files": [
+      "html-processor.md",
+      "html-tag-processor.md",
+      "probe question"
+    ],
+    "work_root": "/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/html-api-docs-eval/round-19/codex-cli-probes"
+  },
+  "result": [
+    {
+      "id": "text-content-recipe",
+      "trial_id": "probe-1",
+      "response": {
+        "answer": "Use `WP_HTML_Processor`, match the element opener, record its depth, then walk forward with `next_token()` while `get_current_depth() >=` the opener depth and append only `#text` tokens via `get_modifiable_text()`. This generic recipe does not collect text from `SCRIPT`, `STYLE`, `TITLE`, or `TEXTAREA` by appending `#text` tokens, because those elements produce no `#text` child tokens; their contents live on the element’s own opening token and should be read with `get_modifiable_text()` while matched on that opener. Code should avoid appending tag tokens or assuming one token holds all text, and should not expect tag-like content inside those special elements to be matched as tags.",
+        "citations": [
+          {
+            "file": "html-processor.md",
+            "heading": "next_token()",
+            "support": "Example recipe: after `next_tag( 'LI' )`, record `$depth_inside_li = $processor->get_current_depth();` and loop with `while ( $processor->next_token() && $processor->get_current_depth() >= $depth_inside_li ) { if ( '#text' === $processor->get_token_type() ) { $text .= $processor->get_modifiable_text(); } }`."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "next_token()",
+            "support": "“An element's text content may be split across several consecutive `#text` tokens: accumulate text while walking rather than assuming one token carries all of an element's text.”"
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "next_token()",
+            "support": "“One important exception to the collect-`#text`-tokens recipe: elements whose contents cannot contain markup (SCRIPT, STYLE, TITLE, TEXTAREA) produce NO `#text` child tokens at all. Their text is carried on the element's own token … Read their text with `get_modifiable_text()` while matched on the element's opening tag instead.”"
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "get_modifiable_text()",
+            "support": "“Note that for elements which cannot contain markup (SCRIPT, STYLE, TEXTAREA, TITLE), the text is carried by the ELEMENT's own token — there is no separate `#text` child to visit. Read it while matched on the element's opening tag.”"
+          },
+          {
+            "file": "html-tag-processor.md",
+            "heading": "next_tag()",
+            "support": "“Only real HTML tags can match. Tag-like text inside comments, CDATA-like sections, and the raw text contents of elements such as SCRIPT, STYLE, TITLE, and TEXTAREA is text, not tags, and is never matched or modified.”"
+          },
+          {
+            "file": "html-tag-processor.md",
+            "heading": "get_modifiable_text()",
+            "support": "“Modifiable text … includes the contents of `#text` nodes … They also contain the contents of SCRIPT and STYLE tags, of TEXTAREA tags, and of any other section in an HTML document which cannot contain HTML markup (DATA).”"
+          }
+        ],
+        "rationale": "The cited `next_token()` and `get_modifiable_text()` sections state the generic collection loop, specify that only `#text` tokens are appended, and carve out the explicit exception that SCRIPT/STYLE/TITLE/TEXTAREA text lives on the element token rather than child `#text` tokens; the `next_tag()` text confirms tag-like content there is not matched as tags.",
+        "confidence": 97
+      }
+    },
+    {
+      "id": "text-content-recipe",
+      "trial_id": "probe-2",
+      "response": {
+        "answer": "The generic pattern is: after `next_tag()` matches the element opener, record `get_current_depth()`, then call `next_token()` in a loop while the depth stays `>=` that recorded depth, and append `get_modifiable_text()` only for `#text` tokens. Text content can be split across multiple consecutive `#text` tokens, so accumulate them all. `SCRIPT`, `STYLE`, `TITLE`, and `TEXTAREA` are the exception: they produce no `#text` child tokens, and their contents live on the element’s own opening token, so read them with `get_modifiable_text()` while matched on that opener. Code should avoid blindly appending `get_modifiable_text()` from every token or expecting those elements’ contents to appear as child `#text` tokens.",
+        "citations": [
+          {
+            "file": "html-processor.md",
+            "heading": "`next_token()`",
+            "support": "“An element's text content may be split across several consecutive `#text` tokens: accumulate text while walking rather than assuming one token carries all of an element's text.”"
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "`next_token()`",
+            "support": "Example recipe: after matching `LI`, record `$depth_inside_li = $processor->get_current_depth();` and loop `while ( $processor->next_token() && $processor->get_current_depth() >= $depth_inside_li ) { if ( '#text' === $processor->get_token_type() ) { $text .= $processor->get_modifiable_text(); } }`."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "`next_token()`",
+            "support": "“One important exception to the collect-`#text`-tokens recipe: elements whose contents cannot contain markup (SCRIPT, STYLE, TITLE, TEXTAREA) produce NO `#text` child tokens at all. Their text is carried on the element's own token … Read their text with `WP_HTML_Tag_Processor::get_modifiable_text` while matched on the element's opening tag instead.”"
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "`get_modifiable_text()`",
+            "support": "“Note that for elements which cannot contain markup (SCRIPT, STYLE, TEXTAREA, TITLE), the text is carried by the ELEMENT's own token — there is no separate `#text` child to visit. Read it while matched on the element's opening tag.”"
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "`get_current_depth()`",
+            "support": "“This gives a reliable way to visit every token inside an element: record the depth when matched on its opening tag and continue while the depth remains at or above that value.”"
+          }
+        ],
+        "rationale": "These passages directly define the recommended depth-bounded `next_token()` walk, restrict normal text collection to `#text` tokens, and explicitly document the SCRIPT/STYLE/TITLE/TEXTAREA exception where text lives on the opener instead of child text tokens.",
+        "confidence": 97
+      }
+    },
+    {
+      "id": "text-content-recipe",
+      "trial_id": "probe-3",
+      "response": {
+        "answer": "The recommended generic pattern is to use `WP_HTML_Processor::next_tag()` to match the element, record its opening-tag depth, then walk forward with `next_token()` while `get_current_depth() >=` that recorded depth, appending only `#text` tokens via `get_modifiable_text()`. This works because an element’s text may be split across several consecutive `#text` tokens. The exception is `SCRIPT`, `STYLE`, `TITLE`, and `TEXTAREA`: they produce no `#text` child tokens, and their contents live on the element’s own opening token, so read them with `get_modifiable_text()` while matched on that element. Code should avoid appending tag tokens or assuming one token holds all text, and for those atomic elements it should avoid waiting for `#text` children because none exist.",
+        "citations": [
+          {
+            "file": "html-processor.md",
+            "heading": "`next_token()`",
+            "support": "“Example: // Collect the text content of the first LI element … while ( $processor->next_token() && $processor->get_current_depth() >= $depth_inside_li ) { if ( '#text' === $processor->get_token_type() ) { $text .= $processor->get_modifiable_text(); } }”"
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "`next_token()`",
+            "support": "“An element's text content may be split across several consecutive `#text` tokens: accumulate text while walking rather than assuming one token carries all of an element's text.”"
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "`next_token()`",
+            "support": "“One important exception to the collect-`#text`-tokens recipe: elements whose contents cannot contain markup (SCRIPT, STYLE, TITLE, TEXTAREA) produce NO `#text` child tokens at all. Their text is carried on the element's own token … Read their text with {@see WP_HTML_Tag_Processor::get_modifiable_text} while matched on the element's opening tag instead.”"
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "`get_modifiable_text()`",
+            "support": "“Note that for elements which cannot contain markup (SCRIPT, STYLE, TEXTAREA, TITLE), the text is carried by the ELEMENT's own token — there is no separate `#text` child to visit. Read it while matched on the element's opening tag”"
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "`get_current_depth()`",
+            "support": "“This gives a reliable way to visit every token inside an element: record the depth when matched on its opening tag and continue while the depth remains at or above that value.”"
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "`get_current_depth()`",
+            "support": "“The `>=` comparison is what makes this loop correct at any nesting depth… Writing `>` instead would end the walk early, at the first closer of a direct child.”"
+          },
+          {
+            "file": "html-tag-processor.md",
+            "heading": "Tokens and *modifiable text*.",
+            "support": "“There are also non-elements… `#text` nodes, whose entire token is the modifiable text.”"
+          },
+          {
+            "file": "html-tag-processor.md",
+            "heading": "##### Special \"atomic\" HTML elements.",
+            "support": "“The inner contents of these elements are that element's *modifiable text*.”"
+          }
+        ],
+        "rationale": "The cited `next_token()`, `get_current_depth()`, and `get_modifiable_text()` sections directly describe the generic text-collection walk, which token types to append (`#text`), the atomic-element exception for SCRIPT/STYLE/TITLE/TEXTAREA, and why code must not rely on non-text tokens or nonexistent `#text` children there.",
+        "confidence": 98
+      }
+    }
+  ]
+}

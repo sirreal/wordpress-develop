@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor::create_fragment() for tree-aware text collection. All HTML API calls are documented in the rendered docs. The single next_token() pass with explicit anchor state matches the documented repeated-region pattern, filters to #text before get_modifiable_text(), and uses is_string(get_attribute('href')) to exclude missing and boolean href values. Minor caveat: returning an empty array on any later get_last_error() is a policy choice not required by the task."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice and no undocumented HTML API usage. The single next_token() state machine is idiomatic and handles decoded text plus string/true/null href semantics correctly. Slight deduction because it never checks get_last_error() or paused_at_incomplete_token(), so unsupported markup or a final incomplete token could silently produce a partial result despite the docs explaining how to detect parser aborts/truncation."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correctly used WP_HTML_Processor, next_tag('A'), get_current_depth(), a >= depth-bounded next_token() subtree walk, #text filtering, and get_modifiable_text(). All called methods are documented, including inherited paused_at_incomplete_token(). The main caveat is that it treats paused_at_incomplete_token() as grounds to discard all results; the docs say incomplete-token handling is caller-policy dependent, and the task only required handling unclosed elements, which the processor represents with virtual closers."
+    }
+  ],
+  "failure_analysis": "All trials passed all 8 frozen hidden cases, and execution.json recorded no _doing_it_wrong entries. The docs did well on the core concepts this task needs: the 'Which processor should I use?' guidance points subjects to WP_HTML_Processor for collecting element text; the 'Recipe: collect DOM-style text from a subtree' shows create_fragment(), next_tag(), get_current_depth(), next_token(), #text filtering, and get_modifiable_text(); get_attribute() documents string/true/null semantics; get_modifiable_text() documents decoded text; next_token()/get_current_depth() explain virtual closers, which is why the unclosed-link case passed. Near-misses were mostly policy ambiguities, not API hallucinations: trial 2 could silently return partial data after a parser abort, and trial 3 could over-reject a fragment ending in a mid-token after already collecting valid links. Neither ambiguity was exposed by the frozen cases.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md: WP_HTML_Processor::get_attribute()",
+      "problem": "The HTML Processor method section shows string|true|null and examples, but the explicit 'string values are returned decoded' contract is present in the Tag Processor page, not repeated here.",
+      "suggestion": "Duplicate the decoded-attribute-value sentence in the WP_HTML_Processor get_attribute() section, since users doing structural work may read only the HTML Processor method docs."
+    },
+    {
+      "location": "html-processor.md: next_token() and 'Recipe: collect DOM-style text from a subtree'",
+      "problem": "The docs warn that nested next_token() loops can skip boundaries, while also showing depth-bounded subtree walks. The safe boundary between those patterns is implicit.",
+      "suggestion": "Add a short rule of thumb: a depth-bounded inner walk is appropriate when intentionally consuming one matched subtree before resuming after it; use one outer next_token() state machine when multiple repeated regions or sibling boundaries must be tracked concurrently."
+    },
+    {
+      "location": "html-processor.md: incomplete-input notes near next_token(), get_current_depth(), and serialize_token()",
+      "problem": "The docs mention paused_at_incomplete_token(), but the distinction between an unclosed element that receives a virtual closer and a truly incomplete final syntax token is easy to blur.",
+      "suggestion": "Add a compact contrast example, such as '<p>text' versus '<p>text <em', and state that checking paused_at_incomplete_token() is a caller policy decision for requiring complete source bytes, not a general requirement for best-effort extraction."
+    },
+    {
+      "location": "html-processor.md: inherited get_tag()/token method examples",
+      "problem": "Some inherited method examples on the HTML Processor page instantiate WP_HTML_Tag_Processor, which adds unnecessary class-choice noise for tasks that require tree-aware traversal.",
+      "suggestion": "For inherited methods displayed on the HTML Processor page, either use WP_HTML_Processor::create_fragment() in examples or label the examples as inherited Tag Processor examples with equivalent behavior on WP_HTML_Processor."
+    }
+  ]
+}

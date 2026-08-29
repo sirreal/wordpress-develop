@@ -1,0 +1,107 @@
+{
+  "candidate": "/Users/jonsurrell/a8c/wordpress-develop/html-api-docs-improvement/doc-experiment/results/round-33/N03-first-list-count/trial-3/candidate.php",
+  "function": "add_first_list_item_count",
+  "passed": 9,
+  "total": 11,
+  "cases": [
+    {
+      "id": "simple-ul",
+      "status": "pass",
+      "expected": "<ul data-item-count=\"3\"><li>A</li><li>B</li><li>C</li></ul>",
+      "actual": "<ul data-item-count=\"3\"><li>A</li><li>B</li><li>C</li></ul>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "ol",
+      "status": "pass",
+      "expected": "<ol data-item-count=\"2\"><li>A</li><li>B</li></ol>",
+      "actual": "<ol data-item-count=\"2\"><li>A</li><li>B</li></ol>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "no-list",
+      "status": "pass",
+      "expected": "<p>No list here.</p>",
+      "actual": "<p>No list here.</p>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "existing-count-overwritten",
+      "status": "pass",
+      "expected": "<ul data-item-count=\"1\"><li>A</li></ul>",
+      "actual": "<ul data-item-count=\"1\"><li>A</li></ul>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "omitted-li-closers",
+      "status": "pass",
+      "expected": "<ul data-item-count=\"2\"><li>one<li>two",
+      "actual": "<ul data-item-count=\"2\"><li>one<li>two",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "nested-list-counts-direct-children",
+      "status": "pass",
+      "expected": "<ul data-item-count=\"2\"><li><ul><li>x</li></ul><li>y",
+      "actual": "<ul data-item-count=\"2\"><li><ul><li>x</li></ul><li>y",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "incomplete-token-inside-list",
+      "status": "fail",
+      "expected": "<ul><li><img src=\"x",
+      "actual": "<ul data-item-count=\"1\"><li><img src=\"x",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "incomplete-comment-inside-list",
+      "status": "fail",
+      "expected": "<ul><li><!-- cut",
+      "actual": "<ul data-item-count=\"1\"><li><!-- cut",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "incomplete-token-after-closed-list",
+      "status": "pass",
+      "expected": "<ul data-item-count=\"1\"><li>one</li></ul><img src=\"x",
+      "actual": "<ul data-item-count=\"1\"><li>one</li></ul><img src=\"x",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "unsupported-inside-list",
+      "status": "pass",
+      "expected": "<ul><li><a><div><a></div></a>",
+      "actual": "<ul><li><a><div><a></div></a>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "unsupported-after-closed-list",
+      "status": "pass",
+      "expected": "<ul data-item-count=\"1\"><li>ok</li></ul><a><div><a></div></a>",
+      "actual": "<ul data-item-count=\"1\"><li>ok</li></ul><a><div><a></div></a>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    }
+  ]
+}

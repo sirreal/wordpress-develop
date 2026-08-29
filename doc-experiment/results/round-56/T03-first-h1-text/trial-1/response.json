@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the input as a body fragment, then `next_tag( 'H1' )` to find the first heading and `next_token()` with `get_current_depth()` to walk its subtree. I only concatenated `#text` tokens via `get_modifiable_text()`, which gives decoded text and ignores markup, so nested elements contribute text while images and other non-text markup do not.",
+  "confidence": 93
+}

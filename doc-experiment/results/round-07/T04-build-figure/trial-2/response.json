@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor with a template approach documented in the HTML Tag Processor guide (lines 158-182). It creates a template with the exact desired structure including empty attributes in the required order (src, alt) and a placeholder text node (.). The processor then sets attribute values using set_attribute(), which automatically handles proper HTML encoding of special characters. For the figcaption text, the processor scans for the first text node and replaces it using set_modifiable_text(). This ensures all values are properly encoded without manual escaping and the output matches the exact structure specified.",
+  "confidence": 72
+}

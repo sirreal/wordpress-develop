@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() for structural awareness and its next_token(), get_token_type(), get_tag(), is_tag_closer(), and get_current_depth() methods to track nested UL/OL elements in one pass. I then used the inherited add_class() and get_updated_html() APIs so only the targeted list openers are modified while the rest of the fragment is preserved exactly.",
+  "confidence": 91
+}

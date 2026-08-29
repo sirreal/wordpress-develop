@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the HTML fragment in the default BODY context, then next_tag('H1') to locate the first H1 element. I recorded its depth via get_current_depth(), then walked forward with next_token(), accumulating get_modifiable_text() from every token whose get_token_type() is '#text' while the current depth remains at or above the H1's depth. The documentation for get_modifiable_text() explicitly states that for #text nodes, character references are already decoded (e.g. &amp; is returned as &). The loop terminates when depth drops below the H1's depth (i.e., on the H1's own closing token), which is the pattern shown in the next_token() documentation example. Returning null when no H1 is found, and an empty string (not null) when an H1 exists but has no text content, matches the task requirements.",
+  "confidence": 97
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body-fragment input, then walked tokens with `next_token()` and rebuilt the output with `serialize_token()`, skipping any token whose tag name is `SPAN` so both span openers and closers are removed while their contents remain. This produces normalized serialization, with `normalize()` as a fallback only if the processor cannot be created or aborts on unsupported markup.",
+  "confidence": 92
+}

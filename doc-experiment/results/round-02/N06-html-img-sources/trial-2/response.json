@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor to efficiently scan through the HTML document for IMG tags. It checks the namespace with get_namespace() to ensure we're looking at HTML IMG elements, not SVG IMAGE elements. For each matching IMG tag, it retrieves the src attribute with get_attribute(), which returns null if absent or a string (possibly empty) if present. Only non-null, non-empty src values are added to the result array, maintaining document order.",
+  "confidence": 82
+}

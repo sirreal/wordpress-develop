@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because the task depends on document structure. It scans opening tags with `next_tag()`, identifies `UL` and `OL` via `get_tag()`, checks their ancestor chain with `get_breadcrumbs()`, and calls `add_class()` only when an earlier breadcrumb is also `UL` or `OL`. The final HTML is returned with `get_updated_html()`, and unsupported-markup aborts are handled by returning the original input unchanged.",
+  "confidence": 90
+}

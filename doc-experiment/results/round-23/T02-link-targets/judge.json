@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used the documented `WP_HTML_Tag_Processor` flow: construct directly, walk `A` tags with `next_tag()`, test href presence with `get_attribute() !== null` semantics via the equivalent inverted guard, set `target`, and return `get_updated_html()`. Lowercase `next_tag( 'a' )` is supported because tag matching is documented as ASCII case-insensitive. No `_doing_it_wrong` records."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same documented pattern as the reference: Tag Processor for a flat byte-preserving attribute edit, `next_tag( 'A' )`, null-only absence check for `href`, `set_attribute()` for overwrite/add behavior, and `get_updated_html()` for output. No undocumented API calls or misuse records."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Canonical documented implementation. It chose the Tag Processor, used only documented methods, handled empty and valueless `href` by checking against `null`, relied on `set_attribute()` overwrite semantics, and returned queued edits with `get_updated_html()`. No `_doing_it_wrong` records."
+    }
+  ],
+  "failure_analysis": "All trials passed all 8 hidden cases, so there were no failed hidden cases to attribute to documentation gaps. The docs worked well for this task in several places: `html-tag-processor.md` under `Which processor should I use?` explicitly recommends the Tag Processor for flat attribute/class edits and byte-precise preservation; `Usage` shows the construct, find, modify pattern; `Finding tags` documents `next_tag()` and its string query form; the `get_attribute()` overview and method entry state the critical `null` vs empty string vs `true` distinction; `set_attribute()` states that existing attributes are overwritten and new attributes are inserted after the tag name; and `get_updated_html()` says untouched bytes are preserved and that this is the output method after queued edits. The HTML Processor docs also reinforce the choice by saying it is for structural work and normalized serialization, while flat byte-exact edits should use the lighter Tag Processor. Near-miss: the success depended on subjects recognizing `null` as the only absence sentinel. The docs do say this, but a more explicit presence-check idiom near `get_attribute()` would further protect against truthiness bugs in tasks involving empty or boolean attributes.",
+  "doc_gaps": [
+    {
+      "location": "`WP_HTML_Tag_Processor::get_attribute()` docblock / rendered `get_attribute()` section",
+      "problem": "The return contract is documented, but the most important usage rule for presence checks is implicit: callers must compare strictly with `null`; truthiness will misclassify empty-string and valueless attributes.",
+      "suggestion": "Add a short note and example showing `null !== $processor->get_attribute( 'name' )` as the general attribute-presence check, and warning that `if ( $processor->get_attribute(...) )` is not a presence test."
+    },
+    {
+      "location": "`WP_HTML_Tag_Processor::set_attribute()` docblock / attribute placement notes",
+      "problem": "The docs explain insertion and overwrite placement, but they do not foreground case-insensitive matching of existing attribute names and preservation of original spelling for untouched attributes.",
+      "suggestion": "Clarify that attribute lookup/update names are matched in the HTML attribute-name sense, including case variants, and that updating an existing attribute changes its value in place while otherwise preserving surrounding untouched bytes."
+    },
+    {
+      "location": "`WP_HTML_Tag_Processor` overview or `next_tag()` section",
+      "problem": "The docs mention incomplete-token pausing, but the byte-preserving behavior for normal mutation loops that simply return `get_updated_html()` after `next_tag()` exhaustion is not tied together as a practical pattern.",
+      "suggestion": "Add a general note that incomplete trailing syntax is not matched or modified; callers that require complete input should check `paused_at_incomplete_token()`, while simple best-effort attribute edits can naturally leave unmatched incomplete syntax untouched."
+    }
+  ]
+}

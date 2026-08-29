@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the HTML Processor because the task depends on nested structure and direct-child counting. The function finds the first `UL` or `OL`, records its depth, scans tokens with `next_token()` to count only direct `LI` opener children, rejects truncated or unsupported input via `paused_at_incomplete_token()` and `get_last_error()`, then seeks back to the opener bookmark and sets `data-item-count` with `set_attribute()` before returning `get_updated_html()`.",
+  "confidence": 91
+}

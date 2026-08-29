@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor to scan linearly through the HTML, finding all H2 opening tags. It maintains a bookmark at the position of each H2 encountered, so at the end of the scan, the bookmark points to the last H2. The processor then seeks back to that bookmark and adds the \"final-section\" class. The approach preserves byte-exact output by relying on the Tag Processor's get_updated_html() method, which only applies the queued class addition.",
+  "confidence": 92
+}

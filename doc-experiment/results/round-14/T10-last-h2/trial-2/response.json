@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Tag_Processor to linearly scan the HTML document for H2 opening tags. For each H2 found, it releases the previous bookmark and creates a new one pointing to the current H2. After the scan completes, it seeks back to the last H2 tag's position and adds the \"final-section\" class using add_class(), which safely handles attribute encoding and class management. The get_updated_html() method returns the document with only this change applied, preserving all other content byte-for-byte. The bookmark-based approach efficiently tracks the last H2 without storing the entire document state.",
+  "confidence": 75
+}

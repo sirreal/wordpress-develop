@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Used the right class, `WP_HTML_Processor::create_fragment()`, for browser-style table structure. All API calls are documented in the rendered files, and execution had no `_doing_it_wrong` records. The one-pass `next_token()` state machine, depth guard, closer handling, and `#text` plus `get_modifiable_text()` pattern are idiomatic. Minor deductions: extra defensive end flush/state repair is less clean than relying fully on documented virtual closers, and it does not make an explicit incomplete-input or unsupported-markup policy."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Best adherence. It chooses `WP_HTML_Processor`, uses only documented methods, and follows the documented single-cursor token walk with state variables. It relies on closer-driven flushing, which the docs explicitly support for implicit/end-of-input closers, and reads only decoded `#text` tokens for cell text. Minor deduction only for not explicitly checking or documenting `paused_at_incomplete_token()` / `get_last_error()` policy."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and no undocumented HTML API usage. The depth-bounded `next_token()` walk and `#text`-only extraction are well aligned with the docs. Slightly less idiomatic than trial 2 because its row/cell finalization is more fragile-looking and depends on documented virtual closers without stating that dependency; it also omits an explicit incomplete-input/unsupported-markup policy. The `function_exists()` wrapper is unnecessary but not an API misuse."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 8 hidden cases, with no `_doing_it_wrong` records. The docs succeeded on the main risk points: the Tag Processor overview says to use the HTML Processor when collecting element text, walking subtrees, and handling implied or missing closing tags; the HTML Processor `next_token()` section explains that it visits implicit and end-of-input closers and warns against nested token loops; `get_current_depth()` documents the `>=` subtree guard; and `get_modifiable_text()` says decoded text should be read only after checking for ordinary `#text` tokens. Those passages directly prevented the common failures for omitted table closers, markup inside cells, and `&amp;` decoding. Near misses: none of the trials made an explicit policy choice for truncated input or unsupported parser aborts, even though the docs mention `paused_at_incomplete_token()` and `get_last_error()`. The candidates also used either `get_tag()` or `get_token_name()` for generated table tokens; this worked, but the `get_tag()` wording could be clearer about virtual/implied tokens exposed by the HTML Processor.",
+  "doc_gaps": [
+    {
+      "location": "`WP_HTML_Processor::get_tag()` docblock",
+      "problem": "The return description says the name is from the input HTML, which is ambiguous for HTML Processor tokens that are implied or virtual, such as synthesized `TBODY`/`TR` nodes.",
+      "suggestion": "Clarify that on `WP_HTML_Processor`, when matched on a tag token, `get_tag()` returns the current tag name including implied/virtual tag tokens, and returns `null` on non-tag tokens."
+    },
+    {
+      "location": "`WP_HTML_Processor::next_token()` and `get_current_depth()` examples",
+      "problem": "The docs explain single-region text extraction and repeated flat regions, but the repeated parent/child state-machine pattern remains implicit.",
+      "suggestion": "Add a general example for collecting text from repeated nested child regions using one token loop: initialize state on child openers, append only `#text`, flush on child closers, and flush parent groups on parent closers."
+    },
+    {
+      "location": "Read-only extraction guidance for `paused_at_incomplete_token()` and `get_last_error()`",
+      "problem": "The docs say read-only callers choose their policy, but examples make it easy to omit that choice entirely.",
+      "suggestion": "Add a short post-walk snippet showing both acceptable policies: best-effort return of accumulated data, or complete-input rejection when `paused_at_incomplete_token()` is true or `get_last_error()` is non-null."
+    },
+    {
+      "location": "Rendered method index for `WP_HTML_Processor`",
+      "problem": "Private/internal methods appear in the same method index as public API methods, increasing the chance that documentation-only users call non-public parser internals.",
+      "suggestion": "Separate public API methods from private/internal implementation methods, or make private method entries explicitly say they are not callable API."
+    }
+  ]
+}

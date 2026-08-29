@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor to scan through all tokens in the HTML document. It creates a processor instance, iterates through every token using next_token() until the document is exhausted, then checks the paused_at_incomplete_token() method which returns true when the input ends in the middle of an HTML syntax element (incomplete tokens like unterminated attributes, comments, or SCRIPT/STYLE contents). This distinguishes incomplete tokens from structurally unclosed elements which are lexically complete.",
+  "confidence": 92
+}

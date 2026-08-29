@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Processor to create a fragment parser, finds the first H1 tag, then walks through all tokens while tracking nesting depth. Collects text from all #text tokens inside the H1 using get_modifiable_text() which returns decoded character references. Returns null if no H1 is found, otherwise returns the concatenated text (empty string if H1 contains no text nodes).",
+  "confidence": 75
+}

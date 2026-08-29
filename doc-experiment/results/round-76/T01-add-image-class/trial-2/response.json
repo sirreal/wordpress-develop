@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan only real tag openers, which preserves the rest of the document byte-for-byte while skipping comments and other non-tags. For each case-insensitive `img` match, I called `add_class( 'wp-image' )`, then returned `get_updated_html()` so existing classes stay in place and the processor emits only the minimal edits.",
+  "confidence": 98
+}

@@ -1,0 +1,71 @@
+{
+  "candidate": "/Users/jonsurrell/a8c/wordpress-develop/html-api-docs-improvement/doc-experiment/results/round-77/T11-strip-tracking-attributes/trial-1/candidate.php",
+  "function": "strip_tracking_attributes",
+  "passed": 7,
+  "total": 7,
+  "cases": [
+    {
+      "id": "single-link",
+      "status": "pass",
+      "expected": "<a href=\"/x\"  data-tracker=\"keep\">go</a>",
+      "actual": "<a href=\"/x\"  data-tracker=\"keep\">go</a>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "multiple-tags",
+      "status": "pass",
+      "expected": "<div ><img src=\"a.jpg\" ><p data-track=\"keep\">Text</p></div>",
+      "actual": "<div ><img src=\"a.jpg\" ><p data-track=\"keep\">Text</p></div>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "multiple-matching-attributes",
+      "status": "pass",
+      "expected": "<button   type=\"button\">Buy</button>",
+      "actual": "<button   type=\"button\">Buy</button>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "similar-prefixes-kept",
+      "status": "pass",
+      "expected": "<span data-track=\"keep\" data-tracker=\"keep\" >x</span>",
+      "actual": "<span data-track=\"keep\" data-tracker=\"keep\" >x</span>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "uppercase-source-attribute",
+      "status": "pass",
+      "expected": "<a  HREF=\"/x\">go</a>",
+      "actual": "<a  HREF=\"/x\">go</a>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "comments-untouched",
+      "status": "pass",
+      "expected": "<!-- <a data-track-id=\"7\"> --><a >go</a>",
+      "actual": "<!-- <a data-track-id=\"7\"> --><a >go</a>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "no-matches",
+      "status": "pass",
+      "expected": "<p class=\"x\" data-track=\"keep\">Text</p>",
+      "actual": "<p class=\"x\" data-track=\"keep\">Text</p>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    }
+  ]
+}

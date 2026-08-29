@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Tag_Processor to linearly scan the HTML, finding the first TABLE element and then tracking row (TR) and cell (TD/TH) tags to extract text content. For each cell, accumulates text from #text tokens (which are automatically decoded), then adds the complete cell text to the current row when the cell closes. Handles missing closing tags by using state flags to detect when we move to a new cell or row.",
+  "confidence": 62
+}

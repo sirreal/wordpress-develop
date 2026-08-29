@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented `WP_HTML_Tag_Processor` to scan tags linearly, remember the last matching `H2` with a bookmark, then `seek()` back and apply `add_class( 'final-section' )` before reading the result with `get_updated_html()`. If no `H2` is found, or the bookmark cannot be revisited, the function returns the original HTML unchanged.",
+  "confidence": 96
+}

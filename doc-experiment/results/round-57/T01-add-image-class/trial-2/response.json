@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` because the task requires byte-preserving attribute edits on individual tags, and `next_tag()` is documented to match tag names case-insensitively while skipping comments and other non-tags. For each `img` opener I call `add_class( 'wp-image' )`, then return `get_updated_html()` so all untouched bytes remain exactly as input.",
+  "confidence": 98
+}

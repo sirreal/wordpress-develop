@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used the documented `WP_HTML_Processor::normalize()` one-step API, checked strictly for `null`, and preserved valid empty-string output. Correct processor choice and no undocumented API usage."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same canonical pattern: HTML Processor normalization in BODY-fragment context with fallback only on `null`. No misuse or undocumented calls."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used only the documented `normalize()` API and handled the documented `string|null` return contract correctly. No hallucinated methods."
+    }
+  ],
+  "failure_analysis": "All trials passed all 7 hidden cases. The docs did well because `html-processor.md` explicitly points users toward the HTML Processor for normalized serialization: the HTML Support section says to choose it for normalizing markup, the `normalize()` method section states it normalizes BODY-context fragments, lists concrete normalization effects like quoting attributes, adding omitted tags, and omitting incomplete trailing syntax, and its return contract says `string|null`. The HTML Support section also explains that unsupported markup makes output-producing methods such as `serialize()` and `normalize()` return `null`, which directly supports the placeholder fallback. Near-misses: the `normalize()` examples use `echo` and only show successful outputs, so a weaker reader might miss that `null` must be tested distinctly from `''`; and the Unsupported Features section says the parser does not report parse errors before discussing bail-out behavior, which could be misread unless combined with the earlier HTML Support paragraph.",
+  "doc_gaps": [
+    {
+      "location": "`WP_HTML_Processor::normalize()` docblock",
+      "problem": "The return contract says `string|null`, but examples only show successful `echo` usage and do not demonstrate handling `null` distinctly from an empty normalized fragment.",
+      "suggestion": "Add a short example or note showing callers should compare `null === WP_HTML_Processor::normalize( $html )` for unsupported input, and should not use a truthiness check because `''` is a valid string result."
+    },
+    {
+      "location": "`WP_HTML_Processor::normalize()` and `serialize()` docblocks",
+      "problem": "Unsupported-input behavior is documented elsewhere, but not reinforced where callers most need it when choosing these output APIs.",
+      "suggestion": "Add one sentence to each output method: unsupported constructs abort parsing and make the method return `null`; ordinary recoverable HTML parse errors may still normalize successfully."
+    },
+    {
+      "location": "HTML Processor `Unsupported Features` section",
+      "problem": "The phrase 'does not report parse errors' sits near bail-out language and can blur the distinction between recoverable parse errors, unsupported constructs, and output failure.",
+      "suggestion": "Clarify that many parse errors are recovered during normalization, while only unsupported constructs cause `get_last_error()` and `normalize()`/`serialize()` returning `null`."
+    }
+  ]
+}

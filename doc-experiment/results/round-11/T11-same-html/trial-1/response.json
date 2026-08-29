@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function normalizes both input HTML fragments using WP_HTML_Processor::normalize(), which handles tag case-insensitivity, implied closing tags, attribute quoting styles, character references, and duplicate attributes. Returns false if either fragment cannot be fully parsed. If both normalize successfully, compares the normalized strings for equality, which effectively determines if they represent the same DOM structure.",
+  "confidence": 85
+}

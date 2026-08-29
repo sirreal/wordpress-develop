@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` for body-fragment parsing and `next_token()` plus `serialize_token()` to rebuild normalized HTML while skipping every `SPAN` token, which removes both opening and closing span wrappers but preserves their contents. This follows the documented fragment serialization behavior and avoids tree-unsafe string rewriting.",
+  "confidence": 95
+}

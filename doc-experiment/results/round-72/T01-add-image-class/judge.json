@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used the documented WP_HTML_Tag_Processor constructor, next_tag('img'), add_class('wp-image'), and get_updated_html(). This exactly matches the flat, byte-preserving class-edit pattern in the rendered docs, with no _doing_it_wrong records and all documented edge cases handled by the chosen API."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same fully documented implementation as trial 1. Correct processor choice, no unsupported methods, idiomatic loop over matching tags, add_class for class merging, and get_updated_html for byte-preserving output."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same fully documented implementation as trials 1 and 2. The candidate relied on documented next_tag matching semantics and add_class behavior rather than manual parsing or attribute rewriting."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 8 hidden cases, so there are no failure-specific misconceptions to diagnose.\n\nThe docs were strong for this task. The Tag Processor page's \"Which processor should I use?\" section explicitly recommends WP_HTML_Tag_Processor for flat, byte-precise tag/class edits and distinguishes it from WP_HTML_Processor's structural use cases. The \"Finding tags\" table shows next_tag('img') directly. The next_tag() method docs state the key hidden-test semantics: tag-name matching is ASCII case-insensitive, tag-like text inside comments and raw-text elements is not matched, and incomplete trailing tags are not matched. The add_class() method docs cover creating a class attribute, appending without removing or reordering existing classes, and avoiding duplicates. The get_updated_html() docs explain that untouched bytes are preserved exactly and that only written attributes are re-emitted.\n\nThe only near-miss is that the candidates' explanations did not mention incomplete trailing input, but their use of next_tag() plus get_updated_html() followed the documented contract and preserved the incomplete tag unchanged.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::add_class() docblock",
+      "problem": "The method docs explain class creation and append semantics, but do not localize the exact insertion-position rule for a newly created class attribute. That rule is only implied elsewhere by the general attribute-update ordering discussion.",
+      "suggestion": "Add one sentence or a cross-reference stating that when add_class() creates a missing class attribute, its placement follows the normal added-attribute ordering used by attribute updates."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::get_updated_html() docblock",
+      "problem": "The byte-preservation rule is clear, but the interaction with a scanner paused at an incomplete trailing token is not stated directly in this method's contract.",
+      "suggestion": "Add a sentence that if parsing pauses on an incomplete token, get_updated_html() still returns queued edits plus any untouched incomplete trailing bytes exactly as supplied."
+    },
+    {
+      "location": "WP_HTML_Processor overview or usage section",
+      "problem": "The HTML Processor page includes an add_class() example, which is valid but could tempt users to choose it for byte-exact flat attribute edits where the Tag Processor is simpler and less likely to abort or normalize.",
+      "suggestion": "Near the first add_class() example, add a short cross-reference: for flat tag/class/attribute edits that must preserve all other bytes exactly, prefer WP_HTML_Tag_Processor and get_updated_html()."
+    }
+  ]
+}

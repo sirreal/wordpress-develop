@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Tag_Processor, which is the documented fit for flat, position-based class edits. Every called method is present in the rendered Tag Processor docs: next_tag, set_bookmark, has_bookmark, seek, add_class, release_bookmark, and get_updated_html. The lowercase 'h2' query is valid because tag matching is documented as ASCII case-insensitive. The bookmark is repeatedly moved in the documented 'last matching tag' idiom, then released."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice and fully documented API surface. It follows the documented pattern exactly: scan with next_tag, keep one bookmark updated, seek back, add_class, release_bookmark, and return get_updated_html. It also checks seek before mutating, which is defensive and idiomatic."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correctly uses the Tag Processor and only documented calls. It also respects set_bookmark and seek return values. The extra found_h2 state is redundant because has_bookmark exists, but it is still valid and documented behavior. Token walking/bookmark/get_updated_html usage is idiomatic."
+    }
+  ],
+  "failure_analysis": "All three trials passed all six frozen cases and produced no _doing_it_wrong records. The docs appear to have supported this task well. The key passages were Tag Processor > Which processor should I use?, which directs flat position-based attribute/class edits to WP_HTML_Tag_Processor; Finding tags / next_tag(), which documents string tag queries and case-insensitive tag matching; Bookmarks / set_bookmark(), which explicitly describes re-setting one bookmark to remember the last matching token; add_class(), which documents appending a class without duplicating or destroying existing classes; and get_updated_html(), which identifies the correct way to read queued edits. Near-miss: the task is advanced only because it requires going back after a forward-only scan. The rendered docs already include the exact general idiom, so no trial fell into the common trap of trying to inspect offsets, rebuild HTML manually, or misuse WP_HTML_Processor serialization.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::seek() docs",
+      "problem": "The method documents the return value but does not clearly state when a bookmark that was just set during the same no-edit scan can or cannot fail later.",
+      "suggestion": "Add a short contract note explaining that seek succeeds for an existing, still-valid bookmark, and that failure mainly means the bookmark does not exist or was invalidated by an intervening edit that removed its token."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::release_bookmark() / Bookmarks docs",
+      "problem": "The docs say to release bookmarks when no longer needed, but do not distinguish required cleanup from performance hygiene. Reference-style code may omit release at function end, while trials may infer it is mandatory.",
+      "suggestion": "Clarify that releasing bookmarks is recommended to reduce overhead during longer processing, but is not required before get_updated_html() or object destruction."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::add_class() docs",
+      "problem": "The class behavior is documented well, but the docs do not explicitly connect add_class() to preserving unrelated markup and comments when combined with get_updated_html().",
+      "suggestion": "Add a general note to class mutation methods that queued class changes affect only the matched tag token; comments, text, and untouched tags are preserved byte-for-byte in the output returned by get_updated_html()."
+    }
+  ]
+}

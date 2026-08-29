@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in BODY context, then walked tokens with `next_token()`. I only wrapped ordinary `#text` tokens whose decoded text from `get_modifiable_text()` contains the keyword, and emitted normalized token HTML with `serialize_token()` so the output stays normalized apart from the added `<mark>` wrappers.",
+  "confidence": 92
+}

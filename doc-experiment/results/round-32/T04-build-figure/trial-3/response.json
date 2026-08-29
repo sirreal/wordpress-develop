@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This builds from a fixed HTML template so the output shape and attribute order stay exact, then uses `WP_HTML_Tag_Processor` to safely fill unescaped values through the documented `set_attribute()`, `next_token()`, `get_token_type()`, `set_modifiable_text()`, and `get_updated_html()` APIs. The placeholder text inside `figcaption` is replaced via the text-token API so caption content is encoded correctly.",
+  "confidence": 95
+}

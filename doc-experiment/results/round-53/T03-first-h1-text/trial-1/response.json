@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment with structural awareness, then `next_tag( 'H1' )` to find the first heading and `next_token()` plus `get_current_depth()` to walk its subtree. I only concatenated `#text` tokens via `get_modifiable_text()`, which returns decoded text for ordinary text nodes, so nested markup is ignored while entity decoding is preserved.",
+  "confidence": 96
+}

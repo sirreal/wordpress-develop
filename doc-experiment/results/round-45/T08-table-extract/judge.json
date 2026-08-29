@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Used the correct tree-aware processor and only documented methods: create_fragment, next_tag, get_current_depth, next_token, get_token_type, get_tag, is_tag_closer, get_modifiable_text, and get_last_error all appear in the rendered docs. The traversal is idiomatic: one depth-bounded token walk with row/cell state and #text-only decoded text collection. Minor deductions: the final manual flush is redundant because next_token documents virtual closers, and the get_last_error fail-closed policy could discard already-collected read-only extraction results even though the docs say that is caller policy."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Processor::create_fragment and a single token walk bounded by the matched table depth. All API calls are documented, including get_token_name for tag names and get_token_type for #text. It follows the documented state-machine pattern for repeated regions and correctly uses get_modifiable_text only after identifying ordinary text. Minor deduction for redundant EOF/current-row flushing, which suggests partial uncertainty about the documented closer-for-every-opener behavior."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Clean API use throughout: correct processor, all methods documented, one depth-bounded next_token loop, explicit #tag/#text dispatch, closer-driven row/cell flushing, and get_modifiable_text only for ordinary text tokens. This aligns closely with the rendered guidance on fragment parsing, implied table structure, virtual closers, and decoded text extraction."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 8 frozen hidden cases, so there are no failed hidden cases to attribute. The docs did especially well on the key hazards for this task: the HTML Processor docs distinguish tree-aware fragment parsing from lexical tag scanning; next_token explains implied elements, synthesized/virtual closers, and the single-cursor state-machine pattern; get_current_depth explains the >= subtree boundary; and get_modifiable_text explains decoded #text handling and warns against treating every modifiable-text token as DOM text. Near-misses were small: two candidates added redundant end-of-loop flushing despite the virtual-closer guarantee, and trial-1 treated get_last_error as a reason to erase read-only results even though the docs frame that as caller policy rather than a universal rule.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::next_token() docblock / traversal recipe",
+      "problem": "The docs explain virtual closers and single-cursor traversal, but the examples stop short of a compact generic pattern for repeated nested regions inside a previously matched container.",
+      "suggestion": "Add a general example for collecting repeated child regions within a matched ancestor using one next_token loop, a depth boundary, state variables, and closer-driven flushing. Keep it generic, such as terms/items/sections, not this table task."
+    },
+    {
+      "location": "WP_HTML_Processor::get_last_error() and WP_HTML_Tag_Processor::paused_at_incomplete_token() docs",
+      "problem": "The read-only extraction policy is present in narrative guidance, but method-level docs can still lead implementers to discard already-collected data whenever an error is observed.",
+      "suggestion": "Add a docblock note that these signals mean the scan did not complete; they do not invalidate tokens already visited. Recommend fail-closed behavior for mutation/normalization/complete-source contracts, and explicit caller policy for read-only extraction."
+    },
+    {
+      "location": "WP_HTML_Processor::get_token_type(), get_token_name(), get_tag(), and is_tag_closer() docs",
+      "problem": "Each method is documented, but models can still be uncertain about which predicate is best for tags versus ordinary text because the comparison is distributed across separate sections.",
+      "suggestion": "Add a small cross-method table showing return values for opening tag, closing tag, ordinary #text, comment, and special-element opener tokens, with a note that ordinary DOM text extraction should test get_token_type() === '#text' before reading get_modifiable_text()."
+    }
+  ]
+}

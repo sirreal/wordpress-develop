@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correct processor (WP_HTML_Tag_Processor; tag-level task). All methods documented: next_tag('img') string form (doc line 59), next_token, get_token_type, set_modifiable_text, set_attribute, get_updated_html. Reproduces the documented 'Building markup from a template' idiom (lines 158-182) verbatim: empty-valued attributes in template for order preservation, placeholder text node, token-walk for #text. Relies on set_attribute/set_modifiable_text auto-encoding (docs lines 1849, 2142-2145) for all special-char cases. 6/6. Only nit: it does not check next_tag's return for figcaption text loop, but that is fine since the template is fixed."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 92,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and all-documented methods (array next_tag form, doc line 58; rest as trial-1). 6/6 pass. Less idiomatic than the documented example: it adds a redundant next_tag(array('tag_name'=>'figcaption')) before the token loop. The documented recipe (lines 168-179) walks tokens globally to the first #text without first seeking the element; the extra seek happens to work because the figcaption's text node is the next token after its open tag, but it diverges from the documented pattern without need. Minor deduction on idiomatic-use; no correctness or API-usage problem."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correct processor; all methods documented (array next_tag('img') form, line 58; remainder identical to documented template example). Matches the documented 'Building markup from a template' idiom closely: global token walk for the #text node, break on first match. Relies on documented auto-encoding for attributes and text. 6/6 pass."
+    }
+  ],
+  "failure_analysis": "No failures: all three trials passed all 6 hidden cases (simple, ampersand-in-caption, quotes-in-alt, angle-brackets-in-caption, unicode, html-in-caption-not-parsed) with zero _doing_it_wrong or trigger_error records. The reason is unambiguous and worth naming: the html-tag-processor.md doc contains a dedicated section 'Building markup from a template' (lines 158-182) whose worked example is structurally identical to the reference solution for this task — a literal template with empty-valued attributes (for write-order preservation) plus a placeholder text node, followed by set_attribute calls and a next_token loop that calls set_modifiable_text on the first '#text' token. All three subjects reproduced this recipe. The edge cases that distinguish this task (& in caption, quotes in alt, <script> not parsed, multibyte unicode) are all handled automatically by set_attribute and set_modifiable_text, and the doc explicitly states both encode plain/unescaped input as needed (line 1849 for the read/write inverse; lines 2142-2145 for set_attribute encoding 'Eggs & Milk' to 'Eggs &amp; Milk'; line 1864+ for set_modifiable_text). The html-in-caption-not-parsed case is implicitly covered because set_modifiable_text treats input as text, not markup, which the doc frames via the modifiable-text/decoded-text discussion (lines 1844-1924). Near-misses in explanations: all three self-reports correctly attribute encoding to the API methods rather than claiming to escape manually, matching the task's prohibition on hand-assembly. The only structural divergence (trial-2's redundant next_tag for figcaption before the token walk) did not cause a failure because the element's text node is the immediately following token. This is a clean case where a targeted, task-shaped doc example produced uniform success; the docs did well here.",
+  "doc_gaps": [
+    {
+      "location": "html-tag-processor.md — 'Building markup from a template' section (lines 158-182)",
+      "problem": "The template example walks tokens globally from the document start to find the first '#text' node. It works for single-text-node templates but gives no guidance for templates with multiple text-bearing elements (e.g. setting text in a specific element among several). A subject extrapolating to a multi-element template could set text in the wrong node. Trial-2 already groped toward this by seeking the element first, but the doc neither blesses nor explains that approach.",
+      "suggestion": "Add a one-line note that the global next_tag/next_token walk lands on the first matching token in document order, and that to target text inside a specific element you should first next_tag() to that element and then continue the token loop from there. This generalizes the recipe to multi-text templates without embedding any specific task."
+    },
+    {
+      "location": "html-tag-processor.md — set_modifiable_text() (line 1864+) and get_token_type() (line 1680)",
+      "problem": "The template recipe matches the text node by string-comparing get_token_type() against the literal '#text'. The full set of token-type return strings (e.g. '#text', '#comment', '#tag', etc.) is not enumerated near the recipe, so a subject must trust the magic string from the example without knowing the complete vocabulary or that '#text' is the canonical text-node value.",
+      "suggestion": "In the get_token_type() reference, enumerate the possible return values (the '#'-prefixed pseudo-names for non-tag tokens plus the tag-name behavior) so callers can reliably branch on token kind without copying a literal from an example."
+    },
+    {
+      "location": "html-tag-processor.md — 'Building markup from a template' section (lines 160-164)",
+      "problem": "The two rules explain attribute-order preservation and the empty-element-has-no-text-node pitfall, but do not explicitly state that values passed to set_attribute and set_modifiable_text must be the raw, unescaped strings (the whole point that makes manual escaping wrong). The encoding guarantee is stated elsewhere (lines 1849, 2142) but not cross-referenced at the template recipe where a subject deciding whether to pre-escape would look.",
+      "suggestion": "Add a third bullet to the template recipe stating that all interpolated values must be passed raw/unescaped and that the API performs the necessary HTML encoding, with a pointer to the set_attribute/set_modifiable_text encoding notes. This prevents double-encoding mistakes for subjects who only read the recipe."
+    }
+  ]
+}

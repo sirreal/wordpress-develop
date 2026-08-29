@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::create_fragment() to parse the HTML fragment in body context, then iterates through A tags with next_tag(). For each A tag with an href attribute (using get_attribute() which returns decoded values), it collects all text nodes inside that element using next_token() and get_modifiable_text() while staying within the element's depth. The text content is automatically decoded by the HTML API as documented.",
+  "confidence": 78
+}

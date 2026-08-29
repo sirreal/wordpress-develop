@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Processor to find each A tag with an href attribute, then collects text content by walking through tokens while the current depth remains within the element. For each text token encountered (#text), appends its decoded content via get_modifiable_text(). Returns an array of associative arrays with 'href' (decoded value or true for valueless attributes) and 'text' (concatenated text content of the element).",
+  "confidence": 72
+}

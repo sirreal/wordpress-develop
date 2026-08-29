@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor::create_fragment for BODY-fragment parsing, walked tokens with next_token(), gated matching on get_token_type() === '#text', used get_modifiable_text() for decoded text, and emitted normalized output with serialize_token(). All called HTML API methods are documented in the two rendered files. The get_last_error() fallback is documented as a policy choice after token serialization and did not produce misuse records."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same strong documented pattern as trial-1, with str_contains() for the task-level substring check. It correctly avoids attributes, comments, and special text-bearing elements by only wrapping ordinary #text tokens, and uses serialize_token() rather than get_updated_html() for a token-rewrite output stream."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Matches the reference approach most closely: create_fragment(), next_token(), #text filtering, decoded get_modifiable_text(), and serialize_token() wrapping. No undocumented methods or _doing_it_wrong records. Returning an empty string on processor creation/error is a reasonable string-returning rejection policy for this task."
+    }
+  ],
+  "failure_analysis": "All trials passed all frozen cases. The docs did well in three specific places: the HTML Processor overview explicitly steers BODY fragments to WP_HTML_Processor::create_fragment(); the text-extraction recipe says ordinary DOM text is only #text tokens and warns that get_modifiable_text() on every token is too broad; and serialize_token() is documented as the token-walking rewrite mechanism for wrapping, dropping, or adding output while preserving normalized serialization. The get_modifiable_text() docs also clearly state that #text text is already decoded, which explains why all candidates handled character references correctly. Near-misses were around policy rather than API misunderstanding: trial-1 and trial-2 return the original unnormalized input if create_fragment() fails or get_last_error() becomes non-null, while trial-3 returns ''. The docs say to reject or fall back after get_last_error(), but they do not give much guidance for string-returning normalizers where returning raw input can violate a normalized-output contract.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::serialize_token() docblock / rewrite-while-serializing recipe",
+      "problem": "The docs say to reject or fall back on get_last_error(), but do not distinguish safe fallbacks for functions whose contract promises normalized serialization. This leaves room for returning raw input after a partial parser abort.",
+      "suggestion": "Add a short note that if the caller promises normalized output, falling back to the original input may violate that contract; prefer a documented sentinel policy such as null, empty string, or a separately normalized fallback chosen by the caller."
+    },
+    {
+      "location": "WP_HTML_Processor::create_fragment() returns section",
+      "problem": "The null return is documented, but the common failure conditions and recommended handling for default BODY/UTF-8 parsing are not concrete. Candidates defensively chose inconsistent null policies.",
+      "suggestion": "Clarify when create_fragment() can return null under currently supported defaults and show a minimal guard that ties the fallback to the caller's return type and output contract."
+    },
+    {
+      "location": "Text extraction guidance around get_token_type() and get_modifiable_text()",
+      "problem": "The docs successfully warn that modifiable text is broader than ordinary text, but the Tag Processor token example uses get_token_name() for #text while other guidance uses get_token_type().",
+      "suggestion": "Add a concise cross-reference: use get_token_type() === '#text' when the distinction is token kind, and reserve get_token_name() for tag names or DOM-style node names. This would reduce ambiguity in text-walking examples."
+    }
+  ]
+}

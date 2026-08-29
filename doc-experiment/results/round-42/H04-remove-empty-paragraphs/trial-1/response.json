@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` and a single `next_token()` walk, building normalized output with `serialize_token()`. A `P` opener is held back until the next token proves whether it is immediately followed by its own closer; if so, both tokens are skipped as an empty paragraph, otherwise the opener is emitted and processing continues. Per the docs, the function falls back to the original HTML when parsing cannot complete cleanly by checking `paused_at_incomplete_token()` and `get_last_error()`.",
+  "confidence": 82
+}

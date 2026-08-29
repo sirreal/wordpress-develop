@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Tag_Processor (not WP_HTML_Processor) because the HTML Processor documentation explicitly states it does not support any element inside a TABLE and will abort early. The Tag Processor is a pure lexical scanner that will see every tag and text token in document order regardless of nesting semantics. I call next_token() to visit all token types (tags, text nodes, etc.) and implement a simple state machine: outside \u2192 in_table \u2192 in_row \u2192 in_cell. On each TD/TH opener I implicitly close any open cell; on each TR opener I implicitly close any open cell and row (handling optional closing tags). Text is accumulated via get_modifiable_text() when in_cell state. The TABLE closer (with depth tracking for theoretically nested tables) triggers final cleanup and breaks the loop. Character references in text are decoded automatically by get_modifiable_text() for #text nodes per the documentation.",
+  "confidence": 62
+}

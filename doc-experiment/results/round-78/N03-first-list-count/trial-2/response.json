@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() because the task depends on structure: finding the first UL/OL, counting only direct LI children, and aborting if the list scan is incomplete. The implementation scans forward with next_token(), records the first list opener and its depth, counts LI openers at one level deeper, then seeks back to a bookmark on the opener and sets data-item-count with set_attribute() before returning get_updated_html().",
+  "confidence": 86
+}

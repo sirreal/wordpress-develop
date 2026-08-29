@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function creates a `WP_HTML_Tag_Processor` instance with the input HTML, then loops with `next_tag('img')` to find every IMG opener (tag closers are skipped by default, and content inside HTML comments is never matched as a tag). On each matched tag, `add_class('wp-image')` is called, which appends the class to any existing `class` attribute value or creates a new one if none exists. Finally, `get_updated_html()` returns the modified document. Both `next_tag()` and `add_class()` are documented public methods of `WP_HTML_Tag_Processor`.",
+  "confidence": 99
+}

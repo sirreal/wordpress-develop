@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor to parse the HTML fragment with full structural awareness. It iterates through all P elements using next_tag(), and for each P element checks whether 'BLOCKQUOTE' appears in the breadcrumbs (the DOM path from root to the current element). If a BLOCKQUOTE ancestor is found, it adds the \"quoted\" class using the add_class() method. Finally, it returns the modified HTML via get_updated_html(), which preserves all other content byte-for-byte.",
+  "confidence": 92
+}

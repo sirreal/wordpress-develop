@@ -1,0 +1,30 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Passed 8/8. Correctly chose WP_HTML_Processor::create_fragment(), used a depth-bounded next_token() subtree walk, filtered to #text, and used get_modifiable_text() for decoded text. The is_tag_closer() guard after next_tag('H1') is redundant because plain next_tag() skips closers by default, but it is documented and harmless."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Passed 8/8. This matches the documented subtree-text recipe exactly: fragment parser, next_tag('H1'), get_current_depth(), next_token() while depth stays within the subtree, #text-only filtering, and get_modifiable_text() for decoded text."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Passed 8/8. Same strong API use as trial-1, including the correct processor, documented methods only, decoded #text extraction, and graceful behavior for empty/image-only and unclosed H1 cases. Only minor issue is the redundant is_tag_closer() guard after next_tag('H1')."
+    }
+  ],
+  "failure_analysis": "All trials passed all frozen cases, so there are no failed hidden cases to attribute to documentation gaps. The docs did well on the core decision points: the HTML Processor overview says to choose WP_HTML_Processor when structure and text extraction matter; the 'Recipe: collect DOM-style text from a subtree' shows the exact depth-bounded token walk; next_token() explains that unclosed elements still produce structural closing tokens; get_current_depth() explains why the guard must use >=; and get_modifiable_text() documents decoded text and warns that it is not a predicate for ordinary text nodes. The only near-miss is that trial-1 and trial-3 defensively checked is_tag_closer() after next_tag('H1'), despite the next_tag() parameter docs saying default tag_closers='skip' visits openers only.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::next_tag() docblock",
+      "problem": "The opener-only default is present in the dense $query parameter description, but two otherwise-correct trials still added an unnecessary is_tag_closer() guard after a simple string query.",
+      "suggestion": "Promote the contract into the main prose: a string query such as next_tag('H1') matches opening tags only; closing tags are visited only when tag_closers is explicitly set to 'visit'."
+    }
+  ]
+}

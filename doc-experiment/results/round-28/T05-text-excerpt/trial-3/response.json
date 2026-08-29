@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the BODY-style HTML fragment with tree awareness, then walks tokens via `next_token()`, appending ordinary `#text` token content and, per the documented special-element rule, the opener-token text from `TEXTAREA` and `TITLE` via `get_modifiable_text()`. It excludes other modifiable-text carriers like `SCRIPT`, `STYLE`, and comments, and truncates the final result by Unicode code points with `mb_strlen()`/`mb_substr()` using explicit `UTF-8` encoding.",
+  "confidence": 89
+}

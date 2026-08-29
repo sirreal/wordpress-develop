@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the HTML Processor\u2019s documented fragment/full-document constructors, `next_tag()` to scan only H2 openers, `set_bookmark()` plus `seek()` to remember the last match, and `add_class()`/`get_updated_html()` to apply the class without rewriting unrelated bytes.",
+  "confidence": 91
+}

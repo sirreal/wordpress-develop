@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to start from a literal figure template so the `src` and `alt` attributes stay in the required order, then used `next_tag()` plus `set_attribute()` for the image and `next_token()` plus `set_modifiable_text()` to replace the figcaption placeholder safely with encoded text.",
+  "confidence": 96
+}

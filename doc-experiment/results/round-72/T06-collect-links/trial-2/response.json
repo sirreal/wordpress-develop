@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the body fragment with tree awareness, then iterated anchor openers with next_tag('A'). For each anchor I read href with get_attribute() and collected only ordinary descendant #text tokens via next_token(), get_current_depth(), get_token_type(), and get_modifiable_text(), which gives decoded text and preserves document order.",
+  "confidence": 92
+}

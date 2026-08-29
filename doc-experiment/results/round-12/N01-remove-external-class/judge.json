@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Correct processor (WP_HTML_Tag_Processor). Methods next_tag, remove_class, get_updated_html all documented (html-tag-processor.md lines 927, 2247, 2289). Used the array query form next_tag(array('tag_name'=>'a')), documented as equivalent to the string form (lines 58-59); lowercase 'a' is fine since tag_name matching is ASCII case-insensitive (line 952). Idiomatic token-walking loop + get_updated_html, identical in behavior to reference.php. 7/7 cases pass, zero doing_it_wrong. Minor: explanation asserts remove_class is 'case-sensitive' and 'automatically removes the entire class attribute', which are correct behaviors but not stated in the remove_class docblock itself (only in scattered/adjacent text), so this is partly inference rather than doc-grounded."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Identical to trial-1 (array query form with lowercase 'a', plus comments). All methods documented, correct processor, idiomatic loop, 7/7 pass, no doing_it_wrong. Same minor note: explanation states the case-sensitivity and attribute-removal/whitespace behaviors that remove_class's own docblock omits; these were correct but rely on inference from other sections (lines 328, 2231)."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Used array('tag_name'=>'A') with uppercase 'A', matching the task wording most directly. All three methods documented, correct processor, idiomatic walk + get_updated_html, 7/7 pass, no doing_it_wrong. Explanation correctly names whitespace preservation and case-sensitive matching; these are true but the remove_class docblock itself does not document them, so the subject combined information from elsewhere. Slightly cleaner explanation than trials 1-2."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed. All three trials passed all 7 cases with output byte-identical to expectations, including the subtle ones: only-class-removes-attribute (class attribute dropped, leftover space kept: '<a  href=\\\"/x\\\">go</a>'), case-sensitive-not-removed ('EXTERNAL' left intact), non-link-untouched (div left alone, A's class attribute dropped to '<a >link</a>'), and middle-of-list (interior class removed, surrounding classes re-spaced to 'one two'). The task is a near-exact match to the canonical pattern in the docs: the html-tag-processor.md overview shows the next_tag/remove_class/get_updated_html loop almost verbatim, and the worked examples around lines 200-220 demonstrate remove_class('rugby'). The three behaviors the task hinges on were all discoverable, though not from one place: (1) whitespace/ordering preservation is stated generally at line 328 ('the add_class and remove_class methods preserve whitespace and the class ordering'); (2) dropping the class attribute when the last class is removed is stated only indirectly, inside the add_class section at line 2231 ('Dropping the attribute when its final class is removed is behavior of remove_class, not of this method'); (3) byte-exact (case-sensitive) class-name comparison is documented for add_class at line 2245 but NOT for remove_class. The subjects evidently generalized the case-sensitivity and attribute-drop semantics correctly despite the remove_class docblock (lines 2247-2267) being a bare stub that documents none of these. Near-miss in the explanations: all three confidently attribute case-sensitivity and attribute-removal to remove_class as if its own docs said so; they happened to be right, but a subject who read only the remove_class section would have had no basis for the case-sensitivity claim and could have guessed wrong on the EXTERNAL case. The docs succeeded here mainly because the headline loop example and the general whitespace-preservation sentence carried the load.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::remove_class() (html-tag-processor.md, lines 2247-2267)",
+      "problem": "The remove_class docblock is a bare stub: one-line summary, $class_name param, bool return. It documents none of the three semantics this method is actually defined by: (a) case-sensitive/byte-exact class-name matching, (b) removal of the entire class attribute when the removed name was the last class, and (c) preservation of surrounding whitespace and remaining class ordering. All three facts live only in other sections (line 328 general statement, line 2231 buried inside add_class, line 2245 byte-exact comparison stated for add_class only). A reader who consults remove_class directly learns none of them.",
+      "suggestion": "Mirror the detail level of add_class. State explicitly in remove_class: that matching is exact/case-sensitive (removing 'external' does not touch 'EXTERNAL'); that when the named class is the tag's only/last class the whole class attribute is removed; and that remaining classes keep their original order and inter-class whitespace, with surrounding attribute whitespace left in place. A two-line before/after example (e.g. class=\"one external two\" -> class=\"one two\", and class=\"external\" -> attribute removed) would make all three concrete."
+    },
+    {
+      "location": "remove_class() Returns row (html-tag-processor.md line 2267)",
+      "problem": "Return is described only as 'Whether the class was set to be removed', which is ambiguous about the no-match case (tag lacks the class) versus the no-matched-tag case. add_class's return (line 2245) carefully distinguishes these and tells the reader not to inspect it in the add-then-get_updated_html flow; remove_class gives no such guidance.",
+      "suggestion": "Clarify what true/false mean for remove_class parallel to add_class: true whenever there is a matched tag (including when the class was absent, a no-op), false only when no tag is matched, and note that the return generally need not be inspected in the usual remove-then-get_updated_html flow."
+    },
+    {
+      "location": "Tag query forms — next_tag() and overview (html-tag-processor.md lines 57-61, 952)",
+      "problem": "The docs show both next_tag('img') and next_tag(array('tag_name'=>'img')) as equivalent and note tag_name matching is ASCII case-insensitive, but these two facts are in separate places. A subject could reasonably worry that lowercase 'a' might miss an 'A' tag (the task even stresses case-sensitivity for class names), conflating tag-name case rules with class-name case rules.",
+      "suggestion": "Add a one-line contrast near the query table making the asymmetry explicit: tag-name matching is ASCII case-insensitive (next_tag('a') and next_tag('A') both match <A>), whereas class-name matching (class_name query, add_class/remove_class) is case-sensitive/byte-exact. Co-locating the two opposite rules prevents readers from over-applying the case-sensitivity warning."
+    }
+  ]
+}

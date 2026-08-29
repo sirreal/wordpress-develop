@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented `WP_HTML_Processor::create_fragment()`, `next_token()`, `get_current_depth()`, `get_token_type()`, `get_tag()`, `is_tag_closer()`, `get_attribute()`, and `get_modifiable_text()` APIs to walk the fragment in document order, start a capture only for `A` openers with a string `href`, and concatenate only `#text` tokens until the anchor closes.",
+  "confidence": 89
+}

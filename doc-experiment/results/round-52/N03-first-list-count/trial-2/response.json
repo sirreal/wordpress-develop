@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the HTML Processor because this task depends on document structure and direct-child relationships. The function creates a fragment processor, finds the first `UL` or `OL` opener with `next_tag()`, records its depth and bookmark, scans `next_token()` within that subtree to count only direct `LI` openers at depth `list_depth + 1`, and then seeks back to set `data-item-count`; it returns the original HTML if the scan is incomplete or the processor reports an error.",
+  "confidence": 88
+}

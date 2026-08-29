@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the HTML Processor fragment parser to find the first TABLE and then walked tokens with `next_token()`, using `get_current_depth()`, `get_token_type()`, `get_tag()`, `is_tag_closer()`, and `get_modifiable_text()` to collect ordinary `#text` content inside `TR`, `TD`, and `TH` tokens while respecting browser-style implied table structure.",
+  "confidence": 78
+}

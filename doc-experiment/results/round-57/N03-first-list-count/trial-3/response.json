@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in BODY context, then `next_tag()` to locate the first `UL` or `OL`, and `next_token()` with `get_current_depth()` / `is_tag_closer()` to count only direct `LI` children inside that element. I guarded the rewrite by checking `paused_at_incomplete_token()` and `get_last_error()`, then returned to the opener with a bookmark and set `data-item-count` via `set_attribute()` before serializing with `get_updated_html()`.",
+  "confidence": 95
+}

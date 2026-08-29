@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` for structural awareness and `next_tag()` plus `get_breadcrumbs()` to detect whether each `UL` or `OL` has a list ancestor above it. When a list is nested, I add the `nested-list` class with `add_class()`, then return the byte-preserving result via `get_updated_html()`.",
+  "confidence": 92
+}

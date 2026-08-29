@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This function uses WP_HTML_Processor to traverse the HTML structure and identify P elements that have a BLOCKQUOTE ancestor. For each P tag found, it checks the breadcrumbs (the complete ancestry path from root to current node) to see if BLOCKQUOTE is present anywhere in that path. If found, it adds the 'quoted' class to that P tag using add_class(). The final modified HTML is retrieved using get_updated_html() which applies all queued class changes.",
+  "confidence": 92
+}

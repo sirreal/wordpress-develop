@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Tag_Processor to scan through the HTML document and find IMG tags. The next_tag( 'img' ) method with the shorthand string syntax case-insensitively matches all IMG opening tags. The add_class() method safely adds the 'wp-image' class to each matched tag, preserving existing classes and whitespace. Images inside HTML comments are not matched by next_tag() because they are comment tokens, not tag tokens. The get_updated_html() method returns the modified HTML with all changes applied.",
+  "confidence": 92
+}

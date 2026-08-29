@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body-style fragment, then walked tokens with `next_token()` and rebuilt the result from `serialize_token()`. Any `SPAN` tag token, opener or closer, is skipped so its contents remain in place while the rest of the fragment is normalized by the processor\u2019s serializer.",
+  "confidence": 93
+}

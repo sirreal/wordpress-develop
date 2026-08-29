@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body fragment with table-aware HTML semantics, finds the first `TABLE` via `next_tag()`, then walks its subtree with `next_token()` and `get_current_depth()`. It collects only `#text` token content with `get_modifiable_text()` while inside `TD` or `TH` cells, and finalizes cells and rows on the corresponding closing `#tag` tokens using `get_tag()` and `is_tag_closer()`.",
+  "confidence": 85
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the BODY-context fragment, walks every token with `next_token()`, checks only ordinary `#text` tokens via `get_token_type()` and decoded text from `get_modifiable_text()`, and rebuilds normalized output with `serialize_token()`. When a text node contains the case-sensitive keyword, it emits a normalized `<mark>...</mark>` wrapper and normalizes the decoded text content with `WP_HTML_Processor::normalize()` so the final result stays normalized.",
+  "confidence": 82
+}

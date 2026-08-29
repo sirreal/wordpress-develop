@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in BODY context, then `next_tag( 'H1' )` to locate the first heading. After recording its depth with `get_current_depth()`, I walked tokens with `next_token()` and concatenated only `#text` tokens via `get_modifiable_text()` until the walk left the H1 subtree, which preserves nested text and decoded character references.",
+  "confidence": 92
+}

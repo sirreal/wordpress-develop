@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor and used documented create_fragment() plus serialize(). It handled create failure and null serialization with the required fallback. Minor loss: the exact one-call API, WP_HTML_Processor::normalize(), was documented and better matched the task, so this is slightly more indirect."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and all WP_HTML_Processor methods used are documented: create_fragment(), serialize(), and get_last_error(). The get_last_error() check after serialize() is redundant for the fallback decision but consistent with the docs' unsupported-markup guidance. class_exists()/method_exists() are PHP built-ins, not hallucinated HTML API calls."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Clean documented use of WP_HTML_Processor::create_fragment(), serialize(), and get_last_error(). It follows the documented normalized-serialization path and fails closed on null/error. Minor loss only for not using the more direct normalize() shortcut documented for BODY-context fragments."
+    }
+  ],
+  "failure_analysis": "No hidden/frozen case failed in any trial; all three passed 7/7. The docs did well on the core distinctions needed here: the HTML Processor overview says to use WP_HTML_Processor, not WP_HTML_Tag_Processor, when normalizing markup; create_fragment() documents BODY-fragment parsing; normalize()/serialize() document the exact normalization effects needed by the tests, including quoted attributes, omitted tag insertion, table structure, entity preservation/re-encoding, and omission of trailing incomplete syntax; and the unsupported-markup section says output methods return null when the parser aborts. The main near-miss is that every trial used create_fragment()->serialize() instead of the simpler WP_HTML_Processor::normalize($html), even though normalize() is the direct API for BODY-context fragment normalization. Also, unsupported cases recorded E_USER_WARNING trigger_error entries from serialize(); the rendered docs emphasize the null return but do not make that warning side effect obvious.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::normalize() docblock / HTML Processor overview",
+      "problem": "The direct one-call normalization API is documented, but subjects gravitated to manually creating a fragment processor and serializing it.",
+      "suggestion": "Add a prominent short example in the overview: for a BODY-context fragment where the caller wants normalized HTML or a failure signal, call WP_HTML_Processor::normalize($html) and check for null."
+    },
+    {
+      "location": "WP_HTML_Processor::serialize() and WP_HTML_Processor::normalize() return-value docs",
+      "problem": "The docs say unsupported markup makes output methods return null, but they do not clearly state that serialize() may also emit an E_USER_WARNING/wp_trigger_error when serialization encounters a parser error or when the processor is no longer in the ready state.",
+      "suggestion": "Document warning side effects alongside the null return contract, including which failure modes are silent nulls versus warning-plus-null."
+    },
+    {
+      "location": "WP_HTML_Processor::get_last_error() docblock",
+      "problem": "The sequencing between serialize()/normalize() and get_last_error() is easy to over-apply; candidates checked get_last_error() after serialize() even though null serialization already carried the fallback signal.",
+      "suggestion": "Clarify that get_last_error() is primarily for diagnosing why a token walk or serialization failed; callers that only need normalized output can branch on normalize()/serialize() returning null."
+    }
+  ]
+}

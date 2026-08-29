@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This walks the fragment with `WP_HTML_Processor::create_fragment()` and `next_token()`, rewrites only ordinary `#text` tokens whose decoded `get_modifiable_text()` contains the case-sensitive keyword, and otherwise appends each token\u2019s normalized `serialize_token()` output. For matched text nodes, it builds a normalized `<mark>` wrapper with `WP_HTML_Tag_Processor`, using `set_modifiable_text()` so the wrapped text is re-encoded canonically.",
+  "confidence": 81
+}

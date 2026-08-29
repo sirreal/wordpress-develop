@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 92,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor::create_fragment(), used documented methods, bookmarks, depth-based traversal, set_attribute(), and get_updated_html(). The main API-adherence miss is treating a depth drop to the list closer as proof the list was fully scanned, without checking paused_at_incomplete_token(). It also did not check get_last_error(), though the completion guard happened to handle unsupported markup inside the list."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 94,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice and all called methods are present in the rendered docs. This was the most idiomatic trial: it used bookmarks, depth, get_token_type(), get_last_error(), and get_updated_html(). It still missed the inherited paused_at_incomplete_token() check, so truncated syntax inside the list was mistaken for a complete synthetic close."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 92,
+      "hallucinated_methods": [],
+      "notes": "Correctly used WP_HTML_Processor and documented traversal/editing APIs. The bookmark/depth/get_updated_html pattern is sound for ordinary malformed HTML and omitted LI closers. Like trial 1, it omitted paused_at_incomplete_token() and get_last_error(), so it could not distinguish an end-of-input synthetic list close caused by truncation from a fully scanned list."
+    }
+  ],
+  "failure_analysis": "All trials passed the structural cases that the docs explain well: choosing WP_HTML_Processor over WP_HTML_Tag_Processor, using create_fragment(), using depth rather than lexical nesting, overwriting attributes with set_attribute(), and seeking back to a bookmarked opener before get_updated_html().\n\nFailed case incomplete-token-inside-list: trials 1, 2, and 3 counted the LI and added data-item-count to `<ul><li><img src=\"x`. The misconception was that reaching a closing UL token via a depth drop means the first list was fully scanned. Actual behavior is subtler: WP_HTML_Processor can emit virtual closing tokens for the open LI and UL after the underlying tokenizer pauses at the incomplete `<img` token; paused_at_incomplete_token() is true while get_last_error() remains null. The responsible docs are the WP_HTML_Processor::next_token() heading, which says the processor visits closing tokens for elements left unclosed at end of input, and the get_current_depth() subtree-walk example, which teaches ending a walk on depth drop. The missing connection is that a depth drop proves only that the parser unwound the element stack, not that no incomplete syntax was encountered inside that bounded region.\n\nFailed case incomplete-comment-inside-list: the same misconception occurred for `<ul><li><!-- cut`. The candidates interpreted the synthetic LI and UL closers as a normal completion boundary. The Tag Processor paused_at_incomplete_token() docs do say to drain tokens before checking whether input ended mid-token, but that documentation lives under WP_HTML_Tag_Processor and uses Tag Processor examples; the HTML Processor next_token()/get_current_depth() examples do not show the corresponding guard after a bounded fragment walk. As a result, subjects copied the documented depth-bounded pattern without the additional truncation check.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::next_token() docblock / rendered `next_token()` heading",
+      "problem": "The docs emphasize that HTML Processor visits closers for implicit and end-of-input element closures, but do not distinguish recoverable omitted end tags from truncated incomplete syntax. This makes synthetic closers look like proof of a complete scan.",
+      "suggestion": "Add an explicit note that after incomplete syntax at the end of input, the processor may still emit virtual closers while paused_at_incomplete_token() is true; code that treats a bounded region as fully scanned should check paused_at_incomplete_token() before applying mutations."
+    },
+    {
+      "location": "WP_HTML_Processor::get_current_depth() docblock subtree-walk example",
+      "problem": "The example teaches `while next_token() && depth >= recorded_depth` as the complete pattern for visiting a subtree. For mutation code, subjects inferred that exiting on a depth drop means the source region was fully available.",
+      "suggestion": "Extend the example with a short post-loop guard: depth drop identifies the structural boundary, while paused_at_incomplete_token() and get_last_error() determine whether traversal stopped cleanly enough to trust the result."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::paused_at_incomplete_token() docblock and inherited visibility from WP_HTML_Processor docs",
+      "problem": "The only direct documentation for paused_at_incomplete_token() is Tag Processor-oriented. It does not show the HTML Processor case where virtual closers are visited after truncation, and it is not prominent in the HTML Processor rendered method list.",
+      "suggestion": "Add an HTML Processor-specific cross-reference or inherited-method section explaining that paused_at_incomplete_token() remains relevant when using WP_HTML_Processor, especially after next_token()/next_tag() scans over fragments that may be truncated."
+    },
+    {
+      "location": "WP_HTML_Processor::get_last_error() docblock",
+      "problem": "The docs explain unsupported-parser failures separately from incomplete-token pauses, but do not give a combined robustness recipe for region scans that will later mutate earlier markup.",
+      "suggestion": "Document the general contract: before applying an edit based on a forward scan, callers should reject the scan if get_last_error() is non-null, and separately reject it if paused_at_incomplete_token() is true when truncation inside the scanned region matters."
+    }
+  ]
+}

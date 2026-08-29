@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` because this is a flat attribute rewrite and the documentation says it preserves untouched bytes exactly while allowing per-tag attribute updates. The function scans for `a` tags with `next_tag( 'a' )`, checks `get_attribute( 'href' )` so empty and boolean `href` values still count as present, then applies `set_attribute( 'target', '_blank' )` and returns `get_updated_html()`.",
+  "confidence": 97
+}

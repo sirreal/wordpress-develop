@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` with a literal template that already contains `src` and `alt` in the required order, then updated those attributes with `set_attribute()` and replaced the figcaption placeholder text with `set_modifiable_text()`. The HTML API handles the necessary encoding for unescaped input values, and `get_updated_html()` returns the finished fragment.",
+  "confidence": 96
+}

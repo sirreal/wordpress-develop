@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function creates an HTML Processor fragment from the input HTML, then iterates through all P tags using next_tag(). For each P tag, it retrieves the breadcrumbs (the ancestor chain from root to the current element) and checks if 'BLOCKQUOTE' is anywhere in that chain using in_array(). If a BLOCKQUOTE ancestor is found, it adds the 'quoted' class to that P element. Finally, it returns the modified HTML via get_updated_html(). The breadcrumbs API automatically handles the ancestor detection requirement.",
+  "confidence": 82
+}

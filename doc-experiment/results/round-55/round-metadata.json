@@ -1,0 +1,133 @@
+{
+  "round": "round-55",
+  "mode": "shadow-doc-a/b",
+  "task_ids": [
+    "T09-mark-keyword",
+    "T12-unwrap-spans",
+    "N04-normalize-or-placeholder"
+  ],
+  "task_count": 3,
+  "splits": {
+    "train": 3
+  },
+  "concepts": {
+    "normalization": 1,
+    "serialization": 2
+  },
+  "trials_per_task": 3,
+  "subject": {
+    "model": "gpt-5.4-mini",
+    "reasoning_effort": "low",
+    "service_tier": "priority"
+  },
+  "judge": {
+    "model": "gpt-5.5",
+    "reasoning_effort": "xhigh",
+    "service_tier": "priority"
+  },
+  "git_head": "33764b42d8b108b98a1e8b03bd56270a2523a347",
+  "git_status_short": "",
+  "source_file_digests": {
+    "ref": "33764b42d8b108b98a1e8b03bd56270a2523a347",
+    "algorithm": "sha256",
+    "php_behavior_fingerprint": "token_get_all with T_COMMENT, T_DOC_COMMENT, and T_WHITESPACE removed; JSON-encoded token names and text",
+    "files": {
+      "src/wp-includes/html-api/class-wp-html-tag-processor.php": {
+        "source_sha256": "9e431d345cc6d5563a65e3456b8a944fe1def8ceb8db299e89f20e8e9f560058",
+        "php_without_comments_sha256": "d073f5772a64826878e4132ed9bb30717fb1b6f3ddb5e23a014a4fa9db218ad7",
+        "php_without_comments_token_count": 9881
+      },
+      "src/wp-includes/html-api/class-wp-html-processor.php": {
+        "source_sha256": "c0d21fbe3ff89f4a11daafb5ddce28a509d08740c6a9be78f4631e303cec975c",
+        "php_without_comments_sha256": "2da9aa482f295c89a7018c5b74b622b4add7e942599c97785434408cfa72c083",
+        "php_without_comments_token_count": 16806
+      }
+    }
+  },
+  "corpus_file_digests": {
+    "ref": "33764b42d8b108b98a1e8b03bd56270a2523a347",
+    "algorithm": "sha256",
+    "tasks": {
+      "T09-mark-keyword": {
+        "labels": {
+          "split": "train",
+          "role": "core",
+          "commonness": "medium",
+          "concept": "serialization",
+          "processor": "html"
+        },
+        "files": {
+          "doc-experiment/corpus/T09-mark-keyword/task.md": "5abba63d508cb56284ce7a02e374d35e4cdd45958d664174eb3002c13f1c3bce",
+          "doc-experiment/corpus/T09-mark-keyword/reference.php": "0141ececbe459f50729e657f59dd75e8b74911cd1d70940b8fd5072d2f1efb60",
+          "doc-experiment/corpus/T09-mark-keyword/tests.json": "946bb96c922fea63cda3c31b94840b05ffded9f2e1dfa4b1547c755b99cda0c5"
+        }
+      },
+      "T12-unwrap-spans": {
+        "labels": {
+          "split": "train",
+          "role": "core",
+          "commonness": "medium",
+          "concept": "serialization",
+          "processor": "html"
+        },
+        "files": {
+          "doc-experiment/corpus/T12-unwrap-spans/task.md": "e95fcebf3ce7e2fd9004c4ff82b66a77d712b81b1317f3d020c4c89ace25eb6b",
+          "doc-experiment/corpus/T12-unwrap-spans/reference.php": "93d6828161817ec9a0b90765d91e7dae1c48f3b3aac35f6cad6f785b1c715797",
+          "doc-experiment/corpus/T12-unwrap-spans/tests.json": "fcade4b9f46bbb824b0095f58b99d4c71c8b3e696093ab0d0ae25d666aae5f53"
+        }
+      },
+      "N04-normalize-or-placeholder": {
+        "labels": {
+          "split": "train",
+          "role": "core",
+          "commonness": "medium",
+          "concept": "normalization",
+          "processor": "html"
+        },
+        "files": {
+          "doc-experiment/corpus/N04-normalize-or-placeholder/task.md": "cef7cd04d639b6b7b435be2d33f3435b8b76f0a4d83748aa7c232204746ad3d0",
+          "doc-experiment/corpus/N04-normalize-or-placeholder/reference.php": "e47feb6d3be887e1ee5df77e39160ffe812cb8322ca8600898de2a34e56ddeed",
+          "doc-experiment/corpus/N04-normalize-or-placeholder/tests.json": "417d2f770b341fc46bb8b7b46df899f1fd1e65d343aa8cc6c4e39307afcb4d18"
+        }
+      }
+    }
+  },
+  "created_at_utc": "2026-06-13T18:52:23+00:00",
+  "isolation": {
+    "scratch_contains": [
+      "html-tag-processor.md",
+      "html-processor.md",
+      "tasks/<task-id>.md"
+    ],
+    "subjects_must_not_read": [
+      "reference.php",
+      "tests.json",
+      "source files",
+      "logs",
+      "plans",
+      "hypothesis docs"
+    ]
+  },
+  "scratch": "/tmp/html-api-docs-eval/round-55",
+  "staged_task_files": [
+    "tasks/T09-mark-keyword.md",
+    "tasks/T12-unwrap-spans.md",
+    "tasks/N04-normalize-or-placeholder.md"
+  ],
+  "scratch_isolation_check": "OK: /tmp/html-api-docs-eval/round-55 exposes 2 docs and 3 task prompt(s), with no forbidden files.",
+  "scratch_file_sha256": {
+    "html-processor.md": "9f8bcc0b2f75385aff71203367b473b11fd7533bb801902793a4928dd36d56a8",
+    "html-tag-processor.md": "8ca4ec32aa54723fe16a0a9f45386ca6ebeecde7a06575d8a782e53fb395a664",
+    "tasks/N04-normalize-or-placeholder.md": "cef7cd04d639b6b7b435be2d33f3435b8b76f0a4d83748aa7c232204746ad3d0",
+    "tasks/T09-mark-keyword.md": "5abba63d508cb56284ce7a02e374d35e4cdd45958d664174eb3002c13f1c3bce",
+    "tasks/T12-unwrap-spans.md": "e95fcebf3ce7e2fd9004c4ff82b66a77d712b81b1317f3d020c4c89ace25eb6b"
+  },
+  "shadow_doc_variant": {
+    "name": "html-processor-string-rewrite-fallback-card",
+    "control_round": "round-54",
+    "edited_files": [
+      "html-processor.md"
+    ],
+    "notes": "Scratch-only rendered-doc variant. Adds a compact class-level string-returning rewrite checklist and method-local serialize_token wrapper/anti-pattern examples: get_modifiable_text() is for decoded inspection, serialize_token() emits normalized token HTML, accumulated output is the rewrite, and normalize($html) or raw input discard emitted wrappers/skips/replacements. Source docblocks are unchanged."
+  }
+}

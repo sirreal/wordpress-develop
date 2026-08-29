@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in body context, then walked tokens with `next_token()`. For each ordinary `#text` token, I checked the decoded text from `get_modifiable_text()` for the case-sensitive keyword and wrapped the normalized token output from `serialize_token()` in `<mark>`, which preserves normalized serialization and leaves special-element text untouched because it is not reported as a `#text` token.",
+  "confidence": 92
+}

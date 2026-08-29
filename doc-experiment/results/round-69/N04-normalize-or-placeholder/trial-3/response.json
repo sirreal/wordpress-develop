@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::normalize()` to normalize the body-context HTML fragment, and returned the required fallback when normalization is not possible because the processor returns `null` for unsupported markup or other failure conditions.",
+  "confidence": 97
+}

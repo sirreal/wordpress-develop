@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` for tree-aware parsing, then walks the fragment once with `next_token()`. On each heading opener (`H1` through `H6`) it starts collecting text, appending ordinary `#text` token content via `get_modifiable_text()`, and also appending any modifiable text carried by child opening-tag tokens for special text-only elements; when the matching heading closer is reached via `is_tag_closer()` and `get_tag()`, it emits the TOC entry in document order.",
+  "confidence": 85
+}

@@ -1,0 +1,107 @@
+{
+  "candidate": "/Users/jonsurrell/a8c/wordpress-develop/html-api-docs-improvement/doc-experiment/results/round-42/H04-remove-empty-paragraphs/trial-1/candidate.php",
+  "function": "remove_empty_paragraphs",
+  "passed": 11,
+  "total": 11,
+  "cases": [
+    {
+      "id": "mixed-paragraphs",
+      "status": "pass",
+      "expected": "<p>Keep <em>me</em></p><p> </p><p><img src=\"x.jpg\"></p>",
+      "actual": "<p>Keep <em>me</em></p><p> </p><p><img src=\"x.jpg\"></p>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "empty-and-whitespace",
+      "status": "pass",
+      "expected": "<p>\n\t </p><p>Text</p>",
+      "actual": "<p>\n\t </p><p>Text</p>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "entity-content",
+      "status": "pass",
+      "expected": "<p> </p><p> </p><p>A B</p>",
+      "actual": "<p> </p><p> </p><p>A B</p>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "element-only-kept",
+      "status": "pass",
+      "expected": "<p><br></p><p><span></span></p>",
+      "actual": "<p><br></p><p><span></span></p>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "comment-and-script-kept",
+      "status": "pass",
+      "expected": "<p><!--x--></p><p><script></script></p>",
+      "actual": "<p><!--x--></p><p><script></script></p>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "self-closing-paragraph-syntax",
+      "status": "pass",
+      "expected": "<p>keep</p>",
+      "actual": "<p>keep</p>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "implicit-paragraph-close",
+      "status": "pass",
+      "expected": "<p>One</p><p>   </p><div>Block</div><p>Two</p>",
+      "actual": "<p>One</p><p>   </p><div>Block</div><p>Two</p>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "case-insensitive-source",
+      "status": "pass",
+      "expected": "<p>Keep</p><p> </p>",
+      "actual": "<p>Keep</p><p> </p>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "no-paragraphs",
+      "status": "pass",
+      "expected": "<div>Nothing to remove</div>",
+      "actual": "<div>Nothing to remove</div>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "incomplete-input-unchanged",
+      "status": "pass",
+      "expected": "<p></p><img src=\"x",
+      "actual": "<p></p><img src=\"x",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "unsupported-input-unchanged",
+      "status": "pass",
+      "expected": "<p></p><a><div><a></div></a>",
+      "actual": "<p></p><a><div><a></div></a>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor to properly parse HTML and find the first H1 element. It creates a fragment processor, finds the H1 tag, records its depth, then walks through all subsequent tokens while staying within the H1's depth level. Text tokens are accumulated using get_modifiable_text(), which automatically handles character reference decoding. When no H1 is found, it returns null; otherwise it returns the concatenated text content (which may be empty if the H1 contains only markup).",
+  "confidence": 92
+}

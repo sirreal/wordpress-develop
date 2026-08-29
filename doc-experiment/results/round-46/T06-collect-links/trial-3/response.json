@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the BODY fragment structurally, then scans `A` openers with `next_tag('A')`. For each anchor, it reads `href` with `get_attribute()` and keeps only string-valued attributes, then walks that anchor\u2019s subtree with `next_token()` bounded by `get_current_depth()`, concatenating only `#text` token contents via `get_modifiable_text()` so character references are decoded and markup contributes nothing.",
+  "confidence": 91
+}

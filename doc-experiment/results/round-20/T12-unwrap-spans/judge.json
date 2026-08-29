@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used the correct `WP_HTML_Processor::create_fragment()` path for body-fragment normalization, walked all tokens with `next_token()`, skipped span opener and closer tokens via documented `get_tag()`, and rebuilt output with documented `serialize_token()`. This exactly follows the rendered `serialize_token()` rewrite pattern and handles the null factory case."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same correct processor choice and token-serialization pattern as trial-1. The extra `get_last_error()` check is documented and did not misuse the API; it is unnecessary for the supplied cases, but consistent with docs that unsupported parser aborts can be detected after scanning."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used only documented API methods and the intended token-by-token serialization pattern. The implementation relies on documented behavior that `next_token()` visits both openers and closers, including virtual/end-of-input closers, and that `serialize_token()` concatenation reconstructs normalized HTML."
+    }
+  ],
+  "failure_analysis": "All trials passed all 7 hidden cases, with no `_doing_it_wrong` records and no undocumented method calls. The docs did well in three specific places: the processor-selection guidance says to use `WP_HTML_Processor` for structure and normalized output; `create_fragment()` describes the body-fragment factory needed for this task; and `serialize_token()` contains the key general recipe for token-by-token rewriting, including skipping both opener and closer tokens and concatenating serialized tokens. The `next_token()` section also explains why unclosed elements are still handled: the HTML Processor visits closing tokens for elements left unclosed at end of input. The main near-miss is that the successful solution depends on `get_tag()` returning the tag name for both opener and closer tag tokens; that is clear from the `serialize_token()` example, but less explicit in the `get_tag()` contract itself. Trial 2’s post-loop `get_last_error()` check shows another near-miss: the docs discuss unsupported-parser aborts and incomplete-token pauses in several places, but the distinction between a normalized best-effort token serialization loop and a scan that must reject truncation could be easier to find.",
+  "doc_gaps": [
+    {
+      "location": "`WP_HTML_Processor::get_tag()` docblock",
+      "problem": "The method says it returns the uppercase name of the matched tag, but does not explicitly state the opener/closer behavior that rewrite loops often rely on.",
+      "suggestion": "State that for matched tag tokens, both opening and closing tokens report the element name, while non-tag tokens return `null`; cross-reference `get_token_type()` or `is_tag_closer()` for callers that need to distinguish them."
+    },
+    {
+      "location": "`WP_HTML_Processor::serialize_token()` docblock",
+      "problem": "The section has a strong rewrite example, but the general contract could be more prominent for fragment output and virtual/implied tokens.",
+      "suggestion": "Add a concise contract sentence that token-by-token concatenation serializes the normalized fragment body content, including implied/end-of-input closing tokens, without emitting the implicit outer `HTML`/`BODY` wrappers for `create_fragment()`."
+    },
+    {
+      "location": "`WP_HTML_Processor::get_last_error()` and `next_token()` docblocks",
+      "problem": "The relationship between unsupported markup, `get_last_error()`, and incomplete trailing syntax is scattered across sections.",
+      "suggestion": "Add a short guidance note: after a full token walk, use `get_last_error()` to detect unsupported-parser aborts; use `paused_at_incomplete_token()` only when the caller must reject trailing incomplete syntax rather than accept normalized serialization of parsed tokens."
+    },
+    {
+      "location": "Rendered method index for `WP_HTML_Processor`",
+      "problem": "Private/internal methods appear alongside public API methods, which can distract constrained readers from the small public surface needed for common tasks.",
+      "suggestion": "Separate private/internal methods from public methods in the generated docs, or visually mark them as implementation details so examples steer readers toward supported public APIs."
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` with a literal template so the output shape and attribute order stay exact. It updates the existing `img` attributes with `set_attribute()` and replaces the placeholder `figcaption` text node with `set_modifiable_text()`, relying on the documented HTML API to perform all required encoding for attribute values and text.",
+  "confidence": 96
+}

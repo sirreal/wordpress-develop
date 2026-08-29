@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor to scan through all tokens in the HTML document until exhaustion. The key method is `paused_at_incomplete_token()`, which returns true when the parser stops because the input ended in the middle of a syntax element (an unfinished tag, unterminated comment, or unclosed special element like SCRIPT whose contents run to EOF). By scanning all tokens first, we ensure the processor reaches the end of input and can report accurately whether it paused at an incomplete token. This handles all the documented cases: incomplete tags, unclosed comments, SCRIPT without closing tag, etc., while correctly treating unclosed elements and trailing lone `<` as complete (lexically complete tokens).",
+  "confidence": 78
+}

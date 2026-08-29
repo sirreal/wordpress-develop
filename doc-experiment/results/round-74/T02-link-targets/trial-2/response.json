@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan tags linearly and `get_attribute( 'href' )` to detect presence of `href`, which the docs say returns `true` for boolean attributes and `null` only when absent. For each matching `A` tag I called `set_attribute( 'target', '_blank' )`, then returned `get_updated_html()` so all untouched bytes remain exactly as in the input.",
+  "confidence": 97
+}

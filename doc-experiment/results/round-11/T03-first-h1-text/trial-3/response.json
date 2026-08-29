@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML, then searches for the first H1 tag using next_tag('H1'). Once found, it records the depth and walks through all tokens inside the H1 element using next_token(), accumulating text from all #text nodes via get_modifiable_text() (which automatically decodes character references like &amp; to &). The depth check ensures we only collect text inside this specific H1 and stop when we exit it. Returns null if no H1 is found, or an empty string if H1 contains no text (e.g., only markup).",
+  "confidence": 92
+}

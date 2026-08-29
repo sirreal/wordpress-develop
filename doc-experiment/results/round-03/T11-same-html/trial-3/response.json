@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The solution uses WP_HTML_Processor::normalize() to convert both HTML fragments into a canonical form that standardizes attribute quoting, adds implicit closing tags, normalizes tag casing, and handles character references. Two fragments represent the same parsed structure if they normalize to identical strings. If either fragment cannot be fully parsed (returns null), the function returns false per the task requirement.",
+  "confidence": 92
+}

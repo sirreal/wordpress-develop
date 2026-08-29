@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Passed 7/7. Correctly chose `WP_HTML_Processor::create_fragment()` for structural fragment parsing. All API calls are documented: `create_fragment`, `next_token`, `get_tag`, `get_token_type`, `get_modifiable_text`, and `is_tag_closer`. The single-pass closer-driven state machine is consistent with the `next_token()` docs, handles virtual/implied closers, empty headings, uppercase normalized tag names, and decoded entity text. Minor reservation: it calls `get_modifiable_text()` on every opening tag inside a heading, relying on the documented empty-string behavior for non-text-bearing tags; this is safe but a little broad."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Passed 7/7. Correct processor choice and no undocumented API usage: `create_fragment`, `next_token`, `get_token_name`, `is_tag_closer`, `get_token_type`, and `get_modifiable_text` are all present in the rendered docs. The implementation follows the documented one-cursor, closer-driven token walk pattern, and it benefits from the processor's guarantee that implied and end-of-input closers are visited. It also uses `get_modifiable_text()` for decoded text and includes empty headings. Minor reservation: it does not inspect `get_last_error()` or incomplete-token state after traversal, though the task did not require rejecting partial input."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 91,
+      "hallucinated_methods": [],
+      "notes": "Passed 7/7 and used only documented APIs. Processor choice and basic traversal are right, but the text-collection branch is overbroad: inside a heading it appends `get_modifiable_text()` for any non-closing token with a token name, not just `#text` nodes or selected text-bearing element tokens. A read-only probe with `<h2>A<!--hidden-->B</h2>` returned `AhiddenB`, unlike the reference and trials 1-2, because comment interiors are also modifiable text. This is a documented distinction, so the implementation is less idiomatic despite passing the hidden cases."
+    }
+  ],
+  "failure_analysis": "No hidden case failed across the trials; all three passed all 7 frozen cases. The docs did well on the core decision points: the WP_HTML_Processor overview says to choose it when document structure matters, including collecting element text and handling implied/virtual closing tags; the `next_token()` section explicitly says to use token walking when text and non-tag content matters, that one cursor is shared, and that the processor visits a closer for every opener including implicit and end-of-input closes; `get_modifiable_text()` states that `#text` content is decoded, which explains the `B & C` case; and `get_token_name()`/`get_tag()` document uppercase tag names, which supports case-insensitive source handling. The main near-miss was trial 3's overgeneralization of `get_modifiable_text()`: the docs say comments and processing-instruction-like tokens also have modifiable text even though they are not DOM text content, but this warning is easy to miss when trying to extract visible descendant text. Another near-miss is that the docs contain both a warning against nested token walks and examples of bounded subtree walks; the candidates avoided trouble by using single-pass state machines, but the relationship between those two patterns could be clearer. None of the candidates checked `get_last_error()` or incomplete-token state after traversal; the existing docs mention this mainly for mutations or callers that must reject truncation, so the omission did not affect this read-only task.",
+  "doc_gaps": [
+    {
+      "location": "`WP_HTML_Processor::next_token()` and `WP_HTML_Processor::get_current_depth()` docblocks",
+      "problem": "The docs warn that nested walk loops share one cursor, while also showing bounded subtree scans. The safe distinction between deliberately consuming a subtree and accidentally hiding tokens from an outer loop is implied rather than stated directly.",
+      "suggestion": "Add a short note contrasting the two patterns: use a single state-machine loop when the outer logic must observe every token or repeated sibling region; use a bounded subtree loop after an opener only when consuming that whole region is intended, and document where the cursor is left afterward."
+    },
+    {
+      "location": "`WP_HTML_Tag_Processor::get_modifiable_text()` and inherited `WP_HTML_Processor::get_modifiable_text()` docs",
+      "problem": "`get_modifiable_text()` is easy to confuse with visible or DOM text content. It also returns comment interiors and other non-DOM modifiable text, which led trial 3 to include comment text in a heading.",
+      "suggestion": "Add an explicit warning: for DOM-style text extraction, do not call `get_modifiable_text()` on every token. Filter by `get_token_type() === '#text'`, and only opt into specific text-bearing element opener tokens such as `SCRIPT`, `STYLE`, `TEXTAREA`, or `TITLE` when that behavior is desired; skip comments and other token types."
+    },
+    {
+      "location": "`WP_HTML_Processor::get_token_name()`, `get_tag()`, and `is_tag_closer()` docblocks",
+      "problem": "Closer-driven algorithms rely on virtual/implied closing tokens exposing the closed element name and `is_tag_closer() === true`, but the accessor docs do not make that contract especially concrete.",
+      "suggestion": "Add a small generic example with malformed or implicitly closed markup showing the sequence of opener, text, virtual closer, and the values returned by `get_token_name()`, `get_tag()`, `get_token_type()`, and `is_tag_closer()` at the closer."
+    },
+    {
+      "location": "`WP_HTML_Processor::next_token()` incomplete-input guidance",
+      "problem": "The docs mention `paused_at_incomplete_token()` and `get_last_error()` mostly in the context of mutations or rejecting truncation. For read-only extraction, it is not obvious when a best-effort partial result is acceptable versus when the caller should discard it.",
+      "suggestion": "Add decision guidance for read-only scans: if the caller requires a complete-document result, check incomplete-token and parser-error state after the loop; if best-effort extraction is acceptable, virtual closers can still provide structurally consistent partial results."
+    }
+  ]
+}

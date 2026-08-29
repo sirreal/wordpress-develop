@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::create_fragment() to parse the HTML with full structural awareness. It iterates through all tags, identifies heading elements (H1-H6), and for each heading extracts the level from the tag name. To collect the text content, it walks through tokens inside each heading using next_token() while staying within the heading's depth, accumulating all #text tokens. Character references are automatically decoded by get_modifiable_text(). The function returns an array of associative arrays with 'level' and 'text' keys.",
+  "confidence": 80
+}

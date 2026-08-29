@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` so the HTML is treated as a BODY fragment, then scanned only tag openers with `next_tag()` and inspected structural ancestry via `get_breadcrumbs()`. For each `UL` or `OL`, I checked whether any earlier breadcrumb was `UL` or `OL`, and if so added `nested-list` with `add_class()`, finally returning `get_updated_html()` so untouched bytes are preserved exactly.",
+  "confidence": 93
+}

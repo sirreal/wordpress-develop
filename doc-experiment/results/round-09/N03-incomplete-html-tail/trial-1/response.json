@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function creates a WP_HTML_Tag_Processor with the input HTML and scans all tokens using next_token() in a loop. After the loop completes (either by reaching the end or pausing at an incomplete token), it returns the result of paused_at_incomplete_token(), which indicates whether the input ended in the middle of a syntax element like an unclosed tag, comment, or special element without its closing tag.",
+  "confidence": 92
+}

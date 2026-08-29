@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor to parse the HTML fragment, which provides structural awareness via breadcrumbs. For each P tag found with next_tag(), I check if 'BLOCKQUOTE' exists anywhere in the breadcrumbs array (which represents the full ancestor chain from root). If a BLOCKQUOTE ancestor is present, I add the 'quoted' class using add_class(). Finally, get_updated_html() returns the modified HTML with only the class additions applied, preserving everything else byte-for-byte.",
+  "confidence": 82
+}

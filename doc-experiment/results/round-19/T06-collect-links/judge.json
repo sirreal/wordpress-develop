@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor::create_fragment() and used only documented methods: next_token(), get_token_name(), is_tag_closer(), get_attribute(), get_token_type(), and get_modifiable_text(). The one-pass closer-driven state machine matches the documented repeated-region pattern and handles string-vs-true-vs-null href semantics, decoded attributes/text, and unclosed A tags. Minor gap: it only collects #text tokens, so it misses text carried on atomic/RCDATA element opener tokens such as TEXTAREA inside a link, which the docs explicitly call out."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Best API adherence. Correct processor choice, no undocumented calls, no _doing_it_wrong records, and a single token-walk state machine. It checks is_string( get_attribute( 'href' ) ), accumulates decoded #text, and also uses get_modifiable_text() on tag openers so documented text-carrying elements are handled without hard-coding most of the parser model. Small caveat: it relies on get_modifiable_text() returning an empty string for ordinary tags, which is documented but can make intent less explicit."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice and all method calls are documented: create_fragment(), next_token(), get_token_type(), get_tag(), is_tag_closer(), get_attribute(), and get_modifiable_text(). It handles href value semantics, decoded text, and unclosed links. The hard-coded special-element list shows it noticed the docs' atomic-element warning, but that approach is less general than leaning on the documented get_modifiable_text() contract and risks omissions as the supported set evolves."
+    }
+  ],
+  "failure_analysis": "No hidden case failed: all three trials passed all 8 frozen cases, and execution.json recorded no _doing_it_wrong notices. The docs worked well in three places: the processor-selection text clearly says to use WP_HTML_Processor when structure, text collection, subtree walking, and missing closing tags matter; get_attribute() and the Tag Processor overview explain null/true/string attribute semantics well enough that every trial used is_string(); and next_token()/get_modifiable_text() explain token walking, decoded text, and virtual closers well enough that all trials handled entity decoding and the unclosed-link case. The main near-miss was text carried on atomic/RCDATA elements. Trial 1 passed the frozen tests but would return empty text for a link containing TEXTAREA because it only accumulates #text tokens. That misconception is not from a total absence of documentation: html-processor.md next_token() says SCRIPT, STYLE, TITLE, and TEXTAREA produce no #text child tokens, and get_modifiable_text() says their text is carried on the element token. The issue is that the prominent subtree text recipe still shows only the #text-token path, so the exception is easy to miss. Another near-miss is that WP_HTML_Processor::get_attribute() lacks the decoded-string sentence present in WP_HTML_Tag_Processor::get_attribute(); the subjects saw both files and inferred correctly, but the subclass method docs alone are under-specified for decoded href values.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_attribute() docblock",
+      "problem": "The HTML Processor method documents string|true|null and boolean attributes, but does not explicitly say that string values are already decoded. That guarantee appears in the Tag Processor docs, even though callers using WP_HTML_Processor read this method on the subclass page.",
+      "suggestion": "Add the same decoded-value contract directly here: string attributes are returned decoded, true means a valueless/boolean attribute, and null means absent or unavailable. Include a small href=\"/x?a=1&amp;b=2\" example returning /x?a=1&b=2."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token() text-collection example",
+      "problem": "The main subtree text example accumulates only #text tokens. The special atomic-element exception is explained in prose, but Trial 1 shows it is easy to implement the example literally and miss TEXTAREA/TITLE/SCRIPT/STYLE-style token-carried text.",
+      "suggestion": "Add a general subtree text-content recipe that is depth-bounded and demonstrates both paths: append get_modifiable_text() for #text tokens, and also read get_modifiable_text() from non-closing element tokens that carry their own text. Note raw-text sections are returned verbatim while RCDATA/#text is decoded."
+    },
+    {
+      "location": "WP_HTML_Processor::get_modifiable_text() docblock",
+      "problem": "The text-carrying element set is described partly by examples and phrases like \"and similar\" / \"DATA\", which encourages hard-coded guesses such as Trial 3's manual list.",
+      "suggestion": "Enumerate or link to the exact supported special element categories and their decoding behavior in this method's docblock, so callers can distinguish ordinary container tags, decoded RCDATA elements, and raw-text elements without guessing."
+    }
+  ]
+}

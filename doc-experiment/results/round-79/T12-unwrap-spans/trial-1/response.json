@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment, then walked every token with `next_token()` and concatenated `serialize_token()` for everything except `SPAN` tag tokens, which removes both span openers and closers while preserving and normalizing their contents. If the processor cannot be created or later reports an error, I fall back to `WP_HTML_Processor::normalize()` as a safe best-effort normalization path.",
+  "confidence": 96
+}

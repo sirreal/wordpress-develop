@@ -1,0 +1,71 @@
+{
+    "candidate": "/Users/jonsurrell/a8c/wordpress-develop/html-api-docs-improvement/doc-experiment/results/round-15/N05-document-title/trial-2/candidate.php",
+    "function": "get_document_title",
+    "passed": 0,
+    "total": 7,
+    "cases": [
+        {
+            "id": "standard-document",
+            "status": "error",
+            "expected": "My Site — Home",
+            "actual": null,
+            "error": "Error: Call to undefined method WP_HTML_Tag_Processor::create_full_parser()",
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "entities-decoded",
+            "status": "error",
+            "expected": "Fish & Chips",
+            "actual": null,
+            "error": "Error: Call to undefined method WP_HTML_Tag_Processor::create_full_parser()",
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "no-title-null",
+            "status": "error",
+            "expected": null,
+            "actual": null,
+            "error": "Error: Call to undefined method WP_HTML_Tag_Processor::create_full_parser()",
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "empty-title",
+            "status": "error",
+            "expected": "",
+            "actual": null,
+            "error": "Error: Call to undefined method WP_HTML_Tag_Processor::create_full_parser()",
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "no-doctype",
+            "status": "error",
+            "expected": "Bare",
+            "actual": null,
+            "error": "Error: Call to undefined method WP_HTML_Tag_Processor::create_full_parser()",
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "attributes-on-elements",
+            "status": "error",
+            "expected": "With Attrs",
+            "actual": null,
+            "error": "Error: Call to undefined method WP_HTML_Tag_Processor::create_full_parser()",
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "minimal-document",
+            "status": "error",
+            "expected": "Implied structure",
+            "actual": null,
+            "error": "Error: Call to undefined method WP_HTML_Tag_Processor::create_full_parser()",
+            "doing_it_wrong": [],
+            "trigger_error": []
+        }
+    ]
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented `WP_HTML_Tag_Processor` because this is a flat, byte-preserving tag edit: scan for each `h2`, keep moving a single bookmark to the last match, then `seek()` back and `add_class( 'final-section' )` on that opener before returning `get_updated_html()`.",
+  "confidence": 97
+}

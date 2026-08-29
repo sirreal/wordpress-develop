@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body fragment structurally, then walks tokens once with `next_token()`. On each `A` opener it reads `href` with `get_attribute()` and starts collecting only when that value is a string, appending decoded text from descendant `#text` tokens via `get_token_type()` and `get_modifiable_text()` until the matching `A` closer detected by `get_tag()` and `is_tag_closer()`. It returns an empty array if the processor could not fully parse the fragment by checking `paused_at_incomplete_token()` and `get_last_error()`.",
+  "confidence": 90
+}

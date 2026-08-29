@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor to parse HTML fragments. It iterates through A tags using next_tag(), retrieves the href attribute with get_attribute(), and collects text content by walking through child tokens with next_token() while tracking depth to stay inside the A element. Text nodes are identified with get_token_type() and their decoded content is collected via get_modifiable_text(). The loop uses > comparison (not >=) to terminate when reaching the A tag's closing token.",
+  "confidence": 72
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the fragment with structural awareness, scans tags with `next_tag()`, identifies `UL` and `OL` elements, and checks `get_breadcrumbs()` for any ancestor list before adding the `nested-list` class via `add_class()`. The result is returned with `get_updated_html()`, and the original HTML is preserved unchanged if the processor cannot be created or aborts on unsupported markup.",
+  "confidence": 88
+}

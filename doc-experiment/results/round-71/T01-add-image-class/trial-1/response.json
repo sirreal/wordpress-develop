@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan the HTML linearly, matching only real `img` tag openers case-insensitively and leaving comments untouched. For each matched image, `add_class( 'wp-image' )` preserves existing classes and appends the new one without reordering them, and `get_updated_html()` returns the byte-preserving edited document.",
+  "confidence": 99
+}

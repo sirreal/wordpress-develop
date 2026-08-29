@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::normalize() which returns a string when normalization succeeds and null when the HTML Processor encounters unsupported markup (like complex mis-nested formatting elements or foster parenting). The documented behavior is that normalize() returns null precisely when the HTML API cannot produce a fully-normalized serialization due to unsupported markup, making this a direct implementation of the required behavior.",
+  "confidence": 92
+}

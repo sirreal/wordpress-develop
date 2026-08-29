@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because the task depends on document structure. It scans list openers with `next_tag()`, checks `get_breadcrumbs()` for any `UL` or `OL` ancestor above the current list, adds the class with `add_class()`, and returns the byte-preserving edited fragment with `get_updated_html()`. If the HTML Processor cannot safely continue and reports `get_last_error()`, it falls back to the original HTML.",
+  "confidence": 90
+}

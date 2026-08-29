@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor to parse the HTML fragment. It iterates through all tags, identifying H1-H6 headings by tag name. For each opener tag, it records the depth and then collects all text tokens inside the heading by calling next_token() until the depth decreases back to the parent level. The modifiable_text from each #text token is concatenated to build the heading's text content. The heading level is extracted as an integer from the tag name (H1=1, H2=2, etc.), and results are accumulated in the returned array.",
+  "confidence": 72
+}

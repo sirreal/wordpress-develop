@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor to scan through all A tags. For each A tag found, it checks whether an href attribute exists by calling get_attribute('href'). The documentation states that get_attribute() returns null if the attribute is not present, but returns either a string value or true (for boolean attributes) if it is present. Since the task specifies that href counts as present even when empty (href=\"\") or valueless (<a href>), we simply check if the value is not null. If the href attribute exists in any form, we call set_attribute('target', '_blank') to set or overwrite the target attribute. Finally, get_updated_html() returns the modified HTML document with all queued changes applied.",
+  "confidence": 92
+}

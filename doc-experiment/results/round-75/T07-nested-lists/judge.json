@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Used the correct structural processor: WP_HTML_Processor::create_fragment(), next_tag(), get_tag(), get_breadcrumbs(), add_class(), and get_updated_html() are all documented. The breadcrumb approach is idiomatic and matches the reference. Minor edge-case gap: it checks processor creation failure but not get_last_error() or paused_at_incomplete_token() after a complete-scan mutation."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Used the correct structural processor and only documented APIs. The explicit next_tag( array( 'tag_closers' => 'skip' ) ) is documented and equivalent to the default opener-only walk. Breadcrumb use and get_updated_html() are appropriate. Minor style/edge deductions for redundant query/counter logic and no unsupported-markup or incomplete-input fallback after scanning."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Used the correct structural processor and only documented APIs, including documented get_last_error(). The loop uses breadcrumbs correctly, add_class() for class preservation, and get_updated_html() for byte-preserving edits. It also falls back on parser errors; the only remaining edge-case omission is not checking paused_at_incomplete_token() for truncated input."
+    }
+  ],
+  "failure_analysis": "All trials passed all 7 hidden cases, with no _doing_it_wrong records. The docs did well on the central distinction for this task: the Tag Processor docs explicitly say it has no tree awareness and no get_breadcrumbs(), while the HTML Processor docs say to choose it when structure or containment matters. The Breadcrumbs section also clearly states that get_breadcrumbs() returns the stack down to the current matched node, which enabled all candidates to exclude the current UL/OL and inspect ancestors. The class mutation docs were also sufficient: add_class() was chosen instead of manual class-string editing, so existing classes were preserved. Near-misses: trial 1 used the verbose but documented tag_name => null form instead of plain next_tag(); trial 2 explicitly passed the documented default tag_closers => skip; trial 3 checked get_last_error() but no candidate checked paused_at_incomplete_token(). That last point did not matter for the frozen cases, but a complete-scan mutation that promises every matching element was considered should have a documented fallback policy for parser aborts and truncated input.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_breadcrumbs() docblock / Breadcrumbs section",
+      "problem": "The docs explain that breadcrumbs include the current node, but they do not show the common ancestor-test pattern of excluding the current breadcrumb before checking containment.",
+      "suggestion": "Add a short example showing `$ancestors = array_slice( $processor->get_breadcrumbs(), 0, -1 );` before testing whether the current element is inside a given ancestor."
+    },
+    {
+      "location": "WP_HTML_Processor::next_tag() docblock",
+      "problem": "The query contract is documented, but candidates still used redundant forms such as `array( 'tag_name' => null )` and explicit `tag_closers => skip`.",
+      "suggestion": "State directly in the method docblock that `next_tag()` with no argument means any opening tag and is equivalent to `tag_name => null` plus the default closer-skipping behavior."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::get_updated_html() docblock as inherited by WP_HTML_Processor",
+      "problem": "The method explains byte-preserving queued updates, but the safety guidance for HTML Processor scans lives elsewhere. For structural mutations, callers may miss that parser aborts or incomplete trailing tokens can mean the scan did not cover the full input.",
+      "suggestion": "Add an inherited-use note: when using WP_HTML_Processor for a complete-scan mutation, decide a fallback if `get_last_error()` is non-null and, when full input coverage matters, also check `paused_at_incomplete_token()` before returning updated HTML."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::add_class() docblock",
+      "problem": "The docs say add_class() enqueues updates and examples show preservation, but the method contract could be more explicit that it appends safely, avoids duplicate class changes, and preserves unrelated bytes.",
+      "suggestion": "Add a concise contract sentence that `add_class()` is the preferred API for adding a class to a matched opener because it preserves existing classes and untouched source bytes, avoiding manual class attribute parsing."
+    }
+  ]
+}

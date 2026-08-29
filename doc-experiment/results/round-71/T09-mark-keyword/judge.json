@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Used the right parser (`WP_HTML_Processor::create_fragment()`), walked all tokens with `next_token()`, limited matching to `#text`, compared decoded `get_modifiable_text()`, and emitted normalized output with `serialize_token()`. All HTML API calls are documented. Minor caveat: the error fallback normalizes or returns the original input, which is a deliberate fallback but would discard any wrappers already emitted before an unsupported-parser abort."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Correct processor, token walk, decoded text check, and `serialize_token()` wrapper pattern. All HTML API calls are documented. The extra `is_special( get_tag() )` branch is harmless but redundant after guarding on `get_token_type() === '#text'`; it suggests slight uncertainty about special-element opener text, which the docs say is not ordinary `#text`."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 93,
+      "hallucinated_methods": [],
+      "notes": "Main path is idiomatic and uses documented APIs only. It correctly uses the HTML Processor, `next_token()`, `#text`, decoded `get_modifiable_text()`, and `serialize_token()`. The main adherence loss is incomplete-input policy: on `paused_at_incomplete_token()` it falls back to `normalize( $html )`, which discards wrappers already emitted by the rewrite. A read-only probe with `<p>world <a` showed trials 1/2 preserve `<mark>`, while trial 3 returns the normalized original without the wrapper."
+    }
+  ],
+  "failure_analysis": "No frozen hidden case failed in any trial; all three passed 8/8. The docs did well on the central contracts: `WP_HTML_Processor::create_fragment()` is presented as the right BODY-fragment parser, `next_token()` is documented for text-aware walks, `get_modifiable_text()` explicitly says decoded text is returned and must be guarded with `get_token_type() === '#text'`, and `serialize_token()` contains a near-direct wrapper rewrite example. Near-misses were limited to fallback policy and special-element over-guarding. Trial 3 followed the incomplete-token warning too aggressively by treating `paused_at_incomplete_token()` as a reason to normalize the original input, despite the `serialize_token()` section warning that `normalize()` after a rewrite discards emitted changes. Trial 2 added a redundant special-element check even though the `#text` guard already excludes SCRIPT/STYLE/TITLE/TEXTAREA opener-carried text.",
+  "doc_gaps": [
+    {
+      "location": "`WP_HTML_Processor::serialize_token()` docblock / rewrite checklist",
+      "problem": "The docs warn that `normalize( $html )` discards emitted rewrites, but models can still apply it conditionally after `paused_at_incomplete_token()` and accidentally return a successful-looking result with transformations removed.",
+      "suggestion": "Add an explicit incomplete-trailing-token rewrite example or decision table: returning accumulated serialization preserves transformations and omits the unvisited incomplete token; normalizing the original input is a failure fallback that removes all emitted changes."
+    },
+    {
+      "location": "`WP_HTML_Processor::next_token()` and `WP_HTML_Tag_Processor::get_modifiable_text()` ordinary-text guidance",
+      "problem": "Special-element text handling is documented, but the sufficiency of the `get_token_type() === '#text'` guard could be even more direct. Trial 2 added a redundant `is_special()` branch after already limiting wrapping to `#text`.",
+      "suggestion": "Add a short note that once code requires `#text`, comments, processing instructions, and special-element opener text are already excluded; special-element checks are only needed when intentionally opting into opener-carried text."
+    },
+    {
+      "location": "`WP_HTML_Processor` method summary / inherited API notes",
+      "problem": "Inherited Tag Processor methods such as `paused_at_incomplete_token()` are usable on an HTML Processor and appear in examples, but are not as visible in the HTML Processor method table.",
+      "suggestion": "Add an inherited-methods subsection or cross-reference list for commonly used inherited methods, especially `paused_at_incomplete_token()` and `get_updated_html()`, with one-line guidance on when they apply to HTML Processor workflows."
+    }
+  ]
+}

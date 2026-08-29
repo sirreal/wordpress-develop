@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML fragment in a BODY context. It iterates through every token using next_token(), and for each token calls get_token_type() to detect text nodes ('#text'). When a text node is matched, get_modifiable_text() returns the decoded text content, which is checked for a case-sensitive substring match against the keyword. If it matches, the token is serialized via serialize_token() (which produces the normalized, properly re-encoded text content) and wrapped with literal <mark> and </mark> strings. All other tokens are serialized normally via serialize_token(). The resulting concatenation of all serialized tokens forms a normalized HTML fragment with the added mark wrappers, since serialize_token() handles proper normalization (double-quoted attributes, closed optional tags, re-encoded text, etc.).",
+  "confidence": 62
+}

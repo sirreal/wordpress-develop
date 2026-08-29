@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented HTML Processor bookmark flow: scan all `H2` tags with `next_tag()`, store the last opener with `set_bookmark()`, then `seek()` back and apply `add_class( 'final-section' )`. I return `get_updated_html()` so only the queued attribute change is emitted, and fall back to the original HTML if no `H2` is found or a processor cannot be created.",
+  "confidence": 84
+}

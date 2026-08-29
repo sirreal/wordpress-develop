@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the body fragment with structural awareness, then next_tag('A') to find anchor openers in document order. For each opener I read the decoded href with get_attribute(), required it to be a string (so boolean href attributes are excluded), and walked the subtree with next_token() plus get_current_depth() to concatenate only #text tokens via get_modifiable_text().",
+  "confidence": 94
+}

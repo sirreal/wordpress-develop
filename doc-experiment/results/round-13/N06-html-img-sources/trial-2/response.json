@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML in a BODY context. It iterates through all IMG tags using next_tag() with tag_name query. For each IMG tag, it checks the namespace using get_namespace() to exclude SVG image elements (which report 'svg' namespace instead of 'html'). The src attribute is retrieved using get_attribute(), which automatically decodes character references. Only sources with non-empty values are included in the result array.",
+  "confidence": 82
+}

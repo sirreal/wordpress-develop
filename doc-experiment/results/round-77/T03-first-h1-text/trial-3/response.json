@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the input as a body fragment, then `next_tag( 'H1' )` to locate the first heading. From that opener I recorded `get_current_depth()` and walked forward with `next_token()`, concatenating only `#text` tokens via `get_modifiable_text()` until the walk left the H1 subtree, which preserves nested-element text while ignoring markup.",
+  "confidence": 98
+}

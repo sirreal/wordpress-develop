@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correct processor: WP_HTML_Tag_Processor (tag) is the right tool for a flat attribute/class edit. Every method exists in html-tag-processor.md: constructor, next_tag(array('tag_name'=>'img')) (verbatim example at line 58), add_class (line 2223), get_updated_html (line 2289). Idiomatic token-walk: while(next_tag(...)){add_class(...)} then get_updated_html — matches the canonical reference (only diff is array query form vs string 'IMG', both documented). Passed 8/8 incl. all edge cases. Explanation correctly grounds comment-skip and case-insensitive matching in the docs. No doing_it_wrong records."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Byte-identical to trial-1. Same correct processor choice, same fully-documented methods, same idiomatic walk. Passed 8/8. Explanation accurately credits next_tag() with skipping comment contents and preserving attribute order via add_class. Confidence 90, well-calibrated."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Byte-identical to trials 1 and 2. Passed 8/8. Explanation explicitly cites ASCII case-insensitive matching 'per the documentation' (line 937/952) and correctly describes add_class create-or-append behavior. No undocumented API, no doing_it_wrong, idiomatic pattern."
+    }
+  ],
+  "failure_analysis": "No failures across any trial. All three candidates are byte-for-byte identical and pass all 8 hidden cases, including the four that probe edge-case semantics: uppercase-tag, inside-comment-ignored, unquoted-attributes, and incomplete-tag-at-end.\n\nWhat the docs did well (the reason for the clean sweep): the next_tag() reference section opens with a \"What this matches\" list (html-tag-processor.md lines 935-941) that pre-answers every tricky case in the suite. Line 937 states tag-name matching is ASCII case-insensitive AND that original source casing is preserved in output — this directly yields the uppercase-tag expectation '<IMG class=\\\"wp-image\\\" SRC=\\\"a.jpg\\\">'. Line 939 states only real HTML tags match and tag-like text inside comments 'is never matched or modified' — directly yielding inside-comment-ignored. Line 941 states truncated input pauses the processor so the incomplete tag is never matched — directly yielding incomplete-tag-at-end (output unchanged). The add_class description (line 328) notes class operations preserve whitespace and ordering, and get_updated_html (lines 2297, plus the byte-preservation sentence) guarantees untouched bytes return verbatim — together covering existing-classes and unquoted-attributes (the latter also benefits from the documented quirk at line 328 that updated attributes become double-quoted, but since add_class only touches the class attribute, src=a.jpg width=10 stay unquoted, matching the expectation).\n\nNear-misses in the explanations: none material. All three explanations are accurate. The strongest (trial-3) explicitly cites the documentation for case-insensitivity; the weakest framing is the recurring claim that comments are 'naturally/automatically skipped because next_tag() only matches real tags' — true and doc-supported, but it elides the more general fact that comment CONTENTS are treated as text (not that comments are skipped as nodes). For this task that distinction is harmless, but a subject who needed to walk comment tokens could be misled. The docs themselves are precise here (line 939); the looseness is the subject's paraphrase, not a doc gap.\"",
+  "doc_gaps": [
+    {
+      "location": "html-tag-processor.md — next_tag() reference, the two $query parameter tables (lines 952 and 2327)",
+      "problem": "There are two separate $query description blocks for next_tag() with slightly divergent wording (one says class_name 'whole class name', the other omits 'whole'; one lists tag_closers default as 'skip', the other gives no default). Subjects relied on the cleaner top-of-section 'What this matches' list; the duplicated/inconsistent param tables are a maintenance and trust hazard for harder tasks.",
+      "suggestion": "Deduplicate to a single canonical $query description, or make the two identical. Ensure each @type line states the default explicitly (e.g., tag_closers defaults to 'skip')."
+    },
+    {
+      "location": "html-tag-processor.md — add_class() method section (around line 2223)",
+      "problem": "The method section documents the create-or-append behavior and quoting, but the round-trip idiom (loop next_tag -> add_class -> get_updated_html) is only shown in scattered example snippets, not anchored at add_class itself. Subjects inferred it correctly here, but a co-located minimal end-to-end example would make the canonical pattern unmissable.",
+      "suggestion": "Add one short generic example in the add_class section showing the full add-then-get_updated_html flow on a matched tag, reinforcing that the new class is appended (not reordered) and that output bytes elsewhere are unchanged."
+    },
+    {
+      "location": "html-tag-processor.md — 'What this matches' bullets, line 939",
+      "problem": "The bullet correctly says tag-like text inside comments 'is never matched or modified', but a reader can over-generalize this to 'comments are skipped entirely as nodes', which is false (comments are visitable, modifiable tokens via the token-walking API). The explanations in two trials showed this slight over-generalization.",
+      "suggestion": "Add a half-sentence clarifying that comments themselves are still tokens the processor can stop on and modify; it is only the tag-LIKE TEXT inside a comment's data that is never parsed as a tag. Cross-link to the comment-token / get_full_comment_text section."
+    }
+  ]
+}

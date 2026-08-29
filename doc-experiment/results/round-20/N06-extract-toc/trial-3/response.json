@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` and a single `next_token()` walk so headings are collected in document order while respecting HTML structure. On each `H1` through `H6` opener it starts a record, appends decoded text from `#text` tokens via `get_modifiable_text()`, also appends modifiable text carried by nested raw-text-like element tokens, and finalizes the entry when the matching heading closer is visited.",
+  "confidence": 87
+}

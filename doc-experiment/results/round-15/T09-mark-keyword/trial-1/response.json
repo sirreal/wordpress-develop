@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I use WP_HTML_Processor::create_fragment() to parse the HTML input with proper HTML5 semantics. I iterate through all tokens using next_token(), checking each for token type. When I encounter a #text token, I retrieve its decoded text content with get_modifiable_text() and perform a case-sensitive substring match against the keyword. If the keyword is found, I wrap the serialized token in <mark> tags; otherwise I output it unchanged. All non-text tokens are serialized directly. The processor's serialize_token() method ensures output is normalized HTML automatically.",
+  "confidence": 42
+}

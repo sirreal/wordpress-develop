@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Used the correct `WP_HTML_Processor::create_fragment()` path, walked tokens with `next_token()`, guarded on `#text`, matched decoded text via `get_modifiable_text()`, and rebuilt normalized output with `serialize_token()`. All called HTML API methods are documented, and execution passed 8/8. Minor near-miss: returning raw `$html` on `create_fragment()` null or `get_last_error()` conflicts with a normalized-output contract; the docs warn that original input is neither normalized nor rewritten."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Fully idiomatic use of the documented API: HTML Processor fragment parsing, token walking, `#text` filtering, decoded text comparison, and token-by-token serialization with wrappers. All called methods are documented and there were no `_doing_it_wrong` records. Execution passed 8/8."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Same correct documented pattern as trial 1: `create_fragment()`, `next_token()`, `get_token_type()`, `get_modifiable_text()`, `serialize_token()`, and `get_last_error()` are all present in the rendered docs. Execution passed 8/8. Minor near-miss: raw-input fallback on parser creation/error is not normalized output."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial. The docs worked well for this task: `create_fragment()` and the HTML Support overview made the HTML Processor the clear choice for BODY fragments and normalization; the DOM-style text recipe warned to use only ordinary `#text` tokens, which avoided comments, attributes, and special text-bearing elements; `get_modifiable_text()` documented decoded text for `#text` nodes, which handled entity-encoded keywords; and `serialize_token()` documented token-by-token normalized rewriting, which led all trials to wrap serialized tokens rather than mutate raw strings. The main near-miss was error fallback policy: two trials returned the original raw input on parser failure, even though the `serialize_token()` docs say this discards accumulated rewrites and is not normalized.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::serialize_token() / rewrite-while-serializing guidance",
+      "problem": "The docs mention that returning original input is not normalized, but two trials still chose that fallback for parser errors in a function whose contract requires normalized output.",
+      "suggestion": "Make the fallback guidance more prescriptive: for normalized-output rewrites, return a caller-defined failure sentinel such as `null`/`''` or documented partial output; return original input only when the contract explicitly prioritizes preserving source bytes over normalization and emitted edits."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token() method docs",
+      "problem": "The public method page recommends `next_token()` throughout, but its changelog still says `Added for internal support; do not use`, which contradicts the rendered recipes.",
+      "suggestion": "Remove or qualify the `do not use` phrase in rendered public docs, or replace it with current guidance about when token walking is appropriate."
+    },
+    {
+      "location": "WP_HTML_Processor::get_last_error() example",
+      "problem": "The documented unsupported-markup example appears stale in the probed environment: the shown `<template><strong><button><em><p><em>` case did not produce `ERROR_UNSUPPORTED`.",
+      "suggestion": "Replace the example with a currently unsupported construct, such as a foster-parenting or unsupported mis-nesting case, and show checking `get_last_error()` after a scan."
+    }
+  ]
+}

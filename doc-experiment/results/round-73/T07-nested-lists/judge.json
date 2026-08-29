@@ -1,0 +1,35 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Passed 7/7. Correctly used WP_HTML_Processor::create_fragment() for BODY-fragment structure, walked tags with next_tag(), inspected get_breadcrumbs(), used add_class(), and returned get_updated_html(). All API calls are documented. Minor issue: is_tag_closer() is redundant after plain next_tag(), and it does not check get_last_error() after scanning."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Passed 7/7. Correct processor choice and fully documented API usage: create_fragment(), next_tag(), get_tag(), get_breadcrumbs(), add_class(), get_last_error(), get_updated_html(). Counting list names in breadcrumbs is less explicit than slicing off the current node, but it is valid here because the current UL/OL accounts for one count and any list ancestor makes it greater than one."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 68,
+      "hallucinated_methods": [],
+      "notes": "Passed 7/7, with no undocumented methods: WP_HTML_Tag_Processor construction, next_tag( array( 'tag_closers' => 'visit' ) ), get_tag(), is_tag_closer(), add_class(), and get_updated_html() are documented. The main adherence problem is processor choice: this is an ancestor/structure task, and the docs direct users to WP_HTML_Processor for structure. The manual lexical stack can become stale around implied or missing closers, so it is less idiomatic and less edge-safe than breadcrumbs."
+    }
+  ],
+  "failure_analysis": "All frozen cases passed for all trials, and execution.json reports no _doing_it_wrong records. The docs worked well for the successful HTML Processor solutions: the processor-choice guidance says to use WP_HTML_Processor when structure matters, get_breadcrumbs() is documented as the root-to-current path, add_class() documents class preservation/appending, and get_updated_html() documents byte preservation for untouched input. The main near-miss is trial-3: it inferred that visiting source closers with WP_HTML_Tag_Processor plus a manual stack is equivalent to parsed ancestry. That held for the well-formed cases, but it is not the API contract; the relevant warning exists in html-tag-processor.md under 'Which processor should I use' and 'Tokens and finer-grained processing', while the tag_closers/bookmark examples can still make lexical list-state tracking look generally safe.",
+  "doc_gaps": [
+    {
+      "location": "html-tag-processor.md, near next_tag() tag_closers and Bookmarks examples",
+      "problem": "The docs show manual state tracking with visited closers, but the warning that this is lexical rather than DOM-structural is separated from those examples. A model can copy the pattern for ancestry questions even though implied/virtual closers are not represented by the Tag Processor.",
+      "suggestion": "Add a local caution after tag_closers examples: closer-visiting stacks are only source-token bookkeeping; for ancestor, descendant, containment, implied-closer, or browser-tree questions, use WP_HTML_Processor with get_breadcrumbs() or depth APIs."
+    },
+    {
+      "location": "html-processor.md, get_breadcrumbs() section",
+      "problem": "The section states that breadcrumbs include the current matched node, but it does not give a compact ancestor-only pattern. This invites off-by-one reasoning when checking whether the current element has an ancestor of the same kind.",
+      "suggestion": "Add a general note and small example: for ancestor-only checks, ignore the final breadcrumb before testing, or otherwise account for the current node separately. Keep the example generic, such as checking whether an element is inside a SECTION."
+    }
+  ]
+}

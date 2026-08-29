@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body-fragment HTML, then `next_tag( 'H1' )` to find the first heading in document order. After recording the opener depth with `get_current_depth()`, I walked tokens with `next_token()` and concatenated only `#text` tokens via `get_modifiable_text()`, which returns decoded text for ordinary text nodes and preserves empty-string text for an empty H1.",
+  "confidence": 96
+}

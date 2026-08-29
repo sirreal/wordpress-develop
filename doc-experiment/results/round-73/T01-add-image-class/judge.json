@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used the correct `WP_HTML_Tag_Processor` for a flat byte-preserving class edit. All called APIs are documented: constructor, `next_tag()`, `add_class()`, and `get_updated_html()`. The loop and output retrieval match the documented pattern, and the implementation relies correctly on documented case-insensitive tag matching, comment/raw-text exclusion, class appending, and incomplete-token behavior."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Identical to trial-1. Correct processor choice, no undocumented calls, idiomatic `next_tag( 'img' )` scan with `add_class()` and `get_updated_html()`, and appropriate reliance on documented edge-case behavior."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Identical to trial-1. Correct Tag Processor usage with only documented APIs and no `_doing_it_wrong` records. The explanation also correctly identifies byte preservation, case-insensitive matching, and comment safety."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial; all three passed 8/8. The docs worked well for this task because the Tag Processor overview explicitly says to use it for flat tag/class edits where byte-exact preservation matters, while reserving the HTML Processor for structural work. `next_tag()` documentation directly covered the important hidden cases: tag-name matching is ASCII case-insensitive, tag-like text inside comments/raw text is not matched, and incomplete trailing tags are not matched. `add_class()` documentation covered creating a missing `class` attribute, appending after existing classes without reordering, and avoiding duplicate class names. `get_updated_html()` documentation made clear that queued edits are retrieved there and untouched bytes are preserved exactly. The only near-miss is discoverability: the top-level Usage section describes create/find/request changes, but the final retrieval step is mainly emphasized later under `get_updated_html()`. These subjects found it, but weaker models could stop after mutation or use serialization/casting in other tasks.",
+  "doc_gaps": [
+    {
+      "location": "`WP_HTML_Tag_Processor` class overview / Usage",
+      "problem": "The numbered usage flow lists construction, finding tags, and requesting mutations, but not the final step of retrieving the modified document. The retrieval contract is documented later, but it is not part of the first canonical workflow readers see.",
+      "suggestion": "Make the usage flow explicitly include a final step: return/read the result with `get_updated_html()` after queued mutations. Mention that serialization is for normalization/rewrite workflows, not retrieving attribute/class edits."
+    },
+    {
+      "location": "`WP_HTML_Tag_Processor::add_class()` docblock",
+      "problem": "The prose describes missing-class, existing-class, ordering, and duplicate behavior, but there is no compact before/after example near the method showing those common class-edit cases.",
+      "suggestion": "Add small generic examples for adding a class to a tag with no `class`, appending to an existing `class`, and the no-op behavior when the class is already present. This reinforces use of `add_class()` instead of manual `get_attribute()` plus `set_attribute()` string handling."
+    },
+    {
+      "location": "`WP_HTML_Tag_Processor::next_tag()` docblock",
+      "problem": "The method documents case-insensitive matching, comments/raw-text exclusion, and incomplete-token pausing, but the simplest repeated-edit loop is easier to find in overview examples than in the method-level contract.",
+      "suggestion": "Add a short method-level loop example using `while ( $processor->next_tag( 'TAG' ) ) { ... }`, and note that default matching visits openers only, so simple attribute/class edits do not need an `is_tag_closer()` guard."
+    }
+  ]
+}

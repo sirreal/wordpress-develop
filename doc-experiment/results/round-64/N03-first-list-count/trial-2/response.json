@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented `WP_HTML_Processor::create_fragment()` to parse the fragment with structure awareness, `next_tag()` to find the first `UL` or `OL`, `get_current_depth()` to identify direct `LI` children at one level deeper, and bookmarks plus `seek()`/`set_attribute()`/`get_updated_html()` to apply the attribute only after a complete scan succeeded.",
+  "confidence": 89
+}

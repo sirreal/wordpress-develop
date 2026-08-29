@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::create_fragment() to parse the HTML, then calls next_tag('H1') to locate the first H1 element. It records the depth at the H1 opener and iterates through tokens with next_token(), accumulating text from all #text nodes at depths greater than the H1's depth. This automatically handles nested elements\u2014all text inside nested tags is collected while text nodes at or below the H1's depth boundary are skipped (including the H1's closing tag). The get_modifiable_text() method returns decoded character references.",
+  "confidence": 92
+}

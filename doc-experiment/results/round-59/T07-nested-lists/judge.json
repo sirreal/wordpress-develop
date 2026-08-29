@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor::create_fragment() for structural ancestor detection and handled null creation. All API calls are documented: next_token(), get_token_type(), get_tag(), is_tag_closer(), add_class(), and get_updated_html(). The manual open-list stack is less direct than get_breadcrumbs(), but it follows the documented next_token() pattern and passed without _doing_it_wrong."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Closest to the reference. Correct fragment HTML Processor, documented next_tag() scan, get_tag(), get_breadcrumbs(), add_class(), and get_updated_html(). The is_tag_closer() guard is redundant because plain next_tag() skips closers by default, but harmless and documented."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 70,
+      "hallucinated_methods": [],
+      "notes": "Chose the structurally correct processor and used documented traversal/mutation methods, but instantiated WP_HTML_Processor directly with new. The constructor appears in the rendered docs, but its section explicitly says not to use it and execution emitted WP_HTML_Processor::__construct _doing_it_wrong on every case. This is a significant API-usage violation despite functional pass results."
+    }
+  ],
+  "failure_analysis": "No hidden case failed: all three trials passed 7/7 cases. The docs did well on the main task: the Tag Processor docs explicitly say it has no tree awareness and direct users to WP_HTML_Processor for structure; the HTML Processor docs explain create_fragment(), breadcrumbs, next_tag() scanning, add_class(), and get_updated_html(). The Breadcrumbs section gave enough information for Trial 2 to detect list ancestors, and the class/get_updated_html docs supported preserving existing class values and untouched bytes. Near misses: Trial 1 used a manual stack instead of the simpler get_breadcrumbs() ancestor check, suggesting the docs could make arbitrary-ancestor checks more obvious. Trial 3 misused the constructor, likely because the rendered method index lists __construct as public Constructor before the later warning that it is private/do-not-use and will trigger _doing_it_wrong.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md Method Index and __construct() section",
+      "problem": "The method index lists __construct as a public constructor, which makes it look callable even though the detailed section says not to use it and runtime emits _doing_it_wrong.",
+      "suggestion": "Mark the index summary as internal/do-not-call, mention the _doing_it_wrong behavior there, and point directly to create_fragment() and create_full_parser()."
+    },
+    {
+      "location": "html-processor.md Breadcrumbs section",
+      "problem": "The docs explain breadcrumbs and breadcrumb queries, but do not show the common pattern for checking whether the current element has any ancestor of a given tag while excluding the current node.",
+      "suggestion": "Add a general example using array_slice( $processor->get_breadcrumbs(), 0, -1 ) and in_array() for ancestor membership, with a note that breadcrumb queries are structural paths, not arbitrary ancestor sets."
+    },
+    {
+      "location": "html-processor.md inherited mutation/output methods",
+      "problem": "The HTML Processor add_class() entry is thin and get_updated_html() is mainly documented on the Tag Processor page, even though HTML Processor users need that exact output path after structural scans.",
+      "suggestion": "Cross-link add_class()/set_attribute() on the HTML Processor page to the byte-preserving get_updated_html() contract, and state that serialize()/normalize() are not the way to retrieve queued mutations."
+    }
+  ]
+}

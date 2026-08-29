@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Processor::create_fragment() to parse HTML with proper semantic understanding, then walks all tokens with next_token(). Tracks whether currently inside a cell (TD/TH) by monitoring opening tags, collects text via get_modifiable_text() (which decodes character references), and builds rows by capturing cell text on closing TD/TH tags and saving complete rows when TR closes or table ends. Handles optional closing tags and TBODY/THEAD implicitly through the processor's proper HTML parsing.",
+  "confidence": 58
+}

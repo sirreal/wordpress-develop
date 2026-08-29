@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in BODY context, then walked tokens with `next_token()`, appending only ordinary `#text` nodes plus opener text from `TITLE` and `TEXTAREA` tokens via `get_modifiable_text()`. I truncated the accumulated UTF-8 text by code points with `mb_strlen`/`mb_substr`, with a `preg_split('//u', ...)` fallback if mbstring is unavailable.",
+  "confidence": 92
+}

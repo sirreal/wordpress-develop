@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment, then walked tokens with `next_token()` so link text is collected from ordinary `#text` descendants only. For each opening `A` token, `get_attribute('href')` provides the decoded attribute value, and `get_current_depth()` bounds the subtree walk until the anchor closes.",
+  "confidence": 92
+}

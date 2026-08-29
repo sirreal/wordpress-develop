@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Processor::create_fragment() to create an HTML processor for the fragment, iterates through all tokens with next_token(), checks if each tag is a SPAN tag (both openers and closers have the same tag name), and skips those tokens by not calling serialize_token() on them. All other tokens are serialized, automatically producing normalized output per the task requirement.",
+  "confidence": 92
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the body fragment, then next_tag('H1') to find the first heading opener. From there I walked the subtree with next_token(), bounded by get_current_depth(), and concatenated only #text tokens via get_modifiable_text() so nested markup contributes its text while character references are already decoded.",
+  "confidence": 97
+}

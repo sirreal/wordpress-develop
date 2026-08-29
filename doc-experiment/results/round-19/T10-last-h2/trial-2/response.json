@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` for a single linear scan of the input, calling `next_tag( 'H2' )` to find each `H2` opener and repeatedly moving one bookmark (`set_bookmark`) so it always points at the most recent match. After the scan, it checks `has_bookmark`, `seek`s back to the last `H2`, adds the `final-section` class with `add_class`, and returns the edited markup with `get_updated_html()`.",
+  "confidence": 97
+}

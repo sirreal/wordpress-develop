@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the body fragment in tree-aware fragment mode, then walked tokens with next_token() and emitted each token through serialize_token() except SPAN openers and closers. A simple span-depth counter ensures nested spans are fully removed while their contents stay in place, and the emitted tokens provide the documented normalized serialization.",
+  "confidence": 86
+}

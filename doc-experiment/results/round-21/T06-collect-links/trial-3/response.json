@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because collecting an anchor\u2019s text is a tree-aware operation. It walks the fragment once with `next_token()`, starts a result entry when it sees an opening `A` tag whose `get_attribute( 'href' )` returns a string (excluding missing and boolean `href`), appends decoded text from `#text` tokens via `get_modifiable_text()`, and closes tracking when `is_tag_closer()` reports the corresponding `A` end tag.",
+  "confidence": 90
+}

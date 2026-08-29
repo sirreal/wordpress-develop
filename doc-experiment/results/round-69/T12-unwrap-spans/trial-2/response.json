@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the input as a body fragment, then walked tokens with `next_token()` and rebuilt the output with `serialize_token()`. Every `SPAN` opener and closer is skipped, so span wrappers are removed while all child content stays in place, and serialization provides the normalized HTML form requested.",
+  "confidence": 94
+}

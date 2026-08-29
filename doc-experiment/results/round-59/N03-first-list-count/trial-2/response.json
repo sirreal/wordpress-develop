@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented `WP_HTML_Processor::create_fragment()` to get a structure-aware fragment parser, then `next_tag()` with `tag_closers => 'visit'`, `get_current_depth()`, `is_tag_closer()`, `set_bookmark()`, `seek()`, `set_attribute()`, and `get_updated_html()` to find the first `UL`/`OL`, count only direct `LI` children, and only commit the attribute update if the list scan completed cleanly.",
+  "confidence": 93
+}

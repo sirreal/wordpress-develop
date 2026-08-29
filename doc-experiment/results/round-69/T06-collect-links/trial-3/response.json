@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the body fragment, next_tag('A') to visit anchor openers in document order, get_attribute('href') to read the decoded href value and exclude boolean/no-value hrefs, and next_token() with get_current_depth() plus get_modifiable_text() to collect only ordinary #text descendants until each anchor closes.",
+  "confidence": 93
+}

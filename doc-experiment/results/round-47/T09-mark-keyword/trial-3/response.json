@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the BODY-context fragment, then walks tokens with `next_token()`. It wraps only ordinary `#text` tokens whose decoded `get_modifiable_text()` contains the case-sensitive keyword, emitting normalized HTML with `serialize_token()`; this naturally skips attributes, comments, split text across nodes, and special text-bearing elements like `script`, `style`, `title`, and `textarea` because those are not exposed as `#text` child tokens.",
+  "confidence": 84
+}

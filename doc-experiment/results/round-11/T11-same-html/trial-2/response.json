@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Processor::normalize() which provides a fully parsed and standardized representation of HTML: implied tags are added, attributes are double-quoted, tag names and case are normalized, and character references are decoded. Two fragments have the same structure if and only if their normalized forms are identical. Returns false if either input cannot be fully parsed (normalize returns null).",
+  "confidence": 78
+}

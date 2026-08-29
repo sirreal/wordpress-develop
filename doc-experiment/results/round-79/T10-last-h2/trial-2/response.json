@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` because this is a flat attribute edit on tags, not a structure-aware rewrite. The function scans for every `h2` opener with `next_tag()`, keeps a single bookmark named `last-h2` on the most recent match via `set_bookmark()`, then `seek()`s back to that bookmark and applies `add_class( 'final-section' )` before returning `get_updated_html()`.",
+  "confidence": 96
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I implemented build_figure() using WP_HTML_Tag_Processor following the documented template-based approach. The function creates a template with the exact required structure, then uses next_tag() to find and modify the img tag's src and alt attributes, and next_token() with set_modifiable_text() to replace the figcaption's placeholder text with the caption. The processor's set_attribute() automatically encodes attribute values, and set_modifiable_text() handles text encoding. Finally, get_updated_html() returns the modified HTML with all special characters properly encoded.",
+  "confidence": 75
+}

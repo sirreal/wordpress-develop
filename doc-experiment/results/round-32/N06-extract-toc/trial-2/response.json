@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body fragment with tree awareness, then walks the document once with `next_token()`. On each heading opener (`H1` through `H6`) it starts a current entry, appends only `#text` token content via `get_modifiable_text()` so nested markup contributes text but not tags, and finalizes the entry when the matching heading closer is visited with `is_tag_closer()`.",
+  "confidence": 90
+}

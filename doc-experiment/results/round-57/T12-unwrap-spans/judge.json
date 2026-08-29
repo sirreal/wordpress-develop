@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 92,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor::create_fragment(), walked tokens, skipped SPAN tag tokens, and used serialize_token(). All called methods are documented, including paused_at_incomplete_token() via the Tag Processor docs inherited by the HTML Processor. Main adherence issue: it treats paused_at_incomplete_token() as a reason to return normalize($html), which discards the rewrite and can reintroduce skipped tokens on trailing incomplete syntax."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice and very close to the documented serialize_token() rewrite recipe. Using get_tag() directly in a next_token() loop is supported by the serialize_token() example and safely returns null on non-tag tokens. Minor risk: normalize($html) ?? $html as an error fallback intentionally starts over from the original input and may not preserve the transformation if reached."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice and idiomatic token-walk serialization. The get_token_type() plus get_tag() guard is clear, documented, and matches the reference shape. Minor risk: the normalize($html) ?? $html fallback after get_last_error() can discard emitted rewrites, though it is an explicit fallback policy and no _doing_it_wrong records occurred."
+    }
+  ],
+  "failure_analysis": "All trials passed all 7 hidden cases. The docs did well by exposing the exact needed pattern under WP_HTML_Processor::serialize_token(): create a fragment processor, loop with next_token(), skip tag tokens to remove wrappers, and append serialize_token() for normalized output. The next_token() docs also explicitly say the HTML Processor visits closing tokens for elements left unclosed at end of input, which likely helped with the unclosed-span case. The main near-miss is incomplete trailing syntax: trial-1 checked paused_at_incomplete_token() and then returned normalize($html), despite the rewrite docs warning that normalize($html) restarts from original bytes and does not contain skipped tokens. A probe with trailing incomplete syntax showed the accumulated rewrite can be '<p>x</p>' while normalize($html) returns '<p><span>x</span></p>', reintroducing removed markup. Trials 2 and 3 avoided that by returning the accumulated output unless get_last_error() was set.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::serialize_token() / Recipe: rewrite while serializing tokens",
+      "problem": "The docs warn that normalize($html) discards a token-by-token rewrite, but the fallback-policy paragraph still lists normalize($html) alongside safer policies. This can make models treat it as a generally safe recovery path after a rewrite loop.",
+      "suggestion": "Add a sharper contract note: for transformations whose returned string must reflect skipped, wrapped, or replaced tokens, fallback to normalize($html) or raw input is only correct when intentionally abandoning the transformation; otherwise return the accumulated output, an explicit failure value, or another contract-specific sentinel."
+    },
+    {
+      "location": "WP_HTML_Processor::serialize_token() incomplete-token guidance",
+      "problem": "paused_at_incomplete_token() is described correctly, but the distinction between an unclosed element that still receives a virtual closer and a truly incomplete trailing syntax token is easy to blur.",
+      "suggestion": "Add a small generic example showing that an unclosed element is still serialized with a closer, while a trailing incomplete token is omitted from the accumulated rewrite; state that paused_at_incomplete_token() should only reject output when the caller requires complete source bytes."
+    },
+    {
+      "location": "WP_HTML_Processor method docs for inherited Tag Processor APIs",
+      "problem": "HTML Processor examples recommend calling paused_at_incomplete_token(), but its signature appears in the Tag Processor docs rather than the HTML Processor method list, which can make inherited availability less obvious.",
+      "suggestion": "Add an inherited-method cross-reference section or inline note for commonly used inherited methods such as paused_at_incomplete_token() and get_updated_html(), clarifying they are callable on WP_HTML_Processor instances."
+    }
+  ]
+}

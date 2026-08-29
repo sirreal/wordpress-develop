@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because table extraction depends on browser-like structure, including implied table elements. It finds the first `TABLE` with `next_tag()`, then makes a single `next_token()` pass bounded by the table depth from `get_current_depth()`, opening and closing rows on `TR` tokens, cells on `TD`/`TH` tokens, and appending cell text from `#text` tokens via `get_modifiable_text()`; it also includes opener-carried text for special text-only elements (`SCRIPT`, `STYLE`, `TEXTAREA`, `TITLE`) when they appear inside a cell.",
+  "confidence": 86
+}

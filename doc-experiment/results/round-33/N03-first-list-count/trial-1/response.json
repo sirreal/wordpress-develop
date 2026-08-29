@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because counting only direct `LI` children requires tree awareness. It scans forward with `next_tag()` to find the first `UL` or `OL`, bookmarks that opener with `set_bookmark()`, records its `get_current_depth()`, then walks its subtree with `next_token()` and counts `LI` opening tags exactly one level deeper. If the scan pauses at incomplete input or hits unsupported markup (`paused_at_incomplete_token()` / `get_last_error()`), it returns the original HTML unchanged; otherwise it `seek()`s back to the list opener, applies `set_attribute()`, and returns `get_updated_html()`.",
+  "confidence": 90
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML, then iterates through all A tags with next_tag(). For each link with an href attribute, it records the current depth and walks through all nested tokens using next_token(), accumulating text from #text tokens into a single string. The href attribute is decoded automatically by get_attribute() as documented. The function returns an array of associative arrays with href and text keys, matching the required format.",
+  "confidence": 92
+}

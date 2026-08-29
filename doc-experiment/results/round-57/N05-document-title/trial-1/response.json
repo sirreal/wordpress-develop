@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_full_parser()` to parse the complete document structurally, then walked tokens with `next_token()` until I found the opening `TITLE` token. Per the documented HTML API, `TITLE` carries its decoded text on the opener token itself, so `get_modifiable_text()` returns the title text directly, including the empty-string case, while returning `null` only when no `<title>` element exists.",
+  "confidence": 98
+}

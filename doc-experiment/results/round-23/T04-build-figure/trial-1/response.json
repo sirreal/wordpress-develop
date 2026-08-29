@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` with a fixed template so the output shape and attribute order stay exact. It updates the existing `img` attributes with `next_tag()` and `set_attribute()`, then walks tokens with `next_token()` until it finds the placeholder `#text` node inside `figcaption` and replaces it via `set_modifiable_text()`, finally returning the fragment with `get_updated_html()`.",
+  "confidence": 96
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment with structural awareness, then `next_tag()` to find the first `UL` or `OL`, `get_current_depth()`/`next_token()` to scan that list\u2019s subtree, and `set_bookmark()`/`seek()` plus `set_attribute()` to update the opener only after verifying the scan finished cleanly with no truncation or unsupported-markup error.",
+  "confidence": 92
+}

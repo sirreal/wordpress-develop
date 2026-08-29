@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Identical to the reference: `null !== WP_HTML_Processor::normalize($html)`. Correct processor (HTML Processor for structural normalization). Every method documented: `normalize()` heading (html-processor.md:938-988) explicitly returns `string|null` with 'null if unable to normalize'. Idiomatic — uses the documented one-call static shortcut for BODY-context fragments. Edge cases correct: empty input normalizes to '' (non-null) so returns true; adoption-agency case returns null so returns false. The serialize trigger_error ('Cannot serialize ... parsing error: unsupported') is expected internal behavior, not subject misuse. Self-confidence 95, well-calibrated. 7/7 passed."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Two-step approach: `create_fragment()` then `serialize()`, null-checking both. Correct processor. Both methods documented (create_fragment at :348-383 returns static|null; serialize at :990-1038 returns string|null with 'null if unable to generate serialization'). This is exactly the pattern html-processor.md:947 prescribes for creating a processor and calling serialize(). The defensive `null === $processor` check is technically redundant for the always-`<body>` default context (create_fragment won't fail here), but it is documented behavior and harmless — not a misconception or undocumented usage, so no deduction. Edge cases handled identically to trial 1. Lower self-confidence (78) is the only near-miss; the implementation is sound. 7/7 passed."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Identical implementation to trial 1 (`null !== WP_HTML_Processor::normalize($html)`). Explanation is the most thorough of the three: correctly reasons that malformed-but-supported markup (unclosed tags, implied closes, well-formed tables) normalizes to non-null while unsupported misnesting aborts to null, directly mirroring the docs at html-processor.md:83-87. Self-confidence 92, well-calibrated. 7/7 passed."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed in any trial — all three trials passed 7/7. This task is a near-ideal match between the documentation and the required behavior, so the analysis focuses on what the docs did well and minor near-misses.\n\nWhat the docs did well:\n1. The overview passage at html-processor.md:83-84 is the linchpin. It plainly states the failure model: 'If any unsupported markup appears ... the HTML Processor will abort early' and 'methods which produce output (such as serialize() and normalize()) return null.' This single passage maps the task ('return false for unsupported markup') onto the API contract (null return) unambiguously. All three subjects cited this mechanism in their explanations.\n2. Both output methods have explicit `string|null` signatures and 'Returns' rows spelling out the null case: normalize() at :988 ('Normalized output, or null if unable to normalize') and serialize() at :1038 ('null if unable to generate serialization'). This let trials converge on a clean `null !== result` check rather than guessing at exceptions or boolean flags.\n3. html-processor.md:947 explicitly documents the relationship between the static `normalize()` shortcut and the `create_fragment()` + `serialize()` two-step form, which is why both the one-call (trials 1/3) and two-call (trial 2) approaches were correct and idiomatic.\n4. Lines 86-87 enumerate exactly which constructs abort vs. parse (well-formed tables, foreign content, TEMPLATE parse; only 'specific constructs' abort), which reassured subjects that the task's table and unclosed-tag examples normalize fine — preventing false negatives on the well-formed-table-true and unclosed-true cases.\n\nNear-misses / minor friction:\n- Trial 2 added a `null === $processor` guard after create_fragment(). This is correct defensive code per the documented `static|null` return, but it is dead in the always-`<body>` default context. The docs (create_fragment :381-383) state null is returned 'if unsuccessful' without explaining WHEN create_fragment itself fails (e.g., unsupported context/encoding) versus when the later serialize() fails. A reader cannot tell from the docs whether unsupported MARKUP surfaces as a null from create_fragment or only later from serialize(). The subject correctly guessed serialize() is where markup-level failure appears, but the docs leave that division of responsibility implicit. This caused no failure but is the only documentation ambiguity the trials brushed against.\n- The 'unsupported parsing error' trigger_error emitted on the adoption-agency case (visible in all three execution.json files) is internal and expected; no subject mishandled it, but the docs do not warn that calling serialize()/normalize() on unsupported input emits a _doing_it_wrong notice in addition to returning null — a caller suppressing or asserting on warnings could be surprised.\"",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::create_fragment() — Returns section (html-processor.md:381-383)",
+      "problem": "The doc says create_fragment returns null 'if unsuccessful' but never states what makes it fail. A reader cannot distinguish create_fragment failure (e.g., unsupported context or encoding) from later serialize()/normalize() failure caused by unsupported MARKUP. This drove trial 2 to add a redundant null-check on create_fragment under the assumption that markup problems might surface there.",
+      "suggestion": "Add one sentence clarifying that create_fragment returns null only for invalid construction arguments (currently a non-default context or non-UTF-8 encoding), and that unsupported MARKUP does not fail here — it surfaces later when an output method (serialize/normalize) or token walk runs and the processor aborts. Cross-link to the 'abort early / return null' passage."
+    },
+    {
+      "location": "WP_HTML_Processor::serialize() and ::normalize() — Returns / behavior notes (html-processor.md:988, 1038)",
+      "problem": "The docs state these methods 'return null' on unsupported input but do not mention that the same condition also emits a _doing_it_wrong / wp_trigger_error ('Cannot serialize HTML Processor with parsing error: unsupported'). Callers that treat PHP notices as fatal, or that assert no-warnings in tests, can be surprised even though the null return is the documented signal.",
+      "suggestion": "Add a short note that, in addition to returning null, attempting to serialize/normalize input the processor cannot support raises a developer notice describing the unsupported construct, and that the null return value (not the absence of a notice) is the canonical, suppressable way to detect failure programmatically."
+    },
+    {
+      "location": "WP_HTML_Processor class overview — failure-handling guidance (html-processor.md:83-84)",
+      "problem": "The overview correctly ties unsupported markup to null returns, but does not point readers to the canonical idiom for a boolean 'can this be normalized?' feasibility check. Subjects had to infer that `null !== normalize($html)` is the intended pattern (they did, but it required synthesis).",
+      "suggestion": "Add a one-line generalizable example in the failure-handling paragraph showing the feasibility-check idiom — e.g., 'To test whether a fragment can be fully normalized, check `null !== WP_HTML_Processor::normalize($html)`.' This is a general API pattern (null-return-as-feasibility-signal), not a task-specific solution, and would make the contract explicit rather than inferred."
+    }
+  ]
+}

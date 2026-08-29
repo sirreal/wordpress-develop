@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This builds from a fixed HTML template so the `img` attributes already exist in the required `src` then `alt` order, then uses `WP_HTML_Tag_Processor::next_tag()` and `set_attribute()` to safely encode the attribute values, `next_token()` plus `get_token_type()` to find the placeholder text node inside `figcaption`, and `set_modifiable_text()` to safely encode the caption before returning `get_updated_html()`.",
+  "confidence": 95
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` for structure-aware traversal and `next_token()` plus `get_breadcrumbs()` to detect whether a `UL` or `OL` opener has any list ancestor above it. When a nested list is found, I call `add_class( 'nested-list' )`, then return `get_updated_html()` so untouched bytes are preserved exactly.",
+  "confidence": 96
+}

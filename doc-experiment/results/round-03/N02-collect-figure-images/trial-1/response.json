@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This implementation uses WP_HTML_Processor to parse the HTML fragment and find IMG elements. It iterates through all IMG tags found via next_tag(), then uses matches_breadcrumbs() with wildcard pattern matching to verify the IMG is nested inside a FIGURE element at any depth. For each qualifying IMG, it retrieves the src attribute value using get_attribute(), validates that it's a non-empty string, and collects it in the result array in document order.",
+  "confidence": 70
+}

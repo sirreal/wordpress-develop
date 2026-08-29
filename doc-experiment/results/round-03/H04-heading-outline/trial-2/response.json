@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML, then iterates through tags looking for heading elements (H1-H6). For each heading found, it uses next_token() to walk through all tokens inside that heading, accumulating text content from #text tokens via get_modifiable_text(). It uses get_current_depth() to detect when it has exited the heading element, ensuring only direct and nested text content is captured, not following elements.",
+  "confidence": 72
+}

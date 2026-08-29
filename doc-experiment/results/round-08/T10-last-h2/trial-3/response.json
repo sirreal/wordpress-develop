@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Tag_Processor to scan linearly through the HTML document and find H2 tags (excluding those in comments, which the processor automatically skips). It counts all H2 tags on the first pass, then reconstructs the processor to iterate again and add the class \"final-section\" to the last H2 found using the add_class() method, which safely handles attribute updates while preserving everything else byte-for-byte. The get_updated_html() method returns the modified HTML with all changes applied.",
+  "confidence": 75
+}

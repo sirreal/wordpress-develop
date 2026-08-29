@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function creates a WP_HTML_Tag_Processor instance and iterates through all tokens using next_token() until the document is exhausted. The processor automatically pauses when it encounters an incomplete token at the end of the input (like a truncated tag, unterminated comment, or unclosed SCRIPT element). The paused_at_incomplete_token() method returns true in these cases, allowing us to detect whether the HTML tail is incomplete. This approach correctly handles all edge cases: a lone < is treated as text (complete), unclosed elements are lexically complete (returns false), and actual incomplete tokens like <div class=\"x are detected (returns true).",
+  "confidence": 92
+}

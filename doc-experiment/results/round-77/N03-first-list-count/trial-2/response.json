@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the HTML Processor fragment parser to find the first UL or OL in document order, bookmarked that opener, scanned forward with next_token() to count only direct LI children at one depth below the list opener, and then sought back to add the data-item-count attribute. I also guarded against truncated or unsupported input by returning the original HTML when paused_at_incomplete_token() is true or get_last_error() is non-null.",
+  "confidence": 88
+}

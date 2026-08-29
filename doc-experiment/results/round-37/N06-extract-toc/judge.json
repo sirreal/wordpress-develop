@@ -1,0 +1,35 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Correctly used WP_HTML_Processor::create_fragment(), next_token(), get_token_type(), get_tag(), is_tag_closer(), and get_modifiable_text(), all documented. The one-pass closer-driven state machine is well aligned with the docs on virtual/implied closers and handles empty/unclosed headings. Small penalty: it opts into SCRIPT/STYLE/TEXTAREA/TITLE modifiable text even though the text-extraction recipe says special-element text should be included only when the caller contract explicitly asks for it."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and fully documented API surface. It records headings on opener tokens and closes them on matching closer tokens, which matches the documented guarantee that HTML Processor visits virtual closers for implicit and end-of-input closes. It naturally includes empty headings and decoded ordinary text. Same small special-element penalty as trial-1: it broadens heading text to text-only special elements without an explicit task requirement."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Closest to the canonical documented subtree pattern: next_tag() finds heading openers, get_current_depth() anchors a bounded next_token() walk, and get_modifiable_text() is read only from #text tokens plus an explicit special-element whitelist. get_token_name() is documented in the rendered files. Small penalty for the same over-broad special-element opt-in; otherwise the API use is idiomatic and robust."
+    }
+  ],
+  "failure_analysis": "No frozen hidden case failed in any trial: all three execution.json files report 7/7 passing with no _doing_it_wrong records. The docs did well on the important points for this task: the HTML Processor overview tells users to choose WP_HTML_Processor for document structure and subtree text; next_token() documents that text requires token walking, that implied and end-of-input closers are visited, and that one cursor must be managed carefully; get_current_depth() documents the >= bounded-walk rule; get_modifiable_text() documents decoded #text output, preventing the entity case from failing. The main near-miss is special-element text. All trials explicitly included SCRIPT, STYLE, TEXTAREA, and TITLE opener text. That did not affect the frozen tests, but it would diverge from the reference on inputs such as a heading containing script or textarea content. This appears to come from the docs' necessary but easy-to-overgeneralize note that special elements carry text on their opener token; the nearby opt-in warning is present, but models still treated it as generally desirable for heading text extraction.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md, Recipe: collect DOM-style text from a subtree / get_modifiable_text()",
+      "problem": "The docs state the opt-in rule for SCRIPT/STYLE/TEXTAREA/TITLE, but all candidates still included those tokens for a generic text-extraction task.",
+      "suggestion": "Add a sharper visible-or-ordinary-text rule: for generic label, heading, link, or article text extraction, collect only #text tokens; include special-element opener text only when the caller explicitly asks for raw/script/style/form-control text."
+    },
+    {
+      "location": "html-processor.md, next_token() single-cursor guidance",
+      "problem": "The docs warn against nested next_token() loops for repeated regions, while other examples show bounded subtree walks after next_tag(). This distinction is subtle.",
+      "suggestion": "Clarify that a bounded inner subtree walk is safe when the outer scan resumes with next_tag()/next_token() after the subtree boundary is intentionally consumed, and contrast that with the unsafe pattern where an outer next_token() loop expects to process the boundary token itself."
+    }
+  ]
+}

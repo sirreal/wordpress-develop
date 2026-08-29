@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor to build an HTML figure fragment from untrusted values. It creates a template with the exact required structure (figure with img and figcaption), then uses next_tag() to find the img element and set_attribute() to safely encode the src and alt attributes while preserving their order. For the caption text, it iterates through tokens with next_token(), finds the first #text token (the placeholder in figcaption), and uses set_modifiable_text() to safely encode the caption. Finally, it returns the result via get_updated_html(), which automatically handles all HTML entity encoding.",
+  "confidence": 90
+}

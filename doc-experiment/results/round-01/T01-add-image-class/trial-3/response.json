@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` from the HTML Tag Processor documentation. The approach is: construct a processor with the input HTML, loop calling `next_tag('img')` to find each IMG opener (the processor skips tag closers by default and correctly ignores IMG-like content inside HTML comments, SCRIPT, STYLE, and other special elements), call `add_class('wp-image')` on each match (which appends to any existing classes without removing them), then return `get_updated_html()` to get the modified document. Tag name matching in `next_tag()` is case-insensitive per the documentation examples.",
+  "confidence": 97
+}

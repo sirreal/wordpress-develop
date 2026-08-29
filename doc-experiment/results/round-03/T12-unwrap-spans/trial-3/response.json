@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML fragment, then iterates through all tokens with next_token(). For each SPAN tag (both opening and closing), it skips the token via continue; for all other tokens it serializes them with serialize_token() and concatenates to build the output. This preserves the contents of spans while removing the span tags themselves. The processor automatically normalizes the HTML during serialization (double-quoted attributes, proper tag closure, text re-encoding, etc.).",
+  "confidence": 82
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML with full structural awareness, then loops through each P tag using next_tag(). For each P tag, it retrieves the breadcrumbs (the stack of ancestor elements) using get_breadcrumbs() and checks if 'BLOCKQUOTE' is present anywhere in that stack. If found, it adds the 'quoted' class using add_class(). Finally, it returns the modified HTML using get_updated_html(). The processor preserves byte-exact output for all other content.",
+  "confidence": 85
+}

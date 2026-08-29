@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the HTML Processor\u2019s fragment parser to scan the document once, bookmarking each matching H2 opener so the bookmark ends up on the last one seen; then I seek back to that bookmark and add the `final-section` class with the documented `add_class()` API before returning `get_updated_html()`.",
+  "confidence": 89
+}

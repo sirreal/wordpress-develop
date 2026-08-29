@@ -1,0 +1,124 @@
+{
+  "round": "round-61",
+  "mode": "discoverability-probe",
+  "question_id": "html-processor-factory-lifecycle",
+  "question": "Can application code instantiate WP_HTML_Processor directly with new WP_HTML_Processor(  )? If not, which documented factory methods should be used for a body fragment and for a full HTML document, and what do the docs say happens when the constructor is used directly? Answer only from the rendered docs and cite headings.",
+  "subject": {
+    "model": "gpt-5.4-mini",
+    "reasoning_effort": "low",
+    "service_tier": "priority"
+  },
+  "subject_isolation": {
+    "enforced": true,
+    "agent_type": "codex-cli-isolated-workdir",
+    "isolation_mode": "isolated-workdir",
+    "runner": "codex exec",
+    "input_delivery": "prompt-embedded-docs",
+    "sandbox_mode": "read-only",
+    "approval_policy": "never",
+    "project_rules_loaded": false,
+    "user_config_loaded": false,
+    "repo_available_to_subject": false,
+    "input_files": [
+      "html-processor.md",
+      "html-tag-processor.md",
+      "probe question"
+    ],
+    "work_root": "/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/html-api-docs-eval/round-61/codex-cli-probes"
+  },
+  "result": [
+    {
+      "id": "html-processor-factory-lifecycle",
+      "trial_id": "probe-1",
+      "response": {
+        "answer": "No. The docs say `WP_HTML_Processor` should not be instantiated directly with `new WP_HTML_Processor( ... )`; application code should use the static creators instead. For a body fragment, use `WP_HTML_Processor::create_fragment( $html )`. For a full HTML document, use `WP_HTML_Processor::create_full_parser( $html )`. The direct constructor is documented as: \"Do not use this method. Use the static creator methods instead.\"",
+        "citations": [
+          {
+            "file": "html-processor.md",
+            "heading": "### `create_fragment()`",
+            "support": "\"Creates an HTML processor in the fragment parsing mode.\" and \"Use this for cases where you are processing chunks of HTML that will be found within a bigger HTML document...\""
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "### `create_full_parser()`",
+            "support": "\"Creates an HTML processor in the full parsing mode.\""
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "### `__construct()`",
+            "support": "\"Do not use this method. Use the static creator methods instead.\""
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "### `__construct()`",
+            "support": "\"This constructor should not be called manually.\""
+          }
+        ],
+        "rationale": "The constructor heading explicitly forbids direct use, while the two factory headings name the documented creation paths for fragment and full-document parsing.",
+        "confidence": 100
+      }
+    },
+    {
+      "id": "html-processor-factory-lifecycle",
+      "trial_id": "probe-2",
+      "response": {
+        "answer": "No. The docs say application code should not call `new WP_HTML_Processor( ... )` directly; use `WP_HTML_Processor::create_fragment( $html )` for a body fragment and `WP_HTML_Processor::create_full_parser( $html )` for a full HTML document. The constructor page says: `Do not use this method. Use the static creator methods instead.` and `This constructor should not be called manually.` The docs do not state a separate runtime result for direct constructor use beyond that prohibition.",
+        "citations": [
+          {
+            "file": "html-processor.md",
+            "heading": "### `create_fragment()`",
+            "support": "Creates an HTML processor in the fragment parsing mode. Use this for cases where you are processing chunks of HTML that will be found within a bigger HTML document ..."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "### `create_full_parser()`",
+            "support": "Creates an HTML processor in the full parsing mode. It's likely that a fragment parser is more appropriate, unless sending an entire HTML document from start to finish."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "### `__construct()`",
+            "support": "Constructor. Do not use this method. Use the static creator methods instead. ... This constructor should not be called manually."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "### `HTML Support`",
+            "support": "Construction differs between the two classes: this class is created through its static factories — create_fragment() for markup that lives inside a BODY, create_full_parser() for complete documents — while the Tag Processor is created directly with `new WP_HTML_Tag_Processor( $html )` and has no factory methods."
+          }
+        ],
+        "rationale": "The constructor heading explicitly forbids manual use and points to static creators, while the factory headings identify the fragment and full-document entry points; the docs do not describe any additional behavior that occurs if the constructor is invoked directly.",
+        "confidence": 97
+      }
+    },
+    {
+      "id": "html-processor-factory-lifecycle",
+      "trial_id": "probe-3",
+      "response": {
+        "answer": "No. The docs say `WP_HTML_Processor` should be created with static factory methods, not by calling `new WP_HTML_Processor( ... )` directly. Use `WP_HTML_Processor::create_fragment( $html )` for HTML fragments that live inside `<body>`, and `WP_HTML_Processor::create_full_parser( $html )` for a full HTML document. The constructor section explicitly says, \"Do not use this method. Use the static creator methods instead,\" and notes that the constructor parameter `$use_the_static_create_methods_instead` means the constructor should not be called manually.",
+        "citations": [
+          {
+            "file": "html-processor.md",
+            "heading": "### Usage",
+            "support": "\"Call a static creator method with your input HTML document.\" The usage example shows `WP_HTML_Processor::create_fragment( $html )`."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "### `create_fragment()`",
+            "support": "\"Creates an HTML processor in the fragment parsing mode.\" and \"Use this for cases where you are processing chunks of HTML that will be found within a bigger HTML document...\""
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "### `create_full_parser()`",
+            "support": "\"Creates an HTML processor in the full parsing mode.\" and \"It's likely that a fragment parser is more appropriate, unless sending an entire HTML document from start to finish.\""
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "### `__construct()`",
+            "support": "\"Do not use this method. Use the static creator methods instead.\" The parameter `$use_the_static_create_methods_instead` says, \"This constructor should not be called manually.\""
+          }
+        ],
+        "rationale": "The usage and factory-method sections specify the supported creation paths, and the constructor section explicitly forbids manual direct construction, which answers both the body-fragment and full-document cases.",
+        "confidence": 99
+      }
+    }
+  ]
+}

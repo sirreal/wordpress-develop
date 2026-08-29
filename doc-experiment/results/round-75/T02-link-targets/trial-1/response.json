@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan tags linearly and `get_attribute( 'href' )` to detect any `A` opener with an `href`, including empty-string and boolean `href` forms. For each match I applied `set_attribute( 'target', '_blank' )`, then returned `get_updated_html()` so untouched bytes remain preserved exactly as documented.",
+  "confidence": 96
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::create_fragment() to parse the HTML in BODY context, iterating through A tags with next_tag(). For each A tag with an href attribute, it collects all text node content by using next_token() to walk through tokens at the same or greater depth, concatenating text from #text tokens using get_modifiable_text() which automatically decodes character references. This approach respects the HTML structure and correctly handles nested markup by excluding it from the text collection.",
+  "confidence": 72
+}

@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 82,
+      "hallucinated_methods": [],
+      "notes": "Correct processor (WP_HTML_Processor::create_fragment) and only documented methods (next_tag, get_current_depth, next_token, get_token_type, get_modifiable_text). Followed the documented token-walking + depth-boundary idiom. The single defect: used strict `> $h1_depth` for the loop guard instead of `>=`. The get_current_depth() docblock (lines 846-849, 885, and the explicit closing warning at line 893) states that a child element's closer reports a depth NO LESS than the container's, so `>` terminates the walk at the first child closer. For `<h1>A <em>B</em> C</h1>` the `</em>` closer reports depth 3 (equal to the H1 opener), aborting the loop and dropping ' ' and 'C' -> 'A B' instead of 'A B C'. Every documented example used `>=`; the candidate deviated from the copyable pattern and hit precisely the failure the docs warn about. Idiomatic-use and edge-case points docked for the boundary error; no processor-choice or hallucination penalty. Confidence 92 was overconfident given the deviation."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and only documented methods. Used `>= $depth_inside_h1` boundary exactly as the get_current_depth()/next_token() examples prescribe, so nested-element closers are walked through and split #text tokens accumulated. Passed all 8 hidden cases including nested-markup, image-only-empty-string (returns '' not null), unclosed-h1 (relies on the documented guarantee that every opener gets a closer even in malformed input), and first-of-two. Used the array query form next_tag(array('tag_name' => 'h1')); tag matching is case-insensitive so 'h1' works. Explanation is accurate and matches behavior. Fully idiomatic."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Identical correct structure to trial-2 with the string query form next_tag('H1'). Correct processor, only documented methods, `>= $h1_depth` boundary per the documented idiom, accumulates split #text tokens, returns '' (not null) for image-only H1 and null only when no H1 found. Passed all 8 cases. Explanation correctly describes depth-boundary termination at the H1 closer and automatic character-reference decoding by get_modifiable_text()."
+    }
+  ],
+  "failure_analysis": "One hidden case failed across all trials: trial-1 / `nested-markup` (`<h1>A <em>B</em> C</h1>`, expected 'A B C', actual 'A B').\n\nMisconception: the candidate believed that text directly inside the H1 lives at a depth strictly greater than the H1's opener depth, and therefore that `get_current_depth() > $h1_depth` would correctly fence the H1's content. It does not. Probe confirms the depth sequence: H1 opener = 3; 'A ' #text = 4; `<em>` = 4; 'B' #text = 5; `</em>` CLOSER = 3; ' ' #text = 4; 'C' #text = 4; `</h1>` closer = 2. The `</em>` closer reports depth 3 — equal to, not greater than, the H1 opener — because a closing token is matched AFTER its element is popped from the stack of open elements, so it reports the parent context's depth. The strict `>` guard sees depth 3 at `</em>` and exits the loop before reaching ' ' and 'C'. Compounding it, the trailing text ' C' is delivered as two separate #text tokens, the documented 'text content may be split across several consecutive #text tokens' behavior.\n\nResponsible documentation: this is a documentation success, not a gap. The behavior is stated three times in the get_current_depth() section of html-processor.md: (1) the prose at lines 846-849 ('every token inside it reports a depth of at least N, the closers of its child elements included ... continue while the depth remains at or above that value'); (2) both runnable examples (lines 885 and 626) use `>=`; (3) the explicit closing warning at line 893: 'Writing `>` instead would end the walk early, at the first closer of a direct child.' The next_token() example (lines 620-636) repeats the `>=` idiom and notes nested closers 'report a depth no lower than the LI's contents.' Trial-1 simply deviated from the copyable pattern and reintroduced exactly the bug the docs call out. Trials 2 and 3 copied the `>=` idiom and passed everything.\n\nNear-miss in explanations: all three self-reported confidence 92. Trial-1's confidence was unjustified given it diverged from the documented `>=`; its explanation even claims 'text nodes at or below the H1's depth boundary are skipped (including the H1's closing tag)' — a correct description of intent that its `>` code does not implement, since it also wrongly skips content following a child closer. The other near-failure surface the docs handled well: image-only-empty-string and unclosed-h1 both passed in all trials because the docs clearly state get_modifiable_text() decoding, the empty-string-for-no-text contract, and the guarantee that every opener yields a closer even in malformed/unclosed input.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_current_depth() — html-processor.md, depth-boundary explanation (lines 846-893)",
+      "problem": "The decisive `>` vs `>=` distinction is documented thoroughly but the warning lives in a trailing paragraph (line 893) AFTER both example code blocks, while the inline example comments only show the correct `>=` without flagging the wrong alternative at the point of use. A reader who skims the example and stops before the final paragraph can still write `>` (trial-1 did). The off-by-one is the single highest-frequency error for this whole API pattern.",
+      "suggestion": "Hoist the pitfall to the point of use: add an inline comment on the `>=` line of the example itself, e.g. `// Must be >=, not >: a child element's closer reports the SAME depth as the container's contents, so `>` would stop at the first nested closing tag.` Keeping the warning adjacent to the copyable line (rather than a paragraph below the code) reduces the chance it is skimmed past."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token() — html-processor.md, depth-boundary example (lines 620-641)",
+      "problem": "This example also uses the `>=` guard but, unlike the get_current_depth() section, contains no warning that `>` is wrong. Because the two sections cover overlapping ground, a reader landing on next_token() first gets the pattern without the rationale for `>=`, weakening the lesson.",
+      "suggestion": "Add a one-line cross-reference or inline caution on the `>=` guard here too (e.g. 'use >= not >; see get_current_depth() for why closers of nested children share the container's depth'). Consistent warnings across every place the idiom appears prevent a reader from copying the unannotated instance."
+    },
+    {
+      "location": "Token-walking guidance — both files, where the depth-boundary idiom appears",
+      "problem": "The breadcrumb-based guard `in_array('CONTAINER', get_breadcrumbs(), true)` (shown at line 640) is mentioned as 'the same walk' but is not presented as the safer default. It is immune to the `>`/`>=` off-by-one entirely because membership in the breadcrumb array does not depend on a comparison operator, and it reads identically on openers, text nodes, and closers.",
+      "suggestion": "Promote the breadcrumb guard as the recommended, hard-to-misuse form for 'collect everything inside element X' tasks, with the depth comparison presented as the lower-overhead alternative that requires the exact `>=` operator. Steering readers toward the boundary check that has no off-by-one failure mode would have prevented trial-1's failure outright."
+    }
+  ]
+}

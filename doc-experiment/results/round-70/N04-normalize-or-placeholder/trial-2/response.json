@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented `WP_HTML_Processor::normalize()` API to normalize the body-context HTML fragment, and returned the required fallback HTML when normalization returns `null` for unsupported input.",
+  "confidence": 96
+}

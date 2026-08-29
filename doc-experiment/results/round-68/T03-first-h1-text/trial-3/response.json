@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment, `next_tag('H1')` to locate the first H1 opener, and then a depth-bounded `next_token()` walk with `get_token_type()`, `get_modifiable_text()`, and `get_current_depth()` to collect only ordinary text nodes inside that heading, including nested descendants. The function returns `null` only when no H1 is found.",
+  "confidence": 96
+}

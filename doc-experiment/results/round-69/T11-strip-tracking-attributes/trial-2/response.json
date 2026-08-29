@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented `WP_HTML_Tag_Processor` to scan every tag in linear order, then `get_attribute_names_with_prefix( 'data-track-' )` to identify only attributes with the required prefix and `remove_attribute()` to delete them. Finally, `get_updated_html()` returns the modified HTML while preserving all untouched bytes exactly as documented.",
+  "confidence": 98
+}

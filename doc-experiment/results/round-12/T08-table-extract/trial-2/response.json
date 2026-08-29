@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::create_fragment() to parse the HTML with full structural awareness. It finds the first TABLE element using next_tag(), then iterates through tokens within the table using next_token() with depth-based boundary checking. For each TR tag opening, it initializes a new row; for TD/TH tag openings, it initializes a cell text accumulator; for text tokens (#text), it appends the decoded text via get_modifiable_text(). Tag closers trigger row and cell flushing. The solution handles omitted closing tags and both TD and TH elements, following the documented pattern for collecting text from table structures.",
+  "confidence": 75
+}

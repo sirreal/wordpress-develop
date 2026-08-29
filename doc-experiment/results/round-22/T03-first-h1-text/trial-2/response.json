@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because extracting an element\u2019s text is a tree-aware operation, then finds the first `H1` with `next_tag()`, records its depth with `get_current_depth()`, and walks its subtree with `next_token()`, concatenating only `#text` tokens via `get_modifiable_text()`, which the docs say already returns decoded text such as `&amp;` as `&`.",
+  "confidence": 93
+}

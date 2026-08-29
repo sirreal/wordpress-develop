@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented HTML Processor fragment API to parse the input in `<body>` context via `WP_HTML_Processor::create_fragment()` and then returned its normalized serialization with `serialize()`. If processor creation fails, serialization returns `null`, the parser reports an error, or parsing pauses on an incomplete token, the function falls back to the exact placeholder HTML.",
+  "confidence": 94
+}

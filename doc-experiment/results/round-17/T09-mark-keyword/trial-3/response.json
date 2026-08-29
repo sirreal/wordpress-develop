@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor's token-by-token walk to find text nodes, check if they contain the keyword via decoded text comparison, and conditionally wrap matching nodes in `<mark>` tags. Non-matching tokens are serialized normally. The processor handles all HTML normalization automatically during serialization, including closing tags and normalizing attributes to double-quoted form.",
+  "confidence": 75
+}

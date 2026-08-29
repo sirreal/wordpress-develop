@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the input as a body fragment, then walked tokens with `next_token()` and appended each normalized token via `serialize_token()` except `SPAN` openers and closers. That preserves all span contents while returning normalized HTML, and I check `get_last_error()` plus `paused_at_incomplete_token()` before accepting the rewritten output.",
+  "confidence": 94
+}

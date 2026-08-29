@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Correctly used WP_HTML_Processor::create_fragment(), next_token(), get_token_type(), get_modifiable_text(), serialize_token(), get_last_error(), and normalize(); all are documented in the rendered files. The implementation follows the documented token-by-token serialization pattern and compares decoded #text content, so comments, attributes, split text, and special element opener-carried text are avoided. Minor deduction: the get_last_error() fallback normalizes the original input and may return raw unnormalized input if normalization fails, discarding any accumulated rewrite by policy."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Best adherence. It chooses the HTML Processor, walks tokens, gates text handling on get_token_type() === '#text', compares decoded get_modifiable_text(), emits wrappers with serialize_token(), and checks get_last_error() before returning. All API calls are documented and there were no _doing_it_wrong records."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Correct API choice and all called HTML API methods are documented. It uses the intended serialize_token() rewrite pattern and handles decoded text and special text-bearing elements correctly by requiring #text tokens. Minor deduction: the '' !== $text guard is redundant for the non-empty-keyword contract and hints at the empty-string/modifiable-text ambiguity; the unsupported-markup fallback has the same discard/raw-output caveat as trial-1."
+    }
+  ],
+  "failure_analysis": "All trials passed all 8 hidden cases, so there is no failed case to attribute to a documentation gap. The rendered docs did well on the core distinctions this task needed: the HTML Processor docs say to use create_fragment() for BODY-context fragments and normalized structural output; next_token() is documented for text and non-tag tokens; get_modifiable_text() clearly says #text is decoded while comments and SCRIPT/STYLE are raw and warns it is not a predicate for ordinary DOM text; serialize_token() explicitly supports token-by-token rewriting by emitting extra markup around selected tokens. The near-miss is in trial-1 and trial-3 fallback behavior: after get_last_error(), they call normalize($html) on the original input and may return raw input if that fails. The serialize_token()/normalize() docs warn that normalizing the original after a rewrite discards emitted changes, but this warning could be easier to discover from get_last_error() itself.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_last_error() docblock",
+      "problem": "The method explains how to distinguish parser aborts from not-found results, but it does not point rewrite callers to a concrete post-scan policy.",
+      "suggestion": "Add a short note that token-by-token rewrite callers should inspect get_last_error() before returning accumulated output, and should deliberately choose a fallback such as empty string, null-equivalent, or original input, because fallback serialization of the original input discards emitted edits."
+    },
+    {
+      "location": "WP_HTML_Processor::serialize_token() docblock",
+      "problem": "The docs state that wrappers can be emitted around selected tokens, but the example demonstrates removal rather than insertion/wrapping.",
+      "suggestion": "Add a small generic example showing a rewrite loop that wraps selected #text tokens with caller-provided markup using serialize_token(), while noting that inserted literal markup is not escaped by serialize_token()."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::get_modifiable_text() docblock",
+      "problem": "The empty-string caveat is present, but it is easy to miss that an empty returned string is not evidence that the current token lacks modifiable text.",
+      "suggestion": "Promote the empty-string contract into the return description: returns decoded/raw modifiable text for tokens that carry it, and also returns '' both for no modifiable text and for legitimately empty modifiable text; use get_token_type()/get_token_name() to decide token kind."
+    }
+  ]
+}

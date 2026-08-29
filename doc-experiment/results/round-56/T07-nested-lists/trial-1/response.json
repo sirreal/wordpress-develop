@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the HTML Processor because the task depends on nested structure and ancestor queries, which the Tag Processor cannot provide. The function walks the fragment with `WP_HTML_Processor::create_fragment()` and `next_tag()`, inspects `get_breadcrumbs()` to detect any `UL` or `OL` ancestor above the current list, and applies `add_class( 'nested-list' )`; `get_updated_html()` returns the byte-preserving rewrite for untouched parts of the fragment.",
+  "confidence": 93
+}

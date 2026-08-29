@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 93,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice (Tag Processor — single-tag attribute edit, no structural awareness needed). All methods documented: next_tag, set_bookmark, release_bookmark, seek, add_class, get_updated_html, is_tag_closer. Passed 6/6, no doing_it_wrong. Uses the documented single-pass bookmark idiom for 'last occurrence' (set_bookmark section, line 1161). Defensively checks seek() return value — good. Two minor non-idioms, both harmless: (1) explicitly release_bookmark before re-setting the same name, which docs at line 1161 state is unnecessary ('does not leak the old one or require releasing it first'); (2) an is_tag_closer() guard that is redundant because next_tag('H2') defaults tag_closers to 'skip' (query table, line 952). Neither is a correctness or hallucination issue."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 94,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice. Same clean single-pass bookmark structure as trial-1, slightly more idiomatic: no redundant is_tag_closer guard. All methods documented; passed 6/6, no doing_it_wrong. Only non-idiom is the unnecessary release_bookmark before re-setting the same bookmark name (docs line 1161 says re-setting moves it without leaking). Skips the seek() return check but is safely guarded by the $last_h2_bookmark !== null condition. Highest-quality and most idiomatic of the three; matches the reference solution's intent closely."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 72,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and all methods documented (next_tag, add_class, get_updated_html); passed 6/6, no doing_it_wrong. But the implementation is markedly non-idiomatic: it makes THREE full passes (detect-any, count-all, then re-iterate to the Nth) and recreates the processor twice, never using bookmarks at all. This is exactly the 'last occurrence' case the docs teach via the single-pass set_bookmark idiom (line 1161), and the docs explicitly note the processor cannot back up and that re-scanning is what bookmarks exist to avoid (line 65, line 1124). The task warns the document 'may be large and may contain many H2 tags', so the triple-pass is a genuine altitude/efficiency miss even though it produces correct output. Penalized on idiomatic-use (max 25) and edge-handling altitude, not on correctness or hallucination."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed in any trial: all three trials passed 6/6 with zero _doing_it_wrong and zero trigger_error records. The documentation served this task exceptionally well, and the analysis here is of what the docs did right plus near-misses in approach.\n\nWhy every trial succeeded: the core requirement is 'mark the LAST occurrence of a tag in a single forward-only scan.' The set_bookmark() method section (html-tag-processor.md ~line 1100-1164) contains a near-perfect template: it states the cursor cannot move backward (line 65), introduces bookmarks/seek as the exception (line 67, line 1124), AND, critically, line 1161 spells out the exact idiom: 'Setting a bookmark with a name that is already in use MOVES that bookmark... Re-setting the same name on every match is the supported idiom for remembering \"the last X seen so far\"... This is how to track the last occurrence of something in a single pass without hitting the bookmark limit.' Trials 1 and 2 followed this idiom directly. The comment-h2-not-counted case passed for free because next_tag() only matches real tags, and the doc's 'When matching fails' / special-elements discussion plus the general framing make clear that comment contents are not tags. The existing-class case passed because add_class() is documented (line 328) to preserve whitespace and class ordering and append idempotently, and the Returns note (line 2245) clarifies the add-then-get_updated_html flow needs no return inspection. No-headings-unchanged passed because get_updated_html() returns untouched bytes verbatim (line 2297) and add_class is never reached.\n\nNear-misses in approach (not failures): (a) Trials 1 and 2 both called release_bookmark() before re-setting the same bookmark name. This is wasted work that line 1161 directly says is unnecessary — the subjects read the bookmark-limit warning but apparently did not fully absorb the 'does not leak the old one or require releasing it first' clause, or hedged against it. The passage is correct but the 'limited, require a name, avoid programmatic names' warning (line 1159) may prime readers toward over-defensive manual release. (b) Trial 3 ignored bookmarks entirely and re-scanned three times. The docs DO discourage this (line 65 'recreate the processor and start over', line 1124 'avoids the need to re-scan the entire document'), but those statements are framed as capability limits rather than as a performance directive, and the single-pass last-occurrence idiom lives only inside the set_bookmark() heading — a subject who did not read that far down would not encounter it. The overview/traversal sections do not surface 'track the last/Nth match in one pass' as a named pattern, so a less careful reader can fall back to multi-pass counting and still pass tests.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor — overview / traversal section (near next_tag, html-tag-processor.md lines 47-67)",
+      "problem": "The single-pass 'track the last (or Nth) matching tag' idiom is documented only deep inside the set_bookmark() method heading (line 1161). A reader who scans the traversal/next_tag section without drilling into bookmarks (as trial-3 evidently did) sees only 'the cursor cannot move backward; recreate the processor to reach an earlier tag', which actively suggests a wasteful multi-pass re-scan and counting approach.",
+      "suggestion": "In the traversal/next_tag prose, add a one-line cross-reference and pattern name where the no-backing-up limitation is first stated: e.g. 'To act on the last (or Nth) tag matching a query, do not re-scan — make one forward pass and re-set a single named bookmark on each match, then seek() to it; see set_bookmark().' This surfaces the efficient pattern at the point of need."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::set_bookmark() (html-tag-processor.md lines 1159-1161)",
+      "problem": "The text correctly states that re-setting an in-use name moves the bookmark and 'does not require releasing it first', but it sits in the same paragraph as the strong 'bookmarks are limited / require names / avoid programmatic names' warning. Two of three subjects (trials 1 and 2) still inserted a redundant release_bookmark() before each re-set, suggesting the no-release-needed point is being missed or over-ridden by the adjacent scarcity warning.",
+      "suggestion": "Add a tiny contrasting code snippet next to line 1161 showing the correct idiom WITHOUT a release inside the loop (set_bookmark on each match; release only once after seek), and explicitly call out 'Do NOT call release_bookmark() before re-setting the same name — that is redundant.' A positive+negative example anchors the behavior better than prose alone."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::next_tag() query options (tag_closers default, html-tag-processor.md line 952 query table)",
+      "problem": "The default tag_closers => 'skip' is only stated inside the dense @type description embedded in the $query parameter table row, not in the next_tag narrative. Trial-1 added an is_tag_closer() guard that is unnecessary precisely because closers are skipped by default; the subject could not easily confirm the default and coded defensively.",
+      "suggestion": "State the default explicitly in the next_tag prose or the query examples table: 'By default next_tag() visits only tag openers; closing tags like </h2> are skipped unless you pass tag_closers => \"visit\".' This removes the need for defensive is_tag_closer() checks when matching a named tag."
+    }
+  ]
+}

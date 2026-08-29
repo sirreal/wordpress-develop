@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Processor::create_fragment() and a single next_token() walk, which is the right processor and a documented pattern for tree-aware link text. All called methods appear in the rendered docs. It correctly filtered href with is_string(), read only #text tokens, and used get_modifiable_text() for decoded text. Minor deductions: the active-link stack is less directly tied to documented depth/breadcrumb patterns, and the final get_last_error() fail-closed policy could discard already collected read-only results on later unsupported markup."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Closest to the documented subtree-text recipe and the reference: HTML Processor, next_tag('A'), get_attribute(), get_current_depth(), bounded next_token() walk with >=, #text guard, and get_modifiable_text(). All methods are documented. Minor deduction only for the global get_last_error() empty-result policy, which is conservative but not clearly required by the read-only extraction contract."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 91,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose HTML Processor and used documented token walking, tag closers, attribute reads, and decoded text extraction. No hallucinated API usage. The single-current-link state machine is documented as viable because HTML Processor visits closers, including virtual closers. Main deduction: the final paused_at_incomplete_token() check treats truncated trailing syntax as a reason to throw away accumulated read-only links; a probe with '<a href=\"/x\">ok</a><div' returns [] for this trial even though the valid link was already visited."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 8 frozen cases, with no _doing_it_wrong records. The docs did well on the core decisions: the HTML Processor overview explicitly says to use WP_HTML_Processor when structure matters, including collecting an element's text; the 'collect DOM-style text from a subtree' recipe says to walk the subtree, append only #text tokens, and use get_modifiable_text(); get_attribute() documents string|true|null, which led candidates to exclude missing and valueless hrefs with is_string(); the Tag Processor get_attribute docs state that string values are decoded; and next_token() explains that HTML Processor visits closing tokens for unclosed ordinary elements, which made the unclosed-link case pass. Near-misses were around completion policy rather than API discovery. Trial 3 over-applied paused_at_incomplete_token() as a global failure for read-only extraction, likely influenced by examples that use clean-scan checks for edits. Trials 1 and 2 similarly fail closed on get_last_error(), which is defensible for mutations but can discard already visited read-only data. Trial 2 also uses a nested bounded token walk for repeated links even though the docs warn that repeated regions usually prefer a single next_token() loop; it works here, but the docs leave some tension between the subtree recipe and the repeated-region warning.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_attribute() docblock",
+      "problem": "The HTML Processor override documents string|true|null but omits the explicit 'string values are returned decoded' paragraph present on WP_HTML_Tag_Processor::get_attribute(). Users looking only at the HTML Processor method section may miss that href values need no decoding.",
+      "suggestion": "Copy or cross-reference the decoded-string contract in the HTML Processor get_attribute() docs, including a small href with &amp; example and the true/null distinction."
+    },
+    {
+      "location": "WP_HTML_Processor text-extraction and completion-policy docs",
+      "problem": "The docs state that read-only callers choose what to do with get_last_error() and paused_at_incomplete_token(), but nearby examples mostly show fail-closed clean-scan checks. This can lead users to discard accumulated extraction results even when the task contract asks for best-effort visited data.",
+      "suggestion": "Add a read-only extraction example that returns accumulated records after a partial scan, alongside a contrasting complete-input example that rejects on paused_at_incomplete_token() or get_last_error(). Emphasize that these flags do not erase visited tokens."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token() repeated-region guidance",
+      "problem": "The docs include both a subtree recipe using an inner bounded walk and a warning that nested next_token() loops can skip repeated regions. The boundary between safe and unsafe nested walks is not explicit enough.",
+      "suggestion": "Add a general 'collect text for multiple matching elements' pattern that shows the recommended single-loop state-machine approach, and explain when a bounded inner loop can safely resume after the element's own closer."
+    },
+    {
+      "location": "WP_HTML_Processor inherited public methods list",
+      "problem": "paused_at_incomplete_token() is used in HTML Processor examples but is listed under WP_HTML_Tag_Processor, not in the HTML Processor method table. This is technically inherited but easy to perceive as undocumented on WP_HTML_Processor.",
+      "suggestion": "Add an inherited-methods note or table entry for paused_at_incomplete_token() in the HTML Processor docs, with a link to the Tag Processor method contract."
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor's next_token() method to iterate through all tokens in the HTML document. According to the documentation, when the input ends in the middle of a syntax element (like an unclosed tag, unterminated comment, or unclosed special element without a closing tag), next_token() returns false and the processor pauses. The paused_at_incomplete_token() method returns true in this case, indicating the HTML was truncated. This handles all the documented cases: incomplete tag attributes, unterminated comments, and unclosed SCRIPT/STYLE elements.",
+  "confidence": 85
+}

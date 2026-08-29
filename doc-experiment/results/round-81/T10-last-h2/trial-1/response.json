@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented `WP_HTML_Tag_Processor` scan-and-bookmark flow: walk all `h2` tags with `next_tag()`, keep moving a bookmark to the latest match with `set_bookmark()`, then `seek()` back to that bookmark and add the `final-section` class with `add_class()`. If no `h2` is found, the function returns the input unchanged; the final HTML is read with `get_updated_html()`.",
+  "confidence": 94
+}

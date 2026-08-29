@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the HTML Processor fragment parser to walk the fragment token by token, collecting only `#text` tokens while inside a heading opener and flushing an entry when a heading opener or closer is encountered. This follows the documented `WP_HTML_Processor::create_fragment()`, `next_token()`, `get_token_type()`, `get_tag()`, `is_tag_closer()`, and `get_modifiable_text()` APIs, which are the right tools for structure-aware text extraction.",
+  "confidence": 83
+}

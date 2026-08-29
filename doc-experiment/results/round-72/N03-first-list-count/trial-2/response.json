@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the HTML Processor fragment parser to find the first `UL` or `OL`, bookmarked its opener, walked tokens with `next_token()` while tracking `get_current_depth()` to count only direct `LI` children, and rejected any truncated or unsupported scan via `paused_at_incomplete_token()` and `get_last_error()` before seeking back and setting `data-item-count`.",
+  "confidence": 93
+}

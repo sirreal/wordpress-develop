@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() for tree-aware fragment parsing, then recorded the first UL/OL opener depth, walked tokens with next_token(), counted only direct LI opener children by checking current depth, and rejected truncated or unsupported scans with paused_at_incomplete_token() and get_last_error() before seeking back and setting data-item-count.",
+  "confidence": 88
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML as a body fragment. It iterates tokens with next_token(), looking for the first H1 opener tag (identified via get_token_type() === '#tag', get_tag() === 'H1', and !is_tag_closer()). Once found, it records the nesting depth via get_current_depth(). It then continues iterating tokens, accumulating text from '#text' tokens via get_modifiable_text() (which returns already-decoded text with character references resolved), stopping when the depth returns to or below the H1's depth (indicating the H1 has been closed). Returns null if no H1 is found, or the concatenated text string (possibly empty) if one is found.",
+  "confidence": 82
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in BODY context, `next_tag()` to find each `A` opener in document order, `get_attribute('href')` to keep only string-valued hrefs, and a depth-bounded `next_token()` walk with `get_token_type() === '#text'` plus `get_modifiable_text()` to collect decoded text from the anchor subtree.",
+  "confidence": 92
+}

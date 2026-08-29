@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML fragment, then loops through all tags using next_tag(). For each tag, it checks if it's a heading (H1-H6) by matching the tag name. When a heading is found, the level is extracted from the tag name, and text content is collected by walking through tokens using next_token() while staying at or deeper than the heading's depth. Text tokens contribute their content via get_modifiable_text(), which automatically decodes character references while markup is ignored.",
+  "confidence": 45
+}

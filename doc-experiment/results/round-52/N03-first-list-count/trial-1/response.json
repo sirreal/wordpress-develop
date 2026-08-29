@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the HTML Processor fragment parser to preserve tree awareness, then scanned forward to the first UL or OL opener, bookmarked it, walked tokens until the list closed, counted direct LI openers by comparing `get_current_depth()` against the list depth, and finally sought back to the bookmark to set `data-item-count` before reading the result with `get_updated_html()`. I also return the original HTML if parsing is incomplete or aborts with an error.",
+  "confidence": 94
+}

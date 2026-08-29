@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to properly parse the HTML fragment with full namespace awareness, then iterates through all IMG tags using next_tag('img'). For each IMG found, it verifies the current namespace is 'html' (not 'svg' or 'math' where IMAGE elements are in foreign content), gets the decoded src attribute value, and collects only non-null and non-empty src values in document order. The HTML Processor handles all browser parsing rules including implied tags, SVG context switching, and attribute decoding automatically.",
+  "confidence": 85
+}

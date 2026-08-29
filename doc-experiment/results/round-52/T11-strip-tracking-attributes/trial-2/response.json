@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Tag_Processor to scan every tag opener in source order, then WP_HTML_Tag_Processor::get_attribute_names_with_prefix('data-track-') to find only attributes whose names start with that prefix case-insensitively, and WP_HTML_Tag_Processor::remove_attribute() to delete each one before returning WP_HTML_Tag_Processor::get_updated_html().",
+  "confidence": 98
+}

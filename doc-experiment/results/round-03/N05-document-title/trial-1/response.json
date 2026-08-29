@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function creates a WP_HTML_Tag_Processor instance and scans for a TITLE tag using next_tag(). Once found, it advances to the next token to retrieve the content. The get_modifiable_text() method automatically decodes character references like &mdash; to their corresponding characters. If no TITLE tag exists, it returns null; if the TITLE is empty, it returns an empty string. This approach respects the special handling of TITLE elements as documented: their contents are plaintext with character references decoded.",
+  "confidence": 42
+}

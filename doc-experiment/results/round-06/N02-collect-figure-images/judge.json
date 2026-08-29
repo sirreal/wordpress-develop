@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice: WP_HTML_Processor for structural containment (max marks). All methods (create_fragment, next_tag, get_breadcrumbs, get_attribute) are documented; no hallucinated API. Idiomatic next_tag+get_breadcrumbs token walk matching the documented 'is this element inside that one' pattern. Edge cases handled correctly: `is_string($src) && '' !== $src` collapses the documented null/true/'' attribute semantics into one clean guard, and relies correctly on get_attribute returning decoded values (entity-decoded-src passed). All 8/8 cases pass. Near-miss: checks `in_array('FIGURE', $breadcrumbs)` over the FULL breadcrumbs including the matched IMG, rather than ancestors-only as the reference does (array_slice 0,-1). Harmless here since the sought ancestor name (FIGURE) never equals the matched tag (IMG), but a latent bug if those could coincide. Minor deduction for that imprecision; explanation is accurate and cites decoded-value behavior."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "Same correct processor and method set; no hallucinated API. Uses lowercase 'img' query, which is valid (docs: tag-name matching is ASCII case-insensitive) and verified to match while breadcrumbs still return uppercase 'FIGURE' for the comparison. Most explicit handling of documented attribute semantics: separately rejects null (absent), true (boolean/empty attribute), and '' with correct rationale tied to the get_attribute contract. Slightly verbose vs trial-1 but fully idiomatic. Same full-breadcrumb-vs-ancestors near-miss as the others (harmless here). 8/8 pass. One-point edge below trial-1 only on conciseness; substantively equivalent quality."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "Identical correct approach: HTML Processor, documented methods only, no hallucinations. Inline guard `null !== $src && '' !== $src && true !== $src` correctly covers all three documented attribute return cases. Comment 'excluding implicit HTML and BODY' shows accurate understanding of breadcrumb structure (the implicit outermost elements documented under Breadcrumbs). Relies correctly on decoded src. Same full-breadcrumbs (not ancestor-sliced) check as trials 1-2 — harmless here. 8/8 pass. Added a function docblock; explanation accurate."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed: all three trials passed 8/8 with zero _doing_it_wrong records. The docs were sufficient for this task, and the subjects converged on essentially the same correct solution. What the docs did well: (1) The 'Which processor should I use?' section in html-tag-processor.md and the HTML-Processor Overview both steer 'is this element inside that one' / containment work to WP_HTML_Processor — every trial picked the right class without hesitation. (2) The Breadcrumbs section and get_breadcrumbs() example (`array('HTML','BODY','P','STRONG','EM','IMG')`) made it obvious that breadcrumbs are uppercase, root-to-node, and include the matched element itself, which is exactly what an `in_array('FIGURE', ...)` ancestor check needs; it also explicitly notes the implicit HTML/BODY prefix, which trial-3 echoed. (3) get_attribute()'s documented contract — string|true|null, with the explicit note that boolean attributes return `true`, null means absent, and '' means present-but-empty — drove correct src filtering in all three (trial-1 via is_string, trials 2/3 via explicit null/true/'' checks). (4) The decoded-value note on get_attribute ('href=\\\"/x?a=1&amp;b=2\\\" is returned as /x?a=1&b=2; do not decode again') directly explains why entity-decoded-src passed without any manual html_entity_decode call. (5) The HTML Processor's structural awareness handled the unclosed-figure case for free: a stray <p> does not pop the open FIGURE, so later.jpg still reports FIGURE in its breadcrumbs — this is implicitly covered by the 'implied and virtual closing tags' / 'handling implied or missing closing tags the way a browser would' framing, though no example spells out the unclosed-ancestor-still-counts behavior. Near-misses in approach (not failures): all three inspect the FULL breadcrumb array rather than slicing off the matched element as the reference does. The docs never demonstrate the ancestors-only idiom, so subjects wrote the looser containment check; it is correct here only because the sought ancestor (FIGURE) can never equal the matched tag (IMG). None of the subjects discovered or used the documented `'breadcrumbs'` query option of next_tag — appropriately, since that option does a fixed child-chain match and (absent a `*` wildcard) cannot express 'FIGURE at any depth', so the manual breadcrumb-inspection they used is the genuinely correct general technique; the docs could make that distinction clearer.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_breadcrumbs() and the Overview 'Breadcrumbs' section",
+      "problem": "The docs show breadcrumbs include the matched element itself (e.g. ...,'IMG') but never demonstrate the common 'is X an ANCESTOR of the current node' check. Every subject wrote `in_array('FIGURE', get_breadcrumbs())` over the full array, which also matches when FIGURE IS the current element — a latent bug the reference avoids by slicing off the last entry (array_slice($crumbs,0,-1)). The docs give no guidance on ancestor-only containment.",
+      "suggestion": "Add a short note/example under get_breadcrumbs() that the last element of the returned array is the matched node itself, so an ancestor-containment test should examine all-but-the-last entry (e.g. `array_slice($crumbs, 0, -1)`) when the ancestor name could coincide with the current tag name. One line plus a 2-line example would generalize to any 'descendant of' query."
+    },
+    {
+      "location": "WP_HTML_Processor::next_tag() — $query 'breadcrumbs' option description",
+      "problem": "The breadcrumbs query option is documented as a DOM sub-path with a single-element `*` wildcard, but it is easy to mistake it for an 'at any depth' / descendant matcher. There is no '**' (any number of elements) support and no example contrasting 'direct chain' vs 'any depth'. A subject wanting 'IMG anywhere inside FIGURE' could wrongly reach for `array('FIGURE','IMG')`, which only matches FIGURE>IMG as a direct child chain from the query's start.",
+      "suggestion": "In the next_tag breadcrumbs docs (and matches_breadcrumbs), explicitly state that the breadcrumbs query matches a contiguous descent chain (each entry is the parent of the next), `*` matches exactly one level, and there is no any-depth wildcard. Add one sentence pointing readers who need 'descendant at any depth' to inspect get_breadcrumbs() with in_array/array-slice instead."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token / get_breadcrumbs — unclosed/implied-close behavior",
+      "problem": "The unclosed-figure case worked because an open FIGURE is not closed by a following <p>, so descendants still report FIGURE as an ancestor. The docs mention 'implied and virtual closing tags' and 'elements left unclosed at the end of the input' but never give a concrete example showing that an element left open by malformed input continues to appear in the breadcrumbs of subsequent siblings/descendants. Subjects relied on this without confirmation from the docs.",
+      "suggestion": "Add a brief example to the HTML Support or get_breadcrumbs section showing that in input like `<figure><img>...<p>...<img>` (figure never explicitly closed) both IMGs report FIGURE in their breadcrumbs, illustrating that the structural model keeps unclosed ancestors open until the parser implicitly closes them. This generalizes the 'parses real-world/malformed HTML like a browser' claim into something actionable for containment checks."
+    }
+  ]
+}

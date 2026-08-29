@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function attempts to create an HTML Processor fragment parser and then serialize it. The serialize() method returns null when the HTML Processor encounters unsupported markup (like misnested formatting elements), and returns a string when normalization succeeds. By checking if serialize() returns null, we can determine whether normalization is possible. The create_fragment() method returns null if initialization fails, which also indicates normalization isn't possible.",
+  "confidence": 78
+}

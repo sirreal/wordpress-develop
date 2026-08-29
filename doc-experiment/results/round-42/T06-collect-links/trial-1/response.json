@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body fragment structurally, then walks the document with `next_token()`. For each `A` opening tag, it reads `href` with `get_attribute()` and includes it only when the returned value is a string, and while that link is open it concatenates descendant ordinary `#text` tokens via `get_token_type()`, `get_tag()`, `is_tag_closer()`, and `get_modifiable_text()`. It rejects truncated or unsupported input by checking `paused_at_incomplete_token()` and `get_last_error()` after the scan.",
+  "confidence": 84
+}

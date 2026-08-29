@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment, then walked tokens with `next_token()` and `get_current_depth()` so heading text is collected structurally, not by regex. For each `H1` through `H6` opener I captured decoded text from `get_modifiable_text()` on the opener and from descendant `#text` tokens until the matching closer, flushing each heading into the returned table of contents.",
+  "confidence": 86
+}

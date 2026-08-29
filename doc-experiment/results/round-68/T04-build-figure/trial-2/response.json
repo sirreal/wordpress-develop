@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I built the fragment from a literal template so the `img` attributes stay in the required `src` then `alt` order, then used `WP_HTML_Tag_Processor::set_attribute()` for HTML-escaped attribute values and `WP_HTML_Tag_Processor::set_modifiable_text()` to replace the figcaption placeholder text safely.",
+  "confidence": 96
+}

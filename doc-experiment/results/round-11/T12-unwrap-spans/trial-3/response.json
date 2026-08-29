@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML with full tree structure awareness, then iterates through every token using next_token(). For each token, it checks if the tag is SPAN (case-insensitive comparison is handled by get_tag() which returns uppercase). SPAN opening and closing tags are skipped entirely, while all other tokens (text nodes, other tags, comments, etc.) are serialized and accumulated. The serialize_token() method produces normalized HTML output that matches the specification requirement. The processor automatically handles implied closing tags and produces normalized serialization as required.",
+  "confidence": 75
+}

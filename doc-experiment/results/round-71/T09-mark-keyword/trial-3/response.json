@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the fragment in BODY context, then walked tokens with next_token(), checking only ordinary '#text' tokens via get_token_type() and get_modifiable_text() so special-element opener text is not wrapped. Matching text tokens are emitted as normalized HTML with serialize_token() and surrounded by <mark>, and I fall back to WP_HTML_Processor::normalize() if the processor cannot complete cleanly.",
+  "confidence": 92
+}

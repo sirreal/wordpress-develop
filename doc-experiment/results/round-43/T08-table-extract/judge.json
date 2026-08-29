@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 94,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor::create_fragment(), used a single depth-bounded next_token() walk, and all called HTML API methods are documented. Slight loss for adding special-element opener modifiable text inside cells; that is documented API behavior, but the docs' ordinary subtree-text recipe says to append only #text tokens unless the caller explicitly opts in. No _doing_it_wrong records; passed 8/8."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Best adherence. Correct processor choice, documented methods only, #text-only extraction with get_modifiable_text(), single cursor/state-machine traversal, depth boundary, null processor handling, and get_last_error handling. Minor loss only for not making an explicit paused_at_incomplete_token policy; passed 8/8 with no _doing_it_wrong records."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 92,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice and documented token-walking methods, with the right depth-bounded single-loop shape. Loses points for not checking get_last_error after a structural scan and for the same special-element opener-text over-inclusion risk as trial-1. No hallucinated methods or _doing_it_wrong records; passed 8/8."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in execution.json: all three trials passed all 8 cases, and none recorded _doing_it_wrong. The docs did well on the core decision path: the HTML Processor overview says to choose WP_HTML_Processor when structure, containment, subtree text, implied tags, and virtual closers matter; create_fragment() covers body fragments and null returns; next_token() explains virtual closers, inserted TBODY, single-cursor traversal, and avoiding nested loops for repeated regions; get_current_depth() explicitly teaches the >= subtree guard; and the DOM-style text recipe plus get_modifiable_text() led candidates to decoded #text extraction for markup and entities. The main near-miss is special-element text. Trials 1 and 3 whitelisted SCRIPT/STYLE/TEXTAREA/TITLE opener text, and trial 1 guessed additional special tags. The relevant passages document that special elements carry modifiable text on opener tokens, while the ordinary subtree-text recipe says not to include special opener text unless the caller opts in. Those facts are present, but split enough that a reader can over-apply get_modifiable_text() when a task says text content. A hidden case with special elements inside cells would diverge from the canonical #text-only interpretation, especially because SCRIPT/STYLE-like content is raw rather than decoded. A secondary near-miss is error policy: trials 1 and 2 discard accumulated rows when get_last_error() is non-null, while the reference is best-effort for already-visited tokens. The docs correctly say unsupported markup stops the parser, but they do not make partial read-only extraction policy as explicit as mutation/serialization policy.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_modifiable_text() and WP_HTML_Tag_Processor::get_modifiable_text() docs",
+      "problem": "The method docs emphasize that special elements expose modifiable text, but the warning that generic subtree text should usually read only #text tokens is easier to miss because it lives mostly in the overview recipe.",
+      "suggestion": "Add an immediate cross-reference and warning in the method docblock: for ordinary subtree text extraction, first require get_token_type() === '#text'; special-element opener text is an explicit opt-in and may be raw or decoded depending on the element."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token() special-elements paragraph",
+      "problem": "The paragraph says to read SCRIPT/STYLE/TITLE/TEXTAREA text from the opener token, but does not state the decision boundary between ordinary DOM-style text extraction and an intentionally inclusive special-element policy.",
+      "suggestion": "Add a compact decision table for token text: #text is ordinary decoded subtree text; TITLE/TEXTAREA opener text is opt-in decoded special text; SCRIPT/STYLE and similar opener text is opt-in raw text; comments and processing instructions are not DOM subtree text."
+    },
+    {
+      "location": "Special atomic element lists in html-tag-processor.md and html-processor.md",
+      "problem": "The documented special-element set is not fully consistent or authoritative; candidates guessed extra tag names such as XMP/NOFRAMES after seeing broad wording like 'any other section'.",
+      "suggestion": "Make the special atomic element list authoritative and consistent across both processor docs, including exact tag names and raw-vs-decoded behavior, or link both docs to one shared list."
+    },
+    {
+      "location": "WP_HTML_Processor::get_last_error(), create_fragment(), and next_token() docs",
+      "problem": "The docs say to check get_last_error() after scans, but partial read-only extraction policy is underspecified. Readers may discard already-collected data even when their caller contract would allow best-effort results, or keep partial data without realizing traversal aborted early.",
+      "suggestion": "Document that already-visited tokens remain usable but the tree was not fully traversed; show the two general policies: fail closed for mutations/normalization or strict completeness, and return accumulated data only when the caller explicitly accepts best-effort extraction."
+    }
+  ]
+}

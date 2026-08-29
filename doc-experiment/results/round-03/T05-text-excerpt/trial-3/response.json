@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor's next_token() method to iterate through all tokens in the HTML fragment. It identifies text nodes by checking get_token_type() for '#text', then extracts the already-decoded text via get_modifiable_text(). Unicode codepoint counting and truncation uses mb_strlen() and mb_substr() with UTF-8 encoding to handle multi-byte characters correctly, ensuring no characters are split. The function returns the concatenated text, truncated to exactly max_codepoints without exceeding it.",
+  "confidence": 60
+}

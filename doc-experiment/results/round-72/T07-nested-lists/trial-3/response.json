@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() and next_token() for structure-aware traversal, then add_class() to update only matching UL/OL openers while preserving the original bytes elsewhere through get_updated_html(). A simple list-depth counter tracks whether the current list has an ancestor list above it.",
+  "confidence": 95
+}

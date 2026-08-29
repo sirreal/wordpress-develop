@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because the task depends on document structure. It does a first pass with `next_tag()` and `get_last_error()` to avoid partial edits on unsupported HTML, then a second pass that checks each `UL`/`OL` opener\u2019s `get_breadcrumbs()` for any ancestor `UL` or `OL`, applies `add_class( 'nested-list' )`, and returns the byte-preserving edited fragment with `get_updated_html()`.",
+  "confidence": 91
+}

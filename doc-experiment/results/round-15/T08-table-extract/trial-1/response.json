@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor to parse HTML and extract table data. It creates a fragment processor, finds the first TABLE element, then walks through all tokens within the table using next_token(). It tracks row and cell boundaries by detecting TR, TD, and TH tag openers and closers, collecting text content from #text tokens with get_modifiable_text(). Text is accumulated per cell, rows are accumulated in an array, and empty arrays are returned when no table is found. The depth-bounded walk ensures we stay within the table structure.",
+  "confidence": 72
+}

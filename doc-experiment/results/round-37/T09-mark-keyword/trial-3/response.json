@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the BODY fragment with full HTML structure, then walks every token with `next_token()`. For ordinary `#text` tokens only, it reads decoded text via `get_modifiable_text()`, checks `str_contains()` against the keyword, and rewrites the normalized output by surrounding that token\u2019s `serialize_token()` with `<mark>...</mark>`. All other tokens are emitted with `serialize_token()` unchanged, which preserves normalized serialization and avoids wrapping special text-bearing elements like `script`, `style`, `title`, and `textarea` because their text is not exposed as ordinary `#text` tokens.",
+  "confidence": 87
+}

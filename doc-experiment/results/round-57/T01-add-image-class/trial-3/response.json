@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` to scan the input linearly and modify only real `img` tag openers, which preserves every untouched byte exactly as documented. For each matched tag I call `add_class( 'wp-image' )`, then return `get_updated_html()` to serialize the queued class updates without reformatting the rest of the document.",
+  "confidence": 98
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::normalize()` to normalize a BODY-fragment HTML string, which the documentation says serializes and returns `null` when it cannot normalize. On `null`, the function returns the exact required fallback markup.",
+  "confidence": 97
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` as a token scanner, appending decoded text from ordinary `#text` tokens and, per the docs, the decoded modifiable text carried on `TITLE` and `TEXTAREA` opening-tag tokens. It ignores other token types, so `SCRIPT` and `STYLE` contents are excluded, preserves whitespace exactly as reported by the parser, and truncates by Unicode code points with `mb_strlen()`/`mb_substr()` using explicit `UTF-8`.",
+  "confidence": 91
+}

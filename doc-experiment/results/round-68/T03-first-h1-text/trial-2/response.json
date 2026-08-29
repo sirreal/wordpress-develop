@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the fragment in BODY context, then scanned for the first H1 opener and walked tokens until its subtree ended using get_current_depth(). I only concatenated #text tokens with get_modifiable_text(), which returns decoded text for ordinary text nodes, so nested markup contributes text while images and other markup do not.",
+  "confidence": 93
+}

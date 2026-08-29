@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML in fragment mode, then iterates through all tokens using next_token(). It collects only #text tokens (which excludes SCRIPT/STYLE content that aren't text nodes), using get_modifiable_text() which returns already-decoded text with character references replaced. Text is accumulated and truncated to max_codepoints using mb_strlen() and mb_substr() with UTF-8 encoding to properly handle multi-byte characters and count Unicode code points correctly.",
+  "confidence": 75
+}

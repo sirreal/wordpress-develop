@@ -1,0 +1,35 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correct processor: WP_HTML_Processor::create_fragment (BODY context, null-guarded). Every method called (create_fragment, next_tag, get_current_depth, next_token, get_token_type, get_modifiable_text) is documented; no _doing_it_wrong records. Token-walk idiom is a near-verbatim adaptation of the documented LI example (html-processor.md:622-643): record depth at the opener, loop next_token() while depth >= opener depth, accumulate get_modifiable_text() on '#text'. Edge cases all handled correctly and explained: unclosed-h1 relies on the documented guarantee that closers are emitted for unclosed elements; image-only returns '' (from $text='') not null; entities decoded by the API (not re-decoded); first-of-two handled by next_tag stopping at the first H1. 8/8 pass. Explanation is accurate and cites the right doc passages."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Identical implementation and approach to trial-1. Correct processor, all methods documented, no _doing_it_wrong, 8/8 pass. Explanation correctly states the closer's depth is one less than the opener (matches html-processor.md:682 and the is_tag_closer section), correctly attributes decoding to the API, and correctly distinguishes '' vs null. Idiomatic depth-guarded token walk straight from the documented pattern."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Identical implementation. Correct processor, all methods documented, no _doing_it_wrong, 8/8 pass. Explanation accurately describes that the loop visits all tokens inside the H1 including nested elements and stops at the H1's own closer whose depth drops below, and that get_modifiable_text returns already-decoded text. Clean, idiomatic use of the documented token-walking pattern with correct edge-case handling."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed: all three trials passed 8/8 with zero _doing_it_wrong and zero hallucinated methods. The success is directly attributable to a single high-quality documentation passage. The next_token() entry in html-processor.md (lines 606-643) ships a worked example that is structurally this exact task — \"Collect the text content of the first LI element\" — using create_fragment, next_tag, get_current_depth, the depth-guarded next_token loop, and the '#text' + get_modifiable_text accumulation. All three subjects transcribed that pattern, swapping LI for H1. The example also pre-empts the two hardest edge cases in the hidden suite via its explanatory comments: (1) the note that nested closers report a depth no lower than the parent's contents so the loop continues through them (covers nested-markup, nested-in-div), and (2) the explicit statement that unclosed elements \"still produce closing tokens at the end of the input\" plus the next_token prose at line 616 (\"Walking code can rely on seeing a closer for every opener even in malformed input\") — this is precisely why unclosed-h1 passed. The image-only-empty-string case passed because no '#text' token ever matched, leaving the $text='' initializer, which the spec demanded; subjects reasoned this correctly without needing a doc statement. The entities-decoded case passed because the decoding contract is documented thoroughly in the Tag Processor's get_modifiable_text() (html-tag-processor.md:1781, 1789): \"for #text nodes ... character references have been replaced ... &amp; is returned as &. Do not decode the returned string again.\" Two subjects cited this near-verbatim. The only near-miss in the explanations: trial-1 attributed the decoding statement to \"the documentation for get_modifiable_text()\" generically — that fact lives only in the Tag Processor file, not in the HTML Processor's own get_modifiable_text() section (html-processor.md:2034-2052), which omits the decoding paragraph and example. A subject relying solely on the HTML Processor doc would not have seen it. No failure resulted because both files were available, but this is a real asymmetry between the two get_modifiable_text() docblocks.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_modifiable_text()",
+      "problem": "The HTML Processor's get_modifiable_text() section (html-processor.md:2034-2052) describes what modifiable text is and the empty-string behavior, but omits the character-reference decoding contract and example that the Tag Processor's identical method carries (html-tag-processor.md:1781,1789: '&amp; is returned as &. Do not decode the returned string again.'). A reader consulting only the HTML Processor doc cannot confirm that #text is returned decoded, which is the single most error-prone assumption when extracting text content.",
+      "suggestion": "Mirror the Tag Processor's decoding paragraph and a one-line '&amp;' -> '&' example into the HTML Processor's get_modifiable_text() docblock (or add an explicit cross-reference). Each method's docblock should stand alone on its decoding contract rather than relying on the reader having also read the base class."
+    },
+    {
+      "location": "WP_HTML_Processor::get_modifiable_text() / next_token() text-content example",
+      "problem": "Neither get_modifiable_text() nor the next_token() example states what an element with no text descendants yields when accumulated (e.g. an element containing only an IMG produces empty string '', never null). The image-only-empty-string distinction between '' and null is a common source of bugs and was only handled here because subjects happened to initialize their accumulator to ''.",
+      "suggestion": "Add a sentence to the next_token() text-accumulation example noting that an element with no #text tokens yields an empty accumulated string (the loop simply never appends), and that '' here means 'no text content' rather than 'absent'. This generalizes the empty-string vs null contract to text-extraction walks."
+    }
+  ]
+}

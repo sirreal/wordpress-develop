@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor::create_fragment() for BODY-fragment, tree-aware text extraction. Every HTML API method called is present in the rendered docs: create_fragment, next_token, get_token_name, is_tag_closer, get_attribute, get_current_depth, get_token_type, and get_modifiable_text. Idiomatic one-pass state machine; uses is_string() for href so null and boolean true are excluded, and reads decoded text only from #text tokens. Minor reservation: no explicit get_last_error()/paused_at_incomplete_token() policy, though the read-only task contract did not require rejecting partial input."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice and all API calls are documented: create_fragment, next_token, get_token_type, get_modifiable_text, get_tag, is_tag_closer, and get_attribute. The closer-driven stack is supported by the next_token() docs because HTML Processor emits closers for explicit, implied, and end-of-input closes. It handles decoded href/text and valueless href correctly. Minor reservation: no explicit parse-abort/truncation policy, but this is acceptable for the task's read-only extraction behavior."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Correctly uses WP_HTML_Processor::create_fragment() and documented token APIs only. It follows the documented #text plus get_modifiable_text pattern and filters href with is_string(). The closer-driven flush relies on documented virtual/end-of-input closing tokens and passed the unclosed-link case. Slightly less robust than trial-2 because it pops before checking stack emptiness on A closers and has no explicit parser-abort/truncation policy."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial: all three passed 8/8 with no _doing_it_wrong records. The docs did well on the core decision points. The Tag Processor overview explicitly says to use the HTML Processor for collecting element text, walking subtrees, and handling implied or missing closing tags, and all trials chose create_fragment(). The get_attribute() docs state string values are decoded, missing attributes return null, and valueless/boolean attributes return true; all trials used is_string(), which explains the entity-in-href-decoded, no-href-excluded, and valueless-href passes. The DOM-style text recipe says to append only #text tokens and then call get_modifiable_text(), which explains the nested-markup, image-link-empty-text, and entities-in-text passes. The next_token() docs say the HTML Processor visits a closer for every opener, including elements left unclosed at end of input; this is exactly why the closer-driven stack implementations in trials 2 and 3 passed unclosed-link. Near-miss: none of the candidates made an explicit get_last_error()/paused_at_incomplete_token() policy, but the docs frame that as caller policy for read-only extraction, so this is not an adherence failure for this task.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::next_token() / is_tag_closer() docblocks",
+      "problem": "The docs say closers are emitted for explicit, implied, and end-of-input closes, and separately say depth/breadcrumbs report the parent on closers. They do not state in one place the full observable contract of a virtual/implied closer token.",
+      "suggestion": "Add a compact contract sentence: on explicit, implied, and end-of-input closing tokens, get_token_type() returns #tag, get_tag()/get_token_name() identify the element being closed, is_tag_closer() is true, and get_current_depth()/get_breadcrumbs() describe the parent after the pop."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::get_attribute() docblock",
+      "problem": "The method section documents true/null and decoded strings, but the empty-string case is easier to miss unless readers saw the overview's custom-query text.",
+      "suggestion": "Add a return-value truth table covering missing/inapplicable => null, bare attribute => true, attr=\"\" => empty string, and valued attribute => decoded string; recommend is_string() when callers require an actual written value."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token() text-walk guidance",
+      "problem": "The docs contain both a depth-bounded subtree walk and a warning against nested next_token() loops for repeated regions. That distinction is correct but easy to overgeneralize.",
+      "suggestion": "Add a decision note explaining when to use each shape: a single stateful token loop for repeated regions, and a bounded inner scan only for a specific opener when the caller intentionally consumes through that region boundary and resumes from the shared cursor."
+    }
+  ]
+}

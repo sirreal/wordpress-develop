@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function creates a WP_HTML_Processor fragment from the input HTML via create_fragment() and iterates through tokens using next_token(). For each #text token, it extracts the decoded text content via get_modifiable_text() and counts Unicode codepoints using mb_strlen with UTF-8 encoding. It accumulates text up to the specified limit, using mb_substr to safely truncate at codepoint boundaries without splitting multi-byte characters. SCRIPT/STYLE content is automatically excluded since their contents are modifiable text of the tag itself, not separate text tokens. The processor correctly handles character reference decoding.",
+  "confidence": 72
+}

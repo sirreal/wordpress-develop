@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Identical to the canonical reference: WP_HTML_Processor::normalize() on both inputs, null-check on each, strict === comparison. Correct processor (static normalization is exactly the documented tool for 'do two fragments parse to the same structure'). Every method called (normalize) is documented (html-processor.md Method Index line 156 and the normalize() section, lines 911-961). Null-on-unparseable handling matches the documented contract (line 84: normalize/serialize return null on unsupported markup). The trigger_error in the misnesting case ('Cannot serialize HTML Processor with parsing error: unsupported') is emitted internally by normalize()'s own call to serialize() and is unavoidable via the documented API; it does not change the correct false result and is not subject misuse. All 9 cases pass."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same canonical implementation as trial-1, plus a docblock that accurately restates the equivalence rules. Correct processor and method (normalize), no undocumented API, idiomatic single-call normalization rather than manual token walking. Explanation correctly enumerates what normalize() canonicalizes (implied closers, casing, quoting, character references, duplicate-attribute removal, invalid-UTF-8 handling) — all drawn straight from the documented normalize() bullet list. Null-check covers the unparseable/unsupported path. Same internal serialize() trigger_error on the misnesting case, unavoidable and harmless. All 9 cases pass."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same canonical normalize()+null-check+=== implementation. Correct processor and method, no hallucinated API, idiomatic. Only difference from the other trials is a lower self-reported confidence (82 vs 92) despite byte-equivalent, fully-correct code — a near-miss in self-assessment, not in execution. All 9 cases pass."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed in any trial. All three subjects independently converged on the canonical solution: WP_HTML_Processor::normalize() on each fragment, treat null as 'cannot represent' -> false, and compare the two normalized strings with ===. This is the intended approach and it passed all 9 cases (quoting styles, implied closers, tag-case, entity spellings, attribute order, text diff, structure diff, in-tag whitespace, and unsupported misnesting).\n\nWhy the docs succeeded here: (1) The normalize() docblock (html-processor.md lines 911-961) explicitly enumerates the equivalences the task asks about — 'Attribute values will be double-quoted', 'Duplicate attributes will be removed', 'Omitted tags will be added', 'Tag and attribute name casing will be lower-cased', 'Text will be re-encoded' — which maps almost one-to-one onto the task's 'quoting style, optional/implied closing tags, tag-name case, and equivalent character references do not change the structure.' A subject reading only this section could deduce that string equality of normalized output answers the structural-equivalence question. (2) The static signature `normalize(string $html): string|null` plus the 'or null if unable to normalize' return doc, reinforced by the class-level statement (line 84) that 'methods which produce output (such as serialize() and normalize()) return null' when the parser aborts, directly gave subjects the unparseable-input branch the task demands ('If either input cannot be fully parsed/represented, return false'). The misnesting case (`<b>one<i>two</b>three</i>`) is even named in the Supported/Unsupported section (line 90-91) as a construct that causes the parser to abort, so the false expectation was reachable from the docs.\n\nNear-misses in the explanations: none materially wrong. All three correctly attribute attribute-order sensitivity to normalize() preserving source order (the task wants attribute-order differences to count as different, and normalize does NOT sort existing attributes — only added ones are sorted, per the Tag Processor 'Building markup from a template' note). The docs do not state this preservation-of-existing-order property explicitly for normalize(); the subjects got attribute-order-differs right because normalize() happens to preserve written order, but none of them justified WHY attribute order is preserved, which is a latent gap (see doc_gaps). Trial-3's lower self-reported confidence (82) was unwarranted given the code is identical and fully correct.\n\nOne observation about the harness signal, not a subject failure: every trial's misnesting case carries a trigger_error from WP_HTML_Processor::serialize ('Cannot serialize HTML Processor with parsing error: unsupported'). This is emitted inside normalize()'s own internal serialize() call when the parser has bailed; it is not reachable or avoidable through the documented public API and does not affect the (correct) null/false result. It is not evidence of API misuse.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::normalize() — 'Many aspects of an input HTML fragment may be changed during normalization' bullet list",
+      "problem": "The bullet list says added/duplicate attributes are sorted/removed and casing is lowercased, but it does not state whether the order of EXISTING attributes is preserved or normalized. A reader trying to decide whether `<a href id>` and `<a id href>` normalize to the same string (the task hinges on this) cannot tell from the docs; the trials got it right only because real behavior happens to preserve source order.",
+      "suggestion": "Add a bullet clarifying that the written order of pre-existing attributes is preserved (not sorted) during normalization, so two fragments differing only in attribute order produce different normalized output. Optionally cross-reference the set_attribute note that only newly-ADDED attributes are sorted by name."
+    },
+    {
+      "location": "WP_HTML_Processor::normalize() — return/null semantics",
+      "problem": "normalize() returns null both for genuinely unsupported markup (parser bail) and for truncated/incomplete input, but the docblock only gives the 'unable to normalize' phrasing and one trailing-incomplete-syntax example. It does not point readers to get_last_error()/get_unsupported_exception() to distinguish 'aborted on unsupported HTML' from other null causes, which matters when a caller must decide whether null means 'definitively cannot represent' vs a recoverable condition.",
+      "suggestion": "In the Returns section, note that a null result can arise from unsupported markup (parser abort) and reference get_last_error()/ERROR_UNSUPPORTED for callers that need to distinguish the cause. State plainly that for the common 'are these structurally equal' use case, treating null as 'cannot be represented' is correct."
+    },
+    {
+      "location": "WP_HTML_Processor::normalize() — example block / side effects",
+      "problem": "When normalize() is given markup the HTML Processor cannot support (e.g. mis-nested formatting like `<b>one<i>two</b>three</i>`), it emits a _doing_it_wrong/trigger_error from its internal serialize() call in addition to returning null. The docs do not mention that calling normalize() on unsupported input produces a PHP notice as a side effect, so a caller cannot anticipate or suppress it.",
+      "suggestion": "Add a sentence noting that normalizing unsupported markup returns null AND triggers an internal _doing_it_wrong notice (originating from the internal serialize() call). Advise callers who expect unsupported input as a normal case (e.g. structural-equality checks) that the null return is the reliable signal and the notice is informational."
+    }
+  ]
+}

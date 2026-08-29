@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan the HTML linearly, matching only real `img` tags with ASCII case-insensitive name matching, then called `add_class( 'wp-image' )` on each matched opener. Finally, `get_updated_html()` returns the original document with only those byte-preserving tag edits applied; comments and other non-tags are left untouched.",
+  "confidence": 98
+}

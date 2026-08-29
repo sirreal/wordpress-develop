@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` as a token stream: it appends decoded text from `#text` tokens via `get_modifiable_text()`, and separately includes the decoded modifiable text carried on opening `TITLE` and `TEXTAREA` tag tokens while naturally excluding `SCRIPT`, `STYLE`, comments, and other non-text tokens. Truncation is done incrementally with `mb_strlen()` and `mb_substr()` in UTF-8 so the result is limited by Unicode code points without splitting multibyte characters.",
+  "confidence": 93
+}

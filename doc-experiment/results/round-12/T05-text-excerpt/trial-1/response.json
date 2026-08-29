@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Tag_Processor to scan through all tokens in the HTML fragment, collecting text exclusively from #text nodes (skipping markup, comments, and content within SCRIPT/STYLE/TITLE/TEXTAREA tags which are not text nodes). Character references are automatically decoded by get_modifiable_text(). The accumulated UTF-8 text is then truncated to exactly max_codepoints using mb_substr() with UTF-8 encoding, which operates on Unicode code points rather than bytes.",
+  "confidence": 92
+}

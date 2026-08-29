@@ -1,0 +1,35 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used the correct documented API, `WP_HTML_Processor::normalize()`, and handled its `null` return with the required fallback. No undocumented WP HTML API calls and no `_doing_it_wrong` records."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used `WP_HTML_Processor::normalize()` correctly and returned the fallback on `null`. The extra `class_exists()` guard is unnecessary in the harness but is a PHP builtin, not a hallucinated HTML API method."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same direct idiom as the reference: call documented `WP_HTML_Processor::normalize()` for a BODY-context fragment and use the fallback only when it returns `null`."
+    }
+  ],
+  "failure_analysis": "All trials passed all 7 hidden cases, so there are no failed cases to attribute to a documentation misconception. The docs succeeded on the important cues: the Tag Processor overview says to use the HTML Processor for implied/missing closing tags and normalized output; the HTML Processor support section says unsupported markup aborts and output-producing methods such as `serialize()` and `normalize()` return `null`; and the `normalize()` method section documents a static BODY-fragment API returning `string|null`. The unsupported-case `trigger_error` entries in execution.json come from the processor's internal serialization path after unsupported markup; they are not `_doing_it_wrong` records and did not indicate candidate misuse. Near-miss: the null-on-unsupported behavior is split between the class support discussion and the `normalize()` return line, but the trials still found it.",
+  "doc_gaps": [
+    {
+      "location": "`WP_HTML_Processor::normalize()` docblock",
+      "problem": "The method return text says `null if unable to normalize`, while the clearest explanation of unsupported-markup failure is elsewhere in the class documentation.",
+      "suggestion": "Move or repeat the failure contract in the method docblock: unsupported processor errors make `normalize()` return `null`; recoverable HTML parse repairs still return normalized HTML."
+    },
+    {
+      "location": "`WP_HTML_Processor::normalize()` docblock",
+      "problem": "The method describes incomplete trailing syntax being omitted, but does not explicitly distinguish that from unsupported markup returning `null`.",
+      "suggestion": "Add a compact examples table for supported repair, unsupported abort, incomplete trailing token omission, and empty input, each showing the return shape rather than task-specific fallback handling."
+    }
+  ]
+}

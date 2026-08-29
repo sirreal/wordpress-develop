@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This implementation uses WP_HTML_Processor to parse the HTML fragment and find all A tags with href attributes. For each A tag found, it records the current depth and then iterates through subsequent tokens, collecting text content from #text nodes until it exits the A tag (depth returns to the opening tag level). The get_modifiable_text() method automatically provides decoded character references, and get_attribute() returns the href value as the HTML API reports it. The while loop condition ensures we only collect text that is actually inside the A element.",
+  "confidence": 72
+}

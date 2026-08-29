@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the HTML Processor fragment parser to walk the first table structurally, then collected ordinary `#text` tokens within the table subtree using `next_token()`, `get_current_depth()`, `get_token_type()`, `get_tag()`, `is_tag_closer()`, and `get_modifiable_text()`. Rows are finalized on `TR` closers and cells on `TD`/`TH` closers, which matches the browser-like table structure described in the documentation.",
+  "confidence": 90
+}

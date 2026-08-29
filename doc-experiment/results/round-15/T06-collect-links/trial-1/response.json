@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Processor::create_fragment() to parse the HTML and WP_HTML_Processor::next_tag('A') to find each anchor tag. For each A tag with an href attribute (using get_attribute() which returns the decoded value), it collects all text nodes inside the element by calling next_token() and checking get_token_type() == '#text', accumulating text via get_modifiable_text() (which returns decoded text). The loop terminates when current depth drops below the A tag's depth, signifying exit from that element.",
+  "confidence": 82
+}

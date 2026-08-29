@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` because this is a flat, position-based edit: scan for `H2` openers, remember the last one with a bookmark, then seek back and add the `final-section` class before reading the result with `get_updated_html()`.",
+  "confidence": 96
+}

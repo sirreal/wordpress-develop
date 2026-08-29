@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment with tree awareness, then `next_tag('H1')` plus `is_tag_closer()` to find the first heading opener. From there I walked tokens with `next_token()`, accumulated only `#text` tokens via `get_modifiable_text()`, and bounded the walk with `get_current_depth()` so nested markup inside the H1 contributes text while markup itself contributes nothing.",
+  "confidence": 96
+}

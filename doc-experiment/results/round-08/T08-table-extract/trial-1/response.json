@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This revised implementation uses WP_HTML_Processor to properly parse HTML with structural awareness. It creates a fragment processor, finds the first TABLE element, then uses a single token iteration loop with state tracking. As it encounters TD/TH opening tags, it enters cell mode and accumulates text from #text tokens. It detects cell closings using the is_tag_closer() method and depth tracking. This approach avoids nested loops that could skip tokens, instead using flat state machine logic that properly handles optional closing tags.",
+  "confidence": 50
+}

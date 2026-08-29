@@ -1,0 +1,154 @@
+{
+  "round_score": 98.87,
+  "core_score": 98.87,
+  "by_split": {
+    "train": 98.87
+  },
+  "by_concept": {
+    "normalization": 100.0,
+    "serialization": 98.3
+  },
+  "tasks": {
+    "T09-mark-keyword": {
+      "score": 98.5,
+      "trials": [
+        {
+          "trial": "trial-1",
+          "passed": 8,
+          "total": 8,
+          "adherence": 99,
+          "score": 99.7
+        },
+        {
+          "trial": "trial-2",
+          "passed": 8,
+          "total": 8,
+          "adherence": 88,
+          "score": 96.4
+        },
+        {
+          "trial": "trial-3",
+          "passed": 8,
+          "total": 8,
+          "adherence": 98,
+          "score": 99.4
+        }
+      ],
+      "labels": {
+        "role": "core",
+        "commonness": "medium",
+        "concept": "serialization",
+        "processor": "html",
+        "split": "train"
+      }
+    },
+    "T12-unwrap-spans": {
+      "score": 98.1,
+      "trials": [
+        {
+          "trial": "trial-1",
+          "passed": 7,
+          "total": 7,
+          "adherence": 96,
+          "score": 98.8
+        },
+        {
+          "trial": "trial-2",
+          "passed": 7,
+          "total": 7,
+          "adherence": 94,
+          "score": 98.2
+        },
+        {
+          "trial": "trial-3",
+          "passed": 7,
+          "total": 7,
+          "adherence": 91,
+          "score": 97.3
+        }
+      ],
+      "labels": {
+        "role": "core",
+        "commonness": "medium",
+        "concept": "serialization",
+        "processor": "html",
+        "split": "train"
+      }
+    },
+    "N04-normalize-or-placeholder": {
+      "score": 100.0,
+      "trials": [
+        {
+          "trial": "trial-1",
+          "passed": 7,
+          "total": 7,
+          "adherence": 100,
+          "score": 100.0
+        },
+        {
+          "trial": "trial-2",
+          "passed": 7,
+          "total": 7,
+          "adherence": 100,
+          "score": 100.0
+        },
+        {
+          "trial": "trial-3",
+          "passed": 7,
+          "total": 7,
+          "adherence": 100,
+          "score": 100.0
+        }
+      ],
+      "labels": {
+        "role": "core",
+        "commonness": "medium",
+        "concept": "normalization",
+        "processor": "html",
+        "split": "train"
+      }
+    }
+  },
+  "round_metadata": {
+    "round": "round-54",
+    "mode": "shadow-doc-a/b",
+    "task_ids": [
+      "T09-mark-keyword",
+      "T12-unwrap-spans",
+      "N04-normalize-or-placeholder"
+    ],
+    "task_count": 3,
+    "trials_per_task": 3,
+    "subject": {
+      "model": "gpt-5.4-mini",
+      "reasoning_effort": "low",
+      "service_tier": "priority"
+    },
+    "judge": {
+      "model": "gpt-5.5",
+      "reasoning_effort": "xhigh",
+      "service_tier": "priority"
+    },
+    "git_head": "b6dd75144383ca543c7fab7182dbfa89426dceb5",
+    "git_status_short": ""
+  },
+  "subject_isolation": {
+    "enforced": true,
+    "agent_type": "codex-cli-isolated-workdir",
+    "isolation_mode": "isolated-workdir",
+    "runner": "codex exec",
+    "input_delivery": "prompt-embedded-docs",
+    "sandbox_mode": "read-only",
+    "approval_policy": "never",
+    "project_rules_loaded": false,
+    "user_config_loaded": false,
+    "repo_available_to_subject": false,
+    "input_files": [
+      "html-processor.md",
+      "html-tag-processor.md",
+      "task.md"
+    ],
+    "work_root": "/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/html-api-docs-eval/round-54/codex-cli-trials",
+    "equivalent_boundary_notes": "Each subject process runs from a private non-repo directory containing only the two staged rendered docs, one task prompt, and the output schema. The task and rendered docs are embedded directly in the subject prompt because local codex exec does not expose the experiment's Read/Grep-only tools. Codex project rules and user config are ignored; the process uses a read-only sandbox and approval policy never."
+  }
+}

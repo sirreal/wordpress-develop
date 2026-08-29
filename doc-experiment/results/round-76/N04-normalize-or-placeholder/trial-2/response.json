@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented `WP_HTML_Processor::create_fragment()` factory for BODY-context fragment parsing and `serialize()` for normalized HTML output. Per the docs, `serialize()` returns `null` on unsupported markup, and I also check `get_last_error()` to fail closed and return the required fallback HTML.",
+  "confidence": 95
+}

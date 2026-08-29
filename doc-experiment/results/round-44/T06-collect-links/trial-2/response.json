@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` and a single `next_token()` walk so text is collected with full tree awareness. On each `A` opener it reads `href` with `get_attribute()` and includes the link only when that value is a string (excluding missing and boolean `href`), then appends decoded text from `#text` tokens via `get_modifiable_text()` while the link is open, preserving document order.",
+  "confidence": 89
+}

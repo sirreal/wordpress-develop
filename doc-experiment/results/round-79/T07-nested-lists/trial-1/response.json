@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to preserve the fragment byte-for-byte while scanning structure, then iterated with next_tag(), checked the current tag name with get_tag(), inspected ancestry with get_breadcrumbs(), and added the class via add_class() only when an ancestor UL or OL was present. The modified markup is read back with get_updated_html(), which preserves untouched bytes exactly.",
+  "confidence": 88
+}

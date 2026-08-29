@@ -1,0 +1,254 @@
+{
+  "round": "round-20",
+  "mode": "discoverability-probe",
+  "question_id": "generic-text-rewrite-recipes",
+  "question": "Using only the rendered HTML API docs, give two generic recipes with citations: (1) how to collect DOM-style text content from an element subtree without including comments, attributes, or unrelated modifiable text; (2) how to finish a token-by-token rewrite with WP_HTML_Processor::serialize_token() when the input may end in an incomplete token or unsupported parser state. For each recipe, name the processor class, the token filters or state checks to use, what to skip, and when returning the accumulated output is acceptable versus when the caller should reject or fall back.",
+  "subject": {
+    "model": "gpt-5.4",
+    "reasoning_effort": "low",
+    "service_tier": "priority"
+  },
+  "subject_isolation": {
+    "enforced": true,
+    "agent_type": "codex-cli-isolated-workdir",
+    "isolation_mode": "isolated-workdir",
+    "runner": "codex exec",
+    "input_delivery": "prompt-embedded-docs",
+    "sandbox_mode": "read-only",
+    "approval_policy": "never",
+    "project_rules_loaded": false,
+    "user_config_loaded": false,
+    "repo_available_to_subject": false,
+    "input_files": [
+      "html-processor.md",
+      "html-tag-processor.md",
+      "probe question"
+    ],
+    "work_root": "/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/html-api-docs-eval/round-20/codex-cli-probes"
+  },
+  "result": [
+    {
+      "id": "generic-text-rewrite-recipes",
+      "trial_id": "probe-1",
+      "response": {
+        "answer": "1) To collect DOM-style text from an element subtree, use `WP_HTML_Processor`, not `WP_HTML_Tag_Processor`, because the HTML Processor has structural awareness and is recommended when “collecting an element's text content” or “walking a subtree.” Match the target opener with `next_tag()`, record `get_current_depth()`, then loop with `next_token()` while `get_current_depth() >=` the recorded depth, appending only tokens whose `get_token_type()` is `#text`. This skips comments, attributes, and unrelated modifiable text automatically, because comments are separate token types and ordinary container elements carry no text of their own. For elements whose contents cannot contain markup (`SCRIPT`, `STYLE`, `TITLE`, `TEXTAREA`), do not look for `#text` children; read `get_modifiable_text()` on the element’s opening token instead. Returning the accumulated text is acceptable when you only need extracted text; if the result will drive a mutation or must reject truncated/unsupported input, finish the bounded walk and require both `! paused_at_incomplete_token()` and `null === get_last_error()`, otherwise reject or fall back.\n\n2) To finish a token-by-token rewrite with `serialize_token()`, use `WP_HTML_Processor` and concatenate `serialize_token()` for each token returned by `next_token()`, skipping both opener and closer when dropping an element. Returning the accumulated output is acceptable only if the walk finished without truncation or unsupported markup. If `next_token()` stops because the input ended in the middle of a token, the docs say it pauses and returns `false`; if unsupported markup appears, the HTML Processor aborts early, `get_last_error()` becomes non-null, and output-producing methods like `serialize()` return `null`. The rendered docs do not explicitly state a final contract for token-by-token rewrites, but the nearest documented rule is the scan-finished-cleanly check used before edits: after the loop, accept the accumulated rewrite only when `! paused_at_incomplete_token()` and `null === get_last_error()`. Otherwise the caller should reject the rewrite or fall back, because the processor may have stopped at incomplete syntax or an unsupported parser state.",
+        "citations": [
+          {
+            "file": "html-tag-processor.md",
+            "heading": "Overview → Which processor should I use?",
+            "support": "Use the HTML PROCESSOR when structure matters: \"is this element inside that one,\" collecting an element's text content, walking a subtree, handling implied or missing closing tags the way a browser would, or producing normalized output."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "next_token()",
+            "support": "Use this method instead of WP_HTML_Processor::next_tag when text and other non-tag content matters, while keeping the HTML Processor's full awareness of document structure."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "next_token()",
+            "support": "An element's text content may be split across several consecutive `#text` tokens: accumulate text while walking rather than assuming one token carries all of an element's text."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "next_token()",
+            "support": "One important exception to the collect-`#text`-tokens recipe: elements whose contents cannot contain markup (SCRIPT, STYLE, TITLE, TEXTAREA) produce NO `#text` child tokens at all. Their text is carried on the element's own token."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "next_token()",
+            "support": "Example: record the depth when matched on its opening tag and continue while the depth remains at or above that value."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "get_current_depth()",
+            "support": "If the scan's result will drive an edit or must reject truncated input, check `paused_at_incomplete_token()` after the bounded walk, and separately check `get_last_error()` for unsupported markup."
+          },
+          {
+            "file": "html-tag-processor.md",
+            "heading": "get_modifiable_text()",
+            "support": "Modifiable text is text content that may be read and changed without changing the HTML structure of the document around it. This includes the contents of `#text` nodes in the HTML as well as the inner contents of HTML comments, Processing Instructions, and others."
+          },
+          {
+            "file": "html-tag-processor.md",
+            "heading": "set_modifiable_text()",
+            "support": "This method operates on the CURRENTLY MATCHED TOKEN, which must be one that carries modifiable text... An ordinary container element (P, DIV, FIGCAPTION, SPAN, …) carries no text of its own — its text lives in `#text` child tokens."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "Usage → Recipe: scan a region before editing its opener",
+            "support": "`$scan_finished_cleanly = ! $processor->paused_at_incomplete_token() && null === $processor->get_last_error();`"
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "serialize_token()",
+            "support": "Walking every token with `WP_HTML_Processor::next_token` and concatenating `serialize_token()` for each one reconstructs the normalized serialization of the input."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "serialize_token()",
+            "support": "The token-by-token form exists so that a rewriting loop can transform the document while serializing: skip tokens to remove them, or emit extra markup around them to insert wrappers. Closing tokens of skipped elements must be skipped too."
+          },
+          {
+            "file": "html-tag-processor.md",
+            "heading": "next_token()",
+            "support": "If it starts parsing a token and reaches the end of the document then it will seek to the start of the last token and pause, returning `false` to indicate that it failed to find a complete token."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "Supported elements",
+            "support": "If any unsupported markup appears in the HTML input the HTML Processor will abort early and stop all processing... `get_last_error()` returns a non-null value... methods which produce output (such as `serialize()` and `normalize()`) return `null`."
+          }
+        ],
+        "rationale": "The citations directly document the subtree-text walk (`next_tag` + depth-bounded `next_token` + `#text` accumulation), the special-case raw-text elements, and the clean-finish checks for truncation and unsupported markup; the only gap is that the docs do not explicitly spell out a token-by-token rewrite acceptance contract, so that part is inferred from the documented clean-scan pattern and serializer failure behavior.",
+        "confidence": 92
+      }
+    },
+    {
+      "id": "generic-text-rewrite-recipes",
+      "trial_id": "probe-2",
+      "response": {
+        "answer": "1. For DOM-style text collection, use `WP_HTML_Processor`, not `WP_HTML_Tag_Processor`, because the docs say to choose the HTML Processor when structure matters and specifically for collecting an element’s text content. Match the element opener with `next_tag()`, record its opening depth with `get_current_depth()`, then walk with `next_token()` while `get_current_depth() >=` that recorded depth, appending only tokens whose `get_token_type()` is `#text`. Do not append comments, attributes, tag tokens, or text from outside the bounded subtree; also note that `SCRIPT`, `STYLE`, `TITLE`, and `TEXTAREA` are the exception because they produce no `#text` children, so read their text from the opening element token with `get_modifiable_text()` instead. Returning the accumulated text is acceptable only when the bounded scan finished cleanly; if `paused_at_incomplete_token()` is true after the scan or `get_last_error()` is non-null, the caller should reject or fall back rather than trust the result.\n\n2. For a token-by-token rewrite, use `WP_HTML_Processor` with `next_token()` plus `serialize_token()`, concatenating each serialized token and skipping any tokens you want removed, including the closing tokens of skipped elements. Returning the accumulated rewritten output is acceptable when the processor reached a supported, complete parse state: `serialize_token()` is intended for rewriting loops, and the docs say walking every token and concatenating it reconstructs normalized serialization. But if the input ends in an incomplete token, `next_token()` stops before a complete token and `paused_at_incomplete_token()` reports truncation; if unsupported markup caused an abort, `get_last_error()` becomes non-null and output-producing methods like `serialize()` return `null`. In those cases the caller should reject or fall back instead of treating the partial accumulation as a complete successful rewrite.",
+        "citations": [
+          {
+            "file": "html-tag-processor.md",
+            "heading": "Overview",
+            "support": "Use the HTML PROCESSOR when structure matters: \"is this element inside that one,\" collecting an element's text content, walking a subtree, handling implied or missing closing tags the way a browser would, or producing normalized output."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "next_token()",
+            "support": "Use this method instead of WP_HTML_Processor::next_tag when text and other non-tag content matters, while keeping the HTML Processor's full awareness of document structure."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "next_token()",
+            "support": "Example: Collect the text content of the first LI element... while ( $processor->next_token() && $processor->get_current_depth() >= $depth_inside_li ) { if ( '#text' === $processor->get_token_type() ) { $text .= $processor->get_modifiable_text(); } }"
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "get_current_depth()",
+            "support": "This gives a reliable way to visit every token inside an element: record the depth when matched on its opening tag and continue while the depth remains at or above that value."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "next_token()",
+            "support": "One important exception to the collect-`#text`-tokens recipe: elements whose contents cannot contain markup (SCRIPT, STYLE, TITLE, TEXTAREA) produce NO `#text` child tokens at all... Read their text with WP_HTML_Tag_Processor::get_modifiable_text while matched on the element's opening tag instead."
+          },
+          {
+            "file": "html-tag-processor.md",
+            "heading": "get_modifiable_text()",
+            "support": "Modifiable text is text content that may be read and changed without changing the HTML structure of the document around it. This includes the contents of `#text` nodes in the HTML as well as the inner contents of HTML comments, Processing Instructions, and others."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "Recipe: scan a region before editing its opener",
+            "support": "If a mutation depends on a complete scan, check WP_HTML_Tag_Processor::paused_at_incomplete_token for truncation and WP_HTML_Processor::get_last_error for unsupported markup before applying the edit."
+          },
+          {
+            "file": "html-tag-processor.md",
+            "heading": "paused_at_incomplete_token()",
+            "support": "In a longer document, drain all tokens first; this method reports the state at the point scanning stopped, so it answers \"did the input end mid-token?\" only after the processor has scanned to the end of the input."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "serialize_token()",
+            "support": "Walking every token with WP_HTML_Processor::next_token and concatenating `serialize_token()` for each one reconstructs the normalized serialization of the input — the same output that WP_HTML_Processor::serialize produces in a single call."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "serialize_token()",
+            "support": "The token-by-token form exists so that a rewriting loop can transform the document while serializing: skip tokens to remove them, or emit extra markup around them to insert wrappers. Closing tokens of skipped elements must be skipped too."
+          },
+          {
+            "file": "html-tag-processor.md",
+            "heading": "next_token()",
+            "support": "If it starts parsing a token and reaches the end of the document then it will seek to the start of the last token and pause, returning `false` to indicate that it failed to find a complete token."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "Supported elements",
+            "support": "When this happens, WP_HTML_Processor::get_last_error returns a non-null value and WP_HTML_Processor::get_unsupported_exception describes what was encountered; methods which produce output (such as `serialize()` and `normalize()`) return `null`."
+          }
+        ],
+        "rationale": "The citations directly describe the subtree text-collection walk, the `#text`-only filter and special-element exception, and the clean-finish checks (`paused_at_incomplete_token()` and `get_last_error()`), while the rewrite recipe is supported by the `serialize_token()` contract plus the incomplete-token and unsupported-markup failure contracts; the docs do not explicitly say a partially accumulated rewrite string is valid after truncation, so the safe fallback/reject guidance is inferred from those failure contracts.",
+        "confidence": 95
+      }
+    },
+    {
+      "id": "generic-text-rewrite-recipes",
+      "trial_id": "probe-3",
+      "response": {
+        "answer": "1. To collect DOM-style text from an element subtree, use `WP_HTML_Processor`, not `WP_HTML_Tag_Processor`, because the HTML Processor is the one recommended when “collecting an element's text content” and walking subtrees. Match the element opener with `next_tag()`, record `get_current_depth()`, then advance with `next_token()` while `get_current_depth() >=` the recorded depth, appending only tokens where `get_token_type() === '#text'` via `get_modifiable_text()`. Skip non-`#text` tokens such as tags and comments, and do not read attributes, because text content lives in text tokens; also do not use `get_modifiable_text()` on ordinary container element tags. For `SCRIPT`, `STYLE`, `TITLE`, and `TEXTAREA`, do not expect `#text` children at all; read their text from the element’s own opening token with `get_modifiable_text()`. Returning the accumulated text is acceptable only if the bounded scan finished cleanly: the docs say to reject or fall back when `paused_at_incomplete_token()` is true or `get_last_error()` is non-null, because structural closers alone do not prove complete input.\n\n2. To finish a token-by-token rewrite with `WP_HTML_Processor::serialize_token()`, use `WP_HTML_Processor`, walk with `next_token()`, and concatenate `serialize_token()` for each visited token, skipping both opener and closer of any element you want removed. Returning the accumulated rewritten output is acceptable when the walk completed without truncation or unsupported-parser abort. If the input may end in an incomplete token, the docs say `next_token()` pauses at the start of that incomplete token and returns `false`; if the parser hits unsupported markup, `get_last_error()` becomes non-null and output-producing methods like `serialize()` return `null`. So after the rewrite loop, accept the accumulated output only when `! paused_at_incomplete_token()` and `get_last_error() === null`; otherwise the caller should reject the result or fall back instead of treating the partial accumulation as a clean rewrite.",
+        "citations": [
+          {
+            "file": "html-tag-processor.md",
+            "heading": "Overview > Which processor should I use?",
+            "support": "Use the HTML PROCESSOR when structure matters: \"is this element inside that one,\" collecting an element's text content, walking a subtree, handling implied or missing closing tags the way a browser would, or producing normalized output."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "next_token()",
+            "support": "Use this method instead of WP_HTML_Processor::next_tag when text and other non-tag content matters, while keeping the HTML Processor's full awareness of document structure."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "next_token()",
+            "support": "An element's text content may be split across several consecutive `#text` tokens: accumulate text while walking rather than assuming one token carries all of an element's text."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "next_token()",
+            "support": "One important exception to the collect-`#text`-tokens recipe: elements whose contents cannot contain markup (SCRIPT, STYLE, TITLE, TEXTAREA) produce NO `#text` child tokens at all... Read their text with `get_modifiable_text()` while matched on the element's opening tag instead."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "next_token()",
+            "support": "Example: `if ( $processor->next_tag( 'LI' ) ) { $depth_inside_li = $processor->get_current_depth(); ... while ( $processor->next_token() && $processor->get_current_depth() >= $depth_inside_li ) { if ( '#text' === $processor->get_token_type() ) { $text .= $processor->get_modifiable_text(); } } }`"
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "get_current_depth()",
+            "support": "This gives a reliable way to visit every token inside an element: record the depth when matched on its opening tag and continue while the depth remains at or above that value."
+          },
+          {
+            "file": "html-tag-processor.md",
+            "heading": "set_modifiable_text()",
+            "support": "An ordinary container element (P, DIV, FIGCAPTION, SPAN, …) carries no text of its own — its text lives in `#text` child tokens — so calling this method while matched on such a tag returns `false` and changes nothing."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "next_token()",
+            "support": "If a scan will drive a mutation or another result that must reject truncated input, check `paused_at_incomplete_token()` after the scan, and check `get_last_error()` for an unsupported-parser abort."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "Recipe: scan a region before editing its opener",
+            "support": "`$scan_finished_cleanly = ! $processor->paused_at_incomplete_token() && null === $processor->get_last_error();`"
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "serialize_token()",
+            "support": "Walking every token with `WP_HTML_Processor::next_token` and concatenating `serialize_token()` for each one reconstructs the normalized serialization of the input... skip tokens to remove them, or emit extra markup around them to insert wrappers. Closing tokens of skipped elements must be skipped too."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "serialize_token()",
+            "support": "Example: `while ( $processor->next_token() ) { if ( 'SUP' === $processor->get_tag() ) { continue; // Skips both the opener and the closer. } $output .= $processor->serialize_token(); }`"
+          },
+          {
+            "file": "html-tag-processor.md",
+            "heading": "next_token()",
+            "support": "If it starts parsing a token and reaches the end of the document then it will seek to the start of the last token and pause, returning `false` to indicate that it failed to find a complete token."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "Supported elements",
+            "support": "When this happens, `WP_HTML_Processor::get_last_error` returns a non-null value... methods which produce output (such as `serialize()` and `normalize()`) return `null`."
+          }
+        ],
+        "rationale": "The cited sections directly describe the subtree text-collection walk, the special-case elements whose text is on the element token, and the clean-finish checks (`paused_at_incomplete_token()` and `get_last_error()`) that determine whether accumulated text or token-by-token serialized output is acceptable.",
+        "confidence": 96
+      }
+    }
+  ]
+}

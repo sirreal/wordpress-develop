@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses the documented `WP_HTML_Processor::normalize()` fragment normalizer, which already handles BODY-context normalization and returns `null` when it cannot produce normalized HTML. In that failure case, the function returns the required fallback markup exactly.",
+  "confidence": 96
+}

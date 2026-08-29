@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I built the fragment from a literal template and used the documented HTML Processor APIs to update the existing `src` and `alt` attributes in place, which preserves their order, then replaced the placeholder text inside `figcaption` with `set_modifiable_text()` so all special characters are encoded safely by the API.",
+  "confidence": 98
+}

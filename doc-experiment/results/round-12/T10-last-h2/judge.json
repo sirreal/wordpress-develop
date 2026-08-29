@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Reference-quality. Tag Processor (correct for byte-preserving attribute edit). All methods documented: next_tag(array('tag_name'=>'h2')), set_bookmark, seek, add_class, release_bookmark, get_updated_html. Uses the exact documented 'last matching tag' idiom (set_bookmark re-set on every match, seek once after, html-tag-processor.md:1124/1161). Releases the bookmark. Passed 6/6. Minor: the $last_h2_bookmark flag variable is slightly redundant (could use has_bookmark or a plain bool), but harmless and the value mirrors the reference's $found flag."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Correct processor, all methods documented (adds is_tag_closer, also documented). Passed 6/6. Two small non-idiomatic choices: (1) the explicit !is_tag_closer() guard is unnecessary because next_tag() with a tag_name query defaults tag_closers to 'skip' (docs line 952/2327), so closers are never visited here — defensive but reflects incomplete grasp of the default; (2) never releases the 'last-h2' bookmark. Both harmless given a single seek and single bookmark. Uses seek()'s return value as the found-guard, which is fine."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Cleanest of the three. Correct processor, all methods documented (next_tag, set_bookmark, has_bookmark, seek, add_class, release_bookmark, get_updated_html). Uses has_bookmark() as the found-guard — the most idiomatic documented check — and releases the bookmark. Explanation directly quotes the documented passage ('Setting a bookmark with a name that is already in use MOVES that bookmark') and correctly explains that comment-internal h2 is skipped because next_tag() only matches real tags. Passed 6/6."
+    }
+  ],
+  "failure_analysis": "No failures: all three trials passed all 6 hidden cases (two-headings, single-heading, no-headings-unchanged, many-headings, comment-h2-not-counted, existing-class), with zero _doing_it_wrong / trigger_error records. This task was strongly supported by the documentation, which deserves most of the credit.\n\nThe decisive enabler was the set_bookmark() docblock in html-tag-processor.md. Lines 1124 and 1161 spell out the exact pattern this task requires: \"to remember 'the last matching tag' in a single pass, re-set the same bookmark name on every match, then seek to it once after the scan completes\" and \"Setting a bookmark with a name that is already in use MOVES that bookmark to the current location ... Re-setting the same name on every match is the supported idiom for remembering 'the last X seen so far'.\" There is even a worked LI example (lines 1128-1155) structurally identical to the H2 task. All three subjects transcribed this idiom; trial-3 quoted it verbatim. Without this explicit prose, the natural-but-wrong alternative is per-tag bookmark names (last-h2-1, last-h2-2, ...) which the same docblock pre-empts at line 1159 (\"should not be created with programmatically-made names ... like 'li_{$index}'\").\n\nThree other doc facts prevented near-misses: (1) the comment-h2 case passed for free because next_tag() only stops on real tags — the comment-token discussion (lines 301-306) and the fact that the next_tag table never lists comments as matchable made subjects confident that '<!-- <h2>fake</h2> -->' would not be visited (trial-2 and trial-3 reasoned this explicitly). (2) The existing-class case passed because add_class()'s description (line 328) promises whitespace/order-preserving class merging, so subjects trusted add_class('final-section') to append 'outro final-section' rather than overwrite. (3) get_updated_html()'s byte-for-byte guarantee (line 2297) gave subjects confidence the no-heading path returns input unchanged.\n\nThe only sub-optimal-but-correct choice was trial-2's redundant is_tag_closer() guard. The cause is a documentation discoverability gap rather than an error: the tag_closers default ('skip') is buried inside the $query parameter cell of the next_tag() table (lines 952, 2327) rather than stated in the prose, so a careful reader can miss that openers-only matching is already the default and add a defensive guard. It cost no correctness here.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::next_tag() — prose description (html-tag-processor.md ~lines 47-63)",
+      "problem": "The default for tag_closers ('skip', i.e. next_tag() stops only on opening tags unless asked otherwise) is stated only inside the $query parameter cell of the method tables (lines 952 and 2327), not in the prose. Trial-2 added an unnecessary !is_tag_closer() guard inside its next_tag('h2') loop, indicating the default is easy to miss. Readers who miss it write redundant guards or, worse, assume they must handle closers manually.",
+      "suggestion": "Add one sentence to the next_tag() prose: 'By default next_tag() matches only opening tags; closers like </div> are skipped unless you pass tag_closers => \"visit\".' Pair it with a one-line note that when querying by tag_name you do not need an is_tag_closer() check unless you opted into visiting closers."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::next_tag() — relationship to non-tag tokens (html-tag-processor.md ~lines 47-63 and the comment-token list ~301-306)",
+      "problem": "Nothing in the next_tag() section states the load-bearing fact that next_tag() never matches markup that only looks like a tag inside comments, CDATA, or rawtext (e.g. an <h2> inside <!-- ... -->). Subjects had to infer this; it happened to be inferred correctly here, but it is the crux of the comment-h2-not-counted case and is left implicit.",
+      "suggestion": "Add an explicit guarantee to next_tag(): 'next_tag() only stops on real parsed HTML tags. Tag-like text inside comments, CDATA, RAWTEXT (e.g. SCRIPT/STYLE), or attribute values is never matched.' This generalizes well beyond this task and removes guesswork for any 'count/find the real tags' problem."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::has_bookmark() vs. an ad-hoc found-flag (html-tag-processor.md ~lines 1368-1374)",
+      "problem": "The set_bookmark() 'last matching tag' example (lines 1128-1155) tracks whether anything was found implicitly via control flow, and trials diverged on the post-loop guard: trial-1 used a separate $last_h2_bookmark string flag, trial-2 relied on seek()'s return value, trial-3 used has_bookmark(). All work, but the canonical idiom is undocumented, so subjects each invented their own found-check.",
+      "suggestion": "In the set_bookmark() 'last matching tag' idiom, show the recommended post-loop guard explicitly: 'After the scan, use has_bookmark(\"name\") to test whether any match occurred before seeking.' This makes has_bookmark() discoverable as the intended companion to the re-set-bookmark pattern and steers readers away from extra flag variables."
+    }
+  ]
+}

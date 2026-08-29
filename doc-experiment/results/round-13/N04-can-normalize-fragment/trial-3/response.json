@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::create_fragment() to create a fragment parser, then calls serialize() which normalizes HTML by handling structure, implied tags, and so on. If serialize() returns a non-null string, normalization succeeded (return true). If it returns null and get_last_error() is non-null, unsupported markup was encountered (return false). The approach leverages the documented behavior that serialize() returns null when the processor aborts due to unsupported markup like mis-nested formatting elements.",
+  "confidence": 85
+}

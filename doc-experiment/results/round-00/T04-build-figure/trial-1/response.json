@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I start with a hand-written template `<figure><img src=\"\" alt=\"\"><figcaption>x</figcaption></figure>` where the img already has attributes in the required order (src then alt) and the figcaption has a placeholder text node. I then use WP_HTML_Tag_Processor: first I call next_tag('img') to land on the img opener, then set_attribute('src', $url) and set_attribute('alt', $alt), which both handle HTML encoding automatically (per the documented behavior of set_attribute). Next I scan with next_token() to visit all tokens including text nodes; once I detect the FIGCAPTION opener I set a flag, then on the next #text token I call set_modifiable_text($caption), which also handles all necessary HTML encoding. Finally get_updated_html() returns the transformed string. All encoding is delegated to the documented HTML API methods.",
+  "confidence": 72
+}

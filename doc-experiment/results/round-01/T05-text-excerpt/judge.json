@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Correct processor (WP_HTML_Processor::create_fragment, default BODY context). Every called method is documented in both markdown files: create_fragment (processor.md:348), next_token (606), get_token_type (1756), get_modifiable_text (2034). Token walk with the '#text' === get_token_type() filter feeding get_modifiable_text() is the exact idiom shown in processor.md:624-630. Handles decoded text (relies on get_modifiable_text's documented decoding, processor.md:2042 / tag-processor.md:1781), multibyte truncation via mb_substr UTF-8, zero/negative guard, and null-create_fragment guard. Malformed nesting and inter-element whitespace are handled transparently by the parser. Passed 9/9, no _doing_it_wrong. Near-miss: explanation asserts script/style 'won't produce #text tokens' which is correct, but does not acknowledge that get_modifiable_text() on the SCRIPT *tag* token would return its contents (docs emphasize this) — the #text gate is what saves it."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Identical API usage to trial-1 with an early-return / '!==' continue structure; trivially equivalent and fully idiomatic. All methods documented; no hallucinations; no _doing_it_wrong. Explanation is the most precise of the three about why SCRIPT/STYLE contents are excluded (they are part of the opening-tag token, not separate #text tokens) — matches the probe-confirmed behavior that <script> surfaces as a #tag token named SCRIPT. Correct decoded-text reliance, mb_substr UTF-8 truncation, zero-limit and null guards. Passed 9/9."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Functionally and stylistically the same as trial-1 (positive '#text' === filter, conditional truncation). Correct processor, only documented methods (create_fragment, next_token, get_token_type, get_modifiable_text), idiomatic token-walk matching processor.md:624-630, correct decoded/multibyte/edge handling, null and zero guards. Passed 9/9, no _doing_it_wrong. Same minor near-miss as trial-1: states script/style 'are not text nodes' without noting that get_modifiable_text() on the SCRIPT element token itself would return its body."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed in any trial — all three passed 9/9 with no _doing_it_wrong or trigger_error records. The candidates are near-clones of reference.php.\n\nWhat the docs did well: The decisive case was 'script-excluded' (expected 'beforeafter'). There is a real trap here that the docs both create and defuse. get_modifiable_text()'s docblock (processor.md:2042, tag-processor.md:1777) explicitly states modifiable text 'contain[s] the contents of SCRIPT and STYLE tags, of TEXTAREA tags, and of any other section ... which cannot contain HTML markup (DATA).' A subject who walked every token and unconditionally concatenated get_modifiable_text() would have included 'var x = 1;' and failed. The docs steered all three subjects away from this because the canonical token-walking example in WP_HTML_Processor::next_token() (processor.md:624-630) shows precisely the right idiom: gate on '#text' === get_token_type() before calling get_modifiable_text(). I verified with a probe that <script>...</script> surfaces as a single #tag token named SCRIPT whose get_modifiable_text() returns its body, so the #text gate is exactly what excludes it. All three subjects copied that pattern and got it right.\n\nOther cases the docs covered cleanly: 'entities-count-decoded' (expected 'Fish &') is reinforced by the verbatim get_modifiable_text() example '<p>Fish &amp; Chips</p>' => 'Fish & Chips' (tag-processor.md:1786-1789) plus the explicit 'Do not decode the returned string again' note (tag-processor.md:1781). 'malformed-nesting' and 'interelement-whitespace' are handled implicitly by the parser; subjects correctly trusted the processor without trying to normalize whitespace.\n\nNear-misses in the explanations: All three explanations justify script exclusion by claiming SCRIPT/STYLE 'are not text nodes' / 'are part of the opening tag token itself.' Trial-2 phrases this most accurately. Trial-1 and trial-3 are correct in outcome but slightly hand-wavy — none acknowledges that calling get_modifiable_text() on the SCRIPT *element* token would return the script body, which is the only reason the #text gate matters. This is a latent comprehension gap, not a code defect: it survived only because the example pattern they copied already gates on #text.\n\nMultibyte/codepoint truncation: no doc passage discusses code-point-vs-byte counting; all three correctly reached for mb_substr/mb_strlen with 'UTF-8' from general PHP knowledge, not from the docs. This is outside the API surface so it is not a doc gap, but it means the docs neither helped nor hindered here.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::get_token_type() and WP_HTML_Processor::get_token_type() (sections at tag-processor.md:1623, processor.md:1756)",
+      "problem": "The token-type docs do not enumerate which token TYPE a raw-text element such as SCRIPT/STYLE/TEXTAREA reports. A reader can wrongly assume the inner content of a <script> arrives as a separate '#text' token. The get_modifiable_text() docblock simultaneously says modifiable text 'includes the contents of SCRIPT and STYLE tags', which invites the opposite mistake — concatenating modifiable text for every token and accidentally pulling in script bodies.",
+      "suggestion": "In get_token_type() add a short note plus a worked example showing that a SCRIPT/STYLE/TEXTAREA element is reported as a single tag token (get_token_type() === '#tag', token name 'SCRIPT'), and that its raw contents are exposed via get_modifiable_text() ON THAT TAG TOKEN — there is no separate '#text' token for raw-text-element interiors. State the general rule: to collect only human-visible text, filter on get_token_type() === '#text' rather than calling get_modifiable_text() on every token."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::get_modifiable_text() / WP_HTML_Processor::get_modifiable_text() (tag-processor.md:1769, processor.md:2034)",
+      "problem": "The docblock lists everything get_modifiable_text() can return (text nodes, comment interiors, SCRIPT/STYLE/TEXTAREA/DATA contents) but gives no guidance on distinguishing these categories, leaving readers to guess how to select only true text content versus script/style/comment payloads.",
+      "suggestion": "Add a one-line cross-reference pairing get_modifiable_text() with get_token_type()/get_token_name(): e.g. 'To extract only visible text content, check get_token_type() === \"#text\" first; SCRIPT, STYLE, TEXTAREA, comment and other DATA contents are also returned by this method but are reported under their own token types/names.' This makes the safe text-extraction idiom discoverable from the method most readers will start at."
+    },
+    {
+      "location": "WP_HTML_Processor class overview / create_fragment() examples (processor.md:42-54, 348)",
+      "problem": "The plain-text-extraction use case (concatenate all #text modifiable text in document order) is shown only deep inside the next_token() docblock example (lines 624-630), which a reader may not find. There is no top-level signpost that 'walk tokens, filter on #text, accumulate get_modifiable_text()' is the standard recipe for getting a document's text content.",
+      "suggestion": "Add a brief 'Extracting text content' subsection (or a cross-reference from the class overview) pointing to the next_token() #text example, noting that this yields decoded text in document order and naturally omits markup, script, and style payloads. Keep it generic — the recipe, not any specific length-limiting task."
+    }
+  ]
+}

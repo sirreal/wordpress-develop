@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::create_fragment to parse HTML in fragment mode (BODY context by default), finds the first TABLE element, then walks through tokens inside the table using next_token(). For each TR (row), it initializes a new row array. For each TD or TH (cell), it accumulates all #text tokens inside that cell using get_modifiable_text() which returns decoded character references. The depth tracking ensures we collect text only from immediate children of cells and properly scope rows and cells within the table structure.",
+  "confidence": 72
+}

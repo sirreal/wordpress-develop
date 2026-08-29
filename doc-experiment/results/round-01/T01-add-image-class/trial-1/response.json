@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan through the HTML. The `next_tag('img')` method finds each IMG opener in sequence (tag name matching is case-insensitive per the docs), skipping HTML comments and other non-tag content automatically. For each matched IMG tag, `add_class('wp-image')` appends the class to any existing classes without removing or reordering them (per the documented behavior showing `add_class` appends when a class attribute already exists). After the loop exhausts all IMG tags, `get_updated_html()` returns the fully updated HTML string.",
+  "confidence": 98
+}

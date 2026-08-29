@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Used the correct API surface: WP_HTML_Processor::create_fragment() and token walking with documented get_token_type(), get_tag(), is_tag_closer(), get_current_depth(), and get_modifiable_text(). The single-pass state machine follows the documented '#text' token extraction guidance and handles decoded entities, empty headings, and implied/EOF closers. Minor deduction only because it does not explicitly inspect parser error/incomplete-token status, though the task behavior is otherwise well covered."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 93,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor and used only documented methods, including get_token_name(). It passes all cases and relies on documented virtual closer behavior. The implementation is less idiomatic than the others: it records $heading_depth but never uses it, and it flushes by matching heading closer names rather than using the documented depth/breadcrumb boundary pattern. That is workable here, but more fragile as a general subtree extraction pattern."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice and no undocumented API usage. The stack/depth approach is consistent with the documented structural-token model, accumulates only '#text' tokens, uses decoded get_modifiable_text(), and drains open headings at EOF. Slightly overbuilt for non-nestable headings, but API use is sound and edge handling is strong."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 7 frozen cases, with no _doing_it_wrong or trigger_error records. The rendered docs did well on the critical distinctions for this task: the Tag Processor overview says to use WP_HTML_Processor when structure, subtree text, implied/missing closing tags, or DOM-style traversal matter; the HTML Processor next_token() and 'Recipe: collect DOM-style text from a subtree' sections explicitly show walking tokens, bounding by current depth, and appending only '#text' tokens; get_modifiable_text() states that returned text is already decoded, which explains the '&amp;' case; and the next_token()/is_tag_closer()/get_current_depth() text explains virtual/implied closers and closer depth, which supports empty headings and '<h2>One<h3>Two'. Near miss: trial-2 carried unused depth state and depended on closer-name flushing. It still works because the docs document virtual closers, but a reader could miss that depth is the more general boundary for arbitrary subtree extraction.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::next_token() docblock / repeated-region examples",
+      "problem": "The docs explain single-cursor traversal and include examples, but the common 'collect text for every matching element in document order' pattern is still easy to implement with ad hoc closer-name logic.",
+      "suggestion": "Add a short general example for repeated structural elements: when an opener matches a predicate, store its depth/name, collect only '#text' tokens while inside that depth, and emit on the virtual or explicit closer, including empty regions."
+    },
+    {
+      "location": "WP_HTML_Processor::get_current_depth() and is_tag_closer() docblocks",
+      "problem": "The closer-depth rule is documented, but its consequence for ending a subtree scan is scattered across sections.",
+      "suggestion": "State directly that for an opener at depth N, a depth drop below N means the processor has left that element, including for implied and end-of-input-generated closers."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::get_modifiable_text() / WP_HTML_Processor inherited method docs",
+      "problem": "The decoded-vs-raw distinction is present, but the task-relevant rule is split between general modifiable text and subtree text guidance.",
+      "suggestion": "Add a compact cross-reference: for ordinary element text content, filter to get_token_type() === '#text' before calling get_modifiable_text(); special element opener text is opt-in and should not be included merely because it is modifiable."
+    }
+  ]
+}

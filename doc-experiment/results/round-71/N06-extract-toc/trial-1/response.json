@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment and `next_token()` to walk tokens in document order, collecting only `#text` tokens inside `H1` through `H6` sections via `get_token_type()`, `get_tag()`, `is_tag_closer()`, `get_current_depth()`, and `get_modifiable_text()`. The function flushes each heading when its closing tag is reached and preserves empty headings as empty strings.",
+  "confidence": 90
+}

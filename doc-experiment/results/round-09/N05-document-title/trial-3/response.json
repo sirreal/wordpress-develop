@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_full_parser() to properly parse a complete HTML document, then uses next_tag() to locate the TITLE element. Once found, it advances to the next token to get the text content. The get_modifiable_text() method automatically decodes character references (like &mdash; to \u2014), so no additional decoding is needed. It returns null if no TITLE exists, empty string for empty TITLE elements, and the decoded text content otherwise.",
+  "confidence": 78
+}

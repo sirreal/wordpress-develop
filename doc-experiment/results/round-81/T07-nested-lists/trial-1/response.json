@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the fragment with structural awareness, then scanned only opening tags via next_tag() and inspected each matched UL/OL element\u2019s get_breadcrumbs() to detect whether any UL or OL appears in its ancestor path. Matching nested lists get add_class('nested-list'), and the modified fragment is returned with get_updated_html() so untouched bytes are preserved exactly.",
+  "confidence": 88
+}

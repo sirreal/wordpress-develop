@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the BODY-style fragment, then walks tokens once with `next_token()`. On each opening `A` tag it reads `href` with `get_attribute()` and includes only string-valued attributes, tracks open anchors with a stack keyed to result indexes, appends decoded text from `#text` tokens via `get_modifiable_text()`, and pops tracked anchors on `A` closing tags using `is_tag_closer()`.",
+  "confidence": 92
+}

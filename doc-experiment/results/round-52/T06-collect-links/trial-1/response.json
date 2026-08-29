@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the body fragment, then walked tokens in document order with next_token(). For each opening A tag, I read the decoded href with get_attribute(), required it to be a string so boolean href attributes are excluded, and accumulated only #text tokens inside that element using get_current_depth() as the subtree boundary and get_modifiable_text() for decoded link text.",
+  "confidence": 94
+}

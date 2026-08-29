@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Tag_Processor to find the first DIV tag with next_tag('div'), then called get_attribute_names_with_prefix('data-') to retrieve all lowercase attribute names that begin with \"data-\" in document order. For each name returned, I called get_attribute($name) to get the decoded value \u2014 which returns a string for valued attributes or true for boolean attributes (those written without a value), exactly matching the task requirements. If no DIV is found or it has no data-* attributes, an empty array is returned.",
+  "confidence": 95
+}

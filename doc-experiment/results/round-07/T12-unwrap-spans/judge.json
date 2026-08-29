@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 88,
+      "hallucinated_methods": [],
+      "notes": "Correct processor (WP_HTML_Processor). All 7 cases pass; all methods documented (create_fragment, next_token, get_tag, get_token_type, is_tag_closer, serialize_token, normalize all grep-confirmed in html-processor.md). Two non-idiomatic redundancies cost points: (1) manual is_tag_closer()/$span_depth bookkeeping that does nothing — the `continue` already skips both opener and closer, exactly as the serialize_token() doc example states ('Skips both the opener and the closer'); (2) a final WP_HTML_Processor::normalize($output) on output that serialize_token() already produced as normalized HTML (probe confirms idempotent, so harmless but pointless). Signals the subject didn't trust the documented 'concatenating serialize_token() reconstructs the normalized serialization' guarantee. Edge handling solid: returns '' on null parse, matching the reference. Self-confidence 45 was the lowest of the three despite the most defensive code."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 92,
+      "hallucinated_methods": [],
+      "notes": "Effectively the reference implementation and a near-verbatim adaptation of the documented SUP-removal example at serialize_token() (lines 1023-1037). Clean: single get_tag() guard relying correctly on get_tag() returning null for non-tag tokens (probe-confirmed; #text => NULL), serialize_token() accumulation, no redundant normalize. Correct processor, no hallucinated API. One minor edge deviation from reference: returns raw $html on null parse instead of '' — un-normalized input technically violates the 'normalized serialization' contract, though create_fragment only returns null on unsupported context/encoding (untested by the suite). Explanation accurate about BODY context and skipping both openers/closers."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 92,
+      "hallucinated_methods": [],
+      "notes": "Identical in substance to trial-2 and to the reference. Mirrors the documented SUP-removal pattern. Correct processor, only documented methods, idiomatic single-guard token walk with serialize_token(). Explanation correctly notes get_tag() returns uppercase and that case-insensitive matching is handled — accurate per the get_tag() heading ('Returns the uppercase name of the matched tag'). Same minor edge ding as trial-2: returns raw $html on null parse rather than a normalized/empty value, violating the normalized-output contract on an untested path. Highest self-confidence (72) and well-calibrated."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed: all three trials passed all 7 cases (21/21 executions, zero _doing_it_wrong or trigger_error records). The task is therefore a documentation success story, and the analysis is of what the docs did well plus near-misses.\n\nWhat the docs did well: The `serialize_token()` section in html-processor.md (lines 1013-1042) carries a directly transferable worked example — 'Remove every SUP element but keep its contents' — that is structurally identical to this unwrap-spans task (substitute SPAN for SUP). It states the two non-obvious facts that make the naive approach correct: (1) 'continue' on a tag match 'Skips both the opener and the closer', and (2) 'Closing tokens of skipped elements must be skipped too.' Trials 2 and 3 reproduced this pattern almost verbatim and were correct. The accompanying prose ('Walking every token ... and concatenating serialize_token() for each one reconstructs the normalized serialization of the input — the same output that serialize() produces in a single call') is what tells subjects no extra normalize() pass is needed. The token-walking example also uses get_tag() as the only guard, implicitly teaching that get_tag() is null-safe on non-tag tokens (probe confirms #text => null), which is why trials 2/3 could skip a get_token_type() check.\n\nNear-misses in explanations / minor weaknesses:\n1. Trial 1's redundant final normalize() and is_tag_closer()/depth bookkeeping. The doc example demonstrates that neither is needed, but the subject still added them. The serialize_token() prose says the concatenation 'reconstructs the normalized serialization', yet a reader can still doubt whether the per-token output is *already* normalized (vs. needing a final pass). The idempotency guarantee — that re-normalizing already-serialized output is a no-op — is implied but never stated, leaving room for the defensive double-normalize. No section ties together that serialize_token() output for the whole walk == serialize() == normalize(serialize_token-walk).\n2. The null-parse contract. create_fragment()'s docs (lines 381-383) say it returns null 'otherwise', and the body explains the only failure modes are unsupported context/encoding — but it does not prescribe what a caller should *return* in that case, nor make clear that null does NOT occur for ordinary malformed HTML (the parser handles `<div></p>fun<table>` etc. fine). Trials 2/3 returned the raw un-normalized $html on null, which would violate a 'normalized output' contract had the path been exercised. This is a latent correctness gap the suite happened not to test.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::serialize_token() — section in html-processor.md (around lines 1023-1039)",
+      "problem": "The prose states that concatenating serialize_token() over a full walk reconstructs the normalized serialization, but never states that this output is ALREADY normalized and that re-running normalize()/serialize() on it is a redundant no-op. This invites a defensive extra normalization pass (observed in trial-1), which is wasteful and re-parses the output a second time.",
+      "suggestion": "Add one sentence to the serialize_token() / serialize() discussion making idempotency explicit, e.g. 'The concatenated output is already fully normalized; passing it to normalize() or serialize() again produces an identical string, so no second normalization pass is needed.'"
+    },
+    {
+      "location": "WP_HTML_Processor::create_fragment() and create_full_parser() — Returns section (html-processor.md lines 381-383, 404-406)",
+      "problem": "The 'Returns ... otherwise null' line does not enumerate WHEN null occurs versus when it does not. It is easy to assume malformed or incomplete HTML yields null, when in fact the parser handles malformed input (it only returns null for unsupported context/encoding). This leaves callers unsure what to return on the null branch, and some return raw un-normalized input, violating a normalized-output contract.",
+      "suggestion": "Clarify the failure conditions: state that null is returned only when the requested context or encoding is unsupported (not for malformed or incomplete HTML, which is parsed and normalized normally), and note that on null there is no parsed document to serialize, so callers wanting normalized output should not fall back to returning the raw input."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::get_tag() — section (html-tag-processor.md line 1566, html-processor.md line 1711)",
+      "problem": "The heading 'Returns the uppercase name of the matched tag' and example only show the null case for 'no more tags'. It does not explicitly state that get_tag() returns null when the cursor is on a non-tag token (#text, #comment, etc.) during a next_token() walk. Code that guards solely on `'SPAN' === get_tag()` while iterating every token relies on this, but the guarantee is only inferable from an example elsewhere.",
+      "suggestion": "Add to the get_tag() Returns/description that it yields null whenever the current token is not a tag opener/closer (including text, comment, and doctype tokens), so that `'TAGNAME' === $p->get_tag()` is a safe standalone guard inside a next_token() loop without a preceding get_token_type() check."
+    }
+  ]
+}

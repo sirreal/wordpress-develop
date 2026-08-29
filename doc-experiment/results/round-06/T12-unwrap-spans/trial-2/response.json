@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This implementation uses WP_HTML_Processor to iterate through all tokens in the HTML fragment. When a SPAN opener is encountered, it increments a skip counter and skips serializing the token. When a SPAN closer is encountered and the skip counter is positive, it decrements the counter and skips the closer token. All other tokens are serialized normally. This preserves the contents of SPAN elements while removing the tags themselves, and the serialize_token() method automatically produces normalized HTML output with proper encoding and formatting.",
+  "confidence": 82
+}

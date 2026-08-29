@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` for a flat, byte-preserving attribute rewrite: it scans each `A` tag with `next_tag( 'A' )`, checks `get_attribute( 'href' )` so empty-string and boolean `href` values still count as present, and overwrites or adds `target` via `set_attribute( 'target', '_blank' )` before returning `get_updated_html()`.",
+  "confidence": 98
+}

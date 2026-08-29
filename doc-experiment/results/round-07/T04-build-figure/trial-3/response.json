@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Tag_Processor to build the figure fragment from a template. Attributes are set with set_attribute() for automatic HTML encoding; text is set via next_token() to find the #text node and set_modifiable_text() for safe encoding. Attributes preserve order (src, alt) as declared in the template, and get_updated_html() returns the final markup.",
+  "confidence": 87
+}

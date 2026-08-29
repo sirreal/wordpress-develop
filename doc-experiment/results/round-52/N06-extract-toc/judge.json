@@ -1,0 +1,35 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Used the correct structural parser, `WP_HTML_Processor::create_fragment()`, and only documented methods: `next_token()`, `get_token_type()`, `get_current_depth()`, `get_modifiable_text()`, `is_tag_closer()`, and `get_tag()`. The single stateful token walk follows the docs' repeated-region guidance and reads only `#text` tokens, so decoded entity handling is correct. Minor caveat: it uses a depth-drop/final-flush pattern rather than the closer-driven flush shown in the repeated-region recipe, but this is still consistent with the depth documentation."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Same strong documented pattern as trial 1: HTML Processor fragment parsing, one `next_token()` pass, heading state keyed by opener depth, and text collected only from ordinary `#text` tokens with `get_modifiable_text()`. No `_doing_it_wrong` records and no undocumented HTML API calls. It does not check `paused_at_incomplete_token()` or `get_last_error()`, but the docs frame that as caller policy for read-only extraction."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Uses only documented API and matches the docs' intended model closely: HTML Processor for tree-aware traversal, one forward token loop, opener/closer distinction with `is_tag_closer()`, depth tracking, and guarded `#text` extraction. The extra flush before starting a new heading is a reasonable safeguard around implicitly closed headings. Edge handling for decoded text, empty headings, case-insensitive tag names, and virtual end-of-input closes is good."
+    }
+  ],
+  "failure_analysis": "All trials passed all 7 frozen cases, so there are no failed hidden cases to attribute to documentation gaps. The rendered docs did well in three places: the processor-choice guidance explicitly says to use `WP_HTML_Processor` when structure, subtree walking, implied closes, or text content matter; the `next_token()` and `get_current_depth()` sections explain one-cursor token walking, depth-bounded subtrees, `>=` boundaries, and virtual closers; and the DOM-style text recipe plus `get_modifiable_text()` docs clearly distinguish ordinary `#text` tokens from comments and special-element opener text, while noting decoded text semantics. The main near-miss is that all candidates implemented a depth-drop state machine rather than the closer-driven repeated-region example. It worked, but the docs could make that equivalent pattern more explicit for read-only extraction over many matching containers. The other near-miss is incomplete input policy: candidates returned best-effort accumulated data without checking parser completion, which is allowed by the docs for read-only extraction but still easy for task authors to overlook if they need complete-source guarantees.",
+  "doc_gaps": [
+    {
+      "location": "`WP_HTML_Processor::next_token()` repeated-region recipe",
+      "problem": "The recipe demonstrates closer-driven flushing for one element name, but many extraction tasks naturally match a set of container elements and use a depth-drop state machine instead. The current docs imply the pieces, but do not present that pattern directly.",
+      "suggestion": "Add a short general example for read-only repeated subtree extraction that records an opener depth, accumulates `#text`, flushes when `get_current_depth()` drops below that opener depth, and states when a final EOF flush is or is not needed."
+    },
+    {
+      "location": "`WP_HTML_Processor::next_token()` / incomplete-input notes",
+      "problem": "The docs say read-only callers choose their completion policy, but the decision point is spread across recipe text and the policy table.",
+      "suggestion": "Add a compact checklist after read-only extraction examples: best-effort extraction may return accumulated data; complete-source extraction should reject or sentinel-return when `paused_at_incomplete_token()` or `get_last_error()` indicates the scan did not cover the full input."
+    }
+  ]
+}

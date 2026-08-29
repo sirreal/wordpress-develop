@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the fragment with browser-like table handling, finds the first `TABLE` with `next_tag()`, then walks tokens with `next_token()` while staying inside that table by comparing `get_current_depth()`. It builds rows on `TR` open/close tokens, builds cells on `TD`/`TH` open/close tokens, and collects cell text from `#text` tokens via `get_modifiable_text()`, also reading text-carrying raw-text/RCDATA elements (`SCRIPT`, `STYLE`, `TITLE`, `TEXTAREA`) from their opening tokens because the docs state they do not emit child `#text` tokens.",
+  "confidence": 88
+}

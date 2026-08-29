@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because containment is structural, then scans only `IMG` openers with `next_tag( 'IMG' )`, checks `get_breadcrumbs()` to confirm each image is somewhere inside a `FIGURE`, and reads the already-decoded `src` with `get_attribute()`, skipping missing, boolean, and empty values.",
+  "confidence": 93
+}

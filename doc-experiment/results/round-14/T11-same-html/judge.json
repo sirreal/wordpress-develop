@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Reference-identical solution: WP_HTML_Processor::normalize() on both inputs, null-check, strict === compare. Correct processor choice (HTML Processor for structure-aware normalization, the documented purpose of normalize()). normalize() is the only API called and is fully documented (html-processor.md lines 944-994) as static returning string|null. No hallucinated or undocumented methods. Idiomatic: uses the documented static one-call normalize() rather than manually building a fragment + serialize(). Edge cases handled per docs: null return on unparseable/unsupported input (misnesting case) is checked and yields false; the harness-captured _doing_it_wrong at level 512 from the internal serialize() is a non-fatal notice that does not change normalize()'s null return, so behavior is correct. All 9/9 cases pass. Explanation is accurate and confident (92)."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Functionally identical to trial-1 and the reference. Single documented call WP_HTML_Processor::normalize() per input, Yoda-style null === checks, strict === comparison. Correct processor choice, no hallucinated/undocumented API, idiomatic use of the documented normalize() entry point, correct null-on-unsupported handling for the misnesting case. 9/9 pass. Explanation accurately enumerates the normalizations (implied closers, quoting, casing, character references) and the null contract. Confidence 92."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Again reference-equivalent: normalize() both inputs, null === guard, strict ===. Correct processor, zero hallucinations, idiomatic, correct edge-case handling (null on unsupported misnesting). 9/9 pass. Explanation is the most complete of the three, correctly citing duplicate-attribute removal, omitted-tag insertion, casing, and character-reference decoding from the documented normalize() bullet list. Confidence 92."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed in any trial: 9/9 pass across all three. All three subjects independently converged on the exact reference solution (WP_HTML_Processor::normalize() + null-check + strict string equality), which is the cleanest possible answer to this task.\n\nWhat the docs did well: The `WP_HTML_Processor::normalize()` section (html-processor.md ~944-994) is a near-perfect match for the task. It is a static, single-call API; its summary \"Normalizes an HTML fragment by serializing it\" plus the bullet list (double-quoting attribute values, removing duplicate attributes, adding omitted tags, lower-casing tag/attribute names, re-encoding text, dropping trailing incomplete syntax) maps directly onto the task's stated equivalences (quoting style, implied closers, tag-name case, character references). The signature `string|null` and the explicit \"or `null` if unable to normalize\" gave subjects the exact failure contract needed for \"if either input cannot be fully parsed, return false.\" The \"Which processor should I use?\" guidance (tag-processor.md 18-25) and the HTML Support section both steer \"producing normalized output\" / \"structure matters\" toward the HTML Processor, reinforcing the correct choice. The worked `normalize()` examples (including `<div></p>fun<table>...` showing implied table structure) made the canonicalizing behavior concrete.\n\nHow the unsupported-misnesting case was handled correctly: The HTML Support section explicitly calls out `<b>one<i>two</b>three</i>` as the canonical example of mis-nested formatting that the processor aborts on, and states that output-producing methods (`serialize()`, `normalize()`) return `null` when `get_last_error()` is non-null. The hidden test `misnesting-unsupported-false` uses that exact input. I confirmed by probe that `normalize(\"<b>one<i>two</b>three</i>\")` returns NULL; the candidates' null-check therefore yields false as required. The level-512 trigger_error from the internal serialize() is a non-fatal E_USER_NOTICE captured by the harness and does not alter the null return — no candidate was penalized by it and no candidate needed to suppress it.\n\nNear-misses in the explanations: All three explanations describe normalize() as producing \"canonical form\" and assume that structurally-equal inputs yield byte-identical strings (and that attribute-order / text / value differences survive). That assumption is correct and is the load-bearing premise of the whole compare-by-normalize approach, but the docs never explicitly promise it — see doc_gaps. Subjects got it right by reasonable inference rather than by documented guarantee; with adversarial inputs that gap could have produced a confidently wrong solution.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::normalize() (and the parallel serialize() docblock)",
+      "problem": "The docs list what normalization CHANGES but never state the canonicalization guarantee that makes normalize() usable for equality/comparison: that two inputs which parse to the same DOM structure produce byte-identical output, and conversely that differences in attribute order, attribute values, and text content are preserved (survive normalization). Every subject relied on this property to compare two fragments, but inferred it rather than reading it. Without it, a comparison built on normalize() is only accidentally correct.",
+      "suggestion": "Add one sentence stating that normalize() is canonical/deterministic: equal parsed structures yield identical strings, so the output is suitable for structural comparison, caching keys, or deduplication. Explicitly note what is PRESERVED (attribute order as written, attribute values, text content) alongside the existing list of what changes."
+    },
+    {
+      "location": "WP_HTML_Processor::normalize()",
+      "problem": "normalize() is the obvious tool for 'do these two HTML fragments mean the same thing?' but no example or 'see also' connects it to that comparison use case; subjects had to discover the pattern. The null-return-on-unsupported behavior is documented in the distant HTML Support section rather than near normalize() itself, so the 'return false if either input is unsupported' contract is split across the page.",
+      "suggestion": "Cross-reference the HTML Support / abort-and-return-null behavior directly from the normalize()/serialize() docblocks (a one-line 'Returns null when the input contains unsupported markup; see HTML Support'), and add a brief comparison example such as `normalize($a) === normalize($b)` with a note that a null from either side means the input could not be fully represented."
+    },
+    {
+      "location": "WP_HTML_Processor::normalize() return documentation / error reporting",
+      "problem": "On unsupported input, normalize() returns null but the underlying serialize() also emits an E_USER_NOTICE ('Cannot serialize HTML Processor with parsing error: unsupported.', level 512), visible in the harness trigger_error logs. The docs do not mention that a notice/_doing_it_wrong may be emitted alongside the null return, so a caller cannot tell whether to expect or suppress it.",
+      "suggestion": "Document that when the processor has aborted on unsupported markup, the output-producing methods return null and may additionally raise a notice; advise callers to branch on the null return (and consult get_last_error()/get_unsupported_exception() for the reason) rather than treating the notice as the signal."
+    }
+  ]
+}

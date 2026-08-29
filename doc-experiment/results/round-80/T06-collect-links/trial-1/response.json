@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment in document order, then walked tokens with `next_token()`. For each `A` opener with a string `href` from `get_attribute()`, I tracked an open link record, appended decoded text from `get_modifiable_text()` on `#text` tokens, and finalized the record when the matching `A` closer was encountered.",
+  "confidence": 82
+}

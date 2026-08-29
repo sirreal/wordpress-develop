@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because the task depends on ancestor structure, then walks tags with `next_tag()`, checks each `UL`/`OL` element\u2019s `get_breadcrumbs()` for any earlier `UL` or `OL` ancestor, and applies `add_class( 'nested-list' )`. The final HTML is returned with `get_updated_html()`, which preserves untouched bytes exactly while applying only the class edits.",
+  "confidence": 92
+}

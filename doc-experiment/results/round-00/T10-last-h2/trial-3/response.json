@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Tag_Processor, scanning for all H2 opener tags (next_tag() skips closers by default) and updating a single bookmark named \"last-h2\" on each match. After the scan completes, if at least one H2 was found I seek back to the bookmark and call add_class('final-section'), then return get_updated_html(). The Tag Processor naturally ignores H2-like text inside comments (it only matches real HTML tags), satisfying that requirement. The bookmark approach is explicitly documented and designed for exactly this \"find the last matching tag\" pattern.",
+  "confidence": 96
+}

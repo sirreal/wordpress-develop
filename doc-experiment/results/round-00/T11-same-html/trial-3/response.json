@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The approach uses `WP_HTML_Processor::normalize()`, a static method documented as normalizing an HTML fragment by serializing it. It standardizes attribute quoting (double-quotes), removes duplicate attributes, adds omitted tags, lowercases tag/attribute names, re-encodes text, and handles character references \u2014 precisely the normalization needed to determine structural equivalence. If either input cannot be parsed/represented, `normalize()` returns `null`, in which case the function returns `false` as required. Comparing the two normalized strings then determines whether both fragments produce the same parsed structure.",
+  "confidence": 90
+}

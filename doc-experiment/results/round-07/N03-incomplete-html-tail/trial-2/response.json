@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor's next_token() method to scan through all tokens in the HTML document, then checks paused_at_incomplete_token() to determine if the input ended mid-token. This handles all incomplete cases (truncated tags, unterminated comments, unclosed special elements) while correctly treating unclosed elements with complete tokens as lexically complete.",
+  "confidence": 92
+}

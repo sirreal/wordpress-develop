@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::normalize()` because the task is to normalize an HTML fragment in BODY context, which the documentation says this static method handles directly and returns `null` when normalization is not possible due to unsupported markup. The function therefore returns the documented fallback placeholder only when `normalize()` returns `null`.",
+  "confidence": 98
+}

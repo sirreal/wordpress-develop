@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Tag_Processor for byte-exact preservation and flat, position-based work. It iterates through all IMG tags (case-insensitive matching is automatic in next_tag) using the documented next_tag() method with a 'tag_name' query parameter, calls add_class() which appends the new class without removing or reordering existing ones, and returns the result using get_updated_html() which preserves all unmodified bytes. The processor automatically ignores tag-like content inside comments and other special elements.",
+  "confidence": 95
+}

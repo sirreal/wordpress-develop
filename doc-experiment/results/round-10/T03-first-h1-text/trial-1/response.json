@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor to parse the HTML fragment and find the first H1 element via next_tag() with a tag_name query. Once matched on the H1, it records its nesting depth and iterates through tokens via next_token(), collecting all #text token content (which is automatically decoded by get_modifiable_text()) while inside the H1. When the depth drops below the H1's depth, it exits the loop. Returns the concatenated text or null if no H1 exists.",
+  "confidence": 42
+}

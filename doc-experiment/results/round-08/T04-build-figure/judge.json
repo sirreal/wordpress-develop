@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Correct processor (Tag Processor) for a static-shape fragment with attribute + text edits (30/30). Every method called — next_tag (string form, doc line 59), set_attribute, next_token, get_token_type, set_modifiable_text, get_updated_html — exists in html-tag-processor.md; no _doing_it_wrong records (30/30). Idiomatic: mirrors the documented 'Building markup from a template' pattern (lines 158-182) — empty-valued attrs preserve src/alt order, placeholder text gives set_modifiable_text a #text node to replace, token-walk finds it (24/25; minor: redundant extra next_tag('figcaption') before the token walk — the reference and trial-3 simply walk all tokens; harmless since next_tag and next_token share one cursor, verified by probe). Edge cases handled via the API's automatic encoding (set_attribute encodes quotes, set_modifiable_text encodes &/</>); both next_tag calls are guarded with if (12/15; does not check set_modifiable_text return value, which doc line 1876 advises). Self-reported confidence 75, well-calibrated. 6/6 hidden cases pass."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Identical structure to trial-1 but uses the array query form next_tag( array('tag_name'=>'img') ) — also documented (doc line 58). Correct processor choice (30/30); all methods documented, no misuse (30/30). Idiomatic template-from-literal pattern (24/25; same redundant next_tag('figcaption') as trial-1). Edge handling via documented auto-encoding, both tag matches guarded (12/15; set_modifiable_text return unchecked). Confidence 82, accurate. 6/6 pass."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Tightest match to the canonical pattern and to reference.php: next_tag('img') then a single token-walk for the first #text node — no redundant figcaption lookup (30/30 processor; 30/30 no hallucination; 25/25 idiomatic, essentially the doc's lines 168-179 example verbatim). Edge cases covered by documented auto-encoding; img match guarded with if, though the text walk is unconditional (13/15; set_modifiable_text return unchecked, but the documented template guarantees a placeholder #text exists). Self-reported confidence 50 is underconfident given a clean 6/6 — the only real fault and it does not affect adherence. 6/6 pass."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed: all three trials passed 6/6, with zero _doing_it_wrong and zero trigger_error records. This task is a near-best-case for the documentation. html-tag-processor.md contains two passages that directly teach the exact technique required:\n\n1. The 'Building markup from a template' section (lines 158-182) states both rules this task hinges on — (a) include attributes in the template with empty values so updates preserve written order (the src-then-alt ordering requirement), and (b) include placeholder text inside elements that need text content because an empty element has no #text token for set_modifiable_text to replace. Its worked example (<a href=\"\" title=\"\">.</a> → next_tag → set_attribute ×2 → token-walk for #text → set_modifiable_text → get_updated_html) is structurally isomorphic to build_figure.\n\n2. The set_modifiable_text() reference (lines 1876, 1878-1888) reinforces this with a <figcaption>.</figcaption> example showing that an empty container carries no text and the placeholder-then-replace idiom is required.\n\nAll three subjects discovered and applied this pattern, so the encoding-related cases (ampersand, quotes-in-alt, angle-brackets, html-not-parsed, unicode) all passed because set_attribute and set_modifiable_text both encode automatically — a fact the docs state explicitly at lines 2142-2145, 1849, 1914-1924, and 1491. The 'html-in-caption-not-parsed' case (a <script> string going through set_modifiable_text on a #text node) passed because the placeholder lived in figcaption, not a raw-text element, so the content was encoded rather than treated as script.\n\nNear-misses in the explanations: none materially wrong. All three explanations correctly attribute the encoding to the API methods. Trial-3's self-reported confidence of 50 is the only notable miscalibration — its code is the cleanest of the three (closest to the reference), yet it expressed the least confidence, suggesting the docs, while sufficient to produce correct code, did not leave the subject feeling certain the output would be byte-exact. The most likely source of that residual doubt is that neither doc passage explicitly states the output is byte-for-byte stable for untouched regions in a fragment context; that guarantee exists at line 2297 ('Every byte the updates did not touch is returned exactly as it appeared') but is located in the get_updated_html reference, far from the template-building tutorial where a subject building a fragment would be reading.\n\nThe redundant next_tag('figcaption') in trials 1 and 2 is a minor non-idiomatic wrinkle, not a failure: the template section's example does not pre-locate the container with next_tag before walking tokens, it walks tokens directly. Subjects who added the extra step still produced correct output because next_tag and next_token share a single cursor (probe-confirmed: after next_tag('figcaption') the following next_token lands on the #text child).\"",
+  "doc_gaps": [
+    {
+      "location": "html-tag-processor.md — 'Building markup from a template' section (lines 158-182)",
+      "problem": "The template-building tutorial does not state the output guarantee that makes this whole technique trustworthy: that bytes the updates did not touch are returned exactly as written. That guarantee is buried in the get_updated_html() reference at line 2297, far from where a subject building a fragment is reading. This likely drove trial-3's low confidence (50) despite correct, clean code.",
+      "suggestion": "Add one sentence to the section closing the loop with output stability, e.g. 'Regions of the template you do not modify are returned byte-for-byte unchanged — no normalization or reformatting — so the surrounding markup you wrote is exactly what you get back.' Cross-link to get_updated_html()."
+    },
+    {
+      "location": "html-tag-processor.md — 'Building markup from a template' section (lines 168-179) and set_modifiable_text() (line 1876)",
+      "problem": "Doc line 1876 explicitly advises 'Always check the return value' of set_modifiable_text, but the template-building example and the figcaption example both ignore the return value. None of the three subjects checked it. The example a reader copies should model the guidance the prose gives, or the guidance reads as optional.",
+      "suggestion": "Either show the return-value check in at least one example (e.g. wrap the set in an if or note what to do on false), or add a one-line caveat under the template example clarifying that within a controlled template the placeholder #text is guaranteed to exist so the check can be omitted — making explicit WHY the example skips it."
+    },
+    {
+      "location": "html-tag-processor.md — next_tag() (lines 47-63) vs next_token() (lines 250-257) interaction",
+      "problem": "Trials 1 and 2 interleaved next_tag('figcaption') with a subsequent next_token() walk and assumed (correctly) that the cursor is shared so next_token resumes from the matched tag. The docs document each method separately but never state that next_tag and next_token operate on the same cursor and can be mixed, nor what next_token returns immediately after a next_tag match (the matched tag's first child token). Subjects relied on an undocumented-but-true behavior.",
+      "suggestion": "Add a short note where next_token is introduced: 'next_tag() and next_token() advance the same cursor. After next_tag() matches an opening tag, the next next_token() call advances to that tag's first child token, so the two can be freely interleaved.'"
+    }
+  ]
+}

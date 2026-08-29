@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function creates a WP_HTML_Tag_Processor instance and iterates through all tokens using next_token() until it reaches the end of the document. The Tag Processor automatically pauses when it encounters incomplete syntax (unfinished tags, unterminated comments, etc.). After the scan completes, paused_at_incomplete_token() returns true if the input ended mid-token, which indicates the document was truncated. This approach leverages the documented API's built-in token detection capabilities.",
+  "confidence": 92
+}

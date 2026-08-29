@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor to scan all tokens in the input HTML. By calling next_token() in a loop until it returns false, we exhaust the document. Then paused_at_incomplete_token() tells us if the parser stopped because it encountered incomplete HTML syntax at the end (like an unfinished tag, unterminated comment, or unclosed SCRIPT element), returning true for truncated input and false when all tokens are lexically complete.",
+  "confidence": 92
+}

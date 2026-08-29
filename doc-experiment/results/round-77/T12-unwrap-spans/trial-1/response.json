@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the input as a BODY fragment, then walked tokens with next_token() and concatenated serialize_token() for every token except SPAN openers and closers. That preserves normalized serialization while removing the wrapper elements and leaving their contents in place.",
+  "confidence": 95
+}

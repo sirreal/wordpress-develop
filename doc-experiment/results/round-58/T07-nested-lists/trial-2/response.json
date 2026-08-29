@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment with structural awareness, then walked tokens with `next_token()`, checked the current tag via `get_token_type()`, `get_tag()`, and `is_tag_closer()`, and used `get_breadcrumbs()` to detect whether a `UL` or `OL` had any list ancestor before calling `add_class('nested-list')`. The modified HTML is returned with `get_updated_html()` so untouched bytes are preserved exactly.",
+  "confidence": 91
+}

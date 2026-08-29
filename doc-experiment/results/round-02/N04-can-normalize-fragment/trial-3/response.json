@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation creates a fragment processor using the documented WP_HTML_Processor::create_fragment() method, which returns null if unable to create the processor. It then calls serialize() on the processor, which returns null if the processor encounters unsupported markup (like misnested formatting elements requiring reconstruction) and aborts early. If serialize() returns a string rather than null, normalization succeeded and the function returns true.",
+  "confidence": 72
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used a literal HTML template with the `src` and `alt` attributes already present so `WP_HTML_Tag_Processor::set_attribute()` preserves their order, then replaced the placeholder text inside `figcaption` with `WP_HTML_Tag_Processor::set_modifiable_text()` so all escaping is handled by the HTML API.",
+  "confidence": 96
+}

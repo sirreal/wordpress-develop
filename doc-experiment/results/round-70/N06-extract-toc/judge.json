@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Processor::create_fragment() and a single next_token() state machine. All HTML API calls are documented, no _doing_it_wrong records, and the approach matches the docs' guidance for repeated token walking, depth boundaries, virtual closers, and decoded #text extraction."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Used the correct processor and only documented methods. The next_tag() plus bounded next_token() subtree walk closely follows the text-extraction recipe. Minor non-idiom: it checks is_tag_closer() after plain next_tag(), although the docs say closers are skipped by default."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Used the correct processor and only documented methods. It correctly combines token type checks, depth-bounded walking, and get_modifiable_text() on #text tokens. Slightly less idiomatic because it uses nested next_token() loops for repeated extraction despite the docs recommending a single explicit-state loop for repeated regions."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial: each execution.json reports 7/7 passing with no _doing_it_wrong records. The docs appear to have successfully communicated the critical contracts: choose WP_HTML_Processor rather than WP_HTML_Tag_Processor when structure and text content matter; use create_fragment() for body fragments; get_tag() returns uppercase names; use next_token() when text nodes matter; bound subtree walks with get_current_depth() and >=; and use get_modifiable_text() only after checking for #text to get decoded ordinary text. Near-misses: trials 2 and 3 used nested token walks for repeated extraction even though the next_token() docs warn that nested loops can skip boundaries. They still passed because the processor emits a virtual closer for implied heading closes before the next heading opener, so the outer scan can resume correctly. Trial 2 also added an unnecessary closer guard after plain next_tag(), suggesting that the default opener-only behavior is documented but easy to miss.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::next_token() and Overview recipes for subtree walks",
+      "problem": "The docs warn against nested next_token() loops for repeated regions while also showing depth-bounded inner walks. Two trials used nested walks, so the distinction is still ambiguous.",
+      "suggestion": "Add a short general rule explaining when a bounded inner subtree scan is acceptable and when a single explicit-state loop is required. Include the cursor position after the bounded loop exits."
+    },
+    {
+      "location": "WP_HTML_Processor::next_tag() parameter documentation",
+      "problem": "The opener-only default for plain next_tag() is buried in the query parameter table; a candidate still checked is_tag_closer() after plain next_tag().",
+      "suggestion": "Promote the default tag_closers behavior into prose near the method summary, with a minimal example contrasting plain next_tag() with tag_closers => 'visit'."
+    },
+    {
+      "location": "WP_HTML_Processor::get_modifiable_text() and collect DOM-style text recipe",
+      "problem": "Decoded ordinary text and special-element opener text are documented, but the extraction contract is spread across sections.",
+      "suggestion": "Add a compact note to the text-extraction recipe: ordinary #text tokens return decoded UTF-8, should not be decoded again, and SCRIPT/STYLE/TEXTAREA/TITLE opener-carried text is excluded unless the caller explicitly opts into those elements."
+    }
+  ]
+}

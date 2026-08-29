@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` with a literal template so the exact element shape and the `src` then `alt` attribute order are preserved. It fills the existing `img` attributes via `next_tag()` and `set_attribute()`, then replaces the placeholder text node inside `figcaption` via `next_token()`, `get_token_type()`, and `set_modifiable_text()`, relying on the HTML API to perform the required escaping.",
+  "confidence": 96
+}

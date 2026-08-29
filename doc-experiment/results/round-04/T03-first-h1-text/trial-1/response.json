@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML, then calls next_tag('H1') to find the first H1 element. If found, it records the depth and iterates through all tokens using next_token(), collecting text content from '#text' tokens that are nested inside the H1 (depth greater than the H1's own depth). Character references are automatically decoded by get_modifiable_text(). The loop terminates when depth drops below the H1 level (its closing tag). Returns null if no H1 exists, or the concatenated text otherwise (which may be empty string).",
+  "confidence": 75
+}

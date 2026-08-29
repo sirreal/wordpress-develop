@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correctly used WP_HTML_Tag_Processor for a flat class edit, with documented constructor, next_tag(), add_class(), and get_updated_html(). The while-loop pattern, case-insensitive tag query, comment skipping, incomplete-token behavior, class append semantics, and byte preservation all align with the rendered docs. No _doing_it_wrong records."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same documented Tag Processor pattern as the reference. It relies on add_class() rather than manually reading or rewriting the class attribute, and returns get_updated_html(), preserving untouched bytes. All called API is documented and execution logged no misuse."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same correct documented API surface as trials 1 and 2. declare(strict_types=1) is harmless. Processor choice, mutation pattern, and edge handling are all idiomatic for this task, with no hallucinated API calls or misuse records."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed in any trial. The docs worked well for this task because WP_HTML_Tag_Processor > Which processor should I use? directly says flat attribute/class edits with byte-exact preservation belong to the Tag Processor; Usage/Finding tags shows construction with new WP_HTML_Tag_Processor and next_tag('img'); WP_HTML_Tag_Processor::next_tag() explicitly documents ASCII case-insensitive tag matching, not matching tag-like text inside comments/raw text, and not matching incomplete trailing tags; WP_HTML_Tag_Processor::add_class() documents preserving existing classes and appending the new class; WP_HTML_Tag_Processor::get_updated_html() documents returning queued updates while preserving untouched bytes. Near-misses: the HTML Processor docs also contain an IMG add_class example for structural breadcrumb matching, and both rendered method indexes expose private methods, but these trials were not misled.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::add_class() docblock",
+      "problem": "It explains missing and existing class attributes, but does not explicitly illustrate empty class values or boolean-style class syntax, which are the cases where weaker models may be tempted into manual get_attribute()/set_attribute() merging and mishandle null/true/'' semantics.",
+      "suggestion": "Add a small general example showing add_class() on no class, empty class, boolean-style class, and already-present class, and state that callers normally should not read/merge the class attribute themselves."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor > Usage / Finding tags",
+      "problem": "The main mutation example uses a single if. Subjects inferred the all-matches while-loop pattern correctly here, but the repeated-edit recipe is not as prominent as the single-tag example.",
+      "suggestion": "Add a generic 'modify every matching tag' recipe: construct the Tag Processor, while next_tag('TAG') mutate, then return get_updated_html(), emphasizing preservation of untouched bytes."
+    },
+    {
+      "location": "Rendered Method Index in html-tag-processor.md and html-processor.md",
+      "problem": "Private methods are listed next to public methods. The visibility column is present, but exposing internals in the same index can invite undocumented or uncallable API usage in code-generation settings.",
+      "suggestion": "Separate private/internal methods into an implementation section or omit them from the rendered public API index, with a clear warning that application code should use only public methods."
+    },
+    {
+      "location": "WP_HTML_Processor > Usage example with breadcrumbs and add_class()",
+      "problem": "The example demonstrates adding a class to an IMG with WP_HTML_Processor before the later guidance says flat byte-exact class edits should use WP_HTML_Tag_Processor. This could blur processor choice for simple attribute/class tasks.",
+      "suggestion": "Add a sentence under the example clarifying that HTML Processor is appropriate there because structural breadcrumbs are part of the query; for every matching tag or byte-exact flat class/attribute edits, prefer WP_HTML_Tag_Processor."
+    }
+  ]
+}

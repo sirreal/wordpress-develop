@@ -1,0 +1,77 @@
+{
+    "candidate": "/Users/jonsurrell/a8c/wordpress-develop/html-api-docs-improvement/doc-experiment/results/round-16/N04-can-normalize-fragment/trial-3/candidate.php",
+    "function": "can_normalize_fragment",
+    "passed": 7,
+    "total": 7,
+    "cases": [
+        {
+            "id": "simple-true",
+            "status": "pass",
+            "expected": true,
+            "actual": true,
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "unclosed-true",
+            "status": "pass",
+            "expected": true,
+            "actual": true,
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "well-formed-table-true",
+            "status": "pass",
+            "expected": true,
+            "actual": true,
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "adoption-agency-false",
+            "status": "pass",
+            "expected": false,
+            "actual": false,
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": [
+                {
+                    "function": "WP_HTML_Processor::serialize",
+                    "message": "Cannot serialize HTML Processor with parsing error: unsupported.",
+                    "level": 512
+                }
+            ]
+        },
+        {
+            "id": "plain-text-true",
+            "status": "pass",
+            "expected": true,
+            "actual": true,
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "empty-true",
+            "status": "pass",
+            "expected": true,
+            "actual": true,
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "deep-nesting-true",
+            "status": "pass",
+            "expected": true,
+            "actual": true,
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        }
+    ]
+}

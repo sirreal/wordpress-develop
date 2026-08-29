@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Tag_Processor, which the docs identify as sufficient for flat byte-preserving class/attribute edits. Called only documented APIs: constructor, next_tag('img'), add_class('wp-image'), and get_updated_html(). The loop and output method follow the documented pattern, and the chosen APIs cover case-insensitive tag matching, comments, existing class preservation, and incomplete trailing tags."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same correct Tag Processor solution. No undocumented methods or misuse records. It relies on documented next_tag string query semantics, add_class class-list semantics, and get_updated_html byte preservation."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same correct Tag Processor solution. Processor choice, token walking, class mutation, and final serialization are all documented and idiomatic for this task. No edge-case handling was hand-rolled because the documented API behavior handles the relevant cases."
+    }
+  ],
+  "failure_analysis": "All trials passed all 8 hidden cases, with no _doing_it_wrong records. The docs appear to have supported the task well: html-processor.md explicitly says WP_HTML_Tag_Processor is appropriate for flat attribute/class edits where byte-exact preservation is the goal, while WP_HTML_Processor is for structural queries. html-tag-processor.md documents construction with new WP_HTML_Tag_Processor($html), the next_tag('img') shortcut, ASCII case-insensitive tag-name matching, exclusion of tag-like text inside comments/raw text, incomplete trailing tag behavior, add_class behavior for missing and existing class attributes, and get_updated_html as the byte-preserving way to retrieve queued edits. The only near-miss is that the candidate explanations slightly inferred comment skipping from next_tag behavior, but that behavior is explicitly documented under next_tag, so this was not a documentation failure.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::add_class() docblock",
+      "problem": "The method contract is strong, but examples could make clear that callers do not need to read or rewrite the class attribute manually to append a class while preserving existing class order and spacing.",
+      "suggestion": "Add a compact example showing add_class on a tag with an existing multi-class class attribute and noting that existing classes are preserved and the new class is appended."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::next_tag() docblock",
+      "problem": "The relevant safety properties are documented in bullets, but they are easy to miss when choosing between a string query and an array query.",
+      "suggestion": "Add a short example using the string shorthand next_tag('IMG') or next_tag('img') and annotate that tag matching is case-insensitive and ignores comment contents."
+    },
+    {
+      "location": "Processor choice overview in WP_HTML_Processor docs",
+      "problem": "The current distinction between flat edits and structural edits worked for this task, but users may still over-select WP_HTML_Processor when they only need byte-preserving attribute/class updates.",
+      "suggestion": "Keep the processor-choice guidance and consider adding a small decision table row: 'add/remove/read an attribute or class on matching tags' -> Tag Processor + get_updated_html; 'query ancestors, descendants, or text subtree' -> HTML Processor."
+    }
+  ]
+}

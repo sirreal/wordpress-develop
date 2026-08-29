@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function creates an HTML template with the exact structure needed, including placeholder attributes (src and alt on img) and placeholder text (a single dot) in the figcaption. It uses WP_HTML_Tag_Processor's next_tag() to find and set the img attributes with proper encoding, then uses next_token() with get_token_type() to find the text node within figcaption and replace it with the caption text using set_modifiable_text(). Finally, get_updated_html() returns the built HTML with all values properly encoded by the API.",
+  "confidence": 75
+}

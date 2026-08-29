@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Processor with create_fragment() to properly parse HTML including SVG foreign content. Iterates through all img tags found by next_tag(), checks the namespace to exclude SVG image elements, and collects decoded src attribute values via get_attribute(). Skips images without a src attribute, with null/empty src, or with boolean src attributes. Returns a numeric array of decoded src values in document order.",
+  "confidence": 85
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This implementation uses WP_HTML_Tag_Processor to construct and properly encode all parts of the HTML fragment. It builds the figure structure with attributes in the correct order (src before alt), then uses set_attribute() to set their values\u2014which automatically handles HTML encoding of special characters like &, <, >, and quotes. It then uses next_token() to locate the #text node inside figcaption and replaces it with set_modifiable_text(), which also provides automatic HTML encoding. This approach avoids any manual string escaping and relies entirely on the documented HTML API.",
+  "confidence": 76
+}

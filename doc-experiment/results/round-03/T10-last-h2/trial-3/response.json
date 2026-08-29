@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor to scan through the HTML document and find all H2 tags. It tracks the last H2 encountered by setting and releasing bookmarks as new H2s are found. Once the scan completes, it seeks back to the last H2 tag and adds the \"final-section\" class using the add_class() method. The add_class() method safely handles the class attribute, preserving all other content byte-for-byte. If no H2 tags exist, the HTML is returned unchanged.",
+  "confidence": 85
+}

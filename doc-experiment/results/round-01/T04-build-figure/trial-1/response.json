@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Tag_Processor to build the fragment by starting with a template string that already has the required structure and attribute order. The template `<figure><img src=\"\" alt=\"\"><figcaption> </figcaption></figure>` pre-establishes src before alt (the Tag Processor preserves attribute order when overwriting existing attributes). I called next_tag('img') to position on the img opener, then set_attribute() twice for src and alt \u2014 the documented API states set_attribute() handles all necessary HTML encoding. I then called next_token() twice to advance past the figcaption opener to the text node inside it, and called set_modifiable_text() with the caption \u2014 also documented to handle encoding. Finally, get_updated_html() returns the serialized result.",
+  "confidence": 82
+}

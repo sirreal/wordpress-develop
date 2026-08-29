@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor to parse the HTML fragment and iterate through all tokens using next_token(). When a SPAN tag token (identified by token_type '#tag' and token_name 'SPAN') is encountered, it's skipped rather than serialized. All other tokens are serialized normally. The resulting HTML is then normalized using WP_HTML_Processor::normalize() to ensure proper formatting with double-quoted attributes and closed optional tags, as required by the task.",
+  "confidence": 72
+}

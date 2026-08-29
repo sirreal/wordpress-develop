@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Processor::create_fragment(), next_token(), get_token_type(), get_token_name(), is_tag_closer(), and get_modifiable_text(); all are documented. Correctly walked tokens, limited inclusion to #text plus TITLE/TEXTAREA opener tokens, and used decoded UTF-8 text with codepoint-safe truncation. Minor deduction only for accumulating the whole document before truncating, which is less efficient than stopping once the limit is reached."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and fully documented API usage, including get_tag(). Very close to the documented text-walk pattern: token loop, #text filtering, explicit TITLE/TEXTAREA handling, SCRIPT/STYLE exclusion, and early codepoint truncation with UTF-8 mb_* calls. No _doing_it_wrong records."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and all called methods are documented. Uses the intended next_token() plus get_modifiable_text() pattern and handles decoded text, special TITLE/TEXTAREA carriers, SCRIPT/STYLE exclusion, malformed nesting, and codepoint truncation. Slight deduction because is_tag_closer() is called on non-text tokens without first checking #tag, though this caused no misuse record or failure."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial: all three passed 10/10 with no _doing_it_wrong records. The rendered docs appear to have directly prevented the common mistakes for this task. The strongest passages were the HTML Processor guidance to use create_fragment() for BODY fragments, the 'collect DOM-style text from a subtree' recipe warning not to call get_modifiable_text() on every token, the next_token() section explaining that text can be split across #text tokens and that SCRIPT/STYLE/TITLE/TEXTAREA carry text on the element token rather than child #text tokens, and the get_modifiable_text() contract stating that #text, TITLE, and TEXTAREA text is already decoded UTF-8 and should be measured/sliced with explicit UTF-8 mb_* calls. The near-miss area is special-element classification: candidates had to combine multiple passages to infer 'include TITLE/TEXTAREA but exclude SCRIPT/STYLE' for text extraction, because get_modifiable_text() exposes all four carriers while only some are decoded/plain-text carriers useful for this task.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md / get_modifiable_text()",
+      "problem": "The opening description lists SCRIPT, STYLE, and TEXTAREA as element tokens with modifiable text, but TITLE is only mentioned later. This inconsistency could make callers miss TITLE or treat the special elements as one undifferentiated group.",
+      "suggestion": "List SCRIPT, STYLE, TITLE, and TEXTAREA consistently in the first contract paragraph, grouped by decoding behavior: decoded text carriers (#text, TITLE, TEXTAREA) versus raw text carriers (SCRIPT, STYLE)."
+    },
+    {
+      "location": "html-processor.md / Recipe: collect DOM-style text from a subtree",
+      "problem": "The recipe says special elements carry their text on the opener, but does not show a compact filter for selecting only specific special element carriers. That leaves room for over-including SCRIPT/STYLE when callers want user-visible or decoded text.",
+      "suggestion": "Add a general note or small example showing that callers should explicitly whitelist special element tokens they want, because get_modifiable_text() returns modifiable content for comments and raw-text elements too."
+    },
+    {
+      "location": "html-processor.md / next_token() and Method Index",
+      "problem": "The docs discuss checking paused_at_incomplete_token() from HTML Processor examples, but the HTML Processor method index does not surface that inherited public method. Readers may not realize it is callable on the processor they are using.",
+      "suggestion": "Expose inherited public Tag Processor methods used by HTML Processor examples in an 'Inherited methods' index or add a cross-reference near next_token() explaining that paused_at_incomplete_token() is inherited and callable on WP_HTML_Processor instances."
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 86,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor::create_fragment() and only called documented methods; no _doing_it_wrong records. It used bookmarks, seek(), set_attribute(), and get_updated_html() appropriately. The key issue is traversal: the inner scan uses plain next_tag(), whose default skips closing tags, so its depth boundary does not reliably stop at the first list's close. It can over-scan into later malformed markup and reject a list that was fully scanned. The response also claimed next_token(), but the code did not use it."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correct processor, all called methods documented, and no misuse records. The implementation follows the documented region-scan pattern: bookmark opener, record depth, walk tokens, check boundary before filters, count direct child LI openers, verify incomplete/unsupported state for the scanned region, seek back, mutate, and return get_updated_html()."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and all called methods are documented; no misuse records. It follows the depth-bounded next_token() pattern and handles the relevant edge cases. Minor idiom nit: it only releases the bookmark on the success path, though early returns destroy the processor immediately so this has no behavioral impact."
+    }
+  ],
+  "failure_analysis": "Only trial-1 failed hidden cases. For incomplete-token-after-closed-list, the misconception was treating 'first list cannot be fully scanned' as 'the entire remaining document must be complete.' Because plain next_tag() skips closers by default, trial-1 never observed the UL closer as the region boundary and instead stopped at the trailing incomplete IMG token, making paused_at_incomplete_token() true. The rendered docs did contain the needed guidance under 'Recipe: test subtree membership and direct children' and next_token(): bounded scans must stop on depth drop, and completion checks should describe the region actually scanned; they also explicitly say not to continue to end just to find trailing incomplete input unless the contract requires the whole document. For unsupported-after-closed-list, the same boundary mistake caused trial-1 to encounter unsupported markup after the closed list and let get_last_error() invalidate the edit. The 'HTML Support / Unsupported Features' section explains that unsupported markup aborts processing, but the region-scoped meaning of get_last_error() after a bounded scan is only emphasized in overview recipes, not strongly in the next_tag()/get_last_error() method docs. Trials 2 and 3 show the docs did well on processor choice, bookmark/seek mutation, direct-child depth checks, and incomplete/unsupported handling when the region-scan recipe was followed.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::next_tag() docblock and tag_closers query parameter docs",
+      "problem": "The default closer-skipping behavior is documented, but its consequence for subtree scans is easy to miss: plain next_tag() plus a depth check may never see the container's own closing token and can run into unrelated trailing markup.",
+      "suggestion": "Add an explicit warning that plain next_tag() is not a subtree-boundary detector. For scans that must stop when the current element closes, use next_token() or next_tag( array( 'tag_closers' => 'visit' ) ) and break as soon as get_current_depth() drops below the opener depth."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::paused_at_incomplete_token() and WP_HTML_Processor::get_last_error() docblocks",
+      "problem": "The docs explain how to detect whole-input truncation or unsupported markup, but method-level guidance does not clearly distinguish whole-document completeness from bounded-region completeness.",
+      "suggestion": "Add a region-scoped note: after a bounded scan, check these APIs before editing the matched region, but do not continue scanning past the region solely to test unrelated suffix markup unless the caller's contract requires the entire document to be complete."
+    },
+    {
+      "location": "WP_HTML_Processor::get_current_depth() / region-scan examples",
+      "problem": "The examples show the correct >= depth guard, but they do not make the trailing-malformed-sibling implication concrete at the point developers copy the pattern.",
+      "suggestion": "Add a short generic example or note showing that once the loop exits because depth dropped below the opener depth, the target region has been left; trailing incomplete or unsupported markup outside that region should not invalidate a region-only mutation unless explicitly required."
+    }
+  ]
+}

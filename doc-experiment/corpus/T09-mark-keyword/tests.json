@@ -1,0 +1,77 @@
+{
+    "id": "T09-mark-keyword",
+    "title": "Highlight a keyword in text",
+    "difficulty": "advanced",
+    "split": "train",
+    "role": "core",
+    "commonness": "medium",
+    "concept": "serialization",
+    "processor": "html",
+    "function": "mark_keyword",
+    "cases": [
+        {
+            "id": "simple-unclosed",
+            "args": [
+                "<p>hello world",
+                "world"
+            ],
+            "expected": "<p><mark>hello world</mark></p>"
+        },
+        {
+            "id": "multiple-text-nodes",
+            "args": [
+                "<p>alpha beta</p><div>beta gamma</div><p>delta</p>",
+                "beta"
+            ],
+            "expected": "<p><mark>alpha beta</mark></p><div><mark>beta gamma</mark></div><p>delta</p>"
+        },
+        {
+            "id": "keyword-in-attribute-not-wrapped",
+            "args": [
+                "<a href=\"world\" title=\"world\">somewhere world</a>",
+                "world"
+            ],
+            "expected": "<a href=\"world\" title=\"world\"><mark>somewhere world</mark></a>"
+        },
+        {
+            "id": "entity-encoded-keyword-matches",
+            "args": [
+                "<p>w&#111;rld peace</p>",
+                "world"
+            ],
+            "expected": "<p><mark>world peace</mark></p>"
+        },
+        {
+            "id": "split-across-elements-no-match",
+            "args": [
+                "<p>wor<em>ld</em></p>",
+                "world"
+            ],
+            "expected": "<p>wor<em>ld</em></p>"
+        },
+        {
+            "id": "keyword-in-comment-not-wrapped",
+            "args": [
+                "<!-- world --><p>world</p>",
+                "world"
+            ],
+            "expected": "<!-- world --><p><mark>world</mark></p>"
+        },
+        {
+            "id": "case-sensitive",
+            "args": [
+                "<p>World world</p>",
+                "world"
+            ],
+            "expected": "<p><mark>World world</mark></p>"
+        },
+        {
+            "id": "normalization-side-effects",
+            "args": [
+                "<div><b>bold world<p>unclosed &AMP; markup",
+                "world"
+            ],
+            "expected": "<div><b><mark>bold world</mark><p>unclosed &amp; markup</p></b></div>"
+        }
+    ]
+}

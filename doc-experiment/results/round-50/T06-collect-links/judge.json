@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Passed 8/8. Correctly chose WP_HTML_Processor::create_fragment(), used only documented methods, filtered href with is_string() so null and boolean href are excluded while string values are kept, and read decoded #text tokens with get_modifiable_text(). Its closer-driven one-pass state is documented as reliable, though less directly aligned with the depth-bounded subtree recipe than the reference."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Passed 8/8. This is the canonical documented pattern: create_fragment(), next_tag('A'), get_attribute(), record get_current_depth(), then next_token() while depth remains in the subtree, appending only #text via get_modifiable_text(). It handles decoded attributes/text, valueless href, nested markup, image links, and unclosed links cleanly."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 88,
+      "hallucinated_methods": [],
+      "notes": "Passed 8/8 and used only documented methods. The main weakness is its final fail-closed check: returning an empty array when paused_at_incomplete_token() or get_last_error() is set over-applies the completion guidance for this read-only extraction task. A probe with a complete link followed by an incomplete trailing token returns [] here while the reference returns the already-collected link."
+    }
+  ],
+  "failure_analysis": "No frozen hidden case failed in any trial. The docs did well on the core choices: they explicitly direct structure/text-content tasks to WP_HTML_Processor, show a subtree text recipe using get_current_depth() plus next_token(), warn to append only #text tokens before calling get_modifiable_text(), and document get_attribute()'s null/true/string split clearly enough that all candidates used is_string($href). The main near-miss was Trial 3's misconception that incomplete-input signals require discarding all accumulated read-only results. The rendered HTML Processor overview says read-only extraction may choose a caller policy, but the surrounding mutation/serialization guidance also emphasizes fail-closed handling; a model copied that stricter policy into a task whose contract asked for collected links, including an unclosed link. A smaller doc asymmetry is that the Tag Processor get_attribute() section explicitly says string values are decoded, while the HTML Processor override section I inspected only gives the return type and examples; candidates could infer inheritance here because both docs were available, but the local method doc is weaker.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_attribute() docblock",
+      "problem": "The override documents string|true|null but does not locally restate that returned string attribute values are decoded. The Tag Processor method does, but readers looking at the HTML Processor method alone may miss the decoded-value contract.",
+      "suggestion": "Repeat the inherited decoded-string contract in the HTML Processor get_attribute() docs, including a short href=\"...?a=1&amp;b=2\" example and the null/true/empty-string distinction."
+    },
+    {
+      "location": "WP_HTML_Processor overview, read-only extraction completion guidance",
+      "problem": "The docs say incomplete-input handling is caller policy, but the concrete examples nearby emphasize fail-closed checks, which can make readers treat paused_at_incomplete_token() as a mandatory global discard even for read-only collection.",
+      "suggestion": "Add a brief read-only example showing that tokens collected before an incomplete trailing token remain available, then contrast that with a complete-source policy that intentionally rejects partial scans."
+    },
+    {
+      "location": "WP_HTML_Processor text/subtree recipes",
+      "problem": "The docs separately show subtree text extraction and one-pass closer-driven region collection, but not the general pattern for collecting repeated records that combine opener attributes with descendant text.",
+      "suggestion": "Add a general non-link example for repeated element records: read a string-valued opener attribute, maintain or bound subtree state, append only #text tokens, and flush on the element boundary."
+    }
+  ]
+}

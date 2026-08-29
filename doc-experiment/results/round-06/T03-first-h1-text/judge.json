@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correct processor (WP_HTML_Processor::create_fragment) for a job needing nested-element/depth awareness. Every method called (create_fragment, next_tag, get_current_depth, next_token, get_token_type, get_modifiable_text) is documented in html-processor.md. Idiomatic depth-walking: records H1 depth, walks tokens, breaks when depth < h1_depth, accumulates #text via get_modifiable_text — mirrors the documented LI example (lines 622-647). Uses the array query form next_tag(array('tag_name'=>'H1')) which matches the documented signature. Edge cases handled: returns null when no H1, returns '' for image-only H1. Defensively guards `! $processor` against create_fragment's documented null return before dereferencing. 8/8 pass. Tiny deduction only because depth guard is in a break rather than the while-condition the docs model, but logically equivalent and arguably clearer."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 90,
+      "hallucinated_methods": [],
+      "notes": "Same correct processor and same documented method set; all verified present. 8/8 pass. Two minor non-idiomatic blemishes: (1) calls $processor->next_tag('h1') directly without guarding the documented `static|null` return of create_fragment, so malformed/unparseable input could fatal — no test case exercises it but it is a latent robustness gap; (2) redundant inner `if ( $current_depth >= $h1_depth )` is dead code, already guaranteed by the preceding `if (current_depth < h1_depth) break`. Uses lowercase string query 'h1' which the matcher normalizes correctly. Token-walking pattern otherwise idiomatic and matches the documented example."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 92,
+      "hallucinated_methods": [],
+      "notes": "Correct processor; all six methods documented and verified. 8/8 pass. Clean idiomatic depth-walk identical in shape to the documented LI/UL examples, no dead code (unlike trial-2). Highest self-reported confidence (82) and the most accurate explanation, explicitly and correctly noting that get_modifiable_text decodes character references and that '' results for markup-only H1. One deduction: like trial-2, dereferences $processor->next_tag('H1') without guarding create_fragment's documented null return."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed: all three trials passed 8/8 on every case (simple, nested-markup, entities-decoded, no-h1-null, image-only-empty-string, first-of-two, nested-in-div, unclosed-h1). The documentation was decisive here. html-processor.md contains a near-verbatim worked example for exactly this shape of task in the next_token() section (lines 622-647): collecting the text content of a found element by recording its depth, walking tokens with next_token(), accumulating get_modifiable_text() for '#text' tokens, and stopping by depth comparison. That example also pre-empts the two traps in this task: (a) it states explicitly that '>=' (not '>') is required because nested closers like </strong> report the same depth as the element's contents, which is exactly what the nested-markup and nested-in-div cases probe; and (b) it notes that unclosed elements still produce closing tokens at end of input, covering the unclosed-h1 case. The is_tag_closer() doc (line 686) reinforces the depth-on-closer semantics. next_token()'s note (line 618) that 'an element's text content may be split across several consecutive #text tokens: accumulate text while walking' directly steers the correct accumulation pattern. All three subjects transcribed this pattern faithfully. The image-only-empty-string case ('') is handled correctly because the loop simply finds no #text tokens and $text stays '', and get_modifiable_text()'s doc (line 2073) clarifies empty-string semantics. Near-misses in the explanations: trials 1 and 2 ASSERT that get_modifiable_text() decodes character references, and trial 3 states it most explicitly — yet the get_modifiable_text() docblock (lines 2063-2081) never actually says the returned text is decoded; it only describes 'text content that may be read and changed.' The subjects inferred decoding from the task spec ('with character references decoded'), and a probe confirms the behavior is correct (input 'Fish &amp; Chips &mdash; daily' yields 'Fish & Chips — daily'). So the entities-decoded case passed despite the doc never stating the decoding guarantee — a latent gap that happened not to bite because the task description supplied the missing fact. The second latent gap: create_fragment is documented as returning 'static|null' (line 351), but only trial-1 guarded the null; trials 2 and 3 would fatal on a null processor. No test case feeds unparseable input, so this never surfaced.\"",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_modifiable_text() (html-processor.md, lines 2063-2081)",
+      "problem": "The docblock describes what modifiable text is ('text content that may be read and changed') but never states the load-bearing fact that the returned text has character references DECODED (e.g. '&amp;' is returned as '&', '&mdash;' as the em-dash). Subjects had to infer this from the task description rather than the docs; in tasks without that hint they could wrongly assume raw text and post-process incorrectly.",
+      "suggestion": "Add one sentence stating that the returned value is the decoded text: character references are resolved to their corresponding characters, so the caller receives plain text, not source markup. A tiny example ('<p>Fish &amp; Chips</p>' -> 'Fish & Chips') would make the decoded-vs-raw distinction unambiguous and contrast it with the raw-byte access available via the Tag Processor."
+    },
+    {
+      "location": "WP_HTML_Processor::create_fragment() (html-processor.md, line 348-431) and surrounding usage examples",
+      "problem": "The signature correctly shows 'static|null' return, but the prose and every inline example dereference the result immediately (e.g. '$processor->next_tag(...)') without showing a null check. Two of three subjects copied this and omitted the null guard, leaving a latent fatal-error path if create_fragment returns null for unparseable input.",
+      "suggestion": "In the return description, state explicitly when null is returned (e.g. the context is invalid or the document cannot be parsed in fragment mode) and show at least one canonical example that guards the null return before calling instance methods (if (null === $processor) { return ...; }). This is a general robustness pattern, not specific to this task."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token() depth-walking example (html-processor.md, lines 622-647)",
+      "problem": "The example puts the depth guard in the while-condition ('next_token() && get_current_depth() >= $depth'), but a common equivalent idiom is to break inside the loop on 'depth < start_depth'. Subjects who used the break form had to reason about whether it was equivalent; one (trial-2) added redundant dead-code depth checks out of uncertainty. The docs only model one of the two equivalent forms.",
+      "suggestion": "Briefly note that the depth guard can equivalently be expressed as an early break inside the loop ('if (get_current_depth() < $start_depth) break;'), so readers recognize both idioms as correct and don't add defensive redundant checks. This reinforces the depth-boundary concept generally rather than tying it to any one task."
+    }
+  ]
+}

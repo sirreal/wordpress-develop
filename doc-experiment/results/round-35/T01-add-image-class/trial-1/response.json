@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor`, which is the documented byte-preserving choice for flat tag/attribute edits. The function scans forward with `next_tag( 'img' )` (case-insensitive and ignoring comment contents), calls `add_class( 'wp-image' )` on each matched `IMG` opener so existing classes stay in place and `wp-image` is appended when needed, then returns the result with `get_updated_html()`.",
+  "confidence": 98
+}

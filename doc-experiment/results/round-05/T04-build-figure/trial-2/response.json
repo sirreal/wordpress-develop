@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Tag_Processor with a template approach: creates a template containing the exact HTML structure with empty attribute values and placeholder text, then uses set_attribute() to populate src and alt attributes on the img tag (in the documented order), and set_modifiable_text() to replace the figcaption's text. The API handles all HTML escaping automatically, and get_updated_html() returns the final encoded result.",
+  "confidence": 72
+}

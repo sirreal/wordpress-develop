@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Processor to parse HTML as a fragment, walks through all tokens via next_token(), checks each #text token's decoded content via get_modifiable_text() for case-sensitive keyword substring match, and wraps matching text nodes entirely in <mark> tags using serialize_token() for normalized output. Non-text tokens are serialized as-is.",
+  "confidence": 42
+}

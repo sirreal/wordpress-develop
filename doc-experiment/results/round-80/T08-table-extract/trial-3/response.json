@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the HTML Processor in fragment mode to parse the body fragment as a browser would, then walked tokens with `next_tag()` and `next_token()` while tracking the table depth from `get_current_depth()`. Row and cell boundaries come from `TR`, `TD`, and `TH` tag tokens, and cell text is collected only from `#text` tokens via `get_modifiable_text()`, which already returns decoded text content.",
+  "confidence": 86
+}

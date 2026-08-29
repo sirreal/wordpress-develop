@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This implementation scans through the HTML document using WP_HTML_Tag_Processor, finding all H2 tags. Each time an H2 tag is found, it updates a bookmark named 'last_h2' to point to that tag. After scanning completes, if at least one H2 was found, it seeks back to the bookmarked position and adds the 'final-section' class using the add_class() method. The approach leverages the Tag Processor's linear scanning with bookmarks to efficiently find the last occurrence without needing to load all H2 positions into memory. Tags inside comments are automatically ignored by the Tag Processor's tag matching semantics.",
+  "confidence": 82
+}

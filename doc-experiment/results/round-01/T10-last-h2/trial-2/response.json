@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Tag_Processor, constructed directly from the input HTML string. I loop with next_tag('H2'), which by default skips tag closers and only matches opening tags. Each time an H2 opener is found, I overwrite the same bookmark 'last-h2', so at the end of the loop the bookmark points to the final H2 opener. If no H2 was found, the original string is returned unchanged. Otherwise, I seek() back to that bookmark, call add_class('final-section') to append the class without disturbing other attributes, release the bookmark, and return get_updated_html().",
+  "confidence": 95
+}

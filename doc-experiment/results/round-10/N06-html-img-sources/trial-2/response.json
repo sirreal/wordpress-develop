@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::create_fragment() to properly parse the HTML fragment as a browser would, which correctly handles SVG namespace transitions. It iterates through IMG tags using next_tag(), checks that each tag is in the 'html' namespace (not 'svg', which would indicate an SVG <image> element), retrieves the decoded 'src' attribute value, and includes only non-empty string values in the result. The processor naturally returns tags in document order.",
+  "confidence": 85
+}

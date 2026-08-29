@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_full_parser()` to parse the complete document and walked tokens until I found the opening `TITLE` token, then returned its decoded `get_modifiable_text()` value. This follows the documented HTML Processor guidance that TITLE content is carried on the opener token and returns an empty string for an empty title, while returning `null` when no title is present.",
+  "confidence": 97
+}

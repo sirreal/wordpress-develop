@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` because the input is a BODY fragment, then walked tokens with `next_tag()` and `next_token()` to find the first opening `H1` and collect only `#text` tokens while the current depth stayed inside that element. `get_current_depth()` bounds the subtree, and `get_modifiable_text()` returns decoded text so character references like `&amp;` come back as `&` without extra decoding.",
+  "confidence": 95
+}

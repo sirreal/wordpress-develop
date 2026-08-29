@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan the document linearly and `next_tag( 'img' )` to match `IMG` tags case-insensitively while skipping comments and raw-text content. For each matched image tag, `add_class( 'wp-image' )` preserves existing classes and appends the new one without reordering them, and `get_updated_html()` returns the minimally edited HTML with untouched bytes preserved.",
+  "confidence": 99
+}

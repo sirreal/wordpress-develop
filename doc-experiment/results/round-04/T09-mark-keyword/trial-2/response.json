@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation walks through all tokens using WP_HTML_Processor::next_token(). For text nodes (identified by '#text' token type), it retrieves decoded text via get_modifiable_text() and performs a case-sensitive substring check using str_contains() for the keyword. Text nodes containing the keyword are wrapped with literal '<mark>' and '</mark>' tags around the serialized token output. All other tokens are serialized unchanged. The concatenated token serializations are then passed through WP_HTML_Processor::normalize() to produce fully normalized HTML (closing omitted tags, double-quoting attributes, re-encoding text) as specified in the requirements.",
+  "confidence": 72
+}

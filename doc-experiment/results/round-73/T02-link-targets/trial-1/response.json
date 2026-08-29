@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan tags linearly and preserve untouched bytes exactly, then checked each matched `A` tag for a present `href` attribute with `get_attribute()` and overwrote `target` via `set_attribute()`. The function returns `get_updated_html()` so only the targeted attribute changes are emitted.",
+  "confidence": 98
+}

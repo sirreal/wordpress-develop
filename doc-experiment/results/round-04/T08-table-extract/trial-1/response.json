@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse HTML with proper HTML5 table parsing semantics. It finds the first TABLE element, then walks through all tokens within it. It tracks when entering/exiting cells (TD/TH), collects text content using get_modifiable_text() which automatically decodes character references, and accumulates rows. The processor automatically handles omitted closing tags, TBODY/THEAD insertion, and other browser-like parsing behaviors.",
+  "confidence": 52
+}
