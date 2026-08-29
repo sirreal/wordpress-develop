@@ -770,9 +770,52 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	/**
 	 * Finds the next token in the HTML document.
 	 *
-	 * This doesn't currently have a way to represent non-tags and doesn't process
-	 * semantic rules for text nodes. For access to the raw tokens consider using
-	 * WP_HTML_Tag_Processor instead.
+	 * A token is a span of the document with its own meaning: a tag opener or
+	 * closer, a text node, a comment, or a doctype declaration. Use this method
+	 * instead of {@see WP_HTML_Processor::next_tag} when text or other non-tag
+	 * content matters, while keeping the HTML Processor's structural awareness.
+	 *
+	 * Unlike the Tag Processor's lexical scan, the HTML Processor visits a
+	 * closing token for every element it opens and can continue to process,
+	 * including elements the HTML specification closes implicitly and elements
+	 * left unclosed at the end of the input.
+	 *
+	 * A walk also visits elements the parser inserted into the document tree,
+	 * because HTML defines implied structure. For example, `<table><tr>` is
+	 * visited as TABLE > TBODY > TR, with the implied TBODY appearing in
+	 * {@see WP_HTML_Processor::get_breadcrumbs} and adding to
+	 * {@see WP_HTML_Processor::get_current_depth}. Anchor depth-bounded walks
+	 * on the depth recorded at a matched element rather than on absolute depth
+	 * numbers.
+	 *
+	 * `next_token()` does not stop when an element matched by an earlier
+	 * `next_tag()` call closes. Bound subtree walks with depth or breadcrumbs.
+	 *
+	 * Example:
+	 *
+	 *     // Collect the text content of the first LI element.
+	 *     $processor = WP_HTML_Processor::create_fragment( '<ul><li>Buy <strong>milk</strong> today.</ul>' );
+	 *     if ( $processor->next_tag( 'LI' ) ) {
+	 *         $li_depth = $processor->get_current_depth();
+	 *         $text     = '';
+	 *
+	 *         while ( $processor->next_token() && $processor->get_current_depth() >= $li_depth ) {
+	 *             if ( '#text' === $processor->get_token_type() ) {
+	 *                 $text .= $processor->get_modifiable_text();
+	 *             }
+	 *         }
+	 *
+	 *         // $text is 'Buy milk today.'
+	 *     }
+	 *
+	 * The `>=` comparison is required. A nested child closer, such as
+	 * `</strong>` above, reports the same depth as the LI opener did; a `>`
+	 * comparison would stop early and drop the trailing text.
+	 *
+	 * For repeated regions, prefer one `next_token()` loop with explicit state
+	 * over nested loops. Every call advances the same cursor, so an inner loop
+	 * can consume the boundary token or next sibling that the outer loop expected
+	 * to see.
 	 *
 	 * @since 6.5.0 Added for internal support; do not use.
 	 * @since 6.7.2 Refactored so subclasses may extend.
@@ -1206,6 +1249,23 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	/**
 	 * Returns the nesting depth of the current location in the document.
 	 *
+	 * The depth counts every node from the root down to and including the
+	 * currently-matched token, so it matches the length of the array returned by
+	 * {@see WP_HTML_Processor::get_breadcrumbs}. Non-element tokens count
+	 * themselves: when matched on a text node directly inside BODY, the depth is
+	 * 3: HTML > BODY > #text.
+	 *
+	 * When the processor is matched on a closing tag token, the closed element
+	 * has already been removed from the stack of open elements. The reported
+	 * depth is that of the remaining parent context: one less than the depth
+	 * reported at the matching opening tag.
+	 *
+	 * This gives a reliable way to visit every token inside an element: record
+	 * the depth when matched on its opening tag and continue while the depth
+	 * remains at or above that value. Only the element's own closer reports a
+	 * shallower depth; nested child closers still report a depth within the
+	 * subtree.
+	 *
 	 * Example:
 	 *
 	 *     $processor = WP_HTML_Processor::create_fragment( '<div><p></p></div>' );
@@ -1220,9 +1280,32 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 *     $processor->next_token();
 	 *     4 === $processor->get_current_depth();
 	 *
-	 *     // The P element is closed during `next_token()` so the depth is decreased to reflect that.
+	 *     // The processor is now matched on the </p> closing token. The P
+	 *     // element has already been removed from the stack of open elements,
+	 *     // so the depth reflects its parent context: one less than at <p>.
 	 *     $processor->next_token();
 	 *     3 === $processor->get_current_depth();
+	 *
+	 *     // Likewise on the </div> closing token, the depth has returned to
+	 *     // that of the BODY context.
+	 *     $processor->next_token();
+	 *     2 === $processor->get_current_depth();
+	 *
+	 * Example:
+	 *
+	 *     // Visit every token inside the first UL element.
+	 *     $processor = WP_HTML_Processor::create_fragment( $html );
+	 *     if ( $processor->next_tag( 'UL' ) ) {
+	 *         $ul_depth = $processor->get_current_depth();
+	 *
+	 *         while ( $processor->next_token() && $processor->get_current_depth() >= $ul_depth ) {
+	 *             // Matched on each token inside the UL, including the openers
+	 *             // and closers of nested elements.
+	 *         }
+	 *     }
+	 *
+	 * In break-condition form, break when the depth drops below the depth
+	 * recorded at the opener (`< $ul_depth`), never when it is equal.
 	 *
 	 * @since 6.6.0
 	 *
