@@ -289,6 +289,10 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 *  - The only supported context is `<body>`, which is the default value.
 	 *  - The only supported document encoding is `UTF-8`, which is the default value.
 	 *
+	 * A `null` return means no processor was created. If a processor is
+	 * created, it may still stop later when unsupported markup is encountered;
+	 * detect that after scanning with {@see WP_HTML_Processor::get_last_error}.
+	 *
 	 * @since 6.4.0
 	 * @since 6.6.0 Returns `static` instead of `self` so it can create subclass instances.
 	 *
@@ -1253,6 +1257,11 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 *  - Any incomplete syntax trailing at the end will be omitted,
 	 *    for example, an unclosed comment opener will be removed.
 	 *
+	 * `normalize( $html )` normalizes the original input fragment. It is not a
+	 * way to finish or recover a token-by-token rewrite that has already built
+	 * an output string with {@see WP_HTML_Processor::serialize_token}; calling
+	 * it after such a loop discards the accumulated output.
+	 *
 	 * Example:
 	 *
 	 *     echo WP_HTML_Processor::normalize( '<a href=#anchor v=5 href="/" enabled>One</a another v=5><!--' );
@@ -1279,7 +1288,15 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * This differs from {@see WP_HTML_Processor::normalize} in that it starts with
 	 * a specific HTML Processor, which _must_ not have already started scanning;
 	 * it must be in the initial ready state and will be in the completed state once
-	 * serialization is complete.
+	 * serialization is complete. Once `next_token()` or `next_tag()` has been
+	 * called, this method returns `null`.
+	 *
+	 * This method is for producing a normalized copy of a document, not for
+	 * retrieving queued modifications. After changing a document with
+	 * {@see WP_HTML_Tag_Processor::set_attribute},
+	 * {@see WP_HTML_Tag_Processor::add_class}, or
+	 * {@see WP_HTML_Tag_Processor::set_modifiable_text}, read the result with
+	 * {@see WP_HTML_Tag_Processor::get_updated_html}, which this class inherits.
 	 *
 	 * Many aspects of an input HTML fragment may be changed during normalization.
 	 *
@@ -1345,6 +1362,40 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * This method produces a fully-normative HTML string for the currently-matched token,
 	 * if able. If not matched at any token or if the token doesn't correspond to any HTML
 	 * it will return an empty string (for example, presumptuous end tags are ignored).
+	 *
+	 * Walking every token with {@see WP_HTML_Processor::next_token} and
+	 * concatenating `serialize_token()` for each one reconstructs the normalized
+	 * serialization of the input. The token-by-token form exists so a rewriting
+	 * loop can transform the document while serializing: skip tokens to remove
+	 * them, replace a token with different markup, or emit extra markup around
+	 * selected tokens.
+	 *
+	 * Example:
+	 *
+	 *     // Remove every SUP element but keep its contents.
+	 *     $processor = WP_HTML_Processor::create_fragment( $html );
+	 *     $output    = '';
+	 *     while ( $processor->next_token() ) {
+	 *         if ( 'SUP' === $processor->get_tag() ) {
+	 *             continue; // Skips both the opener and the closer.
+	 *         }
+	 *
+	 *         $output .= $processor->serialize_token();
+	 *     }
+	 *
+	 * Return the accumulated output when the rewrite succeeds. If
+	 * {@see WP_HTML_Processor::get_last_error} becomes non-null, the parser
+	 * stopped at unsupported markup; choose a fallback for the caller's
+	 * contract. Calling `normalize( $html )` on the original input after
+	 * emitting changes starts over from the original bytes and discards tokens
+	 * already skipped, replaced, or wrapped. Returning the original input also
+	 * discards the accumulated rewrite; it preserves source bytes, but it is
+	 * not normalized output.
+	 *
+	 * Serialization is not the way to retrieve queued attribute, class, or text
+	 * modifications. Use {@see WP_HTML_Tag_Processor::get_updated_html} after
+	 * those edits, and use `serialize_token()` when building normalized output
+	 * token by token.
 	 *
 	 * @see static::serialize()
 	 *
