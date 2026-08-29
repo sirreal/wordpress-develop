@@ -1,0 +1,37 @@
+{
+	"name": "wp-html-api-rust-wasm",
+	"version": "0.1.0",
+	"description": "WebAssembly build of the WordPress HTML API Rust implementation.",
+	"type": "module",
+	"main": "./wp-html-api-rust.js",
+	"types": "./wp-html-api-rust.d.ts",
+	"scripts": {
+		"build": "../build-wasm.sh",
+		"check": "node --check wp-html-api-rust.js && node --check smoke-test.mjs && node --check package-test.mjs && node --check package-artifact-test.mjs && node --check html5lib-tree-test.mjs && node --check browser-test.mjs",
+		"prepack": "npm run build",
+		"test": "node smoke-test.mjs",
+		"test:all": "npm run check && npm test && npm run test:package && npm run test:package-artifact && npm run test:html5lib",
+		"test:browser": "node browser-test.mjs",
+		"test:html5lib": "node html5lib-tree-test.mjs",
+		"test:package": "node package-test.mjs",
+		"test:package-artifact": "node package-artifact-test.mjs"
+	},
+	"exports": {
+		".": {
+			"types": "./wp-html-api-rust.d.ts",
+			"default": "./wp-html-api-rust.js"
+		},
+		"./dist/wp_html_api_rust_core.wasm": {
+			"types": "./wp_html_api_rust_core.wasm.d.ts",
+			"default": "./dist/wp_html_api_rust_core.wasm"
+		}
+	},
+	"files": [
+		"README.md",
+		"dist/wp_html_api_rust_core.wasm",
+		"wp_html_api_rust_core.wasm.d.ts",
+		"wp-html-api-rust.d.ts",
+		"wp-html-api-rust.js"
+	],
+	"sideEffects": false
+}

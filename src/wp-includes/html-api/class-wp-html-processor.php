@@ -7,6 +7,10 @@
  * @since 6.4.0
  */
 
+if ( class_exists( 'WP_HTML_Processor', false ) ) {
+	return;
+}
+
 /**
  * Core class used to safely parse and modify an HTML document.
  *
@@ -5210,6 +5214,25 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	}
 
 	/**
+	 * Sets the modifiable text for the matched token, if matched.
+	 *
+	 * @since 6.9.0 Subclassed for the HTML Processor.
+	 *
+	 * @param string $plaintext_content New text content to represent in the matched token.
+	 * @return bool Whether the text was able to update.
+	 */
+	public function set_modifiable_text( string $plaintext_content ): bool {
+		if (
+			self::STATE_MATCHED_TAG === $this->parser_state &&
+			'html' !== $this->get_namespace()
+		) {
+			return false;
+		}
+
+		return parent::set_modifiable_text( $plaintext_content );
+	}
+
+	/**
 	 * Returns the node name represented by the token.
 	 *
 	 * This matches the DOM API value `nodeName`. Some values
@@ -5230,8 +5253,12 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @return string|null Name of the matched token.
 	 */
 	public function get_token_name(): ?string {
-		return $this->is_virtual()
-			? $this->current_element->token->node_name
+		if ( $this->is_virtual() ) {
+			return $this->current_element->token->node_name;
+		}
+
+		return '#tag' === parent::get_token_type()
+			? $this->get_tag()
 			: parent::get_token_name();
 	}
 
@@ -5537,7 +5564,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		$actual_bookmark_name = "_{$bookmark_name}";
 		$processor_started_at = $this->state->current_token
 			? $this->bookmarks[ $this->state->current_token->bookmark_name ]->start
-			: 0;
+			: ( WP_HTML_Tag_Processor::STATE_COMPLETE === $this->parser_state ? strlen( $this->html ) : 0 );
 		$bookmark_starts_at   = $this->bookmarks[ $actual_bookmark_name ]->start;
 		$direction            = $bookmark_starts_at > $processor_started_at ? 'forward' : 'backward';
 
@@ -5650,7 +5677,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			 * The processor will stop on virtual tokens, but bookmarks may not be set on them.
 			 * They should not be matched when seeking a bookmark, skip them.
 			 */
-			if ( $this->is_virtual() ) {
+			if ( ! isset( $this->state->current_token ) || $this->is_virtual() ) {
 				continue;
 			}
 			if ( $bookmark_starts_at === $this->bookmarks[ $this->state->current_token->bookmark_name ]->start ) {

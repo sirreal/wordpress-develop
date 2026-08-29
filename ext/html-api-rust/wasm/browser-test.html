@@ -1,0 +1,105 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>WordPress HTML API Rust WASM browser smoke test</title>
+<pre id="results">Running...</pre>
+<script type="module">
+import {
+	WP_HTML_Span,
+	createHtmlApi,
+	loadWasm,
+} from "./wp-html-api-rust.js";
+
+const resultsElement = document.getElementById("results");
+const results = [];
+let assertions = 0;
+
+window.__wpHtmlApiRustWasmBrowserSmoke = {
+	assertions,
+	results,
+	status: "running",
+};
+
+function format(value) {
+	return typeof value === "string" ? value : JSON.stringify(value);
+}
+
+function assertEqual(actual, expected, message) {
+	assertions += 1;
+	if (actual !== expected) {
+		throw new Error(`${message}: expected ${format(expected)}, received ${format(actual)}`);
+	}
+	results.push(message);
+}
+
+function assertDeepEqual(actual, expected, message) {
+	assertEqual(JSON.stringify(actual), JSON.stringify(expected), message);
+}
+
+function assertOk(value, message) {
+	assertions += 1;
+	if (!value) {
+		throw new Error(`${message}: expected truthy value`);
+	}
+	results.push(message);
+}
+
+function finish(status, error = null) {
+	window.__wpHtmlApiRustWasmBrowserSmoke = {
+		assertions,
+		message: error?.message ?? null,
+		results,
+		stack: error?.stack ?? null,
+		status,
+	};
+	document.documentElement.dataset.status = status;
+	resultsElement.textContent = status === "passed"
+		? `Passed ${assertions} assertions.`
+		: `${error.message}\n\n${error.stack}`;
+}
+
+try {
+	const span = new WP_HTML_Span("3", "4");
+	assertEqual(span.start, 3, "direct value class export is usable");
+	assertEqual(span.length, 4, "direct value class export coerces numeric fields");
+
+	const api = await loadWasm();
+	assertEqual(typeof api.WP_HTML_Tag_Processor, "function", "default browser load exposes tag processor");
+	assertEqual(typeof api.WP_HTML_Processor, "function", "default browser load exposes processor");
+	assertEqual(api.version(), createHtmlApi(api.wasm).version(), "raw WASM exports can recreate the API");
+
+	assertEqual(
+		api.WP_HTML_Decoder.decode_text_node("Fish &amp; Chips"),
+		"Fish & Chips",
+		"decoder works in browser",
+	);
+
+	const explicitUrlApi = await loadWasm(new URL("./dist/wp_html_api_rust_core.wasm", import.meta.url));
+	assertEqual(explicitUrlApi.version(), api.version(), "explicit browser URL load matches default load");
+
+	const tags = new api.WP_HTML_Tag_Processor('<div class="one"><span data-id="7">Hi</span></div>');
+	assertEqual(tags.next_tag({ tag_name: "span" }), true, "tag processor finds queried tag");
+	assertEqual(tags.get_attribute("data-id"), "7", "tag processor reads attributes");
+	assertEqual(tags.set_attribute("data-id", "8"), true, "tag processor updates attributes");
+	assertEqual(tags.add_class("active"), true, "tag processor adds classes");
+	assertEqual(
+		tags.get_updated_html(),
+		'<div class="one"><span class="active" data-id="8">Hi</span></div>',
+		"tag processor serializes staged updates",
+	);
+	assertEqual(tags.toString(), tags.get_updated_html(), "tag processor string conversion matches updated HTML");
+	tags.destroy();
+
+	const processor = api.WP_HTML_Processor.create_fragment("<main><p>Hello <em>browser</em>");
+	assertOk(processor !== null, "processor creates browser fragment parser");
+	assertEqual(processor.next_tag("p"), true, "processor finds paragraph tag");
+	assertDeepEqual(processor.get_breadcrumbs(), ["HTML", "BODY", "MAIN", "P"], "processor reports paragraph breadcrumbs");
+	assertEqual(processor.next_tag("em"), true, "processor finds nested phrasing tag");
+	assertDeepEqual(processor.get_breadcrumbs(), ["HTML", "BODY", "MAIN", "P", "EM"], "processor reports nested breadcrumbs");
+	processor.destroy();
+
+	finish("passed");
+} catch (error) {
+	finish("failed", error);
+	throw error;
+}
+</script>
