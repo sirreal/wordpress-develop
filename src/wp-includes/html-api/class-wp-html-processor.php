@@ -5388,6 +5388,17 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	/**
 	 * Adds a new class name to the currently matched tag.
 	 *
+	 * Whitespace in `$class_name` is preserved verbatim. This may result
+	 * in multiple class names being added to the element's class list.
+	 *
+	 * Examples:
+	 *
+	 *     $p->add_class( 'wp-block' );
+	 *     // Adds one class: "wp-block".
+	 *
+	 *     $p->add_class( 'wp-block alignwide' );
+	 *     // Adds two classes: "wp-block" and "alignwide".
+	 *
 	 * @since 6.6.0 Subclassed for the HTML Processor.
 	 *
 	 * @param string $class_name The class name to add.
@@ -5401,6 +5412,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * Removes a class name from the currently matched tag.
 	 *
 	 * @since 6.6.0 Subclassed for the HTML Processor.
+	 * @since 7.1.0 Returns false when `$class_name` contains ASCII whitespace.
 	 *
 	 * @param string $class_name The class name to remove.
 	 * @return bool Whether the class was set to be removed.
