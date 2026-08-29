@@ -177,13 +177,13 @@ class Tests_Fonts_WpFontCollection_GetData extends WP_UnitTestCase {
 								'name'       => 'Open Sans',
 								'fontFace'   => array(
 									array(
-										'fontFamily' => 'Open Sans',
+										'fontFamily' => '"Open Sans"',
 										'fontStyle'  => 'normal',
 										'fontWeight' => '400',
 										'src'        => 'https://example.com/src-as-string.ttf?a=',
 									),
 									array(
-										'fontFamily' => 'Open Sans',
+										'fontFamily' => '"Open Sans"',
 										'fontStyle'  => 'normal',
 										'fontWeight' => '400',
 										'src'        => array(

@@ -35,9 +35,220 @@ class WP_Font_Utils {
 		$item  = trim( $item );
 		if ( preg_match( $regex, $item ) ) {
 			$item = trim( $item, "\"'" );
-			return '"' . $item . '"';
+			return WP_CSS_Builder::string( $item );
 		}
 		return $item;
+	}
+
+	/**
+	 * Normalize @font-face font-family CSS text.
+	 *
+	 * The return value is always normalized to a quoted CSS string.
+	 *
+	 * - Valid @font-face font-family values must return a semantically equivalent result.
+	 * - Normalization must be idempotent.
+	 * - If a CSS string is the first value, it will be used discarding subsequent text.
+	 * - The first valid value in a CSS comma-separated list will be used discarding subsequent text.
+	 * - If the value does not appear to be valid CSS or start with a valid CSS
+	 *   @font-face font-family, treat the entire input as a plain string for normalization.
+	 *
+	 * Relevant notes from the CSS specification:
+	 *
+	 * > Syntax of <family-name>
+	 * >     <family-name> = <string> | <custom-ident>+
+	 * > …
+	 * > To avoid mistakes in escaping, it is recommended to quote font family names that contain
+	 * > white space, digits, or punctuation characters other than hyphens
+	 *
+	 * @see https://drafts.csswg.org/css-fonts/#family-name-syntax
+	 *
+	 * @param string $font_family CSS text @font-face font-family value.
+	 * @return string Normalized value or null if the value could not be normalized.
+	 */
+	public static function normalize_css_font_face_font_family( string $font_family ): string {
+		// Scrub and CSS trim whitespace.
+		$font_family = trim( wp_scrub_utf8( $font_family ), "\t\n\f\r " );
+		$processor   = WP_CSS_Token_Processor::create( $font_family );
+		assert( null !== $processor, 'A valid processor must be created' );
+
+		// Ignore leading whitespace tokens.
+		while ( $processor->next_token() && WP_CSS_Token_Processor::TOKEN_WHITESPACE === $processor->get_token_type() ) {
+			continue;
+		}
+
+		$token_type = $processor->get_token_type();
+		if ( WP_CSS_Token_Processor::TOKEN_STRING === $token_type ) {
+			return WP_CSS_Builder::string( $processor->get_token_value() );
+		}
+
+		/**
+		 * Idents can be composed to form a <family-name>, otherwise consider the
+		 * font-family invalid.
+		 */
+		if ( WP_CSS_Token_Processor::TOKEN_IDENT !== $token_type ) {
+			return WP_CSS_Builder::string( $font_family );
+		}
+
+		/**
+		 * > If a sequence of identifiers is given as a <family-name>, the computed value is
+		 * > the name converted to a string by joining all the identifiers in the sequence
+		 * > by single spaces.
+		 *
+		 * @see https://drafts.csswg.org/css-fonts/#family-name-syntax
+		 */
+		$plaintext_font_ident_parts = array( $processor->get_token_value() );
+		while ( $processor->next_token() ) {
+			switch ( $processor->get_token_type() ) {
+				case WP_CSS_Token_Processor::TOKEN_IDENT:
+					$plaintext_font_ident_parts[] = $processor->get_token_value();
+					break;
+
+				case WP_CSS_Token_Processor::TOKEN_WHITESPACE:
+					continue 2;
+
+				/**
+				 * Comma tokens suggest this was a multi-value font-family (for qualified rules, not
+				 * @font-face rules). Stop processing to handle only the first value.
+				 */
+				case WP_CSS_Token_Processor::TOKEN_COMMA:
+					break 2;
+
+				// Anything else is an error.
+				default:
+					return WP_CSS_Builder::string( $font_family );
+			}
+		}
+
+		return WP_CSS_Builder::string( implode( ' ', $plaintext_font_ident_parts ) );
+	}
+
+	/**
+	 * Normalize a CSS qualified rule font-family value.
+	 *
+	 * Warning! This function is unsuitable for `@font-face` `font-family` values. {@see WP_Font_Utils::normalize_css_font_face_font_family()} should be used for @font-face.
+	 * > Value:
+	 * >     [ <family-name> | <generic-family> ]#
+	 * > Computed value:
+	 * >     list, each item a string and/or <generic-family> keywords
+	 *
+	 * @see https://drafts.csswg.org/css-fonts/#font-family-prop
+	 * @see https://www.w3.org/TR/css-syntax-3/#parse-comma-list
+	 */
+	public static function normalize_css_font_family( string $font_family ): string {
+		// Scrub and CSS trim whitespace.
+		$font_family = trim( wp_scrub_utf8( $font_family ), "\t\n\f\r " );
+		$processor   = WP_CSS_Token_Processor::create( $font_family );
+		assert( null !== $processor, 'A valid processor must be created' );
+
+		/*
+		 * States for the parser:
+		 *  0 = ITEM_START:    expecting start of a new comma-separated item
+		 *  1 = AFTER_STRING:  saw a string, expecting comma or EOF
+		 *  2 = IN_IDENTS:     collecting ident tokens
+		 *  3 = IN_GENERIC:    inside generic() function, collecting idents
+		 *  4 = AFTER_GENERIC: after closing ) of generic(), expecting comma or EOF
+		 */
+		$state       = 0;
+		$items       = array();
+		$ident_parts = array();
+
+		while ( $processor->next_token() ) {
+			$type = $processor->get_token_type();
+
+			// Whitespace and comments are skipped in all states.
+			if (
+				WP_CSS_Token_Processor::TOKEN_WHITESPACE === $type ||
+				WP_CSS_Token_Processor::TOKEN_COMMENT === $type
+			) {
+				continue;
+			}
+
+			switch ( $state ) {
+				case 0: // ITEM_START
+					if ( WP_CSS_Token_Processor::TOKEN_STRING === $type ) {
+						$items[] = WP_CSS_Builder::string( $processor->get_token_value() );
+						$state   = 1;
+					} elseif ( WP_CSS_Token_Processor::TOKEN_IDENT === $type ) {
+						$ident_parts = array( $processor->get_token_value() );
+						$state       = 2;
+					} elseif ( WP_CSS_Token_Processor::TOKEN_FUNCTION === $type && 'generic' === strtolower( $processor->get_token_value() ) ) {
+						$ident_parts = array();
+						$state       = 3;
+					} else {
+						return '';
+					}
+					break;
+
+				case 1: // AFTER_STRING
+					if ( WP_CSS_Token_Processor::TOKEN_COMMA === $type ) {
+						$state = 0;
+					} else {
+						return '';
+					}
+					break;
+
+				case 2: // IN_IDENTS
+					if ( WP_CSS_Token_Processor::TOKEN_IDENT === $type ) {
+						$ident_parts[] = $processor->get_token_value();
+					} elseif ( WP_CSS_Token_Processor::TOKEN_COMMA === $type ) {
+						$items[] = implode( ' ', array_map( array( 'WP_CSS_Builder', 'ident' ), $ident_parts ) );
+						$state   = 0;
+					} else {
+						return '';
+					}
+					break;
+
+				case 3: // IN_GENERIC
+					if ( WP_CSS_Token_Processor::TOKEN_IDENT === $type ) {
+						$ident_parts[] = $processor->get_token_value();
+					} elseif ( WP_CSS_Token_Processor::TOKEN_RIGHT_PAREN === $type ) {
+						if ( empty( $ident_parts ) ) {
+							return '';
+						}
+						$items[] = 'generic(' . implode( ' ', array_map( array( 'WP_CSS_Builder', 'ident' ), $ident_parts ) ) . ')';
+						$state   = 4;
+					} else {
+						return '';
+					}
+					break;
+
+				case 4: // AFTER_GENERIC
+					if ( WP_CSS_Token_Processor::TOKEN_COMMA === $type ) {
+						$state = 0;
+					} else {
+						return '';
+					}
+					break;
+			}
+		}
+
+		// Finalize last item based on state at EOF.
+		switch ( $state ) {
+			case 0:
+				// EOF at ITEM_START: either empty input or trailing comma.
+				if ( empty( $items ) ) {
+					return '';
+				}
+				// Trailing comma — last item was followed by comma but no next item.
+				return '';
+
+			case 1: // String at EOF — already added to items.
+			case 4: // After generic close at EOF — already added to items.
+				break;
+
+			case 2: // Ident sequence at EOF — finalize.
+				$items[] = implode( ' ', array_map( array( 'WP_CSS_Builder', 'ident' ), $ident_parts ) );
+				break;
+
+			case 3: // Inside unclosed generic() — invalid.
+				return '';
+		}
+
+		if ( empty( $items ) ) {
+			return '';
+		}
+
+		return implode( ', ', $items );
 	}
 
 	/**
