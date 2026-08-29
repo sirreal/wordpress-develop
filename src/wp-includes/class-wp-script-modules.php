@@ -21,6 +21,7 @@
  *     fetchpriority: 'auto'|'low'|'high',
  *     textdomain?: string,
  *     translations_path?: string,
+ *     scopes?: array<int, string|array{ module_id: string }>,
  * }
  */
 class WP_Script_Modules {
@@ -98,36 +99,55 @@ class WP_Script_Modules {
 	 *
 	 * @since 6.5.0
 	 * @since 6.9.0 Added the $args parameter.
+	 * @since 7.1.0 Added the `scopes` key to the $args parameter.
 	 *
-	 * @param string                              $id      The identifier of the script module. Should be unique. It will be used in the
-	 *                                                     final import map.
-	 * @param string                              $src     Optional. Full URL of the script module, or path of the script module relative
-	 *                                                     to the WordPress root directory. If it is provided and the script module has
-	 *                                                     not been registered yet, it will be registered.
-	 * @param array<string|array<string, string>> $deps    {
-	 *                                                         Optional. List of dependencies.
+	 * @param string                                            $id      The identifier of the script module. Should be unique. It will be used in the
+	 *                                                                   final import map.
+	 * @param string                                            $src     Optional. Full URL of the script module, or path of the script module relative
+	 *                                                                   to the WordPress root directory. If it is provided and the script module has
+	 *                                                                   not been registered yet, it will be registered.
+	 * @param array<string|array<string, string>>               $deps    {
+	 *                                                                       Optional. List of dependencies.
 	 *
-	 *                                                         @type string|array<string, string> ...$0 {
-	 *                                                             An array of script module identifiers of the dependencies of this script
-	 *                                                             module. The dependencies can be strings or arrays. If they are arrays,
-	 *                                                             they need an `id` key with the script module identifier, and can contain
-	 *                                                             an `import` key with either `static` or `dynamic`. By default,
-	 *                                                             dependencies that don't contain an `import` key are considered static.
+	 *                                                                       @type string|array<string, string> ...$0 {
+	 *                                                                           An array of script module identifiers of the dependencies of this script
+	 *                                                                           module. The dependencies can be strings or arrays. If they are arrays,
+	 *                                                                           they need an `id` key with the script module identifier, and can contain
+	 *                                                                           an `import` key with either `static` or `dynamic`. By default,
+	 *                                                                           dependencies that don't contain an `import` key are considered static.
 	 *
-	 *                                                             @type string $id     The script module identifier.
-	 *                                                             @type string $import Optional. Import type. May be either `static` or
-	 *                                                                                  `dynamic`. Defaults to `static`.
-	 *                                                         }
-	 *                                                     }
-	 * @param string|false|null                   $version Optional. String specifying the script module version number. Defaults to false.
-	 *                                                     It is added to the URL as a query string for cache busting purposes. If $version
-	 *                                                     is set to false, the version number is the currently installed WordPress version.
-	 *                                                     If $version is set to null, no version is added.
-	 * @param array<string, string|bool>          $args    {
+	 *                                                                           @type string $id     The script module identifier.
+	 *                                                                           @type string $import Optional. Import type. May be either `static` or
+	 *                                                                                                `dynamic`. Defaults to `static`.
+	 *                                                                       }
+	 *                                                                   }
+	 * @param string|false|null                                 $version Optional. String specifying the script module version number. Defaults to false.
+	 *                                                                   It is added to the URL as a query string for cache busting purposes. If $version
+	 *                                                                   is set to false, the version number is the currently installed WordPress version.
+	 *                                                                   If $version is set to null, no version is added.
+	 * @param array<string, string|bool|array<string|array<string, string>>|null> $args {
 	 *     Optional. An array of additional args. Default empty array.
 	 *
 	 *     @type bool                $in_footer     Whether to print the script module in the footer. Only relevant to block themes. Default 'false'. Optional.
 	 *     @type 'auto'|'low'|'high' $fetchpriority Fetch priority. Default 'auto'. Optional.
+	 *     @type array|null          $scopes        Optional. Constrains the importers that can resolve this module's bare specifier.
+	 *                                              When omitted or null, the module is public (top-level `imports`). When an array is
+	 *                                              provided, the module is emitted under the import map's `scopes` keyed by each entry,
+	 *                                              and is not present in top-level `imports`. An empty array means the module is
+	 *                                              registered but cannot be resolved via bare specifier from anywhere; declared
+	 *                                              dependencies on such a module (static or dynamic) are treated like missing
+	 *                                              dependencies and the dependent will not be emitted.
+	 *                                              Each entry is one of:
+	 *                                              - A non-empty string URL prefix, emitted as-authored. WordPress URL filters such as
+	 *                                                `script_module_loader_src` are NOT applied to string scopes; authors are
+	 *                                                responsible for matching the final browser URL.
+	 *                                              - `array( 'module_id' => string )` — at print time, resolves to the directory
+	 *                                                portion of the named registered module's filtered src URL. Recommended for
+	 *                                                CDN-aware scoping because it goes through the existing `script_module_loader_src`
+	 *                                                filter.
+	 *                                              This is an API-hygiene mechanism, not a security boundary; the file remains
+	 *                                              fetchable, and any caller can still list the module's id in `$deps` or call
+	 *                                              `wp_enqueue_script_module()` on it. Resolution failure is a runtime `TypeError`.
 	 * }
 	 */
 	public function register( string $id, string $src, array $deps = array(), $version = false, array $args = array() ) {
@@ -178,13 +198,68 @@ class WP_Script_Modules {
 				}
 			}
 
-			$this->registered[ $id ] = array(
+			$registered_module = array(
 				'src'           => $src,
 				'version'       => $version,
 				'dependencies'  => $dependencies,
 				'in_footer'     => $in_footer,
 				'fetchpriority' => $fetchpriority,
 			);
+
+			if ( array_key_exists( 'scopes', $args ) && null !== $args['scopes'] ) {
+				if ( ! is_array( $args['scopes'] ) ) {
+					_doing_it_wrong(
+						__METHOD__,
+						sprintf(
+							/* translators: 1: Module identifier; 2: Received type. */
+							__( 'The "scopes" arg for module "%1$s" must be null or an array; received %2$s.' ),
+							$id,
+							gettype( $args['scopes'] )
+						),
+						'7.1.0'
+					);
+				} else {
+					$validated_scopes = array();
+					foreach ( $args['scopes'] as $scope_entry ) {
+						if ( is_string( $scope_entry ) ) {
+							if ( '' === $scope_entry ) {
+								_doing_it_wrong(
+									__METHOD__,
+									sprintf(
+										/* translators: %s: Module identifier. */
+										__( 'A scope entry for module "%s" must be a non-empty string.' ),
+										$id
+									),
+									'7.1.0'
+								);
+								continue;
+							}
+							$validated_scopes[] = $scope_entry;
+						} elseif (
+							is_array( $scope_entry ) &&
+							1 === count( $scope_entry ) &&
+							isset( $scope_entry['module_id'] ) &&
+							is_string( $scope_entry['module_id'] ) &&
+							'' !== $scope_entry['module_id']
+						) {
+							$validated_scopes[] = array( 'module_id' => $scope_entry['module_id'] );
+						} else {
+							_doing_it_wrong(
+								__METHOD__,
+								sprintf(
+									/* translators: %s: Module identifier. */
+									__( 'A scope entry for module "%s" must be a non-empty string or an array with a single "module_id" key whose value is a non-empty string.' ),
+									$id
+								),
+								'7.1.0'
+							);
+						}
+					}
+					$registered_module['scopes'] = $validated_scopes;
+				}
+			}
+
+			$this->registered[ $id ] = $registered_module;
 		}
 	}
 
@@ -270,6 +345,7 @@ class WP_Script_Modules {
 	 *
 	 * @since 6.5.0
 	 * @since 6.9.0 Added the $args parameter.
+	 * @since 7.1.0 Added the `scopes` key to the $args parameter.
 	 *
 	 * @param string                              $id      The identifier of the script module. Should be unique. It will be used in the
 	 *                                                     final import map.
@@ -295,11 +371,12 @@ class WP_Script_Modules {
 	 *                                                     It is added to the URL as a query string for cache busting purposes. If $version
 	 *                                                     is set to false, the version number is the currently installed WordPress version.
 	 *                                                     If $version is set to null, no version is added.
-	 * @param array<string, string|bool>          $args    {
+	 * @param array<string, string|bool|array<string|array<string, string>>|null> $args {
 	 *     Optional. An array of additional args. Default empty array.
 	 *
 	 *     @type bool                $in_footer     Whether to print the script module in the footer. Only relevant to block themes. Default 'false'. Optional.
 	 *     @type 'auto'|'low'|'high' $fetchpriority Fetch priority. Default 'auto'. Optional.
+	 *     @type array|null          $scopes        Optional. See {@see WP_Script_Modules::register()} for details.
 	 * }
 	 */
 	public function enqueue( string $id, string $src = '', array $deps = array(), $version = false, array $args = array() ) {
@@ -619,7 +696,7 @@ class WP_Script_Modules {
 	 */
 	public function print_import_map() {
 		$import_map = $this->get_import_map();
-		if ( ! empty( $import_map['imports'] ) ) {
+		if ( ! empty( $import_map['imports'] ) || ! empty( $import_map['scopes'] ) ) {
 			wp_print_inline_script_tag(
 				(string) wp_json_encode( $import_map, JSON_HEX_TAG | JSON_UNESCAPED_SLASHES ),
 				array(
@@ -635,11 +712,13 @@ class WP_Script_Modules {
 	 *
 	 * @since 6.5.0
 	 * @since 7.0.0 Script module dependencies ('module_dependencies') of classic scripts are now included.
+	 * @since 7.1.0 Scoped (private) modules are emitted under a top-level `scopes` key.
 	 *
 	 * @global WP_Scripts $wp_scripts
 	 *
-	 * @return array<string, array<string, string>> Array with an `imports` key mapping to an array of script module
-	 *                                              identifiers and their respective URLs, including the version query.
+	 * @return array Array with an `imports` key mapping module identifiers to URLs (including the version query),
+	 *               and an optional `scopes` key mapping scope-prefix URLs to per-scope import maps.
+	 * @phpstan-return array{ imports: array<string, string>, scopes?: array<string, array<string, string>> }
 	 */
 	private function get_import_map(): array {
 		global $wp_scripts;
@@ -665,7 +744,8 @@ class WP_Script_Modules {
 
 				$module_dependencies = $wp_scripts->get_data( $handle, 'module_dependencies' );
 				if ( is_array( $module_dependencies ) ) {
-					$missing_module_dependencies = array();
+					$missing_module_dependencies     = array();
+					$unreachable_module_dependencies = array();
 					foreach ( $module_dependencies as $module ) {
 						if ( is_string( $module ) ) {
 							$id = $module;
@@ -679,6 +759,11 @@ class WP_Script_Modules {
 
 						if ( ! isset( $this->registered[ $id ] ) ) {
 							$missing_module_dependencies[] = $id;
+						} elseif (
+							isset( $this->registered[ $id ]['scopes'] ) &&
+							array() === $this->registered[ $id ]['scopes']
+						) {
+							$unreachable_module_dependencies[] = $id;
 						} else {
 							$classic_script_module_dependencies[] = $id;
 						}
@@ -697,6 +782,20 @@ class WP_Script_Modules {
 							'7.0.0'
 						);
 					}
+
+					if ( count( $unreachable_module_dependencies ) > 0 ) {
+						_doing_it_wrong(
+							'WP_Scripts::add_data',
+							sprintf(
+								/* translators: 1: Script handle, 2: 'module_dependencies', 3: List of unreachable dependency IDs. */
+								__( 'The script with the handle "%1$s" was enqueued with script module dependencies ("%2$s") that are registered with empty scopes and cannot be resolved via bare specifier: %3$s.' ),
+								$handle,
+								'module_dependencies',
+								implode( wp_get_list_item_separator(), $unreachable_module_dependencies )
+							),
+							'7.1.0'
+						);
+					}
 				}
 
 				foreach ( $wp_scripts->registered[ $handle ]->deps as $dep ) {
@@ -707,20 +806,85 @@ class WP_Script_Modules {
 			}
 		}
 
-		// Note: the script modules in $this->queue are not included in the importmap because they get printed as scripts.
+		/*
+		 * Walk the dependency graph from queue items + classic-script module dependencies.
+		 * Queue items themselves are not added to `$ids` (they are printed as `<script>` tags),
+		 * but they appear via dep edges of other modules — matching prior behavior of
+		 * `get_dependencies()`.
+		 *
+		 * Modules registered with empty scopes (`scopes => array()`) reached as a *transitive*
+		 * dep are not traversed: their deps are unreachable via bare specifier from any importer,
+		 * so walking through them would leak otherwise-private deps into top-level `imports`.
+		 *
+		 * The starting nodes (queue items + classic-script module dependencies) are exempt
+		 * from this stop rule: queued empty-scoped modules are still entry points whose deps
+		 * must resolve when their `<script>` tag executes in the browser.
+		 */
+		$collected_dependencies = array();
+		$id_queue               = array();
+		foreach ( array_merge( $this->queue, $classic_script_module_dependencies ) as $start_id ) {
+			$id_queue[] = array( $start_id, true );
+		}
+		while ( ! empty( $id_queue ) ) {
+			list( $current_id, $is_starting_node ) = array_shift( $id_queue );
+			if ( ! isset( $this->registered[ $current_id ] ) ) {
+				continue;
+			}
+
+			// Stop traversal at transitive empty-scoped modules; entry points are exempt.
+			if (
+				! $is_starting_node &&
+				isset( $this->registered[ $current_id ]['scopes'] ) &&
+				array() === $this->registered[ $current_id ]['scopes']
+			) {
+				continue;
+			}
+
+			foreach ( $this->registered[ $current_id ]['dependencies'] as $dependency ) {
+				if (
+					! isset( $collected_dependencies[ $dependency['id'] ] ) &&
+					isset( $this->registered[ $dependency['id'] ] )
+				) {
+					$collected_dependencies[ $dependency['id'] ] = true;
+					$id_queue[]                                  = array( $dependency['id'], false );
+				}
+			}
+		}
+
 		$ids = array_unique(
 			array_merge(
 				$classic_script_module_dependencies,
-				array_keys( $this->get_dependencies( array_merge( $this->queue, $classic_script_module_dependencies ) ) )
+				array_keys( $collected_dependencies )
 			)
 		);
+
+		$scopes = array();
 		foreach ( $ids as $id ) {
 			$src = $this->get_src( $id );
-			if ( '' !== $src ) {
+			if ( '' === $src ) {
+				continue;
+			}
+
+			if ( isset( $this->registered[ $id ]['scopes'] ) ) {
+				// Scoped (private) modules are emitted only under their resolved scope keys.
+				// Modules with `scopes => array()` resolve to no keys and are intentionally
+				// absent from both `imports` and `scopes`.
+				foreach ( $this->get_scope_keys( $id ) as $scope_key ) {
+					if ( ! isset( $scopes[ $scope_key ] ) ) {
+						$scopes[ $scope_key ] = array();
+					}
+					$scopes[ $scope_key ][ $id ] = $src;
+				}
+			} else {
 				$imports[ $id ] = $src;
 			}
 		}
-		return array( 'imports' => $imports );
+
+		$import_map = array( 'imports' => $imports );
+		if ( ! empty( $scopes ) ) {
+			$import_map['scopes'] = $scopes;
+		}
+		return $import_map;
 	}
 
 	/**
@@ -911,18 +1075,49 @@ class WP_Script_Modules {
 
 		// If the item requires dependencies that do not exist, fail.
 		$missing_dependencies = array_diff( $dependency_ids, array_keys( $this->registered ) );
-		if ( count( $missing_dependencies ) > 0 ) {
+
+		// Dependencies on modules registered with empty `scopes` (`scopes => array()`)
+		// cannot be resolved via bare specifier from anywhere; treat them as missing
+		// so the dependent does not emit and a developer warning surfaces early.
+		$unreachable_dependencies = array();
+		foreach ( $dependency_ids as $dep_id ) {
+			if ( in_array( $dep_id, $missing_dependencies, true ) ) {
+				continue;
+			}
+			if (
+				isset( $this->registered[ $dep_id ]['scopes'] ) &&
+				array() === $this->registered[ $dep_id ]['scopes']
+			) {
+				$unreachable_dependencies[] = $dep_id;
+			}
+		}
+
+		if ( count( $missing_dependencies ) > 0 || count( $unreachable_dependencies ) > 0 ) {
 			if ( ! in_array( $id, $this->modules_with_missing_dependencies, true ) ) {
-				_doing_it_wrong(
-					get_class( $this ) . '::register',
-					sprintf(
-						/* translators: 1: Script module ID, 2: List of missing dependency IDs. */
-						__( 'The script module with the ID "%1$s" was enqueued with dependencies that are not registered: %2$s.' ),
-						$id,
-						implode( wp_get_list_item_separator(), $missing_dependencies )
-					),
-					'6.9.1'
-				);
+				if ( count( $missing_dependencies ) > 0 ) {
+					_doing_it_wrong(
+						get_class( $this ) . '::register',
+						sprintf(
+							/* translators: 1: Script module ID, 2: List of missing dependency IDs. */
+							__( 'The script module with the ID "%1$s" was enqueued with dependencies that are not registered: %2$s.' ),
+							$id,
+							implode( wp_get_list_item_separator(), $missing_dependencies )
+						),
+						'6.9.1'
+					);
+				}
+				if ( count( $unreachable_dependencies ) > 0 ) {
+					_doing_it_wrong(
+						get_class( $this ) . '::register',
+						sprintf(
+							/* translators: 1: Script module ID, 2: List of unreachable dependency IDs. */
+							__( 'The script module with the ID "%1$s" was enqueued with dependencies that are registered with empty scopes and cannot be resolved via bare specifier: %2$s.' ),
+							$id,
+							implode( wp_get_list_item_separator(), $unreachable_dependencies )
+						),
+						'7.1.0'
+					);
+				}
 				$this->modules_with_missing_dependencies[] = $id;
 			}
 
@@ -1001,6 +1196,88 @@ class WP_Script_Modules {
 	}
 
 	/**
+	 * Resolves the import-map scope keys for a registered scoped script module.
+	 *
+	 * String entries are returned as-authored. `[ 'module_id' => $other_id ]` entries are
+	 * resolved to the directory portion of the named module's filtered src URL (query and
+	 * fragment stripped, path truncated to the last "/"). Lookup failures are dropped with
+	 * `_doing_it_wrong`.
+	 *
+	 * Returns an empty array for unregistered modules, public modules (no `scopes`), or
+	 * modules whose `scopes` entries all failed to resolve.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @param string $id The script module identifier.
+	 * @return string[] Resolved, unique scope keys.
+	 */
+	private function get_scope_keys( string $id ): array {
+		if ( ! isset( $this->registered[ $id ]['scopes'] ) ) {
+			return array();
+		}
+
+		$keys = array();
+		foreach ( $this->registered[ $id ]['scopes'] as $entry ) {
+			if ( is_string( $entry ) ) {
+				$keys[ $entry ] = true;
+				continue;
+			}
+
+			$other_id = $entry['module_id'];
+			if ( ! isset( $this->registered[ $other_id ] ) ) {
+				_doing_it_wrong(
+					__METHOD__,
+					sprintf(
+						/* translators: 1: Scope module id; 2: Owning module id. */
+						__( 'Scope entry references unregistered module "%1$s" for module "%2$s".' ),
+						$other_id,
+						$id
+					),
+					'7.1.0'
+				);
+				continue;
+			}
+
+			$other_src = $this->get_src( $other_id );
+			if ( '' === $other_src ) {
+				_doing_it_wrong(
+					__METHOD__,
+					sprintf(
+						/* translators: 1: Scope module id; 2: Owning module id. */
+						__( 'Scope entry references module "%1$s" with empty src for module "%2$s".' ),
+						$other_id,
+						$id
+					),
+					'7.1.0'
+				);
+				continue;
+			}
+
+			// Strip query and fragment, truncate to last "/" to derive directory.
+			$path       = preg_replace( '~[?#].*$~', '', $other_src );
+			$last_slash = strrpos( (string) $path, '/' );
+			if ( false === $last_slash ) {
+				_doing_it_wrong(
+					__METHOD__,
+					sprintf(
+						/* translators: 1: Scope module id; 2: Owning module id; 3: Resolved URL. */
+						__( 'Scope entry references module "%1$s" whose URL "%3$s" has no "/" path separator and cannot be reduced to a directory for module "%2$s".' ),
+						$other_id,
+						$id,
+						$other_src
+					),
+					'7.1.0'
+				);
+				continue;
+			}
+
+			$keys[ substr( (string) $path, 0, $last_slash + 1 ) ] = true;
+		}
+
+		return array_keys( $keys );
+	}
+
+	/**
 	 * Print data associated with Script Modules.
 	 *
 	 * The data will be embedded in the page HTML and can be read by Script Modules on page load.
@@ -1021,11 +1298,22 @@ class WP_Script_Modules {
 			}
 			$modules[ $id ] = true;
 		}
-		foreach ( array_keys( $this->get_import_map()['imports'] ) as $id ) {
+		$import_map = $this->get_import_map();
+		foreach ( array_keys( $import_map['imports'] ) as $id ) {
 			if ( '@wordpress/a11y' === $id ) {
 				$this->a11y_available = true;
 			}
 			$modules[ $id ] = true;
+		}
+		if ( isset( $import_map['scopes'] ) ) {
+			foreach ( $import_map['scopes'] as $scope_entries ) {
+				foreach ( array_keys( $scope_entries ) as $id ) {
+					if ( '@wordpress/a11y' === $id ) {
+						$this->a11y_available = true;
+					}
+					$modules[ $id ] = true;
+				}
+			}
 		}
 
 		foreach ( array_keys( $modules ) as $module_id ) {

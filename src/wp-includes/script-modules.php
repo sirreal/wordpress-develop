@@ -36,6 +36,7 @@ function wp_script_modules(): WP_Script_Modules {
  *
  * @since 6.5.0
  * @since 6.9.0 Added the $args parameter.
+ * @since 7.1.0 Added the `scopes` key to the $args parameter.
  *
  * @param string                              $id      The identifier of the script module. Should be unique. It will be used in the
  *                                                     final import map.
@@ -61,11 +62,28 @@ function wp_script_modules(): WP_Script_Modules {
  *                                                     It is added to the URL as a query string for cache busting purposes. If $version
  *                                                     is set to false, the version number is the currently installed WordPress version.
  *                                                     If $version is set to null, no version is added.
- * @param array<string, string|bool>          $args    {
+ * @param array<string, string|bool|array<string|array<string, string>>|null> $args    {
  *     Optional. An array of additional args. Default empty array.
  *
  *     @type bool                $in_footer     Whether to print the script module in the footer. Only relevant to block themes. Default 'false'. Optional.
  *     @type 'auto'|'low'|'high' $fetchpriority Fetch priority. Default 'auto'. Optional.
+ *     @type array|null          $scopes        Optional. Constrains the importers that can resolve this module's bare specifier.
+ *                                              When omitted or null, the module is public. When an array is provided, the module is
+ *                                              emitted under the import map's `scopes` keyed by each entry, and is not present in
+ *                                              top-level `imports`. An empty array means the module is registered but cannot be
+ *                                              resolved via bare specifier from anywhere; declared dependencies on such a
+ *                                              module (static or dynamic) are treated like missing dependencies and the
+ *                                              dependent will not be emitted.
+ *                                              Each entry is one of:
+ *                                              - A non-empty string URL prefix, emitted as-authored. WordPress URL-rewriting
+ *                                                hooks such as `script_module_loader_src` are NOT applied to string scopes;
+ *                                                authors are responsible for matching the final browser URL.
+ *                                              - `array( 'module_id' => string )` — at print time, resolves to the directory
+ *                                                portion of the named registered module's filtered src URL. Recommended for
+ *                                                CDN-aware scoping (the existing `script_module_loader_src` filter applies).
+ *                                              This is API-hygiene + bare-specifier scoping, not a security boundary; the file
+ *                                              remains fetchable, callers can still list the module's id in `$deps` or call
+ *                                              `wp_enqueue_script_module()` on it. Resolution failure is a runtime `TypeError`.
  * }
  */
 function wp_register_script_module( string $id, string $src, array $deps = array(), $version = false, array $args = array() ) {
@@ -80,6 +98,7 @@ function wp_register_script_module( string $id, string $src, array $deps = array
  *
  * @since 6.5.0
  * @since 6.9.0 Added the $args parameter.
+ * @since 7.1.0 Added the `scopes` key to the $args parameter.
  *
  * @param string                              $id      The identifier of the script module. Should be unique. It will be used in the
  *                                                     final import map.
@@ -105,11 +124,12 @@ function wp_register_script_module( string $id, string $src, array $deps = array
  *                                                     It is added to the URL as a query string for cache busting purposes. If $version
  *                                                     is set to false, the version number is the currently installed WordPress version.
  *                                                     If $version is set to null, no version is added.
- * @param array<string, string|bool>          $args    {
+ * @param array<string, string|bool|array<string|array<string, string>>|null> $args    {
  *     Optional. An array of additional args. Default empty array.
  *
  *     @type bool                $in_footer     Whether to print the script module in the footer. Only relevant to block themes. Default 'false'. Optional.
  *     @type 'auto'|'low'|'high' $fetchpriority Fetch priority. Default 'auto'. Optional.
+ *     @type array|null          $scopes        Optional. See {@see wp_register_script_module()} for details.
  * }
  */
 function wp_enqueue_script_module( string $id, string $src = '', array $deps = array(), $version = false, array $args = array() ) {

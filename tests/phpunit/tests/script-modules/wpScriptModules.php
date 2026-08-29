@@ -108,6 +108,23 @@ class Tests_Script_Modules_WpScriptModules extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Gets the full decoded import map (including scopes if present).
+	 *
+	 * @return array Decoded import map ('imports' and optional 'scopes'), or [] if no map printed.
+	 */
+	public function get_full_import_map(): array {
+		$p = new WP_HTML_Tag_Processor( get_echo( array( $this->script_modules, 'print_import_map' ) ) );
+		if ( $p->next_tag( array( 'tag' => 'SCRIPT' ) ) ) {
+			$this->assertSame( 'importmap', $p->get_attribute( 'type' ) );
+			$this->assertSame( 'wp-importmap', $p->get_attribute( 'id' ) );
+			$data = json_decode( $p->get_modifiable_text(), true );
+			$this->assertIsArray( $data );
+			return $data;
+		}
+		return array();
+	}
+
+	/**
 	 * Gets a list of preloaded script modules.
 	 *
 	 * @return array Preloaded script module URLs, keyed by script module identifier.
@@ -2921,5 +2938,618 @@ HTML;
 
 		$this->assertSame( 'my-plugin', $seen_domain, 'load_script_module_textdomain() should be called with the overridden domain.' );
 		$this->assertStringContainsString( 'Hola', $output, 'Output should contain the translated string loaded under the overridden domain.' );
+	}
+
+	/*
+	 * --------------------------------------------------------------------
+	 * Scoped (private) script modules — `scopes` arg.
+	 * --------------------------------------------------------------------
+	 */
+
+	/**
+	 * Public registration produces no `scopes` field in the import map.
+	 *
+	 * @covers WP_Script_Modules::register
+	 * @covers WP_Script_Modules::print_import_map
+	 */
+	public function test_scopes_public_module_unchanged() {
+		$this->script_modules->register( 'dep', '/dep.js' );
+		$this->script_modules->register( 'foo', '/foo.js', array( 'dep' ) );
+		$this->script_modules->enqueue( 'foo' );
+
+		$map = $this->get_full_import_map();
+		$this->assertArrayHasKey( 'imports', $map );
+		$this->assertArrayNotHasKey( 'scopes', $map );
+		$this->assertArrayHasKey( 'dep', $map['imports'] );
+	}
+
+	/**
+	 * A directory-style string scope emits under `scopes[<prefix>]`.
+	 *
+	 * @covers WP_Script_Modules::register
+	 * @covers WP_Script_Modules::print_import_map
+	 */
+	public function test_scopes_string_directory_scope() {
+		$this->script_modules->register(
+			'private',
+			'/wp-content/plugins/x/private.js',
+			array(),
+			null,
+			array( 'scopes' => array( '/wp-content/plugins/x/' ) )
+		);
+		$this->script_modules->register( 'consumer', '/wp-content/plugins/x/consumer.js', array( 'private' ) );
+		$this->script_modules->enqueue( 'consumer' );
+
+		$map = $this->get_full_import_map();
+		$this->assertArrayHasKey( 'scopes', $map );
+		$this->assertArrayHasKey( '/wp-content/plugins/x/', $map['scopes'] );
+		$this->assertArrayHasKey( 'private', $map['scopes']['/wp-content/plugins/x/'] );
+		$this->assertArrayNotHasKey( 'private', $map['imports'] );
+	}
+
+	/**
+	 * An exact-URL string scope (no trailing slash) is accepted and emitted verbatim.
+	 *
+	 * @covers WP_Script_Modules::register
+	 * @covers WP_Script_Modules::print_import_map
+	 */
+	public function test_scopes_string_exact_url_scope() {
+		$this->script_modules->register(
+			'private',
+			'/private.js',
+			array(),
+			null,
+			array( 'scopes' => array( 'https://example.com/exact.js' ) )
+		);
+		$this->script_modules->register( 'consumer', '/consumer.js', array( 'private' ) );
+		$this->script_modules->enqueue( 'consumer' );
+
+		$map = $this->get_full_import_map();
+		$this->assertArrayHasKey( 'https://example.com/exact.js', $map['scopes'] );
+		$this->assertArrayHasKey( 'private', $map['scopes']['https://example.com/exact.js'] );
+		$this->assertArrayNotHasKey( 'private', $map['imports'] );
+	}
+
+	/**
+	 * `module_id` scope resolves at print time to the directory of the named module.
+	 *
+	 * @covers WP_Script_Modules::register
+	 * @covers WP_Script_Modules::print_import_map
+	 */
+	public function test_scopes_module_id_resolves_to_directory() {
+		$this->script_modules->register( 'sibling', '/wp-content/plugins/x/build/sibling.js' );
+		$this->script_modules->register(
+			'private',
+			'/wp-content/plugins/x/build/private.js',
+			array(),
+			null,
+			array( 'scopes' => array( array( 'module_id' => 'sibling' ) ) )
+		);
+		$this->script_modules->register( 'consumer', '/wp-content/plugins/x/build/consumer.js', array( 'private' ) );
+		$this->script_modules->enqueue( 'consumer' );
+
+		$map = $this->get_full_import_map();
+		$this->assertArrayHasKey( '/wp-content/plugins/x/build/', $map['scopes'] );
+		$this->assertArrayHasKey( 'private', $map['scopes']['/wp-content/plugins/x/build/'] );
+	}
+
+	/**
+	 * `module_id` scope strips query and fragment from the resolved URL.
+	 *
+	 * @covers WP_Script_Modules::register
+	 * @covers WP_Script_Modules::print_import_map
+	 */
+	public function test_scopes_module_id_strips_query_and_fragment() {
+		$this->script_modules->register( 'sibling', '/wp-content/plugins/x/sibling.js', array(), '1.2.3' );
+		$this->script_modules->register(
+			'private',
+			'/wp-content/plugins/x/private.js',
+			array(),
+			null,
+			array( 'scopes' => array( array( 'module_id' => 'sibling' ) ) )
+		);
+		$this->script_modules->register( 'consumer', '/wp-content/plugins/x/consumer.js', array( 'private' ) );
+		$this->script_modules->enqueue( 'consumer' );
+
+		$map = $this->get_full_import_map();
+		$this->assertArrayHasKey( '/wp-content/plugins/x/', $map['scopes'] );
+	}
+
+	/**
+	 * `module_id` referencing an unregistered module drops the entry with `_doing_it_wrong`.
+	 *
+	 * @expectedIncorrectUsage WP_Script_Modules::get_scope_keys
+	 *
+	 * @covers WP_Script_Modules::register
+	 * @covers WP_Script_Modules::print_import_map
+	 */
+	public function test_scopes_module_id_unregistered_drops() {
+		$this->script_modules->register(
+			'private',
+			'/private.js',
+			array(),
+			null,
+			array(
+				'scopes' => array(
+					array( 'module_id' => 'nope' ),
+					'/fallback/',
+				),
+			)
+		);
+		$this->script_modules->register( 'consumer', '/consumer.js', array( 'private' ) );
+		$this->script_modules->enqueue( 'consumer' );
+
+		$map = $this->get_full_import_map();
+		$this->assertArrayHasKey( 'scopes', $map );
+		$this->assertCount( 1, $map['scopes'] );
+		$this->assertArrayHasKey( '/fallback/', $map['scopes'] );
+		$this->assertArrayHasKey( 'private', $map['scopes']['/fallback/'] );
+		$this->assertArrayNotHasKey( 'private', $map['imports'] );
+	}
+
+	/**
+	 * Empty `scopes => array()` causes static dep edges to be treated as missing.
+	 *
+	 * @expectedIncorrectUsage WP_Script_Modules::register
+	 *
+	 * @covers WP_Script_Modules::register
+	 * @covers WP_Script_Modules::print_enqueued_script_modules
+	 */
+	public function test_scopes_empty_array_static_dep_treated_as_missing() {
+		$this->script_modules->register(
+			'unreachable',
+			'/unreachable.js',
+			array(),
+			null,
+			array( 'scopes' => array() )
+		);
+		$this->script_modules->enqueue( 'consumer', '/consumer.js', array( 'unreachable' ) );
+
+		$enqueued = $this->get_enqueued_script_modules();
+		$this->assertArrayNotHasKey( 'consumer', $enqueued, 'Consumer should not be emitted when its static dep is in empty scopes.' );
+
+		$map = $this->get_full_import_map();
+		$this->assertArrayNotHasKey( 'scopes', $map );
+		if ( isset( $map['imports'] ) ) {
+			$this->assertArrayNotHasKey( 'unreachable', $map['imports'] );
+		}
+	}
+
+	/**
+	 * Empty `scopes => array()` is not emitted in the import map.
+	 *
+	 * @covers WP_Script_Modules::register
+	 * @covers WP_Script_Modules::print_import_map
+	 */
+	public function test_scopes_empty_array_not_emitted() {
+		$this->script_modules->register( 'public', '/public.js' );
+		$this->script_modules->register(
+			'unreachable',
+			'/unreachable.js',
+			array(),
+			null,
+			array( 'scopes' => array() )
+		);
+		$this->script_modules->enqueue( 'public' );
+
+		$map = $this->get_full_import_map();
+		$this->assertArrayNotHasKey( 'scopes', $map );
+		// 'unreachable' isn't in the queue's transitive deps, so no entry expected.
+		$this->assertArrayNotHasKey( 'unreachable', $map['imports'] ?? array() );
+	}
+
+	/**
+	 * Multiple modules can share a single scope key entry.
+	 *
+	 * @covers WP_Script_Modules::register
+	 * @covers WP_Script_Modules::print_import_map
+	 */
+	public function test_scopes_multiple_modules_share_scope_key() {
+		$this->script_modules->register(
+			'priv-a',
+			'/a.js',
+			array(),
+			null,
+			array( 'scopes' => array( '/scope/' ) )
+		);
+		$this->script_modules->register(
+			'priv-b',
+			'/b.js',
+			array(),
+			null,
+			array( 'scopes' => array( '/scope/' ) )
+		);
+		$this->script_modules->register( 'consumer', '/consumer.js', array( 'priv-a', 'priv-b' ) );
+		$this->script_modules->enqueue( 'consumer' );
+
+		$map = $this->get_full_import_map();
+		$this->assertArrayHasKey( '/scope/', $map['scopes'] );
+		$this->assertArrayHasKey( 'priv-a', $map['scopes']['/scope/'] );
+		$this->assertArrayHasKey( 'priv-b', $map['scopes']['/scope/'] );
+	}
+
+	/**
+	 * Import map is printed when only `scopes` entries exist (no public imports).
+	 *
+	 * @covers WP_Script_Modules::print_import_map
+	 */
+	public function test_scopes_importmap_emitted_when_scopes_only() {
+		$this->script_modules->register(
+			'private',
+			'/private.js',
+			array(),
+			null,
+			array( 'scopes' => array( '/x/' ) )
+		);
+		$this->script_modules->enqueue( 'consumer', '/consumer.js', array( 'private' ) );
+
+		$markup = get_echo( array( $this->script_modules, 'print_import_map' ) );
+		$this->assertNotEmpty( $markup, 'Import map should be printed when scopes-only entries exist.' );
+		$this->assertStringContainsString( 'importmap', $markup );
+	}
+
+	/**
+	 * Register-time validation: non-array scopes value is rejected.
+	 *
+	 * @expectedIncorrectUsage WP_Script_Modules::register
+	 *
+	 * @covers WP_Script_Modules::register
+	 */
+	public function test_scopes_register_validation_non_array() {
+		$this->script_modules->register(
+			'foo',
+			'/foo.js',
+			array(),
+			null,
+			array( 'scopes' => 'oops' )
+		);
+
+		$registered = $this->script_modules->get_registered( 'foo' );
+		$this->assertArrayNotHasKey( 'scopes', (array) $registered );
+	}
+
+	/**
+	 * Register-time validation: invalid scope entries are skipped.
+	 *
+	 * @expectedIncorrectUsage WP_Script_Modules::register
+	 *
+	 * @covers WP_Script_Modules::register
+	 */
+	public function test_scopes_register_validation_invalid_entry() {
+		$this->script_modules->register(
+			'foo',
+			'/foo.js',
+			array(),
+			null,
+			array(
+				'scopes' => array(
+					'',                                  // empty string
+					array( 'unknown_tag' => 'value' ),   // unknown tag
+					array( 'module_id' => '' ),          // empty module_id
+					array(                                // multi-key
+						'module_id' => 'x',
+						'extra'     => 'y',
+					),
+					'/keep/',                            // valid
+				),
+			)
+		);
+
+		$registered = $this->script_modules->get_registered( 'foo' );
+		$this->assertSame( array( '/keep/' ), $registered['scopes'] );
+	}
+
+	/**
+	 * Storage shape: omitted/null is public, [] is empty-scoped, [...] is scoped.
+	 *
+	 * @covers WP_Script_Modules::register
+	 * @covers WP_Script_Modules::get_registered
+	 */
+	public function test_scopes_storage_shape() {
+		$this->script_modules->register( 'a', '/a.js' );
+		$this->script_modules->register( 'b', '/b.js', array(), null, array( 'scopes' => null ) );
+		$this->script_modules->register( 'c', '/c.js', array(), null, array( 'scopes' => array() ) );
+		$this->script_modules->register( 'd', '/d.js', array(), null, array( 'scopes' => array( '/d/' ) ) );
+
+		$this->assertArrayNotHasKey( 'scopes', (array) $this->script_modules->get_registered( 'a' ) );
+		$this->assertArrayNotHasKey( 'scopes', (array) $this->script_modules->get_registered( 'b' ) );
+		$this->assertSame( array(), $this->script_modules->get_registered( 'c' )['scopes'] );
+		$this->assertSame( array( '/d/' ), $this->script_modules->get_registered( 'd' )['scopes'] );
+	}
+
+	/**
+	 * Bare-string scopes are NOT subject to script_module_loader_src filter.
+	 *
+	 * Documented v1 limitation: authors using CDNs should prefer `module_id` scopes,
+	 * or author the final browser URL.
+	 *
+	 * @covers WP_Script_Modules::register
+	 * @covers WP_Script_Modules::print_import_map
+	 */
+	public function test_scopes_bare_string_not_rewritten_by_filter() {
+		$rewriter = static function ( $src ) {
+			return 'https://cdn.example.com' . $src;
+		};
+		add_filter( 'script_module_loader_src', $rewriter );
+
+		try {
+			$this->script_modules->register(
+				'private',
+				'/wp-content/plugins/x/private.js',
+				array(),
+				null,
+				array( 'scopes' => array( '/wp-content/plugins/x/' ) )
+			);
+			$this->script_modules->register( 'consumer', '/wp-content/plugins/x/consumer.js', array( 'private' ) );
+			$this->script_modules->enqueue( 'consumer' );
+
+			$map = $this->get_full_import_map();
+			$this->assertArrayHasKey( '/wp-content/plugins/x/', $map['scopes'] );
+			$this->assertStringStartsWith( 'https://cdn.example.com', $map['scopes']['/wp-content/plugins/x/']['private'] );
+		} finally {
+			remove_filter( 'script_module_loader_src', $rewriter );
+		}
+	}
+
+	/**
+	 * `module_id` scopes pick up filter rewrites because they go through get_src().
+	 *
+	 * @covers WP_Script_Modules::register
+	 * @covers WP_Script_Modules::print_import_map
+	 */
+	public function test_scopes_module_id_cdn_parity() {
+		$rewriter = static function ( $src ) {
+			return 'https://cdn.example.com' . $src;
+		};
+		add_filter( 'script_module_loader_src', $rewriter );
+
+		try {
+			$this->script_modules->register( 'sibling', '/wp-content/plugins/x/build/sibling.js' );
+			$this->script_modules->register(
+				'private',
+				'/wp-content/plugins/x/build/private.js',
+				array(),
+				null,
+				array( 'scopes' => array( array( 'module_id' => 'sibling' ) ) )
+			);
+			$this->script_modules->register( 'consumer', '/wp-content/plugins/x/build/consumer.js', array( 'private' ) );
+			$this->script_modules->enqueue( 'consumer' );
+
+			$map = $this->get_full_import_map();
+			$this->assertArrayHasKey( 'https://cdn.example.com/wp-content/plugins/x/build/', $map['scopes'] );
+		} finally {
+			remove_filter( 'script_module_loader_src', $rewriter );
+		}
+	}
+
+	/**
+	 * `script_module_data_*` filter still fires for scoped modules.
+	 *
+	 * @covers WP_Script_Modules::print_script_module_data
+	 */
+	public function test_scopes_script_module_data_emitted_for_scoped() {
+		$this->script_modules->register(
+			'private',
+			'/private.js',
+			array(),
+			null,
+			array( 'scopes' => array( '/x/' ) )
+		);
+		$this->script_modules->enqueue( 'consumer', '/consumer.js', array( 'private' ) );
+
+		$data_filter = static function () {
+			return array( 'token' => 'abc' );
+		};
+		add_filter( 'script_module_data_private', $data_filter );
+
+		try {
+			$markup = get_echo( array( $this->script_modules, 'print_script_module_data' ) );
+			$this->assertStringContainsString( 'wp-script-module-data-private', $markup );
+			$this->assertStringContainsString( '"token":"abc"', $markup );
+		} finally {
+			remove_filter( 'script_module_data_private', $data_filter );
+		}
+	}
+
+	/**
+	 * Preloads do not include modules whose scope is empty (sorter rejects the dep).
+	 *
+	 * @expectedIncorrectUsage WP_Script_Modules::register
+	 *
+	 * @covers WP_Script_Modules::print_script_module_preloads
+	 */
+	public function test_scopes_preloads_skip_empty_scoped_static_dep() {
+		$this->script_modules->register(
+			'unreachable',
+			'/unreachable.js',
+			array(),
+			null,
+			array( 'scopes' => array() )
+		);
+		$this->script_modules->enqueue( 'consumer', '/consumer.js', array( 'unreachable' ) );
+
+		$preloads = $this->get_preloaded_script_modules();
+		$this->assertArrayNotHasKey( 'unreachable', $preloads );
+	}
+
+	/**
+	 * Preloads do include modules with non-empty scopes (URL-keyed; file is on the page anyway).
+	 *
+	 * @covers WP_Script_Modules::print_script_module_preloads
+	 */
+	public function test_scopes_preloads_include_scoped_static_dep() {
+		$this->script_modules->register(
+			'private',
+			'/private.js',
+			array(),
+			null,
+			array( 'scopes' => array( '/x/' ) )
+		);
+		$this->script_modules->enqueue( 'consumer', '/consumer.js', array( 'private' ) );
+
+		$preloads = $this->get_preloaded_script_modules();
+		$this->assertArrayHasKey( 'private', $preloads );
+	}
+
+	/**
+	 * Empty-scoped modules do not leak their public transitive deps into top-level imports.
+	 *
+	 * @covers WP_Script_Modules::get_import_map
+	 */
+	public function test_scopes_empty_does_not_leak_transitive_deps_to_imports() {
+		// Public leaf reachable only through the empty-scoped module.
+		$this->script_modules->register( 'leaf', '/leaf.js' );
+		$this->script_modules->register(
+			'unreachable',
+			'/unreachable.js',
+			array( 'leaf' ),
+			null,
+			array( 'scopes' => array() )
+		);
+		$this->script_modules->enqueue( 'consumer', '/consumer.js', array( 'unreachable' ) );
+
+		$map = $this->get_full_import_map();
+		$this->assertArrayNotHasKey( 'leaf', $map['imports'] ?? array(), 'leaf must not appear in imports — only reachable via empty-scoped module.' );
+		$this->assertArrayNotHasKey( 'unreachable', $map['imports'] ?? array() );
+		$this->assertArrayNotHasKey( 'scopes', $map );
+	}
+
+	/**
+	 * A leaf reachable both via empty-scoped and via a public path is still emitted.
+	 *
+	 * @covers WP_Script_Modules::get_import_map
+	 */
+	public function test_scopes_empty_does_not_hide_dep_reachable_via_public_path() {
+		$this->script_modules->register( 'leaf', '/leaf.js' );
+		$this->script_modules->register(
+			'unreachable',
+			'/unreachable.js',
+			array( 'leaf' ),
+			null,
+			array( 'scopes' => array() )
+		);
+		// Public path also reaches leaf.
+		$this->script_modules->register( 'public-mid', '/public-mid.js', array( 'leaf' ) );
+		$this->script_modules->enqueue( 'consumer-a', '/consumer-a.js', array( 'unreachable' ) );
+		$this->script_modules->enqueue( 'consumer-b', '/consumer-b.js', array( 'public-mid' ) );
+
+		$map = $this->get_full_import_map();
+		$this->assertArrayHasKey( 'leaf', $map['imports'] );
+		$this->assertArrayHasKey( 'public-mid', $map['imports'] );
+	}
+
+	/**
+	 * Classic-script `module_dependencies` referencing an empty-scoped module triggers a warning.
+	 *
+	 * @expectedIncorrectUsage WP_Scripts::add_data
+	 *
+	 * @covers WP_Script_Modules::get_import_map
+	 */
+	public function test_scopes_classic_script_module_dep_on_empty_scoped_warns() {
+		$this->script_modules->register(
+			'unreachable',
+			'/unreachable.js',
+			array(),
+			null,
+			array( 'scopes' => array() )
+		);
+
+		wp_enqueue_script(
+			'classic',
+			'/classic.js',
+			array(),
+			null,
+			array( 'module_dependencies' => array( 'unreachable' ) )
+		);
+
+		// Trigger import-map computation.
+		$map = $this->get_full_import_map();
+		$this->assertArrayNotHasKey( 'unreachable', $map['imports'] ?? array() );
+		$this->assertArrayNotHasKey( 'scopes', $map );
+	}
+
+	/**
+	 * A queued module with `scopes => array()` is treated as an entry point: its transitive
+	 * deps are still walked and emitted in the import map so the entry's imports resolve.
+	 *
+	 * Regression: previously the walk stopped at *every* empty-scoped node, including the
+	 * starting node, leaving the entry's deps absent from the import map.
+	 *
+	 * @covers WP_Script_Modules::get_import_map
+	 */
+	public function test_scopes_empty_queued_entry_still_emits_dep_imports() {
+		$this->script_modules->register(
+			'@plugin/utils',
+			'/wp-content/plugins/x/utils.js',
+			array(),
+			null,
+			array( 'scopes' => array( '/wp-content/plugins/x/' ) )
+		);
+		$this->script_modules->register(
+			'@plugin/lib',
+			'/wp-content/plugins/x/lib.js',
+			array(
+				array(
+					'id'     => '@plugin/utils',
+					'import' => 'dynamic',
+				),
+			),
+			null,
+			array( 'scopes' => array( '/wp-content/plugins/x/' ) )
+		);
+		// Public dep simulating @wordpress/* etc.
+		$this->script_modules->register( '@public/dep', '/wp-content/plugins/x/dep.js' );
+		$this->script_modules->register(
+			'@plugin/main',
+			'/wp-content/plugins/x/main.js',
+			array(
+				'@public/dep',
+				'@plugin/lib',
+				array(
+					'id'     => '@plugin/utils',
+					'import' => 'dynamic',
+				),
+			),
+			null,
+			array( 'scopes' => array() )
+		);
+		$this->script_modules->enqueue( '@plugin/main' );
+
+		$map = $this->get_full_import_map();
+
+		// The queued entry's static and dynamic deps must resolve.
+		$this->assertArrayHasKey( '@public/dep', $map['imports'] ?? array() );
+		$this->assertArrayHasKey( 'scopes', $map );
+		$this->assertArrayHasKey( '/wp-content/plugins/x/', $map['scopes'] );
+		$this->assertArrayHasKey( '@plugin/lib', $map['scopes']['/wp-content/plugins/x/'] );
+		$this->assertArrayHasKey( '@plugin/utils', $map['scopes']['/wp-content/plugins/x/'] );
+		// The empty-scoped entry itself is not advertised in either map.
+		$this->assertArrayNotHasKey( '@plugin/main', $map['imports'] ?? array() );
+		$this->assertArrayNotHasKey( '@plugin/main', $map['scopes']['/wp-content/plugins/x/'] );
+	}
+
+	/**
+	 * `module_id` resolution to a URL with no slash drops with a warning.
+	 *
+	 * @expectedIncorrectUsage WP_Script_Modules::get_scope_keys
+	 *
+	 * @covers WP_Script_Modules::get_import_map
+	 */
+	public function test_scopes_module_id_no_slash_drops_with_warning() {
+		// A module whose src has no slash (after version stripping). `null` version avoids ?ver.
+		$this->script_modules->register( 'oddurl', 'oddurl', array(), null );
+		$this->script_modules->register(
+			'private',
+			'/private.js',
+			array(),
+			null,
+			array( 'scopes' => array( array( 'module_id' => 'oddurl' ) ) )
+		);
+		$this->script_modules->enqueue( 'consumer', '/consumer.js', array( 'private' ) );
+
+		$map = $this->get_full_import_map();
+		// No scope key derivable; private appears nowhere; map is not emitted.
+		$this->assertArrayNotHasKey( 'scopes', $map );
+		$this->assertArrayNotHasKey( 'private', $map['imports'] ?? array() );
 	}
 }
