@@ -446,6 +446,25 @@ class WP_HTML_Processor_State {
 	public $frameset_ok = true;
 
 	/**
+	 * The foster parenting flag indicates that content found inside a table
+	 * context must be inserted at a location before the table ("fostered").
+	 *
+	 * > The foster parenting flag is set to false when the parser is created;
+	 * > it is used to handle mis-nested table content.
+	 *
+	 * This flag is enabled while processing a token which the "in table"
+	 * insertion mode directs to be processed using the rules for the
+	 * "in body" insertion mode, and disabled again afterwards.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @see https://html.spec.whatwg.org/#foster-parenting
+	 *
+	 * @var bool
+	 */
+	public $foster_parenting = false;
+
+	/**
 	 * Constructor - creates a new and empty state value.
 	 *
 	 * @since 6.4.0

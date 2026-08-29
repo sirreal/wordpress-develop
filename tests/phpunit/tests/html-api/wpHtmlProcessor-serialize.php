@@ -624,7 +624,7 @@ class Tests_HtmlApi_WpHtmlProcessor_Serialize extends WP_UnitTestCase {
 	 */
 	public static function data_provider_fuzzer_native_error_cases() {
 		return array(
-			'Unsupported active formatting' => array( '<A><I><A>', null ),
+			'Reconstructed active formatting' => array( '<A><I><A>', '<a><i></i></a><i><a></a></i>' ),
 		);
 	}
 

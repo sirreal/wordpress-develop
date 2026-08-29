@@ -24,23 +24,117 @@ class Tests_HtmlApi_WebPlatformTests extends WP_UnitTestCase {
 	const TREE_INDENT = '  ';
 
 	/**
+	 * Reason to skip tests which require relocating already-visited nodes.
+	 *
+	 * The HTML Processor visits a document in a single pass and cannot move
+	 * nodes it has already visited. When the adoption agency algorithm runs,
+	 * browsers may re-parent nodes found before the misnesting was discovered;
+	 * this parser reports them where they were originally visited, so the
+	 * constructed tree differs even though the parser state after the
+	 * algorithm matches browsers exactly for everything which follows.
+	 */
+	const SKIP_HTML_PARSER_REPARENTS_VISITED_NODES = 'Single-pass parser: the adoption agency algorithm cannot relocate nodes which have already been visited.';
+
+	/**
+	 * Reason to skip tests in which a FORM element is closed while other
+	 * elements remain open inside of it.
+	 *
+	 * In this case browsers remove the FORM from the stack of open elements
+	 * while its still-open descendants remain in place: the FORM remains an
+	 * ancestor of following content in the DOM even though no new content
+	 * can reach it. A properly-nested token stream cannot express this;
+	 * this parser reports following content outside of the closed FORM,
+	 * mirroring the stack of open elements a browser would maintain.
+	 */
+	const SKIP_HTML_PARSER_CANNOT_HOLD_FORM_OPEN = 'Single-pass parser: a FORM closed while its descendants remain open stays in the document as their ancestor, which the token stream cannot express.';
+
+	/**
+	 * Reason to skip tests in which an A element which is not in table scope
+	 * is removed from the stack of open elements when another A element is
+	 * found.
+	 *
+	 * As with a closed FORM, browsers remove the A from the stack of open
+	 * elements while its still-open descendants — such as the TABLE which
+	 * shields it from table scope — remain in place: the A remains an
+	 * ancestor in the DOM, and content foster-parented out of that TABLE
+	 * lands inside of it. A properly-nested token stream cannot express
+	 * this; this parser reports following content outside of the removed A,
+	 * mirroring the stack of open elements a browser would maintain.
+	 */
+	const SKIP_HTML_PARSER_CANNOT_HOLD_REMOVED_A_OPEN = 'Single-pass parser: an A element removed from the stack of open elements while its descendants remain open stays in the document as their ancestor, which the token stream cannot express.';
+
+	/**
 	 * Skip specific tests that may not be supported or have known issues.
 	 */
 	const SKIP_TESTS = array(
-		'noscript01/line0014' => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
-		'tests14/line0022'    => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
-		'tests14/line0055'    => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
-		'tests19/line0488'    => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
-		'tests19/line0500'    => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
-		'tests19/line1079'    => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
-		'tests2/line0207'     => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
-		'tests2/line0686'     => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
-		'tests2/line0697'     => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
-		'tests2/line0709'     => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
-		'webkit01/line0231'   => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
-		'webkit02/line0692'   => 'Unimplemented: The parser does not implement the "maybe clone an option into selectedcontent" algorithm.',
-		'webkit02/line0732'   => 'Unimplemented: The parser does not implement the "maybe clone an option into selectedcontent" algorithm.',
-		'webkit02/line0748'   => 'Unimplemented: The parser does not implement the "maybe clone an option into selectedcontent" algorithm.',
+		'adoption01/line0001'    => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'adoption01/line0014'    => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'adoption01/line0083'    => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'adoption01/line0030'    => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'adoption01/line0062'    => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'adoption01/line0108'    => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'adoption01/line0124'    => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'adoption01/line0141'    => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'adoption01/line0241'    => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'adoption01/line0281'    => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'adoption02/line0001'    => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'adoption02/line0021'    => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'html5test-com/line0252' => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'noscript01/line0014'    => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
+		'template/line1091'      => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'template/line1595'      => self::SKIP_HTML_PARSER_CANNOT_HOLD_REMOVED_A_OPEN,
+		'tests1/line0237'        => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests1/line0256'        => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests1/line0373'        => self::SKIP_HTML_PARSER_CANNOT_HOLD_REMOVED_A_OPEN,
+		'tests1/line0706'        => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests1/line0784'        => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests1/line0850'        => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests1/line0994'        => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests1/line1015'        => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests1/line1037'        => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests1/line1061'        => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests1/line1086'        => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests1/line1111'        => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests1/line1149'        => self::SKIP_HTML_PARSER_CANNOT_HOLD_REMOVED_A_OPEN,
+		'tests1/line1387'        => self::SKIP_HTML_PARSER_CANNOT_HOLD_REMOVED_A_OPEN,
+		'tests1/line1468'        => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests1/line1484'        => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests1/line1559'        => self::SKIP_HTML_PARSER_CANNOT_HOLD_REMOVED_A_OPEN,
+		'tests14/line0022'       => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
+		'tests14/line0055'       => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
+		'tests19/line0488'       => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
+		'tests19/line0500'       => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
+		'tests19/line1079'       => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
+		'tests19/line1127'       => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests19/line1169'       => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests19/line1198'       => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests19/line1258'       => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests2/line0118'        => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests2/line0207'        => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
+		'tests2/line0686'        => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
+		'tests2/line0697'        => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
+		'tests2/line0709'        => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
+		'tests22/line0001'       => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests22/line0023'       => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests22/line0069'       => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests22/line0117'       => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests26/line0136'       => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tests6/line0012'        => self::SKIP_HTML_PARSER_CANNOT_HOLD_FORM_OPEN,
+		'tests8/line0133'        => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tricky01/line0001'      => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tricky01/line0019'      => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tricky01/line0078'      => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'tricky01/line0146'      => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'webkit01/line0231'      => 'Unimplemented: This parser does not add missing attributes to existing HTML or BODY tags.',
+		'webkit01/line0569'      => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'webkit01/line0584'      => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'webkit01/line0601'      => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'webkit02/line0186'      => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'webkit02/line0204'      => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'webkit02/line0224'      => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'webkit02/line0242'      => self::SKIP_HTML_PARSER_REPARENTS_VISITED_NODES,
+		'webkit02/line0706'      => 'Unsupported: Selectedcontent elements are not populated.',
+		'webkit02/line0748'      => 'Unsupported: Selectedcontent elements are not populated.',
 	);
 
 	/**
@@ -56,46 +150,55 @@ class Tests_HtmlApi_WebPlatformTests extends WP_UnitTestCase {
 	 * @param string      $expected_tree    Tree structure of parsed HTML.
 	 */
 	public function test_parse( ?string $fragment_context, string $html, string $expected_tree ) {
-		try {
-			$processed_tree = self::build_tree_representation( $fragment_context, $html );
-		} catch ( WP_HTML_Unsupported_Exception $e ) {
-			$this->markTestSkipped( "Unsupported markup: {$e->getMessage()}" );
-			return;
-		}
-
-		if ( null === $processed_tree ) {
-			$this->markTestSkipped( 'Test includes unsupported markup.' );
-			return;
-		}
-
-		$fragment_detail = $fragment_context ? " in context <{$fragment_context}>" : '';
-
 		/*
-		 * The HTML processor does not produce html, head, body tags if the processor does not reach them.
-		 * HTML tree construction will always produce these tags, the HTML API does not at this time.
+		 * Both presentation modes must realize the same document: the
+		 * document-order default presents nodes in tree order, while
+		 * source-order mode presents fostered nodes at their syntax with
+		 * exact ancestry, from which the tree builder places them.
 		 */
-		$auto_generated_html_head_body = "<html>\n  <head>\n  <body>\n\n";
-		$auto_generated_head_body      = "  <head>\n  <body>\n\n";
-		$auto_generated_body           = "  <body>\n\n";
-		if ( str_ends_with( $expected_tree, $auto_generated_html_head_body ) && ! str_ends_with( $processed_tree, $auto_generated_html_head_body ) ) {
-			if ( str_ends_with( $processed_tree, "<html>\n  <head>\n\n" ) ) {
-				$processed_tree = substr_replace( $processed_tree, "  <body>\n\n", -1 );
-			} elseif ( str_ends_with( $processed_tree, "<html>\n\n" ) ) {
-				$processed_tree = substr_replace( $processed_tree, "  <head>\n  <body>\n\n", -1 );
-			} else {
-				$processed_tree = substr_replace( $processed_tree, $auto_generated_html_head_body, -1 );
+		foreach ( array( false, true ) as $source_order ) {
+			$mode_detail = $source_order ? ' (source-order mode)' : ' (document-order mode)';
+			try {
+				$processed_tree = self::build_tree_representation( $fragment_context, $html, $source_order );
+			} catch ( WP_HTML_Unsupported_Exception $e ) {
+				$this->markTestSkipped( "Unsupported markup{$mode_detail}: {$e->getMessage()}" );
+				return;
 			}
-		} elseif ( str_ends_with( $expected_tree, $auto_generated_head_body ) && ! str_ends_with( $processed_tree, $auto_generated_head_body ) ) {
-			if ( str_ends_with( $processed_tree, "<head>\n\n" ) ) {
-				$processed_tree = substr_replace( $processed_tree, "  <body>\n\n", -1 );
-			} else {
-				$processed_tree = substr_replace( $processed_tree, $auto_generated_head_body, -1 );
-			}
-		} elseif ( str_ends_with( $expected_tree, $auto_generated_body ) && ! str_ends_with( $processed_tree, $auto_generated_body ) ) {
-			$processed_tree = substr_replace( $processed_tree, $auto_generated_body, -1 );
-		}
 
-		$this->assertSame( $expected_tree, $processed_tree, "HTML was not processed correctly{$fragment_detail}:\n{$html}" );
+			if ( null === $processed_tree ) {
+				$this->markTestSkipped( "Test includes unsupported markup{$mode_detail}." );
+				return;
+			}
+
+			$fragment_detail = ( $fragment_context ? " in context <{$fragment_context}>" : '' ) . $mode_detail;
+
+			/*
+			 * The HTML processor does not produce html, head, body tags if the processor does not reach them.
+			 * HTML tree construction will always produce these tags, the HTML API does not at this time.
+			 */
+			$auto_generated_html_head_body = "<html>\n  <head>\n  <body>\n\n";
+			$auto_generated_head_body      = "  <head>\n  <body>\n\n";
+			$auto_generated_body           = "  <body>\n\n";
+			if ( str_ends_with( $expected_tree, $auto_generated_html_head_body ) && ! str_ends_with( $processed_tree, $auto_generated_html_head_body ) ) {
+				if ( str_ends_with( $processed_tree, "<html>\n  <head>\n\n" ) ) {
+					$processed_tree = substr_replace( $processed_tree, "  <body>\n\n", -1 );
+				} elseif ( str_ends_with( $processed_tree, "<html>\n\n" ) ) {
+					$processed_tree = substr_replace( $processed_tree, "  <head>\n  <body>\n\n", -1 );
+				} else {
+					$processed_tree = substr_replace( $processed_tree, $auto_generated_html_head_body, -1 );
+				}
+			} elseif ( str_ends_with( $expected_tree, $auto_generated_head_body ) && ! str_ends_with( $processed_tree, $auto_generated_head_body ) ) {
+				if ( str_ends_with( $processed_tree, "<head>\n\n" ) ) {
+					$processed_tree = substr_replace( $processed_tree, "  <body>\n\n", -1 );
+				} else {
+					$processed_tree = substr_replace( $processed_tree, $auto_generated_head_body, -1 );
+				}
+			} elseif ( str_ends_with( $expected_tree, $auto_generated_body ) && ! str_ends_with( $processed_tree, $auto_generated_body ) ) {
+				$processed_tree = substr_replace( $processed_tree, $auto_generated_body, -1 );
+			}
+
+				$this->assertSame( $expected_tree, $processed_tree, "HTML was not processed correctly{$fragment_detail}:\n{$html}" );
+		}
 	}
 
 	/**
@@ -158,18 +261,106 @@ class Tests_HtmlApi_WebPlatformTests extends WP_UnitTestCase {
 	 * @param string      $html             Given test HTML.
 	 * @return string|null Tree structure of parsed HTML, if supported, else null.
 	 */
-	private static function build_tree_representation( ?string $fragment_context, string $html ) {
+	private static function build_tree_representation( ?string $fragment_context, string $html, bool $source_order = false ) {
 		$processor = $fragment_context
 			? WP_HTML_Processor::create_fragment( $html, "<{$fragment_context}>" )
 			: WP_HTML_Processor::create_full_parser( $html );
 		if ( null === $processor ) {
 			throw new WP_HTML_Unsupported_Exception( "Could not create a parser with the given fragment context: {$fragment_context}.", '', 0, '', array(), array() );
 		}
+		if ( $source_order ) {
+			$processor->enable_source_order_foster_parenting();
+		}
 
-		$output       = '';
-		$indent_level = 0;
-		$was_text     = null;
-		$text_node    = '';
+		/*
+		 * The document tree is built from nodes of this shape and serialized
+		 * once the parse completes. A realized tree is required because nodes
+		 * are not always visited in document order: a foster-parented node is
+		 * visited where it was found in the input HTML, after the table
+		 * element which follows it in the document.
+		 */
+		$make_node = static function ( ?string $line ) {
+			return (object) array(
+				// First output line for the node, e.g. "<div>"; `null` for the root and for text nodes.
+				'line'        => $line,
+				// Attribute lines and self-contained text, output one level deeper than the node.
+				'extra_lines' => array(),
+				// Text content for text nodes; `null` for everything else.
+				'text'        => null,
+				// Uppercase tag name and namespace, for locating TABLE and TEMPLATE ancestors.
+				'tag_name'    => null,
+				'namespace'   => null,
+				'children'    => array(),
+			);
+		};
+
+		$root = $make_node( null );
+
+		/*
+		 * Mirrors the stack of open elements as seen through the visited
+		 * tokens: tag openers which expect a closer are pushed, tag closers
+		 * pop. The root node stands in for the document itself.
+		 *
+		 * @var array<int, object> $open_nodes
+		 */
+		$open_nodes = array( $root );
+
+		/*
+		 * Attaches a node to the tree.
+		 *
+		 * Nodes are normally appended to the deepest open element. A
+		 * foster-parented node is placed where a browser would place it,
+		 * repeating the parser's own walk: everything above the nearest open
+		 * TABLE element belongs to the enclosing table context and is
+		 * bypassed; the node is inserted immediately before that TABLE.
+		 * When a TEMPLATE is found first, the node is appended inside its
+		 * template contents instead.
+		 *
+		 * Text is merged into an immediately-preceding text node at the
+		 * insertion location, as character insertion into a document does.
+		 */
+		$attach = static function ( $node ) use ( &$open_nodes, $processor, $source_order ) {
+			$parent          = end( $open_nodes );
+			$insertion_index = null;
+
+			if ( $source_order && $processor->is_foster_parented() ) {
+				for ( $i = count( $open_nodes ) - 1; $i > 0; $i-- ) {
+					$open = $open_nodes[ $i ];
+					if ( 'html' !== $open->namespace ) {
+						continue;
+					}
+
+					if ( 'TEMPLATE' === $open->tag_name ) {
+						$parent = $open;
+						break;
+					}
+
+					if ( 'TABLE' === $open->tag_name ) {
+						$parent          = $open_nodes[ $i - 1 ];
+						$insertion_index = array_search( $open, $parent->children, true );
+						if ( false === $insertion_index ) {
+							throw new Error( 'Could not find the TABLE element before which a foster-parented node must be inserted.' );
+						}
+						break;
+					}
+				}
+			}
+
+			if ( null === $insertion_index ) {
+				$insertion_index = count( $parent->children );
+			}
+
+			if (
+				isset( $node->text ) &&
+				$insertion_index > 0 &&
+				isset( $parent->children[ $insertion_index - 1 ]->text )
+			) {
+				$parent->children[ $insertion_index - 1 ]->text .= $node->text;
+				return;
+			}
+
+			array_splice( $parent->children, $insertion_index, 0, array( $node ) );
+		};
 
 		while ( $processor->next_token() ) {
 			if ( null !== $processor->get_last_error() ) {
@@ -180,22 +371,15 @@ class Tests_HtmlApi_WebPlatformTests extends WP_UnitTestCase {
 			$token_type = $processor->get_token_type();
 			$is_closer  = $processor->is_tag_closer();
 
-			if ( $was_text && '#text' !== $token_name ) {
-				if ( '' !== $text_node ) {
-					$output .= "{$text_node}\"\n";
-				}
-				$was_text  = false;
-				$text_node = '';
-			}
-
 			switch ( $token_type ) {
 				case '#doctype':
-					$doctype = $processor->get_doctype_info();
-					$output .= "<!DOCTYPE {$doctype->name}";
+					$doctype      = $processor->get_doctype_info();
+					$doctype_line = "<!DOCTYPE {$doctype->name}";
 					if ( null !== $doctype->public_identifier || null !== $doctype->system_identifier ) {
-						$output .= " \"{$doctype->public_identifier}\" \"{$doctype->system_identifier}\"";
+						$doctype_line .= " \"{$doctype->public_identifier}\" \"{$doctype->system_identifier}\"";
 					}
-					$output .= ">\n";
+					$doctype_line .= '>';
+					$attach( $make_node( $doctype_line ) );
 					break;
 
 				case '#tag':
@@ -205,22 +389,13 @@ class Tests_HtmlApi_WebPlatformTests extends WP_UnitTestCase {
 						: "{$namespace} {$processor->get_qualified_tag_name()}";
 
 					if ( $is_closer ) {
-						--$indent_level;
-
-						if ( 'html' === $namespace && 'TEMPLATE' === $token_name ) {
-							--$indent_level;
-						}
-
+						array_pop( $open_nodes );
 						break;
 					}
 
-					$tag_indent = $indent_level;
-
-					if ( $processor->expects_closer() ) {
-						++$indent_level;
-					}
-
-					$output .= str_repeat( self::TREE_INDENT, $tag_indent ) . "<{$tag_name}>\n";
+					$node            = $make_node( "<{$tag_name}>" );
+					$node->tag_name  = $token_name;
+					$node->namespace = $namespace;
 
 					$attribute_names = $processor->get_attribute_names_with_prefix( '' );
 					if ( $attribute_names ) {
@@ -273,21 +448,21 @@ class Tests_HtmlApi_WebPlatformTests extends WP_UnitTestCase {
 							if ( true === $val ) {
 								$val = '';
 							}
-							$output .= str_repeat( self::TREE_INDENT, $tag_indent + 1 ) . "{$display_name}=\"{$val}\"\n";
+							$node->extra_lines[] = "{$display_name}=\"{$val}\"";
 						}
 					}
 
 					// Self-contained tags contain their inner contents as modifiable text.
 					$modifiable_text = $processor->get_modifiable_text();
 					if ( '' !== $modifiable_text ) {
-						$output .= str_repeat( self::TREE_INDENT, $tag_indent + 1 ) . "\"{$modifiable_text}\"\n";
+						$node->extra_lines[] = "\"{$modifiable_text}\"";
 					}
 
-					if ( 'html' === $namespace && 'TEMPLATE' === $token_name ) {
-						$output .= str_repeat( self::TREE_INDENT, $indent_level ) . "content\n";
-						++$indent_level;
-					}
+					$attach( $node );
 
+					if ( $processor->expects_closer() ) {
+						$open_nodes[] = $node;
+					}
 					break;
 
 				case '#cdata-section':
@@ -296,16 +471,14 @@ class Tests_HtmlApi_WebPlatformTests extends WP_UnitTestCase {
 					if ( '' === $text_content ) {
 						break;
 					}
-					$was_text = true;
-					if ( '' === $text_node ) {
-						$text_node .= str_repeat( self::TREE_INDENT, $indent_level ) . '"';
-					}
-					$text_node .= $text_content;
+					$text_node       = $make_node( null );
+					$text_node->text = $text_content;
+					$attach( $text_node );
 					break;
 
 				case '#funky-comment':
 					// Comments must be "<" then "!-- " then the data then " -->".
-					$output .= str_repeat( self::TREE_INDENT, $indent_level ) . "<!-- {$processor->get_modifiable_text()} -->\n";
+					$attach( $make_node( "<!-- {$processor->get_modifiable_text()} -->" ) );
 					break;
 
 				case '#processing-instruction':
@@ -319,7 +492,7 @@ class Tests_HtmlApi_WebPlatformTests extends WP_UnitTestCase {
 
 				case '#comment':
 					// Comments must be "<" then "!-- " then the data then " -->".
-					$output .= str_repeat( self::TREE_INDENT, $indent_level ) . "<!-- {$processor->get_full_comment_text()} -->\n";
+					$attach( $make_node( "<!-- {$processor->get_full_comment_text()} -->" ) );
 					break;
 
 				default:
@@ -340,12 +513,36 @@ class Tests_HtmlApi_WebPlatformTests extends WP_UnitTestCase {
 			throw new WP_HTML_Unsupported_Exception( 'Paused at incomplete token.', '', 0, '', array(), array() );
 		}
 
-		if ( '' !== $text_node ) {
-			$output .= "{$text_node}\"\n";
-		}
+		$render = static function ( $node, int $depth ) use ( &$render ): string {
+			if ( isset( $node->text ) ) {
+				return str_repeat( self::TREE_INDENT, $depth ) . "\"{$node->text}\"\n";
+			}
+
+			$output      = '';
+			$child_depth = $depth;
+			if ( isset( $node->line ) ) {
+				$output     .= str_repeat( self::TREE_INDENT, $depth ) . "{$node->line}\n";
+				$child_depth = $depth + 1;
+				foreach ( $node->extra_lines as $extra_line ) {
+					$output .= str_repeat( self::TREE_INDENT, $depth + 1 ) . "{$extra_line}\n";
+				}
+			}
+
+			// A TEMPLATE element holds its children inside its template contents.
+			if ( 'TEMPLATE' === $node->tag_name && 'html' === $node->namespace ) {
+				$output .= str_repeat( self::TREE_INDENT, $child_depth ) . "content\n";
+				++$child_depth;
+			}
+
+			foreach ( $node->children as $child ) {
+				$output .= $render( $child, $child_depth );
+			}
+
+			return $output;
+		};
 
 		// Tests always end with a trailing newline.
-		return $output . "\n";
+		return $render( $root, 0 ) . "\n";
 	}
 
 	/**
