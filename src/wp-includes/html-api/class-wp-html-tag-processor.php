@@ -3792,6 +3792,15 @@ class WP_HTML_Tag_Processor {
 	 * that a token has modifiable text, and a token with modifiable text may
 	 * have an empty string (e.g. a comment with no contents).
 	 *
+	 * The returned string is already decoded where HTML decodes text: `#text`
+	 * nodes, TITLE contents, and TEXTAREA contents return character references
+	 * as the characters they represent, so `&amp;` is returned as `&`. Do not
+	 * decode the returned string again. SCRIPT, STYLE, and comment contents are
+	 * returned verbatim because HTML does not decode character references there.
+	 *
+	 * The returned string is UTF-8. When measuring or slicing it by code points,
+	 * pass an explicit encoding, for example `mb_strlen( $text, 'UTF-8' )`.
+	 *
 	 * Limitations:
 	 *
 	 *  - This function will not strip the leading newline appropriately
