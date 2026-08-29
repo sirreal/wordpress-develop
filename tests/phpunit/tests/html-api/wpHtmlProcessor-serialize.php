@@ -531,6 +531,129 @@ class Tests_HtmlApi_WpHtmlProcessor_Serialize extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Ensures full document serialization is idempotent when the body is implied after head content.
+	 *
+	 * @ticket 65372
+	 *
+	 * @dataProvider data_provider_full_document_serialize_includes_implied_body_after_head_at_eof
+	 *
+	 * @param string $input               Full document input ending after HEAD content with no explicit BODY.
+	 * @param string $expected_serialized Expected serialization with the implied empty BODY element.
+	 */
+	public function test_full_document_serialize_includes_implied_body_after_head_at_eof( string $input, string $expected_serialized ) {
+		$processor  = WP_HTML_Processor::create_full_parser( $input );
+		$serialized = $processor->serialize();
+
+		$this->assertSame(
+			$expected_serialized,
+			$serialized,
+			'Should have serialized the implied empty BODY element before HTML closes.'
+		);
+
+		$processor = WP_HTML_Processor::create_full_parser( $serialized );
+
+		$this->assertSame(
+			$serialized,
+			$processor->serialize(),
+			'Should have produced idempotent full document serialization.'
+		);
+
+		$processor  = WP_HTML_Processor::create_full_parser( $input );
+		$tag_events = array();
+		while ( $processor->next_token() ) {
+			if ( '#tag' !== $processor->get_token_type() ) {
+				continue;
+			}
+
+			$tag_events[] = array( $processor->is_tag_closer() ? '-' : '+', $processor->get_tag() );
+		}
+
+		$this->assertSame(
+			array(
+				array( '+', 'BODY' ),
+				array( '-', 'BODY' ),
+				array( '-', 'HTML' ),
+			),
+			array_slice( $tag_events, -3 ),
+			'Should visit the implied empty BODY element before closing HTML.'
+		);
+	}
+
+	/**
+	 * Data provider.
+	 *
+	 * @return array[]
+	 */
+	public static function data_provider_full_document_serialize_includes_implied_body_after_head_at_eof() {
+		return array(
+			'Closed HEAD at EOF'                 => array(
+				'<!DOCTYPE html><html><head><title>x</title></head>',
+				'<!DOCTYPE html><html><head><title>x</title></head><body></body></html>',
+			),
+			'Unclosed TEMPLATE in HEAD'          => array(
+				'<!DOCTYPE html><html><head><template>x',
+				'<!DOCTYPE html><html><head><template>x</template></head><body></body></html>',
+			),
+			'Unclosed table in TEMPLATE in HEAD' => array(
+				'<html><title>x</title><template><table><tr><td>x',
+				'<html><head><title>x</title><template><table><tbody><tr><td>x</td></tr></tbody></table></template></head><body></body></html>',
+			),
+			'Ignored BODY in TEMPLATE at EOF'    => array(
+				'<template><body>',
+				'<html><head><template></template></head><body></body></html>',
+			),
+			'Ignored BODY closer in NOSCRIPT'    => array(
+				'<noscript></body>',
+				'<html><head><noscript></noscript></head><body></body></html>',
+			),
+		);
+	}
+
+	/**
+	 * Ensures table insertion modes still close open elements at EOF.
+	 *
+	 * @ticket 65372
+	 *
+	 * @dataProvider data_provider_normalize_closes_tables_at_eof
+	 *
+	 * @param string $input    Fragment input ending in a table insertion mode.
+	 * @param string $expected Expected normalized fragment.
+	 */
+	public function test_normalize_closes_tables_at_eof( string $input, string $expected ) {
+		$this->assertSame(
+			$expected,
+			WP_HTML_Processor::normalize( $input ),
+			'Should have closed open table elements at EOF.'
+		);
+	}
+
+	/**
+	 * Data provider.
+	 *
+	 * @return array[]
+	 */
+	public static function data_provider_normalize_closes_tables_at_eof() {
+		return array(
+			'Open TABLE' => array(
+				'<table>',
+				'<table></table>',
+			),
+			'Open TBODY' => array(
+				'<table><tbody>',
+				'<table><tbody></tbody></table>',
+			),
+			'Open TR'    => array(
+				'<table><tr>',
+				'<table><tbody><tr></tr></tbody></table>',
+			),
+			'Open TD'    => array(
+				'<table><tr><td>x',
+				'<table><tbody><tr><td>x</td></tr></tbody></table>',
+			),
+		);
+	}
+
+	/**
 	 * Data provider.
 	 *
 	 * @return array[]
