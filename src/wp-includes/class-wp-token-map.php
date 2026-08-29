@@ -451,38 +451,49 @@ class WP_Token_Map {
 				return false;
 			}
 
-			$term    = str_pad( $word, $this->key_length + 1, "\x00", STR_PAD_RIGHT );
-			$word_at = $ignore_case ? stripos( $this->small_words, $term ) : strpos( $this->small_words, $term );
-			if ( false === $word_at ) {
-				return false;
+			$term = str_pad( $word, $this->key_length + 1, "\x00", STR_PAD_RIGHT );
+			if ( ! $ignore_case ) {
+				return false !== strpos( $this->small_words, $term );
 			}
 
-			return true;
-		}
+			$small_length  = strlen( $this->small_words );
+			$record_length = $this->key_length + 1;
+			for ( $at = 0; $at < $small_length; $at += $record_length ) {
+				if ( self::matches_at( $this->small_words, $term, $at, $record_length, $ignore_case ) ) {
+					return true;
+				}
+			}
 
-		$group_key = substr( $word, 0, $this->key_length );
-		$group_at  = $ignore_case ? stripos( $this->groups, $group_key ) : strpos( $this->groups, $group_key );
-		if ( false === $group_at ) {
 			return false;
 		}
-		$group        = $this->large_words[ $group_at / ( $this->key_length + 1 ) ];
-		$group_length = strlen( $group );
-		$slug         = substr( $word, $this->key_length );
-		$length       = strlen( $slug );
-		$at           = 0;
 
-		while ( $at < $group_length ) {
-			$token_length   = unpack( 'C', $group[ $at++ ] )[1];
-			$token_at       = $at;
-			$at            += $token_length;
-			$mapping_length = unpack( 'C', $group[ $at++ ] )[1];
-			$mapping_at     = $at;
+		$group_key     = substr( $word, 0, $this->key_length );
+		$group_indexes = $this->find_group_indexes( $group_key, $ignore_case );
+		if ( empty( $group_indexes ) ) {
+			return false;
+		}
 
-			if ( $token_length === $length && 0 === substr_compare( $group, $slug, $token_at, $token_length, $ignore_case ) ) {
-				return true;
+		$slug   = substr( $word, $this->key_length );
+		$length = strlen( $slug );
+
+		foreach ( $group_indexes as $group_index ) {
+			$group        = $this->large_words[ $group_index ];
+			$group_length = strlen( $group );
+			$at           = 0;
+
+			while ( $at < $group_length ) {
+				$token_length   = unpack( 'C', $group[ $at++ ] )[1];
+				$token_at       = $at;
+				$at            += $token_length;
+				$mapping_length = unpack( 'C', $group[ $at++ ] )[1];
+				$mapping_at     = $at;
+
+				if ( $token_length === $length && self::matches_at( $group, $slug, $token_at, $token_length, $ignore_case ) ) {
+					return true;
+				}
+
+				$at = $mapping_at + $mapping_length;
 			}
-
-			$at = $mapping_at + $mapping_length;
 		}
 
 		return false;
@@ -535,41 +546,79 @@ class WP_Token_Map {
 		$text_length = strlen( $text );
 
 		// Search for a long word first, if the text is long enough, and if that fails, a short one.
-		if ( $text_length > $this->key_length ) {
+		if ( $text_length - $offset > $this->key_length ) {
 			/*
 			 * Keys cannot contain null bytes, which is taken care of for the full words,
 			 * but here it’s required to reject group keys with null bytes so that the
 			 * lookup doesn’t get off track when scanning the group string.
 			 */
 			if ( strcspn( $text, "\x00", $offset, $this->key_length ) < $this->key_length ) {
-				return null;
+				return strlen( $this->small_words ) > 0
+					? $this->read_small_token( $text, $offset, $matched_token_byte_length, $case_sensitivity )
+					: null;
 			}
 
-			$group_key = substr( $text, $offset, $this->key_length );
-			$group_at  = $ignore_case ? stripos( $this->groups, $group_key ) : strpos( $this->groups, $group_key );
-			if ( false === $group_at ) {
+			$group_key     = substr( $text, $offset, $this->key_length );
+			$group_indexes = $this->find_group_indexes( $group_key, $ignore_case );
+			if ( empty( $group_indexes ) ) {
 				// Perhaps a short word then.
 				return strlen( $this->small_words ) > 0
 					? $this->read_small_token( $text, $offset, $matched_token_byte_length, $case_sensitivity )
 					: null;
 			}
 
-			$group        = $this->large_words[ $group_at / ( $this->key_length + 1 ) ];
-			$group_length = strlen( $group );
-			$at           = 0;
-			while ( $at < $group_length ) {
-				$token_length   = unpack( 'C', $group[ $at++ ] )[1];
-				$token          = substr( $group, $at, $token_length );
-				$at            += $token_length;
-				$mapping_length = unpack( 'C', $group[ $at++ ] )[1];
-				$mapping_at     = $at;
+			if ( ! $ignore_case ) {
+				$group        = $this->large_words[ $group_indexes[0] ];
+				$group_length = strlen( $group );
+				$at           = 0;
+				while ( $at < $group_length ) {
+					$token_length   = unpack( 'C', $group[ $at++ ] )[1];
+					$token          = substr( $group, $at, $token_length );
+					$at            += $token_length;
+					$mapping_length = unpack( 'C', $group[ $at++ ] )[1];
+					$mapping_at     = $at;
 
-				if ( 0 === substr_compare( $text, $token, $offset + $this->key_length, $token_length, $ignore_case ) ) {
-					$matched_token_byte_length = $this->key_length + $token_length;
-					return substr( $group, $mapping_at, $mapping_length );
+					if ( 0 === substr_compare( $text, $token, $offset + $this->key_length, $token_length ) ) {
+						$matched_token_byte_length = $this->key_length + $token_length;
+						return substr( $group, $mapping_at, $mapping_length );
+					}
+
+					$at = $mapping_at + $mapping_length;
 				}
 
-				$at = $mapping_at + $mapping_length;
+				return strlen( $this->small_words ) > 0
+					? $this->read_small_token( $text, $offset, $matched_token_byte_length, $case_sensitivity )
+					: null;
+			}
+
+			$best_match_length = null;
+			$best_mapping      = null;
+			foreach ( $group_indexes as $group_index ) {
+				$group        = $this->large_words[ $group_index ];
+				$group_length = strlen( $group );
+				$at           = 0;
+				while ( $at < $group_length ) {
+					$token_length   = unpack( 'C', $group[ $at++ ] )[1];
+					$token          = substr( $group, $at, $token_length );
+					$at            += $token_length;
+					$mapping_length = unpack( 'C', $group[ $at++ ] )[1];
+					$mapping_at     = $at;
+
+					if ( self::matches_at( $text, $token, $offset + $this->key_length, $token_length, $ignore_case ) ) {
+						$match_length = $this->key_length + $token_length;
+						if ( null === $best_match_length || $match_length > $best_match_length ) {
+							$best_match_length = $match_length;
+							$best_mapping      = substr( $group, $mapping_at, $mapping_length );
+						}
+					}
+
+					$at = $mapping_at + $mapping_length;
+				}
+			}
+
+			if ( null !== $best_match_length ) {
+				$matched_token_byte_length = $best_match_length;
+				return $best_mapping;
 			}
 		}
 
@@ -594,16 +643,23 @@ class WP_Token_Map {
 		$ignore_case  = 'ascii-case-insensitive' === $case_sensitivity;
 		$small_length = strlen( $this->small_words );
 		$search_text  = substr( $text, $offset, $this->key_length );
+		if ( '' === $search_text ) {
+			return null;
+		}
+
 		if ( $ignore_case ) {
-			$search_text = strtoupper( $search_text );
+			$search_text = self::ascii_lowercase( $search_text );
 		}
 		$starting_char = $search_text[0];
 
 		$at = 0;
 		while ( $at < $small_length ) {
+			$stored_starting_char = $ignore_case
+				? self::ascii_lowercase( $this->small_words[ $at ] )
+				: $this->small_words[ $at ];
+
 			if (
-				$starting_char !== $this->small_words[ $at ] &&
-				( ! $ignore_case || strtoupper( $this->small_words[ $at ] ) !== $starting_char )
+				$starting_char !== $stored_starting_char
 			) {
 				$at += $this->key_length + 1;
 				continue;
@@ -615,9 +671,17 @@ class WP_Token_Map {
 					return $this->small_mappings[ $at / ( $this->key_length + 1 ) ];
 				}
 
+				if ( ! isset( $search_text[ $adjust ] ) ) {
+					$at += $this->key_length + 1;
+					continue 2;
+				}
+
+				$stored_char = $ignore_case
+					? self::ascii_lowercase( $this->small_words[ $at + $adjust ] )
+					: $this->small_words[ $at + $adjust ];
+
 				if (
-					$search_text[ $adjust ] !== $this->small_words[ $at + $adjust ] &&
-					( ! $ignore_case || strtoupper( $this->small_words[ $at + $adjust ] !== $search_text[ $adjust ] ) )
+					$search_text[ $adjust ] !== $stored_char
 				) {
 					$at += $this->key_length + 1;
 					continue 2;
@@ -660,7 +724,7 @@ class WP_Token_Map {
 		}
 
 		foreach ( $this->large_words as $index => $group ) {
-			$prefix       = substr( $this->groups, $index * ( $this->key_length + 1 ), 2 );
+			$prefix       = substr( $this->groups, $index * ( $this->key_length + 1 ), $this->key_length );
 			$group_length = strlen( $group );
 			$at           = 0;
 			while ( $at < $group_length ) {
@@ -719,7 +783,7 @@ class WP_Token_Map {
 		$output .= "{$i2}\"storage_version\" => \"{$class_version}\",\n";
 		$output .= "{$i2}\"key_length\" => {$this->key_length},\n";
 
-		$group_line = str_replace( "\x00", "\\x00", $this->groups );
+		$group_line = self::escape_precomputed_php_string( $this->groups );
 		$output    .= "{$i2}\"groups\" => \"{$group_line}\",\n";
 
 		$output .= "{$i2}\"large_words\" => array(\n";
@@ -732,7 +796,7 @@ class WP_Token_Map {
 			$group        = $this->large_words[ $index ];
 			$group_length = strlen( $group );
 			$comment_line = "{$i3}//";
-			$data_line    = "{$i3}\"";
+			$group_data   = '';
 			$at           = 0;
 			while ( $at < $group_length ) {
 				$token_length   = unpack( 'C', $group[ $at++ ] )[1];
@@ -742,32 +806,11 @@ class WP_Token_Map {
 				$mapping        = substr( $group, $at, $mapping_length );
 				$at            += $mapping_length;
 
-				$token_digits   = str_pad( dechex( $token_length ), 2, '0', STR_PAD_LEFT );
-				$mapping_digits = str_pad( dechex( $mapping_length ), 2, '0', STR_PAD_LEFT );
-
-				$mapping = preg_replace_callback(
-					"~[\\x00-\\x1f\\x22\\x5c]~",
-					static function ( $match_result ) {
-						switch ( $match_result[0] ) {
-							case '"':
-								return '\\"';
-
-							case '\\':
-								return '\\\\';
-
-							default:
-								$hex = dechex( ord( $match_result[0] ) );
-								return "\\x{$hex}";
-						}
-					},
-					$mapping
-				);
-
-				$comment_line .= " {$prefix}{$token}[{$mapping}]";
-				$data_line    .= "\\x{$token_digits}{$token}\\x{$mapping_digits}{$mapping}";
+				$group_data   .= pack( 'C', $token_length ) . $token . pack( 'C', $mapping_length ) . $mapping;
+				$comment_line .= ' ' . self::escape_precomputed_php_comment( "{$prefix}{$token}" ) . '[' . self::escape_precomputed_php_comment( $mapping ) . ']';
 			}
 			$comment_line .= ".\n";
-			$data_line    .= "\",\n";
+			$data_line     = "{$i3}\"" . self::escape_precomputed_php_string( $group_data ) . "\",\n";
 
 			$output .= $comment_line;
 			$output .= $data_line;
@@ -783,12 +826,12 @@ class WP_Token_Map {
 			$at           += $this->key_length + 1;
 		}
 
-		$small_text = str_replace( "\x00", '\x00', implode( '', $small_words ) );
+		$small_text = self::escape_precomputed_php_string( implode( '', $small_words ) );
 		$output    .= "{$i2}\"small_words\" => \"{$small_text}\",\n";
 
 		$output .= "{$i2}\"small_mappings\" => array(\n";
 		foreach ( $this->small_mappings as $mapping ) {
-			$output .= "{$i3}\"{$mapping}\",\n";
+			$output .= "{$i3}\"" . self::escape_precomputed_php_string( $mapping ) . "\",\n";
 		}
 		$output .= "{$i2})\n";
 		$output .= "{$i1})\n";
@@ -826,5 +869,137 @@ class WP_Token_Map {
 		}
 
 		return strcmp( $a, $b );
+	}
+
+	/**
+	 * Finds group indexes that match a lookup key.
+	 *
+	 * @since 6.6.0
+	 *
+	 * @param string $group_key   Group key to find.
+	 * @param bool   $ignore_case Whether to fold ASCII case while searching.
+	 * @return int[] Matching group indexes.
+	 */
+	private function find_group_indexes( string $group_key, bool $ignore_case ): array {
+		if ( ! $ignore_case ) {
+			$group_at = strpos( $this->groups, $group_key );
+
+			return false === $group_at
+				? array()
+				: array( $group_at / ( $this->key_length + 1 ) );
+		}
+
+		$group_indexes = array();
+		$record_length = $this->key_length + 1;
+		$groups_length = strlen( $this->groups );
+		$group_index   = 0;
+
+		for ( $at = 0; $at < $groups_length; $at += $record_length ) {
+			if ( self::matches_at( $this->groups, $group_key, $at, $this->key_length, $ignore_case ) ) {
+				$group_indexes[] = $group_index;
+			}
+
+			++$group_index;
+		}
+
+		return $group_indexes;
+	}
+
+	/**
+	 * Checks whether a substring matches at a given offset.
+	 *
+	 * @since 6.6.0
+	 *
+	 * @param string $haystack    String to search within.
+	 * @param string $needle      String to match.
+	 * @param int    $offset      Offset into the haystack.
+	 * @param int    $length      Number of bytes to compare.
+	 * @param bool   $ignore_case Whether to fold ASCII case while matching.
+	 * @return bool Whether the substring matched.
+	 */
+	private static function matches_at( string $haystack, string $needle, int $offset, int $length, bool $ignore_case ): bool {
+		$candidate = substr( $haystack, $offset, $length );
+		if ( strlen( $candidate ) !== $length ) {
+			return false;
+		}
+
+		if ( ! $ignore_case ) {
+			return $candidate === $needle;
+		}
+
+		return self::ascii_lowercase( $candidate ) === self::ascii_lowercase( $needle );
+	}
+
+	/**
+	 * Lowercases ASCII bytes only.
+	 *
+	 * @since 6.6.0
+	 *
+	 * @param string $text Text to lowercase.
+	 * @return string Text with only ASCII uppercase bytes folded to lowercase.
+	 */
+	private static function ascii_lowercase( string $text ): string {
+		return strtr( $text, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz' );
+	}
+
+	/**
+	 * Escapes text for use inside a double-quoted PHP string literal.
+	 *
+	 * @since 6.6.0
+	 *
+	 * @param string $text Text to escape.
+	 * @return string Escaped string literal body.
+	 */
+	private static function escape_precomputed_php_string( string $text ): string {
+		$escaped = '';
+		$length  = strlen( $text );
+
+		for ( $i = 0; $i < $length; $i++ ) {
+			$byte = ord( $text[ $i ] );
+			switch ( $text[ $i ] ) {
+				case '"':
+					$escaped .= '\\"';
+					break;
+
+				case '\\':
+					$escaped .= '\\\\';
+					break;
+
+				case '$':
+					$escaped .= '\\$';
+					break;
+
+				default:
+					$escaped .= ( $byte < 0x20 || $byte >= 0x7f )
+						? sprintf( '\\x%02x', $byte )
+						: $text[ $i ];
+			}
+		}
+
+		return $escaped;
+	}
+
+	/**
+	 * Escapes text for use inside generated PHP comments.
+	 *
+	 * @since 6.6.0
+	 *
+	 * @param string $text Text to escape.
+	 * @return string Escaped comment text.
+	 */
+	private static function escape_precomputed_php_comment( string $text ): string {
+		$escaped = '';
+		$length  = strlen( $text );
+
+		for ( $i = 0; $i < $length; $i++ ) {
+			$byte = ord( $text[ $i ] );
+			$char = $text[ $i ];
+
+			$escaped .= ( $byte < 0x20 || $byte >= 0x7f || '?' === $char || '\\' === $char )
+				? sprintf( '\\x%02x', $byte )
+				: $char;
+		}
+
+		return $escaped;
 	}
 }
