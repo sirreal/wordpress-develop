@@ -1,19 +1,7 @@
 {
-	"schemaVersion": 1,
 	"cacheSchemaVersion": 1,
-	"toolchain": {
-		"nodeVersion": "20.20.2",
-		"npmVersion": "10.8.2",
-		"composerVersion": "2.8.12",
-		"yarnVersion": "1.22.22",
-		"wpScriptsVersion": "32.6.0",
-		"wpI18nVersion": "6.24.0"
-	},
 	"playground": {
-		"cliVersion": "3.1.48",
 		"phpVersion": "8.4",
-		"wordpressChannel": "beta",
-		"wordpressVersionApi": "https://api.wordpress.org/core/version-check/1.7/?channel=beta",
 		"blueprintSchema": "https://playground.wordpress.net/blueprint-schema.json"
 	},
 	"repositories": {
@@ -47,10 +35,6 @@
 			"commit": "7179d747eef70ca8760cf5e0c04d3877158fa350",
 			"path": "."
 		}
-	},
-	"limits": {
-		"snapshotBytes": 104857600,
-		"artifactRetentionDays": 1
 	},
 	"validation": {
 		"minimumSymbols": {

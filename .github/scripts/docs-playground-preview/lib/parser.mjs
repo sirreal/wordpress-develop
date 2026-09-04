@@ -1,51 +1,77 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import {
+	copyFile,
+	mkdir,
+	readdir,
+	readFile,
+	rm,
+	writeFile,
+} from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 
-import { stageCorePhp } from './files.mjs';
 import { run } from './process.mjs';
 
-const HOOK_TYPE = /^(?:action|filter)(?:_(?:deprecated|reference))?$/;
+// Where the importer reads source from inside the Playground filesystem.
 const IMPORT_SOURCE_ROOT = '/tmp/docs-preview-source';
 const SAFE_VERSION_ROOT = '/tmp/docs-preview-version';
 
-/**
- * @param {Record<string, any> | null | undefined} value
- */
-function hooksIn( value ) {
-	return Array.isArray( value?.hooks ) ? value.hooks : [];
-}
+// Bundled plugins and themes are not part of the Core Code Reference.
+const EXCLUDED_SOURCE = [ 'wp-content/plugins', 'wp-content/themes' ];
 
 /**
- * @param {any[]} hooks
- * @param {Record<string, any>} counts
+ * Copies the Core PHP the parser reads into its own tree. Only these files are
+ * ever exposed to the parser and the importer, and none of them is executed.
+ *
+ * @param {string} candidate
+ * @param {string} destination
  */
-function countHooks( hooks, counts ) {
-	for ( const hook of hooks ) {
-		if (
-			! hook ||
-			typeof hook !== 'object' ||
-			! HOOK_TYPE.test( hook.type )
-		) {
-			throw new Error(
-				'Parser JSON contains a hook with an invalid type.'
-			);
-		}
-		if ( hook.type.startsWith( 'action' ) ) {
-			counts.hooks++;
-		} else {
-			counts.filters++;
-		}
+export async function stageCorePhp( candidate, destination ) {
+	const root = path.resolve( candidate );
+	const source = existsSync(
+		path.join( root, 'src/wp-includes/version.php' )
+	)
+		? path.join( root, 'src' )
+		: root;
+	if ( ! existsSync( path.join( source, 'wp-includes/version.php' ) ) ) {
+		throw new Error( `No WordPress source tree found beneath ${ root }.` );
 	}
+	await rm( destination, { recursive: true, force: true } );
+	// Symbolic links are not files here, so none of them is ever staged.
+	const entries = await readdir( source, {
+		recursive: true,
+		withFileTypes: true,
+	} );
+	let count = 0;
+	for ( const entry of entries ) {
+		const relative = path.relative(
+			source,
+			path.join( entry.parentPath, entry.name )
+		);
+		if (
+			! entry.isFile() ||
+			! relative.endsWith( '.php' ) ||
+			EXCLUDED_SOURCE.some( ( excluded ) =>
+				relative.startsWith( `${ excluded }/` )
+			)
+		) {
+			continue;
+		}
+		const target = path.join( destination, relative );
+		await mkdir( path.dirname( target ), { recursive: true } );
+		await copyFile( path.join( source, relative ), target );
+		count++;
+	}
+	return count;
 }
 
 /**
+ * Counts what the parser produced and points every record at the source tree
+ * the importer will read it from.
+ *
  * @param {any[]} records
- * @param {Record<string, any>} minimumSymbols
+ * @param {Record<string, number>} minimumSymbols
  */
 export function inspectParserRecords( records, minimumSymbols ) {
-	if ( ! Array.isArray( records ) ) {
-		throw new Error( 'Parser JSON must be an array.' );
-	}
 	/** @type {Record<string, number>} */
 	const counts = {
 		classes: 0,
@@ -54,65 +80,58 @@ export function inspectParserRecords( records, minimumSymbols ) {
 		hooks: 0,
 		filters: 0,
 	};
-	for ( const record of records ) {
-		if (
-			! record ||
-			typeof record !== 'object' ||
-			typeof record.path !== 'string'
-		) {
-			throw new Error( 'Parser JSON contains an invalid file record.' );
-		}
-		if (
-			record.path.startsWith( 'wp-content/plugins/' ) ||
-			record.path.startsWith( 'wp-content/themes/' )
-		) {
-			throw new Error(
-				`Parser JSON contains excluded source: ${ record.path }.`
-			);
-		}
-		const functions = Array.isArray( record.functions )
-			? record.functions
-			: [];
-		const classes = Array.isArray( record.classes ) ? record.classes : [];
-		counts.functions += functions.length;
-		counts.classes += classes.length;
-		for ( const item of functions ) {
-			countHooks( hooksIn( item ), counts );
-		}
-		for ( const item of classes ) {
-			const methods = Array.isArray( item?.methods ) ? item.methods : [];
-			counts.methods += methods.length;
-			for ( const method of methods ) {
-				countHooks( hooksIn( method ), counts );
+	/** @param {any[]} [hooks] */
+	const countHooks = ( hooks ) => {
+		for ( const hook of hooks || [] ) {
+			if ( String( hook.type ).startsWith( 'action' ) ) {
+				counts.hooks++;
+			} else {
+				counts.filters++;
 			}
 		}
-		countHooks( hooksIn( record ), counts );
+	};
+	for ( const record of records ) {
+		const functions = record.functions || [];
+		const classes = record.classes || [];
+		counts.functions += functions.length;
+		counts.classes += classes.length;
+		countHooks( record.hooks );
+		for ( const item of functions ) {
+			countHooks( item.hooks );
+		}
+		for ( const item of classes ) {
+			const methods = item.methods || [];
+			counts.methods += methods.length;
+			for ( const method of methods ) {
+				countHooks( method.hooks );
+			}
+		}
+		// The importer includes the file it records, so the version file has to
+		// resolve to the empty stub instead of the pull-request source.
 		record.root =
 			record.path === 'wp-includes/version.php'
 				? SAFE_VERSION_ROOT
 				: IMPORT_SOURCE_ROOT;
 	}
-	const failures =
-		records.length === 0 ? [ 'Parser produced no file records.' ] : [];
-	failures.push(
-		...Object.entries( minimumSymbols )
-			.filter( ( [ type, minimum ] ) => counts[ type ] < minimum )
-			.map(
-				( [ type, minimum ] ) =>
-					`Parser produced ${ counts[ type ] } ${ type }; expected at least ${ minimum }.`
-			)
-	);
-	return { records: records.length, counts, failures };
+	const failures = Object.entries( minimumSymbols )
+		.filter( ( [ type, minimum ] ) => counts[ type ] < minimum )
+		.map(
+			( [ type, minimum ] ) =>
+				`Parser produced ${ counts[ type ] } ${ type }; expected at least ${ minimum }.`
+		);
+	return { counts, failures };
 }
 
 /**
- * @param {Record<string, any>} options
+ * Parses the pull-request Core source into the JSON the importer consumes.
+ *
+ * @param {{source: string, stagedSource: string, parser: string, output: string, minimumSymbols: Record<string, number>}} options
  */
 export async function generateParserJson( options ) {
-	const runImplementation = options.runImplementation || run;
-	const staged = await stageCorePhp( options.source, options.stagedSource );
+	const files = await stageCorePhp( options.source, options.stagedSource );
+	process.stdout.write( `Staged ${ files } Core PHP files for parsing.\n` );
 	await mkdir( path.dirname( options.output ), { recursive: true } );
-	await runImplementation(
+	await run(
 		'php',
 		[
 			'-d',
@@ -123,14 +142,18 @@ export async function generateParserJson( options ) {
 			'-o',
 			options.output,
 		],
-		{
-			capture: Boolean( options.logFile ),
-			logFile: options.logFile,
-			label: 'generate Code Reference parser JSON',
-		}
+		{ label: 'generate Code Reference parser JSON' }
 	);
 	const records = JSON.parse( await readFile( options.output, 'utf8' ) );
-	const inspection = inspectParserRecords( records, options.minimumSymbols );
+	const { counts, failures } = inspectParserRecords(
+		records,
+		options.minimumSymbols
+	);
 	await writeFile( options.output, `${ JSON.stringify( records ) }\n` );
-	return { ...inspection, sourceFiles: staged.files };
+	process.stdout.write(
+		`Parsed ${ Object.entries( counts )
+			.map( ( [ type, total ] ) => `${ total } ${ type }` )
+			.join( ', ' ) }.\n`
+	);
+	return { failures };
 }

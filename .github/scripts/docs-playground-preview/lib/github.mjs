@@ -1,5 +1,14 @@
-import { REQUEST_TIMEOUT_MS, TRANSFER_TIMEOUT_MS } from './http.mjs';
-import { COMMENT_MARKER, RELEASE_TAG } from './publication.mjs';
+import { readFile } from 'node:fs/promises';
+
+import { COMMENT_MARKER, RELEASE_TAG } from './preview.mjs';
+
+// A stalled connection without a deadline runs until the job timeout kills it,
+// which leaves a preview reported as still building and no useful log.
+const REQUEST_TIMEOUT_MS = 30_000;
+
+// Snapshots reach 100 MiB and travel through a third-party proxy, so transfers
+// need a deadline far longer than an API call yet shorter than any job.
+const TRANSFER_TIMEOUT_MS = 300_000;
 
 const API = 'https://api.github.com';
 const UPLOADS = 'https://uploads.github.com';
@@ -9,22 +18,50 @@ const BUILD_WORKFLOW = 'docs-playground-preview-build.yml';
 const BUILD_JOB = 'Build Code Reference snapshot';
 
 /**
+ * The preview publishes from one repository, plus the staging repository that
+ * opts in with the DOCS_PREVIEW_STAGING variable. Every trusted mutation asks
+ * here first; the workflow jobs carry the same condition in their `if:`.
+ *
+ * @param {string | undefined} repository
+ * @param {string} [stagingValue]
+ */
+export function assertDeploymentEnabled( repository, stagingValue ) {
+	const enabled =
+		repository === 'WordPress/wordpress-develop' ||
+		( repository === 'sirreal/wordpress-develop' &&
+			stagingValue === 'true' );
+	if ( ! enabled ) {
+		throw new Error( 'The docs preview is disabled in this repository.' );
+	}
+}
+
+/**
+ * The event payload the runner wrote for this job.
+ */
+export async function readWorkflowEvent() {
+	const eventPath = process.env.GITHUB_EVENT_PATH;
+	if ( ! eventPath ) {
+		throw new Error( 'GITHUB_EVENT_PATH is required.' );
+	}
+	return JSON.parse( await readFile( eventPath, 'utf8' ) );
+}
+
+/**
  * @param {Record<string, unknown>} values
  */
 function query( values ) {
-	const parameters = new URLSearchParams();
-	for ( const [ name, value ] of Object.entries( values ) ) {
-		if ( value !== undefined && value !== null ) {
-			parameters.set( name, String( value ) );
-		}
-	}
-	return parameters.toString();
+	return new URLSearchParams(
+		Object.entries( values ).map( ( [ name, value ] ) => [
+			name,
+			String( value ),
+		] )
+	).toString();
 }
 
 export class GitHubApi {
 	/**
-	 * @param {string} repository
-	 * @param {string} token
+	 * @param {string | undefined} repository
+	 * @param {string | undefined} token
 	 * @param {(...args: any[]) => Promise<any>} [fetchImplementation]
 	 */
 	constructor( repository, token, fetchImplementation = globalThis.fetch ) {
@@ -38,29 +75,36 @@ export class GitHubApi {
 	 * @param {Record<string, any>} [options]
 	 */
 	async request( url, options = {} ) {
-		const { timeoutMs = REQUEST_TIMEOUT_MS, ...init } = options;
-		const headers = {
-			Accept: 'application/vnd.github+json',
-			Authorization: `Bearer ${ this.token }`,
-			'X-GitHub-Api-Version': '2022-11-28',
-			...options.headers,
-		};
+		const {
+			method = 'GET',
+			body,
+			json,
+			contentType,
+			allowNotFound = false,
+			anonymous = false,
+			timeoutMs = REQUEST_TIMEOUT_MS,
+		} = options;
+		const headers = anonymous
+			? undefined
+			: {
+					Accept: 'application/vnd.github+json',
+					Authorization: `Bearer ${ this.token }`,
+					'X-GitHub-Api-Version': '2022-11-28',
+					...( contentType && { 'Content-Type': contentType } ),
+			  };
 		const target = url.startsWith( 'https://' ) ? url : `${ API }${ url }`;
 		// Only reads repeat. Repeating a mutation could post a second comment
 		// or a second upload for an attempt the server had already applied.
-		const repeatable = ! init.method || init.method === 'GET';
+		const repeatable = method === 'GET';
 		for ( let attempt = 1; ; attempt++ ) {
 			const retrying = repeatable && attempt < RETRY_ATTEMPTS;
 			let response;
 			try {
 				response = await this.fetch( target, {
-					...init,
+					method,
 					headers,
 					signal: AbortSignal.timeout( timeoutMs ),
-					body:
-						options.json === undefined
-							? options.body
-							: JSON.stringify( options.json ),
+					body: json === undefined ? body : JSON.stringify( json ),
 				} );
 			} catch ( error ) {
 				if ( ! retrying ) {
@@ -69,7 +113,7 @@ export class GitHubApi {
 				await this.backoff( attempt );
 				continue;
 			}
-			if ( options.allowNotFound && response.status === 404 ) {
+			if ( allowNotFound && response.status === 404 ) {
 				return null;
 			}
 			if ( ! response.ok ) {
@@ -81,20 +125,16 @@ export class GitHubApi {
 					continue;
 				}
 				const detail = await response.text();
-				const error = Object.assign(
+				throw Object.assign(
 					new Error(
-						`GitHub API returned HTTP ${
+						`Request for ${ url } returned HTTP ${
 							response.status
-						} for ${ url }: ${ detail.slice( 0, 300 ) }`
+						}: ${ detail.slice( 0, 300 ) }`
 					),
 					{ status: response.status }
 				);
-				throw error;
 			}
-			if ( response.status === 204 ) {
-				return null;
-			}
-			return response.json();
+			return response.status === 204 ? null : response.json();
 		}
 	}
 
@@ -114,32 +154,31 @@ export class GitHubApi {
 	/**
 	 * @param {string} path
 	 * @param {string | null} [field]
-	 * @returns {AsyncGenerator<any[], void, void>}
 	 */
-	async *pageBatches( path, field = null ) {
+	async pages( path, field = null ) {
+		/** @type {any[]} */
+		const values = [];
 		for ( let page = 1; ; page++ ) {
 			const separator = path.includes( '?' ) ? '&' : '?';
 			const response = await this.request(
 				`${ path }${ separator }per_page=100&page=${ page }`
 			);
 			const batch = field ? response[ field ] : response;
-			yield batch;
+			values.push( ...batch );
 			if ( batch.length < 100 ) {
-				return;
+				return values;
 			}
 		}
 	}
 
 	/**
-	 * @param {string} path
-	 * @param {string | null} [field]
+	 * Release assets are public and their download URL redirects to a storage
+	 * host, so this read deliberately carries no credentials.
+	 *
+	 * @param {Record<string, any>} asset
 	 */
-	async pages( path, field = null ) {
-		const values = [];
-		for await ( const batch of this.pageBatches( path, field ) ) {
-			values.push( ...batch );
-		}
-		return values;
+	readAssetJson( asset ) {
+		return this.request( asset.browser_download_url, { anonymous: true } );
 	}
 
 	/**
@@ -151,138 +190,109 @@ export class GitHubApi {
 		);
 	}
 
-	async getTrunkHeadSha() {
-		const reference = await this.request(
-			`/repos/${ this.repository }/git/ref/heads/trunk`
-		);
-		return reference.object?.sha || null;
-	}
-
 	/**
-	 * @param {number} number
+	 * @param {number} pullRequestNumber
 	 */
-	getPullRequest( number ) {
-		return this.request( `/repos/${ this.repository }/pulls/${ number }` );
+	getPullRequest( pullRequestNumber ) {
+		return this.request(
+			`/repos/${ this.repository }/pulls/${ pullRequestNumber }`
+		);
 	}
 
 	/**
+	 * The workflow_run event omits the pull request for a fork head, so it is
+	 * found from the head repository and branch that the run recorded.
+	 *
 	 * @param {Record<string, any>} run
 	 */
 	async findPullRequestForRun( run ) {
 		const owner = run.head_repository?.owner?.login;
 		if ( ! owner || ! run.head_branch ) {
-			throw new Error( 'Workflow run has no fork head identity.' );
+			return null;
 		}
-		const pulls = await this.pages(
+		const pulls = await this.request(
 			`/repos/${ this.repository }/pulls?${ query( {
 				state: 'open',
 				base: 'trunk',
 				head: `${ owner }:${ run.head_branch }`,
+				per_page: 100,
 			} ) }`
 		);
-		const matches = pulls.filter(
-			( pullRequest ) =>
-				pullRequest.head.sha === run.head_sha &&
-				pullRequest.head.repo?.full_name ===
-					run.head_repository.full_name
+		return (
+			pulls.find(
+				( /** @type {Record<string, any>} */ pullRequest ) =>
+					pullRequest.head.sha === run.head_sha &&
+					pullRequest.head.repo?.full_name ===
+						run.head_repository.full_name
+			) || null
 		);
-		if ( matches.length === 0 ) {
-			return null;
-		}
-		if ( matches.length !== 1 ) {
-			throw new Error(
-				`Expected one pull request for the workflow run; found ${ matches.length }.`
-			);
-		}
-		return matches[ 0 ];
 	}
 
 	/**
-	 * @param {Record<string, any>} run
+	 * @param {Record<string, unknown>} search
 	 */
-	async findLatestPreviewRun( run ) {
-		const runs = await this.pages(
+	async listBuildRuns( search ) {
+		const response = await this.request(
 			`/repos/${
 				this.repository
-			}/actions/workflows/${ BUILD_WORKFLOW }/runs?${ query( {
-				event: 'pull_request',
-				head_sha: run.head_sha,
-			} ) }`,
-			'workflow_runs'
+			}/actions/workflows/${ BUILD_WORKFLOW }/runs?${ query( search ) }`
 		);
+		return response.workflow_runs;
+	}
+
+	/**
+	 * The newest build run for a pull request head. Adding an unrelated label
+	 * starts a run whose build job skips; that never supersedes a real build.
+	 *
+	 * @param {Record<string, any>} run
+	 */
+	async latestPullRequestBuildRun( run ) {
+		const runs = await this.listBuildRuns( {
+			event: 'pull_request',
+			head_sha: run.head_sha,
+			per_page: 100,
+		} );
 		const matching = runs
 			.filter(
-				( candidate ) =>
-					candidate.head_sha === run.head_sha &&
+				( /** @type {Record<string, any>} */ candidate ) =>
 					candidate.head_branch === run.head_branch &&
 					candidate.head_repository?.full_name ===
 						run.head_repository?.full_name
 			)
-			.sort( ( left, right ) => right.id - left.id );
+			.sort(
+				(
+					/** @type {Record<string, any>} */ left,
+					/** @type {Record<string, any>} */ right
+				) => right.id - left.id
+			);
 		for ( const candidate of matching ) {
-			const current = await this.getRun( candidate.id );
-			if ( ! ( await this.isSkippedPreviewBuild( current ) ) ) {
-				return current;
+			if ( ! ( await this.isSkippedBuild( candidate ) ) ) {
+				return candidate;
 			}
 		}
 		return null;
 	}
 
-	/**
-	 * @param {Record<string, any>} run
-	 */
-	async latestPreviewRun( run ) {
-		const latest = await this.findLatestPreviewRun( run );
-		if ( latest ) {
-			return latest;
-		}
-		throw new Error( 'No current docs preview build matches this head.' );
-	}
-
-	async latestTrunkPreviewRun() {
-		// Every authorization repeats this lookup, and the API answers newest
-		// first, so the first page holding a match ends the scan instead of
-		// walking the entire trunk build history.
-		const batches = this.pageBatches(
-			`/repos/${
-				this.repository
-			}/actions/workflows/${ BUILD_WORKFLOW }/runs?${ query( {
-				event: 'push',
-				branch: 'trunk',
-			} ) }`,
-			'workflow_runs'
-		);
-		for await ( const batch of batches ) {
-			const latest = batch
-				.filter(
-					( run ) =>
-						run.event === 'push' &&
-						run.head_branch === 'trunk' &&
-						run.head_repository?.full_name === this.repository
-				)
-				.sort( ( left, right ) => right.id - left.id )[ 0 ];
-			if ( latest ) {
-				return this.getRun( latest.id );
-			}
-		}
-		throw new Error( 'No current trunk docs preview build exists.' );
+	async latestTrunkBuildRun() {
+		// The API answers newest first, so the first run is the current one.
+		const runs = await this.listBuildRuns( {
+			event: 'push',
+			branch: 'trunk',
+			per_page: 1,
+		} );
+		return runs[ 0 ] || null;
 	}
 
 	/**
 	 * @param {Record<string, any>} run
 	 */
-	async isSkippedPreviewBuild( run ) {
+	async isSkippedBuild( run ) {
 		const jobs = await this.pages(
 			`/repos/${ this.repository }/actions/runs/${ run.id }/attempts/${ run.run_attempt }/jobs`,
 			'jobs'
 		);
-		const matches = jobs.filter( ( job ) => job.name === BUILD_JOB );
-		if ( matches.length !== 1 ) {
-			throw new Error(
-				`Expected one Code Reference build job; found ${ matches.length }.`
-			);
-		}
-		return matches[ 0 ].conclusion === 'skipped';
+		const build = jobs.find( ( job ) => job.name === BUILD_JOB );
+		return ! build || build.conclusion === 'skipped';
 	}
 
 	getRelease() {
@@ -327,10 +337,7 @@ export class GitHubApi {
 				}/releases/${ releaseId }/assets?${ query( { name } ) }`,
 				{
 					method: 'POST',
-					headers: {
-						Accept: 'application/vnd.github+json',
-						'Content-Type': contentType,
-					},
+					contentType,
 					body: bytes,
 					timeoutMs: TRANSFER_TIMEOUT_MS,
 				}
@@ -338,10 +345,11 @@ export class GitHubApi {
 		try {
 			return await upload();
 		} catch ( error ) {
+			// Re-running the publish workflow for one build attempt meets the
+			// asset that the earlier run uploaded. Replace it and continue.
 			if (
 				! ( error instanceof Error ) ||
-				! ( 'status' in error ) ||
-				error.status !== 422
+				/** @type {any} */ ( error ).status !== 422
 			) {
 				throw error;
 			}
@@ -356,6 +364,16 @@ export class GitHubApi {
 	}
 
 	/**
+	 * @param {number} assetId
+	 */
+	deleteReleaseAsset( assetId ) {
+		return this.request(
+			`/repos/${ this.repository }/releases/assets/${ assetId }`,
+			{ method: 'DELETE' }
+		);
+	}
+
+	/**
 	 * @param {string} reference
 	 */
 	getGitReference( reference ) {
@@ -366,31 +384,14 @@ export class GitHubApi {
 	}
 
 	/**
+	 * @param {string} path
 	 * @param {string} content
 	 */
-	createGitBlob( content ) {
-		return this.request( `/repos/${ this.repository }/git/blobs`, {
-			method: 'POST',
-			json: { content, encoding: 'utf-8' },
-		} );
-	}
-
-	/**
-	 * @param {string} path
-	 * @param {string} blobSha
-	 */
-	createGitTree( path, blobSha ) {
+	createGitTree( path, content ) {
 		return this.request( `/repos/${ this.repository }/git/trees`, {
 			method: 'POST',
 			json: {
-				tree: [
-					{
-						path,
-						mode: '100644',
-						type: 'blob',
-						sha: blobSha,
-					},
-				],
+				tree: [ { path, mode: '100644', type: 'blob', content } ],
 			},
 		} );
 	}
@@ -398,9 +399,9 @@ export class GitHubApi {
 	/**
 	 * @param {string} message
 	 * @param {string} treeSha
-	 * @param {string | null} [parentSha]
+	 * @param {string | null} parentSha
 	 */
-	createGitCommit( message, treeSha, parentSha = null ) {
+	createGitCommit( message, treeSha, parentSha ) {
 		return this.request( `/repos/${ this.repository }/git/commits`, {
 			method: 'POST',
 			json: {
@@ -414,33 +415,18 @@ export class GitHubApi {
 	/**
 	 * @param {string} reference
 	 * @param {string} sha
+	 * @param {boolean} exists
 	 */
-	createGitReference( reference, sha ) {
-		return this.request( `/repos/${ this.repository }/git/refs`, {
-			method: 'POST',
-			json: { ref: `refs/${ reference }`, sha },
-		} );
-	}
-
-	/**
-	 * @param {string} reference
-	 * @param {string} sha
-	 */
-	updateGitReference( reference, sha ) {
-		return this.request(
-			`/repos/${ this.repository }/git/refs/${ reference }`,
-			{ method: 'PATCH', json: { sha, force: true } }
-		);
-	}
-
-	/**
-	 * @param {number} assetId
-	 */
-	deleteReleaseAsset( assetId ) {
-		return this.request(
-			`/repos/${ this.repository }/releases/assets/${ assetId }`,
-			{ method: 'DELETE' }
-		);
+	setGitReference( reference, sha, exists ) {
+		return exists
+			? this.request(
+					`/repos/${ this.repository }/git/refs/${ reference }`,
+					{ method: 'PATCH', json: { sha, force: true } }
+			  )
+			: this.request( `/repos/${ this.repository }/git/refs`, {
+					method: 'POST',
+					json: { ref: `refs/${ reference }`, sha },
+			  } );
 	}
 
 	/**
