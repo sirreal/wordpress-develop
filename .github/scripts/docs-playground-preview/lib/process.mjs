@@ -1,20 +1,26 @@
 import { spawn } from 'node:child_process';
-import { writeFile } from 'node:fs/promises';
 
+/**
+ * Runs a build tool and rejects with its output when it fails.
+ *
+ * @param {string} command
+ * @param {string[]} args
+ * @param {{capture?: boolean, cwd?: string, env?: NodeJS.ProcessEnv, label?: string}} [options]
+ */
 export async function run( command, args, options = {} ) {
-	const capture = options.capture || Boolean( options.logFile );
-	if ( ! options.quiet ) {
-		process.stdout.write( `$ ${ [ command, ...args ].join( ' ' ) }\n` );
-	}
-
+	process.stdout.write( `$ ${ [ command, ...args ].join( ' ' ) }\n` );
 	return new Promise( ( resolve, reject ) => {
 		const child = spawn( command, args, {
 			cwd: options.cwd,
 			env: { ...process.env, ...options.env },
-			stdio: capture ? [ 'ignore', 'pipe', 'pipe' ] : 'inherit',
+			stdio: options.capture ? [ 'ignore', 'pipe', 'pipe' ] : 'inherit',
 		} );
 		let stdout = '';
 		let stderr = '';
+		// Decoding per chunk would corrupt any character split across a pipe
+		// boundary, so the streams decode as a whole.
+		child.stdout?.setEncoding( 'utf8' );
+		child.stderr?.setEncoding( 'utf8' );
 		child.stdout?.on( 'data', ( chunk ) => {
 			stdout += chunk;
 		} );
@@ -23,26 +29,20 @@ export async function run( command, args, options = {} ) {
 		} );
 		child.once( 'error', reject );
 		child.once( 'close', ( code, signal ) => {
-			( async () => {
-				if ( options.logFile ) {
-					await writeFile(
-						options.logFile,
-						`${ stdout }${ stderr }`
-					);
-				}
-				const result = { code, signal, stdout, stderr };
-				if ( code !== 0 && ! options.allowFailure ) {
-					const detail = `${ stdout }${ stderr }`.trim();
-					throw new Error(
-						`${ options.label || command } failed${
-							signal
-								? ` with signal ${ signal }`
-								: ` with exit code ${ code }`
-						}${ detail ? `\n${ detail }` : '' }`
-					);
-				}
-				return result;
-			} )().then( resolve, reject );
+			if ( code === 0 ) {
+				resolve( { stdout } );
+				return;
+			}
+			const detail = `${ stdout }${ stderr }`.trim();
+			reject(
+				new Error(
+					`${ options.label || command } failed${
+						signal
+							? ` with signal ${ signal }`
+							: ` with exit code ${ code }`
+					}${ detail ? `\n${ detail }` : '' }`
+				)
+			);
 		} );
 	} );
 }

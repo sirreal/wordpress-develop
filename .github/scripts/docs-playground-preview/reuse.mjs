@@ -1,180 +1,85 @@
 #!/usr/bin/env node
 
+// Runs in the build job. When the commit under build already has a published
+// preview, it writes a handoff that tells the publisher to point the comment at
+// the existing assets, and the build workflow skips the rest of the build.
+//
+// Every failure here is reported as "not reusable" so that a problem reading the
+// release only costs a rebuild.
+
 import { mkdir, writeFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 
+import { GitHubApi, readWorkflowEvent } from './lib/github.mjs';
 import {
-	RELEASE_TAG,
-	createReuseHandoff,
-	metadataAssetName,
-	validatePublicSnapshot,
-	validateReusableMetadata,
-} from './lib/publication.mjs';
+	HANDOFF_METADATA,
+	HANDOFF_REUSE,
+	assetPrefix,
+	findLatestSnapshot,
+} from './lib/preview.mjs';
 
-function argumentsFrom( values ) {
-	const options = {};
-	for ( let index = 0; index < values.length; index += 2 ) {
-		const name = values[ index ];
-		const value = values[ index + 1 ];
-		if ( ! name?.startsWith( '--' ) || ! value ) {
-			throw new Error( `Invalid argument ${ name || '(missing)' }.` );
-		}
-		options[
-			name
-				.slice( 2 )
-				.replace( /-([a-z])/g, ( _, letter ) => letter.toUpperCase() )
-		] = value;
-	}
-	return options;
-}
-
-async function apiJson( url, token, fetchImplementation ) {
-	const response = await fetchImplementation( url, {
-		headers: {
-			Accept: 'application/vnd.github+json',
-			Authorization: `Bearer ${ token }`,
-			'X-GitHub-Api-Version': '2022-11-28',
-		},
-	} );
-	if ( response.status === 404 ) {
-		return null;
-	}
-	if ( ! response.ok ) {
-		throw new Error(
-			`GitHub returned HTTP ${ response.status } for ${ url }.`
-		);
-	}
-	return response.json();
-}
-
-async function releaseAssets(
-	repository,
-	releaseId,
-	token,
-	fetchImplementation
+/**
+ * Hands the newest published snapshot for this pull request and commit to the
+ * publisher and reports the reuse to the build workflow, which then skips the
+ * build. Returns the reused asset name, or null when there is nothing to reuse.
+ *
+ * @param {Record<string, any>} api
+ * @param {{number: number, head: {sha: string}}} pullRequest
+ * @param {string} handoffDirectory
+ * @returns {Promise<string | null>}
+ */
+export async function reusePublishedSnapshot(
+	api,
+	pullRequest,
+	handoffDirectory
 ) {
-	const assets = [];
-	for ( let page = 1; ; page++ ) {
-		const batch = await apiJson(
-			`https://api.github.com/repos/${ repository }/releases/${ releaseId }/assets?per_page=100&page=${ page }`,
-			token,
-			fetchImplementation
-		);
-		assets.push( ...batch );
-		if ( batch.length < 100 ) {
-			return assets;
-		}
-	}
-}
-
-export async function findReusablePreview( options ) {
-	const fetchImplementation = options.fetchImplementation || globalThis.fetch;
-	const release = await apiJson(
-		`https://api.github.com/repos/${ options.repository }/releases/tags/${ RELEASE_TAG }`,
-		options.token,
-		fetchImplementation
+	const release = await api.getRelease();
+	const assets = release ? await api.listReleaseAssets( release.id ) : [];
+	const snapshot = findLatestSnapshot(
+		assets,
+		assetPrefix( pullRequest.number, pullRequest.head.sha )
 	);
-	if ( ! release ) {
+	if ( ! snapshot ) {
 		return null;
 	}
-	const assets = await releaseAssets(
-		options.repository,
-		release.id,
-		options.token,
-		fetchImplementation
+	await mkdir( handoffDirectory, { recursive: true } );
+	await writeFile(
+		path.join( handoffDirectory, HANDOFF_METADATA ),
+		`${ JSON.stringify( { handoffType: HANDOFF_REUSE }, null, 2 ) }\n`
 	);
-	const prefix = `code-reference-pr-${ options.pullRequestNumber }-${ options.sourceSha }-`;
-	const candidates = assets
-		.filter(
-			( asset ) =>
-				asset.name.startsWith( prefix ) &&
-				asset.name.endsWith( '.json' )
-		)
-		.sort( ( left, right ) =>
-			right.created_at.localeCompare( left.created_at )
-		);
-	for ( const candidate of candidates ) {
-		try {
-			const metadataResponse = await fetchImplementation(
-				candidate.browser_download_url
-			);
-			if ( metadataResponse.status !== 200 ) {
-				throw new Error(
-					`Published metadata returned HTTP ${ metadataResponse.status }.`
-				);
-			}
-			const published = validateReusableMetadata(
-				await metadataResponse.json(),
-				options
-			);
-			if (
-				candidate.name !==
-				metadataAssetName( published.snapshotFilename )
-			) {
-				throw new Error(
-					'Published metadata asset name does not match.'
-				);
-			}
-			const snapshot = assets.find(
-				( asset ) => asset.name === published.snapshotFilename
-			);
-			if ( ! snapshot ) {
-				throw new Error( 'Published snapshot asset is missing.' );
-			}
-			await validatePublicSnapshot(
-				snapshot.browser_download_url,
-				{
-					bytes: published.snapshotBytes,
-					sha256: published.snapshotSha256,
-					maximumBytes: options.maximumBytes,
-				},
-				fetchImplementation
-			);
-			return createReuseHandoff( published, options );
-		} catch ( error ) {
-			options.warning?.(
-				`Cannot reuse ${ candidate.name }: ${ error.message }`
-			);
-		}
+	// The build workflow skips the build when this is set. A run that reused
+	// nothing, or failed before here, sets nothing and the build goes ahead.
+	if ( process.env.GITHUB_OUTPUT ) {
+		await writeFile( process.env.GITHUB_OUTPUT, 'reused=true\n', {
+			flag: 'a',
+		} );
 	}
-	return null;
+	return snapshot.name;
 }
 
 async function main() {
-	const options = argumentsFrom( process.argv.slice( 2 ) );
-	const handoff = await findReusablePreview( {
-		...options,
-		maximumBytes: Number( options.maximumBytes ),
-		token: process.env.GITHUB_TOKEN,
-		warning: ( message ) =>
-			process.stderr.write( `::warning::${ message }\n` ),
-	} );
-	if ( handoff ) {
-		await mkdir( path.dirname( options.output ), { recursive: true } );
-		await writeFile(
-			options.output,
-			`${ JSON.stringify( handoff, null, 2 ) }\n`
-		);
-	}
-	if ( process.env.GITHUB_OUTPUT ) {
-		await writeFile(
-			process.env.GITHUB_OUTPUT,
-			`reused=${ handoff ? 'true' : 'false' }\n`,
-			{ flag: 'a' }
+	const [ handoffDirectory = 'handoff' ] = process.argv.slice( 2 );
+	const { pull_request: pullRequest } = await readWorkflowEvent();
+	const assetName = await reusePublishedSnapshot(
+		new GitHubApi(
+			process.env.GITHUB_REPOSITORY,
+			process.env.GITHUB_TOKEN
+		),
+		pullRequest,
+		handoffDirectory
+	);
+	if ( assetName ) {
+		process.stdout.write(
+			`Reusing the published snapshot ${ assetName }.\n`
 		);
 	}
 }
 
 if ( import.meta.url === pathToFileURL( process.argv[ 1 ] ).href ) {
-	main().catch( async ( error ) => {
+	main().catch( ( error ) => {
 		process.stderr.write(
 			`::warning::Same-SHA reuse check failed: ${ error.message }\n`
 		);
-		if ( process.env.GITHUB_OUTPUT ) {
-			await writeFile( process.env.GITHUB_OUTPUT, 'reused=false\n', {
-				flag: 'a',
-			} ).catch( () => {} );
-		}
 	} );
 }

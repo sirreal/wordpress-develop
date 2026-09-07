@@ -11,6 +11,7 @@ $active_plugins = array(
 	'posts-to-posts/posts-to-posts.php',
 );
 
+// Writing active_plugins directly would skip a bundle that failed to unpack.
 foreach ( $active_plugins as $plugin ) {
 	$result = validate_plugin( $plugin );
 	if ( is_wp_error( $result ) ) {
@@ -18,16 +19,11 @@ foreach ( $active_plugins as $plugin ) {
 	}
 }
 
-sort( $active_plugins );
 update_option( 'active_plugins', $active_plugins );
 switch_theme( 'wporg-developer-2023' );
 update_option( 'permalink_structure', '/%year%/%monthnum%/%postname%/' );
 
-$ensure_page = static function ( $slug, $title ) {
-	$page = get_page_by_path( $slug, OBJECT, 'page' );
-	if ( $page ) {
-		return $page->ID;
-	}
+$create_page = static function ( $slug, $title ) {
 	$result = wp_insert_post(
 		array(
 			'post_type'   => 'page',
@@ -44,49 +40,24 @@ $ensure_page = static function ( $slug, $title ) {
 };
 
 update_option( 'show_on_front', 'page' );
-update_option( 'page_on_front', $ensure_page( 'home', 'Home' ) );
-$ensure_page( 'reference', 'Reference' );
+update_option( 'page_on_front', $create_page( 'home', 'Home' ) );
+$create_page( 'reference', 'Reference' );
 
-$navigation = '<!-- wp:navigation-link {"label":"Code Reference","type":"custom","url":"/reference/","kind":"custom","isTopLevelLink":true} /-->';
-$existing   = get_page_by_path( 'reference-api-menu', OBJECT, 'wp_navigation' );
-$nav_args   = array(
-	'post_title'   => 'Reference API Menu',
-	'post_name'    => 'reference-api-menu',
-	'post_type'    => 'wp_navigation',
-	'post_status'  => 'publish',
-	'post_content' => $navigation,
+// The theme templates reference this navigation menu by its wordpress.org ID,
+// so the menu has to be created with that exact post ID.
+$result = wp_insert_post(
+	array(
+		'import_id'    => 148843,
+		'post_title'   => 'Reference API Menu',
+		'post_name'    => 'reference-api-menu',
+		'post_type'    => 'wp_navigation',
+		'post_status'  => 'publish',
+		'post_content' => '<!-- wp:navigation-link {"label":"Code Reference","type":"custom","url":"/reference/","kind":"custom","isTopLevelLink":true} /-->',
+	),
+	true
 );
-if ( $existing ) {
-	$nav_args['ID'] = $existing->ID;
-	$result         = wp_update_post( $nav_args, true );
-} else {
-	$nav_args['import_id'] = 148843;
-	$result                = wp_insert_post( $nav_args, true );
-}
 if ( is_wp_error( $result ) ) {
 	throw new RuntimeException( $result->get_error_message() );
-}
-
-global $wpdb;
-$reference_types = array(
-	'wp-parser-class',
-	'wp-parser-function',
-	'wp-parser-hook',
-	'wp-parser-method',
-	'wp-parser-source-file',
-);
-$count           = $wpdb->get_var(
-	$wpdb->prepare(
-		"SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type IN ( %s, %s, %s, %s, %s )",
-		$reference_types[0],
-		$reference_types[1],
-		$reference_types[2],
-		$reference_types[3],
-		$reference_types[4]
-	)
-);
-if ( 0 !== (int) $count ) {
-	throw new RuntimeException( 'Invariant base contains generated reference posts.' );
 }
 
 flush_rewrite_rules( false );

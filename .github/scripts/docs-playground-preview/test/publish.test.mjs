@@ -1,561 +1,503 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 
 import {
-	createPublishedMetadata,
-	renderPreviewComment,
-} from '../lib/publisher.mjs';
-import {
-	PLAYGROUND_ORIGIN,
-	createReuseHandoff,
-	metadataAssetName,
-	releaseAssetUrl,
-	snapshotAssetName,
-} from '../lib/publication.mjs';
-import {
-	enforceValidationResult,
-	formatFailure,
-	publishPullRequest,
-} from '../publish.mjs';
+	FakeGitHub,
+	buildRun,
+	pullRequest,
+	releaseAsset,
+	repository,
+	sourceRepository,
+	sourceSha,
+} from './fake-github.mjs';
+import { HANDOFF_SNAPSHOT, snapshotAssetName } from '../lib/preview.mjs';
+import { enforceValidation, publishPreview } from '../publish.mjs';
 
-const repository = 'WordPress/wordpress-develop';
-const sourceRepository = 'contributor/wordpress-develop';
-const sha = 'a'.repeat( 40 );
-const snapshotBytes = Buffer.from( 'snapshot' );
+const PLAYGROUND_ORIGIN = 'https://playground.wordpress.net';
+const pullRequestNumber = 123;
+const runId = 456;
+const prSnapshot = snapshotAssetName( {
+	pullRequestNumber,
+	sourceSha,
+	workflowRunId: runId,
+	workflowRunAttempt: 1,
+} );
+const trunkSnapshot = snapshotAssetName( {
+	pullRequestNumber: null,
+	sourceSha,
+	workflowRunId: runId,
+	workflowRunAttempt: 1,
+} );
 
-function run() {
+/**
+ * What the build writes and the publisher reads. The build also records its own
+ * idea of the source and of the snapshot; the publisher ignores both, so only
+ * the tests that prove it name those fields.
+ *
+ * @param {Record<string, any>} [overrides]
+ */
+function handoff( overrides = {} ) {
 	return {
-		id: 456,
-		run_attempt: 1,
-		name: 'Code Reference Playground Preview Build',
-		event: 'pull_request',
-		status: 'completed',
-		head_sha: sha,
-		head_branch: 'feature',
-		head_repository: {
-			full_name: sourceRepository,
-			owner: { login: 'contributor' },
-		},
-	};
-}
-
-function pullRequest() {
-	return {
-		number: 123,
-		state: 'open',
-		base: { ref: 'trunk' },
-		head: {
-			sha,
-			ref: 'feature',
-			repo: { full_name: sourceRepository },
-		},
-		labels: [ { name: 'docs-preview' } ],
-	};
-}
-
-function buildMetadata( overrides = {} ) {
-	const identity = {
-		pullRequestNumber: 123,
-		sourceSha: sha,
-		workflowRunId: 456,
-		workflowRunAttempt: 1,
-	};
-	return {
-		schemaVersion: 1,
-		sourceRepository,
-		pullRequestNumber: 123,
-		sourceSha: sha,
-		workflowRunId: '456',
-		workflowRunAttempt: 1,
-		runUrl: `${
-			releaseAssetUrl( repository, 'x' ).split( '/releases/' )[ 0 ]
-		}/actions/runs/456`,
-		resolvedWordPressBeta: {
-			channel: 'beta',
-			version: '7.2-beta1',
-			downloadUrl:
-				'https://downloads.wordpress.org/release/wordpress-7.2-beta1.zip',
-		},
+		resolvedWordPressBeta: { version: '7.2-beta1' },
 		phpVersion: '8.4',
 		dependencyManifestDigest: 'b'.repeat( 64 ),
-		snapshotFilename: snapshotAssetName( identity ),
-		snapshotBytes: snapshotBytes.byteLength,
-		snapshotSha256: createHash( 'sha256' )
-			.update( snapshotBytes )
-			.digest( 'hex' ),
+		generationTimestamp: '2026-09-04T11:00:00.000Z',
 		buildStatus: 'success',
 		validationStatus: 'passed',
-		validationFailures: [],
-		generationTimestamp: '2026-08-09T12:34:56.000Z',
 		...overrides,
 	};
 }
 
-function releaseAsset( id, name, createdAt = '2026-08-08T13:00:00.000Z' ) {
-	return {
-		id,
-		name,
-		created_at: createdAt,
-		browser_download_url: releaseAssetUrl( repository, name ),
-	};
-}
-
-class FakeApi {
-	constructor() {
-		this.currentRun = run();
-		this.currentPullRequest = pullRequest();
-		this.latestRun = this.currentRun;
-		this.release = { id: 9 };
-		this.assets = [];
-		this.metadata = new Map();
-		this.assetBytes = new Map();
-		this.uploads = [];
-		this.deleted = [];
-		this.comments = [];
-		this.labelRemovals = 0;
-		this.runReads = 0;
-		this.deleteError = null;
-		this.uploadError = null;
-	}
-
-	async getRun() {
-		this.runReads++;
-		return this.currentRun;
-	}
-
-	async findPullRequestForRun() {
-		return this.currentPullRequest;
-	}
-
-	async getPullRequest() {
-		return this.currentPullRequest;
-	}
-
-	async latestPreviewRun() {
-		return this.latestRun;
-	}
-
-	async isSkippedPreviewBuild() {
-		return false;
-	}
-
-	async getRelease() {
-		return this.release;
-	}
-
-	async createRelease() {
-		this.release = { id: 9 };
-		return this.release;
-	}
-
-	async listReleaseAssets() {
-		return [ ...this.assets ];
-	}
-
-	async uploadReleaseAsset( releaseId, name, bytes, contentType ) {
-		assert.equal( releaseId, 9 );
-		if ( this.uploadError ) {
-			throw this.uploadError;
-		}
-		const asset = {
-			id: this.assets.length + 10,
-			name,
-			created_at: '2026-08-09T13:00:00.000Z',
-			browser_download_url: releaseAssetUrl( repository, name ),
-		};
-		this.assets.push( asset );
-		this.uploads.push( { name, contentType } );
-		if ( contentType === 'application/json' ) {
-			this.metadata.set( name, JSON.parse( bytes.toString() ) );
-		} else {
-			this.assetBytes.set( name, Buffer.from( bytes ) );
-		}
-		return asset;
-	}
-
-	async deleteReleaseAsset( id ) {
-		if ( this.deleteError ) {
-			throw this.deleteError;
-		}
-		this.deleted.push( id );
-	}
-
-	async findPreviewComment() {
-		return this.comments[ 0 ] || null;
-	}
-
-	async createComment( number, body ) {
-		this.comments = [ { id: 1, number, body } ];
-	}
-
-	async updateComment( id, body ) {
-		this.comments = [ { id, body } ];
-	}
-
-	async removeLabel() {
-		this.labelRemovals++;
-	}
-}
-
-function publicFetch( api, corrupt = new Set() ) {
-	return async ( url ) => {
-		if ( url.includes( 'wordpress-playground-cors-proxy.net' ) ) {
-			const name = url.split( '/' ).at( -1 );
-			const bytes = corrupt.has( name )
-				? Buffer.from( 'corrupt!' )
-				: api.assetBytes.get( name );
-			return {
-				status: 200,
-				headers: {
-					get: ( header ) =>
-						( {
-							'x-playground-cors-proxy': 'true',
-							'access-control-allow-origin': PLAYGROUND_ORIGIN,
-						} )[ header.toLowerCase() ] || null,
-				},
-				arrayBuffer: async () => bytes,
-			};
-		}
-		const name = url.split( '/' ).at( -1 );
-		return {
-			status: api.metadata.has( name ) ? 200 : 404,
-			json: async () => api.metadata.get( name ),
-		};
-	};
-}
-
-async function handoffDirectory( metadata, includeSnapshot = true ) {
+/**
+ * @param {Record<string, any>} metadata
+ * @param {boolean} [withSnapshot]
+ * @param {number} [snapshotSize]
+ */
+async function handoffDirectory( metadata, withSnapshot, snapshotSize = 8 ) {
 	const directory = await mkdtemp(
 		path.join( os.tmpdir(), 'docs-preview-publish-' )
 	);
 	await writeFile(
 		path.join( directory, 'build.json' ),
-		`${ JSON.stringify( metadata ) }\n`
+		JSON.stringify( metadata )
 	);
-	if ( includeSnapshot ) {
+	if ( withSnapshot ) {
 		await writeFile(
-			path.join( directory, metadata.snapshotFilename ),
-			snapshotBytes
+			path.join( directory, HANDOFF_SNAPSHOT ),
+			Buffer.alloc( snapshotSize, 1 )
 		);
 	}
 	return directory;
 }
 
-function options( api, directory, extra = {} ) {
-	return {
+/**
+ * @param {Record<string, any>} api
+ * @param {Record<string, any>} [options]
+ */
+function publish( api, options = {} ) {
+	return publishPreview( {
 		repository,
-		stagingVariable: '',
-		triggerRunId: 456,
+		triggerRunId: runId,
 		triggerRunAttempt: 1,
-		handoffDirectory: directory,
 		artifactAvailable: true,
 		api,
-		fetchImplementation: publicFetch( api ),
-		now: () => '2026-08-09T13:00:00.000Z',
-		warning: () => {},
-		...extra,
-	};
+		...options,
+	} );
 }
 
-function installPublishedPreview(
-	api,
-	build,
-	content = snapshotBytes,
-	publishedAt = '2026-08-08T13:00:00.000Z'
-) {
-	const published = createPublishedMetadata( build, repository, publishedAt );
-	const metadataName = metadataAssetName( build.snapshotFilename );
-	api.assets.push(
-		releaseAsset( 1, build.snapshotFilename, publishedAt ),
-		releaseAsset( 2, metadataName, publishedAt )
-	);
-	api.metadata.set( metadataName, published );
-	api.assetBytes.set( build.snapshotFilename, content );
-	return published;
-}
+test( 'a pull request preview publishes both assets and announces the link', async () => {
+	const api = new FakeGitHub( {
+		assets: [
+			releaseAsset(
+				1,
+				`code-reference-pr-${ pullRequestNumber }-old.zip`
+			),
+			releaseAsset( 2, 'code-reference-pr-999-other.zip' ),
+		],
+	} );
+	const result = await publish( api, {
+		handoffDirectory: await handoffDirectory( handoff(), true ),
+	} );
 
-test( 'a candidate is public before the comment moves and old assets delete', async () => {
-	const api = new FakeApi();
-	const metadata = buildMetadata();
-	const directory = await handoffDirectory( metadata );
-	const result = await publishPullRequest( options( api, directory ) );
 	assert.equal( result.status, 'ready' );
 	assert.deepEqual(
-		api.uploads.map( ( upload ) => upload.contentType ),
-		[ 'application/zip', 'application/json' ]
+		api.uploads.map( ( upload ) => upload.name ),
+		[ prSnapshot, prSnapshot.replace( /\.zip$/, '.json' ) ]
 	);
-	assert.match( api.comments[ 0 ].body, /Status:\*\* Ready/ );
-	assert.match( api.comments[ 0 ].body, /blueprint-url=/ );
+	assert.match( api.comments[ 0 ].body, /\*\*Status:\*\* Ready/ );
+	assert.ok(
+		api.comments[ 0 ].body.includes(
+			`${ PLAYGROUND_ORIGIN }/?blueprint-url=data:application/json,`
+		)
+	);
 	assert.equal( api.labelRemovals, 1 );
-	assert.ok( api.runReads >= 5 );
+	// The superseded asset for this pull request goes; another pull request's
+	// asset stays.
+	assert.deepEqual( api.deletedAssets, [ 1 ] );
 } );
 
-test( 'an advisory validation failure updates the comment but publishes nothing', async () => {
-	const api = new FakeApi();
-	const metadata = buildMetadata( { validationStatus: 'failed' } );
-	const directory = await handoffDirectory( metadata, false );
-	const result = await publishPullRequest( options( api, directory ) );
-	assert.equal( result.status, 'invalid' );
-	assert.equal( api.uploads.length, 0 );
+test( 'published metadata names the commit of the workflow run, not the handoff', async () => {
+	const api = new FakeGitHub();
+	await publish( api, {
+		handoffDirectory: await handoffDirectory(
+			handoff( {
+				sourceSha: 'f'.repeat( 40 ),
+				sourceRepository: 'attacker/wordpress-develop',
+				pullRequestNumber: 999,
+			} ),
+			true
+		),
+	} );
+
+	const published = api.assetJson.get(
+		prSnapshot.replace( /\.zip$/, '.json' )
+	);
+	assert.equal( published.sourceSha, sourceSha );
+	assert.equal( published.sourceRepository, sourceRepository );
+	assert.equal( published.pullRequestNumber, pullRequestNumber );
+	assert.equal( published.snapshotBytes, 8 );
+	assert.ok(
+		! Number.isNaN( Date.parse( published.publication.publishedAt ) )
+	);
+} );
+
+test( 'a snapshot above the size limit is not published', async () => {
+	const api = new FakeGitHub();
+	await assert.rejects(
+		publish( api, {
+			handoffDirectory: await handoffDirectory(
+				handoff(),
+				true,
+				104857601
+			),
+		} ),
+		/the limit is 104857600/
+	);
+	assert.deepEqual( api.uploads, [] );
 	assert.match( api.comments[ 0 ].body, /Latest attempt failed/ );
+} );
+
+test( 'a failed build reports the failure and keeps the last working link', async () => {
+	const previous = 'code-reference-pr-123-old.json';
+	const api = new FakeGitHub( {
+		assets: [
+			releaseAsset( 1, previous ),
+			releaseAsset( 2, 'code-reference-pr-123-old.zip' ),
+		],
+		assetJson: new Map( [
+			[
+				previous,
+				{
+					sourceRepository,
+					sourceSha: 'e'.repeat( 40 ),
+					publication: {
+						playgroundUrl: `${ PLAYGROUND_ORIGIN }/?blueprint-url=previous`,
+					},
+				},
+			],
+		] ),
+	} );
+	await assert.rejects(
+		publish( api, {
+			handoffDirectory: await handoffDirectory(
+				handoff( {
+					buildStatus: 'failed',
+					buildError: 'The parser crashed.',
+				} )
+			),
+		} ),
+		/The parser crashed\./
+	);
+
+	assert.match(
+		api.comments[ 0 ].body,
+		/\*\*Status:\*\* Latest attempt failed/
+	);
+	assert.match( api.comments[ 0 ].body, /Latest successful docs preview/ );
 	assert.equal( api.labelRemovals, 1 );
 } );
 
-test( 'the trusted publisher enforces invalid fork handoffs', () => {
-	const invalid = { status: 'invalid' };
+test( 'a failed validation reports invalid without publishing', async () => {
+	const api = new FakeGitHub();
+	const result = await publish( api, {
+		handoffDirectory: await handoffDirectory(
+			handoff( { validationStatus: 'failed' } ),
+			true
+		),
+	} );
+
+	assert.equal( result.status, 'invalid' );
+	assert.deepEqual( api.uploads, [] );
+	assert.match( api.comments[ 0 ].body, /Latest attempt failed/ );
+} );
+
+test( 'enforcement turns an invalid candidate into a failure', () => {
+	assert.deepEqual( enforceValidation( { status: 'invalid' }, 'false' ), {
+		status: 'invalid',
+	} );
 	assert.throws(
-		() => enforceValidationResult( invalid, 'true' ),
+		() => enforceValidation( { status: 'invalid' }, 'true' ),
 		/DOCS_PREVIEW_ENFORCE/
 	);
-	assert.equal( enforceValidationResult( invalid, 'false' ), invalid );
-	assert.equal( enforceValidationResult( invalid, 'TRUE' ), invalid );
-	assert.equal(
-		enforceValidationResult( { status: 'ready' }, 'true' ).status,
-		'ready'
+} );
+
+test( 'a missing handoff artifact reports the failure', async () => {
+	const api = new FakeGitHub();
+	await assert.rejects(
+		publish( api, {
+			artifactAvailable: false,
+			handoffDirectory: await handoffDirectory( handoff(), true ),
+		} ),
+		/handoff artifact is unavailable/
+	);
+	assert.deepEqual( api.uploads, [] );
+} );
+
+test( 'a superseded build publishes nothing', async () => {
+	const api = new FakeGitHub( { latestRun: buildRun( { id: 999 } ) } );
+	const result = await publish( api, {
+		handoffDirectory: await handoffDirectory( handoff(), true ),
+	} );
+
+	assert.equal( result.status, 'superseded' );
+	assert.deepEqual( api.uploads, [] );
+	assert.deepEqual( api.comments, [] );
+} );
+
+test( 'a newer attempt of the same run publishes nothing', async () => {
+	const api = new FakeGitHub( { run: buildRun( { run_attempt: 2 } ) } );
+	const result = await publish( api, {
+		handoffDirectory: await handoffDirectory( handoff(), true ),
+	} );
+
+	assert.equal( result.status, 'superseded' );
+} );
+
+test( 'a removed docs-preview label stops the first attempt', async () => {
+	const api = new FakeGitHub( {
+		pullRequest: pullRequest( { labels: [] } ),
+	} );
+	const result = await publish( api, {
+		handoffDirectory: await handoffDirectory( handoff(), true ),
+	} );
+
+	assert.equal( result.status, 'superseded' );
+	assert.deepEqual( api.uploads, [] );
+} );
+
+test( 'a closed pull request publishes nothing', async () => {
+	const api = new FakeGitHub( { pullRequest: null } );
+	const result = await publish( api, {
+		handoffDirectory: await handoffDirectory( handoff(), true ),
+	} );
+
+	assert.equal( result.status, 'superseded' );
+} );
+
+test( 'a reuse handoff announces the published assets without uploading', async () => {
+	const reused = `code-reference-pr-${ pullRequestNumber }-${ sourceSha }-1-1.zip`;
+	const reusedMetadata = reused.replace( /\.zip$/, '.json' );
+	const api = new FakeGitHub( {
+		assets: [
+			releaseAsset( 1, reused ),
+			releaseAsset( 2, reusedMetadata ),
+		],
+		assetJson: new Map( [
+			[
+				reusedMetadata,
+				{
+					sourceRepository,
+					sourceSha,
+					publication: {
+						publishedAt: '2026-09-03T10:00:00.000Z',
+						playgroundUrl: `${ PLAYGROUND_ORIGIN }/?blueprint-url=reused`,
+					},
+				},
+			],
+		] ),
+	} );
+	const result = await publish( api, {
+		handoffDirectory: await handoffDirectory( { handoffType: 'reuse' } ),
+	} );
+
+	assert.equal( result.status, 'reused' );
+	assert.deepEqual( api.uploads, [] );
+	assert.deepEqual( api.deletedAssets, [] );
+	assert.match( api.comments[ 0 ].body, /\*\*Status:\*\* Ready/ );
+	assert.equal( api.labelRemovals, 1 );
+} );
+
+test( 'a reuse handoff for a commit with no published preview is refused', async () => {
+	const api = new FakeGitHub( {
+		assets: [
+			releaseAsset( 1, `code-reference-pr-999-${ sourceSha }-1-1.zip` ),
+			releaseAsset( 2, `code-reference-pr-999-${ sourceSha }-1-1.json` ),
+		],
+	} );
+	await assert.rejects(
+		publish( api, {
+			handoffDirectory: await handoffDirectory( {
+				handoffType: 'reuse',
+			} ),
+		} ),
+		/no longer published/
+	);
+	assert.deepEqual( api.deletedAssets, [] );
+} );
+
+test( 'trunk publishes the snapshot and points the stable Blueprint at it', async () => {
+	const api = new FakeGitHub( {
+		pullRequest: null,
+		gitReference: { object: { sha: '9'.repeat( 40 ) } },
+	} );
+	const result = await publish( api, {
+		trunk: true,
+		handoffDirectory: await handoffDirectory( handoff(), true ),
+	} );
+
+	assert.equal( result.status, 'ready' );
+	assert.deepEqual(
+		api.uploads.map( ( upload ) => upload.name ),
+		[ trunkSnapshot, trunkSnapshot.replace( /\.zip$/, '.json' ) ]
+	);
+	assert.equal( api.trees[ 0 ].path, 'code-reference-trunk.json' );
+	const blueprint = JSON.parse( api.trees[ 0 ].content );
+	assert.ok(
+		blueprint.steps[ 0 ].zipFile.url.endsWith( `/${ trunkSnapshot }` )
+	);
+	assert.equal( api.commits[ 0 ].parentSha, '9'.repeat( 40 ) );
+	assert.equal( api.gitReference.existed, true );
+	// Trunk publishes no comment and touches no label.
+	assert.deepEqual( api.comments, [] );
+	assert.equal( api.labelRemovals, 0 );
+} );
+
+test( 'trunk creates the pointer branch when it does not exist', async () => {
+	const api = new FakeGitHub( { pullRequest: null, gitReference: null } );
+	await publish( api, {
+		trunk: true,
+		handoffDirectory: await handoffDirectory( handoff(), true ),
+	} );
+
+	assert.equal( api.commits[ 0 ].parentSha, null );
+	assert.equal( api.gitReference.existed, false );
+} );
+
+test( 'trunk keeps the two newest generations so warm Blueprint copies resolve', async () => {
+	const older = `code-reference-trunk-${ 'b'.repeat( 40 ) }-100-1`;
+	const previous = `code-reference-trunk-${ 'c'.repeat( 40 ) }-200-1`;
+	const api = new FakeGitHub( {
+		pullRequest: null,
+		assets: [
+			releaseAsset( 1, `${ older }.zip` ),
+			releaseAsset( 2, `${ older }.json` ),
+			releaseAsset( 3, `${ previous }.zip` ),
+			releaseAsset( 4, `${ previous }.json` ),
+		],
+	} );
+	await publish( api, {
+		trunk: true,
+		handoffDirectory: await handoffDirectory( handoff(), true ),
+	} );
+
+	assert.deepEqual( api.deletedAssets.sort(), [ 1, 2 ] );
+} );
+
+test( 'the first publication creates the shared release', async () => {
+	const api = new FakeGitHub( { release: null } );
+	const result = await publish( api, {
+		handoffDirectory: await handoffDirectory( handoff(), true ),
+	} );
+
+	assert.equal( result.status, 'ready' );
+	assert.deepEqual( api.release, { id: 9 } );
+	assert.equal( api.uploads.length, 2 );
+} );
+
+test( 'a repository without deployment enabled refuses to publish', async () => {
+	await assert.rejects(
+		publish( new FakeGitHub(), {
+			repository: 'sirreal/wordpress-develop',
+			stagingVariable: 'false',
+			handoffDirectory: await handoffDirectory( handoff(), true ),
+		} ),
+		/disabled in this repository/
 	);
 } );
 
-test( 'publisher failures retain every nested cause in the Actions log', () => {
-	const failure = new AggregateError(
-		[
-			new Error( 'candidate upload failed' ),
-			new AggregateError(
-				[
-					new Error( 'comment failed' ),
-					new Error( 'label removal failed' ),
-				],
-				'failure reporting failed'
+test( 'a handoff whose PHP version would break the comment link is refused', async () => {
+	const api = new FakeGitHub();
+	await assert.rejects(
+		publish( api, {
+			handoffDirectory: await handoffDirectory(
+				handoff( { phpVersion: '8.4)](https://evil.example/' } ),
+				true
+			),
+		} ),
+		/no valid phpVersion/
+	);
+
+	assert.deepEqual( api.uploads, [] );
+	assert.match( api.comments[ 0 ].body, /Latest attempt failed/ );
+} );
+
+test( 'a handoff with no valid runtime or provenance is refused', async () => {
+	/** @type {[string, unknown][]} */
+	const broken = [
+		[ 'resolvedWordPressBeta', { version: 'trunk' } ],
+		[ 'dependencyManifestDigest', 'not-a-digest' ],
+		[ 'generationTimestamp', 'yesterday' ],
+	];
+	for ( const [ field, value ] of broken ) {
+		const api = new FakeGitHub();
+		await assert.rejects(
+			publish( api, {
+				handoffDirectory: await handoffDirectory(
+					handoff( { [ field ]: value } ),
+					true
+				),
+			} ),
+			new RegExp( `no valid ${ field }` )
+		);
+		assert.deepEqual( api.uploads, [] );
+	}
+} );
+
+test( 'a comment deleted while it is being updated is replaced', async () => {
+	const api = new FakeGitHub( {
+		comments: [ { id: 7, body: 'the comment someone deletes' } ],
+	} );
+	api.updateComment = async () => {
+		api.comments = [];
+		throw Object.assign( new Error( 'Not Found' ), { status: 404 } );
+	};
+	const result = await publish( api, {
+		handoffDirectory: await handoffDirectory( handoff(), true ),
+	} );
+
+	assert.equal( result.status, 'ready' );
+	assert.equal( api.uploads.length, 2 );
+	assert.match( api.comments[ 0 ].body, /\*\*Status:\*\* Ready/ );
+} );
+
+test( 'a push during the publication keeps the label, so its build can publish', async () => {
+	const api = new FakeGitHub();
+	api.getPullRequest = async () =>
+		pullRequest( {
+			head: {
+				sha: 'b'.repeat( 40 ),
+				repo: { full_name: sourceRepository },
+			},
+		} );
+	const result = await publish( api, {
+		handoffDirectory: await handoffDirectory( handoff(), true ),
+	} );
+
+	assert.equal( result.status, 'ready' );
+	assert.match( api.comments[ 0 ].body, /\*\*Status:\*\* Ready/ );
+	assert.equal( api.labelRemovals, 0 );
+} );
+
+test( 'a preview stays announced when the tidy-up after it fails', async ( t ) => {
+	t.mock.method( process.stderr, 'write', () => true );
+	const api = new FakeGitHub( {
+		assets: [
+			releaseAsset(
+				1,
+				`code-reference-pr-${ pullRequestNumber }-old.zip`
 			),
 		],
-		'publication failed'
-	);
-	const formatted = formatFailure( failure );
-
-	assert.match( formatted, /candidate upload failed/ );
-	assert.match( formatted, /comment failed/ );
-	assert.match( formatted, /label removal failed/ );
-} );
-
-test( 'a missing handoff always fails after its terminal comment', async () => {
-	const api = new FakeApi();
-	const directory = await mkdtemp(
-		path.join( os.tmpdir(), 'docs-preview-missing-' )
-	);
-	await assert.rejects(
-		publishPullRequest(
-			options( api, directory, { artifactAvailable: false } )
-		),
-		/artifact is unavailable/
-	);
-	assert.match( api.comments[ 0 ].body, /Latest attempt failed/ );
-	assert.equal( api.labelRemovals, 1 );
-} );
-
-test( 'a superseded run makes no mutation', async () => {
-	const api = new FakeApi();
-	api.latestRun = { ...api.currentRun, id: 789 };
-	const directory = await handoffDirectory( buildMetadata() );
-	const result = await publishPullRequest( options( api, directory ) );
-	assert.equal( result.status, 'superseded' );
-	assert.equal( api.uploads.length, 0 );
-	assert.equal( api.comments.length, 0 );
-	assert.equal( api.labelRemovals, 0 );
-} );
-
-test( 'a skipped trigger run makes no mutation', async () => {
-	const api = new FakeApi();
-	api.isSkippedPreviewBuild = async () => true;
-	const directory = await handoffDirectory( buildMetadata() );
-	const result = await publishPullRequest( options( api, directory ) );
-	assert.equal( result.status, 'ignored' );
-	assert.equal( api.uploads.length, 0 );
-	assert.equal( api.comments.length, 0 );
-	assert.equal( api.labelRemovals, 0 );
-} );
-
-test( 'public delivery failure keeps the previous healthy preview', async () => {
-	const api = new FakeApi();
-	const oldBytes = Buffer.from( 'old snapshot' );
-	const oldBuild = buildMetadata( {
-		sourceSha: 'c'.repeat( 40 ),
-		workflowRunId: '300',
-		snapshotFilename: snapshotAssetName( {
-			pullRequestNumber: 123,
-			sourceSha: 'c'.repeat( 40 ),
-			workflowRunId: 300,
-			workflowRunAttempt: 1,
-		} ),
-		snapshotBytes: oldBytes.byteLength,
-		snapshotSha256: createHash( 'sha256' )
-			.update( oldBytes )
-			.digest( 'hex' ),
 	} );
-	installPublishedPreview( api, oldBuild, oldBytes );
-
-	const current = buildMetadata();
-	const directory = await handoffDirectory( current );
-	await assert.rejects(
-		publishPullRequest(
-			options( api, directory, {
-				fetchImplementation: publicFetch(
-					api,
-					new Set( [ current.snapshotFilename ] )
-				),
-			} )
-		),
-		/digest/
-	);
-	assert.deepEqual(
-		api.deleted.sort( ( left, right ) => left - right ),
-		[ 12, 13 ]
-	);
-	assert.match( api.comments[ 0 ].body, /Latest successful docs preview/ );
-	assert.match( api.comments[ 0 ].body, new RegExp( 'c'.repeat( 40 ) ) );
-} );
-
-test( 'a proxy outage cannot remove the previous comment link', async () => {
-	const api = new FakeApi();
-	const oldBytes = Buffer.from( 'old snapshot' );
-	const oldBuild = buildMetadata( {
-		sourceSha: 'c'.repeat( 40 ),
-		workflowRunId: '300',
-		runUrl: `https://github.com/${ repository }/actions/runs/300`,
-		snapshotFilename: snapshotAssetName( {
-			pullRequestNumber: 123,
-			sourceSha: 'c'.repeat( 40 ),
-			workflowRunId: 300,
-			workflowRunAttempt: 1,
-		} ),
-		snapshotBytes: oldBytes.byteLength,
-		snapshotSha256: createHash( 'sha256' )
-			.update( oldBytes )
-			.digest( 'hex' ),
-	} );
-	const oldPreview = installPublishedPreview( api, oldBuild, oldBytes );
-	api.comments = [
-		{
-			id: 1,
-			body: renderPreviewComment( {
-				status: 'ready',
-				preview: oldPreview,
-				runUrl: oldBuild.runUrl,
-			} ),
-		},
-	];
-
-	const current = buildMetadata();
-	const directory = await handoffDirectory( current );
-	await assert.rejects(
-		publishPullRequest(
-			options( api, directory, {
-				fetchImplementation: publicFetch(
-					api,
-					new Set( [
-						oldBuild.snapshotFilename,
-						current.snapshotFilename,
-					] )
-				),
-			} )
-		),
-		/digest/
-	);
-	assert.match( api.comments[ 0 ].body, /Latest attempt failed/ );
-	assert.match( api.comments[ 0 ].body, /Latest successful docs preview/ );
-	assert.match( api.comments[ 0 ].body, new RegExp( 'c'.repeat( 40 ) ) );
-	assert.ok(
-		api.comments[ 0 ].body.includes( oldPreview.publication.playgroundUrl )
-	);
-} );
-
-test( 'a retry cannot delete a same-name preview it did not upload', async () => {
-	const api = new FakeApi();
-	const current = buildMetadata();
-	installPublishedPreview( api, current );
-	api.uploadError = new Error( 'already_exists' );
-	const directory = await handoffDirectory( current );
-	await assert.rejects(
-		publishPullRequest( options( api, directory ) ),
-		/already_exists/
-	);
-	assert.deepEqual( api.deleted, [] );
-	assert.match( api.comments[ 0 ].body, /Latest successful docs preview/ );
-} );
-
-test( 'a healthy same-SHA preview is reused without uploading it again', async () => {
-	const api = new FakeApi();
-	const oldBuild = buildMetadata( {
-		workflowRunId: '300',
-		workflowRunAttempt: 1,
-		runUrl: `https://github.com/${ repository }/actions/runs/300`,
-		snapshotFilename: snapshotAssetName( {
-			pullRequestNumber: 123,
-			sourceSha: sha,
-			workflowRunId: 300,
-			workflowRunAttempt: 1,
-		} ),
-	} );
-	const oldPublished = installPublishedPreview( api, oldBuild );
-	api.assets.push(
-		releaseAsset(
-			3,
-			`code-reference-pr-123-${ 'c'.repeat( 40 ) }-200-1.zip`,
-			'2026-08-07T13:00:00.000Z'
-		)
-	);
-	const handoff = createReuseHandoff( oldPublished, {
-		sourceRepository,
-		pullRequestNumber: 123,
-		sourceSha: sha,
-		workflowRunId: 456,
-		workflowRunAttempt: 1,
-		runUrl: `https://github.com/${ repository }/actions/runs/456`,
-		maximumBytes: 104857600,
-	} );
-	const directory = await handoffDirectory( handoff, false );
-	const result = await publishPullRequest( options( api, directory ) );
-	assert.equal( result.status, 'reused' );
-	assert.equal( api.uploads.length, 0 );
-	assert.deepEqual( api.deleted, [ 3 ] );
-	assert.match( api.comments[ 0 ].body, /Status:\*\* Ready/ );
-	assert.equal( api.labelRemovals, 1 );
-} );
-
-test( 'cleanup failure cannot replace an already-ready comment', async () => {
-	const api = new FakeApi();
-	api.assets.push(
-		releaseAsset(
-			1,
-			`code-reference-pr-123-${ 'c'.repeat( 40 ) }-300-1.zip`
-		)
-	);
-	api.deleteError = new Error( 'cleanup failed' );
-	const directory = await handoffDirectory( buildMetadata() );
-	await assert.rejects(
-		publishPullRequest( options( api, directory ) ),
-		/cleanup failed/
-	);
-	assert.match( api.comments[ 0 ].body, /Status:\*\* Ready/ );
-	assert.doesNotMatch( api.comments[ 0 ].body, /Latest attempt failed/ );
-	assert.equal( api.labelRemovals, 1 );
-} );
-
-test( 'GitHub read failures remain visible publication failures', async () => {
-	const api = new FakeApi();
-	api.getPullRequest = async () => {
-		throw new Error( 'GitHub is unavailable' );
+	api.deleteReleaseAsset = async () => {
+		throw new Error( 'The release asset is gone.' );
 	};
-	const directory = await handoffDirectory( buildMetadata() );
-	await assert.rejects(
-		publishPullRequest( options( api, directory ) ),
-		( error ) => {
-			assert.ok( error instanceof AggregateError );
-			assert.match( error.errors[ 0 ].message, /GitHub is unavailable/ );
-			return true;
-		}
-	);
-	assert.equal( api.comments.length, 0 );
+	const result = await publish( api, {
+		handoffDirectory: await handoffDirectory( handoff(), true ),
+	} );
+
+	assert.equal( result.status, 'ready' );
+	assert.match( api.comments[ 0 ].body, /\*\*Status:\*\* Ready/ );
 } );

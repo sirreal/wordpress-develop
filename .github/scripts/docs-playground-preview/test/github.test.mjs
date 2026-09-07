@@ -1,318 +1,225 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { GitHubApi } from '../lib/github.mjs';
-import { COMMENT_MARKER, RELEASE_TAG } from '../lib/publication.mjs';
+import { GitHubApi, assertDeploymentEnabled } from '../lib/github.mjs';
 
-function response( value, status = 200 ) {
+const repository = 'WordPress/wordpress-develop';
+
+test( 'deployment is inert outside the primary and opted-in staging repositories', () => {
+	assert.doesNotThrow( () => assertDeploymentEnabled( repository ) );
+	assert.doesNotThrow( () =>
+		assertDeploymentEnabled( 'sirreal/wordpress-develop', 'true' )
+	);
+	for ( const [ candidate, staging ] of [
+		[ 'sirreal/wordpress-develop', undefined ],
+		[ 'sirreal/wordpress-develop', 'TRUE' ],
+		[ 'somebody/wordpress-develop', 'true' ],
+	] ) {
+		assert.throws(
+			() => assertDeploymentEnabled( candidate, staging ),
+			/disabled in this repository/
+		);
+	}
+} );
+
+/**
+ * @param {number} status
+ * @param {unknown} [body]
+ */
+function response( status, body = {} ) {
 	return {
 		ok: status >= 200 && status < 300,
 		status,
-		json: async () => value,
-		text: async () => JSON.stringify( value ),
+		json: async () => body,
+		text: async () => JSON.stringify( body ),
 	};
 }
 
-function run( overrides = {} ) {
-	return {
-		id: 456,
-		run_attempt: 1,
+/**
+ * @param {any[]} responses
+ */
+function recordingFetch( responses ) {
+	/** @type {any[]} */
+	const calls = [];
+	/**
+	 * @param {string} url
+	 * @param {Record<string, any>} options
+	 */
+	const fetchImplementation = async ( url, options ) => {
+		calls.push( { url, options } );
+		const next = responses.shift();
+		if ( ! next ) {
+			throw new Error( `Unexpected request for ${ url }.` );
+		}
+		return next;
+	};
+	return { calls, fetchImplementation };
+}
+
+/**
+ * @param {any[]} responses
+ */
+function apiWith( responses ) {
+	const { calls, fetchImplementation } = recordingFetch( responses );
+	const api = new GitHubApi( repository, 'token', fetchImplementation );
+	api.backoff = async () => {};
+	return { api, calls };
+}
+
+test( 'a read is retried through a server error', async () => {
+	const { api, calls } = apiWith( [
+		response( 500 ),
+		response( 200, { id: 5 } ),
+	] );
+
+	assert.deepEqual( await api.getRun( 5 ), { id: 5 } );
+	assert.equal( calls.length, 2 );
+	assert.equal( calls[ 0 ].options.headers.Authorization, 'Bearer token' );
+} );
+
+test( 'a write is not repeated', async () => {
+	const { api, calls } = apiWith( [ response( 500, { message: 'boom' } ) ] );
+
+	await assert.rejects( api.createComment( 1, 'body' ), /HTTP 500/ );
+	assert.equal( calls.length, 1 );
+} );
+
+test( 'a missing release reads as no release and other failures carry the status', async () => {
+	const missing = apiWith( [ response( 404 ) ] );
+	assert.equal( await missing.api.getRelease(), null );
+
+	const forbidden = apiWith( [ response( 403, { message: 'no' } ) ] );
+	await assert.rejects( forbidden.api.getRelease(), ( error ) => {
+		assert.equal( /** @type {any} */ ( error ).status, 403 );
+		return true;
+	} );
+} );
+
+test( 'listings follow every page', async () => {
+	const first = Array.from( { length: 100 }, ( _, index ) => ( {
+		id: index,
+	} ) );
+	const { api, calls } = apiWith( [
+		response( 200, first ),
+		response( 200, [ { id: 100 } ] ),
+	] );
+
+	assert.equal( ( await api.listReleaseAssets( 9 ) ).length, 101 );
+	assert.match( calls[ 0 ].url, /per_page=100&page=1/ );
+	assert.match( calls[ 1 ].url, /per_page=100&page=2/ );
+} );
+
+test( 'an upload replaces the asset a previous attempt left behind', async () => {
+	const { api, calls } = apiWith( [
+		response( 422, { message: 'already_exists' } ),
+		response( 200, [ { id: 3, name: 'snapshot.zip' } ] ),
+		response( 204 ),
+		response( 200, { id: 4, name: 'snapshot.zip' } ),
+	] );
+
+	assert.deepEqual(
+		await api.uploadReleaseAsset(
+			9,
+			'snapshot.zip',
+			Buffer.from( 'x' ),
+			'application/zip'
+		),
+		{ id: 4, name: 'snapshot.zip' }
+	);
+	assert.equal( calls[ 2 ].options.method, 'DELETE' );
+} );
+
+test( 'a published asset is read without credentials', async () => {
+	const { api, calls } = apiWith( [ response( 200, { sourceSha: 'abc' } ) ] );
+
+	assert.deepEqual(
+		await api.readAssetJson( {
+			browser_download_url: 'https://github.com/download/snapshot.json',
+		} ),
+		{ sourceSha: 'abc' }
+	);
+	assert.equal( calls[ 0 ].options.headers, undefined );
+} );
+
+test( 'the pull request behind a fork build run is found by head identity', async () => {
+	const run = {
 		head_sha: 'a'.repeat( 40 ),
 		head_branch: 'feature',
 		head_repository: {
 			full_name: 'contributor/wordpress-develop',
 			owner: { login: 'contributor' },
 		},
-		...overrides,
 	};
-}
+	const { api, calls } = apiWith( [
+		response( 200, [
+			{
+				number: 1,
+				head: {
+					sha: 'b'.repeat( 40 ),
+					repo: { full_name: 'contributor/wordpress-develop' },
+				},
+			},
+			{
+				number: 2,
+				head: {
+					sha: 'a'.repeat( 40 ),
+					repo: { full_name: 'contributor/wordpress-develop' },
+				},
+			},
+		] ),
+	] );
 
-function pullRequest( overrides = {} ) {
-	return {
-		number: 123,
-		base: { ref: 'trunk' },
-		head: {
-			sha: 'a'.repeat( 40 ),
-			ref: 'feature',
-			repo: { full_name: 'contributor/wordpress-develop' },
-		},
-		...overrides,
-	};
-}
-
-test( 'API requests use the repository token and report failures', async () => {
-	const calls = [];
-	const api = new GitHubApi(
-		'WordPress/wordpress-develop',
-		'token',
-		async ( url, options ) => {
-			calls.push( { url, options } );
-			return response( { id: 456 } );
-		}
-	);
-	assert.equal( ( await api.getRun( 456 ) ).id, 456 );
-	assert.match( calls[ 0 ].url, /actions\/runs\/456$/ );
-	assert.equal( calls[ 0 ].options.headers.Authorization, 'Bearer token' );
-
-	const failing = new GitHubApi(
-		'WordPress/wordpress-develop',
-		'token',
-		async () => response( { message: 'no' }, 403 )
-	);
-	await assert.rejects( failing.getRun( 456 ), /HTTP 403/ );
+	assert.equal( ( await api.findPullRequestForRun( run ) ).number, 2 );
+	assert.match( calls[ 0 ].url, /head=contributor%3Afeature/ );
 } );
 
-test( 'a fork run resolves its PR without workflow pull_requests data', async () => {
-	const api = new GitHubApi(
-		'WordPress/wordpress-develop',
-		'token',
-		async ( url ) => {
-			assert.match( url, /state=open/ );
-			assert.match( url, /head=contributor%3Afeature/ );
-			return response( [ pullRequest() ] );
-		}
-	);
-	assert.equal( ( await api.findPullRequestForRun( run() ) ).number, 123 );
-	const obsolete = new GitHubApi(
-		'WordPress/wordpress-develop',
-		'token',
-		async () => response( [] )
-	);
-	assert.equal( await obsolete.findPullRequestForRun( run() ), null );
-
-	const ambiguous = new GitHubApi(
-		'WordPress/wordpress-develop',
-		'token',
-		async () =>
-			response( [ pullRequest(), pullRequest( { number: 124 } ) ] )
-	);
-	await assert.rejects(
-		ambiguous.findPullRequestForRun( run() ),
-		/Expected one pull request/
-	);
-} );
-
-test( 'latest run lookup binds SHA, branch, repository, and current attempt', async () => {
-	const calls = [];
-	const api = new GitHubApi(
-		'WordPress/wordpress-develop',
-		'token',
-		async ( url ) => {
-			calls.push( url );
-			if ( url.includes( '/actions/workflows/' ) ) {
-				return response( {
-					workflow_runs: [
-						run( { id: 789, head_branch: 'other' } ),
-						run( { id: 456 } ),
-					],
-				} );
-			}
-			if ( url.includes( '/jobs?' ) ) {
-				return response( {
-					jobs: [
-						{
-							name: 'Build Code Reference snapshot',
-							conclusion: 'success',
-						},
-					],
-				} );
-			}
-			return response( run( { id: 456, run_attempt: 2 } ) );
-		}
-	);
-	const latest = await api.latestPreviewRun( run() );
-	assert.equal( latest.run_attempt, 2 );
-	assert.match( calls[ 0 ], /head_sha=/ );
-	assert.match( calls[ 1 ], /actions\/runs\/456$/ );
-	assert.match( calls[ 2 ], /runs\/456\/attempts\/2\/jobs/ );
-} );
-
-test( 'trunk lookup binds the workflow, branch, repository, and current attempt', async () => {
-	const calls = [];
-	const api = new GitHubApi(
-		'WordPress/wordpress-develop',
-		'token',
-		async ( url ) => {
-			calls.push( url );
-			if ( url.includes( '/git/ref/heads/trunk' ) ) {
-				return response( { object: { sha: 'a'.repeat( 40 ) } } );
-			}
-			if ( url.includes( '/actions/workflows/' ) ) {
-				return response( {
-					workflow_runs: [
-						run( {
-							id: 789,
-							event: 'push',
-							head_branch: 'trunk',
-							head_repository: {
-								full_name: 'other/wordpress-develop',
-							},
-						} ),
-						run( {
-							id: 456,
-							event: 'push',
-							head_branch: 'trunk',
-							head_repository: {
-								full_name: 'WordPress/wordpress-develop',
-							},
-						} ),
-					],
-				} );
-			}
-			return response(
-				run( {
-					id: 456,
-					run_attempt: 2,
-					event: 'push',
-					head_branch: 'trunk',
-					head_repository: {
-						full_name: 'WordPress/wordpress-develop',
-					},
-				} )
-			);
-		}
-	);
-	assert.equal( await api.getTrunkHeadSha(), 'a'.repeat( 40 ) );
-	assert.equal( ( await api.latestTrunkPreviewRun() ).run_attempt, 2 );
-	assert.match( calls[ 1 ], /event=push/ );
-	assert.match( calls[ 1 ], /branch=trunk/ );
-	assert.match( calls[ 2 ], /actions\/runs\/456$/ );
-} );
-
-test( 'skipped trigger runs neither publish nor supersede a build', async () => {
-	const api = new GitHubApi(
-		'WordPress/wordpress-develop',
-		'token',
-		async ( url ) => {
-			if ( url.includes( '/actions/workflows/' ) ) {
-				return response( {
-					workflow_runs: [ run( { id: 789 } ), run() ],
-				} );
-			}
-			if ( url.includes( '/jobs?' ) ) {
-				return response( {
-					jobs: [
-						{
-							name: 'Build Code Reference snapshot',
-							conclusion: url.includes( '/789/' )
-								? 'skipped'
-								: 'success',
-						},
-					],
-				} );
-			}
-			return response(
-				url.endsWith( '/789' ) ? run( { id: 789 } ) : run()
-			);
-		}
-	);
-	assert.equal( ( await api.latestPreviewRun( run() ) ).id, 456 );
-	assert.equal( await api.isSkippedPreviewBuild( run( { id: 789 } ) ), true );
-} );
-
-test( 'release operations keep immutable names and bytes', async () => {
-	const calls = [];
-	const api = new GitHubApi(
-		'WordPress/wordpress-develop',
-		'token',
-		async ( url, options ) => {
-			calls.push( { url, options } );
-			if ( options.method === 'DELETE' ) {
-				return response( null, 204 );
-			}
-			if ( url.includes( '/actions/caches?' ) ) {
-				return response( { actions_caches: [] } );
-			}
-			return response( { id: 9, name: 'snapshot.zip' } );
-		}
-	);
-	await api.createRelease();
-	await api.uploadReleaseAsset(
-		9,
-		'snapshot.zip',
-		Buffer.from( 'snapshot' ),
-		'application/zip'
-	);
-	await api.deleteReleaseAsset( 10 );
-	await api.listActionCaches( 'refs/pull/123/merge' );
-	await api.deleteActionCache( 11 );
-	assert.equal( calls[ 0 ].options.json.tag_name, RELEASE_TAG );
-	assert.match( calls[ 1 ].url, /^https:\/\/uploads\.github\.com/ );
-	assert.equal( calls[ 1 ].options.body.toString(), 'snapshot' );
-	assert.equal( calls[ 2 ].options.method, 'DELETE' );
-	assert.match( calls[ 3 ].url, /ref=refs%2Fpull%2F123%2Fmerge/ );
-	assert.equal( calls[ 4 ].options.method, 'DELETE' );
-} );
-
-test( 'Git object operations create and atomically move a pointer ref', async () => {
-	const calls = [];
-	const api = new GitHubApi(
-		'WordPress/wordpress-develop',
-		'token',
-		async ( url, options ) => {
-			calls.push( { url, options } );
-			return response( {
-				sha: 'a'.repeat( 40 ),
-				object: { sha: 'b'.repeat( 40 ) },
-			} );
-		}
-	);
-	await api.getGitReference( 'heads/docs-preview-code-reference' );
-	await api.createGitBlob( '{"blueprint":true}\n' );
-	await api.createGitTree( 'code-reference-trunk.json', 'a'.repeat( 40 ) );
-	await api.createGitCommit(
-		'Update Code Reference preview',
-		'b'.repeat( 40 ),
-		'c'.repeat( 40 )
-	);
-	await api.createGitReference(
-		'heads/docs-preview-code-reference',
-		'd'.repeat( 40 )
-	);
-	await api.updateGitReference(
-		'heads/docs-preview-code-reference',
-		'e'.repeat( 40 )
-	);
-	assert.match( calls[ 0 ].url, /git\/ref\/heads\/docs-preview/ );
-	assert.deepEqual( calls[ 1 ].options.json, {
-		content: '{"blueprint":true}\n',
-		encoding: 'utf-8',
-	} );
-	assert.equal( calls[ 2 ].options.json.tree[ 0 ].mode, '100644' );
-	assert.deepEqual( calls[ 3 ].options.json.parents, [ 'c'.repeat( 40 ) ] );
+test( 'a run without a fork head matches no pull request', async () => {
+	const { api } = apiWith( [] );
 	assert.equal(
-		calls[ 4 ].options.json.ref,
-		'refs/heads/docs-preview-code-reference'
+		await api.findPullRequestForRun( { head_branch: null } ),
+		null
 	);
-	assert.deepEqual( calls[ 5 ].options.json, {
-		sha: 'e'.repeat( 40 ),
-		force: true,
-	} );
 } );
 
-test( 'only the marked bot comment is updated', async () => {
-	const calls = [];
-	const api = new GitHubApi(
-		'WordPress/wordpress-develop',
-		'token',
-		async ( url, options ) => {
-			calls.push( { url, options } );
-			if ( url.includes( '/comments?per_page' ) ) {
-				return response( [
-					{ id: 1, user: { type: 'User' }, body: COMMENT_MARKER },
-					{ id: 2, user: { type: 'Bot' }, body: COMMENT_MARKER },
-				] );
-			}
-			if ( options.method === 'DELETE' ) {
-				return response( null, 204 );
-			}
-			return response( { id: 2 } );
-		}
-	);
-	assert.equal( ( await api.findPreviewComment( 123 ) ).id, 2 );
-	await api.updateComment( 2, 'updated' );
-	await api.removeLabel( 123 );
-	assert.equal( calls[ 1 ].options.method, 'PATCH' );
-	assert.deepEqual( calls[ 1 ].options.json, { body: 'updated' } );
-	assert.match( calls[ 2 ].url, /labels\/docs-preview$/ );
+test( 'a build run whose build job skipped never supersedes a real build', async () => {
+	const run = {
+		head_sha: 'a'.repeat( 40 ),
+		head_branch: 'feature',
+		head_repository: { full_name: 'contributor/wordpress-develop' },
+	};
+	const { api } = apiWith( [
+		response( 200, {
+			workflow_runs: [
+				{ id: 20, run_attempt: 1, ...run },
+				{ id: 10, run_attempt: 1, ...run },
+			],
+		} ),
+		response( 200, {
+			jobs: [
+				{
+					name: 'Build Code Reference snapshot',
+					conclusion: 'skipped',
+				},
+			],
+		} ),
+		response( 200, {
+			jobs: [
+				{
+					name: 'Build Code Reference snapshot',
+					conclusion: 'success',
+				},
+			],
+		} ),
+	] );
+
+	assert.equal( ( await api.latestPullRequestBuildRun( run ) ).id, 10 );
+} );
+
+test( 'the newest trunk build run is the first the API reports', async () => {
+	const { api, calls } = apiWith( [
+		response( 200, { workflow_runs: [ { id: 30 } ] } ),
+	] );
+
+	assert.equal( ( await api.latestTrunkBuildRun() ).id, 30 );
+	assert.match( calls[ 0 ].url, /event=push&branch=trunk&per_page=1/ );
 } );

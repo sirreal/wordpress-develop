@@ -1,17 +1,19 @@
 #!/usr/bin/env node
 
 import { mkdir, writeFile } from 'node:fs/promises';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { parseArgs } from 'node:util';
 import path from 'node:path';
 
 import { ensureInvariantBase } from './lib/base.mjs';
-import { packageFinalSnapshot } from './lib/final.mjs';
 import {
 	readResolvedInputs,
 	resolveBuildInputs,
 	writeResolvedInputs,
 } from './lib/inputs.mjs';
 import { generateParserJson } from './lib/parser.mjs';
+import { HANDOFF_METADATA, HANDOFF_SNAPSHOT } from './lib/preview.mjs';
+import { packageSnapshot } from './lib/snapshot.mjs';
 import { run } from './lib/process.mjs';
 import { validateSnapshot } from './lib/validate.mjs';
 
@@ -21,423 +23,222 @@ const TOOLING_ROOT = path.join(
 	REPOSITORY_ROOT,
 	'.github/docs-playground-preview'
 );
-const FULL_COMMIT = /^[0-9a-f]{40}$/;
-const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 
-function argumentValue( args, index, name ) {
-	const value = args[ index + 1 ];
-	if ( ! value || value.startsWith( '--' ) ) {
-		throw new Error( `${ name } requires a value.` );
-	}
-	return value;
-}
+const ARGUMENTS = /** @type {const} */ ( {
+	'source-repository': { type: 'string' },
+	'source-sha': { type: 'string' },
+	'run-url': { type: 'string' },
+	'runner-image': { type: 'string' },
+	'cache-root': { type: 'string' },
+	'work-root': { type: 'string' },
+	handoff: { type: 'string' },
+	'inputs-output': { type: 'string' },
+	'resolved-inputs': { type: 'string' },
+	'resolve-only': { type: 'boolean' },
+} );
 
-export function parseArguments( args, environment = process.env ) {
-	const values = {};
-	for ( let index = 0; index < args.length; index++ ) {
-		const name = args[ index ];
-		if ( name === '--resolve-only' ) {
-			values.resolveOnly = true;
-			continue;
-		}
-		if ( ! name.startsWith( '--' ) ) {
-			throw new Error( `Unexpected argument ${ name }.` );
-		}
-		const key = name
-			.slice( 2 )
-			.replace( /-([a-z])/g, ( _, letter ) => letter.toUpperCase() );
-		if (
-			! [
-				'source',
-				'sourceRepository',
-				'sourceSha',
-				'pullRequest',
-				'runId',
-				'runAttempt',
-				'runUrl',
-				'runnerImage',
-				'cacheRoot',
-				'workRoot',
-				'output',
-				'metadata',
-				'inputsOutput',
-				'resolvedInputs',
-			].includes( key )
-		) {
-			throw new Error( `Unknown option ${ name }.` );
-		}
-		values[ key ] = argumentValue( args, index, name );
-		index++;
-	}
-	return {
-		...values,
-		enforce: environment.DOCS_PREVIEW_ENFORCE === 'true',
-	};
-}
-
-function positiveInteger( value, label, nullable = true ) {
-	if (
-		( value === undefined || value === null || value === '' ) &&
-		nullable
-	) {
-		return null;
-	}
-	const number = Number( value );
-	if ( ! Number.isSafeInteger( number ) || number < 1 ) {
-		throw new Error( `${ label } must be a positive integer.` );
-	}
-	return number;
-}
-
-function githubRepository( remote ) {
-	const match = remote
-		.trim()
-		.match(
-			/^(?:git@github\.com:|https:\/\/github\.com\/)([^/]+\/[^/]+?)(?:\.git)?$/
-		);
-	return match?.[ 1 ] || null;
-}
-
-async function gitIdentity( source, runImplementation ) {
-	const sha = await runImplementation( 'git', [ 'rev-parse', 'HEAD' ], {
-		cwd: source,
-		capture: true,
-		quiet: true,
-		label: 'read source commit',
-	} );
-	const remote = await runImplementation(
+/**
+ * A local run has no workflow inputs, so it describes the checkout it runs in.
+ */
+async function gitIdentity() {
+	const options = { cwd: REPOSITORY_ROOT, capture: true };
+	const sha = await run( 'git', [ 'rev-parse', 'HEAD' ], options );
+	const remote = await run(
 		'git',
 		[ 'config', '--get', 'remote.origin.url' ],
-		{
-			cwd: source,
-			capture: true,
-			quiet: true,
-			label: 'read source repository',
-		}
+		options
 	);
 	return {
 		sha: sha.stdout.trim(),
-		repository: githubRepository( remote.stdout ),
+		repository: remote.stdout
+			.trim()
+			.replace( /^(?:git@github\.com:|https:\/\/github\.com\/)/, '' )
+			.replace( /\.git$/, '' ),
 	};
 }
 
-async function normalizeOptions( raw, implementations ) {
+/**
+ * @param {string[]} argv
+ */
+async function resolveOptions( argv ) {
+	const { values } = parseArgs( { args: argv, options: ARGUMENTS } );
 	const workspace = path.join(
 		REPOSITORY_ROOT,
 		'.cache/docs-playground-preview'
 	);
-	const source = path.resolve( raw.source || REPOSITORY_ROOT );
-	let sourceSha = raw.sourceSha;
-	let sourceRepository = raw.sourceRepository;
-	if ( ! sourceSha || ! sourceRepository ) {
-		const inferred = await gitIdentity( source, implementations.run );
-		sourceSha ||= inferred.sha;
-		sourceRepository ||= inferred.repository;
-	}
-	if ( ! FULL_COMMIT.test( sourceSha || '' ) ) {
-		throw new Error( 'sourceSha must be a full lowercase commit hash.' );
-	}
-	if ( ! REPOSITORY.test( sourceRepository || '' ) ) {
-		throw new Error(
-			'sourceRepository must be a GitHub owner/repository.'
-		);
-	}
+	// Only the snapshot's provenance needs the source identity, so resolving the
+	// cache identity never asks git for it.
+	const resolveOnly = values[ 'resolve-only' ] === true;
+	const inferred =
+		resolveOnly ||
+		( values[ 'source-sha' ] && values[ 'source-repository' ] )
+			? null
+			: await gitIdentity();
 	const workRoot = path.resolve(
-		raw.workRoot || path.join( workspace, 'work' )
+		values[ 'work-root' ] || path.join( workspace, 'work' )
 	);
-	const outputRoot = path.join( workspace, 'output' );
+	// The build writes both handoff files; the publish job downloads the whole
+	// directory and reads them by their fixed names.
+	const handoff = path.resolve(
+		values.handoff || path.join( workspace, 'output' )
+	);
 	return {
-		...raw,
-		source,
-		sourceSha,
-		sourceRepository,
-		pullRequestNumber: positiveInteger( raw.pullRequest, 'pullRequest' ),
-		workflowRunId: raw.runId || null,
-		workflowRunAttempt: positiveInteger( raw.runAttempt, 'runAttempt' ),
-		runUrl: raw.runUrl || null,
+		resolveOnly,
+		resolvedInputs: values[ 'resolved-inputs' ],
+		enforce: process.env.DOCS_PREVIEW_ENFORCE === 'true',
+		sourceSha: values[ 'source-sha' ] || inferred?.sha,
+		sourceRepository: values[ 'source-repository' ] || inferred?.repository,
+		runUrl: values[ 'run-url' ] || null,
 		runnerImage:
-			raw.runnerImage || `${ process.platform }-${ process.arch }`,
+			values[ 'runner-image' ] ||
+			`${ process.platform }-${ process.arch }`,
 		cacheRoot: path.resolve(
-			raw.cacheRoot || path.join( workspace, 'cache' )
+			values[ 'cache-root' ] || path.join( workspace, 'cache' )
 		),
 		workRoot,
-		output: path.resolve(
-			raw.output ||
-				path.join( outputRoot, `code-reference-${ sourceSha }.zip` )
-		),
-		metadata: path.resolve(
-			raw.metadata || path.join( outputRoot, 'build.json' )
-		),
+		snapshot: path.join( handoff, HANDOFF_SNAPSHOT ),
+		metadata: path.join( handoff, HANDOFF_METADATA ),
 		inputsOutput: path.resolve(
-			raw.inputsOutput || path.join( workRoot, 'resolved-inputs.json' )
+			values[ 'inputs-output' ] ||
+				path.join( workRoot, 'resolved-inputs.json' )
 		),
 	};
 }
 
-async function ensureNodeTools( implementations ) {
-	const playgroundCli = path.join(
-		TOOLING_ROOT,
-		`node_modules/.bin/wp-playground-cli${
-			process.platform === 'win32' ? '.cmd' : ''
-		}`
-	);
-	await implementations.run(
-		'npm',
-		[ 'ci', '--ignore-scripts', '--no-audit', '--no-fund' ],
-		{ cwd: TOOLING_ROOT, label: 'install pinned preview tools' }
-	);
-	return playgroundCli;
-}
-
-export async function verifyToolchain( inputs, options = {} ) {
-	const runImplementation = options.runImplementation || run;
-	const expected = inputs.dependencies.toolchain;
-	const nodeVersion = options.nodeVersion || process.versions.node;
-	if ( nodeVersion !== expected.nodeVersion ) {
-		throw new Error(
-			`Node ${ expected.nodeVersion } is required; found ${ nodeVersion }.`
-		);
-	}
-	const npm = await runImplementation( 'npm', [ '--version' ], {
-		capture: true,
-		quiet: true,
-		label: 'read npm version',
-	} );
-	if ( npm.stdout.trim() !== expected.npmVersion ) {
-		throw new Error(
-			`npm ${
-				expected.npmVersion
-			} is required; found ${ npm.stdout.trim() }.`
-		);
-	}
-	const php = await runImplementation(
-		'php',
-		[ '-r', 'echo PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION;' ],
-		{
-			capture: true,
-			quiet: true,
-			label: 'read PHP version',
-		}
-	);
-	if ( php.stdout.trim() !== inputs.dependencies.playground.phpVersion ) {
-		throw new Error(
-			`PHP ${
-				inputs.dependencies.playground.phpVersion
-			} is required; found ${ php.stdout.trim() }.`
-		);
-	}
-}
-
-export function createBuildMetadata(
-	options,
-	inputs,
-	base,
-	parser,
-	snapshot,
-	validation,
-	generationTimestamp
-) {
-	const validationFailures = [ ...parser.failures, ...validation.failures ];
+/**
+ * The handoff contract with publish.mjs: `buildStatus` and `validationStatus`
+ * decide what the publish job does, and the rest describes the snapshot it
+ * publishes. The publish job takes identity from its own workflow run, not from
+ * here, so this file names no repository, commit or pull request.
+ *
+ * @param {Record<string, any> | undefined} inputs
+ * @param {Record<string, any>} result
+ * @returns {Record<string, any>}
+ */
+function handoffMetadata( inputs, result ) {
 	return {
-		schemaVersion: 1,
-		sourceRepository: options.sourceRepository,
-		pullRequestNumber: options.pullRequestNumber,
-		sourceSha: options.sourceSha,
-		workflowRunId: options.workflowRunId,
-		workflowRunAttempt: options.workflowRunAttempt,
-		runUrl: options.runUrl,
-		resolvedWordPressBeta: inputs.wordpress,
-		phpVersion: inputs.dependencies.playground.phpVersion,
-		dependencyManifestDigest: inputs.cacheInputs.dependencyDigest,
-		snapshotFilename: snapshot.filename,
-		snapshotBytes: snapshot.bytes,
-		snapshotSha256: snapshot.sha256,
-		buildStatus: 'success',
-		validationStatus: validationFailures.length === 0 ? 'passed' : 'failed',
-		validationFailures,
-		parser: {
-			sourceFiles: parser.sourceFiles,
-			records: parser.records,
-			counts: parser.counts,
-		},
-		behavior: { checks: validation.checks },
-		cache: { key: inputs.cacheKey, hit: base.cacheHit },
-		generationTimestamp,
-	};
-}
-
-export function createFailureMetadata(
-	options,
-	inputs,
-	error,
-	generationTimestamp
-) {
-	return {
-		schemaVersion: 1,
-		sourceRepository: options.sourceRepository,
-		pullRequestNumber: options.pullRequestNumber,
-		sourceSha: options.sourceSha,
-		workflowRunId: options.workflowRunId,
-		workflowRunAttempt: options.workflowRunAttempt,
-		runUrl: options.runUrl,
 		resolvedWordPressBeta: inputs?.wordpress || null,
-		phpVersion: inputs?.dependencies?.playground?.phpVersion || null,
-		dependencyManifestDigest: inputs?.cacheInputs?.dependencyDigest || null,
-		snapshotFilename: null,
-		snapshotBytes: null,
-		snapshotSha256: null,
-		buildStatus: 'failed',
-		validationStatus: 'not-run',
-		validationFailures: [],
-		generationTimestamp,
-		buildError: error.message,
+		phpVersion: inputs?.dependencies.playground.phpVersion || null,
+		dependencyManifestDigest: inputs?.dependencyDigest || null,
+		...result,
 	};
 }
 
+/**
+ * @param {string} filename
+ * @param {unknown} value
+ */
 async function writeJson( filename, value ) {
 	await mkdir( path.dirname( filename ), { recursive: true } );
 	await writeFile( filename, `${ JSON.stringify( value, null, 2 ) }\n` );
 }
 
-const DEFAULT_IMPLEMENTATIONS = {
-	run,
-	resolveBuildInputs,
-	readResolvedInputs,
-	writeResolvedInputs,
-	ensureInvariantBase,
-	generateParserJson,
-	packageFinalSnapshot,
-	validateSnapshot,
-	verifyToolchain,
-};
-
-export async function buildCodeReferencePreview( rawOptions, overrides = {} ) {
-	const implementations = { ...DEFAULT_IMPLEMENTATIONS, ...overrides };
-	const options = await normalizeOptions( rawOptions, implementations );
-	let generationTimestamp;
+/**
+ * @param {Record<string, any>} options
+ */
+async function build( options ) {
 	let inputs;
-	let result;
 	try {
 		inputs = options.resolvedInputs
-			? await implementations.readResolvedInputs( options.resolvedInputs )
-			: await implementations.resolveBuildInputs( {
+			? await readResolvedInputs( options.resolvedInputs )
+			: await resolveBuildInputs( {
 					repositoryRoot: REPOSITORY_ROOT,
 					cacheRoot: options.cacheRoot,
 					platform: process.platform,
 					architecture: process.arch,
 					runnerImage: options.runnerImage,
 			  } );
-		await implementations.verifyToolchain( inputs, {
-			runImplementation: implementations.run,
-		} );
 		if ( options.resolveOnly ) {
-			await implementations.writeResolvedInputs(
-				inputs,
-				options.inputsOutput
-			);
-			return { inputs, options };
+			await writeResolvedInputs( inputs, options.inputsOutput );
+			return { inputs, metadata: null };
 		}
 
-		generationTimestamp = new Date().toISOString();
 		const provenance = {
 			sourceRepository: options.sourceRepository,
 			sourceSha: options.sourceSha,
-			generationTimestamp,
+			generationTimestamp: new Date().toISOString(),
 			runUrl: options.runUrl,
 		};
-		const playgroundCli = await ensureNodeTools( implementations );
-		const base = await implementations.ensureInvariantBase( inputs, {
-			playgroundCli,
-		} );
-		const parser = await implementations.generateParserJson( {
-			source: options.source,
+		const playgroundCli = path.join(
+			TOOLING_ROOT,
+			'node_modules/.bin/wp-playground-cli'
+		);
+		await run(
+			'npm',
+			[ 'ci', '--ignore-scripts', '--no-audit', '--no-fund' ],
+			{ cwd: TOOLING_ROOT, label: 'install pinned preview tools' }
+		);
+		await ensureInvariantBase( inputs, playgroundCli );
+		const parser = await generateParserJson( {
+			source: REPOSITORY_ROOT,
 			stagedSource: path.join( options.workRoot, 'source' ),
 			parser: path.join( inputs.cacheDirectory, 'parser' ),
 			output: path.join( options.workRoot, 'reference.json' ),
-			logFile: path.join( options.workRoot, 'parser.log' ),
 			minimumSymbols: inputs.dependencies.validation.minimumSymbols,
 		} );
-		const snapshot = await implementations.packageFinalSnapshot( inputs, {
+		await packageSnapshot( inputs, {
 			workDirectory: path.join( options.workRoot, 'final' ),
-			output: options.output,
+			output: options.snapshot,
 			referenceJson: path.join( options.workRoot, 'reference.json' ),
 			stagedSource: path.join( options.workRoot, 'source' ),
 			playgroundCli,
 			provenance,
 		} );
-		const validation = await implementations.validateSnapshot( inputs, {
-			snapshot: options.output,
+		const validation = await validateSnapshot( inputs, {
+			snapshot: options.snapshot,
 			workDirectory: path.join( options.workRoot, 'validation' ),
 			playgroundCli,
 			provenance,
-			requireRunUrl: options.workflowRunId !== null,
 		} );
-		const metadata = createBuildMetadata(
-			options,
+		const validationFailures = [
+			...parser.failures,
+			...validation.failures,
+		];
+		return {
 			inputs,
-			base,
-			parser,
-			snapshot,
-			validation,
-			generationTimestamp
-		);
-		await writeJson( options.metadata, metadata );
-		result = {
-			inputs,
-			base,
-			parser,
-			snapshot,
-			validation,
-			metadata,
-			options,
+			metadata: handoffMetadata( inputs, {
+				buildStatus: 'success',
+				validationStatus:
+					validationFailures.length === 0 ? 'passed' : 'failed',
+				validationFailures,
+				generationTimestamp: provenance.generationTimestamp,
+			} ),
 		};
 	} catch ( error ) {
-		try {
-			await writeJson(
-				options.metadata,
-				createFailureMetadata(
-					options,
-					inputs,
-					error,
-					generationTimestamp || new Date().toISOString()
-				)
-			);
-		} catch {
-			// Preserve the build error when its terminal metadata cannot be written.
-		}
+		// The publish job reports the failure, so it needs a handoff even here.
+		await writeJson(
+			options.metadata,
+			handoffMetadata( inputs, {
+				buildStatus: 'failed',
+				buildError:
+					error instanceof Error ? error.message : String( error ),
+			} )
+		);
 		throw error;
 	}
-	const { metadata } = result;
-	if ( metadata.validationStatus === 'failed' && options.enforce ) {
-		throw new Error( metadata.validationFailures.join( '\n' ) );
-	}
-	return result;
 }
 
 async function main() {
-	const result = await buildCodeReferencePreview(
-		parseArguments( process.argv.slice( 2 ) )
-	);
-	for ( const failure of result.metadata?.validationFailures || [] ) {
+	const options = await resolveOptions( process.argv.slice( 2 ) );
+	const { inputs, metadata } = await build( options );
+	if ( ! metadata ) {
+		process.stdout.write(
+			`Resolved WordPress ${ inputs.wordpress.version } and cache key ${ inputs.cacheKey }.\n`
+		);
+		return;
+	}
+
+	await writeJson( options.metadata, metadata );
+	for ( const failure of metadata.validationFailures ) {
 		process.stderr.write( `::warning::${ failure }\n` );
 	}
-	process.stdout.write(
-		`${ JSON.stringify(
-			result.metadata || {
-				cacheKey: result.inputs.cacheKey,
-				resolvedWordPressBeta: result.inputs.wordpress,
-			},
-			null,
-			2
-		) }\n`
-	);
+	process.stdout.write( `${ JSON.stringify( metadata, null, 2 ) }\n` );
+	if ( metadata.validationStatus === 'failed' && options.enforce ) {
+		throw new Error( metadata.validationFailures.join( '\n' ) );
+	}
 }
 
-if (
-	import.meta.url === pathToFileURL( path.resolve( process.argv[ 1 ] ) ).href
-) {
-	main().catch( ( error ) => {
-		process.stderr.write( `${ error.message }\n` );
-		process.exitCode = 1;
-	} );
-}
+main().catch( ( error ) => {
+	process.stderr.write( `${ error.message }\n` );
+	process.exitCode = 1;
+} );

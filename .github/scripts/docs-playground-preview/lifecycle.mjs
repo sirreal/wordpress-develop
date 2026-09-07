@@ -1,285 +1,135 @@
 #!/usr/bin/env node
 
-import { readFile } from 'node:fs/promises';
+// Keeps the preview comment honest for the rest of a pull request's life: a push
+// marks the published preview stale, and closing the pull request deletes its
+// snapshots and caches.
+
 import { pathToFileURL } from 'node:url';
 
-import { isDeploymentEnabled } from './lib/config.mjs';
-import { GitHubApi } from './lib/github.mjs';
-import { findPreviousPreview } from './lib/published.mjs';
 import {
-	readPreviewCommentSuccess,
+	expiredComment,
 	readPreviewCommentSource,
-	renderPreviewComment,
-} from './lib/publisher.mjs';
+	staleComment,
+	staleUnavailableComment,
+} from './lib/comment.mjs';
+import {
+	GitHubApi,
+	assertDeploymentEnabled,
+	readWorkflowEvent,
+} from './lib/github.mjs';
+import { assetPrefix, findLatestPublishedPreview } from './lib/preview.mjs';
 
-const FULL_COMMIT = /^[0-9a-f]{40}$/;
 const CACHE_PREFIX = 'docs-preview-base-';
 
-class LifecycleSuperseded extends Error {}
-
-function isTerminalComment( body ) {
-	return (
-		typeof body === 'string' &&
-		( body.includes( '\n\n**Status:** Ready\n\n' ) ||
-			body.includes( '\n\n**Status:** Latest attempt failed\n\n' ) )
-	);
-}
-
-function positiveInteger( value, label ) {
-	const number = Number( value );
-	if ( ! Number.isSafeInteger( number ) || number < 1 ) {
-		throw new Error( `${ label } must be a positive integer.` );
-	}
-	return number;
-}
-
-function lifecycleContext( options ) {
+/**
+ * @param {Record<string, any>} api
+ * @param {Record<string, any>} context
+ * @param {Record<string, any>} pullRequest
+ */
+async function markStale( api, context, pullRequest ) {
+	// A labelled pull request is already building a preview for the new head,
+	// and that build replaces the comment when it publishes.
 	if (
-		! isDeploymentEnabled( options.repository, options.stagingVariable )
+		pullRequest.labels?.some(
+			( /** @type {Record<string, any>} */ label ) =>
+				label.name === 'docs-preview'
+		)
 	) {
-		throw new Error(
-			'Docs preview lifecycle is disabled in this repository.'
-		);
+		return { status: 'ignored' };
 	}
+	const comment = await api.findPreviewComment( context.pullRequestNumber );
+	if ( ! comment ) {
+		return { status: 'ignored' };
+	}
+	const source = readPreviewCommentSource( comment.body );
+	if (
+		source?.repository === context.sourceRepository &&
+		source?.sha === context.sourceSha
+	) {
+		return { status: 'ignored' };
+	}
+	const preview = await findLatestPublishedPreview(
+		api,
+		context.pullRequestNumber
+	);
+	if ( preview ) {
+		await api.updateComment( comment.id, staleComment( preview, context ) );
+		return { status: 'stale' };
+	}
+	if ( ! source ) {
+		return { status: 'unavailable' };
+	}
+	await api.updateComment(
+		comment.id,
+		staleUnavailableComment( source, context )
+	);
+	return { status: 'stale' };
+}
+
+/**
+ * @param {Record<string, any>} api
+ * @param {Record<string, any>} context
+ */
+async function expire( api, context ) {
+	const release = await api.getRelease();
+	const prefix = assetPrefix( context.pullRequestNumber );
+	const assets = release
+		? ( await api.listReleaseAssets( release.id ) ).filter(
+				( /** @type {Record<string, any>} */ asset ) =>
+					asset.name.startsWith( prefix )
+		  )
+		: [];
+	for ( const asset of assets ) {
+		await api.deleteReleaseAsset( asset.id );
+	}
+	const caches = (
+		await api.listActionCaches(
+			`refs/pull/${ context.pullRequestNumber }/merge`
+		)
+	).filter( ( /** @type {Record<string, any>} */ cache ) =>
+		cache.key.startsWith( CACHE_PREFIX )
+	);
+	for ( const cache of caches ) {
+		await api.deleteActionCache( cache.id );
+	}
+	// Last, so that a comment saying the preview expired is only posted once
+	// the preview really is gone.
+	const comment = await api.findPreviewComment( context.pullRequestNumber );
+	if ( comment ) {
+		await api.updateComment( comment.id, expiredComment() );
+	}
+	return { status: 'expired' };
+}
+
+/**
+ * @param {Record<string, any>} options
+ * @returns {Promise<Record<string, any>>}
+ */
+export async function managePullRequest( options ) {
+	assertDeploymentEnabled( options.repository, options.stagingVariable );
 	const action = options.event?.action;
 	if ( action !== 'synchronize' && action !== 'closed' ) {
 		throw new Error( `Unsupported pull request action ${ action }.` );
 	}
 	const pullRequest = options.event.pull_request;
-	const pullRequestNumber = positiveInteger(
-		pullRequest?.number,
-		'Pull request number'
-	);
-	if (
-		pullRequest.base?.ref !== 'trunk' ||
-		! FULL_COMMIT.test( pullRequest.head?.sha || '' )
-	) {
-		throw new Error( 'Pull request lifecycle identity is invalid.' );
-	}
-	const sourceRepository = pullRequest.head.repo?.full_name || null;
-	if ( action === 'synchronize' && ! sourceRepository ) {
-		throw new Error( 'Open pull request head repository is missing.' );
-	}
-	return {
-		action,
-		pullRequestNumber,
-		sourceRepository,
+	const api =
+		options.api || new GitHubApi( options.repository, options.token );
+	const context = {
+		pullRequestNumber: pullRequest.number,
+		sourceRepository: pullRequest.head.repo?.full_name || null,
 		sourceSha: pullRequest.head.sha,
 	};
-}
-
-function assertCurrent( context, pullRequest, state, labelMustBeAbsent ) {
-	if (
-		pullRequest.number !== context.pullRequestNumber ||
-		pullRequest.state !== state ||
-		pullRequest.base?.ref !== 'trunk' ||
-		pullRequest.head?.sha !== context.sourceSha ||
-		( context.sourceRepository &&
-			pullRequest.head.repo?.full_name !== context.sourceRepository ) ||
-		( labelMustBeAbsent &&
-			pullRequest.labels?.some(
-				( label ) => label.name === 'docs-preview'
-			) )
-	) {
-		throw new Error( 'A newer pull request state superseded this event.' );
-	}
-	return pullRequest;
-}
-
-function sessionFrom( options ) {
-	const context = lifecycleContext( options );
-	const api =
-		options.api ||
-		new GitHubApi(
-			options.repository,
-			options.token,
-			options.fetchImplementation
-		);
-	const authorize = async ( state, labelMustBeAbsent = false ) => {
-		const pullRequest = await api.getPullRequest(
-			context.pullRequestNumber
-		);
-		try {
-			return assertCurrent(
-				context,
-				pullRequest,
-				state,
-				labelMustBeAbsent
-			);
-		} catch ( error ) {
-			throw new LifecycleSuperseded( error.message );
-		}
-	};
-	return {
-		api,
-		context,
-		repository: options.repository,
-		fetchImplementation: options.fetchImplementation || globalThis.fetch,
-		warning:
-			options.warning ||
-			( ( message ) => process.stderr.write( `${ message }\n` ) ),
-		authorize,
-	};
-}
-
-async function authorizeStaleMutation( session, expectedComment ) {
-	await session.authorize( 'open', true );
-	const currentComment = await session.api.findPreviewComment(
-		session.context.pullRequestNumber
-	);
-	if (
-		currentComment?.id !== expectedComment.id ||
-		currentComment.body !== expectedComment.body
-	) {
-		throw new LifecycleSuperseded(
-			'A newer preview state superseded this stale event.'
-		);
-	}
-}
-
-async function markStale( session ) {
-	try {
-		await session.authorize( 'open', true );
-	} catch ( error ) {
-		if ( error instanceof LifecycleSuperseded ) {
-			return { status: 'ignored' };
-		}
-		throw error;
-	}
-	const comment = await session.api.findPreviewComment(
-		session.context.pullRequestNumber
-	);
-	if ( ! comment ) {
-		return { status: 'ignored' };
-	}
-	const commentSource = readPreviewCommentSource( comment.body );
-	if (
-		isTerminalComment( comment.body ) &&
-		commentSource?.repository === session.context.sourceRepository &&
-		commentSource.sha === session.context.sourceSha
-	) {
-		return { status: 'ignored' };
-	}
-	let preview = await findPreviousPreview( session );
-	if ( ! preview ) {
-		preview = readPreviewCommentSuccess( comment.body );
-	}
-	if ( ! preview ) {
-		const previous = commentSource;
-		if ( ! previous ) {
-			return { status: 'unavailable' };
-		}
-		await authorizeStaleMutation( session, comment );
-		await session.api.updateComment(
-			comment.id,
-			renderPreviewComment( {
-				status: 'stale-unavailable',
-				previousRepository: previous.repository,
-				previousSha: previous.sha,
-				currentRepository: session.context.sourceRepository,
-				currentSha: session.context.sourceSha,
-			} )
-		);
-		return { status: 'stale' };
-	}
-	await authorizeStaleMutation( session, comment );
-	await session.api.updateComment(
-		comment.id,
-		renderPreviewComment( {
-			status: 'stale',
-			preview,
-			currentRepository: session.context.sourceRepository,
-			currentSha: session.context.sourceSha,
-		} )
-	);
-	return { status: 'stale' };
-}
-
-async function settle( operations ) {
-	const errors = [];
-	for ( const operation of operations ) {
-		try {
-			await operation();
-		} catch ( error ) {
-			errors.push( error );
-		}
-	}
-	return errors;
-}
-
-async function expire( session ) {
-	try {
-		await session.authorize( 'closed' );
-	} catch ( error ) {
-		if ( error instanceof LifecycleSuperseded ) {
-			return { status: 'superseded' };
-		}
-		throw error;
-	}
-	const release = await session.api.getRelease();
-	const prefix = `code-reference-pr-${ session.context.pullRequestNumber }-`;
-	const assets = release
-		? ( await session.api.listReleaseAssets( release.id ) ).filter(
-				( asset ) => asset.name.startsWith( prefix )
-		  )
-		: [];
-	const cacheRef = `refs/pull/${ session.context.pullRequestNumber }/merge`;
-	const caches = ( await session.api.listActionCaches( cacheRef ) ).filter(
-		( cache ) =>
-			cache.ref === cacheRef && cache.key.startsWith( CACHE_PREFIX )
-	);
-	const comment = await session.api.findPreviewComment(
-		session.context.pullRequestNumber
-	);
-	const assetErrors = await settle(
-		assets.map( ( asset ) => async () => {
-			await session.authorize( 'closed' );
-			await session.api.deleteReleaseAsset( asset.id );
-		} )
-	);
-	const cacheErrors = await settle(
-		caches.map( ( cache ) => async () => {
-			await session.authorize( 'closed' );
-			await session.api.deleteActionCache( cache.id );
-		} )
-	);
-	let commentErrors = [];
-	if ( comment && assetErrors.length === 0 ) {
-		commentErrors = await settle( [
-			async () => {
-				await session.authorize( 'closed' );
-				await session.api.updateComment(
-					comment.id,
-					renderPreviewComment( { status: 'expired' } )
-				);
-			},
-		] );
-	}
-	const errors = [ ...assetErrors, ...cacheErrors, ...commentErrors ];
-	if ( errors.length > 0 ) {
-		throw new AggregateError( errors, 'Pull request cleanup failed.' );
-	}
-	return {
-		status: 'expired',
-		deletedAssets: assets.length,
-		deletedCaches: caches.length,
-	};
-}
-
-export async function managePullRequest( options ) {
-	const session = sessionFrom( options );
-	return session.context.action === 'synchronize'
-		? markStale( session )
-		: expire( session );
+	return action === 'synchronize'
+		? markStale( api, context, pullRequest )
+		: expire( api, context );
 }
 
 async function main() {
-	const event = JSON.parse( await readFile( process.env.GITHUB_EVENT_PATH ) );
 	const result = await managePullRequest( {
 		repository: process.env.GITHUB_REPOSITORY,
 		stagingVariable: process.env.DOCS_PREVIEW_STAGING,
 		token: process.env.GITHUB_TOKEN,
-		event,
+		event: await readWorkflowEvent(),
 	} );
 	process.stdout.write( `Code Reference lifecycle: ${ result.status }.\n` );
 }

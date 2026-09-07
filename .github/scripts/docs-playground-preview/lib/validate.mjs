@@ -1,19 +1,33 @@
 import { spawn } from 'node:child_process';
 import { copyFile, mkdir, rm, writeFile } from 'node:fs/promises';
-import { createServer } from 'node:net';
 import path from 'node:path';
 
-import { PLAYGROUND_SERVER_WORKERS } from './playground.mjs';
-
 const BANNER_ID = 'wporg-code-reference-preview-provenance';
+const HEALTH_ROUTE = '/wp-json/docs-preview/v1/health';
+// The validation server is the only service the build job runs.
+const PORT = 9400;
+const BASE_URL = `http://127.0.0.1:${ PORT }`;
+const BOOT_TIMEOUT_MS = 120_000;
 
-function bundled( resourcePath ) {
-	return { resource: 'bundled', path: resourcePath };
+/**
+ * @param {number} milliseconds
+ */
+function delay( milliseconds ) {
+	return new Promise( ( resolve ) => setTimeout( resolve, milliseconds ) );
 }
 
-export function createValidationBlueprint( inputs ) {
+/**
+ * @param {unknown} error
+ */
+function message( error ) {
+	return error instanceof Error ? error.message : String( error );
+}
+
+/**
+ * @param {Record<string, any>} inputs
+ */
+function validationBlueprint( inputs ) {
 	return {
-		$schema: inputs.dependencies.playground.blueprintSchema,
 		preferredVersions: {
 			php: inputs.dependencies.playground.phpVersion,
 			wp: inputs.wordpress.version,
@@ -24,117 +38,21 @@ export function createValidationBlueprint( inputs ) {
 		steps: [
 			{
 				step: 'unzip',
-				zipFile: bundled( 'snapshot.zip' ),
+				zipFile: { resource: 'bundled', path: 'snapshot.zip' },
 				extractToPath: '/',
 			},
 		],
 	};
 }
 
-function delay( milliseconds ) {
-	return new Promise( ( resolve ) => setTimeout( resolve, milliseconds ) );
-}
-
-async function availablePort() {
-	const server = createServer();
-	await new Promise( ( resolve, reject ) => {
-		server.once( 'error', reject );
-		server.listen( 0, '127.0.0.1', resolve );
-	} );
-	const port = server.address().port;
-	await new Promise( ( resolve ) => server.close( resolve ) );
-	return port;
-}
-
-function startServer( command, args ) {
-	const child = spawn( command, args, {
-		stdio: [ 'ignore', 'pipe', 'pipe' ],
-	} );
-	let output = '';
-	child.stdout.on( 'data', ( chunk ) => {
-		output += chunk;
-	} );
-	child.stderr.on( 'data', ( chunk ) => {
-		output += chunk;
-	} );
-	const closed = new Promise( ( resolve ) => {
-		child.once( 'error', ( error ) => resolve( { error } ) );
-		child.once( 'close', ( code, signal ) => resolve( { code, signal } ) );
-	} );
-	return { child, closed, output: () => output };
-}
-
-export function createValidationServerArguments(
-	inputs,
-	blueprint,
-	baseUrl,
-	port
-) {
-	return [
-		'server',
-		'--php',
-		inputs.dependencies.playground.phpVersion,
-		'--wp',
-		inputs.wordpress.version,
-		'--blueprint',
-		blueprint,
-		'--blueprint-may-read-adjacent-files',
-		'--site-url',
-		baseUrl,
-		'--port',
-		String( port ),
-		'--workers',
-		String( PLAYGROUND_SERVER_WORKERS ),
-		'--verbosity',
-		'normal',
-	];
-}
-
-async function stopServer( server ) {
-	if ( server.child.exitCode !== null || server.child.signalCode !== null ) {
-		return;
-	}
-	server.child.kill( 'SIGTERM' );
-	const stopped = await Promise.race( [
-		server.closed.then( () => true ),
-		delay( 5000 ).then( () => false ),
-	] );
-	if ( ! stopped ) {
-		server.child.kill( 'SIGKILL' );
-		await server.closed;
-	}
-}
-
-async function waitForBoot( baseUrl, server, fetchImplementation ) {
-	const deadline = Date.now() + 120000;
-	while ( Date.now() < deadline ) {
-		const state = await Promise.race( [
-			server.closed,
-			delay( 250 ).then( () => null ),
-		] );
-		if ( state ) {
-			throw new Error(
-				`Playground exited before boot (${
-					state.code ?? state.signal ?? state.error?.message
-				}).\n${ server.output() }`
-			);
-		}
-		try {
-			const response = await fetchImplementation(
-				`${ baseUrl }/wp-json/docs-preview/v1/health`
-			);
-			if ( response.ok ) {
-				return;
-			}
-		} catch {
-			// The server is not accepting requests yet.
-		}
-	}
-	throw new Error(
-		`Playground did not boot within 120 seconds.\n${ server.output() }`
-	);
-}
-
+/**
+ * Serves the finished snapshot from a temporary directory for the duration of
+ * `inspect`.
+ *
+ * @param {Record<string, any>} inputs
+ * @param {Record<string, any>} options
+ * @param {(baseUrl: string) => Promise<any>} inspect
+ */
 async function withPlaygroundServer( inputs, options, inspect ) {
 	const work = path.resolve( options.workDirectory );
 	await rm( work, { recursive: true, force: true } );
@@ -143,37 +61,96 @@ async function withPlaygroundServer( inputs, options, inspect ) {
 	const blueprint = path.join( work, 'validation-blueprint.json' );
 	await writeFile(
 		blueprint,
-		`${ JSON.stringify( createValidationBlueprint( inputs ), null, 2 ) }\n`
+		`${ JSON.stringify( validationBlueprint( inputs ), null, 2 ) }\n`
 	);
-	const port = await availablePort();
-	const baseUrl = `http://127.0.0.1:${ port }`;
-	const server = startServer(
+
+	const server = spawn(
 		options.playgroundCli,
-		createValidationServerArguments( inputs, blueprint, baseUrl, port )
+		[
+			'server',
+			'--php',
+			inputs.dependencies.playground.phpVersion,
+			'--wp',
+			inputs.wordpress.version,
+			'--blueprint',
+			blueprint,
+			'--blueprint-may-read-adjacent-files',
+			'--site-url',
+			BASE_URL,
+			'--port',
+			String( PORT ),
+			// Enough workers that one slow request cannot stall the checks.
+			'--workers',
+			'6',
+			'--verbosity',
+			'normal',
+		],
+		{ stdio: [ 'ignore', 'pipe', 'pipe' ] }
 	);
+	let log = '';
+	server.stdout?.setEncoding( 'utf8' );
+	server.stderr?.setEncoding( 'utf8' );
+	server.stdout?.on( 'data', ( chunk ) => {
+		log += chunk;
+	} );
+	server.stderr?.on( 'data', ( chunk ) => {
+		log += chunk;
+	} );
+	let running = true;
+	const closed = new Promise( ( resolve ) => {
+		server.once( 'error', ( error ) => {
+			log += message( error );
+			resolve( undefined );
+		} );
+		server.once( 'close', resolve );
+	} ).then( () => {
+		running = false;
+	} );
+
 	try {
-		await waitForBoot( baseUrl, server, options.fetchImplementation );
-		return await inspect( baseUrl );
+		const deadline = Date.now() + BOOT_TIMEOUT_MS;
+		for (;;) {
+			if ( ! running ) {
+				throw new Error( `Playground exited before boot.\n${ log }` );
+			}
+			if ( Date.now() > deadline ) {
+				throw new Error(
+					`Playground did not boot within ${
+						BOOT_TIMEOUT_MS / 1000
+					} seconds.\n${ log }`
+				);
+			}
+			try {
+				if ( ( await fetch( `${ BASE_URL }${ HEALTH_ROUTE }` ) ).ok ) {
+					break;
+				}
+			} catch {
+				// The server is not accepting requests yet.
+			}
+			await delay( 250 );
+		}
+		return await inspect( BASE_URL );
 	} finally {
-		await stopServer( server );
+		server.kill();
+		// A server that ignored SIGTERM would hold the job to its timeout.
+		const stopped = await Promise.race( [
+			closed.then( () => true ),
+			delay( 5000 ).then( () => false ),
+		] );
+		if ( ! stopped ) {
+			server.kill( 'SIGKILL' );
+			await closed;
+		}
 		await rm( work, { recursive: true, force: true } );
 	}
 }
 
-function provenanceFailure( actual, expected ) {
-	for ( const name of [
-		'sourceRepository',
-		'sourceSha',
-		'generationTimestamp',
-		'runUrl',
-	] ) {
-		if ( actual?.[ name ] !== expected[ name ] ) {
-			return `Health provenance ${ name } does not match the build.`;
-		}
-	}
-	return null;
-}
-
+/**
+ * @param {string} name
+ * @param {string} body
+ * @param {Record<string, any>} provenance
+ * @param {string[]} failures
+ */
 function checkBanner( name, body, provenance, failures ) {
 	const timestamp = provenance.generationTimestamp
 		.slice( 0, 19 )
@@ -183,54 +160,33 @@ function checkBanner( name, body, provenance, failures ) {
 		provenance.sourceRepository,
 		provenance.sourceSha,
 		`${ timestamp } UTC`,
+		...( provenance.runUrl ? [ provenance.runUrl ] : [] ),
 	];
-	if ( provenance.runUrl ) {
-		expected.push( provenance.runUrl );
-	}
-	for ( const value of expected ) {
-		if ( ! body.includes( value ) ) {
-			failures.push(
-				`${ name } route has incomplete provenance banner.`
-			);
-		}
+	const missing = expected.filter( ( value ) => ! body.includes( value ) );
+	if ( missing.length > 0 ) {
+		failures.push(
+			`${ name } page banner is missing ${ missing.join( ', ' ) }.`
+		);
 	}
 }
 
-export async function inspectSnapshotBehavior( inputs, options ) {
+/**
+ * Requests the pages a reader of the preview actually opens and reports what
+ * is wrong with them.
+ *
+ * @param {Record<string, any>} inputs
+ * @param {string} baseUrl
+ * @param {Record<string, any>} provenance
+ */
+export async function inspectSnapshotBehavior( inputs, baseUrl, provenance ) {
+	/** @type {string[]} */
 	const failures = [];
-	const checks = {};
-	const request = async ( route ) => {
-		const response = await options.fetchImplementation(
-			`${ options.baseUrl }${ route }`
-		);
-		return {
-			status: response.status,
-			url: response.url,
-			body: await response.text(),
-		};
-	};
 
-	let health;
 	try {
-		const response = await request( '/wp-json/docs-preview/v1/health' );
-		checks.health = response.status;
-		health = JSON.parse( response.body );
-		if ( response.status !== 200 ) {
-			failures.push( `Health route returned HTTP ${ response.status }.` );
-		}
-	} catch ( error ) {
-		failures.push( `Health route failed: ${ error.message }` );
-	}
-	if ( health ) {
-		const mismatch = provenanceFailure(
-			health.provenance,
-			options.provenance
-		);
-		if ( mismatch ) {
-			failures.push( mismatch );
-		}
+		const response = await fetch( `${ baseUrl }${ HEALTH_ROUTE }` );
+		const health = await response.json();
 		if ( health.import?.stage !== 'complete-import' ) {
-			failures.push( 'Complete import terminal stage is missing.' );
+			failures.push( 'The Code Reference import did not complete.' );
 		}
 		if ( health.outboundNetworkDisabled !== true ) {
 			failures.push( 'WordPress outbound networking is not disabled.' );
@@ -247,82 +203,74 @@ export async function inspectSnapshotBehavior( inputs, options ) {
 				);
 			}
 		}
+	} catch ( error ) {
+		failures.push( `Health route failed: ${ message( error ) }` );
 	}
 
-	for ( const [ name, target ] of Object.entries(
-		inputs.dependencies.validation.routes
-	) ) {
+	const { routes, search } = inputs.dependencies.validation;
+	const checks = [
+		...Object.entries( routes ).map( ( [ name, route ] ) => ( {
+			name,
+			stablePath: true,
+			...route,
+		} ) ),
+		{ name: 'search', stablePath: false, ...search },
+	];
+	for ( const check of checks ) {
 		try {
-			const response = await request( target.path );
-			checks[ name ] = response.status;
+			const response = await fetch( `${ baseUrl }${ check.path }` );
+			const body = await response.text();
 			if ( response.status !== 200 ) {
+				// A Playground page that fails reports why in its own output,
+				// and the build job has no other copy of that page.
 				failures.push(
-					`${ name } route returned HTTP ${ response.status }.`
+					`${ check.name } route returned HTTP ${
+						response.status
+					}: ${ body.replace( /\s+/g, ' ' ).trim().slice( 0, 300 ) }`
 				);
 			}
-			const requested = new URL( target.path, options.baseUrl );
 			if (
-				! response.url ||
-				new URL( response.url ).pathname !== requested.pathname
+				check.stablePath &&
+				new URL( response.url ).pathname !==
+					new URL( check.path, baseUrl ).pathname
 			) {
 				failures.push(
-					`${ name } route redirected away from its stable path.`
+					`${ check.name } route redirected away from its stable path.`
 				);
 			}
-			if ( ! response.body.includes( target.expectedText ) ) {
-				failures.push(
-					`${ name } route is missing its representative symbol.`
-				);
+			for ( const expected of [
+				check.expectedText,
+				check.expectedPath,
+			] ) {
+				if ( expected && ! body.includes( expected ) ) {
+					failures.push(
+						`${ check.name } route is missing ${ expected }.`
+					);
+				}
 			}
-			checkBanner( name, response.body, options.provenance, failures );
+			checkBanner( check.name, body, provenance, failures );
 		} catch ( error ) {
-			failures.push( `${ name } route failed: ${ error.message }` );
-		}
-	}
-
-	try {
-		const search = inputs.dependencies.validation.search;
-		const response = await request( search.path );
-		checks.search = response.status;
-		if (
-			response.status !== 200 ||
-			! response.body.includes( search.expectedText ) ||
-			! response.body.includes( search.expectedPath )
-		) {
 			failures.push(
-				'Local Code Reference search did not return the expected result.'
+				`${ check.name } route failed: ${ message( error ) }`
 			);
 		}
-		checkBanner( 'search', response.body, options.provenance, failures );
-	} catch ( error ) {
-		failures.push(
-			`Local Code Reference search failed: ${ error.message }`
-		);
 	}
 
-	if ( options.requireRunUrl && ! options.provenance.runUrl ) {
-		failures.push( 'Published previews require an Actions run URL.' );
-	}
-	return { failures, checks };
+	return { failures };
 }
 
+/**
+ * @param {Record<string, any>} inputs
+ * @param {{snapshot: string, workDirectory: string, playgroundCli: string, provenance: Record<string, any>}} options
+ */
 export async function validateSnapshot( inputs, options ) {
-	const fetchImplementation = options.fetchImplementation || globalThis.fetch;
 	try {
-		return await ( options.serveImplementation || withPlaygroundServer )(
-			inputs,
-			{ ...options, fetchImplementation },
-			( baseUrl ) =>
-				inspectSnapshotBehavior( inputs, {
-					...options,
-					baseUrl,
-					fetchImplementation,
-				} )
+		return await withPlaygroundServer( inputs, options, ( baseUrl ) =>
+			inspectSnapshotBehavior( inputs, baseUrl, options.provenance )
 		);
 	} catch ( error ) {
 		return {
-			failures: [ `Playground boot failed: ${ error.message }` ],
-			checks: {},
+			failures: [ `Playground boot failed: ${ message( error ) }` ],
 		};
 	}
 }
