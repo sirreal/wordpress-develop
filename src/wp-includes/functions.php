@@ -5001,6 +5001,9 @@ function smilies_init() {
  * This function is used throughout WordPress to allow for both string or array
  * to be merged into another array.
  *
+ * STAGING PROBE: this sentence exists only to confirm the Code Reference
+ * preview renders the pull request's own docblock, not trunk's.
+ *
  * @since 2.2.0
  * @since 2.3.0 `$args` can now also be an object.
  *
